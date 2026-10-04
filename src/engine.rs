@@ -10,6 +10,7 @@
 //! Shadow mode only: nothing is signed or sent. Every trigger and opportunity is written as one JSON line with its
 //! per-feed arrival times and our own stage timings (rx -> decoded -> engine -> resolved -> decided).
 use crate::config::StrategyCfg;
+use crate::lat::Series;
 use crate::feeds::{clock::now_ns, Arrival, Event, Interest};
 use crate::pda::AtaCache;
 use crate::pools::{self, pair_key, Registry};
@@ -43,8 +44,25 @@ impl SigInfo {
 enum Pred { Cp(cp::CpSnap), Dlmm(dlmm::Overlay), Damm(crate::venues::dammv2::DammPool) }
 struct PredEntry { trig: [u8; 64], t: u64, pred: Pred }
 
+/// Stage times (ns). Decoded hints: shred/tx receive, decoded, engine dequeue, lookups resolved, decided. State
+/// triggers (WP-00, F13): rx = decoded = the receive time of the first pool update stamped with the transaction,
+/// engine = that update's dequeue, resolved = the evaluation's start, decided = after the route search.
 #[derive(Clone, serde::Serialize)]
 struct Stages { rx: u64, decoded: u64, engine: u64, resolved: u64, decided: u64 }
+
+/// a pool moved by transaction `txn`, waiting until every account update of `txn` has arrived (see `state_pending`):
+/// the receive time and engine dequeue time of the pool's first update stamped `txn`
+struct StatePending { pool: usize, txn: [u8; 64], slot: u64, t_recv: u64, t_engine: u64 }
+
+/// `Engine::lat` series, in order: the decoded-trigger stages (v1 names, A.8: only priced triggers, decoded_sends =
+/// true), the state path's (WP-00, F13), and a hint's receive-to-done (WP-00 review F9: a hint is not priced, so its
+/// times would shrink the v1 series' meaning)
+const LAT_SERIES: [&str; 9] = ["rx_to_decoded", "decoded_to_engine", "engine_to_resolved", "resolved_to_decided", "rx_to_decided",
+    "state_recv_to_engine", "state_engine_to_decided", "state_recv_to_decided", "hint_rx_to_done"];
+const LAT_STATE_RECV_TO_ENGINE: usize = 5;
+const LAT_HINT_RX_TO_DONE: usize = 8;
+/// how many (transaction, pool) first-update times `state_first` keeps (the oldest go first)
+const STATE_FIRST_MAX: usize = 4_096;
 
 struct Opp {
     id: u64,
@@ -96,7 +114,7 @@ pub struct Engine {
     checks: HashMap<usize, Check>,
     next_id: u64,
     slot: u64,
-    lat: Vec<(&'static str, Vec<u64>)>,
+    lat: Vec<Series>,
     counts: HashMap<&'static str, u64>,
     out_trig: std::io::BufWriter<std::fs::File>,
     out_opp: std::io::BufWriter<std::fs::File>,
@@ -123,7 +141,15 @@ pub struct Engine {
     /// state triggers waiting until every account update of their transaction has arrived (one transaction moving two
     /// of our pools comes as several updates; pricing after the first saw a half-updated pair: w5h seg 14, 34% of state
     /// opportunities came from such transactions)
-    state_pending: Vec<(usize, [u8; 64], u64)>,
+    state_pending: Vec<StatePending>,
+    /// (sig8(transaction), pool) -> the receive and dequeue times of the pool's first update stamped with it, kept
+    /// outside `state_pending` because a flush between two parts of one transaction drops the half-done entry (review
+    /// F4: `rx` was then the last part's time). Taken when the pool is complete; bounded by `state_first_order`
+    state_first: HashMap<(u64, u32), (u64, u64)>,
+    state_first_order: VecDeque<(u64, u32)>,
+    /// state opportunities' budget tables (caps.jsonl), written once the flush has priced every pool of the
+    /// transaction (review F6: not between two pools' decisions)
+    caps_pending: Vec<(u64, Best, i64)>,
     /// per pool: (time, CU price) of every transaction that touched it lately (the bids we compete with)
     pool_prices: HashMap<usize, VecDeque<(u64, u64)>>,
     /// recording (record.rs): venue programs by name, sender tip accounts by sender, signers seen arbitraging,
@@ -162,7 +188,6 @@ fn amm_programs() -> HashMap<Pk, &'static str> {
 
 fn sig8(s: &[u8; 64]) -> u64 { u64::from_le_bytes(s[..8].try_into().unwrap()) }
 fn unix_now() -> i64 { (now_ns() / 1_000_000_000) as i64 }
-fn pct(v: &mut Vec<u64>, p: f64) -> u64 { if v.is_empty() { return 0; } v.sort_unstable(); v[((v.len() - 1) as f64 * p).round() as usize] }
 fn sigs58(s: &[u8; 64]) -> String { bs58::encode(s).into_string() }
 
 impl Engine {
@@ -181,10 +206,11 @@ impl Engine {
         Ok(Engine { reg, store, cfg, feeds, min_tip, interest, ata: AtaCache::default(), sigs: HashMap::default(), sig_order: VecDeque::new(),
             preds: HashMap::default(), alts: HashMap::default(), alt_inflight: HashSet::default(), alt_missing: HashSet::default(), alt_wait: HashMap::default(), acct_pool,
             watch: HashMap::default(), opps: HashMap::default(), checks: HashMap::default(), next_id: 0, slot: 0,
-            lat: vec![("rx_to_decoded", vec![]), ("decoded_to_engine", vec![]), ("engine_to_resolved", vec![]), ("resolved_to_decided", vec![]), ("rx_to_decided", vec![])],
+            lat: LAT_SERIES.into_iter().map(Series::new).collect(),
             counts: HashMap::default(),
             out_trig: open("triggers.jsonl")?, out_opp: open("opportunities.jsonl")?, out_pred: open("predictions.jsonl")?, out_status: open("status.jsonl")?, out_arr: open("arrivals.jsonl")?,
-            rpc, rt, tx_back, watch_list, exec: None, signer_stats, trig_pending: HashMap::default(), confirm_wait: VecDeque::new(), state_seen: HashSet::default(), state_pending: Vec::new(), pool_prices: HashMap::default(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(), moves_seen: HashSet::default(), poh: HashMap::default(), poh_order: VecDeque::new() })
+            rpc, rt, tx_back, watch_list, exec: None, signer_stats, trig_pending: HashMap::default(), confirm_wait: VecDeque::new(), state_seen: HashSet::default(), state_pending: Vec::new(),
+            state_first: HashMap::default(), state_first_order: VecDeque::new(), caps_pending: Vec::new(), pool_prices: HashMap::default(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(), moves_seen: HashSet::default(), poh: HashMap::default(), poh_order: VecDeque::new() })
     }
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
@@ -204,30 +230,41 @@ impl Engine {
 
     /// [strategy] state_triggers: transaction `txn` moved pool `i` (every part of it now shows `txn`): if that opened a
     /// gap on the pair, act on it, priced on the live state. Triggers already decoded from shreds are left to that path.
-    fn state_trigger(&mut self, i: usize, txn: [u8; 64], slot: u64) {
+    /// `t_recv` / `t_engine`: when the pool's first update stamped `txn` reached us and left the engine queue.
+    fn state_trigger(&mut self, i: usize, txn: [u8; 64], slot: u64, t_recv: u64, t_engine: u64) {
         let m = &self.reg.pools[i];
         let parts: &[Pk] = match m.venue { Venue::Dlmm | Venue::DammV2 => std::slice::from_ref(&m.pool), Venue::RayCpmm => &[m.vault0, m.vault1, m.pool][..], _ => &[m.vault0, m.vault1][..] };
         if !parts.iter().all(|k| self.store.get(k).is_some_and(|a| a.txn == Some(txn))) { return; }
+        // the first part's times, even when a flush dropped this pool's entry between its parts (review F4)
+        let (t_recv, t_engine) = self.state_first.remove(&(sig8(&txn), i as u32)).unwrap_or((t_recv, t_engine));
         if !self.state_seen.insert((sig8(&txn), i as u32)) { return; }
         if self.state_seen.len() > 200_000 { self.state_seen.clear(); }
         if self.opps.values().any(|o| o.trig == txn) { return; }   // the shred path already acted on this trigger
         if self.exec.as_ref().is_some_and(|x| x.is_ours(&txn)) { return; }
         if self.preds.contains_key(&i) { return; }   // another pending trigger's prediction is on this pool
         let now = unix_now();
-        let t = now_ns();
-        let Some(b) = self.best_cycle(i, now) else { return };
+        let t_eval = now_ns();
+        let best = self.best_cycle(i, now);
+        let t_decided = now_ns();
+        // every evaluation is a sample (whatever it decided): the state path's latency baseline (WP-00, F13)
+        for (k, d) in [(0, t_engine.saturating_sub(t_recv)), (1, t_decided.saturating_sub(t_engine)), (2, t_decided.saturating_sub(t_recv))] {
+            self.lat[LAT_STATE_RECV_TO_ENGINE + k].push(d);
+        }
+        let Some(b) = best else { return };
         if b.net < self.cfg.min_profit_lamports as i64 { return; }
         self.count("state_opportunity");
         let id = self.next_id; self.next_id += 1;
-        self.record_caps(id, &b, "state", now);
         let (bi, si) = (self.reg.by_pool[&b.buy], self.reg.by_pool[&b.sell]);
         self.watch.entry(bi).or_default().push(id);
         self.watch.entry(si).or_default().push(id);
-        let st = Stages { rx: t, decoded: t, engine: t, resolved: t, decided: now_ns() };
+        let st = Stages { rx: t_recv, decoded: t_recv, engine: t_engine, resolved: t_eval, decided: t_decided };
         self.opps.insert(id, Opp { id, trig: txn, trig_feed: u16::MAX, slot, st, trig_pool: self.reg.pools[i].pool, buy: b.buy, sell: b.sell,
             mint: b.mint, size: b.size, gross: b.gross, net: b.net, cu: b.cu, crossed: b.crossed,
             deadline: now_ns() + self.cfg.outcome_watch_ms * 1_000_000, trig_cu_price: None, landed: Some(slot), touches: Vec::new() });
         self.after_opportunity(id);
+        // the budget table (caps.jsonl) after the send, and after the other pools of this transaction are priced
+        // (flush_state writes it): same state, same line
+        self.caps_pending.push((id, b, now));
     }
 
     /// trades whose trigger never showed in time: it failed on chain (a phantom gap) or its update was too slow
@@ -243,7 +280,8 @@ impl Engine {
 
     /// price the state triggers whose transaction is now fully applied
     fn flush_state(&mut self) {
-        for (i, txn, slot) in std::mem::take(&mut self.state_pending) { self.state_trigger(i, txn, slot); }
+        for p in std::mem::take(&mut self.state_pending) { self.state_trigger(p.pool, p.txn, p.slot, p.t_recv, p.t_engine); }
+        for (id, b, now) in std::mem::take(&mut self.caps_pending) { self.record_caps(id, &b, "state", now); }
     }
 
     /// txarr.log: when each feed delivered this transaction (µs after the first; `-` never)
@@ -346,7 +384,7 @@ impl Engine {
             let t_engine = now_ns();
             match ev {
                 Event::Tx(a) => self.on_tx(a, t_engine),
-                Event::Account { slot, pubkey, data, t, txn, .. } => self.on_account(pubkey, data, slot, t, txn),
+                Event::Account { slot, pubkey, data, t, txn, .. } => self.on_account(pubkey, data, slot, t, txn, t_engine),
                 Event::Slot { slot, .. } => { if slot > self.slot { self.slot = slot; crate::send::tpu::SLOT.store(slot, std::sync::atomic::Ordering::Relaxed); } }
                 Event::Status { msg, .. } => status(&msg),
                 Event::Alt { table, addrs } => self.on_alt(table, addrs),
@@ -401,10 +439,11 @@ impl Engine {
 
     fn write_status(&mut self, queue: usize) -> String {
         let mut lat = serde_json::Map::new();
-        for (name, v) in self.lat.iter_mut() {
-            let n = v.len();
-            lat.insert(name.to_string(), json!({ "n": n, "p50_us": pct(v, 0.5) / 1000, "p90_us": pct(v, 0.9) / 1000, "p99_us": pct(v, 0.99) / 1000 }));
-            if n > 200_000 { v.clear(); }
+        // the engine's stage series, then the send's (exec: decided_to_signed, signed_to_fired, signed_to_sent). Each is
+        // a bounded reservoir (lat.rs; review F7: no 200k-sample sorts on the engine thread)
+        let exec_lat = self.exec.as_mut().map(|x| &mut x.lat);
+        for v in self.lat.iter_mut().chain(exec_lat.into_iter().flat_map(|l| l.iter_mut())) {
+            lat.insert(v.name.to_string(), v.summary());
         }
         let waiting: usize = self.alt_wait.values().map(|v| v.len()).sum();
         let line = json!({ "t_ns": now_ns(), "slot": self.slot, "queue": queue, "store_updates": self.store.updates,
@@ -608,6 +647,29 @@ impl Engine {
             "first_feed": self.feeds.get(s.first_feed as usize), "arrivals": arr }));
     }
 
+    /// a decoded trigger's stage times and its triggers.jsonl line; `opp` is the best round trip's net, None for a hint
+    /// (`hint_only`, WP-00) or when no round trip was found. A priced trigger feeds the v1 series; a hint (whose
+    /// `decided` is the end of its bookkeeping, not a pricing decision) feeds `hint_rx_to_done` only (review F9)
+    #[allow(clippy::too_many_arguments)]
+    fn write_trigger(&mut self, a: &Arrival, sw: &PendingSwap, i: usize, t_engine: u64, t_resolved: u64, opp: Option<i64>, hint_only: bool) -> Stages {
+        let t_decided = now_ns();
+        let st = Stages { rx: a.t_rx, decoded: a.t_decoded, engine: t_engine, resolved: t_resolved, decided: t_decided };
+        if hint_only { self.lat[LAT_HINT_RX_TO_DONE].push(t_decided.saturating_sub(a.t_rx)); } else {
+            for (k, d) in [(0, a.t_decoded.saturating_sub(a.t_rx)), (1, t_engine.saturating_sub(a.t_decoded)), (2, t_resolved.saturating_sub(t_engine)), (3, t_decided.saturating_sub(t_resolved)), (4, t_decided.saturating_sub(a.t_rx))] {
+                self.lat[k].push(d);
+            }
+        }
+        let m = &self.reg.pools[i];
+        let mut line = json!({
+            "sig": sigs58(&a.tx.sig), "feed": self.feeds.get(a.feed as usize), "slot": a.slot, "pool": b58(&m.pool), "venue": m.venue,
+            "source": self.reg.source(&m.pool),
+            "zfo": sw.zero_for_one, "amount": sw.amount, "exact_out": sw.exact_out, "executed": a.executed,
+            "st": st, "opp": opp });
+        if hint_only { line["hint_only"] = json!(true); }
+        let _ = writeln!(self.out_trig, "{line}");
+        st
+    }
+
     fn on_trigger(&mut self, a: &Arrival, sw: &PendingSwap, t_engine: u64, t_resolved: u64) {
         self.count("trigger");
         if let Some(s) = self.sigs.get_mut(&sig8(&a.tx.sig)) { if s.trigger.is_none() { s.trigger = Some((sw.pool, sw.venue, a.slot)); } }
@@ -618,9 +680,16 @@ impl Engine {
             match self.quote_input_for_output(i, sw.zero_for_one, sw.amount, now) { Some(x) => x, None => { self.count("trigger_exact_out_unsolved"); return } }
         } else { sw.amount };
         let signer = a.tx.fee_payer().copied().unwrap_or_default();
-        // a signer whose triggers mostly never move the pool: skip (at least 4 resolved, under 25% landed)
+        // a signer whose triggers mostly never move the pool: skip (at least 4 resolved, under 25% landed). Its swap is
+        // still followed (`trig_pending`), so its statistics keep learning and a signer that starts landing is let back
+        // in (review F10: a skipped signer's statistics used to freeze). With decoded_sends off (Stage 0) the skip only
+        // drops the hint's accuracy check: hints are never priced
         if let Some(&(ok, miss)) = self.signer_stats.get(&signer).filter(|_| self.cfg.skip_failing_signers) {
-            if ok + miss >= 4 && (ok as f64) < 0.25 * (ok + miss) as f64 { self.count("trigger_skip_signer_fails"); return; }
+            if ok + miss >= 4 && (ok as f64) < 0.25 * (ok + miss) as f64 {
+                self.count("trigger_skip_signer_fails");
+                self.trig_pending.insert(a.tx.sig, (signer, now_ns()));
+                return;
+            }
         }
         let Some((out, _, after)) = self.quote(i, sw.zero_for_one, amount_in, now) else { self.count("trigger_unquotable"); return };
         // the trigger's own slippage bound: if our quote can't meet it, the swap reverts on chain, the pool doesn't move,
@@ -638,19 +707,19 @@ impl Engine {
         };
         self.checks.insert(i, check);
         self.trig_pending.insert(a.tx.sig, (signer, now_ns()));
+        // WP-00 (F16): a decoded swap is a hint only. Its checks and bookkeeping above ran (the signer skip, signer
+        // statistics, predictions.jsonl's accuracy data), but nothing is predicted, priced
+        // or sent from it: no `preds` entry, so no route is ever priced on a state that may never exist, and the state
+        // path is never blocked by a pending prediction (state_trigger's two skips cannot fire)
+        if !self.cfg.decoded_sends {
+            self.count("trigger_hint_only");
+            self.write_trigger(a, sw, i, t_engine, t_resolved, None, true);
+            return;
+        }
         self.preds.insert(i, PredEntry { trig: a.tx.sig, t: now_ns(), pred: after });
         let best = self.best_cycle(i, now);
-        let t_decided = now_ns();
-        let st = Stages { rx: a.t_rx, decoded: a.t_decoded, engine: t_engine, resolved: t_resolved, decided: t_decided };
-        for (k, d) in [(0, a.t_decoded.saturating_sub(a.t_rx)), (1, t_engine.saturating_sub(a.t_decoded)), (2, t_resolved - t_engine), (3, t_decided - t_resolved), (4, t_decided.saturating_sub(a.t_rx))] {
-            self.lat[k].1.push(d);
-        }
+        let st = self.write_trigger(a, sw, i, t_engine, t_resolved, best.as_ref().map(|b| b.net), false);
         let m = self.reg.pools[i].clone();
-        let _ = writeln!(self.out_trig, "{}", json!({
-            "sig": sigs58(&a.tx.sig), "feed": self.feeds.get(a.feed as usize), "slot": a.slot, "pool": b58(&m.pool), "venue": m.venue,
-            "source": self.reg.source(&m.pool),
-            "zfo": sw.zero_for_one, "amount": sw.amount, "exact_out": sw.exact_out, "executed": a.executed,
-            "st": st, "opp": best.as_ref().map(|b| b.net) }));
         if let Some(b) = best {
             if b.net >= self.cfg.min_profit_lamports as i64 {
                 self.count("opportunity");
@@ -875,7 +944,7 @@ impl Engine {
 
     // ---------------------------------------------------------------- pool state
 
-    fn on_account(&mut self, key: Pk, data: Vec<u8>, slot: u64, t: u64, txn: Option<[u8; 64]>) {
+    fn on_account(&mut self, key: Pk, data: Vec<u8>, slot: u64, t: u64, txn: Option<[u8; 64]>, t_engine: u64) {
         if !self.store.update(key, data, slot, t, txn) { return; }
         let Some(&i) = self.acct_pool.get(&key) else { return };
         let Some(txn) = txn else { return };
@@ -891,8 +960,16 @@ impl Engine {
         // trades waiting for this trigger go now, priced on the real state (the prediction is gone)
         if !self.confirm_wait.is_empty() { self.on_confirm(key, &txn); }
         if self.cfg.state_triggers {
-            if self.state_pending.first().is_some_and(|p| p.1 != txn) { self.flush_state(); }
-            self.state_pending.push((i, txn, slot));
+            let k = (sig8(&txn), i as u32);
+            if !self.state_first.contains_key(&k) {
+                self.state_first.insert(k, (t, t_engine));
+                self.state_first_order.push_back(k);
+                while self.state_first_order.len() > STATE_FIRST_MAX { if let Some(old) = self.state_first_order.pop_front() { self.state_first.remove(&old); } }
+            }
+            if self.state_pending.first().is_some_and(|p| p.txn != txn) { self.flush_state(); }
+            // one entry per pool, with the times of its first update stamped `txn` (later parts of the same pool add
+            // nothing: the evaluation at the flush sees them all)
+            if !self.state_pending.iter().any(|p| p.pool == i) { self.state_pending.push(StatePending { pool: i, txn, slot, t_recv: t, t_engine }); }
         }
         self.check_prediction(i, txn);
         let pool_key = self.reg.pools[i].pool;
@@ -1087,5 +1164,194 @@ pub fn interest(reg: &Registry, templates: Option<&str>) -> Interest {
 pub fn initial_dlmm_arrays(reg: &Registry, store: &mut Store) {
     for m in reg.pools.iter().filter(|m| m.venue == Venue::Dlmm) {
         if let Some(a) = store.get(&m.pool) { if let Some(active) = crate::venues::i32_at(&a.data, 76) { store.dlmm_arrays.insert(m.pool, pools::dlmm_arrays(&m.pool, active)); } }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::venues::PoolMeta;
+
+    const MINT: Pk = [7u8; 32];
+    const SIGNER: Pk = [5u8; 32];
+    const TRIG: [u8; 64] = [9u8; 64];
+
+    /// a Raydium AMM v4 pool account: status 1 (swaps on), fee 25/10,000, no PnL owed
+    fn ammv4_pool() -> Vec<u8> {
+        let mut p = vec![0u8; 752];
+        p[0..8].copy_from_slice(&1u64.to_le_bytes());
+        p[176..184].copy_from_slice(&25u64.to_le_bytes());
+        p[184..192].copy_from_slice(&10_000u64.to_le_bytes());
+        p
+    }
+    fn vault(amount: u64) -> Vec<u8> { let mut v = vec![0u8; 165]; v[64..72].copy_from_slice(&amount.to_le_bytes()); v }
+    fn meta(n: u8) -> PoolMeta {
+        PoolMeta { venue: Venue::RayAmmV4, pool: [n; 32], t0: MINT, t1: *WSOL, vault0: [n + 10; 32], vault1: [n + 20; 32],
+            t0_prog: *crate::pda::TOKEN_PROGRAM, t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![], flag: false }
+    }
+
+    struct Rig { eng: Engine, dir: std::path::PathBuf, _rt: tokio::runtime::Runtime }
+    impl Drop for Rig { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); } }
+
+    /// two AMM v4 pools on WSOL/MINT, 1% apart (a round trip between them pays), held at slot 10
+    fn rig(name: &str, cfg: StrategyCfg) -> Rig {
+        let (a, b) = (meta(1), meta(2));
+        let mut reg = Registry { pools: vec![a.clone(), b.clone()], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+        reg.by_pool.insert(a.pool, 0);
+        reg.by_pool.insert(b.pool, 1);
+        reg.pairs.insert(pair_key(&MINT, &WSOL), vec![0, 1]);
+        let mut store = Store::default();
+        for (m, sol) in [(&a, 1_000u64), (&b, 1_010)] {
+            store.update(m.pool, ammv4_pool(), 10, 1, None);
+            store.update(m.vault0, vault(1_000_000_000_000_000), 10, 1, None);
+            store.update(m.vault1, vault(sol * 1_000_000_000), 10, 1, None);
+        }
+        let dir = std::env::temp_dir().join(format!("arbx-engine-{name}-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let (wtx, _wrx) = tokio::sync::watch::channel(Vec::new());
+        let interest = Arc::new(Interest { keys: Default::default(), tables: Default::default() });
+        let eng = Engine::new(Arc::new(reg), store, cfg, vec!["feed0".into()], 1_000, interest, &dir, crate::rpc::Rpc::race(vec![]),
+            rt.handle().clone(), tx, wtx).unwrap();
+        Rig { eng, dir, _rt: rt }
+    }
+
+    /// a decoded swap of 1 SOL into pool 1 by SIGNER
+    fn hint() -> (Arrival, PendingSwap) {
+        let tx = Tx { sig: TRIG, keys: vec![SIGNER], ..Default::default() };
+        (Arrival { feed: 0, slot: 11, t_rx: 100, t_decoded: 200, executed: None, tx, poh: None },
+         PendingSwap { pool: [1; 32], venue: Venue::RayAmmV4, zero_for_one: false, amount: 1_000_000_000, exact_out: false, user: SIGNER, limit: 0 })
+    }
+    fn n(e: &Engine, k: &str) -> u64 { e.counts.get(k).copied().unwrap_or(0) }
+    fn lat(e: &Engine, name: &str) -> usize { e.lat.iter().find(|x| x.name == name).map_or(usize::MAX, |x| x.n() as usize) }
+
+    /// WP-00 (F16): with decoded_sends off a decoded swap runs its checks and bookkeeping (the accuracy check, the signer's
+    /// pending entry) and writes its triggers line with opp null, but nothing is predicted or priced from it
+    #[test]
+    fn decoded_swap_is_a_hint_only() {
+        let mut r = rig("hint", StrategyCfg::default());
+        let (a, sw) = hint();
+        r.eng.on_trigger(&a, &sw, 300, 400);
+        let e = &mut r.eng;
+        assert_eq!((n(e, "trigger"), n(e, "trigger_hint_only"), n(e, "opportunity")), (1, 1, 0));
+        assert!(e.preds.is_empty(), "no prediction: neither a priced route nor the state path's skip can use it");
+        assert!(e.opps.is_empty());
+        assert!(e.checks.contains_key(&0), "the accuracy check still runs (predictions.jsonl)");
+        assert!(e.trig_pending.contains_key(&TRIG), "signer statistics keep learning");
+        // review F9: a hint is not a pricing decision: its own series, the v1 ones stay for priced triggers
+        assert_eq!((lat(e, "hint_rx_to_done"), lat(e, "rx_to_decided"), lat(e, "resolved_to_decided")), (1, 0, 0));
+        e.out_trig.flush().unwrap();
+        let text = std::fs::read_to_string(r.dir.join("triggers.jsonl")).unwrap();
+        let line: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert!(line["opp"].is_null());
+        assert_eq!(line["hint_only"], json!(true));
+        assert_eq!((line["st"]["rx"].as_u64(), line["st"]["engine"].as_u64()), (Some(100), Some(300)));
+    }
+
+    /// WP-00 (F16): skip_failing_signers works on the hint path (the check runs before the early return), and the
+    /// skipped signer's statistics keep learning (review F10): its swap landing counts, and it is let back in
+    #[test]
+    fn failing_signer_is_skipped_before_the_hint_and_keeps_learning() {
+        let mut r = rig("signer", StrategyCfg::default());
+        r.eng.signer_stats.insert(SIGNER, (0, 4));
+        let (a, sw) = hint();
+        r.eng.on_trigger(&a, &sw, 300, 400);
+        assert_eq!((n(&r.eng, "trigger_skip_signer_fails"), n(&r.eng, "trigger_hint_only")), (1, 0));
+        assert!(r.eng.checks.is_empty(), "no accuracy check for a skipped signer");
+        assert!(r.eng.trig_pending.contains_key(&TRIG), "but its swap is followed");
+        // the swap lands (pool 1's accounts updated, stamped with it): ok + 1 -> 1 of 5 = 20%, still skipped
+        let land = |e: &mut Engine, sig: [u8; 64], slot: u64| {
+            e.on_account(meta(1).vault0, vault(1_000_000_000_000_000), slot, 2_000, Some(sig), 2_100);
+            e.on_account(meta(1).vault1, vault(1_000 * 1_000_000_000), slot, 2_000, Some(sig), 2_100);
+        };
+        land(&mut r.eng, TRIG, 11);
+        assert_eq!(r.eng.signer_stats[&SIGNER], (1, 4));
+        // its next swap is skipped too, and lands: 2 of 6 >= 25%: let back in
+        let (mut a, sw) = hint();
+        a.tx.sig = [21u8; 64];
+        r.eng.on_trigger(&a, &sw, 300, 400);
+        land(&mut r.eng, [21u8; 64], 12);
+        assert_eq!(r.eng.signer_stats[&SIGNER], (2, 4));
+        let (mut a, sw) = hint();
+        a.tx.sig = [23u8; 64];
+        r.eng.on_trigger(&a, &sw, 300, 400);
+        assert_eq!((n(&r.eng, "trigger_skip_signer_fails"), n(&r.eng, "trigger_hint_only")), (2, 1));
+    }
+
+    /// decoded_sends = true keeps arb-lab's decoded path (prediction, priced opportunity)
+    #[test]
+    fn decoded_sends_on_keeps_the_old_path() {
+        let mut r = rig("decoded", StrategyCfg { decoded_sends: true, ..StrategyCfg::default() });
+        let (a, sw) = hint();
+        r.eng.on_trigger(&a, &sw, 300, 400);
+        let e = &r.eng;
+        assert_eq!((n(e, "trigger_hint_only"), n(e, "opportunity")), (0, 1));
+        assert!(e.preds.contains_key(&0));
+    }
+
+    /// WP-00 (F13): a state trigger's stages are the pool's first update stamped with the transaction (receive time and
+    /// dequeue), the evaluation's start and the decision, and every evaluation feeds the three state-path series
+    #[test]
+    fn state_trigger_carries_update_receive_and_dequeue_times() {
+        let mut r = rig("state", StrategyCfg { state_triggers: true, ..StrategyCfg::default() });
+        let b = meta(2);
+        const T: [u8; 64] = [3u8; 64];
+        // T moves pool 2 (both vaults, two updates); pool 2 is now 2% above pool 1
+        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(T), 1_500);
+        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 1_100, Some(T), 1_600);
+        assert_eq!(r.eng.state_pending.len(), 1, "one entry per (pool, txn)");
+        assert_eq!((r.eng.state_pending[0].t_recv, r.eng.state_pending[0].t_engine), (1_000, 1_500), "the first update's times");
+        r.eng.flush_state();
+        let e = &r.eng;
+        assert_eq!(n(e, "state_opportunity"), 1);
+        for s in ["state_recv_to_engine", "state_engine_to_decided", "state_recv_to_decided"] { assert_eq!(lat(e, s), 1, "{s}"); }
+        assert_eq!(e.lat.iter().find(|x| x.name == "state_recv_to_engine").unwrap().kept()[0], 500);
+        assert!(e.caps_pending.is_empty(), "the caps line is written at the end of the flush");
+        let o = e.opps.values().next().unwrap();
+        assert_eq!((o.st.rx, o.st.decoded, o.st.engine), (1_000, 1_000, 1_500));
+        assert!(o.st.resolved > o.st.engine && o.st.decided >= o.st.resolved, "evaluation start, then the decision");
+        // an evaluation that finds nothing is a sample too
+        const U: [u8; 64] = [4u8; 64];
+        let mut r = rig("state2", StrategyCfg { state_triggers: true, min_profit_lamports: u64::MAX / 4, ..StrategyCfg::default() });
+        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(U), 1_500);
+        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 1_100, Some(U), 1_600);
+        r.eng.flush_state();
+        assert_eq!((n(&r.eng, "state_opportunity"), lat(&r.eng, "state_recv_to_decided")), (0, 1));
+    }
+
+    /// review F4: the engine queue empties between the two vault updates of one transaction, so a flush runs on the
+    /// half-done pool (incomplete: nothing priced) and drops its entry. The evaluation after the second part still
+    /// carries the FIRST part's receive and dequeue times
+    #[test]
+    fn state_trigger_keeps_the_first_update_time_across_a_flush() {
+        let mut r = rig("state-split", StrategyCfg { state_triggers: true, ..StrategyCfg::default() });
+        let b = meta(2);
+        const T: [u8; 64] = [6u8; 64];
+        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(T), 1_500);
+        r.eng.flush_state();
+        assert_eq!((n(&r.eng, "state_opportunity"), lat(&r.eng, "state_recv_to_decided")), (0, 0), "half a pool is not priced");
+        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 2_000, Some(T), 2_600);
+        r.eng.flush_state();
+        let e = &r.eng;
+        assert_eq!(n(e, "state_opportunity"), 1);
+        let o = e.opps.values().next().unwrap();
+        assert_eq!((o.st.rx, o.st.engine), (1_000, 1_500), "the first part's times, not the second's (2,000 / 2,600)");
+        assert!(e.state_first.is_empty(), "taken once the pool was complete");
+    }
+
+    /// review F6: a state opportunity's caps line waits until the flush has priced every pool of the transaction
+    #[test]
+    fn caps_line_waits_for_the_end_of_the_flush() {
+        let mut r = rig("caps", StrategyCfg { state_triggers: true, ..StrategyCfg::default() });
+        let b = meta(2);
+        const T: [u8; 64] = [7u8; 64];
+        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(T), 1_500);
+        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 1_100, Some(T), 1_600);
+        let p = r.eng.state_pending.pop().unwrap();
+        r.eng.state_trigger(p.pool, p.txn, p.slot, p.t_recv, p.t_engine);
+        assert_eq!((n(&r.eng, "state_opportunity"), r.eng.caps_pending.len()), (1, 1), "queued, not computed between two pools");
+        r.eng.flush_state();
+        assert!(r.eng.caps_pending.is_empty());
     }
 }

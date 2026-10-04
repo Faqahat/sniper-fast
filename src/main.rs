@@ -9,6 +9,7 @@ mod config;
 mod engine;
 mod exec;
 mod feeds;
+mod lat;
 mod pda;
 mod pools;
 mod record;
@@ -97,6 +98,11 @@ enum Cmd {
         #[arg(long)] canary: bool,
         /// trade for real (`[live]` limits); needs mode = "live" in the config too
         #[arg(long)] live: bool,
+        /// run in shadow whatever the config's mode (recorded in meta.json `overrides`; WP-01 keeps this flag)
+        #[arg(long)] shadow: bool,
+        /// this run without the recorder (`[record] enabled = false`; recorded in meta.json `overrides`): WP-00's
+        /// recorder-off shadow run, without editing the config
+        #[arg(long)] no_record: bool,
     },
 }
 
@@ -133,6 +139,24 @@ fn main() -> Result<()> {
                 println!("  send {:<20} {:?} {tip}{rate}{}", s.name, s.kind, if s.enabled { "" } else { " (disabled)" });
             }
             if cfg.gate.enabled { println!("  jito gate on: paid copies wait up to {} ms for the bundle's first result (canary every {})", cfg.gate.wait_ms, cfg.gate.canary_every); }
+            let on: Vec<&str> = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.name.as_str()).collect();
+            println!("enabled send paths: {}", if on.is_empty() { "none".to_string() } else { on.join(", ") });
+            let (s, l) = (&cfg.strategy, &cfg.live);
+            println!("safety: decoded_sends {}, skip_failing_signers {}, state_triggers {}, record {}; live: max {} SOL a trade, {} new token accounts, sim_gate {}, bundle_mix {} (tpu_max_expected {}), big band >= {} lamports at {}/s, crowded pools {}",
+                s.decoded_sends, s.skip_failing_signers, s.state_triggers, cfg.record.enabled, l.max_size_sol, l.max_new_token_accounts, l.sim_gate, l.bundle_mix,
+                l.tpu_max_expected_lamports, l.big_band_min_expected_lamports, l.big_band_max_per_sec,
+                if l.crowded_pools_file.is_empty() { "none".to_string() } else { l.crowded_pools_file.clone() });
+            if l.crowded_skip_min_expected_lamports > 0 { println!("  crowded pools not sent from {} lamports expected", l.crowded_skip_min_expected_lamports); }
+            // review N3: the crowded list, where this machine has it (the configured path, or the repo's data/ copy)
+            if !l.crowded_pools_file.is_empty() {
+                let p = Path::new(&l.crowded_pools_file);
+                let repo_copy = config.parent().and_then(|d| d.parent()).zip(p.file_name()).map(|(d, f)| d.join("data").join(f));
+                match std::iter::once(p.to_path_buf()).chain(repo_copy).find(|c| c.is_file()) {
+                    Some(c) => println!("  crowded list {}: {} pools", c.display(), exec::load_crowded_pools(&c.to_string_lossy())?.len()),
+                    None => println!("  crowded list not on this machine (loaded at start; a bad list stops the run)"),
+                }
+            }
+            if let Some(w) = cfg.pricing_warning() { println!("{w}"); }
             Ok(())
         }
         Cmd::Pools { config } => {
@@ -154,7 +178,7 @@ fn main() -> Result<()> {
                 Ok(())
             })
         }
-        Cmd::Run { config, minutes, name, only, canary, live } => run(&config, minutes, name, only, canary, live),
+        Cmd::Run { config, minutes, name, only, canary, live, shadow, no_record } => run(&config, minutes, name, only, canary, live, Overrides { shadow, no_record }),
         Cmd::Simcheck { config, max, size_sol, canaries } => simcheck(&config, max, size_sol, canaries),
         Cmd::KeystoreEncrypt { out, generate, show_backup } => {
             use std::io::Read;
@@ -480,11 +504,50 @@ fn rpc_test(config: &Path, calls: usize, concurrency: usize) -> Result<()> {
     })
 }
 
-fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<String>, canary: bool, live: bool) -> Result<()> {
+/// command-line changes to the config for one run, recorded in meta.json `overrides`
+#[derive(Clone, Copy, Default)]
+struct Overrides { shadow: bool, no_record: bool }
+
+impl Overrides {
+    /// apply them; Err when they contradict the other flags
+    fn apply(&self, cfg: &mut config::Config, live: bool) -> Result<()> {
+        if self.shadow {
+            if live { anyhow::bail!("--shadow and --live contradict each other"); }
+            cfg.mode = "shadow".into();
+        }
+        if self.no_record { cfg.record.enabled = false; }
+        Ok(())
+    }
+
+    fn json(&self) -> serde_json::Value {
+        let mut v = serde_json::Map::new();
+        if self.shadow { v.insert("mode".into(), "shadow".into()); }
+        if self.no_record { v.insert("record.enabled".into(), false.into()); }
+        v.into()
+    }
+}
+
+/// meta.json `limits` (MEASUREMENT §4.2, v1.1): the effective safety limits of this run
+fn limits_json(cfg: &config::Config, live: bool, canary: bool) -> serde_json::Value {
+    let l = &cfg.live;
+    serde_json::json!({
+        "sending": if live { "live" } else if canary { "canary" } else { "none" },
+        "max_size_sol": l.max_size_sol, "max_size_src": "config", "sim_max_size_sol": cfg.exec.max_size_sol,
+        "max_failed_fees_lamports": l.max_failed_fees_lamports, "max_new_token_accounts": l.max_new_token_accounts,
+        "decoded_sends": cfg.strategy.decoded_sends, "state_triggers": cfg.strategy.state_triggers,
+        "big_band_min_expected_lamports": l.big_band_min_expected_lamports, "big_band_max_per_sec": l.big_band_max_per_sec,
+        "crowded_pools_file": l.crowded_pools_file, "crowded_skip_min_expected_lamports": l.crowded_skip_min_expected_lamports,
+        "record": cfg.record.enabled,
+    })
+}
+
+fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<String>, canary: bool, live: bool, ov: Overrides) -> Result<()> {
     load_env(config);
     let mut cfg = config::Config::load(config)?;
+    ov.apply(&mut cfg, live)?;
     // live trading needs both mode = "live" and --live; either alone refuses to start (so neither can spend by itself)
-    if live != (cfg.mode == "live") { anyhow::bail!("live trading needs mode = \"live\" in the config AND --live (got mode {}, --live {live})", cfg.mode); }
+    if live != (cfg.mode == "live") { anyhow::bail!("live trading needs mode = \"live\" in the config AND --live (got mode {}, --live {live}; --shadow runs a live config in shadow)", cfg.mode); }
+    if let Some(w) = cfg.pricing_warning() { println!("{w}"); }
     if live && canary { anyhow::bail!("--live and --canary are separate runs"); }
     if canary && !cfg.canary.enabled { anyhow::bail!("--canary needs [canary] enabled = true in the config (both, so neither alone can spend)"); }
     if cfg.canary.enabled && !canary { println!("[canary] is enabled in the config but --canary was not given: no canaries this run"); }
@@ -564,6 +627,11 @@ fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<S
     let exec = if exec_on {
         let (x, notes) = rt.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), &dir, tx.clone(), fs.names.clone(), send_key, reg_mints(&reg)))?;
         for n in notes { say(&format!("exec: {n}")); }
+        if !cfg.live.crowded_pools_file.is_empty() {
+            // review N1: a list made for another registry would rank and skip nothing
+            let (have, all) = x.crowded_in(|p| reg.by_pool.contains_key(p));
+            say(&format!("exec: crowded pools in this registry: {have} of {all}"));
+        }
         say(&format!("exec: simulation {}, canaries {}", if cfg.sim.enabled { format!("on (at most {}/s)", cfg.sim.max_per_sec) } else { "off".into() },
             if canary { format!("ARMED ({} max, cap {} lamports)", cfg.canary.count, cfg.canary.max_spend_lamports) } else { "off".into() }));
         if live { say(&format!("exec: LIVE TRADING: at most {} SOL a trade, stops after {} lamports of failed fees", cfg.live.max_size_sol, cfg.live.max_failed_fees_lamports)); }
@@ -575,6 +643,10 @@ fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<S
         "gate": format!("{:?}", cfg.gate), "sim": format!("{:?}", cfg.sim), "canary": if canary { Some(format!("{:?}", cfg.canary)) } else { None },
         "live": if live { Some(format!("{:?}", cfg.live)) } else { None },
         "exec": format!("{:?}", cfg.exec),
+        // the effective safety limits (WP-00; MEASUREMENT §4.2 `limits`): the trade size is the owner's Stage-0 decision (OD-4)
+        "limits": limits_json(&cfg, live, canary),
+        // what the command line changed in the config for this run (--shadow, --no-record)
+        "overrides": ov.json(),
     }))?)?;
     let min_tip = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.tip_lamports).min().unwrap_or(0);
     let mut eng = engine::Engine::new(reg.clone(), store, cfg.strategy.clone(), fs.names.clone(), min_tip, interest, &dir, rpc,
@@ -604,4 +676,47 @@ fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<S
     say(&format!("done: {}", dir.display()));
     rt.shutdown_timeout(std::time::Duration::from_secs(2));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stage0() -> config::Config { config::Config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arbx-stage0.toml")).unwrap() }
+
+    /// review F8 (d): meta.json `limits` carries the WP-00 limits (MEASUREMENT §7 v1.1)
+    #[test]
+    fn meta_limits_carry_the_stage0_limits() {
+        let cfg = stage0();
+        let l = limits_json(&cfg, true, false);
+        assert_eq!(l["sending"], "live");
+        assert_eq!(limits_json(&cfg, false, false)["sending"], "none");
+        assert_eq!(limits_json(&cfg, false, true)["sending"], "canary");
+        assert_eq!((l["max_size_sol"].as_f64(), l["max_new_token_accounts"].as_u64(), l["max_size_src"].as_str()), (Some(4.2), Some(0), Some("config")));
+        assert_eq!((l["decoded_sends"].as_bool(), l["state_triggers"].as_bool(), l["record"].as_bool()), (Some(false), Some(true), Some(true)));
+        assert_eq!((l["big_band_min_expected_lamports"].as_u64(), l["big_band_max_per_sec"].as_f64()), (Some(1_000_000), Some(0.5)));
+        assert_eq!((l["crowded_pools_file"].as_str(), l["crowded_skip_min_expected_lamports"].as_u64()), (Some("/root/arbx/data/crowded-pools.json"), Some(100_000)));
+    }
+
+    /// review F1: both field-acceptance shadow runs work on the shipped file without editing it, and `--shadow` runs a
+    /// live config in shadow
+    #[test]
+    fn shadow_and_no_record_overrides() {
+        let mut cfg = stage0();
+        Overrides::default().apply(&mut cfg, false).unwrap();
+        assert_eq!(cfg.mode, "shadow", "ships in shadow: a plain run is a shadow run");
+        assert!(cfg.record.enabled);
+        let ov = Overrides { shadow: false, no_record: true };
+        ov.apply(&mut cfg, false).unwrap();
+        assert!(!cfg.record.enabled, "the recorder-off run");
+        assert_eq!(ov.json(), serde_json::json!({ "record.enabled": false }));
+        let mut live = stage0();
+        live.mode = "live".into();
+        let ov = Overrides { shadow: true, no_record: false };
+        ov.apply(&mut live, false).unwrap();
+        assert_eq!(live.mode, "shadow");
+        assert_eq!(ov.json(), serde_json::json!({ "mode": "shadow" }));
+        assert!(Overrides { shadow: true, no_record: false }.apply(&mut stage0(), true).is_err(), "--shadow with --live");
+        assert_eq!(Overrides::default().json(), serde_json::json!({}));
+    }
 }

@@ -157,7 +157,29 @@ pub struct LiveCfg {
     /// gross gain dropped below the fees loses less than reverting it); the decision still needs the full margin
     #[serde(default)]
     pub gross_floor: bool,
+    /// WP-00 (temporary; moves to `[send]` in WP-05): live trades expecting at least this profit (lamports) form the
+    /// "big band", which is throttled to `big_band_max_per_sec` (0 of 1,869 such bundles landed while they took the
+    /// 5/s Jito budget from smaller ones; R §1, §3.4)
+    #[serde(default = "big_band_min")]
+    pub big_band_min_expected_lamports: u64,
+    /// WP-00: the big band's token bucket (rate per second, burst 1); over it the trade is skipped with
+    /// `live_skip_big_band_throttle`. 0 = no big-band trade at all
+    #[serde(default = "big_band_rate")]
+    pub big_band_max_per_sec: f64,
+    /// WP-00 (F6, OD-3): JSON list of the pools with 150 or more distinct arbitrage bots (data/crowded-pools.json).
+    /// An attempt touching one ranks last (Prio rank 2) in a send path's rate queue, and its rate drops are counted
+    /// apart. "" = none
+    #[serde(default)]
+    pub crowded_pools_file: String,
+    /// WP-00 (OD-3's alternative; review F2): a live trade on a crowded pool expecting at least this (lamports) is
+    /// skipped (`live_skip_crowded_pool`). 0 = never (rank only). The rank alone changes nothing at the 5/s budget's
+    /// load (no two bundles wait at once); in the 12 legacy segments 0 of 1,896 crowded bundles expecting 100k or more
+    /// landed, against 12 of 1,214 under 100k
+    #[serde(default)]
+    pub crowded_skip_min_expected_lamports: u64,
 }
+fn big_band_min() -> u64 { 1_000_000 }
+fn big_band_rate() -> f64 { 0.5 }
 fn compete_share() -> f64 { 0.25 }
 fn pair_lock() -> u64 { 8_000 }
 fn live_prio_cap() -> u64 { 100_000 }
@@ -176,7 +198,8 @@ fn live_nonces() -> Vec<String> {
 impl Default for LiveCfg {
     fn default() -> Self { LiveCfg { max_size_sol: live_size(), max_failed_fees_lamports: live_fee_cap(), margin_lamports: live_margin(),
         max_new_token_accounts: live_atas(), settle_s: live_settle(), nonce_accounts: live_nonces(), test_all_paths: false, max_priority_lamports: live_prio_cap(),
-        bid_tiers: false, bid_min_expected_lamports: bid_min(), bid_share: bid_share(), bid_max_priority_lamports: bid_max(), spec_cu_price_micro: 0, rotate_paths: false, race_mix: false, bundle_mix: false, tpu_cu_price_micro: 0, pair_lock_ms: pair_lock(), sim_gate: false, tpu_max_expected_lamports: 0, tpu_skip_mriya_pools: false, tpu_skip_mints: Vec::new(), tpu_min_expected_lamports: 0, bundle_resend_ms: Vec::new(), bundle_size_variants: Vec::new(), compete_mult: 0.0, compete_max_share: compete_share(), compete_ab: false, gross_floor: false } }
+        bid_tiers: false, bid_min_expected_lamports: bid_min(), bid_share: bid_share(), bid_max_priority_lamports: bid_max(), spec_cu_price_micro: 0, rotate_paths: false, race_mix: false, bundle_mix: false, tpu_cu_price_micro: 0, pair_lock_ms: pair_lock(), sim_gate: false, tpu_max_expected_lamports: 0, tpu_skip_mriya_pools: false, tpu_skip_mints: Vec::new(), tpu_min_expected_lamports: 0, bundle_resend_ms: Vec::new(), bundle_size_variants: Vec::new(), compete_mult: 0.0, compete_max_share: compete_share(), compete_ab: false, gross_floor: false,
+        big_band_min_expected_lamports: big_band_min(), big_band_max_per_sec: big_band_rate(), crowded_pools_file: String::new(), crowded_skip_min_expected_lamports: 0 } }
 }
 
 /// Building real transactions from the engine's decisions (simulation and canaries)
@@ -372,6 +395,12 @@ pub struct StrategyCfg {
     /// balance would add; nothing is traded above live.max_size_sol)
     #[serde(default)]
     pub budget_caps_sol: Vec<f64>,
+    /// WP-00 (temporary; removed with the decoded path in WP-04): act on decoded, unconfirmed swaps. Off (default): a
+    /// decoded swap is a hint only. Its signer check, slippage check, accuracy check and signer bookkeeping still run,
+    /// but no prediction is stored and no route is priced or sent from it (`trigger_hint_only`): 681 of 822 decoded
+    /// triggers of 0.1 SOL or more failed on chain (W §7.1)
+    #[serde(default)]
+    pub decoded_sends: bool,
 }
 fn yes() -> bool { true }
 fn sizes() -> Vec<f64> { vec![0.02, 0.05, 0.1, 0.2, 0.5, 1.0] }
@@ -379,7 +408,7 @@ fn min_profit() -> u64 { 10_000 }
 fn cu_price() -> u64 { 40_000 }
 fn watch_ms() -> u64 { 2_000 }
 impl Default for StrategyCfg {
-    fn default() -> Self { StrategyCfg { sizes_sol: sizes(), min_profit_lamports: min_profit(), cu_price_micro: cu_price(), outcome_watch_ms: watch_ms(), signer_stats_file: String::new(), confirm_trigger_ms: 0, skip_failing_signers: true, state_triggers: false, budget_caps_sol: vec![] } }
+    fn default() -> Self { StrategyCfg { sizes_sol: sizes(), min_profit_lamports: min_profit(), cu_price_micro: cu_price(), outcome_watch_ms: watch_ms(), signer_stats_file: String::new(), confirm_trigger_ms: 0, skip_failing_signers: true, state_triggers: false, budget_caps_sol: vec![], decoded_sends: false } }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -556,7 +585,12 @@ impl Default for GateCfg {
 impl Config {
     pub fn load(path: &Path) -> Result<Config> {
         let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        let cfg: Config = toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        Config::parse(&text).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    /// a config file's text, parsed and checked
+    pub fn parse(text: &str) -> Result<Config> {
+        let cfg: Config = toml::from_str(text)?;
         if cfg.mode != "shadow" && cfg.mode != "live" { bail!("mode must be \"shadow\" or \"live\""); }
         let mut names = std::collections::HashSet::new();
         for f in &cfg.feeds {
@@ -596,7 +630,19 @@ impl Config {
             }
         }
         if cfg.feeds.len() > u16::MAX as usize { bail!("too many feeds"); }
+        let bb = cfg.live.big_band_max_per_sec;
+        if !bb.is_finite() || bb < 0.0 { bail!("[live] big_band_max_per_sec must be a rate >= 0 (0 = no big-band trade)"); }
+        // the bucket keeps the rate to 0.001 token/s: a smaller positive rate would silently mean "never"
+        if bb > 0.0 && bb < 0.001 { bail!("[live] big_band_max_per_sec {bb}: under 0.001/s (use 0 for no big-band trade)"); }
+        if cfg.live.big_band_min_expected_lamports == 0 { bail!("[live] big_band_min_expected_lamports must be > 0 (0 would throttle every live trade)"); }
         Ok(cfg)
+    }
+
+    /// WP-00 (review F3): a config whose strategy prices nothing (neither `state_triggers` nor `decoded_sends`) runs,
+    /// records and never finds an opportunity. `arbx check` and `arbx run` print this
+    pub fn pricing_warning(&self) -> Option<String> {
+        let s = &self.strategy;
+        (!s.state_triggers && !s.decoded_sends).then(|| "WARNING: [strategy] state_triggers and decoded_sends are both off: nothing is priced, no opportunity can be found".to_string())
     }
 }
 
@@ -628,4 +674,96 @@ pub fn env_token(var: &Option<String>, what: &str) -> Result<Option<String>> {
 impl Feed {
     pub fn token(&self) -> Result<Option<String>> { env_token(&self.token_env, &self.name) }
     pub fn is_raw(&self) -> bool { matches!(self.kind, FeedKind::Udp | FeedKind::Multicast) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repo(rel: &str) -> std::path::PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join(rel) }
+    /// the file a /root/arbx/... path on Cherry names, in this checkout
+    fn in_repo(cherry: &str) -> std::path::PathBuf { repo(cherry.strip_prefix("/root/arbx/").expect("a path in the arbx tree")) }
+
+    const DAMM_V2: &str = "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG";
+
+    /// WP-00 acceptance: `arbx check --config deploy/arbx-stage0.toml` lists only jito-bundle as enabled, and the day-0
+    /// switches are what PLAN.md WP-00 says
+    #[test]
+    fn stage0_config_is_the_day0_safety_switch() {
+        let cfg = Config::load(&repo("deploy/arbx-stage0.toml")).unwrap();
+        // review F1: it ships in shadow, so both field-acceptance shadow runs need no edit; the owner flips it to live
+        // after they pass
+        assert_eq!(cfg.mode, "shadow");
+        let on: Vec<&str> = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.name.as_str()).collect();
+        assert_eq!(on, ["jito-bundle"], "bundle-only");
+        let j = cfg.sends.iter().find(|s| s.name == "jito-bundle").unwrap();
+        assert_eq!(j.kind, SendKind::JitoBundle);
+        assert_eq!((j.tip_share, j.tip_max_lamports, j.max_per_sec), (Some(0.7), Some(100_000), Some(5)));
+        // review F2: a 10 ms queue only delayed sends (it reordered none in the legacy replay); WP-05 brings the queue
+        assert_eq!(j.queue_ms, 0, "the budget refuses at once, as in arb-lab");
+        for name in ["helius", "rpcfast", "jito-tx", "haan", "astralane", "bolt", "tpu-direct", "everstake", "nozomi", "blockrazor", "flashblock",
+            "nextblock", "jupiter", "landx-fra3", "landx-fra1", "speedlanding"] {
+            assert!(cfg.sends.iter().any(|s| s.name == name && !s.enabled), "{name} is listed and disabled");
+        }
+        let (st, l) = (&cfg.strategy, &cfg.live);
+        assert!(!st.decoded_sends && st.skip_failing_signers && st.state_triggers);
+        assert_eq!(st.confirm_trigger_ms, 60, "stays until WP-04 removes it");
+        assert!(l.bundle_mix && !l.sim_gate);
+        assert_eq!(l.tpu_max_expected_lamports, 1, "every trade on the bundle arm");
+        assert_eq!((l.max_new_token_accounts, l.settle_s, l.max_size_sol), (0, 3, 4.2));
+        assert_eq!((l.big_band_min_expected_lamports, l.big_band_max_per_sec), (1_000_000, 0.5));
+        assert_eq!(l.crowded_skip_min_expected_lamports, 100_000, "OD-3's alternative on top of the rank (review F2)");
+        assert!(cfg.record.enabled && cfg.record.archive_feed.is_empty());
+        assert!(!cfg.gate.enabled);
+        // both deshred feeds now ask for DAMM v2 too
+        let deshred: Vec<&Feed> = cfg.feeds.iter().filter(|f| f.kind == FeedKind::YellowstoneDeshred).collect();
+        assert_eq!(deshred.len(), 2);
+        for f in deshred { assert!(f.account_include.iter().any(|a| a == DAMM_V2), "{}", f.name); }
+        // repointed to the arbx tree; the data files it names are in this repo
+        assert_eq!(cfg.out_dir, "/root/arbx/runs");
+        for f in [cfg.pools.seed_csv.as_str(), cfg.pools.registry_json.as_deref().unwrap(), cfg.pools.templates_json.as_deref().unwrap(), l.crowded_pools_file.as_str()] {
+            assert!(f.starts_with("/root/arbx/data/"), "{f}");
+            assert!(in_repo(f).is_file(), "{f} is in arbx/data");
+        }
+        assert!(st.signer_stats_file.starts_with("/root/arbx/"));
+    }
+
+    /// review F3 (PLAN §7: every WP updates both maintained configs): each one prices something. arb.toml lost its
+    /// only pricing path when decoded_sends became off by default
+    #[test]
+    fn maintained_configs_have_a_pricing_path() {
+        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] {
+            let cfg = Config::load(&repo(f)).unwrap();
+            assert!(cfg.strategy.state_triggers || cfg.strategy.decoded_sends, "{f} prices nothing");
+            assert!(cfg.pricing_warning().is_none(), "{f}");
+            assert!(!cfg.strategy.decoded_sends, "{f}: decoded swaps are hints in Stage 0");
+        }
+        assert!(Config::parse(MINIMAL).unwrap().pricing_warning().is_some(), "the defaults price nothing: warned");
+    }
+
+    #[test]
+    fn arb_toml_jito_tip_matches_live() {
+        let cfg = Config::load(&repo("deploy/arb.toml")).unwrap();
+        let j = cfg.sends.iter().find(|s| s.kind == SendKind::JitoBundle).unwrap();
+        assert_eq!((j.tip_share, j.tip_max_lamports), (Some(0.7), Some(100_000)), "R §3.6: no drift from the live config");
+    }
+
+    const MINIMAL: &str = "out_dir = \"/tmp/x\"\nwallet = \"w\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n";
+
+    #[test]
+    fn wp00_keys_default_safe() {
+        let cfg = Config::parse(MINIMAL).unwrap();
+        assert!(!cfg.strategy.decoded_sends, "decoded swaps are hints unless asked");
+        assert_eq!((cfg.live.big_band_min_expected_lamports, cfg.live.big_band_max_per_sec), (1_000_000, 0.5));
+        assert!(cfg.live.crowded_pools_file.is_empty());
+        let on = Config::parse(&format!("{MINIMAL}[strategy]\ndecoded_sends = true\n")).unwrap();
+        assert!(on.strategy.decoded_sends);
+        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = -1.0\n")).is_err());
+        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = 0\n")).is_ok(), "0 = no big-band trade");
+        assert_eq!(cfg.live.crowded_skip_min_expected_lamports, 0, "OD-3 default: rank only");
+        // review N1: a positive rate the bucket would round to "never", and a band that throttles every trade
+        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = 0.0004\n")).is_err());
+        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = 0.001\n")).is_ok());
+        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_min_expected_lamports = 0\n")).is_err());
+    }
 }

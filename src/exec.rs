@@ -14,7 +14,8 @@ use crate::build::{self, Alt, PumpGlobal};
 use crate::config::{Config, SendKind};
 use crate::feeds::{clock::now_ns, Event};
 use crate::rpc::Rpc;
-use crate::send::{self, Copy, Fired, Paths, Prio};
+use crate::lat::Series;
+use crate::send::{self, Copy, Fired, Paths, Prio, TokenBucket, RANK_CROWDED, RANK_OTHER, RANK_SEED};
 use crate::tx::{b58, pk, Pk};
 use crate::venues::{PoolMeta, WSOL};
 use anyhow::{Context, Result};
@@ -128,6 +129,20 @@ struct Sending {
     stopped: Option<&'static str>,
 }
 
+impl Sending {
+    fn new(cfg: &Config, kind: Kind, key: ed25519_dalek::SigningKey, nonces: Vec<NonceSlot>) -> Sending {
+        let (c, l) = (&cfg.canary, &cfg.live);
+        match kind {
+            Kind::Canary => Sending { kind, key, nonces, count: c.count, every_ms: c.every_ms, size: sol(c.size_sol), cap: c.max_spend_lamports, settle_s: c.settle_s,
+                margin: 0, max_new_atas: u32::MAX, sent: 0, last_ns: 0, spent: 0, reserved: 0, fees: 0, tips: 0, profit: 0, landed: 0, wins: 0, new_atas: 0,
+                watch: HashMap::default(), seen: HashMap::default(), open: HashMap::default(), stopped: None },
+            Kind::Live => Sending { kind, key, nonces, count: u32::MAX, every_ms: 0, size: sol(l.max_size_sol), cap: l.max_failed_fees_lamports, settle_s: l.settle_s,
+                margin: l.margin_lamports, max_new_atas: l.max_new_token_accounts, sent: 0, last_ns: 0, spent: 0, reserved: 0, fees: 0, tips: 0, profit: 0, landed: 0,
+                wins: 0, new_atas: 0, watch: HashMap::default(), seen: HashMap::default(), open: HashMap::default(), stopped: None },
+        }
+    }
+}
+
 type Log = Arc<Mutex<std::io::BufWriter<std::fs::File>>>;
 fn write(log: &Log, v: &Value) { let mut w = log.lock().unwrap(); let _ = writeln!(w, "{v}"); let _ = w.flush(); }
 
@@ -185,18 +200,73 @@ pub struct Exec {
     /// first (w5h seg 9: SPEC, 550 bundles, 0 accepted) burns the 5/s Jito budget and the nonces other tokens need.
     mint_cool: HashMap<Pk, (u32, u64, u32)>,
     pair_lock_ns: u64,
+    /// WP-00: the crowded pools and the band rules of live trades (big-band bucket, crowded skip)
+    band: BandGate,
     rot: usize,
     next_attempt: u64,
     feeds: Vec<String>,
     pub counts: HashMap<&'static str, u64>,
+    /// stage latencies of the send (status.jsonl `latency`, A.8): `decided_to_signed`, `signed_to_fired` (handed to
+    /// the runtime: the cost of the spawn), `signed_to_sent` (the first copy's send task running, from `on_settled`)
+    pub lat: Vec<Series>,
+}
+
+/// `Exec::lat` series, in order
+const LAT_DECIDED_TO_SIGNED: usize = 0;
+const LAT_SIGNED_TO_FIRED: usize = 1;
+const LAT_SIGNED_TO_SENT: usize = 2;
+fn exec_lat() -> Vec<Series> { ["decided_to_signed", "signed_to_fired", "signed_to_sent"].into_iter().map(Series::new).collect() }
+
+/// WP-00's band rules for live trades, apart from `copies` so they can be tested (review F8):
+/// - a route touching a crowded pool ranks last in the send paths' rate queues (F6, OD-3 default), and from
+///   `crowded_skip_min` lamports expected it is not sent at all (`live_skip_crowded_pool`, OD-3's alternative; 0 = never);
+/// - the big band (expected >= `big_min`) takes a token from a bucket (`live_skip_big_band_throttle`). `check` only
+///   peeks at the token; `commit` takes it once the attempt is built and about to fire (review F5: an attempt that
+///   then fails to build used to waste the next 2 s of big-band capacity).
+/// Canaries are never subject to them.
+pub struct BandGate { crowded: HashSet<Pk>, crowded_skip_min: u64, big_min: u64, big: TokenBucket }
+
+impl BandGate {
+    pub fn new(crowded: HashSet<Pk>, crowded_skip_min: u64, big_min: u64, big_per_sec: f64) -> BandGate {
+        BandGate { crowded, crowded_skip_min, big_min, big: TokenBucket::new(big_per_sec, 1) }
+    }
+
+    pub fn from_cfg(cfg: &Config, crowded: HashSet<Pk>) -> BandGate {
+        let l = &cfg.live;
+        BandGate::new(crowded, l.crowded_skip_min_expected_lamports, l.big_band_min_expected_lamports, l.big_band_max_per_sec)
+    }
+
+    pub fn crowded(&self) -> &HashSet<Pk> { &self.crowded }
+
+    pub fn is_crowded(&self, buy: &Pk, sell: &Pk) -> bool { self.crowded.contains(buy) || self.crowded.contains(sell) }
+
+    /// may this attempt go? Err = the skip reason (counted in status.jsonl)
+    pub fn check(&self, kind: Kind, buy: &Pk, sell: &Pk, expected: i64, now: u64) -> Result<(), &'static str> {
+        if kind != Kind::Live { return Ok(()); }
+        // 0 of 1,896 legacy crowded bundles expecting 100k or more landed: they only took budget from the rest
+        if self.crowded_skip_min > 0 && expected >= self.crowded_skip_min as i64 && self.is_crowded(buy, sell) { return Err("live_skip_crowded_pool"); }
+        // the big band (expected >= 1M: 0 of 1,869 such bundles landed, while 1,020 attempts were lost to the 5/s Jito
+        // limit) gets at most big_band_max_per_sec, so it stops crowding out the trades that do land
+        if expected >= self.big_min as i64 && !self.big.peek(now) { return Err("live_skip_big_band_throttle"); }
+        Ok(())
+    }
+
+    /// the attempt passed `check` and is going out now: a big-band one uses its token (still there: a bucket only fills)
+    pub fn commit(&mut self, kind: Kind, expected: i64, now: u64) {
+        if kind == Kind::Live && expected >= self.big_min as i64 { let _ = self.big.try_take(now); }
+    }
 }
 
 fn sol(x: f64) -> u64 { (x * 1e9) as u64 }
 fn hex_code(c: u32) -> String { format!("0x{c:x}") }
 
-/// what a nexus-v2 or venue error code means, in words
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::send::budget::Budget;
+    use crate::venues::Venue;
+    use std::time::Duration;
+
     /// arbx-exec REVIEW.md #8: every arbx-exec code has its own meaning, none falls through to "a venue's own error"
     #[test]
     fn meaning_knows_the_arbx_exec_codes() {
@@ -206,6 +276,216 @@ mod tests {
         }
         assert_eq!(super::meaning(Some(0x4e58_0009), &e).split(':').next(), Some("arbx-exec"));
         assert_eq!(super::meaning(Some(0x4e58_0107), &e), "nexus: a leg delivered nothing");
+    }
+
+    fn key(b: u8) -> Pk { [b; 32] }
+
+    /// WP-00 acceptance (F6): a route touching a crowded pool ranks behind both other ranks
+    #[test]
+    fn crowded_pool_ranks_behind_both_other_ranks() {
+        let crowded: HashSet<Pk> = [key(9)].into_iter().collect();
+        let seed = prio_rank(&key(1), &key(2), "mriya", "ours", &crowded);
+        let other = prio_rank(&key(1), &key(2), "ours", "?", &crowded);
+        let crowd = prio_rank(&key(9), &key(2), "mriya", "mriya", &crowded);
+        assert_eq!((seed, other, crowd), (RANK_SEED, RANK_OTHER, RANK_CROWDED));
+        assert!(crowd > seed && crowd > other, "crowded queues last, even on a seed pool");
+        assert_eq!(prio_rank(&key(1), &key(9), "ours", "ours", &crowded), RANK_CROWDED, "either pool of the route");
+        assert_eq!(prio_rank(&key(9), &key(2), "ours", "ours", &HashSet::default()), RANK_OTHER, "no list: arb-lab's ranks");
+        assert!(Prio { rank: crowd, net: 0 }.crowded() && !Prio { rank: seed, net: 0 }.crowded() && !Prio { rank: other, net: 0 }.crowded());
+        // review N2: a seed pool our registry also has ("both") is a seed pool
+        assert_eq!(prio_rank(&key(1), &key(2), "ours", "both", &crowded), RANK_SEED);
+    }
+
+    /// ... and when bundles do wait for a slot, the rate queue serves it after both, even with by far the biggest
+    /// expected profit. The Budget's ordering only: Stage 0 ships without a queue (queue_ms 0; review F2: at 10 ms it
+    /// reordered nothing), so there the crowded share is cut by `BandGate` (`band_gate_cuts_the_crowded_share`).
+    /// WP-05 brings the queue back.
+    #[tokio::test(start_paused = true)]
+    async fn crowded_route_is_served_last_by_the_rate_queue() {
+        let b = Arc::new(Budget::new(1, Duration::from_millis(3_500)));
+        assert!(b.acquire(Prio::default()).await);
+        let crowded: HashSet<Pk> = [key(9)].into_iter().collect();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let mut hs = Vec::new();
+        for (name, buy, src, net) in [("crowded-big", key(9), "ours", 1_000_000_000i64), ("other", key(1), "ours", 10), ("seed", key(1), "mriya", 1)] {
+            let prio = Prio { rank: prio_rank(&buy, &key(2), src, "ours", &crowded), net };
+            let (b, order) = (b.clone(), order.clone());
+            hs.push(tokio::spawn(async move { if b.acquire(prio).await { order.lock().unwrap().push(name); } }));
+            tokio::task::yield_now().await;
+        }
+        for h in hs { h.await.unwrap(); }
+        // one slot a second: the seed route at 1 s, the other at 2 s, the crowded one at 3 s
+        assert_eq!(*order.lock().unwrap(), vec!["seed", "other", "crowded-big"]);
+    }
+
+    /// data/crowded-pools.json: the 21 pools with 150 or more bots, with its source and date; bad entries are errors
+    #[test]
+    fn crowded_pools_file_loads() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/data/crowded-pools.json")).unwrap();
+        let set = parse_crowded_pools(&text).unwrap();
+        assert_eq!(set.len(), 21, "PATTERNS.md item 10: 21 pools with 150 or more bots");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(v["source"].is_string() && v["date"].is_string());
+        assert!(v["pools"].as_array().unwrap().iter().all(|p| p["bots"].as_u64().unwrap() >= 150));
+        assert_eq!(parse_crowded_pools("[\"58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2\"]").unwrap().len(), 1, "a plain array");
+        assert!(parse_crowded_pools("{\"pools\": [{\"pool\": \"not-a-key\"}]}").is_err());
+        assert!(parse_crowded_pools("{\"pools\": [{\"bots\": 200}]}").is_err());
+        assert!(parse_crowded_pools("{}").is_err());
+        assert!(parse_crowded_pools("{\"pools\": []}").is_err(), "review N1: an empty list is a mistake, not a list");
+        assert!(super::load_crowded_pools("/nonexistent/crowded-pools.json").is_err(), "a configured list must load");
+    }
+
+    const S: u64 = 1_000_000_000;
+
+    /// the Stage-0 band rules (deploy/arbx-stage0.toml): crowded out from 100k, the big band at 0.5/s
+    fn stage0_gate() -> BandGate { BandGate::new([key(9)].into_iter().collect(), 100_000, 1_000_000, 0.5) }
+
+    /// WP-00 (F6, OD-3's alternative; review F2, F5, F8a): the live band rules, and canaries are never subject to them
+    #[test]
+    fn band_gate_skips_crowded_from_100k_and_throttles_the_big_band() {
+        let mut g = stage0_gate();
+        let t = 1_000 * S;
+        let (c, o) = (key(9), key(1));
+        assert_eq!(g.check(Kind::Live, &c, &o, 99_999, t), Ok(()), "a small crowded trade still goes (12 of the 20 legacy bundle wins)");
+        assert_eq!(g.check(Kind::Live, &o, &c, 100_000, t), Err("live_skip_crowded_pool"), "either pool of the route");
+        assert_eq!(g.check(Kind::Live, &c, &o, 5_000_000, t), Err("live_skip_crowded_pool"), "crowded before the big band: no token used");
+        assert_eq!(g.check(Kind::Canary, &c, &o, 5_000_000, t), Ok(()));
+        // the big band: check only peeks; the token goes with commit
+        assert_eq!(g.check(Kind::Live, &o, &key(2), 1_000_000, t), Ok(()));
+        assert_eq!(g.check(Kind::Live, &o, &key(2), 1_000_000, t), Ok(()), "an attempt that never went (no commit) took no token");
+        g.commit(Kind::Live, 1_000_000, t);
+        assert_eq!(g.check(Kind::Live, &o, &key(2), 2_000_000, t + S), Err("live_skip_big_band_throttle"));
+        assert_eq!(g.check(Kind::Live, &o, &key(2), 999_999, t + S), Ok(()), "below the band");
+        assert_eq!(g.check(Kind::Canary, &o, &key(2), 2_000_000, t + S), Ok(()), "canaries are not throttled");
+        g.commit(Kind::Canary, 2_000_000, t + S);
+        assert_eq!(g.check(Kind::Live, &o, &key(2), 2_000_000, t + 2 * S), Ok(()), "a token every 2 s; the canary used none");
+        // rank only (OD-3 default, skip 0): nothing crowded is skipped
+        let g0 = BandGate::new([key(9)].into_iter().collect(), 0, 1_000_000, 0.5);
+        assert_eq!(g0.check(Kind::Live, &c, &o, 500_000, t), Ok(()));
+    }
+
+    /// review F2: the configured policy cuts the crowded share of what is sent, and keeps every crowded trade under
+    /// 100k (where the legacy crowded wins were). Legacy mix of jito-bundle attempts (12 segments, testdata/legacy):
+    /// crowded 1,214 / 866 / 1,030 and other 437 / 614 / 621 in the bands < 100k / 100k-1M / >= 1M; 66% crowded.
+    #[test]
+    fn band_gate_cuts_the_crowded_share() {
+        // the legacy mix, interleaved deterministically, one attempt every 400 ms (about the legacy busy rate)
+        let mix = [(true, 50_000i64, 1_214u32), (true, 500_000, 866), (true, 3_000_000, 1_030), (false, 50_000, 437), (false, 500_000, 614), (false, 3_000_000, 621)];
+        let mut stream = Vec::new();
+        for (crowded, exp, n) in mix { for k in 0..n { stream.push(((k as u64 * 7_919 + exp as u64) % 4_797, crowded, exp)); } }
+        stream.sort();
+        let run = |mut g: BandGate| {
+            let (mut sent_c, mut sent_o, mut small_c) = (0u32, 0u32, 0u32);
+            for (k, (_, crowded, exp)) in stream.iter().enumerate() {
+                let t = 1_000 * S + k as u64 * 400_000_000;
+                let buy = if *crowded { key(9) } else { key(1) };
+                if g.check(Kind::Live, &buy, &key(2), *exp, t).is_ok() {
+                    g.commit(Kind::Live, *exp, t);
+                    if *crowded { sent_c += 1; if *exp < 100_000 { small_c += 1; } } else { sent_o += 1; }
+                }
+            }
+            (sent_c as f64 / (sent_c + sent_o) as f64, small_c, sent_o)
+        };
+        let (rank_only, _, other_rank_only) = run(BandGate::new([key(9)].into_iter().collect(), 0, 1_000_000, 0.5));
+        let (stage0, small, other_stage0) = run(stage0_gate());
+        // here 0.57 -> 0.42 (the legacy replay of the same rules: 0.64 -> 0.45)
+        assert!(rank_only > 0.55, "rank only: the crowded pools keep {rank_only:.2} of the sends");
+        assert!(stage0 < 0.45 && rank_only - stage0 > 0.1, "Stage 0: {stage0:.2}");
+        assert_eq!(small, 1_214, "every crowded trade under 100k still goes");
+        assert!(other_stage0 >= other_rank_only, "the big band's tokens go to the other routes: {other_stage0} vs {other_rank_only}");
+    }
+
+    // ------------------------------------------------------------ Exec wiring (review F8)
+
+    const MINT: Pk = [7u8; 32];
+
+    fn test_cfg(dir: &std::path::Path, crowded: &str) -> Config {
+        let wallet = bs58::encode(ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]).verifying_key().to_bytes()).into_string();
+        Config::parse(&format!("out_dir = \"{}\"\nwallet = \"{wallet}\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n\
+            [live]\npair_lock_ms = 0\ncrowded_pools_file = \"{crowded}\"\ncrowded_skip_min_expected_lamports = 100000\n\
+            [[send]]\nname = \"rpc0\"\nkind = \"rpc\"\nurl = \"http://127.0.0.1:1\"\n", dir.display())).unwrap()
+    }
+
+    fn damm(n: u8, t0: Pk) -> PoolMeta {
+        PoolMeta { venue: Venue::DammV2, pool: [n; 32], t0, t1: *WSOL, vault0: [n + 50; 32], vault1: [n + 100; 32],
+            t0_prog: *crate::pda::TOKEN_PROGRAM, t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![], flag: false }
+    }
+
+    /// a round trip of 1 SOL between pools `buy` and `sell` (1 or 9: 9 is on the crowded list) expecting `expected`
+    fn route(buy: u8, sell: PoolMeta, expected: u64) -> RouteIn {
+        let size = 1_000_000_000u64;
+        RouteIn { opp: buy as u64, trig: [3u8; 64], trig_feed: None, slot: 11, st: [100, 100, 200, 300, now_ns()], buy: damm(buy, MINT), sell,
+            buy_data: vec![], sell_data: vec![], buy_source: "ours", sell_source: "ours", mint: MINT, size, mid: 1_000, back: size + expected,
+            gross_at_opp: expected as i64, net_at_opp: expected as i64, trig_cu_price: None, rival_cu_price: None, cu: 100_000,
+            buy_live: vec![], sell_live: vec![], buy_end: None, sell_end: None }
+    }
+
+    struct Rig { x: Exec, dir: std::path::PathBuf }
+    impl Drop for Rig { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); } }
+
+    /// a live Exec on a made-up wallet (no network: the one send path is a closed local port), three nonces
+    async fn live_rig(name: &str) -> Rig {
+        let dir = std::env::temp_dir().join(format!("arbx-exec-{name}-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crowded_file = dir.join("crowded.json");
+        std::fs::write(&crowded_file, format!("[\"{}\"]", bs58::encode([9u8; 32]).into_string())).unwrap();
+        let cfg = test_cfg(&dir, crowded_file.to_str().unwrap());
+        let (paths, _) = Paths::new(&cfg.sends, cfg.gate.clone(), Some(&dir), false).await.unwrap();
+        let key = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
+        let nonces = (0..3u8).map(|k| NonceSlot { acct: [200 + k; 32], value: Some([k; 32]), busy: None }).collect();
+        let sending = Sending::new(&cfg, Kind::Live, key, nonces);
+        let held: HashSet<Pk> = [*WSOL, MINT].into_iter().collect();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let band = BandGate::from_cfg(&cfg, load_crowded_pools(&cfg.live.crowded_pools_file).unwrap());
+        let x = Exec::assemble(&cfg, Rpc::race(vec![]), Some(paths), &dir, tx, vec![], vec![], None, held, Some(sending), band).unwrap();
+        Rig { x, dir }
+    }
+
+    fn attempts(r: &Rig) -> Vec<Value> {
+        std::fs::read_to_string(r.dir.join("attempts.jsonl")).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    }
+    fn n(x: &Exec, k: &str) -> u64 { x.counts.get(k).copied().unwrap_or(0) }
+
+    /// review F8 (a, b) and F5 through `Exec::send`: the attempt line carries `crowded`, `queue_rank` and `st.fired`
+    /// (after `signed`: the line is written after the copies were handed to the send paths); a crowded route from 100k
+    /// and a second big-band trade inside 2 s are skipped; a big-band attempt that fails to build uses no token
+    #[tokio::test]
+    async fn send_writes_the_queue_fields_and_applies_the_band_rules() {
+        let mut r = live_rig("send").await;
+        // a big-band trade whose sell leg cannot be built (wrong mints): no copy, and the token stays
+        r.x.send(route(1, damm(2, [8u8; 32]), 2_000_000));
+        assert_eq!(n(&r.x, "live_skip_no_copy_worth_sending"), 1);
+        assert!(attempts(&r).is_empty());
+        // a small crowded trade goes, ranked last
+        r.x.send(route(9, damm(2, MINT), 50_000));
+        // a big-band trade goes (the failed one above used no token) ...
+        r.x.send(route(1, damm(3, MINT), 2_000_000));
+        // ... and the next one inside 2 s is throttled; a crowded one from 100k is skipped
+        r.x.send(route(1, damm(4, MINT), 3_000_000));
+        r.x.send(route(9, damm(5, MINT), 200_000));
+        let x = &r.x;
+        assert_eq!((n(x, "live_sent"), n(x, "rank_crowded"), n(x, "live_skip_big_band_throttle"), n(x, "live_skip_crowded_pool")), (2, 1, 1, 1));
+        let a = attempts(&r);
+        assert_eq!(a.len(), 2);
+        assert_eq!((a[0]["crowded"].as_bool(), a[0]["queue_rank"].as_u64()), (Some(true), Some(RANK_CROWDED as u64)));
+        assert_eq!((a[1]["crowded"].as_bool(), a[1]["queue_rank"].as_u64()), (Some(false), Some(RANK_OTHER as u64)));
+        for l in &a {
+            let st = &l["st"];
+            let (signed, fired) = (st["signed"].as_u64().unwrap(), st["fired"].as_u64().expect("fired: no sim gate"));
+            assert!(fired >= signed && signed >= st["built"].as_u64().unwrap());
+            assert_eq!(st["rx"].as_u64(), Some(100));
+        }
+        assert_eq!((x.lat[LAT_DECIDED_TO_SIGNED].n(), x.lat[LAT_SIGNED_TO_FIRED].n()), (2, 2));
+    }
+
+    /// review F8 (c): a configured crowded list that does not load stops the start, before any RPC call
+    #[tokio::test]
+    async fn exec_new_fails_closed_on_a_missing_crowded_file() {
+        let dir = std::env::temp_dir().join(format!("arbx-exec-crowded-{}-{}", std::process::id(), now_ns()));
+        let cfg = test_cfg(&dir, "/nonexistent/crowded-pools.json");
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let e = Exec::new(&cfg, &Rpc::race(vec![]), None, &dir, tx, vec![], None, vec![]).await.err().expect("refused");
+        assert!(format!("{e:#}").contains("crowded_pools_file"), "{e:#}");
     }
 
     #[test]
@@ -219,6 +499,7 @@ mod tests {
     }
 }
 
+/// what a nexus-v2 or venue error code means, in words
 pub fn meaning(code: Option<u32>, err: &Option<Value>) -> &'static str {
     match (code, err) {
         (_, None) => "ok",
@@ -252,14 +533,62 @@ pub fn fee_rule(trigger_arm: bool, trig: Option<u64>, expected_profit: i64, cu_l
     (want.min(cap).max(FLAT_CU_PRICE), arm)
 }
 
+/// The rate-queue rank of a route (`Prio::rank`; lower goes first when a send path's budget is short). WP-00 (F6): a
+/// route touching a pool on the crowded list ranks last, behind every other route: 49% of our attempts went to the 21
+/// pools with 150 or more bots, where we won 0.4% (PATTERNS.md item 10). Otherwise the seed pools first: source
+/// "mriya", or "both" (a seed pool our registry also has; review N2: arb-lab ranked those 1).
+pub fn prio_rank(buy: &Pk, sell: &Pk, buy_source: &str, sell_source: &str, crowded: &HashSet<Pk>) -> u8 {
+    let seed = |s: &str| s == "mriya" || s == "both";
+    if crowded.contains(buy) || crowded.contains(sell) { RANK_CROWDED }
+    else if seed(buy_source) || seed(sell_source) { RANK_SEED }
+    else { RANK_OTHER }
+}
+
+/// The crowded-pool list (data/crowded-pools.json): `{"pools": [{"pool": "<base58>", ...}, ...]}`, or a plain array of
+/// base58 strings. Every entry must be an account key: a typo must not silently un-rank a pool.
+pub fn parse_crowded_pools(text: &str) -> Result<HashSet<Pk>> {
+    let v: Value = serde_json::from_str(text).context("not JSON")?;
+    let list = match &v {
+        Value::Array(a) => a,
+        Value::Object(o) => o.get("pools").and_then(|p| p.as_array()).context("no \"pools\" array")?,
+        _ => anyhow::bail!("neither a JSON object with \"pools\" nor an array"),
+    };
+    let mut out = HashSet::default();
+    for e in list {
+        let s = match e {
+            Value::String(s) => s.as_str(),
+            Value::Object(o) => o.get("pool").and_then(|p| p.as_str()).with_context(|| format!("entry {e} has no \"pool\""))?,
+            _ => anyhow::bail!("entry {e} is not a pool"),
+        };
+        let k: Pk = bs58::decode(s).into_vec().ok().and_then(|b| b.try_into().ok()).with_context(|| format!("{s} is not a base58 account key"))?;
+        out.insert(k);
+    }
+    // review N1: an empty list ranks and skips nothing; that is "no file", not a list
+    anyhow::ensure!(!out.is_empty(), "no pool listed (leave [live] crowded_pools_file empty for none)");
+    Ok(out)
+}
+
+pub fn load_crowded_pools(path: &str) -> Result<HashSet<Pk>> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("[live] crowded_pools_file {path}"))?;
+    parse_crowded_pools(&text).with_context(|| format!("[live] crowded_pools_file {path}"))
+}
+
 impl Exec {
     /// Everything off the hot path: lookup tables, PumpSwap's GlobalConfig, the wallet's token accounts, the nonce.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(cfg: &Config, rpc_all: &Rpc, paths: Option<Arc<Paths>>, dir: &std::path::Path, back: Sender<Event>, feeds: Vec<String>,
         send_key: Option<(Kind, ed25519_dalek::SigningKey)>, mints: Vec<(Pk, Pk)>) -> Result<(Exec, Vec<String>)> {
+        let mut notes = Vec::new();
+        // a configured crowded list must load, first, before any RPC call (fail closed: a missing file would silently put
+        // the crowded pools back in front)
+        let crowded = if cfg.live.crowded_pools_file.is_empty() { HashSet::default() } else {
+            let c = load_crowded_pools(&cfg.live.crowded_pools_file)?;
+            let skip = match cfg.live.crowded_skip_min_expected_lamports { 0 => String::new(), m => format!(", not sent from {m} lamports expected") };
+            notes.push(format!("crowded pools: {} from {} rank last in the send queues{skip}", c.len(), cfg.live.crowded_pools_file));
+            c
+        };
         let rpc = rpc_all.only(&cfg.exec.rpc);
         anyhow::ensure!(!rpc.is_empty(), "[exec] rpc names {:?}: none of them is a configured, available [rpc] endpoint", cfg.exec.rpc);
-        let mut notes = Vec::new();
         let payer = pk(&cfg.wallet);
         let alt_keys: Vec<Pk> = cfg.exec.alts.iter().map(|a| pk(a)).collect();
         let (_, accts) = rpc.accounts(&alt_keys).await.context("lookup tables")?;
@@ -279,8 +608,6 @@ impl Exec {
         let (_, accts) = rpc.accounts(&atas).await.context("wallet token accounts")?;
         let held: HashSet<Pk> = cands.iter().zip(accts).filter(|(_, a)| a.is_some()).map(|((m, _), _)| *m).collect();
         anyhow::ensure!(held.contains(&*WSOL), "wallet {} has no WSOL account: every route starts from it", cfg.wallet);
-        let open = |n: &str| -> Result<Log> { Ok(Arc::new(Mutex::new(std::io::BufWriter::new(std::fs::OpenOptions::new().create(true).append(true).open(dir.join(n))?)))) };
-        let min_tip_paid = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.tip_lamports).max().unwrap_or(0);
         let mut sending = None;
         if let Some((kind, key)) = send_key {
             let accts: Vec<String> = match kind { Kind::Canary => vec![cfg.canary.nonce_account.clone()], Kind::Live => cfg.live.nonce_accounts.clone() };
@@ -293,14 +620,7 @@ impl Exec {
                 nonces.push(NonceSlot { acct: *k, value: build::nonce_value(&n.data), busy: None });
             }
             let (c, l) = (&cfg.canary, &cfg.live);
-            let s = match kind {
-                Kind::Canary => Sending { kind, key, nonces, count: c.count, every_ms: c.every_ms, size: sol(c.size_sol), cap: c.max_spend_lamports, settle_s: c.settle_s,
-                    margin: 0, max_new_atas: u32::MAX, sent: 0, last_ns: 0, spent: 0, reserved: 0, fees: 0, tips: 0, profit: 0, landed: 0, wins: 0, new_atas: 0,
-                    watch: HashMap::default(), seen: HashMap::default(), open: HashMap::default(), stopped: None },
-                Kind::Live => Sending { kind, key, nonces, count: u32::MAX, every_ms: 0, size: sol(l.max_size_sol), cap: l.max_failed_fees_lamports, settle_s: l.settle_s,
-                    margin: l.margin_lamports, max_new_atas: l.max_new_token_accounts, sent: 0, last_ns: 0, spent: 0, reserved: 0, fees: 0, tips: 0, profit: 0, landed: 0,
-                    wins: 0, new_atas: 0, watch: HashMap::default(), seen: HashMap::default(), open: HashMap::default(), stopped: None },
-            };
+            let s = Sending::new(cfg, kind, key, nonces);
             notes.push(match kind {
                 Kind::Canary => format!("canaries armed: {} of {} SOL, every {} ms, cap {} lamports, nonce {}", c.count, c.size_sol, c.every_ms, c.max_spend_lamports, accts.join(",")),
                 Kind::Live => format!("LIVE TRADING armed: at most {} SOL a trade, stop after {} lamports of failed fees, at most {} new token accounts, {} nonce accounts",
@@ -308,13 +628,30 @@ impl Exec {
             });
             sending = Some(s);
         }
-        Ok((Exec { payer, program: pk(&cfg.exec.program), alts, pump, held, rpc, rt: tokio::runtime::Handle::current(), back, paths,
+        Ok((Exec::assemble(cfg, rpc, paths, dir, back, feeds, alts, pump, held, sending, BandGate::from_cfg(cfg, crowded))?, notes))
+    }
+
+    /// The executor from what `new` fetched (or a test made up): no network here. Needs a tokio runtime.
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(cfg: &Config, rpc: Rpc, paths: Option<Arc<Paths>>, dir: &std::path::Path, back: Sender<Event>, feeds: Vec<String>,
+        alts: Vec<Alt>, pump: Option<PumpGlobal>, held: HashSet<Pk>, sending: Option<Sending>, band: BandGate) -> Result<Exec> {
+        let payer = pk(&cfg.wallet);
+        let open = |n: &str| -> Result<Log> { Ok(Arc::new(Mutex::new(std::io::BufWriter::new(std::fs::OpenOptions::new().create(true).append(true).open(dir.join(n))?)))) };
+        let min_tip_paid = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.tip_lamports).max().unwrap_or(0);
+        Ok(Exec { payer, program: pk(&cfg.exec.program), alts, pump, held, rpc, rt: tokio::runtime::Handle::current(), back, paths,
             cu_price: cfg.strategy.cu_price_micro, max_size: sol(cfg.exec.max_size_sol), min_tip_paid,
             sim_rate: cfg.sim.enabled.then_some(cfg.sim.max_per_sec as usize), sim_recent: VecDeque::new(),
             sims: if cfg.sim.enabled { Some(open("sims.jsonl")?) } else { None }, attempts: open("attempts.jsonl")?, outcomes: open("outcomes.jsonl")?,
             sending, gate_on: cfg.gate.enabled, all_paths: cfg.live.test_all_paths, prio_cap: cfg.live.max_priority_lamports,
-            spec_price: cfg.live.spec_cu_price_micro, rotate: cfg.live.rotate_paths, mix: cfg.live.race_mix, path_arm: "", bmix: cfg.live.bundle_mix, tpu_price: cfg.live.tpu_cu_price_micro, sim_gate: cfg.live.sim_gate, compete_mult: cfg.live.compete_mult, compete_share: cfg.live.compete_max_share, compete_ab: cfg.live.compete_ab, gross_floor: cfg.live.gross_floor, tpu_max_expected: cfg.live.tpu_max_expected_lamports, tpu_skip_mriya: cfg.live.tpu_skip_mriya_pools, tpu_skip_mints: cfg.live.tpu_skip_mints.iter().map(|m| pk(m)).collect(), tpu_min_expected: cfg.live.tpu_min_expected_lamports, bundle_resend_ms: cfg.live.bundle_resend_ms.clone(), bundle_variants: cfg.live.bundle_size_variants.clone(), mint_cool: HashMap::default(), pair_lock_ns: cfg.live.pair_lock_ms * 1_000_000, rot: 0,
-            tiers: cfg.live.bid_tiers.then_some((cfg.live.bid_min_expected_lamports, cfg.live.bid_share, cfg.live.bid_max_priority_lamports)), next_attempt: 0, feeds, counts: HashMap::default() }, notes))
+            spec_price: cfg.live.spec_cu_price_micro, rotate: cfg.live.rotate_paths, mix: cfg.live.race_mix, path_arm: "", bmix: cfg.live.bundle_mix, tpu_price: cfg.live.tpu_cu_price_micro, sim_gate: cfg.live.sim_gate, compete_mult: cfg.live.compete_mult, compete_share: cfg.live.compete_max_share, compete_ab: cfg.live.compete_ab, gross_floor: cfg.live.gross_floor, tpu_max_expected: cfg.live.tpu_max_expected_lamports, tpu_skip_mriya: cfg.live.tpu_skip_mriya_pools, tpu_skip_mints: cfg.live.tpu_skip_mints.iter().map(|m| pk(m)).collect(), tpu_min_expected: cfg.live.tpu_min_expected_lamports, bundle_resend_ms: cfg.live.bundle_resend_ms.clone(), bundle_variants: cfg.live.bundle_size_variants.clone(), mint_cool: HashMap::default(), pair_lock_ns: cfg.live.pair_lock_ms * 1_000_000,
+            band, rot: 0,
+            tiers: cfg.live.bid_tiers.then_some((cfg.live.bid_min_expected_lamports, cfg.live.bid_share, cfg.live.bid_max_priority_lamports)), next_attempt: 0, feeds, counts: HashMap::default(),
+            lat: exec_lat() })
+    }
+
+    /// review N1: how many of the crowded pools this run's registry has (a list made for another registry shows here)
+    pub fn crowded_in(&self, has: impl Fn(&Pk) -> bool) -> (usize, usize) {
+        (self.band.crowded().iter().filter(|p| has(p)).count(), self.band.crowded().len())
     }
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
@@ -453,6 +790,8 @@ impl Exec {
             // its own nonce. w5h seg 14: the lock kept 108 rival-proven gaps (1.76 SOL) from being sent behind dead bundles)
             if !self.rotate && s.open.values().any(|o| !o.bundle && o.route.buy.pool == r.buy.pool && o.route.sell.pool == r.sell.pool && now.saturating_sub(o.t) < self.pair_lock_ns) { return Err("live_skip_pair_in_flight"); }
             if creates_ata && s.new_atas >= s.max_new_atas { return Err("live_skip_new_token_account_cap"); }
+            // WP-00: crowded pools out of the bands from 100k, the big band throttled (its token is taken in `send`)
+            self.band.check(s.kind, &r.buy.pool, &r.sell.pool, expected, now)?;
         }
         let est_cu = r.cu + if creates_ata { ATA_CREATE_CU } else { 0 };
         // the fee experiment: attempts alternate between copying the trigger's bid (0.95x) and the flat bid
@@ -569,6 +908,8 @@ impl Exec {
         let worst = worst as u64;
         let expected = r.back as i64 - r.size as i64;
         let t_built = now_ns();
+        // built: nothing below can refuse the attempt now, so a big-band one uses its token (review F5)
+        self.band.commit(kind, expected, t_built);
         let attempt = self.next_attempt;
         self.next_attempt += 1;
         // the bundle arm's resends (free when they fail): Jito turned down every first bundle, sent ~15 ms after the
@@ -595,7 +936,6 @@ impl Exec {
         let s = self.sending.as_mut().unwrap();
         let signed: Vec<Copy> = copies.iter().map(|(i, b, tip, _)| Copy { path: *i, raw: Arc::new(build::sign(&b.msg, &s.key)), tip: *tip }).collect();
         let retries: Vec<(u64, Copy)> = retry_built.iter().map(|(d, i, b, tip, _)| (*d, Copy { path: *i, raw: Arc::new(build::sign(&b.msg, &s.key)), tip: *tip })).collect();
-        let retry_labels: Vec<String> = retry_built.iter().map(|x| x.4.clone()).collect();
         let t_signed = now_ns();
         s.sent += 1;
         s.last_ns = t_signed;
@@ -604,6 +944,25 @@ impl Exec {
         for x in signed.iter().chain(retries.iter().map(|r| &r.1)) {
             if let Some(sig) = send::first_signature(&x.raw).as_deref().and_then(sig64) { s.watch.insert(sig, (attempt, x.path)); }
         }
+        let settle = std::time::Duration::from_secs(s.settle_s);
+        let margin = s.margin;
+        // the rate-queue rank: a crowded pool on the route queues behind everything else (WP-00, F6); then seed pools first
+        let rank = prio_rank(&r.buy.pool, &r.sell.pool, r.buy_source, r.sell_source, self.band.crowded());
+        let crowded = rank == RANK_CROWDED;
+        let prio = Prio { rank, net: expected };
+        // the TPU arm's pre-send simulation: the first copy, exactly as signed
+        let gate_raw = if self.sim_gate && kind == Kind::Live && self.path_arm != "bundle" { signed.first().map(|c| c.raw.clone()) } else { None };
+        // the gate's bar: the full fees + tip + margin on the simulated round trip (the chain floor may be lower: see
+        // gross_floor), and what we predicted per leg, to log where a slip happened
+        let gate_bar = copies.first().map(|c| BASE_FEE + cu_price * c.1.cu_limit / 1_000_000 + c.2.map_or(0, |t| t.1) + margin).unwrap_or(0);
+        let live = kind == Kind::Live;
+        // fire first, then record (WP-00, F44): nothing (the attempt line's formatting, write and flush) sits between
+        // signing and firing. With the sim gate the copies fire later, from the task below (`fired` stays null).
+        // `fired` = handed to the runtime (`fire` spawns; review F11): the bytes leave later (copies.jsonl `t_sent`,
+        // the `signed_to_sent` series)
+        let fire_now = if gate_raw.is_none() { Some(paths.fire(attempt, signed.clone(), prio, live)) } else { None };
+        let t_fired = fire_now.as_ref().map(|_| now_ns());
+        let retry_labels: Vec<String> = retry_built.iter().map(|x| x.4.clone()).collect();
         let cu_limit = copies.iter().map(|c| c.1.cu_limit).max().unwrap_or(0);
         let creates_ata = copies.first().is_some_and(|c| c.1.creates_ata);
         let mut line = Self::route_json(&r);
@@ -620,26 +979,25 @@ impl Exec {
         line["priority_fee_lamports"] = json!(cu_price * cu_limit / 1_000_000);
         line["worst_fee_lamports"] = json!(worst);
         line["creates_token_account"] = json!(creates_ata);
+        line["crowded"] = json!(crowded);
+        line["queue_rank"] = json!(rank);
         line["nonce"] = json!({ "account": b58(&nonce), "value": bs58::encode(value).into_string() });
-        line["st"] = json!({ "rx": r.st[0], "decoded": r.st[1], "engine": r.st[2], "resolved": r.st[3], "decided": t_decided, "built": t_built, "signed": t_signed });
+        // state triggers: rx = the pool update's receive time, engine = its dequeue (WP-00, F13); fired = handed to the
+        // send paths (null: the sim gate fires later)
+        line["st"] = json!({ "rx": r.st[0], "decoded": r.st[1], "engine": r.st[2], "resolved": r.st[3], "decided": t_decided, "built": t_built, "signed": t_signed, "fired": t_fired });
         line["copies"] = json!(signed.iter().zip(&copies).map(|(x, c)| json!({ "path": paths.list[x.path].name, "sig": send::first_signature(&x.raw), "bytes": x.raw.len(),
             "tip": x.tip.map(|t| t.1), "min_profit": c.3 })).collect::<Vec<_>>());
         if !not.is_empty() { line["not_sent"] = json!(not); }
         if !retries.is_empty() { line["bundle_resends"] = json!(retries.iter().zip(&retry_labels).map(|((d, x), l)| json!({ "after_ms": d, "what": l, "sig": send::first_signature(&x.raw), "tip": x.tip.map(|t| t.1) })).collect::<Vec<_>>()); }
         write(&self.attempts, &line);
-        *self.counts.entry(if kind == Kind::Live { "live_sent" } else { "canary_sent" }).or_default() += 1;
-        let settle = std::time::Duration::from_secs(s.settle_s);
+        self.count(if live { "live_sent" } else { "canary_sent" });
+        if crowded { self.count("rank_crowded"); }
+        self.lat[LAT_DECIDED_TO_SIGNED].push(t_signed.saturating_sub(t_decided));
+        if let Some(t) = t_fired { self.lat[LAT_SIGNED_TO_FIRED].push(t.saturating_sub(t_signed)); }
         let (gate_size, gate_mid, gate_back, gate_slot) = (r.size, r.mid, r.back, r.slot);
-        s.open.insert(attempt, Open { route: r, nonce: ni, worst, creates_ata, expected, t: t_signed, bundle: self.path_arm == "bundle" });
-        let prio = Prio { rank: if line["buy_source"] == "mriya" || line["sell_source"] == "mriya" { 0 } else { 1 }, net: expected };
-        // the TPU arm's pre-send simulation: the first copy, exactly as signed
-        let gate_raw = if self.sim_gate && kind == Kind::Live && self.path_arm != "bundle" { signed.first().map(|c| c.raw.clone()) } else { None };
-        // the gate's bar: the full fees + tip + margin on the simulated round trip (the chain floor may be lower: see
-        // gross_floor), and what we predicted per leg, to log where a slip happened
-        let gate_bar = copies.first().map(|c| BASE_FEE + cu_price * c.1.cu_limit / 1_000_000 + c.2.map_or(0, |t| t.1) + self.sending.as_ref().map_or(0, |x| x.margin)).unwrap_or(0);
+        let bundle = self.path_arm == "bundle";
+        if let Some(s) = self.sending.as_mut() { s.open.insert(attempt, Open { route: r, nonce: ni, worst, creates_ata, expected, t: t_signed, bundle }); }
         let (rpc, back, paths2) = (self.rpc.clone(), self.back.clone(), paths.clone());
-        let live = kind == Kind::Live;
-        let fire_now = if gate_raw.is_none() { Some(paths.fire(attempt, signed.clone(), prio, live)) } else { None };
         self.rt.spawn(async move {
             if let Some(raw) = gate_raw {
                 let t0 = now_ns();
@@ -754,6 +1112,8 @@ impl Exec {
         let paths = self.paths.clone();
         let Some(c) = self.sending.as_mut() else { return };
         let Some(o) = c.open.remove(&s.attempt) else { return };
+        // signed -> the first copy's send task running (its t_sent; 0 = never sent): the send baseline (review F11)
+        if let Some(x) = s.fired.copies.first().filter(|x| x.t_sent > 0) { self.lat[LAT_SIGNED_TO_SENT].push(x.t_sent.saturating_sub(o.t)); }
         let route = o.route;
         c.reserved = c.reserved.saturating_sub(o.worst);
         let slot_n = &mut c.nonces[o.nonce];
@@ -848,6 +1208,12 @@ impl Exec {
     /// for status.jsonl: counters, spend so far against the cap
     pub fn status(&self) -> Value {
         let mut v = json!({ "counts": self.counts });
+        // sends refused for the paths' rates, split by the crowded rank (WP-00, F6), totals
+        if let Some(p) = &self.paths {
+            let (mut all, mut crowded) = (0u64, 0u64);
+            for x in &p.list { let st = x.stats.lock().unwrap(); all += st.limited; crowded += st.limited_crowded; }
+            v["over_rate"] = json!({ "crowded": crowded, "other": all.saturating_sub(crowded) });
+        }
         if let Some(c) = &self.sending {
             v["sending"] = json!({ "kind": c.kind, "sent": c.sent, "landed": c.landed, "wins": c.wins, "in_flight": c.open.len(),
                 "failed_fees_lamports": c.spent, "cap_lamports": c.cap, "fees_lamports": c.fees, "tips_lamports": c.tips, "profit_lamports": c.profit,

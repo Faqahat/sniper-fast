@@ -11,6 +11,53 @@ use tokio::sync::oneshot;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Prio { pub rank: u8, pub net: i64 }
 
+/// `Prio::rank` values: a seed (Mriya-sourced) pool on the route, any other route, and (WP-00, F6) a route touching a
+/// pool with 150 or more arbitrage bots, which queues behind both
+pub const RANK_SEED: u8 = 0;
+pub const RANK_OTHER: u8 = 1;
+pub const RANK_CROWDED: u8 = 2;
+
+impl Prio {
+    /// ranked last because a pool of the route is on the crowded list (its rate drops are counted apart)
+    pub fn crowded(&self) -> bool { self.rank >= RANK_CROWDED }
+}
+
+/// A token bucket: `rate` tokens a second, holding at most `burst`; it starts full. WP-00's big-band throttle (live
+/// trades expecting 1M or more: 0.5/s, burst 1). Integer arithmetic (a token is 10^12 units, the rate is kept to
+/// 0.001 token/s: a rate under 0.0005/s is 0), so the refill is exact. Single-threaded (the engine thread owns it); times are ns.
+#[derive(Clone, Debug)]
+pub struct TokenBucket { per_ns: u128, cap: u128, units: u128, last_ns: Option<u64> }
+
+const TOKEN: u128 = 1_000_000_000_000;
+
+impl TokenBucket {
+    pub fn new(rate_per_sec: f64, burst: u32) -> TokenBucket {
+        // units per ns = rate * 10^12 / 10^9
+        let per_ns = if rate_per_sec.is_finite() && rate_per_sec > 0.0 { (rate_per_sec * 1_000.0).round() as u128 } else { 0 };
+        let cap = burst as u128 * TOKEN;
+        // rate 0 = never: no token at the start either
+        TokenBucket { per_ns, cap, units: if per_ns > 0 { cap } else { 0 }, last_ns: None }
+    }
+
+    /// the units held at `now_ns` (a clock that goes backwards refills nothing)
+    fn units_at(&self, now_ns: u64) -> u128 {
+        match self.last_ns {
+            Some(last) => self.units.saturating_add((now_ns.saturating_sub(last) as u128).saturating_mul(self.per_ns)).min(self.cap),
+            None => self.units,
+        }
+    }
+
+    /// would `try_take(now_ns)` succeed? (takes nothing: WP-00 review F5, the token is used only once the attempt goes)
+    pub fn peek(&self, now_ns: u64) -> bool { self.units_at(now_ns) >= TOKEN }
+
+    /// take one token at `now_ns` if there is one
+    pub fn try_take(&mut self, now_ns: u64) -> bool {
+        self.units = self.units_at(now_ns);
+        if self.last_ns.map_or(true, |l| now_ns > l) { self.last_ns = Some(now_ns); }
+        if self.units >= TOKEN { self.units -= TOKEN; true } else { false }
+    }
+}
+
 struct Waiter { prio: Prio, seq: u64, done: oneshot::Sender<()> }
 
 #[derive(Default)]
@@ -85,6 +132,57 @@ async fn pump(st: Arc<Mutex<State>>, per_sec: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const S: u64 = 1_000_000_000;
+
+    /// WP-00 acceptance: the big-band bucket allows 0.5 a second with a burst of 1
+    #[test]
+    fn token_bucket_rate_and_burst_one() {
+        let t0 = 1_000 * S;
+        let mut b = TokenBucket::new(0.5, 1);
+        assert!(b.try_take(t0), "starts full: the first big trade goes");
+        assert!(!b.try_take(t0), "burst 1: a second one at once is refused");
+        assert!(!b.try_take(t0 + S), "1 s later only half a token has come back");
+        assert!(!b.try_take(t0 + 2 * S - 1), "still short of a token just before 2 s");
+        assert!(b.try_take(t0 + 2 * S), "a token every 2 s");
+        assert!(!b.try_take(t0 + 2 * S + S / 2));
+        // a long quiet spell never stores more than the burst
+        assert!(b.try_take(t0 + 100 * S));
+        assert!(!b.try_take(t0 + 100 * S), "burst 1 after 98 s idle");
+        // over 60 s of constant demand: 30 tokens at 0.5/s
+        let mut b = TokenBucket::new(0.5, 1);
+        let mut n = 0;
+        let mut t = t0;
+        while t < t0 + 60 * S { if b.try_take(t) { n += 1; } t += S / 100; }
+        assert_eq!(n, 30, "0.5/s over 60 s, the first from the full bucket");
+        // a clock going backwards neither refills nor panics
+        let mut b = TokenBucket::new(0.5, 1);
+        assert!(b.try_take(t0));
+        assert!(!b.try_take(t0 - S));
+        assert!(!b.try_take(t0 + S));
+        assert!(b.try_take(t0 + 2 * S));
+    }
+
+    /// review F5: peeking takes nothing, and agrees with the next take
+    #[test]
+    fn token_bucket_peek_takes_nothing() {
+        let t0 = 1_000 * S;
+        let mut b = TokenBucket::new(0.5, 1);
+        for _ in 0..3 { assert!(b.peek(t0)); }
+        assert!(b.try_take(t0));
+        assert!(!b.peek(t0) && !b.peek(t0 + S));
+        assert!(b.peek(t0 + 2 * S));
+        assert!(b.peek(t0 + 2 * S), "still there: a peek is not a take");
+        assert!(b.try_take(t0 + 2 * S));
+        assert!(!b.peek(t0 + 2 * S));
+    }
+
+    #[test]
+    fn token_bucket_rate_zero_never_allows() {
+        let mut b = TokenBucket::new(0.0, 1);
+        assert!(!b.try_take(S));
+        assert!(!b.try_take(1_000 * S));
+    }
 
     #[tokio::test(start_paused = true)]
     async fn at_most_n_in_a_rolling_second() {

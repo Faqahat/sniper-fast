@@ -51,6 +51,9 @@ sizes_sol = [0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
 min_profit_lamports = 1
 cu_price_micro = 40000
 outcome_watch_ms = 2000
+# WP-00: decoded swaps are hints only now ([strategy] decoded_sends defaults to false), so the confirmed pool moves
+# are the pricing path. Without this line this config found no opportunity at all (review F3)
+state_triggers = true
 
 # ---------------------------------------------------------------- raw shreds
 [[feed]]
@@ -136,8 +139,8 @@ kind = "jito-bundle"
 url = "https://frankfurt.mainnet.block-engine.jito.wtf"
 auth_keypair = "~/.nexus-v2-jito-auth.json"
 tip_lamports = 10000          # floor
-tip_share = 0.5               # half of the predicted gross edge
-tip_max_lamports = 1000000
+tip_share = 0.7               # 70% of the predicted edge after the base fee (WP-00: aligned with the live config, R §3.6)
+tip_max_lamports = 100000     # owner 2026-10-04: bundle tips capped at 0.0001 SOL (WP-00: aligned with the live config)
 max_per_sec = 5               # Jito's limit on our gRPC key since 2026-10-02 (shared with arbed if it runs on this key)
 
 [[send]]

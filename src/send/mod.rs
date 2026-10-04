@@ -19,7 +19,7 @@ pub mod budget;
 pub mod jito;
 pub mod tpu;
 
-pub use budget::Prio;
+pub use budget::{Prio, TokenBucket, RANK_CROWDED, RANK_OTHER, RANK_SEED};
 
 use crate::config::{GateCfg, SendKind, SendPath};
 use crate::feeds::clock::now_ns;
@@ -350,6 +350,8 @@ pub struct PathStats {
     pub refused: u64,
     /// not sent: over the path's rate
     pub limited: u64,
+    /// of `limited`: copies ranked last for a crowded pool (WP-00, F6: `Prio` rank 2), the rest were not
+    pub limited_crowded: u64,
     /// not sent: the copy did not pay this path's tip (or Helius's priority fee)
     pub bad_tx: u64,
     pub warm_errors: u64,
@@ -521,7 +523,12 @@ impl Path {
             Err(e) => { self.stats.lock().unwrap().bad_tx += 1; return Err(refuse(None, format!("{}: refused before sending: {e}", self.name))); }
         };
         if let Some(b) = &self.budget {
-            if !b.acquire(prio).await { self.stats.lock().unwrap().limited += 1; return Err(refuse(None, format!("{}: over its rate, not sent", self.name))); }
+            if !b.acquire(prio).await {
+                let mut st = self.stats.lock().unwrap();
+                st.limited += 1;
+                if prio.crowded() { st.limited_crowded += 1; }
+                return Err(refuse(None, format!("{}: over its rate, not sent", self.name)));
+            }
         }
         let t = Instant::now();
         let r = self.deliver(raw, &sig).await;
@@ -672,8 +679,8 @@ impl Path {
         let mut s = self.stats.lock().unwrap();
         let p = |v: &mut Vec<u64>, q: f64| { if v.is_empty() { return f64::NAN; } v.sort_unstable(); v[((v.len() - 1) as f64 * q).round() as usize] as f64 / 1000.0 };
         let (s50, s90, w50, w90) = (p(&mut s.send_us, 0.5), p(&mut s.send_us, 0.9), p(&mut s.warm_us, 0.5), p(&mut s.warm_us, 0.9));
-        let line = format!("{}: sent {} ok {} refused {} over-rate {} bad-tx {}; send {s50:.1}/{s90:.1} ms; keep-alive {w50:.1}/{w90:.1} ms ({}, {} errors)",
-            self.name, s.sent, s.ok, s.refused, s.limited, s.bad_tx, s.warm_us.len(), s.warm_errors);
+        let line = format!("{}: sent {} ok {} refused {} over-rate {} (crowded {}) bad-tx {}; send {s50:.1}/{s90:.1} ms; keep-alive {w50:.1}/{w90:.1} ms ({}, {} errors)",
+            self.name, s.sent, s.ok, s.refused, s.limited, s.limited_crowded, s.bad_tx, s.warm_us.len(), s.warm_errors);
         if s.send_us.len() > 100_000 { s.send_us.clear(); }
         if s.warm_us.len() > 100_000 { s.warm_us.clear(); }
         match &self.jito { Some(j) => format!("{line}; bundle results {:?}", j.counts.lock().unwrap()), None => line }
@@ -933,6 +940,22 @@ mod tests {
         v1.extend([0xBB; 64]);
         assert_eq!(first_signature(&v1).unwrap(), bs58::encode([0xAA; 64]).into_string());
         assert!(first_signature(&[0u8]).is_none());
+    }
+
+    /// WP-00 (F6): copies refused for the path's rate are counted, and the crowded-rank ones apart
+    #[tokio::test]
+    async fn rate_drops_are_split_by_crowded_rank() {
+        let mut c = cfg("rpc", "http://127.0.0.1:1".into());
+        c.max_per_sec = Some(1);
+        let p = Path::new(&c, None).await.unwrap();
+        let raw = tx([3; 32], 1, false);
+        // takes the one slot of this second (its delivery fails: nothing listens there)
+        assert!(p.send(&raw, Prio { rank: RANK_OTHER, net: 1 }).await.is_err());
+        let over = |e: Result<Reply, Refusal>| e.err().is_some_and(|e| e.msg.contains("over its rate"));
+        assert!(over(p.send(&raw, Prio { rank: RANK_CROWDED, net: 9 }).await));
+        assert!(over(p.send(&raw, Prio { rank: RANK_SEED, net: 1 }).await));
+        let s = p.stats.lock().unwrap();
+        assert_eq!((s.limited, s.limited_crowded), (2, 1));
     }
 
     #[tokio::test]

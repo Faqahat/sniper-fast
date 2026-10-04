@@ -1176,6 +1176,18 @@ The legacy reader maps arb-lab's files to the v2 model where the meaning is the 
 
 Segments after w5h2-p3 have no recorder files at all (W §8); reports on them are limited to attempts, copies, outcomes, bundles, status and chain fetches.
 
+**WP-00 fields in the v1 files (v1.1).** WP-00 adds fields to the v1 files and changes no existing field's meaning, except the state-trigger stage times and the latency percentiles below. v1 files carry no schema header, so a reader tells v1.1 by the fields' presence (`meta.json` `limits`).
+- `triggers.jsonl`: `hint_only: true` on every decoded swap when `[strategy] decoded_sends = false`; `opp` is then always null (the hint was not priced), and its `st.decided` is the end of the hint's bookkeeping, not a pricing decision. Skipped triggers still write no line.
+- `attempts.jsonl`: `crowded` (bool: a pool of the route is on `[live] crowded_pools_file`), `queue_rank` (`Prio::rank`: 0 seed pool (source `mriya` or `both`), 1 other, 2 crowded) and `st.fired` (t_ns at which the copies were handed to the runtime: `fire` spawns the send, so `signed→fired` is the spawn's cost; the bytes leave at copies.jsonl `t_sent`. Null when the sim gate fires them later). The line is now written after the copies are fired.
+- `attempts.jsonl` and `opportunities.jsonl` `st` of a state trigger: `rx` = `decoded` = the receive time of the pool's first account update stamped with the trigger transaction (kept even when the engine queue emptied between the transaction's updates), `engine` = that update's dequeue, `resolved` = the start of the evaluation, `decided` = the end of the route search. In v1 all five held one time.
+- `status.jsonl`:
+  - counters `trigger_hint_only` (engine), `live_skip_big_band_throttle`, `live_skip_crowded_pool` (a crowded route expecting at least `[live] crowded_skip_min_expected_lamports`) and `rank_crowded` (exec); `trigger_skip_signer_fails` now also follows the skipped signer's swap (its statistics keep learning);
+  - `exec.over_rate: {crowded, other}`, the totals of copies refused for a send path's rate, split by the crowded rank;
+  - the latency series `state_recv_to_engine`, `state_engine_to_decided`, `state_recv_to_decided` (one sample per state evaluation, whatever it decided), `hint_rx_to_done` (one per hint: receive to the end of its bookkeeping), `decided_to_signed` and `signed_to_fired` (one per attempt) and `signed_to_sent` (one per settled attempt whose first copy was sent: signed to that copy's `t_sent`) (A.8). The v1 decoded series (`rx_to_decoded` … `rx_to_decided`) take samples only from priced decoded triggers (`decoded_sends = true`); with hints only they stay at n 0.
+  - Latency `n` counts every sample since the start (v1 reset it at 200,000). The percentiles come from a uniform reservoir of 8,192 samples of the whole run (v1: all samples since the start or the last reset), so they still cover the run so far, not the interval.
+- `meta.json`: `limits: {sending, max_size_sol, max_size_src, sim_max_size_sol, max_failed_fees_lamports, max_new_token_accounts, decoded_sends, state_triggers, big_band_min_expected_lamports, big_band_max_per_sec, crowded_pools_file, crowded_skip_min_expected_lamports, record}`, and `overrides` (what `--shadow` and `--no-record` changed for this run: `{mode: "shadow"}`, `{"record.enabled": false}`; `{}` for none).
+- The `send` lines of `run.log` give `over-rate N (crowded M)` per path.
+
 ---
 
 ## Appendix A. Enumerations
@@ -1220,10 +1232,10 @@ Segments after w5h2-p3 have no recorder files at all (W §8); reports on them ar
 ### A.7 Counter names (`counts_total` / `counts_delta`)
 
 - **Engine:** `tx_first`, `trigger`, `trigger_hint_only`, `trigger_skip_will_fail`, `trigger_skip_signer_fails`, `trigger_unquotable`, `trigger_exact_out_unsolved`, `alt_wait`, `alt_learned`, `alt_retry`, `alt_gave_up`, `resolve_failed`, `commit_complete`, `commit_superseded`, `commit_timeout_unknown`, `commit_timeout_quiescent`, `commit_late_member`, `torn_suspect`, `fork_abandoned_slot`, `fork_priced`, `pred_scored`, `pred_exact`, `pred_pre_state_unknown`, `evaluation`, `route_priced`, `opportunity`, `state_opportunity`, plus one counter per rejection reason of A.1 (`reject_<reason>`).
-- **Exec:** `attempt`, `sent`, `send_refused`, `live_skip_big_band_throttle` (WP-00 only), `rank_crowded`, `verdict_<outcome>`, `landed_ok`, `landed_fail`, `expired`, `expiry_status_hit`, `amended`, `unsettled`.
+- **Exec:** `attempt`, `sent`, `send_refused`, `live_skip_big_band_throttle` and `live_skip_crowded_pool` (WP-00 only), `rank_crowded`, `verdict_<outcome>`, `landed_ok`, `landed_fail`, `expired`, `expiry_status_hit`, `amended`, `unsettled`.
 
 ### A.8 Stage names (`latency`, `stages`)
 
 - **v2:** `first_shred→update_recv`, `update_recv→commit`, `commit→engine`, `engine→priced`, `priced→decided`, `decided→built`, `built→signed`, `signed→enqueued`, `enqueued→sent`, `sent→ack`, `sent→first_verdict`, `sent→seen`, `sent→landed`.
-- **WP-00 interim names** (state path, before WP-04's commit stages exist; F13): `state_recv_to_engine`, `state_engine_to_decided`, `state_recv_to_decided`, `decided_to_signed`, `signed_to_fired`. WP-02's latency gate compares against these.
-- **v1 names** `rx_to_decoded`, `decoded_to_engine`, `engine_to_resolved`, `resolved_to_decided` and `rx_to_decided` remain for decoded hints only.
+- **WP-00 interim names** (state path, before WP-04's commit stages exist; F13): `state_recv_to_engine`, `state_engine_to_decided`, `state_recv_to_decided`, `decided_to_signed`, `signed_to_fired` (handed to the runtime), `signed_to_sent` (first copy's `t_sent`), and `hint_rx_to_done` for decoded hints. WP-02's latency gate compares against the state-path ones.
+- **v1 names** `rx_to_decoded`, `decoded_to_engine`, `engine_to_resolved`, `resolved_to_decided` and `rx_to_decided` remain for priced decoded triggers only (`decoded_sends = true`); hints go to `hint_rx_to_done`.
