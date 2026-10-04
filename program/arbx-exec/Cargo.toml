@@ -1,0 +1,47 @@
+[package]
+name = "arbx-exec"
+version = "0.3.0"
+edition = "2021"
+description = "arbx on-chain route executor: atomic multi-leg arbitrage with an end-of-route profit guard (v2 + v3 layouts)"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+# The on-chain build pulls solana-program. The route logic builds and tests without it:
+#   cargo test                                   (host: logic unit + property tests, LiteSVM tests on the built .so)
+#   cargo-build-sbf --features onchain           (the program: target/deploy/arbx_exec.so)
+onchain = ["solana-program"]
+
+[dependencies]
+solana-program = { version = "4.1", optional = true, default-features = false }
+
+[dev-dependencies]
+# SVM tests (tests/litesvm.rs, tests/venues.rs) load the built target/deploy/arbx_exec.so, tests/mock-amm's .so, the
+# deployed nexus-arb-v2 ELF and (venues.rs) mainnet venue programs from tests/fixtures. The solana-* / agave versions
+# below are the ones litesvm 0.17 (agave 4.3) is built on; solana-syscalls, solana-program-runtime, solana-sbpf and
+# agave-feature-set build the runtime's syscall registry for the ELF audit (REVIEW.md #1).
+agave-feature-set = "4.3"
+base64 = "0.22"
+litesvm = "0.17"
+proptest = "1"
+serde_json = "1"
+solana-clock = "~3.2"
+solana-program-runtime = "4.3"
+solana-sbpf = "0.23"
+solana-syscalls = "4.3"
+solana-account = "4"
+solana-address = { version = "2.7", features = ["curve25519"] }
+solana-instruction = "3.5"
+solana-instruction-error = "2.5"
+solana-keypair = "3.1"
+solana-message = "4"
+solana-signer = "3"
+solana-transaction = "4"
+solana-transaction-error = "3.4"
+
+[lints.rust]
+# solana-program's entrypoint! macro tests these cfgs in our crate
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("custom-heap", "custom-panic"))', 'cfg(target_os, values("solana"))'] }

@@ -197,6 +197,17 @@ fn hex_code(c: u32) -> String { format!("0x{c:x}") }
 /// what a nexus-v2 or venue error code means, in words
 #[cfg(test)]
 mod tests {
+    /// arbx-exec REVIEW.md #8: every arbx-exec code has its own meaning, none falls through to "a venue's own error"
+    #[test]
+    fn meaning_knows_the_arbx_exec_codes() {
+        let e = Some(serde_json::json!("x"));
+        for c in 0x4e58_0001u32..=0x4e58_000c {
+            assert_ne!(super::meaning(Some(c), &e), "a venue's own error (see code)", "{c:#x}");
+        }
+        assert_eq!(super::meaning(Some(0x4e58_0009), &e).split(':').next(), Some("arbx-exec"));
+        assert_eq!(super::meaning(Some(0x4e58_0107), &e), "nexus: a leg delivered nothing");
+    }
+
     #[test]
     fn fee_rule() {
         // copy 0.95x the trigger, but a failed send may cost at most a quarter of the expected profit, never below 40,000
@@ -218,6 +229,13 @@ pub fn meaning(code: Option<u32>, err: &Option<Value>) -> &'static str {
         (Some(0x4e58_0005), _) => "nexus: payer guard",
         (Some(0x4e58_0006), _) => "nexus: token guard",
         (Some(0x4e58_0007), _) => "nexus: a leg named a foreign signer",
+        // arbx-exec only (program/arbx-exec REVIEW.md #8): its v2 path can return 0x4e580009 where nexus-arb-v2 gave
+        // ERR_PROFIT or PrivilegeEscalation; the others come from its v3 layout
+        (Some(build::arbx_v3::ERR_UNSUPPORTED), _) => "arbx-exec: a reserved v3 feature flag is set",
+        (Some(build::arbx_v3::ERR_BAD_ACCOUNTS), _) => "arbx-exec: account structure (last leg not into the quote, output = input, NATIVE_OUT slot, read-only authority, or a quote/output not owned by the authority)",
+        (Some(build::arbx_v3::ERR_TIP_ACCOUNT), _) => "arbx-exec: CPI tip account or System program slot wrong",
+        (Some(build::arbx_v3::ERR_TIP_FUNDS), _) => "arbx-exec: the CPI tip would leave the authority below rent exemption",
+        (Some(build::arbx_v3::ERR_QUOTE_NOT_WSOL), _) => "arbx-exec: COUNT_LAMPORTS or CPI_TIP needs a wSOL quote account",
         (Some(c), _) if (0x4e58_0100..0x4e58_0108).contains(&c) => "nexus: a leg delivered nothing",
         (Some(3005), _) => "anchor: not enough accounts (bin/tick arrays)",
         (Some(1), _) => "token: insufficient funds",

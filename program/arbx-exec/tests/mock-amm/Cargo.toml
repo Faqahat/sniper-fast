@@ -1,0 +1,18 @@
+[package]
+# TEST-ONLY venue for arbx-exec's LiteSVM tests (tests/litesvm.rs): a constant-product AMM with native-SOL pools and
+# hostile operations. The tests load it AT allowlisted venue addresses (and at one unlisted address). Never deploy.
+name = "mock-amm"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+solana-program = { version = "4.1", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("custom-heap", "custom-panic"))', 'cfg(target_os, values("solana"))'] }

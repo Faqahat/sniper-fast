@@ -36,6 +36,8 @@ pub const MAX_TX_BYTES: usize = 1232;
 pub const MAX_LOCKS: usize = 64;
 /// nexus-arb-v2 errors (ERR_BASE 0x4e580000)
 pub const ERR_PROFIT: u32 = 0x4e58_0002;
+/// v2 layout: n_accounts shares its byte with the NATIVE_IN / NATIVE_OUT flags (bits 7 and 6)
+pub const V2_MAX_LEG_ACCOUNTS: usize = 63;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Meta { pub key: Pk, pub signer: bool, pub writable: bool }
@@ -210,7 +212,10 @@ pub fn route_ix(program: Pk, authority: Pk, quote: Pk, amount_in: u64, min_profi
     data.extend(amount_in.to_le_bytes());
     data.extend(min_profit.to_le_bytes());
     for l in legs {
-        if l.accounts.len() > 255 || l.data.len() > 0xffff || l.amount_offset as usize + 8 > l.data.len() { return Err("v2: leg too large".into()); }
+        // the v2 n_accounts byte carries the NATIVE flags in bits 6-7, so a leg of 64+ accounts would be re-read on
+        // chain as a NATIVE leg of (n & 0x3F) accounts (arbx-exec REVIEW.md #9): refuse it here (v3 has a full byte)
+        if l.accounts.len() > V2_MAX_LEG_ACCOUNTS { return Err(format!("v2: a leg of {} accounts (max {V2_MAX_LEG_ACCOUNTS}; use the v3 layout)", l.accounts.len())); }
+        if l.data.len() > 0xffff || l.amount_offset as usize + 8 > l.data.len() { return Err("v2: leg too large".into()); }
         data.push(l.accounts.len() as u8);
         data.push(l.amount_offset);
         data.extend((l.data.len() as u16).to_le_bytes());
@@ -218,6 +223,115 @@ pub fn route_ix(program: Pk, authority: Pk, quote: Pk, amount_in: u64, min_profi
     for l in legs { data.extend(&l.data); }
     let mut accounts = vec![s(authority), w(quote)];
     for l in legs { accounts.push(w(l.out)); accounts.push(r(l.program)); accounts.extend(l.accounts.iter().cloned()); }
+    Ok(Ix { program, accounts, data })
+}
+
+/// arbx-exec's v3 route layout (program/arbx-exec, README.md has the byte table). The bytes are pinned by golden
+/// vectors shared with the program (program/arbx-exec/tests/fixtures/golden), and this encoder refuses exactly what
+/// the program's v3 parser refuses, so a route that builds here parses there. Not wired into `Exec::build` yet:
+/// docs/PLAN.md WP-15 does that behind `[exec] route_program`; until then only the tests and `exec::meaning` use it.
+#[allow(dead_code)]
+pub mod arbx_v3 {
+    pub const VERSION: u8 = 3;
+    /// flags byte. PAYER_GUARD is mandatory (arbx-exec REVIEW.md #2), so the encoder always sets it.
+    pub const PAYER_GUARD: u8 = 0x01;
+    pub const CPI_TIP: u8 = 0x02;
+    pub const COUNT_LAMPORTS: u8 = 0x04;
+    /// leg flags. At most one NATIVE flag per leg; AUTH_RO only on token legs, and only for venues that take the user
+    /// as a plain signer (measured on mainnet snapshots: DLMM, CPMM, DAMM v2, AMM v4 yes; PumpSwap no).
+    pub const LEG_NATIVE_IN: u8 = 0x01;
+    pub const LEG_NATIVE_OUT: u8 = 0x02;
+    pub const LEG_AUTH_RO: u8 = 0x04;
+    pub const MAX_LEGS: usize = 8;
+    /// the runtime's accounts per instruction
+    pub const MAX_IX_ACCOUNTS: usize = 255;
+    /// A CPI tip can only go to `JITO_TIP_ACCOUNTS[account_ix]` (compiled into the program, same order).
+    pub const JITO_TIP_ACCOUNTS: [&str; 8] = [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+        "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+        "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+        "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+        "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+        "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+        "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
+    ];
+    /// arbx-exec's error codes beyond nexus-arb-v2's (0x4e580001..07 keep their meaning)
+    pub const ERR_UNSUPPORTED: u32 = 0x4e58_0008;
+    pub const ERR_BAD_ACCOUNTS: u32 = 0x4e58_0009;
+    pub const ERR_TIP_ACCOUNT: u32 = 0x4e58_000a;
+    pub const ERR_TIP_FUNDS: u32 = 0x4e58_000b;
+    pub const ERR_QUOTE_NOT_WSOL: u32 = 0x4e58_000c;
+}
+
+/// arbx-exec CPI tip: min(cap, max(floor, gain × bps / 10,000)) lamports to `JITO_TIP_ACCOUNTS[account_ix]`, paid only
+/// when the route's guard passes.
+#[allow(dead_code)] // WP-15
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CpiTip { pub bps: u16, pub floor: u64, pub cap: u64, pub account_ix: u8 }
+
+/// arbx-exec v3 route options. The payer guard is mandatory, so its drop is not optional.
+#[allow(dead_code)] // WP-15
+#[derive(Clone, Copy, Debug)]
+pub struct V3Route { pub max_payer_lamport_drop: u64, pub count_lamports: bool, pub tip: Option<CpiTip> }
+
+/// arbx-exec v3 route instruction. data: [0] 3 [1] flags [2] n_legs [3..11] amount_in [11..19] min_profit [19..27]
+/// max_payer_lamport_drop, with CPI_TIP {u16 bps, u64 floor, u64 cap, u8 account_ix}, per leg {n_accounts u8,
+/// leg_flags u8, amount_offset u8, data_len u16}, then every leg's data. accounts: authority, quote account, per leg
+/// (output account, program, the leg's accounts), and with CPI_TIP the System program and the tip account.
+#[allow(dead_code)] // WP-15
+pub fn route_ix_v3(program: Pk, authority: Pk, quote: Pk, amount_in: u64, min_profit: u64, legs: &[Leg], leg_flags: &[u8], o: &V3Route) -> Result<Ix, String> {
+    use arbx_v3::*;
+    if legs.is_empty() || legs.len() > MAX_LEGS { return Err(format!("v3: {} legs, allowed 1..8", legs.len())); }
+    if leg_flags.len() != legs.len() { return Err("v3: one flags byte per leg".into()); }
+    if min_profit < 1 { return Err("v3: min_profit must be >= 1".into()); }
+    let mut flags = PAYER_GUARD;
+    if o.count_lamports { flags |= COUNT_LAMPORTS; }
+    if let Some(t) = o.tip {
+        if !o.count_lamports { return Err("v3: a CPI tip needs count_lamports (the tip is paid in lamports)".into()); }
+        if t.bps > 10_000 || t.cap < t.floor || t.account_ix as usize >= JITO_TIP_ACCOUNTS.len() { return Err("v3: bad CPI tip parameters".into()); }
+        flags |= CPI_TIP;
+    }
+    let native = |f: u8| f & (LEG_NATIVE_IN | LEG_NATIVE_OUT);
+    for (i, (l, &f)) in legs.iter().zip(leg_flags).enumerate() {
+        if l.accounts.is_empty() || l.accounts.len() > 255 { return Err(format!("v3: leg {i} has {} accounts, allowed 1..255", l.accounts.len())); }
+        if l.data.len() > 0xffff || l.amount_offset as usize + 8 > l.data.len() { return Err(format!("v3: leg {i} data")); }
+        if f & !(LEG_NATIVE_IN | LEG_NATIVE_OUT | LEG_AUTH_RO) != 0 || native(f) == LEG_NATIVE_IN | LEG_NATIVE_OUT || (native(f) != 0 && f & LEG_AUTH_RO != 0) {
+            return Err(format!("v3: leg {i} flags {f:#04x}"));
+        }
+        if native(f) != 0 && !o.count_lamports { return Err(format!("v3: native leg {i} needs count_lamports")); }
+        // lamports only chain into lamports: a NATIVE_IN leg follows a NATIVE_OUT leg (or is first), and vice versa
+        let prev_out = i > 0 && leg_flags[i - 1] & LEG_NATIVE_OUT != 0;
+        if (f & LEG_NATIVE_IN != 0 && i > 0 && !prev_out) || (f & LEG_NATIVE_IN == 0 && prev_out) { return Err(format!("v3: leg {i} breaks the native chain")); }
+    }
+    let last = legs.len() - 1;
+    if leg_flags[last] & LEG_NATIVE_OUT != 0 {
+        if legs[last].out != authority { return Err("v3: a NATIVE_OUT last leg delivers into the authority".into()); }
+    } else if legs[last].out != quote {
+        return Err("v3: the last leg must deliver into the quote account".into());
+    }
+    let n_accounts = 2 + legs.iter().map(|l| 2 + l.accounts.len()).sum::<usize>() + if o.tip.is_some() { 2 } else { 0 };
+    if n_accounts > MAX_IX_ACCOUNTS { return Err(format!("v3: {n_accounts} accounts, the runtime allows {MAX_IX_ACCOUNTS}")); }
+    let mut data = vec![VERSION, flags, legs.len() as u8];
+    data.extend(amount_in.to_le_bytes());
+    data.extend(min_profit.to_le_bytes());
+    data.extend(o.max_payer_lamport_drop.to_le_bytes());
+    if let Some(t) = o.tip {
+        data.extend(t.bps.to_le_bytes());
+        data.extend(t.floor.to_le_bytes());
+        data.extend(t.cap.to_le_bytes());
+        data.push(t.account_ix);
+    }
+    for (l, &f) in legs.iter().zip(leg_flags) {
+        data.push(l.accounts.len() as u8);
+        data.push(f);
+        data.push(l.amount_offset);
+        data.extend((l.data.len() as u16).to_le_bytes());
+    }
+    for l in legs { data.extend(&l.data); }
+    let mut accounts = vec![s(authority), w(quote)];
+    for l in legs { accounts.push(w(l.out)); accounts.push(r(l.program)); accounts.extend(l.accounts.iter().cloned()); }
+    if let Some(t) = o.tip { accounts.push(r(*SYSTEM_PROGRAM)); accounts.push(w(pk(JITO_TIP_ACCOUNTS[t.account_ix as usize]))); }
     Ok(Ix { program, accounts, data })
 }
 
@@ -429,6 +543,96 @@ mod tests {
         assert_eq!(ix.accounts.len(), 2 + 2 * 3);
         assert!(ix.accounts[0].signer && ix.accounts[0].key == [2; 32]);
         assert!(route_ix([1; 32], [2; 32], [99; 32], 1, 1, &[Leg { program: [5; 32], out: [6; 32], accounts: vec![], data: vec![0; 16], amount_offset: 8 }]).is_err(), "last leg must pay the quote account");
+    }
+
+    // ---- golden vectors shared with program/arbx-exec (its tests assert the same files) ----
+
+    fn golden(name: &str) -> Vec<u8> {
+        let path = format!("{}/program/arbx-exec/tests/fixtures/golden/{name}", env!("CARGO_MANIFEST_DIR"));
+        let h = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let h = h.trim();
+        (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect()
+    }
+    fn legn(n: usize, out: Pk, byte: u8, len: usize) -> Leg {
+        Leg { program: [5; 32], out, accounts: (0..n).map(|i| w([i as u8; 32])).collect(), data: vec![byte; len], amount_offset: 8 }
+    }
+
+    #[test]
+    fn v2_route_matches_the_shared_golden_vector() {
+        let (quote, x) = ([8; 32], [6; 32]);
+        let ix = route_ix([1; 32], [2; 32], quote, 0x0102_0304_0506_0708, 0x1112_1314_1516_1718, &[legn(3, x, 0xAA, 16), legn(4, quote, 0xBB, 16)]).unwrap();
+        assert_eq!(ix.data, golden("v2_route.hex"));
+    }
+
+    /// arbx-exec REVIEW.md #9: a v2 leg of 64+ accounts is re-read on chain as a NATIVE leg; the builder refuses it.
+    #[test]
+    fn v2_refuses_a_leg_of_64_accounts() {
+        let (quote, x) = ([8; 32], [6; 32]);
+        assert!(route_ix([1; 32], [2; 32], quote, 1, 1, &[legn(63, x, 0, 24), legn(7, quote, 0, 24)]).is_ok());
+        let e = route_ix([1; 32], [2; 32], quote, 1, 1, &[legn(64, x, 0, 24), legn(7, quote, 0, 24)]).unwrap_err();
+        assert!(e.contains("64 accounts"), "{e}");
+        assert!(route_ix([1; 32], [2; 32], quote, 1, 1, &[legn(7, x, 0, 24), legn(200, quote, 0, 24)]).is_err());
+        // the same 64-account leg is fine in the v3 layout
+        let o = V3Route { max_payer_lamport_drop: 0, count_lamports: false, tip: None };
+        assert!(route_ix_v3([1; 32], [2; 32], quote, 1, 1, &[legn(64, x, 0, 24), legn(7, quote, 0, 24)], &[0, 0], &o).is_ok());
+    }
+
+    /// arbx-exec REVIEW.md #3: the engine's v3 encoder produces the program's pinned fixture bytes.
+    #[test]
+    fn v3_route_matches_the_shared_golden_vectors() {
+        use arbx_v3::*;
+        let (auth, quote, x) = ([2; 32], [8; 32], [6; 32]);
+        let tip = CpiTip { bps: 3_000, floor: 0x3132_3334_3536_3738, cap: 0x4142_4344_4546_4748, account_ix: 7 };
+        let o = V3Route { max_payer_lamport_drop: 0x2122_2324_2526_2728, count_lamports: true, tip: Some(tip) };
+        let ix = route_ix_v3([1; 32], auth, quote, 0x0102_0304_0506_0708, 0x1112_1314_1516_1718, &[legn(70, x, 0xAA, 16), legn(3, quote, 0xBB, 16)], &[0, 0], &o).unwrap();
+        assert_eq!(ix.data, golden("v3_route.hex"));
+        assert_eq!(ix.accounts.len(), 2 + (2 + 70) + (2 + 3) + 2);
+        assert_eq!((ix.accounts[ix.accounts.len() - 2].key, ix.accounts.last().unwrap().key), (*SYSTEM_PROGRAM, pk(JITO_TIP_ACCOUNTS[7])));
+        assert!(ix.accounts.last().unwrap().writable && ix.accounts[0].signer);
+        // leg flags: NATIVE_IN on leg 0 (18 accounts), AUTH_RO on leg 1 (70 accounts), no tip
+        let o = V3Route { max_payer_lamport_drop: 0x2122_2324_2526_2728, count_lamports: true, tip: None };
+        let ix = route_ix_v3([1; 32], auth, quote, 0x0102_0304_0506_0708, 0x1112_1314_1516_1718,
+            &[legn(18, x, 0xCC, 24), legn(70, quote, 0xDD, 28)], &[LEG_NATIVE_IN, LEG_AUTH_RO], &o).unwrap();
+        assert_eq!(ix.data, golden("v3_route_leg_flags.hex"));
+    }
+
+    /// The v3 encoder refuses what arbx-exec's parser refuses (REVIEW.md #2, #4, #6, #11, #14).
+    #[test]
+    fn v3_route_refuses_what_the_program_refuses() {
+        use arbx_v3::*;
+        let (auth, quote, x) = ([2; 32], [8; 32], [6; 32]);
+        let legs = [legn(9, x, 0, 24), legn(9, quote, 0, 24)];
+        let base = V3Route { max_payer_lamport_drop: 0, count_lamports: false, tip: None };
+        let tip = Some(CpiTip { bps: 1_000, floor: 0, cap: 1, account_ix: 0 });
+        let ok = |l: &[Leg], f: &[u8], o: &V3Route| route_ix_v3([1; 32], auth, quote, 1, 1, l, f, o);
+        assert_eq!(ok(&legs, &[0, 0], &base).unwrap().data[1], PAYER_GUARD, "the guard is always set");
+        assert!(ok(&legs, &[0, 0], &V3Route { tip, ..base }).is_err(), "#4: a CPI tip needs count_lamports");
+        assert!(ok(&legs, &[0, 0], &V3Route { tip, count_lamports: true, ..base }).is_ok());
+        assert!(ok(&legs, &[0, 0], &V3Route { tip: Some(CpiTip { bps: 1, floor: 0, cap: 1, account_ix: 8 }), count_lamports: true, ..base }).is_err());
+        let cl = V3Route { count_lamports: true, ..base };
+        assert!(ok(&legs, &[LEG_NATIVE_IN | LEG_NATIVE_OUT, 0], &cl).is_err(), "#6");
+        assert!(ok(&legs, &[LEG_NATIVE_IN | LEG_AUTH_RO, 0], &cl).is_err(), "#14: AUTH_RO on a native leg");
+        assert!(ok(&legs, &[LEG_NATIVE_IN, 0], &base).is_err(), "native needs count_lamports");
+        assert!(ok(&legs, &[LEG_NATIVE_IN, LEG_AUTH_RO], &cl).is_ok());
+        assert!(ok(&legs, &[0, LEG_NATIVE_IN], &cl).is_err(), "a token leg cannot feed a NATIVE_IN leg");
+        assert!(ok(&legs, &[0x08, 0], &base).is_err(), "unknown leg flag");
+        assert!(ok(&[legn(9, x, 0, 24), legn(9, [99; 32], 0, 24)], &[0, 0], &base).is_err(), "last leg into the quote");
+        assert!(ok(&[legn(9, x, 0, 24), legn(9, auth, 0, 24)], &[0, LEG_NATIVE_OUT], &cl).is_ok(), "NATIVE_OUT last leg into the authority");
+        // #11: 2 + (2 + 242) + (2 + 7) = 255 fits, one more does not
+        assert!(ok(&[legn(242, x, 0, 24), legn(7, quote, 0, 24)], &[0, 0], &base).is_ok());
+        assert!(ok(&[legn(243, x, 0, 24), legn(7, quote, 0, 24)], &[0, 0], &base).is_err());
+        assert!(ok(&[legn(0, x, 0, 24), legn(7, quote, 0, 24)], &[0, 0], &base).is_err(), "a leg needs an account");
+        assert!(ok(&legs, &[0], &base).is_err(), "one flags byte per leg");
+    }
+
+    /// The tip accounts the encoder names are arbx-exec's compiled-in list, in its order.
+    #[test]
+    fn v3_jito_tip_accounts_are_the_programs() {
+        let src = include_str!("../program/arbx-exec/src/lib.rs");
+        let start = src.find("JITO_TIP_ACCOUNTS_B58: [&str; 8] = [").unwrap();
+        let block = &src[start..start + src[start..].find("];").unwrap()];
+        let listed: Vec<&str> = block.lines().skip(1).filter_map(|l| l.trim().strip_prefix('"')).map(|l| &l[..l.find('"').unwrap()]).collect();
+        assert_eq!(listed, arbx_v3::JITO_TIP_ACCOUNTS.to_vec());
     }
 
     #[test]
