@@ -133,3 +133,13 @@ Added 2026-10-04 at the owner's request.
   - Recorder: per-service verdicts and landings (`copies.service`, `bundles.service`).
 - **Owner actions:** API keys or whitelisting (Harmonic whitelist, Nozomi key, BlockRazor key, NextBlock plan, Lunar key), and approval of the step-3 test.
 - **Dependencies and effort:** after WP-05 (send policy), WP-08 (classification, leader geography) and WP-11 (experiment framework). About 2–3 days of engineering, plus owner time for keys.
+
+## Issues found in live shadow tests (2026-10-04)
+
+- **I-1. A boot snapshot RPC error is fatal.** During the side-by-side shadow test (`cmp2`, Cherry, 13:20 UTC), arbx `e2b8fa5` exited at boot:
+  - error: `shyft getMultipleAccounts: reading reply: error decoding response body … stream error received: unexpected internal error`;
+  - log: `runs/cmp2-arbx-crash1.out` on Cherry;
+  - sequence: the snapshot failed over from Haan (rate-limited by the other bot's snapshot moments earlier) to Shyft, which returned a broken HTTP/2 stream;
+  - the old bot booted fine seconds earlier.
+  - **Fix (WP-03b, `call_bounded` + boot policy):** boot-time snapshot calls retry with backoff across providers, and only a sustained failure aborts, with a recorded stop reason. A test should inject a provider body error.
+- **I-2. Haan gRPC outages are transient.** The account-subscription stream returned 503 for about 3 minutes (13:01–13:04 UTC), for both bots and for one bot alone. It then recovered (probe 13:17). Reconnect with backoff already works; the gRPC probe (WP-03) and feed-health recording (WP-02) should make such outages visible in the segment report.
