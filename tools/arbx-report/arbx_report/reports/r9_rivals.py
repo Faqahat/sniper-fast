@@ -3,7 +3,7 @@
 Only transactions touching watched accounts are seen."""
 from __future__ import annotations
 
-from .. import solana, streams
+from .. import blockctx, solana, streams
 from . import section
 
 CAVEAT = "only transactions touching watched accounts are seen"
@@ -47,17 +47,41 @@ def run(seg, ctx: dict) -> dict:
         sec["caveats"].append("v1: executed results exist only for PumpSwap transactions (one program filter)")
     else:
         n = 0
+        wins = []
+        all_pos_rows = []
         for e in seg.iter_exec():
+            if e.get("idx") is not None:
+                all_pos_rows.append({"sig": e.get("sig"), "slot": e.get("slot"), "idx": e.get("idx")})
             if not (e.get("arb_like") or {}).get("is"):
                 continue
             n += 1
             _acc(per, e.get("signer"), e, e.get("tip_total") or 0, e.get("tip_senders") or [], e.get("bundle"))
+            g = clean_gain(e)
+            if g is not None and e.get("signer") != ours:
+                wins.append((e.get("sig"), e.get("slot"), e.get("idx"), e.get("pools") or [], g, e.get("signer")))
         d["arb_like_txs"] = n
+        # the ladder (rival-synthesis §5): each clean win against the last earlier writer of its pools (its opener)
+        pos = blockctx.positions(seg, all_pos_rows)
+        writers = blockctx.pool_writers(seg, pos)
+        ladder: dict = {}
+        for sig, slot, idx, pools, g, signer in wins:
+            p = pos.get(sig) or ((slot, idx) if idx is not None else None)
+            op = blockctx.opener_of(writers, pools, p, sig) if p else None
+            rg = blockctx.rung(op[:2], p) if op else None
+            k = blockctx.RUNG_NAMES.get(rg, "unknown")
+            b = ladder.setdefault(k, {"wins": 0, "profit": 0})
+            b["wins"] += 1
+            b["profit"] += g
+            if signer in per:
+                per[signer].setdefault("rungs", {})
+                per[signer]["rungs"][k] = per[signer]["rungs"].get(k, 0) + 1
+        d["ladder_clean_wins"] = dict(sorted(ladder.items()))
+        d["ladder_note"] = "rung 0 needs bundle membership, which v2 exec only has when known; such wins show as rung 1"
     rows = []
     for s, b in per.items():
         if s == ours:
             continue
-        rows.append({"signer": s, **b, "senders": dict(sorted(b["senders"].items()))})
+        rows.append({"signer": s, **b, "senders": dict(sorted(b["senders"].items())), "rungs": dict(sorted((b.get("rungs") or {}).items()))})
     rows.sort(key=lambda r: (-r["clean_profit"], -r["n"], r["signer"] or ""))
     d["signers"] = len(rows)
     d["top_by_clean_profit"] = rows[:30]

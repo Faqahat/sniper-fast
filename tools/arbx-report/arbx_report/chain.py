@@ -77,6 +77,25 @@ class Chain:
                 "transactionDetails": "full" if full else "signatures", "commitment": "confirmed"}
         return self.call("getBlock", [slot, opts], f"{slot}-{'full' if full else 'sigs'}")
 
+    def signatures_for_address(self, addr: str, min_slot: int, max_slot: int, page: int = 1000) -> list:
+        """Every signature of `addr` in [min_slot, max_slot], newest first, paging with `before`."""
+        out = []
+        before = None
+        while True:
+            opts = {"limit": page, "commitment": "confirmed"}
+            if before:
+                opts["before"] = before
+            res = self.call("getSignaturesForAddress", [addr, opts], f"{addr}-{before or 'tip'}-{page}")
+            if not res:
+                break
+            for r in res:
+                if r.get("slot") is not None and min_slot <= r["slot"] <= max_slot:
+                    out.append(r)
+            if len(res) < page or res[-1].get("slot", 0) < min_slot:
+                break
+            before = res[-1].get("signature")
+        return out
+
     def get_transaction(self, sig: str):
         return self.call("getTransaction", [sig, {"encoding": "json", "maxSupportedTransactionVersion": 0,
                                                   "commitment": "confirmed"}], sig)

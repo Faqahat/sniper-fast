@@ -93,6 +93,15 @@ class Rules(unittest.TestCase):
             self.assertEqual(fv[1], "none_stream_up")
             self.assertEqual(fv[0], "accepted")
 
+    def test_rivals_clean_wins_and_ladder(self):
+        from arbx_report.reports import r9_rivals
+        d = r9_rivals.run(self.seg, self.ctx)["data"]
+        top = d["top_by_clean_profit"][0]
+        self.assertEqual((top["signer"], top["clean_wins"], top["clean_profit"]), (gen.SIGNERS["W2"], 1, 120_000))
+        self.assertNotIn(gen.W, [r["signer"] for r in d["top_by_clean_profit"]])  # ours are not rivals
+        # W2 @1006/9 against its opener T2 @1006/3 (the last earlier writer of its pools): same slot, later
+        self.assertEqual(d["ladder_clean_wins"], {"3 same slot, later": {"wins": 1, "profit": 120_000}})
+
     def test_experiments(self):
         d = r10_experiments.run(self.seg, self.ctx)["data"]
         self.assertEqual(d["balance"]["x4_share"]["counts"], {"0.4": 2, "0.6": 3})
@@ -121,6 +130,28 @@ class CampaignReport(unittest.TestCase):
             out = os.path.join(root, "out")
             self.assertEqual(main(["campaign", os.path.join(root, "synth"), "--out", out]), 0)
             self.assertTrue(os.path.exists(os.path.join(out, "campaign.json")))
+
+    def test_wallet_against_signatures_for_address_from_cache(self):
+        """Offline, a cached getSignaturesForAddress answer is used; a signature the wallet stream lacks is a miss."""
+        import json as _json
+        from arbx_report import chain
+        from arbx_report.reports import r0_quality
+        with TmpDir() as root:
+            seg = synth_segment(root)
+            ch = chain.Chain(os.path.join(seg.dir, "chain-cache"), None, offline=True)
+            extra = gen.sg("not-in-wallet-stream")
+            rows = [{"signature": gen.S["O2"], "slot": 1007}, {"signature": extra, "slot": 1005},
+                    {"signature": gen.S["O0"], "slot": 1000}]
+            p = ch._cache_path("getSignaturesForAddress", f"{gen.W}-tip-1000")
+            os.makedirs(os.path.dirname(p))
+            with open(p, "w") as f:
+                _json.dump(rows, f)
+            d = r0_quality.run(seg, synth_ctx(chain=ch))["data"]["wallet_vs_signatures_for_address"]
+            self.assertEqual((d["status"], d["chain"], d["missing_n"]), ("checked", 3, 1))
+            self.assertEqual(d["missing_from_wallet_stream"], [extra])
+            ch2 = chain.Chain(os.path.join(root, "empty-cache"), None, offline=True)
+            d2 = r0_quality.run(seg, synth_ctx(chain=ch2))["data"]["wallet_vs_signatures_for_address"]
+            self.assertEqual(d2["status"], "skipped (offline and not cached)")
 
     def test_quality_reports_slow_streams(self):
         with TmpDir() as root:

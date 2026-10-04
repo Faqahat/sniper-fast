@@ -132,6 +132,25 @@ def _replay_gaps(seg, sec, ctx):
             sec["caveats"].append("journal.bin has gaps: replay refuses those intervals")
 
 
+def _wallet_vs_sigs(seg, ctx) -> dict:
+    """Wallet transactions in wallet.jsonl against getSignaturesForAddress over the segment's slots (if online or
+    cached in chain-cache/). Signatures the wallet stream lacks are misses (§6.3); the reverse is not a miss."""
+    ch = ctx.get("chain")
+    slots = [r.get("slot") for r in seg.wallet_rows if r.get("slot") is not None] + list(seg.slotidx)
+    if ch is None or not seg.wallet or not slots:
+        return {"status": "skipped (no chain access, wallet or slot range)"}
+    from .. import chain as chainmod
+    lo, hi = min(slots), max(slots)
+    try:
+        sigs = ch.signatures_for_address(seg.wallet, lo, hi)
+    except chainmod.Offline:
+        return {"status": "skipped (offline and not cached)"}
+    have = {r.get("sig") for r in seg.wallet_rows}
+    missing = sorted(r["signature"] for r in sigs if r.get("signature") not in have)
+    return {"status": "checked", "slot_range": [lo, hi], "chain": len(sigs), "wallet_stream": len(have),
+            "missing_from_wallet_stream": missing[:50], "missing_n": len(missing)}
+
+
 def _q(xs, q):
     from .. import stats
     return stats.quantile(xs, q)
@@ -196,7 +215,9 @@ def _exec_coverage(seg, sec, ctx):
     }
     st = seg.status_agg
     now = st.get("now", {}) if isinstance(st, dict) else {}
-    d["exec_coverage"]["unseen_share_sample_last"] = (now.get("coverage.unseen_share_sample") or {}).get("last")
+    last_cov = next((s.get("coverage") for s in reversed(seg.status) if s.get("coverage")), None) or {}
+    d["exec_coverage"]["unseen_share_sample_last"] = last_cov.get("unseen_share_sample")
+    d["exec_coverage"]["status_watched_with_tx_pct_last"] = last_cov.get("watched_with_tx_pct")
     d["exec_coverage"]["need_rps"] = now.get("chainfetch.need_rps_now")
     d["exec_coverage"]["have_rps"] = now.get("chainfetch.have_rps_now")
     pct = d["exec_coverage"]["within_10min_with_idx"]["pct"]
@@ -223,6 +244,7 @@ def _other_coverage(seg, sec, ctx):
     kinds = _count(e.get("kind") for e in ev)
     d["events"] = kinds
     d["wallet_update_missing"] = kinds.get("wallet_update_missing", 0)
+    d["wallet_vs_signatures_for_address"] = _wallet_vs_sigs(seg, ctx)
     d["jito_stream_down"] = kinds.get("jito_stream_down", 0)
     d["alt_give_up"] = kinds.get("alt_give_up", 0)
     slots = seg.jsonl("slots")

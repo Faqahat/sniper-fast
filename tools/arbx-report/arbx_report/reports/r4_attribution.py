@@ -56,6 +56,7 @@ def attribute(seg, a: dict, row: dict, pricer, known_arbers: set, wv_index: dict
                 continue
             ordered.append((s["slot"], t["idx"], t, s))
     ordered.sort(key=lambda x: (x[0], x[1]))
+    trig_tx = next((x[2] for x in ordered if x[2]["sig"] == (a.get("trigger") or {}).get("txn")), None)
     after_trigger = [x for x in ordered if trig is None or (x[0], x[1]) > (trig["slot"], trig["idx"] if trig["idx"] is not None else -1)]
     attempted = []
     versions = _start_versions(a, wv_index or {})
@@ -67,7 +68,7 @@ def attribute(seg, a: dict, row: dict, pricer, known_arbers: set, wv_index: dict
         if t["ours"]:
             if t["ok"]:
                 res["result"] = "closed"
-                res["closer"] = _closer(t, slot, idx, trig, s, "ours")
+                res["closer"] = _closer(t, slot, idx, trig, s, "ours", trig_tx)
                 return _finish(seg, a, res)
             continue
         if t["ok"] is False:  # touched the route and failed: it wrote nothing, so it cannot close the gap
@@ -91,7 +92,7 @@ def attribute(seg, a: dict, row: dict, pricer, known_arbers: set, wv_index: dict
             return _finish(seg, a, res)
         if min_profit is not None and net <= min_profit:
             res["result"] = "closed"
-            res["closer"] = _closer(t, slot, idx, trig, s, classify(t, known_arbers))
+            res["closer"] = _closer(t, slot, idx, trig, s, classify(t, known_arbers), trig_tx)
             res["closer"]["net_after"] = net
             return _finish(seg, a, res)
     if pending_quote:
@@ -104,13 +105,16 @@ def attribute(seg, a: dict, row: dict, pricer, known_arbers: set, wv_index: dict
     return _finish(seg, a, res)
 
 
-def _closer(t, slot, idx, trig, s, kind) -> dict:
+def _closer(t, slot, idx, trig, s, kind, trig_tx: dict | None = None) -> dict:
     rel = None
+    rg = None
     if trig and trig.get("idx") is not None:
         rel = {"same_slot": slot == trig["slot"], "idx_after_trigger": (idx - trig["idx"]) if slot == trig["slot"] else None,
                "slots_after_trigger": slot - trig["slot"]}
+        same_bundle = bool(trig_tx and trig_tx.get("bundle_id") and trig_tx.get("bundle_id") == t.get("bundle_id"))
+        rg = bc.rung((trig["slot"], trig["idx"]), (slot, idx), same_bundle)
     return {"sig": t["sig"], "signer": t["signer"], "slot": slot, "idx": idx, "kind": kind, "relative": rel,
-            "leader": s.get("leader"), "jito_tipped": t.get("jito_tipped"), "tip": t.get("tip")}
+            "rung": rg, "leader": s.get("leader"), "jito_tipped": t.get("jito_tipped"), "tip": t.get("tip")}
 
 
 def _finish(seg, a, res):
@@ -176,6 +180,14 @@ def run(seg, ctx: dict) -> dict:
     d["attempts"] = len(rows)
     d["by_result"] = dict(sorted(by_res.items()))
     d["closer_kind"] = dict(sorted(by_kind.items()))
+    rungs: dict = {}
+    for r in rows:
+        c = r.get("closer")
+        if c and c["kind"] != "ours":
+            k = bc.RUNG_NAMES.get(c.get("rung"), "unknown")
+            rungs[k] = rungs.get(k, 0) + 1
+    d["closer_rung"] = dict(sorted(rungs.items()))
+    d["rung_note"] = "rung 0 needs bundle membership (exec.bundle); without it an idx+1 closer is rung 1"
     sig_counts: dict = {}
     for r in rows:
         c = r.get("closer")

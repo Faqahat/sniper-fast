@@ -21,6 +21,9 @@ def run(seg, ctx: dict) -> dict:
     sec = section("R1", "Money")
     d = sec["data"]
     if not need(seg, sec, "ledger"):
+        st = seg.status_agg.get("total", {}) if isinstance(seg.status_agg, dict) else {}
+        d["status_counters_only"] = {k: v for k, v in st.items() if k.startswith("money.")}
+        sec["caveats"].append("no ledger: the status counters above are diagnostics, not money (§6.2 rule 2)")
         return sec
     rows = seg.ledger
     cats = {c: 0 for c in SUMMING}

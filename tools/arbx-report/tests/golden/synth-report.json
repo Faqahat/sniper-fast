@@ -5,7 +5,7 @@
    "bytes": 7233,
    "file": "accounts.000.bin.zst",
    "partial_tail": null,
-   "records_read": 98,
+   "records_read": 147,
    "schema": "arbx.accounts/2.0",
    "sha256": "d6058598bbd78b2143c7b5851ab777d313487e792ec7f001fa899a8938ec57ef",
    "stream": "accounts",
@@ -474,7 +474,8 @@
       "last": 20,
       "max": 20
      },
-     "unseen_share_sample_last": null,
+     "status_watched_with_tx_pct_last": 100,
+     "unseen_share_sample_last": 0.004,
      "within_10min_with_idx": {
       "have": 11,
       "pct": 100,
@@ -1063,7 +1064,10 @@
      }
     },
     "unsettled": 0,
-    "wallet_update_missing": 0
+    "wallet_update_missing": 0,
+    "wallet_vs_signatures_for_address": {
+     "status": "skipped (no chain access, wallet or slot range)"
+    }
    },
    "id": "R0",
    "incomplete": [],
@@ -1661,6 +1665,9 @@
      "ours": 1,
      "user_swap": 1
     },
+    "closer_rung": {
+     "2 idx+2..5": 1
+    },
     "rows": [
      {
       "attempt": 0,
@@ -1677,6 +1684,7 @@
         "same_slot": true,
         "slots_after_trigger": 0
        },
+       "rung": 3,
        "sig": "2v9da3g1jRJUveUnyVN87RAfPUod1RYvRdjohCE2PrbixwWzaoa7EMFnLLpt9PDGd7Zz57bcSK4RcwXfMiZ7DuZx",
        "signer": "CxaUKii69GUeqo7S1bQ8j4MHkjsb23iY67n1w8iYNSnJ",
        "slot": 1000,
@@ -1710,6 +1718,7 @@
         "same_slot": true,
         "slots_after_trigger": 0
        },
+       "rung": 2,
        "seen_before_our_send": true,
        "sig": "483W5NqfGt4vk11KErHxor4D5Fww5s2Y4vhjCnfUCp26FoU44JMf9fxvLXys4qkModvTqu8NLH9m9NNgo7Uptyta",
        "signer": "Ay76UZy9FweUBTbwHLaPELMg8QakTrjht4V5CsHAtBJB",
@@ -1745,6 +1754,7 @@
       "writers_after_trigger": 1
      }
     ],
+    "rung_note": "rung 0 needs bundle membership (exec.bundle); without it an idx+1 closer is rung 1",
     "top_closers": [
      [
       "Ay76UZy9FweUBTbwHLaPELMg8QakTrjht4V5CsHAtBJB",
@@ -2240,6 +2250,13 @@
    "coverage": {},
    "data": {
     "arb_like_txs": 4,
+    "ladder_clean_wins": {
+     "3 same slot, later": {
+      "profit": 120000,
+      "wins": 1
+     }
+    },
+    "ladder_note": "rung 0 needs bundle membership, which v2 exec only has when known; such wins show as rung 1",
     "signers": 2,
     "top_by_clean_profit": [
      {
@@ -2249,6 +2266,9 @@
       "in_known_bundle": 0,
       "n": 1,
       "ok": 1,
+      "rungs": {
+       "3 same slot, later": 1
+      },
       "senders": {
        "jito": 1
       },
@@ -2262,6 +2282,7 @@
       "in_known_bundle": 0,
       "n": 1,
       "ok": 0,
+      "rungs": {},
       "senders": {},
       "signer": "4Z9wZBL22wzwC4XsF5MtwLRFSFb1hJcRzNJKCdBcpwtC",
       "tips": 0

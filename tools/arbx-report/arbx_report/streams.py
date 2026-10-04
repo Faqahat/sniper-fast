@@ -71,10 +71,16 @@ def parse_schema(s: str) -> tuple[str, int, int]:
     return m.group(1), int(m.group(2)), int(m.group(3))
 
 
+def registry_name(stream: str) -> str:
+    return "entries" if stream.startswith("entries-") else stream
+
+
 def check_version(stream: str, major: int, path: str = "") -> None:
-    ok = SUPPORTED_MAJORS.get(stream)
-    if ok is None or major not in ok:
-        raise SchemaError(f"{path or stream}: schema arbx.{stream}/{major}.x is not supported (known majors: {sorted(ok or [])})")
+    """Refuse a known stream at an unknown major version. A stream this toolkit does not know is not read by any
+    report, so it is listed (R0) but not refused."""
+    ok = SUPPORTED_MAJORS.get(registry_name(stream))
+    if ok is not None and major not in ok:
+        raise SchemaError(f"{path or stream}: schema arbx.{stream}/{major}.x is not supported (known majors: {sorted(ok)})")
 
 
 def sha256_file(path: str) -> str:

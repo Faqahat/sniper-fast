@@ -121,14 +121,14 @@ def build(seg, chain=None, fill_gaps: bool = False) -> dict:
             txs[sig] = {"sig": sig, "idx": pos.get(sig, e.get("idx")), "signer": e.get("signer"), "ok": e.get("ok", True),
                         "wrote": sorted(accts), "versions": {k: v[0] for k, v in accts.items()},
                         "has_exec": bool(e), "jito_tipped": e.get("jito_tipped"), "tip": e.get("tip_total"),
-                        "bundle_pos": (e.get("bundle") or {}).get("pos"), "keys": e.get("keys") or [],
+                        "bundle_pos": (e.get("bundle") or {}).get("pos"), "bundle_id": (e.get("bundle") or {}).get("id"), "keys": e.get("keys") or [],
                         "pools": e.get("pools") or [], "venues": e.get("venues") or [], "arb_like": (e.get("arb_like") or {}).get("is")}
         for sig, e in execs.items():
             if e.get("slot") != slot or sig in txs:
                 continue
             txs[sig] = {"sig": sig, "idx": pos.get(sig, e.get("idx")), "signer": e.get("signer"), "ok": e.get("ok"),
                         "wrote": [], "versions": {}, "has_exec": True, "jito_tipped": e.get("jito_tipped"),
-                        "tip": e.get("tip_total"), "bundle_pos": (e.get("bundle") or {}).get("pos"),
+                        "tip": e.get("tip_total"), "bundle_pos": (e.get("bundle") or {}).get("pos"), "bundle_id": (e.get("bundle") or {}).get("id"),
                         "keys": e.get("keys") or [], "pools": e.get("pools") or [], "venues": e.get("venues") or [],
                         "arb_like": (e.get("arb_like") or {}).get("is")}
         for sig, idx in pos.items():  # ours, landed but without an exec/wallet record yet
@@ -176,7 +176,7 @@ def build(seg, chain=None, fill_gaps: bool = False) -> dict:
                     continue
                 tl.append({"idx": t["idx"], "sig": t["sig"], "signer": t["signer"], "ok": t["ok"], "wrote": wrote,
                            "versions": {k: v for k, v in t["versions"].items() if k in ras}, "ours": is_ours,
-                           "jito_tipped": t.get("jito_tipped"), "tip": t.get("tip"), "bundle_pos": t.get("bundle_pos"),
+                           "jito_tipped": t.get("jito_tipped"), "tip": t.get("tip"), "bundle_pos": t.get("bundle_pos"), "bundle_id": t.get("bundle_id"),
                            "pools": t.get("pools"), "venues": t.get("venues"), "arb_like": t.get("arb_like")})
                 if t["sig"] == trig:
                     trig_pos = {"slot": slot, "idx": t["idx"]}
@@ -201,6 +201,71 @@ def build(seg, chain=None, fill_gaps: bool = False) -> dict:
 
 
 FILE_TX_FIELDS = ("idx", "sig", "signer", "ok", "wrote", "ours", "jito_tipped", "tip", "bundle_pos")
+
+RUNG_NAMES = {0: "0 same bundle as opener", 1: "1 idx+1", 2: "2 idx+2..5", 3: "3 same slot, later", 4: "4 next slot",
+              5: "5 two or more slots later"}
+
+
+def rung(opener: tuple, pos: tuple, same_bundle: bool = False) -> int | None:
+    """The latency/ordering ladder of rival-synthesis §5, from block positions (slot, idx) of the opener (the
+    transaction that opened the gap) and of the taker."""
+    if opener is None or pos is None or None in opener or None in pos:
+        return None
+    if same_bundle:
+        return 0
+    (os_, oi), (s, i) = opener, pos
+    if s == os_:
+        d = i - oi
+        if d <= 0:
+            return None
+        return 1 if d == 1 else (2 if d <= 5 else 3)
+    return 4 if s == os_ + 1 else (5 if s > os_ else None)
+
+
+def positions(seg, rows=None) -> dict:
+    """{sig: (slot, idx)} from the slot index (tracked signatures) and exec records (idx, idx_update merged)."""
+    pos = {}
+    for slot, r in seg.slotidx.items():
+        for sig, idx in r.get("tracked") or []:
+            pos[sig] = (slot, idx)
+    for e in rows if rows is not None else seg.iter_exec():
+        if e.get("idx") is not None and e.get("sig") not in pos:
+            pos[e["sig"]] = (e.get("slot"), e["idx"])
+    return pos
+
+
+def pool_writers(seg, pos: dict) -> dict:
+    """{pool pubkey: sorted [(slot, idx, txn)]}: every transaction that wrote an account of a registry pool (pool
+    account, vaults, extras; a PumpSwap swap writes only the vaults), with its block position when known."""
+    reg = {p.get("idx"): p.get("pool") for p in (seg.pools or []) if isinstance(p, dict)}
+    out: dict = {}
+    seen = set()
+    if not seg.has("accounts"):
+        return out
+    for r in streams.iter_accounts(seg.stream_files("accounts"), keep_data=False):
+        if not r.txn or r.pool_index is None:
+            continue
+        pool = reg.get(r.pool_index)
+        if pool is None or (pool, r.txn) in seen:
+            continue
+        seen.add((pool, r.txn))
+        p = pos.get(r.txn)
+        out.setdefault(pool, []).append((r.slot, p[1] if p else None, r.txn))
+    for v in out.values():
+        v.sort(key=lambda x: (x[0], x[1] if x[1] is not None else -1, x[2]))
+    return out
+
+
+def opener_of(writers: dict, pools: list, pos: tuple, sig: str, max_slots_back: int = 2):
+    """The last transaction before `pos` (block order) that wrote one of `pools`, within `max_slots_back` slots."""
+    best = None
+    for p in pools or []:
+        for s, i, t in writers.get(p, []):
+            if t == sig or i is None:
+                continue
+            if (s, i) < pos and s >= pos[0] - max_slots_back and (best is None or (s, i) > best[:2]):
+                best = (s, i, t)
+    return best
 
 
 def file_rows(built: dict) -> list:

@@ -55,6 +55,29 @@ class BlockCtx(unittest.TestCase):
         self.assertEqual(set(tx), set(blockctx.FILE_TX_FIELDS))
 
 
+class FillGaps(unittest.TestCase):
+    def test_gap_slot_filled_from_cached_block(self):
+        import json
+        import os
+        from arbx_report import chain
+        with TmpDir() as root:
+            seg = synth_segment(root)
+            ch = chain.Chain(os.path.join(seg.dir, "chain-cache"), None, offline=True)
+            built = blockctx.build(seg, ch, fill_gaps=True)  # offline, nothing cached: the gap stays
+            self.assertEqual(built["gap_slots"], [1013])
+            p = ch._cache_path("getBlock", "1013-full")
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w") as f:
+                json.dump({"blockhash": "x", "transactions": []}, f)
+            built = blockctx.build(seg, ch, fill_gaps=True)
+            rows = {r["attempt"]: r for r in built["rows"]}
+            self.assertEqual(built["gap_slots"], [])
+            self.assertEqual(built["gaps_filled"], 1)
+            self.assertTrue(rows[3]["complete"])
+            self.assertEqual(rows[3]["src"], "mixed")
+            self.assertEqual(rows[0]["src"], "recorded")
+
+
 class Attribution(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -82,6 +105,18 @@ class Attribution(unittest.TestCase):
         self.assertEqual([a["sig"] for a in r["attempted_closers"]], [gen.S["F1"]])
         self.assertEqual(c["ms_after_trigger_poh"], 1.25)  # same slot: same leader's PoH clock
         self.assertTrue(c["seen_before_our_send"])
+        self.assertEqual(c["rung"], 2)  # idx+2 after its opener (the trigger)
+        self.assertEqual(self.sec["data"]["closer_rung"], {"2 idx+2..5": 1})
+
+    def test_rung_ladder(self):
+        from arbx_report import blockctx as b
+        self.assertEqual(b.rung((10, 5), (10, 6)), 1)
+        self.assertEqual(b.rung((10, 5), (10, 6), same_bundle=True), 0)
+        self.assertEqual(b.rung((10, 5), (10, 10)), 2)
+        self.assertEqual(b.rung((10, 5), (10, 11)), 3)
+        self.assertEqual(b.rung((10, 5), (11, 0)), 4)
+        self.assertEqual(b.rung((10, 5), (13, 0)), 5)
+        self.assertIsNone(b.rung((10, 5), (10, 4)))
 
     def test_persisted_gap(self):
         self.assertEqual(self.res[2]["result"], "persisted")

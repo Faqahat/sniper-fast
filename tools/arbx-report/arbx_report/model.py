@@ -45,8 +45,7 @@ class Segment:
         for s in ("status", "attempts", "outcomes"):
             fs = self.stream_files(s)
             if fs:
-                list(streams.iter_jsonl(fs[:1], s))
-                return fs[0].legacy
+                return streams.peek(fs[0]).legacy
         return False
 
     def _json(self, fn: str, stream: str):
@@ -89,6 +88,8 @@ class Segment:
         m = self.meta or {}
         f = m.get("feeds") or []
         names = [x.get("name") if isinstance(x, dict) else x for x in f]
+        for fi in self.stream_files("txarr"):
+            streams.peek(fi)
         hdr = streams.txarr_feeds(self.stream_files("txarr"))
         return hdr or names
 
@@ -291,7 +292,8 @@ class Segment:
         if self.events:
             ready = next((e["t_ns"] for e in self.events if e.get("kind") == "warmup_ready"), None)
             if ready is not None and end:
-                mode = "live"
+                run = m.get("run") if isinstance(m.get("run"), dict) else {}
+                mode = "live" if (run.get("mode", "live") in ("live", "canary") and not run.get("forced_shadow")) else "shadow"
                 t = ready
                 live_ns = 0
                 for e in sorted(self.events, key=lambda e: e.get("t_ns") or 0):
