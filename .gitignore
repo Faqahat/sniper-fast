@@ -28,3 +28,6 @@ program/**/target/
 
 # agent worktrees
 .claude/
+
+# python bytecode
+__pycache__/
