@@ -143,3 +143,43 @@ Added 2026-10-04 at the owner's request.
   - the old bot booted fine seconds earlier.
   - **Fix (WP-03b, `call_bounded` + boot policy):** boot-time snapshot calls retry with backoff across providers, and only a sustained failure aborts, with a recorded stop reason. A test should inject a provider body error.
 - **I-2. Haan gRPC outages are transient.** The account-subscription stream returned 503 for about 3 minutes (13:01–13:04 UTC), for both bots and for one bot alone. It then recovered (probe 13:17). Reconnect with backoff already works; the gRPC probe (WP-03) and feed-health recording (WP-02) should make such outages visible in the segment report.
+- **I-3. Haan grants its streams to the first process only** (cmp1, haan-probe-1, cmp2; `docs/research/cmp2-shadow-comparison.md`).
+  - While the old bot held its three Haan streams, all three of arbx's got 503 for 28 minutes; alone, arbx connected at once.
+  - **Fix:** a separate Haan token for arbx (owner, with Haan; also ask for the concurrent-stream limit).
+  - The supervisor (WP-01 `run-w.sh`) waits until the previous segment's process has exited before starting the next one.
+  - The WP-03 gRPC probe records 503s per stream, separately from other errors.
+- **I-4. There is no state-health gate: arbx ran blind for 28 minutes and exited 0.**
+  - store_updates stayed at the boot snapshot, slot stayed 0, and there was no warning.
+  - A reconnect never re-snapshots (feeds/mod.rs:208-235).
+  - **Fix (WP-04, with WP-05's send gate):**
+    - Stop with reason `state_unavailable` if no state update arrives within N s of boot.
+    - Price and send nothing while the stream is down or the newest update is more than about 2 s old.
+    - Re-snapshot after a reconnect.
+    - Status gains `state_connected`, `last_update_age_ms` and `reconnects`, and a WARNING line is logged.
+- **I-5. Signer stats count false misses whenever state is down, and one file is shared across runs and bots.**
+  - A pending trigger becomes a miss after 5 s unless a state update credits it (engine.rs:440, 976).
+  - cmp2 wrote about 3,430 false misses into arbx's file. The old bot's cmp1 run wrote up to about 146 into the live arb-lab file.
+  - **Fix (WP-04):**
+    - Count a miss only while state is healthy, or better, decide the outcome from the transaction's own status.
+    - Read the boot copy, and write each segment's copy into the run dir. Merging back is an explicit step.
+    - Record the sha256 of the copy that was read.
+- **I-6. A failed lookup-table fetch marks the table missing for the whole run** (engine.rs:595).
+  - In cmp2 arbx dropped 5,001 transactions as `alt_unknown`, against the old bot's about 610. It started with an empty cache during an RPC 429 burst.
+  - **Fix (WP-04, already listed there):**
+    - Retry with backoff.
+    - Cap concurrent fetches.
+    - Preload the previous segment's `alts-final`.
+- **I-7. Shadow mode builds no executor**: `exec_on = sim.enabled || canary || live`.
+  - So no send gate runs and no would-send decision is recorded, and the cmp2 policy figures had to be replayed offline.
+  - **Fix (WP-05):** shadow runs every send check up to the signature and writes `decisions.jsonl` / `attempts.jsonl` with `sent = false`.
+- **I-8. Pricing errors that WP-04 must remove** (cmp2, old bot, 937 opportunities quoting 104.6 SOL):
+  - 198 phantom (failed trigger, 65.09 SOL);
+  - 62 poisoned (the other pool priced against a failed swap's prediction less than 1.5 s old, 33.76 SOL);
+  - only 655 clean opportunities, quoting 4.43 SOL in all;
+  - 57 opportunities sized at the 8.4 SOL ladder edge carry 98.13 SOL of the quotes, and 49 of them are phantom or poisoned;
+  - quotes of 10M lamports and above realize about 55%.
+
+  Keep the 4.2 SOL size cap and the ≥1M throttle until WP-04/WP-16 pass replay.
+- **I-9. Recorder volume.**
+  - 736 MB in 28 minutes, 88% of rivals.jsonl being `why = venues` rows: about 66 GB/day raw, or about 17 GB/day at zstd-3.
+  - **Fix:** WP-02's compression and rotation, plus sampling of `why = venues` rows (WP-08), checked against the disk budget in MEASUREMENT §5.
