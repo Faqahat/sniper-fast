@@ -252,3 +252,10 @@ Supporting files are in `/tmp/claude-1000/-home-moiz-arbed-arb-lab/5e4b11f2-122d
 Move these to https/QUIC endpoints where the provider offers them, and rotate them if in doubt.
 
 **fnzero.dev/partners.** The page lists Glaive and LunarLander keys as obtainable through Fnzero's own Telegram (t.me/xyz_0xfnzero), with "reward_percentage 50%".
+
+**Update (2026-10-04, owner): resolved.**
+- SPEEDLANDING_KEY is not a private key.
+- The trading wallet 2g7rYv7…'s key exists only in the owner-managed encrypted keystore (`.enc`).
+- The wallet was not exposed and no funds need to move.
+
+The hygiene fix in I-10 still applies to the API keys that go over plain HTTP (SpeedLanding, Nozomi, Astralane, LandX).
