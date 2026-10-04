@@ -1,0 +1,188 @@
+minutes 31 counters {'arblike_fail': 290920, 'arblike_ok': 46228, 'arbs': 1327, 'fetched_fail': 21, 'fetched_ok': 27221, 'logs': 1792799, 'pools': 3836, 't': 1791042986, 'tx': 27241, 'ws_acct': 315820}
+sampled share of arb-like successes fetched: 0.59
+PEPEqnuuCDbB score=0.476 opp/h=2.381 gaps=0 est=0.0000 medsecs=None maxbp=0 arbs=4/0 prof=0.7244 comp=4 M=False t20=False closes=0/0 trad=1 inlist=0 ['DLMM']
+       ('DLMM', 'HDojZeCdUee8nczxsc9MeiMKVF961HqEFeKEvHw74xVR', 20.0, 177.99)
+       signers [('4MV2Jxu9', 1), ('8YjrM341', 1), ('GAmNLncP', 1)]
+6rXCb1aK833n score=0.183 opp/h=0.183 gaps=12 est=0.0944 medsecs=8.943 maxbp=1233.0 arbs=0/0 prof=0.0000 comp=0 M=False t20=False closes=0/12 trad=2 inlist=0 ['DAMMv2', 'DLMM']
+       ('DLMM', '8qyKBcwHS5b6tLgvvducmv4rAoxNaWTZ5hSVmz8a9Yjq', 200.0, 42.49)
+       ('DAMMv2', '9WN5rYQZbk3kW9vgYJFfNwMLzBhwurpSamSXZjRD1fMA', 200.0, 4.81)
+5tCju6YNxHq5 score=0.123 opp/h=1.477 gaps=6 est=0.0021 medsecs=9.05 maxbp=35.0 arbs=15/0 prof=0.4495 comp=11 M=True t20=True closes=2/4 trad=2 inlist=2 ['DLMM', 'PumpSwap']
+       ('DLMM', '2YaGc2iYZt44B5zn5Tvk59APbAn51xGekzNQAPF2PGn1', 200.0, 224.58)
+       ('PumpSwap', '8ewuF2o8ACro7fqWepZ3tKhkbBjndZU4Ldk9scRPw83d', 85.0, 800.92)
+       signers [('MriyaNN8', 4), ('9uGsPcu2', 2), ('5551vgR8', 1)]
+J9d68or9ZrCL score=0.110 opp/h=5.083 gaps=166 est=1.7429 medsecs=1.898 maxbp=1868.0 arbs=171/0 prof=1.5463 comp=45 M=True t20=True closes=95/76 trad=2 inlist=0 ['DLMM', 'PumpSwap']
+       ('DLMM', 'Aguo2KMZri6rSB2Tf4CdFjjaWjs2C4r7atmUW2698NuC', 200.0, 63.17)
+       ('PumpSwap', 'AdmHAhSKJRGhvbn7C94sMhaAEM3YRUMVHh43uJU2RETL', 100.0, 305.53)
+       signers [('MriyaNN8', 22), ('AgmLJBMD', 19), ('XUrKb2aK', 15)]
+9aqmJjCnnMQv score=0.052 opp/h=0.933 gaps=9 est=0.0452 medsecs=18.069 maxbp=1190.0 arbs=52/0 prof=0.2837 comp=17 M=True t20=True closes=5/5 trad=5 inlist=4 ['DLMM', 'PumpSwap']
+       ('DLMM', 'JEFj1mYvGg9rmvREUFLS43mXx4dfR1SkUMoEhVGt6UHK', 100.0, 18.6)
+       ('PumpSwap', '7Nj7mBE7iVmjvnBHNvjgaz6G3ZktTHFNbf7aQDfZ7iNR', 100.0, 528.37)
+       ('DLMM', '21bzHy2kRoVKgtYZ8hFoetki2134MG2jyWGC49UV5pyi', 200.0, 53.18)
+       ('DLMM', '5omzLmFemCE9jdALPyvun54N5URQzbjN3293P57zYTpb', 200.0, 0.52)
+       ('DLMM', '7eHvtdXvGkp8DSGfopyoqQkq699wUd9zUatxumP5VHms', 300.0, 3.43)
+       signers [('7xhYhQm4', 19), ('AgmLJBMD', 8), ('MriyaNN8', 3)]
+GZw7LxHtQKSQ score=0.040 opp/h=0.240 gaps=12 est=0.1239 medsecs=1.617 maxbp=2484.0 arbs=11/0 prof=0.0112 comp=5 M=False t20=False closes=1/11 trad=2 inlist=2 ['DLMM']
+       ('DLMM', '2ca7cdE9B58V6T9j92cgifgNjuQQ5mCWTkcdT8pF9Axr', 100.0, 25.91)
+       ('DLMM', 'knRzjJNnj7sxuYwdqMTMFWoRkay12xDc1JVLaYL2Jnq', 200.0, 19.35)
+       signers [('AgmLJBMD', 5), ('CzYQ2kFn', 3), ('94SNzaYe', 1)]
+7HgfXftRBBqs score=0.038 opp/h=0.075 gaps=0 est=0.0000 medsecs=None maxbp=0 arbs=2/0 prof=0.0230 comp=1 M=True t20=True closes=0/0 trad=3 inlist=0 ['DLMM', 'PumpSwap']
+       ('DLMM', 'ATsPPNvrjenUDCGrRqAsH1DaGYVw5Xz3Kk5S67ePYRQD', 50.0, 1.12)
+       ('DLMM', 'Bmovbz2FMD3qgTYfKE7wJHJbm8MJDvHCn9ZCAreCA9RR', 100.0, 0.93)
+       ('PumpSwap', 'FzbYhPcoCuA2qSrV1s3j38RcQhP6c943p3KHYb6C5rCq', 95.0, 1041.32)
+       signers [('MriyaNN8', 2)]
+XLBLxbY1Mr7a score=0.033 opp/h=0.362 gaps=1 est=0.0354 medsecs=2.8 maxbp=327.0 arbs=11/0 prof=0.1102 comp=10 M=False t20=True closes=0/1 trad=2 inlist=2 ['DLMM', 'PumpSwap']
+       ('DLMM', 'DbnGdLNMHJJhqqS3PZtE9qkFf8Te2UFEijJHmhvzu8Sa', 300.0, 171.23)
+       ('PumpSwap', 'BA2YYZ4YUKsMCMDGpqrV5FQiotGnyKrc571pFhc66Gje', 95.0, 523.91)
+       signers [('66666y3R', 2), ('AgmLJBMD', 1), ('9EwQoN74', 1)]
+G2b4ZNxLjgTn score=0.024 opp/h=0.167 gaps=0 est=0.0000 medsecs=None maxbp=0 arbs=14/0 prof=0.0507 comp=6 M=False t20=True closes=0/0 trad=2 inlist=2 ['DAMMv2', 'PumpSwap']
+       ('DAMMv2', 'C8jdide5evNRRVBiisJSnFeHH2k7FKbARP64iyfSrkdf', 100.0, 6.24)
+       ('PumpSwap', 'GxqGY3UHL36SjMZPsu49fAKAm9EETGzxseuqWabLmpME', 125.0, 7.24)
+       signers [('9uGsPcu2', 4), ('DtvmxrTA', 3), ('7dGrdJRY', 3)]
+DDVUsN8sDFxb score=0.022 opp/h=0.109 gaps=0 est=0.0000 medsecs=None maxbp=0 arbs=5/0 prof=0.0333 comp=4 M=False t20=False closes=0/0 trad=2 inlist=0 ['DLMM', 'PumpSwap']
+       ('DLMM', 'vJ8bK53fWR5iD7CT1jxTdfiK464KsNS8DmMst6hxRhk', 100.0, 0.79)
+       ('PumpSwap', 'FYNWkGx9f1PLtdtvVw3bnty5bDbGKZ3UirJMcU25VX7c', 100.0, 393.29)
+       signers [('Dy1jE82C', 2), ('AgmLJBMD', 1), ('HxjwdF32', 1)]
+7VertkgF9KLh score=0.020 opp/h=0.573 gaps=24 est=0.2959 medsecs=2.513 maxbp=376.0 arbs=47/0 prof=0.0818 comp=27 M=True t20=True closes=12/11 trad=3 inlist=4 ['DLMM', 'PumpSwap']
+       ('DLMM', 'GDoenRAGQCdaa1o9rV5wjSNqM41HmmcKL5LkEKfvBiuW', 200.0, 328.59)
+       ('PumpSwap', 'CyJwKnLiiY4fmiwqMCSWFSHxo7T9Ubshgs2uRAuJCrk5', 75.0, 1021.76)
+       ('DLMM', '8DbUV4MeRtJ4cMJW5w5YxtnA8oeAw8DTr2e2K3d1juVi', 500.0, 122.38)
+       signers [('XUrKb2aK', 8), ('4BQ6ATUt', 3), ('AgmLJBMD', 3)]
+Es9vMFrzaCER score=0.015 opp/h=0.030 gaps=0 est=0.0000 medsecs=None maxbp=0 arbs=1/0 prof=0.0091 comp=1 M=False t20=False closes=0/0 trad=3 inlist=0 ['DLMM', 'RayAMMv4']
+       ('RayAMMv4', '7XawhbbxtsRcQA8KTkHT9f9nc6d69UwqCDh6U5EEbEmX', 25.0, 3698.55)
+       ('DLMM', 'HToiT8XK8GHgAT4N3oGXadc7opdApPwsbCL9tFRYa3Rg', 3.0, 4.7)
+       ('DLMM', 'CyrzGrL9U9x9FfqfQiTi7kWsvJ9mK97tGxtPF1AV8E8d', 5.0, 6.39)
+       signers [('Abfe9cZB', 1)]
+CSRRgTwf9o5K score=0.014 opp/h=0.113 gaps=4 est=0.0585 medsecs=229.097 maxbp=2992.0 arbs=7/0 prof=0.0043 comp=7 M=True t20=True closes=2/3 trad=3 inlist=0 ['DLMM', 'PumpSwap']
+       ('PumpSwap', '98ewLHSKoxMu9g9NguMykjgUFz2rc8WsrscXB67BMubh', 75.0, 835.99)
+       ('DLMM', 'EUkTYkmTMx4xJnjTQGqLdbQ3BmscEaZgmN5AcfczvmKn', 500.0, 8.33)
+       ('DLMM', 'KePckupLx7okTwkrUeoS9XAvCw1KDWoaVVbGVqLAakj', 200.0, 2.29)
+       signers [('E3yE42dQ', 1), ('8oSD5a9E', 1), ('MriyaNN8', 1)]
+GWGUDFY1dDxQ score=0.014 opp/h=0.168 gaps=21 est=0.0869 medsecs=12.012 maxbp=2977.0 arbs=19/0 prof=0.0034 comp=11 M=True t20=True closes=14/6 trad=2 inlist=2 ['DLMM', 'PumpSwap']
+       ('DLMM', 'DdgBYm59qE8Gxi6o2Aj1VFm9JrEHko1utM3R3tThopDt', 200.0, 2.19)
+       ('PumpSwap', 'MTvmphUn6T7FUSY743PAct75RSNqVRZYRdf5GM2ieiY', 120.0, 162.1)
+       signers [('AgmLJBMD', 4), ('GxDC9e7S', 4), ('XUrKb2aK', 2)]
+GTBxUiw6wJdm score=0.013 opp/h=0.155 gaps=2 est=0.0505 medsecs=8.998 maxbp=295.0 arbs=13/0 prof=0.0472 comp=11 M=True t20=True closes=1/1 trad=5 inlist=2 ['DAMMv2', 'DLMM', 'PumpSwap']
+       ('DLMM', '5u7PMsDxbaALbV9viti9Y4pEBVJqWSSp69uEsXGtiANq', 100.0, 338.76)
+       ('PumpSwap', '4R8CiMnJWDNoes3fQi1ccPFJygPXazaHaWpHrN3rZeNj', 80.0, 1123.89)
+       ('DLMM', 'CJab6RE2KNdhCLdY9sBxpijxpFegduaFg83UtEehLPh9', 200.0, 79.67)
+       ('DLMM', 'CzVhSwrx9VQmBJTP2BdHgWiRPEcbWBNEAmPCPH1BMJTS', 500.0, 7.98)
+       ('DAMMv2', 'ANJCma3JZ1uxhYZEM2F4rrW4LQsePfMmFc96q2bFuTx9', 600.0, 0.56)
+       signers [('5551vgR8', 2), ('CzYQ2kFn', 2), ('CatyeC3L', 1)]
+D1YZZg9dBZ7A score=0.012 opp/h=0.081 gaps=2 est=0.0030 medsecs=6.17 maxbp=948.0 arbs=7/0 prof=0.0247 comp=6 M=True t20=True closes=1/1 trad=3 inlist=0 ['DLMM', 'RayCPMM']
+       ('DLMM', '2NyAGSQGCnbGGRHQJyZ4yKXwwCbjkLLes1VWTqYKZp5c', 80.0, 1.2)
+       ('RayCPMM', 'CheJUxVQrmpeb4UFWHZ72afQPTKM7AEb8giyzNR7cPvH', 100.0, 399.76)
+       ('DLMM', '6TmYTscrayJqAygf8AeYk8hamNr7wkKedtnv8PNs1RGM', 200.0, 45.51)
+       signers [('AgmLJBMD', 2), ('MriyaNN8', 1), ('3EKX2bfq', 1)]
+7gLU4wTY2gi5 score=0.010 opp/h=0.105 gaps=38 est=0.0384 medsecs=0.128 maxbp=2464.0 arbs=17/0 prof=0.0321 comp=10 M=False t20=True closes=14/25 trad=2 inlist=2 ['DAMMv2']
+       ('DAMMv2', 'CYtHYqW7JZV4ueCM55yFmB2ciqbn6sALEjyuHeVphCon', 25.0, 1.21)
+       ('DAMMv2', 'AR7kjCrydVC2vVJLjbVwiwbX7i9SdhgdocwzA683UXYQ', 25.0, 1.8)
+       signers [('CzYQ2kFn', 6), ('4B8srvot', 2), ('AgmLJBMD', 2)]
+BZFYNPeQAEW3 score=0.008 opp/h=0.057 gaps=2 est=0.0293 medsecs=35.121 maxbp=884.0 arbs=8/0 prof=0.0147 comp=6 M=False t20=True closes=1/1 trad=3 inlist=1 ['DLMM']
+       ('DLMM', '7hvn8egrNGkpQFGyziHxvGkJFWtmoCyXmYYXp4V7tszd', 200.0, 63.92)
+       ('DLMM', '2iYPjjTLPsVaQ55j9uz1k2LchGmkZkPRZcxWVK8gbsmD', 200.0, 21.95)
+       ('DLMM', '82gqRzW8RfHSgSA1cPEAmsrazrWfwLnmuLVcZCPziy48', 250.0, 0.54)
+       signers [('AgmLJBMD', 3), ('81RwTUf7', 1), ('HuTshmtw', 1)]
+8RNUw4N655VS score=0.008 opp/h=0.008 gaps=2 est=0.0041 medsecs=27.392 maxbp=442.0 arbs=0/0 prof=0.0000 comp=0 M=False t20=False closes=0/2 trad=3 inlist=0 ['DAMMv2', 'DLMM']
+       ('DLMM', 'FoyTFL8FxB9X4kvQnHxzyeazXkseSLn1wkP4T2Dsomvt', 100.0, 49.19)
+       ('DLMM', '2zNJtGJKA4ViGmigLVWBXGcRavFoTYam42TLToMEVnAN', 200.0, 5.91)
+       ('DAMMv2', 'DdoqD4ck2cLdMPNYEMNGKDMhTLpAy6gEdUAZGYfHmJcW', 600.0, 1.97)
+wdysfTqUsJ8q score=0.007 opp/h=0.059 gaps=7 est=0.0078 medsecs=10.602 maxbp=385.0 arbs=11/0 prof=0.0179 comp=7 M=True t20=True closes=4/4 trad=2 inlist=2 ['DAMMv2', 'DLMM']
+       ('DLMM', '5qpSEC4Dbvyp8KvpB49qKqu9KF7D5vxsTxfQzPMqjzGu', 100.0, 10.69)
+       ('DAMMv2', 'Bu65yUfdrxgwSnXXvrKxeNzmcjaSCsAEn5JtPMWYZVQG', 125.0, 510.95)
+       signers [('4BQ6ATUt', 3), ('HuTshmtw', 2), ('AgmLJBMD', 2)]
+A9AHYeqb7nQk score=0.006 opp/h=0.019 gaps=0 est=0.0000 medsecs=None maxbp=0 arbs=2/0 prof=0.0059 comp=2 M=False t20=False closes=0/0 trad=1 inlist=0 ['PumpSwap']
+       ('PumpSwap', 'BNpwtuYGve7G1v2NFaRQVCFvcU4CzjvwAmdUxEVQYvrd', 125.0, 111.73)
+       signers [('DtvmxrTA', 1), ('7dGrdJRY', 1)]
+DEW9dSN6QpWy score=0.006 opp/h=0.018 gaps=8 est=0.0091 medsecs=44.906 maxbp=383.0 arbs=15/0 prof=0.0023 comp=2 M=False t20=False closes=5/4 trad=7 inlist=4 ['DLMM']
+       ('DLMM', 'Eb7Z4ZxMTRcuYZCjd218hYJR1FSaeTWQddqHanfPF8B7', 40.0, 65.3)
+       ('DLMM', '8uwFMFCUDi61rgT1e6bUuDEfaUcN6roSoL7qHkp2NtHk', 30.0, 861.02)
+       ('DLMM', 'AG1EhPjsBrkxQWkViuLXF6pQnHwfr9f9sdNneeoykcEJ', 100.0, 1353.18)
+       ('DLMM', 'GrNBan7rCpqA6s4ptdi1o7az8fd3uacaGJMAUme8jXRU', 80.0, 144.19)
+       ('DLMM', '8PhQTNZ2Xc1nEmjbJ1g4smsxR2vYHWLkWQRG7ZTki9hQ', 200.0, 52.6)
+       ('DLMM', 'FcXwEoNGD4wLReAWCDD79iFrvi3suX7XT7qsmDpQ8SKb', 100.0, 0.52)
+       ('DLMM', '6yKySLgF92unCqhnQTTFbEcv1MQzAGsH6ywdumTCv5tz', 200.0, 8.11)
+       signers [('AgmLJBMD', 14), ('12eLaF28', 1)]
+AXC2XcQiVx6U score=0.006 opp/h=0.070 gaps=15 est=0.0360 medsecs=2.884 maxbp=2025.0 arbs=20/0 prof=0.0109 comp=11 M=True t20=True closes=6/9 trad=2 inlist=2 ['DLMM', 'PumpSwap']
+       ('DLMM', '23VVzpvbbXYYengkFQpS5efXZh8fGk8kMQggEro87k8T', 500.0, 3.62)
+       ('PumpSwap', 'hbXdZafYL5u1KCyXhwgPe3hwU1dJxcP31jwgmTkk4n7', 105.0, 291.26)
+       signers [('AgmLJBMD', 6), ('4B8srvot', 3), ('MriyaNN8', 2)]
+vfF1NjPmzGgV score=0.006 opp/h=0.068 gaps=0 est=0.0000 medsecs=None maxbp=0 arbs=18/0 prof=0.0207 comp=11 M=False t20=True closes=0/0 trad=1 inlist=0 ['DAMMv2']
+       ('DAMMv2', 'CHpkJo7oFQ5u3D2fkQr51YaLjN3buxQSdwCW3Yp3LW9S', 50.6, 203.41)
+       signers [('HuTshmtw', 8), ('gtagyESa', 1), ('7dGrdJRY', 1)]
+GAwhcphCqCv5 score=0.006 opp/h=0.073 gaps=4 est=0.0019 medsecs=7.388 maxbp=336.0 arbs=22/0 prof=0.0221 comp=12 M=False t20=True closes=2/2 trad=4 inlist=7 ['DLMM', 'PumpSwap']
+       ('DLMM', '8bRqShHqwgZfrtqxK3bjE7Gu78Enm8iik5NTp3bfnf1E', 200.0, 41.78)
+       ('PumpSwap', 'Cr469Kh7oCPtQk5YADEmjVpBWx1DiXXLiooPFJn23jsg', 100.0, 465.67)
+       ('DLMM', '2VT3XHfbAYgTgcAyiza8yzxZ3V7ti1eEoNxU3aPZyfHR', 100.0, 0.65)
+       ('DLMM', 'JCdxSC3Vv2rLN8f4vd3WdQwyGMr3y1Pi7Aw9q4RBXYaG', 300.0, 9.35)
+       signers [('GLiCiNEn', 5), ('AgmLJBMD', 5), ('Luckywzb', 2)]
+6hTLdzZaaCjm score=0.005 opp/h=0.022 gaps=1 est=0.0001 medsecs=1.565 maxbp=354.0 arbs=3/0 prof=0.0066 comp=3 M=True t20=True closes=1/0 trad=2 inlist=0 ['DLMM', 'PumpSwap']
+       ('DLMM', 'DPZnfC5Yq7WBZWNjfF7tmPvKk4hz4sTGximoiaX5Dn5z', 500.0, 0.45)
+       ('PumpSwap', '2qWF4dn1JnqhCpAYJQnKVaKezzuUiG4xdnbnCSK1Pgcw', 120.0, 167.89)
+       signers [('MriyaNN8', 1), ('ALVaRo3T', 1), ('AgmLJBMD', 1)]
+C1mBfBoDkwWf score=0.005 opp/h=0.046 gaps=6 est=0.0239 medsecs=7.309 maxbp=261.0 arbs=21/0 prof=0.0032 comp=8 M=True t20=True closes=5/2 trad=5 inlist=3 ['DAMMv2', 'DLMM']
+       ('DLMM', 'CnA7BFovX8q8gv2z9QEndo8hPi1PD5nqhABRH4rSnGEc', 30.0, 53.04)
+       ('DAMMv2', 'C7r9jXWiVYmBYR2Jj5YSLiEitUGJPjQXWeg7HPU8NwUk', 300.0, 1582.25)
+       ('DLMM', 'FtiotJckV2ZG4S1YgJDJLiXKKDAnKWXgQxo7vxsjPwPe', 50.0, 848.53)
+       ('DLMM', '3mm16Bre8ew8HsEkRzX5RPXhLMsejwxkfk2MdmdjDVDM', 200.0, 206.37)
+       ('DLMM', '5hw8qr4RG1Mr2iPZEive1w6fpFNnsg5SmyW8nRmcjSb8', 200.0, 87.89)
+       signers [('AgmLJBMD', 14), ('HuTshmtw', 1), ('MriyaNN8', 1)]
+HAcEqEVru6dR score=0.005 opp/h=0.075 gaps=11 est=0.0090 medsecs=2.428 maxbp=524.0 arbs=29/0 prof=0.0227 comp=15 M=True t20=True closes=5/6 trad=3 inlist=0 ['DLMM', 'PumpSwap']
+       ('DLMM', '6SEUgK6KxtMRtxoMcUzHNZc5RJAZ6YoC2gS485DgN2wW', 200.0, 2.59)
+       ('PumpSwap', '9KBF3KqYErfs1NXRK35gb4J8wnAD2i9ePZAzcwn7yhFT', 115.0, 184.1)
+       ('DLMM', 'Gr33t3mZVASueYQQTNARCjU969SpGYMFJhttejLRkEBB', 1000.0, 26.81)
+       signers [('BTpDZDfw', 6), ('AgmLJBMD', 6), ('XUrKb2aK', 2)]
+7KEPApdbBMBy score=0.004 opp/h=0.009 gaps=1 est=0.0046 medsecs=0.0 maxbp=395.0 arbs=1/0 prof=0.0000 comp=1 M=False t20=False closes=0/1 trad=2 inlist=2 ['DLMM']
+       ('DLMM', 'FkA19UWJX3wMAkwchGoodbvEm6cq5Q3Q86sj1Uh5V77q', 200.0, 67.91)
+       ('DLMM', '5csr5JWTCUAUrGE8rverZ9sH9LmBekyk3cb7BkPsnoZG', 200.0, 13.87)
+       signers [('AgmLJBMD', 1)]
+HuAXPyDWDaMY score=0.003 opp/h=0.006 gaps=3 est=0.0030 medsecs=24.839 maxbp=184.0 arbs=6/0 prof=0.0000 comp=1 M=False t20=False closes=0/3 trad=3 inlist=1 ['DLMM']
+       ('DLMM', 'HV49ZDgfqzeWF2BFVq4CtcEbrTm6oXGc68MiimWXh5qe', 20.0, 26.2)
+       ('DLMM', 'D1rDVEp78cvBctREKZmpLdRnPNe3Ufmgq6ZjMYye9kmq', 100.0, 574.13)
+       ('DLMM', '2pvxBP5SHmrtMLC1Gr27a2dSwK3ydNb12GipqKTzVxUF', 200.0, 12.74)
+       signers [('AgmLJBMD', 6)]
+8k4sBtEeK4pf score=0.003 opp/h=0.003 gaps=1 est=0.0014 medsecs=1.565 maxbp=145.0 arbs=0/0 prof=0.0000 comp=0 M=False t20=False closes=0/1 trad=3 inlist=2 ['DLMM', 'PumpSwap']
+       ('DLMM', 'DGHeYVBF81QNEoaoXdaGU1FBwzmgWV7ay46PHF4wbZgX', 100.0, 28.9)
+       ('PumpSwap', '2i2iULr7UwK1SDRB17T5FUtiMnFQL7fyy7rh69brZihc', 90.0, 727.19)
+       ('DLMM', '9xiLuqDSvN1pgyHSHCeRbrKFTe1DWbPAMJRm2usYgdaX', 300.0, 112.64)
+HgcxVs6kJhPA score=0.002 opp/h=0.005 gaps=4 est=0.0026 medsecs=102.503 maxbp=457.0 arbs=3/0 prof=0.0000 comp=1 M=False t20=False closes=0/4 trad=3 inlist=0 ['DAMMv2', 'DLMM']
+       ('DLMM', '8eRh3PYkBpfADNwkrRuXs6SjiNpNMCL8zCR9SVh3bMQF', 100.0, 29.38)
+       ('DLMM', '51nGR5Xc9xyuD12aX2V1LnHERCtN9L3B89DHSdeLV22q', 100.0, 1.69)
+       ('DAMMv2', '9Ehn6UZdm1RrA5wDzPSyA5mY6zR166FPFj6C7USJaTAL', 4000.0, 1.95)
+       signers [('AgmLJBMD', 3)]
+Ai66LHZG9MCz score=0.002 opp/h=0.041 gaps=1 est=0.0151 medsecs=553.537 maxbp=418.0 arbs=38/0 prof=0.0126 comp=16 M=False t20=True closes=2/0 trad=9 inlist=5 ['DLMM', 'PumpSwap']
+       ('DLMM', 'CcG3fyDZn6uXTV5p2TV9cceCA2YhE3bUMLeXGn6vZSNr', 20.0, 89.21)
+       ('DLMM', 'AUaPMKd13d633cXRRrPRfTeL5XRN64ngDWLEfH5zfBML', 25.0, 1.72)
+       ('DLMM', 'qhJ7kLjrE68sbDF11CpwMt3P9rqiwZtretM5ZzeAX6o', 50.0, 984.79)
+       ('DLMM', '4sDjot4aAGGiwsjzNpMsn4GrWsmek3NUd2VpDFh87EUX', 200.0, 51.59)
+       ('DLMM', '7EJqZHD4TTk8B9BCjUwLtfssGbxiDAsrbFHT8YWgrE7U', 100.0, 55.08)
+       ('PumpSwap', 'HMzvsEEmtzHhvZNw9uwbaG85HCTmFnkbhzUx16cy7ca3', 30.0, 13842.21)
+       ('DLMM', 'CjbjJLZ11foU5jby4HVMBkjRc8EBmugT9Q8UWr9iur4D', 100.0, 5.79)
+       ('DLMM', 'AWqqAciBPKmoWaZc2kXiRy1CKXF4gdGdMF2pMM5juinF', 200.0, 5.87)
+       ('DLMM', 'Gj4h2zspHePMmvse7LDqpNNxiFu4734cY56nY9LPrEun', 500.0, 6.28)
+       signers [('AgmLJBMD', 13), ('HuTshmtw', 5), ('XUrKb2aK', 3)]
+3iUTyNYW6xKv score=0.002 opp/h=0.002 gaps=3 est=0.0011 medsecs=9.845 maxbp=407.0 arbs=0/0 prof=0.0000 comp=0 M=False t20=False closes=0/3 trad=2 inlist=1 ['DLMM']
+       ('DLMM', 'HokwvDBVQrqJ2nRCZbybdqE8x35fHkKoXDBFMLNQL9Jy', 200.0, 3.16)
+       ('DLMM', '6C71WubQghuNudtYYWkSdFvkbh6k72o7bWAKbAvQGtJW', 200.0, 1.73)
+AzeNfRi7DX5H score=0.002 opp/h=0.029 gaps=0 est=0.0000 medsecs=None maxbp=0 arbs=17/0 prof=0.0088 comp=13 M=True t20=True closes=0/0 trad=1 inlist=0 ['PumpSwap']
+       ('PumpSwap', 'CjJ4aKLBYCgx4WrydnVXVXj2urMpwKKgSt6kcdmo3dvb', 100.0, 396.42)
+       signers [('MriyaNN8', 3), ('XUrKb2aK', 3), ('CQwT1byu', 1)]
+8dBnKHwNYH3h score=0.002 opp/h=0.002 gaps=1 est=0.0010 medsecs=0.559 maxbp=136.0 arbs=0/0 prof=0.0000 comp=0 M=False t20=False closes=0/1 trad=2 inlist=2 ['DLMM']
+       ('DLMM', '5VH7f8JvbdxYLzGWnLJowZeRukpy5MgNyqZhA76pktez', 200.0, 83.69)
+       ('DLMM', 'EnD4BL6NAxgvmYM72tt5JdqPAg4wRX7fBfHJk4t3VCT2', 200.0, 28.41)
+46YzZrL66v9D score=0.002 opp/h=0.017 gaps=5 est=0.0087 medsecs=26.733 maxbp=2303.0 arbs=10/0 prof=0.0002 comp=8 M=False t20=True closes=4/1 trad=2 inlist=2 ['DAMMv2', 'DLMM']
+       ('DAMMv2', '2E8c2vnAKQ3WaSHjezHwQ6GozuXRx96JX7GoNoBeqBug', 100.0, 166.73)
+       ('DLMM', '8ELAD3xF7WNfAYYpV9spsUsZF3ghrupidUkPrwq4MaWM', 200.0, 0.86)
+       signers [('LionX7R6', 2), ('GgGap6ti', 2), ('R32xAccF', 1)]
+8Y6pHi3cMhxh score=0.002 opp/h=0.010 gaps=2 est=0.0003 medsecs=9.094 maxbp=192.0 arbs=5/0 prof=0.0032 comp=5 M=False t20=True closes=1/1 trad=2 inlist=0 ['DLMM', 'PumpSwap']
+       ('PumpSwap', 'BoiL8W7CfhoGfjr3VHFH34GfKdkmGm7y1YyXbweLfcX7', 120.0, 123.83)
+       ('DLMM', 'CKSWwHVTzveRRZUWE9NyGh2i95Grv7mMkp1PHvskcsDT', 500.0, 1.9)
+       signers [('HvFdDWS3', 1), ('8NQ32SyF', 1), ('66666y3R', 1)]
+DvdmEnztCmXw score=0.002 opp/h=0.010 gaps=4 est=0.0050 medsecs=91.384 maxbp=263.0 arbs=5/0 prof=0.0000 comp=5 M=False t20=True closes=1/3 trad=3 inlist=0 ['DLMM']
+       ('DLMM', '6ELicDvGWaSYhUBFDQGckuRWZGP5du8bLuzWw3G7AQxD', 100.0, 252.49)
+       ('DLMM', 'CdjecBGeVtQW3Hpfk4TrkVzzMYfuE7SyH2pBsSCoZoJb', 100.0, 13.76)
+       ('DLMM', 'FDQmWtwHbz6v9TDAn6AXugYN8MdZdJ5Qh2LmWcQZwj5B', 150.0, 3.04)
+       signers [('R32xAccF', 1), ('4B8srvot', 1), ('HuTshmtw', 1)]
+5tzjoTepg3tE score=0.002 opp/h=0.006 gaps=1 est=0.0033 medsecs=0.066 maxbp=1901.0 arbs=4/0 prof=0.0000 comp=3 M=False t20=True closes=0/1 trad=2 inlist=0 ['DAMMv2', 'DLMM']
+       ('DAMMv2', 'Gd5pCYhoza44mZLR5PMP7eLCQqi45eXwD3v5de3R7mYh', 600.0, 0.82)
+       ('DLMM', '4RcYRQDMpZSifn6N1itQ2tsAePJC7mCwdkXRcd8YvjTA', 200.0, 0.59)
+       signers [('6AGp6zbG', 2), ('AgmLJBMD', 1), ('D9Ew95W9', 1)]

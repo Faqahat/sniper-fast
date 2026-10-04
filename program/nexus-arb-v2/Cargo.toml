@@ -1,0 +1,17 @@
+[package]
+name = "nexus-arb-v2"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+# The on-chain build pulls solana-program. The route logic builds and tests without it:
+#   cargo test                      (host, no Solana toolchain needed)
+#   cargo-build-sbf --features onchain
+onchain = ["solana-program"]
+
+[dependencies]
+solana-program = { version = "1.18", optional = true }

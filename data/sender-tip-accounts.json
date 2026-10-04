@@ -1,0 +1,1630 @@
+{
+ "jito": {
+  "tip_accounts": [
+   "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+   "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+   "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+   "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+   "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+   "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+   "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+   "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+  ],
+  "tip_account_count": 8,
+  "name": "Jito Block Engine (sendBundle / sendTransaction)",
+  "tip_required": "bundles: yes (a tip transfer in the bundle); sendTransaction: tip recommended (70/30 priority-fee/tip split), bundleOnly=true needs one",
+  "min_tip_sol": 1e-06,
+  "min_tip_note": "1,000 lamports minimum for bundles (docs); often not enough to win the auction",
+  "tip_per_transaction": "per bundle (any tx in the bundle may carry it); do not put tip accounts in lookup tables",
+  "eu_endpoints": [
+   "frankfurt.mainnet.block-engine.jito.wtf",
+   "amsterdam.mainnet.block-engine.jito.wtf",
+   "london.mainnet.block-engine.jito.wtf",
+   "dublin.mainnet.block-engine.jito.wtf"
+  ],
+  "features": [
+   "Jito bundles (up to 5 tx, atomic, all-or-nothing)",
+   "revert protection: sendTransaction?bundleOnly=true sends as a 1-tx bundle",
+   "anti-sandwich: any account starting jitodontfront in an instruction",
+   "getTipAccounts / tip_floor REST + tip_stream WebSocket",
+   "free; default 1 request/s per IP per region (no auth key needed for default sends)",
+   "BAM (Block Assembly Marketplace) is a separate rollout, see notes"
+  ],
+  "pricing": "free (tips only)",
+  "docs": "https://docs.jito.wtf/lowlatencytxnsend/",
+  "doc_date": "2026-09-09 (page footer 'Last updated'); fetched 2026-10-03",
+  "summary": {
+   "swqos": "no (block-engine auction)",
+   "bundles": "yes (<=5 tx)",
+   "mev_protection": "jitodontfront marker",
+   "revert_protection": "yes (bundleOnly=true / bundles)",
+   "dual_routing": "sendTransaction = RPC + bundle",
+   "free_tier": "free, 1 req/s/IP/region",
+   "eu_endpoint_primary": "frankfurt.mainnet.block-engine.jito.wtf"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "JitoBundle",
+   "JitoTx"
+  ],
+  "new_vs_local_map": []
+ },
+ "helius_sender": {
+  "tip_accounts": [
+   "4ACfpUFoaSD9bfPdeu6DBt89gB6ENTeHBXCAi87NhDEE",
+   "D2L6yPZ2FmmmTKPgzaMKdhu6EWZcTpLy1Vhx8uvZe7NZ",
+   "9bnz4RShgq1hAnLnZbP8kbgBg1kEmcJBYQq3gQbmnSta",
+   "5VY91ws6B2hMmBFRsXkoAAdsPHBJwRfBht4DXox3xkwn",
+   "2nyhqdwKcJZR2vcqCyrYsaPVdAnFoJjiksCXJ7hfEYgD",
+   "2q5pghRs6arqVjRvT5gfgWfWcHWmw1ZuCzphgd5KfWGJ",
+   "wyvPkWjVZz1M8fHQnMMCDTQDbkManefNNhweYk5WkcF",
+   "3KCKozbAaF75qEU33jtzozcJ29yJuaLJTy2jFdzUY8bT",
+   "4vieeGHPYPG2MmyPRcYjdiDmmhN3ww7hsFNap8pVN3Ey",
+   "4TQLFNWK8AovT1gFvda5jfw2oJeRMKEmw7aH6MGBJ3or"
+  ],
+  "tip_account_count": 10,
+  "name": "Helius Sender (Sender Max / SWQoS-only)",
+  "tip_required": "yes, every transaction; also a setComputeUnitPrice instruction (priority fee >= 5,000 lamports on Max, 10,000+ recommended)",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "Sender Max (all pathways + priority tip buffer, tx or bundle) 0.001 SOL; SWQoS-only tier (?swqos_only=true, single SWQoS path) 0.000005 SOL",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "fra-sender.helius-rpc.com",
+   "ams-sender.helius-rpc.com",
+   "lon-sender.helius-rpc.com"
+  ],
+  "features": [
+   "dual/multi-path routing: Helius SWQoS + Jito + Harmonic + Rakurai etc. at once (Max)",
+   "SWQoS-only tier (0.000005 SOL)",
+   "sendBundle up to 4 tx on Sender Max",
+   "MEV Protect opt-in (?mev-protect=true) avoids validators linked to sandwiching",
+   "50 TPS default (more on request)",
+   "no API credits consumed; available on every plan including free",
+   "HTTP regional endpoints + global HTTPS sender.helius-rpc.com; /ping keep-alive"
+  ],
+  "pricing": "free to use (no credits); pay per landed tx via tip",
+  "docs": "https://www.helius.dev/docs/sending-transactions/sender",
+  "doc_date": "fetched 2026-10-03 (live Mintlify page; no published date)",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "yes (Max, <=4 tx)",
+   "mev_protection": "opt-in mev-protect",
+   "revert_protection": "no",
+   "dual_routing": "yes (Helius SWQoS + Jito + Harmonic + Rakurai)",
+   "free_tier": "free on all plans, 50 TPS",
+   "eu_endpoint_primary": "fra-sender.helius-rpc.com"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "Helius"
+  ],
+  "new_vs_local_map": []
+ },
+ "temporal_nozomi": {
+  "tip_accounts": [
+   "TEMPaMeCRFAS9EKF53Jd6KpHxgL47uWLcpFArU1Fanq",
+   "noz3jAjPiHuBPqiSPkkugaJDkJscPuRhYnSpbi8UvC4",
+   "noz3str9KXfpKknefHji8L1mPgimezaiUyCHYMDv1GE",
+   "noz6uoYCDijhu1V7cutCpwxNiSovEwLdRHPwmgCGDNo",
+   "noz9EPNcT7WH6Sou3sr3GGjHQYVkN3DNirpbvDkv9YJ",
+   "nozc5yT15LazbLTFVZzoNZCwjh3yUtW86LoUyqsBu4L",
+   "nozFrhfnNGoyqwVuwPAW4aaGqempx4PU6g6D9CJMv7Z",
+   "nozievPk7HyK1Rqy1MPJwVQ7qQg2QoJGyP71oeDwbsu",
+   "noznbgwYnBLDHu8wcQVCEw6kDrXkPdKkydGJGNXGvL7",
+   "nozNVWs5N8mgzuD3qigrCG2UoKxZttxzZ85pvAQVrbP",
+   "nozpEGbwx4BcGp6pvEdAh1JoC2CQGZdU6HbNP1v2p6P",
+   "nozrhjhkCr3zXT3BiT4WCodYCUFeQvcdUkM7MqhKqge",
+   "nozrwQtWhEdrA6W8dkbt9gnUaMs52PdAv5byipnadq3",
+   "nozUacTVWub3cL4mJmGCYjKZTnE9RbdY5AP46iQgbPJ",
+   "nozWCyTPppJjRuw2fpzDhhWbW355fzosWSzrrMYB1Qk",
+   "nozWNju6dY353eMkMqURqwQEoM3SFgEKC6psLCSfUne",
+   "nozxNBgWohjR75vdspfxR5H9ceC7XXH99xpxhVGt3Bb"
+  ],
+  "tip_account_count": 17,
+  "name": "Temporal Nozomi",
+  "tip_required": "yes, every transaction (below-minimum tips are silently dropped)",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "default 0.001 SOL; lower per-account minimums for qualifying users; private per-client tip addresses exist",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "fra2.nozomi.temporal.xyz (direct)",
+   "fra.nozomi.temporal.xyz (Cloudflare)",
+   "ams1.nozomi.temporal.xyz (direct)",
+   "ams.nozomi.temporal.xyz (Cloudflare)",
+   "lon1.nozomi.temporal.xyz (direct)",
+   "lon.nozomi.temporal.xyz (Cloudflare)"
+  ],
+  "features": [
+   "staked connections (SWQoS)",
+   "routes via Jito and Harmonic block builders, bidding with your tip",
+   "sendBundle 1-4 tx atomic and in order",
+   "separate MEV Protect key (trusted-validator whitelist); default keys are NOT sandwich-protected",
+   "auto-retry until confirmed/blockhash expiry",
+   "JSON-RPC, binary API v2 (sendTransaction2), batch, QUIC",
+   "rate limits per region (send to several regions at once)"
+  ],
+  "pricing": "self-serve key at dashboard.nozomi.temporal.xyz; tip-based",
+  "docs": "https://use.temporal.xyz/nozomi/tipping-and-faq",
+  "doc_date": "fetched 2026-10-03 (live GitBook page; no published date)",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "yes (1-4 atomic)",
+   "mev_protection": "separate MEV Protect key",
+   "revert_protection": "bundles only",
+   "dual_routing": "yes (staked + Jito/Harmonic builders)",
+   "free_tier": "free self-serve key",
+   "eu_endpoint_primary": "fra2.nozomi.temporal.xyz"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "Nozomi"
+  ],
+  "new_vs_local_map": []
+ },
+ "astralane_iris": {
+  "tip_accounts": [
+   "astrazznxsGUhWShqgNtAdfrzP2G83DzcWVJDxwV9bF",
+   "astra4uejePWneqNaJKuFFA8oonqCE1sqF6b45kDMZm",
+   "astra9xWY93QyfG6yM8zwsKsRodscjQ2uU2HKNL5prk",
+   "astraRVUuTHjpwEVvNBeQEgwYx9w9CFyfxjYoobCZhL",
+   "astraEJ2fEj8Xmy6KLG7B3VfbKfsHXhHrNdCQx7iGJK",
+   "astraubkDw81n4LuutzSQ8uzHCv4BhPVhfvTcYv8SKC",
+   "astraZW5GLFefxNPAatceHhYjfA1ciq9gvfEg2S47xk",
+   "astrawVNP4xDBKT7rAdxrLYiTSTdqtUr63fSMduivXK",
+   "AstrA1ejL4UeXC2SBP4cpeEmtcFPZVLxx3XGKXyCW6to",
+   "AsTra79FET4aCKWspPqeSFvjJNyp96SvAnrmyAxqg5b7",
+   "AstrABAu8CBTyuPXpV4eSCJ5fePEPnxN8NqBaPKQ9fHR",
+   "AsTRADtvb6tTmrsqULQ9Wji9PigDMjhfEMza6zkynEvV",
+   "AsTRAEoyMofR3vUPpf9k68Gsfb6ymTZttEtsAbv8Bk4d",
+   "AStrAJv2RN2hKCHxwUMtqmSxgdcNZbihCwc1mCSnG83W",
+   "Astran35aiQUF57XZsmkWMtNCtXGLzs8upfiqXxth2bz",
+   "AStRAnpi6kFrKypragExgeRoJ1QnKH7pbSjLAKQVWUum",
+   "ASTRaoF93eYt73TYvwtsv6fMWHWbGmMUZfVZPo3CRU9C"
+  ],
+  "tip_account_count": 17,
+  "name": "Astralane Iris",
+  "tip_required": "yes, every transaction; API key required on every tier",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "Free tier 0.001 SOL; VIP1/VIP2 0.0001 SOL; VIP3 0.00001 SOL (tiers by rolling 7-day tip volume)",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "fr.gateway.astralane.io (recommended)",
+   "fr2.gateway.astralane.io",
+   "ams.gateway.astralane.io (recommended)",
+   "ams2.gateway.astralane.io",
+   "lon.gateway.astralane.io"
+  ],
+  "features": [
+   "own SWQoS network",
+   "sendBundle (0 TPS on free tier; 5/10/20 TPS on VIP1-3)",
+   "mev-protect and swqos-only options",
+   "sendPaladin / sendIdeal methods",
+   "tip refunds/rebates for overpaying txs",
+   "binary /irisb, batch, WebSocket and QUIC submission (QUIC via IPv4)",
+   "TPS: free 5, VIP1 20, VIP2 40, VIP3 80; QoS throttling for high-failure free-tier users"
+  ],
+  "pricing": "tiered by tip volume; custom/enterprise via Discord",
+  "docs": "https://astralane.gitbook.io/docs/low-latency/send-txn-fee-tiers",
+  "doc_date": "fetched 2026-10-03 (live GitBook page; no published date)",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "yes (VIP tiers only)",
+   "mev_protection": "mev-protect option",
+   "revert_protection": "not documented",
+   "dual_routing": "yes (SWQoS net + sendPaladin/sendIdeal)",
+   "free_tier": "free tier 5 TPS (key required)",
+   "eu_endpoint_primary": "fr.gateway.astralane.io"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "Iris"
+  ],
+  "new_vs_local_map": []
+ },
+ "bloxroute_trader_api": {
+  "tip_accounts": [
+   "3UQUKjhMKaY2S6bjcQD6yHB7utcZt5bfarRCmctpRtUd",
+   "FogxVNs6Mm2w9rnGL1vkARSwJxvLE8mujTv3LK8RnUhF",
+   "bLx7MvxGaKdKL7mEbpk9tC79z6MnBSJoJkuaEAPu6Nd",
+   "bLx7XBqSg3LUPVf1bRgCnkJmgVZR8QEgDJBPqcRLHvp",
+   "bLx8KeZxinPwy6kkUgyzMLeqb2ARNsWjADG1dhSsVba",
+   "bLxADBknoNj8WAGw2W6GBYeq848Xx6ajhaymV1YvrHm",
+   "bLxAc88vRBwvcUQJEgcxNfBLvHPikY4csNsUmPeWea2",
+   "bLxQ88oCiTsL8Xj4YWekKi1hjrgmbE3J3FFZ2xZHR3h",
+   "bLxS7NoLuynNRJ4mCnEE2YbtwJFttYsEyp2ME7rp2yt",
+   "bLxW6mCov7VEbrKc3S9tcBRcfSzRnLCbNp3Dfn3SJG5",
+   "bLxXSGXs4mYPTC5okZXed1qzvjNwNJ48QJ82hT2V7w7",
+   "bLxYi3vojbbB7hVzVDVTdBLVPhp7GJ3ZB3BwdK5sFXi",
+   "bLxhLPgBXtUpX4b1bH3HatuMGMSKT9GnwtuCGiMSAqe",
+   "bLxpY1mniuFW4PgkNA4JiNxoeKHFszryi6tNgyZAiAA",
+   "bLxuETxd2tgWxBALNwPzAfHhsik4BzD3nrEBCiPNZQD",
+   "bLxuL2gK5FW7xfahvwLrxLyW76vcCpNsKQY2CmnE6kV",
+   "bLxv4Hnub7nDJWHs8s17o9bGU65Bnx6Yqp2fqtMgHmm"
+  ],
+  "tip_account_count": 17,
+  "name": "bloXroute Solana Trader API",
+  "tip_required": "yes, every submitted transaction",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "0.001 SOL per transaction; private tip wallets on request",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "germany.solana.dex.blxrbdn.com",
+   "amsterdam.solana.dex.blxrbdn.com",
+   "uk.solana.dex.blxrbdn.com"
+  ],
+  "features": [
+   "staked RPCs (useStakedRPCs flag)",
+   "frontRunningProtection flag",
+   "submit, submit-batch, submit-snipe, submit-paladin endpoints",
+   "credit-based rate limits: Introductory 60 credits/min, Enterprise +600, Enterprise-Elite +3000, Ultra +9900 (submit = 1 credit)",
+   "use HTTP not HTTPS for best performance (docs)"
+  ],
+  "pricing": "free tier can submit; paid tiers by credits ('Build your own' $250/month per +150 credits/min)",
+  "legacy_tip_accounts_unverified": [
+   "HWEoBxYs7ssKuudEjzjmpfJVX7Dvi7wescFsVx2L5yoY"
+  ],
+  "legacy_note": "HWEoBx... is the old Trader API v2 tip wallet in bloXroute SDK samples ('as of 2/12/2024'); NOT on the current tip page. Useful only for attributing old/legacy-SDK transactions.",
+  "docs": "https://docs.bloxroute.com/solana/trader-api/introduction/tip-and-tipping-addresses",
+  "doc_date": "fetched 2026-10-03 (live GitBook page; no published date)",
+  "summary": {
+   "swqos": "yes (useStakedRPCs)",
+   "bundles": "yes",
+   "mev_protection": "frontRunningProtection flag",
+   "revert_protection": "not documented",
+   "dual_routing": "yes (staked RPCs + Paladin route)",
+   "free_tier": "free tier (60 credits/min)",
+   "eu_endpoint_primary": "germany.solana.dex.blxrbdn.com"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "Bloxroute"
+  ],
+  "new_vs_local_map": []
+ },
+ "nextblock": {
+  "tip_accounts": [
+   "NEXTbLoCkB51HpLBLojQfpyVAMorm3zzKg7w9NFdqid",
+   "nextBLoCkPMgmG8ZgJtABeScP35qLa2AMCNKntAP7Xc",
+   "NextbLoCkVtMGcV47JzewQdvBpLqT9TxQFozQkN98pE",
+   "NexTbLoCkWykbLuB1NkjXgFWkX9oAtcoagQegygXXA2",
+   "NeXTBLoCKs9F1y5PJS9CKrFNNLU1keHW71rfh7KgA1X",
+   "NexTBLockJYZ7QD7p2byrUa6df8ndV2WSd8GkbWqfbb",
+   "neXtBLock1LeC67jYd1QdAa32kbVeubsfPNTJC1V5At",
+   "nEXTBLockYgngeRmRrjDV31mGSekVPqZoMGhQEZtPVG"
+  ],
+  "tip_account_count": 8,
+  "name": "NextBlock",
+  "tip_required": "yes",
+  "min_tip_sol": null,
+  "min_tip_note": "no fixed minimum stated on current pages; docs examples use 0.001 SOL and point to a tip-floor API (landed-tip percentiles, last 5 min); low tips rejected (prior note)",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "frankfurt.nextblock.io",
+   "amsterdam.nextblock.io",
+   "london.nextblock.io",
+   "dublin.nextblock.io"
+  ],
+  "features": [
+   "dedicated SWQoS on all plans",
+   "frontRunningProtection and revertOnFail flags (HTTP only; not on QUIC)",
+   "batched submit, QUIC submit, bundle sample",
+   "tip-floor stream",
+   "Trial 1 tx / 10 s; Entry 5 TPS; Intermediate 20; Advanced 50; Enterprise 100+"
+  ],
+  "pricing": "Trial free; Entry $249/mo; Intermediate $749/mo; Advanced $1,749/mo; Enterprise custom",
+  "docs": "https://docs.nextblock.io/pricing-and-rate-limits",
+  "doc_date": "fetched 2026-10-03 (live GitBook page; no published date)",
+  "summary": {
+   "swqos": "yes (dedicated)",
+   "bundles": "yes (bundle sample)",
+   "mev_protection": "frontRunningProtection flag",
+   "revert_protection": "revertOnFail flag",
+   "dual_routing": "not documented",
+   "free_tier": "trial 1 tx/10 s; $249+/mo",
+   "eu_endpoint_primary": "frankfurt.nextblock.io"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "NextBlock"
+  ],
+  "new_vs_local_map": []
+ },
+ "0slot": {
+  "tip_accounts": [
+   "6fQaVhYZA4w3MBSXjJ81Vf6W1EDYeUPXpgVQ6UQyU1Av",
+   "4HiwLEP2Bzqj3hM2ENxJuzhcPCdsafwiet3oGkMkuQY4",
+   "7toBU3inhmrARGngC7z6SjyP85HgGMmCTEwGNRAcYnEK",
+   "8mR3wB1nh4D6J9RUCugxUpc6ya8w38LPxZ3ZjcBhgzws",
+   "6SiVU5WEwqfFapRuYCndomztEwDjvS5xgtEof3PLEGm9",
+   "TpdxgNJBWZRL8UXF5mrEsyWxDWx9HQexA9P1eTWQ42p",
+   "D8f3WkQu6dCF33cZxuAsrKHrGsqGP2yvAHf8mX6RXnwf",
+   "GQPFicsy3P3NXxB5piJohoxACqTvWE9fKpLgdsMduoHE",
+   "Ey2JEr8hDkgN8qKJGrLf2yFjRhW7rab99HVxwi5rcvJE",
+   "4iUgjMT8q2hNZnLuhpqZ1QtiV8deFPy2ajvvjEpKKgsS",
+   "3Rz8uD83QsU8wKvZbgWAPvCNDU6Fy8TSZTMcPm3RB6zt",
+   "DiTmWENJsHQdawVUUKnUXkconcpW4Jv52TnMWhkncF6t",
+   "HRyRhQ86t3H4aAtgvHVpUJmw64BDrb61gRiKcdKUXs5c",
+   "7y4whZmw388w1ggjToDLSBLv47drw5SUXcLk6jtmwixd",
+   "J9BMEWFbCBEjtQ1fG5Lo9kouX1HfrKQxeUxetwXrifBw",
+   "8U1JPQh3mVQ4F5jwRdFTBzvNRQaYFQppHQYoH38DJGSQ",
+   "Eb2KpSC8uMt9GmzyAEm5Eb1AAAgTjRaXWFjKyFXHZxF3",
+   "FCjUJZ1qozm1e8romw216qyfQMaaWKxWsuySnumVCCNe",
+   "ENxTEjSQ1YabmUpXAdCgevnHQ9MHdLv8tzFiuiYJqa13",
+   "6rYLG55Q9RpsPGvqdPNJs4z5WTxJVatMB8zV3WJhs5EK",
+   "Cix2bHfqPcKcM233mzxbLk14kSggUUiz2A87fJtGivXr"
+  ],
+  "tip_account_count": 21,
+  "name": "0slot",
+  "tip_required": "yes, every transaction",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "0.001 SOL (Trial/Entry/Intermediate); 0.0001 SOL on Advanced plan",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "de.0slot.trade",
+   "ams.0slot.trade"
+  ],
+  "features": [
+   "dedicated SWQoS on all plans",
+   "Anti-MEV option (anti-mev=true)",
+   "binary /txb and JSON /txn paths",
+   "staked_conn sendTransaction max 5 calls/s",
+   "plans: Trial (first week) 5 TPS, Entry 5, Intermediate 20, Advanced 50"
+  ],
+  "pricing": "page lists all plans as 'Free! NEW' (contact sales); key via Telegram/Discord",
+  "docs": "https://0slot.trade/docs.php",
+  "doc_date": "fetched 2026-10-03 (live page; no published date)",
+  "summary": {
+   "swqos": "yes (dedicated)",
+   "bundles": "not documented",
+   "mev_protection": "anti-mev option",
+   "revert_protection": "not documented",
+   "dual_routing": "not documented",
+   "free_tier": "trial week 5 TPS; plans via sales",
+   "eu_endpoint_primary": "de.0slot.trade"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "ZeroSlot"
+  ],
+  "new_vs_local_map": []
+ },
+ "blockrazor": {
+  "tip_accounts": [
+   "FjmZZrFvhnqqb9ThCuMVnENaM3JGVuGWNyCAxRJcFpg9",
+   "6No2i3aawzHsjtThw81iq1EXPJN6rh8eSJCLaYZfKDTG",
+   "A9cWowVAiHe9pJfKAj3TJiN9VpbzMUq6E4kEvf5mUT22",
+   "Gywj98ophM7GmkDdaWs4isqZnDdFCW7B46TXmKfvyqSm",
+   "68Pwb4jS7eZATjDfhmTXgRJjCiZmw1L7Huy4HNpnxJ3o",
+   "4ABhJh5rZPjv63RBJBuyWzBK3g9gWMUQdTZP2kiW31V9",
+   "B2M4NG5eyZp5SBQrSdtemzk5TqVuaWGQnowGaCBt8GyM",
+   "5jA59cXMKQqZAVdtopv8q3yyw9SYfiE3vUCbt7p8MfVf",
+   "5YktoWygr1Bp9wiS1xtMtUki1PeYuuzuCF98tqwYxf61",
+   "295Avbam4qGShBYK7E9H5Ldew4B3WyJGmgmXfiWdeeyV",
+   "EDi4rSy2LZgKJX74mbLTFk4mxoTgT6F7HxxzG2HBAFyK",
+   "BnGKHAC386n4Qmv9xtpBVbRaUTKixjBe3oagkPFKtoy6",
+   "Dd7K2Fp7AtoN8xCghKDRmyqr5U169t48Tw5fEd3wT9mq",
+   "AP6qExwrbRgBAVaehg4b5xHENX815sMabtBzUzVB4v8S"
+  ],
+  "tip_account_count": 14,
+  "name": "BlockRazor (Solana Send Transaction)",
+  "tip_required": "yes (place the tip transfer first)",
+  "min_tip_sol": 0.0001,
+  "min_tip_note": "100,000 lamports minimum; recommend the getTransactionfee value; CU price >= 1,000,000 recommended",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "frankfurt.solana.blockrazor.xyz (HTTP :443)",
+   "frankfurt.solana.blockrazor.io (HTTPS)",
+   "frankfurt-cherryservers.solana.blockrazor.xyz",
+   "frankfurt-allnodes.solana.blockrazor.xyz",
+   "amsterdam.solana.blockrazor.xyz",
+   "amsterdam-cherryservers.solana.blockrazor.xyz",
+   "london.solana.blockrazor.xyz"
+  ],
+  "features": [
+   "modes: fast, sandwichMitigation",
+   "sendBundle up to 4 tx, all-or-nothing (not enabled by default; contact)",
+   "jitodontfront / dontbund1e anti-frontrun markers",
+   "default 3 TPS, not bound to subscription plan",
+   "binary + plain-text + gRPC submission",
+   "Cherry Servers Frankfurt/Amsterdam co-located endpoints"
+  ],
+  "pricing": "sending not tied to plans; free self-serve key",
+  "docs": "https://docs.blockrazor.io/transaction-submission/transaction-sending/solana/priority-fee-and-tip",
+  "doc_date": "fetched 2026-10-03 (live GitBook page; no published date)",
+  "summary": {
+   "swqos": "yes (own edge network)",
+   "bundles": "yes (<=4, on request)",
+   "mev_protection": "sandwichMitigation mode",
+   "revert_protection": "bundles all-or-nothing",
+   "dual_routing": "not documented",
+   "free_tier": "free key, 3 TPS",
+   "eu_endpoint_primary": "frankfurt.solana.blockrazor.xyz"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "BlockRazor"
+  ],
+  "new_vs_local_map": []
+ },
+ "falcon_corvus": {
+  "tip_accounts": [
+   "Fa1con11xLjPddfzRwRUB16sbFZggp2JeJkCeWREyR8X",
+   "Fa1con11TM1RuAQzbQzYjTy4Ekfap9Lnc9fnEbQYEd6Q",
+   "Fa1con113Bvi76nS5AzUiRDC2fqjfzkNMUNRLgQybMYt",
+   "Fa1con1QGHJK232s8yZpzZZwqPexnAKcoyKj626LNsMv",
+   "Fa1con1zUzb6qJVFz5tNkPq1Ahm8H1qKW7Q48252QbkQ",
+   "Fa1con16d3MSwd3SAiwvr2LwgkpE7ot8zntbpuec8HAx",
+   "Fa1con1i7mpa7Qc6epYJ6r4P9AbU77DFFz173r59Df1x",
+   "Fa1con18nWn8TdAGL7JX8PertfMUGVSc899NawokJ4Bq",
+   "Fa1con1GKusK2EqsfzrDzGPaYZSxQtFGzJiRMMU9Zm2g",
+   "Fa1con1RDwVwM9VrJ53CwVefD3VU9c58EMpDawV7fLMi"
+  ],
+  "tip_account_count": 10,
+  "name": "Falcon (Corvus Labs)",
+  "tip_required": "yes: one top-level System transfer (not transferWithSeed, not split, tip account not via lookup table)",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "1,000,000 lamports in a single transfer; rejection returns data.minimumLamports",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "fra.falcon.wtf",
+   "ams.falcon.wtf",
+   "lon.falcon.wtf"
+  ],
+  "features": [
+   "SWQoS backed by >1M SOL stake plus Jito and Harmonic bundle engines",
+   "JSON-RPC, /binary, /plaintext, QUIC (:5000) and native UDP",
+   "TPS allowance attached to the API key (onboarding/Discord)",
+   "tx size cap 1,232 bytes"
+  ],
+  "pricing": "Falcon tip-based; Corvus RPC plans separate (Starter $160/mo 50 submit TPS, Standard $325/mo 125, Professional $400/mo 250)",
+  "docs": "https://docs.corvus-labs.io/falcon/tips",
+  "doc_date": "fetched 2026-10-03 (live Mintlify page; no published date)",
+  "summary": {
+   "swqos": "yes (>1M SOL stake)",
+   "bundles": "no user bundles",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "yes (SWQoS + Jito + Harmonic engines)",
+   "free_tier": "no (key via onboarding)",
+   "eu_endpoint_primary": "fra.falcon.wtf"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "Falcon"
+  ],
+  "new_vs_local_map": []
+ },
+ "flashblock": {
+  "tip_accounts": [
+   "FLaShB3iXXTWE1vu9wQsChUKq3HFtpMAhb8kAh1pf1wi",
+   "FLashhsorBmM9dLpuq6qATawcpqk1Y2aqaZfkd48iT3W",
+   "FLaSHJNm5dWYzEgnHJWWJP5ccu128Mu61NJLxUf7mUXU",
+   "FLaSHR4Vv7sttd6TyDF4yR1bJyAxRwWKbohDytEMu3wL",
+   "FLASHRzANfcAKDuQ3RXv9hbkBy4WVEKDzoAgxJ56DiE4",
+   "FLasHstqx11M8W56zrSEqkCyhMCCpr6ze6Mjdvqope5s",
+   "FLAShWTjcweNT4NSotpjpxAkwxUr2we3eXQGhpTVzRwy",
+   "FLasHXTqrbNvpWFB6grN47HGZfK6pze9HLNTgbukfPSk",
+   "FLAshyAyBcKb39KPxSzXcepiS8iDYUhDGwJcJDPX4g2B",
+   "FLAsHZTRcf3Dy1APaz6j74ebdMC6Xx4g6i9YxjyrDybR"
+  ],
+  "tip_account_count": 10,
+  "name": "FlashBlock",
+  "tip_required": "yes",
+  "min_tip_sol": 0.0001,
+  "min_tip_note": "error 1003 'insufficient tip: at least 0.0001 SOL'; tip-floor API and randomTipAddress API",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "fra.flashblock.trade",
+   "ams.flashblock.trade",
+   "london.flashblock.trade",
+   "lithuanian.flashblock.trade"
+  ],
+  "features": [
+   "submit / submit-batch HTTP",
+   "sendBundle",
+   "QUIC submit",
+   "tip-floor + adaptive tip strategy docs",
+   "free trial key (10 tx/s per prior note)"
+  ],
+  "pricing": "free trial; paid plans in dashboard",
+  "docs": "https://doc.flashblock.trade/en/transaction/",
+  "doc_date": "captured 2026-10-03 06:32Z from the doc site's JS bundles; the site now returns HTTP 403 to scripted fetches (re-check in a browser)",
+  "summary": {
+   "swqos": "not stated",
+   "bundles": "yes",
+   "mev_protection": "not documented",
+   "revert_protection": "not documented",
+   "dual_routing": "not documented",
+   "free_tier": "free trial key",
+   "eu_endpoint_primary": "fra.flashblock.trade"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "FlashBlock"
+  ],
+  "new_vs_local_map": []
+ },
+ "node1": {
+  "tip_accounts": [
+   "node1PqAa3BWWzUnTHVbw8NJHC874zn9ngAkXjgWEej",
+   "node1UzzTxAAeBTpfZkQPJXBAqixsbdth11ba1NXLBG",
+   "node1Qm1bV4fwYnCurP8otJ9s5yrkPq7SPZ5uhj3Tsv",
+   "node1PUber6SFmSQgvf2ECmXsHP5o3boRSGhvJyPMX1",
+   "node1AyMbeqiVN6eoQzEAwCA6Pk826hrdqdAHR7cdJ3",
+   "node1YtWCoTwwVYTFLfS19zquRQzYX332hs1HEuRBjC"
+  ],
+  "tip_account_count": 6,
+  "name": "Node1 (NodeOne) Fast Landing",
+  "tip_required": "yes",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "at least 0.001 SOL to one of 6 wallets; higher tip = higher success",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "fra.node1.me",
+   "fra2.node1.me",
+   "ams.node1.me",
+   "lon.node1.me",
+   "dub.node1.me"
+  ],
+  "features": [
+   "HTTP API, batch API, QUIC API",
+   "keep-alive recommended",
+   "free self-serve key (about 2 tx/s per prior note)"
+  ],
+  "pricing": "self-serve at node1.me",
+  "docs": "https://node1.gitbook.io/node1-docs/solana/fast-landing/endpoints",
+  "doc_date": "fetched 2026-10-03 (live GitBook page; no published date)",
+  "summary": {
+   "swqos": "not stated",
+   "bundles": "not documented",
+   "mev_protection": "not documented",
+   "revert_protection": "not documented",
+   "dual_routing": "not documented",
+   "free_tier": "free self-serve key",
+   "eu_endpoint_primary": "fra.node1.me"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "NodeOne"
+  ],
+  "new_vs_local_map": []
+ },
+ "stellium": {
+  "tip_accounts": [
+   "ste11JV3MLMM7x7EJUM2sXcJC1H7F4jBLnP9a9PG8PH",
+   "ste11MWPjXCRfQryCshzi86SGhuXjF4Lv6xMXD2AoSt",
+   "ste11p5x8tJ53H1NbNQsRBg1YNRd4GcVpxtDw8PBpmb",
+   "ste11p7e2KLYou5bwtt35H7BM6uMdo4pvioGjJXKFcN",
+   "ste11TMV68LMi1BguM4RQujtbNCZvf1sjsASpqgAvSX",
+   "ste111J5Lq54fgZtmCYZTM8emu2UbeDeN9qwhs69hqA",
+   "ste113yP33KzDSqBFUErdbZJ3PGRojHToTPSthUkNTq",
+   "ste11681PDwyYiQUUtFNoujLY3tUqThLMY4yKJrxPtj",
+   "ste11eZvF5bebo6EVyGMJHV6LtPtx7e6TzNZtxPfXGy"
+  ],
+  "tip_account_count": 9,
+  "name": "Stellium Fast Tx Landing",
+  "tip_required": "yes, every transaction",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "0.001 SOL",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "regions Frankfurt, Amsterdam, London, Dublin, Lithuania (hostnames given on request; docs use STELLIUM_ENDPOINT placeholder)",
+   "fra1.flashrpc.com (unverified: from a third-party client repo, not Stellium docs)"
+  ],
+  "features": [
+   "staked connections to leaders",
+   "batch-send endpoint",
+   "rate limits apply (not published)"
+  ],
+  "pricing": "contact (Telegram)",
+  "docs": "https://docs.stellium.dev/products/fast-tx-landing",
+  "doc_date": "fetched 2026-10-03 (live Mintlify page; no published date)",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "no",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "not documented",
+   "free_tier": "contact",
+   "eu_endpoint_primary": "on request (Frankfurt region)"
+  },
+  "in_local_map": "no",
+  "local_map_kinds": [],
+  "new_vs_local_map": [
+   "ste11JV3MLMM7x7EJUM2sXcJC1H7F4jBLnP9a9PG8PH",
+   "ste11MWPjXCRfQryCshzi86SGhuXjF4Lv6xMXD2AoSt",
+   "ste11p5x8tJ53H1NbNQsRBg1YNRd4GcVpxtDw8PBpmb",
+   "ste11p7e2KLYou5bwtt35H7BM6uMdo4pvioGjJXKFcN",
+   "ste11TMV68LMi1BguM4RQujtbNCZvf1sjsASpqgAvSX",
+   "ste111J5Lq54fgZtmCYZTM8emu2UbeDeN9qwhs69hqA",
+   "ste113yP33KzDSqBFUErdbZJ3PGRojHToTPSthUkNTq",
+   "ste11681PDwyYiQUUtFNoujLY3tUqThLMY4yKJrxPtj",
+   "ste11eZvF5bebo6EVyGMJHV6LtPtx7e6TzNZtxPfXGy"
+  ]
+ },
+ "hellomoon_lunar_lander": {
+  "tip_accounts": [
+   "moon17L6BgxXRX5uHKudAmqVF96xia9h8ygcmG2sL3F",
+   "moon26Sek222Md7ZydcAGxoKG832DK36CkLrS3PQY4c",
+   "moon7fwyajcVstMoBnVy7UBcTx87SBtNoGGAaH2Cb8V",
+   "moonBtH9HvLHjLqi9ivyrMVKgFUsSfrz9BwQ9khhn1u",
+   "moonCJg8476LNFLptX1qrK8PdRsA1HD1R6XWyu9MB93",
+   "moonF2sz7qwAtdETnrgxNbjonnhGGjd6r4W4UC9284s",
+   "moonKfftMiGSak3cezvhEqvkPSzwrmQxQHXuspC96yj",
+   "moonQBUKBpkifLcTd78bfxxt4PYLwmJ5admLW6cBBs8",
+   "moonXwpKwoVkMegt5Bc776cSW793X1irL5hHV1vJ3JA",
+   "moonZ6u9E2fgk6eWd82621eLPHt9zuJuYECXAYjMY1C"
+  ],
+  "tip_account_count": 10,
+  "name": "Hello Moon Lunar Lander",
+  "tip_required": "yes",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "0.001 SOL",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "fra.lunar-lander.hellomoon.io",
+   "ams.lunar-lander.hellomoon.io",
+   "lon.lunar-lander.hellomoon.io"
+  ],
+  "features": [
+   "/send JSON-RPC and /send-bin raw bytes",
+   "Batch Send API (independent txs)",
+   "Send Bundle API",
+   "ping every 30-45 s (idle close at 75 s)"
+  ],
+  "pricing": "API key via Discord ticket; rate limits not published",
+  "docs": "https://docs.hellomoon.io/reference/lunar-lander",
+  "doc_date": "fetched 2026-10-03 (live readme.io page; no published date)",
+  "summary": {
+   "swqos": "not stated",
+   "bundles": "yes (Send Bundle API)",
+   "mev_protection": "not documented",
+   "revert_protection": "bundles",
+   "dual_routing": "not documented",
+   "free_tier": "key via Discord",
+   "eu_endpoint_primary": "fra.lunar-lander.hellomoon.io"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "Lunar"
+  ],
+  "new_vs_local_map": []
+ },
+ "raiden_bolt": {
+  "tip_accounts": [
+   "t1TcSg9biJsz4NjKjhopK8QZzPS4KzBgFSszu5QTGgF",
+   "t2XFAFBaUkCzxJwEbLWFX9PKFjfBCp2tSyFtx5z4RZM",
+   "t3QLYyXH4vZYbEifLqjD581t5dPVhq9LABxWceySzL2",
+   "t46SqGmwStEffUMp1fr2xmv5uyR85TB9annJuLKLf83",
+   "t55hdzzftxWkYy3J8t32C9RRcZDuMZ4LDuBmbTzJFkU",
+   "t6UtTQLUGHJJrzxAb8PBBZdZKra8SWUqvTv9zPnxKNz",
+   "t7qUQU35sLpPydh42BcPmtEfTWW8gBe4Ry3gjwVnokJ",
+   "t8pPgarSK3TnuLbbHmoE1RCQdLxfxuPqNTyFjBKahok",
+   "t96GGdw3MiaGR993XN8PSsRpKGXx56t5Wf6zcF1hBpY"
+  ],
+  "tip_account_count": 9,
+  "name": "Raiden Bolt",
+  "tip_required": "yes",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "0.001 SOL; higher tips get higher routing priority",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "fra.bolt.raiden.wtf",
+   "ams.bolt.raiden.wtf",
+   "lnd.bolt.raiden.wtf",
+   "fra.bolt.raiden.wtf:4433 (UDP)"
+  ],
+  "features": [
+   "sendTransaction + sendRawTransaction (raw bytes)",
+   "UDP submission",
+   "dedicated bare-metal",
+   "free tier 5 tx/s per key"
+  ],
+  "pricing": "free to 5 tx/s; Raiden shred feeds sold separately ($499/month/region)",
+  "docs": "https://raiden-4.gitbook.io/raiden.wtf.docs/bolt-low-latency/tip-addresses",
+  "doc_date": "fetched 2026-10-03 (live GitBook page; no published date)",
+  "summary": {
+   "swqos": "not stated",
+   "bundles": "no",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "not documented",
+   "free_tier": "free 5 tx/s",
+   "eu_endpoint_primary": "fra.bolt.raiden.wtf"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "Bolt"
+  ],
+  "new_vs_local_map": []
+ },
+ "everstake_swqos": {
+  "tip_accounts": [
+   "J4cL8c22KNLHwheuWxK1SCYBWASWPGhEi6xvcGyf6o3S",
+   "EzuhsszPxRUHBwGPXtKoqCB58EiTJ1QiYA2XrhbUEFbr",
+   "7wsUm2VDopGDFyXkyhmgUh9V15QkEvnyqbgUPcagLcw2",
+   "Cy3WAM9NdjFG3kXCxXmD17WmtJMBKVpoBXabkSm88Xdt",
+   "BEEya88mme6JJ4rgshBR23eiDHmygUii9opUHE3qxnqK",
+   "Gq21dPAGVuuZucqBQeCkfbbqoEowL1t88igZekJ93CRu",
+   "79HFWkNoPhotXuFYi1ksuK5hE7AUnKasafP6c71hS9sM",
+   "Cp4pCm5JjDaZ4gXB8eSjNJvQ8eg7uK6awgjveofrSATz",
+   "DMHQ51qK2wChtDEUED54cqzbSLMLGvTygQCv5uLTUmZP",
+   "GDnz7cAA7hKEFmDyrk6mz3drybHWc3Gn14y9LCsvvtjE"
+  ],
+  "tip_account_count": 10,
+  "name": "Everstake SWQoS Landing",
+  "tip_required": "yes for keyless/tip users (mandatory, else dropped); prepaid-subscription users may send tip-less (SWQoS single path only)",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "1,000,000 lamports; tip activates priority forwarding and multi-path fanout",
+  "tip_per_transaction": "yes (tip-based mode)",
+  "eu_endpoints": [
+   "fra-swqos.everstake.one",
+   "ams-swqos.everstake.one",
+   "lon-swqos.everstake.one",
+   "main-swqos.everstake.one (Cloudflare, global)"
+  ],
+  "features": [
+   "SWQoS from Everstake validators",
+   "multi-path fanout with a tip",
+   "HTTP/HTTP2 and QUIC (client cert; 8 QUIC connections/min)",
+   "default 10 TPS per client",
+   "optional memo for invoicing"
+  ],
+  "pricing": "tip-based or prepaid subscription",
+  "docs": "https://github.com/everstake/everstake-swqos-docs",
+  "doc_date": "repo last commit 2026-09-16; fetched 2026-10-03",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "no",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "yes (multi-path with tip)",
+   "free_tier": "keyless, 10 TPS",
+   "eu_endpoint_primary": "fra-swqos.everstake.one"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "Everstake"
+  ],
+  "new_vs_local_map": []
+ },
+ "jupiter_tx": {
+  "tip_accounts": [
+   "GGztQqQ6pCPaJQnNpXBgELr5cs3WwDakRbh1iEMzjgSJ",
+   "2MFoS3MPtvyQ4Wh4M9pdfPjz6UhVoNbFbGJAskCPCj3h",
+   "BQ72nSv9f3PRyRKCBnHLVrerrv37CYTHm5h3s9VSGQDV",
+   "6U91aKa8pmMxkJwBCfPTmUEfZi6dHe7DcFq2ALvB2tbB",
+   "4xDsmeTWPNjgSVSS1VTfzFq3iHZhp77ffPkAmkZkdu71",
+   "CapuXNQoDviLvU1PxFiizLgPNQCxrsag1uMeyk6zLVps",
+   "9nnLbotNTcUhvbrsA6Mdkx45Sm82G35zo28AqUvjExn8",
+   "6LXutJvKUw8Q5ue2gCgKHQdAN4suWW8awzFVC6XCguFx",
+   "HFqp6ErWHY6Uzhj8rFyjYuDya2mXUpYEk8VW75K9PSiY",
+   "DSN3j1ykL3obAVNv7ZX49VsFCPe4LqzxHnmtLiPwY6xg",
+   "69yhtoJR4JYPPABZcSNkzuqbaFbwHsCkja1sP1Q2aVT5",
+   "HU23r7UoZbqTUuh3vA7emAGztFtqwTeVips789vqxxBw",
+   "3LoAYHuSd7Gh8d7RTFnhvYtiTiefdZ5ByamU42vkzd76",
+   "3CgvbiM3op4vjrrjH2zcrQUwsqh5veNVRjFCB9N6sRoD",
+   "GP8StUXNYSZjPikyRsvkTbvRV1GBxMErb59cpeCJnDf1",
+   "7iWnBRRhBCiNXXPhqiGzvvBkKrvFSWqqmxRyu9VyYBxE"
+  ],
+  "tip_account_count": 16,
+  "name": "Jupiter tx.jup.ag (transaction submit)",
+  "tip_required": "yes, every transaction (else rejected); flat tip: more does not improve landing",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "0.001 SOL to one of 16 receivers; an extra Jito tip only matters when swqosOnly=false",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "tx.jup.ag (global, no regional hosts published)"
+  ],
+  "features": [
+   "SWQoS via a high-stake Jupiter validator + Jupiter 'Beam' TPU forwarder (+DoubleZero, private fiber); default also adds a small Jito tip itself; swqosOnly=true for SWQoS only",
+   "base64 only; skipPreflight=true and maxRetries=0 required; errors -1013 tip below minimum, -1014 tip missing",
+   "tip accounts are the Jupiter V6 program authorities (per OpenAPI spec)"
+  ],
+  "pricing": "Jupiter portal: Free 1 RPS, Developer $25/mo, Launch $100/mo, Pro $500/mo",
+  "docs": "https://developers.jup.ag/docs/transaction/submit",
+  "doc_date": "dateModified 2026-07-29; fetched 2026-10-03",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "no",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "yes (SWQoS + Jito default)",
+   "free_tier": "portal key",
+   "eu_endpoint_primary": "tx.jup.ag (global)"
+  },
+  "in_local_map": "no",
+  "local_map_kinds": [],
+  "new_vs_local_map": [
+   "GGztQqQ6pCPaJQnNpXBgELr5cs3WwDakRbh1iEMzjgSJ",
+   "2MFoS3MPtvyQ4Wh4M9pdfPjz6UhVoNbFbGJAskCPCj3h",
+   "BQ72nSv9f3PRyRKCBnHLVrerrv37CYTHm5h3s9VSGQDV",
+   "6U91aKa8pmMxkJwBCfPTmUEfZi6dHe7DcFq2ALvB2tbB",
+   "4xDsmeTWPNjgSVSS1VTfzFq3iHZhp77ffPkAmkZkdu71",
+   "CapuXNQoDviLvU1PxFiizLgPNQCxrsag1uMeyk6zLVps",
+   "9nnLbotNTcUhvbrsA6Mdkx45Sm82G35zo28AqUvjExn8",
+   "6LXutJvKUw8Q5ue2gCgKHQdAN4suWW8awzFVC6XCguFx",
+   "HFqp6ErWHY6Uzhj8rFyjYuDya2mXUpYEk8VW75K9PSiY",
+   "DSN3j1ykL3obAVNv7ZX49VsFCPe4LqzxHnmtLiPwY6xg",
+   "69yhtoJR4JYPPABZcSNkzuqbaFbwHsCkja1sP1Q2aVT5",
+   "HU23r7UoZbqTUuh3vA7emAGztFtqwTeVips789vqxxBw",
+   "3LoAYHuSd7Gh8d7RTFnhvYtiTiefdZ5ByamU42vkzd76",
+   "3CgvbiM3op4vjrrjH2zcrQUwsqh5veNVRjFCB9N6sRoD",
+   "GP8StUXNYSZjPikyRsvkTbvRV1GBxMErb59cpeCJnDf1",
+   "7iWnBRRhBCiNXXPhqiGzvvBkKrvFSWqqmxRyu9VyYBxE"
+  ]
+ },
+ "svs_lightspeed": {
+  "tip_accounts": [
+   "svsMoWJBwLcs8JgfN8VaF111tAc199KpYeTKRwxRtip"
+  ],
+  "tip_account_count": 1,
+  "name": "Solana Vibe Station Lightspeed",
+  "tip_required": "yes (Lightspeed path)",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "0.001 SOL, top-level System transfer, tip account in static keys (no ALT/CPI); per-user time-boxed 'stealth' addresses via GET /lightspeed/fetchtipaddress (need >= 890,880 lamports rent-exempt too; recommended for best landing)",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "basic.swqos.ams1.solanavibestation.com/lightspeed",
+   "ultra.swqos.ams1.solanavibestation.com/lightspeed",
+   "elite.swqos.ams1.solanavibestation.com/lightspeed",
+   "(<tier>.rpc.ams1... also works; only sites are AMS1 and ATL1, no Frankfurt)"
+  ],
+  "features": [
+   "fans out to every upstream of the tier (>500,000 SOL stake-weighted peering); ?only=swqos / onlyUpstreams to restrict; 'jito' upstream = Jito bundle forward",
+   "skipPreflight must be true",
+   "Lightspeed sendTransaction req/s: Lite 10, Basic 25, Ultra 50, Elite 100, Epic 250 (not on free tier)"
+  ],
+  "pricing": "staked tiers: Basic $300/mo, Ultra $500/mo, Elite $1,000/mo",
+  "docs": "https://docs.solanavibestation.com/services/solana-node-services/lightspeed-transactions",
+  "doc_date": "page timestamps 2026-10-02; fetched 2026-10-03",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "Jito forward upstream",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "yes (all tier upstreams + Jito)",
+   "free_tier": "no (paid tiers)",
+   "eu_endpoint_primary": "basic.swqos.ams1.solanavibestation.com"
+  },
+  "in_local_map": "no",
+  "local_map_kinds": [],
+  "new_vs_local_map": [
+   "svsMoWJBwLcs8JgfN8VaF111tAc199KpYeTKRwxRtip"
+  ]
+ },
+ "p2p_syncro_sender": {
+  "tip_accounts": [
+   "BPZrtYhdoAhiHWV5EgGLoV7bZFbMamBZurGDq4DmST8v",
+   "7D5pdbkV75Sr73M1YFNZwXMed6DenwkdfbJwVWrX6drQ",
+   "ELpn2NryEW4B3psG36eSjF45YcGMQpGGuu9J2AgAccbV",
+   "FnckAPC9PitnRpGZM2M4WLwb3w9odRLJ7EDRZDngjvd6",
+   "3ZnDTgvVfwzqwWoqAUmDkgVtXvXqjmeb5t9zxD5pMbmv",
+   "3SLDFcdCzMbcFNguZhzmV4zqEAUvcPoKY13akpE4Tq1p",
+   "48tT6LJqrsoFrLpzZSHkjGdGTWtsJ1PvjgWZjh8qF1RK",
+   "7GM9fpVMHHcrK4cgzfVdzJvjiy1bSyfwSYzhxvgbfVLg",
+   "CBd8GE3ffMJKf3iCCcNNBEifMxH1WpgtTzRnXPxxbjGE"
+  ],
+  "tip_account_count": 9,
+  "name": "P2P.org Syncro Sender",
+  "tip_required": "yes, both public and private endpoints",
+  "min_tip_sol": 0.0002,
+  "min_tip_note": "docs: 200,000 lamports public, 150,000 private. The 2026-03-31 launch guide said 100,000 public / 1,000,000 private (0.0001 first month): conflicting, trust the error message",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "fra.sender.syncro.p2p.org:8080 (HTTP)",
+   "ams3.sender.syncro.p2p.org:8080 (HTTP)",
+   "fra.sender.syncro.p2p.org:8090 / ams3...:8090 (QUIC, authorized clients)",
+   "launch-guide hosts: sfls-geo-fra.l2.p2p.org/public, sfls-geo-lon.l2.p2p.org/public, sfls-eu1.l2.p2p.org/public (Amsterdam)"
+  ],
+  "features": [
+   "SWQoS via P2P.org staked validators",
+   "multi-channel parallel delivery per sendTransaction",
+   "public /public endpoint: no key, sendTransaction only, 1 TPS per IP",
+   "private endpoint: API key, 50 TPS (custom), full RPC proxy",
+   "keep-alive timeout 30 s"
+  ],
+  "pricing": "tip-based; API key on request",
+  "docs": "https://docs.p2p.org/docs/syncro-sender-quick-start",
+  "doc_date": "docs fetched 2026-10-03 (no published date); launch guide 2026-03-31",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "no",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "yes (multi-channel)",
+   "free_tier": "public: no key, 1 TPS",
+   "eu_endpoint_primary": "fra.sender.syncro.p2p.org:8080"
+  },
+  "in_local_map": "no",
+  "local_map_kinds": [],
+  "new_vs_local_map": [
+   "BPZrtYhdoAhiHWV5EgGLoV7bZFbMamBZurGDq4DmST8v",
+   "7D5pdbkV75Sr73M1YFNZwXMed6DenwkdfbJwVWrX6drQ",
+   "ELpn2NryEW4B3psG36eSjF45YcGMQpGGuu9J2AgAccbV",
+   "FnckAPC9PitnRpGZM2M4WLwb3w9odRLJ7EDRZDngjvd6",
+   "3ZnDTgvVfwzqwWoqAUmDkgVtXvXqjmeb5t9zxD5pMbmv",
+   "3SLDFcdCzMbcFNguZhzmV4zqEAUvcPoKY13akpE4Tq1p",
+   "48tT6LJqrsoFrLpzZSHkjGdGTWtsJ1PvjgWZjh8qF1RK",
+   "7GM9fpVMHHcrK4cgzfVdzJvjiy1bSyfwSYzhxvgbfVLg",
+   "CBd8GE3ffMJKf3iCCcNNBEifMxH1WpgtTzRnXPxxbjGE"
+  ]
+ },
+ "rpcfast_beam": {
+  "tip_accounts": [
+   "ASdXviZw2kbViFuAgZF26RPZL1HdybUoWdcveG2nfU8D",
+   "Ax2JBnTPUpBFWe75z3YtgueWUfvZPZ6ZFXiMWJMUnjbo",
+   "rfBP8KJ6KMqvBhmqaV7EoNHVexXQdn1sX4CJ9aLv5w2",
+   "rfBkmha9yK5QS7h562Pn6Bfw6cPjsrgVqgcnnXBoXj7",
+   "rfBxDPw4XK2WKBinv7Vbr68inD964H7HTMLMWshe3jT",
+   "Eag4Jt2M7tiCV3daC7jCwM9CZZa7C8tZPGn5kURT7qUE",
+   "3ZMMzsRp3mCftMgyX9tCeg9kRwFU8siYTvamTxHCdHoC",
+   "tJgbQbGhNtUE2h6pSa7LV2NbUuftTq5wrxQkXbLK4mu",
+   "AoJAVKY58jmTa3gT9bx29bdeYpKdE4beoXFrjMJk7A5q",
+   "9Uq39ZFGW55zGrafsa1D35uKgchNcQEKsWoCq2CjwUW9",
+   "F2onQMdej9rLW8wdUF46dodDDRakYynjm1VT9hDysFRK",
+   "CCm7t7d8Q2zpqJRDAcKzCbMbuWuJxj71N6o3A3MHeE8J",
+   "BhawUhJ9G6W7D3Q4JGjkbXjs1v2GyyTANFodWmCsPJyu",
+   "rfCCxFtXuwjjnP9cXAaEgvCzLkrzXwAiWQadJ4uNKmf",
+   "rfCTcFU5p63roQ7S8sTwpQ93NHfGxf5ThSsbH1CjQbf",
+   "rfC18Jx6rqwhvwjWpkZnX8q7vE45vzxBXtic1jLr32R",
+   "rfCmxTvz2LeEzVmFZHvcfLvz4EaT6Rbkkff98RufbdZ",
+   "rfCaRhB66prehCypC53XeSPJ83cTjzwa8cHMeNpenQ8"
+  ],
+  "tip_account_count": 18,
+  "name": "RPC Fast Beam (beta)",
+  "tip_required": "yes: a provider-specific tip (Beam picks the route from the tip account); no injection by Beam",
+  "min_tip_sol": 0.0001,
+  "min_tip_note": "Astralane route 0.0001 SOL; bloXroute, Nozomi and Falcon routes 0.001 SOL. Beam's tip accounts are its own, separate from the providers' public lists",
+  "tip_per_transaction": "yes (rotate the tip account every tx)",
+  "eu_endpoints": [
+   "beam.rpcfast.com (single global host; RPC Fast shared infra is in Frankfurt, Equinix FR13)",
+   "beam.rpcfast.com:9900 (QUIC)"
+  ],
+  "features": [
+   "routes via Astralane, bloXroute, Nozomi, Falcon",
+   "modes fastest / mev_protect (mev_protect on Astralane and bloXroute only)",
+   "sendBundle on Astralane and bloXroute routes",
+   "QUIC sendTransactionFast (skips Beam-side tip validation)",
+   "tip feed and provider-score WebSockets"
+  ],
+  "pricing": "RPC Fast plans (free start plan; Aperture tier for HFT)",
+  "docs": "https://docs.rpcfast.com/rpc-fast-saas-solana/sending-transactions/rpc-fast-beam-beta",
+  "doc_date": "fetched 2026-10-03 (live GitBook page; no published date)",
+  "summary": {
+   "swqos": "via providers",
+   "bundles": "yes (Astralane/bloXroute routes)",
+   "mev_protection": "mev_protect mode",
+   "revert_protection": "no",
+   "dual_routing": "routes to 4 providers",
+   "free_tier": "RPC Fast plan",
+   "eu_endpoint_primary": "beam.rpcfast.com (global)"
+  },
+  "in_local_map": "partial",
+  "local_map_kinds": [
+   "Rpcfast"
+  ],
+  "new_vs_local_map": [
+   "rfBP8KJ6KMqvBhmqaV7EoNHVexXQdn1sX4CJ9aLv5w2",
+   "rfBkmha9yK5QS7h562Pn6Bfw6cPjsrgVqgcnnXBoXj7",
+   "rfBxDPw4XK2WKBinv7Vbr68inD964H7HTMLMWshe3jT",
+   "Eag4Jt2M7tiCV3daC7jCwM9CZZa7C8tZPGn5kURT7qUE",
+   "3ZMMzsRp3mCftMgyX9tCeg9kRwFU8siYTvamTxHCdHoC",
+   "tJgbQbGhNtUE2h6pSa7LV2NbUuftTq5wrxQkXbLK4mu",
+   "AoJAVKY58jmTa3gT9bx29bdeYpKdE4beoXFrjMJk7A5q",
+   "9Uq39ZFGW55zGrafsa1D35uKgchNcQEKsWoCq2CjwUW9",
+   "F2onQMdej9rLW8wdUF46dodDDRakYynjm1VT9hDysFRK",
+   "CCm7t7d8Q2zpqJRDAcKzCbMbuWuJxj71N6o3A3MHeE8J",
+   "BhawUhJ9G6W7D3Q4JGjkbXjs1v2GyyTANFodWmCsPJyu",
+   "rfCCxFtXuwjjnP9cXAaEgvCzLkrzXwAiWQadJ4uNKmf",
+   "rfCTcFU5p63roQ7S8sTwpQ93NHfGxf5ThSsbH1CjQbf",
+   "rfC18Jx6rqwhvwjWpkZnX8q7vE45vzxBXtic1jLr32R",
+   "rfCmxTvz2LeEzVmFZHvcfLvz4EaT6Rbkkff98RufbdZ",
+   "rfCaRhB66prehCypC53XeSPJ83cTjzwa8cHMeNpenQ8"
+  ],
+  "tip_accounts_by_route": {
+   "Astralane": [
+    "ASdXviZw2kbViFuAgZF26RPZL1HdybUoWdcveG2nfU8D",
+    "Ax2JBnTPUpBFWe75z3YtgueWUfvZPZ6ZFXiMWJMUnjbo"
+   ],
+   "bloXroute": [
+    "rfBP8KJ6KMqvBhmqaV7EoNHVexXQdn1sX4CJ9aLv5w2",
+    "rfBkmha9yK5QS7h562Pn6Bfw6cPjsrgVqgcnnXBoXj7",
+    "rfBxDPw4XK2WKBinv7Vbr68inD964H7HTMLMWshe3jT"
+   ],
+   "Nozomi by Temporal": [
+    "Eag4Jt2M7tiCV3daC7jCwM9CZZa7C8tZPGn5kURT7qUE",
+    "3ZMMzsRp3mCftMgyX9tCeg9kRwFU8siYTvamTxHCdHoC",
+    "tJgbQbGhNtUE2h6pSa7LV2NbUuftTq5wrxQkXbLK4mu",
+    "AoJAVKY58jmTa3gT9bx29bdeYpKdE4beoXFrjMJk7A5q",
+    "9Uq39ZFGW55zGrafsa1D35uKgchNcQEKsWoCq2CjwUW9",
+    "F2onQMdej9rLW8wdUF46dodDDRakYynjm1VT9hDysFRK",
+    "CCm7t7d8Q2zpqJRDAcKzCbMbuWuJxj71N6o3A3MHeE8J",
+    "BhawUhJ9G6W7D3Q4JGjkbXjs1v2GyyTANFodWmCsPJyu"
+   ],
+   "Falcon by Corvus": [
+    "rfCCxFtXuwjjnP9cXAaEgvCzLkrzXwAiWQadJ4uNKmf",
+    "rfCTcFU5p63roQ7S8sTwpQ93NHfGxf5ThSsbH1CjQbf",
+    "rfC18Jx6rqwhvwjWpkZnX8q7vE45vzxBXtic1jLr32R",
+    "rfCmxTvz2LeEzVmFZHvcfLvz4EaT6Rbkkff98RufbdZ",
+    "rfCaRhB66prehCypC53XeSPJ83cTjzwa8cHMeNpenQ8"
+   ]
+  }
+ },
+ "quicknode_lil_jit": {
+  "tip_accounts": [
+   "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+   "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+   "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+   "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+   "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+   "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+   "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+   "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+  ],
+  "tip_account_count": 8,
+  "name": "QuickNode Lil' JIT add-on (Jito bundles + transactions)",
+  "tip_required": "bundles: yes (Jito tip); Jito sendTransaction: priority fee + Jito tip required",
+  "min_tip_sol": null,
+  "min_tip_note": "uses Jito's own tip accounts and floor ('Jito no longer provides a minimum tip' per QuickNode doc; Jito's own doc still says 1,000 lamports for bundles); getTipFloor method",
+  "tip_per_transaction": "per bundle",
+  "eu_endpoints": [
+   "your own QuickNode Solana endpoint; region param selects Jito block engine: amsterdam, frankfurt, london"
+  ],
+  "features": [
+   "Jito sendBundle (up to 5 tx, atomic)",
+   "Jito sendTransaction (RPC + bundle dual send); bundleOnly=true for revert protection",
+   "simulateBundle, getBundleStatuses, getInflightBundleStatuses",
+   "no SWQoS claim"
+  ],
+  "pricing": "add-on from $89/month (add-ons listing); no free tier seen",
+  "docs": "https://www.quicknode.com/docs/solana/lil-jit-jito-bundles",
+  "doc_date": "fetched 2026-10-03 (no published date)",
+  "tip_accounts_note": "the 8 standard Jito tip accounts (QuickNode's static getTipAccounts example; identical to docs.jito.wtf)",
+  "summary": {
+   "swqos": "no",
+   "bundles": "yes (<=5 tx)",
+   "mev_protection": "via Jito markers",
+   "revert_protection": "bundleOnly=true",
+   "dual_routing": "yes (RPC + bundle)",
+   "free_tier": "no ($89+/mo)",
+   "eu_endpoint_primary": "QuickNode endpoint, region=frankfurt"
+  },
+  "in_local_map": "all",
+  "local_map_kinds": [
+   "JitoBundle",
+   "JitoTx"
+  ],
+  "new_vs_local_map": []
+ },
+ "quicknode_fastlane": {
+  "tip_accounts": [
+   "CHJPZWYoHMkTFtDq75Jmy6FLFcHD5kJhGziBgiNSfmLE",
+   "Jfxpfrmghh7MWRPB8XMVF8QgFqGVEhKWVp24ZpvPAHC",
+   "EQHMoomkaneVz99A4gdUfnPaNYedAcBzfnVMRe82rEMW",
+   "FgBDNKreUbZqYJHQFN8199b9zGCpkKqBCPyDjpCgzhx",
+   "42mWt6QXn167LgSxKM6rtHjEjMztFF6u5Vnb1nA6Vvu6",
+   "22GKaRXieiGnrpGdBWpCRoW4a3m7zjSUaUxrDbnhpphk",
+   "F9XUxbNcqGQAfzjT2E9LDcHtw5LWQzaeqoQuCkXXPhvU",
+   "AkoLzkJuthPh9ZGR4CddsFfzVunYtmtteUPjZJnvMH5c"
+  ],
+  "tip_account_count": 8,
+  "name": "QuickNode Solana Transaction Fastlane (discontinued/unlisted)",
+  "unverified": true,
+  "tip_required": "was: yes, every tx (round-robin across 8 addresses)",
+  "min_tip_sol": 0.001,
+  "min_tip_note": "was 0.001 SOL + CU price >= 5,000,000 microLamports",
+  "tip_per_transaction": "yes (historical)",
+  "eu_endpoints": [],
+  "features": [
+   "dedicated staked connection (SWQoS)",
+   "Jito bundle routing",
+   "frontrunning protection",
+   "NYC only"
+  ],
+  "pricing": "was: Intermediate $0/mo 10 req/s; Advanced $1,999/mo 50 req/s",
+  "docs": "https://web.archive.org/web/20260121191651/https://marketplace.quicknode.com/add-on/solana-transaction-fastlane",
+  "doc_date": "Wayback copy 2026-01-21 (beta launched 2025-08-26); live marketplace URL now 301-redirects to /add-ons (2026-10-03)",
+  "status_note": "product no longer listed; addresses verbatim from the archived official page, kept only for attributing rivals' historical txs",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "Jito routing",
+   "mev_protection": "yes (frontrunning protection)",
+   "revert_protection": "no",
+   "dual_routing": "yes",
+   "free_tier": "was $0 at 10 req/s",
+   "eu_endpoint_primary": "none (NYC only)"
+  },
+  "in_local_map": "no",
+  "local_map_kinds": [],
+  "new_vs_local_map": [
+   "CHJPZWYoHMkTFtDq75Jmy6FLFcHD5kJhGziBgiNSfmLE",
+   "Jfxpfrmghh7MWRPB8XMVF8QgFqGVEhKWVp24ZpvPAHC",
+   "EQHMoomkaneVz99A4gdUfnPaNYedAcBzfnVMRe82rEMW",
+   "FgBDNKreUbZqYJHQFN8199b9zGCpkKqBCPyDjpCgzhx",
+   "42mWt6QXn167LgSxKM6rtHjEjMztFF6u5Vnb1nA6Vvu6",
+   "22GKaRXieiGnrpGdBWpCRoW4a3m7zjSUaUxrDbnhpphk",
+   "F9XUxbNcqGQAfzjT2E9LDcHtw5LWQzaeqoQuCkXXPhvU",
+   "AkoLzkJuthPh9ZGR4CddsFfzVunYtmtteUPjZJnvMH5c"
+  ]
+ },
+ "triton_cascade_jet": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Triton One (Cascade delivery via Yellowstone Jet; open-source Jet)",
+  "tip_required": "no",
+  "min_tip_sol": 0,
+  "min_tip_note": "no tip; SWQoS included for every Triton customer since the Cascade Marketplace was retired (bids cancelled 2026-02-28)",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [
+   "per-customer endpoint from the Triton dashboard (GeoDNS + failover); no public regional hostnames"
+  ],
+  "features": [
+   "SWQoS by default on all sendTransaction (through Jet)",
+   "Yellowstone Shield allow/deny leader policies via solana-forwardingpolicies header (MEV control)",
+   "POST /sendtx raw/base58/base64 with max_retries",
+   "Jito: only simulateBundle documented (no sendBundle)",
+   "Yellowstone Jet: self-hosted AGPL QUIC TPU sender, full SWQoS with your own staked identity (GitHub rpcpool/yellowstone-jet, v17.0.0-rc7 2026-09-16)"
+  ],
+  "pricing": "pay-as-you-go, $125 minimum deposit; $10 per million calls + $0.08/GB; no extra charge for staked sending",
+  "docs": "https://docs.triton.one/chains/solana/cascade",
+  "doc_date": "docs fetched 2026-10-03; retirement blog 2026-03-05 (updated 2026-05-05)",
+  "summary": {
+   "swqos": "yes (all customers)",
+   "bundles": "no (simulateBundle only)",
+   "mev_protection": "Shield allow/deny policies",
+   "revert_protection": "no",
+   "dual_routing": "no",
+   "free_tier": "PAYG ($125 deposit)",
+   "eu_endpoint_primary": "per-customer GeoDNS"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "chainstack_warp": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Chainstack Warp transactions (bloXroute-powered)",
+  "tip_required": "no (user-side); bloXroute tip/memo handled by Chainstack",
+  "min_tip_sol": 0,
+  "min_tip_note": "no tip; billed per Warp transaction (price not on the static page)",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [
+   "Chainstack fra2 (Frankfurt) Solana trader node; hostnames per customer"
+  ],
+  "features": [
+   "sendTransaction relayed via bloXroute Trader API over staked connections (SWQoS)",
+   "front-running protection deliberately disabled",
+   "HTTP only; no Jito bundles, revert protection or dual routing documented"
+  ],
+  "pricing": "paid plans from Growth; Warp billed per transaction",
+  "docs": "https://docs.chainstack.com/docs/warp-transactions",
+  "doc_date": "fetched 2026-10-03 (no published date)",
+  "summary": {
+   "swqos": "yes (via bloXroute)",
+   "bundles": "no",
+   "mev_protection": "disabled",
+   "revert_protection": "no",
+   "dual_routing": "no",
+   "free_tier": "no (Growth plan+)",
+   "eu_endpoint_primary": "fra2 node (private host)"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "erpc_swqos": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "ERPC SWQoS endpoint (ELSOUL LABO / Validators DAO)",
+  "tip_required": "no; access by holding elSOL registered in the dashboard",
+  "min_tip_sol": 0,
+  "min_tip_note": "1 TPS per 4.2 elSOL held (shared plans); dedicated nodes +EUR 100/month for a 1,000 SOL stake allocation",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [
+   "per-user SWQoS domain (not public); initial region Frankfurt (unverified: release post now 404)"
+  ],
+  "features": [
+   "staked SWQoS lane plus simultaneous unstaked lane",
+   "GET /ping keep-alive",
+   "durable-nonce fan-out doc",
+   "no Jito bundle / MEV / revert protection documented"
+  ],
+  "pricing": "Developer Plan+ and Bundle Plans; elSOL-based TPS",
+  "docs": "https://erpc.global/en/doc/rpc/swqos-endpoint/",
+  "doc_date": "fetched 2026-10-03 (no published date); release post 2025-09-22 (now 404)",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "no",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "staked + unstaked lanes",
+   "free_tier": "no (elSOL-based)",
+   "eu_endpoint_primary": "Frankfurt (private domain)"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "shyft": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Shyft RPC (staked sendTransaction)",
+  "tip_required": "no",
+  "min_tip_sol": 0,
+  "min_tip_note": "no tip; SWQoS on paid plans only",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [
+   "rpc.shyft.to (GeoDNS: Frankfurt, Amsterdam, NY, VA, Singapore)"
+  ],
+  "features": [
+   "SWQoS on paid plans",
+   "sendTransaction limits per second: Free 1, Build 20, Grow 40, Accelerate 80",
+   "Jito: simulateBundle only (no sendBundle)"
+  ],
+  "pricing": "Free $0; Build $199/mo; Grow $349/mo; Accelerate $649/mo; dedicated from $1,800/mo",
+  "docs": "https://docs.shyft.to/solana/solana-rpc-limits",
+  "doc_date": "fetched 2026-10-03 (no published date)",
+  "summary": {
+   "swqos": "yes (paid plans)",
+   "bundles": "no",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "no",
+   "free_tier": "free plan without SWQoS",
+   "eu_endpoint_primary": "rpc.shyft.to (GeoDNS)"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "haan_digital": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Haan Digital Transaction Sender",
+  "unverified": true,
+  "tip_required": "not documented (our integration sends tip-less)",
+  "min_tip_sol": null,
+  "min_tip_note": "no public docs",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [
+   "Frankfurt (status widget); sender hostname not public"
+  ],
+  "features": [
+   "private Transaction Sender API with per-client TPS/burst",
+   "validator-backed Staked/SWQoS routing with sender fallback",
+   "optional Jito integration (bundles, status, Direct Mode)"
+  ],
+  "pricing": "by contact only",
+  "docs": "https://haandigital.eu/solana-infrastructure/",
+  "doc_date": "page published 2026-07-20, modified 2026-09-25",
+  "summary": {
+   "swqos": "claimed",
+   "bundles": "optional Jito",
+   "mev_protection": "not documented",
+   "revert_protection": "not documented",
+   "dual_routing": "sender fallback",
+   "free_tier": "contact",
+   "eu_endpoint_primary": "Frankfurt (private)"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "syndica": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Syndica",
+  "tip_required": "n/a",
+  "min_tip_sol": null,
+  "min_tip_note": "no sending product: Solana RPC and ChainStream retired (Chainstack migration guide)",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [],
+  "features": [
+   "retired; Sig is a validator client, not a sender"
+  ],
+  "pricing": "n/a",
+  "docs": "https://docs.chainstack.com/docs/migrating-from-syndica-to-chainstack",
+  "doc_date": "fetched 2026-10-03",
+  "summary": {
+   "swqos": "n/a",
+   "bundles": "n/a",
+   "mev_protection": "n/a",
+   "revert_protection": "n/a",
+   "dual_routing": "n/a",
+   "free_tier": "retired",
+   "eu_endpoint_primary": "none"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "harmonic": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Harmonic (alternative block engine / builder marketplace)",
+  "tip_required": "no SOL tip transfer; bundles bid via compute-unit priority fees (100% to validator, no protocol fee)",
+  "min_tip_sol": 0,
+  "min_tip_note": "no tip accounts; no documented minimum priority fee",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [
+   "fra.be.harmonic.gg (gRPC bundles)",
+   "ams.be.harmonic.gg",
+   "lon.be.harmonic.gg",
+   "fra.tpu.harmonic.gg / ams.tpu... / lon.tpu... (remote TPU, non-atomic, no revert protection)"
+  ],
+  "features": [
+   "gRPC SearcherService.SendBundle, Jito-searcher-proto compatible; challenge/response auth; pubkey whitelist (application)",
+   "revert protection for real bundles; single-tx senders keep it only while landed rate stays high; crank-arb spam gets blacklisted",
+   "bundle privacy (trusted builders only); dontfront/jitodontfront/dontbund1e control accounts",
+   "bundles cross-forwarded to all regions (docs conflict: nearest region vs send to all)"
+  ],
+  "pricing": "no protocol fees",
+  "docs": "https://docs.harmonic.gg/searchers/harmonic-bundles",
+  "doc_date": "GitBook timestamps up to 2026-09-25; fetched 2026-10-03",
+  "summary": {
+   "swqos": "no (block engine)",
+   "bundles": "yes (gRPC, whitelist)",
+   "mev_protection": "dontfront markers + bundle privacy",
+   "revert_protection": "yes (bundles)",
+   "dual_routing": "no",
+   "free_tier": "free (whitelist)",
+   "eu_endpoint_primary": "fra.be.harmonic.gg"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "paladin_p3": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Paladin P3 priority port (validator-side)",
+  "tip_required": "no tip accounts documented (priority-fee auction; P3 QoS appears weighted by staked $PAL, unverified)",
+  "min_tip_sol": null,
+  "min_tip_note": "none documented",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [
+   "none: send QUIC straight to the Paladin leader's IP, port 4819 (regular) / 4820 (MEV) per p3-standalone README"
+  ],
+  "features": [
+   "direct-to-leader QUIC P3 port on Paladin validators",
+   "p3-txn-sender (fork of Helius atlas-txn-sender) uses an identity that stakes $PAL",
+   "bloXroute submit-paladin and Astralane sendPaladin route to it"
+  ],
+  "pricing": "n/a",
+  "docs": "https://github.com/paladin-bladesmith/paladin-solana",
+  "doc_date": "fetched 2026-10-03 (official GitBook requires login)",
+  "unverified": true,
+  "summary": {
+   "swqos": "PAL-stake QoS (unverified)",
+   "bundles": "no",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "no",
+   "free_tier": "n/a",
+   "eu_endpoint_primary": "none (leader IP:4819)"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "sanctum_gateway": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Sanctum Gateway (+ Sanctum Sender)",
+  "unverified": true,
+  "tip_required": "per-tx Gateway fee (tip instructions from getTipInstructions)",
+  "min_tip_sol": 5e-05,
+  "min_tip_note": "Gateway fee 0.00005 SOL/tx; Sanctum Sender 0.0001 SOL/tx (blog); tip accounts NOT verifiable: gateway.sanctum.so/docs/* returns 404 (2026-10-03), search-snippet addresses were garbled",
+  "tip_per_transaction": "yes",
+  "eu_endpoints": [
+   "not retrievable (runs on Cloudflare Workers)"
+  ],
+  "features": [
+   "routes across RPCs, SWQoS RPCs (e.g. Triton), Jito bundles, Sanctum Sender, Helius Sender, Nozomi, Astralane (weighted round-robin)",
+   "refunds the Jito tip if the tx lands via the RPC path",
+   "early expiry option; observability dashboard"
+  ],
+  "pricing": "0.00005 SOL per tx (Gateway); 0.0001 SOL per tx (Sanctum Sender)",
+  "docs": "https://sanctum.so/blog/sanctum-gateway-faqs-transaction-landing",
+  "doc_date": "FAQ blog 2025-10-14; docs pages 404 on 2026-10-03",
+  "summary": {
+   "swqos": "via routed providers",
+   "bundles": "via Jito route",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "yes (multi-provider)",
+   "free_tier": "pay per tx",
+   "eu_endpoint_primary": "not published"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "rakurai": {
+  "tip_accounts": [
+   "BjqjPHFmwr19YFmkH8CMNJFbj1wzX9k9ngr4am2nQEdq",
+   "9CNKnAqJgLA4pL6KByzhhdY4mKoQP5wcPdhJgnvvi5Ve",
+   "5wy4C2VMFhHE4i8PWKNS1K4SV275zjNwhLwfKBwajrro",
+   "AgMdA97pk2i2Ry4YQ4iVPNrRiFhcH3x3ARUCiQGt3vJG",
+   "4Qf8JFV5vmpADXNouoJriQ9KiniT5DENrz9JM2mKGH9m",
+   "AuFAFzbzE9dzMajy4RNdyJZBTskeiuJQqT2wd9xoGSRD",
+   "8aLaHz8595MAvgxKoBJEyZmDfqQp8CorezFGYnC7CPjy",
+   "H6hyJo6rpBmwHbvVuWCEHExJ2bE4rcn1hTPeiBtypus4"
+  ],
+  "tip_account_count": 8,
+  "name": "Rakurai TIN (Transaction Inclusion Network) virtual priority boost",
+  "tip_required": "optional (boost only applies when the leader runs Rakurai's validator client)",
+  "min_tip_sol": null,
+  "min_tip_note": "no minimum; recommended 0.001 SOL per tipped tx/bundle on top of priority fees; boost additive and capped. Mainnet list only (testnet uses 8 different accounts)",
+  "tip_per_transaction": "optional",
+  "eu_endpoints": [
+   "none public: landing services/searchers onboard with Rakurai, which connects its validators to their block engine"
+  ],
+  "features": [
+   "validator client (jito-solana fork, own scheduler; claims >8.5% stake)",
+   "Helius Sender routes to Rakurai",
+   "paid P2C post-pack confirmation stream"
+  ],
+  "pricing": "onboarding by contact",
+  "docs": "https://docs.rakurai.io/docs/rakurai_docs/transaction_inclusion/tips",
+  "doc_date": "'last updated 1 week ago' as of 2026-10-03",
+  "summary": {
+   "swqos": "n/a (validator client)",
+   "bundles": "via your block engine",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "no",
+   "free_tier": "n/a",
+   "eu_endpoint_primary": "none public"
+  },
+  "in_local_map": "no",
+  "local_map_kinds": [],
+  "new_vs_local_map": [
+   "BjqjPHFmwr19YFmkH8CMNJFbj1wzX9k9ngr4am2nQEdq",
+   "9CNKnAqJgLA4pL6KByzhhdY4mKoQP5wcPdhJgnvvi5Ve",
+   "5wy4C2VMFhHE4i8PWKNS1K4SV275zjNwhLwfKBwajrro",
+   "AgMdA97pk2i2Ry4YQ4iVPNrRiFhcH3x3ARUCiQGt3vJG",
+   "4Qf8JFV5vmpADXNouoJriQ9KiniT5DENrz9JM2mKGH9m",
+   "AuFAFzbzE9dzMajy4RNdyJZBTskeiuJQqT2wd9xoGSRD",
+   "8aLaHz8595MAvgxKoBJEyZmDfqQp8CorezFGYnC7CPjy",
+   "H6hyJo6rpBmwHbvVuWCEHExJ2bE4rcn1hTPeiBtypus4"
+  ]
+ },
+ "jito_bam": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Jito BAM (Block Assembly Marketplace)",
+  "tip_required": "same Jito tip programs as the classic block engine",
+  "min_tip_sol": null,
+  "min_tip_note": "no separate searcher API or tip accounts documented; inference: keep using the classic block engine + the 8 Jito tip accounts",
+  "tip_per_transaction": "as Jito",
+  "eu_endpoints": [
+   "validator-side BAM nodes: fra.mainnet.bam.jito.wtf, ams.mainnet.bam.jito.wtf, lon.mainnet.bam.jito.wtf, dub.mainnet.bam.jito.wtf (not for searcher submission)"
+  ],
+  "features": [
+   "BAM node keeps one connection to the Block Engine; RPC/TPU flow to a BAM leader is routed through BAM",
+   "preconfirmations live (via Helius and Triton) 2026-09-09: leader's committed txs streamed before shreds, p50 5-10 ms ahead of shred feeds (data-feed relevance)"
+  ],
+  "pricing": "n/a",
+  "docs": "https://bam.dev/docs/bam/bam-overview/",
+  "doc_date": "preconfirmations blog 2026-09-09; fetched 2026-10-03",
+  "summary": {
+   "swqos": "n/a",
+   "bundles": "via Jito block engine",
+   "mev_protection": "as Jito",
+   "revert_protection": "as Jito",
+   "dual_routing": "n/a",
+   "free_tier": "n/a",
+   "eu_endpoint_primary": "frankfurt.mainnet.block-engine.jito.wtf (classic)"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "getblock_landfirst": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "GetBlock LandFirst",
+  "unverified": true,
+  "tip_required": "not documented",
+  "min_tip_sol": null,
+  "min_tip_note": "sales-only; no tip accounts or endpoints published",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [],
+  "features": [
+   "parallel routing via GetBlock SWQoS, leased SWQoS and Jito block engine"
+  ],
+  "pricing": "sales",
+  "docs": "https://docs.getblock.io/solana-advanced-data-tools/landfirst",
+  "doc_date": "fetched 2026-10-03",
+  "summary": {
+   "swqos": "yes",
+   "bundles": "via Jito",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "yes",
+   "free_tier": "sales only",
+   "eu_endpoint_primary": "not published"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "figment_accelerator": {
+  "tip_accounts": [],
+  "tip_account_count": 0,
+  "name": "Figment Solana Transaction Accelerator",
+  "unverified": true,
+  "tip_required": "not documented",
+  "min_tip_sol": null,
+  "min_tip_note": "marketing page only",
+  "tip_per_transaction": "n/a",
+  "eu_endpoints": [],
+  "features": [
+   "staked transaction acceleration (marketing claims only)"
+  ],
+  "pricing": "sales",
+  "docs": "https://www.figment.io/solana-transaction-accelerator/",
+  "doc_date": "fetched 2026-10-03",
+  "summary": {
+   "swqos": "claimed",
+   "bundles": "no",
+   "mev_protection": "no",
+   "revert_protection": "no",
+   "dual_routing": "no",
+   "free_tier": "sales only",
+   "eu_endpoint_primary": "not published"
+  },
+  "in_local_map": "n/a (no tip accounts)",
+  "local_map_kinds": [],
+  "new_vs_local_map": []
+ },
+ "soyas": {
+  "name": "Soyas TX Landing",
+  "tip_accounts": [
+   "soyas4s6L8KWZ8rsSk1mF3d1mQScoTGGAgjk98bF8nP",
+   "soyascXFW5wEEYiwfEmHy2pNwomqzvggJosGVD6TJdY",
+   "soyasDBdKjADwPz3xk82U3TNPRDKEWJj7wWLajNHZ1L",
+   "soyasE2abjBAynmHbGWgEwk4ctBy7JMTUCNrMbjcnyH",
+   "soyasi59njacMUPvo3TM5paHjeK8pYSdovXgFi32gRt",
+   "soyasQYhJxv8uZgWDxhg72td6piAf7XTkoyWHtSATEz",
+   "soyastP66xyYC8XADXZjdMM5BAVGD2YRvz8dwtLsqb8",
+   "soyasvdgUJWYcUCzDxpmjUnNjH7KamXLXTzLwFvdVPE",
+   "soyasvxAunisNxaoRxkKGjNir7KmbwYnr37JmefkX9G",
+   "soyas5doVFUwH8s5zK8gEvCL5KR5ogDmf52LsrJEZ9h"
+  ],
+  "min_tip_sol": 0.001,
+  "eu_endpoints": [
+   "fra.landing.soyas.xyz:9000 (Teraswitch)",
+   "fra2.landing.soyas.xyz:9000 (Allnodes)",
+   "ams.landing.soyas.xyz:9000"
+  ],
+  "features": [
+   "private QUIC endpoints (ALPN solana-tpu, server name soyas-landing)",
+   "whitelisted: API key is a keypair used as the TLS client certificate",
+   "tips-based, no subscription"
+  ],
+  "docs": "https://soyas.xyz/fast-landing (pasted by the owner 2026-10-03)",
+  "doc_date": "2026-10-03"
+ },
+ "glaive": {
+  "name": "Glaive",
+  "tip_accounts": [
+   "GLaiv4GMRYQmthatDS98uQT4HoucgxWT8NeJz6oSwxeU",
+   "GLaivL5uPrDpvd1wTtvat38KGqb5WLhEdqQfnmNd3oNr",
+   "GLaivinAWh21NaJMhtExtD5G2gZs1xnvaYVZmwqobWZL",
+   "GLaivJSUL71FcocYa8tks5vpVyYzvaDMHtyrzfQF2ABr",
+   "GLaivRU6eDKrta3p3psFAWPEFLzCjeMHGpPUuQqTjtyv",
+   "GLaivq5dU8qHayz9Qf13LjPfVy3SmUhbmickfGiZdmfh"
+  ],
+  "min_tip_sol": 0.0001,
+  "eu_endpoints": [],
+  "features": [
+   "transaction submission service (endpoints not on the tip page)"
+  ],
+  "docs": "https://glaive.trade/tip-accounts (sent by the owner 2026-10-03)",
+  "doc_date": "2026-10-03"
+ }
+}

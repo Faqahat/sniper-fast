@@ -1,0 +1,16 @@
+[package]
+# TEST-ONLY hostile venue for nexus-arb-v2's payer guard (tools/arb-v2/exec/nexus-v2.litesvm.test.ts).
+# Loaded in LiteSVM AT an allowlisted venue address to simulate a malicious third-party upgrade of a
+# Raydium-CLMM fork. Never deploy it.
+name = "nexus-evil-venue"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+solana-program = "=1.18.26"

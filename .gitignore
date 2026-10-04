@@ -1,0 +1,27 @@
+# build output (local and the Cherry build tuned for its CPU)
+/target/
+/target-cherry/
+
+# secrets: tokens and keys live only in .env (mode 600), never in git
+.env
+.env.*
+!.env.example
+*.key
+*-keypair.json
+id.json
+
+# run output (written on Cherry under runs/, copied here for analysis)
+/runs/
+*.zst
+*.jsonl
+*.log
+
+# editor and OS clutter
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# program build outputs
+program/*/target/

@@ -1,0 +1,37 @@
+Fresh seed pools (2026-10-03 20:09 UTC). Candidate sources: GeckoTerminal trending 5m/1h/6h, new pools, top pools by tx (all + pumpswap/meteora/meteora-damm-v2/raydium); DexScreener profiles/boosts; Meteora DLMM + DAMM v2 datapi top-volume pools (DLMM top 1,600); Raydium v3 standard pools; local data/registry.json tokens with 2+ SOL pools. All pairs via DexScreener token-pairs; every pool owner verified on chain; transfer-fee Token-2022 mints dropped; stables/LSTs/bridged majors/mcap>=$500M excluded.
+Of the 119 tokens, 62 are not in the current server seed-pools-w.csv; 210 of the 326 pools are new rows. Found via public APIs: 118; via local registry only: 1.
+Candidates scanned 1963; tokens qualified (after transfer-fee drop) 119, kept top 119; pools 326 {'DAMMv2': 22, 'DLMM': 208, 'PumpSwap': 67, 'RayCPMM': 15, 'RayAMMv4': 14}
+Rule: >=2 SOL pools on PumpSwap/DLMM/DAMMv2/RayCPMM/RayAMMv4, each liq >= $3k; some pool 1h txns >= 30 or 5m volume > 0; mcap < $500M; stables/LSTs/bridged majors excluded.
+score = 25*log10(1+tx1h) + 12*(venues-1) + 6*(min(pools,6)-1) + 10*log10(1+min(diff_bps,500)) + 5*log10(1+vol1h/$1k) + 8*log10(1+liq_2nd_pool/$1k)
+
+  # symbol         mint                                          venues                               tx1h    vol1h$ diff_bps    liq2$  score
+  1 SPEC           2AVjqmGbMqg7rSyHVv2deVdggsBgBtu1Bi69BUvE5WRv  DLMMx2 DAMMv2                       39258   4901154    252.0    31340  193.4
+  2 Agency         7VertkgF9KLhxxJXHX6uaWuoYZTP9LdGj2bWmVXVpump  DLMMx4 PumpSwap                      6424   1403222    296.3   470129  193.1
+  3 HOOKED         C1mBfBoDkwWfd6uTFZp62ARHLjeVp3bDpCDMfMZtPngE  DLMMx4 DAMMv2                        4159    937589    276.6   355311  186.2
+  4 USELESS        Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk  DLMMx7 RayCPMM                       2290    253614    224.5   561838  183.6
+  5 CLAUDIA        H7TuvDxEKygh27zGfGcjKG8JGWgrbyKpPtvJEpGosfas  DLMMx2 PumpSwap                      4988    496242    643.6    92862  172.7
+  6 ANSEM          9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump  DLMMx4 PumpSwap                      1043    208119    208.9  1119021  170.7
+  7 LMAO!          H74CYmXgMkYHYuSRsZt6RJb4NYp2u72Vw8BS5huApump  PumpSwap DLMM DAMMv2                 1836     61383    205.8   186791  167.9
+  8 MET            METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL   DLMMx9 DAMMv2                         585     76125    138.0   525273  163.8
+  9 STONK          6GmAFSYs4gk3FDao5FzzySQpPZaWsa4rUJHacpMpUNgx  DLMMx4 RayCPMM                        674    240917     97.9   999470  162.6
+ 10 e/acc          CbcyNo7m1amFWqEQm2m4PLv1UNvpcL3C1Ujm6AkzpKoU  DLMMx5 PumpSwap                       637    101039     85.0   265450  160.9
+ 11 swordcat       5tCju6YNxHq5zrA6tGndr6F7TK42mpUFmeE31cSFpump  DLMM PumpSwap                        3165    456332    230.0   155979  160.0
+ 12 Cupsey         6NwarBvDkXhByqVp2Qkq5i9XbtA2B3Bwe8SWGu9vpump  DAMMv2x2 DLMMx2 PumpSwap              571     41754    154.8    22497  158.0
+ 13 PAID           98kfF7rmsg1QDUEoCqNE7g7M1FdrTt92TEp2CLzypump  DLMMx4 PumpSwap                       422     63089    270.2   486348  156.5
+ 14 SUPERIOR       CJ7yfNktWNqKBJRaCQWNzoAhHPs3eshWY8MqU8wXpump  PumpSwap DAMMv2                      7316    749041     90.6     6371  155.5
+ 15 knightcat      3Dgwn5E7H5a8k6iGrz3qirkaJqUaJrKHEZ2xPcLRpump  PumpSwap DLMM                        6181    651120    146.6     4560  154.5
+ 16 Aiden          9dSMwFfPezQ8WPcW1uZV7ns4rcviEj2LssSAg75WBLXd  PumpSwap DLMM                        4998    351877    186.0     6700  153.0
+ 17 SOCKET         XLBLxbY1Mr7aadnqAbmqSBXLEyUdjvUXtXCnz8Mpump   PumpSwap DLMM                        1695    261606    861.2    64260  152.3
+ 18 JEANPHIL       GTBxUiw6wJdmmkCGZgRHLyYxqu1vG4KtRpeox6yDpump  DLMMx3 PumpSwap                       484     52247   1664.3   221317  151.5
+ 19 www            GAwhcphCqCv5bKHmCiN4VDdNWfbXJL4npmkc8L3Q9S9H  DLMMx2 PumpSwap                      1446    186557     80.0    73352  148.4
+ 20 Fartcoin       9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump  DLMMx4 RayAMMv4 PumpSwap               75     21577    149.0   155806  147.1
+ 21 OTC            MukLDtJ8Cx9DxLbeyLRSWPSposTMWuwHANbuaudpump   DLMMx2 PumpSwap                      2341     22508     20.6   129563  145.4
+ 22 HOTBOT         8nnaeWCw8mUypcGAgbmSuzAT85uWx4UN12adDrMhXrGF  DLMMx2 PumpSwap                       581     50982    679.7    99163  144.7
+ 23 Jimothy        Ge87EtsjwRQbHaqQmKRno69RFTwh9bfSsm99XNxTpump  DLMMx2 PumpSwap                       678     54666    110.6   158079  141.6
+ 24 fone           CTPoyCwkjMvoJwU4xvZZqoD8tiYk6yDchySiN5gGpump  DLMMx4 PumpSwap                       277     35347     77.8   105238  140.1
+ 25 EMBER          5dvXTZ5qwgafnHtwu3Ls3QrWx1U4LQsFeCuJgkk4QEC6  DLMMx5                                307     52829    163.9   200884  135.5
+ 26 SI             9aqmJjCnnMQv42TXLk921ceUkN35nea2QP969n1caqjj  DLMMx2 PumpSwap                       465     34199    219.7    36320  134.5
+ 27 DUST           HAcEqEVru6dRbe1grLFTPBxjxGgjn1tVpR7bLgYXdust  PumpSwap DLMM                         694     28808    126.3    10672  126.0
+ 28 PEPE           PEPEqnuuCDbBC89p1u9vpnP1KQ2oj1xTcQBsjt9X55m   DLMM DAMMv2                           380     78234     66.8    68101  125.0
+ 29 baton          Hg5Ja55T5wESq4vyFoiVCMeHXtGyVA69X2UHq8hgpump  DLMMx3                                456     34853    351.1    42319  124.8
+ 30 TROLL          5UUH9RTDiSpq6HKS6bp4NdU9PNJpXRXuiw6ShBTBhgH2  DLMMx2 PumpSwap                       124     10861    346.9   119240  123.8

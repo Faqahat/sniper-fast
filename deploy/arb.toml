@@ -1,0 +1,326 @@
+# arb-lab on Cherry (84.32.59.15), shadow mode: every feed still live, MriyaNN8's pools + all of ours.
+out_dir = "/root/arb-lab/runs"
+mode = "shadow"
+# the trading wallet (arbed's keystore ~/.nexus-v2-trading-wallet.*; owner of the WSOL account and the nonce accounts)
+wallet = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
+
+[pools]
+seed_csv = "/root/arb-lab/data/seed-pools-merged.csv"   # old list + mriya v5 (owner, 2026-10-03)
+registry_json = "/root/arb-lab/data/registry.json"
+registry_all = true
+templates_json = "/root/arb-lab/data/templates.json"
+
+# Every RPC call is raced across all providers below; the first good answer is used and each one is timed.
+# Providers whose environment variables are missing are skipped (listed in run.log).
+[rpc]
+
+[[rpc.endpoint]]
+name = "public"
+url = "https://api.mainnet-beta.solana.com"
+
+[[rpc.endpoint]]
+name = "helius"
+url_env = "RMR_RPC_URL"
+
+[[rpc.endpoint]]
+name = "shyft"
+url_env = "SHYFT_RPC_URL"
+
+[[rpc.endpoint]]
+# dropped for now (owner, 2026-10-03): a 60/min send plan; reads kept it rate-limited (12,116 of 12,116 failed in shadow-4)
+name = "rpcfast"
+url_env = "LANDER_RPCFAST_URL"
+enabled = false
+
+[[rpc.endpoint]]
+name = "haan"
+url = "https://rpc.haandigital.eu/"
+bearer_env = "HAAN_API_KEY"
+
+[[rpc.endpoint]]
+name = "erpc"
+url = "https://edge.erpc.global?api-key=${ERPC_RPC_TOKEN}"
+
+[state]
+url = "https://grpc.haandigital.eu:443"
+token_env = "HAAN_X_TOKEN"
+
+[strategy]
+sizes_sol = [0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
+# record every round trip that clears base + priority fee; the report applies each send path's tip
+min_profit_lamports = 1
+cu_price_micro = 40000
+outcome_watch_ms = 2000
+
+# ---------------------------------------------------------------- raw shreds
+[[feed]]
+name = "raiden"
+kind = "udp"
+bind = "0.0.0.0:8005"
+
+[[feed]]
+name = "corvus"
+kind = "udp"
+bind = "0.0.0.0:8006"
+
+[[feed]]
+name = "getblock"
+kind = "udp"
+bind = "0.0.0.0:8009"
+
+[[feed]]
+name = "dz-leader"
+kind = "multicast"
+group = "233.84.178.1"
+port = 7733
+interface = "doublezero1"
+
+[[feed]]
+name = "dz-retransmit-eu"
+kind = "multicast"
+group = "233.84.178.12"
+port = 7733
+interface = "doublezero1"
+
+# ---------------------------------------------------------------- gRPC
+[[feed]]
+name = "constantk-prism"
+kind = "jito-entries"
+url = "https://prism-frankfurt.constant-k.com:55577"
+token_env = "CONSTANTK_TOKEN"
+
+[[feed]]
+name = "erpc"
+kind = "jito-entries"
+url = "https://shreds-fra6-1.erpc.global"
+
+[[feed]]
+name = "astralane-deshred"
+kind = "yellowstone-deshred"
+url = "http://fr2.shreds.astralane.io:12000"
+token_env = "ASTRALANE_KEY"
+account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"]
+
+[[feed]]
+name = "haan-deshred"
+kind = "yellowstone-deshred"
+url = "https://grpc.haandigital.eu:443"
+token_env = "HAAN_X_TOKEN"
+account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"]
+
+[[feed]]
+# Haan's plan allows 1 transaction filter with 1 account: PumpSwap (the busiest venue)
+name = "haan-grpc"
+kind = "yellowstone-tx"
+url = "https://grpc.haandigital.eu:443"
+token_env = "HAAN_X_TOKEN"
+account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]
+
+# ---------------------------------------------------------------- send paths
+# Checked with `arb-lab senders --config arb.toml` (sends nothing). The engine does not send yet (shadow only).
+# Secrets come from .env next to this file; `${NAME}` in a url is replaced from it. Tip accounts default to each
+# provider's documented list (src/send/mod.rs known_tip_accounts). Tips are paid only when the trade lands.
+# Same order as arbed's production LANDERS (jito-bundle,shyft,helius,rpcfast); the bundle must stay first for the gate.
+
+# THE JITO GATE (arbed's Run 2 decision: keep it): the bundle goes first; the paid copies are dropped only when Jito
+# says our own profit check (0x4e580002) would fail, within 25 ms. Every 10th skip is sent anyway (canary).
+[gate]
+enabled = true
+wait_ms = 25
+canary_every = 10
+
+[[send]]
+# one-transaction bundle through the searcher gRPC; auth key = the whitelisted keypair (CrQx62…EynE), never funded
+name = "jito-bundle"
+kind = "jito-bundle"
+url = "https://frankfurt.mainnet.block-engine.jito.wtf"
+auth_keypair = "~/.nexus-v2-jito-auth.json"
+tip_lamports = 10000          # floor
+tip_share = 0.5               # half of the predicted gross edge
+tip_max_lamports = 1000000
+max_per_sec = 5               # Jito's limit on our gRPC key since 2026-10-02 (shared with arbed if it runs on this key)
+
+[[send]]
+# Shyft staked RPC (SWQoS), no tip. Frankfurt host, e.g. https://rpc.fra.shyft.to?api_key=...
+name = "shyft"
+kind = "shyft"
+url = "${LANDER_SHYFT_URL}"
+
+[[send]]
+name = "helius"
+kind = "helius"
+url = "http://fra-sender.helius-rpc.com/fast?swqos_only=true"
+tip_lamports = 5000           # the swqos_only minimum; Sender Max (no swqos_only) wants 1,000,000
+
+[[send]]
+# RPC Fast Beam: key in the URL (.env); tip to Beam's Astralane accounts; Start plan 60/min. Dropped for now.
+name = "rpcfast"
+kind = "rpcfast"
+enabled = false
+url = "${LANDER_RPCFAST_URL}"
+tip_lamports = 10000
+max_per_sec = 1
+
+[[send]]
+# Jito JSON-RPC sendTransaction with our UUID (2/s). Add ?bundleOnly=true for revert protection.
+name = "jito-tx"
+kind = "jito-tx"
+enabled = false
+url = "https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/transactions"
+token_env = "JITO_UUID"
+tip_lamports = 5000
+max_per_sec = 2
+
+[[send]]
+# Haan Sender trial: 1 tx/s, no tip
+name = "haan"
+kind = "haan"
+enabled = false
+url = "https://sender.haandigital.eu/api/v1/transactions"
+token_env = "HAAN_API_KEY"
+jito_auth_env = "JITO_UUID"
+max_per_sec = 1
+
+[[send]]
+# Astralane Iris (binary). The key is mandatory on every tier: the account key (same as the shred feed's) works
+# (2026-10-03 probe: no key -> 401). Free tier: 0.001 SOL minimum tip, 5 tx/s, no bundles; 10,000 lamports at VIP 3
+name = "astralane"
+kind = "iris"
+url = "http://fr.gateway.astralane.io/irisb?api-key=${ASTRALANE_KEY}&method=sendTransaction"
+tip_lamports = 1000000
+max_per_sec = 5
+
+[[send]]
+# Raiden Bolt: free tier 5 tx/s, 0.001 SOL minimum tip (key accepted, 2026-10-03 probe)
+name = "bolt"
+kind = "bolt"
+url = "https://fra.bolt.raiden.wtf/api/v1/sendRawTransaction"
+token_env = "RAIDEN_BOLT_KEY"
+tip_lamports = 1000000
+max_per_sec = 5
+
+[[send]]
+# Hello Moon Lunar Lander (binary): 0.001 SOL minimum tip
+name = "lunar"
+kind = "lunar"
+enabled = false
+url = "http://fra.lunar-lander.hellomoon.io/send-bin?api-key=${LUNAR_KEY}"
+tip_lamports = 1000000
+
+# ---------------------------------------------------------------- steps 1-3 of the send plan
+# step 1 (keep-alives) runs whenever send paths are enabled; steps 2 and 3 below.
+[exec]
+program = "8K8uyQDtVKHYRPACP9fepz91q4sEZLBppR2Ty4vdXuWg"
+rpc = ["helius"]          # simulation, signature statuses, landed transactions: one provider, not the race
+max_size_sol = 0.165      # the wallet's WSOL covers this
+keepalive_s = 30
+
+[sim]
+# step 2, free: every would-send decision is built and simulated (sims.jsonl)
+enabled = true
+max_per_sec = 2
+
+[canary]
+# step 3: real transactions built to fail our profit check; needs this AND `arb-lab run --canary`
+enabled = true
+count = 100
+every_ms = 5000
+size_sol = 0.01
+max_spend_lamports = 3000000   # 0.003 SOL of network fees in all
+settle_s = 30
+nonce_account = "58XHXCVwizLunHZdtXRr21NXnraG8Y4vQWjpXLN2FgVe"
+
+[live]
+# step 4: real trades; needs mode = "live" AND `arb-lab run --live`
+max_size_sol = 0.165                # about $20 a trade (owner, 2026-10-03), paid from the wallet's WSOL
+max_failed_fees_lamports = 20000000 # stop after 0.02 SOL of fees on landed transactions that failed
+margin_lamports = 1000              # on-chain min_profit = base fee + priority fee + that copy's tip + this
+max_new_token_accounts = 5          # rent of new token accounts (recoverable)
+settle_s = 15
+max_priority_lamports = 100000   # at most this priority fee per trade
+nonce_accounts = ["58XHXCVwizLunHZdtXRr21NXnraG8Y4vQWjpXLN2FgVe", "G6MfymxNMNSBResfcJccuvwQMswPW8cq7nB1tsCUN2DC", "CK9tCKm9PNt7Smrymh87UG6PyPi8XmV4gmV3BCPtxJdM"]
+
+# ---------------------------------------------------------------- senders the rivals use (research log S-010/S-011)
+# Formats from each provider's docs (2026-10-03). All want their own tip; it is paid only when a trade wins. Keys go in
+# /root/arb-lab/.env under the names below; a path whose key is missing is left out of a run (named in run.log).
+[[send]]
+# Everstake SWQoS: NO key needed; tip >= 0.001 SOL placed first (their rule); 10 tx/s
+name = "everstake"
+kind = "everstake"
+url = "http://fra-swqos.everstake.one"
+tip_lamports = 1000000
+max_per_sec = 10
+
+[[send]]
+# Temporal Nozomi (the paid sender the backrunners use most): free self-serve key at dashboard.nozomi.temporal.xyz; 5 tx/s
+name = "nozomi"
+kind = "nozomi"
+enabled = false
+url = "http://fra2.nozomi.temporal.xyz/?c=${NOZOMI_KEY}"
+tip_lamports = 1000000
+max_per_sec = 5
+
+[[send]]
+# 0slot: key from their sales (Discord/Telegram), free first week; 5 tx/s
+name = "0slot"
+kind = "0slot"
+enabled = false
+url = "http://de.0slot.trade/?api-key=${ZEROSLOT_KEY}"
+tip_lamports = 1000000
+max_per_sec = 5
+
+[[send]]
+# NodeOne: free self-serve key at node1.me/register (2 tx/s)
+name = "nodeone"
+kind = "node-one"
+enabled = false
+url = "http://fra.node1.me/v2"
+token_env = "NODEONE_KEY"
+tip_lamports = 1000000
+max_per_sec = 2
+
+[[send]]
+# Corvus Falcon: key via onboarding/Discord
+name = "falcon"
+kind = "falcon"
+enabled = false
+url = "http://fra.falcon.wtf/?api-key=${FALCON_KEY}"
+tip_lamports = 1000000
+
+[[send]]
+# BlockRazor: free self-serve key (3 tx/s); they also run a Cherry Servers Frankfurt endpoint (frankfurt-cherryservers...)
+name = "blockrazor"
+kind = "block-razor"
+enabled = false
+url = "http://frankfurt.solana.blockrazor.xyz:443/v2/sendBinaryTransaction?auth=${BLOCKRAZOR_KEY}"
+tip_lamports = 100000
+max_per_sec = 3
+
+[[send]]
+# FlashBlock: free trial key (10 tx/s), self-serve
+name = "flashblock"
+kind = "flash-block"
+enabled = false
+url = "http://fra.flashblock.trade/api/v2/submit-batch"
+token_env = "FLASHBLOCK_KEY"
+tip_lamports = 100000
+max_per_sec = 10
+
+[[send]]
+# NextBlock: free trial key (1 tx per 10 s) at nextblock.io/app/dashboard
+name = "nextblock"
+kind = "next-block"
+enabled = false
+url = "https://frankfurt.nextblock.io/api/v2/submit"
+token_env = "NEXTBLOCK_KEY"
+tip_lamports = 1000000
+
+[[send]]
+# bloXroute Trader API: free tier key at portal.bloxroute.com (about 1 tx/s)
+name = "bloxroute"
+kind = "bloxroute"
+enabled = false
+url = "http://germany.solana.dex.blxrbdn.com/api/v2/submit"
+token_env = "BLOXROUTE_KEY"
+tip_lamports = 1000000
+max_per_sec = 1

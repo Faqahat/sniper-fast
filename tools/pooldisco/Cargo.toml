@@ -1,0 +1,27 @@
+[package]
+name = "pooldisco"
+version = "0.1.0"
+edition = "2021"
+description = "Live discovery of multi-pool tokens with cross-pool price gaps and the arbitrage bots (if any) that close them"
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+bs58 = "0.5"
+crossbeam-channel = "0.5"
+curve25519-dalek = "4"
+futures-util = "0.3"
+http = "1"
+prost = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "http2"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-stream = "0.1"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
+
+[profile.release]
+opt-level = 3
