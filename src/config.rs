@@ -227,13 +227,19 @@ pub struct RecordCfg {
     /// CPUs the writer threads are pinned to (away from the engine's); empty = any
     #[serde(default)]
     pub writer_cpus: Vec<usize>,
+    /// plan addendum I-9 (WP-08): rivals.jsonl keeps 1 in this many of its `why = venues` rows (88% of cmp2's rows),
+    /// chosen by the signature so a replay keeps the same ones; each kept one carries the rate and the running counts
+    /// (`sample`). 1 keeps every row
+    #[serde(default = "rec_rivals_venues_sample")]
+    pub rivals_venues_sample: u32,
 }
 
 impl Default for RecordCfg {
     fn default() -> Self {
         RecordCfg { disk_budget_gb: rec_budget_gb(), min_free_gb: rec_min_free_gb(), rotate_mb: rec_rotate_mb(), rotate_min: rec_rotate_min(), flush_ms: rec_flush_ms(),
             zstd_level: rec_zstd_level(), archive_feeds: vec![], queue_core: rec_queue_core(), queue_accounts: rec_queue_accounts(), queue_journal: rec_queue_journal(),
-            queue_chain: rec_queue_core(), queue_bulk: rec_queue_bulk(), queue_max_mb: rec_queue_max_mb(), accounts_keyframe_every: rec_keyframe(), writer_cpus: vec![] }
+            queue_chain: rec_queue_core(), queue_bulk: rec_queue_bulk(), queue_max_mb: rec_queue_max_mb(), accounts_keyframe_every: rec_keyframe(), writer_cpus: vec![],
+            rivals_venues_sample: rec_rivals_venues_sample() }
     }
 }
 fn rec_budget_gb() -> f64 { 40.0 }
@@ -248,6 +254,7 @@ fn rec_queue_journal() -> u64 { 524_288 }
 fn rec_queue_bulk() -> u64 { 131_072 }
 fn rec_queue_max_mb() -> f64 { 1_024.0 }
 fn rec_keyframe() -> u32 { 64 }
+fn rec_rivals_venues_sample() -> u32 { 10 }
 
 /// The runtime split (src/runtime.rs; PLAN WP-02 item 1): the hot runtime (2 workers) runs stream I/O and sends; the
 /// background runtime runs every RPC call
@@ -775,7 +782,7 @@ pub struct TxStreamCfg {
     pub max_accounts: Option<usize>,
 }
 
-/// The LeaderBook's sources (src/leaders.rs; WP-03 item 10)
+/// The LeaderBook's sources (src/leaders.rs; WP-03 item 10) and its metadata and RTT probe (WP-08 item 1)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LeadersCfg {
@@ -787,15 +794,29 @@ pub struct LeadersCfg {
     /// the dated static fallback
     #[serde(default = "leader_static")]
     pub static_fallback: String,
-    /// how often the lists are fetched again, minutes
+    /// how often the lists and the vote accounts are fetched again, minutes (WP-08: validators.jsonl every 10 minutes)
     #[serde(default = "leader_refresh")]
     pub refresh_min: u64,
+    /// WP-08: measure host -> leader TPU-QUIC RTT with a QUIC handshake (no data sent) to the next leaders' announced
+    /// TPU-QUIC endpoints, once per endpoint however many validators share it (F40)
+    #[serde(default = "yes")]
+    pub rtt_probe: bool,
+    /// ... at most this many handshakes a second
+    #[serde(default = "leader_rtt_per_sec")]
+    pub rtt_per_sec: f64,
+    /// WP-08: the offline IP -> location table (DB-IP City Lite ranges): a validator's city and region (metro) from its
+    /// gossip IP, its TPU-QUIC endpoint's region (the RTT fallback's bucket)
+    #[serde(default = "leader_geo")]
+    pub geo_table: String,
 }
 fn leader_lists() -> Vec<String> { vec!["https://kobe.mainnet.jito.network/api/v1/validators".into()] }
 fn leader_static() -> String { "data/validators-meta.json".into() }
 fn leader_refresh() -> u64 { 60 }
+fn leader_rtt_per_sec() -> f64 { 2.0 }
+fn leader_geo() -> String { "data/ip-geo.csv".into() }
 impl Default for LeadersCfg {
-    fn default() -> Self { LeadersCfg { enabled: true, validator_lists: leader_lists(), static_fallback: leader_static(), refresh_min: leader_refresh() } }
+    fn default() -> Self { LeadersCfg { enabled: true, validator_lists: leader_lists(), static_fallback: leader_static(), refresh_min: leader_refresh(),
+        rtt_probe: true, rtt_per_sec: leader_rtt_per_sec(), geo_table: leader_geo() } }
 }
 
 /// `[[state.tx_stream]]` include tokens (expanded once the registry is booted: `expand_includes`)
@@ -1176,6 +1197,10 @@ impl Config {
         if !(1..=19).contains(&r.zstd_level) { bail!("[record] zstd_level must be 1..19"); }
         if [r.queue_core, r.queue_accounts, r.queue_journal, r.queue_chain, r.queue_bulk].contains(&0) { bail!("[record] queue sizes must be > 0"); }
         if r.accounts_keyframe_every == 0 { bail!("[record] accounts_keyframe_every must be > 0"); }
+        // WP-08: the RTT prober's rate; I-9's sampling (1 keeps every row)
+        let rps = cfg.leaders.rtt_per_sec;
+        if !(rps.is_finite() && rps > 0.0 && rps <= 20.0) { bail!("[leaders] rtt_per_sec must be in (0, 20] handshakes a second (got {rps})"); }
+        if r.rivals_venues_sample == 0 { bail!("[record] rivals_venues_sample must be >= 1 (1 keeps every row)"); }
         // a typo would archive nothing, silently
         for a in &r.archive_feeds {
             match cfg.feeds.iter().find(|f| &f.name == a) {
@@ -1484,6 +1509,27 @@ mod tests {
         let mut stage = std::fs::read_to_string(repo("deploy/arbx-stage0.toml")).unwrap();
         stage = stage.replace("name = \"haan-grpc\"", "name = \"haan-deshred\"");
         assert!(Config::parse(&stage).unwrap_err().to_string().contains("the name is taken"));
+    }
+
+    /// WP-08: [leaders] rtt_probe, rtt_per_sec, geo_table (defaults; the maintained configs; a rate outside (0, 20]) and
+    /// [record] rivals_venues_sample
+    #[test]
+    fn wp08_leaders_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        assert_eq!((c.leaders.rtt_probe, c.leaders.rtt_per_sec, c.leaders.geo_table.as_str()), (true, 2.0, "data/ip-geo.csv"));
+        let stage0 = Config::load(&repo("deploy/arbx-stage0.toml")).unwrap();
+        assert_eq!((stage0.leaders.rtt_probe, stage0.leaders.rtt_per_sec, stage0.leaders.geo_table.as_str()), (true, 2.0, "/root/arbx/data/ip-geo.csv"));
+        let off = Config::parse(&format!("{MINIMAL}[leaders]\nrtt_probe = false\nrtt_per_sec = 0.5\ngeo_table = \"g.csv\"\n")).unwrap();
+        assert_eq!((off.leaders.rtt_probe, off.leaders.rtt_per_sec, off.leaders.geo_table.as_str()), (false, 0.5, "g.csv"));
+        for bad in ["rtt_per_sec = 0", "rtt_per_sec = -1.0", "rtt_per_sec = 21", "rtt_per_sec = nan"] {
+            let e = Config::parse(&format!("{MINIMAL}[leaders]\n{bad}\n")).map(|_| ()).unwrap_err().to_string();
+            assert!(e.contains("rtt_per_sec"), "{bad}: {e}");
+        }
+        // plan addendum I-9: [record] rivals_venues_sample, 1 in 10 by default and in both maintained configs; 1 keeps all
+        assert_eq!((c.record.rivals_venues_sample, stage0.record.rivals_venues_sample, Config::load(&repo("deploy/arb.toml")).unwrap().record.rivals_venues_sample), (10, 10, 10));
+        assert_eq!(Config::parse(&format!("{MINIMAL}[record]\nrivals_venues_sample = 1\n")).unwrap().record.rivals_venues_sample, 1);
+        let e = Config::parse(&format!("{MINIMAL}[record]\nrivals_venues_sample = 0\n")).map(|_| ()).unwrap_err().to_string();
+        assert!(e.contains("rivals_venues_sample"), "{e}");
     }
 
     #[test]

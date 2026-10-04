@@ -1,0 +1,43 @@
+{
+  "schema": "arbx.fixture.classify-signatures/1",
+  "_doc": "Transactions for the transfer classification tests (PLAN WP-08 item 3; src/classify/tests.rs). `txs`: other signers' transactions found on 2026-10-04 by scanning public mainnet blocks (slots 453,330,484-453,330,549) for CPI tips, wraps, unwraps, PumpSwap creator fees and Glaive tips; fetched into testdata/classify/<sig>.json by `tools/capture-fixtures.py --classify`. `wallet`: the two of our wallet's transactions the tests use (testdata/wallet/, fetched by --wallet).",
+  "txs": [
+    {
+      "sig": "3hdmTiRUBQUDTbGai4jnHMrocdjhoLVMAmqd4Rrdcg9NReC3FtJQBgZbkKY4FYTyfYCDuGzhmPkJ33tjQMaifgz8",
+      "role": "cpi_tip",
+      "what": "legacy; a program pays Jito 202,846 lamports from inside (System transfer at stack height 2); a vault program refunds the signer at height 3"
+    },
+    {
+      "sig": "3SBF5po14VDjQw8MjMfructaimWuPWthh36b8cbWPqPdXF5fLKHJh5d8NBYPqzELYUdymtU1JTAQqmhFoewkvqwK",
+      "role": "cpi_tip_from_vault_and_pumpswap_sell_fees",
+      "what": "v0 with lookup tables; an arbitrage program's Jupiter route sells on PumpSwap three levels down (protocol, creator and buyback fees from the pool's quote vault), then its vault pays Jito 6,255 lamports by CPI"
+    },
+    {
+      "sig": "Kk7Nd3EFDTs3CESR4v2bQQB83CFgUfasqPdgdfBJPvPH48EYerL8HUpne7TJjipQ7r9Ub7idqvcP9RB7BS1n9Wf",
+      "role": "pumpswap_buy_creator_fee_wrap_unwrap",
+      "what": "v0; a top-level PumpSwap buy: two ATAs created, 239,868,095 lamports wrapped (transfer + SyncNative), protocol / creator / buyback fees, the WSOL ATA closed back to the signer"
+    },
+    {
+      "sig": "3QWEcbXwCR6J7TttkwBbG46YMhAtp7GLSESVhsvVePztuqXrSXLSmiQqiQ8BxwwzavCty6GgFvAJ13QjfjHhV4Yt",
+      "role": "glaive_tip_failed",
+      "what": "v0, failed (InstructionError 4 custom 0), durable nonce; a top-level Glaive tip of 30,036,343 lamports"
+    },
+    {
+      "sig": "3kJuXhocws1GpyqXWkCwSU337oNCFbz6XRPdCqR8ysYnDyJsBb4Dh78PctAuEuVCTVgVuTdeGjUqZ43fBubGrEQX",
+      "role": "glaive_tip_failed_v1",
+      "what": "v1 (SIMD-0385), failed (InstructionError 2 custom 1); a top-level Glaive tip"
+    }
+  ],
+  "wallet": [
+    {
+      "sig": "1WUBGeUhRymCbU8yyVqvxmbSkWEaNJwd3A98kxyAuyj2PjeN6VfcgAdJvyWxqX2fTQ4iX98UW6NocREXsNKq7q9",
+      "role": "jito_bundle_pumpswap_creator_fee",
+      "what": "our w5h2/w5h3 win: a Jito bundle (top-level tip 7,254 lamports) whose PumpSwap buy_exact_quote_in leg inside our program pays the coin creator 396,412 lamports"
+    },
+    {
+      "sig": "2rw9r59fq2V3VNMEwWbienLyV98jqoitFDTsgNWwHiNMHisgESyx66f6buB85AbCZJ8TKzbX9zGpgTj6pgcWa2Hk",
+      "role": "wrap",
+      "what": "the wallet's setup: WSOL ATA created, 4.2 SOL wrapped"
+    }
+  ]
+}

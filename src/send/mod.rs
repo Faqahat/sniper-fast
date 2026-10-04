@@ -38,10 +38,36 @@ use std::time::{Duration, Instant};
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const SYSTEM_PROGRAM: Pk = [0u8; 32];
 
-/// Each provider's own tip accounts, copied verbatim from its docs (a wrong address silently burns lamports). A path's
-/// configured `tip_accounts` must come from this list; empty = all of them.
-/// every known sender tip account -> the sender's name (recording: whose tip a rival's transfer is)
+/// The sender catalogue (`data/sender-tip-accounts.json`, compiled in): every service's tip accounts, the ones WP-08
+/// added each with its provider source (`tip_account_sources`). Recordings name tips with it; sends use only
+/// [`known_tip_accounts`]
+pub const TIP_CATALOGUE: &str = include_str!("../../data/sender-tip-accounts.json");
+
+/// every known sender tip account -> the sender's name (recording: whose tip a rival's transfer is: rivals.jsonl `tips`,
+/// exec.jsonl `transfers`): the code's lists first ([`code_tip_names`]), then the catalogue ([`TIP_CATALOGUE`]) for every
+/// account they do not name (WP-08, plan addendum: Glaive, Soyas, AllenHark, Solami and the bloXroute and SVS legacy
+/// accounts, which cmp2's rivals.jsonl recorded unnamed)
 pub fn tip_owner_names() -> rustc_hash::FxHashMap<crate::tx::Pk, String> {
+    let mut m = code_tip_names();
+    add_tip_catalogue(&mut m, TIP_CATALOGUE);
+    m
+}
+
+/// Adds the accounts of a catalogue (the `data/sender-tip-accounts.json` layout: `{service: {"sender"?, "tip_accounts":
+/// [..]}}`) that `m` does not name yet, each named by its service's `sender`, else by the service's key
+pub fn add_tip_catalogue(m: &mut rustc_hash::FxHashMap<crate::tx::Pk, String>, json: &str) {
+    let v: Value = serde_json::from_str(json).unwrap_or(Value::Null);
+    for (key, s) in v.as_object().into_iter().flatten() {
+        let name = s["sender"].as_str().unwrap_or(key);
+        for a in s["tip_accounts"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            if let Some(pk) = bs58::decode(a).into_vec().ok().and_then(|v| <[u8; 32]>::try_from(v).ok()) { m.entry(pk).or_insert_with(|| name.to_string()); }
+        }
+    }
+}
+
+/// the code's sender tip accounts -> the sender's name: [`known_tip_accounts`] of every send kind, then
+/// [`OTHER_TIP_ACCOUNTS`]
+pub fn code_tip_names() -> rustc_hash::FxHashMap<crate::tx::Pk, String> {
     use SendKind::*;
     let mut m = rustc_hash::FxHashMap::default();
     for (k, name) in [(JitoTx, "jito"), (Helius, "helius"), (Rpcfast, "rpcfast"), (Bolt, "bolt"), (Iris, "astralane"), (Lunar, "lunar"),
@@ -113,6 +139,8 @@ pub static OTHER_TIP_ACCOUNTS: &[(&str, &str)] = &[
     ("H6hyJo6rpBmwHbvVuWCEHExJ2bE4rcn1hTPeiBtypus4", "rakurai"),
 ];
 
+/// Each provider's own tip accounts, copied verbatim from its docs (a wrong address silently burns lamports). A path's
+/// configured `tip_accounts` must come from this list; empty = all of them.
 pub fn known_tip_accounts(kind: SendKind) -> &'static [&'static str] {
     match kind {
         // speedlanding.trade/docs.html (2026-10-03)
@@ -890,6 +918,32 @@ mod tests {
         let mut c: SendPath = toml::from_str(&format!("name = \"t\"\nkind = \"{kind}\"\nurl = \"{url}\"")).unwrap();
         c.tip_lamports = c.kind.min_tip();
         c
+    }
+
+    /// WP-08 (plan addendum; review WP-08 #1): the names rivals.jsonl uses (`tip_owner_names`, the engine's `tip_names`)
+    /// include the catalogue's accounts the code lists do not name: Glaive's (4,197 cmp2 rows recorded unnamed), Soyas',
+    /// AllenHark's, Solami's and the bloXroute / SVS legacy ones. Every catalogue account is named, a code name wins over
+    /// the catalogue's, and every service that adds an account of its own names its sender (review #19: a key such as
+    /// `temporal_nozomi` must not become a sender name by accident)
+    #[test]
+    fn rival_tip_names_take_the_catalogue() {
+        let pk = |s: &str| -> Pk { bs58::decode(s).into_vec().unwrap().try_into().unwrap() };
+        let (code, all) = (code_tip_names(), tip_owner_names());
+        for (a, want) in [("GLaivinAWh21NaJMhtExtD5G2gZs1xnvaYVZmwqobWZL", "glaive"), ("soyas4s6L8KWZ8rsSk1mF3d1mQScoTGGAgjk98bF8nP", "soyas"),
+            ("HWEoBxYs7ssKuudEjzjmpfJVX7Dvi7wescFsVx2L5yoY", "bloxroute"), ("95cfoy472fcQHaw4tPGBTKpn6ZQnfEPfBgDQx6gcRmRg", "bloxroute")] {
+            assert_eq!((code.get(&pk(a)), all.get(&pk(a)).map(String::as_str)), (None, Some(want)), "{a}");
+        }
+        assert_eq!(all.get(&pk("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5")).map(String::as_str), Some("jito"), "the code's name first");
+        let cat: Value = serde_json::from_str(TIP_CATALOGUE).unwrap();
+        let mut added = 0;
+        for (svc, s) in cat.as_object().unwrap() {
+            let accts: Vec<Pk> = s["tip_accounts"].as_array().into_iter().flatten().map(|a| pk(a.as_str().unwrap())).collect();
+            for k in &accts { assert!(all.contains_key(k), "{svc}: {} unnamed", crate::tx::b58(k)); }
+            let own = accts.iter().filter(|k| !code.contains_key(*k)).count();
+            if own > 0 { assert!(s["sender"].is_string(), "{svc} adds {own} accounts: it needs a `sender`"); }
+            added += own;
+        }
+        assert_eq!((added, all.len()), (46, code.len() + 46), "the catalogue adds 46 accounts (2026-10-04)");
     }
 
     /// one-shot HTTP/1.1 server: answers `reply` (status, body) and hands back the request it got

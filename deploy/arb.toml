@@ -381,6 +381,7 @@ max_per_sec = 1
 [record]
 # WP-02: always on; these keys only set budgets (defaults shown)
 archive_feeds = []
+rivals_venues_sample = 10   # WP-08 (plan addendum I-9): 1 in 10 rivals.jsonl `why = venues` rows, by signature; 1 keeps all
 disk_budget_gb = 40
 min_free_gb = 25
 

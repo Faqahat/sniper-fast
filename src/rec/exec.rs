@@ -3,9 +3,11 @@
 //! It replaces arb-lab's PumpSwap-only `rec_exec` (feeds/grpc.rs). The record is built and serialized on the
 //! recorder's chain writer: the producer only moves the protobuf transaction and meta into the closure.
 //!
-//! Derived fields come later and are null here: transfer classification (`transfers`, `tip_total`, `tip_senders`,
-//! `jito_tipped`), bundle membership (`bundle`), `arb_like` (WP-08), our own attempts (`ours`, `prog_events`: WP-05,
-//! WP-08). wallet.jsonl (WP-03b) uses the same field builder ([`exec_json`]) with its own `src` and extras.
+//! Derived fields (WP-08): [`exec_json`] leaves them null and the hook [`derive`] fills them on the writer thread
+//! from the record's own fields (`crate::classify::annotate`): transfer classification (`transfers`, `tip_total`,
+//! `tip_senders`, `jito_tipped`), bundle membership (`bundle`) and `arb_like`. `ours` and `prog_events` stay null until
+//! WP-05 / WP-08's log decoders. wallet.jsonl (WP-03b) uses the same field builder ([`exec_json`]) with its own `src`
+//! and extras, then the same one-line hook ([`derive`]) before it is serialized.
 use super::accounts::{role, Roles};
 use super::{Rec, Record, EXEC};
 use crate::feeds::grpc::{PbMeta, PbTransaction};
@@ -48,9 +50,15 @@ pub fn emit_grpc(rec: &Rec, roles: Option<&Arc<Roles>>, x: GrpcTx) -> bool {
         let mut v = exec_json(&x.sig, x.slot, Some(x.idx), x.t, "grpc-tx", &["tx_stream"], &x.tx, &x.meta, roles.as_deref());
         // the bank it executed in, when the provider sends it (review WP-03 #12)
         v["bank_id"] = serde_json::json!(x.bank_id);
+        derive(&mut v);
         let _ = serde_json::to_writer(o, &v);
     }))
 }
+
+/// The derived-field hook (PLAN WP-08 item 3): fills `transfers`, `tip_total`, `tip_asked`, `tip_senders`,
+/// `jito_tipped`, `bundle` and `arb_like` of a §4.14 record built by [`exec_json`], on the writer thread that serializes
+/// it. exec.jsonl calls it here; the wallet.jsonl writer (WP-03b) calls it the same way
+pub fn derive(v: &mut Value) { crate::classify::annotate(v); }
 
 /// venue programs by name (exec.jsonl `venues`; the same list as the engine's rival detection)
 static VENUES: LazyLock<rustc_hash::FxHashMap<Pk, &'static str>> = LazyLock::new(|| crate::engine::amm_programs().into_iter().collect());
@@ -172,8 +180,9 @@ pub fn exec_json(sig: &[u8], slot: u64, idx: Option<u64>, t: u64, src: &str, fou
     put("pre_tok", json!(tok(&meta.pre_token_balances))); put("post_tok", json!(tok(&meta.post_token_balances)));
     put("signer_sol", json!(signer_sol)); put("signer_tok", Value::Object(signer_tok));
     put("watched", json!(watched)); put("venues", json!(venues)); put("pools", json!(pools));
-    // derived fields of later WPs (WP-08: transfer classification, bundle membership, arb_like; WP-05: ours)
-    for k in ["transfers", "tip_total", "tip_senders", "jito_tipped", "bundle", "arb_like", "ours", "prog_events"] { put(k, Value::Null); }
+    // derived fields: null here; [`derive`] fills the WP-08 ones (transfers, tips, bundle, arb_like) on the writer thread;
+    // `ours` and `prog_events` come with WP-05 / the log decoders
+    for k in ["transfers", "tip_total", "tip_asked", "tip_senders", "jito_tipped", "bundle", "arb_like", "ours", "prog_events"] { put(k, Value::Null); }
     Value::Object(m)
 }
 

@@ -20,11 +20,15 @@ Modes (exactly one per call):
   --exec-slice ZST     Rebuild testdata/legacy/exec/<seg>.slice.jsonl.xz (--seg, default w5h-p10): the exec.jsonl v1 lines
                        of the slots around that segment's landed attempts (trigger slot .. landed slot + 1).
                        Decompresses with `zstd -dc` if installed, else node's zlib.createZstdDecompress.
+  --classify           Fetch every signature of testdata/classify/signatures.json `txs` (WP-08: other signers' transactions
+                       for the transfer classification tests) with getTransaction (encoding base64, JSON meta,
+                       maxSupportedTransactionVersion 1, commitment finalized) into testdata/classify/<sig>.json, the same
+                       layout as --wallet. Read-only. Files already present are kept unless --refetch.
   --manifest           Rewrite testdata/legacy/fixtures.sha256 over every fixture file in testdata/legacy and testdata/wallet.
   --verify             Offline check (CI): every file listed in fixtures.sha256 exists and matches; no fixture is unlisted;
                        raw.sha256 agrees; every signature in signatures.json has its wallet file. Exit 1 on any problem.
 
-RPC (only --wallet and --discover use it): --rpc-url URL (default: the public mainnet endpoint), or --rpc-url-env NAME
+RPC (only --wallet, --classify and --discover use it): --rpc-url URL (default: the public mainnet endpoint), or --rpc-url-env NAME
 to read the URL from an environment variable. A URL read from the environment is never printed or written.
 """
 import argparse
@@ -46,6 +50,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTDATA = os.path.join(REPO, "testdata")
 LEGACY = os.path.join(TESTDATA, "legacy")
 WALLET_DIR = os.path.join(TESTDATA, "wallet")
+CLASSIFY_DIR = os.path.join(TESTDATA, "classify")
 SIGNATURES = os.path.join(LEGACY, "signatures.json")
 MANIFEST = os.path.join(LEGACY, "fixtures.sha256")
 PUBLIC_RPC = "https://api.mainnet-beta.solana.com"
@@ -147,16 +152,27 @@ def make_rpc(args):
 
 
 def cmd_wallet(args):
-    sigs = all_sigs(load_signatures())
+    if fetch_txs(args, all_sigs(load_signatures()), WALLET_DIR, 0, "wallet"):
+        print("run --manifest to update testdata/legacy/fixtures.sha256")
+
+
+def cmd_classify(args):
+    with open(os.path.join(CLASSIFY_DIR, "signatures.json")) as f:
+        sigs = [t["sig"] for t in json.load(f)["txs"]]
+    fetch_txs(args, sigs, CLASSIFY_DIR, 1, "classify")
+
+
+def fetch_txs(args, sigs, out_dir, max_version, label):
+    """getTransaction of every signature into out_dir/<sig>.json (base64 transaction, JSON meta, sorted keys)."""
     rpc = make_rpc(args)
-    os.makedirs(WALLET_DIR, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
     fetched = kept = 0
     for i, sig in enumerate(sigs):
-        path = os.path.join(WALLET_DIR, f"{sig}.json")
+        path = os.path.join(out_dir, f"{sig}.json")
         if os.path.exists(path) and not args.refetch:
             kept += 1
             continue
-        cfg = {"encoding": "base64", "maxSupportedTransactionVersion": 0, "commitment": "finalized"}
+        cfg = {"encoding": "base64", "maxSupportedTransactionVersion": max_version, "commitment": "finalized"}
         res = None
         for k in range(4):
             res = rpc.call("getTransaction", [sig, cfg])
@@ -172,9 +188,8 @@ def cmd_wallet(args):
         fetched += 1
         print(f"  [{i + 1}/{len(sigs)}] {sig[:12]} slot {res['slot']}")
         time.sleep(args.sleep)
-    print(f"wallet: {len(sigs)} signatures, {fetched} fetched, {kept} kept; {rpc.calls} RPC calls to {rpc.label}")
-    if fetched:
-        print("run --manifest to update testdata/legacy/fixtures.sha256")
+    print(f"{label}: {len(sigs)} signatures, {fetched} fetched, {kept} kept; {rpc.calls} RPC calls to {rpc.label}")
+    return fetched
 
 
 # ---------------------------------------------------------------- --discover
@@ -399,6 +414,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     m = ap.add_mutually_exclusive_group(required=True)
     m.add_argument("--wallet", action="store_true")
+    m.add_argument("--classify", action="store_true")
     m.add_argument("--discover", action="store_true")
     m.add_argument("--pool-bots", metavar="DIR")
     m.add_argument("--wins", metavar="RUNS")
@@ -408,11 +424,13 @@ def main():
     ap.add_argument("--seg", default="w5h-p10", help="segment for --exec-slice")
     ap.add_argument("--rpc-url", default=PUBLIC_RPC)
     ap.add_argument("--rpc-url-env", metavar="NAME")
-    ap.add_argument("--refetch", action="store_true", help="--wallet: fetch again even if the file exists")
+    ap.add_argument("--refetch", action="store_true", help="--wallet, --classify: fetch again even if the file exists")
     ap.add_argument("--sleep", type=float, default=0.4, help="seconds between RPC calls (public endpoint rate limits)")
     args = ap.parse_args()
     if args.wallet:
         cmd_wallet(args)
+    elif args.classify:
+        cmd_classify(args)
     elif args.discover:
         cmd_discover(args)
     elif args.pool_bots:

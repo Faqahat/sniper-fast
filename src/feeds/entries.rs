@@ -165,18 +165,22 @@ pub struct PohClock { slot: u64, hashes: u64, ticks: u32, last_tick: u64, hpt: u
 pub struct SlotRec { pub slot: u64, pub ticks: u32, pub entries: u32, pub txs: u64, pub t_first: u64, pub t_last: u64, pub valid: bool }
 
 impl PohClock {
-    /// `entries`, plus arrival bookkeeping: returns the previous slot's record once a newer slot starts
-    pub fn entries_at(&mut self, slot: u64, ents: &[(u64, u64)], t: u64) -> (Vec<Option<Poh>>, Option<SlotRec>) {
+    /// `entries`, plus arrival bookkeeping: returns each entry's position, the previous slot's record once a newer slot
+    /// starts, and the index in its slot of the message's first entry when the slot is followed from its start (poh.log
+    /// v2 `entry_idx`: the entries of a slot arrive in order, so the count so far is the index)
+    pub fn entries_at(&mut self, slot: u64, ents: &[(u64, u64)], t: u64) -> (Vec<Option<Poh>>, Option<SlotRec>, Option<u32>) {
         let done = (slot > self.slot && self.slot != 0).then(|| SlotRec { slot: self.slot, ticks: self.ticks, entries: self.n_entries, txs: self.n_txs,
             t_first: self.t_first, t_last: self.t_last, valid: self.valid });
         let out = self.entries(slot, ents);
+        let mut first = None;
         if slot == self.slot {
+            first = self.valid.then_some(self.n_entries);
             if self.t_first == 0 { self.t_first = t; }
             self.t_last = t;
             self.n_entries += ents.len() as u32;
             self.n_txs += ents.iter().map(|e| e.1).sum::<u64>();
         }
-        (out, done)
+        (out, done, first)
     }
 
     /// account one message's entries of `slot`; returns each entry's position (None for a slot we joined midway)
@@ -270,6 +274,20 @@ mod tests {
         assert_eq!(p[1].unwrap().ms(), Some(9.375));   // 1.5 ticks of 6.25 ms
         assert_eq!(p[3].unwrap().ms(), Some(14.0625));
         assert_eq!(p[3].unwrap().ms_after(&p[1].unwrap()), Some(4.6875));
+    }
+
+    /// poh.log v2 `entry_idx` for an entries feed: the index in its slot of each message's first entry, known only for a
+    /// slot followed from its start (the first slot after joining is not)
+    #[test]
+    fn entry_indexes_of_a_slot_followed_from_its_start() {
+        let mut c = PohClock::default();
+        assert_eq!(c.entries_at(10, &[(100, 1), (100, 0)], 1).2, None, "joined midway");
+        assert_eq!(c.entries_at(11, &[(100, 0), (50, 2)], 2).2, Some(0));
+        assert_eq!(c.entries_at(11, &[(50, 0), (25, 1), (25, 1)], 3).2, Some(2));
+        let (p, done, first) = c.entries_at(12, &[(100, 0)], 4);
+        assert_eq!((first, done.map(|d| (d.slot, d.entries, d.ticks, d.valid))), (Some(0), Some((11, 5, 2, true))));
+        assert_eq!(p.len(), 1);
+        assert_eq!(c.entries_at(11, &[(1, 1)], 5).2, None, "a late message of an older slot");
     }
 
     #[test]

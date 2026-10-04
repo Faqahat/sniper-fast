@@ -1,0 +1,6 @@
+{
+ "schema": "arbx.platform-fee-wallets/1.0",
+ "date": "2026-10-04",
+ "note": "Wallets that collect platform fees (trading terminals, bots, swap front ends), by platform: exec.jsonl / wallet.jsonl transfers to one of them, or to a token account one of them owns, are `platform_fee` (src/classify.rs; MEASUREMENT A.4). Same rule as sender-tip-accounts.json: every address carries the platform's own source (`source_url`, `fetched`, `attribution` provider_docs / provider_api / provider_docs_archived) or `attribution: unverified` with a note. None is listed yet: no platform publishes its fee wallets in a source checked so far (2026-10-04: GMGN, searched; its `gmgno...` vanity receiver seen on chain is not sourced). Add entries as {\"platforms\": {\"<name>\": {\"docs\": \"<url>\", \"wallets\": [{\"address\", \"source_url\", \"fetched\", \"attribution\", \"note\"?}]}}}.",
+ "platforms": {}
+}
