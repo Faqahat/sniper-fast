@@ -24,4 +24,4 @@ id.json
 .vscode/
 
 # program build outputs
-program/*/target/
+program/**/target/
