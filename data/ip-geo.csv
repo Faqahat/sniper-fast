@@ -1,0 +1,878 @@
+# arbx offline IP -> location table (PLAN WP-08 item 1: a leader's region from its gossip IP; MEASUREMENT 4.27, 4.28)
+# Source: DB-IP IP to City Lite, 2026-10 edition (dbip-city-lite-2026-10.csv.gz, https://db-ip.com/db/download/ip-to-city-lite),
+# licensed CC BY 4.0: "IP Geolocation by DB-IP" (https://db-ip.com). Kept: the IPv4 ranges holding a gossip, TPU or TPU-QUIC
+# address of the 3,744 cluster nodes of getClusterNodes (api.mainnet-beta.solana.com, 2026-10-04): 872 ranges, 3,741 addresses.
+# Columns as DB-IP gives them; the LeaderBook's region is <country>-<city without its parenthesised district>.
+ip_start,ip_end,country,stateprov,city
+2.57.215.0,2.57.215.255,JP,Tokyo,Chiyoda City
+2.59.216.0,2.59.217.255,NL,North Holland,Amsterdam
+3.65.167.0,3.66.226.255,DE,Hesse,Frankfurt am Main
+3.67.225.0,3.68.22.255,DE,Hesse,Frankfurt am Main
+3.77.238.0,3.78.101.255,DE,Hesse,Frankfurt am Main
+3.80.0.0,3.81.120.255,US,Virginia,Ashburn
+3.88.134.0,3.89.36.255,US,Virginia,Ashburn
+3.112.109.0,3.115.255.255,JP,Tokyo,Shibuya City
+3.235.106.0,3.235.235.255,US,Virginia,Ashburn
+3.248.0.0,3.248.223.255,IE,Leinster,Dublin
+4.2.51.0,4.2.51.255,US,Colorado,Denver
+5.10.250.0,5.10.250.255,NL,North Holland,Amsterdam
+5.39.216.0,5.39.223.255,NL,North Holland,Amsterdam
+5.43.224.0,5.43.225.255,CZ,Prague,Prague
+5.61.208.0,5.61.208.255,JP,Tokyo,Chiyoda City
+5.61.209.0,5.61.209.255,NL,North Holland,Amsterdam
+5.104.107.0,5.104.108.255,DE,North Rhine-Westphalia,Düsseldorf (Stadtbezirke 06)
+5.187.35.0,5.187.35.255,NL,North Holland,Amsterdam
+5.187.38.0,5.187.38.255,HK,Eastern District,Quarry Bay
+5.199.164.0,5.199.167.255,SG,,Singapore
+5.199.169.0,5.199.170.255,LT,Siauliai,Šiauliai
+5.199.172.0,5.199.172.255,LT,Siauliai,Šiauliai
+8.209.194.0,8.209.255.255,JP,Tokyo,Shibuya City
+8.210.0.0,8.210.255.255,HK,Kowloon,Hong Kong
+8.211.0.0,8.211.127.255,DE,Hesse,Frankfurt am Main
+8.216.0.0,8.216.75.255,JP,Tokyo,Shibuya City
+8.216.80.0,8.216.127.255,JP,Tokyo,Shibuya City
+8.217.0.0,8.218.255.255,HK,Kowloon,Hong Kong
+8.221.128.0,8.221.151.255,JP,Tokyo,Shibuya City
+8.222.128.0,8.222.255.255,SG,,Singapore
+13.112.0.0,13.114.225.255,JP,Tokyo,Shibuya City
+13.158.0.0,13.158.76.255,JP,Tokyo,Shibuya City
+13.192.0.0,13.193.177.255,JP,Tokyo,Shibuya City
+13.193.179.0,13.199.255.255,JP,Tokyo,Shibuya City
+13.213.72.0,13.215.255.255,SG,,Singapore
+13.219.72.0,13.220.117.255,US,Virginia,Ashburn
+15.204.41.128,15.204.48.255,US,Oregon,Hillsboro
+15.204.98.0,15.204.123.255,US,Oregon,Hillsboro
+15.204.152.128,15.204.166.127,US,Virginia,Reston
+15.204.237.133,15.204.255.255,US,Virginia,Reston
+15.235.39.0,15.235.57.255,CA,Quebec,Montreal (Ville-Marie)
+15.235.59.0,15.235.73.255,CA,Quebec,Montreal (Ville-Marie)
+15.235.99.0,15.235.127.255,CA,Quebec,Montreal (Ville-Marie)
+15.235.190.128,15.235.255.255,SG,,Singapore (Downtown Core)
+18.138.0.0,18.143.255.255,SG,,Singapore
+18.156.0.0,18.156.165.255,DE,Hesse,Frankfurt am Main
+18.176.0.0,18.181.160.255,JP,Tokyo,Shibuya City
+18.181.162.0,18.181.206.255,JP,Tokyo,Shibuya City
+18.181.208.0,18.181.224.255,JP,Tokyo,Shibuya City
+18.181.226.0,18.183.35.79,JP,Tokyo,Shibuya City
+18.183.35.96,18.183.128.255,JP,Tokyo,Shibuya City
+18.183.130.0,18.183.255.255,JP,Tokyo,Shibuya City
+18.185.114.0,18.185.232.255,DE,Hesse,Frankfurt am Main
+18.210.208.0,18.213.56.255,US,Virginia,Ashburn
+18.232.0.0,18.232.115.255,US,Virginia,Ashburn
+18.246.151.128,18.246.175.255,US,Oregon,Boardman
+23.19.136.0,23.19.143.255,US,Illinois,Lombard
+23.88.0.0,23.88.8.127,DE,Saxony,Falkenstein
+23.88.17.0,23.88.18.159,DE,Saxony,Falkenstein
+23.92.176.0,23.92.179.255,US,Georgia,Norcross
+23.106.80.0,23.106.87.255,US,California,Los Angeles (Westlake)
+23.106.232.0,23.106.239.255,GB,England,London
+23.109.46.0,23.109.47.255,NL,North Holland,Amsterdam
+23.109.60.0,23.109.64.255,NL,North Holland,Amsterdam
+23.109.156.0,23.109.159.255,NL,North Holland,Amsterdam
+23.111.240.0,23.111.247.255,NL,North Holland,Amsterdam (Amsterdam-Zuidoost)
+23.115.72.0,23.115.79.255,US,Texas,Richardson
+23.132.12.0,23.132.12.255,US,Delaware,Dover
+23.227.220.0,23.227.223.255,JP,Tokyo,Shinagawa
+23.252.121.0,23.252.122.255,US,New York,New York
+31.57.32.0,31.57.32.255,DE,Hesse,Frankfurt am Main
+31.134.200.0,31.134.207.255,NL,North Holland,Purmerend
+31.165.103.0,31.165.104.255,CH,Zurich,Zurich
+31.170.16.0,31.170.22.255,LV,Riga,Riga (Latgales priekšpilsēta)
+31.172.68.0,31.172.68.255,DE,Hesse,Frankfurt am Main
+31.204.158.0,31.204.159.255,NL,South Holland,Rotterdam
+31.207.44.0,31.207.47.255,NL,North Holland,Amsterdam
+32.193.29.0,32.196.177.255,US,Virginia,Ashburn
+34.9.0.0,34.10.255.255,US,Iowa,Council Bluffs
+34.32.128.0,34.32.255.255,NL,Groningen,Groningen
+34.48.0.0,34.48.255.255,US,District of Columbia,Washington D.C.
+34.82.0.0,34.83.255.255,US,Oregon,The Dalles
+34.84.0.0,34.85.127.255,JP,Tokyo,Shibuya City
+34.146.0.0,34.146.255.255,JP,Tokyo,Shibuya City
+34.170.0.0,34.173.255.255,US,Iowa,Council Bluffs
+34.204.47.0,34.204.204.255,US,Virginia,Ashburn
+34.222.67.0,34.222.134.255,US,Oregon,Boardman
+35.72.0.0,35.77.101.255,JP,Tokyo,Shibuya City
+35.77.103.0,35.79.255.255,JP,Tokyo,Shibuya City
+35.208.0.0,35.209.255.255,US,Iowa,Council Bluffs
+37.27.74.64,37.27.164.255,FI,Uusimaa,Helsinki
+37.27.166.0,37.27.255.255,FI,Uusimaa,Helsinki
+37.48.102.0,37.48.127.255,NL,North Holland,Amsterdam
+37.61.208.0,37.61.223.255,DE,Hesse,Frankfurt am Main
+37.72.171.0,37.72.171.255,NL,North Holland,Haarlem
+37.114.51.0,37.114.54.127,DE,Hesse,Frankfurt am Main
+37.120.245.0,37.120.247.255,RO,Bucharest,Bucharest
+37.122.252.0,37.122.252.127,GB,England,London
+37.142.115.0,37.142.120.255,IL,Central District,Yakum
+37.187.82.0,37.187.82.255,FR,Hauts-de-France,Wattrelos
+38.7.145.0,38.7.145.255,NL,North Holland,Amsterdam
+38.46.216.0,38.46.219.255,US,Utah,Draper
+38.46.220.0,38.46.223.255,US,Utah,Salt Lake City
+38.50.164.0,38.50.164.255,GB,England,London
+38.58.176.0,38.58.183.255,US,Utah,Salt Lake City
+38.84.231.0,38.84.231.255,DE,Hesse,Frankfurt am Main (Fechenheim)
+38.86.91.0,38.86.91.255,US,Virginia,Charlottesville
+38.88.64.0,38.88.64.255,CA,British Columbia,Vancouver
+38.92.24.0,38.92.25.255,US,Utah,Salt Lake City
+38.124.152.0,38.124.152.255,NL,North Holland,Amsterdam
+38.155.79.0,38.155.79.255,JP,Tokyo,Shibuya City
+38.186.48.0,38.186.63.255,CA,British Columbia,Vancouver
+38.190.136.0,38.190.136.255,US,Texas,Austin
+38.244.189.0,38.244.189.255,NL,North Holland,Haarlem
+40.160.0.0,40.160.39.255,US,Virginia,Reston
+40.160.50.0,40.160.72.255,US,Virginia,Warrenton
+43.130.224.0,43.130.255.255,JP,Tokyo,Shibuya City
+43.156.88.0,43.156.221.255,SG,,Singapore
+43.157.0.0,43.157.127.255,DE,Hesse,Frankfurt am Main
+43.159.32.0,43.159.63.255,SG,,Singapore
+43.167.0.0,43.167.255.255,JP,Tokyo,Shibuya City
+43.206.0.0,43.207.255.255,JP,Tokyo,Shibuya City
+44.193.24.0,44.193.196.255,US,Virginia,Ashburn
+44.247.55.0,44.247.56.255,US,Oregon,Boardman
+45.32.74.0,45.32.95.255,US,California,Los Angeles
+45.32.145.0,45.32.145.255,FR,Centre-Val de Loire,Saint-Laurent-Nouan
+45.32.152.0,45.32.159.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+45.32.214.0,45.32.223.255,US,Georgia,Atlanta (Knight Park/Howell Station)
+45.59.162.0,45.59.162.255,US,New York,New York
+45.63.64.0,45.63.79.255,US,Illinois,Elk Grove Village
+45.76.0.0,45.76.15.255,US,New Jersey,Piscataway
+45.76.16.0,45.76.31.255,US,Illinois,Elk Grove Village
+45.76.144.0,45.76.163.255,SG,,Singapore (Pioneer)
+45.76.234.0,45.76.239.255,US,Texas,Dallas
+45.77.0.0,45.77.7.255,US,California,Santa Clara
+45.77.64.0,45.77.67.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+45.77.68.0,45.77.71.255,US,California,Los Angeles
+45.77.96.0,45.77.111.255,US,New Jersey,Piscataway
+45.77.136.0,45.77.139.255,NL,North Holland,Haarlem
+45.77.140.0,45.77.143.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+45.77.144.0,45.77.159.255,US,New Jersey,Piscataway
+45.77.168.0,45.77.175.255,SG,,Singapore (Pioneer)
+45.77.240.0,45.77.255.255,SG,,Singapore (Pioneer)
+45.84.193.0,45.84.194.255,HK,Islands,Lau Fau Shan
+45.90.14.0,45.90.15.255,NL,South Holland,Zoetermeer
+45.90.148.0,45.90.151.255,NL,North Holland,Amsterdam
+45.128.218.0,45.128.219.255,PL,Mazovia,Warsaw (Mokotów)
+45.134.108.0,45.134.109.255,DE,Hesse,Frankfurt am Main
+45.136.153.0,45.136.153.255,DE,Hesse,Frankfurt am Main
+45.137.117.0,45.137.117.255,GB,England,London
+45.137.215.0,45.137.215.255,NL,North Holland,Amsterdam
+45.139.132.0,45.139.133.255,DE,Hesse,Frankfurt am Main (Fechenheim)
+45.139.134.0,45.139.134.255,DE,Hesse,Hattersheim am Main
+45.139.135.0,45.139.135.255,DE,Hesse,Rüsselsheim am Main
+45.146.160.0,45.146.161.255,DE,Hesse,Frankfurt am Main
+45.152.160.0,45.152.160.255,DE,Bavaria,Ottobrunn (Unterbiberg)
+45.154.33.0,45.154.33.255,NL,Drenthe,Emmen
+45.158.38.0,45.158.40.255,DE,Hesse,Frankfurt am Main
+45.250.25.0,45.250.25.255,US,Virginia,Ashburn
+45.250.253.0,45.250.253.255,US,New York,New York
+45.250.254.0,45.250.254.255,US,Virginia,Ashburn
+45.250.255.0,45.250.255.255,JP,Tokyo,Shibuya City
+46.4.190.0,46.4.191.127,DE,Saxony,Falkenstein
+46.8.0.0,46.8.3.255,RU,Moscow Oblast,Belyaninovo
+46.17.96.0,46.17.103.255,NL,North Holland,Amsterdam
+46.21.150.0,46.21.153.255,US,California,Los Angeles (Central-Alameda)
+46.21.157.0,46.21.159.255,US,California,Los Angeles (Central-Alameda)
+46.29.73.0,46.29.76.255,RU,Samara Oblast,Samara
+46.166.141.0,46.166.143.223,NL,North Brabant,Roosendaal
+46.166.161.0,46.166.163.215,LT,Siauliai,Šiauliai
+46.166.168.0,46.166.169.255,LT,Siauliai,Šiauliai
+46.229.232.0,46.229.232.254,SK,Bratislava Region,Bratislava (Petržalka)
+46.236.216.0,46.236.216.255,LT,Vilnius,Vilnius
+47.74.0.0,47.74.63.255,JP,Tokyo,Shibuya City
+47.75.0.0,47.76.255.255,HK,Kowloon,Hong Kong
+47.77.128.0,47.77.255.255,US,California,Minkler
+47.83.0.0,47.83.255.255,HK,Kowloon,Hong Kong
+47.88.46.0,47.88.127.255,US,California,Minkler
+47.129.248.0,47.131.255.255,SG,,Singapore
+47.238.28.0,47.240.255.255,HK,Kowloon,Hong Kong
+47.242.0.0,47.244.255.255,HK,Kowloon,Hong Kong
+47.245.128.0,47.245.255.255,DE,Hesse,Frankfurt am Main
+47.254.128.0,47.254.191.255,DE,Hesse,Frankfurt am Main
+50.7.4.0,50.7.5.255,IE,Leinster,Saggart
+50.21.167.0,50.21.167.255,CA,Quebec,Drummondville
+50.115.45.0,50.115.47.255,US,Utah,Salt Lake City (Downtown)
+51.77.236.0,51.77.236.255,FR,Hauts-de-France,Gravelines
+51.89.10.0,51.89.11.255,DE,Hesse,Limburg an der Lahn
+51.162.160.0,51.162.167.255,JP,Tokyo,Shibuya City
+51.170.128.0,51.170.143.255,MA,Casablanca-Settat,Zawyat an Nwaçer
+51.195.23.0,51.195.25.255,DE,Hesse,Limburg an der Lahn
+51.255.239.0,51.255.239.255,FR,Grand Est,Strasbourg
+52.27.105.0,52.27.255.255,US,Oregon,Boardman
+52.38.253.0,52.39.255.255,US,Oregon,Portland
+52.74.0.0,52.74.255.255,SG,,Singapore
+52.76.0.0,52.77.255.255,SG,,Singapore
+52.192.66.0,52.195.112.255,JP,Tokyo,Shibuya City
+54.38.148.0,54.38.149.15,DE,Hesse,Limburg an der Lahn
+54.64.0.0,54.65.255.255,JP,Tokyo,Shibuya City
+54.82.234.0,54.84.1.255,US,Virginia,Ashburn
+54.88.114.0,54.89.153.255,US,Virginia,Ashburn
+54.148.0.0,54.149.255.255,US,Oregon,Boardman
+54.167.40.0,54.167.236.255,US,Virginia,Ashburn
+54.168.0.0,54.168.255.255,JP,Tokyo,Shibuya City
+54.169.0.0,54.169.103.255,SG,,Singapore
+54.169.105.0,54.169.255.255,SG,,Singapore
+54.177.42.0,54.177.155.255,US,California,San Jose
+54.216.0.0,54.217.255.255,IE,Leinster,Dublin
+54.221.0.0,54.221.255.255,US,Virginia,Ashburn
+54.244.228.0,54.245.255.255,US,Oregon,Portland
+54.248.0.0,54.250.255.255,JP,Tokyo,Shibuya City
+54.255.166.0,54.255.255.255,SG,,Singapore
+57.128.66.0,57.128.72.255,FR,Grand Est,Strasbourg
+57.128.189.0,57.128.189.255,GB,England,Blackburn
+57.128.192.0,57.128.255.255,PL,Mazovia,Warsaw (Praga-Północ)
+57.129.0.0,57.129.127.255,DE,Hesse,Limburg an der Lahn
+57.129.138.0,57.129.146.255,GB,England,Erith
+57.180.0.0,57.183.255.255,JP,Tokyo,Shibuya City
+61.111.3.0,61.111.3.255,KR,Seoul,Yongsan-dong (Nonhyeon-ro)
+62.101.242.0,62.101.242.255,NO,Trøndelag,Brekstad
+62.113.193.0,62.113.199.95,DE,Hesse,Frankfurt am Main
+62.122.185.0,62.122.185.255,US,Virginia,Ashburn
+62.197.45.0,62.197.45.255,NL,Drenthe,Meppel
+63.254.161.0,63.254.161.255,NL,North Holland,Amsterdam
+63.254.162.0,63.254.163.255,JP,Tokyo,Shinagawa (Higashishinagawa)
+63.254.165.0,63.254.165.255,JP,Tokyo,Koto-ku (Toyosu)
+63.254.166.0,63.254.167.255,NL,North Holland,Amsterdam
+63.254.168.0,63.254.169.255,GB,England,London
+63.254.172.0,63.254.177.255,US,New Jersey,Newark
+63.254.178.0,63.254.178.255,JP,Tokyo,Shinagawa (Higashishinagawa)
+63.254.180.0,63.254.180.255,US,Washington,Kent
+64.22.115.0,64.22.119.255,US,Colorado,Boulder (Central Boulder)
+64.31.2.0,64.31.2.255,US,Virginia,Charlottesville
+64.31.6.0,64.31.8.255,US,California,Los Angeles
+64.31.13.0,64.31.13.255,US,North Carolina,Wake Forest
+64.31.14.0,64.31.14.255,US,New York,New York
+64.31.16.0,64.31.16.255,US,Virginia,Charlottesville
+64.31.23.0,64.31.24.255,US,New York,New York
+64.31.28.0,64.31.28.255,US,New York,New York
+64.31.29.0,64.31.29.255,DE,Hesse,Frankfurt am Main
+64.31.32.0,64.31.32.255,JP,Tokyo,Shibuya City
+64.31.39.0,64.31.39.255,DE,Hesse,Frankfurt am Main
+64.31.42.0,64.31.42.255,US,Virginia,Charlottesville
+64.31.48.0,64.31.48.255,JP,Tokyo,Shibuya City
+64.31.51.0,64.31.51.255,JP,Tokyo,Shibuya City
+64.31.52.0,64.31.53.255,US,New York,New York
+64.31.54.0,64.31.54.255,US,Texas,Dallas
+64.31.55.0,64.31.56.255,US,California,Los Angeles
+64.31.58.0,64.31.59.255,US,New York,New York
+64.31.61.0,64.31.61.255,US,California,Los Angeles
+64.34.80.0,64.34.80.255,US,New York,New York
+64.34.81.0,64.34.81.255,US,Virginia,Ashburn
+64.34.86.0,64.34.86.255,GB,England,London
+64.34.87.0,64.34.87.255,NL,North Holland,Amsterdam
+64.34.88.0,64.34.88.255,US,California,Los Angeles
+64.34.89.0,64.34.89.255,US,New York,New York
+64.34.92.0,64.34.92.255,GB,England,London
+64.34.94.0,64.34.94.255,JP,Tokyo,Shibuya City
+64.38.128.0,64.38.136.255,US,Washington,Seattle (University District)
+64.58.234.0,64.58.237.255,US,North Carolina,Charlotte (Olde Whitehall)
+64.87.37.0,64.87.43.255,US,California,San Jose
+64.130.32.0,64.130.32.255,DE,Hesse,Frankfurt am Main
+64.130.33.0,64.130.33.255,US,Utah,Herriman
+64.130.34.0,64.130.37.255,US,New Jersey,Newark
+64.130.40.0,64.130.41.255,DE,Hesse,Frankfurt am Main
+64.130.42.0,64.130.43.255,NL,North Holland,Amsterdam
+64.130.44.0,64.130.44.255,JP,Tokyo,Shinagawa (Higashishinagawa)
+64.130.45.0,64.130.45.255,US,New Jersey,Newark
+64.130.46.0,64.130.46.255,GB,England,London
+64.130.47.0,64.130.47.255,DE,Hesse,Frankfurt am Main
+64.130.49.0,64.130.49.255,JP,Tokyo,Shinagawa (Higashishinagawa)
+64.130.50.0,64.130.50.255,DE,Hesse,Frankfurt am Main
+64.130.51.0,64.130.51.255,US,New Jersey,Newark
+64.130.52.0,64.130.52.255,NL,North Holland,Amsterdam
+64.130.53.0,64.130.53.255,US,Utah,Herriman
+64.130.54.0,64.130.54.255,US,Pennsylvania,Allegheny (historical)
+64.130.55.0,64.130.55.255,NL,North Holland,Amsterdam
+64.130.56.0,64.130.56.255,US,Pennsylvania,Allegheny (historical)
+64.130.57.0,64.130.57.255,DE,Hesse,Frankfurt am Main
+64.130.58.0,64.130.58.255,US,California,Los Angeles
+64.130.59.0,64.130.59.255,US,New Jersey,Newark
+64.130.61.0,64.130.61.255,IE,Leinster,Walkinstown (Bluebell)
+64.130.62.0,64.130.62.255,NL,North Holland,Amsterdam
+64.130.63.0,64.130.63.255,GB,England,London
+64.137.45.0,64.137.45.255,US,New York,New York
+64.140.160.0,64.140.167.255,US,California,Los Angeles
+64.140.168.0,64.140.175.255,US,Utah,Salt Lake City (Downtown)
+64.176.32.0,64.176.63.255,JP,Osaka,Osaka (Shiromi)
+64.176.65.0,64.176.79.255,PL,Mazovia,Warsaw
+64.176.176.0,64.176.191.255,GB,England,Pendlebury
+64.176.192.0,64.176.223.255,US,New Jersey,Piscataway
+64.185.226.0,64.185.226.255,US,New York,New York
+64.185.227.0,64.185.227.255,US,District of Columbia,Washington D.C.
+64.185.229.208,64.185.231.191,US,New York,New York
+64.185.234.192,64.185.237.63,US,New York,New York
+64.203.83.0,64.203.84.255,CA,Ontario,Ottawa
+64.239.35.0,64.239.35.255,KY,George Town,Whitehall Estates
+64.239.116.0,64.239.118.255,KY,George Town,Whitehall Estates
+65.19.161.0,65.19.161.255,US,Washington,Seattle (University District)
+65.20.104.0,65.20.104.255,ES,Valencia,Alboraya
+65.20.105.0,65.20.105.255,ES,Madrid,Alcobendas
+65.21.223.0,65.21.255.255,FI,Uusimaa,Helsinki
+65.108.0.0,65.108.34.7,FI,Uusimaa,Helsinki
+65.108.192.0,65.109.255.255,FI,Uusimaa,Helsinki
+66.42.48.0,66.42.63.255,SG,,Singapore (Pioneer)
+66.135.0.0,66.135.31.255,US,New Jersey,Piscataway
+66.151.34.0,66.151.35.255,FI,Uusimaa,Helsinki
+66.165.232.0,66.165.235.255,US,New York,Staten Island
+66.165.244.0,66.165.247.255,US,New York,Staten Island
+66.245.192.0,66.245.199.255,GB,England,Pendlebury
+66.248.204.0,66.248.207.255,NL,North Holland,Amsterdam
+67.202.0.0,67.202.63.255,US,Virginia,Ashburn
+67.208.234.0,67.208.234.255,US,Michigan,Delta Mills (Waverly)
+67.209.52.0,67.209.52.255,GB,England,London
+67.209.54.0,67.209.55.255,SG,,Singapore (Queenstown Estate)
+67.213.112.0,67.213.112.255,US,New York,New York
+67.213.113.0,67.213.113.255,DE,Saxony,Adorf
+67.213.115.0,67.213.115.255,US,Virginia,Ashburn
+67.213.116.0,67.213.116.255,US,Mississippi,Lyman
+67.213.117.0,67.213.117.255,GB,England,London
+67.213.118.0,67.213.118.255,US,Texas,Dallas
+67.213.119.0,67.213.119.255,US,Illinois,Chicago
+67.213.120.0,67.213.120.255,US,New York,New York
+67.213.121.0,67.213.121.255,DE,Hesse,Frankfurt am Main
+67.213.122.0,67.213.122.255,SG,,Singapore (Central Area)
+67.213.123.0,67.213.123.255,JP,Tokyo,Shibuya City
+67.213.124.0,67.213.124.255,US,California,Los Angeles
+67.213.126.0,67.213.126.255,GB,England,London
+67.213.127.0,67.213.127.255,NL,North Holland,Amsterdam
+67.220.143.0,67.220.143.255,SG,,Singapore
+69.2.39.0,69.2.39.255,US,Louisiana,Baton Rouge
+69.25.95.0,69.25.95.255,US,California,Berkeley
+69.67.148.0,69.67.148.255,MX,Querétaro,Querétaro City
+69.67.149.0,69.67.149.255,US,California,Los Angeles
+69.67.150.0,69.67.150.255,US,Florida,Miami
+69.67.151.0,69.67.152.255,US,New York,New York
+69.72.82.0,69.72.83.255,HK,Kowloon,Hong Kong
+69.162.93.0,69.162.93.255,SG,,Singapore
+69.162.118.0,69.162.118.255,NL,North Holland,Amsterdam
+70.34.240.0,70.34.255.255,PL,Mazovia,Warsaw
+70.40.184.0,70.40.187.255,DE,Hesse,Frankfurt am Main (Rödelheim)
+72.46.84.0,72.46.84.255,GB,England,London
+72.46.85.0,72.46.85.255,US,Mississippi,Monticello
+72.46.86.0,72.46.86.255,JP,Tokyo,Shibuya City
+72.46.87.0,72.46.87.255,SG,,Singapore (Central Area)
+72.251.0.0,72.251.3.255,CA,Ontario,Toronto
+72.251.9.224,72.251.11.255,CA,Ontario,Toronto
+74.63.207.0,74.63.207.255,JP,Tokyo,Shibuya City
+74.63.225.0,74.63.225.255,NL,North Holland,Amsterdam
+74.63.229.0,74.63.229.255,US,New York,New York
+74.88.254.0,74.88.255.255,US,New York,Wappingers Falls
+74.118.68.0,74.118.71.255,US,Massachusetts,Boston
+74.118.136.0,74.118.136.255,NL,North Holland,Amsterdam
+74.118.139.0,74.118.140.255,NL,North Holland,Amsterdam
+74.118.142.0,74.118.142.255,US,California,Los Angeles
+74.118.143.0,74.118.143.255,NL,North Holland,Amsterdam
+77.42.57.64,77.42.127.255,FI,Uusimaa,Helsinki
+77.81.118.144,77.81.119.255,ES,Andalusia,La Rinconada
+77.220.198.0,77.220.199.255,UZ,Tashkent,Tashkent
+77.223.113.0,77.223.115.255,RU,St.-Petersburg,St Petersburg
+77.237.232.0,77.237.247.255,DE,Hesse,Frankfurt am Main
+77.244.252.56,77.244.252.255,AT,Vienna,Vienna
+78.46.57.0,78.46.115.103,DE,Saxony,Falkenstein
+78.128.1.0,78.128.2.255,BG,Sofia-grad,Sofia (Sofia Center)
+78.138.96.0,78.138.107.255,FR,Grand Est,Strasbourg
+78.141.208.0,78.141.223.255,NL,North Holland,Haarlem
+79.112.104.0,79.112.104.255,ES,Valencia,Alicante
+79.127.158.0,79.127.159.255,JP,Tokyo,Shibuya City
+79.127.204.0,79.127.204.255,CZ,Prague,Prague
+79.127.216.0,79.127.216.255,DE,Hesse,Frankfurt am Main
+79.127.224.0,79.127.224.255,BE,Brussels Capital,Brussels (Brussels Capital)
+79.127.226.0,79.127.226.255,DE,Hesse,Frankfurt am Main
+79.127.227.0,79.127.227.255,NL,North Holland,Amsterdam
+79.127.231.0,79.127.231.255,US,Texas,Dallas
+79.127.239.0,79.127.239.255,NL,North Holland,Amsterdam
+79.137.101.0,79.137.101.255,FR,Hauts-de-France,Wattrelos
+79.188.132.0,79.188.132.255,PL,Pomerania,Gdansk
+80.47.0.0,80.47.31.255,PL,Mazovia,Warsaw (Mokotów)
+80.76.51.0,80.76.51.255,AL,Tirana,Tirana
+80.232.240.0,80.232.251.255,LV,Riga,Riga (Centra rajons)
+80.240.16.0,80.240.31.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+81.29.134.0,81.29.135.255,RU,St.-Petersburg,St Petersburg
+82.22.35.0,82.22.35.255,NL,North Holland,Amsterdam
+82.23.183.0,82.23.183.255,DE,Hesse,Frankfurt am Main
+82.100.58.0,82.100.58.255,CZ,Hlavní město Praha,Prague
+82.113.38.0,82.113.39.31,CZ,Prague,Prague
+82.197.162.0,82.197.162.255,CH,Zurich,Winterthur
+83.143.80.0,83.143.87.255,NO,Oslo,Oslo (Alna District)
+84.17.52.0,84.17.53.255,CH,Zurich,Zurich
+84.32.22.0,84.32.23.255,SG,,Singapore
+84.32.32.0,84.32.32.255,US,Illinois,Chicago
+84.32.49.0,84.32.50.255,SE,Stockholm,Stockholm
+84.32.63.0,84.32.63.255,US,Illinois,Chicago
+84.32.64.0,84.32.64.255,NL,North Holland,Amsterdam
+84.32.70.0,84.32.71.255,US,Illinois,Chicago
+84.32.97.0,84.32.97.255,LT,Siauliai,Šiauliai
+84.32.101.0,84.32.104.255,NL,North Holland,Amsterdam
+84.32.176.0,84.32.177.255,NL,North Holland,Amsterdam
+84.32.184.0,84.32.191.255,NL,North Holland,Amsterdam
+84.32.220.0,84.32.220.255,US,Illinois,Chicago
+84.85.39.0,84.85.42.255,NL,North Holland,Amsterdam
+84.201.2.0,84.201.11.111,DE,Hesse,Frankfurt am Main
+84.207.212.0,84.207.215.255,IE,Leinster,Dublin
+85.195.72.0,85.195.81.111,DE,Hesse,Frankfurt am Main (Innenstadt I)
+85.195.81.112,85.195.81.255,DE,Hesse,Frankfurt am Main
+85.195.82.0,85.195.83.75,DE,Hesse,Frankfurt am Main (Innenstadt I)
+85.195.84.2,85.195.87.25,DE,Hesse,Frankfurt am Main (Innenstadt I)
+85.195.95.0,85.195.127.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+85.195.196.0,85.195.196.255,CH,Zurich,Wallisellen
+85.208.196.0,85.208.199.255,GB,England,Maidenhead
+86.54.152.0,86.54.152.255,GB,England,London
+86.54.153.0,86.54.153.255,US,New Jersey,Secaucus
+86.54.154.0,86.54.154.255,JP,Tokyo,Chiyoda City
+86.105.224.0,86.105.224.255,NL,South Holland,Rotterdam (Heijplaat)
+87.20.87.0,87.20.87.255,IT,Campania,Airola
+87.249.128.0,87.249.128.255,JP,Tokyo,Shibuya City
+88.118.177.64,88.118.182.255,LT,Vilnius,Vilnius
+88.211.224.0,88.211.227.255,LU,Diekirch,Schieren
+88.211.232.0,88.211.235.255,NL,North Holland,Haarlem (Haarlemmerbuurt-Oost)
+88.216.36.0,88.216.36.255,DE,Hesse,Frankfurt am Main
+88.216.181.0,88.216.182.255,DE,Hesse,Frankfurt am Main
+88.216.192.0,88.216.192.255,LT,Siauliai,Šiauliai
+88.216.197.0,88.216.197.255,LT,Siauliai,Šiauliai
+88.216.198.0,88.216.198.255,US,Illinois,Chicago
+88.216.208.0,88.216.208.255,SG,,Singapore
+88.216.216.0,88.216.220.255,DE,Hesse,Frankfurt am Main
+88.216.222.0,88.216.222.255,US,Illinois,Chicago
+89.35.92.0,89.35.92.255,DE,Hesse,Frankfurt am Main
+89.42.231.0,89.42.231.255,NL,North Holland,Amsterdam
+89.44.211.0,89.44.211.255,FI,Uusimaa,Tuusula
+89.106.12.0,89.106.12.255,DE,Hesse,Frankfurt am Main
+89.107.20.0,89.107.20.255,GB,England,London
+89.149.69.0,89.149.83.255,MD,Chișinău Municipality,Chisinau
+89.222.124.0,89.222.125.255,DE,Hesse,Frankfurt am Main
+89.222.171.0,89.222.172.255,RU,Moscow,Moscow
+89.238.223.0,89.238.223.255,RO,Bucureşti,Bucharest
+91.134.30.0,91.134.33.255,FR,Hauts-de-France,Gravelines
+91.134.54.0,91.134.54.255,FR,Hauts-de-France,Wattrelos
+91.134.83.0,91.134.83.255,FR,Grand Est,Strasbourg
+91.148.228.0,91.148.231.255,NL,North Holland,Haarlem (Oude Stad)
+91.189.176.0,91.189.183.255,NO,Oslo,Oslo (Alna District)
+91.199.149.0,91.199.149.255,RU,Novosibirsk Oblast,Novosibirsk
+91.203.68.0,91.203.71.255,LV,Riga,Riga (Latgales priekšpilsēta)
+91.225.138.0,91.225.139.255,UA,Kyiv City,Kyiv (Darnyts'kyi district)
+91.227.33.0,91.227.33.255,AT,Vienna,Vienna (Floridsdorf)
+91.232.30.0,91.232.31.255,UA,Mykolaiv,Mykolaiv (Inhulskyi district)
+91.237.141.0,91.237.141.255,GB,England,London
+91.242.214.0,91.242.214.255,US,Illinois,Chicago
+91.244.70.0,91.244.70.255,AT,State of Vienna,Vienna (Floridsdorf)
+92.4.240.0,92.5.191.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+92.42.104.0,92.42.111.255,FR,Grand Est,Strasbourg
+92.204.160.0,92.204.175.255,FR,Grand Est,Strasbourg
+92.205.32.0,92.205.35.255,US,New York,New York
+93.115.25.0,93.115.26.255,LT,Siauliai,Šiauliai
+93.123.46.0,93.123.46.255,AL,Tirana,Tirana
+94.31.53.0,94.31.55.255,GB,England,London (Temple)
+94.72.181.0,94.72.181.255,GB,England,London
+94.158.242.0,94.158.242.255,DE,North Rhine-Westphalia,Cologne
+94.158.243.0,94.158.243.255,DE,Hesse,Frankfurt am Main
+94.242.192.0,94.242.199.255,DE,Hesse,Frankfurt am Main
+95.67.39.192,95.67.40.95,UA,Kyiv City,Kyiv
+95.135.69.0,95.135.69.255,GB,England,London
+95.165.108.0,95.165.151.255,RU,Moscow,Moscow
+95.173.206.0,95.173.206.255,US,New York,New York
+95.179.160.0,95.179.175.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+95.179.176.0,95.179.191.255,NL,North Holland,Haarlem
+95.211.172.0,95.211.183.255,NL,North Holland,Haarlem (Haarlem-Oost)
+95.214.52.0,95.214.55.255,PL,Mazovia,Warsaw (Mokotów)
+95.217.51.0,95.217.71.239,FI,Uusimaa,Helsinki
+99.80.0.0,99.81.255.255,IE,Leinster,Dublin
+100.60.63.0,100.63.255.255,US,Virginia,Ashburn
+103.14.27.0,103.14.27.255,BR,Rio Grande do Sul,Novo Hamburgo
+103.28.88.0,103.28.89.255,HK,Eastern,Quarry Bay
+103.50.32.0,103.50.32.255,GB,England,Ossett
+103.60.108.0,103.60.111.255,HK,Kwun Tong,Kowloon Bay
+103.66.180.0,103.66.183.255,SG,,Singapore
+103.70.0.0,103.70.3.255,HK,Eastern District,Chai Wan
+103.88.233.0,103.88.233.255,BR,Minas Gerais,Montes Claros
+103.88.234.0,103.88.234.255,MX,Mexico City,Mexico City
+103.101.206.0,103.101.207.255,HK,Wan Chai,Wan Chai
+103.106.58.0,103.106.58.255,AR,Buenos Aires F.D.,Buenos Aires
+103.106.59.0,103.106.59.255,US,Virginia,Ashburn
+103.152.196.0,103.152.197.255,AU,New South Wales,Zetland
+103.167.234.0,103.167.235.255,AL,Tirana,Tirana
+103.219.168.0,103.219.168.255,GB,England,London
+103.219.170.0,103.219.170.255,US,California,Los Angeles
+103.219.171.0,103.219.171.255,DE,Bavaria,Ismaning
+103.244.112.0,103.244.115.255,SG,,Singapore
+104.167.24.0,104.167.24.255,DE,Hesse,Frankfurt am Main
+104.171.164.0,104.171.164.255,US,California,Los Angeles
+104.194.8.0,104.194.8.255,US,California,Los Angeles
+104.204.140.0,104.204.143.255,DE,Hesse,Frankfurt am Main (Fechenheim)
+104.207.156.0,104.207.159.255,US,Washington,Kent
+104.219.232.0,104.219.239.255,US,New York,Buffalo
+104.228.168.0,104.228.175.255,US,New York,Saratoga Springs
+104.237.53.32,104.237.53.255,US,California,Los Angeles
+104.237.55.0,104.237.55.255,US,California,Los Angeles
+104.237.57.80,104.237.58.255,US,California,Los Angeles
+104.238.152.0,104.238.157.255,US,Washington,Kent
+104.238.220.0,104.238.222.255,US,California,Los Angeles
+104.243.40.0,104.243.43.119,US,New Jersey,Piscataway
+107.6.112.0,107.6.123.255,SG,,Singapore
+107.155.95.0,107.155.95.255,SG,,Singapore (Queenstown Estate)
+107.155.107.0,107.155.108.255,US,Texas,Dallas
+107.155.125.0,107.155.125.255,SE,Stockholm,Stockholm
+108.61.126.0,108.61.127.255,JP,Tokyo,Shinagawa
+108.61.200.0,108.61.201.255,JP,Tokyo,Shinagawa
+108.171.196.0,108.171.199.255,US,New York,New York
+108.171.202.0,108.171.204.255,US,Utah,Salt Lake City (Downtown)
+108.171.210.0,108.171.210.255,US,Utah,Salt Lake City (Downtown)
+108.171.213.0,108.171.217.255,US,Utah,Salt Lake City (Downtown)
+109.74.144.0,109.74.144.255,SK,Bratislava Region,Bratislava
+109.94.96.0,109.94.96.255,DE,Hesse,Frankfurt am Main
+109.94.97.0,109.94.97.255,GB,England,London
+109.94.98.0,109.94.98.255,US,New York,New York
+109.94.99.0,109.94.99.255,JP,Tokyo,Shibuya City
+109.109.164.0,109.109.167.255,JP,Tokyo,Chiyoda City
+109.122.207.0,109.122.207.255,SG,,Singapore
+109.200.254.0,109.200.254.255,UA,Odesa,Kryzhanivka
+109.230.239.0,109.230.239.255,DE,Hamburg,Hamburg (Wandsbek)
+109.248.222.0,109.248.222.255,RU,Novosibirsk Oblast,Novosibirsk
+110.45.180.0,110.45.180.255,KR,Seoul,Yongsan-dong (Hangang-daero)
+113.43.227.0,113.43.233.255,JP,Tokyo,Chiyoda City
+116.126.136.0,116.126.203.255,KR,Seoul,Seoul (Toegye-ro)
+116.202.48.0,116.202.55.255,DE,Saxony,Falkenstein
+116.202.224.0,116.202.247.255,DE,Saxony,Falkenstein
+117.52.179.0,117.52.255.255,KR,Seoul,Yongsan-dong (Hangang-daero)
+122.10.196.0,122.10.199.255,HK,Kowloon,Hong Kong
+126.0.0.0,126.0.5.255,JP,Tokyo,Minato
+128.106.97.0,128.106.101.255,SG,,Singapore (Geylang)
+129.97.0.0,129.97.123.255,CA,Ontario,Waterloo
+129.146.0.0,129.146.255.255,US,Arizona,Phoenix
+130.61.0.0,130.61.255.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+132.226.0.0,132.226.15.255,JP,Chiba,Inzai (Otsuka)
+134.65.192.0,134.65.193.255,DE,Hesse,Frankfurt am Main (Fechenheim)
+134.119.192.0,134.119.223.255,FR,Grand Est,Strasbourg
+135.125.142.0,135.125.143.255,DE,Hesse,Limburg an der Lahn
+135.125.159.0,135.125.164.255,DE,Hesse,Limburg an der Lahn
+135.181.127.0,135.181.167.31,FI,Uusimaa,Helsinki
+135.181.168.0,135.181.169.31,FI,Uusimaa,Helsinki
+136.64.0.0,136.65.255.255,US,Iowa,Council Bluffs
+136.92.0.0,136.92.127.255,DE,Hesse,Frankfurt am Main
+136.243.31.0,136.243.86.127,DE,Saxony,Falkenstein
+136.244.96.0,136.244.111.255,NL,North Holland,Haarlem
+137.220.52.0,137.220.55.255,CA,Ontario,Toronto (Old Toronto)
+137.239.202.0,137.239.202.255,GB,England,London
+137.239.212.0,137.239.213.255,US,New York,New York
+138.2.64.0,138.2.111.255,SG,,Singapore (Loyang)
+138.201.15.0,138.201.23.159,DE,Saxony,Falkenstein
+138.226.224.0,138.226.225.255,CZ,Prague,Prague
+139.84.238.0,139.84.255.255,ZA,Gauteng,Kempton Park (Isando)
+139.162.130.0,139.162.191.255,DE,Hesse,Frankfurt am Main
+139.180.208.0,139.180.223.255,SG,,Singapore (Pioneer)
+140.82.32.0,140.82.39.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+140.82.56.0,140.82.59.255,NL,North Holland,Haarlem
+141.11.172.0,141.11.172.255,DE,Hesse,Frankfurt am Main (Fechenheim)
+141.94.3.0,141.94.3.255,FR,Hauts-de-France,Wattrelos
+141.94.154.0,141.94.155.255,FR,Hauts-de-France,Wattrelos
+141.94.157.0,141.94.157.255,FR,Grand Est,Strasbourg
+141.95.41.0,141.95.48.39,DE,Hesse,Limburg an der Lahn
+141.98.217.0,141.98.217.255,IE,Leinster,Walkinstown (Bluebell)
+141.98.218.0,141.98.218.255,US,Texas,Dallas
+141.98.219.0,141.98.219.255,US,Pennsylvania,Allegheny (historical)
+141.147.160.0,141.147.191.255,JP,Chiba,Inzai (Otsuka)
+141.148.224.0,141.148.255.255,NL,North Holland,Amsterdam
+142.91.96.0,142.91.103.255,SG,,Singapore (Outram)
+142.91.152.0,142.91.159.255,NL,North Holland,Amsterdam (Amsterdam-Zuidoost)
+142.132.128.0,142.132.159.255,DE,Saxony,Falkenstein
+142.132.176.0,142.132.255.255,DE,Saxony,Falkenstein
+142.215.208.0,142.215.215.255,US,New York,New York
+144.6.50.0,144.6.51.255,AU,Victoria,Traralgon
+144.76.78.0,144.76.122.7,DE,Saxony,Falkenstein
+144.178.115.0,144.178.115.255,NL,North Holland,Amsterdam
+144.178.240.0,144.178.241.255,NL,North Holland,Amsterdam
+144.202.0.0,144.202.15.255,US,New Jersey,Piscataway
+144.202.48.0,144.202.63.255,US,Illinois,Elk Grove Village
+144.202.112.0,144.202.127.255,US,California,Los Angeles
+145.239.148.0,145.239.151.255,DE,Saarland,Saarbrücken (Mitte)
+145.239.161.0,145.239.161.255,FR,Hauts-de-France,Wattrelos
+146.0.224.0,146.0.255.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+146.19.127.0,146.19.127.255,GB,England,London (Notting Hill)
+146.19.172.0,146.19.172.255,US,New York,New York
+146.71.124.0,146.71.126.255,US,Utah,Salt Lake City
+146.235.192.0,146.235.230.2,US,California,San Jose
+147.93.0.0,147.93.7.255,US,New Jersey,Secaucus
+148.51.214.0,148.51.214.103,NL,North Holland,Amsterdam
+148.113.185.0,148.113.190.255,CA,Quebec,Montreal (Ville-Marie)
+148.113.193.0,148.113.193.255,CA,Quebec,Montreal (Ville-Marie)
+148.113.198.0,148.113.199.255,CA,Quebec,Montreal (Ville-Marie)
+148.113.210.0,148.113.220.255,CA,Quebec,Montreal (Ville-Marie)
+148.113.222.0,148.113.235.255,CA,Quebec,Montreal (Ville-Marie)
+149.28.64.0,149.28.95.255,US,California,Los Angeles
+149.28.112.0,149.28.126.255,US,Illinois,Elk Grove Village
+149.28.128.0,149.28.159.255,SG,,Singapore (Pioneer)
+149.28.192.0,149.28.223.255,US,California,Santa Clara
+149.28.224.0,149.28.239.255,US,New Jersey,Piscataway
+149.50.101.0,149.50.127.255,PL,Mazovia,Warsaw
+149.130.208.0,149.130.223.255,US,Illinois,Chicago
+149.248.0.0,149.248.31.255,US,California,Los Angeles
+149.255.37.0,149.255.38.255,NL,North Holland,Haarlem
+150.109.92.0,150.109.95.255,SG,,Singapore
+150.109.192.0,150.109.207.255,JP,Tokyo,Shibuya City
+150.136.0.0,150.136.255.255,US,Virginia,Ashburn
+151.123.172.0,151.123.173.255,US,Virginia,Sterling
+151.123.174.0,151.123.175.255,JP,Tokyo,Shinagawa
+151.241.224.0,151.241.225.255,US,New York,New York
+151.245.213.0,151.245.219.255,NL,North Holland,Amsterdam
+151.247.219.0,151.247.220.255,GB,England,London
+152.233.19.0,152.233.19.255,BR,São Paulo,São Paulo
+152.236.8.0,152.236.8.255,US,Delaware,Wilmington
+152.236.9.0,152.236.9.255,DE,Hesse,Frankfurt am Main
+152.236.11.0,152.236.11.255,US,California,Los Angeles
+152.236.14.0,152.236.14.255,CA,Ontario,Toronto
+152.236.24.0,152.236.24.255,US,Texas,Dallas
+154.29.238.0,154.30.2.255,US,Virginia,Ashburn
+154.43.52.0,154.43.55.255,DE,Hesse,Offenbach
+154.45.250.0,154.45.250.255,US,New York,New York
+154.47.144.0,154.47.147.255,DE,Hesse,Offenbach
+154.50.33.0,154.50.33.255,US,Texas,Dallas
+154.60.100.0,154.60.101.255,DE,Bavaria,Munich
+155.2.223.0,155.2.223.255,NL,North Holland,Amsterdam
+155.103.84.0,155.103.86.255,US,Illinois,Chicago
+155.107.7.0,155.107.8.255,US,California,San Mateo (South San Mateo)
+155.107.9.0,155.107.9.255,US,California,Sacramento
+155.138.128.0,155.138.133.255,CA,Ontario,Toronto (Old Toronto)
+155.138.135.0,155.138.159.255,CA,Ontario,Toronto (Old Toronto)
+155.138.160.0,155.138.175.255,US,Georgia,Atlanta
+155.138.192.0,155.138.239.255,US,Georgia,Atlanta
+157.90.0.0,157.90.8.79,DE,Saxony,Falkenstein
+157.90.32.0,157.90.36.143,DE,Saxony,Falkenstein
+157.90.88.0,157.90.95.255,DE,Saxony,Falkenstein
+157.90.104.0,157.90.105.31,DE,Saxony,Falkenstein
+157.90.128.0,157.90.136.15,DE,Saxony,Falkenstein
+157.90.198.192,157.90.199.255,DE,Saxony,Falkenstein
+157.90.205.0,157.90.206.15,DE,Saxony,Falkenstein
+157.180.0.0,157.180.127.255,FI,Uusimaa,Helsinki
+158.41.66.192,158.41.67.255,GB,England,Westminster
+159.54.160.0,159.54.191.255,US,California,San Jose
+159.69.48.0,159.69.79.255,DE,Saxony,Falkenstein
+159.100.13.0,159.100.14.255,DE,Hesse,Frankfurt am Main
+160.202.128.0,160.202.128.255,US,New York,New York
+160.202.129.0,160.202.129.255,US,Texas,Dallas
+160.202.131.0,160.202.131.255,DE,Hesse,Frankfurt am Main
+160.250.106.0,160.250.106.255,AU,Queensland,Fortitude Valley
+161.33.128.0,161.33.223.255,JP,Chiba,Inzai (Otsuka)
+161.118.192.0,161.118.255.255,SG,,Singapore (Loyang)
+162.19.43.0,162.19.43.255,FR,Grand Est,Strasbourg
+162.19.92.0,162.19.97.255,FR,Hauts-de-France,Gravelines
+162.19.103.0,162.19.104.255,FR,Grand Est,Strasbourg
+162.19.108.0,162.19.119.255,FR,Hauts-de-France,Gravelines
+162.19.123.128,162.19.127.255,FR,Hauts-de-France,Gravelines
+162.19.136.0,162.19.143.23,DE,Hesse,Limburg an der Lahn
+162.19.168.0,162.19.171.255,DE,Hesse,Limburg an der Lahn
+162.19.219.0,162.19.255.255,DE,Hesse,Limburg an der Lahn
+162.43.190.0,162.43.190.255,BR,Rio de Janeiro,Vila Sarapui
+162.55.0.0,162.55.8.191,DE,Saxony,Falkenstein
+162.55.80.0,162.55.96.31,DE,Saxony,Falkenstein
+162.55.97.0,162.55.105.111,DE,Saxony,Falkenstein
+162.55.199.0,162.55.199.255,DE,Saxony,Falkenstein
+162.120.16.0,162.120.18.255,US,New York,New York
+162.120.19.0,162.120.19.255,US,District of Columbia,The Wharf
+162.245.186.0,162.245.189.255,US,New Jersey,Secaucus
+162.254.200.0,162.254.205.199,US,Florida,Miami
+163.114.159.0,163.114.159.255,FR,Île-de-France,Puteaux
+163.192.96.0,163.192.127.255,US,Illinois,Chicago
+164.138.249.0,164.138.250.255,NL,North Holland,Amsterdam
+164.152.160.0,164.152.161.255,DE,Hesse,Frankfurt am Main (Fechenheim)
+164.152.162.0,164.152.163.255,US,Virginia,Sterling
+165.254.143.0,165.254.143.255,US,Virginia,Ashburn
+167.235.0.0,167.235.15.255,DE,Saxony,Falkenstein
+167.235.174.128,167.235.189.63,DE,Saxony,Falkenstein
+168.100.244.0,168.100.244.255,JP,Tokyo,Shibuya City
+168.119.136.0,168.119.144.31,DE,Saxony,Falkenstein
+168.138.160.0,168.138.191.255,SG,,Singapore (Loyang)
+168.222.96.0,168.222.96.255,GB,England,London
+169.150.223.0,169.150.223.255,NL,North Holland,Amsterdam
+169.150.228.0,169.150.228.255,CO,Bogota D.C.,Bogotá
+169.155.44.0,169.155.45.255,DE,Hesse,Frankfurt am Main (Fechenheim)
+169.155.46.0,169.155.47.255,US,Virginia,Sterling
+169.155.168.0,169.155.169.255,DE,Hesse,Frankfurt am Main (Fechenheim)
+169.155.170.0,169.155.171.255,US,Virginia,Sterling
+170.9.0.0,170.9.31.255,US,California,San Jose
+170.23.64.0,170.23.67.255,US,California,San Jose
+170.23.104.0,170.23.107.255,BR,São Paulo,São Paulo
+170.23.134.0,170.23.135.255,NL,North Holland,Amsterdam
+170.23.152.0,170.23.155.255,NL,North Holland,Amsterdam (Amsterdam-Zuidoost)
+170.23.209.0,170.23.209.255,NL,North Holland,Amsterdam
+170.23.220.0,170.23.231.255,US,Virginia,Sterling
+172.93.101.184,172.93.101.255,US,New Jersey,Piscataway
+172.93.104.0,172.93.104.255,US,New Jersey,Piscataway
+172.93.108.0,172.93.109.255,US,New Jersey,Piscataway
+172.96.160.0,172.96.161.255,US,California,Los Angeles
+172.241.224.0,172.241.227.255,US,Texas,Dallas
+173.201.44.0,173.201.47.255,US,New York,New York
+173.224.112.0,173.224.127.255,US,Missouri,St Louis
+173.231.10.0,173.231.11.255,US,Colorado,Denver (North Capitol Hill)
+173.231.12.0,173.231.17.255,US,Utah,Salt Lake City (Downtown)
+173.231.22.0,173.231.23.255,US,Utah,Salt Lake City (Downtown)
+173.231.43.0,173.231.45.255,US,New York,New York
+173.231.55.0,173.231.61.255,US,Utah,Salt Lake City (Downtown)
+173.233.132.0,173.233.132.255,NL,North Holland,Amsterdam (Amsterdam-Zuidoost)
+173.234.17.0,173.234.18.255,GB,England,Slough
+173.237.44.0,173.237.49.255,US,California,San Jose
+173.237.209.0,173.237.209.143,CA,Ontario,Mississauga
+176.236.68.248,176.236.70.23,TR,Istanbul,Beyoğlu
+177.54.144.0,177.54.150.255,BR,São Paulo,São Paulo
+177.54.154.0,177.54.154.255,SG,,Singapore (Central Area)
+177.54.155.0,177.54.155.255,US,Illinois,Chicago
+177.54.159.0,177.54.159.255,US,Virginia,Ashburn
+178.18.119.0,178.18.119.255,GB,England,London (Charing Cross)
+178.33.120.0,178.33.127.255,FR,Hauts-de-France,Roubaix
+178.63.165.32,178.63.165.255,DE,Bavaria,Falkenstein
+178.105.96.0,178.105.127.255,DE,Saxony,Falkenstein
+178.162.231.0,178.162.233.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+178.211.139.0,178.211.139.255,PL,Mazovia,Warsaw (Mokotów)
+178.250.154.0,178.250.155.255,RU,St.-Petersburg,St Petersburg
+183.81.168.0,183.81.168.255,US,District of Columbia,Washington D.C.
+184.105.146.0,184.105.146.255,US,Illinois,Chicago
+185.6.12.0,185.6.13.255,NL,North Holland,Amsterdam
+185.8.106.0,185.8.107.255,US,Illinois,Chicago
+185.16.38.0,185.16.38.255,PL,Mazovia,Warsaw (Mokotów)
+185.19.216.0,185.19.219.255,DE,Hesse,Frankfurt am Main
+185.21.130.0,185.21.130.255,FR,Île-de-France,Puteaux
+185.26.8.0,185.26.8.255,US,Texas,Dallas
+185.26.9.0,185.26.9.255,US,Virginia,Ashburn
+185.26.10.0,185.26.10.255,DE,Hesse,Frankfurt am Main
+185.26.11.0,185.26.11.255,GB,England,London
+185.32.161.0,185.32.163.255,CZ,Prague,Prague
+185.44.206.0,185.44.207.255,DE,Hesse,Frankfurt am Main
+185.52.236.0,185.52.239.255,NL,North Holland,Wormerveer
+185.59.221.0,185.59.221.255,GB,England,London
+185.101.32.0,185.101.32.255,NO,Oslo,Oslo
+185.130.224.0,185.130.227.255,NL,North Holland,Amsterdam
+185.133.42.0,185.133.42.255,RU,Novosibirsk Oblast,Novosibirsk
+185.134.66.0,185.134.66.255,DE,State of Berlin,Berlin
+185.135.80.0,185.135.83.255,RU,Novosibirsk Oblast,Novosibirsk
+185.170.59.0,185.170.59.255,EE,Harjumaa,Tallinn (Kesklinna linnaosa)
+185.188.42.0,185.188.42.255,GB,England,London
+185.189.44.0,185.189.51.255,SE,Stockholm,Stockholm
+185.191.116.0,185.191.119.255,DE,Hesse,Frankfurt am Main
+185.199.37.0,185.199.38.255,BG,Sofia-grad,Sofia (Sveta Troitsa)
+185.209.176.0,185.209.177.255,US,California,Los Angeles
+185.209.178.0,185.209.179.255,US,New York,New York
+185.215.165.0,185.215.166.255,GB,England,London
+185.218.204.0,185.218.204.255,CH,Zurich,Zurich
+185.229.190.0,185.229.191.255,NL,North Holland,Amsterdam
+185.234.13.0,185.234.13.255,GB,England,Slough (Britwell)
+185.238.165.0,185.238.166.255,NL,North Holland,Amsterdam
+185.252.220.0,185.252.220.255,RO,Bucharest,Bucharest
+186.233.184.0,186.233.185.255,US,Florida,Miami
+186.233.187.0,186.233.187.255,US,Illinois,Chicago
+188.34.138.48,188.34.139.127,DE,Saxony,Falkenstein
+188.40.31.192,188.40.147.159,DE,Saxony,Falkenstein
+188.42.31.0,188.42.63.255,LU,Diekirch,Schieren
+188.42.128.0,188.42.143.255,NL,North Holland,Amsterdam (Amsterdam-Zuidoost)
+188.62.0.0,188.62.0.255,CH,Zurich,Zurich
+189.1.164.0,189.1.164.255,JP,Ehime,Imabari
+189.1.171.0,189.1.171.255,DE,Hesse,Gräfenhausen
+191.44.100.0,191.44.100.255,HK,Tsuen Wan,Tsuen Wan
+192.41.71.0,192.41.71.255,US,Virginia,Chesapeake (Great Bridge East)
+192.69.194.0,192.69.197.255,US,New York,New York
+192.69.209.0,192.69.211.255,US,Utah,Salt Lake City (Downtown)
+192.155.96.0,192.155.103.255,US,Missouri,St Louis
+193.29.182.0,193.29.182.255,DE,Hesse,Offenbach
+193.118.169.0,193.118.170.255,IE,Leinster,Dublin
+193.123.32.0,193.123.63.255,NL,North Holland,Amsterdam
+193.221.135.0,193.221.135.255,GB,England,London
+193.243.164.0,193.243.165.255,DE,Hesse,Frankfurt am Main
+194.48.217.0,194.48.217.255,DE,Hesse,Frankfurt am Main
+194.126.172.0,194.126.175.255,NL,North Holland,Haarlem
+195.12.227.0,195.12.227.255,BG,Kyustendil,Kyustendil
+195.14.6.0,195.14.6.255,RO,Bucharest,Bucharest
+195.182.16.0,195.182.16.255,DE,Hesse,Frankfurt am Main
+195.189.96.0,195.189.99.255,NL,North Holland,Amsterdam
+195.211.43.0,195.211.43.255,RU,Moscow Oblast,Ramenskoye
+198.13.130.0,198.13.131.255,SG,,Singapore (Queenstown Estate)
+198.13.132.0,198.13.132.255,US,Utah,Herriman
+198.13.133.0,198.13.133.255,JP,Tokyo,Shinagawa (Higashishinagawa)
+198.13.134.0,198.13.135.255,NL,North Holland,Amsterdam
+198.13.136.0,198.13.136.255,US,New Jersey,Newark
+198.13.137.0,198.13.141.255,DE,Hesse,Frankfurt am Main
+198.13.142.0,198.13.142.255,IE,Leinster,Walkinstown (Bluebell)
+198.17.118.0,198.17.118.255,US,California,Los Angeles
+198.73.56.0,198.73.56.255,NL,North Holland,Amsterdam
+198.244.253.0,198.244.253.255,GB,England,London
+199.231.160.0,199.231.162.255,US,California,Los Angeles (Central-Alameda)
+199.247.0.0,199.247.7.255,DE,Hesse,Frankfurt am Main (Innenstadt I)
+199.247.24.0,199.247.31.255,NL,North Holland,Haarlem
+200.69.8.0,200.69.15.255,IE,Leinster,Dublin
+201.78.140.0,201.78.140.255,DE,Hesse,Frankfurt am Main
+202.8.8.0,202.8.8.255,NL,North Holland,Amsterdam
+202.8.9.0,202.8.9.255,JP,Tokyo,Shinagawa (Higashishinagawa)
+202.8.10.0,202.8.10.255,IE,Leinster,Walkinstown (Bluebell)
+202.8.11.0,202.8.11.255,SG,,Singapore (Queenstown Estate)
+203.118.21.0,203.118.21.255,SG,,MacPherson
+204.11.32.0,204.11.34.15,US,Michigan,Troy
+204.11.50.16,204.11.50.255,US,California,Los Angeles (Downtown Los Angeles)
+204.13.238.76,204.13.239.255,US,New Jersey,Secaucus
+204.15.240.0,204.15.240.255,DE,Hesse,Frankfurt am Main
+204.15.241.0,204.15.241.255,CA,British Columbia,Surrey
+204.16.240.0,204.16.247.255,US,Pennsylvania,Allegheny (historical)
+204.144.134.128,204.144.134.255,US,Colorado,Westminster (North Westminster)
+204.210.160.0,204.210.161.7,US,Colorado,Greenwood Village
+205.209.125.0,205.209.126.255,US,New Jersey,Englewood Cliffs
+206.223.224.0,206.223.224.255,SG,,Singapore (Central Area)
+206.223.226.0,206.223.226.255,JP,Tokyo,Shibuya City
+206.223.236.0,206.223.236.255,NL,North Holland,Amsterdam
+207.148.16.0,207.148.31.255,US,New Jersey,Piscataway
+207.148.64.0,207.148.79.255,SG,,Singapore (Pioneer)
+207.188.6.0,207.188.7.255,US,Texas,Dallas
+207.211.160.0,207.211.191.255,US,Illinois,Chicago
+207.229.99.0,207.229.99.255,CA,British Columbia,Vancouver (Fairview)
+207.246.96.0,207.246.111.255,US,California,Los Angeles
+207.246.120.0,207.246.127.255,US,New Jersey,Piscataway
+208.73.200.0,208.73.201.255,US,California,Los Angeles
+208.82.60.0,208.82.63.255,US,Virginia,Sterling
+208.91.104.0,208.91.104.255,CA,British Columbia,Vancouver (Renfrew-Collingwood)
+208.91.105.0,208.91.105.255,US,Virginia,Ashburn
+208.91.107.0,208.91.107.255,JP,Tokyo,Shinagawa (Higashishinagawa)
+208.91.109.0,208.91.109.255,JP,Tokyo,Shinagawa (Higashishinagawa)
+208.91.110.0,208.91.110.255,US,New Jersey,Newark
+208.91.111.0,208.91.111.255,US,Pennsylvania,Allegheny (historical)
+208.115.201.0,208.115.201.255,DE,Hesse,Frankfurt am Main
+208.115.202.0,208.115.202.255,US,New York,New York
+208.115.203.0,208.115.203.255,DE,Hesse,Frankfurt am Main
+208.115.212.0,208.115.212.255,US,New York,New York
+208.115.223.0,208.115.223.255,US,New York,New York
+208.115.224.0,208.115.224.255,DE,Lower Saxony,Hamelin
+208.115.226.0,208.115.227.255,DE,Hesse,Frankfurt am Main
+208.115.231.0,208.115.231.255,DE,Hesse,Frankfurt am Main
+208.115.234.0,208.115.234.255,US,New York,New York
+208.115.237.0,208.115.237.255,US,California,Los Angeles
+208.115.247.0,208.115.247.255,US,Wyoming,Evanston
+208.115.248.0,208.115.248.255,DE,Hesse,Frankfurt am Main
+208.115.249.0,208.115.249.255,US,Utah,Salt Lake City
+208.115.251.0,208.115.251.255,DE,Hesse,Frankfurt am Main
+209.133.192.0,209.133.223.255,US,Florida,Tampa
+209.189.241.0,209.189.243.255,US,Texas,Dallas
+209.195.0.0,209.195.63.255,US,Georgia,Atlanta
+209.249.216.0,209.249.216.255,US,New York,New York
+209.250.240.0,209.250.255.255,NL,North Holland,Haarlem
+212.20.238.0,212.20.239.0,GB,Scotland,Edinburgh
+212.83.42.0,212.83.42.255,DE,North Rhine-Westphalia,Münster
+212.83.43.0,212.83.43.255,DE,North Rhine-Westphalia,Münster
+212.102.34.0,212.102.35.255,NL,North Holland,Amsterdam
+212.117.164.0,212.117.167.255,NL,North Holland,Amsterdam (Amsterdam-Zuidoost)
+213.21.195.0,213.21.195.255,AT,Vienna,Vienna
+213.21.196.0,213.21.209.47,LV,Riga,Riga (Centra rajons)
+213.136.66.0,213.136.69.255,GB,England,London
+213.136.70.0,213.136.71.255,DE,Hesse,Frankfurt am Main
+213.145.102.0,213.145.103.255,BG,Sofia-grad,Sofia
+213.239.141.0,213.239.143.255,DE,Rheinland-Pfalz,Böhl-Iggelheim (Böhl)
+213.250.128.0,213.250.159.255,TR,Istanbul,Istanbul
+216.10.30.0,216.10.30.255,US,Alaska,Anchorage
+216.18.192.0,216.18.201.255,US,California,San Jose
+216.18.204.0,216.18.205.255,US,Utah,Salt Lake City (Downtown)
+216.18.206.0,216.18.207.255,US,California,San Jose
+216.18.209.0,216.18.216.255,US,California,San Jose
+216.128.128.0,216.128.143.255,US,Texas,Dallas
+216.128.146.0,216.128.159.255,US,Illinois,Elk Grove Village
+216.144.245.0,216.144.245.255,JP,Tokyo,Shibuya City
+216.144.249.0,216.144.249.255,DE,Hesse,Frankfurt am Main
+216.152.155.0,216.152.155.255,US,Illinois,Chicago
+216.158.66.0,216.158.67.255,US,Utah,Salt Lake City (Downtown)
+216.238.64.0,216.238.67.255,MX,Querétaro,Querétaro City
+216.238.77.0,216.238.78.255,MX,Querétaro,Querétaro City
+216.242.0.0,216.242.10.63,US,Florida,Boca Raton
+217.69.8.0,217.69.10.255,FR,Île-de-France,Aubervilliers
+217.79.254.0,217.79.254.255,US,New York,Staten Island
+217.118.192.128,217.118.194.10,CH,Zurich,Winterthur
+217.170.192.0,217.170.203.255,NO,Oslo,Oslo (Alna District)
+217.182.88.0,217.182.88.255,FR,Hauts-de-France,Gravelines

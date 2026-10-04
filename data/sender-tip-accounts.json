@@ -1606,8 +1606,82 @@
    "whitelisted: API key is a keypair used as the TLS client certificate",
    "tips-based, no subscription"
   ],
-  "docs": "https://soyas.xyz/fast-landing (pasted by the owner 2026-10-03)",
-  "doc_date": "2026-10-03"
+  "docs": "https://soyas.xyz/fast-landing",
+  "doc_date": "fetched 2026-10-04: the page is rendered by https://soyas.xyz/assets/index-Dwm0d28N.js, which holds the ten tip addresses and the endpoints (fra, fra2, ams, nyc, lon, tyo .landing.soyas.xyz:9000); first recorded 2026-10-03 from text the owner pasted",
+  "sender": "soyas",
+  "tip_account_count": 10,
+  "tip_account_sources": [
+   {
+    "address": "soyas4s6L8KWZ8rsSk1mF3d1mQScoTGGAgjk98bF8nP",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   },
+   {
+    "address": "soyascXFW5wEEYiwfEmHy2pNwomqzvggJosGVD6TJdY",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   },
+   {
+    "address": "soyasDBdKjADwPz3xk82U3TNPRDKEWJj7wWLajNHZ1L",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   },
+   {
+    "address": "soyasE2abjBAynmHbGWgEwk4ctBy7JMTUCNrMbjcnyH",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   },
+   {
+    "address": "soyasi59njacMUPvo3TM5paHjeK8pYSdovXgFi32gRt",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   },
+   {
+    "address": "soyasQYhJxv8uZgWDxhg72td6piAf7XTkoyWHtSATEz",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   },
+   {
+    "address": "soyastP66xyYC8XADXZjdMM5BAVGD2YRvz8dwtLsqb8",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   },
+   {
+    "address": "soyasvdgUJWYcUCzDxpmjUnNjH7KamXLXTzLwFvdVPE",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   },
+   {
+    "address": "soyasvxAunisNxaoRxkKGjNir7KmbwYnr37JmefkX9G",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   },
+   {
+    "address": "soyas5doVFUwH8s5zK8gEvCL5KR5ogDmf52LsrJEZ9h",
+    "source_url": "https://soyas.xyz/fast-landing",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs",
+    "note": "listed in the page's script bundle https://soyas.xyz/assets/index-Dwm0d28N.js (the page has no static text)"
+   }
+  ]
  },
  "glaive": {
   "name": "Glaive",
@@ -1624,7 +1698,425 @@
   "features": [
    "transaction submission service (endpoints not on the tip page)"
   ],
-  "docs": "https://glaive.trade/tip-accounts (sent by the owner 2026-10-03)",
-  "doc_date": "2026-10-03"
+  "docs": "https://glaive.trade/tip-accounts",
+  "doc_date": "fetched 2026-10-04 (\"Current Official Glaive Tip Addresses\", minimum 0.0001 SOL); first recorded 2026-10-03 from a list the owner sent, now checked against the page",
+  "sender": "glaive",
+  "tip_account_count": 6,
+  "tip_account_sources": [
+   {
+    "address": "GLaiv4GMRYQmthatDS98uQT4HoucgxWT8NeJz6oSwxeU",
+    "source_url": "https://glaive.trade/tip-accounts",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "GLaivL5uPrDpvd1wTtvat38KGqb5WLhEdqQfnmNd3oNr",
+    "source_url": "https://glaive.trade/tip-accounts",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "GLaivinAWh21NaJMhtExtD5G2gZs1xnvaYVZmwqobWZL",
+    "source_url": "https://glaive.trade/tip-accounts",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "GLaivJSUL71FcocYa8tks5vpVyYzvaDMHtyrzfQF2ABr",
+    "source_url": "https://glaive.trade/tip-accounts",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "GLaivRU6eDKrta3p3psFAWPEFLzCjeMHGpPUuQqTjtyv",
+    "source_url": "https://glaive.trade/tip-accounts",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "GLaivq5dU8qHayz9Qf13LjPfVy3SmUhbmickfGiZdmfh",
+    "source_url": "https://glaive.trade/tip-accounts",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   }
+  ]
+ },
+ "speedlanding": {
+  "name": "SpeedLanding",
+  "sender": "speedlanding",
+  "tip_accounts": [
+   "SpEEdz8S1KorkMZqjMUxfxrmWwofmp6ReNP2Nx6CUmq",
+   "SpeeDy3GJM4wcrQmk1itRFWgidvxX4rwjTLMv78wwjE",
+   "SPeEdva37vW8vRtqgYjprQs1g3965icfVN5Rt7SMAyh",
+   "speEdrSEpox5GUfHWcBc7tQjRuSfUin2yvB7qoYvvJh",
+   "SPeEDmkHkN3A2roSZf6aZyEMsmrGqTHKqwP51y2Y4rV",
+   "SpeedLdTJXh2RKpXEaP8JCxkWoUVXhtdPQ1EnxBJMxc",
+   "SpEediGKLbbXndSYTzwmz6Z3NDgHQLDcTDEvGFkSMH9",
+   "speede8xCcUq2Tiv1efXeTuE3k9TDNq8TnGKaKSc6J4"
+  ],
+  "tip_account_count": 8,
+  "min_tip_sol": 0.001,
+  "min_tip_note": "0.001 SOL (1,000,000 lamports) per transaction",
+  "eu_endpoints": [
+   "fra.speedlanding.trade (HTTP :80, QUIC :17778)",
+   "ams.speedlanding.trade",
+   "lon.speedlanding.trade"
+  ],
+  "features": [
+   "HTTP JSON-RPC sendTransaction and a binary API on port 80; the apikey query parameter is a base58 keypair SECRET (plan addendum I-10: never over plain HTTP)",
+   "QUIC API on :17778"
+  ],
+  "docs": "https://speedlanding.trade/docs.html",
+  "doc_date": "fetched 2026-10-04 (no published date); the same eight addresses as send/mod.rs known_tip_accounts(SpeedLanding), fetched 2026-10-03",
+  "tip_account_sources": [
+   {
+    "address": "SpEEdz8S1KorkMZqjMUxfxrmWwofmp6ReNP2Nx6CUmq",
+    "source_url": "https://speedlanding.trade/docs.html",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "SpeeDy3GJM4wcrQmk1itRFWgidvxX4rwjTLMv78wwjE",
+    "source_url": "https://speedlanding.trade/docs.html",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "SPeEdva37vW8vRtqgYjprQs1g3965icfVN5Rt7SMAyh",
+    "source_url": "https://speedlanding.trade/docs.html",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "speEdrSEpox5GUfHWcBc7tQjRuSfUin2yvB7qoYvvJh",
+    "source_url": "https://speedlanding.trade/docs.html",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "SPeEDmkHkN3A2roSZf6aZyEMsmrGqTHKqwP51y2Y4rV",
+    "source_url": "https://speedlanding.trade/docs.html",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "SpeedLdTJXh2RKpXEaP8JCxkWoUVXhtdPQ1EnxBJMxc",
+    "source_url": "https://speedlanding.trade/docs.html",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "SpEediGKLbbXndSYTzwmz6Z3NDgHQLDcTDEvGFkSMH9",
+    "source_url": "https://speedlanding.trade/docs.html",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "speede8xCcUq2Tiv1efXeTuE3k9TDNq8TnGKaKSc6J4",
+    "source_url": "https://speedlanding.trade/docs.html",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   }
+  ]
+ },
+ "allenhark_relay": {
+  "name": "AllenHark Relay",
+  "sender": "allenhark",
+  "tip_accounts": [
+   "hark1zxc5Rz3K8Kquz79WPWFEgNCFeJnsMJ16f22uNP",
+   "harkm2BTWxZuszoNpZnfe84jRbQTg6KGHaQBmWzDGQQ",
+   "hark4CwtTnN2y9FaxjcFBAJdJqQrpouu5pgEixfqdEz",
+   "harkoJfnM6dxrJydx5eVmDVwAgwC94KbhuxF69UbXwP",
+   "hark6hUDUTekc1DGxWdJcuyDZwf6pJdCxd4SXAVtta6",
+   "harkoTvFpKSrEQduYrNHXCurARVT19Ud3BnFhVxabos",
+   "harkEpXoJv5qVzHaN7HSuUAd6PHjyMcFMcDYBMDJCEQ",
+   "harkyXDdZSoJGyCxa24t2QXx1poPyp8YfghbtpzGSzK",
+   "harkR2YJ4Dpt4UDJTcBirjnSPBhNpQFcoFkNpCkVqNk",
+   "harkRBygM8pHYe4K8eBjfxyEX19oJn3LepFjvNbLbyi",
+   "harkYFxB6DuUFNwDLvA5CQ66KpfRvFgUoVypMagNcmd"
+  ],
+  "tip_account_count": 11,
+  "tip_required": "yes: a top-level SystemProgram.transfer of at least 0.001 SOL to one of the tip wallets, in the static account keys (else tip_missing); wallets on the Relay Dedicated upgrade skip it",
+  "min_tip_sol": 0.001,
+  "eu_endpoints": [
+   "fra.relay.allenhark.com (HTTPS /v1/sendTx, /v1/sendBundle; WebSocket)",
+   "ams.relay.allenhark.com",
+   "88.216.36.108:4433 (QUIC, Frankfurt)",
+   "84.32.104.38:4433 (QUIC, Amsterdam)"
+  ],
+  "features": [
+   "QUIC, WebSocket and HTTPS submission to the current and upcoming leaders",
+   "/v1/sendBundle: up to 5 transactions, all-or-nothing, through the Jito Block Engine (the relay page also lists the 8 Jito tip accounts for bundles: they stay Jito's)",
+   "10 requests/s per API key by default"
+  ],
+  "docs": "https://allenhark.com/docs/infrastructure/relay",
+  "doc_date": "fetched 2026-10-04 (no published date)",
+  "tip_account_sources": [
+   {
+    "address": "hark1zxc5Rz3K8Kquz79WPWFEgNCFeJnsMJ16f22uNP",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "harkm2BTWxZuszoNpZnfe84jRbQTg6KGHaQBmWzDGQQ",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "hark4CwtTnN2y9FaxjcFBAJdJqQrpouu5pgEixfqdEz",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "harkoJfnM6dxrJydx5eVmDVwAgwC94KbhuxF69UbXwP",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "hark6hUDUTekc1DGxWdJcuyDZwf6pJdCxd4SXAVtta6",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "harkoTvFpKSrEQduYrNHXCurARVT19Ud3BnFhVxabos",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "harkEpXoJv5qVzHaN7HSuUAd6PHjyMcFMcDYBMDJCEQ",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "harkyXDdZSoJGyCxa24t2QXx1poPyp8YfghbtpzGSzK",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "harkR2YJ4Dpt4UDJTcBirjnSPBhNpQFcoFkNpCkVqNk",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "harkRBygM8pHYe4K8eBjfxyEX19oJn3LepFjvNbLbyi",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   },
+   {
+    "address": "harkYFxB6DuUFNwDLvA5CQ66KpfRvFgUoVypMagNcmd",
+    "source_url": "https://allenhark.com/docs/infrastructure/relay",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs"
+   }
+  ]
+ },
+ "solami_beam": {
+  "name": "Solami Beam (stake-weighted transaction routing)",
+  "sender": "solami",
+  "tip_accounts": [
+   "15qWd4huAkoxvhDsHMfpUn27TW1YBYMMJJ2jkAkbeam",
+   "9XuGciSwr5wb7dLTQm91JhuBTvj3GG8WjuRDc3obeam",
+   "kiQioJNyFG7pU36ELLsRKXkeT48kFbk3b6rSgrWbeam",
+   "kjmVhW1UzJrW2sU5bY5NtZ79jpvjSStsj37Pzmabeam",
+   "kREnjPWFpt4AHeY5pijPmyXaCrMnbatUQJo7d3Xbeam",
+   "praRZG6N6MdbsT4EFpKgZJWReZGXQhAMFcH68oCbeam",
+   "SqoKQKU5uwBxovq3R7yEBxFwptc4z7vwoghU3M9beam",
+   "sV72TY66T1RfmDSeHPPbwX6wwJ3bBv5hd4ehJ8tbeam",
+   "swf8MyEeLo7gtRUo27UuJj6naCASUrypU7dbteSbeam",
+   "uiuaQsxA47JybQAVN4FTfYuoEDkMiXV1r591Aewbeam",
+   "6993ZufwyEDNdB94kciDTGB17ANXguiNH22VmMQU1ami",
+   "E1BkG293HQocKfCkfPS7tEvs8Enh6FK8pUKi17EH1ami",
+   "2Ga87xvZwpP9WRsSdiPiWre21cQbDcFhGLmT5EMo1ami",
+   "CGzT5jzT68vGUWVagQAQqESfrCEHSKYe9DAjfgfC1ami",
+   "148HEjLv8JFZYZzduhSitV1VtQHRKLc5auX1RzdyGtxx"
+  ],
+  "tip_account_count": 15,
+  "min_tip_sol": 0.0001,
+  "min_tip_note": "\"Free to use with a 0.0001 SOL minimum tip\" (https://solami.dev/llms.txt)",
+  "eu_endpoints": [
+   "beam.solami.dev:11000 (QUIC)",
+   "beam-http.solami.dev (HTTP)"
+  ],
+  "features": [
+   "tip-only, free; validator stake behind the routing lane (over 5 million SOL claimed)"
+  ],
+  "docs": "https://solami.dev/docs (GET https://api.solami.dev/onchain/tip-addresses)",
+  "doc_date": "fetched 2026-10-04: the API returned 15 addresses (10 ending 'beam', 4 ending '1ami', 1 without a vanity part); the 2026-10-04 audit counted 10",
+  "tip_account_sources": [
+   {
+    "address": "15qWd4huAkoxvhDsHMfpUn27TW1YBYMMJJ2jkAkbeam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "9XuGciSwr5wb7dLTQm91JhuBTvj3GG8WjuRDc3obeam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "kiQioJNyFG7pU36ELLsRKXkeT48kFbk3b6rSgrWbeam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "kjmVhW1UzJrW2sU5bY5NtZ79jpvjSStsj37Pzmabeam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "kREnjPWFpt4AHeY5pijPmyXaCrMnbatUQJo7d3Xbeam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "praRZG6N6MdbsT4EFpKgZJWReZGXQhAMFcH68oCbeam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "SqoKQKU5uwBxovq3R7yEBxFwptc4z7vwoghU3M9beam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "sV72TY66T1RfmDSeHPPbwX6wwJ3bBv5hd4ehJ8tbeam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "swf8MyEeLo7gtRUo27UuJj6naCASUrypU7dbteSbeam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "uiuaQsxA47JybQAVN4FTfYuoEDkMiXV1r591Aewbeam",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "6993ZufwyEDNdB94kciDTGB17ANXguiNH22VmMQU1ami",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "E1BkG293HQocKfCkfPS7tEvs8Enh6FK8pUKi17EH1ami",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "2Ga87xvZwpP9WRsSdiPiWre21cQbDcFhGLmT5EMo1ami",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "CGzT5jzT68vGUWVagQAQqESfrCEHSKYe9DAjfgfC1ami",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   },
+   {
+    "address": "148HEjLv8JFZYZzduhSitV1VtQHRKLc5auX1RzdyGtxx",
+    "source_url": "https://api.solami.dev/onchain/tip-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_api",
+    "note": "Solami's own tip-address API (documented at https://solami.dev/docs); the 'beam' vanity is Solami's Beam product, not RPC Fast Beam"
+   }
+  ]
+ },
+ "bloxroute_legacy": {
+  "name": "bloXroute Trader API (legacy tip addresses)",
+  "sender": "bloxroute",
+  "status": "legacy",
+  "tip_accounts": [
+   "HWEoBxYs7ssKuudEjzjmpfJVX7Dvi7wescFsVx2L5yoY",
+   "95cfoy472fcQHaw4tPGBTKpn6ZQnfEPfBgDQx6gcRmRg"
+  ],
+  "tip_account_count": 2,
+  "min_tip_sol": 0.001,
+  "docs": "https://web.archive.org/web/20250624141008/https://docs.bloxroute.com/solana/trader-api/introduction/tip-and-tipping-addresses",
+  "doc_date": "the provider's page as archived on 2025-04-15 and 2025-06-24 (SNS names bloxroute.sol and bloxroute1.sol, beside 3UQUKjhM... and FogxVNs6...); the live page (https://docs.bloxroute.com/solana/trader-api/introduction/tip-and-tipping-addresses, fetched 2026-10-04) lists 17 addresses, not these two (bloxroute_trader_api above)",
+  "tip_account_sources": [
+   {
+    "address": "HWEoBxYs7ssKuudEjzjmpfJVX7Dvi7wescFsVx2L5yoY",
+    "source_url": "https://web.archive.org/web/20250624141008/https://docs.bloxroute.com/solana/trader-api/introduction/tip-and-tipping-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs_archived",
+    "note": "bloxroute.sol in the provider's own table (also in the 2025-04-15 snapshot https://web.archive.org/web/20250415043007/https://docs.bloxroute.com/solana/trader-api/introduction/tip-and-tipping-addresses); no longer listed on 2026-10-04 but still tipped by rivals in cmp2"
+   },
+   {
+    "address": "95cfoy472fcQHaw4tPGBTKpn6ZQnfEPfBgDQx6gcRmRg",
+    "source_url": "https://web.archive.org/web/20250624141008/https://docs.bloxroute.com/solana/trader-api/introduction/tip-and-tipping-addresses",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs_archived",
+    "note": "bloxroute1.sol in the provider's own table (also in the 2025-04-15 snapshot https://web.archive.org/web/20250415043007/https://docs.bloxroute.com/solana/trader-api/introduction/tip-and-tipping-addresses); no longer listed on 2026-10-04 but still tipped by rivals in cmp2"
+   }
+  ]
+ },
+ "svs_lightspeed_legacy": {
+  "name": "Solana Vibe Station Lightspeed (legacy tip addresses)",
+  "sender": "svs_lightspeed",
+  "status": "legacy",
+  "tip_accounts": [
+   "53PhM3UTdMQWu5t81wcd35AHGc5xpmHoRjem7GQPvXjA",
+   "9tYF5yPDC1NP8s6diiB3kAX6ZZnva9DM3iDwJkBRarBB"
+  ],
+  "tip_account_count": 2,
+  "min_tip_sol": 0.0001,
+  "min_tip_note": "0.0001 SOL minimum, 0.001 SOL recommended (the archived pages)",
+  "docs": "https://web.archive.org/web/20260124062940/https://docs.solanavibestation.com/services/solana-node-services/lightspeed-transactions",
+  "doc_date": "the provider's Lightspeed pages as archived on 2025-10-14 (developers/lightspeed/overview), 2026-01-24 and 2026-02-14; the live pages (fetched 2026-10-04) list only svsMoWJBwLcs8JgfN8VaF111tAc199KpYeTKRwxRtip (svs_lightspeed above)",
+  "tip_account_sources": [
+   {
+    "address": "53PhM3UTdMQWu5t81wcd35AHGc5xpmHoRjem7GQPvXjA",
+    "source_url": "https://web.archive.org/web/20260124062940/https://docs.solanavibestation.com/services/solana-node-services/lightspeed-transactions",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs_archived",
+    "note": "Lightspeed tip address on the provider's pages (also https://web.archive.org/web/20251014054611/https://docs.solanavibestation.com/developers/lightspeed/overview, and the sendBundle (beta) tip address at https://web.archive.org/web/20260214022451/https://docs.solanavibestation.com/developers/jito/jito-solana-rpc-methods/sendbundle-beta)"
+   },
+   {
+    "address": "9tYF5yPDC1NP8s6diiB3kAX6ZZnva9DM3iDwJkBRarBB",
+    "source_url": "https://web.archive.org/web/20260124062940/https://docs.solanavibestation.com/services/solana-node-services/lightspeed-transactions",
+    "fetched": "2026-10-04",
+    "attribution": "provider_docs_archived",
+    "note": "Lightspeed tip address on the provider's pages (also https://web.archive.org/web/20251014054611/https://docs.solanavibestation.com/developers/lightspeed/overview); the 2026-10-04 audit had it unattributed"
+   }
+  ]
  }
 }

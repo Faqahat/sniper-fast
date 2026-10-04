@@ -192,6 +192,80 @@ impl FeedCounters {
     }
 }
 
+/// PoH positions of forwarded transactions, by any feed (PLAN WP-08 item 2): an entries feed's when its message is
+/// walked (they also ride on the arrival), a shred feed's when its PoH walk reaches them, which can be after the
+/// transaction was handed over (so they never ride on the arrival and the engine's own map lacks them). Keyed by the
+/// signature's first 8 bytes (big-endian, as poh.log's `sig8`), the earliest position kept, for `POH_KEEP_NS`.
+/// Settlement (outcomes `poh`) and the `poh_trigger_pct` gauge read it ([`poh_index`]; WP-05 / WP-07 call sites)
+pub struct PohIndex { m: std::sync::Mutex<(rustc_hash::FxHashMap<u64, (entries::Poh, u16)>, std::collections::VecDeque<(u64, u64)>)> }
+
+/// how long a position is kept, and at most how many (a hard cap on memory)
+pub const POH_KEEP_NS: u64 = 180_000_000_000;
+pub const POH_KEEP_MAX: usize = 1_000_000;
+
+impl PohIndex {
+    fn new() -> PohIndex { PohIndex { m: std::sync::Mutex::new(Default::default()) } }
+    /// positions `(sig8, poh)` from feed `feed`, received at `t` (the first one of a signature wins)
+    pub fn insert_many(&self, items: &[(u64, entries::Poh)], feed: u16, t: u64) {
+        if items.is_empty() { return; }
+        let mut g = self.m.lock().unwrap_or_else(|e| e.into_inner());
+        let (map, order) = &mut *g;
+        for (k, p) in items { if !map.contains_key(k) { map.insert(*k, (*p, feed)); order.push_back((t, *k)); } }
+        while let Some(&(t0, k)) = order.front() {
+            if t.saturating_sub(t0) < POH_KEEP_NS && order.len() <= POH_KEEP_MAX { break; }
+            order.pop_front();
+            map.remove(&k);
+        }
+    }
+    /// the position of the transaction whose signature starts with `sig8`, and the feed that saw it
+    pub fn get(&self, sig8: u64) -> Option<(entries::Poh, u16)> { self.m.lock().unwrap_or_else(|e| e.into_inner()).0.get(&sig8).copied() }
+    /// the same by full signature
+    pub fn get_sig(&self, sig: &[u8; 64]) -> Option<(entries::Poh, u16)> { self.get(u64::from_be_bytes(sig[..8].try_into().unwrap())) }
+    pub fn len(&self) -> usize { self.m.lock().unwrap_or_else(|e| e.into_inner()).0.len() }
+    pub fn is_empty(&self) -> bool { self.len() == 0 }
+}
+
+/// The process's PoH index
+pub fn poh_index() -> &'static PohIndex {
+    static I: std::sync::LazyLock<PohIndex> = std::sync::LazyLock::new(PohIndex::new);
+    &I
+}
+
+/// The `poh_trigger_pct` gauge (PLAN WP-08 item 2, F38): the share of attempts whose trigger has a PoH position; the
+/// target is >= 90% while at least one entries or shred feed is alive. The attempt writer (WP-05, exec.rs) notes every
+/// attempt ([`PohGauge::note_attempt`]); the status line's `coverage` section (engine.rs) takes [`PohGauge::status`]
+pub struct PohGauge { attempts: AtomicU64, with_poh: AtomicU64, prev: std::sync::Mutex<(u64, u64)> }
+
+/// the process's gauge
+pub static POH_GAUGE: PohGauge = PohGauge::new();
+
+/// the gauge's target, percent
+pub const POH_TRIGGER_TARGET_PCT: f64 = 90.0;
+
+/// a feed that rebuilds a PoH clock (entries and raw shred feeds), by feedhealth `kind`
+pub fn poh_capable(kind: &str) -> bool { matches!(kind, "jito-entries" | "udp" | "multicast") }
+
+impl PohGauge {
+    pub const fn new() -> PohGauge { PohGauge { attempts: AtomicU64::new(0), with_poh: AtomicU64::new(0), prev: std::sync::Mutex::new((0, 0)) } }
+    /// one attempt; `has_poh`: its trigger has a PoH position (the engine's map or [`poh_index`])
+    pub fn note_attempt(&self, has_poh: bool) {
+        self.attempts.fetch_add(1, Ordering::Relaxed);
+        if has_poh { self.with_poh.fetch_add(1, Ordering::Relaxed); }
+    }
+    /// `{poh_trigger_pct, attempts_delta, with_poh_delta, attempts_total, with_poh_total, poh_feeds_alive_now, target_pct,
+    /// target_met}` since the previous call (`poh_trigger_pct` null without attempts; `target_met` null while no
+    /// PoH-capable feed is alive, i.e. connected with a message in the last 10 s)
+    pub fn status(&self, feeds: &[Arc<FeedCounters>], now: u64) -> serde_json::Value {
+        let (a, w) = (self.attempts.load(Ordering::Relaxed), self.with_poh.load(Ordering::Relaxed));
+        let (da, dw) = { let mut p = self.prev.lock().unwrap_or_else(|e| e.into_inner()); let d = (a - p.0, w - p.1); *p = (a, w); d };
+        let alive = feeds.iter().filter(|c| poh_capable(&c.kind) && c.connected.load(Ordering::Relaxed)
+            && now.saturating_sub(c.last_msg_ns.load(Ordering::Relaxed)) < 10_000_000_000).count();
+        let pct = (da > 0).then(|| dw as f64 * 100.0 / da as f64);
+        serde_json::json!({ "poh_trigger_pct": pct, "attempts_delta": da, "with_poh_delta": dw, "attempts_total": a, "with_poh_total": w,
+            "poh_feeds_alive_now": alive, "target_pct": POH_TRIGGER_TARGET_PCT, "target_met": (alive > 0).then_some(pct.map(|p| p >= POH_TRIGGER_TARGET_PCT)).flatten() })
+    }
+}
+
 /// feedhealth.jsonl `kind`
 fn kind_name(k: &FeedKind) -> String { serde_json::to_value(k).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_else(|| format!("{k:?}")) }
 
@@ -310,31 +384,35 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
                 rec.emit_sized(s, bytes.len() as u64 + 20, Record::enc(move |o| { o.extend(slot.to_le_bytes()); o.extend(t.to_le_bytes()); o.extend((bytes.len() as u32).to_le_bytes()); o.extend_from_slice(&bytes); }));
             };
             let Some((refs, ents)) = entries::parse_entries_poh(&bytes) else { archive(bytes); return true };
-            let pohs = match poh {
+            let (pohs, first_entry) = match poh {
                 Some(p) => {
-                    let (pohs, done) = p.lock().unwrap().entries_at(slot, &ents, t);
+                    let (pohs, done, first) = p.lock().unwrap().entries_at(slot, &ents, t);
                     if let Some(d) = done {
                         // slots-feed.log v2: the eight v1 columns; the shred columns are `-` for an entries feed, and
                         // poh_complete is whether the slot was followed from its start with all 64 ticks
                         rec.emit(rec::SLOTS_FEED, Record::enc(move |o| { let _ = std::io::Write::write_fmt(o, format_args!("{id} {} {} {} {} {} {} {} - - - - {}",
                             d.slot, d.ticks, d.entries, d.txs, d.t_first, d.t_last, d.valid as u8, (d.valid && d.ticks == 64) as u8)); }));
                     }
-                    pohs
+                    (pohs, first)
                 }
-                None => vec![None; ents.len()],
+                None => (vec![None; ents.len()], None),
             };
-            // poh.log v2: `sig8 slot ms feed entry_idx` (`-`: an entry's index in its slot is not known to an entries
-            // feed). One record for the message's lines (review F11: one queue slot, formatted on the writer)
+            // poh.log v2: `sig8 slot ms feed entry_idx` (WP-08: the entry's index in its slot when the slot is followed
+            // from its start, as the PoH position itself; `-` otherwise). One record for the message's lines (review F11:
+            // one queue slot, formatted on the writer)
             if rec.is_on() {
-                let lines: Vec<(u64, f64)> = refs.iter().filter(|r| !r.is_vote).filter_map(|r| {
+                let lines: Vec<(u64, f64, Option<u32>)> = refs.iter().filter(|r| !r.is_vote).filter_map(|r| {
                     let ms = pohs.get(r.entry as usize).copied().flatten().and_then(|p| p.ms())?;
-                    Some((u64::from_be_bytes(r.sig[..8].try_into().unwrap()), ms))
+                    Some((u64::from_be_bytes(r.sig[..8].try_into().unwrap()), ms, first_entry.map(|f| f + r.entry)))
                 }).collect();
                 if !lines.is_empty() {
                     rec.emit(rec::POH, Record::enc_lines(lines.len() as u32, move |o| {
-                        for (k, (sig8, ms)) in lines.iter().enumerate() {
+                        for (k, (sig8, ms, e)) in lines.iter().enumerate() {
                             if k > 0 { o.push(b'\n'); }
-                            let _ = std::io::Write::write_fmt(o, format_args!("{sig8:016x} {slot} {ms:.3} {id} -"));
+                            let _ = match e {
+                                Some(e) => std::io::Write::write_fmt(o, format_args!("{sig8:016x} {slot} {ms:.3} {id} {e}")),
+                                None => std::io::Write::write_fmt(o, format_args!("{sig8:016x} {slot} {ms:.3} {id} -")),
+                            };
                         }
                     }));
                 }
@@ -343,6 +421,7 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
             let tables = interest.tables.read().unwrap();
             let (key, table) = (|k: &Pk| interest.keys.contains(k), |k: &Pk| tables.contains(k));
             let mut ok = true;
+            let mut positions: Vec<(u64, entries::Poh)> = Vec::new();
             for r in refs {
                 if r.is_vote { continue; }
                 c.txs.fetch_add(1, Ordering::Relaxed);
@@ -351,10 +430,12 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
                 let Some((tx, n)) = tx::parse_wire(raw) else { continue };
                 c.forwarded.fetch_add(1, Ordering::Relaxed);
                 let poh = pohs.get(r.entry as usize).copied().flatten();
+                if let Some(p) = poh { positions.push((u64::from_be_bytes(r.sig[..8].try_into().unwrap()), p)); }
                 let raw = RawTx::Wire(Arc::from(&raw[..n.min(raw.len())]));
                 if !sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded, executed: None, tx, poh, raw })).is_ok()) { ok = false; break; }
             }
             drop(tables);
+            poh_index().insert_many(&positions, id, t);
             archive(bytes);
             ok
         }
@@ -500,9 +581,10 @@ mod tests {
         b
     }
 
-    /// review F12: what an entries feed records through the recorder: poh.log v2 (`sig8 slot ms feed -`, one record per
-    /// message, a line per transaction), slots-feed.log v2 (the eight v1 columns, four `-` shred columns, poh_complete)
-    /// and the raw archive in its v1 frame layout (`u64 slot | u64 t | u32 len | bytes`)
+    /// review F12: what an entries feed records through the recorder: poh.log v2 (`sig8 slot ms feed entry_idx`, one
+    /// record per message, a line per transaction; WP-08: the entry's index in a slot followed from its start),
+    /// slots-feed.log v2 (the eight v1 columns, four `-` shred columns, poh_complete) and the raw archive in its v1 frame
+    /// layout (`u64 slot | u64 t | u32 len | bytes`)
     #[test]
     fn an_entries_feed_records_poh_slots_and_its_archive() {
         let d = tmp("ent");
@@ -519,7 +601,7 @@ mod tests {
         assert!(forward(0, &interest, &tx, &c, Some(&clock), &rec, &fwd, grpc::Item::Entries { slot: 10, bytes: m10.clone(), t: 1_000 }));
         assert!(forward(0, &interest, &tx, &c, Some(&clock), &rec, &fwd, grpc::Item::Entries { slot: 11, bytes: m11.clone(), t: 2_000 }));
         rec.close();
-        assert_eq!(rec::read_text(&d, "poh").unwrap(), vec!["2222222222222222 11 9.375 0 -", "3333333333333333 11 9.375 0 -"]);
+        assert_eq!(rec::read_text(&d, "poh").unwrap(), vec!["2222222222222222 11 9.375 0 1", "3333333333333333 11 9.375 0 1"]);
         assert_eq!(rec::read_text(&d, "slots-feed").unwrap(), vec!["0 10 0 1 1 1000 1000 0 - - - - 0"]);
         let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(d.join("manifest.json")).unwrap()).unwrap();
         let poh = m["streams"].as_array().unwrap().iter().find(|s| s["name"] == "poh").unwrap();
@@ -657,7 +739,8 @@ mod tests {
         assert_eq!(x["pools"], serde_json::json!([b(fixture::POOL)]));
         assert_eq!(x["watched"], serde_json::json!([{ "acct": b(fixture::POOL), "role": "pool", "pool": 0 }, { "acct": b(fixture::VAULT0), "role": "vault", "pool": 0 },
             { "acct": b(fixture::VAULT1), "role": "vault", "pool": 0 }]));
-        assert!(x["transfers"].is_null() && x["bundle"].is_null() && x["ours"].is_null(), "derived fields come with WP-08 / WP-05");
+        // WP-08's derived fields are filled on the writer (src/classify.rs; `ours` waits for WP-05)
+        assert!(x["transfers"].is_array() && x["arb_like"].is_object() && x["tip_total"].is_u64() && x["ours"].is_null(), "{x}");
         let y = &ex[1];
         assert_eq!((y["ok"].as_bool(), y["err"].as_str(), y["err_ix"].as_u64(), y["idx"].as_u64()), (Some(false), Some("ix2:custom:0x1771"), Some(2), Some(3)));
         assert!(y["logs"].is_null() && y["inner"].is_null() && y["return_data"].is_null(), "the provider omitted them: null, not empty");
@@ -672,6 +755,54 @@ mod tests {
             (Some(1_000), Some(b(0x34).as_str()), Some(b(0x99).as_str()), Some(900)));
         assert!(bl[0]["bank_id"].is_null() && x["bank_id"].is_null(), "the fixture's provider sends no bank_id");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// PLAN WP-08 item 2: the PoH index keeps the earliest position of a forwarded transaction per signature, by feed,
+    /// for 3 minutes; an entries feed's forwarded transactions go there (the walk in `forward`)
+    #[test]
+    fn the_poh_index_and_an_entries_feeds_forwarded_positions() {
+        let ix = PohIndex::new();
+        let p = |slot: u64, h: u64| entries::Poh { slot, hashes: h, ticks: 1, hpt: 100 };
+        ix.insert_many(&[(7, p(1, 150)), (8, p(1, 160))], 2, 1_000);
+        ix.insert_many(&[(7, p(1, 140))], 3, 2_000);
+        assert_eq!((ix.get(7), ix.get(8).map(|x| x.1), ix.get(9)), (Some((p(1, 150), 2)), Some(2), None), "the first position of a signature stays");
+        ix.insert_many(&[(10, p(2, 100))], 1, 1_000 + POH_KEEP_NS);
+        assert_eq!((ix.get(7), ix.get(8), ix.get(10).map(|x| x.1), ix.len()), (None, None, Some(1), 1), "kept 3 minutes");
+        // through `forward`: the walked message's forwarded transactions (a watched key) are indexed with the feed id
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let c = FeedCounters::named("ent", "jito-entries");
+        let clock = std::sync::Mutex::new(entries::PohClock::default());
+        let interest = Interest { keys: [[3u8; 32]].into_iter().collect(), tables: Default::default() };
+        let m = msg(&[(100, vec![])]);
+        assert!(forward(6, &interest, &tx, &c, Some(&clock), &Rec::off(), &Fwd::default(), grpc::Item::Entries { slot: 20, bytes: m, t: 1 }));
+        let m = msg(&[(100, vec![]), (25, vec![legacy_tx(0x6a)])]);
+        assert!(forward(6, &interest, &tx, &c, Some(&clock), &Rec::off(), &Fwd::default(), grpc::Item::Entries { slot: 21, bytes: m, t: 2 }));
+        let (pos, feed) = poh_index().get_sig(&[0x6a; 64]).expect("indexed");
+        assert_eq!((pos.slot, pos.hashes, pos.ms(), feed), (21, 125, Some(7.8125), 6));
+    }
+
+    /// PLAN WP-08 item 2 (F38): `poh_trigger_pct` over the attempts noted since the last status line, and the target
+    /// judged only while a PoH-capable feed (entries, raw shreds) is alive
+    #[test]
+    fn the_poh_trigger_gauge() {
+        let g = PohGauge::new();
+        let ent = Arc::new(FeedCounters::named("ent", "jito-entries"));
+        let tx = Arc::new(FeedCounters::named("tx", "yellowstone-tx"));
+        let now = 100_000_000_000;
+        tx.seen(1, now);
+        let s = g.status(&[ent.clone(), tx.clone()], now);
+        assert_eq!((s["poh_trigger_pct"].clone(), s["poh_feeds_alive_now"].as_u64(), s["target_met"].clone()), (serde_json::Value::Null, Some(0), serde_json::Value::Null));
+        for has in [true, true, true, false] { g.note_attempt(has); }
+        let s = g.status(&[ent.clone(), tx.clone()], now);
+        assert_eq!((s["poh_trigger_pct"].as_f64(), s["attempts_delta"].as_u64(), s["target_met"].clone()), (Some(75.0), Some(4), serde_json::Value::Null), "no PoH feed alive: not judged");
+        ent.seen(1, now);
+        for _ in 0..9 { g.note_attempt(true); }
+        g.note_attempt(false);
+        let s = g.status(&[ent.clone(), tx.clone()], now + 1_000_000_000);
+        assert_eq!((s["poh_trigger_pct"].as_f64(), s["poh_feeds_alive_now"].as_u64(), s["target_met"].as_bool(), s["attempts_total"].as_u64()), (Some(90.0), Some(1), Some(true), Some(14)));
+        let s = g.status(&[ent], now + 11_000_000_000);
+        assert_eq!((s["attempts_delta"].as_u64(), s["poh_feeds_alive_now"].as_u64()), (Some(0), Some(0)), "silent for 10 s: not alive");
+        assert!(poh_capable("udp") && poh_capable("multicast") && !poh_capable("yellowstone-deshred"));
     }
 
     /// review WP-03 #6: an interslot status (first-shred, created-bank: ahead of every processed slot) counts as a message

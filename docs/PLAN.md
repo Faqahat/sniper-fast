@@ -517,10 +517,11 @@ Lane S  (Stage 1):   WP-13 and WP-14 after WP-03; WP-12 after WP-09 + WP-10; WP-
 9. **The `exec.jsonl` v2 writer** moves from grpc.rs:336-356 to `src/rec/exec.rs`. It writes the full fields (MEASUREMENT.md §4.14): raw instructions, inner instructions, logs, balances, loaded addresses and compute-budget parameters. Derived fields (transfer classification, bundle membership) come in WP-08. `wallet.jsonl` (WP-03b) uses the same writer.
 10. **Basic LeaderBook** (`src/leaders.rs`, new):
     - The leader schedule comes from `getSlotLeaders` in 400-slot windows, refreshed every 100 slots on `rt_bg`.
-    - The leader kind (Jito, BAM, other) has three named sources (F39), each recorded with its fetch time:
-      - Jito: the Jito validators API (`https://kobe.mainnet.jito.network/api/v1/validators`; the implementer confirms the endpoint and fields when the WP starts);
-      - BAM: validator identities seen in our bundle results (`Accepted` / `Processed` `validator_identity`), plus a public BAM list if one is identified (none is assumed);
-      - a dated static fallback `data/validators-meta.json`.
+    - The leader kind (Jito, BAM, other) has named sources (F39), each recorded with its fetch time (as implemented: WP-03 deviation 6, WP-08):
+      - Jito and BAM: the Jito validators API (`https://kobe.mainnet.jito.network/api/v1/validators`): `running_bam` gives BAM, `running_jito` Jito, and a validator absent from it runs neither;
+      - Jito: validator identities seen in our bundle results (`Accepted` / `Processed` `validator_identity`): a bundle result shows the leader takes Jito bundles, not that it runs BAM; a public BAM list if one is identified (none is assumed);
+      - a dated static fallback `data/validators-meta.json`;
+      - (WP-08) the client a validator announces in gossip (`JitoLabs`, `AgaveBam` / `FireBAM`, plain `Agave`), for a validator no other source names.
     - It exposes `leader(slot)`, `kind(slot)` and `snapshot(slot)`, a struct that WP-05 copies into attempts and WP-08 fills further. send/tpu.rs `Book` (:39) stays until WP-08 switches it over.
 11. **Input journal** (`src/rec/journal.rs`; moved here from WP-09, F11):
     - **The run loop** (`Engine::run` :324-358) is restructured into two calls:

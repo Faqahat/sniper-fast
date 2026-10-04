@@ -1,6 +1,7 @@
 //! manifest.json (MEASUREMENT §4.4): every stream's files, bytes, records, first and last time, drops, I/O and encoding
 //! losses, queue high-water marks and, for closed files, their sha256; the queues; the disk budget's state; the
-//! recorder's faults. Written every 60 s by the monitor and at close, atomically (temporary file + rename).
+//! recorder's faults; the sampled populations' counts (`sampling`, WP-08). Written every 60 s by the monitor and at
+//! close, atomically (temporary file + rename).
 //!
 //! `records_total` counts records whose bytes reached the disk. A record that was taken but not written is in exactly
 //! one of `io_lost_total` (an open, compression or write error), `encode_errors_total` (its encoder panicked) or, at the
@@ -34,7 +35,9 @@ pub fn json(r: &Recorder, last: bool) -> Value {
         "streams": streams, "queues": queues, "disk": disk, "core_record_loss": r.core_lost.load(Relaxed),
         "writers_dead": Class::ALL.iter().filter(|c| r.dead[c.idx()].load(Relaxed)).map(|c| c.as_str()).collect::<Vec<_>>(),
         "close_timeout": r.close_timeout.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-        "fatal": r.fatal.get(), "echo_dropped": r.echo_dropped.load(Relaxed) })
+        "fatal": r.fatal.get(), "echo_dropped": r.echo_dropped.load(Relaxed),
+        // plan addendum I-9 (WP-08): the sampled populations' totals (kept + left out = seen)
+        "sampling": { "rivals_venues": r.rival_venues.counts() } })
 }
 
 pub fn write(r: &Recorder, last: bool) -> anyhow::Result<()> {

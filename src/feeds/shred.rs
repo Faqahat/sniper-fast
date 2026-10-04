@@ -9,10 +9,19 @@
 //! A data shred's payload is bytes [88..size]. Variants: legacy data 0xA5, legacy code 0x5A; merkle data 0x8_/0x9_/0xB_,
 //! merkle code 0x4_/0x6_/0x7_. Recovery (code) shreds are counted but not used yet: a missing data shred stalls its
 //! data set until it arrives (or the slot is dropped).
+//!
+//! PoH (PLAN WP-08 item 2): the finished data sets are walked in index order from the slot's first entry, so every
+//! transaction gets its position on the leader's clock and its entry's index (poh.log v2); the forwarded ones also go to
+//! the PoH index (`feeds::poh_index`). Each slot's coverage is a slots-feed.log v2 line, written when the walk reaches
+//! the slot's last shred (LAST_SHRED_IN_SLOT) or, short of that, when the slot is dropped (20 s after its first shred):
+//! data and code shreds, data sets decoded and failed, ticks, entries and transactions walked, and `poh_complete` (the
+//! walk covered the whole slot: its first data set to its last shred, 64 ticks).
 use crate::tx::{parse_wire, scan, Pk, Tx};
 use std::collections::{BTreeMap, HashMap};
 
 pub const DATA_COMPLETE: u8 = 0x40;
+/// LAST_SHRED_IN_SLOT (it includes DATA_COMPLETE)
+pub const LAST_IN_SLOT: u8 = 0xC0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ShredKind { Data, Code }
@@ -58,8 +67,9 @@ struct Stream {
     state: Parse,
     entries_left: u64,
     txs_left: u64,
-    /// the leader's PoH: per entry (num_hashes, transactions, first 8 bytes of each non-vote signature)
-    entries: Vec<(u64, u64, Vec<[u8; 8]>)>,
+    /// the leader's PoH: per entry (num_hashes, transactions, first 8 bytes of each non-vote signature and whether it is
+    /// forwarded)
+    entries: Vec<(u64, u64, Vec<([u8; 8], bool)>)>,
 }
 
 impl Stream {
@@ -85,12 +95,25 @@ struct SlotState {
     waiting: HashMap<u32, u32>,
     /// the PoH clock rebuilt from the shreds: finished data sets by start index (end, entries), the next set start in
     /// order, the hashes so far in the slot, the hash count at the last tick; u32::MAX = a set failed, no clock
-    sets: BTreeMap<u32, (u32, Vec<(u64, u64, Vec<[u8; 8]>)>)>,
+    sets: BTreeMap<u32, (u32, Vec<(u64, u64, Vec<([u8; 8], bool)>)>)>,
     poh_next: u32,
     cum: u64,
     last_tick: u64,
     /// entries walked so far in the slot (poh.log `entry_idx`)
     entries: u64,
+    /// slots-feed.log v2 (WP-08): the last shred's arrival, data and code shreds, data sets decoded and failed, ticks and
+    /// transactions walked, the index of the slot's last shred, whether the walk started at its first set, and whether
+    /// the slot's line was written
+    t_last: u64,
+    data_n: u64,
+    code_n: u64,
+    sets_ok: u64,
+    sets_failed: u64,
+    ticks: u64,
+    txs: u64,
+    last_index: Option<u32>,
+    walk_started: bool,
+    reported: bool,
 }
 
 #[derive(Default, Debug, Clone, serde::Serialize)]
@@ -128,12 +151,18 @@ pub struct Assembler {
     /// where the PoH positions go (poh.log, with this feed id); off: the PoH clock is not rebuilt
     pub rec: crate::rec::Rec,
     pub feed: u16,
+    /// the slots dropped lately (the newest `DROPPED_KEEP`): a late shred of one starts no second slots-feed line
+    /// (review WP-08 #15)
+    dropped: std::collections::BTreeSet<u64>,
 }
+
+/// dropped slots remembered (about 7 minutes of slots)
+const DROPPED_KEEP: usize = 1_024;
 
 impl Assembler {
     pub fn new() -> Assembler {
         Assembler { slots: BTreeMap::new(), stats: AsmStats::default(), keep_ns: 20_000_000_000,
-            versions: HashMap::new(), version: None, bad_samples: Vec::new(), hpt: 0, rec: crate::rec::Rec::off(), feed: 0 }
+            versions: HashMap::new(), version: None, bad_samples: Vec::new(), hpt: 0, rec: crate::rec::Rec::off(), feed: 0, dropped: Default::default() }
     }
 
     /// the shred version the feed settled on
@@ -156,11 +185,22 @@ impl Assembler {
             Some(_) => {}
             None => { let n = self.versions.entry(ver).or_insert(0); *n += 1; if *n >= 500 { self.version = Some(ver); } }
         }
-        if h.kind == ShredKind::Code { self.stats.code_shreds += 1; return Some(h); }
+        // a slot dropped already was reported then (or had nothing to report): a late shred of it starts no new line
+        let late = self.dropped.contains(&h.slot);
+        if h.kind == ShredKind::Code {
+            self.stats.code_shreds += 1;
+            let st = self.slots.entry(h.slot).or_insert_with(|| SlotState { first_t: t, reported: late, ..Default::default() });
+            st.code_n += 1;
+            st.t_last = st.t_last.max(t);
+            return Some(h);
+        }
         let payload = match data_payload(pkt) { Some(p) => p, None => { self.stats.bad_packets += 1; return Some(h); } };
-        let st = self.slots.entry(h.slot).or_insert_with(|| SlotState { first_t: t, ..Default::default() });
+        let st = self.slots.entry(h.slot).or_insert_with(|| SlotState { first_t: t, reported: late, ..Default::default() });
         if st.data.contains_key(&h.index) { self.stats.dup_shreds += 1; return Some(h); }
         self.stats.data_shreds += 1;
+        st.data_n += 1;
+        st.t_last = st.t_last.max(t);
+        if h.flags & LAST_IN_SLOT == LAST_IN_SLOT { st.last_index = Some(h.index); }
         st.data.insert(h.index, Shred { t, flags: h.flags, payload: payload.to_vec() });
         // does this shred start a data set? (index 0, or the previous shred ended one)
         let starts_set = h.index == 0 || st.data.get(&(h.index - 1)).map_or(false, |p| p.flags & DATA_COMPLETE != 0);
@@ -222,7 +262,7 @@ impl Assembler {
                             if sc.is_vote { stats.votes += 1; continue; }
                             // the signature follows a 1-byte count (fewer than 128 signers)
                             if s.buf.get(start_b).is_some_and(|c| *c < 0x80) {
-                                if let (Some(sig), Some(e)) = (s.buf.get(start_b + 1..start_b + 9), s.entries.last_mut()) { e.2.push(sig.try_into().unwrap()); }
+                                if let (Some(sig), Some(e)) = (s.buf.get(start_b + 1..start_b + 9), s.entries.last_mut()) { e.2.push((sig.try_into().unwrap(), sc.hit)); }
                             }
                             stats.txs += 1;
                             if !sc.hit { continue; }
@@ -241,13 +281,16 @@ impl Assembler {
         }
         match s.state {
             Parse::Done => {
-                stats.sets_decoded += 1; let n = s.next;
+                stats.sets_decoded += 1; st.sets_ok += 1; let n = s.next;
                 let ents = std::mem::take(&mut s.entries);
                 st.streams.remove(&start); st.waiting.remove(&n);
                 st.sets.insert(start, (n, ents));
                 Self::poh_advance(st, slot, hpt, rec, feed);
             }
-            Parse::Failed => { stats.sets_failed += 1; let n = s.next; st.streams.remove(&start); st.waiting.remove(&n); st.poh_next = u32::MAX; st.sets.clear(); }
+            Parse::Failed => {
+                stats.sets_failed += 1; st.sets_failed += 1;
+                let n = s.next; st.streams.remove(&start); st.waiting.remove(&n); st.poh_next = u32::MAX; st.sets.clear();
+            }
             _ => {}
         }
     }
@@ -259,23 +302,35 @@ impl Assembler {
     fn poh_advance(st: &mut SlotState, slot: u64, hpt: &mut u64, rec: &crate::rec::Rec, feed: u16) {
         if !rec.is_on() { st.sets.clear(); return; }
         let mut lines: Vec<(u64, f64, u64)> = Vec::new();
+        let mut hits: Vec<(u64, super::entries::Poh)> = Vec::new();
         while let Some((end, ents)) = st.sets.remove(&st.poh_next) {
+            if st.poh_next == 0 { st.walk_started = true; }
             for (h, ntx, sigs) in ents {
                 let entry = st.entries;
                 st.entries += 1;
                 st.cum += h;
+                st.txs += ntx;
                 if ntx == 0 {
                     let d = st.cum - st.last_tick;
                     if d > 0 && (*hpt == 0 || d.abs_diff(*hpt) * 10 < *hpt) { *hpt = d; }   // ignore a tick after a gap
                     st.last_tick = st.cum;
+                    st.ticks += 1;
                     continue;
                 }
                 if *hpt == 0 { continue; }
                 let ms = st.cum as f64 / *hpt as f64 * 6.25;
-                for sg in sigs { lines.push((u64::from_be_bytes(sg), ms, entry)); }
+                let p = super::entries::Poh { slot, hashes: st.cum, ticks: st.ticks as u32, hpt: *hpt };
+                for (sg, hit) in sigs {
+                    let k = u64::from_be_bytes(sg);
+                    lines.push((k, ms, entry));
+                    if hit { hits.push((k, p)); }
+                }
             }
             st.poh_next = end;
         }
+        super::poh_index().insert_many(&hits, feed, st.t_last);
+        // the walk reached the slot's last shred: its slots-feed line now
+        if !st.reported && st.last_index.is_some_and(|l| st.poh_next != u32::MAX && st.poh_next == l + 1) { Self::report(st, slot, rec, feed); }
         // one record per data set's lines (they are formatted on the writer; counted as lines)
         if !lines.is_empty() {
             rec.emit(crate::rec::POH, crate::rec::Record::enc_lines(lines.len() as u32, move |o| {
@@ -287,9 +342,34 @@ impl Assembler {
         }
     }
 
+    /// slots-feed.log v2 for one slot: `feed slot ticks entries txs t_first t_last valid data_shreds code_shreds sets_ok
+    /// sets_failed poh_complete` (`valid`: the walk started at the slot's first data set; `poh_complete`: it reached the
+    /// slot's last shred with 64 ticks)
+    fn report(st: &mut SlotState, slot: u64, rec: &crate::rec::Rec, feed: u16) {
+        st.reported = true;
+        if !rec.is_on() { return; }
+        let complete = st.walk_started && st.last_index.is_some_and(|l| st.poh_next != u32::MAX && st.poh_next == l + 1) && st.ticks == 64;
+        let (ticks, entries, txs, t0, t1, valid, d, c, ok, bad) = (st.ticks, st.entries, st.txs, st.first_t, st.t_last, st.walk_started as u8, st.data_n, st.code_n,
+            st.sets_ok, st.sets_failed);
+        rec.emit(crate::rec::SLOTS_FEED, crate::rec::Record::enc(move |o| {
+            let _ = std::io::Write::write_fmt(o, format_args!("{feed} {slot} {ticks} {entries} {txs} {t0} {t1} {valid} {d} {c} {ok} {bad} {}", complete as u8));
+        }));
+    }
+
+    /// drop the slots older than `keep_ns` (from their first shred); a slot whose line was not written yet (its walk
+    /// never reached the last shred) is written now, and every dropped slot is remembered (one line per slot)
     pub fn gc(&mut self, now: u64) {
         let keep = self.keep_ns;
-        self.slots.retain(|_, s| now.saturating_sub(s.first_t) < keep);
+        let (rec, feed, dropped) = (&self.rec, self.feed, &mut self.dropped);
+        self.slots.retain(|slot, s| {
+            let keep_it = now.saturating_sub(s.first_t) < keep;
+            if !keep_it {
+                if !s.reported && s.data_n > 0 { Self::report(s, *slot, rec, feed); }
+                dropped.insert(*slot);
+            }
+            keep_it
+        });
+        while self.dropped.len() > DROPPED_KEEP { self.dropped.pop_first(); }
     }
 }
 
@@ -357,6 +437,82 @@ mod tests {
         asm.push(&data_shred(300_000_001, 0, DATA_COMPLETE, &a), 60, &mut out, &all());
         assert_eq!(out.len(), 2);
         assert_eq!(asm.stats.sets_decoded, 2);
+    }
+
+    /// a data set of entries (num_hashes, transactions)
+    fn set_entries(ents: &[(u64, Vec<Vec<u8>>)]) -> Vec<u8> {
+        let mut buf = (ents.len() as u64).to_le_bytes().to_vec();
+        for (h, txs) in ents {
+            buf.extend(h.to_le_bytes()); buf.extend([0u8; 32]); buf.extend((txs.len() as u64).to_le_bytes());
+            for t in txs { buf.extend(t); }
+        }
+        buf
+    }
+
+    fn code_shred(slot: u64, index: u32) -> Vec<u8> {
+        let mut b = vec![0u8; 120];
+        b[64] = 0x6a;
+        b[65..73].copy_from_slice(&slot.to_le_bytes());
+        b[73..77].copy_from_slice(&index.to_le_bytes());
+        b
+    }
+
+    fn recorder(name: &str) -> (std::path::PathBuf, crate::rec::Rec) {
+        let d = std::env::temp_dir().join(format!("arbx-shred-{name}-{}-{}", std::process::id(), crate::feeds::clock::now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        (d, rec)
+    }
+
+    /// PLAN WP-08 acceptance, per-feed PoH from shreds: a slot delivered whole (its first data set, then the last one,
+    /// ending in LAST_SHRED_IN_SLOT, plus a code shred) is one slots-feed.log v2 line with every column, written when the
+    /// walk reaches the last shred: 64 ticks, 65 entries, 1 transaction, valid, 3 data and 1 code shreds, 2 sets decoded,
+    /// poh complete; the forwarded transaction's position goes to the PoH index with the feed's id; dropping the slot
+    /// later writes nothing more. A slot whose sets never started (its first shreds missing), and one with a failed set,
+    /// are written when dropped, with poh_complete 0
+    #[test]
+    fn slot_coverage_from_shreds() {
+        let (d, rec) = recorder("cov");
+        let mut asm = Assembler::new();
+        asm.rec = rec.clone();
+        asm.feed = 4;
+        let mut out = Vec::new();
+        let tick = || (100u64, Vec::<Vec<u8>>::new());
+        // slot A: set 0 = 32 ticks and an entry with one transaction (50 hashes after the 32nd tick: 203.125 ms); set 1
+        // (shreds 1-2) = 32 ticks, the last shred LAST_IN_SLOT
+        let a = 300_000_010u64;
+        let mut first: Vec<(u64, Vec<Vec<u8>>)> = (0..32).map(|_| tick()).collect();
+        first.push((50, vec![tx(0x51)]));
+        let second: Vec<(u64, Vec<Vec<u8>>)> = (0..32).map(|_| tick()).collect();
+        let s1 = set_entries(&second);
+        let (s1a, s1b) = s1.split_at(s1.len() / 2);
+        asm.push(&data_shred(a, 0, DATA_COMPLETE, &set_entries(&first)), 1_000, &mut out, &all());
+        asm.push(&code_shred(a, 0), 1_100, &mut out, &all());
+        asm.push(&data_shred(a, 1, 0, s1a), 1_200, &mut out, &all());
+        asm.push(&data_shred(a, 2, LAST_IN_SLOT, s1b), 1_300, &mut out, &all());
+        assert_eq!(out.len(), 1, "the transaction");
+        let (p, feed) = crate::feeds::poh_index().get(u64::from_be_bytes([0x51; 8])).expect("indexed");
+        assert_eq!((p.slot, p.hashes, p.ticks, p.hpt, p.ms(), feed), (a, 3_250, 32, 100, Some(203.125), 4));
+        // slot B: only its last set (index 5, LAST_IN_SLOT): never walked; slot C: a set that does not parse
+        let b = 300_000_011u64;
+        asm.push(&data_shred(b, 5, LAST_IN_SLOT, &set_entries(&[(100, vec![])])), 2_000, &mut out, &all());
+        let c = 300_000_012u64;
+        asm.push(&data_shred(c, 0, DATA_COMPLETE, &[0xff; 40]), 3_000, &mut out, &all());
+        assert_eq!((asm.stats.sets_decoded, asm.stats.sets_failed), (2, 1), "B's lone set never starts (its first shred is missing)");
+        asm.gc(25_000_000_000);
+        asm.gc(26_000_000_000);
+        // review WP-08 #15: late shreds of slots already dropped (A, written whole; B, written when dropped) start no
+        // second line when they are dropped in turn
+        asm.push(&data_shred(a, 7, 0, &[0u8; 40]), 27_000_000_000, &mut out, &all());
+        asm.push(&code_shred(b, 9), 27_000_000_000, &mut out, &all());
+        asm.push(&data_shred(b, 6, 0, &[0u8; 40]), 27_000_000_000, &mut out, &all());
+        asm.gc(48_000_000_000);
+        rec.close();
+        let lines = crate::rec::read_text(&d, "slots-feed").unwrap();
+        assert_eq!(lines, vec![format!("4 {a} 64 65 1 1000 1300 1 3 1 2 0 1"), format!("4 {b} 0 0 0 2000 2000 0 1 0 0 0 0"), format!("4 {c} 0 0 0 3000 3000 0 1 0 0 1 0")]);
+        let poh = crate::rec::read_text(&d, "poh").unwrap();
+        assert_eq!(poh, vec![format!("5151515151515151 {a} 203.125 4 32")], "the transaction's entry is the slot's 33rd");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// review F12: poh.log v2 from a raw feed, through the recorder: each transaction's position on the leader's clock

@@ -1,0 +1,992 @@
+{
+ "schema": "arbx.fixture.cmp2-rival-tips/1",
+ "_doc": "Tips that cmp2's arbx recorded with no sender (rivals.jsonl `tips` [account, lamports, null]): the 28-minute side-by-side shadow run of 2026-10-04 13:21-13:50 UTC on Cherry (docs/research/cmp2-shadow-comparison.md), arbx e2b8fa5, whose map was send/mod.rs alone. One entry per tip account: `rows` = rivals.jsonl lines with at least one such tip to it, `tips` = such tip transfers, `lamports` = their sum. Kept: every account with at least 20 rows, and every account data/sender-tip-accounts.json lists (any count). Built by a stream pass over the 603 MB file (WP-08; src/classify/tests.rs reads it).",
+ "rivals_rows_total": 849585,
+ "rows_with_unnamed_tip": 43707,
+ "unnamed_accounts_total": 7422,
+ "rows_with_two_or_more_unnamed_accounts": 4468,
+ "kept_accounts": 196,
+ "kept_rows_sum": 38535,
+ "accounts": {
+  "AgmLJBMDCqWynYnQiPCuj9ewsNNsBJXyzoUhD9LJzN51": {
+   "rows": 4671,
+   "tips": 4671,
+   "lamports": 585273360
+  },
+  "GLaivq5dU8qHayz9Qf13LjPfVy3SmUhbmickfGiZdmfh": {
+   "rows": 874,
+   "tips": 874,
+   "lamports": 13173575646
+  },
+  "GLaivRU6eDKrta3p3psFAWPEFLzCjeMHGpPUuQqTjtyv": {
+   "rows": 714,
+   "tips": 714,
+   "lamports": 13243635465
+  },
+  "GLaiv4GMRYQmthatDS98uQT4HoucgxWT8NeJz6oSwxeU": {
+   "rows": 677,
+   "tips": 677,
+   "lamports": 16090449119
+  },
+  "GLaivinAWh21NaJMhtExtD5G2gZs1xnvaYVZmwqobWZL": {
+   "rows": 659,
+   "tips": 659,
+   "lamports": 12954483020
+  },
+  "GLaivJSUL71FcocYa8tks5vpVyYzvaDMHtyrzfQF2ABr": {
+   "rows": 642,
+   "tips": 642,
+   "lamports": 11970177224
+  },
+  "FASTYKWXRfAoty7SQCM1mGVrmPUyyNcF4tc3DUkLDAu9": {
+   "rows": 635,
+   "tips": 635,
+   "lamports": 12153386972
+  },
+  "GLaivL5uPrDpvd1wTtvat38KGqb5WLhEdqQfnmNd3oNr": {
+   "rows": 631,
+   "tips": 631,
+   "lamports": 11627274133
+  },
+  "Gw8b8f9a7Lae4g2Hoe69m4gdrLNWeD9KoDUKn34EYrbL": {
+   "rows": 619,
+   "tips": 619,
+   "lamports": 1857000000000
+  },
+  "B7XwXUuZn9zkRSV17mcn35J77hv91GJpK5jMH3Y7kk5R": {
+   "rows": 580,
+   "tips": 580,
+   "lamports": 580000000
+  },
+  "FASTKL1AamNKrwnvbKwo4PU8434BBdqVrTtugM6oDU71": {
+   "rows": 564,
+   "tips": 564,
+   "lamports": 10342491481
+  },
+  "FASTYmSidNfLwdwiQEhCTtzghxEtaipeNSDSwh9xDPs3": {
+   "rows": 554,
+   "tips": 554,
+   "lamports": 9653977287
+  },
+  "FASTHPW6akdGh9PFSdhMTbCuGkCSX7LsUjjnaB2RTQ4v": {
+   "rows": 532,
+   "tips": 532,
+   "lamports": 11746808383
+  },
+  "CcTNKBhQKYu7nB4eRrRFQoXEvpd6H5QnGKh93pwniBtp": {
+   "rows": 517,
+   "tips": 517,
+   "lamports": 7120789
+  },
+  "4gQT88rvHr6ay8XvmUUriL5FTjsSuvkvH8ybz3etVLBb": {
+   "rows": 503,
+   "tips": 503,
+   "lamports": 5884100
+  },
+  "FASTPB76TxKPMZ7Q29m8v4zJn8gUjbWyvTEQaaxhwN7M": {
+   "rows": 486,
+   "tips": 486,
+   "lamports": 11097327158
+  },
+  "FAST3dMFZvESiEipBvLSiXq3QCV51o3xuoHScqRU6cB6": {
+   "rows": 476,
+   "tips": 476,
+   "lamports": 11292206781
+  },
+  "FASTCKnwwY6iL3CknRgg3Zqir7jeagDDhxSnBQQy5a1C": {
+   "rows": 462,
+   "tips": 462,
+   "lamports": 9738385391
+  },
+  "B4RRE8DrRRLAH3d6CAqmSixLdcurwnic1h83rEYmSY4s": {
+   "rows": 451,
+   "tips": 451,
+   "lamports": 2315846438
+  },
+  "FASTs6ctgbsuZegMzUs4DPUYhRSZUPCjgCVnttHbpQAp": {
+   "rows": 449,
+   "tips": 449,
+   "lamports": 10266462579
+  },
+  "6HRgJMRmjaj2svP9GpRbUU5TPzLAHnBW3sHgYVbirWYE": {
+   "rows": 447,
+   "tips": 447,
+   "lamports": 4412979
+  },
+  "HeZVpHj9jLwTVtMMbzQRf6mLtFPkWNSg11o68qrbUBa3": {
+   "rows": 401,
+   "tips": 401,
+   "lamports": 2679358843
+  },
+  "pfnaxrmMoemfvbhXek6offTNXas11GtepGQMN9UF3gk": {
+   "rows": 398,
+   "tips": 398,
+   "lamports": 3980000
+  },
+  "pfnSbG36fCGpT8WsB1NEbQ2BH11iog6qjFqMEVCZZgV": {
+   "rows": 386,
+   "tips": 386,
+   "lamports": 3860000
+  },
+  "6TxjC5wJzuuZgTtnTMipwwULEbMPx5JPW3QwWkdTGnrn": {
+   "rows": 385,
+   "tips": 385,
+   "lamports": 2301262000
+  },
+  "ByRRgnZenY6W2sddo1VJzX9o4sMU4gPDUkcmgrpGBxRy": {
+   "rows": 384,
+   "tips": 384,
+   "lamports": 3039797461
+  },
+  "pfn9b35be4L7xh7G8P2jUzWsJAigrKDSoBeRMiyg75p": {
+   "rows": 381,
+   "tips": 381,
+   "lamports": 3810000
+  },
+  "pfn6dyanKiTTinHs887D7qe2S4727wzK7xi7ERGaizC": {
+   "rows": 379,
+   "tips": 379,
+   "lamports": 3790000
+  },
+  "DymeoWc5WLNiQBaoLuxrxDnDRvLgGZ1QGsEoCAM7Jsrx": {
+   "rows": 377,
+   "tips": 377,
+   "lamports": 2315469849
+  },
+  "pfnaZXdkjJq26auzzFKeQm7YKphuNCdDGcJVqqb6awr": {
+   "rows": 375,
+   "tips": 375,
+   "lamports": 3750000
+  },
+  "pfnUxCuZcfP6yidkG3EsqyR5DTbyie3R74fGoA5oB3J": {
+   "rows": 372,
+   "tips": 372,
+   "lamports": 3720000
+  },
+  "3t9EKmRiAUcQUYzTZpNojzeGP1KBAVEEbDNmy6wECQpK": {
+   "rows": 367,
+   "tips": 367,
+   "lamports": 2946258427
+  },
+  "DXfkEGoo6WFsdL7x6gLZ7r6Hw2S6HrtrAQVPWYx2A1s9": {
+   "rows": 365,
+   "tips": 365,
+   "lamports": 2114634795
+  },
+  "pfnP85qobXv2wETniKjXBhxKvgivpfT8EGAcS8sb3bq": {
+   "rows": 364,
+   "tips": 364,
+   "lamports": 3640000
+  },
+  "pfngGVVQLiVRFbLWw3Ektiv17ef9NiRZbcgdAhh4ZEW": {
+   "rows": 364,
+   "tips": 364,
+   "lamports": 3640000
+  },
+  "pfnTcJ1i4mRYzbqGduF71RsooUCFkPSpk8UE7drCkjh": {
+   "rows": 360,
+   "tips": 360,
+   "lamports": 3600000
+  },
+  "7sHXjs1j7sDJGVSMSPjD1b4v3FD6uRSvRWfhRdfv5BiA": {
+   "rows": 358,
+   "tips": 358,
+   "lamports": 1900576672
+  },
+  "pfnEJvqLGddJxQTA9DcYLTbVwiFdT3KmLXo6UcnmcgC": {
+   "rows": 355,
+   "tips": 355,
+   "lamports": 3550000
+  },
+  "dBhdrmwBkRa66XxBuAK4WZeZnsZ6bHeHCCLXa3a8bTJ": {
+   "rows": 354,
+   "tips": 354,
+   "lamports": 2217269687
+  },
+  "pfnntQ8jDjE6aP9uPVYBsTEnzwFZuQqBx9XZ7wpzXNC": {
+   "rows": 350,
+   "tips": 350,
+   "lamports": 3500000
+  },
+  "pfnXi2FdpFUUn6VyoxUohNyWk2Nup3ruguTgK8jaZaF": {
+   "rows": 349,
+   "tips": 349,
+   "lamports": 3490000
+  },
+  "pfnSbziLrSSVNqPBD9tpx3Ud4VtbxwsXjdfYv9SmBDx": {
+   "rows": 336,
+   "tips": 336,
+   "lamports": 3360000
+  },
+  "pfnKWwarhjuKKg3WV3nw3wAE8zuymigT3vuJHwZeL4s": {
+   "rows": 330,
+   "tips": 330,
+   "lamports": 3300000
+  },
+  "pfnSAoQWtJCDKnjmR8oduqbZYXr69Q4cFQ6VhgFkvgT": {
+   "rows": 327,
+   "tips": 327,
+   "lamports": 3270000
+  },
+  "pfn2d1g6xkwhykkyjtoccFbC7r19ADf5dGB2YnT1Hgw": {
+   "rows": 318,
+   "tips": 318,
+   "lamports": 3180000
+  },
+  "2qDoKXbts4ePAv5NVhHZLuG7eFqB1ik58Nsb9aDArecj": {
+   "rows": 306,
+   "tips": 306,
+   "lamports": 757437432
+  },
+  "HR6xhpJYYiTvmAtUZvpLMN7qbr6TxCw1Sgq3fab8vCoa": {
+   "rows": 305,
+   "tips": 305,
+   "lamports": 2553569614
+  },
+  "3y5u6tGmYwoFpLgfRYcjxRLj6g4FYHfoG3Z3g4ChGas5": {
+   "rows": 295,
+   "tips": 295,
+   "lamports": 1147984918
+  },
+  "HrMfuQdaM2mu3Krx7ZZ7TrTQyVaKra7sFgb7Cds3bif2": {
+   "rows": 293,
+   "tips": 293,
+   "lamports": 897489921
+  },
+  "7HkiWXe5deJvzn4D6kgMUFCADwX9Z4DMrdjNSSxN6bPp": {
+   "rows": 290,
+   "tips": 290,
+   "lamports": 317319999
+  },
+  "8GV86MhDQST6rh56oTMU9v5TdHwRtXnFQ3zdGD3WT3mG": {
+   "rows": 285,
+   "tips": 285,
+   "lamports": 903322064
+  },
+  "DU3oUMrzewfvuUN8HNA3rXTvbscCA3krY365mzfFixrT": {
+   "rows": 282,
+   "tips": 282,
+   "lamports": 920935587
+  },
+  "7nFkbKooThkybP6NJLDEhayK54JHA9ziSSgcv3FG33ND": {
+   "rows": 273,
+   "tips": 273,
+   "lamports": 699442061
+  },
+  "3rXRVo9hPjtWNJEhsN6WDmxD8ubBjTjHXugRVYyH5gC3": {
+   "rows": 272,
+   "tips": 272,
+   "lamports": 893797205
+  },
+  "CH5jhgNAb15UypNJxCUYU3RYK2FBkeojE5SCsrvTgAdD": {
+   "rows": 272,
+   "tips": 272,
+   "lamports": 578597179
+  },
+  "YYVEwYxUif4zSGdnBxLdHU1ej4kQTgxKrkD5VXDU8RC": {
+   "rows": 268,
+   "tips": 268,
+   "lamports": 910109252
+  },
+  "J4PeVZhx2496eXjAMpbm7nrCxRBgAUfRDwhZ1YSdzTSE": {
+   "rows": 266,
+   "tips": 266,
+   "lamports": 681255080
+  },
+  "46qnt5Lg1uPk6qkgMuuMisxACzwHVv4P2Nuv3wELCqk3": {
+   "rows": 259,
+   "tips": 259,
+   "lamports": 864041117
+  },
+  "D1Mc6j9xQWgR1o1Z7yU5nVVXFQiAYx7FG9AW1aVfwrUM": {
+   "rows": 258,
+   "tips": 258,
+   "lamports": 5580841589
+  },
+  "5qLPs1V6j9MDFHk9G1ygimtLJCjUWmkbMBEiPX7toBvB": {
+   "rows": 257,
+   "tips": 257,
+   "lamports": 823270333
+  },
+  "8d5jPhXwjEa9cPkQG2aFHw5cwE6KjytnPFJbmH1RgN1M": {
+   "rows": 254,
+   "tips": 254,
+   "lamports": 920811268
+  },
+  "7KKNPiFyi3b3VSM81sNEwHPxUGVZJHCTucqoh7rAABw4": {
+   "rows": 252,
+   "tips": 252,
+   "lamports": 743038749
+  },
+  "jqvQkwWbqZY5C4gp5avEDnB7Mr3bfUuKqowe4UbBZwN": {
+   "rows": 252,
+   "tips": 252,
+   "lamports": 552204198
+  },
+  "6TYd5ytzKVDUP4jsuXyUA6BA8SmN57mzwJjw5XvnXqmG": {
+   "rows": 251,
+   "tips": 251,
+   "lamports": 756029833
+  },
+  "H9bSW2VTrRU7LuT5Zo5XEx3uuGhLDTeAJdEUxQX39314": {
+   "rows": 251,
+   "tips": 251,
+   "lamports": 674730230
+  },
+  "GaRXSetYz7MMnFitHA3D1HGEMih6dnyXhtd3q4jWX6oS": {
+   "rows": 240,
+   "tips": 240,
+   "lamports": 240000000
+  },
+  "8ovyrAo1f3jBmq5F1njewpcgfUB12GpSiB2heWRUFS9T": {
+   "rows": 231,
+   "tips": 231,
+   "lamports": 343546484
+  },
+  "DAbjWBKNUs3MCNYNS7tsyyosBzZtjHLpGWA9GbTjX9cq": {
+   "rows": 229,
+   "tips": 229,
+   "lamports": 291061253
+  },
+  "qGs8S6yAyu7meRUF17Ns1wUqsJfML7Q7cp2DsVNxKT8": {
+   "rows": 229,
+   "tips": 229,
+   "lamports": 229000000
+  },
+  "3XCBmEGtot44VFAoBXWoDoBDii7tCaVdQXA5pVV26qfo": {
+   "rows": 228,
+   "tips": 228,
+   "lamports": 228000000
+  },
+  "GjerS5RUhFq3aYDidgquYbjJCEjaFJZni7bXz9Z4ikWe": {
+   "rows": 208,
+   "tips": 208,
+   "lamports": 208000000
+  },
+  "HufQZ6bSi61a77wqNEjjNY6zd4WcfJvrij7GkVA5JrF4": {
+   "rows": 207,
+   "tips": 207,
+   "lamports": 1167912441
+  },
+  "ABiHHY1TbsyqDve5o3kGoAEoHTnM3HJS9oY3L7izXcoX": {
+   "rows": 197,
+   "tips": 197,
+   "lamports": 1057342707
+  },
+  "6GZVKMaoWry4UFiydjeQU9nmAxj3hEARAStQ7Hc2z6TB": {
+   "rows": 195,
+   "tips": 195,
+   "lamports": 264283558
+  },
+  "MMs5RN4P6zjU4V1iHXAisCK8bBi7gTzoqwCicRjvVok": {
+   "rows": 191,
+   "tips": 191,
+   "lamports": 1040150658
+  },
+  "7yfyz26SSErhKA4DWL6V71kTPFfEbw8pFtwTp6Qemq7W": {
+   "rows": 187,
+   "tips": 187,
+   "lamports": 958124757
+  },
+  "B5Pb89aZVvLJRjrtjHpXgfre9ecnCvaQdHVtz66vdXi3": {
+   "rows": 164,
+   "tips": 164,
+   "lamports": 3402314797
+  },
+  "SpagSJmnh8E9cGT5Y431xPPaS2c1xLREGGCWN9yDeUf": {
+   "rows": 156,
+   "tips": 156,
+   "lamports": 1043613185
+  },
+  "Sp1x2AqpQckPLaWnWCJUNg8k6qQexfaEWcSRKf5JcDV": {
+   "rows": 148,
+   "tips": 148,
+   "lamports": 349989978
+  },
+  "Sp1xMS2cbw83SZDNr4AGqkBYYLjb3LvVnmDSrTMaHkr": {
+   "rows": 146,
+   "tips": 146,
+   "lamports": 1255535103
+  },
+  "SpWrza9E63MQuHeGnnfzmtLVCs3pBdjyKPXUABPo9nq": {
+   "rows": 146,
+   "tips": 146,
+   "lamports": 447401366
+  },
+  "Sp4JHSh9cksfzXbgK7Pq2ovtn8LirLQydaJKTsiNT77": {
+   "rows": 144,
+   "tips": 144,
+   "lamports": 423432014
+  },
+  "4dyRtsAdkiHsiXFku5peCgCpTyUBGrjgeXWb79MTdZYN": {
+   "rows": 109,
+   "tips": 109,
+   "lamports": 47787562
+  },
+  "ENY9JreWWWtq8jSKfLtXpzjBteknLPdahPCwG7ZCVbJe": {
+   "rows": 104,
+   "tips": 104,
+   "lamports": 0
+  },
+  "uXYxbbhcD9kHU1KzZM6ZNzPvieEvRcJCPHpqcnpwdcR": {
+   "rows": 103,
+   "tips": 103,
+   "lamports": 39844980
+  },
+  "soyas4s6L8KWZ8rsSk1mF3d1mQScoTGGAgjk98bF8nP": {
+   "rows": 101,
+   "tips": 101,
+   "lamports": 869337779
+  },
+  "CyfyiDSi7cK4cbjWJUJXvuNPtAG1vP5mUq9U1zar9rn2": {
+   "rows": 100,
+   "tips": 100,
+   "lamports": 20000000
+  },
+  "soyascXFW5wEEYiwfEmHy2pNwomqzvggJosGVD6TJdY": {
+   "rows": 98,
+   "tips": 98,
+   "lamports": 272332213
+  },
+  "9UD9Fwr5qXASA4ZgfE5dYxAEh5DDqpwhNri4YPQ3z4z1": {
+   "rows": 96,
+   "tips": 96,
+   "lamports": 19200000
+  },
+  "8HuZXJbnRMErTzhtjnuTVhBuUaZs5KDj2tVWhyzvov2g": {
+   "rows": 95,
+   "tips": 95,
+   "lamports": 19000000
+  },
+  "HQMPUYfpngKv7k3DvD4MEjNmHvf287DzaXi3SgZNBTEU": {
+   "rows": 93,
+   "tips": 93,
+   "lamports": 42299370
+  },
+  "6YDhJEhBjvTh631m29KgebFFnJPnfmRqeq4489oJ4fGd": {
+   "rows": 92,
+   "tips": 92,
+   "lamports": 489639566
+  },
+  "6YZATebZosXkNFdfGuvHydf5EHiWyG1f1rAgWED2dwA7": {
+   "rows": 92,
+   "tips": 92,
+   "lamports": 45284113
+  },
+  "CLymnRe1cyL3jmFgMYkF9RribNoWFVNcDgSbNs91CTwT": {
+   "rows": 92,
+   "tips": 92,
+   "lamports": 18400000
+  },
+  "Df2ogwsoM48zajA212FVLpEzLFhGhf39sHyoYxQhWQk3": {
+   "rows": 92,
+   "tips": 92,
+   "lamports": 18400000
+  },
+  "2HdFyMov2oppwDTzfAjcZATv3JYZ4GiyTsGc2MJ8YtRn": {
+   "rows": 91,
+   "tips": 91,
+   "lamports": 18200000
+  },
+  "3aqwpYHvkba91vBskPLHGGHJ1VP8Yos92CYsuStuaqJq": {
+   "rows": 91,
+   "tips": 91,
+   "lamports": 18200000
+  },
+  "gasTzr94Pmp4Gf8vknQnqxeYxdgwFjbgdJa4msYRpnB": {
+   "rows": 90,
+   "tips": 90,
+   "lamports": 133959600
+  },
+  "AP5aYKc8PtvHVNAB7EmmRH2MmHqbnkVa4RRHEtRjcrAP": {
+   "rows": 89,
+   "tips": 89,
+   "lamports": 6043357346
+  },
+  "EeCSgSgNE1dTX5vbyJN5Mgz3eVUW9ZJfLP8QGYzKWDrH": {
+   "rows": 89,
+   "tips": 89,
+   "lamports": 41783894
+  },
+  "9r2W7ZEkcYtfh7gySTXmnhZ9apbrdquX6RMZuPvbvTgU": {
+   "rows": 88,
+   "tips": 88,
+   "lamports": 17600000
+  },
+  "AubYiwEdACZC7Qp8t9qNL97m8xzjqbbxTrWn4kDhoEiM": {
+   "rows": 86,
+   "tips": 86,
+   "lamports": 17200000
+  },
+  "BvH5CteddzPsNquinN4NKTHqcUtAnxDjVtFeGrx9E8jQ": {
+   "rows": 86,
+   "tips": 86,
+   "lamports": 53093411
+  },
+  "6cNyXokrgXwqnUtRAafGAFYqD8oRnKMk4Gut3pLdbnDe": {
+   "rows": 85,
+   "tips": 85,
+   "lamports": 17000000
+  },
+  "Euznbr2WLEqm3j5V7ZHtuRGkARD32wBpDe4ofUns5DAQ": {
+   "rows": 85,
+   "tips": 85,
+   "lamports": 41998059
+  },
+  "4QkrBeRLQy75AiYcaiTsVKJpZw9tzfCJbvmHHNAaDbDe": {
+   "rows": 82,
+   "tips": 82,
+   "lamports": 28496123
+  },
+  "soyasDBdKjADwPz3xk82U3TNPRDKEWJj7wWLajNHZ1L": {
+   "rows": 80,
+   "tips": 80,
+   "lamports": 364569520
+  },
+  "soyasE2abjBAynmHbGWgEwk4ctBy7JMTUCNrMbjcnyH": {
+   "rows": 76,
+   "tips": 76,
+   "lamports": 1119982533
+  },
+  "AaVkWvcZ8ENa9jC4NXKEEU4nYFKMyoQJ6WUkHdEB8zGR": {
+   "rows": 73,
+   "tips": 73,
+   "lamports": 135456537
+  },
+  "gmgnC6MFUDAUPzqPeHB7JC6oB49Kv3tHHbQQiMzPuSY": {
+   "rows": 67,
+   "tips": 67,
+   "lamports": 73686881
+  },
+  "gmgnKdu5P2ZbU5MooAQsgh38zExN6o3hWMTtiUMyec8": {
+   "rows": 63,
+   "tips": 63,
+   "lamports": 66432292
+  },
+  "gmgn9Mu1YGUmBihL8ujWAq1HunqoFHh9f2zSnbJ4DBp": {
+   "rows": 61,
+   "tips": 61,
+   "lamports": 79796079
+  },
+  "gmgnUA4v4i7GcVm3FqFV6us9stcfgDQKYDLARsz8wU1": {
+   "rows": 61,
+   "tips": 61,
+   "lamports": 60313257
+  },
+  "gmgniQix2Fa9HX5giNoKPmNtxL4o2NTCavq5gZKjqN6": {
+   "rows": 61,
+   "tips": 61,
+   "lamports": 59822948
+  },
+  "5JVyW4kxLAFvPwp8rxc2BiGpJztbkDyFbZBTKEnKCvee": {
+   "rows": 58,
+   "tips": 58,
+   "lamports": 605989784
+  },
+  "BZcvtxDy4WihU24k3pezzajuiqYtTUHPfH7b5m26BucR": {
+   "rows": 58,
+   "tips": 58,
+   "lamports": 605989784
+  },
+  "FSjVufNSHPxeSo2XCVUGYv7kfGeeBQ8g1YFWpkPuJdq6": {
+   "rows": 58,
+   "tips": 58,
+   "lamports": 757487237
+  },
+  "gmgnpkxVcSYnREsFamJygtcqo5QLbZCYNSJJVP7e2XW": {
+   "rows": 57,
+   "tips": 57,
+   "lamports": 46826753
+  },
+  "gmgn6MwAHaswqrRshYkpt1YXq8Y81XF6oZQgwt7X2aR": {
+   "rows": 56,
+   "tips": 56,
+   "lamports": 58574805
+  },
+  "gmgnoTSayiTuRfcC3giZ9J4NbyrvyWEUToE5nbL5S1S": {
+   "rows": 56,
+   "tips": 56,
+   "lamports": 63688990
+  },
+  "gmgnuPqrfXG2HJTFXLWF2mcp214ZyjsofL1uBNhpoGK": {
+   "rows": 56,
+   "tips": 56,
+   "lamports": 66744134
+  },
+  "4gy9ANoFk1TPVFHHQavfPgNgg92GoeDnaJRJuyXqsaaW": {
+   "rows": 54,
+   "tips": 54,
+   "lamports": 6290000000
+  },
+  "gmgnfGwFvnqZm4MtaunuVjErQNHdAC7H4wZYjBQkvKW": {
+   "rows": 53,
+   "tips": 53,
+   "lamports": 62763239
+  },
+  "7HeD6sLLqAnKVRuSfc1Ko3BSPMNKWgGTiWLKXJF31vKM": {
+   "rows": 49,
+   "tips": 49,
+   "lamports": 162599830
+  },
+  "soyasi59njacMUPvo3TM5paHjeK8pYSdovXgFi32gRt": {
+   "rows": 48,
+   "tips": 48,
+   "lamports": 414218706
+  },
+  "DtvmxrTACskMG2W8a6KXgSemUfvyNVeQTgfpJoGvMVKx": {
+   "rows": 44,
+   "tips": 44,
+   "lamports": 111869783
+  },
+  "EpPKVKDxEeccFVcoNHWhXHXvsrbPBh1Zq2LnYSJ7QJVf": {
+   "rows": 42,
+   "tips": 42,
+   "lamports": 1681706984
+  },
+  "CeGo4wh5yi7BWcbLvV77esRkk1f9vdKbFEHycKFb78aE": {
+   "rows": 40,
+   "tips": 40,
+   "lamports": 487086341
+  },
+  "n6Tc3GoTheA1pYF4MPV57KGmn3DHJCCuk3wHZmcUypp": {
+   "rows": 40,
+   "tips": 40,
+   "lamports": 1183876325
+  },
+  "95cfoy472fcQHaw4tPGBTKpn6ZQnfEPfBgDQx6gcRmRg": {
+   "rows": 39,
+   "tips": 39,
+   "lamports": 217050655
+  },
+  "AQ3MK4mf4i4r3G9rkbAvfoxGP6eZ7yscuiy5Syyuq27U": {
+   "rows": 39,
+   "tips": 39,
+   "lamports": 39000000
+  },
+  "5LyMEsxokaFYQWjcVSpR4rDN7WEoYULfiQ1W2Q9UiP7T": {
+   "rows": 38,
+   "tips": 38,
+   "lamports": 51994922
+  },
+  "5HayciSkCydEP1FVhCtEu7Ud8UJMoQToUQfiUxG4ArFa": {
+   "rows": 37,
+   "tips": 37,
+   "lamports": 23589248134
+  },
+  "BGP8a4yW8THuUZaq2TxVPU6KjHXi7G4McRyz333uuqNr": {
+   "rows": 34,
+   "tips": 34,
+   "lamports": 29189268
+  },
+  "HWEoBxYs7ssKuudEjzjmpfJVX7Dvi7wescFsVx2L5yoY": {
+   "rows": 33,
+   "tips": 33,
+   "lamports": 180210160
+  },
+  "6fymzSKrFCM2AVKVwKWreqaaE7pSzP68LENgTsN2djHo": {
+   "rows": 32,
+   "tips": 32,
+   "lamports": 2570000000
+  },
+  "HXk447f9G41nqfneZmiXGmcr1HLffLQJ1AoVdEEuBQG9": {
+   "rows": 31,
+   "tips": 31,
+   "lamports": 178095893
+  },
+  "AStZiY6EE532nQBBogmvcWemc2bwg2kHuR4Jrd5Cqaq5": {
+   "rows": 29,
+   "tips": 29,
+   "lamports": 167570801
+  },
+  "DZfEurFKFtSbdWZsKSDTqpqsQgvXxmESpvRtXkAdgLwM": {
+   "rows": 29,
+   "tips": 29,
+   "lamports": 1434
+  },
+  "AStzprSDj14m1pdMuuomjLQwUL5X4d4yEKwiFfzfUSeC": {
+   "rows": 28,
+   "tips": 28,
+   "lamports": 519386196
+  },
+  "nEFs3jph8HJt7honu3k7XtGUufMnwAvSXmXcKSPxryP": {
+   "rows": 28,
+   "tips": 28,
+   "lamports": 209793982
+  },
+  "846ah7iBSu9ApuCyEhA5xpnjHHX7d4QJKetWLbwzmJZ8": {
+   "rows": 27,
+   "tips": 27,
+   "lamports": 500
+  },
+  "8vFGAKdwpn4hk7kc1cBgfWZzpyW3MEMDATDzVZhddeQb": {
+   "rows": 27,
+   "tips": 27,
+   "lamports": 1321
+  },
+  "H2cDR3EkJjtTKDQKk8SJS48du9mhsdzQhy8xJx5UMqQK": {
+   "rows": 26,
+   "tips": 26,
+   "lamports": 921
+  },
+  "HqaWtD76gizjDM6q3fUpXmHrvRaoasTZKXybfm6FrS7d": {
+   "rows": 26,
+   "tips": 26,
+   "lamports": 48245028
+  },
+  "37E8HUxwSJYgRFwmnTBMd34FXfVKSM48BVAKiwkGJ2nL": {
+   "rows": 25,
+   "tips": 25,
+   "lamports": 758235325
+  },
+  "76sxKrPtgoJHDJvxwFHqb3cAXWfRHFLe3VpKcLCAHSEf": {
+   "rows": 25,
+   "tips": 25,
+   "lamports": 300
+  },
+  "8ZCzZnSxhbZp2oBGYYUeXMwqHCsAweXdgvyqNrAzGHWV": {
+   "rows": 25,
+   "tips": 25,
+   "lamports": 402859655
+  },
+  "Bgac65AWXEX1dcMfgaYjdbpPHbYktL8ApptKzCQ2gf5R": {
+   "rows": 25,
+   "tips": 25,
+   "lamports": 46389225
+  },
+  "CZ1Sq3FiNtv7B96R7d7G9CdSrSREqB9munegcEJjLrDv": {
+   "rows": 25,
+   "tips": 25,
+   "lamports": 27960695
+  },
+  "DFeuabFi5Emuxgptq6ZJpsQXbTrBcTAMYxkuSGi8HkXq": {
+   "rows": 25,
+   "tips": 25,
+   "lamports": 29358731
+  },
+  "DKyUs1xXMDy8Z11zNsLnUg3dy9HZf6hYZidB6WodcaGy": {
+   "rows": 25,
+   "tips": 25,
+   "lamports": 1267
+  },
+  "mwGELGMgGGrNL1UibNCQeJHDE7qdPptWRYB6noUHmTj": {
+   "rows": 25,
+   "tips": 25,
+   "lamports": 341425553
+  },
+  "4B1aEzDk3JkiskTXLJdbGLVqKNdS7V2EkGLwLLerV8nr": {
+   "rows": 24,
+   "tips": 24,
+   "lamports": 68533656
+  },
+  "4kuG6NsAFJNwqEkac8GFDMMheCGKUPEbaRVHHyFHSwWz": {
+   "rows": 24,
+   "tips": 24,
+   "lamports": 600
+  },
+  "2gsTDw5ynEbHSnFNEe1eXAXZLeD4T7SjuJT3dbvFPTBN": {
+   "rows": 23,
+   "tips": 23,
+   "lamports": 3176000000
+  },
+  "2u8VJ3HovYu3wNekHkohB5gV7Susm5KNb8ALqsb1Xupn": {
+   "rows": 23,
+   "tips": 23,
+   "lamports": 42678087
+  },
+  "5L2QKqDn5ukJSWGyqR4RPvFvwnBabKWqAqMzH4heaQNB": {
+   "rows": 23,
+   "tips": 23,
+   "lamports": 800
+  },
+  "9Jp1DKycHChzdpnbtN5iLXUCzrU2M7eRKpJe8ne5RhDZ": {
+   "rows": 23,
+   "tips": 23,
+   "lamports": 1082624
+  },
+  "9UQGgArDNrtGkxQCyU2QX38U9vGVti4ARcnCRQuAtNwa": {
+   "rows": 23,
+   "tips": 23,
+   "lamports": 28583544396
+  },
+  "Bx3jzzEeCTKxC7iGJDZFdbLHe62hckeu26th4qARvkEr": {
+   "rows": 23,
+   "tips": 23,
+   "lamports": 2045030
+  },
+  "DRfiT2Poi8LR8FmTppW8N2zB5aKVYoMe5AUgV7oXAMVi": {
+   "rows": 23,
+   "tips": 23,
+   "lamports": 42678087
+  },
+  "GsUF1hwqUYCgqSkiegf6qKS9w7jwaYEJoi6QWL3d4exb": {
+   "rows": 23,
+   "tips": 23,
+   "lamports": 4640536
+  },
+  "nzUMeyyucuHSCZLw1aaX14d1si2mffT4PjVNdZcybot": {
+   "rows": 23,
+   "tips": 23,
+   "lamports": 349214158
+  },
+  "3Nxtebri7djH4bfnKzis59EJ4WRxXjhqn36BiQ64f27U": {
+   "rows": 22,
+   "tips": 22,
+   "lamports": 11920675053
+  },
+  "4HQZ8ACkBBzm9KvC4mE3MywDDRhe8pfKjwV6FvX5Vnu6": {
+   "rows": 22,
+   "tips": 22,
+   "lamports": 2036052
+  },
+  "4zKBG1jtW4t29kzY5PK1nFWPJSJEoJfUWDF9ziobZfj1": {
+   "rows": 22,
+   "tips": 22,
+   "lamports": 105878540
+  },
+  "7oi1L8U9MRu5zDz5syFahsiLUric47LzvJBQX6r827ws": {
+   "rows": 22,
+   "tips": 22,
+   "lamports": 500
+  },
+  "9adH36rwcZdoGYDAgf7o98VQTvsTf6T1BXiwZ53koQCB": {
+   "rows": 22,
+   "tips": 22,
+   "lamports": 4950000000
+  },
+  "9kPrgLggBJ69tx1czYAbp7fezuUmL337BsqQTKETUEhP": {
+   "rows": 22,
+   "tips": 22,
+   "lamports": 1542
+  },
+  "CeSFoWfWLPXeKXx2gJS9EKHwL61ZvB9NRVU7nquDrPf3": {
+   "rows": 22,
+   "tips": 22,
+   "lamports": 3004373
+  },
+  "Hbj6XdxX6eV4nfbYTseysibp4zZJtVRRPn2J3BhGRuK9": {
+   "rows": 22,
+   "tips": 22,
+   "lamports": 821
+  },
+  "2howWBYeUs7q19opwzZbdXKd91J3ZcrBogMRwD682515": {
+   "rows": 21,
+   "tips": 21,
+   "lamports": 210000000
+  },
+  "86Vh4XGLW2b6nvWbRyDs4ScgMXbuvRCHT7WbUT3RFxKG": {
+   "rows": 21,
+   "tips": 21,
+   "lamports": 400
+  },
+  "ADTW8Pi4af2auBpLHor8XkMydWZBVVmHpioo84ThQ5tU": {
+   "rows": 21,
+   "tips": 21,
+   "lamports": 1451094
+  },
+  "AJz5BvWmTKDyX6uYv61xzTQ1VczmtGPSPYyCzVRkm9aK": {
+   "rows": 21,
+   "tips": 21,
+   "lamports": 2850000000
+  },
+  "AgQHNEvkT3fNg8QR6Ff4qhoCMEHdUbzHqCDqk8RVBDSm": {
+   "rows": 21,
+   "tips": 21,
+   "lamports": 75966949
+  },
+  "34DaQbLjqFwwFHNMKUUruceei25smzRCAuxV3ZD32n3v": {
+   "rows": 20,
+   "tips": 20,
+   "lamports": 79111380
+  },
+  "4z5swiK4NQrYzeopyhc57uJ21Y8ZuBfZQHQK2zf1L4GZ": {
+   "rows": 20,
+   "tips": 20,
+   "lamports": 116000000
+  },
+  "8UnNNRtqUs9NzC6r1Uvo2NZ4zmugQytNvBty7A4Lothh": {
+   "rows": 20,
+   "tips": 20,
+   "lamports": 75111380
+  },
+  "AVUCZyuT35YSuj4RH7fwiyPu82Djn2Hfg7y2ND2XcnZH": {
+   "rows": 20,
+   "tips": 20,
+   "lamports": 276960000
+  },
+  "FmCoksbD6WDRjmaNn924PmSMJEAerVQnDwmJDaG4K3wo": {
+   "rows": 20,
+   "tips": 20,
+   "lamports": 247050135
+  },
+  "H2x8DxzKcsUAHKAj2cqT8wCQLpARprvaQQNdvXa9mpZP": {
+   "rows": 20,
+   "tips": 20,
+   "lamports": 8000000000
+  },
+  "soyas5doVFUwH8s5zK8gEvCL5KR5ogDmf52LsrJEZ9h": {
+   "rows": 12,
+   "tips": 12,
+   "lamports": 474834959
+  },
+  "soyasvxAunisNxaoRxkKGjNir7KmbwYnr37JmefkX9G": {
+   "rows": 12,
+   "tips": 12,
+   "lamports": 174364519
+  },
+  "soyastP66xyYC8XADXZjdMM5BAVGD2YRvz8dwtLsqb8": {
+   "rows": 11,
+   "tips": 11,
+   "lamports": 13666124
+  },
+  "soyasQYhJxv8uZgWDxhg72td6piAf7XTkoyWHtSATEz": {
+   "rows": 10,
+   "tips": 10,
+   "lamports": 185857369
+  },
+  "soyasvdgUJWYcUCzDxpmjUnNjH7KamXLXTzLwFvdVPE": {
+   "rows": 10,
+   "tips": 10,
+   "lamports": 22715369
+  },
+  "kREnjPWFpt4AHeY5pijPmyXaCrMnbatUQJo7d3Xbeam": {
+   "rows": 4,
+   "tips": 4,
+   "lamports": 153500088
+  },
+  "15qWd4huAkoxvhDsHMfpUn27TW1YBYMMJJ2jkAkbeam": {
+   "rows": 3,
+   "tips": 3,
+   "lamports": 568694
+  },
+  "kiQioJNyFG7pU36ELLsRKXkeT48kFbk3b6rSgrWbeam": {
+   "rows": 3,
+   "tips": 3,
+   "lamports": 1996966
+  },
+  "sV72TY66T1RfmDSeHPPbwX6wwJ3bBv5hd4ehJ8tbeam": {
+   "rows": 2,
+   "tips": 2,
+   "lamports": 327919
+  },
+  "9XuGciSwr5wb7dLTQm91JhuBTvj3GG8WjuRDc3obeam": {
+   "rows": 1,
+   "tips": 1,
+   "lamports": 478365
+  },
+  "CGzT5jzT68vGUWVagQAQqESfrCEHSKYe9DAjfgfC1ami": {
+   "rows": 1,
+   "tips": 1,
+   "lamports": 557217
+  },
+  "E1BkG293HQocKfCkfPS7tEvs8Enh6FK8pUKi17EH1ami": {
+   "rows": 1,
+   "tips": 1,
+   "lamports": 164815
+  },
+  "uiuaQsxA47JybQAVN4FTfYuoEDkMiXV1r591Aewbeam": {
+   "rows": 1,
+   "tips": 1,
+   "lamports": 195512
+  }
+ }
+}

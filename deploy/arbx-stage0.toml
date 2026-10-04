@@ -95,6 +95,12 @@ max_accounts = 1    # the provider's limit (an include list longer than this ref
 validator_lists = ["https://kobe.mainnet.jito.network/api/v1/validators"]   # Cherry's address may be refused (403): then the fallback
 static_fallback = "/root/arbx/data/validators-meta.json"
 refresh_min = 60
+# WP-08: host -> leader TPU-QUIC RTT (a QUIC handshake, no data) to the endpoints the leaders of the next 64 slots
+# announce, once per endpoint (BAM / Harmonic ingress nodes serve many validators), at most 2 a second; a validator whose
+# endpoint refuses takes the median of its endpoint region's (region_bucket). Places (city, metro region) from the table
+rtt_probe = true
+rtt_per_sec = 2
+geo_table = "/root/arbx/data/ip-geo.csv"
 
 [strategy]
 confirm_trigger_ms = 60   # unused while decoded_sends = false (no decoded opportunity waits); removed in WP-04
@@ -451,6 +457,9 @@ max_per_sec = 1
 # small streams (status, events, feedhealth, resources, keepalive, run.log) stay plain. These keys only set budgets.
 # No raw entries archive until an entries feed is alive (erpc and constantk-prism delivered 0 in p12)
 archive_feeds = []
+# WP-08 (plan addendum I-9): rivals.jsonl keeps 1 in 10 of its `why = venues` rows (88% of cmp2's 1.3 GB/h raw), chosen by
+# the signature (a replay keeps the same ones); each kept row carries `sample` {one_in, kept, seen}. 1 keeps every row
+rivals_venues_sample = 10
 disk_budget_gb = 40     # per segment; past 90% of it the disk ladder stops entries, rivals, then lengthens accounts keyframes; past it: shadow + stop
 min_free_gb = 25        # the same two stages on free space (under 25 / 0.9 GB, then under 25 GB); a run does not start under it
 rotate_mb = 256

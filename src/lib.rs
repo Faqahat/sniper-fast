@@ -8,6 +8,7 @@
 //! The library holds every module; `main.rs` is the command line over it (PLAN WP-01 item 1), so integration tests,
 //! offline subcommands and the verifier client can use the engine without the CLI.
 pub mod build;
+pub mod classify;
 pub mod config;
 pub mod control;
 pub mod engine;

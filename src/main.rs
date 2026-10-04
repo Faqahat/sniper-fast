@@ -221,6 +221,21 @@ fn main() -> Result<()> {
             println!("recorder (always on): disk budget {} GB per segment, min free {} GB, rotate at {} MiB or {} min, frames every {} ms, zstd {}, archived feeds {}; background runtime {} threads",
                 r.disk_budget_gb, r.min_free_gb, r.rotate_mb, r.rotate_min, r.flush_ms, r.zstd_level,
                 if r.archive_feeds.is_empty() { "none".to_string() } else { r.archive_feeds.join(",") }, cfg.runtime.bg_threads);
+            // WP-08: the LeaderBook's telemetry and I-9's sampling. The geo table where this machine has it (the configured
+            // path, or the repo's data/ copy): a table that does not parse fails the check; a missing one is loaded at start
+            println!("rivals.jsonl: 1 in {} `why = venues` rows kept (by signature){}", r.rivals_venues_sample, if r.rivals_venues_sample == 1 { " (all)" } else { "" });
+            if cfg.leaders.enabled {
+                let l = &cfg.leaders;
+                println!("leaders telemetry: RTT probe {}; geo table {}", if l.rtt_probe { format!("on, at most {} handshakes/s (host -> TPU-QUIC endpoint)", l.rtt_per_sec) } else { "off".into() },
+                    l.geo_table);
+                let p = Path::new(&l.geo_table);
+                let repo_copy = config.parent().and_then(|d| d.parent()).zip(p.file_name()).map(|(d, f)| d.join("data").join(f));
+                match std::iter::once(p.to_path_buf()).chain(repo_copy).find(|c| c.is_file()) {
+                    Some(c) => { let g = leaders::Geo::load(&c)?; let (regions, cities) = g.counts();
+                        println!("  geo table {}: {} ranges, {cities} cities in {regions} regions", c.display(), g.len()); }
+                    None => println!("  geo table not on this machine (loaded at start; without it regions stay null)"),
+                }
+            }
             Ok(())
         }
         Cmd::Pools { config } => {
@@ -968,6 +983,13 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         match book.load_static(Path::new(&cfg.leaders.static_fallback)) {
             Ok(n) => say(&format!("leaders: static fallback {} ({n} validators)", cfg.leaders.static_fallback)),
             Err(e) => say(&format!("leaders: no static fallback: {e:#}")),
+        }
+        // WP-08: the places of validators' gossip IPs and TPU-QUIC endpoints (leaders.jsonl, validators.jsonl, attempts'
+        // leader snapshot); the RTT probe and the validator metadata start with the refreshes below (`leaders::start`)
+        match leaders::Geo::load(Path::new(&cfg.leaders.geo_table)) {
+            Ok(g) => { let (regions, cities) = g.counts(); say(&format!("leaders: geo table {} ({} ranges, {cities} cities in {regions} regions); RTT probe {}",
+                cfg.leaders.geo_table, g.len(), if cfg.leaders.rtt_probe { format!("on, at most {} handshakes/s", cfg.leaders.rtt_per_sec) } else { "off".into() })); book.set_geo(g); }
+            Err(e) => say(&format!("leaders: no geo table, regions stay null: {e:#}")),
         }
     }
     // WP-03 items 1, 2, 11: accounts.bin (every account update with its aseq; the snapshot's as src rpc_boot between

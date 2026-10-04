@@ -532,6 +532,9 @@ impl Engine {
         let pools: Vec<String> = keys.iter().filter(|k| self.reg.by_pool.contains_key(*k)).map(b58).collect();
         let why = if n_venues >= 2 { "venues" } else if pools.len() >= 2 { "pools" } else if self.arbers.contains(&signer) { "known" } else { return };
         if why != "known" && !agg && self.arbers.len() < 200_000 { self.arbers.insert(signer); }
+        // plan addendum I-9 (WP-08): 1 in `[record] rivals_venues_sample` of the `venues` rows, chosen by the signature;
+        // a kept one carries the rate and the running counts (the signer was learned above either way)
+        let sample = if why == "venues" { let Some(k) = self.rec.sample_rival_venues(&tx.sig) else { return }; (k.one_in > 1).then_some(k) } else { None };
         let sys = [0u8; 32];
         let (mut tips, mut nonce, mut progs, mut head) = (Vec::new(), Value::Null, Vec::<String>::new(), Value::Null);
         for (n, ix) in tx.ixs.iter().enumerate() {
@@ -559,7 +562,8 @@ impl Engine {
         let line = json!({ "sig": tx.sig_b58(), "slot": a.slot, "t": a.t_rx, "feed": self.feeds.get(a.feed as usize), "why": why,
             "signer": b58(&signer), "n_sig": tx.num_signers, "v": ver, "cu_limit": tx.cu_limit, "cu_price": tx.cu_price(),
             "v1_fee": if tx.v1 { tx.cu_price_micro } else { None }, "tips": tips, "nonce": nonce, "progs": progs, "venues": venues, "agg": agg,
-            "pools": pools, "alts": tx.lookups.iter().map(|l| b58(&l.table)).collect::<Vec<_>>(), "n_ix": tx.ixs.len(), "n_keys": keys.len(), "head": head });
+            "pools": pools, "alts": tx.lookups.iter().map(|l| b58(&l.table)).collect::<Vec<_>>(), "n_ix": tx.ixs.len(), "n_keys": keys.len(), "head": head,
+            "sample": sample });
         self.rec.json(rec::RIVALS, line);
     }
 

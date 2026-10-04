@@ -27,6 +27,7 @@ pub mod exec;
 pub mod health;
 pub mod journal;
 pub mod manifest;
+pub mod sample;
 mod writer;
 
 use crate::config::RecordCfg;
@@ -125,6 +126,25 @@ pub const RUN_LOG: S = S(24);
 pub const SLOTS: S = S(25);
 pub const BLOCKS: S = S(26);
 pub const LEADERS: S = S(27);
+/// WP-08: the LeaderBook's validator snapshots (§4.28). Its id is its row's index in the table, found by name at compile
+/// time ([`id_of`]): lanes that each append streams at the same index cannot give it another stream's row when they merge
+/// (review WP-08 #12; `stream_ids_name_their_rows` checks every constant)
+pub const VALIDATORS: S = S(id_of("validators"));
+
+/// The id of the stream named `name` in the table (compile time; a name that is not in it does not compile)
+pub const fn id_of(name: &str) -> u16 {
+    let mut i = 0;
+    while i < STATIC.len() {
+        let (a, b) = (STATIC[i].0.as_bytes(), name.as_bytes());
+        if a.len() == b.len() {
+            let mut j = 0;
+            while j < a.len() && a[j] == b[j] { j += 1; }
+            if j == a.len() { return i as u16; }
+        }
+        i += 1;
+    }
+    panic!("no such stream in the recorder's table");
+}
 
 pub const ACCOUNTS_MAGIC: [u8; 8] = *b"ARBXACC\0";
 pub const JOURNAL_MAGIC: [u8; 8] = *b"ARBXJRN\0";
@@ -134,15 +154,17 @@ pub const ENTRIES_MAGIC: [u8; 8] = *b"ARBXENT\0";
 /// record with the WP-00/WP-01 fields (§7), now behind a header; `2.0` where the stream is at v2. Streams of later WPs
 /// (ledger, wallet, decisions, commits, slotidx, txfetch, alts events, ...) are added here by them. `accounts` and
 /// `journal` are WP-03's formats (src/rec/accounts.rs, src/rec/journal.rs); their queues and GAP records are this
-/// module's. WP-03 also brings exec v2 (src/rec/exec.rs), slots, blocks and leaders
-const STATIC: [(&str, Class, Format, &str, bool); 28] = [
+/// module's. WP-03 also brings exec v2 (src/rec/exec.rs), slots, blocks and leaders; WP-08 exec 2.1 (the derived
+/// fields), leaders 1.1 (region, endpoint, RTT, client, kind updates), rivals 1.2 (the sampled `venues` rows,
+/// `sample`; plan addendum I-9) and validators
+const STATIC: [(&str, Class, Format, &str, bool); 29] = [
     ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/1.1", false),
     ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.1", false),
     ("bundles", Class::Core, Format::Jsonl, "arbx.bundles/1.1", false),
     ("outcomes", Class::Core, Format::Jsonl, "arbx.outcomes/1.1", false),
     ("accounts", Class::Replay, Format::Bin { magic: ACCOUNTS_MAGIC, format: 2 }, "arbx.accounts/2.0", false),
     ("journal", Class::Replay, Format::Bin { magic: JOURNAL_MAGIC, format: 2 }, "arbx.journal/2.1", false),
-    ("exec", Class::Chain, Format::Jsonl, "arbx.exec/2.0", false),
+    ("exec", Class::Chain, Format::Jsonl, "arbx.exec/2.1", false),
     ("txarr", Class::Chain, Format::Text, "arbx.txarr/1.1", false),
     ("arrivals", Class::Chain, Format::Jsonl, "arbx.arrivals/1.1", false),
     ("moves", Class::Chain, Format::Text, "arbx.moves/2.0", false),
@@ -154,7 +176,7 @@ const STATIC: [(&str, Class, Format, &str, bool); 28] = [
     ("caps", Class::Chain, Format::Jsonl, "arbx.caps/1.1", false),
     ("sims", Class::Chain, Format::Jsonl, "arbx.sims/1.1", false),
     ("opportunities", Class::Chain, Format::Jsonl, "arbx.opportunities/1.1", false),
-    ("rivals", Class::Bulk, Format::Jsonl, "arbx.rivals/1.1", false),
+    ("rivals", Class::Bulk, Format::Jsonl, "arbx.rivals/1.2", false),
     ("status", Class::Slow, Format::PlainJsonl, "arbx.status/2.0", false),
     ("events", Class::Slow, Format::PlainJsonl, "arbx.events/1.0", false),
     ("feedhealth", Class::Slow, Format::PlainJsonl, "arbx.feedhealth/1.0", false),
@@ -163,7 +185,8 @@ const STATIC: [(&str, Class, Format, &str, bool); 28] = [
     ("run", Class::Slow, Format::PlainText, "arbx.run/1.0", false),
     ("slots", Class::Chain, Format::Jsonl, "arbx.slots/1.0", false),
     ("blocks", Class::Chain, Format::Jsonl, "arbx.blocks/1.0", false),
-    ("leaders", Class::Chain, Format::Jsonl, "arbx.leaders/1.0", false),
+    ("leaders", Class::Chain, Format::Jsonl, "arbx.leaders/1.1", false),
+    ("validators", Class::Bulk, Format::Jsonl, "arbx.validators/1.0", false),
 ];
 
 /// a zstd frame ends at the latest when this much raw data is pending (§1.3)
@@ -372,6 +395,8 @@ pub struct Recorder {
     monitor: Mutex<Option<(Arc<AtomicBool>, std::thread::JoinHandle<()>)>>,
     /// what `start` noted (an archive feed that is not running, ...) for run.log
     pub notes: Vec<String>,
+    /// plan addendum I-9 (WP-08): rivals.jsonl's `why = venues` rows, 1 in `[record] rivals_venues_sample` kept
+    pub(crate) rival_venues: sample::Sampler,
 }
 
 /// The handle every producer holds. `Rec::off()` records nothing (tools, tests, the recorder-off benchmark)
@@ -425,7 +450,7 @@ pub fn start(opts: Opts) -> Result<Rec> {
     let (echo_done_tx, echo_done_rx) = crossbeam_channel::bounded::<()>(1);
     let started_ns = now_ns();
     let r = Arc::new(Recorder { dir: opts.dir.clone(), run: opts.run, producer: opts.producer, keyframe_every: AtomicU32::new(cfg.accounts_keyframe_every),
-        disk: Mutex::new(disk::Ladder::new(&cfg)), cfg, streams, queues, tx, threads: Mutex::new(Vec::new()), closed: AtomicBool::new(false), started_ns,
+        rival_venues: sample::Sampler::new(cfg.rivals_venues_sample), disk: Mutex::new(disk::Ladder::new(&cfg)), cfg, streams, queues, tx, threads: Mutex::new(Vec::new()), closed: AtomicBool::new(false), started_ns,
         dead: Default::default(), progress: Default::default(), fatal: OnceLock::new(), echo: echo_tx, echo_done: Mutex::new(Some(echo_done_rx)),
         echo_dropped: AtomicU64::new(0), close_timeout: Mutex::new(Vec::new()), crash: Default::default(),
         close_wait_ms: AtomicU64::new(CLOSE_WAIT.as_millis() as u64),
@@ -885,6 +910,12 @@ impl Rec {
         Value::Object(m)
     }
 
+    /// Plan addendum I-9 (WP-08): whether rivals.jsonl writes the `why = venues` row of the transaction `sig`: 1 in
+    /// `[record] rivals_venues_sample`, chosen by the signature ([`sample::keep_1_in`]: a replay keeps the same rows),
+    /// counted (manifest.json `sampling.rivals_venues`). Some(the counts, which the row carries as `sample`) when it is
+    /// written; None when it is left out, or when nothing records
+    pub fn sample_rival_venues(&self, sig: &[u8]) -> Option<sample::Kept> { self.0.as_ref()?.rival_venues.take(sig) }
+
     pub fn sync(&self) { if let Some(x) = &self.0 { x.sync(); } }
     pub fn close(&self) { if let Some(x) = &self.0 { x.close(); } }
 }
@@ -966,6 +997,30 @@ pub fn tx_error(b: &[u8]) -> String {
         }
         Some(v) => format!("tx{v}"),
         None => "?".into(),
+    }
+}
+
+/// Review WP-08 #12: every stream constant is its own row's index, name by name, and every row has one. Lanes append
+/// their streams at the same ids (WP-03b's wallet, slotidx and txfetch, WP-04's commits, decisions and alts take 28-30 as
+/// WP-08's validators did): a merge that numbers two streams alike, or leaves a row without its constant in this list,
+/// fails here
+#[cfg(test)]
+mod stream_ids {
+    use super::*;
+
+    #[test]
+    fn stream_ids_name_their_rows() {
+        let all = [(ATTEMPTS, "attempts"), (COPIES, "copies"), (BUNDLES, "bundles"), (OUTCOMES, "outcomes"), (ACCOUNTS, "accounts"), (JOURNAL, "journal"),
+            (EXEC, "exec"), (TXARR, "txarr"), (ARRIVALS, "arrivals"), (MOVES, "moves"), (POH, "poh"), (SLOTS_FEED, "slots-feed"), (ALTS_FINAL, "alts-final"),
+            (TRIGGERS, "triggers"), (PREDICTIONS, "predictions"), (CAPS, "caps"), (SIMS, "sims"), (OPPORTUNITIES, "opportunities"), (RIVALS, "rivals"),
+            (STATUS, "status"), (EVENTS, "events"), (FEEDHEALTH, "feedhealth"), (RESOURCES, "resources"), (KEEPALIVE, "keepalive"), (RUN_LOG, "run"),
+            (SLOTS, "slots"), (BLOCKS, "blocks"), (LEADERS, "leaders"), (VALIDATORS, "validators")];
+        for (s, name) in all { assert_eq!(STATIC[s.0 as usize].0, name, "stream id {}", s.0); }
+        let mut ids: Vec<u16> = all.iter().map(|x| x.0 .0).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!((ids.len(), all.len()), (STATIC.len(), STATIC.len()), "one constant per row, no two alike");
+        assert_eq!((id_of("attempts"), id_of("leaders")), (0, 27));
     }
 }
 
