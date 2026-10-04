@@ -1,0 +1,81 @@
+slot 453207209; Clock: slot 453207209 epoch 1049 unix_timestamp 1791103719
+ok   pump GLL3Czyb owner+disc, len 301
+ok   pump GLL3Czyb base vault @139 / quote vault @171 hold base_mint @43 / quote_mint @75 (quote So1111)
+     coin_creator@211=21GML1ie mayhem@243=0 cashback@244=0 virtual_quote_reserves(i128)@245=17542101293 creator_fee_bps@261=0 can_edit@269=0 canonical=True reserves base=72969898903177 quote=337244181640
+ok   pump base mint supply@36 = 962872893498638 decimals@44 = 6
+ok   pump 6ejg4aYJ owner+disc, len 301
+ok   pump 6ejg4aYJ base vault @139 / quote vault @171 hold base_mint @43 / quote_mint @75 (quote A7bdiY)
+     coin_creator@211=FauKh2en mayhem@243=0 cashback@244=0 virtual_quote_reserves(i128)@245=213138744 creator_fee_bps@261=200 can_edit@269=0 canonical=True reserves base=58798886102425 quote=6412825724
+ok   pump base mint supply@36 = 804092715279016 decimals@44 = 6
+ok   pump GlobalConfig ADyA8hde len 949
+     lp_bps@40=20 protocol_bps@48=5 disable_flags@56=0x00 coin_creator_bps@313=5 mayhem_enabled@417=1 cashback_enabled@642=1 buyback_bps@899=5000 boost_enabled@939=1 creator_fee_configurable@940=1 max_cfg_creator_bps@941=300 (len 949)
+ok   pump FeeConfig 5PHirr8j owner pfee, len 4097
+     flat(lp,proto,creator)@41=(25, 5, 0) fee_tiers n=25 first=[(0, 2, 93, 30), (420000000000, 20, 5, 95)] last=[(98240000000000, 20, 5, 5)] stable n=25 exotic@2073=(20, 5, 5)
+ok   cpmm GfApkU62 owner+disc+len 637
+ok   cpmm vault0 @72 / vault1 @104 hold mint0 @168 / mint1 @200
+ok   cpmm amm_config @8 owner+disc+len 236
+     status@329=0x00 open_time@373=1779960471 (now 1791103719) owed0 p/f/c @341/357/397=3799052,12583436,0 owed1 @349/365/405=2830352209,7023354314,0 creator_fee_on@389=0 enable_creator_fee@390=0 | cfg trade@12=2500 protocol@20=120000 fund@28=40000 creator@108=500 creator_share@116=50000 | vaults 165243017007 / 90534427862920
+ok   cpmm Hmx1eHEd owner+disc+len 637
+ok   cpmm vault0 @72 / vault1 @104 hold mint0 @168 / mint1 @200
+ok   cpmm amm_config @8 owner+disc+len 236
+     status@329=0x00 open_time@373=1767099585 (now 1791103719) owed0 p/f/c @341/357/397=18481070,6885527,0 owed1 @349/365/405=200962044019235,80651543438925,0 creator_fee_on@389=0 enable_creator_fee@390=0 | cfg trade@12=2500 protocol@20=120000 fund@28=40000 creator@108=500 creator_share@116=50000 | vaults 7024430232 / 75205848038454595
+ok   ammv4 FVq2chsi owner+len 752
+ok   ammv4 coin vault @336 / pc vault @368 hold coin mint @400 / pc mint @432
+     status@0=6 swap_fee num/den @176/184=25/10000 trade_fee @144/152=25/10000 need_take_pnl coin/pc @192/200=0/0 pool_open_time@224=0 vaults 1427853541522 / 38108644972012
+ok   dlmm 6D4EWF22 owner+disc+len 904
+ok   dlmm reserve_x @152 / reserve_y @184 hold mint_x @88 / mint_y @120
+ok   dlmm oracle @552 exists, owned by DLMM
+     base_factor@8=20000 filter@10=300 decay@12=1200 reduction@14=5000 vfc@16=7500 max_va@20=150000 protocol_share@32=1000 power@34=0 function_type@35=2 collect_fee_mode@36=0 | va@40=150000 vref@44=11855 idx_ref@48=-524 last_ts@56=1791103493 (now 1791103719) | pair_type@75=3 active@76=-538 bin_step@80=100 status@82=0 activation_type@86=0 activation_point@816=0 | rewards mint@264=111111 @408=111111 | flags x/y@880/881=1,0 version@882=1 | ext exists=False
+ok   dlmm array -10: owner+disc+len 10136, index@8 == -10, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -10: 70 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -9: owner+disc+len 10136, index@8 == -9, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -9: 70 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -8: owner+disc+len 10136, index@8 == -8, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -8: 70 bins with liquidity, 0 of them with price 0, 12 bins with nonzero limit-order fields @112..141
+ok   dlmm array -7: owner+disc+len 10136, index@8 == -7, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -7: 70 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -6: owner+disc+len 10136, index@8 == -6, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -6: 70 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+     active bin -538: amount_x 54231448 amount_y 864569292 price(Q64.64) 87301283238751097 = 4.732612e-03  (1+step)^id = 4.732612e-03
+ok   dlmm C9xcUNdJ owner+disc+len 904
+ok   dlmm reserve_x @152 / reserve_y @184 hold mint_x @88 / mint_y @120
+ok   dlmm oracle @552 exists, owned by DLMM
+     base_factor@8=25000 filter@10=300 decay@12=1200 reduction@14=5000 vfc@16=7500 max_va@20=150000 protocol_share@32=1000 power@34=0 function_type@35=2 collect_fee_mode@36=1 | va@40=150000 vref@44=23750 idx_ref@48=-287 last_ts@56=1790974597 (now 1791103719) | pair_type@75=3 active@76=-272 bin_step@80=200 status@82=0 activation_type@86=0 activation_point@816=0 | rewards mint@264=111111 @408=111111 | flags x/y@880/881=1,0 version@882=1 | ext exists=False
+ok   dlmm array -6: owner+disc+len 10136, index@8 == -6, lb_pair@24 == pair, version@16=2, bitmap bit 0
+     array -6: 0 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -5: owner+disc+len 10136, index@8 == -5, lb_pair@24 == pair, version@16=2, bitmap bit 0
+     array -5: 0 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -4: owner+disc+len 10136, index@8 == -4, lb_pair@24 == pair, version@16=2, bitmap bit 0
+     array -4: 0 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -3: absent, bitmap bit 0
+ok   dlmm array -2: absent, bitmap bit 0
+     active bin -272: amount_x 0 amount_y 0 price(Q64.64) 84464264227765375 = 4.578817e-03  (1+step)^id = 4.578817e-03
+ok   dlmm 7hvn8egr owner+disc+len 904
+ok   dlmm reserve_x @152 / reserve_y @184 hold mint_x @88 / mint_y @120
+ok   dlmm oracle @552 exists, owned by DLMM
+     base_factor@8=20000 filter@10=300 decay@12=1200 reduction@14=5000 vfc@16=7500 max_va@20=150000 protocol_share@32=1000 power@34=0 function_type@35=2 collect_fee_mode@36=0 | va@40=10000 vref@44=0 idx_ref@48=-442 last_ts@56=1791103683 (now 1791103719) | pair_type@75=3 active@76=-441 bin_step@80=100 status@82=0 activation_type@86=0 activation_point@816=0 | rewards mint@264=111111 @408=111111 | flags x/y@880/881=1,0 version@882=1 | ext exists=False
+ok   dlmm array -9: owner+disc+len 10136, index@8 == -9, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -9: 70 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -8: owner+disc+len 10136, index@8 == -8, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -8: 70 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -7: owner+disc+len 10136, index@8 == -7, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -7: 70 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -6: owner+disc+len 10136, index@8 == -6, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -6: 70 bins with liquidity, 0 of them with price 0, 0 bins with nonzero limit-order fields @112..141
+ok   dlmm array -5: owner+disc+len 10136, index@8 == -5, lb_pair@24 == pair, version@16=2, bitmap bit 1
+     array -5: 70 bins with liquidity, 0 of them with price 0, 1 bins with nonzero limit-order fields @112..141
+     active bin -441: amount_x 87250467142 amount_y 831566868 price(Q64.64) 229189060507967718 = 1.242436e-02  (1+step)^id = 1.242436e-02
+ok   damm C8jdide5 owner+disc+len 1112
+ok   damm vault a @232 / vault b @264 hold mint a @168 / mint b @200
+ok   damm sqrt_min@424 <= sqrt_price@456 <= sqrt_max@440 (4295048016 <= 259852331918871904 <= 79226673521066979257578248091)
+     base_fee: cliff@8=10000000 mode@16=0 | protocol%@48=20 referral%@50=20 compounding_bps@54=0 | dyn initialized@56=1 | liquidity@360=9594906139389183367239004998771 activation pt/type @472/480=1789425653/1 status@481=0 flags a/b @482/483=1,0 collect_fee_mode@484=0 fee_version@486=1 token amounts a/b @680/688=36924456550153/7327028884 layout@696=1 | vaults 37232107221559 / 7363711160
+ok   damm 2E8c2vnA owner+disc+len 1112
+ok   damm vault a @232 / vault b @264 hold mint a @168 / mint b @200
+ok   damm sqrt_min@424 <= sqrt_price@456 <= sqrt_max@440 (4295048016 <= 691685625750111292 <= 79226673521066979257578248091)
+     base_fee: cliff@8=10000000 mode@16=0 | protocol%@48=20 referral%@50=20 compounding_bps@54=0 | dyn initialized@56=1 | liquidity@360=67538916861407750268079457606038 activation pt/type @472/480=1790991421/1 status@481=0 flags a/b @482/483=1,0 collect_fee_mode@484=1 fee_version@486=1 token amounts a/b @680/688=97643950303315/137285103171 layout@696=1 | vaults 97643950303315 / 142372785682
+ok   damm 3Bu5wTUf owner+disc+len 1112
+ok   damm vault a @232 / vault b @264 hold mint a @168 / mint b @200
+ok   damm sqrt_min@424 <= sqrt_price@456 <= sqrt_max@440 (4295048016 <= 12736858313594486118 <= 79226673521066979257578248091)
+     base_fee: cliff@8=10000000 mode@16=0 | protocol%@48=20 referral%@50=20 compounding_bps@54=0 | dyn initialized@56=1 | liquidity@360=25201458425189361618560051337180 activation pt/type @472/480=1790976358/1 status@481=0 flags a/b @482/483=1,1 collect_fee_mode@484=1 fee_version@486=1 token amounts a/b @680/688=1978624383895/943297204721 layout@696=1 | vaults 1978624383895 / 1154283434786
+
+0 failures

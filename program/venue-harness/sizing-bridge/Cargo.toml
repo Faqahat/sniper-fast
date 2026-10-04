@@ -1,0 +1,16 @@
+[package]
+name = "sizing-bridge"
+version = "0.0.0"
+edition = "2021"
+description = "Runs arbx-sizing's exact leg quotes on venue-harness snapshots (JSON in, JSON out). Built and run by venue-harness/tests/exactness.rs only when ../../arbx-sizing exists; kept out of venue-harness's own dependency graph so the harness builds while the sizing crate is being written."
+publish = false
+
+[workspace]
+
+[dependencies]
+arbx-sizing = { path = "../../arbx-sizing" }
+base64 = "0.22"
+serde_json = "1"
+# the host-side create_program_address (arbx-sizing's PdaFn): SHA-256 + "off the ed25519 curve"
+sha2 = "0.10"
+curve25519-dalek = "4"

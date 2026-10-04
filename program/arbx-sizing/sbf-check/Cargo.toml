@@ -1,0 +1,36 @@
+[package]
+name = "arbx-sizing-sbf-check"
+version = "0.0.0"
+edition = "2021"
+description = "SBF build check (and CU probe) for arbx-sizing: parses a sizing block and runs plan() on the instruction's accounts. Not a deployable program."
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["all-venues", "bench"]
+all-venues = ["arbx-sizing/default"]
+# the per-operation modes 1-9 the CU runner uses (off for the code-size builds)
+bench = []
+# per-venue builds, for code size
+pumpswap = ["arbx-sizing/pumpswap"]
+cpmm = ["arbx-sizing/cpmm"]
+ammv4 = ["arbx-sizing/ammv4"]
+dlmm = ["arbx-sizing/dlmm"]
+dammv2 = ["arbx-sizing/dammv2"]
+search = ["arbx-sizing/search"]
+# the same entrypoint and account handling without calling arbx-sizing: the size baseline
+baseline = []
+
+[dependencies]
+arbx-sizing = { path = "..", default-features = false }
+solana-program = { version = "4.1", default-features = false }
+
+[profile.release]
+overflow-checks = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("custom-heap", "custom-panic"))', 'cfg(target_os, values("solana"))'] }

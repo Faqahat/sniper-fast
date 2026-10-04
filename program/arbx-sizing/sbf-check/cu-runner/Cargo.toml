@@ -1,0 +1,25 @@
+[package]
+name = "arbx-sizing-cu"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+
+[dependencies]
+litesvm = "0.17"
+solana-address = { version = "2.7", features = ["curve25519"] }
+solana-instruction = "3.5"
+solana-keypair = "3.1"
+solana-message = "4"
+solana-signer = "3"
+solana-transaction = "4"
+solana-compute-budget-interface = "*"
+solana-account = "*"
+solana-clock = "*"
+arbx-sizing = { path = "../..", features = ["encode"] }
+sha2 = "0.10"
+curve25519-dalek = "4"
+serde_json = "1"
+base64 = "0.22"

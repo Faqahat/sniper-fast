@@ -1,0 +1,49 @@
+[package]
+name = "arbx-sizing"
+version = "0.1.0"
+edition = "2021"
+description = "On-chain sizing (SELF_SIZE / BASKET) for arbx-exec: exact venue quotes from account bytes, the optimizer, and the sizing-block parser. no_std, no dependencies."
+publish = false
+
+# Its own workspace root: the crate is built from here (host tests) and from sbf-check/ (cargo-build-sbf).
+[workspace]
+exclude = ["sbf-check"]
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["pumpswap", "cpmm", "ammv4", "dlmm", "dammv2", "search"]
+# per-venue code; a kind whose feature is off parses to Abort::Unsupported
+pumpswap = []
+cpmm = []
+ammv4 = []
+dlmm = []
+dammv2 = []
+# golden-section fallback (still gated at run time by the SEARCH flag)
+search = []
+# alloc-based sizing-block encoder for the engine and the tests
+encode = []
+# std::error::Error impls
+std = []
+# per-plan counters for CU attribution in the harness (always compiled; the feature only documents intent)
+trace = []
+
+[dev-dependencies]
+proptest = "1"
+serde_json = "1"
+base64 = "0.22"
+num-bigint = "0.4"
+sha2 = "0.10"
+curve25519-dalek = "4"
+
+[profile.release]
+overflow-checks = true
+
+[profile.test]
+overflow-checks = true
+opt-level = 2
+
+[[test]]
+name = "desc"
+required-features = ["encode"]

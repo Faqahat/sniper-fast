@@ -1,0 +1,25 @@
+300 signatures from 2CusiBmVnP3t.. to 2eQaZtMPHMVH..
+   5 ok    0 diff  buy lp,pr,cr = ceil(quote_in*bps/1e4)
+   5 ok    0 diff  buy quote_in = ceil((Q+V)*base/(B-base))
+   5 ok    0 diff  buy user_in = quote_in + lp + pr + cr + cashback
+   6 ok    0 diff  buy virtual lp,pr,cr = ceil(quote_in*bps/1e4)
+   6 ok    0 diff  buy virtual quote_in = ceil((Q+V)*base/(B-base))
+   6 ok    0 diff  buy virtual user_in = quote_in + lp + pr + cr + cashback
+ 112 ok    0 diff  buyback_fee = floor(protocol_fee * buyback_bps / 1e4) (carve-out, not a user fee)
+   6 ok    0 diff  bxqi base = floor(B*(eff-1)/(Q+V+eff-1))
+   6 ok    0 diff  bxqi eff (SDK adjust) == event user_quote_amount_in
+   6 ok    0 diff  bxqi eff + fees(eff) == spendable
+   6 ok    0 diff  bxqi fees = ceil(eff*bps/1e4)
+  17 ok    0 diff  bxqi virtual base = floor(B*(eff-1)/(Q+V+eff-1))
+  17 ok    0 diff  bxqi virtual eff (SDK adjust) == event user_quote_amount_in
+  17 ok    0 diff  bxqi virtual eff + fees(eff) == spendable
+  17 ok    0 diff  bxqi virtual fees = ceil(eff*bps/1e4)
+  24 ok    0 diff  sell cashback = ceil(q*cb_bps/1e4)
+  24 ok    0 diff  sell lp,pr,cr = ceil(q*bps/1e4) each
+  24 ok    0 diff  sell q = floor((Q+V)*b/(B+b))
+  24 ok    0 diff  sell user_out = q - lp - pr - cr - cashback
+  54 ok    0 diff  sell virtual cashback = ceil(q*cb_bps/1e4)
+  54 ok    0 diff  sell virtual lp,pr,cr = ceil(q*bps/1e4) each
+  54 ok    0 diff  sell virtual q = floor((Q+V)*b/(B+b))
+  54 ok    0 diff  sell virtual user_out = q - lp - pr - cr - cashback
+buy_exact_quote_in with eff+fees(eff) != spendable: []
