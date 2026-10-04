@@ -140,6 +140,16 @@ enum Cmd {
         /// probe even though a segment, a campaign or another bot process may hold the provider
         #[arg(long)] force: bool,
     },
+    /// Fold segments' signer statistics into the shared file (PLAN-ADDENDUM I-5): each run directory's
+    /// `signer-stats-delta.json` (that segment's own counts) is added to --into, written atomically; a merged run is
+    /// marked (`signer-stats.merged.json`) and refused a second time. Runs never write the shared file themselves
+    SignerStats {
+        /// merge (the only action)
+        action: String,
+        #[arg(long)] into: PathBuf,
+        /// run directories
+        runs: Vec<PathBuf>,
+    },
     /// (tests) install `run`'s signal handler, control socket and stop path, without feeds or RPC; print "ready <pid>",
     /// wait for a stop, write stop.json and exit with its code
     #[command(hide = true)]
@@ -189,6 +199,12 @@ fn main() -> Result<()> {
             println!("state stream {}: watch clock {}, programdata {}, wallet {}; slot statuses {}, block meta {}", provenance::host_of(&st.url), st.watch_clock,
                 st.watch_programdata, st.watch_wallet, st.slot_statuses, st.block_meta);
             if cfg.leaders.enabled { println!("leaders: lists {:?} every {} min, static fallback {}", cfg.leaders.validator_lists, cfg.leaders.refresh_min, cfg.leaders.static_fallback); }
+            // WP-04: state consistency, the state-health gate (I-4), lookup-table retries (I-6), the accuracy monitor
+            println!("state consistency: commit timeout {} ms, quiescence {} ms, part skew <= {} slots, tip lag <= {} slots, clock <= {} slots; lag SLO p50 {} / p90 {} ms ({}); stop if no state update within {} s, price nothing past {} ms without one, resnapshot on reconnect {}",
+                st.commit_timeout_ms, st.quiescence_ms, st.max_part_skew_slots, st.max_tip_lag_slots, st.clock_max_age_slots, st.lag_slo_p50_ms, st.lag_slo_p90_ms, st.slo_action,
+                st.boot_timeout_s, st.max_update_age_ms, st.resnapshot);
+            println!("lookup tables: retries {:?} ms then every {} s, give up after {} s, at most {} waiting, {} fetches at once, preload {:?}; accuracy {} ({} versions per account)",
+                cfg.alts.retry_ms, cfg.alts.retry_every_s, cfg.alts.give_up_s, cfg.alts.wait_cap, cfg.alts.max_inflight, cfg.alts.preload, cfg.accuracy.action, cfg.accuracy.ring_versions);
             for s in &cfg.sends {
                 let tip = match (s.tip_share, s.tip_lamports) { (Some(x), l) => format!("{:.0}% of the edge, {l}..{} lamports", x * 100.0, s.tip_max_lamports.unwrap_or(u64::MAX)), (None, 0) => "no tip".into(), (None, l) => format!("tip {l} lamports") };
                 let rate = s.max_per_sec.map(|n| format!(", max {n}/s")).unwrap_or_default();
@@ -198,8 +214,8 @@ fn main() -> Result<()> {
             let on: Vec<&str> = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.name.as_str()).collect();
             println!("enabled send paths: {}", if on.is_empty() { "none".to_string() } else { on.join(", ") });
             let (s, l) = (&cfg.strategy, &cfg.live);
-            println!("safety: decoded_sends {}, skip_failing_signers {}, state_triggers {}; live: max {} SOL a trade, {} new token accounts, sim_gate {}, bundle_mix {} (tpu_max_expected {}), big band >= {} lamports at {}/s, crowded pools {}",
-                s.decoded_sends, s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_new_token_accounts, l.sim_gate, l.bundle_mix,
+            println!("safety: decoded swaps are hints only, skip_failing_signers {}, state_triggers {}; live: max {} SOL a trade, {} new token accounts, sim_gate {}, bundle_mix {} (tpu_max_expected {}), big band >= {} lamports at {}/s, crowded pools {}",
+                s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_new_token_accounts, l.sim_gate, l.bundle_mix,
                 l.tpu_max_expected_lamports, l.big_band_min_expected_lamports, l.big_band_max_per_sec,
                 if l.crowded_pools_file.is_empty() { "none".to_string() } else { l.crowded_pools_file.clone() });
             if l.crowded_skip_min_expected_lamports > 0 { println!("  crowded pools not sent from {} lamports expected", l.crowded_skip_min_expected_lamports); }
@@ -276,6 +292,12 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Simcheck { config, max, size_sol, canaries } => simcheck(&config, max, size_sol, canaries),
+        Cmd::SignerStats { action, into, runs } => {
+            anyhow::ensure!(action == "merge", "signer-stats: the only action is `merge`");
+            anyhow::ensure!(!runs.is_empty(), "signer-stats merge: name the run directories");
+            for (r, signers, n) in engine::merge_signer_stats(&into, &runs)? { println!("{r}: {signers} signers, {n} outcomes added to {}", into.display()); }
+            Ok(())
+        }
         Cmd::GrpcProbe { config, seconds, out, only, force } => grpc_probe(&config, seconds, out, only, force),
         Cmd::KeystoreEncrypt { out, generate, show_backup } => {
             use std::io::Read;
@@ -716,7 +738,9 @@ fn limits_json(cfg: &config::Config, live: bool, canary: bool) -> serde_json::Va
         "sending": if live { "live" } else if canary { "canary" } else { "none" },
         "max_size_sol": l.max_size_sol, "max_size_src": "config", "sim_max_size_sol": cfg.exec.max_size_sol,
         "max_failed_fees_lamports": l.max_failed_fees_lamports, "max_new_token_accounts": l.max_new_token_accounts,
-        "decoded_sends": cfg.strategy.decoded_sends, "state_triggers": cfg.strategy.state_triggers,
+        "decoded_sends": false, "state_triggers": cfg.strategy.state_triggers,
+        // WP-04: prices only committed, complete, canonical state; nothing priced or sent while the state is unavailable
+        "state_gate": { "boot_timeout_s": cfg.state.boot_timeout_s, "max_update_age_ms": cfg.state.max_update_age_ms },
         "big_band_min_expected_lamports": l.big_band_min_expected_lamports, "big_band_max_per_sec": l.big_band_max_per_sec,
         "crowded_pools_file": l.crowded_pools_file, "crowded_skip_min_expected_lamports": l.crowded_skip_min_expected_lamports,
         // WP-02: always on
@@ -844,10 +868,41 @@ impl Drop for RecGuard { fn drop(&mut self) { self.0.close(); } }
 fn boot_account(store: &mut store::Store, ar: &rec::accounts::AcctRec, j: &rec::journal::Journal, k: tx::Pk, a: rpc::Account, slot: u64) {
     let t = now_ns();
     let data: Arc<[u8]> = a.data.into();
-    let aseq = ar.record(&rec::accounts::AcctUpdate { pubkey: k, slot, write_version: 0, t_recv: t, src: feeds::src::RPC_BOOT, is_startup: false, txn: None,
-        lamports: a.lamports, owner: a.owner, data: &data });
-    j.account(0, aseq, store.is_stale(&k, slot));
-    store.update(k, data, slot, t, None);
+    let src = feeds::src::RPC_BOOT;
+    let aseq = ar.record(&rec::accounts::AcctUpdate { pubkey: k, slot, write_version: 0, t_recv: t, src, is_startup: false, txn: None,
+        lamports: a.lamports, owner: a.owner, data: &data, bank_id: None });
+    j.account(0, aseq, store.is_stale(&k, slot, src, 0, aseq));
+    store.apply(k, store::Acct::rpc(data, slot, t, aseq, src));
+}
+
+/// PLAN-ADDENDUM I-6: the lookup tables of a previous segment's `alts-final.jsonl.zst` (`[alts] preload`: "auto" = the
+/// newest one among this run directory's siblings, a path, or "" for none). Returns the file and its tables
+fn alts_preload(cfg: &config::AltsCfg, dir: &Path) -> Option<(PathBuf, Vec<(tx::Pk, Vec<Option<tx::Pk>>)>)> {
+    let file = match cfg.preload.as_str() {
+        "" => return None,
+        "auto" => {
+            let parent = dir.parent()?;
+            let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+            for e in std::fs::read_dir(parent).ok()?.flatten() {
+                let p = e.path().join("alts-final.jsonl.zst");
+                if e.path() == dir || !p.is_file() { continue; }
+                let Ok(t) = std::fs::metadata(&p).and_then(|m| m.modified()) else { continue };
+                if best.as_ref().map_or(true, |b| t > b.0) { best = Some((t, p)); }
+            }
+            best?.1
+        }
+        p => PathBuf::from(p),
+    };
+    let (bytes, _) = if file.extension().is_some_and(|e| e == "zst") { rec::decode_zst(&file).ok()? } else { (std::fs::read(&file).ok()?, 0) };
+    let mut out = Vec::new();
+    for l in bytes.split(|b| *b == b'\n').filter(|l| !l.is_empty()) {
+        let Ok(v) = serde_json::from_slice::<Value>(l) else { continue };
+        let Some(t) = v["table"].as_str().and_then(|t| bs58::decode(t).into_vec().ok()).and_then(|b| tx::Pk::try_from(b).ok()) else { continue };
+        let addrs: Vec<Option<tx::Pk>> = v["addrs"].as_array().into_iter().flatten()
+            .map(|a| a.as_str().and_then(|s| bs58::decode(s).into_vec().ok()).and_then(|b| tx::Pk::try_from(b).ok())).collect();
+        out.push((t, addrs));
+    }
+    Some((file, out))
 }
 
 fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
@@ -1048,7 +1103,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let venue_programs: Vec<String> = provenance::venue_specs().iter().map(|p| tx::b58(&p.id)).collect();
     config::expand_includes(&mut cfg.feeds, &reg.watched_writable(), &venue_programs)?;
     let reg = Arc::new(reg);
-    say(&format!("booted: {}; {} accounts held (snapshot at slot {snapshot_slot})", reg.summary(), store.accts.len()));
+    say(&format!("booted: {}; {} accounts held (snapshot at slot {snapshot_slot})", reg.summary(), store.len()));
     say(&format!("state stream follows {followed} accounts, started {:.1} ms after the snapshot (its first update's slot follows in this log)",
         stream_started_ns.saturating_sub(snapshot_ns) as f64 / 1e6));
     say(&format!("rpc providers raced: {} (skipped, env missing: {:?})", rpc.names().join(", "), skipped));
@@ -1175,6 +1230,23 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     eng.set_feed_counters(fs.counters.clone(), Some(state_counters));
     eng.set_acct_rec(acct_rec.clone());
     eng.set_base_watch(base_watch);
+    // ---- WP-04 wiring: state consistency knobs, signer statistics per segment (I-5), lookup-table preload (I-6)
+    eng.set_knobs(engine::EngineKnobs::from_cfg(&cfg));
+    eng.set_signer_stats_out(&dir);
+    if !cfg.strategy.signer_stats_file.is_empty() {
+        say(&format!("signer statistics: read {} (sha256 {}); this segment writes signer-stats.json and signer-stats-delta.json here (`arbx signer-stats merge` folds the delta back)",
+            cfg.strategy.signer_stats_file, eng.signer_stats_sha256().unwrap_or("none: not read")));
+    }
+    match alts_preload(&cfg.alts, &dir) {
+        Some((file, tables)) => {
+            let n = tables.len();
+            // journaled with the boot records (ALT found 3): a replay starts from the same tables
+            for (t, v) in tables { eng.preload_alt(t, v, true); }
+            say(&format!("lookup tables: preloaded {n} from {}", file.display()));
+            rec.event("alts_preload", "engine", None, json!({ "file": file.display().to_string(), "tables": n, "sha256": provenance::file_sha256(&file).ok().map(|x| x.0) }));
+        }
+        None => say(&format!("lookup tables: nothing preloaded ([alts] preload {:?})", cfg.alts.preload)),
+    }
     eng.exec = exec;
     eng.gate = Some(sess.gate.clone());
     // the minutes count from the engine's start, as in arb-lab (boot time is not part of the segment)
@@ -1196,6 +1268,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     match end {
         engine::RunEnd::Deadline => { sess.stopper.request(StopInfo::new(StopReason::Deadline, format!("--minutes {} reached", a.minutes.unwrap_or(0.0)))); }
         engine::RunEnd::Disconnected => { sess.stopper.request(StopInfo::new(StopReason::Error, "the engine's event channel closed")); }
+        // PLAN-ADDENDUM I-4: the state stream never delivered (cmp2 ran blind for 28 minutes and exited 0)
+        engine::RunEnd::StateUnavailable => { sess.stopper.request(StopInfo::new(StopReason::StateUnavailable, eng.stop_req.clone().unwrap_or_default())); }
         engine::RunEnd::Stopped => {}
     }
     let reason = sess.stopper.info().map_or("error", |i| i.reason.as_str());
@@ -1418,5 +1492,30 @@ mod tests {
         assert!(e.to_string().contains("needs its control socket"), "{e}");
         assert!(!d.join("camp").exists(), "refused before the segment directory");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// PLAN-ADDENDUM I-6: `[alts] preload = "auto"` finds the newest sibling segment's alts-final and reads its tables
+    /// (gaps kept); "" preloads nothing; an explicit path is read as given
+    #[test]
+    fn alts_preload_reads_the_previous_segments_tables() {
+        let root = std::env::temp_dir().join(format!("arbx-alts-preload-{}-{}", std::process::id(), now_ns()));
+        let (old, prev, me) = (root.join("c-p1"), root.join("c-p2"), root.join("c-p3"));
+        for d in [&old, &prev, &me] { std::fs::create_dir_all(d).unwrap(); }
+        let k = |n: u8| tx::b58(&[n; 32]);
+        let write = |dir: &Path, lines: &str| {
+            let z = zstd::stream::encode_all(lines.as_bytes(), 3).unwrap();
+            std::fs::write(dir.join("alts-final.jsonl.zst"), z).unwrap();
+        };
+        write(&old, &format!("{{\"table\":\"{}\",\"addrs\":[\"{}\"]}}\n", k(1), k(2)));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write(&prev, &format!("{{\"schema\":\"arbx.alts-final/1.1\"}}\n{{\"table\":\"{}\",\"addrs\":[\"{}\",null,\"{}\"]}}\n", k(3), k(4), k(5)));
+        let cfg = config::AltsCfg::default();
+        let (file, tables) = alts_preload(&cfg, &me).expect("found");
+        assert_eq!(file, prev.join("alts-final.jsonl.zst"), "the newest sibling");
+        assert_eq!(tables, vec![([3u8; 32], vec![Some([4u8; 32]), None, Some([5u8; 32])])]);
+        assert!(alts_preload(&config::AltsCfg { preload: String::new(), ..cfg.clone() }, &me).is_none());
+        let (_, t) = alts_preload(&config::AltsCfg { preload: old.join("alts-final.jsonl.zst").display().to_string(), ..cfg }, &me).unwrap();
+        assert_eq!(t[0].0, [1u8; 32]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

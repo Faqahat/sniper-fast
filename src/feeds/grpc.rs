@@ -247,7 +247,7 @@ pub struct UpdateAccount {
     #[prost(message, optional, tag = "1")] pub account: Option<AccountInfo>,
     #[prost(uint64, tag = "2")] pub slot: u64,
     #[prost(bool, tag = "3")] pub is_startup: bool,
-    /// parsed and pinned (review WP-03 #12), not yet recorded: accounts.bin has no field for it (WP-04)
+    /// the bank the update was written in (review WP-03 #12; recorded in accounts.bin since WP-04, flags bit 2)
     #[prost(uint64, optional, tag = "4")] pub bank_id: Option<u64>,
 }
 #[derive(Clone, PartialEq, prost::Message)]
@@ -296,8 +296,8 @@ pub enum Item {
     /// one transaction; `executed` is Some(succeeded) for executed (processed) feeds, None for unexecuted ones; `raw`:
     /// its protobuf transaction (the input journal's TX_FIRST bytes, WP-03)
     Tx { slot: u64, tx: Tx, t: u64, executed: Option<bool>, raw: RawTx },
-    /// one account update (pool state and the other watched accounts)
-    Account { slot: u64, pubkey: Pk, lamports: u64, owner: Pk, data: Vec<u8>, write_version: u64, t: u64, txn: Option<[u8; 64]>, is_startup: bool },
+    /// one account update (pool state and the other watched accounts), with its bank when the provider sends it
+    Account { slot: u64, pubkey: Pk, lamports: u64, owner: Pk, data: Vec<u8>, write_version: u64, t: u64, txn: Option<[u8; 64]>, is_startup: bool, bank_id: Option<u64> },
     /// a slot status update (0 processed, 1 confirmed, 2 finalized, 3 first-shred, 4 completed, 5 created-bank, 6
     /// dead), with its parent when the provider sends it
     Slot { slot: u64, status: i32, t: u64, parent: Option<u64>, dead_error: Option<String>, bank_id: Option<u64> },
@@ -331,7 +331,7 @@ pub fn state_item(m: SubscribeUpdate, t: u64) -> Option<Item> {
         let (pubkey, owner) = (to_pk(&info.pubkey)?, to_pk(&info.owner)?);
         let txn = info.txn_signature.as_deref().and_then(|b| <[u8; 64]>::try_from(b).ok());
         return Some(Item::Account { slot: a.slot, pubkey, lamports: info.lamports, owner, data: info.data, write_version: info.write_version, t, txn,
-            is_startup: a.is_startup });
+            is_startup: a.is_startup, bank_id: a.bank_id.filter(|b| *b != 0) });
     }
     if let Some(s) = m.slot { return Some(Item::Slot { slot: s.slot, status: s.status, t, parent: s.parent, dead_error: s.dead_error, bank_id: s.bank_id }); }
     if let Some(b) = m.block_meta {

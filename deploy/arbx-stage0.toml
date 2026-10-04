@@ -2,7 +2,8 @@
 # last ran live on Cherry (84.32.59.15). What changed, and why (R §4 "Day 0, config only"; W §2; R §1):
 #   - bundle-only: every non-bundle [[send]] path is disabled, and [live] bundle_mix + tpu_max_expected_lamports = 1 put
 #     every attempt on the bundle arm (the direct arm: 1 win in 989 attempts, 24.4M lamports of fees)
-#   - no sends on decoded triggers ([strategy] decoded_sends = false: decoded swaps are hints only)
+#   - no sends on decoded triggers (WP-00; since WP-04 decoded swaps are hints only, and prices come only from committed,
+#     complete, canonical state: commit groups, readiness, forks, the state-health gate; [state] WP-04 keys, [alts], [accuracy])
 #   - bundles expecting 1M or more throttled to 0.5/s ([live] big_band_*); crowded pools ranked last ([live] crowded_pools_file)
 #     and kept out of the bands from 100k ([live] crowded_skip_min_expected_lamports, OD-3's alternative)
 #   - no new token accounts ([live] max_new_token_accounts = 0: rent turned the bundle arm's +163k into -17.9M)
@@ -80,6 +81,27 @@ slot_statuses = "auto"  # "all" (processed, confirmed, finalized + first-shred, 
 block_meta = "auto"     # on only if `arbx grpc-probe --config deploy/arbx-stage0.toml` accepted it (<out_dir>/probe.json); run the probe before WP-05
 # probe_file = ""       # default <out_dir>/probe.json, where `arbx grpc-probe` writes it
 
+# WP-04: state consistency (the plan's defaults, written out). Commit groups: a known write set waits at most
+# commit_timeout_ms for its members; an unknown one resolves after quiescence_ms without updates (3 ms is a placeholder:
+# arb-lab's moves logs show 0.38-0.63 ms p99.9 across one transaction's pools); readiness: consistency-set skew, tip lag
+commit_timeout_ms = 5
+quiescence_ms = 3
+max_part_skew_slots = 2
+max_tip_lag_slots = 2
+clock_max_age_slots = 2   # DLMM / DAMM v2 are priced on the Clock sysvar; refused (clock_stale) past this
+lag_slo_p50_ms = 16       # first shred of T to T's complete commit, every minute
+lag_slo_p90_ms = 30
+lag_slo_breach_minutes = 5
+slo_action = "log"        # Stage 0: breaches are recorded only (F32)
+slo_recover_minutes = 10
+tier_a_grace_s = 60       # a pool whose parts are still missing after this leaves Tier A (the warm-up gate)
+# PLAN-ADDENDUM I-4: stop (state_unavailable, exit 30) if the state stream delivers nothing within boot_timeout_s; price
+# and send nothing while it is down or its newest message is older than max_update_age_ms; read every account again
+# after a reconnect
+boot_timeout_s = 60
+max_update_age_ms = 2000
+resnapshot = true
+
 # WP-03 item 3: the executed-transaction stream (arb-lab's `haan-grpc` [[feed]]; it runs as a feed after the [[feed]] list,
 # so its feed id is unchanged). Haan's plan allows 1 transaction filter with 1 account: PumpSwap (the busiest venue).
 # A second filter or provider covering the other venues is owner decision OD-1 (config only: another entry here)
@@ -97,12 +119,12 @@ static_fallback = "/root/arbx/data/validators-meta.json"
 refresh_min = 60
 
 [strategy]
-confirm_trigger_ms = 60   # unused while decoded_sends = false (no decoded opportunity waits); removed in WP-04
-decoded_sends = false   # WP-00: decoded swaps are hints only (checks, signer stats, predictions.jsonl); nothing is priced or sent on them
-skip_failing_signers = true   # WP-00: stopgap (R §4 day 0); live had false. The hint path runs the signer check, so it works now
-state_triggers = true   # act on confirmed pool moves: the only path that prices and sends in Stage 0
+# WP-04: decoded swaps are hints only (their write set goes to the CommitTracker, their predictions to the accuracy
+# monitor); `confirm_trigger_ms` and `decoded_sends` are gone (there is no decoded send path: a config with them does not load)
+skip_failing_signers = true   # WP-00: stopgap (R §4 day 0); live had false. With hints never priced it only drops their accuracy check
+state_triggers = true   # price on committed state (complete commit groups): the only path that prices and sends
 budget_caps_sol = [0.165, 2.1, 4.2, 8.4, 21.0, 42.0, 84.0]   # EXP-4: $20, $250, $500, $1k, $2.5k, $5k, $10k at SOL $119: the best round trip at each budget (recorded, not traded)
-signer_stats_file = "/root/arbx/runs/signer-stats.json"   # trigger signers (ok, failed) across runs; copy /root/arb-lab/runs/signer-stats.json here to keep what arb-lab learned
+signer_stats_file = "/root/arbx/runs/signer-stats.json"   # read at start, never written (I-5): each segment writes signer-stats.json and signer-stats-delta.json into its run dir; `arbx signer-stats merge` folds deltas back
 sizes_sol = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.2]   # $500 run: the size search reaches the 4.2 SOL cap
 # record every round trip that clears base + priority fee; the report applies each send path's tip
 min_profit_lamports = 1
@@ -462,6 +484,23 @@ queue_max_mb = 1024     # each bounded recorder queue's byte cap (declared paylo
 [runtime]
 # WP-02: RPC runs on its own runtime (arbx-bg, niced +5), apart from the state stream, feeds and sends (arbx-hot, 2)
 bg_threads = 3
+
+[alts]
+# WP-04 item 7 / PLAN-ADDENDUM I-6: a failed lookup-table fetch is retried (50 ms, 250 ms, 1 s, 5 s, then every 30 s)
+# and given up after 10 minutes, never cached as missing for the run; at most 16 fetches at once; transactions wait for
+# their tables (at most wait_cap); the newest sibling segment's alts-final is preloaded
+retry_ms = [50, 250, 1000, 5000]
+retry_every_s = 30
+give_up_s = 600
+wait_cap = 10000
+max_inflight = 16
+preload = "auto"
+
+[accuracy]
+# WP-04 item 13: hints scored against their transaction's pre-state (the 8-version rings); log only in Stage 0 (OD-8)
+action = "log"
+ring_versions = 8
+queue = 10000
 
 [[send]]
 name = "jupiter"

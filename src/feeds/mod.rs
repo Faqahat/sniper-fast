@@ -80,10 +80,12 @@ impl InputKind {
 pub enum Event {
     Tx(Arrival),
     /// one watched-account update. `aseq`: its record in accounts.bin (assigned when the record was emitted, WP-03;
-    /// 0 without a recorder); `src`: [`src`]; `write_version` 0 for RPC reads
-    Account { slot: u64, pubkey: Pk, owner: Pk, lamports: u64, data: Arc<[u8]>, t: u64, txn: Option<[u8; 64]>, write_version: u64, is_startup: bool, src: u8, aseq: u64 },
-    /// a slot status (Yellowstone SlotStatus 0-6), with its parent when the provider sends it
-    Slot { slot: u64, status: i32, t: u64, parent: Option<u64>, dead_error: Option<String> },
+    /// 0 without a recorder); `src`: [`src`]; `write_version` 0 for RPC reads; `bank_id`: the bank it was written in, when
+    /// the provider says (WP-04 forks)
+    Account { slot: u64, pubkey: Pk, owner: Pk, lamports: u64, data: Arc<[u8]>, t: u64, txn: Option<[u8; 64]>, write_version: u64, is_startup: bool, src: u8, aseq: u64,
+        bank_id: Option<u64> },
+    /// a slot status (Yellowstone SlotStatus 0-6), with its parent and bank when the provider sends them
+    Slot { slot: u64, status: i32, t: u64, parent: Option<u64>, dead_error: Option<String>, bank_id: Option<u64> },
     /// a block's metadata (`blocks_meta`, when subscribed)
     BlockMeta(grpc::BlockMeta),
     /// an input from another subsystem (leader-schedule windows, SendGate changes, ...): journaled as INPUT (the
@@ -91,8 +93,9 @@ pub enum Event {
     Input { kind: InputKind, data: Arc<serde_json::Value> },
     /// a feed connected, reconnected or failed (for the run log)
     Status { feed: u16, msg: String },
-    /// a lookup table fetched off the hot path (None: it doesn't exist)
-    Alt { table: Pk, addrs: Option<Arc<Vec<Pk>>> },
+    /// a lookup table fetched off the hot path: `addrs` its entries; None with `err` None: no such table (yet); `err`:
+    /// the fetch failed (WP-04: both are retried)
+    Alt { table: Pk, addrs: Option<Arc<Vec<Pk>>>, err: Option<String> },
     /// a canary, settled from chain (exec.rs); the engine adds what its feeds saw and writes the outcome
     Settled(Box<crate::exec::Settled>),
 }
@@ -366,17 +369,18 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
             c.forwarded.fetch_add(1, Ordering::Relaxed);
             sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded: t, executed, tx, poh: None, raw })).is_ok())
         }
-        grpc::Item::Account { slot, pubkey, lamports, owner, data, t, txn, write_version, is_startup } => {
+        grpc::Item::Account { slot, pubkey, lamports, owner, data, t, txn, write_version, is_startup, bank_id } => {
             c.packets.fetch_add(1, Ordering::Relaxed);
             c.seen(slot, t);
             // one allocation shared by the accounts.bin record and the store (WP-03 item 1)
             let data: Arc<[u8]> = Arc::from(data);
-            // every update, stale ones included (the store's verdict is the journal's), with its aseq
+            // every update, stale ones included (the store's verdict is the journal's), with its aseq (and bank, WP-04)
             let aseq = match &fwd.acct {
-                Some(a) => a.record(&crate::rec::accounts::AcctUpdate { pubkey, slot, write_version, t_recv: t, src: src::GRPC, is_startup, txn, lamports, owner, data: &data }),
+                Some(a) => a.record(&crate::rec::accounts::AcctUpdate { pubkey, slot, write_version, t_recv: t, src: src::GRPC, is_startup, txn, lamports, owner, data: &data,
+                    bank_id }),
                 None => 0,
             };
-            sent(c, out.send(Event::Account { slot, pubkey, owner, lamports, data, t, txn, write_version, is_startup, src: src::GRPC, aseq }).is_ok())
+            sent(c, out.send(Event::Account { slot, pubkey, owner, lamports, data, t, txn, write_version, is_startup, src: src::GRPC, aseq, bank_id }).is_ok())
         }
         grpc::Item::Slot { slot, status, t, parent, dead_error, bank_id } => {
             c.packets.fetch_add(1, Ordering::Relaxed);
@@ -391,7 +395,7 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
                         "bank_id": bank_id }));
                 }));
             }
-            sent(c, out.send(Event::Slot { slot, status, t, parent, dead_error }).is_ok())
+            sent(c, out.send(Event::Slot { slot, status, t, parent, dead_error, bank_id }).is_ok())
         }
         grpc::Item::BlockMeta(b) => {
             c.packets.fetch_add(1, Ordering::Relaxed);
@@ -417,9 +421,19 @@ pub fn slot_status_name(s: i32) -> &'static str {
     match s { 0 => "processed", 1 => "confirmed", 2 => "finalized", 3 => "first_shred", 4 => "completed", 5 => "created_bank", 6 => "dead", _ => "unknown" }
 }
 
+/// The state stream's health as an engine input (journaled INPUT kind 6 `health`; PLAN-ADDENDUM I-4): `connected` true
+/// right before the first message of each (re)connection, false when the stream ends or fails (with the error). The
+/// engine prices nothing while the stream is down, and reads every followed account again after a reconnect
+pub fn state_health(connected: bool, connects: u64, reconnects: u64, error: Option<String>) -> Event {
+    let msg = error.map(|e| crate::rpc::scrub(&e));
+    Event::Input { kind: InputKind::Health, data: Arc::new(serde_json::json!({ "src": "state", "connected": connected, "connects": connects, "reconnects": reconnects,
+        "error": msg })) }
+}
+
 /// Start the pool-state stream (accounts + slots, and block meta when `subs` says so) on `rt` (the hot runtime). The
 /// engine changes the followed accounts through `list`. `c`: its counters (feedhealth.jsonl feed `state`); `rec` and
-/// `fwd`: accounts.bin, slots.jsonl and blocks.jsonl (WP-03)
+/// `fwd`: accounts.bin, slots.jsonl and blocks.jsonl (WP-03). Each connection's first message and each end are engine
+/// inputs (`state_health`, WP-04 / I-4)
 #[allow(clippy::too_many_arguments)]
 pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch::Receiver<Vec<String>>, subs: grpc::StateSubs, out: UnboundedSender<Event>,
     stop: Arc<AtomicBool>, rt: &tokio::runtime::Handle, c: Arc<FeedCounters>, rec: Rec, fwd: Fwd) {
@@ -432,11 +446,14 @@ pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch:
             if connects > 0 { if let Some(a) = &fwd.acct { a.mark(crate::rec::accounts::MARK_STREAM_RECONNECT, &[]); } }
             connects += 1;
             let started = now_ns();
+            let reconnects = c.reconnects.load(Ordering::Relaxed);
             // review F1: the slot of the first update after each (re)connect goes to run.log (the snapshot's slot is
-            // there too): writes between the two are not seen until the account's next write
+            // there too): writes between the two are not seen until the account's next write (WP-04: the engine reads
+            // every followed account again after a reconnect)
             let first = std::sync::atomic::AtomicBool::new(true);
             let sink = |it: grpc::Item| -> bool {
                 if first.swap(false, Ordering::Relaxed) {
+                    let _ = out.send(state_health(true, connects, reconnects, None));
                     let (slot, what) = match &it { grpc::Item::Account { slot, .. } => (*slot, "account"), grpc::Item::Slot { slot, .. } => (*slot, "slot"), _ => (0, "other") };
                     let _ = out.send(Event::Status { feed: u16::MAX, msg: format!("state stream: first update at slot {slot} ({what}), {:.0} ms after connecting",
                         now_ns().saturating_sub(started) as f64 / 1e6) });
@@ -446,8 +463,9 @@ pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch:
             let res = grpc::accounts_once(&url, token.as_deref(), list.clone(), subs, &c, &sink).await;
             c.connected.store(false, Ordering::Relaxed);
             if stop.load(Ordering::Relaxed) { break; }
-            c.reconnects.fetch_add(1, Ordering::Relaxed);
+            let reconnects = c.reconnects.fetch_add(1, Ordering::Relaxed) + 1;
             let msg = match res { Ok(()) => "stream closed".to_string(), Err(e) => { c.errors.fetch_add(1, Ordering::Relaxed); format!("{e:#}") } };
+            let _ = out.send(state_health(false, connects, reconnects, Some(msg.clone())));
             let _ = out.send(Event::Status { feed: u16::MAX, msg: format!("state stream: {msg}; reconnecting in {backoff} ms") });
             if now_ns() - started > 30_000_000_000 { backoff = 500; }
             tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
@@ -597,13 +615,22 @@ mod tests {
         assert!(matches!(txs[0].raw, RawTx::Pb(_)));
         assert_eq!(txs[0].tx.loaded, Some((vec![k(fixture::LW)], vec![k(fixture::LR)])));
         let t1 = txs[0].tx.clone();
-        // the engine journals them at its dequeue point
-        let reg = crate::pools::Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+        // the engine journals them at its dequeue point. WP-04: its registry holds the fixture's PumpSwap pool (and a second
+        // pool on its pair), so the pool's writes form commit groups
+        let ps = |pool: u8, v0: u8, v1: u8| crate::venues::PoolMeta { venue: crate::venues::Venue::PumpSwap, pool: k(pool), t0: k(0x41), t1: *crate::venues::WSOL,
+            vault0: k(v0), vault1: k(v1), t0_prog: fixture::token(), t1_prog: fixture::token(), extra: vec![k(0x41)], flag: true };
+        let mut reg = crate::pools::Registry { pools: vec![ps(fixture::POOL, fixture::VAULT0, fixture::VAULT1), ps(0x64, 0x65, 0x66)], by_pool: Default::default(),
+            pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+        reg.by_pool.insert(k(fixture::POOL), 0);
+        reg.by_pool.insert(k(0x64), 1);
+        reg.pairs.insert(crate::pools::pair_key(&k(0x41), &crate::venues::WSOL), vec![0, 1]);
         let mut e = crate::engine::Engine::new_offline(Arc::new(reg), crate::store::Store::default(), crate::config::StrategyCfg::default());
         e.set_rec(rec.clone());
         let mut status = |_: &str| {};
         for (i, ev) in evs.into_iter().enumerate() { e.step(ev, fixture::T0 + 100 + i as u64, &mut status); }
         e.timers(fixture::T0 + 1_000, &mut status);
+        // the timers after the stream's last message (T2's lone update, W unknown, resolves by quiescence)
+        e.timers(fixture::T0 + 100_000_000, &mut status);
         assert_eq!((e.store.updates, e.store.stale_dropped), (5, 1), "one stale update refused");
         assert!(cs.provider_lag.lock().unwrap().as_mut().unwrap().pct(0.5) == 2_000_000, "2 ms provider lag");
         rec.close();
@@ -615,7 +642,7 @@ mod tests {
         assert_eq!(a.records.iter().map(|r| r.kind).collect::<Vec<_>>(), vec![2, 2, 2, 2, 3, 3]);
         assert_eq!((a.records[4].write_version, a.records[4].txn, a.records[4].data.clone()), (90, Some(sig(fixture::OLD)), fixture::vault_data(900_000)));
         assert_eq!((a.records[5].is_startup, a.records[5].data.clone(), a.records[3].pool_index), (true, fixture::vault_data(2_100_000), Some(0)));
-        assert_eq!(a.header["schema"], serde_json::json!("arbx.accounts/2.0"));
+        assert_eq!(a.header["schema"], serde_json::json!("arbx.accounts/2.1"));
         // journal.bin: the ACCOUNT records name those aseqs with the store's verdicts; TX_FIRST holds the protobuf
         // transaction and its loaded addresses (it decodes back to the same transaction); slots carry their parents
         let j = journal::read_dir(&d).unwrap();
@@ -671,6 +698,16 @@ mod tests {
         assert_eq!((bl[0]["slot"].as_u64(), bl[0]["blockhash"].as_str(), bl[0]["leader"].as_str(), bl[0]["block_height"].as_u64()),
             (Some(1_000), Some(b(0x34).as_str()), Some(b(0x99).as_str()), Some(900)));
         assert!(bl[0]["bank_id"].is_null() && x["bank_id"].is_null(), "the fixture's provider sends no bank_id");
+        // WP-04 through `forward`: T1's three writes form one group, whose write set the PumpSwap transaction stream
+        // registered after the updates (authoritative: `tx-stream`), and it completed then; T2's lone write (W unknown: its
+        // transaction failed, so nothing registered it) resolved by quiescence; the dead slot 1001 was abandoned
+        let c = rec::read_jsonl(&d, "commits").unwrap();
+        let t1 = c.iter().find(|x| x["txn"] == serde_json::json!(bs58::encode(sig(fixture::T1)).into_string())).expect("T1's group");
+        assert_eq!((t1["outcome"].as_str(), t1["w_src"].as_str(), t1["w_late"].as_bool(), t1["resolved_by"].as_str(), t1["w_seen"].as_array().unwrap().len()),
+            (Some("complete"), Some("tx-stream"), Some(true), Some("register"), 3));
+        let t2 = c.iter().find(|x| x["txn"] == serde_json::json!(bs58::encode(sig(fixture::T2)).into_string())).expect("T2's group");
+        assert_eq!((t2["outcome"].as_str(), t2["w_src"].as_str()), (Some("timeout_quiescent"), Some("unknown")));
+        assert_eq!(e.counter("fork_dead_slot"), 1, "slot 1001 died");
         let _ = std::fs::remove_dir_all(&d);
     }
 

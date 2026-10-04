@@ -118,36 +118,63 @@ impl Journal {
         self.put(J_ACCOUNT, t, 0, move |o| { o.extend(aseq.to_le_bytes()); o.push(stale as u8); });
     }
 
-    pub fn slot(&self, t: u64, slot: u64, parent: Option<u64>, status: i32, t_recv: u64) {
+    /// SLOT: a slot status with its parent (u64::MAX: unknown) and, since 2.2 (WP-04), its bank (u64::MAX: not sent)
+    pub fn slot(&self, t: u64, slot: u64, parent: Option<u64>, status: i32, t_recv: u64, bank_id: Option<u64>) {
         self.put(J_SLOT, t, 0, move |o| {
             o.extend(slot.to_le_bytes());
             o.extend(parent.unwrap_or(u64::MAX).to_le_bytes());
             o.extend(status.to_le_bytes());
             o.extend(t_recv.to_le_bytes());
+            o.extend(bank_id.unwrap_or(u64::MAX).to_le_bytes());
         });
     }
 
-    /// BLOCK_META (`height` u64::MAX: unknown)
+    /// BLOCK_META (`height` u64::MAX: unknown; 2.2: the bank, u64::MAX not sent)
     pub fn block_meta(&self, t: u64, b: &grpc::BlockMeta) {
-        let (slot, hash, height, parent, tr) = (b.slot, b.blockhash, b.block_height.unwrap_or(u64::MAX), b.parent_slot, b.t);
+        let (slot, hash, height, parent, tr, bank) = (b.slot, b.blockhash, b.block_height.unwrap_or(u64::MAX), b.parent_slot, b.t, b.bank_id.unwrap_or(u64::MAX));
         self.put(J_BLOCK_META, t, 0, move |o| {
             o.extend(slot.to_le_bytes());
             o.extend_from_slice(&hash);
             o.extend(height.to_le_bytes());
             o.extend(parent.to_le_bytes());
             o.extend(tr.to_le_bytes());
+            o.extend(bank.to_le_bytes());
         });
     }
 
-    /// ALT: a lookup table fetched off the hot path (found or not)
-    pub fn alt(&self, t: u64, table: Pk, addrs: Option<Arc<Vec<Pk>>>) {
+    /// ALT: a lookup table fetched off the hot path. `found` 1 with its entries, 0 no such table, 2 (2.2, WP-04) the
+    /// fetch failed, followed by `u16 len | UTF-8 error` (both 0 and 2 are retried)
+    pub fn alt(&self, t: u64, table: Pk, addrs: Option<Arc<Vec<Pk>>>, err: Option<String>) {
         let size = addrs.as_ref().map_or(0, |a| 32 * a.len() as u64);
         self.put(J_ALT, t, size, move |o| {
             o.extend_from_slice(&table);
-            o.push(addrs.is_some() as u8);
+            let found = if addrs.is_some() { 1 } else if err.is_some() { 2 } else { 0 };
+            o.push(found);
             let a = addrs.as_deref().map(|v| &v[..]).unwrap_or(&[]);
             o.extend((a.len().min(u16::MAX as usize) as u16).to_le_bytes());
             for k in a.iter().take(u16::MAX as usize) { o.extend_from_slice(k); }
+            if let Some(e) = &err {
+                let b = &e.as_bytes()[..e.len().min(1_024)];
+                o.extend((b.len() as u16).to_le_bytes());
+                o.extend_from_slice(b);
+            }
+        });
+    }
+
+    /// ALT `found` 3 (2.2, WP-04 / I-6): a lookup table preloaded at boot from a previous segment's alts-final, with the
+    /// boot records (`t_engine_ns` 0): `u16 n | ceil(n/8) bytes known-bitmap | 32 × each known entry` (a table learned
+    /// from feeds has gaps)
+    pub fn alt_preload(&self, table: Pk, addrs: &[Option<Pk>]) {
+        let v: Vec<Option<Pk>> = addrs.iter().take(u16::MAX as usize).copied().collect();
+        let size = 32 * v.iter().filter(|a| a.is_some()).count() as u64;
+        self.put(J_ALT, 0, size, move |o| {
+            o.extend_from_slice(&table);
+            o.push(3);
+            o.extend((v.len() as u16).to_le_bytes());
+            let mut bits = vec![0u8; v.len().div_ceil(8)];
+            for (i, a) in v.iter().enumerate() { if a.is_some() { bits[i / 8] |= 1 << (i % 8); } }
+            o.extend_from_slice(&bits);
+            for k in v.iter().flatten() { o.extend_from_slice(k); }
         });
     }
 
@@ -202,9 +229,11 @@ pub enum JBody {
     TxFirst { feed: u16, slot: u64, t_rx: u64, t_decoded: u64, executed: Option<bool>, enc: u8, bytes: Vec<u8>, loaded: Option<(Vec<Pk>, Vec<Pk>)>, poh: Option<Poh> },
     TxCopy { sig: [u8; 64], feed: u16, t_rx: u64, poh: Option<Poh> },
     Account { aseq: u64, stale: bool },
-    Slot { slot: u64, parent: Option<u64>, status: i32, t: u64 },
-    BlockMeta { slot: u64, blockhash: [u8; 32], height: Option<u64>, parent_slot: u64, t: u64 },
-    Alt { table: Pk, addrs: Option<Vec<Pk>> },
+    /// `bank_id`: 2.2 (WP-04); None when the provider did not send one (or a 2.1 record)
+    Slot { slot: u64, parent: Option<u64>, status: i32, t: u64, bank_id: Option<u64> },
+    BlockMeta { slot: u64, blockhash: [u8; 32], height: Option<u64>, parent_slot: u64, t: u64, bank_id: Option<u64> },
+    /// a fetch's answer (`addrs` found; neither: no such table; `err`: the fetch failed), or a preloaded table (`preload`)
+    Alt { table: Pk, addrs: Option<Vec<Pk>>, err: Option<String>, preload: Option<Vec<Option<Pk>>> },
     Input { kind: u8, data: serde_json::Value },
     Tick,
     Status { feed: u16, msg: String },
@@ -242,13 +271,38 @@ fn body(kind: u8, b: &[u8]) -> Result<JBody> {
         }
         J_TX_COPY => JBody::TxCopy { sig: c.arr()?, feed: c.u16()?, t_rx: c.u64()?, poh: c.poh()? },
         J_ACCOUNT => JBody::Account { aseq: c.u64()?, stale: c.u8()? != 0 },
-        J_SLOT => { let slot = c.u64()?; let p = c.u64()?; JBody::Slot { slot, parent: (p != u64::MAX).then_some(p), status: c.u32()? as i32, t: c.u64()? } }
+        J_SLOT => {
+            let slot = c.u64()?;
+            let p = c.u64()?;
+            let (status, t) = (c.u32()? as i32, c.u64()?);
+            // 2.2 appends the bank; a 2.1 record ends here
+            let bank = if c.p + 8 <= b.len() { c.u64()? } else { u64::MAX };
+            JBody::Slot { slot, parent: (p != u64::MAX).then_some(p), status, t, bank_id: (bank != u64::MAX).then_some(bank) }
+        }
         J_BLOCK_META => {
             let (slot, blockhash) = (c.u64()?, c.arr()?);
             let h = c.u64()?;
-            JBody::BlockMeta { slot, blockhash, height: (h != u64::MAX).then_some(h), parent_slot: c.u64()?, t: c.u64()? }
+            let (parent_slot, t) = (c.u64()?, c.u64()?);
+            let bank = if c.p + 8 <= b.len() { c.u64()? } else { u64::MAX };
+            JBody::BlockMeta { slot, blockhash, height: (h != u64::MAX).then_some(h), parent_slot, t, bank_id: (bank != u64::MAX).then_some(bank) }
         }
-        J_ALT => { let table = c.arr()?; let found = c.u8()? != 0; let a = c.keys()?; JBody::Alt { table, addrs: found.then_some(a) } }
+        J_ALT => {
+            let table = c.arr()?;
+            match c.u8()? {
+                3 => {
+                    let n = c.u16()? as usize;
+                    let bits = c.take(n.div_ceil(8))?.to_vec();
+                    let mut v = Vec::with_capacity(n);
+                    for i in 0..n { v.push(if bits[i / 8] & (1 << (i % 8)) != 0 { Some(c.arr::<32>()?) } else { None }); }
+                    JBody::Alt { table, addrs: None, err: None, preload: Some(v) }
+                }
+                found => {
+                    let a = c.keys()?;
+                    let err = if found == 2 { let n = c.u16()? as usize; Some(String::from_utf8_lossy(c.take(n)?).into_owned()) } else { None };
+                    JBody::Alt { table, addrs: (found == 1).then_some(a), err, preload: None }
+                }
+            }
+        }
         J_INPUT => { let k = c.u8()?; let n = c.u32()? as usize; JBody::Input { kind: k, data: serde_json::from_slice(c.take(n)?).unwrap_or(serde_json::Value::Null) } }
         J_TICK => JBody::Tick,
         J_STATUS => { let feed = c.u16()?; JBody::Status { feed, msg: String::from_utf8_lossy(&b[2.min(b.len())..]).into_owned() } }
@@ -293,7 +347,13 @@ pub fn read_dir(dir: &std::path::Path) -> Result<Vec<JRec>> {
 /// The event an account record was, as the feed handed it to the engine
 pub fn account_event(r: &AcctRecord) -> Event {
     Event::Account { slot: r.slot, pubkey: r.pubkey, owner: r.owner, lamports: r.lamports, data: Arc::from(&r.data[..]), t: r.t_recv, txn: r.txn,
-        write_version: r.write_version, is_startup: r.is_startup, src: r.src, aseq: r.aseq }
+        write_version: r.write_version, is_startup: r.is_startup, src: r.src, aseq: r.aseq, bank_id: r.bank_id }
+}
+
+/// the store version an account record was (boot snapshots)
+pub fn account_version(r: &AcctRecord) -> crate::store::Acct {
+    crate::store::Acct { data: Arc::from(&r.data[..]), slot: r.slot, write_version: r.write_version, txn: r.txn, t_recv: r.t_recv, aseq: r.aseq, src: r.src,
+        bank_id: r.bank_id }
 }
 
 /// The arrival a TX_FIRST record was (its transaction decoded from the journaled bytes)
@@ -326,13 +386,20 @@ fn boot_rec(r: &JRec) -> bool { r.t_engine == 0 || matches!(r.body, JBody::Gap {
 /// store as `arbx run` applies it, with the DLMM arrays it then follows
 pub fn boot_store(journal: &[JRec], accounts: &HashMap<u64, AcctRecord>, reg: &crate::pools::Registry) -> crate::store::Store {
     let mut store = crate::store::Store::default();
+    // the run's ring size (WP-04): engine_init carries it; the store must keep as many versions as the run's did
+    if let Some(n) = engine_init(journal).and_then(|i| i.knobs).map(|k| k.ring_versions) { store.ring_versions = n; }
     for r in journal.iter().take_while(|r| boot_rec(r)) {
         if let JBody::Account { aseq, .. } = r.body {
-            if let Some(a) = accounts.get(&aseq) { store.update(a.pubkey, Arc::from(&a.data[..]), a.slot, a.t_recv, a.txn); }
+            if let Some(a) = accounts.get(&aseq) { store.apply(a.pubkey, account_version(a)); }
         }
     }
     crate::engine::initial_dlmm_arrays(reg, &mut store);
     store
+}
+
+/// the lookup tables preloaded at boot (ALT `found` 3 in the boot section; WP-04 / I-6)
+pub fn boot_alts(journal: &[JRec]) -> Vec<(Pk, Vec<Option<Pk>>)> {
+    journal.iter().take_while(|r| boot_rec(r)).filter_map(|r| match &r.body { JBody::Alt { table, preload: Some(v), .. } => Some((*table, v.clone())), _ => None }).collect()
 }
 
 /// The run's engine_init record (INPUT 10 in the boot section; review WP-03 #2): None for a journal not written by
@@ -353,6 +420,8 @@ pub fn replay_engine(reg: Arc<crate::pools::Registry>, cfg: crate::config::Strat
     let init = engine_init(journal).context("the journal has no engine_init record (INPUT 10): it was not written by `Engine::run` of WP-03 or later")?;
     let mut e = crate::engine::Engine::new_offline(reg.clone(), boot_store(journal, accounts, &reg), cfg);
     e.apply_init(&init)?;
+    // the tables the run preloaded (journaled with the boot records), applied as the run applied them
+    for (t, v) in boot_alts(journal) { e.preload_alt(t, v, false); }
     Ok((e, init))
 }
 
@@ -379,12 +448,16 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
     let mut st = ReplayStats::default();
     let mut status = |_: &str| {};
     let mut boot = true;
+    // WP-04 item 11: the replay clock. While a record is handled, this thread's clock reads its t_engine_ns, so stage
+    // timestamps are the journaled times too (the guard restores the real clock, also on an error)
+    let clock = crate::feeds::clock::Virtual::start(0);
     for r in journal {
         if let JBody::Gap { first_lost_seq, n_lost } = r.body { st.gaps.push((first_lost_seq, n_lost)); continue; }
         // the boot section is applied by `boot_store` / `replay_engine`
         if boot && r.t_engine == 0 { continue; }
         boot = false;
         let t = r.t_engine;
+        clock.at(t);
         let ev = match &r.body {
             JBody::TxFirst { feed, slot, t_rx, t_decoded, executed, enc, bytes, loaded, poh } =>
                 Event::Tx(arrival(*feed, *slot, *t_rx, *t_decoded, *executed, *enc, bytes, loaded, *poh)?),
@@ -394,16 +467,18 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
             }
             JBody::Account { aseq, stale } => match accounts.get(aseq) {
                 Some(a) => {
-                    if eng.store.is_stale(&a.pubkey, a.slot) != *stale { st.verdict_mismatches += 1; }
+                    if eng.store.is_stale(&a.pubkey, a.slot, a.src, a.write_version, a.aseq) != *stale { st.verdict_mismatches += 1; }
                     account_event(a)
                 }
                 None => { st.missing_accounts += 1; continue; }
             },
-            JBody::Slot { slot, parent, status, t } => Event::Slot { slot: *slot, status: *status, t: *t, parent: *parent, dead_error: None },
-            JBody::BlockMeta { slot, blockhash, height, parent_slot, t } => Event::BlockMeta(grpc::BlockMeta { slot: *slot, blockhash: *blockhash,
+            JBody::Slot { slot, parent, status, t, bank_id } => Event::Slot { slot: *slot, status: *status, t: *t, parent: *parent, dead_error: None, bank_id: *bank_id },
+            JBody::BlockMeta { slot, blockhash, height, parent_slot, t, bank_id } => Event::BlockMeta(grpc::BlockMeta { slot: *slot, blockhash: *blockhash,
                 parent_slot: *parent_slot, parent_blockhash: [0; 32], block_height: *height, block_time: None, executed_transaction_count: 0, entries_count: 0, t: *t,
-                bank_id: None }),
-            JBody::Alt { table, addrs } => Event::Alt { table: *table, addrs: addrs.clone().map(Arc::new) },
+                bank_id: *bank_id }),
+            // a preloaded table outside the boot section would be a writer's error: applied like one inside it
+            JBody::Alt { table, preload: Some(v), .. } => { eng.preload_alt(*table, v.clone(), false); continue; }
+            JBody::Alt { table, addrs, err, .. } => Event::Alt { table: *table, addrs: addrs.clone().map(Arc::new), err: err.clone() },
             JBody::Input { kind, data } => match InputKind::from_u8(*kind) {
                 // a settlement belongs to the executor, which an offline engine does not have (WP-05 / WP-09 replay it);
                 // engine_init belongs to the boot section
@@ -458,9 +533,11 @@ mod tests {
         Arc::new(reg)
     }
     /// a transaction by a signer touching `pool` (no venue instruction: not a decoded swap), with its wire bytes
-    fn tx(sig: u8, pool: Pk) -> (Tx, Arc<[u8]>) {
-        let t = Tx { sig: [sig; 64], num_signers: 1, num_ro_signed: 0, num_ro_unsigned: 1, keys: vec![[0x52; 32], pool, [0x53; 32]],
-            ixs: vec![crate::tx::Ix { program: 2, accounts: vec![0, 1], data: vec![1, 2, 3] }], ..Default::default() };
+    /// (WP-04: the transaction writes the pool's vaults, so its write set W(T), registered when a feed delivers it, is what
+    /// its account updates show; the pool account is read only)
+    fn tx(sig: u8, m: &PoolMeta) -> (Tx, Arc<[u8]>) {
+        let t = Tx { sig: [sig; 64], num_signers: 1, num_ro_signed: 0, num_ro_unsigned: 2, keys: vec![[0x52; 32], m.vault1, m.vault0, m.pool, [0x53; 32]],
+            ixs: vec![crate::tx::Ix { program: 4, accounts: vec![0, 1, 2, 3], data: vec![1, 2, 3] }], ..Default::default() };
         let w = crate::tx::to_wire(&t).unwrap();
         (crate::tx::parse_wire(&w).unwrap().0, Arc::from(&w[..]))
     }
@@ -478,7 +555,7 @@ mod tests {
         let acct = AcctRec::new(rec.clone(), Arc::new(Roles::new(reg.watch_roles())));
         let cfg = StrategyCfg { state_triggers: true, budget_caps_sol: vec![0.5, 2.0], ..StrategyCfg::default() };
         let rec_acct = |key: Pk, data: &Arc<[u8]>, slot: u64, t: u64, txn: Option<[u8; 64]>, src: u8| -> u64 {
-            acct.record(&AcctUpdate { pubkey: key, slot, write_version: if src == 0 { t } else { 0 }, t_recv: t, src, is_startup: false, txn, lamports: 1, owner: [3; 32], data })
+            acct.record(&AcctUpdate { pubkey: key, slot, write_version: if src == 0 { t } else { 0 }, t_recv: t, src, is_startup: false, txn, lamports: 1, owner: [3; 32], data, bank_id: None })
         };
         // the boot snapshot, as `arbx run` takes it (accounts.bin src rpc_boot; ACCOUNT records with t_engine 0)
         let boot_j = Journal::new(rec.clone());
@@ -488,8 +565,8 @@ mod tests {
             for (k, data) in [(m.pool, ammv4_pool()), (m.vault0, vault(1_000_000_000_000_000)), (m.vault1, vault(sol * 1_000_000_000))] {
                 let data: Arc<[u8]> = data.into();
                 let aseq = rec_acct(k, &data, 10, T0, None, src::RPC_BOOT);
-                boot_j.account(0, aseq, store.is_stale(&k, 10));
-                store.update(k, data, 10, T0, None);
+                boot_j.account(0, aseq, store.is_stale(&k, 10, src::RPC_BOOT, 0, aseq));
+                store.apply(k, crate::store::Acct::rpc(data, 10, T0, aseq, src::RPC_BOOT));
             }
         }
         crate::engine::initial_dlmm_arrays(&reg, &mut store);
@@ -511,30 +588,34 @@ mod tests {
                 let tt = tick();
                 let aseq = rec_acct(k, &data, slot, tt, Some(s), src::GRPC);
                 let te = tick();
-                e.step(Event::Account { slot, pubkey: k, owner: [3; 32], lamports: 1, data, t: tt, txn: Some(s), write_version: tt, is_startup: false, src: src::GRPC, aseq },
+                e.step(Event::Account { slot, pubkey: k, owner: [3; 32], lamports: 1, data, t: tt, txn: Some(s), write_version: tt, is_startup: false, src: src::GRPC, aseq, bank_id: None },
                     te, &mut status);
             }
             // the transaction itself from a shred feed (its bytes; every 7th without them), and a later copy from another
-            let (x, raw) = tx(n as u8 + 100, m.pool);
+            let (x, raw) = tx(n as u8 + 100, &m);
             let raw = if n % 7 == 3 { RawTx::None } else { RawTx::Wire(raw) };
             let tr = tick();
             let te = tick();
             e.step(Event::Tx(Arrival { feed: 0, slot, t_rx: tr, t_decoded: tr + 10, executed: None, tx: x.clone(), poh: None, raw }), te, &mut status);
             let (tr, te) = (tick(), tick());
-            e.step(Event::Tx(Arrival { feed: 1, slot, t_rx: tr, t_decoded: 0, executed: Some(true), tx: x, poh: None, raw: RawTx::None }), te, &mut status);
+            e.step(Event::Tx(Arrival { feed: 1, slot, t_rx: tr, t_decoded: 0, executed: Some(true), tx: x.clone(), poh: None, raw: RawTx::None }), te, &mut status);
+            // a third copy from an unexecuted feed: timing only (TX_COPY); the executed one above is journaled in full
+            // (WP-04: its status settles signer outcomes and registers W(T))
+            let (tr, te) = (tick(), tick());
+            e.step(Event::Tx(Arrival { feed: 0, slot, t_rx: tr, t_decoded: tr, executed: None, tx: x, poh: None, raw: RawTx::None }), te, &mut status);
             if n % 10 == 9 {
                 // a late update from an older slot (stale), slot statuses, an input, a lookup table
                 let data: Arc<[u8]> = vault(5).into();
                 let tt = tick();
                 let aseq = rec_acct(m.vault0, &data, 1, tt, None, src::GRPC);
                 let te = tick();
-                e.step(Event::Account { slot: 1, pubkey: m.vault0, owner: [3; 32], lamports: 1, data, t: tt, txn: None, write_version: tt, is_startup: false, src: src::GRPC, aseq },
+                e.step(Event::Account { slot: 1, pubkey: m.vault0, owner: [3; 32], lamports: 1, data, t: tt, txn: None, write_version: tt, is_startup: false, src: src::GRPC, aseq, bank_id: None },
                     te, &mut status);
-                for st in [0, 3, 1] { let (a, b) = (tick(), tick()); e.step(Event::Slot { slot, status: st, t: a, parent: Some(slot - 1), dead_error: None }, b, &mut status); }
+                for st in [0, 3, 1] { let (a, b) = (tick(), tick()); e.step(Event::Slot { slot, status: st, t: a, parent: Some(slot - 1), dead_error: None, bank_id: None }, b, &mut status); }
                 let te = tick();
                 e.step(Event::Input { kind: InputKind::LeaderWindow, data: Arc::new(serde_json::json!({ "start": slot, "leaders": [] })) }, te, &mut status);
                 let te = tick();
-                e.step(Event::Alt { table: [n as u8; 32], addrs: Some(Arc::new(vec![[1; 32], [2; 32]])) }, te, &mut status);
+                e.step(Event::Alt { table: [n as u8; 32], addrs: Some(Arc::new(vec![[1; 32], [2; 32]])), err: None }, te, &mut status);
             }
             // the queue empties: the timers flush the state triggers
             let te = tick();
@@ -589,7 +670,7 @@ mod tests {
         assert_eq!(a.digest(), b.digest());
         let m = meta(2);
         let ev = || Event::Account { slot: 11, pubkey: m.vault1, owner: [3; 32], lamports: 1, data: vault(1_030_000_000_000).into(), t: 5, txn: Some([9; 64]),
-            write_version: 1, is_startup: false, src: 0, aseq: 0 };
+            write_version: 1, is_startup: false, src: 0, aseq: 0, bank_id: None };
         a.step(ev(), T0, &mut status);
         assert_ne!(a.digest(), b.digest());
         b.step(ev(), T0, &mut status);
@@ -626,9 +707,9 @@ mod tests {
             boot.extend([(m.pool, ammv4_pool().into()), (m.vault0, vault(1_000_000_000_000_000).into()), (m.vault1, vault(sol * 1_000_000_000).into())]);
         }
         for (k, data) in boot {
-            let aseq = acct.record(&AcctUpdate { pubkey: k, slot: 10, write_version: 0, t_recv: t0, src: src::RPC_BOOT, is_startup: false, txn: None, lamports: 1, owner: [3; 32], data: &data });
-            boot_j.account(0, aseq, store.is_stale(&k, 10));
-            store.update(k, data, 10, t0, None);
+            let aseq = acct.record(&AcctUpdate { pubkey: k, slot: 10, write_version: 0, t_recv: t0, src: src::RPC_BOOT, is_startup: false, txn: None, lamports: 1, owner: [3; 32], data: &data, bank_id: None });
+            boot_j.account(0, aseq, store.is_stale(&k, 10, src::RPC_BOOT, 0, aseq));
+            store.apply(k, crate::store::Acct::rpc(data, 10, t0, aseq, src::RPC_BOOT));
         }
         crate::engine::initial_dlmm_arrays(&reg, &mut store);
         let held0 = store.dlmm_arrays[&dl.pool].clone();
@@ -648,8 +729,8 @@ mod tests {
         {
             let data = dlmm_pool(100_000);
             let t = crate::feeds::clock::now_ns();
-            let aseq = acct.record(&AcctUpdate { pubkey: dl.pool, slot: 11, write_version: t, t_recv: t, src: src::GRPC, is_startup: false, txn: Some([1; 64]), lamports: 1, owner: [3; 32], data: &data });
-            tx_ch.send(Event::Account { slot: 11, pubkey: dl.pool, owner: [3; 32], lamports: 1, data, t, txn: Some([1; 64]), write_version: t, is_startup: false, src: src::GRPC, aseq }).unwrap();
+            let aseq = acct.record(&AcctUpdate { pubkey: dl.pool, slot: 11, write_version: t, t_recv: t, src: src::GRPC, is_startup: false, txn: Some([1; 64]), lamports: 1, owner: [3; 32], data: &data, bank_id: None });
+            tx_ch.send(Event::Account { slot: 11, pubkey: dl.pool, owner: [3; 32], lamports: 1, data, t, txn: Some([1; 64]), write_version: t, is_startup: false, src: src::GRPC, aseq, bank_id: None }).unwrap();
         }
         // the inputs, from another thread with pauses (the queue empties between transactions: the flushes run then)
         let mk_tx = tx;
@@ -658,8 +739,8 @@ mod tests {
             std::thread::spawn(move || {
                 let send = |key: Pk, data: Arc<[u8]>, slot: u64, txn: Option<[u8; 64]>| {
                     let t = crate::feeds::clock::now_ns();
-                    let aseq = acct.record(&AcctUpdate { pubkey: key, slot, write_version: t, t_recv: t, src: src::GRPC, is_startup: false, txn, lamports: 1, owner: [3; 32], data: &data });
-                    tx.send(Event::Account { slot, pubkey: key, owner: [3; 32], lamports: 1, data, t, txn, write_version: t, is_startup: false, src: src::GRPC, aseq }).unwrap();
+                    let aseq = acct.record(&AcctUpdate { pubkey: key, slot, write_version: t, t_recv: t, src: src::GRPC, is_startup: false, txn, lamports: 1, owner: [3; 32], data: &data, bank_id: None });
+                    tx.send(Event::Account { slot, pubkey: key, owner: [3; 32], lamports: 1, data, t, txn, write_version: t, is_startup: false, src: src::GRPC, aseq, bank_id: None }).unwrap();
                 };
                 for n in 0..40u64 {
                     let m = meta(1 + (n % 2) as u8);
@@ -668,10 +749,10 @@ mod tests {
                     let sol = if n % 5 == 0 { 1_030 + n } else { 1_000 + n % 7 };
                     send(m.vault1, vault(sol * 1_000_000_000).into(), slot, Some(s));
                     send(m.vault0, vault(999_000_000_000_000 - n * 1_000_000_000).into(), slot, Some(s));
-                    let (x, raw) = mk_tx(n as u8 + 100, m.pool);
+                    let (x, raw) = mk_tx(n as u8 + 100, &m);
                     let t = crate::feeds::clock::now_ns();
                     tx.send(Event::Tx(Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx: x, poh: None, raw: RawTx::Wire(raw) })).unwrap();
-                    tx.send(Event::Slot { slot, status: 0, t, parent: Some(slot - 1), dead_error: None }).unwrap();
+                    tx.send(Event::Slot { slot, status: 0, t, parent: Some(slot - 1), dead_error: None, bank_id: None }).unwrap();
                     if n % 10 == 9 { tx.send(Event::Input { kind: InputKind::LeaderWindow, data: Arc::new(serde_json::json!({ "start": slot, "leaders": [] })) }).unwrap(); }
                     std::thread::sleep(std::time::Duration::from_millis(3));
                 }
@@ -692,7 +773,7 @@ mod tests {
         let by: HashMap<u64, AcctRecord> = a.records.into_iter().map(|r| (r.aseq, r)).collect();
         // the timers' journaled scopes: idle evaluations do everything, after-input ones only flush
         let whats: std::collections::BTreeSet<u8> = j.iter().filter_map(|r| match r.body { JBody::Timer { what, .. } => Some(what), _ => None }).collect();
-        assert!(whats.contains(&crate::engine::TIMER_ALL) && whats.contains(&crate::engine::TIMER_FLUSH), "{whats:?}");
+        assert!(whats.contains(&crate::engine::TIMER_ALL), "{whats:?}");
         let (mut r, init) = replay_engine(reg.clone(), cfg.clone(), &j, &by).unwrap();
         assert_eq!((init.min_tip, init.executor, init.signer_stats.get(&SIGNER).copied(), init.signer_stats.len()), (1_000, false, Some((1, 9)), 2));
         let st = replay(&mut r, &j, &by).unwrap();
@@ -734,7 +815,7 @@ mod tests {
             let m = meta(1 + (n % 2) as u8);
             let s = { let mut s = [0u8; 64]; s[..8].copy_from_slice(&(n + 1).to_le_bytes()); s };
             for (k, data) in [(m.vault1, vault((1_000 + n % 40) * 1_000_000_000)), (m.vault0, vault(1_000_000_000_000_000 - n))] {
-                tx.send(Event::Account { slot: 11, pubkey: k, owner: [3; 32], lamports: 1, data: data.into(), t: n, txn: Some(s), write_version: n, is_startup: false, src: 0, aseq: n }).unwrap();
+                tx.send(Event::Account { slot: 11, pubkey: k, owner: [3; 32], lamports: 1, data: data.into(), t: n, txn: Some(s), write_version: n, is_startup: false, src: 0, aseq: n, bank_id: None }).unwrap();
             }
         }
         drop(tx);
@@ -761,5 +842,172 @@ mod tests {
         let mut e = Engine::new_offline(reg.clone(), Store::default(), StrategyCfg::default());
         let st = replay(&mut e, &j, &HashMap::default()).unwrap();
         assert_eq!((st.events, st.timers, st.skipped, st.gaps.clone()), (0, 1, 0, vec![(1, 2)]), "the boot records are not replayed as events; the gap is reported");
+    }
+
+    /// PLAN WP-04 acceptance, the replay of a run (WP-03's hand-off): a journal written by the real `Engine::run`, with
+    /// WP-04's inputs and machinery (W(T) hints before and after their updates, decoded swaps and a failed executed copy,
+    /// commit groups completing and resolving by quiescence, a sibling fork abandoned by a confirmation, the state stream's
+    /// health inputs (a disconnect and a re-snapshot), a lookup table preloaded at boot and one whose fetches fail and are
+    /// retried), replayed through `journal::replay_engine` on the replay clock, gives the run's state digest, decision
+    /// digest, and the same decisions.jsonl and commits.jsonl lines (stage timestamps aside: real clock reads in the run).
+    /// A field replay of a Cherry recording made with this build is the owner's step
+    #[test]
+    fn a_wp04_run_replays_to_the_run() {
+        let d = std::env::temp_dir().join(format!("arbx-journal-wp04-{}-{}", std::process::id(), crate::feeds::clock::now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec!["shred".into(), "tx".into()],
+            monitor: false, echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let reg = registry();
+        let acct = AcctRec::new(rec.clone(), Arc::new(Roles::new(reg.watch_roles())));
+        let t0 = crate::feeds::clock::now_ns();
+        let boot_j = Journal::new(rec.clone());
+        let mut store = Store::default();
+        for (n, sol) in [(1u8, 1_000u64), (2, 1_010)] {
+            let m = meta(n);
+            for (k, data) in [(m.pool, ammv4_pool()), (m.vault0, vault(1_000_000_000_000_000)), (m.vault1, vault(sol * 1_000_000_000))] {
+                let data: Arc<[u8]> = data.into();
+                let aseq = acct.record(&AcctUpdate { pubkey: k, slot: 10, write_version: 0, t_recv: t0, src: src::RPC_BOOT, is_startup: false, txn: None, lamports: 1,
+                    owner: [3; 32], data: &data, bank_id: None });
+                boot_j.account(0, aseq, store.is_stale(&k, 10, src::RPC_BOOT, 0, aseq));
+                store.apply(k, crate::store::Acct::rpc(data, 10, t0, aseq, src::RPC_BOOT));
+            }
+        }
+        crate::engine::initial_dlmm_arrays(&reg, &mut store);
+        let cfg = StrategyCfg { state_triggers: true, budget_caps_sol: vec![0.5, 2.0], ..StrategyCfg::default() };
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let (tx_ch, rx) = crossbeam_channel::unbounded();
+        let (wtx, _wrx) = tokio::sync::watch::channel(Vec::new());
+        let mut e = Engine::new(reg.clone(), store, cfg.clone(), vec!["shred".into(), "tx".into()], 1_000, Arc::new(crate::feeds::Interest::default()), rec.clone(),
+            crate::rpc::Rpc::race(vec![]), rt.handle().clone(), tx_ch.clone(), wtx).unwrap();
+        e.set_acct_rec(acct.clone());
+        e.set_knobs(crate::engine::EngineKnobs::default());
+        // a lookup table from "the previous segment", journaled with the boot records
+        const PRE: Pk = [0x71; 32];
+        e.preload_alt(PRE, vec![Some([0x72; 32]), None, Some(meta(1).vault0)], true);
+        let mk_tx = tx;
+        let feeder = {
+            let (tx, acct) = (tx_ch.clone(), acct.clone());
+            std::thread::spawn(move || {
+                let now = crate::feeds::clock::now_ns;
+                let send_acct = |key: Pk, data: Arc<[u8]>, slot: u64, txn: Option<[u8; 64]>, wv: u64| {
+                    let t = now();
+                    let aseq = acct.record(&AcctUpdate { pubkey: key, slot, write_version: wv, t_recv: t, src: src::GRPC, is_startup: false, txn, lamports: 1, owner: [3; 32],
+                        data: &data, bank_id: None });
+                    tx.send(Event::Account { slot, pubkey: key, owner: [3; 32], lamports: 1, data, t, txn, write_version: wv, is_startup: false, src: src::GRPC, aseq,
+                        bank_id: None }).unwrap();
+                };
+                let send_slot = |slot: u64, status: i32, parent: Option<u64>| { tx.send(Event::Slot { slot, status, t: now(), parent, dead_error: None, bank_id: None }).unwrap(); };
+                let clock = |slot: u64, wv: u64| { let mut c = vec![0u8; 40]; c[0..8].copy_from_slice(&slot.to_le_bytes()); c[32..40].copy_from_slice(&1_759_000_000i64.to_le_bytes());
+                    send_acct(*crate::pools::CLOCK_SYSVAR, c.into(), slot, None, wv) };
+                let shred = |s: [u8; 64], m: &PoolMeta, executed: Option<bool>, lookup: bool| {
+                    let (mut x, raw) = mk_tx(s[0], m);
+                    x.sig = s;
+                    if lookup { x.lookups = vec![crate::tx::Lookup { table: [0x73; 32], writable: vec![1], readonly: vec![] }]; }
+                    let t = now();
+                    let raw = if lookup { RawTx::None } else { RawTx::Wire(raw) };
+                    tx.send(Event::Tx(Arrival { feed: if executed.is_some() { 1 } else { 0 }, slot: 12, t_rx: t, t_decoded: t, executed, tx: x, poh: None, raw })).unwrap();
+                };
+                tx.send(crate::feeds::state_health(true, 1, 0, None)).unwrap();
+                send_slot(11, 1, Some(10));
+                clock(11, 1);
+                let mut wv = 100;
+                for n in 0..30u64 {
+                    let m = meta(1 + (n % 2) as u8);
+                    let s = [n as u8 + 100; 64];
+                    // slots 12 and 13 are siblings; 13 is confirmed half-way (12 abandoned); then 14, 15 on 13
+                    let slot = match n { 0..=9 => if n % 3 == 0 { 12 } else { 13 }, 10..=19 => 14, _ => 15 };
+                    if n == 0 { send_slot(12, 0, Some(11)); send_slot(13, 0, Some(11)); clock(13, 2); }
+                    if n == 10 { send_slot(13, 1, Some(11)); send_slot(14, 0, Some(13)); clock(14, 3); }
+                    if n == 20 { send_slot(15, 0, Some(14)); clock(15, 4); }
+                    // the write set from shreds: before the updates (n even) or after them (n odd)
+                    if n % 2 == 0 { shred(s, &m, None, false); }
+                    let sol = if n % 5 == 0 { 1_030 + n } else { 1_000 + n % 7 };
+                    wv += 2;
+                    send_acct(m.vault1, vault(sol * 1_000_000_000).into(), slot, Some(s), wv);
+                    send_acct(m.vault0, vault(999_000_000_000_000 - n * 1_000_000_000).into(), slot, Some(s), wv + 1);
+                    if n % 2 == 1 { shred(s, &m, None, false); }
+                    // a failed executed copy of a transaction that never writes anything
+                    if n % 7 == 3 { shred([n as u8 + 160; 64], &m, Some(false), false); }
+                    // a transaction whose lookup table is unknown: fetched (the RPC has no provider: it fails, is retried)
+                    if n == 4 { shred([0xEE; 64], &m, None, true); }
+                    // the state stream drops and comes back (a re-snapshot)
+                    if n == 15 { tx.send(crate::feeds::state_health(false, 1, 1, Some("status: 503".into()))).unwrap(); tx.send(crate::feeds::state_health(true, 2, 1, None)).unwrap(); }
+                    std::thread::sleep(std::time::Duration::from_millis(4));
+                }
+            })
+        };
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let s2 = stop.clone();
+        std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(700)); s2.store(true, std::sync::atomic::Ordering::Relaxed); });
+        let end = e.run(&rx, &stop, u64::MAX, |_| {});
+        assert_eq!(end, crate::engine::RunEnd::Stopped);
+        feeder.join().unwrap();
+        let live = (e.digest(), e.decision_digest());
+        for (k, at_least) in [("commit_complete", 5), ("fork_abandoned_slot", 1), ("evaluation", 10), ("state_resnapshot", 1), ("alt_preloaded", 1), ("alt_retry", 1),
+            ("signer_miss_tx", 0)] {
+            assert!(e.counter(k) >= at_least, "{k}: {}", e.counter(k));
+        }
+        rec.close();
+        let j = read_dir(&d).unwrap();
+        let a = accounts::read_dir(&d).unwrap();
+        let by: HashMap<u64, AcctRecord> = a.records.into_iter().map(|r| (r.aseq, r)).collect();
+        assert!(j.iter().any(|r| matches!(&r.body, JBody::Alt { err: Some(_), .. })), "a failed fetch is journaled (ALT found 2)");
+        assert_eq!(boot_alts(&j).len(), 1, "the preloaded table is in the boot section (ALT found 3)");
+        assert!(j.iter().any(|r| matches!(&r.body, JBody::Input { kind: 6, .. })), "health inputs");
+        let lines = |dir: &std::path::Path, s: &str| -> Vec<serde_json::Value> {
+            crate::rec::read_jsonl(dir, s).unwrap_or_default().into_iter().map(|mut v| { v["stages"] = serde_json::Value::Null; v }).collect()
+        };
+        let (run_decisions, run_commits) = (lines(&d, "decisions"), lines(&d, "commits"));
+        assert!(!run_decisions.is_empty() && !run_commits.is_empty());
+        // the replay, recording into its own directory, on the replay clock
+        let d2 = d.join("replay");
+        let rec2 = crate::rec::start(crate::rec::Opts { dir: d2.clone(), run: "r".into(), producer: "p".into(), cfg: Default::default(), feeds: vec!["shred".into(), "tx".into()],
+            monitor: false, echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let (mut r, init) = replay_engine(reg.clone(), cfg.clone(), &j, &by).unwrap();
+        assert_eq!((init.min_tip, init.knobs.clone()), (1_000, Some(crate::engine::EngineKnobs::default())));
+        r.set_rec(rec2.clone());
+        let st = replay(&mut r, &j, &by).unwrap();
+        assert_eq!((st.missing_accounts, st.verdict_mismatches, st.gaps.len()), (0, 0, 0), "{st:?}");
+        r.finish();
+        rec2.close();
+        assert_eq!((r.digest(), r.decision_digest()), live, "run vs replay");
+        assert_eq!(lines(&d2, "decisions"), run_decisions, "the same decisions");
+        assert_eq!(lines(&d2, "commits"), run_commits, "the same commit groups");
+        assert!(crate::feeds::clock::virtual_time().is_none(), "the replay clock is off again");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// journal 2.2 (WP-04): SLOT and BLOCK_META carry the bank (None when not sent), ALT `found` 2 an error with its text
+    /// and `found` 3 a preloaded table with gaps; a 2.1 SLOT record (no bank) still reads
+    #[test]
+    fn journal_2_2_records_round_trip() {
+        let d = std::env::temp_dir().join(format!("arbx-journal-22-{}-{}", std::process::id(), crate::feeds::clock::now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let j = Journal::new(rec.clone());
+        j.alt_preload([1; 32], &[Some([2; 32]), None, None, Some([3; 32]), None, None, None, None, Some([4; 32])]);
+        j.slot(5, 100, Some(99), 6, 7, Some(42));
+        j.slot(6, 101, None, 0, 8, None);
+        j.block_meta(7, &grpc::BlockMeta { slot: 100, blockhash: [9; 32], parent_slot: 99, parent_blockhash: [0; 32], block_height: Some(90), block_time: None,
+            executed_transaction_count: 0, entries_count: 0, t: 1, bank_id: Some(43) });
+        j.alt(8, [5; 32], None, Some("429 Too Many Requests".into()));
+        j.alt(9, [6; 32], None, None);
+        j.alt(10, [7; 32], Some(Arc::new(vec![[8; 32]])), None);
+        rec.close();
+        let r = read_dir(&d).unwrap();
+        assert!(matches!(&r[0].body, JBody::Alt { table, preload: Some(v), .. } if *table == [1; 32] && v.len() == 9 && v[0] == Some([2; 32]) && v[1].is_none() && v[8] == Some([4; 32])));
+        assert_eq!(boot_alts(&r).len(), 1);
+        assert!(matches!(r[1].body, JBody::Slot { slot: 100, parent: Some(99), status: 6, t: 7, bank_id: Some(42) }));
+        assert!(matches!(r[2].body, JBody::Slot { slot: 101, parent: None, bank_id: None, .. }));
+        assert!(matches!(r[3].body, JBody::BlockMeta { slot: 100, bank_id: Some(43), .. }));
+        assert!(matches!(&r[4].body, JBody::Alt { addrs: None, err: Some(e), preload: None, .. } if e == "429 Too Many Requests"));
+        assert!(matches!(&r[5].body, JBody::Alt { addrs: None, err: None, preload: None, .. }));
+        assert!(matches!(&r[6].body, JBody::Alt { addrs: Some(a), err: None, .. } if a == &vec![[8u8; 32]]));
+        // a 2.1 SLOT body (no bank) reads with bank None
+        let mut b = Vec::new();
+        for x in [100u64, 99] { b.extend(x.to_le_bytes()); }
+        b.extend(1i32.to_le_bytes());
+        b.extend(5u64.to_le_bytes());
+        assert!(matches!(body(J_SLOT, &b).unwrap(), JBody::Slot { slot: 100, parent: Some(99), status: 1, t: 5, bank_id: None }));
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -70,6 +70,11 @@ pub struct RouteIn {
     pub sell_live: Vec<i64>,
     pub buy_end: Option<i32>,
     pub sell_end: Option<i32>,
+    /// WP-04 item 10: the state version the decision priced (xxh3 over the route accounts' (pubkey, slot,
+    /// write_version)), the time since the route's last write, and the decision (decisions.jsonl `decision`)
+    pub state_version: u64,
+    pub route_age_ms: Option<f64>,
+    pub decision: u64,
 }
 
 struct Built { msg: build::Message, cu_limit: u64, creates_ata: bool }
@@ -214,6 +219,11 @@ pub struct Exec {
     /// the SendGate mode the last `wants_send` read (None: it returned before reading it); the engine journals it at the
     /// decision point (review WP-03 #3)
     gate_seen: Option<GateMode>,
+    /// WP-04 item 8 / PLAN-ADDENDUM I-4: the engine's store health (warm-up, state availability). `wants_send` refuses
+    /// unless it is ready. An executor on its own (tools, tests) is always ready; `Engine::run` installs the engine's
+    health: Arc<crate::store_health::HealthFlags>,
+    /// why the last `wants_send` refused (decisions.jsonl `reason`), None when it allowed a send
+    refused: Option<String>,
 }
 
 /// `Exec::lat` series, in order
@@ -425,7 +435,7 @@ mod tests {
         RouteIn { opp: buy as u64, trig: [3u8; 64], trig_feed: None, slot: 11, st: [100, 100, 200, 300, now_ns()], buy: damm(buy, MINT), sell,
             buy_data: vec![], sell_data: vec![], buy_source: "ours", sell_source: "ours", mint: MINT, size, mid: 1_000, back: size + expected,
             gross_at_opp: expected as i64, net_at_opp: expected as i64, trig_cu_price: None, rival_cu_price: None, cu: 100_000,
-            buy_live: vec![], sell_live: vec![], buy_end: None, sell_end: None }
+            buy_live: vec![], sell_live: vec![], buy_end: None, sell_end: None, state_version: 0, route_age_ms: None, decision: 0 }
     }
 
     struct Rig { x: Exec, dir: std::path::PathBuf, rec: Rec }
@@ -565,10 +575,17 @@ mod tests {
         }
         let mut e = Engine::new_offline(Arc::new(reg), store, StrategyCfg { state_triggers: true, ..StrategyCfg::default() });
         e.set_rec(rec.clone());
+        // WP-04: the executor follows the engine's health (as `Engine::run` installs it)
+        x.set_health(e.health_flags());
         e.exec = Some(x);
         let mut status = |_: &str| {};
         let mut t = 1_791_000_000_000_000_000u64;
-        // three transactions, each moving one pool ~3% above the other: live, then paused (twice)
+        // the stream delivers and Tier A is complete: the warm-up gate opens (WP-04)
+        e.step(Event::Slot { slot: 12, status: 0, t, parent: Some(11), dead_error: None, bank_id: None }, t, &mut status);
+        t += 6_000_000;
+        e.timers(t, &mut status);
+        // three transactions, each moving one pool ~3% above the other: live, then paused (twice). Their groups resolve by
+        // quiescence (W unknown) at the timers 4 ms later
         for (n, sol, pause) in [(0u8, 1_030u64, false), (1, 1_060, true), (2, 1_090, false)] {
             if pause { gate.shadow("control", "pause-sending by test", false).unwrap(); }
             let m = if n % 2 == 0 { &a } else { &b };
@@ -576,9 +593,9 @@ mod tests {
             for (k, data) in [(m.vault1, vault(sol * 1_000_000_000)), (m.vault0, vault(1_000_000_000_000_000 - n as u64))] {
                 t += 1_000;
                 e.step(Event::Account { slot: 12, pubkey: k, owner: [3; 32], lamports: 1, data, t, txn: Some(txn), write_version: t, is_startup: false,
-                    src: 0, aseq: 0 }, t, &mut status);
+                    src: 0, aseq: 0, bank_id: None }, t, &mut status);
             }
-            t += 1_000;
+            t += 4_000_000;
             e.timers(t, &mut status);
         }
         let x = e.exec.as_ref().unwrap();
@@ -595,6 +612,30 @@ mod tests {
         assert!(matches!(j[i].body, JBody::Input { ref data, .. } if data["reason"] == "control"));
         assert!(matches!(j[i - 1].body, JBody::Timer { .. }) && j[i - 1].t_engine == j[i].t_engine, "{:?}", j[i - 1]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// WP-04 item 8 / PLAN-ADDENDUM I-4 (the wants_send hook; WP-05's send_checks takes the same flags): the executor
+    /// refuses while the engine is warming up or its state is unavailable, and says why (decisions.jsonl `reason`)
+    #[tokio::test]
+    async fn wants_send_refuses_unless_the_store_is_ready() {
+        use crate::store_health::{HealthFlags, Shut};
+        let mut r = live_rig("health").await;
+        assert!(r.x.wants_send().is_some(), "an executor on its own is ready");
+        let h = Arc::new(HealthFlags::default());
+        r.x.set_health(h.clone());
+        assert!(r.x.wants_send().is_none());
+        assert_eq!((r.x.refusal().as_deref(), n(&r.x, "reject_warmup")), (Some("warmup"), 1));
+        h.set(Shut::StateUnavailable);
+        assert!(r.x.wants_send().is_none());
+        assert_eq!((r.x.refusal().as_deref(), n(&r.x, "reject_state_unavailable")), (Some("state_unavailable"), 1));
+        h.set(Shut::Ready);
+        assert!(r.x.wants_send().is_some() && r.x.refusal().is_none(), "ready: allowed");
+        // the gate still comes first, with its reason
+        let g = SendGate::new();
+        g.shadow("control", "test", false).unwrap();
+        r.x.set_gate(g);
+        assert!(r.x.wants_send().is_none());
+        assert_eq!(r.x.refusal().as_deref(), Some("gate_shadow:control"));
     }
 
     /// review M10: a send deferred past the decision (the sim gate re-checks the route first) is cancelled when the
@@ -790,7 +831,7 @@ impl Exec {
             spec_price: cfg.live.spec_cu_price_micro, rotate: cfg.live.rotate_paths, mix: cfg.live.race_mix, path_arm: "", bmix: cfg.live.bundle_mix, tpu_price: cfg.live.tpu_cu_price_micro, sim_gate: cfg.live.sim_gate, compete_mult: cfg.live.compete_mult, compete_share: cfg.live.compete_max_share, compete_ab: cfg.live.compete_ab, gross_floor: cfg.live.gross_floor, tpu_max_expected: cfg.live.tpu_max_expected_lamports, tpu_skip_mriya: cfg.live.tpu_skip_mriya_pools, tpu_skip_mints: cfg.live.tpu_skip_mints.iter().map(|m| pk(m)).collect(), tpu_min_expected: cfg.live.tpu_min_expected_lamports, bundle_resend_ms: cfg.live.bundle_resend_ms.clone(), bundle_variants: cfg.live.bundle_size_variants.clone(), mint_cool: HashMap::default(), pair_lock_ns: cfg.live.pair_lock_ms * 1_000_000,
             band, rot: 0,
             tiers: cfg.live.bid_tiers.then_some((cfg.live.bid_min_expected_lamports, cfg.live.bid_share, cfg.live.bid_max_priority_lamports)), next_attempt: 0, feeds, counts: HashMap::default(),
-            lat: exec_lat(), gate: SendGate::new(), gate_seen: None })
+            lat: exec_lat(), gate: SendGate::new(), gate_seen: None, health: Arc::new(crate::store_health::HealthFlags::always_ready()), refused: None })
     }
 
     /// WP-01: follow the run's SendGate (a new Exec has its own, always live)
@@ -798,6 +839,13 @@ impl Exec {
 
     /// the SendGate mode the last `wants_send` read (None: it returned before reading the gate)
     pub fn gate_seen(&self) -> Option<GateMode> { self.gate_seen }
+
+    /// WP-04: follow the engine's store health (the warm-up gate, state availability): no send unless it is ready
+    pub fn set_health(&mut self, h: Arc<crate::store_health::HealthFlags>) { self.health = h; }
+
+    /// why the last `wants_send` refused (decisions.jsonl `reason`: `gate_shadow:<reason>`, `gate_stopped`, `warmup`,
+    /// `state_unavailable`, ...), None when it allowed a send
+    pub fn refusal(&self) -> Option<String> { self.refused.clone() }
 
     /// the SendGate as it is now (`SendGate::json`)
     pub fn gate_json(&self) -> Value { self.gate.json() }
@@ -836,6 +884,7 @@ impl Exec {
     /// the largest size the sender would send now (canary: its fixed size; live: the size cap), if it may send now
     pub fn wants_send(&mut self) -> Option<u64> {
         self.gate_seen = None;
+        self.refused = Some("no_sender".into());
         self.sending.as_ref()?;
         // WP-01: paused, shadow or stopping (control socket, --shadow, program hash mismatch, a stop request). The live
         // gate, read once: the mode this decision saw is what the engine journals (`gate_seen`)
@@ -843,20 +892,31 @@ impl Exec {
         self.gate_seen = Some(mode);
         if mode != GateMode::Live {
             self.count(if mode == GateMode::Stopped { "reject_gate_stopped" } else { "reject_gate_shadow" });
+            self.refused = Some(if mode == GateMode::Stopped { "gate_stopped".into() } else { format!("gate_shadow:{}", self.gate.reason()) });
+            return None;
+        }
+        // WP-04 / I-4: fail closed while the store is warming up or its state stream is unavailable (WP-05's send_checks
+        // takes the same flags)
+        let shut = self.health.shut();
+        if shut != crate::store_health::Shut::Ready {
+            self.count(if shut == crate::store_health::Shut::Warmup { "reject_warmup" } else { "reject_state_unavailable" });
+            self.refused = Some(shut.as_str().into());
             return None;
         }
         let s = self.sending.as_mut()?;
-        if s.stopped.is_some() { return None; }
+        if s.stopped.is_some() { self.refused = Some("sender_stopped".into()); return None; }
         let worst = BASE_FEE + FLAT_CU_PRICE * 400_000 / 1_000_000;
         if s.spent + s.reserved + worst > s.cap {
             if s.open.is_empty() { s.stopped = Some(if s.kind == Kind::Live { "failed-fee cap reached" } else { "spend cap reached" }); }
+            self.refused = Some("fee_cap".into());
             return None;
         }
         if s.kind == Kind::Canary {
-            if !s.open.is_empty() || now_ns() < s.last_ns + s.every_ms * 1_000_000 { return None; }
-            if s.sent >= s.count { s.stopped = Some("count reached"); return None; }
+            if !s.open.is_empty() || now_ns() < s.last_ns + s.every_ms * 1_000_000 { self.refused = Some("canary_wait".into()); return None; }
+            if s.sent >= s.count { s.stopped = Some("count reached"); self.refused = Some("canary_count".into()); return None; }
         }
-        if !s.nonces.iter().any(|n| n.busy.is_none() && n.value.is_some()) { *self.counts.entry("send_no_free_nonce").or_default() += 1; return None; }
+        if !s.nonces.iter().any(|n| n.busy.is_none() && n.value.is_some()) { *self.counts.entry("send_no_free_nonce").or_default() += 1; self.refused = Some("no_free_nonce".into()); return None; }
+        self.refused = None;
         Some(s.size)
     }
 
@@ -897,7 +957,9 @@ impl Exec {
             "buy_pool": b58(&r.buy.pool), "buy_venue": r.buy.venue, "buy_source": r.buy_source,
             "sell_pool": b58(&r.sell.pool), "sell_venue": r.sell.venue, "sell_source": r.sell_source, "mint": b58(&r.mint),
             "size_lamports": r.size, "predicted_mid": r.mid, "predicted_back": r.back, "predicted_profit": r.back as i64 - r.size as i64,
-            "gross_at_opp": r.gross_at_opp, "net_at_opp": r.net_at_opp })
+            "gross_at_opp": r.gross_at_opp, "net_at_opp": r.net_at_opp,
+            // WP-04 item 10: the decision and the state version it priced
+            "decision": r.decision, "sv": format!("{:016x}", r.state_version), "route_age_ms": r.route_age_ms })
     }
 
     /// STEP 2: build this decision's transaction and simulate it (the answer goes to sims.jsonl)

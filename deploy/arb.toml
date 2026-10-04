@@ -53,6 +53,16 @@ watch_programdata = true
 watch_wallet = true
 slot_statuses = "auto"
 block_meta = "auto"
+# WP-04 (the defaults, written out): commit groups, readiness, the lag SLO (log only), the state-health gate (I-4)
+commit_timeout_ms = 5
+quiescence_ms = 3
+max_part_skew_slots = 2
+max_tip_lag_slots = 2
+clock_max_age_slots = 2
+slo_action = "log"
+boot_timeout_s = 60
+max_update_age_ms = 2000
+resnapshot = true
 
 # Haan's plan allows 1 transaction filter with 1 account: PumpSwap (the busiest venue). WP-03: a [[state.tx_stream]]
 # (it runs as a feed after the [[feed]] list)
@@ -67,8 +77,8 @@ sizes_sol = [0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
 min_profit_lamports = 1
 cu_price_micro = 40000
 outcome_watch_ms = 2000
-# WP-00: decoded swaps are hints only now ([strategy] decoded_sends defaults to false), so the confirmed pool moves
-# are the pricing path. Without this line this config found no opportunity at all (review F3)
+# decoded swaps are hints only (WP-00, WP-04), so committed state is the only pricing path. Without this line this
+# config finds no opportunity at all (review F3)
 state_triggers = true
 
 # ---------------------------------------------------------------- raw shreds
@@ -354,3 +364,13 @@ min_free_gb = 25
 [runtime]
 # WP-02: the background runtime for every RPC call
 bg_threads = 3
+
+[alts]
+# WP-04 / I-6: lookup-table fetches retried (never cached as missing), capped, the previous segment's tables preloaded
+max_inflight = 16
+preload = "auto"
+
+[accuracy]
+# WP-04: hint accuracy against the pre-state; log only in Stage 0
+action = "log"
+ring_versions = 8

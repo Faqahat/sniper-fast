@@ -125,6 +125,10 @@ pub const RUN_LOG: S = S(24);
 pub const SLOTS: S = S(25);
 pub const BLOCKS: S = S(26);
 pub const LEADERS: S = S(27);
+/// WP-04: every commit group at resolution (§4.31), every route evaluation (§4.32), lookup-table events (§4.26)
+pub const COMMITS: S = S(28);
+pub const DECISIONS: S = S(29);
+pub const ALTS: S = S(30);
 
 pub const ACCOUNTS_MAGIC: [u8; 8] = *b"ARBXACC\0";
 pub const JOURNAL_MAGIC: [u8; 8] = *b"ARBXJRN\0";
@@ -135,13 +139,13 @@ pub const ENTRIES_MAGIC: [u8; 8] = *b"ARBXENT\0";
 /// (ledger, wallet, decisions, commits, slotidx, txfetch, alts events, ...) are added here by them. `accounts` and
 /// `journal` are WP-03's formats (src/rec/accounts.rs, src/rec/journal.rs); their queues and GAP records are this
 /// module's. WP-03 also brings exec v2 (src/rec/exec.rs), slots, blocks and leaders
-const STATIC: [(&str, Class, Format, &str, bool); 28] = [
+const STATIC: [(&str, Class, Format, &str, bool); 31] = [
     ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/1.1", false),
     ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.1", false),
     ("bundles", Class::Core, Format::Jsonl, "arbx.bundles/1.1", false),
     ("outcomes", Class::Core, Format::Jsonl, "arbx.outcomes/1.1", false),
-    ("accounts", Class::Replay, Format::Bin { magic: ACCOUNTS_MAGIC, format: 2 }, "arbx.accounts/2.0", false),
-    ("journal", Class::Replay, Format::Bin { magic: JOURNAL_MAGIC, format: 2 }, "arbx.journal/2.1", false),
+    ("accounts", Class::Replay, Format::Bin { magic: ACCOUNTS_MAGIC, format: 2 }, "arbx.accounts/2.1", false),
+    ("journal", Class::Replay, Format::Bin { magic: JOURNAL_MAGIC, format: 2 }, "arbx.journal/2.2", false),
     ("exec", Class::Chain, Format::Jsonl, "arbx.exec/2.0", false),
     ("txarr", Class::Chain, Format::Text, "arbx.txarr/1.1", false),
     ("arrivals", Class::Chain, Format::Jsonl, "arbx.arrivals/1.1", false),
@@ -149,11 +153,11 @@ const STATIC: [(&str, Class, Format, &str, bool); 28] = [
     ("poh", Class::Chain, Format::Text, "arbx.poh/2.0", false),
     ("slots-feed", Class::Chain, Format::Text, "arbx.slots-feed/2.0", false),
     ("alts-final", Class::Chain, Format::Jsonl, "arbx.alts-final/1.1", true),
-    ("triggers", Class::Chain, Format::Jsonl, "arbx.triggers/1.1", false),
-    ("predictions", Class::Chain, Format::Jsonl, "arbx.predictions/1.1", false),
-    ("caps", Class::Chain, Format::Jsonl, "arbx.caps/1.1", false),
+    ("triggers", Class::Chain, Format::Jsonl, "arbx.triggers/2.0", false),
+    ("predictions", Class::Chain, Format::Jsonl, "arbx.predictions/2.0", false),
+    ("caps", Class::Chain, Format::Jsonl, "arbx.caps/1.2", false),
     ("sims", Class::Chain, Format::Jsonl, "arbx.sims/1.1", false),
-    ("opportunities", Class::Chain, Format::Jsonl, "arbx.opportunities/1.1", false),
+    ("opportunities", Class::Chain, Format::Jsonl, "arbx.opportunities/1.2", false),
     ("rivals", Class::Bulk, Format::Jsonl, "arbx.rivals/1.1", false),
     ("status", Class::Slow, Format::PlainJsonl, "arbx.status/2.0", false),
     ("events", Class::Slow, Format::PlainJsonl, "arbx.events/1.0", false),
@@ -164,6 +168,9 @@ const STATIC: [(&str, Class, Format, &str, bool); 28] = [
     ("slots", Class::Chain, Format::Jsonl, "arbx.slots/1.0", false),
     ("blocks", Class::Chain, Format::Jsonl, "arbx.blocks/1.0", false),
     ("leaders", Class::Chain, Format::Jsonl, "arbx.leaders/1.0", false),
+    ("commits", Class::Core, Format::Jsonl, "arbx.commits/1.0", false),
+    ("decisions", Class::Core, Format::Jsonl, "arbx.decisions/1.0", false),
+    ("alts", Class::Chain, Format::Jsonl, "arbx.alts/2.0", false),
 ];
 
 /// a zstd frame ends at the latest when this much raw data is pending (§1.3)

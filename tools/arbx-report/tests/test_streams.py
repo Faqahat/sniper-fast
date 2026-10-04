@@ -207,6 +207,34 @@ class Binary(unittest.TestCase):
         got = streams._parse_journal_body(streams.J_INPUT, struct.pack("<BI", 10, len(payload)) + payload)
         self.assertEqual(got, {"input": "engine_init", "data": {"min_tip": 1000}})
 
+    def test_journal_2_2_and_accounts_2_1_fields(self):
+        # WP-04: SLOT and BLOCK_META carry the bank; ALT found 2 (a failed fetch, with its error) and 3 (a table
+        # preloaded at boot, with gaps); accounts.bin flags bit 2 carries the update's bank after the txn
+        slot = struct.pack("<QQiQQ", 100, 99, 6, 7, 42)
+        self.assertEqual(streams._parse_journal_body(streams.J_SLOT, slot)["bank_id"], 42)
+        self.assertIsNone(streams._parse_journal_body(streams.J_SLOT, slot[:28])["bank_id"], "a 2.1 SLOT has no bank")
+        self.assertIsNone(streams._parse_journal_body(streams.J_SLOT, struct.pack("<QQiQQ", 1, 0, 0, 0, 2 ** 64 - 1))["bank_id"])
+        err = b"429"
+        alt2 = bytes(32) + bytes([2]) + struct.pack("<H", 0) + struct.pack("<H", len(err)) + err
+        self.assertEqual(streams._parse_journal_body(streams.J_ALT, alt2), {"table": solana.b58encode(bytes(32)), "found": False, "addrs": [], "err": "429"})
+        k = bytes([7]) * 32
+        alt3 = bytes(32) + bytes([3]) + struct.pack("<H", 3) + bytes([0b101]) + k + k
+        got = streams._parse_journal_body(streams.J_ALT, alt3)
+        self.assertEqual((got["preload"], got["addrs"]), (True, [solana.b58encode(k), None, solana.b58encode(k)]))
+        # an accounts.bin FULL record with a bank (flags bit 2)
+        hdr = json.dumps(gen.header("accounts", "2.1"), sort_keys=True).encode()
+        out = bytearray(b"ARBXACC\0" + struct.pack("<HH", 2, len(hdr)) + hdr)
+        d = struct.pack("<I", 0) + k + bytes([2]) + struct.pack("<I", 0)
+        out += bytes([1]) + struct.pack("<I", len(d)) + d
+        data = b"\x05" * 8
+        body = struct.pack("<QIQQQBB", 0, 0, 10, 1, 1, 0, 4) + struct.pack("<Q", 77) + struct.pack("<Q", 1) + bytes(32) + struct.pack("<QI", 0, len(data)) + data
+        out += bytes([2]) + struct.pack("<I", len(body)) + body
+        with TmpDir() as tmp:
+            with open(os.path.join(tmp, "accounts.000.bin.zst"), "wb") as f:
+                f.write(zstd.compress_raw(bytes(out)))
+            recs = list(streams.iter_accounts(streams.discover(tmp)["accounts"]))
+            self.assertEqual((recs[0].bank_id, recs[0].data, recs[0].lamports), (77, data, 1))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -57,7 +57,7 @@ fn rotation_makes_self_contained_files() {
         let (bytes, tail) = decode_zst(f).unwrap();
         assert_eq!(tail, 0, "every frame complete after close");
         let v = lines(&bytes);
-        assert_eq!(v[0]["schema"], "arbx.triggers/1.1", "{f:?} starts with its header");
+        assert_eq!(v[0]["schema"], "arbx.triggers/2.0", "{f:?} starts with its header");
         assert_eq!((v[0]["file_seq"].as_u64(), v[0]["run"].as_str(), v[0]["producer"].as_str()), (Some(k as u64), Some("test-seg"), Some("0123456789abcdef")));
         assert!(v[0]["started_ns"].as_u64().unwrap() > 0);
         assert!(v.len() > 1);
@@ -192,7 +192,7 @@ fn acct_records(bytes: &[u8]) -> Vec<(u8, Vec<u8>)> {
     assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 2);
     let hlen = u16::from_le_bytes([bytes[10], bytes[11]]) as usize;
     let h: Value = serde_json::from_slice(&bytes[12..12 + hlen]).unwrap();
-    assert_eq!((h["schema"].as_str(), h["file_seq"].as_u64()), (Some("arbx.accounts/2.0"), Some(0)));
+    assert_eq!((h["schema"].as_str(), h["file_seq"].as_u64()), (Some("arbx.accounts/2.1"), Some(0)));
     let mut p = 12 + hlen;
     let mut out = Vec::new();
     while p < bytes.len() {
@@ -398,7 +398,7 @@ fn headers_and_plain_streams() {
     assert_eq!((st["files"][0]["path"].as_str(), st["files"][0]["sha256"].as_str()), (Some("status.jsonl"), None), "plain files stay open to appends: no hash");
     // meta.json `streams`
     let s = rec.streams_json();
-    assert_eq!((s["attempts"].as_str(), s["status"].as_str(), s["accounts"].as_str()), (Some("arbx.attempts/1.1"), Some("arbx.status/2.0"), Some("arbx.accounts/2.0")));
+    assert_eq!((s["attempts"].as_str(), s["status"].as_str(), s["accounts"].as_str()), (Some("arbx.attempts/1.1"), Some("arbx.status/2.0"), Some("arbx.accounts/2.1")));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -623,7 +623,7 @@ fn a_file_that_could_not_be_opened_is_tried_again() {
     rec.close();
     let (b, _) = decode_zst(&d.join("caps.000.jsonl.zst")).unwrap();
     let v = lines(&b);
-    assert_eq!(v[0]["schema"], "arbx.caps/1.1", "the header comes first");
+    assert_eq!(v[0]["schema"], "arbx.caps/1.2", "the header comes first");
     assert_eq!(v[1..].iter().map(|x| x["i"].as_u64().unwrap()).collect::<Vec<_>>(), vec![5, 6, 7]);
     let m = manifest(&d);
     let c = mstream(&m, "caps");

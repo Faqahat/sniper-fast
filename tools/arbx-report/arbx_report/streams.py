@@ -368,6 +368,7 @@ class AccountRecord:
     data_xxh3: int
     data: bytes
     kind: int  # 2 FULL, 3 XOR
+    bank_id: int | None = None  # accounts 2.1 (flags bit 2)
 
 
 @dataclass
@@ -425,6 +426,11 @@ def iter_accounts(files: list, keep_data: bool = True, scan: AccountsScan | None
                     if flags & 1:
                         txn = solana.b58encode(body[p:p + 64])
                         p += 64
+                    bank_id = None
+                    if flags & 4:
+                        # accounts 2.1 (WP-04): the bank the update was written in
+                        bank_id = struct.unpack_from("<Q", body, p)[0]
+                        p += 8
                     lamports = struct.unpack_from("<Q", body, p)[0]
                     p += 8
                     owner = solana.b58encode(body[p:p + 32])
@@ -449,7 +455,7 @@ def iter_accounts(files: list, keep_data: bool = True, scan: AccountsScan | None
                             scan.aseq_holes.append((prev_aseq + 1, aseq - 1))
                     prev_aseq = aseq
                     yield AccountRecord(aseq, pk, role, pidx, slot, wv, t, src, flags, txn, lamports, owner, xh,
-                                        data if keep_data else b"", kind)
+                                        data if keep_data else b"", kind, bank_id)
                 elif kind == ACC_MARK:
                     t, mark, n = struct.unpack_from("<QBI", body, 0)
                     ids = struct.unpack_from(f"<{n}I", body, 13) if n else ()
@@ -517,16 +523,41 @@ def _parse_journal_body(kind: int, b: bytes) -> dict:
         return {"aseq": aseq, "store_verdict": "accepted" if verdict == 0 else "stale"}
     if kind == J_SLOT:
         slot, parent, status, t = struct.unpack_from("<QQiQ", b, 0)
-        return {"slot": slot, "parent": None if parent == 0xFFFFFFFFFFFFFFFF else parent, "status": status, "t": t}
+        # journal 2.2 (WP-04) appends the slot's bank (u64::MAX: not sent)
+        bank = struct.unpack_from("<Q", b, 28)[0] if len(b) >= 36 else 0xFFFFFFFFFFFFFFFF
+        return {"slot": slot, "parent": None if parent == 0xFFFFFFFFFFFFFFFF else parent, "status": status, "t": t,
+                "bank_id": None if bank == 0xFFFFFFFFFFFFFFFF else bank}
     if kind == J_BLOCK_META:
         slot = struct.unpack_from("<Q", b, 0)[0]
         bh = solana.b58encode(b[8:40])
         height, parent, t = struct.unpack_from("<QQQ", b, 40)
-        return {"slot": slot, "blockhash": bh, "height": height, "parent_slot": parent, "t": t}
+        bank = struct.unpack_from("<Q", b, 64)[0] if len(b) >= 72 else 0xFFFFFFFFFFFFFFFF
+        return {"slot": slot, "blockhash": bh, "height": height, "parent_slot": parent, "t": t,
+                "bank_id": None if bank == 0xFFFFFFFFFFFFFFFF else bank}
     if kind == J_ALT:
         table = solana.b58encode(b[:32])
-        found, n = b[32], struct.unpack_from("<H", b, 33)[0]
-        return {"table": table, "found": bool(found), "addrs": [solana.b58encode(b[35 + 32 * i:67 + 32 * i]) for i in range(n)]}
+        found = b[32]
+        if found == 3:
+            # journal 2.2 (WP-04 / I-6): a table preloaded at boot, u16 n | known-bitmap | the known entries
+            n = struct.unpack_from("<H", b, 33)[0]
+            bits = b[35:35 + (n + 7) // 8]
+            p = 35 + (n + 7) // 8
+            addrs = []
+            for i in range(n):
+                if bits[i // 8] & (1 << (i % 8)):
+                    addrs.append(solana.b58encode(b[p:p + 32]))
+                    p += 32
+                else:
+                    addrs.append(None)
+            return {"table": table, "found": True, "preload": True, "addrs": addrs}
+        n = struct.unpack_from("<H", b, 33)[0]
+        d = {"table": table, "found": found == 1, "addrs": [solana.b58encode(b[35 + 32 * i:67 + 32 * i]) for i in range(n)]}
+        if found == 2:
+            # journal 2.2: the fetch failed (u16 len | UTF-8 error); retried by the engine
+            p = 35 + 32 * n
+            ln = struct.unpack_from("<H", b, p)[0]
+            d["err"] = b[p + 2:p + 2 + ln].decode("utf-8", "replace")
+        return d
     if kind == J_INPUT:
         ik, ln = struct.unpack_from("<BI", b, 0)
         try:

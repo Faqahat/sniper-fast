@@ -103,20 +103,22 @@ impl SendGate {
 
 // ------------------------------------------------------------------ stop reasons
 
-/// MEASUREMENT A.5 stop reasons
+/// MEASUREMENT A.5 stop reasons. `StateUnavailable` (PLAN-ADDENDUM I-4): the state stream delivered nothing within
+/// `[state] boot_timeout_s` of the engine's start (cmp2: a 503 for 28 minutes, priced blind, exit 0); it is a failure
+/// (exit 30, a crash to the supervisor: retried after its back-off, counted toward the crash limit), not a safety stop
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum StopReason { Deadline, Signal, Control, EquityDay, DiskBudget, Error, Panic }
+pub enum StopReason { Deadline, Signal, Control, EquityDay, DiskBudget, StateUnavailable, Error, Panic }
 
 impl StopReason {
     pub fn as_str(self) -> &'static str {
         match self { StopReason::Deadline => "deadline", StopReason::Signal => "signal", StopReason::Control => "control", StopReason::EquityDay => "equity_day",
-            StopReason::DiskBudget => "disk_budget", StopReason::Error => "error", StopReason::Panic => "panic" }
+            StopReason::DiskBudget => "disk_budget", StopReason::StateUnavailable => "state_unavailable", StopReason::Error => "error", StopReason::Panic => "panic" }
     }
     /// 0 deadline, 10 operator stop, 20 safety stop (ends the campaign), 30 error
     pub fn exit_code(self) -> i32 {
         match self { StopReason::Deadline => 0, StopReason::Signal | StopReason::Control => 10, StopReason::EquityDay | StopReason::DiskBudget => 20,
-            StopReason::Error | StopReason::Panic => 30 }
+            StopReason::StateUnavailable | StopReason::Error | StopReason::Panic => 30 }
     }
 }
 
@@ -500,8 +502,11 @@ mod tests {
 
     #[test]
     fn exit_codes_and_first_reason_wins() {
-        assert_eq!([StopReason::Deadline, StopReason::Signal, StopReason::Control, StopReason::EquityDay, StopReason::DiskBudget, StopReason::Error, StopReason::Panic]
-            .map(StopReason::exit_code), [0, 10, 10, 20, 20, 30, 30]);
+        assert_eq!([StopReason::Deadline, StopReason::Signal, StopReason::Control, StopReason::EquityDay, StopReason::DiskBudget, StopReason::StateUnavailable,
+            StopReason::Error, StopReason::Panic].map(StopReason::exit_code), [0, 10, 10, 20, 20, 30, 30, 30]);
+        // WP-04 / PLAN-ADDENDUM I-4: its own name in stop.json (the supervisor classes it a crash: exit 30, not error)
+        assert_eq!(StopReason::StateUnavailable.as_str(), "state_unavailable");
+        assert_eq!(serde_json::to_value(StopReason::StateUnavailable).unwrap(), serde_json::json!("state_unavailable"));
         let s = Session::new();
         let d = tmp("first");
         s.set_dir(d.clone());

@@ -97,6 +97,8 @@ pub struct AcctUpdate<'a> {
     pub lamports: u64,
     pub owner: Pk,
     pub data: &'a Arc<[u8]>,
+    /// the bank it was written in (WP-04: flags bit 2 and a u64 after the txn; MEASUREMENT §4.12, accounts 2.1)
+    pub bank_id: Option<u64>,
 }
 
 /// The accounts.bin producer handle (cheap to share: `Arc`)
@@ -118,7 +120,8 @@ impl AcctRec {
         let (role, pool_index) = self.roles.of(&u.pubkey);
         let every = self.rec.accounts_keyframe_every().max(1);
         let rec = Rec2 { pubkey: u.pubkey, role, pool_index, slot: u.slot, wv: u.write_version, t: u.t_recv, src: u.src,
-            flags: (u.txn.is_some() as u8) | ((u.is_startup as u8) << 1), txn: u.txn, lamports: u.lamports, owner: u.owner, data: u.data.clone() };
+            flags: (u.txn.is_some() as u8) | ((u.is_startup as u8) << 1) | ((u.bank_id.is_some() as u8) << 2), txn: u.txn, bank_id: u.bank_id, lamports: u.lamports,
+            owner: u.owner, data: u.data.clone() };
         let size = u.data.len() as u64 + 160;
         // the aseq and the queue order are taken together: the file is in aseq order whatever thread records
         let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -146,7 +149,8 @@ impl AcctRec {
 }
 
 /// what the writer needs of one update
-struct Rec2 { pubkey: Pk, role: u8, pool_index: u32, slot: u64, wv: u64, t: u64, src: u8, flags: u8, txn: Option<[u8; 64]>, lamports: u64, owner: Pk, data: Arc<[u8]> }
+struct Rec2 { pubkey: Pk, role: u8, pool_index: u32, slot: u64, wv: u64, t: u64, src: u8, flags: u8, txn: Option<[u8; 64]>, bank_id: Option<u64>, lamports: u64, owner: Pk,
+    data: Arc<[u8]> }
 
 /// The per-file dictionary and keyframe state (writer side)
 #[derive(Default)]
@@ -193,6 +197,7 @@ impl AccDict {
         o.push(r.src);
         o.push(r.flags);
         if let Some(s) = &r.txn { o.extend_from_slice(s); }
+        if let Some(b) = r.bank_id { o.extend(b.to_le_bytes()); }
         o.extend(r.lamports.to_le_bytes());
         o.extend_from_slice(&r.owner);
         o.extend(xxhash_rust::xxh3::xxh3_64(&r.data).to_le_bytes());
@@ -221,6 +226,8 @@ pub struct AcctRecord {
     pub src: u8,
     pub is_startup: bool,
     pub txn: Option<[u8; 64]>,
+    /// the bank it was written in (flags bit 2; accounts 2.1, WP-04)
+    pub bank_id: Option<u64>,
     pub lamports: u64,
     pub owner: Pk,
     pub data: Vec<u8>,
@@ -281,6 +288,7 @@ pub fn parse(b: &[u8]) -> Result<Parsed> {
                 let src = rd::<1>(body, &mut q)?[0];
                 let flags = rd::<1>(body, &mut q)?[0];
                 let txn = if flags & 1 != 0 { Some(rd::<64>(body, &mut q)?) } else { None };
+                let bank_id = if flags & 4 != 0 { Some(u64_(body, &mut q)?) } else { None };
                 let lamports = u64_(body, &mut q)?;
                 let owner: Pk = rd(body, &mut q)?;
                 let h = u64_(body, &mut q)?;
@@ -295,7 +303,7 @@ pub fn parse(b: &[u8]) -> Result<Parsed> {
                 let (pubkey, role, pi) = *dict.get(&id).with_context(|| format!("aseq {aseq}: unknown acct_id {id}"))?;
                 last.insert(id, data.clone());
                 out.records.push(AcctRecord { aseq, pubkey, role, pool_index: (pi != NO_POOL).then_some(pi), slot, write_version: wv, t_recv: t, src,
-                    is_startup: flags & 2 != 0, txn, lamports, owner, data, kind });
+                    is_startup: flags & 2 != 0, txn, bank_id, lamports, owner, data, kind });
             }
             K_MARK => {
                 let t = u64_(body, &mut q)?;
@@ -348,7 +356,10 @@ mod tests {
             let mut v = vec![(i % 251) as u8; len];
             v[0..8].copy_from_slice(&i.to_le_bytes());
             let data: Arc<[u8]> = v.clone().into();
-            let q = acct.record(&AcctUpdate { pubkey: k, slot: i, write_version: i, t_recv: i, src: 0, is_startup: false, txn: None, lamports: i, owner: [1; 32], data: &data });
+            // WP-04: every 3rd update names its bank (flags bit 2)
+            let bank_id = (i % 3 == 0).then_some(1_000 + i);
+            let q = acct.record(&AcctUpdate { pubkey: k, slot: i, write_version: i, t_recv: i, src: 0, is_startup: false, txn: None, lamports: i, owner: [1; 32], data: &data,
+                bank_id });
             assert_eq!(q, i, "aseq in order");
             want.push(v);
             if i == 1_000 { acct.mark(MARK_STREAM_RECONNECT, &[]); }
@@ -360,7 +371,10 @@ mod tests {
         let a = read_dir(&d).unwrap();
         assert!(files.len() > 1, "rotated: {} files", files.len());
         assert_eq!(a.records.len(), 2_000);
-        for (r, w) in a.records.iter().zip(&want) { assert_eq!(&r.data, w, "aseq {}", r.aseq); assert_eq!((r.slot, r.lamports), (r.aseq, r.aseq)); }
+        for (r, w) in a.records.iter().zip(&want) {
+            assert_eq!(&r.data, w, "aseq {}", r.aseq);
+            assert_eq!((r.slot, r.lamports, r.bank_id), (r.aseq, r.aseq, (r.aseq % 3 == 0).then_some(1_000 + r.aseq)));
+        }
         let full = a.records.iter().filter(|r| r.kind == K_FULL).count();
         let xor = a.records.iter().filter(|r| r.kind == K_XOR).count();
         assert_eq!(full + xor, 2_000);

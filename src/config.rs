@@ -56,6 +56,10 @@ pub struct Config {
     pub runtime: RuntimeCfg,
     #[serde(default)]
     pub leaders: LeadersCfg,
+    #[serde(default)]
+    pub alts: AltsCfg,
+    #[serde(default)]
+    pub accuracy: AccuracyCfg,
 }
 
 /// the config format this binary reads
@@ -502,9 +506,118 @@ pub struct StateCfg {
     /// (`yellowstone-tx`) after the `[[feed]]` list; Stage 0 has one, on the PumpSwap program
     #[serde(default, rename = "tx_stream")]
     pub tx_streams: Vec<TxStreamCfg>,
+    /// WP-04 item 3 (CommitTracker): a transaction whose write set W(T) is known stays pending at most this long after
+    /// its first account update (then `timeout_unknown`), ms
+    #[serde(default = "commit_timeout_ms")]
+    pub commit_timeout_ms: u64,
+    /// ... one whose W(T) is unknown resolves when no update stamped with it arrived for this long (`timeout_quiescent`),
+    /// and the routes of a group resolved by a timeout need every account of both pools quiet this long, ms. 3 is a
+    /// placeholder until WP-03 recordings measure the spread of one transaction's updates (arb-lab's moves logs, first
+    /// update per pool only: 0.38-0.63 ms at p99.9 across the pools of one transaction, w5h2-p1/p2, w5h-p12)
+    #[serde(default = "quiescence_ms")]
+    pub quiescence_ms: u64,
+    /// WP-04 item 4: a pool's consistency set (the accounts every swap of it writes) may span at most this many slots
+    #[serde(default = "two")]
+    pub max_part_skew_slots: u64,
+    /// ... and the store may be at most this many slots behind the chain tip (the warm-up gate too)
+    #[serde(default = "two")]
+    pub max_tip_lag_slots: u64,
+    /// WP-04 item 6: DLMM and DAMM v2 routes are refused (`clock_stale`) when the Clock sysvar is more than this many
+    /// slots behind the tip
+    #[serde(default = "two")]
+    pub clock_max_age_slots: u64,
+    /// WP-04 item 8: the lag SLO (first shred of T to T's complete commit), checked every minute
+    #[serde(default = "slo_p50")]
+    pub lag_slo_p50_ms: f64,
+    #[serde(default = "slo_p90")]
+    pub lag_slo_p90_ms: f64,
+    #[serde(default = "slo_breach")]
+    pub lag_slo_breach_minutes: u32,
+    /// "log" (Stage 0: breaches are recorded only) or "shadow" (`lag_slo_breach_minutes` breaches in a row shadow the
+    /// SendGate, reason `state_slo`; `slo_recover_minutes` good minutes in a row bring it back; F32)
+    #[serde(default = "slo_log")]
+    pub slo_action: String,
+    #[serde(default = "slo_recover")]
+    pub slo_recover_minutes: u32,
+    /// WP-04 item 8: a Tier-A pool whose parts are still missing this long after the engine started leaves Tier A, so
+    /// one dead pool cannot hold the warm-up gate shut, s
+    #[serde(default = "tier_a_grace")]
+    pub tier_a_grace_s: u64,
+    /// PLAN-ADDENDUM I-4: the run stops (`state_unavailable`) when the state stream has delivered nothing this long after
+    /// the engine started, s (0: never)
+    #[serde(default = "boot_timeout")]
+    pub boot_timeout_s: u64,
+    /// ... and nothing is priced or sent while the stream is down or its newest message is older than this, ms
+    #[serde(default = "max_update_age")]
+    pub max_update_age_ms: u64,
+    /// ... and every followed account is read again (RPC) after the stream reconnects
+    #[serde(default = "yes")]
+    pub resnapshot: bool,
 }
 fn slot_statuses_auto() -> String { "auto".into() }
 fn block_meta_auto() -> String { "auto".into() }
+fn commit_timeout_ms() -> u64 { 5 }
+fn quiescence_ms() -> u64 { 3 }
+fn two() -> u64 { 2 }
+fn slo_p50() -> f64 { 16.0 }
+fn slo_p90() -> f64 { 30.0 }
+fn slo_breach() -> u32 { 5 }
+fn slo_log() -> String { "log".into() }
+fn slo_recover() -> u32 { 10 }
+fn tier_a_grace() -> u64 { 60 }
+fn boot_timeout() -> u64 { 60 }
+fn max_update_age() -> u64 { 2_000 }
+
+/// Lookup tables (PLAN WP-04 item 7; PLAN-ADDENDUM I-6): a failed fetch is retried, never cached as missing for the run
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AltsCfg {
+    /// the retries after the 1st, 2nd, ... failure, ms; then every `retry_every_s`
+    #[serde(default = "alt_retry_ms")]
+    pub retry_ms: Vec<u64>,
+    #[serde(default = "alt_retry_every")]
+    pub retry_every_s: u64,
+    /// a table still not fetched this long after its first failure is given up (its waiting transactions dropped), s
+    #[serde(default = "alt_give_up")]
+    pub give_up_s: u64,
+    /// transactions waiting for tables, at most (the oldest are dropped and counted)
+    #[serde(default = "alt_wait_cap")]
+    pub wait_cap: usize,
+    /// fetches running at once, at most (the rest queue)
+    #[serde(default = "alt_inflight")]
+    pub max_inflight: usize,
+    /// a previous segment's `alts-final.jsonl.zst` to start with: "auto" (the newest one in this run directory's sibling
+    /// segments), a path, or "" (none)
+    #[serde(default = "auto")]
+    pub preload: String,
+}
+fn alt_retry_ms() -> Vec<u64> { vec![50, 250, 1_000, 5_000] }
+fn alt_retry_every() -> u64 { 30 }
+fn alt_give_up() -> u64 { 600 }
+fn alt_wait_cap() -> usize { 10_000 }
+fn alt_inflight() -> usize { 16 }
+fn auto() -> String { "auto".into() }
+impl Default for AltsCfg {
+    fn default() -> Self { AltsCfg { retry_ms: alt_retry_ms(), retry_every_s: alt_retry_every(), give_up_s: alt_give_up(), wait_cap: alt_wait_cap(), max_inflight: alt_inflight(), preload: auto() } }
+}
+
+/// The accuracy monitor (PLAN WP-04 item 13): decoded hints scored against their transaction's pre-state
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccuracyCfg {
+    /// "log": no quarantine acts in Stage 0 (OD-8)
+    #[serde(default = "slo_log")]
+    pub action: String,
+    /// versions kept per account (the pre-state, fork rollback)
+    #[serde(default = "ring_versions")]
+    pub ring_versions: usize,
+    /// scores waiting for idle time, at most (overflow counted)
+    #[serde(default = "acc_queue")]
+    pub queue: usize,
+}
+fn ring_versions() -> usize { 8 }
+fn acc_queue() -> usize { 10_000 }
+impl Default for AccuracyCfg { fn default() -> Self { AccuracyCfg { action: slo_log(), ring_versions: ring_versions(), queue: acc_queue() } } }
 
 /// One executed-transaction stream (`[[state.tx_stream]]`, WP-03 item 3). The provider of the Stage-0 plan allows one
 /// transaction filter with one account; a second filter or provider covering the other venues is owner decision OD-1
@@ -600,32 +713,24 @@ pub struct StrategyCfg {
     /// how long (ms) after a trigger we keep watching the pools for who took the opportunity
     #[serde(default = "watch_ms")]
     pub outcome_watch_ms: u64,
-    /// per trigger signer (ok, failed) carried across runs: loaded at start, saved every 10 s; "" keeps them per run
+    /// per trigger signer (ok, failed) carried across runs: read once at start (its sha256 goes to meta.json and the
+    /// journal's engine_init); never written by a run (PLAN-ADDENDUM I-5): each segment writes its own copy and this
+    /// segment's counts into its run directory (`signer-stats.json`, `signer-stats-delta.json`), and merging them back is
+    /// an explicit step (`arbx signer-stats merge`). "" starts empty
     #[serde(default)]
     pub signer_stats_file: String,
-    /// wait (at most this many ms) for the pool update naming the trigger before acting: a trigger that failed on chain
-    /// never shows, so no trade on a gap that never existed (long run 1: 52% of trades), and the trade is priced on the
-    /// real post-trigger state. 0 = act on the prediction at once.
-    #[serde(default)]
-    pub confirm_trigger_ms: u64,
-    /// skip triggers from signers whose triggers mostly fail (with confirm_trigger_ms on, a phantom is never traded
-    /// anyway, and the filter only loses the real gaps such signers sometimes make)
+    /// skip triggers from signers whose triggers mostly fail. Decoded swaps are hints only (WP-04): the skip drops only
+    /// the hint's accuracy check (its write set is still registered with the CommitTracker)
     #[serde(default = "skip_signers")]
     pub skip_failing_signers: bool,
-    /// also act on CONFIRMED pool moves: whenever any transaction (aggregator- or bot-routed swaps included, which
-    /// the instruction decoder cannot see) moves one of our pools, re-check that pair on the live state
+    /// price on committed state: whenever a transaction's writes to one of our pools are complete (its commit group
+    /// resolved, WP-04), the pool's routes are evaluated. The only pricing path (decoded swaps are hints)
     #[serde(default)]
     pub state_triggers: bool,
     /// record, per opportunity, the best round trip at each of these budgets (SOL) to caps.jsonl (what a bigger
     /// balance would add; nothing is traded above live.max_size_sol)
     #[serde(default)]
     pub budget_caps_sol: Vec<f64>,
-    /// WP-00 (temporary; removed with the decoded path in WP-04): act on decoded, unconfirmed swaps. Off (default): a
-    /// decoded swap is a hint only. Its signer check, slippage check, accuracy check and signer bookkeeping still run,
-    /// but no prediction is stored and no route is priced or sent from it (`trigger_hint_only`): 681 of 822 decoded
-    /// triggers of 0.1 SOL or more failed on chain (W §7.1)
-    #[serde(default)]
-    pub decoded_sends: bool,
 }
 fn yes() -> bool { true }
 fn sizes() -> Vec<f64> { vec![0.02, 0.05, 0.1, 0.2, 0.5, 1.0] }
@@ -633,7 +738,7 @@ fn min_profit() -> u64 { 10_000 }
 fn cu_price() -> u64 { 40_000 }
 fn watch_ms() -> u64 { 2_000 }
 impl Default for StrategyCfg {
-    fn default() -> Self { StrategyCfg { sizes_sol: sizes(), min_profit_lamports: min_profit(), cu_price_micro: cu_price(), outcome_watch_ms: watch_ms(), signer_stats_file: String::new(), confirm_trigger_ms: 0, skip_failing_signers: true, state_triggers: false, budget_caps_sol: vec![], decoded_sends: false } }
+    fn default() -> Self { StrategyCfg { sizes_sol: sizes(), min_profit_lamports: min_profit(), cu_price_micro: cu_price(), outcome_watch_ms: watch_ms(), signer_stats_file: String::new(), skip_failing_signers: true, state_triggers: false, budget_caps_sol: vec![] } }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -908,6 +1013,19 @@ impl Config {
             }
         }
         if cfg.leaders.refresh_min == 0 { bail!("[leaders] refresh_min must be > 0"); }
+        // WP-04: the state consistency keys, [alts] and [accuracy]
+        if st.commit_timeout_ms == 0 || st.quiescence_ms == 0 { bail!("[state] commit_timeout_ms and quiescence_ms must be > 0"); }
+        if !["log", "shadow"].contains(&st.slo_action.as_str()) { bail!("[state] slo_action must be \"log\" or \"shadow\""); }
+        for (k, v) in [("lag_slo_p50_ms", st.lag_slo_p50_ms), ("lag_slo_p90_ms", st.lag_slo_p90_ms)] { if !v.is_finite() || v <= 0.0 { bail!("[state] {k} must be a positive number"); } }
+        if st.lag_slo_breach_minutes == 0 || st.slo_recover_minutes == 0 { bail!("[state] lag_slo_breach_minutes and slo_recover_minutes must be > 0"); }
+        if st.max_update_age_ms == 0 { bail!("[state] max_update_age_ms must be > 0"); }
+        let a = &cfg.alts;
+        if a.retry_ms.is_empty() || a.retry_ms.contains(&0) || a.retry_ms.windows(2).any(|w| w[0] > w[1]) { bail!("[alts] retry_ms must be a non-empty, non-decreasing list of positive delays"); }
+        if a.retry_every_s == 0 || a.give_up_s == 0 || a.wait_cap == 0 || a.max_inflight == 0 { bail!("[alts] retry_every_s, give_up_s, wait_cap and max_inflight must be > 0"); }
+        // OD-8: no quarantine acts in Stage 0
+        if cfg.accuracy.action != "log" { bail!("[accuracy] action must be \"log\" in Stage 0 (no quarantine acts; OD-8)"); }
+        if cfg.accuracy.ring_versions < 2 || cfg.accuracy.ring_versions > 64 { bail!("[accuracy] ring_versions must be 2..64"); }
+        if cfg.accuracy.queue == 0 { bail!("[accuracy] queue must be > 0"); }
         let bb = cfg.live.big_band_max_per_sec;
         if !bb.is_finite() || bb < 0.0 { bail!("[live] big_band_max_per_sec must be a rate >= 0 (0 = no big-band trade)"); }
         // the bucket keeps the rate to 0.001 token/s: a smaller positive rate would silently mean "never"
@@ -945,11 +1063,11 @@ impl Config {
     /// sha256 (hex) of `normalized_json`
     pub fn normalized_sha256(&self) -> String { crate::provenance::sha256_hex(self.normalized_json().as_bytes()) }
 
-    /// WP-00 (review F3): a config whose strategy prices nothing (neither `state_triggers` nor `decoded_sends`) runs,
-    /// records and never finds an opportunity. `arbx check` and `arbx run` print this
+    /// WP-00 (review F3): a config whose strategy prices nothing runs, records and never finds an opportunity. Since
+    /// WP-04 committed state is the only pricing path (`state_triggers`; decoded swaps are hints). `arbx check` and
+    /// `arbx run` print this
     pub fn pricing_warning(&self) -> Option<String> {
-        let s = &self.strategy;
-        (!s.state_triggers && !s.decoded_sends).then(|| "WARNING: [strategy] state_triggers and decoded_sends are both off: nothing is priced, no opportunity can be found".to_string())
+        (!self.strategy.state_triggers).then(|| "WARNING: [strategy] state_triggers is off: nothing is priced (decoded swaps are hints only), no opportunity can be found".to_string())
     }
 }
 
@@ -1027,8 +1145,7 @@ mod tests {
             assert!(cfg.sends.iter().any(|s| s.name == name && !s.enabled), "{name} is listed and disabled");
         }
         let (st, l) = (&cfg.strategy, &cfg.live);
-        assert!(!st.decoded_sends && st.skip_failing_signers && st.state_triggers);
-        assert_eq!(st.confirm_trigger_ms, 60, "stays until WP-04 removes it");
+        assert!(st.skip_failing_signers && st.state_triggers);
         assert!(l.bundle_mix && !l.sim_gate);
         assert_eq!(l.tpu_max_expected_lamports, 1, "every trade on the bundle arm");
         assert_eq!((l.max_new_token_accounts, l.settle_s, l.max_size_sol), (0, 3, 4.2));
@@ -1050,15 +1167,14 @@ mod tests {
         assert!(st.signer_stats_file.starts_with("/root/arbx/"));
     }
 
-    /// review F3 (PLAN §7: every WP updates both maintained configs): each one prices something. arb.toml lost its
-    /// only pricing path when decoded_sends became off by default
+    /// review F3 (PLAN §7: every WP updates both maintained configs): each one prices something (committed state is the
+    /// only pricing path since WP-04)
     #[test]
     fn maintained_configs_have_a_pricing_path() {
         for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] {
             let cfg = Config::load(&repo(f)).unwrap();
-            assert!(cfg.strategy.state_triggers || cfg.strategy.decoded_sends, "{f} prices nothing");
+            assert!(cfg.strategy.state_triggers, "{f} prices nothing");
             assert!(cfg.pricing_warning().is_none(), "{f}");
-            assert!(!cfg.strategy.decoded_sends, "{f}: decoded swaps are hints in Stage 0");
         }
         assert!(Config::parse(MINIMAL).unwrap().pricing_warning().is_some(), "the defaults price nothing: warned");
     }
@@ -1212,11 +1328,8 @@ mod tests {
     #[test]
     fn wp00_keys_default_safe() {
         let cfg = Config::parse(MINIMAL).unwrap();
-        assert!(!cfg.strategy.decoded_sends, "decoded swaps are hints unless asked");
         assert_eq!((cfg.live.big_band_min_expected_lamports, cfg.live.big_band_max_per_sec), (1_000_000, 0.5));
         assert!(cfg.live.crowded_pools_file.is_empty());
-        let on = Config::parse(&format!("{MINIMAL}[strategy]\ndecoded_sends = true\n")).unwrap();
-        assert!(on.strategy.decoded_sends);
         assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = -1.0\n")).is_err());
         assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = 0\n")).is_ok(), "0 = no big-band trade");
         assert_eq!(cfg.live.crowded_skip_min_expected_lamports, 0, "OD-3 default: rank only");
@@ -1224,5 +1337,32 @@ mod tests {
         assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = 0.0004\n")).is_err());
         assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = 0.001\n")).is_ok());
         assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_min_expected_lamports = 0\n")).is_err());
+    }
+
+    /// PLAN WP-04 config keys: the state consistency keys, [alts] and [accuracy] with the plan's defaults and checks; the
+    /// removed keys (`strategy.confirm_trigger_ms`, `strategy.decoded_sends`: there is no decoded send path) refuse to load
+    #[test]
+    fn wp04_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        let st = &c.state;
+        assert_eq!((st.commit_timeout_ms, st.quiescence_ms, st.max_part_skew_slots, st.max_tip_lag_slots, st.clock_max_age_slots), (5, 3, 2, 2, 2));
+        assert_eq!((st.lag_slo_p50_ms, st.lag_slo_p90_ms, st.lag_slo_breach_minutes, st.slo_action.as_str(), st.slo_recover_minutes), (16.0, 30.0, 5, "log", 10));
+        assert_eq!((st.tier_a_grace_s, st.boot_timeout_s, st.max_update_age_ms, st.resnapshot), (60, 60, 2_000, true));
+        assert_eq!((c.alts.retry_ms.clone(), c.alts.retry_every_s, c.alts.give_up_s, c.alts.wait_cap, c.alts.max_inflight, c.alts.preload.as_str()),
+            (vec![50, 250, 1_000, 5_000], 30, 600, 10_000, 16, "auto"));
+        assert_eq!((c.accuracy.action.as_str(), c.accuracy.ring_versions, c.accuracy.queue), ("log", 8, 10_000));
+        for k in ["confirm_trigger_ms = 60", "decoded_sends = false"] {
+            let key = k.split(' ').next().unwrap();
+            assert!(err(&format!("{MINIMAL}[strategy]\n{k}\n")).contains(&format!("unknown field `{key}`")), "{k}");
+        }
+        for (bad, why) in [("[state]\nslo_action = \"halt\"\n", "slo_action"), ("[state]\nquiescence_ms = 0\n", "quiescence_ms"),
+            ("[alts]\nretry_ms = [250, 50]\n", "retry_ms"), ("[alts]\nmax_inflight = 0\n", "max_inflight"), ("[accuracy]\naction = \"quarantine\"\n", "OD-8"),
+            ("[accuracy]\nring_versions = 1\n", "ring_versions")] {
+            let text = if bad.starts_with("[state]") { MINIMAL.replace("[state]\n", bad) } else { format!("{MINIMAL}{bad}") };
+            let e = Config::parse(&text).map(|_| ()).unwrap_err().to_string();
+            assert!(e.contains(why), "{why}: {e}");
+        }
+        let shadow = Config::parse(&MINIMAL.replace("[state]\n", "[state]\nslo_action = \"shadow\"\n")).unwrap();
+        assert_eq!(shadow.state.slo_action, "shadow");
     }
 }
