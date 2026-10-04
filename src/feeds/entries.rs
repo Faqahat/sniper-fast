@@ -124,23 +124,25 @@ fn transaction(c: &mut Cur) -> Option<TxRef> {
 /// Walk a serialized Vec<Entry>. Returns None if the bytes don't parse as one (wrong boundaries, garbage).
 pub fn parse_entries(buf: &[u8]) -> Option<Vec<TxRef>> { parse_entries_poh(buf).map(|x| x.0) }
 
-/// The same walk, plus each entry's PoH record: (num_hashes, transaction count). An entry with no transactions is a
-/// tick; num_hashes counts the PoH hashes since the previous entry, so a running sum is the leader's clock in the slot.
-pub fn parse_entries_poh(buf: &[u8]) -> Option<(Vec<TxRef>, Vec<(u64, u64)>)> {
+/// The same walk, plus each entry's PoH record: (num_hashes, transaction count), and the last entry's hash. An entry
+/// with no transactions is a tick; num_hashes counts the PoH hashes since the previous entry, so a running sum is the
+/// leader's clock in the slot. A slot's last entry is its final tick, whose hash is the slot's blockhash
+pub fn parse_entries_poh(buf: &[u8]) -> Option<(Vec<TxRef>, Vec<(u64, u64)>, Option<[u8; 32]>)> {
     let mut c = Cur { b: buf, p: 0 };
     let n = c.u64()?;
     if n > 1_000_000 { return None; }
     let mut out = Vec::new();
     let mut ents = Vec::with_capacity(n as usize);
+    let mut last = None;
     for e in 0..n {
         let hashes = c.u64()?;
-        c.skip(32)?; // hash
+        last = c.bytes(32)?.try_into().ok(); // hash
         let ntx = c.u64()?;
         if ntx > 100_000 { return None; }
         for _ in 0..ntx { let mut t = transaction(&mut c)?; t.entry = e as u32; out.push(t); }
         ents.push((hashes, ntx));
     }
-    Some((out, ents))
+    Some((out, ents, last))
 }
 
 /// Where a transaction sits on its leader's PoH clock: PoH hashes since the slot began (through its entry), ticks
@@ -159,10 +161,14 @@ impl Poh {
 /// after (re)connecting started before we joined, so it is not counted (`valid` false).
 #[derive(Default)]
 pub struct PohClock { slot: u64, hashes: u64, ticks: u32, last_tick: u64, hpt: u64, valid: bool, pub complete: u64, pub partial: u64,
-    n_entries: u32, n_txs: u64, t_first: u64, t_last: u64 }
+    n_entries: u32, n_txs: u64, t_first: u64, t_last: u64,
+    /// the hash of the slot's latest entry and whether that entry is a tick ([`PohClock::note_last`])
+    last_hash: Option<[u8; 32]>, last_is_tick: bool }
 
-/// one finished slot as an entries feed delivered it (slots.log)
-pub struct SlotRec { pub slot: u64, pub ticks: u32, pub entries: u32, pub txs: u64, pub t_first: u64, pub t_last: u64, pub valid: bool }
+/// one finished slot as an entries feed delivered it (slots.log); `last_tick_hash`: the hash of its last entry when that
+/// entry was a tick (a slot ends on its final tick, whose hash is its blockhash)
+pub struct SlotRec { pub slot: u64, pub ticks: u32, pub entries: u32, pub txs: u64, pub t_first: u64, pub t_last: u64, pub valid: bool,
+    pub last_tick_hash: Option<[u8; 32]> }
 
 impl PohClock {
     /// `entries`, plus arrival bookkeeping: returns each entry's position, the previous slot's record once a newer slot
@@ -170,7 +176,7 @@ impl PohClock {
     /// v2 `entry_idx`: the entries of a slot arrive in order, so the count so far is the index)
     pub fn entries_at(&mut self, slot: u64, ents: &[(u64, u64)], t: u64) -> (Vec<Option<Poh>>, Option<SlotRec>, Option<u32>) {
         let done = (slot > self.slot && self.slot != 0).then(|| SlotRec { slot: self.slot, ticks: self.ticks, entries: self.n_entries, txs: self.n_txs,
-            t_first: self.t_first, t_last: self.t_last, valid: self.valid });
+            t_first: self.t_first, t_last: self.t_last, valid: self.valid, last_tick_hash: self.last_hash.filter(|_| self.last_is_tick) });
         let out = self.entries(slot, ents);
         let mut first = None;
         if slot == self.slot {
@@ -181,6 +187,12 @@ impl PohClock {
             self.n_txs += ents.iter().map(|e| e.1).sum::<u64>();
         }
         (out, done, first)
+    }
+
+    /// the hash of the last entry of a message of `slot` just accounted, and whether that entry is a tick (the slot's record
+    /// carries it once the slot is done); a message of another slot changes nothing
+    pub fn note_last(&mut self, slot: u64, hash: Option<[u8; 32]>, is_tick: bool) {
+        if slot == self.slot && hash.is_some() { self.last_hash = hash; self.last_is_tick = is_tick; }
     }
 
     /// account one message's entries of `slot`; returns each entry's position (None for a slot we joined midway)

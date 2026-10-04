@@ -293,6 +293,44 @@ async fn wallet_discovery_dedups_and_flags_missing_updates() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The merge of WP-03b and WP-08 (WP-08 review #13's hand-off): the service's records go through WP-08's derived-field
+/// hook as the transaction stream's do. Our Jito-tipped bundle transaction (testdata/wallet 1WUBGeUh..., named by a
+/// wallet account update) reaches wallet.jsonl and exec.jsonl with its transfers classified (classify::tests'
+/// `a_jito_bundle_of_ours_with_a_pumpswap_creator_fee`: 9 transfers, one top-level `sender_tip` of 7,254 lamports to
+/// Jito), `tip_total` and `tip_asked` 7,254, `tip_senders` ["jito"], `jito_tipped`; wallet.jsonl's own fields stay
+#[tokio::test(start_paused = true)]
+async fn the_services_records_carry_wp08s_derived_fields() {
+    let (rec, dir) = rec_in("derive");
+    let wallet = pk(WALLET);
+    let roles = Arc::new(Roles::new([(wallet, role_of(role::WALLET, NO_POOL))]));
+    let fake = FakeChain::new(no_extra());
+    let r = run(quiet_cfg(), roles, rec.clone(), fake.clone(), f64::INFINITY);
+    let s = "1WUBGeUhRymCbU8yyVqvxmbSkWEaNJwd3A98kxyAuyj2PjeN6VfcgAdJvyWxqX2fTQ4iX98UW6NocREXsNKq7q9";
+    let slot = wallet_tx(s).unwrap()["slot"].as_u64().unwrap();
+    r.shared.send(acct(wallet, slot, sig64(s)));
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let _ = r.end().await;
+    assert_eq!(fake.calls("getTransaction").len(), 1);
+    rec.close();
+    let w = crate::rec::read_jsonl(&dir, "wallet").unwrap();
+    let e = crate::rec::read_jsonl(&dir, "exec").unwrap();
+    for (name, rows) in [("wallet", &w), ("exec", &e)] {
+        let x = rows.iter().find(|x| x["sig"] == s && x["src"] == "rpc-wallet").unwrap_or_else(|| panic!("{name}: no record"));
+        let t = x["transfers"].as_array().unwrap_or_else(|| panic!("{name}: transfers not filled: {x}"));
+        let tips: Vec<(Option<u64>, Option<&str>, u64)> = t.iter().filter(|t| t["kind"] == "sender_tip")
+            .map(|t| (t["lamports"].as_u64(), t["sender"].as_str(), t["depth"].as_u64().unwrap())).collect();
+        assert_eq!((t.len(), tips), (9, vec![(Some(7_254), Some("jito"), 0)]), "{name}");
+        assert_eq!((x["tip_total"].as_u64(), x["tip_asked"].as_u64(), x["tip_senders"].clone(), x["jito_tipped"].as_bool()),
+            (Some(7_254), Some(7_254), json!(["jito"]), Some(true)), "{name}");
+        // the bundle (heuristic, or the block engine's result once classify::note_bundle_processed named it) and arb_like
+        // depend on process-wide state other tests change: filled, whatever their content
+        assert!(x["bundle"].is_object() && x["arb_like"].is_object(), "{name}: {x}");
+    }
+    let x = w.iter().find(|x| x["sig"] == s).unwrap();
+    assert!(x["wallet_kind"].is_string() && x["wallet_sol"].is_i64() && x["pre_run"] == json!(false), "wallet.jsonl's own fields: {x}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// PLAN WP-03b item 1: a wallet signature the provider never has is fetched again after 1 s, 5 s, then every 30 s, and
 /// given up 10 minutes after it was found (its last txfetch line says so); it is never backfilled on top
 #[tokio::test(start_paused = true)]

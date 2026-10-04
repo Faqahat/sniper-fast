@@ -1544,8 +1544,14 @@ impl Engine {
         });
         let nz = |x: u64| (x > 0).then_some(x);
         let by_venue: serde_json::Map<String, Value> = self.acc_by_venue.iter().map(|(v, (s, e))| (v.clone(), json!({ "scored": s, "exact": e }))).collect();
-        // WP-03b: the chain-fetch service's sections (null without the service)
-        let (chainfetch, coverage) = crate::chainfetch::status_sections();
+        // WP-03b: the chain-fetch service's sections (null without the service). WP-08 (F38): the PoH gauge joins the
+        // coverage section, `poh_trigger_pct` with its counts and target in `poh` (beside the service's fields, or alone
+        // without the service); attempts reach it from WP-05's attempt writer (`POH_GAUGE.note_attempt`)
+        let (chainfetch, mut coverage) = crate::chainfetch::status_sections();
+        let poh = crate::feeds::POH_GAUGE.status(&self.feed_counters, t);
+        if !coverage.is_object() { coverage = json!({}); }
+        coverage["poh_trigger_pct"] = poh["poh_trigger_pct"].clone();
+        coverage["poh"] = poh;
         let mut line = json!({ "seq": self.status_lines, "t_ns": t, "interval_ns": t.saturating_sub(p.t), "run_s": t.saturating_sub(self.t_start) as f64 / 1e9,
             "slot": { "processed": nz(self.slots[0].max(self.slot)), "confirmed": nz(self.slots[1]), "finalized": nz(self.slots[2]), "shred": nz(self.shred_slot), "tip": nz(tip) },
             "tip_lag_slots_now": (self.slot > 0 && self.store_slot_max > 0).then(|| self.slot as i64 - self.store_slot_max as i64),
@@ -3977,6 +3983,28 @@ mod tests {
             assert!(p99 < 1_000 && p999 < 10_000, "p99 {p99} µs, p99.9 {p999} µs");
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// The merge of WP-03b and WP-08: the status line's `coverage` section carries WP-08's PoH gauge (F38):
+    /// `poh_trigger_pct` (null until WP-05's attempt writer notes attempts) and `poh` with its counts, its 90% target and
+    /// the PoH-capable feeds alive (a raw shred feed that delivered just now; a transaction stream is not one). Without
+    /// the chain-fetch service its own coverage fields are absent, the gauge is there alone
+    #[test]
+    fn the_status_lines_coverage_carries_the_poh_gauge() {
+        let mut r = rig("poh-gauge");
+        let shred = Arc::new(FeedCounters::named("shred", "udp"));
+        let tx = Arc::new(FeedCounters::named("tx", "yellowstone-tx"));
+        shred.seen(12, now_ns());
+        tx.seen(12, now_ns());
+        r.e.set_feed_counters(vec![shred, tx], None);
+        r.rec.open_now(rec::STATUS).unwrap();
+        r.e.write_status(0);
+        r.rec.sync();
+        let st = rec::read_jsonl(&r.dir, "status").unwrap();
+        let cov = &st.last().unwrap()["coverage"];
+        assert_eq!((cov["poh_trigger_pct"].clone(), cov["poh"]["poh_feeds_alive_now"].as_u64(), cov["poh"]["target_pct"].as_f64(), cov["poh"]["target_met"].clone()),
+            (Value::Null, Some(1), Some(90.0), Value::Null), "no attempts yet: no share, not judged: {cov}");
+        assert!(cov.get("watched_with_tx_pct").is_none(), "no chain-fetch service in this test: {cov}");
     }
 
     /// PLAN WP-02 acceptance (F13), the engine benchmark, on WP-04's path: 100k synthetic account updates (50k

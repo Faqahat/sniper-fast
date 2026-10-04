@@ -392,11 +392,21 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
             let archive = |bytes: Vec<u8>| if let Some(s) = rec.entries(id) {
                 rec.emit_sized(s, bytes.len() as u64 + 20, Record::enc(move |o| { o.extend(slot.to_le_bytes()); o.extend(t.to_le_bytes()); o.extend((bytes.len() as u32).to_le_bytes()); o.extend_from_slice(&bytes); }));
             };
-            let Some((refs, ents)) = entries::parse_entries_poh(&bytes) else { archive(bytes); return true };
+            let Some((refs, ents, last_hash)) = entries::parse_entries_poh(&bytes) else { archive(bytes); return true };
             let (pohs, first_entry) = match poh {
                 Some(p) => {
-                    let (pohs, done, first) = p.lock().unwrap().entries_at(slot, &ents, t);
+                    let (pohs, done, first) = {
+                        let mut clock = p.lock().unwrap();
+                        let r = clock.entries_at(slot, &ents, t);
+                        clock.note_last(slot, last_hash, ents.last().is_some_and(|e| e.1 == 0));
+                        r
+                    };
                     if let Some(d) = done {
+                        // WP-03b's blockhash ring (source `entries`, PLAN WP-03b item 4): a slot followed from its first entry
+                        // that ended on a tick, with whole slots' worth of ticks (64, or more for a leader whose parent is slots
+                        // back), ended on its final tick, whose hash is the slot's blockhash. An entries feed does not mark a
+                        // slot's last entry: it is known once the next slot starts
+                        if d.valid && d.ticks > 0 && d.ticks % 64 == 0 { if let Some(h) = d.last_tick_hash { crate::chainfetch::note_entry_hash(d.slot, h, id); } }
                         // slots-feed.log v2: the eight v1 columns; the shred columns are `-` for an entries feed, and
                         // poh_complete is whether the slot was followed from its start with all 64 ticks
                         rec.emit(rec::SLOTS_FEED, Record::enc(move |o| { let _ = std::io::Write::write_fmt(o, format_args!("{id} {} {} {} {} {} {} {} - - - - {}",
@@ -603,6 +613,53 @@ mod tests {
             for t in txs { b.extend(t); }
         }
         b
+    }
+
+    /// a serialized Vec<Entry> with each entry's hash: (num_hashes, hash, transactions)
+    fn msg_hashed(ents: &[(u64, [u8; 32], Vec<Vec<u8>>)]) -> Vec<u8> {
+        let mut b = (ents.len() as u64).to_le_bytes().to_vec();
+        for (h, hash, txs) in ents {
+            b.extend(h.to_le_bytes());
+            b.extend(hash);
+            b.extend((txs.len() as u64).to_le_bytes());
+            for t in txs { b.extend(t); }
+        }
+        b
+    }
+
+    /// The merge of WP-03b and WP-08 (WP-03b's hand-off): an entries feed gives the chain-fetch service's blockhash ring
+    /// the hash of each slot it followed from its first entry and that ended on a tick after whole slots' worth of ticks
+    /// (the slot's final tick: its blockhash; source `entries`), once the next slot starts (an entries feed does not mark
+    /// a slot's last entry). Slot 30: joined midway, none. Slot 31: 64 ticks in two messages, the last 0xAB. Slot 32: 63
+    /// ticks (a message lost), none. Slot 33: a transaction entry after its ticks, none. Slot 34: a leader whose parent is
+    /// a slot back, 128 ticks, the last 0xCD. Slot 35 is still open when the feed stops
+    #[test]
+    fn an_entries_feed_gives_each_whole_slots_blockhash() {
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let c = FeedCounters::named("ent", "jito-entries");
+        let clock = std::sync::Mutex::new(entries::PohClock::default());
+        let interest = Interest { keys: Default::default(), tables: Default::default() };
+        let (shared, notes) = crate::chainfetch::Shared::new(Arc::new(crate::rpc::Registry::default()));
+        let ticks = |n: usize, last: [u8; 32]| -> Vec<(u64, [u8; 32], Vec<Vec<u8>>)> {
+            (0..n).map(|k| (100u64, if k + 1 == n { last } else { [k as u8; 32] }, Vec::new())).collect() };
+        crate::chainfetch::with_test_service(shared, || {
+            let feed = |slot: u64, ents: Vec<(u64, [u8; 32], Vec<Vec<u8>>)>| {
+                assert!(forward(7, &interest, &tx, &c, Some(&clock), &Rec::off(), &Fwd::default(), grpc::Item::Entries { slot, bytes: msg_hashed(&ents), t: slot }));
+            };
+            feed(30, ticks(10, [0x30; 32]));
+            feed(31, ticks(40, [1; 32]));
+            feed(31, ticks(24, [0xAB; 32]));
+            feed(32, ticks(63, [0x32; 32]));
+            let mut e33 = ticks(64, [0x33; 32]);
+            e33.push((5, [0x99; 32], vec![legacy_tx(0x6b)]));
+            feed(33, e33);
+            feed(34, ticks(100, [4; 32]));
+            feed(34, ticks(28, [0xCD; 32]));
+            feed(35, ticks(3, [0x35; 32]));
+        });
+        let got: Vec<(u64, [u8; 32], u16)> = notes.try_iter().filter_map(|n| match n {
+            crate::chainfetch::Note::EntryHash { slot, hash, feed, .. } => Some((slot, hash, feed)), _ => None }).collect();
+        assert_eq!(got, vec![(31, [0xAB; 32], 7), (34, [0xCD; 32], 7)]);
     }
 
     /// review F12: what an entries feed records through the recorder: poh.log v2 (`sig8 slot ms feed entry_idx`, one

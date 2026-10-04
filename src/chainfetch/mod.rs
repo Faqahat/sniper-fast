@@ -185,7 +185,9 @@ pub fn note_fired(attempt: u64, copies: &[crate::send::Sent], accounts: &[Pk]) {
 /// A Jito `processed` result of a transaction of ours (source (c); WP-05 wires it)
 pub fn note_jito_processed(sig: &[u8; 64], slot: Option<u64>) { with_shared(|s| s.send(Note::JitoProcessed { sig: *sig, slot, t: now_ns() })); }
 
-/// The last entry hash of a completed slot from a shred or entries assembler (blockhash source `entries`; WP-08 wires it)
+/// The last entry hash of a completed slot from a shred or entries assembler (blockhash source `entries`): a shred feed's
+/// slot walked whole (feeds/shred.rs, at its last shred), an entries feed's slot followed from its first entry (feeds/mod.rs
+/// `forward`, when the next slot starts)
 pub fn note_entry_hash(slot: u64, hash: [u8; 32], feed: u16) { with_shared(|s| s.send(Note::EntryHash { slot, hash, feed, t: now_ns() })); }
 
 /// status.jsonl `chainfetch` and `coverage` (MEASUREMENT §4.8): null while the service is not running
@@ -1068,7 +1070,7 @@ impl Service {
     // ---------------------------------------------------------------- records
 
     /// An exec.jsonl (or wallet.jsonl) record of an RPC transaction, built on the chain (core) writer with the stream's
-    /// builder; `extras`: wallet.jsonl's own fields
+    /// builder and WP-08's derived-field hook; `extras`: wallet.jsonl's own fields
     #[allow(clippy::too_many_arguments)]
     fn emit_tx(&self, stream: rec::S, x: Arc<RpcTx>, slot: u64, idx: Option<u64>, src: &'static str, bits: u8, extras: Option<Map<String, Value>>, bytes: usize) {
         if !self.rec.is_on() { return; }
@@ -1080,6 +1082,9 @@ impl Service {
             let mut v = rec::exec::exec_json(&x.sig, slot, idx, t, src, &fb, &x.tx, meta, Some(roles.as_ref()));
             v["bank_id"] = Value::Null;
             v["block_time"] = json!(x.block_time);
+            // WP-08's derived fields (transfers, tips, bundle, arb_like) by the hook the transaction stream's records use
+            // (`rec::exec::emit_grpc`), so wallet.jsonl and every exec.jsonl record classify alike whoever produced them
+            rec::exec::derive(&mut v);
             if let Some(m) = extras { for (k, val) in m { v[k] = val; } }
             let _ = serde_json::to_writer(o, &v);
         }));

@@ -15,7 +15,10 @@
 //! the PoH index (`feeds::poh_index`). Each slot's coverage is a slots-feed.log v2 line, written when the walk reaches
 //! the slot's last shred (LAST_SHRED_IN_SLOT) or, short of that, when the slot is dropped (20 s after its first shred):
 //! data and code shreds, data sets decoded and failed, ticks, entries and transactions walked, and `poh_complete` (the
-//! walk covered the whole slot: its first data set to its last shred, 64 ticks).
+//! walk covered the whole slot: its first data set to its last shred, 64 ticks). A slot walked from its first data set to
+//! its last shred, with whole slots' worth of ticks (64, or more for a leader whose parent is slots back), ended on its
+//! final tick, whose hash is the slot's blockhash: it goes to the chain-fetch service's blockhash ring (PLAN WP-03b item
+//! 4, source `entries`; `chainfetch::note_entry_hash`).
 use crate::tx::{parse_wire, scan, Pk, Tx};
 use std::collections::{BTreeMap, HashMap};
 
@@ -70,12 +73,14 @@ struct Stream {
     /// the leader's PoH: per entry (num_hashes, transactions, first 8 bytes of each non-vote signature and whether it is
     /// forwarded)
     entries: Vec<(u64, u64, Vec<([u8; 8], bool)>)>,
+    /// the hash of the last entry parsed (the set's last entry once it is done)
+    last_hash: Option<[u8; 32]>,
 }
 
 impl Stream {
     fn new(start: u32) -> Stream {
         Stream { next: start, buf: Vec::with_capacity(16 * 1024), ends: Vec::new(), pref_t: Vec::new(), complete: false,
-            pos: 0, state: Parse::Count, entries_left: 0, txs_left: 0, entries: Vec::new() }
+            pos: 0, state: Parse::Count, entries_left: 0, txs_left: 0, entries: Vec::new(), last_hash: None }
     }
     fn u64_at(&self, p: usize) -> Option<u64> { self.buf.get(p..p + 8).map(|b| u64::from_le_bytes(b.try_into().unwrap())) }
     /// arrival time at which byte `end - 1` became available
@@ -93,9 +98,10 @@ struct SlotState {
     streams: BTreeMap<u32, Stream>,
     /// start index of the open stream waiting for shred `k` (its `next`)
     waiting: HashMap<u32, u32>,
-    /// the PoH clock rebuilt from the shreds: finished data sets by start index (end, entries), the next set start in
-    /// order, the hashes so far in the slot, the hash count at the last tick; u32::MAX = a set failed, no clock
-    sets: BTreeMap<u32, (u32, Vec<(u64, u64, Vec<([u8; 8], bool)>)>)>,
+    /// the PoH clock rebuilt from the shreds: finished data sets by start index (end, entries, the last entry's hash), the
+    /// next set start in order, the hashes so far in the slot, the hash count at the last tick; u32::MAX = a set failed,
+    /// no clock
+    sets: BTreeMap<u32, (u32, Vec<(u64, u64, Vec<([u8; 8], bool)>)>, Option<[u8; 32]>)>,
     poh_next: u32,
     cum: u64,
     last_tick: u64,
@@ -114,6 +120,8 @@ struct SlotState {
     last_index: Option<u32>,
     walk_started: bool,
     reported: bool,
+    /// the hash of the last entry walked (the slot's blockhash once the walk is complete)
+    last_hash: Option<[u8; 32]>,
 }
 
 #[derive(Default, Debug, Clone, serde::Serialize)]
@@ -244,7 +252,12 @@ impl Assembler {
                     None => break,
                 },
                 Parse::EntryHeader => match s.u64_at(s.pos + 40) {
-                    Some(n) if n <= 100_000 => { let h = s.u64_at(s.pos).unwrap_or(0); s.entries.push((h, n, Vec::new())); s.txs_left = n; s.pos += 48; s.state = Parse::Txs; }
+                    Some(n) if n <= 100_000 => {
+                        let h = s.u64_at(s.pos).unwrap_or(0);
+                        s.entries.push((h, n, Vec::new()));
+                        s.last_hash = s.buf.get(s.pos + 8..s.pos + 40).and_then(|b| b.try_into().ok());
+                        s.txs_left = n; s.pos += 48; s.state = Parse::Txs;
+                    }
                     Some(_) => s.state = Parse::Failed,
                     None => break,
                 },
@@ -282,9 +295,9 @@ impl Assembler {
         match s.state {
             Parse::Done => {
                 stats.sets_decoded += 1; st.sets_ok += 1; let n = s.next;
-                let ents = std::mem::take(&mut s.entries);
+                let (ents, last) = (std::mem::take(&mut s.entries), s.last_hash);
                 st.streams.remove(&start); st.waiting.remove(&n);
-                st.sets.insert(start, (n, ents));
+                st.sets.insert(start, (n, ents, last));
                 Self::poh_advance(st, slot, hpt, rec, feed);
             }
             Parse::Failed => {
@@ -303,8 +316,9 @@ impl Assembler {
         if !rec.is_on() { st.sets.clear(); return; }
         let mut lines: Vec<(u64, f64, u64)> = Vec::new();
         let mut hits: Vec<(u64, super::entries::Poh)> = Vec::new();
-        while let Some((end, ents)) = st.sets.remove(&st.poh_next) {
+        while let Some((end, ents, last)) = st.sets.remove(&st.poh_next) {
             if st.poh_next == 0 { st.walk_started = true; }
+            if last.is_some() { st.last_hash = last; }
             for (h, ntx, sigs) in ents {
                 let entry = st.entries;
                 st.entries += 1;
@@ -329,8 +343,13 @@ impl Assembler {
             st.poh_next = end;
         }
         super::poh_index().insert_many(&hits, feed, st.t_last);
-        // the walk reached the slot's last shred: its slots-feed line now
-        if !st.reported && st.last_index.is_some_and(|l| st.poh_next != u32::MAX && st.poh_next == l + 1) { Self::report(st, slot, rec, feed); }
+        // the walk reached the slot's last shred: its slots-feed line now. A walk from the slot's first set to its last
+        // shred walked every entry, so it ended on the slot's final tick, whose hash is the slot's blockhash (the chain-fetch
+        // ring's `entries` source; ticks come in whole slots: 64, or more for a leader whose parent is slots back)
+        if !st.reported && st.last_index.is_some_and(|l| st.poh_next != u32::MAX && st.poh_next == l + 1) {
+            if st.walk_started && st.ticks > 0 && st.ticks % 64 == 0 { if let Some(h) = st.last_hash { crate::chainfetch::note_entry_hash(slot, h, feed); } }
+            Self::report(st, slot, rec, feed);
+        }
         // one record per data set's lines (they are formatted on the writer; counted as lines)
         if !lines.is_empty() {
             rec.emit(crate::rec::POH, crate::rec::Record::enc_lines(lines.len() as u32, move |o| {
@@ -512,6 +531,61 @@ mod tests {
         assert_eq!(lines, vec![format!("4 {a} 64 65 1 1000 1300 1 3 1 2 0 1"), format!("4 {b} 0 0 0 2000 2000 0 1 0 0 0 0"), format!("4 {c} 0 0 0 3000 3000 0 1 0 0 1 0")]);
         let poh = crate::rec::read_text(&d, "poh").unwrap();
         assert_eq!(poh, vec![format!("5151515151515151 {a} 203.125 4 32")], "the transaction's entry is the slot's 33rd");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// a data set of entries (num_hashes, hash, transactions)
+    fn set_hashed(ents: &[(u64, [u8; 32], Vec<Vec<u8>>)]) -> Vec<u8> {
+        let mut buf = (ents.len() as u64).to_le_bytes().to_vec();
+        for (h, hash, txs) in ents {
+            buf.extend(h.to_le_bytes()); buf.extend(hash); buf.extend((txs.len() as u64).to_le_bytes());
+            for t in txs { buf.extend(t); }
+        }
+        buf
+    }
+
+    /// The merge of WP-03b and WP-08 (WP-03b's hand-off): a shred feed gives the chain-fetch service's blockhash ring each
+    /// slot it walked whole, with the hash of the slot's last entry (its final tick: the slot's blockhash; source
+    /// `entries`), once, when the walk reaches the last shred. Slot A: 64 ticks in two sets, the last tick's hash 0xAB.
+    /// Slot B: a leader whose parent is a slot back, 128 ticks, ending on 0xCD. Slot C: its first set missing (never
+    /// walked), and slot D: a set that does not parse; neither gives a hash, when it arrives or when it is dropped
+    #[test]
+    fn a_slot_walked_whole_gives_its_blockhash() {
+        let (d, rec) = recorder("bh");
+        let (shared, rx) = crate::chainfetch::Shared::new(std::sync::Arc::new(crate::rpc::Registry::default()));
+        let mut asm = Assembler::new();
+        asm.rec = rec.clone();
+        asm.feed = 4;
+        let mut out = Vec::new();
+        let ticks = |n: usize, last: [u8; 32]| -> Vec<(u64, [u8; 32], Vec<Vec<u8>>)> {
+            (0..n).map(|k| (100u64, if k + 1 == n { last } else { [k as u8; 32] }, Vec::new())).collect() };
+        crate::chainfetch::with_test_service(shared, || {
+            let a = 300_000_020u64;
+            let mut first = ticks(32, [1; 32]);
+            first.insert(5, (50, [2; 32], vec![tx(0x52)]));
+            asm.push(&data_shred(a, 0, DATA_COMPLETE, &set_hashed(&first)), 1_000, &mut out, &all());
+            let second = set_hashed(&ticks(32, [0xAB; 32]));
+            let (x, y) = second.split_at(second.len() / 2);
+            asm.push(&data_shred(a, 1, 0, x), 1_100, &mut out, &all());
+            assert!(rx.try_recv().is_err(), "nothing before the last shred");
+            asm.push(&data_shred(a, 2, LAST_IN_SLOT, y), 1_200, &mut out, &all());
+            let b = 300_000_022u64;
+            asm.push(&data_shred(b, 0, DATA_COMPLETE, &set_hashed(&ticks(64, [3; 32]))), 2_000, &mut out, &all());
+            asm.push(&data_shred(b, 1, LAST_IN_SLOT, &set_hashed(&ticks(64, [0xCD; 32]))), 2_100, &mut out, &all());
+            let c = 300_000_023u64;
+            asm.push(&data_shred(c, 3, LAST_IN_SLOT, &set_hashed(&ticks(64, [0xEE; 32]))), 3_000, &mut out, &all());
+            let dd = 300_000_024u64;
+            asm.push(&data_shred(dd, 0, LAST_IN_SLOT, &[0xff; 40]), 4_000, &mut out, &all());
+            asm.gc(30_000_000_000);
+        });
+        let got: Vec<(u64, [u8; 32], u16)> = rx.try_iter().filter_map(|n| match n {
+            crate::chainfetch::Note::EntryHash { slot, hash, feed, .. } => Some((slot, hash, feed)), _ => None }).collect();
+        assert_eq!(got, vec![(300_000_020, [0xAB; 32], 4), (300_000_022, [0xCD; 32], 4)]);
+        assert_eq!(out.len(), 1, "slot A's transaction");
+        rec.close();
+        let lines = crate::rec::read_text(&d, "slots-feed").unwrap();
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        assert!(lines[0].ends_with(" 1") && lines[1].starts_with("4 300000022 128 128 0 "), "A complete; B walked whole with 128 ticks: {lines:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
