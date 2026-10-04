@@ -129,6 +129,10 @@ pub const LEADERS: S = S(27);
 pub const COMMITS: S = S(28);
 pub const DECISIONS: S = S(29);
 pub const ALTS: S = S(30);
+/// WP-03b: our wallet's transactions (§4.15, core), the slot index (§4.16b) and the chain fetches (§4.18)
+pub const WALLET: S = S(31);
+pub const SLOTIDX: S = S(32);
+pub const TXFETCH: S = S(33);
 
 pub const ACCOUNTS_MAGIC: [u8; 8] = *b"ARBXACC\0";
 pub const JOURNAL_MAGIC: [u8; 8] = *b"ARBXJRN\0";
@@ -138,8 +142,9 @@ pub const ENTRIES_MAGIC: [u8; 8] = *b"ARBXENT\0";
 /// record with the WP-00/WP-01 fields (§7), now behind a header; `2.0` where the stream is at v2. Streams of later WPs
 /// (ledger, wallet, decisions, commits, slotidx, txfetch, alts events, ...) are added here by them. `accounts` and
 /// `journal` are WP-03's formats (src/rec/accounts.rs, src/rec/journal.rs); their queues and GAP records are this
-/// module's. WP-03 also brings exec v2 (src/rec/exec.rs), slots, blocks and leaders
-const STATIC: [(&str, Class, Format, &str, bool); 31] = [
+/// module's. WP-03 also brings exec v2 (src/rec/exec.rs), slots, blocks and leaders; WP-04 commits, decisions and alts;
+/// WP-03b wallet, slotidx and txfetch
+const STATIC: [(&str, Class, Format, &str, bool); 34] = [
     ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/1.1", false),
     ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.1", false),
     ("bundles", Class::Core, Format::Jsonl, "arbx.bundles/1.1", false),
@@ -171,6 +176,9 @@ const STATIC: [(&str, Class, Format, &str, bool); 31] = [
     ("commits", Class::Core, Format::Jsonl, "arbx.commits/1.0", false),
     ("decisions", Class::Core, Format::Jsonl, "arbx.decisions/1.0", false),
     ("alts", Class::Chain, Format::Jsonl, "arbx.alts/2.0", false),
+    ("wallet", Class::Core, Format::Jsonl, "arbx.wallet/1.0", false),
+    ("slotidx", Class::Chain, Format::Jsonl, "arbx.slotidx/1.0", false),
+    ("txfetch", Class::Chain, Format::Jsonl, "arbx.txfetch/1.0", false),
 ];
 
 /// a zstd frame ends at the latest when this much raw data is pending (§1.3)

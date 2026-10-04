@@ -118,6 +118,39 @@ validator_lists = ["https://kobe.mainnet.jito.network/api/v1/validators"]   # Ch
 static_fallback = "/root/arbx/data/validators-meta.json"
 refresh_min = 60
 
+# WP-03b: chain fetch (our wallet's transactions, the watched-transaction backfill, the slot index, the blockhash ring)
+# and every RPC provider's request budget. A provider's max_rps is a token bucket for the whole process: the boot, the
+# executor, the engine's lookup-table fetches and re-snapshots, the LeaderBook and chain fetch all share it (Haan
+# answered 429 at about 5 requests/s, sequential: tools/rpc_latency.py, 2026-10-04; two bots got 597-698 Haan 429s in
+# cmp2's 28 minutes). Tokens go by priority, and a waiting caller is never overtaken by a later or lower one: boot /
+# snapshot / exec first, then engine / leaders / wallet, then the slot index / coverage sample / blockhash poll, then
+# the backfill, which runs at what its providers have spare after the others (status chainfetch.cap_rps_now). With
+# this split the slot index (about 3.7 getBlock/s) takes most of Shyft, the poll is skipped while the slot index's
+# confirmed hashes are fresh, and the backfill gets about 3.9/s, nearly all on Haan (test
+# the_slot_index_keeps_up_while_the_backfill_has_demand, P1's load), against the 16-35/s that non-PumpSwap watched
+# transactions need (PLAN §0): status.jsonl chainfetch.need_rps_now against have_rps_now shows the shortfall, and OD-1
+# decides the capacity. Our attempts' signatures cost one getSignatureStatuses every 2 s while any is in flight
+[chainfetch]
+after_ms = 1500          # a watched transaction this long without an exec.jsonl record is backfilled
+rps = "auto"             # the backfill: 1.25 x the uncovered rate (1-minute EWMA), capped by its providers' max_rps
+max_backlog = 200000
+sample_every_s = 60      # one full block a minute: the share of watched transactions no source reported
+blockhash_poll_ms = 400  # getLatestBlockhash (confirmed), only while no other source gave a fresh confirmed blockhash
+sigs_every_s = 3600      # getSignaturesForAddress(wallet) over the last hour
+default_max_rps = 0      # no bucket for an [rpc] provider not listed below
+boot_retry_s = 90        # PLAN-ADDENDUM I-1: at boot a call retries with backoff across the providers this long
+max_tx_version = 1       # mainnet blocks carry v1 transactions: with 0 a provider refuses the whole block (-32015)
+
+[[chainfetch.provider]]
+name = "haan"
+roles = ["wallet", "blockhash", "backfill"]
+max_rps = 4
+
+[[chainfetch.provider]]
+name = "shyft"
+roles = ["slotidx", "sample", "backfill", "wallet"]
+max_rps = 4
+
 [strategy]
 # WP-04: decoded swaps are hints only (their write set goes to the CommitTracker, their predictions to the accuracy
 # monitor); `confirm_trigger_ms` and `decoded_sends` are gone (there is no decoded send path: a config with them does not load)

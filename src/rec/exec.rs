@@ -38,9 +38,9 @@ impl Recent {
 
 /// exec.jsonl v2 for a transaction from the stream (src `grpc-tx`, found by `tx_stream`). The record holds the whole
 /// transaction and meta until the chain writer encodes it: it counts against the queue's byte cap at their encoded
-/// size (review WP-03 #8)
-pub fn emit_grpc(rec: &Rec, roles: Option<&Arc<Roles>>, x: GrpcTx) {
-    if !rec.is_on() { return; }
+/// size (review WP-03 #8). True when the recorder took the record (WP-03b: a dropped one is backfilled)
+pub fn emit_grpc(rec: &Rec, roles: Option<&Arc<Roles>>, x: GrpcTx) -> bool {
+    if !rec.is_on() { return false; }
     use prost::Message as _;
     let roles = roles.cloned();
     let size = (x.tx.encoded_len() + x.meta.encoded_len() + x.sig.len()) as u64;
@@ -49,7 +49,7 @@ pub fn emit_grpc(rec: &Rec, roles: Option<&Arc<Roles>>, x: GrpcTx) {
         // the bank it executed in, when the provider sends it (review WP-03 #12)
         v["bank_id"] = serde_json::json!(x.bank_id);
         let _ = serde_json::to_writer(o, &v);
-    }));
+    }))
 }
 
 /// venue programs by name (exec.jsonl `venues`; the same list as the engine's rival detection)

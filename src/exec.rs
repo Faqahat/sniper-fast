@@ -1235,6 +1235,8 @@ impl Exec {
         self.lat[LAT_DECIDED_TO_SIGNED].push(t_signed.saturating_sub(t_decided));
         if let Some(t) = t_fired { self.lat[LAT_SIGNED_TO_FIRED].push(t.saturating_sub(t_signed)); }
         let (gate_size, gate_mid, gate_back, gate_slot) = (r.size, r.mid, r.back, r.slot);
+        // WP-03b: the route's pools, for the chain-fetch tap after each firing below
+        let pools = [r.buy.pool, r.sell.pool];
         let bundle = self.path_arm == "bundle";
         if let Some(s) = self.sending.as_mut() { s.open.insert(attempt, Open { route: r, nonce: ni, worst, creates_ata, expected, t: t_signed, bundle }); }
         let (rpc, back, paths2, gate, log) = (self.rpc.clone(), self.back.clone(), paths.clone(), self.gate.clone(), self.rec.clone());
@@ -1287,6 +1289,9 @@ impl Exec {
             let fired = match fire.await { Ok(f) => f, Err(e) => { let _ = back.send(Event::Settled(Box::new(Settled { attempt, fired: Fired { id: attempt, t_ns: 0, copies: vec![], gate: None },
                 landed: None, jito: None, nonce_value: None, error: Some(e.to_string()) }))); return; } };
             let mut fired = fired;
+            // WP-03b tap, after the firing: the signatures of the copies that left (wallet source (b): watched until a status
+            // shows them landed) and the route's pools (backfill priority 0); nothing for copies the gate kept back
+            crate::chainfetch::note_fired(attempt, &fired.copies, &pools);
             // the bundle resends, on their schedule after the first send
             let t_fire = std::time::Instant::now();
             for (delay, c) in retries {
@@ -1295,7 +1300,10 @@ impl Exec {
                 if d > el { tokio::time::sleep(d - el).await; }
                 // review M10: no scheduled resend after a pause, shadow or stop
                 if !gate.allows() { break; }
-                if let Ok(f2) = paths2.fire(attempt, vec![c], prio, live).await { fired.copies.extend(f2.copies); }
+                if let Ok(f2) = paths2.fire(attempt, vec![c], prio, live).await {
+                    crate::chainfetch::note_fired(attempt, &f2.copies, &pools);
+                    fired.copies.extend(f2.copies);
+                }
             }
             // a gate skip sent only the bundle, which Jito already rejected: nothing can land, so the nonce lease ends now
             let gated = fired.gate.as_ref().is_some_and(|g| matches!(g.decision, send::Decision::Gated | send::Decision::GatedNoBundle));

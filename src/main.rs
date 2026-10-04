@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use arbx::control::{self, StopInfo, StopReason};
 use arbx::feeds::clock::now_ns;
-use arbx::{build, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, rec, rpc, runtime, send, store, tx, venues, wallet};
+use arbx::{build, chainfetch, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, rec, rpc, runtime, send, store, tx, venues, wallet};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -205,6 +205,14 @@ fn main() -> Result<()> {
                 st.boot_timeout_s, st.max_update_age_ms, st.resnapshot);
             println!("lookup tables: retries {:?} ms then every {} s, give up after {} s, at most {} waiting, {} fetches at once, preload {:?}; accuracy {} ({} versions per account)",
                 cfg.alts.retry_ms, cfg.alts.retry_every_s, cfg.alts.give_up_s, cfg.alts.wait_cap, cfg.alts.max_inflight, cfg.alts.preload, cfg.accuracy.action, cfg.accuracy.ring_versions);
+            // WP-03b: the providers' budgets (every client of the process) and the chain-fetch roles
+            let cf = &cfg.chainfetch;
+            let all: Vec<String> = cfg.rpc.url_env.iter().map(|_| "default".to_string()).chain(cfg.rpc.endpoints.iter().filter(|e| e.enabled).map(|e| e.name.clone())).collect();
+            let budgets: Vec<String> = all.iter().map(|n| match cf.limit_of(n) { (r, _) if r > 0.0 => format!("{n} {r}/s"), _ => format!("{n} unlimited") }).collect();
+            println!("rpc budgets: {}; boot retries for {} s", budgets.join(", "), cf.boot_retry_s);
+            println!("chain fetch {}: after {} ms, backfill rps {}, backlog {}, sample every {} s, blockhash poll {} ms, sigs every {} s, tx version {}; roles {}", if cf.enabled { "on" } else { "off" },
+                cf.after_ms, cf.rps.fixed().map_or("auto".to_string(), |r| format!("{r}/s")), cf.max_backlog, cf.sample_every_s, cf.blockhash_poll_ms, cf.sigs_every_s, cf.max_tx_version,
+                rpc::Role::FETCH.iter().map(|r| format!("{}={}", r.as_str(), cf.providers_for(r.as_str(), &all).join("+"))).collect::<Vec<_>>().join(" "));
             for s in &cfg.sends {
                 let tip = match (s.tip_share, s.tip_lamports) { (Some(x), l) => format!("{:.0}% of the edge, {l}..{} lamports", x * 100.0, s.tip_max_lamports.unwrap_or(u64::MAX)), (None, 0) => "no tip".into(), (None, l) => format!("tip {l} lamports") };
                 let rate = s.max_per_sec.map(|n| format!(", max {n}/s")).unwrap_or_default();
@@ -985,7 +993,18 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     rec.set_runtimes(hot.clone(), bg.clone());
     let (eps, skipped) = cfg.rpc.endpoints();
     if eps.is_empty() { anyhow::bail!("no RPC provider configured (skipped: {skipped:?})"); }
-    let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover).bind(bg.clone());
+    let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover).bind(bg.clone()).with_role(rpc::Role::Boot);
+    // WP-03b (PLAN-ADDENDUM I-1): every provider's token bucket, shared by every client and role of the process (Haan
+    // answered 429 at about 5 requests/s); the boot policy (until the executor is built, every call retries with backoff
+    // across the providers for `[chainfetch] boot_retry_s`: only a sustained failure aborts the boot, with its stop
+    // reason); each provider's host resolved once and its connection opened (no DNS lookup on a reconnect)
+    let rpc_reg = rpc::Registry::global();
+    for n in rpc.names() { let (r, b) = cfg.chainfetch.limit_of(&n); rpc_reg.set_limit(&n, r, b); }
+    rpc_reg.set_sink(rec.clone());
+    rpc.set_phase(rpc::Phase::Boot);
+    rpc.set_boot_budget(std::time::Duration::from_secs(cfg.chainfetch.boot_retry_s));
+    rpc.set_stop(stop.clone());
+    for n in rts.bg.block_on(rpc.prewarm()) { say(&n); }
     let state_token = config::env_token(&cfg.state.token_env, "state")?;
     // WP-03 items 6, 7: what the state stream subscribes to besides the accounts. blocks_meta = "auto" follows the probe
     // (`arbx grpc-probe`), whose result is copied into the segment (probe.json)
@@ -1073,6 +1092,21 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let followed = list.len();
     let (wtx, wrx) = tokio::sync::watch::channel(list);
     let state_counters = Arc::new(feeds::FeedCounters::named("state", "state-stream"));
+    // WP-03b wiring: the chain-fetch service (wallet transactions, the watched-transaction backfill, the slot index, the
+    // blockhash ring) on rt_bg, its roles on the `[[chainfetch.provider]]` providers. Its taps are installed before the
+    // state stream starts (its first updates name transactions too); nothing here waits on the network. If the service
+    // dies while the run goes on, the SendGate closes for the rest of the segment (wallet.jsonl is the reconciliation
+    // source; review WP-03b #12). The idle providers' connections are kept warm
+    let cf_clients = chainfetch::RoleClients::new(&rpc, &cfg.chainfetch);
+    let cf_meta = chainfetch::meta_json(&cfg.chainfetch, &cf_clients, &rpc_reg);
+    if cfg.chainfetch.enabled {
+        let (cap, wallet_pk) = (cf_clients.cap(rpc::Role::Backfill), bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok()));
+        let gate = sess.gate.clone();
+        let on_dead: chainfetch::OnDead = Arc::new(move |why: &str| { let _ = gate.shadow("chainfetch_dead", why, true); });
+        chainfetch::start(chainfetch::Opts { cfg: cfg.chainfetch.clone(), wallet: wallet_pk, route_program: tx::pk(&cfg.exec.program), roles: roles.clone(), rec: rec.clone(),
+            back: Some(tx.clone()), chain: Arc::new(cf_clients), backfill_cap: cap }, rpc_reg.clone(), &bg, stop.clone(), Some(on_dead));
+    }
+    rpc.start_warm(&bg, stop.clone(), std::time::Duration::from_secs(20), std::time::Duration::from_secs(5));
     feeds::start_state(cfg.state.url.clone(), state_token, wrx, state_subs, tx.clone(), stop.clone(), &hot, state_counters.clone(), rec.clone(),
         feeds::Fwd { state: true, acct: Some(acct_rec.clone()), leaders: Some(book.clone()) });
     let stream_started_ns = now_ns();
@@ -1081,7 +1115,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // the LeaderBook's refreshes (schedule windows reach the engine as inputs) and the SendGate's changes, sampled every
     // 100 ms (`src` "watch": status and coverage only; the mode each send check saw is journaled by the engine at the
     // decision, `src` "decision": review WP-03 #3)
-    if cfg.leaders.enabled { leaders::start(book.clone(), rpc.clone(), cfg.leaders.clone(), &bg, stop.clone(), tx.clone(), rec.clone()); }
+    // (the LeaderBook calls as configured from the start: its own phase, not the boot policy; review WP-03b #14)
+    if cfg.leaders.enabled { leaders::start(book.clone(), rpc.with_role(rpc::Role::Leaders).with_own_phase(rpc::Phase::Run), cfg.leaders.clone(), &bg, stop.clone(), tx.clone(), rec.clone()); }
     {
         let (gate, back, stop) = (sess.gate.clone(), tx.clone(), stop.clone());
         bg.spawn(async move {
@@ -1153,6 +1188,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         if live { say(&format!("exec: LIVE TRADING: at most {} SOL a trade, stops after {} lamports of failed fees", cfg.live.max_size_sol, cfg.live.max_failed_fees_lamports)); }
         Some(x)
     } else { None };
+    // WP-03b: the boot is over (pools, snapshot, route program, executor): every client calls as configured again
+    rpc.set_phase(rpc::Phase::Run);
+    say(&format!("rpc: boot done; budgets {} (requests/s, every role); chain fetch {}", rpc_reg.limits_json(),
+        if cfg.chainfetch.enabled { cf_meta["roles"].to_string() } else { "off".to_string() }));
     // meta.json v2 (MEASUREMENT §4.2), written before the feeds start; rewritten once when the venue programs are hashed
     let built: Vec<String> = paths.as_ref().map(|p| p.list.iter().map(|x| x.name.clone()).collect()).unwrap_or_default();
     let mut limits = limits_json(&cfg, live, canary);
@@ -1178,7 +1217,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
             "watch_programdata": cfg.state.watch_programdata, "watch_wallet": cfg.state.watch_wallet, "block_meta": block_meta,
             "slot_statuses": if interslot { "all" } else { "commitment" }, "extra_watched": n_extra, "config": provenance::section(&cfg.state),
             "snapshot_slot": snapshot_slot, "snapshot_ns": snapshot_ns, "stream_started_ns": stream_started_ns, "followed": followed },
-        "probe": probe_meta, "chainfetch": null, "leaders": provenance::section(&cfg.leaders),
+        "probe": probe_meta, "chainfetch": cf_meta, "leaders": provenance::section(&cfg.leaders),
         "pools": provenance::pools_json(&reg, &cfg), "inputs": provenance::inputs_json(&cfg),
         "streams": streams, "experiments": null,
         "limits": limits, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()),
@@ -1199,7 +1238,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // the venue programs, in the background: once per campaign (the campaign's cache, keyed by each programdata's last
     // deploy slot), then meta.json is rewritten with them; what happened goes to run.log through the engine
     {
-        let (rpc, back, dir, wallet) = (rpc.clone(), tx.clone(), dir.clone(), cfg.wallet.clone());
+        let (rpc, back, dir, wallet) = (rpc.with_role(rpc::Role::Provenance), tx.clone(), dir.clone(), cfg.wallet.clone());
         let cache = a.campaign_dir.as_ref().map(|c| c.join(provenance::PROGRAMS_CACHE));
         let mut meta = meta.clone();
         rts.bg.spawn(async move {
@@ -1225,7 +1264,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // "the engine started" (deploy/run-w.sh `spent`, review F4). A run that cannot write it does not start: it is the
     // supervisor's failed-fee budget source
     rec.open_now(rec::STATUS).context("status.jsonl (the supervisor's budget source)")?;
-    let mut eng = engine::Engine::new(reg.clone(), store, cfg.strategy.clone(), fs.names.clone(), min_tip, interest, rec.clone(), rpc.clone(),
+    let mut eng = engine::Engine::new(reg.clone(), store, cfg.strategy.clone(), fs.names.clone(), min_tip, interest, rec.clone(), rpc.with_role(rpc::Role::Engine),
         bg.clone(), tx.clone(), wtx)?;
     eng.set_feed_counters(fs.counters.clone(), Some(state_counters));
     eng.set_acct_rec(acct_rec.clone());
@@ -1281,6 +1320,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         unsettled: open.unwrap_or_default(), drain_ms: None, final_status_seq: eng.status_lines.checked_sub(1) };
     for l in rpc_stats.summary() { say(&format!("rpc final {l}")); }
     for l in rpc_stats.reasons(5) { say(&format!("rpc failure {l}")); }
+    // WP-03b: every client's requests by role and provider (resources.jsonl `rpc` has them every 10 s)
+    for l in rpc_reg.summary_lines() { say(&format!("rpc role {l}")); }
     if let Some(p) = &paths { for l in p.summary() { say(&format!("send final {l}")); } }
     if let Some(x) = &eng.exec { say(&format!("exec final {}", x.status())); }
     if runtime::hot_violations() > 0 { say(&format!("WARNING: {} RPC calls ran on an arbx-hot thread", runtime::hot_violations())); }
@@ -1474,6 +1515,23 @@ mod tests {
         // nothing that waits on the network between the snapshot and the stream
         let gap = &body[at("anyhow::Ok((reg, store, slot))")..at("feeds::start_state(")];
         assert!(!gap.contains("block_on") && !gap.contains(".await"), "{gap}");
+    }
+
+    /// WP-03b (PLAN-ADDENDUM I-1), a structural guard on `run`: the budgets and the boot policy are set before the first
+    /// boot call (pools, snapshot) and stay on through the route program and the executor; the chain-fetch taps are
+    /// installed before the state stream starts; the service's settings reach meta.json
+    #[test]
+    fn the_boot_policy_spans_the_boot_and_the_taps_precede_the_stream() {
+        let src = include_str!("main.rs");
+        let body = &src[src.find("\nfn run(a: &RunArgs").expect("run")..];
+        let body = &body[..body.find("\n#[cfg(test)]").unwrap_or(body.len())];
+        let at = |needle: &str| body.find(needle).unwrap_or_else(|| panic!("{needle} not in run()"));
+        let order = ["rpc_reg.set_limit(", "rpc.set_phase(rpc::Phase::Boot)", "rpc.prewarm()", "pools::boot(&rpc", "rpc.accounts(&keys)", "chainfetch::start(",
+            "feeds::start_state(", "provenance::route_spec(", "exec::Exec::new(", "rpc.set_phase(rpc::Phase::Run)", "write_atomic(&dir.join(\"meta.json\")"];
+        for w in order.windows(2) { assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]); }
+        assert!(body.contains("\"chainfetch\": cf_meta"), "meta.json `chainfetch`");
+        assert!(body.contains("rpc.with_role(rpc::Role::Engine)") && body.contains("rpc.with_role(rpc::Role::Leaders).with_own_phase(rpc::Phase::Run)"), "per-role clients");
+        assert!(body.contains("gate.shadow(\"chainfetch_dead\""), "the watchdog closes the SendGate");
     }
 
     /// review F3: a supervised segment needs its control socket (the supervisor pauses through it): refused before

@@ -10,6 +10,7 @@
 pub mod accuracy;
 pub mod alts;
 pub mod build;
+pub mod chainfetch;
 pub mod commit;
 pub mod config;
 pub mod control;

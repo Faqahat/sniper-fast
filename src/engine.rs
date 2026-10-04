@@ -1284,6 +1284,8 @@ impl Engine {
         });
         let nz = |x: u64| (x > 0).then_some(x);
         let by_venue: serde_json::Map<String, Value> = self.acc_by_venue.iter().map(|(v, (s, e))| (v.clone(), json!({ "scored": s, "exact": e }))).collect();
+        // WP-03b: the chain-fetch service's sections (null without the service)
+        let (chainfetch, coverage) = crate::chainfetch::status_sections();
         let mut line = json!({ "seq": self.status_lines, "t_ns": t, "interval_ns": t.saturating_sub(p.t), "run_s": t.saturating_sub(self.t_start) as f64 / 1e9,
             "slot": { "processed": nz(self.slots[0].max(self.slot)), "confirmed": nz(self.slots[1]), "finalized": nz(self.slots[2]), "shred": nz(self.shred_slot), "tip": nz(tip) },
             "tip_lag_slots_now": (self.slot > 0 && self.store_slot_max > 0).then(|| self.slot as i64 - self.store_slot_max as i64),
@@ -1315,7 +1317,7 @@ impl Engine {
             "opps_open_now": self.opps.len(), "ata_misses_total": self.ata.misses.get(),
             "counts_total": self.counts, "counts_delta": counts_delta,
             "latency": lat, "latency_run": lat_run,
-            "exec": exec, "money": money, "recorder": recorder });
+            "exec": exec, "money": money, "recorder": recorder, "chainfetch": chainfetch, "coverage": coverage });
         if let Some(r) = stop_reason { line["stop_reason"] = json!(r); }
         p.t = t;
         p.counts = self.counts.clone();
@@ -1409,6 +1411,8 @@ impl Engine {
         };
         let t_resolved = now_ns();
         self.record_rival(&a, &keys);
+        // WP-03b tap: an unexecuted transaction with its resolved keys (a D2 candidate when it touches a watched account)
+        crate::chainfetch::note_seen(&a, &keys);
         // the bids on our pools: every transaction touching one (users and bots alike contend for its write lock)
         if !self.exec.as_ref().is_some_and(|x| x.is_ours(&a.tx.sig)) {
             let price = a.tx.cu_price().unwrap_or(0);
