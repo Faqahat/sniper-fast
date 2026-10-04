@@ -201,3 +201,34 @@ Added 2026-10-04 at the owner's request.
   - Arms: A = unprotected lanes, B = protected lanes, C = built-to-fail.
   - About 400 rounds per arm; hard stop at 0.15 SOL.
   - Needs owner approval and a top-up. Never through any third-party SDK (owner rule, 2026-10-04).
+
+## Go-live gate (owner plan, 2026-10-04)
+
+**Owner's plan:**
+- No new keys are set until arbx is **actually ready for live**. The owner is told when it is.
+- At go-live the owner sets all keys and funds a wallet with **$80**: about 0.67 SOL at the $119/SOL the configs assume.
+- **$500** (about 4.2 SOL) follows once the bot turns small profits.
+
+**"Ready for live" means all of the following:**
+
+1. **Code.**
+   - WP-04, WP-03b, WP-16, WP-05, WP-06 and WP-07 are committed with reviews. WP-09 scenarios S1–S16 pass. All tests are green, and `arbx check` passes on the canary config.
+2. **$80 canary config** (`deploy/arbx-canary-80.toml`).
+   - Bundle-only, on the deployed Nexus program 8K8uyQDt. No program deploy: arbx-exec waits until after the $500 stage, since its rent is about 0.35–1 SOL.
+   - Size is capped by the bankroll: min(cap, 85% of liquid SOL + WSOL − 0.03 SOL reserve).
+   - **OD-11 (proposed):** equity stops. Shadow if equity drops more than 0.02 SOL in a rolling hour, or falls below 90% of the starting equity, campaign-wide (WP-07).
+   - No new token accounts while trading. An owner-approved wallet-prep step creates the token accounts for the top-N mints, about 0.002 SOL each and recoverable.
+   - The I-10 credential checks pass.
+3. **Field: a shadow soak on Cherry with the final build, at least 3 h, with Haan alone** (the old bot not running), no trading keys. It must show:
+   - the state gate never fails open, and boot survives provider errors;
+   - 0 core and replay record drops;
+   - would-send decisions recorded with `sent = false`, with a chain-truth check of the would-send set (share real vs phantom);
+   - a 1 h recording that replays identically.
+4. **Send dry run.** At least 100 would-send bundles are signed but not sent, or simulated, with their size, tip and accounts checked.
+
+**Scaling to $500 requires all of:**
+- at least 48 h live;
+- net ≥ 0 after all costs;
+- hourly reconciliation clean;
+- 0 non-bundle sends;
+- evidence that real opportunities were capped by the $80 size limit. Otherwise $500 adds risk, not profit.
