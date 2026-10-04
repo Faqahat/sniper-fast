@@ -49,3 +49,39 @@ Added after the on-chain sizing work (commit b614ca0, `program/arbx-sizing` + `p
   - Experiment X3 (replay of would-fail bundles at smaller sizes): at least 30% profitable at a smaller size and at least 0.05 SOL/h.
   - Then a SHADOW canary.
 - **Dependencies and effort:** after WP-06 (builder), WP-15 (arbx-exec integration) and WP-16. About 3–4 days.
+
+## WP-18 / experiment X10: multi-region Jito bundle submission
+
+Added 2026-10-04 at the owner's request.
+
+- **Goal:** find out whether sending the same bundle to more than one Jito block-engine region:
+  - improves landing and latency on leaders far from Frankfurt;
+  - raises our effective bundle rate.
+- **Evidence and hypotheses:**
+  - Today every bundle goes only to `frankfurt.mainnet.block-engine.jito.wtf`.
+  - Bundles on far leaders landed slower (wallet-synthesis §7; small n).
+  - The 5/s client limit dropped 1,020–1,027 of 7,643 bundle attempts (13%).
+  - Jito documents a default limit of 1 request/s per IP **per region** (data/sender-tip-accounts.json `jito.features`). EU regions are Frankfurt, Amsterdam, London and Dublin; others exist worldwide.
+  - **Unverified:**
+    - whether our authenticated limit is also per region;
+    - whether duplicate submissions of one bundle count against more than one limit;
+    - how each region's auction treats a bundle already seen by another region.
+  - Landing twice is impossible: the same signed transaction can land at most once, and the tip is in it. Duplicates only risk extra would-fail verdicts and rate usage.
+- **Design** (behind `[send] regions = ["frankfurt"]`, default unchanged):
+  - **Region clients:** one Jito client per configured region, each with its own auth token, cached token refresh and rate budget (send/budget.rs per region).
+  - **Region policy** `region_policy`:
+    - `primary_only` (default);
+    - `all`: fire to every configured region;
+    - `leader_nearest`: Frankfurt plus the region nearest the target slot's leader, using leader geography and RTT from the WP-08 LeaderBook.
+  - Fan-out happens on the send path with no extra network round trip before the first send. The other regions follow in parallel.
+  - **Verdicts:** every region's verdict history is recorded per bundle (WP-05 item 7, keyed by region). Landing is attributed by the processed region and validator when Jito reports it, otherwise by first acceptance.
+- **Measurement** (extends MEASUREMENT.md; bundles/copies gain a `region` field):
+  - per region × leader kind (Jito/BAM) × leader location: accepted, would-fail, landed, send→ack ms, send→seen ms, over-rate;
+  - region-level rate-limit errors;
+  - duplicate-verdict patterns.
+- **Experiment X10:**
+  - Randomly assign `primary_only` vs `leader_nearest` (later `all`) per attempt, at least 400 eligible attempts per arm, run alongside X5 (BAM landing).
+  - **Go:** landed/attempt on non-Frankfurt leaders improves by ≥ 20% relative, or `rate_queue_timeout` drops ≥ 50%, with no loss on Frankfurt leaders.
+  - **No-go:** keep `primary_only`.
+  - Before going live, confirm the per-region rate limit with a shadow/keep-alive probe and Jito's docs, and log the probe's result.
+- **Dependencies and effort:** after WP-05 (send policy, verdict history) and WP-08 (leader geography); runs with WP-11's experiment framework. About 1.5–2 days.
