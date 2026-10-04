@@ -90,8 +90,8 @@ impl Resources {
             "recorder_queues": queues, "recorder_bytes_delta": bytes,
             "disk": { "run_dir_bytes_now": used, "fs_free_bytes_now": free },
             "udp_drops_delta": d(udp_total, self.prev_udp),
-            // the per-(role, provider) RPC registry is WP-03b's (F29)
-            "rpc": null,
+            // WP-03b (F29): the per-(role, provider) RPC registry, deltas since the previous line
+            "rpc": crate::rpc::Registry::global().resources_json(),
             "runtimes": runtimes });
         self.seq += 1;
         self.last_t = t;

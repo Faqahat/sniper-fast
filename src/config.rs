@@ -60,6 +60,111 @@ pub struct Config {
     pub alts: AltsCfg,
     #[serde(default)]
     pub accuracy: AccuracyCfg,
+    /// WP-03b: wallet transactions, watched-transaction backfill, slot index, blockhash sources; per-provider RPC budgets
+    #[serde(default)]
+    pub chainfetch: ChainfetchCfg,
+}
+
+/// The chain-fetch service (src/chainfetch; PLAN WP-03b) and the RPC budgets every client shares (src/rpc.rs)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChainfetchCfg {
+    /// run the service (wallet transactions, backfill, slot index, blockhash ring). The provider budgets and the boot
+    /// policy apply either way
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// a watched transaction seen without an exec.jsonl record this long is queued for a getTransaction, ms
+    #[serde(default = "cf_after_ms")]
+    pub after_ms: u64,
+    /// the backfill's request rate: "auto" (1.25 x the measured rate of uncovered signatures, a 1-minute EWMA) or a fixed
+    /// number of requests/s; either way capped by its providers' `max_rps`
+    #[serde(default)]
+    pub rps: CfRps,
+    /// past this many queued signatures the oldest low-priority ones are dropped (and counted)
+    #[serde(default = "cf_backlog")]
+    pub max_backlog: usize,
+    /// one full block every this many seconds measures the share of watched transactions no source reported (0: off)
+    #[serde(default = "cf_sample")]
+    pub sample_every_s: u64,
+    /// getLatestBlockhash (confirmed) this often, ms (0: off)
+    #[serde(default = "cf_bh_poll")]
+    pub blockhash_poll_ms: u64,
+    /// getSignaturesForAddress(wallet) over the last hour, this often, seconds (source (d); 0: off)
+    #[serde(default = "cf_sigs")]
+    pub sigs_every_s: u64,
+    /// the token bucket (requests/s) of every [rpc] provider no `[[chainfetch.provider]]` gives a `max_rps` (0, the
+    /// default: no limit; a config without `[chainfetch]` keeps unlimited providers, review WP-03b #18). Haan answered
+    /// 429 at about 5 requests/s (tools/rpc_latency.py, 2026-10-04): the deploy configs list it with its own `max_rps`
+    #[serde(default = "cf_default_rps")]
+    pub default_max_rps: f64,
+    /// PLAN-ADDENDUM I-1: at boot (pools, snapshot, route program, executor) an RPC call retries with backoff across the
+    /// providers this long before the boot gives up, seconds
+    #[serde(default = "cf_boot_retry")]
+    pub boot_retry_s: u64,
+    /// getTransaction / getBlock `maxSupportedTransactionVersion` (mainnet blocks carry v1 transactions, SIMD-0385: a
+    /// lower value makes the provider refuse a whole block with -32015)
+    #[serde(default = "cf_txver")]
+    pub max_tx_version: u8,
+    /// which providers serve which chain-fetch role, and each provider's budget
+    #[serde(default, rename = "provider")]
+    pub providers: Vec<ChainfetchProviderCfg>,
+}
+
+/// One `[[chainfetch.provider]]`: an [rpc] endpoint, the chain-fetch roles it serves (`wallet`, `blockhash`, `slotidx`,
+/// `backfill`, `sample`; a role no provider names uses every available [rpc] provider in order), and its token bucket,
+/// shared by every client and role of the process (boot, exec, engine and leaders calls too)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChainfetchProviderCfg {
+    pub name: String,
+    #[serde(default)]
+    pub roles: Vec<String>,
+    /// requests/s for the whole process (None: `[chainfetch] default_max_rps`; 0: no limit)
+    pub max_rps: Option<f64>,
+    /// the bucket's burst (default: max(1, max_rps))
+    pub burst: Option<f64>,
+}
+
+/// `[chainfetch] rps`: "auto" or a fixed rate
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum CfRps { Fixed(f64), Auto(String) }
+impl Default for CfRps { fn default() -> Self { CfRps::Auto("auto".into()) } }
+impl CfRps {
+    /// the fixed rate, None for "auto"
+    pub fn fixed(&self) -> Option<f64> { match self { CfRps::Fixed(r) => Some(*r), CfRps::Auto(_) => None } }
+}
+
+fn cf_after_ms() -> u64 { 1_500 }
+fn cf_backlog() -> usize { 200_000 }
+fn cf_sample() -> u64 { 60 }
+fn cf_bh_poll() -> u64 { 400 }
+fn cf_sigs() -> u64 { 3_600 }
+fn cf_default_rps() -> f64 { 0.0 }
+fn cf_boot_retry() -> u64 { 90 }
+fn cf_txver() -> u8 { 1 }
+impl Default for ChainfetchCfg {
+    fn default() -> Self {
+        ChainfetchCfg { enabled: true, after_ms: cf_after_ms(), rps: CfRps::default(), max_backlog: cf_backlog(), sample_every_s: cf_sample(),
+            blockhash_poll_ms: cf_bh_poll(), sigs_every_s: cf_sigs(), default_max_rps: cf_default_rps(), boot_retry_s: cf_boot_retry(),
+            max_tx_version: cf_txver(), providers: vec![] }
+    }
+}
+
+impl ChainfetchCfg {
+    /// The providers (by name, in order) serving `role`: the `[[chainfetch.provider]]` entries that name it, in their
+    /// order; a role no entry names gets every provider of `all` (the [rpc] order)
+    pub fn providers_for(&self, role: &str, all: &[String]) -> Vec<String> {
+        let named: Vec<String> = self.providers.iter().filter(|p| p.roles.iter().any(|r| r == role)).map(|p| p.name.clone()).filter(|n| all.contains(n)).collect();
+        if self.providers.iter().any(|p| p.roles.iter().any(|r| r == role)) { named } else { all.to_vec() }
+    }
+    /// (rate, burst) of provider `name`'s bucket: its entry's `max_rps`, else `default_max_rps` (0: no limit)
+    pub fn limit_of(&self, name: &str) -> (f64, Option<f64>) {
+        match self.providers.iter().find(|p| p.name == name) {
+            Some(p) => (p.max_rps.unwrap_or(self.default_max_rps), p.burst),
+            None => (self.default_max_rps, None),
+        }
+    }
 }
 
 /// the config format this binary reads
@@ -1080,6 +1185,33 @@ impl Config {
             }
         }
         if cfg.runtime.bg_threads == 0 { bail!("[runtime] bg_threads must be > 0"); }
+        // WP-03b: [chainfetch]
+        let cf = &cfg.chainfetch;
+        match &cf.rps {
+            CfRps::Auto(s) if s == "auto" => {}
+            CfRps::Auto(s) => bail!("[chainfetch] rps must be \"auto\" or a number of requests/s (got {s:?})"),
+            CfRps::Fixed(r) if !r.is_finite() || *r <= 0.0 => bail!("[chainfetch] rps must be > 0 (or \"auto\")"),
+            CfRps::Fixed(_) => {}
+        }
+        if cf.after_ms < 100 { bail!("[chainfetch] after_ms must be at least 100"); }
+        if cf.max_backlog == 0 { bail!("[chainfetch] max_backlog must be > 0"); }
+        if cf.blockhash_poll_ms > 0 && cf.blockhash_poll_ms < 100 { bail!("[chainfetch] blockhash_poll_ms must be 0 (off) or at least 100"); }
+        if !cf.default_max_rps.is_finite() || cf.default_max_rps < 0.0 { bail!("[chainfetch] default_max_rps must be a rate >= 0 (0 = no limit)"); }
+        if cf.boot_retry_s == 0 { bail!("[chainfetch] boot_retry_s must be > 0"); }
+        if cf.max_tx_version > 1 { bail!("[chainfetch] max_tx_version must be 0 or 1"); }
+        let rpc_names: Vec<String> = cfg.rpc.url_env.iter().map(|_| "default".to_string()).chain(cfg.rpc.endpoints.iter().map(|e| e.name.clone())).collect();
+        let mut seen = std::collections::HashSet::new();
+        for p in &cf.providers {
+            if !seen.insert(p.name.clone()) { bail!("[[chainfetch.provider]] {}: named twice", p.name); }
+            if !rpc_names.contains(&p.name) { bail!("[[chainfetch.provider]] {}: no [[rpc.endpoint]] of that name", p.name); }
+            for r in &p.roles {
+                if !crate::rpc::Role::FETCH.iter().any(|x| x.as_str() == r) {
+                    bail!("[[chainfetch.provider]] {}: role {r:?} is not a chain-fetch role (wallet, blockhash, backfill, slotidx, sample)", p.name);
+                }
+            }
+            if let Some(m) = p.max_rps { if !m.is_finite() || m < 0.0 { bail!("[[chainfetch.provider]] {}: max_rps must be >= 0 (0 = no limit)", p.name); } }
+            if let Some(b) = p.burst { if !b.is_finite() || b < 1.0 { bail!("[[chainfetch.provider]] {}: burst must be at least 1", p.name); } }
+        }
         Ok(cfg)
     }
 

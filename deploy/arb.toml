@@ -71,6 +71,29 @@ name = "haan-grpc"
 account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]
 max_accounts = 1
 
+# WP-03b: chain fetch and the providers' request budgets (each a token bucket for the whole process; the race spends
+# one token on every provider per call). The keys are the plan's defaults, written out; see deploy/arbx-stage0.toml
+[chainfetch]
+after_ms = 1500
+rps = "auto"
+max_backlog = 200000
+sample_every_s = 60
+blockhash_poll_ms = 400
+sigs_every_s = 3600
+default_max_rps = 0      # no bucket for the providers not listed below (public, helius, erpc), as before WP-03b
+boot_retry_s = 90
+max_tx_version = 1
+
+[[chainfetch.provider]]
+name = "haan"
+roles = ["wallet", "blockhash", "backfill"]
+max_rps = 4
+
+[[chainfetch.provider]]
+name = "shyft"
+roles = ["slotidx", "sample", "backfill", "wallet"]
+max_rps = 4
+
 [strategy]
 sizes_sol = [0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
 # record every round trip that clears base + priority fee; the report applies each send path's tip

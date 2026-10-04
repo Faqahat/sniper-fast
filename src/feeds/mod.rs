@@ -306,6 +306,9 @@ pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event
 #[allow(clippy::too_many_arguments)]
 pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &FeedCounters, poh: Option<&std::sync::Mutex<entries::PohClock>>, rec: &Rec, fwd: &Fwd,
     it: grpc::Item) -> bool {
+    // WP-03b tap: the chain-fetch service learns the state stream's transactions (watched writes, our wallet's), confirmed
+    // slots and block metas (a non-blocking try_send; a no-op without the service)
+    if fwd.state { crate::chainfetch::note_state(&it); }
     let sent = |c: &FeedCounters, ok: bool| { if !ok { c.channel_drops.fetch_add(1, Ordering::Relaxed); } ok };
     match it {
         grpc::Item::Entries { slot, bytes, t } => {

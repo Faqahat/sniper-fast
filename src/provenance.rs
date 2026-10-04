@@ -147,19 +147,29 @@ pub fn send_paths_json(cfg: &Config, built: &[String]) -> Value {
 }
 
 /// meta.json `rpc`: every configured provider, host only; `available`: its environment is complete. Roles: every
-/// available provider serves `boot` (the race); the `[exec]` ones also `exec`
+/// available provider serves `boot` (the race); the `[exec]` ones also `exec`; WP-03b: the chain-fetch roles
+/// `[[chainfetch.provider]]` gives it, and `max_rps`, its token bucket for the whole process (null: no limit)
 pub fn rpc_json(cfg: &Config) -> Value {
     let (eps, _) = cfg.rpc.endpoints();
+    let available: Vec<String> = eps.iter().map(|e| e.name.clone()).collect();
+    let cf = &cfg.chainfetch;
+    let fetch_roles = |name: &str| -> Vec<&'static str> {
+        crate::rpc::Role::FETCH.iter().filter(|r| cf.providers_for(r.as_str(), &available).iter().any(|n| n == name)).map(|r| r.as_str()).collect()
+    };
+    let max_rps = |name: &str| { let r = cf.limit_of(name).0; (r > 0.0).then_some(r) };
     let mut out = Vec::new();
     if let Some(e) = eps.iter().find(|e| e.name == "default") {
-        out.push(json!({ "name": "default", "host": host_of(&e.url), "available": true, "roles": ["boot"], "max_rps": null }));
+        let mut roles = vec!["boot"];
+        roles.extend(fetch_roles("default"));
+        out.push(json!({ "name": "default", "host": host_of(&e.url), "available": true, "roles": roles, "max_rps": max_rps("default") }));
     }
     for e in &cfg.rpc.endpoints {
         let live = eps.iter().find(|x| x.name == e.name);
         let host = live.map(|x| host_of(&x.url)).or_else(|| e.url.as_deref().map(host_of));
         let mut roles = Vec::new();
         if e.enabled { roles.push("boot"); if cfg.exec.rpc.contains(&e.name) { roles.push("exec"); } }
-        out.push(json!({ "name": e.name, "host": host, "enabled": e.enabled, "available": live.is_some(), "roles": roles, "max_rps": null }));
+        if live.is_some() { roles.extend(fetch_roles(&e.name)); }
+        out.push(json!({ "name": e.name, "host": host, "enabled": e.enabled, "available": live.is_some(), "roles": roles, "max_rps": max_rps(&e.name) }));
     }
     Value::Array(out)
 }

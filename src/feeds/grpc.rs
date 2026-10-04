@@ -361,8 +361,12 @@ pub fn tx_stream_item(u: UpdateTx, t: u64, rec: &crate::rec::Rec, roles: Option<
     };
     let tx = tx_from_pb(&info.signature, info.is_vote, &pb, &lw, &lr);
     if let Some(meta) = meta.filter(|_| recent.first(&info.signature, u.slot)) {
-        crate::rec::exec::emit_grpc(rec, roles, crate::rec::exec::GrpcTx { sig: info.signature, slot: u.slot, idx: info.index, t, tx: pb.clone(), meta,
+        let sig: Option<[u8; 64]> = info.signature.as_slice().try_into().ok();
+        let recorded = crate::rec::exec::emit_grpc(rec, roles, crate::rec::exec::GrpcTx { sig: info.signature, slot: u.slot, idx: info.index, t, tx: pb.clone(), meta,
             bank_id: (u.bank_id != 0).then_some(u.bank_id) });
+        // WP-03b tap: this signature has its exec.jsonl record when the recorder took it (else the backfill fetches it:
+        // review WP-03b #13), and its idx is checked against the slot index
+        if let Some(sig) = sig { crate::chainfetch::note_stream_tx(&sig, u.slot, info.index, ok, recorded); }
     }
     Some(Item::Tx { slot: u.slot, tx: tx?, t, executed: Some(ok), raw: RawTx::Pb(pb) })
 }
