@@ -1,0 +1,23 @@
+{
+ "method": "getAccountInfo",
+ "pubkey": "8K8uyQDtVKHYRPACP9fepz91q4sEZLBppR2Ty4vdXuWg",
+ "fetched": "2026-10-04",
+ "rpc": "https://api.mainnet-beta.solana.com",
+ "result": {
+  "context": {
+   "apiVersion": "4.3.0",
+   "slot": 453232936
+  },
+  "value": {
+   "data": [
+    "AgAAAEKeQ3aAWO1ctMyIjL6dAq39iCaKx5OT5vyrXnobpuZh",
+    "base64"
+   ],
+   "executable": true,
+   "lamports": 833120,
+   "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+   "rentEpoch": 18446744073709552000,
+   "space": 36
+  }
+ }
+}

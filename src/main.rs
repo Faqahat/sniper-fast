@@ -1,34 +1,23 @@
-//! arb-lab: a minimal arbitrage bot built to answer one question: which data feed and which send path make us money.
+//! arbx: the command line over the arbx library (src/lib.rs). An atomic, self-funded Solana arbitrage bot built to
+//! measure which data feed and which send path make money, and to trade only round trips that revert unless profitable.
 //!   input       every feed at once (raw UDP shreds, DoubleZero multicast, ShredStream gRPC, Yellowstone deshred / tx)
-//!   processing  decode swaps on watched pools, predict the pool after the swap, look for a profitable round trip
+//!   processing  follow watched pools, look for a profitable round trip
 //!   output      shadow mode: record every decision with per-feed arrival times and our own stage timings
-//!   send paths  `send`: Jito bundles (gRPC) and JSON-RPC, Helius Sender, Shyft, RPC Fast Beam, Haan, Bolt, Iris,
-//!               Lunar Lander; `arb-lab senders` checks them without sending
-mod build;
-mod config;
-mod engine;
-mod exec;
-mod feeds;
-mod lat;
-mod pda;
-mod pools;
-mod record;
-mod rpc;
-mod send;
-mod store;
-mod tx;
-mod wallet;
-mod venues;
-
+//!   send paths  `send`: Jito bundles (gRPC) and JSON-RPC paths; `arbx senders` checks them without sending
+//!   provenance  every run writes meta.json (build, config and program hashes) and stop.json (why it stopped);
+//!               `arbx ctl` drives a running segment through its control socket
 use anyhow::{Context, Result};
+use arbx::control::{self, StopInfo, StopReason};
+use arbx::feeds::clock::now_ns;
+use arbx::{build, config, engine, exec, feeds, pda, pools, provenance, rpc, send, store, tx, venues, wallet};
 use clap::{Parser, Subcommand};
-use feeds::clock::now_ns;
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(version, about)]
+#[command(version = concat!(env!("CARGO_PKG_VERSION"), " (git ", env!("ARBX_GIT_COMMIT"), ", dirty ", env!("ARBX_GIT_DIRTY"), ", ", env!("ARBX_PROFILE"), ")"), about)]
 struct Cli { #[command(subcommand)] cmd: Cmd }
 
 #[derive(Subcommand)]
@@ -87,7 +76,9 @@ enum Cmd {
         /// then send this many canaries on probe routes (needs [canary] enabled too): the whole live path end to end
         #[arg(long, default_value_t = 0)] canaries: u32,
     },
-    /// Run the engine (shadow mode: decide and record, never send)
+    /// Run the engine (shadow mode: decide and record, never send). Writes meta.json (provenance) before the feeds
+    /// start and stop.json (why it stopped) at the end. Exit code: 0 deadline, 10 operator stop (signal, control
+    /// socket), 20 safety stop, 30 error
     Run {
         #[arg(long, default_value = "arb.toml")] config: PathBuf,
         #[arg(long)] minutes: Option<f64>,
@@ -98,11 +89,53 @@ enum Cmd {
         #[arg(long)] canary: bool,
         /// trade for real (`[live]` limits); needs mode = "live" in the config too
         #[arg(long)] live: bool,
-        /// run in shadow whatever the config's mode (recorded in meta.json `overrides`; WP-01 keeps this flag)
+        /// run in shadow whatever the config's mode (meta.json `run.forced_shadow` and `overrides`; the SendGate is
+        /// shadow with reason `forced_shadow`). Refused with --live
         #[arg(long)] shadow: bool,
         /// this run without the recorder (`[record] enabled = false`; recorded in meta.json `overrides`): WP-00's
         /// recorder-off shadow run, without editing the config
         #[arg(long)] no_record: bool,
+        /// what is left of the campaign's failed-fee budget, lamports: this segment's `[live] max_failed_fees_lamports` is
+        /// the smaller of this and the config's (deploy/run-w.sh passes it, so the frozen config is never edited)
+        #[arg(long)] budget_left: Option<u64>,
+        /// the campaign directory (deploy/run-w.sh): the segment's directory is <campaign-dir>/<name>, and meta.json
+        /// compares this config with the campaign's frozen one (campaign.json)
+        #[arg(long)] campaign_dir: Option<PathBuf>,
+        /// the .env file to load (default: `.env` beside the config). The supervisor runs the campaign's frozen config
+        /// copy and names the .env of the config it froze (a path, never a secret)
+        #[arg(long)] env_file: Option<PathBuf>,
+    },
+    /// Print the provenance of this binary and a config without starting anything: build (git commit, dirty state,
+    /// rustc), the binary's sha256, the config's file and normalized sha256, host and clock; unless --offline, also the
+    /// route and venue programs' ELF hashes (RPC, read-only)
+    Provenance {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        /// no RPC: skip the programs
+        #[arg(long)] offline: bool,
+    },
+    /// Send a command to a running segment through its control socket (<run>/control.sock): status, pause-sending,
+    /// resume-sending, shadow (for the rest of the segment) or stop. Every command is logged in <run>/control.jsonl.
+    /// Exit code 0 accepted, 2 refused
+    Ctl {
+        /// the segment's run directory
+        #[arg(long)] run: PathBuf,
+        /// status | pause-sending | resume-sending | shadow | stop
+        cmd: String,
+        /// who sends it
+        #[arg(long)] who: String,
+        /// why (required for every command but status)
+        #[arg(long, default_value = "")] why: String,
+    },
+    /// (tests) install `run`'s signal handler, control socket and stop path, without feeds or RPC; print "ready <pid>",
+    /// wait for a stop, write stop.json and exit with its code
+    #[command(hide = true)]
+    WaitSignal {
+        #[arg(long)] dir: PathBuf,
+        #[arg(long)] minutes: Option<f64>,
+        /// panic on the main thread once ready (the panic path of the stop)
+        #[arg(long)] panic: bool,
+        /// fail with an error once stopped (a crash during shutdown: stop.json `secondary`, exit 30)
+        #[arg(long)] fail_after_stop: bool,
     },
 }
 
@@ -130,7 +163,8 @@ fn utc_stamp() -> String {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Check { config } => {
-            let cfg = config::Config::load(&config)?;
+            let (cfg, raw) = config::Config::load_raw(&config)?;
+            println!("config_version {}, sha256 {}, normalized {}", config::CONFIG_VERSION, provenance::sha256_hex(&raw), cfg.normalized_sha256());
             println!("mode {}, wallet {}, {} feeds, {} send paths", cfg.mode, cfg.wallet, cfg.feeds.len(), cfg.sends.len());
             for f in &cfg.feeds { println!("  feed {:<20} {:?}{}", f.name, f.kind, if f.enabled { "" } else { " (disabled)" }); }
             for s in &cfg.sends {
@@ -157,6 +191,10 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(w) = cfg.pricing_warning() { println!("{w}"); }
+            let e = &cfg.exec;
+            println!("route program {}: {}", e.program, if e.expected_program_sha256.is_empty() && e.expected_program_md5.is_empty() { "no expected hash (recorded, not checked)".to_string() }
+                else { format!("expected sha256 {} md5 {} (checked at start; a mismatch refuses live sends)", e.expected_program_sha256, e.expected_program_md5) });
+            println!("control socket {}", if cfg.control.socket { "on" } else { "off" });
             Ok(())
         }
         Cmd::Pools { config } => {
@@ -178,7 +216,39 @@ fn main() -> Result<()> {
                 Ok(())
             })
         }
-        Cmd::Run { config, minutes, name, only, canary, live, shadow, no_record } => run(&config, minutes, name, only, canary, live, Overrides { shadow, no_record }),
+        Cmd::Run { config, minutes, name, only, canary, live, shadow, no_record, budget_left, campaign_dir, env_file } => {
+            let a = RunArgs { config, minutes, name, only, canary, live, ov: Overrides { shadow, no_record, budget_left }, campaign_dir, env_file };
+            let sess = control::Session::new();
+            control::install_panic_hook(sess.clone());
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&a, &sess)));
+            std::process::exit(end_run(&sess, res))
+        }
+        Cmd::WaitSignal { dir, minutes, panic, fail_after_stop } => {
+            let sess = control::Session::new();
+            control::install_panic_hook(sess.clone());
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wait_signal(&dir, minutes, panic, fail_after_stop, &sess)));
+            std::process::exit(end_run(&sess, res))
+        }
+        Cmd::Provenance { config, offline } => {
+            load_env(&config);
+            let (cfg, raw) = config::Config::load_raw(&config)?;
+            let programs = if offline { None } else {
+                let (eps, skipped) = cfg.rpc.endpoints();
+                if eps.is_empty() { eprintln!("no RPC provider available (skipped: {skipped:?}): programs not read"); None } else {
+                    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
+                    let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover);
+                    Some(rt.block_on(provenance::fetch_programs(&rpc, &provenance::program_specs(&cfg))))
+                }
+            };
+            println!("{}", serde_json::to_string_pretty(&provenance::report(&config, &raw, &cfg, programs))?);
+            Ok(())
+        }
+        Cmd::Ctl { run, cmd, who, why } => {
+            let r = control::send_command(&run, &cmd, &who, &why)?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            if r["accepted"].as_bool() != Some(true) { std::process::exit(2); }
+            Ok(())
+        }
         Cmd::Simcheck { config, max, size_sol, canaries } => simcheck(&config, max, size_sol, canaries),
         Cmd::KeystoreEncrypt { out, generate, show_backup } => {
             use std::io::Read;
@@ -413,7 +483,7 @@ fn senders(config: &Path, rounds: u32, only: Option<String>, raw: Option<PathBuf
         let text = std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
         Ok(base64::engine::general_purpose::STANDARD.decode(text.trim()).context("--raw: not base64")?)
     }).transpose()?;
-    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("arb-io").enable_all().build()?;
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("arbx-io").enable_all().build()?;
     rt.block_on(async {
         // each path on its own, so one that fails does not hide the others
         let mut bad = 0;
@@ -506,16 +576,20 @@ fn rpc_test(config: &Path, calls: usize, concurrency: usize) -> Result<()> {
 
 /// command-line changes to the config for one run, recorded in meta.json `overrides`
 #[derive(Clone, Copy, Default)]
-struct Overrides { shadow: bool, no_record: bool }
+struct Overrides { shadow: bool, no_record: bool, budget_left: Option<u64> }
 
 impl Overrides {
     /// apply them; Err when they contradict the other flags
-    fn apply(&self, cfg: &mut config::Config, live: bool) -> Result<()> {
+    fn apply(&self, cfg: &mut config::Config, live: bool, canary: bool) -> Result<()> {
         if self.shadow {
             if live { anyhow::bail!("--shadow and --live contradict each other"); }
+            // review M7: --shadow never sends, so a canary run under it would unlock the key and arm canaries for nothing
+            if canary { anyhow::bail!("--shadow and --canary contradict each other (--shadow never sends)"); }
             cfg.mode = "shadow".into();
         }
         if self.no_record { cfg.record.enabled = false; }
+        // the supervisor's budget never raises the config's own cap (res-stops: sed used to overwrite it)
+        if let Some(b) = self.budget_left { cfg.live.max_failed_fees_lamports = cfg.live.max_failed_fees_lamports.min(b); }
         Ok(())
     }
 
@@ -523,6 +597,7 @@ impl Overrides {
         let mut v = serde_json::Map::new();
         if self.shadow { v.insert("mode".into(), "shadow".into()); }
         if self.no_record { v.insert("record.enabled".into(), false.into()); }
+        if let Some(b) = self.budget_left { v.insert("budget_left_lamports".into(), b.into()); }
         v.into()
     }
 }
@@ -541,43 +616,178 @@ fn limits_json(cfg: &config::Config, live: bool, canary: bool) -> serde_json::Va
     })
 }
 
-fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<String>, canary: bool, live: bool, ov: Overrides) -> Result<()> {
-    load_env(config);
-    let mut cfg = config::Config::load(config)?;
-    ov.apply(&mut cfg, live)?;
+/// `arbx run`'s arguments
+struct RunArgs { config: PathBuf, minutes: Option<f64>, name: Option<String>, only: Option<String>, canary: bool, live: bool, ov: Overrides, campaign_dir: Option<PathBuf>,
+    env_file: Option<PathBuf> }
+
+/// A run's config: `cfg` with the command line applied (what the run uses); `config_json` (meta.json `config`) hashes
+/// the file as loaded, before the overrides (review F2: the normalized hash is the same in every segment of a campaign,
+/// whatever `--budget-left`, `--shadow` or `--no-record` say, and equals `arbx provenance`'s); `config_cap` is the
+/// file's failed-fee cap
+struct RunConfig { cfg: config::Config, raw: Vec<u8>, config_json: Value, config_cap: u64 }
+
+fn run_config(a: &RunArgs) -> Result<RunConfig> {
+    let (loaded, raw) = config::Config::load_raw(&a.config)?;
+    let mut config_json = provenance::config_json(&a.config, &raw, &loaded, Some("config.toml"), a.campaign_dir.as_deref());
+    let config_cap = loaded.live.max_failed_fees_lamports;
+    let mut cfg = loaded;
+    a.ov.apply(&mut cfg, a.live, a.canary)?;
+    config_json["effective_mode"] = json!(cfg.mode);
+    Ok(RunConfig { cfg, raw, config_json, config_cap })
+}
+
+/// The SendGate a run starts with (review M3): `--shadow` makes it shadow for the whole segment (`forced_shadow`); so
+/// does a run without `--live` or `--canary`, which sends nothing anyway (`mode_shadow`); a live or canary run starts live
+fn initial_gate(gate: &control::SendGate, forced_shadow: bool, live: bool, canary: bool) {
+    if forced_shadow { let _ = gate.shadow("forced_shadow", "--shadow", true); }
+    else if !live && !canary { let _ = gate.shadow("mode_shadow", "no --live or --canary: nothing is sent", true); }
+}
+
+/// The route program's check, applied to the gate before anything can send: a route program whose hash differs from
+/// `[exec] expected_program_*`, or could not be read (`route_check` fails closed), keeps a live or canary run in shadow
+/// for the whole segment (`program_hash_mismatch`); a shadow run only records it. Returns the run.log lines
+fn apply_route_check(gate: &control::SendGate, check: Option<(bool, String)>, live: bool, canary: bool) -> Vec<String> {
+    match check {
+        Some((true, line)) => vec![format!("provenance: {line}: ok")],
+        Some((false, line)) => {
+            let mut v = vec![format!("provenance: {line}: MISMATCH")];
+            if live || canary {
+                let _ = gate.shadow("program_hash_mismatch", &line, true);
+                v.push("provenance: NOT SENDING this segment (program_hash_mismatch): it runs and records in shadow".into());
+            }
+            v
+        }
+        None => vec!["provenance: no [exec] expected_program_sha256/md5: the route program is recorded, not checked".into()],
+    }
+}
+
+/// the segment's directory: `<campaign-dir>/<name>` in a campaign (MEASUREMENT §1.1), else `<out_dir>/<name>`
+fn run_dir(out_dir: &str, campaign_dir: Option<&Path>, name: &str) -> PathBuf {
+    match campaign_dir { Some(c) => c.join(name), None => PathBuf::from(out_dir).join(name) }
+}
+
+/// The end of `run` / `wait-signal`: the stop reason they set, or error / panic; stop.json; the exit code. An error or
+/// panic after a stop request keeps that reason, is stop.json `secondary`, and exits 30 (review M5)
+fn end_run(sess: &control::Session, res: std::thread::Result<Result<()>>) -> i32 {
+    match res {
+        Ok(Ok(())) => sess.finish(StopInfo::new(StopReason::Error, "the run ended without a stop reason")),
+        Ok(Err(e)) => {
+            let msg = rpc::scrub(&format!("{e:#}"));
+            eprintln!("Error: {msg}");
+            sess.fail(StopInfo::new(StopReason::Error, msg))
+        }
+        Err(_) => {
+            let info = StopInfo::new(StopReason::Panic, sess.last_panic().map(|p| rpc::scrub(&p)).unwrap_or_else(|| "panic".into()));
+            // a main-thread panic already went through the panic hook (`last_panic` set, stop.json written)
+            if sess.last_panic().is_some() { sess.finish(info) } else { sess.fail(info) }
+        }
+    }
+}
+
+/// `arbx wait-signal` (tests): `run`'s signal handler, control socket and stop path, nothing else. `fail_after_stop`:
+/// return an error once stopped (a crash during shutdown)
+fn wait_signal(dir: &Path, minutes: Option<f64>, panic: bool, fail_after_stop: bool, sess: &Arc<control::Session>) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    sess.set_dir(dir.to_path_buf());
+    control::install_signals(sess.clone())?;
+    let _ctl = control::serve(sess.clone(), dir)?;
+    {
+        use std::io::Write;
+        println!("ready {}", std::process::id());
+        std::io::stdout().flush()?;
+    }
+    if panic { panic!("wait-signal --panic: a test panic"); }
+    let until = minutes.map(|m| now_ns() + (m * 60e9) as u64).unwrap_or(u64::MAX);
+    while !sess.stopper.stopping() {
+        if now_ns() >= until { sess.stopper.request(StopInfo::new(StopReason::Deadline, "--minutes reached")); break; }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // no executor: nothing was in flight, and the drain fields say so by being null (review M11)
+    *sess.drain.lock().unwrap() = control::Drain::default();
+    if fail_after_stop { anyhow::bail!("wait-signal --fail-after-stop: a test failure while stopping"); }
+    Ok(())
+}
+
+/// `--env-file`: load it; a file that cannot be read is named in run.log (without its contents: a parse error's line
+/// could hold a secret)
+fn load_env_file(f: &Path) -> Option<String> {
+    match dotenvy::from_path(f) {
+        Ok(()) => None,
+        Err(e) => {
+            let why = match &e {
+                dotenvy::Error::Io(io) => io.kind().to_string(),
+                dotenvy::Error::LineParse(_, i) => format!("a line it cannot parse (at byte {i})"),
+                other => other.to_string(),
+            };
+            Some(format!("WARNING: --env-file {}: {why}: nothing loaded from it", f.display()))
+        }
+    }
+}
+
+fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
+    let started_ns = now_ns();
+    let (live, canary) = (a.live, a.canary);
+    let env_note = match &a.env_file { Some(f) => load_env_file(f), None => { load_env(&a.config); None } };
+    let RunConfig { mut cfg, raw, config_json, config_cap } = run_config(a)?;
     // live trading needs both mode = "live" and --live; either alone refuses to start (so neither can spend by itself)
     if live != (cfg.mode == "live") { anyhow::bail!("live trading needs mode = \"live\" in the config AND --live (got mode {}, --live {live}; --shadow runs a live config in shadow)", cfg.mode); }
     if let Some(w) = cfg.pricing_warning() { println!("{w}"); }
     if live && canary { anyhow::bail!("--live and --canary are separate runs"); }
     if canary && !cfg.canary.enabled { anyhow::bail!("--canary needs [canary] enabled = true in the config (both, so neither alone can spend)"); }
     if cfg.canary.enabled && !canary { println!("[canary] is enabled in the config but --canary was not given: no canaries this run"); }
-    // the trading key is read only when something will really be sent, and must be the config's wallet
+    // review F3: a supervised segment is paused through its socket; without one, `.pause` could not reach it
+    if a.campaign_dir.is_some() && !cfg.control.socket { anyhow::bail!("[control] socket = false: a supervised segment (--campaign-dir) needs its control socket (the supervisor pauses sending through it)"); }
+    // the trading key is read only when something will really be sent, and must be the config's wallet. Before the
+    // signal handlers: Ctrl-C at the passphrase prompt still ends the process at once (nothing has started)
     let send_key = if live || canary { Some((if live { exec::Kind::Live } else { exec::Kind::Canary }, wallet::load_cfg(&cfg)?)) } else { None };
+    // the run directory next: from here on every end, even a failed boot, leaves stop.json
+    let name = a.name.clone().unwrap_or_else(utc_stamp);
+    let dir = run_dir(&cfg.out_dir, a.campaign_dir.as_deref(), &name);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    sess.set_dir(dir.clone());
+    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("run.log"))?;
+    // one write per line (review N7: the signal and control threads append to run.log too)
+    let mut say = |s: &str| { use std::io::Write; println!("{s}"); let _ = log.write_all(format!("{} {s}\n", now_ns()).as_bytes()); };
+    say(&format!("arbx {} build {} ({}), config {} (sha256 {}), run {}", env!("CARGO_PKG_VERSION"), provenance::build_short(), env!("ARBX_PROFILE"),
+        a.config.display(), &provenance::sha256_hex(&raw)[..16], dir.display()));
+    if let Some(n) = &env_note { say(n); }
+    // the run's identity, and a partial meta.json that stop.json's writer leaves if the boot fails before the full one
+    let run_json = json!({ "campaign": a.campaign_dir.as_deref().and_then(|c| c.file_name()).map(|c| c.to_string_lossy().into_owned()), "segment": name,
+        "dir": dir.display().to_string(), "started_ns": started_ns, "host": provenance::hostname(), "pid": std::process::id(),
+        "uid": unsafe { libc::getuid() }, "argv": std::env::args().collect::<Vec<_>>(),
+        "mode": if live { "live" } else if canary { "canary" } else { "shadow" }, "forced_shadow": a.ov.shadow, "live_flag": live,
+        "env_file": a.env_file.as_ref().map(|f| f.display().to_string()), "env_file_loaded": a.env_file.as_ref().map(|_| env_note.is_none()) });
+    sess.set_meta_stub(json!({ "schema": provenance::META_SCHEMA, "partial": true, "run": run_json, "build": provenance::build_json(),
+        "config": config_json, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()), "overrides": a.ov.json() }));
+    // stop reasons (WP-01): SIGINT / SIGTERM with their sender, and the control socket. Outside a campaign a socket that
+    // cannot be opened is not fatal (signals still stop the run); a supervised segment needs it (review F3)
+    control::install_signals(sess.clone())?;
+    let _control = if !cfg.control.socket { None } else {
+        match control::serve(sess.clone(), &dir) {
+            Ok(c) => Some(c),
+            Err(e) if a.campaign_dir.is_some() => return Err(e.context("the control socket (a supervised segment needs it)")),
+            Err(e) => { say(&format!("WARNING: no control socket: {e:#}")); None }
+        }
+    };
+    // the gate says what this run may do: --shadow forces shadow; a run without --live or --canary sends nothing anyway
+    initial_gate(&sess.gate, a.ov.shadow, live, canary);
+    // the frozen copy of the config this run uses (meta.json config.frozen_copy)
+    std::fs::write(dir.join("config.toml"), &raw)?;
+    let stop = sess.stopper.flag();
     let exec_on = cfg.sim.enabled || canary || live;
     // every entries-feed transaction on its leader's PoH clock (poh.log), whenever we build or send
     let poh_log_on = exec_on;
-    if let Some(only) = &only {
+    if let Some(only) = &a.only {
         let want: Vec<&str> = only.split(',').map(str::trim).collect();
         for f in &mut cfg.feeds { f.enabled = want.contains(&f.name.as_str()); }
     }
-    let dir = PathBuf::from(&cfg.out_dir).join(name.unwrap_or_else(utc_stamp));
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("arb-io").enable_all().build()?;
-    let stop = Arc::new(AtomicBool::new(false));
-    {
-        let stop = stop.clone();
-        rt.spawn(async move {
-            let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("signal");
-            tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
-            stop.store(true, Ordering::Relaxed);
-        });
-    }
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("arbx-io").enable_all().build()?;
     let (eps, skipped) = cfg.rpc.endpoints();
     if eps.is_empty() { anyhow::bail!("no RPC provider configured (skipped: {skipped:?})"); }
     let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover);
     let state_token = config::env_token(&cfg.state.token_env, "state")?;
     // pools, then a first snapshot of every followed account
-    let (reg, mut store) = rt.block_on(async {
+    let (reg, store, snapshot_slot) = rt.block_on(async {
         let (cands, seeds, ours) = pools::candidates(&cfg.pools)?;
         let reg = pools::boot(&rpc, &cands, seeds, ours).await?;
         let mut store = store::Store::default();
@@ -586,34 +796,52 @@ fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<S
         for (k, a) in keys.iter().zip(accts) { if let Some(a) = a { store.update(*k, a.data, slot, now_ns(), None); } }
         engine::initial_dlmm_arrays(&reg, &mut store);
         let arr: Vec<tx::Pk> = store.dlmm_arrays.values().flatten().map(|x| x.1).collect();
-        let (slot, accts) = rpc.accounts(&arr).await?;
-        for (k, a) in arr.iter().zip(accts) { if let Some(a) = a { store.update(*k, a.data, slot, now_ns(), None); } }
-        anyhow::Ok((reg, store))
+        let (slot2, accts) = rpc.accounts(&arr).await?;
+        for (k, a) in arr.iter().zip(accts) { if let Some(a) = a { store.update(*k, a.data, slot2, now_ns(), None); } }
+        anyhow::Ok((reg, store, slot))
     })?;
+    let snapshot_ns = now_ns();
+    // review F1: the state stream starts right after the snapshot, as in arb-lab. It sends only the writes after it
+    // subscribes and the engine never re-reads the pools, so every step put between the two (the programs, the send
+    // paths, the executor, meta.json) would leave pools on a pre-write price until their next write. Its updates queue
+    // until the engine starts; the tx feeds still start after meta.json
+    let (tx, rx) = crossbeam_channel::unbounded::<feeds::Event>();
+    let mut list: Vec<String> = reg.static_accounts().iter().map(tx::b58).collect();
+    for l in store.dlmm_arrays.values() { for (_, k) in l { list.push(tx::b58(k)); } }
+    let followed = list.len();
+    let (wtx, wrx) = tokio::sync::watch::channel(list);
+    feeds::start_state(cfg.state.url.clone(), state_token, wrx, tx.clone(), stop.clone(), rt.handle());
+    let stream_started_ns = now_ns();
     let reg = Arc::new(reg);
-    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("run.log"))?;
-    let mut say = |s: &str| { use std::io::Write; println!("{s}"); let _ = writeln!(log, "{} {s}", now_ns()); };
-    say(&format!("booted: {}; {} accounts held", reg.summary(), store.accts.len()));
+    say(&format!("booted: {}; {} accounts held (snapshot at slot {snapshot_slot})", reg.summary(), store.accts.len()));
+    say(&format!("state stream follows {followed} accounts, started {:.1} ms after the snapshot (its first update's slot follows in this log)",
+        stream_started_ns.saturating_sub(snapshot_ns) as f64 / 1e6));
     say(&format!("rpc providers raced: {} (skipped, env missing: {:?})", rpc.names().join(", "), skipped));
+    if sess.stopper.stopping() { return Ok(()); }
+    // provenance (WP-01): the route program's ELF hash, before anything can send. A route program that is not the
+    // expected one refuses live sends: the SendGate stays shadow for the whole segment. The venue programs are hashed
+    // in the background once the feeds run (review F1, M8)
+    let route = rt.block_on(provenance::fetch_programs(&rpc, &[provenance::route_spec(&cfg)]));
+    for p in route.iter().filter(|p| p["error"].is_string()) { say(&format!("provenance: program {} ({}) not hashed: {}", p["name"].as_str().unwrap_or("?"), p["id"].as_str().unwrap_or("?"), p["error"].as_str().unwrap_or(""))); }
+    for l in apply_route_check(&sess.gate, provenance::route_check(&route), live, canary) { say(&l); }
+    // invariant 9: the trading key never holds a program's upgrade authority
+    for p in route.iter().filter(|p| p["upgrade_authority"].as_str() == Some(cfg.wallet.as_str())) {
+        say(&format!("WARNING: the trading wallet holds the upgrade authority of {} ({})", p["name"].as_str().unwrap_or("?"), p["id"].as_str().unwrap_or("?")));
+    }
+    if sess.stopper.stopping() { return Ok(()); }
     let mut interest = engine::interest(&reg, cfg.pools.templates_json.as_deref());
     // our own transactions (canaries): every feed forwards them, so we see when each one appears
     if exec_on { interest.keys.insert(tx::pk(&cfg.wallet)); }
     let interest = Arc::new(interest);
     say(&format!("interest: {} keys, {} lookup tables", interest.keys.len(), interest.tables.read().unwrap().len()));
-    let (tx, rx) = crossbeam_channel::unbounded::<feeds::Event>();
-    let mut list: Vec<String> = reg.static_accounts().iter().map(tx::b58).collect();
-    for l in store.dlmm_arrays.values() { for (_, k) in l { list.push(tx::b58(k)); } }
-    say(&format!("state stream follows {} accounts", list.len()));
-    let (wtx, wrx) = tokio::sync::watch::channel(list);
     if poh_log_on { let _ = feeds::POH_LOG.set(std::sync::Mutex::new(std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(dir.join("poh.log"))?))); }
+    // the enabled feeds, in order: their index is the feed id every stream uses
+    let feed_names: Vec<String> = cfg.feeds.iter().filter(|f| f.enabled).map(|f| f.name.clone()).collect();
     if cfg.record.enabled {
-        let archive = cfg.feeds.iter().filter(|f| f.enabled).position(|f| f.name == cfg.record.archive_feed).map(|i| i as u16);
-        record::init(&dir, archive)?;
+        let archive = feed_names.iter().position(|f| *f == cfg.record.archive_feed).map(|i| i as u16);
+        arbx::record::init(&dir, archive)?;
         say(&format!("recording: rivals, executed results, arrivals, moves, slots{}", if archive.is_some() { format!(", raw entries of {}", cfg.record.archive_feed) } else { String::new() }));
     }
-    let fs = feeds::start(&cfg.feeds, interest.clone(), tx.clone(), stop.clone(), rt.handle())?;
-    feeds::start_state(cfg.state.url.clone(), state_token, wrx, tx.clone(), stop.clone(), rt.handle());
-    say(&format!("feeds: {}", fs.names.join(", ")));
     // STEP 1: every send path kept warm and timed (keepalive.jsonl); paths that can't be built are named, not fatal
     let paths = if cfg.sends.iter().any(|s| s.enabled) {
         let (p, notes) = rt.block_on(send::Paths::new(&cfg.sends, cfg.gate.clone(), Some(&dir), true))?;
@@ -625,7 +853,8 @@ fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<S
     } else { None };
     // STEPS 2-3: simulation of every would-send decision, canaries
     let exec = if exec_on {
-        let (x, notes) = rt.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), &dir, tx.clone(), fs.names.clone(), send_key, reg_mints(&reg)))?;
+        let (mut x, notes) = rt.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), &dir, tx.clone(), feed_names.clone(), send_key, reg_mints(&reg)))?;
+        x.set_gate(sess.gate.clone());
         for n in notes { say(&format!("exec: {n}")); }
         if !cfg.live.crowded_pools_file.is_empty() {
             // review N1: a list made for another registry would rank and skip nothing
@@ -637,27 +866,80 @@ fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<S
         if live { say(&format!("exec: LIVE TRADING: at most {} SOL a trade, stops after {} lamports of failed fees", cfg.live.max_size_sol, cfg.live.max_failed_fees_lamports)); }
         Some(x)
     } else { None };
-    std::fs::write(dir.join("meta.json"), serde_json::to_string_pretty(&serde_json::json!({
-        "started_ns": now_ns(), "feeds": fs.names, "strategy": format!("{:?}", cfg.strategy), "pools": reg.summary(),
-        "wallet": cfg.wallet, "send_paths": paths.as_ref().map(|p| p.list.iter().map(|x| x.name.clone()).collect::<Vec<_>>()),
-        "gate": format!("{:?}", cfg.gate), "sim": format!("{:?}", cfg.sim), "canary": if canary { Some(format!("{:?}", cfg.canary)) } else { None },
-        "live": if live { Some(format!("{:?}", cfg.live)) } else { None },
-        "exec": format!("{:?}", cfg.exec),
-        // the effective safety limits (WP-00; MEASUREMENT §4.2 `limits`): the trade size is the owner's Stage-0 decision (OD-4)
-        "limits": limits_json(&cfg, live, canary),
-        // what the command line changed in the config for this run (--shadow, --no-record)
-        "overrides": ov.json(),
-    }))?)?;
+    // meta.json v2 (MEASUREMENT §4.2), written before the feeds start; rewritten once when the venue programs are hashed
+    let built: Vec<String> = paths.as_ref().map(|p| p.list.iter().map(|x| x.name.clone()).collect()).unwrap_or_default();
+    let mut limits = limits_json(&cfg, live, canary);
+    limits["supervisor"] = json!({ "budget_left_lamports": a.ov.budget_left, "config_max_failed_fees_lamports": config_cap,
+        "effective_max_failed_fees_lamports": cfg.live.max_failed_fees_lamports });
+    limits["ledger"] = Value::Null;
+    let tx_streams: Vec<Value> = cfg.feeds.iter().filter(|f| f.enabled && f.kind == config::FeedKind::YellowstoneTx)
+        .map(|f| json!({ "name": f.name, "account_include": f.account_include, "max_accounts": null })).collect();
+    let venue_specs = provenance::venue_specs();
+    let mut programs = route.clone();
+    programs.extend(venue_specs.iter().map(provenance::pending_entry));
+    let meta = json!({
+        "schema": provenance::META_SCHEMA,
+        "run": run_json, "build": provenance::build_json(), "config": config_json,
+        "programs": programs, "programs_pending": true,
+        "wallet": { "pubkey": cfg.wallet, "keystore_path": if cfg.wallet_keystore.is_empty() { format!("~/.nexus-v2-{}-wallet.enc", cfg.wallet_profile) } else { cfg.wallet_keystore.clone() },
+            "held_mints_at_boot": exec.as_ref().map(|x| x.held_mints()) },
+        "feeds": provenance::feeds_json(&cfg), "send_paths": provenance::send_paths_json(&cfg, &built), "rpc": provenance::rpc_json(&cfg),
+        "state": { "url_host": provenance::host_of(&cfg.state.url), "tx_streams": tx_streams, "watch_clock": false, "watch_programdata": false,
+            "watch_wallet": false, "block_meta": false, "config": provenance::section(&cfg.state),
+            "snapshot_slot": snapshot_slot, "snapshot_ns": snapshot_ns, "stream_started_ns": stream_started_ns, "followed": followed },
+        "probe": null, "chainfetch": null,
+        "pools": provenance::pools_json(&reg, &cfg), "inputs": provenance::inputs_json(&cfg),
+        "streams": provenance::streams_json(), "experiments": null,
+        "limits": limits, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()),
+        "clock": provenance::clock_json(),
+        "strategy": provenance::section(&cfg.strategy), "send": provenance::section(&cfg.sends), "builder": provenance::section(&cfg.exec),
+        "live": provenance::section(&cfg.live), "sim": provenance::section(&cfg.sim), "canary": provenance::section(&cfg.canary),
+        "gate": provenance::section(&cfg.gate), "record": provenance::section(&cfg.record), "control": provenance::section(&cfg.control), "tips": null,
+        "send_gate": sess.gate.json(),
+        // what the command line changed in the config for this run (--shadow, --no-record, --budget-left)
+        "overrides": a.ov.json(),
+    });
+    control::write_atomic(&dir.join("meta.json"), serde_json::to_string_pretty(&meta)?.as_bytes())?;
+    if sess.stopper.stopping() { return Ok(()); }
+    let fs = feeds::start(&cfg.feeds, interest.clone(), tx.clone(), stop.clone(), rt.handle())?;
+    anyhow::ensure!(fs.names == feed_names, "feed ids changed: {:?} vs {:?}", fs.names, feed_names);
+    say(&format!("feeds: {}", fs.names.join(", ")));
+    // the venue programs, in the background: once per campaign (the campaign's cache, keyed by each programdata's last
+    // deploy slot), then meta.json is rewritten with them; what happened goes to run.log through the engine
+    {
+        let (rpc, back, dir, wallet) = (rpc.clone(), tx.clone(), dir.clone(), cfg.wallet.clone());
+        let cache = a.campaign_dir.as_ref().map(|c| c.join(provenance::PROGRAMS_CACHE));
+        let mut meta = meta.clone();
+        rt.spawn(async move {
+            let t0 = now_ns();
+            let venues = provenance::fetch_programs_cached(&rpc, &venue_specs, cache.as_deref()).await;
+            let say = |msg: String| { let _ = back.send(feeds::Event::Status { feed: u16::MAX, msg }); };
+            for p in venues.iter().filter(|p| p["error"].is_string()) { say(format!("provenance: program {} ({}) not hashed: {}", p["name"].as_str().unwrap_or("?"), p["id"].as_str().unwrap_or("?"), p["error"].as_str().unwrap_or(""))); }
+            for p in venues.iter().filter(|p| p["upgrade_authority"].as_str() == Some(wallet.as_str())) {
+                say(format!("WARNING: the trading wallet holds the upgrade authority of {} ({})", p["name"].as_str().unwrap_or("?"), p["id"].as_str().unwrap_or("?")));
+            }
+            let cached = venues.iter().filter(|p| p["source"] == "cache").count();
+            let n = venues.len();
+            if let Some(list) = meta["programs"].as_array_mut() { list.retain(|p| p["role"] != "venue"); list.extend(venues); }
+            meta["programs_pending"] = json!(false);
+            meta["programs_done_ns"] = json!(now_ns());
+            let wrote = serde_json::to_string_pretty(&meta).map_err(anyhow::Error::from).and_then(|s| control::write_atomic(&dir.join("meta.json"), s.as_bytes()));
+            say(format!("provenance: {n} venue programs hashed in {:.0} ms ({cached} from the campaign cache); meta.json {}", (now_ns() - t0) as f64 / 1e6,
+                match wrote { Ok(()) => "rewritten".to_string(), Err(e) => format!("NOT rewritten: {e:#}") }));
+        });
+    }
     let min_tip = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.tip_lamports).min().unwrap_or(0);
     let mut eng = engine::Engine::new(reg.clone(), store, cfg.strategy.clone(), fs.names.clone(), min_tip, interest, &dir, rpc,
         rt.handle().clone(), tx.clone(), wtx)?;
     eng.exec = exec;
-    let until = minutes.map(|m| now_ns() + (m * 60e9) as u64).unwrap_or(u64::MAX);
+    eng.gate = Some(sess.gate.clone());
+    // the minutes count from the engine's start, as in arb-lab (boot time is not part of the segment)
+    let until = a.minutes.map(|m| now_ns() + (m * 60e9) as u64).unwrap_or(u64::MAX);
     let counters = fs.counters.clone();
     let names = fs.names.clone();
     let rpc_stats = eng.rpc_handle();
     let mut ticks = 0u64;
-    eng.run(&rx, &stop, until, |s| {
+    let end = eng.run(&rx, &stop, until, |s| {
         let per: Vec<String> = names.iter().zip(&counters).map(|(n, c)| format!("{n} {}/{}", c.forwarded.load(Ordering::Relaxed), c.txs.load(Ordering::Relaxed))).collect();
         say(&format!("{s} | fwd/txs: {}", per.join(", ")));
         ticks += 1;
@@ -667,13 +949,25 @@ fn run(config: &Path, minutes: Option<f64>, name: Option<String>, only: Option<S
             if let Some(p) = &paths { for l in p.summary() { say(&format!("send {l}")); } }
         }
     });
+    match end {
+        engine::RunEnd::Deadline => { sess.stopper.request(StopInfo::new(StopReason::Deadline, format!("--minutes {} reached", a.minutes.unwrap_or(0.0)))); }
+        engine::RunEnd::Disconnected => { sess.stopper.request(StopInfo::new(StopReason::Error, "the engine's event channel closed")); }
+        engine::RunEnd::Stopped => {}
+    }
+    let reason = sess.stopper.info().map_or("error", |i| i.reason.as_str());
+    // what was still open when the stop began (stop.json; WP-05 / WP-07 drain them, the next segment's ledger picks them
+    // up). No executor: null (review M11)
+    let open = eng.exec.as_ref().map(|x| x.open_attempts());
+    eng.write_final_status(rx.len(), reason);
+    *sess.drain.lock().unwrap() = control::Drain { in_flight_at_stop: open.as_ref().map(|o| o.len()), drained: open.as_ref().map(|o| o.is_empty()),
+        unsettled: open.unwrap_or_default(), drain_ms: None, final_status_seq: eng.status_lines.checked_sub(1) };
     for l in rpc_stats.summary() { say(&format!("rpc final {l}")); }
     for l in rpc_stats.reasons(5) { say(&format!("rpc failure {l}")); }
     if let Some(p) = &paths { for l in p.summary() { say(&format!("send final {l}")); } }
     if let Some(x) = &eng.exec { say(&format!("exec final {}", x.status())); }
     stop.store(true, Ordering::Relaxed);
-    if let Some(r) = record::get() { r.finish(); }
-    say(&format!("done: {}", dir.display()));
+    if let Some(r) = arbx::record::get() { r.finish(); }
+    say(&format!("done: {} (stop: {reason})", dir.display()));
     rt.shutdown_timeout(std::time::Duration::from_secs(2));
     Ok(())
 }
@@ -703,20 +997,187 @@ mod tests {
     #[test]
     fn shadow_and_no_record_overrides() {
         let mut cfg = stage0();
-        Overrides::default().apply(&mut cfg, false).unwrap();
+        Overrides::default().apply(&mut cfg, false, false).unwrap();
         assert_eq!(cfg.mode, "shadow", "ships in shadow: a plain run is a shadow run");
         assert!(cfg.record.enabled);
-        let ov = Overrides { shadow: false, no_record: true };
-        ov.apply(&mut cfg, false).unwrap();
+        let ov = Overrides { shadow: false, no_record: true, budget_left: None };
+        ov.apply(&mut cfg, false, false).unwrap();
         assert!(!cfg.record.enabled, "the recorder-off run");
         assert_eq!(ov.json(), serde_json::json!({ "record.enabled": false }));
         let mut live = stage0();
         live.mode = "live".into();
-        let ov = Overrides { shadow: true, no_record: false };
-        ov.apply(&mut live, false).unwrap();
+        let ov = Overrides { shadow: true, no_record: false, budget_left: None };
+        ov.apply(&mut live, false, false).unwrap();
         assert_eq!(live.mode, "shadow");
         assert_eq!(ov.json(), serde_json::json!({ "mode": "shadow" }));
-        assert!(Overrides { shadow: true, no_record: false }.apply(&mut stage0(), true).is_err(), "--shadow with --live");
+        assert!(Overrides { shadow: true, ..Default::default() }.apply(&mut stage0(), true, false).is_err(), "--shadow with --live");
+        // review M7: --shadow never sends, so --canary with it is refused (it would unlock the key for nothing)
+        let e = Overrides { shadow: true, ..Default::default() }.apply(&mut stage0(), false, true).unwrap_err();
+        assert!(e.to_string().contains("--shadow and --canary"), "{e}");
         assert_eq!(Overrides::default().json(), serde_json::json!({}));
+    }
+
+    /// WP-01 `--budget-left`: the supervisor's per-segment budget lowers the failed-fee cap, never raises it, and the
+    /// config file is not touched (res-stops: sed rewrote it every segment)
+    #[test]
+    fn budget_left_caps_without_editing_the_config() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arbx-stage0.toml");
+        let before = std::fs::read(&path).unwrap();
+        let mut cfg = stage0();
+        let cap = cfg.live.max_failed_fees_lamports;
+        assert_eq!(cap, 25_000_000);
+        let ov = Overrides { budget_left: Some(3_000_000), ..Default::default() };
+        ov.apply(&mut cfg, false, false).unwrap();
+        assert_eq!(cfg.live.max_failed_fees_lamports, 3_000_000);
+        assert_eq!(ov.json(), serde_json::json!({ "budget_left_lamports": 3_000_000 }));
+        let mut cfg = stage0();
+        Overrides { budget_left: Some(90_000_000), ..Default::default() }.apply(&mut cfg, false, false).unwrap();
+        assert_eq!(cfg.live.max_failed_fees_lamports, cap, "the config's own cap still applies");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    /// a campaign's segments live in the campaign directory (MEASUREMENT §1.1)
+    #[test]
+    fn segment_directory() {
+        assert_eq!(run_dir("/root/arbx/runs", None, "x-p1"), PathBuf::from("/root/arbx/runs/x-p1"));
+        assert_eq!(run_dir("/root/arbx/runs", Some(Path::new("/root/arbx/runs/w6")), "w6-p3"), PathBuf::from("/root/arbx/runs/w6/w6-p3"));
+    }
+
+    /// a run that failed or panicked still leaves stop.json with the reason and exit 30; a stop requested first stands
+    #[test]
+    fn end_run_codes() {
+        let d = std::env::temp_dir().join(format!("arbx-endrun-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&d).unwrap();
+        let read = |d: &Path| -> Value { serde_json::from_str(&std::fs::read_to_string(d.join("stop.json")).unwrap()).unwrap() };
+        let s = control::Session::new();
+        s.set_dir(d.clone());
+        assert_eq!(end_run(&s, Ok(Err(anyhow::anyhow!("boot: rpc https://x.example/?api-key=SECRET refused")))), 30);
+        let v = read(&d);
+        assert_eq!(v["reason"], "error");
+        assert!(!v["detail"].as_str().unwrap().contains("SECRET"), "{v}");
+        let s = control::Session::new();
+        s.set_dir(d.clone());
+        let _ = std::fs::remove_file(d.join("stop.json"));
+        assert_eq!(end_run(&s, Err(Box::new("boom"))), 30);
+        assert_eq!(read(&d)["reason"], "panic");
+        let s = control::Session::new();
+        s.set_dir(d.clone());
+        s.stopper.request(StopInfo::new(StopReason::Deadline, "--minutes reached"));
+        assert_eq!(end_run(&s, Ok(Ok(()))), 0);
+        assert_eq!(read(&d)["reason"], "deadline");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn args(config: &Path, ov: Overrides, live: bool, canary: bool, campaign_dir: Option<PathBuf>) -> RunArgs {
+        RunArgs { config: config.to_path_buf(), minutes: None, name: None, only: None, canary, live, ov, campaign_dir, env_file: None }
+    }
+
+    /// review F2: meta.json `config.normalized_sha256` hashes the file as loaded, so every override leaves it equal to
+    /// `arbx provenance`'s (campaign.json's); the overrides themselves still apply to the run's config
+    #[test]
+    fn normalized_hash_ignores_the_command_line() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arbx-stage0.toml");
+        let (loaded, raw) = config::Config::load_raw(&path).unwrap();
+        let want = provenance::report(&path, &raw, &loaded, None)["config"]["normalized_sha256"].clone();
+        assert!(want.is_string());
+        let all = [
+            Overrides::default(),
+            Overrides { budget_left: Some(1_000_000), ..Default::default() },
+            Overrides { budget_left: Some(99_999_999_999), ..Default::default() },
+            Overrides { no_record: true, ..Default::default() },
+            Overrides { shadow: true, ..Default::default() },
+            Overrides { shadow: true, no_record: true, budget_left: Some(0) },
+        ];
+        for ov in all {
+            let rc = run_config(&args(&path, ov, false, false, None)).unwrap();
+            assert_eq!(rc.config_json["normalized_sha256"], want, "{:?}", ov.json());
+            assert_eq!(rc.config_json["file_sha256"], provenance::sha256_hex(&raw));
+            assert_eq!((rc.config_json["mode"].as_str(), rc.config_json["effective_mode"].as_str()), (Some("shadow"), Some("shadow")));
+            assert_eq!(rc.config_cap, 25_000_000, "the file's cap");
+            // the overrides did apply to what the run uses
+            if let Some(b) = ov.budget_left { assert_eq!(rc.cfg.live.max_failed_fees_lamports, b.min(25_000_000)); }
+            assert_eq!(rc.cfg.record.enabled, !ov.no_record);
+        }
+        // a live config under --shadow: the file's mode is kept, the effective one is shadow
+        let d = std::env::temp_dir().join(format!("arbx-runcfg-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&d).unwrap();
+        let live_path = d.join("live.toml");
+        std::fs::write(&live_path, String::from_utf8(raw.clone()).unwrap().replacen("mode = \"shadow\"", "mode = \"live\"", 1)).unwrap();
+        let (l, lraw) = config::Config::load_raw(&live_path).unwrap();
+        assert_eq!(l.mode, "live");
+        let rc = run_config(&args(&live_path, Overrides { shadow: true, budget_left: Some(5), ..Default::default() }, false, false, None)).unwrap();
+        assert_eq!((rc.config_json["mode"].as_str(), rc.config_json["effective_mode"].as_str(), rc.cfg.mode.as_str()), (Some("live"), Some("shadow"), "shadow"));
+        assert_eq!(rc.config_json["normalized_sha256"], provenance::report(&live_path, &lraw, &l, None)["config"]["normalized_sha256"]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// review M3: the gate a run starts with, and what the route program's check does to it, for every combination
+    #[test]
+    fn the_send_gate_at_start() {
+        use control::{GateMode, SendGate};
+        let ok = Some((true, "route program X".to_string()));
+        let bad = Some((false, "route program X: rate limited".to_string()));
+        // (--shadow, --live, --canary, route check) -> (mode, reason, sticky)
+        let cases: [(bool, bool, bool, Option<(bool, String)>, GateMode, &str, bool); 12] = [
+            (false, true, false, ok.clone(), GateMode::Live, "", false),
+            (false, false, true, ok.clone(), GateMode::Live, "", false),
+            (false, true, false, None, GateMode::Live, "", false),
+            (false, false, true, None, GateMode::Live, "", false),
+            (false, true, false, bad.clone(), GateMode::Shadow, "program_hash_mismatch", true),
+            (false, false, true, bad.clone(), GateMode::Shadow, "program_hash_mismatch", true),
+            (false, false, false, ok.clone(), GateMode::Shadow, "mode_shadow", true),
+            (false, false, false, bad.clone(), GateMode::Shadow, "mode_shadow", true),
+            (false, false, false, None, GateMode::Shadow, "mode_shadow", true),
+            (true, false, false, ok.clone(), GateMode::Shadow, "forced_shadow", true),
+            (true, false, false, bad.clone(), GateMode::Shadow, "forced_shadow", true),
+            (true, false, false, None, GateMode::Shadow, "forced_shadow", true),
+        ];
+        for (shadow, live, canary, check, mode, reason, sticky) in cases {
+            let g = SendGate::new();
+            initial_gate(&g, shadow, live, canary);
+            let lines = apply_route_check(&g, check.clone(), live, canary);
+            let what = format!("--shadow {shadow} --live {live} --canary {canary} check {:?}", check.as_ref().map(|c| c.0));
+            assert_eq!((g.mode(), g.reason().as_str(), g.sticky()), (mode, reason, sticky), "{what}");
+            assert_eq!(g.allows(), mode == GateMode::Live, "{what}");
+            assert!(g.resume("try").is_ok() == (mode == GateMode::Live), "{what}: a start-up shadow cannot be resumed");
+            let not_sending = lines.iter().any(|l| l.contains("NOT SENDING"));
+            assert_eq!(not_sending, reason == "program_hash_mismatch", "{what}: {lines:?}");
+            assert!(lines[0].ends_with(match check.as_ref().map(|c| c.0) { Some(true) => ": ok", Some(false) => ": MISMATCH", None => "recorded, not checked" }), "{lines:?}");
+        }
+    }
+
+    /// review F1, a structural guard on `run`'s boot order (it needs RPC and a gRPC server, so it is not run here): the
+    /// state stream starts right after the account snapshot, before the route program, the send paths, the executor
+    /// and meta.json; the transaction feeds start after meta.json; the venue programs are hashed after that
+    #[test]
+    fn the_state_stream_starts_right_after_the_snapshot() {
+        let src = include_str!("main.rs");
+        let body = &src[src.find("\nfn run(a: &RunArgs").expect("run")..];
+        let body = &body[..body.find("\n#[cfg(test)]").unwrap_or(body.len())];
+        let at = |needle: &str| body.find(needle).unwrap_or_else(|| panic!("{needle} not in run()"));
+        let order = ["rpc.accounts(&arr)", "feeds::start_state(", "provenance::route_spec(", "send::Paths::new(", "exec::Exec::new(",
+            "write_atomic(&dir.join(\"meta.json\")", "feeds::start(&cfg.feeds", "fetch_programs_cached(", "engine::Engine::new("];
+        for w in order.windows(2) { assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]); }
+        // nothing that waits on the network between the snapshot and the stream
+        let gap = &body[at("anyhow::Ok((reg, store, slot))")..at("feeds::start_state(")];
+        assert!(!gap.contains("block_on") && !gap.contains(".await"), "{gap}");
+    }
+
+    /// review F3: a supervised segment needs its control socket (the supervisor pauses through it): refused before
+    /// anything starts
+    #[test]
+    fn a_supervised_segment_needs_its_control_socket() {
+        let d = std::env::temp_dir().join(format!("arbx-nosock-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&d).unwrap();
+        let src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arbx-stage0.toml")).unwrap();
+        assert!(src.contains("[control]"), "the stage-0 config has a [control] section");
+        let p = d.join("nosock.toml");
+        std::fs::write(&p, src.replacen("socket = true", "socket = false", 1)).unwrap();
+        assert!(!config::Config::load(&p).unwrap().control.socket);
+        let sess = control::Session::new();
+        let e = run(&args(&p, Overrides::default(), false, false, Some(d.join("camp"))), &sess).unwrap_err();
+        assert!(e.to_string().contains("needs its control socket"), "{e}");
+        assert!(!d.join("camp").exists(), "refused before the segment directory");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

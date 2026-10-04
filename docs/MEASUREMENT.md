@@ -1,6 +1,6 @@
 # arbx measurement specification
 
-**Date:** 2026-10-04. **Status:** specification, revision 2. It describes what WP-00 to WP-08 and WP-11 to WP-15 of `docs/PLAN.md` must produce, and how the toolkit (WP-10) must read it. Revision 2 applies `docs/reviews/plan-review.md`; the dispositions are in `docs/reviews/plan-changes.md`.
+**Date:** 2026-10-04. **Status:** specification, revision 2.1. It describes what WP-00 to WP-08 and WP-11 to WP-15 of `docs/PLAN.md` must produce, and how the toolkit (WP-10) must read it. Revision 2 applies `docs/reviews/plan-review.md`; the dispositions are in `docs/reviews/plan-changes.md`. Revision 2.1 records what WP-01 implemented: `campaign.json`, `meta.json` v2, `stop.json`, `control.jsonl` and `supervisor.jsonl` (§4.1-§4.3, §4.7; the fields WP-01 added beyond revision 2 are marked **(WP-01)**), the SendGate reasons `program_hash_mismatch` and `mode_shadow` (A.5), and the final status line's `stop_reason` in the v1.1 files (§7), with the fixes of its review (`docs/reviews/WP-01-review.md`, Disposition).
 **Owner's requirement:** measure everything, on chain and off chain, at least as completely as arb-lab, and fix every gap found in the research. Recording is always on, never slows the hot path, and comes with a toolkit that regenerates per-segment reports correctly.
 
 This document gives, for every recorded stream and file (existing and new): its name, producer (file and function), when it is written, every field with type, unit and semantics (monotonic or delta), rotation and compression, its share of the disk budget, and which reports use it. Section 6 designs the analysis toolkit.
@@ -210,12 +210,15 @@ Written by `deploy/run-w.sh` at campaign start and rewritten after each segment.
 | binary | {path, sha256} | the copied binary every segment runs |
 | config | {path, sha256, normalized_sha256} | the frozen config |
 | budget | {equity_drop_day_sol, failed_fee_budget_lamports} | limits given at start |
-| segments | [{name, started_ns, ended_ns, exit_code, stop_reason, class (`natural`, `operator`, `safety`, `crash`)}] | one per segment |
-| crash_count_15min | integer | crashes only (operator stops excluded) |
+| segments | [{name, started_ns, ended_ns, exit_code, stop_reason, class (`natural`, `operator`, `safety`, `crash`)}] | one per segment. `class` comes from the segment's stop.json: `deadline` = natural; `signal`, `control` = operator; exit 20, `equity_day`, `disk_budget` = safety; anything else (`error`, `panic`, no stop.json: `stop_reason` null, an exit code outside 0/10/20/30) = crash |
+| crash_count_15min | integer | crashes only (operator stops excluded), in the 15 minutes before the last segment ended; more than 6 ends the campaign |
+| end_reason **(WP-01)** | str / null | why the campaign ended: `time up`, `max segments (n)`, `stop file: <text>`, `safety stop in <segment> (<reason>)`, `crash limit: …`, `disk low …`; null while it runs |
+
+`config.normalized_sha256` is `arbx provenance --offline`'s, the same as every segment's meta.json `config.normalized_sha256` (both hash the config file as loaded, before any command-line override: WP-01 review F2). `budget.equity_drop_day_sol` is null until WP-07. The supervisor also writes `check.out` and `provenance.json` (the frozen binary's `arbx check` and `arbx provenance --offline` of the frozen config) into the campaign directory, and the segments keep `programs.cache.json` there (the venue programs' hashes, §4.2).
 
 ### 4.2 meta.json (v2)
 
-Producer: `src/provenance.rs`, called from `main.rs::run` before feeds start. Written once.
+Producer: `src/provenance.rs`, called from `main.rs::run` before the transaction feeds start. Written once, then rewritten once when the venue programs' hashes are in (WP-01; see below).
 
 | Field | Type | Semantics |
 |---|---|---|
@@ -240,6 +243,27 @@ Producer: `src/provenance.rs`, called from `main.rs::run` before feeds start. Wr
 | strategy, send, builder, tips, state | object | effective config sections (normalized) |
 | (v1) started_ns, feeds, strategy, pools, wallet, send_paths, gate, sim, canary, live, exec | — | v1 had only these, as Debug strings |
 
+**As WP-01 writes it.** Written by `main.rs::run` (helpers in `src/provenance.rs`) after the pools, the route program, the send paths and the executor are up and before the transaction feeds start; atomically (temporary file + rename). The state stream (pool accounts) starts earlier, right after the account snapshot, so that no pool write between the snapshot and its subscription is missed (WP-01 review F1); `state.snapshot_slot`, `state.snapshot_ns` and `state.stream_started_ns` record the gap, and run.log has the slot of the stream's first update after each (re)connect. meta.json is rewritten once, atomically, when the venue programs are hashed in the background (`programs_pending` false, `programs_done_ns`); a segment that stops first keeps `programs_pending: true`. A run that ends before that (a failed boot, a stop during boot) leaves a partial one, written with stop.json: `{schema, partial: true, run, build, config, campaign_dir, overrides}`. Fields that a later WP fills are present and null (`probe`, `chainfetch`, `experiments`, `tips`, `limits.ledger`, `pools.file`, `rpc[].max_rps`, `state.tx_streams[].max_accounts`) or false (`state.watch_*`, `state.block_meta`). Beyond the table above:
+- `run.env_file` **(WP-01)**: the `--env-file` the run loaded (a path; the supervisor names the `.env` of the config it froze), or null for the `.env` beside the config.
+- `build.binary_path` **(WP-01)**: `/proc/self/exe`'s target. `build.git_dirty` is null and `git_commit` `unknown` for a build outside git; `dirty_sha256` is null when clean. Dirty means the files that make up the binary (`src/`, `Cargo.toml`, `Cargo.lock`, `buildinfo.rs`) differ from HEAD, or there are untracked files under `src/`; `dirty_sha256` hashes `git diff HEAD --binary` over them plus each untracked file's path and bytes.
+- `config` **(WP-01)**: `normalized_sha256` (and `file_sha256`) hash the config file as loaded, before the command line: the same in every segment of a campaign whatever `--budget-left`, `--no-record` or `--shadow` say, and equal to campaign.json's and `arbx provenance`'s (review F2); what the command line changed is in `overrides` and `limits.supervisor`. `config.mode` is the file's `mode`; `config.effective_mode` is the mode after the command line (`--shadow`).
+- `programs[]`: one entry for the route program (`role` `route`, `[exec] program`) and one per venue program (PumpSwap, RayCpmm, RayAmmV4, Dlmm, DammV2). **(WP-01)** extra fields: `upgrade_authority` (pk / null), `trailing_nonzero` (non-zero bytes after the ELF's end: 0 when the procedure is right), `expected_md5`, `error` (why it could not be hashed; then `ok` is false if a hash was expected), `source` (`rpc`: fetched whole this segment; `cache`: the campaign's `programs.cache.json`) and `pending` (true until the background fetch ends). The route program is fetched at boot, before anything can send. The venue programs are fetched in the background once the feeds run, and once per campaign: later segments read each programdata header (45 bytes, `dataSlice`) and reuse the cached hashes while the last deploy slot is unchanged (an upgrade always changes it), with the upgrade authority taken from the fresh header (review F1, M8). Outside a campaign every program is fetched whole. `ok` is null when no hash is expected (venue programs; a route program without `[exec] expected_program_*`). The procedure also takes a BPF loader 2 program (no programdata: the ELF is the program account's data; `programdata`, `last_deploy_slot` and `upgrade_authority` are null). When the route program's `ok` is false, a live or canary run does not send: the SendGate is shadow for the whole segment with reason `program_hash_mismatch` (A.5); a shadow run only records it. A program whose upgrade authority is the trading wallet is a run.log warning (invariant 9).
+- `wallet.keystore_path`: `wallet_keystore`, or the profile's `~/.nexus-v2-<profile>-wallet.enc`. `held_mints_at_boot` is null when no executor runs (shadow without simulation).
+- `feeds[].host`: the URL's host, the UDP bind address, or `group:port@interface` for multicast; `id` is null for a disabled feed.
+- `send_paths[]`: the enabled paths; `id` is null for one that could not be built.
+- `rpc[]` **(WP-01)**: also `enabled` and `available` (its environment is complete); roles are `boot` (every enabled provider) and `exec` (the `[exec] rpc` ones) until WP-03b.
+- `state.config` **(WP-01)**: the `[state]` section; `state.snapshot_slot` (the slot of the boot's account snapshot), `snapshot_ns`, `stream_started_ns` (when the state stream was started) and `followed` (accounts it follows).
+- `inputs` **(WP-01)**: `{crowded_pools_file, templates_json, signer_stats_file: {path, sha256, size} | {path, sha256: null, error}}`, the set ones only (review N8: files the config names but its hash does not cover).
+- `run.env_file_loaded` **(WP-01)**: false when the `--env-file` could not be read (also a run.log warning); null without `--env-file`.
+- `limits`: the v1.1 fields (§7) plus `supervisor: {budget_left_lamports, config_max_failed_fees_lamports, effective_max_failed_fees_lamports}` and `ledger: null`.
+- `clock` **(WP-01)**: also `adjtimex: {state, offset_ns, maxerror_us, esterror_us, unsynced}` and `chrony` (`chronyc -c tracking`: `ref_id, ref_name, stratum, system_time_s, last_offset_s, rms_offset_s, frequency_ppm, skew_ppm, root_delay_s, root_dispersion_s, leap`, or null). `sync_source` is `chronyc`, `adjtimex` or `none`.
+- `streams`: `meta`, `stop`, `control` and `config` with their schemas; the arb-lab files as `v1.1`.
+- `strategy`, `send`, `builder` (`[exec]`), `live`, `sim`, `canary`, `gate`, `record`, `control` **(WP-01)**: effective config sections, normalized (keys sorted, every URL cut to `scheme://host`). `arbx provenance` prints the same sections.
+- `send_gate` **(WP-01)**: the SendGate at the time meta.json was written (`{mode, reason, detail, since_ns, sticky}`).
+- `overrides` (v1.1, kept): what the command line changed: `{mode: "shadow"}` (`--shadow`), `{"record.enabled": false}` (`--no-record`), `{budget_left_lamports}` (`--budget-left`).
+
+`arbx provenance --config <file> [--offline]` prints `{schema: "arbx.provenance/1.0", t_ns, host, build, config, programs (null with --offline), clock, feeds, send_paths (ids null: nothing is built), rpc, state: {url_host}, inputs, strategy, send, builder, live, sim, canary, gate, record, control}` without starting anything (no pools, feeds or send paths).
+
 ### 4.3 stop.json
 
 Producer: `main.rs::run` at exit (also on panic via a hook). Written once.
@@ -257,7 +281,11 @@ Producer: `main.rs::run` at exit (also on panic via a hook). Written once.
 | drained | bool | all reached a final state |
 | drain_ms | ms | time spent draining |
 | unsettled | [attempt] | still open at exit; the next segment's ledger picks them up |
-| final_status_seq | integer | the last `status.jsonl` seq |
+| final_status_seq | integer | the last `status.jsonl` seq. **(WP-01)** Until status v2 (WP-02) gives lines a `seq`, it is the 0-based index of the final line; null when the run stopped before its engine ran |
+| secondary **(WP-01)** | {reason (`error`, `panic`), detail} / null | a failure after the stop reason was set (a crash while stopping). The first reason stays `reason`; the exit code is then 30 and the supervisor classes the segment a crash (review M5) |
+| requested_ns **(WP-01)** | t_ns | when the stop reason was set (the first request wins; later ones are only logged) |
+
+**As WP-01 writes it.** `stop.json` is written once, atomically, by `control::Session::finish` (from `main.rs` at exit, or the panic hook for a panic on the main thread), with a `<t_ns> stop: reason <r> (exit <code>): <detail>` line in run.log and the control socket removed. Every run that got as far as creating its directory has one, including a failed boot (`error`). `signal` also carries `name` (`SIGINT`, `SIGTERM`) and `sender_comm` (`/proc/<pid>/comm`); `sender_cmdline` is cut to 512 characters with URLs reduced to their host. `detail` is human text: `--minutes N reached`, `SIGINT from pid N (comm)`, `stop by <who>: <why>`, or the error with URLs scrubbed. Until WP-05 drains attempts at stop, `drain_ms` is null, `in_flight_at_stop` and `unsettled` are the attempts still open when the engine loop ended, and `drained` says whether there were none; with no executor (shadow without simulation, a failed boot) `in_flight_at_stop` and `drained` are null (review M11). `exit_code` is 30 whenever `secondary` is set. A signal with no sender process (the kernel, a terminal's Ctrl-C) reads `SIGINT with no sender process (kernel or terminal)` in `detail`. Only SIGINT and SIGTERM are handled (SIGHUP stays ignored under the supervisor). The exit code follows the reason: `deadline` 0; `signal`, `control` 10; `equity_day`, `disk_budget` 20; `error`, `panic` 30.
 
 ### 4.4 manifest.json
 
@@ -302,8 +330,15 @@ Producer: `rec::event(kind, fields)` from any subsystem. One line per event.
 | why | str | required text |
 | accepted | bool | |
 | result | str | e.g. the new SendGate mode |
+| note **(WP-01)** | str | a command accepted without changing anything says why (`already shadow for the rest of the segment (<reason>): nothing to change`) |
 
-`supervisor.jsonl` (run-w.sh): `{t_ns, event (start, segment_start, segment_end, pause, resume, stop, disk_low, budget), segment, budget_left_lamports, budget_src ("ledger" or "status"), free_gb, detail}`.
+`supervisor.jsonl` (run-w.sh): `{t_ns, event (start, segment_start, segment_end, pause, resume, stop, disk_low, budget; WP-01: gate, pause_failed, resume_failed, kill), segment, budget_left_lamports, budget_src ("ledger", "status" or "unknown"), free_gb, detail}`.
+
+**As WP-01 writes them.**
+- The segment's `control.jsonl` gets one line per socket command (`src` `socket`, accepted or not: `--who` is required, and `--why` for every command but `status`), and one per SIGINT or SIGTERM (`src` `signal`, `who` = `<comm> (pid <n>)`, `cmd` `stop`, `why` = the stop detail; a second signal has `accepted` false, `result` `already stopping`). `result` is the SendGate mode after the command, `stopping`, or why it was refused.
+- Commands: `status` (also returns `send_gate`, `stopping`, `stop_reason`, `pid`, `dir` and the last status line), `pause-sending` (SendGate shadow, reason `control`, until `resume-sending`), `resume-sending` (refused after `shadow`, `--shadow`, `program_hash_mismatch` or a stop), `shadow` (shadow for the rest of the segment), `stop` (stop reason `control` with `{who, why, cmd}`). `pause-sending` and `shadow` on a gate that is already shadow for the rest of the segment (`mode_shadow`, `forced_shadow`, `program_hash_mismatch`, an earlier `shadow`) are accepted, change nothing and carry a `note` (review F3: the run is not sending, which is what was asked). Every reply also has `note` (null otherwise). A connection from another user than the run's (or root) is refused and logged with `who` `uid <n>`, `cmd` `?` (review N5).
+- The campaign's `control.jsonl` (`src` `file`) records the control files: `pause-sending` / `resume-sending` for `<campaign>.pause` appearing and going, `next` (`<campaign>.next`; `accepted` false when no segment was running), `stop` (`<campaign>.stop`). `who` is the file's owner (`?` for a removal), `why` its first line. A `pause-sending` line names what happened: the segment paused (`segment <s> paused`), was already shadow (`segment <s> already shadow (<reason>)`), did not confirm (`accepted` false, `result` the reply or `ctl failed (exit n): …`), or, between segments, `segments record only (--shadow) while the file exists`. A `resume-sending` line likewise (`segment <s> resumed`, `… stays shadow (<reason>)`, `accepted` false and `…; restarted` when the segment refused, `segment <s> (records only) restarted: the next one sends`). When the pause is not confirmed after `ARBX_PAUSE_TRIES` (3) polls of a `--live` segment, the supervisor stops it and logs a `next` line with `who` `supervisor`.
+- `supervisor.jsonl`: `budget_src` is `status` (each segment's last status line, never a sum of lines) or `unknown` until WP-07 brings `ledger`. Unknown means a segment that may have sent (it left attempts, or ran with `--live` and its engine started, i.e. has `status.jsonl`) has no readable numeric failed-fee total in its last line, or reading failed: the rest of the campaign is records only (review M4). `budget` events name a records-only segment. `detail` is text: `minutes=… flag=…[ paused=true]` at segment start, `exit=… reason=… class=… duration_s=… crashes_15min=…` at segment end, the end reason at `stop`, `mode=… reason=… flag=…` at `gate` (the segment's meta.json `send_gate`, once known; a `--live` segment whose gate is not live is also a WARNING line in supervisor.log), the ctl reply at `pause_failed` / `resume_failed`, and `SIGKILL …` at `kill`.
 
 ### 4.8 status.jsonl (v2)
 
@@ -1188,6 +1223,8 @@ Segments after w5h2-p3 have no recorder files at all (W §8); reports on them ar
 - `meta.json`: `limits: {sending, max_size_sol, max_size_src, sim_max_size_sol, max_failed_fees_lamports, max_new_token_accounts, decoded_sends, state_triggers, big_band_min_expected_lamports, big_band_max_per_sec, crowded_pools_file, crowded_skip_min_expected_lamports, record}`, and `overrides` (what `--shadow` and `--no-record` changed for this run: `{mode: "shadow"}`, `{"record.enabled": false}`; `{}` for none).
 - The `send` lines of `run.log` give `over-rate N (crowded M)` per path.
 
+**WP-01 in the v1.1 files.** Every `status.jsonl` line carries `send_gate` (`{mode, reason, detail, since_ns, sticky}`, the SendGate when the line was written; review M2), and the final line (written once the run knows why it stops) carries `stop_reason` (A.5). `exec.counts` (the executor's counters, `Exec::status`) gains `reject_gate_shadow` / `reject_gate_stopped` when the SendGate refuses a send (review M11: they are under `exec.counts`, not the engine's `counts`). `meta.json` is v2 (§4.2); a reader tells it by its `schema` field. The segment directory also holds `config.toml` (the frozen config), `stop.json`, `control.jsonl` and, while it runs, `control.sock`.
+
 ---
 
 ## Appendix A. Enumerations
@@ -1223,7 +1260,7 @@ Segments after w5h2-p3 have no recorder files at all (W §8); reports on them ar
 
 **Stop reasons** (`stop.json`): `deadline`, `signal`, `control`, `equity_day` (campaign-wide rolling 24 h; exit 20 ends the campaign), `disk_budget`, `error`, `panic`.
 
-**SendGate shadow reasons** (`status.send_gate.reason`, `gate_change` events; the process keeps running and recording): `control`, `forced_shadow` (`--shadow`), `equity_hour` (campaign-wide rolling hour), `reconcile_miss`, `state_slo` (only with `slo_action = "shadow"`; recovers automatically), `core_record_loss` (for the rest of the segment), `recorder_unhealthy`, `disk_budget` (before the stop).
+**SendGate shadow reasons** (`status.send_gate.reason`, `gate_change` events; the process keeps running and recording): `control`, `forced_shadow` (`--shadow`), `equity_hour` (campaign-wide rolling hour), `reconcile_miss`, `state_slo` (only with `slo_action = "shadow"`; recovers automatically), `core_record_loss` (for the rest of the segment), `recorder_unhealthy`, `disk_budget` (before the stop), `program_hash_mismatch` (WP-01: the route program on chain is not `[exec] expected_program_*`, or could not be read; for the whole segment), `mode_shadow` (WP-01: a run without `--live` or `--canary`, which sends nothing). A stop request turns the gate to `stopped` with the stop reason. A closed gate makes `Exec::wants_send` refuse, counted as `reject_gate_shadow` or `reject_gate_stopped` in `exec.counts` (A.7; the shadow reason is in the gate, not the counter name). A send deferred past its decision (the sim gate's re-checks, scheduled bundle resends) asks the gate again and is dropped when it is closed (review M10).
 
 ### A.6 Event kinds
 

@@ -8,7 +8,10 @@ exec(open(os.path.join(HERE, "latency.py")).read().split("rows = []")[0])
 seg = sys.argv[1]
 A = {x["attempt"]: x for x in map(json.loads, lines(seg, "attempts.jsonl"))}
 O = {x["attempt"]: x for x in map(json.loads, lines(seg, "outcomes.jsonl"))}
-meta = json.load(open(os.path.join(seg, "meta.json"))); F = meta["feeds"]
+meta = json.load(open(os.path.join(seg, "meta.json")))
+# meta.json v2 (arbx, WP-01): feeds are objects, disabled ones included with id null; the txarr columns follow the ids
+# (review M9: a plain list of names would shift every column after a disabled feed)
+F = [f["name"] for f in sorted((f for f in meta["feeds"] if f["id"] is not None), key=lambda f: f["id"])] if str(meta.get("schema", "")).startswith("arbx.meta/2") else meta["feeds"]
 slots = {o["poh"]["trigger"]["slot"] for o in O.values() if (o.get("poh") or {}).get("trigger")}
 trig8 = {sig8(a["trigger"]): i for i, a in A.items()}
 pohms = {}

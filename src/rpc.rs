@@ -217,6 +217,17 @@ impl Rpc {
         Ok((slot, out))
     }
 
+    /// getMultipleAccounts of at most 100 keys, only bytes `[offset, offset + length)` of each (`dataSlice`): headers
+    /// of large accounts (a programdata account's 45 bytes instead of megabytes); returns (slot, accounts in order)
+    pub async fn accounts_slice(&self, keys: &[Pk], offset: usize, length: usize) -> Result<(u64, Vec<Option<Account>>)> {
+        anyhow::ensure!(keys.len() <= 100, "accounts_slice takes at most 100 keys");
+        let ks: Vec<String> = keys.iter().map(b58).collect();
+        let r = self.call("getMultipleAccounts", json!([ks, { "encoding": "base64", "commitment": "processed", "dataSlice": { "offset": offset, "length": length } }])).await?;
+        let slot = r["context"]["slot"].as_u64().unwrap_or(0);
+        let out = r["value"].as_array().context("getMultipleAccounts: no value")?.iter().map(parse_account).collect();
+        Ok((slot, out))
+    }
+
     pub async fn slot(&self) -> Result<u64> { Ok(self.call("getSlot", json!([{ "commitment": "processed" }])).await?.as_u64().unwrap_or(0)) }
 
     pub async fn latest_blockhash(&self) -> Result<([u8; 32], u64)> {

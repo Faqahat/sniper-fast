@@ -212,8 +212,18 @@ pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch:
         let dummy = FeedCounters::default();
         let interest = Interest::default();
         while !stop.load(Ordering::Relaxed) {
-            let sink = |it: grpc::Item| -> bool { forward(u16::MAX, &interest, &out, &dummy, None, it) };
             let started = now_ns();
+            // review F1: the slot of the first update after each (re)connect goes to run.log (the snapshot's slot is
+            // there too): writes between the two are not seen until the account's next write
+            let first = std::sync::atomic::AtomicBool::new(true);
+            let sink = |it: grpc::Item| -> bool {
+                if first.swap(false, Ordering::Relaxed) {
+                    let (slot, what) = match &it { grpc::Item::Account { slot, .. } => (*slot, "account"), grpc::Item::Slot { slot, .. } => (*slot, "slot"), _ => (0, "other") };
+                    let _ = out.send(Event::Status { feed: u16::MAX, msg: format!("state stream: first update at slot {slot} ({what}), {:.0} ms after connecting",
+                        now_ns().saturating_sub(started) as f64 / 1e6) });
+                }
+                forward(u16::MAX, &interest, &out, &dummy, None, it)
+            };
             let res = grpc::accounts_once(&url, token.as_deref(), list.clone(), &sink).await;
             if stop.load(Ordering::Relaxed) { break; }
             let msg = match res { Ok(()) => "stream closed".to_string(), Err(e) => format!("{e:#}") };

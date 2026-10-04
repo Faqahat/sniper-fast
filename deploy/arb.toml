@@ -1,4 +1,6 @@
 # arb-lab on Cherry (84.32.59.15), shadow mode: every feed still live, MriyaNN8's pools + all of ours.
+# WP-01: the config format (required; every unknown key is an error)
+config_version = 2
 out_dir = "/root/arb-lab/runs"
 mode = "shadow"
 # the trading wallet (arbed's keystore ~/.nexus-v2-trading-wallet.*; owner of the WSOL account and the nonce accounts)
@@ -120,7 +122,7 @@ token_env = "HAAN_X_TOKEN"
 account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]
 
 # ---------------------------------------------------------------- send paths
-# Checked with `arb-lab senders --config arb.toml` (sends nothing). The engine does not send yet (shadow only).
+# Checked with `arbx senders --config arb.toml` (sends nothing). The engine does not send yet (shadow only).
 # Secrets come from .env next to this file; `${NAME}` in a url is replaced from it. Tip accounts default to each
 # provider's documented list (src/send/mod.rs known_tip_accounts). Tips are paid only when the trade lands.
 # Same order as arbed's production LANDERS (jito-bundle,shyft,helius,rpcfast); the bundle must stay first for the gate.
@@ -217,6 +219,13 @@ program = "8K8uyQDtVKHYRPACP9fepz91q4sEZLBppR2Ty4vdXuWg"
 rpc = ["helius"]          # simulation, signature statuses, landed transactions: one provider, not the race
 max_size_sol = 0.165      # the wallet's WSOL covers this
 keepalive_s = 30
+# WP-01: the deployed 8K8uyQDt ELF (testdata/programs/README.md); a live or canary run whose program differs does not send
+expected_program_sha256 = "e4f03590bda38d95b884f56a1192070f7e34320840a6d89a568c6ed6024bae2f"
+expected_program_md5 = "809315befcb9554211f8019bf9df290b"
+
+# WP-01: <run dir>/control.sock (`arbx ctl`)
+[control]
+socket = true
 
 [sim]
 # step 2, free: every would-send decision is built and simulated (sims.jsonl)
@@ -224,7 +233,7 @@ enabled = true
 max_per_sec = 2
 
 [canary]
-# step 3: real transactions built to fail our profit check; needs this AND `arb-lab run --canary`
+# step 3: real transactions built to fail our profit check; needs this AND `arbx run --canary`
 enabled = true
 count = 100
 every_ms = 5000
@@ -234,7 +243,7 @@ settle_s = 30
 nonce_account = "58XHXCVwizLunHZdtXRr21NXnraG8Y4vQWjpXLN2FgVe"
 
 [live]
-# step 4: real trades; needs mode = "live" AND `arb-lab run --live`
+# step 4: real trades; needs mode = "live" AND `arbx run --live`
 max_size_sol = 0.165                # about $20 a trade (owner, 2026-10-03), paid from the wallet's WSOL
 max_failed_fees_lamports = 20000000 # stop after 0.02 SOL of fees on landed transactions that failed
 margin_lamports = 1000              # on-chain min_profit = base fee + priority fee + that copy's tip + this

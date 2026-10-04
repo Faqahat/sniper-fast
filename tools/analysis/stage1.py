@@ -36,7 +36,9 @@ def lines(name):
 
 
 meta = json.load(open(os.path.join(SEG, "meta.json")))
-FEEDS = meta["feeds"]
+# meta.json v2 (arbx, WP-01): feeds are objects, disabled ones included with id null; the txarr columns follow the ids
+# (review M9: a plain list of names would shift every column after a disabled feed)
+FEEDS = [f["name"] for f in sorted((f for f in meta["feeds"] if f["id"] is not None), key=lambda f: f["id"])] if str(meta.get("schema", "")).startswith("arbx.meta/2") else meta["feeds"]
 
 # 1. rivals (shred time)
 riv = {}

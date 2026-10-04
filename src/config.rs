@@ -1,12 +1,21 @@
-//! arb-lab configuration (TOML). Secrets are never in the file: each one is named by an environment variable that
+//! arbx configuration (TOML). Secrets are never in the file: each one is named by an environment variable that
 //! `.env` (next to the config, mode 600) provides.
+//!
+//! Config hygiene (PLAN WP-01 item 2): every struct denies unknown keys, so a misspelled or removed key is a load error
+//! that names the key, never a silently ignored setting; `config_version = 2` is required (arb-lab's v1 files, such as
+//! `deploy/legacy/arb-w-live.toml`, do not load); `Config::normalized_json` gives the hash that ignores comments and
+//! formatting (meta.json `config.normalized_sha256`).
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
-    /// where each run writes its own directory
+    /// the config format: 2 (arbx). Required: `Config::parse` refuses a file without it or with another value
+    #[serde(default)]
+    pub config_version: Option<u32>,
+    /// where each run writes its own directory (`run --campaign-dir` puts the segment in the campaign's directory instead)
     pub out_dir: String,
     /// "shadow" (decide, log, never send) or "live" (send; also needs --live and the confirm phrase)
     #[serde(default = "shadow")]
@@ -16,7 +25,7 @@ pub struct Config {
     /// keystore profile for live mode: ~/.nexus-v2-<profile>-wallet.enc and .pass (the current bot's format)
     #[serde(default = "trading")]
     pub wallet_profile: String,
-    /// an encrypted v3 keystore file (arb-lab keystore-encrypt / tools/encrypt-keystore.mjs). When set, the passphrase
+    /// an encrypted v3 keystore file (arbx keystore-encrypt / tools/encrypt-keystore.mjs). When set, the passphrase
     /// is read once at start from stdin (piped over SSH) or the terminal, never from a file; wallet_profile is unused.
     #[serde(default)]
     pub wallet_keystore: String,
@@ -41,10 +50,26 @@ pub struct Config {
     pub live: LiveCfg,
     #[serde(default)]
     pub record: RecordCfg,
+    #[serde(default)]
+    pub control: ControlCfg,
 }
 
+/// the config format this binary reads
+pub const CONFIG_VERSION: u32 = 2;
+
+/// The run's control socket (src/control.rs): `<run dir>/control.sock` (mode 0600), driven by `arbx ctl`
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlCfg {
+    /// listen on the socket (default true). Off: signals and the supervisor's files still stop the run
+    #[serde(default = "yes")]
+    pub socket: bool,
+}
+impl Default for ControlCfg { fn default() -> Self { ControlCfg { socket: true } } }
+
 /// The long run's recorders (record.rs): rivals, executed results, arrivals per feed, pool moves, slots, raw entries.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct RecordCfg {
     #[serde(default)]
     pub enabled: bool,
@@ -53,10 +78,11 @@ pub struct RecordCfg {
     pub archive_feed: String,
 }
 
-/// STEP 4: real trades. Needs mode = "live" AND `arb-lab run --live`. Each copy's on-chain min_profit is base fee +
+/// STEP 4: real trades. Needs mode = "live" AND `arbx run --live`. Each copy's on-chain min_profit is base fee +
 /// priority fee + that copy's tip + `margin_lamports`, so a landed trade cannot lose; what failures cost (their fees)
 /// is capped by `max_failed_fees_lamports`, after which no trade is sent (the engine keeps recording).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LiveCfg {
     /// at most this much per trade, SOL (paid from the wallet's WSOL account)
     #[serde(default = "live_size")]
@@ -203,7 +229,8 @@ impl Default for LiveCfg {
 }
 
 /// Building real transactions from the engine's decisions (simulation and canaries)
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecCfg {
     /// the nexus-arb-v2 program
     #[serde(default = "v2_program")]
@@ -220,6 +247,13 @@ pub struct ExecCfg {
     /// keep-alive round trip to every send path this often, seconds
     #[serde(default = "keepalive_s")]
     pub keepalive_s: u64,
+    /// WP-01: the route program's ELF hashes (programdata without its header and zero padding; MEASUREMENT §4.2),
+    /// lowercase hex. When set, a live or canary run whose program on chain differs (or cannot be read) does not send:
+    /// the SendGate goes to shadow with reason `program_hash_mismatch`. A shadow run only records the check. "" = no check
+    #[serde(default)]
+    pub expected_program_sha256: String,
+    #[serde(default)]
+    pub expected_program_md5: String,
 }
 fn v2_program() -> String { "8K8uyQDtVKHYRPACP9fepz91q4sEZLBppR2Ty4vdXuWg".into() }
 fn v2_alts() -> Vec<String> {
@@ -233,12 +267,14 @@ fn exec_rpc() -> Vec<String> { vec!["helius".into()] }
 fn exec_max_size() -> f64 { 0.15 }
 fn keepalive_s() -> u64 { 30 }
 impl Default for ExecCfg {
-    fn default() -> Self { ExecCfg { program: v2_program(), alts: v2_alts(), rpc: exec_rpc(), max_size_sol: exec_max_size(), keepalive_s: keepalive_s() } }
+    fn default() -> Self { ExecCfg { program: v2_program(), alts: v2_alts(), rpc: exec_rpc(), max_size_sol: exec_max_size(), keepalive_s: keepalive_s(),
+        expected_program_sha256: String::new(), expected_program_md5: String::new() } }
 }
 
 /// STEP 2, free: build the real transaction for each would-send decision and simulate it (sims.jsonl). An answer of
 /// "ok" or our profit check (0x4e580002) means every leg ran: the encoding is right; anything else names what is not.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SimCfg {
     #[serde(default)]
     pub enabled: bool,
@@ -252,7 +288,8 @@ impl Default for SimCfg { fn default() -> Self { SimCfg { enabled: false, max_pe
 /// STEP 3, fees only: real transactions built to FAIL our own profit check (min_profit = 1,000 SOL), one copy per send
 /// path under one durable nonce, so at most one lands and it lands failed: only its network fee is paid, and every
 /// tip reverts with the trade. Needs `enabled = true` here AND `--canary` on the command line.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CanaryCfg {
     #[serde(default)]
     pub enabled: bool,
@@ -290,7 +327,8 @@ fn shadow() -> String { "shadow".into() }
 fn trading() -> String { "trading".into() }
 fn skip_signers() -> bool { true }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PoolsCfg {
     /// seed pools (venue,pool,vault_a,vault_b,mint_a,mint_b,...) — the pools whose swaps we react to
     pub seed_csv: String,
@@ -307,7 +345,8 @@ pub struct PoolsCfg {
 }
 fn wsol() -> Vec<String> { vec!["So11111111111111111111111111111111111111112".into()] }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RpcCfg {
     /// env var holding the RPC URL (account snapshots, lookup tables, blockhash, signature statuses)
     pub url_env: Option<String>,
@@ -319,7 +358,8 @@ pub struct RpcCfg {
     pub failover: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RpcEndpointCfg {
     pub name: String,
     /// env var with the full URL (key included if the provider puts it in the URL)
@@ -354,14 +394,16 @@ impl RpcCfg {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StateCfg {
     /// Yellowstone endpoint for pool-state account updates
     pub url: String,
     pub token_env: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StrategyCfg {
     /// trade sizes tried per opportunity, in SOL
     #[serde(default = "sizes")]
@@ -411,7 +453,7 @@ impl Default for StrategyCfg {
     fn default() -> Self { StrategyCfg { sizes_sol: sizes(), min_profit_lamports: min_profit(), cu_price_micro: cu_price(), outcome_watch_ms: watch_ms(), signer_stats_file: String::new(), confirm_trigger_ms: 0, skip_failing_signers: true, state_triggers: false, budget_caps_sol: vec![], decoded_sends: false } }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum FeedKind {
     /// raw shreds pushed over UDP
@@ -426,7 +468,8 @@ pub enum FeedKind {
     YellowstoneTx,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Feed {
     pub name: String,
     pub kind: FeedKind,
@@ -449,7 +492,7 @@ pub struct Feed {
     pub split_include: bool,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum SendKind {
     /// Jito block engine searcher gRPC: a one-transaction bundle, authenticated with a whitelisted keypair
@@ -525,7 +568,8 @@ impl SendKind {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SendPath {
     pub name: String,
     pub kind: SendKind,
@@ -567,7 +611,8 @@ pub struct SendPath {
 /// to `wait_ms` after it for the block engine's first result. A `would-fail` on our own profit check (0x4e580002)
 /// means the gap is already gone: the paid copies are not sent and nothing is spent. Every `canary_every`-th skip is
 /// sent anyway (0 = never), so the gate's cost in lost wins stays measured.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct GateCfg {
     #[serde(default)]
     pub enabled: bool,
@@ -583,15 +628,34 @@ impl Default for GateCfg {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> Result<Config> {
-        let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        Config::parse(&text).with_context(|| format!("parsing {}", path.display()))
+    pub fn load(path: &Path) -> Result<Config> { Ok(Config::load_raw(path)?.0) }
+
+    /// the parsed config and the file's raw bytes (meta.json `config.file_sha256`, the run directory's frozen copy)
+    pub fn load_raw(path: &Path) -> Result<(Config, Vec<u8>)> {
+        let raw = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        let text = std::str::from_utf8(&raw).with_context(|| format!("{}: not UTF-8", path.display()))?;
+        let cfg = Config::parse(text).with_context(|| format!("parsing {}", path.display()))?;
+        Ok((cfg, raw))
     }
 
     /// a config file's text, parsed and checked
     pub fn parse(text: &str) -> Result<Config> {
+        // the version first, so an arb-lab (v1) file is named as such rather than by its first unknown key
+        if let Ok(v) = text.parse::<toml::Table>() {
+            match v.get("config_version") {
+                None => bail!("config_version = {CONFIG_VERSION} is required (this file has none: an arb-lab v1 config? those stay in deploy/legacy/)"),
+                Some(toml::Value::Integer(n)) if *n == CONFIG_VERSION as i64 => {}
+                Some(x) => bail!("config_version {x} is not supported: this binary reads config_version = {CONFIG_VERSION}"),
+            }
+        }
         let cfg: Config = toml::from_str(text)?;
+        if cfg.config_version != Some(CONFIG_VERSION) { bail!("config_version = {CONFIG_VERSION} is required"); }
         if cfg.mode != "shadow" && cfg.mode != "live" { bail!("mode must be \"shadow\" or \"live\""); }
+        for (k, v, n) in [("expected_program_sha256", &cfg.exec.expected_program_sha256, 64), ("expected_program_md5", &cfg.exec.expected_program_md5, 32)] {
+            if !v.is_empty() && (v.len() != n || !v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) {
+                bail!("[exec] {k} must be {n} lowercase hex characters (or \"\" for no check)");
+            }
+        }
         let mut names = std::collections::HashSet::new();
         for f in &cfg.feeds {
             if !names.insert(f.name.clone()) { bail!("duplicate feed name {}", f.name); }
@@ -638,11 +702,34 @@ impl Config {
         Ok(cfg)
     }
 
+    /// The parsed config as JSON with every default filled in and every object's keys sorted: the same settings give
+    /// the same text whatever the file's comments, order and formatting (meta.json `config.normalized_sha256`)
+    pub fn normalized_json(&self) -> String {
+        sorted(serde_json::to_value(self).expect("a config serializes")).to_string()
+    }
+
+    /// sha256 (hex) of `normalized_json`
+    pub fn normalized_sha256(&self) -> String { crate::provenance::sha256_hex(self.normalized_json().as_bytes()) }
+
     /// WP-00 (review F3): a config whose strategy prices nothing (neither `state_triggers` nor `decoded_sends`) runs,
     /// records and never finds an opportunity. `arbx check` and `arbx run` print this
     pub fn pricing_warning(&self) -> Option<String> {
         let s = &self.strategy;
         (!s.state_triggers && !s.decoded_sends).then(|| "WARNING: [strategy] state_triggers and decoded_sends are both off: nothing is priced, no opportunity can be found".to_string())
+    }
+}
+
+/// `v` with every object's keys in sorted order (whatever map type serde_json was built with)
+pub fn sorted(v: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match v {
+        Value::Object(m) => {
+            let mut kv: Vec<(String, Value)> = m.into_iter().collect();
+            kv.sort_by(|a, b| a.0.cmp(&b.0));
+            Value::Object(kv.into_iter().map(|(k, v)| (k, sorted(v))).collect())
+        }
+        Value::Array(a) => Value::Array(a.into_iter().map(sorted).collect()),
+        x => x,
     }
 }
 
@@ -748,7 +835,74 @@ mod tests {
         assert_eq!((j.tip_share, j.tip_max_lamports), (Some(0.7), Some(100_000)), "R §3.6: no drift from the live config");
     }
 
-    const MINIMAL: &str = "out_dir = \"/tmp/x\"\nwallet = \"w\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n";
+    const MINIMAL: &str = "config_version = 2\nout_dir = \"/tmp/x\"\nwallet = \"w\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n";
+
+    fn err(text: &str) -> String { format!("{:#}", Config::parse(text).err().expect("refused")) }
+
+    /// PLAN WP-01 acceptance: a misspelled key fails to load, with the key's name in the error, in every section
+    /// (res-code §2: unknown keys were silently ignored)
+    #[test]
+    fn unknown_keys_are_load_errors() {
+        assert!(Config::parse(MINIMAL).is_ok());
+        for (section, typo) in [("", "out_dirr = \"/tmp\""), ("[live]", "max_failed_fee_lamports = 1"), ("[strategy]", "decoded_send = true"),
+            ("[exec]", "expected_program_sha = \"x\""), ("[sim]", "enable = true"), ("[canary]", "enabled_ = true"), ("[record]", "enabeld = true"),
+            ("[gate]", "wait = 1"), ("[control]", "sockets = false"), ("[[feed]]\nname = \"f\"\nkind = \"udp\"\nbind = \"0.0.0.0:1\"", "binds = \"x\""),
+            ("[[send]]\nname = \"s\"\nkind = \"rpc\"\nurl = \"http://x\"", "max_per_second = 1"),
+            ("[[rpc.endpoint]]\nname = \"r\"\nurl = \"http://x\"", "url_envv = \"X\"")] {
+            let key = typo.split(' ').next().unwrap();
+            let text = if section.is_empty() { MINIMAL.replacen("wallet", &format!("{typo}\nwallet"), 1) } else { format!("{MINIMAL}{section}\n{typo}\n") };
+            let e = err(&text);
+            assert!(e.contains(&format!("unknown field `{key}`")), "{section} {key}: {e}");
+        }
+        // [pools] and [state] (required sections) too
+        assert!(err(&MINIMAL.replace("seed_csv", "registry_al = true\nseed_csv")).contains("unknown field `registry_al`"));
+        assert!(err(&MINIMAL.replace("url = \"http://localhost\"", "url = \"http://localhost\"\ntoken = \"X\"")).contains("unknown field `token`"));
+    }
+
+    /// PLAN WP-01 acceptance: config_version = 2 is required; 1 (or none: an arb-lab file) fails
+    #[test]
+    fn config_version_2_is_required() {
+        assert!(err(&MINIMAL.replace("config_version = 2", "config_version = 1")).contains("config_version 1 is not supported"));
+        assert!(err(&MINIMAL.replace("config_version = 2\n", "")).contains("config_version = 2 is required"));
+        assert!(err(&MINIMAL.replace("config_version = 2", "config_version = \"2\"")).contains("not supported"));
+        assert_eq!(Config::parse(MINIMAL).unwrap().config_version, Some(CONFIG_VERSION));
+        // F19: the arb-lab record stays as it was and is not loadable
+        let e = format!("{:#}", Config::load(&repo("deploy/legacy/arb-w-live.toml")).err().unwrap());
+        assert!(e.contains("config_version = 2 is required"), "{e}");
+        assert!(!repo("deploy/arb-w-live.toml").exists(), "moved to deploy/legacy/");
+        // the maintained configs are v2 and parse with every key known
+        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] { assert_eq!(Config::load(&repo(f)).unwrap().config_version, Some(2), "{f}"); }
+    }
+
+    /// `normalized_json`: defaults filled, keys sorted, comments and formatting ignored; a changed value changes it
+    #[test]
+    fn normalized_hash_ignores_comments_and_order() {
+        let a = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nsettle_s = 3\n")).unwrap();
+        let b = Config::parse(&format!("# a comment\n{}[live]\nsettle_s   =   3 # inline\nmax_size_sol = 0.50\n", MINIMAL.replace("wallet = \"w\"\n", "")
+            .replace("out_dir", "wallet = \"w\"\nout_dir"))).unwrap();
+        assert_eq!(a.normalized_json(), b.normalized_json());
+        assert_eq!(a.normalized_sha256(), b.normalized_sha256());
+        let c = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.6\nsettle_s = 3\n")).unwrap();
+        assert_ne!(a.normalized_sha256(), c.normalized_sha256());
+        // a default written out explicitly is the same config
+        let d = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nsettle_s = 3\nmargin_lamports = 1000\n")).unwrap();
+        assert_eq!(a.normalized_sha256(), d.normalized_sha256());
+        let v: serde_json::Value = serde_json::from_str(&a.normalized_json()).unwrap();
+        assert_eq!((v["config_version"].as_u64(), v["live"]["settle_s"].as_u64(), v["control"]["socket"].as_bool()), (Some(2), Some(3), Some(true)));
+        let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        let mut sorted_keys = keys.clone();
+        sorted_keys.sort();
+        assert_eq!(keys, sorted_keys);
+        assert!(a.normalized_json().find("\"canary\"").unwrap() < a.normalized_json().find("\"wallet\"").unwrap(), "sorted in the text");
+    }
+
+    /// `[exec] expected_program_*` must be hex of the right length (a typo would make every live run shadow)
+    #[test]
+    fn expected_program_hashes_are_checked() {
+        assert!(Config::parse(&format!("{MINIMAL}[exec]\nexpected_program_md5 = \"809315befcb9554211f8019bf9df290b\"\n")).is_ok());
+        assert!(err(&format!("{MINIMAL}[exec]\nexpected_program_md5 = \"809315be\"\n")).contains("expected_program_md5"));
+        assert!(err(&format!("{MINIMAL}[exec]\nexpected_program_sha256 = \"{}\"\n", "E".repeat(64))).contains("lowercase hex"));
+    }
 
     #[test]
     fn wp00_keys_default_safe() {

@@ -90,6 +90,10 @@ struct Opp {
 /// A trigger's prediction, kept until its real effect shows up (accuracy check)
 struct Check { pool: usize, trig: [u8; 64], t: u64, cp: Option<(u128, u128)>, active: Option<i32>, venue: Venue, signer: Pk }
 
+/// Why `Engine::run` returned
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunEnd { Stopped, Deadline, Disconnected }
+
 pub struct Engine {
     pub reg: Arc<Registry>,
     pub store: Store,
@@ -120,6 +124,10 @@ pub struct Engine {
     out_opp: std::io::BufWriter<std::fs::File>,
     out_pred: std::io::BufWriter<std::fs::File>,
     out_status: std::io::BufWriter<std::fs::File>,
+    /// status.jsonl lines written so far (stop.json `final_status_seq` = this - 1)
+    pub status_lines: u64,
+    /// the run's SendGate, shown in every status line as `send_gate` (review M2: a segment that does not send says why)
+    pub gate: Option<Arc<crate::control::SendGate>>,
     /// per-trigger arrival times from every feed (the feed scoreboard)
     out_arr: std::io::BufWriter<std::fs::File>,
     rpc: crate::rpc::Rpc,
@@ -208,7 +216,7 @@ impl Engine {
             watch: HashMap::default(), opps: HashMap::default(), checks: HashMap::default(), next_id: 0, slot: 0,
             lat: LAT_SERIES.into_iter().map(Series::new).collect(),
             counts: HashMap::default(),
-            out_trig: open("triggers.jsonl")?, out_opp: open("opportunities.jsonl")?, out_pred: open("predictions.jsonl")?, out_status: open("status.jsonl")?, out_arr: open("arrivals.jsonl")?,
+            out_trig: open("triggers.jsonl")?, out_opp: open("opportunities.jsonl")?, out_pred: open("predictions.jsonl")?, out_status: open("status.jsonl")?, status_lines: 0, gate: None, out_arr: open("arrivals.jsonl")?,
             rpc, rt, tx_back, watch_list, exec: None, signer_stats, trig_pending: HashMap::default(), confirm_wait: VecDeque::new(), state_seen: HashSet::default(), state_pending: Vec::new(),
             state_first: HashMap::default(), state_first_order: VecDeque::new(), caps_pending: Vec::new(), pool_prices: HashMap::default(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(), moves_seen: HashSet::default(), poh: HashMap::default(), poh_order: VecDeque::new() })
     }
@@ -357,15 +365,17 @@ impl Engine {
     }
     pub fn rpc_handle(&self) -> crate::rpc::Rpc { self.rpc.clone() }
 
-    /// Run until `stop` or the channel closes. `status` is called every 10 s with a one-line summary.
-    pub fn run(&mut self, rx: &Receiver<Event>, stop: &std::sync::atomic::AtomicBool, until_ns: u64, mut status: impl FnMut(&str)) {
+    /// Run until `stop`, the deadline `until_ns` or the channel closes; says which. `status` is called every 10 s with a
+    /// one-line summary. The final status.jsonl line is the caller's (`write_final_status`), once it knows the stop reason.
+    pub fn run(&mut self, rx: &Receiver<Event>, stop: &std::sync::atomic::AtomicBool, until_ns: u64, mut status: impl FnMut(&str)) -> RunEnd {
         let mut last_status = now_ns();
         let mut last_drift = now_ns();
-        loop {
-            if stop.load(std::sync::atomic::Ordering::Relaxed) || now_ns() >= until_ns { break; }
+        let end = loop {
+            if stop.load(std::sync::atomic::Ordering::Relaxed) { break RunEnd::Stopped; }
+            if now_ns() >= until_ns { break RunEnd::Deadline; }
             let ev = match rx.try_recv() {
                 Ok(e) => e,
-                Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Disconnected) => break RunEnd::Disconnected,
                 Err(TryRecvError::Empty) => {
                     // spin briefly (an event usually follows another within microseconds), then block
                     let until_spin = now_ns() + SPIN_NS;
@@ -376,7 +386,7 @@ impl Engine {
                         None => match rx.recv_timeout(std::time::Duration::from_millis(5)) {
                             Ok(e) => e,
                             Err(RecvTimeoutError::Timeout) => { self.expire_confirms(); self.housekeeping(&mut last_status, &mut last_drift, rx.len(), &mut status); continue; }
-                            Err(RecvTimeoutError::Disconnected) => break,
+                            Err(RecvTimeoutError::Disconnected) => break RunEnd::Disconnected,
                         },
                     }
                 }
@@ -393,7 +403,7 @@ impl Engine {
             if !self.confirm_wait.is_empty() { self.expire_confirms(); }
             if !self.state_pending.is_empty() && rx.is_empty() { self.flush_state(); }
             if now_ns() - last_status > 10_000_000_000 { self.housekeeping(&mut last_status, &mut last_drift, rx.len(), &mut status); }
-        }
+        };
         // finish open opportunities so nothing is lost
         let ids: Vec<u64> = self.opps.keys().copied().collect();
         for id in ids { self.finish_opp(id); }
@@ -404,7 +414,12 @@ impl Engine {
         let _ = self.out_trig.flush(); let _ = self.out_opp.flush(); let _ = self.out_pred.flush();
         crate::feeds::flush_poh_log();
         self.save_signer_stats();
-        self.write_status(rx.len());
+        end
+    }
+
+    /// The last status.jsonl line, with the run's stop reason (MEASUREMENT A.5; WP-01)
+    pub fn write_final_status(&mut self, queue: usize, stop_reason: &str) {
+        self.write_status_line(queue, Some(stop_reason));
         let _ = self.out_status.flush();
     }
 
@@ -437,7 +452,9 @@ impl Engine {
         }
     }
 
-    fn write_status(&mut self, queue: usize) -> String {
+    fn write_status(&mut self, queue: usize) -> String { self.write_status_line(queue, None) }
+
+    fn write_status_line(&mut self, queue: usize, stop_reason: Option<&str>) -> String {
         let mut lat = serde_json::Map::new();
         // the engine's stage series, then the send's (exec: decided_to_signed, signed_to_fired, signed_to_sent). Each is
         // a bounded reservoir (lat.rs; review F7: no 200k-sample sorts on the engine thread)
@@ -446,10 +463,12 @@ impl Engine {
             lat.insert(v.name.to_string(), v.summary());
         }
         let waiting: usize = self.alt_wait.values().map(|v| v.len()).sum();
-        let line = json!({ "t_ns": now_ns(), "slot": self.slot, "queue": queue, "store_updates": self.store.updates,
+        let mut line = json!({ "t_ns": now_ns(), "slot": self.slot, "queue": queue, "store_updates": self.store.updates,
             "open_opps": self.opps.len(), "alts_cached": self.alts.len(), "alt_waiting": waiting, "ata_misses": self.ata.misses.get(),
-            "counts": self.counts, "latency": lat, "exec": self.exec.as_ref().map(|x| x.status()) });
+            "counts": self.counts, "latency": lat, "exec": self.exec.as_ref().map(|x| x.status()), "send_gate": self.gate.as_ref().map(|g| g.json()) });
+        if let Some(r) = stop_reason { line["stop_reason"] = json!(r); }
         let _ = writeln!(self.out_status, "{line}");
+        self.status_lines += 1;
         let c = |k: &str| self.counts.get(k).copied().unwrap_or(0);
         format!("slot {} queue {} | txs {} triggers {} opps {} | alt: waits {} learned {} still waiting {} | preds checked {}", self.slot, queue,
             c("tx_first"), c("trigger"), c("opportunity"), c("alt_wait"), c("alt_learned"), waiting, c("pred_checked"))

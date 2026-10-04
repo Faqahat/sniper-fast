@@ -12,6 +12,7 @@
 //! Building and signing run on the engine thread (microseconds); RPC and sending run on the runtime.
 use crate::build::{self, Alt, PumpGlobal};
 use crate::config::{Config, SendKind};
+use crate::control::{GateMode, SendGate};
 use crate::feeds::{clock::now_ns, Event};
 use crate::rpc::Rpc;
 use crate::lat::Series;
@@ -209,6 +210,9 @@ pub struct Exec {
     /// stage latencies of the send (status.jsonl `latency`, A.8): `decided_to_signed`, `signed_to_fired` (handed to
     /// the runtime: the cost of the spawn), `signed_to_sent` (the first copy's send task running, from `on_settled`)
     pub lat: Vec<Series>,
+    /// WP-01: the run's SendGate (control socket pause / shadow, `--shadow`, a route program hash mismatch, a stop
+    /// request): `wants_send` refuses while it is not live
+    gate: Arc<SendGate>,
 }
 
 /// `Exec::lat` series, in order
@@ -399,10 +403,13 @@ mod tests {
 
     const MINT: Pk = [7u8; 32];
 
-    fn test_cfg(dir: &std::path::Path, crowded: &str) -> Config {
+    fn test_cfg(dir: &std::path::Path, crowded: &str) -> Config { test_cfg_live(dir, crowded, "") }
+
+    /// `extra`: more `[live]` lines
+    fn test_cfg_live(dir: &std::path::Path, crowded: &str, extra: &str) -> Config {
         let wallet = bs58::encode(ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]).verifying_key().to_bytes()).into_string();
-        Config::parse(&format!("out_dir = \"{}\"\nwallet = \"{wallet}\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n\
-            [live]\npair_lock_ms = 0\ncrowded_pools_file = \"{crowded}\"\ncrowded_skip_min_expected_lamports = 100000\n\
+        Config::parse(&format!("config_version = 2\nout_dir = \"{}\"\nwallet = \"{wallet}\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n\
+            [live]\npair_lock_ms = 0\ncrowded_pools_file = \"{crowded}\"\ncrowded_skip_min_expected_lamports = 100000\n{extra}\
             [[send]]\nname = \"rpc0\"\nkind = \"rpc\"\nurl = \"http://127.0.0.1:1\"\n", dir.display())).unwrap()
     }
 
@@ -424,21 +431,24 @@ mod tests {
     impl Drop for Rig { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); } }
 
     /// a live Exec on a made-up wallet (no network: the one send path is a closed local port), three nonces
-    async fn live_rig(name: &str) -> Rig {
+    async fn live_rig(name: &str) -> Rig { live_rig_with(name, "").await.0 }
+
+    /// a live rig with more `[live]` lines; also the events the executor sends back (settlements)
+    async fn live_rig_with(name: &str, extra: &str) -> (Rig, crossbeam_channel::Receiver<Event>) {
         let dir = std::env::temp_dir().join(format!("arbx-exec-{name}-{}-{}", std::process::id(), now_ns()));
         std::fs::create_dir_all(&dir).unwrap();
         let crowded_file = dir.join("crowded.json");
         std::fs::write(&crowded_file, format!("[\"{}\"]", bs58::encode([9u8; 32]).into_string())).unwrap();
-        let cfg = test_cfg(&dir, crowded_file.to_str().unwrap());
+        let cfg = test_cfg_live(&dir, crowded_file.to_str().unwrap(), extra);
         let (paths, _) = Paths::new(&cfg.sends, cfg.gate.clone(), Some(&dir), false).await.unwrap();
         let key = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
         let nonces = (0..3u8).map(|k| NonceSlot { acct: [200 + k; 32], value: Some([k; 32]), busy: None }).collect();
         let sending = Sending::new(&cfg, Kind::Live, key, nonces);
         let held: HashSet<Pk> = [*WSOL, MINT].into_iter().collect();
-        let (tx, _rx) = crossbeam_channel::unbounded();
+        let (tx, rx) = crossbeam_channel::unbounded();
         let band = BandGate::from_cfg(&cfg, load_crowded_pools(&cfg.live.crowded_pools_file).unwrap());
         let x = Exec::assemble(&cfg, Rpc::race(vec![]), Some(paths), &dir, tx, vec![], vec![], None, held, Some(sending), band).unwrap();
-        Rig { x, dir }
+        (Rig { x, dir }, rx)
     }
 
     fn attempts(r: &Rig) -> Vec<Value> {
@@ -476,6 +486,60 @@ mod tests {
             assert_eq!(st["rx"].as_u64(), Some(100));
         }
         assert_eq!((x.lat[LAT_DECIDED_TO_SIGNED].n(), x.lat[LAT_SIGNED_TO_FIRED].n()), (2, 2));
+    }
+
+    /// PLAN WP-01 acceptance (control test): `pause-sending` through the control socket makes `wants_send` return None
+    /// and writes a control.jsonl line; `resume-sending` lets it send again; a stop request closes it for good
+    #[tokio::test]
+    async fn control_pause_closes_wants_send() {
+        use crate::control::{self, StopInfo, StopReason};
+        let mut r = live_rig("ctl").await;
+        let sess = control::Session::new();
+        sess.set_dir(r.dir.clone());
+        r.x.set_gate(sess.gate.clone());
+        let size = r.x.sending.as_ref().unwrap().size;
+        assert_eq!(r.x.wants_send(), Some(size), "live: may send");
+        let _srv = control::serve(sess.clone(), &r.dir).unwrap();
+        let rep = control::send_command(&r.dir, "pause-sending", "moiz", "WP-01 control test").unwrap();
+        assert_eq!((rep["accepted"].as_bool(), rep["send_gate"]["mode"].as_str()), (Some(true), Some("shadow")));
+        assert_eq!(r.x.wants_send(), None, "paused");
+        assert_eq!(n(&r.x, "reject_gate_shadow"), 1);
+        let log: Vec<Value> = std::fs::read_to_string(r.dir.join("control.jsonl")).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(log.len(), 1);
+        assert_eq!((log[0]["src"].as_str(), log[0]["cmd"].as_str(), log[0]["who"].as_str(), log[0]["why"].as_str(), log[0]["accepted"].as_bool(), log[0]["result"].as_str()),
+            (Some("socket"), Some("pause-sending"), Some("moiz"), Some("WP-01 control test"), Some(true), Some("shadow")));
+        assert!(control::send_command(&r.dir, "resume-sending", "moiz", "done").unwrap()["accepted"].as_bool().unwrap());
+        assert!(r.x.wants_send().is_some(), "resumed");
+        sess.stopper.request(StopInfo::new(StopReason::Signal, "SIGINT"));
+        assert_eq!(r.x.wants_send(), None, "stopping");
+        assert_eq!(n(&r.x, "reject_gate_stopped"), 1);
+        assert!(!control::send_command(&r.dir, "resume-sending", "moiz", "again").unwrap()["accepted"].as_bool().unwrap());
+    }
+
+    /// review M10: a send deferred past the decision (the sim gate re-checks the route first) is cancelled when the
+    /// SendGate closes in between: the attempt settles as not sent, nothing is fired
+    #[tokio::test]
+    async fn a_pause_cancels_a_deferred_send() {
+        use crate::control::{self, StopInfo, StopReason};
+        for stop in [false, true] {
+            let (mut r, rx) = live_rig_with(if stop { "defer-stop" } else { "defer-pause" }, "sim_gate = true\n").await;
+            let sess = control::Session::new();
+            r.x.set_gate(sess.gate.clone());
+            r.x.send(route(1, damm(3, MINT), 50_000));
+            assert_eq!(n(&r.x, "live_sent"), 1, "decided and signed while the gate was open");
+            assert!(attempts(&r)[0]["st"]["fired"].is_null(), "the sim gate fires later, from the task");
+            // the task has not run yet (current-thread runtime): close the gate first
+            if stop { sess.stopper.request(StopInfo::new(StopReason::Signal, "SIGINT")); } else { sess.gate.shadow("control", "pause-sending by test", false).unwrap(); }
+            let t0 = std::time::Instant::now();
+            let settled = loop {
+                if let Ok(Event::Settled(s)) = rx.try_recv() { break s; }
+                assert!(t0.elapsed() < std::time::Duration::from_secs(10), "no settlement");
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            };
+            assert!(settled.fired.copies.is_empty(), "nothing was fired");
+            let want = if stop { "(stopped)" } else { "(shadow)" };
+            assert!(settled.error.as_deref().is_some_and(|e| e.contains("send gate closed before the deferred send") && e.contains(want)), "{:?}", settled.error);
+        }
     }
 
     /// review F8 (c): a configured crowded list that does not load stops the start, before any RPC call
@@ -646,7 +710,24 @@ impl Exec {
             spec_price: cfg.live.spec_cu_price_micro, rotate: cfg.live.rotate_paths, mix: cfg.live.race_mix, path_arm: "", bmix: cfg.live.bundle_mix, tpu_price: cfg.live.tpu_cu_price_micro, sim_gate: cfg.live.sim_gate, compete_mult: cfg.live.compete_mult, compete_share: cfg.live.compete_max_share, compete_ab: cfg.live.compete_ab, gross_floor: cfg.live.gross_floor, tpu_max_expected: cfg.live.tpu_max_expected_lamports, tpu_skip_mriya: cfg.live.tpu_skip_mriya_pools, tpu_skip_mints: cfg.live.tpu_skip_mints.iter().map(|m| pk(m)).collect(), tpu_min_expected: cfg.live.tpu_min_expected_lamports, bundle_resend_ms: cfg.live.bundle_resend_ms.clone(), bundle_variants: cfg.live.bundle_size_variants.clone(), mint_cool: HashMap::default(), pair_lock_ns: cfg.live.pair_lock_ms * 1_000_000,
             band, rot: 0,
             tiers: cfg.live.bid_tiers.then_some((cfg.live.bid_min_expected_lamports, cfg.live.bid_share, cfg.live.bid_max_priority_lamports)), next_attempt: 0, feeds, counts: HashMap::default(),
-            lat: exec_lat() })
+            lat: exec_lat(), gate: SendGate::new() })
+    }
+
+    /// WP-01: follow the run's SendGate (a new Exec has its own, always live)
+    pub fn set_gate(&mut self, gate: Arc<SendGate>) { self.gate = gate; }
+
+    /// the attempts still open (sent, not settled): stop.json `in_flight_at_stop` / `unsettled`
+    pub fn open_attempts(&self) -> Vec<u64> {
+        let mut v: Vec<u64> = self.sending.as_ref().map(|s| s.open.keys().copied().collect()).unwrap_or_default();
+        v.sort_unstable();
+        v
+    }
+
+    /// the tokens the wallet held an account for at boot (meta.json `wallet.held_mints_at_boot`), sorted
+    pub fn held_mints(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.held.iter().map(b58).collect();
+        v.sort();
+        v
     }
 
     /// review N1: how many of the crowded pools this run's registry has (a list made for another registry shows here)
@@ -668,6 +749,12 @@ impl Exec {
 
     /// the largest size the sender would send now (canary: its fixed size; live: the size cap), if it may send now
     pub fn wants_send(&mut self) -> Option<u64> {
+        self.sending.as_ref()?;
+        // WP-01: paused, shadow or stopping (control socket, --shadow, program hash mismatch, a stop request)
+        if !self.gate.allows() {
+            self.count(if self.gate.mode() == GateMode::Stopped { "reject_gate_stopped" } else { "reject_gate_shadow" });
+            return None;
+        }
         let s = self.sending.as_mut()?;
         if s.stopped.is_some() { return None; }
         let worst = BASE_FEE + FLAT_CU_PRICE * 400_000 / 1_000_000;
@@ -997,7 +1084,7 @@ impl Exec {
         let (gate_size, gate_mid, gate_back, gate_slot) = (r.size, r.mid, r.back, r.slot);
         let bundle = self.path_arm == "bundle";
         if let Some(s) = self.sending.as_mut() { s.open.insert(attempt, Open { route: r, nonce: ni, worst, creates_ata, expected, t: t_signed, bundle }); }
-        let (rpc, back, paths2) = (self.rpc.clone(), self.back.clone(), paths.clone());
+        let (rpc, back, paths2, gate) = (self.rpc.clone(), self.back.clone(), paths.clone(), self.gate.clone());
         self.rt.spawn(async move {
             if let Some(raw) = gate_raw {
                 let t0 = now_ns();
@@ -1036,6 +1123,13 @@ impl Exec {
                     return;
                 }
             }
+            // review M10: a send deferred past the decision (the sim gate's re-checks) still asks the SendGate: a pause,
+            // shadow or stop that came in meanwhile cancels it
+            if fire_now.is_none() && !gate.allows() {
+                let _ = back.send(Event::Settled(Box::new(Settled { attempt, fired: Fired { id: attempt, t_ns: 0, copies: vec![], gate: None },
+                    landed: None, jito: None, nonce_value: None, error: Some(format!("not sent: the send gate closed before the deferred send ({})", gate.mode().as_str())) })));
+                return;
+            }
             let fire = match fire_now { Some(f) => f, None => paths2.fire(attempt, signed, prio, live) };
             let fired = match fire.await { Ok(f) => f, Err(e) => { let _ = back.send(Event::Settled(Box::new(Settled { attempt, fired: Fired { id: attempt, t_ns: 0, copies: vec![], gate: None },
                 landed: None, jito: None, nonce_value: None, error: Some(e.to_string()) }))); return; } };
@@ -1046,6 +1140,8 @@ impl Exec {
                 let d = std::time::Duration::from_millis(delay);
                 let el = t_fire.elapsed();
                 if d > el { tokio::time::sleep(d - el).await; }
+                // review M10: no scheduled resend after a pause, shadow or stop
+                if !gate.allows() { break; }
                 if let Ok(f2) = paths2.fire(attempt, vec![c], prio, live).await { fired.copies.extend(f2.copies); }
             }
             // a gate skip sent only the bundle, which Jito already rejected: nothing can land, so the nonce lease ends now
