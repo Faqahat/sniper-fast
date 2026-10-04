@@ -1,0 +1,15 @@
+[project]
+name = "arbx-report"
+version = "0.1"
+description = "arbx analysis toolkit: per-segment and per-campaign reports from recorded files (docs/MEASUREMENT.md §6)"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+zstd = ["zstandard"]
+
+[project.scripts]
+arbx-report = "arbx_report.__main__:main"
+
+[tool.setuptools]
+packages = ["arbx_report", "arbx_report.reports"]

@@ -1,0 +1,2577 @@
+{
+ "format": "v2",
+ "inputs": [
+  {
+   "bytes": 7233,
+   "file": "accounts.000.bin.zst",
+   "partial_tail": null,
+   "records_read": 147,
+   "schema": "arbx.accounts/2.0",
+   "sha256": "d6058598bbd78b2143c7b5851ab777d313487e792ec7f001fa899a8938ec57ef",
+   "stream": "accounts",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 526,
+   "file": "alts.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 2,
+   "schema": "arbx.alts/2.0",
+   "sha256": "53250ec5f47f85dadab2a82a99e21cefa75cf69413fed51a1627c550e858b1b9",
+   "stream": "alts",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 18536,
+   "file": "attempts.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 5,
+   "schema": "arbx.attempts/2.0",
+   "sha256": "19066a53ed67013068d84d7cd6d4d2c0ed2bbf04b6bbaa854924121409eb2427",
+   "stream": "attempts",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 1848,
+   "file": "bundles.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 5,
+   "schema": "arbx.bundles/2.0",
+   "sha256": "a8c88b1a42c4437649fe97a402e8d791db0a2c7d4b55dbe8c538c344cf0f3516",
+   "stream": "bundles",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 1374,
+   "file": "caps.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 3,
+   "schema": "arbx.caps/1.0",
+   "sha256": "c48d37f6ccfbf1b2ed5cf42da74ebdc468111bfd75bc336e9aea459c8bdb22dc",
+   "stream": "caps",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 5334,
+   "file": "commits.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 5,
+   "schema": "arbx.commits/1.0",
+   "sha256": "824cde21f9d68912dfbbd10cb3833b9f0e16a40fdce597dd7842d9f76c343381",
+   "stream": "commits",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 2202,
+   "file": "copies.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 5,
+   "schema": "arbx.copies/1.0",
+   "sha256": "d4a35aefdc95651e98328c14991aed0cc033a533e5c6307eba43647d768b2e8c",
+   "stream": "copies",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 10806,
+   "file": "decisions.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 8,
+   "schema": "arbx.decisions/1.0",
+   "sha256": "1f09d4a8779ed35b9fc9513508f42977296c49b8aaabfa4d6d6b5132942c1ea9",
+   "stream": "decisions",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 746,
+   "file": "events.jsonl",
+   "partial_tail": null,
+   "records_read": 5,
+   "schema": "arbx.events/1.0",
+   "sha256": "358647a8c78f06ef46b29754ca85a20a67edb43dda16882d5d11a869c15803b8",
+   "stream": "events",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 28586,
+   "file": "exec.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 12,
+   "schema": "arbx.exec/2.0",
+   "sha256": "ff05b421b1e3c119655007d9c90e067ef69dc8fb06c562e943c2f02e205d0d64",
+   "stream": "exec",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 296,
+   "file": "experiments.jsonl",
+   "partial_tail": null,
+   "records_read": 1,
+   "schema": "arbx.experiments/1.0",
+   "sha256": "8cbc9210a40bc5fbdd526991e3811696397fa04cd61eeb0b238b6a4e61747067",
+   "stream": "experiments",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 2156,
+   "file": "feedhealth.jsonl",
+   "partial_tail": null,
+   "records_read": 4,
+   "schema": "arbx.feedhealth/1.0",
+   "sha256": "c394ef6ed69d2fed0dbd580173adcbbfd920630fa5cc97bfa2af9a22fa4946e5",
+   "stream": "feedhealth",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 505,
+   "file": "journal.000.bin.zst",
+   "partial_tail": null,
+   "records_read": 6,
+   "schema": "arbx.journal/2.0",
+   "sha256": "3ebc68df8c9c91c8e12425124777dacbee266b66403a93c1a25762953674d192",
+   "stream": "journal",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 478,
+   "file": "keepalive.jsonl",
+   "partial_tail": null,
+   "records_read": 4,
+   "schema": "arbx.keepalive/1.0",
+   "sha256": "752f893b43a4d82ee1ec8e68b0a1dff010fb91708510279bb9812714f0b2b0d0",
+   "stream": "keepalive",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 3874,
+   "file": "leaders.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 14,
+   "schema": "arbx.leaders/1.0",
+   "sha256": "766c2b8587dd3a7ec5d5f5391a11e45f09d5b6a914eddc212a151cc00b4649fa",
+   "stream": "leaders",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 1286,
+   "file": "ledger.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 2,
+   "schema": "arbx.ledger/1.0",
+   "sha256": "f7051b51c0f4e84b474c71d41717710f073c90f3fb13b91603c3b497db5360a3",
+   "stream": "ledger",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 5667,
+   "file": "manifest.json",
+   "partial_tail": null,
+   "records_read": null,
+   "schema": null,
+   "sha256": "08975cd54110f50e9f159f673285b1d897ca8a4706cb77412d2a727fd7fabcc5",
+   "stream": "manifest",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 1425,
+   "file": "meta.json",
+   "partial_tail": null,
+   "records_read": null,
+   "schema": null,
+   "sha256": "78904f04a6aad667663f0565cd7dcbef77585f7701bb49e71d6ec70075037cc2",
+   "stream": "meta",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 2163,
+   "file": "moves.000.log.zst",
+   "partial_tail": null,
+   "records_read": null,
+   "schema": "arbx.moves/2.0",
+   "sha256": "c3a02a61d47a931fef26b643f121b9758fe1eed0482efbaf8455a681d3a07aa4",
+   "stream": "moves",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 7030,
+   "file": "outcomes.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 6,
+   "schema": "arbx.outcomes/2.0",
+   "sha256": "332cc25b26475830cf19dfd675b378cbb40d7b901fdac10021b9ef65fbf50437",
+   "stream": "outcomes",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 260,
+   "file": "poh.000.log.zst",
+   "partial_tail": null,
+   "records_read": 7,
+   "schema": "arbx.poh/2.0",
+   "sha256": "2587fe6a71e6e8eb4ef28c4b961834fd15fc1a83675a41bd93d37042fd1238b2",
+   "stream": "poh",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 780,
+   "file": "pools.json",
+   "partial_tail": null,
+   "records_read": null,
+   "schema": null,
+   "sha256": "ff38a1bef20069820a2d525afc52343d8c244fff6bc8b3cab6c29c95d9625b01",
+   "stream": "pools",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 1414,
+   "file": "predictions.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 3,
+   "schema": "arbx.predictions/2.0",
+   "sha256": "259641cef449cd8fce9540626dbb66427b56696933c6a2c6f8f6a31a172cd5ff",
+   "stream": "predictions",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 352,
+   "file": "probe.json",
+   "partial_tail": null,
+   "records_read": null,
+   "schema": null,
+   "sha256": "745d7ca74c3bd92bf0e88b5e1c59f704305a138e1859504cf1b963ee069157ee",
+   "stream": "probe",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 581,
+   "file": "recon.jsonl",
+   "partial_tail": null,
+   "records_read": 1,
+   "schema": "arbx.recon/1.0",
+   "sha256": "cfb7f24b82327cfa7460647cd3b64d7eea61233eddd153f40982da3874b4f8ae",
+   "stream": "recon",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 866,
+   "file": "resources.jsonl",
+   "partial_tail": null,
+   "records_read": 2,
+   "schema": "arbx.resources/1.0",
+   "sha256": "bf46f4d55c27d64a6f18cc318af51bae9c66c920202797493e11819f67716ca8",
+   "stream": "resources",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 6316,
+   "file": "slotidx.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 13,
+   "schema": "arbx.slotidx/1.0",
+   "sha256": "6b434e8d22c8aff2411878a68384f13439a2a5a87c577812248902775caf8c72",
+   "stream": "slotidx",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 1878,
+   "file": "slots-feed.000.log.zst",
+   "partial_tail": null,
+   "records_read": 26,
+   "schema": "arbx.slots-feed/2.0",
+   "sha256": "4bbaf945c89214b30ee384e9af947fb91d5bc09bf57c3adc24cf8ef78679f72a",
+   "stream": "slots-feed",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 1550,
+   "file": "slots.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 14,
+   "schema": "arbx.slots/1.0",
+   "sha256": "153988d5a328829971f56fd9c523f75804d95a563863ef59e2ed2d8af4d79243",
+   "stream": "slots",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 904,
+   "file": "snapshots.jsonl",
+   "partial_tail": null,
+   "records_read": 2,
+   "schema": "arbx.snapshots/1.0",
+   "sha256": "f012140101b081eedffda01e4a8d340e09294fcbcad60674a50e39d59333ac14",
+   "stream": "snapshots",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 3535,
+   "file": "status.jsonl",
+   "partial_tail": null,
+   "records_read": 3,
+   "schema": "arbx.status/2.0",
+   "sha256": "f6cbc6226e824c68415d36937aa97daddfd4852d11a82e964092105aab318844",
+   "stream": "status",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 271,
+   "file": "stop.json",
+   "partial_tail": null,
+   "records_read": null,
+   "schema": null,
+   "sha256": "4b0f59b117029d288f3bbe5a03822bcf22218dbe132a21168d54812ee14e83e1",
+   "stream": "stop",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 3904,
+   "file": "triggers.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 5,
+   "schema": "arbx.triggers/2.0",
+   "sha256": "75f5fdd62eec7ea9f0646195dc009f1fe161c57ad238a22202803ca41a7cf24d",
+   "stream": "triggers",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 475,
+   "file": "txarr.000.log.zst",
+   "partial_tail": null,
+   "records_read": 18,
+   "schema": "arbx.txarr/1.1",
+   "sha256": "eb48b2806d545b924c645b97d8aaf17f447af17e69683a5bb5ba08931bc0fabb",
+   "stream": "txarr",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 3342,
+   "file": "txfetch.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 14,
+   "schema": "arbx.txfetch/1.0",
+   "sha256": "f6b2191e96be59d8c384b5d08fad914cd881502ff3880b5f156a679e33274b2f",
+   "stream": "txfetch",
+   "truncated_bytes": null
+  },
+  {
+   "bytes": 8008,
+   "file": "wallet.000.jsonl.zst",
+   "partial_tail": null,
+   "records_read": 2,
+   "schema": "arbx.wallet/1.0",
+   "sha256": "d5a11e031d02d0653ad837f9f9cbde990ba7903f35df94c0901623783c02571c",
+   "stream": "wallet",
+   "truncated_bytes": null
+  }
+ ],
+ "kind": "segment",
+ "name": "synth-p1",
+ "options": {
+  "fill_gaps": false,
+  "offline": true,
+  "pricer": true,
+  "quick": false,
+  "wallet_chain_data": true
+ },
+ "schema": "arbx.report/1.0",
+ "sections": [
+  {
+   "caveats": [],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "accounts": {
+     "errors": [],
+     "gaps": [],
+     "marks": {
+      "boot_end": 1
+     },
+     "records": 41,
+     "unknown_kinds": {},
+     "unmarked_holes": []
+    },
+    "alt_give_up": 0,
+    "alts": {
+     "fetch_ok": 1,
+     "fetch_start": 1
+    },
+    "amends": [
+     {
+      "attempt": 3,
+      "from": "unsettled",
+      "to": "not_landed_expired"
+     }
+    ],
+    "attempt_coverage": {
+     "attempts": 5,
+     "blockctx_complete": {
+      "have": 3,
+      "pct": 60,
+      "total": 5
+     },
+     "with_leader": {
+      "have": 5,
+      "pct": 100,
+      "total": 5
+     },
+     "with_poh_trigger": {
+      "have": 1,
+      "pct": 20,
+      "total": 5
+     },
+     "with_verdicts": {
+      "have": 4,
+      "pct": 80,
+      "total": 5
+     }
+    },
+    "clock": {
+     "source": "CLOCK_REALTIME",
+     "sync_offset_ms": 0.2,
+     "sync_source": "chronyc"
+    },
+    "commits": {
+     "by_outcome": {
+      "complete": 4
+     },
+     "by_w_src": {
+      "shred": 2,
+      "tx-stream": 2
+     },
+     "fork_priced_decisions": 0,
+     "groups": 4,
+     "late_member_lines": 1,
+     "torn_suspect_decisions": 1
+    },
+    "disk_actions": [],
+    "events": {
+     "gate_change": 2,
+     "jito_stream_down": 1,
+     "jito_stream_up": 1,
+     "warmup_ready": 1
+    },
+    "exec_coverage": {
+     "by_found_by_within_10min": {
+      "account_update": 9,
+      "ours": 2,
+      "shred": 2
+     },
+     "by_venue_within_10min": {
+      "Dlmm": 6,
+      "PumpSwap": 8,
+      "unknown": 1
+     },
+     "denominator": {
+      "d1_account_txn": 8,
+      "d2_slotidx_tracked": 11,
+      "union": 11
+     },
+     "full_meta_without_idx": 0,
+     "gate": "coverage >= 99% and unseen share < 1% (PLAN §6)",
+     "have_rps": {
+      "last": 25,
+      "max": 25
+     },
+     "need_rps": {
+      "last": 20,
+      "max": 20
+     },
+     "status_watched_with_tx_pct_last": 100,
+     "unseen_share_sample_last": 0.004,
+     "within_10min_with_idx": {
+      "have": 11,
+      "pct": 100,
+      "total": 11
+     },
+     "within_60s_with_idx": {
+      "have": 11,
+      "pct": 100,
+      "total": 11
+     }
+    },
+    "feed_uptime": {
+     "feedA": {
+      "have": 2,
+      "pct": 100,
+      "total": 2
+     },
+     "feedB": {
+      "have": 1,
+      "pct": 50,
+      "total": 2
+     }
+    },
+    "files": [
+     {
+      "file": "accounts.000.bin.zst",
+      "producer": "synth000",
+      "schema": "arbx.accounts/2.0",
+      "stream": "accounts"
+     },
+     {
+      "file": "alts.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.alts/2.0",
+      "stream": "alts"
+     },
+     {
+      "file": "attempts.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.attempts/2.0",
+      "stream": "attempts"
+     },
+     {
+      "file": "bundles.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.bundles/2.0",
+      "stream": "bundles"
+     },
+     {
+      "file": "caps.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.caps/1.0",
+      "stream": "caps"
+     },
+     {
+      "file": "commits.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.commits/1.0",
+      "stream": "commits"
+     },
+     {
+      "file": "copies.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.copies/1.0",
+      "stream": "copies"
+     },
+     {
+      "file": "decisions.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.decisions/1.0",
+      "stream": "decisions"
+     },
+     {
+      "file": "events.jsonl",
+      "producer": "synth000",
+      "schema": "arbx.events/1.0",
+      "stream": "events"
+     },
+     {
+      "file": "exec.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.exec/2.0",
+      "stream": "exec"
+     },
+     {
+      "file": "experiments.jsonl",
+      "producer": "synth000",
+      "schema": "arbx.experiments/1.0",
+      "stream": "experiments"
+     },
+     {
+      "file": "feedhealth.jsonl",
+      "producer": "synth000",
+      "schema": "arbx.feedhealth/1.0",
+      "stream": "feedhealth"
+     },
+     {
+      "file": "journal.000.bin.zst",
+      "producer": "synth000",
+      "schema": "arbx.journal/2.0",
+      "stream": "journal"
+     },
+     {
+      "file": "keepalive.jsonl",
+      "producer": "synth000",
+      "schema": "arbx.keepalive/1.0",
+      "stream": "keepalive"
+     },
+     {
+      "file": "leaders.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.leaders/1.0",
+      "stream": "leaders"
+     },
+     {
+      "file": "ledger.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.ledger/1.0",
+      "stream": "ledger"
+     },
+     {
+      "file": "manifest.json",
+      "producer": null,
+      "schema": null,
+      "stream": "manifest"
+     },
+     {
+      "file": "meta.json",
+      "producer": null,
+      "schema": null,
+      "stream": "meta"
+     },
+     {
+      "file": "moves.000.log.zst",
+      "producer": null,
+      "schema": "arbx.moves/2.0",
+      "stream": "moves"
+     },
+     {
+      "file": "outcomes.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.outcomes/2.0",
+      "stream": "outcomes"
+     },
+     {
+      "file": "poh.000.log.zst",
+      "producer": null,
+      "schema": "arbx.poh/2.0",
+      "stream": "poh"
+     },
+     {
+      "file": "pools.json",
+      "producer": null,
+      "schema": null,
+      "stream": "pools"
+     },
+     {
+      "file": "predictions.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.predictions/2.0",
+      "stream": "predictions"
+     },
+     {
+      "file": "probe.json",
+      "producer": null,
+      "schema": null,
+      "stream": "probe"
+     },
+     {
+      "file": "recon.jsonl",
+      "producer": "synth000",
+      "schema": "arbx.recon/1.0",
+      "stream": "recon"
+     },
+     {
+      "file": "resources.jsonl",
+      "producer": "synth000",
+      "schema": "arbx.resources/1.0",
+      "stream": "resources"
+     },
+     {
+      "file": "slotidx.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.slotidx/1.0",
+      "stream": "slotidx"
+     },
+     {
+      "file": "slots.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.slots/1.0",
+      "stream": "slots"
+     },
+     {
+      "file": "slots-feed.000.log.zst",
+      "producer": null,
+      "schema": "arbx.slots-feed/2.0",
+      "stream": "slots-feed"
+     },
+     {
+      "file": "snapshots.jsonl",
+      "producer": "synth000",
+      "schema": "arbx.snapshots/1.0",
+      "stream": "snapshots"
+     },
+     {
+      "file": "status.jsonl",
+      "producer": "synth000",
+      "schema": "arbx.status/2.0",
+      "stream": "status"
+     },
+     {
+      "file": "stop.json",
+      "producer": null,
+      "schema": null,
+      "stream": "stop"
+     },
+     {
+      "file": "triggers.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.triggers/2.0",
+      "stream": "triggers"
+     },
+     {
+      "file": "txarr.000.log.zst",
+      "producer": null,
+      "schema": "arbx.txarr/1.1",
+      "stream": "txarr"
+     },
+     {
+      "file": "txfetch.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.txfetch/1.0",
+      "stream": "txfetch"
+     },
+     {
+      "file": "wallet.000.jsonl.zst",
+      "producer": "synth000",
+      "schema": "arbx.wallet/1.0",
+      "stream": "wallet"
+     }
+    ],
+    "format": "arbx v2",
+    "jito_stream_down": 1,
+    "journal": {
+     "by_kind": {
+      "ACCOUNT": 1,
+      "INPUT": 1,
+      "SLOT": 1,
+      "TICK": 1,
+      "TIMER": 1,
+      "TX_FIRST": 1
+     },
+     "gaps": [],
+     "records": 6,
+     "unmarked_holes": []
+    },
+    "keepalive": {
+     "errors": 1,
+     "n": 4,
+     "rtt_ms_p50": 1.2,
+     "rtt_ms_p99": 1.396
+    },
+    "manifest_final": true,
+    "missing_streams": {
+     "chain": [
+      "blocks",
+      "arrivals",
+      "sims",
+      "verify"
+     ],
+     "core": [
+      "control"
+     ],
+     "replay": [],
+     "slow": []
+    },
+    "outcome_finals": {
+     "landed_fail": 1,
+     "landed_ok": 1,
+     "not_landed_expired": 2,
+     "not_landed_refused": 1
+    },
+    "probe": {
+     "accepted": [
+      "accounts_full"
+     ],
+     "refused": [
+      "blocks_meta"
+     ]
+    },
+    "recon": {
+     "failed": 0,
+     "windows": 1
+    },
+    "recorder": [
+     {
+      "class": "replay",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "accounts"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "alts"
+     },
+     {
+      "class": "core",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "attempts"
+     },
+     {
+      "class": "core",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "bundles"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "caps"
+     },
+     {
+      "class": "core",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "commits"
+     },
+     {
+      "class": "core",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "copies"
+     },
+     {
+      "class": "core",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "decisions"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "events"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "exec"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "experiments"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "feedhealth"
+     },
+     {
+      "class": "replay",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "journal"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "keepalive"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "leaders"
+     },
+     {
+      "class": "core",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "ledger"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "moves"
+     },
+     {
+      "class": "core",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "outcomes"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "poh"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "predictions"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "recon"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "resources"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "slotidx"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "slots"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "slots-feed"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "snapshots"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "status"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "triggers"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "txarr"
+     },
+     {
+      "class": "chain",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "txfetch"
+     },
+     {
+      "class": "core",
+      "dropped_total": 0,
+      "queue_cap": 262144,
+      "queue_hwm": 3,
+      "records_total": 10,
+      "stream": "wallet"
+     }
+    ],
+    "resources": {
+     "cpu_sys_ms": 200,
+     "cpu_user_ms": 1801,
+     "fs_free_bytes_min": 106300440576,
+     "lines": 2,
+     "rss_bytes_max": 325058560
+    },
+    "slotidx": {
+     "confirmed_slots": 14,
+     "idx_check_mismatches": 0,
+     "lines": 13,
+     "status": {
+      "ok": 13
+     },
+     "with_line": {
+      "have": 13,
+      "pct": 92.857,
+      "total": 14
+     }
+    },
+    "snapshots": {
+     "n": 2,
+     "slot_mismatch": 0
+    },
+    "status_seq": {
+     "deltas_complete": true,
+     "first": 0,
+     "gaps": [],
+     "last": 2,
+     "lines": 3,
+     "lost_lines": 0,
+     "restarts": 0,
+     "with_seq": 3
+    },
+    "txfetch": {
+     "slotidx/getBlock": {
+      "calls": 14,
+      "errors": 1,
+      "latency_ms_p50": 36,
+      "latency_ms_p99": 37,
+      "rate_limited": 1
+     }
+    },
+    "unsettled": 0,
+    "wallet_update_missing": 0,
+    "wallet_vs_signatures_for_address": {
+     "status": "skipped (no chain access, wallet or slot range)"
+    }
+   },
+   "id": "R0",
+   "incomplete": [],
+   "title": "Data quality"
+  },
+  {
+   "caveats": [
+    "one trade is more than half of the positive total (jackpot): read the median",
+    "rent is not trading: trade_net excludes recoverable rent (it moves liquid, not total equity)"
+   ],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "equity": {
+     "delta_liquid": 10000,
+     "delta_total": 10000,
+     "end": {
+      "equity_liquid": 11000010000,
+      "equity_total": 11002049280,
+      "rent_recoverable": 2039280,
+      "slot": 1012,
+      "t_ns": 1791100004800000000
+     },
+     "start": {
+      "equity_liquid": 11000000000,
+      "equity_total": 11002039280,
+      "rent_recoverable": 2039280,
+      "slot": 999,
+      "t_ns": 1791099999600000000
+     }
+    },
+    "ledger": {
+     "equity_delta_missing": 0,
+     "equity_delta_sum": 10000,
+     "identity_violations": [],
+     "identity_violations_n": 0,
+     "informational": {
+      "liquid_delta": 10000,
+      "rent_locked": 0,
+      "rent_reclaimed": 0
+     },
+     "summing_categories": {
+      "fee_fail": -5000,
+      "fee_other": 0,
+      "fee_win": -5000,
+      "other": 0,
+      "rent_nonrecoverable": 0,
+      "tip": -30000,
+      "trade_gross": 50000,
+      "transfer_in": 0,
+      "transfer_out": 0
+     },
+     "summing_total": 10000,
+     "transactions": 2
+    },
+    "outcomes_ledger_cross_check": {
+     "ledger_route": {
+      "fee": 10000,
+      "tip": 30000,
+      "trade_net": 10000
+     },
+     "outcomes_with_ledger": 2,
+     "sum": {
+      "fee": 10000,
+      "tip": 30000,
+      "trade_net": 10000
+     }
+    },
+    "per_hour": {
+     "basis": "trading hours",
+     "hours": 0.0014,
+     "trade_net_per_hour": 7142857
+    },
+    "recon": [
+     {
+      "arithmetic": "ok",
+      "delta_equity": 10000,
+      "from_slot": 999,
+      "inventory_reval": 0,
+      "liquid_residual": 0,
+      "ok": true,
+      "residual": 0,
+      "sum_entries": 10000,
+      "to_slot": 1012
+     }
+    ],
+    "splits": {
+     "band": {
+      "1": {
+       "n": 1,
+       "trade_net": 15000,
+       "wins": 1
+      },
+      "2": {
+       "n": 1,
+       "trade_net": -5000,
+       "wins": 0
+      }
+     },
+     "experiment_arm": {
+      "x4_share=0.6": {
+       "n": 2,
+       "trade_net": 10000,
+       "wins": 1
+      }
+     },
+     "leader_kind": {
+      "bam": {
+       "n": 1,
+       "trade_net": -5000,
+       "wins": 0
+      },
+      "jito": {
+       "n": 1,
+       "trade_net": 15000,
+       "wins": 1
+      }
+     },
+     "venue_pair": {
+      "PumpSwap>Dlmm": {
+       "n": 2,
+       "trade_net": 10000,
+       "wins": 1
+      }
+     }
+    },
+    "status_cross_check": [
+     {
+      "counter": "money.trade_net_total",
+      "difference": 0,
+      "ledger": 10000,
+      "status_last": 10000
+     },
+     {
+      "counter": "money.tips_total",
+      "difference": 0,
+      "ledger": 30000,
+      "status_last": 30000
+     },
+     {
+      "counter": "money.fees_win_total",
+      "difference": 0,
+      "ledger": 5000,
+      "status_last": 5000
+     },
+     {
+      "counter": "money.fees_fail_total",
+      "difference": 0,
+      "ledger": 5000,
+      "status_last": 5000
+     },
+     {
+      "counter": "money.fees_other_total",
+      "difference": 0,
+      "ledger": 0,
+      "status_last": 0
+     },
+     {
+      "counter": "money.failed_fees_total_lamports",
+      "difference": 0,
+      "ledger": 5000,
+      "status_last": 5000
+     },
+     {
+      "counter": "money.failed_fees_delta_lamports (summed)",
+      "difference": 0,
+      "ledger": 5000,
+      "status_last": 5000
+     }
+    ],
+    "toolkit_recompute": {
+     "compared": 2,
+     "differences": [],
+     "differences_n": 0
+    },
+    "trade_net_per_attempt": {
+     "jackpot_flag": true,
+     "mean": 5000,
+     "median": 5000,
+     "n": 2,
+     "top1": 15000,
+     "top1_share": 1,
+     "total": 10000
+    },
+    "trading": {
+     "fees_fail": 5000,
+     "fees_other": 0,
+     "fees_win": 5000,
+     "landed_failures": 1,
+     "rent": {
+      "locked": 0,
+      "nonrecoverable": 0,
+      "reclaimed": 0
+     },
+     "tips": 30000,
+     "trade_gross": 50000,
+     "trade_net": 10000,
+     "wins": 1
+    }
+   },
+   "id": "R1",
+   "incomplete": [],
+   "title": "Money"
+  },
+  {
+   "caveats": [],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "commit_outcomes": {
+     "complete": 4
+    },
+    "decision_verdict": {
+     "reject": 2,
+     "send": 5
+    },
+    "finals": {
+     "landed_fail": 1,
+     "landed_ok": 1,
+     "not_landed_expired": 2,
+     "not_landed_refused": 1
+    },
+    "first_verdict": {
+     "accepted": 2,
+     "lost-auction": 1,
+     "would-fail:0x4e580002": 1
+    },
+    "land_rate": {
+     "landed": 2,
+     "rate": 0.5,
+     "rule": "attempts with a copy actually sent are the denominator (§6.2 rule 4)",
+     "sent_attempts": 4
+    },
+    "per_hour": {
+     "basis": "trading hours",
+     "hours": 0.0014,
+     "rates": {
+      ">= min_profit (a best route)": 4285.71,
+      "attempts (signed)": 3571.43,
+      "commit groups": 2857.14,
+      "evaluations (decisions)": 5000,
+      "first verdict received": 2857.14,
+      "hints (decoded triggers)": 3571.43,
+      "landed": 1428.57,
+      "landed ok": 714.29,
+      "routes priced": 9285.71,
+      "sent (a copy with t_sent > 0 and ok)": 2857.14
+     }
+    },
+    "rejection_reasons": {
+     "below_min_profit": 1,
+     "inflight_same_state": 1
+    },
+    "route_reasons": {
+     "below_min_profit": 7,
+     "best": 6
+    },
+    "stages": [
+     [
+      "hints (decoded triggers)",
+      5
+     ],
+     [
+      "commit groups",
+      4
+     ],
+     [
+      "evaluations (decisions)",
+      7
+     ],
+     [
+      "routes priced",
+      13
+     ],
+     [
+      ">= min_profit (a best route)",
+      6
+     ],
+     [
+      "attempts (signed)",
+      5
+     ],
+     [
+      "sent (a copy with t_sent > 0 and ok)",
+      4
+     ],
+     [
+      "first verdict received",
+      4
+     ],
+     [
+      "landed",
+      2
+     ],
+     [
+      "landed ok",
+      1
+     ]
+    ],
+    "status_cross_check": [
+     {
+      "counter": "counts_delta.trigger",
+      "difference": 0,
+      "status_delta_sum": 5,
+      "streams": 5
+     },
+     {
+      "counter": "counts_delta.evaluation",
+      "difference": 0,
+      "status_delta_sum": 7,
+      "streams": 7
+     },
+     {
+      "counter": "counts_delta.attempt",
+      "difference": 0,
+      "status_delta_sum": 5,
+      "streams": 5
+     },
+     {
+      "counter": "counts_delta.landed_ok",
+      "difference": 0,
+      "status_delta_sum": 1,
+      "streams": 1
+     },
+     {
+      "counter": "counts_delta.landed_fail",
+      "difference": 0,
+      "status_delta_sum": 1,
+      "streams": 1
+     },
+     {
+      "counter": "exec.attempts_delta",
+      "difference": 0,
+      "status_delta_sum": 5,
+      "streams": 5
+     }
+    ],
+    "trigger_skips": {
+     "will_fail": 1
+    }
+   },
+   "id": "R2",
+   "incomplete": [],
+   "title": "Funnel"
+  },
+  {
+   "caveats": [
+    "landed-only: a bundle that overprices its gap fails its on-chain check and never lands, so realised/expected over landed attempts cannot show overpricing (W §3); read it beside the would-fail statistics",
+    "acceptance is not landing: accepted -> landed is reported separately, by leader kind"
+   ],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "accepted_then_would_fail": 0,
+    "accepted_vs_landed": {
+     "be_rtt": {
+      "<2": {
+       "accepted": 2,
+       "accepted_landed": 2,
+       "accepted_to_landed": 1,
+       "attempts": 4,
+       "land_rate": 0.5,
+       "land_rate_ci95": [
+        0.150039,
+        0.849961
+       ],
+       "landed": 2
+      }
+     },
+     "kind": {
+      "bam": {
+       "accepted": 1,
+       "accepted_landed": 1,
+       "accepted_to_landed": 1,
+       "attempts": 1,
+       "land_rate": 1,
+       "land_rate_ci95": [
+        0.206549,
+        1
+       ],
+       "landed": 1
+      },
+      "jito": {
+       "accepted": 1,
+       "accepted_landed": 1,
+       "accepted_to_landed": 1,
+       "attempts": 3,
+       "land_rate": 0.333333,
+       "land_rate_ci95": [
+        0.061492,
+        0.79234
+       ],
+       "landed": 1
+      }
+     },
+     "region": {
+      "ams": {
+       "accepted": 1,
+       "accepted_landed": 1,
+       "accepted_to_landed": 1,
+       "attempts": 1,
+       "land_rate": 1,
+       "land_rate_ci95": [
+        0.206549,
+        1
+       ],
+       "landed": 1
+      },
+      "fra": {
+       "accepted": 1,
+       "accepted_landed": 1,
+       "accepted_to_landed": 1,
+       "attempts": 3,
+       "land_rate": 0.333333,
+       "land_rate_ci95": [
+        0.061492,
+        0.79234
+       ],
+       "landed": 1
+      }
+     },
+     "rtt": {
+      "<10": {
+       "accepted": 1,
+       "accepted_landed": 1,
+       "accepted_to_landed": 1,
+       "attempts": 2,
+       "land_rate": 0.5,
+       "land_rate_ci95": [
+        0.094531,
+        0.905469
+       ],
+       "landed": 1
+      },
+      "<5": {
+       "accepted": 1,
+       "accepted_landed": 1,
+       "accepted_to_landed": 1,
+       "attempts": 2,
+       "land_rate": 0.5,
+       "land_rate_ci95": [
+        0.094531,
+        0.905469
+       ],
+       "landed": 1
+      }
+     }
+    },
+    "blockhash_age_slots": {
+     "0": {
+      "attempts": 3,
+      "blockhash_not_found": 0
+     },
+     "30": {
+      "attempts": 1,
+      "blockhash_not_found": 0
+     }
+    },
+    "first_verdict": {
+     "accepted": 2,
+     "lost-auction": 1,
+     "would-fail:0x4e580002": 1
+    },
+    "lambda": {
+     "n": 4,
+     "p50": 0.4,
+     "p90": 0.4,
+     "p99": 0.4,
+     "window": "segment"
+    },
+    "land_rate": {
+     "ci95": [
+      0.150039,
+      0.849961
+     ],
+     "denominator_sent_attempts": 4,
+     "denominator_src": "copies",
+     "landed": 2,
+     "rate": 0.5
+    },
+    "lost_auction": {
+     "bid": {
+      "n": 1,
+      "p50": 700000,
+      "p90": 700000,
+      "p99": 700000,
+      "window": "segment"
+     },
+     "bid_over_our_tip": {
+      "n": 1,
+      "p50": 0.0972627484,
+      "p90": 0.0972627484,
+      "p99": 0.0972627484,
+      "window": "segment"
+     },
+     "n": 1
+    },
+    "queue_wait_us": {
+     "n": 4,
+     "p50": 650,
+     "p90": 770,
+     "p99": 797,
+     "window": "segment"
+    },
+    "rate_limited_copies_429": 0,
+    "realised_over_expected_landed_only": {
+     "beside_would_fail": {
+      "rate": 0.25,
+      "sent": 4,
+      "would_fail_attempts": 1
+     },
+     "caveat": "landed-only: a bundle that overprices its gap fails its on-chain check and never lands, so realised/expected over landed attempts cannot show overpricing (W §3); read it beside the would-fail statistics",
+     "n": 1,
+     "ratio": {
+      "n": 1,
+      "p50": 1,
+      "p90": 1,
+      "p99": 1,
+      "window": "segment"
+     }
+    },
+    "send_delay_basis": [
+     "first_shred"
+    ],
+    "time_to_first_verdict_ms": {
+     "n": 4,
+     "p50": 10.5,
+     "p90": 14.1,
+     "p99": 14.91,
+     "window": "segment"
+    },
+    "verdict_sequences": {
+     "accepted": 1,
+     "accepted>processed": 1,
+     "lost-auction": 1,
+     "would-fail": 1
+    },
+    "would_fail_by_band_delay_leader": {
+     "band=1|delay=10-20|leader=jito": {
+      "attempts": 1,
+      "would_fail": 0,
+      "would_fail_rate": 0
+     },
+     "band=2|delay=10-20|leader=bam": {
+      "attempts": 1,
+      "would_fail": 0,
+      "would_fail_rate": 0
+     },
+     "band=2|delay=10-20|leader=jito": {
+      "attempts": 1,
+      "would_fail": 1,
+      "would_fail_rate": 1
+     },
+     "band=3|delay=10-20|leader=jito": {
+      "attempts": 1,
+      "would_fail": 0,
+      "would_fail_rate": 0
+     }
+    }
+   },
+   "id": "R3",
+   "incomplete": [],
+   "title": "Attempts and Jito"
+  },
+  {
+   "caveats": [],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "attempted_closers": 1,
+    "attempts": 5,
+    "blockctx": {
+     "complete": 3,
+     "gap_slots": [
+      1013
+     ],
+     "gaps_filled": 0,
+     "rows": 5,
+     "slot_refs": 30,
+     "slots_processed": 14
+    },
+    "by_result": {
+     "closed": 2,
+     "persisted": 1,
+     "persisted_incomplete": 2
+    },
+    "closer_idx_after_trigger": {
+     "n": 1,
+     "p50": 2,
+     "p90": 2,
+     "p99": 2,
+     "window": "segment"
+    },
+    "closer_kind": {
+     "ours": 1,
+     "user_swap": 1
+    },
+    "closer_rung": {
+     "2 idx+2..5": 1
+    },
+    "rows": [
+     {
+      "attempt": 0,
+      "attempted_closers": [],
+      "closer": {
+       "idx": 40,
+       "jito_tipped": true,
+       "kind": "ours",
+       "leader": "3V89PmQTBW3tj9opQKzLD75eDyEET1g6yKDYXkXzPUiJ",
+       "ms_after_trigger_poh": 11.5,
+       "poh_clock": "same slot",
+       "relative": {
+        "idx_after_trigger": 30,
+        "same_slot": true,
+        "slots_after_trigger": 0
+       },
+       "rung": 3,
+       "sig": "2v9da3g1jRJUveUnyVN87RAfPUod1RYvRdjohCE2PrbixwWzaoa7EMFnLLpt9PDGd7Zz57bcSK4RcwXfMiZ7DuZx",
+       "signer": "CxaUKii69GUeqo7S1bQ8j4MHkjsb23iY67n1w8iYNSnJ",
+       "slot": 1000,
+       "tip": 30000
+      },
+      "complete": true,
+      "result": "closed",
+      "writers_after_trigger": 3
+     },
+     {
+      "attempt": 1,
+      "attempted_closers": [
+       {
+        "idx": 6,
+        "kind": "arb_bot",
+        "sig": "5PcwkmdxmekDQSrszVvDrWHhfWh9zmF62xNV7AvqtDU2Yj4Zd8y32QrspuvqVDpsEjxRgaC3sy2BEqFdR9CSdHVJ",
+        "signer": "4Z9wZBL22wzwC4XsF5MtwLRFSFb1hJcRzNJKCdBcpwtC",
+        "slot": 1003
+       }
+      ],
+      "closer": {
+       "idx": 7,
+       "jito_tipped": false,
+       "kind": "user_swap",
+       "leader": "3V89PmQTBW3tj9opQKzLD75eDyEET1g6yKDYXkXzPUiJ",
+       "ms_after_trigger_poh": 1.25,
+       "net_after": 0,
+       "poh_clock": "same slot",
+       "relative": {
+        "idx_after_trigger": 2,
+        "same_slot": true,
+        "slots_after_trigger": 0
+       },
+       "rung": 2,
+       "seen_before_our_send": true,
+       "sig": "483W5NqfGt4vk11KErHxor4D5Fww5s2Y4vhjCnfUCp26FoU44JMf9fxvLXys4qkModvTqu8NLH9m9NNgo7Uptyta",
+       "signer": "Ay76UZy9FweUBTbwHLaPELMg8QakTrjht4V5CsHAtBJB",
+       "slot": 1003,
+       "tip": 0
+      },
+      "complete": true,
+      "result": "closed",
+      "writers_after_trigger": 4
+     },
+     {
+      "attempt": 2,
+      "attempted_closers": [],
+      "closer": null,
+      "complete": true,
+      "result": "persisted",
+      "writers_after_trigger": 3
+     },
+     {
+      "attempt": 3,
+      "attempted_closers": [],
+      "closer": null,
+      "complete": false,
+      "result": "persisted_incomplete",
+      "writers_after_trigger": 1
+     },
+     {
+      "attempt": 4,
+      "attempted_closers": [],
+      "closer": null,
+      "complete": false,
+      "result": "persisted_incomplete",
+      "writers_after_trigger": 1
+     }
+    ],
+    "rung_note": "rung 0 needs bundle membership (exec.bundle); without it an idx+1 closer is rung 1",
+    "top_closers": [
+     [
+      "Ay76UZy9FweUBTbwHLaPELMg8QakTrjht4V5CsHAtBJB",
+      1
+     ]
+    ]
+   },
+   "id": "R4",
+   "incomplete": [],
+   "title": "Attribution: who closed each gap"
+  },
+  {
+   "caveats": [],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "attempt_stages": {
+     "built→signed": {
+      "n": 5,
+      "p50": 100,
+      "p90": 100,
+      "p99": 100,
+      "window": "segment"
+     },
+     "commit→engine": {
+      "n": 5,
+      "p50": 100,
+      "p90": 100,
+      "p99": 100,
+      "window": "segment"
+     },
+     "decided→built": {
+      "n": 5,
+      "p50": 200,
+      "p90": 200,
+      "p99": 200,
+      "window": "segment"
+     },
+     "engine→priced": {
+      "n": 5,
+      "p50": 100,
+      "p90": 100,
+      "p99": 100,
+      "window": "segment"
+     },
+     "enqueued→sent": {
+      "n": 4,
+      "p50": 650,
+      "p90": 650,
+      "p99": 650,
+      "window": "segment"
+     },
+     "first_shred→update_recv": {
+      "n": 5,
+      "p50": 15000,
+      "p90": 15000,
+      "p99": 15000,
+      "window": "segment"
+     },
+     "priced→decided": {
+      "n": 5,
+      "p50": 50,
+      "p90": 50,
+      "p99": 50,
+      "window": "segment"
+     },
+     "sent→ack": {
+      "n": 4,
+      "p50": 800,
+      "p90": 800,
+      "p99": 800,
+      "window": "segment"
+     },
+     "sent→first_verdict": {
+      "n": 4,
+      "p50": 10500,
+      "p90": 14100,
+      "p99": 14910,
+      "window": "segment"
+     },
+     "sent→landed(wallet fetch)": {
+      "n": 2,
+      "p50": 778250,
+      "p90": 938250,
+      "p99": 974250,
+      "window": "segment"
+     },
+     "sent→seen": {
+      "n": 1,
+      "p50": 38250,
+      "p90": 38250,
+      "p99": 38250,
+      "window": "segment"
+     },
+     "signed→enqueued": {
+      "n": 5,
+      "p50": 50,
+      "p90": 50,
+      "p99": 50,
+      "window": "segment"
+     },
+     "update_recv→commit": {
+      "n": 5,
+      "p50": 500,
+      "p90": 500,
+      "p99": 500,
+      "window": "segment"
+     }
+    },
+    "commit_lag_ms": {
+     "all": {
+      "n": 4,
+      "p50": 17.5,
+      "p90": 18.7,
+      "p99": 18.97,
+      "window": "segment"
+     },
+     "shred": {
+      "n": 2,
+      "p50": 18,
+      "p90": 18.8,
+      "p99": 18.98,
+      "window": "segment"
+     },
+     "tx-stream": {
+      "n": 2,
+      "p50": 17,
+      "p90": 17.8,
+      "p99": 17.98,
+      "window": "segment"
+     }
+    },
+    "decision_stages": {
+     "commit→engine": {
+      "n": 7,
+      "p50": 100,
+      "p90": 100,
+      "p99": 100,
+      "window": "segment"
+     },
+     "engine→priced": {
+      "n": 7,
+      "p50": 100,
+      "p90": 100,
+      "p99": 100,
+      "window": "segment"
+     },
+     "first_shred→update_recv": {
+      "n": 7,
+      "p50": 15000,
+      "p90": 15000,
+      "p99": 15000,
+      "window": "segment"
+     },
+     "priced→decided": {
+      "n": 7,
+      "p50": 50,
+      "p90": 50,
+      "p99": 50,
+      "window": "segment"
+     },
+     "update_recv→commit": {
+      "n": 7,
+      "p50": 500,
+      "p90": 500,
+      "p99": 500,
+      "window": "segment"
+     }
+    },
+    "lag_slo_minutes": {
+     "breaches": 1,
+     "lines": 3,
+     "p90_ms_by_line": {
+      "n": 3,
+      "p50": 20,
+      "p90": 20.8,
+      "p99": 20.98,
+      "window": "segment"
+     }
+    },
+    "poh_ms_after_trigger": {
+     "closers": {
+      "n": 1,
+      "p50": 1.25,
+      "p90": 1.25,
+      "p99": 1.25,
+      "window": "segment"
+     },
+     "note": "PoH ms compared only on the same leader's clock (same slot)",
+     "ours": {
+      "n": 1,
+      "p50": 11.5,
+      "p90": 11.5,
+      "p99": 11.5,
+      "window": "segment"
+     }
+    },
+    "unit": "microseconds"
+   },
+   "id": "R5",
+   "incomplete": [],
+   "title": "Latency"
+  },
+  {
+   "caveats": [
+    "host -> leader RTT is our QUIC handshake to the leader's TPU, not the bundle's path (block engine -> leader); the block-engine RTT is be_rtt_ms"
+   ],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "by": {
+     "block_engine_rtt": {
+      "<2": {
+       "accepted": 2,
+       "attempts": 5,
+       "ci95": [
+        0.117621,
+        0.769276
+       ],
+       "land_rate": 0.4,
+       "landed": 2
+      }
+     },
+     "client": {
+      "jito-agave": {
+       "accepted": 2,
+       "attempts": 5,
+       "ci95": [
+        0.117621,
+        0.769276
+       ],
+       "land_rate": 0.4,
+       "landed": 2
+      }
+     },
+     "host_leader_rtt": {
+      "<10": {
+       "accepted": 1,
+       "attempts": 3,
+       "ci95": [
+        0.061492,
+        0.79234
+       ],
+       "land_rate": 0.333333,
+       "landed": 1
+      },
+      "<5": {
+       "accepted": 1,
+       "attempts": 2,
+       "ci95": [
+        0.094531,
+        0.905469
+       ],
+       "land_rate": 0.5,
+       "landed": 1
+      }
+     },
+     "kind": {
+      "bam": {
+       "accepted": 1,
+       "attempts": 1,
+       "ci95": [
+        0.206549,
+        1
+       ],
+       "land_rate": 1,
+       "landed": 1
+      },
+      "jito": {
+       "accepted": 1,
+       "attempts": 4,
+       "ci95": [
+        0.045587,
+        0.699358
+       ],
+       "land_rate": 0.25,
+       "landed": 1
+      }
+     },
+     "region": {
+      "ams": {
+       "accepted": 1,
+       "attempts": 1,
+       "ci95": [
+        0.206549,
+        1
+       ],
+       "land_rate": 1,
+       "landed": 1
+      },
+      "fra": {
+       "accepted": 1,
+       "attempts": 4,
+       "ci95": [
+        0.045587,
+        0.699358
+       ],
+       "land_rate": 0.25,
+       "landed": 1
+      }
+     }
+    },
+    "landings_per_1000_slots": {
+     "bam": {
+      "ci95_per_1000": [
+       45.587,
+       699.358
+      ],
+      "eligible_slots": 4,
+      "landed": 1,
+      "per_1000_slots": 250
+     },
+     "jito": {
+      "ci95_per_1000": [
+       17.876,
+       404.15
+      ],
+      "eligible_slots": 10,
+      "landed": 1,
+      "per_1000_slots": 100
+     }
+    },
+    "slot_share": {
+     "bam": {
+      "share": 0.285714,
+      "slots": 4
+     },
+     "jito": {
+      "share": 0.714286,
+      "slots": 10
+     }
+    }
+   },
+   "id": "R6",
+   "incomplete": [],
+   "title": "Leaders"
+  },
+  {
+   "caveats": [],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "feedhealth": {
+     "feedA": {
+      "channel_drops": 0,
+      "connected_share": 1,
+      "errors": 0,
+      "first_arrivals": 60,
+      "forwarded": 80,
+      "lead_ms_p50_of_intervals": 0.1,
+      "lines": 2,
+      "packets": 2000,
+      "provider_lag_ms_p50_of_intervals": null,
+      "reconnects": 0,
+      "txs": 1800,
+      "udp_drops": 0
+     },
+     "feedB": {
+      "channel_drops": 0,
+      "connected_share": 0.5,
+      "errors": 0,
+      "first_arrivals": 20,
+      "forwarded": 80,
+      "lead_ms_p50_of_intervals": 0.2,
+      "lines": 2,
+      "packets": 2002,
+      "provider_lag_ms_p50_of_intervals": null,
+      "reconnects": 1,
+      "txs": 1800,
+      "udp_drops": 0
+     }
+    },
+    "slots_feed": {
+     "feedA": {
+      "poh_complete_share": 1,
+      "slots": 13,
+      "ticks_p50": 64,
+      "valid_share": 1
+     },
+     "feedB": {
+      "poh_complete_share": 0.692308,
+      "slots": 13,
+      "ticks_p50": 64,
+      "valid_share": 1
+     }
+    },
+    "txarr": {
+     "dead_feeds": [],
+     "feeds": {
+      "feedA": {
+       "behind_first_us": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p99": null,
+        "window": "segment"
+       },
+       "delivered": 8,
+       "delivered_share": 0.888889,
+       "first": 8,
+       "first_share": 0.888889
+      },
+      "feedB": {
+       "behind_first_us": {
+        "n": 8,
+        "p50": 155.5,
+        "p90": 159.3,
+        "p99": 159.93,
+        "window": "segment"
+       },
+       "delivered": 9,
+       "delivered_share": 1,
+       "first": 1,
+       "first_share": 0.111111
+      }
+     },
+     "signatures": 9
+    }
+   },
+   "id": "R7",
+   "incomplete": [],
+   "title": "Feeds"
+  },
+  {
+   "caveats": [],
+   "complete": false,
+   "coverage": {},
+   "data": {
+    "by_venue": {
+     "Dlmm": {
+      "dlmm_bins_checked": 2,
+      "dlmm_bins_exact": 2,
+      "exact": 1,
+      "exact_rate_at_hint": 0,
+      "exact_rate_pre_state": 1,
+      "hint_exact": 0,
+      "hint_scored": 2,
+      "n": 2,
+      "pre_state_unknown": 1,
+      "scored": 1
+     },
+     "PumpSwap": {
+      "dlmm_bins_checked": 0,
+      "dlmm_bins_exact": 0,
+      "exact": 1,
+      "exact_rate_at_hint": 1,
+      "exact_rate_pre_state": 1,
+      "hint_exact": 1,
+      "hint_scored": 1,
+      "n": 1,
+      "pre_state_unknown": 0,
+      "scored": 1
+     }
+    },
+    "landed_legs_exact": {
+     "exact": 1,
+     "n": 1
+    },
+    "landed_round_trip_minus_predicted": {
+     "caveat": "landed-only: a bundle that overprices its gap fails its on-chain check and never lands, so realised/expected over landed attempts cannot show overpricing (W §3); read it beside the would-fail statistics",
+     "n": 1,
+     "p50": 0,
+     "p90": 0,
+     "p99": 0,
+     "window": "segment",
+     "within_2_lamports": 1
+    },
+    "quarantine_actions": {
+     "log": 3
+    },
+    "worst_pools_window_exact_pct": [
+     [
+      "FwmuatBdoKppeMfopu2fbTtuBBXSStoi6Ay9UV2upzeZ",
+      98.5
+     ],
+     [
+      "Gbj63Adqf6QLk5wAFZeqHGYjJh1xwTgY7TD3AHUwDBjk",
+      100
+     ]
+    ]
+   },
+   "id": "R8",
+   "incomplete": [
+    "every-swap scoring (aggregator-routed swaps included) and the closer check need `arbx quote` (WP-09)"
+   ],
+   "title": "Predictions and accuracy"
+  },
+  {
+   "caveats": [
+    "only transactions touching watched accounts are seen",
+    "a clean win is any SOL + WSOL gain with no other token change; one-off large gains can be transfers routed through watched pools, so read profit beside the win count"
+   ],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "arb_like_txs": 4,
+    "clean_wins_total": {
+     "profit": 120000,
+     "wins": 1
+    },
+    "ladder_clean_wins": {
+     "3 same slot, later": {
+      "profit": 120000,
+      "wins": 1
+     }
+    },
+    "ladder_note": "rung 0 needs bundle membership, which v2 exec only has when known; such wins show as rung 1",
+    "signers": 2,
+    "top_by_clean_profit": [
+     {
+      "clean_profit": 120000,
+      "clean_wins": 1,
+      "fees": 5000,
+      "in_known_bundle": 0,
+      "n": 1,
+      "ok": 1,
+      "rungs": {
+       "3 same slot, later": 1
+      },
+      "senders": {
+       "jito": 1
+      },
+      "signer": "4PH5PBKeqCncHuKs4YSsPDqsu6Gyqm6t1tu2vVa7Qv7Y",
+      "tips": 10000
+     },
+     {
+      "clean_profit": 0,
+      "clean_wins": 0,
+      "fees": 5000,
+      "in_known_bundle": 0,
+      "n": 1,
+      "ok": 0,
+      "rungs": {},
+      "senders": {},
+      "signer": "4Z9wZBL22wzwC4XsF5MtwLRFSFb1hJcRzNJKCdBcpwtC",
+      "tips": 0
+     }
+    ],
+    "top_by_clean_wins": [
+     {
+      "clean_profit": 120000,
+      "clean_wins": 1,
+      "fees": 5000,
+      "in_known_bundle": 0,
+      "n": 1,
+      "ok": 1,
+      "rungs": {
+       "3 same slot, later": 1
+      },
+      "senders": {
+       "jito": 1
+      },
+      "signer": "4PH5PBKeqCncHuKs4YSsPDqsu6Gyqm6t1tu2vVa7Qv7Y",
+      "tips": 10000
+     },
+     {
+      "clean_profit": 0,
+      "clean_wins": 0,
+      "fees": 5000,
+      "in_known_bundle": 0,
+      "n": 1,
+      "ok": 0,
+      "rungs": {},
+      "senders": {},
+      "signer": "4Z9wZBL22wzwC4XsF5MtwLRFSFb1hJcRzNJKCdBcpwtC",
+      "tips": 0
+     }
+    ]
+   },
+   "id": "R9",
+   "incomplete": [],
+   "title": "Rivals and the field"
+  },
+  {
+   "caveats": [],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "balance": {
+     "x4_share": {
+      "chi2": {
+       "chi2": 0.2,
+       "df": 1,
+       "p": 0.658862
+      },
+      "counts": {
+       "0.4": 2,
+       "0.6": 3
+      },
+      "weights": {
+       "0.4": 0.5,
+       "0.6": 0.5
+      }
+     }
+    },
+    "margin": {},
+    "x2": {},
+    "x4": {
+     "arms": {
+      "0.4": {
+       "go": false,
+       "land_rate": 0,
+       "land_rate_ci95": [
+        0,
+        0
+       ],
+       "n": 2,
+       "net_ci95": [
+        0,
+        0
+       ],
+       "net_per_attempt": 0,
+       "relative_land_drop_vs_0.6": 1
+      },
+      "0.6": {
+       "land_rate": 0.666667,
+       "land_rate_ci95": [
+        0,
+        1
+       ],
+       "n": 3,
+       "net_ci95": [
+        -5000,
+        15000
+       ],
+       "net_per_attempt": 3333.33333
+      }
+     },
+     "baseline": "0.6"
+    },
+    "x5": {
+     "bam": {
+      "eligible": 1,
+      "landed": 1,
+      "rate": 1
+     },
+     "eligible": 5,
+     "enough_data": false,
+     "fisher_p": 0.4,
+     "go": false,
+     "jito": {
+      "eligible": 4,
+      "landed": 1,
+      "rate": 0.25
+     },
+     "ratio": 4
+    },
+    "x8": {},
+    "x9": {}
+   },
+   "id": "R10",
+   "incomplete": [],
+   "title": "Experiments"
+  },
+  {
+   "caveats": [],
+   "complete": false,
+   "coverage": {},
+   "data": {
+    "inputs_available": {
+     "decisions": 7,
+     "route_age_ms": {
+      "n": 7,
+      "p50": 360,
+      "p90": 384,
+      "p99": 389.4,
+      "window": "segment"
+     },
+     "rule": {
+      "excluded_rungs": [
+       0,
+       1
+      ],
+      "max_size_sol": 4.2,
+      "min_route_age_ms": 354
+     }
+    }
+   },
+   "id": "R11",
+   "incomplete": [
+    "X1 needs every gap's winner rung from R4 (arbx quote, WP-09) and the census of WP-12"
+   ],
+   "title": "X1 census"
+  },
+  {
+   "caveats": [
+    "caps are our own quotes at each budget, not what the market took"
+   ],
+   "complete": false,
+   "coverage": {},
+   "data": {
+    "episodes": 2,
+    "episodes_by_pair": {
+     "PumpSwap>Dlmm": 2
+    },
+    "per_hour_basis": "wall hours",
+    "priced": 3,
+    "sum_best_net_per_hour": {
+     "0.165": 2941176,
+     "4.2": 3529412
+    },
+    "tiers": [
+     {
+      "budget_sol": 0.165,
+      "episodes_positive": 2,
+      "sum_best_net": 5000,
+      "summary": {
+       "jackpot_flag": true,
+       "mean": 2500,
+       "median": 2500,
+       "n": 2,
+       "top1": 3000,
+       "top1_share": 0.6,
+       "total": 5000
+      }
+     },
+     {
+      "budget_sol": 4.2,
+      "episodes_positive": 2,
+      "sum_best_net": 6000,
+      "summary": {
+       "jackpot_flag": true,
+       "mean": 3000,
+       "median": 3000,
+       "n": 2,
+       "top1": 3600,
+       "top1_share": 0.6,
+       "total": 6000
+      }
+     }
+    ]
+   },
+   "id": "R12",
+   "incomplete": [
+    "the market's realised take per episode needs R4 closers (arbx quote, WP-09)"
+   ],
+   "title": "Caps"
+  },
+  {
+   "caveats": [],
+   "complete": true,
+   "coverage": {},
+   "data": {
+    "table": {
+     "built_ns": 1791100006000000000,
+     "cells": {
+      "PumpSwap|Dlmm|1-2|false": {
+       "leg_samples": [
+        8,
+        1
+       ],
+       "limit": null,
+       "src": "fallback"
+      },
+      "PumpSwap|Dlmm|3-5|false": {
+       "leg_samples": [
+        8,
+        1
+       ],
+       "limit": null,
+       "src": "fallback"
+      }
+     },
+     "extras": {
+      "ata_close": 0,
+      "ata_create": 0,
+      "tip": 150
+     },
+     "legs": {
+      "Dlmm|1-2": {
+       "n": 1,
+       "p50": 60000,
+       "p99": 60000
+      },
+      "Dlmm|3-5": {
+       "n": 1,
+       "p50": 60000,
+       "p99": 60000
+      },
+      "Dlmm|unk": {
+       "n": 4,
+       "p50": 61250,
+       "p99": 61500
+      },
+      "PumpSwap|na": {
+       "n": 8,
+       "p50": 41014,
+       "p99": 41014
+      }
+     },
+     "overhead": {
+      "n": 2,
+      "p99": 20000,
+      "program": [
+       "4PXLvTZcjUkUcht5oEy9LghFNm8nwLd89K3ohyUPEfMa"
+      ]
+     },
+     "schema": "arbx.cu-table/1.0",
+     "source_runs": [
+      "synth-p1"
+     ]
+    },
+    "transactions_without_logs": 0
+   },
+   "id": "CU",
+   "incomplete": [],
+   "title": "cu-table"
+  }
+ ],
+ "tool": "arbx-report/0.1",
+ "window": {
+  "end_ns": 1791100006000000000,
+  "end_src": "stop.json",
+  "start_ns": 1791100000000000000,
+  "start_src": "meta.json",
+  "trading_hours": 0.0014,
+  "trading_src": "events",
+  "wall_hours": 0.0017
+ }
+}
