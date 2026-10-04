@@ -26,9 +26,9 @@
 config_version = 2
 out_dir = "/root/arbx/runs"
 mode = "shadow"   # WP-00: shadow until the two shadow runs above pass (review F1); the owner sets "live" then
-# the trading wallet (arbed's keystore ~/.nexus-v2-trading-wallet.*; owner of the WSOL account and the nonce accounts)
+# the trading wallet (the owner's encrypted keystore, owner-managed; owner of the WSOL account and the nonce accounts)
 wallet = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"   # NEW trading wallet (2026-10-03), encrypted keystore, passphrase given at start
-wallet_keystore = "/root/arb-lab/wallets/trading-v3.enc"   # the owner's keystore, left where it is (not a repo file)
+wallet_keystore = "/root/arbx/wallets/trading.enc"   # the owner's encrypted keystore (not a repo file): the owner places it here at go-live (I-11)
 
 [pools]
 # OD-4 (owner confirms the seed list): the live w5h3 campaign's list (exp3 list + fresh discovery, 2026-10-03 evening),
@@ -262,7 +262,7 @@ auth_keypair = "~/.nexus-v2-jito-auth.json"
 tip_lamports = 1000   # EXP-1: floor; the bundle-only bots tip 1,000-6,000
 tip_share = 0.7               # 70% of the predicted edge after the base fee (live value)
 tip_max_lamports = 100000   # owner 2026-10-04: bundle tips capped at 0.0001 SOL (70% share below that)
-max_per_sec = 5               # Jito's limit on our gRPC key since 2026-10-02 (shared with arbed if it runs on this key)
+max_per_sec = 5               # Jito's limit on our gRPC key since 2026-10-02 (per key: arbx gets its own key at go-live)
 # no queue_ms (0: over the rate a bundle is refused at once, as in arb-lab). WP-00 review F2: a 10 ms queue reordered
 # no send in the legacy replay (two bundles almost never wait at once) and only added delay. WP-05 brings [send] queue_ms
 
@@ -427,7 +427,7 @@ url = "${RMR_RPC_URL}"
 
 # ---------------------------------------------------------------- senders the rivals use (research log S-010/S-011)
 # Formats from each provider's docs (2026-10-03). All want their own tip; it is paid only when a trade wins. Keys go in
-# /root/arb-lab/.env under the names below; a path whose key is missing is left out of a run (named in run.log).
+# arbx's own .env beside this config (/root/arbx/deploy/.env, mode 600, created by the owner) under the names below; a path whose key is missing is left out of a run (named in run.log).
 [[send]]
 # Everstake SWQoS: NO key needed; tip >= 0.001 SOL placed first (their rule); 10 tx/s
 name = "everstake"

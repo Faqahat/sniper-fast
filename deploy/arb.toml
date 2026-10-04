@@ -1,16 +1,16 @@
-# arb-lab on Cherry (84.32.59.15), shadow mode: every feed still live, MriyaNN8's pools + all of ours.
+# arbx all-feeds shadow config on Cherry (84.32.59.15), shadow mode: every feed still live, MriyaNN8's pools + all of ours.
 # WP-01: the config format (required; every unknown key is an error)
 config_version = 2
-out_dir = "/root/arb-lab/runs"
+out_dir = "/root/arbx/runs"
 mode = "shadow"
-# the trading wallet (arbed's keystore ~/.nexus-v2-trading-wallet.*; owner of the WSOL account and the nonce accounts)
+# the trading wallet (the owner's encrypted keystore, owner-managed; owner of the WSOL account and the nonce accounts)
 wallet = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
 
 [pools]
-seed_csv = "/root/arb-lab/data/seed-pools-merged.csv"   # old list + mriya v5 (owner, 2026-10-03)
-registry_json = "/root/arb-lab/data/registry.json"
+seed_csv = "/root/arbx/data/seed-pools-merged.csv"   # old list + mriya v5 (owner, 2026-10-03)
+registry_json = "/root/arbx/data/registry.json"
 registry_all = true
-templates_json = "/root/arb-lab/data/templates.json"
+templates_json = "/root/arbx/data/templates.json"
 
 # Every RPC call is raced across all providers below; the first good answer is used and each one is timed.
 # Providers whose environment variables are missing are skipped (listed in run.log).
@@ -184,7 +184,7 @@ auth_keypair = "~/.nexus-v2-jito-auth.json"
 tip_lamports = 10000          # floor
 tip_share = 0.7               # 70% of the predicted edge after the base fee (WP-00: aligned with the live config, R §3.6)
 tip_max_lamports = 100000     # owner 2026-10-04: bundle tips capped at 0.0001 SOL (WP-00: aligned with the live config)
-max_per_sec = 5               # Jito's limit on our gRPC key since 2026-10-02 (shared with arbed if it runs on this key)
+max_per_sec = 5               # Jito's limit on our gRPC key since 2026-10-02 (per key: arbx gets its own key at go-live)
 
 [[send]]
 # Shyft staked RPC (SWQoS), no tip. Frankfurt host, e.g. https://rpc.fra.shyft.to?api_key=...
@@ -295,7 +295,7 @@ nonce_accounts = ["58XHXCVwizLunHZdtXRr21NXnraG8Y4vQWjpXLN2FgVe", "G6MfymxNMNSBR
 
 # ---------------------------------------------------------------- senders the rivals use (research log S-010/S-011)
 # Formats from each provider's docs (2026-10-03). All want their own tip; it is paid only when a trade wins. Keys go in
-# /root/arb-lab/.env under the names below; a path whose key is missing is left out of a run (named in run.log).
+# arbx's own .env beside this config (/root/arbx/deploy/.env, mode 600, created by the owner) under the names below; a path whose key is missing is left out of a run (named in run.log).
 [[send]]
 # Everstake SWQoS: NO key needed; tip >= 0.001 SOL placed first (their rule); 10 tx/s
 name = "everstake"

@@ -328,7 +328,7 @@ Lane S  (Stage 1):   WP-13 and WP-14 after WP-03; WP-12 after WP-09 + WP-10; WP-
    - `--budget-left <lamports>` replaces the supervisor's `sed` rewrite of the config.
    - `--campaign-dir <dir>` tells a segment its campaign (used for campaign-wide stops in WP-07).
    - `arbx provenance --config <file>` prints meta without starting feeds.
-8. **Supervisor** `deploy/run-w.sh` (new; it replaces tools/analysis/cherry/run-w.sh, which stays as history):
+8. **Supervisor** `deploy/run-w.sh` (new; it replaces arb-lab's tools/analysis/cherry/run-w.sh, removed from arbx with tools/analysis in I-11):
    - **Campaign directory** `runs/<campaign>/`. At start the supervisor copies the binary to `runs/<campaign>/arbx-<sha8>` and the config to `config.frozen.toml`, writes `campaign.json`, and runs only those copies. A mid-campaign `mv` of a new binary no longer affects the campaign.
    - **Budget** per segment via `--budget-left`, so the config hash stays constant. Today `sed` at run-w.sh:36 changes it every segment.
    - **Controls by file:** `<campaign>.pause`, `<campaign>.next` (restart now; the file's text is the reason) and `<campaign>.stop` (reason text). No more `kill -STOP`.
@@ -1197,7 +1197,7 @@ Removed:
   - Slots are deduplicated across attempts.
   - Gaps can be filled with a rate-limited full `getBlock` through `chain.py`.
 - **R8 accuracy over every successful swap** (aggregator-routed ones included, decoded from `exec.jsonl` inner instructions) scores each swap against `arbx quote` at the pre-state version. It includes R §3.3's closer check: the closer's realised take against our quote at the version just before it.
-- **Legacy readers** for arb-lab's v1 files let old runs be compared. `tools/analysis/` stays as history.
+- **Legacy readers** for arb-lab's v1 files let old runs be compared. `tools/analysis/` was removed from arbx on 2026-10-04 (I-11: arbx is standalone); it is in git history.
 
 **Offline acceptance (CI).**
 - Unit tests on synthetic streams:

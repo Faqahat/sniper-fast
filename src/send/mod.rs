@@ -689,7 +689,7 @@ impl Path {
         }
     }
 
-    /// AUTH PROBE (`arb-lab senders --probe`): deliver 4 bytes that cannot be a transaction (nothing can land, nothing is
+    /// AUTH PROBE (`arbx senders --probe`): deliver 4 bytes that cannot be a transaction (nothing can land, nothing is
     /// paid) and return what the endpoint answered. A key it rejects reads as an auth error (HTTP 401/403), one it accepts
     /// as a decode error. jito-bundle is skipped: logging in already checked its key.
     pub async fn probe(&self) -> String {

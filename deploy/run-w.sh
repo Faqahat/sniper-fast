@@ -1,5 +1,5 @@
 #!/bin/bash
-# arbx campaign supervisor (PLAN WP-01 item 8; replaces tools/analysis/cherry/run-w.sh, which stays as history).
+# arbx campaign supervisor (PLAN WP-01 item 8; it replaced arb-lab's supervisor script, removed with tools/analysis in I-11).
 #
 # usage: deploy/run-w.sh <campaign> <hours> <segment min> <fee budget lamports> <config> [operator]
 #   e.g. from your own machine: ssh -t root@<host> 'cd /root/arbx && deploy/run-w.sh w6 5 20 25000000 deploy/arbx-stage0.toml moiz'

@@ -466,7 +466,7 @@ mod tests {
         let key = SigningKey::from_bytes(&[5u8; 32]);
         let mut bytes = key.to_bytes().to_vec();
         bytes.extend_from_slice(key.verifying_key().as_bytes());
-        let dir = std::env::temp_dir().join(format!("arb-lab-key-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("arbx-key-{}", std::process::id()));
         std::fs::write(&dir, serde_json::to_string(&bytes).unwrap()).unwrap();
         assert_eq!(load_keypair(dir.to_str().unwrap()).unwrap().to_bytes(), key.to_bytes());
         bytes[40] ^= 1;
