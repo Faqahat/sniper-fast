@@ -116,7 +116,9 @@ def outcome(o: dict) -> dict:
         "round_trip_predicted": o.get("round_trip_predicted"),
         "expected_profit": o.get("expected_profit"),
         "legacy": {"tip_paid_lamports": tip, "profit_lamports": profit, "rent_residual": rent,
-                   "failed_fees_lamports_running": o.get("failed_fees_lamports"), "settle_error": o.get("settle_error"),
+                   # arb-lab's running total; arbx's v1.1 outcome (WP-02) renamed it and added the line's delta (review F14)
+                   "failed_fees_lamports_running": o.get("failed_fees_lamports", o.get("failed_fees_total_lamports")),
+                   "failed_fees_delta_lamports": o.get("failed_fees_delta_lamports"), "settle_error": o.get("settle_error"),
                    "gate": o.get("gate"), "copies": o.get("copies"), "run_profit_lamports": o.get("run_profit_lamports"),
                    "cap_lamports": o.get("cap_lamports")},
     }

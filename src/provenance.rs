@@ -24,7 +24,7 @@ use std::path::Path;
 pub const META_SCHEMA: &str = "arbx.meta/2.0";
 pub const PROVENANCE_SCHEMA: &str = "arbx.provenance/1.0";
 
-fn hex(b: &[u8]) -> String { b.iter().map(|x| format!("{x:02x}")).collect() }
+pub fn hex(b: &[u8]) -> String { b.iter().map(|x| format!("{x:02x}")).collect() }
 
 pub fn sha256_hex(b: &[u8]) -> String { use sha2::Digest; hex(&sha2::Sha256::digest(b)) }
 
@@ -490,16 +490,13 @@ pub fn parse_chrony_csv(line: &str) -> Option<Value> {
 
 // ------------------------------------------------------------------ meta.json
 
-/// every file a segment of this binary writes, with its schema (MEASUREMENT §4; "v1.1" = arb-lab's v1 with WP-00's
-/// fields, no header line)
+/// The files a segment writes outside the recorder, with their schemas (MEASUREMENT §4). `arbx run` adds every recorder
+/// stream (`rec::Rec::streams_json`: `attempts` `arbx.attempts/1.1`, `status` `arbx.status/2.0`, ...; WP-02)
 pub fn streams_json() -> Value {
     let mut m = serde_json::Map::new();
-    for (k, v) in [("meta", META_SCHEMA), ("stop", crate::control::STOP_SCHEMA), ("control", crate::control::CONTROL_SCHEMA), ("config", "toml (frozen copy)")] {
+    for (k, v) in [("meta", META_SCHEMA), ("stop", crate::control::STOP_SCHEMA), ("control", crate::control::CONTROL_SCHEMA), ("config", "toml (frozen copy)"),
+        ("manifest", crate::rec::manifest::SCHEMA)] {
         m.insert(k.into(), v.into());
-    }
-    for k in ["run.log", "status", "triggers", "opportunities", "predictions", "arrivals", "caps", "txarr", "rivals", "exec", "moves",
-        "slots", "poh", "entries", "alts", "attempts", "copies", "outcomes", "bundles", "sims", "keepalive"] {
-        m.insert(k.into(), "v1.1".into());
     }
     Value::Object(m)
 }

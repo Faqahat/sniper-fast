@@ -336,3 +336,13 @@ url = "http://germany.solana.dex.blxrbdn.com/api/v2/submit"
 token_env = "BLOXROUTE_KEY"
 tip_lamports = 1000000
 max_per_sec = 1
+
+[record]
+# WP-02: always on; these keys only set budgets (defaults shown)
+archive_feeds = []
+disk_budget_gb = 40
+min_free_gb = 25
+
+[runtime]
+# WP-02: the background runtime for every RPC call
+bg_threads = 3

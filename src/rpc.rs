@@ -1,5 +1,9 @@
 //! Minimal JSON-RPC client (off the hot path): account snapshots at boot, lookup tables, slot/blockhash, signature
 //! statuses and transaction simulation.
+//!
+//! WP-02 (runtime split): `Rpc::bind` ties a client to the background runtime: every call is spawned there, whichever
+//! runtime awaits it, and replies over `runtime::LARGE_REPLY` bytes are parsed in `spawn_blocking`. The HTTP work
+//! checks it is not on an `arbx-hot` thread (`runtime::check_not_hot`).
 use crate::tx::{b58, Pk};
 use anyhow::{bail, Context, Result};
 use base64::Engine as _;
@@ -47,7 +51,9 @@ pub fn scrub(msg: &str) -> String {
 pub struct Rpc { eps: std::sync::Arc<Vec<Endpoint>>, http: reqwest::Client, pub stats: std::sync::Arc<std::sync::Mutex<Stats>>,
     /// try the providers in order, the next only if one fails (a race sends every call to all of them: every call costs
     /// rate limit everywhere, and 15% of calls then failed on all of them)
-    failover: bool }
+    failover: bool,
+    /// the runtime every call runs on (`bind`; `arbx run`: rt_bg). None: the caller's
+    rt: Option<tokio::runtime::Handle> }
 
 #[derive(Debug, Clone)]
 pub struct Account { pub owner: Pk, pub lamports: u64, pub data: Vec<u8> }
@@ -58,9 +64,13 @@ impl Rpc {
     pub fn race(eps: Vec<Endpoint>) -> Rpc {
         let http = reqwest::Client::builder().tcp_nodelay(true).pool_idle_timeout(std::time::Duration::from_secs(90))
             .pool_max_idle_per_host(8).timeout(std::time::Duration::from_secs(20)).build().expect("http client");
-        Rpc { eps: std::sync::Arc::new(eps), http, stats: Default::default(), failover: false }
+        Rpc { eps: std::sync::Arc::new(eps), http, stats: Default::default(), failover: false, rt: None }
     }
     pub fn with_failover(mut self, on: bool) -> Rpc { self.failover = on; self }
+
+    /// Run every call of this client (and of the clients `only` makes from it) on `rt` (the background runtime)
+    pub fn bind(mut self, rt: tokio::runtime::Handle) -> Rpc { self.rt = Some(rt); self }
+    pub fn is_bound(&self) -> bool { self.rt.is_some() }
 
     pub fn names(&self) -> Vec<String> { self.eps.iter().map(|e| e.name.clone()).collect() }
 
@@ -68,11 +78,12 @@ impl Rpc {
     /// the named providers, in the order named (the failover order)
     pub fn only(&self, names: &[String]) -> Rpc {
         Rpc { eps: std::sync::Arc::new(names.iter().filter_map(|n| self.eps.iter().find(|e| &e.name == n).cloned()).collect()), http: self.http.clone(),
-              stats: Default::default(), failover: self.failover }
+              stats: Default::default(), failover: self.failover, rt: self.rt.clone() }
     }
     pub fn is_empty(&self) -> bool { self.eps.is_empty() }
 
     async fn one(http: &reqwest::Client, ep: &Endpoint, body: &Value, method: &str, retry: bool) -> Result<Value> {
+        crate::runtime::check_not_hot("an RPC call");
         let mut wait = 300u64;
         for attempt in 0..8 {
             let mut req = http.post(&ep.url).json(body);
@@ -81,12 +92,13 @@ impl Rpc {
             let status = resp.status();
             let limited = status.as_u16() == 429;
             let r: Value = if limited { Value::Null } else {
-                let text = resp.text().await.with_context(|| format!("{} {method}: reading reply", ep.name))?;
-                match serde_json::from_str(&text) {
+                let bytes = resp.bytes().await.with_context(|| format!("{} {method}: reading reply", ep.name))?;
+                match parse_reply(bytes.clone()).await {
                     Ok(v) => v,
                     Err(_) => {
+                        let text = String::from_utf8_lossy(&bytes);
                         let snippet: String = text.chars().take(120).map(|c| if c.is_control() { ' ' } else { c }).collect();
-                        bail!("{} {method}: HTTP {} with a non-JSON reply ({} bytes): {:?}", ep.name, status.as_u16(), text.len(), snippet.trim());
+                        bail!("{} {method}: HTTP {} with a non-JSON reply ({} bytes): {:?}", ep.name, status.as_u16(), bytes.len(), snippet.trim());
                     }
                 }
             };
@@ -103,8 +115,21 @@ impl Rpc {
         bail!("{} {method}: still rate limited", ep.name)
     }
 
-    /// One JSON-RPC call raced across every provider; returns the first successful result.
+    /// One JSON-RPC call raced across every provider (or in failover order); returns the first successful result. A
+    /// bound client runs it on its runtime (`bind`)
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        match &self.rt {
+            Some(h) => {
+                let mut me = self.clone();
+                me.rt = None;
+                let m = method.to_string();
+                h.spawn(async move { me.call_here(&m, params).await }).await.map_err(|e| anyhow::anyhow!("rpc {method}: task failed: {e}"))?
+            }
+            None => self.call_here(method, params).await,
+        }
+    }
+
+    async fn call_here(&self, method: &str, params: Value) -> Result<Value> {
         let body = std::sync::Arc::new(json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }));
         if self.failover {
             self.stats.lock().unwrap().calls += 1;
@@ -282,6 +307,17 @@ impl Rpc {
         Ok(r["value"].as_array().map(|a| a.iter().map(|v| if v.is_null() { None } else {
             Some((v["slot"].as_u64().unwrap_or(0), v["err"].is_null())) }).collect()).unwrap_or_default())
     }
+}
+
+/// A reply's JSON: parsed in place when small, in `spawn_blocking` when over `runtime::LARGE_REPLY` bytes (a getBlock
+/// or a big getMultipleAccounts: tens of ms of parsing that must not hold a runtime worker)
+pub async fn parse_reply<B: AsRef<[u8]> + Send + 'static>(bytes: B) -> serde_json::Result<Value> {
+    if bytes.as_ref().len() <= crate::runtime::LARGE_REPLY || tokio::runtime::Handle::try_current().is_err() { return serde_json::from_slice(bytes.as_ref()); }
+    crate::runtime::BLOCKING_NOW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    crate::runtime::LARGE_PARSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let r = tokio::task::spawn_blocking(move || { crate::runtime::check_not_hot("a large RPC reply's parse"); serde_json::from_slice(bytes.as_ref()) }).await;
+    crate::runtime::BLOCKING_NOW.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    match r { Ok(v) => v, Err(e) => Err(serde::de::Error::custom(format!("parse task: {e}"))) }
 }
 
 /// one simulateTransaction answer

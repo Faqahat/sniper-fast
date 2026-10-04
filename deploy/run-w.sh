@@ -136,11 +136,17 @@ elif op == "classify":    # classify <segment dir> <exit code>: "<class> <stop r
     else: cls = "crash"
     print(cls, reason or "none")
 elif op == "spent":       # spent <campaign dir> <campaign> [segments run with --live...]: "<lamports> status" or "unknown <why>"
-    # review M4: a segment may have sent when it left attempts (any name: attempts.jsonl now, attempts.NNN.jsonl.zst
-    # after WP-02) or ran with --live (the supervisor knows) and its engine started (status.jsonl exists: the engine
-    # creates it before anything can be sent; a boot that failed earlier sent nothing). For those, a last line that is
-    # missing, unreadable, not an object or without a numeric failed-fee total makes the budget unknown. Any error at
-    # all: unknown
+    # review M4: a segment may have sent when it left attempts (any name: attempts.jsonl in arb-lab,
+    # attempts.NNN.jsonl.zst from WP-02, whose core writer puts each attempt on disk at once) or ran with --live (the
+    # supervisor knows) and its engine started (status.jsonl exists: from WP-02 the recorder creates it, with its schema
+    # header line, right before the engine starts, so before anything can be sent; a boot that failed earlier sent
+    # nothing). The header line (`schema` arbx.status/..., `file_seq`) is not a status line. For those segments, a last
+    # status line that is missing, unreadable, not an object or without a numeric failed-fee total makes the budget
+    # unknown. Any error at all: unknown
+    def is_header(l):
+        try: o = json.loads(l)
+        except Exception: return False
+        return isinstance(o, dict) and isinstance(o.get("schema"), str) and o["schema"].startswith("arbx.status/") and "file_seq" in o
     try:
         total = 0; live = set(a[2:])
         for d in sorted(glob.glob(os.path.join(a[0], a[1] + "-p*"))):
@@ -149,7 +155,7 @@ elif op == "spent":       # spent <campaign dir> <campaign> [segments run with -
             st = os.path.join(d, "status.jsonl")
             atts = [f for f in glob.glob(os.path.join(d, "attempts*")) if os.path.getsize(f) > 0]
             sent = bool(atts) or (seg in live and os.path.exists(st))
-            lines = [l for l in open(st, errors="replace").read().splitlines() if l.strip()] if os.path.exists(st) else []
+            lines = [l for l in open(st, errors="replace").read().splitlines() if l.strip() and not is_header(l)] if os.path.exists(st) else []
             if not lines:
                 if sent: print("unknown", seg + ":no-status-line"); sys.exit(0)
                 continue

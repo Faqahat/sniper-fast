@@ -16,6 +16,7 @@ use crate::control::{GateMode, SendGate};
 use crate::feeds::{clock::now_ns, Event};
 use crate::rpc::Rpc;
 use crate::lat::Series;
+use crate::rec::{self, Rec};
 use crate::send::{self, Copy, Fired, Paths, Prio, TokenBucket, RANK_CROWDED, RANK_OTHER, RANK_SEED};
 use crate::tx::{b58, pk, Pk};
 use crate::venues::{PoolMeta, WSOL};
@@ -24,8 +25,7 @@ use crossbeam_channel::Sender;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
-use std::io::Write;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// a canary's min_profit: unreachable, so the profit check always fails (1,000 SOL)
 const CANARY_MIN_PROFIT: u64 = 1_000_000_000_000;
@@ -144,8 +144,6 @@ impl Sending {
     }
 }
 
-type Log = Arc<Mutex<std::io::BufWriter<std::fs::File>>>;
-fn write(log: &Log, v: &Value) { let mut w = log.lock().unwrap(); let _ = writeln!(w, "{v}"); let _ = w.flush(); }
 
 pub struct Exec {
     payer: Pk,
@@ -162,9 +160,9 @@ pub struct Exec {
     min_tip_paid: u64,
     sim_rate: Option<usize>,
     sim_recent: VecDeque<u64>,
-    sims: Option<Log>,
-    attempts: Log,
-    outcomes: Log,
+    /// sims.jsonl ([sim] enabled), attempts.jsonl, outcomes.jsonl and the diagnostic `log` events, through the recorder
+    rec: Rec,
+    sims_on: bool,
     sending: Option<Sending>,
     /// the Jito gate is on ([gate] enabled): live paid copies then need a bundle copy to wait behind
     gate_on: bool,
@@ -309,7 +307,7 @@ mod tests {
         let b = Arc::new(Budget::new(1, Duration::from_millis(3_500)));
         assert!(b.acquire(Prio::default()).await);
         let crowded: HashSet<Pk> = [key(9)].into_iter().collect();
-        let order = Arc::new(Mutex::new(Vec::new()));
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut hs = Vec::new();
         for (name, buy, src, net) in [("crowded-big", key(9), "ours", 1_000_000_000i64), ("other", key(1), "ours", 10), ("seed", key(1), "mriya", 1)] {
             let prio = Prio { rank: prio_rank(&buy, &key(2), src, "ours", &crowded), net };
@@ -427,8 +425,13 @@ mod tests {
             buy_live: vec![], sell_live: vec![], buy_end: None, sell_end: None }
     }
 
-    struct Rig { x: Exec, dir: std::path::PathBuf }
-    impl Drop for Rig { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); } }
+    struct Rig { x: Exec, dir: std::path::PathBuf, rec: Rec }
+    impl Drop for Rig { fn drop(&mut self) { self.rec.close(); let _ = std::fs::remove_dir_all(&self.dir); } }
+
+    /// a recorder in `dir` (no monitor thread)
+    fn test_rec(dir: &std::path::Path) -> Rec {
+        rec::start(rec::Opts { dir: dir.to_path_buf(), run: "test".into(), producer: "test".into(), cfg: Default::default(), feeds: vec![], monitor: false, echo: None }).unwrap()
+    }
 
     /// a live Exec on a made-up wallet (no network: the one send path is a closed local port), three nonces
     async fn live_rig(name: &str) -> Rig { live_rig_with(name, "").await.0 }
@@ -440,19 +443,22 @@ mod tests {
         let crowded_file = dir.join("crowded.json");
         std::fs::write(&crowded_file, format!("[\"{}\"]", bs58::encode([9u8; 32]).into_string())).unwrap();
         let cfg = test_cfg_live(&dir, crowded_file.to_str().unwrap(), extra);
-        let (paths, _) = Paths::new(&cfg.sends, cfg.gate.clone(), Some(&dir), false).await.unwrap();
+        let rec = test_rec(&dir);
+        let (paths, _) = Paths::new(&cfg.sends, cfg.gate.clone(), rec.clone(), false).await.unwrap();
         let key = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
         let nonces = (0..3u8).map(|k| NonceSlot { acct: [200 + k; 32], value: Some([k; 32]), busy: None }).collect();
         let sending = Sending::new(&cfg, Kind::Live, key, nonces);
         let held: HashSet<Pk> = [*WSOL, MINT].into_iter().collect();
         let (tx, rx) = crossbeam_channel::unbounded();
         let band = BandGate::from_cfg(&cfg, load_crowded_pools(&cfg.live.crowded_pools_file).unwrap());
-        let x = Exec::assemble(&cfg, Rpc::race(vec![]), Some(paths), &dir, tx, vec![], vec![], None, held, Some(sending), band).unwrap();
-        (Rig { x, dir }, rx)
+        let x = Exec::assemble(&cfg, Rpc::race(vec![]), Some(paths), rec.clone(), tx, vec![], vec![], None, held, Some(sending), band).unwrap();
+        (Rig { x, dir, rec }, rx)
     }
 
+    /// attempts.jsonl as written so far (through the recorder: attempts.000.jsonl.zst, its header skipped)
     fn attempts(r: &Rig) -> Vec<Value> {
-        std::fs::read_to_string(r.dir.join("attempts.jsonl")).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+        r.rec.sync();
+        rec::read_jsonl(&r.dir, "attempts").unwrap()
     }
     fn n(x: &Exec, k: &str) -> u64 { x.counts.get(k).copied().unwrap_or(0) }
 
@@ -548,7 +554,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("arbx-exec-crowded-{}-{}", std::process::id(), now_ns()));
         let cfg = test_cfg(&dir, "/nonexistent/crowded-pools.json");
         let (tx, _rx) = crossbeam_channel::unbounded();
-        let e = Exec::new(&cfg, &Rpc::race(vec![]), None, &dir, tx, vec![], None, vec![]).await.err().expect("refused");
+        let e = Exec::new(&cfg, &Rpc::race(vec![]), None, Rec::off(), tx, vec![], None, vec![]).await.err().expect("refused");
         assert!(format!("{e:#}").contains("crowded_pools_file"), "{e:#}");
     }
 
@@ -640,7 +646,7 @@ pub fn load_crowded_pools(path: &str) -> Result<HashSet<Pk>> {
 impl Exec {
     /// Everything off the hot path: lookup tables, PumpSwap's GlobalConfig, the wallet's token accounts, the nonce.
     #[allow(clippy::too_many_arguments)]
-    pub async fn new(cfg: &Config, rpc_all: &Rpc, paths: Option<Arc<Paths>>, dir: &std::path::Path, back: Sender<Event>, feeds: Vec<String>,
+    pub async fn new(cfg: &Config, rpc_all: &Rpc, paths: Option<Arc<Paths>>, rec: Rec, back: Sender<Event>, feeds: Vec<String>,
         send_key: Option<(Kind, ed25519_dalek::SigningKey)>, mints: Vec<(Pk, Pk)>) -> Result<(Exec, Vec<String>)> {
         let mut notes = Vec::new();
         // a configured crowded list must load, first, before any RPC call (fail closed: a missing file would silently put
@@ -692,20 +698,19 @@ impl Exec {
             });
             sending = Some(s);
         }
-        Ok((Exec::assemble(cfg, rpc, paths, dir, back, feeds, alts, pump, held, sending, BandGate::from_cfg(cfg, crowded))?, notes))
+        Ok((Exec::assemble(cfg, rpc, paths, rec, back, feeds, alts, pump, held, sending, BandGate::from_cfg(cfg, crowded))?, notes))
     }
 
     /// The executor from what `new` fetched (or a test made up): no network here. Needs a tokio runtime.
     #[allow(clippy::too_many_arguments)]
-    fn assemble(cfg: &Config, rpc: Rpc, paths: Option<Arc<Paths>>, dir: &std::path::Path, back: Sender<Event>, feeds: Vec<String>,
+    fn assemble(cfg: &Config, rpc: Rpc, paths: Option<Arc<Paths>>, rec: Rec, back: Sender<Event>, feeds: Vec<String>,
         alts: Vec<Alt>, pump: Option<PumpGlobal>, held: HashSet<Pk>, sending: Option<Sending>, band: BandGate) -> Result<Exec> {
         let payer = pk(&cfg.wallet);
-        let open = |n: &str| -> Result<Log> { Ok(Arc::new(Mutex::new(std::io::BufWriter::new(std::fs::OpenOptions::new().create(true).append(true).open(dir.join(n))?)))) };
         let min_tip_paid = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.tip_lamports).max().unwrap_or(0);
         Ok(Exec { payer, program: pk(&cfg.exec.program), alts, pump, held, rpc, rt: tokio::runtime::Handle::current(), back, paths,
             cu_price: cfg.strategy.cu_price_micro, max_size: sol(cfg.exec.max_size_sol), min_tip_paid,
             sim_rate: cfg.sim.enabled.then_some(cfg.sim.max_per_sec as usize), sim_recent: VecDeque::new(),
-            sims: if cfg.sim.enabled { Some(open("sims.jsonl")?) } else { None }, attempts: open("attempts.jsonl")?, outcomes: open("outcomes.jsonl")?,
+            rec, sims_on: cfg.sim.enabled,
             sending, gate_on: cfg.gate.enabled, all_paths: cfg.live.test_all_paths, prio_cap: cfg.live.max_priority_lamports,
             spec_price: cfg.live.spec_cu_price_micro, rotate: cfg.live.rotate_paths, mix: cfg.live.race_mix, path_arm: "", bmix: cfg.live.bundle_mix, tpu_price: cfg.live.tpu_cu_price_micro, sim_gate: cfg.live.sim_gate, compete_mult: cfg.live.compete_mult, compete_share: cfg.live.compete_max_share, compete_ab: cfg.live.compete_ab, gross_floor: cfg.live.gross_floor, tpu_max_expected: cfg.live.tpu_max_expected_lamports, tpu_skip_mriya: cfg.live.tpu_skip_mriya_pools, tpu_skip_mints: cfg.live.tpu_skip_mints.iter().map(|m| pk(m)).collect(), tpu_min_expected: cfg.live.tpu_min_expected_lamports, bundle_resend_ms: cfg.live.bundle_resend_ms.clone(), bundle_variants: cfg.live.bundle_size_variants.clone(), mint_cool: HashMap::default(), pair_lock_ns: cfg.live.pair_lock_ms * 1_000_000,
             band, rot: 0,
@@ -822,10 +827,11 @@ impl Exec {
         line["t_ns"] = json!(t0);
         line["build_us"] = json!((t_built - t0) / 1_000);
         line["canary_bytes"] = match &canary_shape { Ok(n) => json!(n), Err(e) => json!(e) };
-        let Some(log) = self.sims.clone() else { return };
+        if !self.sims_on { return; }
+        let rec = self.rec.clone();
         let b = match built {
             Ok(b) => b,
-            Err(e) => { self.count("sim_build_failed"); line["build_error"] = json!(e); write(&log, &line); return; }
+            Err(e) => { self.count("sim_build_failed"); line["build_error"] = json!(e); rec.json(rec::SIMS, line); return; }
         };
         self.count("sim_sent");
         line["bytes"] = json!(build::tx_bytes(&b.msg));
@@ -853,7 +859,7 @@ impl Exec {
                 }
                 Err(e) => { line["sim_error"] = json!(format!("{e:#}")); }
             }
-            write(&log, &line);
+            rec.json(rec::SIMS, line);
         });
     }
 
@@ -1076,7 +1082,7 @@ impl Exec {
             "tip": x.tip.map(|t| t.1), "min_profit": c.3 })).collect::<Vec<_>>());
         if !not.is_empty() { line["not_sent"] = json!(not); }
         if !retries.is_empty() { line["bundle_resends"] = json!(retries.iter().zip(&retry_labels).map(|((d, x), l)| json!({ "after_ms": d, "what": l, "sig": send::first_signature(&x.raw), "tip": x.tip.map(|t| t.1) })).collect::<Vec<_>>()); }
-        write(&self.attempts, &line);
+        self.rec.json(rec::ATTEMPTS, line);
         self.count(if live { "live_sent" } else { "canary_sent" });
         if crowded { self.count("rank_crowded"); }
         self.lat[LAT_DECIDED_TO_SIGNED].push(t_signed.saturating_sub(t_decided));
@@ -1084,7 +1090,7 @@ impl Exec {
         let (gate_size, gate_mid, gate_back, gate_slot) = (r.size, r.mid, r.back, r.slot);
         let bundle = self.path_arm == "bundle";
         if let Some(s) = self.sending.as_mut() { s.open.insert(attempt, Open { route: r, nonce: ni, worst, creates_ata, expected, t: t_signed, bundle }); }
-        let (rpc, back, paths2, gate) = (self.rpc.clone(), self.back.clone(), paths.clone(), self.gate.clone());
+        let (rpc, back, paths2, gate, log) = (self.rpc.clone(), self.back.clone(), paths.clone(), self.gate.clone(), self.rec.clone());
         self.rt.spawn(async move {
             if let Some(raw) = gate_raw {
                 let t0 = now_ns();
@@ -1101,7 +1107,7 @@ impl Exec {
                     let back_sim = legs.last().map(|x| x.1);
                     let thin = sim.err.is_none() && back_sim.is_some_and(|b| (b as i64 - gate_size as i64) < gate_bar as i64);
                     if sim.err.is_none() && !thin {
-                        if k > 0 { eprintln!("gate: attempt {attempt} passed on re-check {k} at +{:.0} ms (sim slots {slots:?})", (now_ns() - t0) as f64 / 1e6); }
+                        if k > 0 { log.log("send", format!("gate: attempt {attempt} passed on re-check {k} at +{:.0} ms (sim slots {slots:?})", (now_ns() - t0) as f64 / 1e6)); }
                         fail = None;
                         break;
                     }
@@ -1109,7 +1115,7 @@ impl Exec {
                     // slot behind the trigger, still behind at +90 ms) priced the pools without the trigger: its "gap gone"
                     // says nothing about this trade, which goes on our own quote
                     if sim.slot < gate_slot {
-                        eprintln!("gate: attempt {attempt} sim stale (slot {} < trigger {gate_slot}, check {k}): sent on our quote", sim.slot);
+                        log.log("send", format!("gate: attempt {attempt} sim stale (slot {} < trigger {gate_slot}, check {k}): sent on our quote", sim.slot));
                         fail = None;
                         break;
                     }
@@ -1198,7 +1204,7 @@ impl Exec {
                     if e.0 >= 25 {
                         let secs = (60u64 << e.2.min(3)).min(300);
                         e.1 = now_ns() + secs * 1_000_000_000; e.0 = 0; e.2 += 1;
-                        eprintln!("cool: token {} paused {secs} s after 25 Jito rejections in a row (pause {})", b58(&mint), e.2);
+                        self.rec.log("send", format!("cool: token {} paused {secs} s after 25 Jito rejections in a row (pause {})", b58(&mint), e.2));
                     }
                 }
                 _ => {}
@@ -1208,6 +1214,7 @@ impl Exec {
         let paths = self.paths.clone();
         let Some(c) = self.sending.as_mut() else { return };
         let Some(o) = c.open.remove(&s.attempt) else { return };
+        let spent_before = c.spent;
         // signed -> the first copy's send task running (its t_sent; 0 = never sent): the send baseline (review F11)
         if let Some(x) = s.fired.copies.first().filter(|x| x.t_sent > 0) { self.lat[LAT_SIGNED_TO_SENT].push(x.t_sent.saturating_sub(o.t)); }
         let route = o.route;
@@ -1291,13 +1298,15 @@ impl Exec {
             "ours_ms_after_trigger": op.zip(tp).and_then(|(a, b)| a.ms_after(&b)) });
         line["jito"] = json!(s.jito);
         line["settle_error"] = json!(s.error);
-        line["failed_fees_lamports"] = json!(c.spent);
+        // status.jsonl v2 counter semantics (MEASUREMENT §2.2): the running total after this attempt, and this attempt's part
+        line["failed_fees_total_lamports"] = json!(c.spent);
+        line["failed_fees_delta_lamports"] = json!(c.spent - spent_before);
         line["cap_lamports"] = json!(c.cap);
         line["run_profit_lamports"] = json!(c.profit);
         for x in &s.fired.copies {
             if let Some(b) = x.sig.as_ref().and_then(|sg| bs58::decode(sg).into_vec().ok()).and_then(|v| <[u8; 64]>::try_from(v).ok()) { c.watch.remove(&b); c.seen.remove(&b); }
         }
-        write(&self.outcomes, &line);
+        self.rec.json(rec::OUTCOMES, line);
         if let Some(m) = new_mint { self.held.insert(m); }
     }
 
@@ -1312,11 +1321,67 @@ impl Exec {
         }
         if let Some(c) = &self.sending {
             v["sending"] = json!({ "kind": c.kind, "sent": c.sent, "landed": c.landed, "wins": c.wins, "in_flight": c.open.len(),
-                "failed_fees_lamports": c.spent, "cap_lamports": c.cap, "fees_lamports": c.fees, "tips_lamports": c.tips, "profit_lamports": c.profit,
+                "failed_fees_total_lamports": c.spent, "cap_lamports": c.cap, "fees_lamports": c.fees, "tips_lamports": c.tips, "profit_lamports": c.profit,
                 "new_token_accounts": c.new_atas, "stopped": c.stopped });
         }
         v
     }
 
+    /// status.jsonl v2 (MEASUREMENT §4.8, §2.2): the `exec` section and the `money` section, deltas against `prev`.
+    /// `money` holds the bot's own counters until WP-07's ledger (`src: "bot"`; null without a sender). Every number is
+    /// `_total`, `_delta` or `_now`
+    pub fn status_v2(&self, prev: &mut ExecPrev) -> (Value, Value) {
+        let mut counts_delta = serde_json::Map::new();
+        for (k, v) in &self.counts {
+            let d = v - prev.counts.get(k).copied().unwrap_or(0);
+            if d > 0 { counts_delta.insert(k.to_string(), json!(d)); }
+        }
+        prev.counts = self.counts.clone();
+        // every block-engine result so far, by outcome (the jito paths' result streams)
+        let mut verdicts: std::collections::BTreeMap<&'static str, u64> = Default::default();
+        if let Some(p) = &self.paths {
+            for x in p.list.iter().filter_map(|x| x.jito.as_ref()) { for (k, v) in x.counts.lock().unwrap().iter() { *verdicts.entry(k).or_default() += v; } }
+        }
+        let verdicts_delta: serde_json::Map<String, Value> = verdicts.iter().filter_map(|(k, v)| {
+            let d = v - prev.verdicts.get(k).copied().unwrap_or(0);
+            (d > 0).then(|| (k.to_string(), json!(d)))
+        }).collect();
+        prev.verdicts = verdicts;
+        let over_rate = self.paths.as_ref().map(|p| {
+            let (mut all, mut crowded) = (0u64, 0u64);
+            for x in &p.list { let st = x.stats.lock().unwrap(); all += st.limited; crowded += st.limited_crowded; }
+            json!({ "crowded": crowded, "other": all.saturating_sub(crowded) })
+        });
+        let mut exec = json!({ "counts_total": self.counts, "counts_delta": counts_delta, "verdicts_delta": verdicts_delta, "over_rate_total": over_rate,
+            // WP-05's send policy fills these
+            "decisions_total": null, "refused_total": null, "queue_now": null, "lambda_now": null });
+        let money = match &self.sending {
+            Some(c) => {
+                exec["kind"] = json!(c.kind);
+                exec["stopped"] = json!(c.stopped);
+                exec["attempts_total"] = json!(c.sent);
+                exec["attempts_delta"] = json!(c.sent as u64 - prev.attempts);
+                exec["landed_total"] = json!(c.landed);
+                exec["landed_delta"] = json!(c.landed as u64 - prev.landed);
+                exec["ok_total"] = json!(c.wins);
+                exec["in_flight_now"] = json!(c.open.len());
+                let m = json!({ "src": "bot", "failed_fees_total_lamports": c.spent, "failed_fees_delta_lamports": c.spent - prev.spent.min(c.spent),
+                    "failed_fees_cap_now_lamports": c.cap, "fees_landed_total_lamports": c.fees, "tips_paid_total_lamports": c.tips,
+                    // v1 `profit_lamports`: chain balance changes of winning landings, rent included (WP-07's ledger separates it)
+                    "bot_profit_total_lamports": c.profit, "new_token_accounts_total": c.new_atas });
+                prev.attempts = c.sent as u64;
+                prev.landed = c.landed as u64;
+                prev.spent = c.spent;
+                m
+            }
+            None => Value::Null,
+        };
+        (exec, money)
+    }
+
     pub fn payer(&self) -> Pk { self.payer }
 }
+
+/// What `Exec::status_v2`'s deltas are against (the previous status line)
+#[derive(Default)]
+pub struct ExecPrev { counts: HashMap<&'static str, u64>, verdicts: std::collections::BTreeMap<&'static str, u64>, attempts: u64, landed: u64, spent: u64 }

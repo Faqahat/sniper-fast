@@ -52,6 +52,8 @@ pub struct Config {
     pub record: RecordCfg,
     #[serde(default)]
     pub control: ControlCfg,
+    #[serde(default)]
+    pub runtime: RuntimeCfg,
 }
 
 /// the config format this binary reads
@@ -67,16 +69,86 @@ pub struct ControlCfg {
 }
 impl Default for ControlCfg { fn default() -> Self { ControlCfg { socket: true } } }
 
-/// The long run's recorders (record.rs): rivals, executed results, arrivals per feed, pool moves, slots, raw entries.
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+/// The recorder (src/rec; PLAN WP-02, MEASUREMENT §1). It is always on: these keys only set budgets, files and queues
+/// (`enabled` and `archive_feed` are gone: a config that still has them does not load)
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordCfg {
+    /// the segment directory's size limit, GB (§1.4: the disk ladder acts past it)
+    #[serde(default = "rec_budget_gb")]
+    pub disk_budget_gb: f64,
+    /// the filesystem's free-space floor, GB (the ladder acts under it; the supervisor refuses to start under it)
+    #[serde(default = "rec_min_free_gb")]
+    pub min_free_gb: f64,
+    /// a stream's file rotates at this much raw (uncompressed) data, MiB
+    #[serde(default = "rec_rotate_mb")]
+    pub rotate_mb: f64,
+    /// ... or at this age, minutes
+    #[serde(default = "rec_rotate_min")]
+    pub rotate_min: u64,
+    /// every stream's zstd frame ends this often (so a file can be read up to its last frame while the run goes on), ms
+    #[serde(default = "rec_flush_ms")]
+    pub flush_ms: u64,
+    #[serde(default = "rec_zstd_level")]
+    pub zstd_level: i32,
+    /// the entries feeds whose raw messages are archived (`entries-<feed>.NNN.bin.zst`, bulk class; 1-2 GB/h each)
     #[serde(default)]
-    pub enabled: bool,
-    /// the entries feed whose raw messages are archived (entries.zst); "" = none
+    pub archive_feeds: Vec<String>,
+    /// queue sizes, records (§1.2): core, chain and bulk are per class, accounts and journal per stream
+    #[serde(default = "rec_queue_core")]
+    pub queue_core: u64,
+    #[serde(default = "rec_queue_accounts")]
+    pub queue_accounts: u64,
+    #[serde(default = "rec_queue_journal")]
+    pub queue_journal: u64,
+    #[serde(default = "rec_queue_core")]
+    pub queue_chain: u64,
+    #[serde(default = "rec_queue_bulk")]
+    pub queue_bulk: u64,
+    /// each bounded queue's byte cap, MiB: the payload bytes producers declare (binary records, sized closures) are
+    /// counted, and a record past the cap drops as a full queue would (review F17: a stalled replay writer must not hold
+    /// gigabytes of account data)
+    #[serde(default = "rec_queue_max_mb")]
+    pub queue_max_mb: f64,
+    /// accounts.bin: a FULL record of an account every this many of its records (WP-03; the disk ladder lengthens it 4x)
+    #[serde(default = "rec_keyframe")]
+    pub accounts_keyframe_every: u32,
+    /// CPUs the writer threads are pinned to (away from the engine's); empty = any
     #[serde(default)]
-    pub archive_feed: String,
+    pub writer_cpus: Vec<usize>,
 }
+
+impl Default for RecordCfg {
+    fn default() -> Self {
+        RecordCfg { disk_budget_gb: rec_budget_gb(), min_free_gb: rec_min_free_gb(), rotate_mb: rec_rotate_mb(), rotate_min: rec_rotate_min(), flush_ms: rec_flush_ms(),
+            zstd_level: rec_zstd_level(), archive_feeds: vec![], queue_core: rec_queue_core(), queue_accounts: rec_queue_accounts(), queue_journal: rec_queue_journal(),
+            queue_chain: rec_queue_core(), queue_bulk: rec_queue_bulk(), queue_max_mb: rec_queue_max_mb(), accounts_keyframe_every: rec_keyframe(), writer_cpus: vec![] }
+    }
+}
+fn rec_budget_gb() -> f64 { 40.0 }
+fn rec_min_free_gb() -> f64 { 25.0 }
+fn rec_rotate_mb() -> f64 { 256.0 }
+fn rec_rotate_min() -> u64 { 60 }
+fn rec_flush_ms() -> u64 { 1_000 }
+fn rec_zstd_level() -> i32 { 3 }
+fn rec_queue_core() -> u64 { 262_144 }
+fn rec_queue_accounts() -> u64 { 1_048_576 }
+fn rec_queue_journal() -> u64 { 524_288 }
+fn rec_queue_bulk() -> u64 { 131_072 }
+fn rec_queue_max_mb() -> f64 { 1_024.0 }
+fn rec_keyframe() -> u32 { 64 }
+
+/// The runtime split (src/runtime.rs; PLAN WP-02 item 1): the hot runtime (2 workers) runs stream I/O and sends; the
+/// background runtime runs every RPC call
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeCfg {
+    /// the background runtime's workers (`arbx-bg`, niced +5)
+    #[serde(default = "rt_bg_threads")]
+    pub bg_threads: usize,
+}
+impl Default for RuntimeCfg { fn default() -> Self { RuntimeCfg { bg_threads: rt_bg_threads() } } }
+fn rt_bg_threads() -> usize { 3 }
 
 /// STEP 4: real trades. Needs mode = "live" AND `arbx run --live`. Each copy's on-chain min_profit is base fee +
 /// priority fee + that copy's tip + `margin_lamports`, so a landed trade cannot lose; what failures cost (their fees)
@@ -699,6 +771,26 @@ impl Config {
         // the bucket keeps the rate to 0.001 token/s: a smaller positive rate would silently mean "never"
         if bb > 0.0 && bb < 0.001 { bail!("[live] big_band_max_per_sec {bb}: under 0.001/s (use 0 for no big-band trade)"); }
         if cfg.live.big_band_min_expected_lamports == 0 { bail!("[live] big_band_min_expected_lamports must be > 0 (0 would throttle every live trade)"); }
+        let r = &cfg.record;
+        // review N4: a zero budget (or byte cap) would stop (or drop) everything; the free-space floor may be 0
+        for (k, v) in [("disk_budget_gb", r.disk_budget_gb), ("rotate_mb", r.rotate_mb), ("queue_max_mb", r.queue_max_mb)] {
+            if !v.is_finite() || v <= 0.0 { bail!("[record] {k} must be a positive number"); }
+        }
+        if !r.min_free_gb.is_finite() || r.min_free_gb < 0.0 { bail!("[record] min_free_gb must be a number >= 0"); }
+        if let Some(c) = r.writer_cpus.iter().find(|c| **c >= 1024) { bail!("[record] writer_cpus: CPU {c} is out of range (0..1023)"); }
+        if r.flush_ms == 0 || r.rotate_min == 0 { bail!("[record] flush_ms and rotate_min must be > 0"); }
+        if !(1..=19).contains(&r.zstd_level) { bail!("[record] zstd_level must be 1..19"); }
+        if [r.queue_core, r.queue_accounts, r.queue_journal, r.queue_chain, r.queue_bulk].contains(&0) { bail!("[record] queue sizes must be > 0"); }
+        if r.accounts_keyframe_every == 0 { bail!("[record] accounts_keyframe_every must be > 0"); }
+        // a typo would archive nothing, silently
+        for a in &r.archive_feeds {
+            match cfg.feeds.iter().find(|f| &f.name == a) {
+                None => bail!("[record] archive_feeds: no [[feed]] named {a}"),
+                Some(f) if f.is_raw() => bail!("[record] archive_feeds: {a} is a raw shred feed (only entries feeds are archived)"),
+                Some(_) => {}
+            }
+        }
+        if cfg.runtime.bg_threads == 0 { bail!("[runtime] bg_threads must be > 0"); }
         Ok(cfg)
     }
 
@@ -800,7 +892,8 @@ mod tests {
         assert_eq!((l.max_new_token_accounts, l.settle_s, l.max_size_sol), (0, 3, 4.2));
         assert_eq!((l.big_band_min_expected_lamports, l.big_band_max_per_sec), (1_000_000, 0.5));
         assert_eq!(l.crowded_skip_min_expected_lamports, 100_000, "OD-3's alternative on top of the rank (review F2)");
-        assert!(cfg.record.enabled && cfg.record.archive_feed.is_empty());
+        assert!(cfg.record.archive_feeds.is_empty(), "no raw entries archive until an entries feed is alive");
+        assert_eq!((cfg.record.disk_budget_gb, cfg.record.min_free_gb, cfg.record.flush_ms, cfg.runtime.bg_threads), (40.0, 25.0, 1_000, 3));
         assert!(!cfg.gate.enabled);
         // both deshred feeds now ask for DAMM v2 too
         let deshred: Vec<&Feed> = cfg.feeds.iter().filter(|f| f.kind == FeedKind::YellowstoneDeshred).collect();
@@ -845,7 +938,7 @@ mod tests {
     fn unknown_keys_are_load_errors() {
         assert!(Config::parse(MINIMAL).is_ok());
         for (section, typo) in [("", "out_dirr = \"/tmp\""), ("[live]", "max_failed_fee_lamports = 1"), ("[strategy]", "decoded_send = true"),
-            ("[exec]", "expected_program_sha = \"x\""), ("[sim]", "enable = true"), ("[canary]", "enabled_ = true"), ("[record]", "enabeld = true"),
+            ("[exec]", "expected_program_sha = \"x\""), ("[sim]", "enable = true"), ("[canary]", "enabled_ = true"), ("[record]", "rotate_mbb = 1"), ("[runtime]", "bg_thread = 1"),
             ("[gate]", "wait = 1"), ("[control]", "sockets = false"), ("[[feed]]\nname = \"f\"\nkind = \"udp\"\nbind = \"0.0.0.0:1\"", "binds = \"x\""),
             ("[[send]]\nname = \"s\"\nkind = \"rpc\"\nurl = \"http://x\"", "max_per_second = 1"),
             ("[[rpc.endpoint]]\nname = \"r\"\nurl = \"http://x\"", "url_envv = \"X\"")] {
@@ -902,6 +995,35 @@ mod tests {
         assert!(Config::parse(&format!("{MINIMAL}[exec]\nexpected_program_md5 = \"809315befcb9554211f8019bf9df290b\"\n")).is_ok());
         assert!(err(&format!("{MINIMAL}[exec]\nexpected_program_md5 = \"809315be\"\n")).contains("expected_program_md5"));
         assert!(err(&format!("{MINIMAL}[exec]\nexpected_program_sha256 = \"{}\"\n", "E".repeat(64))).contains("lowercase hex"));
+    }
+
+    /// WP-02: recording cannot be turned off (`[record] enabled` and `archive_feed` are gone: a config that still has
+    /// them does not load); the new keys have the plan's defaults and are checked
+    #[test]
+    fn record_and_runtime_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        let r = &c.record;
+        assert_eq!((r.disk_budget_gb, r.min_free_gb, r.rotate_mb, r.rotate_min, r.flush_ms, r.zstd_level), (40.0, 25.0, 256.0, 60, 1_000, 3));
+        assert_eq!((r.queue_core, r.queue_accounts, r.queue_journal, r.queue_chain, r.queue_bulk), (262_144, 1_048_576, 524_288, 262_144, 131_072));
+        assert_eq!((r.accounts_keyframe_every, c.runtime.bg_threads), (64, 3));
+        assert!(r.archive_feeds.is_empty() && r.writer_cpus.is_empty());
+        for k in ["enabled = true", "archive_feed = \"\""] {
+            let key = k.split(' ').next().unwrap();
+            assert!(err(&format!("{MINIMAL}[record]\n{k}\n")).contains(&format!("unknown field `{key}`")), "{k}");
+        }
+        let feeds = "[[feed]]\nname = \"ent\"\nkind = \"jito-entries\"\nurl = \"http://x\"\n[[feed]]\nname = \"raw\"\nkind = \"udp\"\nbind = \"0.0.0.0:1\"\n";
+        assert_eq!(Config::parse(&format!("{MINIMAL}{feeds}[record]\narchive_feeds = [\"ent\"]\n")).unwrap().record.archive_feeds, ["ent"]);
+        assert!(err(&format!("{MINIMAL}{feeds}[record]\narchive_feeds = [\"nope\"]\n")).contains("no [[feed]] named nope"));
+        assert!(err(&format!("{MINIMAL}{feeds}[record]\narchive_feeds = [\"raw\"]\n")).contains("raw shred feed"));
+        assert_eq!(r.queue_max_mb, 1_024.0);
+        for bad in ["zstd_level = 0", "flush_ms = 0", "rotate_mb = 0", "queue_core = 0", "disk_budget_gb = -1", "accounts_keyframe_every = 0",
+            "disk_budget_gb = 0", "queue_max_mb = 0", "min_free_gb = -1", "writer_cpus = [1024]"] {
+            assert!(Config::parse(&format!("{MINIMAL}[record]\n{bad}\n")).is_err(), "{bad}");
+        }
+        assert!(err(&format!("{MINIMAL}[runtime]\nbg_threads = 0\n")).contains("bg_threads"));
+        // integers where the defaults are numbers with a fraction
+        assert_eq!(Config::parse(&format!("{MINIMAL}[record]\nrotate_mb = 1\ndisk_budget_gb = 2\n")).unwrap().record.rotate_mb, 1.0);
+        assert_eq!(Config::parse(&format!("{MINIMAL}[record]\nmin_free_gb = 0\nwriter_cpus = [2, 3]\n")).unwrap().record.writer_cpus, [2, 3]);
     }
 
     #[test]

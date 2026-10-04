@@ -18,15 +18,18 @@ from . import solana, zstd
 
 # ------------------------------------------------------------------------------------------------- schema registry
 
-#: major versions this toolkit reads, per stream (MEASUREMENT §1.3 rule: refuse unknown majors; minors may add fields)
+#: major versions this toolkit reads, per stream (MEASUREMENT §1.3 rule: refuse unknown majors; minors may add fields).
+#: Major 1 of attempts, bundles, outcomes, exec, triggers and predictions is arb-lab's v1 record: without a header (an
+#: arb-lab file) or behind a `/1.x` header (arbx from WP-02 until the WP that brings its v2: MEASUREMENT §1.6, §7). Both
+#: are read through `legacy.py` (`model.Segment.v1`; WP-02 review F3)
 SUPPORTED_MAJORS: dict = {
     "campaign": {1}, "meta": {2}, "stop": {1}, "manifest": {1}, "probe": {1}, "events": {1}, "control": {1},
     "supervisor": {1}, "status": {2}, "feedhealth": {1}, "resources": {1}, "keepalive": {1}, "accounts": {2},
-    "journal": {2}, "exec": {2}, "wallet": {1, 2}, "blocks": {1}, "slotidx": {1}, "slots": {1}, "txfetch": {1},
+    "journal": {2}, "exec": {1, 2}, "wallet": {1, 2}, "blocks": {1}, "slotidx": {1}, "slots": {1}, "txfetch": {1},
     "txarr": {1}, "arrivals": {1}, "rivals": {1}, "moves": {2}, "poh": {2}, "slots-feed": {2}, "entries": {1},
-    "alts": {2}, "alts-final": {1, 2}, "leaders": {1}, "validators": {1}, "pools": {1}, "triggers": {2},
-    "commits": {1}, "decisions": {1}, "opportunities": {1}, "predictions": {2}, "caps": {1}, "sims": {1},
-    "attempts": {2}, "copies": {1}, "bundles": {2}, "outcomes": {2}, "blockctx": {1}, "ledger": {1},
+    "alts": {2}, "alts-final": {1, 2}, "leaders": {1}, "validators": {1}, "pools": {1}, "triggers": {1, 2},
+    "commits": {1}, "decisions": {1}, "opportunities": {1}, "predictions": {1, 2}, "caps": {1}, "sims": {1},
+    "attempts": {1, 2}, "copies": {1}, "bundles": {1, 2}, "outcomes": {1, 2}, "blockctx": {1}, "ledger": {1},
     "snapshots": {1}, "recon": {1}, "experiments": {1}, "verify": {1}, "discovery": {1}, "cu-table": {1},
 }
 

@@ -48,6 +48,15 @@ class Segment:
                 return streams.peek(fs[0]).legacy
         return False
 
+    def v1(self, stream: str) -> bool:
+        """Whether `stream` holds arb-lab's v1 records: a v1 segment, or a v2 segment whose stream is still at major 1
+        (arbx from WP-02 writes attempts, bundles, outcomes, exec, triggers and predictions as `/1.1` until the WP that
+        brings their v2; MEASUREMENT §1.6, §7). Those records go through `legacy.py` (WP-02 review F3)."""
+        if self.legacy:
+            return True
+        fs = self.stream_files(stream)
+        return bool(fs) and streams.peek(fs[0]).major == 1
+
     def _json(self, fn: str, stream: str):
         p = os.path.join(self.dir, fn)
         return streams.read_json(p, stream) if os.path.exists(p) else None
@@ -97,7 +106,7 @@ class Segment:
     @cached_property
     def attempts(self) -> list:
         rows = self.jsonl("attempts")
-        if self.legacy:
+        if self.v1("attempts"):
             rows = [legacy.attempt(a) for a in rows]
         return sorted(rows, key=lambda a: (a.get("attempt") is None, a.get("attempt") or 0))
 
@@ -108,7 +117,7 @@ class Segment:
     @cached_property
     def outcome_lines(self) -> list:
         rows = self.jsonl("outcomes")
-        return [legacy.outcome(o) for o in rows] if self.legacy else rows
+        return [legacy.outcome(o) for o in rows] if self.v1("outcomes") else rows
 
     @cached_property
     def outcomes(self) -> dict:
@@ -162,7 +171,7 @@ class Segment:
     @cached_property
     def bundles(self) -> list:
         rows = self.jsonl("bundles")
-        if self.legacy:
+        if self.v1("bundles"):
             rows = [legacy.bundle(b) for b in rows]
         b2a = {}
         for c in self.copies:
@@ -260,7 +269,7 @@ class Segment:
         return self.jsonl("events")
 
     def iter_exec(self):
-        if self.legacy:
+        if self.v1("exec"):
             for e in streams.iter_jsonl(self.stream_files("exec"), "exec"):
                 yield legacy.exec_row(e)
         else:
@@ -335,7 +344,7 @@ class Segment:
         for c in self.copies:
             if (c.get("t_sent") or 0) > 0 and c.get("ok"):
                 sent.add(c.get("attempt"))
-        if not self.has("copies") and self.legacy:
+        if not self.has("copies") and self.v1("outcomes"):
             # v1 segments copied without copies.jsonl: outcomes carry the copies (t_sent, accepted)
             src = "outcomes.copies (v1)"
             for a, o in self.outcomes.items():

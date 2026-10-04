@@ -89,6 +89,8 @@ struct SlotState {
     poh_next: u32,
     cum: u64,
     last_tick: u64,
+    /// entries walked so far in the slot (poh.log `entry_idx`)
+    entries: u64,
 }
 
 #[derive(Default, Debug, Clone, serde::Serialize)]
@@ -122,13 +124,19 @@ pub struct Assembler {
     pub bad_samples: Vec<String>,
     /// hashes per tick, learned from the ticks (needed to turn hashes into ms)
     hpt: u64,
+    /// where the PoH positions go (poh.log, with this feed id); off: the PoH clock is not rebuilt
+    pub rec: crate::rec::Rec,
+    pub feed: u16,
 }
 
 impl Assembler {
     pub fn new() -> Assembler {
         Assembler { slots: BTreeMap::new(), stats: AsmStats::default(), keep_ns: 20_000_000_000,
-            versions: HashMap::new(), version: None, bad_samples: Vec::new(), hpt: 0 }
+            versions: HashMap::new(), version: None, bad_samples: Vec::new(), hpt: 0, rec: crate::rec::Rec::off(), feed: 0 }
     }
+
+    /// the shred version the feed settled on
+    pub fn version(&self) -> Option<u16> { self.version }
 
     fn note_bad(&mut self, pkt: &[u8], why: &str) {
         if self.bad_samples.len() < 5 {
@@ -165,15 +173,16 @@ impl Assembler {
             if st.data.contains_key(&n) && !st.streams.contains_key(&n) {
                 st.streams.insert(n, Stream::new(n));
                 st.waiting.insert(n, n);
-                Self::advance(st, n, h.slot, &mut self.stats, out, want, &mut self.hpt);
+                Self::advance(st, n, h.slot, &mut self.stats, out, want, &mut self.hpt, &self.rec, self.feed);
             }
         }
-        if let Some(&start) = st.waiting.get(&h.index) { Self::advance(st, start, h.slot, &mut self.stats, out, want, &mut self.hpt); }
+        if let Some(&start) = st.waiting.get(&h.index) { Self::advance(st, start, h.slot, &mut self.stats, out, want, &mut self.hpt, &self.rec, self.feed); }
         Some(h)
     }
 
     /// Append every contiguous shred to stream `start`, then parse as far as the bytes go.
-    fn advance(st: &mut SlotState, start: u32, slot: u64, stats: &mut AsmStats, out: &mut Vec<DecodedTx>, want: &Want, hpt: &mut u64) {
+    #[allow(clippy::too_many_arguments)]
+    fn advance(st: &mut SlotState, start: u32, slot: u64, stats: &mut AsmStats, out: &mut Vec<DecodedTx>, want: &Want, hpt: &mut u64, rec: &crate::rec::Rec, feed: u16) {
         let Some(s) = st.streams.get_mut(&start) else { return };
         st.waiting.remove(&s.next);
         while !s.complete {
@@ -234,7 +243,7 @@ impl Assembler {
                 let ents = std::mem::take(&mut s.entries);
                 st.streams.remove(&start); st.waiting.remove(&n);
                 st.sets.insert(start, (n, ents));
-                Self::poh_advance(st, slot, hpt);
+                Self::poh_advance(st, slot, hpt, rec, feed);
             }
             Parse::Failed => { stats.sets_failed += 1; let n = s.next; st.streams.remove(&start); st.waiting.remove(&n); st.poh_next = u32::MAX; st.sets.clear(); }
             _ => {}
@@ -242,13 +251,16 @@ impl Assembler {
     }
 
     /// Walk the finished data sets in index order from the slot's start: every entry's hashes add up to its position
-    /// on the leader's PoH clock (ticks give hashes per tick, 6.25 ms each); write each transaction's position to the
-    /// run's poh.log (`sig8 slot ms`, the format the entries feeds wrote). A gap waits; a failed set stops the clock.
-    fn poh_advance(st: &mut SlotState, slot: u64, hpt: &mut u64) {
-        let Some(log) = crate::feeds::POH_LOG.get() else { st.sets.clear(); return };
-        let mut lines = String::new();
+    /// on the leader's PoH clock (ticks give hashes per tick, 6.25 ms each); record each transaction's position in
+    /// poh.log v2 (`sig8 slot ms feed entry_idx`; the entry's index in the slot is known here, the walk starts at the
+    /// slot's first entry). A gap waits; a failed set stops the clock. Without a recorder nothing is rebuilt
+    fn poh_advance(st: &mut SlotState, slot: u64, hpt: &mut u64, rec: &crate::rec::Rec, feed: u16) {
+        if !rec.is_on() { st.sets.clear(); return; }
+        let mut lines: Vec<(u64, f64, u64)> = Vec::new();
         while let Some((end, ents)) = st.sets.remove(&st.poh_next) {
             for (h, ntx, sigs) in ents {
+                let entry = st.entries;
+                st.entries += 1;
                 st.cum += h;
                 if ntx == 0 {
                     let d = st.cum - st.last_tick;
@@ -258,11 +270,19 @@ impl Assembler {
                 }
                 if *hpt == 0 { continue; }
                 let ms = st.cum as f64 / *hpt as f64 * 6.25;
-                for sg in sigs { lines.push_str(&format!("{:016x} {slot} {ms:.3}\n", u64::from_be_bytes(sg))); }
+                for sg in sigs { lines.push((u64::from_be_bytes(sg), ms, entry)); }
             }
             st.poh_next = end;
         }
-        if !lines.is_empty() { use std::io::Write; let _ = log.lock().unwrap().write_all(lines.as_bytes()); }
+        // one record per data set's lines (they are formatted on the writer; counted as lines)
+        if !lines.is_empty() {
+            rec.emit(crate::rec::POH, crate::rec::Record::enc_lines(lines.len() as u32, move |o| {
+                for (k, (sg, ms, e)) in lines.iter().enumerate() {
+                    if k > 0 { o.push(b'\n'); }
+                    let _ = std::io::Write::write_fmt(o, format_args!("{sg:016x} {slot} {ms:.3} {feed} {e}"));
+                }
+            }));
+        }
     }
 
     pub fn gc(&mut self, now: u64) {
@@ -335,5 +355,30 @@ mod tests {
         asm.push(&data_shred(300_000_001, 0, DATA_COMPLETE, &a), 60, &mut out, &all());
         assert_eq!(out.len(), 2);
         assert_eq!(asm.stats.sets_decoded, 2);
+    }
+
+    /// review F12: poh.log v2 from a raw feed, through the recorder: each transaction's position on the leader's clock
+    /// and its entry's index in the slot (`sig8 slot ms feed entry_idx`), one queue slot per data set, counted as lines
+    #[test]
+    fn poh_positions_are_recorded_with_their_entry_index() {
+        let d = std::env::temp_dir().join(format!("arbx-shred-poh-{}-{}", std::process::id(), crate::feeds::clock::now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        // the slot's first data set: a tick of 100 hashes, then an entry of two transactions 50 hashes later (9.375 ms)
+        let mut buf = Vec::new();
+        buf.extend(2u64.to_le_bytes());
+        buf.extend(100u64.to_le_bytes()); buf.extend([0u8; 32]); buf.extend(0u64.to_le_bytes());
+        buf.extend(50u64.to_le_bytes()); buf.extend([0u8; 32]); buf.extend(2u64.to_le_bytes()); buf.extend(tx(0x31)); buf.extend(tx(0x32));
+        let mut asm = Assembler::new();
+        asm.rec = rec.clone();
+        asm.feed = 3;
+        let mut out = Vec::new();
+        asm.push(&data_shred(300_000_002, 0, DATA_COMPLETE, &buf), 10, &mut out, &all());
+        assert_eq!(out.len(), 2);
+        rec.close();
+        assert_eq!(crate::rec::read_text(&d, "poh").unwrap(), vec!["3131313131313131 300000002 9.375 3 1", "3232323232323232 300000002 9.375 3 1"]);
+        let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(d.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(m["streams"].as_array().unwrap().iter().find(|s| s["name"] == "poh").unwrap()["records_total"].as_u64(), Some(2));
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

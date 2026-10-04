@@ -269,7 +269,7 @@ where Req: prost::Message + Clone + Default + Send + 'static, Resp: prost::Messa
 }
 
 /// Connect once and stream a feed's items into `out` until the stream ends or errors. The caller reconnects.
-pub async fn feed_once(f: &Feed, sink: &(dyn Fn(Item) -> bool + Send + Sync)) -> Result<()> {
+pub async fn feed_once(f: &Feed, sink: &(dyn Fn(Item) -> bool + Send + Sync), rec: &crate::rec::Rec) -> Result<()> {
     let url = f.url.as_deref().context("grpc feed needs url")?;
     let token = f.token()?;
     let mut grpc = tonic::client::Grpc::new(channel(url).await?).max_decoding_message_size(256 * 1024 * 1024);
@@ -321,7 +321,7 @@ pub async fn feed_once(f: &Feed, sink: &(dyn Fn(Item) -> bool + Send + Sync)) ->
                         Some(meta) => (meta.err.is_none(), meta.loaded_writable_addresses.clone(), meta.loaded_readonly_addresses.clone()),
                         None => (true, vec![], vec![]),
                     };
-                    if let (Some(rec), Some(meta)) = (crate::record::get(), &info.meta) { rec_exec(rec, &info, pb, meta, u.slot, t); }
+                    if let Some(meta) = &info.meta { rec_exec(rec, &info, pb, meta, u.slot, t); }
                     match tx_from_pb(&info.signature, info.is_vote, pb, &lw, &lr) {
                         Some(tx) => send(Item::Tx { slot: u.slot, tx, t, executed: Some(ok) }),
                         None => true,
@@ -332,8 +332,10 @@ pub async fn feed_once(f: &Feed, sink: &(dyn Fn(Item) -> bool + Send + Sync)) ->
     }
 }
 
-/// exec.jsonl: one executed transaction's result and what it did to its signer's balances
-fn rec_exec(rec: &crate::record::Recorder, info: &TxInfo, pb: &PbTransaction, meta: &PbMeta, slot: u64, t: u64) {
+/// exec.jsonl (v1.1: arb-lab's PumpSwap stream): one executed transaction's result and what it did to its signer's
+/// balances. The object is built here and serialized on the recorder's chain writer
+fn rec_exec(rec: &crate::rec::Rec, info: &TxInfo, pb: &PbTransaction, meta: &PbMeta, slot: u64, t: u64) {
+    if !rec.is_on() { return; }
     let signer = pb.message.as_ref().and_then(|m| m.account_keys.first()).map(|k| bs58::encode(k).into_string()).unwrap_or_default();
     let sol = match (meta.pre_balances.first(), meta.post_balances.first()) { (Some(a), Some(b)) => *b as i64 - *a as i64, _ => 0 };
     // the signer's token changes by mint (accounts it owns; a token account absent on one side counts as 0)
@@ -345,14 +347,14 @@ fn rec_exec(rec: &crate::record::Recorder, info: &TxInfo, pb: &PbTransaction, me
         }
     }
     let tok: serde_json::Map<String, serde_json::Value> = tok.into_iter().filter(|(_, v)| *v != 0).map(|(k, v)| (k.to_string(), serde_json::json!(v.to_string()))).collect();
-    let err = meta.err.as_ref().map(|e| crate::record::tx_error(&e.err));
+    let err = meta.err.as_ref().map(|e| crate::rec::tx_error(&e.err));
     // the failing program's own words, when it failed
     let why = if err.is_some() {
         meta.log_messages.iter().rev().find(|l| l.contains("Error") || l.contains("error") || l.contains("failed")).map(|l| l.chars().take(160).collect::<String>())
     } else { None };
     let line = serde_json::json!({ "sig": bs58::encode(&info.signature).into_string(), "slot": slot, "idx": info.index, "t": t, "ok": err.is_none(),
         "err": err, "why": why, "fee": meta.fee, "cu": meta.compute_units_consumed, "signer": signer, "sol": sol, "tok": tok });
-    crate::record::Recorder::line(&rec.exec, &line.to_string());
+    rec.json(crate::rec::EXEC, line);
 }
 
 /// Pool-state stream: account updates plus slot updates, at processed commitment. The account list comes from a
@@ -408,4 +410,38 @@ pub async fn accounts_once(url: &str, token: Option<&str>, mut list: tokio::sync
     }.await;
     sender.abort();
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// review F12: exec.jsonl v1.1 as `rec_exec` writes it: the signature and signer in base58, the signer's SOL change,
+    /// its token changes by mint (as strings), and the error decoded with the failing program's words
+    #[test]
+    fn rec_exec_writes_the_v1_exec_line() {
+        let d = std::env::temp_dir().join(format!("arbx-grpc-exec-{}-{}", std::process::id(), crate::feeds::clock::now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let signer = vec![5u8; 32];
+        let s58 = bs58::encode(&signer).into_string();
+        let pb = PbTransaction { signatures: vec![vec![9u8; 64]], message: Some(PbMessage { account_keys: vec![signer.clone()], ..Default::default() }) };
+        let tb = |mint: &str, amount: &str, owner: &str| PbTokenBalance { account_index: 1, mint: mint.into(), ui_token_amount: Some(PbUiAmount { amount: amount.into() }), owner: owner.into() };
+        // InstructionError(2, Custom(6001))
+        let mut err = 8u32.to_le_bytes().to_vec();
+        err.push(2);
+        err.extend(25u32.to_le_bytes());
+        err.extend(6001u32.to_le_bytes());
+        let meta = PbMeta { err: Some(PbTxError { err }), fee: 5_000, pre_balances: vec![1_000_000], post_balances: vec![990_000],
+            log_messages: vec!["Program log: ok".into(), "Program log: Error: slippage".into(), "Program x failed".into()],
+            pre_token_balances: vec![tb("MintA", "100", &s58), tb("MintB", "7", "someone")], post_token_balances: vec![tb("MintA", "250", &s58)],
+            compute_units_consumed: Some(12_345), ..Default::default() };
+        let info = TxInfo { signature: vec![9u8; 64], is_vote: false, transaction: Some(pb.clone()), meta: Some(meta.clone()), index: 17 };
+        rec_exec(&rec, &info, &pb, &meta, 300, 42);
+        rec.close();
+        let v = crate::rec::read_jsonl(&d, "exec").unwrap();
+        assert_eq!(v, vec![serde_json::json!({ "sig": bs58::encode([9u8; 64]).into_string(), "slot": 300, "idx": 17, "t": 42, "ok": false,
+            "err": "ix2:custom:0x1771", "why": "Program x failed", "fee": 5_000, "cu": 12_345, "signer": s58, "sol": -10_000, "tok": { "MintA": "150" } })]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

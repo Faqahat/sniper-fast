@@ -16,7 +16,8 @@
 #   - a stop that does not end the segment escalates to SIGINT, then SIGKILL (a crash); disk low ends the campaign;
 #     a second supervisor on the same runs directory is refused; a config without the control socket is refused;
 #   - the budget is unknown (records only) when a --live segment's last line is not a readable total, and an error in
-#     reading it does not kill the supervisor (review M4); a crash while stopping (stop.json `secondary`) is a crash;
+#     reading it does not kill the supervisor (review M4); status.jsonl's schema header line (WP-02) is not a status
+#     line (WP-02 review F4); a crash while stopping (stop.json `secondary`) is a crash;
 #   - each segment's send gate is logged, with a warning for a --live segment that does not send (review M2).
 # usage: tools/test-run-w.sh   (exit 0 when every check passes; needs bash, python3, coreutils)
 set -u
@@ -85,6 +86,10 @@ case "$cmd" in
       nofield) echo '{"slot":1}' > "$d/status.jsonl" ;;
       garbage) echo '{"exec":{"sending":{"failed_fees_lamports":1}}}' > "$d/status.jsonl"; echo '{"exec":{"send' >> "$d/status.jsonl"; echo '{"attempt":1}' > "$d/attempts.jsonl" ;;
       v2:*) IFS=, read -ra xs <<< "${status#v2:}"; for x in "${xs[@]}"; do echo "{\"money\":{\"failed_fees_total_lamports\":$x}}" >> "$d/status.jsonl"; done ;;
+      # WP-02: status.jsonl starts with its schema header line (the recorder writes it when the engine starts)
+      hdr) echo '{"schema":"arbx.status/2.0","run":"x","file_seq":0,"started_ns":1,"producer":"p"}' > "$d/status.jsonl" ;;
+      hdr:*) IFS=, read -ra xs <<< "${status#hdr:}"; echo '{"schema":"arbx.status/2.0","run":"x","file_seq":0,"started_ns":1,"producer":"p"}' > "$d/status.jsonl"
+        for x in "${xs[@]}"; do echo "{\"money\":{\"failed_fees_total_lamports\":$x}}" >> "$d/status.jsonl"; done ;;
       *) IFS=, read -ra xs <<< "$status"; for x in "${xs[@]}"; do echo "{\"exec\":{\"sending\":{\"failed_fees_lamports\":$x}}}" >> "$d/status.jsonl"; done ;;
     esac
     if [ "${wait:-}" = wait ]; then
@@ -302,6 +307,12 @@ check "P2: a --live segment's last line without a failed-fee total: records only
 campaign P3 50000000 2 "0 deadline empty" "0 deadline -"
 check "P3: a --live segment whose engine started but wrote no line: records only" eq "$(field P3 2 flag)" "--shadow"
 check "P3: the supervisor survived to end the campaign" eq "$(j "$T/runs/P3/campaign.json" 'v["end_reason"]')" "max segments (2)"
+
+# ------------------------------------------------------------------ P4: WP-02's status.jsonl header line is not a status line (review F4)
+campaign P4 50000000 3 "0 deadline hdr:700000,900000" "0 deadline hdr" "0 deadline -"
+check "P4: the last status line under the header counts (900,000), the header does not" eq "$(field P4 2 budget) $(field P4 2 flag)" "49100000 --live"
+check "P4: a --live segment whose engine started (header written) but wrote no status line: records only" eq "$(field P4 3 flag) $(field P4 3 budget)" "--shadow 0"
+check "P4: ... named as such (the header is not read as a line without a total)" grep -q "P4-p2:no-status-line" "$T/runs/P4/supervisor.jsonl"
 
 # ------------------------------------------------------------------ Q: a crash while stopping is a crash (review M5); a --live segment not sending is a warning (review M2)
 campaign Q 50000000 2 "30 signal - - - error" "0 deadline - - mismatch"

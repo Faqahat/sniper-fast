@@ -28,7 +28,7 @@ def run(seg, ctx: dict) -> dict:
         b = by.setdefault(v, {"n": 0, "scored": 0, "exact": 0, "pre_state_unknown": 0, "hint_scored": 0, "hint_exact": 0,
                               "dlmm_bins_checked": 0, "dlmm_bins_exact": 0})
         b["n"] += 1
-        if seg.legacy:
+        if seg.v1("predictions"):
             e = _v1_exact(p)
             if e is not None:
                 b["hint_scored"] += 1
@@ -54,7 +54,7 @@ def run(seg, ctx: dict) -> dict:
         b["exact_rate_pre_state"] = ratio(b["exact"], b["scored"])
         b["exact_rate_at_hint"] = ratio(b["hint_exact"], b["hint_scored"])
     d["by_venue"] = dict(sorted(by.items()))
-    if seg.legacy:
+    if seg.v1("predictions"):
         sec["caveats"].append("v1 predictions were made at hint time from the store: an earlier write to the pool in the "
                               "same slot makes a correct prediction look inexact (DAMM v2 87% in res-code §3)")
     else:

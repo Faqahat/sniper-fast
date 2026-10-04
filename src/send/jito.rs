@@ -17,7 +17,6 @@ use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
 use std::collections::{HashMap, VecDeque};
-use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -248,17 +247,17 @@ pub struct Jito {
     key: SigningKey,
     tokens: tokio::sync::Mutex<Tokens>,
     verdicts: Mutex<Verdicts>,
-    log: Option<Mutex<std::io::BufWriter<std::fs::File>>>,
+    /// bundles.jsonl (core class)
+    rec: crate::rec::Rec,
     /// results received, by outcome
     pub counts: Mutex<std::collections::BTreeMap<&'static str, u64>>,
 }
 
 impl Jito {
-    /// connect (not yet authenticated); `log` receives every bundle result
-    pub async fn connect(url: &str, key: SigningKey, log: Option<std::fs::File>) -> Result<Arc<Jito>> {
+    /// connect (not yet authenticated); `rec` records every bundle result (bundles.jsonl)
+    pub async fn connect(url: &str, key: SigningKey, rec: crate::rec::Rec) -> Result<Arc<Jito>> {
         let channel = crate::feeds::grpc::channel(url).await?;
-        Ok(Arc::new(Jito { channel, key, tokens: Default::default(), verdicts: Default::default(),
-            log: log.map(|f| Mutex::new(std::io::BufWriter::new(f))), counts: Default::default() }))
+        Ok(Arc::new(Jito { channel, key, tokens: Default::default(), verdicts: Default::default(), rec, counts: Default::default() }))
     }
 
     pub fn pubkey(&self) -> String { bs58::encode(self.key.verifying_key().as_bytes()).into_string() }
@@ -345,15 +344,17 @@ impl Jito {
             }
             v.sig_of_id.get(&o.bundle).cloned()
         };
-        if let Some(log) = &self.log {
-            let code = if o.outcome == "would-fail" { error_code(o.detail.as_deref()) } else { None };
-            let mut line = serde_json::to_value(&o).unwrap_or_default();
-            line["t_ns"] = json!(now_ns());
-            line["sig"] = json!(sig);
-            line["code"] = json!(code);
-            let mut w = log.lock().unwrap();
-            let _ = writeln!(w, "{line}");
-            let _ = w.flush();
+        if self.rec.is_on() {
+            // the line is made and serialized on the recorder's core writer, not on the result stream's task
+            let t = now_ns();
+            self.rec.emit(crate::rec::BUNDLES, crate::rec::Record::enc(move |w| {
+                let code = if o.outcome == "would-fail" { error_code(o.detail.as_deref()) } else { None };
+                let mut line = serde_json::to_value(&o).unwrap_or_default();
+                line["t_ns"] = json!(t);
+                line["sig"] = json!(sig);
+                line["code"] = json!(code);
+                let _ = serde_json::to_writer(w, &line);
+            }));
         }
     }
 
@@ -482,5 +483,27 @@ mod tests {
         let g = v.lock().unwrap();
         let id = g.id_of_sig.get("sig1").unwrap();
         assert_eq!(g.first.get(id).unwrap().outcome, "would-fail");
+    }
+
+    /// review F12: bundles.jsonl as `on_result` writes it through the recorder (the line is made on the core writer):
+    /// the outcome's fields, `t_ns`, the signature when known and a would-fail's decoded error code
+    #[tokio::test]
+    async fn bundle_results_are_recorded() {
+        let d = std::env::temp_dir().join(format!("arbx-jito-rec-{}-{}", std::process::id(), now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:9").connect_lazy();
+        let j = Jito { channel, key: SigningKey::from_bytes(&[1u8; 32]), tokens: Default::default(), verdicts: Default::default(), rec: rec.clone(), counts: Default::default() };
+        j.verdicts.lock().unwrap().sig_of_id.insert("b1".into(), "sigA".into());
+        j.on_result(Outcome { bundle: "b1".into(), outcome: "would-fail", slot: None, index: None, bid: None, detail: Some(PROFIT.into()) });
+        j.on_result(Outcome { bundle: "b2".into(), outcome: "processed", slot: Some(7), index: Some(1), bid: None, detail: None });
+        rec.close();
+        let v = crate::rec::read_jsonl(&d, "bundles").unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!((v[0]["bundle"].as_str(), v[0]["outcome"].as_str(), v[0]["sig"].as_str(), v[0]["code"].as_str()), (Some("b1"), Some("would-fail"), Some("sigA"), Some(PROFIT_CHECK_CODE)));
+        assert!(v[0]["t_ns"].as_u64().unwrap() > 0 && v[0]["detail"].as_str().unwrap().starts_with("A transaction"));
+        assert_eq!((v[1]["slot"].as_u64(), v[1]["index"].as_u64(), v[1]["sig"].is_null(), v[1]["code"].is_null()), (Some(7), Some(1), true, true));
+        assert_eq!(*j.counts.lock().unwrap(), [("processed", 1), ("would-fail", 1)].into_iter().collect());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

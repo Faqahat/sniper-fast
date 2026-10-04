@@ -88,8 +88,14 @@ impl Tpu {
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
         let mut req = self.http.post(&self.rpc_url).json(&json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }));
         if let Some(b) = &self.bearer { req = req.bearer_auth(b); }
-        let r: Value = req.send().await
-            .map_err(|e| anyhow::anyhow!("tpu {method}: {}", e.without_url()))?.json().await?;
+        let bytes = req.send().await.map_err(|e| anyhow::anyhow!("tpu {method}: {}", e.without_url()))?.bytes().await?;
+        // review F8: getClusterNodes is megabytes of JSON; this runs on rt_hot (WP-08 moves the leader book to rt_bg), so
+        // a large reply is parsed off its workers
+        let r: Value = if bytes.len() > crate::runtime::LARGE_REPLY {
+            tokio::task::spawn_blocking(move || serde_json::from_slice::<Value>(&bytes)).await.map_err(|e| anyhow::anyhow!("tpu {method}: parse task: {e}"))??
+        } else {
+            serde_json::from_slice(&bytes)?
+        };
         if let Some(e) = r.get("error") { bail!("tpu {method}: {e}"); }
         r.get("result").cloned().context("no result")
     }

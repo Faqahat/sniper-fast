@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use arbx::control::{self, StopInfo, StopReason};
 use arbx::feeds::clock::now_ns;
-use arbx::{build, config, engine, exec, feeds, pda, pools, provenance, rpc, send, store, tx, venues, wallet};
+use arbx::{build, config, engine, exec, feeds, pda, pools, provenance, rec, rpc, runtime, send, store, tx, venues, wallet};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -92,9 +92,6 @@ enum Cmd {
         /// run in shadow whatever the config's mode (meta.json `run.forced_shadow` and `overrides`; the SendGate is
         /// shadow with reason `forced_shadow`). Refused with --live
         #[arg(long)] shadow: bool,
-        /// this run without the recorder (`[record] enabled = false`; recorded in meta.json `overrides`): WP-00's
-        /// recorder-off shadow run, without editing the config
-        #[arg(long)] no_record: bool,
         /// what is left of the campaign's failed-fee budget, lamports: this segment's `[live] max_failed_fees_lamports` is
         /// the smaller of this and the config's (deploy/run-w.sh passes it, so the frozen config is never edited)
         #[arg(long)] budget_left: Option<u64>,
@@ -176,8 +173,8 @@ fn main() -> Result<()> {
             let on: Vec<&str> = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.name.as_str()).collect();
             println!("enabled send paths: {}", if on.is_empty() { "none".to_string() } else { on.join(", ") });
             let (s, l) = (&cfg.strategy, &cfg.live);
-            println!("safety: decoded_sends {}, skip_failing_signers {}, state_triggers {}, record {}; live: max {} SOL a trade, {} new token accounts, sim_gate {}, bundle_mix {} (tpu_max_expected {}), big band >= {} lamports at {}/s, crowded pools {}",
-                s.decoded_sends, s.skip_failing_signers, s.state_triggers, cfg.record.enabled, l.max_size_sol, l.max_new_token_accounts, l.sim_gate, l.bundle_mix,
+            println!("safety: decoded_sends {}, skip_failing_signers {}, state_triggers {}; live: max {} SOL a trade, {} new token accounts, sim_gate {}, bundle_mix {} (tpu_max_expected {}), big band >= {} lamports at {}/s, crowded pools {}",
+                s.decoded_sends, s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_new_token_accounts, l.sim_gate, l.bundle_mix,
                 l.tpu_max_expected_lamports, l.big_band_min_expected_lamports, l.big_band_max_per_sec,
                 if l.crowded_pools_file.is_empty() { "none".to_string() } else { l.crowded_pools_file.clone() });
             if l.crowded_skip_min_expected_lamports > 0 { println!("  crowded pools not sent from {} lamports expected", l.crowded_skip_min_expected_lamports); }
@@ -195,6 +192,10 @@ fn main() -> Result<()> {
             println!("route program {}: {}", e.program, if e.expected_program_sha256.is_empty() && e.expected_program_md5.is_empty() { "no expected hash (recorded, not checked)".to_string() }
                 else { format!("expected sha256 {} md5 {} (checked at start; a mismatch refuses live sends)", e.expected_program_sha256, e.expected_program_md5) });
             println!("control socket {}", if cfg.control.socket { "on" } else { "off" });
+            let r = &cfg.record;
+            println!("recorder (always on): disk budget {} GB per segment, min free {} GB, rotate at {} MiB or {} min, frames every {} ms, zstd {}, archived feeds {}; background runtime {} threads",
+                r.disk_budget_gb, r.min_free_gb, r.rotate_mb, r.rotate_min, r.flush_ms, r.zstd_level,
+                if r.archive_feeds.is_empty() { "none".to_string() } else { r.archive_feeds.join(",") }, cfg.runtime.bg_threads);
             Ok(())
         }
         Cmd::Pools { config } => {
@@ -216,8 +217,8 @@ fn main() -> Result<()> {
                 Ok(())
             })
         }
-        Cmd::Run { config, minutes, name, only, canary, live, shadow, no_record, budget_left, campaign_dir, env_file } => {
-            let a = RunArgs { config, minutes, name, only, canary, live, ov: Overrides { shadow, no_record, budget_left }, campaign_dir, env_file };
+        Cmd::Run { config, minutes, name, only, canary, live, shadow, budget_left, campaign_dir, env_file } => {
+            let a = RunArgs { config, minutes, name, only, canary, live, ov: Overrides { shadow, budget_left }, campaign_dir, env_file };
             let sess = control::Session::new();
             control::install_panic_hook(sess.clone());
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&a, &sess)));
@@ -384,8 +385,11 @@ fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<(
     cfg.sim.enabled = true;
     if canaries > 0 && !cfg.canary.enabled { anyhow::bail!("--canaries needs [canary] enabled = true in the config too"); }
     let key = if canaries > 0 { Some((exec::Kind::Canary, wallet::load_cfg(&cfg)?)) } else { None };
-    let dir = PathBuf::from(&cfg.out_dir).join(format!("simcheck-{}", utc_stamp()));
-    std::fs::create_dir_all(&dir)?;
+    let name = format!("simcheck-{}", utc_stamp());
+    let dir = PathBuf::from(&cfg.out_dir).join(&name);
+    let rec = tool_recorder(&dir, &name)?;
+    // review N5: closed on an error too (its unflushed tail is kept)
+    let _rec_guard = RecGuard(rec.clone());
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
     let (eps, _) = cfg.rpc.endpoints();
     let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover);
@@ -405,25 +409,24 @@ fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<(
     let (tx, rx) = crossbeam_channel::unbounded::<feeds::Event>();
     let (wtx, _) = tokio::sync::watch::channel(Vec::new());
     let paths = if canaries > 0 {
-        let (p, notes) = rt.block_on(send::Paths::new(&cfg.sends, cfg.gate.clone(), Some(&dir), true))?;
+        let (p, notes) = rt.block_on(send::Paths::new(&cfg.sends, cfg.gate.clone(), rec.clone(), true))?;
         for n in notes { println!("send path {n}"); }
         p.start(Arc::new(AtomicBool::new(false)), std::time::Duration::from_secs(30), |m: String| println!("  {m}"));
         Some(p)
     } else { None };
-    let (x, notes) = rt.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), &dir, tx.clone(), vec![], key, reg_mints(&reg)))?;
+    let (x, notes) = rt.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), rec.clone(), tx.clone(), vec![], key, reg_mints(&reg)))?;
     for n in notes { println!("exec: {n}"); }
-    let mut eng = engine::Engine::new(Arc::new(reg), store, cfg.strategy.clone(), vec![], 0, Arc::new(engine::interest(&engine_dummy_registry(), None)), &dir, rpc.clone(),
+    let mut eng = engine::Engine::new(Arc::new(reg), store, cfg.strategy.clone(), vec![], 0, Arc::new(engine::interest(&engine_dummy_registry(), None)), rec.clone(), rpc.clone(),
         rt.handle().clone(), tx, wtx)?;
     eng.exec = Some(x);
     let routes = eng.probe_routes((size_sol * 1e9) as u64, max);
     for r in &routes { let r2 = eng.refresh_route(r); if let Some(r2) = r2 { eng.exec.as_mut().unwrap().simulate(r2); } std::thread::sleep(std::time::Duration::from_millis(500)); }
     println!("{} simulations sent; waiting for the answers ...", routes.len());
     std::thread::sleep(std::time::Duration::from_secs(8));
-    let text = std::fs::read_to_string(dir.join("sims.jsonl")).unwrap_or_default();
+    rec.sync();
     let mut by: std::collections::BTreeMap<String, (u32, u32, std::collections::BTreeMap<String, u32>)> = Default::default();
     let mut good: Vec<(String, String)> = Vec::new();
-    for l in text.lines() {
-        let v: serde_json::Value = serde_json::from_str(l)?;
+    for v in rec::read_jsonl(&dir, "sims")? {
         let key = format!("{} -> {}", v["buy_venue"].as_str().unwrap_or("?"), v["sell_venue"].as_str().unwrap_or("?"));
         let e = by.entry(key).or_default();
         e.0 += 1;
@@ -450,9 +453,8 @@ fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<(
             Ok(feeds::Event::Settled(s)) => { x.on_settled(*s, &|_| None); }
             Ok(_) | Err(_) => { println!("canary {}: not settled in time", sent - 1); break; }
         }
-        let last = std::fs::read_to_string(dir.join("outcomes.jsonl")).unwrap_or_default();
-        if let Some(l) = last.lines().last() {
-            let v: serde_json::Value = serde_json::from_str(l)?;
+        rec.sync();
+        if let Some(v) = rec::read_jsonl(&dir, "outcomes")?.last() {
             println!("  landed via {}  slot {}  {} {}  fee {}  copies: {}", v["landed"], v["slot"], v["code"], v["meaning"], v["fee_lamports"],
                 v["copies"].as_array().map(|a| a.iter().map(|c| format!("{}={}{}", c["path"].as_str().unwrap_or("?"), if c["accepted"].as_bool() == Some(true) { "accepted" } else { "REFUSED" },
                     c["status"].as_u64().map(|s| format!("({s})")).unwrap_or_default())).collect::<Vec<_>>().join(" ")).unwrap_or_default());
@@ -460,8 +462,15 @@ fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<(
         }
         std::thread::sleep(std::time::Duration::from_secs(2));
     }
+    rec.close();
     println!("written to {}", dir.display());
     Ok(())
+}
+
+/// The recorder of a tool's own directory (simcheck, senders --raw): the run's streams, no monitor thread
+fn tool_recorder(dir: &Path, name: &str) -> Result<rec::Rec> {
+    let producer = provenance::build_json()["binary_sha256"].as_str().map(|h| h[..16].to_string()).unwrap_or_else(|| "unknown".into());
+    rec::start(rec::Opts { dir: dir.to_path_buf(), run: name.to_string(), producer, cfg: config::RecordCfg::default(), feeds: vec![], monitor: false, echo: None })
 }
 
 /// an empty registry for the simcheck engine's feed filter (no feeds run)
@@ -488,7 +497,7 @@ fn senders(config: &Path, rounds: u32, only: Option<String>, raw: Option<PathBuf
         // each path on its own, so one that fails does not hide the others
         let mut bad = 0;
         for s in &enabled {
-            match send::Paths::new(std::slice::from_ref(s), config::GateCfg::default(), None, false).await.map(|x| x.0) {
+            match send::Paths::new(std::slice::from_ref(s), config::GateCfg::default(), rec::Rec::off(), false).await.map(|x| x.0) {
                 Err(e) => { bad += 1; println!("{:<18} FAILED: {e:#}", s.name); }
                 Ok(ps) => {
                     let p = &ps.list[0];
@@ -512,9 +521,11 @@ fn senders(config: &Path, rounds: u32, only: Option<String>, raw: Option<PathBuf
             }
         }
         let Some(raw) = raw else { if bad > 0 { anyhow::bail!("{bad} send path(s) failed") } return Ok(()) };
-        let dir = PathBuf::from(&cfg.out_dir).join(format!("send-{}", utc_stamp()));
-        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-        let (ps, _) = send::Paths::new(&enabled, cfg.gate.clone(), Some(&dir), false).await?;
+        let name = format!("send-{}", utc_stamp());
+        let dir = PathBuf::from(&cfg.out_dir).join(&name);
+        let rec = tool_recorder(&dir, &name)?;
+        let _rec_guard = RecGuard(rec.clone());
+        let (ps, _) = send::Paths::new(&enabled, cfg.gate.clone(), rec.clone(), false).await?;
         let stop = Arc::new(AtomicBool::new(false));
         ps.start(stop.clone(), std::time::Duration::from_secs(30), |m: String| println!("  {m}"));
         let copies = (0..ps.list.len()).map(|i| send::Copy { path: i, raw: Arc::new(raw.clone()), tip: None }).collect();
@@ -529,6 +540,7 @@ fn senders(config: &Path, rounds: u32, only: Option<String>, raw: Option<PathBuf
         }
         stop.store(true, Ordering::Relaxed);
         for l in ps.summary() { println!("  {l}"); }
+        rec.close();
         println!("written to {}", dir.display());
         Ok(())
     })
@@ -574,9 +586,10 @@ fn rpc_test(config: &Path, calls: usize, concurrency: usize) -> Result<()> {
     })
 }
 
-/// command-line changes to the config for one run, recorded in meta.json `overrides`
+/// command-line changes to the config for one run, recorded in meta.json `overrides` (WP-02: `--no-record` is gone,
+/// recording cannot be turned off)
 #[derive(Clone, Copy, Default)]
-struct Overrides { shadow: bool, no_record: bool, budget_left: Option<u64> }
+struct Overrides { shadow: bool, budget_left: Option<u64> }
 
 impl Overrides {
     /// apply them; Err when they contradict the other flags
@@ -587,7 +600,6 @@ impl Overrides {
             if canary { anyhow::bail!("--shadow and --canary contradict each other (--shadow never sends)"); }
             cfg.mode = "shadow".into();
         }
-        if self.no_record { cfg.record.enabled = false; }
         // the supervisor's budget never raises the config's own cap (res-stops: sed used to overwrite it)
         if let Some(b) = self.budget_left { cfg.live.max_failed_fees_lamports = cfg.live.max_failed_fees_lamports.min(b); }
         Ok(())
@@ -596,7 +608,6 @@ impl Overrides {
     fn json(&self) -> serde_json::Value {
         let mut v = serde_json::Map::new();
         if self.shadow { v.insert("mode".into(), "shadow".into()); }
-        if self.no_record { v.insert("record.enabled".into(), false.into()); }
         if let Some(b) = self.budget_left { v.insert("budget_left_lamports".into(), b.into()); }
         v.into()
     }
@@ -612,7 +623,8 @@ fn limits_json(cfg: &config::Config, live: bool, canary: bool) -> serde_json::Va
         "decoded_sends": cfg.strategy.decoded_sends, "state_triggers": cfg.strategy.state_triggers,
         "big_band_min_expected_lamports": l.big_band_min_expected_lamports, "big_band_max_per_sec": l.big_band_max_per_sec,
         "crowded_pools_file": l.crowded_pools_file, "crowded_skip_min_expected_lamports": l.crowded_skip_min_expected_lamports,
-        "record": cfg.record.enabled,
+        // WP-02: always on
+        "record": true,
     })
 }
 
@@ -622,7 +634,7 @@ struct RunArgs { config: PathBuf, minutes: Option<f64>, name: Option<String>, on
 
 /// A run's config: `cfg` with the command line applied (what the run uses); `config_json` (meta.json `config`) hashes
 /// the file as loaded, before the overrides (review F2: the normalized hash is the same in every segment of a campaign,
-/// whatever `--budget-left`, `--shadow` or `--no-record` say, and equals `arbx provenance`'s); `config_cap` is the
+/// whatever `--budget-left` or `--shadow` say, and equals `arbx provenance`'s); `config_cap` is the
 /// file's failed-fee cap
 struct RunConfig { cfg: config::Config, raw: Vec<u8>, config_json: Value, config_cap: u64 }
 
@@ -673,7 +685,8 @@ fn end_run(sess: &control::Session, res: std::thread::Result<Result<()>>) -> i32
         Ok(Ok(())) => sess.finish(StopInfo::new(StopReason::Error, "the run ended without a stop reason")),
         Ok(Err(e)) => {
             let msg = rpc::scrub(&format!("{e:#}"));
-            eprintln!("Error: {msg}");
+            // a failing stderr must not turn the error into a panic before stop.json is written (review F2)
+            rec::err_line(&format!("Error: {msg}"));
             sess.fail(StopInfo::new(StopReason::Error, msg))
         }
         Err(_) => {
@@ -724,6 +737,12 @@ fn load_env_file(f: &Path) -> Option<String> {
     }
 }
 
+/// Closes a recorder on every way out of `run`, `simcheck` and `senders --raw` (an error, a panic): its queues are
+/// drained and its files closed. An error's stop.json is written after it; a main-thread panic's stop.json is written
+/// by the panic hook, before the unwinding reaches it (MEASUREMENT §1.6)
+struct RecGuard(rec::Rec);
+impl Drop for RecGuard { fn drop(&mut self) { self.0.close(); } }
+
 fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let started_ns = now_ns();
     let (live, canary) = (a.live, a.canary);
@@ -740,17 +759,34 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // the trading key is read only when something will really be sent, and must be the config's wallet. Before the
     // signal handlers: Ctrl-C at the passphrase prompt still ends the process at once (nothing has started)
     let send_key = if live || canary { Some((if live { exec::Kind::Live } else { exec::Kind::Canary }, wallet::load_cfg(&cfg)?)) } else { None };
+    // the enabled feeds, in order: their index is the feed id every stream uses (txarr's columns, the entries archives)
+    if let Some(only) = &a.only {
+        let want: Vec<&str> = only.split(',').map(str::trim).collect();
+        for f in &mut cfg.feeds { f.enabled = want.contains(&f.name.as_str()); }
+    }
+    let feed_names: Vec<String> = cfg.feeds.iter().filter(|f| f.enabled).map(|f| f.name.clone()).collect();
     // the run directory next: from here on every end, even a failed boot, leaves stop.json
     let name = a.name.clone().unwrap_or_else(utc_stamp);
     let dir = run_dir(&cfg.out_dir, a.campaign_dir.as_deref(), &name);
+    // review F13: a directory that already holds a run is refused (the recorder would replace its compressed files and
+    // append to its plain ones); nothing is written into it
+    if let Some(n) = std::fs::read_dir(&dir).ok().map(|d| d.count()).filter(|n| *n > 0) {
+        anyhow::bail!("{} already holds {n} files (an earlier run?): choose another --name", dir.display());
+    }
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     sess.set_dir(dir.clone());
-    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("run.log"))?;
-    // one write per line (review N7: the signal and control threads append to run.log too)
-    let mut say = |s: &str| { use std::io::Write; println!("{s}"); let _ = log.write_all(format!("{} {s}\n", now_ns()).as_bytes()); };
+    // WP-02: the recorder, always on (MEASUREMENT §0), before anything records. Its writer threads write every stream
+    // (run.log too: `say` hands the line over; the engine thread writes nothing); a core-stream drop or the disk
+    // budget's last step closes the SendGate. Closed on every way out of `run`, before stop.json's line
+    let producer = provenance::build_json()["binary_sha256"].as_str().map(|h| h[..16].to_string()).unwrap_or_else(|| "unknown".into());
+    let rec = rec::start(rec::Opts { dir: dir.clone(), run: name.clone(), producer, cfg: cfg.record.clone(), feeds: feed_names.clone(), monitor: true, echo: None })?;
+    let _rec_guard = RecGuard(rec.clone());
+    rec.bind_session(sess.gate.clone(), sess.stopper.clone());
+    let say = |s: &str| rec.say(s);
     say(&format!("arbx {} build {} ({}), config {} (sha256 {}), run {}", env!("CARGO_PKG_VERSION"), provenance::build_short(), env!("ARBX_PROFILE"),
         a.config.display(), &provenance::sha256_hex(&raw)[..16], dir.display()));
     if let Some(n) = &env_note { say(n); }
+    for n in rec.recorder().map(|r| r.notes.clone()).unwrap_or_default() { say(&n); }
     // the run's identity, and a partial meta.json that stop.json's writer leaves if the boot fails before the full one
     let run_json = json!({ "campaign": a.campaign_dir.as_deref().and_then(|c| c.file_name()).map(|c| c.to_string_lossy().into_owned()), "segment": name,
         "dir": dir.display().to_string(), "started_ns": started_ns, "host": provenance::hostname(), "pid": std::process::id(),
@@ -775,19 +811,19 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     std::fs::write(dir.join("config.toml"), &raw)?;
     let stop = sess.stopper.flag();
     let exec_on = cfg.sim.enabled || canary || live;
-    // every entries-feed transaction on its leader's PoH clock (poh.log), whenever we build or send
-    let poh_log_on = exec_on;
-    if let Some(only) = &a.only {
-        let want: Vec<&str> = only.split(',').map(str::trim).collect();
-        for f in &mut cfg.feeds { f.enabled = want.contains(&f.name.as_str()); }
-    }
-    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("arbx-io").enable_all().build()?;
+    // WP-02 (F9): two runtimes. rt_hot (2 workers, `arbx-hot`) runs only stream I/O and sends: the state stream, the gRPC
+    // feeds, the send paths, the Jito result streams, keep-alives. rt_bg (`[runtime] bg_threads`, `arbx-bg`, niced +5)
+    // runs every RPC call: the client is bound to it, so the boot, the engine's fetches, the executor's simulations and
+    // settlements and the program hashing all run there, and large replies are parsed in its blocking pool
+    let rts = runtime::Runtimes::new(cfg.runtime.bg_threads)?;
+    let (hot, bg) = (rts.hot.handle().clone(), rts.bg.handle().clone());
+    rec.set_runtimes(hot.clone(), bg.clone());
     let (eps, skipped) = cfg.rpc.endpoints();
     if eps.is_empty() { anyhow::bail!("no RPC provider configured (skipped: {skipped:?})"); }
-    let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover);
+    let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover).bind(bg.clone());
     let state_token = config::env_token(&cfg.state.token_env, "state")?;
     // pools, then a first snapshot of every followed account
-    let (reg, store, snapshot_slot) = rt.block_on(async {
+    let (reg, store, snapshot_slot) = rts.bg.block_on(async {
         let (cands, seeds, ours) = pools::candidates(&cfg.pools)?;
         let reg = pools::boot(&rpc, &cands, seeds, ours).await?;
         let mut store = store::Store::default();
@@ -810,7 +846,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     for l in store.dlmm_arrays.values() { for (_, k) in l { list.push(tx::b58(k)); } }
     let followed = list.len();
     let (wtx, wrx) = tokio::sync::watch::channel(list);
-    feeds::start_state(cfg.state.url.clone(), state_token, wrx, tx.clone(), stop.clone(), rt.handle());
+    let state_counters = Arc::new(feeds::FeedCounters::named("state", "state-stream"));
+    feeds::start_state(cfg.state.url.clone(), state_token, wrx, tx.clone(), stop.clone(), &hot, state_counters.clone());
     let stream_started_ns = now_ns();
     let reg = Arc::new(reg);
     say(&format!("booted: {}; {} accounts held (snapshot at slot {snapshot_slot})", reg.summary(), store.accts.len()));
@@ -821,7 +858,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // provenance (WP-01): the route program's ELF hash, before anything can send. A route program that is not the
     // expected one refuses live sends: the SendGate stays shadow for the whole segment. The venue programs are hashed
     // in the background once the feeds run (review F1, M8)
-    let route = rt.block_on(provenance::fetch_programs(&rpc, &[provenance::route_spec(&cfg)]));
+    let route = rts.bg.block_on(provenance::fetch_programs(&rpc, &[provenance::route_spec(&cfg)]));
     for p in route.iter().filter(|p| p["error"].is_string()) { say(&format!("provenance: program {} ({}) not hashed: {}", p["name"].as_str().unwrap_or("?"), p["id"].as_str().unwrap_or("?"), p["error"].as_str().unwrap_or(""))); }
     for l in apply_route_check(&sess.gate, provenance::route_check(&route), live, canary) { say(&l); }
     // invariant 9: the trading key never holds a program's upgrade authority
@@ -834,26 +871,23 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     if exec_on { interest.keys.insert(tx::pk(&cfg.wallet)); }
     let interest = Arc::new(interest);
     say(&format!("interest: {} keys, {} lookup tables", interest.keys.len(), interest.tables.read().unwrap().len()));
-    if poh_log_on { let _ = feeds::POH_LOG.set(std::sync::Mutex::new(std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(dir.join("poh.log"))?))); }
-    // the enabled feeds, in order: their index is the feed id every stream uses
-    let feed_names: Vec<String> = cfg.feeds.iter().filter(|f| f.enabled).map(|f| f.name.clone()).collect();
-    if cfg.record.enabled {
-        let archive = feed_names.iter().position(|f| *f == cfg.record.archive_feed).map(|i| i as u16);
-        arbx::record::init(&dir, archive)?;
-        say(&format!("recording: rivals, executed results, arrivals, moves, slots{}", if archive.is_some() { format!(", raw entries of {}", cfg.record.archive_feed) } else { String::new() }));
-    }
-    // STEP 1: every send path kept warm and timed (keepalive.jsonl); paths that can't be built are named, not fatal
+    say(&format!("recording (always on): every stream compressed in {} (frames every {} ms, rotation at {} MiB or {} min; disk budget {} GB, min free {} GB){}",
+        dir.display(), cfg.record.flush_ms, cfg.record.rotate_mb, cfg.record.rotate_min, cfg.record.disk_budget_gb, cfg.record.min_free_gb,
+        if cfg.record.archive_feeds.is_empty() { String::new() } else { format!("; raw entries of {}", cfg.record.archive_feeds.join(", ")) }));
+    // STEP 1: every send path kept warm and timed (keepalive.jsonl); paths that can't be built are named, not fatal. On
+    // the hot runtime (their sends and result streams run there)
     let paths = if cfg.sends.iter().any(|s| s.enabled) {
-        let (p, notes) = rt.block_on(send::Paths::new(&cfg.sends, cfg.gate.clone(), Some(&dir), true))?;
+        let (p, notes) = rts.hot.block_on(send::Paths::new(&cfg.sends, cfg.gate.clone(), rec.clone(), true))?;
         for n in notes { say(&format!("send path {n}")); }
         let back = tx.clone();
         p.start(stop.clone(), std::time::Duration::from_secs(cfg.exec.keepalive_s), move |m: String| { let _ = back.send(feeds::Event::Status { feed: u16::MAX, msg: m }); });
         say(&format!("send paths: {} (keep-alive every {} s)", p.list.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(", "), cfg.exec.keepalive_s));
         Some(p)
     } else { None };
-    // STEPS 2-3: simulation of every would-send decision, canaries
+    // STEPS 2-3: simulation of every would-send decision, canaries. The executor's sends run on the hot runtime; its
+    // RPC (lookup tables, nonces, simulations, settlements) on the background one through the bound client
     let exec = if exec_on {
-        let (mut x, notes) = rt.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), &dir, tx.clone(), feed_names.clone(), send_key, reg_mints(&reg)))?;
+        let (mut x, notes) = rts.hot.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), rec.clone(), tx.clone(), feed_names.clone(), send_key, reg_mints(&reg)))?;
         x.set_gate(sess.gate.clone());
         for n in notes { say(&format!("exec: {n}")); }
         if !cfg.live.crowded_pools_file.is_empty() {
@@ -877,6 +911,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let venue_specs = provenance::venue_specs();
     let mut programs = route.clone();
     programs.extend(venue_specs.iter().map(provenance::pending_entry));
+    let mut streams = provenance::streams_json();
+    if let (Some(m), Value::Object(r)) = (streams.as_object_mut(), rec.streams_json()) { m.extend(r); }
     let meta = json!({
         "schema": provenance::META_SCHEMA,
         "run": run_json, "build": provenance::build_json(), "config": config_json,
@@ -889,19 +925,20 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
             "snapshot_slot": snapshot_slot, "snapshot_ns": snapshot_ns, "stream_started_ns": stream_started_ns, "followed": followed },
         "probe": null, "chainfetch": null,
         "pools": provenance::pools_json(&reg, &cfg), "inputs": provenance::inputs_json(&cfg),
-        "streams": provenance::streams_json(), "experiments": null,
+        "streams": streams, "experiments": null,
         "limits": limits, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()),
         "clock": provenance::clock_json(),
         "strategy": provenance::section(&cfg.strategy), "send": provenance::section(&cfg.sends), "builder": provenance::section(&cfg.exec),
         "live": provenance::section(&cfg.live), "sim": provenance::section(&cfg.sim), "canary": provenance::section(&cfg.canary),
         "gate": provenance::section(&cfg.gate), "record": provenance::section(&cfg.record), "control": provenance::section(&cfg.control), "tips": null,
+        "runtime": provenance::section(&cfg.runtime),
         "send_gate": sess.gate.json(),
-        // what the command line changed in the config for this run (--shadow, --no-record, --budget-left)
+        // what the command line changed in the config for this run (--shadow, --budget-left)
         "overrides": a.ov.json(),
     });
     control::write_atomic(&dir.join("meta.json"), serde_json::to_string_pretty(&meta)?.as_bytes())?;
     if sess.stopper.stopping() { return Ok(()); }
-    let fs = feeds::start(&cfg.feeds, interest.clone(), tx.clone(), stop.clone(), rt.handle())?;
+    let fs = feeds::start(&cfg.feeds, interest.clone(), tx.clone(), stop.clone(), &hot, &rec)?;
     anyhow::ensure!(fs.names == feed_names, "feed ids changed: {:?} vs {:?}", fs.names, feed_names);
     say(&format!("feeds: {}", fs.names.join(", ")));
     // the venue programs, in the background: once per campaign (the campaign's cache, keyed by each programdata's last
@@ -910,7 +947,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         let (rpc, back, dir, wallet) = (rpc.clone(), tx.clone(), dir.clone(), cfg.wallet.clone());
         let cache = a.campaign_dir.as_ref().map(|c| c.join(provenance::PROGRAMS_CACHE));
         let mut meta = meta.clone();
-        rt.spawn(async move {
+        rts.bg.spawn(async move {
             let t0 = now_ns();
             let venues = provenance::fetch_programs_cached(&rpc, &venue_specs, cache.as_deref()).await;
             let say = |msg: String| { let _ = back.send(feeds::Event::Status { feed: u16::MAX, msg }); };
@@ -929,15 +966,20 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         });
     }
     let min_tip = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.tip_lamports).min().unwrap_or(0);
-    let mut eng = engine::Engine::new(reg.clone(), store, cfg.strategy.clone(), fs.names.clone(), min_tip, interest, &dir, rpc,
-        rt.handle().clone(), tx.clone(), wtx)?;
+    // status.jsonl exists (with its header) before the engine can send anything: the supervisor reads its existence as
+    // "the engine started" (deploy/run-w.sh `spent`, review F4). A run that cannot write it does not start: it is the
+    // supervisor's failed-fee budget source
+    rec.open_now(rec::STATUS).context("status.jsonl (the supervisor's budget source)")?;
+    let mut eng = engine::Engine::new(reg.clone(), store, cfg.strategy.clone(), fs.names.clone(), min_tip, interest, rec.clone(), rpc.clone(),
+        bg.clone(), tx.clone(), wtx)?;
+    eng.set_feed_counters(fs.counters.clone(), Some(state_counters));
     eng.exec = exec;
     eng.gate = Some(sess.gate.clone());
     // the minutes count from the engine's start, as in arb-lab (boot time is not part of the segment)
     let until = a.minutes.map(|m| now_ns() + (m * 60e9) as u64).unwrap_or(u64::MAX);
     let counters = fs.counters.clone();
     let names = fs.names.clone();
-    let rpc_stats = eng.rpc_handle();
+    let rpc_stats = rpc.clone();
     let mut ticks = 0u64;
     let end = eng.run(&rx, &stop, until, |s| {
         let per: Vec<String> = names.iter().zip(&counters).map(|(n, c)| format!("{n} {}/{}", c.forwarded.load(Ordering::Relaxed), c.txs.load(Ordering::Relaxed))).collect();
@@ -965,10 +1007,12 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     for l in rpc_stats.reasons(5) { say(&format!("rpc failure {l}")); }
     if let Some(p) = &paths { for l in p.summary() { say(&format!("send final {l}")); } }
     if let Some(x) = &eng.exec { say(&format!("exec final {}", x.status())); }
+    if runtime::hot_violations() > 0 { say(&format!("WARNING: {} RPC calls ran on an arbx-hot thread", runtime::hot_violations())); }
     stop.store(true, Ordering::Relaxed);
-    if let Some(r) = arbx::record::get() { r.finish(); }
+    // the feeds and send tasks stop with the runtimes; then the recorder drains what they handed it (its guard closes it)
+    rts.shutdown(std::time::Duration::from_secs(2));
     say(&format!("done: {} (stop: {reason})", dir.display()));
-    rt.shutdown_timeout(std::time::Duration::from_secs(2));
+    rec.close();
     Ok(())
 }
 
@@ -992,21 +1036,16 @@ mod tests {
         assert_eq!((l["crowded_pools_file"].as_str(), l["crowded_skip_min_expected_lamports"].as_u64()), (Some("/root/arbx/data/crowded-pools.json"), Some(100_000)));
     }
 
-    /// review F1: both field-acceptance shadow runs work on the shipped file without editing it, and `--shadow` runs a
-    /// live config in shadow
+    /// review F1: a plain run of the shipped file is a shadow run, and `--shadow` runs a live config in shadow. WP-02:
+    /// the recorder cannot be turned off (`--no-record` is gone: clap refuses it, tests/meta_config_hash.rs)
     #[test]
-    fn shadow_and_no_record_overrides() {
+    fn shadow_override() {
         let mut cfg = stage0();
         Overrides::default().apply(&mut cfg, false, false).unwrap();
         assert_eq!(cfg.mode, "shadow", "ships in shadow: a plain run is a shadow run");
-        assert!(cfg.record.enabled);
-        let ov = Overrides { shadow: false, no_record: true, budget_left: None };
-        ov.apply(&mut cfg, false, false).unwrap();
-        assert!(!cfg.record.enabled, "the recorder-off run");
-        assert_eq!(ov.json(), serde_json::json!({ "record.enabled": false }));
         let mut live = stage0();
         live.mode = "live".into();
-        let ov = Overrides { shadow: true, no_record: false, budget_left: None };
+        let ov = Overrides { shadow: true, budget_left: None };
         ov.apply(&mut live, false, false).unwrap();
         assert_eq!(live.mode, "shadow");
         assert_eq!(ov.json(), serde_json::json!({ "mode": "shadow" }));
@@ -1084,9 +1123,8 @@ mod tests {
             Overrides::default(),
             Overrides { budget_left: Some(1_000_000), ..Default::default() },
             Overrides { budget_left: Some(99_999_999_999), ..Default::default() },
-            Overrides { no_record: true, ..Default::default() },
             Overrides { shadow: true, ..Default::default() },
-            Overrides { shadow: true, no_record: true, budget_left: Some(0) },
+            Overrides { shadow: true, budget_left: Some(0) },
         ];
         for ov in all {
             let rc = run_config(&args(&path, ov, false, false, None)).unwrap();
@@ -1096,7 +1134,6 @@ mod tests {
             assert_eq!(rc.config_cap, 25_000_000, "the file's cap");
             // the overrides did apply to what the run uses
             if let Some(b) = ov.budget_left { assert_eq!(rc.cfg.live.max_failed_fees_lamports, b.min(25_000_000)); }
-            assert_eq!(rc.cfg.record.enabled, !ov.no_record);
         }
         // a live config under --shadow: the file's mode is kept, the effective one is shadow
         let d = std::env::temp_dir().join(format!("arbx-runcfg-{}-{}", std::process::id(), now_ns()));

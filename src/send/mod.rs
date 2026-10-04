@@ -29,7 +29,6 @@ use base64::Engine as _;
 use budget::Budget;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use serde_json::{json, Value};
-use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -393,7 +392,7 @@ pub struct Path {
 }
 
 impl Path {
-    async fn new(c: &SendPath, bundles_log: Option<std::fs::File>) -> Result<Path> {
+    async fn new(c: &SendPath, rec: &crate::rec::Rec) -> Result<Path> {
         let what = format!("send path {}", c.name);
         let url = crate::config::expand(&c.url).with_context(|| format!("{what}: url {} names an environment variable that is empty or missing", c.url))?;
         let mut headers = HeaderMap::new();
@@ -451,7 +450,7 @@ impl Path {
         let jito = if c.kind == SendKind::JitoBundle {
             if !url.starts_with("https://") && !url.starts_with("http://") { bail!("{what}: the block engine url needs a scheme (https://...)"); }
             let key = jito::load_keypair(c.auth_keypair.as_deref().unwrap_or("~/.nexus-v2-jito-auth.json"))?;
-            let j = jito::Jito::connect(&url, key, bundles_log).await.with_context(|| format!("{what}: connect"))?;
+            let j = jito::Jito::connect(&url, key, rec.clone()).await.with_context(|| format!("{what}: connect"))?;
             j.token().await.with_context(|| format!("{what}: authenticate as {} (is the key whitelisted?)", j.pubkey()))?;
             let live = j.tip_accounts().await.with_context(|| format!("{what}: getTipAccounts"))?;
             for t in &tips {
@@ -744,37 +743,27 @@ pub struct Paths {
     pub list: Vec<Arc<Path>>,
     gate: GateCfg,
     skips: AtomicU64,
-    copies: Option<Mutex<std::io::BufWriter<std::fs::File>>>,
-    keepalive: Option<Mutex<std::io::BufWriter<std::fs::File>>>,
+    /// copies.jsonl (core) and keepalive.jsonl (slow), through the recorder
+    rec: crate::rec::Rec,
     rt: tokio::runtime::Handle,
-}
-
-fn line(log: &Option<Mutex<std::io::BufWriter<std::fs::File>>>, v: &impl serde::Serialize) {
-    if let Some(l) = log { let mut w = l.lock().unwrap(); let _ = writeln!(w, "{}", serde_json::to_string(v).unwrap_or_default()); let _ = w.flush(); }
 }
 
 impl Paths {
     /// Build every enabled path (jito-bundle: connect, authenticate, check the tip accounts against the block engine).
-    /// With `dir`: copies.jsonl, keepalive.jsonl and bundles.jsonl there. With `lenient`, a path that can't be built
-    /// (a key missing from .env, ...) is left out and named in the returned notes instead of failing. Call inside the
-    /// runtime.
-    pub async fn new(cfgs: &[SendPath], gate: GateCfg, dir: Option<&std::path::Path>, lenient: bool) -> Result<(Arc<Paths>, Vec<String>)> {
-        let open = |n: &str| -> Result<Option<std::fs::File>> {
-            dir.map(|d| std::fs::OpenOptions::new().create(true).append(true).open(d.join(n)).with_context(|| format!("opening {n}"))).transpose()
-        };
+    /// `rec` gets copies.jsonl, keepalive.jsonl and bundles.jsonl (`Rec::off()`: nothing recorded). With `lenient`, a
+    /// path that can't be built (a key missing from .env, ...) is left out and named in the returned notes instead of
+    /// failing. Call inside the runtime the sends run on (the hot one).
+    pub async fn new(cfgs: &[SendPath], gate: GateCfg, rec: crate::rec::Rec, lenient: bool) -> Result<(Arc<Paths>, Vec<String>)> {
         let mut list = Vec::new();
         let mut notes = Vec::new();
         for c in cfgs.iter().filter(|c| c.enabled) {
-            let blog = if c.kind == SendKind::JitoBundle { open("bundles.jsonl")? } else { None };
-            match Path::new(c, blog).await {
+            match Path::new(c, &rec).await {
                 Ok(p) => list.push(Arc::new(p)),
                 Err(e) if lenient => notes.push(format!("{}: left out: {e:#}", c.name)),
                 Err(e) => return Err(e),
             }
         }
-        let wr = |f: Option<std::fs::File>| f.map(|f| Mutex::new(std::io::BufWriter::new(f)));
-        Ok((Arc::new(Paths { list, gate, skips: AtomicU64::new(0), copies: wr(open("copies.jsonl")?), keepalive: wr(open("keepalive.jsonl")?),
-            rt: tokio::runtime::Handle::current() }), notes))
+        Ok((Arc::new(Paths { list, gate, skips: AtomicU64::new(0), rec, rt: tokio::runtime::Handle::current() }), notes))
     }
 
     pub fn index(&self, name: &str) -> Option<usize> { self.list.iter().position(|p| p.name == name) }
@@ -796,7 +785,7 @@ impl Paths {
                         let r = p.warm().await;
                         let (ms, error) = match &r { Ok(Some(d)) => (Some(d.as_secs_f64() * 1e3), None), Ok(None) => return, Err(e) => (None, Some(format!("{e:#}"))) };
                         if let Some(e) = &error { status(format!("{} keep-alive: {e}", p.name)); }
-                        line(&me.keepalive, &json!({ "t_ns": t_ns, "path": p.name, "ms": ms, "error": error }));
+                        me.rec.json(crate::rec::KEEPALIVE, json!({ "t_ns": t_ns, "path": p.name, "ms": ms, "error": error }));
                     });
                 }
                 tokio::time::sleep(every).await;
@@ -868,7 +857,8 @@ impl Paths {
             }
             let hs: Vec<_> = rest.map(go).collect();
             for h in hs { if let Ok(s) = h.await { out.push(s); } }
-            for c in &out { line(&me.copies, c); }
+            // one copies.jsonl line per copy, serialized on the recorder's core writer
+            for c in &out { me.rec.emit(crate::rec::COPIES, crate::rec::Record::ser(c.clone())); }
             Fired { id: attempt, t_ns: t0_ns, copies: out, gate: gate_rec }
         })
     }
@@ -947,7 +937,7 @@ mod tests {
     async fn rate_drops_are_split_by_crowded_rank() {
         let mut c = cfg("rpc", "http://127.0.0.1:1".into());
         c.max_per_sec = Some(1);
-        let p = Path::new(&c, None).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
         let raw = tx([3; 32], 1, false);
         // takes the one slot of this second (its delivery fails: nothing listens there)
         assert!(p.send(&raw, Prio { rank: RANK_OTHER, net: 1 }).await.is_err());
@@ -962,7 +952,7 @@ mod tests {
     async fn tips_rotate_and_scale() {
         let mut c = cfg("helius", "http://127.0.0.1:1/fast".into());
         c.tip_lamports = 5_000;
-        let p = Path::new(&c, None).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
         let (a, l) = p.tip(1_000_000).unwrap();
         let (b, _) = p.tip(0).unwrap();
         assert_eq!(l, 5_000);
@@ -980,7 +970,7 @@ mod tests {
     async fn refuses_a_copy_that_does_not_pay_this_path() {
         let mut c = cfg("helius", "http://127.0.0.1:1/fast".into());
         c.tip_lamports = 5_000;
-        let p = Path::new(&c, None).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
         let helius = crate::tx::pk(known_tip_accounts(SendKind::Helius)[3]);
         assert!(p.check(&tx(helius, 5_000, true)).is_ok());
         assert!(p.check(&tx(helius, 4_999, true)).is_err(), "below the minimum");
@@ -995,7 +985,7 @@ mod tests {
         let (base, h) = server(200, reply).await;
         let mut c = cfg("helius", format!("{base}/fast?swqos_only=true"));
         c.tip_lamports = 5_000;
-        let p = Path::new(&c, None).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
         let raw = tx(crate::tx::pk(known_tip_accounts(SendKind::Helius)[0]), 5_000, true);
         let r = p.send(&raw, Prio::default()).await.unwrap();
         assert_eq!(r.sig, sig58());
@@ -1007,6 +997,31 @@ mod tests {
         assert_eq!(v["params"][1], json!({ "encoding": "base64", "skipPreflight": true, "maxRetries": 0 }));
     }
 
+    /// review F12: copies.jsonl through the recorder: one line per copy (serialized on the core writer) with the
+    /// attempt, the path, our signature, the send and ack times, the reply and the HTTP status
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fired_copies_are_recorded() {
+        let d = std::env::temp_dir().join(format!("arbx-copies-{}-{}", std::process::id(), now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let reply: &'static str = Box::leak(format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"{}\"}}", sig58()).into_boxed_str());
+        let (base, h) = server(200, reply).await;
+        let mut c = cfg("helius", format!("{base}/fast"));
+        c.tip_lamports = 5_000;
+        let (ps, _) = Paths::new(&[c], GateCfg::default(), rec.clone(), false).await.unwrap();
+        let raw = Arc::new(tx(crate::tx::pk(known_tip_accounts(SendKind::Helius)[0]), 5_000, true));
+        let fired = ps.fire(42, vec![Copy { path: 0, raw, tip: None }], Prio::default(), false).await.unwrap();
+        let _ = h.await;
+        assert!(fired.copies[0].ok);
+        rec.close();
+        let v = crate::rec::read_jsonl(&d, "copies").unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!((v[0]["attempt"].as_u64(), v[0]["path"].as_str(), v[0]["sig"].as_str(), v[0]["ok"].as_bool(), v[0]["status"].as_u64()),
+            (Some(42), Some("t"), Some(sig58().as_str()), Some(true), Some(200)));
+        assert!(v[0]["t_sent"].as_u64().unwrap() > 0 && v[0]["t_ack"].as_u64().unwrap() >= v[0]["t_sent"].as_u64().unwrap());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[tokio::test]
     async fn haan_posts_raw_bytes_with_both_headers() {
         let reply: &'static str = Box::leak(sig58().into_boxed_str());
@@ -1016,7 +1031,7 @@ mod tests {
         let mut c = cfg("haan", format!("{base}/api/v1/transactions"));
         c.token_env = Some("ARB_TEST_HAAN_KEY".into());
         c.jito_auth_env = Some("ARB_TEST_JITO_UUID".into());
-        let p = Path::new(&c, None).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
         let raw = tx([3; 32], 0, false);
         assert_eq!(p.send(&raw, Prio::default()).await.unwrap().sig, sig58());
         let (head, body) = h.await.unwrap();
@@ -1031,7 +1046,7 @@ mod tests {
         std::env::set_var("ARB_TEST_BOLT_KEY", "b1");
         let mut c = cfg("bolt", format!("{base}/api/v1/sendRawTransaction"));
         c.token_env = Some("ARB_TEST_BOLT_KEY".into());
-        let p = Path::new(&c, None).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
         let raw = tx(crate::tx::pk(known_tip_accounts(SendKind::Bolt)[0]), 1_000_000, false);
         let e = p.send(&raw, Prio::default()).await.unwrap_err().to_string();
         assert!(e.contains("missing tip"), "{e}");
@@ -1043,7 +1058,7 @@ mod tests {
         std::env::set_var("ARB_TEST_IRIS_KEY", "SECRETKEY");
         let mut c = cfg("iris", "http://127.0.0.1:1/irisb?api-key=${ARB_TEST_IRIS_KEY}&method=sendTransaction".into());
         c.tip_lamports = 10_000;
-        let p = Path::new(&c, None).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
         let raw = tx(crate::tx::pk(known_tip_accounts(SendKind::Iris)[0]), 10_000, false);
         let e = format!("{:#}", p.send(&raw, Prio::default()).await.unwrap_err());
         assert!(!e.contains("SECRETKEY"), "{e}");

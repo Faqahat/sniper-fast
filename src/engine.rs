@@ -11,7 +11,8 @@
 //! per-feed arrival times and our own stage timings (rx -> decoded -> engine -> resolved -> decided).
 use crate::config::StrategyCfg;
 use crate::lat::Series;
-use crate::feeds::{clock::now_ns, Arrival, Event, Interest};
+use crate::feeds::{clock::now_ns, Arrival, Event, FeedCounters, Interest};
+use crate::rec::{self, Rec, Record};
 use crate::pda::AtaCache;
 use crate::pools::{self, pair_key, Registry};
 use crate::store::{Snap, Store};
@@ -20,7 +21,7 @@ use crate::venues::{cp, dlmm, PendingSwap, PoolMeta, Venue, WSOL};
 use serde_json::{json, Value};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::collections::VecDeque;
-use std::io::Write;
+use std::io::Write as _;
 use std::sync::Arc;
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 
@@ -94,6 +95,14 @@ struct Check { pool: usize, trig: [u8; 64], t: u64, cp: Option<(u128, u128)>, ac
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunEnd { Stopped, Deadline, Disconnected }
 
+/// The engine's outside world: RPC (bound to the background runtime), the background runtime it spawns fetches on,
+/// the event channel their answers come back on, and the state stream's watch list. `Engine::new_offline` has none
+struct Io { rpc: crate::rpc::Rpc, rt: tokio::runtime::Handle, tx_back: Sender<Event>, watch_list: tokio::sync::watch::Sender<Vec<String>> }
+
+/// what status.jsonl v2's deltas are against (the previous line)
+#[derive(Default)]
+struct StatusPrev { t: u64, counts: HashMap<&'static str, u64>, updates: u64, stale: u64, dropped: HashMap<String, u64> }
+
 pub struct Engine {
     pub reg: Arc<Registry>,
     pub store: Store,
@@ -120,20 +129,31 @@ pub struct Engine {
     slot: u64,
     lat: Vec<Series>,
     counts: HashMap<&'static str, u64>,
-    out_trig: std::io::BufWriter<std::fs::File>,
-    out_opp: std::io::BufWriter<std::fs::File>,
-    out_pred: std::io::BufWriter<std::fs::File>,
-    out_status: std::io::BufWriter<std::fs::File>,
-    /// status.jsonl lines written so far (stop.json `final_status_seq` = this - 1)
+    /// every stream the engine writes (triggers, opportunities, predictions, arrivals, txarr, moves, rivals, caps,
+    /// alts-final, status, feedhealth): handed to the recorder, never written on this thread (WP-02)
+    rec: Rec,
+    /// status.jsonl lines written so far (`seq` of the next one; stop.json `final_status_seq` = this - 1)
     pub status_lines: u64,
     /// the run's SendGate, shown in every status line as `send_gate` (review M2: a segment that does not send says why)
     pub gate: Option<Arc<crate::control::SendGate>>,
-    /// per-trigger arrival times from every feed (the feed scoreboard)
-    out_arr: std::io::BufWriter<std::fs::File>,
-    rpc: crate::rpc::Rpc,
-    rt: tokio::runtime::Handle,
-    tx_back: Sender<Event>,
-    watch_list: tokio::sync::watch::Sender<Vec<String>>,
+    /// RPC, runtime, channel back, watch list (None: `new_offline`)
+    io: Option<Io>,
+    /// `new_offline`: the fetches the engine asked for (what, accounts), recorded instead of sent
+    pub offline_fetches: Vec<(&'static str, Vec<Pk>)>,
+    /// newest slot by status (processed, confirmed, finalized) and the newest slot of a stored account update
+    slots: [u64; 3],
+    store_slot_max: u64,
+    /// the engine queue's high-water mark since the last status line
+    queue_hwm: usize,
+    t_start: u64,
+    sp: StatusPrev,
+    exec_prev: crate::exec::ExecPrev,
+    /// feedhealth.jsonl: the feeds' counters (index = feed id), the state stream's, and each feed's lead over the first
+    /// arrival (txarr: when a signature leaves its window)
+    feed_counters: Vec<Arc<FeedCounters>>,
+    state_counters: Option<Arc<FeedCounters>>,
+    leads: Vec<Series>,
+    fh: rec::health::FeedHealth,
     /// simulation and canaries (exec.rs); None in a plain shadow run
     pub exec: Option<crate::exec::Exec>,
     /// per trigger signer: (triggers that moved the pool, triggers that never did within 5 s). Signers whose triggers
@@ -160,7 +180,7 @@ pub struct Engine {
     caps_pending: Vec<(u64, Best, i64)>,
     /// per pool: (time, CU price) of every transaction that touched it lately (the bids we compete with)
     pool_prices: HashMap<usize, VecDeque<(u64, u64)>>,
-    /// recording (record.rs): venue programs by name, sender tip accounts by sender, signers seen arbitraging,
+    /// recording (rivals, moves): venue programs by name, sender tip accounts by sender, signers seen arbitraging,
     /// (transaction, pool) moves already written
     amm: HashMap<Pk, &'static str>,
     tip_names: HashMap<Pk, String>,
@@ -199,11 +219,37 @@ fn unix_now() -> i64 { (now_ns() / 1_000_000_000) as i64 }
 fn sigs58(s: &[u8; 64]) -> String { bs58::encode(s).into_string() }
 
 impl Engine {
+    /// The run's engine. `rec`: the recorder; `rpc` must be bound to the background runtime `rt_bg`, where the engine's
+    /// fetches (lookup tables, DLMM bin arrays) are spawned; their answers come back on `tx_back`
     #[allow(clippy::too_many_arguments)]
     pub fn new(reg: Arc<Registry>, store: Store, cfg: StrategyCfg, feeds: Vec<String>, min_tip: u64, interest: Arc<Interest>,
-        dir: &std::path::Path, rpc: crate::rpc::Rpc, rt: tokio::runtime::Handle, tx_back: Sender<Event>,
+        rec: Rec, rpc: crate::rpc::Rpc, rt_bg: tokio::runtime::Handle, tx_back: Sender<Event>,
         watch_list: tokio::sync::watch::Sender<Vec<String>>) -> anyhow::Result<Engine> {
-        let open = |n: &str| -> anyhow::Result<std::io::BufWriter<std::fs::File>> { Ok(std::io::BufWriter::new(std::fs::File::create(dir.join(n))?)) };
+        let mut e = Engine::build(reg, store, cfg, feeds, min_tip, interest, rec);
+        e.io = Some(Io { rpc, rt: rt_bg, tx_back, watch_list });
+        Ok(e)
+    }
+
+    /// An engine with no RPC, runtime or watch channel (PLAN WP-02 item 11): fetches are recorded in
+    /// `offline_fetches` instead of sent, and it records nothing until `set_rec`. For benchmarks and replay (WP-09)
+    pub fn new_offline(reg: Arc<Registry>, store: Store, cfg: StrategyCfg) -> Engine {
+        Engine::build(reg, store, cfg, vec![], 0, Arc::new(Interest::default()), Rec::off())
+    }
+
+    /// record through `rec` from now on
+    pub fn set_rec(&mut self, rec: Rec) { self.rec = rec; }
+
+    /// a latency series by name (A.8; benchmarks and tests)
+    pub fn series_mut(&mut self, name: &str) -> Option<&mut Series> { self.lat.iter_mut().find(|s| s.name == name) }
+
+    /// feedhealth.jsonl: the feeds' counters (index = feed id) and the state stream's
+    pub fn set_feed_counters(&mut self, feeds: Vec<Arc<FeedCounters>>, state: Option<Arc<FeedCounters>>) {
+        self.leads = feeds.iter().map(|_| Series::new("lead")).collect();
+        self.feed_counters = feeds;
+        self.state_counters = state;
+    }
+
+    fn build(reg: Arc<Registry>, store: Store, cfg: StrategyCfg, feeds: Vec<String>, min_tip: u64, interest: Arc<Interest>, rec: Rec) -> Engine {
         let mut acct_pool = HashMap::default();
         for &i in reg.pairs.values().flatten() {
             let m = &reg.pools[i];
@@ -211,14 +257,16 @@ impl Engine {
             if !matches!(m.venue, Venue::Dlmm | Venue::DammV2) { acct_pool.insert(m.vault0, i); acct_pool.insert(m.vault1, i); }
         }
         let signer_stats = load_signer_stats(&cfg.signer_stats_file);
-        Ok(Engine { reg, store, cfg, feeds, min_tip, interest, ata: AtaCache::default(), sigs: HashMap::default(), sig_order: VecDeque::new(),
+        let t0 = now_ns();
+        Engine { reg, store, cfg, feeds, min_tip, interest, ata: AtaCache::default(), sigs: HashMap::default(), sig_order: VecDeque::new(),
             preds: HashMap::default(), alts: HashMap::default(), alt_inflight: HashSet::default(), alt_missing: HashSet::default(), alt_wait: HashMap::default(), acct_pool,
             watch: HashMap::default(), opps: HashMap::default(), checks: HashMap::default(), next_id: 0, slot: 0,
             lat: LAT_SERIES.into_iter().map(Series::new).collect(),
-            counts: HashMap::default(),
-            out_trig: open("triggers.jsonl")?, out_opp: open("opportunities.jsonl")?, out_pred: open("predictions.jsonl")?, out_status: open("status.jsonl")?, status_lines: 0, gate: None, out_arr: open("arrivals.jsonl")?,
-            rpc, rt, tx_back, watch_list, exec: None, signer_stats, trig_pending: HashMap::default(), confirm_wait: VecDeque::new(), state_seen: HashSet::default(), state_pending: Vec::new(),
-            state_first: HashMap::default(), state_first_order: VecDeque::new(), caps_pending: Vec::new(), pool_prices: HashMap::default(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(), moves_seen: HashSet::default(), poh: HashMap::default(), poh_order: VecDeque::new() })
+            counts: HashMap::default(), rec, status_lines: 0, gate: None, io: None, offline_fetches: Vec::new(), slots: [0; 3], store_slot_max: 0, queue_hwm: 0,
+            t_start: t0, sp: StatusPrev { t: t0, ..Default::default() }, exec_prev: Default::default(), feed_counters: Vec::new(), state_counters: None, leads: Vec::new(),
+            fh: rec::health::FeedHealth::new(t0),
+            exec: None, signer_stats, trig_pending: HashMap::default(), confirm_wait: VecDeque::new(), state_seen: HashSet::default(), state_pending: Vec::new(),
+            state_first: HashMap::default(), state_first_order: VecDeque::new(), caps_pending: Vec::new(), pool_prices: HashMap::default(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(), moves_seen: HashSet::default(), poh: HashMap::default(), poh_order: VecDeque::new() }
     }
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
@@ -286,37 +334,41 @@ impl Engine {
         }
     }
 
-    /// price the state triggers whose transaction is now fully applied
-    fn flush_state(&mut self) {
+    /// price the state triggers whose transaction is now fully applied (`run` calls it when its queue is empty)
+    pub fn flush_state(&mut self) {
         for p in std::mem::take(&mut self.state_pending) { self.state_trigger(p.pool, p.txn, p.slot, p.t_recv, p.t_engine); }
         for (id, b, now) in std::mem::take(&mut self.caps_pending) { self.record_caps(id, &b, "state", now); }
     }
 
-    /// txarr.log: when each feed delivered this transaction (µs after the first; `-` never)
-    fn write_txarr(&self, k: u64, s: &SigInfo) {
-        let Some(r) = crate::record::get() else { return };
-        let mut line = format!("{:016x} {} {}", k.swap_bytes(), s.slot, s.first_t);
-        for f in 0..self.feeds.len().min(MAX_FEEDS) {
-            let t = s.arr[f];
-            if t == 0 { line.push_str(" -"); } else { line.push_str(&format!(" {}", t.saturating_sub(s.first_t) / 1000)); }
-        }
-        crate::record::Recorder::line(&r.txarr, &line);
+    /// A signature left its 10 s window: txarr.log (when each feed delivered it: µs after the first; `-` never; the
+    /// line is formatted on the recorder's writer), and feedhealth's first-arrival count and per-feed lead
+    fn write_txarr(&mut self, k: u64, s: &SigInfo) {
+        if let Some(c) = self.feed_counters.get(s.first_feed as usize) { c.first_arrivals.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+        for (f, t) in s.arrivals() { if let Some(l) = self.leads.get_mut(f as usize) { l.push(t.saturating_sub(s.first_t)); } }
+        if !self.rec.is_on() { return; }
+        let (n, slot, first, arr) = (self.feeds.len().min(MAX_FEEDS), s.slot, s.first_t, s.arr);
+        self.rec.emit(rec::TXARR, Record::enc(move |o| {
+            let _ = write!(o, "{:016x} {slot} {first}", k.swap_bytes());
+            for &t in &arr[..n] { if t == 0 { o.extend_from_slice(b" -"); } else { let _ = write!(o, " {}", t.saturating_sub(first) / 1000); } }
+        }));
     }
 
-    /// alts.jsonl: every lookup table entry the engine learned, to decode the entries archive offline
+    /// alts-final.jsonl (MEASUREMENT §4.26; v1 `alts.jsonl`): every lookup table entry the engine learned, at stop, to
+    /// decode the entries archive offline. Each table is serialized on the recorder's writer
     fn write_alts(&self) {
-        let Some(r) = crate::record::get() else { return };
-        let Ok(f) = std::fs::File::create(r.dir.join("alts.jsonl")) else { return };
-        let mut w = std::io::BufWriter::new(f);
+        if !self.rec.is_on() { return; }
         for (t, v) in &self.alts {
-            let addrs: Vec<Value> = v.iter().map(|a| a.map_or(Value::Null, |k| json!(b58(&k)))).collect();
-            let _ = writeln!(w, "{}", json!({ "table": b58(t), "addrs": addrs }));
+            let (t, v) = (*t, v.clone());
+            self.rec.emit(rec::ALTS_FINAL, Record::enc(move |o| {
+                let addrs: Vec<Value> = v.iter().map(|a| a.map_or(Value::Null, |k| json!(b58(&k)))).collect();
+                let _ = serde_json::to_writer(o, &json!({ "table": b58(&t), "addrs": addrs }));
+            }));
         }
     }
 
     /// rivals.jsonl: an arbitrage-like transaction's fingerprint, at shred time
     fn record_rival(&mut self, a: &Arrival, keys: &[Pk]) {
-        let Some(r) = crate::record::get() else { return };
+        if !self.rec.is_on() { return; }
         let tx = &a.tx;
         let Some(signer) = tx.fee_payer().copied() else { return };
         let mut venues: Vec<&'static str> = Vec::new();
@@ -354,20 +406,25 @@ impl Engine {
             "signer": b58(&signer), "n_sig": tx.num_signers, "v": ver, "cu_limit": tx.cu_limit, "cu_price": tx.cu_price(),
             "v1_fee": if tx.v1 { tx.cu_price_micro } else { None }, "tips": tips, "nonce": nonce, "progs": progs, "venues": venues, "agg": agg,
             "pools": pools, "alts": tx.lookups.iter().map(|l| b58(&l.table)).collect::<Vec<_>>(), "n_ix": tx.ixs.len(), "n_keys": keys.len(), "head": head });
-        crate::record::Recorder::line(&r.rivals, &line.to_string());
+        self.rec.json(rec::RIVALS, line);
     }
 
+    /// signer-stats.json (a cross-run file, §4.48): a copy of the map is serialized and written by the recorder's slow
+    /// writer (atomically), not on the engine thread
     fn save_signer_stats(&self) {
         if self.cfg.signer_stats_file.is_empty() { return; }
-        let m: serde_json::Map<String, Value> = self.signer_stats.iter().map(|(k, v)| (b58(k), json!([v.0, v.1]))).collect();
-        let tmp = format!("{}.tmp", self.cfg.signer_stats_file);
-        if std::fs::write(&tmp, Value::Object(m).to_string()).is_ok() { let _ = std::fs::rename(&tmp, &self.cfg.signer_stats_file); }
+        let (stats, path) = (self.signer_stats.clone(), self.cfg.signer_stats_file.clone());
+        self.rec.task(move || {
+            let m: serde_json::Map<String, Value> = stats.iter().map(|(k, v)| (b58(k), json!([v.0, v.1]))).collect();
+            let tmp = format!("{path}.tmp");
+            if std::fs::write(&tmp, Value::Object(m).to_string()).is_ok() { let _ = std::fs::rename(&tmp, &path); }
+        });
     }
-    pub fn rpc_handle(&self) -> crate::rpc::Rpc { self.rpc.clone() }
 
     /// Run until `stop`, the deadline `until_ns` or the channel closes; says which. `status` is called every 10 s with a
     /// one-line summary. The final status.jsonl line is the caller's (`write_final_status`), once it knows the stop reason.
     pub fn run(&mut self, rx: &Receiver<Event>, stop: &std::sync::atomic::AtomicBool, until_ns: u64, mut status: impl FnMut(&str)) -> RunEnd {
+        self.rec.set_engine_tid(crate::runtime::gettid());
         let mut last_status = now_ns();
         let mut last_drift = now_ns();
         let end = loop {
@@ -392,35 +449,48 @@ impl Engine {
                 }
             };
             let t_engine = now_ns();
-            match ev {
-                Event::Tx(a) => self.on_tx(a, t_engine),
-                Event::Account { slot, pubkey, data, t, txn, .. } => self.on_account(pubkey, data, slot, t, txn, t_engine),
-                Event::Slot { slot, .. } => { if slot > self.slot { self.slot = slot; crate::send::tpu::SLOT.store(slot, std::sync::atomic::Ordering::Relaxed); } }
-                Event::Status { msg, .. } => status(&msg),
-                Event::Alt { table, addrs } => self.on_alt(table, addrs),
-                Event::Settled(st) => { let poh = &self.poh; if let Some(x) = self.exec.as_mut() { x.on_settled(*st, &|s| poh.get(s).copied()); } }
-            }
-            if !self.confirm_wait.is_empty() { self.expire_confirms(); }
+            let q = rx.len();
+            if q > self.queue_hwm { self.queue_hwm = q; }
+            self.on_event(ev, t_engine, &mut status);
             if !self.state_pending.is_empty() && rx.is_empty() { self.flush_state(); }
             if now_ns() - last_status > 10_000_000_000 { self.housekeeping(&mut last_status, &mut last_drift, rx.len(), &mut status); }
         };
-        // finish open opportunities so nothing is lost
+        self.finish();
+        end
+    }
+
+    /// One input event, dequeued at `t_engine`: the body of `run`'s loop (`new_offline` users call it, then
+    /// `flush_state` when their queue is empty, as `run` does)
+    pub fn on_event(&mut self, ev: Event, t_engine: u64, status: &mut dyn FnMut(&str)) {
+        match ev {
+            Event::Tx(a) => self.on_tx(a, t_engine),
+            Event::Account { slot, pubkey, data, t, txn, .. } => self.on_account(pubkey, data, slot, t, txn, t_engine),
+            Event::Slot { slot, status: st, .. } => {
+                if slot > self.slot { self.slot = slot; crate::send::tpu::SLOT.store(slot, std::sync::atomic::Ordering::Relaxed); }
+                // Yellowstone SlotStatus: 0 processed, 1 confirmed, 2 finalized (status.jsonl v2 `slot`)
+                if let Some(x) = usize::try_from(st).ok().and_then(|i| self.slots.get_mut(i)) { if slot > *x { *x = slot; } }
+            }
+            Event::Status { msg, .. } => status(&msg),
+            Event::Alt { table, addrs } => self.on_alt(table, addrs),
+            Event::Settled(st) => { let poh = &self.poh; if let Some(x) = self.exec.as_mut() { x.on_settled(*st, &|s| poh.get(s).copied()); } }
+        }
+        if !self.confirm_wait.is_empty() { self.expire_confirms(); }
+    }
+
+    /// the end of the run: open opportunities finished, the signatures still in their window written, the lookup
+    /// tables dumped (alts-final), the signer statistics saved
+    pub fn finish(&mut self) {
         let ids: Vec<u64> = self.opps.keys().copied().collect();
         for id in ids { self.finish_opp(id); }
         let left: Vec<u64> = self.sigs.keys().copied().collect();
         for k in left { if let Some(s) = self.sigs.remove(&k) { self.write_txarr(k, &s); if s.trigger.is_some() { self.write_arrivals(&s); } } }
         self.write_alts();
-        let _ = self.out_arr.flush();
-        let _ = self.out_trig.flush(); let _ = self.out_opp.flush(); let _ = self.out_pred.flush();
-        crate::feeds::flush_poh_log();
         self.save_signer_stats();
-        end
     }
 
     /// The last status.jsonl line, with the run's stop reason (MEASUREMENT A.5; WP-01)
     pub fn write_final_status(&mut self, queue: usize, stop_reason: &str) {
         self.write_status_line(queue, Some(stop_reason));
-        let _ = self.out_status.flush();
     }
 
     fn housekeeping(&mut self, last_status: &mut u64, last_drift: &mut u64, queue: usize, status: &mut impl FnMut(&str)) {
@@ -444,30 +514,85 @@ impl Engine {
         if now - *last_status > 10_000_000_000 {
             *last_status = now;
             self.save_signer_stats();
-            if let Some(r) = crate::record::get() { r.flush(); }
             let line = self.write_status(queue);
             status(&line);
-            let _ = self.out_trig.flush(); let _ = self.out_opp.flush(); let _ = self.out_pred.flush(); let _ = self.out_status.flush(); let _ = self.out_arr.flush();
-            crate::feeds::flush_poh_log();
+            self.write_feedhealth(now);
         }
     }
 
     fn write_status(&mut self, queue: usize) -> String { self.write_status_line(queue, None) }
 
+    /// feedhealth.jsonl (MEASUREMENT §4.9): one line per feed and one for the state stream, every 10 s
+    fn write_feedhealth(&mut self, t: u64) {
+        if !self.rec.is_on() || (self.feed_counters.is_empty() && self.state_counters.is_none()) { return; }
+        let tip = self.slots[0].max(self.slot);
+        let mut rows = Vec::new();
+        if let Some(c) = &self.state_counters { rows.push(rec::health::FeedRow { id: None, c: c.as_ref(), lead: None }); }
+        for ((i, c), lead) in self.feed_counters.iter().enumerate().zip(self.leads.iter_mut()) {
+            rows.push(rec::health::FeedRow { id: Some(i as u16), c: c.as_ref(), lead: Some(lead) });
+        }
+        for l in self.fh.lines(t, tip, rows) { self.rec.json(rec::FEEDHEALTH, l); }
+    }
+
+    /// status.jsonl v2 (MEASUREMENT §4.8, §2.2): every number is `_total` (since the start), `_delta` (since the last
+    /// line) or `_now`; percentiles name their window (`latency`: the interval; `latency_run`: the whole run, WP-00's
+    /// series). Sections later WPs bring (commit, forks, lag_slo, accuracy, chainfetch, coverage) are absent; health
+    /// fields they fill are null
     fn write_status_line(&mut self, queue: usize, stop_reason: Option<&str>) -> String {
-        let mut lat = serde_json::Map::new();
+        let t = now_ns();
+        let (mut lat, mut lat_run) = (serde_json::Map::new(), serde_json::Map::new());
         // the engine's stage series, then the send's (exec: decided_to_signed, signed_to_fired, signed_to_sent). Each is
         // a bounded reservoir (lat.rs; review F7: no 200k-sample sorts on the engine thread)
         let exec_lat = self.exec.as_mut().map(|x| &mut x.lat);
         for v in self.lat.iter_mut().chain(exec_lat.into_iter().flat_map(|l| l.iter_mut())) {
-            lat.insert(v.name.to_string(), v.summary());
+            lat.insert(v.name.to_string(), v.take_interval(1e3));
+            lat_run.insert(v.name.to_string(), v.run_pct(1e3));
         }
         let waiting: usize = self.alt_wait.values().map(|v| v.len()).sum();
-        let mut line = json!({ "t_ns": now_ns(), "slot": self.slot, "queue": queue, "store_updates": self.store.updates,
-            "open_opps": self.opps.len(), "alts_cached": self.alts.len(), "alt_waiting": waiting, "ata_misses": self.ata.misses.get(),
-            "counts": self.counts, "latency": lat, "exec": self.exec.as_ref().map(|x| x.status()), "send_gate": self.gate.as_ref().map(|g| g.json()) });
+        let p = &mut self.sp;
+        let counts_delta: serde_json::Map<String, Value> = self.counts.iter().filter_map(|(k, v)| {
+            let d = v - p.counts.get(k).copied().unwrap_or(0);
+            (d > 0).then(|| (k.to_string(), json!(d)))
+        }).collect();
+        let (exec, money) = match self.exec.as_ref() { Some(x) => x.status_v2(&mut self.exec_prev), None => (Value::Null, Value::Null) };
+        let st = self.rec.stats();
+        let recorder = st.as_ref().map(|st| {
+            let dropped_total: serde_json::Map<String, Value> = st.dropped.iter().filter(|(_, n)| *n > 0).map(|(k, n)| (k.clone(), json!(n))).collect();
+            let dropped_delta: serde_json::Map<String, Value> = st.dropped.iter().filter_map(|(k, n)| {
+                let d = n - p.dropped.get(k).copied().unwrap_or(0);
+                (d > 0).then(|| (k.clone(), json!(d)))
+            }).collect();
+            let nonzero = |v: &[(String, u64)]| -> serde_json::Map<String, Value> { v.iter().filter(|(_, n)| *n > 0).map(|(k, n)| (k.clone(), json!(n))).collect() };
+            // review F1, F2: records lost to I/O errors and encoders, and writers that died, beside the drops
+            json!({ "dropped_total": dropped_total, "dropped_delta": dropped_delta, "suppressed_total": nonzero(&st.suppressed),
+                "io_errors_total": nonzero(&st.io_errors), "io_lost_total": nonzero(&st.io_lost), "encode_errors_total": nonzero(&st.encode_errors),
+                "writers_dead_now": st.writers_dead, "echo_dropped_total": st.echo_dropped,
+                "queue_hwm": st.queue_hwm.iter().map(|(q, n)| (q.to_string(), json!(n))).collect::<serde_json::Map<_, _>>() })
+        });
+        let nz = |x: u64| (x > 0).then_some(x);
+        let mut line = json!({ "seq": self.status_lines, "t_ns": t, "interval_ns": t.saturating_sub(p.t), "run_s": t.saturating_sub(self.t_start) as f64 / 1e9,
+            "slot": { "processed": nz(self.slots[0].max(self.slot)), "confirmed": nz(self.slots[1]), "finalized": nz(self.slots[2]) },
+            "tip_lag_slots_now": (self.slot > 0 && self.store_slot_max > 0).then(|| self.slot as i64 - self.store_slot_max as i64),
+            "send_gate": self.gate.as_ref().map(|g| g.json()),
+            "health": { "recorder_ok": st.as_ref().map(|s| s.core_ok), "warmup_ready": null, "lag_slo_ok": null, "leaders_ok": null,
+                "blockhash_age_slots_now": null, "blockhash_src_now": null, "jito_token_age_s_now": null },
+            "queue": { "engine_now": queue, "engine_hwm_delta": self.queue_hwm.max(queue) },
+            "store": { "accounts_now": self.store.accts.len(), "updates_total": self.store.updates, "updates_delta": self.store.updates - p.updates,
+                "stale_total": self.store.stale_dropped, "stale_delta": self.store.stale_dropped - p.stale, "pending_groups_now": self.state_pending.len() },
+            "alts": { "cached_now": self.alts.len(), "waiting_txs_now": waiting, "fetching_now": self.alt_inflight.len(), "missing_now": self.alt_missing.len(),
+                "learned_delta": self.counts.get("alt_learned").copied().unwrap_or(0) - p.counts.get("alt_learned").copied().unwrap_or(0) },
+            "opps_open_now": self.opps.len(), "ata_misses_total": self.ata.misses.get(),
+            "counts_total": self.counts, "counts_delta": counts_delta,
+            "latency": lat, "latency_run": lat_run,
+            "exec": exec, "money": money, "recorder": recorder });
         if let Some(r) = stop_reason { line["stop_reason"] = json!(r); }
-        let _ = writeln!(self.out_status, "{line}");
+        p.t = t;
+        p.counts = self.counts.clone();
+        p.updates = self.store.updates;
+        p.stale = self.store.stale_dropped;
+        if let Some(st) = &st { p.dropped = st.dropped.iter().cloned().collect(); }
+        self.queue_hwm = queue;
+        self.rec.json(rec::STATUS, line);
         self.status_lines += 1;
         let c = |k: &str| self.counts.get(k).copied().unwrap_or(0);
         format!("slot {} queue {} | txs {} triggers {} opps {} | alt: waits {} learned {} still waiting {} | preds checked {}", self.slot, queue,
@@ -577,9 +702,11 @@ impl Engine {
         }
     }
 
-    fn fetch_alt(&self, table: Pk) {
-        let (rpc, back) = (self.rpc.clone(), self.tx_back.clone());
-        self.rt.spawn(async move {
+    /// a lookup table, fetched on the background runtime (its answer comes back as `Event::Alt`)
+    fn fetch_alt(&mut self, table: Pk) {
+        let Some(io) = &self.io else { self.offline_fetches.push(("alt", vec![table])); return };
+        let (rpc, back) = (io.rpc.clone(), io.tx_back.clone());
+        io.rt.spawn(async move {
             let addrs = match rpc.accounts(&[table]).await {
                 Ok((_, v)) => v.into_iter().next().flatten().and_then(|a| crate::tx::parse_alt(&a.data)).map(Arc::new),
                 Err(_) => None,
@@ -662,7 +789,7 @@ impl Engine {
         let Some((pool, venue, slot)) = s.trigger else { return };
         let arr: serde_json::Map<String, serde_json::Value> = s.arrivals()
             .map(|(f, t)| (self.feeds.get(f as usize).cloned().unwrap_or_default(), json!(t))).collect();
-        let _ = writeln!(self.out_arr, "{}", json!({ "slot": slot, "pool": b58(&pool), "venue": venue, "source": self.reg.source(&pool),
+        self.rec.json(rec::ARRIVALS, json!({ "slot": slot, "pool": b58(&pool), "venue": venue, "source": self.reg.source(&pool),
             "first_feed": self.feeds.get(s.first_feed as usize), "arrivals": arr }));
     }
 
@@ -685,7 +812,7 @@ impl Engine {
             "zfo": sw.zero_for_one, "amount": sw.amount, "exact_out": sw.exact_out, "executed": a.executed,
             "st": st, "opp": opp });
         if hint_only { line["hint_only"] = json!(true); }
-        let _ = writeln!(self.out_trig, "{line}");
+        self.rec.json(rec::TRIGGERS, line);
         st
     }
 
@@ -930,8 +1057,7 @@ impl Engine {
     /// size up to the unconstrained best size, so each cap trades min(best size, cap). A size a pool can't quote (e.g.
     /// past the DLMM bin arrays we follow) is recorded as null.
     fn record_caps(&self, id: u64, b: &Best, kind: &str, now: i64) {
-        if self.cfg.budget_caps_sol.is_empty() { return; }
-        let Some(r) = crate::record::get() else { return };
+        if self.cfg.budget_caps_sol.is_empty() || !self.rec.is_on() { return; }
         let (Some(&bi), Some(&si)) = (self.reg.by_pool.get(&b.buy), self.reg.by_pool.get(&b.sell)) else { return };
         let (Some(lb), Some(ls)) = (self.leg(bi, now), self.leg(si, now)) else { return };
         let (pb, ps) = (&self.reg.pools[bi], &self.reg.pools[si]);
@@ -958,19 +1084,24 @@ impl Engine {
         }).collect();
         let line = json!({ "id": id, "kind": kind, "slot": self.slot, "buy": b58(&b.buy), "sell": b58(&b.sell), "buy_venue": pb.venue, "sell_venue": ps.venue,
             "mint": b58(&b.mint), "best_size": best.0, "best_net": best.1 - fee, "at_trade_size": [b.size, b.net], "caps": caps });
-        crate::record::Recorder::line(&r.caps, &line.to_string());
+        self.rec.json(rec::CAPS, line);
     }
 
     // ---------------------------------------------------------------- pool state
 
     fn on_account(&mut self, key: Pk, data: Vec<u8>, slot: u64, t: u64, txn: Option<[u8; 64]>, t_engine: u64) {
         if !self.store.update(key, data, slot, t, txn) { return; }
+        if slot > self.store_slot_max { self.store_slot_max = slot; }
         let Some(&i) = self.acct_pool.get(&key) else { return };
         let Some(txn) = txn else { return };
-        if let Some(r) = crate::record::get() {
+        if self.rec.is_on() {
             if self.moves_seen.len() > 500_000 { self.moves_seen.clear(); }
             if self.moves_seen.insert((sig8(&txn), i as u32)) {
-                crate::record::Recorder::line(&r.moves, &format!("{} {slot} {} {t}", sigs58(&txn), b58(&self.reg.pools[i].pool)));
+                // moves.log v2: `sig slot pool t_ns acct write_version role` (the write version comes with WP-03: `-`);
+                // the base58 is done on the recorder's writer
+                let pool = self.reg.pools[i].pool;
+                let role = if key == pool { "pool" } else { "vault" };
+                self.rec.emit(rec::MOVES, Record::enc(move |o| { let _ = write!(o, "{} {slot} {} {t} {} - {role}", sigs58(&txn), b58(&pool), b58(&key)); }));
             }
         }
         if let Some((sg, _)) = self.trig_pending.remove(&txn) { self.signer_stats.entry(sg).or_default().0 += 1; }
@@ -1032,7 +1163,7 @@ impl Engine {
                     "err0": p0 as i128 - s.r0 as i128, "err1": p1 as i128 - s.r1 as i128 })
             }
         };
-        let _ = writeln!(self.out_pred, "{line}");
+        self.rec.json(rec::PREDICTIONS, line);
         self.checks.remove(&i);
         self.count("pred_checked");
     }
@@ -1051,14 +1182,17 @@ impl Engine {
     }
 
     pub fn publish_watch_list(&self) {
+        let Some(io) = &self.io else { return };
         let mut l: Vec<String> = self.reg.static_accounts().iter().map(b58).collect();
         for list in self.store.dlmm_arrays.values() { for (_, k) in list { l.push(b58(k)); } }
-        let _ = self.watch_list.send(l);
+        let _ = io.watch_list.send(l);
     }
 
-    fn fetch_accounts(&self, keys: Vec<Pk>) {
-        let (rpc, back) = (self.rpc.clone(), self.tx_back.clone());
-        self.rt.spawn(async move {
+    /// accounts (newly followed DLMM bin arrays), fetched on the background runtime; they come back as account events
+    fn fetch_accounts(&mut self, keys: Vec<Pk>) {
+        let Some(io) = &self.io else { self.offline_fetches.push(("accounts", keys)); return };
+        let (rpc, back) = (io.rpc.clone(), io.tx_back.clone());
+        io.rt.spawn(async move {
             if let Ok((slot, v)) = rpc.accounts(&keys).await {
                 for (k, a) in keys.iter().zip(v) {
                     if let Some(a) = a { let _ = back.send(Event::Account { slot, pubkey: *k, owner: a.owner, lamports: a.lamports, data: a.data, t: now_ns(), txn: None }); }
@@ -1094,7 +1228,7 @@ impl Engine {
                 "first_feed": seen.and_then(|x| self.feeds.get(x.first_feed as usize)),
                 "window_ms": seen.zip(trig_info).map(|(x, tr)| (x.first_t as f64 - tr.first_t as f64) / 1e6) })
         });
-        let _ = writeln!(self.out_opp, "{}", json!({
+        self.rec.json(rec::OPPORTUNITIES, json!({
             "id": o.id, "trigger": sigs58(&o.trig), "trigger_feed": self.feeds.get(o.trig_feed as usize), "slot": o.slot,
             "trigger_pool": b58(&o.trig_pool), "buy_pool": b58(&o.buy), "sell_pool": b58(&o.sell), "mint": b58(&o.mint),
             "buy_source": self.reg.source(&o.buy), "sell_source": self.reg.source(&o.sell),
@@ -1209,8 +1343,8 @@ mod tests {
             t0_prog: *crate::pda::TOKEN_PROGRAM, t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![], flag: false }
     }
 
-    struct Rig { eng: Engine, dir: std::path::PathBuf, _rt: tokio::runtime::Runtime }
-    impl Drop for Rig { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); } }
+    struct Rig { eng: Engine, dir: std::path::PathBuf, rec: Rec, _rt: tokio::runtime::Runtime }
+    impl Drop for Rig { fn drop(&mut self) { self.rec.close(); let _ = std::fs::remove_dir_all(&self.dir); } }
 
     /// two AMM v4 pools on WSOL/MINT, 1% apart (a round trip between them pays), held at slot 10
     fn rig(name: &str, cfg: StrategyCfg) -> Rig {
@@ -1231,9 +1365,10 @@ mod tests {
         let (tx, _rx) = crossbeam_channel::unbounded();
         let (wtx, _wrx) = tokio::sync::watch::channel(Vec::new());
         let interest = Arc::new(Interest { keys: Default::default(), tables: Default::default() });
-        let eng = Engine::new(Arc::new(reg), store, cfg, vec!["feed0".into()], 1_000, interest, &dir, crate::rpc::Rpc::race(vec![]),
+        let rec = rec::start(rec::Opts { dir: dir.clone(), run: "test".into(), producer: "test".into(), cfg: Default::default(), feeds: vec!["feed0".into()], monitor: false, echo: None }).unwrap();
+        let eng = Engine::new(Arc::new(reg), store, cfg, vec!["feed0".into()], 1_000, interest, rec.clone(), crate::rpc::Rpc::race(vec![]),
             rt.handle().clone(), tx, wtx).unwrap();
-        Rig { eng, dir, _rt: rt }
+        Rig { eng, dir, rec, _rt: rt }
     }
 
     /// a decoded swap of 1 SOL into pool 1 by SIGNER
@@ -1260,9 +1395,9 @@ mod tests {
         assert!(e.trig_pending.contains_key(&TRIG), "signer statistics keep learning");
         // review F9: a hint is not a pricing decision: its own series, the v1 ones stay for priced triggers
         assert_eq!((lat(e, "hint_rx_to_done"), lat(e, "rx_to_decided"), lat(e, "resolved_to_decided")), (1, 0, 0));
-        e.out_trig.flush().unwrap();
-        let text = std::fs::read_to_string(r.dir.join("triggers.jsonl")).unwrap();
-        let line: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        r.rec.sync();
+        let lines = rec::read_jsonl(&r.dir, "triggers").unwrap();
+        let line = &lines[0];
         assert!(line["opp"].is_null());
         assert_eq!(line["hint_only"], json!(true));
         assert_eq!((line["st"]["rx"].as_u64(), line["st"]["engine"].as_u64()), (Some(100), Some(300)));
@@ -1357,6 +1492,91 @@ mod tests {
         let o = e.opps.values().next().unwrap();
         assert_eq!((o.st.rx, o.st.engine), (1_000, 1_500), "the first part's times, not the second's (2,000 / 2,600)");
         assert!(e.state_first.is_empty(), "taken once the pool was complete");
+    }
+
+    /// PLAN WP-02 acceptance (F13), the engine benchmark: 100k synthetic account updates (50k transactions, each moving
+    /// both vaults of one of 40 pools) through `Engine::new_offline`, with the recorder on and off. With it on (moves.log
+    /// for every update group, status and the rest through the queues) `state_recv_to_decided` p99 is within 5 µs of the
+    /// run without it, both with no opportunity priced and with about 1% of updates opening one (review F9: triggers,
+    /// opportunities, caps and predictions are emitted then). Each mode runs three times, alternating, and the best p99
+    /// of each is compared (other tests run on the same machine meanwhile)
+    #[test]
+    fn engine_benchmark_recorder_on_off() {
+        const POOLS: u8 = 40;
+        const TXS: u64 = 50_000;
+        /// `min_profit`: u64::MAX / 4 prices no opportunity (moves only); a real threshold with `gaps` (every 200th
+        /// transaction moves one pool 10% off its pair: it and the pair's next update open one) prices about 1% of
+        /// updates as opportunities, whose caps and opportunities records are made on the engine thread too (review F9)
+        fn engine(min_profit: u64) -> Engine {
+            let mut reg = Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+            let mut store = Store::default();
+            for n in 0..POOLS {
+                // pairs of pools on 20 mints, 1% apart
+                let mut m = meta(n + 1);
+                m.pool = [n + 1; 32];
+                m.vault0 = { let mut k = [n + 1; 32]; k[31] = 200; k };
+                m.vault1 = { let mut k = [n + 1; 32]; k[31] = 201; k };
+                m.t0 = { let mut k = MINT; k[0] = n / 2; k };
+                reg.by_pool.insert(m.pool, n as usize);
+                reg.pairs.entry(pair_key(&m.t0, &WSOL)).or_insert_with(Vec::new).push(n as usize);
+                store.update(m.pool, ammv4_pool(), 10, 1, None);
+                store.update(m.vault0, vault(1_000_000_000_000_000), 10, 1, None);
+                store.update(m.vault1, vault((1_000 + (n % 2) as u64 * 10) * 1_000_000_000), 10, 1, None);
+                reg.pools.push(m);
+            }
+            // the caps table (caps.jsonl) for every opportunity, as the stage-0 config has it
+            Engine::new_offline(Arc::new(reg), store, StrategyCfg { state_triggers: true, min_profit_lamports: min_profit, budget_caps_sol: vec![0.5, 2.0, 10.0],
+                ..StrategyCfg::default() })
+        }
+        fn bench(rec: Rec, min_profit: u64, gaps: bool) -> (u64, u64, u64) {
+            let mut e = engine(min_profit);
+            e.set_rec(rec);
+            let mut status = |_: &str| {};
+            for k in 0..TXS {
+                let i = (k % POOLS as u64) as usize;
+                let m = e.reg.pools[i].clone();
+                let mut sig = [0u8; 64];
+                sig[..8].copy_from_slice(&k.to_le_bytes());
+                // one slot for all: the AMM v4 snapshot refuses parts more than 2 slots apart, and only the vaults move here
+                let slot = 11;
+                let sol = if gaps && k % 200 == 0 { 1_100 } else { 1_000 + (k % 7) };
+                let t = now_ns();
+                e.on_event(Event::Account { slot, pubkey: m.vault1, owner: [0; 32], lamports: 0, data: vault(sol * 1_000_000_000), t, txn: Some(sig) }, now_ns(), &mut status);
+                e.on_event(Event::Account { slot, pubkey: m.vault0, owner: [0; 32], lamports: 0, data: vault(999_000_000_000_000), t: now_ns(), txn: Some(sig) }, now_ns(), &mut status);
+                e.flush_state();
+                // the opportunities end (opportunities.jsonl), as their watch window would end them, outside the timed part
+                if gaps && k % 1_000 == 999 { e.finish(); }
+            }
+            let opps = n(&e, "state_opportunity");
+            e.finish();
+            let s = e.series_mut("state_recv_to_decided").unwrap();
+            assert_eq!(s.n(), TXS, "every transaction evaluated");
+            (s.pct(0.5), s.pct(0.99), opps)
+        }
+        let dir = std::env::temp_dir().join(format!("arbx-engine-bench-{}-{}", std::process::id(), now_ns()));
+        let best = |v: &[(u64, u64, u64)]| v.iter().map(|x| x.1).min().unwrap();
+        for (what, min_profit, gaps) in [("moves only", u64::MAX / 4, false), ("1% opportunities", 100_000_000, true)] {
+            let (mut off, mut on) = (Vec::new(), Vec::new());
+            for _ in 0..3 {
+                off.push(bench(Rec::off(), min_profit, gaps));
+                let rec = rec::start(rec::Opts { dir: dir.clone(), run: "bench".into(), producer: "test".into(), cfg: Default::default(), feeds: vec![], monitor: false, echo: None }).unwrap();
+                on.push(bench(rec.clone(), min_profit, gaps));
+                rec.close();
+                assert_eq!(rec::read_text(&dir, "moves").unwrap().len() as u64, TXS, "the recorder wrote a moves line per transaction");
+                if gaps {
+                    let opps = on.last().unwrap().2;
+                    assert!((TXS / 200..=TXS / 50).contains(&opps), "about 1% of updates open an opportunity: {opps}");
+                    // the state path's records (decoded triggers, arrivals and predictions come from the tx feeds' path)
+                    for s in ["caps", "opportunities"] { assert!(rec::read_jsonl(&dir, s).unwrap().len() as u64 >= opps / 2, "{s} recorded"); }
+                } else {
+                    assert_eq!(on.last().unwrap().2, 0);
+                }
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            let (p99_off, p99_on) = (best(&off), best(&on));
+            eprintln!("{what}: state_recv_to_decided p50/p99 ns (opportunities): recorder off {off:?}, on {on:?}; best p99 off {p99_off} on {p99_on}");
+            assert!(p99_on <= p99_off + 5_000, "{what}: recorder on adds {} ns to the p99", p99_on as i64 - p99_off as i64);
+        }
     }
 
     /// review F6: a state opportunity's caps line waits until the flush has priced every pool of the transaction

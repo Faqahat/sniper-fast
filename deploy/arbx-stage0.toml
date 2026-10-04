@@ -6,14 +6,14 @@
 #   - bundles expecting 1M or more throttled to 0.5/s ([live] big_band_*); crowded pools ranked last ([live] crowded_pools_file)
 #     and kept out of the bands from 100k ([live] crowded_skip_min_expected_lamports, OD-3's alternative)
 #   - no new token accounts ([live] max_new_token_accounts = 0: rent turned the bundle arm's +163k into -17.9M)
-#   - the recorder on ([record] enabled = true); skip_failing_signers on; sim gate off; settle_s 3
+#   - the recorder on (WP-02: always on, [record] only sets budgets); skip_failing_signers on; sim gate off; settle_s 3
 #   - paths repointed to the arbx tree (/root/arbx)
 # Check it with `arbx check --config deploy/arbx-stage0.toml`: only jito-bundle is enabled.
 #
 # Owner procedure (WP-00 field acceptance; review F1). The file ships in shadow, so neither run needs an edit:
 #   1. arbx run --config deploy/arbx-stage0.toml --minutes 10 --name wp00-shadow-rec      (recorder on)
-#   2. arbx run --config deploy/arbx-stage0.toml --minutes 10 --name wp00-shadow-norec --no-record
-#      (`--no-record` = [record] enabled = false for this run only, recorded in meta.json `overrides`)
+#   2. (WP-00 only) the same run with --no-record; WP-02 removed that flag: recording cannot be turned off, and the
+#      recorder-on/off comparison is the offline engine benchmark (rec::tests, `engine_benchmark_recorder_on_off`)
 #   3. once both pass: set mode = "live" below (note it in the merge note), then `arbx run ... --live`.
 #      `--shadow` runs the live file in shadow again (meta.json `overrides`), e.g. for WP-02's baseline comparison.
 #   The send side (big band, crowded skip and rank, the over-rate split, decided_to_signed / signed_to_fired /
@@ -428,10 +428,22 @@ tip_lamports = 1000000
 max_per_sec = 1
 
 [record]
-# WP-00: on (it was off from w5h2-p3, W §8): rivals, executed results (Haan PumpSwap), per-feed arrivals, pool moves,
-# slots, caps. No raw entries archive until an entries feed is alive (erpc and constantk-prism delivered 0 in p12)
-enabled = true
-archive_feed = ""
+# WP-02: the recorder is always on (MEASUREMENT §0-§1): every stream is zstd-compressed in-process into
+# <stream>.NNN.<ext>.zst (frames every flush_ms, readable while the run goes on), rotated, with a manifest.json; the
+# small streams (status, events, feedhealth, resources, keepalive, run.log) stay plain. These keys only set budgets.
+# No raw entries archive until an entries feed is alive (erpc and constantk-prism delivered 0 in p12)
+archive_feeds = []
+disk_budget_gb = 40     # per segment; past 90% of it the disk ladder stops entries, rivals, then lengthens accounts keyframes; past it: shadow + stop
+min_free_gb = 25        # the same two stages on free space (under 25 / 0.9 GB, then under 25 GB); a run does not start under it
+rotate_mb = 256
+rotate_min = 60
+flush_ms = 1000
+zstd_level = 3
+queue_max_mb = 1024     # each bounded recorder queue's byte cap (declared payloads: binary records, the entries archive)
+
+[runtime]
+# WP-02: RPC runs on its own runtime (arbx-bg, niced +5), apart from the state stream, feeds and sends (arbx-hot, 2)
+bg_threads = 3
 
 [[send]]
 name = "jupiter"
