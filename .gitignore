@@ -25,3 +25,6 @@ id.json
 
 # program build outputs
 program/**/target/
+
+# agent worktrees
+.claude/
