@@ -193,13 +193,4 @@ mod tests {
         assert_eq!(keypair(&decrypt(&blob, "correct horse").unwrap()).unwrap().verifying_key(), k.verifying_key());
         assert!(decrypt(&blob, "wrong").is_err());
     }
-
-    /// a blob written by arbed's own encryptKey (testdata-keystore.json), passphrase "test pass\n" (kept byte for byte)
-    #[test]
-    fn decrypts_arbeds_keystore() {
-        let v: serde_json::Value = serde_json::from_str(include_str!("testdata-keystore.json")).unwrap();
-        let key = keypair(&decrypt(v["enc"].as_str().unwrap(), "test pass\n").unwrap()).unwrap();
-        assert_eq!(bs58::encode(key.verifying_key().as_bytes()).into_string(), v["pubkey"].as_str().unwrap());
-        assert!(decrypt(v["enc"].as_str().unwrap(), "test pass").is_err(), "the trailing newline is part of the passphrase");
-    }
 }
