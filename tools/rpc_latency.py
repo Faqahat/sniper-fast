@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """RPC latency check (read-only): warm keep-alive latency per method and a cold connection breakdown, per provider.
 
-usage (on the bot host, with the bot's .env loaded into the environment, never printed):
-    set -a; . /root/arb-lab/.env; set +a; python3 tools/rpc_latency.py --seed data/seed-pools-w4.csv --out runs/rpc-latency.json
+usage (on the bot host from /root/arbx, with arbx's own .env loaded into the environment, never printed):
+    set -a; . deploy/.env; set +a; python3 tools/rpc_latency.py --seed data/seed-pools-w4.csv --out runs/rpc-latency.json
 
 Providers: haan (https://rpc.haandigital.eu/, Bearer HAAN_API_KEY), shyft (SHYFT_RPC_URL), public (api.mainnet-beta).
 URLs and keys are never printed; output names providers only. Requests are sequential with a pause (default 0.2 s),

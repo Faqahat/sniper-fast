@@ -232,3 +232,24 @@ Added 2026-10-04 at the owner's request.
 - hourly reconciliation clean;
 - 0 non-bundle sends;
 - evidence that real opportunities were capped by the $80 size limit. Otherwise $500 adds risk, not profit.
+
+## I-11. arbx is standalone (owner, 2026-10-04)
+
+arbx has no runtime, build, test or tooling dependency on arb-lab, either locally or on Cherry. Mentions of arb-lab as history (what changed and why) stay; anything operational does not.
+
+**Done (this commit):**
+- Removed `tools/analysis/`: arb-lab's one-off scripts, all hardwired to `/root/arb-lab`. Their findings are kept in `docs/research/PATTERNS.md`, moved here.
+- Repointed `tools/haanrpc.sh`, `tools/pooldisco` and `tools/rpc_latency.py` to `/root/arbx` and arbx's own `.env`.
+
+**After E2's merge** (those files are being edited now):
+- `deploy/arbx-stage0.toml`:
+  - `wallet_keystore` → `/root/arbx/wallets/trading.enc`. The owner places their `.enc` there at go-live; arbx never reads arb-lab's.
+  - The `.env` is `/root/arbx/deploy/.env`, beside the config, mode 600, created by the owner at go-live.
+- `deploy/arb.toml` is arb-lab's shadow config, with every path in `/root/arb-lab`. Retire it to `deploy/legacy/`, or repoint it to `/root/arbx`, and update the tests and the `arbx check` list to match.
+- Cosmetic names in src: the temp dir `arb-lab-key-*` in send/jito.rs and `arb-lab senders --probe` in send/mod.rs.
+- PLAN.md operational notes: "tools/analysis stays as history"; "copy arb-lab's signer stats".
+
+**Rules from now on:**
+- Signer stats start empty: nothing is copied from arb-lab. They are learned per segment (I-5).
+- Every file a test reads lives in the repo (`testdata/`). A test that needs a file outside the repo is a bug.
+- Agent briefs name only in-repo fixtures.

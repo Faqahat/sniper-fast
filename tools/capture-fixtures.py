@@ -12,7 +12,8 @@ Modes (exactly one per call):
                        over every copy signature in the raw attempts of the `landed.segments`, compared with the list.
                        Prints the difference; exit 1 if any landed copy is missing from the list or vice versa.
   --pool-bots DIR      Rebuild testdata/legacy/pool-bots.json from the patterns scans DIR/scan-w5h-p*.json
-                       (Cherry: /root/arb-lab/tmp-patterns/). Same rule as tools/analysis/patterns/analyze.py:32.
+                       (the 2026-10 scans; the scan scripts were
+                       arb-lab tools, removed from arbx 2026-10-04, see docs/research/PATTERNS.md). Same rule as their POOLBOTS.
   --wins RUNS          Rebuild testdata/legacy/wins/<seg>/{outcomes,attempts}.jsonl.xz: the verbatim v1 lines of the
                        wins listed in signatures.json `wins_w5h2_w5h3`, for segments that have no full copy in raw/.
                        RUNS is an arb-lab runs directory (RUNS/<seg>/outcomes.jsonl).

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Offline keystore encryption for arb-lab. Run on the OFFLINE machine where the wallet was generated:
+// Offline keystore encryption for arbx (the format arb-lab introduced). Run on the OFFLINE machine where the wallet was generated:
 //   node encrypt-keystore.mjs <keypair.json from solana-keygen> <out.enc>
-// It asks for the passphrase twice (no echo) and writes arb-lab's v3 keystore:
+// It asks for the passphrase twice (no echo) and writes the v3 keystore arbx reads (src/wallet.rs):
 //   "v3:17:" + hex(salt 16 | iv 12 | tag 16 | ciphertext), key = scrypt(pass, salt, N=2^17, r=8, p=1, 32 bytes),
 //   AES-256-GCM over the base58 secret key. Needs only Node.js (or Bun); no network, no packages.
 import { readFileSync, writeFileSync, existsSync } from "node:fs";

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Reproduce Haan RPC failures: concurrent and sequential getMultipleAccounts; print status codes and error bodies.
-cd ~/arb-lab
-K=$(grep -E '^HAAN_API_KEY=' .env | head -1 | cut -d= -f2- | tr -d '"'"'"' \r')
+# usage: tools/haanrpc.sh [env file]   (default: arbx's own /root/arbx/deploy/.env; the key is read, never printed)
+ENVF=${1:-/root/arbx/deploy/.env}
+K=$(grep -E '^HAAN_API_KEY=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '"'"'"' \r')
 [ -z "$K" ] && { echo "no HAAN_API_KEY"; exit 1; }
 BODY='{"jsonrpc":"2.0","id":1,"method":"getMultipleAccounts","params":[["So11111111111111111111111111111111111111112","EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"],{"encoding":"base64","commitment":"processed"}]}'
 D=$(mktemp -d)

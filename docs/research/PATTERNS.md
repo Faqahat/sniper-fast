@@ -1,6 +1,6 @@
 # Profitable arbitrage on our pools: patterns (w5h-p1..p15, 2026-10-03 18:46-21:28 UTC)
 
-Scope: 15 live segments, 2.47 h of recording on Cherry. Everything below is aggregate statistics from public transactions we recorded (rivals.jsonl, exec.jsonl, moves.log, txarr/poh, our attempts/outcomes), plus trade sizes for wins of 0.01 SOL or more from getTransaction (1,395 calls). Scripts: `scan.py` (runs on Cherry, read-only, output in /root/arb-lab/tmp-patterns/), `sizes.py`, `analyze.py`, `extra.py` (this folder).
+Scope: 15 live segments, 2.47 h of recording on Cherry. Everything below is aggregate statistics from public transactions we recorded (rivals.jsonl, exec.jsonl, moves.log, txarr/poh, our attempts/outcomes), plus trade sizes for wins of 0.01 SOL or more from getTransaction (1,395 calls). Scripts: `scan.py`, `sizes.py`, `analyze.py`, `extra.py`. These were arb-lab tools run on Cherry and were removed from arbx on 2026-10-04 (arbx is standalone); they are in git history under tools/analysis/patterns/.
 
 ## Definitions and caveats (read first)
 - **Win** = a successful transaction by another signer that touched at least one watched pool, where the signer's SOL+WSOL went up and no other token balance was left over. "Gain" is the signer's net after fees and tips. "Gross" = gain + fee + tip.

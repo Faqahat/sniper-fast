@@ -827,9 +827,9 @@ fn env_file(path: &str) -> HashMap<String, String> {
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let arg = |name: &str, def: &str| -> String { args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned().unwrap_or(def.to_string()) };
-    let out = arg("--out", "/root/arb-lab/runs/discovery");
+    let out = arg("--out", "/root/arbx/runs/discovery");
     let minutes: f64 = arg("--minutes", "45").parse()?;
-    let envp = arg("--env", "/root/arb-lab/.env");
+    let envp = arg("--env", "/root/arbx/deploy/.env");
     let bots_path = arg("--bots", "");
     let grpc_url = arg("--grpc", "https://grpc.haandigital.eu:443");
     std::fs::create_dir_all(&out)?;
