@@ -85,3 +85,51 @@ Added 2026-10-04 at the owner's request.
   - **No-go:** keep `primary_only`.
   - Before going live, confirm the per-region rate limit with a shadow/keep-alive probe and Jito's docs, and log the probe's result.
 - **Dependencies and effort:** after WP-05 (send policy, verdict history) and WP-08 (leader geography); runs with WP-11's experiment framework. About 1.5–2 days.
+
+## WP-19 / experiment X11: revert-protected non-Jito senders
+
+Added 2026-10-04 at the owner's request.
+
+- **Goal:** find out whether any non-Jito sending path:
+  - can carry our routes **without paying fees when the route fails** (revert protection);
+  - lands what the Jito path does not: BAM leaders, non-Jito leaders (1.3% of slots, reachable only outside Jito), or faster landings.
+- **Evidence:**
+  - **Our unprotected direct copies failed.** They landed 986 times with 1 win and about 24.4M lamports of fees, landing 137–170 ms after send. The untipped Haan or tpu-direct copy landed first in about 2/3 of attempts (wallet-synthesis §2, §4).
+  - **Rivals do win on non-Jito paths, but with revert protection or order flow.** 9EwQoN74's priority path and 8oSD5a9E's no-tip path never fail, land only on non-BAM Jito-client leaders, and are not in Jito's explorer. The service behind them is unidentified (Harmonic is an inference). Mriya's priority path is order-flow sequencing (rival-synthesis §4).
+  - **Relays wrap.** Helius, BlockRazor and Speed land some copies as 2-transaction Jito bundles, so they are partly Jito underneath.
+- **Candidates and what their documentation claims** (`data/sender-tip-accounts.json`; not yet verified by us):
+
+  | Service | Bundles | Revert protection (claimed) | Access | EU endpoint |
+  |---|---|---|---|---|
+  | Harmonic | yes (gRPC, whitelist) | yes (bundles) | free, whitelist | fra.be.harmonic.gg |
+  | Temporal Nozomi | yes (1–4 atomic) | bundles only | free self-serve key | fra2.nozomi.temporal.xyz |
+  | BlockRazor | yes (≤4, on request) | bundles all-or-nothing | free key, 3 TPS | frankfurt.solana.blockrazor.xyz |
+  | NextBlock | yes | `revertOnFail` flag | trial 1 tx/10 s; $249+/mo | frankfurt.nextblock.io |
+  | Hello Moon Lunar Lander | yes | bundles | key via Discord | fra.lunar-lander.hellomoon.io |
+  | Astralane Iris | VIP tiers only | not documented | key; free 5 TPS | fr.gateway.astralane.io |
+  | bloXroute | yes | not documented | free tier | germany.solana.dex.blxrbdn.com |
+  | Helius Sender, Falcon, Paladin P3, 0slot | — | no / not documented | — | excluded unless a later doc shows revert protection |
+
+- **Steps:**
+  1. **Documentation and probe (free, no transactions).**
+     - Confirm each service's revert-protection semantics. Does a failing bundle or transaction never land? Who pays what on a miss? Are the tips conditional?
+     - Confirm its rate limits and whether it forwards to Jito (if it only forwards to Jito, it adds nothing over our Jito path).
+     - Keep-alive RTT from Cherry with `arbx senders`.
+     - Record each conclusion in `docs/research/senders-x11.md`.
+  2. **Shadow measurement (free).** From the WP-02/WP-08 recorder's transfer classification, attribute rivals' landed wins and failures to each service, by leader kind (Jito / BAM / non-Jito). This shows which non-Jito paths actually land winning arbitrage, and whether their failures ever land (which would disprove revert protection).
+  3. **Revert test (small live, owner approval needed).**
+     - For each service that passes steps 1–2, send N ≥ 30 routes built to fail our profit check (`min_profit` above any achievable gain).
+     - **Pass:** 0 of N land, and the wallet pays 0 lamports.
+     - **Any landing:** the service is rejected for unprotected use.
+     - Budget cap: the worst-case fee of N unprotected landings, about 30 × 25k = 0.00075 SOL per service.
+  4. **Landing A/B.** For services that pass, randomly assign eligible attempts to Jito vs the service. Prioritise BAM leaders, non-Jito leaders, and leaders far from Frankfurt. Measure accepted, landed, send→seen ms and wins per arm, with at least 400 attempts per arm.
+     - **Go** (enable for that leader class): landed/attempt better than Jito by ≥ 20% relative on that class, and 0 paid failures.
+     - **No-go:** keep bundle-only.
+- **Design:**
+  - A `SendKind::ProtectedBundle { service }` path, separate from the unprotected direct kinds.
+  - Allowed in live only when `[send_policy] protected_services` lists the service and its step-3 revert test is recorded as passed (`docs/research/senders-x11.md` + a config hash pin).
+  - Per-leader routing (WP-05 leader kinds + WP-08 geography) picks Jito vs a protected service.
+  - Per-service rate budgets and token handling, mirroring WP-05.
+  - Recorder: per-service verdicts and landings (`copies.service`, `bundles.service`).
+- **Owner actions:** API keys or whitelisting (Harmonic whitelist, Nozomi key, BlockRazor key, NextBlock plan, Lunar key), and approval of the step-3 test.
+- **Dependencies and effort:** after WP-05 (send policy), WP-08 (classification, leader geography) and WP-11 (experiment framework). About 2–3 days of engineering, plus owner time for keys.
