@@ -183,3 +183,21 @@ Added 2026-10-04 at the owner's request.
 - **I-9. Recorder volume.**
   - 736 MB in 28 minutes, 88% of rivals.jsonl being `why = venues` rows: about 66 GB/day raw, or about 17 GB/day at zstd-3.
   - **Fix:** WP-02's compression and rotation, plus sampling of `why = venues` rows (WP-08), checked against the disk budget in MEASUREMENT §5.
+- **I-10. Credentials in clear text on send paths** (`docs/research/sol-trade-sdk-audit.md`, addendum).
+  - SpeedLanding's HTTP API takes a keypair **secret** as `?apikey=`. The live arb-lab config sends it over http:80, and Nozomi, Astralane and LandX keys also travel over http.
+  - **Owner:** confirm that SPEEDLANDING_KEY is not the trading wallet. If it is, move funds to a new wallet.
+  - **Fix (WP-05 / WP-19):**
+    - A sender may carry a secret only over TLS/QUIC or in a header.
+    - The config check refuses an `http://` URL holding `${...KEY}` unless the provider has no TLS endpoint, and the exception is recorded.
+    - A provider key that is a keypair must be a dedicated keypair, and the config check refuses one whose pubkey equals the payer.
+- **WP-19 corrections and additions (same report):**
+  - BlockRazor has a per-transaction `revertProtection` flag; test it on `/v2/sendBinaryTransaction`.
+  - Astralane's `revertProtection` on sendBundle needs a VIP tier.
+  - Add Helius Sender Max sendBundle and AllenHark Relay `/v1/sendBundle` as candidates.
+  - HelloMoon's Lunar Lander client rejects arbitrage programs per key (`BlockedArbProgram`).
+- **WP-08: tip-account map.** Add Glaive, Soyas, SpeedLanding, AllenHark, Solami, the bloXroute legacy accounts (HWEoBx…, 95cfoy… = bloxroute1.sol) and the SVS legacy accounts to `OTHER_TIP_ACCOUNTS`. In cmp2, 4,197 rival transactions tipped Glaive and were recorded as unknown.
+- **X12. Lane race (clean-room, after WP-19 step 3).**
+  - Each round sends N copies under one durable nonce (System, ComputeBudget and Memo instructions only), from a dedicated test wallet.
+  - Arms: A = unprotected lanes, B = protected lanes, C = built-to-fail.
+  - About 400 rounds per arm; hard stop at 0.15 SOL.
+  - Needs owner approval and a top-up. Never through any third-party SDK (owner rule, 2026-10-04).
