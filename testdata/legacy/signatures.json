@@ -1,0 +1,2123 @@
+{
+  "schema": "arbx.fixture.signatures/1",
+  "_doc": "Signatures of the legacy (arb-lab) known-answer cases and the wallet transactions they need (PLAN WP-00b). Every `sig` here has a getTransaction fixture in testdata/wallet/<sig>.json (tools/capture-fixtures.py --wallet). `cases`: hand-picked ledger cases; `chain` is what the wallet transaction shows (fee the wallet paid, wallet lamport change, WSOL token change, other token changes, tip transfers, accounts created with their rent), `record` the v1 outcome line where one exists. `landed`: every landed wallet transaction of w5h-p1..p10 (res-pnl p1-p10), complete for the slot range. `wins_w5h2_w5h3`: every win of w5h2-p1..p11 and w5h3-p1..p2 (wallet-synthesis §2/§3). Amounts in lamports. Expected ledger lines and aggregates are in expected.json.",
+  "wallet": "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE",
+  "wsol_account": "D3qtLfeA4nrLrthVuDgysdzfkqnWNxJKGk3fqro2vcdF",
+  "nonrecoverable_accounts": [
+    {
+      "account": "BKPfj2HtknArpzzksCTUfpT2KRge2p4CzDe4JcKKp9HS",
+      "kind": "pump_user_volume_accumulator",
+      "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+      "space": 137,
+      "lamports": 1346200,
+      "note": "created by w5h-p6#69; PumpSwap user_volume_accumulator PDA seeded by the payer (inferred, res-pnl C2); not closable"
+    }
+  ],
+  "cases": [
+    {
+      "id": "transfer_in_funding",
+      "seg": null,
+      "attempt": null,
+      "sig": "pa7DNQGVA5qDDfkUQEgN6sbNoKt473nmycrYX8XVUFzQiGV24mRJeE1cy7vMxddqcMWfd5PzxqB57KVzKogwSgD",
+      "slot": 453011200,
+      "idx": 598,
+      "kind": "transfer_in",
+      "arm": null,
+      "path": null,
+      "what": "The transfer that created and funded the wallet with 4,349,000,000. Another account is the fee payer, so the wallet pays no fee.",
+      "source": "res-pnl MISSED (4,349,000,000 funding); chain",
+      "record": null,
+      "chain": {
+        "wallet_index": 2,
+        "ok": true,
+        "err": null,
+        "meta_fee": 11000,
+        "fee": 0,
+        "wallet_sol": 4349000000,
+        "wsol": 0,
+        "tokens": {},
+        "tip": null,
+        "created": []
+      }
+    },
+    {
+      "id": "nonce_create",
+      "seg": null,
+      "attempt": null,
+      "sig": "23RrUmD82QyKuNCSX9zYPcNC2WiKHmjAjVurYbEdKiGcPMUdc9RkqTQpAH7QNc3r1UMwTTqtAZ6MQcRFekctAPUW",
+      "slot": 453011452,
+      "idx": 490,
+      "kind": "nonce",
+      "arm": null,
+      "path": null,
+      "what": "Create and initialize one durable-nonce account (create only: 1,056,640 of recoverable rent; 20 such accounts lock 21,132,800).",
+      "source": "res-pnl §4 (20 nonce accounts lock 21,132,800); chain",
+      "record": null,
+      "chain": {
+        "wallet_index": 0,
+        "ok": true,
+        "err": null,
+        "meta_fee": 5000,
+        "fee": 5000,
+        "wallet_sol": -1061640,
+        "wsol": 0,
+        "tokens": {},
+        "tip": null,
+        "created": [
+          {
+            "account": "7FhgBHwRoyydy8Q3WhrePceJyLFFeKy9dRifyQk5XsdP",
+            "lamports": 1056640,
+            "kind": "nonce_account",
+            "recoverable": true,
+            "rent": 1056640
+          }
+        ]
+      }
+    },
+    {
+      "id": "wsol_ata_create_wrap",
+      "seg": null,
+      "attempt": null,
+      "sig": "2rw9r59fq2V3VNMEwWbienLyV98jqoitFDTsgNWwHiNMHisgESyx66f6buB85AbCZJ8TKzbX9zGpgTj6pgcWa2Hk",
+      "slot": 453016456,
+      "idx": 1253,
+      "kind": "wrap",
+      "arm": null,
+      "path": null,
+      "what": "Create the wallet's WSOL ATA and wrap 4,200,000,000 in one transaction (CreateIdempotent, System transfer, SyncNative).",
+      "source": "res-pnl C5 (WSOL ATA's own rent 1,488,440); chain",
+      "record": null,
+      "chain": {
+        "wallet_index": 0,
+        "ok": true,
+        "err": null,
+        "meta_fee": 5000,
+        "fee": 5000,
+        "wallet_sol": -4201493440,
+        "wsol": 4200000000,
+        "tokens": {},
+        "tip": null,
+        "created": [
+          {
+            "account": "D3qtLfeA4nrLrthVuDgysdzfkqnWNxJKGk3fqro2vcdF",
+            "lamports": 4201488440,
+            "kind": "token_account",
+            "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "mint": "So11111111111111111111111111111111111111112",
+            "recoverable": true,
+            "rent": 1488440
+          }
+        ]
+      }
+    },
+    {
+      "id": "foreign_failed",
+      "seg": null,
+      "attempt": null,
+      "sig": "HozPg4GdRDcCg3htmf53byjr9BGPqDw3BGsasMhy7vZ4qrmwCiM5gABd1efNVs7ZcUNr9SFWVmFcaK8sPB8RwoM",
+      "slot": 453016484,
+      "idx": 301,
+      "kind": "other",
+      "arm": null,
+      "path": null,
+      "what": "A failed transaction paid by another signer that lists the wallet (InsufficientFundsForRent on another account). No wallet change.",
+      "source": "chain (getSignaturesForAddress of the wallet returns it)",
+      "record": null,
+      "chain": {
+        "wallet_index": 1,
+        "ok": false,
+        "err": {
+          "InsufficientFundsForRent": {
+            "account_index": 5
+          }
+        },
+        "meta_fee": 5000,
+        "fee": 0,
+        "wallet_sol": 0,
+        "wsol": 0,
+        "tokens": {},
+        "tip": null,
+        "created": []
+      }
+    },
+    {
+      "id": "landed_fail_compete_bid",
+      "seg": "w5h-p2",
+      "attempt": 0,
+      "sig": "2XoZqhwZavao9GLyzQ86qKMfqHRAYN8cXUpx54kCoyAEvUqgjPLsy9RDVY9rKF8ZQuRFcT7SvbMVz6ndQs4SuUp4",
+      "slot": 453022728,
+      "idx": 1117,
+      "kind": "route",
+      "arm": "tpu",
+      "path": "tpu-direct",
+      "what": "Landed failure (fee only): the p2 compete bid, cu_price 5,000,000, fee 1,305,030 of which priority 1,300,040, profit check 0x4e580002.",
+      "source": "res-pnl C7",
+      "record": {
+        "ok": false,
+        "landed": "tpu-direct",
+        "code": "0x4e580002",
+        "fee_lamports": 1305030,
+        "tip_paid_lamports": 0,
+        "round_trip_on_chain": -79837800,
+        "round_trip_predicted": 63330308,
+        "expected_profit": 63330308,
+        "profit_lamports": -1305030
+      },
+      "chain": {
+        "wallet_index": 0,
+        "ok": false,
+        "err": {
+          "InstructionError": [
+            4,
+            {
+              "Custom": 1314390018
+            }
+          ]
+        },
+        "meta_fee": 1305030,
+        "fee": 1305030,
+        "wallet_sol": -1305030,
+        "wsol": 0,
+        "tokens": {},
+        "tip": null,
+        "created": []
+      }
+    },
+    {
+      "id": "landed_fail_unrecorded",
+      "seg": "w5h-p1",
+      "attempt": 2,
+      "sig": "4nMHVU3otUNFxtjRJCz4bh9r6CyfhmKbkg9kCP22tyUbSJHc7J1DY9RmtCBJDn6PGCWhjbKQqqtUJ4T4qSD61Nqe",
+      "slot": 453018197,
+      "idx": 872,
+      "kind": "route",
+      "arm": "tpu",
+      "path": "tpu-direct",
+      "what": "Landed failure the bot never recorded (statuses rate-limited); found only on chain. Fee 7,301.",
+      "source": "res-pnl §1 cross-checks, C5",
+      "record": {
+        "ok": null,
+        "landed": null,
+        "settle_error": "statuses: shyft getSignatureStatuses: rate limited",
+        "expected_profit": 561048,
+        "failed_fees_lamports": 0
+      },
+      "chain": {
+        "wallet_index": 0,
+        "ok": false,
+        "err": {
+          "InstructionError": [
+            4,
+            {
+              "Custom": 1314390018
+            }
+          ]
+        },
+        "meta_fee": 7301,
+        "fee": 7301,
+        "wallet_sol": -7301,
+        "wsol": 0,
+        "tokens": {},
+        "tip": null,
+        "created": []
+      }
+    },
+    {
+      "id": "landed_fail_venue_error",
+      "seg": "w5h-p6",
+      "attempt": 44,
+      "sig": "43KagBXtbi9f1JLRfr19XhEgLGzpzHZtiqG2HH6AR8y7VQZkRkbJzFAoQbvuXBVZx6UsNsuDRms584gQk6uM6Hit",
+      "slot": 453031207,
+      "idx": 1346,
+      "kind": "route",
+      "arm": "tpu",
+      "path": "jito-tx",
+      "what": "Landed failure with a DLMM venue error (0x1794, bitmap extension not passed) instead of the profit check; no round trip recorded.",
+      "source": "res-pnl C9 (the one 0x1794 failure in p6)",
+      "record": {
+        "ok": false,
+        "landed": "jito-tx",
+        "code": "0x1794",
+        "fee_lamports": 35001,
+        "tip_paid_lamports": 0,
+        "round_trip_on_chain": null,
+        "round_trip_predicted": null,
+        "expected_profit": 13450911,
+        "profit_lamports": -35001
+      },
+      "chain": {
+        "wallet_index": 0,
+        "ok": false,
+        "err": {
+          "InstructionError": [
+            4,
+            {
+              "Custom": 6036
+            }
+          ]
+        },
+        "meta_fee": 35001,
+        "fee": 35001,
+        "wallet_sol": -35001,
+        "wsol": 0,
+        "tokens": {},
+        "tip": null,
+        "created": []
+      }
+    },
+    {
+      "id": "win_no_create",
+      "seg": "w5h-p7",
+      "attempt": 96,
+      "sig": "2RoX3a1anhymUS4VcMhG6fYT4yz9N6BRZEh48EtDQkMgqvc7nEjt2PQzQA9w4VsyUizU1sp5S1ZoYCZNGPbHaGCA",
+      "slot": 453034543,
+      "idx": 264,
+      "kind": "route",
+      "arm": "bundle",
+      "path": "jito-bundle",
+      "what": "Bundle win that creates no account: residual 0, profit_lamports = round trip - fee - tip.",
+      "source": "res-pnl C2 (11 wins with residual 0)",
+      "record": {
+        "ok": true,
+        "landed": "jito-bundle",
+        "code": null,
+        "fee_lamports": 5000,
+        "tip_paid_lamports": 20047,
+        "round_trip_on_chain": 40112,
+        "round_trip_predicted": 40095,
+        "expected_profit": 40095,
+        "profit_lamports": 15065
+      },
+      "chain": {
+        "wallet_index": 0,
+        "ok": true,
+        "err": null,
+        "meta_fee": 5000,
+        "fee": 5000,
+        "wallet_sol": -25047,
+        "wsol": 40112,
+        "tokens": {},
+        "tip": {
+          "account": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+          "lamports": 20047
+        },
+        "created": []
+      }
+    },
+    {
+      "id": "win_negative_trade_net",
+      "seg": "w5h-p3",
+      "attempt": 96,
+      "sig": "3afcmNyrXdJUtz5ntTmuRxmTH3XvgWHbp2Uq8Wf1EA4prn62xSUm9w7PWXgPyErTYThFWYxVL6gmpgfN8NhzcaCc",
+      "slot": 453024375,
+      "idx": 817,
+      "kind": "route",
+      "arm": "tpu",
+      "path": "shyft",
+      "what": "TPU win whose round trip (710) is below its fee (8,362): an ok route with negative trade net, no tip.",
+      "source": "res-pnl C9 (p3#96 -7,652, gross_floor)",
+      "record": {
+        "ok": true,
+        "landed": "shyft",
+        "code": null,
+        "fee_lamports": 8362,
+        "tip_paid_lamports": 0,
+        "round_trip_on_chain": 710,
+        "round_trip_predicted": 13445,
+        "expected_profit": 13445,
+        "profit_lamports": -7652
+      },
+      "chain": {
+        "wallet_index": 0,
+        "ok": true,
+        "err": null,
+        "meta_fee": 8362,
+        "fee": 8362,
+        "wallet_sol": -8362,
+        "wsol": 710,
+        "tokens": {},
+        "tip": null,
+        "created": []
+      }
+    },
+    {
+      "id": "bundle_win_ata_create",
+      "seg": "w5h-p10",
+      "attempt": 2,
+      "sig": "CNmK2ap3MotrG2H2h5L7GkRVZNTXLnqDSfq59Sbq8a2AvSRXScynMjKHxJWMcZKZGymEKjnE8XXVcjZ1ZEVfcQQ",
+      "slot": 453041040,
+      "idx": 414,
+      "kind": "route",
+      "arm": "bundle",
+      "path": "jito-bundle",
+      "what": "Bundle win that creates a 165-byte SPL token account left open (rent 1,488,440).",
+      "source": "res-pnl C2 (residual -1,488,440); PLAN WP-00b case 1",
+      "record": {
+        "ok": true,
+        "landed": "jito-bundle",
+        "code": null,
+        "fee_lamports": 5000,
+        "tip_paid_lamports": 10637,
+        "round_trip_on_chain": 20196,
+        "round_trip_predicted": 20196,
+        "expected_profit": 20196,
+        "profit_lamports": -1483881
+      },
+      "chain": {
+        "wallet_index": 0,
+        "ok": true,
+        "err": null,
+        "meta_fee": 5000,
+        "fee": 5000,
+        "wallet_sol": -1504077,
+        "wsol": 20196,
+        "tokens": {},
+        "tip": {
+          "account": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+          "lamports": 10637
+        },
+        "created": [
+          {
+            "account": "FKXPhi6ZwiVpigk1fK3Jkf3KqntRupqiXBkxvs928qSn",
+            "lamports": 1488440,
+            "kind": "token_account",
+            "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+            "recoverable": true,
+            "rent": 1488440
+          }
+        ]
+      }
+    },
+    {
+      "id": "bundle_win_token2022_create",
+      "seg": "w5h-p9",
+      "attempt": 976,
+      "sig": "4oKJBrAcA2sYXw7rQPCQvXAVsvRbM9QLB1aoF12h8B92hVhdVWoArDbMSwBn7bH6Q77ccU3WjXkKofQqRG3j6YKk",
+      "slot": 453040559,
+      "idx": 685,
+      "kind": "route",
+      "arm": "bundle",
+      "path": "jito-bundle",
+      "what": "Bundle win that creates a 170-byte Token-2022 account (immutableOwner) left open (rent 1,513,840).",
+      "source": "res-pnl C2 (residual -1,513,840); PLAN WP-00b case 2",
+      "record": {
+        "ok": true,
+        "landed": "jito-bundle",
+        "code": null,
+        "fee_lamports": 5000,
+        "tip_paid_lamports": 78079,
+        "round_trip_on_chain": 116540,
+        "round_trip_predicted": 116542,
+        "expected_profit": 116542,
+        "profit_lamports": -1480379
+      },
+      "chain": {
+        "wallet_index": 0,
+        "ok": true,
+        "err": null,
+        "meta_fee": 5000,
+        "fee": 5000,
+        "wallet_sol": -1596919,
+        "wsol": 116540,
+        "tokens": {},
+        "tip": {
+          "account": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+          "lamports": 78079
+        },
+        "created": [
+          {
+            "account": "7CJ9BCK32nYyzEJSviJHyqrvZYikGq54H19mNxXPkhW3",
+            "lamports": 1513840,
+            "kind": "token_account",
+            "program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+            "mint": "CJ7yfNktWNqKBJRaCQWNzoAhHPs3eshWY8MqU8wXpump",
+            "recoverable": true,
+            "rent": 1513840
+          }
+        ]
+      }
+    },
+    {
+      "id": "bundle_win_accumulator_create",
+      "seg": "w5h-p6",
+      "attempt": 69,
+      "sig": "2wqUDpE6xAwD3iSd7YGt36RddenJpr9JicPCvywY3zEKdvpXDHBs3DimjdSFcfXp7AxvzmJWkcwj8Ho113zmNcut",
+      "slot": 453031803,
+      "idx": 1612,
+      "kind": "route",
+      "arm": "bundle",
+      "path": "jito-bundle",
+      "what": "Bundle win that creates the PumpSwap user volume accumulator (1,346,200, owner pAMMBay6, 137 bytes; not recoverable) and leaves a Token-2022 account open (1,513,840).",
+      "source": "res-pnl C2 (residual -2,860,040); MEASUREMENT §4.42 golden example; PLAN WP-00b case 3",
+      "record": {
+        "ok": true,
+        "landed": "jito-bundle",
+        "code": null,
+        "fee_lamports": 5000,
+        "tip_paid_lamports": 10248,
+        "round_trip_on_chain": 19302,
+        "round_trip_predicted": 20496,
+        "expected_profit": 20496,
+        "profit_lamports": -2855986
+      },
+      "chain": {
+        "wallet_index": 0,
+        "ok": true,
+        "err": null,
+        "meta_fee": 5000,
+        "fee": 5000,
+        "wallet_sol": -2875288,
+        "wsol": 19302,
+        "tokens": {},
+        "tip": {
+          "account": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+          "lamports": 10248
+        },
+        "created": [
+          {
+            "account": "SJCBBcgsXtZSrtST5YNFnSCv6yv5m1ZRWsNZJ1kxkY3",
+            "lamports": 1513840,
+            "kind": "token_account",
+            "program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+            "mint": "GAwhcphCqCv5bKHmCiN4VDdNWfbXJL4npmkc8L3Q9S9H",
+            "recoverable": true,
+            "rent": 1513840
+          },
+          {
+            "account": "BKPfj2HtknArpzzksCTUfpT2KRge2p4CzDe4JcKKp9HS",
+            "lamports": 1346200,
+            "kind": "pump_user_volume_accumulator",
+            "recoverable": false,
+            "rent": 1346200
+          }
+        ]
+      }
+    },
+    {
+      "id": "bolt_direct_win",
+      "seg": "w5h2-p5",
+      "attempt": 648,
+      "sig": "4bkYuxT94kc8QMG7MNGpJxdMq6HB5UjMpDavzk8s81t5Wp5dARHZW9oPQJcbttCxG1J13nCuPP7E64JYeLs1KEJF",
+      "slot": 453069812,
+      "idx": 1391,
+      "kind": "route",
+      "arm": "tpu",
+      "path": "bolt",
+      "what": "The bolt trade: a direct (non-bundle) win of +27,459,627 (+28,973,467 before rent), tip 1,000,000 to bolt, creates a Token-2022 account.",
+      "source": "wallet-synthesis §2, §5; PLAN WP-00b case 5",
+      "record": {
+        "ok": true,
+        "landed": "bolt",
+        "code": null,
+        "fee_lamports": 28601,
+        "tip_paid_lamports": 1000000,
+        "round_trip_on_chain": 30002068,
+        "round_trip_predicted": 19967380,
+        "expected_profit": 19967380,
+        "profit_lamports": 27459627
+      },
+      "chain": {
+        "wallet_index": 0,
+        "ok": true,
+        "err": null,
+        "meta_fee": 28601,
+        "fee": 28601,
+        "wallet_sol": -2542441,
+        "wsol": 30002068,
+        "tokens": {},
+        "tip": {
+          "account": "t96GGdw3MiaGR993XN8PSsRpKGXx56t5Wf6zcF1hBpY",
+          "lamports": 1000000
+        },
+        "created": [
+          {
+            "account": "AjtUcuL2u2dp8TBfjcfvxmQZj86eSKf2d5pPh7qmT1gn",
+            "lamports": 1513840,
+            "kind": "token_account",
+            "program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+            "mint": "9dSMwFfPezQ8WPcW1uZV7ns4rcviEj2LssSAg75WBLXd",
+            "recoverable": true,
+            "rent": 1513840
+          }
+        ]
+      }
+    }
+  ],
+  "landed": {
+    "scope": "every landed transaction of wallet 2g7rYv7y between the first and last landing of w5h-p1..p10",
+    "segments": [
+      "w5h-p1",
+      "w5h-p2",
+      "w5h-p3",
+      "w5h-p4",
+      "w5h-p5",
+      "w5h-p6",
+      "w5h-p7",
+      "w5h-p8",
+      "w5h-p9",
+      "w5h-p10"
+    ],
+    "slot_from": 453018197,
+    "slot_to": 453044950,
+    "complete": true,
+    "how": "recorded = outcomes.jsonl has the landing; recorded = false = a copy signature from attempts.jsonl found on chain (getSignaturesForAddress of the wallet) with no landed outcome. No other wallet transaction exists in the slot range. Re-check online with tools/capture-fixtures.py --discover.",
+    "rows": [
+      {
+        "seg": "w5h-p1",
+        "attempt": 2,
+        "sig": "4nMHVU3otUNFxtjRJCz4bh9r6CyfhmKbkg9kCP22tyUbSJHc7J1DY9RmtCBJDn6PGCWhjbKQqqtUJ4T4qSD61Nqe",
+        "slot": 453018197,
+        "idx": 872,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": false
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 12,
+        "sig": "28nD3vamCNBqmB1FvdhzSQfBQAjRqVhJsKXT2QJTWZQr5Kd36ESh28zHqB8UWdUMCNRyicw9zEgzDmUvQrMWb2it",
+        "slot": 453018213,
+        "idx": 336,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 42,
+        "sig": "2WqsQ3wrW2eHbTh7VYjaq9AGm7K5da1CtL2uSg3MUbWyKaofFpo5xCkezv3wKGYUwj9XHWetv4hET1okJehEwiZ8",
+        "slot": 453018271,
+        "idx": 1116,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 60,
+        "sig": "2kYzhLeCTpDQ7mwMEKwYyNMjZbCQuuDBS2oLrTQK4WjPbehLyfPUtyJr9moan8FaTP3Q5HXgNMYrWM11XiWZDnLX",
+        "slot": 453018296,
+        "idx": 131,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 62,
+        "sig": "2uoit9EGoZ9kFbhELr2QwU5jzSHF4RNc59UbPJDeUdLZpFKBqvEGHCm4oXnLw7YmQfmZ2FFJsDiHnPdeMzY9YXbb",
+        "slot": 453018297,
+        "idx": 339,
+        "ok": false,
+        "path": "helius",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 70,
+        "sig": "4pMW21iDh7VAuZvW7GUtgJQfbN2wXjjCTmjT3crYBdVwrACH6eRmF3b68ZdQWsPiwumStvs847nCBLiQ1iRc9E7b",
+        "slot": 453018311,
+        "idx": 54,
+        "ok": false,
+        "path": "everstake",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 210,
+        "sig": "5N3rCaDnEgs7y2oehfZsoAKbFS3s1XAvFHrgFQCrhgm4gHM3cjazodnY6vxcAQcSNdLNCHGx5HrY1nXZqTZoyDAj",
+        "slot": 453018727,
+        "idx": 1027,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 432,
+        "sig": "3c6FMVvn9hghXwVD3csqY78ALNb97oZMyP8911hW9rMYcrBx52LwFwqBrc946xkduL7vNmnS3F3YZnWY49WbHwKb",
+        "slot": 453019632,
+        "idx": 654,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 584,
+        "sig": "kQnAKtbFtWuNbcKkKFMnJpNbj1ri4K1NQd8JKPLRsYtACbqpx25RvqZnKMd1P2iioPKDR7cbzzxWofMXt3yK3nx",
+        "slot": 453020746,
+        "idx": 521,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 620,
+        "sig": "3ycXaEWHHfnRFWECZ7U3fNCGeX4kmh3QyXXvMTCrNhkr51fzGtH9DYz2tkYbbpBBnK1mzqeQrkTo8rYk2uYrHeBV",
+        "slot": 453021082,
+        "idx": 446,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 748,
+        "sig": "eVtyTsBNtWaARfTEK9skuvQg6jyPR3D5VBQbxsNq68wiqxuduoaGTMzpg1M3GeeDHBZ1x7THdX2aqUH5VNs1iuz",
+        "slot": 453021738,
+        "idx": 836,
+        "ok": false,
+        "path": "helius",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 836,
+        "sig": "3XDcBsu8f4MVuRqjKxH7CTTCLhZdoym8qBip3Xsnqky4kTn25hEH12ZCM5oPPweJhC5sYh938qUXdBQTfmBaUZqf",
+        "slot": 453022228,
+        "idx": 1415,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 856,
+        "sig": "4z4tgGGegYgQ8YnbRuMrexA1xigEJxAQLA1HP9WiMJ1sahN94sLDm2KuZ9chnSXzb1wXYrQRQ16MnRGYPbBq7Spm",
+        "slot": 453022320,
+        "idx": 325,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p1",
+        "attempt": 884,
+        "sig": "5siAbd7NdAi3ShGWifyrn6gLcsEmV9875EkWRPaNAeL7qd5LR64qAafXjceSPhTzc5c1yfPPoN4hUzm2sXpbTrqm",
+        "slot": 453022397,
+        "idx": 302,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p2",
+        "attempt": 0,
+        "sig": "2XoZqhwZavao9GLyzQ86qKMfqHRAYN8cXUpx54kCoyAEvUqgjPLsy9RDVY9rKF8ZQuRFcT7SvbMVz6ndQs4SuUp4",
+        "slot": 453022728,
+        "idx": 1117,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p2",
+        "attempt": 8,
+        "sig": "3FGRwvDFSZqoBP3i8kNtbzF5KL5rjamhZBC2nekHCFwCbFEFJ6hrsAphWRT4LFLxQUwuKuVb4GnPjBE8euUc4r1Y",
+        "slot": 453022776,
+        "idx": 1822,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": false
+      },
+      {
+        "seg": "w5h-p2",
+        "attempt": 18,
+        "sig": "3PUj9cEhwLt7CgsuGVuBpxiPDhziNMbKaA6Vc4e1F3nC9tLmh9Sbd94UXVXvGDSTX6gY4x6V6A2Hq6Mpo4ws3NhM",
+        "slot": 453022813,
+        "idx": 713,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p2",
+        "attempt": 50,
+        "sig": "3xagybHk9GsesG3vCWYTrzptm4UvcAYW8zZeru2AsEsqf1GgP7ZouqHnEMhKVXxzwYKrZp6KBDH4DhAG7ZohJoxr",
+        "slot": 453022985,
+        "idx": 472,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p3",
+        "attempt": 8,
+        "sig": "4HTXHqCus2m3DnXEFMSf8VRYnV7fdC5bJUibgu1dUcheeaLLPK9BbTKQSbbYXUTHdabXgidxXCyMiJS7HPaSTBbd",
+        "slot": 453024086,
+        "idx": 1346,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p3",
+        "attempt": 60,
+        "sig": "4EFVgASdgf3zmtJTvZrCoctJgZndgCaGEwxW5EW8GVNRBi7VCFgjsTdEt67vjpwHXfvij9CWnXnY4nzNd9KfV9gS",
+        "slot": 453024250,
+        "idx": 1232,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p3",
+        "attempt": 72,
+        "sig": "5HUKDvuHj9wkXePu3i7utLmfZkTpRQArqiGHLJ88GPo6E8skHGF7LQA2nFAs3zN6b8D2Ke58gNPGoVCB5ZWRKPsf",
+        "slot": 453024296,
+        "idx": 118,
+        "ok": true,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p3",
+        "attempt": 96,
+        "sig": "3afcmNyrXdJUtz5ntTmuRxmTH3XvgWHbp2Uq8Wf1EA4prn62xSUm9w7PWXgPyErTYThFWYxVL6gmpgfN8NhzcaCc",
+        "slot": 453024375,
+        "idx": 817,
+        "ok": true,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p3",
+        "attempt": 120,
+        "sig": "4rRWAPVnaTtZc29G3dNY5JHjQHAsFioGQmrMbY3tVmH4FFYzr26c1tqHJtvjgc2QH76q63uziFDaduPAkpv6qy9m",
+        "slot": 453024437,
+        "idx": 396,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p3",
+        "attempt": 124,
+        "sig": "3jwoNCPnwyNENB7QrsKJfgLusMqS3Gq8ouW6KqfpaSKZmNUFoxLdnMcGRXLmpfzy2tQSvb5SGgkvqNLQLeQtsjzU",
+        "slot": 453024455,
+        "idx": 802,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 6,
+        "sig": "4be2KL5tDkBn5sAzZRWZbGp9jMRn9ySHDde3BRFCgK3u9p1bgeT6QydEcuKc9F4Sfe9obmzDYKzJpSFJtC9sLhqi",
+        "slot": 453024682,
+        "idx": 930,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 36,
+        "sig": "3evoGjJSwJnuxB5qZKhtiRnbZU2QZaTBuPcZ9BpkbypmbsyefAjXzuTncbiXKKTw1MBaXUeRrtCYJpH2z5kjDSae",
+        "slot": 453024830,
+        "idx": 314,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 58,
+        "sig": "2tP82xKMpGAKFqkeSmefCE5hxqMwBuTiKZjyYTX4KVS2edVCq2soiobZRTxJRXu6WJexQQ6PJv4UthPPmi66GoRM",
+        "slot": 453024940,
+        "idx": 1945,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 120,
+        "sig": "2zXvhVF71L63MCbD7ngz55AVLnKdr4n2XzN7dmcjmqHBH5xGzoZTDZNvJR5XTfPKWTZQuDrtiLVKcmZSZ2zPEn7N",
+        "slot": 453025665,
+        "idx": 807,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 124,
+        "sig": "3kCdZRPc6je6aFRsBLhwKu8gwCoc1v2Rt3KnRaKTv8VjKGMRKPcjDN1NAzmzjLdUuiiGBuDsCP4eGojBuWcYb6Nt",
+        "slot": 453025709,
+        "idx": 768,
+        "ok": false,
+        "path": "helius",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 180,
+        "sig": "5VuYWScSWqBv49dsXnccghjLSCbwGHVZbR1mvXcUFZyAfZHh7GNeVtE5TDD8f3pZWoTKUN6TkuCwKqT1PgvVbDsS",
+        "slot": 453026506,
+        "idx": 580,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 218,
+        "sig": "5ov1xcoA4TPjJv4iJQhknmK9WSgRzQRT4ZwgHxAYVWiZT3HpYwgHkwTgDgTxeeUcM7dCQfDpxMLDGpdPJNV5fc3z",
+        "slot": 453026899,
+        "idx": 1151,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 296,
+        "sig": "3qQEsRGy8dBrv41QD7SrN2tvggALvZCChEbZtsFfniTDarZuRQkHX5aYcYESTDDbX6GhhaAtYTir7isDbVq41Tms",
+        "slot": 453027752,
+        "idx": 624,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 362,
+        "sig": "4Dt7sLGFHFW4pM6tBuKe9egHkkMZfRaFEePr6zUdGkn8L8VbpAj4AP9nuqXpjSWiDFQ1TmSeDx4fh1B3CPUdQiGa",
+        "slot": 453028546,
+        "idx": 317,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p4",
+        "attempt": 384,
+        "sig": "DJQvzZVcnsSPEFZ98MMHbeSizxF3eqnRxQmFY59791DborFEVcp9P831AiaxmcbfQwcramX1Bx3kxtgSUTDUGBq",
+        "slot": 453028687,
+        "idx": 1014,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 4,
+        "sig": "3uC3JH1vACWHcGXeuZy7rnuSoaJpbjm632kcUmAmP5NyRqZPiSLnxp6yfZJYNGZPChoBU6VxBzCEKNUKi5vtH7J4",
+        "slot": 453029182,
+        "idx": 911,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 0,
+        "sig": "4v8qooCr3sHTvYdJntUszeTa2x6cpwM84eG53st1zZNgM7zJeteQpkKWbqczBUv8ArgP1ohXDG6ZWiyS9qtuHkdv",
+        "slot": 453029193,
+        "idx": 349,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 20,
+        "sig": "39HUqjL9E9ipciGqbrBLYGJBHYsAj6p3pYuRned5zUgz8wbxxmX6icHnNMiDW6Cycd3kPWkZqtceRAC7PD4thVpU",
+        "slot": 453029308,
+        "idx": 1106,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 30,
+        "sig": "UGJkegzATCFSKrtC8VAWwWeaFDsZW1DdY7vFHBricGrSR9z7idWoiEtbWhkhZQ885LBWpNwFzNmESsSzorGc2g2",
+        "slot": 453029389,
+        "idx": 1050,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 54,
+        "sig": "3dC2SbYR7cKL7ZkYkUe2BJfV2xjo4WynPSXtYkwxuXHaE7fi1yC6RXDxSwUp6EnqjJNtaUFJUSeybAMJ4qYdyK84",
+        "slot": 453029999,
+        "idx": 431,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 58,
+        "sig": "BbJokfEvsQHMpcn3PzXfURkAjGWUCqUauBV7qFWisuCJRLtnkn3dDykW8mttaZW2RsZEoYEy1rVbVHafqFjQNK3",
+        "slot": 453030004,
+        "idx": 343,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 62,
+        "sig": "494ASiTFk9GFrmNbwCDHyRJciLf1RSTiZjCeVHdFgMvAvSXUdsG81emNkNXW6rjUd6MgvwHnpiZCuVeftemJ1ENY",
+        "slot": 453030008,
+        "idx": 518,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 80,
+        "sig": "3xpGsQ6kz7iVvumq9VEd965vK7wj2njmxTNtWK9Eo2h9pxgYrzoWbK9vvaHcq23ZsHnaVRQMFNwiKNuMkmZw9ZLK",
+        "slot": 453030069,
+        "idx": 494,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 102,
+        "sig": "2QGwRSAnWLYZAVERBauDfC3LPwnRSXqKWMbX2bBR8Hs1BRViiW4SZtiWWsKyjXjGEqoRX9LdQLwjpCA9Rr553AG9",
+        "slot": 453030206,
+        "idx": 922,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p5",
+        "attempt": 104,
+        "sig": "2iAHoeBeMBi67yY7JorR4ndsHuWfbYhqUsVxuyjjanFFgLHt2KRL8vwMhaPAGs6BYt5uzQ8YjD3jYsdtDrckZE2m",
+        "slot": 453030236,
+        "idx": 363,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 0,
+        "sig": "2q4PN2BqyAAkKGtYQiDsDq3n1HauaiVZHYYbJkmNb8XyeNb6cjDCyFznPdrn3u9yUmiGoXikP2jSkAFjxbPancnD",
+        "slot": 453030562,
+        "idx": 177,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 4,
+        "sig": "2uGQgBhb3hhnrPf4PNxwmriLGDRxziQChq2ww8YhYqaUGr1At4qGQTyQrAsxW3sijsiaekT3v6dHDtqNLQm4JDtj",
+        "slot": 453030576,
+        "idx": 1239,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 6,
+        "sig": "2dY1dzKAm7BdWykCUqYimpfFSuUgEodv2Lbf5fisF6VDQjYk1NKdqyyLFozUznt2NAyJtLoJvaD3dQT6y9acix5k",
+        "slot": 453030579,
+        "idx": 1076,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 8,
+        "sig": "4WWVdfCeKMgtTBeFhKnwXWNpgpnN9JpYz4ta432L8vnk9Ndt5hb9QzE9KFyA9HpvzT9Gm3vMfXSW6aSKmG4hDvj9",
+        "slot": 453030586,
+        "idx": 921,
+        "ok": false,
+        "path": "helius",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 10,
+        "sig": "539VXi9uic2q1qnuj48bm85gr3rS8D6YjWSeEQfCUcaFxNkxXVk64GZYFrokA3nYpnppCWxoQQ2WpLZmWBKgWC6Y",
+        "slot": 453030589,
+        "idx": 1264,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 14,
+        "sig": "5siF6EHVVGhaWYmAG4s6Ndu6DkFxroQG4K5uQqsfxYjpGEFx6y633M8wymL8ZqtsA5W9CKvM2XAmkhWKaxT4viKq",
+        "slot": 453030673,
+        "idx": 224,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 16,
+        "sig": "9MVBqhAJ9Uren351DMhrLX3S8PcC1yXQhPj6vJgn5RtZzaBUUd3GuHUZkyjtWwz5kw4TdfroX7ksUFKYuviE5Ua",
+        "slot": 453030682,
+        "idx": 133,
+        "ok": false,
+        "path": "nozomi",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 24,
+        "sig": "4469HVsGdvJr1ZEdNxyDV81yBn183NpQ89KNioLmjxepp3YY5AAqR6PRcjxarHbdpZY1BaGnLwq48u2rmcbcvcfG",
+        "slot": 453030738,
+        "idx": 1041,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 22,
+        "sig": "4WknQCxagzvxDLVb9KM82jeUAy6uPuaCrrmFbAHbMt7Jn9PaS8qGM9aXHRCJP1xLjb3Q4q9KQihD6fokLjhxx1zR",
+        "slot": 453030744,
+        "idx": 572,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 26,
+        "sig": "2JC7Gs1GFnpyNXnfXbejyi3Da46CSc84hFvMCGak5mMHyd5XJ3v4MVR2RAkKfkNUdZrdxnAZrgLpX7Ch8vkqEv4z",
+        "slot": 453030783,
+        "idx": 1536,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 28,
+        "sig": "uiqnSkQ18m7uheH9c6C8v7ALSDVNyST3idEotinWavfdgzs2YSzScmKzumzywgwzMcCgEx6bsw38CCc8wGwRnmy",
+        "slot": 453030836,
+        "idx": 808,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 30,
+        "sig": "4WihKhp5dBQDK2xQayMYHrMVbvV9He9uWdsswKUH1eZiVRDh7gH9r6khaJ9kBoaosy2zdk3DmrMbPb66UW3gxN5V",
+        "slot": 453030963,
+        "idx": 897,
+        "ok": false,
+        "path": "astralane",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 32,
+        "sig": "q2R3oMpbG9UdxapyvYVq22DYDJcJedq6FsLw3fiJVyUJL5kdkTHbNTMwM8Cw8qpeUxxaUJMJaWnRdr33LoaKh9x",
+        "slot": 453031074,
+        "idx": 511,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 34,
+        "sig": "wDma9bNtjsSeTHH13FsNknsUCF67KjzhPBoWUETm5APKWYv82fkVJnZo5JaFTKSQDqJeHqwF2HCiqbE45bk5mHa",
+        "slot": 453031109,
+        "idx": 848,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 36,
+        "sig": "5p11SjCBR8HTC1rDoJ23csTDxXwDEVGiamomZp16uaXmvn4mt44hfXRwu2Sbp8oeGSH4skn4h892YQ3sZ2bygrAA",
+        "slot": 453031123,
+        "idx": 827,
+        "ok": false,
+        "path": "nozomi",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 38,
+        "sig": "74htNtFSbgrMwipcg6ZD61Sg9DWvk8seanXJvdusQGbfqUs9STwcxb9tmCN6nVij5pQnMAs93nvyBjL85NnE5Xy",
+        "slot": 453031125,
+        "idx": 190,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 40,
+        "sig": "5s1PmVpUhakLZEYanAkWdX11ekEKXp23MihUkeUe2qkfLJraNGyApqpKm8hdzVvkUt4uyMb7zUgtDWaRG8oHL4v",
+        "slot": 453031132,
+        "idx": 995,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 42,
+        "sig": "44Dqvok8fTecVXrpKvX3EZDrKJhzyXGhiGwqqxWabPX7Go2phLA67LCt7PrBnyPMF4eUAB7sqStZiV6TSgxsXAi3",
+        "slot": 453031198,
+        "idx": 1323,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 44,
+        "sig": "43KagBXtbi9f1JLRfr19XhEgLGzpzHZtiqG2HH6AR8y7VQZkRkbJzFAoQbvuXBVZx6UsNsuDRms584gQk6uM6Hit",
+        "slot": 453031207,
+        "idx": 1346,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 46,
+        "sig": "4L8gK9EQRV4FK2nT7p9VB5Buzo7j99HhKFJdK8MQ74vhkhE6WF4BFGPZzuAWgdWNWfLkgcWCebNnFnXZi9giFCpu",
+        "slot": 453031249,
+        "idx": 173,
+        "ok": false,
+        "path": "helius",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 48,
+        "sig": "4oYcq24jDxaEqHc9ULH9eywjQiQDzn4CBQrnz7snNnEEQoCxYvQ2etm1WjAAG9Xj6CbXMZ6CAPkVbx28Rqudx88e",
+        "slot": 453031293,
+        "idx": 606,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 50,
+        "sig": "5rDrbcQNM89j9C6DiHCMayrf7n45W3HwzeUnhAEQhUFCSx9dio8qyDrJTegLe2kxwhfLNEqjW2HUsUayDVEcrZRa",
+        "slot": 453031363,
+        "idx": 640,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 52,
+        "sig": "4Esu3EwZGWmY6kSumJbhA2EGxgDczTsYYdWucG5yJ16ChZdHr2JsYUVxk7pz31zLDjDrF79LeMwjxt65LCS5ff3g",
+        "slot": 453031377,
+        "idx": 981,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 54,
+        "sig": "GvYV5k5qMbVGzRWsWmrkGrMybCXuYjYkjLAu9heoxhUqBFMvBYwfgGDDHa3tjm5qum5fa9utjcuaTgr14kdVztq",
+        "slot": 453031384,
+        "idx": 563,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 56,
+        "sig": "37ahBRYmYHm9z35MhaBViPASmsvTxBgkN83oEYV3oEwmMKNyHK5GdiYVm492hHwLBLkR16oqag8YBiiUK3Rp5GDb",
+        "slot": 453031385,
+        "idx": 1036,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 58,
+        "sig": "49KnbKqXtnpb8f6qjaZzv6FkEjwHxSxkE7SJCWN7VLEV9hozsrxJX2jGKQNgdoCHMNXr9PXR7VgrMGM9JKDBUzfL",
+        "slot": 453031430,
+        "idx": 253,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 60,
+        "sig": "5cMCZ7Le6n4HY7YbNL6e68jAkv2KZ4nQNfBBY1nojRjtWzmredSwXLeNbiVnvkn35NWQcdohnp9oSUgMc7CE3V1L",
+        "slot": 453031469,
+        "idx": 290,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 62,
+        "sig": "3yKrd5s8LVb6SfUFWjw1uWufUwdudnvvWsRtTGz827buirux32EGjfw7JzQ79PmN5yJqte8mqGyvJ65JTHp6uEE",
+        "slot": 453031529,
+        "idx": 978,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 64,
+        "sig": "4Ec4Gcc6vuGnNKAohg1TLbUTNkccDa8W2Jj88w57sRRiGaFcVfjcYQHv1bgh2FRPWc3ZaLEadymqbPhti2dAaHDX",
+        "slot": 453031629,
+        "idx": 504,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 66,
+        "sig": "5jL6BKqdL65C2QAnPs7eZUNRFLuFda8KfsGgG9RufywjhjyYzTQjciU62g2W9hqX2mnxo2EP2ZKPKKzik7nSyJAj",
+        "slot": 453031699,
+        "idx": 274,
+        "ok": false,
+        "path": "astralane",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 68,
+        "sig": "5DFS61Sqr3fpMohfSccgmeaGSNPESWYez9cZTsbocQgmuH5HyMgp9ir44XBUgvBy9MBogUf8cXjBt2VVik9m9N4a",
+        "slot": 453031729,
+        "idx": 56,
+        "ok": false,
+        "path": "helius",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 69,
+        "sig": "2wqUDpE6xAwD3iSd7YGt36RddenJpr9JicPCvywY3zEKdvpXDHBs3DimjdSFcfXp7AxvzmJWkcwj8Ho113zmNcut",
+        "slot": 453031803,
+        "idx": 1612,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 70,
+        "sig": "5VXM7xC5BnZV7erG4UthXiNFJrdQ325q8FqoYdUuZUUhyn91SsPUB4tNG1vG6Lyw1coppZpsFUDjJS2F3YBJkMwu",
+        "slot": 453031839,
+        "idx": 991,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 72,
+        "sig": "3fGRaTMjbvJLmLBPWoKD9k9zXmXBUwj8zXJeEVsYbsRiE3Q3oQkMBX9BBbzL3mQt17s797vaJWLP1yECBaqMgGZH",
+        "slot": 453031852,
+        "idx": 290,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 76,
+        "sig": "3tVbpaVRbcuNZpcWmQakkkBZhfyqYd9PXXY8bSuCwoCfxRGRRmwZRiY5jjYJT1DXQ1z8BMcvQ5vW8X6BSd9Y6Ugm",
+        "slot": 453031871,
+        "idx": 831,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 78,
+        "sig": "58nBvr2wkqDX5rF1zSi6F6xsffgvVnqZ55qDeMbsJVK3L65jzsv3FTRYSdXur3LwWkCkxWvL19FhKaWWLMfiyom8",
+        "slot": 453031873,
+        "idx": 576,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 82,
+        "sig": "65r3aWcxTYnEbnizyW7iz8LgqDjw6TRz8uKxLbV9jUSqah3y1is9YZyxYgG3Pch13iKo8mxiueyxpHECep7WBfdo",
+        "slot": 453031898,
+        "idx": 14,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 84,
+        "sig": "4mhoX6SstSn5SvTJ6Poc2bTkkRQGhm4LuChtsnT16YWNrHTV9BkbEU7Fkhq5vgFryZ2BDwg2CvxxES4FZVHcc8LR",
+        "slot": 453031901,
+        "idx": 107,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 86,
+        "sig": "2q5oQsepjYN88KvqdwccrzfqnzPpDSXptLn2LiUhiBppFvM6WrsXnmLbSeHSaJ6RnnsUmGr9stmzbQijSnL4aw34",
+        "slot": 453031952,
+        "idx": 1184,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 88,
+        "sig": "tn4bvfM5MLGXPCKxtVpci9ygxpWK6M87YGyEfD62mV4E78hgvkmxsZ7DKsLsUsCiswRFAGo99XLHEREjoF9NnHL",
+        "slot": 453031964,
+        "idx": 920,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 92,
+        "sig": "Av4KQQW42cDuhWAkFzM3DqLvn6LnCw1ZZBqDAHRF3pCrpyyR1Z76BA6d6rnyEmVXFsdw1LLFkzpf2w844ZokvMm",
+        "slot": 453031980,
+        "idx": 1060,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 90,
+        "sig": "4n7ZdsupaBoQjWZFYiARrK47jZnp8cWzfat84Ccgu6vkMKxDd4ZMyjQ5kfQF25Hwgxq1CyKtm43jiZeLqPw3WhoR",
+        "slot": 453031981,
+        "idx": 1665,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 94,
+        "sig": "4auLQgr5vwuin59so1imDuhardBZtMQoLZZy6Nwdo122Tk9eQuW2J58XzD81jKNh8WSaNhrHSTmcWEbd36DTVRNf",
+        "slot": 453031998,
+        "idx": 1150,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 96,
+        "sig": "2pudqzHcAbxcD2WdMc5houQmyYLBfaG38gF4iZECZM3WGtxuTvkkX3C6o6FV6mhqgcAKsavN59YWdBq9eh5oDJNV",
+        "slot": 453032016,
+        "idx": 754,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 98,
+        "sig": "3YTKT4CcpEFpTAQFmFPHo7sdVeaiNzwZHtTqh1wyfeqww2FM1DWbNCXbUgpYBg5muZY8Aq56uQKCpop9C7ed88W8",
+        "slot": 453032030,
+        "idx": 85,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 102,
+        "sig": "3CLprL5DeiraGnbubSbAj4BDZmfHKRa7tTcYJPDLWDaZCTMnExzW44zCC2S7h6fiht2cZ3DV95Ch55UD4oBKXc9x",
+        "slot": 453032087,
+        "idx": 501,
+        "ok": false,
+        "path": "nozomi",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 104,
+        "sig": "3o7FHMZcgE7ueo4k4JUbhHDpC1M141cc1dsS5FFdYva3pJGYGwMf6U3ueY1T6LpAUrbwgHvUmJf8D1Db2wyum9DF",
+        "slot": 453032106,
+        "idx": 69,
+        "ok": false,
+        "path": "shyft",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 106,
+        "sig": "3925aVZvZ9FeauQ67suVR9fADbpSBW92xagqPciEE86WgvNYC2KD6UBKeasrMKVrtu3GARYQyazWa2dCNGrsoyXd",
+        "slot": 453032154,
+        "idx": 1244,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 108,
+        "sig": "4HSUCukSMrdn4uUMM3MuXPPcrge7obj38Rb9X7SBuVrt742HTxcdm45PqsaWyEPyoZRngEmAkfuKezVwr91EtYLR",
+        "slot": 453032159,
+        "idx": 440,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 110,
+        "sig": "4b7Dnq1FutRLpPEoRQhcXRtvZiZRSdSmmdLmHZNknBrtperZpF4Q8fxZNc1GbS3pmgCcpQS5CGG3zHhrfyMv1Lj3",
+        "slot": 453032237,
+        "idx": 848,
+        "ok": true,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 112,
+        "sig": "26qXmMyRaQgBRPtDF7VPK4RSJsgvP7t31bAaFHQ3F1ouFJNDV5bDzzeUfKjFEr4Y4jHEDw53Y2mVchF9BiYCDY7g",
+        "slot": 453032285,
+        "idx": 29,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 114,
+        "sig": "4RT9wvEgjWQXR2XVcceB6hEq8HFDnuRBSfcVM2sbmsUuhxCzn3oABNAWeGcjPz87aHhD45eorxRrDaQm1wHaxCnh",
+        "slot": 453032285,
+        "idx": 154,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 116,
+        "sig": "51cKDE4AeroPnEPEYdCcnYHficZCu58P8uaKcm9MHKS2QZtd1hwe9XoF8uPiVMhaTQpWPnN7urbFKf7YcoAVKDvj",
+        "slot": 453032330,
+        "idx": 400,
+        "ok": false,
+        "path": "jito-tx",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 118,
+        "sig": "2jtjCauDjUvYLu6iPkgfMPf3BdEFykfsXEZpaaKNA4Y9C19YMQGsHSE1mC5XU4yz5hry4zHTjCwrWTmMFdiRSXDA",
+        "slot": 453032345,
+        "idx": 844,
+        "ok": false,
+        "path": "haan",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 120,
+        "sig": "2zHYvTZ5LhiTWeiLNSKZzA28jWpjGouN5k1FQXsiq1QTt3Y2iy6364YpraGTuDuSiHW7FKYtuDxEM37B1YzmX53p",
+        "slot": 453032387,
+        "idx": 230,
+        "ok": false,
+        "path": "tpu-direct",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 122,
+        "sig": "fGDzGdHX3xBK5jy62PX6quJEYzKHBBULgc5n3afEzNPUXP6cwd16ZBqdM6cZsMeDsnEgvunnNPSVaEM2Q6kBwkF",
+        "slot": 453032450,
+        "idx": 1248,
+        "ok": false,
+        "path": "astralane",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 124,
+        "sig": "612FWSarDYXtJtVRqTDP8cWZmJSy19yuwjEA8NTHwgh1VgrQVKZttyB6c6Z5LZWe6BQo1tw671AgULjN96imTr7H",
+        "slot": 453032548,
+        "idx": 1250,
+        "ok": false,
+        "path": "nozomi",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p6",
+        "attempt": 130,
+        "sig": "2rkym9XNr54EkK2kHcwBVC4JJexhtFCu5PdPJxVW4cXwxWt4VFbFpu7HaQXBaFBn4BDkGEH8hJHH8d53K7kf5ohc",
+        "slot": 453032591,
+        "idx": 422,
+        "ok": false,
+        "path": "helius",
+        "arm": "tpu",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p7",
+        "attempt": 62,
+        "sig": "kw1frUAY54ScaczQqCKDzdRNrP4hKKemmbGCzwZzGoWVNiZzH9JyBBPSC8HZN52nFoF1Aj6B1g3pCwgj2Ypwkga",
+        "slot": 453034261,
+        "idx": 304,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p7",
+        "attempt": 96,
+        "sig": "2RoX3a1anhymUS4VcMhG6fYT4yz9N6BRZEh48EtDQkMgqvc7nEjt2PQzQA9w4VsyUizU1sp5S1ZoYCZNGPbHaGCA",
+        "slot": 453034543,
+        "idx": 264,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p7",
+        "attempt": 165,
+        "sig": "2fRTsBmYkjCWxsTTjEs8HpWMRHRBRu9DRapr86rGbauR6F3mqfgPPpsGvTaaMaFQbV5qFQ2j65X6oAvKfvsAutfF",
+        "slot": 453035143,
+        "idx": 812,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p7",
+        "attempt": 253,
+        "sig": "63cM7QJQSTe6HPahgK1Tt9MiMW3zvzsJFwfbVz8uRyR6B4woPgHdbq1iZ9HLMwW2v8PupK1igYiAi23akPrKpAjf",
+        "slot": 453035797,
+        "idx": 387,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p7",
+        "attempt": 308,
+        "sig": "4hreKkH8aV1HeUu7jfa45cFa2P3VXH5ZFArGAVu2hnPP2uc4udmcvNTXazYtA6L6X6VmvvMdn54ZhZW5tCVA5DBj",
+        "slot": 453036318,
+        "idx": 211,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p7",
+        "attempt": 331,
+        "sig": "5TijUerqbq3sW1Z4hbS2CdyoQvz7CkJ5JGqXMiHVjn8oDtZ3XLPc7icPFqaGmkifWwhU1N5xqBvD4CwfginGoekK",
+        "slot": 453036583,
+        "idx": 751,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p7",
+        "attempt": 350,
+        "sig": "5sjjcybJk1F8R66hgrrNCdXCjaTJ2bisGbGWefatyLX8ne3VkoSfF9y8StTrHrj37hbTmKuJHU4L2ttkEPg1uFeg",
+        "slot": 453036687,
+        "idx": 1253,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p7",
+        "attempt": 375,
+        "sig": "2VhM2eTPHeiYNy5z12ZRqr9tvyL17ZrgaKtgyGv6KR3XqwFMb4kpUGG6QpQnLhmfZV3okhdKGYTWYsGvLmRCA8wv",
+        "slot": 453037061,
+        "idx": 81,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p9",
+        "attempt": 599,
+        "sig": "zGotgjJdtQFjTcK5gzgG9rHUiuwJJjxwPJ2PqwUt9wofUX8dWntYFjTLHb9xak1ff7g4rBaAivcWGczTAFkvAu2",
+        "slot": 453040126,
+        "idx": 1506,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p9",
+        "attempt": 976,
+        "sig": "4oKJBrAcA2sYXw7rQPCQvXAVsvRbM9QLB1aoF12h8B92hVhdVWoArDbMSwBn7bH6Q77ccU3WjXkKofQqRG3j6YKk",
+        "slot": 453040559,
+        "idx": 685,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p10",
+        "attempt": 2,
+        "sig": "CNmK2ap3MotrG2H2h5L7GkRVZNTXLnqDSfq59Sbq8a2AvSRXScynMjKHxJWMcZKZGymEKjnE8XXVcjZ1ZEVfcQQ",
+        "slot": 453041040,
+        "idx": 414,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p10",
+        "attempt": 76,
+        "sig": "3WhNh8SHw3rjijGX3Y56mTr6i4q9A4eYo1aLcEzrWv7UWf6iDQYGCNTxHiWjpdmcFuRDBSTg9nxfpE3mbeztwBEp",
+        "slot": 453041408,
+        "idx": 1312,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p10",
+        "attempt": 418,
+        "sig": "3EKMi8hkHwa1SmF727Thwjj8tDtePzRGMccSBWGtDe54NnLjvkX9J7z6ZPPdyrcCog7FFWYHkDbGb4tVrYAzUZSo",
+        "slot": 453043261,
+        "idx": 527,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p10",
+        "attempt": 425,
+        "sig": "44dsSwjU5S6Kx4mhuwornDHb74Zhs2JeZTSBv5wp8M1acmmwG16BSdSbVnhqqahMBnVav9qVxSz6XkPvoPnsa3g3",
+        "slot": 453043289,
+        "idx": 1068,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p10",
+        "attempt": 464,
+        "sig": "5SiChG5VBS6MbMrDN276gAdzZL6nWpSCULdCVBYinh4ukydUdENPk6CuEXzwXSBVaPpwesdyx1DMa481dDgrHTGG",
+        "slot": 453043598,
+        "idx": 543,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p10",
+        "attempt": 617,
+        "sig": "4XpJsajVY9TZPqyEiWgBuVqSRFW7y9zEJi6jebx8sWVeFVF7MANNi1FW1rWQ1GtNRk4L8HzBF2UEzaZVPsiBZ82L",
+        "slot": 453044541,
+        "idx": 196,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      },
+      {
+        "seg": "w5h-p10",
+        "attempt": 665,
+        "sig": "5fbLtHY2Y5aJPdA3Fo2bVGCtuBKkwRz9V2myzfnEJ3cSdayDfXqcvFGwCt6mVtmz4EjjhNRqHe8wMxXU4sWCDAEf",
+        "slot": 453044950,
+        "idx": 937,
+        "ok": true,
+        "path": "jito-bundle",
+        "arm": "bundle",
+        "recorded": true
+      }
+    ]
+  },
+  "wins_w5h2_w5h3": {
+    "scope": "every win (ok route transaction) of w5h2-p1..p11 and w5h3-p1..p2: 23 Jito-bundle wins and the bolt direct win",
+    "how": "from the chain ledger of that window (getSignaturesForAddress + getTransaction, wallet-synthesis §2), joined to attempts by signature",
+    "rows": [
+      {
+        "seg": "w5h2-p1",
+        "attempt": 59,
+        "sig": "2fnmVRwJayMHL19g1nEQjAMxVVskTFhYsnJHaSpi8M8YRgncjojLcQqhmtFfjYv2xQN9NHHEYkjq6u7j9vjdUN1Z",
+        "slot": 453055690,
+        "idx": 773,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p2",
+        "attempt": 658,
+        "sig": "28ebhgrKeq9Ctm4ekcjfbeo7W6Wo9gh3kQc2bverMSZQMhnn3d5hyS7JuvSfUHKKgi1g67qeKvXAzy9feNmK5hiW",
+        "slot": 453058730,
+        "idx": 631,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p2",
+        "attempt": 1413,
+        "sig": "4CP94NsVXVMaR8C4VArjwYwJsnfNP78MQUZSe4pP6zogqjiRSvB3Wyqzf1jfLpMGzm5Pj7kW2Vcdd6pxhrAKrLHL",
+        "slot": 453060473,
+        "idx": 452,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p3",
+        "attempt": 418,
+        "sig": "3MH2dNi5zudiv2z8SGfm2Qh9wmQy3bdsYHpQWcrpRgB1WC1KpCtaTySTebPHztGGzCGmJVtMJJ5f2tN8URTmzPoV",
+        "slot": 453062284,
+        "idx": 1165,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p3",
+        "attempt": 1083,
+        "sig": "4jTXvudJw8pRnNqn1Gc5x1gcBRDHDiT7mqHJR7euTdEP5TRtxY82qwQGzds4EPgagk1J5ofxEVgspihz2dbE4s5D",
+        "slot": 453065166,
+        "idx": 920,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p5",
+        "attempt": 449,
+        "sig": "GSUy8gGFrwMeRWhFkpKMPKq5nat8VEvTvp654apZV5Po4Y3QtiyYd5m8MgjzkLZJtej97si8A7rg7DcFqm7pEzG",
+        "slot": 453068498,
+        "idx": 1103,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p5",
+        "attempt": 648,
+        "sig": "4bkYuxT94kc8QMG7MNGpJxdMq6HB5UjMpDavzk8s81t5Wp5dARHZW9oPQJcbttCxG1J13nCuPP7E64JYeLs1KEJF",
+        "slot": 453069812,
+        "idx": 1391,
+        "arm": "tpu",
+        "path": "bolt",
+        "class": "direct_win"
+      },
+      {
+        "seg": "w5h2-p6",
+        "attempt": 67,
+        "sig": "4GNGLgCP3ZhPuAYYAUMCUXAd9UqtXcr5WYNJNYZGBFAVkVcpDSHWz3Eqexanj4HUMRVzHqx1itbUESY2n1G8dBWS",
+        "slot": 453070754,
+        "idx": 797,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p6",
+        "attempt": 114,
+        "sig": "5UiPYjn7yBWQdBZMTRUvkC5xseccV6fcbGbKzmDX8CPdqXeSnuhyz5EFFunJSbazHhmiHgLYDTxFRLBcpABLPbad",
+        "slot": 453071397,
+        "idx": 48,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p6",
+        "attempt": 311,
+        "sig": "5Axvq9WTYrCFfwy8KVyphzKfp87zW7WZ6So3yqbcEoRpYwmWmmmsY4YoaWQrcQnRnrCJNJy4eLL5R75dnqRCnCUj",
+        "slot": 453072794,
+        "idx": 927,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p7",
+        "attempt": 63,
+        "sig": "2fpkJRGC2fShTJsL7iffXSZ79MoQWhY4EZhomNp7bycozMCjQj8f7TJMo59DNidqvCd1qgQTqyFKDy7aBKAiFaeX",
+        "slot": 453074909,
+        "idx": 936,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p7",
+        "attempt": 154,
+        "sig": "e81Dy4FNGrUPDL88RNbKPqnoZGfux9ivz2gHTKSGUjVjy7nn7TCi4htJm4Poiv4SocZ1EmGrNSACPoZVn9pRLZq",
+        "slot": 453075313,
+        "idx": 331,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p7",
+        "attempt": 307,
+        "sig": "48MAZQ4DLJWp1G6p8P4NcSjg9eYN1C95dhKMx4Rfxp7Yk5s1FWbXR7GGyDfH4iW6xmU9FKAqx8hh9ATMuCaasETC",
+        "slot": 453075968,
+        "idx": 1404,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p7",
+        "attempt": 643,
+        "sig": "4CHZqx1PE4YqRxg3kgdNLjtXo5v9K3zXGGZ7tKfkedFjECevcj33ifMEoNVBtieez8aM6JigwpdAwMh2rej5gESt",
+        "slot": 453078560,
+        "idx": 1283,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p8",
+        "attempt": 162,
+        "sig": "4AsuvEGKMymJ8DmpiTYcbPynU1QCijqm6S4JCKbShMatCiSeVRXBpRckdwLXS17jK2KnL88oW4Grfss3CJ61V1SP",
+        "slot": 453081045,
+        "idx": 104,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p8",
+        "attempt": 216,
+        "sig": "5iCF4JrfhzetZfGCtVFCR72ApmAgqx5eFAeTjzGjaDXfGVYPUZFtWzHyJgzm94hLpxUZmxZQYiKzdHSh2ednW5q3",
+        "slot": 453081638,
+        "idx": 704,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p9",
+        "attempt": 35,
+        "sig": "3udPDf9rtreWJQZpqoxvJfuWkQmhGJoUumjTWPDjsUBHEjZFVFfusRSHjwc41s7ZJaN2FkNKEnGPfG95cgB9Q6DA",
+        "slot": 453084042,
+        "idx": 24,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p9",
+        "attempt": 78,
+        "sig": "1WUBGeUhRymCbU8yyVqvxmbSkWEaNJwd3A98kxyAuyj2PjeN6VfcgAdJvyWxqX2fTQ4iX98UW6NocREXsNKq7q9",
+        "slot": 453084225,
+        "idx": 143,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p9",
+        "attempt": 101,
+        "sig": "5SGVW21kKBKiboxZj7cyGex1j7ZaKU2n9DhvkumcAq1kDoQ2GUnxns1PcsHmr9BZkgG9bRQWEnzMcoPmPn9eCvna",
+        "slot": 453084448,
+        "idx": 686,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p10",
+        "attempt": 412,
+        "sig": "3y8GAHorj9X2TV6cfT44oxEKSX1AyCsc1RQWA88MWsjFPfKHm4r4hqjZ42cjGThL98VEwmhQTR3kALnkoz3UeP9Z",
+        "slot": 453090109,
+        "idx": 335,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p10",
+        "attempt": 559,
+        "sig": "5oCtaiY7bGUMahh5gNtTVJML4UEmnyLCWsXkwcDzeaTpoJK2keVZFc3q7xYfdDKFGGvBUL9qNqnXGqrKshxcmWeh",
+        "slot": 453091632,
+        "idx": 895,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h2-p11",
+        "attempt": 246,
+        "sig": "5RS6vJ1hyi9HUV7GHLGNVJ9dKwM2Fk8h7UJ1nrv3azJKFP8QhHMEHues8koeBmuGaDyh3CoEQCrFkQVcZDAGszac",
+        "slot": 453093764,
+        "idx": 417,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h3-p1",
+        "attempt": 18,
+        "sig": "TWT4MzDoVSoq1zLkdKmnFgCT5arhfamKNKNzjPYfxgXNrjCwYz4AvMjVVL8N7RS9kECxwEciCCYeQKx3pwMfdAz",
+        "slot": 453100402,
+        "idx": 1037,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      },
+      {
+        "seg": "w5h3-p2",
+        "attempt": 687,
+        "sig": "3BTxE8y95g1CXeDFmLdNpNSTtkg3oyJk5KYqxoH1esspVeYn5bWmMMzqzsbn8LWGuJqn3yGEDUjVo84whZqMf79t",
+        "slot": 453108749,
+        "idx": 450,
+        "arm": "bundle",
+        "path": "jito-bundle",
+        "class": "bundle_win"
+      }
+    ]
+  }
+}

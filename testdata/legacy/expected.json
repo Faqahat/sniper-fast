@@ -1,0 +1,759 @@
+{
+  "schema": "arbx.fixture.expected/1",
+  "_doc": "Known answers for the legacy (arb-lab) fixtures (PLAN WP-00b). Inputs: testdata/legacy/raw/ and wins/ (v1 records), testdata/wallet/ (getTransaction), signatures.json. Amounts in lamports. `res_pnl_p1_p10` and `wallet_synthesis_s2` are copied from docs/research/res-pnl.md and wallet-synthesis.md; the fixtures reproduce every number (testdata/legacy/test_legacy_fixtures.py). `cases` are the ledger lines of signatures.json's cases under MEASUREMENT.md §4.42 revision 2 (summing categories sum to equity_delta).",
+  "conventions": {
+    "fee": "the fee the wallet paid: meta.fee when the wallet is the fee payer (account index 0), else 0",
+    "tip": "System transfers from the wallet in an ok transaction to an account that is neither created in the transaction nor a wallet token account",
+    "rent": "lamports of an account created in the transaction (pre 0, post > 0); for the WSOL account, lamports minus token amount",
+    "recoverable": "token accounts and nonce accounts are recoverable (rent_locked); the PumpSwap user volume accumulator is not (rent_nonrecoverable)",
+    "trade_gross/trade_net": "route transactions only: ok -> trade_gross = equity_delta + fee + tip + rent_nonrecoverable, failed -> 0; trade_net = trade_gross - fee - tip (so a failed route has trade_net = -fee). Non-route transactions: 0 and 0. With this, the sum of trade_net over the w5h-p1..p10 landings is res-pnl's trading net -2,337,448.",
+    "non_route_categories": "fee_other for the fee the wallet paid; whatever else changes total equity is transfer_in (+) or transfer_out (-). No fixture has a failed non-route transaction paid by the wallet, so fee_fail versus fee_other for that case stays open",
+    "zero_categories": "categories with 0 lamports are omitted"
+  },
+  "cases": {
+    "transfer_in_funding": {
+      "sig": "pa7DNQGVA5qDDfkUQEgN6sbNoKt473nmycrYX8XVUFzQiGV24mRJeE1cy7vMxddqcMWfd5PzxqB57KVzKogwSgD",
+      "kind": "transfer_in",
+      "ok": true,
+      "wallet_sol": 4349000000,
+      "wsol": 0,
+      "tokens": {},
+      "fee": 0,
+      "tip": 0,
+      "rent_locked": 0,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": 4349000000,
+      "equity_delta": 4349000000,
+      "trade_gross": 0,
+      "trade_net": 0,
+      "categories": [
+        {
+          "cat": "transfer_in",
+          "lamports": 4349000000
+        }
+      ],
+      "stranded": []
+    },
+    "nonce_create": {
+      "sig": "23RrUmD82QyKuNCSX9zYPcNC2WiKHmjAjVurYbEdKiGcPMUdc9RkqTQpAH7QNc3r1UMwTTqtAZ6MQcRFekctAPUW",
+      "kind": "nonce",
+      "ok": true,
+      "wallet_sol": -1061640,
+      "wsol": 0,
+      "tokens": {},
+      "fee": 5000,
+      "tip": 0,
+      "rent_locked": 1056640,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": -1061640,
+      "equity_delta": -5000,
+      "trade_gross": 0,
+      "trade_net": 0,
+      "categories": [
+        {
+          "cat": "fee_other",
+          "lamports": -5000
+        }
+      ],
+      "stranded": []
+    },
+    "wsol_ata_create_wrap": {
+      "sig": "2rw9r59fq2V3VNMEwWbienLyV98jqoitFDTsgNWwHiNMHisgESyx66f6buB85AbCZJ8TKzbX9zGpgTj6pgcWa2Hk",
+      "kind": "wrap",
+      "ok": true,
+      "wallet_sol": -4201493440,
+      "wsol": 4200000000,
+      "tokens": {},
+      "fee": 5000,
+      "tip": 0,
+      "rent_locked": 1488440,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": -1493440,
+      "equity_delta": -5000,
+      "trade_gross": 0,
+      "trade_net": 0,
+      "categories": [
+        {
+          "cat": "fee_other",
+          "lamports": -5000
+        }
+      ],
+      "stranded": []
+    },
+    "foreign_failed": {
+      "sig": "HozPg4GdRDcCg3htmf53byjr9BGPqDw3BGsasMhy7vZ4qrmwCiM5gABd1efNVs7ZcUNr9SFWVmFcaK8sPB8RwoM",
+      "kind": "other",
+      "ok": false,
+      "wallet_sol": 0,
+      "wsol": 0,
+      "tokens": {},
+      "fee": 0,
+      "tip": 0,
+      "rent_locked": 0,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": 0,
+      "equity_delta": 0,
+      "trade_gross": 0,
+      "trade_net": 0,
+      "categories": [],
+      "stranded": []
+    },
+    "landed_fail_compete_bid": {
+      "sig": "2XoZqhwZavao9GLyzQ86qKMfqHRAYN8cXUpx54kCoyAEvUqgjPLsy9RDVY9rKF8ZQuRFcT7SvbMVz6ndQs4SuUp4",
+      "kind": "route",
+      "ok": false,
+      "wallet_sol": -1305030,
+      "wsol": 0,
+      "tokens": {},
+      "fee": 1305030,
+      "tip": 0,
+      "rent_locked": 0,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": -1305030,
+      "equity_delta": -1305030,
+      "trade_gross": 0,
+      "trade_net": -1305030,
+      "categories": [
+        {
+          "cat": "fee_fail",
+          "lamports": -1305030
+        }
+      ],
+      "stranded": []
+    },
+    "landed_fail_unrecorded": {
+      "sig": "4nMHVU3otUNFxtjRJCz4bh9r6CyfhmKbkg9kCP22tyUbSJHc7J1DY9RmtCBJDn6PGCWhjbKQqqtUJ4T4qSD61Nqe",
+      "kind": "route",
+      "ok": false,
+      "wallet_sol": -7301,
+      "wsol": 0,
+      "tokens": {},
+      "fee": 7301,
+      "tip": 0,
+      "rent_locked": 0,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": -7301,
+      "equity_delta": -7301,
+      "trade_gross": 0,
+      "trade_net": -7301,
+      "categories": [
+        {
+          "cat": "fee_fail",
+          "lamports": -7301
+        }
+      ],
+      "stranded": []
+    },
+    "landed_fail_venue_error": {
+      "sig": "43KagBXtbi9f1JLRfr19XhEgLGzpzHZtiqG2HH6AR8y7VQZkRkbJzFAoQbvuXBVZx6UsNsuDRms584gQk6uM6Hit",
+      "kind": "route",
+      "ok": false,
+      "wallet_sol": -35001,
+      "wsol": 0,
+      "tokens": {},
+      "fee": 35001,
+      "tip": 0,
+      "rent_locked": 0,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": -35001,
+      "equity_delta": -35001,
+      "trade_gross": 0,
+      "trade_net": -35001,
+      "categories": [
+        {
+          "cat": "fee_fail",
+          "lamports": -35001
+        }
+      ],
+      "stranded": []
+    },
+    "win_no_create": {
+      "sig": "2RoX3a1anhymUS4VcMhG6fYT4yz9N6BRZEh48EtDQkMgqvc7nEjt2PQzQA9w4VsyUizU1sp5S1ZoYCZNGPbHaGCA",
+      "kind": "route",
+      "ok": true,
+      "wallet_sol": -25047,
+      "wsol": 40112,
+      "tokens": {},
+      "fee": 5000,
+      "tip": 20047,
+      "rent_locked": 0,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": 15065,
+      "equity_delta": 15065,
+      "trade_gross": 40112,
+      "trade_net": 15065,
+      "categories": [
+        {
+          "cat": "trade_gross",
+          "lamports": 40112
+        },
+        {
+          "cat": "tip",
+          "lamports": -20047
+        },
+        {
+          "cat": "fee_win",
+          "lamports": -5000
+        }
+      ],
+      "stranded": []
+    },
+    "win_negative_trade_net": {
+      "sig": "3afcmNyrXdJUtz5ntTmuRxmTH3XvgWHbp2Uq8Wf1EA4prn62xSUm9w7PWXgPyErTYThFWYxVL6gmpgfN8NhzcaCc",
+      "kind": "route",
+      "ok": true,
+      "wallet_sol": -8362,
+      "wsol": 710,
+      "tokens": {},
+      "fee": 8362,
+      "tip": 0,
+      "rent_locked": 0,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": -7652,
+      "equity_delta": -7652,
+      "trade_gross": 710,
+      "trade_net": -7652,
+      "categories": [
+        {
+          "cat": "trade_gross",
+          "lamports": 710
+        },
+        {
+          "cat": "fee_win",
+          "lamports": -8362
+        }
+      ],
+      "stranded": []
+    },
+    "bundle_win_ata_create": {
+      "sig": "CNmK2ap3MotrG2H2h5L7GkRVZNTXLnqDSfq59Sbq8a2AvSRXScynMjKHxJWMcZKZGymEKjnE8XXVcjZ1ZEVfcQQ",
+      "kind": "route",
+      "ok": true,
+      "wallet_sol": -1504077,
+      "wsol": 20196,
+      "tokens": {},
+      "fee": 5000,
+      "tip": 10637,
+      "rent_locked": 1488440,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": -1483881,
+      "equity_delta": 4559,
+      "trade_gross": 20196,
+      "trade_net": 4559,
+      "categories": [
+        {
+          "cat": "trade_gross",
+          "lamports": 20196
+        },
+        {
+          "cat": "tip",
+          "lamports": -10637
+        },
+        {
+          "cat": "fee_win",
+          "lamports": -5000
+        }
+      ],
+      "stranded": []
+    },
+    "bundle_win_token2022_create": {
+      "sig": "4oKJBrAcA2sYXw7rQPCQvXAVsvRbM9QLB1aoF12h8B92hVhdVWoArDbMSwBn7bH6Q77ccU3WjXkKofQqRG3j6YKk",
+      "kind": "route",
+      "ok": true,
+      "wallet_sol": -1596919,
+      "wsol": 116540,
+      "tokens": {},
+      "fee": 5000,
+      "tip": 78079,
+      "rent_locked": 1513840,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": -1480379,
+      "equity_delta": 33461,
+      "trade_gross": 116540,
+      "trade_net": 33461,
+      "categories": [
+        {
+          "cat": "trade_gross",
+          "lamports": 116540
+        },
+        {
+          "cat": "tip",
+          "lamports": -78079
+        },
+        {
+          "cat": "fee_win",
+          "lamports": -5000
+        }
+      ],
+      "stranded": []
+    },
+    "bundle_win_accumulator_create": {
+      "sig": "2wqUDpE6xAwD3iSd7YGt36RddenJpr9JicPCvywY3zEKdvpXDHBs3DimjdSFcfXp7AxvzmJWkcwj8Ho113zmNcut",
+      "kind": "route",
+      "ok": true,
+      "wallet_sol": -2875288,
+      "wsol": 19302,
+      "tokens": {},
+      "fee": 5000,
+      "tip": 10248,
+      "rent_locked": 1513840,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 1346200,
+      "liquid_delta": -2855986,
+      "equity_delta": -1342146,
+      "trade_gross": 19302,
+      "trade_net": 4054,
+      "categories": [
+        {
+          "cat": "trade_gross",
+          "lamports": 19302
+        },
+        {
+          "cat": "tip",
+          "lamports": -10248
+        },
+        {
+          "cat": "fee_win",
+          "lamports": -5000
+        },
+        {
+          "cat": "rent_nonrecoverable",
+          "lamports": -1346200
+        }
+      ],
+      "stranded": []
+    },
+    "bolt_direct_win": {
+      "sig": "4bkYuxT94kc8QMG7MNGpJxdMq6HB5UjMpDavzk8s81t5Wp5dARHZW9oPQJcbttCxG1J13nCuPP7E64JYeLs1KEJF",
+      "kind": "route",
+      "ok": true,
+      "wallet_sol": -2542441,
+      "wsol": 30002068,
+      "tokens": {},
+      "fee": 28601,
+      "tip": 1000000,
+      "rent_locked": 1513840,
+      "rent_reclaimed": 0,
+      "rent_nonrecoverable": 0,
+      "liquid_delta": 27459627,
+      "equity_delta": 28973467,
+      "trade_gross": 30002068,
+      "trade_net": 28973467,
+      "categories": [
+        {
+          "cat": "trade_gross",
+          "lamports": 30002068
+        },
+        {
+          "cat": "tip",
+          "lamports": -1000000
+        },
+        {
+          "cat": "fee_win",
+          "lamports": -28601
+        }
+      ],
+      "stranded": []
+    }
+  },
+  "res_pnl_p1_p10": {
+    "source": "docs/research/res-pnl.md §1 (table), §2, §4, claims C2, C5, C6, C9",
+    "fields": {
+      "sent": "attempts.jsonl rows",
+      "landed": "recorded landings + chain-only landings (signatures.json landed, recorded=false)",
+      "failed_fees_recorded": "fee_lamports of landed failures in outcomes.jsonl",
+      "failed_fees_unrecorded": "meta.fee of the chain-only landings",
+      "win_fees/tips/gross_round_trip_wins/profit_lamports": "outcomes.jsonl of ok landings (fee_lamports, tip_paid_lamports, round_trip_on_chain, profit_lamports)",
+      "new_token_accounts/rent_token_accounts/rent_pump": "accounts created by the wins (wallet transactions)",
+      "trading_net_ex_rent": "profit_lamports + rent_token_accounts + rent_pump - failed_fees_recorded - failed_fees_unrecorded"
+    },
+    "segments": {
+      "w5h-p1": {
+        "sent": 917,
+        "landed": 14,
+        "wins": 0,
+        "landed_failed": 14,
+        "failed_fees_recorded": 91278,
+        "failed_fees_unrecorded": 7301,
+        "win_fees": 0,
+        "tips": 0,
+        "gross_round_trip_wins": 0,
+        "new_token_accounts": 0,
+        "rent_token_accounts": 0,
+        "rent_pump": 0,
+        "profit_lamports": 0,
+        "trading_net_ex_rent": -98579
+      },
+      "w5h-p2": {
+        "sent": 187,
+        "landed": 4,
+        "wins": 0,
+        "landed_failed": 4,
+        "failed_fees_recorded": 1318650,
+        "failed_fees_unrecorded": 14294,
+        "win_fees": 0,
+        "tips": 0,
+        "gross_round_trip_wins": 0,
+        "new_token_accounts": 0,
+        "rent_token_accounts": 0,
+        "rent_pump": 0,
+        "profit_lamports": 0,
+        "trading_net_ex_rent": -1332944
+      },
+      "w5h-p3": {
+        "sent": 149,
+        "landed": 6,
+        "wins": 2,
+        "landed_failed": 4,
+        "failed_fees_recorded": 37853,
+        "failed_fees_unrecorded": 0,
+        "win_fees": 16369,
+        "tips": 0,
+        "gross_round_trip_wins": 12735,
+        "new_token_accounts": 1,
+        "rent_token_accounts": 1488440,
+        "rent_pump": 0,
+        "profit_lamports": -1492074,
+        "trading_net_ex_rent": -41487
+      },
+      "w5h-p4": {
+        "sent": 444,
+        "landed": 10,
+        "wins": 0,
+        "landed_failed": 10,
+        "failed_fees_recorded": 139043,
+        "failed_fees_unrecorded": 0,
+        "win_fees": 0,
+        "tips": 0,
+        "gross_round_trip_wins": 0,
+        "new_token_accounts": 0,
+        "rent_token_accounts": 0,
+        "rent_pump": 0,
+        "profit_lamports": 0,
+        "trading_net_ex_rent": -139043
+      },
+      "w5h-p5": {
+        "sent": 143,
+        "landed": 10,
+        "wins": 0,
+        "landed_failed": 10,
+        "failed_fees_recorded": 155224,
+        "failed_fees_unrecorded": 0,
+        "win_fees": 0,
+        "tips": 0,
+        "gross_round_trip_wins": 0,
+        "new_token_accounts": 0,
+        "rent_token_accounts": 0,
+        "rent_pump": 0,
+        "profit_lamports": 0,
+        "trading_net_ex_rent": -155224
+      },
+      "w5h-p6": {
+        "sent": 131,
+        "landed": 58,
+        "wins": 2,
+        "landed_failed": 56,
+        "failed_fees_recorded": 755198,
+        "failed_fees_unrecorded": 0,
+        "win_fees": 12301,
+        "tips": 10248,
+        "gross_round_trip_wins": 43340,
+        "new_token_accounts": 2,
+        "rent_token_accounts": 3027680,
+        "rent_pump": 1346200,
+        "profit_lamports": -4353089,
+        "trading_net_ex_rent": -734407
+      },
+      "w5h-p7": {
+        "sent": 381,
+        "landed": 8,
+        "wins": 8,
+        "landed_failed": 0,
+        "failed_fees_recorded": 0,
+        "failed_fees_unrecorded": 0,
+        "win_fees": 40000,
+        "tips": 139080,
+        "gross_round_trip_wins": 266685,
+        "new_token_accounts": 2,
+        "rent_token_accounts": 3002280,
+        "rent_pump": 0,
+        "profit_lamports": -2914675,
+        "trading_net_ex_rent": 87605
+      },
+      "w5h-p8": {
+        "sent": 115,
+        "landed": 0,
+        "wins": 0,
+        "landed_failed": 0,
+        "failed_fees_recorded": 0,
+        "failed_fees_unrecorded": 0,
+        "win_fees": 0,
+        "tips": 0,
+        "gross_round_trip_wins": 0,
+        "new_token_accounts": 0,
+        "rent_token_accounts": 0,
+        "rent_pump": 0,
+        "profit_lamports": 0,
+        "trading_net_ex_rent": 0
+      },
+      "w5h-p9": {
+        "sent": 1182,
+        "landed": 2,
+        "wins": 2,
+        "landed_failed": 0,
+        "failed_fees_recorded": 0,
+        "failed_fees_unrecorded": 0,
+        "win_fees": 10000,
+        "tips": 104362,
+        "gross_round_trip_wins": 159088,
+        "new_token_accounts": 1,
+        "rent_token_accounts": 1513840,
+        "rent_pump": 0,
+        "profit_lamports": -1469114,
+        "trading_net_ex_rent": 44726
+      },
+      "w5h-p10": {
+        "sent": 762,
+        "landed": 7,
+        "wins": 7,
+        "landed_failed": 0,
+        "failed_fees_recorded": 0,
+        "failed_fees_unrecorded": 0,
+        "win_fees": 35000,
+        "tips": 84054,
+        "gross_round_trip_wins": 150959,
+        "new_token_accounts": 4,
+        "rent_token_accounts": 6004560,
+        "rent_pump": 0,
+        "profit_lamports": -5972655,
+        "trading_net_ex_rent": 31905
+      }
+    },
+    "total": {
+      "sent": 4411,
+      "landed": 119,
+      "wins": 21,
+      "landed_failed": 98,
+      "failed_fees_recorded": 2497246,
+      "failed_fees_unrecorded": 21595,
+      "win_fees": 113670,
+      "tips": 337744,
+      "gross_round_trip_wins": 632807,
+      "new_token_accounts": 10,
+      "rent_token_accounts": 15036800,
+      "rent_pump": 1346200,
+      "profit_lamports": -16201607,
+      "trading_net_ex_rent": -2337448
+    },
+    "rent_total": 16383000,
+    "trades_net_on_wins": 181393,
+    "wins_residual": {
+      "0": [
+        "w5h-p10#418",
+        "w5h-p10#425",
+        "w5h-p10#76",
+        "w5h-p3#96",
+        "w5h-p7#165",
+        "w5h-p7#253",
+        "w5h-p7#331",
+        "w5h-p7#350",
+        "w5h-p7#375",
+        "w5h-p7#96",
+        "w5h-p9#599"
+      ],
+      "-1488440": [
+        "w5h-p10#2",
+        "w5h-p10#617",
+        "w5h-p3#72",
+        "w5h-p7#308"
+      ],
+      "-1513840": [
+        "w5h-p10#464",
+        "w5h-p10#665",
+        "w5h-p6#110",
+        "w5h-p7#62",
+        "w5h-p9#976"
+      ],
+      "-2860040": [
+        "w5h-p6#69"
+      ]
+    },
+    "fees_split": {
+      "fail_base": 490000,
+      "fail_priority": 2028841,
+      "win_base": 105000,
+      "win_priority": 8670
+    },
+    "quote_accuracy": {
+      "wins_within_2": 14,
+      "chain_round_trip": 632807,
+      "predicted_round_trip": 706900
+    },
+    "eras": {
+      "tpu_p1_p6_trading_net": -2501684,
+      "bundle_p7_p10_trading_net": 164236
+    },
+    "in_flight_at_stop": {
+      "w5h-p5": 1,
+      "w5h-p8": 7,
+      "w5h-p9": 6,
+      "w5h-p10": 1
+    },
+    "status_agrees": "the last status.jsonl line of every segment equals the outcome sums: sent, landed, wins, failed_fees_lamports, fees_lamports, tips_lamports, profit_lamports",
+    "ledger_sums_landings": {
+      "trade_net": -2337448,
+      "equity_delta": -3683648,
+      "liquid_delta": -18720448,
+      "rent_locked": 15036800,
+      "rent_nonrecoverable": 1346200,
+      "trade_gross": 632807,
+      "fee": 2632511,
+      "tip": 337744,
+      "note": "sums of the §4.42 ledger lines (kind route) over the 119 landings in signatures.json landed"
+    },
+    "liquid": {
+      "basis_token_amount": {
+        "start": 4326181650,
+        "end": 4307461202,
+        "delta": -18720448,
+        "note": "native SOL + WSOL token amount (MEASUREMENT §4.42 liquid equity): pre-state of the first landing, post-state of the last"
+      },
+      "basis_account_lamports": {
+        "start": 4327670090,
+        "end": 4308949642,
+        "delta": -18720448,
+        "note": "native SOL + WSOL account lamports (res-pnl §4; includes the WSOL account's 1,488,440 rent)"
+      },
+      "sum_liquid_delta_landings": -18720448
+    }
+  },
+  "wallet_synthesis_s2": {
+    "source": "docs/research/wallet-synthesis.md §1, §2 (w5h2-p1..p11, w5h3-p1..p2)",
+    "w5h2_bundle_wins": {
+      "wins": 21,
+      "gross_round_trip": 613850,
+      "tips": 359052,
+      "fees": 105000,
+      "rent_locked": 18089880,
+      "net_wallet_change": -17940082,
+      "net_ex_rent": 149798
+    },
+    "w5h3_bundle_wins": {
+      "wins": 2,
+      "gross_round_trip": 54629,
+      "tips": 31240,
+      "fees": 10000,
+      "rent_locked": 0,
+      "net_wallet_change": 13389,
+      "net_ex_rent": 13389
+    },
+    "w5h2_bolt_win": {
+      "wins": 1,
+      "gross_round_trip": 30002068,
+      "tips": 1000000,
+      "fees": 28601,
+      "rent_locked": 1513840,
+      "net_wallet_change": 27459627,
+      "net_ex_rent": 28973467
+    },
+    "bundle_arm": {
+      "wins": 23,
+      "net_ex_rent": 163187,
+      "net_with_rent": -17926693
+    },
+    "bundle_wins_records": {
+      "tip_is_floor_0_7_expected_minus_5000": 23,
+      "round_trip_exact": 18,
+      "round_trip_within_12": 22
+    },
+    "rent_accounts": {
+      "token2022_1513840": 10,
+      "spl_1488440": 3,
+      "total": 19603720
+    }
+  },
+  "exec_slice": {
+    "file": "legacy/exec/w5h-p10.slice.jsonl.xz",
+    "source": "Cherry /root/arb-lab/runs/w5h-p10/exec.jsonl.zst (1,180,104 lines, slots 453041032..453045519; PumpSwap transactions only)",
+    "rule": "lines whose slot is in [trigger_slot, landed slot + 1] of a landed w5h-p10 attempt",
+    "lines": 4353,
+    "slots": [
+      453041040,
+      453041041,
+      453041408,
+      453041409,
+      453043261,
+      453043262,
+      453043289,
+      453043290,
+      453043598,
+      453043599,
+      453044540,
+      453044541,
+      453044542,
+      453044950,
+      453044951
+    ],
+    "our_landings_present": [
+      "5SiChG5VBS6MbMrDN276gAdzZL6nWpSCULdCVBYinh4ukydUdENPk6CuEXzwXSBVaPpwesdyx1DMa481dDgrHTGG"
+    ]
+  },
+  "pool_bots": {
+    "crowded_min_bots": 150,
+    "crowded_pools": 21,
+    "bins": [
+      {
+        "lo": 1,
+        "hi": 5,
+        "pools": 525,
+        "market_wins": 355,
+        "our_attempts": 91,
+        "our_wins": 0
+      },
+      {
+        "lo": 5,
+        "hi": 20,
+        "pools": 362,
+        "market_wins": 1540,
+        "our_attempts": 338,
+        "our_wins": 3
+      },
+      {
+        "lo": 20,
+        "hi": 60,
+        "pools": 236,
+        "market_wins": 4808,
+        "our_attempts": 1156,
+        "our_wins": 9
+      },
+      {
+        "lo": 60,
+        "hi": 150,
+        "pools": 118,
+        "market_wins": 7266,
+        "our_attempts": 4641,
+        "our_wins": 27
+      },
+      {
+        "lo": 150,
+        "hi": null,
+        "pools": 21,
+        "market_wins": 9515,
+        "our_attempts": 6108,
+        "our_wins": 23
+      }
+    ],
+    "source": "tools/analysis/patterns/PATTERNS.md item 10 and its crowding table"
+  }
+}
