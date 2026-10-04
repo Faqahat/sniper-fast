@@ -4,6 +4,8 @@
 //! pool or vault, or one of its lookup tables is known to hold one. Everything else is dropped inside the feed.
 pub mod clock;
 pub mod entries;
+#[cfg(test)]
+pub(crate) mod fixture;
 pub mod grpc;
 pub mod shred;
 pub mod udp;
@@ -18,6 +20,19 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use crossbeam_channel::Sender as UnboundedSender;
 
+/// A transaction's bytes as its feed delivered them: what the input journal's TX_FIRST record holds (MEASUREMENT
+/// §4.13, `enc`), so a replay decodes exactly the transaction the engine saw. Shared, never copied on the engine thread
+#[derive(Clone, Default)]
+pub enum RawTx {
+    /// not kept (synthetic arrivals: the journal re-encodes the parsed transaction, `tx::to_wire`)
+    #[default]
+    None,
+    /// wire bytes (raw shreds, ShredStream entries)
+    Wire(Arc<[u8]>),
+    /// Yellowstone's protobuf transaction (deshred, transaction streams)
+    Pb(Arc<grpc::PbTransaction>),
+}
+
 /// A transaction as delivered by one feed.
 pub struct Arrival {
     pub feed: u16,
@@ -31,12 +46,49 @@ pub struct Arrival {
     pub tx: Tx,
     /// its place on the leader's PoH clock (entries feeds, slots seen from their start)
     pub poh: Option<entries::Poh>,
+    /// its bytes as delivered (the input journal, WP-03)
+    pub raw: RawTx,
+}
+
+/// Where an account update came from (accounts.bin `src`, MEASUREMENT §4.12)
+pub mod src {
+    pub const GRPC: u8 = 0;
+    pub const RPC_BOOT: u8 = 1;
+    pub const RPC_REFETCH: u8 = 2;
+    pub const RPC_SNAPSHOT: u8 = 3;
+}
+
+/// What an `Event::Input` carries (the journal's INPUT kinds, MEASUREMENT §4.13): inputs from other subsystems that
+/// change engine or send-check decisions
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum InputKind { BlockhashHead = 1, LeaderWindow = 2, Gate = 3, Quarantine = 4, InflightRelease = 5, Health = 6, WalletTx = 7, SlotidxMissing = 8,
+    /// an executor settlement (exec.rs `Settled`) in full: its replay is WP-05 / WP-09's
+    Settled = 9,
+    /// what the engine starts with that no input carries (`engine::EngineInit`): journaled once by `Engine::run` with
+    /// `t_engine_ns` 0, never an `Event`
+    EngineInit = 10 }
+
+impl InputKind {
+    pub fn from_u8(k: u8) -> Option<InputKind> {
+        use InputKind::*;
+        Some(match k { 1 => BlockhashHead, 2 => LeaderWindow, 3 => Gate, 4 => Quarantine, 5 => InflightRelease, 6 => Health, 7 => WalletTx, 8 => SlotidxMissing, 9 => Settled,
+            10 => EngineInit, _ => return None })
+    }
 }
 
 pub enum Event {
     Tx(Arrival),
-    Account { slot: u64, pubkey: Pk, owner: Pk, lamports: u64, data: Vec<u8>, t: u64, txn: Option<[u8; 64]> },
-    Slot { slot: u64, status: i32, t: u64 },
+    /// one watched-account update. `aseq`: its record in accounts.bin (assigned when the record was emitted, WP-03;
+    /// 0 without a recorder); `src`: [`src`]; `write_version` 0 for RPC reads
+    Account { slot: u64, pubkey: Pk, owner: Pk, lamports: u64, data: Arc<[u8]>, t: u64, txn: Option<[u8; 64]>, write_version: u64, is_startup: bool, src: u8, aseq: u64 },
+    /// a slot status (Yellowstone SlotStatus 0-6), with its parent when the provider sends it
+    Slot { slot: u64, status: i32, t: u64, parent: Option<u64>, dead_error: Option<String> },
+    /// a block's metadata (`blocks_meta`, when subscribed)
+    BlockMeta(grpc::BlockMeta),
+    /// an input from another subsystem (leader-schedule windows, SendGate changes, ...): journaled as INPUT (the
+    /// journal shares `data`, serialized on the recorder's writer: review WP-03 N3)
+    Input { kind: InputKind, data: Arc<serde_json::Value> },
     /// a feed connected, reconnected or failed (for the run log)
     Status { feed: u16, msg: String },
     /// a lookup table fetched off the hot path (None: it doesn't exist)
@@ -92,6 +144,9 @@ pub struct FeedCounters {
     pub udp_watched: AtomicBool,
     /// raw shred feeds: the assembler's totals
     pub shreds: ShredCounters,
+    /// gRPC feeds whose provider stamps its messages (`created_at`): receive time minus that, ns (feedhealth.jsonl
+    /// `provider_lag_ms`; a provider clock ahead of ours counts as 0)
+    pub provider_lag: std::sync::Mutex<Option<crate::lat::Series>>,
 }
 
 /// A raw shred feed's assembler totals (feedhealth.jsonl `shreds`), copied from `AsmStats` every 2 s by the feed thread
@@ -118,6 +173,12 @@ impl FeedCounters {
         if slot > self.slot_max.load(Ordering::Relaxed) { self.slot_max.store(slot, Ordering::Relaxed); }
     }
 
+    /// a message stamped `created` (ns) by the provider arrived at `t`
+    pub fn provider_lag(&self, t: u64, created: u64) {
+        let mut g = self.provider_lag.lock().unwrap_or_else(|e| e.into_inner());
+        g.get_or_insert_with(|| crate::lat::Series::new("provider_lag")).push(t.saturating_sub(created));
+    }
+
     fn copy_asm(&self, a: &shred::AsmStats, version: Option<u16>) {
         let s = &self.shreds;
         s.on.store(true, Ordering::Relaxed);
@@ -139,10 +200,21 @@ pub struct Feeds {
     pub counters: Vec<Arc<FeedCounters>>,
 }
 
+/// What `forward` records besides the events, for the state stream (WP-03): every account update to accounts.bin
+/// (its `aseq` goes into the event), and the block metas' leaders (blocks.jsonl). The transaction feeds have none
+#[derive(Clone, Default)]
+pub struct Fwd {
+    /// this is the state stream (slots.jsonl is its slots')
+    pub state: bool,
+    pub acct: Option<Arc<crate::rec::accounts::AcctRec>>,
+    pub leaders: Option<Arc<crate::leaders::LeaderBook>>,
+}
+
 /// Start every enabled feed. Returns the feed names (index = `Arrival::feed`) and their counters. `rt` is the hot
 /// runtime (gRPC feeds); raw feeds run on their own threads. `rec`: the recorder (poh, slots-feed, exec, entries
-/// archives; raw feeds' sockets are followed for kernel drops)
-pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event>, stop: Arc<AtomicBool>, rt: &tokio::runtime::Handle, rec: &Rec) -> anyhow::Result<Feeds> {
+/// archives; raw feeds' sockets are followed for kernel drops). `roles`: the watched accounts (exec.jsonl v2 `watched`)
+pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event>, stop: Arc<AtomicBool>, rt: &tokio::runtime::Handle, rec: &Rec,
+    roles: Option<Arc<crate::rec::accounts::Roles>>) -> anyhow::Result<Feeds> {
     let mut names = Vec::new();
     let mut counters = Vec::new();
     for f in feeds.iter().filter(|f| f.enabled) {
@@ -187,7 +259,7 @@ pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event
                     let t_decoded = t_now;
                     for d in done.drain(..) {
                         c.forwarded.fetch_add(1, Ordering::Relaxed);
-                        if out.send(Event::Tx(Arrival { feed: id, slot: d.slot, t_rx: d.t, t_decoded, executed: None, tx: d.tx, poh: None })).is_err() {
+                        if out.send(Event::Tx(Arrival { feed: id, slot: d.slot, t_rx: d.t, t_decoded, executed: None, tx: d.tx, poh: None, raw: RawTx::Wire(d.raw) })).is_err() {
                             c.channel_drops.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -196,14 +268,16 @@ pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event
                 if let Err(e) = res { c.errors.fetch_add(1, Ordering::Relaxed); let _ = out.send(Event::Status { feed: id, msg: format!("{name}: receive failed: {e}") }); }
             })?;
         } else {
-            let (f, interest, out, stop, c, rec) = (f.clone(), interest.clone(), out.clone(), stop.clone(), c.clone(), rec.clone());
+            let (f, interest, out, stop, c, rec, roles) = (f.clone(), interest.clone(), out.clone(), stop.clone(), c.clone(), rec.clone(), roles.clone());
             rt.spawn(async move {
                 let mut backoff = 500u64;
+                let fwd = Fwd::default();
+                let mut recent = crate::rec::exec::Recent::default();
                 while !stop.load(Ordering::Relaxed) {
                     let clock = std::sync::Mutex::new(entries::PohClock::default());
-                    let sink = |it: grpc::Item| -> bool { forward(id, &interest, &out, &c, Some(&clock), &rec, it) };
+                    let sink = |it: grpc::Item| -> bool { forward(id, &interest, &out, &c, Some(&clock), &rec, &fwd, it) };
                     let started = now_ns();
-                    let res = grpc::feed_once(&f, &sink, &rec).await;
+                    let res = grpc::feed_once(&f, &sink, &rec, &c, roles.as_ref(), &mut recent).await;
                     c.connected.store(false, Ordering::Relaxed);
                     if stop.load(Ordering::Relaxed) { break; }
                     c.reconnects.fetch_add(1, Ordering::Relaxed);
@@ -221,8 +295,11 @@ pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event
 
 /// gRPC item -> engine events (entries are walked here, in the feed task, not in the engine). The entries feeds' PoH
 /// positions (poh.log), finished slots (slots-feed.log) and raw messages (entries-<feed>, when archived) are recorded
-/// here too
-fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &FeedCounters, poh: Option<&std::sync::Mutex<entries::PohClock>>, rec: &Rec, it: grpc::Item) -> bool {
+/// here too; for the state stream (`fwd`), every account update (accounts.bin: its `aseq` goes into the event), every
+/// slot status (slots.jsonl) and block meta (blocks.jsonl)
+#[allow(clippy::too_many_arguments)]
+pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &FeedCounters, poh: Option<&std::sync::Mutex<entries::PohClock>>, rec: &Rec, fwd: &Fwd,
+    it: grpc::Item) -> bool {
     let sent = |c: &FeedCounters, ok: bool| { if !ok { c.channel_drops.fetch_add(1, Ordering::Relaxed); } ok };
     match it {
         grpc::Item::Entries { slot, bytes, t } => {
@@ -271,46 +348,89 @@ fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &FeedC
                 c.txs.fetch_add(1, Ordering::Relaxed);
                 let raw = &bytes[r.start..r.end];
                 if !tx::scan(raw, &key, &table).map_or(false, |s| s.hit) { continue; }
-                let Some((tx, _)) = tx::parse_wire(raw) else { continue };
+                let Some((tx, n)) = tx::parse_wire(raw) else { continue };
                 c.forwarded.fetch_add(1, Ordering::Relaxed);
                 let poh = pohs.get(r.entry as usize).copied().flatten();
-                if !sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded, executed: None, tx, poh })).is_ok()) { ok = false; break; }
+                let raw = RawTx::Wire(Arc::from(&raw[..n.min(raw.len())]));
+                if !sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded, executed: None, tx, poh, raw })).is_ok()) { ok = false; break; }
             }
             drop(tables);
             archive(bytes);
             ok
         }
-        grpc::Item::Tx { slot, tx, t, executed } => {
+        grpc::Item::Tx { slot, tx, t, executed, raw } => {
             c.packets.fetch_add(1, Ordering::Relaxed);
             c.txs.fetch_add(1, Ordering::Relaxed);
             c.seen(slot, t);
             if !interest.wants(&tx) { return true; }
             c.forwarded.fetch_add(1, Ordering::Relaxed);
-            sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded: t, executed, tx, poh: None })).is_ok())
+            sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded: t, executed, tx, poh: None, raw })).is_ok())
         }
-        grpc::Item::Account { slot, pubkey, lamports, owner, data, t, txn, .. } => {
+        grpc::Item::Account { slot, pubkey, lamports, owner, data, t, txn, write_version, is_startup } => {
             c.packets.fetch_add(1, Ordering::Relaxed);
             c.seen(slot, t);
-            sent(c, out.send(Event::Account { slot, pubkey, owner, lamports, data, t, txn }).is_ok())
+            // one allocation shared by the accounts.bin record and the store (WP-03 item 1)
+            let data: Arc<[u8]> = Arc::from(data);
+            // every update, stale ones included (the store's verdict is the journal's), with its aseq
+            let aseq = match &fwd.acct {
+                Some(a) => a.record(&crate::rec::accounts::AcctUpdate { pubkey, slot, write_version, t_recv: t, src: src::GRPC, is_startup, txn, lamports, owner, data: &data }),
+                None => 0,
+            };
+            sent(c, out.send(Event::Account { slot, pubkey, owner, lamports, data, t, txn, write_version, is_startup, src: src::GRPC, aseq }).is_ok())
         }
-        grpc::Item::Slot { slot, status, t } => {
+        grpc::Item::Slot { slot, status, t, parent, dead_error, bank_id } => {
             c.packets.fetch_add(1, Ordering::Relaxed);
-            c.seen(slot, t);
-            sent(c, out.send(Event::Slot { slot, status, t }).is_ok())
+            // the feed's newest slot (feedhealth `slot_max_now`, `slot_lag_now`) by commitment statuses only: interslot
+            // ones (first-shred, created-bank) run ahead of every processed slot (review WP-03 #6). Slot 0 moves no maximum
+            c.seen(if (0..=2).contains(&status) { slot } else { 0 }, t);
+            // slots.jsonl (MEASUREMENT §4.17): every status of every slot, with its parent
+            if rec.is_on() && fwd.state {
+                let de = dead_error.clone();
+                rec.emit(rec::SLOTS, Record::enc(move |o| {
+                    let _ = serde_json::to_writer(o, &serde_json::json!({ "slot": slot, "status": slot_status_name(status), "parent": parent, "dead_error": de, "t": t,
+                        "bank_id": bank_id }));
+                }));
+            }
+            sent(c, out.send(Event::Slot { slot, status, t, parent, dead_error }).is_ok())
+        }
+        grpc::Item::BlockMeta(b) => {
+            c.packets.fetch_add(1, Ordering::Relaxed);
+            c.seen(b.slot, b.t);
+            // blocks.jsonl (MEASUREMENT §4.16), with the slot's leader when the LeaderBook knows it
+            if rec.is_on() {
+                let leader = fwd.leaders.as_ref().and_then(|l| l.leader(b.slot));
+                let x = b.clone();
+                rec.emit(rec::BLOCKS, Record::enc(move |o| {
+                    let _ = serde_json::to_writer(o, &serde_json::json!({ "slot": x.slot, "parent_slot": x.parent_slot, "blockhash": crate::tx::b58(&x.blockhash),
+                        "parent_blockhash": crate::tx::b58(&x.parent_blockhash), "block_height": x.block_height, "block_time": x.block_time,
+                        "executed_tx_count": x.executed_transaction_count, "entries_count": x.entries_count, "leader": leader.map(|k| crate::tx::b58(&k)),
+                        "t_recv": x.t, "src": "grpc", "bank_id": x.bank_id }));
+                }));
+            }
+            sent(c, out.send(Event::BlockMeta(b)).is_ok())
         }
     }
 }
 
-/// Start the pool-state stream (accounts + slots) on `rt` (the hot runtime). The engine changes the followed accounts
-/// through `list`. `c`: its counters (feedhealth.jsonl feed `state`)
+/// slots.jsonl `status` (Yellowstone SlotStatus)
+pub fn slot_status_name(s: i32) -> &'static str {
+    match s { 0 => "processed", 1 => "confirmed", 2 => "finalized", 3 => "first_shred", 4 => "completed", 5 => "created_bank", 6 => "dead", _ => "unknown" }
+}
+
+/// Start the pool-state stream (accounts + slots, and block meta when `subs` says so) on `rt` (the hot runtime). The
+/// engine changes the followed accounts through `list`. `c`: its counters (feedhealth.jsonl feed `state`); `rec` and
+/// `fwd`: accounts.bin, slots.jsonl and blocks.jsonl (WP-03)
 #[allow(clippy::too_many_arguments)]
-pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch::Receiver<Vec<String>>, out: UnboundedSender<Event>, stop: Arc<AtomicBool>,
-    rt: &tokio::runtime::Handle, c: Arc<FeedCounters>) {
+pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch::Receiver<Vec<String>>, subs: grpc::StateSubs, out: UnboundedSender<Event>,
+    stop: Arc<AtomicBool>, rt: &tokio::runtime::Handle, c: Arc<FeedCounters>, rec: Rec, fwd: Fwd) {
     rt.spawn(async move {
         let mut backoff = 500u64;
         let interest = Interest::default();
-        let rec = Rec::off();
+        let mut connects = 0u64;
         while !stop.load(Ordering::Relaxed) {
+            // accounts.bin MARK stream_reconnect: updates written between the two connections were not seen
+            if connects > 0 { if let Some(a) = &fwd.acct { a.mark(crate::rec::accounts::MARK_STREAM_RECONNECT, &[]); } }
+            connects += 1;
             let started = now_ns();
             // review F1: the slot of the first update after each (re)connect goes to run.log (the snapshot's slot is
             // there too): writes between the two are not seen until the account's next write
@@ -321,9 +441,9 @@ pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch:
                     let _ = out.send(Event::Status { feed: u16::MAX, msg: format!("state stream: first update at slot {slot} ({what}), {:.0} ms after connecting",
                         now_ns().saturating_sub(started) as f64 / 1e6) });
                 }
-                forward(u16::MAX, &interest, &out, &c, None, &rec, it)
+                forward(u16::MAX, &interest, &out, &c, None, &rec, &fwd, it)
             };
-            let res = grpc::accounts_once(&url, token.as_deref(), list.clone(), &sink).await;
+            let res = grpc::accounts_once(&url, token.as_deref(), list.clone(), subs, &c, &sink).await;
             c.connected.store(false, Ordering::Relaxed);
             if stop.load(Ordering::Relaxed) { break; }
             c.reconnects.fetch_add(1, Ordering::Relaxed);
@@ -395,8 +515,9 @@ mod tests {
         // transactions 50 hashes later (1.5 ticks: 9.375 ms)
         let m10 = msg(&[(100, vec![legacy_tx(1)])]);
         let m11 = msg(&[(100, vec![]), (50, vec![legacy_tx(0x22), legacy_tx(0x33)])]);
-        assert!(forward(0, &interest, &tx, &c, Some(&clock), &rec, grpc::Item::Entries { slot: 10, bytes: m10.clone(), t: 1_000 }));
-        assert!(forward(0, &interest, &tx, &c, Some(&clock), &rec, grpc::Item::Entries { slot: 11, bytes: m11.clone(), t: 2_000 }));
+        let fwd = Fwd::default();
+        assert!(forward(0, &interest, &tx, &c, Some(&clock), &rec, &fwd, grpc::Item::Entries { slot: 10, bytes: m10.clone(), t: 1_000 }));
+        assert!(forward(0, &interest, &tx, &c, Some(&clock), &rec, &fwd, grpc::Item::Entries { slot: 11, bytes: m11.clone(), t: 2_000 }));
         rec.close();
         assert_eq!(rec::read_text(&d, "poh").unwrap(), vec!["2222222222222222 11 9.375 0 -", "3333333333333333 11 9.375 0 -"]);
         assert_eq!(rec::read_text(&d, "slots-feed").unwrap(), vec!["0 10 0 1 1 1000 1000 0 - - - - 0"]);
@@ -415,5 +536,157 @@ mod tests {
         }
         assert_eq!(p, b.len());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// PLAN WP-03 acceptance, the synthetic stream fixture (F12): testdata/grpc/stream.bin (SubscribeUpdate messages
+    /// encoded from the vendored proto text: wallet and pool account updates, PumpSwap transactions, slots with a fork,
+    /// block meta) through `forward` into a channel, then through the engine's `step`. Checks the events' fields, and
+    /// the accounts.bin, journal.bin (with its aseq references), exec.jsonl v2, slots.jsonl and blocks.jsonl records
+    #[test]
+    fn grpc_stream_fixture_through_forward() {
+        use crate::rec::accounts::{role, AcctRec, RoleOf, Roles};
+        use crate::rec::journal::{self, JBody};
+        use fixture::{k, sig, Proto};
+        use prost::Message as _;
+        let p = Proto::load();
+        let msgs = fixture::stream(&p);
+        // the committed file is what the generator makes (ARBX_WRITE_FIXTURES=1 rewrites it)
+        let bytes = fixture::encode_file(&msgs);
+        if std::env::var("ARBX_WRITE_FIXTURES").is_ok() { std::fs::write(fixture::file_path(), &bytes).unwrap(); }
+        let file = std::fs::read(fixture::file_path()).expect("testdata/grpc/stream.bin (ARBX_WRITE_FIXTURES=1 cargo test --release grpc_stream_fixture)");
+        assert!(file == bytes, "testdata/grpc/stream.bin is stale: regenerate it with ARBX_WRITE_FIXTURES=1");
+        let msgs = fixture::decode_file(&file);
+        let d = tmp("fixture");
+        let rec = rec::start(rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec!["haan-grpc".into()], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let ri = |role: u8, pool_index: u32| RoleOf { role, pool_index };
+        let roles = Arc::new(Roles::new([(k(fixture::WALLET), ri(role::WALLET, u32::MAX)), (k(fixture::POOL), ri(role::POOL, 0)),
+            (k(fixture::VAULT0), ri(role::VAULT, 0)), (k(fixture::VAULT1), ri(role::VAULT, 0))]));
+        let acct = AcctRec::new(rec.clone(), roles.clone());
+        let book = crate::leaders::LeaderBook::new(Rec::off());
+        book.add_window(1_000, &[k(0x99)]);
+        let fwd = Fwd { state: true, acct: Some(acct.clone()), leaders: Some(book) };
+        let (out, rx) = crossbeam_channel::unbounded();
+        let (cs, ct) = (FeedCounters::named("state", "state-stream"), FeedCounters::named("haan-grpc", "yellowstone-tx"));
+        let interest = Interest { keys: [fixture::pumpswap()].into_iter().collect(), tables: Default::default() };
+        let mut recent = crate::rec::exec::Recent::default();
+        for (t, b) in &msgs {
+            let m = grpc::SubscribeUpdate::decode(&b[..]).unwrap();
+            if let Some(c) = &m.created_at { let ns = c.ns().unwrap(); if m.transaction.is_some() { ct.provider_lag(*t, ns) } else { cs.provider_lag(*t, ns) } }
+            match m.transaction.clone() {
+                Some(u) => { let it = grpc::tx_stream_item(u, *t, &rec, Some(&roles), &mut recent).unwrap(); assert!(forward(0, &interest, &out, &ct, None, &rec, &Fwd::default(), it)); }
+                None => { let it = grpc::state_item(m, *t).unwrap(); assert!(forward(u16::MAX, &interest, &out, &cs, None, &rec, &fwd, it)); }
+            }
+        }
+        let evs: Vec<Event> = rx.try_iter().collect();
+        assert_eq!(evs.len(), 15);
+        // the events: accounts carry write_version, is_startup, src and their aseq (0.. in arrival order); slots their
+        // parent and dead error; the block meta; transactions their protobuf bytes and executed flag
+        let accs: Vec<(Pk, u64, u64, bool, u8, u64, Option<[u8; 64]>)> = evs.iter().filter_map(|e| match e {
+            Event::Account { pubkey, slot, write_version, is_startup, src, aseq, txn, .. } => Some((*pubkey, *slot, *write_version, *is_startup, *src, *aseq, *txn)), _ => None }).collect();
+        assert_eq!(accs, vec![(k(fixture::WALLET), 1_000, 100, false, 0, 0, Some(sig(fixture::OURS))), (k(fixture::VAULT0), 1_000, 101, false, 0, 1, Some(sig(fixture::T1))),
+            (k(fixture::VAULT1), 1_000, 102, false, 0, 2, Some(sig(fixture::T1))), (k(fixture::POOL), 1_000, 103, false, 0, 3, Some(sig(fixture::T1))),
+            (k(fixture::VAULT0), 999, 90, false, 0, 4, Some(sig(fixture::OLD))), (k(fixture::VAULT1), 1_002, 104, true, 0, 5, Some(sig(fixture::T2)))]);
+        let slots: Vec<(u64, i32, Option<u64>, Option<String>)> = evs.iter().filter_map(|e| match e {
+            Event::Slot { slot, status, parent, dead_error, .. } => Some((*slot, *status, *parent, dead_error.clone())), _ => None }).collect();
+        assert_eq!(slots[4], (1_001, 6, Some(1_000), Some("fork abandoned".into())));
+        assert_eq!(slots.len(), 6);
+        assert!(evs.iter().any(|e| matches!(e, Event::BlockMeta(b) if b.slot == 1_000 && b.block_height == Some(900))));
+        let txs: Vec<&Arrival> = evs.iter().filter_map(|e| match e { Event::Tx(a) => Some(a), _ => None }).collect();
+        assert_eq!((txs.len(), txs[0].executed, txs[1].executed), (2, Some(true), Some(false)));
+        assert!(matches!(txs[0].raw, RawTx::Pb(_)));
+        assert_eq!(txs[0].tx.loaded, Some((vec![k(fixture::LW)], vec![k(fixture::LR)])));
+        let t1 = txs[0].tx.clone();
+        // the engine journals them at its dequeue point
+        let reg = crate::pools::Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+        let mut e = crate::engine::Engine::new_offline(Arc::new(reg), crate::store::Store::default(), crate::config::StrategyCfg::default());
+        e.set_rec(rec.clone());
+        let mut status = |_: &str| {};
+        for (i, ev) in evs.into_iter().enumerate() { e.step(ev, fixture::T0 + 100 + i as u64, &mut status); }
+        e.timers(fixture::T0 + 1_000, &mut status);
+        assert_eq!((e.store.updates, e.store.stale_dropped), (5, 1), "one stale update refused");
+        assert!(cs.provider_lag.lock().unwrap().as_mut().unwrap().pct(0.5) == 2_000_000, "2 ms provider lag");
+        rec.close();
+        // accounts.bin: every update, the stale one too, in aseq order, with its role, write version and txn; the
+        // second update of each vault is an XOR record whose data reconstructs
+        let a = crate::rec::accounts::read_dir(&d).unwrap();
+        assert_eq!(a.records.iter().map(|r| r.aseq).collect::<Vec<_>>(), vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(a.records.iter().map(|r| r.role).collect::<Vec<_>>(), vec![role::WALLET, role::VAULT, role::VAULT, role::POOL, role::VAULT, role::VAULT]);
+        assert_eq!(a.records.iter().map(|r| r.kind).collect::<Vec<_>>(), vec![2, 2, 2, 2, 3, 3]);
+        assert_eq!((a.records[4].write_version, a.records[4].txn, a.records[4].data.clone()), (90, Some(sig(fixture::OLD)), fixture::vault_data(900_000)));
+        assert_eq!((a.records[5].is_startup, a.records[5].data.clone(), a.records[3].pool_index), (true, fixture::vault_data(2_100_000), Some(0)));
+        assert_eq!(a.header["schema"], serde_json::json!("arbx.accounts/2.0"));
+        // journal.bin: the ACCOUNT records name those aseqs with the store's verdicts; TX_FIRST holds the protobuf
+        // transaction and its loaded addresses (it decodes back to the same transaction); slots carry their parents
+        let j = journal::read_dir(&d).unwrap();
+        assert_eq!(j.iter().map(|r| r.seq).collect::<Vec<_>>(), (0..j.len() as u64).collect::<Vec<_>>(), "seq without holes");
+        let acc: Vec<(u64, bool)> = j.iter().filter_map(|r| match r.body { JBody::Account { aseq, stale } => Some((aseq, stale)), _ => None }).collect();
+        assert_eq!(acc, vec![(0, false), (1, false), (2, false), (3, false), (4, true), (5, false)]);
+        let by_aseq: std::collections::HashMap<u64, &crate::rec::accounts::AcctRecord> = a.records.iter().map(|r| (r.aseq, r)).collect();
+        for (q, _) in &acc { assert!(by_aseq.contains_key(q), "aseq {q} in accounts.bin"); }
+        let first: Vec<&JBody> = j.iter().filter(|r| matches!(r.body, JBody::TxFirst { .. })).map(|r| &r.body).collect();
+        assert_eq!(first.len(), 2);
+        let JBody::TxFirst { feed, slot, t_rx, t_decoded, executed, enc, bytes, loaded, poh } = first[0].clone() else { unreachable!() };
+        assert_eq!((feed, slot, enc, executed, loaded.clone()), (0, 1_000, journal::ENC_PB, Some(true), Some((vec![k(fixture::LW)], vec![k(fixture::LR)]))));
+        let back = journal::arrival(feed, slot, t_rx, t_decoded, executed, enc, &bytes, &loaded, poh).unwrap();
+        assert_eq!((back.tx.sig, back.tx.keys.clone(), back.tx.loaded.clone(), back.tx.cu_price_micro, back.tx.lookups.len()), (t1.sig, t1.keys.clone(), t1.loaded.clone(), Some(5_000), 1));
+        let sl: Vec<(u64, Option<u64>, i32)> = j.iter().filter_map(|r| match r.body { JBody::Slot { slot, parent, status, .. } => Some((slot, parent, status)), _ => None }).collect();
+        assert_eq!(sl[4], (1_001, Some(1_000), 6));
+        assert!(j.iter().any(|r| matches!(r.body, JBody::BlockMeta { slot: 1_000, height: Some(900), .. })));
+        assert!(j.iter().any(|r| matches!(r.body, JBody::Timer { t, .. } if t == fixture::T0 + 1_000)), "the timers' evaluation");
+        assert!(j.iter().zip(j.iter().skip(1)).all(|(x, y)| x.t_engine <= y.t_engine), "engine times in order");
+        // exec.jsonl v2: the PumpSwap transactions with their full meta
+        let ex = rec::read_jsonl(&d, "exec").unwrap();
+        assert_eq!(ex.len(), 2);
+        let x = &ex[0];
+        let b = |n: u8| bs58::encode(k(n)).into_string();
+        assert_eq!((x["sig"].as_str(), x["slot"].as_u64(), x["idx"].as_u64(), x["src"].as_str(), x["found_by"].clone()),
+            (Some(bs58::encode(sig(fixture::T1)).into_string().as_str()), Some(1_000), Some(17), Some("grpc-tx"), serde_json::json!(["tx_stream"])));
+        assert_eq!((x["ok"].as_bool(), x["fee"].as_u64(), x["cu"].as_u64(), x["cost_units"].as_u64(), x["version"].as_str()), (Some(true), Some(6_000), Some(45_000), Some(61_000), Some("0")));
+        assert_eq!((x["cu_limit"].as_u64(), x["cu_price_micro"].as_u64(), x["priority_fee"].as_u64(), x["n_static"].as_u64()), (Some(200_000), Some(5_000), Some(1_000), Some(7)));
+        assert_eq!(x["keys"].as_array().unwrap().len(), 9, "static keys, then loaded writable, then loaded readonly");
+        assert_eq!((x["keys"][7].as_str(), x["keys"][8].as_str()), (Some(b(fixture::LW).as_str()), Some(b(fixture::LR).as_str())));
+        assert_eq!(x["recent_blockhash"].as_str(), Some(b(0x33).as_str()));
+        assert_eq!(x["alts"], serde_json::json!([{ "table": b(fixture::ALT), "w": [3], "r": [9] }]));
+        assert_eq!(x["inner"][0]["list"][0], serde_json::json!({ "p": 6, "a": [2, 0], "d": "AwkJ", "h": 2 }));
+        assert_eq!(x["return_data"], serde_json::json!({ "program": bs58::encode(fixture::pumpswap()).into_string(), "data": "AQID" }));
+        assert_eq!(x["logs"].as_array().unwrap().len(), 2);
+        assert_eq!(x["post_tok"][0]["dec"].as_u64(), Some(6));
+        assert_eq!((x["signer_sol"].as_i64(), x["signer_tok"].clone()), (Some(-6_000), serde_json::json!({ b(0x41): "500" })));
+        assert_eq!(x["venues"], serde_json::json!(["pumpswap"]));
+        assert_eq!(x["pools"], serde_json::json!([b(fixture::POOL)]));
+        assert_eq!(x["watched"], serde_json::json!([{ "acct": b(fixture::POOL), "role": "pool", "pool": 0 }, { "acct": b(fixture::VAULT0), "role": "vault", "pool": 0 },
+            { "acct": b(fixture::VAULT1), "role": "vault", "pool": 0 }]));
+        assert!(x["transfers"].is_null() && x["bundle"].is_null() && x["ours"].is_null(), "derived fields come with WP-08 / WP-05");
+        let y = &ex[1];
+        assert_eq!((y["ok"].as_bool(), y["err"].as_str(), y["err_ix"].as_u64(), y["idx"].as_u64()), (Some(false), Some("ix2:custom:0x1771"), Some(2), Some(3)));
+        assert!(y["logs"].is_null() && y["inner"].is_null() && y["return_data"].is_null(), "the provider omitted them: null, not empty");
+        assert_eq!(y["watched"], serde_json::json!([]), "a failed transaction writes no watched account");
+        // slots.jsonl and blocks.jsonl
+        let s = rec::read_jsonl(&d, "slots").unwrap();
+        assert_eq!(s.len(), 6);
+        assert_eq!(s[4], serde_json::json!({ "slot": 1_001, "status": "dead", "parent": 1_000, "dead_error": "fork abandoned", "t": s[4]["t"], "bank_id": null }));
+        assert_eq!((s[1]["status"].as_str(), s[0]["parent"].as_u64()), (Some("first_shred"), Some(999)));
+        let bl = rec::read_jsonl(&d, "blocks").unwrap();
+        assert_eq!((bl[0]["slot"].as_u64(), bl[0]["blockhash"].as_str(), bl[0]["leader"].as_str(), bl[0]["block_height"].as_u64()),
+            (Some(1_000), Some(b(0x34).as_str()), Some(b(0x99).as_str()), Some(900)));
+        assert!(bl[0]["bank_id"].is_null() && x["bank_id"].is_null(), "the fixture's provider sends no bank_id");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// review WP-03 #6: an interslot status (first-shred, created-bank: ahead of every processed slot) counts as a message
+    /// of the state stream but does not move its newest slot (feedhealth `slot_max_now`, `slot_lag_now`)
+    #[test]
+    fn interslot_statuses_do_not_move_the_feeds_newest_slot() {
+        let (out, _rx) = crossbeam_channel::unbounded();
+        let c = FeedCounters::named("state", "state-stream");
+        let slot = |slot: u64, status: i32, t: u64| grpc::Item::Slot { slot, status, t, parent: None, dead_error: None, bank_id: None };
+        let interest = Interest::default();
+        assert!(forward(u16::MAX, &interest, &out, &c, None, &Rec::off(), &Fwd::default(), slot(4_000, 0, 10)));
+        assert!(forward(u16::MAX, &interest, &out, &c, None, &Rec::off(), &Fwd::default(), slot(4_003, 3, 20)));
+        assert!(forward(u16::MAX, &interest, &out, &c, None, &Rec::off(), &Fwd::default(), slot(4_003, 5, 30)));
+        assert_eq!((c.slot_max.load(Ordering::Relaxed), c.last_msg_ns.load(Ordering::Relaxed)), (4_000, 30));
+        assert!(forward(u16::MAX, &interest, &out, &c, None, &Rec::off(), &Fwd::default(), slot(4_001, 1, 40)));
+        assert_eq!(c.slot_max.load(Ordering::Relaxed), 4_001);
     }
 }

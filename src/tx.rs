@@ -311,6 +311,51 @@ pub fn pk(s: &str) -> Pk {
 
 pub fn b58(k: &Pk) -> String { bs58::encode(k).into_string() }
 
+fn put_short(o: &mut Vec<u8>, mut n: usize) {
+    loop {
+        let b = (n & 0x7f) as u8;
+        n >>= 7;
+        if n == 0 { o.push(b); return; }
+        o.push(b | 0x80);
+    }
+}
+
+/// A parsed legacy or v0 transaction encoded back to wire bytes, with its first signature, zero for the others and a
+/// zero blockhash (neither is kept by `Tx`). `parse_wire` of the result gives back an equal `Tx`. For transactions
+/// whose original bytes were not kept (the input journal's synthetic arrivals, test fixtures). None for v1
+pub fn to_wire(tx: &Tx) -> Option<Vec<u8>> {
+    if tx.v1 || tx.num_signers == 0 { return None; }
+    let mut o = Vec::with_capacity(256);
+    put_short(&mut o, tx.num_signers as usize);
+    o.extend_from_slice(&tx.sig);
+    o.resize(o.len() + 64 * (tx.num_signers as usize - 1), 0);
+    let v0 = !tx.lookups.is_empty();
+    if v0 { o.push(0x80); }
+    o.extend([tx.num_signers, tx.num_ro_signed, tx.num_ro_unsigned]);
+    put_short(&mut o, tx.keys.len());
+    for k in &tx.keys { o.extend_from_slice(k); }
+    o.extend([0u8; 32]);
+    put_short(&mut o, tx.ixs.len());
+    for ix in &tx.ixs {
+        o.push(ix.program);
+        put_short(&mut o, ix.accounts.len());
+        o.extend_from_slice(&ix.accounts);
+        put_short(&mut o, ix.data.len());
+        o.extend_from_slice(&ix.data);
+    }
+    if v0 {
+        put_short(&mut o, tx.lookups.len());
+        for l in &tx.lookups {
+            o.extend_from_slice(&l.table);
+            put_short(&mut o, l.writable.len());
+            o.extend_from_slice(&l.writable);
+            put_short(&mut o, l.readonly.len());
+            o.extend_from_slice(&l.readonly);
+        }
+    }
+    Some(o)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,6 +388,22 @@ mod tests {
         assert!(sc.hit, "lookup table hit");
         assert!(!scan(&b, &|_| false, &|_| false).unwrap().hit);
         assert!(scan(&b[..b.len() - 1], &|_| true, &|_| true).is_none(), "truncated");
+    }
+
+    /// WP-03: a parsed transaction re-encoded (the journal's synthetic arrivals) parses back to the same transaction
+    #[test]
+    fn to_wire_round_trips() {
+        let (tx, _) = parse_wire(&v0_tx()).unwrap();
+        let (back, used) = parse_wire(&to_wire(&tx).unwrap()).unwrap();
+        assert_eq!(used, to_wire(&tx).unwrap().len());
+        assert_eq!((back.sig, back.keys.clone(), back.cu_price_micro, back.ixs.len(), back.lookups.len()), (tx.sig, tx.keys.clone(), tx.cu_price_micro, tx.ixs.len(), 1));
+        for (x, y) in back.ixs.iter().zip(&tx.ixs) { assert_eq!((x.program, &x.accounts, &x.data), (y.program, &y.accounts, &y.data)); }
+        assert_eq!((back.lookups[0].table, &back.lookups[0].writable, &back.lookups[0].readonly), (tx.lookups[0].table, &tx.lookups[0].writable, &tx.lookups[0].readonly));
+        assert_eq!((back.num_signers, back.num_ro_signed, back.num_ro_unsigned, back.is_vote), (tx.num_signers, tx.num_ro_signed, tx.num_ro_unsigned, tx.is_vote));
+        // a long data field (compact-u16 lengths of two bytes)
+        let mut t = tx.clone();
+        t.ixs[1].data = vec![7u8; 300];
+        assert_eq!(parse_wire(&to_wire(&t).unwrap()).unwrap().0.ixs[1].data, vec![7u8; 300]);
     }
 
     #[test]

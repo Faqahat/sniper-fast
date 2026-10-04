@@ -469,7 +469,7 @@ J_TX_FIRST, J_TX_COPY, J_ACCOUNT, J_SLOT, J_BLOCK_META, J_ALT, J_INPUT, J_TICK, 
 J_NAMES = {1: "TX_FIRST", 2: "TX_COPY", 3: "ACCOUNT", 4: "SLOT", 5: "BLOCK_META", 6: "ALT", 7: "INPUT", 8: "TICK",
            9: "STATUS", 10: "TIMER", 12: "GAP"}
 INPUT_KINDS = {1: "blockhash_head", 2: "leader_window", 3: "gate", 4: "quarantine", 5: "inflight_release",
-               6: "health", 7: "wallet_tx", 8: "slotidx_missing"}
+               6: "health", 7: "wallet_tx", 8: "slotidx_missing", 9: "settled", 10: "engine_init"}
 
 #: journal record framing: `u8 kind | u32 body_len | u64 seq | u64 t_engine_ns | body`. body_len counts the body
 #: only (not seq and t_engine_ns). Keep in step with src/rec/journal.rs (WP-03).
@@ -505,8 +505,13 @@ def _parse_journal_body(kind: int, b: bytes) -> dict:
             d["poh"] = {"slot": ps, "hashes": hashes, "ticks": ticks, "hpt": hpt}
         return d
     if kind == J_TX_COPY:
-        return {"sig": solana.b58encode(b[:64]), "feed": struct.unpack_from("<H", b, 64)[0],
-                "t_rx": struct.unpack_from("<Q", b, 66)[0]}
+        d = {"sig": solana.b58encode(b[:64]), "feed": struct.unpack_from("<H", b, 64)[0],
+             "t_rx": struct.unpack_from("<Q", b, 66)[0]}
+        # journal 2.1: the copy's PoH position (u8 has_poh | u64 slot | u64 hashes | u32 ticks | u64 hpt)
+        if len(b) > 74 and b[74] and len(b) >= 75 + 28:
+            ps, hashes, ticks, hpt = struct.unpack_from("<QQIQ", b, 75)
+            d["poh"] = {"slot": ps, "hashes": hashes, "ticks": ticks, "hpt": hpt}
+        return d
     if kind == J_ACCOUNT:
         aseq, verdict = struct.unpack_from("<QB", b, 0)
         return {"aseq": aseq, "store_verdict": "accepted" if verdict == 0 else "stale"}
@@ -530,7 +535,8 @@ def _parse_journal_body(kind: int, b: bytes) -> dict:
             payload = None
         return {"input": INPUT_KINDS.get(ik, str(ik)), "data": payload}
     if kind == J_TIMER:
-        return {"t": struct.unpack_from("<Q", b, 0)[0]}
+        # journal 2.1: u8 what (1 the state flush, 2 housekeeping; absent: both)
+        return {"t": struct.unpack_from("<Q", b, 0)[0], "what": b[8] if len(b) > 8 else 3}
     if kind == J_GAP:
         first, n = struct.unpack_from("<QQ", b, 0)
         return {"first_lost_seq": first, "n_lost": n}

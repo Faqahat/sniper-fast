@@ -195,6 +195,18 @@ class Binary(unittest.TestCase):
             self.assertEqual(recs[3]["input"], "gate")
             self.assertEqual(js.seq_holes, [])
 
+    def test_journal_2_1_fields(self):
+        # WP-03 review: TIMER carries what it did, TX_COPY its PoH position, INPUT kinds 9 and 10 are named
+        self.assertEqual(streams._parse_journal_body(streams.J_TIMER, struct.pack("<QB", 7, 1)), {"t": 7, "what": 1})
+        self.assertEqual(streams._parse_journal_body(streams.J_TIMER, struct.pack("<Q", 7)), {"t": 7, "what": 3})
+        copy = bytes(64) + struct.pack("<HQ", 2, 9)
+        self.assertNotIn("poh", streams._parse_journal_body(streams.J_TX_COPY, copy))
+        got = streams._parse_journal_body(streams.J_TX_COPY, copy + bytes([1]) + struct.pack("<QQIQ", 5, 6, 7, 8))
+        self.assertEqual((got["feed"], got["t_rx"], got["poh"]), (2, 9, {"slot": 5, "hashes": 6, "ticks": 7, "hpt": 8}))
+        payload = b'{"min_tip": 1000}'
+        got = streams._parse_journal_body(streams.J_INPUT, struct.pack("<BI", 10, len(payload)) + payload)
+        self.assertEqual(got, {"input": "engine_init", "data": {"min_tip": 1000}})
+
 
 if __name__ == "__main__":
     unittest.main()

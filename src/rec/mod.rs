@@ -21,8 +21,11 @@
 //!   progress, stops the segment (reason `error`): the supervisor's budget reads status.jsonl.
 //! - **Disk budget** ([`disk`]) and **manifest** ([`manifest`]) run on a monitor thread, with `resources.jsonl`
 //!   ([`health`]); the monitor also watches the writer threads.
+pub mod accounts;
 pub mod disk;
+pub mod exec;
 pub mod health;
+pub mod journal;
 pub mod manifest;
 mod writer;
 
@@ -118,6 +121,10 @@ pub const FEEDHEALTH: S = S(21);
 pub const RESOURCES: S = S(22);
 pub const KEEPALIVE: S = S(23);
 pub const RUN_LOG: S = S(24);
+/// WP-03: the slot statuses of the state stream (§4.17), its block metas (§4.16) and the LeaderBook's schedule (§4.27)
+pub const SLOTS: S = S(25);
+pub const BLOCKS: S = S(26);
+pub const LEADERS: S = S(27);
 
 pub const ACCOUNTS_MAGIC: [u8; 8] = *b"ARBXACC\0";
 pub const JOURNAL_MAGIC: [u8; 8] = *b"ARBXJRN\0";
@@ -125,16 +132,17 @@ pub const ENTRIES_MAGIC: [u8; 8] = *b"ARBXENT\0";
 
 /// (name, class, format, schema, single file). Versions (MEASUREMENT "As WP-02 writes them"): `1.1` is arb-lab's v1
 /// record with the WP-00/WP-01 fields (§7), now behind a header; `2.0` where the stream is at v2. Streams of later WPs
-/// (ledger, wallet, decisions, commits, blocks, slots, slotidx, txfetch, alts events, leaders, ...) are added here by
-/// them. `accounts` and `journal` are WP-03's formats; their queues and GAP records are this module's
-const STATIC: [(&str, Class, Format, &str, bool); 25] = [
+/// (ledger, wallet, decisions, commits, slotidx, txfetch, alts events, ...) are added here by them. `accounts` and
+/// `journal` are WP-03's formats (src/rec/accounts.rs, src/rec/journal.rs); their queues and GAP records are this
+/// module's. WP-03 also brings exec v2 (src/rec/exec.rs), slots, blocks and leaders
+const STATIC: [(&str, Class, Format, &str, bool); 28] = [
     ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/1.1", false),
     ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.1", false),
     ("bundles", Class::Core, Format::Jsonl, "arbx.bundles/1.1", false),
     ("outcomes", Class::Core, Format::Jsonl, "arbx.outcomes/1.1", false),
     ("accounts", Class::Replay, Format::Bin { magic: ACCOUNTS_MAGIC, format: 2 }, "arbx.accounts/2.0", false),
-    ("journal", Class::Replay, Format::Bin { magic: JOURNAL_MAGIC, format: 2 }, "arbx.journal/2.0", false),
-    ("exec", Class::Chain, Format::Jsonl, "arbx.exec/1.1", false),
+    ("journal", Class::Replay, Format::Bin { magic: JOURNAL_MAGIC, format: 2 }, "arbx.journal/2.1", false),
+    ("exec", Class::Chain, Format::Jsonl, "arbx.exec/2.0", false),
     ("txarr", Class::Chain, Format::Text, "arbx.txarr/1.1", false),
     ("arrivals", Class::Chain, Format::Jsonl, "arbx.arrivals/1.1", false),
     ("moves", Class::Chain, Format::Text, "arbx.moves/2.0", false),
@@ -153,6 +161,9 @@ const STATIC: [(&str, Class, Format, &str, bool); 25] = [
     ("resources", Class::Slow, Format::PlainJsonl, "arbx.resources/1.0", false),
     ("keepalive", Class::Slow, Format::PlainJsonl, "arbx.keepalive/1.1", false),
     ("run", Class::Slow, Format::PlainText, "arbx.run/1.0", false),
+    ("slots", Class::Chain, Format::Jsonl, "arbx.slots/1.0", false),
+    ("blocks", Class::Chain, Format::Jsonl, "arbx.blocks/1.0", false),
+    ("leaders", Class::Chain, Format::Jsonl, "arbx.leaders/1.0", false),
 ];
 
 /// a zstd frame ends at the latest when this much raw data is pending (§1.3)
@@ -768,6 +779,11 @@ impl Rec {
     /// a replay record with its sequence number: if it is dropped, the next record of the stream carries a GAP
     #[inline]
     pub fn emit_seq(&self, s: S, seq: u64, r: Record) -> bool { match &self.0 { Some(x) => { let n = r.size(); x.push(s, Some(seq), n, r) } None => false } }
+
+    /// `emit_seq` for a record whose payload (`bytes`, held by its closure) the queue's byte cap must count (accounts.bin
+    /// records carry the account's data)
+    #[inline]
+    pub fn emit_seq_sized(&self, s: S, seq: u64, bytes: u64, r: Record) -> bool { match &self.0 { Some(x) => x.push(s, Some(seq), bytes, r), None => false } }
 
     /// events.jsonl (§4.6, kinds in A.6)
     pub fn event(&self, kind: &'static str, subsystem: &'static str, feed: Option<u16>, detail: Value) {

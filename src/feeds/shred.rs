@@ -109,8 +109,9 @@ pub struct AsmStats {
     pub decoded: u64,
 }
 
-/// one interesting transaction and when it became decodable (kernel time of the shred that completed it)
-pub struct DecodedTx { pub slot: u64, pub t: u64, pub tx: Tx }
+/// one interesting transaction and when it became decodable (kernel time of the shred that completed it), with its wire
+/// bytes (the input journal, WP-03)
+pub struct DecodedTx { pub slot: u64, pub t: u64, pub tx: Tx, pub raw: std::sync::Arc<[u8]> }
 
 /// what makes a transaction worth decoding: a static key or a lookup table (checked in place, no allocation)
 pub struct Want<'a> { pub key: &'a dyn Fn(&Pk) -> bool, pub table: &'a dyn Fn(&Pk) -> bool }
@@ -225,9 +226,10 @@ impl Assembler {
                             }
                             stats.txs += 1;
                             if !sc.hit { continue; }
-                            if let Some((tx, _)) = parse_wire(&s.buf[start_b..end]) {
+                            if let Some((tx, n)) = parse_wire(&s.buf[start_b..end]) {
                                 stats.decoded += 1;
-                                out.push(DecodedTx { slot, t: s.t_of(end), tx });
+                                let raw = std::sync::Arc::from(&s.buf[start_b..start_b + n.min(end - start_b)]);
+                                out.push(DecodedTx { slot, t: s.t_of(end), tx, raw });
                             }
                         }
                         // not enough bytes yet, or garbage: only the latter once the data set is complete

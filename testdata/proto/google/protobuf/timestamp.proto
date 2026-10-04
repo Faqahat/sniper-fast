@@ -1,0 +1,12 @@
+// The well-known type `google.protobuf.Timestamp` (protobuf's src/google/protobuf/timestamp.proto), reduced to its
+// message definition: geyser.proto imports it for `SubscribeUpdate.created_at`.
+syntax = "proto3";
+
+package google.protobuf;
+
+message Timestamp {
+  // Represents seconds of UTC time since Unix epoch 1970-01-01T00:00:00Z.
+  int64 seconds = 1;
+  // Non-negative fractions of a second at nanosecond resolution.
+  int32 nanos = 2;
+}

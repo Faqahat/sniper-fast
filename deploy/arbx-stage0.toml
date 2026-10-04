@@ -71,6 +71,30 @@ enabled = false
 [state]
 url = "https://grpc.haandigital.eu:443"
 token_env = "HAAN_X_TOKEN"
+# WP-03: the state stream also follows the Clock sysvar, the route and venue programs' programdata accounts, and the
+# wallet with its token accounts (every landed transaction we pay for writes the wallet: its txn names it)
+watch_clock = true
+watch_programdata = true
+watch_wallet = true
+slot_statuses = "auto"  # "all" (processed, confirmed, finalized + first-shred, completed, created-bank, dead) where the probe accepted slots_interslot, else "commitment"
+block_meta = "auto"     # on only if `arbx grpc-probe --config deploy/arbx-stage0.toml` accepted it (<out_dir>/probe.json); run the probe before WP-05
+# probe_file = ""       # default <out_dir>/probe.json, where `arbx grpc-probe` writes it
+
+# WP-03 item 3: the executed-transaction stream (arb-lab's `haan-grpc` [[feed]]; it runs as a feed after the [[feed]] list,
+# so its feed id is unchanged). Haan's plan allows 1 transaction filter with 1 account: PumpSwap (the busiest venue).
+# A second filter or provider covering the other venues is owner decision OD-1 (config only: another entry here)
+[[state.tx_stream]]
+name = "haan-grpc"
+# url and token_env: the [state] stream's
+account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]
+failed = true       # failed PumpSwap transactions too (exec.jsonl `ok` false)
+max_accounts = 1    # the provider's limit (an include list longer than this refuses to start)
+
+# WP-03 item 10: the LeaderBook's leader kinds (jito / bam / other) and the dated fallback
+[leaders]
+validator_lists = ["https://kobe.mainnet.jito.network/api/v1/validators"]   # Cherry's address may be refused (403): then the fallback
+static_fallback = "/root/arbx/data/validators-meta.json"
+refresh_min = 60
 
 [strategy]
 confirm_trigger_ms = 60   # unused while decoded_sends = false (no decoded opportunity waits); removed in WP-04
@@ -145,13 +169,7 @@ token_env = "HAAN_X_TOKEN"
 # the feed error shows in run.log: revert this line
 account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"]
 
-[[feed]]
-# Haan's plan allows 1 transaction filter with 1 account: PumpSwap (the busiest venue)
-name = "haan-grpc"
-kind = "yellowstone-tx"
-url = "https://grpc.haandigital.eu:443"
-token_env = "HAAN_X_TOKEN"
-account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]
+# (the PumpSwap executed-transaction stream `haan-grpc` is [[state.tx_stream]] since WP-03; it keeps its feed id)
 
 # ---------------------------------------------------------------- send paths
 # Checked with `arbx senders --config arbx-stage0.toml` (sends nothing). Stage 0 sends one-transaction Jito bundles only:

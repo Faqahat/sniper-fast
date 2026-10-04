@@ -54,6 +54,8 @@ pub struct Config {
     pub control: ControlCfg,
     #[serde(default)]
     pub runtime: RuntimeCfg,
+    #[serde(default)]
+    pub leaders: LeadersCfg,
 }
 
 /// the config format this binary reads
@@ -472,6 +474,115 @@ pub struct StateCfg {
     /// Yellowstone endpoint for pool-state account updates
     pub url: String,
     pub token_env: Option<String>,
+    /// WP-03 item 2: also follow the Clock sysvar (chain time, WP-04)
+    #[serde(default = "yes")]
+    pub watch_clock: bool,
+    /// ... the programdata accounts of the route program and every venue program (upgrade detection, WP-07)
+    #[serde(default = "yes")]
+    pub watch_programdata: bool,
+    /// ... the wallet and its token accounts (every landed transaction we pay for writes the wallet: its `txn` names
+    /// it, WP-03b)
+    #[serde(default = "yes")]
+    pub watch_wallet: bool,
+    /// WP-03 item 7: "all" (processed, confirmed, finalized and the interslot first-shred, completed, created-bank,
+    /// dead, with parents), "commitment" (the first three only, arb-lab's subscription), or "auto" (the default: "all"
+    /// where `arbx grpc-probe` accepted `slots_interslot` on this provider, else "commitment"; review WP-03 #5: the
+    /// interslot filter shares the state stream's one subscription, and a refusal would refuse the accounts too)
+    #[serde(default = "slot_statuses_auto")]
+    pub slot_statuses: String,
+    /// WP-03 item 6: subscribe to `blocks_meta`: "on", "off", or "auto" (on if `arbx grpc-probe` accepted it on this
+    /// provider: `probe_file`)
+    #[serde(default = "block_meta_auto")]
+    pub block_meta: String,
+    /// the probe result `block_meta = "auto"` and `slot_statuses = "auto"` read ("" = `<out_dir>/probe.json`, where
+    /// `arbx grpc-probe` writes it)
+    #[serde(default)]
+    pub probe_file: String,
+    /// WP-03 item 3: the executed-transaction streams (Yellowstone transaction filters). Each runs as a feed
+    /// (`yellowstone-tx`) after the `[[feed]]` list; Stage 0 has one, on the PumpSwap program
+    #[serde(default, rename = "tx_stream")]
+    pub tx_streams: Vec<TxStreamCfg>,
+}
+fn slot_statuses_auto() -> String { "auto".into() }
+fn block_meta_auto() -> String { "auto".into() }
+
+/// One executed-transaction stream (`[[state.tx_stream]]`, WP-03 item 3). The provider of the Stage-0 plan allows one
+/// transaction filter with one account; a second filter or provider covering the other venues is owner decision OD-1
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TxStreamCfg {
+    pub name: String,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// default: `[state] url`
+    pub url: Option<String>,
+    /// default: `[state] token_env`
+    pub token_env: Option<String>,
+    pub token_header: Option<String>,
+    /// literal base58 keys, or `@watched_writable` (every watched pool and vault) / `@venue_programs` (the venue programs)
+    #[serde(default)]
+    pub account_include: Vec<String>,
+    /// deliver failed transactions too (default true; false: successful only)
+    #[serde(default = "yes")]
+    pub failed: bool,
+    /// the provider's limit of accounts per filter: an expanded list longer than this refuses to start
+    pub max_accounts: Option<usize>,
+}
+
+/// The LeaderBook's sources (src/leaders.rs; WP-03 item 10)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeadersCfg {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Jito validators API URLs (`{"validators": [{identity_account, running_jito, running_bam}]}`)
+    #[serde(default = "leader_lists")]
+    pub validator_lists: Vec<String>,
+    /// the dated static fallback
+    #[serde(default = "leader_static")]
+    pub static_fallback: String,
+    /// how often the lists are fetched again, minutes
+    #[serde(default = "leader_refresh")]
+    pub refresh_min: u64,
+}
+fn leader_lists() -> Vec<String> { vec!["https://kobe.mainnet.jito.network/api/v1/validators".into()] }
+fn leader_static() -> String { "data/validators-meta.json".into() }
+fn leader_refresh() -> u64 { 60 }
+impl Default for LeadersCfg {
+    fn default() -> Self { LeadersCfg { enabled: true, validator_lists: leader_lists(), static_fallback: leader_static(), refresh_min: leader_refresh() } }
+}
+
+/// `[[state.tx_stream]]` include tokens (expanded once the registry is booted: `expand_includes`)
+pub const WATCHED_WRITABLE: &str = "@watched_writable";
+pub const VENUE_PROGRAMS: &str = "@venue_programs";
+
+impl StateCfg {
+    /// the transaction streams as feeds (kind `yellowstone-tx`), url and token defaulting to the state stream's
+    pub fn tx_stream_feeds(&self) -> Vec<Feed> {
+        self.tx_streams.iter().map(|t| Feed { name: t.name.clone(), kind: FeedKind::YellowstoneTx, enabled: t.enabled, bind: None, group: None, port: None,
+            interface: None, allowed_src: vec![], url: Some(t.url.clone().unwrap_or_else(|| self.url.clone())), token_env: t.token_env.clone().or_else(|| self.token_env.clone()),
+            token_header: t.token_header.clone(), account_include: t.account_include.clone(), split_include: false,
+            failed: if t.failed { None } else { Some(false) }, max_accounts: t.max_accounts }).collect()
+    }
+}
+
+/// Replace the `@watched_writable` / `@venue_programs` tokens of every gRPC feed's include list, and refuse a list
+/// longer than its feed's `max_accounts`
+pub fn expand_includes(feeds: &mut [Feed], watched_writable: &[String], venue_programs: &[String]) -> Result<()> {
+    for f in feeds.iter_mut() {
+        if f.account_include.iter().any(|a| a.starts_with('@')) {
+            let mut out: Vec<String> = Vec::new();
+            for a in &f.account_include {
+                let add: Vec<String> = match a.as_str() { WATCHED_WRITABLE => watched_writable.to_vec(), VENUE_PROGRAMS => venue_programs.to_vec(), x => vec![x.to_string()] };
+                for k in add { if !out.contains(&k) { out.push(k); } }
+            }
+            f.account_include = out;
+        }
+        if let Some(m) = f.max_accounts.filter(|m| f.account_include.len() > *m) {
+            bail!("feed {}: account_include holds {} accounts, more than its max_accounts {m} (the provider's limit; OD-1)", f.name, f.account_include.len());
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -562,6 +673,12 @@ pub struct Feed {
     /// one filter per include entry (plans that allow 1 account per filter)
     #[serde(default)]
     pub split_include: bool,
+    /// yellowstone-tx: Some(false) delivers successful transactions only; None both (`[[state.tx_stream]] failed`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed: Option<bool>,
+    /// yellowstone-tx: the provider's limit of accounts per filter
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_accounts: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
@@ -766,6 +883,31 @@ impl Config {
             }
         }
         if cfg.feeds.len() > u16::MAX as usize { bail!("too many feeds"); }
+        // WP-03: the state stream's options and its transaction streams (feeds after the [[feed]] list)
+        let st = &cfg.state;
+        if !["auto", "all", "commitment"].contains(&st.slot_statuses.as_str()) { bail!("[state] slot_statuses must be \"auto\", \"all\" or \"commitment\""); }
+        if !["auto", "on", "off"].contains(&st.block_meta.as_str()) { bail!("[state] block_meta must be \"auto\", \"on\" or \"off\""); }
+        let mut tx_names = std::collections::HashSet::new();
+        for t in &st.tx_streams {
+            if !tx_names.insert(t.name.clone()) || cfg.feeds.iter().any(|f| f.name == t.name) { bail!("[[state.tx_stream]] {}: the name is taken (feed names are shared)", t.name); }
+            if t.account_include.is_empty() { bail!("[[state.tx_stream]] {}: account_include is empty", t.name); }
+            for a in &t.account_include {
+                let ok = a == WATCHED_WRITABLE || a == VENUE_PROGRAMS || bs58::decode(a).into_vec().is_ok_and(|b| b.len() == 32);
+                if !ok { bail!("[[state.tx_stream]] {}: account_include {a:?} is neither a base58 key nor {WATCHED_WRITABLE} / {VENUE_PROGRAMS}", t.name); }
+            }
+            if t.max_accounts == Some(0) { bail!("[[state.tx_stream]] {}: max_accounts must be at least 1", t.name); }
+            let literal = t.account_include.iter().filter(|a| !a.starts_with('@')).count();
+            if let Some(m) = t.max_accounts.filter(|m| literal > *m) { bail!("[[state.tx_stream]] {}: {literal} accounts in account_include, over max_accounts {m}", t.name); }
+        }
+        // review WP-03 N8: a [[feed]]'s literal include list is checked here, not first at run time after the boot
+        for f in &cfg.feeds {
+            if f.max_accounts == Some(0) { bail!("feed {}: max_accounts must be at least 1", f.name); }
+            let literal: std::collections::HashSet<&String> = f.account_include.iter().filter(|a| !a.starts_with('@')).collect();
+            if let Some(m) = f.max_accounts.filter(|m| literal.len() > *m) {
+                bail!("feed {}: {} accounts in account_include, over max_accounts {m} (the provider's limit; OD-1)", f.name, literal.len());
+            }
+        }
+        if cfg.leaders.refresh_min == 0 { bail!("[leaders] refresh_min must be > 0"); }
         let bb = cfg.live.big_band_max_per_sec;
         if !bb.is_finite() || bb < 0.0 { bail!("[live] big_band_max_per_sec must be a rate >= 0 (0 = no big-band trade)"); }
         // the bucket keeps the rate to 0.001 token/s: a smaller positive rate would silently mean "never"
@@ -1024,6 +1166,47 @@ mod tests {
         // integers where the defaults are numbers with a fraction
         assert_eq!(Config::parse(&format!("{MINIMAL}[record]\nrotate_mb = 1\ndisk_budget_gb = 2\n")).unwrap().record.rotate_mb, 1.0);
         assert_eq!(Config::parse(&format!("{MINIMAL}[record]\nmin_free_gb = 0\nwriter_cpus = [2, 3]\n")).unwrap().record.writer_cpus, [2, 3]);
+    }
+
+    /// WP-03: the state stream's keys, the transaction streams (feeds after the [[feed]] list, url and token from the
+    /// state stream's, the include tokens expanded once the registry is known, the provider's limit enforced) and
+    /// [leaders]
+    #[test]
+    fn wp03_state_keys_and_tx_streams() {
+        let c = Config::parse(MINIMAL).unwrap();
+        let st = &c.state;
+        assert!(st.watch_clock && st.watch_programdata && st.watch_wallet && st.tx_streams.is_empty());
+        assert_eq!((st.slot_statuses.as_str(), st.block_meta.as_str(), c.leaders.refresh_min), ("auto", "auto", 60));
+        let stage0 = Config::load(&repo("deploy/arbx-stage0.toml")).unwrap();
+        let tx = &stage0.state.tx_streams;
+        assert_eq!((tx.len(), tx[0].name.as_str(), tx[0].max_accounts, tx[0].failed), (1, "haan-grpc", Some(1), true));
+        assert!(!stage0.feeds.iter().any(|f| f.kind == FeedKind::YellowstoneTx), "the PumpSwap stream moved to [[state.tx_stream]]");
+        let mut f = stage0.state.tx_stream_feeds();
+        assert_eq!((f[0].kind.clone(), f[0].url.as_deref(), f[0].token_env.as_deref(), f[0].failed), (FeedKind::YellowstoneTx, Some(stage0.state.url.as_str()),
+            Some("HAAN_X_TOKEN"), None));
+        // its feed id is the one the [[feed]] had: it was the last feed, and the streams follow the list
+        assert_eq!(stage0.feeds.len() + 1, 10);
+        expand_includes(&mut f, &["W1".into()], &["V1".into()]).unwrap();
+        let ok = |extra: &str| Config::parse(&format!("{MINIMAL}{extra}"));
+        let txs = |inc: &str, max: &str| format!("[[state.tx_stream]]\nname = \"t\"\naccount_include = {inc}\n{max}");
+        let mut feeds = ok(&txs("[\"@watched_writable\", \"@venue_programs\"]", "")).unwrap().state.tx_stream_feeds();
+        expand_includes(&mut feeds, &["W1".into(), "W2".into()], &["V1".into(), "W1".into()]).unwrap();
+        assert_eq!(feeds[0].account_include, ["W1", "W2", "V1"], "expanded, without duplicates");
+        let mut feeds = ok(&txs("[\"@watched_writable\"]", "max_accounts = 1")).unwrap().state.tx_stream_feeds();
+        assert!(expand_includes(&mut feeds, &["W1".into(), "W2".into()], &[]).unwrap_err().to_string().contains("more than its max_accounts 1"));
+        for (bad, why) in [(txs("[\"nope\"]", ""), "neither a base58 key"), (txs("[]", ""), "is empty"),
+            (txs("[\"pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA\", \"CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C\"]", "max_accounts = 1"), "over max_accounts"),
+            ("[state]\nslot_statuses = \"some\"\n".to_string(), "slot_statuses"), ("[leaders]\nrefresh_min = 0\n".to_string(), "refresh_min"),
+            // review WP-03 N8: a [[feed]]'s literal list, at load
+            ("[[feed]]\nname = \"g\"\nkind = \"yellowstone-tx\"\nurl = \"http://localhost\"\naccount_include = [\"A\", \"B\"]\nmax_accounts = 1\n".to_string(), "over max_accounts 1")] {
+            let text = if bad.starts_with("[state]") { MINIMAL.replace("[state]\n", &bad) } else { format!("{MINIMAL}{bad}") };
+            let e = Config::parse(&text).map(|_| ()).unwrap_err().to_string();
+            assert!(e.contains(why), "{why}: {e}");
+        }
+        // a stream named like a feed is refused (feed names are shared)
+        let mut stage = std::fs::read_to_string(repo("deploy/arbx-stage0.toml")).unwrap();
+        stage = stage.replace("name = \"haan-grpc\"", "name = \"haan-deshred\"");
+        assert!(Config::parse(&stage).unwrap_err().to_string().contains("the name is taken"));
     }
 
     #[test]

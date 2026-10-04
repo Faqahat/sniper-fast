@@ -445,6 +445,13 @@ fn last_line(path: &Path) -> Value {
     s.lines().rev().find_map(|l| serde_json::from_str(l).ok()).unwrap_or(Value::Null)
 }
 
+/// Whether a run's control socket has a live server (a running segment): a connection is accepted. A stale socket
+/// file left by a killed run refuses it. Nothing is sent (the server answers an empty line and logs nothing)
+pub fn socket_alive(run_dir: &Path) -> bool {
+    let Ok((name, _dir_fd)) = sock_name(run_dir) else { return false };
+    std::os::unix::net::UnixStream::connect(&name).is_ok()
+}
+
 /// `arbx ctl`: send one command to a run's socket, return its reply
 pub fn send_command(run_dir: &Path, cmd: &str, who: &str, why: &str) -> Result<Value> {
     let path = run_dir.join(SOCKET);

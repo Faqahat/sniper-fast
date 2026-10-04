@@ -46,6 +46,20 @@ url = "https://edge.erpc.global?api-key=${ERPC_RPC_TOKEN}"
 [state]
 url = "https://grpc.haandigital.eu:443"
 token_env = "HAAN_X_TOKEN"
+# WP-03 (the defaults, written out): clock, programdata and wallet accounts on the stream; the interslot slot statuses
+# and block meta if `arbx grpc-probe` accepted them
+watch_clock = true
+watch_programdata = true
+watch_wallet = true
+slot_statuses = "auto"
+block_meta = "auto"
+
+# Haan's plan allows 1 transaction filter with 1 account: PumpSwap (the busiest venue). WP-03: a [[state.tx_stream]]
+# (it runs as a feed after the [[feed]] list)
+[[state.tx_stream]]
+name = "haan-grpc"
+account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]
+max_accounts = 1
 
 [strategy]
 sizes_sol = [0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
@@ -113,13 +127,7 @@ url = "https://grpc.haandigital.eu:443"
 token_env = "HAAN_X_TOKEN"
 account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"]
 
-[[feed]]
-# Haan's plan allows 1 transaction filter with 1 account: PumpSwap (the busiest venue)
-name = "haan-grpc"
-kind = "yellowstone-tx"
-url = "https://grpc.haandigital.eu:443"
-token_env = "HAAN_X_TOKEN"
-account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]
+# (the PumpSwap transaction stream `haan-grpc` is a [[state.tx_stream]] since WP-03)
 
 # ---------------------------------------------------------------- send paths
 # Checked with `arbx senders --config arb.toml` (sends nothing). The engine does not send yet (shadow only).

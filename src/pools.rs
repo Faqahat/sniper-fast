@@ -3,6 +3,7 @@
 //! the files, so a stale or mis-oriented row can't produce a wrong quote.
 use crate::config::PoolsCfg;
 use crate::pda;
+use crate::rec::accounts::{role, RoleOf, NO_POOL};
 use crate::rpc::Rpc;
 use crate::tx::{b58, pk, Pk};
 use crate::venues::{dlmm, pk_at, PoolMeta, Venue, WSOL};
@@ -12,6 +13,8 @@ use std::sync::LazyLock;
 
 pub static PUMP_FEE_CONFIG: LazyLock<Pk> = LazyLock::new(|| pk("5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx"));
 pub static PUMP_FUN: LazyLock<Pk> = LazyLock::new(|| pk("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"));
+/// the Clock sysvar (chain time; WP-03 item 2)
+pub static CLOCK_SYSVAR: LazyLock<Pk> = LazyLock::new(|| pk("SysvarC1ock11111111111111111111111111111111"));
 /// DLMM bin arrays kept live around the active one (each side)
 pub const DLMM_ARRAY_SPAN: i64 = 3;
 
@@ -164,6 +167,62 @@ impl Registry {
         }
         s
     }
+    /// Every account `static_accounts` follows, with its role (accounts.bin DICT, exec.jsonl `watched`; WP-03): pools,
+    /// vaults, PumpSwap base mints, CPMM configs, the PumpSwap fee config
+    pub fn watch_roles(&self) -> Vec<(Pk, RoleOf)> {
+        let mut out = Vec::new();
+        let r = |role: u8, i: usize| RoleOf { role, pool_index: i as u32 };
+        for &i in self.pairs.values().flatten() {
+            let m = &self.pools[i];
+            out.push((m.pool, r(role::POOL, i)));
+            if !matches!(m.venue, Venue::Dlmm | Venue::DammV2) {
+                out.push((m.vault0, r(role::VAULT, i)));
+                out.push((m.vault1, r(role::VAULT, i)));
+                for e in &m.extra { out.push((*e, r(if m.venue == Venue::PumpSwap { role::MINT } else { role::EXTRA }, i))); }
+            }
+            if m.venue == Venue::PumpSwap { out.push((*PUMP_FEE_CONFIG, RoleOf { role: role::PUMP_FEE_CONFIG, pool_index: NO_POOL })); }
+        }
+        out
+    }
+
+    /// The extra accounts the state stream follows (WP-03 item 2), with their roles: the Clock sysvar (chain time), every
+    /// DLMM pool's bitmap-extension PDA whether or not it exists (an update arrives if one is created), the programdata
+    /// accounts of `programs` (upgrade detection), and the wallet with its token accounts (its WSOL account and its
+    /// associated account for every registry mint: every landed transaction we pay for writes the wallet)
+    pub fn extra_watch(&self, clock: bool, programs: &[Pk], wallet: Option<&Pk>) -> Vec<(Pk, RoleOf)> {
+        let mut out = Vec::new();
+        let none = |role: u8| RoleOf { role, pool_index: NO_POOL };
+        if clock { out.push((*CLOCK_SYSVAR, none(role::CLOCK_SYSVAR))); }
+        for &i in self.pairs.values().flatten() {
+            let m = &self.pools[i];
+            if m.venue == Venue::Dlmm { if let Some(ext) = m.extra.first() { out.push((*ext, RoleOf { role: role::DLMM_BITMAP_EXT, pool_index: i as u32 })); } }
+        }
+        let loader = pk(crate::provenance::UPGRADEABLE_LOADER);
+        for p in programs { out.push((pda::find_program_address(&[p], &loader).0, none(role::PROGRAMDATA))); }
+        if let Some(w) = wallet {
+            out.push((*w, none(role::WALLET)));
+            let mut mints: Vec<(Pk, Pk)> = vec![(*WSOL, *pda::TOKEN_PROGRAM)];
+            for &i in self.pairs.values().flatten() { let m = &self.pools[i]; mints.push((m.t0, m.t0_prog)); mints.push((m.t1, m.t1_prog)); }
+            mints.sort();
+            mints.dedup();
+            for (mint, prog) in mints { out.push((pda::ata(w, &mint, &prog), none(role::WALLET_TOKEN_ACCOUNT))); }
+        }
+        let mut seen = HashSet::default();
+        out.retain(|(k, _)| seen.insert(*k));
+        out
+    }
+
+    /// `[[state.tx_stream]]` `@watched_writable`: every watched pool and its vaults
+    pub fn watched_writable(&self) -> Vec<String> {
+        let mut seen = HashSet::default();
+        let mut out = Vec::new();
+        for &i in self.pairs.values().flatten() {
+            let m = &self.pools[i];
+            for k in [m.pool, m.vault0, m.vault1] { if seen.insert(k) { out.push(b58(&k)); } }
+        }
+        out
+    }
+
     pub fn source(&self, p: &Pk) -> &'static str {
         match (self.seeds.contains(p), self.ours.contains(p)) { (true, true) => "both", (true, false) => "mriya", (false, true) => "ours", _ => "?" }
     }

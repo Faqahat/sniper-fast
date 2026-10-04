@@ -374,6 +374,10 @@ impl Jito {
                 status(format!("jito results: stream {}", if first { "open" } else { "reopened" }));
                 first = false;
                 while let Some(m) = st.message().await? {
+                    // the LeaderBook's `bundle_result` source (WP-03 item 10): the validators our bundles reached
+                    if let Some(id) = m.accepted.as_ref().map(|a| &a.validator_identity).or(m.processed.as_ref().map(|p| &p.validator_identity)) {
+                        crate::leaders::note_bundle_validator(id);
+                    }
                     self.on_result(summarize(m));
                     if stop.load(std::sync::atomic::Ordering::Relaxed) { return Ok(()); }
                 }

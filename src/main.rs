@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use arbx::control::{self, StopInfo, StopReason};
 use arbx::feeds::clock::now_ns;
-use arbx::{build, config, engine, exec, feeds, pda, pools, provenance, rec, rpc, runtime, send, store, tx, venues, wallet};
+use arbx::{build, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, rec, rpc, runtime, send, store, tx, venues, wallet};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -123,6 +123,23 @@ enum Cmd {
         /// why (required for every command but status)
         #[arg(long, default_value = "")] why: String,
     },
+    /// What the configured gRPC provider accepts (PLAN WP-03 item 5): subscribes, one after the other, to each
+    /// subscription the plan needs (the full accounts filter, interslot slots, blocks_meta, transaction filters of 1, 2
+    /// and 5 accounts, blocks of the venue programs, the deshred filter with 5 programs) for --seconds each, and writes
+    /// probe.json (`[state] probe_file`, default <out_dir>/probe.json) and a dated copy. Sends no transaction. Refuses
+    /// to start while a segment or campaign may hold the provider (Haan serves the first process only), and holds the
+    /// campaign supervisor's lock while it runs. A 503 / Unavailable result is inconclusive: probe.json is then not
+    /// replaced and the exit code is 3
+    GrpcProbe {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        #[arg(long, default_value_t = 30.0)] seconds: f64,
+        /// where to write probe.json (default: `[state] probe_file`, else <out_dir>/probe.json)
+        #[arg(long)] out: Option<PathBuf>,
+        /// only these subscriptions (comma-separated names)
+        #[arg(long)] only: Option<String>,
+        /// probe even though a segment, a campaign or another bot process may hold the provider
+        #[arg(long)] force: bool,
+    },
     /// (tests) install `run`'s signal handler, control socket and stop path, without feeds or RPC; print "ready <pid>",
     /// wait for a stop, write stop.json and exit with its code
     #[command(hide = true)]
@@ -164,6 +181,14 @@ fn main() -> Result<()> {
             println!("config_version {}, sha256 {}, normalized {}", config::CONFIG_VERSION, provenance::sha256_hex(&raw), cfg.normalized_sha256());
             println!("mode {}, wallet {}, {} feeds, {} send paths", cfg.mode, cfg.wallet, cfg.feeds.len(), cfg.sends.len());
             for f in &cfg.feeds { println!("  feed {:<20} {:?}{}", f.name, f.kind, if f.enabled { "" } else { " (disabled)" }); }
+            for t in &cfg.state.tx_streams {
+                println!("  tx stream {:<15} yellowstone-tx on {} include {:?}{}{}", t.name, provenance::host_of(t.url.as_deref().unwrap_or(&cfg.state.url)), t.account_include,
+                    t.max_accounts.map(|m| format!(" (max {m})")).unwrap_or_default(), if t.enabled { "" } else { " (disabled)" });
+            }
+            let st = &cfg.state;
+            println!("state stream {}: watch clock {}, programdata {}, wallet {}; slot statuses {}, block meta {}", provenance::host_of(&st.url), st.watch_clock,
+                st.watch_programdata, st.watch_wallet, st.slot_statuses, st.block_meta);
+            if cfg.leaders.enabled { println!("leaders: lists {:?} every {} min, static fallback {}", cfg.leaders.validator_lists, cfg.leaders.refresh_min, cfg.leaders.static_fallback); }
             for s in &cfg.sends {
                 let tip = match (s.tip_share, s.tip_lamports) { (Some(x), l) => format!("{:.0}% of the edge, {l}..{} lamports", x * 100.0, s.tip_max_lamports.unwrap_or(u64::MAX)), (None, 0) => "no tip".into(), (None, l) => format!("tip {l} lamports") };
                 let rate = s.max_per_sec.map(|n| format!(", max {n}/s")).unwrap_or_default();
@@ -251,6 +276,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Simcheck { config, max, size_sol, canaries } => simcheck(&config, max, size_sol, canaries),
+        Cmd::GrpcProbe { config, seconds, out, only, force } => grpc_probe(&config, seconds, out, only, force),
         Cmd::KeystoreEncrypt { out, generate, show_backup } => {
             use std::io::Read;
             if out.exists() { anyhow::bail!("{} exists: not overwriting", out.display()); }
@@ -379,6 +405,76 @@ fn nonces(config: &Path, from: u32, count: u32) -> Result<()> {
     })
 }
 
+/// `arbx grpc-probe` (PLAN WP-03 item 5): what the state stream's provider (and each deshred feed) accepts
+fn grpc_probe(config: &Path, seconds: f64, out: Option<PathBuf>, only: Option<String>, force: bool) -> Result<()> {
+    load_env(config);
+    let cfg = config::Config::load(config)?;
+    if !(seconds > 0.0) { anyhow::bail!("--seconds must be > 0"); }
+    // review WP-03 #4 (PLAN-ADDENDUM I-3): Haan gives its streams to the first process only. A probe run beside a segment
+    // learns nothing (503 everywhere), and one started first blinds a segment that reconnects meanwhile
+    let runs = PathBuf::from(&cfg.out_dir);
+    let busy = probe::busy(&runs, true);
+    let lock = probe::lock_runs(&runs);
+    if !force {
+        let mut why = busy.clone();
+        if let Err(e) = &lock { why.push(format!("{e:#}")); }
+        if !why.is_empty() {
+            anyhow::bail!("the provider may be in use (Haan serves the first process only, PLAN-ADDENDUM I-3): {}. Probe when nothing runs, or pass --force", why.join("; "));
+        }
+    } else if !busy.is_empty() || lock.is_err() {
+        println!("--force: probing although the provider may be in use ({}); expect inconclusive results", busy.len() + lock.is_err() as usize);
+    }
+    let target = |url: &str, token_env: &Option<String>, header: &Option<String>, what: &str| -> Result<probe::Target> {
+        Ok(probe::Target { url: url.to_string(), token: config::env_token(token_env, what)?, header: header.clone() })
+    };
+    let state = target(&cfg.state.url, &cfg.state.token_env, &None, "state")?;
+    // the accounts filter's keys: the candidate pools (no RPC), the clock, the wallet and the programs' programdata,
+    // padded to the full list's estimated size (pools with their vaults and extras, the wallet's token accounts)
+    let (cands, _, _) = pools::candidates(&cfg.pools)?;
+    let loader = tx::pk(provenance::UPGRADEABLE_LOADER);
+    let mut keys: Vec<String> = cands.iter().map(|c| tx::b58(&c.1)).collect();
+    keys.push(tx::b58(&pools::CLOCK_SYSVAR));
+    keys.push(cfg.wallet.clone());
+    for p in provenance::program_specs(&cfg) { keys.push(tx::b58(&pda::find_program_address(&[&p.id], &loader).0)); }
+    let n = (4 * cands.len()).max(probe::MIN_ACCOUNTS);
+    let accounts = probe::pad_accounts(&keys, n);
+    let venue_programs: Vec<String> = provenance::venue_specs().iter().map(|p| tx::b58(&p.id)).collect();
+    let mut deshred = Vec::new();
+    for f in cfg.feeds.iter().filter(|f| f.enabled && f.kind == config::FeedKind::YellowstoneDeshred) {
+        if let Some(u) = &f.url { deshred.push((f.name.clone(), target(u, &f.token_env, &f.token_header, &f.name)?)); }
+    }
+    let plan = probe::Plan { state, accounts, venue_programs, deshred };
+    let only: Option<Vec<String>> = only.map(|o| o.split(',').map(|x| x.trim().to_string()).collect());
+    println!("probing {} for {seconds} s per subscription ({} accounts in the accounts filter) ...", provenance::host_of(&cfg.state.url), plan.accounts.len());
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
+    let subs = rt.block_on(probe::probe(&plan, std::time::Duration::from_secs_f64(seconds), only.as_deref()));
+    drop(lock);
+    for s in &subs {
+        let what = match s.verdict { "accepted" if s.messages_30s == 0 => "SILENT", "accepted" => "accepted", "refused" => "REFUSED", _ => "INCONCLUSIVE" };
+        println!("  {:<24} {:<12} {:>6} msgs  first {:>8}  {}{}", s.sub, what, s.messages_30s,
+            s.first_msg_ms.map(|m| format!("{m:.0} ms")).unwrap_or_else(|| "-".into()), s.host, s.error.as_ref().map(|e| format!("  ({e})")).unwrap_or_default());
+    }
+    let v = probe::probe_json(&plan, &subs);
+    let path = out.unwrap_or_else(|| if cfg.state.probe_file.is_empty() { PathBuf::from(&cfg.out_dir).join("probe.json") } else { PathBuf::from(&cfg.state.probe_file) });
+    if let Some(d) = path.parent().filter(|d| !d.as_os_str().is_empty()) { std::fs::create_dir_all(d)?; }
+    let text = serde_json::to_string_pretty(&v)?;
+    let bad = probe::inconclusive(&subs);
+    if !bad.is_empty() {
+        // an inconclusive probe never replaces a conclusive one (`auto` reads probe.json)
+        let dated = path.with_file_name(format!("probe-{}-inconclusive.json", &utc_stamp()[..15]));
+        control::write_atomic(&dated, text.as_bytes())?;
+        eprintln!("{} of {} subscriptions inconclusive ({}): the provider was busy or down (503 / Unavailable: another process holding Haan, I-3, or an outage, I-2). \
+            {} not replaced; this result is in {}. Probe again when nothing else uses the provider",
+            bad.len(), subs.len(), bad.iter().map(|s| format!("{} {}", s.sub, s.code.as_deref().unwrap_or("no gRPC answer"))).collect::<Vec<_>>().join(", "), path.display(), dated.display());
+        std::process::exit(3);
+    }
+    control::write_atomic(&path, text.as_bytes())?;
+    let dated = path.with_file_name(format!("probe-{}.json", &utc_stamp()[..8]));
+    control::write_atomic(&dated, text.as_bytes())?;
+    println!("wrote {} and {} (copy it into docs/ and record the result in PLAN §9)", path.display(), dated.display());
+    Ok(())
+}
+
 fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<()> {
     load_env(config);
     let mut cfg = config::Config::load(config)?;
@@ -395,7 +491,7 @@ fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<(
     let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover);
     let fetch = |store: &mut store::Store, keys: &[tx::Pk]| -> Result<()> {
         let (slot, accts) = rt.block_on(rpc.accounts(keys))?;
-        for (k, a) in keys.iter().zip(accts) { if let Some(a) = a { store.update(*k, a.data, slot, now_ns(), None); } }
+        for (k, a) in keys.iter().zip(accts) { if let Some(a) = a { store.update(*k, a.data.into(), slot, now_ns(), None); } }
         Ok(())
     };
     let (cands, seeds, ours) = pools::candidates(&cfg.pools)?;
@@ -743,11 +839,25 @@ fn load_env_file(f: &Path) -> Option<String> {
 struct RecGuard(rec::Rec);
 impl Drop for RecGuard { fn drop(&mut self) { self.0.close(); } }
 
+/// One account of the boot snapshot: accounts.bin (src rpc_boot), the boot journal (its ACCOUNT record, t_engine 0, with
+/// the store's verdict) and the store
+fn boot_account(store: &mut store::Store, ar: &rec::accounts::AcctRec, j: &rec::journal::Journal, k: tx::Pk, a: rpc::Account, slot: u64) {
+    let t = now_ns();
+    let data: Arc<[u8]> = a.data.into();
+    let aseq = ar.record(&rec::accounts::AcctUpdate { pubkey: k, slot, write_version: 0, t_recv: t, src: feeds::src::RPC_BOOT, is_startup: false, txn: None,
+        lamports: a.lamports, owner: a.owner, data: &data });
+    j.account(0, aseq, store.is_stale(&k, slot));
+    store.update(k, data, slot, t, None);
+}
+
 fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let started_ns = now_ns();
     let (live, canary) = (a.live, a.canary);
     let env_note = match &a.env_file { Some(f) => load_env_file(f), None => { load_env(&a.config); None } };
     let RunConfig { mut cfg, raw, config_json, config_cap } = run_config(a)?;
+    // WP-03 item 3: the transaction streams run as feeds after the [[feed]] list (their ids follow its)
+    let tx_stream_feeds = cfg.state.tx_stream_feeds();
+    cfg.feeds.extend(tx_stream_feeds);
     // live trading needs both mode = "live" and --live; either alone refuses to start (so neither can spend by itself)
     if live != (cfg.mode == "live") { anyhow::bail!("live trading needs mode = \"live\" in the config AND --live (got mode {}, --live {live}; --shadow runs a live config in shadow)", cfg.mode); }
     if let Some(w) = cfg.pricing_warning() { println!("{w}"); }
@@ -822,33 +932,121 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     if eps.is_empty() { anyhow::bail!("no RPC provider configured (skipped: {skipped:?})"); }
     let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover).bind(bg.clone());
     let state_token = config::env_token(&cfg.state.token_env, "state")?;
+    // WP-03 items 6, 7: what the state stream subscribes to besides the accounts. blocks_meta = "auto" follows the probe
+    // (`arbx grpc-probe`), whose result is copied into the segment (probe.json)
+    let state_host = provenance::host_of(&cfg.state.url);
+    let probe_path = if cfg.state.probe_file.is_empty() { PathBuf::from(&cfg.out_dir).join("probe.json") } else { PathBuf::from(&cfg.state.probe_file) };
+    let probe_raw = std::fs::read(&probe_path).ok();
+    let probe_v: Option<Value> = probe_raw.as_deref().and_then(|b| serde_json::from_slice(b).ok());
+    if probe_v.is_some() { let _ = std::fs::copy(&probe_path, dir.join("probe.json")); }
+    // meta.json `probe` (MEASUREMENT §4.2): the file's hash, when it was taken, what was accepted and refused
+    let probe_meta = probe_v.as_ref().map(|p| {
+        let subs = p["subs"].as_array().cloned().unwrap_or_default();
+        let name = |s: &Value| match s["feed"].as_str() { Some(f) => format!("{}@{f}", s["sub"].as_str().unwrap_or("?")), None => s["sub"].as_str().unwrap_or("?").to_string() };
+        let ok = |s: &&Value| s["accepted"] == json!(true) && s["messages_30s"].as_u64().unwrap_or(0) > 0;
+        json!({ "file_sha256": provenance::sha256_hex(probe_raw.as_deref().unwrap_or_default()), "t_ns": p["t_ns"], "provider_host": p["provider_host"],
+            // review WP-03 N7: how old the probe is when this segment reads it
+            "age_s": p["t_ns"].as_u64().map(|t| started_ns.saturating_sub(t) / 1_000_000_000),
+            "accepted": subs.iter().filter(ok).map(name).collect::<Vec<_>>(),
+            "refused": subs.iter().filter(|s| s["accepted"] == json!(false)).map(|s| json!({ "sub": name(s), "error": s["error"] })).collect::<Vec<_>>(),
+            "inconclusive": subs.iter().filter(|s| !ok(s) && s["accepted"] != json!(false)).map(|s| json!({ "sub": name(s), "error": s["error"], "code": s["code"],
+                "messages_30s": s["messages_30s"] })).collect::<Vec<_>>() })
+    });
+    let probe_ok = |sub: &str| probe_v.as_ref().and_then(|p| probe::accepted(p, &state_host, sub)).unwrap_or(false);
+    let block_meta = match cfg.state.block_meta.as_str() { "on" => true, "off" => false, _ => probe_ok("blocks_meta") };
+    // review WP-03 #5: interslot statuses share the state stream's one subscription with the accounts; a provider that
+    // refused them would refuse the whole stream. "auto" (the default): on only where the probe accepted them
+    let interslot = match cfg.state.slot_statuses.as_str() { "all" => true, "commitment" => false, _ => probe_ok("slots_interslot") };
+    let state_subs = feeds::grpc::StateSubs { interslot, block_meta };
+    say(&format!("state stream: slot statuses {} ({}), blocks_meta {} ({}; probe {})", if interslot { "all" } else { "commitment" }, cfg.state.slot_statuses,
+        if block_meta { "on" } else { "off" }, cfg.state.block_meta,
+        match &probe_v { Some(p) => format!("{} of {}", probe_path.display(), p["provider_host"].as_str().unwrap_or("?")), None => format!("none at {}", probe_path.display()) }));
+    // the LeaderBook (WP-03 item 10): its static fallback now, its refreshes once the engine's channel exists
+    let book = leaders::LeaderBook::new(rec.clone());
+    leaders::install(book.clone());
+    if cfg.leaders.enabled {
+        match book.load_static(Path::new(&cfg.leaders.static_fallback)) {
+            Ok(n) => say(&format!("leaders: static fallback {} ({n} validators)", cfg.leaders.static_fallback)),
+            Err(e) => say(&format!("leaders: no static fallback: {e:#}")),
+        }
+    }
+    // WP-03 items 1, 2, 11: accounts.bin (every account update with its aseq; the snapshot's as src rpc_boot between
+    // boot marks) and the boot journal (the snapshot's ACCOUNT records, t_engine 0); the extra watched accounts (the
+    // Clock sysvar, the programs' programdata, the wallet and its token accounts) and every account's role
+    let journal = rec::journal::Journal::new(rec.clone());
+    let mut boot_extra = None;
     // pools, then a first snapshot of every followed account
     let (reg, store, snapshot_slot) = rts.bg.block_on(async {
         let (cands, seeds, ours) = pools::candidates(&cfg.pools)?;
         let reg = pools::boot(&rpc, &cands, seeds, ours).await?;
+        let programs: Vec<tx::Pk> = if cfg.state.watch_programdata { provenance::program_specs(&cfg).iter().map(|p| p.id).collect() } else { vec![] };
+        // (a wallet that is not a key leaves the wallet accounts out: the run's keystore check names it)
+        let wallet = cfg.state.watch_wallet.then(|| bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok())).flatten();
+        let extra = reg.extra_watch(cfg.state.watch_clock, &programs, wallet.as_ref());
+        let mut role_list = reg.watch_roles();
+        role_list.extend(extra.iter().copied());
+        let roles = Arc::new(rec::accounts::Roles::new(role_list));
+        let acct_rec = rec::accounts::AcctRec::new(rec.clone(), roles.clone());
+        let mut base = reg.static_accounts();
+        let mut have: std::collections::HashSet<tx::Pk> = base.iter().copied().collect();
+        for (k, _) in &extra { if have.insert(*k) { base.push(*k); } }
         let mut store = store::Store::default();
-        let keys = reg.static_accounts();
+        // the snapshot leaves out the programdata accounts (megabytes each; the stream reports their upgrades)
+        let keys: Vec<tx::Pk> = base.iter().copied().filter(|k| roles.get(k).map_or(true, |r| r.role != rec::accounts::role::PROGRAMDATA)).collect();
+        acct_rec.mark(rec::accounts::MARK_BOOT_BEGIN, &[]);
         let (slot, accts) = rpc.accounts(&keys).await?;
-        for (k, a) in keys.iter().zip(accts) { if let Some(a) = a { store.update(*k, a.data, slot, now_ns(), None); } }
+        for (k, a) in keys.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, slot); } }
         engine::initial_dlmm_arrays(&reg, &mut store);
         let arr: Vec<tx::Pk> = store.dlmm_arrays.values().flatten().map(|x| x.1).collect();
+        roles.add(store.dlmm_arrays.iter().flat_map(|(p, l)| { let pi = reg.by_pool.get(p).map_or(rec::accounts::NO_POOL, |i| *i as u32);
+            l.iter().map(move |(_, k)| (*k, rec::accounts::RoleOf { role: rec::accounts::role::DLMM_BIN_ARRAY, pool_index: pi })) }).collect::<Vec<_>>());
         let (slot2, accts) = rpc.accounts(&arr).await?;
-        for (k, a) in arr.iter().zip(accts) { if let Some(a) = a { store.update(*k, a.data, slot2, now_ns(), None); } }
+        for (k, a) in arr.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, slot2); } }
+        acct_rec.mark(rec::accounts::MARK_BOOT_END, &[]);
+        boot_extra = Some((roles, acct_rec, base, extra.len()));
         anyhow::Ok((reg, store, slot))
     })?;
+    let (roles, acct_rec, base_watch, n_extra) = boot_extra.expect("set by the boot");
     let snapshot_ns = now_ns();
     // review F1: the state stream starts right after the snapshot, as in arb-lab. It sends only the writes after it
     // subscribes and the engine never re-reads the pools, so every step put between the two (the programs, the send
     // paths, the executor, meta.json) would leave pools on a pre-write price until their next write. Its updates queue
     // until the engine starts; the tx feeds still start after meta.json
     let (tx, rx) = crossbeam_channel::unbounded::<feeds::Event>();
-    let mut list: Vec<String> = reg.static_accounts().iter().map(tx::b58).collect();
+    let mut list: Vec<String> = base_watch.iter().map(tx::b58).collect();
     for l in store.dlmm_arrays.values() { for (_, k) in l { list.push(tx::b58(k)); } }
     let followed = list.len();
     let (wtx, wrx) = tokio::sync::watch::channel(list);
     let state_counters = Arc::new(feeds::FeedCounters::named("state", "state-stream"));
-    feeds::start_state(cfg.state.url.clone(), state_token, wrx, tx.clone(), stop.clone(), &hot, state_counters.clone());
+    feeds::start_state(cfg.state.url.clone(), state_token, wrx, state_subs, tx.clone(), stop.clone(), &hot, state_counters.clone(), rec.clone(),
+        feeds::Fwd { state: true, acct: Some(acct_rec.clone()), leaders: Some(book.clone()) });
     let stream_started_ns = now_ns();
+    say(&format!("state stream: {n_extra} extra watched accounts (clock {}, programdata {}, wallet {}); {} accounts with a role", cfg.state.watch_clock,
+        cfg.state.watch_programdata, cfg.state.watch_wallet, roles.len()));
+    // the LeaderBook's refreshes (schedule windows reach the engine as inputs) and the SendGate's changes, sampled every
+    // 100 ms (`src` "watch": status and coverage only; the mode each send check saw is journaled by the engine at the
+    // decision, `src` "decision": review WP-03 #3)
+    if cfg.leaders.enabled { leaders::start(book.clone(), rpc.clone(), cfg.leaders.clone(), &bg, stop.clone(), tx.clone(), rec.clone()); }
+    {
+        let (gate, back, stop) = (sess.gate.clone(), tx.clone(), stop.clone());
+        bg.spawn(async move {
+            let mut last = Value::Null;
+            while !stop.load(Ordering::Relaxed) {
+                let mut g = gate.json();
+                if let Some(m) = g.as_object_mut() { m.remove("since_ns"); }
+                if g != last {
+                    let mut d = gate.json();
+                    d["src"] = json!("watch");
+                    let _ = back.send(feeds::Event::Input { kind: feeds::InputKind::Gate, data: Arc::new(d) });
+                    last = g;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        });
+    }
+    // WP-03 item 3: the transaction streams' `@watched_writable` / `@venue_programs`, now that the registry is known
+    let venue_programs: Vec<String> = provenance::venue_specs().iter().map(|p| tx::b58(&p.id)).collect();
+    config::expand_includes(&mut cfg.feeds, &reg.watched_writable(), &venue_programs)?;
     let reg = Arc::new(reg);
     say(&format!("booted: {}; {} accounts held (snapshot at slot {snapshot_slot})", reg.summary(), store.accts.len()));
     say(&format!("state stream follows {followed} accounts, started {:.1} ms after the snapshot (its first update's slot follows in this log)",
@@ -907,7 +1105,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         "effective_max_failed_fees_lamports": cfg.live.max_failed_fees_lamports });
     limits["ledger"] = Value::Null;
     let tx_streams: Vec<Value> = cfg.feeds.iter().filter(|f| f.enabled && f.kind == config::FeedKind::YellowstoneTx)
-        .map(|f| json!({ "name": f.name, "account_include": f.account_include, "max_accounts": null })).collect();
+        .map(|f| json!({ "name": f.name, "url_host": f.url.as_deref().map(provenance::host_of), "account_include": f.account_include, "max_accounts": f.max_accounts,
+            "failed": f.failed.unwrap_or(true) })).collect();
     let venue_specs = provenance::venue_specs();
     let mut programs = route.clone();
     programs.extend(venue_specs.iter().map(provenance::pending_entry));
@@ -920,10 +1119,11 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         "wallet": { "pubkey": cfg.wallet, "keystore_path": if cfg.wallet_keystore.is_empty() { format!("~/.nexus-v2-{}-wallet.enc", cfg.wallet_profile) } else { cfg.wallet_keystore.clone() },
             "held_mints_at_boot": exec.as_ref().map(|x| x.held_mints()) },
         "feeds": provenance::feeds_json(&cfg), "send_paths": provenance::send_paths_json(&cfg, &built), "rpc": provenance::rpc_json(&cfg),
-        "state": { "url_host": provenance::host_of(&cfg.state.url), "tx_streams": tx_streams, "watch_clock": false, "watch_programdata": false,
-            "watch_wallet": false, "block_meta": false, "config": provenance::section(&cfg.state),
+        "state": { "url_host": provenance::host_of(&cfg.state.url), "tx_streams": tx_streams, "watch_clock": cfg.state.watch_clock,
+            "watch_programdata": cfg.state.watch_programdata, "watch_wallet": cfg.state.watch_wallet, "block_meta": block_meta,
+            "slot_statuses": if interslot { "all" } else { "commitment" }, "extra_watched": n_extra, "config": provenance::section(&cfg.state),
             "snapshot_slot": snapshot_slot, "snapshot_ns": snapshot_ns, "stream_started_ns": stream_started_ns, "followed": followed },
-        "probe": null, "chainfetch": null,
+        "probe": probe_meta, "chainfetch": null, "leaders": provenance::section(&cfg.leaders),
         "pools": provenance::pools_json(&reg, &cfg), "inputs": provenance::inputs_json(&cfg),
         "streams": streams, "experiments": null,
         "limits": limits, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()),
@@ -938,7 +1138,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     });
     control::write_atomic(&dir.join("meta.json"), serde_json::to_string_pretty(&meta)?.as_bytes())?;
     if sess.stopper.stopping() { return Ok(()); }
-    let fs = feeds::start(&cfg.feeds, interest.clone(), tx.clone(), stop.clone(), &hot, &rec)?;
+    let fs = feeds::start(&cfg.feeds, interest.clone(), tx.clone(), stop.clone(), &hot, &rec, Some(roles.clone()))?;
     anyhow::ensure!(fs.names == feed_names, "feed ids changed: {:?} vs {:?}", fs.names, feed_names);
     say(&format!("feeds: {}", fs.names.join(", ")));
     // the venue programs, in the background: once per campaign (the campaign's cache, keyed by each programdata's last
@@ -973,6 +1173,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let mut eng = engine::Engine::new(reg.clone(), store, cfg.strategy.clone(), fs.names.clone(), min_tip, interest, rec.clone(), rpc.clone(),
         bg.clone(), tx.clone(), wtx)?;
     eng.set_feed_counters(fs.counters.clone(), Some(state_counters));
+    eng.set_acct_rec(acct_rec.clone());
+    eng.set_base_watch(base_watch);
     eng.exec = exec;
     eng.gate = Some(sess.gate.clone());
     // the minutes count from the engine's start, as in arb-lab (boot time is not part of the segment)

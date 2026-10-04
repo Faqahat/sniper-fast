@@ -40,6 +40,8 @@ tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
 toml = "0.8"
 # the recorder's in-process compression: one zstd frame per flush (MEASUREMENT §1.3; PLAN WP-02)
 zstd = { version = "0.13", default-features = false }
+# accounts.bin `data_xxh3` and state-version hashes (MEASUREMENT §2.1, §4.12; PLAN WP-03)
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [build-dependencies]
 sha2 = "0.10"

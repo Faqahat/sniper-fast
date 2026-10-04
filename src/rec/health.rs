@@ -203,8 +203,8 @@ impl FeedHealth {
                 "lead_ms": row.lead.map(|s| s.take_interval(1e6)),
                 "last_msg_age_ms_now": (last > 0).then(|| t.saturating_sub(last) as f64 / 1e6),
                 "slot_max_now": (slot > 0).then_some(slot), "slot_lag_now": (slot > 0 && tip > 0).then(|| tip as i64 - slot as i64),
-                // the provider's created_at is not parsed yet (WP-03)
-                "provider_lag_ms": null,
+                // WP-03: receive time minus the provider's `created_at`, for providers that stamp their messages
+                "provider_lag_ms": c.provider_lag.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|s| s.take_interval(1e6)),
                 "shreds": shreds,
                 "udp_drops_delta": udp.map(|u| u.saturating_sub(p.udp.unwrap_or(0))),
                 "channel_drops_delta": chan.saturating_sub(p.chan) }));

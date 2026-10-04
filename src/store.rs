@@ -6,7 +6,9 @@ use crate::venues::{cp, dlmm, i32_at, PoolMeta, Venue};
 use rustc_hash::FxHashMap as HashMap;
 use std::sync::Arc;
 
-pub struct Acct { pub data: Vec<u8>, pub slot: u64, pub t: u64, pub txn: Option<[u8; 64]> }
+/// An account's latest bytes. `data` is shared with the recorder's accounts.bin record of the same update (WP-03: one
+/// allocation per update, never copied on the engine thread)
+pub struct Acct { pub data: Arc<[u8]>, pub slot: u64, pub t: u64, pub txn: Option<[u8; 64]> }
 
 #[derive(Default)]
 pub struct Store {
@@ -27,13 +29,16 @@ pub enum Snap<'a> {
 
 impl Store {
     /// Apply an update; returns false if it is older than what we hold.
-    pub fn update(&mut self, key: Pk, data: Vec<u8>, slot: u64, t: u64, txn: Option<[u8; 64]>) -> bool {
-        if let Some(a) = self.accts.get(&key) { if a.slot > slot { self.stale_dropped += 1; return false; } }
+    pub fn update(&mut self, key: Pk, data: Arc<[u8]>, slot: u64, t: u64, txn: Option<[u8; 64]>) -> bool {
+        if self.is_stale(&key, slot) { self.stale_dropped += 1; return false; }
         if key == *PUMP_FEE_CONFIG { self.pump_cfg = cp::decode_pump_fee_cfg(&data).map(Arc::new); }
         self.accts.insert(key, Acct { data, slot, t, txn });
         self.updates += 1;
         true
     }
+
+    /// Whether `update` would refuse an update of `key` at `slot` (the journal's ACCOUNT verdict, WP-03; no change)
+    pub fn is_stale(&self, key: &Pk, slot: u64) -> bool { self.accts.get(key).is_some_and(|a| a.slot > slot) }
 
     pub fn get(&self, k: &Pk) -> Option<&Acct> { self.accts.get(k) }
 
@@ -44,7 +49,7 @@ impl Store {
             Venue::Dlmm => {
                 let mut arrays = HashMap::default();
                 if let Some(list) = self.dlmm_arrays.get(&m.pool) {
-                    for (i, k) in list { if let Some(a) = self.accts.get(k) { arrays.insert(*i, a.data.as_slice()); } }
+                    for (i, k) in list { if let Some(a) = self.accts.get(k) { arrays.insert(*i, &a.data[..]); } }
                 }
                 Ok(Snap::Dlmm { pair: &pool.data, arrays, slot: pool.slot })
             }
@@ -53,7 +58,7 @@ impl Store {
             _ => {
                 let v0 = self.accts.get(&m.vault0).ok_or("no-vault0")?;
                 let v1 = self.accts.get(&m.vault1).ok_or("no-vault1")?;
-                let extra: Vec<&[u8]> = m.extra.iter().filter_map(|k| self.accts.get(k).map(|a| a.data.as_slice())).collect();
+                let extra: Vec<&[u8]> = m.extra.iter().filter_map(|k| self.accts.get(k).map(|a| &a.data[..])).collect();
                 if extra.len() != m.extra.len() { return Err("no-extra-account"); }
                 // the snapshot's slot is the newest part's; parts more than 2 slots apart are not trusted together
                 let (lo, hi) = (pool.slot.min(v0.slot).min(v1.slot), pool.slot.max(v0.slot).max(v1.slot));

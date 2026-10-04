@@ -11,7 +11,8 @@
 //! per-feed arrival times and our own stage timings (rx -> decoded -> engine -> resolved -> decided).
 use crate::config::StrategyCfg;
 use crate::lat::Series;
-use crate::feeds::{clock::now_ns, Arrival, Event, FeedCounters, Interest};
+use crate::feeds::{clock::now_ns, Arrival, Event, FeedCounters, InputKind, Interest};
+use crate::rec::journal::Journal;
 use crate::rec::{self, Rec, Record};
 use crate::pda::AtaCache;
 use crate::pools::{self, pair_key, Registry};
@@ -24,6 +25,17 @@ use std::collections::VecDeque;
 use std::io::Write as _;
 use std::sync::Arc;
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError};
+
+/// housekeeping runs at most this often from `timers` (arb-lab ran it on every 5 ms idle wake-up)
+const HOUSEKEEPING_NS: u64 = 5_000_000;
+/// What one `timers` evaluation may do (journal TIMER `what`, MEASUREMENT §4.13): flush the pending state triggers
+/// (the queue is empty: every part of their transactions has arrived), and housekeeping (expiries, the DLMM drift
+/// check, the status line). Expired confirmation waits are checked by every evaluation
+pub const TIMER_FLUSH: u8 = 1;
+pub const TIMER_HK: u8 = 2;
+pub const TIMER_ALL: u8 = TIMER_FLUSH | TIMER_HK;
+const STATUS_EVERY_NS: u64 = 10_000_000_000;
+const DRIFT_EVERY_NS: u64 = 2_000_000_000;
 
 /// How long a signature's arrival record is kept (later copies from slower feeds still count)
 const SIG_KEEP_NS: u64 = 10_000_000_000;
@@ -148,6 +160,34 @@ pub struct Engine {
     t_start: u64,
     sp: StatusPrev,
     exec_prev: crate::exec::ExecPrev,
+    /// the input journal (journal.bin, WP-03): every input at its dequeue point, every timer evaluation
+    journal: Journal,
+    /// the clock value of the input (or timer evaluation) being handled: every decision made while handling it reads
+    /// this, never the clock (the determinism contract, MEASUREMENT §4.13). Stage timestamps for latency reports are
+    /// real clock reads and never decision inputs
+    t_now: u64,
+    /// when housekeeping, the status line and the DLMM drift check last ran (engine time). Anchored at the first input's
+    /// or timer's journaled time (`anchored`), never at an unjournaled clock read: a replay starts them at the same
+    /// values (review WP-03 #2a)
+    last_hk_t: u64,
+    last_status_t: u64,
+    last_drift_t: u64,
+    anchored: bool,
+    /// the engine_init record (INPUT 10) is in the journal
+    init_journaled: bool,
+    /// the SendGate mode the last journaled decision saw (INPUT gate, `src` decision; review WP-03 #3)
+    gate_journaled: Option<crate::control::GateMode>,
+    /// the engine queue's length when the last input was taken (status lines only)
+    queue_now: usize,
+    /// a running hash of every decision made (opportunities, and what was handed to the executor): replay compares it
+    decisions: u64,
+    /// the newest block meta (slot, blockhash, height): WP-03b's blockhash ring takes it from here
+    pub last_block_meta: Option<(u64, [u8; 32], Option<u64>)>,
+    /// accounts.bin for the engine's own RPC reads (DLMM bin arrays it starts following: src rpc_refetch)
+    acct_rec: Option<Arc<crate::rec::accounts::AcctRec>>,
+    /// the state stream's fixed accounts (the registry's and WP-03's extra watched accounts: clock, programdata, wallet);
+    /// None: the registry's only
+    base_watch: Option<Vec<Pk>>,
     /// feedhealth.jsonl: the feeds' counters (index = feed id), the state stream's, and each feed's lead over the first
     /// arrival (txarr: when a signature leaves its window)
     feed_counters: Vec<Arc<FeedCounters>>,
@@ -202,8 +242,53 @@ fn load_signer_stats(path: &str) -> HashMap<Pk, (u32, u32)> {
     }).collect()
 }
 
+/// What a run's engine starts with that no journaled input carries (review WP-03 #2b, #2c): the tip its nets are
+/// computed with, its strategy config, whether it has an executor, and the signer statistics as loaded from the
+/// cross-run file (which is rewritten every 10 s and shared across runs, addendum I-5: only its content makes the
+/// trigger-skip decisions reproducible). Journaled once as INPUT 10 `engine_init` with `t_engine_ns` 0, after the boot
+/// snapshot's records and before the first input (`Engine::journal_init`, called by `run`); a replay starts from it
+/// (`Engine::apply_init`, `journal::replay_engine`)
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EngineInit {
+    pub min_tip: u64,
+    /// sha256 of the `[strategy]` section as the engine runs it (JSON; `signer_stats_file` left out: a replay never reads it)
+    pub strategy_sha256: String,
+    /// the run had an executor (simulation, canaries or live): its send checks and routes are in the decision digest,
+    /// and an offline replay (no executor) cannot reproduce them until WP-05 / WP-09
+    pub executor: bool,
+    pub signer_stats_file: String,
+    pub signer_stats: HashMap<Pk, (u32, u32)>,
+}
+
+impl EngineInit {
+    pub fn json(&self) -> Value {
+        let mut ss: Vec<(&Pk, &(u32, u32))> = self.signer_stats.iter().collect();
+        ss.sort();
+        let stats: serde_json::Map<String, Value> = ss.into_iter().map(|(k, v)| (b58(k), json!([v.0, v.1]))).collect();
+        json!({ "min_tip": self.min_tip, "strategy_sha256": self.strategy_sha256, "executor": self.executor,
+            "signer_stats_file": self.signer_stats_file, "signer_stats": stats })
+    }
+
+    pub fn from_json(v: &Value) -> Option<EngineInit> {
+        let stats = v["signer_stats"].as_object()?.iter().filter_map(|(k, v)| {
+            let key: Pk = bs58::decode(k).into_vec().ok()?.try_into().ok()?;
+            Some((key, (v[0].as_u64()? as u32, v[1].as_u64()? as u32)))
+        }).collect();
+        Some(EngineInit { min_tip: v["min_tip"].as_u64()?, strategy_sha256: v["strategy_sha256"].as_str()?.to_string(), executor: v["executor"].as_bool()?,
+            signer_stats_file: v["signer_stats_file"].as_str().unwrap_or("").to_string(), signer_stats: stats })
+    }
+}
+
+/// sha256 of a `[strategy]` section as an engine runs it (`signer_stats_file` left out: where the statistics came from
+/// is not how decisions are made, and an offline engine never reads the file)
+pub fn strategy_sha256(cfg: &StrategyCfg) -> String {
+    let mut c = cfg.clone();
+    c.signer_stats_file.clear();
+    crate::provenance::sha256_hex(&serde_json::to_vec(&c).unwrap_or_default())
+}
+
 /// swap venues by program (wider than the four we trade, to recognise arbitrage elsewhere) and the Jupiter aggregator
-fn amm_programs() -> HashMap<Pk, &'static str> {
+pub fn amm_programs() -> HashMap<Pk, &'static str> {
     [("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "pumpswap"), ("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", "raycpmm"),
      ("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", "rayammv4"), ("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", "dlmm"),
      ("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", "rayclmm"), ("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc", "whirlpool"),
@@ -215,8 +300,35 @@ fn amm_programs() -> HashMap<Pk, &'static str> {
 }
 
 fn sig8(s: &[u8; 64]) -> u64 { u64::from_le_bytes(s[..8].try_into().unwrap()) }
+/// the real clock in unix seconds: only for offline tools (`simcheck`'s routes), never for a run's decisions
 fn unix_now() -> i64 { (now_ns() / 1_000_000_000) as i64 }
+/// unix seconds of an engine time (DLMM and DAMM v2 fees are priced on it)
+fn unix_of(t: u64) -> i64 { (t / 1_000_000_000) as i64 }
+/// xxh3 of a decision's fields, folded into `Engine::decisions`
+fn fold(h: u64, parts: &[&[u8]]) -> u64 {
+    let mut x = xxhash_rust::xxh3::Xxh3::new();
+    x.update(&h.to_le_bytes());
+    for p in parts { x.update(p); }
+    x.digest()
+}
 fn sigs58(s: &[u8; 64]) -> String { bs58::encode(s).into_string() }
+
+/// What `run` evaluates after an input (review WP-03 #7, arb-lab's rules): the state flush only when state triggers are
+/// pending and the queue is empty (an empty queue is the only sign a transaction's account updates have all arrived);
+/// housekeeping only every 10 s while the queue never empties (with the flush if it is empty then). Housekeeping
+/// otherwise runs from the idle wake-ups alone
+fn after_input_timers(pending: bool, queue_empty: bool, since_status_ns: u64) -> u8 {
+    let flush = if queue_empty && (pending || since_status_ns > STATUS_EVERY_NS) { TIMER_FLUSH } else { 0 };
+    let hk = if since_status_ns > STATUS_EVERY_NS { TIMER_HK } else { 0 };
+    if hk == 0 && !pending { 0 } else { flush | hk }
+}
+
+/// journal INPUT 9 `settled`: an executor settlement in full (review WP-03 #9; the executor's replay is WP-05 / WP-09's)
+fn settled_json(st: &crate::exec::Settled) -> Value {
+    json!({ "attempt": st.attempt, "error": st.error, "fired": serde_json::to_value(&st.fired).unwrap_or(Value::Null),
+        "landed": st.landed.as_ref().map(|l| json!({ "path": l.0, "sig": l.1, "slot": l.2, "tx": l.3 })), "jito": st.jito,
+        "nonce_value": st.nonce_value.map(|n| b58(&n)) })
+}
 
 impl Engine {
     /// The run's engine. `rec`: the recorder; `rpc` must be bound to the background runtime `rt_bg`, where the engine's
@@ -230,14 +342,53 @@ impl Engine {
         Ok(e)
     }
 
+    /// accounts.bin for the engine's own RPC reads (and the roles of the DLMM bin arrays it starts following)
+    pub fn set_acct_rec(&mut self, a: Arc<crate::rec::accounts::AcctRec>) { self.acct_rec = Some(a); }
+
+    /// the state stream's fixed accounts (registry plus the extra watched accounts); the DLMM bin arrays are added to it
+    /// whenever the watch list is published
+    pub fn set_base_watch(&mut self, keys: Vec<Pk>) { self.base_watch = Some(keys); }
+
     /// An engine with no RPC, runtime or watch channel (PLAN WP-02 item 11): fetches are recorded in
     /// `offline_fetches` instead of sent, and it records nothing until `set_rec`. For benchmarks and replay (WP-09)
-    pub fn new_offline(reg: Arc<Registry>, store: Store, cfg: StrategyCfg) -> Engine {
+    ///
+    /// It never reads or writes the cross-run signer statistics file (`signer_stats_file` is cleared): a replay takes
+    /// the run's statistics, and its `min_tip`, from the journal's engine_init record (`apply_init`); a replay with the
+    /// run's config must not rewrite the live file either (review WP-03 #2c)
+    pub fn new_offline(reg: Arc<Registry>, store: Store, mut cfg: StrategyCfg) -> Engine {
+        cfg.signer_stats_file.clear();
         Engine::build(reg, store, cfg, vec![], 0, Arc::new(Interest::default()), Rec::off())
     }
 
-    /// record through `rec` from now on
-    pub fn set_rec(&mut self, rec: Rec) { self.rec = rec; }
+    /// What this engine starts with that no input carries (the engine_init record)
+    pub fn init(&self) -> EngineInit {
+        EngineInit { min_tip: self.min_tip, strategy_sha256: strategy_sha256(&self.cfg), executor: self.exec.is_some(),
+            signer_stats_file: self.cfg.signer_stats_file.clone(), signer_stats: self.signer_stats.clone() }
+    }
+
+    /// Journal the engine_init record (INPUT 10, `t_engine_ns` 0) once, before the first input: `run` calls it first
+    pub fn journal_init(&mut self) {
+        if self.init_journaled || !self.journal.is_on() { return; }
+        self.init_journaled = true;
+        self.journal.input_sized(0, InputKind::EngineInit, Arc::new(self.init().json()), 256 + 64 * self.signer_stats.len() as u64);
+    }
+
+    /// Start from a run's engine_init record (replay): its `min_tip` and signer statistics. An error when the replay's
+    /// `[strategy]` is not the run's
+    pub fn apply_init(&mut self, init: &EngineInit) -> anyhow::Result<()> {
+        let mine = strategy_sha256(&self.cfg);
+        if init.strategy_sha256 != mine { anyhow::bail!("the replay's [strategy] (sha256 {}) is not the run's ({})", &mine[..16], &init.strategy_sha256[..16.min(init.strategy_sha256.len())]); }
+        self.min_tip = init.min_tip;
+        self.signer_stats = init.signer_stats.clone();
+        self.init_journaled = true;
+        Ok(())
+    }
+
+    /// record (and journal) through `rec` from now on
+    pub fn set_rec(&mut self, rec: Rec) { self.journal = Journal::new(rec.clone()); self.rec = rec; }
+
+    /// the engine's own journal handle (`arbx run` journals the boot snapshot through it before the engine starts)
+    pub fn journal(&self) -> &Journal { &self.journal }
 
     /// a latency series by name (A.8; benchmarks and tests)
     pub fn series_mut(&mut self, name: &str) -> Option<&mut Series> { self.lat.iter_mut().find(|s| s.name == name) }
@@ -258,7 +409,9 @@ impl Engine {
         }
         let signer_stats = load_signer_stats(&cfg.signer_stats_file);
         let t0 = now_ns();
-        Engine { reg, store, cfg, feeds, min_tip, interest, ata: AtaCache::default(), sigs: HashMap::default(), sig_order: VecDeque::new(),
+        let journal = Journal::new(rec.clone());
+        Engine { journal, t_now: 0, last_hk_t: 0, last_status_t: 0, last_drift_t: 0, anchored: false, init_journaled: false, gate_journaled: None, queue_now: 0, decisions: 0, last_block_meta: None, acct_rec: None, base_watch: None,
+            reg, store, cfg, feeds, min_tip, interest, ata: AtaCache::default(), sigs: HashMap::default(), sig_order: VecDeque::new(),
             preds: HashMap::default(), alts: HashMap::default(), alt_inflight: HashSet::default(), alt_missing: HashSet::default(), alt_wait: HashMap::default(), acct_pool,
             watch: HashMap::default(), opps: HashMap::default(), checks: HashMap::default(), next_id: 0, slot: 0,
             lat: LAT_SERIES.into_iter().map(Series::new).collect(),
@@ -298,7 +451,7 @@ impl Engine {
         if self.opps.values().any(|o| o.trig == txn) { return; }   // the shred path already acted on this trigger
         if self.exec.as_ref().is_some_and(|x| x.is_ours(&txn)) { return; }
         if self.preds.contains_key(&i) { return; }   // another pending trigger's prediction is on this pool
-        let now = unix_now();
+        let now = unix_of(self.t_now);
         let t_eval = now_ns();
         let best = self.best_cycle(i, now);
         let t_decided = now_ns();
@@ -314,9 +467,10 @@ impl Engine {
         self.watch.entry(bi).or_default().push(id);
         self.watch.entry(si).or_default().push(id);
         let st = Stages { rx: t_recv, decoded: t_recv, engine: t_engine, resolved: t_eval, decided: t_decided };
+        self.decisions = fold(self.decisions, &[b"state", &id.to_le_bytes(), &txn, &b.buy, &b.sell, &b.size.to_le_bytes(), &b.net.to_le_bytes()]);
         self.opps.insert(id, Opp { id, trig: txn, trig_feed: u16::MAX, slot, st, trig_pool: self.reg.pools[i].pool, buy: b.buy, sell: b.sell,
             mint: b.mint, size: b.size, gross: b.gross, net: b.net, cu: b.cu, crossed: b.crossed,
-            deadline: now_ns() + self.cfg.outcome_watch_ms * 1_000_000, trig_cu_price: None, landed: Some(slot), touches: Vec::new() });
+            deadline: self.t_now + self.cfg.outcome_watch_ms * 1_000_000, trig_cu_price: None, landed: Some(slot), touches: Vec::new() });
         self.after_opportunity(id);
         // the budget table (caps.jsonl) after the send, and after the other pools of this transaction are priced
         // (flush_state writes it): same state, same line
@@ -325,7 +479,7 @@ impl Engine {
 
     /// trades whose trigger never showed in time: it failed on chain (a phantom gap) or its update was too slow
     fn expire_confirms(&mut self) {
-        let now = now_ns();
+        let now = self.t_now;
         // the opportunity ends with its wait: if the trigger lands later, the state path prices it afresh (w5h seg 14:
         // 42 late-landing triggers were never acted on because the stale opportunity blocked the state path)
         while self.confirm_wait.front().is_some_and(|e| e.3 <= now) {
@@ -423,10 +577,19 @@ impl Engine {
 
     /// Run until `stop`, the deadline `until_ns` or the channel closes; says which. `status` is called every 10 s with a
     /// one-line summary. The final status.jsonl line is the caller's (`write_final_status`), once it knows the stop reason.
+    ///
+    /// WP-03 (the input journal): the engine_init record first (what the engine starts with that no input carries), then
+    /// each input is handled by `step` with one clock read taken at its dequeue, and every timeout by `timers_at` with its
+    /// own clock read and what it may do; both are journaled, so a replay calls them at exactly the same points, times
+    /// and scopes. The timer rules are arb-lab's (review WP-03 #7):
+    /// - an idle 5 ms wake-up: everything (`TIMER_ALL`: the state flush, expiries, housekeeping at most every 5 ms);
+    /// - after an input, when the queue is empty and state triggers are pending: the flush only (`TIMER_FLUSH`). Only an
+    ///   empty queue says a transaction's account updates have all arrived, so nothing is flushed while it is not;
+    /// - after an input, every 10 s while the queue never empties: housekeeping only (`TIMER_HK`: expiries, the drift
+    ///   check, the status line), plus the flush if the queue is empty then.
     pub fn run(&mut self, rx: &Receiver<Event>, stop: &std::sync::atomic::AtomicBool, until_ns: u64, mut status: impl FnMut(&str)) -> RunEnd {
         self.rec.set_engine_tid(crate::runtime::gettid());
-        let mut last_status = now_ns();
-        let mut last_drift = now_ns();
+        self.journal_init();
         let end = loop {
             if stop.load(std::sync::atomic::Ordering::Relaxed) { break RunEnd::Stopped; }
             if now_ns() >= until_ns { break RunEnd::Deadline; }
@@ -442,7 +605,7 @@ impl Engine {
                         Some(e) => e,
                         None => match rx.recv_timeout(std::time::Duration::from_millis(5)) {
                             Ok(e) => e,
-                            Err(RecvTimeoutError::Timeout) => { self.expire_confirms(); self.housekeeping(&mut last_status, &mut last_drift, rx.len(), &mut status); continue; }
+                            Err(RecvTimeoutError::Timeout) => { self.queue_now = rx.len(); self.timers_at(now_ns(), TIMER_ALL, &mut status); continue; }
                             Err(RecvTimeoutError::Disconnected) => break RunEnd::Disconnected,
                         },
                     }
@@ -451,31 +614,155 @@ impl Engine {
             let t_engine = now_ns();
             let q = rx.len();
             if q > self.queue_hwm { self.queue_hwm = q; }
-            self.on_event(ev, t_engine, &mut status);
-            if !self.state_pending.is_empty() && rx.is_empty() { self.flush_state(); }
-            if now_ns() - last_status > 10_000_000_000 { self.housekeeping(&mut last_status, &mut last_drift, rx.len(), &mut status); }
+            self.queue_now = q;
+            self.step(ev, t_engine, &mut status);
+            // the state flush once the queue is empty (a transaction's account updates have all arrived), and the
+            // periodic work while the queue never empties
+            let t = now_ns();
+            let what = after_input_timers(!self.state_pending.is_empty(), rx.is_empty(), t.saturating_sub(self.last_status_t));
+            if what != 0 {
+                self.queue_now = rx.len();
+                self.timers_at(t, what, &mut status);
+            }
         };
         self.finish();
         end
     }
 
-    /// One input event, dequeued at `t_engine`: the body of `run`'s loop (`new_offline` users call it, then
-    /// `flush_state` when their queue is empty, as `run` does)
-    pub fn on_event(&mut self, ev: Event, t_engine: u64, status: &mut dyn FnMut(&str)) {
+    /// the timer anchors (housekeeping, drift check, status line) start at the first journaled time the engine handles
+    fn anchor(&mut self, t: u64) {
+        if self.anchored { return; }
+        self.anchored = true;
+        self.last_hk_t = t;
+        self.last_status_t = t;
+        self.last_drift_t = t;
+    }
+
+    /// One input, dequeued at `t_engine` (WP-03 item 11): journaled, then handled. Every decision made while handling
+    /// it reads `t_engine`, never the clock
+    pub fn step(&mut self, ev: Event, t_engine: u64, status: &mut dyn FnMut(&str)) {
+        self.t_now = t_engine;
+        self.anchor(t_engine);
+        if self.journal.is_on() {
+            let j = &self.journal;
+            match &ev {
+                Event::Tx(a) => {
+                    // a first copy in full; a later copy by its timing, unless it carries addresses the engine learns
+                    // lookup-table entries from
+                    let first = !self.sigs.contains_key(&sig8(&a.tx.sig));
+                    if first || (a.tx.loaded.is_some() && !a.tx.lookups.is_empty()) { j.tx_first(t_engine, a) } else { j.tx_copy(t_engine, a) }
+                }
+                Event::Account { pubkey, slot, aseq, .. } => j.account(t_engine, *aseq, self.store.is_stale(pubkey, *slot)),
+                Event::Slot { slot, status: st, t, parent, .. } => j.slot(t_engine, *slot, *parent, *st, *t),
+                Event::BlockMeta(b) => j.block_meta(t_engine, b),
+                Event::Alt { table, addrs } => j.alt(t_engine, *table, addrs.clone()),
+                Event::Input { kind, data } => j.input(t_engine, *kind, data.clone()),
+                Event::Status { feed, msg } => j.status(t_engine, *feed, msg),
+                // the whole settlement (review WP-03 #9): what the executor's replay (WP-05 / WP-09) restores
+                Event::Settled(st) => j.input(t_engine, InputKind::Settled, Arc::new(settled_json(st))),
+            }
+        }
+        self.on_event(ev, t_engine, status);
+    }
+
+    /// The timers, evaluated at `t` with everything allowed (`TIMER_ALL`; tests and offline drivers)
+    pub fn timers(&mut self, t: u64, status: &mut dyn FnMut(&str)) { self.timers_at(t, TIMER_ALL, status) }
+
+    /// The timers, evaluated at `t` (WP-03 item 11; journaled as TIMER with `what`): the state flush (pending state
+    /// triggers whose transactions are complete) when `what` has `TIMER_FLUSH`, expired confirmation waits, and
+    /// housekeeping when `what` has `TIMER_HK` and it is due (watch windows, expiries, the DLMM drift check every 2 s,
+    /// the status line every 10 s)
+    pub fn timers_at(&mut self, t: u64, what: u8, status: &mut dyn FnMut(&str)) {
+        self.t_now = t;
+        self.anchor(t);
+        self.journal.timer(t, what);
+        if what & TIMER_FLUSH != 0 && !self.state_pending.is_empty() { self.flush_state(); }
+        if !self.confirm_wait.is_empty() { self.expire_confirms(); }
+        if what & TIMER_HK != 0 && (t.saturating_sub(self.last_hk_t) >= HOUSEKEEPING_NS || t.saturating_sub(self.last_status_t) > STATUS_EVERY_NS) {
+            self.housekeeping(t, status);
+        }
+    }
+
+    /// One input event, dequeued at `t_engine`: the body of `step` (without the journal)
+    fn on_event(&mut self, ev: Event, t_engine: u64, status: &mut dyn FnMut(&str)) {
+        self.t_now = t_engine;
         match ev {
             Event::Tx(a) => self.on_tx(a, t_engine),
-            Event::Account { slot, pubkey, data, t, txn, .. } => self.on_account(pubkey, data, slot, t, txn, t_engine),
+            Event::Account { slot, pubkey, data, t, txn, write_version, .. } => self.on_account(pubkey, data, slot, t, txn, write_version, t_engine),
             Event::Slot { slot, status: st, .. } => {
-                if slot > self.slot { self.slot = slot; crate::send::tpu::SLOT.store(slot, std::sync::atomic::Ordering::Relaxed); }
-                // Yellowstone SlotStatus: 0 processed, 1 confirmed, 2 finalized (status.jsonl v2 `slot`)
-                if let Some(x) = usize::try_from(st).ok().and_then(|i| self.slots.get_mut(i)) { if slot > *x { *x = slot; } }
+                // Yellowstone SlotStatus: 0 processed, 1 confirmed, 2 finalized (status.jsonl v2 `slot`). The interslot
+                // statuses (first-shred, completed, created-bank, dead; WP-03) go to slots.jsonl and the journal; they
+                // move nothing here until WP-04's fork tree (a first-shred slot is ahead of every processed one)
+                if (0..=2).contains(&st) {
+                    if slot > self.slot { self.slot = slot; crate::send::tpu::SLOT.store(slot, std::sync::atomic::Ordering::Relaxed); }
+                    if let Some(x) = usize::try_from(st).ok().and_then(|i| self.slots.get_mut(i)) { if slot > *x { *x = slot; } }
+                }
             }
+            Event::BlockMeta(b) => {
+                if self.last_block_meta.map_or(true, |x| b.slot > x.0) { self.last_block_meta = Some((b.slot, b.blockhash, b.block_height)); }
+            }
+            // inputs from other subsystems are journaled (step); what the engine does with them comes with their WPs
+            // (WP-03b blockhash heads, WP-04 health, WP-05 in-flight releases, leader windows)
+            Event::Input { .. } => {}
             Event::Status { msg, .. } => status(&msg),
             Event::Alt { table, addrs } => self.on_alt(table, addrs),
             Event::Settled(st) => { let poh = &self.poh; if let Some(x) = self.exec.as_mut() { x.on_settled(*st, &|s| poh.get(s).copied()); } }
         }
         if !self.confirm_wait.is_empty() { self.expire_confirms(); }
     }
+
+    /// A digest of the engine's decision state (WP-03: replay determinism). Two engines fed the same journal have the
+    /// same digest. Stage timestamps and latency series (real clock reads) are left out, as are counters of recording
+    pub fn digest(&self) -> u64 {
+        let mut x = xxhash_rust::xxh3::Xxh3::new();
+        let mut put = |b: &[u8]| x.update(b);
+        let mut keys: Vec<&Pk> = self.store.accts.keys().collect();
+        keys.sort();
+        for k in keys {
+            let a = &self.store.accts[k];
+            put(k); put(&a.slot.to_le_bytes()); put(&a.t.to_le_bytes()); put(a.txn.as_ref().map_or(&[0u8; 64][..], |s| &s[..])); put(&a.data);
+        }
+        let mut arr: Vec<(&Pk, &Vec<(i64, Pk)>)> = self.store.dlmm_arrays.iter().collect();
+        arr.sort();
+        for (k, l) in arr { put(k); for (i, a) in l { put(&i.to_le_bytes()); put(a); } }
+        put(&self.store.updates.to_le_bytes()); put(&self.store.stale_dropped.to_le_bytes());
+        let mut sigs: Vec<(&u64, &SigInfo)> = self.sigs.iter().collect();
+        sigs.sort_by_key(|x| *x.0);
+        for (k, v) in sigs { put(&k.to_le_bytes()); put(&v.first_t.to_le_bytes()); put(&v.first_feed.to_le_bytes()); put(&v.slot.to_le_bytes()); for a in v.arr { put(&a.to_le_bytes()); } }
+        let mut opps: Vec<&Opp> = self.opps.values().collect();
+        opps.sort_by_key(|o| o.id);
+        for o in opps {
+            put(&o.id.to_le_bytes()); put(&o.trig); put(&o.buy); put(&o.sell); put(&o.size.to_le_bytes()); put(&o.net.to_le_bytes());
+            put(&o.deadline.to_le_bytes()); put(&o.touches.len().to_le_bytes()); put(&o.landed.unwrap_or(u64::MAX).to_le_bytes());
+        }
+        let mut preds: Vec<&usize> = self.preds.keys().collect();
+        preds.sort();
+        for p in preds { put(&p.to_le_bytes()); }
+        let mut ss: Vec<(&Pk, &(u32, u32))> = self.signer_stats.iter().collect();
+        ss.sort();
+        for (k, v) in ss { put(k); put(&v.0.to_le_bytes()); put(&v.1.to_le_bytes()); }
+        let mut tp: Vec<(&[u8; 64], &(Pk, u64))> = self.trig_pending.iter().collect();
+        tp.sort();
+        for (k, v) in tp { put(k); put(&v.0); put(&v.1.to_le_bytes()); }
+        let mut alts: Vec<(&Pk, &Vec<Option<Pk>>)> = self.alts.iter().collect();
+        alts.sort();
+        for (k, v) in alts { put(k); for a in v { put(a.as_ref().map_or(&[0u8; 32][..], |a| &a[..])); } }
+        let mut miss: Vec<&Pk> = self.alt_missing.iter().collect();
+        miss.sort();
+        for k in miss { put(k); }
+        let mut counts: Vec<(&&str, &u64)> = self.counts.iter().collect();
+        counts.sort();
+        for (k, v) in counts { put(k.as_bytes()); put(&v.to_le_bytes()); }
+        put(&self.next_id.to_le_bytes()); put(&self.slot.to_le_bytes());
+        for s in self.slots { put(&s.to_le_bytes()); }
+        for p in &self.state_pending { put(&p.pool.to_le_bytes()); put(&p.txn); }
+        for c in &self.confirm_wait { put(&c.0.to_le_bytes()); put(&c.3.to_le_bytes()); }
+        put(&self.decisions.to_le_bytes());
+        x.digest()
+    }
+
+    /// the running hash of every decision made (opportunities, and the routes handed to the executor)
+    pub fn decision_digest(&self) -> u64 { self.decisions }
 
     /// the end of the run: open opportunities finished, the signatures still in their window written, the lookup
     /// tables dumped (alts-final), the signer statistics saved
@@ -493,30 +780,31 @@ impl Engine {
         self.write_status_line(queue, Some(stop_reason));
     }
 
-    fn housekeeping(&mut self, last_status: &mut u64, last_drift: &mut u64, queue: usize, status: &mut impl FnMut(&str)) {
-        let now = now_ns();
+    fn housekeeping(&mut self, now: u64, status: &mut dyn FnMut(&str)) {
+        self.last_hk_t = now;
         // finish opportunities whose watch window ended
         let due: Vec<u64> = self.opps.values().filter(|o| o.deadline <= now).map(|o| o.id).collect();
         for id in due { self.finish_opp(id); }
         // forget old signatures, predictions and checks
         while let Some(&(t, k)) = self.sig_order.front() {
-            if now - t < SIG_KEEP_NS { break; }
+            if now.saturating_sub(t) < SIG_KEEP_NS { break; }
             self.sig_order.pop_front();
             if let Some(s) = self.sigs.remove(&k) { self.write_txarr(k, &s); if s.trigger.is_some() { self.write_arrivals(&s); } }
         }
-        self.preds.retain(|_, p| now - p.t < PRED_KEEP_NS);
-        while let Some(&(t, s)) = self.poh_order.front() { if now - t < 180_000_000_000 { break; } self.poh_order.pop_front(); self.poh.remove(&s); }
+        self.preds.retain(|_, p| now.saturating_sub(p.t) < PRED_KEEP_NS);
+        while let Some(&(t, s)) = self.poh_order.front() { if now.saturating_sub(t) < 180_000_000_000 { break; } self.poh_order.pop_front(); self.poh.remove(&s); }
         // a trigger whose pool never showed it within 5 s failed on chain (or never landed): count it against its signer
-        let expired: Vec<[u8; 64]> = self.trig_pending.iter().filter(|(_, v)| now - v.1 >= 5_000_000_000).map(|(k, _)| *k).collect();
+        let expired: Vec<[u8; 64]> = self.trig_pending.iter().filter(|(_, v)| now.saturating_sub(v.1) >= 5_000_000_000).map(|(k, _)| *k).collect();
         for k in expired { if let Some((sg, _)) = self.trig_pending.remove(&k) { self.signer_stats.entry(sg).or_default().1 += 1; } }
-        self.checks.retain(|_, c| now - c.t < 5_000_000_000);
-        if now - *last_drift > 2_000_000_000 { *last_drift = now; self.follow_dlmm(); }
-        if now - *last_status > 10_000_000_000 {
-            *last_status = now;
+        self.checks.retain(|_, c| now.saturating_sub(c.t) < 5_000_000_000);
+        if now.saturating_sub(self.last_drift_t) > DRIFT_EVERY_NS { self.last_drift_t = now; self.follow_dlmm(); }
+        if now.saturating_sub(self.last_status_t) > STATUS_EVERY_NS {
+            self.last_status_t = now;
+            self.journal.tick(now);
             self.save_signer_stats();
-            let line = self.write_status(queue);
+            let line = self.write_status(self.queue_now);
             status(&line);
-            self.write_feedhealth(now);
+            self.write_feedhealth(now_ns());
         }
     }
 
@@ -606,7 +894,7 @@ impl Engine {
         let k = sig8(&a.tx.sig);
         let f = (a.feed as usize).min(MAX_FEEDS - 1);
         if let Some(x) = self.exec.as_mut() { x.on_arrival(&a.tx.sig, a.feed, a.t_rx); }
-        if let Some(p) = a.poh { if !self.poh.contains_key(&a.tx.sig) { self.poh.insert(a.tx.sig, p); self.poh_order.push_back((now_ns(), a.tx.sig)); } }
+        if let Some(p) = a.poh { if !self.poh.contains_key(&a.tx.sig) { self.poh.insert(a.tx.sig, p); self.poh_order.push_back((t_engine, a.tx.sig)); } }
         if let Some(s) = self.sigs.get_mut(&k) {
             if s.arr[f] == 0 { s.arr[f] = a.t_rx.max(1); }
             if a.t_rx < s.first_t { s.first_t = a.t_rx; s.first_feed = a.feed; }
@@ -615,7 +903,7 @@ impl Engine {
         let mut arr = [0u64; MAX_FEEDS];
         arr[f] = a.t_rx.max(1);
         self.sigs.insert(k, SigInfo { first_t: a.t_rx, first_feed: a.feed, arr, trigger: None, slot: a.slot });
-        self.sig_order.push_back((now_ns(), k));
+        self.sig_order.push_back((t_engine, k));
         self.count("tx_first");
         self.process(a, t_engine);
     }
@@ -641,7 +929,7 @@ impl Engine {
         // the bids on our pools: every transaction touching one (users and bots alike contend for its write lock)
         if !self.exec.as_ref().is_some_and(|x| x.is_ours(&a.tx.sig)) {
             let price = a.tx.cu_price().unwrap_or(0);
-            let now = now_ns();
+            let now = t_engine;
             for k in &keys {
                 if let Some(&i) = self.reg.by_pool.get(k) {
                     let q = self.pool_prices.entry(i).or_default();
@@ -820,7 +1108,7 @@ impl Engine {
         self.count("trigger");
         if let Some(s) = self.sigs.get_mut(&sig8(&a.tx.sig)) { if s.trigger.is_none() { s.trigger = Some((sw.pool, sw.venue, a.slot)); } }
         let Some(&i) = self.reg.by_pool.get(&sw.pool) else { return };
-        let now = unix_now();
+        let now = unix_of(t_engine);
         // exact-out swaps: find the input that produces their output
         let amount_in = if sw.exact_out {
             match self.quote_input_for_output(i, sw.zero_for_one, sw.amount, now) { Some(x) => x, None => { self.count("trigger_exact_out_unsolved"); return } }
@@ -833,7 +1121,7 @@ impl Engine {
         if let Some(&(ok, miss)) = self.signer_stats.get(&signer).filter(|_| self.cfg.skip_failing_signers) {
             if ok + miss >= 4 && (ok as f64) < 0.25 * (ok + miss) as f64 {
                 self.count("trigger_skip_signer_fails");
-                self.trig_pending.insert(a.tx.sig, (signer, now_ns()));
+                self.trig_pending.insert(a.tx.sig, (signer, t_engine));
                 return;
             }
         }
@@ -847,12 +1135,12 @@ impl Engine {
         // accuracy check: remember what we expect the pool to look like once the trigger lands
         let m = &self.reg.pools[i];
         let check = match &after {
-            Pred::Cp(s) => Check { pool: i, trig: a.tx.sig, t: now_ns(), cp: Some((s.r0, s.r1)), active: None, venue: m.venue, signer },
-            Pred::Dlmm(o) => Check { pool: i, trig: a.tx.sig, t: now_ns(), cp: None, active: o.active, venue: m.venue, signer },
-            Pred::Damm(p) => Check { pool: i, trig: a.tx.sig, t: now_ns(), cp: Some((p.sqrt_price, 0)), active: None, venue: m.venue, signer },
+            Pred::Cp(s) => Check { pool: i, trig: a.tx.sig, t: t_engine, cp: Some((s.r0, s.r1)), active: None, venue: m.venue, signer },
+            Pred::Dlmm(o) => Check { pool: i, trig: a.tx.sig, t: t_engine, cp: None, active: o.active, venue: m.venue, signer },
+            Pred::Damm(p) => Check { pool: i, trig: a.tx.sig, t: t_engine, cp: Some((p.sqrt_price, 0)), active: None, venue: m.venue, signer },
         };
         self.checks.insert(i, check);
-        self.trig_pending.insert(a.tx.sig, (signer, now_ns()));
+        self.trig_pending.insert(a.tx.sig, (signer, t_engine));
         // WP-00 (F16): a decoded swap is a hint only. Its checks and bookkeeping above ran (the signer skip, signer
         // statistics, predictions.jsonl's accuracy data), but nothing is predicted, priced
         // or sent from it: no `preds` entry, so no route is ever priced on a state that may never exist, and the state
@@ -862,7 +1150,7 @@ impl Engine {
             self.write_trigger(a, sw, i, t_engine, t_resolved, None, true);
             return;
         }
-        self.preds.insert(i, PredEntry { trig: a.tx.sig, t: now_ns(), pred: after });
+        self.preds.insert(i, PredEntry { trig: a.tx.sig, t: t_engine, pred: after });
         let best = self.best_cycle(i, now);
         let st = self.write_trigger(a, sw, i, t_engine, t_resolved, best.as_ref().map(|b| b.net), false);
         let m = self.reg.pools[i].clone();
@@ -870,30 +1158,57 @@ impl Engine {
             if b.net >= self.cfg.min_profit_lamports as i64 {
                 self.count("opportunity");
                 let id = self.next_id; self.next_id += 1;
+                self.decisions = fold(self.decisions, &[b"decoded", &id.to_le_bytes(), &a.tx.sig, &b.buy, &b.sell, &b.size.to_le_bytes(), &b.net.to_le_bytes()]);
                 self.record_caps(id, &b, "decoded", now);
                 let (bi, si) = (self.reg.by_pool[&b.buy], self.reg.by_pool[&b.sell]);
                 self.watch.entry(bi).or_default().push(id);
                 self.watch.entry(si).or_default().push(id);
                 self.opps.insert(id, Opp { id, trig: a.tx.sig, trig_feed: a.feed, slot: a.slot, st, trig_pool: m.pool, buy: b.buy, sell: b.sell,
                     mint: b.mint, size: b.size, gross: b.gross, net: b.net, cu: b.cu, crossed: b.crossed,
-                    deadline: now_ns() + self.cfg.outcome_watch_ms * 1_000_000, trig_cu_price: a.tx.cu_price(), landed: None, touches: Vec::new() });
+                    deadline: t_engine + self.cfg.outcome_watch_ms * 1_000_000, trig_cu_price: a.tx.cu_price(), landed: None, touches: Vec::new() });
                 if self.cfg.confirm_trigger_ms > 0 && self.exec.is_some() {
                     // act once every part of the trigger pool shows the trigger (the vaults hold a CP pool's reserves)
                     let parts = match m.venue { Venue::Dlmm | Venue::DammV2 => vec![m.pool], Venue::RayCpmm => vec![m.vault0, m.vault1, m.pool], _ => vec![m.vault0, m.vault1] };
-                    self.confirm_wait.push_back((id, a.tx.sig, parts, now_ns() + self.cfg.confirm_trigger_ms * 1_000_000));
+                    self.confirm_wait.push_back((id, a.tx.sig, parts, t_engine + self.cfg.confirm_trigger_ms * 1_000_000));
                 } else { self.after_opportunity(id); }
             } else { self.count("below_min_profit"); }
         }
     }
 
     /// Steps 2 and 3 (exec.rs): simulate this decision's real transaction, and/or send a canary built on it.
+    ///
+    /// The send check reads the live SendGate (a pause or stop closes it at once). The mode it saw is journaled here,
+    /// on the engine thread, whenever it differs from the last one journaled: an INPUT `gate` with `src` "decision" and
+    /// the opportunity's id, written right after the input being handled (review WP-03 #3). A replay of send checks
+    /// (WP-05 / WP-09) applies it at that opportunity's decision; the 100 ms watcher's `src` "watch" records are for status
     fn after_opportunity(&mut self, id: u64) {
         let Some(size) = self.opps.get(&id).map(|o| o.size) else { return };
         let Some(x) = self.exec.as_mut() else { return };
         let (sim, send) = (x.wants_sim(size), x.wants_send());
-        // a live trade first (it is the one racing), then the free simulation
-        if let Some(cap) = send { match self.route_in(id, size.min(cap)) { Some(r) => self.exec.as_mut().unwrap().send(r), None => self.count("send_unquotable") } }
-        if let Some(sz) = sim { match self.route_in(id, sz) { Some(r) => self.exec.as_mut().unwrap().simulate(r), None => self.count("sim_unquotable") } }
+        let seen = x.gate_seen();
+        if let Some(m) = seen.filter(|m| Some(*m) != self.gate_journaled) {
+            self.gate_journaled = Some(m);
+            let mut g = x.gate_json();
+            g["mode"] = json!(m.as_str());
+            g["src"] = json!("decision");
+            g["opp"] = json!(id);
+            self.journal.input(self.t_now, InputKind::Gate, Arc::new(g));
+        }
+        self.decisions = fold(self.decisions, &[b"exec", &id.to_le_bytes(), &[sim.is_some() as u8, send.is_some() as u8, seen.map_or(u8::MAX, |m| m as u8)]]);
+        // a live trade first (it is the one racing), then the free simulation; the route handed over is a decision too
+        // (review WP-03 N5)
+        if let Some(cap) = send {
+            match self.route_in(id, size.min(cap)) {
+                Some(r) => { self.decisions = fold(self.decisions, &[b"send", &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes()]); self.exec.as_mut().unwrap().send(r) }
+                None => self.count("send_unquotable"),
+            }
+        }
+        if let Some(sz) = sim {
+            match self.route_in(id, sz) {
+                Some(r) => { self.decisions = fold(self.decisions, &[b"sim", &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes()]); self.exec.as_mut().unwrap().simulate(r) }
+                None => self.count("sim_unquotable"),
+            }
+        }
     }
 
     /// `arb-lab simcheck`: one round trip per ordered pool pair at `size`, on the pools as they are (no trigger), spread
@@ -970,14 +1285,14 @@ impl Engine {
     /// size (on the trigger-adjusted state), and for DLMM the bin arrays we hold and where the quote ends.
     fn route_in(&self, id: u64, size: u64) -> Option<crate::exec::RouteIn> {
         let o = self.opps.get(&id)?;
-        let now = unix_now();
+        let now = unix_of(self.t_now);
         let (bi, si) = (*self.reg.by_pool.get(&o.buy)?, *self.reg.by_pool.get(&o.sell)?);
         let (pb, ps) = (&self.reg.pools[bi], &self.reg.pools[si]);
         let (lb, ls) = (self.leg(bi, now)?, self.leg(si, now)?);
         let (mid, buy_end) = leg_quote_end(&lb, pb.t0 == *WSOL, size, now)?;
         let (back, sell_end) = leg_quote_end(&ls, ps.t0 == o.mint, mid, now)?;
         let live = |p: &crate::venues::PoolMeta| -> Vec<i64> { self.store.dlmm_arrays.get(&p.pool).map(|l| l.iter().filter(|(_, k)| self.store.get(k).is_some()).map(|(i, _)| *i).collect()).unwrap_or_default() };
-        let data = |p: &crate::venues::PoolMeta| self.store.get(&p.pool).map(|a| a.data.clone());
+        let data = |p: &crate::venues::PoolMeta| self.store.get(&p.pool).map(|a| a.data.to_vec());
         let trig_feed = if o.trig_feed == u16::MAX { Some("state".to_string()) } else { self.feeds.get(o.trig_feed as usize).cloned() };
         let p75 = |i: usize| -> Option<u64> {
             let q = self.pool_prices.get(&i)?;
@@ -1089,19 +1404,25 @@ impl Engine {
 
     // ---------------------------------------------------------------- pool state
 
-    fn on_account(&mut self, key: Pk, data: Vec<u8>, slot: u64, t: u64, txn: Option<[u8; 64]>, t_engine: u64) {
+    /// an account update (`wv`: its write version, 0 for RPC reads: moves.log `-`)
+    fn on_account(&mut self, key: Pk, data: Arc<[u8]>, slot: u64, t: u64, txn: Option<[u8; 64]>, wv: u64, t_engine: u64) {
         if !self.store.update(key, data, slot, t, txn) { return; }
-        if slot > self.store_slot_max { self.store_slot_max = slot; }
         let Some(&i) = self.acct_pool.get(&key) else { return };
+        // pool accounts only (review WP-03 #6): the Clock, wallet and programdata accounts WP-03 watches are not pool
+        // state, and the Clock updates every slot (status `tip_lag_slots_now` measures pool-state staleness)
+        if slot > self.store_slot_max { self.store_slot_max = slot; }
         let Some(txn) = txn else { return };
         if self.rec.is_on() {
             if self.moves_seen.len() > 500_000 { self.moves_seen.clear(); }
             if self.moves_seen.insert((sig8(&txn), i as u32)) {
-                // moves.log v2: `sig slot pool t_ns acct write_version role` (the write version comes with WP-03: `-`);
-                // the base58 is done on the recorder's writer
+                // moves.log v2: `sig slot pool t_ns acct write_version role` (WP-03 fills the write version; `-` for an RPC
+                // read); the base58 is done on the recorder's writer
                 let pool = self.reg.pools[i].pool;
                 let role = if key == pool { "pool" } else { "vault" };
-                self.rec.emit(rec::MOVES, Record::enc(move |o| { let _ = write!(o, "{} {slot} {} {t} {} - {role}", sigs58(&txn), b58(&pool), b58(&key)); }));
+                self.rec.emit(rec::MOVES, Record::enc(move |o| {
+                    let _ = write!(o, "{} {slot} {} {t} {} ", sigs58(&txn), b58(&pool), b58(&key));
+                    let _ = if wv > 0 { write!(o, "{wv} {role}") } else { write!(o, "- {role}") };
+                }));
             }
         }
         if let Some((sg, _)) = self.trig_pending.remove(&txn) { self.signer_stats.entry(sg).or_default().0 += 1; }
@@ -1155,7 +1476,7 @@ impl Engine {
             _ => {
                 // both vaults (and the CPMM pool, whose owed fees move) must show the trigger
                 if !(by_trig(&m.vault0) && by_trig(&m.vault1)) || (m.venue == Venue::RayCpmm && !by_trig(&m.pool)) { return; }
-                let Ok(Snap::Cp(s)) = self.store.snapshot(&m, unix_now()) else { return };
+                let Ok(Snap::Cp(s)) = self.store.snapshot(&m, unix_of(self.t_now)) else { return };
                 let Some((p0, p1)) = c.cp else { return };
                 let bps = |p: u128, a: u128| if a == 0 { 0.0 } else { (p as f64 - a as f64) / a as f64 * 1e4 };
                 json!({ "sig": sigs58(&txn), "venue": m.venue, "pool": b58(&m.pool), "r0_pred": p0.to_string(), "r0": s.r0.to_string(),
@@ -1173,9 +1494,17 @@ impl Engine {
         let drift = self.store.dlmm_drift(&self.reg);
         if drift.is_empty() { return; }
         let mut fetch = Vec::new();
+        let mut roles = Vec::new();
         for (pool, list) in drift {
             for (_, k) in &list { if self.store.get(k).is_none() { fetch.push(*k); } }
+            let pi = self.reg.by_pool.get(&pool).map_or(crate::rec::accounts::NO_POOL, |i| *i as u32);
+            roles.extend(list.iter().map(|(_, k)| (*k, crate::rec::accounts::RoleOf { role: crate::rec::accounts::role::DLMM_BIN_ARRAY, pool_index: pi })));
             self.store.dlmm_arrays.insert(pool, list);
+        }
+        // the new arrays' roles (accounts.bin DICT, exec.jsonl `watched`), and a MARK naming them
+        if let Some(ar) = &self.acct_rec {
+            let new = ar.roles().add(roles);
+            ar.mark(crate::rec::accounts::MARK_WATCH_LIST_CHANGED, &new);
         }
         self.publish_watch_list();
         if !fetch.is_empty() { self.fetch_accounts(fetch); }
@@ -1183,19 +1512,25 @@ impl Engine {
 
     pub fn publish_watch_list(&self) {
         let Some(io) = &self.io else { return };
-        let mut l: Vec<String> = self.reg.static_accounts().iter().map(b58).collect();
+        let mut l: Vec<String> = match &self.base_watch { Some(b) => b.iter().map(b58).collect(), None => self.reg.static_accounts().iter().map(b58).collect() };
         for list in self.store.dlmm_arrays.values() { for (_, k) in list { l.push(b58(k)); } }
         let _ = io.watch_list.send(l);
     }
 
-    /// accounts (newly followed DLMM bin arrays), fetched on the background runtime; they come back as account events
+    /// accounts (newly followed DLMM bin arrays), fetched on the background runtime; they come back as account events,
+    /// each recorded in accounts.bin first (src rpc_refetch) so the journal can name it by its aseq
     fn fetch_accounts(&mut self, keys: Vec<Pk>) {
         let Some(io) = &self.io else { self.offline_fetches.push(("accounts", keys)); return };
-        let (rpc, back) = (io.rpc.clone(), io.tx_back.clone());
+        let (rpc, back, ar) = (io.rpc.clone(), io.tx_back.clone(), self.acct_rec.clone());
         io.rt.spawn(async move {
             if let Ok((slot, v)) = rpc.accounts(&keys).await {
                 for (k, a) in keys.iter().zip(v) {
-                    if let Some(a) = a { let _ = back.send(Event::Account { slot, pubkey: *k, owner: a.owner, lamports: a.lamports, data: a.data, t: now_ns(), txn: None }); }
+                    let Some(a) = a else { continue };
+                    let (t, data): (u64, Arc<[u8]>) = (now_ns(), Arc::from(a.data));
+                    let src = crate::feeds::src::RPC_REFETCH;
+                    let aseq = ar.as_ref().map_or(0, |r| r.record(&crate::rec::accounts::AcctUpdate { pubkey: *k, slot, write_version: 0, t_recv: t, src,
+                        is_startup: false, txn: None, lamports: a.lamports, owner: a.owner, data: &data }));
+                    let _ = back.send(Event::Account { slot, pubkey: *k, owner: a.owner, lamports: a.lamports, data, t, txn: None, write_version: 0, is_startup: false, src, aseq });
                 }
             }
         });
@@ -1330,14 +1665,14 @@ mod tests {
     const TRIG: [u8; 64] = [9u8; 64];
 
     /// a Raydium AMM v4 pool account: status 1 (swaps on), fee 25/10,000, no PnL owed
-    fn ammv4_pool() -> Vec<u8> {
+    fn ammv4_pool() -> Arc<[u8]> {
         let mut p = vec![0u8; 752];
         p[0..8].copy_from_slice(&1u64.to_le_bytes());
         p[176..184].copy_from_slice(&25u64.to_le_bytes());
         p[184..192].copy_from_slice(&10_000u64.to_le_bytes());
-        p
+        p.into()
     }
-    fn vault(amount: u64) -> Vec<u8> { let mut v = vec![0u8; 165]; v[64..72].copy_from_slice(&amount.to_le_bytes()); v }
+    fn vault(amount: u64) -> Arc<[u8]> { let mut v = vec![0u8; 165]; v[64..72].copy_from_slice(&amount.to_le_bytes()); v.into() }
     fn meta(n: u8) -> PoolMeta {
         PoolMeta { venue: Venue::RayAmmV4, pool: [n; 32], t0: MINT, t1: *WSOL, vault0: [n + 10; 32], vault1: [n + 20; 32],
             t0_prog: *crate::pda::TOKEN_PROGRAM, t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![], flag: false }
@@ -1374,7 +1709,7 @@ mod tests {
     /// a decoded swap of 1 SOL into pool 1 by SIGNER
     fn hint() -> (Arrival, PendingSwap) {
         let tx = Tx { sig: TRIG, keys: vec![SIGNER], ..Default::default() };
-        (Arrival { feed: 0, slot: 11, t_rx: 100, t_decoded: 200, executed: None, tx, poh: None },
+        (Arrival { feed: 0, slot: 11, t_rx: 100, t_decoded: 200, executed: None, tx, poh: None, raw: Default::default() },
          PendingSwap { pool: [1; 32], venue: Venue::RayAmmV4, zero_for_one: false, amount: 1_000_000_000, exact_out: false, user: SIGNER, limit: 0 })
     }
     fn n(e: &Engine, k: &str) -> u64 { e.counts.get(k).copied().unwrap_or(0) }
@@ -1416,8 +1751,8 @@ mod tests {
         assert!(r.eng.trig_pending.contains_key(&TRIG), "but its swap is followed");
         // the swap lands (pool 1's accounts updated, stamped with it): ok + 1 -> 1 of 5 = 20%, still skipped
         let land = |e: &mut Engine, sig: [u8; 64], slot: u64| {
-            e.on_account(meta(1).vault0, vault(1_000_000_000_000_000), slot, 2_000, Some(sig), 2_100);
-            e.on_account(meta(1).vault1, vault(1_000 * 1_000_000_000), slot, 2_000, Some(sig), 2_100);
+            e.on_account(meta(1).vault0, vault(1_000_000_000_000_000), slot, 2_000, Some(sig), 0, 2_100);
+            e.on_account(meta(1).vault1, vault(1_000 * 1_000_000_000), slot, 2_000, Some(sig), 0, 2_100);
         };
         land(&mut r.eng, TRIG, 11);
         assert_eq!(r.eng.signer_stats[&SIGNER], (1, 4));
@@ -1431,6 +1766,29 @@ mod tests {
         a.tx.sig = [23u8; 64];
         r.eng.on_trigger(&a, &sw, 300, 400);
         assert_eq!((n(&r.eng, "trigger_skip_signer_fails"), n(&r.eng, "trigger_hint_only")), (2, 1));
+    }
+
+    /// review WP-03 #7: after an input, the flush runs only on an empty queue and housekeeping only every 10 s
+    #[test]
+    fn after_an_input_the_timers_keep_arb_labs_rules() {
+        let ten = STATUS_EVERY_NS + 1;
+        for (pending, empty, since, want) in [(true, true, 0, TIMER_FLUSH), (true, false, 0, 0), (false, true, 0, 0), (false, false, 0, 0),
+            (true, false, ten, TIMER_HK), (false, false, ten, TIMER_HK), (true, true, ten, TIMER_ALL), (false, true, ten, TIMER_ALL),
+            (true, true, HOUSEKEEPING_NS * 10, TIMER_FLUSH)] {
+            assert_eq!(after_input_timers(pending, empty, since), want, "pending {pending} empty {empty} since {since}");
+        }
+    }
+
+    /// review WP-03 #6: the newest stored slot (status `tip_lag_slots_now`) follows pool accounts only: the Clock sysvar
+    /// (every slot), the wallet and programdata accounts WP-03 watches are stored but do not move it
+    #[test]
+    fn store_slot_max_follows_pool_accounts_only() {
+        let mut r = rig("slotmax", StrategyCfg::default());
+        r.eng.on_account(*crate::pools::CLOCK_SYSVAR, vec![0u8; 40].into(), 5_000, 1, None, 1, 2);
+        assert!(r.eng.store.get(&crate::pools::CLOCK_SYSVAR).is_some(), "stored");
+        assert_eq!(r.eng.store_slot_max, 0);
+        r.eng.on_account(meta(1).vault0, vault(1_000_000_000_000_000), 12, 1, None, 1, 2);
+        assert_eq!(r.eng.store_slot_max, 12);
     }
 
     /// decoded_sends = true keeps arb-lab's decoded path (prediction, priced opportunity)
@@ -1452,8 +1810,8 @@ mod tests {
         let b = meta(2);
         const T: [u8; 64] = [3u8; 64];
         // T moves pool 2 (both vaults, two updates); pool 2 is now 2% above pool 1
-        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(T), 1_500);
-        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 1_100, Some(T), 1_600);
+        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(T), 0, 1_500);
+        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 1_100, Some(T), 0, 1_600);
         assert_eq!(r.eng.state_pending.len(), 1, "one entry per (pool, txn)");
         assert_eq!((r.eng.state_pending[0].t_recv, r.eng.state_pending[0].t_engine), (1_000, 1_500), "the first update's times");
         r.eng.flush_state();
@@ -1468,8 +1826,8 @@ mod tests {
         // an evaluation that finds nothing is a sample too
         const U: [u8; 64] = [4u8; 64];
         let mut r = rig("state2", StrategyCfg { state_triggers: true, min_profit_lamports: u64::MAX / 4, ..StrategyCfg::default() });
-        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(U), 1_500);
-        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 1_100, Some(U), 1_600);
+        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(U), 0, 1_500);
+        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 1_100, Some(U), 0, 1_600);
         r.eng.flush_state();
         assert_eq!((n(&r.eng, "state_opportunity"), lat(&r.eng, "state_recv_to_decided")), (0, 1));
     }
@@ -1482,10 +1840,10 @@ mod tests {
         let mut r = rig("state-split", StrategyCfg { state_triggers: true, ..StrategyCfg::default() });
         let b = meta(2);
         const T: [u8; 64] = [6u8; 64];
-        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(T), 1_500);
+        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(T), 0, 1_500);
         r.eng.flush_state();
         assert_eq!((n(&r.eng, "state_opportunity"), lat(&r.eng, "state_recv_to_decided")), (0, 0), "half a pool is not priced");
-        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 2_000, Some(T), 2_600);
+        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 2_000, Some(T), 0, 2_600);
         r.eng.flush_state();
         let e = &r.eng;
         assert_eq!(n(e, "state_opportunity"), 1);
@@ -1541,8 +1899,10 @@ mod tests {
                 let slot = 11;
                 let sol = if gaps && k % 200 == 0 { 1_100 } else { 1_000 + (k % 7) };
                 let t = now_ns();
-                e.on_event(Event::Account { slot, pubkey: m.vault1, owner: [0; 32], lamports: 0, data: vault(sol * 1_000_000_000), t, txn: Some(sig) }, now_ns(), &mut status);
-                e.on_event(Event::Account { slot, pubkey: m.vault0, owner: [0; 32], lamports: 0, data: vault(999_000_000_000_000), t: now_ns(), txn: Some(sig) }, now_ns(), &mut status);
+                e.step(Event::Account { slot, pubkey: m.vault1, owner: [0; 32], lamports: 0, data: vault(sol * 1_000_000_000), t, txn: Some(sig), write_version: 2 * k,
+                    is_startup: false, src: 0, aseq: 2 * k }, now_ns(), &mut status);
+                e.step(Event::Account { slot, pubkey: m.vault0, owner: [0; 32], lamports: 0, data: vault(999_000_000_000_000), t: now_ns(), txn: Some(sig),
+                    write_version: 2 * k + 1, is_startup: false, src: 0, aseq: 2 * k + 1 }, now_ns(), &mut status);
                 e.flush_state();
                 // the opportunities end (opportunities.jsonl), as their watch window would end them, outside the timed part
                 if gaps && k % 1_000 == 999 { e.finish(); }
@@ -1585,8 +1945,8 @@ mod tests {
         let mut r = rig("caps", StrategyCfg { state_triggers: true, ..StrategyCfg::default() });
         let b = meta(2);
         const T: [u8; 64] = [7u8; 64];
-        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(T), 1_500);
-        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 1_100, Some(T), 1_600);
+        r.eng.on_account(b.vault1, vault(1_020 * 1_000_000_000), 11, 1_000, Some(T), 0, 1_500);
+        r.eng.on_account(b.vault0, vault(990_000_000_000_000), 11, 1_100, Some(T), 0, 1_600);
         let p = r.eng.state_pending.pop().unwrap();
         r.eng.state_trigger(p.pool, p.txn, p.slot, p.t_recv, p.t_engine);
         assert_eq!((n(&r.eng, "state_opportunity"), r.eng.caps_pending.len()), (1, 1), "queued, not computed between two pools");

@@ -211,6 +211,9 @@ pub struct Exec {
     /// WP-01: the run's SendGate (control socket pause / shadow, `--shadow`, a route program hash mismatch, a stop
     /// request): `wants_send` refuses while it is not live
     gate: Arc<SendGate>,
+    /// the SendGate mode the last `wants_send` read (None: it returned before reading it); the engine journals it at the
+    /// decision point (review WP-03 #3)
+    gate_seen: Option<GateMode>,
 }
 
 /// `Exec::lat` series, in order
@@ -440,10 +443,17 @@ mod tests {
     async fn live_rig_with(name: &str, extra: &str) -> (Rig, crossbeam_channel::Receiver<Event>) {
         let dir = std::env::temp_dir().join(format!("arbx-exec-{name}-{}-{}", std::process::id(), now_ns()));
         std::fs::create_dir_all(&dir).unwrap();
+        let rec = test_rec(&dir);
+        let (x, rx) = live_exec(&dir, &rec, extra).await;
+        (Rig { x, dir, rec }, rx)
+    }
+
+    /// a live Exec recording into `rec` (see `live_rig`)
+    async fn live_exec(dir: &std::path::Path, rec: &Rec, extra: &str) -> (Exec, crossbeam_channel::Receiver<Event>) {
         let crowded_file = dir.join("crowded.json");
         std::fs::write(&crowded_file, format!("[\"{}\"]", bs58::encode([9u8; 32]).into_string())).unwrap();
-        let cfg = test_cfg_live(&dir, crowded_file.to_str().unwrap(), extra);
-        let rec = test_rec(&dir);
+        let cfg = test_cfg_live(dir, crowded_file.to_str().unwrap(), extra);
+        let rec = rec.clone();
         let (paths, _) = Paths::new(&cfg.sends, cfg.gate.clone(), rec.clone(), false).await.unwrap();
         let key = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
         let nonces = (0..3u8).map(|k| NonceSlot { acct: [200 + k; 32], value: Some([k; 32]), busy: None }).collect();
@@ -452,7 +462,7 @@ mod tests {
         let (tx, rx) = crossbeam_channel::unbounded();
         let band = BandGate::from_cfg(&cfg, load_crowded_pools(&cfg.live.crowded_pools_file).unwrap());
         let x = Exec::assemble(&cfg, Rpc::race(vec![]), Some(paths), rec.clone(), tx, vec![], vec![], None, held, Some(sending), band).unwrap();
-        (Rig { x, dir, rec }, rx)
+        (x, rx)
     }
 
     /// attempts.jsonl as written so far (through the recorder: attempts.000.jsonl.zst, its header skipped)
@@ -520,6 +530,71 @@ mod tests {
         assert_eq!(r.x.wants_send(), None, "stopping");
         assert_eq!(n(&r.x, "reject_gate_stopped"), 1);
         assert!(!control::send_command(&r.dir, "resume-sending", "moiz", "again").unwrap()["accepted"].as_bool().unwrap());
+    }
+
+    /// review WP-03 #3: the SendGate mode each send check saw is journaled on the engine thread at the decision (INPUT
+    /// gate, `src` "decision", with the opportunity's id) whenever it differs from the last one journaled, and is part
+    /// of the decision digest; the live gate still decides (a pause closes the very next check)
+    #[tokio::test]
+    async fn the_gate_each_send_check_saw_is_journaled() {
+        use crate::config::StrategyCfg;
+        use crate::engine::Engine;
+        use crate::rec::journal::{self, JBody};
+        let dir = std::env::temp_dir().join(format!("arbx-exec-gatej-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rec = test_rec(&dir);
+        let (mut x, _rx) = live_exec(&dir, &rec, "").await;
+        let gate = SendGate::new();
+        x.set_gate(gate.clone());
+        // two AMM v4 pools on MINT / WSOL
+        let amm = |n: u8| PoolMeta { venue: Venue::RayAmmV4, pool: [n; 32], t0: MINT, t1: *WSOL, vault0: [n + 10; 32], vault1: [n + 20; 32],
+            t0_prog: *crate::pda::TOKEN_PROGRAM, t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![], flag: false };
+        let vault = |amount: u64| -> Arc<[u8]> { let mut v = vec![0u8; 165]; v[64..72].copy_from_slice(&amount.to_le_bytes()); v.into() };
+        let pool_data: Arc<[u8]> = { let mut p = vec![0u8; 752]; p[0..8].copy_from_slice(&1u64.to_le_bytes()); p[176..184].copy_from_slice(&25u64.to_le_bytes());
+            p[184..192].copy_from_slice(&10_000u64.to_le_bytes()); p.into() };
+        let (a, b) = (amm(1), amm(2));
+        let mut reg = crate::pools::Registry { pools: vec![a.clone(), b.clone()], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+        reg.by_pool.insert(a.pool, 0);
+        reg.by_pool.insert(b.pool, 1);
+        reg.pairs.insert(crate::pools::pair_key(&MINT, &WSOL), vec![0, 1]);
+        let mut store = crate::store::Store::default();
+        for (m, sol) in [(&a, 1_000u64), (&b, 1_010)] {
+            store.update(m.pool, pool_data.clone(), 10, 1, None);
+            store.update(m.vault0, vault(1_000_000_000_000_000), 10, 1, None);
+            store.update(m.vault1, vault(sol * 1_000_000_000), 10, 1, None);
+        }
+        let mut e = Engine::new_offline(Arc::new(reg), store, StrategyCfg { state_triggers: true, ..StrategyCfg::default() });
+        e.set_rec(rec.clone());
+        e.exec = Some(x);
+        let mut status = |_: &str| {};
+        let mut t = 1_791_000_000_000_000_000u64;
+        // three transactions, each moving one pool ~3% above the other: live, then paused (twice)
+        for (n, sol, pause) in [(0u8, 1_030u64, false), (1, 1_060, true), (2, 1_090, false)] {
+            if pause { gate.shadow("control", "pause-sending by test", false).unwrap(); }
+            let m = if n % 2 == 0 { &a } else { &b };
+            let txn = [n + 50; 64];
+            for (k, data) in [(m.vault1, vault(sol * 1_000_000_000)), (m.vault0, vault(1_000_000_000_000_000 - n as u64))] {
+                t += 1_000;
+                e.step(Event::Account { slot: 12, pubkey: k, owner: [3; 32], lamports: 1, data, t, txn: Some(txn), write_version: t, is_startup: false,
+                    src: 0, aseq: 0 }, t, &mut status);
+            }
+            t += 1_000;
+            e.timers(t, &mut status);
+        }
+        let x = e.exec.as_ref().unwrap();
+        assert_eq!((n(x, "reject_gate_shadow"), x.gate_seen()), (2, Some(GateMode::Shadow)), "the live gate decided the last two");
+        rec.close();
+        let j = journal::read_dir(&dir).unwrap();
+        let seen: Vec<(String, u64)> = j.iter().filter_map(|r| match &r.body {
+            JBody::Input { kind: 3, data } if data["src"] == "decision" => Some((data["mode"].as_str().unwrap().to_string(), data["opp"].as_u64().unwrap())),
+            _ => None,
+        }).collect();
+        assert_eq!(seen, vec![("live".to_string(), 0), ("shadow".to_string(), 1)], "one record per change, at the decision that saw it");
+        // the shadow record carries the reason, and sits right after the input whose handling made the decision
+        let i = j.iter().position(|r| matches!(&r.body, JBody::Input { kind: 3, data } if data["mode"] == "shadow")).unwrap();
+        assert!(matches!(j[i].body, JBody::Input { ref data, .. } if data["reason"] == "control"));
+        assert!(matches!(j[i - 1].body, JBody::Timer { .. }) && j[i - 1].t_engine == j[i].t_engine, "{:?}", j[i - 1]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// review M10: a send deferred past the decision (the sim gate re-checks the route first) is cancelled when the
@@ -715,11 +790,17 @@ impl Exec {
             spec_price: cfg.live.spec_cu_price_micro, rotate: cfg.live.rotate_paths, mix: cfg.live.race_mix, path_arm: "", bmix: cfg.live.bundle_mix, tpu_price: cfg.live.tpu_cu_price_micro, sim_gate: cfg.live.sim_gate, compete_mult: cfg.live.compete_mult, compete_share: cfg.live.compete_max_share, compete_ab: cfg.live.compete_ab, gross_floor: cfg.live.gross_floor, tpu_max_expected: cfg.live.tpu_max_expected_lamports, tpu_skip_mriya: cfg.live.tpu_skip_mriya_pools, tpu_skip_mints: cfg.live.tpu_skip_mints.iter().map(|m| pk(m)).collect(), tpu_min_expected: cfg.live.tpu_min_expected_lamports, bundle_resend_ms: cfg.live.bundle_resend_ms.clone(), bundle_variants: cfg.live.bundle_size_variants.clone(), mint_cool: HashMap::default(), pair_lock_ns: cfg.live.pair_lock_ms * 1_000_000,
             band, rot: 0,
             tiers: cfg.live.bid_tiers.then_some((cfg.live.bid_min_expected_lamports, cfg.live.bid_share, cfg.live.bid_max_priority_lamports)), next_attempt: 0, feeds, counts: HashMap::default(),
-            lat: exec_lat(), gate: SendGate::new() })
+            lat: exec_lat(), gate: SendGate::new(), gate_seen: None })
     }
 
     /// WP-01: follow the run's SendGate (a new Exec has its own, always live)
     pub fn set_gate(&mut self, gate: Arc<SendGate>) { self.gate = gate; }
+
+    /// the SendGate mode the last `wants_send` read (None: it returned before reading the gate)
+    pub fn gate_seen(&self) -> Option<GateMode> { self.gate_seen }
+
+    /// the SendGate as it is now (`SendGate::json`)
+    pub fn gate_json(&self) -> Value { self.gate.json() }
 
     /// the attempts still open (sent, not settled): stop.json `in_flight_at_stop` / `unsettled`
     pub fn open_attempts(&self) -> Vec<u64> {
@@ -754,10 +835,14 @@ impl Exec {
 
     /// the largest size the sender would send now (canary: its fixed size; live: the size cap), if it may send now
     pub fn wants_send(&mut self) -> Option<u64> {
+        self.gate_seen = None;
         self.sending.as_ref()?;
-        // WP-01: paused, shadow or stopping (control socket, --shadow, program hash mismatch, a stop request)
-        if !self.gate.allows() {
-            self.count(if self.gate.mode() == GateMode::Stopped { "reject_gate_stopped" } else { "reject_gate_shadow" });
+        // WP-01: paused, shadow or stopping (control socket, --shadow, program hash mismatch, a stop request). The live
+        // gate, read once: the mode this decision saw is what the engine journals (`gate_seen`)
+        let mode = self.gate.mode();
+        self.gate_seen = Some(mode);
+        if mode != GateMode::Live {
+            self.count(if mode == GateMode::Stopped { "reject_gate_stopped" } else { "reject_gate_shadow" });
             return None;
         }
         let s = self.sending.as_mut()?;
