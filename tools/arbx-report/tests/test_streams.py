@@ -206,6 +206,10 @@ class Binary(unittest.TestCase):
         payload = b'{"min_tip": 1000}'
         got = streams._parse_journal_body(streams.J_INPUT, struct.pack("<BI", 10, len(payload)) + payload)
         self.assertEqual(got, {"input": "engine_init", "data": {"min_tip": 1000}})
+        # WP-04 review #1: INPUT 11, how a chunk of an engine RPC read ended
+        payload = b'{"job": 0, "chunk": 1, "what": "resnapshot", "ok": true, "slot": 90, "missing": []}'
+        got = streams._parse_journal_body(streams.J_INPUT, struct.pack("<BI", 11, len(payload)) + payload)
+        self.assertEqual((got["input"], got["data"]["what"], got["data"]["slot"]), ("fetch", "resnapshot", 90))
 
     def test_journal_2_2_and_accounts_2_1_fields(self):
         # WP-04: SLOT and BLOCK_META carry the bank; ALT found 2 (a failed fetch, with its error) and 3 (a table

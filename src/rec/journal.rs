@@ -421,7 +421,7 @@ pub fn replay_engine(reg: Arc<crate::pools::Registry>, cfg: crate::config::Strat
     let mut e = crate::engine::Engine::new_offline(reg.clone(), boot_store(journal, accounts, &reg), cfg);
     e.apply_init(&init)?;
     // the tables the run preloaded (journaled with the boot records), applied as the run applied them
-    for (t, v) in boot_alts(journal) { e.preload_alt(t, v, false); }
+    for (t, v) in boot_alts(journal) { e.preload_alt(t, v, None, false); }
     Ok((e, init))
 }
 
@@ -467,7 +467,7 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
             }
             JBody::Account { aseq, stale } => match accounts.get(aseq) {
                 Some(a) => {
-                    if eng.store.is_stale(&a.pubkey, a.slot, a.src, a.write_version, a.aseq) != *stale { st.verdict_mismatches += 1; }
+                    if eng.account_refused(&a.pubkey, a.slot, a.src, a.write_version, a.aseq, a.bank_id) != *stale { st.verdict_mismatches += 1; }
                     account_event(a)
                 }
                 None => { st.missing_accounts += 1; continue; }
@@ -477,7 +477,7 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
                 parent_slot: *parent_slot, parent_blockhash: [0; 32], block_height: *height, block_time: None, executed_transaction_count: 0, entries_count: 0, t: *t,
                 bank_id: *bank_id }),
             // a preloaded table outside the boot section would be a writer's error: applied like one inside it
-            JBody::Alt { table, preload: Some(v), .. } => { eng.preload_alt(*table, v.clone(), false); continue; }
+            JBody::Alt { table, preload: Some(v), .. } => { eng.preload_alt(*table, v.clone(), None, false); continue; }
             JBody::Alt { table, addrs, err, .. } => Event::Alt { table: *table, addrs: addrs.clone().map(Arc::new), err: err.clone() },
             JBody::Input { kind, data } => match InputKind::from_u8(*kind) {
                 // a settlement belongs to the executor, which an offline engine does not have (WP-05 / WP-09 replay it);
@@ -847,10 +847,12 @@ mod tests {
     /// PLAN WP-04 acceptance, the replay of a run (WP-03's hand-off): a journal written by the real `Engine::run`, with
     /// WP-04's inputs and machinery (W(T) hints before and after their updates, decoded swaps and a failed executed copy,
     /// commit groups completing and resolving by quiescence, a sibling fork abandoned by a confirmation, the state stream's
-    /// health inputs (a disconnect and a re-snapshot), a lookup table preloaded at boot and one whose fetches fail and are
-    /// retried), replayed through `journal::replay_engine` on the replay clock, gives the run's state digest, decision
-    /// digest, and the same decisions.jsonl and commits.jsonl lines (stage timestamps aside: real clock reads in the run).
-    /// A field replay of a Cherry recording made with this build is the owner's step
+    /// health inputs (its first connection and a reconnection, each followed by the re-read of every account through a
+    /// JSON-RPC server: account events and INPUT 11 records, one chunk failing and read again; review WP-04 #1), a lookup
+    /// table preloaded at boot and one whose fetches fail and are retried), replayed through `journal::replay_engine` on
+    /// the replay clock, gives the run's state digest, decision digest, and the same decisions.jsonl and commits.jsonl
+    /// lines (stage timestamps aside: real clock reads in the run). A field replay of a Cherry recording made with this
+    /// build is the owner's step
     #[test]
     fn a_wp04_run_replays_to_the_run() {
         let d = std::env::temp_dir().join(format!("arbx-journal-wp04-{}-{}", std::process::id(), crate::feeds::clock::now_ns()));
@@ -872,23 +874,34 @@ mod tests {
             }
         }
         crate::engine::initial_dlmm_arrays(&reg, &mut store);
+        // the chain as an RPC node serves it (the re-reads after each connection read it): the boot state at slot 11, then
+        // every write the feeder sends
+        let mock = Arc::new(crate::rpc::mock::MockRpc::start());
+        for k in store.keys().copied().collect::<Vec<Pk>>() { mock.set(k, &store.get(&k).unwrap().data); }
+        mock.slot.store(11, std::sync::atomic::Ordering::Relaxed);
+        // the lookup table's first fetch fails (ALT found 2), then it is retried (none such: found 0)
+        mock.fail_keys.lock().unwrap().insert([0x73; 32]);
         let cfg = StrategyCfg { state_triggers: true, budget_caps_sol: vec![0.5, 2.0], ..StrategyCfg::default() };
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
         let (tx_ch, rx) = crossbeam_channel::unbounded();
         let (wtx, _wrx) = tokio::sync::watch::channel(Vec::new());
+        let rpc = crate::rpc::Rpc::race(vec![crate::rpc::Endpoint { name: "mock".into(), url: mock.url.clone(), bearer: None }]);
         let mut e = Engine::new(reg.clone(), store, cfg.clone(), vec!["shred".into(), "tx".into()], 1_000, Arc::new(crate::feeds::Interest::default()), rec.clone(),
-            crate::rpc::Rpc::race(vec![]), rt.handle().clone(), tx_ch.clone(), wtx).unwrap();
+            rpc, rt.handle().clone(), tx_ch.clone(), wtx).unwrap();
         e.set_acct_rec(acct.clone());
         e.set_knobs(crate::engine::EngineKnobs::default());
         // a lookup table from "the previous segment", journaled with the boot records
         const PRE: Pk = [0x71; 32];
-        e.preload_alt(PRE, vec![Some([0x72; 32]), None, Some(meta(1).vault0)], true);
+        e.preload_alt(PRE, vec![Some([0x72; 32]), None, Some(meta(1).vault0)], Some(1), true);
         let mk_tx = tx;
         let feeder = {
-            let (tx, acct) = (tx_ch.clone(), acct.clone());
+            let (tx, acct, mock) = (tx_ch.clone(), acct.clone(), mock.clone());
             std::thread::spawn(move || {
                 let now = crate::feeds::clock::now_ns;
                 let send_acct = |key: Pk, data: Arc<[u8]>, slot: u64, txn: Option<[u8; 64]>, wv: u64| {
+                    mock.set(key, &data);
+                    let s = &mock.slot;
+                    if slot > s.load(std::sync::atomic::Ordering::Relaxed) { s.store(slot, std::sync::atomic::Ordering::Relaxed); }
                     let t = now();
                     let aseq = acct.record(&AcctUpdate { pubkey: key, slot, write_version: wv, t_recv: t, src: src::GRPC, is_startup: false, txn, lamports: 1, owner: [3; 32],
                         data: &data, bank_id: None });
@@ -909,6 +922,8 @@ mod tests {
                 tx.send(crate::feeds::state_health(true, 1, 0, None)).unwrap();
                 send_slot(11, 1, Some(10));
                 clock(11, 1);
+                // the boot re-read starts one slot after the stream's resume slot and lands (the gate is `resync` until then)
+                for _ in 0..6 { std::thread::sleep(std::time::Duration::from_millis(100)); clock(11, 1); }
                 let mut wv = 100;
                 for n in 0..30u64 {
                     let m = meta(1 + (n % 2) as u8);
@@ -929,23 +944,30 @@ mod tests {
                     if n % 7 == 3 { shred([n as u8 + 160; 64], &m, Some(false), false); }
                     // a transaction whose lookup table is unknown: fetched (the RPC has no provider: it fails, is retried)
                     if n == 4 { shred([0xEE; 64], &m, None, true); }
-                    // the state stream drops and comes back (a re-snapshot)
-                    if n == 15 { tx.send(crate::feeds::state_health(false, 1, 1, Some("status: 503".into()))).unwrap(); tx.send(crate::feeds::state_health(true, 2, 1, None)).unwrap(); }
+                    // the state stream drops and comes back (a re-read, whose first chunk read fails and is read again)
+                    if n == 15 {
+                        mock.fail_keys.lock().unwrap().insert(meta(1).pool);
+                        tx.send(crate::feeds::state_health(false, 1, 1, Some("status: 503".into()))).unwrap();
+                        tx.send(crate::feeds::state_health(true, 2, 1, None)).unwrap();
+                    }
                     std::thread::sleep(std::time::Duration::from_millis(4));
                 }
+                // the stream goes on (the reconnection's re-read lands: one chunk read twice)
+                for _ in 0..8 { std::thread::sleep(std::time::Duration::from_millis(100)); clock(16, 5); }
             })
         };
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let s2 = stop.clone();
-        std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(700)); s2.store(true, std::sync::atomic::Ordering::Relaxed); });
+        std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(1_700)); s2.store(true, std::sync::atomic::Ordering::Relaxed); });
         let end = e.run(&rx, &stop, u64::MAX, |_| {});
         assert_eq!(end, crate::engine::RunEnd::Stopped);
         feeder.join().unwrap();
         let live = (e.digest(), e.decision_digest());
-        for (k, at_least) in [("commit_complete", 5), ("fork_abandoned_slot", 1), ("evaluation", 10), ("state_resnapshot", 1), ("alt_preloaded", 1), ("alt_retry", 1),
-            ("signer_miss_tx", 0)] {
+        for (k, at_least) in [("commit_complete", 5), ("fork_abandoned_slot", 1), ("evaluation", 10), ("state_resnapshot", 2), ("state_resync_done", 2), ("read_chunk_ok", 2),
+            ("read_chunk_failed", 1), ("read_retry", 1), ("alt_preloaded", 1), ("alt_retry", 1), ("signer_miss_tx", 0)] {
             assert!(e.counter(k) >= at_least, "{k}: {}", e.counter(k));
         }
+        assert_eq!(e.shut(), crate::store_health::Shut::Ready, "both re-reads landed");
         rec.close();
         let j = read_dir(&d).unwrap();
         let a = accounts::read_dir(&d).unwrap();
@@ -958,6 +980,10 @@ mod tests {
         };
         let (run_decisions, run_commits) = (lines(&d, "decisions"), lines(&d, "commits"));
         assert!(!run_decisions.is_empty() && !run_commits.is_empty());
+        let reason = |x: &serde_json::Value, r: &str| x["routes"].as_array().is_some_and(|v| v.iter().any(|y| y["reason"] == r));
+        assert!(run_decisions.iter().any(|x| reason(x, "resync")) && run_decisions.iter().any(|x| x["routes"].as_array().is_some_and(|v| v.iter().any(|y| y["net"].is_i64()))),
+            "routes refused while unverified, priced once the re-read landed");
+        assert!(j.iter().filter(|r| matches!(&r.body, JBody::Input { kind: 11, .. })).count() >= 3, "INPUT 11 fetch: two landed chunks and a failed one");
         // the replay, recording into its own directory, on the replay clock
         let d2 = d.join("replay");
         let rec2 = crate::rec::start(crate::rec::Opts { dir: d2.clone(), run: "r".into(), producer: "p".into(), cfg: Default::default(), feeds: vec!["shred".into(), "tx".into()],

@@ -628,6 +628,10 @@ mod tests {
         h.set(Shut::StateUnavailable);
         assert!(r.x.wants_send().is_none());
         assert_eq!((r.x.refusal().as_deref(), n(&r.x, "reject_state_unavailable")), (Some("state_unavailable"), 1));
+        // review WP-04 #1: the re-read after a (re)connection has not landed
+        h.set(Shut::Resync);
+        assert!(r.x.wants_send().is_none());
+        assert_eq!((r.x.refusal().as_deref(), n(&r.x, "reject_resync")), (Some("resync"), 1));
         h.set(Shut::Ready);
         assert!(r.x.wants_send().is_some() && r.x.refusal().is_none(), "ready: allowed");
         // the gate still comes first, with its reason
@@ -899,7 +903,7 @@ impl Exec {
         // takes the same flags)
         let shut = self.health.shut();
         if shut != crate::store_health::Shut::Ready {
-            self.count(if shut == crate::store_health::Shut::Warmup { "reject_warmup" } else { "reject_state_unavailable" });
+            self.count(match shut { crate::store_health::Shut::Warmup => "reject_warmup", crate::store_health::Shut::Resync => "reject_resync", _ => "reject_state_unavailable" });
             self.refused = Some(shut.as_str().into());
             return None;
         }
@@ -1237,7 +1241,7 @@ impl Exec {
         let (gate_size, gate_mid, gate_back, gate_slot) = (r.size, r.mid, r.back, r.slot);
         let bundle = self.path_arm == "bundle";
         if let Some(s) = self.sending.as_mut() { s.open.insert(attempt, Open { route: r, nonce: ni, worst, creates_ata, expected, t: t_signed, bundle }); }
-        let (rpc, back, paths2, gate, log) = (self.rpc.clone(), self.back.clone(), paths.clone(), self.gate.clone(), self.rec.clone());
+        let (rpc, back, paths2, gate, log, health) = (self.rpc.clone(), self.back.clone(), paths.clone(), self.gate.clone(), self.rec.clone(), self.health.clone());
         self.rt.spawn(async move {
             if let Some(raw) = gate_raw {
                 let t0 = now_ns();
@@ -1277,10 +1281,13 @@ impl Exec {
                 }
             }
             // review M10: a send deferred past the decision (the sim gate's re-checks) still asks the SendGate: a pause,
-            // shadow or stop that came in meanwhile cancels it
-            if fire_now.is_none() && !gate.allows() {
+            // shadow or stop that came in meanwhile cancels it; so does the store's health (review WP-04 #8: a state outage,
+            // a re-read or a warm-up that began meanwhile)
+            if fire_now.is_none() && (!gate.allows() || !health.ready()) {
+                let why = if gate.allows() { format!("the store was not ready before the deferred send ({})", health.shut().as_str()) }
+                    else { format!("the send gate closed before the deferred send ({})", gate.mode().as_str()) };
                 let _ = back.send(Event::Settled(Box::new(Settled { attempt, fired: Fired { id: attempt, t_ns: 0, copies: vec![], gate: None },
-                    landed: None, jito: None, nonce_value: None, error: Some(format!("not sent: the send gate closed before the deferred send ({})", gate.mode().as_str())) })));
+                    landed: None, jito: None, nonce_value: None, error: Some(format!("not sent: {why}")) })));
                 return;
             }
             let fire = match fire_now { Some(f) => f, None => paths2.fire(attempt, signed, prio, live) };
@@ -1293,8 +1300,8 @@ impl Exec {
                 let d = std::time::Duration::from_millis(delay);
                 let el = t_fire.elapsed();
                 if d > el { tokio::time::sleep(d - el).await; }
-                // review M10: no scheduled resend after a pause, shadow or stop
-                if !gate.allows() { break; }
+                // review M10: no scheduled resend after a pause, shadow or stop, nor while the store is not ready (WP-04 #8)
+                if !gate.allows() || !health.ready() { break; }
                 if let Ok(f2) = paths2.fire(attempt, vec![c], prio, live).await { fired.copies.extend(f2.copies); }
             }
             // a gate skip sent only the bundle, which Jito already rejected: nothing can land, so the nonce lease ends now

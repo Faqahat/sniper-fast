@@ -550,9 +550,23 @@ pub struct StateCfg {
     /// ... and nothing is priced or sent while the stream is down or its newest message is older than this, ms
     #[serde(default = "max_update_age")]
     pub max_update_age_ms: u64,
-    /// ... and every followed account is read again (RPC) after the stream reconnects
+    /// ... and a run whose state has been unavailable this long without a break (after it had delivered) stops with
+    /// `state_unavailable` too, so the supervisor starts a fresh segment (review WP-04 #10: an outage after the first
+    /// message otherwise runs blind to the deadline and exits 0), s; 0 never (the default: owner decision)
+    #[serde(default)]
+    pub unavailable_stop_s: u64,
+    /// ... and every followed account is read again (RPC) after the stream's first connection and every reconnection
+    /// (review WP-04 #1: writes not delivered meanwhile are not resent); until the re-read has landed the gate is shut
+    /// (`resync`) and a pool with a part not read again since is refused (`resync`)
     #[serde(default = "yes")]
     pub resnapshot: bool,
+    /// ... a WARNING when the re-read has not landed this long after the connection (the gate stays shut), s
+    #[serde(default = "resync_warn")]
+    pub resync_warn_s: u64,
+    /// ... and a chunk of it still unread this long after the re-read started is given up: the gate opens, and the
+    /// accounts it held stay refused one by one until the stream writes them, s
+    #[serde(default = "resync_give_up")]
+    pub resync_give_up_s: u64,
 }
 fn slot_statuses_auto() -> String { "auto".into() }
 fn block_meta_auto() -> String { "auto".into() }
@@ -567,6 +581,8 @@ fn slo_recover() -> u32 { 10 }
 fn tier_a_grace() -> u64 { 60 }
 fn boot_timeout() -> u64 { 60 }
 fn max_update_age() -> u64 { 2_000 }
+fn resync_warn() -> u64 { 10 }
+fn resync_give_up() -> u64 { 300 }
 
 /// Lookup tables (PLAN WP-04 item 7; PLAN-ADDENDUM I-6): a failed fetch is retried, never cached as missing for the run
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -590,6 +606,13 @@ pub struct AltsCfg {
     /// segments), a path, or "" (none)
     #[serde(default = "auto")]
     pub preload: String,
+    /// review WP-04 #11: only the tables a transaction used in the last `preload_max_age_h` hours are preloaded (each
+    /// segment's alts-final says when each table was last used), at most `preload_max_tables` of them (the most recently
+    /// used): the set no longer grows across a campaign, and neither does the journal's boot section that holds it
+    #[serde(default = "alt_preload_age")]
+    pub preload_max_age_h: u64,
+    #[serde(default = "alt_preload_max")]
+    pub preload_max_tables: usize,
 }
 fn alt_retry_ms() -> Vec<u64> { vec![50, 250, 1_000, 5_000] }
 fn alt_retry_every() -> u64 { 30 }
@@ -597,8 +620,13 @@ fn alt_give_up() -> u64 { 600 }
 fn alt_wait_cap() -> usize { 10_000 }
 fn alt_inflight() -> usize { 16 }
 fn auto() -> String { "auto".into() }
+fn alt_preload_age() -> u64 { 24 }
+fn alt_preload_max() -> usize { 5_000 }
 impl Default for AltsCfg {
-    fn default() -> Self { AltsCfg { retry_ms: alt_retry_ms(), retry_every_s: alt_retry_every(), give_up_s: alt_give_up(), wait_cap: alt_wait_cap(), max_inflight: alt_inflight(), preload: auto() } }
+    fn default() -> Self {
+        AltsCfg { retry_ms: alt_retry_ms(), retry_every_s: alt_retry_every(), give_up_s: alt_give_up(), wait_cap: alt_wait_cap(), max_inflight: alt_inflight(), preload: auto(),
+            preload_max_age_h: alt_preload_age(), preload_max_tables: alt_preload_max() }
+    }
 }
 
 /// The accuracy monitor (PLAN WP-04 item 13): decoded hints scored against their transaction's pre-state
@@ -713,7 +741,7 @@ pub struct StrategyCfg {
     /// how long (ms) after a trigger we keep watching the pools for who took the opportunity
     #[serde(default = "watch_ms")]
     pub outcome_watch_ms: u64,
-    /// per trigger signer (ok, failed) carried across runs: read once at start (its sha256 goes to meta.json and the
+    /// per trigger signer (ok, failed) carried across runs: read once at start (its sha256 goes to run.log and the
     /// journal's engine_init); never written by a run (PLAN-ADDENDUM I-5): each segment writes its own copy and this
     /// segment's counts into its run directory (`signer-stats.json`, `signer-stats-delta.json`), and merging them back is
     /// an explicit step (`arbx signer-stats merge`). "" starts empty
@@ -1019,6 +1047,7 @@ impl Config {
         for (k, v) in [("lag_slo_p50_ms", st.lag_slo_p50_ms), ("lag_slo_p90_ms", st.lag_slo_p90_ms)] { if !v.is_finite() || v <= 0.0 { bail!("[state] {k} must be a positive number"); } }
         if st.lag_slo_breach_minutes == 0 || st.slo_recover_minutes == 0 { bail!("[state] lag_slo_breach_minutes and slo_recover_minutes must be > 0"); }
         if st.max_update_age_ms == 0 { bail!("[state] max_update_age_ms must be > 0"); }
+        if st.resync_warn_s == 0 || st.resync_give_up_s == 0 { bail!("[state] resync_warn_s and resync_give_up_s must be > 0"); }
         let a = &cfg.alts;
         if a.retry_ms.is_empty() || a.retry_ms.contains(&0) || a.retry_ms.windows(2).any(|w| w[0] > w[1]) { bail!("[alts] retry_ms must be a non-empty, non-decreasing list of positive delays"); }
         if a.retry_every_s == 0 || a.give_up_s == 0 || a.wait_cap == 0 || a.max_inflight == 0 { bail!("[alts] retry_every_s, give_up_s, wait_cap and max_inflight must be > 0"); }
@@ -1348,8 +1377,10 @@ mod tests {
         assert_eq!((st.commit_timeout_ms, st.quiescence_ms, st.max_part_skew_slots, st.max_tip_lag_slots, st.clock_max_age_slots), (5, 3, 2, 2, 2));
         assert_eq!((st.lag_slo_p50_ms, st.lag_slo_p90_ms, st.lag_slo_breach_minutes, st.slo_action.as_str(), st.slo_recover_minutes), (16.0, 30.0, 5, "log", 10));
         assert_eq!((st.tier_a_grace_s, st.boot_timeout_s, st.max_update_age_ms, st.resnapshot), (60, 60, 2_000, true));
+        assert_eq!((st.resync_warn_s, st.resync_give_up_s), (10, 300), "review WP-04 #1");
         assert_eq!((c.alts.retry_ms.clone(), c.alts.retry_every_s, c.alts.give_up_s, c.alts.wait_cap, c.alts.max_inflight, c.alts.preload.as_str()),
             (vec![50, 250, 1_000, 5_000], 30, 600, 10_000, 16, "auto"));
+        assert_eq!((c.alts.preload_max_age_h, c.alts.preload_max_tables), (24, 5_000), "review WP-04 #11");
         assert_eq!((c.accuracy.action.as_str(), c.accuracy.ring_versions, c.accuracy.queue), ("log", 8, 10_000));
         for k in ["confirm_trigger_ms = 60", "decoded_sends = false"] {
             let key = k.split(' ').next().unwrap();
@@ -1357,7 +1388,7 @@ mod tests {
         }
         for (bad, why) in [("[state]\nslo_action = \"halt\"\n", "slo_action"), ("[state]\nquiescence_ms = 0\n", "quiescence_ms"),
             ("[alts]\nretry_ms = [250, 50]\n", "retry_ms"), ("[alts]\nmax_inflight = 0\n", "max_inflight"), ("[accuracy]\naction = \"quarantine\"\n", "OD-8"),
-            ("[accuracy]\nring_versions = 1\n", "ring_versions")] {
+            ("[accuracy]\nring_versions = 1\n", "ring_versions"), ("[state]\nresync_give_up_s = 0\n", "resync_give_up_s")] {
             let text = if bad.starts_with("[state]") { MINIMAL.replace("[state]\n", bad) } else { format!("{MINIMAL}{bad}") };
             let e = Config::parse(&text).map(|_| ()).unwrap_err().to_string();
             assert!(e.contains(why), "{why}: {e}");

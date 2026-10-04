@@ -67,13 +67,16 @@ pub enum InputKind { BlockhashHead = 1, LeaderWindow = 2, Gate = 3, Quarantine =
     Settled = 9,
     /// what the engine starts with that no input carries (`engine::EngineInit`): journaled once by `Engine::run` with
     /// `t_engine_ns` 0, never an `Event`
-    EngineInit = 10 }
+    EngineInit = 10,
+    /// how one chunk of an engine RPC read ended (`reads.rs`; review WP-04 #1, #7): `{job, chunk, what, attempt, ok,
+    /// slot, n, missing: [pk]}` or `{..., ok: false, err}`, after the chunk's account events
+    Fetch = 11 }
 
 impl InputKind {
     pub fn from_u8(k: u8) -> Option<InputKind> {
         use InputKind::*;
         Some(match k { 1 => BlockhashHead, 2 => LeaderWindow, 3 => Gate, 4 => Quarantine, 5 => InflightRelease, 6 => Health, 7 => WalletTx, 8 => SlotidxMissing, 9 => Settled,
-            10 => EngineInit, _ => return None })
+            10 => EngineInit, 11 => Fetch, _ => return None })
     }
 }
 
@@ -708,6 +711,85 @@ mod tests {
         let t2 = c.iter().find(|x| x["txn"] == serde_json::json!(bs58::encode(sig(fixture::T2)).into_string())).expect("T2's group");
         assert_eq!((t2["outcome"].as_str(), t2["w_src"].as_str()), (Some("timeout_quiescent"), Some("unknown")));
         assert_eq!(e.counter("fork_dead_slot"), 1, "slot 1001 died");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Review WP-04 #6, PLAN WP-04 offline acceptance: the S1, S1b' and S8b sequences as synthetic protobuf streams
+    /// (testdata/grpc/wp04.bin, regenerated with ARBX_WRITE_FIXTURES=1) through `grpc::state_item` / `tx_stream_item`,
+    /// `forward` and the engine's `step`, with the timers after every message (an empty queue): the split route's group
+    /// learns its write set from the transaction stream and completes only with B's vaults, C's evaluation in between
+    /// refuses the routes through A and B (`pending_commit`); the unknown-W group resolves by quiescence and its late write
+    /// is a late member; the minority fork's writes are `fork_pending` while both siblings are unconfirmed, and dropped
+    /// when the other is confirmed (no `dead` status)
+    #[test]
+    fn grpc_wp04_sequences_through_forward() {
+        use fixture::{k, sig, Proto};
+        use prost::Message as _;
+        let p = Proto::load();
+        let bytes = fixture::encode_file(&fixture::wp04_stream(&p));
+        if std::env::var("ARBX_WRITE_FIXTURES").is_ok() { std::fs::write(fixture::wp04_file_path(), &bytes).unwrap(); }
+        let file = std::fs::read(fixture::wp04_file_path()).expect("testdata/grpc/wp04.bin (ARBX_WRITE_FIXTURES=1 cargo test --release grpc_wp04)");
+        assert!(file == bytes, "testdata/grpc/wp04.bin is stale: regenerate it with ARBX_WRITE_FIXTURES=1");
+        let d = tmp("wp04-fixture");
+        let rec = rec::start(rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec!["haan-grpc".into()], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        // three PumpSwap pools on one pair, every part held at slot 1999
+        let ps = |pool: u8, v0: u8, v1: u8| crate::venues::PoolMeta { venue: crate::venues::Venue::PumpSwap, pool: k(pool), t0: k(0x41), t1: *crate::venues::WSOL,
+            vault0: k(v0), vault1: k(v1), t0_prog: fixture::token(), t1_prog: fixture::token(), extra: vec![k(0x41)], flag: true };
+        let pools = [ps(fixture::POOL, fixture::VAULT0, fixture::VAULT1), ps(fixture::POOL_B, fixture::VAULT_B0, fixture::VAULT_B1), ps(fixture::POOL_C, fixture::VAULT_C0, fixture::VAULT_C1)];
+        let mut reg = crate::pools::Registry { pools: pools.to_vec(), by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+        let mut store = crate::store::Store::default();
+        for (i, m) in pools.iter().enumerate() {
+            reg.by_pool.insert(m.pool, i);
+            store.update(m.pool, Arc::from(&[8u8; 300][..]), 1_999, 1, None);
+            for v in [m.vault0, m.vault1] { store.update(v, Arc::from(fixture::vault_data(1_000_000)), 1_999, 1, None); }
+        }
+        store.update(*crate::pools::PUMP_FEE_CONFIG, Arc::from(&[0u8; 64][..]), 1_999, 1, None);
+        store.update(k(0x41), Arc::from(&[0u8; 82][..]), 1_999, 1, None);
+        reg.pairs.insert(crate::pools::pair_key(&k(0x41), &crate::venues::WSOL), vec![0, 1, 2]);
+        let mut e = crate::engine::Engine::new_offline(Arc::new(reg), store, crate::config::StrategyCfg { state_triggers: true, ..Default::default() });
+        e.set_rec(rec.clone());
+        let (out, rx) = crossbeam_channel::unbounded();
+        let (cs, ct) = (FeedCounters::named("state", "state-stream"), FeedCounters::named("haan-grpc", "yellowstone-tx"));
+        let interest = Interest { keys: [fixture::pumpswap()].into_iter().collect(), tables: Default::default() };
+        let mut recent = crate::rec::exec::Recent::default();
+        let mut status = |_: &str| {};
+        for (t, b) in fixture::decode_file(&file) {
+            let m = grpc::SubscribeUpdate::decode(&b[..]).unwrap();
+            match m.transaction.clone() {
+                Some(u) => { let it = grpc::tx_stream_item(u, t, &rec, None, &mut recent).unwrap(); assert!(forward(0, &interest, &out, &ct, None, &rec, &Fwd::default(), it)); }
+                None => { let it = grpc::state_item(m, t).unwrap(); assert!(forward(u16::MAX, &interest, &out, &cs, None, &rec, &Fwd::default(), it)); }
+            }
+            for ev in rx.try_iter() { e.step(ev, t + 10_000, &mut status); }
+            e.timers(t + 20_000, &mut status);
+        }
+        rec.close();
+        let b58 = |n: u8| bs58::encode(sig(n)).into_string();
+        let c = rec::read_jsonl(&d, "commits").unwrap();
+        let group = |n: u8| c.iter().find(|x| x["txn"] == serde_json::json!(b58(n)) && x.get("outcome").is_some()).unwrap_or_else(|| panic!("{n:#x}'s group")).clone();
+        // S1: T3's write set from the transaction stream (after its first two updates), complete with B's vaults
+        let t3 = group(fixture::T3);
+        assert_eq!((t3["outcome"].as_str(), t3["w_src"].as_str(), t3["w_late"].as_bool(), t3["resolved_by"].as_str(), t3["w_seen"].as_array().unwrap().len()),
+            (Some("complete"), Some("tx-stream"), Some(true), Some("member"), 6));
+        let dec = rec::read_jsonl(&d, "decisions").unwrap();
+        let of = |n: u8| -> Vec<serde_json::Value> { dec.iter().filter(|x| x["trigger"]["txn"] == serde_json::json!(b58(n))).cloned().collect() };
+        let u = of(fixture::U);
+        assert_eq!(u.len(), 1, "C evaluated once U resolved");
+        assert!(u[0]["routes"].as_array().unwrap().iter().all(|r| r["reason"] == "pending_commit"), "C's routes through A and B wait for T3: {}", u[0]);
+        assert_eq!(of(fixture::T3).len(), 2, "A and B evaluated once T3 completed");
+        // S1b': T4 resolved by quiescence; its write that came after is a late member
+        assert_eq!(group(fixture::T4)["outcome"].as_str(), Some("timeout_quiescent"));
+        assert!(c.iter().any(|x| x["txn"] == serde_json::json!(b58(fixture::T4)) && x["late"] == serde_json::json!(true)
+            && x["late_members"][0]["acct"] == serde_json::json!(crate::tx::b58(&k(fixture::VAULT0)))));
+        assert_eq!(e.counter("commit_late_member"), 1);
+        // S8b: A written in the minority fork 2002: fork_pending while 2002 and 2003 are both unconfirmed; 2003 confirmed:
+        // 2002 abandoned (no dead status), its versions dropped, A evaluated again on its canonical (slot 2001) state
+        let t5 = of(fixture::T5);
+        assert!(!t5.is_empty() && t5.iter().all(|x| x["routes"].as_array().unwrap().iter().filter(|r| r["buy"] == serde_json::json!(crate::tx::b58(&k(fixture::POOL)))
+            || r["sell"] == serde_json::json!(crate::tx::b58(&k(fixture::POOL)))).all(|r| r["reason"] == "fork_pending")), "{t5:?}");
+        assert_eq!((e.counter("fork_abandoned_slot"), e.counter("fork_dead_slot"), e.counter("fork_versions_dropped")), (1, 0, 2));
+        assert_eq!((e.store.get(&k(fixture::VAULT0)).unwrap().slot, e.store.get(&k(fixture::VAULT1)).unwrap().slot), (2_001, 2_001));
+        assert!(dec.iter().any(|x| x["kind"] == "fork"));
         let _ = std::fs::remove_dir_all(&d);
     }
 

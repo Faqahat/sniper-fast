@@ -25,6 +25,7 @@ use crate::rec::journal::Journal;
 use crate::rec::{self, Rec, Record};
 use crate::pda::AtaCache;
 use crate::pools::{self, pair_key, Registry, CLOCK_SYSVAR, PUMP_FEE_CONFIG};
+use crate::reads::{Failed, Fetch, Reads, What};
 use crate::store::{consistency_set, other_parts, snapshot_with, Acct, NotReady, PoolView, ReadyCtx, RouteView, Snap, Store};
 use crate::store_health::{HealthFlags, LagSlo, Shut, SloAct, StateStream};
 use crate::tx::{b58, Pk, Tx};
@@ -64,6 +65,13 @@ const ACC_BATCH: usize = 64;
 /// scores kept per pool for `window_exact_pct`
 const ACC_WINDOW: usize = 200;
 const LAMPORTS_PER_SOL: f64 = 1e9;
+
+/// the state stream's re-read (review WP-04 #1) starts this long after the stream's resume slot is known (one slot: the
+/// RPC node's processed bank reaches it), its chunks this far apart (the boot snapshot's pace)
+const RESYNC_DELAY_NS: u64 = 400_000_000;
+const RESYNC_PACE_NS: u64 = 120_000_000;
+/// a fork refetch or a new DLMM bin array still unread this long after it was asked for is given up (as a lookup table)
+const READ_GIVE_UP_NS: u64 = 600_000_000_000;
 
 /// most feeds one run can follow (arrival times are kept in a fixed array: no allocation per signature)
 pub const MAX_FEEDS: usize = 24;
@@ -153,17 +161,30 @@ pub struct EngineKnobs {
     pub tier_a_grace_s: u64,
     pub boot_timeout_s: u64,
     pub max_update_age_ms: u64,
+    /// review WP-04 #10: stop (`state_unavailable`) after this long unavailable without a break, s; 0 never
+    #[serde(default)]
+    pub unavailable_stop_s: u64,
     pub resnapshot: bool,
+    /// review WP-04 #1: a WARNING when the re-read after a (re)connection has not landed this long after it (the gate
+    /// stays `resync`), s; and a chunk still unread this long after it started is given up (its accounts stay refused,
+    /// one by one, until the stream writes them), s
+    #[serde(default = "resync_warn_s")]
+    pub resync_warn_s: u64,
+    #[serde(default = "resync_give_up_s")]
+    pub resync_give_up_s: u64,
     pub alts: crate::alts::Policy,
     pub ring_versions: usize,
     pub accuracy_queue: usize,
 }
+fn resync_warn_s() -> u64 { 10 }
+fn resync_give_up_s() -> u64 { 300 }
 
 impl Default for EngineKnobs {
     fn default() -> Self {
         EngineKnobs { commit_timeout_ms: 5, quiescence_ms: 3, max_part_skew_slots: 2, max_tip_lag_slots: 2, clock_max_age_slots: 2, lag_slo_p50_ms: 16.0,
             lag_slo_p90_ms: 30.0, lag_slo_breach_minutes: 5, slo_action: "log".into(), slo_recover_minutes: 10, tier_a_grace_s: 60, boot_timeout_s: 60,
-            max_update_age_ms: 2_000, resnapshot: true, alts: crate::alts::Policy::default(), ring_versions: crate::store::RING_VERSIONS, accuracy_queue: 10_000 }
+            max_update_age_ms: 2_000, unavailable_stop_s: 0, resnapshot: true, resync_warn_s: resync_warn_s(), resync_give_up_s: resync_give_up_s(), alts: crate::alts::Policy::default(),
+            ring_versions: crate::store::RING_VERSIONS, accuracy_queue: 10_000 }
     }
 }
 
@@ -173,7 +194,8 @@ impl EngineKnobs {
         EngineKnobs { commit_timeout_ms: s.commit_timeout_ms, quiescence_ms: s.quiescence_ms, max_part_skew_slots: s.max_part_skew_slots, max_tip_lag_slots: s.max_tip_lag_slots,
             clock_max_age_slots: s.clock_max_age_slots, lag_slo_p50_ms: s.lag_slo_p50_ms, lag_slo_p90_ms: s.lag_slo_p90_ms, lag_slo_breach_minutes: s.lag_slo_breach_minutes,
             slo_action: s.slo_action.clone(), slo_recover_minutes: s.slo_recover_minutes, tier_a_grace_s: s.tier_a_grace_s, boot_timeout_s: s.boot_timeout_s,
-            max_update_age_ms: s.max_update_age_ms, resnapshot: s.resnapshot,
+            max_update_age_ms: s.max_update_age_ms, unavailable_stop_s: s.unavailable_stop_s, resnapshot: s.resnapshot, resync_warn_s: s.resync_warn_s,
+            resync_give_up_s: s.resync_give_up_s,
             alts: crate::alts::Policy { retry_ms: c.alts.retry_ms.clone(), retry_every_s: c.alts.retry_every_s, give_up_s: c.alts.give_up_s, wait_cap: c.alts.wait_cap,
                 max_inflight: c.alts.max_inflight },
             ring_versions: c.accuracy.ring_versions, accuracy_queue: c.accuracy.queue }
@@ -207,15 +229,35 @@ struct EvalCtx {
 /// evaluated by its own groups anyway)
 const MAX_DEFERRALS: u8 = 3;
 
-/// A decision remembered for its follow-ups: the pools it priced and the slots of the versions it read
-struct RecentDec { id: u64, t: u64, pools: Vec<usize>, slots: Vec<u64> }
+/// A decision remembered for its follow-ups: the pools it priced, the slots of the versions it read, and (slot, txn8) of
+/// those a transaction wrote (slot-index `missing` evidence, review WP-04 #7)
+struct RecentDec { id: u64, t: u64, pools: Vec<usize>, slots: Vec<u64>, txns: Vec<(u64, u64)> }
+
+/// The state stream's re-read after a (re)connection (PLAN-ADDENDUM I-4; review WP-04 #1). The gate stays `resync` until
+/// every chunk has landed or was given up. The read starts once the stream's resume slot is known (its first account
+/// update or processed slot after the connection): a chunk read at an older slot is read again (the RPC node is behind
+/// the point the stream resumed at, and the writes in between would be missed)
+struct Resync {
+    why: &'static str,
+    t_connect: u64,
+    /// the chunks to read (each pool's accounts together), until the job starts
+    chunks: Vec<Vec<Pk>>,
+    n_keys: usize,
+    job: Option<u64>,
+    floor: Option<u64>,
+    warned: bool,
+    /// chunk answers read behind the resume slot, failed, and accounts the node did not have
+    behind: u64,
+    failed: u64,
+    missing: u64,
+}
 
 /// one priced route
 #[derive(Clone, Debug)]
 struct Priced { size: u64, gross: i64, net: i64, cu: u64, crossed: (u32, u32) }
 
 /// one route of an evaluation
-struct RouteRes { buy: usize, sell: usize, priced: Option<Priced>, reason: &'static str, sv: Option<RouteView>, slots: Vec<u64> }
+struct RouteRes { buy: usize, sell: usize, priced: Option<Priced>, reason: &'static str, sv: Option<RouteView>, slots: Vec<u64>, txns: Vec<(u64, u64)> }
 
 pub struct Engine {
     pub reg: Arc<Registry>,
@@ -259,8 +301,10 @@ pub struct Engine {
     /// the run's SendGate, shown in every status line as `send_gate` (review M2: a segment that does not send says why)
     pub gate: Option<Arc<crate::control::SendGate>>,
     io: Option<Io>,
-    /// `new_offline`: the fetches the engine asked for (what, accounts), recorded instead of sent
+    /// `new_offline`: the fetches the engine asked for (what, accounts), recorded instead of sent; account reads also in
+    /// full (job, chunk, attempt) in `offline_reads`, which a test answers through INPUT 11 `fetch`
     pub offline_fetches: Vec<(&'static str, Vec<Pk>)>,
+    pub offline_reads: Vec<Fetch>,
     /// newest slot by status (processed, confirmed, finalized) and the newest slot of a stored pool-account update
     slots: [u64; 3],
     store_slot_max: u64,
@@ -292,8 +336,10 @@ pub struct Engine {
     fh: rec::health::FeedHealth,
     pub exec: Option<crate::exec::Exec>,
     /// per trigger signer: (triggers that moved the pool or landed, triggers that failed or never showed). Loaded once
-    /// (its sha256 recorded), never written back to the shared file (I-5): `signer_delta` is this segment's part
+    /// (its sha256 recorded), never written back to the shared file (I-5): `signer_delta` is this segment's part, and
+    /// `signer_stats` = `signer_base` (as loaded, shared with the recorder's writer) + `signer_delta`
     signer_stats: HashMap<Pk, (u32, u32)>,
+    signer_base: Arc<HashMap<Pk, (u32, u32)>>,
     signer_delta: HashMap<Pk, (u32, u32)>,
     signer_stats_sha256: Option<String>,
     /// where this segment writes its copy (`<run dir>`; None: nowhere)
@@ -330,6 +376,13 @@ pub struct Engine {
     /// a stop the engine asks for (PLAN-ADDENDUM I-4: the state stream never delivered)
     pub stop_req: Option<String>,
     boot_warned: bool,
+    /// RPC account reads (the re-read, fork refetches, new DLMM bin arrays): chunks, retries (review WP-04 #1, #7)
+    reads: Reads,
+    resync: Option<Resync>,
+    /// accounts not read again since the state stream's last (re)connection: a pool with one is refused (`resync`)
+    unverified: HashSet<Pk>,
+    /// receive time of the newest state-stream account update (status `last_account_age_ms_now`; review WP-04 #9)
+    last_account_t: u64,
 }
 
 /// {signer: [ok, failed]} as a file holds it; with the sha256 of the bytes read. Missing or unreadable: empty, no hash
@@ -354,8 +407,9 @@ fn signer_stats_json(m: &HashMap<Pk, (u32, u32)>) -> Value {
 }
 
 /// `arbx signer-stats merge` (PLAN-ADDENDUM I-5): fold each run directory's `signer-stats-delta.json` (that segment's own
-/// counts) into `into`, written atomically. A run already merged (its `signer-stats.merged.json`) is refused. Returns,
-/// per run, the signers and counts added
+/// counts) into `into`, written atomically. A run already merged (its `signer-stats.merged.json`) is refused, and so is
+/// one that has not ended (no `stop.json`: its delta is still growing; review WP-04 N7). Returns, per run, the signers
+/// and counts added
 pub fn merge_signer_stats(into: &std::path::Path, runs: &[std::path::PathBuf]) -> anyhow::Result<Vec<(String, usize, u64)>> {
     use anyhow::Context;
     let mut base = match std::fs::read(into) {
@@ -368,6 +422,7 @@ pub fn merge_signer_stats(into: &std::path::Path, runs: &[std::path::PathBuf]) -
     let mut deltas = Vec::new();
     for r in runs {
         anyhow::ensure!(!r.join("signer-stats.merged.json").exists(), "{} was merged already (signer-stats.merged.json)", r.display());
+        anyhow::ensure!(r.join("stop.json").exists(), "{} has no stop.json: the segment has not ended (its delta would be partial)", r.display());
         let p = r.join("signer-stats-delta.json");
         let v: Value = serde_json::from_slice(&std::fs::read(&p).with_context(|| format!("reading {}", p.display()))?)?;
         let Value::Object(m) = v else { anyhow::bail!("{} is not an object", p.display()) };
@@ -601,17 +656,19 @@ impl Engine {
         if init.strategy_sha256 != mine { anyhow::bail!("the replay's [strategy] (sha256 {}) is not the run's ({})", &mine[..16], &init.strategy_sha256[..16.min(init.strategy_sha256.len())]); }
         self.min_tip = init.min_tip;
         self.signer_stats = init.signer_stats.clone();
+        self.signer_base = Arc::new(init.signer_stats.clone());
+        self.signer_delta.clear();
         self.signer_stats_sha256 = init.signer_stats_sha256.clone();
         if let Some(k) = &init.knobs { self.set_knobs(k.clone()); }
         self.init_journaled = true;
         Ok(())
     }
 
-    /// A lookup table from a previous segment's alts-final (I-6). `journal`: also into the journal's boot records (the
-    /// run; a replay applies them from there)
-    pub fn preload_alt(&mut self, table: Pk, addrs: Vec<Option<Pk>>, journal: bool) {
+    /// A lookup table from a previous segment's alts-final (I-6), with when a transaction last used it there. `journal`:
+    /// also into the journal's boot records (the run; a replay applies them from there)
+    pub fn preload_alt(&mut self, table: Pk, addrs: Vec<Option<Pk>>, last_used: Option<u64>, journal: bool) {
         if journal { self.journal.alt_preload(table, &addrs); }
-        self.alts.preload(table, addrs);
+        self.alts.preload(table, addrs, last_used);
         self.count("alt_preloaded");
     }
 
@@ -671,10 +728,12 @@ impl Engine {
             alts: Alts::new(knobs.alts.clone()), acct_pool, part_pools, eval_pools, tier_a, tier_a_complete: false,
             watch: HashMap::default(), opps: HashMap::default(), next_id: 0, next_decision: 0, slot: 0, shred_slot: 0,
             lat: LAT_SERIES.into_iter().map(Series::new).collect(),
-            counts: HashMap::default(), rec, status_lines: 0, gate: None, io: None, offline_fetches: Vec::new(), slots: [0; 3], store_slot_max: 0, queue_hwm: 0,
+            counts: HashMap::default(), rec, status_lines: 0, gate: None, io: None, offline_fetches: Vec::new(), offline_reads: Vec::new(), slots: [0; 3], store_slot_max: 0,
+            queue_hwm: 0,
             t_start: t0, sp: StatusPrev { t: t0, ..Default::default() }, exec_prev: Default::default(), feed_counters: Vec::new(), state_counters: None, leads: Vec::new(),
             fh: rec::health::FeedHealth::new(t0),
-            exec: None, signer_stats, signer_delta: HashMap::default(), signer_stats_sha256, signer_stats_out: None, trig_pending: HashMap::default(),
+            exec: None, signer_base: Arc::new(signer_stats.clone()), signer_stats, signer_delta: HashMap::default(), signer_stats_sha256, signer_stats_out: None,
+            trig_pending: HashMap::default(),
             caps_pending: Vec::new(), pool_prices: HashMap::default(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(),
             moves_seen: HashSet::default(), poh: HashMap::default(), poh_order: VecDeque::new(),
             tracker: CommitTracker::new(TrackerCfg::new(knobs.commit_timeout_ms, knobs.quiescence_ms)), forks: SlotTree::default(), state: StateStream::default(),
@@ -682,7 +741,8 @@ impl Engine {
             slo: LagSlo::new(knobs.lag_slo_p50_ms, knobs.lag_slo_p90_ms, knobs.lag_slo_breach_minutes, knobs.slo_recover_minutes, &knobs.slo_action),
             deferred: Vec::new(), recent: VecDeque::new(), hints: HashMap::default(), hint_order: VecDeque::new(), acc_queue: VecDeque::new(), acc_windows: HashMap::default(),
             acc_by_venue: Default::default(), commit_lag: Series::new("commit_lag"),
-            commit_lag_src: [Series::new("commit_lag_tx"), Series::new("commit_lag_shred"), Series::new("commit_lag_unknown")], stop_req: None, boot_warned: false, knobs }
+            commit_lag_src: [Series::new("commit_lag_tx"), Series::new("commit_lag_shred"), Series::new("commit_lag_unknown")], stop_req: None, boot_warned: false,
+            reads: Reads::default(), resync: None, unverified: HashSet::default(), last_account_t: 0, knobs }
     }
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
@@ -699,6 +759,12 @@ impl Engine {
 
     /// the state's health right now (PLAN-ADDENDUM I-4)
     pub fn state_ok(&self) -> bool { self.state.ok(self.t_now, self.max_age_ns()) }
+
+    /// Whether an account update would not become the account's current version: the store holds a newer one (stale), or
+    /// its slot is already abandoned (review WP-04 #3b). The journal's ACCOUNT verdict, and what replay checks it against
+    pub fn account_refused(&self, key: &Pk, slot: u64, src: u8, write_version: u64, aseq: u64, bank_id: Option<u64>) -> bool {
+        self.forks.refuses(slot, bank_id) || self.store.is_stale(key, slot, src, write_version, aseq)
+    }
 
     /// A state-stream message received at `t`. A silence longer than `max_update_age_ms` before it was an outage even if
     /// no timer ran meanwhile to see it: the signer statistics count no miss across it (I-5)
@@ -734,15 +800,16 @@ impl Engine {
         }));
     }
 
-    /// alts-final.jsonl (MEASUREMENT §4.26; v1 `alts.jsonl`): every lookup table entry the engine knows, at stop. Each
-    /// table is serialized on the recorder's writer
+    /// alts-final.jsonl (MEASUREMENT §4.26; v1 `alts.jsonl`): every lookup table entry the engine knows, at stop, with
+    /// when a transaction last used the table (`last_used_ns`, null: never; review WP-04 #11: the next segment preloads
+    /// only recently used tables). Each table is serialized on the recorder's writer
     fn write_alts(&self) {
         if !self.rec.is_on() { return; }
         for (t, v) in &self.alts.tables {
-            let (t, v) = (*t, v.clone());
+            let (t, v, used) = (*t, v.clone(), self.alts.last_used.get(t).copied());
             self.rec.emit(rec::ALTS_FINAL, Record::enc(move |o| {
                 let addrs: Vec<Value> = v.iter().map(|a| a.map_or(Value::Null, |k| json!(b58(&k)))).collect();
-                let _ = serde_json::to_writer(o, &json!({ "table": b58(&t), "addrs": addrs }));
+                let _ = serde_json::to_writer(o, &json!({ "table": b58(&t), "addrs": addrs, "last_used_ns": used }));
             }));
         }
     }
@@ -815,12 +882,17 @@ impl Engine {
     }
 
     /// I-5: this segment's signer statistics, written by the recorder's slow writer (atomically) into the run directory:
-    /// the whole map, and this segment's counts. The shared, configured file is never written
+    /// the whole map, and this segment's counts. The shared, configured file is never written. Review WP-04 #4: the
+    /// engine thread hands over only the statistics as loaded (shared, no copy) and a copy of this segment's counts (the
+    /// few signers it saw); the writer adds them up and serializes (the real file has 30,304 signers: about 25 ms every
+    /// 10 s when the engine thread serialized the whole map)
     fn save_signer_stats(&self) {
         let Some(dir) = self.signer_stats_out.clone() else { return };
-        let (full, delta) = (signer_stats_json(&self.signer_stats), signer_stats_json(&self.signer_delta));
+        let (base, delta) = (self.signer_base.clone(), self.signer_delta.clone());
         self.rec.task(move || {
-            for (name, v) in [("signer-stats.json", full), ("signer-stats-delta.json", delta)] {
+            let mut full = (*base).clone();
+            for (k, (ok, miss)) in &delta { let e = full.entry(*k).or_default(); e.0 = e.0.saturating_add(*ok); e.1 = e.1.saturating_add(*miss); }
+            for (name, v) in [("signer-stats.json", signer_stats_json(&full)), ("signer-stats-delta.json", signer_stats_json(&delta))] {
                 let (p, tmp) = (dir.join(name), dir.join(format!("{name}.tmp")));
                 if std::fs::write(&tmp, v.to_string()).is_ok() { let _ = std::fs::rename(&tmp, &p); }
             }
@@ -894,9 +966,9 @@ impl Engine {
         end
     }
 
-    /// the earliest commit deadline, deferred evaluation or lookup-table retry (the receive-time / engine clock)
+    /// the earliest commit deadline, deferred evaluation, lookup-table retry or account read (the receive-time / engine clock)
     fn next_due(&self) -> Option<u64> {
-        [self.tracker.next_deadline(), self.deferred.iter().map(|d| d.0).min(), self.alts.next_retry()].into_iter().flatten().min()
+        [self.tracker.next_deadline(), self.deferred.iter().map(|d| d.0).min(), self.alts.next_retry(), self.reads.next_due()].into_iter().flatten().min()
     }
 
     /// the timer anchors (housekeeping, drift check, status line, boot timeout) start at the first journaled time
@@ -923,7 +995,7 @@ impl Engine {
                     let first = !self.sigs.contains_key(&sig8(&a.tx.sig));
                     if first || (a.tx.loaded.is_some() && !a.tx.lookups.is_empty()) || a.executed.is_some() { j.tx_first(t_engine, a) } else { j.tx_copy(t_engine, a) }
                 }
-                Event::Account { pubkey, slot, aseq, src, write_version, .. } => j.account(t_engine, *aseq, self.store.is_stale(pubkey, *slot, *src, *write_version, *aseq)),
+                Event::Account { pubkey, slot, aseq, src, write_version, bank_id, .. } => j.account(t_engine, *aseq, self.account_refused(pubkey, *slot, *src, *write_version, *aseq, *bank_id)),
                 Event::Slot { slot, status: st, t, parent, bank_id, .. } => j.slot(t_engine, *slot, *parent, *st, *t, *bank_id),
                 Event::BlockMeta(b) => j.block_meta(t_engine, b),
                 Event::Alt { table, addrs, err } => j.alt(t_engine, *table, addrs.clone(), err.clone()),
@@ -953,6 +1025,9 @@ impl Engine {
             self.alts.due(t, &mut fetch);
             for f in fetch { self.fetch_alt(f); }
             self.emit_alt_events();
+            let mut reads = Vec::new();
+            self.reads.due(t, &mut reads);
+            for f in reads { self.spawn_read(f); }
         }
         if what & TIMER_HK != 0 && (t.saturating_sub(self.last_hk_t) >= HOUSEKEEPING_NS || t.saturating_sub(self.last_status_t) > STATUS_EVERY_NS) {
             self.housekeeping(t, status);
@@ -979,6 +1054,7 @@ impl Engine {
             Event::Input { kind, data } => match kind {
                 InputKind::Health => self.on_health(&data),
                 InputKind::SlotidxMissing => self.on_slotidx_missing(&data),
+                InputKind::Fetch => self.on_fetch(&data),
                 // the other inputs come with their WPs (WP-03b blockhash heads, WP-05 in-flight releases, leader windows)
                 _ => {}
             },
@@ -993,8 +1069,9 @@ impl Engine {
 
     // ---------------------------------------------------------------- health (I-4, item 8)
 
-    /// The state stream's task said it connected or lost the stream (INPUT 6 `health`, journaled). A reconnect after a
-    /// loss reads every followed account again: writes made while the stream was down are not resent (I-4)
+    /// The state stream's task said it connected or lost the stream (INPUT 6 `health`, journaled). Its first connection
+    /// (the boot snapshot was read before the stream subscribed) and every reconnection after a loss start the re-read of
+    /// every followed account (review WP-04 #1, I-4): the stream does not resend writes it did not deliver
     fn on_health(&mut self, d: &Value) {
         if d["src"].as_str() != Some("state") { return; }
         let Some(connected) = d["connected"].as_bool() else { return };
@@ -1004,23 +1081,174 @@ impl Engine {
         if !connected {
             self.state.last_error = d["error"].as_str().map(String::from);
             self.count("state_disconnect");
-        } else if was == Some(false) && self.knobs.resnapshot {
-            self.resnapshot();
+        } else if was != Some(true) && self.knobs.resnapshot {
+            self.begin_resync(if was.is_none() { "boot" } else { "reconnect" });
         }
     }
 
-    /// Every followed account (the programdata ones aside: megabytes each, the stream reports their upgrades) read again
-    /// over RPC (accounts.bin src rpc_snapshot): the store keeps a read only where it is newer than what it holds
-    fn resnapshot(&mut self) {
+    /// The re-read (review WP-04 #1): every followed account (the programdata ones aside: megabytes each, the stream
+    /// reports their upgrades) is unverified until the re-read or a stream write brings it, and the gate is `resync`
+    /// until the re-read has landed. A re-read still running is replaced (its answers no longer verify anything: they
+    /// predate this connection's gap)
+    fn begin_resync(&mut self, why: &'static str) {
+        if let Some(old) = self.resync.take() { if let Some(j) = old.job { self.reads.cancel(j); } self.count("state_resync_superseded"); }
+        let chunks = self.resync_chunks();
+        let n_keys: usize = chunks.iter().map(|c| c.len()).sum();
+        self.unverified = chunks.iter().flatten().copied().collect();
+        self.state.resnapshots += 1;
+        self.count("state_resnapshot");
+        self.rec.event("state_resnapshot", "state", None, json!({ "why": why, "accounts": n_keys, "chunks": chunks.len(), "reconnects": self.state.reconnects }));
+        self.resync = Some(Resync { why, t_connect: self.t_now, chunks, n_keys, job: None, floor: None, warned: false, behind: 0, failed: 0, missing: 0 });
+    }
+
+    /// What the re-read reads, in chunks of at most 100 accounts: each Tier-A pool's own accounts (pool, consistency set,
+    /// vaults, followed DLMM bin arrays) in one chunk, so a pool's parts are read at one slot (the skew rule holds after a
+    /// reconnect), then the shared parts and the other followed accounts
+    fn resync_chunks(&self) -> Vec<Vec<Pk>> {
         let mut keys: Vec<Pk> = match &self.base_watch { Some(b) => b.clone(), None => self.reg.static_accounts() };
         for l in self.store.dlmm_arrays.values() { keys.extend(l.iter().map(|x| x.1)); }
         if let Some(ar) = &self.acct_rec { keys.retain(|k| ar.roles().get(k).map_or(true, |r| r.role != crate::rec::accounts::role::PROGRAMDATA)); }
-        keys.sort();
-        keys.dedup();
-        self.state.resnapshots += 1;
-        self.count("state_resnapshot");
-        self.rec.event("state_resnapshot", "state", None, json!({ "accounts": keys.len(), "reconnects": self.state.reconnects }));
-        self.fetch_accounts(keys, asrc::RPC_SNAPSHOT, "resnapshot");
+        let want: HashSet<Pk> = keys.iter().copied().collect();
+        let mut placed: HashSet<Pk> = HashSet::default();
+        let mut groups: Vec<Vec<Pk>> = Vec::new();
+        let mut pools: Vec<usize> = self.reg.pairs.values().flatten().copied().collect();
+        pools.sort_unstable();
+        pools.dedup();
+        for i in pools {
+            let m = &self.reg.pools[i];
+            let mut cand = vec![m.pool];
+            cand.extend(consistency_set(m));
+            if !matches!(m.venue, Venue::Dlmm | Venue::DammV2) { cand.extend([m.vault0, m.vault1]); }
+            if let Some(l) = self.store.dlmm_arrays.get(&m.pool) { cand.extend(l.iter().map(|x| x.1)); }
+            let g: Vec<Pk> = cand.into_iter().filter(|k| want.contains(k) && placed.insert(*k)).collect();
+            if !g.is_empty() { groups.push(g); }
+        }
+        let rest: Vec<Pk> = keys.into_iter().filter(|k| placed.insert(*k)).collect();
+        groups.extend(rest.chunks(crate::reads::CHUNK).map(|c| c.to_vec()));
+        crate::reads::pack(groups)
+    }
+
+    /// The stream's resume slot after a (re)connection: its first account update or processed slot. The re-read starts
+    /// one slot later, its chunks paced, and a chunk read at an older slot is read again
+    fn resync_floor(&mut self, slot: u64) {
+        let Some(r) = self.resync.as_mut() else { return };
+        if r.floor.is_some() { return; }
+        r.floor = Some(slot);
+        let chunks = std::mem::take(&mut r.chunks);
+        let t = self.t_now;
+        let mut out = Vec::new();
+        let id = self.reads.start(What::Resync, chunks, t, t + RESYNC_DELAY_NS, RESYNC_PACE_NS, self.knobs.resync_give_up_s.saturating_mul(1_000_000_000), &mut out);
+        if let Some(r) = self.resync.as_mut() { r.job = Some(id); }
+        for f in out { self.spawn_read(f); }
+        if self.reads.complete(id) { self.read_job_done(id); }
+    }
+
+    /// A read the engine needs now (a fork refetch, new DLMM bin arrays): chunks of 100, started at once, retried
+    fn start_read(&mut self, what: What, keys: Vec<Pk>) {
+        if keys.is_empty() { return; }
+        let chunks: Vec<Vec<Pk>> = keys.chunks(crate::reads::CHUNK).map(|c| c.to_vec()).collect();
+        let t = self.t_now;
+        let mut out = Vec::new();
+        self.reads.start(what, chunks, t, t, 0, READ_GIVE_UP_NS, &mut out);
+        for f in out { self.spawn_read(f); }
+    }
+
+    /// One chunk read on the background runtime: its accounts come back as account events (each recorded in accounts.bin
+    /// first, `src` rpc_snapshot or rpc_refetch, so the journal names it by its aseq), then INPUT 11 `fetch` says how the
+    /// chunk ended. An offline engine records the read in `offline_fetches` instead
+    fn spawn_read(&mut self, f: Fetch) {
+        let Some(io) = &self.io else { self.offline_fetches.push((f.what.as_str(), f.keys.clone())); self.offline_reads.push(f); return };
+        let (rpc, back, ar) = (io.rpc.clone(), io.tx_back.clone(), self.acct_rec.clone());
+        io.rt.spawn(async move {
+            let (src, what) = (f.what.src(), f.what.as_str());
+            let head = json!({ "job": f.job, "chunk": f.chunk, "what": what, "attempt": f.attempt, "n": f.keys.len() });
+            let data = match rpc.accounts(&f.keys).await {
+                Ok((slot, v)) if v.len() == f.keys.len() => {
+                    let mut missing = Vec::new();
+                    for (k, a) in f.keys.iter().zip(v) {
+                        let Some(a) = a else { missing.push(b58(k)); continue };
+                        let (t, data): (u64, Arc<[u8]>) = (now_ns(), Arc::from(a.data));
+                        let aseq = ar.as_ref().map_or(0, |r| r.record(&crate::rec::accounts::AcctUpdate { pubkey: *k, slot, write_version: 0, t_recv: t, src,
+                            is_startup: false, txn: None, lamports: a.lamports, owner: a.owner, data: &data, bank_id: None }));
+                        let _ = back.send(Event::Account { slot, pubkey: *k, owner: a.owner, lamports: a.lamports, data, t, txn: None, write_version: 0, is_startup: false,
+                            src, aseq, bank_id: None });
+                    }
+                    let mut d = head;
+                    d["ok"] = json!(true);
+                    d["slot"] = json!(slot);
+                    d["missing"] = json!(missing);
+                    d
+                }
+                Ok((_, v)) => { let mut d = head; let n = v.len(); d["ok"] = json!(false); d["err"] = json!(format!("{n} values for {} accounts", f.keys.len())); d }
+                Err(e) => { let mut d = head; d["ok"] = json!(false); d["err"] = json!(crate::rpc::scrub(&format!("{e:#}"))); d }
+            };
+            let _ = back.send(Event::Input { kind: InputKind::Fetch, data: Arc::new(data) });
+        });
+    }
+
+    /// INPUT 11 `fetch`: how one chunk of a read ended (its account events came first). A re-read's chunk verifies its
+    /// accounts (the ones the node had) when it read at or after the stream's resume slot; one read behind it, or a
+    /// failed one, is read again later (or given up past its job's time)
+    fn on_fetch(&mut self, d: &Value) {
+        let (Some(job), Some(chunk)) = (d["job"].as_u64(), d["chunk"].as_u64().map(|c| c as usize)) else { return };
+        let Some(what) = self.reads.what_of(job) else { self.count("read_answer_dropped"); return };
+        let t = self.t_now;
+        let ok = d["ok"].as_bool() == Some(true);
+        let slot = d["slot"].as_u64().unwrap_or(0);
+        let floor = if what == What::Resync { self.resync.as_ref().filter(|r| r.job == Some(job)).and_then(|r| r.floor) } else { None };
+        let behind = ok && floor.is_some_and(|f| slot < f);
+        let mut out = Vec::new();
+        if ok && !behind {
+            let missing: HashSet<Pk> = d["missing"].as_array().into_iter().flatten().filter_map(|k| k.as_str())
+                .filter_map(|k| bs58::decode(k).into_vec().ok()?.try_into().ok()).collect();
+            if let Some(keys) = self.reads.landed(job, chunk, t, &mut out) {
+                self.count("read_chunk_ok");
+                self.count_n("read_missing", missing.len() as u64);
+                if what == What::Resync {
+                    // an account the node does not have stays unverified while the store holds a version of it (its pools
+                    // are refused until the stream writes it); one the store never had has nothing to verify
+                    for k in keys.iter().filter(|k| !missing.contains(*k) || self.store.get(k).is_none()) { self.unverified.remove(k); }
+                    if let Some(r) = self.resync.as_mut() { r.missing += missing.len() as u64; }
+                }
+            }
+        } else {
+            let err = if behind { format!("read at slot {slot}, behind the stream's resume slot {}", floor.unwrap_or(0)) } else { d["err"].as_str().unwrap_or("?").to_string() };
+            if behind { self.count("resync_chunk_behind"); } else { self.count("read_chunk_failed"); }
+            if let Some(r) = self.resync.as_mut().filter(|r| r.job == Some(job)) { if behind { r.behind += 1; } else { r.failed += 1; } }
+            match self.reads.failed(job, chunk, t, err.clone(), &mut out) {
+                Failed::Retry { at, attempt } => {
+                    self.count("read_retry");
+                    self.rec.event("read_retry", "state", None, json!({ "what": what.as_str(), "job": job, "chunk": chunk, "attempt": attempt,
+                        "in_ms": at.saturating_sub(t) / 1_000_000, "err": err }));
+                }
+                Failed::GaveUp => self.count("read_gave_up"),
+                Failed::Unknown => {}
+            }
+        }
+        for f in out { self.spawn_read(f); }
+        if self.reads.complete(job) { self.read_job_done(job); }
+    }
+
+    /// A read job has every chunk landed or given up: the re-read's end opens the gate (an event and a run.log line; the
+    /// accounts it could not read stay refused, one by one, with a WARNING); a given-up refetch is an event
+    fn read_job_done(&mut self, id: u64) {
+        let Some(j) = self.reads.finish(id) else { return };
+        let gave_up: Vec<Pk> = j.chunks.iter().filter(|c| c.gave_up()).flat_map(|c| c.keys.iter().copied()).collect();
+        if j.what == What::Resync && self.resync.as_ref().is_some_and(|r| r.job == Some(id)) {
+            let r = self.resync.take().unwrap();
+            let ms = self.t_now.saturating_sub(r.t_connect) / 1_000_000;
+            self.count("state_resync_done");
+            self.rec.event("state_resync_done", "state", None, json!({ "why": r.why, "ms": ms, "accounts": r.n_keys, "chunks": j.chunks.len(), "retries": j.retries,
+                "behind": r.behind, "failed": r.failed, "missing": r.missing, "gave_up": gave_up.len(), "unverified_now": self.unverified.len(), "floor": r.floor }));
+            self.rec.say(format!("state re-read ({}) done {ms} ms after the connection: {} accounts in {} chunks, {} retries ({} behind the stream, {} failed), {} not found",
+                r.why, r.n_keys, j.chunks.len(), j.retries, r.behind, r.failed, r.missing));
+            if !gave_up.is_empty() {
+                self.rec.say(format!("WARNING: the state re-read gave up on {} accounts after {} s ({}): their pools stay refused (resync) until the stream writes them",
+                    gave_up.len(), self.knobs.resync_give_up_s, j.last_err().unwrap_or("?")));
+            }
+        } else if !gave_up.is_empty() {
+            self.rec.event("read_gave_up", "state", None, json!({ "what": j.what.as_str(), "accounts": gave_up.len(), "err": j.last_err() }));
+        }
     }
 
     /// Recompute what the store's health says at `t` (after every input and timer): state availability (I-4), the
@@ -1058,6 +1286,16 @@ impl Engine {
             self.rec.say(format!("WARNING: the state stream has delivered nothing in 10 s ({} reconnects; last error: {}): nothing is priced; the run stops after {} s",
                 self.state.reconnects, self.state.last_error.as_deref().unwrap_or("none"), self.knobs.boot_timeout_s));
         }
+        // review WP-04 #10 (owner decision, off by default): an outage after the stream had delivered stops the run too
+        if let Some(since) = self.state.down_since.filter(|_| self.knobs.unavailable_stop_s > 0 && self.state.msgs > 0 && self.stop_req.is_none()) {
+            if t.saturating_sub(since) >= self.knobs.unavailable_stop_s.saturating_mul(1_000_000_000) {
+                let why = format!("the state has been unavailable for {} s ({} reconnects; last error: {})", t.saturating_sub(since) / 1_000_000_000, self.state.reconnects,
+                    self.state.last_error.as_deref().unwrap_or("none"));
+                self.rec.say(format!("WARNING: {why}: stopping (state_unavailable; [state] unavailable_stop_s = {})", self.knobs.unavailable_stop_s));
+                self.rec.event("state_unavailable", "state", None, json!({ "why": "unavailable_stop", "detail": why }));
+                self.stop_req = Some(why);
+            }
+        }
         if self.state.msgs == 0 && self.knobs.boot_timeout_s > 0 && self.stop_req.is_none() && t.saturating_sub(self.t_anchor) >= self.knobs.boot_timeout_s * 1_000_000_000 {
             let why = format!("the state stream delivered nothing within {} s of the engine's start ({} reconnects; last error: {})", self.knobs.boot_timeout_s,
                 self.state.reconnects, self.state.last_error.as_deref().unwrap_or("none"));
@@ -1065,8 +1303,20 @@ impl Engine {
             self.rec.event("state_unavailable", "state", None, json!({ "why": "boot_timeout", "detail": why }));
             self.stop_req = Some(why);
         }
+        // the re-read after a (re)connection: a WARNING when it has not landed in `resync_warn_s` (the gate stays shut)
+        if let Some(r) = self.resync.as_mut().filter(|r| !r.warned && t.saturating_sub(r.t_connect) >= self.knobs.resync_warn_s.saturating_mul(1_000_000_000)) {
+            r.warned = true;
+            let (why, floor, n) = (r.why, r.floor, r.n_keys);
+            let job = r.job.and_then(|j| self.reads.job(j));
+            let (done, chunks, err) = job.map_or((0, 0, None), |j| (j.n_done(), j.chunks.len(), j.last_err().map(String::from)));
+            self.count("state_resync_slow");
+            self.rec.say(format!("WARNING: the state re-read ({why}) has not landed {} s after the connection ({done} of {chunks} chunks; stream resume slot {}; last error: {}): \
+                nothing is sent until it has", self.knobs.resync_warn_s, floor.map_or("not yet seen".into(), |f| f.to_string()), err.as_deref().unwrap_or("none")));
+            self.rec.event("state_resync_slow", "state", None, json!({ "why": why, "accounts": n, "chunks": chunks, "chunks_done": done, "floor": floor, "err": err,
+                "unverified_now": self.unverified.len() }));
+        }
         let lag_ok = self.tip_slot().saturating_sub(self.store.stream_slot_max) <= self.knobs.max_tip_lag_slots;
-        let shut = if !ok { Shut::StateUnavailable } else if !(self.tier_a_complete && lag_ok) { Shut::Warmup } else { Shut::Ready };
+        let shut = if !ok { Shut::StateUnavailable } else if self.resync.is_some() { Shut::Resync } else if !(self.tier_a_complete && lag_ok) { Shut::Warmup } else { Shut::Ready };
         if shut != self.shut {
             let prev = self.shut;
             self.shut = shut;
@@ -1136,6 +1386,12 @@ impl Engine {
         self.alts.digest(&mut x);
         self.tracker.digest(&mut x);
         self.forks.digest(&mut x);
+        // the re-read (review WP-04 #1): its job and resume slot, the reads in progress, the accounts still unverified
+        self.reads.digest(&mut x);
+        if let Some(r) = &self.resync { x.update(&r.job.unwrap_or(u64::MAX).to_le_bytes()); x.update(&r.floor.unwrap_or(u64::MAX).to_le_bytes()); x.update(&r.t_connect.to_le_bytes()); }
+        let mut unv: Vec<&Pk> = self.unverified.iter().collect();
+        unv.sort();
+        for k in unv { x.update(k); }
         let mut counts: Vec<(&&str, &u64)> = self.counts.iter().collect();
         counts.sort();
         for (k, v) in counts { x.update(k.as_bytes()); x.update(&v.to_le_bytes()); }
@@ -1292,19 +1548,28 @@ impl Engine {
                 "state_ok": self.state.ok(self.t_now, self.knobs.max_update_age_ms * 1_000_000), "lag_slo_ok": self.slo.last.as_ref().map(|m| m.ok), "leaders_ok": null,
                 "blockhash_age_slots_now": null, "blockhash_src_now": null, "jito_token_age_s_now": null },
             "state": { "connected_now": self.state.connected, "last_update_age_ms_now": self.state.age_ns(self.t_now).map(|a| a / 1_000_000),
+                "last_account_age_ms_now": (self.last_account_t > 0).then(|| self.t_now.saturating_sub(self.last_account_t) / 1_000_000),
                 "reconnects_total": self.state.reconnects, "resnapshots_total": self.state.resnapshots, "messages_total": self.state.msgs,
                 "unavailable_total": self.state.down_total, "down_since_ns": self.state.down_since, "last_error": self.state.last_error,
-                "tier_a_now": self.tier_a.len(), "tier_a_complete": self.tier_a_complete, "store_slot_now": nz(self.store.stream_slot_max) },
+                "tier_a_now": self.tier_a.len(), "tier_a_complete": self.tier_a_complete, "store_slot_now": nz(self.store.stream_slot_max),
+                "resync_now": self.resync.as_ref().map(|r| {
+                    let j = r.job.and_then(|j| self.reads.job(j));
+                    json!({ "why": r.why, "since_ns": r.t_connect, "resume_slot": r.floor, "accounts": r.n_keys, "chunks": j.map(|j| j.chunks.len()),
+                        "chunks_done": j.map(|j| j.n_done()), "behind": r.behind, "failed": r.failed })
+                }),
+                "unverified_now": self.unverified.len(), "reads_inflight_now": self.reads.inflight(), "reads_pending_now": self.reads.pending() },
             "queue": { "engine_now": queue, "engine_hwm_delta": self.queue_hwm.max(queue) },
             "store": { "accounts_now": self.store.len(), "updates_total": self.store.updates, "updates_delta": self.store.updates - p.updates,
-                "stale_total": self.store.stale_dropped, "stale_delta": self.store.stale_dropped - p.stale, "pending_groups_now": self.tracker.pending_groups() },
+                "stale_total": self.store.stale_dropped, "stale_delta": self.store.stale_dropped - p.stale, "kept_below_total": self.store.kept_below,
+                "pending_groups_now": self.tracker.pending_groups() },
             "commit": { "groups_delta": d("commit_complete") + d("commit_superseded") + d("commit_timeout_unknown") + d("commit_timeout_quiescent") + d("commit_fork_dropped"),
                 "by_w_src_delta": { "tx-stream": d("commit_w_tx_stream"), "shred": d("commit_w_shred"), "unknown": d("commit_w_unknown") },
                 "complete_delta": d("commit_complete"), "superseded_delta": d("commit_superseded"), "timeout_unknown_delta": d("commit_timeout_unknown"),
                 "timeout_quiescent_delta": d("commit_timeout_quiescent"), "fork_dropped_delta": d("commit_fork_dropped"), "late_member_delta": d("commit_late_member"),
                 "torn_suspect_delta": d("torn_suspect"), "w_after_resolve_total": self.tracker.w_after_resolve, "lag_ms": commit_lag, "lag_ms_by_w_src": lag_by },
             "forks": { "abandoned_slots_delta": d("fork_abandoned_slot"), "dead_slots_delta": d("fork_dead_slot"), "versions_dropped_delta": d("fork_versions_dropped"),
-                "refetch_delta": d("fork_refetch"), "fork_priced_delta": d("fork_priced"), "contested_now": self.forks.contested_now(), "root_now": nz(self.forks.root) },
+                "refetch_delta": d("fork_refetch"), "fork_priced_delta": d("fork_priced"), "late_version_delta": d("fork_late_version"),
+                "contested_now": self.forks.contested_now(), "root_now": nz(self.forks.root) },
             "lag_slo": { "window": "minute", "p50_ms": self.slo.last.as_ref().and_then(|m| m.p50_ms), "p90_ms": self.slo.last.as_ref().and_then(|m| m.p90_ms),
                 "ok": self.slo.last.as_ref().map(|m| m.ok), "breaches_in_row": self.slo.breaches_in_row, "good_in_row": self.slo.good_in_row, "action": self.slo.action },
             "accuracy": { "scored_delta": d("pred_scored"), "exact_delta": d("pred_exact"), "pre_state_unknown_delta": d("pred_pre_state_unknown"), "by_venue": by_venue,
@@ -1326,7 +1591,7 @@ impl Engine {
         self.rec.json(rec::STATUS, line);
         self.status_lines += 1;
         let c = |k: &str| self.counts.get(k).copied().unwrap_or(0);
-        let state = if self.shut == Shut::StateUnavailable { " | STATE UNAVAILABLE" } else if self.shut == Shut::Warmup { " | warm-up" } else { "" };
+        let state = match self.shut { Shut::StateUnavailable => " | STATE UNAVAILABLE", Shut::Resync => " | re-reading the state", Shut::Warmup => " | warm-up", Shut::Ready => "" };
         format!("slot {} queue {} | txs {} triggers {} groups {} decisions {} opps {} | alt: waits {} learned {} still waiting {}{state}", self.tip_slot(), queue,
             c("tx_first"), c("trigger"), self.tracker.pending_groups(), c("evaluation"), c("state_opportunity"), c("alt_wait"), c("alt_learned"), self.alts.waiting_txs())
     }
@@ -1408,6 +1673,7 @@ impl Engine {
             match a.tx.resolve(|_| None) { Some(k) => k, None => { self.count("resolve_failed"); return } }
         };
         let t_resolved = now_ns();
+        for l in &a.tx.lookups { self.alts.used(l.table, t_engine); }
         self.record_rival(&a, &keys);
         // the bids on our pools: every transaction touching one (users and bots alike contend for its write lock)
         if !self.exec.as_ref().is_some_and(|x| x.is_ours(&a.tx.sig)) {
@@ -1535,7 +1801,11 @@ impl Engine {
 
     /// The unix time and slot DLMM and DAMM v2 are priced at: the Clock sysvar's (item 6); tools without one: the host's
     fn chain_now(&self) -> (i64, u64) {
-        match self.store.chain_clock() { Some(c) => (c.unix_timestamp, c.slot), None => ((self.t_now / 1_000_000_000) as i64, self.slot) }
+        match self.store.chain_clock() {
+            Some(c) => (c.unix_timestamp, c.slot),
+            // the engine's time; an engine that has handled no input yet (`simcheck`'s routes) has only the host's
+            None => (if self.t_now > 0 { (self.t_now / 1_000_000_000) as i64 } else { unix_now() }, self.slot),
+        }
     }
 
     /// Pool `m` ready to quote, from the store's current versions only (PLAN WP-04 item 1: there is no other state to
@@ -1554,7 +1824,7 @@ impl Engine {
     fn skip_arrays(&self, m: &PoolMeta) -> Vec<i64> {
         if m.venue != Venue::Dlmm { return vec![]; }
         self.store.dlmm_arrays.get(&m.pool).map(|l| l.iter().filter(|(_, k)| {
-            self.tracker.is_pending(k) || self.store.get(k).is_some_and(|a| self.forks.is_contested(a.slot))
+            self.tracker.is_pending(k) || self.store.get(k).is_some_and(|a| self.forks.is_contested(a.slot)) || self.unverified.contains(k)
         }).map(|(i, _)| *i).collect()).unwrap_or_default()
     }
 
@@ -1580,8 +1850,10 @@ impl Engine {
         }
         let Some(mut t) = top else { return Err(first_err.unwrap_or_else(|| venue_unquotable(pb.venue))) };
         if t.1 > 0 {
+            // the refinement stays within the ladder: past its top rung (the size cap: 4.2 SOL in Stage 0) a decision
+            // would describe a trade the executor never sends (review WP-04 #5; the cmp2 8.4 SOL ladder-edge quotes)
             let mut lo = if idx > 0 { sizes[idx - 1] } else { sizes[0] / 4 };
-            let mut hi = sizes.get(idx + 1).copied().unwrap_or(sizes[idx] * 2);
+            let mut hi = sizes.get(idx + 1).copied().unwrap_or(sizes[idx]);
             for _ in 0..24 {
                 if hi - lo < 1_000 { break; }
                 let (m1, m2) = (lo + (hi - lo) / 3, hi - (hi - lo) / 3);
@@ -1795,7 +2067,9 @@ impl Engine {
     /// where the quote ends.
     fn route_in(&self, id: u64, size: u64) -> Option<crate::exec::RouteIn> {
         let o = self.opps.get(&id)?;
-        let (now, dslot) = match self.store.chain_clock() { Some(c) => (c.unix_timestamp, c.slot), None => (unix_now(), self.slot) };
+        // the decision's clock (review WP-04 N4: without a Clock sysvar, the engine's time, as `evaluate_pool` priced it,
+        // not the host's)
+        let (now, dslot) = self.chain_now();
         let (bi, si) = (*self.reg.by_pool.get(&o.buy)?, *self.reg.by_pool.get(&o.sell)?);
         let (pb, ps) = (&self.reg.pools[bi], &self.reg.pools[si]);
         let (lb, ls) = (self.leg_of(pb, now, dslot, &self.skip_arrays(pb)).ok()?, self.leg_of(ps, now, dslot, &self.skip_arrays(ps)).ok()?);
@@ -1860,12 +2134,23 @@ impl Engine {
     fn on_account(&mut self, key: Pk, v: Acct, t_engine: u64) {
         let (slot, t, txn, wv, aseq, src) = (v.slot, v.t_recv, v.txn, v.write_version, v.aseq, v.src);
         let stream = src == asrc::GRPC;
-        if stream { self.state_message(t); }
-        if !self.store.apply(key, v) {
+        if stream {
+            self.state_message(t);
+            if t > self.last_account_t { self.last_account_t = t; }
+            // the stream's resume slot after a (re)connection starts the re-read (review WP-04 #1)
+            if self.resync.as_ref().is_some_and(|r| r.floor.is_none()) { self.resync_floor(slot); }
+        }
+        // a write of a slot already abandoned (interslot statuses abandon a slot built on an abandoned parent before its
+        // writes arrive: review WP-04 #3b) is refused: it would be priced, and nothing would ever drop it
+        let refused = self.forks.refuses(slot, v.bank_id);
+        if refused { self.count("fork_late_version"); }
+        if refused || !self.store.apply(key, v) {
             // a stale update is still stream evidence
             if stream { let rs = self.tracker.stream_time(t, t_engine); self.on_resolutions(rs); self.run_deferred(t); }
             return;
         }
+        // a stream write after the (re)connection: this account's state is known again
+        if stream && !self.unverified.is_empty() { self.unverified.remove(&key); }
         if let Some(&i) = self.acct_pool.get(&key) {
             // pool accounts only (review WP-03 #6): status `tip_lag_slots_now` measures pool-state staleness
             if slot > self.store_slot_max { self.store_slot_max = slot; }
@@ -1916,6 +2201,7 @@ impl Engine {
             if slot > self.slot { self.slot = slot; crate::send::tpu::SLOT.store(slot, std::sync::atomic::Ordering::Relaxed); }
             if let Some(x) = usize::try_from(st).ok().and_then(|i| self.slots.get_mut(i)) { if slot > *x { *x = slot; } }
         }
+        if st == 0 && self.resync.as_ref().is_some_and(|r| r.floor.is_none()) { self.resync_floor(slot); }
         let ab = self.forks.on_status(slot, parent, st, bank_id);
         if !ab.is_empty() { self.on_abandoned(ab, t_engine); }
         let rs = self.tracker.stream_time(t, t_engine);
@@ -2041,14 +2327,15 @@ impl Engine {
         {
             let pending = |a: &Pk| self.tracker.is_pending(a);
             let contested = |s: u64| self.forks.is_contested(s);
-            let rc = ReadyCtx { pending: &pending, contested: &contested, max_skew: self.knobs.max_part_skew_slots };
+            let unverified = |a: &Pk| !self.unverified.is_empty() && self.unverified.contains(a);
+            let rc = ReadyCtx { pending: &pending, contested: &contested, unverified: &unverified, max_skew: self.knobs.max_part_skew_slots };
             let mut views: HashMap<usize, Result<PoolView, NotReady>> = HashMap::default();
             for &p in std::iter::once(&i).chain(others.iter()) { views.entry(p).or_insert_with(|| self.store.pool_view(&self.reg.pools[p], &rc)); }
             for &j in &others {
                 if j == i { continue; }
                 for (buy, sell) in [(i, j), (j, i)] {
                     let (pb, ps) = (&self.reg.pools[buy], &self.reg.pools[sell]);
-                    let mut rr = RouteRes { buy, sell, priced: None, reason: "", sv: None, slots: vec![] };
+                    let mut rr = RouteRes { buy, sell, priced: None, reason: "", sv: None, slots: vec![], txns: vec![] };
                     if !state_ok { rr.reason = NotReady::StateUnavailable.reason(); routes.push(rr); continue; }
                     if lagging { rr.reason = NotReady::StoreLagging.reason(); routes.push(rr); continue; }
                     let (vb, vs) = match (&views[&buy], &views[&sell]) {
@@ -2057,6 +2344,7 @@ impl Engine {
                     };
                     let rv = RouteView::of(vb, vs);
                     rr.slots = RouteView::slots(vb, vs);
+                    rr.txns = RouteView::txns(vb, vs);
                     if ctx.quiet && rv.t_last_write.saturating_add(q) > ctx.now_clock {
                         rr.reason = NotReady::RouteNotQuiet.reason();
                         let at = rv.t_last_write + q;
@@ -2133,7 +2421,10 @@ impl Engine {
             let mut slots: Vec<u64> = routes.iter().filter(|r| r.priced.is_some()).flat_map(|r| r.slots.iter().copied()).collect();
             slots.sort_unstable();
             slots.dedup();
-            self.recent.push_back(RecentDec { id, t: self.t_now, pools: priced_pools, slots });
+            let mut txns: Vec<(u64, u64)> = routes.iter().filter(|r| r.priced.is_some()).flat_map(|r| r.txns.iter().copied()).collect();
+            txns.sort_unstable();
+            txns.dedup();
+            self.recent.push_back(RecentDec { id, t: self.t_now, pools: priced_pools, slots, txns });
         }
         if self.rec.is_on() {
             let bestr = best.map(|k| &routes[k]);
@@ -2172,24 +2463,28 @@ impl Engine {
                 json!({ "slot": a.slot, "why": a.why.as_str(), "by": a.by, "bank_id": a.bank_id }));
         }
         let slots: Vec<u64> = ab.iter().map(|a| a.slot).collect();
-        self.on_dropped(dropped, &slots, t_engine);
+        self.on_dropped(dropped, &slots, None, t_engine);
     }
 
-    /// versions dropped by a fork (or slot-index `missing` evidence): refetch what has none left, drop the slots' groups,
-    /// mark the decisions that read them, evaluate the pools again
-    fn on_dropped(&mut self, dropped: Vec<(Pk, usize, bool)>, slots: &[u64], t_engine: u64) {
+    /// versions dropped by a fork (`slots`) or slot-index `missing` evidence (`txns`: the slot and the transactions its
+    /// confirmed block does not hold): refetch what has none left, drop their pending groups, mark the decisions that read
+    /// them, evaluate the pools again
+    fn on_dropped(&mut self, dropped: Vec<(Pk, usize, bool)>, slots: &[u64], txns: Option<(u64, &[[u8; 64]])>, t_engine: u64) {
         let n: usize = dropped.iter().map(|d| d.1).sum();
         self.count_n("fork_versions_dropped", n as u64);
         let refetch: Vec<Pk> = dropped.iter().filter(|d| d.2).map(|d| d.0).collect();
         if !refetch.is_empty() {
             self.count_n("fork_refetch", refetch.len() as u64);
             if let Some(ar) = &self.acct_rec { ar.mark(crate::rec::accounts::MARK_FORK_REFETCH, &refetch); }
-            self.fetch_accounts(refetch, asrc::RPC_REFETCH, "fork_refetch");
+            self.start_read(What::ForkRefetch, refetch);
         }
         if dropped.iter().any(|d| d.0 == *PUMP_FEE_CONFIG) { self.count("fork_pump_cfg"); }
-        let rs = self.tracker.drop_slots(&|s| slots.contains(&s), t_engine);
+        let mut rs = self.tracker.drop_slots(&|s| slots.contains(&s), t_engine);
+        if let Some((slot, sigs)) = txns { rs.extend(self.tracker.drop_txns(slot, sigs, t_engine)); }
         self.on_resolutions(rs);
-        let priced: Vec<u64> = self.recent.iter().filter(|d| d.slots.iter().any(|s| slots.contains(s))).map(|d| d.id).collect();
+        // review WP-04 #7: a decision that read a version of a missing (slot, transaction) was priced on a phantom too
+        let missing: Vec<(u64, u64)> = txns.map(|(slot, sigs)| sigs.iter().map(|s| (slot, sig8(s))).collect()).unwrap_or_default();
+        let priced: Vec<u64> = self.recent.iter().filter(|d| d.slots.iter().any(|s| slots.contains(s)) || d.txns.iter().any(|x| missing.contains(x))).map(|d| d.id).collect();
         for id in priced {
             self.count("fork_priced");
             self.rec.emit(rec::DECISIONS, Record::ser(json!({ "decision": id, "fork_priced": true, "slots": slots })));
@@ -2216,7 +2511,9 @@ impl Engine {
         let dropped = self.store.drop_txn_versions(slot, &sigs);
         self.count("fork_slotidx_missing");
         self.rec.event("fork_abandoned", "forks", None, json!({ "slot": slot, "why": "slotidx_missing", "txns": sigs.len(), "versions": dropped.len() }));
-        if !dropped.is_empty() { self.on_dropped(dropped, &[], self.t_now); }
+        // the pending groups of those transactions and the decisions that read their versions too, even when no version is
+        // held any more (review WP-04 #7)
+        self.on_dropped(dropped, &[], Some((slot, &sigs)), self.t_now);
     }
 
     // ---------------------------------------------------------------- accuracy (item 13)
@@ -2348,7 +2645,7 @@ impl Engine {
             ar.mark(crate::rec::accounts::MARK_WATCH_LIST_CHANGED, &new);
         }
         self.publish_watch_list();
-        if !fetch.is_empty() { self.fetch_accounts(fetch, asrc::RPC_REFETCH, "dlmm_arrays"); }
+        self.start_read(What::DlmmArrays, fetch);
     }
 
     pub fn publish_watch_list(&self) {
@@ -2356,28 +2653,6 @@ impl Engine {
         let mut l: Vec<String> = match &self.base_watch { Some(b) => b.iter().map(b58).collect(), None => self.reg.static_accounts().iter().map(b58).collect() };
         for list in self.store.dlmm_arrays.values() { for (_, k) in list { l.push(b58(k)); } }
         let _ = io.watch_list.send(l);
-    }
-
-    /// accounts read over RPC on the background runtime (newly followed DLMM bin arrays, a re-snapshot after a stream
-    /// reconnect, a fork refetch): they come back as account events, each recorded in accounts.bin first (`src`) so the
-    /// journal can name it by its aseq. Read 100 at a time, each batch with its own context slot (a version labelled with
-    /// another batch's slot could order wrongly against stream updates)
-    fn fetch_accounts(&mut self, keys: Vec<Pk>, src: u8, what: &'static str) {
-        let Some(io) = &self.io else { self.offline_fetches.push((what, keys)); return };
-        let (rpc, back, ar) = (io.rpc.clone(), io.tx_back.clone(), self.acct_rec.clone());
-        io.rt.spawn(async move {
-            for chunk in keys.chunks(100) {
-                let Ok((slot, v)) = rpc.accounts(chunk).await else { continue };
-                for (k, a) in chunk.iter().zip(v) {
-                    let Some(a) = a else { continue };
-                    let (t, data): (u64, Arc<[u8]>) = (now_ns(), Arc::from(a.data));
-                    let aseq = ar.as_ref().map_or(0, |r| r.record(&crate::rec::accounts::AcctUpdate { pubkey: *k, slot, write_version: 0, t_recv: t, src,
-                        is_startup: false, txn: None, lamports: a.lamports, owner: a.owner, data: &data, bank_id: None }));
-                    let _ = back.send(Event::Account { slot, pubkey: *k, owner: a.owner, lamports: a.lamports, data, t, txn: None, write_version: 0, is_startup: false, src,
-                        aseq, bank_id: None });
-                }
-            }
-        });
     }
 
     // ---------------------------------------------------------------- outcomes
@@ -2422,7 +2697,7 @@ fn reject_counter(reason: &str) -> &'static str {
     match reason {
         "pending_commit" => "reject_pending_commit", "route_not_quiet" => "reject_route_not_quiet", "parts_skewed" => "reject_parts_skewed",
         "store_lagging" => "reject_store_lagging", "account_missing" => "reject_account_missing", "clock_stale" => "reject_clock_stale",
-        "fork_pending" => "reject_fork_pending", "state_unavailable" => "reject_state_unavailable", "warmup" => "reject_warmup",
+        "fork_pending" => "reject_fork_pending", "state_unavailable" => "reject_state_unavailable", "warmup" => "reject_warmup", "resync" => "reject_resync",
         "unquotable_dlmm_array" => "reject_unquotable_dlmm_array", "unquotable_dlmm_liquidity" => "reject_unquotable_dlmm_liquidity",
         "unquotable_damm" => "reject_unquotable_damm", "unquotable_cp" => "reject_unquotable_cp", "broken_quote" => "reject_broken_quote",
         _ => "reject_other",
@@ -2560,10 +2835,20 @@ mod tests {
     /// AMM v4 pools on MINT / WSOL (`pools`: (n, SOL in its quote vault; every pool holds 1e15 MINT)), booted at slot 10
     /// (RPC reads), on an offline engine that records into a temp directory, `min_tip` 1,000
     fn rig_with(name: &str, cfg: StrategyCfg, pools: &[(u8, u64)]) -> Rig {
+        rig_metas(name, cfg, &pools.iter().map(|(n, sol)| (meta(*n), *sol)).collect::<Vec<_>>())
+    }
+    /// an AMM v4 pool `n` whose vaults never collide with another pool's keys (for registries of more than 9 pools)
+    fn meta_k(n: u8) -> PoolMeta {
+        let mut m = meta(n);
+        m.vault0 = { let mut k = [n; 32]; k[31] = 200; k };
+        m.vault1 = { let mut k = [n; 32]; k[31] = 201; k };
+        m
+    }
+    fn rig_metas(name: &str, cfg: StrategyCfg, pools: &[(PoolMeta, u64)]) -> Rig {
         let mut reg = Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
         let mut store = Store::default();
-        for (i, (n, sol)) in pools.iter().enumerate() {
-            let m = meta(*n);
+        for (i, (m, sol)) in pools.iter().enumerate() {
+            let m = m.clone();
             reg.by_pool.insert(m.pool, i);
             store.update(m.pool, ammv4_pool(), 10, 1, None);
             store.update(m.vault0, vault(1_000_000_000_000_000), 10, 1, None);
@@ -2630,6 +2915,38 @@ mod tests {
         Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: Default::default() }
     }
     fn tx_ev(e: &mut Engine, a: Arrival) { let t = a.t_rx; e.step(Event::Tx(a), t + 10_000, &mut nop()); }
+    /// the state stream's task: connected (right before a connection's first message) or lost
+    fn health(e: &mut Engine, connected: bool, t: u64) {
+        e.step(crate::feeds::state_health(connected, 2, 1, (!connected).then(|| "status: 503".into())), t, &mut nop());
+    }
+    /// Answer the account reads the (offline) engine asked for, as the fetch task would: each account of each chunk (as
+    /// `data` says, else as the store holds it; None from both: the node does not have it) at `slot`, then the chunk's
+    /// INPUT 11 `fetch`. Returns how many chunks were answered
+    fn answer_reads(e: &mut Engine, slot: u64, t: u64, data: &dyn Fn(&Pk) -> Option<Arc<[u8]>>) -> usize {
+        let reads = std::mem::take(&mut e.offline_reads);
+        let n = reads.len();
+        for (i, f) in reads.into_iter().enumerate() {
+            let te = t + i as u64 * 10_000;
+            let mut missing = Vec::new();
+            for k in &f.keys {
+                match data(k).or_else(|| e.store.get(k).map(|a| a.data.clone())) {
+                    Some(d) => e.step(Event::Account { slot, pubkey: *k, owner: [3; 32], lamports: 1, data: d, t: te, txn: None, write_version: 0, is_startup: false,
+                        src: f.what.src(), aseq: 0, bank_id: None }, te + 100, &mut nop()),
+                    None => missing.push(b58(k)),
+                }
+            }
+            e.step(Event::Input { kind: InputKind::Fetch, data: Arc::new(json!({ "job": f.job, "chunk": f.chunk, "what": f.what.as_str(), "attempt": f.attempt,
+                "ok": true, "slot": slot, "n": f.keys.len(), "missing": missing })) }, te + 5_000, &mut nop());
+        }
+        n
+    }
+    /// the account reads asked for fail (an RPC error)
+    fn fail_reads(e: &mut Engine, t: u64, err: &str) {
+        for f in std::mem::take(&mut e.offline_reads) {
+            e.step(Event::Input { kind: InputKind::Fetch, data: Arc::new(json!({ "job": f.job, "chunk": f.chunk, "what": f.what.as_str(), "attempt": f.attempt,
+                "ok": false, "err": err, "n": f.keys.len() })) }, t, &mut nop());
+        }
+    }
 
     /// PLAN WP-04 item 1 (WP-00 F16 kept): a decoded swap is a hint only: its triggers.jsonl line (opp null, hint_only,
     /// the write set it registered, its signer's statistics), an accuracy check waiting for its commit, the signer's
@@ -3000,7 +3317,6 @@ mod tests {
         let mut r = rig("outage");
         make_ready(&mut r.e, T0);
         let (a, b) = (meta(1), meta(2));
-        let health = |e: &mut Engine, connected: bool, t: u64| e.step(crate::feeds::state_health(connected, 2, 1, (!connected).then(|| "status: 503".into())), t, &mut nop());
         // a trigger's swap is seen just before the stream goes down
         tx_ev(&mut r.e, shred_tx(sig(7), &[a.pool, a.vault0, a.vault1], Some((&a, SOL, false)), 11, T0 + 8 * MS));
         health(&mut r.e, false, T0 + 9 * MS);
@@ -3019,18 +3335,22 @@ mod tests {
         r.e.timers(T0 + 6_000 * MS, &mut nop());
         assert_eq!((r.e.counter("signer_miss"), r.e.counter("signer_miss_unknown")), (0, 1));
         assert!(!r.e.signer_stats.contains_key(&SIGNER) || r.e.signer_stats[&SIGNER].1 == 0, "no false miss written");
-        // the stream comes back: every followed account is read again
+        // the stream comes back: every followed account is read again (from one slot after the stream's resume slot), and
+        // the gate is `resync` until the re-read has landed (review WP-04 #1)
         health(&mut r.e, true, T0 + 6_001 * MS);
         assert_eq!(r.e.counter("state_resnapshot"), 1);
-        let (w, keys) = r.e.offline_fetches.iter().rev().find(|(w, _)| *w == "resnapshot").unwrap().clone();
-        assert!(w == "resnapshot" && keys.contains(&a.vault0) && keys.contains(&b.pool));
         slot_ev(&mut r.e, 401, 0, Some(400), T0 + 6_002 * MS);
         acct(&mut r.e, *CLOCK_SYSVAR, clock_data(401, 1_759_000_006), 401, T0 + 6_002 * MS, None, 60);
-        assert_eq!(r.e.shut(), Shut::Ready, "available again (the tip from the stream, the store at it)");
+        assert_eq!(r.e.shut(), Shut::Resync, "available again, but not re-read yet");
+        r.e.timers(T0 + 6_403 * MS, &mut nop());
+        let (w, keys) = r.e.offline_fetches.iter().rev().find(|(w, _)| *w == "resnapshot").unwrap().clone();
+        assert!(w == "resnapshot" && keys.contains(&a.vault0) && keys.contains(&b.pool));
+        assert_eq!(answer_reads(&mut r.e, 401, T0 + 6_404 * MS, &|_| None), 1);
+        assert_eq!(r.e.shut(), Shut::Ready, "available again (the tip from the stream, the store at it, every account read again)");
         // with the state healthy all along (a message every second), an expired trigger is a miss
-        tx_ev(&mut r.e, shred_tx(sig(10), &[a.pool, a.vault0, a.vault1], Some((&a, SOL, false)), 401, T0 + 6_010 * MS));
+        tx_ev(&mut r.e, shred_tx(sig(10), &[a.pool, a.vault0, a.vault1], Some((&a, SOL, false)), 401, T0 + 6_410 * MS));
         for k in 1..=6u64 { acct(&mut r.e, *CLOCK_SYSVAR, clock_data(401, 1_759_000_007), 401, T0 + (6_002 + 1_000 * k) * MS, None, 60 + k); }
-        r.e.timers(T0 + 11_012 * MS, &mut nop());
+        r.e.timers(T0 + 11_412 * MS, &mut nop());
         assert_eq!(r.e.counter("signer_miss"), 1);
         // a silence of 3 s that no timer saw is an outage all the same (a trigger across it is not a miss)
         tx_ev(&mut r.e, shred_tx(sig(11), &[a.pool, a.vault0, a.vault1], Some((&a, SOL, false)), 401, T0 + 12_100 * MS));
@@ -3047,6 +3367,16 @@ mod tests {
         assert!(log.contains("WARNING: state unavailable"), "{log}");
         let ev = rec::read_jsonl(&r.dir, "events").unwrap();
         assert!(ev.iter().any(|e| e["kind"] == "state_unavailable") && ev.iter().any(|e| e["kind"] == "state_resnapshot"));
+        assert!(r.e.stop_req.is_none(), "unavailable_stop_s 0: an outage after the first message never stops the run");
+        // review WP-04 #10, `unavailable_stop_s` set: an outage that lasts that long stops it (state_unavailable)
+        let mut r2 = rig("unavailable-stop");
+        r2.e.set_knobs(EngineKnobs { unavailable_stop_s: 60, ..EngineKnobs::default() });
+        make_ready(&mut r2.e, T0);
+        health(&mut r2.e, false, T0 + 10 * MS);
+        r2.e.timers(T0 + 60_000 * MS, &mut nop());
+        assert!(r2.e.stop_req.is_none());
+        r2.e.timers(T0 + 60_011 * MS, &mut nop());
+        assert!(r2.e.stop_req.as_deref().is_some_and(|s| s.contains("unavailable for 60 s")), "{:?}", r2.e.stop_req);
         // the boot timeout: a stream that never delivers stops the run
         let mut r = rig("boot-timeout");
         r.e.timers(T0, &mut nop());
@@ -3054,6 +3384,295 @@ mod tests {
         assert!(r.e.stop_req.is_none());
         r.e.timers(T0 + 60 * 1_000 * MS, &mut nop());
         assert!(r.e.stop_req.as_deref().is_some_and(|s| s.contains("delivered nothing within 60 s")));
+    }
+
+    /// Review WP-04 #1 (blocker, I-4; probe 1): after a state-stream reconnection nothing is priced or sent until the
+    /// re-read has landed. The probe's sequence: both pools ready, the stream drops, 30 s later it reconnects, a slot
+    /// status, the Clock and a write to B arrive. Before the fix the gate opened at once and B→A priced A's pre-outage
+    /// version (+106,621,773 lamports at 2 SOL). Now: the gate is `resync` (the executor's flags too) and every route
+    /// through a pool not read again is refused (`resync`); the re-read starts one slot after the stream's resume slot,
+    /// each pool's accounts in one chunk; an injected chunk error is retried, a read behind the resume slot too; once
+    /// every chunk has landed the gate opens and A is priced at the state the re-read brought
+    #[test]
+    fn a_reconnect_prices_nothing_until_the_re_read_lands() {
+        let mut r = rig("resync");
+        make_ready(&mut r.e, T0);
+        let (a, b) = (meta(1), meta(2));
+        health(&mut r.e, false, T0 + 10 * MS);
+        assert_eq!(r.e.shut(), Shut::StateUnavailable);
+        let tr = T0 + 30_000 * MS;
+        health(&mut r.e, true, tr);
+        assert_eq!(r.e.counter("state_resnapshot"), 1);
+        slot_ev(&mut r.e, 90, 0, Some(89), tr + 1 * MS);
+        acct(&mut r.e, *CLOCK_SYSVAR, clock_data(90, 1_759_000_030), 90, tr + 1 * MS, None, 500);
+        assert_eq!((r.e.shut(), r.e.health_flags().shut(), r.e.health_flags().ready()), (Shut::Resync, Shut::Resync, false), "probe 1 found Ready here");
+        acct(&mut r.e, b.vault1, vault(1_031 * SOL), 90, tr + 2 * MS, Some(sig(0xB1)), 501);
+        acct(&mut r.e, b.vault0, vault(970_000_000_000_000), 90, tr + 2 * MS + 1, Some(sig(0xB1)), 502);
+        r.e.timers(tr + 6 * MS, &mut nop());
+        let d = decisions(&r);
+        let last = d.last().unwrap();
+        assert!(last["routes"].as_array().unwrap().iter().all(|x| x["reason"] == "resync"), "B's own pool account and all of A are unverified: {last}");
+        assert_eq!((last["reason"].as_str(), r.e.counter("state_opportunity"), r.e.counter("reject_resync")), (Some("resync"), 0, 2), "no phantom gap");
+        // the re-read: one slot after the resume slot 90, 6 accounts in one chunk, each pool's together
+        r.e.timers(tr + 400 * MS, &mut nop());
+        assert!(r.e.offline_reads.is_empty(), "not before one slot after the resume slot");
+        r.e.timers(tr + 402 * MS, &mut nop());
+        assert_eq!(r.e.offline_reads.len(), 1);
+        assert_eq!(r.e.offline_reads[0].keys, vec![a.pool, a.vault0, a.vault1, b.pool, b.vault0, b.vault1]);
+        // an injected chunk error: retried 250 ms later
+        fail_reads(&mut r.e, tr + 450 * MS, "getMultipleAccounts: rate limited");
+        assert_eq!((r.e.counter("read_chunk_failed"), r.e.counter("read_retry"), r.e.shut()), (1, 1, Shut::Resync));
+        r.e.timers(tr + 699 * MS, &mut nop());
+        assert!(r.e.offline_reads.is_empty(), "not before its retry time");
+        r.e.timers(tr + 700 * MS, &mut nop());
+        assert_eq!(r.e.offline_reads[0].attempt, 2, "read again");
+        // an RPC node behind the stream's resume slot: its read would miss the writes before slot 90; read again
+        answer_reads(&mut r.e, 89, tr + 710 * MS, &|_| None);
+        assert_eq!((r.e.counter("resync_chunk_behind"), r.e.shut(), r.e.unverified.len()), (1, Shut::Resync, 4), "B's vaults came from the stream");
+        acct(&mut r.e, *CLOCK_SYSVAR, clock_data(92, 1_759_000_031), 92, tr + 1_000 * MS, None, 503);
+        r.e.timers(tr + 1_711 * MS, &mut nop());
+        // the third read lands, A as the chain has it now (1,060 SOL, written during the outage)
+        assert_eq!(answer_reads(&mut r.e, 92, tr + 1_720 * MS, &|k| (*k == a.vault1).then(|| vault(1_060 * SOL))), 1);
+        assert_eq!((r.e.counter("state_resync_done"), r.e.shut(), r.e.unverified.len()), (1, Shut::Ready, 0), "every chunk landed: the gate opens");
+        assert_eq!(r.e.store.get(&a.vault1).unwrap().slot, 92);
+        // B's next write: priced against A's re-read state
+        acct(&mut r.e, b.vault1, vault(1_032 * SOL), 93, tr + 1_800 * MS, Some(sig(0xB2)), 504);
+        acct(&mut r.e, b.vault0, vault(969_000_000_000_000), 93, tr + 1_800 * MS + 1, Some(sig(0xB2)), 505);
+        r.e.timers(tr + 1_805 * MS, &mut nop());
+        let last = decisions(&r).last().cloned().unwrap();
+        assert!(last["routes"].as_array().unwrap().iter().all(|x| x["net"].is_i64()), "{last}");
+        r.rec.sync();
+        let ev = rec::read_jsonl(&r.dir, "events").unwrap();
+        let done = ev.iter().find(|e| e["kind"] == "state_resync_done").unwrap();
+        assert_eq!((done["detail"]["why"].as_str(), done["detail"]["retries"].as_u64(), done["detail"]["behind"].as_u64(), done["detail"]["failed"].as_u64()),
+            (Some("reconnect"), Some(2), Some(1), Some(1)));
+        assert!(ev.iter().any(|e| e["kind"] == "read_retry"));
+        let log = std::fs::read_to_string(r.dir.join("run.log")).unwrap();
+        assert!(log.contains("state re-read (reconnect) done"), "{log}");
+    }
+
+    /// Review WP-04 #1c: the boot snapshot is read before the stream subscribes, so the stream's first connection starts
+    /// the same re-read (writes between the snapshot and the subscription are closed); the re-read packs each pool's
+    /// accounts into one chunk of at most 100; a re-read that has not landed `resync_warn_s` after the connection is a
+    /// WARNING (the gate stays shut); a chunk still failing `resync_give_up_s` after the start is given up: the gate
+    /// opens, its accounts stay refused one by one until the stream writes them
+    #[test]
+    fn the_first_connection_re_reads_the_boot_snapshot() {
+        let pools: Vec<(PoolMeta, u64)> = (1..=40u8).map(|n| (meta_k(n), 1_000)).collect();
+        let mut r = rig_metas("resync-boot", StrategyCfg { state_triggers: true, ..StrategyCfg::default() }, &pools);
+        r.e.set_knobs(EngineKnobs { resync_give_up_s: 30, ..EngineKnobs::default() });
+        let chunks = r.e.resync_chunks();
+        assert_eq!(chunks.iter().map(|c| c.len()).collect::<Vec<_>>(), vec![99, 21], "33 pools of 3, then 7");
+        for p in 1..=40u8 {
+            let m = meta_k(p);
+            let c: Vec<usize> = [m.pool, m.vault0, m.vault1].iter().map(|k| chunks.iter().position(|c| c.contains(k)).unwrap()).collect();
+            assert!(c.windows(2).all(|w| w[0] == w[1]), "pool {p}'s accounts in one chunk: {c:?}");
+        }
+        health(&mut r.e, true, T0);
+        slot_ev(&mut r.e, 11, 0, Some(10), T0 + MS);
+        acct(&mut r.e, *CLOCK_SYSVAR, clock_data(11, 1_759_000_000), 11, T0 + MS, None, 1);
+        r.e.timers(T0 + 6 * MS, &mut nop());
+        assert_eq!(r.e.shut(), Shut::Resync, "Tier A is complete, but the boot snapshot is not re-read yet");
+        r.e.timers(T0 + 402 * MS, &mut nop());
+        assert_eq!(r.e.offline_reads.len(), 1, "the second chunk 120 ms later");
+        answer_reads(&mut r.e, 12, T0 + 410 * MS, &|_| None);
+        r.e.timers(T0 + 522 * MS, &mut nop());
+        assert_eq!(r.e.offline_reads.len(), 1);
+        fail_reads(&mut r.e, T0 + 530 * MS, "status: 503");
+        // keep the stream alive; the WARNING at 10 s; the retries every 10 s at most; given up 30 s after the start
+        let mut t = T0 + 530 * MS;
+        while t < T0 + 35_000 * MS {
+            t += 500 * MS;
+            acct(&mut r.e, *CLOCK_SYSVAR, clock_data(12, 1_759_000_001), 12, t, None, 2 + t / MS);
+            r.e.timers(t + 1, &mut nop());
+            fail_reads(&mut r.e, t + 2, "status: 503");
+        }
+        assert_eq!((r.e.counter("state_resync_slow"), r.e.counter("read_gave_up"), r.e.counter("state_resync_done")), (1, 1, 1));
+        assert_eq!(r.e.shut(), Shut::Ready, "given up: the gate opens");
+        assert_eq!(r.e.unverified.len(), 21, "the second chunk's accounts stay refused one by one");
+        let m = meta_k(40);
+        acct(&mut r.e, m.vault1, vault(1_010 * SOL), 13, t + 10 * MS, Some(sig(1)), 1_000_000);
+        acct(&mut r.e, m.vault0, vault(990_000_000_000_000), 13, t + 10 * MS + 1, Some(sig(1)), 1_000_001);
+        r.e.timers(t + 15 * MS, &mut nop());
+        let last = decisions(&r).last().cloned().unwrap();
+        assert_eq!(last["routes"][0]["reason"], json!("resync"), "pool 40's own account was never read again: {last}");
+        r.rec.sync();
+        let ev = rec::read_jsonl(&r.dir, "events").unwrap();
+        assert!(ev.iter().any(|e| e["kind"] == "state_resnapshot" && e["detail"]["why"] == "boot"));
+        let log = std::fs::read_to_string(r.dir.join("run.log")).unwrap();
+        assert!(log.contains("WARNING: the state re-read (boot) has not landed 10 s after the connection") && log.contains("WARNING: the state re-read gave up on 21 accounts after 30 s"), "{log}");
+    }
+
+    /// Review WP-04 #3a (probe 2): siblings 12 and 13 of 11; A written in 13 is `fork_pending` while both are
+    /// unconfirmed; once 12 is confirmed, 13 is abandoned at once (its versions dropped), so B's next decision reads A's
+    /// canonical version, never 13's, and no decision is `fork_priced` later
+    #[test]
+    fn a_confirmed_slots_higher_sibling_is_never_priced() {
+        let mut r = rig("fork-sibling");
+        make_ready(&mut r.e, T0);
+        let (a, b) = (meta(1), meta(2));
+        let t = T0 + 20 * MS;
+        slot_ev(&mut r.e, 11, 1, Some(10), t);
+        slot_ev(&mut r.e, 12, 0, Some(11), t);
+        slot_ev(&mut r.e, 13, 0, Some(11), t);
+        acct(&mut r.e, a.vault1, vault(1_030 * SOL), 13, t + 1 * MS, Some(sig(1)), 10);
+        acct(&mut r.e, a.vault0, vault(970_000_000_000_000), 13, t + 1 * MS + 1, Some(sig(1)), 11);
+        r.e.timers(t + 5 * MS, &mut nop());
+        assert!(decisions(&r)[0]["routes"].as_array().unwrap().iter().all(|x| x["reason"] == "fork_pending"));
+        slot_ev(&mut r.e, 12, 1, Some(11), t + 6 * MS);
+        assert!(r.e.forks.is_abandoned(13) && !r.e.forks.is_contested(13), "probe 2: neither abandoned nor contested");
+        assert_eq!((r.e.store.get(&a.vault1).unwrap().slot, r.e.counter("fork_versions_dropped")), (10, 2));
+        slot_ev(&mut r.e, 14, 0, Some(12), t + 7 * MS);
+        acct(&mut r.e, b.vault1, vault(1_001 * SOL), 14, t + 7 * MS, Some(sig(2)), 12);
+        acct(&mut r.e, b.vault0, vault(999_000_000_000_000), 14, t + 7 * MS + 1, Some(sig(2)), 13);
+        r.e.timers(t + 11 * MS, &mut nop());
+        let last = r.e.recent.back().unwrap();
+        assert!(!last.slots.contains(&13) && last.slots.contains(&14), "B's decision read A's canonical version: {:?}", last.slots);
+        slot_ev(&mut r.e, 15, 0, Some(14), t + 12 * MS);
+        slot_ev(&mut r.e, 15, 1, Some(14), t + 12 * MS);
+        assert_eq!(r.e.counter("fork_priced"), 0, "probe 2: 0 -> 1 at 15's confirmation");
+    }
+
+    /// Review WP-04 #3b (probe 3): with interslot statuses, a slot created on an abandoned parent is abandoned before its
+    /// writes arrive; they are refused (`fork_late_version`), never stored, priced or kept
+    #[test]
+    fn writes_of_a_slot_already_abandoned_are_refused() {
+        let mut r = rig("fork-late");
+        make_ready(&mut r.e, T0);
+        let (a, b) = (meta(1), meta(2));
+        let t = T0 + 20 * MS;
+        slot_ev(&mut r.e, 12, 0, Some(11), t);
+        slot_ev(&mut r.e, 13, 0, Some(11), t);
+        slot_ev(&mut r.e, 13, 1, Some(11), t + 1 * MS);
+        slot_ev(&mut r.e, 14, 5, Some(12), t + 2 * MS);
+        assert!(r.e.forks.is_abandoned(14));
+        acct(&mut r.e, a.vault1, vault(1_030 * SOL), 14, t + 3 * MS, Some(sig(1)), 10);
+        acct(&mut r.e, a.vault0, vault(970_000_000_000_000), 14, t + 3 * MS + 1, Some(sig(1)), 11);
+        r.e.timers(t + 7 * MS, &mut nop());
+        assert_eq!((r.e.counter("fork_late_version"), r.e.store.get(&a.vault1).unwrap().slot, r.e.tracker.pending_groups()), (2, 10, 0));
+        slot_ev(&mut r.e, 14, 0, Some(12), t + 8 * MS);
+        slot_ev(&mut r.e, 16, 0, Some(13), t + 9 * MS);
+        acct(&mut r.e, b.vault1, vault(1_001 * SOL), 16, t + 9 * MS, Some(sig(2)), 12);
+        acct(&mut r.e, b.vault0, vault(999_000_000_000_000), 16, t + 9 * MS + 1, Some(sig(2)), 13);
+        r.e.timers(t + 13 * MS, &mut nop());
+        assert_eq!((r.e.store.get(&a.vault1).unwrap().slot, r.e.counter("state_opportunity")), (10, 0), "probe 3: slot 14 current, 2 opportunities");
+        // the journal's verdict says refused (a replay checks it against the same rule)
+        assert!(r.e.account_refused(&a.vault1, 14, asrc::GRPC, 99, 0, None));
+    }
+
+    /// Review WP-04 #2 (probe 6, the late-leader fork): 13 (built on 11) is replayed first, then the late block 12, whose
+    /// writes arrive with a lower slot. When 12 wins, 13's versions go and the account holds the canonical slot-12
+    /// version (1,050 SOL), not the pre-fork one (1,000 SOL), with no refetch needed; its pools are evaluated again
+    #[test]
+    fn the_late_leader_fork_restores_the_canonical_version() {
+        let mut r = rig("fork-late-leader");
+        make_ready(&mut r.e, T0);
+        let a = meta(1);
+        let t = T0 + 20 * MS;
+        slot_ev(&mut r.e, 11, 1, Some(10), t);
+        slot_ev(&mut r.e, 13, 0, Some(11), t);
+        acct(&mut r.e, a.vault1, vault(1_020 * SOL), 13, t + 1 * MS, Some(sig(13)), 10);
+        acct(&mut r.e, a.vault0, vault(980_000_000_000_000), 13, t + 1 * MS + 1, Some(sig(13)), 11);
+        slot_ev(&mut r.e, 12, 0, Some(11), t + 2 * MS);
+        acct(&mut r.e, a.vault1, vault(1_050 * SOL), 12, t + 3 * MS, Some(sig(12)), 12);
+        acct(&mut r.e, a.vault0, vault(952_000_000_000_000), 12, t + 3 * MS + 1, Some(sig(12)), 13);
+        r.e.timers(t + 8 * MS, &mut nop());
+        assert_eq!((r.e.store.get(&a.vault1).unwrap().slot, r.e.store.kept_below), (13, 2), "12's writes kept below 13's");
+        let before = r.e.counter("evaluation");
+        slot_ev(&mut r.e, 12, 1, Some(11), t + 9 * MS);
+        slot_ev(&mut r.e, 14, 0, Some(12), t + 10 * MS);
+        slot_ev(&mut r.e, 14, 1, Some(12), t + 11 * MS);
+        assert!(r.e.forks.is_abandoned(13));
+        let v = r.e.store.get(&a.vault1).unwrap();
+        let amount = u64::from_le_bytes(v.data[64..72].try_into().unwrap()) / SOL;
+        assert_eq!((v.slot, amount), (12, 1_050), "probe 6 found (10, 1,000): the pre-fork version");
+        assert_eq!(r.e.counter("fork_refetch"), 0);
+        assert!(r.e.counter("evaluation") > before, "A evaluated again on its canonical state");
+        assert!(decisions(&r).iter().any(|x| x["kind"] == "fork"));
+    }
+
+    /// Review WP-04 #5 (probe 4): with the Stage-0 ladder (top rung 4.2 SOL), a decision never prices a size past the top
+    /// rung (the refinement doubled it to 8.4 SOL: the cmp2 ladder-edge quotes)
+    #[test]
+    fn decisions_never_price_past_the_top_rung() {
+        let cfg = StrategyCfg { state_triggers: true, sizes_sol: vec![0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.2], ..StrategyCfg::default() };
+        let mut r = rig_with("top-rung", cfg, &[(1, 15_000), (2, 15_000)]);
+        make_ready(&mut r.e, T0);
+        let b = meta(2);
+        let t = T0 + 20 * MS;
+        acct(&mut r.e, b.vault1, vault(15_900 * SOL), 12, t, Some(sig(1)), 10);
+        acct(&mut r.e, b.vault0, vault(950_000_000_000_000), 12, t + 1, Some(sig(1)), 11);
+        r.e.timers(t + 4 * MS, &mut nop());
+        let d = decisions(&r);
+        let x = d.last().unwrap();
+        let best = &x["routes"][x["best"].as_u64().unwrap() as usize];
+        assert!(best["size"].as_u64().unwrap() <= 4_200_000_000 && best["net"].as_i64().unwrap() > 0, "probe 4: 8,399,809,909: {best}");
+        assert!(x["routes"].as_array().unwrap().iter().filter_map(|r| r["size"].as_u64()).all(|s| s <= 4_200_000_000));
+    }
+
+    /// Review WP-04 #4 (probe 5): with the real file's 30,304 signers, saving the signer statistics and the 10-s status
+    /// line cost the engine thread microseconds (it hands over the map as loaded and this segment's counts; the writer
+    /// adds them up and serializes: about 25 ms per call when the engine thread did it); the files hold the sum
+    #[test]
+    fn saving_signer_stats_stays_off_the_engine_thread() {
+        let mut r = rig("signer-save");
+        let dir = r.dir.clone();
+        r.e.set_signer_stats_out(&dir);
+        let mut base: HashMap<Pk, (u32, u32)> = HashMap::default();
+        let mut x = 0x9e3779b97f4a7c15u64;
+        for n in 0..30_304u32 {
+            let mut k = [0u8; 32];
+            for c in k.chunks_mut(8) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; c.copy_from_slice(&x.to_le_bytes()); }
+            base.insert(k, (n % 5, n % 3));
+        }
+        let one = *base.keys().next().unwrap();
+        r.e.signer_stats = base.clone();
+        r.e.signer_base = Arc::new(base);
+        r.e.trig_pending.insert(sig(1), (one, 1));
+        r.e.signer_outcome(&sig(1), true);
+        r.e.trig_pending.insert(sig(2), (SIGNER, 1));
+        r.e.signer_outcome(&sig(2), false);
+        let mut save = Vec::new();
+        for _ in 0..5 { let a = std::time::Instant::now(); r.e.save_signer_stats(); save.push(a.elapsed().as_micros()); }
+        let mut t = T0;
+        let mut status = Vec::new();
+        for _ in 0..5 { t += STATUS_EVERY_NS + 1; let a = std::time::Instant::now(); r.e.timers(t, &mut nop()); status.push(a.elapsed().as_micros()); }
+        eprintln!("signer statistics (30,304 signers): save on the engine thread {save:?} µs; the 10-s timers {status:?} µs (probe 5: about 25,000 µs each)");
+        // the best of five (a machine busy with other tests can preempt one call; the old path cost 25 ms every time)
+        let (s_min, t_min) = (save.iter().min().copied().unwrap(), status.iter().skip(1).min().copied().unwrap());
+        assert!(s_min < 2_000 && t_min < 5_000, "{save:?} µs / {status:?} µs");
+        r.rec.sync();
+        let full: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("signer-stats.json")).unwrap()).unwrap();
+        let delta: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("signer-stats-delta.json")).unwrap()).unwrap();
+        let b = r.e.signer_base.get(&one).copied().unwrap();
+        assert_eq!(full.as_object().unwrap().len(), 30_305);
+        assert_eq!((full[b58(&one)].clone(), full[b58(&SIGNER)].clone()), (json!([b.0 + 1, b.1]), json!([0, 1])), "the map as loaded plus this segment's counts");
+        assert_eq!(delta.as_object().unwrap().len(), 2);
+    }
+
+    /// Review WP-04 #7: slot-index `missing` evidence (the confirmed block of a slot does not hold a transaction) drops
+    /// that transaction's versions, its pending group (`fork_dropped`), and marks the decisions that read its versions
+    /// `fork_priced`, even when the account kept no version of it
+    #[test]
+    fn slot_index_missing_marks_decisions_and_drops_groups() {
+        let mut r = rig("slotidx");
+        make_ready(&mut r.e, T0);
+        let (a, b) = (meta(1), meta(2));
+        let t = T0 + 20 * MS;
+        // X moves B in slot 21 (W(X) known): complete, B priced on X's versions
+        tx_ev(&mut r.e, shred_tx(sig(4), &[b.vault0, b.vault1], None, 21, t));
+        acct(&mut r.e, b.vault1, vault(1_005 * SOL), 21, t + 1 * MS, Some(sig(4)), 30);
+        acct(&mut r.e, b.vault0, vault(995_000_000_000_000), 21, t + 1 * MS + 1, Some(sig(4)), 31);
+        assert!(r.e.recent.back().is_some_and(|d| d.txns.contains(&(21, sig8(&sig(4))))));
+        // Y writes A in slot 21, one of its two members so far: pending
+        tx_ev(&mut r.e, shred_tx(sig(5), &[a.vault0, a.vault1], None, 21, t + 2 * MS));
+        acct(&mut r.e, a.vault1, vault(1_010 * SOL), 21, t + 3 * MS, Some(sig(5)), 32);
+        assert!(r.e.tracker.is_pending(&a.vault0));
+        let priced = r.e.counter("fork_priced");
+        r.e.step(Event::Input { kind: InputKind::SlotidxMissing, data: Arc::new(json!({ "slot": 21, "missing": [sigs58(&sig(4)), sigs58(&sig(5))] })) }, t + 4 * MS, &mut nop());
+        assert!(r.e.counter("fork_priced") > priced, "B's decision read X's versions");
+        assert_eq!((r.e.counter("commit_fork_dropped"), r.e.tracker.is_pending(&a.vault0)), (1, false), "Y's group dropped");
+        assert_eq!((r.e.store.get(&b.vault1).unwrap().slot, r.e.store.get(&a.vault1).unwrap().slot), (10, 10));
     }
 
     /// S2 (stacked failed sells, PLAN WP-09; W §7.1: 681 of 822 decoded triggers of 0.1 SOL or more failed on chain):
@@ -3126,6 +3745,8 @@ mod tests {
         let full: Value = serde_json::from_str(&std::fs::read_to_string(run.join("signer-stats.json")).unwrap()).unwrap();
         let delta: Value = serde_json::from_str(&std::fs::read_to_string(run.join("signer-stats-delta.json")).unwrap()).unwrap();
         assert_eq!((full[b58(&SIGNER)].clone(), delta[b58(&SIGNER)].clone()), (json!([4, 1]), json!([1, 0])));
+        assert!(merge_signer_stats(&shared, &[run.clone()]).unwrap_err().to_string().contains("has not ended"), "a running segment is refused");
+        std::fs::write(run.join("stop.json"), "{}").unwrap();
         let out = merge_signer_stats(&shared, &[run.clone()]).unwrap();
         assert_eq!(out[0].1, 1);
         let merged: Value = serde_json::from_str(&std::fs::read_to_string(&shared).unwrap()).unwrap();
@@ -3276,6 +3897,80 @@ mod tests {
         assert_eq!((ri.decision, ri.state_version != 0), (0, true), "RouteIn carries the decision and its state version");
     }
 
+    /// Review WP-04 #13, the engine benchmark on the real shape: the Stage-0 ladder (10 rungs to 4.2 SOL) and caps, 80
+    /// pools at 4 and then 8 per pair, the recorder on, and the real signer file's size (30,304 signers) behind the 10-s
+    /// status line (review #4). Each transaction writes both vaults of one pool (W unknown); the timers 3.5 ms later
+    /// (virtual time) resolve its group and evaluate the pool. The busy time of the two updates and the timers is measured
+    /// per transaction (p50, p99, p99.9 in the test output; the review measured 15 / 22 µs at 4 pools and 22 / 31 µs at 8),
+    /// and the timers calls that wrote a status line separately (about 25 ms each before review #4's fix). The bounds are
+    /// generous: a CI machine runs other tests meanwhile
+    #[test]
+    fn engine_benchmark_stage0_shapes() {
+        const TXS: u64 = 20_000;
+        let mut x = 0x9e3779b97f4a7c15u64;
+        let signers: HashMap<Pk, (u32, u32)> = (0..30_304u32).map(|n| {
+            let mut k = [0u8; 32];
+            for c in k.chunks_mut(8) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; c.copy_from_slice(&x.to_le_bytes()); }
+            (k, (n % 5, n % 3))
+        }).collect();
+        let signers = Arc::new(signers);
+        for per_pair in [4u8, 8] {
+            let dir = std::env::temp_dir().join(format!("arbx-engine-shapes-{per_pair}-{}-{}", std::process::id(), now_ns()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let rec = rec::start(rec::Opts { dir: dir.clone(), run: "bench".into(), producer: "test".into(), cfg: Default::default(), feeds: vec![], monitor: false, echo: None }).unwrap();
+            let mut reg = Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+            let mut store = Store::default();
+            for n in 0..80u8 {
+                let mut m = meta_k(n + 1);
+                m.t0 = { let mut k = MINT; k[0] = n / per_pair; k[1] = 99; k };
+                reg.by_pool.insert(m.pool, n as usize);
+                reg.pairs.entry(pair_key(&m.t0, &WSOL)).or_insert_with(Vec::new).push(n as usize);
+                store.update(m.pool, ammv4_pool(), 10, 1, None);
+                store.update(m.vault0, vault(1_000_000_000_000_000), 10, 1, None);
+                store.update(m.vault1, vault((1_000 + (n % per_pair) as u64 * 3) * SOL), 10, 1, None);
+                reg.pools.push(m);
+            }
+            let cfg = StrategyCfg { state_triggers: true, sizes_sol: vec![0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.2],
+                budget_caps_sol: vec![0.165, 2.1, 4.2, 8.4, 21.0, 42.0, 84.0], min_profit_lamports: 1, ..StrategyCfg::default() };
+            let mut e = Engine::new_offline(Arc::new(reg), store, cfg);
+            e.set_rec(rec.clone());
+            e.min_tip = 1_000;
+            e.tier_a_complete = true;
+            e.set_signer_stats_out(&dir);
+            e.signer_stats = (*signers).clone();
+            e.signer_base = signers.clone();
+            let mut t = T0;
+            slot_ev(&mut e, 11, 0, Some(10), t);
+            let (mut busy, mut status) = (Vec::with_capacity(TXS as usize), Vec::new());
+            for k in 0..TXS {
+                t += 4 * MS;
+                let m = e.reg.pools[(k % 80) as usize].clone();
+                let mut s = [0u8; 64];
+                s[..8].copy_from_slice(&(k + 1).to_le_bytes());
+                let lines = e.status_lines;
+                let a = std::time::Instant::now();
+                e.step(Event::Account { slot: 11, pubkey: m.vault1, owner: [0; 32], lamports: 0, data: vault((1_000 + k % 7) * SOL), t, txn: Some(s), write_version: 2 * k + 10,
+                    is_startup: false, src: 0, aseq: 0, bank_id: None }, t + 10_000, &mut nop());
+                e.step(Event::Account { slot: 11, pubkey: m.vault0, owner: [0; 32], lamports: 0, data: vault(999_000_000_000_000), t: t + 1, txn: Some(s), write_version: 2 * k + 11,
+                    is_startup: false, src: 0, aseq: 0, bank_id: None }, t + 20_000, &mut nop());
+                e.timers(t + 3_500_000, &mut nop());
+                let ns = a.elapsed().as_nanos() as u64;
+                busy.push(ns);
+                if e.status_lines > lines { status.push(ns); }
+            }
+            assert_eq!(e.counter("evaluation"), TXS, "every transaction evaluated");
+            rec.close();
+            busy.sort_unstable();
+            let p = |q: f64| busy[((busy.len() as f64 * q) as usize).min(busy.len() - 1)] / 1_000;
+            let (p50, p99, p999) = (p(0.5), p(0.99), p(0.999));
+            eprintln!("Stage-0 shape, {per_pair} pools per pair, recorder on: busy per transaction p50 {p50} µs, p99 {p99} µs, p99.9 {p999} µs; {} status lines {:?} µs; \
+                opportunities {}", status.len(), status.iter().map(|x| x / 1_000).collect::<Vec<_>>(), e.counter("state_opportunity"));
+            assert!(status.len() >= 7 && status.iter().min().copied().unwrap() < 5_000_000, "a status line costs the engine thread under 5 ms: {status:?} ns");
+            assert!(p99 < 1_000 && p999 < 10_000, "p99 {p99} µs, p99.9 {p999} µs");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
     /// PLAN WP-02 acceptance (F13), the engine benchmark, on WP-04's path: 100k synthetic account updates (50k
     /// transactions, each moving both vaults of one of 40 pools, its write set registered first, so its group completes
     /// on its second update) through `Engine::new_offline`, with the recorder on and off. With it on (commits, decisions,
@@ -3336,7 +4031,8 @@ mod tests {
         }
         let dir = std::env::temp_dir().join(format!("arbx-engine-bench-{}-{}", std::process::id(), now_ns()));
         let best = |v: &[(u64, u64, u64)]| v.iter().map(|x| x.1).min().unwrap();
-        for (what, min_profit, gaps) in [("moves only", u64::MAX / 4, false), ("1% opportunities", 100_000_000, true)] {
+        // (review WP-04 #5: a decision no longer prices past the ladder's top rung, 1 SOL here: a 10% gap nets about 0.085 SOL)
+        for (what, min_profit, gaps) in [("moves only", u64::MAX / 4, false), ("1% opportunities", 50_000_000, true)] {
             let (mut off, mut on) = (Vec::new(), Vec::new());
             for _ in 0..3 {
                 off.push(bench(Rec::off(), min_profit, gaps));

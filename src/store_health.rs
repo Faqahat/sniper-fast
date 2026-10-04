@@ -6,6 +6,13 @@
 //!   task says so through journaled `health` inputs) or its newest message (account update or slot status) is more
 //!   than `max_update_age_ms` old; nothing is priced or sent then, a WARNING goes to run.log, and a run whose stream
 //!   delivers nothing within `boot_timeout_s` of the engine's start stops with reason `state_unavailable`.
+//! - **Re-read** (I-4; review WP-04 #1). The stream does not resend the writes made while it was down, nor those made
+//!   between the boot snapshot and its first subscription. On every (re)connection, the boot's first included, every
+//!   followed account is read again over RPC (chunked by pool) and the gate stays shut (`resync`) until every chunk has
+//!   landed (or, after `resync_give_up_s`, given up: its accounts stay refused one by one, reason `resync`, until the
+//!   stream writes them). Each account is unverified until the re-read or a stream write after the (re)connection
+//!   brings it: a pool with an unverified part is refused (`resync`), so a pool idle since the outage is never priced on
+//!   its pre-outage version.
 //! - **Warm-up** (item 8). `ready` turns on when every Tier-A pool has all its parts, the store is within
 //!   `max_tip_lag_slots` of the chain tip and the state is available; until then decisions are refused with `warmup`
 //!   and nothing is sent. A Tier-A pool whose parts are still missing `tier_a_grace_s` after the start is dropped from
@@ -19,14 +26,18 @@
 //! on its own thread before each send check, so a replay's checks see the same values (WP-05's `send_checks` takes it).
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
 
-/// why the gate is shut (HealthFlags reason)
+/// why the gate is shut (HealthFlags reason). `Resync` (review WP-04 #1): the state stream (re)connected and the re-read
+/// of every followed account has not landed yet (writes made while the stream was down, or before it first subscribed,
+/// are not resent: until the re-read lands, the store cannot tell a pool written meanwhile from an idle one)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
-pub enum Shut { Ready = 0, Warmup = 1, StateUnavailable = 2 }
+pub enum Shut { Ready = 0, Warmup = 1, StateUnavailable = 2, Resync = 3 }
 
 impl Shut {
-    pub fn as_str(self) -> &'static str { match self { Shut::Ready => "ready", Shut::Warmup => "warmup", Shut::StateUnavailable => "state_unavailable" } }
-    fn from_u8(x: u8) -> Shut { match x { 0 => Shut::Ready, 1 => Shut::Warmup, _ => Shut::StateUnavailable } }
+    pub fn as_str(self) -> &'static str {
+        match self { Shut::Ready => "ready", Shut::Warmup => "warmup", Shut::StateUnavailable => "state_unavailable", Shut::Resync => "resync" }
+    }
+    fn from_u8(x: u8) -> Shut { match x { 0 => Shut::Ready, 1 => Shut::Warmup, 3 => Shut::Resync, _ => Shut::StateUnavailable } }
 }
 
 /// The engine's health as the executor reads it (`Exec::wants_send`)
@@ -171,5 +182,7 @@ mod tests {
         assert_eq!(f.shut(), Shut::StateUnavailable);
         f.set(Shut::Ready);
         assert!(f.ready());
+        f.set(Shut::Resync);
+        assert_eq!((f.ready(), f.shut(), f.shut().as_str()), (false, Shut::Resync, "resync"));
     }
 }

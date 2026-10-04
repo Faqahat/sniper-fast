@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use arbx::control::{self, StopInfo, StopReason};
 use arbx::feeds::clock::now_ns;
-use arbx::{build, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, rec, rpc, runtime, send, store, tx, venues, wallet};
+use arbx::{build, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, reads, rec, rpc, runtime, send, store, tx, venues, wallet};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -142,7 +142,8 @@ enum Cmd {
     },
     /// Fold segments' signer statistics into the shared file (PLAN-ADDENDUM I-5): each run directory's
     /// `signer-stats-delta.json` (that segment's own counts) is added to --into, written atomically; a merged run is
-    /// marked (`signer-stats.merged.json`) and refused a second time. Runs never write the shared file themselves
+    /// marked (`signer-stats.merged.json`) and refused a second time, and a run without `stop.json` (still running) is
+    /// refused. Runs never write the shared file themselves
     SignerStats {
         /// merge (the only action)
         action: String,
@@ -200,11 +201,13 @@ fn main() -> Result<()> {
                 st.watch_programdata, st.watch_wallet, st.slot_statuses, st.block_meta);
             if cfg.leaders.enabled { println!("leaders: lists {:?} every {} min, static fallback {}", cfg.leaders.validator_lists, cfg.leaders.refresh_min, cfg.leaders.static_fallback); }
             // WP-04: state consistency, the state-health gate (I-4), lookup-table retries (I-6), the accuracy monitor
-            println!("state consistency: commit timeout {} ms, quiescence {} ms, part skew <= {} slots, tip lag <= {} slots, clock <= {} slots; lag SLO p50 {} / p90 {} ms ({}); stop if no state update within {} s, price nothing past {} ms without one, resnapshot on reconnect {}",
+            println!("state consistency: commit timeout {} ms, quiescence {} ms, part skew <= {} slots, tip lag <= {} slots, clock <= {} slots; lag SLO p50 {} / p90 {} ms ({}); stop if no state update within {} s, price nothing past {} ms without one, re-read after every connection {} (warn {} s, give up {} s); {}",
                 st.commit_timeout_ms, st.quiescence_ms, st.max_part_skew_slots, st.max_tip_lag_slots, st.clock_max_age_slots, st.lag_slo_p50_ms, st.lag_slo_p90_ms, st.slo_action,
-                st.boot_timeout_s, st.max_update_age_ms, st.resnapshot);
-            println!("lookup tables: retries {:?} ms then every {} s, give up after {} s, at most {} waiting, {} fetches at once, preload {:?}; accuracy {} ({} versions per account)",
-                cfg.alts.retry_ms, cfg.alts.retry_every_s, cfg.alts.give_up_s, cfg.alts.wait_cap, cfg.alts.max_inflight, cfg.alts.preload, cfg.accuracy.action, cfg.accuracy.ring_versions);
+                st.boot_timeout_s, st.max_update_age_ms, st.resnapshot, st.resync_warn_s, st.resync_give_up_s,
+                if st.unavailable_stop_s == 0 { "an outage after the first message does not stop the run".to_string() } else { format!("stop after {} s unavailable", st.unavailable_stop_s) });
+            println!("lookup tables: retries {:?} ms then every {} s, give up after {} s, at most {} waiting, {} fetches at once, preload {:?} (used in the last {} h, at most {}); accuracy {} ({} versions per account)",
+                cfg.alts.retry_ms, cfg.alts.retry_every_s, cfg.alts.give_up_s, cfg.alts.wait_cap, cfg.alts.max_inflight, cfg.alts.preload, cfg.alts.preload_max_age_h,
+                cfg.alts.preload_max_tables, cfg.accuracy.action, cfg.accuracy.ring_versions);
             for s in &cfg.sends {
                 let tip = match (s.tip_share, s.tip_lamports) { (Some(x), l) => format!("{:.0}% of the edge, {l}..{} lamports", x * 100.0, s.tip_max_lamports.unwrap_or(u64::MAX)), (None, 0) => "no tip".into(), (None, l) => format!("tip {l} lamports") };
                 let rate = s.max_per_sec.map(|n| format!(", max {n}/s")).unwrap_or_default();
@@ -875,9 +878,15 @@ fn boot_account(store: &mut store::Store, ar: &rec::accounts::AcctRec, j: &rec::
     store.apply(k, store::Acct::rpc(data, slot, t, aseq, src));
 }
 
+/// a preloaded lookup table: its address, its entries (gaps kept), when a transaction last used it (ns)
+type Preloaded = (tx::Pk, Vec<Option<tx::Pk>>, Option<u64>);
+
 /// PLAN-ADDENDUM I-6: the lookup tables of a previous segment's `alts-final.jsonl.zst` (`[alts] preload`: "auto" = the
-/// newest one among this run directory's siblings, a path, or "" for none). Returns the file and its tables
-fn alts_preload(cfg: &config::AltsCfg, dir: &Path) -> Option<(PathBuf, Vec<(tx::Pk, Vec<Option<tx::Pk>>)>)> {
+/// newest one among this run directory's siblings, a path, or "" for none). Review WP-04 #11: only the tables a
+/// transaction used within `preload_max_age_h` of `now_ns` (a table without `last_used_ns`, from an older file, counts as
+/// used when the file was written), the `preload_max_tables` most recently used. Returns the file, its tables, and how
+/// many it held
+fn alts_preload(cfg: &config::AltsCfg, dir: &Path, now: u64) -> Option<(PathBuf, Vec<Preloaded>, usize)> {
     let file = match cfg.preload.as_str() {
         "" => return None,
         "auto" => {
@@ -894,15 +903,22 @@ fn alts_preload(cfg: &config::AltsCfg, dir: &Path) -> Option<(PathBuf, Vec<(tx::
         p => PathBuf::from(p),
     };
     let (bytes, _) = if file.extension().is_some_and(|e| e == "zst") { rec::decode_zst(&file).ok()? } else { (std::fs::read(&file).ok()?, 0) };
+    let written = std::fs::metadata(&file).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as u64);
     let mut out = Vec::new();
     for l in bytes.split(|b| *b == b'\n').filter(|l| !l.is_empty()) {
         let Ok(v) = serde_json::from_slice::<Value>(l) else { continue };
         let Some(t) = v["table"].as_str().and_then(|t| bs58::decode(t).into_vec().ok()).and_then(|b| tx::Pk::try_from(b).ok()) else { continue };
         let addrs: Vec<Option<tx::Pk>> = v["addrs"].as_array().into_iter().flatten()
             .map(|a| a.as_str().and_then(|s| bs58::decode(s).into_vec().ok()).and_then(|b| tx::Pk::try_from(b).ok())).collect();
-        out.push((t, addrs));
+        out.push((t, addrs, v["last_used_ns"].as_u64().or(written)));
     }
-    Some((file, out))
+    let held = out.len();
+    let oldest = now.saturating_sub(cfg.preload_max_age_h.saturating_mul(3_600_000_000_000));
+    out.retain(|x| x.2.is_some_and(|u| u >= oldest));
+    // the most recently used first (then by address: deterministic), at most preload_max_tables
+    out.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
+    out.truncate(cfg.preload_max_tables);
+    Some((file, out, held))
 }
 
 fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
@@ -1049,14 +1065,25 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         // the snapshot leaves out the programdata accounts (megabytes each; the stream reports their upgrades)
         let keys: Vec<tx::Pk> = base.iter().copied().filter(|k| roles.get(k).map_or(true, |r| r.role != rec::accounts::role::PROGRAMDATA)).collect();
         acct_rec.mark(rec::accounts::MARK_BOOT_BEGIN, &[]);
-        let (slot, accts) = rpc.accounts(&keys).await?;
-        for (k, a) in keys.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, slot); } }
+        // 100 accounts per call, paced; each labelled with its own call's context slot (review WP-04 #1c: one label, the
+        // last call's, put early accounts at a slot they were not read at). The stream's first connection reads them all
+        // again (the engine's re-read), closing the gap between this snapshot and the subscription
+        let mut slot = 0;
+        for (n, chunk) in keys.chunks(reads::CHUNK).enumerate() {
+            if n > 0 { tokio::time::sleep(std::time::Duration::from_millis(120)).await; }
+            let (s, accts) = rpc.accounts(chunk).await?;
+            slot = slot.max(s);
+            for (k, a) in chunk.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, s); } }
+        }
         engine::initial_dlmm_arrays(&reg, &mut store);
         let arr: Vec<tx::Pk> = store.dlmm_arrays.values().flatten().map(|x| x.1).collect();
         roles.add(store.dlmm_arrays.iter().flat_map(|(p, l)| { let pi = reg.by_pool.get(p).map_or(rec::accounts::NO_POOL, |i| *i as u32);
             l.iter().map(move |(_, k)| (*k, rec::accounts::RoleOf { role: rec::accounts::role::DLMM_BIN_ARRAY, pool_index: pi })) }).collect::<Vec<_>>());
-        let (slot2, accts) = rpc.accounts(&arr).await?;
-        for (k, a) in arr.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, slot2); } }
+        for chunk in arr.chunks(reads::CHUNK) {
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            let (s, accts) = rpc.accounts(chunk).await?;
+            for (k, a) in chunk.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, s); } }
+        }
         acct_rec.mark(rec::accounts::MARK_BOOT_END, &[]);
         boot_extra = Some((roles, acct_rec, base, extra.len()));
         anyhow::Ok((reg, store, slot))
@@ -1237,13 +1264,15 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         say(&format!("signer statistics: read {} (sha256 {}); this segment writes signer-stats.json and signer-stats-delta.json here (`arbx signer-stats merge` folds the delta back)",
             cfg.strategy.signer_stats_file, eng.signer_stats_sha256().unwrap_or("none: not read")));
     }
-    match alts_preload(&cfg.alts, &dir) {
-        Some((file, tables)) => {
+    match alts_preload(&cfg.alts, &dir, now_ns()) {
+        Some((file, tables, held)) => {
             let n = tables.len();
             // journaled with the boot records (ALT found 3): a replay starts from the same tables
-            for (t, v) in tables { eng.preload_alt(t, v, true); }
-            say(&format!("lookup tables: preloaded {n} from {}", file.display()));
-            rec.event("alts_preload", "engine", None, json!({ "file": file.display().to_string(), "tables": n, "sha256": provenance::file_sha256(&file).ok().map(|x| x.0) }));
+            for (t, v, used) in tables { eng.preload_alt(t, v, used, true); }
+            say(&format!("lookup tables: preloaded {n} of the {held} in {} (used in the last {} h, at most {})", file.display(), cfg.alts.preload_max_age_h,
+                cfg.alts.preload_max_tables));
+            rec.event("alts_preload", "engine", None, json!({ "file": file.display().to_string(), "tables": n, "held": held,
+                "sha256": provenance::file_sha256(&file).ok().map(|x| x.0) }));
         }
         None => say(&format!("lookup tables: nothing preloaded ([alts] preload {:?})", cfg.alts.preload)),
     }
@@ -1468,7 +1497,7 @@ mod tests {
         let body = &src[src.find("\nfn run(a: &RunArgs").expect("run")..];
         let body = &body[..body.find("\n#[cfg(test)]").unwrap_or(body.len())];
         let at = |needle: &str| body.find(needle).unwrap_or_else(|| panic!("{needle} not in run()"));
-        let order = ["rpc.accounts(&arr)", "feeds::start_state(", "provenance::route_spec(", "send::Paths::new(", "exec::Exec::new(",
+        let order = ["for chunk in arr.chunks(", "feeds::start_state(", "provenance::route_spec(", "send::Paths::new(", "exec::Exec::new(",
             "write_atomic(&dir.join(\"meta.json\")", "feeds::start(&cfg.feeds", "fetch_programs_cached(", "engine::Engine::new("];
         for w in order.windows(2) { assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]); }
         // nothing that waits on the network between the snapshot and the stream
@@ -1508,13 +1537,23 @@ mod tests {
         };
         write(&old, &format!("{{\"table\":\"{}\",\"addrs\":[\"{}\"]}}\n", k(1), k(2)));
         std::thread::sleep(std::time::Duration::from_millis(20));
-        write(&prev, &format!("{{\"schema\":\"arbx.alts-final/1.1\"}}\n{{\"table\":\"{}\",\"addrs\":[\"{}\",null,\"{}\"]}}\n", k(3), k(4), k(5)));
+        // review WP-04 #11: tables used more than 24 h ago are left out, the most recently used kept first (at most
+        // preload_max_tables); a table without last_used_ns counts as used when its file was written
+        let now = now_ns();
+        let h = 3_600_000_000_000u64;
+        write(&prev, &format!("{{\"schema\":\"arbx.alts-final/1.1\"}}\n{{\"table\":\"{}\",\"addrs\":[\"{}\",null,\"{}\"],\"last_used_ns\":{}}}\n\
+            {{\"table\":\"{}\",\"addrs\":[\"{}\"],\"last_used_ns\":{}}}\n{{\"table\":\"{}\",\"addrs\":[\"{}\"],\"last_used_ns\":null}}\n\
+            {{\"table\":\"{}\",\"addrs\":[\"{}\"],\"last_used_ns\":{}}}\n", k(3), k(4), k(5), now - h, k(6), k(7), now - 25 * h, k(8), k(9), k(10), k(11), now - 2 * h));
         let cfg = config::AltsCfg::default();
-        let (file, tables) = alts_preload(&cfg, &me).expect("found");
+        let (file, tables, held) = alts_preload(&cfg, &me, now).expect("found");
         assert_eq!(file, prev.join("alts-final.jsonl.zst"), "the newest sibling");
-        assert_eq!(tables, vec![([3u8; 32], vec![Some([4u8; 32]), None, Some([5u8; 32])])]);
-        assert!(alts_preload(&config::AltsCfg { preload: String::new(), ..cfg.clone() }, &me).is_none());
-        let (_, t) = alts_preload(&config::AltsCfg { preload: old.join("alts-final.jsonl.zst").display().to_string(), ..cfg }, &me).unwrap();
+        assert_eq!(held, 4);
+        assert_eq!(tables.iter().map(|t| t.0).collect::<Vec<_>>(), vec![[8u8; 32], [3u8; 32], [10u8; 32]], "the 25 h old one left out; newest first");
+        assert_eq!(tables[1], ([3u8; 32], vec![Some([4u8; 32]), None, Some([5u8; 32])], Some(now - h)));
+        let (_, capped, _) = alts_preload(&config::AltsCfg { preload_max_tables: 2, ..cfg.clone() }, &me, now).unwrap();
+        assert_eq!(capped.len(), 2);
+        assert!(alts_preload(&config::AltsCfg { preload: String::new(), ..cfg.clone() }, &me, now).is_none());
+        let (_, t, _) = alts_preload(&config::AltsCfg { preload: old.join("alts-final.jsonl.zst").display().to_string(), ..cfg }, &me, now).unwrap();
         assert_eq!(t[0].0, [1u8; 32]);
         let _ = std::fs::remove_dir_all(&root);
     }

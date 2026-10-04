@@ -234,6 +234,81 @@ pub fn stream(p: &Proto) -> Vec<(u64, Vec<u8>)> {
     }).collect()
 }
 
+/// A PumpSwap transaction writing `writable` (after the signer; the program, ComputeBudget and Token programs read
+/// only): the transaction stream's message for a route through several pools (review WP-04 #6)
+fn route_tx<'a>(p: &'a Proto, s: [u8; 64], slot: u64, idx: u64, writable: &[[u8; 32]]) -> M<'a> {
+    let mut keys = vec![k(SIGNER)];
+    keys.extend_from_slice(writable);
+    let prog = keys.len() as u64;
+    keys.extend([pumpswap(), crate::tx::COMPUTE_BUDGET, token()]);
+    let mut msg = p.msg("Message").msg("header", p.msg("MessageHeader").u64("num_required_signatures", 1).u64("num_readonly_unsigned_accounts", 3));
+    for key in &keys { msg = msg.bytes("account_keys", key); }
+    let accounts: Vec<u8> = (0..prog as u8).collect();
+    msg = msg.bytes("recent_blockhash", &k(0x33)).msg("instructions", p.msg("CompiledInstruction").u64("program_id_index", prog).bytes("accounts", &accounts).bytes("data", &[0x66, 1, 2, 3]));
+    let tx = p.msg("Transaction").bytes("signatures", &s).msg("message", msg);
+    let meta = p.msg("TransactionStatusMeta").u64("fee", 5_000).u64("compute_units_consumed", 60_000);
+    let info = p.msg("SubscribeUpdateTransactionInfo").bytes("signature", &s).msg("transaction", tx).msg("meta", meta).u64("index", idx);
+    p.msg("SubscribeUpdate").msg("transaction", p.msg("SubscribeUpdateTransaction").msg("transaction", info).u64("slot", slot))
+}
+
+/// review WP-04 #6: pools A (POOL, VAULT0, VAULT1), B and C of the WP-04 sequences
+pub const POOL_B: u8 = 0x64;
+pub const VAULT_B0: u8 = 0x65;
+pub const VAULT_B1: u8 = 0x66;
+pub const POOL_C: u8 = 0x67;
+pub const VAULT_C0: u8 = 0x68;
+pub const VAULT_C1: u8 = 0x69;
+/// the split route (S1), the transaction on C, the unknown-W transaction with a late member (S1b'), the minority fork's
+pub const T3: u8 = 0x95;
+pub const U: u8 = 0x96;
+pub const T4: u8 = 0x97;
+pub const T5: u8 = 0x98;
+
+/// The WP-04 sequences as the state and transaction streams deliver them (review WP-04 #6; `testdata/grpc/wp04.bin`):
+/// - **S1** (slot 2000): T3, a route through pools A and B, writes both pools' accounts; its transaction-stream message
+///   (W(T3) authoritative) comes after its first two updates; U writes C meanwhile and resolves (quiescence, by stream
+///   evidence) while T3 still misses B's vaults: C's routes through A and B are `pending_commit`; T3 then completes;
+/// - **S1b'** (slot 2001): T4 writes A's vault1 (W unknown), resolves by quiescence, then its A vault0 write arrives: a
+///   late member;
+/// - **S8b** (slots 2002, 2003, siblings on 2001): T5 writes A in 2002, A's routes are `fork_pending` while both are
+///   unconfirmed; 2003 is confirmed and 2002 abandoned with no `dead` status: A's 2002 versions are dropped.
+pub fn wp04_stream(p: &Proto) -> Vec<(u64, Vec<u8>)> {
+    let acct = |key: u8, amount: u64, wv: u64, txn: u8, slot: u64| account(p, k(key), token(), 2_039_280, &vault_data(amount), wv, Some(sig(txn)), slot, false);
+    let pool = |key: u8, wv: u64, txn: u8, slot: u64| account(p, k(key), pumpswap(), 3_000_000, &[8u8; 300], wv, Some(sig(txn)), slot, false);
+    // (receive time after T0 in µs, message): T3's updates within its 5 ms commit timeout; U's (W unknown) quiet 3 ms
+    // before T3's last two; T4 quiet 3 ms before its late write; T5 quiet 3 ms before 2003 is processed
+    let v: Vec<(u64, M)> = vec![
+        (0, slot(p, 2_000, Some(1_999), 1, None)),
+        (1_000, acct(VAULT0, 1_100_000, 201, T3, 2_000)),
+        (1_200, acct(VAULT1, 1_900_000, 202, T3, 2_000)),
+        (1_400, route_tx(p, sig(T3), 2_000, 5, &[k(POOL), k(VAULT0), k(VAULT1), k(POOL_B), k(VAULT_B0), k(VAULT_B1)])),
+        (1_600, acct(VAULT_C0, 1_050_000, 203, U, 2_000)),
+        (1_800, acct(VAULT_C1, 1_950_000, 204, U, 2_000)),
+        (2_000, pool(POOL, 205, T3, 2_000)),
+        (2_200, pool(POOL_B, 206, T3, 2_000)),
+        (5_000, acct(VAULT_B0, 900_000, 207, T3, 2_000)),
+        (5_200, acct(VAULT_B1, 2_100_000, 208, T3, 2_000)),
+        (6_000, slot(p, 2_001, Some(2_000), 0, None)),
+        (7_000, acct(VAULT1, 1_910_000, 209, T4, 2_001)),
+        (8_000, slot(p, 2_001, Some(2_000), 1, None)),
+        (9_000, slot(p, 2_002, Some(2_001), 3, None)),
+        (10_000, slot(p, 2_002, Some(2_001), 5, None)),
+        (11_000, acct(VAULT0, 1_090_000, 210, T4, 2_001)),
+        (12_000, acct(VAULT0, 1_000_000, 211, T5, 2_002)),
+        (12_200, acct(VAULT1, 2_000_000, 212, T5, 2_002)),
+        (13_000, slot(p, 2_003, Some(2_001), 3, None)),
+        (14_000, slot(p, 2_002, Some(2_001), 0, None)),
+        (15_500, slot(p, 2_003, Some(2_001), 0, None)),
+        (16_000, slot(p, 2_003, Some(2_001), 1, None)),
+        (17_000, slot(p, 2_004, Some(2_003), 0, None)),
+    ];
+    v.into_iter().map(|(us, m)| {
+        let t = T0 + us * 1_000;
+        (t, m.msg("created_at", created(p, t - 2_000_000)).done())
+    }).collect()
+}
+pub fn wp04_file_path() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/grpc/wp04.bin") }
+
 /// testdata/grpc/stream.bin: `u64 t_recv | u32 len | SubscribeUpdate bytes`, repeated
 pub fn encode_file(s: &[(u64, Vec<u8>)]) -> Vec<u8> {
     let mut o = Vec::new();

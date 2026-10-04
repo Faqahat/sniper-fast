@@ -7,7 +7,9 @@
 //! - at most `max_inflight` fetches run at once; the rest queue;
 //! - transactions wait while their table's fetch or retry is pending (at most `wait_cap` of them, the oldest dropped
 //!   and counted) and are dropped only when the table is given up;
-//! - the previous segment's `alts-final` can be preloaded at boot;
+//! - the previous segment's `alts-final` can be preloaded at boot: the tables a transaction used in the last
+//!   `[alts] preload_max_age_h` hours, at most `preload_max_tables` (review WP-04 #11: `last_used` is kept per table and
+//!   written to alts-final, so the preloaded set no longer grows across a campaign);
 //! - every transition is an `alts.jsonl` event (MEASUREMENT §4.26); the full dump stays `alts-final` at stop.
 //! The retry times are engine times, checked by the engine's timers: deterministic under replay (the journal holds the
 //! fetch answers as ALT records).
@@ -43,7 +45,6 @@ enum St {
     Queued(u32),
     /// failed `n` times; the next attempt at `at`
     Retry { n: u32, at: u64 },
-    GaveUp,
 }
 
 /// One alts.jsonl event (MEASUREMENT §4.26)
@@ -58,7 +59,10 @@ pub struct Alts<W> {
     pub policy: Policy,
     /// tables, possibly partial: entries learned from feeds that send loaded addresses, or the whole table from a fetch
     pub tables: HashMap<Pk, Vec<Option<Pk>>>,
+    /// the tables being fetched, queued or retried (with when their first attempt started); given-up ones are kept apart
+    /// (`given_up`), so the per-input scans (`next_retry`) see only the work in progress (review WP-04 N6)
     st: HashMap<Pk, (St, u64)>,
+    given_up: rustc_hash::FxHashSet<Pk>,
     /// tables waiting for a free fetch slot, in order
     queue: VecDeque<Pk>,
     inflight: usize,
@@ -68,6 +72,9 @@ pub struct Alts<W> {
     wait_seq: u64,
     n_waiting: usize,
     pub events: Vec<Ev>,
+    /// when a transaction last used each table (engine time; a preloaded table's from the previous segment's file):
+    /// alts-final's `last_used_ns`, what the next segment's preload filters on
+    pub last_used: HashMap<Pk, u64>,
     /// totals: waiters dropped by the cap and by a give-up
     pub dropped_cap: u64,
     pub dropped_gave_up: u64,
@@ -75,14 +82,14 @@ pub struct Alts<W> {
 
 impl<W> Alts<W> {
     pub fn new(policy: Policy) -> Alts<W> {
-        Alts { policy, tables: HashMap::default(), st: HashMap::default(), queue: VecDeque::new(), inflight: 0, waiting: HashMap::default(), wait_order: VecDeque::new(),
-            wait_seq: 0, n_waiting: 0, events: Vec::new(), dropped_cap: 0, dropped_gave_up: 0 }
+        Alts { policy, tables: HashMap::default(), st: HashMap::default(), given_up: Default::default(), queue: VecDeque::new(), inflight: 0, waiting: HashMap::default(),
+            wait_order: VecDeque::new(), wait_seq: 0, n_waiting: 0, events: Vec::new(), last_used: HashMap::default(), dropped_cap: 0, dropped_gave_up: 0 }
     }
 
     pub fn inflight(&self) -> usize { self.inflight }
     pub fn waiting_txs(&self) -> usize { self.n_waiting }
     pub fn pending_retries(&self) -> usize { self.st.values().filter(|s| matches!(s.0, St::Retry { .. } | St::Queued(_))).count() }
-    pub fn gave_up(&self) -> usize { self.st.values().filter(|s| s.0 == St::GaveUp).count() }
+    pub fn gave_up(&self) -> usize { self.given_up.len() }
 
     fn ev(&mut self, table: Pk, event: &'static str, attempt: u32, next_retry_ms: Option<u64>, err: Option<String>) {
         let waiting = self.waiting.get(&table).map_or(0, |v| v.len());
@@ -94,7 +101,7 @@ impl<W> Alts<W> {
     /// fetch starts for every one that is not known, fetched or retried already (`fetch` collects the tables to fetch
     /// now). Dropped when one of them was given up
     pub fn need(&mut self, missing: &[Pk], w: W, t: u64, fetch: &mut Vec<Pk>) -> Need {
-        if missing.iter().any(|m| self.st.get(m).is_some_and(|s| s.0 == St::GaveUp)) { return Need::Drop("alt_gave_up"); }
+        if missing.iter().any(|m| self.given_up.contains(m)) { return Need::Drop("alt_gave_up"); }
         for m in missing {
             if self.st.contains_key(m) { continue; }
             self.start(*m, 1, t, fetch);
@@ -149,7 +156,8 @@ impl<W> Alts<W> {
                 let (what, err) = match &a { Answer::Missing => ("fetch_missing", None), Answer::Error(e) => ("fetch_error", Some(e.clone())), _ => unreachable!() };
                 self.ev(table, what, attempt, None, err);
                 if t.saturating_sub(first_t) >= self.policy.give_up_s * 1_000_000_000 {
-                    self.st.insert(table, (St::GaveUp, first_t));
+                    self.st.remove(&table);
+                    self.given_up.insert(table);
                     self.ev(table, "give_up", attempt, None, None);
                     let n = self.take_waiters(&table).len();
                     if n > 0 { self.dropped_gave_up += n as u64; self.ev(table, "waiters_dropped", attempt, None, Some("give_up".into())); }
@@ -195,19 +203,28 @@ impl<W> Alts<W> {
 
     /// entries learned from a feed that sends loaded addresses: a table being retried or given up is known again
     pub fn learned(&mut self, table: Pk) {
-        if matches!(self.st.get(&table), Some((St::Retry { .. } | St::GaveUp | St::Queued(_), _))) {
+        if matches!(self.st.get(&table), Some((St::Retry { .. } | St::Queued(_), _))) || self.given_up.contains(&table) {
             self.st.remove(&table);
+            self.given_up.remove(&table);
             self.queue.retain(|k| *k != table);
         }
         self.ev(table, "learned_feed", 0, None, None);
     }
 
-    /// a table from the previous segment's alts-final (boot)
-    pub fn preload(&mut self, table: Pk, addrs: Vec<Option<Pk>>) {
+    /// a table from the previous segment's alts-final (boot), with when it was last used there
+    pub fn preload(&mut self, table: Pk, addrs: Vec<Option<Pk>>, last_used: Option<u64>) {
         let mut v = addrs;
         v.resize(256.max(v.len()), None);
         self.tables.insert(table, v);
+        if let Some(t) = last_used { self.last_used.insert(table, t); }
         self.ev(table, "preloaded", 0, None, None);
+    }
+
+    /// a transaction used `table` at `t` (its addresses resolved one)
+    #[inline]
+    pub fn used(&mut self, table: Pk, t: u64) {
+        let e = self.last_used.entry(table).or_insert(t);
+        if t > *e { *e = t; }
     }
 
     /// a digest of the state (replay determinism)
@@ -218,6 +235,9 @@ impl<W> Alts<W> {
         let mut s: Vec<(&Pk, &(St, u64))> = self.st.iter().collect();
         s.sort_by(|a, b| a.0.cmp(b.0));
         for (k, (st, t0)) in s { x.update(k); x.update(format!("{st:?}").as_bytes()); x.update(&t0.to_le_bytes()); }
+        let mut g: Vec<&Pk> = self.given_up.iter().collect();
+        g.sort();
+        for k in g { x.update(k); x.update(b"GaveUp"); }
         x.update(&(self.n_waiting as u64).to_le_bytes());
     }
 }

@@ -97,10 +97,15 @@ slo_recover_minutes = 10
 tier_a_grace_s = 60       # a pool whose parts are still missing after this leaves Tier A (the warm-up gate)
 # PLAN-ADDENDUM I-4: stop (state_unavailable, exit 30) if the state stream delivers nothing within boot_timeout_s; price
 # and send nothing while it is down or its newest message is older than max_update_age_ms; read every account again
-# after a reconnect
+# after the stream's first connection and every reconnection (review WP-04 #1: the gate is `resync`, and a pool with a
+# part not read again is refused, until the re-read lands; a WARNING after resync_warn_s; a chunk still failing
+# resync_give_up_s after the start is given up, its accounts staying refused until the stream writes them)
 boot_timeout_s = 60
 max_update_age_ms = 2000
 resnapshot = true
+resync_warn_s = 10
+resync_give_up_s = 300
+unavailable_stop_s = 0    # review WP-04 #10, owner decision: stop (state_unavailable) after this long unavailable; 0 never
 
 # WP-03 item 3: the executed-transaction stream (arb-lab's `haan-grpc` [[feed]]; it runs as a feed after the [[feed]] list,
 # so its feed id is unchanged). Haan's plan allows 1 transaction filter with 1 account: PumpSwap (the busiest venue).
@@ -488,13 +493,16 @@ bg_threads = 3
 [alts]
 # WP-04 item 7 / PLAN-ADDENDUM I-6: a failed lookup-table fetch is retried (50 ms, 250 ms, 1 s, 5 s, then every 30 s)
 # and given up after 10 minutes, never cached as missing for the run; at most 16 fetches at once; transactions wait for
-# their tables (at most wait_cap); the newest sibling segment's alts-final is preloaded
+# their tables (at most wait_cap); the newest sibling segment's alts-final is preloaded: the tables a transaction used in
+# the last preload_max_age_h hours, at most preload_max_tables (review WP-04 #11: the set no longer grows per segment)
 retry_ms = [50, 250, 1000, 5000]
 retry_every_s = 30
 give_up_s = 600
 wait_cap = 10000
 max_inflight = 16
 preload = "auto"
+preload_max_age_h = 24
+preload_max_tables = 5000
 
 [accuracy]
 # WP-04 item 13: hints scored against their transaction's pre-state (the 8-version rings); log only in Stage 0 (OD-8)

@@ -23,6 +23,7 @@ pub mod pda;
 pub mod pools;
 pub mod probe;
 pub mod provenance;
+pub mod reads;
 pub mod rec;
 pub mod rpc;
 pub mod runtime;

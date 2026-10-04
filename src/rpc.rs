@@ -330,3 +330,104 @@ fn parse_account(v: &Value) -> Option<Account> {
     let owner: Pk = bs58::decode(v["owner"].as_str()?).into_vec().ok()?.try_into().ok()?;
     Some(Account { owner, lamports: v["lamports"].as_u64().unwrap_or(0), data })
 }
+
+/// Test support (review WP-04 #1): a JSON-RPC server on 127.0.0.1 that answers getMultipleAccounts from `accounts` at
+/// `slot` (one HTTP/1.1 request per connection), so a run-level test reads accounts through the real client. While
+/// `fail_next` is above 0 a call is answered HTTP 500 (and the counter goes down); a call naming an account of
+/// `fail_keys` is answered HTTP 500 once (the account leaves the set)
+#[cfg(test)]
+pub(crate) mod mock {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+    use std::sync::{Arc, Mutex};
+
+    pub struct MockRpc {
+        pub url: String,
+        /// account -> (data, owner, lamports)
+        pub accounts: Arc<Mutex<std::collections::HashMap<Pk, (Vec<u8>, Pk, u64)>>>,
+        pub slot: Arc<AtomicU64>,
+        pub fail_next: Arc<AtomicU64>,
+        pub fail_keys: Arc<Mutex<std::collections::HashSet<Pk>>>,
+        pub calls: Arc<AtomicU64>,
+        stop: Arc<AtomicBool>,
+        addr: std::net::SocketAddr,
+    }
+
+    impl MockRpc {
+        pub fn start() -> MockRpc {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = l.local_addr().unwrap();
+            let m = MockRpc { url: format!("http://{addr}"), accounts: Default::default(), slot: Arc::new(AtomicU64::new(0)), fail_next: Default::default(),
+                fail_keys: Default::default(), calls: Default::default(), stop: Default::default(), addr };
+            let (accounts, slot, fail, fail_keys, calls, stop) = (m.accounts.clone(), m.slot.clone(), m.fail_next.clone(), m.fail_keys.clone(), m.calls.clone(), m.stop.clone());
+            std::thread::spawn(move || {
+                for c in l.incoming() {
+                    if stop.load(Relaxed) { break; }
+                    let Ok(mut c) = c else { continue };
+                    let _ = c.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                    let mut buf = Vec::new();
+                    let mut b = [0u8; 4096];
+                    // the headers, then Content-Length bytes of body
+                    let body = loop {
+                        let Ok(n) = c.read(&mut b) else { break None };
+                        if n == 0 { break None; }
+                        buf.extend_from_slice(&b[..n]);
+                        let Some(h) = buf.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                        let head = String::from_utf8_lossy(&buf[..h]).to_ascii_lowercase();
+                        let len: usize = head.lines().find_map(|l| l.strip_prefix("content-length:").map(|v| v.trim().parse().unwrap_or(0))).unwrap_or(0);
+                        if buf.len() >= h + 4 + len { break Some(buf[h + 4..h + 4 + len].to_vec()); }
+                    };
+                    let Some(body) = body else { continue };
+                    calls.fetch_add(1, Relaxed);
+                    let req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                    let named: Vec<Pk> = req["params"][0].as_array().into_iter().flatten().filter_map(|k| k.as_str())
+                        .filter_map(|s| bs58::decode(s).into_vec().ok()?.try_into().ok()).collect();
+                    let key_fail = { let mut f = fail_keys.lock().unwrap(); let hit = named.iter().find(|k| f.contains(*k)).copied(); if let Some(k) = hit { f.remove(&k); } hit.is_some() };
+                    let (status, reply) = if key_fail || fail.load(Relaxed) > 0 {
+                        if !key_fail { fail.fetch_sub(1, Relaxed); }
+                        ("500 Internal Server Error", "upstream error".to_string())
+                    } else {
+                        let accts = accounts.lock().unwrap();
+                        let value: Vec<Value> = req["params"][0].as_array().into_iter().flatten().map(|k| {
+                            let key: Option<Pk> = k.as_str().and_then(|s| bs58::decode(s).into_vec().ok()).and_then(|v| v.try_into().ok());
+                            match key.and_then(|k| accts.get(&k)) {
+                                Some((data, owner, lamports)) => json!({ "data": [base64::engine::general_purpose::STANDARD.encode(data), "base64"], "owner": b58(owner),
+                                    "lamports": lamports, "executable": false, "rentEpoch": 0 }),
+                                None => Value::Null,
+                            }
+                        }).collect();
+                        ("200 OK", json!({ "jsonrpc": "2.0", "id": req["id"], "result": { "context": { "slot": slot.load(Relaxed) }, "value": value } }).to_string())
+                    };
+                    let _ = write!(c, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len());
+                    let _ = c.flush();
+                }
+            });
+            m
+        }
+        pub fn set(&self, k: Pk, data: &[u8]) { self.accounts.lock().unwrap().insert(k, (data.to_vec(), [3; 32], 1)); }
+    }
+
+    impl Drop for MockRpc {
+        fn drop(&mut self) { self.stop.store(true, Relaxed); let _ = std::net::TcpStream::connect(self.addr); }
+    }
+
+    /// the mock through the real client: accounts, the context slot, a failing call
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn the_mock_answers_get_multiple_accounts() {
+        let m = MockRpc::start();
+        m.set([1; 32], &[9, 8, 7]);
+        m.slot.store(77, Relaxed);
+        let rpc = Rpc::race(vec![Endpoint { name: "mock".into(), url: m.url.clone(), bearer: None }]);
+        let (slot, v) = rpc.accounts(&[[1; 32], [2; 32]]).await.unwrap();
+        assert_eq!((slot, v[0].as_ref().map(|a| a.data.clone()), v[1].is_none()), (77, Some(vec![9, 8, 7]), true));
+        m.fail_next.store(1, Relaxed);
+        assert!(rpc.accounts(&[[1; 32]]).await.is_err());
+        assert!(rpc.accounts(&[[1; 32]]).await.is_ok());
+        m.fail_keys.lock().unwrap().insert([2; 32]);
+        assert!(rpc.accounts(&[[1; 32]]).await.is_ok(), "a call not naming it");
+        assert!(rpc.accounts(&[[1; 32], [2; 32]]).await.is_err());
+        assert!(rpc.accounts(&[[2; 32]]).await.is_ok(), "once");
+        assert_eq!(m.calls.load(Relaxed), 6);
+    }
+}

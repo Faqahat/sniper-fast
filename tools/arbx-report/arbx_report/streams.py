@@ -475,7 +475,9 @@ J_TX_FIRST, J_TX_COPY, J_ACCOUNT, J_SLOT, J_BLOCK_META, J_ALT, J_INPUT, J_TICK, 
 J_NAMES = {1: "TX_FIRST", 2: "TX_COPY", 3: "ACCOUNT", 4: "SLOT", 5: "BLOCK_META", 6: "ALT", 7: "INPUT", 8: "TICK",
            9: "STATUS", 10: "TIMER", 12: "GAP"}
 INPUT_KINDS = {1: "blockhash_head", 2: "leader_window", 3: "gate", 4: "quarantine", 5: "inflight_release",
-               6: "health", 7: "wallet_tx", 8: "slotidx_missing", 9: "settled", 10: "engine_init"}
+               6: "health", 7: "wallet_tx", 8: "slotidx_missing", 9: "settled", 10: "engine_init",
+               # WP-04 review #1: how one chunk of an engine RPC read ended (re-read, fork refetch, DLMM arrays)
+               11: "fetch"}
 
 #: journal record framing: `u8 kind | u32 body_len | u64 seq | u64 t_engine_ns | body`. body_len counts the body
 #: only (not seq and t_engine_ns). Keep in step with src/rec/journal.rs (WP-03).

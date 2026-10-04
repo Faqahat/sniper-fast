@@ -276,6 +276,13 @@ impl CommitTracker {
         ids.into_iter().map(|id| self.resolve(id, Outcome::ForkDropped, t_engine, t_engine, By::Fork)).collect()
     }
 
+    /// The groups of `txns` opened in `slot` (slot-index `missing` evidence: the confirmed block of that slot does not
+    /// hold them; review WP-04 #7)
+    pub fn drop_txns(&mut self, slot: u64, txns: &[[u8; 64]], t_engine: u64) -> Vec<Resolution> {
+        let ids: Vec<u64> = self.pending.values().filter(|g| g.slot == slot && txns.contains(&g.txn)).map(|g| g.id).collect();
+        ids.into_iter().map(|id| self.resolve(id, Outcome::ForkDropped, t_engine, t_engine, By::Fork)).collect()
+    }
+
     fn open(&mut self, txn: [u8; 64], slot: u64, m: Member, r: Option<Reg>, t_engine: u64) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -294,8 +301,12 @@ impl CommitTracker {
         self.by_txn.remove(&g.txn);
         let accounts = g.accounts();
         for a in &accounts { self.unindex(a, id); }
-        self.resolved.insert(g.txn, Done { id, t_resolved, accounts });
-        self.resolved_order.push_back((t_resolved, g.txn));
+        // a group a fork dropped is not remembered: if its transaction executes again on the canonical branch, its
+        // updates open a new group rather than count as late members of the dropped one (review WP-04 N3: nothing was torn)
+        if outcome != Outcome::ForkDropped {
+            self.resolved.insert(g.txn, Done { id, t_resolved, accounts });
+            self.resolved_order.push_back((t_resolved, g.txn));
+        }
         Resolution { group: g, outcome, t_resolved, t_clock, by }
     }
 
@@ -446,7 +457,9 @@ mod tests {
         assert_eq!((outs(&r), r[0].group.reopened_from), (vec![(1, Outcome::TimeoutQuiescent)], Some(0)));
     }
 
-    /// forks: the pending groups of an abandoned slot become `fork_dropped`
+    /// forks: the pending groups of an abandoned slot become `fork_dropped`; slot-index `missing` evidence drops a
+    /// transaction's group in that slot only; a transaction that executes again after its group was dropped opens a new
+    /// group, not a late member (review WP-04 N3)
     #[test]
     fn groups_of_an_abandoned_slot_are_dropped() {
         let mut c = tracker();
@@ -455,5 +468,11 @@ mod tests {
         let r = c.drop_slots(&|s| s == 11, 2 * MS);
         assert_eq!((outs(&r), r[0].by), (vec![(2, Outcome::ForkDropped)], By::Fork));
         assert!(!c.is_pending(&k(2)) && c.is_pending(&k(1)));
+        let (r, late) = c.on_update(k(2), Some(t(2)), 12, 3, 2, 2 * MS, 2 * MS, true);
+        assert!(r.is_empty() && late.is_none(), "T2 again on the canonical branch: a new group");
+        assert!(c.is_pending(&k(2)));
+        assert!(c.drop_txns(10, &[t(2)], 3 * MS).is_empty(), "T2's group is in slot 12");
+        assert_eq!(outs(&c.drop_txns(12, &[t(2), t(9)], 3 * MS)), vec![(2, Outcome::ForkDropped)]);
+        assert!(c.is_pending(&k(1)));
     }
 }

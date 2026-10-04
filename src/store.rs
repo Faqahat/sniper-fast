@@ -5,8 +5,14 @@
 //! - **Versions** (item 2). An update is applied only if its version is newer than the account's current one. The
 //!   order is `(slot, write_version)` for stream updates; an RPC read has no write version, so within one slot it orders
 //!   after every stream record of that slot, and RPC reads among themselves by their accounts.bin `aseq` (MEASUREMENT
-//!   §4.12). Each account keeps a ring of its last `ring_versions` (8) versions: fork rollback (`drop_versions`), the
-//!   accuracy monitor's pre-state (`version_before`) and replay checks read it.
+//!   §4.12). Each account keeps a ring of its last `ring_versions` (8) versions, in that order: fork rollback
+//!   (`drop_versions`), the accuracy monitor's pre-state (`version_before`) and replay checks read it.
+//! - **Forks** (review WP-04 #2). An older version from another slot is not current, but it is kept in the ring at its
+//!   place (the late-leader fork: the leader of 12 is late, 13 is built on 11 and replayed first, then 12; 12's writes
+//!   arrive with a lower slot). When a fork drops the versions above it, the newest surviving version is current again:
+//!   the canonical one, not the pre-fork one. Eviction takes the oldest first, so the newest surviving version is the
+//!   newest one the stream delivered on the surviving branch, unless the ring lost them all (then it is fetched again).
+//!   A same-slot older version (a reordering) is refused as before.
 //! - **Readiness** (item 4). A pool is quoted only when every account of its consistency set (the accounts every swap
 //!   of that pool writes) is present, not pending and at most `max_part_skew_slots` apart, and its other parts are
 //!   present and not pending (no age rule). Slots are never compared across pools: an idle pool is fine at any age. This
@@ -90,6 +96,9 @@ pub enum NotReady {
     StateUnavailable,
     /// the warm-up gate is shut (StoreHealth not ready)
     Warmup,
+    /// a part of the pool has not been read again since the state stream (re)connected (review WP-04 #1, I-4): its
+    /// version may predate writes the stream never resent
+    Resync,
 }
 
 impl NotReady {
@@ -98,6 +107,7 @@ impl NotReady {
             NotReady::AccountMissing => "account_missing", NotReady::PendingCommit => "pending_commit", NotReady::PartsSkewed => "parts_skewed",
             NotReady::ForkPending => "fork_pending", NotReady::StoreLagging => "store_lagging", NotReady::ClockStale => "clock_stale",
             NotReady::RouteNotQuiet => "route_not_quiet", NotReady::StateUnavailable => "state_unavailable", NotReady::Warmup => "warmup",
+            NotReady::Resync => "resync",
         }
     }
 }
@@ -128,10 +138,12 @@ pub fn other_parts(m: &PoolMeta) -> Vec<Pk> {
 }
 
 /// What the readiness check needs from outside the store: which accounts are pending (the CommitTracker), which slots
-/// are contested (forks), and the skew limit
+/// are contested (forks), which accounts are not read again yet since the state stream (re)connected (the engine's
+/// re-read, review WP-04 #1), and the skew limit
 pub struct ReadyCtx<'a> {
     pub pending: &'a dyn Fn(&Pk) -> bool,
     pub contested: &'a dyn Fn(u64) -> bool,
+    pub unverified: &'a dyn Fn(&Pk) -> bool,
     pub max_skew: u64,
 }
 
@@ -141,16 +153,22 @@ pub struct ReadyCtx<'a> {
 pub struct PoolView {
     /// (account, slot, write_version, t_recv, aseq) of every account read
     pub accts: Vec<(Pk, u64, u64, u64, u64)>,
+    /// (slot, the writing transaction's first 8 signature bytes, 0 for none) of every version read: slot-index `missing`
+    /// evidence marks the decisions that read one (review WP-04 #7)
+    pub txns: Vec<(u64, u64)>,
     /// the consistency set's newest minus oldest slot
     pub skew: u64,
     pub min_slot: u64,
     pub max_slot: u64,
     /// the newest `t_recv` of the pool's accounts
     pub t_last_write: u64,
-    /// DLMM: the followed bin arrays left out because a pending group writes them or their slot is contested (a quote
-    /// that needs one fails)
+    /// DLMM: the followed bin arrays left out because a pending group writes them, their slot is contested or they are
+    /// not read again yet since a (re)connection (a quote that needs one fails)
     pub pending_arrays: Vec<i64>,
 }
+
+/// the first 8 bytes of a version's writing transaction (0: none), as decisions remember the versions they read
+pub fn txn8(a: &Acct) -> u64 { a.txn.map_or(0, |t| u64::from_le_bytes(t[..8].try_into().unwrap())) }
 
 /// Two pools' views together (PLAN WP-04 item 4): the route's state version (MEASUREMENT §2.1 `sv`: xxh3-64 over the
 /// route accounts' (pubkey, slot, write_version) in route order), its slot range, and its last write
@@ -178,6 +196,13 @@ impl RouteView {
         v.dedup();
         v
     }
+    /// (slot, txn8) of every version read that a transaction wrote (fork_priced on slot-index `missing` evidence)
+    pub fn txns(buy: &PoolView, sell: &PoolView) -> Vec<(u64, u64)> {
+        let mut v: Vec<(u64, u64)> = buy.txns.iter().chain(&sell.txns).copied().filter(|x| x.1 != 0).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
 }
 
 /// one account's versions, oldest first (the back is the current one)
@@ -192,7 +217,10 @@ pub struct Store {
     /// DLMM pool -> bin array index -> array account (the arrays we follow)
     pub dlmm_arrays: HashMap<Pk, Vec<(i64, Pk)>>,
     pub updates: u64,
+    /// versions not applied as current (older than the current one: stale, or kept below it for a fork rollback)
     pub stale_dropped: u64,
+    /// of those, the older-slot versions kept in the ring below the current one (review WP-04 #2)
+    pub kept_below: u64,
     /// the newest slot of a stream update applied (any account, the Clock included): the store's position (lag rule)
     pub stream_slot_max: u64,
 }
@@ -200,7 +228,7 @@ pub struct Store {
 impl Default for Store {
     fn default() -> Self {
         Store { accts: HashMap::default(), ring_versions: RING_VERSIONS, pump_cfg: None, dlmm_arrays: HashMap::default(), updates: 0, stale_dropped: 0,
-            stream_slot_max: 0 }
+            kept_below: 0, stream_slot_max: 0 }
     }
 }
 
@@ -212,12 +240,30 @@ pub enum Snap<'a> {
 }
 
 impl Store {
-    /// Apply one version; false (and counted) when it is not newer than the account's current one
+    /// Apply one version; false (and counted) when it is not newer than the account's current one. Such a version from a
+    /// slot the ring holds no version of (same bank) is kept in the ring at its place, below the current one: a fork
+    /// rollback that drops the versions above it falls back to it (review WP-04 #2)
     pub fn apply(&mut self, key: Pk, v: Acct) -> bool {
-        if self.is_stale_key(&key, v.key()) { self.stale_dropped += 1; return false; }
+        let k = v.key();
+        let cap = self.ring_versions.max(1);
+        if let Some(h) = self.accts.get_mut(&key) {
+            if h.ring.back().is_some_and(|cur| cur.key() >= k) {
+                self.stale_dropped += 1;
+                let same_slot = h.ring.iter().any(|x| x.slot == v.slot && (x.bank_id.is_none() || v.bank_id.is_none() || x.bank_id == v.bank_id));
+                if !same_slot {
+                    let pos = h.ring.iter().position(|x| x.key() > k).unwrap_or(h.ring.len());
+                    // into a full ring below its oldest version: it would be the first evicted
+                    if !(h.ring.len() >= cap && pos == 0) {
+                        h.ring.insert(pos, v);
+                        while h.ring.len() > cap { h.ring.pop_front(); }
+                        self.kept_below += 1;
+                    }
+                }
+                return false;
+            }
+        }
         if key == *PUMP_FEE_CONFIG { self.pump_cfg = cp::decode_pump_fee_cfg(&v.data).map(Arc::new); }
         if v.src == asrc::GRPC && v.slot > self.stream_slot_max { self.stream_slot_max = v.slot; }
-        let cap = self.ring_versions.max(1);
         let h = self.accts.entry(key).or_default();
         h.ring.push_back(v);
         while h.ring.len() > cap { h.ring.pop_front(); }
@@ -319,14 +365,18 @@ impl Store {
         let mut v = PoolView { min_slot: u64::MAX, ..Default::default() };
         let mut pending = false;
         let mut contested = false;
+        let mut unverified = false;
         for (n, k) in cs.iter().chain(other.iter()).enumerate() {
             let a = self.get(k).ok_or(NotReady::AccountMissing)?;
             if (ctx.pending)(k) { pending = true; }
             if (ctx.contested)(a.slot) { contested = true; }
+            if (ctx.unverified)(k) { unverified = true; }
             if n < cs.len() { v.min_slot = v.min_slot.min(a.slot); v.max_slot = v.max_slot.max(a.slot); }
             v.t_last_write = v.t_last_write.max(a.t_recv);
             v.accts.push((*k, a.slot, a.write_version, a.t_recv, a.aseq));
+            v.txns.push((a.slot, txn8(a)));
         }
+        if unverified { return Err(NotReady::Resync); }
         if pending { return Err(NotReady::PendingCommit); }
         if contested { return Err(NotReady::ForkPending); }
         v.skew = v.max_slot - v.min_slot;
@@ -334,9 +384,10 @@ impl Store {
         if m.venue == Venue::Dlmm {
             for (i, k) in self.dlmm_arrays.get(&m.pool).map(|l| l.as_slice()).unwrap_or(&[]) {
                 let Some(a) = self.get(k) else { continue };
-                if (ctx.pending)(k) || (ctx.contested)(a.slot) { v.pending_arrays.push(*i); continue; }
+                if (ctx.pending)(k) || (ctx.contested)(a.slot) || (ctx.unverified)(k) { v.pending_arrays.push(*i); continue; }
                 v.t_last_write = v.t_last_write.max(a.t_recv);
                 v.accts.push((*k, a.slot, a.write_version, a.t_recv, a.aseq));
+                v.txns.push((a.slot, txn8(a)));
             }
         }
         Ok(v)
@@ -449,6 +500,33 @@ mod tests {
         assert_eq!(s.get(&k(1)).unwrap().data[0], 4);
     }
 
+    /// review WP-04 #2 (probe 6, the late-leader fork): 13 (built on 11) is replayed first, then the late block 12; 12's
+    /// writes arrive with a lower slot. They are not current, but kept below 13's in the ring; when 13 is abandoned the
+    /// canonical slot-12 version is current, not the pre-fork one. A same-slot reordering is still refused, and a version
+    /// below the oldest of a full ring is not kept
+    #[test]
+    fn a_rollback_restores_the_canonical_version_of_a_lower_slot() {
+        let mut s = Store::default();
+        assert!(s.apply(k(1), stream(10, 1, 10, None)));
+        assert!(s.apply(k(1), stream(13, 20, 13, Some(13))));
+        assert!(!s.apply(k(1), stream(12, 30, 12, Some(12))), "not current: an older slot");
+        assert!(!s.apply(k(1), stream(13, 19, 99, Some(14))), "a same-slot older write version: refused");
+        assert_eq!(s.versions(&k(1)).map(|v| v.slot).collect::<Vec<_>>(), vec![10, 12, 13], "kept in order, below the current one");
+        assert_eq!((s.get(&k(1)).unwrap().slot, s.stale_dropped, s.kept_below, s.updates), (13, 2, 1, 2));
+        let d = s.drop_versions(&|slot, _| slot == 13);
+        assert_eq!(d, vec![(k(1), 1, false)]);
+        assert_eq!((s.get(&k(1)).unwrap().slot, s.get(&k(1)).unwrap().data[0]), (12, 12), "the canonical slot-12 version, not the pre-fork one");
+        // a later write of the surviving branch is current as usual
+        assert!(s.apply(k(1), stream(14, 40, 14, Some(15))));
+        // a full ring: a version older than everything it holds is not kept; one in between is, and the oldest goes
+        let mut s = Store { ring_versions: 3, ..Store::default() };
+        for slot in [20, 22, 24] { s.apply(k(2), stream(slot, slot, slot as u8, None)); }
+        assert!(!s.apply(k(2), stream(19, 1, 19, None)));
+        assert!(!s.apply(k(2), stream(23, 1, 23, None)));
+        assert_eq!(s.versions(&k(2)).map(|v| v.slot).collect::<Vec<_>>(), vec![22, 23, 24]);
+        assert_eq!(s.kept_below, 1);
+    }
+
     fn pump(n: u8) -> PoolMeta {
         PoolMeta { venue: Venue::PumpSwap, pool: k(n), t0: k(200), t1: *WSOL, vault0: k(n + 1), vault1: k(n + 2), t0_prog: *crate::pda::TOKEN_PROGRAM,
             t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![k(n + 3)], flag: true }
@@ -464,7 +542,7 @@ mod tests {
         let mut s = Store::default();
         let no = |_: &Pk| false;
         let none = |_: u64| false;
-        let ctx = ReadyCtx { pending: &no, contested: &none, max_skew: 2 };
+        let ctx = ReadyCtx { pending: &no, contested: &none, unverified: &no, max_skew: 2 };
         s.apply(m.pool, stream(1_000, 1, 1, None));
         s.apply(*PUMP_FEE_CONFIG, stream(1_000, 2, 1, None));
         s.apply(m.extra[0], stream(1_000, 3, 1, None));
@@ -484,9 +562,12 @@ mod tests {
         let gone = pump(30);
         assert_eq!(s.pool_view(&gone, &ctx).err(), Some(NotReady::AccountMissing));
         let pend = |a: &Pk| *a == m.pool;
-        assert_eq!(s.pool_view(&m, &ReadyCtx { pending: &pend, contested: &none, max_skew: 2 }).err(), Some(NotReady::PendingCommit), "other parts may not be pending");
+        assert_eq!(s.pool_view(&m, &ReadyCtx { pending: &pend, contested: &none, unverified: &no, max_skew: 2 }).err(), Some(NotReady::PendingCommit), "other parts may not be pending");
         let cont = |slot: u64| slot == 11_003;
-        assert_eq!(s.pool_view(&m, &ReadyCtx { pending: &no, contested: &cont, max_skew: 2 }).err(), Some(NotReady::ForkPending));
+        assert_eq!(s.pool_view(&m, &ReadyCtx { pending: &no, contested: &cont, unverified: &no, max_skew: 2 }).err(), Some(NotReady::ForkPending));
+        // a part not read again since a (re)connection (review WP-04 #1): `resync`, whatever else holds
+        let unv = |a: &Pk| *a == m.extra[0];
+        assert_eq!(s.pool_view(&m, &ReadyCtx { pending: &pend, contested: &none, unverified: &unv, max_skew: 2 }).err(), Some(NotReady::Resync));
         // DLMM: the lb_pair is the consistency set; a held array far from the quote (ancient, or on a contested slot)
         // is not checked, only left out of the quote
         let d = PoolMeta { venue: Venue::Dlmm, pool: k(40), t0: k(201), t1: *WSOL, vault0: k(41), vault1: k(42), t0_prog: *crate::pda::TOKEN_PROGRAM,
@@ -496,8 +577,12 @@ mod tests {
         s.apply(k(45), stream(11_003, 22, 1, None));
         s.dlmm_arrays.insert(d.pool, vec![(-9, k(44)), (0, k(45))]);
         let cont = |slot: u64| slot == 5;
-        let dv = s.pool_view(&d, &ReadyCtx { pending: &no, contested: &cont, max_skew: 2 }).unwrap();
+        let dv = s.pool_view(&d, &ReadyCtx { pending: &no, contested: &cont, unverified: &no, max_skew: 2 }).unwrap();
         assert_eq!((dv.skew, dv.pending_arrays.clone(), dv.accts.len()), (0, vec![-9], 2));
+        // an unverified array is left out of the quote the same way
+        let unv = |a: &Pk| *a == k(45);
+        let dv = s.pool_view(&d, &ReadyCtx { pending: &no, contested: &none, unverified: &unv, max_skew: 2 }).unwrap();
+        assert_eq!((dv.pending_arrays.clone(), dv.accts.len()), (vec![0], 2));
     }
 
     #[test]
