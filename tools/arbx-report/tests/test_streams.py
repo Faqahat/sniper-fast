@@ -81,6 +81,14 @@ class JsonLines(unittest.TestCase):
             with self.assertRaises(streams.SchemaError):
                 streams.read_jsonl(streams.discover(d)["attempts"], "attempts")
 
+    def test_mixed_series_is_refused(self):
+        with TmpDir() as d:
+            hdr = {"schema": "arbx.outcomes/2.0", "run": "x", "file_seq": 1, "started_ns": 1, "producer": "p"}
+            write_jsonl(os.path.join(d, "outcomes.000.jsonl"), [{"attempt": 0}])  # v1, no header
+            write_jsonl(os.path.join(d, "outcomes.001.jsonl"), [{"attempt": 1}], hdr)
+            with self.assertRaises(streams.SchemaError):
+                streams.read_jsonl(streams.discover(d)["outcomes"], "outcomes")
+
     def test_v1_file_without_header_is_legacy(self):
         with TmpDir() as d:
             write_jsonl(os.path.join(d, "outcomes.jsonl"), [{"attempt": 0, "landed": None}])

@@ -2244,12 +2244,17 @@
   },
   {
    "caveats": [
-    "only transactions touching watched accounts are seen"
+    "only transactions touching watched accounts are seen",
+    "a clean win is any SOL + WSOL gain with no other token change; one-off large gains can be transfers routed through watched pools, so read profit beside the win count"
    ],
    "complete": true,
    "coverage": {},
    "data": {
     "arb_like_txs": 4,
+    "clean_wins_total": {
+     "profit": 120000,
+     "wins": 1
+    },
     "ladder_clean_wins": {
      "3 same slot, later": {
       "profit": 120000,
@@ -2259,6 +2264,36 @@
     "ladder_note": "rung 0 needs bundle membership, which v2 exec only has when known; such wins show as rung 1",
     "signers": 2,
     "top_by_clean_profit": [
+     {
+      "clean_profit": 120000,
+      "clean_wins": 1,
+      "fees": 5000,
+      "in_known_bundle": 0,
+      "n": 1,
+      "ok": 1,
+      "rungs": {
+       "3 same slot, later": 1
+      },
+      "senders": {
+       "jito": 1
+      },
+      "signer": "4PH5PBKeqCncHuKs4YSsPDqsu6Gyqm6t1tu2vVa7Qv7Y",
+      "tips": 10000
+     },
+     {
+      "clean_profit": 0,
+      "clean_wins": 0,
+      "fees": 5000,
+      "in_known_bundle": 0,
+      "n": 1,
+      "ok": 0,
+      "rungs": {},
+      "senders": {},
+      "signer": "4Z9wZBL22wzwC4XsF5MtwLRFSFb1hJcRzNJKCdBcpwtC",
+      "tips": 0
+     }
+    ],
+    "top_by_clean_wins": [
      {
       "clean_profit": 120000,
       "clean_wins": 1,

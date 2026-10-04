@@ -160,6 +160,7 @@ def _is_header(obj) -> bool:
 def iter_jsonl(files: list, stream: str | None = None):
     """Records of a rotation series. The header line is checked and skipped; files without one are arb-lab v1.
     Mixed v1/v2 series and unknown majors raise SchemaError."""
+    series_major = None
     for fi in files:
         first = True
         for raw in _lines(fi):
@@ -174,11 +175,16 @@ def iter_jsonl(files: list, stream: str | None = None):
                 first = False
                 if _is_header(obj):
                     name, major, minor = parse_schema(obj["schema"])
-                    check_version(stream or fi.stream, major, fi.path)
+                    check_version(stream or fi.stream, major, fi.name)
                     fi.schema, fi.major, fi.minor, fi.header = obj["schema"], major, minor, obj
+                else:
+                    fi.legacy = True
+                    fi.major, fi.minor = 1, 0
+                if series_major is not None and fi.major != series_major:
+                    raise SchemaError(f"{fi.name}: major version {fi.major} in a series of version {series_major}")
+                series_major = fi.major
+                if not fi.legacy:
                     continue
-                fi.legacy = True
-                fi.major, fi.minor = 1, 0
             fi.records += 1
             yield obj
         if first:  # empty file
@@ -237,7 +243,7 @@ def _text_header(fi: FileInfo, line: str, stream: str) -> dict | None:
     if not parts:
         return {}
     name, major, minor = parse_schema(parts[0])
-    check_version(stream, major, fi.path)
+    check_version(stream, major, fi.name)
     fi.schema, fi.major, fi.minor = parts[0], major, minor
     kv = {}
     for p in parts[1:]:
@@ -380,14 +386,14 @@ def iter_accounts(files: list, keep_data: bool = True, scan: AccountsScan | None
         f, trunc = open_bytes(fi)
         fi.truncated_bytes = trunc
         try:
-            fmt, hdr = _bin_header(f, b"ARBXACC\0", fi.path)
+            fmt, hdr = _bin_header(f, b"ARBXACC\0", fi.name)
             if fmt != 2:
-                raise SchemaError(f"{fi.path}: accounts format {fmt} not supported")
+                raise SchemaError(f"{fi.name}: accounts format {fmt} not supported")
             fi.header, fi.major, fi.minor = hdr, 2, 0
             fi.schema = hdr.get("schema")
             if fi.schema:
                 _n, major, minor = parse_schema(fi.schema)
-                check_version("accounts", major, fi.path)
+                check_version("accounts", major, fi.name)
                 fi.major, fi.minor = major, minor
             dct: dict = {}
             last: dict = {}
@@ -544,9 +550,9 @@ def iter_journal(files: list, scan: JournalScan | None = None):
         f, trunc = open_bytes(fi)
         fi.truncated_bytes = trunc
         try:
-            fmt, hdr = _bin_header(f, b"ARBXJRN\0", fi.path)
+            fmt, hdr = _bin_header(f, b"ARBXJRN\0", fi.name)
             if fmt != 2:
-                raise SchemaError(f"{fi.path}: journal format {fmt} not supported")
+                raise SchemaError(f"{fi.name}: journal format {fmt} not supported")
             fi.header, fi.major, fi.minor, fi.schema = hdr, 2, 0, hdr.get("schema")
             while True:
                 h = f.read(21)

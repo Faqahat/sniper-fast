@@ -85,7 +85,11 @@ def run(seg, ctx: dict) -> dict:
     rows.sort(key=lambda r: (-r["clean_profit"], -r["n"], r["signer"] or ""))
     d["signers"] = len(rows)
     d["top_by_clean_profit"] = rows[:30]
+    d["top_by_clean_wins"] = sorted(rows, key=lambda r: (-r["clean_wins"], -r["clean_profit"], r["signer"] or ""))[:30]
+    d["clean_wins_total"] = {"wins": sum(r["clean_wins"] for r in rows), "profit": sum(r["clean_profit"] for r in rows)}
     sec["caveats"].append(CAVEAT)
+    sec["caveats"].append("a clean win is any SOL + WSOL gain with no other token change; one-off large gains can be "
+                          "transfers routed through watched pools, so read profit beside the win count")
     return sec
 
 

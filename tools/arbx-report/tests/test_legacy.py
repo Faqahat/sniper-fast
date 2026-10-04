@@ -174,6 +174,35 @@ class WalletSynthesisCampaign(unittest.TestCase):
         self.assertEqual(self.w2["chain_unrecorded"]["fees_fail"], 332_506)
         self.assertEqual(self.w3["chain_unrecorded"]["fees_fail"], 87_405)
 
+    def test_attempt_level_joins(self):
+        """W §4/§6: 989 direct attempts (2 sim-gated, 987 sent); 1 win in 1,511 attempts of >= 1 SOL (bundle 0/901,
+        direct 1/609 sent); direct failures seen p50 137 ms (p90 349) after the send."""
+        from arbx_report import stats
+        runs = os.path.join(CHERRY, "root", "runs")
+        camp = model.Campaign.open(runs, r"^w5h[23]-p\d+$")
+        c: dict = {}
+        s2s = []
+        for s in camp.segments:
+            sent = s.land_rate_denominator()["sent_ids"]
+            for a in s.attempts:
+                arm = a["legacy"]["path_arm"]
+                o = s.outcomes.get(a["attempt"]) or {}
+                big = (a.get("size_lamports") or 0) >= 10 ** 9
+                for k, hit in (("attempts", True), ("sent", a["attempt"] in sent), ("gated", o.get("final") == "not_sent_v1"),
+                               ("wins", o.get("final") == "landed_ok")):
+                    if hit:
+                        c[(arm, k)] = c.get((arm, k), 0) + 1
+                        if big:
+                            c[(arm, k, ">=1SOL")] = c.get((arm, k, ">=1SOL"), 0) + 1
+                if arm == "tpu" and o.get("final") == "landed_fail" and o.get("send_to_seen_ms") is not None:
+                    s2s.append(o["send_to_seen_ms"])
+        self.assertEqual((c[("tpu", "attempts")], c[("tpu", "gated")], c[("tpu", "sent")]), (989, 2, 987))
+        self.assertEqual(c[("tpu", "attempts", ">=1SOL")] + c[("bundle", "attempts", ">=1SOL")], 1511)
+        self.assertEqual((c[("bundle", "attempts", ">=1SOL")], c.get(("bundle", "wins", ">=1SOL"), 0)), (901, 0))
+        self.assertEqual((c[("tpu", "sent", ">=1SOL")], c[("tpu", "wins", ">=1SOL")]), (609, 1))
+        p = stats.pct(s2s)
+        self.assertEqual((round(p["p50"]), round(p["p90"])), (137, 349))
+
     def test_arms(self):
         b, d = self.all["by_arm"]["bundle"], self.all["by_arm"]["direct"]
         self.assertEqual(b["trade_net"], 163_187)
