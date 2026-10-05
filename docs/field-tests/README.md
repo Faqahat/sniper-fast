@@ -37,6 +37,7 @@ Never uploaded: `src/`, `program/`, `tools/`, `docs/`, or any script (.py/.sh/.t
 
 1. **Before:**
    - ID and title;
+   - **the goal in one sentence**, posted to the owner's Telegram group when the run starts; the result against that goal is posted when it ends;
    - purpose and hypothesis;
    - **pass/fail criteria, written before it runs**;
    - mode (shadow / dry-run / canary / live);
