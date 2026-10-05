@@ -253,3 +253,11 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
 - Signer stats start empty: nothing is copied from arb-lab. They are learned per segment (I-5).
 - Every file a test reads lives in the repo (`testdata/`). A test that needs a file outside the repo is a bug.
 - Agent briefs name only in-repo fixtures.
+
+### Update (owner, 2026-10-05): the frz wallet and a pre-approved test budget
+
+- Live tests use the production wallet **`FRZh63L6…`** ("frz", ≈ 0.414 SOL ≈ $60). This replaces the $80 figure above. The $500 stage still follows small profits.
+- The **test budget is $3–5**: hard cap 0.034 SOL, target ≤ 0.021 SOL. It is pre-approved: once gate items 1–4 pass, live tests within it run without asking again. "Never drain it."
+- Every test is documented in `docs/field-tests/` (protocol, entries `FT-NNN`, `BUDGET.md` ledger).
+- The equity floor = starting equity − remaining budget.
+- The owner expects the **win ratio to rise a lot in Stage 1**. The Stage 1 plan, focused on win ratio, is `docs/STAGE1-PLAN.md`.
