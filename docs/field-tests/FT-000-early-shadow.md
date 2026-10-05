@@ -374,3 +374,33 @@ Other monitor counters: `pred_not_committed` 1,467, `pred_trigger_failed` 90, qu
   - Coverage up: more pools priced, opportunities/h ≥ s2's 1,976.
   - Fork events recorded and handled: no pricing on abandoned forks.
 - **s3 started** 03:41:00 UTC (60 min) under the live watcher.
+
+## Results: segment 3 (60 min, 03:41–04:41 UTC; refreshed pools, fork statuses on): PASS
+
+- **Goal:** refreshed pools with fork statuses on. Pass = no crash or hang, state ≥ 95%, 0 drops, coverage up vs s2, fork events handled.
+- **Stop:** `deadline`, exit 0.
+- **State:** connected in 100% of status lines, 0 reconnects. **Recorder:** 0 drops, 0 I/O errors.
+- **Coverage vs s2** (decisions and opportunities read with arbx-report's readers):
+
+  | | s2 | s3 |
+  |---|---|---|
+  | Pools priced | 622 | **844 (+36%)** |
+  | Pools with triggers | 527 | 705 (+34%) |
+  | Decisions | 57,594 | 82,802 (+44%) |
+  | Opportunities | 1,985 | 2,162 (+9%) |
+  | Quoted net | 20.14 SOL | 13.17 SOL |
+
+  The quoted net depends on market conditions and is not realised value.
+- **Forks:** meta.json shows `slot_statuses = all` and `block_meta = true` from probe.json, the first segment with them. The summed fork counters were all 0 (dead, abandoned, versions dropped, fork_priced, refetch): no fork happened in the hour, so fork handling was **not exercised live**. The WP-04 offline fork tests (S8, S8b) still cover it.
+- **Local outage:** the operator's own network was down 03:52–04:10 UTC, so the watcher could not reach Cherry. The segment was unaffected. The watcher was hardened: it keeps watching through outages and queues its messages.
+
+## FT-000 verdict: PASS (s1, s2 and s3 all met their criteria)
+
+Issues carried to the fixes lane (lane/ft000-fixes):
+- the RPC budget spent on one-per-call lookup-table fetches, which starved chain fetch and slowed the boot re-read to 51 s;
+- the unbounded lookup-table cache (about 18 MB/min of RSS growth);
+- recorder volume (about 110 GB/day);
+- in-block position disagreement;
+- the probe labelling plan-limit refusals "inconclusive".
+
+Owner decision raised (OD-1): Haan's plan allows one transaction filter and no block subscriptions.
