@@ -19,7 +19,10 @@ Every test that runs on Cherry (shadow, dry run, canary or live) is documented h
   - arbx loads that format as `wallet_profile = "trading"` with `wallet_keystore = ""`, unattended.
   - At boot it refuses to start unless the key is `FRZh63L6…`.
   - The files are used in place, never copied or read by anyone but the bot process.
-- **Still needed:** `/root/arbx/deploy/.env` holding `HAAN_API_KEY`, `HAAN_X_TOKEN`, `SHYFT_RPC_URL`, `ASTRALANE_KEY` and `JITO_UUID`. The owner sets it, or allows copying those five names from the existing server .env without printing them.
+- **Done (owner's instruction, 2026-10-05):** `/root/arbx/deploy/.env` (mode 600) was created on Cherry from the existing server .env. Only the names arbx's two maintained configs reference were copied, and no value was printed.
+  - 17 names are set, including the five the canary needs: `HAAN_API_KEY`, `HAAN_X_TOKEN`, `SHYFT_RPC_URL`, `ASTRALANE_KEY`, `JITO_UUID`.
+  - Absent from the source and unused by the canary: `BLOXROUTE_KEY`, `FALCON_KEY`, `LANDER_SHYFT_URL`, `LUNAR_KEY`, `NODEONE_KEY`, `ZEROSLOT_KEY`.
+- **Shared keys:** the Haan token and the Jito UUID are the same keys arb-lab used. Haan grants its streams to the first process only (I-3), and Jito's rate limit is per key, so arb-lab must not run while arbx tests run.
 
 ## Protocol for each test (an entry `FT-NNN-<slug>.md`)
 
