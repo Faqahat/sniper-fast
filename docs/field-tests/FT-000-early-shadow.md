@@ -348,3 +348,29 @@ Other monitor counters: `pred_not_committed` 1,467, `pred_trigger_failed` 90, qu
 - **For OD-1:** the Haan token allows ONE transaction filter and no block subscriptions. Executed-transaction coverage across the five venues therefore needs a bigger Haan plan or a second provider; RPC backfill is limited to about 4 req/s.
 - **Probe bug:** `ResourceExhausted … exceeded n/m` is a definite plan refusal, but the probe labelled it inconclusive (exit 3) and did not write probe.json. It is fixed on the FT-000 fixes lane (classify it as `refused_plan_limit`).
 - **For s3:** the probe is re-run with `--only` on the accepted subscriptions, so probe.json exists and s3 runs with `slot_statuses = all`, testing fork handling.
+
+## s3 setup: pool refresh (owner request: "for next segment, refresh the pools") and probe re-run
+
+- **Discovery:** `bin/pooldisco-cb88257`, the compiled tools/pooldisco (binary only on Cherry, sha256 `8f3b4074f9ad5008…`).
+  - Ran 02:43–03:13 UTC with arbx stopped (Haan grants its streams to one process).
+  - Saw 4,873 pools, 746 tokens with 2+ pools, 2,385 arbitrages and 477 gap openings; ranked 592 candidates, 577 in tradeable venues.
+  - My orchestration script reported an early stop. That was a false alarm from a failed ssh check; the run completed.
+- **New seed list:** `data/seed-pools-ft000s3.csv`, 1,500 pools, built by a local script with read-only public RPC to check every pool still exists:
+  - **Kept (1,147):** 548 pools active in s1+s2 (86,655 decisions, 3,131 opportunities read with arbx-report's readers) first, then idle pools that still exist.
+  - **New (353):** pooldisco pools in complete token groups (≥ 2 tradeable pools per mint), ranked by opportunity SOL/h and few competitors.
+  - **Dropped (248):** w4 pools with zero activity in 1.5 h, cut to the 1,500 cap. No pool was closed on chain.
+
+  | Venue | Kept | New |
+  |---|---|---|
+  | DAMM v2 | 482 | 113 |
+  | DLMM | 371 | 165 |
+  | PumpSwap | 227 | 40 |
+  | Raydium CPMM | 40 | 20 |
+  | Raydium AMM v4 | 27 | 15 |
+- **Probe re-run** (03:3x UTC, `--only accounts_full,slots_interslot,blocks_meta,tx_filter_1,deshred_5`): all accepted, and `runs/probe.json` was written. s3 runs with `slot_statuses = all` and block meta on, so fork handling is exercised for the first time.
+- **Config:** `deploy/ft000-s3.toml` is ft000-shadow.toml with `seed_csv` pointing at the new list. Same binary `arbx-735901e`. `arbx check` exits 0.
+- **s3 goal:** refreshed pools with fork statuses on.
+  - No crash or hang, state connected ≥ 95%, 0 dropped records.
+  - Coverage up: more pools priced, opportunities/h ≥ s2's 1,976.
+  - Fork events recorded and handled: no pricing on abandoned forks.
+- **s3 started** 03:41:00 UTC (60 min) under the live watcher.
