@@ -1,0 +1,27 @@
+{
+  "schema": "arbx.fixture.scenarios-capture/1",
+  "_doc": "What `tools/capture-fixtures.py --scenarios` reads from public RPC into testdata/scenarios/accounts.json (PLAN WP-09 item 4). For each pool it reads the accounts arbx follows for it, as pools::boot and Registry::static_accounts derive them from the pool account: CP vaults, the PumpSwap base mint and the global fee config, the CPMM config, every token mint (boot reads their owners and transfer-fee extensions), the DLMM bitmap extension and the 7 bin arrays around the active bin (pools::DLMM_ARRAY_SPAN). The scenario tests (src/scenarios/) boot a registry from these bytes through the real pools::boot (served by a local mock RPC) and mutate them synthetically.",
+  "pairs": {
+    "usdc": {
+      "why": "USDC/SOL on all five venues arbx prices: real layouts of PumpSwap (no creator, no virtual reserve), Raydium CPMM (the largest WSOL/USDC CPMM pool, by getProgramAccounts on 2026-10-04), Raydium AMM v4, Meteora DLMM (bin step 1, with a bitmap extension) and DAMM v2. Gf7sXM is the cmp2 'poisoned' pool (PLAN-ADDENDUM I-8)",
+      "pools": [
+        { "name": "pump", "venue": "PumpSwap", "pool": "Gf7sXMoP8iRw4iiXmJ1nq4vxcRycbGXy5RL8a8LnTd3v" },
+        { "name": "cpmm", "venue": "RayCPMM", "pool": "47hq28mcL7q5GhBg7epyGF2dnuJd4MKFt8QhT7CzYUp4" },
+        { "name": "ammv4", "venue": "RayAMMv4", "pool": "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2" },
+        { "name": "dlmm", "venue": "DLMM", "pool": "HTvjzsfX3yU6BUodCjZ5vZkUrAxMDTrBs3CJaq43ashR" },
+        { "name": "damm", "venue": "DAMMv2", "pool": "8Pm2kZpnxD3hoMmt4bjStX2Pw2Z9abpbHzZxMPqxPmie" }
+      ]
+    },
+    "bolt": {
+      "why": "The bolt trade's two pools (w5h2-p5#648, testdata/wallet/4bkYuxT94kc8....json; docs/research/wallet-synthesis.md section 5): 9dSMwFfP (Token-2022 with metadata extensions, no transfer fee) on PumpSwap 5VbavvxS (creator fee, signed virtual reserve, a 170-byte Token-2022 vault) and DLMM HYWKYZ1e (bin step 100)",
+      "pools": [
+        { "name": "pump", "venue": "PumpSwap", "pool": "5VbavvxS1NLmyNJLS3QbDoRFsUHKn6rBzmfVQdWWSniq" },
+        { "name": "dlmm", "venue": "DLMM", "pool": "HYWKYZ1eA2eKdJdCnMqZKHEfArvmEB8T3SJGDvJZyEUg" }
+      ]
+    }
+  },
+  "extra": [
+    { "pubkey": "SysvarC1ock11111111111111111111111111111111", "what": "clock_sysvar" },
+    { "pubkey": "5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx", "what": "pump_fee_config" }
+  ]
+}

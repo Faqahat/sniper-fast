@@ -1,0 +1,200 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 2,
+      "group": 0,
+      "late": null,
+      "members": 1,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.damm"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386133,
+      "txn": "dead-1",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 2,
+      "group": 1,
+      "late": null,
+      "members": 1,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.damm"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386133,
+      "txn": "dead-2",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 2,
+      "group": 2,
+      "late": null,
+      "members": 2,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.ammv4"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386134,
+      "txn": "after",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": 0,
+      "best": 1,
+      "decision": 0,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "below_min_profit",
+      "routes": [
+        {
+          "buy": "usdc.damm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": -17252,
+          "net": -26732,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": -11760,
+          "net": -21240,
+          "reason": "below_min_profit",
+          "sell": "usdc.damm",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.damm",
+        "slot": 453386133,
+        "txn": "dead-1"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 0,
+      "best": 1,
+      "decision": 1,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "below_min_profit",
+      "routes": [
+        {
+          "buy": "usdc.damm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": -18253,
+          "net": -27733,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": -10749,
+          "net": -20229,
+          "reason": "below_min_profit",
+          "sell": "usdc.damm",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.damm",
+        "slot": 453386133,
+        "txn": "dead-2"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "decision": 0,
+      "fork_priced": true,
+      "torn_suspect": null,
+      "txn": null
+    },
+    {
+      "decision": 1,
+      "fork_priced": true,
+      "torn_suspect": null,
+      "txn": null
+    },
+    {
+      "band": 0,
+      "best": 0,
+      "decision": 2,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "below_min_profit",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": -12769,
+          "net": -22249,
+          "reason": "below_min_profit",
+          "sell": "usdc.damm",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.damm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": -16234,
+          "net": -25714,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386134,
+        "txn": "after"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    }
+  ],
+  "scenario": "s8"
+}

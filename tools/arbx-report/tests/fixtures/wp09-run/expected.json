@@ -1,0 +1,10 @@
+{
+  "_doc": "WP-09: a recording made by src/scenarios/harness.rs `the_toolkit_fixture_is_this_codes_recording` (ARBX_BLESS=1 rewrites it); read by test_wp09_recording.py",
+  "pools": [
+    "Gf7sXMoP8iRw4iiXmJ1nq4vxcRycbGXy5RL8a8LnTd3v",
+    "47hq28mcL7q5GhBg7epyGF2dnuJd4MKFt8QhT7CzYUp4",
+    "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
+  ],
+  "trade_txn": "4gp52nnr1bwQ7yEygo3Vx2wEFSZXeS7cryaorL8ka1nhtw5KAMb3vXnsHEQRPHWEDKN2hS8W9WqN5bXCThM8TqKq",
+  "traded_pool": "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
+}

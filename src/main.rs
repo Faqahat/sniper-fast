@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use arbx::control::{self, StopInfo, StopReason};
 use arbx::feeds::clock::now_ns;
-use arbx::{build, chainfetch, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, reads, rec, rpc, runtime, send, store, tx, venues, wallet};
+use arbx::{build, chainfetch, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, reads, rec, replay, rpc, runtime, send, store, tx, venues, wallet};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -150,6 +150,52 @@ enum Cmd {
         #[arg(long)] into: PathBuf,
         /// run directories
         runs: Vec<PathBuf>,
+    },
+    /// Replay a recorded run (PLAN WP-09): the run's engine rebuilt offline from its boot records, registry (pools.json,
+    /// registry-run.json) and frozen config, fed its journal in order at the journaled times. Nothing is built or sent.
+    /// Writes the replay's own streams, replay.json and (--compare) replay-diff.json into --out. Recordings made before
+    /// WP-03 cannot be replayed. Exit code: 0 a whole replay and (--compare) no difference; 1 differences, or a replay
+    /// that is not whole (journal or accounts.bin gaps, missing account records, store verdicts not reproduced, recorder
+    /// drops, a run with an executor: replay.json `not_whole`); 2 refused
+    Replay {
+        /// the segment's run directory
+        #[arg(long)] run: PathBuf,
+        /// compare only decisions whose trigger slot is at least this (the replay starts at the boot all the same)
+        #[arg(long)] from_slot: Option<u64>,
+        /// stop once the chain tip passes this slot
+        #[arg(long)] to_slot: Option<u64>,
+        /// the run's frozen config (default: <run>/config.toml)
+        #[arg(long)] config: Option<PathBuf>,
+        /// the run's registry (default: <run>/pools.json; its registry-run.json beside it)
+        #[arg(long)] pools: Option<PathBuf>,
+        /// a new directory the replay records into (refused if it exists; default: ./replay-<run>-<unix time>-<pid>)
+        #[arg(long)] out: Option<PathBuf>,
+        /// diff the decisions and commit groups against the run's into replay-diff.json
+        #[arg(long)] compare: bool,
+        /// re-price every opportunity's best route at these fractions of its size and/or `opt` (X3), e.g. 0.5,0.25,0.125,opt
+        #[arg(long, value_delimiter = ',')] reprice_sizes: Vec<String>,
+        /// what-if: strategy.<field>=<v>, state.<knob>=<v>, alts.<knob>=<v>, accuracy.ring_versions=<v>, min_tip=<v> (repeatable)
+        #[arg(long = "set")] set: Vec<String>,
+    },
+    /// Price one route at one recorded state version of a run (PLAN WP-09 item 3; the toolkit's R4, R8): the run replayed
+    /// up to the version, then the engine's own pricing. --version: an accounts.bin aseq, slot:write_version, a transaction
+    /// signature (its post-state) or pre:<signature>. --batch: JSON lines {id, route, version, size} in, JSON lines out.
+    /// Exit code: 0 every answer priced, 1 one was not, 2 refused
+    Quote {
+        /// the segment's run directory
+        #[arg(long)] run: PathBuf,
+        /// buy,sell,mint (base58)
+        #[arg(long)] route: Option<String>,
+        /// aseq (or aseq:N), slot:write_version, <signature> or pre:<signature>
+        #[arg(long)] version: Option<String>,
+        /// lamports
+        #[arg(long)] size: Option<u64>,
+        /// a file of questions, one JSON line each: {"id", "route", "version", "size"}
+        #[arg(long)] batch: Option<PathBuf>,
+        /// the run's frozen config (default: <run>/config.toml)
+        #[arg(long)] config: Option<PathBuf>,
+        /// the run's registry (default: <run>/pools.json; its registry-run.json beside it)
+        #[arg(long)] pools: Option<PathBuf>,
     },
     /// (tests) install `run`'s signal handler, control socket and stop path, without feeds or RPC; print "ready <pid>",
     /// wait for a stop, write stop.json and exit with its code
@@ -325,6 +371,23 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::GrpcProbe { config, seconds, out, only, force } => grpc_probe(&config, seconds, out, only, force),
+        // ---- WP-09: replay and quote (src/replay.rs); a refused recording exits 2
+        Cmd::Replay { run, from_slot, to_slot, config, pools, out, compare, reprice_sizes, set } => {
+            let parsed = (|| -> Result<replay::Opts> {
+                Ok(replay::Opts { from_slot, to_slot, config, pools, out, compare, sets: set.iter().map(|s| s.parse()).collect::<Result<_>>()?,
+                    reprice: reprice_sizes.iter().map(|s| s.parse()).collect::<Result<_>>()? })
+            })();
+            match parsed.and_then(|o| replay::cli_replay(&run, &o)) {
+                Ok(code) => std::process::exit(code),
+                Err(e) => { eprintln!("arbx replay: {e:#}"); std::process::exit(2) }
+            }
+        }
+        Cmd::Quote { run, route, version, size, batch, config, pools } => {
+            match replay::cli_quote(&run, config.as_deref(), pools.as_deref(), route.as_deref(), version.as_deref(), size, batch.as_deref()) {
+                Ok(code) => std::process::exit(code),
+                Err(e) => { eprintln!("arbx quote: {e:#}"); std::process::exit(2) }
+            }
+        }
         Cmd::KeystoreEncrypt { out, generate, show_backup } => {
             use std::io::Read;
             if out.exists() { anyhow::bail!("{} exists: not overwriting", out.display()); }
@@ -1187,6 +1250,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let venue_programs: Vec<String> = provenance::venue_specs().iter().map(|p| tx::b58(&p.id)).collect();
     config::expand_includes(&mut cfg.feeds, &reg.watched_writable(), &venue_programs)?;
     let reg = Arc::new(reg);
+    // ---- WP-09 wiring: pools.json (MEASUREMENT §4.29: the registry this segment trades, the toolkit's attribution reads
+    // it) and registry-run.json (its pairs in order, the state stream's watch list with its roles): what `arbx replay` and
+    // `arbx quote` rebuild the engine from (the boot read the pools from chain); meta.json `pools.file` names it
+    let pools_sha256 = replay::write_pools_json(&dir, &reg, &base_watch, &roles)?;
     say(&format!("booted: {}; {} accounts held (snapshot at slot {snapshot_slot})", reg.summary(), store.len()));
     say(&format!("state stream follows {followed} accounts, started {:.1} ms after the snapshot (its first update's slot follows in this log)",
         stream_started_ns.saturating_sub(snapshot_ns) as f64 / 1e6));
@@ -1267,7 +1334,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
             "slot_statuses": if interslot { "all" } else { "commitment" }, "extra_watched": n_extra, "config": provenance::section(&cfg.state),
             "snapshot_slot": snapshot_slot, "snapshot_ns": snapshot_ns, "stream_started_ns": stream_started_ns, "followed": followed },
         "probe": probe_meta, "chainfetch": cf_meta, "leaders": provenance::section(&cfg.leaders),
-        "pools": provenance::pools_json(&reg, &cfg), "inputs": provenance::inputs_json(&cfg),
+        "pools": replay::meta_pools(provenance::pools_json(&reg, &cfg), &pools_sha256), "inputs": provenance::inputs_json(&cfg),
         "streams": streams, "experiments": null,
         "limits": limits, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()),
         "clock": provenance::clock_json(),

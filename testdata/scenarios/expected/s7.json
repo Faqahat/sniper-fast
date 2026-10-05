@@ -1,0 +1,416 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 8,
+      "group": 0,
+      "late": null,
+      "members": 2,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.ammv4"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "dump",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 8,
+      "group": 1,
+      "late": null,
+      "members": 1,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.cpmm"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "vault-arrives",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 8,
+      "group": 2,
+      "late": null,
+      "members": 2,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.ammv4"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "dump2",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": 4,
+      "best": 4,
+      "decision": 0,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "warmup",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": 325361202,
+          "net": 325348642,
+          "reason": "not_best",
+          "sell": "usdc.pump",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -411412,
+          "net": -423972,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "account_missing",
+          "sell": "usdc.cpmm",
+          "size": null
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "account_missing",
+          "sell": "usdc.ammv4",
+          "size": null
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            2
+          ],
+          "cu": 118000,
+          "gross": 331618048,
+          "net": 331607328,
+          "reason": "best",
+          "sell": "usdc.dlmm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 112000,
+          "gross": -390558,
+          "net": -401038,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": 329490562,
+          "net": 329481082,
+          "reason": "not_best",
+          "sell": "usdc.damm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.damm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": -391787,
+          "net": -401267,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386132,
+        "txn": "dump"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 3,
+      "best": 3,
+      "decision": 1,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 1
+      },
+      "reason": "warmup",
+      "routes": [
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 181000,
+          "gross": -46352,
+          "net": -59592,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 181000,
+          "gross": -43975,
+          "net": -57215,
+          "reason": "below_min_profit",
+          "sell": "usdc.cpmm",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": -426576,
+          "net": -436296,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": 2200377,
+          "net": 2190657,
+          "reason": "best",
+          "sell": "usdc.cpmm",
+          "size": 57473054
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            1
+          ],
+          "cu": 129000,
+          "gross": -40253,
+          "net": -51413,
+          "reason": "below_min_profit",
+          "sell": "usdc.dlmm",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 129000,
+          "gross": -21526,
+          "net": -32686,
+          "reason": "below_min_profit",
+          "sell": "usdc.cpmm",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 104000,
+          "gross": -41729,
+          "net": -51889,
+          "reason": "below_min_profit",
+          "sell": "usdc.damm",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.damm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 104000,
+          "gross": -22841,
+          "net": -33001,
+          "reason": "below_min_profit",
+          "sell": "usdc.cpmm",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.cpmm",
+        "slot": 453386132,
+        "txn": "vault-arrives"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 4,
+      "best": 4,
+      "decision": 2,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "no_executor",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": 500824726,
+          "net": 500812166,
+          "reason": "not_best",
+          "sell": "usdc.pump",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -582725,
+          "net": -595285,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": 4901988,
+          "net": 4892268,
+          "reason": "not_best",
+          "sell": "usdc.cpmm",
+          "size": 84214316
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": -597323,
+          "net": -607043,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            2
+          ],
+          "cu": 118000,
+          "gross": 507352291,
+          "net": 507341571,
+          "reason": "best",
+          "sell": "usdc.dlmm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 112000,
+          "gross": -562650,
+          "net": -573130,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": 505110401,
+          "net": 505100921,
+          "reason": "not_best",
+          "sell": "usdc.damm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.damm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 87000,
+          "gross": -563833,
+          "net": -573313,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386132,
+        "txn": "dump2"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    }
+  ],
+  "scenario": "s7"
+}

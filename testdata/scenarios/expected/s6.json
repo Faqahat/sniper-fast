@@ -1,0 +1,68 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 2,
+      "group": 0,
+      "late": null,
+      "members": 2,
+      "outcome": "complete",
+      "pools": [
+        "usdc.pump"
+      ],
+      "resolved_by": "member",
+      "slot": 453386132,
+      "txn": "T1",
+      "w_src": "shred"
+    }
+  ],
+  "decisions": [
+    {
+      "band": 0,
+      "best": 0,
+      "decision": 0,
+      "kind": "commit",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "below_min_profit",
+      "routes": [
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -18713,
+          "net": -31273,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -36169,
+          "net": -48729,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.pump",
+        "slot": 453386132,
+        "txn": "T1"
+      },
+      "verdict": "reject",
+      "w_src": "shred"
+    }
+  ],
+  "scenario": "s6"
+}

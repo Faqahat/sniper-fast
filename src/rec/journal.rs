@@ -102,14 +102,16 @@ impl Journal {
     }
 
     /// TX_COPY: a later copy (timing as the engine uses it; WP-03 appends its PoH position when it has one, which the
-    /// engine keeps if the first copy had none)
+    /// engine keeps if the first copy had none; WP-09 appends its slot: an unexecuted copy raises the engine's shred slot,
+    /// review WP-09 #15)
     pub fn tx_copy(&self, t: u64, a: &Arrival) {
-        let (sig, feed, t_rx, poh) = (a.tx.sig, a.feed, a.t_rx, a.poh);
+        let (sig, feed, t_rx, poh, slot) = (a.tx.sig, a.feed, a.t_rx, a.poh, a.slot);
         self.put(J_TX_COPY, t, 0, move |o| {
             o.extend_from_slice(&sig);
             o.extend(feed.to_le_bytes());
             o.extend(t_rx.to_le_bytes());
             put_poh(o, poh.as_ref());
+            o.extend(slot.to_le_bytes());
         });
     }
 
@@ -227,7 +229,8 @@ pub struct JRec { pub seq: u64, pub t_engine: u64, pub body: JBody }
 #[derive(Clone, Debug)]
 pub enum JBody {
     TxFirst { feed: u16, slot: u64, t_rx: u64, t_decoded: u64, executed: Option<bool>, enc: u8, bytes: Vec<u8>, loaded: Option<(Vec<Pk>, Vec<Pk>)>, poh: Option<Poh> },
-    TxCopy { sig: [u8; 64], feed: u16, t_rx: u64, poh: Option<Poh> },
+    /// `slot`: WP-09 (None: a record written before it)
+    TxCopy { sig: [u8; 64], feed: u16, t_rx: u64, poh: Option<Poh>, slot: Option<u64> },
     Account { aseq: u64, stale: bool },
     /// `bank_id`: 2.2 (WP-04); None when the provider did not send one (or a 2.1 record)
     Slot { slot: u64, parent: Option<u64>, status: i32, t: u64, bank_id: Option<u64> },
@@ -269,7 +272,12 @@ fn body(kind: u8, b: &[u8]) -> Result<JBody> {
             let loaded = if c.u8()? == 1 { Some((c.keys()?, c.keys()?)) } else { None };
             JBody::TxFirst { feed, slot, t_rx, t_decoded, executed, enc, bytes, loaded, poh: c.poh()? }
         }
-        J_TX_COPY => JBody::TxCopy { sig: c.arr()?, feed: c.u16()?, t_rx: c.u64()?, poh: c.poh()? },
+        J_TX_COPY => {
+            let (sig, feed, t_rx, poh) = (c.arr()?, c.u16()?, c.u64()?, c.poh()?);
+            // WP-09 appends the copy's slot after the PoH tail (a record written before it ends there)
+            let slot = if c.p + 8 <= b.len() { Some(c.u64()?) } else { None };
+            JBody::TxCopy { sig, feed, t_rx, poh, slot }
+        }
         J_ACCOUNT => JBody::Account { aseq: c.u64()?, stale: c.u8()? != 0 },
         J_SLOT => {
             let slot = c.u64()?;
@@ -438,12 +446,52 @@ pub struct ReplayStats {
     pub gaps: Vec<(u64, u64)>,
     /// INPUT records not fed to the engine: settlements (the executor's, WP-05 / WP-09) and unknown kinds
     pub skipped: u64,
-    /// decision-point gate records (`src` "decision"): what the run's send checks saw, for a replay with an executor
+    /// decision-point gate records (`src` "decision"): what the run's decisions read of the SendGate
     pub gate_observed: u64,
+    /// ---- WP-09 (review WP-09 #3): of those, the ones staged for the replay's decisions (`Engine::gate_seen`)
+    pub gate_staged: u64,
+}
+
+/// ---- WP-09 (review WP-09 #3). A decision-point gate record: INPUT 3 `src` "decision", what a decision read of the
+/// SendGate (written by the engine right after the input or timer whose handling made the decision)
+pub fn is_gate_decision(r: &JRec) -> bool {
+    matches!(&r.body, JBody::Input { kind, data } if *kind == InputKind::Gate as u8 && data["src"].as_str() == Some("decision"))
+}
+
+/// ---- WP-09. The SendGate a journaled gate state describes (`{mode, reason, detail, sticky}`: meta.json `send_gate`,
+/// INPUT 3 records); None for a record of a run that had no gate (`mode` null)
+pub fn gate_of(d: &serde_json::Value) -> Option<Arc<crate::control::SendGate>> {
+    let g = crate::control::SendGate::new();
+    let (reason, detail) = (d["reason"].as_str().unwrap_or(""), d["detail"].as_str().unwrap_or(""));
+    match d["mode"].as_str() {
+        None => return None,
+        Some("shadow") => { let _ = g.shadow(reason, detail, d["sticky"].as_bool().unwrap_or(false)); }
+        Some("stopped") => g.stop(reason),
+        Some(_) => {}
+    }
+    Some(g)
+}
+
+/// ---- WP-09 (review WP-09 #3). The look-ahead: the decision-point gate records that follow a record (its decisions'
+/// gate, written while it was handled; TICK records may sit between them), staged on the engine before it handles the
+/// record; each applies at its opportunity
+fn stage_gate_decisions(eng: &mut crate::engine::Engine, after: &[JRec], st: &mut ReplayStats) {
+    for n in after {
+        match &n.body {
+            JBody::Input { data, .. } if is_gate_decision(n) => {
+                let Some(opp) = data["opp"].as_u64() else { continue };
+                eng.gate_seen.script.push_back((opp, gate_of(data)));
+                st.gate_staged += 1;
+            }
+            JBody::Tick => continue,
+            _ => break,
+        }
+    }
 }
 
 /// Feed a journal (after its boot records) into `eng` exactly as the run handed it its inputs: each record's event
-/// with its `t_engine_ns`, each TIMER at its time
+/// with its `t_engine_ns`, each TIMER at its time and scope. WP-09: the gate each decision read is staged ahead of the
+/// record whose handling made it (`stage_gate_decisions`)
 pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &HashMap<u64, AcctRecord>) -> Result<ReplayStats> {
     let mut st = ReplayStats::default();
     let mut status = |_: &str| {};
@@ -451,7 +499,7 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
     // WP-04 item 11: the replay clock. While a record is handled, this thread's clock reads its t_engine_ns, so stage
     // timestamps are the journaled times too (the guard restores the real clock, also on an error)
     let clock = crate::feeds::clock::Virtual::start(0);
-    for r in journal {
+    for (i, r) in journal.iter().enumerate() {
         if let JBody::Gap { first_lost_seq, n_lost } = r.body { st.gaps.push((first_lost_seq, n_lost)); continue; }
         // the boot section is applied by `boot_store` / `replay_engine`
         if boot && r.t_engine == 0 { continue; }
@@ -461,9 +509,9 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
         let ev = match &r.body {
             JBody::TxFirst { feed, slot, t_rx, t_decoded, executed, enc, bytes, loaded, poh } =>
                 Event::Tx(arrival(*feed, *slot, *t_rx, *t_decoded, *executed, *enc, bytes, loaded, *poh)?),
-            JBody::TxCopy { sig, feed, t_rx, poh } => {
+            JBody::TxCopy { sig, feed, t_rx, poh, slot } => {
                 let tx = crate::tx::Tx { sig: *sig, ..Default::default() };
-                Event::Tx(Arrival { feed: *feed, slot: 0, t_rx: *t_rx, t_decoded: *t_rx, executed: None, tx, poh: *poh, raw: RawTx::None })
+                Event::Tx(Arrival { feed: *feed, slot: slot.unwrap_or(0), t_rx: *t_rx, t_decoded: *t_rx, executed: None, tx, poh: *poh, raw: RawTx::None })
             }
             JBody::Account { aseq, stale } => match accounts.get(aseq) {
                 Some(a) => {
@@ -483,14 +531,21 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
                 // a settlement belongs to the executor, which an offline engine does not have (WP-05 / WP-09 replay it);
                 // engine_init belongs to the boot section
                 Some(InputKind::Settled) | Some(InputKind::EngineInit) | None => { st.skipped += 1; continue; }
-                // what a send check saw, journaled by the engine while handling the input before it: not an input
+                // what a decision read of the SendGate, journaled by the engine while handling the record before it: not
+                // an input (staged before that record was handed over)
                 Some(InputKind::Gate) if data["src"].as_str() == Some("decision") => { st.gate_observed += 1; continue; }
                 Some(k) => Event::Input { kind: k, data: Arc::new(data.clone()) },
             },
-            JBody::Timer { t, what } => { eng.timers_at(*t, *what, &mut status); st.timers += 1; continue; }
+            JBody::Timer { t, what } => {
+                stage_gate_decisions(eng, &journal[i + 1..], &mut st);
+                eng.timers_at(*t, *what, &mut status);
+                st.timers += 1;
+                continue;
+            }
             JBody::Gap { .. } => continue,
             JBody::Tick | JBody::Status { .. } => continue,
         };
+        stage_gate_decisions(eng, &journal[i + 1..], &mut st);
         eng.step(ev, t, &mut status);
         st.events += 1;
     }
@@ -1035,5 +1090,24 @@ mod tests {
         b.extend(5u64.to_le_bytes());
         assert!(matches!(body(J_SLOT, &b).unwrap(), JBody::Slot { slot: 100, parent: Some(99), status: 1, t: 5, bank_id: None }));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// WP-09 (review WP-09 #15): TX_COPY carries the copy's slot after its PoH tail; a record written before (2.1, 2.2)
+    /// still reads, without one
+    #[test]
+    fn tx_copy_carries_its_slot_and_older_records_read() {
+        let mut b = vec![7u8; 64];
+        b.extend(2u16.to_le_bytes());
+        b.extend(1_234u64.to_le_bytes());
+        b.push(0);
+        assert!(matches!(body(J_TX_COPY, &b).unwrap(), JBody::TxCopy { feed: 2, t_rx: 1_234, poh: None, slot: None, .. }), "a 2.1 / 2.2 record");
+        b.extend(453_000_001u64.to_le_bytes());
+        assert!(matches!(body(J_TX_COPY, &b).unwrap(), JBody::TxCopy { feed: 2, poh: None, slot: Some(453_000_001), .. }));
+        let mut p = vec![7u8; 64];
+        p.extend(2u16.to_le_bytes());
+        p.extend(1_234u64.to_le_bytes());
+        put_poh(&mut p, Some(&Poh { slot: 9, hashes: 10, ticks: 11, hpt: 12 }));
+        p.extend(77u64.to_le_bytes());
+        assert!(matches!(body(J_TX_COPY, &p).unwrap(), JBody::TxCopy { poh: Some(Poh { slot: 9, .. }), slot: Some(77), .. }));
     }
 }

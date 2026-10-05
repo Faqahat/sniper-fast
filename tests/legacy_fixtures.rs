@@ -1,4 +1,5 @@
-//! Offline checks of the legacy fixtures (PLAN WP-00b): testdata/legacy/ and testdata/wallet/.
+//! Offline checks of the legacy fixtures (PLAN WP-00b): testdata/legacy/ and testdata/wallet/ (and WP-09's scenario
+//! inputs, testdata/scenarios/capture.json and accounts.json, in the same manifest).
 //!
 //! - every fixture file matches testdata/legacy/fixtures.sha256, none is unlisted, and raw.sha256 agrees;
 //! - every JSON fixture parses, and every signature in signatures.json has its getTransaction fixture;
@@ -79,6 +80,8 @@ fn fixture_files() -> BTreeSet<PathBuf> {
     let mut all = Vec::new();
     walk(&testdata().join("legacy"), &mut all);
     walk(&testdata().join("wallet"), &mut all);
+    // the WP-09 scenario inputs (tools/capture-fixtures.py `SCENARIO_INPUTS`; their expected outputs are not fixtures)
+    all.extend(["capture.json", "accounts.json"].iter().map(|f| testdata().join("scenarios").join(f)).filter(|p| p.exists()));
     all.into_iter().filter(|p| is_fixture(p)).map(|p| normalize(&p)).collect()
 }
 

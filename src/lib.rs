@@ -27,8 +27,11 @@ pub mod probe;
 pub mod provenance;
 pub mod reads;
 pub mod rec;
+pub mod replay;
 pub mod rpc;
 pub mod runtime;
+#[cfg(test)]
+mod scenarios;
 pub mod send;
 pub mod store;
 pub mod store_health;
