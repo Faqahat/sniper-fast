@@ -261,3 +261,47 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
 - Every test is documented in `docs/field-tests/` (protocol, entries `FT-NNN`, `BUDGET.md` ledger).
 - The equity floor = starting equity − remaining budget.
 - The owner expects the **win ratio to rise a lot in Stage 1**. The Stage 1 plan, focused on win ratio, is `docs/STAGE1-PLAN.md`.
+
+## WP-20: Alerts (Telegram) and watchdog (owner request, 2026-10-05)
+
+**Goal:** the owner is told at once about wins, errors and anything else worth knowing, and whether the bot is running or not, in the Telegram group "ArbX".
+- The token and chat id live only in `/root/arbx/deploy/.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`), never in the repo. `tools/secret-scan.py` blocks bot tokens.
+- Until WP-20 is deployed, the operator's segment watcher posts test alerts.
+
+**`src/alerts.rs`:**
+- A non-blocking sink: a bounded channel with `try_send`; when the channel is full the alert is dropped and counted.
+- One sender task on `rt_bg` posts HTTPS `sendMessage` (parse_mode HTML).
+- Per-chat rate limit (≤ 20/min), with retries that honour 429 `retry_after`.
+- Bursts are coalesced into one message, and repeated alerts with the same dedup key are suppressed (default 600 s).
+- Counters go in status (`alerts.*`) and events in `events.jsonl`.
+- The token is never logged, recorded or shown in meta.json; https only (I-10).
+
+**Events:**
+
+| Kind | When |
+|---|---|
+| Lifecycle | segment start (mode, build, config hash, short wallet, budget); stop (reason, duration, decisions, opportunities, sends, wins, net); crash (a panic hook sends Critical, best-effort, with a short timeout) |
+| Health | state stream down or up; a re-snapshot that does not land; Haan 503 or 429 storms; recorder drops, I/O errors, dead writers and disk-ladder steps; chain fetch dead; Jito auth or token failures; stale blockhash; SendGate changes, with the reason (budget or equity floor, hourly cap, reconciliation miss) |
+| Money | **win**: route, mint, size, net, tip, slot and a solscan link, via `alerts::win()`, which the WP-05 settlement calls (wired at the merge); a failed landing (Error); budget or equity floor reached (Critical); low balance |
+| Periodic | a heartbeat every `heartbeat_min` (default 60) with the key numbers; a daily summary at 00:00 UTC (wins, net SOL, sends, win ratio per send, budget left) |
+
+**Subcommands:**
+- `arbx watchdog` is a separate long-running process on Cherry. It holds a single-instance lock and watches `/root/arbx/runs`:
+  - "✅ running" every `status_min` (default 60);
+  - "❌ not running" when no segment process has been alive for more than `grace_s` (default 120 s, which covers gaps between segments), or `status.jsonl` is more than 60 s stale;
+  - "✅ back up" when it recovers.
+- `arbx alert-test` sends one test message.
+
+**Config:**
+- `[alerts] enabled, token_env = "TELEGRAM_BOT_TOKEN", chat_env = "TELEGRAM_CHAT_ID", heartbeat_min = 60, min_level = "info", dedup_s = 600, rate_per_min = 20`
+- `[watchdog] runs_dir, grace_s = 120, status_min = 60`
+
+**Tests:**
+- rate limit, dedup and coalescing against a fake HTTP server;
+- the sink never blocks;
+- the token never appears in any record or log;
+- the panic hook sends;
+- the watchdog state machine on a fake runs directory;
+- message formatting.
+
+**Placement:** a lane, merged after WP-05 so the win and settlement hooks can be wired. Cherry gets only the binary (owner rule): the watchdog is a subcommand, not a script.
