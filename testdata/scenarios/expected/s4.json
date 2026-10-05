@@ -1,0 +1,170 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 2,
+      "group": 0,
+      "late": null,
+      "members": 1,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.pump"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386133,
+      "txn": "donation",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 2,
+      "group": 1,
+      "late": null,
+      "members": 2,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.ammv4"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386133,
+      "txn": "small",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 2,
+      "group": 2,
+      "late": null,
+      "members": 1,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.pump"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386133,
+      "txn": "touch",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": null,
+      "best": null,
+      "decision": 0,
+      "kind": "quiescent",
+      "parts_skew_slots": null,
+      "reason": "parts_skewed",
+      "routes": [
+        {
+          "buy": "usdc.pump",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "parts_skewed",
+          "sell": "usdc.ammv4",
+          "size": null
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "parts_skewed",
+          "sell": "usdc.pump",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.pump",
+        "slot": 453386133,
+        "txn": "donation"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": null,
+      "best": null,
+      "decision": 1,
+      "kind": "quiescent",
+      "parts_skew_slots": null,
+      "reason": "parts_skewed",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "parts_skewed",
+          "sell": "usdc.pump",
+          "size": null
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "parts_skewed",
+          "sell": "usdc.ammv4",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386133,
+        "txn": "small"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 0,
+      "best": 1,
+      "decision": 2,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "below_min_profit",
+      "routes": [
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -37680,
+          "net": -50240,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -17191,
+          "net": -29751,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.pump",
+        "slot": 453386133,
+        "txn": "touch"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    }
+  ],
+  "scenario": "s4"
+}

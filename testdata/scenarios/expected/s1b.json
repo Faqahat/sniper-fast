@@ -1,0 +1,370 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 4,
+      "group": 1,
+      "late": null,
+      "members": 2,
+      "outcome": "complete",
+      "pools": [
+        "usdc.ammv4"
+      ],
+      "resolved_by": "member",
+      "slot": 453386132,
+      "txn": "U",
+      "w_src": "shred"
+    },
+    {
+      "evaluated": 8,
+      "group": 0,
+      "late": null,
+      "members": 6,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.pump",
+        "usdc.dlmm"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "T",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": null,
+      "best": null,
+      "decision": 0,
+      "kind": "commit",
+      "parts_skew_slots": null,
+      "reason": "pending_commit",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "pending_commit",
+          "sell": "usdc.pump",
+          "size": null
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "pending_commit",
+          "sell": "usdc.ammv4",
+          "size": null
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "pending_commit",
+          "sell": "usdc.dlmm",
+          "size": null
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "pending_commit",
+          "sell": "usdc.ammv4",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386132,
+        "txn": "U"
+      },
+      "verdict": "reject",
+      "w_src": "shred"
+    },
+    {
+      "band": 3,
+      "best": 0,
+      "decision": 1,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "no_executor",
+      "routes": [
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            7
+          ],
+          "cu": 236000,
+          "gross": 5194877,
+          "net": 5179437,
+          "reason": "best",
+          "sell": "usdc.dlmm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 200000,
+          "gross": -41479,
+          "net": -55479,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "route_not_quiet",
+          "sell": "usdc.ammv4",
+          "size": null
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "route_not_quiet",
+          "sell": "usdc.pump",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.pump",
+        "slot": 453386132,
+        "txn": "T"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 3,
+      "best": 1,
+      "decision": 2,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "no_executor",
+      "routes": [
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 200000,
+          "gross": -41479,
+          "net": -55479,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            7
+          ],
+          "cu": 236000,
+          "gross": 5194877,
+          "net": 5179437,
+          "reason": "best",
+          "sell": "usdc.dlmm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "route_not_quiet",
+          "sell": "usdc.ammv4",
+          "size": null
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "route_not_quiet",
+          "sell": "usdc.dlmm",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.dlmm",
+        "slot": 453386132,
+        "txn": "T"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 4,
+      "best": 2,
+      "decision": 3,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "no_executor",
+      "routes": [
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            7
+          ],
+          "cu": 236000,
+          "gross": 5194877,
+          "net": 5179437,
+          "reason": "not_best",
+          "sell": "usdc.dlmm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 200000,
+          "gross": -41479,
+          "net": -55479,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": 46599486,
+          "net": 46586926,
+          "reason": "best",
+          "sell": "usdc.ammv4",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -110115,
+          "net": -122675,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.pump",
+        "slot": 453386132,
+        "txn": "T"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 4,
+      "best": 2,
+      "decision": 4,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "no_executor",
+      "routes": [
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 200000,
+          "gross": -41479,
+          "net": -55479,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            7
+          ],
+          "cu": 236000,
+          "gross": 5194877,
+          "net": 5179437,
+          "reason": "not_best",
+          "sell": "usdc.dlmm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            6,
+            0
+          ],
+          "cu": 142000,
+          "gross": 36626073,
+          "net": 36614393,
+          "reason": "best",
+          "sell": "usdc.ammv4",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            1
+          ],
+          "cu": 112000,
+          "gross": -72178,
+          "net": -82658,
+          "reason": "below_min_profit",
+          "sell": "usdc.dlmm",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.dlmm",
+        "slot": 453386132,
+        "txn": "T"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    }
+  ],
+  "scenario": "s1b"
+}

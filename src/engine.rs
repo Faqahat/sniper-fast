@@ -328,6 +328,8 @@ pub struct Engine {
     t_anchor: u64,
     init_journaled: bool,
     gate_journaled: Option<crate::control::GateMode>,
+    /// ---- WP-09 (review WP-09 #3): the SendGate as decisions without an executor read it (`gate_no_executor`)
+    pub gate_seen: GateSeen,
     queue_now: usize,
     /// a running hash of every decision made: replay compares it
     decisions: u64,
@@ -743,7 +745,8 @@ impl Engine {
         let journal = Journal::new(rec.clone());
         let knobs = EngineKnobs::default();
         store.ring_versions = knobs.ring_versions;
-        Engine { journal, t_now: 0, last_hk_t: 0, last_status_t: 0, last_drift_t: 0, anchored: false, t_anchor: 0, init_journaled: false, gate_journaled: None, queue_now: 0,
+        Engine { journal, t_now: 0, last_hk_t: 0, last_status_t: 0, last_drift_t: 0, anchored: false, t_anchor: 0, init_journaled: false, gate_journaled: None,
+            gate_seen: GateSeen::default(), queue_now: 0,
             decisions: 0, last_block_meta: None, acct_rec: None, base_watch: None,
             reg, store, cfg, feeds, min_tip, interest, ata: AtaCache::default(), sigs: HashMap::default(), sig_order: VecDeque::new(),
             alts: Alts::new(knobs.alts.clone()), acct_pool, part_pools, eval_pools, tier_a, tier_a_complete: false,
@@ -1462,12 +1465,16 @@ impl Engine {
     /// the end of the run: open opportunities finished, the signatures still in their window written, the lookup
     /// tables dumped (alts-final), the signer statistics saved (into the run directory)
     pub fn finish(&mut self) {
+        // ---- WP-09 (review WP-09 #6): the digests as the run ends (its last journaled record handled), before this
+        // bookkeeping empties the opportunities and the signature windows
+        let before = (self.digest(), self.decision_digest());
         let ids: Vec<u64> = self.opps.keys().copied().collect();
         for id in ids { self.finish_opp(id); }
         let left: Vec<u64> = self.sigs.keys().copied().collect();
         for k in left { if let Some(s) = self.sigs.remove(&k) { self.write_txarr(k, &s); if s.trigger.is_some() { self.write_arrivals(&s); } } }
         self.write_alts();
         self.save_signer_stats();
+        self.record_digests(before);
     }
 
     /// The last status.jsonl line, with the run's stop reason (MEASUREMENT A.5; WP-01)
@@ -2024,7 +2031,7 @@ impl Engine {
         let (t, slot) = (self.t_now, self.slot);
         let Some(x) = self.exec.as_mut() else {
             // no executor: nothing can send
-            let why = self.gate.as_ref().filter(|g| !g.allows()).map_or("no_executor".to_string(), |g| format!("gate_{}:{}", g.mode().as_str(), g.reason()));
+            let why = self.gate_no_executor(id); // ---- WP-09 (review WP-09 #3): journaled at the decision, replayed from the journal
             return crate::exec::Decided::reject(why);
         };
         let sim = x.wants_sim(size);
@@ -2771,6 +2778,94 @@ impl Engine {
             "size_lamports": o.size, "gross_lamports": o.gross, "net_lamports": o.net, "cu": o.cu, "bins_crossed": [o.crossed.0, o.crossed.1],
             "st": o.st, "arrivals": arrivals, "trigger_landed_slot": o.landed, "taker": taker_json, "poh": poh_json,
             "touches": o.touches.len(), "decision": (o.decision != u64::MAX).then_some(o.decision), "sv": hex16(o.sv) }));
+    }
+}
+
+// ---------------------------------------------------------------- WP-09: what a replay needs of the engine (src/replay.rs)
+
+/// ---- WP-09 (review WP-09 #3). The SendGate as decisions without an executor read it. A run keeps the reason it
+/// journaled last (a decision whose reason differs writes an INPUT 3 `src` "decision" record). A replay stages the run's
+/// records in `script` (`journal::replay` reads them ahead of the input whose handling made the decision), and each is
+/// applied at its opportunity
+#[derive(Default)]
+pub struct GateSeen {
+    last: Option<String>,
+    /// (opportunity id, the gate the run's decision read; None: the run had none)
+    pub script: VecDeque<(u64, Option<Arc<crate::control::SendGate>>)>,
+}
+
+/// One route priced on the store as a decision prices it (`Engine::quote_route`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct RouteQuote {
+    pub size: u64,
+    pub mid: u64,
+    pub back: u64,
+    pub gross: i64,
+    pub fee: u64,
+    pub net: i64,
+    pub cu: u64,
+    pub crossed: (u32, u32),
+    pub buy_end: Option<i32>,
+    pub sell_end: Option<i32>,
+}
+
+impl Engine {
+    /// ---- WP-09 (review WP-09 #3). The reason of a decision without an executor: `no_executor` while the SendGate
+    /// allows sends, else `gate_<mode>:<reason>`. A run reads its live gate (a pause from the control socket closes it at
+    /// once) and journals what it read, as the executor's send checks journal theirs: an INPUT 3 `src` "decision" record
+    /// `{mode, reason, detail, since_ns, sticky, src, opp, executor: false, why}` with the opportunity's id, right after
+    /// the input being handled, whenever the reason differs from the last one journaled. A replay applies the run's
+    /// records first (`gate_seen.script`)
+    fn gate_no_executor(&mut self, id: u64) -> String {
+        while self.gate_seen.script.front().is_some_and(|(o, _)| *o <= id) {
+            if let Some((_, g)) = self.gate_seen.script.pop_front() { self.gate = g; }
+        }
+        let why = self.gate.as_ref().filter(|g| !g.allows()).map_or("no_executor".to_string(), |g| format!("gate_{}:{}", g.mode().as_str(), g.reason()));
+        if self.gate_seen.last.as_deref() != Some(why.as_str()) {
+            let mut g = self.gate.as_ref().map_or_else(|| json!({ "mode": null }), |g| g.json());
+            g["src"] = json!("decision");
+            g["opp"] = json!(id);
+            g["executor"] = json!(false);
+            g["why"] = json!(why);
+            self.journal.input(self.t_now, InputKind::Gate, Arc::new(g));
+            self.gate_seen.last = Some(why.clone());
+        }
+        why
+    }
+
+    /// ---- WP-09 (review WP-09 #6). The digests as the run ends, as an events.jsonl `engine_digests` record:
+    /// `before_finish` once its last journaled record was handled (what a whole replay reaches), then after `finish`'s
+    /// bookkeeping. `arbx replay --compare` checks a replay that ran to the end against them
+    fn record_digests(&self, before: (u64, u64)) {
+        self.rec.event("engine_digests", "engine", None, json!({ "t_engine": self.t_now, "decisions": self.next_decision, "opportunities": self.next_id,
+            "before_finish": { "digest": hex16(before.0), "decision_digest": hex16(before.1) },
+            "digest": hex16(self.digest()), "decision_digest": hex16(self.decision_digest()) }));
+    }
+
+    /// ---- WP-09 (review WP-09 #10). Route (buy, sell) of `mint` priced at `size` on the store as it is, as a decision
+    /// prices it: `route_in`'s legs (the Clock sysvar's unix time and slot, else the engine's time; the DLMM bin arrays a
+    /// decision leaves out, left out) and `price_route`'s CU estimate and fee rule (5,000 + `cu_price_micro` × CU / 10^6
+    /// + the run's `min_tip`). `arbx quote` and `--reprice-sizes` price with it. Err: why it does not quote
+    pub fn quote_route(&self, buy: &Pk, sell: &Pk, mint: &Pk, size: u64) -> Result<RouteQuote, &'static str> {
+        let (Some(&bi), Some(&si)) = (self.reg.by_pool.get(buy), self.reg.by_pool.get(sell)) else { return Err("not_in_registry") };
+        let (pb, ps) = (&self.reg.pools[bi], &self.reg.pools[si]);
+        let (now, dslot) = self.chain_now();
+        let lb = self.leg_of(pb, now, dslot, &self.skip_arrays(pb))?;
+        let ls = self.leg_of(ps, now, dslot, &self.skip_arrays(ps))?;
+        let (zb, zs) = (pb.t0 == *WSOL, ps.t0 == *mint);
+        let (mid, c1) = leg_quote(&lb, zb, size, now)?;
+        let (back, c2) = leg_quote(&ls, zs, mid, now)?;
+        let (buy_end, sell_end) = (leg_quote_end(&lb, zb, size, now).and_then(|x| x.1), leg_quote_end(&ls, zs, mid, now).and_then(|x| x.1));
+        let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
+        let fee = 5_000 + self.cfg.cu_price_micro * cu / 1_000_000 + self.min_tip;
+        let gross = back as i64 - size as i64;
+        Ok(RouteQuote { size, mid, back, gross, fee, net: gross - fee as i64, cu, crossed: (c1, c2), buy_end, sell_end })
+    }
+
+    /// ---- WP-09 (review WP-09 #10). Whether a decision would leave account `k` out now: (written by a pending commit
+    /// group, its version on a contested slot, not read again since the state stream's last connection)
+    pub fn part_flags(&self, k: &Pk) -> (bool, bool, bool) {
+        (self.tracker.is_pending(k), self.store.get(k).is_some_and(|a| self.forks.is_contested(a.slot)), self.unverified.contains(k))
     }
 }
 

@@ -1,0 +1,277 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 8,
+      "group": 0,
+      "late": null,
+      "members": 5,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.pump",
+        "usdc.dlmm"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "T",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": null,
+      "group": 0,
+      "late": true,
+      "members": null,
+      "outcome": null,
+      "pools": null,
+      "resolved_by": null,
+      "slot": null,
+      "txn": "T",
+      "w_src": null
+    },
+    {
+      "evaluated": 4,
+      "group": 1,
+      "late": null,
+      "members": 1,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.dlmm"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "T",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": 4,
+      "best": 2,
+      "decision": 0,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "no_executor",
+      "routes": [
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            6
+          ],
+          "cu": 230000,
+          "gross": 5523224,
+          "net": 5508024,
+          "reason": "not_best",
+          "sell": "usdc.dlmm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 200000,
+          "gross": -41970,
+          "net": -55970,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": 46598810,
+          "net": 46586250,
+          "reason": "best",
+          "sell": "usdc.ammv4",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -110115,
+          "net": -122675,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.pump",
+        "slot": 453386132,
+        "txn": "T"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 4,
+      "best": 2,
+      "decision": 1,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "no_executor",
+      "routes": [
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 200000,
+          "gross": -41970,
+          "net": -55970,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            6
+          ],
+          "cu": 230000,
+          "gross": 5523224,
+          "net": 5508024,
+          "reason": "not_best",
+          "sell": "usdc.dlmm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            5,
+            0
+          ],
+          "cu": 136000,
+          "gross": 36325658,
+          "net": 36314218,
+          "reason": "best",
+          "sell": "usdc.ammv4",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            1
+          ],
+          "cu": 112000,
+          "gross": -72178,
+          "net": -82658,
+          "reason": "below_min_profit",
+          "sell": "usdc.dlmm",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.dlmm",
+        "slot": 453386132,
+        "txn": "T"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "decision": 0,
+      "fork_priced": null,
+      "torn_suspect": true,
+      "txn": "T"
+    },
+    {
+      "decision": 1,
+      "fork_priced": null,
+      "torn_suspect": true,
+      "txn": "T"
+    },
+    {
+      "band": 4,
+      "best": 2,
+      "decision": 2,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "no_executor",
+      "routes": [
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            1,
+            0
+          ],
+          "cu": 200000,
+          "gross": -41479,
+          "net": -55479,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            7
+          ],
+          "cu": 236000,
+          "gross": 5194877,
+          "net": 5179437,
+          "reason": "not_best",
+          "sell": "usdc.dlmm",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.dlmm",
+          "crossed": [
+            6,
+            0
+          ],
+          "cu": 142000,
+          "gross": 36625398,
+          "net": 36613718,
+          "reason": "best",
+          "sell": "usdc.ammv4",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            1
+          ],
+          "cu": 112000,
+          "gross": -72178,
+          "net": -82658,
+          "reason": "below_min_profit",
+          "sell": "usdc.dlmm",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.dlmm",
+        "slot": 453386132,
+        "txn": "T"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    }
+  ],
+  "scenario": "s1b_late"
+}

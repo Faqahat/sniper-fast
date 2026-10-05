@@ -1,0 +1,6 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [],
+  "decisions": [],
+  "scenario": "s2"
+}
