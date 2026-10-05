@@ -29,7 +29,8 @@
 //!   registry's rate-limited counts); from the status line ([`Alerts::start_monitor`]): a stale blockhash, the
 //!   executor's failed-fee cap (the budget floor), a low balance, the heartbeat and the daily summary; the money calls
 //!   ([`win`], [`failed_landing`], [`loss`], [`budget_floor`], [`low_balance`]) that WP-05's settlement and WP-07's ledger
-//!   make; the segment's start and stop; a crash.
+//!   make, and WP-07's notices ([`notice`]: its equity and token floors, reconciliation misses, balances and campaign
+//!   lifecycle); the segment's start and stop; a crash.
 pub mod format;
 pub mod summary;
 pub mod telegram;
@@ -218,9 +219,14 @@ pub struct Win {
 }
 
 impl Win {
-    /// the realised net: gross − tip − fee − rent (None while the gross is unknown)
-    pub fn net_lamports(&self) -> Option<i64> { self.gross_lamports.map(|g| g - self.tip_lamports as i64 - self.fee_lamports as i64 - self.rent_lamports as i64) }
+    /// the realised net: gross − tip − fee − rent (None while the gross is unknown). In i128, clamped: no input overflows
+    pub fn net_lamports(&self) -> Option<i64> {
+        self.gross_lamports.map(|g| clamp_i64(g as i128 - self.tip_lamports as i128 - self.fee_lamports as i128 - self.rent_lamports as i128))
+    }
 }
+
+/// an i128 sum back into i64, saturating (lamport sums never come near it; a corrupt input must not panic or wrap)
+pub(crate) fn clamp_i64(x: i128) -> i64 { x.clamp(i64::MIN as i128, i64::MAX as i128) as i64 }
 
 /// A landed transaction that failed (the route reverted: the fee is lost; `alerts::failed_landing`)
 #[derive(Clone, Debug, Default)]
@@ -282,16 +288,18 @@ fn sig_part(b: Body, sig: &str) -> Body {
     match format::solscan_tx(sig) { Some(l) => b.raw(l), None if sig.is_empty() => b, None => b.code("tx", short_key(sig)) }
 }
 
-/// The alert of a landing whose route succeeded: "succeeded" and the realised net (gross − tip − fee − rent). Never
-/// "profitable" or a win unless that net is above 0: a net at or below 0 is a Warning that says it lost (F12)
+/// The alert of a landing whose route succeeded: "succeeded" and the realised net from chain data (the round trip of the
+/// route program's events − tip − fee − rent). Never "profitable" (the word is not used) and a gain only when that net
+/// is above 0 (Stage-1 plan review F12): a net below 0 is a Warning that says it lost, a net of 0 says "no profit"
 pub fn win_alert(w: &Win) -> Alert {
     let (level, icon, title) = match w.net_lamports() {
         Some(n) if n > 0 => (Level::Info, "💰", format!("succeeded · net {}", sol_signed(n))),
+        Some(0) => (Level::Info, "➖", "succeeded · net 0 SOL: no profit after fee, tip, rent".to_string()),
         Some(n) => (Level::Warning, "🔻", format!("succeeded but lost: net {} after fee, tip, rent", sol_signed(n))),
         None => (Level::Info, "✅", "succeeded · net not known yet".to_string()),
     };
     let mut b = route_mint(Body::new(), &w.route, &w.mint, &w.mint_name).nl()
-        .kv("in", format::sol_num(w.size_lamports as i64)).kv("gross", w.gross_lamports.map_or("?".to_string(), format::sol_num_signed))
+        .kv("size", format::sol_num(w.size_lamports as i64)).kv("gross", w.gross_lamports.map_or("?".to_string(), format::sol_num_signed))
         .kv("tip", format::sol_num(w.tip_lamports as i64)).kv("fee", format::sol_num(w.fee_lamports as i64));
     if w.rent_lamports > 0 { b = b.kv("rent", format::sol_num(w.rent_lamports as i64)); }
     let b = b.nl().kv("slot", w.slot.map_or("?".to_string(), int));
@@ -300,7 +308,7 @@ pub fn win_alert(w: &Win) -> Alert {
 
 /// the alert of a failed landing (Error; one key, so a run of them is one message every `dedup_s` with the count)
 pub fn failed_landing_alert(f: &FailedLanding) -> Alert {
-    let mut b = route_mint(Body::new(), &f.route, &f.mint, &f.mint_name).nl().kv("in", format::sol_num(f.size_lamports as i64));
+    let mut b = route_mint(Body::new(), &f.route, &f.mint, &f.mint_name).nl().kv("size", format::sol_num(f.size_lamports as i64));
     if let Some(e) = &f.error { b = b.code("", e); }
     let b = b.nl().kv("slot", f.slot.map_or("?".to_string(), int));
     Alert::new(Level::Error, "failed_landing", "failed_landing", &format!("failed landing · fee {} lost", sol(f.fee_lamports as i64))).body(sig_part(b, &f.signature))
@@ -308,7 +316,7 @@ pub fn failed_landing_alert(f: &FailedLanding) -> Alert {
 
 /// the alert of a realised loss
 pub fn loss_alert(l: &Loss) -> Alert {
-    let mut b = route_mint(Body::new(), &l.route, &l.mint, &l.mint_name).nl().kv("in", format::sol_num(l.size_lamports as i64))
+    let mut b = route_mint(Body::new(), &l.route, &l.mint, &l.mint_name).nl().kv("size", format::sol_num(l.size_lamports as i64))
         .kv("tip", format::sol_num(l.tip_lamports as i64)).kv("fee", format::sol_num(l.fee_lamports as i64));
     if l.rent_lamports > 0 { b = b.kv("rent", format::sol_num(l.rent_lamports as i64)); }
     if let Some(w) = &l.why { b = b.nl().txt(w); }
@@ -331,9 +339,32 @@ pub fn low_balance_alert(b: &LowBalance) -> Alert {
         .icon("🪫").body(Body::new().kv("warn below", sol(b.warn_below_lamports as i64)))
 }
 
+/// The alert of one of WP-07's notices (src/notify.rs on lane/wp-07: the ledger's, its in-process supervisor's and the
+/// campaign's money and lifecycle events: `equity_floor`, `equity_hour`, `equity_day`, `token_floor`, `recon_miss`,
+/// `low_native_sol`, `stranded_token`, `equity_unknown`, `campaign_start`, `equity_start`, `segment_end`,
+/// `segment_not_sending`, `segment_start_failed`, `campaign_shadow`, `campaign_end`). The merge wires it with
+/// `notify::set_hook(|n| { alerts::notice(<n.level as a Level: Warn is Warning>, n.kind, &n.subject, &n.text); })`.
+/// Its level is WP-07's; its key `<kind>:<subject>`; it is never deduplicated (WP-07 raises each once); `text`, WP-07's
+/// line for a person, is the title (escaped, cut at 200 characters)
+pub fn notice_alert(level: Level, kind: &'static str, subject: &str, text: &str) -> Alert {
+    let icon = match kind {
+        "equity_floor" | "equity_hour" | "equity_day" | "token_floor" => "🛑",
+        "low_native_sol" => "🪫",
+        "stranded_token" => "🪙",
+        "campaign_start" | "equity_start" => "🟢",
+        "campaign_shadow" | "segment_not_sending" => "🚦",
+        "campaign_end" | "segment_end" if level < Level::Error => "⏹",
+        _ => level.icon(),
+    };
+    Alert::new(level, kind, format!("{kind}:{subject}"), text).icon(icon).once()
+}
+
 // ------------------------------------------------------------------ events.jsonl kinds -> alerts
 
 fn s_of(d: &Value, k: &str) -> String { d[k].as_str().map(str::to_string).unwrap_or_else(|| if d[k].is_null() { String::new() } else { d[k].to_string() }) }
+/// a free-text field (an error, a why, a detail) with every URL cut to its host and key parameters masked
+/// (`rpc::scrub`): a provider's key in a URL never goes to the chat
+fn t_of(d: &Value, k: &str) -> String { crate::rpc::scrub(&s_of(d, k)) }
 fn n_of(d: &Value, k: &str) -> Option<u64> { d[k].as_u64() }
 fn gb(b: Option<u64>) -> String { b.map_or("?".into(), |b| format!("{:.1} GB", b as f64 / (1u64 << 30) as f64)) }
 
@@ -345,7 +376,7 @@ pub fn classify(kind: &str, d: &Value) -> Option<Alert> {
             let why = s_of(d, "why");
             if why == "boot_timeout" || why == "unavailable_stop" {
                 Alert::new(Level::Critical, "state_unavailable", "state_stop", "state stream unavailable: the segment stops").family("state")
-                    .body(Body::new().kv("why", &why).nl().txt(s_of(d, "detail")))
+                    .body(Body::new().kv("why", &why).nl().txt(t_of(d, "detail")))
             } else {
                 let mut b = Body::new().kv("why", &why);
                 if let Some(a) = n_of(d, "age_ms") { b = b.kv("last message", format!("{} ago", format::dur(a / 1000))); }
@@ -359,9 +390,9 @@ pub fn classify(kind: &str, d: &Value) -> Option<Alert> {
             .body(Body::new().kv("down for", n_of(d, "down_ms").map_or("?".into(), |m| format::dur(m / 1000))).kv("reconnects", n_of(d, "reconnects").map_or("?".into(), |r| r.to_string()))),
         "state_resync_slow" => Alert::new(Level::Warning, "state_resync_slow", "resync_slow", "state re-read has not landed: the gate stays shut")
             .body(Body::new().kv("why", s_of(d, "why")).kv("chunks", format!("{}/{}", n_of(d, "chunks_done").unwrap_or(0), n_of(d, "chunks").unwrap_or(0)))
-                .kv("accounts", n_of(d, "accounts").unwrap_or(0).to_string()).nl().code("error", crate::rpc::scrub(&s_of(d, "err")))),
+                .kv("accounts", n_of(d, "accounts").unwrap_or(0).to_string()).nl().code("error", t_of(d, "err"))),
         "read_gave_up" => Alert::new(Level::Warning, "read_gave_up", format!("read_gave_up:{}", s_of(d, "what")), "gave up re-reading accounts")
-            .body(Body::new().kv("what", s_of(d, "what")).kv("accounts", n_of(d, "accounts").unwrap_or(0).to_string()).nl().code("error", crate::rpc::scrub(&s_of(d, "err")))),
+            .body(Body::new().kv("what", s_of(d, "what")).kv("accounts", n_of(d, "accounts").unwrap_or(0).to_string()).nl().code("error", t_of(d, "err"))),
         "recorder_drop" => {
             let class = s_of(d, "class");
             let level = if class == "core" || class == "replay" { Level::Error } else { Level::Warning };
@@ -371,14 +402,14 @@ pub fn classify(kind: &str, d: &Value) -> Option<Alert> {
         }
         "recorder_io_error" => Alert::new(Level::Error, "recorder_io_error", format!("recorder_io:{}", s_of(d, "stream")), "recorder I/O error")
             .body(Body::new().code("stream", s_of(d, "stream")).kv("op", s_of(d, "op")).kv("records lost", n_of(d, "lost_total").map_or("?".into(), int)).nl()
-                .code("error", s_of(d, "error"))),
+                .code("error", t_of(d, "error"))),
         "recorder_encode_error" => Alert::new(Level::Warning, "recorder_encode_error", format!("recorder_enc:{}", s_of(d, "stream")), "recorder: a record's encoder failed")
             .body(Body::new().code("stream", s_of(d, "stream")).kv("so far", n_of(d, "encode_errors_total").map_or("?".into(), int))),
         "recorder_writer_dead" => Alert::new(Level::Error, "recorder_writer_dead", format!("writer_dead:{}", s_of(d, "class")), "recorder writer died")
-            .body(Body::new().kv("class", s_of(d, "class")).nl().txt(s_of(d, "detail"))),
+            .body(Body::new().kv("class", s_of(d, "class")).nl().txt(t_of(d, "detail"))),
         "recorder_writer_stalled" => Alert::new(Level::Error, "recorder_writer_stalled", format!("writer_stalled:{}", s_of(d, "class")), "recorder writer stalled")
-            .body(Body::new().kv("class", s_of(d, "class")).kv("queued", n_of(d, "queued").map_or("?".into(), int)).nl().txt(s_of(d, "detail"))),
-        "recorder_fatal" => Alert::new(Level::Critical, "recorder_fatal", "recorder_fatal", "recorder stopped the segment").body(Body::new().txt(s_of(d, "detail"))),
+            .body(Body::new().kv("class", s_of(d, "class")).kv("queued", n_of(d, "queued").map_or("?".into(), int)).nl().txt(t_of(d, "detail"))),
+        "recorder_fatal" => Alert::new(Level::Critical, "recorder_fatal", "recorder_fatal", "recorder stopped the segment").body(Body::new().txt(t_of(d, "detail"))),
         "disk_action" => {
             let action = s_of(d, "action");
             let level = if action == "shadow_and_stop" { Level::Critical } else { Level::Warning };
@@ -386,22 +417,23 @@ pub fn classify(kind: &str, d: &Value) -> Option<Alert> {
                 .body(Body::new().kv("used", gb(n_of(d, "used_bytes"))).kv("budget", gb(n_of(d, "budget_bytes"))).kv("free", gb(n_of(d, "fs_free_bytes"))))
         }
         "chainfetch_dead" => Alert::new(Level::Error, "chainfetch_dead", "chainfetch_dead", "chain fetch died: sending stops for the rest of the segment")
-            .family("chainfetch").body(Body::new().txt(s_of(d, "why"))),
+            .family("chainfetch").body(Body::new().txt(t_of(d, "why"))),
         "chainfetch_stalled" => Alert::new(Level::Warning, "chainfetch_stalled", "chainfetch_stalled", "chain fetch stalled").family("chainfetch")
             .body(Body::new().kv("no publication for", format!("{} ms", n_of(d, "published_age_ms").unwrap_or(0)))),
         "chainfetch_recovered" => Alert::new(Level::Info, "chainfetch_recovered", "chainfetch_recovered", "chain fetch recovered").icon("✅").family("chainfetch"),
         "rpc_boot_failed" => Alert::new(Level::Error, "rpc_boot_failed", "rpc_boot_failed", "boot failed: no RPC provider answered")
-            .body(Body::new().code("method", s_of(d, "method")).kv("attempts", n_of(d, "attempts").map_or("?".into(), int)).nl().code("last", crate::rpc::scrub(&s_of(d, "last")))),
+            .body(Body::new().code("method", s_of(d, "method")).kv("attempts", n_of(d, "attempts").map_or("?".into(), int)).nl().code("last", t_of(d, "last"))),
         "jito_token_refresh" if d["ok"] == json!(false) => {
             let stale = d["stale"] == json!(true);
             Alert::new(Level::Error, "jito_token_refresh", "jito_token", if stale { "Jito auth token renewal failed: no valid token, sends are refused" } else { "Jito auth token renewal failed" })
-                .body(Body::new().kv("retry in", format!("{} s", n_of(d, "retry_s").unwrap_or(0))).nl().code("error", crate::rpc::scrub(&s_of(d, "error"))))
+                .body(Body::new().kv("retry in", format!("{} s", n_of(d, "retry_s").unwrap_or(0))).nl().code("error", t_of(d, "error")))
         }
         "jito_stream_down" => Alert::new(Level::Warning, "jito_stream_down", "jito_stream_down", "Jito result stream down").family("jito_stream")
-            .body(Body::new().code("error", crate::rpc::scrub(&s_of(d, "error")))),
+            .body(Body::new().code("error", t_of(d, "error"))),
         "jito_stream_up" => Alert::new(Level::Info, "jito_stream_up", "jito_stream_up", "Jito result stream back").icon("✅").family("jito_stream")
             .body(Body::new().kv("down for", n_of(d, "down_ms").map_or("?".into(), |m| format::dur(m / 1000)))),
-        "recon_miss" => Alert::new(Level::Error, "recon_miss", "recon_miss", "reconciliation miss").body(Body::new().txt(d.to_string())),
+        // `recon_miss` and WP-07's other money events come as its notices (`alerts::notice`, with WP-07's own text): telling
+        // them here too would send each twice
         _ => return None,
     };
     Some(a)
@@ -418,6 +450,8 @@ pub fn gate_alert(prev: &(String, String), mode: &str, reason: &str, detail: &st
                 "control" | "mode_shadow" | "forced_shadow" | "dry_run" => Level::Info,
                 "state_slo" => Level::Warning,
                 "core_record_loss" | "recorder_unhealthy" | "disk_budget" | "chainfetch_dead" | "program_hash_mismatch" => Level::Error,
+                // the money stops: WP-07's equity and token floors (its supervisor's rule names), a reconciliation miss
+                "token_floor" => Level::Critical,
                 r if r.contains("equity") || r.contains("budget") || r.contains("recon") || r.contains("fee_cap") => Level::Critical,
                 _ => Level::Warning,
             };
@@ -474,7 +508,10 @@ fn numbers(b: Body, s: &Snapshot) -> Body {
 pub fn stop_alert(label: &str, reason: &str, detail: &str, code: i32, secondary: Option<(&str, &str)>, ran_s: Option<u64>, snap: Option<&Snapshot>) -> Alert {
     let level = match reason {
         "deadline" | "signal" | "control" => if code == 0 || code == 10 { Level::Info } else { Level::Error },
-        "panic" | "equity_day" | "disk_budget" => Level::Critical,
+        // a crash, and every safety stop (exit 20: the campaign ends): the disk budget, the equity stops (WP-07 adds
+        // equity_hour, equity_floor and token_floor beside equity_day)
+        "panic" | "equity_day" | "disk_budget" | "equity_hour" | "equity_floor" | "token_floor" => Level::Critical,
+        _ if code == 20 => Level::Critical,
         _ => Level::Error,
     };
     let icon = match level { Level::Info => "⏹", Level::Critical => "🚨", _ => "❌" };
@@ -508,15 +545,30 @@ pub fn heartbeat_alert(label: &str, mode: &str, up_s: u64, s: &Snapshot, w: &sum
     Alert::new(Level::Info, "heartbeat", "heartbeat", &format!("{label} up {}", format::dur(up_s))).icon("💓").once().body(b)
 }
 
-/// The daily summary (docs/STAGE1-PLAN.md §1, "What you will see"; F12): "win ratio = wins ÷ bundles sent", a win a
-/// landed bundle whose route succeeded and the bundles sent `exec.sent_total` only (never would-sends: "no sends" when
-/// there are none), always beside the wins, the sends and the net from chain data, and the fees, tips and rent
+/// "1 win", "12 wins"
+fn count_of(n: u64, one: &str, many: &str) -> String { format!("{} {}", int(n), if n == 1 { one } else { many }) }
+
+/// The win ratio as the owner reads it (docs/STAGE1-PLAN.md §1 "What you will see"; Stage-1 plan review F12): wins ÷
+/// bundles sent, where a win is a landed bundle whose route succeeded (`exec.ok_total`) and sent counts live bundles only
+/// (`exec.sent_total`: never would-sends, never `attempts_total`, no fallback), always beside both numbers and the net
+/// from chain data: `win ratio 1.2% (12 wins / 1,003 sent) · net +0.0031 SOL (ledger)`, or
+/// `win ratio: no sends (0 wins / 0 sent) · net …` when nothing was sent. Under 1% it keeps two decimals (0.29%: the old
+/// bot's range)
+pub fn ratio_line(wins: u64, sent: u64, net: &str) -> String {
+    let counts = format!("{} / {} sent", count_of(wins, "win", "wins"), int(sent));
+    if sent == 0 { return format!("win ratio: no sends ({counts}) · net {net}"); }
+    let pct = wins as f64 * 100.0 / sent as f64;
+    format!("win ratio {}% ({counts}) · net {net}", if pct < 1.0 { format!("{pct:.2}") } else { format!("{pct:.1}") })
+}
+
+/// The daily summary (docs/STAGE1-PLAN.md §1; F12): the [`ratio_line`] (wins ÷ bundles sent, `exec.sent_total` only,
+/// "no sends" when there were none, beside the wins, the sends and the net from chain data), then the fees, tips and
+/// rent, the budget left, the segments and crashes
 pub fn daily_alert(t: &summary::DayTotals) -> Alert {
-    let ratio = if t.sends > 0 { format!("{:.1}% ({} wins / {} sent)", t.wins as f64 * 100.0 / t.sends as f64, int(t.wins), int(t.sends)) }
-        else { format!("no sends ({} wins)", int(t.wins)) };
-    let mut b = Body::new().kv("win ratio = wins ÷ bundles sent:", ratio).nl().kv("net", totals_net(t)).nl()
+    let approx = if t.rent_estimated && t.rent > 0 { "≈ " } else { "" };
+    let mut b = Body::new().txt(ratio_line(t.wins, t.sends, &totals_net(t))).nl()
         .kv("fees", format::sol_num(t.fees as i64)).kv("tips", format::sol_num(t.tips as i64))
-        .kv("rent", format!("{}{}", if t.rent_estimated && t.rent > 0 { "≈ " } else { "" }, format::sol_num(t.rent as i64))).nl();
+        .kv("rent", format!("{approx}{} SOL", format::sol_num(t.rent as i64))).nl();
     if let Some(l) = t.budget_left { b = b.kv("budget left", sol(l)); }
     b = b.kv("segments", t.segments.to_string()).kv("crashes", t.crashes.to_string());
     Alert::new(Level::Info, "daily_summary", format!("daily:{}", t.day), &format!("daily {} (UTC)", t.day)).icon("📊").once().body(b)
@@ -862,6 +914,7 @@ impl Alerts {
     pub fn loss(&self, l: &Loss) -> bool { self.enabled() && self.raise(loss_alert(l)) }
     pub fn budget_floor(&self, b: &BudgetFloor) -> bool { self.enabled() && self.raise(budget_floor_alert(b)) }
     pub fn low_balance(&self, b: &LowBalance) -> bool { self.enabled() && self.raise(low_balance_alert(b)) }
+    pub fn notice(&self, level: Level, kind: &'static str, subject: &str, text: &str) -> bool { self.enabled() && self.raise(notice_alert(level, kind, subject, text)) }
 
     /// The segment started (after meta.json): its facts are kept for the heartbeat and the monitor
     pub fn segment_start(&self, s: SegmentStart) -> bool {
@@ -1253,22 +1306,29 @@ impl Alerts {
     // ---------------------------------------------------------------- watchers (rt_bg)
 
     /// Watch the SendGate (every second) and alert on every change of mode or reason after the first look, with its reason
-    /// (a stop is left to the stop message)
+    /// (a stop is left to the stop message). Lock-free while nothing changes: it compares the gate's change count and
+    /// reads the gate (under its lock) only after a change, because the engine takes that lock on every send decision and
+    /// this task runs on the niced rt_bg (a watcher preempted while holding it would stall the engine)
     pub fn watch_gate(self: &Arc<Self>, rt: &tokio::runtime::Handle, gate: Arc<crate::control::SendGate>, stop: Arc<AtomicBool>) {
         if self.creds.is_none() { return; }
         let me = self.clone();
         rt.spawn(async move {
             let mut last: Option<(String, String)> = None;
+            let mut seen: Option<u64> = None;
             loop {
-                let g = gate.json();
-                let cur = (g["mode"].as_str().unwrap_or("?").to_string(), g["reason"].as_str().unwrap_or("").to_string());
-                if let Some(prev) = &last {
-                    if *prev != cur {
-                        if let Some(a) = gate_alert(prev, &cur.0, &cur.1, g["detail"].as_str().unwrap_or(""), g["sticky"] == json!(true)) { me.raise(a); }
+                let n = gate.changes();
+                if seen != Some(n) {
+                    seen = Some(n);
+                    let g = gate.json();
+                    let cur = (g["mode"].as_str().unwrap_or("?").to_string(), g["reason"].as_str().unwrap_or("").to_string());
+                    if let Some(prev) = &last {
+                        if *prev != cur {
+                            if let Some(a) = gate_alert(prev, &cur.0, &cur.1, g["detail"].as_str().unwrap_or(""), g["sticky"] == json!(true)) { me.raise(a); }
+                        }
                     }
+                    last = Some(cur);
                 }
-                if cur.0 == "stopped" || stop.load(Relaxed) { break; }
-                last = Some(cur);
+                if gate.mode() == crate::control::GateMode::Stopped || stop.load(Relaxed) { break; }
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
@@ -1418,6 +1478,8 @@ pub fn loss(l: Loss) -> bool { global().is_some_and(|g| g.loss(&l)) }
 pub fn budget_floor(b: BudgetFloor) -> bool { global().is_some_and(|g| g.budget_floor(&b)) }
 /// WP-07 merge hook: a balance under its warning level (never waits)
 pub fn low_balance(b: LowBalance) -> bool { global().is_some_and(|g| g.low_balance(&b)) }
+/// WP-07 merge hook: one of its notices (`notify::set_hook`; [`notice_alert`]; never waits)
+pub fn notice(level: Level, kind: &'static str, subject: &str, text: &str) -> bool { global().is_some_and(|g| g.notice(level, kind, subject, text)) }
 /// the feeds' hook: a gRPC stream's failed connection (never waits)
 pub fn note_stream_error(stream: &str, msg: &str) { if let Some(g) = global() { g.note_stream_error(stream, msg); } }
 /// status.jsonl `alerts`: null without alerts

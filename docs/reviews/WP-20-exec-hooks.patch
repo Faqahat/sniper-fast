@@ -1,6 +1,8 @@
+diff --git a/src/exec.rs b/src/exec.rs
+index 87ba41c8865c7af29d74547c2a320b5100ad8009..f4e68ede217e4422695f183b082cb64f89fe756b 100644
 --- a/src/exec.rs
 +++ b/src/exec.rs
-@@ -414,6 +414,8 @@
+@@ -414,6 +414,8 @@ impl Settled {
  /// An attempt sent (live, canary) and not final yet
  struct Open {
      attempt: u64,
@@ -9,7 +11,7 @@
      decision: u64,
      opp: u64,
      sig: [u8; 64],
-@@ -455,7 +457,7 @@
+@@ -455,7 +457,7 @@ struct Open {
  /// expiry check found the landing, whose fee and events only the wallet record brings), what its landing adds to the
  /// money so far (`counted`), whether the wallet record came, whether a would-fail of it counted toward cooling
  #[derive(Clone)]
@@ -18,7 +20,7 @@
      cooled: bool }
  
  /// the dry run's key and options
-@@ -815,7 +817,12 @@
+@@ -815,7 +817,12 @@ impl Exec {
          if !self.mode.sends() { return None; }
          if self.stopped.is_some() { return Some("sender_stopped"); }
          if self.spent + self.reserved + BASE_FEE > self.cap_failed_fees {
@@ -32,7 +34,7 @@
              return Some("fee_cap");
          }
          if let Some(c) = self.canary {
-@@ -1020,7 +1027,7 @@
+@@ -1020,7 +1027,7 @@ impl Exec {
          self.count(if self.mode == Mode::Canary { "canary_sent" } else { "live_sent" });
          if crowding.rank() > 0 { self.count("rank_crowded"); }
          self.by_sig.insert(sig, attempt);
@@ -41,7 +43,7 @@
              trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit, creates_ata: built.creates_ata, worst: BASE_FEE, bh_slot: bh.slot, bh_height: bh.height,
              target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_signed, t_sent: None, bundle: None,
              path: paths.list[bp].name.clone(), fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
-@@ -1339,11 +1346,27 @@
+@@ -1339,11 +1346,27 @@ impl Exec {
          let error = error.or_else(|| o.send_error.clone());
          let counted = landed.as_ref().map(|l| Counted::of(l, o.tip, o.size, o.creates_ata)).unwrap_or_default();
          self.add(counted, o.mint);
@@ -70,7 +72,7 @@
              size: o.size, creates_ata: o.creates_ata, src, counted, wallet_seen: src == "wallet", cooled: o.cooled });
          self.finals_order.push_back(o.attempt);
          while self.finals_order.len() > FINALS_KEEP { if let Some(a) = self.finals_order.pop_front() { self.finals.remove(&a); } }
-@@ -1368,6 +1391,20 @@
+@@ -1368,6 +1391,20 @@ impl Exec {
          let counted = Counted::of(&l, f.tip, f.size, f.creates_ata);
          self.sub(f.counted);
          self.add(counted, f.mint);

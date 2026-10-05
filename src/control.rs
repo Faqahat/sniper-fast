@@ -18,7 +18,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub const STOP_SCHEMA: &str = "arbx.stop/1.0";
@@ -39,15 +39,20 @@ impl GateMode {
 struct GateInfo { reason: String, detail: String, since_ns: u64, sticky: bool }
 
 /// Whether this process may send now. The mode is one relaxed atomic load (`allows`); the reason sits beside it.
-pub struct SendGate { mode: AtomicU8, info: Mutex<GateInfo> }
+pub struct SendGate { mode: AtomicU8, info: Mutex<GateInfo>, changes: AtomicU64 }
 
 impl SendGate {
     pub fn new() -> Arc<SendGate> {
-        Arc::new(SendGate { mode: AtomicU8::new(GateMode::Live as u8), info: Mutex::new(GateInfo { reason: String::new(), detail: String::new(), since_ns: now_ns(), sticky: false }) })
+        Arc::new(SendGate { mode: AtomicU8::new(GateMode::Live as u8), info: Mutex::new(GateInfo { reason: String::new(), detail: String::new(), since_ns: now_ns(), sticky: false }),
+            changes: AtomicU64::new(0) })
     }
     #[inline]
     pub fn allows(&self) -> bool { self.mode.load(Ordering::Relaxed) == GateMode::Live as u8 }
     pub fn mode(&self) -> GateMode { GateMode::from_u8(self.mode.load(Ordering::Relaxed)) }
+    /// How many times the gate changed (to shadow, back to live, stopped), lock-free. A watcher compares it and reads
+    /// [`Self::json`] only after a change (WP-20's alerts: the engine takes the gate's lock on every send decision, and a
+    /// watcher on the niced background runtime must not hold that lock every second)
+    pub fn changes(&self) -> u64 { self.changes.load(Ordering::Acquire) }
 
     /// To shadow. `sticky`: for the rest of the segment (`resume-sending` refuses). Refused once stopped. Ok(true): the
     /// gate changed; Ok(false): it was already shadow for the rest of the segment, which keeps its first reason (review
@@ -61,6 +66,7 @@ impl SendGate {
         }
         *i = GateInfo { reason: reason.into(), detail: detail.into(), since_ns: now_ns(), sticky };
         self.mode.store(GateMode::Shadow as u8, Ordering::Relaxed);
+        self.changes.fetch_add(1, Ordering::Release);
         Ok(true)
     }
 
@@ -80,6 +86,7 @@ impl SendGate {
             GateMode::Shadow => {
                 *i = GateInfo { reason: String::new(), detail: detail.into(), since_ns: now_ns(), sticky: false };
                 self.mode.store(GateMode::Live as u8, Ordering::Relaxed);
+                self.changes.fetch_add(1, Ordering::Release);
                 Ok(())
             }
         }
@@ -91,6 +98,7 @@ impl SendGate {
         if self.mode() == GateMode::Stopped { return; }
         *i = GateInfo { reason: reason.into(), detail: String::new(), since_ns: now_ns(), sticky: true };
         self.mode.store(GateMode::Stopped as u8, Ordering::Relaxed);
+        self.changes.fetch_add(1, Ordering::Release);
     }
 
     /// status.jsonl / meta.json `send_gate`: {mode, reason, detail, since_ns, sticky}
@@ -483,18 +491,24 @@ mod tests {
     fn gate_modes() {
         let g = SendGate::new();
         assert!(g.allows());
+        assert_eq!(g.changes(), 0);
         g.shadow("control", "pause", false).unwrap();
         assert!(!g.allows() && g.mode() == GateMode::Shadow);
         g.resume("go").unwrap();
         assert!(g.allows());
+        assert_eq!(g.changes(), 2, "WP-20: every change counts (the alerts' watcher reads the gate only after one)");
+        assert!(g.resume("go").is_ok() && g.changes() == 2, "a resume of a live gate changes nothing");
         assert_eq!(g.shadow("forced_shadow", "--shadow", true), Ok(true));
         assert!(g.sticky() && g.reason() == "forced_shadow");
         assert!(g.resume("go").is_err(), "sticky");
         assert_eq!(g.shadow("control", "pause", false), Ok(false), "review F3: a pause of a sticky shadow is met, and changes nothing");
         assert_eq!(g.shadow("control", "shadow", true), Ok(false));
+        assert_eq!(g.changes(), 3, "refused or met changes count nothing");
         assert_eq!(g.json()["reason"], "forced_shadow", "a sticky shadow keeps its reason");
         assert!(g.sticky());
         g.stop("signal");
+        g.stop("again");
+        assert_eq!(g.changes(), 4);
         assert_eq!(g.mode(), GateMode::Stopped);
         assert!(g.resume("go").is_err() && g.shadow("control", "x", false).is_err());
         assert_eq!(g.json()["mode"], "stopped");

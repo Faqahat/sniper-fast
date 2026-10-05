@@ -439,7 +439,7 @@ fn message_formatting_escapes_and_fits() {
     assert!(!text.to_lowercase().contains("profit") && !text.contains("WIN"));
     assert!(text.contains("<a href=\"https://solscan.io/tx/5VERv8"), "{text}");
     assert!(text.contains("371,234,567"));
-    // a net at or below 0 after fee, tip and rent is never a win
+    // a net below 0 after fee, tip and rent is never a gain (owner_wording_rules has every case)
     let lost = win_alert(&Win { rent_lamports: 2_039_280, ..w.clone() });
     assert!(lost.title.contains("succeeded but lost: net -0.00089428 SOL") && lost.level == Level::Warning, "{}", lost.title);
     assert!(lost.body.contains("rent 0.00203928"), "{}", lost.body);
@@ -468,14 +468,66 @@ fn message_formatting_escapes_and_fits() {
     let mut old = info("old", "old");
     old.t_ns = real_ns() - 120_000_000_000;
     assert!(render(&old, real_ns()).contains(" UTC)</i>"));
-    // the daily summary: the win ratio is wins ÷ bundles sent, beside its numbers, the net and the fees, tips and rent
+}
+
+/// The owner-facing wording (coordinator's rules for WP-20; docs/STAGE1-PLAN.md §1; Stage-1 plan review F12):
+/// - the daily summary's win ratio is wins ÷ bundles SENT (`exec.sent_total`), never attempts or would-sends, "no sends"
+///   when there were none, always beside the wins, the sends, the net from chain data and the fees, tips and rent;
+/// - a win alert says "succeeded" and the realised net, never "profitable", and a gain only when the net after fee, tip
+///   and rent is above 0;
+/// - messages are short: a few lines, each readable on a phone
+#[test]
+fn owner_wording_rules() {
+    use format::*;
+    // the example: "win ratio 1.2% (12 wins / 1,003 sent) · net +0.0031 SOL"
     let d = summary::DayTotals { day: "2026-10-04".into(), segments: 24, crashes: 1, sends: 1_003, sends_known: true, wins: 12, net_lamports: 3_100_000, net_known: true,
-        net_src: Some("ledger"), fees: 5_015_000, tips: 1_200_000, rent: 0, budget_left: Some(29_000_000), ..Default::default() };
-    let t = compose("watchdog", real_ns(), &[daily_alert(&d)], MAX_TEXT).0;
-    assert!(t.contains("win ratio = wins ÷ bundles sent: 1.2% (12 wins / 1,003 sent)") && t.contains("net +0.0031 SOL (ledger)"), "{t}");
-    assert!(t.contains("fees 0.005015") && t.contains("tips 0.0012") && t.contains("rent 0.0000"), "{t}");
-    let none = daily_alert(&summary::DayTotals { day: "x".into(), wins: 0, ..Default::default() });
-    assert!(none.body.contains("win ratio = wins ÷ bundles sent: no sends (0 wins)") && !none.body.contains('%'), "{}", none.body);
+        net_src: Some("ledger"), fees: 5_015_000, tips: 1_200_000, rent: 0, budget_left: Some(29_000_000), decisions: 99_999, would_send: 5_000, ..Default::default() };
+    let a = daily_alert(&d);
+    let t = compose("watchdog", real_ns(), std::slice::from_ref(&a), MAX_TEXT).0;
+    assert!(t.contains("win ratio 1.2% (12 wins / 1,003 sent) · net +0.0031 SOL (ledger)"), "{t}");
+    assert!(t.contains("fees 0.005015 · tips 0.0012 · rent 0.0000 SOL"), "fees, tips and rent always shown: {t}");
+    assert!(t.contains("budget left 0.0290 SOL") && t.contains("segments 24 · crashes 1"), "{t}");
+    // would-sends and decisions are not sends: neither the denominator nor shown as such
+    assert!(!t.contains("5,000") && !t.contains("99,999"), "{t}");
+    // nothing sent: "no sends", no percentage, the zeros and the net still shown
+    let none = daily_alert(&summary::DayTotals { day: "x".into(), net_known: true, net_src: Some("ledger"), ..Default::default() });
+    assert!(none.body.contains("win ratio: no sends (0 wins / 0 sent) · net +0.0000 SOL (ledger)") && !none.body.contains('%'), "{}", none.body);
+    // sends unknown (a status line without `exec.sent_total`): still "no sends", never a ratio over attempts
+    let v2 = Snapshot::of(&json!({ "exec": { "attempts_total": 400, "ok_total": 2 } }));
+    assert_eq!(v2.sends, None, "attempts_total is never read as sends");
+    // two decimals under 1% (the old bot's 0.29–0.56%), one above; "1 win"; the net's source and its partial mark
+    assert_eq!(ratio_line(3, 1_003, "+0.0001 SOL (ledger)"), "win ratio 0.30% (3 wins / 1,003 sent) · net +0.0001 SOL (ledger)");
+    assert_eq!(ratio_line(1, 5, "x"), "win ratio 20.0% (1 win / 5 sent) · net x");
+    let partial = summary::DayTotals { sends: 10, sends_known: true, wins: 1, net_lamports: 5_000, net_known: true, net_partial: true, net_src: Some("wallet records"),
+        rent: summary::ATA_RENT_LAMPORTS, rent_estimated: true, ..Default::default() };
+    let p = daily_alert(&partial);
+    assert!(p.body.contains("win ratio 10.0% (1 win / 10 sent) · net ≥ +0.000005 SOL (wallet records)") && p.body.contains("rent ≈ 0.00151384 SOL"), "{}", p.body);
+    let unknown = daily_alert(&summary::DayTotals { sends: 4, sends_known: true, ..Default::default() });
+    assert!(unknown.body.contains("win ratio 0.00% (0 wins / 4 sent) · net ? (no ledger or wallet records)"), "{}", unknown.body);
+    // win alerts: "succeeded" and the realised net; never "profitable"; a gain only above 0
+    let w = Win { route: Some("PumpSwap>Dlmm".into()), mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".into(), size_lamports: 500_000_000, gross_lamports: Some(1_250_000),
+        tip_lamports: 100_000, fee_lamports: 5_000, slot: Some(371_234_567),
+        signature: "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW".into(), ..Default::default() };
+    let cases = [
+        (Win { ..w.clone() }, "succeeded · net +0.001145 SOL", Level::Info),
+        (Win { gross_lamports: Some(105_000), ..w.clone() }, "succeeded · net 0 SOL: no profit after fee, tip, rent", Level::Info),
+        (Win { rent_lamports: 1_513_840, ..w.clone() }, "succeeded but lost: net -0.00036884 SOL after fee, tip, rent", Level::Warning),
+        (Win { gross_lamports: None, ..w.clone() }, "succeeded · net not known yet", Level::Info),
+    ];
+    for (x, title, level) in cases {
+        let a = win_alert(&x);
+        assert!(a.title.starts_with("succeeded") && a.title == title && a.level == level, "{} ({:?})", a.title, a.level);
+        let t = compose("w6-p3", real_ns(), std::slice::from_ref(&a), MAX_TEXT).0;
+        assert!(!t.to_lowercase().contains("profitable") && !t.contains("WIN"), "{t}");
+        // short: the header, the title, three lines; none longer than a phone shows in two lines
+        assert!(t.lines().count() <= 6 && t.lines().all(|l| to_plain(l).chars().count() <= 90), "{t}");
+    }
+    // the daily summary is short too
+    assert!(t.lines().count() <= 7 && t.lines().all(|l| to_plain(l).chars().count() <= 90), "{t}");
+    // the realised net never overflows or panics, whatever the inputs
+    let wild = Win { gross_lamports: Some(i64::MIN), tip_lamports: u64::MAX, fee_lamports: u64::MAX, rent_lamports: u64::MAX, ..w.clone() };
+    assert_eq!(wild.net_lamports(), Some(i64::MIN));
+    assert_eq!(Win { gross_lamports: Some(i64::MAX), tip_lamports: 0, fee_lamports: 0, ..w }.net_lamports(), Some(i64::MAX));
 }
 
 /// which events alert, at which level, with which key
@@ -491,6 +543,17 @@ fn events_classify_into_alerts() {
     assert_eq!(c("state_unavailable", json!({ "why": "boot_timeout" })).unwrap().level, Level::Critical);
     let down = c("state_unavailable", json!({ "why": "stream down", "error": format!("https://h.example/p?{}=SECRETVALUE1234", "api-key") })).unwrap();
     assert!(down.level == Level::Error && down.family == Some("state") && !down.body.contains("SECRETVALUE1234"), "URLs cut: {}", down.body);
+    // every free-text field that can quote a provider's URL is cut to the host before it can reach the chat (review: a
+    // stop's detail quotes the stream's last error)
+    let leak = format!("last error: transport error for https://h.example/v1/p?{}=SECRETVALUE1234 (x)", "api-key");
+    for (k, d) in [("state_unavailable", json!({ "why": "boot_timeout", "detail": leak })), ("state_unavailable", json!({ "why": "unavailable_stop", "detail": leak })),
+        ("recorder_writer_dead", json!({ "class": "chain", "detail": leak })), ("recorder_writer_stalled", json!({ "class": "chain", "detail": leak })),
+        ("recorder_fatal", json!({ "detail": leak })), ("recorder_io_error", json!({ "stream": "x", "error": leak })), ("chainfetch_dead", json!({ "why": leak })),
+        ("rpc_boot_failed", json!({ "method": "getSlot", "last": leak })), ("read_gave_up", json!({ "what": "resync", "err": leak })),
+        ("state_resync_slow", json!({ "err": leak })), ("jito_token_refresh", json!({ "ok": false, "error": leak })), ("jito_stream_down", json!({ "error": leak }))] {
+        let a = c(k, d).unwrap();
+        assert!(!a.body.contains("SECRETVALUE1234") && !a.body.contains("/v1/p") && a.body.contains("h.example"), "{k}: {}", a.body);
+    }
     assert_eq!(c("state_available", json!({ "down_ms": 1 })).unwrap().level, Level::Info);
     assert_eq!(c("state_resync_slow", json!({})).unwrap().key, "resync_slow");
     assert_eq!(c("chainfetch_dead", json!({ "why": "panic" })).unwrap().level, Level::Error);
@@ -498,13 +561,74 @@ fn events_classify_into_alerts() {
     assert!(c("jito_token_refresh", json!({ "ok": false, "error": "x", "stale": true })).unwrap().title.contains("sends are refused"));
     assert_eq!(c("jito_stream_down", json!({ "error": "x" })).unwrap().family, Some("jito_stream"));
     for quiet in ["late_member", "alts_preload", "leaders_refresh", "log", "alert_sent", "alert_failed", "gate_change", "lag_slo_breach"] { assert!(c(quiet, json!({})).is_none(), "{quiet}"); }
+    // WP-07's money events come as its notices (`alerts::notice`): the recorder's tap leaves them alone, or each would go twice
+    for k in ["recon_miss", "equity_floor", "equity_hour", "equity_day", "token_floor", "low_native_sol", "stranded_token", "equity_unknown"] {
+        assert!(c(k, json!({ "why": "x" })).is_none(), "{k}");
+    }
     // the SendGate's changes
     let live = ("live".to_string(), String::new());
     assert_eq!(gate_alert(&live, "shadow", "core_record_loss", "x", true).unwrap().level, Level::Error);
     assert_eq!(gate_alert(&live, "shadow", "control", "pause by moiz", false).unwrap().level, Level::Info);
     assert_eq!(gate_alert(&live, "shadow", "equity_floor", "", true).unwrap().level, Level::Critical);
+    // WP-07's supervisor names its rules: every money stop is Critical
+    for r in ["equity_hour", "equity_day", "token_floor", "reconcile_miss"] { assert_eq!(gate_alert(&live, "shadow", r, "", true).unwrap().level, Level::Critical, "{r}"); }
     assert_eq!(gate_alert(&("shadow".into(), "control".into()), "live", "", "resume", false).unwrap().key, "gate:live");
     assert!(gate_alert(&live, "stopped", "deadline", "", true).is_none(), "the stop message says it");
+}
+
+/// WP-07's notices (src/notify.rs on lane/wp-07, wired at the merge with `notify::set_hook`): every kind it raises keeps
+/// its level and text, is keyed `<kind>:<subject>`, never deduplicated (WP-07 raises each once), and escaped
+#[test]
+fn wp07_notices() {
+    let kinds = [("equity_floor", Level::Critical, "🛑"), ("equity_hour", Level::Critical, "🛑"), ("equity_day", Level::Critical, "🛑"), ("token_floor", Level::Critical, "🛑"),
+        ("recon_miss", Level::Error, "❌"), ("low_native_sol", Level::Warning, "🪫"), ("stranded_token", Level::Warning, "🪙"), ("equity_unknown", Level::Error, "❌"),
+        ("campaign_start", Level::Info, "🟢"), ("equity_start", Level::Info, "🟢"), ("segment_end", Level::Error, "❌"), ("segment_end", Level::Critical, "🚨"),
+        ("segment_not_sending", Level::Warning, "🚦"), ("segment_start_failed", Level::Error, "❌"), ("campaign_shadow", Level::Error, "🚦"),
+        ("campaign_end", Level::Info, "⏹"), ("campaign_end", Level::Critical, "🚨")];
+    for (k, level, icon) in kinds {
+        let a = notice_alert(level, k, "w6-p3", &format!("{k}: SOL + WSOL 0.380 < floor 0.381 <b>&</b> (segment w6-p3): sending stopped"));
+        assert_eq!((a.level, a.kind, a.key.as_str(), a.icon, a.dedup), (level, k, format!("{k}:w6-p3").as_str(), icon, false), "{k}");
+        assert!(a.title.contains("&lt;b&gt;&amp;&lt;/b&gt;") && !a.title.contains("<b>"), "escaped: {}", a.title);
+    }
+    // through the sink: never deduplicated, every one sent
+    let fake = Fake::start();
+    let a = alerts_at(&fake.base, &on(20), Tuning { dedup: Duration::from_secs(600), ..quick() });
+    let rt = runtime();
+    a.start(rt.handle(), Arc::new(AtomicBool::new(false)));
+    assert!(a.notice(Level::Critical, "equity_floor", "w6-p3", "equity_floor: below the floor (segment w6-p3): sending stopped, campaign stops"));
+    assert!(a.notice(Level::Critical, "equity_floor", "w6-p3", "equity_floor: again"), "a notice is never deduplicated");
+    wait_for("the notices", 10, || { let t = fake.texts().join("\n"); t.contains("🛑 <b>equity_floor: below the floor") && t.contains("equity_floor: again") });
+    // off: nothing, and no notice without installed alerts
+    let (off, _) = Alerts::new(&AlertsCfg::default(), &env_ok, Ctx::default());
+    assert!(!off.notice(Level::Critical, "equity_floor", "x", "x"));
+    assert!(!notice(Level::Critical, "equity_floor", "x", "x") || global().is_some());
+}
+
+/// the SendGate watcher tells every change after its first look (a pause, a resume, a sticky shadow), never the stop,
+/// and reads the gate only after its change count moved (review: the engine takes the gate's lock on every send decision)
+#[test]
+fn the_gate_watcher_tells_every_change() {
+    let fake = Fake::start();
+    let a = alerts_at(&fake.base, &on(20), quick());
+    let rt = runtime();
+    a.start(rt.handle(), Arc::new(AtomicBool::new(false)));
+    let gate = crate::control::SendGate::new();
+    let stop = Arc::new(AtomicBool::new(false));
+    a.watch_gate(rt.handle(), gate.clone(), stop.clone());
+    // its first look sees the gate live: nothing to tell
+    std::thread::sleep(Duration::from_millis(1_300));
+    assert_eq!(fake.n(), 0);
+    gate.shadow("control", "pause by moiz", false).unwrap();
+    wait_for("the pause", 10, || fake.texts().join("\n").contains("SendGate shadow: control"));
+    gate.resume("resume by moiz").unwrap();
+    wait_for("the resume", 10, || fake.texts().join("\n").contains("sending resumed: SendGate live"));
+    gate.shadow("core_record_loss", "a core record was lost", true).unwrap();
+    wait_for("the loss", 10, || fake.texts().join("\n").contains("SendGate shadow: core_record_loss"));
+    assert!(fake.texts().join("\n").contains("for the rest of the segment"));
+    let n = fake.n();
+    gate.stop("signal");
+    std::thread::sleep(Duration::from_millis(1_500));
+    assert_eq!(fake.n(), n, "the stop is the stop message's");
 }
 
 /// the redaction: the token, its secret half, its URL-encoded form, any bot-token shape, URL paths
@@ -588,10 +712,35 @@ fn snapshot_reads_each_generation_of_the_status_line() {
     assert_eq!(s.net_lamports, Some(3_000_000 - 200_000 - 15_000 - summary::ATA_RENT_LAMPORTS as i64));
     assert!(s.net_partial && s.rent_estimated && s.sender_stopped.is_none() && s.net_src == Some("wallet records"));
     assert_eq!((s.blockhash_age_slots, s.tip, s.gate_mode.as_deref()), (Some(3), Some(11), Some("live")));
-    // WP-07: the ledger's net
+    // WP-07: the ledger's net, after its non-recoverable rent (MEASUREMENT §4.42: trade_net = trade_gross − fee − tip)
     let v7 = json!({ "money": { "trade_net_total": -1_234, "rent_nonrecoverable_total": 10, "round_trip_total_lamports": 999 } });
     let s = Snapshot::of(&v7);
-    assert_eq!((s.net_lamports, s.rent_lamports, s.rent_estimated, s.net_src), (Some(-1_234), Some(10), false, Some("ledger")));
+    assert_eq!((s.net_lamports, s.rent_lamports, s.rent_estimated, s.net_src), (Some(-1_244), Some(10), false, Some("ledger")));
+    // WP-07 as lane/wp-07 writes it: the ledger owns `money` (its fees, tips, test budget) and the executor's counters move
+    // under `money.bot` (read there: the fee cap; never the bot's round trips once the ledger has a net)
+    let l7 = json!({ "exec": { "sent_total": 40, "ok_total": 3 }, "money": { "src": "ledger", "trade_net_total": 50_000, "rent_nonrecoverable_total": 2_000,
+        "tips_total": 30_000, "fees_win_total": 10_000, "fees_fail_total": 5_000, "fees_other_total": 7_777, "failed_fees_total_lamports": 5_000,
+        "budget_left_now": 20_000_000, "equity_liquid_now": 400_000_000,
+        "bot": { "src": "bot", "failed_fees_cap_now_lamports": 34_000_000, "tips_paid_total_lamports": 29_000, "fees_landed_total_lamports": 14_000,
+            "round_trip_total_lamports": 90_000, "round_trip_unknown_total": 1, "new_token_accounts_total": 0 } } });
+    let s = Snapshot::of(&l7);
+    assert_eq!((s.net_lamports, s.net_src, s.net_partial), (Some(48_000), Some("ledger"), false));
+    assert_eq!((s.tips_lamports, s.fees_lamports, s.rent_lamports, s.rent_estimated), (Some(30_000), Some(15_000), Some(2_000), false));
+    assert_eq!((s.fee_cap, s.failed_fees, s.budget_left(), s.balance_lamports, s.sends, s.wins), (Some(34_000_000), Some(5_000), Some(20_000_000), Some(400_000_000), Some(40), Some(3)));
+    // the ledger on without a test budget: the budget left is the executor's fee cap (read under `bot`) less the failed fees
+    let mut nb = l7.clone();
+    nb["money"].as_object_mut().unwrap().remove("budget_left_now");
+    assert_eq!(Snapshot::of(&nb).budget_left(), Some(34_000_000 - 5_000));
+    // the executor's counters under `bot` and no ledger net yet: the wallet-record net from there
+    let b5 = json!({ "money": { "src": "ledger", "bot": { "round_trip_total_lamports": 90_000, "tips_paid_total_lamports": 29_000, "fees_landed_total_lamports": 14_000,
+        "new_token_accounts_total": 1, "round_trip_unknown_total": 0 } } });
+    let s = Snapshot::of(&b5);
+    assert_eq!((s.net_lamports, s.net_src, s.rent_estimated), (Some(90_000 - 29_000 - 14_000 - summary::ATA_RENT_LAMPORTS as i64), Some("wallet records"), true));
+    // absurd numbers clamp, never panic or wrap
+    let wild = json!({ "money": { "round_trip_total_lamports": i64::MIN, "tips_paid_total_lamports": u64::MAX, "fees_landed_total_lamports": u64::MAX,
+        "new_token_accounts_total": u64::MAX, "failed_fees_cap_now_lamports": 0, "failed_fees_total_lamports": u64::MAX } });
+    let s = Snapshot::of(&wild);
+    assert_eq!((s.net_lamports, s.rent_lamports, s.budget_left()), (Some(i64::MIN), Some(u64::MAX), Some(i64::MIN)));
     // the last line of a file, header and torn tail skipped
     let d = std::env::temp_dir().join(format!("arbx-alerts-last-{}-{}", std::process::id(), real_ns()));
     std::fs::create_dir_all(&d).unwrap();
@@ -737,6 +886,10 @@ fn lifecycle_messages() {
     assert!(t.contains("decisions 12,345 · opps 87 · would-send 40") && t.contains("sent 2 · wins 1 · net +0.000123 SOL"), "{t}");
     assert_eq!(stop_alert("x", "panic", "d", 30, None, None, None).level, Level::Critical);
     assert_eq!(stop_alert("x", "error", "d", 30, Some(("panic", "boom")), None, None).level, Level::Error);
+    // every safety stop (exit 20) is Critical: WP-07's equity_hour, equity_floor and token_floor, and any later one
+    for r in ["equity_day", "equity_hour", "equity_floor", "token_floor", "disk_budget", "some_new_safety_stop"] {
+        assert_eq!(stop_alert("x", r, "d", 20, None, None, None).level, Level::Critical, "{r}");
+    }
     // the exit: the stop message first, then what was queued
     let fake = Fake::start();
     let dir = std::env::temp_dir().join(format!("arbx-alerts-exit-{}-{}", std::process::id(), real_ns()));

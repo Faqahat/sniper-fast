@@ -6,10 +6,14 @@
 //! Wins and sends (docs/STAGE1-PLAN.md §1, "What you will see"): a win is a landed bundle whose route succeeded
 //! (`exec.ok_total`); sends are live bundles sent, `exec.sent_total` only (WP-05): never `attempts_total`, which counts
 //! would-sends that were never sent. The net is after fees, tips and rent (Stage-1 plan review F12: 12 of the old bot's
-//! 23 "wins" lost SOL to account rent) and from chain data only: `money.trade_net_total` (WP-07's chain ledger), else
-//! WP-05's counters from our wallet's transaction records, `round_trip_total_lamports − tips_paid_total_lamports −
-//! fees_landed_total_lamports − rent` (rent: `new_token_accounts_total` × [`ATA_RENT_LAMPORTS`], an estimate; partial
-//! while `round_trip_unknown_total` > 0). A line with neither has no net.
+//! 23 "wins" lost SOL to account rent) and from chain data only: WP-07's chain ledger, `money.trade_net_total −
+//! money.rent_nonrecoverable_total` (MEASUREMENT §4.42: `trade_net` = trade_gross − fee − tip; non-recoverable rent is
+//! its own expense line), else WP-05's counters from our wallet's transaction records, `round_trip_total_lamports −
+//! tips_paid_total_lamports − fees_landed_total_lamports − rent` (rent: `new_token_accounts_total` ×
+//! [`ATA_RENT_LAMPORTS`], an estimate; partial while `round_trip_unknown_total` > 0). A line with neither has no net.
+//! With the ledger on, WP-07 moves WP-05's money counters under `money.bot`: every executor counter is read at
+//! `money.<name>`, else at `money.bot.<name>`; the ledger's own fees and tips (`fees_win_total` + `fees_fail_total`,
+//! `tips_total`) and test budget (`budget_left_now`) come first.
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -51,6 +55,8 @@ pub struct Snapshot {
     pub rent_estimated: bool,
     pub failed_fees: Option<u64>,
     pub fee_cap: Option<u64>,
+    /// WP-07: the campaign's test budget left (`money.budget_left_now`, equity-based), lamports
+    pub budget_left_now: Option<i64>,
     /// why the executor stopped sending (`failed-fee cap reached`, ...)
     pub sender_stopped: Option<String>,
     pub blockhash_age_slots: Option<u64>,
@@ -69,23 +75,33 @@ fn at<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
 impl Snapshot {
     pub fn of(v: &Value) -> Snapshot {
         let u = |p: &[&str]| at(v, p).and_then(Value::as_u64);
-        let i = |p: &[&str]| at(v, p).and_then(|x| x.as_i64().or_else(|| x.as_u64().map(|n| n as i64)));
+        let i = |p: &[&str]| at(v, p).and_then(|x| x.as_i64().or_else(|| x.as_u64().map(|n| n.min(i64::MAX as u64) as i64)));
         let s = |p: &[&str]| at(v, p).and_then(Value::as_str).map(str::to_string);
         let b = |p: &[&str]| at(v, p).and_then(Value::as_bool);
-        let tips_lamports = u(&["money", "tips_paid_total_lamports"]);
-        let fees_lamports = u(&["money", "fees_landed_total_lamports"]);
+        // the executor's money counter `k` (WP-05): at `money.k`, or at `money.bot.k` once WP-07's ledger owns `money`
+        let mu = |k: &str| u(&["money", k]).or_else(|| u(&["money", "bot", k]));
+        let mi = |k: &str| i(&["money", k]).or_else(|| i(&["money", "bot", k]));
+        // tips and fees: the ledger's (WP-07) first, else the executor's
+        let tips_lamports = u(&["money", "tips_total"]).or_else(|| mu("tips_paid_total_lamports"));
+        let fees_lamports = match (u(&["money", "fees_win_total"]), u(&["money", "fees_fail_total"])) {
+            (None, None) => mu("fees_landed_total_lamports"),
+            (w, f) => Some(w.unwrap_or(0).saturating_add(f.unwrap_or(0))),
+        };
         let failed = u(&["money", "failed_fees_total_lamports"]);
-        // rent: the ledger's when it has one (WP-07), else the new token accounts' (an estimate)
-        let (rent_lamports, rent_estimated) = match (u(&["money", "rent_nonrecoverable_total"]), u(&["money", "new_token_accounts_total"])) {
+        // rent: the ledger's non-recoverable rent when it has one (WP-07), else the new token accounts' (an estimate)
+        let ledger_rent = u(&["money", "rent_nonrecoverable_total"]);
+        let (rent_lamports, rent_estimated) = match (ledger_rent, mu("new_token_accounts_total")) {
             (Some(r), _) => (Some(r), false),
-            (None, Some(n)) => (Some(n * ATA_RENT_LAMPORTS), true),
+            (None, Some(n)) => (Some(n.saturating_mul(ATA_RENT_LAMPORTS)), true),
             (None, None) => (None, false),
         };
-        let (tips, fees, rent) = (tips_lamports.unwrap_or(0) as i64, fees_lamports.unwrap_or(0) as i64, rent_lamports.unwrap_or(0) as i64);
+        let (tips, fees, rent) = (tips_lamports.unwrap_or(0) as i128, fees_lamports.unwrap_or(0) as i128, rent_lamports.unwrap_or(0) as i128);
+        // the net after fees, tips and rent: the ledger's trade net (gross − fee − tip) less its non-recoverable rent, else
+        // the executor's round trips less tips, fees and the rent estimate
         let (net_lamports, net_partial, net_src) = if let Some(n) = i(&["money", "trade_net_total"]) {
-            (Some(n), false, Some("ledger"))
-        } else if let Some(rt) = i(&["money", "round_trip_total_lamports"]) {
-            (Some(rt - tips - fees - rent), u(&["money", "round_trip_unknown_total"]).unwrap_or(0) > 0, Some("wallet records"))
+            (Some(super::clamp_i64(n as i128 - ledger_rent.unwrap_or(0) as i128)), false, Some("ledger"))
+        } else if let Some(rt) = mi("round_trip_total_lamports") {
+            (Some(super::clamp_i64(rt as i128 - tips - fees - rent)), mu("round_trip_unknown_total").unwrap_or(0) > 0, Some("wallet records"))
         } else {
             (None, false, None)
         };
@@ -114,7 +130,8 @@ impl Snapshot {
             rent_lamports,
             rent_estimated,
             failed_fees: failed,
-            fee_cap: u(&["money", "failed_fees_cap_now_lamports"]),
+            fee_cap: mu("failed_fees_cap_now_lamports"),
+            budget_left_now: i(&["money", "budget_left_now"]),
             sender_stopped: s(&["exec", "stopped"]),
             blockhash_age_slots: u(&["health", "blockhash_age_slots_now"]),
             jito_token_age_s: u(&["health", "jito_token_age_s_now"]),
@@ -123,8 +140,11 @@ impl Snapshot {
         }
     }
 
-    /// what is left of the failed-fee budget (cap − spent), lamports
-    pub fn budget_left(&self) -> Option<i64> { self.fee_cap.map(|c| c as i64 - self.failed_fees.unwrap_or(0) as i64) }
+    /// the budget left, lamports: WP-07's test budget (`money.budget_left_now`) when the line has it, else what is left of
+    /// the executor's failed-fee cap (cap − spent)
+    pub fn budget_left(&self) -> Option<i64> {
+        self.budget_left_now.or_else(|| self.fee_cap.map(|c| super::clamp_i64(c as i128 - self.failed_fees.unwrap_or(0) as i128)))
+    }
 }
 
 /// a status.jsonl header line (`{"schema":"arbx.status/...","file_seq":..}`), not a status line
@@ -231,19 +251,19 @@ pub fn totals(runs_dir: &Path, from_ns: u64, to_ns: u64) -> DayTotals {
         let base = lines.iter().filter(|s| s.t_ns < from_ns).last().cloned().unwrap_or_default();
         let d = |a: Option<u64>, b: Option<u64>| a.unwrap_or(0).saturating_sub(b.unwrap_or(0));
         t.segments += 1;
-        t.decisions += d(last.decisions, base.decisions);
-        t.would_send += d(last.would_send, base.would_send);
-        t.sends += d(last.sends, base.sends);
+        t.decisions = t.decisions.saturating_add(d(last.decisions, base.decisions));
+        t.would_send = t.would_send.saturating_add(d(last.would_send, base.would_send));
+        t.sends = t.sends.saturating_add(d(last.sends, base.sends));
         t.sends_known |= last.sends.is_some();
-        t.landed += d(last.landed, base.landed);
-        t.wins += d(last.wins, base.wins);
-        t.failed_fees += d(last.failed_fees, base.failed_fees);
-        t.fees += d(last.fees_lamports, base.fees_lamports);
-        t.tips += d(last.tips_lamports, base.tips_lamports);
-        t.rent += d(last.rent_lamports, base.rent_lamports);
+        t.landed = t.landed.saturating_add(d(last.landed, base.landed));
+        t.wins = t.wins.saturating_add(d(last.wins, base.wins));
+        t.failed_fees = t.failed_fees.saturating_add(d(last.failed_fees, base.failed_fees));
+        t.fees = t.fees.saturating_add(d(last.fees_lamports, base.fees_lamports));
+        t.tips = t.tips.saturating_add(d(last.tips_lamports, base.tips_lamports));
+        t.rent = t.rent.saturating_add(d(last.rent_lamports, base.rent_lamports));
         t.rent_estimated |= last.rent_estimated;
         if let Some(n) = last.net_lamports {
-            t.net_lamports += n - base.net_lamports.unwrap_or(0);
+            t.net_lamports = super::clamp_i64(t.net_lamports as i128 + n as i128 - base.net_lamports.unwrap_or(0) as i128);
             t.net_known = true;
             t.net_partial |= last.net_partial;
             // the weaker source names the sum

@@ -56,9 +56,9 @@ Never uploaded: `src/`, `program/`, `tools/`, `docs/`, or any script (.py/.sh/.t
 
   - It watches `[watchdog] runs_dir` (`/root/arbx/runs`). It tells the group "✅ running" every `status_min` (60 min), and "❌ NOT running" when no segment process has been alive for more than `grace_s` (120 s) or the running segment's status.jsonl is more than 60 s old. While it stays down, it repeats the reminder every `status_min`; "✅ back up" follows when the bot recovers.
   - Its journal is `runs/watchdog.jsonl`, and `runs/watchdog.out` has the same lines with times.
-  - One per runs directory: a second one refuses to start, and `runs/.watchdog.lock` holds the pid of the one running.
+  - One per runs directory: a second one refuses to start, and `runs/.watchdog.lock` holds the pid of the one running (emptied when it stops).
   - To look once without sending: `bin/arbx-<hash> watchdog --config deploy/<cfg>.toml --once` prints JSON (exit 0 running, 1 not).
-  - To stop it: `kill $(cat runs/.watchdog.lock)`. On SIGTERM it says "⏹ watchdog stopped" and exits 0. For a new binary, stop the old watchdog and start the new one with the new hash.
+  - To stop it: `flock -n runs/.watchdog.lock true || kill $(cat runs/.watchdog.lock)` (it signals only while a watchdog holds the lock, so never a process that reused an old pid). On SIGTERM it says "⏹ watchdog stopped" and exits 0. For a new binary, stop the old watchdog and start the new one with the new hash.
 - The watchdog is the binary itself (a subcommand) started from its config, so the owner rule above holds: Cherry gets the binary, its config and its data, never source or scripts.
 
 ## Protocol for each test (an entry `FT-NNN-<slug>.md`)

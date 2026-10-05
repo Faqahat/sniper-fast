@@ -357,8 +357,14 @@ pub fn render(out: &Out, o: &Obs, m: &Machine, host: &str) -> Alert {
 
 // ------------------------------------------------------------------ the process
 
-/// The single-instance lock: an exclusive `flock` on `<runs_dir>/.watchdog.lock`, held while this lives
-pub struct Lock { _f: std::fs::File, pub path: PathBuf }
+/// The single-instance lock: an exclusive `flock` on `<runs_dir>/.watchdog.lock`, held while this lives. The file holds
+/// the holder's pid while it runs and is emptied when it ends (still under the lock), so a pid read from it later never
+/// names a process that reused the number: an empty file, or one `flock -n` can take, means no watchdog runs
+pub struct Lock { f: std::fs::File, pub path: PathBuf }
+
+impl Drop for Lock {
+    fn drop(&mut self) { let _ = self.f.set_len(0); }
+}
 
 pub fn lock(runs_dir: &Path) -> Result<Lock> {
     use std::io::{Read, Seek, Write};
@@ -375,7 +381,7 @@ pub fn lock(runs_dir: &Path) -> Result<Lock> {
     let _ = f.set_len(0);
     let _ = f.rewind();
     let _ = writeln!(f, "{}", std::process::id());
-    Ok(Lock { _f: f, path })
+    Ok(Lock { f, path })
 }
 
 fn stamp(t_ns: u64) -> String { format!("{}T{}Z", format::utc_date(t_ns), format::utc_hms(t_ns)) }
@@ -597,9 +603,13 @@ mod tests {
     fn the_lock_is_single_instance() {
         let runs = tmp("lock");
         let l = lock(&runs).unwrap();
+        let file = runs.join(".watchdog.lock");
+        assert_eq!(std::fs::read_to_string(&file).unwrap().trim(), std::process::id().to_string(), "the holder's pid while it runs");
         let e = lock(&runs).err().unwrap().to_string();
         assert!(e.contains("another arbx watchdog holds") && e.contains(&std::process::id().to_string()), "{e}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap().trim(), std::process::id().to_string(), "a refused second one leaves the pid alone");
         drop(l);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "", "emptied when it ends: a later `kill $(cat …)` names no reused pid");
         assert!(lock(&runs).is_ok(), "free again once the first ends");
         let _ = std::fs::remove_dir_all(&runs);
     }

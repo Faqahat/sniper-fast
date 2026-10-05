@@ -104,6 +104,8 @@ fn the_watchdog_once_and_its_lock() {
     let (code, so, se) = out(Command::new(BIN).args(["watchdog", "--config"]).arg(&conf));
     assert_ne!(code, Some(0), "{so}{se}");
     assert!(se.contains("another arbx watchdog holds") && se.contains(&first.id().to_string()), "{se}");
+    let lock = runs.join(".watchdog.lock");
+    assert_eq!(std::fs::read_to_string(&lock).unwrap().trim(), first.id().to_string(), "the lock file names the running watchdog");
     // SAFETY: a signal to the child this test started
     assert_eq!(unsafe { libc::kill(first.id() as i32, libc::SIGTERM) }, 0);
     let t0 = Instant::now();
@@ -120,5 +122,7 @@ fn the_watchdog_once_and_its_lock() {
     assert!(lines.iter().any(|l| l["event"] == "start") && lines.iter().any(|l| l["event"] == "stop"), "{lines:?}");
     // nothing running and its grace not over yet: no verdict in the journal
     assert!(!lines.iter().any(|l| l["event"] == "down"));
+    // a clean stop empties the lock file: the stop command (`flock -n … || kill $(cat …)`) never names a reused pid
+    assert_eq!(std::fs::read_to_string(&lock).unwrap(), "", "emptied at exit");
     let _ = std::fs::remove_dir_all(&d);
 }
