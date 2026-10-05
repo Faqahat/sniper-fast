@@ -51,6 +51,7 @@ R_CRED = [
     ("uuid-near-key", re.compile(r"(?i)(?:key|uuid|auth|token)[^\n]{0,40}?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")),
     ("landx-path-key", re.compile(r"/txb/([A-Za-z0-9]{8,})")),
     ("keystore-blob", re.compile(r"\"(v[23]:(?:\d+:)?[0-9a-f]{100,})\"")),
+    ("telegram-bot-token", re.compile(r"(?<![0-9])([0-9]{8,10}:AA[A-Za-z0-9_-]{30,40})(?![A-Za-z0-9_-])")),
 ]
 found = []
 for sha, size in blobs:
