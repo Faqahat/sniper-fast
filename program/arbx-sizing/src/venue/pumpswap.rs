@@ -6,10 +6,21 @@ use crate::fx::Fx;
 use crate::layout::{T22_NATIVE, USDC, WSOL};
 use crate::math::{ceil_div, div, i128_at, key_at, u32_at, u64_at, u8_at, ZERO_KEY};
 
-/// mainnet pools are exactly 301 bytes (the IDL defines bytes up to 270). Any other length is Abort::Layout: a tail
-/// extension has already turned out to be pricing-relevant (bytes 271..287), so a new one turns sizing off instead
-/// of mispricing (REVIEW.md F1/F9).
+/// The Pool account's current length: the IDL's fields end at 271 (`is_holder_reward` @270, pump-public-docs
+/// idl/pump_amm.json, 2026-09-12), the two held-back quote amounts at 287, then 14 unidentified bytes. A pool written
+/// before a trailing field existed is shorter (mainnet: 287, 300 and 301 bytes) and the program reads each trailing
+/// group it does not hold whole as zero / false (pump.fun PUMP_SWAP_README: "read the missing trailing fields as 0 /
+/// false"; the groups are pinned on the dumped binary, `off`). A longer pool is an unknown layout: `Abort::Layout`, so
+/// the next extension turns sizing off instead of mispricing (REVIEW.md F9; WP-16 review F1).
 pub const POOL_LEN: usize = 301;
+/// The shortest pool the program accepts: the original layout (bump .. lp_supply). Below it the program fails
+/// InvalidAccountData (pinned on the dumped binary at 204, 208 and 210 bytes; it swaps from 211 on)
+pub const POOL_MIN_LEN: usize = 211;
+/// The pool lengths the crate prices: the program's minimum up to the current layout
+pub fn pool_len_ok(len: usize) -> bool { (POOL_MIN_LEN..=POOL_LEN).contains(&len) }
+/// The fixed base supply a mayhem pool's market cap is computed on (SDK `computeFeesBps`; pinned on the dumped
+/// binary: GxqG priced on 1e15 with its mint's supply scaled ×1/1000 to ×2000)
+pub const MAYHEM_SUPPLY: u64 = 1_000_000_000_000_000;
 pub const GLOBAL_LEN: usize = 949;
 pub const FEE_CONFIG_LEN: usize = 4097;
 const BPS: u128 = 10_000;
@@ -22,20 +33,31 @@ pub mod off {
     pub const BASE_VAULT: usize = 139;
     pub const QUOTE_VAULT: usize = 171;
     pub const COIN_CREATOR: usize = 211;
+    // Trailing fields: the program reads each one only when the pool holds all of it (pinned on the dumped binary by
+    // cutting pools to every boundary ±1: a partial virtual reserve reads as 0, creator_fee_bps is read together
+    // with can_edit_creator_fee, and the two held amounts together)
     pub const MAYHEM: usize = 243;
     pub const CASHBACK: usize = 244;
     pub const VIRTUAL_QUOTE: usize = 245;
     pub const CREATOR_FEE_BPS: usize = 261;
     pub const CAN_EDIT_CREATOR_FEE: usize = 269;
-    /// Two u64 quote amounts the program holds back from the real quote vault (not in IDL 1.20 nor in the program's
-    /// on-chain IDL; most likely the unswept protocol and creator fee buckets, cf. SweepProtocolFee /
-    /// SweepCreatorFee). A sell must satisfy `q − ⌈q·lp/1e4⌉ ≤ Q − (held_0 + held_1)` (6063
-    /// InsufficientRealQuoteReserves otherwise), pinned by bisection on the dumped binary (REVIEW.md F1).
+    /// `is_holder_reward: bool` (pump-public-docs idl/pump_amm.json): holder rewards redirect the creator fee and
+    /// change no trade amount (HOLDER_REWARDS_README: "no changes to any trade instruction"); exact on the dumped
+    /// binary on holder-reward pools. A byte other than 0 or 1 is no Borsh bool: the program fails to deserialize
+    pub const IS_HOLDER_REWARD: usize = 270;
+    /// Two u64 quote amounts the program holds back from the real quote vault (in no IDL; most likely the unswept
+    /// protocol and creator fee buckets, cf. SweepProtocolFee / SweepCreatorFee). A sell must satisfy
+    /// `q − ⌈q·lp/1e4⌉ ≤ Q − (held_0 + held_1)` (6063 InsufficientRealQuoteReserves otherwise), pinned by bisection on
+    /// the dumped binary (REVIEW.md F1)
     pub const HELD_0: usize = 271;
     pub const HELD_1: usize = 279;
-    /// unidentified tail bytes: 270 and 287..301 (all zero on every pool seen); nonzero → Abort
-    pub const TAIL_UNKNOWN_0: usize = 270;
-    pub const TAIL_UNKNOWN_1: usize = 287;
+    /// unidentified tail bytes 287..301 (zero on every pool seen); a nonzero byte → Abort
+    pub const TAIL_UNKNOWN: usize = 287;
+    /// where the program's read groups end (a group is read only when the pool holds all of it)
+    pub const END_COIN_CREATOR: usize = 243;
+    pub const END_VIRTUAL_QUOTE: usize = 261;
+    pub const END_CREATOR_FEE: usize = 270;
+    pub const END_HELD: usize = 287;
     // GlobalConfig
     pub const G_LP: usize = 40;
     pub const G_PROTOCOL: usize = 48;
@@ -129,32 +151,52 @@ pub struct PumpLeg {
     pub fees: PumpFees,
 }
 
+/// A pool's Borsh bool at `o`: false when the pool ends before it; a byte other than 0 or 1 fails the program's
+/// deserialization (BorshIoError "Invalid bool representation"), so it is `Abort::Layout`
+fn bool_at(pool: &[u8], o: usize) -> Result<bool, Abort> {
+    match pool.get(o) { None | Some(0) => Ok(false), Some(1) => Ok(true), Some(_) => Err(Abort::Layout) }
+}
+
+/// The pool's trailing group `off..end` when the pool holds all of it (the program reads the group as zero / false
+/// otherwise)
+fn group(pool: &[u8], off: usize, end: usize) -> Option<&[u8]> { pool.get(off..end) }
+
 /// Parse a PumpSwap leg from the account bytes (owner/key checks are the caller's). `base_supply` is the base mint's
-/// supply; `canonical` = the pool's creator is pump.fun's pool-authority PDA for the base mint.
+/// supply; `canonical` = the pool's creator is pump.fun's pool-authority PDA for the base mint. A pool of any length
+/// from [`POOL_MIN_LEN`] to [`POOL_LEN`] is read as the program reads it: each trailing group it holds whole, the
+/// others as zero / false.
 pub fn parse(pool: &[u8], global: &[u8], fee_cfg: &[u8], base_supply: u64, quote_mint: &[u8; 32], base_amount: u64, quote_amount: u64,
              sell: bool, canonical: bool) -> Result<PumpLeg, Abort> {
-    if pool.len() != POOL_LEN || global.len() != GLOBAL_LEN || fee_cfg.len() != FEE_CONFIG_LEN { return Err(Abort::Layout); }
-    let tail_set = |a: usize, b: usize| pool.get(a..b).map_or(true, |t| t.iter().any(|&x| x != 0));
-    if tail_set(off::TAIL_UNKNOWN_0, off::HELD_0) || tail_set(off::TAIL_UNKNOWN_1, POOL_LEN) { return Err(Abort::Pump(PumpWhy::UnknownTail)); }
-    if u8_at(pool, off::MAYHEM) != Some(0) { return Err(Abort::Pump(PumpWhy::Mayhem)); }
-    if u8_at(pool, off::CASHBACK) != Some(0) { return Err(Abort::Pump(PumpWhy::Cashback)); }
+    if !pool_len_ok(pool.len()) || global.len() != GLOBAL_LEN || fee_cfg.len() != FEE_CONFIG_LEN { return Err(Abort::Layout); }
+    let mayhem = bool_at(pool, off::MAYHEM)?;
+    let cashback = bool_at(pool, off::CASHBACK)?;
+    bool_at(pool, off::CAN_EDIT_CREATOR_FEE)?;
+    bool_at(pool, off::IS_HOLDER_REWARD)?;
+    if pool.get(off::TAIL_UNKNOWN..).is_some_and(|t| t.iter().any(|&x| x != 0)) { return Err(Abort::Pump(PumpWhy::UnknownTail)); }
+    if cashback { return Err(Abort::Pump(PumpWhy::Cashback)); }
     let disable = u8_at(global, off::G_DISABLE).ok_or(Abort::Layout)?;
     if disable & if sell { 1 << 4 } else { 1 << 3 } != 0 { return Err(Abort::Pump(PumpWhy::Disabled)); }
-    let v = i128_at(pool, off::VIRTUAL_QUOTE).ok_or(Abort::Layout)?;
+    let v = group(pool, off::VIRTUAL_QUOTE, off::END_VIRTUAL_QUOTE).map_or(Some(0), |g| i128_at(g, 0)).ok_or(Abort::Layout)?;
     let qv = (quote_amount as i128).checked_add(v).ok_or(Abort::Pump(PumpWhy::Virtual))?;
     if qv <= 0 || qv > u64::MAX as i128 { return Err(Abort::Pump(PumpWhy::Virtual)); }
     let qv = qv as u64;
     if base_amount == 0 { return Err(Abort::Pump(PumpWhy::EmptyReserves)); }
-    let mc = (qv as u128).checked_mul(base_supply as u128).ok_or(Abort::Math)? / base_amount as u128;
+    // a mayhem pool's market cap is on the fixed supply
+    let supply = if mayhem { MAYHEM_SUPPLY } else { base_supply };
+    let mc = (qv as u128).checked_mul(supply as u128).ok_or(Abort::Math)? / base_amount as u128;
     let mut fees = fee_config_fees(fee_cfg, canonical, quote_kind(quote_mint), mc)?;
     let configurable = u8_at(global, off::G_CREATOR_FEE_CONFIGURABLE).ok_or(Abort::Layout)? != 0;
-    let pool_creator_bps = u64_at(pool, off::CREATOR_FEE_BPS).ok_or(Abort::Layout)?;
+    // creator_fee_bps is read with can_edit_creator_fee (one group, @261..270)
+    let pool_creator_bps = group(pool, off::CREATOR_FEE_BPS, off::END_CREATOR_FEE).map_or(Some(0), |g| u64_at(g, 0)).ok_or(Abort::Layout)?;
     if configurable && pool_creator_bps > 0 { fees.creator = pool_creator_bps; }
-    if key_at(pool, off::COIN_CREATOR).ok_or(Abort::Layout)? == &ZERO_KEY { fees.creator = 0; }
+    if group(pool, off::COIN_CREATOR, off::END_COIN_CREATOR).map_or(true, |g| g == ZERO_KEY) { fees.creator = 0; }
     if fees.total() >= BPS { return Err(Abort::Pump(PumpWhy::FeeTotal)); }
     // the program subtracts the held amounts from the vault on both instructions (a buy fails 6023 Overflow when they
-    // exceed it); only a sell's payout is bounded by the difference
-    let held = (u64_at(pool, off::HELD_0).ok_or(Abort::Layout)? as u128) + u64_at(pool, off::HELD_1).ok_or(Abort::Layout)? as u128;
+    // exceed it); only a sell's payout is bounded by the difference. Both are one group (@271..287)
+    let held = match group(pool, off::HELD_0, off::END_HELD) {
+        Some(g) => u64_at(g, 0).ok_or(Abort::Layout)? as u128 + u64_at(g, 8).ok_or(Abort::Layout)? as u128,
+        None => 0,
+    };
     let avail = u64::try_from((quote_amount as u128).checked_sub(held).ok_or(Abort::Pump(PumpWhy::HeldExceedsVault))?).map_err(|_| Abort::Math)?;
     let quote = if sell { avail } else { quote_amount };
     Ok(PumpLeg { sell, base: base_amount, quote, qv, fees })
@@ -198,7 +240,29 @@ pub fn buy_quote(base: u64, qv: u64, f: &PumpFees, x: u64) -> Result<Quote, Quot
     Ok(Quote { out: out as u64, spent: debit.min(xx) as u64 })
 }
 
+/// `buy` (base out exact: the exact-out instruction third parties send): `out` base units for a debit of
+/// `q + ⌈q·lp/1e4⌉ + ⌈q·pr/1e4⌉ + ⌈q·cr/1e4⌉`, `q = ⌈Qv·out/(B − out)⌉`; returns `q` (the quote that enters the curve)
+/// and the quote. Pinned on the dumped binary (venue-harness tests/pins.rs `pumpswap_exact_out_buy_matches_its_closed_form`,
+/// 11,477 buys exact to the unit). `ZeroOut` for 0 (6001 ZeroBaseAmount); `TooLarge` for the whole base reserve or more
+/// and for a quote amount or debit past u64 (6024 Truncation, 6023 Overflow). Host only: on-chain sizing quotes exact
+/// in; the engine prices third parties' `buy`s with it (WP-16 review F6)
+pub fn buy_exact_out(base: u64, qv: u64, f: &PumpFees, out: u64) -> Result<(u64, Quote), QuoteErr> {
+    if out == 0 { return Err(QuoteErr::ZeroOut); }
+    if out >= base { return Err(QuoteErr::TooLarge); }
+    let q = ceil_div(qv as u128 * out as u128, (base - out) as u128).ok_or(QuoteErr::Abort(Abort::Math))?;
+    let q = u64::try_from(q).map_err(|_| QuoteErr::TooLarge)?;
+    let debit = (q as u128).checked_add(f.charged(q as u128).ok_or(QuoteErr::Abort(Abort::Math))?).ok_or(QuoteErr::Abort(Abort::Math))?;
+    let debit = u64::try_from(debit).map_err(|_| QuoteErr::TooLarge)?;
+    Ok((q, Quote { out, spent: debit }))
+}
+
 impl PumpLeg {
+    /// A buy leg's exact-out quote ([`buy_exact_out`]): (q, the quote); a sell leg has none (`Abort::Unsupported`)
+    pub fn quote_exact_out(&self, out: u64) -> Result<(u64, Quote), QuoteErr> {
+        if self.sell { return Err(QuoteErr::Abort(Abort::Unsupported)); }
+        buy_exact_out(self.base, self.qv, &self.fees, out)
+    }
+
     pub fn quote(&self, amount_in: u64) -> Result<Quote, QuoteErr> {
         if self.sell { sell_quote(self.base, self.quote, self.qv, &self.fees, amount_in) } else { buy_quote(self.base, self.qv, &self.fees, amount_in) }
     }

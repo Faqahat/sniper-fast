@@ -134,13 +134,18 @@ fn pumpswap_aborts() {
     };
     let _ = rng.next();
     assert_eq!(abort(&|_| {}), None);
-    assert_eq!(abort(&|a| a.pool.data[243] = 1), Some(Abort::Pump(PumpWhy::Mayhem)));
+    // a mayhem pool is priced (on the fixed 1e15 supply); a flag byte that is no Borsh bool fails the program
+    assert_eq!(abort(&|a| a.pool.data[243] = 1), None);
+    assert_eq!(abort(&|a| a.pool.data[243] = 2), Some(Abort::Layout));
+    assert_eq!(abort(&|a| a.pool.data[244] = 2), Some(Abort::Layout));
     assert_eq!(abort(&|a| a.pool.data[244] = 1), Some(Abort::Pump(PumpWhy::Cashback)));
     assert_eq!(abort(&|a| a.global.data[56] = 1 << 4), Some(Abort::Pump(PumpWhy::Disabled)));
     assert_eq!(abort(&|a| a.global.data[56] = 1 << 3), None); // buy disabled, this is a sell
     assert_eq!(abort(&|a| put(&mut a.pool.data, 245, &(-400_000_000_000i128).to_le_bytes())), Some(Abort::Pump(PumpWhy::Virtual)));
     assert_eq!(abort(&|a| put(&mut a.pool.data, 245, &(u64::MAX as i128).to_le_bytes())), Some(Abort::Pump(PumpWhy::Virtual)));
-    assert_eq!(abort(&|a| a.pool.data.truncate(269)), Some(Abort::Layout));
+    assert_eq!(abort(&|a| a.pool.data.truncate(269)), None);
+    assert_eq!(abort(&|a| a.pool.data.truncate(210)), Some(Abort::Layout));
+    assert_eq!(abort(&|a| a.pool.data.push(0)), Some(Abort::Layout));
     assert_eq!(abort(&|a| a.global.data.push(0)), Some(Abort::Layout));
     assert_eq!(abort(&|a| put_u64(&mut a.pool.data, 261, 9_999)), Some(Abort::Pump(PumpWhy::FeeTotal)));
     // a Token-2022 base mint with a transfer fee
@@ -353,6 +358,48 @@ fn dlmm_properties() {
     assert!(capped > 200 && walked_arrays > 100);
 }
 
+/// `DlmmLeg::fills` (the engine's off-chain walk, PLAN-ADDENDUM WP-16) is the exact quote bin by bin: the same
+/// Ok/Err as `quote` at every size (budgets included), its bins' outputs and inputs sum to the quote, every layer
+/// gives at most what it holds, the bins read equal `bins_for`, and the walk ends on the last bin it took from
+#[test]
+fn dlmm_fills_equal_the_quote() {
+    let mut rng = Rng(23);
+    let (mut checked, mut lo_fills, mut multi) = (0u64, 0u64, 0u64);
+    for case in 0..300 {
+        let spec = random_dlmm(&mut rng, case % 2 == 0);
+        for swap_for_y in [true, false] {
+            let (st, r) = dlmm_leg_of(&spec, swap_for_y, &CLOCK);
+            if r.is_err() { continue; }
+            with_dlmm(&st, swap_for_y, &CLOCK, |l| {
+                let cap = l.cap_in().unwrap();
+                let mut xs = sizes(&mut rng, cap.saturating_mul(2).max(10));
+                xs.extend([cap.saturating_sub(1), cap, cap.saturating_add(1)]);
+                for budget in [dlmm::NO_BUDGET, rng.range(1, 40) as u16] {
+                    let lb = l.with_budget(budget);
+                    for &x in &xs {
+                        let mut bins: Vec<dlmm::BinFill> = vec![];
+                        let w = lb.fills(x, &mut |b| bins.push(*b));
+                        assert_eq!(w.map(|w| w.quote), lb.quote(x), "fills vs quote at {x} (budget {budget})");
+                        let Ok(w) = w else { continue };
+                        checked += 1;
+                        assert_eq!(bins.iter().map(|b| b.out as u128).sum::<u128>(), w.quote.out as u128);
+                        assert_eq!(bins.iter().map(|b| b.used as u128).sum::<u128>(), x as u128);
+                        for b in &bins {
+                            for i in 0..3 { assert!(b.taken[i] <= b.layers[i], "layer {i} gives {} of {}", b.taken[i], b.layers[i]); }
+                            if b.taken[1] > 0 || b.taken[2] > 0 { lo_fills += 1; }
+                        }
+                        if bins.len() > 1 { multi += 1; }
+                        assert_eq!((w.liquid as usize, w.end), (bins.len(), bins.last().unwrap().id));
+                        if budget == dlmm::NO_BUDGET { assert_eq!(Some(w.walked), l.bins_for(x)); }
+                    }
+                }
+            });
+        }
+    }
+    eprintln!("dlmm fills: {checked} swaps, {lo_fills} bins with limit-order fills, {multi} multi-bin swaps");
+    assert!(checked > 10_000 && lo_fills > 100 && multi > 1_000);
+}
+
 #[test]
 fn dlmm_bitmap_jump_and_limit_orders() {
     // active bin 5 in array 0 empty; the next array with liquidity (by the bitmap) is −2 for X→Y: the walk shifts
@@ -552,4 +599,36 @@ fn dammv2_properties_and_exact_capacity() {
     eprintln!("dammv2: {pools_n} pools; {tight} (pool, direction, clock) caps exactly tight");
     assert!(tight > 10);
     let _ = DammWhy::RateLimiter;
+}
+
+/// WP-16 review F6: the exact-out `buy` ([`pumpswap::buy_exact_out`]): the closed form (pinned on the dumped binary by
+/// venue-harness tests/pins.rs), its refusals (0, the whole base reserve, a sell leg), and a debit non-decreasing in the
+/// base asked for
+#[test]
+fn pumpswap_exact_out_buy() {
+    let mut rng = Rng(16);
+    let mut checked = 0;
+    for _ in 0..300 {
+        let s = PumpSpec { base: rng.log(1_000, 1 << 56), quote: rng.log(1_000, 1 << 50), virt: if rng.chance(1, 2) { rng.log(1, 1 << 40) as i128 } else { 0 },
+            creator_fee_bps: if rng.chance(1, 4) { rng.range(1, 300) } else { 0 }, ..Default::default() };
+        let l = pump_leg(&s, false);
+        assert_eq!(l.quote_exact_out(0), Err(QuoteErr::ZeroOut));
+        assert_eq!(l.quote_exact_out(l.base), Err(QuoteErr::TooLarge));
+        assert_eq!(pump_leg(&s, true).quote_exact_out(1), Err(QuoteErr::Abort(Abort::Unsupported)), "a sell leg has no exact-out quote");
+        let mut last = 0u64;
+        let mut outs: Vec<u64> = (0..40).map(|_| rng.log(1, l.base - 1)).collect();
+        outs.sort();
+        for out in outs {
+            let Ok((q, quote)) = l.quote_exact_out(out) else { continue };
+            let (qv, b) = (l.qv as u128, l.base as u128);
+            assert_eq!(q as u128, (qv * out as u128).div_ceil(b - out as u128), "q");
+            let fee = |bps: u64| (q as u128 * bps as u128).div_ceil(10_000);
+            assert_eq!(quote.spent as u128, q as u128 + fee(l.fees.lp) + fee(l.fees.protocol) + fee(l.fees.creator), "debit");
+            assert_eq!(quote.out, out);
+            assert!(quote.spent >= last, "the debit falls as the base asked for rises");
+            last = quote.spent;
+            checked += 1;
+        }
+    }
+    assert!(checked > 5_000, "{checked}");
 }

@@ -43,7 +43,8 @@ use crate::rec::journal::Journal;
 use crate::rec::{self, Rec};
 use crate::store::{Acct, Store};
 use crate::tx::{b58, Ix, Pk, Tx};
-use crate::venues::{cp, dammv2, dlmm, PoolMeta, Venue};
+use crate::venues::legacy::{cp, dammv2};
+use crate::venues::{dlmm, PoolMeta, Venue};
 use rustc_hash::FxHashMap as HashMap;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -92,8 +93,34 @@ pub(crate) fn fixtures() -> &'static Fixtures {
             f.pools.push((p["pair"].as_str().unwrap().into(), p["name"].as_str().unwrap().into(), Venue::parse(p["venue"].as_str().unwrap()).unwrap(),
                 pk(p["pool"].as_str().unwrap())));
         }
+        let g = pump_global_config(f.slot);
+        f.by_key.insert(g.key, f.accounts.len());
+        f.accounts.push(g);
         f
     })
+}
+
+/// ---- WP-16 merge. PumpSwap's GlobalConfig, a part of every PumpSwap pool since WP-16 (arbx-sizing reads its disable
+/// flags and creator-fee switch; the state stream follows it): accounts.json, captured before WP-16, does not hold it.
+/// Its real bytes come from two of WP-16's own captures (testdata/venue-parity, read from mainnet by the venue
+/// harness), one before and one after the scenarios' capture slot: identical, so the account did not change in between
+fn pump_global_config(slot: u64) -> Fix {
+    use base64::Engine as _;
+    const SHA256: &str = "a698009a419d0b8c56ff257626d15cba305c4989a602fa86e65ca252b2c200f4";
+    let key = *crate::pools::PUMP_GLOBAL_CONFIG;
+    let read = |file: &str| -> (u64, Pk, u64, Vec<u8>) {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/venue-parity/pools").join(file);
+        let v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap();
+        let a = v["accounts"].as_array().unwrap().iter().find(|a| pk(a["pubkey"].as_str().unwrap()) == key).expect("the GlobalConfig in the capture");
+        let lamports: u64 = a["lamports"].as_str().map_or_else(|| a["lamports"].as_u64(), |x| x.parse().ok()).unwrap();
+        (v["slot"].as_u64().unwrap(), pk(a["owner"].as_str().unwrap()), lamports, base64::engine::general_purpose::STANDARD.decode(a["data"].as_str().unwrap()).unwrap())
+    };
+    let before = read("PumpSwap-CyJwKnLiiY4fmiwqMCSWFSHxo7T9Ubshgs2uRAuJCrk5.json");
+    let after = read("PumpSwap-9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA.json");
+    assert!(before.0 < slot && slot < after.0, "the two captures ({}, {}) bracket the scenarios' slot {slot}", before.0, after.0);
+    assert_eq!(before, (before.0, after.1, after.2, after.3.clone()), "the GlobalConfig is the same before and after the scenarios' capture");
+    assert_eq!(crate::provenance::sha256_hex(&after.3), SHA256, "the GlobalConfig's bytes changed");
+    Fix { key, what: "pump_global_config".into(), owner: after.1, lamports: after.2, data: after.3 }
 }
 
 impl Fixtures {
@@ -120,8 +147,8 @@ pub(crate) fn boot_registry(names: &[&str]) -> Registry {
     let rpc = crate::rpc::Rpc::race(vec![crate::rpc::Endpoint { name: "mock".into(), url: mock.url.clone(), bearer: None }]);
     let cands: Vec<(Venue, Pk)> = names.iter().map(|n| f.pool(n)).collect();
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    let reg = rt.block_on(pools::boot(&rpc, &cands, Default::default(), cands.iter().map(|c| c.1).collect())).expect("pools::boot on the fixtures");
-    assert_eq!(reg.pools.len(), names.len(), "every fixture pool booted: {}", reg.summary());
+    let (reg, drops) = rt.block_on(pools::boot(&rpc, &cands, Default::default(), cands.iter().map(|c| c.1).collect())).expect("pools::boot on the fixtures");
+    assert_eq!(reg.pools.len(), names.len(), "every fixture pool booted: {}; dropped {}", reg.summary(), pools::drops_json(&drops));
     reg
 }
 
@@ -165,8 +192,8 @@ pub(crate) struct Rig {
 
 /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 9). A real executor in the run (WP-05: every `arbx run` builds
 /// one), as `arbx run` builds it: `Exec::assemble` on the boot's lookup tables, PumpSwap GlobalConfig and held tokens
-/// (the fixtures hold none of them: a made-up GlobalConfig, and a lookup table of every account the fixture pools' legs
-/// name, as Stage 0's `[exec] alts` hold the venues' common accounts), the run's SendGate, a LeaderBook that knows the
+/// (the GlobalConfig decoded from the fixture's account, as the boot decodes it; the fixtures hold no lookup table: one
+/// of every account the fixture pools' legs name, as Stage 0's `[exec] alts` hold the venues' common accounts), the run's SendGate, a LeaderBook that knows the
 /// test leaders' kinds, the engine's health, the crowding map with WP-00's static list; its exec_init record journaled
 /// after engine_init. No RPC endpoint, no send path, no key (a dry run's throwaway key aside)
 pub(crate) struct ExecSetup<'a> {
@@ -299,7 +326,7 @@ impl Rig {
         if let Some(x) = &s.exec {
             if x.sticky_shadow { let _ = gate.shadow("mode_shadow", "no --live or --canary: nothing is sent", true); }
             let payer = crate::tx::pk(&cfg.wallet);
-            let pump = crate::build::PumpGlobal { disable_flags: 0, protocol: vec![[0x71; 32]], reserved: vec![[0x72; 32]], buyback: vec![[0x73; 32]] };
+            let pump = crate::build::decode_pump_global(&chain[&*crate::pools::PUMP_GLOBAL_CONFIG]).expect("the fixture's GlobalConfig decodes");
             let alt = fixture_alt(&reg, &chain, &e.store, payer, &pump);
             let mut held: rustc_hash::FxHashSet<Pk> = [*crate::venues::WSOL].into_iter().collect();
             if x.hold_tokens { for m in &reg.pools { held.insert(m.t0); held.insert(m.t1); } }
@@ -434,6 +461,17 @@ impl Rig {
             assert_eq!((r.summary["executor"]["replayed"].as_bool(), s["executor_replayed"].as_bool()), (Some(true), Some(true)), "{}: {}", self.name, r.summary["executor"]);
             assert_eq!((s["attempts_differ"].as_u64(), s["attempts_missing_in_replay"].as_u64(), s["attempts_extra_in_replay"].as_u64()), (Some(0), Some(0), Some(0)), "{}", self.name);
             assert_eq!(s["attempts_compared"], s["attempts_run"], "{}: every attempt compared", self.name);
+            // ---- WP-16 merge: the executor's expected profit is its decision's gross, the guard's quote delta (the sell
+            // output minus the buy leg's debit), at the same size
+            let best: HashMap<u64, &Value> = decisions.iter().filter(|d| d["opp"].is_u64())
+                .map(|d| (d["decision"].as_u64().unwrap(), &d["routes"][d["best"].as_u64().unwrap() as usize])).collect();
+            for a in rec::read_jsonl(&self.dir, "attempts").unwrap_or_default() {
+                let x = &a["expected"];
+                assert_eq!(x["gross"].as_i64(), Some(x["back"].as_i64().unwrap() - x["spent"].as_i64().unwrap()), "{}: {a}", self.name);
+                assert!(x["spent"].as_u64().unwrap() <= a["size_lamports"].as_u64().unwrap(), "{}: {a}", self.name);
+                let b = best[&a["decision"].as_u64().unwrap()];
+                if b["size"] == a["size_lamports"] { assert_eq!(x["gross"], b["gross"], "{}: attempt {} vs its decision's route {b}", self.name, a["attempt"]); }
+            }
         }
         self.handed_over = true;
         Done { name: self.name, dir: self.dir.clone(), decisions, commits, sig_names: std::mem::take(&mut self.sig_names), replay: r.summary, keep: self.keep }
@@ -554,7 +592,9 @@ pub(crate) fn ammv4_swap(m: &PoolMeta, user: &Pk, amount: u64, zfo: bool, writab
 // ------------------------------------------------------------------ swaps on the chain's bytes (the venues' own maths)
 
 /// A swap of `amount_in` on pool `m` at the chain's current bytes: the accounts it writes, with their new bytes (the
-/// venue's own post-trade model: CP effective reserves, the DLMM bins walked, the DAMM v2 price) and the output
+/// venue's own post-trade model: CP effective reserves, the DLMM bins walked, the DAMM v2 price) and the output. The
+/// model is the engine's maths before WP-16 (`venues::legacy`, kept for tests): the scenarios' third-party trades, and
+/// so their inputs, are byte for byte what they were before the merge; the engine prices them with arbx-sizing
 pub(crate) fn swap(chain: &HashMap<Pk, Vec<u8>>, m: &PoolMeta, zfo: bool, amount_in: u64, slot: u64, unix: i64) -> (Vec<(Pk, Vec<u8>)>, u64) {
     try_swap(chain, m, zfo, amount_in, slot, unix).unwrap_or_else(|| panic!("{}: a swap of {amount_in} (zfo {zfo}) does not quote", nm(&m.pool)))
 }
@@ -568,7 +608,7 @@ pub(crate) fn try_swap(chain: &HashMap<Pk, Vec<u8>>, m: &PoolMeta, zfo: bool, am
             let c = dlmm::array_index(active);
             let keys: Vec<(i64, Pk)> = (c - pools::DLMM_ARRAY_SPAN..=c + pools::DLMM_ARRAY_SPAN).map(|i| (i, dlmm::bin_array_pda(&m.pool, i))).collect();
             let held: HashMap<i64, &[u8]> = keys.iter().filter_map(|(i, k)| chain.get(k).map(|d| (*i, &d[..]))).collect();
-            let q = dlmm::quote(&dlmm::View { pair: &pair, arrays: &held, over: None }, zfo, amount_in, unix, true).ok()?;
+            let q = crate::venues::legacy::dlmm::quote(&crate::venues::legacy::dlmm::View { pair: &pair, arrays: &held, over: None }, zfo, amount_in, unix, true).ok()?;
             let mut arrays: HashMap<i64, Vec<u8>> = HashMap::default();
             for (bin, x, y) in &q.changed {
                 let i = dlmm::array_index(*bin);
@@ -644,8 +684,15 @@ fn the_fixture_pools_boot_and_quote() {
         let m = r.meta(n);
         let (v, _) = f.pool(n);
         assert_eq!(m.venue, v);
-        let s = r.e.store.snapshot(&m, r.unix0).unwrap_or_else(|e| panic!("{n}: {e}"));
-        let _ = s;
+    }
+    // WP-16: each pool quotes in both directions on the engine's own path (arbx-sizing's legs, as a decision parses them):
+    // every ordered pair of the five, at 0.01 SOL
+    let usdc = { let m = r.meta(names[0]); if m.t0 == *crate::venues::WSOL { m.t1 } else { m.t0 } };
+    for b in names {
+        for s in names.iter().filter(|s| **s != b) {
+            let q = r.e.quote_route(&r.meta(b).pool, &r.meta(s).pool, &usdc, SOL / 100).unwrap_or_else(|e| panic!("{b} -> {s}: {e}"));
+            assert!(q.mid > 0 && q.back > 0 && q.spent > 0 && q.spent <= SOL / 100, "{b} -> {s}: {}", q.gross);
+        }
     }
     let bolt = boot_registry(&["bolt.pump", "bolt.dlmm"]);
     assert!(bolt.pools.iter().any(|m| m.venue == Venue::PumpSwap && m.t0_prog == pk("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")), "the bolt token is Token-2022");

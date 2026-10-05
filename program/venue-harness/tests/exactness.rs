@@ -11,24 +11,27 @@
 //!   * `Budget` (a DLMM swap past the leg's walk budget, 255 bins with liquidity here: "not evaluated") is checked
 //!     twice: the same quote without a budget must equal the venue as above, and the swap must really need more
 //!     bins with liquidity than the budget;
-//!   * `Abort(..)` (parse or quote) is skipped and counted per venue (the skip rate is a reported metric);
+//!   * `Abort(..)` (parse or quote), a refusal, is checked against the venue too (WP-16 review F3): the venue failing
+//!     (or paying nothing) is "both refuse"; the venue swapping is a FALSE REFUSAL, a failure like a mismatch, unless
+//!     the crate's maths without the refused state (lifted on the crate's side only, `common::lift`: a Token-2022
+//!     transfer fee zeroed) are off at one of those sizes at least: a "necessary refusal" (the refusal keeps a
+//!     misprice out). A refusal with no lift is a FALSE REFUSAL whenever the venue swaps;
 //!   * a `DescError` on a leg the harness built like the engine is a failure.
 //! Otherwise the test SKIPS with a message (it passes), unless VENUE_HARNESS_REQUIRE_SIZING=1.
 //! Results: results/exactness.json.
 //!
 //!   cargo test --release --test exactness -- --nocapture
+mod common;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
 use venue_harness::venues::pump_canonical_bump;
 use venue_harness::*;
 
-const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+use common::{lift, refusal_verdict, VenueAt, MANIFEST_DIR};
 
 fn skip(msg: &str) {
-    if std::env::var("VENUE_HARNESS_REQUIRE_SIZING").is_ok_and(|v| v == "1") { panic!("{msg}"); }
+    if common::required() { panic!("{msg}"); }
     println!("SKIP exactness: {msg}");
 }
 
@@ -43,42 +46,9 @@ fn kind_of(venue: Venue, dir: Dir) -> (u8, bool) {
     }
 }
 
-/// The sizing crate: program/arbx-sizing, or VENUE_HARNESS_SIZING_DIR (e.g. a worktree or a stub).
-fn sizing_dir() -> PathBuf {
-    std::env::var("VENUE_HARNESS_SIZING_DIR").map(PathBuf::from).unwrap_or_else(|_| Path::new(MANIFEST_DIR).join("../arbx-sizing"))
-}
-
-/// Build the bridge (sizing-bridge/src/main.rs, with a manifest generated for `sizing`) in its own target dir.
-/// Err: the build's error lines.
-fn build_bridge(sizing: &Path) -> Result<PathBuf, String> {
-    let root = Path::new(MANIFEST_DIR);
-    let target = root.join("target").join("sizing-bridge");
-    let src = target.join("crate");
-    std::fs::create_dir_all(src.join("src")).unwrap();
-    let manifest = std::fs::read_to_string(root.join("sizing-bridge/Cargo.toml")).unwrap()
-        .replace("path = \"../../arbx-sizing\"", &format!("path = {:?}", sizing.canonicalize().unwrap()));
-    std::fs::write(src.join("Cargo.toml"), manifest).unwrap();
-    let _ = std::fs::remove_file(src.join("Cargo.lock")); // re-resolve: the sizing crate may have changed
-    std::fs::copy(root.join("sizing-bridge/src/main.rs"), src.join("src/main.rs")).unwrap();
-    let mut cmd = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
-    cmd.args(["build", "--release", "--manifest-path"]).arg(src.join("Cargo.toml")).arg("--target-dir").arg(&target);
-    // the outer `cargo test` exports CARGO_* variables describing THIS package: keep them away from the inner build
-    for (k, _) in std::env::vars() {
-        if k.starts_with("CARGO_") && !matches!(k.as_str(), "CARGO_HOME" | "CARGO_BUILD_JOBS" | "CARGO_NET_OFFLINE") { cmd.env_remove(&k); }
-    }
-    if std::env::var("CARGO_BUILD_JOBS").is_err() { cmd.env("CARGO_BUILD_JOBS", "4"); }
-    let out = cmd.output().map_err(|e| format!("running cargo: {e}"))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        let noise = ["Compiling", "Updating", "Downloaded", "Downloading", "Locking", "Blocking", "Adding", "warning"];
-        let lines: Vec<&str> = err.lines().filter(|l| !l.trim().is_empty() && !noise.iter().any(|n| l.trim_start().starts_with(n))).take(30).collect();
-        return Err(lines.join("\n"));
-    }
-    Ok(target.join("release").join("sizing-bridge"))
-}
-
 #[derive(Default, serde::Serialize)]
-struct Tally { exact: usize, too_large_agree: usize, budget: usize, cu_limit: usize, aborted: usize, mismatches: usize, abort_reasons: BTreeMap<String, usize> }
+struct Tally { exact: usize, too_large_agree: usize, budget: usize, cu_limit: usize, aborted: usize, refused_venue_fails: usize, necessary_refusals: usize,
+    false_refusals: usize, mismatches: usize, abort_reasons: BTreeMap<String, usize> }
 
 /// One harness state to compare on: a pool's snapshot, or the snapshot with a byte mutation (DESIGN §6.3 "state
 /// mutation": the program is the oracle; a mutation it rejects must be rejected by the model too).
@@ -133,11 +103,11 @@ fn cases(fx: &Fixtures) -> Vec<Case> {
 
 #[test]
 fn sizing_quotes_equal_the_real_programs() {
-    let sizing = sizing_dir();
+    let sizing = common::sizing_dir();
     if !sizing.join("Cargo.toml").exists() {
         return skip(&format!("{} has no Cargo.toml: arbx-sizing is not written yet", sizing.display()));
     }
-    let bridge = match build_bridge(&sizing) {
+    let bridge = match common::build_bridge(&sizing, "sizing-bridge") {
         Ok(b) => b,
         Err(e) => return skip(&format!("arbx-sizing exists but sizing-bridge does not build against it (crate mid-edit, or its API \
             differs from DESIGN.md §5.3: align sizing-bridge/src/main.rs `adapter`):\n{e}")),
@@ -145,17 +115,23 @@ fn sizing_quotes_equal_the_real_programs() {
     let fx = Fixtures::load().unwrap();
     // the engine passes at most 5 DLMM bin arrays (the descriptor's 3-bit count), so quote and swap with that list
     let opts = BuildOpts { dlmm_max_arrays: 5, ..Default::default() };
+    // PumpSwap's exact-out `buy` (WP-16 review F6): the amount is the base out
+    let opts_out = BuildOpts { exact_out: true, ..opts.clone() };
     let cases = cases(&fx);
     let mut legs = vec![];
     let mut meta = vec![];
     for (ci, c) in cases.iter().enumerate() {
         let (h, p) = (&c.h, &c.h.fixture);
-        for dir in Dir::BOTH {
-            let sw = h.build(dir, 1, &opts).unwrap();
+        let exact_out_buy = p.venue == Venue::PumpSwap && venue_harness::venues::engine_leg_executes(p.venue, &h.view[&h.pool].data);
+        for (dir, exact_out) in Dir::BOTH.into_iter().map(|d| (d, false)).chain(exact_out_buy.then_some((Dir::OneForZero, true))) {
+            let o = if exact_out { &opts_out } else { &opts };
+            let sw = h.build(dir, 1, o).unwrap();
             let (kind, t0_in) = kind_of(p.venue, dir);
-            let mut amounts: Vec<u64> = size_ladder(h.input_reserve(dir), 40).into_iter().chain([1, 2, 10, 100, 1_000]).collect();
-            // PumpSwap buy_exact_quote_in: a dense run of consecutive sizes covers every fee-rounding residue (§7.1)
-            if kind == 1 && c.label == "snapshot" { amounts.extend(10_000_000..10_001_000); }
+            let mut amounts: Vec<u64> = if exact_out { size_ladder(h.output_reserve(dir), 40).into_iter().chain([0, 1, 2, 10, 100, 1_000]).collect() }
+                else { size_ladder(h.input_reserve(dir), 40).into_iter().chain([1, 2, 10, 100, 1_000]).collect() };
+            // PumpSwap buy_exact_quote_in: a dense run of consecutive sizes covers every fee-rounding residue (§7.1); the
+            // exact-out buy likewise
+            if kind == 1 && c.label == "snapshot" { amounts.extend(if exact_out { 1_000_000..1_000_500 } else { 10_000_000..10_001_000 }); }
             amounts.sort();
             amounts.dedup();
             // the leg's own accounts as the program sees them before the swap (executables without their ELF)
@@ -167,33 +143,24 @@ fn sizing_quotes_equal_the_real_programs() {
             let pump_bump = if p.venue == Venue::PumpSwap { pump_canonical_bump(&h.view[&h.pool].data) } else { 0 };
             legs.push(json!({"id": legs.len(), "kind": kind, "base_or_token0_in": t0_in, "n_bin_arrays": sw.dlmm_arrays.len(),
                 "pump_bump": pump_bump, "program": p.venue.program().to_string(), "input_mint": sw.mint_in.to_string(),
-                "accounts": accounts, "amounts": amounts, "clock": p.clock}));
-            meta.push((ci, dir));
+                "accounts": accounts, "amounts": amounts, "clock": p.clock, "exact_out": exact_out}));
+            meta.push((ci, dir, exact_out));
         }
     }
     // one bridge run per distinct clock (each pool snapshot carries its own)
-    let mut resp: Vec<Value> = vec![Value::Null; legs.len()];
-    let mut by_clock: BTreeMap<String, Vec<Value>> = BTreeMap::new();
-    for l in &legs { by_clock.entry(l["clock"].to_string()).or_default().push(l.clone()); }
-    for (clock, ls) in by_clock {
-        let req = json!({"clock": serde_json::from_str::<Value>(&clock).unwrap(), "legs": ls});
-        let mut child = Command::new(&bridge).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-        child.stdin.take().unwrap().write_all(req.to_string().as_bytes()).unwrap();
-        let out = child.wait_with_output().unwrap();
-        assert!(out.status.success(), "sizing-bridge crashed (a panic in arbx-sizing is a bug: DESIGN §5.4 'no panics'):\n{}",
-            String::from_utf8_lossy(&out.stderr));
-        let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-        for r in v["legs"].as_array().unwrap() { resp[r["id"].as_u64().unwrap() as usize] = r.clone(); }
-    }
+    let resp = common::quote_legs(&bridge, &legs);
     // compare with the real programs
     let mut tally: BTreeMap<String, Tally> = BTreeMap::new();
     let mut problems = vec![];
     let mut rows = vec![];
+    // refused sizes the venue swapped, per leg: (row index, venue outcome), for the lift check below
+    let mut swapped_refusals: BTreeMap<usize, Vec<(usize, VenueAt)>> = BTreeMap::new();
     for (i, r) in resp.iter().enumerate() {
-        let (ci, dir) = meta[i];
+        let (ci, dir, exact_out) = meta[i];
         let c = &cases[ci];
         let (h, p) = (&c.h, &c.h.fixture);
-        let key = if c.label == "snapshot" { p.venue.name().to_string() } else { format!("{} [{}]", p.venue.name(), c.label) };
+        let key = tally_key(p, &if exact_out { format!("{} exact-out buy", c.label) } else { c.label.clone() });
+        let opts = if exact_out { &opts_out } else { &opts };
         let t = tally.entry(key).or_default();
         let parse = r["parse"].as_str().unwrap_or("missing").to_string();
         if parse.starts_with("desc:") { problems.push(format!("{} {} {} [{}]: DescError on an engine-built leg: {parse}", p.venue.name(), p.pool, dir.short(), c.label)); }
@@ -204,12 +171,21 @@ fn sizing_quotes_equal_the_real_programs() {
             let budget = q0["err"].as_str() == Some("Budget");
             let q = if budget { &q0["unbounded"] } else { q0 };
             let err = q["err"].as_str().unwrap_or("");
+            let s = h.swap_opts(dir, x, opts);
+            // a refusal (Abort at parse or quote): the venue must refuse too, or the refusal must be shown necessary
             if !q["ok"].as_bool().unwrap() && (parse != "ok" || err.starts_with("Abort")) {
                 t.aborted += 1;
-                *t.abort_reasons.entry(if parse != "ok" { parse.clone() } else { err.to_string() }).or_default() += 1;
+                let reason = if parse != "ok" { parse.clone() } else { err.to_string() };
+                *t.abort_reasons.entry(reason.clone()).or_default() += 1;
+                let v = VenueAt { ok: s.ok, out: s.amount_out, spent: s.spent };
+                let verdict = if v.swapped() {
+                    swapped_refusals.entry(i).or_default().push((rows.len(), v));
+                    format!("refused ({reason}) while the venue swaps: pending the lift check")
+                } else { t.refused_venue_fails += 1; format!("both refuse ({reason}; venue {})", if s.ok { "pays 0".to_string() } else { s.venue_error() }) };
+                rows.push(json!({"venue": p.venue.name(), "pool": p.pool, "case": c.label, "dir": dir.short(), "exact_out": exact_out, "amount_in": x, "quote": q0, "program_ok": s.ok,
+                    "program_out": s.amount_out, "program_spent": s.spent, "cu": s.cu_venue, "verdict": verdict}));
                 continue;
             }
-            let s = h.swap_opts(dir, x, &opts);
             let mut verdict = if q["ok"].as_bool().unwrap() {
                 let (o, sp) = (q["out"].as_u64().unwrap(), q["spent"].as_u64().unwrap());
                 if s.ok && s.amount_out == o && s.spent == sp { "exact".to_string() } else {
@@ -233,16 +209,50 @@ fn sizing_quotes_equal_the_real_programs() {
             if verdict.starts_with("MISMATCH") { t.mismatches += 1; } else if verdict.starts_with("budget") { t.budget += 1; }
                 else if verdict.starts_with("venue CU limit") { t.cu_limit += 1; } else if verdict == "exact" { t.exact += 1; } else { t.too_large_agree += 1; }
             if verdict.starts_with("MISMATCH") && problems.len() < 40 { problems.push(format!("{} {} {} [{}] x={x}: {verdict}", p.venue.name(), p.pool, dir.short(), c.label)); }
-            rows.push(json!({"venue": p.venue.name(), "pool": p.pool, "case": c.label, "dir": dir.short(), "amount_in": x, "quote": q0, "program_ok": s.ok,
+            rows.push(json!({"venue": p.venue.name(), "pool": p.pool, "case": c.label, "dir": dir.short(), "exact_out": exact_out, "amount_in": x, "quote": q0, "program_ok": s.ok,
                 "program_out": s.amount_out, "program_spent": s.spent, "cu": s.cu_venue, "verdict": verdict}));
         }
     }
-    println!("{:<44} {:>6} {:>11} {:>7} {:>7} {:>8} {:>9}  abort reasons", "venue [mutation]", "exact", "both-refuse", "budget", "cu-lim", "aborted", "MISMATCH");
+    // the lift check (WP-16 review F3): each leg refused while the venue swaps, re-quoted with the refused state taken
+    // out on the crate's side only
+    let lifted_legs: Vec<(usize, Value)> = swapped_refusals.keys().filter_map(|&i| {
+        let parse = resp[i]["parse"].as_str().unwrap_or("");
+        let accounts = lift(parse, legs[i]["accounts"].as_array().unwrap())?;
+        let mut l = legs[i].clone();
+        l["accounts"] = json!(accounts);
+        l["amounts"] = json!(swapped_refusals[&i].iter().map(|(ri, _)| rows[*ri]["amount_in"].clone()).collect::<Vec<_>>());
+        Some((i, l))
+    }).collect();
+    let mut relegs: Vec<Value> = lifted_legs.iter().enumerate().map(|(k, (_, l))| { let mut l = l.clone(); l["id"] = json!(k); l }).collect();
+    let relifted = if relegs.is_empty() { vec![] } else { common::quote_legs(&bridge, &std::mem::take(&mut relegs)) };
+    for (i, refused) in &swapped_refusals {
+        let (ci, dir, exact_out) = meta[*i];
+        let c = &cases[ci];
+        let p = &c.h.fixture;
+        let lq = lifted_legs.iter().position(|(j, _)| j == i).map(|k| relifted[k]["quotes"].as_array().unwrap().as_slice());
+        let venue: Vec<VenueAt> = refused.iter().map(|(_, v)| v.clone()).collect();
+        let (verdict, why) = refusal_verdict(&venue, lq);
+        let t = tally.get_mut(&tally_key(p, &if exact_out { format!("{} exact-out buy", c.label) } else { c.label.clone() })).unwrap();
+        for (ri, _) in refused {
+            rows[*ri]["verdict"] = json!(format!("{verdict} ({}): {why}", resp[*i]["parse"].as_str().unwrap_or("")));
+            if verdict == "necessary refusal" { t.necessary_refusals += 1; } else { t.false_refusals += 1; }
+        }
+        if verdict != "necessary refusal" && problems.len() < 40 {
+            problems.push(format!("{} {} {} [{}]: FALSE REFUSAL {} at {} venue-swapped sizes: {why}", p.venue.name(), p.pool, dir.short(), c.label,
+                resp[*i]["parse"], refused.len()));
+        }
+    }
+    println!("{:<44} {:>6} {:>11} {:>7} {:>7} {:>8} {:>9} {:>9} {:>9}  abort reasons", "venue [mutation]", "exact", "both-refuse", "budget", "cu-lim", "refused",
+        "necessary", "FALSE-REF", "MISMATCH");
     for (v, t) in &tally {
-        println!("{v:<44} {:>6} {:>11} {:>7} {:>7} {:>8} {:>9}  {:?}", t.exact, t.too_large_agree, t.budget, t.cu_limit, t.aborted, t.mismatches, t.abort_reasons);
+        println!("{v:<44} {:>6} {:>11} {:>7} {:>7} {:>8} {:>9} {:>9} {:>9}  {:?}", t.exact, t.too_large_agree + t.refused_venue_fails, t.budget, t.cu_limit, t.aborted,
+            t.necessary_refusals, t.false_refusals, t.mismatches, t.abort_reasons);
     }
     let sum = |f: fn(&Tally) -> usize| tally.values().map(f).sum::<usize>();
-    println!("{:<44} {:>6} {:>11} {:>7} {:>7} {:>8} {:>9}", "TOTAL", sum(|t| t.exact), sum(|t| t.too_large_agree), sum(|t| t.budget), sum(|t| t.cu_limit), sum(|t| t.aborted), sum(|t| t.mismatches));
+    println!("{:<44} {:>6} {:>11} {:>7} {:>7} {:>8} {:>9} {:>9} {:>9}", "TOTAL", sum(|t| t.exact), sum(|t| t.too_large_agree + t.refused_venue_fails), sum(|t| t.budget),
+        sum(|t| t.cu_limit), sum(|t| t.aborted), sum(|t| t.necessary_refusals), sum(|t| t.false_refusals), sum(|t| t.mismatches));
+    println!("refused sizes: {} (venue refuses too {}, necessary {}, FALSE REFUSAL {})", sum(|t| t.aborted), sum(|t| t.refused_venue_fails),
+        sum(|t| t.necessary_refusals), sum(|t| t.false_refusals));
     for r in rows.iter().filter(|r| { let v = r["verdict"].as_str().unwrap(); v.starts_with("budget") || v.starts_with("venue CU") }).take(8) {
         println!("  {} {} {} [{}] x={} {}", r["venue"], r["pool"], r["dir"], r["case"], r["amount_in"], r["verdict"]);
     }
@@ -258,3 +268,6 @@ fn sizing_quotes_equal_the_real_programs() {
 }
 
 fn base64_encode(b: &[u8]) -> String { use base64::Engine as _; base64::engine::general_purpose::STANDARD.encode(b) }
+
+/// a tally's key: the venue, with the mutation when the case is not the snapshot itself
+fn tally_key(p: &PoolFixture, label: &str) -> String { if label == "snapshot" { p.venue.name().to_string() } else { format!("{} [{label}]", p.venue.name()) } }

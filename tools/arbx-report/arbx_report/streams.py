@@ -347,7 +347,9 @@ def _bin_header(f, magic: bytes, path: str) -> tuple[int, dict]:
 ACC_DICT, ACC_FULL, ACC_XOR, ACC_MARK, ACC_GAP = 1, 2, 3, 4, 6
 MARK_NAMES = {1: "boot_begin", 2: "boot_end", 3: "stream_reconnect", 4: "watch_list_changed", 5: "fork_refetch"}
 ROLE_NAMES = {0: "other", 1: "pool", 2: "vault", 3: "extra", 4: "dlmm_bin_array", 5: "mint", 6: "clock_sysvar",
-              7: "dlmm_bitmap_ext", 8: "programdata", 9: "wallet", 10: "wallet_token_account", 11: "pump_fee_config"}
+              7: "dlmm_bitmap_ext", 8: "programdata", 9: "wallet", 10: "wallet_token_account", 11: "pump_fee_config",
+              # WP-16: PumpSwap's GlobalConfig, a part of every PumpSwap pool (src/rec/accounts.rs `role::PUMP_GLOBAL_CONFIG`)
+              12: "pump_global_config"}
 SRC_NAMES = {0: "grpc", 1: "rpc_boot", 2: "rpc_refetch", 3: "rpc_snapshot"}
 
 

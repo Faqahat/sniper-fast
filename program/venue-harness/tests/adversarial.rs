@@ -9,28 +9,28 @@
 //! * state mutations: DLMM limit orders (open and processed layers, both ask sides, function_type 0/1/2, reward
 //!   mints), volatility extremes, a bitmap gap and an empty active array (bitmap-order and engine-order array
 //!   lists); PumpSwap negative / large virtual reserve, coin_creator 0, creator_fee_bps above the configurable
-//!   maximum, market cap across fee tiers; CPMM owed fees, fee rates; AMM v4 fee fractions; DAMM v2 narrow price
-//!   range, rate limiter, fee cap.
+//!   maximum, market cap across fee tiers, the pool cut to every read-group boundary ±1 (WP-16 review F1: the program
+//!   reads a pool from 211 bytes, each trailing group only when whole), `is_holder_reward` (byte 270), the flag bytes
+//!   set to a value that is no Borsh bool, mayhem and cashback; CPMM owed fees, fee rates; AMM v4 fee fractions;
+//!   DAMM v2 narrow price range, rate limiter, fee cap, zero liquidity.
 //!
-//! A state the program refuses must be refused (or aborted) by the crate too; an Abort is skipped and counted.
-//! Fails on any MISMATCH. Results: results/adversarial.json.
+//! Every refusal is checked against the venue too (WP-16 review F3): see `tests/exactness.rs`. Fails on any MISMATCH
+//! or FALSE REFUSAL. Results: results/adversarial.json.
 //!
 //!   VENUE_HARNESS_REQUIRE_SIZING=1 cargo test --release --test adversarial -- --nocapture
+mod common;
 use serde_json::{json, Value};
 use solana_address::Address;
 use std::collections::BTreeMap;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
+use common::{lift, refusal_verdict, VenueAt, MANIFEST_DIR};
 use venue_harness::fixture::ClockSnap;
 use venue_harness::keys;
 use venue_harness::venues::{i32_at, pump_canonical_bump, u64_at};
 use venue_harness::*;
 
-const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
-
 fn skip(msg: &str) {
-    if std::env::var("VENUE_HARNESS_REQUIRE_SIZING").is_ok_and(|v| v == "1") { panic!("{msg}"); }
+    if common::required() { panic!("{msg}"); }
     println!("SKIP adversarial: {msg}");
 }
 
@@ -42,32 +42,6 @@ fn kind_of(venue: Venue, dir: Dir) -> (u8, bool) {
         Venue::Dlmm => (5, dir.zfo()),
         Venue::DammV2 => (6, dir.zfo()),
     }
-}
-
-fn sizing_dir() -> PathBuf {
-    std::env::var("VENUE_HARNESS_SIZING_DIR").map(PathBuf::from).unwrap_or_else(|_| Path::new(MANIFEST_DIR).join("../arbx-sizing"))
-}
-
-/// The bridge (sizing-bridge/src/main.rs) built in its own target dir (not the one tests/exactness.rs uses).
-fn build_bridge(sizing: &Path) -> Result<PathBuf, String> {
-    let root = Path::new(MANIFEST_DIR);
-    let target = root.join("target").join("sizing-bridge-adv");
-    let src = target.join("crate");
-    std::fs::create_dir_all(src.join("src")).unwrap();
-    let manifest = std::fs::read_to_string(root.join("sizing-bridge/Cargo.toml")).unwrap()
-        .replace("path = \"../../arbx-sizing\"", &format!("path = {:?}", sizing.canonicalize().unwrap()));
-    std::fs::write(src.join("Cargo.toml"), manifest).unwrap();
-    let _ = std::fs::remove_file(src.join("Cargo.lock"));
-    std::fs::copy(root.join("sizing-bridge/src/main.rs"), src.join("src/main.rs")).unwrap();
-    let mut cmd = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
-    cmd.args(["build", "--release", "--manifest-path"]).arg(src.join("Cargo.toml")).arg("--target-dir").arg(&target);
-    for (k, _) in std::env::vars() {
-        if k.starts_with("CARGO_") && !matches!(k.as_str(), "CARGO_HOME" | "CARGO_BUILD_JOBS" | "CARGO_NET_OFFLINE") { cmd.env_remove(&k); }
-    }
-    if std::env::var("CARGO_BUILD_JOBS").is_err() { cmd.env("CARGO_BUILD_JOBS", "4"); }
-    let out = cmd.output().map_err(|e| format!("running cargo: {e}"))?;
-    if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).lines().rev().take(30).collect::<Vec<_>>().join("\n")); }
-    Ok(target.join("release").join("sizing-bridge"))
 }
 
 /// One state to compare on: a (patched) snapshot, the Clock both sides see, the array list, the directions.
@@ -136,9 +110,10 @@ fn limit_orders(h: &Harness, open_div: u64, processed_div: u64) -> Vec<Patch> {
     p
 }
 
-fn probes(fx: &Fixtures) -> Vec<Probe> {
+/// The probes of one pool (a LiteSVM each: the test runs one pool's at a time, which keeps its memory at a pool's)
+fn probes(fx: &Fixtures, p: &PoolFixture) -> Vec<Probe> {
     let mut out = vec![];
-    for p in fx.pools.values() {
+    {
         let pool = p.pool_key();
         let h0 = Harness::new(fx, &pool).unwrap();
         let fee_mint = venues::pool_has_transfer_fee(&h0.view, &h0.tokens);
@@ -152,7 +127,7 @@ fn probes(fx: &Fixtures) -> Vec<Probe> {
             }
         };
         let both = Dir::BOTH.to_vec();
-        if fee_mint { continue; } // Abort::TransferFee: nothing to compare
+        if fee_mint { return out; } // Abort::TransferFee: tests/exactness.rs checks the refusal against the venue
         // every pool: the crate's own boundary sizes at the snapshot
         add("probe".into(), vec![], snap, opts5.clone(), true, both.clone());
         let at = |ts: i64| ClockSnap { unix_timestamp: ts, ..snap };
@@ -231,9 +206,27 @@ fn probes(fx: &Fixtures) -> Vec<Probe> {
                     add(format!("held quote {h0} + {h1}"), vec![Patch::new(pool, 271, &h0.to_le_bytes()), Patch::new(pool, 279, &h1.to_le_bytes())], snap, opts5.clone(), true, both.clone());
                 }
                 // more than the vault: the program fails both instructions (6023) and the crate refuses the leg
-                // (HeldExceedsVault); and an unidentified tail byte (Abort)
+                // (HeldExceedsVault)
                 add("held quote > vault".into(), vec![Patch::new(pool, 271, &qu.to_le_bytes()), Patch::new(pool, 279, &1u64.to_le_bytes())], snap, opts5.clone(), true, both.clone());
-                add("tail byte 270 set".into(), vec![Patch::new(pool, 270, &[1])], snap, opts5.clone(), false, both.clone());
+                // byte 270 is `is_holder_reward` (WP-16 review F2): priced as any pool; a flag byte that is no Borsh bool
+                // fails the program's deserialization (the crate: Layout)
+                add("is_holder_reward = 1".into(), vec![Patch::new(pool, 270, &[1])], snap, opts5.clone(), true, both.clone());
+                for at in [243usize, 244, 269, 270] { add(format!("byte {at} = 2 (no Borsh bool)"), vec![Patch::new(pool, at, &[2])], snap, opts5.clone(), false, both.clone()); }
+                // mayhem: priced on the fixed 1e15 supply (the builder passes the reserved fee recipients); cashback: the
+                // engine's leg leaves out the cashback accounts in front of pool_v2, so the venue fails it (6060 / 6061)
+                add("is_mayhem_mode = 1".into(), vec![Patch::new(pool, 243, &[1])], snap, opts5.clone(), true, both.clone());
+                add("is_mayhem_mode = 1, base supply x60".into(), vec![Patch::new(pool, 243, &[1]),
+                    Patch::new(h0.tokens.t0, 36, &(u64_at(&h0.view[&h0.tokens.t0].data, 36).unwrap().saturating_mul(60)).to_le_bytes())], snap, opts5.clone(), true, both.clone());
+                add("is_cashback_coin = 1".into(), vec![Patch::new(pool, 244, &[1])], snap, opts5.clone(), false, both.clone());
+                // the pool cut at each read-group boundary ±1, the held amounts made binding (WP-16 review F1): the program
+                // reads a pool from 211 bytes (InvalidAccountData below) and each trailing group only when it is whole:
+                // coin_creator @211..243, the virtual reserve @245..261, creator_fee_bps with can_edit @261..270,
+                // is_holder_reward @270, the two held amounts @271..287
+                for l in [210usize, 211, 242, 243, 246, 260, 261, 262, 269, 270, 271, 279, 286, 287, 288, 300] {
+                    if l >= d.len() { continue; }
+                    add(format!("pool cut to {l} bytes (held quote Q/4 + Q/8)"), vec![Patch::new(pool, 271, &(qu / 4).to_le_bytes()),
+                        Patch::new(pool, 279, &(qu / 8).to_le_bytes()), Patch::resize(pool, l)], snap, opts5.clone(), true, both.clone());
+                }
                 let mint = h0.tokens.t0;
                 let supply = u64_at(&h0.view[&mint].data, 36).unwrap();
                 for (num, den) in [(1u64, 1000u64), (1, 30), (5, 1), (60, 1), (2000, 1)] {
@@ -291,6 +284,8 @@ fn probes(fx: &Fixtures) -> Vec<Probe> {
                         add(format!("volatility_accumulator 1e9, fee_version {fv}"), vec![Patch::new(pool, 120, &1_000_000_000u128.to_le_bytes()), Patch::new(pool, 486, &[fv]), Patch::new(pool, 80, &(snap.unix_timestamp as u64).to_le_bytes())], snap, opts5.clone(), true, both.clone());
                     }
                 }
+                // an empty pool (the census: 53 DAMM v2 pools with zero liquidity): the crate refuses it (Liquidity)
+                add("liquidity = 0".into(), vec![Patch::new(pool, 360, &[0u8; 16])], snap, opts5.clone(), false, both.clone());
                 // the rate limiter (mode 2) in force for B->A
                 if d[484] == 1 {
                     let rb = venues::token_amount(&h0.view[&h0.tokens.vault1].data).unwrap();
@@ -311,121 +306,154 @@ fn probes(fx: &Fixtures) -> Vec<Probe> {
 }
 
 #[derive(Default, serde::Serialize)]
-struct Tally { exact: usize, both_refuse: usize, budget: usize, cu_limit: usize, aborted: usize, mismatches: usize }
+struct Tally { exact: usize, both_refuse: usize, budget: usize, cu_limit: usize, aborted: usize, necessary: usize, false_refusals: usize, mismatches: usize }
 
 #[test]
 fn adversarial_states_and_boundary_sizes() {
-    let sizing = sizing_dir();
+    let sizing = common::sizing_dir();
     if !sizing.join("Cargo.toml").exists() { return skip("arbx-sizing is not there"); }
-    let bridge = match build_bridge(&sizing) { Ok(b) => b, Err(e) => return skip(&format!("sizing-bridge does not build:\n{e}")) };
+    let bridge = match common::build_bridge(&sizing, "sizing-bridge-adv") { Ok(b) => b, Err(e) => return skip(&format!("sizing-bridge does not build:\n{e}")) };
     let fx = Fixtures::load().unwrap();
-    let probes = probes(&fx);
-    let mut legs = vec![];
-    let mut meta = vec![];
-    for (pi, pr) in probes.iter().enumerate() {
-        let (h, p) = (&pr.h, &pr.h.fixture);
-        for &dir in &pr.dirs {
-            let Ok(sw) = h.build(dir, 1, &pr.opts) else { continue };
-            if sw.dlmm_arrays.len() > 5 { continue; }
-            let (kind, t0_in) = kind_of(p.venue, dir);
-            let mut amounts: Vec<u64> = size_ladder(h.input_reserve(dir).max(1_000_000), 24).into_iter().chain([1, 2, 10, 100, 1_000]).collect();
-            amounts.sort();
-            amounts.dedup();
-            let accounts: Vec<Value> = sw.ix.accounts.iter().map(|m| {
-                let a = h.svm().get_account(&m.pubkey).unwrap_or_default();
-                let data = if a.executable { vec![] } else { a.data };
-                json!({"key": m.pubkey.to_string(), "owner": a.owner.to_string(), "data": b64(&data)})
-            }).collect();
-            let pump_bump = if p.venue == Venue::PumpSwap { pump_canonical_bump(&h.view[&h.pool].data) } else { 0 };
-            legs.push(json!({"id": legs.len(), "kind": kind, "base_or_token0_in": t0_in, "n_bin_arrays": sw.dlmm_arrays.len(),
-                "pump_bump": pump_bump, "program": p.venue.program().to_string(), "input_mint": sw.mint_in.to_string(),
-                "accounts": accounts, "amounts": amounts, "probe": pr.probe,
-                "clock": {"slot": pr.clock.slot, "unix_timestamp": pr.clock.unix_timestamp, "epoch": pr.clock.epoch}}));
-            meta.push((pi, dir));
-        }
-    }
-    let mut resp: Vec<Value> = vec![Value::Null; legs.len()];
-    let mut by_clock: BTreeMap<String, Vec<Value>> = BTreeMap::new();
-    for l in &legs { by_clock.entry(l["clock"].to_string()).or_default().push(l.clone()); }
-    for (clock, ls) in by_clock {
-        let req = json!({"clock": serde_json::from_str::<Value>(&clock).unwrap(), "legs": ls});
-        let mut child = Command::new(&bridge).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-        child.stdin.take().unwrap().write_all(req.to_string().as_bytes()).unwrap();
-        let out = child.wait_with_output().unwrap();
-        assert!(out.status.success(), "sizing-bridge crashed (a panic in arbx-sizing):\n{}", String::from_utf8_lossy(&out.stderr));
-        let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-        for r in v["legs"].as_array().unwrap() { resp[r["id"].as_u64().unwrap() as usize] = r.clone(); }
-    }
     let mut tally: BTreeMap<String, Tally> = BTreeMap::new();
     let mut problems = vec![];
     let mut rows = vec![];
-    for (i, r) in resp.iter().enumerate() {
-        let (pi, dir) = meta[i];
-        let pr = &probes[pi];
-        let (h, p) = (&pr.h, &pr.h.fixture);
-        let key = format!("{} {} [{}]", p.venue.name(), &p.pool[..6], pr.label);
-        let t = tally.entry(key.clone()).or_default();
-        let parse = r["parse"].as_str().unwrap_or("missing").to_string();
-        if parse.starts_with("desc:") { problems.push(format!("{key} {}: DescError on an engine-built leg: {parse}", dir.short())); }
-        // REVIEW.md F5: the limited direction cannot execute through the engine's leg, so the crate must refuse it
-        if pr.label == "rate limiter in force" && !dir.zfo() && parse != "abort:Damm(RateLimiter)" {
-            problems.push(format!("{key} {}: the rate limiter is in force but the leg parsed as {parse}", dir.short()));
+    for pool in fx.pools.values() {
+        let probes = probes(&fx, pool);
+        let mut legs = vec![];
+        let mut meta = vec![];
+        for (pi, pr) in probes.iter().enumerate() {
+            let (h, p) = (&pr.h, &pr.h.fixture);
+            for &dir in &pr.dirs {
+                let Ok(sw) = h.build(dir, 1, &pr.opts) else { continue };
+                if sw.dlmm_arrays.len() > 5 { continue; }
+                let (kind, t0_in) = kind_of(p.venue, dir);
+                let mut amounts: Vec<u64> = size_ladder(h.input_reserve(dir).max(1_000_000), 24).into_iter().chain([1, 2, 10, 100, 1_000]).collect();
+                amounts.sort();
+                amounts.dedup();
+                let accounts: Vec<Value> = sw.ix.accounts.iter().map(|m| {
+                    let a = h.svm().get_account(&m.pubkey).unwrap_or_default();
+                    let data = if a.executable { vec![] } else { a.data };
+                    json!({"key": m.pubkey.to_string(), "owner": a.owner.to_string(), "data": b64(&data)})
+                }).collect();
+                let pump_bump = if p.venue == Venue::PumpSwap { pump_canonical_bump(&h.view[&h.pool].data) } else { 0 };
+                legs.push(json!({"id": legs.len(), "kind": kind, "base_or_token0_in": t0_in, "n_bin_arrays": sw.dlmm_arrays.len(),
+                    "pump_bump": pump_bump, "program": p.venue.program().to_string(), "input_mint": sw.mint_in.to_string(),
+                    "accounts": accounts, "amounts": amounts, "probe": pr.probe,
+                    "clock": {"slot": pr.clock.slot, "unix_timestamp": pr.clock.unix_timestamp, "epoch": pr.clock.epoch}}));
+                meta.push((pi, dir));
+            }
         }
-        let clock = pr.clock.to_clock();
-        let max_bins = r["max_bins"].as_u64().unwrap_or(255);
-        for q0 in r["quotes"].as_array().unwrap() {
-            let x = q0["amount"].as_u64().unwrap();
-            // a Budget refusal: compare the same quote without a budget, and check the budget really binds
-            let budget = q0["err"].as_str() == Some("Budget");
-            let q = if budget { &q0["unbounded"] } else { q0 };
-            let err = q["err"].as_str().unwrap_or("");
-            // above 2^62 the test wallet's input plus the pool vault overflow u64 in the token program (a harness
-            // artifact, not a venue limit): such sizes are not compared (REVIEW.md, minor finding on vault headroom)
-            if x > 1u64 << 62 { continue; }
-            if !q["ok"].as_bool().unwrap() && (parse != "ok" || err.starts_with("Abort")) {
-                t.aborted += 1;
-                rows.push(json!({"case": key, "dir": dir.short(), "amount_in": x, "verdict": format!("aborted {parse} {err}")}));
-                continue;
+        if legs.is_empty() { continue; }
+        let resp = common::quote_legs(&bridge, &legs);
+        // refused sizes the venue swapped, per leg: (row index, venue outcome), for the lift check below
+        let mut swapped_refusals: BTreeMap<usize, Vec<(usize, VenueAt)>> = BTreeMap::new();
+        for (i, r) in resp.iter().enumerate() {
+            let (pi, dir) = meta[i];
+            let pr = &probes[pi];
+            let (h, p) = (&pr.h, &pr.h.fixture);
+            let key = format!("{} {} [{}]", p.venue.name(), &p.pool[..6], pr.label);
+            let t = tally.entry(key.clone()).or_default();
+            let parse = r["parse"].as_str().unwrap_or("missing").to_string();
+            if parse.starts_with("desc:") { problems.push(format!("{key} {}: DescError on an engine-built leg: {parse}", dir.short())); }
+            // REVIEW.md F5: the limited direction cannot execute through the engine's leg, so the crate must refuse it
+            if pr.label == "rate limiter in force" && !dir.zfo() && parse != "abort:Damm(RateLimiter)" {
+                problems.push(format!("{key} {}: the rate limiter is in force but the leg parsed as {parse}", dir.short()));
             }
-            let s = h.swap_with(dir, x, &pr.opts, |svm| svm.set_sysvar(&clock));
-            let mut verdict = if q["ok"].as_bool().unwrap() {
-                let (o, sp) = (q["out"].as_u64().unwrap(), q["spent"].as_u64().unwrap());
-                if s.ok && s.amount_out == o && s.spent == sp { "exact".to_string() } else {
-                    format!("MISMATCH quote out {o} spent {sp} vs program {} out {} spent {} (diff out {}) {}", if s.ok { "ok" } else { "FAILED" }, s.amount_out, s.spent,
-                        s.amount_out as i128 - o as i128, if s.ok { String::new() } else { s.venue_error() })
+            let clock = pr.clock.to_clock();
+            let max_bins = r["max_bins"].as_u64().unwrap_or(255);
+            for q0 in r["quotes"].as_array().unwrap() {
+                let x = q0["amount"].as_u64().unwrap();
+                // a Budget refusal: compare the same quote without a budget, and check the budget really binds
+                let budget = q0["err"].as_str() == Some("Budget");
+                let q = if budget { &q0["unbounded"] } else { q0 };
+                let err = q["err"].as_str().unwrap_or("");
+                // above 2^62 the test wallet's input plus the pool vault overflow u64 in the token program (a harness
+                // artifact, not a venue limit): such sizes are not compared (REVIEW.md, minor finding on vault headroom)
+                if x > 1u64 << 62 { continue; }
+                let s = h.swap_with(dir, x, &pr.opts, |svm| svm.set_sysvar(&clock));
+                // a refusal (Abort at parse or quote): the venue must refuse too, or the refusal must be shown necessary
+                if !q["ok"].as_bool().unwrap() && (parse != "ok" || err.starts_with("Abort")) {
+                    t.aborted += 1;
+                    let reason = if parse != "ok" { parse.clone() } else { err.to_string() };
+                    let v = VenueAt { ok: s.ok, out: s.amount_out, spent: s.spent };
+                    let verdict = if v.swapped() {
+                        swapped_refusals.entry(i).or_default().push((rows.len(), v));
+                        format!("refused ({reason}) while the venue swaps: pending the lift check")
+                    } else { t.both_refuse += 1; format!("both refuse ({reason}; venue {})", if s.ok { "pays 0".to_string() } else { s.venue_error() }) };
+                    rows.push(json!({"case": key, "dir": dir.short(), "amount_in": x, "quote": q0, "program_ok": s.ok, "program_out": s.amount_out,
+                        "program_spent": s.spent, "cu": s.cu_venue, "verdict": verdict}));
+                    continue;
                 }
-            } else if s.failed_or_zero() { format!("both refuse ({err})") } else {
-                // TooLarge claims a venue capacity: the venue swapping is a mismatch (no "conservative" verdict)
-                format!("MISMATCH quote {err} vs program out {} (cu {:?})", s.amount_out, s.cu_venue)
-            };
-            // the venue ran out of the transaction's 1.4M CU (a long DLMM walk): not a maths verdict. The engine's
-            // max_bins keeps sized swaps far below it (DESIGN.md §4.7); the bins it took are recorded
-            if !s.ok && (s.logs.iter().any(|l| l.contains("exceeded CUs meter") || l.contains("Computational budget exceeded"))
-                || s.err.as_deref().is_some_and(|e| e.contains("ComputationalBudgetExceeded"))) {
-                verdict = format!("venue CU limit (quote {}; {} bins)", if q["ok"].as_bool().unwrap() { "ok" } else { err }, q0["bins"]);
+                let mut verdict = if q["ok"].as_bool().unwrap() {
+                    let (o, sp) = (q["out"].as_u64().unwrap(), q["spent"].as_u64().unwrap());
+                    if s.ok && s.amount_out == o && s.spent == sp { "exact".to_string() } else {
+                        format!("MISMATCH quote out {o} spent {sp} vs program {} out {} spent {} (diff out {}) {}", if s.ok { "ok" } else { "FAILED" }, s.amount_out, s.spent,
+                            s.amount_out as i128 - o as i128, if s.ok { String::new() } else { s.venue_error() })
+                    }
+                } else if s.failed_or_zero() { format!("both refuse ({err})") } else {
+                    // TooLarge claims a venue capacity: the venue swapping is a mismatch (no "conservative" verdict)
+                    format!("MISMATCH quote {err} vs program out {} (cu {:?})", s.amount_out, s.cu_venue)
+                };
+                // the venue ran out of the transaction's 1.4M CU (a long DLMM walk): not a maths verdict. The engine's
+                // max_bins keeps sized swaps far below it (DESIGN.md §4.7); the bins it took are recorded
+                if !s.ok && (s.logs.iter().any(|l| l.contains("exceeded CUs meter") || l.contains("Computational budget exceeded"))
+                    || s.err.as_deref().is_some_and(|e| e.contains("ComputationalBudgetExceeded"))) {
+                    verdict = format!("venue CU limit (quote {}; {} bins)", if q["ok"].as_bool().unwrap() { "ok" } else { err }, q0["bins"]);
+                }
+                if budget && !verdict.starts_with("MISMATCH") {
+                    let need = q0["bins"].as_u64();
+                    verdict = if need.map_or(false, |b| b > max_bins) || !q["ok"].as_bool().unwrap() { format!("budget ({verdict}; needs {need:?} > {max_bins} bins)") }
+                        else { format!("MISMATCH Budget refusal although the swap needs {need:?} <= {max_bins} bins") };
+                }
+                if verdict.starts_with("MISMATCH") { t.mismatches += 1; } else if verdict.starts_with("budget") { t.budget += 1; }
+                    else if verdict.starts_with("venue CU limit") { t.cu_limit += 1; } else if verdict == "exact" { t.exact += 1; } else { t.both_refuse += 1; }
+                if verdict.starts_with("MISMATCH") { problems.push(format!("{key} {} x={x}: {verdict}", dir.short())); }
+                rows.push(json!({"case": key, "dir": dir.short(), "amount_in": x, "quote": q0, "program_ok": s.ok, "program_out": s.amount_out,
+                    "program_spent": s.spent, "cu": s.cu_venue, "verdict": verdict}));
             }
-            if budget && !verdict.starts_with("MISMATCH") {
-                let need = q0["bins"].as_u64();
-                verdict = if need.map_or(false, |b| b > max_bins) || !q["ok"].as_bool().unwrap() { format!("budget ({verdict}; needs {need:?} > {max_bins} bins)") }
-                    else { format!("MISMATCH Budget refusal although the swap needs {need:?} <= {max_bins} bins") };
+        }
+        // the lift check (WP-16 review F3): each leg refused while the venue swaps, re-quoted with the refused state taken
+        // out on the crate's side only
+        let lifted_legs: Vec<(usize, Value)> = swapped_refusals.keys().filter_map(|&i| {
+            let accounts = lift(resp[i]["parse"].as_str().unwrap_or(""), legs[i]["accounts"].as_array().unwrap())?;
+            let mut l = legs[i].clone();
+            l["accounts"] = json!(accounts);
+            l["probe"] = json!(false);
+            l["amounts"] = json!(swapped_refusals[&i].iter().map(|(ri, _)| rows[*ri]["amount_in"].clone()).collect::<Vec<_>>());
+            Some((i, l))
+        }).collect();
+        let relegs: Vec<Value> = lifted_legs.iter().enumerate().map(|(k, (_, l))| { let mut l = l.clone(); l["id"] = json!(k); l }).collect();
+        let relifted = if relegs.is_empty() { vec![] } else { common::quote_legs(&bridge, &relegs) };
+        for (i, refused) in &swapped_refusals {
+            let (pi, dir) = meta[*i];
+            let pr = &probes[pi];
+            let key = format!("{} {} [{}]", pr.h.fixture.venue.name(), &pr.h.fixture.pool[..6], pr.label);
+            let lq = lifted_legs.iter().position(|(j, _)| j == i).map(|k| relifted[k]["quotes"].as_array().unwrap().as_slice());
+            let venue: Vec<VenueAt> = refused.iter().map(|(_, v)| v.clone()).collect();
+            let (verdict, why) = refusal_verdict(&venue, lq);
+            let t = tally.get_mut(&key).unwrap();
+            for (ri, _) in refused {
+                rows[*ri]["verdict"] = json!(format!("{verdict} ({}): {why}", resp[*i]["parse"].as_str().unwrap_or("")));
+                if verdict == "necessary refusal" { t.necessary += 1; } else { t.false_refusals += 1; }
             }
-            if verdict.starts_with("MISMATCH") { t.mismatches += 1; } else if verdict.starts_with("budget") { t.budget += 1; }
-                else if verdict.starts_with("venue CU limit") { t.cu_limit += 1; } else if verdict == "exact" { t.exact += 1; } else { t.both_refuse += 1; }
-            if verdict.starts_with("MISMATCH") { problems.push(format!("{key} {} x={x}: {verdict}", dir.short())); }
-            rows.push(json!({"case": key, "dir": dir.short(), "amount_in": x, "quote": q0, "program_ok": s.ok, "program_out": s.amount_out,
-                "program_spent": s.spent, "cu": s.cu_venue, "verdict": verdict}));
+            if verdict != "necessary refusal" { problems.push(format!("{key} {}: FALSE REFUSAL {} at {} venue-swapped sizes: {why}", dir.short(), resp[*i]["parse"], refused.len())); }
         }
     }
-    println!("{:<78} {:>6} {:>8} {:>6} {:>6} {:>7} {:>8}", "case", "exact", "refuse", "budget", "cu-lim", "abort", "MISMATCH");
-    for (k, t) in &tally { println!("{k:<78} {:>6} {:>8} {:>6} {:>6} {:>7} {:>8}", t.exact, t.both_refuse, t.budget, t.cu_limit, t.aborted, t.mismatches); }
+    println!("{:<78} {:>6} {:>8} {:>6} {:>6} {:>7} {:>9} {:>9} {:>8}", "case", "exact", "refuse", "budget", "cu-lim", "refused", "necessary", "FALSE-REF", "MISMATCH");
+    for (k, t) in &tally {
+        println!("{k:<78} {:>6} {:>8} {:>6} {:>6} {:>7} {:>9} {:>9} {:>8}", t.exact, t.both_refuse, t.budget, t.cu_limit, t.aborted, t.necessary, t.false_refusals, t.mismatches);
+    }
     let sum = |f: fn(&Tally) -> usize| tally.values().map(f).sum::<usize>();
-    println!("{:<78} {:>6} {:>8} {:>6} {:>6} {:>7} {:>8}", "TOTAL", sum(|t| t.exact), sum(|t| t.both_refuse), sum(|t| t.budget), sum(|t| t.cu_limit), sum(|t| t.aborted), sum(|t| t.mismatches));
-    let mut by_venue: BTreeMap<String, [usize; 6]> = BTreeMap::new();
+    println!("{:<78} {:>6} {:>8} {:>6} {:>6} {:>7} {:>9} {:>9} {:>8}", "TOTAL", sum(|t| t.exact), sum(|t| t.both_refuse), sum(|t| t.budget), sum(|t| t.cu_limit),
+        sum(|t| t.aborted), sum(|t| t.necessary), sum(|t| t.false_refusals), sum(|t| t.mismatches));
+    let mut by_venue: BTreeMap<String, [usize; 8]> = BTreeMap::new();
     for (k, t) in &tally {
         let v = by_venue.entry(k.split(' ').next().unwrap_or("?").to_string()).or_default();
-        for (i, n) in [t.exact, t.both_refuse, t.budget, t.cu_limit, t.aborted, t.mismatches].into_iter().enumerate() { v[i] += n; }
+        for (i, n) in [t.exact, t.both_refuse, t.budget, t.cu_limit, t.aborted, t.necessary, t.false_refusals, t.mismatches].into_iter().enumerate() { v[i] += n; }
     }
-    for (v, n) in &by_venue { println!("VENUE {v:<10} exact {:>6} refuse {:>6} budget {:>5} cu-limit {:>4} abort {:>5} MISMATCH {:>5}", n[0], n[1], n[2], n[3], n[4], n[5]); }
+    for (v, n) in &by_venue {
+        println!("VENUE {v:<10} exact {:>6} refuse {:>6} budget {:>5} cu-limit {:>4} refused {:>5} (necessary {:>4}, FALSE {:>4}) MISMATCH {:>5}", n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7]);
+    }
     let bins_of = |r: &Value| r["quote"]["bins"].as_u64();
     let cu_min = rows.iter().filter(|r| r["verdict"].as_str().unwrap_or("").starts_with("venue CU")).filter_map(bins_of).min();
     let ok_max = rows.iter().filter(|r| r["program_ok"] == true).filter_map(bins_of).max();
@@ -434,7 +462,7 @@ fn adversarial_states_and_boundary_sizes() {
     std::fs::create_dir_all(&out).unwrap();
     std::fs::write(out.join("adversarial.json"), serde_json::to_string_pretty(&json!({"tally": tally, "rows": rows})).unwrap()).unwrap();
     for pbl in problems.iter().take(80) { println!("{pbl}"); }
-    assert!(problems.is_empty(), "{} mismatches (first 80 above)", problems.len());
+    assert!(problems.is_empty(), "{} mismatches or false refusals (first 80 above)", problems.len());
 }
 
 fn b64(b: &[u8]) -> String { use base64::Engine as _; base64::engine::general_purpose::STANDARD.encode(b) }

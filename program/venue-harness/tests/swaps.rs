@@ -1,4 +1,5 @@
-//! Real swaps on every fetched pool, both directions, 14 sizes each (>= 10 must succeed per pool and direction).
+//! Real swaps on every fetched pool, both directions, 14 sizes each (>= 10 must succeed per pool and direction; a
+//! PumpSwap cashback coin must fail every one: the engine's leg cannot execute it).
 //! Records exact outputs and CU in results/swap-runs.json and prints a table.
 //!
 //!   cargo test --release --test swaps -- --nocapture
@@ -28,7 +29,14 @@ fn every_pool_swaps_at_ten_plus_sizes() {
             let fails: Vec<String> = swaps.iter().filter(|s| !s.ok).map(|s| format!("{}: {}", s.amount_in, short_err(s))).collect();
             println!("{:<9} {:<10} {:<5} {:>2}/{:<2} {:>9} {:>9}  {}", p.venue.name(), &p.pool[..8], dir.short(), ok.len(), swaps.len(),
                 cus.iter().min().unwrap_or(&0), cus.iter().max().unwrap_or(&0), fails.first().cloned().unwrap_or_default());
-            if ok.len() < 10 { problems.push(format!("{} {} {}: only {} of {} sizes swapped: {fails:?}", p.venue.name(), p.pool, dir.short(), ok.len(), swaps.len())); }
+            // a cashback coin: the engine's leg cannot execute it (with a pool_v2 the venue fails 6060
+            // InvalidCashbackAccumulator / 6061 ...Ata at every size) and arbx-sizing refuses the pool (Pump(Cashback)):
+            // that refusal of the census's class is what is checked here
+            if !venue_harness::venues::engine_leg_executes(p.venue, &h.view[&h.pool].data) {
+                let swapped: Vec<u64> = swaps.iter().filter(|s| s.ok || !s.logs.iter().any(|l| l.contains("Error Number: 6060") || l.contains("Error Number: 6061")))
+                    .map(|s| s.amount_in).collect();
+                if !swapped.is_empty() { problems.push(format!("{} {} {}: a cashback coin swapped or failed otherwise at {swapped:?}", p.venue.name(), p.pool, dir.short())); }
+            } else if ok.len() < 10 { problems.push(format!("{} {} {}: only {} of {} sizes swapped: {fails:?}", p.venue.name(), p.pool, dir.short(), ok.len(), swaps.len())); }
             // the venue's own invariants: output non-decreasing in input, and the input debited exactly
             for w in ok.windows(2) {
                 if w[1].amount_out < w[0].amount_out { problems.push(format!("{} {} {}: not monotone at {}", p.venue.name(), p.pool, dir.short(), w[1].amount_in)); }

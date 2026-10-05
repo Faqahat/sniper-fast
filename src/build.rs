@@ -138,7 +138,9 @@ fn pump_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
     let g = a.pump.ok_or("pump-no-global-config")?;
     let sell = a.tin == m.t0;
     if g.disable_flags & if sell { 1 << 4 } else { 1 << 3 } != 0 { return Err(format!("pump-{}-disabled", if sell { "sell" } else { "buy" })); }
-    let creator = pk_at(a.pool, 211).ok_or("pump-pool-short")?;
+    // a pool written before coin_creator existed (shorter than 243 bytes; arbx-sizing prices from 211): the program reads
+    // it as zero, and so do the creator-vault accounts here (venue-harness adversarial "pool cut to 211 / 242 bytes")
+    let creator = pk_at(a.pool, 211).unwrap_or([0u8; 32]);
     let mayhem = a.pool.get(243) == Some(&1);
     let cashback = a.pool.get(244) == Some(&1);
     let fees = if mayhem { &g.reserved } else { &g.protocol };

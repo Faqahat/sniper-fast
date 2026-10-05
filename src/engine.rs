@@ -26,7 +26,8 @@ use crate::rec::{self, Rec, Record};
 use crate::pda::AtaCache;
 use crate::pools::{self, pair_key, Registry, CLOCK_SYSVAR, PUMP_FEE_CONFIG};
 use crate::reads::{Failed, Fetch, Reads, What};
-use crate::store::{consistency_set, other_parts, snapshot_with, Acct, NotReady, PoolView, ReadyCtx, RouteView, Snap, Store};
+use crate::quote::{self, Use};
+use crate::store::{consistency_set, other_parts, Acct, NotReady, PoolView, ReadyCtx, RouteView, Store};
 use crate::store_health::{HealthFlags, LagSlo, Shut, SloAct, StateStream};
 use crate::tx::{b58, Pk, Tx};
 use crate::venues::{cp, dlmm, PendingSwap, PoolMeta, Venue, WSOL};
@@ -528,8 +529,11 @@ fn fold(h: u64, parts: &[&[u8]]) -> u64 {
     x.digest()
 }
 fn sigs58(s: &[u8; 64]) -> String { bs58::encode(s).into_string() }
-fn venue_unquotable(v: Venue) -> &'static str {
-    match v { Venue::Dlmm => "unquotable_dlmm_array", Venue::DammV2 => "unquotable_damm", _ => "unquotable_cp" }
+/// How a route's legs are parsed (PLAN-ADDENDUM WP-16): as the builder sends them, with each DLMM leg's walk budget
+/// from the transaction's CU limit (`quote::DLMM_BUDGET_*`: two DLMM legs share it)
+fn route_use(pb: &PoolMeta, ps: &PoolMeta) -> Use {
+    let both = pb.venue == Venue::Dlmm && ps.venue == Venue::Dlmm;
+    Use::Route { dlmm_budget: if both { quote::DLMM_BUDGET_SHARED } else { quote::DLMM_BUDGET_ALONE } }
 }
 
 /// base58 at serialization time (on the recorder's writer, not the engine thread)
@@ -1906,16 +1910,15 @@ impl Engine {
         }
     }
 
-    /// Pool `m` ready to quote, from the store's current versions only (PLAN WP-04 item 1: there is no other state to
-    /// read: a prediction is never a priced state). `skip`: DLMM bin arrays left out (pending or on a contested slot)
-    fn leg_of(&self, m: &PoolMeta, now: i64, damm_slot: u64, skip: &[i64]) -> Result<Leg<'_>, &'static str> {
+    /// Pool `m` ready to quote in one direction (`zfo`: spending its token 0), from the store's current versions only
+    /// (PLAN WP-04 item 1: there is no other state to read: a prediction is never a priced state), parsed by
+    /// arbx-sizing (PLAN-ADDENDUM WP-16, `src/quote.rs`). `skip`: DLMM bin arrays left out (pending or on a contested
+    /// slot). Err: why it cannot be quoted (`Why::reason`, MEASUREMENT A.1)
+    fn leg_of(&self, m: &PoolMeta, zfo: bool, clock: arbx_sizing::Clock, skip: &[i64], use_: Use) -> Result<quote::Leg<'_>, quote::Why> {
         let arrays = self.store.dlmm_arrays.get(&m.pool).map(|l| l.as_slice()).unwrap_or(&[]);
-        match snapshot_with(m, &|k| self.store.get(k), arrays, &|i| !skip.contains(&i), self.store.pump_cfg.as_ref(), now) {
-            Ok(Snap::Cp(s)) => Ok(Leg::Cp(s)),
-            Ok(Snap::Dlmm { pair, arrays, .. }) => Ok(Leg::Dlmm { pair, arrays }),
-            Ok(Snap::Damm(p, _)) => Ok(Leg::Damm(p, damm_slot)),
-            Err(_) => Err(venue_unquotable(m.venue)),
-        }
+        let get = |k: &Pk| self.store.get(k);
+        let usable = |i: i64| !skip.contains(&i);
+        quote::leg(m, zfo, &quote::Src { get: &get, arrays, usable: &usable, clock }, use_)
     }
 
     /// the DLMM bin arrays of pool `m` a quote must not use now (a pending group writes them, or their slot is contested)
@@ -1926,47 +1929,27 @@ impl Engine {
         }).map(|(i, _)| *i).collect()).unwrap_or_default()
     }
 
-    /// One route priced on two legs: the size ladder, then a ternary refinement around the best rung (profit is
-    /// unimodal in size). Err: why it could not be quoted
-    fn price_route(&self, lb: &Leg, ls: &Leg, pb: &PoolMeta, ps: &PoolMeta, mint: Pk, now: i64) -> Result<Priced, &'static str> {
-        let sizes: Vec<u64> = self.cfg.sizes_sol.iter().map(|s| (s * LAMPORTS_PER_SOL) as u64).collect();
-        let zb = pb.t0 == *WSOL;          // SOL -> mint on the buy pool
-        let zs = ps.t0 == mint;           // mint -> SOL on the sell pool
-        let run = |x: u64| -> Result<(i64, u32, u32), &'static str> {
-            let (mid, c1) = leg_quote(lb, zb, x, now)?;
-            let (back, c2) = leg_quote(ls, zs, mid, now)?;
-            Ok((back as i64 - x as i64, c1, c2))
-        };
-        let mut top: Option<(u64, i64, u32, u32)> = None;
-        let mut first_err = None;
-        let mut idx = 0;
-        for (k, &x) in sizes.iter().enumerate() {
-            match run(x) {
-                Ok((p, c1, c2)) => if top.map_or(true, |t| p > t.1) { top = Some((x, p, c1, c2)); idx = k; },
-                Err(e) => { first_err.get_or_insert(e); }
-            }
-        }
-        let Some(mut t) = top else { return Err(first_err.unwrap_or_else(|| venue_unquotable(pb.venue))) };
-        if t.1 > 0 {
-            // the refinement stays within the ladder: past its top rung (the size cap: 4.2 SOL in Stage 0) a decision
-            // would describe a trade the executor never sends (review WP-04 #5; the cmp2 8.4 SOL ladder-edge quotes)
-            let mut lo = if idx > 0 { sizes[idx - 1] } else { sizes[0] / 4 };
-            let mut hi = sizes.get(idx + 1).copied().unwrap_or(sizes[idx]);
-            for _ in 0..24 {
-                if hi - lo < 1_000 { break; }
-                let (m1, m2) = (lo + (hi - lo) / 3, hi - (hi - lo) / 3);
-                let (p1, p2) = (run(m1).map_or(i64::MIN, |r| r.0), run(m2).map_or(i64::MIN, |r| r.0));
-                if p1 < p2 { lo = m1; } else { hi = m2; }
-            }
-            let x = (lo + hi) / 2;
-            if let Ok((p, c1, c2)) = run(x) { if p > t.1 { t = (x, p, c1, c2); } }
-        }
+    /// the size ladder in lamports ([strategy] sizes_sol); its top rung is the size cap (4.2 SOL in Stage 0)
+    fn ladder(&self) -> Vec<u64> { self.cfg.sizes_sol.iter().map(|s| (s * LAMPORTS_PER_SOL) as u64).collect() }
+
+    /// One route priced on its two legs (PLAN-ADDENDUM WP-16): arbx-sizing's locator and the ladder's rungs, every
+    /// candidate evaluated exactly (`quote::best`), never above the top rung (review WP-04 #5: past the size cap a
+    /// decision would describe a trade the executor never sends). Gross is the guard's quote delta (sell output minus
+    /// the buy leg's debit). Err: why it could not be quoted
+    fn price_route(&self, lb: &quote::Leg, ls: &quote::Leg, pb: &PoolMeta, ps: &PoolMeta) -> Result<Priced, &'static str> {
+        let sizes = self.ladder();
+        let Some(&top) = sizes.iter().max() else { return Err("no_sizes") };
+        let lo = sizes.iter().copied().min().unwrap_or(top) / 4;
+        let t = quote::best(lb, ls, &sizes, lo, top).map_err(quote::Why::reason)?;
         // a round trip returning over twice its input is a broken quote (w5h seg 4: one PumpSwap pool quoted 9.9e12
         // lamports, 663 times): it must not win the pick over the token's real cycles
-        if t.1 > t.0 as i64 { return Err("broken_quote"); }
-        let cu = (((29_000 + pb.venue.leg_cu(t.2) + ps.venue.leg_cu(t.3)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
+        if t.profit() > t.x as i64 { return Err("broken_quote"); }
+        // DLMM legs: the bins with liquidity the chosen size crosses (the CU table's input); the trip already quoted the rest
+        let crossed = |l: &quote::Leg, x: u64| if l.is_dlmm() { l.walk(x).map(|w| w.crossed).map_err(quote::Why::reason) } else { Ok(0) };
+        let (c1, c2) = (crossed(lb, t.x)?, crossed(ls, t.mid)?);
+        let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
         let fee = 5_000 + self.cfg.cu_price_micro * cu / 1_000_000 + self.min_tip;
-        Ok(Priced { size: t.0, gross: t.1, net: t.1 - fee as i64, cu, crossed: (t.2, t.3) })
+        Ok(Priced { size: t.x, gross: t.profit(), net: t.profit() - fee as i64, cu, crossed: (c1, c2) })
     }
 
     /// every feed's arrival time for one trigger, written once all feeds had 10 s to deliver it
@@ -1984,15 +1967,28 @@ impl Engine {
     fn hint_check(&self, i: usize, sw: &PendingSwap) -> Result<Option<Pred>, (&'static str, &'static str)> {
         let m = &self.reg.pools[i];
         let (now, dslot) = self.chain_now();
-        let leg = self.leg_of(m, now, dslot, &self.skip_arrays(m)).map_err(|_| ("unquotable", "trigger_unquotable"))?;
-        let amount_in = if sw.exact_out { crate::venues::solve_exact_in(sw.amount, |x| leg_quote(&leg, sw.zero_for_one, x, now).ok().map(|q| q.0)) } else { Some(sw.amount) };
-        let amount_in = amount_in.ok_or(("exact_out_unsolved", "trigger_exact_out_unsolved"))?;
-        let (out, _) = leg_quote(&leg, sw.zero_for_one, amount_in, now).map_err(|_| ("unquotable", "trigger_unquotable"))?;
-        let fails = sw.limit > 0 && if sw.exact_out { amount_in > sw.limit + sw.limit / 2000 } else { out.saturating_add(out / 2000) < sw.limit };
+        // the third party's own swap, as the venue executes it (WP-16: arbx-sizing's exact quote). A state the crate
+        // refuses is the skip's reason and counter (`sz_*`, `trigger_sz_*`: review F10); a missing account or a size the
+        // venue cannot fill stays `unquotable`
+        let skip = |w: quote::Why| w.crate_reason().map_or(("unquotable", "trigger_unquotable"), |r| (r.reason, r.trigger));
+        let leg = self.leg_of(m, sw.zero_for_one, quote::clock(dslot, now), &self.skip_arrays(m), Use::Third).map_err(skip)?;
+        let fails = if sw.exact_out {
+            // the input an exact-out swap spends: the venue's own debit where the crate models the instruction (PumpSwap's
+            // `buy`, review F6), else the smallest exact-in size that buys the amount
+            let amount_in = match leg.exact_out(sw.amount) {
+                Some(r) => Some(r.map_err(skip)?.1.spent),
+                None => crate::venues::solve_exact_in(sw.amount, |x| leg.quote(x).ok().map(|q| q.out)),
+            };
+            let amount_in = amount_in.ok_or(("exact_out_unsolved", "trigger_exact_out_unsolved"))?;
+            sw.limit > 0 && amount_in > sw.limit + sw.limit / 2000
+        } else {
+            let out = leg.quote(sw.amount).map_err(skip)?.out;
+            sw.limit > 0 && out.saturating_add(out / 2000) < sw.limit
+        };
         if fails { return Err(("will_fail", "trigger_skip_will_fail")); }
         let arrays = self.store.dlmm_arrays.get(&m.pool).cloned().unwrap_or_default();
         let get = |k: &Pk| self.store.get(k);
-        let v = accuracy::View { get: &get, arrays: &arrays, pump_cfg: self.store.pump_cfg.as_ref(), now_unix: now, slot: dslot };
+        let v = accuracy::View { get: &get, arrays: &arrays, now_unix: now, slot: dslot };
         Ok(accuracy::predict(m, &v, sw.zero_for_one, sw.amount, sw.exact_out).ok().map(|p| p.0))
     }
 
@@ -2129,12 +2125,15 @@ impl Engine {
                     if *c >= max / 8 + 1 { continue; }   // spread over venue combinations
                     *c += 1;
                     let mint = if pb.t0 == *WSOL { pb.t1 } else { pb.t0 };
-                    let q = self.leg_of(&pb, now, self.slot, &[]).ok().zip(self.leg_of(&ps, now, self.slot, &[]).ok()).and_then(|(lb, ls)| {
-                        let (mid, c1) = leg_quote(&lb, pb.t0 == *WSOL, size, now).ok()?;
-                        let (_, c2) = leg_quote(&ls, ps.t0 == mint, mid, now).ok()?;
-                        Some((c1, c2))
+                    let (clk, u) = (quote::clock(self.slot, now), route_use(&pb, &ps));
+                    let q = self.leg_of(&pb, pb.t0 == *WSOL, clk, &[], u).and_then(|lb| {
+                        let ls = self.leg_of(&ps, ps.t0 == mint, clk, &[], u)?;
+                        let w1 = lb.walk(size)?;
+                        let w2 = ls.walk(w1.out)?;
+                        Ok((w1.crossed, w2.crossed))
                     });
-                    let Some((c1, c2)) = q else { self.count("probe_unquotable"); continue };
+                    // a state the crate refuses is counted by its reason (`probe_sz_*`, WP-16 review F10)
+                    let (c1, c2) = match q { Ok(c) => c, Err(w) => { self.count(w.crate_reason().map_or("probe_unquotable", |r| r.probe)); continue } };
                     let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
                     let id = self.next_id;
                     self.next_id += 1;
@@ -2156,10 +2155,11 @@ impl Engine {
         let now = self.store.chain_clock().map_or(unix_now(), |c| c.unix_timestamp);
         let (pb, ps) = (self.reg.pools[bi].clone(), self.reg.pools[si].clone());
         let (c1, c2) = {
-            let (lb, ls) = (self.leg_of(&pb, now, self.slot, &[]).ok()?, self.leg_of(&ps, now, self.slot, &[]).ok()?);
-            let (mid, c1) = leg_quote(&lb, pb.t0 == *WSOL, r.size, now).ok()?;
-            let (_, c2) = leg_quote(&ls, ps.t0 == r.mint, mid, now).ok()?;
-            (c1, c2)
+            let (clk, u) = (quote::clock(self.slot, now), route_use(&pb, &ps));
+            let (lb, ls) = (self.leg_of(&pb, pb.t0 == *WSOL, clk, &[], u).ok()?, self.leg_of(&ps, ps.t0 == r.mint, clk, &[], u).ok()?);
+            let w1 = lb.walk(r.size).ok()?;
+            let w2 = ls.walk(w1.out).ok()?;
+            (w1.crossed, w2.crossed)
         };
         let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
         let id = self.next_id;
@@ -2196,9 +2196,12 @@ impl Engine {
         let (now, dslot) = self.chain_now();
         let (bi, si) = (*self.reg.by_pool.get(&o.buy)?, *self.reg.by_pool.get(&o.sell)?);
         let (pb, ps) = (&self.reg.pools[bi], &self.reg.pools[si]);
-        let (lb, ls) = (self.leg_of(pb, now, dslot, &self.skip_arrays(pb)).ok()?, self.leg_of(ps, now, dslot, &self.skip_arrays(ps)).ok()?);
-        let (mid, buy_end) = leg_quote_end(&lb, pb.t0 == *WSOL, size, now)?;
-        let (back, sell_end) = leg_quote_end(&ls, ps.t0 == o.mint, mid, now)?;
+        let (clk, u) = (quote::clock(dslot, now), route_use(pb, ps));
+        let (lb, ls) = (self.leg_of(pb, pb.t0 == *WSOL, clk, &self.skip_arrays(pb), u).ok()?, self.leg_of(ps, ps.t0 == o.mint, clk, &self.skip_arrays(ps), u).ok()?);
+        // the legs at `size` (WP-16: arbx-sizing's exact quotes; a DLMM leg's walk ends where the builder names arrays up to)
+        let wb = lb.walk(size).ok()?;
+        let ws = ls.walk(wb.out).ok()?;
+        let (mid, buy_end, back, sell_end, spent) = (wb.out, wb.end, ws.out, ws.end, wb.spent);
         let live = |p: &crate::venues::PoolMeta| -> Vec<i64> { self.store.dlmm_arrays.get(&p.pool).map(|l| l.iter().filter(|(_, k)| self.store.get(k).is_some()).map(|(i, _)| *i).collect()).unwrap_or_default() };
         let data = |p: &crate::venues::PoolMeta| self.store.get(&p.pool).map(|a| a.data.to_vec());
         let trig_feed = if o.trig_feed == u16::MAX { Some("state".to_string()) } else { self.feeds.get(o.trig_feed as usize).cloned() };
@@ -2208,7 +2211,7 @@ impl Engine {
         let accounts: Vec<(Pk, u64, u64)> = self.route_accounts_of(pb, ps).into_iter().filter_map(|k| self.store.get(&k).map(|a| (k, a.slot, a.write_version))).collect();
         Some(crate::exec::RouteIn { opp: id, trig: o.trig, trig_feed, slot: o.slot,
             st: [o.st.rx, o.st.decoded, o.st.engine, o.st.resolved, o.st.decided], buy: pb.clone(), sell: ps.clone(), buy_data: data(pb)?, sell_data: data(ps)?,
-            buy_source: self.reg.source(&pb.pool), sell_source: self.reg.source(&ps.pool), mint: o.mint, size, mid, back,
+            buy_source: self.reg.source(&pb.pool), sell_source: self.reg.source(&ps.pool), mint: o.mint, size, mid, back, spent,
             gross_at_opp: o.gross, net_at_opp: o.net, cu: o.cu,
             buy_live: live(pb), sell_live: live(ps), buy_end, sell_end, state_version: o.sv, route_age_ms: o.route_age_ms, decision: o.decision,
             trig_kind: o.kind, t_first_shred: o.t_first_shred, t_commit: o.t_commit, t_priced: o.t_priced, parts_skew: o.parts_skew, crowding, accounts })
@@ -2216,28 +2219,18 @@ impl Engine {
 
     /// caps.jsonl: the decided pair's best round trip at each budget in [strategy] budget_caps_sol. Profit rises with
     /// size up to the unconstrained best size, so each cap trades min(best size, cap). A size a pool can't quote (e.g.
-    /// past the DLMM bin arrays we follow) is recorded as null.
+    /// past the DLMM bin arrays we follow, or past a DLMM leg's walk budget) is recorded as null. WP-16: the best size is
+    /// arbx-sizing's locator over (0, the largest cap], evaluated exactly with the decision's size beside it
     fn record_caps(&self, id: u64, b: &Best, kind: &str, now: i64) {
         if self.cfg.budget_caps_sol.is_empty() || !self.rec.is_on() { return; }
         let (Some(&bi), Some(&si)) = (self.reg.by_pool.get(&b.buy), self.reg.by_pool.get(&b.sell)) else { return };
         let (pb, ps) = (&self.reg.pools[bi], &self.reg.pools[si]);
         let dslot = self.store.chain_clock().map_or(self.slot, |c| c.slot);
-        let (Ok(lb), Ok(ls)) = (self.leg_of(pb, now, dslot, &self.skip_arrays(pb)), self.leg_of(ps, now, dslot, &self.skip_arrays(ps))) else { return };
-        let (zb, zs) = (pb.t0 == *WSOL, ps.t0 == b.mint);
-        let run = |x: u64| -> Option<i64> { let (mid, _) = leg_quote(&lb, zb, x, now).ok()?; let (back, _) = leg_quote(&ls, zs, mid, now).ok()?; Some(back as i64 - x as i64) };
+        let (clk, u) = (quote::clock(dslot, now), route_use(pb, ps));
+        let (Ok(lb), Ok(ls)) = (self.leg_of(pb, pb.t0 == *WSOL, clk, &self.skip_arrays(pb), u), self.leg_of(ps, ps.t0 == b.mint, clk, &self.skip_arrays(ps), u)) else { return };
+        let run = |x: u64| -> Option<i64> { quote::round_trip(&lb, &ls, x).ok().map(|t| t.profit()) };
         let max = (self.cfg.budget_caps_sol.iter().cloned().fold(0.0, f64::max) * LAMPORTS_PER_SOL) as u64;
-        // unconstrained best size in (0, max]: geometric ladder, then ternary refinement
-        let mut x = b.size.max(1_000_000);
-        let mut best = (b.size, run(b.size).unwrap_or(b.gross));
-        while x < max { x = (x * 2).min(max); match run(x) { Some(p) if p > best.1 => best = (x, p), Some(_) => break, None => break } }
-        let (mut lo, mut hi) = (best.0 / 2, (best.0 * 2).min(max));
-        for _ in 0..30 {
-            if hi <= lo + 1_000 { break; }
-            let (m1, m2) = (lo + (hi - lo) / 3, hi - (hi - lo) / 3);
-            if run(m1).unwrap_or(i64::MIN) < run(m2).unwrap_or(i64::MIN) { lo = m1; } else { hi = m2; }
-        }
-        let xs = (lo + hi) / 2;
-        if let Some(p) = run(xs) { if p > best.1 { best = (xs, p); } }
+        let best = match quote::best(&lb, &ls, &[b.size.min(max)], 1, max.max(1)) { Ok(t) => (t.x, t.profit()), Err(_) => (b.size, run(b.size).unwrap_or(b.gross)) };
         let fee = b.gross - b.net;
         let caps: Vec<Value> = self.cfg.budget_caps_sol.iter().map(|c| {
             let cap = (c * LAMPORTS_PER_SOL) as u64;
@@ -2454,6 +2447,9 @@ impl Engine {
             let rc = ReadyCtx { pending: &pending, contested: &contested, unverified: &unverified, max_skew: self.knobs.max_part_skew_slots };
             let mut views: HashMap<usize, Result<PoolView, NotReady>> = HashMap::default();
             for &p in std::iter::once(&i).chain(others.iter()) { views.entry(p).or_insert_with(|| self.store.pool_view(&self.reg.pools[p], &rc)); }
+            // each pool's leg, per direction and DLMM walk budget, parsed once per evaluation (WP-16 review F7: pool `i` is
+            // in all 2(k-1) routes of the evaluation)
+            let mut legs_memo: HashMap<(usize, bool, u16), Result<quote::Leg<'_>, quote::Why>> = HashMap::default();
             for &j in &others {
                 if j == i { continue; }
                 for (buy, sell) in [(i, j), (j, i)] {
@@ -2479,8 +2475,13 @@ impl Engine {
                     rr.sv = Some(rv);
                     let needs_clock = matches!(pb.venue, Venue::Dlmm | Venue::DammV2) || matches!(ps.venue, Venue::Dlmm | Venue::DammV2);
                     if needs_clock && !clock_ok { rr.reason = NotReady::ClockStale.reason(); routes.push(rr); continue; }
-                    let legs = self.leg_of(pb, now, dslot, &vb.pending_arrays).and_then(|lb| Ok((lb, self.leg_of(ps, now, dslot, &vs.pending_arrays)?)));
-                    match legs.and_then(|(lb, ls)| self.price_route(&lb, &ls, pb, ps, mint, now)) {
+                    // both legs parsed by arbx-sizing (WP-16): a state it refuses is the route's reason (`sz_*`)
+                    let (clk, u) = (quote::clock(dslot, now), route_use(pb, ps));
+                    let budget = match u { Use::Route { dlmm_budget } => dlmm_budget, Use::Third => 0 };
+                    let (zb, zs) = (pb.t0 == *WSOL, ps.t0 == mint);
+                    let lb = *legs_memo.entry((buy, zb, budget)).or_insert_with(|| self.leg_of(pb, zb, clk, &vb.pending_arrays, u));
+                    let legs = lb.and_then(|lb| Ok((lb, (*legs_memo.entry((sell, zs, budget)).or_insert_with(|| self.leg_of(ps, zs, clk, &vs.pending_arrays, u)))?)));
+                    match legs.map_err(quote::Why::reason).and_then(|(lb, ls)| self.price_route(&lb, &ls, pb, ps)) {
                         Ok(p) => { rr.reason = "priced"; rr.priced = Some(p); }
                         Err(e) => rr.reason = e,
                     }
@@ -2658,13 +2659,19 @@ impl Engine {
         match res {
             Scored::NotWritten => { self.count("pred_not_written"); return; }
             Scored::PreStateUnknown => self.count("pred_pre_state_unknown"),
-            Scored::Unquotable => self.count("pred_unquotable"),
+            // a swap the crate does not model is counted by its reason (`pred_sz_*`, WP-16 review F10)
+            Scored::Unquotable(why) => self.count(why.and_then(quote::reason_row).map_or("pred_unquotable", |r| r.pred)),
             Scored::Done(exact) => {
                 self.count("pred_scored");
                 if exact { self.count("pred_exact"); }
-                let e = self.acc_by_venue.entry(format!("{:?}", h.venue)).or_default();
-                e.0 += 1;
-                if exact { e.1 += 1; }
+                // an exact-out swap solved through exact-in quotes is not the venue's own rounding: scored and recorded,
+                // kept out of the per-venue exact rate (WP-16 review F6)
+                if accuracy::exact_out_model(h.venue, h.zfo, h.exact_out) == Some("solved") { self.count("pred_exact_out_solved"); }
+                else {
+                    let e = self.acc_by_venue.entry(format!("{:?}", h.venue)).or_default();
+                    e.0 += 1;
+                    if exact { e.1 += 1; }
+                }
             }
         }
         let mut line = line;
@@ -2689,7 +2696,8 @@ impl Engine {
         let mut known = true;
         let mut versions = Vec::new();
         let mut needed: Vec<Pk> = accts.clone();
-        if matches!(m.venue, Venue::Dlmm | Venue::DammV2) { needed.push(*CLOCK_SYSVAR); }
+        // the Clock: DLMM and DAMM v2 fees, and (WP-16, arbx-sizing) CPMM / AMM v4 open times
+        needed.push(*CLOCK_SYSVAR);
         for k in needed.iter().chain(arrays.iter().map(|a| &a.1)) {
             let wrote = h.writes.iter().any(|(w, _, _)| w == k);
             let tv = if wrote { self.store.version_by_txn(k, &h.txn) } else { None };
@@ -2709,22 +2717,24 @@ impl Engine {
         }
         let clock_pre = pre.get(&*CLOCK_SYSVAR).and_then(|a| crate::store::decode_clock(&a.data));
         let (now, slot) = clock_pre.map_or((0, h.slot), |c| (c.1, c.0));
-        let pump_pre = pre.get(&*PUMP_FEE_CONFIG).and_then(|a| cp::decode_pump_fee_cfg(&a.data)).map(Arc::new);
-        let pump_post = post.get(&*PUMP_FEE_CONFIG).and_then(|a| cp::decode_pump_fee_cfg(&a.data)).map(Arc::new).or_else(|| pump_pre.clone());
         let mut line = json!({ "sig": sigs58(&h.txn), "venue": m.venue, "pool": b58(&m.pool), "t_ns": self.t_now, "slot": h.slot, "input_src": "decoded",
-            "quarantine_action": "log" });
+            "quarantine_action": "log", "exact_out": h.exact_out, "exact_out_model": accuracy::exact_out_model(m.venue, h.zfo, h.exact_out) });
         let getpre = |k: &Pk| pre.get(k).copied();
         let getpost = |k: &Pk| post.get(k).copied();
-        let vpre = accuracy::View { get: &getpre, arrays: &arrays, pump_cfg: pump_pre.as_ref(), now_unix: now, slot };
-        let vpost = accuracy::View { get: &getpost, arrays: &arrays, pump_cfg: pump_post.as_ref(), now_unix: now, slot };
+        let vpre = accuracy::View { get: &getpre, arrays: &arrays, now_unix: now, slot };
+        let vpost = accuracy::View { get: &getpost, arrays: &arrays, now_unix: now, slot };
+        let mut refused: Option<&'static str> = None;
         let scored = if !known { None } else {
             match accuracy::predict(m, &vpre, h.zfo, h.amount, h.exact_out) {
                 Ok((p, _)) => accuracy::actual(m, &vpost, &p).map(|a| (p, a)),
                 // a bin array the quote needs has no pre-state in its ring
                 Err(accuracy::NoPred::DlmmArray) => { known = false; None }
+                // a state arbx-sizing does not model (WP-16): not scored, its reason recorded
+                Err(accuracy::NoPred::Refused(why)) => { refused = Some(why); None }
                 Err(_) => None,
             }
         };
+        if let Some(why) = refused { line["refused"] = json!(why); }
         line["pre_state"] = json!({ "known": known, "versions": versions });
         // the at-hint comparison (arb-lab's measure), against the same committed state
         if let Some(ah) = &h.at_hint {
@@ -2737,7 +2747,7 @@ impl Engine {
         if line.get("hint").is_none() { line["hint"] = json!({ "exact": null, "err": null }); }
         let res = match (known, scored) {
             (false, _) => { line["exact"] = Value::Null; Scored::PreStateUnknown }
-            (true, None) => { line["exact"] = Value::Null; Scored::Unquotable }
+            (true, None) => { line["exact"] = Value::Null; Scored::Unquotable(refused) }
             (true, Some((p, a))) => {
                 let (exact, bins) = accuracy::compare(&p, &a);
                 line["exact"] = json!(exact);
@@ -2839,6 +2849,8 @@ pub struct RouteQuote {
     pub size: u64,
     pub mid: u64,
     pub back: u64,
+    /// what the buy leg debits (WP-16: `gross` = `back` − `spent`, the guard's quote delta)
+    pub spent: u64,
     pub gross: i64,
     pub fee: u64,
     pub net: i64,
@@ -2892,19 +2904,39 @@ impl Engine {
     /// decision leaves out, left out) and `price_route`'s CU estimate and fee rule (5,000 + `cu_price_micro` × CU / 10^6
     /// + the run's `min_tip`). `arbx quote` and `--reprice-sizes` price with it. Err: why it does not quote
     pub fn quote_route(&self, buy: &Pk, sell: &Pk, mint: &Pk, size: u64) -> Result<RouteQuote, &'static str> {
+        let (lb, ls, pb, ps) = self.quote_legs(buy, sell, mint)?;
+        // the legs at `size` as `route_in` walks them (WP-16: arbx-sizing's exact quotes; a state the crate refuses is its
+        // `sz_*` reason); gross is the guard's quote delta, the sell output minus the buy leg's debit, as a decision's
+        let wb = lb.walk(size).map_err(quote::Why::reason)?;
+        let ws = ls.walk(wb.out).map_err(quote::Why::reason)?;
+        let (c1, c2) = (wb.crossed, ws.crossed);
+        let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
+        let fee = 5_000 + self.cfg.cu_price_micro * cu / 1_000_000 + self.min_tip;
+        let gross = ws.out as i64 - wb.spent as i64;
+        Ok(RouteQuote { size, mid: wb.out, back: ws.out, spent: wb.spent, gross, fee, net: gross - fee as i64, cu, crossed: (c1, c2), buy_end: wb.end, sell_end: ws.end })
+    }
+
+    /// ---- WP-16 merge. Route (buy, sell) of `mint` at the size a decision would pick now, at most `cap`: `price_route`'s
+    /// search (the ladder's rungs, then arbx-sizing's locator where a rung makes money: `quote::best`), priced as
+    /// `quote_route`. `--reprice-sizes opt`
+    pub fn quote_route_best(&self, buy: &Pk, sell: &Pk, mint: &Pk, cap: u64) -> Result<RouteQuote, &'static str> {
+        let (lb, ls, _, _) = self.quote_legs(buy, sell, mint)?;
+        let sizes = self.ladder();
+        let lo = sizes.iter().copied().min().unwrap_or(cap) / 4;
+        let t = quote::best(&lb, &ls, &sizes, lo, cap).map_err(quote::Why::reason)?;
+        self.quote_route(buy, sell, mint, t.x)
+    }
+
+    /// both legs of route (buy, sell) of `mint` as `route_in` parses them: the decision's clock (`chain_now`), the DLMM
+    /// bin arrays a decision leaves out left out, the route's DLMM walk budget
+    fn quote_legs(&self, buy: &Pk, sell: &Pk, mint: &Pk) -> Result<(quote::Leg<'_>, quote::Leg<'_>, &PoolMeta, &PoolMeta), &'static str> {
         let (Some(&bi), Some(&si)) = (self.reg.by_pool.get(buy), self.reg.by_pool.get(sell)) else { return Err("not_in_registry") };
         let (pb, ps) = (&self.reg.pools[bi], &self.reg.pools[si]);
         let (now, dslot) = self.chain_now();
-        let lb = self.leg_of(pb, now, dslot, &self.skip_arrays(pb))?;
-        let ls = self.leg_of(ps, now, dslot, &self.skip_arrays(ps))?;
-        let (zb, zs) = (pb.t0 == *WSOL, ps.t0 == *mint);
-        let (mid, c1) = leg_quote(&lb, zb, size, now)?;
-        let (back, c2) = leg_quote(&ls, zs, mid, now)?;
-        let (buy_end, sell_end) = (leg_quote_end(&lb, zb, size, now).and_then(|x| x.1), leg_quote_end(&ls, zs, mid, now).and_then(|x| x.1));
-        let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
-        let fee = 5_000 + self.cfg.cu_price_micro * cu / 1_000_000 + self.min_tip;
-        let gross = back as i64 - size as i64;
-        Ok(RouteQuote { size, mid, back, gross, fee, net: gross - fee as i64, cu, crossed: (c1, c2), buy_end, sell_end })
+        let (clk, u) = (quote::clock(dslot, now), route_use(pb, ps));
+        let lb = self.leg_of(pb, pb.t0 == *WSOL, clk, &self.skip_arrays(pb), u).map_err(quote::Why::reason)?;
+        let ls = self.leg_of(ps, ps.t0 == *mint, clk, &self.skip_arrays(ps), u).map_err(quote::Why::reason)?;
+        Ok((lb, ls, pb, ps))
     }
 
     /// ---- WP-09 (review WP-09 #10). Whether a decision would leave account `k` out now: (written by a pending commit
@@ -2922,13 +2954,15 @@ fn reject_counter(reason: &str) -> &'static str {
         "fork_pending" => "reject_fork_pending", "state_unavailable" => "reject_state_unavailable", "warmup" => "reject_warmup", "resync" => "reject_resync",
         "unquotable_dlmm_array" => "reject_unquotable_dlmm_array", "unquotable_dlmm_liquidity" => "reject_unquotable_dlmm_liquidity",
         "unquotable_damm" => "reject_unquotable_damm", "unquotable_cp" => "reject_unquotable_cp", "broken_quote" => "reject_broken_quote",
-        _ => "reject_other",
+        // arbx-sizing's refusal states (PLAN-ADDENDUM WP-16, `quote::REASONS`)
+        r => quote::reason_row(r).map_or("reject_other", |x| x.reject),
     }
 }
 
 /// what scoring a hint came to
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Scored { NotWritten, PreStateUnknown, Unquotable, Done(bool) }
+/// A hint's score: `Unquotable` carries the crate's reason when it refused the swap (`refused`, `pred_<reason>`)
+enum Scored { NotWritten, PreStateUnknown, Unquotable(Option<&'static str>), Done(bool) }
 
 fn pred_json(p: &Pred) -> Value {
     match p {
@@ -2940,39 +2974,6 @@ fn pred_json(p: &Pred) -> Value {
 
 #[derive(Clone, Debug)]
 struct Best { buy: Pk, sell: Pk, mint: Pk, size: u64, gross: i64, net: i64, decision: u64 }
-
-/// A pool ready to quote, from the store's current versions only (see `Engine::leg_of`): there is no prediction overlay
-enum Leg<'a> {
-    Cp(cp::CpSnap),
-    Dlmm { pair: &'a [u8], arrays: HashMap<i64, &'a [u8]> },
-    /// DAMM v2 pool and the slot its fee schedule is evaluated at
-    Damm(crate::venues::dammv2::DammPool, u64),
-}
-
-/// a leg's output and, for DLMM, the bin its quote ends in (the builder names the bin arrays up to it)
-fn leg_quote_end(l: &Leg, zfo: bool, amount: u64, now: i64) -> Option<(u64, Option<i32>)> {
-    match l {
-        Leg::Cp(s) => cp::quote(s, zfo, amount).map(|q| (q.out, None)),
-        Leg::Dlmm { pair, arrays } => {
-            let v = dlmm::View { pair, arrays, over: None };
-            dlmm::quote(&v, zfo, amount, now, false).ok().map(|q| (q.out, Some(q.end_active)))
-        }
-        Leg::Damm(p, slot) => crate::venues::dammv2::quote_exact_in(p, zfo, amount, *slot, now).map(|q| (q.0, None)),
-    }
-}
-
-/// size probe: output and bins crossed, no state kept; Err: why it could not be quoted (MEASUREMENT A.1)
-fn leg_quote(l: &Leg, zfo: bool, amount: u64, now: i64) -> Result<(u64, u32), &'static str> {
-    match l {
-        Leg::Cp(s) => cp::quote(s, zfo, amount).map(|q| (q.out, 0)).ok_or("unquotable_cp"),
-        Leg::Dlmm { pair, arrays } => {
-            let v = dlmm::View { pair, arrays, over: None };
-            dlmm::quote(&v, zfo, amount, now, false).map(|q| (q.out, q.crossed))
-                .map_err(|w| if w == dlmm::Why::ArrayNotLoaded { "unquotable_dlmm_array" } else { "unquotable_dlmm_liquidity" })
-        }
-        Leg::Damm(p, slot) => crate::venues::dammv2::quote_exact_in(p, zfo, amount, *slot, now).map(|q| (q.0, 0)).ok_or("unquotable_damm"),
-    }
-}
 
 /// A Meteora DAMM v2 `swap` (exact in: amount_in @8, minimum_amount_out @16) or `swap2` (amount_0 @8, amount_1 @16,
 /// swap_mode @24: 0 exact in = (in, min out), 2 exact out = (out, max in); 1, partial fill, is not predicted).
@@ -3273,12 +3274,15 @@ mod tests {
         // what the old path priced: A at the failed swap's predicted state
         let Some(Pred::Cp { r0, r1 }) = at_hint else { panic!("an at-hint prediction") };
         let (a, b) = (e.reg.pools[0].clone(), e.reg.pools[1].clone());
-        let Ok(Leg::Cp(mut sa)) = e.leg_of(&a, 0, 0, &[]) else { panic!() };
-        sa.r0 = r0;
-        sa.r1 = r1;
-        let lb = e.leg_of(&b, 0, 0, &[]).unwrap();
+        let (ck, u) = (quote::clock(0, 0), route_use(&a, &b));
+        // A's buy leg (WSOL in: its token 1, the pc side) at the failed swap's predicted reserves
+        let mut la = e.leg_of(&a, a.t0 == *WSOL, ck, &[], u).unwrap();
+        let arbx_sizing::AnyLeg::Amm(sa) = &mut la.any else { panic!() };
+        sa.r_in = r1 as u64;
+        sa.r_out = r0 as u64;
+        let lb = e.leg_of(&b, b.t0 == MINT, ck, &[], u).unwrap();
         // USDC into A makes A's MINT cheap: buy it on A (at the predicted state), sell it on B
-        let poisoned = e.price_route(&Leg::Cp(sa.clone()), &lb, &a, &b, MINT, 0).unwrap_or_else(|why| panic!("the poisoned route prices: {why}; {sa:?}"));
+        let poisoned = e.price_route(&la, &lb, &a, &b).unwrap_or_else(|why| panic!("the poisoned route prices: {why}; {la:?}"));
         eprintln!("cmp2 poisoning pattern: priced on the failed swap's prediction the route quotes {} lamports net at {} lamports; on committed state the best route nets {}",
             poisoned.net, poisoned.size, net_committed);
         assert!(poisoned.net > 1_000_000_000, "priced on the prediction the route quotes {} lamports (cmp2: 3.88 SOL)", poisoned.net);
@@ -3830,6 +3834,60 @@ mod tests {
         let best = &x["routes"][x["best"].as_u64().unwrap() as usize];
         assert!(best["size"].as_u64().unwrap() <= 4_200_000_000 && best["net"].as_i64().unwrap() > 0, "probe 4: 8,399,809,909: {best}");
         assert!(x["routes"].as_array().unwrap().iter().filter_map(|r| r["size"].as_u64()).all(|s| s <= 4_200_000_000));
+        // WP-16: the crate's locator puts the optimum past the cap here; the size sits on the cap
+        assert_eq!(best["size"].as_u64(), Some(4_200_000_000), "{best}");
+    }
+
+    /// PLAN-ADDENDUM WP-16: a state arbx-sizing refuses is the route's recorded reason (decisions.jsonl `routes[].reason`)
+    /// and its counter (`reject_<reason>`): a third pool on the pair whose AMM v4 status is 0 (swaps off) refuses both
+    /// routes through it (`sz_ammv4_status`); the routes between the tradable pools price as before
+    #[test]
+    fn a_state_arbx_sizing_refuses_is_the_routes_reason() {
+        let mut r = rig_with("sz-refused", StrategyCfg { state_triggers: true, ..StrategyCfg::default() }, &[(1, 1_000), (2, 1_000), (3, 1_000)]);
+        let c = meta(3);
+        let mut p = ammv4_pool().to_vec();
+        p[0..8].copy_from_slice(&0u64.to_le_bytes());
+        assert!(r.e.store.update(c.pool, p.into(), 11, 1, None));
+        make_ready(&mut r.e, T0);
+        let b = meta(2);
+        let t = T0 + 20 * MS;
+        acct(&mut r.e, b.vault1, vault(1_020 * SOL), 12, t, Some(sig(3)), 10);
+        acct(&mut r.e, b.vault0, vault(990_000_000_000_000), 12, t + 1, Some(sig(3)), 11);
+        r.e.timers(t + 4 * MS, &mut nop());
+        let d = decisions(&r);
+        let routes = d.last().unwrap()["routes"].as_array().unwrap().clone();
+        let c58 = json!(b58(&c.pool));
+        let through_c: Vec<&Value> = routes.iter().filter(|x| x["buy"] == c58 || x["sell"] == c58).collect();
+        assert_eq!(through_c.len(), 2, "{routes:?}");
+        assert!(through_c.iter().all(|x| x["reason"] == "sz_ammv4_status" && x["size"].is_null()), "{through_c:?}");
+        assert!(routes.iter().any(|x| x["size"].is_u64()), "the tradable pools' routes price: {routes:?}");
+        assert_eq!(r.e.counter("reject_sz_ammv4_status"), 2);
+    }
+
+    /// WP-16 review F10: the hint check, the builder probe and the accuracy monitor name the crate's refusal, like a
+    /// route: a decoded swap on a pool whose AMM v4 status is 0 (swaps off) is skipped `sz_ammv4_status` (triggers.jsonl
+    /// `skip`, counter `trigger_sz_ammv4_status`, not `trigger_unquotable`); `probe_routes` over that pool counts
+    /// `probe_sz_ammv4_status`; the monitor's counter for a refused swap is `pred_<reason>`
+    #[test]
+    fn hints_probes_and_the_monitor_carry_the_crates_reason() {
+        let mut r = rig("sz-hint");
+        let a = meta(1);
+        let mut p = ammv4_pool().to_vec();
+        p[0..8].copy_from_slice(&0u64.to_le_bytes());
+        assert!(r.e.store.update(a.pool, p.into(), 11, 1, None));
+        make_ready(&mut r.e, T0);
+        tx_ev(&mut r.e, shred_tx(sig(9), &[a.pool, a.vault0, a.vault1], Some((&a, SOL, false)), 11, T0 + 10 * MS));
+        assert_eq!((r.e.counter("trigger"), r.e.counter("trigger_sz_ammv4_status"), r.e.counter("trigger_unquotable"), r.e.counter("trigger_hint_only")), (1, 1, 0, 0));
+        r.rec.sync();
+        let t = rec::read_jsonl(&r.dir, "triggers").unwrap();
+        assert_eq!(t.last().unwrap()["skip"], "sz_ammv4_status", "{:?}", t.last());
+        let _ = r.e.probe_routes(SOL / 10, 10);
+        assert!(r.e.counter("probe_sz_ammv4_status") >= 1 && r.e.counter("probe_unquotable") == 0, "{} {}", r.e.counter("probe_sz_ammv4_status"), r.e.counter("probe_unquotable"));
+        // the monitor's counter: the reason's own (`accuracy::predict` refuses with it)
+        let v = |k: &Pk| r.e.store.get(k);
+        let view = accuracy::View { get: &v, arrays: &[], now_unix: 1_759_000_000, slot: 11 };
+        assert_eq!(accuracy::predict(&a, &view, false, SOL, false).unwrap_err(), accuracy::NoPred::Refused("sz_ammv4_status"));
+        assert_eq!(quote::reason_row("sz_ammv4_status").unwrap().pred, "pred_sz_ammv4_status");
     }
 
     /// Review WP-04 #4 (probe 5): with the real file's 30,304 signers, saving the signer statistics and the 10-s status
@@ -4039,11 +4097,13 @@ mod tests {
         acct(&mut r.e, a.vault1, vault(1_005 * SOL), 11, T0 + 11 * MS, Some(sig(41)), 20);
         acct(&mut r.e, a.vault0, vault(995_000_000_000_000), 11, T0 + 11 * MS + 1, Some(sig(41)), 21);
         r.e.timers(T0 + 15 * MS, &mut nop());
-        // T commits exactly what the AMM v4 maths say on its pre-state
-        let pre = r.e.leg_of(&a, 0, 0, &[]).ok().unwrap();
-        let Leg::Cp(s) = pre else { panic!() };
-        let q = cp::quote(&s, false, 10 * SOL).unwrap();
-        for (k, d, wv) in [(a.pool, ammv4_pool(), 22), (a.vault0, vault(q.r0 as u64), 23), (a.vault1, vault(q.r1 as u64), 24)] {
+        // T commits exactly what the AMM v4 maths say on its pre-state (arbx-sizing's quote; the whole input enters the pc
+        // vault, the output leaves the coin vault)
+        let pre = r.e.leg_of(&a, false, quote::clock(0, 0), &[], Use::Third).unwrap();
+        let q = pre.quote(10 * SOL).unwrap();
+        let arbx_sizing::AnyLeg::Amm(l) = pre.any else { panic!() };
+        let (r0, r1) = (l.r_out - q.out, l.r_in + q.spent);
+        for (k, d, wv) in [(a.pool, ammv4_pool(), 22), (a.vault0, vault(r0), 23), (a.vault1, vault(r1), 24)] {
             acct(&mut r.e, k, d, 12, T0 + 20 * MS, Some(sig(40)), wv);
         }
         r.e.timers(T0 + 25 * MS, &mut nop());

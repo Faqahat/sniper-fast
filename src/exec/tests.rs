@@ -62,7 +62,7 @@ fn damm(n: u8, t0: Pk) -> PoolMeta {
 fn route(buy: u8, sell: PoolMeta, expected: u64, sv: u64) -> RouteIn {
     let size = 1_000_000_000u64;
     RouteIn { opp: buy as u64, trig: [3u8; 64], trig_feed: None, slot: 99, st: [100, 100, 200, 300, now_ns()], buy: damm(buy, MINT), sell,
-        buy_data: vec![], sell_data: vec![], buy_source: "ours", sell_source: "ours", mint: MINT, size, mid: 1_000, back: size + expected,
+        buy_data: vec![], sell_data: vec![], buy_source: "ours", sell_source: "ours", mint: MINT, size, mid: 1_000, back: size + expected, spent: size,
         gross_at_opp: expected as i64, net_at_opp: expected as i64, cu: 100_000,
         buy_live: vec![], sell_live: vec![], buy_end: None, sell_end: None, state_version: sv, route_age_ms: Some(1.5), decision: 40 + sv,
         trig_kind: "commit", t_first_shred: Some(90), t_commit: 150, t_priced: 400, parts_skew: Some((0, 1)),

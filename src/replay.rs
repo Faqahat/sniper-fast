@@ -1245,35 +1245,25 @@ fn compare_attempts(run: &Path, out: &Path, compared: &IdRanges) -> Result<Attem
 // ------------------------------------------------------------------ pricing a route on the engine's store
 
 /// The engine's own price of route (buy, sell, mint) at `size` on its store as it is, as a decision prices it
-/// (`Engine::quote_route`): what the buy leg delivers, what the sell leg returns, the CU it asks, and the net with the
-/// engine's fee rule (base fee + `cu_price_micro` × CU + the run's `min_tip`)
+/// (`Engine::quote_route`): what the buy leg delivers and debits (`spent`), what the sell leg returns, the gross (the
+/// guard's quote delta, `back` − `spent`), the CU it asks, and the net with the engine's fee rule (base fee +
+/// `cu_price_micro` × CU + the run's `min_tip`)
 pub fn price(e: &Engine, buy: &Pk, sell: &Pk, mint: &Pk, size: u64) -> Result<Value, String> {
-    match e.quote_route(buy, sell, mint, size) {
-        Ok(q) => Ok(json!({ "size": q.size, "mid": q.mid, "back": q.back, "gross": q.gross, "fee": q.fee, "net": q.net, "cu": q.cu, "crossed": [q.crossed.0, q.crossed.1],
-            "buy_end": q.buy_end, "sell_end": q.sell_end })),
+    quote_json(e.quote_route(buy, sell, mint, size))
+}
+
+fn quote_json(q: Result<crate::engine::RouteQuote, &'static str>) -> Result<Value, String> {
+    match q {
+        Ok(q) => Ok(json!({ "size": q.size, "mid": q.mid, "back": q.back, "spent": q.spent, "gross": q.gross, "fee": q.fee, "net": q.net, "cu": q.cu,
+            "crossed": [q.crossed.0, q.crossed.1], "buy_end": q.buy_end, "sell_end": q.sell_end })),
         Err(why) => Err(format!("unquotable on this state ({why}: a part missing or left out, or a venue refused the size)")),
     }
 }
 
-/// the best net over (0, cap]: the ladder (the strategy's sizes up to `cap`), then a ternary refinement around the best
-/// rung, as the engine's `price_route` searches
-fn price_opt(e: &Engine, cfg: &StrategyCfg, buy: &Pk, sell: &Pk, mint: &Pk, cap: u64) -> Value {
-    let net = |x: u64| -> Option<(i64, Value)> { price(e, buy, sell, mint, x).ok().and_then(|v| Some((v["net"].as_i64()?, v))) };
-    let sizes: Vec<u64> = cfg.sizes_sol.iter().map(|s| (s * 1e9) as u64).filter(|x| *x > 0 && *x <= cap).collect();
-    let mut best: Option<(usize, i64, Value)> = None;
-    for (k, &x) in sizes.iter().enumerate() {
-        if let Some((n, v)) = net(x) { if best.as_ref().map_or(true, |b| n > b.1) { best = Some((k, n, v)); } }
-    }
-    let Some((k, bn, mut bv)) = best else { return json!({ "error": "unquotable at every rung" }) };
-    let (mut lo, mut hi) = (if k > 0 { sizes[k - 1] } else { sizes[0] / 4 }, sizes.get(k + 1).copied().unwrap_or(sizes[k]));
-    for _ in 0..24 {
-        if hi.saturating_sub(lo) < 1_000 { break; }
-        let (m1, m2) = (lo + (hi - lo) / 3, hi - (hi - lo) / 3);
-        let (p1, p2) = (net(m1).map_or(i64::MIN, |x| x.0), net(m2).map_or(i64::MIN, |x| x.0));
-        if p1 < p2 { lo = m1; } else { hi = m2; }
-    }
-    if let Some((n, v)) = net((lo + hi) / 2) { if n > bn { bv = v; } }
-    bv
+/// the size a decision would pick over (0, cap], priced: the engine's own search (`Engine::quote_route_best`: the
+/// strategy's ladder, then arbx-sizing's locator where a rung makes money, as `price_route`; WP-16)
+fn price_opt(e: &Engine, buy: &Pk, sell: &Pk, mint: &Pk, cap: u64) -> Value {
+    quote_json(e.quote_route_best(buy, sell, mint, cap)).unwrap_or_else(|err| json!({ "error": err }))
 }
 
 // ------------------------------------------------------------------ --reprice-sizes (X3)
@@ -1312,7 +1302,7 @@ impl Hook for RepriceHook<'_> {
                 let x = ((size as f64) * f) as u64;
                 match price(e, &buy, &sell, &mint, x) { Ok(mut v) => { v["f"] = json!(f); v } Err(err) => json!({ "f": f, "size": x, "error": err }) }
             }).collect();
-            let opt = self.sizes.contains(&Reprice::Opt).then(|| price_opt(e, &self.cfg, &buy, &sell, &mint, self.cap));
+            let opt = self.sizes.contains(&Reprice::Opt).then(|| price_opt(e, &buy, &sell, &mint, self.cap));
             self.out.push(json!({ "decision": id, "t_ns": d["t_ns"], "slot": d["slot"], "buy": d["buy"], "sell": d["sell"], "mint": d["mint"], "size": size,
                 "run": { "gross": d["gross"], "net": d["net"], "cu": d["cu"], "verdict": d["verdict"], "reason": d["reason"] },
                 "requote": check.unwrap_or_else(|err| json!({ "error": err })), "requote_same_gross": same, "at": at, "opt": opt }));

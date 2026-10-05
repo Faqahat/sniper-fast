@@ -93,7 +93,8 @@ fn last_feasible(l0: &AnyLeg, l1: &AnyLeg, lo: u64, hi: u64) -> u64 {
 /// F1: a PumpSwap sell may pay out at most Q − (held_0 + held_1) net of the LP fee (u64 @271, @279; pinned on the
 /// real binary, re-checked by venue-harness tests/adversarial.rs "held quote …"). The capacity is exact with the
 /// held amounts, they never move the price, and more held than Q refuses the pool in both directions.
-/// F9: the pool is accepted at exactly 301 bytes, with its unidentified tail bytes clear.
+/// F9 (corrected by the WP-16 review): the pool is accepted at every length the program accepts, 211..=301 bytes,
+/// byte 270 is `is_holder_reward`, and the unidentified tail 287..301 must be clear.
 #[test]
 fn f1_f9_pumpswap_held_quote_and_layout_gate() {
     let mut rng = Rng(901);
@@ -140,7 +141,10 @@ fn f1_f9_pumpswap_held_quote_and_layout_gate() {
         let li = arbx_sizing::LegIn { desc: leg.desc, program: leg.desc.kind.program(), state: &refs, input_mint: &leg.input_mint };
         assert_eq!(AnyLeg::parse(&li, &CLOCK, pda).unwrap().leg.unwrap_err(), Abort::Pump(PumpWhy::HeldExceedsVault));
     }
-    // F9: exactly 301 bytes, unidentified tail bytes clear
+    // F9, as corrected by the WP-16 review (F1, F2): the pool is priced at every length the program accepts (211..=301:
+    // the original layout up to the current one), its missing trailing groups read as zero; a longer pool is an unknown
+    // layout; byte 270 is `is_holder_reward` (0 or 1; any other byte is no Borsh bool and the program fails, so Layout);
+    // the unidentified tail 287..301 must be clear
     let parse_with = |f: &dyn Fn(&mut Vec<u8>)| {
         let mut leg = OwnedLeg::pump(&p, true);
         f(&mut leg.state[0].data);
@@ -149,11 +153,87 @@ fn f1_f9_pumpswap_held_quote_and_layout_gate() {
         AnyLeg::parse(&li, &CLOCK, pda).unwrap().leg.err()
     };
     assert_eq!(parse_with(&|_| {}), None);
-    assert_eq!(parse_with(&|d| d.truncate(300)), Some(Abort::Layout));
-    assert_eq!(parse_with(&|d| d.truncate(270)), Some(Abort::Layout));
-    assert_eq!(parse_with(&|d| d.push(0)), Some(Abort::Layout));
-    for at in [270usize, 287, 300] { assert_eq!(parse_with(&|d| d[at] = 1), Some(Abort::Pump(PumpWhy::UnknownTail)), "byte {at}"); }
-    assert_eq!(pumpswap::POOL_LEN, 301);
+    for len in [211usize, 212, 242, 243, 244, 245, 246, 260, 261, 262, 269, 270, 271, 272, 286, 287, 288, 299, 300] {
+        assert_eq!(parse_with(&|d| d.truncate(len)), None, "a {len}-byte pool is priced");
+    }
+    for len in [8usize, 203, 210] { assert_eq!(parse_with(&|d| d.truncate(len)), Some(Abort::Layout), "{len} bytes: below the program's minimum"); }
+    for extra in [1usize, 7, 99] { assert_eq!(parse_with(&|d| d.resize(301 + extra, 0)), Some(Abort::Layout), "{} bytes", 301 + extra); }
+    assert_eq!(parse_with(&|d| d[270] = 1), None, "a holder-reward pool is priced");
+    for v in [2u8, 3, 0x97, 0xba, 0xff] {
+        assert_eq!(parse_with(&|d| d[270] = v), Some(Abort::Layout), "byte 270 = {v:#x}");
+        assert_eq!(parse_with(&|d| d[269] = v), Some(Abort::Layout), "byte 269 = {v:#x}");
+        assert_eq!(parse_with(&|d| d[243] = v), Some(Abort::Layout), "byte 243 = {v:#x}");
+    }
+    for at in [287usize, 293, 300] { assert_eq!(parse_with(&|d| d[at] = 1), Some(Abort::Pump(PumpWhy::UnknownTail)), "byte {at}"); }
+    assert_eq!(parse_with(&|d| { d.truncate(295); d[294] = 1; }), Some(Abort::Pump(PumpWhy::UnknownTail)), "a present tail byte of a short pool");
+    assert_eq!((pumpswap::POOL_MIN_LEN, pumpswap::POOL_LEN), (211, 301));
+}
+
+/// WP-16 review F1: a pool shorter than the current layout is read as the program reads it (pinned on the dumped pAMM
+/// binary by venue-harness tests/adversarial.rs "pool cut to L bytes"): each trailing group the pool holds whole is
+/// read, every other one is zero: coin_creator @211..243, the virtual quote reserve @245..261 (a partial one reads as
+/// 0), creator_fee_bps with can_edit_creator_fee @261..270, the two held amounts together @271..287. So a cut pool
+/// quotes exactly like the full pool with those groups cleared, in both directions, at every size, capacity included
+#[test]
+fn wp16_short_pools_read_their_missing_groups_as_zero() {
+    let mut rng = Rng(916);
+    let groups: [(usize, usize); 4] = [(211, 243), (245, 261), (261, 270), (271, 287)];
+    let mut compared = 0;
+    for case in 0..60 {
+        let quote = rng.log(1_000_000_000, 1 << 44);
+        let spec = PumpSpec { base: rng.log(1 << 30, 1 << 56), quote, virt: [quote as i128 * 50, -(quote as i128 / 7), 12_345][case % 3],
+            creator_fee_bps: [0, 200, 290][case % 3], ..Default::default() };
+        let p = pump(&mut rng, &spec);
+        for len in [211usize, 230, 243, 245, 246, 253, 260, 261, 262, 269, 270, 271, 279, 286, 287, 300, 301] {
+            for sell in [true, false] {
+                let mut cut = OwnedLeg::pump(&p, sell);
+                put_u64(&mut cut.state[0].data, 271, quote / 5);
+                put_u64(&mut cut.state[0].data, 279, quote / 9);
+                cut.state[0].data[270] = (case % 2) as u8;
+                let mut full = OwnedLeg::pump(&p, sell);
+                full.state[0].data = cut.state[0].data.clone();
+                cut.state[0].data.truncate(len);
+                for &(a, b) in &groups { if len < b { full.state[0].data[a..b].fill(0); } }
+                if len < 271 { full.state[0].data[270] = 0; }
+                let (cr, fr): (Vec<_>, Vec<_>) = (cut.state.iter().map(|a| a.view()).collect(), full.state.iter().map(|a| a.view()).collect());
+                let (lc, lf) = (any_leg(&cut, &cr), any_leg(&full, &fr));
+                let (AnyLeg::Pump(c), AnyLeg::Pump(f)) = (lc, lf) else { panic!() };
+                assert_eq!(c, f, "case {case} len {len} sell {sell}: the cut pool parses like the full pool without its missing groups");
+                let reserve = if sell { spec.base } else { quote };
+                let mut xs: Vec<u64> = (0..24).map(|_| rng.log(1, reserve.saturating_mul(3).max(2))).collect();
+                if let Some(k) = c.cap_in() { xs.extend([k.saturating_sub(1), k, k.saturating_add(1)]); }
+                for x in xs { assert_eq!(lc.quote(x), lf.quote(x), "case {case} len {len} sell {sell} x {x}"); compared += 1; }
+            }
+        }
+    }
+    assert!(compared > 40_000, "{compared}");
+}
+
+/// WP-16 fix: a mayhem pool (@243 = 1) is priced, its market cap on the fixed 1e15 supply whatever the mint's supply
+/// (pinned on the dumped binary: GxqG with its supply scaled ×1/1000 .. ×2000, venue-harness tests/adversarial.rs
+/// "base supply x… (market-cap tier)"). The same pool without the flag prices on the mint's supply
+#[test]
+fn wp16_mayhem_pools_price_on_the_fixed_supply() {
+    let mut rng = Rng(917);
+    let mut differ = 0;
+    for case in 0..200 {
+        let supply = rng.log(1 << 30, 1 << 62);
+        let spec = PumpSpec { base: rng.log(1 << 30, 1 << 56), quote: rng.log(1_000_000, 1 << 44), supply, ..Default::default() };
+        let p = pump(&mut rng, &spec);
+        for sell in [true, false] {
+            let mut m = OwnedLeg::pump(&p, sell);
+            m.state[0].data[243] = 1;
+            let mut ref15 = OwnedLeg::pump(&p, sell);
+            // the reference: no mayhem flag, the mint's supply set to 1e15
+            ref15.state[2].data[36..44].copy_from_slice(&pumpswap::MAYHEM_SUPPLY.to_le_bytes());
+            let plain = OwnedLeg::pump(&p, sell);
+            let (mr, rr, pr): (Vec<_>, Vec<_>, Vec<_>) = (m.state.iter().map(|a| a.view()).collect(), ref15.state.iter().map(|a| a.view()).collect(), plain.state.iter().map(|a| a.view()).collect());
+            let (AnyLeg::Pump(lm), AnyLeg::Pump(lr), AnyLeg::Pump(lp)) = (any_leg(&m, &mr), any_leg(&ref15, &rr), any_leg(&plain, &pr)) else { panic!() };
+            assert_eq!(lm, lr, "case {case}: mayhem prices on the 1e15 supply");
+            if lm.fees != lp.fees { differ += 1; }
+        }
+    }
+    assert!(differ > 10, "the supply basis must matter in some cases: {differ}");
 }
 
 /// F1 at plan level: a PumpSwap sell leg 1 whose capacity binds (BOOST-like V = 50·Q, held amounts present): the

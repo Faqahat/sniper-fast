@@ -222,12 +222,12 @@
    "truncated_bytes": null
   },
   {
-   "bytes": 1414,
+   "bytes": 2252,
    "file": "predictions.000.jsonl.zst",
    "partial_tail": null,
-   "records_read": 3,
+   "records_read": 5,
    "schema": "arbx.predictions/2.0",
-   "sha256": "259641cef449cd8fce9540626dbb66427b56696933c6a2c6f8f6a31a172cd5ff",
+   "sha256": "24c25742927cdca91a7e85fe1d88cebf7ac792dd10147e0112073a760649106b",
    "stream": "predictions",
    "truncated_bytes": null
   },
@@ -2188,25 +2188,35 @@
       "dlmm_bins_checked": 2,
       "dlmm_bins_exact": 2,
       "exact": 1,
+      "exact_out_solved": 0,
+      "exact_out_solved_exact": 0,
       "exact_rate_at_hint": 0,
       "exact_rate_pre_state": 1,
       "hint_exact": 0,
       "hint_scored": 2,
       "n": 2,
       "pre_state_unknown": 1,
-      "scored": 1
+      "refused": {},
+      "scored": 1,
+      "unquotable": 0
      },
      "PumpSwap": {
       "dlmm_bins_checked": 0,
       "dlmm_bins_exact": 0,
       "exact": 1,
+      "exact_out_solved": 1,
+      "exact_out_solved_exact": 0,
       "exact_rate_at_hint": 1,
       "exact_rate_pre_state": 1,
       "hint_exact": 1,
       "hint_scored": 1,
-      "n": 1,
+      "n": 3,
       "pre_state_unknown": 0,
-      "scored": 1
+      "refused": {
+       "sz_transfer_fee": 1
+      },
+      "scored": 1,
+      "unquotable": 0
      }
     },
     "landed_legs_exact": {
@@ -2223,16 +2233,16 @@
      "within_2_lamports": 1
     },
     "quarantine_actions": {
-     "log": 3
+     "log": 5
     },
     "worst_pools_window_exact_pct": [
      [
-      "FwmuatBdoKppeMfopu2fbTtuBBXSStoi6Ay9UV2upzeZ",
-      98.5
+      "Gbj63Adqf6QLk5wAFZeqHGYjJh1xwTgY7TD3AHUwDBjk",
+      50
      ],
      [
-      "Gbj63Adqf6QLk5wAFZeqHGYjJh1xwTgY7TD3AHUwDBjk",
-      100
+      "FwmuatBdoKppeMfopu2fbTtuBBXSStoi6Ay9UV2upzeZ",
+      98.5
      ]
     ]
    },

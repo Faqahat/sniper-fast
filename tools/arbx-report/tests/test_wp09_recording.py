@@ -49,6 +49,12 @@ class Wp09Recording(unittest.TestCase):
         files = {x["file"] for x in self.seg.inputs()}
         self.assertLessEqual({"pools.json", "registry-run.json"}, files)
 
+    def test_the_pumpswap_global_config_has_its_role(self):
+        # WP-16: the state stream follows PumpSwap's GlobalConfig (accounts.bin role 12), a part of every PumpSwap pool
+        gc = "ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw"
+        roles = {streams.ROLE_NAMES.get(r.role) for r in streams.iter_accounts(self.seg.stream_files("accounts"), keep_data=False) if r.acct == gc}
+        self.assertEqual(roles, {"pump_global_config"})
+
 
 if __name__ == "__main__":
     unittest.main()

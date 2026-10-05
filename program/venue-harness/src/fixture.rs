@@ -91,20 +91,30 @@ pub struct PoolFixture {
     pub notes: BTreeMap<String, serde_json::Value>,
 }
 
-/// Overwrite `bytes` at `offset` in account `key`'s data (state mutation; the account must be in the snapshot)
+/// Overwrite `bytes` at `offset` in account `key`'s data (state mutation; the account must be in the snapshot), after
+/// resizing the data to `resize` bytes when set (cut, or extended with zeros: a PumpSwap pool written before a trailing
+/// field existed is shorter; the lamports are topped up to the snapshot's rent-exempt minimum)
 #[derive(Clone, Debug)]
-pub struct Patch { pub key: Address, pub offset: usize, pub bytes: Vec<u8> }
+pub struct Patch { pub key: Address, pub offset: usize, pub bytes: Vec<u8>, pub resize: Option<usize> }
 
 impl Patch {
-    pub fn new(key: Address, offset: usize, bytes: &[u8]) -> Self { Patch { key, offset, bytes: bytes.to_vec() } }
+    pub fn new(key: Address, offset: usize, bytes: &[u8]) -> Self { Patch { key, offset, bytes: bytes.to_vec(), resize: None } }
+    /// the account's data cut to (or zero-extended to) `len` bytes
+    pub fn resize(key: Address, len: usize) -> Self { Patch { key, offset: 0, bytes: vec![], resize: Some(len) } }
 }
 
 impl PoolFixture {
     pub fn apply(&mut self, patches: &[Patch]) -> Result<(), String> {
         for p in patches {
             let k = p.key.to_string();
+            let rent = self.rent;
             let a = self.accounts.iter_mut().find(|a| a.pubkey == k).ok_or(format!("patch: {k} not in the snapshot"))?;
             let (key, mut acc) = a.to_account()?;
+            if let Some(n) = p.resize {
+                acc.data.resize(n, 0);
+                let per_byte = rent.map_or(6_960, |r| (r.lamports_per_byte as f64 * r.exemption_threshold) as u64);
+                acc.lamports = acc.lamports.max((n as u64 + 128) * per_byte);
+            }
             let end = p.offset + p.bytes.len();
             if end > acc.data.len() { return Err(format!("patch: {k} [{}..{end}] beyond {} bytes", p.offset, acc.data.len())); }
             acc.data[p.offset..end].copy_from_slice(&p.bytes);

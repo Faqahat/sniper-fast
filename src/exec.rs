@@ -133,6 +133,10 @@ pub struct RouteIn {
     /// our prediction at `size`: what the buy leg delivers, what the sell leg returns
     pub mid: u64,
     pub back: u64,
+    /// what the buy leg debits at `size` (PLAN-ADDENDUM WP-16: arbx-sizing's exact quote; PumpSwap's
+    /// `buy_exact_quote_in` debits min(size, eff0 + fees(eff0)), now and then a lamport below `size`): the guard's quote
+    /// delta is `back` minus it, as the decision's `gross`
+    pub spent: u64,
     pub gross_at_opp: i64,
     pub net_at_opp: i64,
     pub cu: u64,
@@ -159,8 +163,9 @@ pub struct RouteIn {
 }
 
 impl RouteIn {
-    /// the expected profit at `size` (gross, before the tip and the fee)
-    pub fn expected(&self) -> i64 { self.back as i64 - self.size as i64 }
+    /// the expected profit at `size` (gross, before the tip and the fee): the guard's quote delta, the sell leg's output
+    /// minus the buy leg's debit, as the decision's `gross` (WP-16 merge: one profit for the decision and the executor)
+    pub fn expected(&self) -> i64 { self.back as i64 - self.spent as i64 }
 }
 
 // ------------------------------------------------------------------------------------------------ the send view
@@ -1183,7 +1188,7 @@ impl Exec {
         json!({ "opp": r.opp, "trigger": bs58::encode(r.trig).into_string(), "trigger_feed": r.trig_feed, "slot": r.slot,
             "buy_pool": b58(&r.buy.pool), "buy_venue": r.buy.venue, "buy_source": r.buy_source,
             "sell_pool": b58(&r.sell.pool), "sell_venue": r.sell.venue, "sell_source": r.sell_source, "mint": b58(&r.mint),
-            "size_lamports": r.size, "predicted_mid": r.mid, "predicted_back": r.back, "predicted_profit": r.back as i64 - r.size as i64,
+            "size_lamports": r.size, "predicted_mid": r.mid, "predicted_back": r.back, "predicted_spent": r.spent, "predicted_profit": r.expected(),
             "gross_at_opp": r.gross_at_opp, "net_at_opp": r.net_at_opp,
             // WP-04 item 10: the decision and the state version it priced
             "decision": r.decision, "sv": format!("{:016x}", r.state_version), "route_age_ms": r.route_age_ms })
@@ -1528,6 +1533,8 @@ impl Exec {
         v["prog_events"] = json!(landed.map(|l| l.prog_events.clone()));
         v["delivered"] = json!(delivered);
         v["predicted"] = json!([o.mid, o.back]);
+        // the two round trips on one basis, the last leg's output minus the size (the route program's events carry what
+        // each leg delivered, not what the buy leg debited); `expected` is the guard's quote delta (minus the debit)
         v["round_trip_on_chain"] = json!(landed.and_then(|l| last_leg_out(&l.prog_events)).map(|b| b as i64 - o.size as i64));
         v["round_trip_predicted"] = json!(o.back as i64 - o.size as i64);
         v["expected"] = json!(o.expected);
@@ -1951,7 +1958,7 @@ impl AttemptLine<'_> {
             "route": { "buy_pool": b58(&r.buy.pool), "buy_venue": r.buy.venue, "buy_source": r.buy_source, "sell_pool": b58(&r.sell.pool), "sell_venue": r.sell.venue,
                 "sell_source": r.sell_source, "mint": b58(&r.mint), "mint_prog": b58(if r.mint == r.buy.t0 { &r.buy.t0_prog } else { &r.buy.t1_prog }), "hub": b58(&WSOL) },
             "size_lamports": r.size,
-            "expected": { "mid": r.mid, "back": r.back, "gross": self.expected, "fee": BASE_FEE, "tip": tip_l, "net": self.expected - tip_l as i64 - BASE_FEE as i64 },
+            "expected": { "mid": r.mid, "back": r.back, "spent": r.spent, "gross": self.expected, "fee": BASE_FEE, "tip": tip_l, "net": self.expected - tip_l as i64 - BASE_FEE as i64 },
             "band": self.band, "sv": format!("{:016x}", r.state_version), "route_age_ms": r.route_age_ms,
             "parts_skew_slots": r.parts_skew.map(|(b, s)| json!({ "buy": b, "sell": s })),
             "min_profit_onchain": self.min_profit, "margin": self.margin,

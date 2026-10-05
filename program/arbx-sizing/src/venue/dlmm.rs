@@ -568,4 +568,78 @@ impl<'a> DlmmLeg<'a> {
         let leg = self.with_budget(NO_BUDGET);
         leg.swap_from(&leg.start(), x, u16::MAX).ok().and_then(|r| r.ok()).map(|r| r.1)
     }
+
+    /// One bin of the exact swap, layer by layer: [`bin_quote`](Self::bin_quote) keeping what each layer gave and
+    /// took. Off-chain only (the engine's post-state prediction); `tests/venues.rs::dlmm_fills_equal_the_quote` holds
+    /// it equal to `bin_quote` (used, user output) on random bins with limit orders and both fee modes.
+    fn bin_fill(&self, input: u128, bin: &BinRef, rate: u128) -> Result<BinFill, QuoteErr> {
+        let math = QuoteErr::Abort(Abort::Math);
+        let fee_in = if self.p.fee_on_input { ceil_div(wmul(input, rate).ok_or(math)?, FEE_PRECISION).ok_or(math)? } else { 0 };
+        let excl = input.checked_sub(fee_in).ok_or(math)?;
+        let mut rem = excl;
+        let (mut taken, mut paid) = ([0u64; 3], [0u64; 3]);
+        for (i, &l) in bin.layers.iter().enumerate() {
+            if l == 0 { continue; }
+            if rem == 0 { break; }
+            let need = self.amount_in(l, bin.price).ok_or(QuoteErr::TooLarge)?;
+            let (t, p) = if rem >= need { (l as u128, need) } else { (self.amount_out(rem, bin.price).ok_or(QuoteErr::TooLarge)?, rem) };
+            rem -= p;
+            if let (Some(ts), Some(ps)) = (taken.get_mut(i), paid.get_mut(i)) {
+                *ts = u64::try_from(t).map_err(|_| math)?;
+                *ps = u64::try_from(p).map_err(|_| math)?;
+            }
+            if p < need { break; }
+        }
+        let out: u128 = taken.iter().map(|&t| t as u128).sum();
+        let used = if rem > 0 {
+            let e = excl - rem;
+            if self.p.fee_on_input { e + ceil_div(wmul(e, rate).ok_or(math)?, FEE_PRECISION - rate).ok_or(math)? } else { e }
+        } else { input };
+        let out_user = if self.p.fee_on_input { out } else { out - ceil_div(wmul(out, rate).ok_or(math)?, FEE_PRECISION).ok_or(math)? };
+        let fit = |v: u128| u64::try_from(v).map_err(|_| math);
+        Ok(BinFill { id: bin.id, price: bin.price, rate: fit(rate)?, layers: bin.layers, taken, paid, used: fit(used)?, out: fit(out_user)? })
+    }
+
+    /// The exact swap of `x` from the active bin, bin by bin: `f` sees every bin it takes from ([`BinFill`]), in walk
+    /// order. The result is the swap's [`Walk`]; its quote equals [`quote`](Self::quote) (same walker, same budget,
+    /// same per-bin maths). Off-chain only: the engine's DLMM post-state (the bins' amounts after the swap, the bin the
+    /// active id ends on) and its CU and bin-array inputs (bins read, bins with liquidity taken from).
+    pub fn fills(&self, x: u64, f: &mut dyn FnMut(&BinFill)) -> Result<Walk, QuoteErr> {
+        if x == 0 { return Err(QuoteErr::ZeroOut); }
+        let mut w = self.walker();
+        let mut left = x as u128;
+        let (mut out, mut liquid, mut end) = (0u128, 0u16, self.p.active);
+        let mut memo = RateMemo::default();
+        while left > 0 {
+            let bin = match w.next() { Ok(b) => b, Err(End::Cap) => return Err(QuoteErr::TooLarge), Err(End::Budget) => return Err(QuoteErr::Budget) };
+            if bin.price == 0 { return Err(QuoteErr::Abort(Abort::Dlmm(DlmmWhy::ZeroPrice))); }
+            let rate = self.rate_memo(bin.id, &mut memo).ok_or(QuoteErr::TooLarge)?;
+            let b = self.bin_fill(left, &bin, rate)?;
+            left = left.checked_sub(b.used as u128).ok_or(QuoteErr::Abort(Abort::Math))?;
+            out += b.out as u128;
+            liquid = liquid.saturating_add(1);
+            end = b.id;
+            f(&b);
+        }
+        let out = u64::try_from(out).map_err(|_| QuoteErr::TooLarge)?;
+        if out == 0 { return Err(QuoteErr::ZeroOut); }
+        Ok(Walk { quote: Quote { out, spent: x }, walked: w.walked, liquid, end })
+    }
 }
+
+/// One bin of an exact swap ([`DlmmLeg::fills`]). Layers in fill order: [market-making amount, processed limit
+/// orders, open limit orders]. `taken[i]`: what the swap took out of layer i (gross: before an output fee);
+/// `paid[i]`: the input that layer took, net of an input fee. `used`: the input the bin consumed (fee included);
+/// `out`: the user's output from it (net of an output fee); `rate`: the bin's fee rate out of 1e9.
+///
+/// On the real program (venue-harness `capture_post`) a swap moves the bin's own `amount_x`/`amount_y` by the
+/// market-making layer only: the input side gains `paid[0]`, the output side loses `taken[0]`; limit-order fills
+/// are booked in the order fields, not in the amounts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BinFill { pub id: i32, pub price: u128, pub rate: u64, pub layers: [u64; 3], pub taken: [u64; 3], pub paid: [u64; 3], pub used: u64, pub out: u64 }
+
+/// An exact swap's walk ([`DlmmLeg::fills`]): its quote, the bins read (empty ones inside a visited array included:
+/// what [`DlmmLeg::bins_for`] returns), the bins with liquidity it took from, and the last of those (where the
+/// program leaves the active id).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Walk { pub quote: Quote, pub walked: u16, pub liquid: u16, pub end: i32 }

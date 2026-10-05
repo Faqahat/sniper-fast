@@ -7,6 +7,9 @@ venue by venue.
 **Revision 2026-10-04 (review fixes), in one list** — each item is detailed in the section named:
 - PumpSwap: a sell pays out at most `Q − (held_0 + held_1)` (pool u64 @271, @279), the pool is accepted at exactly
   301 bytes with its unidentified tail clear, and `buy_exact_quote_in` debits `min(x, eff0 + fees(eff0))` (§2.1).
+  **Corrected 2026-10-05 (WP-16 review F1, F2):** the pool is read at every length the program reads (211..=301, each
+  missing trailing group as zero), byte 270 is `is_holder_reward` (0 or 1, priced), a mayhem pool is priced on the
+  fixed 1e15 supply, and the exact-out `buy` has its closed form (host only).
 - DLMM: the pair's own `min_bin_id`/`max_bin_id` bound the walk; the walk budget is a per-leg descriptor field
   `max_bins` (bins read) that the engine sizes from its own quote, and a walk past it answers `Budget` ("not
   evaluated"), never TooLarge (§2.4, §4.3).
@@ -205,7 +208,8 @@ needed.
 
 **Version gates.** Every layout is accepted only at the lengths and version bytes listed below. Anything else is
 `Abort::Layout`, which falls back to `e`. A venue upgrade that grows an account therefore turns sizing off for that
-venue instead of mispricing it.
+venue instead of mispricing it. PumpSwap's pool is the one account read at several lengths: every length the program
+itself reads, from its original layout up to the current one, the way the program reads it (§2.1; WP-16 review F1).
 
 Each venue section gives:
 - **state** (accounts, positions, offsets);
@@ -221,7 +225,7 @@ Each venue section gives:
 
 | Pos (buy / sell) | Account | Checks / fields read |
 |---|---|---|
-| 0 | Pool (owner pAMM, disc `sha256("account:Pool")[..8]`, len **exactly 301**; the IDL defines bytes up to 270) | base_mint @43, quote_mint @75, pool_base_token_account @139, pool_quote_token_account @171, creator @11, coin_creator @211, is_mayhem_mode @243, is_cashback_coin @244, **virtual_quote_reserves i128 @245**, **creator_fee_bps u64 @261**, can_edit_creator_fee @269, **held_0 u64 @271, held_1 u64 @279**. Bytes 270..301 are in neither IDL 1.20.0 nor the program's on-chain IDL (which predates the virtual reserves). `held_0 + held_1` is a quote amount the program holds back from the real vault (most likely the unswept protocol and creator fee buckets, cf. SweepProtocolFee / SweepCreatorFee): nonzero on mainnet (CyJw 1,469,628 + 2,939,251; GLL3 and 6ejg earlier), it does not move the price but bounds a sell's payout (below). Bytes 270 and 287..301 are zero on every pool seen and their meaning is unknown: nonzero → `Abort::Pump(UnknownTail)` |
+| 0 | Pool (owner pAMM, disc `sha256("account:Pool")[..8]`, len **211..=301**: the program's original layout up to the current one; mainnet pools are 287, 300 and 301 bytes) | base_mint @43, quote_mint @75, pool_base_token_account @139, pool_quote_token_account @171, creator @11, coin_creator @211, is_mayhem_mode @243, is_cashback_coin @244, **virtual_quote_reserves i128 @245**, **creator_fee_bps u64 @261**, can_edit_creator_fee @269, **is_holder_reward bool @270**, **held_0 u64 @271, held_1 u64 @279**, then 14 unidentified bytes. The IDL fields end at 271 (pump-public-docs `idl/pump_amm.json`, 2026-09-12: `is_holder_reward` appended after `can_edit_creator_fee`); holder rewards only redirect the creator fee ("no changes to any trade instruction", HOLDER_REWARDS_README) and the crate is exact on holder-reward pools on the dumped binary. `held_0 + held_1` (in no IDL) is a quote amount the program holds back from the real vault (most likely the unswept protocol and creator fee buckets, cf. SweepProtocolFee / SweepCreatorFee): nonzero on mainnet (CyJw 1,469,628 + 2,939,251; GLL3 and 6ejg earlier), it does not move the price but bounds a sell's payout (below). **A shorter pool** (written before a trailing field existed) is read as the program reads it, pinned on the dumped binary by cutting pools at every boundary ±1 (venue-harness `tests/adversarial.rs` "pool cut to L bytes"): below 211 bytes it fails InvalidAccountData; above, each trailing group is read only when the pool holds all of it, else as zero / false: coin_creator @211..243, is_mayhem_mode @243, is_cashback_coin @244, the virtual reserve @245..261 (a partial one reads as 0), creator_fee_bps together with can_edit_creator_fee @261..270, is_holder_reward @270, the two held amounts together @271..287. The bools (@243, @244, @269, @270) are Borsh bools: a byte other than 0 or 1 fails the program's deserialization → `Abort::Layout`. A present byte of the unidentified tail 287..301 that is not zero → `Abort::Pump(UnknownTail)` (zero on every pool seen) |
 | 2 | GlobalConfig `ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw` = PDA["global_config"] (len **949**, disc `95089ccaa0fcb0d9`) | lp_fee_bps @40, protocol_fee_bps @48, disable_flags @56 (bit 3 buy, bit 4 sell), coin_creator_fee_bps @313, buyback_basis_points @899, **creator_fee_configurable @940**, max_configurable_creator_fee_bps @941 |
 | 3 | base mint | supply u64 @36 (market cap); transfer-fee scan |
 | 4 | quote mint | key: SOL-like / USDC / other (fee schedule); transfer-fee scan |
@@ -244,7 +248,9 @@ V = 17,542,101,293. Pool 6ejg has creator_fee_bps = 200.
    - USDC (`EPjF…`) → `stable_fee_tiers` (or `fee_tiers` if the stable list is empty);
    - any other quote → `exotic_flat_fees`, or `flat_fees` when exotic is all zero.
 
-   Market cap is `mc = ⌊Qv · S / B⌋`, where `S` = mint supply (or the fixed 1e15 when mayhem). Pick tier 0 if
+   Market cap is `mc = ⌊Qv · S / B⌋`, where `S` = mint supply, or the fixed 1e15 for a mayhem pool (pinned on the
+   dumped binary: GxqG priced on 1e15 with its mint's supply scaled ×1/1000 to ×2000; a mayhem pool also takes the
+   reserved fee recipients and no buyback, neither of which changes the user's amounts). Pick tier 0 if
    `mc < t0`, otherwise the last tier with `mc ≥ threshold`. This is computed from the PRE-swap reserves, so it is
    constant during the swap.
 4. If `creator_fee_configurable && creator_fee_bps > 0`, then `cr = creator_fee_bps`.
@@ -279,6 +285,18 @@ spent = min(x, eff0 + fees(eff0))                 (pinned on the binary, venue-h
 require: out ≥ 1, out < B, Q ≥ held_0 + held_1    (else the program fails 6023 Overflow on both instructions)
 ```
 
+**Exact, buy (base out `out` exact; host only, WP-16 review F6).** The exact-out instruction third parties send most
+(`PumpLeg::quote_exact_out`; on-chain sizing quotes exact in):
+
+```
+q     = ⌈Qv·out / (B − out)⌉                      (the quote that enters the curve)
+debit = q + ⌈q·lp/1e4⌉ + ⌈q·pr/1e4⌉ + ⌈q·cr/1e4⌉    (each fee rounded up separately; base out is exactly `out`)
+fail:  out = 0 (6001 ZeroBaseAmount), out ≥ B, q or debit past u64 (6024 Truncation, 6023 Overflow)
+```
+
+Pinned on the dumped binary (venue-harness `tests/pins.rs` `pumpswap_exact_out_buy_matches_its_closed_form`: 11,477
+buys exact to the unit) and in the exactness suite (6,362 rows exact).
+
 **Model.** A Möbius curve `out(u) = A·u/(B' + C·u)`:
 - sell: `A = (1 − F/1e4)·Qv`, `B' = B`, `C = 1`;
 - buy: `ψ = 1e4/(1e4+F)`, `A = ψ·B`, `B' = Qv`, `C = ψ`.
@@ -290,13 +308,17 @@ require: out ≥ 1, out < B, Q ≥ held_0 + held_1    (else the program fails 60
 - Buy: unbounded (`out < B` always holds for a finite `x`).
 
 **Abort (falls back to `e`):**
-- `Pump(Mayhem)` when @243 = 1: the market-cap basis and fee recipients differ. Mayhem can be enabled later once the
-  harness covers it.
-- `Pump(Cashback)` when @244 = 1: the cashback bps source is not pinned. No cashback events appeared in the sample.
+- A mayhem pool (@243 = 1) is priced since the WP-16 review: its market cap is on the fixed 1e15 supply (above), and
+  the crate is exact on mayhem pools on the dumped binary. `Pump(Mayhem)` is no longer returned (the variant stays so
+  that the AXZ1 codes after it do not move).
+- `Pump(Cashback)` when @244 = 1: the cashback bps source is not pinned, and the engine's leg cannot execute a
+  cashback coin (with a pool_v2 it leaves out the cashback accounts: 6060 / 6061; without one the program refuses its
+  buyback recipient, 6053), so the venue refuses it too.
 - `Pump(Disabled)` when the disable_flags bit for this direction is set.
 - `Pump(Virtual)`.
-- `Layout` when the pool length is not 301, GlobalConfig ≠ 949 or FeeConfig ≠ 4097.
-- `Pump(UnknownTail)` when byte 270 or any of 287..301 is set; `Pump(HeldExceedsVault)` when `held_0 + held_1 > Q`.
+- `Layout` when the pool length is outside 211..=301, a flag byte (@243, @244, @269, @270) is neither 0 nor 1,
+  GlobalConfig ≠ 949 or FeeConfig ≠ 4097.
+- `Pump(UnknownTail)` when a present byte of 287..301 is set; `Pump(HeldExceedsVault)` when `held_0 + held_1 > Q`.
 - `Pump(FeeTotal)`.
 - `TransferFee` on either mint.
 
@@ -521,16 +543,24 @@ have landed. SELF_SIZE with an abort falls back the same way (REVIEW.md F7).
 
 ### 2.7 Where the engine's reference maths (`src/venues`) differs from the venue programs
 
-These differences matter for the differential tests (§6.2) and are also engine bugs worth fixing. The engine could
-reuse this crate's quoters off chain (§5.5).
+These differences matter for the differential tests (§6.2) and are also engine bugs worth fixing. **Fixed in the
+engine by PLAN-ADDENDUM WP-16:** the engine now quotes with this crate (`src/quote.rs`, §5.5); its old maths is kept,
+tests only, in `src/venues/legacy` as the differential reference, and `src/quote/tests.rs` measures these differences
+against real swaps on the venue binaries (testdata/venue-parity): the crate exact on all 1,252 it quotes, the old maths
+off on PumpSwap buys (all above the program, ≤ 59 ppm), CPMM creator fees on the input (≤ one input unit's worth) and
+DLMM limit-order and fee-on-output pairs (41 of 216, 34 of them above the program, up to 1.2%).
 
 1. **PumpSwap buy_exact_quote_in** (`cp.rs` Fee::Pump buy). It is missing the
    `eff −= max(0, eff0 + fees(eff0) − x)` adjustment and the `−1` in `⌊B·(eff−1)/(Qv+eff−1)⌋`, so it overestimates
    the base out slightly. It also reads the virtual reserve as i64 @245, but the field is i128 (equal while
    `|V| < 2^63`).
-2. **PumpSwap pool flags.** `cp.rs:112` refuses `p[270] == 1` as "holder reward". Byte 270 is the first byte of a
-   field that is not in the IDL and holds nonzero counters on mainnet (0x97, 0xba). The check is wrong, though it only
-   ever refuses.
+2. **PumpSwap pool flags.** `cp.rs:112` refuses `p[270] == 1` as "holder reward". Byte 270 is `is_holder_reward:
+   bool` (pump-public-docs `idl/pump_amm.json`, 2026-09-12), 0 or 1 on every live pool (the WP-16 review's census: 355
+   and 34), and holder rewards change no trade amount: the refusal is needless and dropped 34 tradable pools. (The
+   "nonzero counters 0x97, 0xba" read here earlier were not byte 270: no live pool holds anything but 0 or 1 there, and a
+   Borsh bool cannot.) The crate accepts 0 and 1 and refuses any other byte as `Layout` (§2.1). The old engine also read
+   only pools of ≥ 253 bytes and the crate, until the WP-16 review, only 301-byte ones: both now read every length the
+   program reads.
 3. **Raydium CPMM**, creator fee on input: the engine takes two ceils, the program one (an error of at most 1 unit).
    The engine does not check `open_time` either.
 4. **DLMM.**
@@ -1154,10 +1184,17 @@ impl DlmmLeg<'a> {                                // off-chain helpers the engin
     pub fn with_budget(self, bins: u16) -> Self;  // NO_BUDGET = unbounded
     pub fn bins_for(&self, x: u64) -> Option<u16>;            // the max_bins that covers x
     pub fn start(&self) -> Cursor;  pub fn quote_from(&self, c: &Cursor, x: u64) -> Result<Quote, QuoteErr>;
+    // WP-16 (host only, never called by plan): the exact swap bin by bin, layer by layer (BinFill: taken / paid per
+    // layer, used, out, rate) and its Walk (quote, bins read, bins with liquidity taken from, the bin it ends on).
+    // Equal to quote (tests/venues.rs dlmm_fills_equal_the_quote); the engine's DLMM post-state and CU inputs
+    pub fn fills(&self, x: u64, f: &mut dyn FnMut(&BinFill)) -> Result<Walk, QuoteErr>;
 }
 pub mod venue::dammv2 { pub fn parse_with_limiter(..) -> Result<DammLeg, Abort>; }   // prices the rate limiter
 pub mod venue::pumpswap { pub fn parse(pool, global, fee_cfg, base_mint, quote_mint, base_vault, quote_vault,
-                                       sell: bool, bump: u8) -> Result<PumpLeg, Abort>; }
+                                       sell: bool, bump: u8) -> Result<PumpLeg, Abort>;
+    pub fn pool_len_ok(len: usize) -> bool;                    // POOL_MIN_LEN 211 ..= POOL_LEN 301 (WP-16 review F1)
+    pub fn buy_exact_out(base, qv, fees, out) -> Result<(u64, Quote), QuoteErr>;   // the exact-out `buy` (host only, F6)
+    impl PumpLeg { pub fn quote_exact_out(&self, out: u64) -> Result<(u64, Quote), QuoteErr>; } }
 // … one `parse` per venue taking plain byte slices, so the engine can call the same code with its own snapshots.
 ```
 
@@ -1180,9 +1217,13 @@ pub mod venue::pumpswap { pub fn parse(pool, global, fee_cfg, base_mint, quote_m
 - **arbx-exec** (feature `sizing`): depends on `arbx-sizing` with the default features. It calls `parse_block` from
   `parse_v3` and `plan` from `process_instruction` (§4.5).
 - **The engine** (`arbx`, std): uses `encode_block` and `layout` in the builder, `DlmmLeg::bins_for` for each DLMM
-  leg's `max_bins` (§4.3) and `cu_bound` for the CU limit (§4.7). It should **also quote with the same `venue::*` code**
-  off chain, which removes the divergences in §2.7 and makes "the program and the engine agree" true by construction.
-  The engine's own `src/venues` stays as the differential reference until the switch.
+  leg's `max_bins` (§4.3) and `cu_bound` for the CU limit (§4.7) (WP-17). **Since PLAN-ADDENDUM WP-16 it quotes with
+  the same `venue::*` code off chain** (`src/quote.rs`: a path dependency with the default features), which removes the
+  divergences in §2.7 and makes "the program and the engine agree" true by construction: route pricing and sizing (the
+  ladder plus `opt::locate`), the opportunity's legs, the budget caps, the hint checks and the accuracy monitor's
+  amounts. Each refusal state (`Abort`, `Budget`, a PumpSwap sell past the held-back quote, the DAMM v2 rate limiter on
+  our leg, a Token-2022 transfer fee or hook) is a decision's reason (`sz_*`). The engine's former maths is kept, tests
+  only, in `src/venues/legacy` as the differential reference.
 
 ---
 
@@ -1348,8 +1389,10 @@ of redesign §3.8's "programdata change → venue to shadow".
 
 1. **PumpSwap buy_exact_quote_in debit when `eff + fees(eff) ≠ x`.** Settled (venue-harness pins.rs): the program
    debits `min(x, eff0 + fees(eff0))`; the evaluator now does too (REVIEW.md F2).
-2. **PumpSwap cashback coins and mayhem pools.** Find the cashback bps source (GlobalConfig, FeeConfig or event-only)
-   and the mayhem market-cap basis. Both are aborted until pinned.
+2. **PumpSwap cashback coins and mayhem pools.** Mayhem settled (WP-16 review): the market cap is on the fixed 1e15
+   supply, pinned on the dumped binary; mayhem pools are priced. Cashback is still open: find the cashback bps source
+   (GlobalConfig, FeeConfig or event-only), and the engine's leg must pass the cashback accounts (it cannot execute a
+   cashback coin today). Aborted until both are done.
 3. **DLMM drain test.** SDK 0.12 uses `rem ≥ need` (fee charged first, on the whole input). The older program used
    `in > max_in + max_fee`. These are equivalent for the user's amounts, including at equality (§2.7). The open
    question is the layered limit-order fill: whether each layer's `need` is rounded up separately on chain, as in SDK
@@ -1359,9 +1402,12 @@ of redesign §3.8's "programdata change → venue to shadow".
    orders).
 5. **DLMM version gates.** Collect the pair and bin-array version bytes of older pools, and widen the accepted set
    after harness runs.
-6. **PumpSwap bytes 270..301.** Partly settled: `held_0`/`held_1` (u64 @271, @279) bound a sell's payout (REVIEW.md
-   F1); bytes 270 and 287..301 are still unidentified and refused when set. The program's on-chain IDL predates even
-   the virtual reserves, so a newer IDL has to come from pump.fun's next SDK.
+6. **PumpSwap bytes 270..301.** Settled but for 287..301: byte 270 is `is_holder_reward: bool` (the public IDL of
+   2026-09-12; priced, a non-bool byte is `Layout`), `held_0`/`held_1` (u64 @271, @279) bound a sell's payout (REVIEW.md
+   F1), and shorter pools are read as the program reads them (§2.1, pinned per read group). Bytes 287..301 are still
+   unidentified (in no IDL; zero on every pool seen; a 300-byte pool holds 13 of them) and refused when set. On the
+   dumped binary a pool with them set swaps like one without, so the refusal is a policy (an unknown field turns sizing
+   off) that costs no live pool today.
 7. **DAMM v2 rate limiter.** Settled: the limited direction cannot execute through the engine's leg (6049 without the
    instructions sysvar), so the leg is refused (§2.5). Sizing it would need the sysvar in the leg first.
 8. **Account-lock limit.** Confirm the cluster's `max_tx_account_locks` before planning baskets above 64 unique keys.

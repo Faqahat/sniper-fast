@@ -224,7 +224,7 @@
           "net": 2190657,
           "reason": "best",
           "sell": "usdc.cpmm",
-          "size": 57473054
+          "size": 57515016
         },
         {
           "buy": "usdc.cpmm",
@@ -331,11 +331,11 @@
             0
           ],
           "cu": 93000,
-          "gross": 4901988,
-          "net": 4892268,
+          "gross": 4901985,
+          "net": 4892265,
           "reason": "not_best",
           "sell": "usdc.cpmm",
-          "size": 84214316
+          "size": 84227896
         },
         {
           "buy": "usdc.cpmm",

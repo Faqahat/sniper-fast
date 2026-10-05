@@ -36,8 +36,8 @@
             1
           ],
           "cu": 200000,
-          "gross": -173208,
-          "net": -187208,
+          "gross": -173210,
+          "net": -187210,
           "reason": "below_min_profit",
           "sell": "bolt.dlmm",
           "size": 5000000
@@ -95,8 +95,8 @@
             1
           ],
           "cu": 200000,
-          "gross": -173208,
-          "net": -187208,
+          "gross": -173210,
+          "net": -187210,
           "reason": "below_min_profit",
           "sell": "bolt.dlmm",
           "size": 5000000

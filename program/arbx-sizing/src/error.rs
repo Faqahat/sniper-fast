@@ -30,10 +30,16 @@ pub enum Abort {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PumpWhy {
-    Mayhem, Cashback, Disabled, Virtual, FeeTotal, FeeConfig, EmptyReserves,
+    /// not returned any more: a mayhem pool is priced on the fixed 1e15 supply (pinned on the dumped binary). The
+    /// variant stays so that the AXZ1 codes of the ones after it do not move
+    Mayhem,
+    /// a cashback coin: the cashback bps source is not pinned, and the engine's leg cannot execute one (it leaves out
+    /// the cashback accounts in front of pool_v2: 6060 / 6061 on the dumped binary)
+    Cashback,
+    Disabled, Virtual, FeeTotal, FeeConfig, EmptyReserves,
     /// the quote amounts the pool holds back (bytes 271..287) exceed the quote vault (the program fails 6023 Overflow)
     HeldExceedsVault,
-    /// a byte of the pool's unidentified tail (270, 287..301) is set: its meaning is unknown, so the pool is not priced
+    /// a byte of the pool's unidentified tail (287..301) is set: its meaning is unknown, so the pool is not priced
     UnknownTail,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

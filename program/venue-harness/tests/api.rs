@@ -4,9 +4,11 @@ use venue_harness::*;
 #[test]
 fn venue_swap_output_on_every_pool() {
     let fx = Fixtures::load().unwrap();
+    // every pool the engine's leg can execute (a PumpSwap cashback coin cannot: tests/swaps.rs)
     for p in fx.pools.values() {
+        let h = harness_for(&fx, &p.pool_key()).unwrap();
+        if !venues::engine_leg_executes(p.venue, &h.view[&h.pool].data) { continue; }
         for dir in Dir::BOTH {
-            let h = harness_for(&fx, &p.pool_key()).unwrap();
             let x = size_ladder(h.input_reserve(dir), 14)[4];
             let (out, cu) = venue_swap_output(&fx, &p.pool_key(), dir, x).unwrap_or_else(|o| panic!("{} {}: {}", p.pool, dir.short(), o.venue_error()));
             assert!(out > 0 && cu > 1_000, "{} {}: out {out} cu {cu}", p.pool, dir.short());
@@ -22,8 +24,11 @@ fn venue_swap_output_on_every_pool() {
 fn session_round_trip_loses_fees() {
     let fx = Fixtures::load().unwrap();
     let mut differs = 0;
+    let mut n = 0;
     for p in fx.pools.values() {
         let h = Harness::new(&fx, &p.pool_key()).unwrap();
+        if !venues::engine_leg_executes(p.venue, &h.view[&h.pool].data) { continue; }
+        n += 1;
         let x = size_ladder(h.input_reserve(Dir::OneForZero), 14)[5];
         let mut s = h.session();
         let a = s.swap(Dir::OneForZero, x);
@@ -35,7 +40,7 @@ fn session_round_trip_loses_fees() {
         assert!(fresh.ok);
         if fresh.amount_out != b.amount_out { differs += 1; }
     }
-    assert!(differs * 10 >= fx.pools.len() * 9, "the session did not carry state: {differs} of {} second legs differ", fx.pools.len());
+    assert!(differs * 10 >= n * 9, "the session did not carry state: {differs} of {n} second legs differ");
 }
 
 /// Mutation hook: advance the Clock (DESIGN §6.3 "clock variations"); the swap still runs, against the new time.

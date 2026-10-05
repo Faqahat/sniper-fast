@@ -1,11 +1,13 @@
-//! Venues: pool metadata, live snapshots built from raw account bytes, exact-in quotes, post-trade prediction, and
-//! decoding of a third party's swap instruction. All math is integer (u128, with a 192-bit product where DLMM needs
-//! it). Ported from the current bot's TypeScript (docs/spec-cpmm.md, docs/spec-dlmm.md), with its known float and
-//! fee-bookkeeping shortcuts replaced by the programs' integer rules; the engine checks every prediction against the
-//! pool's real next state, so any remaining mismatch is measured, not assumed.
+//! Venues: pool metadata, the venues' program ids, and decoding of a third party's swap instruction. The venue
+//! maths (exact-in quotes, capacities, the walk over DLMM bins) is arbx-sizing's, through `src/quote.rs`
+//! (PLAN-ADDENDUM WP-16: one pricing implementation, the one proven against the real venue binaries, on chain and off
+//! chain); the accuracy monitor checks every prediction against the pool's real next state, so any remaining mismatch
+//! is measured, not assumed. The engine's own maths before WP-16 is kept, for the differential tests only, in
+//! `legacy`.
 pub mod cp;
 pub mod dlmm;
-pub mod dammv2;
+#[cfg(test)]
+pub mod legacy;
 
 use crate::tx::{pk, Pk};
 use std::sync::LazyLock;

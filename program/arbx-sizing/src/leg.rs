@@ -93,7 +93,8 @@ impl<'a> AnyLeg<'a> {
                 same(gc, Some(&L::PUMP_GLOBAL_CONFIG), 1)?;
                 owned(fc, &L::PUMP_FEE_PROGRAM, Some(&L::DISC_FEE_CONFIG), 6)?;
                 same(fc, Some(&L::PUMP_FEE_CONFIG), 6)?;
-                if pool.data.len() != pumpswap::POOL_LEN { return Ok(Parsed { head, leg: Err(Abort::Layout) }); }
+                // a pool written before a trailing field existed is shorter: priced from the program's minimum up
+                if !pumpswap::pool_len_ok(pool.data.len()) { return Ok(Parsed { head, leg: Err(Abort::Layout) }); }
                 let p = pool.data;
                 let (base, quote) = (key_at(p, pumpswap::off::BASE_MINT), key_at(p, pumpswap::off::QUOTE_MINT));
                 let (Some(base), Some(quote)) = (base, quote) else { return Ok(Parsed { head, leg: Err(Abort::Layout) }) };
