@@ -15,10 +15,11 @@ Every test that runs on Cherry (shadow, dry run, canary or live) is documented h
   - an hourly drop cap (OD-11).
 
   Crossing either puts the bot in shadow and stops the segment.
-- **Prerequisites (owner):**
-  - the frz keystore at `/root/arbx/wallets/trading.enc`;
-  - a passphrase method: piped on stdin at start, or a mode-600 file the supervisor pipes in for unattended tests;
-  - `/root/arbx/deploy/.env` holding `HAAN_API_KEY`, `HAAN_X_TOKEN`, `SHYFT_RPC_URL`, `ASTRALANE_KEY` and `JITO_UUID`.
+- **The key (owner, 2026-10-05): no passphrase needed.** The frz private key is already on Cherry, as the owner's keystore `~/.nexus-v2-trading-wallet.{enc,pass}` that arbed uses.
+  - arbx loads that format as `wallet_profile = "trading"` with `wallet_keystore = ""`, unattended.
+  - At boot it refuses to start unless the key is `FRZh63L6…`.
+  - The files are used in place, never copied or read by anyone but the bot process.
+- **Still needed:** `/root/arbx/deploy/.env` holding `HAAN_API_KEY`, `HAAN_X_TOKEN`, `SHYFT_RPC_URL`, `ASTRALANE_KEY` and `JITO_UUID`. The owner sets it, or allows copying those five names from the existing server .env without printing them.
 
 ## Protocol for each test (an entry `FT-NNN-<slug>.md`)
 
