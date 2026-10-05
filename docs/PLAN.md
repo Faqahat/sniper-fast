@@ -81,7 +81,7 @@ arbx is an atomic, self-funded DEX arbitrage bot. It never trades ahead of user 
 
 1. **No front-running.** arbx only trades atomic, self-funded round trips. A bundle holds only our transaction. Nothing is ever placed ahead of a user order.
 2. **A miss costs nothing.** Live sends are one-transaction Jito bundles. The route reverts unless the quote account ends with at least tip + base fee + margin more than it started (R §3.9).
-3. **Price only committed, complete, canonical state.** No decision reads a state that did not exist on chain, half of one, or one from an abandoned fork once that fork is known to be abandoned (R §3.2).
+3. **Price only committed, complete, canonical state.** No decision reads a state that did not exist on chain, half of one, or one from an abandoned fork once that fork is known to be abandoned (R §3.2). **A hint (a decoded transaction not yet committed) may veto a send, never create one** (STAGE1-PLAN, 2026-10-05).
 4. **Fail closed.** If any input of a send is missing, stale or unverified, there is no send, and the reason is recorded.
 5. **The hot path never blocks** on disk, RPC or recording. The hot runtime runs only stream I/O and sends; all RPC and heavy parsing run on a separate background runtime (WP-02). Recording uses bounded queues and counts its drops.
 6. **Everything is recorded with stable IDs** (signature, decision id, attempt id, bundle id, state version, account-record sequence). Missing data is recorded as missing, never as zero.

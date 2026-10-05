@@ -217,7 +217,9 @@ Added 2026-10-04 at the owner's request.
    - Bundle-only, on the deployed Nexus program 8K8uyQDt. No program deploy: arbx-exec waits until after the $500 stage, since its rent is about 0.35–1 SOL.
    - Size is capped by the bankroll: min(cap, 85% of liquid SOL + WSOL − 0.03 SOL reserve).
    - **OD-11 (proposed):** equity stops. Shadow if equity drops more than 0.02 SOL in a rolling hour, or falls below 90% of the starting equity, campaign-wide (WP-07).
-   - No new token accounts while trading. An owner-approved wallet-prep step creates the token accounts for the top-N mints, about 0.002 SOL each and recoverable.
+   - New token accounts only through WP-06's **rent-neutral create+close inside the same atomic transaction**. The rent comes back in that transaction; a failed route reverts everything; nothing stays locked. This was the best-evidenced lever in STAGE1-PLAN.
+   - Until WP-06 lands, only routes whose token accounts already exist can trade (frz: WSOL and USDC).
+   - Optionally, a wallet-prep step creates accounts for the top-N mints at 1,488,440 lamports each (SPL) or 1,513,840 (Token-2022), recoverable.
    - The I-10 credential checks pass.
 3. **Field: a shadow soak on Cherry with the final build, at least 3 h, with Haan alone** (the old bot not running), no trading keys. It must show:
    - the state gate never fails open, and boot survives provider errors;
