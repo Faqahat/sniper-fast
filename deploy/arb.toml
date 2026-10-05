@@ -163,17 +163,13 @@ account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "CPMMoo8L3F4Nb
 # (the PumpSwap transaction stream `haan-grpc` is a [[state.tx_stream]] since WP-03)
 
 # ---------------------------------------------------------------- send paths
-# Checked with `arbx senders --config arb.toml` (sends nothing). The engine does not send yet (shadow only).
+# Checked with `arbx senders --config arb.toml` (sends nothing). The engine does not send (shadow only): its executor
+# runs every send check up to the signature and records would-sends (WP-05, PLAN-ADDENDUM I-7); the other enabled
+# paths only keep their connections warm (keep-alive measurement). A live or canary run is bundle-only (WP-05).
 # Secrets come from .env next to this file; `${NAME}` in a url is replaced from it. Tip accounts default to each
 # provider's documented list (src/send/mod.rs known_tip_accounts). Tips are paid only when the trade lands.
-# Same order as arbed's production LANDERS (jito-bundle,shyft,helius,rpcfast); the bundle must stay first for the gate.
-
-# THE JITO GATE (arbed's Run 2 decision: keep it): the bundle goes first; the paid copies are dropped only when Jito
-# says our own profit check (0x4e580002) would fail, within 25 ms. Every 10th skip is sent anyway (canary).
-[gate]
-enabled = true
-wait_ms = 25
-canary_every = 10
+# PLAN-ADDENDUM I-10: an enabled path carries a secret over plain http:// only with `no_tls_endpoint` (none here).
+# The Jito gate ([gate]) is gone with WP-05.
 
 [[send]]
 # one-transaction bundle through the searcher gRPC; auth key = the whitelisted keypair (CrQx62…EynE), never funded
@@ -232,7 +228,7 @@ max_per_sec = 1
 # (2026-10-03 probe: no key -> 401). Free tier: 0.001 SOL minimum tip, 5 tx/s, no bundles; 10,000 lamports at VIP 3
 name = "astralane"
 kind = "iris"
-url = "http://fr.gateway.astralane.io/irisb?api-key=${ASTRALANE_KEY}&method=sendTransaction"
+url = "https://fr.gateway.astralane.io/irisb?api-key=${ASTRALANE_KEY}&method=sendTransaction"   # I-10: TLS ("you can also use HTTPS on the above endpoints", astralane.gitbook.io low-latency/endpoints-and-configs, 2026-10-04)
 tip_lamports = 1000000
 max_per_sec = 5
 
@@ -274,23 +270,35 @@ enabled = true
 max_per_sec = 2
 
 [canary]
-# step 3: real transactions built to fail our profit check; needs this AND `arbx run --canary`
+# WP-05: a canary run is a live run under these caps (`arbx run --canary`, bundle-only): at most size_sol a trade
 enabled = true
 count = 100
 every_ms = 5000
 size_sol = 0.01
-max_spend_lamports = 3000000   # 0.003 SOL of network fees in all
-settle_s = 30
-nonce_account = "58XHXCVwizLunHZdtXRr21NXnraG8Y4vQWjpXLN2FgVe"
+max_spend_lamports = 3000000   # 0.003 SOL of fees of landed failures in all
 
 [live]
-# step 4: real trades; needs mode = "live" AND `arbx run --live`
+# step 4: real trades; needs mode = "live" AND `arbx run --live` (bundle-only: WP-05)
 max_size_sol = 0.165                # about $20 a trade (owner, 2026-10-03), paid from the wallet's WSOL
 max_failed_fees_lamports = 20000000 # stop after 0.02 SOL of fees on landed transactions that failed
-margin_lamports = 1000              # on-chain min_profit = base fee + priority fee + that copy's tip + this
+margin_lamports = 1000              # the decision's bar: expected profit >= tip + base fee + this
 max_new_token_accounts = 5          # rent of new token accounts (recoverable)
-settle_s = 15
-max_priority_lamports = 100000   # at most this priority fee per trade
+
+[send_policy]
+# PLAN WP-05 (the defaults, written out): fail-closed send checks, the in-flight lock, the rate queue, the on-chain margin
+max_blockhash_age_slots = 20
+blockhash_commitment = "confirmed"
+skip_leader_kinds = ["other", "unknown"]
+inflight_hold_slots = 2
+queue_ms = 10
+big_band_max_per_sec = 0.5
+crowding_window_h = 6
+crowding_buckets = [20, 150]
+margin_floor = 1
+margin_share = 0.0
+
+[send_policy.direct]
+# the direct arm's durable nonces, kept for its experiment only (direct_experiment is refused in Stage 0)
 nonce_accounts = ["58XHXCVwizLunHZdtXRr21NXnraG8Y4vQWjpXLN2FgVe", "G6MfymxNMNSBResfcJccuvwQMswPW8cq7nB1tsCUN2DC", "CK9tCKm9PNt7Smrymh87UG6PyPi8XmV4gmV3BCPtxJdM"]
 
 # ---------------------------------------------------------------- senders the rivals use (research log S-010/S-011)

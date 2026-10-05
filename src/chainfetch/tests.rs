@@ -381,7 +381,7 @@ async fn backfill_priority_and_auto_rate_under_a_paused_clock() {
     let mut ours = Vec::new();
     for step in 0..2_400u32 {
         r.shared.send(acct(p0, 1_000 + step as u64 / 8, sig_of(step)));
-        if step == 2_000 { r.shared.send(Note::Ours { attempt: 7, sigs: vec![], accounts: vec![p1], t: 0 }); }
+        if step == 2_000 { r.shared.send(Note::Ours { attempt: 7, sigs: vec![], accounts: vec![p1], target_slot: None, t: 0 }); }
         if step > 2_000 && step % 20 == 0 {
             let s = sig_of(1_000_000 + step);
             ours.push((s, step as u64 * 50_000_000));
@@ -630,7 +630,7 @@ fn taps_without_a_service_are_noops() {
     note_stream_tx(&[1u8; 64], 1, 2, true, true);
     note_jito_processed(&[1u8; 64], None);
     note_entry_hash(1, [0; 32], 0);
-    note_fired(1, &[], &[]);
+    note_fired(1, &[], &[], None);
     assert_eq!(status_sections(), (Value::Null, Value::Null));
     // a wire signature: legacy / v0 after the count
     let mut raw = vec![1u8];
@@ -815,7 +815,7 @@ async fn our_attempts_are_watched_with_batched_statuses() {
     let mut account_at = None;
     while t0.elapsed() < Duration::from_secs(16 * 60) {
         k += 1;
-        r.shared.send(Note::Ours { attempt: k as u64, sigs: vec![sig_of(k)], accounts: vec![], t: 0 });
+        r.shared.send(Note::Ours { attempt: k as u64, sigs: vec![sig_of(k)], accounts: vec![], target_slot: None, t: 0 });
         if k == 20 { account_at = Some(t0.elapsed() + Duration::from_secs(5)); }
         if k == 30 { r.shared.send(Note::JitoProcessed { sig: sig_of(5_000_000), slot: Some(453_032_287), t: 0 }); }
         if account_at.is_some_and(|t| t0.elapsed() >= t) { account_at = None; r.shared.send(acct(wallet, 453_032_286, sig_of(20))); }
@@ -856,15 +856,37 @@ async fn our_attempts_are_watched_with_batched_statuses() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The exec tap (`note_fired`) reports only the copies that left (a copy the Jito gate kept back has no `t_sent`)
+/// WP-05 (the E2 merge's hand-off): one of our attempts' signatures is watched only until the chain is
+/// `WATCH_SLOTS_AFTER_TARGET` slots past its target slot (a bundle lands in its leader's window or not at all), within the
+/// 90 s; one without a target slot keeps the 90 s. The narrowed ones are counted apart (`wallet_unlanded_by_slot_delta`)
+#[test]
+fn our_attempts_are_watched_until_their_target_slot_passes() {
+    let mut w = wallet::Wallet::new(pk(WALLET), *crate::venues::WSOL, pk(ROUTE));
+    let (a, b) = (sig_of(1), sig_of(2));
+    let t0 = 1_000_000_000_000u64;
+    assert!(w.found(a, wallet::F_OURS, None, Some(1), t0) && w.found(b, wallet::F_OURS, None, Some(2), t0));
+    w.watch_until(&a, 900 + wallet::WATCH_SLOTS_AFTER_TARGET);
+    w.watch_until(&a, 905);
+    w.evaluate(t0 + 1_000_000_000, 916);
+    assert_eq!((w.unlanded_total, w.watching()), (0, 2), "at slot 916, a's last slot watched (an earlier bound never shortens it)");
+    w.evaluate(t0 + 1_000_000_000, 0);
+    assert_eq!(w.unlanded_total, 0, "no tip slot known: the 90 s only");
+    w.evaluate(t0 + 2_000_000_000, 917);
+    assert_eq!((w.unlanded_total, w.unlanded_by_slot_total, w.watching()), (1, 1, 1), "a: 16 slots past its target, never landed");
+    w.evaluate(t0 + wallet::WATCH_NS, 917);
+    assert_eq!((w.unlanded_total, w.unlanded_by_slot_total, w.watching()), (2, 1, 0), "b: the 90 s");
+}
+
+/// The exec tap (`note_fired`) reports only the copies that left (a copy the rate queue dropped has no `t_sent`), and the
+/// attempt's target slot (WP-05)
 #[test]
 fn the_exec_tap_reports_the_copies_that_left() {
     let (shared, rx) = Shared::new(Arc::new(Registry::default()));
     let sent = |sig: [u8; 64], t_sent: u64| crate::send::Sent { attempt: 3, path: "jito".into(), sig: Some(b58s(&sig)), tip_account: None, tip_lamports: 0, t_sent,
-        t_ack: 0, ms: 0.0, ok: true, status: None, reply: None, bundle: None };
-    with_test_service(shared, || note_fired(3, &[sent(sig_of(1), 5), sent(sig_of(2), 0)], &[[7u8; 32]]));
+        t_ack: 0, ms: 0.0, ok: true, status: None, reply: None, bundle: None, blockhash_slot: None, queue_wait_us: None, drop: None, lambda: None };
+    with_test_service(shared, || note_fired(3, &[sent(sig_of(1), 5), sent(sig_of(2), 0)], &[[7u8; 32]], Some(900)));
     let notes: Vec<Note> = rx.try_iter().collect();
-    assert!(matches!(&notes[..], [Note::Ours { attempt: 3, sigs, accounts, .. }] if *sigs == vec![sig_of(1)] && *accounts == vec![[7u8; 32]]), "{notes:?}");
+    assert!(matches!(&notes[..], [Note::Ours { attempt: 3, sigs, accounts, target_slot: Some(900), .. }] if *sigs == vec![sig_of(1)] && *accounts == vec![[7u8; 32]]), "{notes:?}");
 }
 
 // ---------------------------------------------------------------- memory (review WP-03b #3)

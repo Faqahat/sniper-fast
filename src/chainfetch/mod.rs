@@ -8,9 +8,9 @@
 //!   source (a)), confirmed and dead slots and block metas (`feeds::forward`); the transaction stream's records with
 //!   their `idx` (`feeds::grpc::tx_stream_item`: covered signatures when the recorder took the record, the idx check);
 //!   the engine's first copy of every unexecuted (shred, entries, deshred) transaction with its resolved keys
-//!   (`Engine::process`: D2 candidates); our attempts' copies once fired (`Exec::send`'s fire task: source (b), and the
-//!   route's pools at priority 0). `note_jito_processed` (source (c)) and `note_entry_hash` (the shred/entries
-//!   blockhash source) are ready for their producers (WP-05, WP-08).
+//!   (`Engine::process`: D2 candidates); our attempts' copies once fired (`Exec::decide`'s fire task: source (b), and the
+//!   route's pools at priority 0). `note_jito_processed` (source (c): send/jito.rs on a `processed` result of ours,
+//!   WP-05) and `note_entry_hash` (the shred/entries blockhash source, WP-08).
 //! - **Records**: exec.jsonl (backfilled `rpc-backfill`, ours `rpc-wallet`, sampled `rpc-block-sample`; `idx_update`
 //!   lines), wallet.jsonl, slotidx.jsonl, txfetch.jsonl, events.jsonl (`wallet_update_missing`,
 //!   `blockhash_source_disagree`, `chainfetch_backlog`, `chainfetch_tap_drop`, and the watchdog's `chainfetch_dead`,
@@ -70,8 +70,9 @@ pub enum Note {
     StreamTx { sig: [u8; 64], slot: u64, idx: u64, ok: bool, recorded: bool, t: u64 },
     /// the engine's first copy of an unexecuted transaction, with its resolved account keys
     Seen { sig: [u8; 64], slot: u64, feed: u16, keys: Vec<Pk>, t: u64 },
-    /// an attempt of ours, fired: the signatures of its copies handed to the send paths, and its route's accounts
-    Ours { attempt: u64, sigs: Vec<[u8; 64]>, accounts: Vec<Pk>, t: u64 },
+    /// an attempt of ours, fired: the signatures of its copies handed to the send paths, its route's accounts, and the
+    /// slot it was aimed at (WP-05: its signatures are watched until a few slots past it)
+    Ours { attempt: u64, sigs: Vec<[u8; 64]>, accounts: Vec<Pk>, target_slot: Option<u64>, t: u64 },
     /// a Jito `processed` result for a transaction of ours
     JitoProcessed { sig: [u8; 64], slot: Option<u64>, t: u64 },
     /// the last entry hash of a completed slot (its blockhash) from a shred or entries assembler
@@ -172,17 +173,19 @@ pub fn note_seen(a: &crate::feeds::Arrival, keys: &[Pk]) {
     with_shared(|s| s.send(Note::Seen { sig: a.tx.sig, slot: a.slot, feed: a.feed, keys: keys.to_vec(), t: a.t_rx }));
 }
 
-/// An attempt of ours, fired (`Exec::send`'s fire task, after each send): the signatures of the copies that left
-/// (`t_sent` set: wallet source (b)) and its route's accounts (backfill priority 0)
-pub fn note_fired(attempt: u64, copies: &[crate::send::Sent], accounts: &[Pk]) {
+/// An attempt of ours, fired (`Exec::decide`'s fire task, after the send): the signatures of the copies that left
+/// (`t_sent` set: wallet source (b)), its route's accounts (backfill priority 0) and its target slot: WP-05 narrows the
+/// watch of its signatures to `wallet::WATCH_SLOTS_AFTER_TARGET` slots past it (a bundle lands in its leader's window or
+/// never; the executor's own expiry check covers the rest of the blockhash's life)
+pub fn note_fired(attempt: u64, copies: &[crate::send::Sent], accounts: &[Pk], target_slot: Option<u64>) {
     with_shared(|s| {
         let sigs: Vec<[u8; 64]> = copies.iter().filter(|c| c.t_sent > 0).filter_map(|c| c.sig.as_deref())
             .filter_map(|x| bs58::decode(x).into_vec().ok()).filter_map(|v| <[u8; 64]>::try_from(v).ok()).collect();
-        s.send(Note::Ours { attempt, sigs, accounts: accounts.to_vec(), t: now_ns() });
+        s.send(Note::Ours { attempt, sigs, accounts: accounts.to_vec(), target_slot, t: now_ns() });
     });
 }
 
-/// A Jito `processed` result of a transaction of ours (source (c); WP-05 wires it)
+/// A Jito `processed` result of a transaction of ours (source (c); send/jito.rs calls it, WP-05)
 pub fn note_jito_processed(sig: &[u8; 64], slot: Option<u64>) { with_shared(|s| s.send(Note::JitoProcessed { sig: *sig, slot, t: now_ns() })); }
 
 /// The last entry hash of a completed slot from a shred or entries assembler (blockhash source `entries`): a shred feed's
@@ -270,7 +273,7 @@ pub struct Published {
     pub slotidx_lag: Option<u64>, pub slotidx_pending: usize, pub slot_ok: u64, pub slot_skipped: u64, pub slot_error: u64, pub slot_dropped: u64, pub slot_refused: u64,
     pub idx_n: u64, pub idx_mismatch: u64, pub idx_updates: u64, pub missing_sigs: u64, pub d2_landed: u64, pub d2_absent: u64, pub d2_unknown: u64,
     pub wallet_pending: usize, pub wallet_watch: usize, pub wallet_fetched: u64, pub wallet_gave_up: u64, pub wallet_missing: u64, pub wallet_unlanded: u64,
-    pub wallet_landed_by_status: u64, pub wallet_status_calls: u64,
+    pub wallet_unlanded_by_slot: u64, pub wallet_landed_by_status: u64, pub wallet_status_calls: u64,
     pub bh: Option<(String, u64, Option<u64>, u64)>, pub bh_disagree: u64, pub bh_polls: u64, pub bh_poll_skipped: u64,
     pub unseen: Option<(u64, u64, u64)>,
     pub denom: u64, pub with_tx: u64, pub with_idx: u64, pub wallet_n: u64, pub wallet_with: u64, pub slots_n: u64, pub slots_with: u64,
@@ -307,6 +310,7 @@ impl Shared {
             "d2_landed_delta": d(p.d2_landed, prev.d2_landed), "d2_absent_delta": d(p.d2_absent, prev.d2_absent), "d2_unknown_delta": d(p.d2_unknown, prev.d2_unknown),
             "wallet_pending_now": p.wallet_pending, "wallet_watch_now": p.wallet_watch, "wallet_fetched_delta": d(p.wallet_fetched, prev.wallet_fetched),
             "wallet_gave_up_delta": d(p.wallet_gave_up, prev.wallet_gave_up), "wallet_unlanded_delta": d(p.wallet_unlanded, prev.wallet_unlanded),
+            "wallet_unlanded_by_slot_delta": d(p.wallet_unlanded_by_slot, prev.wallet_unlanded_by_slot),
             "wallet_landed_by_status_delta": d(p.wallet_landed_by_status, prev.wallet_landed_by_status),
             "wallet_status_calls_delta": d(p.wallet_status_calls, prev.wallet_status_calls),
             "blockhash": { "src_now": p.bh.as_ref().map(|b| b.0.clone()), "slot_now": p.bh.as_ref().map(|b| b.1), "age_slots_now": p.bh.as_ref().and_then(|b| b.2),
@@ -563,13 +567,16 @@ impl Service {
                 if let (None, Some((_, idx, ts))) = (e.rec, stream) { e.rec = Some(RecSrc::Stream); e.idx = Some(idx); e.rec_idx = true; e.t_exec = Some(ts); e.t_idx = Some(ts); }
                 if new { self.si.track(slot, sig, Kind::D2); }
             }
-            Note::Ours { attempt, sigs, accounts, t: _ } => {
+            Note::Ours { attempt, sigs, accounts, target_slot, t: _ } => {
                 for k in &accounts {
                     self.ours_accounts.insert(*k, now + OURS_KEEP_NS);
                     if let Some(r) = self.roles.get(k).filter(|r| r.pool_index != crate::rec::accounts::NO_POOL) { self.ours_pools.insert(r.pool_index, now + OURS_KEEP_NS); }
                 }
                 for s in sigs {
-                    if let Some(w) = &mut self.wallet { w.found(s, F_OURS, None, Some(attempt), now); }
+                    if let Some(w) = &mut self.wallet {
+                        w.found(s, F_OURS, None, Some(attempt), now);
+                        if let Some(ts) = target_slot { w.watch_until(&s, ts + wallet::WATCH_SLOTS_AFTER_TARGET); }
+                    }
                     if let Some(e) = self.known.get_mut(&s) { e.bits |= F_OURS; }
                 }
             }
@@ -724,7 +731,8 @@ impl Service {
         for (sig, slot, bits) in missing {
             self.rec.event("wallet_update_missing", "chainfetch", None, json!({ "sig": b58s(&sig), "slot": slot, "found_by": wallet::found_by(bits) }));
         }
-        if let Some(w) = &mut self.wallet { w.evaluate(now); }
+        let tip = self.ring.tip_slot;
+        if let Some(w) = &mut self.wallet { w.evaluate(now, tip); }
         self.si.evaluate(now);
         // the backfill's rate: what its providers have spare after the other roles (never above their configured
         // max_rps); signatures seen 10 minutes ago leave it
@@ -783,6 +791,7 @@ impl Service {
             d2_unknown: self.d2_unknown,
             wallet_pending: w.map_or(0, |w| w.pending_now()), wallet_watch: w.map_or(0, |w| w.watching()), wallet_fetched: wv(|w| w.fetched_total),
             wallet_gave_up: wv(|w| w.gave_up_total), wallet_missing: wv(|w| w.missing_total), wallet_unlanded: wv(|w| w.unlanded_total),
+            wallet_unlanded_by_slot: wv(|w| w.unlanded_by_slot_total),
             wallet_landed_by_status: wv(|w| w.landed_by_status_total), wallet_status_calls: self.status_calls,
             bh, bh_disagree: self.ring.disagreements, bh_polls: self.bh_polls, bh_poll_skipped: self.bh_poll_skipped, unseen: self.unseen,
             denom: self.denom_n, with_tx: self.with_tx, with_idx: self.with_idx, wallet_n: wv(|w| w.cov_n_total), wallet_with: wv(|w| w.cov_with_total),
@@ -930,8 +939,10 @@ impl Service {
         // exec.jsonl too when it wrote a watched account (it is a D1 signature, or it moved the wallet) and has no record yet
         let wrote_wallet = x.keys.first() == Some(&w.wallet) || f.wallet_sol.is_some_and(|s| s != 0) || !f.wallet_tok.is_empty();
         let in_exec = known.as_ref().map_or(wrote_wallet, |e| e.rec.is_none() && (e.denom || wrote_wallet));
+        // WP-05: the route program's events (each leg's delivered amount) and the CU used, for the attempt's outcome line
         let input = json!({ "sig": b58s(&sig), "slot": slot, "idx": idx, "ok": ok, "err": err, "fee": fee, "wallet_kind": f.wallet_kind, "wallet_sol": f.wallet_sol,
-            "wallet_tok": f.wallet_tok, "attempt": attempt, "found_by": wallet::found_by(bits), "created": f.created.len(), "closed": f.closed.len(), "pre_run": pre_run });
+            "wallet_tok": f.wallet_tok, "attempt": attempt, "found_by": wallet::found_by(bits), "created": f.created.len(), "closed": f.closed.len(), "pre_run": pre_run,
+            "prog_events": meta.map(|m| crate::proglog::events(&m.log_messages)), "cu_consumed": meta.and_then(|m| m.compute_units_consumed) });
         let bytes = r.as_ref().map_or(0, |f| f.bytes);
         let x = Arc::new(x);
         self.emit_tx(rec::WALLET, x.clone(), slot, idx, "rpc-wallet", bits, Some(extras), bytes);

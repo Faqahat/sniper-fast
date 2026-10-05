@@ -9,7 +9,8 @@
 //! (a) and (d) show the signature landed: it is fetched at once. Most of (b) never lands (Jito drops a losing bundle),
 //! so a signature known only from (b) or (c) is watched instead: batched `getSignatureStatuses` (up to 256 a call, one
 //! call every 2 s while any is watched), and fetched only once a status shows it landed or (a) / (d) names it. A watched
-//! signature with no status 90 s after it was found never landed (`unlanded`, counted). The rate is a call every 2 s
+//! signature with no status 90 s after it was found, or (WP-05) once the chain is 16 slots past its attempt's target
+//! slot, never landed (`unlanded`, counted). The rate is a call every 2 s
 //! while attempts are in flight plus one fetch per landed transaction, against the 22 fetches per attempt of fetching
 //! every signature blind (review WP-03b #2).
 //!
@@ -48,6 +49,10 @@ pub const MISSING_GRACE_NS: u64 = 60_000_000_000;
 /// a signature known only from our attempt (b) or Jito (c) is watched this long for a status (a bundle that did not
 /// land within it never will: Jito forwards it to the leaders of a few slots)
 pub const WATCH_NS: u64 = 90_000_000_000;
+/// WP-05: an attempt's signatures are watched until the chain is this many slots past the attempt's target slot (four
+/// leader windows: a bundle lands in its leader's slots or not at all; a later landing still comes by (a), and the
+/// executor checks once more when the blockhash expires), within the 90 s above
+pub const WATCH_SLOTS_AFTER_TARGET: u64 = 16;
 /// at most this many signatures in one getSignatureStatuses call (the RPC's limit is 256)
 pub const STATUS_BATCH: usize = 256;
 /// signatures are remembered this long (a later source of one already fetched only adds to its `found_by`)
@@ -84,6 +89,8 @@ pub struct WSig {
     pub idx: Option<u64>,
     /// its record also went to exec.jsonl (the idx update goes there too)
     pub in_exec: bool,
+    /// WP-05: watched no longer once the chain passes this slot (an attempt's target slot + `WATCH_SLOTS_AFTER_TARGET`)
+    pub watch_until_slot: Option<u64>,
 }
 
 pub struct Wallet {
@@ -101,8 +108,10 @@ pub struct Wallet {
     pub fetched_total: u64,
     pub gave_up_total: u64,
     pub missing_total: u64,
-    /// watched signatures that never showed a status, and those whose status showed they landed
+    /// watched signatures that never showed a status (of them, those that passed their target slot: WP-05), and those
+    /// whose status showed they landed
     pub unlanded_total: u64,
+    pub unlanded_by_slot_total: u64,
     pub landed_by_status_total: u64,
     /// coverage (`wallet_with_tx_pct`): landed signatures whose minute has passed, and those recorded within it
     cov_q: VecDeque<(u64, [u8; 64])>,
@@ -113,7 +122,7 @@ pub struct Wallet {
 impl Wallet {
     pub fn new(wallet: Pk, wsol: Pk, route: Pk) -> Wallet {
         Wallet { wallet, wsol, route, sigs: HashMap::new(), order: VecDeque::new(), due: BTreeSet::new(), watch: VecDeque::new(), stream_first_slot: None,
-            missing_checks: VecDeque::new(), fetched_total: 0, gave_up_total: 0, missing_total: 0, unlanded_total: 0, landed_by_status_total: 0,
+            missing_checks: VecDeque::new(), fetched_total: 0, gave_up_total: 0, missing_total: 0, unlanded_total: 0, unlanded_by_slot_total: 0, landed_by_status_total: 0,
             cov_q: VecDeque::new(), cov_n_total: 0, cov_with_total: 0 }
     }
 
@@ -161,11 +170,16 @@ impl Wallet {
             return false;
         }
         self.sigs.insert(sig, WSig { found_by: bit, first: now, slot, attempt, tries: 0, state: State::Watch, due_at: None, landed: None, recorded: None, idx: None,
-            in_exec: false });
+            in_exec: false, watch_until_slot: None });
         self.order.push_back((now, sig));
         if lands { self.landed(sig, now); self.schedule(sig, now); } else { self.watch.push_back((now, sig)); }
         if bit == F_SIGS { self.missing_checks.push_back((now + MISSING_GRACE_NS, sig)); }
         true
+    }
+
+    /// WP-05: watch `sig` (one of our attempts') only until the chain passes `slot`
+    pub fn watch_until(&mut self, sig: &[u8; 64], slot: u64) {
+        if let Some(s) = self.sigs.get_mut(sig) { s.watch_until_slot = Some(s.watch_until_slot.map_or(slot, |x| x.max(slot))); }
     }
 
     /// at most `max` signatures to fetch now
@@ -253,14 +267,21 @@ impl Wallet {
         out
     }
 
-    /// Once a second: watched signatures without a status for `WATCH_NS` never landed; coverage (landed signatures whose
-    /// minute has passed, recorded within it or not); old signatures forgotten
-    pub fn evaluate(&mut self, now: u64) {
-        while let Some(&(t, sig)) = self.watch.front() {
-            if now.saturating_sub(t) < WATCH_NS { break; }
-            self.watch.pop_front();
-            if let Some(s) = self.sigs.get_mut(&sig).filter(|s| s.state == State::Watch) { s.state = State::Unlanded; self.unlanded_total += 1; }
+    /// Once a second, `tip_slot` the chain's newest slot (0: unknown): watched signatures without a status for
+    /// `WATCH_NS`, or whose attempt's target slot the chain has passed by `WATCH_SLOTS_AFTER_TARGET` (WP-05), never
+    /// landed; coverage (landed signatures whose minute has passed, recorded within it or not); old signatures forgotten
+    pub fn evaluate(&mut self, now: u64, tip_slot: u64) {
+        let mut keep = VecDeque::with_capacity(self.watch.len());
+        while let Some((t, sig)) = self.watch.pop_front() {
+            let Some(s) = self.sigs.get_mut(&sig).filter(|s| s.state == State::Watch) else { continue };
+            let by_slot = tip_slot > 0 && s.watch_until_slot.is_some_and(|u| tip_slot > u);
+            if by_slot || now.saturating_sub(t) >= WATCH_NS {
+                s.state = State::Unlanded;
+                self.unlanded_total += 1;
+                if by_slot { self.unlanded_by_slot_total += 1; }
+            } else { keep.push_back((t, sig)); }
         }
+        self.watch = keep;
         while let Some(&(t, sig)) = self.cov_q.front() {
             if now.saturating_sub(t) < 60_000_000_000 { break; }
             self.cov_q.pop_front();

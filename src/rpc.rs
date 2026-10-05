@@ -747,6 +747,8 @@ impl Rpc {
     /// bound client runs it on its runtime (`bind`). During the boot ([`Phase::Boot`]) it is a bounded call that
     /// retries across the providers with backoff for the boot budget (PLAN-ADDENDUM I-1)
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        // WP-05 (F28): counted where it starts, in the caller's context (a send-path scope sees it)
+        crate::netcount::note();
         if self.phase() == Phase::Boot {
             let b = Bounds::boot(self.boot_budget());
             return match self.bounded(method, params, b, true).await {
@@ -773,6 +775,7 @@ impl Rpc {
     /// when every provider has answered so (review WP-03b #4). During the boot, every failed attempt is an events.jsonl
     /// `rpc_boot_retry`, and the final failure `rpc_boot_failed`. A bound client runs it on its runtime
     pub async fn call_bounded(&self, method: &str, params: Value, b: Bounds) -> std::result::Result<Fetched, RpcFailure> {
+        crate::netcount::note();
         self.bounded(method, params, b, false).await
     }
 
@@ -969,6 +972,7 @@ impl Rpc {
                 _ => "no DNS (an address)".to_string(),
             };
             let t1 = Instant::now();
+            crate::netcount::note();
             let first = match me.attempt(ep, &body, "getSlot", Duration::from_secs(5), Some(Instant::now() + Duration::from_secs(5))).await {
                 Ok(_) => format!("first call {:.1} ms", t1.elapsed().as_secs_f64() * 1e3),
                 Err(f) => format!("first call failed ({}: {})", f.class.as_str(), f.msg),
@@ -991,6 +995,7 @@ impl Rpc {
                     // only an idle provider, and only with a token to spare (a busy one is warm anyway)
                     let spare = me.reg.limiter(&ep.name).wait_hint(Role::Warm.priority(), Instant::now()).is_zero();
                     if spare && me.reg.idle_for(&ep.name).is_none_or(|d| d >= idle) {
+                        crate::netcount::note();
                         let _ = me.attempt(ep, &body, "getSlot", Duration::from_secs(3), Some(Instant::now())).await;
                     }
                 }
@@ -1111,6 +1116,29 @@ impl Rpc {
         Ok(out)
     }
 
+    /// getSignatureStatuses as one bounded call (PLAN WP-05 item 2: the executor's run-time calls use `call_bounded`, never
+    /// the 3 s failover or the 429 loop): per signature, None when the node does not know it. `search_history`: look past
+    /// the recent status cache (the one check before an attempt is final, F43)
+    pub async fn statuses_bounded(&self, sigs: &[[u8; 64]], search_history: bool, b: Bounds) -> std::result::Result<Vec<Option<SigStatus>>, RpcFailure> {
+        let ss: Vec<String> = sigs.iter().map(|s| bs58::encode(s).into_string()).collect();
+        let f = self.call_bounded("getSignatureStatuses", json!([ss, { "searchTransactionHistory": search_history }]), b).await?;
+        let list = f.value["value"].as_array().cloned().unwrap_or_default();
+        Ok((0..sigs.len()).map(|i| list.get(i).filter(|v| !v.is_null()).map(|v| SigStatus { slot: v["slot"].as_u64().unwrap_or(0),
+            err: if v["err"].is_null() { None } else { Some(v["err"].clone()) }, confirmation: v["confirmationStatus"].as_str().map(String::from) })).collect())
+    }
+
+    /// simulateTransaction as one bounded call (read-only: nothing is broadcast). `sig_verify` false lets a transaction
+    /// signed by another key than its payer simulate; `replace_blockhash` false checks the blockhash too
+    pub async fn simulate_bounded(&self, tx: &[u8], sig_verify: bool, replace_blockhash: bool, b: Bounds) -> std::result::Result<Sim, RpcFailure> {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(tx);
+        let f = self.call_bounded("simulateTransaction", json!([b64, { "encoding": "base64", "sigVerify": sig_verify, "replaceRecentBlockhash": replace_blockhash,
+            "commitment": "processed" }]), b).await?;
+        let (r, v) = (&f.value, &f.value["value"]);
+        Ok(Sim { slot: r["context"]["slot"].as_u64().unwrap_or(0), err: if v["err"].is_null() { None } else { Some(v["err"].clone()) },
+            units: v["unitsConsumed"].as_u64(),
+            logs: v["logs"].as_array().map(|a| a.iter().filter_map(|l| l.as_str().map(String::from)).collect()).unwrap_or_default() })
+    }
+
     /// getSignatureStatuses: (slot, ok) per signature, None if unknown
     pub async fn statuses(&self, sigs: &[[u8; 64]]) -> Result<Vec<Option<(u64, bool)>>> {
         let ss: Vec<String> = sigs.iter().map(|s| bs58::encode(s).into_string()).collect();
@@ -1194,6 +1222,11 @@ pub async fn parse_reply<B: AsRef<[u8]> + Send + 'static>(bytes: B) -> serde_jso
 #[derive(Debug, Clone)]
 pub struct Sim { pub slot: u64, pub err: Option<Value>, pub units: Option<u64>, pub logs: Vec<String> }
 
+/// one signature's status (`getSignatureStatuses`): the slot it landed in, its error (None: it succeeded) and the
+/// commitment reached
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct SigStatus { pub slot: u64, pub err: Option<Value>, pub confirmation: Option<String> }
+
 fn parse_account(v: &Value) -> Option<Account> {
     if v.is_null() { return None; }
     let data = base64::engine::general_purpose::STANDARD.decode(v["data"][0].as_str()?).ok()?;
@@ -1220,6 +1253,8 @@ pub(crate) mod mock {
         pub fail_next: Arc<AtomicU64>,
         pub fail_keys: Arc<Mutex<std::collections::HashSet<Pk>>>,
         pub calls: Arc<AtomicU64>,
+        /// every request, in order (`{"method", "params", ...}`)
+        pub reqs: Arc<Mutex<Vec<Value>>>,
         stop: Arc<AtomicBool>,
         addr: std::net::SocketAddr,
     }
@@ -1229,8 +1264,9 @@ pub(crate) mod mock {
             let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let addr = l.local_addr().unwrap();
             let m = MockRpc { url: format!("http://{addr}"), accounts: Default::default(), slot: Arc::new(AtomicU64::new(0)), fail_next: Default::default(),
-                fail_keys: Default::default(), calls: Default::default(), stop: Default::default(), addr };
+                fail_keys: Default::default(), calls: Default::default(), reqs: Default::default(), stop: Default::default(), addr };
             let (accounts, slot, fail, fail_keys, calls, stop) = (m.accounts.clone(), m.slot.clone(), m.fail_next.clone(), m.fail_keys.clone(), m.calls.clone(), m.stop.clone());
+            let reqs = m.reqs.clone();
             std::thread::spawn(move || {
                 for c in l.incoming() {
                     if stop.load(Relaxed) { break; }
@@ -1251,6 +1287,7 @@ pub(crate) mod mock {
                     let Some(body) = body else { continue };
                     calls.fetch_add(1, Relaxed);
                     let req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                    reqs.lock().unwrap().push(req.clone());
                     let named: Vec<Pk> = req["params"][0].as_array().into_iter().flatten().filter_map(|k| k.as_str())
                         .filter_map(|s| bs58::decode(s).into_vec().ok()?.try_into().ok()).collect();
                     let key_fail = { let mut f = fail_keys.lock().unwrap(); let hit = named.iter().find(|k| f.contains(*k)).copied(); if let Some(k) = hit { f.remove(&k); } hit.is_some() };

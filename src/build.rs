@@ -229,7 +229,7 @@ pub fn route_ix(program: Pk, authority: Pk, quote: Pk, amount_in: u64, min_profi
 /// arbx-exec's v3 route layout (program/arbx-exec, README.md has the byte table). The bytes are pinned by golden
 /// vectors shared with the program (program/arbx-exec/tests/fixtures/golden), and this encoder refuses exactly what
 /// the program's v3 parser refuses, so a route that builds here parses there. Not wired into `Exec::build` yet:
-/// docs/PLAN.md WP-15 does that behind `[exec] route_program`; until then only the tests and `exec::meaning` use it.
+/// docs/PLAN.md WP-15 does that behind `[exec] route_program`; until then only the tests and `proglog::meaning` use it.
 #[allow(dead_code)]
 pub mod arbx_v3 {
     pub const VERSION: u8 = 3;
@@ -361,7 +361,9 @@ pub fn create_nonce_ixs(payer: Pk, seed: &str, lamports: u64) -> (Pk, Vec<Ix>) {
     (addr, vec![create, init])
 }
 
-/// AdvanceNonceAccount: must be the FIRST instruction of a durable-nonce transaction
+/// AdvanceNonceAccount: must be the FIRST instruction of a durable-nonce transaction. Kept for the direct experiment
+/// only (PLAN WP-05 item 3: bundles use a recent blockhash; `[send_policy.direct] nonce_accounts` keeps the accounts):
+/// nothing calls it in Stage 0 (review WP-05 #17)
 pub fn advance_nonce_ix(nonce: Pk, authority: Pk) -> Ix {
     Ix { program: *SYSTEM_PROGRAM, accounts: vec![w(nonce), r(*SYSVAR_RECENT_BLOCKHASHES), s(authority)], data: 4u32.to_le_bytes().to_vec() }
 }
@@ -371,7 +373,8 @@ pub fn create_ata_idempotent_ix(payer: Pk, owner: Pk, mint: Pk, token_prog: Pk) 
     Ix { program: *ATA_PROGRAM, accounts: vec![s(payer), w(ata_of(&owner, &mint, &token_prog)), r(owner), r(mint), r(*SYSTEM_PROGRAM), r(token_prog)], data: vec![1] }
 }
 
-/// A durable nonce account's stored value (the blockhash field the transaction carries), from its 80 bytes
+/// A durable nonce account's stored value (the blockhash field the transaction carries), from its 80 bytes. The direct
+/// experiment's, like `advance_nonce_ix`: no reader in Stage 0
 pub fn nonce_value(d: &[u8]) -> Option<[u8; 32]> {
     if d.len() < 72 || crate::venues::u32_at(d, 4)? != 1 { return None; }
     d[40..72].try_into().ok()
@@ -483,22 +486,6 @@ pub fn unsigned(msg: &Message) -> Vec<u8> {
 
 /// size of the signed transaction
 pub fn tx_bytes(msg: &Message) -> usize { 1 + 64 + msg.bytes.len() }
-
-/// What `NXV2OUT` logs say each leg delivered: (leg index, amount). Logged as "Program data: <base64>" of
-/// `NXV2OUT` + leg u8 + u64 LE (16 bytes).
-pub fn delivered_from_logs(logs: &[String]) -> Vec<(u8, u64)> {
-    use base64::Engine as _;
-    let mut out = Vec::new();
-    for l in logs {
-        let Some(rest) = l.strip_prefix("Program data: ") else { continue };
-        for part in rest.split_whitespace() {
-            if let Ok(b) = base64::engine::general_purpose::STANDARD.decode(part) {
-                if b.len() == 16 && &b[..7] == b"NXV2OUT" { out.push((b[7], u64::from_le_bytes(b[8..16].try_into().unwrap()))); }
-            }
-        }
-    }
-    out
-}
 
 /// A custom program error code from a simulation / transaction error value ({"InstructionError":[i,{"Custom":n}]})
 pub fn custom_code(err: &serde_json::Value) -> Option<u32> {
@@ -749,10 +736,7 @@ mod tests {
         d[4..8].copy_from_slice(&1u32.to_le_bytes());
         d[40..72].copy_from_slice(&[5; 32]);
         assert_eq!(nonce_value(&d), Some([5; 32]));
-        use base64::Engine as _;
-        let mut ev = b"NXV2OUT".to_vec(); ev.push(1); ev.extend(123u64.to_le_bytes());
-        let logs = vec![format!("Program data: {}", base64::engine::general_purpose::STANDARD.encode(&ev))];
-        assert_eq!(delivered_from_logs(&logs), vec![(1, 123)]);
+        // (the logs' decoder moved to src/proglog.rs with WP-05: `proglog::tests::delivered_reads_the_out_records`)
         let e = serde_json::json!({ "InstructionError": [3, { "Custom": 1314390018u64 }] });
         assert_eq!(custom_code(&e), Some(ERR_PROFIT));
     }

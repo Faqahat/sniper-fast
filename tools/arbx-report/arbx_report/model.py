@@ -105,9 +105,22 @@ class Segment:
     # ------------------------------------------------------------------ core streams, normalized
     @cached_property
     def attempts(self) -> list:
+        """the attempts sent (live, canary). A would-send (attempts 2.0 `sent` false: a shadow or dry run, or a closed
+        SendGate; PLAN-ADDENDUM I-7, WP-05) is no attempt: it is in `would_sends`"""
         rows = self.jsonl("attempts")
         if self.v1("attempts"):
             rows = [legacy.attempt(a) for a in rows]
+        else:
+            rows = [a for a in rows if a.get("sent") is not False]
+        return sorted(rows, key=lambda a: (a.get("attempt") is None, a.get("attempt") or 0))
+
+    @cached_property
+    def would_sends(self) -> list:
+        """attempts.jsonl's would-sends (`sent` false, WP-05): every check but the SendGate passed and the bundle was
+        built (a dry run's also signed); never sent, so never in a land rate"""
+        if self.v1("attempts"):
+            return []
+        rows = [a for a in self.jsonl("attempts") if a.get("sent") is False]
         return sorted(rows, key=lambda a: (a.get("attempt") is None, a.get("attempt") or 0))
 
     @cached_property

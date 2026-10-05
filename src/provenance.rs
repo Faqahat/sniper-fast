@@ -136,13 +136,21 @@ pub fn feeds_json(cfg: &Config) -> Value {
     }).collect())
 }
 
+/// meta.json `send_paths[].tls`: the URL is not plain (`http://`, `udp://`); null when it is wholly `${...}`, whose scheme
+/// is known only once expanded (review WP-05 #17; `Path::new` checks the expanded URL, PLAN-ADDENDUM I-10)
+pub fn tls_of(url: &str) -> Value {
+    if url.trim_start().starts_with("${") { Value::Null } else { Value::Bool(!crate::config::cleartext_scheme(url)) }
+}
+
 /// meta.json `send_paths`: the enabled paths; `id` is the path's index in the running send paths (null when it could
 /// not be built)
 pub fn send_paths_json(cfg: &Config, built: &[String]) -> Value {
     Value::Array(cfg.sends.iter().filter(|s| s.enabled).map(|s| {
         let n = if s.tip_accounts.is_empty() { crate::send::known_tip_accounts(s.kind).len() } else { s.tip_accounts.len() };
+        // PLAN-ADDENDUM I-10: a secret over plain http is recorded with its exception (null: none taken)
         json!({ "id": built.iter().position(|b| *b == s.name), "name": s.name, "kind": s.kind, "host": host_of(&s.url),
-            "max_per_sec": s.max_per_sec, "tip_accounts_n": n })
+            "max_per_sec": s.max_per_sec, "tip_accounts_n": n, "tls": tls_of(&s.url),
+            "cleartext_exception": crate::config::cleartext_check(s).ok().flatten() })
     }).collect())
 }
 
@@ -175,11 +183,11 @@ pub fn rpc_json(cfg: &Config) -> Value {
 }
 
 /// meta.json `inputs` (review N8): the other files the run reads at start, which the config names but does not hash:
-/// `{<key>: {path, sha256, size} | {path, error}}` for `[live] crowded_pools_file`, `[pools] templates_json` and
+/// `{<key>: {path, sha256, size} | {path, error}}` for `[send_policy] crowded_pools_file`, `[pools] templates_json` and
 /// `[strategy] signer_stats_file` (read at start, rewritten at stop). Unset ones are left out
 pub fn inputs_json(cfg: &Config) -> Value {
     let mut m = serde_json::Map::new();
-    for (k, p) in [("crowded_pools_file", Some(cfg.live.crowded_pools_file.as_str())), ("templates_json", cfg.pools.templates_json.as_deref()),
+    for (k, p) in [("crowded_pools_file", Some(cfg.send_policy.crowded_pools_file.as_str())), ("templates_json", cfg.pools.templates_json.as_deref()),
         ("signer_stats_file", Some(cfg.strategy.signer_stats_file.as_str()))] {
         let Some(p) = p.filter(|p| !p.is_empty()) else { continue };
         m.insert(k.into(), match file_sha256(Path::new(p)) {
@@ -520,7 +528,8 @@ pub fn report(path: &Path, raw: &[u8], cfg: &Config, programs: Option<Vec<Value>
         "feeds": feeds_json(cfg), "send_paths": send_paths_json(cfg, &[]), "rpc": rpc_json(cfg), "state": { "url_host": host_of(&cfg.state.url) },
         "inputs": inputs_json(cfg),
         "strategy": section(&cfg.strategy), "send": section(&cfg.sends), "builder": section(&cfg.exec), "live": section(&cfg.live),
-        "sim": section(&cfg.sim), "canary": section(&cfg.canary), "gate": section(&cfg.gate), "record": section(&cfg.record), "control": section(&cfg.control) })
+        "sim": section(&cfg.sim), "canary": section(&cfg.canary), "send_policy": section(&cfg.send_policy), "dry_run": section(&cfg.dry_run),
+        "record": section(&cfg.record), "control": section(&cfg.control) })
 }
 
 #[cfg(test)]
@@ -691,7 +700,7 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let mut cfg = Config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arb.toml")).unwrap();
         std::fs::write(d.join("crowded.json"), "[]").unwrap();
-        cfg.live.crowded_pools_file = d.join("crowded.json").display().to_string();
+        cfg.send_policy.crowded_pools_file = d.join("crowded.json").display().to_string();
         cfg.pools.templates_json = None;
         cfg.strategy.signer_stats_file = d.join("missing.json").display().to_string();
         let v = inputs_json(&cfg);
@@ -761,7 +770,7 @@ mod tests {
         assert_eq!(r["clock"]["source"], "CLOCK_REALTIME");
         assert!(r["feeds"].is_array() && r["send"].is_array() && r["builder"]["expected_program_md5"].is_string());
         // review M11 / F3: the sections v1 had, and the control socket the supervisor checks
-        assert!(r["sim"].is_object() && r["canary"].is_object() && r["gate"].is_object() && r["record"].is_object() && r["inputs"].is_object());
+        assert!(r["sim"].is_object() && r["canary"].is_object() && r["send_policy"].is_object() && r["record"].is_object() && r["inputs"].is_object());
         assert_eq!(r["control"]["socket"], true);
         assert_eq!(r["config"]["effective_mode"], r["config"]["mode"]);
     }
@@ -795,7 +804,9 @@ mod tests {
         assert!(!all.contains("api-key=") && !all.contains("${"), "{all}");
         let sp = send_paths_json(&cfg, &["jito-bundle".into()]);
         assert_eq!(sp.as_array().unwrap().len(), 1, "enabled paths only");
-        assert_eq!((sp[0]["id"].as_u64(), sp[0]["name"].as_str()), (Some(0), Some("jito-bundle")));
+        assert_eq!((sp[0]["id"].as_u64(), sp[0]["name"].as_str(), sp[0]["tls"].as_bool()), (Some(0), Some("jito-bundle"), Some(true)));
+        // review WP-05 #17: a URL that is wholly `${...}` has no scheme until it is expanded
+        assert_eq!((tls_of("https://x"), tls_of("http://x"), tls_of("udp://x:1"), tls_of("${SHYFT_RPC_URL}")), (json!(true), json!(false), json!(false), Value::Null));
         // feed ids: the index among the enabled feeds
         let f = feeds_json(&cfg);
         let ids: Vec<Option<u64>> = f.as_array().unwrap().iter().map(|x| x["id"].as_u64()).collect();

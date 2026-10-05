@@ -15,7 +15,8 @@
 #     Spent = the sum over the campaign's segments of each segment's LAST status line (`failed_fees_lamports` before
 #     WP-02, `failed_fees_total_lamports` after); the lines of one segment are never summed. A segment that may have sent
 #     (it has attempts, or ran with --live and its engine started) and whose last line has no readable failed-fee total
-#     makes the budget unknown (review M4: so does any error in reading it). Under 1,000,000 left, or unknown: records
+#     makes the budget unknown (review M4: so does any error in reading it). From WP-05 a segment that could not send
+#     (meta.json `run.mode` shadow or dry_run) writes would-sends to attempts: those are no evidence of sending. Under 1,000,000 left, or unknown: records
 #     only, i.e. `--shadow` (the bot runs and records, never sends). WP-07 replaces this with the ledger.
 #   - Controls by file in runs/ (no more kill -STOP):
 #       <campaign>.pause  stop sending, keep recording (review M1): the running segment pauses sending (`arbx ctl
@@ -154,6 +155,12 @@ elif op == "spent":       # spent <campaign dir> <campaign> [segments run with -
             seg = os.path.basename(d)
             st = os.path.join(d, "status.jsonl")
             atts = [f for f in glob.glob(os.path.join(d, "attempts*")) if os.path.getsize(f) > 0]
+            # review WP-05 #6: from WP-05 a segment that cannot send (meta.json `run.mode` shadow or dry_run, written before
+            # anything could be sent: a --shadow or paused segment) records its would-sends in attempts too, which are no
+            # evidence of sending. A meta.json that is missing or unreadable says nothing: its attempts count
+            try: mode = load(os.path.join(d, "meta.json"))["run"]["mode"]
+            except Exception: mode = None
+            if mode in ("shadow", "dry_run"): atts = []
             sent = bool(atts) or (seg in live and os.path.exists(st))
             lines = [l for l in open(st, errors="replace").read().splitlines() if l.strip() and not is_header(l)] if os.path.exists(st) else []
             if not lines:

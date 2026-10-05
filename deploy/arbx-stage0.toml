@@ -1,13 +1,16 @@
 # arbx Stage 0, day 0 (docs/PLAN.md WP-00 "Day-0 safety switch"): derived from deploy/legacy/arb-w-live.toml, the config arb-lab
 # last ran live on Cherry (84.32.59.15). What changed, and why (R §4 "Day 0, config only"; W §2; R §1):
-#   - bundle-only: every non-bundle [[send]] path is disabled, and [live] bundle_mix + tpu_max_expected_lamports = 1 put
-#     every attempt on the bundle arm (the direct arm: 1 win in 989 attempts, 24.4M lamports of fees)
+#   - bundle-only: every non-bundle [[send]] path is disabled (the direct arm: 1 win in 989 attempts, 24.4M lamports of
+#     fees); since WP-05 the executor sends one-transaction bundles only, and a live config with another path enabled
+#     does not load
 #   - no sends on decoded triggers (WP-00; since WP-04 decoded swaps are hints only, and prices come only from committed,
 #     complete, canonical state: commit groups, readiness, forks, the state-health gate; [state] WP-04 keys, [alts], [accuracy])
-#   - bundles expecting 1M or more throttled to 0.5/s ([live] big_band_*); crowded pools ranked last ([live] crowded_pools_file)
-#     and kept out of the bands from 100k ([live] crowded_skip_min_expected_lamports, OD-3's alternative)
+#   - bundles expecting 1M or more throttled to 0.5/s; crowded pools ranked last and kept out from 100k expected
+#     (OD-3's alternative); since WP-05 in [send_policy] with the rest of the send policy (fail-closed send checks, the
+#     in-flight lock, the rate queue's bands and crowding, the on-chain margin)
 #   - no new token accounts ([live] max_new_token_accounts = 0: rent turned the bundle arm's +163k into -17.9M)
-#   - the recorder on (WP-02: always on, [record] only sets budgets); skip_failing_signers on; sim gate off; settle_s 3
+#   - the recorder on (WP-02: always on, [record] only sets budgets); skip_failing_signers on; the sim gate and the
+#     durable nonces are gone (WP-05: a recent blockhash; attempts settle from the chain)
 #   - paths repointed to the arbx tree (/root/arbx)
 # Check it with `arbx check --config deploy/arbx-stage0.toml`: only jito-bundle is enabled.
 #
@@ -17,8 +20,9 @@
 #      recorder-on/off comparison is the offline engine benchmark (rec::tests, `engine_benchmark_recorder_on_off`)
 #   3. once both pass: set mode = "live" below (note it in the merge note), then `arbx run ... --live`.
 #      `--shadow` runs the live file in shadow again (meta.json `overrides`), e.g. for WP-02's baseline comparison.
-#   The send side (big band, crowded skip and rank, the over-rate split, decided_to_signed / signed_to_fired /
-#   signed_to_sent, settle_s) runs only with --live; its offline tests are exec.rs `send_*` and `band_gate_*`.
+#   The send checks run in every run (PLAN-ADDENDUM I-7): a shadow run records its would-sends with sent = false, and
+#   `arbx run --dry-run` also signs them with a throwaway key and records them in full, never sending (go-live gate
+#   item 4). Offline tests: src/exec/tests.rs.
 # Campaigns (WP-01): deploy/run-w.sh <campaign> <hours> <segment min> <fee budget lamports> deploy/arbx-stage0.toml <you>
 #   freezes the binary and this file into runs/<campaign>/ and never edits them (the budget goes as --budget-left);
 #   control it with runs/<campaign>.pause | .next | .stop (a reason inside), a segment with `arbx ctl --run <dir> ...`.
@@ -242,15 +246,11 @@ account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "CPMMoo8L3F4Nb
 # every other path below is disabled (WP-00).
 # Secrets come from .env next to this file; `${NAME}` in a url is replaced from it. Tip accounts default to each
 # provider's documented list (src/send/mod.rs known_tip_accounts). Tips are paid only when the trade lands.
-# Same order as arbed's production LANDERS (jito-bundle,shyft,helius,rpcfast); the bundle must stay first for the gate.
-
-# THE JITO GATE (arbed's Run 2 decision: keep it): the bundle goes first; the paid copies are dropped only when Jito
-# says our own profit check (0x4e580002) would fail, within 25 ms. Every 10th skip is sent anyway (canary).
-[gate]
-# OFF for live-run-2 (owner, 2026-10-03): every paid copy goes out without waiting for Jito's verdict
-enabled = false
-wait_ms = 25
-canary_every = 10
+# WP-05: live and canary runs are bundle-only (a live config with any other path enabled does not load); the Jito gate
+# ([gate]) is gone. The send policy is [send_policy] below (PLAN WP-05's `[send]` keys: TOML cannot hold a [send] table
+# beside these [[send]] paths). PLAN-ADDENDUM I-10: an enabled path may carry a `${...}` secret over plain http:// only
+# with `no_tls_endpoint = "<evidence>"`; `arbx check` refuses it otherwise, and refuses any provider key that is the
+# payer's keypair.
 
 [[send]]
 # one-transaction bundle through the searcher gRPC; auth key = the whitelisted keypair (CrQx62…EynE), never funded
@@ -263,8 +263,7 @@ tip_lamports = 1000   # EXP-1: floor; the bundle-only bots tip 1,000-6,000
 tip_share = 0.7               # 70% of the predicted edge after the base fee (live value)
 tip_max_lamports = 100000   # owner 2026-10-04: bundle tips capped at 0.0001 SOL (70% share below that)
 max_per_sec = 5               # Jito's limit on our gRPC key since 2026-10-02 (per key: arbx gets its own key at go-live)
-# no queue_ms (0: over the rate a bundle is refused at once, as in arb-lab). WP-00 review F2: a 10 ms queue reordered
-# no send in the legacy replay (two bundles almost never wait at once) and only added delay. WP-05 brings [send] queue_ms
+# the bundle path's rate queue waits [send_policy] queue_ms (no queue_ms here: WP-05)
 
 [[send]]
 # Shyft staked RPC (SWQoS), no tip. Frankfurt host, e.g. https://rpc.fra.shyft.to?api_key=...
@@ -358,57 +357,59 @@ socket = true
 max_per_sec = 2
 
 [canary]
-# step 3: real transactions built to fail our profit check; needs this AND `arbx run --canary`
+# WP-05: a canary run is a live run under these caps (`arbx run --canary` AND enabled = true): real bundles of at most
+# size_sol (0.2 SOL at most), at most `count` attempts `every_ms` apart; the built-to-fail canaries are gone
 count = 100
 every_ms = 5000
 size_sol = 0.01
-max_spend_lamports = 3000000   # 0.003 SOL of network fees in all
-settle_s = 30
-nonce_account = "58XHXCVwizLunHZdtXRr21NXnraG8Y4vQWjpXLN2FgVe"
+max_spend_lamports = 3000000   # 0.003 SOL of fees of landed failures in all
 
 [live]
-# step 4: real trades; needs mode = "live" AND `arbx run --live`
+# step 4: real trades; needs mode = "live" AND `arbx run --live`. WP-05: one-transaction Jito bundles only (the direct
+# arm's keys are gone: test_all_paths, bid_*, rotate_paths, race_mix, bundle_mix, tpu_*, pair_lock_ms, sim_gate,
+# compete_*, gross_floor, bundle_*, spec/max priority; settle_s: attempts settle from the chain; the durable nonces:
+# [send_policy.direct]; big band and crowding: [send_policy])
 max_size_sol = 4.2                # OD-4 (owner): ships with the live value 4.2 (or R §3.8's ladder 0.2 -> 1 -> 4.2); in meta.json limits
 max_failed_fees_lamports = 25000000   # EXP: $3 for tonight experiments
-margin_lamports = 1000              # on-chain min_profit = base fee + priority fee + that copy's tip + this
+margin_lamports = 1000              # the decision's bar: expected profit >= tip + base fee + this (the on-chain floor is [send_policy])
 max_new_token_accounts = 0   # WP-00: none until WP-06 makes trades rent-neutral (rent turned the bundle arm's +163k into -17.9M)
-settle_s = 3   # WP-00: the p1-p9 value (settle_s 1 missed late landings)
-# testing landing on every path, not profit (owner): Astralane and Bolt get a copy on every trade too
-test_all_paths = false   # long run: race_mix decides per trade
-# two-tier bid (9EwQoN74's pattern, research log S-010): zero priority by default (a miss costs 5,000), and from
-# 100,000 lamports of expected profit a priority fee of half of it (at most 0.005 SOL) to win the next turn on the pool
-bid_tiers = false   # long run: fee_rule arms (0.95x trigger / flat 40k), capped
-rotate_paths = false   # long run: no rotation
-race_mix = false   # exp-1: replaced by bundle_mix
-bundle_mix = true   # with tpu_max_expected_lamports = 1 every trade takes the bundle arm (no priority fee; a miss costs nothing)
-tpu_cu_price_micro = 100000   # EXP-1: the TPU arm bid (winners pay ~0; long run 1 paid 40k)
-pair_lock_ms = 400   # EXP-1: one trade per pair per 1.5 s (was the 8 s settle)
-sim_gate = false   # WP-00: bundles only (Jito drops a bundle that would fail); the gate's stale branch sent anyway
-compete_mult = 0   # SEG2: TPU bid = 1.25x the pools 30-s p75 CU price ...
-compete_max_share = 0.10   # SEG3: at most 10% of the expected profit as priority ...
-compete_ab = true   # pairs of TPU trades: one competes, one stays flat (10k)
-gross_floor = true   # SEG3: on-chain min_profit = tip + 1 (the sim gate keeps the full fees + tip + margin bar)
-tpu_max_expected_lamports = 1   # WP-00: every trade above 1 lamport expected is "TPU hopeless": the bundle arm only (res-pnl §3, p7-p10)
-tpu_skip_mriya_pools = false   # EXP-3b: off: the seed list is all tagged mriya, so it sent nearly everything to bundles
-tpu_skip_mints = ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"]
-tpu_min_expected_lamports = 3000000   # w5h hybrid test: direct copies only for 50k-1M expected
-bundle_size_variants = []   # w5h seg 8: a quarter-size copy of every bundle (quotes are exact at small sizes)
-spec_cu_price_micro = 40000   # live-run-5: the normal flat bid on every copy, to measure our relay + leader-queue time fairly
-bid_min_expected_lamports = 1000000000000000   # CONTEST tier off until the PoH data shows we can reach the trigger
-bid_share = 0.5
-bid_max_priority_lamports = 5000000
-max_priority_lamports = 30000   # at most this priority fee per trade (live-run-1 paid 1.1M once)
-# WP-00 (temporary; moved to [send] in WP-05): the big band (expected >= 1M; 0 of 1,869 landed) at most 0.5 a second,
-# burst 1 (live_skip_big_band_throttle; the token is used only by an attempt that is built and fired)
-big_band_min_expected_lamports = 1000000
+
+[send_policy]
+# PLAN WP-05: bundle-only, fail closed (no network call between a decision and its fire). A send needs a blockhash from
+# the WP-03b ring at most max_blockhash_age_slots old, a target-slot leader whose kind is not skipped, a valid cached
+# Jito token, a healthy recorder, the SendGate live and the store ready
+max_blockhash_age_slots = 20
+blockhash_commitment = "confirmed"
+skip_leader_kinds = ["other", "unknown"]   # R §3.6: non-Jito leaders cannot take a bundle
+inflight_hold_slots = 2   # one attempt per (buy, sell, mint) until a new state version or a new leader
+queue_ms = 10   # the Jito rate queue: bands under 1M first, crowded pools last in their band, then EV
+# the >=1M bands (src/bands.rs bands 3-4; 0 of 1,869 legacy bundles there landed while they took the 5/s budget):
+# at most 0.5 a second (burst 1), behind every smaller band in the queue
 big_band_max_per_sec = 0.5
-# the 21 pools with 150+ bots: ranked last in the send queues (OD-3 default) and counted apart in the rate drops, AND
-# (OD-3's alternative, review F2) skipped from 100k lamports expected (live_skip_crowded_pool): the rank alone changed
-# nothing in the legacy replay, and 0 of 1,896 legacy crowded bundles expecting >= 100k landed (12 of 1,214 under 100k
-# did: those still go). Owner: 0 here = rank only
+# crowding (F6): distinct arbitrage-like signers that landed on either pool in the last 6 h, buckets < 20, 20-150, >= 150.
+# WP-00's list of the 21 pools with 150+ bots stands in until the map holds 6 h; and (OD-3's alternative, review F2)
+# a trade on such a pool expecting >= 100k is not sent: 0 of 1,896 legacy crowded bundles expecting >= 100k landed (12
+# of 1,214 under 100k did: those still go). Owner: 0 here = rank only
+crowding_window_h = 6
+crowding_buckets = [20, 150]
 crowded_pools_file = "/root/arbx/data/crowded-pools.json"
 crowded_skip_min_expected_lamports = 100000
-nonce_accounts = ["7FhgBHwRoyydy8Q3WhrePceJyLFFeKy9dRifyQk5XsdP", "bzZ8duYQu9pR8LW4kadiQpmGQiT82SRr87UxDnUk882", "9B42xGWEBv23RDbxUuYitnPrTVqZx8au8qUg4N7vDEUT", "7PTHLfiRwYbYkNMDg78HMEBG52eU9m3fYZdybZC1QyKF", "AfCEs8r7va62X9wHNwUWv7BrmF1y7tNHT3DnCFt8TQt2", "2eB1kJDEe2qm9eeHW8eA8nLKv3EjoiZZKCV38Ypk4EP4", "9vDG6azq7P8ajF5ZWUFg8q67oAaVkM4aePt821wzCmJH", "8QNXNscS8aZVq5uG1WRuKm2g51pchwEDxb2Fh7uvp24S", "8XtyztY27tFio2HZLAR2oPHQJsGSLm5zJ4ebycWmMAsm", "5fLLJC9am82hGh4oC4vojstJ95XMyshYfVTd6s2WrDdc", "BaNnigdYTuf6JNwQeBJe4Xx5EN5XnrYuZVZJ52uMekVz", "5H3wjior6RrJ5yBQRHGQiDqX9ccxhQESrxMQY6cjJHcj", "BppgM2hhGfEw1JGLd8Cq5WFQ7rvrvEr3Lg9QQ8XRWniz", "2FbH2shEAqUiTXHBYvnjGQdYb3qTE4D292f6JKiao6b5", "ta5JaGyCqfmVhQcncwuit1QhuVX16m2DBytMpwxYPmu", "3bdQ9NHoskMHmBi6eohrQgpmYaXfPge46R9maDWyzhbW", "E7EPka7JhgCPMafvPU8FKRcJeTwo9S144bTs99TuqGPR", "4xHsSvGJGbkc14AM1dSyneEDXHtF3PhaHaCaX3PMMQJs", "Fb2fYXYqYNRzDWJ4RmXAwDR2Ux7vsytaKtHXhyG3tcmW", "BbzRg7HfeohNpYzLnkXbzE2ThzwKa2PxWFbZGpG3Gs3Z"]   # the NEW wallet s arb-nonce-0..19 (2026-10-03)
+# on-chain min_profit = tip + base fee + margin, margin = max(floor, share x expected net): Stage 0 keeps today's floor
+# (F23); R §3.9's 2,000 / 2% is a WP-11 arm or OD-5
+margin_floor = 1
+margin_share = 0.0
+direct_experiment = false   # the direct (non-bundle) arm: refused in Stage 0
+
+[send_policy.direct]
+# the direct arm's durable nonces (the NEW wallet's arb-nonce-0..19, 2026-10-03), kept for its experiment only
+nonce_accounts = ["7FhgBHwRoyydy8Q3WhrePceJyLFFeKy9dRifyQk5XsdP", "bzZ8duYQu9pR8LW4kadiQpmGQiT82SRr87UxDnUk882", "9B42xGWEBv23RDbxUuYitnPrTVqZx8au8qUg4N7vDEUT", "7PTHLfiRwYbYkNMDg78HMEBG52eU9m3fYZdybZC1QyKF", "AfCEs8r7va62X9wHNwUWv7BrmF1y7tNHT3DnCFt8TQt2", "2eB1kJDEe2qm9eeHW8eA8nLKv3EjoiZZKCV38Ypk4EP4", "9vDG6azq7P8ajF5ZWUFg8q67oAaVkM4aePt821wzCmJH", "8QNXNscS8aZVq5uG1WRuKm2g51pchwEDxb2Fh7uvp24S", "8XtyztY27tFio2HZLAR2oPHQJsGSLm5zJ4ebycWmMAsm", "5fLLJC9am82hGh4oC4vojstJ95XMyshYfVTd6s2WrDdc", "BaNnigdYTuf6JNwQeBJe4Xx5EN5XnrYuZVZJ52uMekVz", "5H3wjior6RrJ5yBQRHGQiDqX9ccxhQESrxMQY6cjJHcj", "BppgM2hhGfEw1JGLd8Cq5WFQ7rvrvEr3Lg9QQ8XRWniz", "2FbH2shEAqUiTXHBYvnjGQdYb3qTE4D292f6JKiao6b5", "ta5JaGyCqfmVhQcncwuit1QhuVX16m2DBytMpwxYPmu", "3bdQ9NHoskMHmBi6eohrQgpmYaXfPge46R9maDWyzhbW", "E7EPka7JhgCPMafvPU8FKRcJeTwo9S144bTs99TuqGPR", "4xHsSvGJGbkc14AM1dSyneEDXHtF3PhaHaCaX3PMMQJs", "Fb2fYXYqYNRzDWJ4RmXAwDR2Ux7vsytaKtHXhyG3tcmW", "BbzRg7HfeohNpYzLnkXbzE2ThzwKa2PxWFbZGpG3Gs3Z"]
+
+[dry_run]
+# go-live gate item 4 (`arbx run --dry-run`): every would-send bundle is signed by a throwaway key made in memory (never
+# the trading keystore; the payer stays the wallet, so the signature cannot pass on chain), recorded in full
+# (attempts.jsonl `dry_run`: the transaction, its size, tip, accounts and checks) and never sent; no send path is built
+simulate = false   # true: also a read-only simulateTransaction (sigVerify off, the blockhash checked), at most max_sim_per_sec
+max_sim_per_sec = 2
 
 [[send]]
 # direct to the leader over QUIC (no relay, no tip, unstaked); the RPC only answers the leader schedule and TPU addresses

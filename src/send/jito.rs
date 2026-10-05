@@ -10,22 +10,37 @@
 //!      full flow runs again once the refresh token itself is near expiry. Every failure is an Err, never a panic.
 //!
 //! BUNDLES: up to 5 signed transactions, executed in order and atomically. Ours is one transaction (tip inside it).
-//! The result stream reports what became of every bundle this key sent; the first result per bundle is kept for the
-//! Jito gate (`verdict`), and every result is written to bundles.jsonl.
+//! The result stream reports what became of every bundle this key sent. PLAN WP-05 item 7: every result is kept per
+//! bundle, in order, with its time (`verdicts`), and written to bundles.jsonl (v2: its sequence number, the validator,
+//! the attempt, the stream's connection number); outages of the stream are `jito_stream_down` / `jito_stream_up`
+//! events, so missing verdicts are explainable. A `processed` result of ours names its bundle to the transfer
+//! classification (`classify::note_bundle_processed`) and the wallet's source (c) (`chainfetch::note_jito_processed`);
+//! every result of ours goes to the executor's sink (token cooling; a landing releases the in-flight entry).
+//!
+//! SENDBUNDLE ERRORS (review WP-05 #7): a gRPC status the block engine answers with that refuses the bundle (invalid,
+//! over the rate, not authorised, ...) is `BundleError::Refused`: it cannot land. Anything else (a transport error,
+//! a timeout, `unavailable`, `internal`, ...) may have reached the block engine: `BundleError::Other`, and the executor
+//! keeps the attempt open until it lands or its blockhash expires.
+//!
+//! TOKEN (PLAN WP-05 item 2, F28): the send path never refreshes the auth token. `keep_token` (a background task)
+//! renews it at half its lifetime; `send_bundle` only reads the cached token and refuses with `jito_auth_stale` when it
+//! has expired. Every unary call but SendBundle counts as a network call (`netcount`).
 use crate::feeds::clock::now_ns;
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use tokio::sync::oneshot;
 use tonic::codec::ProstCodec;
 use tonic::transport::Channel;
 
 pub const MAX_BUNDLE_TXS: usize = 5;
-/// renew a token this long before it expires
+/// renew a token this long before it expires (a caller that may refresh: the keep-alive, the result stream)
 const RENEW_MARGIN_MS: i64 = 30_000;
+/// the send path uses the cached access token only while it has at least this much life left
+pub const SEND_MIN_LEFT_MS: i64 = 5_000;
 /// bundle ids remembered for verdicts and the log
 const KEEP: usize = 5_000;
 /// our on-chain profit check's error as Jito prints it (nexus-v2 ERR_BASE 0x4e580000 + 2)
@@ -152,16 +167,29 @@ pub struct Outcome {
     pub bundle: String,
     pub outcome: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")] pub slot: Option<u64>,
+    /// the bundle's position in its block (`processed`)
     #[serde(skip_serializing_if = "Option::is_none")] pub index: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")] pub bid: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")] pub detail: Option<String>,
+    /// the validator `accepted` / `processed` name (PLAN WP-05 item 7)
+    #[serde(skip_serializing_if = "Option::is_none")] pub validator: Option<String>,
+}
+
+impl Outcome {
+    /// The block engine reports a landing (`processed`, `finalized`): the state the attempt priced is spent, its
+    /// in-flight entry may go (review WP-05 #2). Every other result is not final: `accepted` may still land, and a
+    /// `would-fail`, `lost-auction`, `dropped` or `rejected` says the state does not pay or did not get in, which keeps
+    /// the entry for its hold (the same state is not sent again to the same leader). An attempt is final at its landing
+    /// or its blockhash's expiry (PLAN WP-07)
+    pub fn is_final(&self) -> bool { matches!(self.outcome, "processed" | "finalized") }
 }
 
 pub fn summarize(r: BundleResult) -> Outcome {
-    let o = |outcome| Outcome { bundle: r.bundle_id.clone(), outcome, slot: None, index: None, bid: None, detail: None };
-    if let Some(p) = &r.processed { return Outcome { slot: Some(p.slot), index: Some(p.bundle_index), ..o("processed") }; }
+    let o = |outcome| Outcome { bundle: r.bundle_id.clone(), outcome, slot: None, index: None, bid: None, detail: None, validator: None };
+    let v = |s: &str| (!s.is_empty()).then(|| s.to_string());
+    if let Some(p) = &r.processed { return Outcome { slot: Some(p.slot), index: Some(p.bundle_index), validator: v(&p.validator_identity), ..o("processed") }; }
     if r.finalized.is_some() { return o("finalized"); }
-    if let Some(a) = &r.accepted { return Outcome { slot: Some(a.slot), ..o("accepted") }; }
+    if let Some(a) = &r.accepted { return Outcome { slot: Some(a.slot), validator: v(&a.validator_identity), ..o("accepted") }; }
     if let Some(d) = &r.dropped {
         let why = match d.reason { 0 => "blockhash-expired", 1 => "partially-processed", 2 => "not-finalized", _ => "unknown" };
         return Outcome { detail: Some(why.into()), ..o("dropped") };
@@ -199,6 +227,9 @@ pub fn error_code(detail: Option<&str>) -> Option<String> {
     Some("other".into())
 }
 
+/// where the block engine's auth keypair lives unless `auth_keypair` says otherwise (never the trading wallet)
+pub const DEFAULT_AUTH_KEYPAIR: &str = "~/.nexus-v2-jito-auth.json";
+
 /// The auth keypair from its file: a JSON array of the 64 secret-key bytes, as `solana-keygen` writes it.
 pub fn load_keypair(path: &str) -> Result<SigningKey> {
     let path = match path.strip_prefix("~/") { Some(rest) => format!("{}/{rest}", std::env::var("HOME").unwrap_or_default()), None => path.to_string() };
@@ -213,6 +244,66 @@ pub fn load_keypair(path: &str) -> Result<SigningKey> {
 #[derive(Default)]
 struct Tokens { access: Option<(String, i64)>, refresh: Option<(String, i64)> }
 
+/// the access token the send path reads: its value, expiry and when it was obtained (unix ms)
+#[derive(Clone, Debug, PartialEq)]
+pub struct CachedToken { pub value: String, pub exp_ms: i64, pub issued_ms: i64 }
+
+/// what the send check sees of the token (status `health.jito_token_age_s_now`)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TokenState { Valid { age_s: u64, left_s: i64 }, Stale }
+
+/// why `send_bundle` did not send: no valid cached token (nothing left); the block engine answered with a refusal (it
+/// cannot land); anything else (it may have reached the block engine)
+#[derive(Debug)]
+pub enum BundleError { AuthStale, Refused(anyhow::Error), Other(anyhow::Error) }
+impl std::fmt::Display for BundleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            BundleError::AuthStale => f.write_str("jito_auth_stale: no valid cached auth token (the send path never refreshes it)"),
+            BundleError::Refused(e) | BundleError::Other(e) => write!(f, "{e:#}"),
+        }
+    }
+}
+
+/// a unary call's gRPC status (the block engine's answer, or tonic's own for a transport failure or a timeout)
+#[derive(Debug)]
+pub struct GrpcStatus { pub code: tonic::Code, pub msg: String }
+impl std::fmt::Display for GrpcStatus { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str(&self.msg) } }
+impl std::error::Error for GrpcStatus {}
+
+/// A status the block engine answers a SendBundle with when it does not take the bundle (review WP-05 #7). Not:
+/// `cancelled` / `deadline_exceeded` (a timeout), `unavailable` / `unknown` / `internal` / `data_loss` / `aborted` (also
+/// what tonic reports for a transport failure after the request may have left) and `already_exists` (the bundle is
+/// in): those may land
+pub fn refused_code(c: tonic::Code) -> bool {
+    use tonic::Code::*;
+    matches!(c, InvalidArgument | ResourceExhausted | PermissionDenied | Unauthenticated | FailedPrecondition | OutOfRange | Unimplemented | NotFound)
+}
+
+/// The result stream's outages: one `jito_stream_down` at an outage's first error, one `jito_stream_up` (with how long
+/// results could not arrive) when a stream opens again (PLAN WP-05 item 7)
+#[derive(Default)]
+struct Outage { down_since: Option<u64> }
+
+impl Outage {
+    /// a stream opened (connection `epoch`) at `now`: the `jito_stream_up` event's body, if an outage ends
+    fn opened(&mut self, epoch: u64, now: u64) -> Option<serde_json::Value> {
+        self.down_since.take().map(|d| json!({ "stream_epoch": epoch, "down_ms": now.saturating_sub(d) / 1_000_000 }))
+    }
+    /// the stream failed or ended (`why`) at `now`: the `jito_stream_down` event's body, if an outage starts
+    fn failed(&mut self, epoch: u64, why: &str, now: u64) -> Option<serde_json::Value> {
+        if self.down_since.is_some() { return None; }
+        self.down_since = Some(now);
+        Some(json!({ "stream_epoch": epoch, "error": why }))
+    }
+}
+
+/// one result of a bundle of ours, as the sink gets it
+#[derive(Clone, Debug)]
+pub struct ResultNote { pub sig: String, pub bundle: String, pub outcome: Outcome, pub seq: u32, pub t_ns: u64, pub attempt: Option<u64> }
+
+pub type Sink = Box<dyn Fn(ResultNote) + Send + Sync>;
+
 fn token_of(t: Option<Token>) -> Option<(String, i64)> {
     let t = t?;
     let ms = t.expires_at_utc.map_or(0, |e| e.seconds * 1_000 + e.nanos as i64 / 1_000_000);
@@ -221,13 +312,15 @@ fn token_of(t: Option<Token>) -> Option<(String, i64)> {
 
 fn unix_ms() -> i64 { (now_ns() / 1_000_000) as i64 }
 
-/// First result per bundle, and who is waiting for one (the Jito gate). A result can beat the sendBundle reply.
+/// Every result per bundle, in order with its time (PLAN WP-05 item 7: `Verdicts.first` became `all`), and the bundle
+/// of each of our transactions. A result can beat the sendBundle reply: it is kept under its bundle id and matched
+/// when the reply names the bundle
 #[derive(Default)]
 struct Verdicts {
-    first: HashMap<String, Outcome>,
-    waiting: HashMap<String, Vec<oneshot::Sender<Outcome>>>,
+    all: HashMap<String, Vec<(u64, Outcome)>>,
     id_of_sig: HashMap<String, String>,
     sig_of_id: HashMap<String, String>,
+    attempt_of_id: HashMap<String, u64>,
     order: VecDeque<String>,
 }
 
@@ -235,8 +328,8 @@ impl Verdicts {
     fn trim(&mut self) {
         while self.order.len() > KEEP {
             let Some(id) = self.order.pop_front() else { break };
-            self.first.remove(&id);
-            self.waiting.remove(&id);
+            self.all.remove(&id);
+            self.attempt_of_id.remove(&id);
             if let Some(sig) = self.sig_of_id.remove(&id) { self.id_of_sig.remove(&sig); }
         }
     }
@@ -246,72 +339,209 @@ pub struct Jito {
     channel: Channel,
     key: SigningKey,
     tokens: tokio::sync::Mutex<Tokens>,
+    /// the access token as the send path reads it (no await, no network)
+    cached: Mutex<Option<CachedToken>>,
     verdicts: Mutex<Verdicts>,
     /// bundles.jsonl (core class)
     rec: crate::rec::Rec,
     /// results received, by outcome
     pub counts: Mutex<std::collections::BTreeMap<&'static str, u64>>,
+    /// the result stream's connection number (bundles.jsonl `stream_epoch`)
+    epoch: AtomicU64,
+    /// the executor's sink for our bundles' results
+    sink: OnceLock<Sink>,
+    /// tests: a block engine in memory that takes (or refuses) the bundle (the real SendBundle call is not made)
+    fake: OnceLock<Arc<FakeEngine>>,
+    /// tests: the token renewal (`renew`) without the network
+    #[cfg(test)]
+    fake_renew: OnceLock<Arc<dyn Fn() -> Result<CachedToken> + Send + Sync>>,
 }
+
+/// tests: an in-memory block engine's answer to a bundle
+pub(crate) type FakeEngine = dyn Fn(&[&[u8]]) -> std::result::Result<String, BundleError> + Send + Sync;
 
 impl Jito {
     /// connect (not yet authenticated); `rec` records every bundle result (bundles.jsonl)
     pub async fn connect(url: &str, key: SigningKey, rec: crate::rec::Rec) -> Result<Arc<Jito>> {
         let channel = crate::feeds::grpc::channel(url).await?;
-        Ok(Arc::new(Jito { channel, key, tokens: Default::default(), verdicts: Default::default(), rec, counts: Default::default() }))
+        Ok(Arc::new(Jito::with_channel(channel, key, rec)))
     }
 
+    fn with_channel(channel: Channel, key: SigningKey, rec: crate::rec::Rec) -> Jito {
+        Jito { channel, key, tokens: Default::default(), cached: Default::default(), verdicts: Default::default(), rec, counts: Default::default(),
+            epoch: AtomicU64::new(0), sink: OnceLock::new(), fake: OnceLock::new(), #[cfg(test)] fake_renew: OnceLock::new() }
+    }
+
+    /// tests: a client whose channel goes nowhere (127.0.0.1:9, connected lazily)
+    #[cfg(test)]
+    pub fn for_test(rec: crate::rec::Rec) -> Arc<Jito> {
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:9").connect_lazy();
+        Arc::new(Jito::with_channel(channel, SigningKey::from_bytes(&[1u8; 32]), rec))
+    }
+
+    /// tests: the cached token as given
+    #[cfg(test)]
+    pub fn set_cached(&self, t: Option<CachedToken>) { *self.cached.lock().unwrap() = t; }
+
+    /// tests: bundles go to `f` (an in-memory block engine) instead of SendBundle; `f` returns the bundle id
+    #[cfg(test)]
+    pub fn set_fake(&self, f: Arc<dyn Fn(&[&[u8]]) -> String + Send + Sync>) { let _ = self.fake.set(Arc::new(move |t: &[&[u8]]| Ok(f(t)))); }
+
+    /// tests: as `set_fake`, the block engine may refuse (`BundleError::Refused`) or not answer (`Other`)
+    #[cfg(test)]
+    pub fn set_fake_result(&self, f: Arc<FakeEngine>) { let _ = self.fake.set(f); }
+
+    /// tests: `renew` asks `f` instead of the block engine
+    #[cfg(test)]
+    pub fn set_fake_renew(&self, f: Arc<dyn Fn() -> Result<CachedToken> + Send + Sync>) { let _ = self.fake_renew.set(f); }
+
+    /// the executor's sink for every result of our bundles (once)
+    pub fn set_sink(&self, f: Sink) { let _ = self.sink.set(f); }
+
     pub fn pubkey(&self) -> String { bs58::encode(self.key.verifying_key().as_bytes()).into_string() }
+    pub fn verifying_key(&self) -> [u8; 32] { self.key.verifying_key().to_bytes() }
 
     async fn unary<Req, Resp>(&self, path: &'static str, req: Req, bearer: Option<&str>) -> Result<Resp>
     where Req: prost::Message + Send + Sync + 'static, Resp: prost::Message + Default + Send + Sync + 'static {
+        // a network call (F28): every unary call but SendBundle, which is the send itself
+        if path != SEND_BUNDLE { crate::netcount::note(); }
         let mut grpc = tonic::client::Grpc::new(self.channel.clone());
         grpc.ready().await.context("block engine not ready")?;
         let mut r = tonic::Request::new(req);
         r.set_timeout(Duration::from_secs(5));
         if let Some(b) = bearer { r.metadata_mut().insert("authorization", format!("Bearer {b}").parse().context("token is not a header value")?); }
         let codec: ProstCodec<Req, Resp> = ProstCodec::default();
-        let resp = grpc.unary(r, http::uri::PathAndQuery::from_static(path), codec).await.map_err(|s| anyhow::anyhow!("{path}: {} {}", s.code(), s.message()))?;
+        let resp = grpc.unary(r, http::uri::PathAndQuery::from_static(path), codec).await
+            .map_err(|s| anyhow::Error::new(GrpcStatus { code: s.code(), msg: format!("{path}: {} {}", s.code(), s.message()) }))?;
         Ok(resp.into_inner())
     }
 
-    /// a valid access token, renewed (refresh, else the full challenge-response) when it nears expiry
-    pub async fn token(&self) -> Result<String> {
+    /// a valid access token, renewed (refresh, else the full challenge-response) when it nears expiry. Never on the send
+    /// path: the keep-alive, the result stream, the background refresher and the start use it
+    pub async fn token(&self) -> Result<String> { self.renew(false).await.map(|x| x.0) }
+
+    /// `token`, or (`force`) a new access token whatever the old one's life: (token, how: `cached`, `refresh`,
+    /// `challenge`)
+    async fn renew(&self, force: bool) -> Result<(String, &'static str)> {
+        #[cfg(test)]
+        if let Some(f) = self.fake_renew.get() {
+            let c = f()?;
+            *self.cached.lock().unwrap() = Some(c.clone());
+            return Ok((c.value, "fake"));
+        }
         let mut t = self.tokens.lock().await;
         let now = unix_ms();
-        if let Some((v, exp)) = &t.access { if exp - now > RENEW_MARGIN_MS { return Ok(v.clone()); } }
-        if let Some((r, exp)) = t.refresh.clone() {
-            if exp - now > RENEW_MARGIN_MS {
-                let resp: RefreshAccessTokenResponse = self.unary("/auth.AuthService/RefreshAccessToken", RefreshAccessTokenRequest { refresh_token: r }, None).await?;
-                t.access = token_of(resp.access_token);
-                return t.access.as_ref().map(|a| a.0.clone()).context("jito auth: no access token in the refresh reply");
+        if !force { if let Some((v, exp)) = &t.access { if exp - now > RENEW_MARGIN_MS { return Ok((v.clone(), "cached")); } } }
+        let (access, how) = 'got: {
+            if let Some((r, exp)) = t.refresh.clone() {
+                if exp - now > RENEW_MARGIN_MS {
+                    let resp: RefreshAccessTokenResponse = self.unary("/auth.AuthService/RefreshAccessToken", RefreshAccessTokenRequest { refresh_token: r }, None).await?;
+                    break 'got (token_of(resp.access_token), "refresh");
+                }
             }
-        }
-        let pubkey = self.key.verifying_key().to_bytes().to_vec();
-        let ch: GenerateAuthChallengeResponse = self.unary("/auth.AuthService/GenerateAuthChallenge",
-            GenerateAuthChallengeRequest { role: ROLE_SEARCHER, pubkey: pubkey.clone() }, None).await?;
-        let signed = format!("{}-{}", self.pubkey(), ch.challenge);
-        let sig = self.key.sign(signed.as_bytes()).to_bytes().to_vec();
-        let resp: GenerateAuthTokensResponse = self.unary("/auth.AuthService/GenerateAuthTokens",
-            GenerateAuthTokensRequest { challenge: signed, client_pubkey: pubkey, signed_challenge: sig }, None).await?;
-        t.access = token_of(resp.access_token);
-        t.refresh = token_of(resp.refresh_token);
-        t.access.as_ref().map(|a| a.0.clone()).context("jito auth: no access token in the reply")
+            let pubkey = self.key.verifying_key().to_bytes().to_vec();
+            let ch: GenerateAuthChallengeResponse = self.unary("/auth.AuthService/GenerateAuthChallenge",
+                GenerateAuthChallengeRequest { role: ROLE_SEARCHER, pubkey: pubkey.clone() }, None).await?;
+            let signed = format!("{}-{}", self.pubkey(), ch.challenge);
+            let sig = self.key.sign(signed.as_bytes()).to_bytes().to_vec();
+            let resp: GenerateAuthTokensResponse = self.unary("/auth.AuthService/GenerateAuthTokens",
+                GenerateAuthTokensRequest { challenge: signed, client_pubkey: pubkey, signed_challenge: sig }, None).await?;
+            t.refresh = token_of(resp.refresh_token);
+            (token_of(resp.access_token), "challenge")
+        };
+        t.access = access;
+        let (v, exp) = t.access.clone().context("jito auth: no access token in the reply")?;
+        *self.cached.lock().unwrap() = Some(CachedToken { value: v.clone(), exp_ms: exp, issued_ms: now });
+        Ok((v, how))
     }
 
-    /// submit signed transactions (wire bytes, v0 or v1 unchanged) as one bundle; returns the block engine's bundle id.
-    /// `sig` (base58, the first transaction's) joins the bundle's results to it.
-    pub async fn send_bundle(&self, txs: &[&[u8]], sig: &str) -> Result<String> {
-        if txs.is_empty() || txs.len() > MAX_BUNDLE_TXS { bail!("jito bundle: 1-{MAX_BUNDLE_TXS} transactions, got {}", txs.len()); }
-        let packets = txs.iter().map(|d| Packet { data: d.to_vec(), meta: Some(Meta { size: d.len() as u64, addr: "0.0.0.0".into(), port: 0, sender_stake: 0 }) }).collect();
-        let token = self.token().await?;
-        let r: SendBundleResponse = self.unary("/searcher.SearcherService/SendBundle", SendBundleRequest { bundle: Some(Bundle { packets }) }, Some(&token)).await?;
-        let mut v = self.verdicts.lock().unwrap();
-        v.id_of_sig.insert(sig.to_string(), r.uuid.clone());
-        v.sig_of_id.insert(r.uuid.clone(), sig.to_string());
-        v.order.push_back(r.uuid.clone());
-        v.trim();
-        Ok(r.uuid)
+    /// the cached access token with at least `SEND_MIN_LEFT_MS` of life at `now_ms` (the send path: no network)
+    pub fn cached_token(&self, now_ms: i64) -> Option<String> {
+        self.cached.lock().unwrap().as_ref().filter(|c| c.exp_ms - now_ms > SEND_MIN_LEFT_MS).map(|c| c.value.clone())
     }
+
+    /// what the send check sees of the token at `now_ms`
+    pub fn token_state(&self, now_ms: i64) -> TokenState {
+        match self.cached.lock().unwrap().as_ref() {
+            Some(c) if c.exp_ms - now_ms > SEND_MIN_LEFT_MS => TokenState::Valid { age_s: (now_ms.saturating_sub(c.issued_ms).max(0) / 1_000) as u64, left_s: (c.exp_ms - now_ms) / 1_000 },
+            _ => TokenState::Stale,
+        }
+    }
+
+    /// When the cached token is due for renewal (unix ms): half its lifetime after it was obtained; now when none
+    pub fn renew_due_ms(&self, now_ms: i64) -> i64 {
+        self.cached.lock().unwrap().as_ref().map_or(now_ms, |c| c.issued_ms + (c.exp_ms - c.issued_ms).max(0) / 2)
+    }
+
+    /// The background refresher (PLAN WP-05 item 2, F28): renews the access token at half its lifetime, so the send path
+    /// always finds a valid one cached; a failure is retried after 1 s, doubling to 30 s. Each renewal is an
+    /// events.jsonl `jito_token_refresh`. Until `stop`
+    pub async fn keep_token(self: Arc<Self>, stop: Arc<std::sync::atomic::AtomicBool>) {
+        let mut backoff = Duration::from_secs(1);
+        while !stop.load(Relaxed) {
+            let now = unix_ms();
+            let due = self.renew_due_ms(now);
+            if now >= due {
+                match self.renew(true).await {
+                    Ok((_, how)) => {
+                        backoff = Duration::from_secs(1);
+                        let left = self.cached.lock().unwrap().as_ref().map(|c| (c.exp_ms - unix_ms()) / 1_000);
+                        self.rec.event("jito_token_refresh", "jito", None, json!({ "ok": true, "via": how, "expires_in_s": left }));
+                    }
+                    Err(e) => {
+                        self.rec.event("jito_token_refresh", "jito", None, json!({ "ok": false, "error": crate::rpc::scrub(&format!("{e:#}")),
+                            "retry_s": backoff.as_secs(), "stale": self.cached_token(unix_ms()).is_none() }));
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(Duration::from_secs(30));
+                        continue;
+                    }
+                }
+            }
+            let wait = (self.renew_due_ms(unix_ms()) - unix_ms()).clamp(50, 5_000) as u64;
+            tokio::time::sleep(Duration::from_millis(wait)).await;
+        }
+    }
+
+    /// Submit signed transactions (wire bytes, v0 or v1 unchanged) as one bundle; returns the block engine's bundle id.
+    /// `sig` (base58, the first transaction's) and `attempt` join the bundle's results to it. The cached token only
+    /// (F28): an expired one refuses at once (`BundleError::AuthStale`), nothing goes over the network
+    pub async fn send_bundle(&self, txs: &[&[u8]], sig: &str, attempt: Option<u64>) -> std::result::Result<String, BundleError> {
+        if txs.is_empty() || txs.len() > MAX_BUNDLE_TXS { return Err(BundleError::Other(anyhow::anyhow!("jito bundle: 1-{MAX_BUNDLE_TXS} transactions, got {}", txs.len()))); }
+        let token = self.cached_token(unix_ms()).ok_or(BundleError::AuthStale)?;
+        let uuid = match self.fake.get() {
+            Some(f) => f(txs)?,
+            None => {
+                let packets = txs.iter().map(|d| Packet { data: d.to_vec(), meta: Some(Meta { size: d.len() as u64, addr: "0.0.0.0".into(), port: 0, sender_stake: 0 }) }).collect();
+                let r: SendBundleResponse = self.unary(SEND_BUNDLE, SendBundleRequest { bundle: Some(Bundle { packets }) }, Some(&token)).await
+                    .map_err(|e| if e.downcast_ref::<GrpcStatus>().is_some_and(|s| refused_code(s.code)) { BundleError::Refused(e) } else { BundleError::Other(e) })?;
+                r.uuid
+            }
+        };
+        // results that came before this reply (kept under the id) are matched now
+        let early: Vec<(u64, Outcome)> = {
+            let mut v = self.verdicts.lock().unwrap();
+            v.id_of_sig.insert(sig.to_string(), uuid.clone());
+            v.sig_of_id.insert(uuid.clone(), sig.to_string());
+            if let Some(a) = attempt { v.attempt_of_id.insert(uuid.clone(), a); }
+            let early = v.all.get(&uuid).cloned().unwrap_or_default();
+            if early.is_empty() { v.order.push_back(uuid.clone()); v.trim(); }
+            early
+        };
+        for (k, (t, o)) in early.into_iter().enumerate() { self.ours(sig, &o, k as u32, t, attempt); }
+        Ok(uuid)
+    }
+
+    /// every result so far of the bundle sent with transaction `sig`, in order, with its receipt time
+    pub fn verdicts(&self, sig: &str) -> Vec<(u64, Outcome)> {
+        let v = self.verdicts.lock().unwrap();
+        v.id_of_sig.get(sig).and_then(|id| v.all.get(id)).cloned().unwrap_or_default()
+    }
+
+    /// the bundle id the block engine gave the bundle with transaction `sig`
+    pub fn bundle_of(&self, sig: &str) -> Option<String> { self.verdicts.lock().unwrap().id_of_sig.get(sig).cloned() }
+
+    /// the result stream's connection number
+    pub fn stream_epoch(&self) -> u64 { self.epoch.load(Relaxed) }
 
     /// the tip accounts this block engine accepts
     pub async fn tip_accounts(&self) -> Result<Vec<String>> {
@@ -320,48 +550,57 @@ impl Jito {
         Ok(r.accounts)
     }
 
-    /// the block engine's FIRST result for the bundle sent with transaction `sig`, or None if none came by `deadline`
-    pub async fn verdict(&self, sig: &str, deadline: tokio::time::Instant) -> Option<Outcome> {
-        let rx = {
-            let mut v = self.verdicts.lock().unwrap();
-            let id = v.id_of_sig.get(sig)?.clone();
-            if let Some(o) = v.first.get(&id) { return Some(o.clone()); }
-            let (tx, rx) = oneshot::channel();
-            v.waiting.entry(id).or_default().push(tx);
-            rx
-        };
-        tokio::time::timeout_at(deadline, rx).await.ok()?.ok()
-    }
+    /// One result from the stream: counted, kept in order under its bundle, written to bundles.jsonl (v2), and, for a
+    /// bundle of ours, handed on (`ours`)
+    fn on_result(&self, o: Outcome) { self.on_result_at(o, now_ns()); }
 
-    fn on_result(&self, o: Outcome) {
+    pub(crate) fn on_result_at(&self, o: Outcome, t: u64) {
         *self.counts.lock().unwrap().entry(o.outcome).or_default() += 1;
-        let sig = {
+        let (seq, sig, attempt) = {
             let mut v = self.verdicts.lock().unwrap();
-            if !v.first.contains_key(&o.bundle) {
-                v.first.insert(o.bundle.clone(), o.clone());
-                if !v.sig_of_id.contains_key(&o.bundle) { v.order.push_back(o.bundle.clone()); v.trim(); }
-                for w in v.waiting.remove(&o.bundle).unwrap_or_default() { let _ = w.send(o.clone()); }
-            }
-            v.sig_of_id.get(&o.bundle).cloned()
+            let known = v.sig_of_id.contains_key(&o.bundle);
+            let list = v.all.entry(o.bundle.clone()).or_default();
+            let seq = list.len() as u32;
+            list.push((t, o.clone()));
+            if !known && seq == 0 { v.order.push_back(o.bundle.clone()); v.trim(); }
+            (seq, v.sig_of_id.get(&o.bundle).cloned(), v.attempt_of_id.get(&o.bundle).copied())
         };
+        if let Some(sig) = &sig { self.ours(sig, &o, seq, t, attempt); }
         if self.rec.is_on() {
             // the line is made and serialized on the recorder's core writer, not on the result stream's task
-            let t = now_ns();
+            let epoch = self.epoch.load(Relaxed);
             self.rec.emit(crate::rec::BUNDLES, crate::rec::Record::enc(move |w| {
                 let code = if o.outcome == "would-fail" { error_code(o.detail.as_deref()) } else { None };
                 let mut line = serde_json::to_value(&o).unwrap_or_default();
                 line["t_ns"] = json!(t);
                 line["sig"] = json!(sig);
                 line["code"] = json!(code);
+                line["seq"] = json!(seq);
+                for k in ["slot", "index", "bid", "detail", "validator"] { if line.get(k).is_none() { line[k] = serde_json::Value::Null; } }
+                line["attempt"] = json!(attempt);
+                line["stream_epoch"] = json!(epoch);
                 let _ = serde_json::to_writer(w, &line);
             }));
         }
     }
 
-    /// Follow the result of every bundle this key sends, until `stop`; the stream reopens by itself when it ends.
+    /// A result of a bundle of ours (`sig` its transaction): a `processed` one names the bundle to the transfer
+    /// classification (exec.jsonl / wallet.jsonl `bundle`) and is the wallet's source (c); every one goes to the sink
+    fn ours(&self, sig: &str, o: &Outcome, seq: u32, t: u64, attempt: Option<u64>) {
+        if o.outcome == "processed" {
+            crate::classify::note_bundle_processed(sig, &o.bundle, o.slot.unwrap_or(0), o.index.unwrap_or(0));
+            if let Some(s64) = bs58::decode(sig).into_vec().ok().and_then(|v| <[u8; 64]>::try_from(v).ok()) { crate::chainfetch::note_jito_processed(&s64, o.slot); }
+        }
+        if let Some(f) = self.sink.get() { f(ResultNote { sig: sig.to_string(), bundle: o.bundle.clone(), outcome: o.clone(), seq, t_ns: t, attempt }); }
+    }
+
+    /// Follow the result of every bundle this key sends, until `stop`; the stream reopens by itself when it ends. Each
+    /// opening is a new `stream_epoch`; an outage is `jito_stream_down` (with the error) then `jito_stream_up` (with how
+    /// long results could not arrive)
     pub async fn follow_results(self: Arc<Self>, stop: Arc<std::sync::atomic::AtomicBool>, status: impl Fn(String) + Send + Sync) {
         let mut first = true;
-        while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+        let mut outage = Outage::default();
+        while !stop.load(Relaxed) {
             let r = async {
                 let token = self.token().await?;
                 let mut grpc = tonic::client::Grpc::new(self.channel.clone());
@@ -370,8 +609,11 @@ impl Jito {
                 req.metadata_mut().insert("authorization", format!("Bearer {token}").parse().context("token")?);
                 let codec: ProstCodec<SubscribeBundleResultsRequest, BundleResult> = ProstCodec::default();
                 let path = http::uri::PathAndQuery::from_static("/searcher.SearcherService/SubscribeBundleResults");
+                crate::netcount::note();
                 let mut st = grpc.server_streaming(req, path, codec).await?.into_inner();
+                let epoch = self.epoch.fetch_add(1, Relaxed) + 1;
                 status(format!("jito results: stream {}", if first { "open" } else { "reopened" }));
+                if let Some(e) = outage.opened(epoch, now_ns()) { self.rec.event("jito_stream_up", "jito", None, e); }
                 first = false;
                 while let Some(m) = st.message().await? {
                     // the LeaderBook's `bundle_result` source (WP-03 item 10): the validators our bundles reached
@@ -379,16 +621,21 @@ impl Jito {
                         crate::leaders::note_bundle_validator(id);
                     }
                     self.on_result(summarize(m));
-                    if stop.load(std::sync::atomic::Ordering::Relaxed) { return Ok(()); }
+                    if stop.load(Relaxed) { return Ok(()); }
                 }
                 anyhow::Ok(())
             }.await;
-            if stop.load(std::sync::atomic::Ordering::Relaxed) { break; }
-            if let Err(e) = r { status(format!("jito results: {e:#}; reopening")); }
+            if stop.load(Relaxed) { break; }
+            let why = match &r { Err(e) => crate::rpc::scrub(&format!("{e:#}")), Ok(()) => "the stream ended".into() };
+            if let Some(e) = outage.failed(self.epoch.load(Relaxed), &why, now_ns()) { self.rec.event("jito_stream_down", "jito", None, e); }
+            if r.is_err() { status(format!("jito results: {why}; reopening")); }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
 }
+
+/// the SendBundle method (the one unary call that is the send itself: not counted as a network call)
+const SEND_BUNDLE: &str = "/searcher.SearcherService/SendBundle";
 
 #[cfg(test)]
 mod tests {
@@ -475,18 +722,162 @@ mod tests {
         let _ = std::fs::remove_file(&dir);
     }
 
+    fn out(bundle: &str, outcome: &'static str) -> Outcome { Outcome { bundle: bundle.into(), outcome, slot: None, index: None, bid: None, detail: None, validator: None } }
+
+    /// PLAN WP-05 acceptance (verdict history): several results for one bundle are all kept, in order, with their times;
+    /// a result that beat the sendBundle reply is matched when the reply names its bundle; our results reach the sink
+    /// (and a `processed` one the classification and the wallet's source (c))
     #[tokio::test]
-    async fn verdict_sees_a_result_that_beat_the_send_reply() {
-        let v = Mutex::new(Verdicts::default());
-        // the result arrives first, then the bundle id is learned
-        {
-            let mut g = v.lock().unwrap();
-            g.first.insert("id1".into(), Outcome { bundle: "id1".into(), outcome: "would-fail", slot: None, index: None, bid: None, detail: None });
-            g.id_of_sig.insert("sig1".into(), "id1".into());
+    async fn every_result_of_a_bundle_is_kept_in_order() {
+        let j = Jito::for_test(crate::rec::Rec::off());
+        j.set_cached(Some(CachedToken { value: "tok".into(), exp_ms: unix_ms() + 600_000, issued_ms: unix_ms() }));
+        let sunk: Arc<Mutex<Vec<(String, &'static str, u32, Option<u64>)>>> = Default::default();
+        let s2 = sunk.clone();
+        j.set_sink(Box::new(move |n: ResultNote| s2.lock().unwrap().push((n.sig, n.outcome.outcome, n.seq, n.attempt))));
+        // the block engine in memory names bundles b1, b2, ...
+        let n = Arc::new(AtomicU64::new(0));
+        let n2 = n.clone();
+        j.set_fake(Arc::new(move |_txs: &[&[u8]]| format!("b{}", n2.fetch_add(1, Relaxed) + 1)));
+        // b1: sent first, then accepted, would-fail
+        let sig1 = bs58::encode([1u8; 64]).into_string();
+        assert_eq!(j.send_bundle(&[&[1, 2, 3]], &sig1, Some(7)).await.unwrap(), "b1");
+        j.on_result_at(Outcome { slot: Some(9), validator: Some("V1".into()), ..out("b1", "accepted") }, 100);
+        j.on_result_at(Outcome { detail: Some("custom program error: 0x4e580002".into()), ..out("b1", "would-fail") }, 250);
+        let v = j.verdicts(&sig1);
+        assert_eq!(v.iter().map(|(t, o)| (*t, o.outcome)).collect::<Vec<_>>(), vec![(100, "accepted"), (250, "would-fail")]);
+        assert_eq!(v[0].1.validator.as_deref(), Some("V1"), "the validator is kept");
+        // b2's results beat its reply: kept under the id, matched (and sunk) when the reply comes
+        let sig2 = bs58::encode([2u8; 64]).into_string();
+        j.on_result_at(Outcome { slot: Some(11), validator: Some("V2".into()), ..out("b2", "accepted") }, 300);
+        j.on_result_at(Outcome { slot: Some(11), index: Some(4), validator: Some("V2".into()), ..out("b2", "processed") }, 310);
+        assert!(j.verdicts(&sig2).is_empty(), "not matched yet");
+        assert_eq!(j.send_bundle(&[&[4, 5]], &sig2, Some(8)).await.unwrap(), "b2");
+        assert_eq!(j.verdicts(&sig2).iter().map(|(t, o)| (*t, o.outcome)).collect::<Vec<_>>(), vec![(300, "accepted"), (310, "processed")]);
+        j.on_result_at(out("b2", "finalized"), 900);
+        assert_eq!(j.verdicts(&sig2).len(), 3);
+        let s = sunk.lock().unwrap().clone();
+        assert_eq!(s, vec![(sig1.clone(), "accepted", 0, Some(7)), (sig1, "would-fail", 1, Some(7)), (sig2.clone(), "accepted", 0, Some(8)), (sig2.clone(), "processed", 1, Some(8)),
+            (sig2, "finalized", 2, Some(8))]);
+        // review WP-05 #2: only a landing is final; a would-fail, a lost auction, a drop or a rejection keeps the entry
+        assert!(out("x", "processed").is_final() && out("x", "finalized").is_final());
+        for o in ["accepted", "would-fail", "lost-auction", "dropped", "rejected"] { assert!(!out("x", o).is_final(), "{o}"); }
+    }
+
+    /// F28: the send path reads only the cached token. An expired one refuses at once (`jito_auth_stale`) with no network
+    /// call; a valid one sends; the refresh is the background's (it counts in the process total, not in the send's scope)
+    #[tokio::test]
+    async fn send_bundle_never_refreshes_the_token() {
+        let j = Jito::for_test(crate::rec::Rec::off());
+        let got: Arc<Mutex<Vec<Vec<u8>>>> = Default::default();
+        let g2 = got.clone();
+        j.set_fake(Arc::new(move |txs: &[&[u8]]| { g2.lock().unwrap().push(txs[0].to_vec()); "bx".into() }));
+        let scope = Arc::new(AtomicU64::new(0));
+        let sig = bs58::encode([3u8; 64]).into_string();
+        // no token at all, then one about to expire: refused without a call
+        for t in [None, Some(CachedToken { value: "t".into(), exp_ms: unix_ms() + 1_000, issued_ms: unix_ms() - 100_000 })] {
+            j.set_cached(t);
+            let r = crate::netcount::in_task(Some(scope.clone()), j.send_bundle(&[&[9]], &sig, None)).await;
+            assert!(matches!(r, Err(BundleError::AuthStale)), "{r:?}");
         }
-        let g = v.lock().unwrap();
-        let id = g.id_of_sig.get("sig1").unwrap();
-        assert_eq!(g.first.get(id).unwrap().outcome, "would-fail");
+        assert!(got.lock().unwrap().is_empty());
+        assert_eq!(j.token_state(unix_ms()), TokenState::Stale);
+        j.set_cached(Some(CachedToken { value: "t".into(), exp_ms: unix_ms() + 600_000, issued_ms: unix_ms() }));
+        assert!(matches!(j.token_state(unix_ms()), TokenState::Valid { age_s: 0, .. }));
+        let r = crate::netcount::in_task(Some(scope.clone()), j.send_bundle(&[&[9]], &sig, None)).await;
+        assert_eq!(r.unwrap(), "bx");
+        assert_eq!(got.lock().unwrap().len(), 1);
+        assert_eq!(scope.load(Relaxed), 0, "no network call on the send path");
+        // a refresh in the background (the real one: the channel goes nowhere, so it fails) counts, outside the scope
+        let t0 = crate::netcount::total();
+        let j2 = j.clone();
+        let _ = tokio::spawn(async move { j2.renew(true).await }).await.unwrap();
+        assert!(crate::netcount::total() > t0, "the refresh's unary call is a network call");
+        assert_eq!(scope.load(Relaxed), 0, "... not the send path's");
+        // the refresher's schedule: half the token's life
+        j.set_cached(Some(CachedToken { value: "t".into(), exp_ms: 10_000, issued_ms: 2_000 }));
+        assert_eq!(j.renew_due_ms(5_000), 6_000);
+    }
+
+    /// review WP-05 #7: a status the block engine answers with when it does not take the bundle is a refusal (it cannot
+    /// land); a timeout, a transport failure and what tonic reports for one are not: such a bundle may have arrived
+    #[test]
+    fn a_refusal_is_told_from_no_answer() {
+        use tonic::Code::*;
+        for c in [InvalidArgument, ResourceExhausted, PermissionDenied, Unauthenticated, FailedPrecondition, OutOfRange, Unimplemented, NotFound] { assert!(refused_code(c), "{c:?}"); }
+        for c in [Ok, Cancelled, DeadlineExceeded, Unknown, Unavailable, Internal, DataLoss, Aborted, AlreadyExists] { assert!(!refused_code(c), "{c:?}"); }
+        let e = anyhow::Error::new(GrpcStatus { code: ResourceExhausted, msg: "/x: rate limited".into() });
+        assert_eq!(format!("{e:#}"), "/x: rate limited", "the message is the status line, as before");
+    }
+
+    /// review WP-05 #14: one `jito_stream_down` per outage (its first error) and one `jito_stream_up` when a stream opens
+    /// again, with how long results could not arrive
+    #[test]
+    fn stream_outages_are_one_down_and_one_up() {
+        let mut o = Outage::default();
+        assert_eq!(o.opened(1, 100), None, "the first opening ends no outage");
+        assert_eq!(o.failed(1, "boom", 1_000_000_000), Some(json!({ "stream_epoch": 1, "error": "boom" })));
+        assert_eq!(o.failed(1, "again", 2_000_000_000), None, "one down per outage");
+        assert_eq!(o.opened(2, 4_500_000_000), Some(json!({ "stream_epoch": 2, "down_ms": 3_500 })));
+        assert_eq!(o.opened(3, 5_000_000_000), None);
+        assert!(o.failed(3, "x", 6_000_000_000).is_some(), "a new outage");
+    }
+
+    /// review WP-05 #14 (PLAN WP-05 item 2, F28): the background refresher renews the cached token at half its lifetime
+    /// (an events.jsonl `jito_token_refresh` each time); a failed renewal is retried after 1 s, then 2 s, each failure an
+    /// event saying whether the send path is left without a valid token
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn keep_token_renews_at_half_life_and_backs_off() {
+        let d = std::env::temp_dir().join(format!("arbx-jito-keep-{}-{}", std::process::id(), now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:9").connect_lazy();
+        let j = Arc::new(Jito::with_channel(channel, SigningKey::from_bytes(&[1u8; 32]), rec.clone()));
+        let fail = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (f2, calls) = (fail.clone(), Arc::new(AtomicU64::new(0)));
+        let c2 = calls.clone();
+        j.set_fake_renew(Arc::new(move || {
+            c2.fetch_add(1, Relaxed);
+            if f2.load(Relaxed) { anyhow::bail!("block engine unreachable") }
+            Ok(CachedToken { value: "renewed".into(), exp_ms: unix_ms() + 3_600_000, issued_ms: unix_ms() })
+        }));
+        // a token obtained 10 s ago with 10.3 s left: due for renewal at half its life, 150 ms from now
+        let t0 = unix_ms();
+        j.set_cached(Some(CachedToken { value: "first".into(), exp_ms: t0 + 10_300, issued_ms: t0 - 10_000 }));
+        assert_eq!(j.renew_due_ms(t0), t0 + 150);
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let h = tokio::spawn(j.clone().keep_token(stop.clone()));
+        let waited = std::time::Instant::now();
+        while j.cached_token(unix_ms()).as_deref() != Some("renewed") {
+            assert!(waited.elapsed() < Duration::from_secs(3), "not renewed");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(unix_ms() >= t0 + 140, "renewed at half its life, not before");
+        assert_eq!(calls.load(Relaxed), 1);
+        h.abort();
+        // the block engine is unreachable and no token is held: a renewal at once, then after 1 s, then after 2 s
+        fail.store(true, Relaxed);
+        j.set_cached(None);
+        let h = tokio::spawn(j.clone().keep_token(stop.clone()));
+        let wait_for = |n: u64| { let c = calls.clone(); async move {
+            let w = std::time::Instant::now();
+            while c.load(Relaxed) < n { assert!(w.elapsed() < Duration::from_secs(4), "no retry"); tokio::time::sleep(Duration::from_millis(5)).await; }
+            std::time::Instant::now()
+        } };
+        let first = wait_for(2).await;
+        let second = wait_for(3).await;
+        assert!(second - first >= Duration::from_millis(950), "the first retry waits 1 s: {:?}", second - first);
+        // (the failure's event is written right after the call returns)
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        stop.store(true, Relaxed);
+        h.abort();
+        rec.close();
+        let ev: Vec<serde_json::Value> = crate::rec::read_jsonl(&d, "events").unwrap().into_iter().filter(|e| e["kind"] == "jito_token_refresh").collect();
+        assert_eq!(ev.len(), 3, "{ev:?}");
+        assert_eq!((ev[0]["detail"]["ok"].as_bool(), ev[0]["detail"]["via"].as_str()), (Some(true), Some("fake")), "{}", ev[0]);
+        assert_eq!((ev[1]["detail"]["ok"].as_bool(), ev[1]["detail"]["retry_s"].as_u64(), ev[1]["detail"]["stale"].as_bool()), (Some(false), Some(1), Some(true)), "{}", ev[1]);
+        assert_eq!((ev[2]["detail"]["ok"].as_bool(), ev[2]["detail"]["retry_s"].as_u64()), (Some(false), Some(2)), "{}", ev[2]);
+        assert!(ev[1]["detail"]["error"].as_str().is_some_and(|e| e.contains("unreachable")));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// review F12: bundles.jsonl as `on_result` writes it through the recorder (the line is made on the core writer):
@@ -497,17 +888,24 @@ mod tests {
         let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
             echo: Some(Box::new(std::io::sink())) }).unwrap();
         let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:9").connect_lazy();
-        let j = Jito { channel, key: SigningKey::from_bytes(&[1u8; 32]), tokens: Default::default(), verdicts: Default::default(), rec: rec.clone(), counts: Default::default() };
-        j.verdicts.lock().unwrap().sig_of_id.insert("b1".into(), "sigA".into());
-        j.on_result(Outcome { bundle: "b1".into(), outcome: "would-fail", slot: None, index: None, bid: None, detail: Some(PROFIT.into()) });
-        j.on_result(Outcome { bundle: "b2".into(), outcome: "processed", slot: Some(7), index: Some(1), bid: None, detail: None });
+        let j = Jito::with_channel(channel, SigningKey::from_bytes(&[1u8; 32]), rec.clone());
+        {
+            let mut v = j.verdicts.lock().unwrap();
+            v.sig_of_id.insert("b1".into(), "sigA".into());
+            v.attempt_of_id.insert("b1".into(), 5);
+        }
+        j.on_result(Outcome { detail: Some(PROFIT.into()), ..out("b1", "would-fail") });
+        j.on_result(Outcome { slot: Some(7), index: Some(1), validator: Some("Val".into()), ..out("b2", "processed") });
+        j.on_result(Outcome { slot: Some(7), ..out("b2", "finalized") });
         rec.close();
         let v = crate::rec::read_jsonl(&d, "bundles").unwrap();
-        assert_eq!(v.len(), 2);
+        assert_eq!(v.len(), 3);
         assert_eq!((v[0]["bundle"].as_str(), v[0]["outcome"].as_str(), v[0]["sig"].as_str(), v[0]["code"].as_str()), (Some("b1"), Some("would-fail"), Some("sigA"), Some(PROFIT_CHECK_CODE)));
         assert!(v[0]["t_ns"].as_u64().unwrap() > 0 && v[0]["detail"].as_str().unwrap().starts_with("A transaction"));
-        assert_eq!((v[1]["slot"].as_u64(), v[1]["index"].as_u64(), v[1]["sig"].is_null(), v[1]["code"].is_null()), (Some(7), Some(1), true, true));
-        assert_eq!(*j.counts.lock().unwrap(), [("processed", 1), ("would-fail", 1)].into_iter().collect());
+        assert_eq!((v[0]["seq"].as_u64(), v[0]["attempt"].as_u64(), v[0]["validator"].is_null(), v[0]["stream_epoch"].as_u64()), (Some(0), Some(5), true, Some(0)));
+        assert_eq!((v[1]["slot"].as_u64(), v[1]["index"].as_u64(), v[1]["sig"].is_null(), v[1]["code"].is_null(), v[1]["validator"].as_str()), (Some(7), Some(1), true, true, Some("Val")));
+        assert_eq!((v[2]["seq"].as_u64(), v[2]["outcome"].as_str()), (Some(1), Some("finalized")), "the second result of b2");
+        assert_eq!(*j.counts.lock().unwrap(), [("finalized", 1), ("processed", 1), ("would-fail", 1)].into_iter().collect());
         let _ = std::fs::remove_dir_all(&d);
     }
 }

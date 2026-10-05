@@ -22,11 +22,14 @@ fn json(p: &Path) -> Value { serde_json::from_str(&std::fs::read_to_string(p).un
 fn meta_json_hashes_the_config_before_the_command_line() {
     let d = tmp();
     // a copy, so no .env beside the shipped config is ever loaded; with no free-space floor (WP-02 review F5: a run does
-    // not start under `min_free_gb`, and the test's temporary directory may hold less than the shipped 25 GB)
+    // not start under `min_free_gb`, and the test's temporary directory may hold less than the shipped 25 GB), and the
+    // repo's crowded list in place of the server's path (WP-05: a configured list must load before anything starts)
     let conf = d.join("stage0.toml");
     let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arbx-stage0.toml")).unwrap();
     let floor = text.lines().find(|l| l.starts_with("min_free_gb")).expect("the shipped config sets min_free_gb").to_string();
-    std::fs::write(&conf, text.replace(&floor, "min_free_gb = 0")).unwrap();
+    let crowded = text.lines().find(|l| l.starts_with("crowded_pools_file")).expect("the shipped config names a crowded list").to_string();
+    let repo_list = Path::new(env!("CARGO_MANIFEST_DIR")).join("data/crowded-pools.json");
+    std::fs::write(&conf, text.replace(&floor, "min_free_gb = 0").replace(&crowded, &format!("crowded_pools_file = {:?}", repo_list.display().to_string()))).unwrap();
     let prov = Command::new(BIN).env_clear().args(["provenance", "--offline", "--config"]).arg(&conf).output().unwrap();
     assert!(prov.status.success(), "{}", String::from_utf8_lossy(&prov.stderr));
     let prov: Value = serde_json::from_slice(&prov.stdout).unwrap();
@@ -66,5 +69,12 @@ fn meta_json_hashes_the_config_before_the_command_line() {
     assert_eq!(out.status.code(), Some(30));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--shadow and --canary"));
     assert!(!camp.join("x").exists());
+    // WP-05 (review F8 c): a configured crowded list that does not load stops the start, before the segment directory
+    let missing = d.join("missing-list.toml");
+    std::fs::write(&missing, text.replace(&floor, "min_free_gb = 0").replace(&crowded, "crowded_pools_file = \"/nonexistent/crowded-pools.json\"")).unwrap();
+    let out = Command::new(BIN).env_clear().args(["run", "--name", "z", "--config"]).arg(&missing).arg("--campaign-dir").arg(&camp).output().unwrap();
+    assert_eq!(out.status.code(), Some(30));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("crowded_pools_file"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!camp.join("z").exists());
     let _ = std::fs::remove_dir_all(&d);
 }

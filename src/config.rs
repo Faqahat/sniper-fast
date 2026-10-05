@@ -38,8 +38,13 @@ pub struct Config {
     pub feeds: Vec<Feed>,
     #[serde(rename = "send", default)]
     pub sends: Vec<SendPath>,
+    /// WP-05: the send policy (PLAN WP-05's `[send]` keys: TOML cannot hold a `[send]` table beside the `[[send]]` paths,
+    /// so they live here). `[gate]` (the Jito gate) is gone: a config that still has it does not load
     #[serde(default)]
-    pub gate: GateCfg,
+    pub send_policy: SendPolicyCfg,
+    /// WP-05 (go-live gate item 4): `arbx run --dry-run` signs every would-send bundle with a throwaway key and never sends
+    #[serde(default)]
+    pub dry_run: DryRunCfg,
     #[serde(default)]
     pub exec: ExecCfg,
     #[serde(default)]
@@ -268,9 +273,15 @@ pub struct RuntimeCfg {
 impl Default for RuntimeCfg { fn default() -> Self { RuntimeCfg { bg_threads: rt_bg_threads() } } }
 fn rt_bg_threads() -> usize { 3 }
 
-/// STEP 4: real trades. Needs mode = "live" AND `arbx run --live`. Each copy's on-chain min_profit is base fee +
-/// priority fee + that copy's tip + `margin_lamports`, so a landed trade cannot lose; what failures cost (their fees)
-/// is capped by `max_failed_fees_lamports`, after which no trade is sent (the engine keeps recording).
+/// STEP 4: real trades. Needs mode = "live" AND `arbx run --live`. Every send is a one-transaction Jito bundle (PLAN
+/// WP-05): its on-chain min_profit is tip + base fee + margin (`[send_policy] margin_*`), so a landed trade cannot lose,
+/// and a losing bundle never lands. What landed failures cost (their fees) is capped by `max_failed_fees_lamports`, after
+/// which no trade is sent (the engine keeps recording). WP-05 removed the direct arm's keys (`test_all_paths`,
+/// `max_priority_lamports`, `bid_*`, `spec_cu_price_micro`, `rotate_paths`, `race_mix`, `bundle_mix`, `tpu_*`,
+/// `pair_lock_ms`, `sim_gate`, `bundle_resend_ms`, `bundle_size_variants`, `compete_*`, `gross_floor`), the durable nonces
+/// (`nonce_accounts`: `[send_policy.direct]`), `settle_s` (attempts settle from the chain: the wallet stream, or the
+/// blockhash's expiry) and moved `big_band_*`, `crowded_pools_file` and `crowded_skip_min_expected_lamports` to
+/// `[send_policy]`: a config that still has one does not load
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiveCfg {
@@ -280,143 +291,119 @@ pub struct LiveCfg {
     /// stop sending once fees of landed transactions that failed reach this, lamports
     #[serde(default = "live_fee_cap")]
     pub max_failed_fees_lamports: u64,
+    /// the decision's own margin: a trade is sent only when its expected profit covers tip + base fee + this (today's
+    /// rule, kept); the on-chain floor is `[send_policy] margin_floor` / `margin_share`
     #[serde(default = "live_margin")]
     pub margin_lamports: u64,
-    /// new token accounts a winning trade may create (rent, recoverable by closing them)
+    /// new token accounts a winning trade may create (rent, recoverable by closing them); 0 = none (WP-06 makes trades
+    /// rent-neutral and removes the key)
     #[serde(default = "live_atas")]
     pub max_new_token_accounts: u32,
-    /// settle each trade this long after it is sent, seconds (its nonce is leased until then)
-    #[serde(default = "live_settle")]
-    pub settle_s: u64,
-    /// durable nonce accounts (authority: the wallet), one per trade in flight; arbed's three by default
-    #[serde(default = "live_nonces")]
-    pub nonce_accounts: Vec<String>,
-    /// TESTING LANDING, not profit (owner, 2026-10-03): every enabled path gets a copy on every trade, even when its tip
-    /// (Bolt, Astralane: 0.001 SOL) is above the expected profit. Each copy's on-chain min_profit still includes its tip,
-    /// so such a copy lands as a failed transaction (fee only) unless the trade really clears its tip.
-    #[serde(default)]
-    pub test_all_paths: bool,
-    /// never more than this priority fee on one trade, lamports, whatever the expected profit says (arbed's
-    /// PRIORITY_MAX_LAMPORTS): live-run-1 paid 1,104,138 on one trade whose expected profit was overstated
-    #[serde(default = "live_prio_cap")]
-    pub max_priority_lamports: u64,
-    /// TWO-TIER BID (9EwQoN74's pattern, research log S-010): speculative copies at ZERO priority (a miss costs the 5,000
-    /// base fee only), and only when the expected profit reaches `bid_min_expected_lamports` a priority fee of
-    /// `bid_share` of it (at most `bid_max_priority_lamports`) to win the pool's next turn behind the trigger. Replaces
-    /// the trigger-copy / flat rule and `max_priority_lamports` when on.
-    #[serde(default)]
-    pub bid_tiers: bool,
-    #[serde(default = "bid_min")]
-    pub bid_min_expected_lamports: u64,
-    #[serde(default = "bid_share")]
-    pub bid_share: f64,
-    #[serde(default = "bid_max")]
-    pub bid_max_priority_lamports: u64,
-    /// the speculative (default) tier's compute-unit price, micro-lamports: 0 = none at all; 1 = about 0.2 lamports,
-    /// enough for Helius Sender, which refuses a transaction without a CU price
-    #[serde(default)]
-    pub spec_cu_price_micro: u64,
-    /// PATH ROTATION (measurement): each trade goes out through ONE path, the next in turn (the Jito bundle excluded: a
-    /// failing bundle never lands), so every path gets its own landings timed on the leader clock
-    #[serde(default)]
-    pub rotate_paths: bool,
-    /// the long run's 2x2: even trades put a copy on every path ("race", path data), odd ones only the copies whose tip
-    /// the gap covers ("win"); and in pairs, the fee copies the trigger (0.95x) or is flat. Needs bid_tiers off.
-    #[serde(default)]
-    pub race_mix: bool,
-    /// tonight's 2-arm test: even trades go on every TPU path (only copies whose tip the gap covers), odd trades as a
-    /// Jito bundle only, with no priority fee (a bundle that would fail never lands: a miss costs nothing)
-    #[serde(default)]
-    pub bundle_mix: bool,
-    /// the TPU arm's flat priority fee, µlamports/CU (0 = the fee rule)
-    #[serde(default)]
-    pub tpu_cu_price_micro: u64,
-    /// one trade per pool pair within this many ms (was: until the trade settled, 8+ s)
-    #[serde(default = "pair_lock")]
-    pub pair_lock_ms: u64,
-    /// simulate a TPU trade's own signed transaction before sending it (the chain's fees, clock and state, so a quote
-    /// error never lands as a paid failure); the bundle arm needs none (Jito drops a bundle that would fail)
-    #[serde(default)]
-    pub sim_gate: bool,
-    /// TPU copies only below this predicted profit (0 = no limit): long run 1's wins had a median 51k, the gaps fast
-    /// bots took 438k, the mispriced ones 650k; above it the trade goes as a bundle only (a miss costs nothing)
-    #[serde(default)]
-    pub tpu_max_expected_lamports: u64,
-    /// TPU copies never on pools from MriyaNN8's list (1 win in 335 sends there in long run 1): bundle only
-    #[serde(default)]
-    pub tpu_skip_mriya_pools: bool,
-    /// TPU copies never for these tokens: bundle only (w5h seg 1-4: SOL/USDC DLMM gaps pass the simulation, then lose
-    /// on chain to faster bots; 14 landed, 2 wins worth +12k and +0.7k gross against 108k lamports of fees)
-    #[serde(default)]
-    pub tpu_skip_mints: Vec<String>,
-    /// TPU copies only from this predicted profit up (0 = no floor): below it the trade goes as a bundle only
-    #[serde(default)]
-    pub tpu_min_expected_lamports: u64,
-    /// the bundle arm's resends of the same bundle, ms after the first (w5h seg 7: +100/+250 ms were never accepted,
-    /// the gap was gone; empty = none)
-    #[serde(default)]
-    pub bundle_resend_ms: Vec<u64>,
-    /// the bundle arm also sends the same trade at these fractions of its size, at once, under the same nonce (our
-    /// quote is exact at small sizes and off at big ones: seg 6 failures were 0.2-4.2 SOL, the wins 0.006-0.024 SOL)
-    #[serde(default)]
-    pub bundle_size_variants: Vec<f64>,
-    /// the TPU arm bids this multiple of the pools' recent 75th-percentile CU price (0 = off) ...
-    #[serde(default)]
-    pub compete_mult: f64,
-    /// ... but never more than this share of the expected profit as priority fee
-    #[serde(default = "compete_share")]
-    pub compete_max_share: f64,
-    /// alternate competitive and flat bids in pairs of TPU trades (measures which wins more per lamport)
-    #[serde(default)]
-    pub compete_ab: bool,
-    /// on-chain min_profit = the copy's tip + 1 lamport (fees are paid whatever happens, so completing a trade whose
-    /// gross gain dropped below the fees loses less than reverting it); the decision still needs the full margin
-    #[serde(default)]
-    pub gross_floor: bool,
-    /// WP-00 (temporary; moves to `[send]` in WP-05): live trades expecting at least this profit (lamports) form the
-    /// "big band", which is throttled to `big_band_max_per_sec` (0 of 1,869 such bundles landed while they took the
-    /// 5/s Jito budget from smaller ones; R §1, §3.4)
-    #[serde(default = "big_band_min")]
-    pub big_band_min_expected_lamports: u64,
-    /// WP-00: the big band's token bucket (rate per second, burst 1); over it the trade is skipped with
-    /// `live_skip_big_band_throttle`. 0 = no big-band trade at all
-    #[serde(default = "big_band_rate")]
-    pub big_band_max_per_sec: f64,
-    /// WP-00 (F6, OD-3): JSON list of the pools with 150 or more distinct arbitrage bots (data/crowded-pools.json).
-    /// An attempt touching one ranks last (Prio rank 2) in a send path's rate queue, and its rate drops are counted
-    /// apart. "" = none
-    #[serde(default)]
-    pub crowded_pools_file: String,
-    /// WP-00 (OD-3's alternative; review F2): a live trade on a crowded pool expecting at least this (lamports) is
-    /// skipped (`live_skip_crowded_pool`). 0 = never (rank only). The rank alone changes nothing at the 5/s budget's
-    /// load (no two bundles wait at once); in the 12 legacy segments 0 of 1,896 crowded bundles expecting 100k or more
-    /// landed, against 12 of 1,214 under 100k
-    #[serde(default)]
-    pub crowded_skip_min_expected_lamports: u64,
 }
-fn big_band_min() -> u64 { 1_000_000 }
-fn big_band_rate() -> f64 { 0.5 }
-fn compete_share() -> f64 { 0.25 }
-fn pair_lock() -> u64 { 8_000 }
-fn live_prio_cap() -> u64 { 100_000 }
-fn bid_min() -> u64 { 100_000 }
-fn bid_share() -> f64 { 0.5 }
-fn bid_max() -> u64 { 5_000_000 }
 fn live_size() -> f64 { 0.1 }
 fn live_fee_cap() -> u64 { 20_000_000 }
 fn live_margin() -> u64 { 1_000 }
 fn live_atas() -> u32 { 5 }
-fn live_settle() -> u64 { 15 }
-fn live_nonces() -> Vec<String> {
-    ["58XHXCVwizLunHZdtXRr21NXnraG8Y4vQWjpXLN2FgVe", "G6MfymxNMNSBResfcJccuvwQMswPW8cq7nB1tsCUN2DC", "CK9tCKm9PNt7Smrymh87UG6PyPi8XmV4gmV3BCPtxJdM"]
-        .iter().map(|s| s.to_string()).collect()
-}
 impl Default for LiveCfg {
-    fn default() -> Self { LiveCfg { max_size_sol: live_size(), max_failed_fees_lamports: live_fee_cap(), margin_lamports: live_margin(),
-        max_new_token_accounts: live_atas(), settle_s: live_settle(), nonce_accounts: live_nonces(), test_all_paths: false, max_priority_lamports: live_prio_cap(),
-        bid_tiers: false, bid_min_expected_lamports: bid_min(), bid_share: bid_share(), bid_max_priority_lamports: bid_max(), spec_cu_price_micro: 0, rotate_paths: false, race_mix: false, bundle_mix: false, tpu_cu_price_micro: 0, pair_lock_ms: pair_lock(), sim_gate: false, tpu_max_expected_lamports: 0, tpu_skip_mriya_pools: false, tpu_skip_mints: Vec::new(), tpu_min_expected_lamports: 0, bundle_resend_ms: Vec::new(), bundle_size_variants: Vec::new(), compete_mult: 0.0, compete_max_share: compete_share(), compete_ab: false, gross_floor: false,
-        big_band_min_expected_lamports: big_band_min(), big_band_max_per_sec: big_band_rate(), crowded_pools_file: String::new(), crowded_skip_min_expected_lamports: 0 } }
+    fn default() -> Self { LiveCfg { max_size_sol: live_size(), max_failed_fees_lamports: live_fee_cap(), margin_lamports: live_margin(), max_new_token_accounts: live_atas() } }
 }
+
+/// PLAN WP-05: the send policy. Bundle-only, fail-closed send checks (blockhash age, leader kind, cached Jito token,
+/// recorder, SendGate, store health), the in-flight lock, the rate queue's bands and crowding, the on-chain margin
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SendPolicyCfg {
+    /// a blockhash older than this (slots behind the chain tip) is not used: no send (`blockhash_stale`)
+    #[serde(default = "pol_bh_age")]
+    pub max_blockhash_age_slots: u64,
+    /// which blockhash-ring entry a bundle uses: "confirmed" (the WP-03b ring's confirmed head) or "processed" (the newest
+    /// of the head and the state stream's block metas)
+    #[serde(default = "pol_bh_commitment")]
+    pub blockhash_commitment: String,
+    /// a send waits at most this long for a slot of the Jito rate budget (best first: bands, crowding, EV), ms; then it is
+    /// dropped (`rate_queue_timeout`, or `crowded_pool` when a less crowded send took its slot)
+    #[serde(default = "pol_queue_ms")]
+    pub queue_ms: u64,
+    /// the ≥1M bands (bands 3-4, src/bands.rs) at most this often (a token bucket, burst 1; R §3.4); 0 = none of them
+    #[serde(default = "pol_big_rate")]
+    pub big_band_max_per_sec: f64,
+    /// crowding (F6): distinct arbitrage-like signers that landed on either pool over this many hours ...
+    #[serde(default = "pol_crowd_h")]
+    pub crowding_window_h: u64,
+    /// ... bucketed < [0], [0]..[1], ≥ [1] (buckets 0, 1, 2); bucket 2 queues behind the others of its band
+    #[serde(default = "pol_crowd_buckets")]
+    pub crowding_buckets: Vec<u32>,
+    /// WP-00's static list of the ≥150-bot pools (data/crowded-pools.json): bucket 2 until the activity map holds
+    /// `crowding_window_h` of data. "" = none
+    #[serde(default)]
+    pub crowded_pools_file: String,
+    /// WP-00 (OD-3's alternative; review F2), kept: a trade on a bucket-2 pool expecting at least this is not sent
+    /// (`crowded_pool`). 0 = never (rank only)
+    #[serde(default)]
+    pub crowded_skip_min_expected_lamports: u64,
+    /// on-chain min_profit = tip + base fee + priority (0) + margin, margin = max(margin_floor, margin_share × expected
+    /// net) (R §3.9). Stage 0 keeps today's floor (F23): 1 and 0
+    #[serde(default = "pol_margin_floor")]
+    pub margin_floor: u64,
+    #[serde(default)]
+    pub margin_share: f64,
+    /// an in-flight entry (key: buy pool, sell pool, mint) holds this many slots past its target slot, or until its final
+    /// verdict
+    #[serde(default = "pol_hold")]
+    pub inflight_hold_slots: u64,
+    /// leaders of these kinds are not sent to (`leader_skip_kind`; `unknown`: `leader_unknown`). R §3.6: non-Jito leaders
+    /// cannot take a bundle
+    #[serde(default = "pol_skip_kinds")]
+    pub skip_leader_kinds: Vec<String>,
+    /// the non-bundle (direct) arm, for a future experiment only: loading `true` is refused in Stage 0
+    #[serde(default)]
+    pub direct_experiment: bool,
+    /// the direct arm's durable nonces (only with `direct_experiment`)
+    #[serde(default)]
+    pub direct: DirectCfg,
+}
+fn pol_bh_age() -> u64 { 20 }
+fn pol_bh_commitment() -> String { "confirmed".into() }
+fn pol_queue_ms() -> u64 { 10 }
+fn pol_big_rate() -> f64 { 0.5 }
+fn pol_crowd_h() -> u64 { 6 }
+fn pol_crowd_buckets() -> Vec<u32> { vec![20, 150] }
+fn pol_margin_floor() -> u64 { 1 }
+fn pol_hold() -> u64 { 2 }
+fn pol_skip_kinds() -> Vec<String> { vec!["other".into(), "unknown".into()] }
+impl Default for SendPolicyCfg {
+    fn default() -> Self {
+        SendPolicyCfg { max_blockhash_age_slots: pol_bh_age(), blockhash_commitment: pol_bh_commitment(), queue_ms: pol_queue_ms(), big_band_max_per_sec: pol_big_rate(),
+            crowding_window_h: pol_crowd_h(), crowding_buckets: pol_crowd_buckets(), crowded_pools_file: String::new(), crowded_skip_min_expected_lamports: 0,
+            margin_floor: pol_margin_floor(), margin_share: 0.0, inflight_hold_slots: pol_hold(), skip_leader_kinds: pol_skip_kinds(), direct_experiment: false,
+            direct: DirectCfg::default() }
+    }
+}
+
+/// `[send_policy.direct]`: the direct (non-bundle) arm's durable nonce accounts, kept for its experiment
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectCfg {
+    #[serde(default)]
+    pub nonce_accounts: Vec<String>,
+}
+
+/// `arbx run --dry-run` (go-live gate item 4): every would-send bundle is built and signed by a throwaway key made in
+/// memory at the start (never the trading keystore, never written anywhere: its pubkey is recorded), then recorded in
+/// full and never sent. The payer stays the config's wallet, so accounts, sizes and tips are the live ones, and the
+/// signature cannot pass on chain
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DryRunCfg {
+    /// also simulate each would-send bundle (read-only `simulateTransaction`, sigVerify off, the blockhash checked)
+    #[serde(default)]
+    pub simulate: bool,
+    /// at most this many simulations a second
+    #[serde(default = "dry_sim_rate")]
+    pub max_sim_per_sec: u32,
+}
+fn dry_sim_rate() -> u32 { 2 }
+impl Default for DryRunCfg { fn default() -> Self { DryRunCfg { simulate: false, max_sim_per_sec: dry_sim_rate() } } }
 
 /// Building real transactions from the engine's decisions (simulation and canaries)
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -475,42 +462,36 @@ pub struct SimCfg {
 fn sim_rate() -> u32 { 2 }
 impl Default for SimCfg { fn default() -> Self { SimCfg { enabled: false, max_per_sec: sim_rate() } } }
 
-/// STEP 3, fees only: real transactions built to FAIL our own profit check (min_profit = 1,000 SOL), one copy per send
-/// path under one durable nonce, so at most one lands and it lands failed: only its network fee is paid, and every
-/// tip reverts with the trade. Needs `enabled = true` here AND `--canary` on the command line.
+/// PLAN WP-05: a canary run (`arbx run --canary`, with `enabled = true` here) is a live run under these caps: real
+/// bundles, size at most `size_sol` (0.2 SOL at most), at most `count` attempts, `every_ms` apart, stopping once landed
+/// failures' fees reach `max_spend_lamports`. Built-to-fail canaries under a durable nonce (and `nonce_account`,
+/// `settle_s`) are gone: they only made sense for the direct paths
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanaryCfg {
     #[serde(default)]
     pub enabled: bool,
-    /// how many canaries in all
+    /// how many attempts in all
     #[serde(default = "canary_count")]
     pub count: u32,
-    /// at least this long between two canaries, ms (one is in flight at a time)
+    /// at least this long between two attempts, ms
     #[serde(default = "canary_every")]
     pub every_ms: u64,
-    /// trade size, SOL (the legs really execute before the profit check fails, so the wallet must hold it)
+    /// trade size cap, SOL (refused above 0.2)
     #[serde(default = "canary_size")]
     pub size_sol: f64,
-    /// stop once landed canaries' fees plus the worst case of the one in flight would pass this, lamports
+    /// stop once fees of landed failures plus the worst case of those in flight would pass this, lamports
     #[serde(default = "canary_spend")]
     pub max_spend_lamports: u64,
-    /// settle each canary this long after it is sent, seconds
-    #[serde(default = "canary_settle")]
-    pub settle_s: u64,
-    /// the durable nonce account (authority: the wallet); arbed's first by default. Never shared with a running arbed.
-    #[serde(default = "canary_nonce")]
-    pub nonce_account: String,
 }
 fn canary_count() -> u32 { 100 }
 fn canary_every() -> u64 { 5_000 }
 fn canary_size() -> f64 { 0.01 }
 fn canary_spend() -> u64 { 3_000_000 }
-fn canary_settle() -> u64 { 30 }
-fn canary_nonce() -> String { "58XHXCVwizLunHZdtXRr21NXnraG8Y4vQWjpXLN2FgVe".into() }
+/// PLAN WP-05: a canary trades at most this much
+pub const CANARY_MAX_SIZE_SOL: f64 = 0.2;
 impl Default for CanaryCfg {
-    fn default() -> Self { CanaryCfg { enabled: false, count: canary_count(), every_ms: canary_every(), size_sol: canary_size(),
-        max_spend_lamports: canary_spend(), settle_s: canary_settle(), nonce_account: canary_nonce() } }
+    fn default() -> Self { CanaryCfg { enabled: false, count: canary_count(), every_ms: canary_every(), size_sol: canary_size(), max_spend_lamports: canary_spend() } }
 }
 
 fn shadow() -> String { "shadow".into() }
@@ -1053,26 +1034,10 @@ pub struct SendPath {
     pub preflight: bool,
     /// keep-alive URL (GET) hit every 20 s; default per kind (Helius /ping, Iris /gethealth, JSON-RPC getHealth)
     pub ping_url: Option<String>,
-}
-
-/// THE JITO GATE (arbed's JITO_GATE, owner's Run 2): the jito-bundle copy goes out first, and the paid copies wait up
-/// to `wait_ms` after it for the block engine's first result. A `would-fail` on our own profit check (0x4e580002)
-/// means the gap is already gone: the paid copies are not sent and nothing is spent. Every `canary_every`-th skip is
-/// sent anyway (0 = never), so the gate's cost in lost wins stays measured.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct GateCfg {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "gate_wait")]
-    pub wait_ms: u64,
-    #[serde(default = "gate_canary")]
-    pub canary_every: u64,
-}
-fn gate_wait() -> u64 { 25 }
-fn gate_canary() -> u64 { 10 }
-impl Default for GateCfg {
-    fn default() -> Self { GateCfg { enabled: false, wait_ms: gate_wait(), canary_every: gate_canary() } }
+    /// PLAN-ADDENDUM I-10: a secret (`${...}`) in an `http://` URL is refused unless the provider has no TLS endpoint;
+    /// this says so, with the evidence (recorded: `arbx check`, run.log, meta.json `send_paths`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_tls_endpoint: Option<String>,
 }
 
 impl Config {
@@ -1134,13 +1099,34 @@ impl Config {
             if s.tip_max_lamports.is_some_and(|m| m < s.tip_lamports) { bail!("send path {}: tip_max_lamports is below tip_lamports", s.name); }
             if s.max_per_sec == Some(0) { bail!("send path {}: max_per_sec must be at least 1", s.name); }
             if s.queue_ms > 0 && s.max_per_sec.is_none() { bail!("send path {}: queue_ms needs max_per_sec", s.name); }
+            // WP-05: the bundle path's queue is the send policy's (one queue_ms for the bands, the crowding and lambda)
+            if s.kind == SendKind::JitoBundle && s.queue_ms > 0 { bail!("send path {}: a jito-bundle path waits [send_policy] queue_ms, not its own queue_ms", s.name); }
+            // PLAN-ADDENDUM I-10: a secret may travel only over TLS (or QUIC) or in a header
+            if s.enabled { cleartext_check(s)?; }
         }
-        if cfg.gate.enabled {
-            match cfg.sends.iter().find(|s| s.enabled) {
-                Some(s) if s.kind == SendKind::JitoBundle => {}
-                _ => bail!("[gate] enabled needs a jito-bundle send path listed FIRST among the enabled ones (its copy goes out before the paid ones)"),
-            }
+        // PLAN WP-05 item 1: live sends are one-transaction Jito bundles; every other kind stays compiled (`arbx senders`
+        // checks, a future direct experiment) but may not be enabled in a live config
+        if cfg.mode == "live" { bundle_only(&cfg.sends).map_err(|e| anyhow::anyhow!("mode = \"live\": {e}"))?; }
+        let sp = &cfg.send_policy;
+        if sp.direct_experiment { bail!("[send_policy] direct_experiment = true is refused in Stage 0 (bundle-only; PLAN WP-05 item 1)"); }
+        if !["confirmed", "processed"].contains(&sp.blockhash_commitment.as_str()) { bail!("[send_policy] blockhash_commitment must be \"confirmed\" or \"processed\""); }
+        if sp.max_blockhash_age_slots == 0 || sp.max_blockhash_age_slots > 150 { bail!("[send_policy] max_blockhash_age_slots must be 1..150 (a blockhash is valid for 150 blocks)"); }
+        let bb = sp.big_band_max_per_sec;
+        if !bb.is_finite() || bb < 0.0 { bail!("[send_policy] big_band_max_per_sec must be a rate >= 0 (0 = no big-band trade)"); }
+        // the bucket keeps the rate to 0.001 token/s: a smaller positive rate would silently mean "never"
+        if bb > 0.0 && bb < 0.001 { bail!("[send_policy] big_band_max_per_sec {bb}: under 0.001/s (use 0 for no big-band trade)"); }
+        if sp.crowding_window_h == 0 { bail!("[send_policy] crowding_window_h must be > 0"); }
+        if sp.crowding_buckets.len() != 2 || sp.crowding_buckets[0] == 0 || sp.crowding_buckets[0] >= sp.crowding_buckets[1] {
+            bail!("[send_policy] crowding_buckets must be two increasing positive signer counts (e.g. [20, 150])");
         }
+        if sp.margin_floor == 0 { bail!("[send_policy] margin_floor must be >= 1 (a landed bundle must clear tip + fee + at least 1 lamport)"); }
+        if !sp.margin_share.is_finite() || !(0.0..=1.0).contains(&sp.margin_share) { bail!("[send_policy] margin_share is a share of the expected net, 0..1"); }
+        if sp.inflight_hold_slots == 0 { bail!("[send_policy] inflight_hold_slots must be >= 1"); }
+        for k in &sp.skip_leader_kinds {
+            if !["jito", "bam", "other", "unknown"].contains(&k.as_str()) { bail!("[send_policy] skip_leader_kinds: {k:?} is not a leader kind (jito, bam, other, unknown)"); }
+        }
+        if !(cfg.canary.size_sol > 0.0 && cfg.canary.size_sol <= CANARY_MAX_SIZE_SOL) { bail!("[canary] size_sol must be in (0, {CANARY_MAX_SIZE_SOL}] (PLAN WP-05: a canary is a small live run)"); }
+        if cfg.dry_run.max_sim_per_sec == 0 { bail!("[dry_run] max_sim_per_sec must be >= 1"); }
         if cfg.feeds.len() > u16::MAX as usize { bail!("too many feeds"); }
         // WP-03: the state stream's options and its transaction streams (feeds after the [[feed]] list)
         let st = &cfg.state;
@@ -1181,11 +1167,6 @@ impl Config {
         if cfg.accuracy.action != "log" { bail!("[accuracy] action must be \"log\" in Stage 0 (no quarantine acts; OD-8)"); }
         if cfg.accuracy.ring_versions < 2 || cfg.accuracy.ring_versions > 64 { bail!("[accuracy] ring_versions must be 2..64"); }
         if cfg.accuracy.queue == 0 { bail!("[accuracy] queue must be > 0"); }
-        let bb = cfg.live.big_band_max_per_sec;
-        if !bb.is_finite() || bb < 0.0 { bail!("[live] big_band_max_per_sec must be a rate >= 0 (0 = no big-band trade)"); }
-        // the bucket keeps the rate to 0.001 token/s: a smaller positive rate would silently mean "never"
-        if bb > 0.0 && bb < 0.001 { bail!("[live] big_band_max_per_sec {bb}: under 0.001/s (use 0 for no big-band trade)"); }
-        if cfg.live.big_band_min_expected_lamports == 0 { bail!("[live] big_band_min_expected_lamports must be > 0 (0 would throttle every live trade)"); }
         let r = &cfg.record;
         // review N4: a zero budget (or byte cap) would stop (or drop) everything; the free-space floor may be 0
         for (k, v) in [("disk_budget_gb", r.disk_budget_gb), ("rotate_mb", r.rotate_mb), ("queue_max_mb", r.queue_max_mb)] {
@@ -1254,6 +1235,64 @@ impl Config {
     /// `arbx run` print this
     pub fn pricing_warning(&self) -> Option<String> {
         (!self.strategy.state_triggers).then(|| "WARNING: [strategy] state_triggers is off: nothing is priced (decoded swaps are hints only), no opportunity can be found".to_string())
+    }
+}
+
+/// PLAN WP-05 item 1: only jito-bundle paths enabled (a live config, a canary or live run); Err names the others
+pub fn bundle_only(sends: &[SendPath]) -> Result<()> {
+    let other: Vec<String> = sends.iter().filter(|s| s.enabled && s.kind != SendKind::JitoBundle).map(|s| format!("{} ({:?})", s.name, s.kind)).collect();
+    if !other.is_empty() { bail!("only jito-bundle send paths may be enabled (bundle-only); enabled: {}", other.join(", ")); }
+    if !sends.iter().any(|s| s.enabled && s.kind == SendKind::JitoBundle) { bail!("no jito-bundle send path is enabled"); }
+    Ok(())
+}
+
+/// the `${NAME}` variables a string names
+pub fn env_vars(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = s;
+    while let Some(i) = rest.find("${") {
+        let Some(j) = rest[i..].find('}') else { break };
+        out.push(rest[i + 2..i + j].to_string());
+        rest = &rest[i + j + 1..];
+    }
+    out
+}
+
+/// a URL whose scheme carries its data in clear text: `http://`, and `udp://` (LandX's key starts every packet)
+pub fn cleartext_scheme(u: &str) -> bool {
+    let l = u.trim_start().to_ascii_lowercase();
+    l.starts_with("http://") || l.starts_with("udp://")
+}
+
+/// PLAN-ADDENDUM I-10: a sender's secret travels only over TLS (or QUIC), in the URL or in a header alike (review WP-05
+/// #5: a header is as readable on the wire as a query). A `url` or `ping_url` that is plain (`http://`, `udp://`) and
+/// carries a secret to it (a `${...}` in that URL, or the path's header key, `token_env` / `jito_auth_env`, which every
+/// request and keep-alive carries) is refused, unless `no_tls_endpoint` says the provider has none (the exception is
+/// recorded where `cleartext_exception` is read: `arbx check`, run.log, meta.json). An exception on a path that needs
+/// none is refused too (a stale claim hides the next mistake). A URL that is wholly `${...}` has no scheme until it is
+/// expanded: `Path::new` checks it then. Ok(Some(note)): the exception taken
+pub fn cleartext_check(s: &SendPath) -> Result<Option<String>> {
+    let headers: Vec<String> = [("token_env", &s.token_env), ("jito_auth_env", &s.jito_auth_env)].into_iter()
+        .filter_map(|(k, v)| v.as_ref().map(|v| format!("{v} ({k}, a header)"))).collect();
+    let plain: Vec<(&str, String, Vec<String>)> = [("url", Some(s.url.as_str())), ("ping_url", s.ping_url.as_deref())].into_iter()
+        .filter_map(|(k, u)| u.map(|u| (k, u)))
+        .filter(|(_, u)| cleartext_scheme(u))
+        .map(|(k, u)| {
+            let scheme = u.trim_start().split("://").next().unwrap_or("").to_ascii_lowercase();
+            (k, format!("{scheme}://"), env_vars(u).into_iter().map(|v| format!("${{{v}}}")).chain(headers.iter().cloned()).collect::<Vec<_>>())
+        })
+        .filter(|(_, _, secrets)| !secrets.is_empty()).collect();
+    let why = s.no_tls_endpoint.as_deref().map(str::trim).filter(|w| !w.is_empty());
+    let what = plain.iter().map(|x| x.0).collect::<Vec<_>>().join(" and ");
+    let mut seen = std::collections::HashSet::new();
+    let secrets: Vec<String> = plain.iter().flat_map(|x| x.2.iter().cloned()).filter(|x| seen.insert(x.clone())).collect();
+    match (plain.is_empty(), why) {
+        (true, None) => Ok(None),
+        (true, Some(_)) => bail!("send path {}: no_tls_endpoint is set but no plain (http://, udp://) URL carries a secret (remove the stale exception)", s.name),
+        (false, Some(w)) => Ok(Some(format!("send path {}: {what} carries {} over plain {}: allowed, the provider has no TLS endpoint ({w})", s.name, secrets.join(", "),
+            plain[0].1))),
+        (false, None) => bail!("send path {}: {what} is plain {} and carries a secret ({}): use the provider's https:// endpoint (PLAN-ADDENDUM I-10), or, if it has none, \
+            say so with no_tls_endpoint = \"<evidence>\"", s.name, plain[0].1, secrets.join(", ")),
     }
 }
 
@@ -1330,23 +1369,26 @@ mod tests {
             "nextblock", "jupiter", "landx-fra3", "landx-fra1", "speedlanding"] {
             assert!(cfg.sends.iter().any(|s| s.name == name && !s.enabled), "{name} is listed and disabled");
         }
-        let (st, l) = (&cfg.strategy, &cfg.live);
+        let (st, l, sp) = (&cfg.strategy, &cfg.live, &cfg.send_policy);
         assert!(st.skip_failing_signers && st.state_triggers);
-        assert!(l.bundle_mix && !l.sim_gate);
-        assert_eq!(l.tpu_max_expected_lamports, 1, "every trade on the bundle arm");
-        assert_eq!((l.max_new_token_accounts, l.settle_s, l.max_size_sol), (0, 3, 4.2));
-        assert_eq!((l.big_band_min_expected_lamports, l.big_band_max_per_sec), (1_000_000, 0.5));
-        assert_eq!(l.crowded_skip_min_expected_lamports, 100_000, "OD-3's alternative on top of the rank (review F2)");
+        assert_eq!((l.max_new_token_accounts, l.max_size_sol), (0, 4.2));
+        // WP-05: the send policy (bundle-only is enforced at load for a live config: `live_configs_are_bundle_only`)
+        assert_eq!((sp.big_band_max_per_sec, sp.queue_ms, sp.max_blockhash_age_slots, sp.blockhash_commitment.as_str(), sp.inflight_hold_slots), (0.5, 10, 20, "confirmed", 2));
+        assert_eq!(sp.crowded_skip_min_expected_lamports, 100_000, "OD-3's alternative on top of the rank (review F2), kept by WP-05");
+        assert_eq!((sp.margin_floor, sp.margin_share, sp.skip_leader_kinds.clone()), (1, 0.0, vec!["other".to_string(), "unknown".to_string()]), "F23: today's on-chain floor");
+        assert!(!sp.direct_experiment);
         assert!(cfg.record.archive_feeds.is_empty(), "no raw entries archive until an entries feed is alive");
         assert_eq!((cfg.record.disk_budget_gb, cfg.record.min_free_gb, cfg.record.flush_ms, cfg.runtime.bg_threads), (40.0, 25.0, 1_000, 3));
-        assert!(!cfg.gate.enabled);
+        // the stage-0 file is bundle-only as it ships, so flipping it to live loads
+        let live = std::fs::read_to_string(repo("deploy/arbx-stage0.toml")).unwrap().replacen("mode = \"shadow\"", "mode = \"live\"", 1);
+        assert_eq!(Config::parse(&live).unwrap().mode, "live");
         // both deshred feeds now ask for DAMM v2 too
         let deshred: Vec<&Feed> = cfg.feeds.iter().filter(|f| f.kind == FeedKind::YellowstoneDeshred).collect();
         assert_eq!(deshred.len(), 2);
         for f in deshred { assert!(f.account_include.iter().any(|a| a == DAMM_V2), "{}", f.name); }
         // repointed to the arbx tree; the data files it names are in this repo
         assert_eq!(cfg.out_dir, "/root/arbx/runs");
-        for f in [cfg.pools.seed_csv.as_str(), cfg.pools.registry_json.as_deref().unwrap(), cfg.pools.templates_json.as_deref().unwrap(), l.crowded_pools_file.as_str()] {
+        for f in [cfg.pools.seed_csv.as_str(), cfg.pools.registry_json.as_deref().unwrap(), cfg.pools.templates_json.as_deref().unwrap(), sp.crowded_pools_file.as_str()] {
             assert!(f.starts_with("/root/arbx/data/"), "{f}");
             assert!(in_repo(f).is_file(), "{f} is in arbx/data");
         }
@@ -1383,7 +1425,7 @@ mod tests {
         assert!(Config::parse(MINIMAL).is_ok());
         for (section, typo) in [("", "out_dirr = \"/tmp\""), ("[live]", "max_failed_fee_lamports = 1"), ("[strategy]", "decoded_send = true"),
             ("[exec]", "expected_program_sha = \"x\""), ("[sim]", "enable = true"), ("[canary]", "enabled_ = true"), ("[record]", "rotate_mbb = 1"), ("[runtime]", "bg_thread = 1"),
-            ("[gate]", "wait = 1"), ("[control]", "sockets = false"), ("[[feed]]\nname = \"f\"\nkind = \"udp\"\nbind = \"0.0.0.0:1\"", "binds = \"x\""),
+            ("[send_policy]", "queue = 1"), ("[dry_run]", "simulates = true"), ("[control]", "sockets = false"), ("[[feed]]\nname = \"f\"\nkind = \"udp\"\nbind = \"0.0.0.0:1\"", "binds = \"x\""),
             ("[[send]]\nname = \"s\"\nkind = \"rpc\"\nurl = \"http://x\"", "max_per_second = 1"),
             ("[[rpc.endpoint]]\nname = \"r\"\nurl = \"http://x\"", "url_envv = \"X\"")] {
             let key = typo.split(' ').next().unwrap();
@@ -1414,18 +1456,18 @@ mod tests {
     /// `normalized_json`: defaults filled, keys sorted, comments and formatting ignored; a changed value changes it
     #[test]
     fn normalized_hash_ignores_comments_and_order() {
-        let a = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nsettle_s = 3\n")).unwrap();
-        let b = Config::parse(&format!("# a comment\n{}[live]\nsettle_s   =   3 # inline\nmax_size_sol = 0.50\n", MINIMAL.replace("wallet = \"w\"\n", "")
+        let a = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nmax_new_token_accounts = 3\n")).unwrap();
+        let b = Config::parse(&format!("# a comment\n{}[live]\nmax_new_token_accounts   =   3 # inline\nmax_size_sol = 0.50\n", MINIMAL.replace("wallet = \"w\"\n", "")
             .replace("out_dir", "wallet = \"w\"\nout_dir"))).unwrap();
         assert_eq!(a.normalized_json(), b.normalized_json());
         assert_eq!(a.normalized_sha256(), b.normalized_sha256());
-        let c = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.6\nsettle_s = 3\n")).unwrap();
+        let c = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.6\nmax_new_token_accounts = 3\n")).unwrap();
         assert_ne!(a.normalized_sha256(), c.normalized_sha256());
         // a default written out explicitly is the same config
-        let d = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nsettle_s = 3\nmargin_lamports = 1000\n")).unwrap();
+        let d = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nmax_new_token_accounts = 3\nmargin_lamports = 1000\n")).unwrap();
         assert_eq!(a.normalized_sha256(), d.normalized_sha256());
         let v: serde_json::Value = serde_json::from_str(&a.normalized_json()).unwrap();
-        assert_eq!((v["config_version"].as_u64(), v["live"]["settle_s"].as_u64(), v["control"]["socket"].as_bool()), (Some(2), Some(3), Some(true)));
+        assert_eq!((v["config_version"].as_u64(), v["live"]["max_new_token_accounts"].as_u64(), v["control"]["socket"].as_bool()), (Some(2), Some(3), Some(true)));
         let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
         let mut sorted_keys = keys.clone();
         sorted_keys.sort();
@@ -1532,18 +1574,126 @@ mod tests {
         assert!(e.contains("rivals_venues_sample"), "{e}");
     }
 
+    /// WP-00's keys, moved to `[send_policy]` by WP-05 (the big band is the band table's bands 3-4 now: no
+    /// `big_band_min_expected_lamports`)
     #[test]
     fn wp00_keys_default_safe() {
         let cfg = Config::parse(MINIMAL).unwrap();
-        assert_eq!((cfg.live.big_band_min_expected_lamports, cfg.live.big_band_max_per_sec), (1_000_000, 0.5));
-        assert!(cfg.live.crowded_pools_file.is_empty());
-        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = -1.0\n")).is_err());
-        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = 0\n")).is_ok(), "0 = no big-band trade");
-        assert_eq!(cfg.live.crowded_skip_min_expected_lamports, 0, "OD-3 default: rank only");
-        // review N1: a positive rate the bucket would round to "never", and a band that throttles every trade
-        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = 0.0004\n")).is_err());
-        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_max_per_sec = 0.001\n")).is_ok());
-        assert!(Config::parse(&format!("{MINIMAL}[live]\nbig_band_min_expected_lamports = 0\n")).is_err());
+        assert_eq!(cfg.send_policy.big_band_max_per_sec, 0.5);
+        assert!(cfg.send_policy.crowded_pools_file.is_empty());
+        let pol = |k: &str| Config::parse(&format!("{MINIMAL}[send_policy]\n{k}\n"));
+        assert!(pol("big_band_max_per_sec = -1.0").is_err());
+        assert!(pol("big_band_max_per_sec = 0").is_ok(), "0 = no big-band trade");
+        assert_eq!(cfg.send_policy.crowded_skip_min_expected_lamports, 0, "OD-3 default: rank only");
+        // review N1: a positive rate the bucket would round to "never"
+        assert!(pol("big_band_max_per_sec = 0.0004").is_err());
+        assert!(pol("big_band_max_per_sec = 0.001").is_ok());
+        // the WP-00 keys are no longer in [live]: a config that still has them does not load
+        for k in ["big_band_max_per_sec = 0.5", "big_band_min_expected_lamports = 1", "crowded_pools_file = \"\"", "crowded_skip_min_expected_lamports = 1"] {
+            let key = k.split(' ').next().unwrap();
+            assert!(err(&format!("{MINIMAL}[live]\n{k}\n")).contains(&format!("unknown field `{key}`")), "{k}");
+        }
+    }
+
+    /// PLAN WP-05 config keys: `[send_policy]` with the plan's defaults and checks; the removed keys (`[gate]`, the direct
+    /// arm's `[live]` keys, `nonce_accounts`, the canary's nonce and settle) refuse to load; `direct_experiment = true` is
+    /// refused in Stage 0; a canary is at most 0.2 SOL
+    #[test]
+    fn wp05_send_policy_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        let sp = &c.send_policy;
+        assert_eq!((sp.max_blockhash_age_slots, sp.blockhash_commitment.as_str(), sp.queue_ms, sp.big_band_max_per_sec, sp.crowding_window_h, sp.crowding_buckets.clone()),
+            (20, "confirmed", 10, 0.5, 6, vec![20, 150]));
+        assert_eq!((sp.margin_floor, sp.margin_share, sp.inflight_hold_slots, sp.skip_leader_kinds.clone(), sp.direct_experiment),
+            (1, 0.0, 2, vec!["other".to_string(), "unknown".to_string()], false));
+        assert!(!c.dry_run.simulate && c.dry_run.max_sim_per_sec == 2);
+        let pol = |k: &str| Config::parse(&format!("{MINIMAL}[send_policy]\n{k}\n")).map(|_| ()).map_err(|e| format!("{e:#}"));
+        assert!(pol("direct_experiment = true").unwrap_err().contains("refused in Stage 0"));
+        assert!(pol("blockhash_commitment = \"finalized\"").is_err());
+        assert!(pol("blockhash_commitment = \"processed\"").is_ok());
+        assert!(pol("max_blockhash_age_slots = 151").is_err() && pol("max_blockhash_age_slots = 0").is_err());
+        assert!(pol("crowding_buckets = [150, 20]").is_err() && pol("crowding_buckets = [20]").is_err());
+        assert!(pol("margin_floor = 0").is_err(), "a landed bundle clears at least 1 lamport");
+        assert!(pol("margin_share = 1.5").is_err() && pol("margin_share = 0.02").is_ok());
+        assert!(pol("skip_leader_kinds = [\"bam\"]").is_ok() && pol("skip_leader_kinds = [\"leader\"]").is_err());
+        assert!(pol("inflight_hold_slots = 0").is_err());
+        assert!(Config::parse(&format!("{MINIMAL}[send_policy.direct]\nnonce_accounts = [\"x\"]\n")).is_ok(), "kept for the experiment");
+        // removed keys
+        for (section, k) in [("[live]", "test_all_paths = true"), ("[live]", "max_priority_lamports = 1"), ("[live]", "bid_tiers = true"), ("[live]", "bid_share = 0.5"),
+            ("[live]", "spec_cu_price_micro = 1"), ("[live]", "rotate_paths = true"), ("[live]", "race_mix = true"), ("[live]", "bundle_mix = true"),
+            ("[live]", "tpu_cu_price_micro = 1"), ("[live]", "tpu_max_expected_lamports = 1"), ("[live]", "pair_lock_ms = 1"), ("[live]", "sim_gate = true"),
+            ("[live]", "bundle_resend_ms = [1]"), ("[live]", "bundle_size_variants = [0.5]"), ("[live]", "compete_mult = 1.0"), ("[live]", "gross_floor = true"),
+            ("[live]", "nonce_accounts = []"), ("[live]", "settle_s = 3"), ("[canary]", "nonce_account = \"x\""), ("[canary]", "settle_s = 3")] {
+            let key = k.split(' ').next().unwrap();
+            assert!(err(&format!("{MINIMAL}{section}\n{k}\n")).contains(&format!("unknown field `{key}`")), "{section} {k}");
+        }
+        assert!(err(&format!("{MINIMAL}[gate]\nenabled = false\n")).contains("unknown field `gate`"), "the Jito gate is gone");
+        assert!(err(&format!("{MINIMAL}[canary]\nsize_sol = 0.25\n")).contains("0.2"));
+        assert!(Config::parse(&format!("{MINIMAL}[canary]\nsize_sol = 0.2\n")).is_ok());
+        assert!(err(&format!("{MINIMAL}[[send]]\nname = \"j\"\nkind = \"jito-bundle\"\nurl = \"https://x\"\ntip_lamports = 1000\nmax_per_sec = 5\nqueue_ms = 10\n"))
+            .contains("[send_policy] queue_ms"));
+    }
+
+    const JITO: &str = "[[send]]\nname = \"jito-bundle\"\nkind = \"jito-bundle\"\nurl = \"https://frankfurt.mainnet.block-engine.jito.wtf\"\ntip_lamports = 1000\n";
+
+    /// PLAN WP-05 acceptance: a live config with a non-bundle path enabled fails to load (and one without an enabled bundle
+    /// path); a shadow config may keep other paths enabled (keep-alive measurement), and disabled ones stay listed
+    #[test]
+    fn live_configs_are_bundle_only() {
+        let live = MINIMAL.replace("out_dir", "mode = \"live\"\nout_dir");
+        assert!(Config::parse(&format!("{live}{JITO}")).is_ok());
+        let helius = "[[send]]\nname = \"helius\"\nkind = \"helius\"\nurl = \"https://fra-sender.helius-rpc.com/fast\"\ntip_lamports = 5000\n";
+        let e = err(&format!("{live}{JITO}{helius}"));
+        assert!(e.contains("only jito-bundle send paths may be enabled") && e.contains("helius (Helius)"), "{e}");
+        assert!(Config::parse(&format!("{live}{JITO}{}", helius.replace("tip_lamports", "enabled = false\ntip_lamports"))).is_ok(), "listed, disabled: fine");
+        assert!(err(&live).contains("no jito-bundle send path is enabled"));
+        assert!(Config::parse(&format!("{MINIMAL}{JITO}{helius}")).is_ok(), "shadow: other paths may run their keep-alives");
+        assert!(bundle_only(&Config::parse(&format!("{MINIMAL}{JITO}{helius}")).unwrap().sends).is_err(), "a canary / live run checks the same");
+    }
+
+    /// PLAN-ADDENDUM I-10: an enabled path whose http:// URL carries a `${...}` secret is refused at load, unless
+    /// `no_tls_endpoint` records that the provider has none (the note names it); https, a secret-free http URL, a header
+    /// key and a disabled path are fine; a stale exception is refused
+    #[test]
+    fn cleartext_secrets_are_refused() {
+        let path = |url: &str, extra: &str| format!("{MINIMAL}[[send]]\nname = \"nozomi\"\nkind = \"nozomi\"\nurl = \"{url}\"\ntip_lamports = 1000000\n{extra}");
+        let e = err(&path("http://fra2.nozomi.temporal.xyz/?c=${NOZOMI_KEY}", ""));
+        assert!(e.contains("plain http://") && e.contains("${NOZOMI_KEY}") && e.contains("I-10"), "{e}");
+        assert!(Config::parse(&path("https://fra.nozomi.temporal.xyz/?c=${NOZOMI_KEY}", "")).is_ok(), "TLS");
+        assert!(Config::parse(&path("http://fra2.nozomi.temporal.xyz/?c=${NOZOMI_KEY}", "enabled = false\n")).is_ok(), "disabled: checked when it is enabled");
+        let ok = Config::parse(&path("http://fra2.nozomi.temporal.xyz/?c=${NOZOMI_KEY}", "no_tls_endpoint = \"docs show http only (2026-10-04)\"\n")).unwrap();
+        let note = cleartext_check(&ok.sends[0]).unwrap().unwrap();
+        assert!(note.contains("no TLS endpoint") && note.contains("docs show http only") && note.contains("${NOZOMI_KEY}"), "{note}");
+        assert!(err(&path("https://fra.nozomi.temporal.xyz/?c=${NOZOMI_KEY}", "no_tls_endpoint = \"x\"\n")).contains("stale exception"));
+        // review WP-05 #5: a header key over plain http is clear text too (refused, or allowed with the exception
+        // recorded); over https it is fine, and so is a plain-http URL without any secret
+        let nodeone = |url: &str, extra: &str| format!("{MINIMAL}[[send]]\nname = \"n1\"\nkind = \"node-one\"\nurl = \"{url}\"\ntoken_env = \"NODEONE_KEY\"\ntip_lamports = 1000000\n{extra}");
+        let e = err(&nodeone("http://fra.node1.me/v2", ""));
+        assert!(e.contains("plain http://") && e.contains("NODEONE_KEY (token_env, a header)") && e.contains("I-10"), "{e}");
+        let ok = Config::parse(&nodeone("http://fra.node1.me/v2", "no_tls_endpoint = \"node1.me lists http only (2026-10-05)\"\n")).unwrap();
+        let note = cleartext_check(&ok.sends[0]).unwrap().unwrap();
+        assert!(note.contains("NODEONE_KEY") && note.contains("no TLS endpoint") && note.contains("http only"), "{note}");
+        assert!(Config::parse(&nodeone("https://fra.node1.me/v2", "")).is_ok(), "a header key over TLS");
+        assert!(Config::parse(&nodeone("http://fra.node1.me/v2", "enabled = false\n")).is_ok(), "disabled");
+        let e = err(&nodeone("https://fra.node1.me/v2", "ping_url = \"http://fra.node1.me/ping\"\n"));
+        assert!(e.contains("ping_url") && e.contains("NODEONE_KEY"), "the keep-alive carries the header too: {e}");
+        let haan = format!("{MINIMAL}[[send]]\nname = \"h\"\nkind = \"haan\"\nurl = \"http://sender.haandigital.eu/api/v1/transactions\"\njito_auth_env = \"JITO_UUID\"\n");
+        assert!(err(&haan).contains("JITO_UUID (jito_auth_env, a header)"));
+        let landx = format!("{MINIMAL}[[send]]\nname = \"lx\"\nkind = \"landx\"\nurl = \"udp://fra3.landx.dev:10000\"\ntoken_env = \"LANDX_KEY\"\ntip_lamports = 1000000\n");
+        assert!(err(&landx).contains("plain udp://"), "a key at the head of every UDP packet");
+        let helius = format!("{MINIMAL}[[send]]\nname = \"hl\"\nkind = \"helius\"\nurl = \"http://fra-sender.helius-rpc.com/fast\"\ntip_lamports = 5000\n");
+        assert!(Config::parse(&helius).is_ok(), "plain http without a secret");
+        assert!(err(&format!("{helius}no_tls_endpoint = \"x\"\n")).contains("stale exception"));
+        assert!(cleartext_scheme("HTTP://x") && cleartext_scheme(" udp://x") && !cleartext_scheme("https://x") && !cleartext_scheme("${URL}"));
+        // the keep-alive URL is checked too
+        let e = err(&path("https://fra.nozomi.temporal.xyz/?c=${NOZOMI_KEY}", "ping_url = \"http://fra.nozomi.temporal.xyz/ping?c=${NOZOMI_KEY}\"\n"));
+        assert!(e.contains("ping_url"), "{e}");
+        assert_eq!(env_vars("http://x/${A}/y?k=${B_KEY}&z"), vec!["A".to_string(), "B_KEY".to_string()]);
+        // the maintained configs pass (their enabled paths)
+        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] {
+            let cfg = Config::load(&repo(f)).unwrap();
+            for s in cfg.sends.iter().filter(|s| s.enabled) { cleartext_check(s).unwrap(); }
+        }
     }
 
     /// PLAN WP-04 config keys: the state consistency keys, [alts] and [accuracy] with the plan's defaults and checks; the

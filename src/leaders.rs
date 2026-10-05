@@ -447,6 +447,17 @@ impl LeaderBook {
         match g.sched.get(&slot) { Some(e) => LeaderBook::kind_of(&g, &e.leader, now_ns()).0, None => LeaderKind::Unknown }
     }
 
+    /// The slot's leader, its kind and the kind's source (`no_schedule` without one): what the send checks read before
+    /// the fire, without the snapshot's places, RTTs, encodings and next leader (review WP-05 #8; the attempt line takes
+    /// the full `snapshot` after the fire)
+    pub fn kind_at(&self, slot: u64) -> (Option<Pk>, LeaderKind, Option<String>) {
+        let g = self.r();
+        match g.sched.get(&slot).map(|e| e.leader) {
+            Some(id) => { let (k, src, _) = LeaderBook::kind_of(&g, &id, now_ns()); (Some(id), k, src) }
+            None => (None, LeaderKind::Unknown, Some(NO_SCHEDULE.into())),
+        }
+    }
+
     /// the slot's leader, kind, places, endpoint, RTT, client, the block engine's RTT and the next distinct leader, as an
     /// attempt records it
     pub fn snapshot(&self, slot: u64) -> LeaderSnap { self.snapshot_at(slot, now_ns()) }
@@ -1110,6 +1121,11 @@ mod tests {
         assert_eq!((s.kind, s.kind_src.as_deref()), (LeaderKind::Jito, Some("bundle_result")));
         let out = book.snapshot(5);
         assert_eq!((out.kind, out.kind_src.as_deref(), out.leader), (LeaderKind::Unknown, Some(NO_SCHEDULE), None), "a slot outside the schedule");
+        // review WP-05 #8: the light read the send checks use agrees with the snapshot
+        for slot in [5, 1_000, 1_004, 1_008] {
+            let s = book.snapshot(slot);
+            assert_eq!(book.kind_at(slot), (s.leader.as_deref().map(crate::tx::pk), s.kind, s.kind_src), "slot {slot}");
+        }
         // leaders.jsonl: one line per newly learned slot (400 + 100), kinds as known then
         rec.close();
         let lines = crate::rec::read_jsonl(&dir, "leaders").unwrap();

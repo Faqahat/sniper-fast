@@ -99,7 +99,8 @@ pub enum Event {
     /// a lookup table fetched off the hot path: `addrs` its entries; None with `err` None: no such table (yet); `err`:
     /// the fetch failed (WP-04: both are retried)
     Alt { table: Pk, addrs: Option<Arc<Vec<Pk>>>, err: Option<String> },
-    /// a canary, settled from chain (exec.rs); the engine adds what its feeds saw and writes the outcome
+    /// an executor task's result (exec.rs: a fire result, a getSignatureStatuses answer, a dry run's simulation),
+    /// journaled as INPUT 9 `settled`; the executor settles its attempts from it
     Settled(Box<crate::exec::Settled>),
 }
 

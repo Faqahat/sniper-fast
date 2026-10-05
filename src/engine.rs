@@ -122,14 +122,18 @@ struct Opp {
     cu: u64,
     crossed: (u32, u32),
     deadline: u64,
-    /// the trigger's own compute-unit price (micro-lamports per CU)
-    trig_cu_price: Option<u64>,
     landed: Option<u64>,
     /// (pool, txn signature, slot, time the update reached us) of every later update to buy/sell pools
     touches: Vec<(Pk, [u8; 64], u64, u64)>,
     /// the state version it was priced on, and the time since its route's last write
     sv: u64,
     route_age_ms: Option<f64>,
+    /// WP-05: the evaluation's kind and stage times (attempts `trigger`, `stages`), the pools' consistency-set skews
+    kind: &'static str,
+    t_first_shred: Option<u64>,
+    t_commit: u64,
+    t_priced: u64,
+    parts_skew: Option<(u64, u64)>,
 }
 
 /// Why `Engine::run` returned
@@ -347,7 +351,6 @@ pub struct Engine {
     /// triggers waiting for their outcome (by signature): signer, seen at
     trig_pending: HashMap<[u8; 64], (Pk, u64)>,
     caps_pending: Vec<(u64, Best, i64)>,
-    pool_prices: HashMap<usize, VecDeque<(u64, u64)>>,
     amm: HashMap<Pk, &'static str>,
     tip_names: HashMap<Pk, String>,
     arbers: HashSet<Pk>,
@@ -383,6 +386,14 @@ pub struct Engine {
     unverified: HashSet<Pk>,
     /// receive time of the newest state-stream account update (status `last_account_age_ms_now`; review WP-04 #9)
     last_account_t: u64,
+    // ------------------------------------------------------------ WP-05
+    /// what the send checks read of the chain, from journaled inputs only: the blockhash ring's head, block metas, the
+    /// leader schedule
+    pub sendview: crate::exec::SendView,
+    /// crowding (F6): distinct arbitrage-like signers that landed on each pool over the window
+    activity: crate::crowding::Activity,
+    /// what the last journaled decision-point record said (gate mode, leader kind, token valid, recorder healthy)
+    seen_journaled: Option<(crate::control::GateMode, crate::leaders::LeaderKind, bool, bool)>,
 }
 
 /// {signer: [ok, failed]} as a file holds it; with the sha256 of the bytes read. Missing or unreadable: empty, no hash
@@ -562,22 +573,29 @@ struct StagesRec { t_first_shred: Option<u64>, t_update_recv: u64, t_commit: u64
 #[derive(Serialize)]
 struct DecisionRec {
     decision: u64, t_ns: u64, kind: &'static str, trigger: TriggerRef, routes: Vec<RouteRec>, best: Option<usize>, sv: Option<SvRec>, route_age_ms: Option<f64>,
-    parts_skew_slots: Option<SkewRec>, w_src: &'static str, torn_suspect: bool, fork_priced: bool, band: Option<u8>, crowding: Option<()>, verdict: &'static str,
-    reason: String, ev: Option<f64>, rank: Option<u8>, attempt: Option<u64>, opp: Option<u64>, experiments: serde_json::Map<String, Value>, stages: StagesRec,
+    parts_skew_slots: Option<SkewRec>, w_src: &'static str, torn_suspect: bool, fork_priced: bool,
+    /// the executor's band when it reached the route checks (at the size it would trade: the queue's and the tip's),
+    /// else the engine's; `band_at_opp` is always the engine's, at its priced size (review WP-05 #9)
+    band: Option<u8>, band_at_opp: Option<u8>, crowding: Option<crate::exec::Crowding>,
+    verdict: &'static str, reason: String, ev: Option<i64>, rank: Option<u8>, attempt: Option<u64>, opp: Option<u64>, experiments: serde_json::Map<String, Value>,
+    stages: StagesRec,
+    /// WP-05 (decisions 1.1): the attempt was sent (true), is a would-send recorded with `sent = false` (PLAN-ADDENDUM I-7),
+    /// or none was made (null); with the gate closed, what would have refused it otherwise (null: a would-send)
+    sent: Option<bool>, would_send: bool, reason_ungated: Option<String>,
 }
 
-/// the shared band table's provisional edges (MEASUREMENT §4.32 `band`; WP-06 brings `[bands]`): over the expected edge
-/// = gross − base fee
-fn band_of(gross: i64) -> u8 {
-    let edge = gross - 5_000;
-    if edge < 20_000 { 0 } else if edge < 100_000 { 1 } else if edge < 1_000_000 { 2 } else if edge < 10_000_000 { 3 } else { 4 }
-}
+/// the shared band table (src/bands.rs; MEASUREMENT §4.32 `band`; WP-06 brings `[bands]`): over the expected edge =
+/// gross − base fee
+fn band_of(gross: i64) -> u8 { crate::bands::of_gross(gross) }
 
-/// journal INPUT 9 `settled`: an executor settlement in full (review WP-03 #9; the executor's replay is WP-05 / WP-09's)
-fn settled_json(st: &crate::exec::Settled) -> Value {
-    json!({ "attempt": st.attempt, "error": st.error, "fired": serde_json::to_value(&st.fired).unwrap_or(Value::Null),
-        "landed": st.landed.as_ref().map(|l| json!({ "path": l.0, "sig": l.1, "slot": l.2, "tx": l.3 })), "jito": st.jito,
-        "nonce_value": st.nonce_value.map(|n| b58(&n)) })
+/// journal INPUT 9 `settled`: an executor task's result in full (WP-05: a fire result, a statuses answer, a dry run's
+/// simulation)
+fn settled_json(st: &crate::exec::Settled) -> Value { st.json() }
+
+/// a transaction's PoH position: the engine's map (entries feeds' arrivals), else the process's PoH index (shred feeds'
+/// walks: WP-08)
+fn poh_of(poh: &HashMap<[u8; 64], crate::feeds::entries::Poh>, s: &[u8; 64]) -> Option<crate::feeds::entries::Poh> {
+    poh.get(s).copied().or_else(|| crate::feeds::poh_index().get_sig(s).map(|x| x.0))
 }
 
 /// What `run` evaluates after an input: the commit timers only when the queue is empty and a deadline is due (an update
@@ -626,8 +644,11 @@ impl Engine {
     }
     pub fn knobs(&self) -> &EngineKnobs { &self.knobs }
 
-    /// what the executor reads before it sends (`Exec::wants_send`; WP-05's `send_checks`)
+    /// what the executor reads before it sends (`Exec::decide`'s send checks)
     pub fn health_flags(&self) -> Arc<HealthFlags> { self.flags.clone() }
+
+    /// WP-05: the crowding map's window, buckets and WP-00's static list (`[send_policy]`)
+    pub fn set_crowding(&mut self, a: crate::crowding::Activity) { self.activity = a; }
 
     /// I-5: this segment's signer statistics go to `<dir>/signer-stats.json` (the whole map: usable as a next run's
     /// input) and `<dir>/signer-stats-delta.json` (this segment's counts: what `arbx signer-stats merge` folds back)
@@ -734,7 +755,7 @@ impl Engine {
             fh: rec::health::FeedHealth::new(t0),
             exec: None, signer_base: Arc::new(signer_stats.clone()), signer_stats, signer_delta: HashMap::default(), signer_stats_sha256, signer_stats_out: None,
             trig_pending: HashMap::default(),
-            caps_pending: Vec::new(), pool_prices: HashMap::default(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(),
+            caps_pending: Vec::new(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(),
             moves_seen: HashSet::default(), poh: HashMap::default(), poh_order: VecDeque::new(),
             tracker: CommitTracker::new(TrackerCfg::new(knobs.commit_timeout_ms, knobs.quiescence_ms)), forks: SlotTree::default(), state: StateStream::default(),
             flags: Arc::new(HealthFlags::default()), shut: Shut::Warmup,
@@ -742,7 +763,8 @@ impl Engine {
             deferred: Vec::new(), recent: VecDeque::new(), hints: HashMap::default(), hint_order: VecDeque::new(), acc_queue: VecDeque::new(), acc_windows: HashMap::default(),
             acc_by_venue: Default::default(), commit_lag: Series::new("commit_lag"),
             commit_lag_src: [Series::new("commit_lag_tx"), Series::new("commit_lag_shred"), Series::new("commit_lag_unknown")], stop_req: None, boot_warned: false,
-            reads: Reads::default(), resync: None, unverified: HashSet::default(), last_account_t: 0, knobs }
+            reads: Reads::default(), resync: None, unverified: HashSet::default(), last_account_t: 0, knobs,
+            sendview: Default::default(), activity: Default::default(), seen_journaled: None }
     }
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
@@ -839,6 +861,22 @@ impl Engine {
     }
 
     /// rivals.jsonl: an arbitrage-like transaction's fingerprint, at shred time
+    /// The rival test (`record_rival`'s rule): an arbitrage-like transaction touches two venue programs besides the
+    /// aggregator, or two watched pools, or comes from a signer seen doing either (who is learned here). Its signer
+    fn arb_like(&mut self, a: &Arrival, keys: &[Pk]) -> Option<Pk> {
+        let signer = a.tx.fee_payer().copied()?;
+        let (n_venues, agg, n_pools) = {
+            let mut venues: Vec<&'static str> = Vec::new();
+            for k in keys { if let Some(n) = self.amm.get(k) { if !venues.contains(n) { venues.push(n); } } }
+            let agg = venues.contains(&"jupiter");
+            (venues.len() - agg as usize, agg, keys.iter().filter(|k| self.reg.by_pool.contains_key(*k)).count())
+        };
+        let known = n_venues < 2 && n_pools < 2;
+        if known && !self.arbers.contains(&signer) { return None; }
+        if !known && !agg && self.arbers.len() < 200_000 { self.arbers.insert(signer); }
+        Some(signer)
+    }
+
     fn record_rival(&mut self, a: &Arrival, keys: &[Pk]) {
         if !self.rec.is_on() { return; }
         let tx = &a.tx;
@@ -848,8 +886,8 @@ impl Engine {
         let agg = venues.contains(&"jupiter");
         let n_venues = venues.len() - agg as usize;
         let pools: Vec<String> = keys.iter().filter(|k| self.reg.by_pool.contains_key(*k)).map(b58).collect();
+        // (the signer was learned by `arb_like`, which runs first, recorder or not)
         let why = if n_venues >= 2 { "venues" } else if pools.len() >= 2 { "pools" } else if self.arbers.contains(&signer) { "known" } else { return };
-        if why != "known" && !agg && self.arbers.len() < 200_000 { self.arbers.insert(signer); }
         // plan addendum I-9 (WP-08): 1 in `[record] rivals_venues_sample` of the `venues` rows, chosen by the signature;
         // a kept one carries the rate and the running counts (the signer was learned above either way)
         let sample = if why == "venues" { let Some(k) = self.rec.sample_rival_venues(&tx.sig) else { return }; (k.one_in > 1).then_some(k) } else { None };
@@ -1054,12 +1092,20 @@ impl Engine {
             Event::BlockMeta(b) => {
                 self.state_message(b.t);
                 if self.last_block_meta.map_or(true, |x| b.slot > x.0) { self.last_block_meta = Some((b.slot, b.blockhash, b.block_height)); }
+                // WP-05: the processed blockhash source and the block height (attempts expire by it)
+                self.sendview.on_block_meta(b.slot, b.blockhash, b.block_height, b.t);
             }
             Event::Input { kind, data } => match kind {
                 InputKind::Health => self.on_health(&data),
                 InputKind::SlotidxMissing => self.on_slotidx_missing(&data),
                 InputKind::Fetch => self.on_fetch(&data),
-                // the other inputs come with their WPs (WP-03b blockhash heads, WP-05 in-flight releases, leader windows)
+                // WP-05: the blockhash ring's confirmed head and the leader schedule (what the send checks read), our
+                // wallet's transactions (an attempt landed) and the block engine's results for our bundles
+                InputKind::BlockhashHead => self.sendview.on_head(&data),
+                InputKind::LeaderWindow => self.sendview.on_window(&data),
+                InputKind::WalletTx => { let poh = &self.poh; if let Some(x) = self.exec.as_mut() { x.on_wallet_tx(&data, &|s| poh_of(poh, s)); } }
+                InputKind::InflightRelease => { let t = self.t_now; if let Some(x) = self.exec.as_mut() { x.on_release(&data, t); } }
+                // gate records (the 100 ms watch: status only), quarantines (Stage 1), settlements (`Event::Settled`)
                 _ => {}
             },
             Event::Status { msg, .. } => status(&msg),
@@ -1067,7 +1113,7 @@ impl Engine {
                 let a = match (addrs, err) { (Some(v), _) => Answer::Found(v.to_vec()), (None, Some(e)) => Answer::Error(e), (None, None) => Answer::Missing };
                 self.on_alt(table, a);
             }
-            Event::Settled(st) => { let poh = &self.poh; if let Some(x) = self.exec.as_mut() { x.on_settled(*st, &|s| poh.get(s).copied()); } }
+            Event::Settled(st) => { let (poh, t) = (&self.poh, self.t_now); if let Some(x) = self.exec.as_mut() { x.on_settled(*st, t, &|s| poh_of(poh, s)); } }
         }
     }
 
@@ -1431,6 +1477,11 @@ impl Engine {
 
     fn housekeeping(&mut self, now: u64, status: &mut dyn FnMut(&str)) {
         self.last_hk_t = now;
+        // WP-05: the executor's timers (in-flight expiry, the status cross-checks, the blockhash expiries) and the
+        // crowding map's window
+        let tip = self.tip_slot();
+        if let Some(x) = self.exec.as_mut() { x.tick(now, &self.sendview, tip); }
+        self.activity.expire(now);
         // finish opportunities whose watch window ended
         let due: Vec<u64> = self.opps.values().filter(|o| o.deadline <= now).map(|o| o.id).collect();
         for id in due { self.finish_opp(id); }
@@ -1552,13 +1603,22 @@ impl Engine {
         if !coverage.is_object() { coverage = json!({}); }
         coverage["poh_trigger_pct"] = poh["poh_trigger_pct"].clone();
         coverage["poh"] = poh;
+        // WP-05: the share of attempts (would-sends included) whose target leader was known (null without an attempt)
+        coverage["leader_known_pct"] = self.exec.as_mut().map_or(Value::Null, |x| x.leader_known_pct());
+        // WP-05: the blockhash the send checks would use, its age and source; the cached Jito token's age; the target
+        // slot's leader known
+        let commitment = self.exec.as_ref().map_or("confirmed".to_string(), |x| x.blockhash_commitment().to_string());
+        let bh = self.sendview.blockhash(&commitment).map(|b| (tip.saturating_sub(b.slot), b.src.clone()));
+        let leaders_ok = (tip > 0).then(|| self.sendview.leader(tip + 1).is_some() || crate::leaders::installed().is_some_and(|b| b.leader(tip + 1).is_some()));
+        let token_age = self.exec.as_ref().and_then(|x| x.token_age_s());
         let mut line = json!({ "seq": self.status_lines, "t_ns": t, "interval_ns": t.saturating_sub(p.t), "run_s": t.saturating_sub(self.t_start) as f64 / 1e9,
             "slot": { "processed": nz(self.slots[0].max(self.slot)), "confirmed": nz(self.slots[1]), "finalized": nz(self.slots[2]), "shred": nz(self.shred_slot), "tip": nz(tip) },
             "tip_lag_slots_now": (self.slot > 0 && self.store_slot_max > 0).then(|| self.slot as i64 - self.store_slot_max as i64),
             "send_gate": self.gate.as_ref().map(|g| g.json()),
             "health": { "recorder_ok": st.as_ref().map(|s| s.core_ok), "warmup_ready": self.shut == Shut::Ready, "shut": self.shut.as_str(),
-                "state_ok": self.state.ok(self.t_now, self.knobs.max_update_age_ms * 1_000_000), "lag_slo_ok": self.slo.last.as_ref().map(|m| m.ok), "leaders_ok": null,
-                "blockhash_age_slots_now": null, "blockhash_src_now": null, "jito_token_age_s_now": null },
+                "state_ok": self.state.ok(self.t_now, self.knobs.max_update_age_ms * 1_000_000), "lag_slo_ok": self.slo.last.as_ref().map(|m| m.ok), "leaders_ok": leaders_ok,
+                "blockhash_age_slots_now": bh.as_ref().filter(|_| tip > 0).map(|b| b.0), "blockhash_src_now": bh.map(|b| b.1), "blockhash_commitment": commitment,
+                "jito_token_age_s_now": token_age },
             "state": { "connected_now": self.state.connected, "last_update_age_ms_now": self.state.age_ns(self.t_now).map(|a| a / 1_000_000),
                 "last_account_age_ms_now": (self.last_account_t > 0).then(|| self.t_now.saturating_sub(self.last_account_t) / 1_000_000),
                 "reconnects_total": self.state.reconnects, "resnapshots_total": self.state.resnapshots, "messages_total": self.state.msgs,
@@ -1686,21 +1746,11 @@ impl Engine {
         };
         let t_resolved = now_ns();
         for l in &a.tx.lookups { self.alts.used(l.table, t_engine); }
+        // WP-05 crowding (F6): an arbitrage-like transaction (the rival test) is a candidate until its writes land
+        if let Some(signer) = self.arb_like(&a, &keys) { self.activity.candidate(a.tx.sig, signer, t_engine); }
         self.record_rival(&a, &keys);
         // WP-03b tap: an unexecuted transaction with its resolved keys (a D2 candidate when it touches a watched account)
         crate::chainfetch::note_seen(&a, &keys);
-        // the bids on our pools: every transaction touching one (users and bots alike contend for its write lock)
-        if !self.exec.as_ref().is_some_and(|x| x.is_ours(&a.tx.sig)) {
-            let price = a.tx.cu_price().unwrap_or(0);
-            let now = t_engine;
-            for k in &keys {
-                if let Some(&i) = self.reg.by_pool.get(k) {
-                    let q = self.pool_prices.entry(i).or_default();
-                    q.push_back((now, price));
-                    while q.len() > 64 || q.front().is_some_and(|x| now - x.0 > 30_000_000_000) { q.pop_front(); }
-                }
-            }
-        }
         // W(T) for the CommitTracker (item 3): every forwarded transaction, decoded swap or not. An executed feed's
         // successful copy is authoritative; a failed one writes nothing
         let w = self.write_set(&a.tx, &keys);
@@ -1960,49 +2010,60 @@ impl Engine {
         self.rec.json(rec::TRIGGERS, line);
     }
 
-    /// The executor's turn for opportunity `id` (steps 2-3 and live, exec.rs): returns the decision's verdict and reason.
+    /// The executor's turn for opportunity `id` (exec.rs): the send checks on this engine's journaled view (the
+    /// blockhash ring's head, block metas, the leader schedule) and its health, the route re-quoted at the size cap, then
+    /// a send, a would-send (shadow, dry run, a closed gate: PLAN-ADDENDUM I-7) or a refusal, with its reason.
     ///
-    /// The send check reads the live SendGate (a pause or stop closes it at once) and this engine's health. The gate mode
-    /// it saw is journaled here, on the engine thread, whenever it differs from the last one journaled: an INPUT `gate`
-    /// with `src` "decision" and the opportunity's id, written right after the input being handled (review WP-03 #3)
-    fn after_opportunity(&mut self, id: u64) -> (&'static str, String) {
-        let Some(size) = self.opps.get(&id).map(|o| o.size) else { return ("reject", "no_opportunity".into()) };
+    /// What the check read from outside the journal (the SendGate's mode, the leader's kind, the Jito token, the
+    /// recorder) is journaled here, on the engine thread, whenever it differs from the last record: an INPUT `gate` with
+    /// `src` "decision" and the opportunity's id, right after the input being handled (review WP-03 #3; WP-08 review #18:
+    /// the leader's kind)
+    fn after_opportunity(&mut self, id: u64) -> crate::exec::Decided {
+        let Some(size) = self.opps.get(&id).map(|o| o.size) else { return crate::exec::Decided::reject("no_opportunity") };
+        let tip = self.tip_slot();
+        let (t, slot) = (self.t_now, self.slot);
         let Some(x) = self.exec.as_mut() else {
-            // no executor (shadow): nothing can send
+            // no executor: nothing can send
             let why = self.gate.as_ref().filter(|g| !g.allows()).map_or("no_executor".to_string(), |g| format!("gate_{}:{}", g.mode().as_str(), g.reason()));
-            return ("reject", why);
+            return crate::exec::Decided::reject(why);
         };
-        let (sim, send) = (x.wants_sim(size), x.wants_send());
-        let refused = x.refusal();
-        let seen = x.gate_seen();
-        if let Some(m) = seen.filter(|m| Some(*m) != self.gate_journaled) {
-            self.gate_journaled = Some(m);
+        let sim = x.wants_sim(size);
+        let inputs = x.inputs(&self.sendview, tip, t);
+        let token_ok = !matches!(inputs.token, crate::exec::TokenSeen::Stale);
+        let seen = (inputs.gate, inputs.leader.kind, token_ok, inputs.recorder_ok);
+        if self.seen_journaled != Some(seen) {
             let mut g = x.gate_json();
-            g["mode"] = json!(m.as_str());
+            g["mode"] = json!(seen.0.as_str());
             g["src"] = json!("decision");
             g["opp"] = json!(id);
+            g["leader"] = json!({ "slot": inputs.leader.slot, "identity": inputs.leader.identity, "kind": inputs.leader.kind, "kind_src": inputs.leader.kind_src });
+            g["jito_token_ok"] = json!(token_ok);
+            g["recorder_ok"] = json!(inputs.recorder_ok);
             self.journal.input(self.t_now, InputKind::Gate, Arc::new(g));
+            self.gate_journaled = Some(seen.0);
+            self.seen_journaled = Some(seen);
         }
-        self.decisions = fold(self.decisions, &[b"exec", &id.to_le_bytes(), &[sim.is_some() as u8, send.is_some() as u8, seen.map_or(u8::MAX, |m| m as u8)]]);
-        let mut verdict = ("reject", refused.unwrap_or_else(|| "not_sent".into()));
-        // a live trade first (it is the one racing), then the free simulation; the route handed over is a decision too
-        if let Some(cap) = send {
-            match self.route_in(id, size.min(cap)) {
-                Some(r) => {
-                    self.decisions = fold(self.decisions, &[b"send", &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes()]);
-                    self.exec.as_mut().unwrap().send(r);
-                    verdict = ("send", "sent".into());
-                }
-                None => { self.count("send_unquotable"); verdict = ("reject", "build_error:unquotable".into()); }
+        let cap = x.size_cap();
+        let d = match self.route_in(id, size.min(cap)) {
+            Some(r) => {
+                self.decisions = fold(self.decisions, &[b"exec", &id.to_le_bytes(), &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes(), &[seen.0 as u8]]);
+                let trig = r.trig;
+                let x = self.exec.as_mut().unwrap();
+                let d = x.decide(r, &inputs, &self.sendview, slot.max(tip), t);
+                // the poh_trigger_pct gauge, after the fire (the PoH index is shared with the feed threads; review WP-05 #8)
+                if d.attempt.is_some() { x.note_poh(trig != [0; 64] && poh_of(&self.poh, &trig).is_some()); }
+                d
             }
-        }
+            None => { self.count("send_unquotable"); crate::exec::Decided::reject("build_error:unquotable") }
+        };
+        self.decisions = fold(self.decisions, &[b"exec_verdict", &id.to_le_bytes(), d.reason.as_bytes(), &[d.sent.map_or(2, |b| b as u8)]]);
         if let Some(sz) = sim {
             match self.route_in(id, sz) {
                 Some(r) => { self.decisions = fold(self.decisions, &[b"sim", &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes()]); self.exec.as_mut().unwrap().simulate(r) }
                 None => self.count("sim_unquotable"),
             }
         }
-        verdict
+        d
     }
 
     /// `arb-lab simcheck`: one round trip per ordered pool pair at `size`, on the pools as they are (no trigger), spread
@@ -2034,7 +2095,8 @@ impl Engine {
                     self.next_id += 1;
                     let st = Stages { rx: 0, decoded: 0, engine: 0, resolved: 0, decided: now_ns() };
                     self.opps.insert(id, Opp { id, decision: u64::MAX, trig: [0; 64], trig_feed: 0, slot: self.slot, st, trig_pool: pb.pool, buy: pb.pool, sell: ps.pool,
-                        mint, size, gross: 0, net: 0, cu, crossed: (c1, c2), deadline: u64::MAX, trig_cu_price: None, landed: None, touches: Vec::new(), sv: 0, route_age_ms: None });
+                        mint, size, gross: 0, net: 0, cu, crossed: (c1, c2), deadline: u64::MAX, landed: None, touches: Vec::new(), sv: 0, route_age_ms: None,
+                        kind: "probe", t_first_shred: None, t_commit: 0, t_priced: 0, parts_skew: None });
                     if let Some(r) = self.route_in(id, size) { out.push(r); } else { self.count("probe_unquotable"); }
                     self.opps.remove(&id);
                 }
@@ -2059,16 +2121,19 @@ impl Engine {
         self.next_id += 1;
         let st = Stages { rx: 0, decoded: 0, engine: 0, resolved: 0, decided: now_ns() };
         self.opps.insert(id, Opp { id, decision: u64::MAX, trig: [0; 64], trig_feed: 0, slot: self.slot, st, trig_pool: pb.pool, buy: pb.pool, sell: ps.pool,
-            mint: r.mint, size: r.size, gross: 0, net: 0, cu, crossed: (c1, c2), deadline: u64::MAX, trig_cu_price: None, landed: None, touches: Vec::new(), sv: 0, route_age_ms: None });
+            mint: r.mint, size: r.size, gross: 0, net: 0, cu, crossed: (c1, c2), deadline: u64::MAX, landed: None, touches: Vec::new(), sv: 0, route_age_ms: None,
+            kind: "probe", t_first_shred: None, t_commit: 0, t_priced: 0, parts_skew: None });
         let out = self.route_in(id, r.size);
         self.opps.remove(&id);
         out
     }
 
     /// the accounts a route's two pools are quoted from (pool, vaults, extras, followed DLMM bin arrays)
-    pub fn route_accounts(&self, r: &crate::exec::RouteIn) -> Vec<Pk> {
+    pub fn route_accounts(&self, r: &crate::exec::RouteIn) -> Vec<Pk> { self.route_accounts_of(&r.buy, &r.sell) }
+
+    fn route_accounts_of(&self, buy: &crate::venues::PoolMeta, sell: &crate::venues::PoolMeta) -> Vec<Pk> {
         let mut k = Vec::new();
-        for m in [&r.buy, &r.sell] {
+        for m in [buy, sell] {
             k.push(m.pool);
             if m.venue == Venue::Dlmm { if let Some(l) = self.store.dlmm_arrays.get(&m.pool) { k.extend(l.iter().map(|x| x.1)); } }
             else if m.venue != Venue::DammV2 { k.push(m.vault0); k.push(m.vault1); k.extend(m.extra.iter().copied()); }
@@ -2092,19 +2157,16 @@ impl Engine {
         let live = |p: &crate::venues::PoolMeta| -> Vec<i64> { self.store.dlmm_arrays.get(&p.pool).map(|l| l.iter().filter(|(_, k)| self.store.get(k).is_some()).map(|(i, _)| *i).collect()).unwrap_or_default() };
         let data = |p: &crate::venues::PoolMeta| self.store.get(&p.pool).map(|a| a.data.to_vec());
         let trig_feed = if o.trig_feed == u16::MAX { Some("state".to_string()) } else { self.feeds.get(o.trig_feed as usize).cloned() };
-        let p75 = |i: usize| -> Option<u64> {
-            let q = self.pool_prices.get(&i)?;
-            let mut v: Vec<u64> = q.iter().map(|x| x.1).collect();
-            if v.len() < 3 { return None; }
-            v.sort_unstable();
-            Some(v[(v.len() * 3 / 4).min(v.len() - 1)])
-        };
-        let rival_cu_price = match (p75(bi), p75(si)) { (Some(a), Some(b)) => Some(a.max(b)), (a, b) => a.or(b) };
+        // WP-05: the route's crowding (F6: two counts, review WP-05 #1) and the versions of its accounts it was priced on
+        // (attempts `route_in`); whether its trigger has a PoH position is looked up after the decision (review #8)
+        let crowding = self.activity.crowding(&pb.pool, &ps.pool, self.t_now);
+        let accounts: Vec<(Pk, u64, u64)> = self.route_accounts_of(pb, ps).into_iter().filter_map(|k| self.store.get(&k).map(|a| (k, a.slot, a.write_version))).collect();
         Some(crate::exec::RouteIn { opp: id, trig: o.trig, trig_feed, slot: o.slot,
             st: [o.st.rx, o.st.decoded, o.st.engine, o.st.resolved, o.st.decided], buy: pb.clone(), sell: ps.clone(), buy_data: data(pb)?, sell_data: data(ps)?,
             buy_source: self.reg.source(&pb.pool), sell_source: self.reg.source(&ps.pool), mint: o.mint, size, mid, back,
-            gross_at_opp: o.gross, net_at_opp: o.net, trig_cu_price: o.trig_cu_price, rival_cu_price, cu: o.cu,
-            buy_live: live(pb), sell_live: live(ps), buy_end, sell_end, state_version: o.sv, route_age_ms: o.route_age_ms, decision: o.decision })
+            gross_at_opp: o.gross, net_at_opp: o.net, cu: o.cu,
+            buy_live: live(pb), sell_live: live(ps), buy_end, sell_end, state_version: o.sv, route_age_ms: o.route_age_ms, decision: o.decision,
+            trig_kind: o.kind, t_first_shred: o.t_first_shred, t_commit: o.t_commit, t_priced: o.t_priced, parts_skew: o.parts_skew, crowding, accounts })
     }
 
     /// caps.jsonl: the decided pair's best round trip at each budget in [strategy] budget_caps_sol. Profit rises with
@@ -2182,6 +2244,8 @@ impl Engine {
                     }
                 }
                 let pool_key = self.reg.pools[i].pool;
+                // WP-05 crowding (F6): an arbitrage-like transaction's write to the pool landed: its signer counts there
+                if stream { self.activity.landed(&txn, pool_key, t_engine); }
                 if let Some(ids) = self.watch.get(&i).cloned() {
                     for id in ids {
                         let Some(o) = self.opps.get_mut(&id) else { continue };
@@ -2402,9 +2466,9 @@ impl Engine {
             (4, t_decided0.saturating_sub(t_priced))] { self.lat[LAT_V2 + k].push(dv); }
         // the decision: an opportunity, the executor's verdict
         let mut opp_id = None;
-        let (verdict, reason): (&'static str, String) = match best.map(|k| (k, routes[k].priced.clone().unwrap())) {
-            None => ("reject", routes.first().map_or("no_route", |r| r.reason).to_string()),
-            Some((_, p)) if p.net < min_profit => ("reject", "below_min_profit".into()),
+        let dec: crate::exec::Decided = match best.map(|k| (k, routes[k].priced.clone().unwrap())) {
+            None => crate::exec::Decided::reject(routes.first().map_or("no_route", |r| r.reason)),
+            Some((_, p)) if p.net < min_profit => crate::exec::Decided::reject("below_min_profit"),
             Some((k, p)) => {
                 let r = &routes[k];
                 let (buy, sell) = (self.reg.pools[r.buy].pool, self.reg.pools[r.sell].pool);
@@ -2417,18 +2481,20 @@ impl Engine {
                 self.watch.entry(r.buy).or_default().push(oid);
                 self.watch.entry(r.sell).or_default().push(oid);
                 let st = Stages { rx: ctx.t_update_recv, decoded: ctx.t_update_recv, engine: ctx.t_first_engine, resolved: t_eval, decided: t_decided0 };
+                let parts_skew = r.sv.as_ref().map(|v| v.skew);
                 self.opps.insert(oid, Opp { id: oid, decision: id, trig: ctx.txn.unwrap_or([0; 64]), trig_feed: u16::MAX, slot: ctx.slot, st, trig_pool: m.pool, buy, sell,
                     mint, size: p.size, gross: p.gross, net: p.net, cu: p.cu, crossed: p.crossed, deadline: self.t_now + self.cfg.outcome_watch_ms * 1_000_000,
-                    trig_cu_price: None, landed: Some(ctx.slot), touches: Vec::new(), sv, route_age_ms });
+                    landed: Some(ctx.slot), touches: Vec::new(), sv, route_age_ms, kind: ctx.kind, t_first_shred: ctx.t_first_shred, t_commit: ctx.t_commit,
+                    t_priced, parts_skew });
                 self.decisions = fold(self.decisions, &[b"state", &oid.to_le_bytes(), &ctx.txn.unwrap_or([0; 64]), &buy, &sell, &p.size.to_le_bytes(), &p.net.to_le_bytes()]);
                 let b = Best { buy, sell, mint, size: p.size, gross: p.gross, net: p.net, decision: id };
                 self.caps_pending.push((oid, b, now));
                 // the warm-up / health gate (item 8, I-4): recorded, never sent while not ready
-                if self.shut != Shut::Ready { ("reject", self.shut.as_str().to_string()) } else { self.after_opportunity(oid) }
+                if self.shut != Shut::Ready { crate::exec::Decided::reject(self.shut.as_str()) } else { self.after_opportunity(oid) }
             }
         };
         let t_decided = now_ns();
-        self.decisions = fold(self.decisions, &[b"decision", &id.to_le_bytes(), &i.to_le_bytes(), &best.map_or(u64::MAX, |b| b as u64).to_le_bytes(), reason.as_bytes()]);
+        self.decisions = fold(self.decisions, &[b"decision", &id.to_le_bytes(), &i.to_le_bytes(), &best.map_or(u64::MAX, |b| b as u64).to_le_bytes(), dec.reason.as_bytes()]);
         // follow-up bookkeeping: the pools priced and the slots read (torn_suspect, fork_priced)
         let priced_pools: Vec<usize> = { let mut v: Vec<usize> = routes.iter().filter(|r| r.priced.is_some()).flat_map(|r| [r.buy, r.sell]).collect(); v.sort_unstable(); v.dedup(); v };
         if !priced_pools.is_empty() {
@@ -2454,9 +2520,11 @@ impl Engine {
                 best, sv: bestr.and_then(|r| r.sv.as_ref()).map(|v| SvRec { h: hex16(v.h), slot_max: v.slot_max, wv_max: v.wv_max }),
                 route_age_ms: bestr.and_then(|r| r.sv.as_ref()).map(|v| self.t_now.saturating_sub(v.t_last_write) as f64 / 1e6),
                 parts_skew_slots: bestr.and_then(|r| r.sv.as_ref()).map(|v| SkewRec { buy: v.skew.0, sell: v.skew.1 }), w_src: ctx.w_src, torn_suspect: false,
-                fork_priced: false, band: bestr.and_then(|r| r.priced.as_ref()).map(|p| band_of(p.gross)), crowding: None, verdict, reason, ev: None, rank: None, attempt: None,
-                opp: opp_id, experiments: serde_json::Map::new(),
-                stages: StagesRec { t_first_shred: ctx.t_first_shred, t_update_recv: ctx.t_update_recv, t_commit: ctx.t_commit, t_engine: ctx.t_resolved, t_priced, t_decided } };
+                fork_priced: false, band: dec.band.or_else(|| bestr.and_then(|r| r.priced.as_ref()).map(|p| band_of(p.gross))),
+                band_at_opp: bestr.and_then(|r| r.priced.as_ref()).map(|p| band_of(p.gross)), crowding: dec.crowding, verdict: dec.verdict,
+                reason: dec.reason, ev: dec.ev, rank: dec.rank, attempt: dec.attempt, opp: opp_id, experiments: serde_json::Map::new(),
+                stages: StagesRec { t_first_shred: ctx.t_first_shred, t_update_recv: ctx.t_update_recv, t_commit: ctx.t_commit, t_engine: ctx.t_resolved, t_priced, t_decided },
+                sent: dec.sent, would_send: dec.would_send, reason_ungated: dec.reason_ungated };
             self.rec.emit(rec::DECISIONS, Record::ser(rec));
         }
         n_routes
@@ -3335,7 +3403,7 @@ mod tests {
         tx_ev(&mut r.e, shred_tx(sig(7), &[a.pool, a.vault0, a.vault1], Some((&a, SOL, false)), 11, T0 + 8 * MS));
         health(&mut r.e, false, T0 + 9 * MS);
         assert_eq!(r.e.shut(), Shut::StateUnavailable);
-        assert!(!r.e.health_flags().ready() && r.e.health_flags().shut() == Shut::StateUnavailable, "the wants_send hook fails closed");
+        assert!(!r.e.health_flags().ready() && r.e.health_flags().shut() == Shut::StateUnavailable, "the send checks fail closed");
         // the shred feeds go on: the engine's slot follows them
         tx_ev(&mut r.e, shred_tx(sig(8), &[[50u8; 32]], None, 400, T0 + 100 * MS));
         assert_eq!(r.e.tip_slot(), 400);
@@ -4005,6 +4073,36 @@ mod tests {
         assert_eq!((cov["poh_trigger_pct"].clone(), cov["poh"]["poh_feeds_alive_now"].as_u64(), cov["poh"]["target_pct"].as_f64(), cov["poh"]["target_met"].clone()),
             (Value::Null, Some(1), Some(90.0), Value::Null), "no attempts yet: no share, not judged: {cov}");
         assert!(cov.get("watched_with_tx_pct").is_none(), "no chain-fetch service in this test: {cov}");
+    }
+
+    /// WP-05 with WP-04 (`health.blockhash_*` was null): the status line's `health` shows what the send checks read, from
+    /// journaled inputs only: the blockhash they would use (its age against the tip, its source, the commitment) and
+    /// whether the target slot's leader is known; null until the WP-03b ring has said anything. Without an executor there
+    /// is no Jito token age and no leader coverage
+    #[test]
+    fn the_status_lines_health_shows_the_send_checks_inputs() {
+        let mut r = rig("send-health");
+        r.rec.open_now(rec::STATUS).unwrap();
+        slot_ev(&mut r.e, 11, 0, Some(10), T0);
+        r.e.write_status(0);
+        let head = json!({ "hash": crate::tx::b58(&[5u8; 32]), "slot": 9, "height": 7, "src": "slotidx", "commitment": "confirmed", "t_ns": T0 });
+        r.e.step(Event::Input { kind: InputKind::BlockhashHead, data: Arc::new(head) }, T0 + MS, &mut nop());
+        let leaders = vec![crate::tx::b58(&[9u8; 32]); 3];
+        r.e.step(Event::Input { kind: InputKind::LeaderWindow, data: Arc::new(json!({ "start": 10, "leaders": leaders })) }, T0 + MS, &mut nop());
+        r.e.write_status(0);
+        r.rec.sync();
+        let st = rec::read_jsonl(&r.dir, "status").unwrap();
+        let (h0, h1) = (&st[0]["health"], &st[1]["health"]);
+        assert_eq!((h0["blockhash_age_slots_now"].clone(), h0["blockhash_src_now"].clone(), h0["blockhash_commitment"].as_str()), (Value::Null, Value::Null, Some("confirmed")),
+            "no blockhash yet: {h0}");
+        assert_eq!((h1["blockhash_age_slots_now"].as_u64(), h1["blockhash_src_now"].as_str(), h1["leaders_ok"].as_bool()), (Some(2), Some("slotidx"), Some(true)), "{h1}");
+        assert_eq!((h1["jito_token_age_s_now"].clone(), st[1]["coverage"]["leader_known_pct"].clone()), (Value::Null, Value::Null));
+        assert_eq!((r.e.sendview.head.as_ref().map(|b| b.height), r.e.sendview.leader(12)), (Some(Some(7)), Some([9u8; 32])));
+        // both came as engine inputs: journaled, so a replay sees the same
+        r.rec.close();
+        let kinds: Vec<u8> = crate::rec::journal::read_dir(&r.dir).unwrap().iter().filter_map(|x| match &x.body {
+            crate::rec::journal::JBody::Input { kind, .. } => Some(*kind), _ => None }).collect();
+        assert!(kinds.contains(&(InputKind::BlockhashHead as u8)) && kinds.contains(&(InputKind::LeaderWindow as u8)), "{kinds:?}");
     }
 
     /// PLAN WP-02 acceptance (F13), the engine benchmark, on WP-04's path: 100k synthetic account updates (50k

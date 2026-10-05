@@ -78,13 +78,16 @@ case "$cmd" in
     [ -n "${behave:-}" ] && [ "$behave" != - ] && echo "$behave" > "$d/.fake-ctl"
     gmode=shadow; greason=mode_shadow; [ "$flag" = --shadow ] && greason=forced_shadow; [ "$flag" = --live ] && { gmode=live; greason=""; }
     [ "${behave:-}" = mismatch ] && { gmode=shadow; greason=program_hash_mismatch; }
-    echo "{\"schema\":\"arbx.meta/2.0\",\"send_gate\":{\"mode\":\"$gmode\",\"reason\":\"$greason\",\"sticky\":true}}" > "$d/meta.json"
+    rmode=shadow; [ "$flag" = --live ] && rmode=live
+    echo "{\"schema\":\"arbx.meta/2.0\",\"run\":{\"mode\":\"$rmode\"},\"send_gate\":{\"mode\":\"$gmode\",\"reason\":\"$greason\",\"sticky\":true}}" > "$d/meta.json"
     case "$status" in
       -|"") ;;
       empty) : > "$d/status.jsonl" ;;
       array) echo '[1,2]' > "$d/status.jsonl" ;;
       nofield) echo '{"slot":1}' > "$d/status.jsonl" ;;
       garbage) echo '{"exec":{"sending":{"failed_fees_lamports":1}}}' > "$d/status.jsonl"; echo '{"exec":{"send' >> "$d/status.jsonl"; echo '{"attempt":1}' > "$d/attempts.jsonl" ;;
+      # WP-05: a segment that cannot send records its would-sends (sent false) and dies before any status line
+      wouldsend) echo '{"attempt":0,"kind":"shadow","sent":false,"not_sent":"gate_shadow:forced_shadow"}' > "$d/attempts.jsonl" ;;
       v2:*) IFS=, read -ra xs <<< "${status#v2:}"; for x in "${xs[@]}"; do echo "{\"money\":{\"failed_fees_total_lamports\":$x}}" >> "$d/status.jsonl"; done ;;
       # WP-02: status.jsonl starts with its schema header line (the recorder writes it when the engine starts)
       hdr) echo '{"schema":"arbx.status/2.0","run":"x","file_seq":0,"started_ns":1,"producer":"p"}' > "$d/status.jsonl" ;;
@@ -208,6 +211,20 @@ wait "$SUP" 2>/dev/null
 check "G: the restart went through ctl stop" eq "$(grep -c '^stop|pause lifted' "$T/fake-G/ctl.log")" "1"
 check "G: supervisor.jsonl pause, then resume of p1" eq "$(jl "$T/runs/G/supervisor.jsonl" '[(x["event"], x["segment"]) for x in L if x["event"] in ("pause", "resume")]')" "[('pause', None), ('resume', 'G-p1')]"
 check "G: control.jsonl: pause (records only), resume (restart)" eq "$(jl "$T/runs/G/control.jsonl" '[(x["cmd"], x["accepted"], x["result"]) for x in L][:2]')" "[('pause-sending', True, 'segments record only (--shadow) while the file exists'), ('resume-sending', True, 'segment G-p1 (records only) restarted: the next one sends')]"
+
+# ------------------------------------------------------------------ G2: a paused segment's would-sends are no sends (review WP-05 #6)
+export FAKE_DIR=$T/fake-G2 FAKE_PLAN=$T/fake-G2/plan
+mkdir -p "$FAKE_DIR"; printf '%s\n' "0 deadline wouldsend wait" "0 deadline - wait" > "$FAKE_PLAN"
+echo "wait for the owner" > "$T/runs/G2.pause"
+ARBX_MAX_SEGMENTS=2 "$ROOT/deploy/run-w.sh" G2 1 20 50000000 "$T/live.toml" tester & SUP=$!
+check "G2: a segment starts while paused, --shadow" wait_for '[ -s "$T/fake-G2/runs.log" ] && [ "$(field G2 1 flag)" = --shadow ]'
+check "G2: it records would-sends (attempts, sent false) and no status line" wait_for '[ -s "$T/runs/G2/G2-p1/attempts.jsonl" ] && [ ! -e "$T/runs/G2/G2-p1/status.jsonl" ]'
+rm -f "$T/runs/G2.pause"
+check "G2: the pause lifted, the next segment starts" wait_for '[ "$(wc -l < "$T/fake-G2/runs.log")" -ge 2 ]'
+check "G2: segment 2 runs --live with the whole budget: p1 (meta.json run.mode shadow) sent nothing" eq "$(field G2 2 flag) $(field G2 2 budget)" "--live 50000000"
+echo "end" > "$T/runs/G2.stop"
+check "G2: the campaign ends" wait_for '! kill -0 $SUP 2>/dev/null'
+wait "$SUP" 2>/dev/null
 
 # ------------------------------------------------------------------ I: a refused pause falls back to a records-only restart (review F3)
 export FAKE_DIR=$T/fake-I FAKE_PLAN=$T/fake-I/plan

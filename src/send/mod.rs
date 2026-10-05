@@ -1,27 +1,33 @@
 //! Send paths, one per `[[send]]` entry (ported from arbed's landers, src/providers/sender/*). Each takes signed
 //! transaction bytes and delivers them its own way:
 //!   jito-bundle  Jito searcher gRPC sendBundle, one-transaction bundle (jito.rs). A losing bundle costs nothing: the
-//!                block engine drops a bundle whose transaction would fail, and its result stream says so (the gate)
+//!                block engine drops a bundle whose transaction would fail, and its result stream says so
 //!   jito-tx      Jito JSON-RPC sendTransaction (`x-jito-auth` UUID)
 //!   helius       Helius Sender JSON-RPC sendTransaction (`?swqos_only=true`: the 5,000-lamport tier)
 //!   shyft        Shyft staked RPC sendTransaction (SWQoS), no tip
 //!   rpcfast      RPC Fast Beam JSON-RPC sendTransaction, tip to a Beam Astralane account
 //!   haan         Haan Sender: raw bytes, Bearer key + x-jito-auth, plain-text signature reply, no tip
 //!   bolt / iris / lunar  raw bytes (Raiden Bolt, Astralane Iris /irisb, Hello Moon Lunar Lander /send-bin)
-//! Each path wants its own tip (or none): the transaction builder asks `Path::tip` per path. Different copies of one
-//! trade may differ only under one durable nonce, or as one shared transaction carrying every path's tip (arbed's
-//! LANDER_SHARED_TX); otherwise two copies could both land. Tips are paid only when the trade succeeds: the tip
-//! transfer comes after the on-chain profit check. Before a copy leaves, `Path::check` makes sure it really pays this
-//! path's tip to one of this path's accounts (a top-level System transfer), so a builder bug can't burn a send.
+//! PLAN WP-05: live sends are one-transaction Jito bundles (bundle-only); the other kinds stay compiled for `arbx
+//! senders` checks and a future direct experiment. Tips are paid only when the trade succeeds: the tip transfer comes
+//! after the on-chain profit check. Before a copy leaves, `Path::check` makes sure it really pays this path's tip to one
+//! of this path's accounts (a top-level System transfer), so a builder bug can't burn a send. The jito-bundle path's
+//! rate budget is the send queue (`budget.rs`: bands, crowding, EV, `[send_policy] queue_ms`); its auth token is
+//! renewed in the background (`Jito::keep_token`) and only read on the send path; its keep-alive round trip is the
+//! block engine's RTT (`leaders::note_be_rtt`: attempts carry it). The Jito gate is gone (WP-05).
 //! Records (one JSON object per line, ns CLOCK_REALTIME): every copy in copies.jsonl (sent or not, answered or not),
 //! every keep-alive in keepalive.jsonl, every bundle result in bundles.jsonl. Errors never carry a URL (keys live in some).
+//! PLAN-ADDENDUM I-10: no secret travels in clear text, in the URL or in a header (review WP-05 #5): a path whose URL
+//! expands into plain `http://` (or `udp://`) while it carries a `${...}` secret, a `token_env` or a `jito_auth_env` is
+//! refused unless the provider has no TLS endpoint (`no_tls_endpoint`), and no provider key may be the payer's keypair
+//! (`check_key_material`).
 pub mod budget;
 pub mod jito;
 pub mod tpu;
 
-pub use budget::{Prio, TokenBucket, RANK_CROWDED, RANK_OTHER, RANK_SEED};
+pub use budget::{Drop, Granted, Prio, TokenBucket};
 
-use crate::config::{GateCfg, SendKind, SendPath};
+use crate::config::{SendKind, SendPath};
 use crate::feeds::clock::now_ns;
 use crate::tx::Pk;
 use anyhow::{bail, Context, Result};
@@ -29,7 +35,7 @@ use base64::Engine as _;
 use budget::Budget;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -387,16 +393,101 @@ pub struct PathStats {
 }
 
 /// What an endpoint answered for one copy: its HTTP status (None for gRPC), its reply (cut to 200 characters), the
-/// signature it returned and, for a bundle, the bundle id
+/// signature it returned and, for a bundle, the bundle id; how long the copy waited in the rate queue
 #[derive(Clone, Debug)]
-pub struct Reply { pub sig: String, pub bundle: Option<String>, pub status: Option<u16>, pub reply: String }
+pub struct Reply { pub sig: String, pub bundle: Option<String>, pub status: Option<u16>, pub reply: String, pub queue_wait_us: Option<u64> }
 
-/// A copy that was refused before or by the endpoint (status None: never reached it, or gRPC)
+/// A signed copy for a path of `kind` whose tip accounts are `tips`: one signed transaction, nothing after it, that pays
+/// at least the kind's minimum tip to one of `tips` with a top-level System transfer (a tip account behind a lookup
+/// table does not count: Jito forbids it), and for Helius a compute-unit price. Returns its signature. The send path's
+/// last check (`Path::check`), and the dry run's (no `Path`)
+pub fn verify_copy(raw: &[u8], kind: SendKind, tips: &[Pk], name: &str) -> Result<String> {
+    let sig = first_signature(raw).context("not a signed transaction")?;
+    let min = kind.min_tip();
+    if min == 0 && kind != SendKind::Helius { return Ok(sig); }
+    let (tx, used) = crate::tx::parse_wire(raw).context("transaction does not parse")?;
+    if used != raw.len() { bail!("{} stray bytes after the transaction", raw.len() - used); }
+    if kind == SendKind::Helius && tx.cu_price_micro.is_none() { bail!("no compute-unit price (Helius Sender rejects it)"); }
+    let paid = tip_paid(&tx, tips);
+    if paid < min { bail!("pays {paid} lamports to {name}'s tip accounts; it needs at least {min}"); }
+    Ok(sig)
+}
+
+/// lamports a parsed transaction pays to `tips` with top-level System transfers
+pub fn tip_paid(tx: &crate::tx::Tx, tips: &[Pk]) -> u64 {
+    tx.ixs.iter().filter_map(|ix| {
+        if *tx.keys.get(ix.program as usize)? != SYSTEM_PROGRAM || ix.data.len() != 12 || ix.data[..4] != [2, 0, 0, 0] { return None; }
+        let to = tx.keys.get(*ix.accounts.get(1)? as usize)?;
+        tips.contains(to).then(|| u64::from_le_bytes(ix.data[4..12].try_into().unwrap()))
+    }).sum()
+}
+
+/// A copy that was refused before or by the endpoint (status None: never reached it, or gRPC). `code`: why, when it never
+/// left (`rate_queue_timeout`, `crowded_pool`: the rate queue; `bad_tx`: it did not pay this path; `jito_auth_stale`: no
+/// valid cached token), None when the endpoint refused it or did not answer. `answered`: the endpoint answered (an HTTP
+/// status, or a gRPC status that refuses the bundle: `jito::refused_code`), so the copy cannot land; false when it never
+/// left or got no answer (a timeout, a transport error after it may have left: review WP-05 #7)
 #[derive(Clone, Debug)]
-pub struct Refusal { pub status: Option<u16>, pub msg: String }
+pub struct Refusal { pub status: Option<u16>, pub msg: String, pub code: Option<&'static str>, pub answered: bool }
 impl std::fmt::Display for Refusal { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str(&self.msg) } }
 impl std::error::Error for Refusal {}
-fn refuse(status: Option<u16>, msg: impl Into<String>) -> Refusal { Refusal { status, msg: msg.into() } }
+fn refuse(status: Option<u16>, msg: impl Into<String>) -> Refusal { Refusal { status, msg: msg.into(), code: None, answered: status.is_some() } }
+fn refuse_code(code: &'static str, msg: impl Into<String>) -> Refusal { Refusal { status: None, msg: msg.into(), code: Some(code), answered: false } }
+/// a gRPC endpoint's refusal (no HTTP status): it answered
+fn refuse_answered(msg: impl Into<String>) -> Refusal { Refusal { status: None, msg: msg.into(), code: None, answered: true } }
+
+/// What `Paths::new` needs beyond the paths: the bundle path's queue (`[send_policy] queue_ms`) and the payer, whose
+/// keypair no provider key may be (I-10)
+#[derive(Clone, Debug, Default)]
+pub struct PathsOpts { pub queue_ms: u64, pub payer: Option<Pk> }
+
+/// The public key of a secret if it is one: a base58 64-byte keypair (secret then public half: its seed's key), a
+/// base58 32-byte seed, or a solana-keygen JSON byte array of either length
+pub fn keypair_pubkey(s: &str) -> Option<Pk> {
+    let t = s.trim();
+    let bytes: Vec<u8> = if t.starts_with('[') { serde_json::from_str::<Vec<u8>>(t).ok()? } else { bs58::decode(t).into_vec().ok()? };
+    let seed: [u8; 32] = match bytes.len() { 64 | 32 => bytes[..32].try_into().ok()?, _ => return None };
+    Some(ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().to_bytes())
+}
+
+/// The secret values a path's config names that are set now: its URL's and keep-alive URL's `${...}` variables (and
+/// every query value and path segment of the expanded URLs), `token_env`, `jito_auth_env`: (what, value)
+fn secret_values(c: &SendPath) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (what, u) in [("url", Some(c.url.as_str())), ("ping_url", c.ping_url.as_deref())] {
+        let Some(u) = u else { continue };
+        for v in crate::config::env_vars(u) { if let Ok(x) = std::env::var(&v) { out.push((format!("{what} ${{{v}}}"), x.trim().to_string())); } }
+        if let Some(x) = crate::config::expand(u).and_then(|e| reqwest::Url::parse(&e).ok()) {
+            for (k, v) in x.query_pairs() { out.push((format!("{what} query {k}"), v.to_string())); }
+            for seg in x.path_segments().into_iter().flatten() { out.push((format!("{what} path"), seg.to_string())); }
+        }
+    }
+    for (what, v) in [("token_env", c.token_env.as_deref()), ("jito_auth_env", c.jito_auth_env.as_deref())] {
+        if let Some(x) = v.and_then(|v| std::env::var(v).ok()) { out.push((what.to_string(), x.trim().to_string())); }
+    }
+    out
+}
+
+/// PLAN-ADDENDUM I-10: a provider key that is a keypair must be a dedicated one. Refused when any secret value of the
+/// path (`secret_values`) or its jito auth keypair file is the payer's keypair. Returns how many values were checked.
+/// The key material is never printed
+pub fn check_key_material(c: &SendPath, payer: &Pk) -> Result<usize> {
+    let mut n = 0;
+    for (what, v) in secret_values(c) {
+        n += 1;
+        if keypair_pubkey(&v).is_some_and(|k| k == *payer) {
+            bail!("send path {}: its {what} is the payer's keypair (PLAN-ADDENDUM I-10: a provider key that is a keypair must be a dedicated one)", c.name);
+        }
+    }
+    if c.kind == SendKind::JitoBundle {
+        let f = c.auth_keypair.as_deref().unwrap_or(jito::DEFAULT_AUTH_KEYPAIR);
+        if let Ok(k) = jito::load_keypair(f) {
+            n += 1;
+            if k.verifying_key().to_bytes() == *payer { bail!("send path {}: its auth keypair is the payer's (the block engine key must never be the trading wallet)", c.name); }
+        }
+    }
+    Ok(n)
+}
 
 pub struct Path {
     pub name: String,
@@ -420,9 +511,17 @@ pub struct Path {
 }
 
 impl Path {
-    async fn new(c: &SendPath, rec: &crate::rec::Rec) -> Result<Path> {
+    async fn new(c: &SendPath, rec: &crate::rec::Rec, opts: &PathsOpts) -> Result<Path> {
         let what = format!("send path {}", c.name);
         let url = crate::config::expand(&c.url).with_context(|| format!("{what}: url {} names an environment variable that is empty or missing", c.url))?;
+        // I-10 at run time too: a URL whose `${...}` expands into plain http:// (the whole URL from the environment), or a
+        // plain-http URL that a header key goes to (review WP-05 #5)
+        let secret = !crate::config::env_vars(&c.url).is_empty() || c.token_env.is_some() || c.jito_auth_env.is_some();
+        if secret && crate::config::cleartext_scheme(&url) && c.no_tls_endpoint.is_none() {
+            let scheme = url.trim_start().split("://").next().unwrap_or("").to_ascii_lowercase();
+            bail!("{what}: its url expands into plain {scheme}:// (no TLS) and carries a secret (in the URL or a header): use the provider's https:// endpoint \
+                (PLAN-ADDENDUM I-10), or set no_tls_endpoint");
+        }
         let mut headers = HeaderMap::new();
         let token = c.token_env.as_deref().map(|v| env_value(v, &what)).transpose()?;
         // tpu-direct: token_env is the Bearer key of the RPC that answers the leader schedule (e.g. Haan)
@@ -450,7 +549,14 @@ impl Path {
         }
         let base = || reqwest::Url::parse(&url).with_context(|| format!("{what}: bad url"));
         let ping = match (&c.ping_url, c.kind) {
-            (Some(u), _) => Ping::Get(crate::config::expand(u).with_context(|| format!("{what}: ping_url names a missing environment variable"))?),
+            (Some(u), _) => {
+                let x = crate::config::expand(u).with_context(|| format!("{what}: ping_url names a missing environment variable"))?;
+                // the keep-alive carries the path's headers too (I-10)
+                if (!crate::config::env_vars(u).is_empty() || !headers.is_empty()) && crate::config::cleartext_scheme(&x) && c.no_tls_endpoint.is_none() {
+                    bail!("{what}: its ping_url is plain (no TLS) and carries a secret (in the URL or a header): use https:// (PLAN-ADDENDUM I-10), or set no_tls_endpoint");
+                }
+                Ping::Get(x)
+            }
             (None, SendKind::JitoBundle) => Ping::Tips,
             (None, SendKind::Helius | SendKind::Lunar | SendKind::Bolt) => {
                 // Helius: /fast -> /ping; Lunar /send-bin and Bolt /api/v1/sendRawTransaction: /ping at the host
@@ -472,12 +578,15 @@ impl Path {
         let known = known_tip_accounts(c.kind);
         let names: Vec<&str> = if c.tip_accounts.is_empty() { known.to_vec() } else { c.tip_accounts.iter().map(String::as_str).collect() };
         let tips: Vec<Pk> = if c.tip_lamports > 0 { names.iter().map(|a| crate::tx::pk(a)).collect() } else { Vec::new() };
-        let budget = c.max_per_sec.map(|n| Budget::new(n, Duration::from_millis(c.queue_ms)));
+        // the bundle path's queue is the send policy's ([send_policy] queue_ms; PLAN WP-05 item 5)
+        let queue_ms = if c.kind == SendKind::JitoBundle { opts.queue_ms } else { c.queue_ms };
+        let budget = c.max_per_sec.map(|n| Budget::new(n, Duration::from_millis(queue_ms)));
         let http = reqwest::Client::builder().tcp_nodelay(true).pool_idle_timeout(Duration::from_secs(85)).pool_max_idle_per_host(4)
             .timeout(SEND_TIMEOUT).build()?;
         let jito = if c.kind == SendKind::JitoBundle {
             if !url.starts_with("https://") && !url.starts_with("http://") { bail!("{what}: the block engine url needs a scheme (https://...)"); }
-            let key = jito::load_keypair(c.auth_keypair.as_deref().unwrap_or("~/.nexus-v2-jito-auth.json"))?;
+            let key = jito::load_keypair(c.auth_keypair.as_deref().unwrap_or(jito::DEFAULT_AUTH_KEYPAIR))?;
+            if opts.payer.is_some_and(|p| p == key.verifying_key().to_bytes()) { bail!("{what}: the auth keypair is the payer's (PLAN-ADDENDUM I-10)"); }
             let j = jito::Jito::connect(&url, key, rec.clone()).await.with_context(|| format!("{what}: connect"))?;
             j.token().await.with_context(|| format!("{what}: authenticate as {} (is the key whitelisted?)", j.pubkey()))?;
             let live = j.tip_accounts().await.with_context(|| format!("{what}: getTipAccounts"))?;
@@ -501,6 +610,16 @@ impl Path {
         Ok(Path { name: c.name.clone(), kind: c.kind, tips, tip_lamports: c.tip_lamports, tip_share: c.tip_share,
             tip_max: c.tip_max_lamports.unwrap_or(u64::MAX), cursor: AtomicUsize::new(0), budget, url, ping, headers,
             preflight: c.preflight, http, jito, tpu, udp, stats: Default::default() })
+    }
+
+    /// tests: a jito-bundle path on `jito` (e.g. `Jito::for_test` with an in-memory block engine), Jito's own tip
+    /// accounts, `max_per_sec` and `queue_ms` for its rate queue
+    #[cfg(test)]
+    pub fn test_bundle(jito: Arc<jito::Jito>, max_per_sec: Option<u32>, queue_ms: u64) -> Path {
+        Path { name: "jito-bundle".into(), kind: SendKind::JitoBundle, tips: known_tip_accounts(SendKind::JitoBundle).iter().map(|a| crate::tx::pk(a)).collect(),
+            tip_lamports: 1_000, tip_share: Some(0.7), tip_max: 100_000, cursor: AtomicUsize::new(0),
+            budget: max_per_sec.map(|n| Budget::new(n, Duration::from_millis(queue_ms))), url: "https://127.0.0.1:9".into(), ping: Ping::Tips, headers: HeaderMap::new(),
+            preflight: false, http: reqwest::Client::new(), jito: Some(jito), tpu: None, udp: None, stats: Default::default() }
     }
 
     /// kind and endpoint host (never the full URL: keys live in some)
@@ -527,51 +646,47 @@ impl Path {
     /// The copy must be one signed transaction that pays this path's minimum tip to one of its accounts with a top-level
     /// System transfer (a tip account behind a lookup table does not count: Jito forbids it), and for Helius a
     /// compute-unit price. Returns the transaction's signature.
-    pub fn check(&self, raw: &[u8]) -> Result<String> {
-        let sig = first_signature(raw).context("not a signed transaction")?;
-        let min = self.kind.min_tip();
-        if min == 0 && self.kind != SendKind::Helius { return Ok(sig); }
-        let (tx, used) = crate::tx::parse_wire(raw).context("transaction does not parse")?;
-        if used != raw.len() { bail!("{} stray bytes after the transaction", raw.len() - used); }
-        if self.kind == SendKind::Helius && tx.cu_price_micro.is_none() { bail!("no compute-unit price (Helius Sender rejects it)"); }
-        let paid: u64 = tx.ixs.iter().filter_map(|ix| {
-            if *tx.keys.get(ix.program as usize)? != SYSTEM_PROGRAM || ix.data.len() != 12 || ix.data[..4] != [2, 0, 0, 0] { return None; }
-            let to = tx.keys.get(*ix.accounts.get(1)? as usize)?;
-            self.tips.contains(to).then(|| u64::from_le_bytes(ix.data[4..12].try_into().unwrap()))
-        }).sum();
-        if paid < min { bail!("pays {paid} lamports to {}'s tip accounts; it needs at least {min}", self.name); }
-        Ok(sig)
-    }
+    pub fn check(&self, raw: &[u8]) -> Result<String> { verify_copy(raw, self.kind, &self.tips, &self.name) }
 
-    /// Check, wait for the rate budget, deliver. Never retried here: a late copy is worthless.
-    pub async fn send(&self, raw: &[u8], prio: Prio) -> Result<Reply, Refusal> {
+    /// the rate queue's waiting sends and λ (status `exec.queue_now`, `lambda_now`)
+    pub fn queue_now(&self) -> Option<(usize, Option<i64>)> { self.budget.as_ref().map(|b| (b.waiting(), b.lambda())) }
+
+    /// Check, wait for the rate budget (the queue: bands, crowding, EV), deliver. Never retried here: a late copy is
+    /// worthless. `attempt` joins the bundle's results to it. The reply carries the queue wait
+    pub async fn send(&self, raw: &[u8], prio: Prio, attempt: Option<u64>) -> Result<Reply, Refusal> {
         let sig = match self.check(raw) {
             Ok(s) => s,
-            Err(e) => { self.stats.lock().unwrap().bad_tx += 1; return Err(refuse(None, format!("{}: refused before sending: {e}", self.name))); }
+            Err(e) => { self.stats.lock().unwrap().bad_tx += 1; return Err(refuse_code("bad_tx", format!("{}: refused before sending: {e}", self.name))); }
         };
+        let mut waited = None;
         if let Some(b) = &self.budget {
-            if !b.acquire(prio).await {
-                let mut st = self.stats.lock().unwrap();
-                st.limited += 1;
-                if prio.crowded() { st.limited_crowded += 1; }
-                return Err(refuse(None, format!("{}: over its rate, not sent", self.name)));
+            match b.acquire(prio).await {
+                Ok(g) => waited = Some(g.waited),
+                Err(d) => {
+                    let mut st = self.stats.lock().unwrap();
+                    st.limited += 1;
+                    if prio.crowded() { st.limited_crowded += 1; }
+                    return Err(refuse_code(d.reason(), format!("{}: over its rate, not sent ({})", self.name, d.reason())));
+                }
             }
         }
         let t = Instant::now();
-        let r = self.deliver(raw, &sig).await;
+        let mut r = self.deliver(raw, &sig, attempt).await;
+        if let Ok(rep) = &mut r { rep.queue_wait_us = waited.map(|w| w.as_micros() as u64); }
         let mut s = self.stats.lock().unwrap();
         s.sent += 1;
         match &r { Ok(_) => { s.ok += 1; s.send_us.push(t.elapsed().as_micros() as u64); } Err(_) => s.refused += 1 }
         r
     }
 
-    async fn deliver(&self, raw: &[u8], sig: &str) -> Result<Reply, Refusal> {
+    async fn deliver(&self, raw: &[u8], sig: &str, attempt: Option<u64>) -> Result<Reply, Refusal> {
         let name = &self.name;
         let net = |e: reqwest::Error| refuse(None, net(name, e).to_string());
+        let rep = |sig: String, bundle: Option<String>, status: Option<u16>, reply: String| Reply { sig, bundle, status, reply, queue_wait_us: None };
         let answer = |status: u16, body: &[u8], bundle: Option<String>| -> Result<Reply, Refusal> {
             let reply = short(String::from_utf8_lossy(body).trim());
             match parse_reply(name, status, body) {
-                Ok(got) => Ok(Reply { sig: got, bundle, status: Some(status), reply }),
+                Ok(got) => Ok(rep(got, bundle, Some(status), reply)),
                 Err(e) => Err(refuse(Some(status), e.to_string())),
             }
         };
@@ -579,19 +694,23 @@ impl Path {
         let lenient = |status: u16, body: &[u8]| -> Result<Reply, Refusal> {
             let text = short(String::from_utf8_lossy(body).trim());
             let v: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
-            if let Some(sg) = v["data"]["signatures"][0].as_str() { return Ok(Reply { sig: sg.to_string(), bundle: None, status: Some(status), reply: text }); }
+            if let Some(sg) = v["data"]["signatures"][0].as_str() { return Ok(rep(sg.to_string(), None, Some(status), text)); }
             match parse_reply(name, status, body) {
-                Ok(got) => Ok(Reply { sig: got, bundle: None, status: Some(status), reply: text }),
+                Ok(got) => Ok(rep(got, None, Some(status), text)),
                 Err(_) if (200..300).contains(&status) && v.get("error").map_or(true, |e| e.is_null()) && v.get("success") != Some(&Value::Bool(false)) =>
-                    Ok(Reply { sig: sig.to_string(), bundle: None, status: Some(status), reply: text }),
+                    Ok(rep(sig.to_string(), None, Some(status), text)),
                 Err(e) => Err(refuse(Some(status), e.to_string())),
             }
         };
         match self.kind {
             SendKind::JitoBundle => {
                 let j = self.jito.as_ref().ok_or_else(|| refuse(None, "jito-bundle without a block engine client"))?;
-                let id = j.send_bundle(&[raw], sig).await.map_err(|e| refuse(None, format!("{name}: sendBundle: {e:#}")))?;
-                Ok(Reply { sig: sig.to_string(), bundle: Some(id.clone()), status: None, reply: id })
+                let id = j.send_bundle(&[raw], sig, attempt).await.map_err(|e| match e {
+                    jito::BundleError::AuthStale => refuse_code("jito_auth_stale", format!("{name}: sendBundle: {e}")),
+                    jito::BundleError::Refused(_) => refuse_answered(format!("{name}: sendBundle refused: {e}")),
+                    jito::BundleError::Other(_) => refuse(None, format!("{name}: sendBundle: {e}")),
+                })?;
+                Ok(rep(sig.to_string(), Some(id.clone()), None, id))
             }
             SendKind::Landx => {
                 if let Some((sock, key)) = &self.udp {
@@ -599,7 +718,7 @@ impl Path {
                     p.extend_from_slice(key);
                     p.extend_from_slice(raw);
                     sock.send(&p).await.map_err(|e| refuse(None, format!("{name}: udp: {e}")))?;
-                    Ok(Reply { sig: sig.to_string(), bundle: None, status: None, reply: "udp sent".into() })
+                    Ok(rep(sig.to_string(), None, None, "udp sent".into()))
                 } else {
                     let resp = self.http.post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
                         .body(raw.to_vec()).send().await.map_err(net)?;
@@ -610,7 +729,7 @@ impl Path {
             SendKind::Tpu => {
                 let t = self.tpu.as_ref().ok_or_else(|| refuse(None, "tpu path without its leader book"))?;
                 let to = t.send(raw).await.map_err(|e| refuse(None, format!("{e:#}")))?;
-                Ok(Reply { sig: sig.to_string(), bundle: None, status: None, reply: format!("written to leaders {}", to.join(",")) })
+                Ok(rep(sig.to_string(), None, None, format!("written to leaders {}", to.join(","))))
             }
             SendKind::NextBlock | SendKind::Bloxroute | SendKind::FlashBlock => {
                 let b64 = base64::engine::general_purpose::STANDARD.encode(raw);
@@ -695,7 +814,7 @@ impl Path {
     pub async fn probe(&self) -> String {
         if self.kind == SendKind::JitoBundle { return "skipped (the login already checked the key)".into(); }
         if self.kind == SendKind::Tpu { return "skipped (a leader sends no reply to read)".into(); }
-        match self.deliver(&[1, 2, 3, 4], "").await {
+        match self.deliver(&[1, 2, 3, 4], "", None).await {
             Ok(r) => format!("accepted junk?! reply {}", r.sig),
             Err(e) => e.msg,
         }
@@ -714,9 +833,9 @@ impl Path {
     }
 }
 
-/// One copy of a trade for one path, and the tip it carries (account, lamports)
+/// One copy of a trade for one path, the tip it carries (account, lamports), and the slot of its blockhash
 #[derive(Clone)]
-pub struct Copy { pub path: usize, pub raw: Arc<Vec<u8>>, pub tip: Option<(Pk, u64)> }
+pub struct Copy { pub path: usize, pub raw: Arc<Vec<u8>>, pub tip: Option<(Pk, u64)>, pub blockhash_slot: Option<u64> }
 
 /// One line of copies.jsonl: one copy sent (or not) to one path
 #[derive(Clone, Debug, serde::Serialize)]
@@ -737,40 +856,21 @@ pub struct Sent {
     /// the endpoint's reply, or why the copy failed
     pub reply: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] pub bundle: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Decision { Sent, Gated, GatedNoBundle, Canary }
-
-/// The Jito gate's decision for the paid copies, given whether the bundle went out and Jito's first answer by the
-/// deadline: only a would-fail on OUR profit check skips them (it means the gap is gone); every other answer, or none
-/// in time, sends them. No bundle at all (rate, refusal): no paid copies either.
-pub fn gate_decision(bundle_sent: bool, first: Option<&jito::Outcome>) -> (Decision, Option<String>) {
-    if !bundle_sent { return (Decision::GatedNoBundle, None); }
-    let code = first.filter(|o| o.outcome == "would-fail").and_then(|o| jito::error_code(o.detail.as_deref()));
-    let d = if code.as_deref() == Some(jito::PROFIT_CHECK_CODE) { Decision::Gated } else { Decision::Sent };
-    (d, code)
-}
-
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct Gate {
-    pub decision: Decision,
-    #[serde(skip_serializing_if = "Option::is_none")] pub canary_of: Option<Decision>,
-    pub waited_ms: f64,
-    pub verdict: Option<&'static str>,
-    pub code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")] pub detail: Option<String>,
+    /// (1.2, WP-05) the slot of the blockhash it was built on, how long it waited in the rate queue (µs; null: not
+    /// queued, or never got a slot), why it never left (`rate_queue_timeout`, `crowded_pool`, `bad_tx`,
+    /// `jito_auth_stale`; null: it left, or the endpoint refused it), and λ when it was queued
+    pub blockhash_slot: Option<u64>,
+    pub queue_wait_us: Option<u64>,
+    pub drop: Option<&'static str>,
+    pub lambda: Option<i64>,
 }
 
 /// Everything that happened to one fired trade
 #[derive(Clone, Debug, serde::Serialize)]
-pub struct Fired { pub id: u64, pub t_ns: u64, pub copies: Vec<Sent>, #[serde(skip_serializing_if = "Option::is_none")] pub gate: Option<Gate> }
+pub struct Fired { pub id: u64, pub t_ns: u64, pub copies: Vec<Sent> }
 
 pub struct Paths {
     pub list: Vec<Arc<Path>>,
-    gate: GateCfg,
-    skips: AtomicU64,
     /// copies.jsonl (core) and keepalive.jsonl (slow), through the recorder
     rec: crate::rec::Rec,
     rt: tokio::runtime::Handle,
@@ -780,27 +880,51 @@ impl Paths {
     /// Build every enabled path (jito-bundle: connect, authenticate, check the tip accounts against the block engine).
     /// `rec` gets copies.jsonl, keepalive.jsonl and bundles.jsonl (`Rec::off()`: nothing recorded). With `lenient`, a
     /// path that can't be built (a key missing from .env, ...) is left out and named in the returned notes instead of
-    /// failing. Call inside the runtime the sends run on (the hot one).
-    pub async fn new(cfgs: &[SendPath], gate: GateCfg, rec: crate::rec::Rec, lenient: bool) -> Result<(Arc<Paths>, Vec<String>)> {
+    /// failing; a provider key that is the payer's keypair (I-10) fails the start even then. Call inside the runtime the
+    /// sends run on (the hot one).
+    pub async fn new(cfgs: &[SendPath], opts: PathsOpts, rec: crate::rec::Rec, lenient: bool) -> Result<(Arc<Paths>, Vec<String>)> {
         let mut list = Vec::new();
         let mut notes = Vec::new();
         for c in cfgs.iter().filter(|c| c.enabled) {
-            match Path::new(c, &rec).await {
+            if let Some(p) = &opts.payer { check_key_material(c, p)?; }
+            if let Some(n) = crate::config::cleartext_check(c)? { notes.push(n); }
+            match Path::new(c, &rec, &opts).await {
                 Ok(p) => list.push(Arc::new(p)),
                 Err(e) if lenient => notes.push(format!("{}: left out: {e:#}", c.name)),
                 Err(e) => return Err(e),
             }
         }
-        Ok((Arc::new(Paths { list, gate, skips: AtomicU64::new(0), rec, rt: tokio::runtime::Handle::current() }), notes))
+        Ok((Arc::new(Paths { list, rec, rt: tokio::runtime::Handle::current() }), notes))
     }
 
     pub fn index(&self, name: &str) -> Option<usize> { self.list.iter().position(|p| p.name == name) }
 
-    /// Keep every path warm (one round trip each `every`, each one a line in keepalive.jsonl) and follow the bundle
-    /// result streams, until `stop`.
+    /// tests: paths made by hand (no network at construction), recording into `rec`
+    #[cfg(test)]
+    pub fn for_test(list: Vec<Path>, rec: crate::rec::Rec) -> Arc<Paths> {
+        Arc::new(Paths { list: list.into_iter().map(Arc::new).collect(), rec, rt: tokio::runtime::Handle::current() })
+    }
+
+    /// the first jito-bundle path (the only one a live run sends through)
+    pub fn bundle_path(&self) -> Option<usize> { self.list.iter().position(|p| p.kind == SendKind::JitoBundle) }
+
+    /// the rate queues' waiting sends, and the lowest λ of them (status `exec.queue_now`, `lambda_now`)
+    pub fn queue_now(&self) -> (usize, Option<i64>) {
+        let mut n = 0;
+        let mut l: Option<i64> = None;
+        for p in &self.list { if let Some((w, x)) = p.queue_now() { n += w; if let Some(x) = x { l = Some(l.map_or(x, |y| y.min(x))); } } }
+        (n, l)
+    }
+
+    /// Keep every path warm (one round trip each `every`, each one a line in keepalive.jsonl), follow the bundle result
+    /// streams, and keep each block engine's auth token renewed (`Jito::keep_token`), until `stop`. The jito-bundle
+    /// path's round trip is the block engine's RTT (`leaders::note_be_rtt`: attempts' `leader.be_rtt_ms`)
     pub fn start(self: &Arc<Self>, stop: Arc<AtomicBool>, every: Duration, status: impl Fn(String) + Clone + Send + Sync + 'static) {
         for p in &self.list {
-            if let Some(j) = &p.jito { self.rt.spawn(j.clone().follow_results(stop.clone(), status.clone())); }
+            if let Some(j) = &p.jito {
+                self.rt.spawn(j.clone().follow_results(stop.clone(), status.clone()));
+                self.rt.spawn(j.clone().keep_token(stop.clone()));
+            }
             if let Some(t) = &p.tpu { self.rt.spawn(t.clone().keep_warm(stop.clone())); }
         }
         let me = self.clone();
@@ -811,6 +935,7 @@ impl Paths {
                     tokio::spawn(async move {
                         let t_ns = now_ns();
                         let r = p.warm().await;
+                        note_keepalive(&p, &r);
                         let (ms, error) = match &r { Ok(Some(d)) => (Some(d.as_secs_f64() * 1e3), None), Ok(None) => return, Err(e) => (None, Some(format!("{e:#}"))) };
                         if let Some(e) = &error { status(format!("{} keep-alive: {e}", p.name)); }
                         me.rec.json(crate::rec::KEEPALIVE, json!({ "t_ns": t_ns, "path": p.name, "ms": ms, "error": error }));
@@ -823,30 +948,23 @@ impl Paths {
 
     pub fn summary(&self) -> Vec<String> { self.list.iter().map(|p| p.summary()).collect() }
 
-    /// every `canary_every`-th gate skip is sent anyway (0 = never)
-    fn canary(&self) -> bool {
-        let n = self.gate.canary_every;
-        n > 0 && (self.skips.fetch_add(1, Ordering::Relaxed) + 1) % n == 0
-    }
-
-    /// Send one trade's copies, from any thread (the work runs on the runtime). Without the gate every copy leaves at
-    /// once. With `gate` (and the gate enabled, the first copy a jito-bundle, and paid copies behind it) the bundle goes
-    /// first and the paid copies wait for Jito's first answer, up to `wait_ms` after the fire. Canaries pass
-    /// `gate: false`: they are built to fail, and the gate would stop them. Every copy is a line in copies.jsonl,
-    /// including the ones never sent and the ones never answered.
-    pub fn fire(self: &Arc<Self>, attempt: u64, copies: Vec<Copy>, prio: Prio, gate: bool) -> tokio::task::JoinHandle<Fired> {
+    /// Send one trade's copies, from any thread (the work runs on the runtime), all at once (Stage 0: one bundle copy).
+    /// Every copy is a line in copies.jsonl, including the ones never sent and the ones never answered. `net`: the send
+    /// path's network-call scope (`netcount`), carried into every copy's task
+    pub fn fire(self: &Arc<Self>, attempt: u64, copies: Vec<Copy>, prio: Prio) -> tokio::task::JoinHandle<Fired> {
         let me = self.clone();
-        self.rt.spawn(async move {
-            let (t0, t0_ns) = (Instant::now(), now_ns());
-            let blank = move |c: &Copy, p: &Path| Sent { attempt, path: p.name.clone(), sig: first_signature(&c.raw), tip_account: c.tip.map(|t| crate::tx::b58(&t.0)),
-                tip_lamports: c.tip.map_or(0, |t| t.1), t_sent: 0, t_ack: 0, ms: 0.0, ok: false, status: None, reply: None, bundle: None };
-            let go = |c: Copy| {
+        let net = crate::netcount::current();
+        self.rt.spawn(crate::netcount::in_task(net.clone(), async move {
+            let t0_ns = now_ns();
+            let hs: Vec<_> = copies.into_iter().map(|c| {
                 let p = me.list[c.path].clone();
-                tokio::spawn(async move {
-                    let mut out = blank(&c, &p);
+                tokio::spawn(crate::netcount::in_task(net.clone(), async move {
+                    let mut out = Sent { attempt, path: p.name.clone(), sig: first_signature(&c.raw), tip_account: c.tip.map(|t| crate::tx::b58(&t.0)),
+                        tip_lamports: c.tip.map_or(0, |t| t.1), t_sent: 0, t_ack: 0, ms: 0.0, ok: false, status: None, reply: None, bundle: None,
+                        blockhash_slot: c.blockhash_slot, queue_wait_us: None, drop: None, lambda: p.queue_now().and_then(|q| q.1) };
                     let t = Instant::now();
                     out.t_sent = now_ns();
-                    let r = tokio::time::timeout(SEND_TIMEOUT, p.send(&c.raw, prio)).await
+                    let r = tokio::time::timeout(SEND_TIMEOUT, p.send(&c.raw, prio, Some(attempt))).await
                         .unwrap_or_else(|_| Err(refuse(None, format!("{}: no answer in {SEND_TIMEOUT:?}", p.name))));
                     out.ms = t.elapsed().as_secs_f64() * 1e3;
                     match r {
@@ -855,41 +973,40 @@ impl Paths {
                             out.ok = true;
                             out.status = r.status;
                             out.bundle = r.bundle;
+                            out.queue_wait_us = r.queue_wait_us;
                             out.reply = Some(if out.sig.as_deref() == Some(r.sig.as_str()) { r.reply } else { format!("{} (returned signature {})", r.reply, r.sig) });
                         }
-                        Err(e) => { if e.status.is_some() { out.t_ack = now_ns(); } out.status = e.status; out.reply = Some(short(&e.msg)); if e.msg.ends_with("not sent") || e.msg.contains("refused before sending") { out.t_sent = 0; } }
+                        Err(e) => {
+                            // an answer (an HTTP status, a gRPC refusal) has its time; a timeout or a transport error has none
+                            if e.answered { out.t_ack = now_ns(); }
+                            out.status = e.status;
+                            out.reply = Some(short(&e.msg));
+                            out.drop = e.code;
+                            // never left: no send time
+                            if e.code.is_some() { out.t_sent = 0; }
+                        }
                     }
                     out
-                })
-            };
-            let gated = gate && me.gate.enabled && copies.len() > 1 && me.list.get(copies[0].path).is_some_and(|p| p.free_miss());
-            let mut out = Vec::with_capacity(copies.len());
-            let mut gate_rec = None;
-            let mut rest = copies.into_iter();
-            if gated {
-                let first = rest.next().unwrap();
-                let jito = me.list[first.path].jito.clone();
-                let s0 = match go(first).await { Ok(s) => s, Err(e) => Sent { attempt, path: "?".into(), sig: None, tip_account: None, tip_lamports: 0, t_sent: 0, t_ack: 0,
-                    ms: 0.0, ok: false, status: None, reply: Some(e.to_string()), bundle: None } };
-                let deadline = tokio::time::Instant::from_std(t0 + Duration::from_millis(me.gate.wait_ms));
-                let v = match (&s0.sig, &jito) { (Some(sig), Some(j)) if s0.ok => j.verdict(sig, deadline).await, _ => None };
-                let (decision, code) = gate_decision(s0.ok, v.as_ref());
-                let canary = decision != Decision::Sent && me.canary();
-                gate_rec = Some(Gate { decision: if canary { Decision::Canary } else { decision }, canary_of: canary.then_some(decision),
-                    waited_ms: t0.elapsed().as_secs_f64() * 1e3, verdict: v.as_ref().map(|o| o.outcome), code,
-                    detail: v.and_then(|o| o.detail).map(|d| short(&d)) });
-                out.push(s0);
-                if decision != Decision::Sent && !canary {
-                    for c in rest.by_ref() { let p = me.list[c.path].clone(); let mut x = blank(&c, &p); x.reply = Some(format!("not sent: {decision:?} by the Jito gate")); out.push(x); }
-                }
-            }
-            let hs: Vec<_> = rest.map(go).collect();
+                }))
+            }).collect();
+            let mut out = Vec::with_capacity(hs.len());
             for h in hs { if let Ok(s) = h.await { out.push(s); } }
             // one copies.jsonl line per copy, serialized on the recorder's core writer
             for c in &out { me.rec.emit(crate::rec::COPIES, crate::rec::Record::ser(c.clone())); }
-            Fired { id: attempt, t_ns: t0_ns, copies: out, gate: gate_rec }
-        })
+            Fired { id: attempt, t_ns: t0_ns, copies: out }
+        }))
     }
+}
+
+/// A keep-alive's round trip: the jito-bundle path's is the block engine's RTT, published for attempts
+/// (`leaders::note_be_rtt`; MEASUREMENT §4.37 `leader.be_rtt_ms`)
+fn note_keepalive(p: &Path, r: &Result<Option<Duration>>) {
+    if let Some(ms) = keepalive_be_rtt(p.kind, r) { crate::leaders::note_be_rtt(ms); }
+}
+
+/// the block engine's RTT (ms) a keep-alive gives: a jito-bundle path's answered round trip; None otherwise
+fn keepalive_be_rtt(kind: SendKind, r: &Result<Option<Duration>>) -> Option<f64> {
+    match (kind, r) { (SendKind::JitoBundle, Ok(Some(d))) => Some(d.as_secs_f64() * 1e3), _ => None }
 }
 
 #[cfg(test)]
@@ -986,27 +1103,92 @@ mod tests {
         assert!(first_signature(&[0u8]).is_none());
     }
 
-    /// WP-00 (F6): copies refused for the path's rate are counted, and the crowded-rank ones apart
+    fn no_opts() -> PathsOpts { PathsOpts::default() }
+
+    /// WP-00 (F6): copies refused for the path's rate are counted, and the crowded-rank ones apart; WP-05: the refusal
+    /// says why (`rate_queue_timeout`: no queue here)
     #[tokio::test]
     async fn rate_drops_are_split_by_crowded_rank() {
         let mut c = cfg("rpc", "http://127.0.0.1:1".into());
         c.max_per_sec = Some(1);
-        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
         let raw = tx([3; 32], 1, false);
         // takes the one slot of this second (its delivery fails: nothing listens there)
-        assert!(p.send(&raw, Prio { rank: RANK_OTHER, net: 1 }).await.is_err());
-        let over = |e: Result<Reply, Refusal>| e.err().is_some_and(|e| e.msg.contains("over its rate"));
-        assert!(over(p.send(&raw, Prio { rank: RANK_CROWDED, net: 9 }).await));
-        assert!(over(p.send(&raw, Prio { rank: RANK_SEED, net: 1 }).await));
+        assert!(p.send(&raw, Prio { band: 0, crowd: 0, ev: 1 }, None).await.is_err());
+        let over = |e: Result<Reply, Refusal>| e.err().is_some_and(|e| e.msg.contains("over its rate") && e.code == Some("rate_queue_timeout"));
+        assert!(over(p.send(&raw, Prio { band: 0, crowd: 1, ev: 9 }, None).await));
+        assert!(over(p.send(&raw, Prio { band: 1, crowd: 0, ev: 1 }, None).await));
         let s = p.stats.lock().unwrap();
         assert_eq!((s.limited, s.limited_crowded), (2, 1));
+    }
+
+    /// PLAN-ADDENDUM I-10 (the second half): a provider key that is a keypair may not be the payer's. Any secret value a
+    /// path names (its URL's `${...}`, the expanded URL's query values and path segments, `token_env`, `jito_auth_env`),
+    /// in base58 (64-byte keypair, 32-byte seed) or solana-keygen JSON, and the jito auth keypair file, are checked; a
+    /// dedicated keypair passes. `Paths::new` refuses the payer's even when lenient
+    #[tokio::test]
+    async fn a_provider_key_may_not_be_the_payers_keypair() {
+        let payer_key = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        let payer = payer_key.verifying_key().to_bytes();
+        let mut kp = payer_key.to_bytes().to_vec();
+        kp.extend(payer);
+        let payer_b58 = bs58::encode(&kp).into_string();
+        let other = ed25519_dalek::SigningKey::from_bytes(&[43u8; 32]);
+        let mut okp = other.to_bytes().to_vec();
+        okp.extend(other.verifying_key().to_bytes());
+        assert_eq!(keypair_pubkey(&payer_b58), Some(payer));
+        assert_eq!(keypair_pubkey(&bs58::encode([42u8; 32]).into_string()), Some(payer), "a 32-byte seed");
+        assert_eq!(keypair_pubkey(&serde_json::to_string(&kp).unwrap()), Some(payer), "solana-keygen JSON");
+        assert_eq!(keypair_pubkey("not-a-key"), None);
+        std::env::set_var("ARB_TEST_SPEED_KEY_PAYER", &payer_b58);
+        std::env::set_var("ARB_TEST_SPEED_KEY_OWN", bs58::encode(&okp).into_string());
+        let mut c = cfg("speed-landing", "https://fra.speedlanding.trade/sendTx?apikey=${ARB_TEST_SPEED_KEY_PAYER}".into());
+        let e = check_key_material(&c, &payer).unwrap_err().to_string();
+        assert!(e.contains("payer's keypair") && !e.contains(&payer_b58), "named, never printed: {e}");
+        c.url = "https://fra.speedlanding.trade/sendTx?apikey=${ARB_TEST_SPEED_KEY_OWN}".into();
+        assert!(check_key_material(&c, &payer).unwrap() >= 1, "a dedicated keypair");
+        // the payer's key in a header (token_env), or literally in the URL
+        let mut h = cfg("node-one", "https://fra.node1.me/v2".into());
+        h.token_env = Some("ARB_TEST_SPEED_KEY_PAYER".into());
+        assert!(check_key_material(&h, &payer).is_err());
+        let lit = cfg("speed-landing", format!("https://fra.speedlanding.trade/sendTx?apikey={payer_b58}"));
+        assert!(check_key_material(&lit, &payer).is_err());
+        // the jito auth keypair file
+        let d = std::env::temp_dir().join(format!("arbx-jito-auth-{}-{}", std::process::id(), now_ns()));
+        std::fs::write(&d, serde_json::to_string(&kp).unwrap()).unwrap();
+        let mut j = cfg("jito-bundle", "https://127.0.0.1:1".into());
+        j.auth_keypair = Some(d.display().to_string());
+        assert!(check_key_material(&j, &payer).unwrap_err().to_string().contains("auth keypair is the payer's"));
+        std::fs::write(&d, serde_json::to_string(&okp).unwrap()).unwrap();
+        assert!(check_key_material(&j, &payer).is_ok());
+        let _ = std::fs::remove_file(&d);
+        // lenient or not, the start refuses
+        let bad = cfg("speed-landing", "https://127.0.0.1:1/sendTx?apikey=${ARB_TEST_SPEED_KEY_PAYER}".into());
+        let r = Paths::new(&[bad], PathsOpts { queue_ms: 0, payer: Some(payer) }, crate::rec::Rec::off(), true).await;
+        assert!(r.err().is_some_and(|e| e.to_string().contains("payer's keypair")));
+        // and the run-time I-10 check: a `${...}` that expands into plain http://
+        std::env::set_var("ARB_TEST_WHOLE_URL", "http://127.0.0.1:1/?api-key=abc");
+        let whole = cfg("rpc", "${ARB_TEST_WHOLE_URL}".into());
+        let e = Path::new(&whole, &crate::rec::Rec::off(), &no_opts()).await.err().expect("refused").to_string();
+        assert!(e.contains("plain http://") && e.contains("I-10") && !e.contains("abc"), "{e}");
+    }
+
+    /// the jito-bundle path's keep-alive round trip is the block engine's RTT, published for attempts (`be_rtt_ms`;
+    /// `Paths::start` calls `note_keepalive`, which publishes this value with `leaders::note_be_rtt`)
+    #[test]
+    fn the_bundle_paths_keepalive_is_the_block_engines_rtt() {
+        let ok = Ok(Some(Duration::from_micros(41_500)));
+        assert_eq!(keepalive_be_rtt(SendKind::JitoBundle, &ok), Some(41.5));
+        assert_eq!(keepalive_be_rtt(SendKind::Helius, &ok), None, "another kind's round trip is not the block engine's");
+        assert_eq!(keepalive_be_rtt(SendKind::JitoBundle, &Ok(None)), None, "skipped (the budget was full)");
+        assert_eq!(keepalive_be_rtt(SendKind::JitoBundle, &Err(anyhow::anyhow!("down"))), None);
     }
 
     #[tokio::test]
     async fn tips_rotate_and_scale() {
         let mut c = cfg("helius", "http://127.0.0.1:1/fast".into());
         c.tip_lamports = 5_000;
-        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
         let (a, l) = p.tip(1_000_000).unwrap();
         let (b, _) = p.tip(0).unwrap();
         assert_eq!(l, 5_000);
@@ -1024,7 +1206,7 @@ mod tests {
     async fn refuses_a_copy_that_does_not_pay_this_path() {
         let mut c = cfg("helius", "http://127.0.0.1:1/fast".into());
         c.tip_lamports = 5_000;
-        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
         let helius = crate::tx::pk(known_tip_accounts(SendKind::Helius)[3]);
         assert!(p.check(&tx(helius, 5_000, true)).is_ok());
         assert!(p.check(&tx(helius, 4_999, true)).is_err(), "below the minimum");
@@ -1039,9 +1221,9 @@ mod tests {
         let (base, h) = server(200, reply).await;
         let mut c = cfg("helius", format!("{base}/fast?swqos_only=true"));
         c.tip_lamports = 5_000;
-        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
         let raw = tx(crate::tx::pk(known_tip_accounts(SendKind::Helius)[0]), 5_000, true);
-        let r = p.send(&raw, Prio::default()).await.unwrap();
+        let r = p.send(&raw, Prio::default(), None).await.unwrap();
         assert_eq!(r.sig, sig58());
         let (head, body) = h.await.unwrap();
         assert!(head.starts_with("POST /fast?swqos_only=true "), "{head}");
@@ -1062,9 +1244,9 @@ mod tests {
         let (base, h) = server(200, reply).await;
         let mut c = cfg("helius", format!("{base}/fast"));
         c.tip_lamports = 5_000;
-        let (ps, _) = Paths::new(&[c], GateCfg::default(), rec.clone(), false).await.unwrap();
+        let (ps, _) = Paths::new(&[c], no_opts(), rec.clone(), false).await.unwrap();
         let raw = Arc::new(tx(crate::tx::pk(known_tip_accounts(SendKind::Helius)[0]), 5_000, true));
-        let fired = ps.fire(42, vec![Copy { path: 0, raw, tip: None }], Prio::default(), false).await.unwrap();
+        let fired = ps.fire(42, vec![Copy { path: 0, raw, tip: None, blockhash_slot: Some(77) }], Prio::default()).await.unwrap();
         let _ = h.await;
         assert!(fired.copies[0].ok);
         rec.close();
@@ -1073,6 +1255,8 @@ mod tests {
         assert_eq!((v[0]["attempt"].as_u64(), v[0]["path"].as_str(), v[0]["sig"].as_str(), v[0]["ok"].as_bool(), v[0]["status"].as_u64()),
             (Some(42), Some("t"), Some(sig58().as_str()), Some(true), Some(200)));
         assert!(v[0]["t_sent"].as_u64().unwrap() > 0 && v[0]["t_ack"].as_u64().unwrap() >= v[0]["t_sent"].as_u64().unwrap());
+        // copies 1.2 (WP-05): the blockhash's slot; not queued (no rate budget), nothing dropped
+        assert_eq!((v[0]["blockhash_slot"].as_u64(), v[0]["queue_wait_us"].is_null(), v[0]["drop"].is_null()), (Some(77), true, true));
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1085,9 +1269,13 @@ mod tests {
         let mut c = cfg("haan", format!("{base}/api/v1/transactions"));
         c.token_env = Some("ARB_TEST_HAAN_KEY".into());
         c.jito_auth_env = Some("ARB_TEST_JITO_UUID".into());
-        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
+        // review WP-05 #5: header keys over plain http are refused at the start too, unless the exception is recorded
+        let e = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.err().expect("refused").to_string();
+        assert!(e.contains("plain http://") && e.contains("I-10") && !e.contains("k1") && !e.contains("u1"), "{e}");
+        c.no_tls_endpoint = Some("the test server has no TLS".into());
+        let p = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
         let raw = tx([3; 32], 0, false);
-        assert_eq!(p.send(&raw, Prio::default()).await.unwrap().sig, sig58());
+        assert_eq!(p.send(&raw, Prio::default(), None).await.unwrap().sig, sig58());
         let (head, body) = h.await.unwrap();
         let head = head.to_ascii_lowercase();
         assert!(head.contains("authorization: bearer k1") && head.contains("x-jito-auth: u1") && head.contains("content-type: application/octet-stream"), "{head}");
@@ -1100,9 +1288,10 @@ mod tests {
         std::env::set_var("ARB_TEST_BOLT_KEY", "b1");
         let mut c = cfg("bolt", format!("{base}/api/v1/sendRawTransaction"));
         c.token_env = Some("ARB_TEST_BOLT_KEY".into());
-        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
+        c.no_tls_endpoint = Some("the test server has no TLS".into());
+        let p = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
         let raw = tx(crate::tx::pk(known_tip_accounts(SendKind::Bolt)[0]), 1_000_000, false);
-        let e = p.send(&raw, Prio::default()).await.unwrap_err().to_string();
+        let e = p.send(&raw, Prio::default(), None).await.unwrap_err().to_string();
         assert!(e.contains("missing tip"), "{e}");
         assert_eq!(p.stats.lock().unwrap().refused, 1);
     }
@@ -1110,11 +1299,12 @@ mod tests {
     #[tokio::test]
     async fn errors_never_carry_the_url() {
         std::env::set_var("ARB_TEST_IRIS_KEY", "SECRETKEY");
-        let mut c = cfg("iris", "http://127.0.0.1:1/irisb?api-key=${ARB_TEST_IRIS_KEY}&method=sendTransaction".into());
+        // (https: I-10 refuses a secret over plain http)
+        let mut c = cfg("iris", "https://127.0.0.1:1/irisb?api-key=${ARB_TEST_IRIS_KEY}&method=sendTransaction".into());
         c.tip_lamports = 10_000;
-        let p = Path::new(&c, &crate::rec::Rec::off()).await.unwrap();
+        let p = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
         let raw = tx(crate::tx::pk(known_tip_accounts(SendKind::Iris)[0]), 10_000, false);
-        let e = format!("{:#}", p.send(&raw, Prio::default()).await.unwrap_err());
+        let e = format!("{:#}", p.send(&raw, Prio::default(), None).await.unwrap_err());
         assert!(!e.contains("SECRETKEY"), "{e}");
         let w = format!("{:#}", p.warm().await.unwrap_err());
         assert!(!w.contains("SECRETKEY") && !p.describe().contains("SECRETKEY"), "{w}");
@@ -1130,15 +1320,4 @@ mod tests {
         assert!(parse_reply("x", 200, b"ok").is_err());
     }
 
-    #[test]
-    fn gate() {
-        let o = |outcome, detail: &str| jito::Outcome { bundle: "b".into(), outcome, slot: None, index: None, bid: None, detail: Some(detail.into()) };
-        let profit = "A transaction in the bundle failed to execute: [signature=48W3, error=Error processing Instruction 2: custom program error: 0x4e580002]";
-        assert_eq!(gate_decision(true, Some(&o("would-fail", profit))), (Decision::Gated, Some("0x4e580002".into())));
-        assert_eq!(gate_decision(true, Some(&o("would-fail", "custom program error: 0x1783"))).0, Decision::Sent);
-        assert_eq!(gate_decision(true, Some(&o("would-fail", "error=Blockhash not found]"))).0, Decision::Sent);
-        assert_eq!(gate_decision(true, Some(&o("accepted", ""))).0, Decision::Sent);
-        assert_eq!(gate_decision(true, None), (Decision::Sent, None));
-        assert_eq!(gate_decision(false, None).0, Decision::GatedNoBundle);
-    }
 }

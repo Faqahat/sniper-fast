@@ -1,7 +1,7 @@
 //! Stop reasons and run control (PLAN WP-01 items 5-6; MEASUREMENT §4.3 stop.json, §4.7 control.jsonl, A.5).
 //!
-//! - **SendGate**: an atomic mode (`live`, `shadow`, `stopped`) with a reason, read by `Exec::wants_send` on every
-//!   decision. `pause-sending` puts it in shadow until `resume-sending`; `shadow` (and `--shadow`, and a route program
+//! - **SendGate**: an atomic mode (`live`, `shadow`, `stopped`) with a reason, read by the executor's send checks
+//!   (`exec::send_checks`) on every decision. `pause-sending` puts it in shadow until `resume-sending`; `shadow` (and `--shadow`, and a route program
 //!   whose hash differs from the config's) is sticky for the rest of the segment; a stop request closes it for good.
 //!   Pausing a gate that is already shadow for the rest of the segment is accepted and changes nothing (review F3).
 //! - **Stopper**: the stop flag every loop polls, and the `StopReason` that is set once (the first request wins).

@@ -22,8 +22,9 @@
 //!   `"shadow"`: `lag_slo_breach_minutes` breaches in a row put the SendGate in shadow (`state_slo`), and
 //!   `slo_recover_minutes` good minutes in a row bring it back (F32).
 //!
-//! [`HealthFlags`] is the part shared with the executor (`Exec::wants_send` refuses unless `ready`): the engine sets it
-//! on its own thread before each send check, so a replay's checks see the same values (WP-05's `send_checks` takes it).
+//! [`HealthFlags`] is the part shared with the executor (its send checks, `exec::send_checks`, refuse unless `ready`):
+//! the engine sets it on its own thread before each send check, so a replay's checks see the same values. An executor
+//! is not ready until an engine installs its flags (fail closed: WP-04 review #8).
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
 
 /// why the gate is shut (HealthFlags reason). `Resync` (review WP-04 #1): the state stream (re)connected and the re-read
@@ -40,13 +41,14 @@ impl Shut {
     fn from_u8(x: u8) -> Shut { match x { 0 => Shut::Ready, 1 => Shut::Warmup, 3 => Shut::Resync, _ => Shut::StateUnavailable } }
 }
 
-/// The engine's health as the executor reads it (`Exec::wants_send`)
+/// The engine's health as the executor's send checks read it (`exec::SendInputs::shut`)
 pub struct HealthFlags { ready: AtomicBool, why: AtomicU8 }
 
 impl Default for HealthFlags { fn default() -> Self { HealthFlags { ready: AtomicBool::new(false), why: AtomicU8::new(Shut::Warmup as u8) } } }
 
 impl HealthFlags {
-    /// an executor without an engine (tools, tests): always ready
+    /// always ready: for a tool or a test that installs it on purpose (an executor never defaults to it: WP-05 fails
+    /// closed, `HealthFlags::default()` is warm-up)
     pub fn always_ready() -> HealthFlags { HealthFlags { ready: AtomicBool::new(true), why: AtomicU8::new(Shut::Ready as u8) } }
     #[inline]
     pub fn ready(&self) -> bool { self.ready.load(Relaxed) }

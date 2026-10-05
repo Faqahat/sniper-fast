@@ -69,12 +69,11 @@ enum Cmd {
     Wallet { #[arg(long, default_value = "arb.toml")] config: PathBuf },
     /// STEP 2 without feeds: build one real round trip per pool pair (pools as they are now) and simulate it, unsigned.
     /// Nothing is sent. Writes <out_dir>/simcheck-<time>/sims.jsonl and prints what the chain said, by venue pair.
+    /// (WP-05: the built-to-fail canaries are gone; a canary is a small live run, `arbx run --canary`)
     Simcheck {
         #[arg(long, default_value = "arb.toml")] config: PathBuf,
         #[arg(long, default_value_t = 40)] max: usize,
         #[arg(long, default_value_t = 0.01)] size_sol: f64,
-        /// then send this many canaries on probe routes (needs [canary] enabled too): the whole live path end to end
-        #[arg(long, default_value_t = 0)] canaries: u32,
     },
     /// Run the engine (shadow mode: decide and record, never send). Writes meta.json (provenance) before the feeds
     /// start and stop.json (why it stopped) at the end. Exit code: 0 deadline, 10 operator stop (signal, control
@@ -85,8 +84,11 @@ enum Cmd {
         #[arg(long)] name: Option<String>,
         /// only these feeds (comma-separated)
         #[arg(long)] only: Option<String>,
-        /// send the canaries `[canary]` describes (real transactions built to fail our profit check; fees only)
+        /// a canary run: live bundles under `[canary]`'s caps (at most 0.2 SOL a trade); needs `[canary] enabled = true` too
         #[arg(long)] canary: bool,
+        /// go-live gate item 4: build and sign every would-send bundle with a throwaway key made in memory (never the
+        /// trading keystore), record it in full (attempts.jsonl `dry_run`) and never send it; no send path is built
+        #[arg(long)] dry_run: bool,
         /// trade for real (`[live]` limits); needs mode = "live" in the config too
         #[arg(long)] live: bool,
         /// run in shadow whatever the config's mode (meta.json `run.forced_shadow` and `overrides`; the SendGate is
@@ -188,6 +190,9 @@ fn utc_stamp() -> String {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Check { config } => {
+            // the .env beside the config, as `run` loads it: the I-10 key-material check reads the keys it names (never
+            // printing them)
+            load_env(&config);
             let (cfg, raw) = config::Config::load_raw(&config)?;
             println!("config_version {}, sha256 {}, normalized {}", config::CONFIG_VERSION, provenance::sha256_hex(&raw), cfg.normalized_sha256());
             println!("mode {}, wallet {}, {} feeds, {} send paths", cfg.mode, cfg.wallet, cfg.feeds.len(), cfg.sends.len());
@@ -216,23 +221,30 @@ fn main() -> Result<()> {
             println!("chain fetch {}: after {} ms, backfill rps {}, backlog {}, sample every {} s, blockhash poll {} ms, sigs every {} s, tx version {}; roles {}", if cf.enabled { "on" } else { "off" },
                 cf.after_ms, cf.rps.fixed().map_or("auto".to_string(), |r| format!("{r}/s")), cf.max_backlog, cf.sample_every_s, cf.blockhash_poll_ms, cf.sigs_every_s, cf.max_tx_version,
                 rpc::Role::FETCH.iter().map(|r| format!("{}={}", r.as_str(), cf.providers_for(r.as_str(), &all).join("+"))).collect::<Vec<_>>().join(" "));
+            let payer = bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok());
+            let mut keys_checked = 0;
             for s in &cfg.sends {
                 let tip = match (s.tip_share, s.tip_lamports) { (Some(x), l) => format!("{:.0}% of the edge, {l}..{} lamports", x * 100.0, s.tip_max_lamports.unwrap_or(u64::MAX)), (None, 0) => "no tip".into(), (None, l) => format!("tip {l} lamports") };
                 let rate = s.max_per_sec.map(|n| format!(", max {n}/s")).unwrap_or_default();
                 println!("  send {:<20} {:?} {tip}{rate}{}", s.name, s.kind, if s.enabled { "" } else { " (disabled)" });
+                // PLAN-ADDENDUM I-10: a secret over plain http only with a recorded exception; no provider key is the payer's
+                if s.enabled { if let Some(note) = config::cleartext_check(s)? { println!("    I-10 exception: {note}"); } }
+                if let Some(p) = &payer { keys_checked += send::check_key_material(s, p)?; }
             }
-            if cfg.gate.enabled { println!("  jito gate on: paid copies wait up to {} ms for the bundle's first result (canary every {})", cfg.gate.wait_ms, cfg.gate.canary_every); }
+            println!("I-10: no secret over plain http or udp (in the URL or a header) without a recorded exception (above); {keys_checked} values a provider key could be checked (URL variables and parts, header keys, block engine keypairs): none is the payer's keypair");
             let on: Vec<&str> = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.name.as_str()).collect();
-            println!("enabled send paths: {}", if on.is_empty() { "none".to_string() } else { on.join(", ") });
-            let (s, l) = (&cfg.strategy, &cfg.live);
-            println!("safety: decoded swaps are hints only, skip_failing_signers {}, state_triggers {}; live: max {} SOL a trade, {} new token accounts, sim_gate {}, bundle_mix {} (tpu_max_expected {}), big band >= {} lamports at {}/s, crowded pools {}",
-                s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_new_token_accounts, l.sim_gate, l.bundle_mix,
-                l.tpu_max_expected_lamports, l.big_band_min_expected_lamports, l.big_band_max_per_sec,
-                if l.crowded_pools_file.is_empty() { "none".to_string() } else { l.crowded_pools_file.clone() });
-            if l.crowded_skip_min_expected_lamports > 0 { println!("  crowded pools not sent from {} lamports expected", l.crowded_skip_min_expected_lamports); }
+            println!("enabled send paths: {}{}", if on.is_empty() { "none".to_string() } else { on.join(", ") },
+                if config::bundle_only(&cfg.sends).is_ok() { " (bundle-only: a live or canary run may start)" } else { " (NOT bundle-only: live and canary runs refuse to start)" });
+            let (s, l, sp) = (&cfg.strategy, &cfg.live, &cfg.send_policy);
+            println!("safety: decoded swaps are hints only, skip_failing_signers {}, state_triggers {}; live: max {} SOL a trade, {} new token accounts, stop after {} lamports of failed fees; canary: {} SOL, {} attempts",
+                s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_new_token_accounts, l.max_failed_fees_lamports, cfg.canary.size_sol, cfg.canary.count);
+            println!("send policy (WP-05): live and canary sends are one-transaction bundles, fail closed; blockhash {} at most {} slots old; skip leaders {:?}; in-flight hold {} slots; queue {} ms; >=1M bands at {}/s; crowding {:?} over {} h, crowded list {}; on-chain margin max({}, {} x net); dry run simulate {}",
+                sp.blockhash_commitment, sp.max_blockhash_age_slots, sp.skip_leader_kinds, sp.inflight_hold_slots, sp.queue_ms, sp.big_band_max_per_sec, sp.crowding_buckets,
+                sp.crowding_window_h, if sp.crowded_pools_file.is_empty() { "none".to_string() } else { sp.crowded_pools_file.clone() }, sp.margin_floor, sp.margin_share, cfg.dry_run.simulate);
+            if sp.crowded_skip_min_expected_lamports > 0 { println!("  crowded pools not sent from {} lamports expected", sp.crowded_skip_min_expected_lamports); }
             // review N3: the crowded list, where this machine has it (the configured path, or the repo's data/ copy)
-            if !l.crowded_pools_file.is_empty() {
-                let p = Path::new(&l.crowded_pools_file);
+            if !sp.crowded_pools_file.is_empty() {
+                let p = Path::new(&sp.crowded_pools_file);
                 let repo_copy = config.parent().and_then(|d| d.parent()).zip(p.file_name()).map(|(d, f)| d.join("data").join(f));
                 match std::iter::once(p.to_path_buf()).chain(repo_copy).find(|c| c.is_file()) {
                     Some(c) => println!("  crowded list {}: {} pools", c.display(), exec::load_crowded_pools(&c.to_string_lossy())?.len()),
@@ -284,8 +296,8 @@ fn main() -> Result<()> {
                 Ok(())
             })
         }
-        Cmd::Run { config, minutes, name, only, canary, live, shadow, budget_left, campaign_dir, env_file } => {
-            let a = RunArgs { config, minutes, name, only, canary, live, ov: Overrides { shadow, budget_left }, campaign_dir, env_file };
+        Cmd::Run { config, minutes, name, only, canary, dry_run, live, shadow, budget_left, campaign_dir, env_file } => {
+            let a = RunArgs { config, minutes, name, only, canary, dry_run, live, ov: Overrides { shadow, budget_left }, campaign_dir, env_file };
             let sess = control::Session::new();
             control::install_panic_hook(sess.clone());
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&a, &sess)));
@@ -317,7 +329,7 @@ fn main() -> Result<()> {
             if r["accepted"].as_bool() != Some(true) { std::process::exit(2); }
             Ok(())
         }
-        Cmd::Simcheck { config, max, size_sol, canaries } => simcheck(&config, max, size_sol, canaries),
+        Cmd::Simcheck { config, max, size_sol } => simcheck(&config, max, size_sol),
         Cmd::SignerStats { action, into, runs } => {
             anyhow::ensure!(action == "merge", "signer-stats: the only action is `merge`");
             anyhow::ensure!(!runs.is_empty(), "signer-stats merge: name the run directories");
@@ -523,12 +535,10 @@ fn grpc_probe(config: &Path, seconds: f64, out: Option<PathBuf>, only: Option<St
     Ok(())
 }
 
-fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<()> {
+fn simcheck(config: &Path, max: usize, size_sol: f64) -> Result<()> {
     load_env(config);
     let mut cfg = config::Config::load(config)?;
     cfg.sim.enabled = true;
-    if canaries > 0 && !cfg.canary.enabled { anyhow::bail!("--canaries needs [canary] enabled = true in the config too"); }
-    let key = if canaries > 0 { Some((exec::Kind::Canary, wallet::load_cfg(&cfg)?)) } else { None };
     let name = format!("simcheck-{}", utc_stamp());
     let dir = PathBuf::from(&cfg.out_dir).join(&name);
     let rec = tool_recorder(&dir, &name)?;
@@ -550,15 +560,10 @@ fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<(
     let arr: Vec<tx::Pk> = store.dlmm_arrays.values().flatten().map(|x| x.1).collect();
     fetch(&mut store, &arr)?;
     println!("booted: {}", reg.summary());
-    let (tx, rx) = crossbeam_channel::unbounded::<feeds::Event>();
+    let (tx, _rx) = crossbeam_channel::unbounded::<feeds::Event>();
     let (wtx, _) = tokio::sync::watch::channel(Vec::new());
-    let paths = if canaries > 0 {
-        let (p, notes) = rt.block_on(send::Paths::new(&cfg.sends, cfg.gate.clone(), rec.clone(), true))?;
-        for n in notes { println!("send path {n}"); }
-        p.start(Arc::new(AtomicBool::new(false)), std::time::Duration::from_secs(30), |m: String| println!("  {m}"));
-        Some(p)
-    } else { None };
-    let (x, notes) = rt.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), rec.clone(), tx.clone(), vec![], key, reg_mints(&reg)))?;
+    // a shadow executor: it builds and simulates, holds no key and no send path
+    let (x, notes) = rt.block_on(exec::Exec::new(&cfg, &rpc, None, rec.clone(), tx.clone(), vec![], exec::Mode::Shadow, None, reg_mints(&reg)))?;
     for n in notes { println!("exec: {n}"); }
     let mut eng = engine::Engine::new(Arc::new(reg), store, cfg.strategy.clone(), vec![], 0, Arc::new(engine::interest(&engine_dummy_registry(), None)), rec.clone(), rpc.clone(),
         rt.handle().clone(), tx, wtx)?;
@@ -569,43 +574,17 @@ fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<(
     std::thread::sleep(std::time::Duration::from_secs(8));
     rec.sync();
     let mut by: std::collections::BTreeMap<String, (u32, u32, std::collections::BTreeMap<String, u32>)> = Default::default();
-    let mut good: Vec<(String, String)> = Vec::new();
     for v in rec::read_jsonl(&dir, "sims")? {
         let key = format!("{} -> {}", v["buy_venue"].as_str().unwrap_or("?"), v["sell_venue"].as_str().unwrap_or("?"));
         let e = by.entry(key).or_default();
         e.0 += 1;
-        if v["encoding_ok"].as_bool() == Some(true) { e.1 += 1; good.push((v["buy_pool"].as_str().unwrap_or("").into(), v["sell_pool"].as_str().unwrap_or("").into())); }
+        if v["encoding_ok"].as_bool() == Some(true) { e.1 += 1; }
         let why = v["build_error"].as_str().map(|b| format!("build: {}", b.split('(').next().unwrap_or(b)))
             .or_else(|| v["sim_error"].as_str().map(|e| format!("rpc: {}", &e[..e.len().min(60)])))
             .unwrap_or_else(|| format!("{} {}", v["code"].as_str().unwrap_or(""), v["meaning"].as_str().unwrap_or("")));
         *e.2.entry(why).or_default() += 1;
     }
     for (k, (n, ok, why)) in &by { println!("{k:<22} {ok}/{n} encoding ok   {why:?}"); }
-    // canaries on routes whose simulation ran every leg: refresh both pools, build, sign, send to every path, settle
-    let mut sent = 0;
-    for r in routes.iter().filter(|r| good.contains(&(tx::b58(&r.buy.pool), tx::b58(&r.sell.pool)))) {
-        if sent >= canaries { break; }
-        let keys = eng.route_accounts(r);
-        fetch(&mut eng.store, &keys)?;
-        let Some(fresh) = eng.refresh_route(r) else { continue };
-        let x = eng.exec.as_mut().unwrap();
-        if x.wants_send().is_none() { println!("canary: not allowed now ({})", x.status()); break; }
-        println!("canary {sent}: {:?} -> {:?}, {} lamports ...", fresh.buy.venue, fresh.sell.venue, fresh.size);
-        x.send(fresh);
-        sent += 1;
-        match rx.recv_timeout(std::time::Duration::from_secs(cfg.canary.settle_s + 40)) {
-            Ok(feeds::Event::Settled(s)) => { x.on_settled(*s, &|_| None); }
-            Ok(_) | Err(_) => { println!("canary {}: not settled in time", sent - 1); break; }
-        }
-        rec.sync();
-        if let Some(v) = rec::read_jsonl(&dir, "outcomes")?.last() {
-            println!("  landed via {}  slot {}  {} {}  fee {}  copies: {}", v["landed"], v["slot"], v["code"], v["meaning"], v["fee_lamports"],
-                v["copies"].as_array().map(|a| a.iter().map(|c| format!("{}={}{}", c["path"].as_str().unwrap_or("?"), if c["accepted"].as_bool() == Some(true) { "accepted" } else { "REFUSED" },
-                    c["status"].as_u64().map(|s| format!("({s})")).unwrap_or_default())).collect::<Vec<_>>().join(" ")).unwrap_or_default());
-            println!("  jito: {}", v["jito"]);
-        }
-        std::thread::sleep(std::time::Duration::from_secs(2));
-    }
     rec.close();
     println!("written to {}", dir.display());
     Ok(())
@@ -631,6 +610,9 @@ fn senders(config: &Path, rounds: u32, only: Option<String>, raw: Option<PathBuf
     }
     let enabled: Vec<config::SendPath> = cfg.sends.iter().filter(|s| s.enabled).cloned().collect();
     if enabled.is_empty() { anyhow::bail!("no enabled send path"); }
+    // PLAN-ADDENDUM I-10, for the paths --only enabled too (the config's load checked the ones enabled in the file)
+    for s in &enabled { if let Some(n) = config::cleartext_check(s)? { println!("{n}"); } }
+    let opts = send::PathsOpts { queue_ms: cfg.send_policy.queue_ms, payer: bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok()) };
     let raw = raw.map(|p| -> Result<Vec<u8>> {
         use base64::Engine as _;
         let text = std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
@@ -641,7 +623,7 @@ fn senders(config: &Path, rounds: u32, only: Option<String>, raw: Option<PathBuf
         // each path on its own, so one that fails does not hide the others
         let mut bad = 0;
         for s in &enabled {
-            match send::Paths::new(std::slice::from_ref(s), config::GateCfg::default(), rec::Rec::off(), false).await.map(|x| x.0) {
+            match send::Paths::new(std::slice::from_ref(s), opts.clone(), rec::Rec::off(), false).await.map(|x| x.0) {
                 Err(e) => { bad += 1; println!("{:<18} FAILED: {e:#}", s.name); }
                 Ok(ps) => {
                     let p = &ps.list[0];
@@ -669,12 +651,11 @@ fn senders(config: &Path, rounds: u32, only: Option<String>, raw: Option<PathBuf
         let dir = PathBuf::from(&cfg.out_dir).join(&name);
         let rec = tool_recorder(&dir, &name)?;
         let _rec_guard = RecGuard(rec.clone());
-        let (ps, _) = send::Paths::new(&enabled, cfg.gate.clone(), rec.clone(), false).await?;
+        let (ps, _) = send::Paths::new(&enabled, opts, rec.clone(), false).await?;
         let stop = Arc::new(AtomicBool::new(false));
         ps.start(stop.clone(), std::time::Duration::from_secs(30), |m: String| println!("  {m}"));
-        let copies = (0..ps.list.len()).map(|i| send::Copy { path: i, raw: Arc::new(raw.clone()), tip: None }).collect();
-        let fired = ps.fire(0, copies, send::Prio::default(), true).await?;
-        if let Some(g) = &fired.gate { println!("gate: {}", serde_json::to_string(g)?); }
+        let copies = (0..ps.list.len()).map(|i| send::Copy { path: i, raw: Arc::new(raw.clone()), tip: None, blockhash_slot: None }).collect();
+        let fired = ps.fire(0, copies, send::Prio::default()).await?;
         for c in &fired.copies {
             println!("  {:<16} {:>7.1} ms  {} {}", c.path, c.ms, if c.ok { "ok" } else { "REFUSED" }, c.reply.as_deref().unwrap_or("-"));
         }
@@ -760,23 +741,41 @@ impl Overrides {
 /// meta.json `limits` (MEASUREMENT §4.2, v1.1): the effective safety limits of this run
 fn limits_json(cfg: &config::Config, live: bool, canary: bool) -> serde_json::Value {
     let l = &cfg.live;
+    // a canary trades at most its own size (never above [live]'s): the cap the executor applies (review WP-05 #17)
+    let (max_size, src) = if canary && !live { (cfg.canary.size_sol.min(l.max_size_sol), "canary") } else { (l.max_size_sol, "config") };
     serde_json::json!({
         "sending": if live { "live" } else if canary { "canary" } else { "none" },
-        "max_size_sol": l.max_size_sol, "max_size_src": "config", "sim_max_size_sol": cfg.exec.max_size_sol,
+        "max_size_sol": max_size, "max_size_src": src, "sim_max_size_sol": cfg.exec.max_size_sol,
         "max_failed_fees_lamports": l.max_failed_fees_lamports, "max_new_token_accounts": l.max_new_token_accounts,
         "decoded_sends": false, "state_triggers": cfg.strategy.state_triggers,
         // WP-04: prices only committed, complete, canonical state; nothing priced or sent while the state is unavailable
         "state_gate": { "boot_timeout_s": cfg.state.boot_timeout_s, "max_update_age_ms": cfg.state.max_update_age_ms },
-        "big_band_min_expected_lamports": l.big_band_min_expected_lamports, "big_band_max_per_sec": l.big_band_max_per_sec,
-        "crowded_pools_file": l.crowded_pools_file, "crowded_skip_min_expected_lamports": l.crowded_skip_min_expected_lamports,
+        // WP-05: the ≥1M bands' rate and the crowding policy moved to [send_policy]; bundle-only
+        // (the bands are over the expected edge, gross − the base fee: src/bands.rs)
+        "big_band_min_expected_lamports": arbx::bands::EDGES[arbx::bands::BIG_FROM as usize - 1], "big_band_max_per_sec": cfg.send_policy.big_band_max_per_sec,
+        "crowded_pools_file": cfg.send_policy.crowded_pools_file, "crowded_skip_min_expected_lamports": cfg.send_policy.crowded_skip_min_expected_lamports,
+        "bundle_only": config::bundle_only(&cfg.sends).is_ok(), "canary_max_size_sol": cfg.canary.size_sol,
+        "max_blockhash_age_slots": cfg.send_policy.max_blockhash_age_slots, "skip_leader_kinds": cfg.send_policy.skip_leader_kinds,
+        "margin_floor": cfg.send_policy.margin_floor, "margin_share": cfg.send_policy.margin_share,
         // WP-02: always on
         "record": true,
     })
 }
 
+/// What a run may send with (go-live gate item 4): the executor's mode, its key, and whether the run builds its send
+/// paths. A dry run builds none (nothing in it can transmit) and signs with a throwaway key made in memory, never
+/// reading the trading keystore; only a live or canary run reads it (`load_key`); a shadow run holds no key and builds
+/// the enabled paths for their keep-alives (a shadow executor is handed none)
+fn send_setup(live: bool, canary: bool, dry_run: bool, any_send: bool, load_key: impl FnOnce() -> Result<ed25519_dalek::SigningKey>)
+    -> Result<(exec::Mode, Option<ed25519_dalek::SigningKey>, bool)> {
+    let mode = if live { exec::Mode::Live } else if canary { exec::Mode::Canary } else if dry_run { exec::Mode::DryRun } else { exec::Mode::Shadow };
+    let key = match mode { exec::Mode::Live | exec::Mode::Canary => Some(load_key()?), exec::Mode::DryRun => Some(exec::ephemeral_key()?), exec::Mode::Shadow => None };
+    Ok((mode, key, any_send && mode != exec::Mode::DryRun))
+}
+
 /// `arbx run`'s arguments
-struct RunArgs { config: PathBuf, minutes: Option<f64>, name: Option<String>, only: Option<String>, canary: bool, live: bool, ov: Overrides, campaign_dir: Option<PathBuf>,
-    env_file: Option<PathBuf> }
+struct RunArgs { config: PathBuf, minutes: Option<f64>, name: Option<String>, only: Option<String>, canary: bool, dry_run: bool, live: bool, ov: Overrides,
+    campaign_dir: Option<PathBuf>, env_file: Option<PathBuf> }
 
 /// A run's config: `cfg` with the command line applied (what the run uses); `config_json` (meta.json `config`) hashes
 /// the file as loaded, before the overrides (review F2: the normalized hash is the same in every segment of a campaign,
@@ -795,9 +794,11 @@ fn run_config(a: &RunArgs) -> Result<RunConfig> {
 }
 
 /// The SendGate a run starts with (review M3): `--shadow` makes it shadow for the whole segment (`forced_shadow`); so
-/// does a run without `--live` or `--canary`, which sends nothing anyway (`mode_shadow`); a live or canary run starts live
-fn initial_gate(gate: &control::SendGate, forced_shadow: bool, live: bool, canary: bool) {
+/// does a run without `--live` or `--canary`, which sends nothing anyway (`mode_shadow`; a dry run: `dry_run`); a live
+/// or canary run starts live
+fn initial_gate(gate: &control::SendGate, forced_shadow: bool, live: bool, canary: bool, dry_run: bool) {
     if forced_shadow { let _ = gate.shadow("forced_shadow", "--shadow", true); }
+    else if dry_run { let _ = gate.shadow("dry_run", "--dry-run: would-sends are signed by a throwaway key and never sent", true); }
     else if !live && !canary { let _ = gate.shadow("mode_shadow", "no --live or --canary: nothing is sent", true); }
 }
 
@@ -946,7 +947,7 @@ fn alts_preload(cfg: &config::AltsCfg, dir: &Path, now: u64) -> Option<(PathBuf,
 
 fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let started_ns = now_ns();
-    let (live, canary) = (a.live, a.canary);
+    let (live, canary, dry_run) = (a.live, a.canary, a.dry_run);
     let env_note = match &a.env_file { Some(f) => load_env_file(f), None => { load_env(&a.config); None } };
     let RunConfig { mut cfg, raw, config_json, config_cap } = run_config(a)?;
     // WP-03 item 3: the transaction streams run as feeds after the [[feed]] list (their ids follow its)
@@ -956,13 +957,21 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     if live != (cfg.mode == "live") { anyhow::bail!("live trading needs mode = \"live\" in the config AND --live (got mode {}, --live {live}; --shadow runs a live config in shadow)", cfg.mode); }
     if let Some(w) = cfg.pricing_warning() { println!("{w}"); }
     if live && canary { anyhow::bail!("--live and --canary are separate runs"); }
+    // go-live gate item 4: a dry run never sends, so it is no live or canary run
+    if dry_run && (live || canary) { anyhow::bail!("--dry-run never sends: it is refused with --live and --canary"); }
     if canary && !cfg.canary.enabled { anyhow::bail!("--canary needs [canary] enabled = true in the config (both, so neither alone can spend)"); }
     if cfg.canary.enabled && !canary { println!("[canary] is enabled in the config but --canary was not given: no canaries this run"); }
+    // PLAN WP-05 item 1: a live or canary run sends one-transaction Jito bundles only
+    if live || canary { config::bundle_only(&cfg.sends).context("PLAN WP-05: live and canary runs are bundle-only")?; }
     // review F3: a supervised segment is paused through its socket; without one, `.pause` could not reach it
     if a.campaign_dir.is_some() && !cfg.control.socket { anyhow::bail!("[control] socket = false: a supervised segment (--campaign-dir) needs its control socket (the supervisor pauses sending through it)"); }
+    // WP-05 crowding (F6; review F8 c): a configured crowded list must load, before anything starts (fail closed: a missing
+    // one would put the crowded pools back in front of the queue)
+    let crowded = if cfg.send_policy.crowded_pools_file.is_empty() { Default::default() } else { exec::load_crowded_pools(&cfg.send_policy.crowded_pools_file)? };
     // the trading key is read only when something will really be sent, and must be the config's wallet. Before the
-    // signal handlers: Ctrl-C at the passphrase prompt still ends the process at once (nothing has started)
-    let send_key = if live || canary { Some((if live { exec::Kind::Live } else { exec::Kind::Canary }, wallet::load_cfg(&cfg)?)) } else { None };
+    // signal handlers: Ctrl-C at the passphrase prompt still ends the process at once (nothing has started). A dry run
+    // makes a throwaway key in memory instead (never the keystore); a shadow run holds none
+    let (mode, send_key, build_paths) = send_setup(live, canary, dry_run, cfg.sends.iter().any(|s| s.enabled), || wallet::load_cfg(&cfg))?;
     // the enabled feeds, in order: their index is the feed id every stream uses (txarr's columns, the entries archives)
     if let Some(only) = &a.only {
         let want: Vec<&str> = only.split(',').map(str::trim).collect();
@@ -995,7 +1004,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let run_json = json!({ "campaign": a.campaign_dir.as_deref().and_then(|c| c.file_name()).map(|c| c.to_string_lossy().into_owned()), "segment": name,
         "dir": dir.display().to_string(), "started_ns": started_ns, "host": provenance::hostname(), "pid": std::process::id(),
         "uid": unsafe { libc::getuid() }, "argv": std::env::args().collect::<Vec<_>>(),
-        "mode": if live { "live" } else if canary { "canary" } else { "shadow" }, "forced_shadow": a.ov.shadow, "live_flag": live,
+        "mode": mode.as_str(), "forced_shadow": a.ov.shadow, "live_flag": live, "dry_run": dry_run,
         "env_file": a.env_file.as_ref().map(|f| f.display().to_string()), "env_file_loaded": a.env_file.as_ref().map(|_| env_note.is_none()) });
     sess.set_meta_stub(json!({ "schema": provenance::META_SCHEMA, "partial": true, "run": run_json, "build": provenance::build_json(),
         "config": config_json, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()), "overrides": a.ov.json() }));
@@ -1010,11 +1019,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         }
     };
     // the gate says what this run may do: --shadow forces shadow; a run without --live or --canary sends nothing anyway
-    initial_gate(&sess.gate, a.ov.shadow, live, canary);
+    initial_gate(&sess.gate, a.ov.shadow, live, canary, dry_run);
     // the frozen copy of the config this run uses (meta.json config.frozen_copy)
     std::fs::write(dir.join("config.toml"), &raw)?;
     let stop = sess.stopper.flag();
-    let exec_on = cfg.sim.enabled || canary || live;
     // WP-02 (F9): two runtimes. rt_hot (2 workers, `arbx-hot`) runs only stream I/O and sends: the state stream, the gRPC
     // feeds, the send paths, the Jito result streams, keep-alives. rt_bg (`[runtime] bg_threads`, `arbx-bg`, niced +5)
     // runs every RPC call: the client is bound to it, so the boot, the engine's fetches, the executor's simulations and
@@ -1204,39 +1212,48 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     }
     if sess.stopper.stopping() { return Ok(()); }
     let mut interest = engine::interest(&reg, cfg.pools.templates_json.as_deref());
-    // our own transactions (canaries): every feed forwards them, so we see when each one appears
-    if exec_on { interest.keys.insert(tx::pk(&cfg.wallet)); }
+    // our own transactions: every feed forwards them, so we see when each one appears
+    interest.keys.insert(tx::pk(&cfg.wallet));
     let interest = Arc::new(interest);
     say(&format!("interest: {} keys, {} lookup tables", interest.keys.len(), interest.tables.read().unwrap().len()));
     say(&format!("recording (always on): every stream compressed in {} (frames every {} ms, rotation at {} MiB or {} min; disk budget {} GB, min free {} GB){}",
         dir.display(), cfg.record.flush_ms, cfg.record.rotate_mb, cfg.record.rotate_min, cfg.record.disk_budget_gb, cfg.record.min_free_gb,
         if cfg.record.archive_feeds.is_empty() { String::new() } else { format!("; raw entries of {}", cfg.record.archive_feeds.join(", ")) }));
-    // STEP 1: every send path kept warm and timed (keepalive.jsonl); paths that can't be built are named, not fatal. On
-    // the hot runtime (their sends and result streams run there)
-    let paths = if cfg.sends.iter().any(|s| s.enabled) {
-        let (p, notes) = rts.hot.block_on(send::Paths::new(&cfg.sends, cfg.gate.clone(), rec.clone(), true))?;
+    // STEP 1: every send path kept warm and timed (keepalive.jsonl), each block engine's auth token renewed in the
+    // background; paths that can't be built are named, not fatal (a provider key that is the payer's is: I-10). On the
+    // hot runtime (their sends and result streams run there). A dry run builds none: nothing in it can transmit
+    let paths_opts = send::PathsOpts { queue_ms: cfg.send_policy.queue_ms, payer: bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok()) };
+    let paths = if build_paths {
+        let (p, notes) = rts.hot.block_on(send::Paths::new(&cfg.sends, paths_opts, rec.clone(), true))?;
         for n in notes { say(&format!("send path {n}")); }
         let back = tx.clone();
         p.start(stop.clone(), std::time::Duration::from_secs(cfg.exec.keepalive_s), move |m: String| { let _ = back.send(feeds::Event::Status { feed: u16::MAX, msg: m }); });
         say(&format!("send paths: {} (keep-alive every {} s)", p.list.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(", "), cfg.exec.keepalive_s));
         Some(p)
-    } else { None };
-    // STEPS 2-3: simulation of every would-send decision, canaries. The executor's sends run on the hot runtime; its
-    // RPC (lookup tables, nonces, simulations, settlements) on the background one through the bound client
-    let exec = if exec_on {
-        let (mut x, notes) = rts.hot.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), rec.clone(), tx.clone(), feed_names.clone(), send_key, reg_mints(&reg)))?;
-        x.set_gate(sess.gate.clone());
-        for n in notes { say(&format!("exec: {n}")); }
-        if !cfg.live.crowded_pools_file.is_empty() {
-            // review N1: a list made for another registry would rank and skip nothing
-            let (have, all) = x.crowded_in(|p| reg.by_pool.contains_key(p));
-            say(&format!("exec: crowded pools in this registry: {have} of {all}"));
+    } else {
+        if dry_run { say("send paths: none (--dry-run: nothing is sent, no block engine is contacted)"); }
+        None
+    };
+    // The executor, in every run (PLAN-ADDENDUM I-7: a shadow run runs every send check up to the signature and records
+    // its would-sends with sent = false). Its sends run on the hot runtime; its RPC (lookup tables, settlements, the
+    // diagnostic simulations) on the background one through the bound client. A shadow executor that cannot start
+    // leaves the run recording without one (decisions `no_executor`); a live, canary or dry-run one stops the start
+    let exec = match rts.hot.block_on(exec::Exec::new(&cfg, &rpc, paths.clone(), rec.clone(), tx.clone(), feed_names.clone(), mode, send_key, reg_mints(&reg))) {
+        Ok((mut x, notes)) => {
+            x.set_gate(sess.gate.clone());
+            x.set_leaders(book.clone());
+            for n in notes { say(&format!("exec: {n}")); }
+            say(&format!("exec: {}; simulation {}", mode.as_str(), if cfg.sim.enabled { format!("on (at most {}/s)", cfg.sim.max_per_sec) } else { "off".into() }));
+            if live { say(&format!("exec: LIVE TRADING: bundle-only, at most {} SOL a trade, stops after {} lamports of failed fees", cfg.live.max_size_sol, cfg.live.max_failed_fees_lamports)); }
+            Some(x)
         }
-        say(&format!("exec: simulation {}, canaries {}", if cfg.sim.enabled { format!("on (at most {}/s)", cfg.sim.max_per_sec) } else { "off".into() },
-            if canary { format!("ARMED ({} max, cap {} lamports)", cfg.canary.count, cfg.canary.max_spend_lamports) } else { "off".into() }));
-        if live { say(&format!("exec: LIVE TRADING: at most {} SOL a trade, stops after {} lamports of failed fees", cfg.live.max_size_sol, cfg.live.max_failed_fees_lamports)); }
-        Some(x)
-    } else { None };
+        Err(e) if mode == exec::Mode::Shadow => {
+            say(&format!("WARNING: the shadow executor did not start ({e:#}): decisions are recorded without send checks (no_executor)"));
+            rec.event("log", "send", None, json!({ "msg": format!("shadow executor not started: {}", rpc::scrub(&format!("{e:#}"))) }));
+            None
+        }
+        Err(e) => return Err(e.context("the executor")),
+    };
     // WP-03b: the boot is over (pools, snapshot, route program, executor): every client calls as configured again
     rpc.set_phase(rpc::Phase::Run);
     say(&format!("rpc: boot done; budgets {} (requests/s, every role); chain fetch {}", rpc_reg.limits_json(),
@@ -1260,7 +1277,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         "run": run_json, "build": provenance::build_json(), "config": config_json,
         "programs": programs, "programs_pending": true,
         "wallet": { "pubkey": cfg.wallet, "keystore_path": if cfg.wallet_keystore.is_empty() { format!("~/.nexus-v2-{}-wallet.enc", cfg.wallet_profile) } else { cfg.wallet_keystore.clone() },
-            "held_mints_at_boot": exec.as_ref().map(|x| x.held_mints()) },
+            "held_mints_at_boot": exec.as_ref().map(|x| x.held_mints()), "keystore_read": mode.sends(),
+            // a dry run's throwaway signer (made in memory, never written; it is not the payer)
+            "dry_run_signer": exec.as_ref().and_then(|x| x.dry_signer()).map(|k| tx::b58(&k)) },
+        "executor": { "mode": mode.as_str(), "started": exec.is_some() },
         "feeds": provenance::feeds_json(&cfg), "send_paths": provenance::send_paths_json(&cfg, &built), "rpc": provenance::rpc_json(&cfg),
         "state": { "url_host": provenance::host_of(&cfg.state.url), "tx_streams": tx_streams, "watch_clock": cfg.state.watch_clock,
             "watch_programdata": cfg.state.watch_programdata, "watch_wallet": cfg.state.watch_wallet, "block_meta": block_meta,
@@ -1273,7 +1293,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         "clock": provenance::clock_json(),
         "strategy": provenance::section(&cfg.strategy), "send": provenance::section(&cfg.sends), "builder": provenance::section(&cfg.exec),
         "live": provenance::section(&cfg.live), "sim": provenance::section(&cfg.sim), "canary": provenance::section(&cfg.canary),
-        "gate": provenance::section(&cfg.gate), "record": provenance::section(&cfg.record), "control": provenance::section(&cfg.control), "tips": null,
+        "send_policy": provenance::section(&cfg.send_policy), "dry_run": provenance::section(&cfg.dry_run),
+        "record": provenance::section(&cfg.record), "control": provenance::section(&cfg.control), "tips": null,
         "runtime": provenance::section(&cfg.runtime),
         "send_gate": sess.gate.json(),
         // what the command line changed in the config for this run (--shadow, --budget-left)
@@ -1337,6 +1358,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         }
         None => say(&format!("lookup tables: nothing preloaded ([alts] preload {:?})", cfg.alts.preload)),
     }
+    // WP-05 crowding (F6): the activity map's window and buckets; WP-00's static list stands in until it holds one
+    if !crowded.is_empty() { say(&format!("crowding: {} of the {} listed pools are in this registry", crowded.iter().filter(|p| reg.by_pool.contains_key(*p)).count(), crowded.len())); }
+    let b = &cfg.send_policy.crowding_buckets;
+    eng.set_crowding(arbx::crowding::Activity::new(cfg.send_policy.crowding_window_h, [b[0], b[1]], crowded));
     eng.exec = exec;
     eng.gate = Some(sess.gate.clone());
     // the minutes count from the engine's start, as in arb-lab (boot time is not part of the segment)
@@ -1363,9 +1388,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         engine::RunEnd::Stopped => {}
     }
     let reason = sess.stopper.info().map_or("error", |i| i.reason.as_str());
-    // what was still open when the stop began (stop.json; WP-05 / WP-07 drain them, the next segment's ledger picks them
-    // up). No executor: null (review M11)
-    let open = eng.exec.as_ref().map(|x| x.open_attempts());
+    // what was still open when the stop began: each gets its `unsettled` outcome line (WP-05) and stop.json lists them
+    // (the next segment's wallet stream and WP-07's ledger pick their landings up by signature). No executor: null
+    // (review M11)
+    let open = eng.exec.as_mut().map(|x| x.settle_at_stop());
     eng.write_final_status(rx.len(), reason);
     *sess.drain.lock().unwrap() = control::Drain { in_flight_at_stop: open.as_ref().map(|o| o.len()), drained: open.as_ref().map(|o| o.is_empty()),
         unsettled: open.unwrap_or_default(), drain_ms: None, final_status_seq: eng.status_lines.checked_sub(1) };
@@ -1398,10 +1424,14 @@ mod tests {
         assert_eq!(l["sending"], "live");
         assert_eq!(limits_json(&cfg, false, false)["sending"], "none");
         assert_eq!(limits_json(&cfg, false, true)["sending"], "canary");
+        // review WP-05 #17: a canary run's cap is the canary's size, as the executor applies it
+        let c = limits_json(&cfg, false, true);
+        assert_eq!((c["max_size_sol"].as_f64(), c["max_size_src"].as_str(), c["canary_max_size_sol"].as_f64()), (Some(cfg.canary.size_sol), Some("canary"), Some(cfg.canary.size_sol)));
         assert_eq!((l["max_size_sol"].as_f64(), l["max_new_token_accounts"].as_u64(), l["max_size_src"].as_str()), (Some(4.2), Some(0), Some("config")));
         assert_eq!((l["decoded_sends"].as_bool(), l["state_triggers"].as_bool(), l["record"].as_bool()), (Some(false), Some(true), Some(true)));
         assert_eq!((l["big_band_min_expected_lamports"].as_u64(), l["big_band_max_per_sec"].as_f64()), (Some(1_000_000), Some(0.5)));
         assert_eq!((l["crowded_pools_file"].as_str(), l["crowded_skip_min_expected_lamports"].as_u64()), (Some("/root/arbx/data/crowded-pools.json"), Some(100_000)));
+        assert_eq!((l["bundle_only"].as_bool(), l["max_blockhash_age_slots"].as_u64(), l["margin_floor"].as_u64()), (Some(true), Some(20), Some(1)));
     }
 
     /// review F1: a plain run of the shipped file is a shadow run, and `--shadow` runs a live config in shadow. WP-02:
@@ -1476,7 +1506,7 @@ mod tests {
     }
 
     fn args(config: &Path, ov: Overrides, live: bool, canary: bool, campaign_dir: Option<PathBuf>) -> RunArgs {
-        RunArgs { config: config.to_path_buf(), minutes: None, name: None, only: None, canary, live, ov, campaign_dir, env_file: None }
+        RunArgs { config: config.to_path_buf(), minutes: None, name: None, only: None, canary, dry_run: false, live, ov, campaign_dir, env_file: None }
     }
 
     /// review F2: meta.json `config.normalized_sha256` hashes the file as loaded, so every override leaves it equal to
@@ -1539,7 +1569,7 @@ mod tests {
         ];
         for (shadow, live, canary, check, mode, reason, sticky) in cases {
             let g = SendGate::new();
-            initial_gate(&g, shadow, live, canary);
+            initial_gate(&g, shadow, live, canary, false);
             let lines = apply_route_check(&g, check.clone(), live, canary);
             let what = format!("--shadow {shadow} --live {live} --canary {canary} check {:?}", check.as_ref().map(|c| c.0));
             assert_eq!((g.mode(), g.reason().as_str(), g.sticky()), (mode, reason, sticky), "{what}");
@@ -1601,6 +1631,55 @@ mod tests {
         assert!(e.to_string().contains("needs its control socket"), "{e}");
         assert!(!d.join("camp").exists(), "refused before the segment directory");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Go-live gate item 4: `--dry-run` never sends, so it is refused with `--live` and with `--canary`, before anything
+    /// starts; in `run` (a structural guard: it needs RPC and a gRPC server) a dry run builds no send path and signs with a
+    /// throwaway key made in memory, while only a live or canary run reads the trading keystore
+    #[test]
+    fn a_dry_run_never_sends() {
+        let d = std::env::temp_dir().join(format!("arbx-dryrun-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&d).unwrap();
+        let src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arbx-stage0.toml")).unwrap();
+        let (shadow_p, live_p) = (d.join("shadow.toml"), d.join("live.toml"));
+        std::fs::write(&shadow_p, &src).unwrap();
+        std::fs::write(&live_p, src.replacen("mode = \"shadow\"", "mode = \"live\"", 1)).unwrap();
+        assert_eq!(config::Config::load(&live_p).unwrap().mode, "live");
+        let sess = control::Session::new();
+        for (p, live, canary) in [(&live_p, true, false), (&shadow_p, false, true)] {
+            let mut a = args(p, Overrides::default(), live, canary, Some(d.join("camp")));
+            a.dry_run = true;
+            let e = run(&a, &sess).unwrap_err();
+            assert!(e.to_string().contains("--dry-run never sends"), "--live {live} --canary {canary}: {e}");
+        }
+        assert!(!d.join("camp").exists(), "refused before the segment directory");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Go-live gate item 4, by behaviour (review WP-05 #14: the source's text proved nothing): `run`'s send setup. A dry
+    /// run builds no send path and signs with a throwaway key made in memory (a new one each run, never the wallet's),
+    /// never calling the keystore loader, even one that would fail; a live and a canary run read the keystore (its failure
+    /// stops them) and build their paths; a shadow run holds no key and builds the enabled paths for their keep-alives
+    #[test]
+    fn a_dry_run_reads_no_keystore_and_builds_no_send_path() {
+        let reads = std::cell::Cell::new(0);
+        let wallet = ed25519_dalek::SigningKey::from_bytes(&[3u8; 32]);
+        let load = || { reads.set(reads.get() + 1); Ok(wallet.clone()) };
+        let (mode, key, paths) = send_setup(false, false, true, true, load).unwrap();
+        let dry = key.expect("a throwaway key");
+        assert_eq!((mode, paths, reads.get()), (exec::Mode::DryRun, false, 0), "no path, no keystore");
+        assert_ne!(dry.verifying_key(), wallet.verifying_key());
+        let (_, again, _) = send_setup(false, false, true, true, || panic!("a dry run must not read the keystore")).unwrap();
+        assert_ne!(again.unwrap().verifying_key(), dry.verifying_key(), "made anew each run");
+        for (live, canary, want) in [(true, false, exec::Mode::Live), (false, true, exec::Mode::Canary)] {
+            let (mode, key, paths) = send_setup(live, canary, false, true, load).unwrap();
+            assert_eq!((mode, paths, key.map(|k| k.verifying_key())), (want, true, Some(wallet.verifying_key())));
+            assert!(send_setup(live, canary, false, true, || anyhow::bail!("no keystore")).is_err(), "a sending run needs its key");
+        }
+        assert_eq!(reads.get(), 2, "read once per sending run");
+        let (mode, key, paths) = send_setup(false, false, false, true, || panic!("a shadow run must not read the keystore")).unwrap();
+        assert_eq!((mode, key.is_none(), paths), (exec::Mode::Shadow, true, true), "keep-alives only");
+        assert!(!send_setup(false, false, false, false, load).unwrap().2, "nothing enabled, nothing built");
     }
 
     /// PLAN-ADDENDUM I-6: `[alts] preload = "auto"` finds the newest sibling segment's alts-final and reads its tables

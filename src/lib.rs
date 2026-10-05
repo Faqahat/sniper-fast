@@ -9,21 +9,25 @@
 //! offline subcommands and the verifier client can use the engine without the CLI.
 pub mod accuracy;
 pub mod alts;
+pub mod bands;
 pub mod build;
 pub mod chainfetch;
 pub mod classify;
 pub mod commit;
 pub mod config;
 pub mod control;
+pub mod crowding;
 pub mod engine;
 pub mod exec;
 pub mod feeds;
 pub mod forks;
 pub mod lat;
 pub mod leaders;
+pub mod netcount;
 pub mod pda;
 pub mod pools;
 pub mod probe;
+pub mod proglog;
 pub mod provenance;
 pub mod reads;
 pub mod rec;

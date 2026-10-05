@@ -1,42 +1,117 @@
-//! From the engine's decisions to real transactions, in the send plan's steps (step 1, keep-alives, is in send):
-//!   step 2  simulation  each would-send decision is built into the real nexus-v2 transaction and simulated, unsigned.
-//!                       "ok" or our profit check (0x4e580002) = every leg ran: the encoding is right. sims.jsonl
-//!   step 3  canaries    real transactions built to FAIL our profit check (min_profit 1,000 SOL), one copy per send
-//!                       path, all under one durable nonce: at most one lands, failed, paying only its network fee
-//!                       (tips revert with the trade; a Jito bundle that would fail is dropped and only reports why).
-//!                       attempts.jsonl (one per canary), copies.jsonl (send), outcomes.jsonl (settled from chain)
-//!   step 4  live        real trades on the engine's decisions: size at most [live] max_size_sol, the owner's fee rule,
-//!                       one copy per path with that path's tip and its own on-chain min_profit (base + priority + tip +
-//!                       margin: a landed trade cannot lose), all under one durable nonce lease, the Jito gate first.
-//!                       Stops by itself once fees of failed landed transactions reach [live] max_failed_fees_lamports.
-//! Building and signing run on the engine thread (microseconds); RPC and sending run on the runtime.
+//! The executor (PLAN WP-05): from the engine's decisions to one-transaction Jito bundles. Bundle-only, fail-closed, no
+//! network call between the decision and the fire.
+//!
+//! **Send checks** ([`send_checks`]: one pure function over [`SendInputs`], called by the executor at every decision and
+//! by replay, WP-09): the SendGate in live; a healthy recorder; the store's health (WP-04: warm-up, state availability,
+//! the re-read); the sender's own caps; a blockhash from the WP-03b ring (journaled `blockhash_head` inputs, the state
+//! stream's block metas) no older than `max_blockhash_age_slots`; the target slot's leader (the slot after the current
+//! processed one) from the LeaderBook, whose kind is not in `skip_leader_kinds`; a valid cached Jito auth token (the
+//! send path never refreshes it, F28). The first that fails is the decision's reason.
+//!
+//! **Route checks**, in order: an expected profit, a plausible gap, token cooling, the rent cap, the in-flight lock
+//! keyed by (buy pool, sell pool, mint) (a new attempt only on a new state version or a new leader; `inflight_same_state`
+//! for the same slot, `inflight_same_leader` for a later slot of the same leader), the ≥1M class's token bucket
+//! (`band_throttle`), the crowded skip (`crowded_skip`), the on-chain min_profit (tip + base fee + margin, margin =
+//! max(`margin_floor`, `margin_share` × expected net): a landed bundle cannot lose) against the expected profit, and the
+//! build (one bundle copy: CU limit, the ATA create when needed, the route, the tip last; on a recent blockhash, never a
+//! durable nonce).
+//!
+//! **Modes** ([`Mode`]): `live` and `canary` (live under `[canary]`'s caps, at most 0.2 SOL) sign with the trading key
+//! and fire through the jito-bundle path's rate queue (bands, crowding, EV; send/budget.rs). `shadow` (PLAN-ADDENDUM
+//! I-7) runs every check up to the signature: a decision that passes all of them but the SendGate is a would-send, built
+//! and recorded with `sent = false`. `dry_run` (go-live gate item 4) also signs it, with a throwaway key made in memory
+//! (never the trading key; the payer stays the wallet, so accounts, sizes and tips are the live ones and the signature
+//! cannot pass on chain), records it in full (transaction, size, tip, accounts, the checks it passed) and never sends: a
+//! dry-run executor holds no send path and no Jito client, so nothing in it can transmit; it may simulate (read-only).
+//! The dry run's checks ([`verify_bundle`]) read the signed bytes: the route instruction's amount_in and min_profit
+//! against the decision's, its accounts, the tip's amount, account and payer, and that the signed min_profit covers the
+//! signed tip, the base fee and the margin floor (what makes a landed bundle unable to lose; review WP-05 #12). Shadow
+//! and dry runs hold no Jito client, so the token check is not modelled in them (`TokenSeen::NotUsed`, review #18): a
+//! period of `jito_auth_stale` shows only in a sending run.
+//!
+//! **Settlement** (item 9), stream-based: a landing is the wallet stream's record of our signature (INPUT `wallet_tx`);
+//! an attempt that never landed is final when its blockhash expires (150 blocks), after one bounded
+//! `getSignatureStatuses` with `searchTransactionHistory` (F43); `getSignatureStatuses` also runs at +2 s, +10 s and
+//! +60 s, batched, 500 ms each; a landing found after the final writes an `amend` line, and so does the wallet record of
+//! a landing the expiry check found first (its fee, CU and events: review WP-05 #3). A copy that left without an answer
+//! (a timeout, a transport error) may still land: it stays open until it lands or its blockhash expires (review #7);
+//! only a copy that never left, or one the block engine refused, is final at once. Every block-engine result of our
+//! bundles is kept in order (send/jito.rs) and reaches the engine as INPUT `inflight_release`: only a landing
+//! (`processed`, `finalized`) releases the attempt's in-flight entry early (PLAN WP-07's final: a landing or the
+//! blockhash's expiry; a would-fail keeps it for its hold, review #2), and an attempt's first would-fail counts once
+//! toward its token's cooling. Building and signing run on the engine thread (microseconds); the send and every RPC call
+//! run on the runtimes.
+use crate::bands;
 use crate::build::{self, Alt, PumpGlobal};
-use crate::config::{Config, SendKind};
+use crate::config::{Config, SendKind, SendPath};
 use crate::control::{GateMode, SendGate};
-use crate::feeds::{clock::now_ns, Event};
-use crate::rpc::Rpc;
+use crate::feeds::{clock::now_ns, Event, InputKind};
 use crate::lat::Series;
+use crate::leaders::{LeaderBook, LeaderKind};
 use crate::rec::{self, Rec};
-use crate::send::{self, Copy, Fired, Paths, Prio, TokenBucket, RANK_CROWDED, RANK_OTHER, RANK_SEED};
+use crate::rpc::{Bounds, Rpc, SigStatus};
+use crate::send::{self, jito, Copy, Fired, Paths, Prio, TokenBucket};
+use crate::store_health::{HealthFlags, Shut};
 use crate::tx::{b58, pk, Pk};
 use crate::venues::{PoolMeta, WSOL};
 use anyhow::{Context, Result};
 use crossbeam_channel::Sender;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Duration;
 
-/// a canary's min_profit: unreachable, so the profit check always fails (1,000 SOL)
-const CANARY_MIN_PROFIT: u64 = 1_000_000_000_000;
-/// the fee rule (owner, 2026-10-03): the flat bid, which is also Helius Sender's floor; a copy of the trigger's bid at
-/// 0.95x; and the priority fee never above a quarter of the expected profit (what a failed send still costs)
-const FLAT_CU_PRICE: u64 = 40_000;
-const TRIGGER_SHARE: f64 = 0.95;
-const MAX_FEE_SHARE_OF_PROFIT: f64 = 0.25;
 /// CU for creating the mid token account when the wallet has none (arbed's cu-budget allowance)
 const ATA_CREATE_CU: u64 = 30_000;
-const BASE_FEE: u64 = 5_000;
+const BASE_FEE: u64 = bands::BASE_FEE;
+/// a blockhash is valid for this many blocks after its own (an attempt is open until the chain passes it)
+pub const BLOCKHASH_VALID_BLOCKS: u64 = 150;
+/// without a block height an attempt expires this many slots after its blockhash's slot (150 blocks, skipped slots
+/// included with margin) ...
+const EXPIRY_SLOTS: u64 = 300;
+/// ... and without any slot this long after it was signed
+const EXPIRY_NS: u64 = 120_000_000_000;
+/// the cross-checks after the send (F43): one batched `getSignatureStatuses` each, 500 ms
+const CHECKS: [(u64, &str); 3] = [(2_000_000_000, "+2s"), (10_000_000_000, "+10s"), (60_000_000_000, "+60s")];
+/// signatures per getSignatureStatuses call (the RPC's limit is 256)
+const STATUS_BATCH: usize = 256;
+/// finalised attempts remembered for amends and verdicts that come late
+const FINALS_KEEP: usize = 20_000;
+/// token cooling: this many would-fails in a row pause a token 60 s, doubling per pause up to 5 min
+const COOL_AFTER: u32 = 25;
+
+/// What the executor is armed as (attempts.jsonl `kind`)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    /// real bundles (`--live`, mode = "live")
+    Live,
+    /// real bundles under `[canary]`'s caps (`--canary`)
+    Canary,
+    /// no key: every check up to the signature, would-sends recorded with `sent = false` (I-7)
+    Shadow,
+    /// a throwaway key: would-sends built, signed, recorded in full, never sent (go-live gate item 4)
+    DryRun,
+}
+
+impl Mode {
+    pub fn as_str(self) -> &'static str { match self { Mode::Live => "live", Mode::Canary => "canary", Mode::Shadow => "shadow", Mode::DryRun => "dry_run" } }
+    /// the modes that send
+    pub fn sends(self) -> bool { matches!(self, Mode::Live | Mode::Canary) }
+}
+
+/// A route's crowding (PLAN WP-05 item 5, F6): distinct arbitrage-like signers that landed on either pool over the
+/// window, its bucket (0 < 20, 1 20-150, 2 ≥ 150 by default) and where the bucket came from (`map`: the activity map
+/// holds the whole window; `static_list`: WP-00's list stands in until it does; `map_partial`: no list, the map so far)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Crowding { pub signers_6h: Option<u32>, pub bucket: u8, pub src: &'static str }
+
+impl Crowding {
+    /// the send queue's crowding rank: the top bucket queues behind the others of its band
+    pub fn rank(&self) -> u8 { (self.bucket >= 2) as u8 }
+}
 
 /// Everything a build needs about one round trip, owned (the engine fills it at the size the step wants)
 #[derive(Clone)]
@@ -60,11 +135,6 @@ pub struct RouteIn {
     pub back: u64,
     pub gross_at_opp: i64,
     pub net_at_opp: i64,
-    /// the trigger's own compute-unit price, micro-lamports per CU (None: it bid none)
-    pub trig_cu_price: Option<u64>,
-    /// what others bid on these pools lately: the 75th percentile CU price of every transaction that touched them
-    /// in the last 30 s (they compete for the pools' write locks in the leader's scheduler)
-    pub rival_cu_price: Option<u64>,
     pub cu: u64,
     pub buy_live: Vec<i64>,
     pub sell_live: Vec<i64>,
@@ -75,155 +145,420 @@ pub struct RouteIn {
     pub state_version: u64,
     pub route_age_ms: Option<f64>,
     pub decision: u64,
+    /// WP-05: the evaluation's kind (`commit`, `quiescent`, `timeout`, `fork`) and stage times (attempts `trigger`,
+    /// `stages`), the consistency-set skew of each pool
+    pub trig_kind: &'static str,
+    pub t_first_shred: Option<u64>,
+    pub t_commit: u64,
+    pub t_priced: u64,
+    pub parts_skew: Option<(u64, u64)>,
+    /// the route's crowding (F6)
+    pub crowding: Crowding,
+    /// the route's accounts with the (slot, write_version) the decision priced (attempts `route_in.accounts`, X6)
+    pub accounts: Vec<(Pk, u64, u64)>,
 }
 
-struct Built { msg: build::Message, cu_limit: u64, creates_ata: bool }
-
-/// A settled attempt (canary or live), sent back to the engine (which adds what its own feeds saw)
-pub struct Settled {
-    pub attempt: u64,
-    pub fired: Fired,
-    /// (path index, signature, chain slot, landed transaction)
-    pub landed: Option<(usize, String, u64, Value)>,
-    pub jito: Option<send::jito::Outcome>,
-    pub nonce_value: Option<[u8; 32]>,
-    pub error: Option<String>,
+impl RouteIn {
+    /// the expected profit at `size` (gross, before the tip and the fee)
+    pub fn expected(&self) -> i64 { self.back as i64 - self.size as i64 }
 }
 
-fn sig64(s: &str) -> Option<[u8; 64]> { bs58::decode(s).into_vec().ok()?.try_into().ok() }
+// ------------------------------------------------------------------------------------------------ the send view
 
-/// what the sender sends: canaries (built to fail) or live trades
-#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Kind { Canary, Live }
+/// One blockhash as the executor would build on it
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bh { pub hash: [u8; 32], pub slot: u64, pub height: Option<u64>, pub src: String, pub commitment: &'static str, pub t_ns: u64 }
 
-/// one durable nonce account, leased to one attempt at a time (its copies share it, so at most one lands)
-struct NonceSlot { acct: Pk, value: Option<[u8; 32]>, busy: Option<u64> }
-
-/// an attempt waiting for its settlement
-struct Open { route: RouteIn, nonce: usize, worst: u64, creates_ata: bool, expected: i64, t: u64, bundle: bool }
-
-struct Sending {
-    kind: Kind,
-    key: ed25519_dalek::SigningKey,
-    nonces: Vec<NonceSlot>,
-    /// canary: how many, how far apart, what size; live: the size cap
-    count: u32,
-    every_ms: u64,
-    size: u64,
-    /// stop once `spent` plus the worst case of what is in flight would pass this (lamports)
-    cap: u64,
-    settle_s: u64,
-    margin: u64,
-    max_new_atas: u32,
-    sent: u32,
-    last_ns: u64,
-    /// fees of landed transactions that failed (from chain); worst-case fees of attempts still in flight
-    spent: u64,
-    reserved: u64,
-    /// all fees, tips paid, real profit (chain balance changes) of landed transactions
-    fees: u64,
-    tips: u64,
-    profit: i64,
-    landed: u32,
-    wins: u32,
-    new_atas: u32,
-    /// our copies' signatures -> (attempt, path) while open, and what our feeds saw of them
-    watch: HashMap<[u8; 64], (u64, usize)>,
-    seen: HashMap<[u8; 64], (u64, u16, Vec<(u16, u64)>)>,
-    open: HashMap<u64, Open>,
-    stopped: Option<&'static str>,
+/// What the send checks read of the chain, from journaled engine inputs only (so a replay sees the same): the WP-03b
+/// ring's confirmed head (INPUT 1 `blockhash_head`), the state stream's block metas (processed), the newest block
+/// height, and the leader schedule (INPUT 2 `leader_window`). Owned by the engine
+#[derive(Default, Debug)]
+pub struct SendView {
+    pub head: Option<Bh>,
+    pub meta: Option<Bh>,
+    /// the newest block height seen, with its slot
+    pub height: Option<(u64, u64)>,
+    sched: BTreeMap<u64, Pk>,
 }
 
-impl Sending {
-    fn new(cfg: &Config, kind: Kind, key: ed25519_dalek::SigningKey, nonces: Vec<NonceSlot>) -> Sending {
-        let (c, l) = (&cfg.canary, &cfg.live);
-        match kind {
-            Kind::Canary => Sending { kind, key, nonces, count: c.count, every_ms: c.every_ms, size: sol(c.size_sol), cap: c.max_spend_lamports, settle_s: c.settle_s,
-                margin: 0, max_new_atas: u32::MAX, sent: 0, last_ns: 0, spent: 0, reserved: 0, fees: 0, tips: 0, profit: 0, landed: 0, wins: 0, new_atas: 0,
-                watch: HashMap::default(), seen: HashMap::default(), open: HashMap::default(), stopped: None },
-            Kind::Live => Sending { kind, key, nonces, count: u32::MAX, every_ms: 0, size: sol(l.max_size_sol), cap: l.max_failed_fees_lamports, settle_s: l.settle_s,
-                margin: l.margin_lamports, max_new_atas: l.max_new_token_accounts, sent: 0, last_ns: 0, spent: 0, reserved: 0, fees: 0, tips: 0, profit: 0, landed: 0,
-                wins: 0, new_atas: 0, watch: HashMap::default(), seen: HashMap::default(), open: HashMap::default(), stopped: None },
+/// slots of the schedule kept (a window is 400; the next one comes every 100)
+const SCHED_KEEP: usize = 4_000;
+
+impl SendView {
+    /// INPUT 1 `blockhash_head`: `{hash, slot, height, src, commitment, t_ns}`
+    pub fn on_head(&mut self, d: &Value) {
+        let Some(hash) = d["hash"].as_str().and_then(|h| bs58::decode(h).into_vec().ok()).and_then(|v| <[u8; 32]>::try_from(v).ok()) else { return };
+        let Some(slot) = d["slot"].as_u64() else { return };
+        let height = d["height"].as_u64();
+        let commitment = if d["commitment"].as_str() == Some("processed") { "processed" } else { "confirmed" };
+        self.head = Some(Bh { hash, slot, height, src: d["src"].as_str().unwrap_or("ring").to_string(), commitment, t_ns: d["t_ns"].as_u64().unwrap_or(0) });
+        if let Some(h) = height { self.note_height(slot, h); }
+    }
+
+    /// a block meta of the state stream (processed)
+    pub fn on_block_meta(&mut self, slot: u64, hash: [u8; 32], height: Option<u64>, t: u64) {
+        if self.meta.as_ref().is_some_and(|m| m.slot >= slot) { return; }
+        self.meta = Some(Bh { hash, slot, height, src: "blocks_meta".into(), commitment: "processed", t_ns: t });
+        if let Some(h) = height { self.note_height(slot, h); }
+    }
+
+    fn note_height(&mut self, slot: u64, h: u64) { if self.height.is_none_or(|x| h > x.1) { self.height = Some((slot, h)); } }
+
+    /// INPUT 2 `leader_window`: `{start, leaders: [pk]}`
+    pub fn on_window(&mut self, d: &Value) {
+        let Some(start) = d["start"].as_u64() else { return };
+        for (i, l) in d["leaders"].as_array().into_iter().flatten().enumerate() {
+            if let Some(k) = l.as_str().and_then(|s| bs58::decode(s).into_vec().ok()).and_then(|v| Pk::try_from(v).ok()) { self.sched.insert(start + i as u64, k); }
+        }
+        while self.sched.len() > SCHED_KEEP { let k = *self.sched.keys().next().unwrap(); self.sched.remove(&k); }
+    }
+
+    /// the schedule's leader of `slot`
+    pub fn leader(&self, slot: u64) -> Option<Pk> { self.sched.get(&slot).copied() }
+
+    /// The blockhash a bundle would use: `confirmed` the ring's head; `processed` the newer of the head and the newest
+    /// block meta
+    pub fn blockhash(&self, commitment: &str) -> Option<&Bh> {
+        match (commitment, &self.head, &self.meta) {
+            ("processed", Some(h), Some(m)) => Some(if m.slot > h.slot { m } else { h }),
+            ("processed", h, m) => h.as_ref().or(m.as_ref()),
+            (_, h, _) => h.as_ref(),
+        }
+    }
+
+    /// whether the chain has passed `bh`'s validity: its height + 150 when both heights are known, else its slot + 300
+    /// against `tip_slot`
+    pub fn expired(&self, bh_slot: u64, bh_height: Option<u64>, tip_slot: u64) -> Option<bool> {
+        match (bh_height, self.height) {
+            (Some(h), Some((_, now))) => Some(now > h + BLOCKHASH_VALID_BLOCKS),
+            _ if tip_slot > 0 && bh_slot > 0 => Some(tip_slot > bh_slot + EXPIRY_SLOTS),
+            _ => None,
         }
     }
 }
 
+// ------------------------------------------------------------------------------------------------ the send checks
+
+/// The blockhash a check saw
+#[derive(Clone, Debug, PartialEq)]
+pub struct BhSeen { pub slot: u64, pub age_slots: Option<u64>, pub src: String, pub commitment: &'static str }
+
+/// The target slot's leader a check saw (the LeaderBook's snapshot, the schedule's identity)
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeaderSeen { pub slot: u64, pub identity: Option<String>, pub kind: LeaderKind, pub kind_src: Option<String> }
+
+/// The Jito token a check saw: a valid cached one, none valid, or none needed (no bundle path: shadow, dry run)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TokenSeen { Valid { age_s: u64 }, Stale, NotUsed }
+
+/// Everything `send_checks` reads: one value per input, taken at the decision (the engine journals the ones that come
+/// from outside its inputs: the gate, the leader's kind, the token, the recorder)
+#[derive(Clone, Debug)]
+pub struct SendInputs {
+    pub gate: GateMode,
+    pub gate_reason: String,
+    pub recorder_ok: bool,
+    pub shut: Shut,
+    /// the sender's own state: None ready, else why not (`fee_cap`, `sender_stopped`, `canary_wait`, `canary_count`)
+    pub sender: Option<&'static str>,
+    pub blockhash: Option<BhSeen>,
+    pub max_blockhash_age_slots: u64,
+    pub leader: LeaderSeen,
+    pub skip_leader_kinds: Vec<LeaderKind>,
+    pub token: TokenSeen,
+}
+
+/// the checks `send_checks` runs, in order (attempts `checks`)
+pub const SEND_CHECKS: [&str; 7] = ["gate", "recorder", "store_health", "sender", "blockhash", "leader", "jito_auth"];
+
+/// The SendGate's check: live, or `gate_shadow:<reason>` / `gate_stopped`
+pub fn gate_check(i: &SendInputs) -> Result<(), String> {
+    match i.gate {
+        GateMode::Live => Ok(()),
+        GateMode::Stopped => Err("gate_stopped".into()),
+        GateMode::Shadow => Err(format!("gate_shadow:{}", i.gate_reason)),
+    }
+}
+
+/// Every check but the gate's, in order: the recorder (`recorder_unhealthy`), the store's health (`warmup`,
+/// `state_unavailable`, `resync`), the sender's caps, the blockhash (`blockhash_stale`: none, its age unknown, or older
+/// than `max_blockhash_age_slots`), the leader (`leader_unknown`, `leader_skip_kind`), the token (`jito_auth_stale`)
+pub fn input_checks(i: &SendInputs) -> Result<(), String> {
+    if !i.recorder_ok { return Err("recorder_unhealthy".into()); }
+    if i.shut != Shut::Ready { return Err(i.shut.as_str().into()); }
+    if let Some(s) = i.sender { return Err(s.into()); }
+    match &i.blockhash {
+        Some(b) if b.age_slots.is_some_and(|a| a <= i.max_blockhash_age_slots) => {}
+        _ => return Err("blockhash_stale".into()),
+    }
+    if i.skip_leader_kinds.contains(&i.leader.kind) {
+        return Err(if i.leader.kind == LeaderKind::Unknown { "leader_unknown" } else { "leader_skip_kind" }.into());
+    }
+    if i.token == TokenSeen::Stale { return Err("jito_auth_stale".into()); }
+    Ok(())
+}
+
+/// PLAN WP-05 item 2: the send checks, one pure function (the executor's decision and WP-09's replay): the first that
+/// fails is the reason
+pub fn send_checks(i: &SendInputs) -> Result<(), String> { gate_check(i)?; input_checks(i) }
+
+// ------------------------------------------------------------------------------------------------ the in-flight lock
+
+/// The in-flight key (PLAN WP-05 item 4): the route's two pools and its mint
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct InflightKey { pub buy: Pk, pub sell: Pk, pub mint: Pk }
+
+impl InflightKey {
+    pub fn json(&self) -> Value { json!([b58(&self.buy), b58(&self.sell), b58(&self.mint)]) }
+}
+
+/// An attempt in flight on a key: the state version it priced, its target slot and leader, the attempt, when
+#[derive(Clone, Debug, PartialEq)]
+pub struct InflightEntry { pub sv: u64, pub target_slot: u64, pub leader: Option<Pk>, pub attempt: u64, pub t: u64 }
+
+/// The in-flight lock (replaces the 400 ms pair lock): a new attempt on a key goes only on a new state version or to a
+/// new leader. An entry holds `hold_slots` past its target slot, or until its attempt is released early: a landing (the
+/// block engine's `processed`, the wallet's record), or a copy that never left or was refused (review WP-05 #2: a
+/// would-fail, a lost auction or a drop does not release it)
+#[derive(Debug)]
+pub struct Inflight { map: HashMap<InflightKey, InflightEntry>, pub hold_slots: u64 }
+
+impl Inflight {
+    pub fn new(hold_slots: u64) -> Inflight { Inflight { map: HashMap::default(), hold_slots: hold_slots.max(1) } }
+
+    /// entries whose hold ended by `slot` (target slot + hold ≤ slot) go
+    pub fn expire(&mut self, slot: u64) { let h = self.hold_slots; self.map.retain(|_, e| e.target_slot + h > slot); }
+
+    /// May a new attempt on `key` go, priced on `sv`, aimed at `target_slot` and its `leader`? Ok: why (`first`,
+    /// `new_state`, `new_leader`) and the entry it replaces (attempt, state version); Err: `inflight_same_state` (the same
+    /// state to the same leader at the same slot) or `inflight_same_leader` (the same state, a later slot of the same
+    /// leader; from Stage 1 the verifier may allow it, `new_slot_verified`)
+    pub fn check(&self, key: &InflightKey, sv: u64, target_slot: u64, leader: Option<Pk>) -> Result<(&'static str, Option<(u64, u64)>), &'static str> {
+        let Some(e) = self.map.get(key).filter(|e| e.target_slot + self.hold_slots > target_slot.saturating_sub(1)) else { return Ok(("first", None)) };
+        let prev = Some((e.attempt, e.sv));
+        if e.sv != sv { return Ok(("new_state", prev)); }
+        if e.leader != leader { return Ok(("new_leader", prev)); }
+        if target_slot > e.target_slot { Err("inflight_same_leader") } else { Err("inflight_same_state") }
+    }
+
+    pub fn insert(&mut self, key: InflightKey, e: InflightEntry) { self.map.insert(key, e); }
+
+    /// the attempt landed, or cannot (it never left, it was refused, it expired): its entry goes (if it is still that
+    /// attempt's). True when one went
+    pub fn release(&mut self, attempt: u64) -> bool {
+        let before = self.map.len();
+        self.map.retain(|_, e| e.attempt != attempt);
+        self.map.len() < before
+    }
+
+    pub fn len(&self) -> usize { self.map.len() }
+    pub fn is_empty(&self) -> bool { self.map.is_empty() }
+}
+
+// ------------------------------------------------------------------------------------------------ tips
+
+/// The bundle path's tip (`[[send]]` jito-bundle: `tip_share` of the edge within `tip_lamports`..`tip_max_lamports`, to
+/// its accounts in rotation), the same with or without a built path (shadow and dry runs tip as live ones would)
+#[derive(Clone, Debug)]
+pub struct TipPolicy { pub accounts: Vec<Pk>, pub floor: u64, pub share: Option<f64>, pub max: u64, cursor: usize, pub path: String }
+
+impl TipPolicy {
+    pub fn from_path(c: &SendPath) -> TipPolicy {
+        let known = send::known_tip_accounts(c.kind);
+        let names: Vec<&str> = if c.tip_accounts.is_empty() { known.to_vec() } else { c.tip_accounts.iter().map(String::as_str).collect() };
+        TipPolicy { accounts: names.iter().map(|a| pk(a)).collect(), floor: c.tip_lamports, share: c.tip_share, max: c.tip_max_lamports.unwrap_or(u64::MAX), cursor: 0,
+            path: c.name.clone() }
+    }
+    /// the tip for an expected edge (gross − base fee), and its account
+    pub fn tip(&mut self, edge: i64) -> Option<(Pk, u64)> {
+        if self.accounts.is_empty() || self.floor == 0 { return None; }
+        let lamports = match self.share { Some(s) => ((edge.max(0) as f64 * s) as u64).clamp(self.floor, self.max.max(self.floor)), None => self.floor };
+        let a = self.accounts[self.cursor % self.accounts.len()];
+        self.cursor += 1;
+        Some((a, lamports))
+    }
+}
+
+/// The on-chain min_profit of a bundle (PLAN WP-05 item 8): tip + base fee + priority (0) + margin, margin =
+/// max(`floor`, `share` × expected net). Rent is never part of it. Returns (min_profit, margin)
+pub fn min_profit_onchain(tip: u64, expected_net: i64, floor: u64, share: f64) -> (u64, u64) {
+    let margin = floor.max((expected_net.max(0) as f64 * share) as u64);
+    (tip + BASE_FEE + margin, margin)
+}
+
+// ------------------------------------------------------------------------------------------------ settlement
+
+/// What comes back to the engine from the executor's tasks (journaled as INPUT 9 `settled`)
+pub enum Settled {
+    /// the send task's result for one attempt (its copy sent, refused, or never left)
+    Fired { attempt: u64, fired: Fired },
+    /// one batched getSignatureStatuses: `why` `check` (the +2/+10/+60 s cross-checks) or `expiry` (the one check
+    /// before an attempt not landed is final; with `searchTransactionHistory`), one entry per (attempt, label)
+    Statuses { why: &'static str, at: Vec<(u64, &'static str)>, result: std::result::Result<Vec<Option<SigStatus>>, String>, t_ns: u64 },
+    /// a dry run's read-only simulation of a would-send bundle (sims are recorded with the attempt's id)
+    DrySim { attempt: u64, line: Value },
+}
+
+impl Settled {
+    /// the journal's INPUT 9 body
+    pub fn json(&self) -> Value {
+        match self {
+            Settled::Fired { attempt, fired } => json!({ "what": "fired", "attempt": attempt, "fired": serde_json::to_value(fired).unwrap_or(Value::Null) }),
+            Settled::Statuses { why, at, result, t_ns } => json!({ "what": "statuses", "why": why, "at": at.iter().map(|(a, l)| json!([a, l])).collect::<Vec<_>>(),
+                "result": match result { Ok(v) => serde_json::to_value(v).unwrap_or(Value::Null), Err(e) => json!({ "error": e }) }, "t_ns": t_ns }),
+            Settled::DrySim { attempt, line } => json!({ "what": "dry_sim", "attempt": attempt, "line": line }),
+        }
+    }
+}
+
+/// An attempt sent (live, canary) and not final yet
+struct Open {
+    attempt: u64,
+    decision: u64,
+    opp: u64,
+    sig: [u8; 64],
+    sig58: String,
+    mint: Pk,
+    size: u64,
+    mid: u64,
+    back: u64,
+    trig: [u8; 64],
+    trig_slot: u64,
+    expected: i64,
+    tip: u64,
+    min_profit: u64,
+    creates_ata: bool,
+    worst: u64,
+    bh_slot: u64,
+    bh_height: Option<u64>,
+    target_slot: u64,
+    leader: Option<(String, LeaderKind)>,
+    t_signed: u64,
+    t_sent: Option<u64>,
+    bundle: Option<String>,
+    path: String,
+    fired: bool,
+    took_big: bool,
+    /// cross-checks still to run (time, label) and their results
+    checks_due: Vec<(u64, &'static str)>,
+    checks: Vec<Value>,
+    /// a cross-check saw it land (evidence; the wallet record or the expiry check decides)
+    status_hit: Option<SigStatus>,
+    expiry_asked: bool,
+    /// the copy left without an answer (a timeout, a transport error): why, for its final line (review WP-05 #7)
+    send_error: Option<String>,
+    /// one of its would-fails counted toward its token's cooling already (one per attempt: review #2, #16)
+    cooled: bool,
+}
+
+/// What is remembered of a final attempt (amends, late verdicts): whether it landed and how (`src`: `statuses` when the
+/// expiry check found the landing, whose fee and events only the wallet record brings), what its landing adds to the
+/// money so far (`counted`), whether the wallet record came, whether a would-fail of it counted toward cooling
+#[derive(Clone)]
+struct Final { sig58: String, mint: Pk, landed: bool, ok: bool, tip: u64, size: u64, creates_ata: bool, src: &'static str, counted: Counted, wallet_seen: bool,
+    cooled: bool }
+
+/// the dry run's key and options
+struct Dry { key: ed25519_dalek::SigningKey, simulate: bool, sim_recent: VecDeque<u64>, sim_per_sec: usize }
+
+/// the canary's caps on top of the live ones
+#[derive(Clone, Copy)]
+struct CanaryCaps { count: u32, every_ns: u64 }
 
 pub struct Exec {
+    mode: Mode,
     payer: Pk,
     program: Pk,
     alts: Vec<Alt>,
+    alt_lists: HashMap<Pk, Arc<Vec<Pk>>>,
     pump: Option<PumpGlobal>,
     held: HashSet<Pk>,
+    /// the executor's RPC (role exec: the diagnostic simulations) and the settlement's (role settle): run-time calls are
+    /// bounded calls, never the 3 s failover or the 429 loop (item 2)
     rpc: Rpc,
+    settle: Rpc,
     rt: tokio::runtime::Handle,
     back: Sender<Event>,
+    /// live and canary only: the send paths and the bundle path's index; a shadow or dry-run executor has none
     paths: Option<Arc<Paths>>,
-    cu_price: u64,
+    bundle_path: Option<usize>,
+    jito: Option<Arc<jito::Jito>>,
+    /// live and canary: the trading key
+    key: Option<ed25519_dalek::SigningKey>,
+    dry: Option<Dry>,
+    pol: crate::config::SendPolicyCfg,
+    skip_kinds: Vec<LeaderKind>,
+    tips: Option<TipPolicy>,
+    /// the bundle path's rate (a would-send's rate model) and its rolling window
+    path_rate: usize,
+    would_recent: VecDeque<u64>,
     max_size: u64,
-    min_tip_paid: u64,
+    cap_failed_fees: u64,
+    margin_lamports: u64,
+    max_new_atas: u32,
+    canary: Option<CanaryCaps>,
     sim_rate: Option<usize>,
     sim_recent: VecDeque<u64>,
+    sim_size_max: u64,
+    cu_price: u64,
     /// sims.jsonl ([sim] enabled), attempts.jsonl, outcomes.jsonl and the diagnostic `log` events, through the recorder
     rec: Rec,
     sims_on: bool,
-    sending: Option<Sending>,
-    /// the Jito gate is on ([gate] enabled): live paid copies then need a bundle copy to wait behind
-    gate_on: bool,
-    /// [live] test_all_paths: a copy on every path whatever its tip (testing landing, not profit)
-    all_paths: bool,
-    /// [live] max_priority_lamports: the absolute cap on one trade's priority fee
-    prio_cap: u64,
-    /// [live] bid_tiers: (min expected profit for the bid tier, share of it bid, cap), or None for the old rule
-    tiers: Option<(u64, f64, u64)>,
-    /// [live] spec_cu_price_micro: the speculative tier's compute-unit price
-    spec_price: u64,
-    /// [live] rotate_paths: one path per trade, the next in turn (measurement)
-    rotate: bool,
-    /// [live] race_mix, and the path arm of the trade being built
-    mix: bool,
-    path_arm: &'static str,
-    /// [live] bundle_mix / tpu_cu_price_micro / pair_lock_ms
-    bmix: bool,
-    tpu_price: u64,
-    sim_gate: bool,
-    /// [live] compete_mult / compete_max_share / compete_ab: the TPU arm's competitive bid
-    compete_mult: f64,
-    compete_share: f64,
-    compete_ab: bool,
-    /// [live] gross_floor: the on-chain min_profit is the tip + 1, not fees + tip + margin (the send decision is unchanged)
-    gross_floor: bool,
-    tpu_max_expected: u64,
-    tpu_skip_mriya: bool,
-    tpu_skip_mints: HashSet<Pk>,
-    tpu_min_expected: u64,
-    bundle_resend_ms: Vec<u64>,
-    bundle_variants: Vec<f64>,
-    /// per token: (Jito rejections in a row, paused until (ns), pauses so far). A token whose gaps the crowd always takes
-    /// first (w5h seg 9: SPEC, 550 bundles, 0 accepted) burns the 5/s Jito budget and the nonces other tokens need.
-    mint_cool: HashMap<Pk, (u32, u64, u32)>,
-    pair_lock_ns: u64,
-    /// WP-00: the crowded pools and the band rules of live trades (big-band bucket, crowded skip)
-    band: BandGate,
-    rot: usize,
-    next_attempt: u64,
-    feeds: Vec<String>,
     pub counts: HashMap<&'static str, u64>,
-    /// stage latencies of the send (status.jsonl `latency`, A.8): `decided_to_signed`, `signed_to_fired` (handed to
-    /// the runtime: the cost of the spawn), `signed_to_sent` (the first copy's send task running, from `on_settled`)
+    /// stage latencies of the send (status.jsonl `latency`, A.8): `decided_to_signed`, `signed_to_fired` (handed to the
+    /// runtime: the cost of the spawn), `signed_to_sent` (the copy's send task running, from its fire result)
     pub lat: Vec<Series>,
-    /// WP-01: the run's SendGate (control socket pause / shadow, `--shadow`, a route program hash mismatch, a stop
-    /// request): `wants_send` refuses while it is not live
     gate: Arc<SendGate>,
-    /// the SendGate mode the last `wants_send` read (None: it returned before reading it); the engine journals it at the
-    /// decision point (review WP-03 #3)
     gate_seen: Option<GateMode>,
-    /// WP-04 item 8 / PLAN-ADDENDUM I-4: the engine's store health (warm-up, state availability). `wants_send` refuses
-    /// unless it is ready. An executor on its own (tools, tests) is always ready; `Engine::run` installs the engine's
-    health: Arc<crate::store_health::HealthFlags>,
-    /// why the last `wants_send` refused (decisions.jsonl `reason`), None when it allowed a send
+    /// WP-04 item 8 / I-4: the engine's store health. Fail closed: not ready until an engine installs its flags
+    health: Arc<HealthFlags>,
     refused: Option<String>,
+    leaders: Option<Arc<LeaderBook>>,
+    next_attempt: u64,
+    inflight: Inflight,
+    big: TokenBucket,
+    /// per token: (would-fails in a row, paused until (ns), pauses so far)
+    mint_cool: HashMap<Pk, (u32, u64, u32)>,
+    open: BTreeMap<u64, Open>,
+    by_sig: HashMap<[u8; 64], u64>,
+    finals: HashMap<u64, Final>,
+    finals_order: VecDeque<u64>,
+    feeds: Vec<String>,
+    seen: HashMap<[u8; 64], (u64, u16, Vec<(u16, u64)>)>,
+    /// the send path's network-call scope (F28): every call made between a decision and its fire counts here
+    net: Arc<AtomicU64>,
+    /// the `poh_trigger_pct` gauge every attempt is noted in (the process's, which the status line reads; tests give
+    /// their own)
+    poh_gauge: &'static crate::feeds::PohGauge,
+    // totals
+    decisions: u64,
+    refusals: u64,
+    would_sends: u64,
+    sent: u32,
+    last_sent_ns: u64,
+    landed: u32,
+    wins: u32,
+    spent: u64,
+    reserved: u64,
+    fees: u64,
+    tips_paid: u64,
+    /// the on-chain round trips of the winning landings (the last leg's output − the size, from the route program's
+    /// events): with `tips_paid` and `fees`, the bot's own net until WP-07's ledger
+    round_trip: i64,
+    /// winning landings whose round trip is not in `round_trip` (yet): found by the expiry check before their wallet
+    /// record, or without the route program's events (truncated logs). While it is not 0 the money is partial (review #3)
+    round_trip_unknown: u32,
+    /// attempts handed to the fire whose copy never left (the queue dropped it, no valid token, ...): not sends for the
+    /// canary's count (review #16)
+    never_left: u32,
+    new_atas: u32,
+    stopped: Option<&'static str>,
+    leader_seen: (u64, u64),
+    leader_prev: (u64, u64),
+    /// tests: the route instruction is built with these (amount_in, min_profit) instead of the decision's (a builder
+    /// regression the dry run's checks must catch: review #12)
+    #[cfg(test)]
+    fault_route: Option<(u64, u64)>,
 }
 
 /// `Exec::lat` series, in order
@@ -232,506 +567,36 @@ const LAT_SIGNED_TO_FIRED: usize = 1;
 const LAT_SIGNED_TO_SENT: usize = 2;
 fn exec_lat() -> Vec<Series> { ["decided_to_signed", "signed_to_fired", "signed_to_sent"].into_iter().map(Series::new).collect() }
 
-/// WP-00's band rules for live trades, apart from `copies` so they can be tested (review F8):
-/// - a route touching a crowded pool ranks last in the send paths' rate queues (F6, OD-3 default), and from
-///   `crowded_skip_min` lamports expected it is not sent at all (`live_skip_crowded_pool`, OD-3's alternative; 0 = never);
-/// - the big band (expected >= `big_min`) takes a token from a bucket (`live_skip_big_band_throttle`). `check` only
-///   peeks at the token; `commit` takes it once the attempt is built and about to fire (review F5: an attempt that
-///   then fails to build used to waste the next 2 s of big-band capacity).
-/// Canaries are never subject to them.
-pub struct BandGate { crowded: HashSet<Pk>, crowded_skip_min: u64, big_min: u64, big: TokenBucket }
-
-impl BandGate {
-    pub fn new(crowded: HashSet<Pk>, crowded_skip_min: u64, big_min: u64, big_per_sec: f64) -> BandGate {
-        BandGate { crowded, crowded_skip_min, big_min, big: TokenBucket::new(big_per_sec, 1) }
-    }
-
-    pub fn from_cfg(cfg: &Config, crowded: HashSet<Pk>) -> BandGate {
-        let l = &cfg.live;
-        BandGate::new(crowded, l.crowded_skip_min_expected_lamports, l.big_band_min_expected_lamports, l.big_band_max_per_sec)
-    }
-
-    pub fn crowded(&self) -> &HashSet<Pk> { &self.crowded }
-
-    pub fn is_crowded(&self, buy: &Pk, sell: &Pk) -> bool { self.crowded.contains(buy) || self.crowded.contains(sell) }
-
-    /// may this attempt go? Err = the skip reason (counted in status.jsonl)
-    pub fn check(&self, kind: Kind, buy: &Pk, sell: &Pk, expected: i64, now: u64) -> Result<(), &'static str> {
-        if kind != Kind::Live { return Ok(()); }
-        // 0 of 1,896 legacy crowded bundles expecting 100k or more landed: they only took budget from the rest
-        if self.crowded_skip_min > 0 && expected >= self.crowded_skip_min as i64 && self.is_crowded(buy, sell) { return Err("live_skip_crowded_pool"); }
-        // the big band (expected >= 1M: 0 of 1,869 such bundles landed, while 1,020 attempts were lost to the 5/s Jito
-        // limit) gets at most big_band_max_per_sec, so it stops crowding out the trades that do land
-        if expected >= self.big_min as i64 && !self.big.peek(now) { return Err("live_skip_big_band_throttle"); }
-        Ok(())
-    }
-
-    /// the attempt passed `check` and is going out now: a big-band one uses its token (still there: a bucket only fills)
-    pub fn commit(&mut self, kind: Kind, expected: i64, now: u64) {
-        if kind == Kind::Live && expected >= self.big_min as i64 { let _ = self.big.try_take(now); }
-    }
-}
-
 fn sol(x: f64) -> u64 { (x * 1e9) as u64 }
 fn hex_code(c: u32) -> String { format!("0x{c:x}") }
+fn sig64(s: &str) -> Option<[u8; 64]> { bs58::decode(s).into_vec().ok()?.try_into().ok() }
+fn kind_of(s: &str) -> Option<LeaderKind> { match s { "jito" => Some(LeaderKind::Jito), "bam" => Some(LeaderKind::Bam), "other" => Some(LeaderKind::Other), "unknown" => Some(LeaderKind::Unknown), _ => None } }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::send::budget::Budget;
-    use crate::venues::Venue;
-    use std::time::Duration;
-
-    /// arbx-exec REVIEW.md #8: every arbx-exec code has its own meaning, none falls through to "a venue's own error"
-    #[test]
-    fn meaning_knows_the_arbx_exec_codes() {
-        let e = Some(serde_json::json!("x"));
-        for c in 0x4e58_0001u32..=0x4e58_000c {
-            assert_ne!(super::meaning(Some(c), &e), "a venue's own error (see code)", "{c:#x}");
-        }
-        assert_eq!(super::meaning(Some(0x4e58_0009), &e).split(':').next(), Some("arbx-exec"));
-        assert_eq!(super::meaning(Some(0x4e58_0107), &e), "nexus: a leg delivered nothing");
-    }
-
-    fn key(b: u8) -> Pk { [b; 32] }
-
-    /// WP-00 acceptance (F6): a route touching a crowded pool ranks behind both other ranks
-    #[test]
-    fn crowded_pool_ranks_behind_both_other_ranks() {
-        let crowded: HashSet<Pk> = [key(9)].into_iter().collect();
-        let seed = prio_rank(&key(1), &key(2), "mriya", "ours", &crowded);
-        let other = prio_rank(&key(1), &key(2), "ours", "?", &crowded);
-        let crowd = prio_rank(&key(9), &key(2), "mriya", "mriya", &crowded);
-        assert_eq!((seed, other, crowd), (RANK_SEED, RANK_OTHER, RANK_CROWDED));
-        assert!(crowd > seed && crowd > other, "crowded queues last, even on a seed pool");
-        assert_eq!(prio_rank(&key(1), &key(9), "ours", "ours", &crowded), RANK_CROWDED, "either pool of the route");
-        assert_eq!(prio_rank(&key(9), &key(2), "ours", "ours", &HashSet::default()), RANK_OTHER, "no list: arb-lab's ranks");
-        assert!(Prio { rank: crowd, net: 0 }.crowded() && !Prio { rank: seed, net: 0 }.crowded() && !Prio { rank: other, net: 0 }.crowded());
-        // review N2: a seed pool our registry also has ("both") is a seed pool
-        assert_eq!(prio_rank(&key(1), &key(2), "ours", "both", &crowded), RANK_SEED);
-    }
-
-    /// ... and when bundles do wait for a slot, the rate queue serves it after both, even with by far the biggest
-    /// expected profit. The Budget's ordering only: Stage 0 ships without a queue (queue_ms 0; review F2: at 10 ms it
-    /// reordered nothing), so there the crowded share is cut by `BandGate` (`band_gate_cuts_the_crowded_share`).
-    /// WP-05 brings the queue back.
-    #[tokio::test(start_paused = true)]
-    async fn crowded_route_is_served_last_by_the_rate_queue() {
-        let b = Arc::new(Budget::new(1, Duration::from_millis(3_500)));
-        assert!(b.acquire(Prio::default()).await);
-        let crowded: HashSet<Pk> = [key(9)].into_iter().collect();
-        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut hs = Vec::new();
-        for (name, buy, src, net) in [("crowded-big", key(9), "ours", 1_000_000_000i64), ("other", key(1), "ours", 10), ("seed", key(1), "mriya", 1)] {
-            let prio = Prio { rank: prio_rank(&buy, &key(2), src, "ours", &crowded), net };
-            let (b, order) = (b.clone(), order.clone());
-            hs.push(tokio::spawn(async move { if b.acquire(prio).await { order.lock().unwrap().push(name); } }));
-            tokio::task::yield_now().await;
-        }
-        for h in hs { h.await.unwrap(); }
-        // one slot a second: the seed route at 1 s, the other at 2 s, the crowded one at 3 s
-        assert_eq!(*order.lock().unwrap(), vec!["seed", "other", "crowded-big"]);
-    }
-
-    /// data/crowded-pools.json: the 21 pools with 150 or more bots, with its source and date; bad entries are errors
-    #[test]
-    fn crowded_pools_file_loads() {
-        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/data/crowded-pools.json")).unwrap();
-        let set = parse_crowded_pools(&text).unwrap();
-        assert_eq!(set.len(), 21, "PATTERNS.md item 10: 21 pools with 150 or more bots");
-        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert!(v["source"].is_string() && v["date"].is_string());
-        assert!(v["pools"].as_array().unwrap().iter().all(|p| p["bots"].as_u64().unwrap() >= 150));
-        assert_eq!(parse_crowded_pools("[\"58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2\"]").unwrap().len(), 1, "a plain array");
-        assert!(parse_crowded_pools("{\"pools\": [{\"pool\": \"not-a-key\"}]}").is_err());
-        assert!(parse_crowded_pools("{\"pools\": [{\"bots\": 200}]}").is_err());
-        assert!(parse_crowded_pools("{}").is_err());
-        assert!(parse_crowded_pools("{\"pools\": []}").is_err(), "review N1: an empty list is a mistake, not a list");
-        assert!(super::load_crowded_pools("/nonexistent/crowded-pools.json").is_err(), "a configured list must load");
-    }
-
-    const S: u64 = 1_000_000_000;
-
-    /// the Stage-0 band rules (deploy/arbx-stage0.toml): crowded out from 100k, the big band at 0.5/s
-    fn stage0_gate() -> BandGate { BandGate::new([key(9)].into_iter().collect(), 100_000, 1_000_000, 0.5) }
-
-    /// WP-00 (F6, OD-3's alternative; review F2, F5, F8a): the live band rules, and canaries are never subject to them
-    #[test]
-    fn band_gate_skips_crowded_from_100k_and_throttles_the_big_band() {
-        let mut g = stage0_gate();
-        let t = 1_000 * S;
-        let (c, o) = (key(9), key(1));
-        assert_eq!(g.check(Kind::Live, &c, &o, 99_999, t), Ok(()), "a small crowded trade still goes (12 of the 20 legacy bundle wins)");
-        assert_eq!(g.check(Kind::Live, &o, &c, 100_000, t), Err("live_skip_crowded_pool"), "either pool of the route");
-        assert_eq!(g.check(Kind::Live, &c, &o, 5_000_000, t), Err("live_skip_crowded_pool"), "crowded before the big band: no token used");
-        assert_eq!(g.check(Kind::Canary, &c, &o, 5_000_000, t), Ok(()));
-        // the big band: check only peeks; the token goes with commit
-        assert_eq!(g.check(Kind::Live, &o, &key(2), 1_000_000, t), Ok(()));
-        assert_eq!(g.check(Kind::Live, &o, &key(2), 1_000_000, t), Ok(()), "an attempt that never went (no commit) took no token");
-        g.commit(Kind::Live, 1_000_000, t);
-        assert_eq!(g.check(Kind::Live, &o, &key(2), 2_000_000, t + S), Err("live_skip_big_band_throttle"));
-        assert_eq!(g.check(Kind::Live, &o, &key(2), 999_999, t + S), Ok(()), "below the band");
-        assert_eq!(g.check(Kind::Canary, &o, &key(2), 2_000_000, t + S), Ok(()), "canaries are not throttled");
-        g.commit(Kind::Canary, 2_000_000, t + S);
-        assert_eq!(g.check(Kind::Live, &o, &key(2), 2_000_000, t + 2 * S), Ok(()), "a token every 2 s; the canary used none");
-        // rank only (OD-3 default, skip 0): nothing crowded is skipped
-        let g0 = BandGate::new([key(9)].into_iter().collect(), 0, 1_000_000, 0.5);
-        assert_eq!(g0.check(Kind::Live, &c, &o, 500_000, t), Ok(()));
-    }
-
-    /// review F2: the configured policy cuts the crowded share of what is sent, and keeps every crowded trade under
-    /// 100k (where the legacy crowded wins were). Legacy mix of jito-bundle attempts (12 segments, testdata/legacy):
-    /// crowded 1,214 / 866 / 1,030 and other 437 / 614 / 621 in the bands < 100k / 100k-1M / >= 1M; 66% crowded.
-    #[test]
-    fn band_gate_cuts_the_crowded_share() {
-        // the legacy mix, interleaved deterministically, one attempt every 400 ms (about the legacy busy rate)
-        let mix = [(true, 50_000i64, 1_214u32), (true, 500_000, 866), (true, 3_000_000, 1_030), (false, 50_000, 437), (false, 500_000, 614), (false, 3_000_000, 621)];
-        let mut stream = Vec::new();
-        for (crowded, exp, n) in mix { for k in 0..n { stream.push(((k as u64 * 7_919 + exp as u64) % 4_797, crowded, exp)); } }
-        stream.sort();
-        let run = |mut g: BandGate| {
-            let (mut sent_c, mut sent_o, mut small_c) = (0u32, 0u32, 0u32);
-            for (k, (_, crowded, exp)) in stream.iter().enumerate() {
-                let t = 1_000 * S + k as u64 * 400_000_000;
-                let buy = if *crowded { key(9) } else { key(1) };
-                if g.check(Kind::Live, &buy, &key(2), *exp, t).is_ok() {
-                    g.commit(Kind::Live, *exp, t);
-                    if *crowded { sent_c += 1; if *exp < 100_000 { small_c += 1; } } else { sent_o += 1; }
-                }
-            }
-            (sent_c as f64 / (sent_c + sent_o) as f64, small_c, sent_o)
-        };
-        let (rank_only, _, other_rank_only) = run(BandGate::new([key(9)].into_iter().collect(), 0, 1_000_000, 0.5));
-        let (stage0, small, other_stage0) = run(stage0_gate());
-        // here 0.57 -> 0.42 (the legacy replay of the same rules: 0.64 -> 0.45)
-        assert!(rank_only > 0.55, "rank only: the crowded pools keep {rank_only:.2} of the sends");
-        assert!(stage0 < 0.45 && rank_only - stage0 > 0.1, "Stage 0: {stage0:.2}");
-        assert_eq!(small, 1_214, "every crowded trade under 100k still goes");
-        assert!(other_stage0 >= other_rank_only, "the big band's tokens go to the other routes: {other_stage0} vs {other_rank_only}");
-    }
-
-    // ------------------------------------------------------------ Exec wiring (review F8)
-
-    const MINT: Pk = [7u8; 32];
-
-    fn test_cfg(dir: &std::path::Path, crowded: &str) -> Config { test_cfg_live(dir, crowded, "") }
-
-    /// `extra`: more `[live]` lines
-    fn test_cfg_live(dir: &std::path::Path, crowded: &str, extra: &str) -> Config {
-        let wallet = bs58::encode(ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]).verifying_key().to_bytes()).into_string();
-        Config::parse(&format!("config_version = 2\nout_dir = \"{}\"\nwallet = \"{wallet}\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n\
-            [live]\npair_lock_ms = 0\ncrowded_pools_file = \"{crowded}\"\ncrowded_skip_min_expected_lamports = 100000\n{extra}\
-            [[send]]\nname = \"rpc0\"\nkind = \"rpc\"\nurl = \"http://127.0.0.1:1\"\n", dir.display())).unwrap()
-    }
-
-    fn damm(n: u8, t0: Pk) -> PoolMeta {
-        PoolMeta { venue: Venue::DammV2, pool: [n; 32], t0, t1: *WSOL, vault0: [n + 50; 32], vault1: [n + 100; 32],
-            t0_prog: *crate::pda::TOKEN_PROGRAM, t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![], flag: false }
-    }
-
-    /// a round trip of 1 SOL between pools `buy` and `sell` (1 or 9: 9 is on the crowded list) expecting `expected`
-    fn route(buy: u8, sell: PoolMeta, expected: u64) -> RouteIn {
-        let size = 1_000_000_000u64;
-        RouteIn { opp: buy as u64, trig: [3u8; 64], trig_feed: None, slot: 11, st: [100, 100, 200, 300, now_ns()], buy: damm(buy, MINT), sell,
-            buy_data: vec![], sell_data: vec![], buy_source: "ours", sell_source: "ours", mint: MINT, size, mid: 1_000, back: size + expected,
-            gross_at_opp: expected as i64, net_at_opp: expected as i64, trig_cu_price: None, rival_cu_price: None, cu: 100_000,
-            buy_live: vec![], sell_live: vec![], buy_end: None, sell_end: None, state_version: 0, route_age_ms: None, decision: 0 }
-    }
-
-    struct Rig { x: Exec, dir: std::path::PathBuf, rec: Rec }
-    impl Drop for Rig { fn drop(&mut self) { self.rec.close(); let _ = std::fs::remove_dir_all(&self.dir); } }
-
-    /// a recorder in `dir` (no monitor thread)
-    fn test_rec(dir: &std::path::Path) -> Rec {
-        rec::start(rec::Opts { dir: dir.to_path_buf(), run: "test".into(), producer: "test".into(), cfg: Default::default(), feeds: vec![], monitor: false, echo: None }).unwrap()
-    }
-
-    /// a live Exec on a made-up wallet (no network: the one send path is a closed local port), three nonces
-    async fn live_rig(name: &str) -> Rig { live_rig_with(name, "").await.0 }
-
-    /// a live rig with more `[live]` lines; also the events the executor sends back (settlements)
-    async fn live_rig_with(name: &str, extra: &str) -> (Rig, crossbeam_channel::Receiver<Event>) {
-        let dir = std::env::temp_dir().join(format!("arbx-exec-{name}-{}-{}", std::process::id(), now_ns()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let rec = test_rec(&dir);
-        let (x, rx) = live_exec(&dir, &rec, extra).await;
-        (Rig { x, dir, rec }, rx)
-    }
-
-    /// a live Exec recording into `rec` (see `live_rig`)
-    async fn live_exec(dir: &std::path::Path, rec: &Rec, extra: &str) -> (Exec, crossbeam_channel::Receiver<Event>) {
-        let crowded_file = dir.join("crowded.json");
-        std::fs::write(&crowded_file, format!("[\"{}\"]", bs58::encode([9u8; 32]).into_string())).unwrap();
-        let cfg = test_cfg_live(dir, crowded_file.to_str().unwrap(), extra);
-        let rec = rec.clone();
-        let (paths, _) = Paths::new(&cfg.sends, cfg.gate.clone(), rec.clone(), false).await.unwrap();
-        let key = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
-        let nonces = (0..3u8).map(|k| NonceSlot { acct: [200 + k; 32], value: Some([k; 32]), busy: None }).collect();
-        let sending = Sending::new(&cfg, Kind::Live, key, nonces);
-        let held: HashSet<Pk> = [*WSOL, MINT].into_iter().collect();
-        let (tx, rx) = crossbeam_channel::unbounded();
-        let band = BandGate::from_cfg(&cfg, load_crowded_pools(&cfg.live.crowded_pools_file).unwrap());
-        let x = Exec::assemble(&cfg, Rpc::race(vec![]), Some(paths), rec.clone(), tx, vec![], vec![], None, held, Some(sending), band).unwrap();
-        (x, rx)
-    }
-
-    /// attempts.jsonl as written so far (through the recorder: attempts.000.jsonl.zst, its header skipped)
-    fn attempts(r: &Rig) -> Vec<Value> {
-        r.rec.sync();
-        rec::read_jsonl(&r.dir, "attempts").unwrap()
-    }
-    fn n(x: &Exec, k: &str) -> u64 { x.counts.get(k).copied().unwrap_or(0) }
-
-    /// review F8 (a, b) and F5 through `Exec::send`: the attempt line carries `crowded`, `queue_rank` and `st.fired`
-    /// (after `signed`: the line is written after the copies were handed to the send paths); a crowded route from 100k
-    /// and a second big-band trade inside 2 s are skipped; a big-band attempt that fails to build uses no token
-    #[tokio::test]
-    async fn send_writes_the_queue_fields_and_applies_the_band_rules() {
-        let mut r = live_rig("send").await;
-        // a big-band trade whose sell leg cannot be built (wrong mints): no copy, and the token stays
-        r.x.send(route(1, damm(2, [8u8; 32]), 2_000_000));
-        assert_eq!(n(&r.x, "live_skip_no_copy_worth_sending"), 1);
-        assert!(attempts(&r).is_empty());
-        // a small crowded trade goes, ranked last
-        r.x.send(route(9, damm(2, MINT), 50_000));
-        // a big-band trade goes (the failed one above used no token) ...
-        r.x.send(route(1, damm(3, MINT), 2_000_000));
-        // ... and the next one inside 2 s is throttled; a crowded one from 100k is skipped
-        r.x.send(route(1, damm(4, MINT), 3_000_000));
-        r.x.send(route(9, damm(5, MINT), 200_000));
-        let x = &r.x;
-        assert_eq!((n(x, "live_sent"), n(x, "rank_crowded"), n(x, "live_skip_big_band_throttle"), n(x, "live_skip_crowded_pool")), (2, 1, 1, 1));
-        let a = attempts(&r);
-        assert_eq!(a.len(), 2);
-        assert_eq!((a[0]["crowded"].as_bool(), a[0]["queue_rank"].as_u64()), (Some(true), Some(RANK_CROWDED as u64)));
-        assert_eq!((a[1]["crowded"].as_bool(), a[1]["queue_rank"].as_u64()), (Some(false), Some(RANK_OTHER as u64)));
-        for l in &a {
-            let st = &l["st"];
-            let (signed, fired) = (st["signed"].as_u64().unwrap(), st["fired"].as_u64().expect("fired: no sim gate"));
-            assert!(fired >= signed && signed >= st["built"].as_u64().unwrap());
-            assert_eq!(st["rx"].as_u64(), Some(100));
-        }
-        assert_eq!((x.lat[LAT_DECIDED_TO_SIGNED].n(), x.lat[LAT_SIGNED_TO_FIRED].n()), (2, 2));
-    }
-
-    /// PLAN WP-01 acceptance (control test): `pause-sending` through the control socket makes `wants_send` return None
-    /// and writes a control.jsonl line; `resume-sending` lets it send again; a stop request closes it for good
-    #[tokio::test]
-    async fn control_pause_closes_wants_send() {
-        use crate::control::{self, StopInfo, StopReason};
-        let mut r = live_rig("ctl").await;
-        let sess = control::Session::new();
-        sess.set_dir(r.dir.clone());
-        r.x.set_gate(sess.gate.clone());
-        let size = r.x.sending.as_ref().unwrap().size;
-        assert_eq!(r.x.wants_send(), Some(size), "live: may send");
-        let _srv = control::serve(sess.clone(), &r.dir).unwrap();
-        let rep = control::send_command(&r.dir, "pause-sending", "moiz", "WP-01 control test").unwrap();
-        assert_eq!((rep["accepted"].as_bool(), rep["send_gate"]["mode"].as_str()), (Some(true), Some("shadow")));
-        assert_eq!(r.x.wants_send(), None, "paused");
-        assert_eq!(n(&r.x, "reject_gate_shadow"), 1);
-        let log: Vec<Value> = std::fs::read_to_string(r.dir.join("control.jsonl")).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-        assert_eq!(log.len(), 1);
-        assert_eq!((log[0]["src"].as_str(), log[0]["cmd"].as_str(), log[0]["who"].as_str(), log[0]["why"].as_str(), log[0]["accepted"].as_bool(), log[0]["result"].as_str()),
-            (Some("socket"), Some("pause-sending"), Some("moiz"), Some("WP-01 control test"), Some(true), Some("shadow")));
-        assert!(control::send_command(&r.dir, "resume-sending", "moiz", "done").unwrap()["accepted"].as_bool().unwrap());
-        assert!(r.x.wants_send().is_some(), "resumed");
-        sess.stopper.request(StopInfo::new(StopReason::Signal, "SIGINT"));
-        assert_eq!(r.x.wants_send(), None, "stopping");
-        assert_eq!(n(&r.x, "reject_gate_stopped"), 1);
-        assert!(!control::send_command(&r.dir, "resume-sending", "moiz", "again").unwrap()["accepted"].as_bool().unwrap());
-    }
-
-    /// review WP-03 #3: the SendGate mode each send check saw is journaled on the engine thread at the decision (INPUT
-    /// gate, `src` "decision", with the opportunity's id) whenever it differs from the last one journaled, and is part
-    /// of the decision digest; the live gate still decides (a pause closes the very next check)
-    #[tokio::test]
-    async fn the_gate_each_send_check_saw_is_journaled() {
-        use crate::config::StrategyCfg;
-        use crate::engine::Engine;
-        use crate::rec::journal::{self, JBody};
-        let dir = std::env::temp_dir().join(format!("arbx-exec-gatej-{}-{}", std::process::id(), now_ns()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let rec = test_rec(&dir);
-        let (mut x, _rx) = live_exec(&dir, &rec, "").await;
-        let gate = SendGate::new();
-        x.set_gate(gate.clone());
-        // two AMM v4 pools on MINT / WSOL
-        let amm = |n: u8| PoolMeta { venue: Venue::RayAmmV4, pool: [n; 32], t0: MINT, t1: *WSOL, vault0: [n + 10; 32], vault1: [n + 20; 32],
-            t0_prog: *crate::pda::TOKEN_PROGRAM, t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![], flag: false };
-        let vault = |amount: u64| -> Arc<[u8]> { let mut v = vec![0u8; 165]; v[64..72].copy_from_slice(&amount.to_le_bytes()); v.into() };
-        let pool_data: Arc<[u8]> = { let mut p = vec![0u8; 752]; p[0..8].copy_from_slice(&1u64.to_le_bytes()); p[176..184].copy_from_slice(&25u64.to_le_bytes());
-            p[184..192].copy_from_slice(&10_000u64.to_le_bytes()); p.into() };
-        let (a, b) = (amm(1), amm(2));
-        let mut reg = crate::pools::Registry { pools: vec![a.clone(), b.clone()], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
-        reg.by_pool.insert(a.pool, 0);
-        reg.by_pool.insert(b.pool, 1);
-        reg.pairs.insert(crate::pools::pair_key(&MINT, &WSOL), vec![0, 1]);
-        let mut store = crate::store::Store::default();
-        for (m, sol) in [(&a, 1_000u64), (&b, 1_010)] {
-            store.update(m.pool, pool_data.clone(), 10, 1, None);
-            store.update(m.vault0, vault(1_000_000_000_000_000), 10, 1, None);
-            store.update(m.vault1, vault(sol * 1_000_000_000), 10, 1, None);
-        }
-        let mut e = Engine::new_offline(Arc::new(reg), store, StrategyCfg { state_triggers: true, ..StrategyCfg::default() });
-        e.set_rec(rec.clone());
-        // WP-04: the executor follows the engine's health (as `Engine::run` installs it)
-        x.set_health(e.health_flags());
-        e.exec = Some(x);
-        let mut status = |_: &str| {};
-        let mut t = 1_791_000_000_000_000_000u64;
-        // the stream delivers and Tier A is complete: the warm-up gate opens (WP-04)
-        e.step(Event::Slot { slot: 12, status: 0, t, parent: Some(11), dead_error: None, bank_id: None }, t, &mut status);
-        t += 6_000_000;
-        e.timers(t, &mut status);
-        // three transactions, each moving one pool ~3% above the other: live, then paused (twice). Their groups resolve by
-        // quiescence (W unknown) at the timers 4 ms later
-        for (n, sol, pause) in [(0u8, 1_030u64, false), (1, 1_060, true), (2, 1_090, false)] {
-            if pause { gate.shadow("control", "pause-sending by test", false).unwrap(); }
-            let m = if n % 2 == 0 { &a } else { &b };
-            let txn = [n + 50; 64];
-            for (k, data) in [(m.vault1, vault(sol * 1_000_000_000)), (m.vault0, vault(1_000_000_000_000_000 - n as u64))] {
-                t += 1_000;
-                e.step(Event::Account { slot: 12, pubkey: k, owner: [3; 32], lamports: 1, data, t, txn: Some(txn), write_version: t, is_startup: false,
-                    src: 0, aseq: 0, bank_id: None }, t, &mut status);
-            }
-            t += 4_000_000;
-            e.timers(t, &mut status);
-        }
-        let x = e.exec.as_ref().unwrap();
-        assert_eq!((n(x, "reject_gate_shadow"), x.gate_seen()), (2, Some(GateMode::Shadow)), "the live gate decided the last two");
-        rec.close();
-        let j = journal::read_dir(&dir).unwrap();
-        let seen: Vec<(String, u64)> = j.iter().filter_map(|r| match &r.body {
-            JBody::Input { kind: 3, data } if data["src"] == "decision" => Some((data["mode"].as_str().unwrap().to_string(), data["opp"].as_u64().unwrap())),
-            _ => None,
-        }).collect();
-        assert_eq!(seen, vec![("live".to_string(), 0), ("shadow".to_string(), 1)], "one record per change, at the decision that saw it");
-        // the shadow record carries the reason, and sits right after the input whose handling made the decision
-        let i = j.iter().position(|r| matches!(&r.body, JBody::Input { kind: 3, data } if data["mode"] == "shadow")).unwrap();
-        assert!(matches!(j[i].body, JBody::Input { ref data, .. } if data["reason"] == "control"));
-        assert!(matches!(j[i - 1].body, JBody::Timer { .. }) && j[i - 1].t_engine == j[i].t_engine, "{:?}", j[i - 1]);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// WP-04 item 8 / PLAN-ADDENDUM I-4 (the wants_send hook; WP-05's send_checks takes the same flags): the executor
-    /// refuses while the engine is warming up or its state is unavailable, and says why (decisions.jsonl `reason`)
-    #[tokio::test]
-    async fn wants_send_refuses_unless_the_store_is_ready() {
-        use crate::store_health::{HealthFlags, Shut};
-        let mut r = live_rig("health").await;
-        assert!(r.x.wants_send().is_some(), "an executor on its own is ready");
-        let h = Arc::new(HealthFlags::default());
-        r.x.set_health(h.clone());
-        assert!(r.x.wants_send().is_none());
-        assert_eq!((r.x.refusal().as_deref(), n(&r.x, "reject_warmup")), (Some("warmup"), 1));
-        h.set(Shut::StateUnavailable);
-        assert!(r.x.wants_send().is_none());
-        assert_eq!((r.x.refusal().as_deref(), n(&r.x, "reject_state_unavailable")), (Some("state_unavailable"), 1));
-        // review WP-04 #1: the re-read after a (re)connection has not landed
-        h.set(Shut::Resync);
-        assert!(r.x.wants_send().is_none());
-        assert_eq!((r.x.refusal().as_deref(), n(&r.x, "reject_resync")), (Some("resync"), 1));
-        h.set(Shut::Ready);
-        assert!(r.x.wants_send().is_some() && r.x.refusal().is_none(), "ready: allowed");
-        // the gate still comes first, with its reason
-        let g = SendGate::new();
-        g.shadow("control", "test", false).unwrap();
-        r.x.set_gate(g);
-        assert!(r.x.wants_send().is_none());
-        assert_eq!(r.x.refusal().as_deref(), Some("gate_shadow:control"));
-    }
-
-    /// review M10: a send deferred past the decision (the sim gate re-checks the route first) is cancelled when the
-    /// SendGate closes in between: the attempt settles as not sent, nothing is fired
-    #[tokio::test]
-    async fn a_pause_cancels_a_deferred_send() {
-        use crate::control::{self, StopInfo, StopReason};
-        for stop in [false, true] {
-            let (mut r, rx) = live_rig_with(if stop { "defer-stop" } else { "defer-pause" }, "sim_gate = true\n").await;
-            let sess = control::Session::new();
-            r.x.set_gate(sess.gate.clone());
-            r.x.send(route(1, damm(3, MINT), 50_000));
-            assert_eq!(n(&r.x, "live_sent"), 1, "decided and signed while the gate was open");
-            assert!(attempts(&r)[0]["st"]["fired"].is_null(), "the sim gate fires later, from the task");
-            // the task has not run yet (current-thread runtime): close the gate first
-            if stop { sess.stopper.request(StopInfo::new(StopReason::Signal, "SIGINT")); } else { sess.gate.shadow("control", "pause-sending by test", false).unwrap(); }
-            let t0 = std::time::Instant::now();
-            let settled = loop {
-                if let Ok(Event::Settled(s)) = rx.try_recv() { break s; }
-                assert!(t0.elapsed() < std::time::Duration::from_secs(10), "no settlement");
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            };
-            assert!(settled.fired.copies.is_empty(), "nothing was fired");
-            let want = if stop { "(stopped)" } else { "(shadow)" };
-            assert!(settled.error.as_deref().is_some_and(|e| e.contains("send gate closed before the deferred send") && e.contains(want)), "{:?}", settled.error);
-        }
-    }
-
-    /// review F8 (c): a configured crowded list that does not load stops the start, before any RPC call
-    #[tokio::test]
-    async fn exec_new_fails_closed_on_a_missing_crowded_file() {
-        let dir = std::env::temp_dir().join(format!("arbx-exec-crowded-{}-{}", std::process::id(), now_ns()));
-        let cfg = test_cfg(&dir, "/nonexistent/crowded-pools.json");
-        let (tx, _rx) = crossbeam_channel::unbounded();
-        let e = Exec::new(&cfg, &Rpc::race(vec![]), None, Rec::off(), tx, vec![], None, vec![]).await.err().expect("refused");
-        assert!(format!("{e:#}").contains("crowded_pools_file"), "{e:#}");
-    }
-
-    #[test]
-    fn fee_rule() {
-        // copy 0.95x the trigger, but a failed send may cost at most a quarter of the expected profit, never below 40,000
-        assert_eq!(super::fee_rule(true, Some(100_000), 1_000_000, 200_000), (95_000, "trigger"));
-        assert_eq!(super::fee_rule(true, Some(10_000_000), 100_000, 200_000), (125_000, "trigger"), "capped: 25,000 lamports on 200k CU");
-        assert_eq!(super::fee_rule(true, Some(1_000), 1_000_000, 200_000), (40_000, "trigger"), "floor");
-        assert_eq!(super::fee_rule(false, Some(100_000), 1_000_000, 200_000), (40_000, "flat"));
-        assert_eq!(super::fee_rule(true, None, 1_000_000, 200_000), (40_000, "flat"), "no trigger bid to copy");
-    }
+/// What the engine records for a decision the executor saw (decisions.jsonl `verdict`, `reason`, `attempt`, `sent`,
+/// `would_send`, `reason_ungated`, `crowding`, `ev`, `rank`, `band`). `reason` follows `send_checks`' order (a closed
+/// gate first); with the gate closed, `reason_ungated` is the first other check that would have refused the decision
+/// (null: it is a would-send: every other check passed and its bundle was built, PLAN-ADDENDUM I-7). `band` is the
+/// executor's (at the size it would trade: the queue's and the tip's band; review WP-05 #9), once it reached the route
+/// checks
+#[derive(Clone, Debug, PartialEq)]
+pub struct Decided {
+    pub verdict: &'static str,
+    pub reason: String,
+    pub attempt: Option<u64>,
+    pub sent: Option<bool>,
+    pub would_send: bool,
+    pub reason_ungated: Option<String>,
+    pub crowding: Option<Crowding>,
+    pub ev: Option<i64>,
+    pub rank: Option<u8>,
+    pub band: Option<u8>,
 }
 
-/// what a nexus-v2 or venue error code means, in words
-pub fn meaning(code: Option<u32>, err: &Option<Value>) -> &'static str {
-    match (code, err) {
-        (_, None) => "ok",
-        (Some(build::ERR_PROFIT), _) => "profit check: every leg ran, the round trip did not pay",
-        (Some(0x4e58_0001), _) => "nexus: bad instruction data",
-        (Some(0x4e58_0003), _) => "nexus: a leg program is not allowlisted",
-        (Some(0x4e58_0004), _) => "nexus: an output or quote account is not a token account",
-        (Some(0x4e58_0005), _) => "nexus: payer guard",
-        (Some(0x4e58_0006), _) => "nexus: token guard",
-        (Some(0x4e58_0007), _) => "nexus: a leg named a foreign signer",
-        // arbx-exec only (program/arbx-exec REVIEW.md #8): its v2 path can return 0x4e580009 where nexus-arb-v2 gave
-        // ERR_PROFIT or PrivilegeEscalation; the others come from its v3 layout
-        (Some(build::arbx_v3::ERR_UNSUPPORTED), _) => "arbx-exec: a reserved v3 feature flag is set",
-        (Some(build::arbx_v3::ERR_BAD_ACCOUNTS), _) => "arbx-exec: account structure (last leg not into the quote, output = input, NATIVE_OUT slot, read-only authority, or a quote/output not owned by the authority)",
-        (Some(build::arbx_v3::ERR_TIP_ACCOUNT), _) => "arbx-exec: CPI tip account or System program slot wrong",
-        (Some(build::arbx_v3::ERR_TIP_FUNDS), _) => "arbx-exec: the CPI tip would leave the authority below rent exemption",
-        (Some(build::arbx_v3::ERR_QUOTE_NOT_WSOL), _) => "arbx-exec: COUNT_LAMPORTS or CPI_TIP needs a wSOL quote account",
-        (Some(c), _) if (0x4e58_0100..0x4e58_0108).contains(&c) => "nexus: a leg delivered nothing",
-        (Some(3005), _) => "anchor: not enough accounts (bin/tick arrays)",
-        (Some(1), _) => "token: insufficient funds",
-        (Some(_), _) => "a venue's own error (see code)",
-        (None, Some(_)) => "not a program error (see err)",
+impl Decided {
+    pub fn reject(reason: impl Into<String>) -> Decided {
+        Decided { verdict: "reject", reason: reason.into(), attempt: None, sent: None, would_send: false, reason_ungated: None, crowding: None, ev: None, rank: None,
+            band: None }
     }
-}
-
-/// The compute-unit price for one attempt: 0.95x the trigger's ("trigger") or the flat 40,000 ("flat"); the priority
-/// fee then capped at a quarter of the expected profit, but never below the flat floor Helius Sender requires.
-pub fn fee_rule(trigger_arm: bool, trig: Option<u64>, expected_profit: i64, cu_limit: u64) -> (u64, &'static str) {
-    let (want, arm) = match (trigger_arm, trig) { (true, Some(t)) => (((t as f64) * TRIGGER_SHARE) as u64, "trigger"), _ => (FLAT_CU_PRICE, "flat") };
-    let cap = if cu_limit == 0 { u64::MAX } else { ((expected_profit.max(0) as f64 * MAX_FEE_SHARE_OF_PROFIT) * 1e6 / cu_limit as f64) as u64 };
-    (want.min(cap).max(FLAT_CU_PRICE), arm)
-}
-
-/// The rate-queue rank of a route (`Prio::rank`; lower goes first when a send path's budget is short). WP-00 (F6): a
-/// route touching a pool on the crowded list ranks last, behind every other route: 49% of our attempts went to the 21
-/// pools with 150 or more bots, where we won 0.4% (PATTERNS.md item 10). Otherwise the seed pools first: source
-/// "mriya", or "both" (a seed pool our registry also has; review N2: arb-lab ranked those 1).
-pub fn prio_rank(buy: &Pk, sell: &Pk, buy_source: &str, sell_source: &str, crowded: &HashSet<Pk>) -> u8 {
-    let seed = |s: &str| s == "mriya" || s == "both";
-    if crowded.contains(buy) || crowded.contains(sell) { RANK_CROWDED }
-    else if seed(buy_source) || seed(sell_source) { RANK_SEED }
-    else { RANK_OTHER }
 }
 
 /// The crowded-pool list (data/crowded-pools.json): `{"pools": [{"pool": "<base58>", ...}, ...]}`, or a plain array of
@@ -754,37 +619,67 @@ pub fn parse_crowded_pools(text: &str) -> Result<HashSet<Pk>> {
         out.insert(k);
     }
     // review N1: an empty list ranks and skips nothing; that is "no file", not a list
-    anyhow::ensure!(!out.is_empty(), "no pool listed (leave [live] crowded_pools_file empty for none)");
+    anyhow::ensure!(!out.is_empty(), "no pool listed (leave [send_policy] crowded_pools_file empty for none)");
     Ok(out)
 }
 
 pub fn load_crowded_pools(path: &str) -> Result<HashSet<Pk>> {
-    let text = std::fs::read_to_string(path).with_context(|| format!("[live] crowded_pools_file {path}"))?;
-    parse_crowded_pools(&text).with_context(|| format!("[live] crowded_pools_file {path}"))
+    let text = std::fs::read_to_string(path).with_context(|| format!("[send_policy] crowded_pools_file {path}"))?;
+    parse_crowded_pools(&text).with_context(|| format!("[send_policy] crowded_pools_file {path}"))
 }
 
+/// a throwaway signing key for the dry run, made in memory from the OS's randomness (never written anywhere)
+pub fn ephemeral_key() -> Result<ed25519_dalek::SigningKey> {
+    use std::io::Read;
+    let mut seed = [0u8; 32];
+    std::fs::File::open("/dev/urandom").context("/dev/urandom")?.read_exact(&mut seed)?;
+    let k = ed25519_dalek::SigningKey::from_bytes(&seed);
+    seed.fill(0);
+    Ok(k)
+}
+
+/// One built bundle transaction
+struct Built { msg: build::Message, cu_limit: u64, creates_ata: bool }
+
 impl Exec {
-    /// Everything off the hot path: lookup tables, PumpSwap's GlobalConfig, the wallet's token accounts, the nonce.
+    /// Everything off the hot path: lookup tables, PumpSwap's GlobalConfig, the wallet's token accounts. `mode`: what to
+    /// arm; `key`: the trading key (live, canary: the config's wallet, unlocked by the caller), the dry run's throwaway key,
+    /// or none (shadow). `paths`: the send paths (live and canary only; a dry run refuses them: nothing in it may send)
     #[allow(clippy::too_many_arguments)]
     pub async fn new(cfg: &Config, rpc_all: &Rpc, paths: Option<Arc<Paths>>, rec: Rec, back: Sender<Event>, feeds: Vec<String>,
-        send_key: Option<(Kind, ed25519_dalek::SigningKey)>, mints: Vec<(Pk, Pk)>) -> Result<(Exec, Vec<String>)> {
+        mode: Mode, key: Option<ed25519_dalek::SigningKey>, mints: Vec<(Pk, Pk)>) -> Result<(Exec, Vec<String>)> {
         let mut notes = Vec::new();
+        let payer = pk(&cfg.wallet);
         // a configured crowded list must load, first, before any RPC call (fail closed: a missing file would silently put
         // the crowded pools back in front)
-        let crowded = if cfg.live.crowded_pools_file.is_empty() { HashSet::default() } else {
-            let c = load_crowded_pools(&cfg.live.crowded_pools_file)?;
-            let skip = match cfg.live.crowded_skip_min_expected_lamports { 0 => String::new(), m => format!(", not sent from {m} lamports expected") };
-            notes.push(format!("crowded pools: {} from {} rank last in the send queues{skip}", c.len(), cfg.live.crowded_pools_file));
-            c
-        };
+        let crowded = if cfg.send_policy.crowded_pools_file.is_empty() { None } else { Some(load_crowded_pools(&cfg.send_policy.crowded_pools_file)?) };
+        if let Some(c) = &crowded { notes.push(format!("crowded pools: {} from {} (bucket 2 until the activity map holds {} h)", c.len(), cfg.send_policy.crowded_pools_file, cfg.send_policy.crowding_window_h)); }
+        match mode {
+            Mode::Live | Mode::Canary => {
+                let k = key.as_ref().context("a live or canary executor needs the trading key")?;
+                anyhow::ensure!(k.verifying_key().to_bytes() == payer, "the trading key is not the config's wallet {}", cfg.wallet);
+                crate::config::bundle_only(&cfg.sends).context("PLAN WP-05: live sends are bundle-only")?;
+                let p = paths.as_ref().context("a live or canary executor needs its send paths")?;
+                anyhow::ensure!(p.bundle_path().is_some(), "no jito-bundle send path was built (see the send path notes)");
+            }
+            Mode::DryRun => {
+                anyhow::ensure!(paths.is_none(), "a dry run builds no send path: nothing in it may transmit");
+                let k = key.as_ref().context("a dry run needs its throwaway key")?;
+                anyhow::ensure!(k.verifying_key().to_bytes() != payer, "the dry run's key must not be the trading wallet's");
+            }
+            Mode::Shadow => anyhow::ensure!(key.is_none(), "a shadow executor holds no key"),
+        }
         let rpc = rpc_all.only(&cfg.exec.rpc);
-        anyhow::ensure!(!rpc.is_empty(), "[exec] rpc names {:?}: none of them is a configured, available [rpc] endpoint", cfg.exec.rpc);
-        let payer = pk(&cfg.wallet);
+        let rpc = if rpc.is_empty() {
+            anyhow::ensure!(mode == Mode::Shadow, "[exec] rpc names {:?}: none of them is a configured, available [rpc] endpoint", cfg.exec.rpc);
+            notes.push(format!("[exec] rpc {:?} unavailable: the shadow executor reads through the run's providers", cfg.exec.rpc));
+            rpc_all.with_role(crate::rpc::Role::Exec)
+        } else { rpc };
         let alt_keys: Vec<Pk> = cfg.exec.alts.iter().map(|a| pk(a)).collect();
         let (_, accts) = rpc.accounts(&alt_keys).await.context("lookup tables")?;
         let mut alts = Vec::new();
         for (k, a) in alt_keys.iter().zip(accts) {
-            match a.and_then(|a| crate::tx::parse_alt(&a.data)) { Some(addrs) => alts.push(Alt::new(*k, &addrs)), None => notes.push(format!("lookup table {} not found, skipped", b58(k))) }
+            match a.and_then(|a| crate::tx::parse_alt(&a.data)) { Some(addrs) => alts.push((*k, addrs)), None => notes.push(format!("lookup table {} not found, skipped", b58(k))) }
         }
         let (_, g) = rpc.accounts(&[*build::PUMP_GLOBAL_CONFIG]).await.context("PumpSwap GlobalConfig")?;
         let pump = g.into_iter().next().flatten().and_then(|a| build::decode_pump_global(&a.data));
@@ -797,80 +692,106 @@ impl Exec {
         let atas: Vec<Pk> = cands.iter().map(|(m, p)| build::ata_of(&payer, m, p)).collect();
         let (_, accts) = rpc.accounts(&atas).await.context("wallet token accounts")?;
         let held: HashSet<Pk> = cands.iter().zip(accts).filter(|(_, a)| a.is_some()).map(|((m, _), _)| *m).collect();
-        anyhow::ensure!(held.contains(&*WSOL), "wallet {} has no WSOL account: every route starts from it", cfg.wallet);
-        let mut sending = None;
-        if let Some((kind, key)) = send_key {
-            let accts: Vec<String> = match kind { Kind::Canary => vec![cfg.canary.nonce_account.clone()], Kind::Live => cfg.live.nonce_accounts.clone() };
-            let keys: Vec<Pk> = accts.iter().map(|a| pk(a)).collect();
-            let (_, ns) = rpc.accounts(&keys).await.context("nonce accounts")?;
-            let mut nonces = Vec::new();
-            for (k, n) in keys.iter().zip(ns) {
-                let n = n.with_context(|| format!("nonce account {} not found", b58(k)))?;
-                anyhow::ensure!(n.data.len() >= 72 && n.data[8..40] == payer, "nonce account {}: its authority is not the wallet", b58(k));
-                nonces.push(NonceSlot { acct: *k, value: build::nonce_value(&n.data), busy: None });
-            }
-            let (c, l) = (&cfg.canary, &cfg.live);
-            let s = Sending::new(cfg, kind, key, nonces);
-            notes.push(match kind {
-                Kind::Canary => format!("canaries armed: {} of {} SOL, every {} ms, cap {} lamports, nonce {}", c.count, c.size_sol, c.every_ms, c.max_spend_lamports, accts.join(",")),
-                Kind::Live => format!("LIVE TRADING armed: at most {} SOL a trade, stop after {} lamports of failed fees, at most {} new token accounts, {} nonce accounts",
-                    l.max_size_sol, l.max_failed_fees_lamports, l.max_new_token_accounts, s.nonces.len()),
-            });
-            sending = Some(s);
+        if !held.contains(&*WSOL) {
+            anyhow::ensure!(!mode.sends(), "wallet {} has no WSOL account: every route starts from it", cfg.wallet);
+            notes.push(format!("wallet {} has no WSOL account: a live run would refuse to start", cfg.wallet));
         }
-        Ok((Exec::assemble(cfg, rpc, paths, rec, back, feeds, alts, pump, held, sending, BandGate::from_cfg(cfg, crowded))?, notes))
+        let x = Exec::assemble(cfg, rpc, paths, rec, back, feeds, alts, pump, held, mode, key)?;
+        notes.push(match mode {
+            Mode::Live => format!("LIVE TRADING armed: bundle-only, at most {} SOL a trade, stop after {} lamports of failed fees", cfg.live.max_size_sol, cfg.live.max_failed_fees_lamports),
+            Mode::Canary => format!("CANARY armed: live bundles of at most {} SOL, {} attempts, {} ms apart, stop after {} lamports of failed fees", cfg.canary.size_sol,
+                cfg.canary.count, cfg.canary.every_ms, cfg.canary.max_spend_lamports),
+            Mode::Shadow => "shadow: every send check up to the signature; would-sends recorded with sent = false (PLAN-ADDENDUM I-7)".into(),
+            Mode::DryRun => format!("DRY RUN: would-sends built and signed by the throwaway key {} (payer {}), recorded in full, never sent{}",
+                x.dry.as_ref().map(|d| b58(&d.key.verifying_key().to_bytes())).unwrap_or_default(), cfg.wallet, if cfg.dry_run.simulate { "; simulated read-only" } else { "" }),
+        });
+        Ok((x, notes))
     }
 
     /// The executor from what `new` fetched (or a test made up): no network here. Needs a tokio runtime.
     #[allow(clippy::too_many_arguments)]
-    fn assemble(cfg: &Config, rpc: Rpc, paths: Option<Arc<Paths>>, rec: Rec, back: Sender<Event>, feeds: Vec<String>,
-        alts: Vec<Alt>, pump: Option<PumpGlobal>, held: HashSet<Pk>, sending: Option<Sending>, band: BandGate) -> Result<Exec> {
+    pub fn assemble(cfg: &Config, rpc: Rpc, paths: Option<Arc<Paths>>, rec: Rec, back: Sender<Event>, feeds: Vec<String>,
+        alts: Vec<(Pk, Vec<Pk>)>, pump: Option<PumpGlobal>, held: HashSet<Pk>, mode: Mode, key: Option<ed25519_dalek::SigningKey>) -> Result<Exec> {
         let payer = pk(&cfg.wallet);
-        let min_tip_paid = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.tip_lamports).max().unwrap_or(0);
-        Ok(Exec { payer, program: pk(&cfg.exec.program), alts, pump, held, rpc, rt: tokio::runtime::Handle::current(), back, paths,
-            cu_price: cfg.strategy.cu_price_micro, max_size: sol(cfg.exec.max_size_sol), min_tip_paid,
-            sim_rate: cfg.sim.enabled.then_some(cfg.sim.max_per_sec as usize), sim_recent: VecDeque::new(),
-            rec, sims_on: cfg.sim.enabled,
-            sending, gate_on: cfg.gate.enabled, all_paths: cfg.live.test_all_paths, prio_cap: cfg.live.max_priority_lamports,
-            spec_price: cfg.live.spec_cu_price_micro, rotate: cfg.live.rotate_paths, mix: cfg.live.race_mix, path_arm: "", bmix: cfg.live.bundle_mix, tpu_price: cfg.live.tpu_cu_price_micro, sim_gate: cfg.live.sim_gate, compete_mult: cfg.live.compete_mult, compete_share: cfg.live.compete_max_share, compete_ab: cfg.live.compete_ab, gross_floor: cfg.live.gross_floor, tpu_max_expected: cfg.live.tpu_max_expected_lamports, tpu_skip_mriya: cfg.live.tpu_skip_mriya_pools, tpu_skip_mints: cfg.live.tpu_skip_mints.iter().map(|m| pk(m)).collect(), tpu_min_expected: cfg.live.tpu_min_expected_lamports, bundle_resend_ms: cfg.live.bundle_resend_ms.clone(), bundle_variants: cfg.live.bundle_size_variants.clone(), mint_cool: HashMap::default(), pair_lock_ns: cfg.live.pair_lock_ms * 1_000_000,
-            band, rot: 0,
-            tiers: cfg.live.bid_tiers.then_some((cfg.live.bid_min_expected_lamports, cfg.live.bid_share, cfg.live.bid_max_priority_lamports)), next_attempt: 0, feeds, counts: HashMap::default(),
-            lat: exec_lat(), gate: SendGate::new(), gate_seen: None, health: Arc::new(crate::store_health::HealthFlags::always_ready()), refused: None })
+        let paths = if mode.sends() { paths } else { None };
+        let bundle_path = paths.as_ref().and_then(|p| p.bundle_path());
+        let jito = bundle_path.and_then(|i| paths.as_ref().and_then(|p| p.list[i].jito.clone()));
+        let bundle_cfg = cfg.sends.iter().find(|s| s.enabled && s.kind == SendKind::JitoBundle).or_else(|| cfg.sends.iter().find(|s| s.kind == SendKind::JitoBundle));
+        let (dry, key) = match mode {
+            Mode::DryRun => (Some(Dry { key: key.context("a dry run needs its key")?, simulate: cfg.dry_run.simulate, sim_recent: VecDeque::new(),
+                sim_per_sec: cfg.dry_run.max_sim_per_sec as usize }), None),
+            Mode::Shadow => (None, None),
+            _ => (None, key),
+        };
+        let skip_kinds: Vec<LeaderKind> = cfg.send_policy.skip_leader_kinds.iter().filter_map(|k| kind_of(k)).collect();
+        let canary = (mode == Mode::Canary).then_some(CanaryCaps { count: cfg.canary.count, every_ns: cfg.canary.every_ms * 1_000_000 });
+        let max_size = match mode { Mode::Canary => sol(cfg.canary.size_sol.min(cfg.live.max_size_sol)), _ => sol(cfg.live.max_size_sol) };
+        let alt_lists: HashMap<Pk, Arc<Vec<Pk>>> = alts.iter().map(|(k, a)| (*k, Arc::new(a.clone()))).collect();
+        let settle = rpc.with_role(crate::rpc::Role::Settle);
+        let x = Exec { mode, payer, program: pk(&cfg.exec.program), alts: alts.iter().map(|(k, a)| Alt::new(*k, a)).collect(), alt_lists, pump, held, rpc, settle,
+            rt: tokio::runtime::Handle::current(), back, paths, bundle_path, jito, key, dry, pol: cfg.send_policy.clone(), skip_kinds,
+            tips: bundle_cfg.map(TipPolicy::from_path), path_rate: bundle_cfg.and_then(|c| c.max_per_sec).unwrap_or(5) as usize, would_recent: VecDeque::new(),
+            max_size, cap_failed_fees: if mode == Mode::Canary { cfg.canary.max_spend_lamports } else { cfg.live.max_failed_fees_lamports },
+            margin_lamports: cfg.live.margin_lamports, max_new_atas: cfg.live.max_new_token_accounts, canary,
+            sim_rate: cfg.sim.enabled.then_some(cfg.sim.max_per_sec as usize), sim_recent: VecDeque::new(), sim_size_max: sol(cfg.exec.max_size_sol),
+            cu_price: cfg.strategy.cu_price_micro, rec, sims_on: cfg.sim.enabled, counts: HashMap::default(), lat: exec_lat(), gate: SendGate::new(), gate_seen: None,
+            health: Arc::new(HealthFlags::default()), refused: None, leaders: None, next_attempt: 0, inflight: Inflight::new(cfg.send_policy.inflight_hold_slots),
+            big: TokenBucket::new(cfg.send_policy.big_band_max_per_sec, 1), mint_cool: HashMap::default(), open: BTreeMap::new(), by_sig: HashMap::default(),
+            finals: HashMap::default(), finals_order: VecDeque::new(), feeds, seen: HashMap::default(), net: Arc::new(AtomicU64::new(0)), poh_gauge: &crate::feeds::POH_GAUGE,
+            decisions: 0, refusals: 0, would_sends: 0, sent: 0, last_sent_ns: 0, landed: 0, wins: 0, spent: 0, reserved: 0, fees: 0, tips_paid: 0, round_trip: 0,
+            round_trip_unknown: 0, never_left: 0, new_atas: 0, stopped: None, leader_seen: (0, 0), leader_prev: (0, 0), #[cfg(test)] fault_route: None };
+        x.install_sink();
+        Ok(x)
     }
+
+    /// every result of our bundles reaches the engine as INPUT 5 `inflight_release` (journaled), through the Jito client's
+    /// sink; `release` is true for a landing only (`Outcome::is_final`: review WP-05 #2)
+    fn install_sink(&self) {
+        let Some(j) = &self.jito else { return };
+        let back = self.back.clone();
+        j.set_sink(Box::new(move |n: jito::ResultNote| {
+            let o = &n.outcome;
+            let _ = back.send(Event::Input { kind: InputKind::InflightRelease, data: Arc::new(json!({ "src": "jito", "sig": n.sig, "bundle": n.bundle, "attempt": n.attempt,
+                "outcome": o.outcome, "slot": o.slot, "index": o.index, "validator": o.validator, "seq": n.seq, "t_ns": n.t_ns, "release": o.is_final(),
+                "code": if o.outcome == "would-fail" { jito::error_code(o.detail.as_deref()) } else { None } })) });
+        }));
+    }
+
+    pub fn mode(&self) -> Mode { self.mode }
 
     /// WP-01: follow the run's SendGate (a new Exec has its own, always live)
     pub fn set_gate(&mut self, gate: Arc<SendGate>) { self.gate = gate; }
 
-    /// the SendGate mode the last `wants_send` read (None: it returned before reading the gate)
+    /// the SendGate mode the last decision read (None: it returned before reading it); the engine journals it
     pub fn gate_seen(&self) -> Option<GateMode> { self.gate_seen }
 
-    /// WP-04: follow the engine's store health (the warm-up gate, state availability): no send unless it is ready
-    pub fn set_health(&mut self, h: Arc<crate::store_health::HealthFlags>) { self.health = h; }
+    /// WP-04: follow the engine's store health. Until an engine installs its flags the executor is not ready (fail
+    /// closed: WP-04 review #8)
+    pub fn set_health(&mut self, h: Arc<HealthFlags>) { self.health = h; }
 
-    /// why the last `wants_send` refused (decisions.jsonl `reason`: `gate_shadow:<reason>`, `gate_stopped`, `warmup`,
-    /// `state_unavailable`, ...), None when it allowed a send
+    /// the run's LeaderBook (the target slot's leader, its kind, places and RTTs: attempts' `leader`)
+    pub fn set_leaders(&mut self, b: Arc<LeaderBook>) { self.leaders = Some(b); }
+
+    /// why the last decision was refused (decisions.jsonl `reason`), None when it was sent
     pub fn refusal(&self) -> Option<String> { self.refused.clone() }
 
     /// the SendGate as it is now (`SendGate::json`)
     pub fn gate_json(&self) -> Value { self.gate.json() }
 
-    /// the attempts still open (sent, not settled): stop.json `in_flight_at_stop` / `unsettled`
-    pub fn open_attempts(&self) -> Vec<u64> {
-        let mut v: Vec<u64> = self.sending.as_ref().map(|s| s.open.keys().copied().collect()).unwrap_or_default();
-        v.sort_unstable();
-        v
-    }
+    /// the send path's network calls so far (F28: a decision-to-fire must make none)
+    pub fn net_calls(&self) -> u64 { self.net.load(std::sync::atomic::Ordering::Relaxed) }
+
+    /// the dry run's signer (its public key), if this is a dry run
+    pub fn dry_signer(&self) -> Option<Pk> { self.dry.as_ref().map(|d| d.key.verifying_key().to_bytes()) }
+
+    /// the attempts still open (sent, not final): stop.json `in_flight_at_stop` / `unsettled`
+    pub fn open_attempts(&self) -> Vec<u64> { self.open.keys().copied().collect() }
 
     /// the tokens the wallet held an account for at boot (meta.json `wallet.held_mints_at_boot`), sorted
     pub fn held_mints(&self) -> Vec<String> {
         let mut v: Vec<String> = self.held.iter().map(b58).collect();
         v.sort();
         v
-    }
-
-    /// review N1: how many of the crowded pools this run's registry has (a list made for another registry shows here)
-    pub fn crowded_in(&self, has: impl Fn(&Pk) -> bool) -> (usize, usize) {
-        (self.band.crowded().iter().filter(|p| has(p)).count(), self.band.crowded().len())
     }
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
@@ -882,78 +803,299 @@ impl Exec {
         while self.sim_recent.front().is_some_and(|t| now - t >= 1_000_000_000) { self.sim_recent.pop_front(); }
         if self.sim_recent.len() >= per { self.count("sim_skipped_rate"); return None; }
         self.sim_recent.push_back(now);
-        Some(size.min(self.max_size))
+        Some(size.min(self.sim_size_max))
     }
 
-    /// the largest size the sender would send now (canary: its fixed size; live: the size cap), if it may send now
-    pub fn wants_send(&mut self) -> Option<u64> {
-        self.gate_seen = None;
-        self.refused = Some("no_sender".into());
-        self.sending.as_ref()?;
-        // WP-01: paused, shadow or stopping (control socket, --shadow, program hash mismatch, a stop request). The live
-        // gate, read once: the mode this decision saw is what the engine journals (`gate_seen`)
-        let mode = self.gate.mode();
-        self.gate_seen = Some(mode);
-        if mode != GateMode::Live {
-            self.count(if mode == GateMode::Stopped { "reject_gate_stopped" } else { "reject_gate_shadow" });
-            self.refused = Some(if mode == GateMode::Stopped { "gate_stopped".into() } else { format!("gate_shadow:{}", self.gate.reason()) });
-            return None;
+    /// the largest size a decision may trade (live: `[live] max_size_sol`; canary: its size; shadow and dry runs model
+    /// live)
+    pub fn size_cap(&self) -> u64 { self.max_size }
+
+    /// the sender's own state for the send checks (None: ready)
+    fn sender_state(&mut self, t: u64) -> Option<&'static str> {
+        if !self.mode.sends() { return None; }
+        if self.stopped.is_some() { return Some("sender_stopped"); }
+        if self.spent + self.reserved + BASE_FEE > self.cap_failed_fees {
+            if self.open.is_empty() { self.stopped = Some(if self.mode == Mode::Canary { "spend cap reached" } else { "failed-fee cap reached" }); }
+            return Some("fee_cap");
         }
-        // WP-04 / I-4: fail closed while the store is warming up or its state stream is unavailable (WP-05's send_checks
-        // takes the same flags)
-        let shut = self.health.shut();
-        if shut != crate::store_health::Shut::Ready {
-            self.count(match shut { crate::store_health::Shut::Warmup => "reject_warmup", crate::store_health::Shut::Resync => "reject_resync", _ => "reject_state_unavailable" });
-            self.refused = Some(shut.as_str().into());
-            return None;
+        if let Some(c) = self.canary {
+            // the attempts that left (or may have): one the queue dropped is no canary (review WP-05 #16)
+            if self.sent.saturating_sub(self.never_left) >= c.count { self.stopped = Some("canary count reached"); return Some("canary_count"); }
+            if self.sent > 0 && t < self.last_sent_ns + c.every_ns { return Some("canary_wait"); }
         }
-        let s = self.sending.as_mut()?;
-        if s.stopped.is_some() { self.refused = Some("sender_stopped".into()); return None; }
-        let worst = BASE_FEE + FLAT_CU_PRICE * 400_000 / 1_000_000;
-        if s.spent + s.reserved + worst > s.cap {
-            if s.open.is_empty() { s.stopped = Some(if s.kind == Kind::Live { "failed-fee cap reached" } else { "spend cap reached" }); }
-            self.refused = Some("fee_cap".into());
-            return None;
-        }
-        if s.kind == Kind::Canary {
-            if !s.open.is_empty() || now_ns() < s.last_ns + s.every_ms * 1_000_000 { self.refused = Some("canary_wait".into()); return None; }
-            if s.sent >= s.count { s.stopped = Some("count reached"); self.refused = Some("canary_count".into()); return None; }
-        }
-        if !s.nonces.iter().any(|n| n.busy.is_none() && n.value.is_some()) { *self.counts.entry("send_no_free_nonce").or_default() += 1; self.refused = Some("no_free_nonce".into()); return None; }
-        self.refused = None;
-        Some(s.size)
+        None
     }
 
-    /// `tip_first`: the tip right after the nonce advance instead of last (Everstake wants it first; the transaction is
-    /// atomic, so a failed trade still reverts it)
-    fn build(&self, r: &RouteIn, min_profit: u64, nonce: Option<(Pk, [u8; 32])>, tip: Option<(Pk, u64)>, cu_price: u64, tip_first: bool, tag: u64) -> Result<Built, String> {
+    /// What the send checks see now: the gate, the recorder, the store's health, the sender, the blockhash of `view` aged
+    /// against `tip_slot`, the leader of `tip_slot + 1`, the token. `now_ns` is the engine's time
+    pub fn inputs(&mut self, view: &SendView, tip_slot: u64, now_ns: u64) -> SendInputs {
+        let gate = self.gate.mode();
+        self.gate_seen = Some(gate);
+        let target = tip_slot + 1;
+        let bh = view.blockhash(&self.pol.blockhash_commitment).map(|b| BhSeen { slot: b.slot, age_slots: (tip_slot > 0).then(|| tip_slot.saturating_sub(b.slot)),
+            src: b.src.clone(), commitment: b.commitment });
+        let leader = self.leader_seen(view, target);
+        let token = match (&self.jito, self.mode.sends()) {
+            (_, false) => TokenSeen::NotUsed,
+            (None, true) => TokenSeen::Stale,
+            (Some(j), true) => match j.token_state((now_ns / 1_000_000) as i64) { jito::TokenState::Valid { age_s, .. } => TokenSeen::Valid { age_s }, jito::TokenState::Stale => TokenSeen::Stale },
+        };
+        SendInputs { gate, gate_reason: self.gate.reason(), recorder_ok: self.rec.core_ok(), shut: self.health.shut(), sender: self.sender_state(now_ns), blockhash: bh,
+            max_blockhash_age_slots: self.pol.max_blockhash_age_slots, leader, skip_leader_kinds: self.skip_kinds.clone(), token }
+    }
+
+    /// The target slot's leader: its identity from the journaled schedule only (INPUT 2: a replay sees the same; none
+    /// there is `unknown`, `no_schedule`), its kind from the LeaderBook (journaled with the decision when it changes,
+    /// INPUT 3); a book that names another leader for the slot makes it `unknown` (`schedule_mismatch`). Before the fire
+    /// only the book's light read (`kind_at`); the attempt line takes the full snapshot after it (review WP-05 #8)
+    fn leader_seen(&self, view: &SendView, target: u64) -> LeaderSeen {
+        let unknown = |identity: Option<String>, why: &str| LeaderSeen { slot: target, identity, kind: LeaderKind::Unknown, kind_src: Some(why.to_string()) };
+        let Some(id) = view.leader(target) else { return unknown(None, crate::leaders::NO_SCHEDULE) };
+        let identity = Some(b58(&id));
+        let Some(b) = &self.leaders else { return unknown(identity, crate::leaders::NO_SOURCE) };
+        let (book_leader, kind, kind_src) = b.kind_at(target);
+        if book_leader.is_some_and(|l| l != id) { return unknown(identity, "schedule_mismatch"); }
+        LeaderSeen { slot: target, identity, kind, kind_src }
+    }
+
+    /// an attempt's trigger has (or not) a PoH position: the `poh_trigger_pct` gauge. The engine looks it up after the
+    /// decision (the PoH index is shared with the feed threads: not before the fire; review WP-05 #8)
+    pub fn note_poh(&self, has: bool) { self.poh_gauge.note_attempt(has); }
+
+    /// The executor's turn for one decision (route `r`, re-quoted by the engine at the size cap): the send checks, the
+    /// route checks, then a send (live, canary) or a would-send (shadow, dry run, or a closed gate) recorded with
+    /// `sent = false`. `slot` is the engine's processed slot (in-flight expiry), `t` its time
+    pub fn decide(&mut self, r: RouteIn, i: &SendInputs, view: &SendView, slot: u64, t: u64) -> Decided {
+        self.decisions += 1;
+        let net = self.net.clone();
+        let gate = gate_check(i);
+        // a closed gate is counted for every decision it held back (MEASUREMENT A.5: `reject_gate_shadow`, `_stopped`);
+        // what else refused such a decision is `ungated_<reason>`, so the `reject_*` counters sum to the refusals
+        // (review WP-05 #16)
+        if let Err(g) = &gate { self.count(reject_counter(g)); }
+        let mut d = crate::netcount::on_thread(&net, || self.decide_inner(r, i, view, slot, t, gate.is_err()));
+        if d.attempt.is_none() { let k = if gate.is_err() { ungated_counter(&d.reason) } else { reject_counter(&d.reason) }; self.count(k); }
+        if let Err(g) = gate {
+            // send_checks' order: the gate's reason first; what would have refused it otherwise beside it
+            d.reason_ungated = if d.would_send { None } else { Some(d.reason.clone()) };
+            d.reason = g;
+        }
+        if d.sent != Some(true) { self.refusals += 1; self.refused = Some(d.reason.clone()); } else { self.refused = None; }
+        d
+    }
+
+    /// everything but the gate (`gated`: the gate is closed, a send would be a would-send)
+    fn decide_inner(&mut self, r: RouteIn, i: &SendInputs, view: &SendView, slot: u64, t: u64, gated: bool) -> Decided {
+        if let Err(why) = input_checks(i) { return Decided::reject(why); }
+        let expected = r.expected();
+        let band = bands::of_gross(expected);
+        let crowding = r.crowding;
+        let mut d = Decided { crowding: Some(crowding), band: Some(band), ..Decided::reject("") };
+        let fail = |mut d: Decided, why: &str| { d.reason = why.to_string(); d };
+        // the route's checks
+        if expected <= 0 { return fail(d, "expected_below_min_profit"); }
+        // a gap worth more than the trade is a broken quote, not an opportunity (seen: 9.9e12 lamports)
+        if expected > r.size as i64 { return fail(d, "implausible_gap"); }
+        if self.mint_cool.get(&r.mint).is_some_and(|c| t < c.1) { return fail(d, "token_cooling"); }
+        let creates_ata = !self.held.contains(&r.mint);
+        if creates_ata && self.new_atas >= self.max_new_atas { return fail(d, "rent_cap"); }
+        self.inflight.expire(slot);
+        let key = InflightKey { buy: r.buy.pool, sell: r.sell.pool, mint: r.mint };
+        let leader_pk = i.leader.identity.as_deref().and_then(|s| bs58::decode(s).into_vec().ok()).and_then(|v| Pk::try_from(v).ok());
+        let target = i.leader.slot;
+        let (why_allowed, prev) = match self.inflight.check(&key, r.state_version, target, leader_pk) { Ok(x) => x, Err(why) => return fail(d, why) };
+        let big = bands::is_big(band);
+        if big && !self.big.peek(t) { return fail(d, "band_throttle"); }
+        // a bucket-2 route expecting this much is not sent at all (OD-3's alternative); `crowded_pool` is the queue's drop
+        if crowding.bucket >= 2 && self.pol.crowded_skip_min_expected_lamports > 0 && expected >= self.pol.crowded_skip_min_expected_lamports as i64 {
+            return fail(d, "crowded_skip");
+        }
+        // the tip, the on-chain min_profit (item 8) and the decision's own bar (today's: tip + fee + [live] margin)
+        let tip = self.tips.as_mut().and_then(|p| p.tip(expected - BASE_FEE as i64));
+        let tip_l = tip.map_or(0, |x| x.1);
+        let net = expected - tip_l as i64 - BASE_FEE as i64;
+        let (min_profit, margin) = min_profit_onchain(tip_l, net, self.pol.margin_floor, self.pol.margin_share);
+        let prio = Prio { band: bands::rank(band), crowd: crowding.rank(), ev: net };
+        d.ev = Some(net);
+        d.rank = Some(prio.rank());
+        if expected < (min_profit.max(tip_l + BASE_FEE + self.margin_lamports)) as i64 { return fail(d, "expected_below_min_profit"); }
+        // a would-send (shadow, dry run, a closed gate) models the bundle path's rate: at most its max_per_sec a second
+        // (`would_rate`; `would_rate_crowded` for a crowded route: a model, not the queue's drop, review WP-05 #10)
+        let would = !self.mode.sends() || gated;
+        if would {
+            while self.would_recent.front().is_some_and(|x| t.saturating_sub(*x) >= 1_000_000_000) { self.would_recent.pop_front(); }
+            if self.would_recent.len() >= self.path_rate { return fail(d, if crowding.rank() > 0 { "would_rate_crowded" } else { "would_rate" }); }
+        }
+        let Some(bh) = view.blockhash(&self.pol.blockhash_commitment).cloned() else { return fail(d, "blockhash_stale") };
+        let t_built0 = now_ns();
+        let built = match self.build(&r, min_profit, bh.hash, tip) {
+            Ok(b) => b,
+            Err(e) => return fail(d, &if e.starts_with("oversized") { "oversized".to_string() } else { format!("build_error:{e}") }),
+        };
+        let t_built = now_ns();
+        // a sending mode's path (always there: `Exec::new` refuses a live or canary executor without its bundle path)
+        let send_path = if would { None } else {
+            match (self.paths.clone(), self.bundle_path) { (Some(p), Some(bp)) => Some((p, bp)), _ => return fail(d, "sender_stopped") }
+        };
+        // the attempt: from here on nothing refuses it
+        let attempt = self.next_attempt;
+        self.next_attempt += 1;
+        let took_big = big && self.big.try_take(t);
+        self.inflight.insert(key, InflightEntry { sv: r.state_version, target_slot: target, leader: leader_pk, attempt, t });
+        self.leader_seen.0 += 1;
+        if i.leader.kind != LeaderKind::Unknown && i.leader.identity.is_some() { self.leader_seen.1 += 1; }
+        d.attempt = Some(attempt);
+        // live / canary: sign and fire first (nothing but the signature sits between the decision and the fire), record after
+        let fired = send_path.map(|(paths, bp)| {
+            let raw = Arc::new(build::sign(&built.msg, self.key.as_ref().expect("a sending mode holds its key")));
+            let t_signed = now_ns();
+            let fire = paths.fire(attempt, vec![Copy { path: bp, raw: raw.clone(), tip, blockhash_slot: Some(bh.slot) }], prio);
+            (paths, bp, raw, fire, t_signed, now_ns())
+        });
+        let snap = self.leaders.as_ref().map(|b| serde_json::to_value(b.snapshot(target)).unwrap_or(Value::Null))
+            .unwrap_or_else(|| json!({ "slot": target, "leader": i.leader.identity, "kind": i.leader.kind, "kind_src": i.leader.kind_src, "be_rtt_ms": crate::leaders::be_rtt(now_ns()) }));
+        let age = i.blockhash.as_ref().and_then(|b| b.age_slots);
+        let mut line = AttemptLine { attempt, r: &r, mode: self.mode, expected, band, crowding, tip, tip_policy: self.tips.as_ref(), min_profit, margin, built: &built, bh: &bh,
+            bh_age: age, leader: snap, key, prev, why_allowed, prio, lambda: self.paths.as_ref().and_then(|p| p.queue_now().1), t_built0, t_built, payer: self.payer,
+            program: self.program }.json();
+        let Some((paths, bp, raw, fire, t_signed, t_fired)) = fired else {
+            // a would-send (shadow, dry run, a closed gate): recorded with sent = false
+            self.would_recent.push_back(t);
+            self.would_sends += 1;
+            d.reason = "would_send".into();
+            d.sent = Some(false);
+            d.would_send = true;
+            line["sent"] = json!(false);
+            line["not_sent"] = json!(if gated { gate_check(i).err().unwrap_or_default() } else { self.mode.as_str().to_string() });
+            if let Some(dk) = self.dry.as_ref().map(|d| d.key.clone()) {
+                // the dry run signs (the throwaway key) and checks the signed transaction as the send path would
+                let raw = build::sign(&built.msg, &dk);
+                let t_signed = now_ns();
+                let want = self.want(&r, dk.verifying_key().to_bytes(), bh.hash, tip, min_profit, built.cu_limit);
+                let checks = verify_bundle(&raw, &want);
+                let ok = checks.iter().all(|c| c["ok"] == json!(true));
+                line["tx"]["sig"] = json!(send::first_signature(&raw));
+                line["copies"][0]["sig"] = line["tx"]["sig"].clone();
+                line["stages"]["t_signed"] = json!(t_signed);
+                line["dry_run"] = json!({ "signer": b58(&dk.verifying_key().to_bytes()), "tx_b64": base64_of(&raw), "bytes": raw.len(), "checks": checks, "checks_ok": ok,
+                    "accounts": accounts_of(&raw, &self.alt_lists) });
+                self.count(if ok { "dry_run_ok" } else { "dry_run_check_failed" });
+                let sim = self.dry.as_mut().is_some_and(|dry| {
+                    while dry.sim_recent.front().is_some_and(|x| t_signed.saturating_sub(*x) >= 1_000_000_000) { dry.sim_recent.pop_front(); }
+                    let go = dry.simulate && dry.sim_recent.len() < dry.sim_per_sec;
+                    if go { dry.sim_recent.push_back(t_signed); }
+                    go
+                });
+                line["dry_run"]["simulated"] = json!(sim);
+                if sim { self.spawn_dry_sim(attempt, raw); }
+            }
+            self.rec.json(rec::ATTEMPTS, line);
+            self.count("would_send");
+            return d;
+        };
+        let sig58 = send::first_signature(&raw).unwrap_or_default();
+        let sig = sig64(&sig58).unwrap_or([0; 64]);
+        let pools = [r.buy.pool, r.sell.pool];
+        let back = self.back.clone();
+        self.rt.spawn(async move {
+            let fired = match fire.await { Ok(f) => f, Err(e) => Fired { id: attempt, t_ns: 0, copies: vec![send::Sent { attempt, path: "?".into(), sig: Some(sig58_of(&sig)),
+                tip_account: None, tip_lamports: 0, t_sent: 0, t_ack: 0, ms: 0.0, ok: false, status: None, reply: Some(format!("send task failed: {e}")), bundle: None,
+                blockhash_slot: None, queue_wait_us: None, drop: Some("send_task"), lambda: None }] } };
+            // WP-03b tap, after the firing: the copy that left (the wallet's source (b), watched until a few slots past its
+            // target slot) and the route's pools (backfill priority 0)
+            crate::chainfetch::note_fired(attempt, &fired.copies, &pools, Some(target));
+            let _ = back.send(Event::Settled(Box::new(Settled::Fired { attempt, fired })));
+        });
+        line["sent"] = json!(true);
+        line["tx"]["sig"] = json!(sig58);
+        line["copies"][0]["sig"] = json!(sig58);
+        line["stages"]["t_signed"] = json!(t_signed);
+        line["stages"]["t_enqueued"] = json!(t_fired);
+        self.rec.json(rec::ATTEMPTS, line);
+        self.lat[LAT_DECIDED_TO_SIGNED].push(t_signed.saturating_sub(r.st[4]));
+        self.lat[LAT_SIGNED_TO_FIRED].push(t_fired.saturating_sub(t_signed));
+        self.sent += 1;
+        self.last_sent_ns = t;
+        self.reserved += BASE_FEE;
+        self.count(if self.mode == Mode::Canary { "canary_sent" } else { "live_sent" });
+        if crowding.rank() > 0 { self.count("rank_crowded"); }
+        self.by_sig.insert(sig, attempt);
+        self.open.insert(attempt, Open { attempt, decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
+            trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit, creates_ata: built.creates_ata, worst: BASE_FEE, bh_slot: bh.slot, bh_height: bh.height,
+            target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_signed, t_sent: None, bundle: None,
+            path: paths.list[bp].name.clone(), fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
+            send_error: None, cooled: false });
+        d.verdict = "send";
+        d.reason = "sent".into();
+        d.sent = Some(true);
+        d
+    }
+
+    /// What the signed bundle of route `r` must be (the dry run's checks): from the decision's own values, never from the
+    /// built message, so a builder that encodes the wrong amount or min_profit is caught (review WP-05 #12)
+    fn want(&self, r: &RouteIn, signer: Pk, blockhash: [u8; 32], tip: Option<(Pk, u64)>, min_profit: u64, cu_limit: u64) -> VerifyWant<'_> {
+        let mint_prog = if r.mint == r.buy.t0 { r.buy.t0_prog } else { r.buy.t1_prog };
+        VerifyWant { payer: self.payer, signer, blockhash, tip, tips: self.tips.as_ref().map(|p| p.accounts.clone()).unwrap_or_default(), program: self.program,
+            pools: [r.buy.pool, r.sell.pool], cu_limit, alts: &self.alt_lists, amount_in: r.size, min_profit, margin_floor: self.pol.margin_floor,
+            quote: build::ata_of(&self.payer, &WSOL, &crate::pda::TOKEN_PROGRAM), mid: build::ata_of(&self.payer, &r.mint, &mint_prog),
+            leg_programs: [r.buy.venue.program(), r.sell.venue.program()] }
+    }
+
+    /// One bundle transaction (PLAN WP-05 item 1; WP-06 brings its final order, rent neutrality and the size budget):
+    /// the CU limit, the mid token's ATA create when the wallet holds none, the route with its on-chain `min_profit`, the
+    /// tip last (a top-level System transfer: Jito ignores a tip account named through a table). On `blockhash` (item 3:
+    /// a recent blockhash, never a durable nonce). No CU price: a bundle pays its tip only
+    fn build(&self, r: &RouteIn, min_profit: u64, blockhash: [u8; 32], tip: Option<(Pk, u64)>) -> Result<Built, String> {
         let leg = |m: &PoolMeta, data: &[u8], tin: Pk, tout: Pk, live: &[i64], end: Option<i32>| build::leg(&build::LegIn {
             m, pool: data, tin, tout, amount_in: r.size, payer: self.payer, pump: self.pump.as_ref(), dlmm_live: live, dlmm_end: end });
         let l1 = leg(&r.buy, &r.buy_data, *WSOL, r.mint, &r.buy_live, r.buy_end).map_err(|e| format!("buy leg: {e}"))?;
         let l2 = leg(&r.sell, &r.sell_data, r.mint, *WSOL, &r.sell_live, r.sell_end).map_err(|e| format!("sell leg: {e}"))?;
         let quote = build::ata_of(&self.payer, &WSOL, &crate::pda::TOKEN_PROGRAM);
-        let v2 = build::route_ix(self.program, self.payer, quote, r.size, min_profit, &[l1, l2])?;
+        let (amount_in, min_profit) = (r.size, min_profit);
+        #[cfg(test)]
+        let (amount_in, min_profit) = self.fault_route.unwrap_or((amount_in, min_profit));
+        let v2 = build::route_ix(self.program, self.payer, quote, amount_in, min_profit, &[l1, l2])?;
         let creates_ata = !self.held.contains(&r.mint);
-        // `tag` (the copy's index) makes every copy's bytes, so its signature, its own: tip-less copies would otherwise be
-        // identical and a landing could not be told apart by path
-        let cu_limit = r.cu + if creates_ata { ATA_CREATE_CU } else { 0 } + tag;
-        let mut ixs = Vec::new();
-        let mut keep = Vec::new();
-        if let Some((acct, _)) = nonce { ixs.push(build::advance_nonce_ix(acct, self.payer)); keep.push(acct); keep.push(crate::tx::pk("SysvarRecentB1ockHashes11111111111111111111")); }
-        if tip_first { if let Some((to, lamports)) = tip { ixs.push(build::transfer_ix(self.payer, to, lamports)); keep.push(to); } }
-        ixs.push(build::cu_limit_ix(cu_limit as u32));
-        if cu_price > 0 { ixs.push(build::cu_price_ix(cu_price)); }
+        let cu_limit = r.cu + if creates_ata { ATA_CREATE_CU } else { 0 };
+        let mut ixs = vec![build::cu_limit_ix(cu_limit as u32)];
         if creates_ata {
             let prog = if r.mint == r.buy.t0 { r.buy.t0_prog } else { r.buy.t1_prog };
             ixs.push(build::create_ata_idempotent_ix(self.payer, self.payer, r.mint, prog));
         }
         ixs.push(v2);
-        if !tip_first { if let Some((to, lamports)) = tip { ixs.push(build::transfer_ix(self.payer, to, lamports)); keep.push(to); } }
+        let mut keep = Vec::new();
+        if let Some((to, lamports)) = tip { ixs.push(build::transfer_ix(self.payer, to, lamports)); keep.push(to); }
         let alts: Vec<&Alt> = self.alts.iter().collect();
-        let msg = build::compile_v0(self.payer, &ixs, nonce.map_or([0u8; 32], |n| n.1), &alts, &keep)?;
+        let msg = build::compile_v0(self.payer, &ixs, blockhash, &alts, &keep)?;
         let bytes = build::tx_bytes(&msg);
         if bytes > build::MAX_TX_BYTES || msg.locks > build::MAX_LOCKS { return Err(format!("oversized({bytes} bytes, {} locks)", msg.locks)); }
         Ok(Built { msg, cu_limit, creates_ata })
+    }
+
+    /// a dry run's read-only simulation (sigVerify off: the throwaway key is not the payer; the blockhash checked): its
+    /// answer comes back to the engine (INPUT 9) and is written to sims.jsonl with the attempt's id. Never a send
+    fn spawn_dry_sim(&self, attempt: u64, raw: Vec<u8>) {
+        let (rpc, back) = (self.rpc.clone(), self.back.clone());
+        self.rt.spawn(async move {
+            let t = std::time::Instant::now();
+            let mut line = json!({ "attempt": attempt, "src": "dry_run", "t_ns": now_ns() });
+            match rpc.simulate_bounded(&raw, false, false, Bounds::fetch(Duration::from_secs(2), 1)).await {
+                Ok(s) => {
+                    let code = s.err.as_ref().and_then(build::custom_code);
+                    line["sim_ms"] = json!(t.elapsed().as_secs_f64() * 1e3);
+                    line["sim_slot"] = json!(s.slot);
+                    line["err"] = json!(s.err);
+                    line["code"] = json!(code.map(hex_code));
+                    line["meaning"] = json!(crate::proglog::meaning(code, &s.err));
+                    line["encoding_ok"] = json!(s.err.is_none() || code == Some(build::ERR_PROFIT));
+                    line["units"] = json!(s.units);
+                    line["delivered"] = json!(crate::proglog::delivered_from_logs(&s.logs).iter().map(|d| d.1).collect::<Vec<_>>());
+                    if s.err.is_some() && code != Some(build::ERR_PROFIT) { line["logs_tail"] = json!(s.logs.iter().rev().take(8).rev().collect::<Vec<_>>()); }
+                }
+                Err(e) => line["sim_error"] = json!(e.msg),
+            }
+            let _ = back.send(Event::Settled(Box::new(Settled::DrySim { attempt, line })));
+        });
     }
 
     fn route_json(r: &RouteIn) -> Value {
@@ -966,18 +1108,16 @@ impl Exec {
             "decision": r.decision, "sv": format!("{:016x}", r.state_version), "route_age_ms": r.route_age_ms })
     }
 
-    /// STEP 2: build this decision's transaction and simulate it (the answer goes to sims.jsonl)
+    /// STEP 2 (diagnostic, `[sim] enabled`): build this decision's transaction (no tip, a zero blockhash replaced by the
+    /// RPC) and simulate it, unsigned; the answer goes to sims.jsonl. A bounded call on the background runtime
     pub fn simulate(&mut self, r: RouteIn) {
         let t0 = now_ns();
-        let min_profit = (BASE_FEE + self.cu_price * r.cu / 1_000_000 + self.min_tip_paid).max(1);
-        let built = self.build(&r, min_profit, None, None, self.cu_price, false, 0);
-        // the same route as a canary would carry it (nonce + a tip, both static): its size
-        let canary_shape = self.build(&r, min_profit, Some(([7; 32], [0; 32])), Some(([8; 32], 1_000_000)), self.cu_price, false, 0).map(|b| build::tx_bytes(&b.msg));
+        let min_profit = (BASE_FEE + self.cu_price * r.cu / 1_000_000).max(1);
+        let built = self.build(&r, min_profit, [0u8; 32], None);
         let t_built = now_ns();
         let mut line = Self::route_json(&r);
         line["t_ns"] = json!(t0);
         line["build_us"] = json!((t_built - t0) / 1_000);
-        line["canary_bytes"] = match &canary_shape { Ok(n) => json!(n), Err(e) => json!(e) };
         if !self.sims_on { return; }
         let rec = self.rec.clone();
         let b = match built {
@@ -994,504 +1134,353 @@ impl Exec {
         let rpc = self.rpc.clone();
         self.rt.spawn(async move {
             let t = std::time::Instant::now();
-            match rpc.simulate_full(&raw).await {
+            match rpc.simulate_bounded(&raw, false, true, Bounds::fetch(Duration::from_secs(2), 1)).await {
                 Ok(s) => {
                     let code = s.err.as_ref().and_then(build::custom_code);
-                    let delivered = build::delivered_from_logs(&s.logs);
+                    let delivered = crate::proglog::delivered_from_logs(&s.logs);
                     line["sim_ms"] = json!(t.elapsed().as_secs_f64() * 1e3);
                     line["sim_slot"] = json!(s.slot);
                     line["err"] = json!(s.err);
                     line["code"] = json!(code.map(hex_code));
-                    line["meaning"] = json!(meaning(code, &s.err));
+                    line["meaning"] = json!(crate::proglog::meaning(code, &s.err));
                     line["encoding_ok"] = json!(s.err.is_none() || code == Some(build::ERR_PROFIT));
                     line["units"] = json!(s.units);
                     line["delivered"] = json!(delivered.iter().map(|d| d.1).collect::<Vec<_>>());
                     if s.err.is_some() && code != Some(build::ERR_PROFIT) { line["logs_tail"] = json!(s.logs.iter().rev().take(8).rev().collect::<Vec<_>>()); }
                 }
-                Err(e) => { line["sim_error"] = json!(format!("{e:#}")); }
+                Err(e) => { line["sim_error"] = json!(e.msg); }
             }
             rec.json(rec::SIMS, line);
         });
     }
 
-    /// The copies of one attempt, one per path: (path, built, tip, its min_profit), the compute-unit price and fee arm,
-    /// and the attempt's worst-case fee. Err = why this decision is not sent.
-    #[allow(clippy::type_complexity)]
-    fn copies(&mut self, r: &RouteIn, nonce: (Pk, [u8; 32])) -> Result<(Vec<(usize, Built, Option<(Pk, u64)>, u64)>, Vec<Value>, u64, &'static str, i64), &'static str> {
-        let paths = self.paths.clone().ok_or("no send paths")?;
-        let s = self.sending.as_ref().ok_or("no sender")?;
-        let expected = r.back as i64 - r.size as i64;
-        let creates_ata = !self.held.contains(&r.mint);
-        if s.kind == Kind::Live {
-            if expected <= 0 { return Err("live_skip_no_expected_profit"); }
-            if self.mint_cool.get(&r.mint).is_some_and(|c| now_ns() < c.1) { return Err("live_skip_token_cooling"); }
-            // a gap worth more than half the trade is a broken quote, not an opportunity (seen: 9.9e12 lamports)
-            if expected > r.size as i64 { return Err("live_skip_implausible_gap"); }
-            // one trade per pool pair at a time: a burst of triggers on one pair would otherwise race itself
-            // (rotation sends one copy per trade, each under its own nonce: several on one pair can't collide)
-            let now = now_ns();
-            // (a bundle in flight holds no lock: a losing bundle costs nothing, Jito rejects it within ~10 ms, and each attempt has
-            // its own nonce. w5h seg 14: the lock kept 108 rival-proven gaps (1.76 SOL) from being sent behind dead bundles)
-            if !self.rotate && s.open.values().any(|o| !o.bundle && o.route.buy.pool == r.buy.pool && o.route.sell.pool == r.sell.pool && now.saturating_sub(o.t) < self.pair_lock_ns) { return Err("live_skip_pair_in_flight"); }
-            if creates_ata && s.new_atas >= s.max_new_atas { return Err("live_skip_new_token_account_cap"); }
-            // WP-00: crowded pools out of the bands from 100k, the big band throttled (its token is taken in `send`)
-            self.band.check(s.kind, &r.buy.pool, &r.sell.pool, expected, now)?;
-        }
-        let est_cu = r.cu + if creates_ata { ATA_CREATE_CU } else { 0 };
-        // the fee experiment: attempts alternate between copying the trigger's bid (0.95x) and the flat bid
-        let arm_trigger = if self.mix { (self.next_attempt / 2) % 2 == 0 } else { self.next_attempt % 2 == 0 } && r.trig_cu_price.is_some();
-        let all_paths = (self.all_paths || (self.mix && self.next_attempt % 2 == 0)) && !self.bmix;
-        // where TPU copies can't win (fast bots' pools, outsized gaps) the trade goes as a bundle only, free when it loses
-        let tpu_hopeless = (self.tpu_max_expected > 0 && expected > self.tpu_max_expected as i64)
-            || (self.tpu_skip_mriya && (r.buy_source == "mriya" || r.sell_source == "mriya"))
-            || self.tpu_skip_mints.contains(&r.mint)
-            || (self.tpu_min_expected > 0 && expected < self.tpu_min_expected as i64);
-        let bundle_arm = self.bmix && (self.next_attempt % 2 == 1 || tpu_hopeless);
-        self.path_arm = if self.bmix { if bundle_arm { "bundle" } else { "tpu" } } else if !self.mix { "" } else if all_paths { "race" } else { "win" };
-        let profit_basis = if s.kind == Kind::Live { expected } else { r.net_at_opp };
-        let (mut cu_price, mut arm) = fee_rule(arm_trigger, r.trig_cu_price, profit_basis, est_cu);
-        match (s.kind, self.tiers) {
-            // two tiers: zero priority unless the gap is big enough to buy the pool's next turn
-            (Kind::Live, Some((min, share, cap))) if est_cu > 0 => {
-                if expected >= min as i64 {
-                    let target = ((expected as f64 * share) as u64).min(cap);
-                    cu_price = target.saturating_mul(1_000_000) / est_cu;
-                    arm = "bid";
-                } else { cu_price = self.spec_price; arm = "spec"; }
-            }
-            // live: an absolute cap on the priority fee too (the 25% rule trusts the expected profit, which can be wrong)
-            (Kind::Live, _) if est_cu > 0 => { cu_price = cu_price.min((self.prio_cap.saturating_mul(1_000_000) / est_cu).max(FLAT_CU_PRICE)); }
-            _ => {}
-        }
-        if s.kind == Kind::Live && self.bmix {
-            // the bundle arm pays its tip only (Jito orders bundles by tip); the TPU arm a flat bid if one is set
-            if bundle_arm { cu_price = 0; arm = "bundle-no-priority"; } else if self.tpu_price > 0 { cu_price = self.tpu_price; arm = "flat"; }
-            // the competitive bid: just above what the pools' recent traffic pays, never past a share of the expected profit
-            // (A/B: in pairs of TPU trades, one competes, one stays flat)
-            let compete_turn = !self.compete_ab || (self.next_attempt / 2) % 2 == 0;
-            if !bundle_arm && self.compete_mult > 0.0 && compete_turn && est_cu > 0 {
-                if let Some(rp) = r.rival_cu_price {
-                    let target = (rp as f64 * self.compete_mult) as u64;
-                    let cap = ((expected.max(0) as f64 * self.compete_share) * 1e6 / est_cu as f64) as u64;
-                    // and never past the absolute per-trade priority cap ([live] max_priority_lamports): a lost race
-                    // pays it in full (2026-10-03 seg 2: one 1.94 SOL trade paid 1.3M lamports and reverted)
-                    let cap_abs = self.prio_cap.saturating_mul(1_000_000) / est_cu;
-                    let bid = target.min(cap).min(cap_abs).max(self.tpu_price);
-                    if bid > cu_price { cu_price = bid; }
-                    arm = "compete";
-                }
-            }
-        }
-        let prio = cu_price * est_cu / 1_000_000;
-        let mut out = Vec::new();
-        let mut not = Vec::new();
-        let mut bundle_built = None;
-        // rotation: one path per trade, starting from the next in turn (the bundle can't be timed: a failing one never lands)
-        let n = paths.list.len();
-        let order: Vec<usize> = if self.rotate && s.kind == Kind::Live { (0..n).map(|k| (self.rot + k) % n).collect() } else { (0..n).collect() };
-        for i in order {
-            let p = &paths.list[i];
-            if self.bmix && s.kind == Kind::Live && (bundle_arm != (p.kind == SendKind::JitoBundle)) { continue; }
-            if self.rotate && s.kind == Kind::Live && p.free_miss() { continue; }
-            if self.rotate && s.kind == Kind::Live && !out.is_empty() { break; }
-            // Helius Sender rejects a transaction without a compute-unit price: not on a zero-priority copy
-            if cu_price == 0 && p.kind == SendKind::Helius { not.push(json!({ "path": p.name, "why": "zero priority (Helius Sender needs a CU price)" })); continue; }
-            let (tip, min_profit) = match s.kind {
-                Kind::Canary => (p.tip(r.gross_at_opp), CANARY_MIN_PROFIT),
-                Kind::Live => {
-                    let tip = match p.kind {
-                        SendKind::Shyft | SendKind::Haan => None,
-                        // the 0.001 SOL paths only when the expected profit covers that tip and the fees
-                        SendKind::Bolt | SendKind::Iris | SendKind::Lunar => match p.tip(expected) {
-                            Some(t) if all_paths || expected > (t.1 + BASE_FEE + prio) as i64 => Some(t),
-                            _ => { not.push(json!({ "path": p.name, "why": "its 0.001 SOL tip is more than the expected profit after fees" })); continue }
-                        },
-                        // jito-bundle: tip_share of the expected profit within its floor and cap; helius, jito-tx: fixed
-                        // a bundle's tip comes out of the profit left after the base fee (w5h seg 7: a 50% tip on a predicted
-                        // 24k gross, on a real 12.6k round trip, landed at -4,447 net)
-                        SendKind::JitoBundle => p.tip(expected - BASE_FEE as i64),
-                        _ => p.tip(expected),
-                    };
-                    let mp = BASE_FEE + prio + tip.map_or(0, |t| t.1) + s.margin;
-                    if expected < mp as i64 && !all_paths { not.push(json!({ "path": p.name, "why": format!("expected {expected} < this copy's min_profit {mp}") })); if p.free_miss() { bundle_built = Some(false); } continue; }
-                    // on chain only the tip (+1) must be covered: the fee is paid either way, so a trade whose gross
-                    // gain fell below the fees is still better completed (a smaller loss) than reverted (the whole fee)
-                    // a bundle that reverts costs nothing, so it must never land at a loss: it covers its tip AND the fees
-                    let chain_mp = if p.kind == SendKind::JitoBundle { tip.map_or(0, |t| t.1) + BASE_FEE + prio + 1 }
-                        else if self.gross_floor { tip.map_or(0, |t| t.1) + 1 } else { mp };
-                    (tip, chain_mp)
-                }
-            };
-            match self.build(r, min_profit, Some(nonce), tip, cu_price, p.kind == SendKind::Everstake, out.len() as u64) {
-                Ok(b) => { if p.free_miss() { bundle_built = Some(true); } out.push((i, b, tip, min_profit)); }
-                Err(e) => { if p.free_miss() { bundle_built = Some(false); } not.push(json!({ "path": p.name, "build_error": e })); }
-            }
-        }
-        // live with the gate on: no bundle copy, nothing for the gate to wait for, so no paid copies either (arbed's rule
-        // since Run 2). With the gate off the paid copies go on their own.
-        if s.kind == Kind::Live && self.gate_on && bundle_built == Some(false) { return Err("live_skip_bundle_copy_not_built"); }
-        if out.is_empty() { return Err(if s.kind == Kind::Live { "live_skip_no_copy_worth_sending" } else { "canary_build_failed" }); }
-        if self.rotate { self.rot = out.first().map_or(self.rot + 1, |c| c.0 + 1); }
-        let worst = BASE_FEE + out.iter().map(|x| cu_price * x.1.cu_limit / 1_000_000).max().unwrap_or(0);
-        Ok((out, not, cu_price, arm, worst as i64))
-    }
-
-    /// STEP 3 / 4: one attempt on this decision: a copy per path under one nonce lease. Canaries fire every copy at
-    /// once (the gate would stop them); live trades go through the Jito gate.
-    pub fn send(&mut self, r: RouteIn) {
-        let Some(paths) = self.paths.clone() else { return };
-        let Some(s) = self.sending.as_ref() else { return };
-        let kind = s.kind;
-        let Some(ni) = s.nonces.iter().position(|n| n.busy.is_none() && n.value.is_some()) else { return };
-        let (nonce, value) = (s.nonces[ni].acct, s.nonces[ni].value.unwrap());
-        let t_decided = r.st[4];
-        let (copies, not, cu_price, arm, worst) = match self.copies(&r, (nonce, value)) {
-            Ok(x) => x,
-            Err(why) => { self.count(why); return; }
-        };
-        let worst = worst as u64;
-        let expected = r.back as i64 - r.size as i64;
-        let t_built = now_ns();
-        // built: nothing below can refuse the attempt now, so a big-band one uses its token (review F5)
-        self.band.commit(kind, expected, t_built);
-        let attempt = self.next_attempt;
-        self.next_attempt += 1;
-        // the bundle arm's resends (free when they fail): Jito turned down every first bundle, sent ~15 ms after the
-        // trigger (w5h seg 4: 222 of 222 would-fail), while rivals' bundles won our gaps at a median 246 ms. Each resend
-        // is the same trade under the same nonce (one can land at most) with its own signature (a CU-limit tag).
-        // ([live] bundle_resend_ms), and smaller copies of the trade sent with the first ([live] bundle_size_variants)
-        let mut retry_built: Vec<(u64, usize, Built, Option<(Pk, u64)>, String)> = Vec::new();
-        if kind == Kind::Live && self.path_arm == "bundle" {
-            if let Some((i, _, tip, mp)) = copies.first() {
-                for (k, d) in self.bundle_resend_ms.iter().enumerate() {
-                    if let Ok(b) = self.build(&r, *mp, Some((nonce, value)), *tip, cu_price, false, 100 + k as u64) { retry_built.push((*d, *i, b, *tip, format!("resend +{d}ms"))); }
-                }
-                for (k, f) in self.bundle_variants.iter().enumerate() {
-                    let size = (r.size as f64 * f) as u64;
-                    if size < 5_000_000 || size >= r.size { continue; }
-                    let mut rv = r.clone();
-                    rv.size = size;
-                    let tip_v = paths.list[*i].tip((expected as f64 * f) as i64 - BASE_FEE as i64);
-                    let mp_v = tip_v.map_or(0, |t| t.1) + BASE_FEE + cu_price * r.cu / 1_000_000 + 1;
-                    if let Ok(b) = self.build(&rv, mp_v, Some((nonce, value)), tip_v, cu_price, false, 200 + k as u64) { retry_built.push((0, *i, b, tip_v, format!("size x{f}"))); }
-                }
-            }
-        }
-        let s = self.sending.as_mut().unwrap();
-        let signed: Vec<Copy> = copies.iter().map(|(i, b, tip, _)| Copy { path: *i, raw: Arc::new(build::sign(&b.msg, &s.key)), tip: *tip }).collect();
-        let retries: Vec<(u64, Copy)> = retry_built.iter().map(|(d, i, b, tip, _)| (*d, Copy { path: *i, raw: Arc::new(build::sign(&b.msg, &s.key)), tip: *tip })).collect();
-        let t_signed = now_ns();
-        s.sent += 1;
-        s.last_ns = t_signed;
-        s.reserved += worst;
-        s.nonces[ni].busy = Some(attempt);
-        for x in signed.iter().chain(retries.iter().map(|r| &r.1)) {
-            if let Some(sig) = send::first_signature(&x.raw).as_deref().and_then(sig64) { s.watch.insert(sig, (attempt, x.path)); }
-        }
-        let settle = std::time::Duration::from_secs(s.settle_s);
-        let margin = s.margin;
-        // the rate-queue rank: a crowded pool on the route queues behind everything else (WP-00, F6); then seed pools first
-        let rank = prio_rank(&r.buy.pool, &r.sell.pool, r.buy_source, r.sell_source, self.band.crowded());
-        let crowded = rank == RANK_CROWDED;
-        let prio = Prio { rank, net: expected };
-        // the TPU arm's pre-send simulation: the first copy, exactly as signed
-        let gate_raw = if self.sim_gate && kind == Kind::Live && self.path_arm != "bundle" { signed.first().map(|c| c.raw.clone()) } else { None };
-        // the gate's bar: the full fees + tip + margin on the simulated round trip (the chain floor may be lower: see
-        // gross_floor), and what we predicted per leg, to log where a slip happened
-        let gate_bar = copies.first().map(|c| BASE_FEE + cu_price * c.1.cu_limit / 1_000_000 + c.2.map_or(0, |t| t.1) + margin).unwrap_or(0);
-        let live = kind == Kind::Live;
-        // fire first, then record (WP-00, F44): nothing (the attempt line's formatting, write and flush) sits between
-        // signing and firing. With the sim gate the copies fire later, from the task below (`fired` stays null).
-        // `fired` = handed to the runtime (`fire` spawns; review F11): the bytes leave later (copies.jsonl `t_sent`,
-        // the `signed_to_sent` series)
-        let fire_now = if gate_raw.is_none() { Some(paths.fire(attempt, signed.clone(), prio, live)) } else { None };
-        let t_fired = fire_now.as_ref().map(|_| now_ns());
-        let retry_labels: Vec<String> = retry_built.iter().map(|x| x.4.clone()).collect();
-        let cu_limit = copies.iter().map(|c| c.1.cu_limit).max().unwrap_or(0);
-        let creates_ata = copies.first().is_some_and(|c| c.1.creates_ata);
-        let mut line = Self::route_json(&r);
-        line["attempt"] = json!(attempt);
-        line["kind"] = json!(kind);
-        line["t_ns"] = json!(t_signed);
-        line["expected_profit"] = json!(expected);
-        line["cu_limit"] = json!(cu_limit);
-        line["fee_arm"] = json!(arm);
-        if !self.path_arm.is_empty() { line["path_arm"] = json!(self.path_arm); }
-        line["trigger_cu_price_micro"] = json!(r.trig_cu_price);
-        line["rival_cu_price_micro"] = json!(r.rival_cu_price);
-        line["cu_price_micro"] = json!(cu_price);
-        line["priority_fee_lamports"] = json!(cu_price * cu_limit / 1_000_000);
-        line["worst_fee_lamports"] = json!(worst);
-        line["creates_token_account"] = json!(creates_ata);
-        line["crowded"] = json!(crowded);
-        line["queue_rank"] = json!(rank);
-        line["nonce"] = json!({ "account": b58(&nonce), "value": bs58::encode(value).into_string() });
-        // state triggers: rx = the pool update's receive time, engine = its dequeue (WP-00, F13); fired = handed to the
-        // send paths (null: the sim gate fires later)
-        line["st"] = json!({ "rx": r.st[0], "decoded": r.st[1], "engine": r.st[2], "resolved": r.st[3], "decided": t_decided, "built": t_built, "signed": t_signed, "fired": t_fired });
-        line["copies"] = json!(signed.iter().zip(&copies).map(|(x, c)| json!({ "path": paths.list[x.path].name, "sig": send::first_signature(&x.raw), "bytes": x.raw.len(),
-            "tip": x.tip.map(|t| t.1), "min_profit": c.3 })).collect::<Vec<_>>());
-        if !not.is_empty() { line["not_sent"] = json!(not); }
-        if !retries.is_empty() { line["bundle_resends"] = json!(retries.iter().zip(&retry_labels).map(|((d, x), l)| json!({ "after_ms": d, "what": l, "sig": send::first_signature(&x.raw), "tip": x.tip.map(|t| t.1) })).collect::<Vec<_>>()); }
-        self.rec.json(rec::ATTEMPTS, line);
-        self.count(if live { "live_sent" } else { "canary_sent" });
-        if crowded { self.count("rank_crowded"); }
-        self.lat[LAT_DECIDED_TO_SIGNED].push(t_signed.saturating_sub(t_decided));
-        if let Some(t) = t_fired { self.lat[LAT_SIGNED_TO_FIRED].push(t.saturating_sub(t_signed)); }
-        let (gate_size, gate_mid, gate_back, gate_slot) = (r.size, r.mid, r.back, r.slot);
-        // WP-03b: the route's pools, for the chain-fetch tap after each firing below
-        let pools = [r.buy.pool, r.sell.pool];
-        let bundle = self.path_arm == "bundle";
-        if let Some(s) = self.sending.as_mut() { s.open.insert(attempt, Open { route: r, nonce: ni, worst, creates_ata, expected, t: t_signed, bundle }); }
-        let (rpc, back, paths2, gate, log, health) = (self.rpc.clone(), self.back.clone(), paths.clone(), self.gate.clone(), self.rec.clone(), self.health.clone());
-        self.rt.spawn(async move {
-            if let Some(raw) = gate_raw {
-                let t0 = now_ns();
-                // the RPC can be behind the trigger (w5h seg 4: the short leg was the trigger's own pool in 40 of 46
-                // gated trades, often with no rival move in between): a failed check is re-run at +30 and +90 ms, and
-                // the trade goes if one passes. Every check's slot is logged, to see how far behind the RPC was.
-                let mut slots = Vec::new();
-                let mut fail = None;
-                for (k, wait) in [0u64, 30, 60].into_iter().enumerate() {
-                    if wait > 0 { tokio::time::sleep(std::time::Duration::from_millis(wait)).await; }
-                    let Ok(sim) = rpc.simulate_full(&raw).await else { fail = None; break };
-                    slots.push(sim.slot);
-                    let legs = build::delivered_from_logs(&sim.logs);
-                    let back_sim = legs.last().map(|x| x.1);
-                    let thin = sim.err.is_none() && back_sim.is_some_and(|b| (b as i64 - gate_size as i64) < gate_bar as i64);
-                    if sim.err.is_none() && !thin {
-                        if k > 0 { log.log("send", format!("gate: attempt {attempt} passed on re-check {k} at +{:.0} ms (sim slots {slots:?})", (now_ns() - t0) as f64 / 1e6)); }
-                        fail = None;
-                        break;
-                    }
-                    // a check from before the trigger's slot (the RPC is behind: w5h seg 5, 13 of 16 gated checks ran a
-                    // slot behind the trigger, still behind at +90 ms) priced the pools without the trigger: its "gap gone"
-                    // says nothing about this trade, which goes on our own quote
-                    if sim.slot < gate_slot {
-                        log.log("send", format!("gate: attempt {attempt} sim stale (slot {} < trigger {gate_slot}, check {k}): sent on our quote", sim.slot));
-                        fail = None;
-                        break;
-                    }
-                    let why = match &sim.err { Some(err) => build::custom_code(err).map_or(err.to_string(), |c| format!("0x{c:x}")), None => format!("thin: gross {} < bar {gate_bar}", back_sim.unwrap_or(0) as i64 - gate_size as i64) };
-                    fail = Some(format!("{why} | legs {:?} predicted [{gate_mid}, {gate_back}]", legs.iter().map(|x| x.1).collect::<Vec<_>>()));
-                }
-                if let Some(f) = fail {
-                    let msg = format!("sim_gated after {:.1} ms: {f} | sim slots {slots:?}", (now_ns() - t0) as f64 / 1e6);
-                    let _ = back.send(Event::Settled(Box::new(Settled { attempt, fired: Fired { id: attempt, t_ns: 0, copies: vec![], gate: None },
-                        landed: None, jito: None, nonce_value: None, error: Some(msg) })));
-                    return;
-                }
-            }
-            // review M10: a send deferred past the decision (the sim gate's re-checks) still asks the SendGate: a pause,
-            // shadow or stop that came in meanwhile cancels it; so does the store's health (review WP-04 #8: a state outage,
-            // a re-read or a warm-up that began meanwhile)
-            if fire_now.is_none() && (!gate.allows() || !health.ready()) {
-                let why = if gate.allows() { format!("the store was not ready before the deferred send ({})", health.shut().as_str()) }
-                    else { format!("the send gate closed before the deferred send ({})", gate.mode().as_str()) };
-                let _ = back.send(Event::Settled(Box::new(Settled { attempt, fired: Fired { id: attempt, t_ns: 0, copies: vec![], gate: None },
-                    landed: None, jito: None, nonce_value: None, error: Some(format!("not sent: {why}")) })));
-                return;
-            }
-            let fire = match fire_now { Some(f) => f, None => paths2.fire(attempt, signed, prio, live) };
-            let fired = match fire.await { Ok(f) => f, Err(e) => { let _ = back.send(Event::Settled(Box::new(Settled { attempt, fired: Fired { id: attempt, t_ns: 0, copies: vec![], gate: None },
-                landed: None, jito: None, nonce_value: None, error: Some(e.to_string()) }))); return; } };
-            let mut fired = fired;
-            // WP-03b tap, after the firing: the signatures of the copies that left (wallet source (b): watched until a status
-            // shows them landed) and the route's pools (backfill priority 0); nothing for copies the gate kept back
-            crate::chainfetch::note_fired(attempt, &fired.copies, &pools);
-            // the bundle resends, on their schedule after the first send
-            let t_fire = std::time::Instant::now();
-            for (delay, c) in retries {
-                let d = std::time::Duration::from_millis(delay);
-                let el = t_fire.elapsed();
-                if d > el { tokio::time::sleep(d - el).await; }
-                // review M10: no scheduled resend after a pause, shadow or stop, nor while the store is not ready (WP-04 #8)
-                if !gate.allows() || !health.ready() { break; }
-                if let Ok(f2) = paths2.fire(attempt, vec![c], prio, live).await {
-                    crate::chainfetch::note_fired(attempt, &f2.copies, &pools);
-                    fired.copies.extend(f2.copies);
-                }
-            }
-            // a gate skip sent only the bundle, which Jito already rejected: nothing can land, so the nonce lease ends now
-            let gated = fired.gate.as_ref().is_some_and(|g| matches!(g.decision, send::Decision::Gated | send::Decision::GatedNoBundle));
-            tokio::time::sleep(if gated { std::time::Duration::from_millis(300) } else { settle }).await;
-            let mut s = Settled { attempt, fired, landed: None, jito: None, nonce_value: None, error: None };
-            let sigs: Vec<(usize, [u8; 64], String)> = s.fired.copies.iter().enumerate().filter_map(|(i, c)| {
-                let sg = c.sig.clone()?;
-                Some((i, sig64(&sg)?, sg))
-            }).collect();
-            match rpc.statuses(&sigs.iter().map(|x| x.1).collect::<Vec<_>>()).await {
-                Ok(st) => {
-                    if let Some(((i, _, sg), Some((slot, _)))) = sigs.iter().zip(st).find(|(_, v)| v.is_some()) {
-                        let path = paths2.index(&s.fired.copies[*i].path).unwrap_or(usize::MAX);
-                        let mut tx = Value::Null;
-                        for _ in 0..5 { if let Ok(Some(t)) = rpc.transaction(sg).await { tx = t; break; } tokio::time::sleep(std::time::Duration::from_secs(2)).await; }
-                        s.landed = Some((path, sg.clone(), slot, tx));
-                    }
-                }
-                Err(e) => s.error = Some(format!("statuses: {e:#}")),
-            }
-            for c in &s.fired.copies {
-                if let (Some(j), Some(sig)) = (paths2.list.iter().find(|p| p.name == c.path).and_then(|p| p.jito.clone()), &c.sig) {
-                    s.jito = j.verdict(sig, tokio::time::Instant::now()).await;
-                }
-            }
-            if let Ok((_, v)) = rpc.accounts(&[nonce]).await { s.nonce_value = v.into_iter().next().flatten().and_then(|a| build::nonce_value(&a.data)); }
-            let _ = back.send(Event::Settled(Box::new(s)));
-        });
-    }
+    // -------------------------------------------------------------------------------------------- settlement
 
     /// one of our own copies (a pool move by our own trade is not a trigger)
-    pub fn is_ours(&self, sig: &[u8; 64]) -> bool { self.sending.as_ref().is_some_and(|c| c.watch.contains_key(sig)) }
+    pub fn is_ours(&self, sig: &[u8; 64]) -> bool { self.by_sig.contains_key(sig) }
 
     /// a feed delivered a transaction: note it if it is one of our open copies
     pub fn on_arrival(&mut self, sig: &[u8; 64], feed: u16, t: u64) {
-        let Some(c) = self.sending.as_mut() else { return };
-        if !c.watch.contains_key(sig) { return; }
-        let e = c.seen.entry(*sig).or_insert((t, feed, Vec::new()));
+        if !self.by_sig.contains_key(sig) { return; }
+        let e = self.seen.entry(*sig).or_insert((t, feed, Vec::new()));
         if t < e.0 { e.0 = t; e.1 = feed; }
         if !e.2.iter().any(|x| x.0 == feed) { e.2.push((feed, t)); }
     }
 
-    /// the attempt's outcome, from chain plus what our own feeds saw, written once (outcomes.jsonl)
-    pub fn on_settled(&mut self, s: Settled, poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
-        // the token cool-down: 25 Jito rejections in a row (no accept, no landing) pause the token 60 s, doubling per
-        // pause up to 5 min; an accepted or landed bundle clears it
-        if let Some(mint) = self.sending.as_ref().and_then(|c| c.open.get(&s.attempt)).map(|o| o.route.mint) {
-            let e = self.mint_cool.entry(mint).or_insert((0, 0, 0));
-            match (s.landed.is_some(), s.jito.as_ref().map(|o| o.outcome)) {
-                (true, _) | (_, Some("accepted")) | (_, Some("landed")) => { *e = (0, 0, 0); }
-                (false, Some("would-fail")) => {
-                    e.0 += 1;
-                    if e.0 >= 25 {
-                        let secs = (60u64 << e.2.min(3)).min(300);
-                        e.1 = now_ns() + secs * 1_000_000_000; e.0 = 0; e.2 += 1;
-                        self.rec.log("send", format!("cool: token {} paused {secs} s after 25 Jito rejections in a row (pause {})", b58(&mint), e.2));
-                    }
-                }
-                _ => {}
-            }
+    /// A result of the executor's tasks (journaled INPUT 9) at engine time `t`: a fire result, a statuses answer, a dry
+    /// run's simulation
+    pub fn on_settled(&mut self, s: Settled, t: u64, poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
+        match s {
+            Settled::Fired { attempt, fired } => self.on_fired(attempt, fired, t, poh),
+            Settled::Statuses { why, at, result, t_ns } => self.on_statuses(why, at, result, t_ns, poh),
+            Settled::DrySim { line, .. } => { self.rec.json(rec::SIMS, line); }
         }
-        let feeds = self.feeds.clone();
-        let paths = self.paths.clone();
-        let Some(c) = self.sending.as_mut() else { return };
-        let Some(o) = c.open.remove(&s.attempt) else { return };
-        let spent_before = c.spent;
-        // signed -> the first copy's send task running (its t_sent; 0 = never sent): the send baseline (review F11)
-        if let Some(x) = s.fired.copies.first().filter(|x| x.t_sent > 0) { self.lat[LAT_SIGNED_TO_SENT].push(x.t_sent.saturating_sub(o.t)); }
-        let route = o.route;
-        c.reserved = c.reserved.saturating_sub(o.worst);
-        let slot_n = &mut c.nonces[o.nonce];
-        slot_n.busy = None;
-        if let Some(v) = s.nonce_value { slot_n.value = Some(v); }
-        let mut new_mint = None;
-        let mut line = json!({ "attempt": s.attempt, "kind": c.kind, "t_ns": now_ns(), "opp": route.opp, "trigger": bs58::encode(route.trig).into_string(),
-            "trigger_slot": route.slot, "expected_profit": o.expected, "gate": s.fired.gate });
-        let feed = |f: u16| feeds.get(f as usize).cloned().unwrap_or_default();
-        let mut copies = Vec::new();
-        for x in &s.fired.copies {
-            let b: Option<[u8; 64]> = x.sig.as_ref().and_then(|sg| bs58::decode(sg).into_vec().ok()).and_then(|v| v.try_into().ok());
-            let seen = b.and_then(|b| c.seen.get(&b));
-            copies.push(json!({ "path": x.path, "sig": x.sig, "accepted": x.ok, "status": x.status, "t_sent": x.t_sent,
-                "seen_first_ns": seen.map(|v| v.0), "seen_first_feed": seen.map(|v| feed(v.1)),
-                "send_to_seen_ms": seen.filter(|_| x.t_sent > 0).map(|v| (v.0 as f64 - x.t_sent as f64) / 1e6) }));
-        }
-        line["copies"] = json!(copies);
-        match &s.landed {
-            Some((path, sig, slot, tx)) => {
-                c.landed += 1;
-                let meta = &tx["meta"];
-                let fee = meta["fee"].as_u64().unwrap_or(0);
-                let err = if meta["err"].is_null() { None } else { Some(meta["err"].clone()) };
-                if tx.is_null() { c.spent += o.worst; } else if err.is_some() { c.spent += fee; }
-                c.fees += fee;
-                let code = err.as_ref().and_then(build::custom_code);
-                // real profit from the chain: the wallet's lamports plus its WSOL account, after minus before
-                let keys: Vec<String> = tx["transaction"]["message"]["accountKeys"].as_array().map(|a| a.iter().filter_map(|k| k.as_str().map(String::from)).collect()).unwrap_or_default();
-                let me = b58(&self.payer);
-                let lamports = keys.iter().position(|k| *k == me).map(|i| meta["postBalances"][i].as_i64().unwrap_or(0) - meta["preBalances"][i].as_i64().unwrap_or(0));
-                let wsol = |side: &str| meta[side].as_array().into_iter().flatten()
-                    .filter(|b| b["owner"].as_str() == Some(me.as_str()) && b["mint"].as_str() == Some(&b58(&WSOL)))
-                    .map(|b| b["uiTokenAmount"]["amount"].as_str().and_then(|a| a.parse::<i64>().ok()).unwrap_or(0)).sum::<i64>();
-                let profit = lamports.map(|l| l + wsol("postTokenBalances") - wsol("preTokenBalances"));
-                let b: Option<[u8; 64]> = bs58::decode(sig).into_vec().ok().and_then(|v| v.try_into().ok());
-                let seen = b.and_then(|b| c.seen.get(&b));
-                let sent = s.fired.copies.iter().find(|x| x.sig.as_deref() == Some(sig.as_str()));
-                line["landed"] = json!(paths.as_ref().and_then(|p| p.list.get(*path)).map(|p| p.name.clone()));
-                line["sig"] = json!(sig);
-                line["slot"] = json!(slot);
-                line["slots_after_trigger"] = json!(*slot as i64 - route.slot as i64);
-                line["ok"] = json!(err.is_none());
-                line["err"] = json!(err);
-                line["code"] = json!(code.map(hex_code));
-                line["meaning"] = json!(meaning(code, &err));
-                line["fee_lamports"] = json!(fee);
-                let tip_paid = if err.is_none() && !tx.is_null() { sent.map_or(0, |x| x.tip_lamports) } else { 0 };
-                if err.is_none() && !tx.is_null() {
-                    c.wins += 1;
-                    c.tips += tip_paid;
-                    c.profit += profit.unwrap_or(0);
-                    if o.creates_ata { c.new_atas += 1; new_mint = Some(route.mint); }
-                }
-                line["tip_paid_lamports"] = json!(tip_paid);
-                line["profit_lamports"] = json!(profit);
-                line["profit_vs_expected"] = json!(profit.map(|p| p - o.expected));
-                // what each leg really delivered on chain (the program's NXV2OUT logs, kept in failed transactions too):
-                // the round trip's real result against our prediction at the moment it executed
-                let logs: Vec<String> = meta["logMessages"].as_array().map(|a| a.iter().filter_map(|l| l.as_str().map(String::from)).collect()).unwrap_or_default();
-                let got = build::delivered_from_logs(&logs);
-                line["delivered"] = json!(got.iter().map(|d| d.1).collect::<Vec<_>>());
-                line["predicted"] = json!([route.mid, route.back]);
-                if let Some(&(_, back)) = got.iter().find(|d| d.0 == 1) {
-                    line["round_trip_on_chain"] = json!(back as i64 - route.size as i64);
-                    line["round_trip_predicted"] = json!(route.back as i64 - route.size as i64);
-                }
-                line["send_to_seen_ms"] = json!(seen.zip(sent).filter(|(_, x)| x.t_sent > 0).map(|(v, x)| (v.0 as f64 - x.t_sent as f64) / 1e6));
-                line["seen_by"] = json!(seen.map(|v| v.2.iter().map(|(f, t)| (feed(*f), json!(t))).collect::<serde_json::Map<_, _>>()));
-            }
-            None => { line["landed"] = Value::Null; }
-        }
-        // on the leaders' PoH clocks: when the trigger ran and how long after it OUR transaction ran (the proof of how
-        // late we reach the leader, independent of network clocks)
-        let tp = poh(&route.trig);
-        let op = s.landed.as_ref().and_then(|(_, sg, _, _)| sig64(sg)).and_then(|b| poh(&b));
-        line["poh"] = json!({ "trigger": tp.map(|p| json!({ "slot": p.slot, "ms_in_slot": p.ms(), "ticks": p.ticks })),
-            "ours": op.map(|p| json!({ "slot": p.slot, "ms_in_slot": p.ms(), "ticks": p.ticks })),
-            "ours_ms_after_trigger": op.zip(tp).and_then(|(a, b)| a.ms_after(&b)) });
-        line["jito"] = json!(s.jito);
-        line["settle_error"] = json!(s.error);
-        // status.jsonl v2 counter semantics (MEASUREMENT §2.2): the running total after this attempt, and this attempt's part
-        line["failed_fees_total_lamports"] = json!(c.spent);
-        line["failed_fees_delta_lamports"] = json!(c.spent - spent_before);
-        line["cap_lamports"] = json!(c.cap);
-        line["run_profit_lamports"] = json!(c.profit);
-        for x in &s.fired.copies {
-            if let Some(b) = x.sig.as_ref().and_then(|sg| bs58::decode(sg).into_vec().ok()).and_then(|v| <[u8; 64]>::try_from(v).ok()) { c.watch.remove(&b); c.seen.remove(&b); }
-        }
-        self.rec.json(rec::OUTCOMES, line);
-        if let Some(m) = new_mint { self.held.insert(m); }
     }
 
-    /// for status.jsonl: counters, spend so far against the cap
-    pub fn status(&self) -> Value {
-        let mut v = json!({ "counts": self.counts });
-        // sends refused for the paths' rates, split by the crowded rank (WP-00, F6), totals
-        if let Some(p) = &self.paths {
-            let (mut all, mut crowded) = (0u64, 0u64);
-            for x in &p.list { let st = x.stats.lock().unwrap(); all += st.limited; crowded += st.limited_crowded; }
-            v["over_rate"] = json!({ "crowded": crowded, "other": all.saturating_sub(crowded) });
+    /// The send task's result. Accepted (a bundle id): open until it lands or its blockhash expires. Left without an
+    /// answer (a timeout, a transport error after it may have gone out): it may land, so it stays open the same way, its
+    /// in-flight entry and fee reservation kept (review WP-05 #7). Never left (a `drop` code: the queue, the token, its
+    /// check) or refused by the block engine's answer: nothing can land, the attempt is final now and gives back its
+    /// in-flight entry, its reservation and its big-band token (refunded at the engine's time `t`, review #13)
+    fn on_fired(&mut self, attempt: u64, fired: Fired, t: u64, poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
+        let Some(o) = self.open.get_mut(&attempt) else { return };
+        let c = fired.copies.first();
+        let left = c.is_some_and(|c| c.t_sent > 0 && c.drop.is_none());
+        if let Some(c) = c.filter(|c| c.t_sent > 0) { self.lat[LAT_SIGNED_TO_SENT].push(c.t_sent.saturating_sub(o.t_signed)); }
+        o.fired = true;
+        if let Some(c) = c.filter(|c| left && (c.ok || c.t_ack == 0)) {
+            o.t_sent = Some(c.t_sent);
+            o.bundle = c.bundle.clone();
+            o.checks_due = CHECKS.iter().map(|(dt, l)| (c.t_sent + dt, *l)).collect();
+            if !c.ok {
+                o.send_error = Some(format!("send: {}", c.reply.as_deref().unwrap_or("no answer")));
+                *self.counts.entry("send_unanswered").or_default() += 1;
+            }
+            return;
         }
-        if let Some(c) = &self.sending {
-            v["sending"] = json!({ "kind": c.kind, "sent": c.sent, "landed": c.landed, "wins": c.wins, "in_flight": c.open.len(),
-                "failed_fees_total_lamports": c.spent, "cap_lamports": c.cap, "fees_lamports": c.fees, "tips_lamports": c.tips, "profit_lamports": c.profit,
-                "new_token_accounts": c.new_atas, "stopped": c.stopped });
+        let why = c.and_then(|c| c.drop).map(String::from).or_else(|| c.and_then(|c| c.reply.clone())).unwrap_or_else(|| "no copy".into());
+        if left { self.count("send_refused"); } else {
+            self.never_left += 1;
+            if let Some(code) = c.and_then(|c| c.drop) { self.count(drop_counter(code)); }
         }
+        let o = self.open.remove(&attempt).unwrap();
+        if o.took_big { self.big.refund(t); }
+        self.finalize(o, "not_landed_refused", "send", None, Some(why), false, poh);
+    }
+
+    /// INPUT 7 `wallet_tx` (WP-03b): one of our wallet's transactions. One of our attempts' signatures landed: final
+    /// (`landed_ok` / `landed_fail`, from the wallet), or an amend line when it was final already: a landing after a
+    /// final that said not landed, or the wallet record of a landing the expiry check found first, which brings its fee,
+    /// CU and the route program's events (review WP-05 #3)
+    pub fn on_wallet_tx(&mut self, d: &Value, poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
+        let Some(sig) = d["sig"].as_str().and_then(sig64) else { return };
+        let attempt = self.by_sig.get(&sig).copied().or_else(|| d["attempt"].as_u64().filter(|a| self.open.contains_key(a) || self.finals.contains_key(a)));
+        let Some(attempt) = attempt else { return };
+        let ok = d["ok"].as_bool().unwrap_or(false);
+        let landed = Landed { slot: d["slot"].as_u64(), idx: d["idx"].as_u64(), ok, err: d.get("err").cloned().filter(|e| !e.is_null()), fee: d["fee"].as_u64(),
+            cu: d["cu_consumed"].as_u64(), prog_events: d.get("prog_events").cloned().unwrap_or(Value::Null), t_wallet: now_ns() };
+        if let Some(o) = self.open.remove(&attempt) {
+            let fin = if ok { "landed_ok" } else { "landed_fail" };
+            self.finalize(o, fin, "wallet", Some(landed), None, false, poh);
+        } else if self.finals.get(&attempt).is_some_and(|f| !f.wallet_seen) {
+            self.amend(attempt, landed, "wallet");
+        }
+    }
+
+    /// INPUT 5 `inflight_release` (a block-engine result of one of our bundles, from the Jito client's sink). Only a
+    /// landing (`release`: `processed`, `finalized`) releases the attempt's in-flight entry early: a would-fail, a lost
+    /// auction or a drop keeps it for its hold, so the same state does not go again to the same leader (review WP-05 #2).
+    /// Token cooling: an accepted or landed bundle clears its token's run of would-fails; an attempt's first would-fail
+    /// adds one to it (a bundle may get several results: they count once)
+    pub fn on_release(&mut self, d: &Value, t: u64) {
+        let attempt = d["attempt"].as_u64().or_else(|| d["sig"].as_str().and_then(sig64).and_then(|s| self.by_sig.get(&s).copied()));
+        let Some(attempt) = attempt else { return };
+        let outcome = d["outcome"].as_str().unwrap_or("");
+        *self.counts.entry(match outcome { "accepted" => "verdict_accepted", "processed" => "verdict_processed", "finalized" => "verdict_finalized",
+            "would-fail" => "verdict_would_fail", "lost-auction" => "verdict_lost_auction", "dropped" => "verdict_dropped", _ => "verdict_rejected" }).or_default() += 1;
+        if d["release"].as_bool() == Some(true) && self.inflight.release(attempt) { self.count("inflight_released"); }
+        let would_fail = outcome == "would-fail";
+        let first = |c: &mut bool| { let f = !*c; *c = true; f };
+        let (mint, counts) = if let Some(o) = self.open.get_mut(&attempt) { (o.mint, would_fail && first(&mut o.cooled)) }
+            else if let Some(f) = self.finals.get_mut(&attempt) { (f.mint, would_fail && first(&mut f.cooled)) }
+            else { return };
+        if would_fail && !counts { self.count("cool_repeat"); return; }
+        let e = self.mint_cool.entry(mint).or_insert((0, 0, 0));
+        match outcome {
+            "accepted" | "processed" | "finalized" => *e = (0, 0, 0),
+            "would-fail" => {
+                e.0 += 1;
+                if e.0 >= COOL_AFTER {
+                    let secs = (60u64 << e.2.min(3)).min(300);
+                    e.1 = t + secs * 1_000_000_000; e.0 = 0; e.2 += 1;
+                    let n = e.2;
+                    self.rec.log("send", format!("cool: token {} paused {secs} s after {COOL_AFTER} would-fails in a row (pause {n})", b58(&mint)));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The executor's timers (the engine's housekeeping, journaled): in-flight expiry, the cross-checks due (one batched
+    /// getSignatureStatuses, 500 ms) and the attempts whose blockhash expired (one batched getSignatureStatuses with
+    /// `searchTransactionHistory`, F43), each on the background runtime; the answers come back as INPUT 9
+    pub fn tick(&mut self, t: u64, view: &SendView, tip_slot: u64) {
+        self.inflight.expire(tip_slot);
+        let mut checks: Vec<(u64, &'static str, [u8; 64])> = Vec::new();
+        let mut expiry: Vec<(u64, &'static str, [u8; 64])> = Vec::new();
+        for o in self.open.values_mut() {
+            if !o.fired { continue; }
+            let expired = view.expired(o.bh_slot, o.bh_height, tip_slot).unwrap_or(t.saturating_sub(o.t_signed) >= EXPIRY_NS);
+            if expired && !o.expiry_asked { o.expiry_asked = true; expiry.push((o.attempt, "expiry", o.sig)); continue; }
+            while let Some(&(due, label)) = o.checks_due.first() {
+                if due > t { break; }
+                o.checks_due.remove(0);
+                checks.push((o.attempt, label, o.sig));
+            }
+        }
+        for (why, list, search, ms) in [("check", checks, false, 500u64), ("expiry", expiry, true, 2_000)] {
+            for chunk in list.chunks(STATUS_BATCH) {
+                let at: Vec<(u64, &'static str)> = chunk.iter().map(|x| (x.0, x.1)).collect();
+                let sigs: Vec<[u8; 64]> = chunk.iter().map(|x| x.2).collect();
+                let (rpc, back) = (self.settle.clone(), self.back.clone());
+                self.count(if why == "check" { "status_check" } else { "expiry_check" });
+                self.rt.spawn(async move {
+                    let b = Bounds { deadline: Duration::from_millis(ms), retries: if search { 1 } else { 0 }, attempt_timeout: Duration::from_millis(ms),
+                        backoff_first: Duration::from_millis(100), backoff_max: Duration::from_millis(500) };
+                    let result = rpc.statuses_bounded(&sigs, search, b).await.map_err(|e| e.msg);
+                    let _ = back.send(Event::Settled(Box::new(Settled::Statuses { why, at, result, t_ns: now_ns() })));
+                });
+            }
+        }
+    }
+
+    fn on_statuses(&mut self, why: &'static str, at: Vec<(u64, &'static str)>, result: std::result::Result<Vec<Option<SigStatus>>, String>, t_ns: u64,
+        poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
+        for (k, (attempt, label)) in at.into_iter().enumerate() {
+            let hit = match &result { Ok(v) => Ok(v.get(k).cloned().flatten()), Err(e) => Err(e.clone()) };
+            let res = match &hit { Ok(Some(s)) => json!({ "slot": s.slot, "ok": s.err.is_none(), "err": s.err, "confirmation": s.confirmation }), Ok(None) => Value::Null,
+                Err(e) => json!({ "error": e }) };
+            if why == "check" {
+                if let Some(o) = self.open.get_mut(&attempt) {
+                    o.checks.push(json!({ "t_ns": t_ns, "at": label, "result": res }));
+                    if let Ok(Some(s)) = &hit { o.status_hit = Some(s.clone()); }
+                } else if let (true, Ok(Some(s))) = (self.finals.get(&attempt).is_some_and(|f| !f.landed), &hit) {
+                    // a late cross-check found a landing after the final: amend
+                    self.amend(attempt, Landed::of_status(s), "statuses");
+                }
+                continue;
+            }
+            // the expiry check: a landing the wallet path missed, else not landed
+            let Some(mut o) = self.open.remove(&attempt) else { continue };
+            o.checks.push(json!({ "t_ns": t_ns, "at": "expiry", "result": res }));
+            match hit {
+                Ok(Some(s)) => { self.count("expiry_status_hit"); let fin = if s.err.is_none() { "landed_ok" } else { "landed_fail" }; self.finalize(o, fin, "statuses", Some(Landed::of_status(&s)), None, false, poh); }
+                Ok(None) => { self.count("expired"); self.finalize(o, "not_landed_expired", "expiry", None, None, false, poh); }
+                // the check failed: what a cross-check saw decides, else not landed (the wallet stream may amend it)
+                Err(e) => match o.status_hit.clone() {
+                    Some(s) => { let fin = if s.err.is_none() { "landed_ok" } else { "landed_fail" }; self.finalize(o, fin, "statuses", Some(Landed::of_status(&s)), Some(format!("expiry check failed: {e}")), false, poh); }
+                    None => { self.count("expired"); self.finalize(o, "not_landed_expired", "expiry", None, Some(format!("expiry check failed: {e}")), false, poh); }
+                },
+            }
+        }
+    }
+
+    /// The final outcomes.jsonl line (v2) of an attempt, its in-flight entry released, its money counted (the bot's
+    /// counters until WP-07's ledger). A landing the expiry check found has no fee or events yet: its fee is counted as
+    /// the base fee (exactly what a one-signature bundle at CU price 0 pays) and its round trip as unknown, until its
+    /// wallet record amends them (review WP-05 #3)
+    #[allow(clippy::too_many_arguments)]
+    fn finalize(&mut self, o: Open, fin: &'static str, src: &'static str, landed: Option<Landed>, error: Option<String>, amend: bool,
+        poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
+        self.inflight.release(o.attempt);
+        self.reserved = self.reserved.saturating_sub(o.worst);
+        self.by_sig.remove(&o.sig);
+        let seen = self.seen.remove(&o.sig);
+        let error = error.or_else(|| o.send_error.clone());
+        let counted = landed.as_ref().map(|l| Counted::of(l, o.tip, o.size, o.creates_ata)).unwrap_or_default();
+        self.add(counted, o.mint);
+        let line = self.outcome_line(&o, fin, src, landed.as_ref(), error, amend, seen.as_ref(), poh);
+        self.rec.json(rec::OUTCOMES, line);
+        self.count(match fin { "landed_ok" => "landed_ok", "landed_fail" => "landed_fail", "not_landed_expired" => "not_landed_expired", "unsettled" => "unsettled",
+            _ => "not_landed_refused" });
+        self.finals.insert(o.attempt, Final { sig58: o.sig58.clone(), mint: o.mint, landed: landed.is_some(), ok: landed.as_ref().is_some_and(|l| l.ok), tip: o.tip,
+            size: o.size, creates_ata: o.creates_ata, src, counted, wallet_seen: src == "wallet", cooled: o.cooled });
+        self.finals_order.push_back(o.attempt);
+        while self.finals_order.len() > FINALS_KEEP { if let Some(a) = self.finals_order.pop_front() { self.finals.remove(&a); } }
+    }
+
+    /// The run is stopping: every attempt still open gets its final line now, `unsettled` (`final_src` `stop`; A.2), and
+    /// stop.json lists them (`unsettled`). Returns them
+    pub fn settle_at_stop(&mut self) -> Vec<u64> {
+        let open: Vec<u64> = self.open.keys().copied().collect();
+        for a in &open { if let Some(o) = self.open.remove(a) { self.finalize(o, "unsettled", "stop", None, None, false, &|_| None); } }
+        open
+    }
+
+    /// A later record of a final attempt (MEASUREMENT §4.40 `amend`): a landing found after a final that said not landed
+    /// (a late cross-check, the wallet stream), or the wallet record of a landing the expiry check found first. The
+    /// money then counts what this record says instead of what was counted (the landing once; the fee, the failed fee
+    /// and the round trip as the record gives them: review WP-05 #3)
+    fn amend(&mut self, attempt: u64, l: Landed, src: &'static str) {
+        let Some(f) = self.finals.get(&attempt).cloned() else { return };
+        self.count("amended");
+        let fin = if l.ok { "landed_ok" } else { "landed_fail" };
+        let counted = Counted::of(&l, f.tip, f.size, f.creates_ata);
+        self.sub(f.counted);
+        self.add(counted, f.mint);
+        if let Some(x) = self.finals.get_mut(&attempt) {
+            x.landed = true;
+            x.ok = l.ok;
+            x.src = src;
+            x.counted = counted;
+            x.wallet_seen |= src == "wallet";
+        }
+        let delivered = delivered_of(&l.prog_events);
+        self.rec.json(rec::OUTCOMES, json!({ "attempt": attempt, "t_ns": now_ns(), "sig": f.sig58, "final": fin, "final_t_ns": now_ns(), "final_src": src, "amend": true,
+            "amends": if f.landed { f.src } else { "not_landed" }, "landed": l.json(None), "ok": l.ok, "err": l.err, "fee_lamports": l.fee, "cu_consumed": l.cu,
+            "prog_events": l.prog_events, "delivered": delivered, "round_trip_on_chain": last_leg_out(&l.prog_events).map(|b| b as i64 - f.size as i64),
+            "failed_fees_total_lamports": self.spent }));
+    }
+
+    /// a landing's money into the counters (and its new token account into the held set)
+    fn add(&mut self, c: Counted, mint: Pk) {
+        self.landed += c.landed;
+        self.wins += c.win;
+        self.tips_paid += c.tip;
+        self.fees += c.fee;
+        self.spent += c.failed_fee;
+        self.round_trip += c.round_trip;
+        self.round_trip_unknown += c.rt_unknown;
+        if c.atas > 0 { self.new_atas += c.atas; self.held.insert(mint); }
+    }
+
+    /// what `add` counted for a landing, taken back (a later record replaces it)
+    fn sub(&mut self, c: Counted) {
+        self.landed -= c.landed;
+        self.wins -= c.win;
+        self.tips_paid -= c.tip;
+        self.fees -= c.fee;
+        self.spent -= c.failed_fee;
+        self.round_trip -= c.round_trip;
+        self.round_trip_unknown -= c.rt_unknown;
+        self.new_atas -= c.atas;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn outcome_line(&self, o: &Open, fin: &str, src: &str, landed: Option<&Landed>, error: Option<String>, amend: bool, seen: Option<&(u64, u16, Vec<(u16, u64)>)>,
+        poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) -> Value {
+        let verdicts: Vec<(u64, jito::Outcome)> = self.jito.as_ref().map(|j| j.verdicts(&o.sig58)).unwrap_or_default();
+        let vj: Vec<Value> = verdicts.iter().map(|(t, v)| json!({ "t_ns": t, "outcome": v.outcome, "slot": v.slot, "validator": v.validator, "index": v.index, "bid": v.bid,
+            "code": if v.outcome == "would-fail" { jito::error_code(v.detail.as_deref()) } else { None }, "detail": v.detail })).collect();
+        let first_ms = o.t_sent.zip(verdicts.first()).map(|(s, (t, _))| (*t as f64 - s as f64) / 1e6);
+        let accepted = verdicts.iter().find(|(_, v)| v.outcome == "accepted").map(|(t, v)| json!({ "t_ns": t, "slot": v.slot, "validator": v.validator }));
+        let processed = verdicts.iter().find(|(_, v)| v.outcome == "processed").map(|(_, v)| json!({ "slot": v.slot, "index": v.index, "validator": v.validator }));
+        let feed = |f: u16| self.feeds.get(f as usize).cloned().unwrap_or_default();
+        let tp = poh(&o.trig);
+        let op = landed.and_then(|_| poh(&o.sig));
+        let code = landed.and_then(|l| l.err.as_ref()).and_then(build::custom_code);
+        let delivered: Vec<u64> = landed.map(|l| delivered_of(&l.prog_events)).unwrap_or_default();
+        let mut v = json!({
+            "attempt": o.attempt, "decision": o.decision, "opp": o.opp, "t_ns": now_ns(), "kind": self.mode, "sig": o.sig58, "bundle": o.bundle, "path": o.path,
+            "final": fin, "final_t_ns": now_ns(), "final_src": src, "amend": amend, "error": error,
+            "verdicts": vj, "first_verdict_ms": first_ms, "accepted": accepted, "processed": processed,
+            "landed": landed.map(|l| l.json(o.leader.as_ref())),
+            "slots_after_trigger": landed.and_then(|l| l.slot).map(|s| s as i64 - o.trig_slot as i64),
+        });
+        v["poh"] = json!({ "trigger": tp.map(|p| json!({ "slot": p.slot, "ms": p.ms(), "ticks": p.ticks })), "ours": op.map(|p| json!({ "slot": p.slot, "ms": p.ms(), "ticks": p.ticks })),
+            "ours_ms_after_trigger": op.zip(tp).and_then(|(a, b)| a.ms_after(&b)) });
+        v["ms_after_trigger_src"] = if op.is_some() && tp.is_some() { json!("poh") } else { Value::Null };
+        v["seen"] = json!(seen.map(|x| json!({ "first_ns": x.0, "first_feed": feed(x.1), "by": x.2.iter().map(|(f, t)| (feed(*f), json!(t))).collect::<serde_json::Map<_, _>>() })));
+        v["send_to_seen_ms"] = json!(seen.zip(o.t_sent).map(|(x, s)| (x.0 as f64 - s as f64) / 1e6));
+        v["ok"] = json!(landed.map(|l| l.ok));
+        v["err"] = json!(landed.and_then(|l| l.err.clone()));
+        v["code"] = json!(code.map(hex_code));
+        v["meaning"] = json!(landed.map(|l| crate::proglog::meaning(code, &l.err)));
+        v["fee_lamports"] = json!(landed.and_then(|l| l.fee));
+        v["cu_consumed"] = json!(landed.and_then(|l| l.cu));
+        v["prog_events"] = json!(landed.map(|l| l.prog_events.clone()));
+        v["delivered"] = json!(delivered);
+        v["predicted"] = json!([o.mid, o.back]);
+        v["round_trip_on_chain"] = json!(landed.and_then(|l| last_leg_out(&l.prog_events)).map(|b| b as i64 - o.size as i64));
+        v["round_trip_predicted"] = json!(o.back as i64 - o.size as i64);
+        v["expected"] = json!(o.expected);
+        v["tip_lamports"] = json!(o.tip);
+        v["min_profit_onchain"] = json!(o.min_profit);
+        v["blockhash"] = json!({ "slot": o.bh_slot, "height": o.bh_height, "valid_until_height": o.bh_height.map(|h| h + BLOCKHASH_VALID_BLOCKS) });
+        v["target_slot"] = json!(o.target_slot);
+        v["ledger"] = Value::Null;
+        v["closer"] = Value::Null;
+        v["statuses_checks"] = json!(o.checks);
+        // status.jsonl v2 counter semantics (MEASUREMENT §2.2): the running total after this attempt
+        v["failed_fees_total_lamports"] = json!(self.spent);
         v
     }
 
+    /// for run.log: counters, spend so far against the cap
+    pub fn status(&self) -> Value {
+        json!({ "mode": self.mode, "counts": self.counts, "decisions": self.decisions, "would_send": self.would_sends, "sent": self.sent, "landed": self.landed, "wins": self.wins,
+            "in_flight": self.open.len(), "failed_fees_total_lamports": self.spent, "cap_lamports": self.cap_failed_fees, "stopped": self.stopped })
+    }
+
+    /// the share of attempts (would-sends included) whose target leader was known, since the last call (status
+    /// `coverage.leader_known_pct`; null without an attempt)
+    pub fn leader_known_pct(&mut self) -> Value {
+        let (n, k) = (self.leader_seen.0 - self.leader_prev.0, self.leader_seen.1 - self.leader_prev.1);
+        self.leader_prev = self.leader_seen;
+        if n == 0 { Value::Null } else { json!(((k as f64 * 100.0 / n as f64) * 100.0).round() / 100.0) }
+    }
+
+    /// status.jsonl `health.jito_token_age_s_now` (null: no bundle path)
+    pub fn token_age_s(&self) -> Option<u64> {
+        match self.jito.as_ref()?.token_state((now_ns() / 1_000_000) as i64) { jito::TokenState::Valid { age_s, .. } => Some(age_s), jito::TokenState::Stale => None }
+    }
+
+    /// the blockhash commitment the send checks use
+    pub fn blockhash_commitment(&self) -> &str { &self.pol.blockhash_commitment }
+
     /// status.jsonl v2 (MEASUREMENT §4.8, §2.2): the `exec` section and the `money` section, deltas against `prev`.
-    /// `money` holds the bot's own counters until WP-07's ledger (`src: "bot"`; null without a sender). Every number is
-    /// `_total`, `_delta` or `_now`
+    /// `money` holds the bot's own counters until WP-07's ledger (`src: "bot"`; zeros for a shadow or dry run, which
+    /// send nothing)
     pub fn status_v2(&self, prev: &mut ExecPrev) -> (Value, Value) {
         let mut counts_delta = serde_json::Map::new();
         for (k, v) in &self.counts {
@@ -1499,11 +1488,9 @@ impl Exec {
             if d > 0 { counts_delta.insert(k.to_string(), json!(d)); }
         }
         prev.counts = self.counts.clone();
-        // every block-engine result so far, by outcome (the jito paths' result streams)
+        // every block-engine result so far, by outcome (the jito path's result stream)
         let mut verdicts: std::collections::BTreeMap<&'static str, u64> = Default::default();
-        if let Some(p) = &self.paths {
-            for x in p.list.iter().filter_map(|x| x.jito.as_ref()) { for (k, v) in x.counts.lock().unwrap().iter() { *verdicts.entry(k).or_default() += v; } }
-        }
+        if let Some(j) = &self.jito { for (k, v) in j.counts.lock().unwrap().iter() { *verdicts.entry(k).or_default() += v; } }
         let verdicts_delta: serde_json::Map<String, Value> = verdicts.iter().filter_map(|(k, v)| {
             let d = v - prev.verdicts.get(k).copied().unwrap_or(0);
             (d > 0).then(|| (k.to_string(), json!(d)))
@@ -1514,36 +1501,325 @@ impl Exec {
             for x in &p.list { let st = x.stats.lock().unwrap(); all += st.limited; crowded += st.limited_crowded; }
             json!({ "crowded": crowded, "other": all.saturating_sub(crowded) })
         });
-        let mut exec = json!({ "counts_total": self.counts, "counts_delta": counts_delta, "verdicts_delta": verdicts_delta, "over_rate_total": over_rate,
-            // WP-05's send policy fills these
-            "decisions_total": null, "refused_total": null, "queue_now": null, "lambda_now": null });
-        let money = match &self.sending {
-            Some(c) => {
-                exec["kind"] = json!(c.kind);
-                exec["stopped"] = json!(c.stopped);
-                exec["attempts_total"] = json!(c.sent);
-                exec["attempts_delta"] = json!(c.sent as u64 - prev.attempts);
-                exec["landed_total"] = json!(c.landed);
-                exec["landed_delta"] = json!(c.landed as u64 - prev.landed);
-                exec["ok_total"] = json!(c.wins);
-                exec["in_flight_now"] = json!(c.open.len());
-                let m = json!({ "src": "bot", "failed_fees_total_lamports": c.spent, "failed_fees_delta_lamports": c.spent - prev.spent.min(c.spent),
-                    "failed_fees_cap_now_lamports": c.cap, "fees_landed_total_lamports": c.fees, "tips_paid_total_lamports": c.tips,
-                    // v1 `profit_lamports`: chain balance changes of winning landings, rent included (WP-07's ledger separates it)
-                    "bot_profit_total_lamports": c.profit, "new_token_accounts_total": c.new_atas });
-                prev.attempts = c.sent as u64;
-                prev.landed = c.landed as u64;
-                prev.spent = c.spent;
-                m
-            }
-            None => Value::Null,
-        };
+        let (queue, lambda) = self.paths.as_ref().map(|p| p.queue_now()).map_or((None, None), |(q, l)| (Some(q), l));
+        let exec = json!({ "kind": self.mode, "stopped": self.stopped, "counts_total": self.counts, "counts_delta": counts_delta, "verdicts_delta": verdicts_delta,
+            "over_rate_total": over_rate, "decisions_total": self.decisions, "decisions_delta": self.decisions - prev.decisions, "refused_total": self.refusals,
+            "would_send_total": self.would_sends, "would_send_delta": self.would_sends - prev.would_sends,
+            "attempts_total": self.next_attempt, "attempts_delta": self.next_attempt - prev.attempts, "sent_total": self.sent, "sent_delta": self.sent as u64 - prev.sent,
+            "landed_total": self.landed, "landed_delta": self.landed as u64 - prev.landed, "ok_total": self.wins, "in_flight_now": self.open.len(),
+            "inflight_keys_now": self.inflight.len(), "queue_now": queue, "lambda_now": lambda, "net_calls_send_path_total": self.net_calls() });
+        let money = json!({ "src": "bot", "failed_fees_total_lamports": self.spent, "failed_fees_delta_lamports": self.spent - prev.spent.min(self.spent),
+            "failed_fees_cap_now_lamports": self.cap_failed_fees, "fees_landed_total_lamports": self.fees, "tips_paid_total_lamports": self.tips_paid,
+            "round_trip_total_lamports": self.round_trip, "round_trip_unknown_total": self.round_trip_unknown,
+            "new_token_accounts_total": self.new_atas });
+        prev.decisions = self.decisions;
+        prev.would_sends = self.would_sends;
+        prev.attempts = self.next_attempt;
+        prev.sent = self.sent as u64;
+        prev.landed = self.landed as u64;
+        prev.spent = self.spent;
         (exec, money)
     }
 
     pub fn payer(&self) -> Pk { self.payer }
 }
 
-/// What `Exec::status_v2`'s deltas are against (the previous status line)
+fn sig58_of(s: &[u8; 64]) -> String { bs58::encode(s).into_string() }
+/// the lookup tables a built message loads accounts from (attempts `tx.alts`)
+fn lookups_of(msg: &build::Message) -> Vec<String> {
+    crate::tx::parse_wire(&build::unsigned(msg)).map(|(tx, _)| tx.lookups.iter().map(|l| b58(&l.table)).collect()).unwrap_or_default()
+}
+/// what each leg delivered, in order: the `out` events of the route program's logs (`proglog::events`, as the wallet
+/// stream's record carries them)
+fn delivered_of(prog_events: &Value) -> Vec<u64> {
+    prog_events.as_array().into_iter().flatten().filter(|e| e["kind"] == "out").filter_map(|e| e["amount"].as_u64()).collect()
+}
+
+/// what the route's last leg delivered (the quote back): the `out` event of the highest leg (the last one without leg
+/// numbers), whatever the number of legs (review WP-05 #15)
+fn last_leg_out(prog_events: &Value) -> Option<u64> {
+    let outs = prog_events.as_array().into_iter().flatten().filter(|e| e["kind"] == "out").filter_map(|e| Some((e["leg"].as_u64(), e["amount"].as_u64()?)));
+    outs.fold(None, |best: Option<(Option<u64>, u64)>, (leg, amount)| match best { Some((b, _)) if leg < b => best, _ => Some((leg, amount)) }).map(|x| x.1)
+}
+fn base64_of(b: &[u8]) -> String { use base64::Engine as _; base64::engine::general_purpose::STANDARD.encode(b) }
+
+/// The executor's refusal reasons (MEASUREMENT A.1) and their counters (A.7): `reject_<reason>` when the reason refused
+/// the decision, `ungated_<reason>` when a closed SendGate refused it first (counted `reject_gate_*`), so the `reject_*`
+/// counters sum to the refusals (review WP-05 #16). The text before a `:` is the reason (`gate_shadow:<why>`,
+/// `build_error:<detail>`)
+macro_rules! reasons {
+    ($($r:literal),* $(,)?) => {
+        /// the counter of a refusal reason (`reject_<reason>`; `reject_other` for an unknown one)
+        pub fn reject_counter(reason: &str) -> &'static str {
+            match reason.split(':').next().unwrap_or("") { $($r => concat!("reject_", $r),)* _ => "reject_other" }
+        }
+        /// the counter of what refused a decision the closed gate refused first (`ungated_<reason>`)
+        pub fn ungated_counter(reason: &str) -> &'static str {
+            match reason.split(':').next().unwrap_or("") { $($r => concat!("ungated_", $r),)* _ => "ungated_other" }
+        }
+    };
+}
+
+reasons!("gate_shadow", "gate_stopped", "recorder_unhealthy", "warmup", "state_unavailable", "resync", "fee_cap", "sender_stopped", "canary_wait", "canary_count",
+    "blockhash_stale", "leader_unknown", "leader_skip_kind", "jito_auth_stale", "expected_below_min_profit", "implausible_gap", "token_cooling", "rent_cap",
+    "inflight_same_state", "inflight_same_leader", "band_throttle", "crowded_skip", "would_rate", "would_rate_crowded", "oversized", "build_error");
+
+/// the counter of a copy that never left (copies.jsonl `drop`, MEASUREMENT §4.38): `drop_<code>`. Such an attempt was
+/// handed to the fire, so it is not a refused decision (review WP-05 #16)
+pub fn drop_counter(code: &str) -> &'static str {
+    match code {
+        "rate_queue_timeout" => "drop_rate_queue_timeout", "crowded_pool" => "drop_crowded_pool", "bad_tx" => "drop_bad_tx",
+        "jito_auth_stale" => "drop_jito_auth_stale", "send_task" => "drop_send_task", _ => "drop_other",
+    }
+}
+
+/// a landing as the settlement knows it
+#[derive(Clone, Debug)]
+struct Landed { slot: Option<u64>, idx: Option<u64>, ok: bool, err: Option<Value>, fee: Option<u64>, cu: Option<u64>, prog_events: Value, t_wallet: u64 }
+
+/// What one landing adds to the bot's money counters: the landing, a win and its tip, its fee (and as a failed fee
+/// when it failed), a win's round trip when the route program's events give it (else it is unknown), the token account
+/// it created
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Counted { landed: u32, win: u32, tip: u64, fee: u64, failed_fee: u64, round_trip: i64, rt_unknown: u32, atas: u32 }
+
+impl Counted {
+    /// a landing of a bundle tipping `tip` for `size` (a record without a fee: the base fee, what our one-signature
+    /// bundles at CU price 0 pay)
+    fn of(l: &Landed, tip: u64, size: u64, creates_ata: bool) -> Counted {
+        let fee = l.fee.unwrap_or(BASE_FEE);
+        let rt = if l.ok { last_leg_out(&l.prog_events).map(|b| b as i64 - size as i64) } else { None };
+        Counted { landed: 1, win: l.ok as u32, tip: if l.ok { tip } else { 0 }, fee, failed_fee: if l.ok { 0 } else { fee }, round_trip: rt.unwrap_or(0),
+            rt_unknown: (l.ok && rt.is_none()) as u32, atas: (l.ok && creates_ata) as u32 }
+    }
+}
+
+impl Landed {
+    fn of_status(s: &SigStatus) -> Landed { Landed { slot: Some(s.slot), idx: None, ok: s.err.is_none(), err: s.err.clone(), fee: None, cu: None, prog_events: Value::Null, t_wallet: 0 } }
+    fn json(&self, leader: Option<&(String, LeaderKind)>) -> Value {
+        json!({ "slot": self.slot, "idx": self.idx, "t_wallet_ns": (self.t_wallet > 0).then_some(self.t_wallet), "leader": leader.map(|l| l.0.clone()), "leader_kind": leader.map(|l| l.1) })
+    }
+}
+
+/// What `status_v2`'s deltas are against (the previous status line)
 #[derive(Default)]
-pub struct ExecPrev { counts: HashMap<&'static str, u64>, verdicts: std::collections::BTreeMap<&'static str, u64>, attempts: u64, landed: u64, spent: u64 }
+pub struct ExecPrev { counts: HashMap<&'static str, u64>, verdicts: std::collections::BTreeMap<&'static str, u64>, decisions: u64, would_sends: u64, attempts: u64, sent: u64, landed: u64, spent: u64 }
+
+/// attempts.jsonl v2 (MEASUREMENT §4.37), the parts every mode writes
+struct AttemptLine<'a> {
+    attempt: u64,
+    r: &'a RouteIn,
+    mode: Mode,
+    expected: i64,
+    band: u8,
+    crowding: Crowding,
+    tip: Option<(Pk, u64)>,
+    tip_policy: Option<&'a TipPolicy>,
+    min_profit: u64,
+    margin: u64,
+    built: &'a Built,
+    bh: &'a Bh,
+    bh_age: Option<u64>,
+    leader: Value,
+    key: InflightKey,
+    prev: Option<(u64, u64)>,
+    why_allowed: &'static str,
+    prio: Prio,
+    lambda: Option<i64>,
+    t_built0: u64,
+    t_built: u64,
+    payer: Pk,
+    program: Pk,
+}
+
+impl AttemptLine<'_> {
+    fn json(&self) -> Value {
+        let r = self.r;
+        let tip_l = self.tip.map_or(0, |t| t.1);
+        let mut checks: Vec<&str> = SEND_CHECKS.to_vec();
+        checks.extend(["expected", "gap", "cooling", "rent", "inflight", "band", "crowding", "min_profit", "rate", "build"]);
+        json!({
+            "attempt": self.attempt, "decision": r.decision, "opp": r.opp, "t_ns": self.t_built, "kind": self.mode,
+            "trigger": { "txn": bs58::encode(r.trig).into_string(), "slot": r.slot, "kind": r.trig_kind, "t_first_shred": r.t_first_shred, "feed": r.trig_feed },
+            "route": { "buy_pool": b58(&r.buy.pool), "buy_venue": r.buy.venue, "buy_source": r.buy_source, "sell_pool": b58(&r.sell.pool), "sell_venue": r.sell.venue,
+                "sell_source": r.sell_source, "mint": b58(&r.mint), "mint_prog": b58(if r.mint == r.buy.t0 { &r.buy.t0_prog } else { &r.buy.t1_prog }), "hub": b58(&WSOL) },
+            "size_lamports": r.size,
+            "expected": { "mid": r.mid, "back": r.back, "gross": self.expected, "fee": BASE_FEE, "tip": tip_l, "net": self.expected - tip_l as i64 - BASE_FEE as i64 },
+            "band": self.band, "sv": format!("{:016x}", r.state_version), "route_age_ms": r.route_age_ms,
+            "parts_skew_slots": r.parts_skew.map(|(b, s)| json!({ "buy": b, "sell": s })),
+            "min_profit_onchain": self.min_profit, "margin": self.margin,
+            "tip": { "lamports": tip_l, "account": self.tip.map(|t| b58(&t.0)), "sender": self.tip_policy.map(|p| p.path.clone()), "share": self.tip_policy.and_then(|p| p.share),
+                "band": self.band, "arm": null, "policy": "share_of_edge" },
+            "tx": { "sig": null, "bytes": build::tx_bytes(&self.built.msg), "locks": self.built.msg.locks, "alts": lookups_of(&self.built.msg), "alt_fallback": "none", "cu_limit": self.built.cu_limit,
+                "cu_src": "fallback", "cu_price_micro": 0, "loaded_data_limit": null, "creates_ata": self.built.creates_ata, "closes_ata": false, "guard_max_drop": null,
+                "payer": b58(&self.payer), "program": { "id": b58(&self.program), "kind": "nexus-v2", "layout": "v2" } },
+            "blockhash": { "hash": b58(&self.bh.hash), "slot": self.bh.slot, "height": self.bh.height, "age_slots": self.bh_age, "commitment": self.bh.commitment, "src": self.bh.src },
+            "leader": self.leader,
+            "crowding": self.crowding,
+            "inflight": { "key": self.key.json(), "prev_attempt": self.prev.map(|p| p.0), "prev_sv": self.prev.map(|p| format!("{:016x}", p.1)), "why_allowed": self.why_allowed },
+            "queue": { "rank": self.prio.rank(), "band_rank": self.prio.band, "crowd_rank": self.prio.crowd, "ev": self.prio.ev, "wait_us": null, "lambda": self.lambda },
+            "experiments": {},
+            "checks": checks,
+            "stages": { "t_first_shred": r.t_first_shred, "t_update_recv": r.st[0], "t_commit": r.t_commit, "t_engine": r.st[2], "t_priced": r.t_priced, "t_decided": r.st[4],
+                "t_built": self.t_built, "t_build_start": self.t_built0, "t_signed": null, "t_enqueued": null, "t_dequeued": null, "t_sent": null, "t_ack": null },
+            "copies": [{ "path": self.tip_policy.map(|p| p.path.clone()), "sig": null, "bytes": build::tx_bytes(&self.built.msg), "tip": tip_l, "min_profit": self.min_profit }],
+            "route_in": { "accounts": r.accounts.iter().map(|(k, slot, wv)| json!({ "acct": b58(k), "slot": slot, "wv": wv })).collect::<Vec<_>>(),
+                "dlmm_arrays": { "buy": r.buy_live, "sell": r.sell_live }, "buy_end": r.buy_end, "sell_end": r.sell_end },
+            "net_at_opp": r.net_at_opp, "gross_at_opp": r.gross_at_opp,
+        })
+    }
+}
+
+/// What a signed bundle transaction must be (the dry run's checks), from the decision's own values
+pub struct VerifyWant<'a> {
+    pub payer: Pk,
+    /// the key that signed it (the dry run's throwaway key)
+    pub signer: Pk,
+    pub blockhash: [u8; 32],
+    pub tip: Option<(Pk, u64)>,
+    pub tips: Vec<Pk>,
+    pub program: Pk,
+    pub pools: [Pk; 2],
+    pub cu_limit: u64,
+    pub alts: &'a HashMap<Pk, Arc<Vec<Pk>>>,
+    /// the route instruction's amount_in (the attempt's `size_lamports`) and min_profit (its `min_profit_onchain`)
+    pub amount_in: u64,
+    pub min_profit: u64,
+    /// `[send_policy] margin_floor`: the signed min_profit covers the signed tip + the base fee + at least this
+    pub margin_floor: u64,
+    /// the route's accounts: the quote account (the payer's WSOL account, where the last leg delivers), the mid token's
+    /// account (where the first leg delivers), and each leg's venue program
+    pub quote: Pk,
+    pub mid: Pk,
+    pub leg_programs: [Pk; 2],
+}
+
+/// The nexus-v2 route instruction as a signed transaction carries it (data `[2, n, amount_in u64, min_profit u64, per
+/// leg {n_accounts, amount_offset, data_len u16}, leg data]`; accounts: authority, quote, then per leg its output account,
+/// its program and its own accounts: build.rs `route_ix`)
+#[derive(Debug, PartialEq)]
+pub struct RouteSeen { pub amount_in: u64, pub min_profit: u64, pub authority: Pk, pub quote: Pk, pub legs: Vec<LegSeen> }
+
+/// one leg of a [`RouteSeen`]: where it delivers, its program, its accounts
+#[derive(Debug, PartialEq)]
+pub struct LegSeen { pub out: Pk, pub program: Pk, pub accounts: Vec<Pk> }
+
+/// the route instruction of `program` in a parsed transaction whose full account list is `all` (None: none, more than
+/// one, or one that does not decode)
+pub fn route_of(tx: &crate::tx::Tx, all: &[Pk], program: &Pk) -> Option<RouteSeen> {
+    let mut ixs = tx.ixs.iter().filter(|ix| tx.keys.get(ix.program as usize) == Some(program));
+    let ix = ixs.next()?;
+    if ixs.next().is_some() { return None; }
+    let d = &ix.data;
+    let u64_at = |i: usize| d.get(i..i + 8).map(|b| u64::from_le_bytes(b.try_into().unwrap()));
+    if d.first() != Some(&2) { return None; }
+    let n = *d.get(1)? as usize;
+    let (amount_in, min_profit) = (u64_at(2)?, u64_at(10)?);
+    let key = |k: usize| ix.accounts.get(k).and_then(|&i| all.get(i as usize)).copied();
+    let (authority, quote) = (key(0)?, key(1)?);
+    let (mut at, mut data_len) = (2usize, 0usize);
+    let mut legs = Vec::with_capacity(n);
+    for l in 0..n {
+        let desc = d.get(18 + 4 * l..22 + 4 * l)?;
+        // bits 6-7 of the account count are the NATIVE flags (build.rs refuses them on the v2 layout)
+        if desc[0] & 0xC0 != 0 { return None; }
+        let na = desc[0] as usize;
+        data_len += u16::from_le_bytes([desc[2], desc[3]]) as usize;
+        let accounts: Vec<Pk> = (at + 2..at + 2 + na).map(key).collect::<Option<_>>()?;
+        legs.push(LegSeen { out: key(at)?, program: key(at + 1)?, accounts });
+        at += 2 + na;
+    }
+    if d.len() != 18 + 4 * n + data_len || ix.accounts.len() != at { return None; }
+    Some(RouteSeen { amount_in, min_profit, authority, quote, legs })
+}
+
+/// The signed bundle transaction's checks (go-live gate item 4: its size, tip and accounts checked), each
+/// `{check, ok, detail}`, read from the signed bytes: one signed v0 transaction with nothing after it; its signature
+/// verifies with the signer's key; the payer is the wallet; size and locks within the limits; the blockhash is the one
+/// chosen; the CU limit; the tip last, a top-level System transfer of the tip from the payer to a Jito tip account
+/// (`Path::check`'s rule too); the route program; both pools among its accounts; and the route instruction itself
+/// (review WP-05 #12): it decodes (`route_data`), its amount_in and min_profit are the decision's (`route_amount_in`,
+/// `route_min_profit`), the signed min_profit covers the signed tip + the base fee + the margin floor
+/// (`min_profit_covers_tip`: a landed bundle cannot lose), and its accounts are the payer, the quote account and per leg
+/// its output account, its venue's program and its pool (`route_accounts`)
+pub fn verify_bundle(raw: &[u8], w: &VerifyWant) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut put = |check: &str, ok: bool, detail: Value| out.push(json!({ "check": check, "ok": ok, "detail": detail }));
+    let parsed = crate::tx::parse_wire(raw);
+    let Some((tx, used)) = parsed else { put("parses", false, json!("not a transaction")); return out };
+    put("parses", used == raw.len(), json!({ "bytes": raw.len(), "used": used }));
+    put("one_signature", tx.num_signers == 1, json!(tx.num_signers));
+    // the message is what follows the signature (one signature: 1 + 64 bytes)
+    let sig_ok = raw.len() > 65 && {
+        use ed25519_dalek::Verifier;
+        let sig = ed25519_dalek::Signature::from_bytes(raw[1..65].try_into().unwrap());
+        ed25519_dalek::VerifyingKey::from_bytes(&w.signer).is_ok_and(|vk| vk.verify(&raw[65..], &sig).is_ok())
+    };
+    put("signature_verifies", sig_ok, json!(b58(&w.signer)));
+    put("payer_is_wallet", tx.keys.first() == Some(&w.payer), json!(tx.keys.first().map(b58)));
+    put("size", raw.len() <= build::MAX_TX_BYTES, json!({ "bytes": raw.len(), "max": build::MAX_TX_BYTES }));
+    let all = tx.resolve(|t| w.alts.get(t).cloned());
+    let locks = all.as_ref().map_or(0, |a| a.len());
+    put("accounts_resolve", all.is_some(), json!({ "static": tx.keys.len(), "loaded": locks.saturating_sub(tx.keys.len()), "lookups": tx.lookups.len() }));
+    put("locks", locks <= build::MAX_LOCKS, json!({ "accounts": locks, "max": build::MAX_LOCKS }));
+    let bh_ok = raw.len() >= 65 + 4 + 32 * tx.keys.len() + 32 && {
+        // the message: header (4 incl. the version byte), compact key count (1 byte below 128 keys), the keys, the blockhash
+        let at = 65 + 4 + 1 + 32 * tx.keys.len();
+        raw.get(at..at + 32) == Some(&w.blockhash[..])
+    };
+    put("blockhash", bh_ok, json!(b58(&w.blockhash)));
+    put("cu_limit", tx.cu_limit == Some(w.cu_limit as u32), json!({ "tx": tx.cu_limit, "want": w.cu_limit }));
+    put("no_cu_price", tx.cu_price_micro.unwrap_or(0) == 0, json!(tx.cu_price_micro));
+    // the tip as signed: the last instruction, a System transfer (2) from the payer
+    let signed_tip = tx.ixs.last().filter(|ix| tx.keys.get(ix.program as usize) == Some(&[0u8; 32]) && ix.data.len() == 12 && ix.data[..4] == [2, 0, 0, 0])
+        .and_then(|ix| Some((*tx.keys.get(*ix.accounts.first()? as usize)?, *tx.keys.get(*ix.accounts.get(1)? as usize)?, u64::from_le_bytes(ix.data[4..12].try_into().unwrap()))));
+    let last_is_tip = signed_tip.is_some_and(|(from, to, lamports)| from == w.payer && w.tip == Some((to, lamports)));
+    let tip_ok = w.tip.is_none() || last_is_tip;
+    // (what was signed is spelled out only when it is not what was wanted: the dry run's decisions stay cheap)
+    put("tip_last", tip_ok, json!({ "account": w.tip.map(|t| b58(&t.0)), "lamports": w.tip.map(|t| t.1),
+        "signed": if tip_ok { Value::Null } else { json!(signed_tip.map(|(f, t, l)| json!({ "from": b58(&f), "to": b58(&t), "lamports": l }))) } }));
+    let paid = send::tip_paid(&tx, &w.tips);
+    put("tip_to_jito", w.tip.map_or(true, |t| paid == t.1 && w.tips.contains(&t.0)), json!({ "paid": paid }));
+    put("tip_check", send::verify_copy(raw, SendKind::JitoBundle, &w.tips, "jito-bundle").is_ok(), Value::Null);
+    let route = tx.ixs.iter().any(|ix| tx.keys.get(ix.program as usize) == Some(&w.program));
+    put("route_program", route, json!(b58(&w.program)));
+    let has = |p: &Pk| all.as_ref().is_some_and(|a| a.contains(p));
+    put("pools_named", has(&w.pools[0]) && has(&w.pools[1]), json!([b58(&w.pools[0]), b58(&w.pools[1])]));
+    // the route instruction, decoded from the signed bytes (review WP-05 #12)
+    let seen = all.as_ref().and_then(|a| route_of(&tx, a, &w.program));
+    put("route_data", seen.as_ref().is_some_and(|r| r.legs.len() == 2), json!(seen.as_ref().map(|r| json!({ "legs": r.legs.len() }))));
+    let r = seen.as_ref();
+    put("route_amount_in", r.is_some_and(|r| r.amount_in == w.amount_in), json!({ "signed": r.map(|r| r.amount_in), "want": w.amount_in }));
+    put("route_min_profit", r.is_some_and(|r| r.min_profit == w.min_profit), json!({ "signed": r.map(|r| r.min_profit), "want": w.min_profit }));
+    // a landed bundle cannot lose: what the program demands back covers everything the transaction pays out (every
+    // System transfer from the payer: the tip) plus the base fee and the margin floor
+    let paid_out: u64 = tx.ixs.iter().filter(|ix| tx.keys.get(ix.program as usize) == Some(&[0u8; 32]) && ix.data.len() == 12 && ix.data[..4] == [2, 0, 0, 0])
+        .filter(|ix| ix.accounts.first().and_then(|&i| tx.keys.get(i as usize)) == Some(&w.payer))
+        .map(|ix| u64::from_le_bytes(ix.data[4..12].try_into().unwrap())).sum();
+    let floor = paid_out.saturating_add(BASE_FEE).saturating_add(w.margin_floor);
+    put("min_profit_covers_tip", r.is_some_and(|r| r.min_profit >= floor), json!({ "signed_min_profit": r.map(|r| r.min_profit), "signed_paid_out": paid_out,
+        "base_fee": BASE_FEE, "margin_floor": w.margin_floor }));
+    let legs_ok = r.is_some_and(|r| r.authority == w.payer && r.quote == w.quote && r.legs.len() == 2
+        && r.legs[0].out == w.mid && r.legs[1].out == w.quote
+        && r.legs.iter().zip(&w.leg_programs).all(|(l, p)| l.program == *p)
+        && r.legs.iter().zip(&w.pools).all(|(l, p)| l.accounts.contains(p)));
+    put("route_accounts", legs_ok, if legs_ok { json!({ "legs": 2 }) } else { json!(r.map(|r| json!({ "authority": b58(&r.authority), "quote": b58(&r.quote),
+        "legs": r.legs.iter().map(|l| json!({ "out": b58(&l.out), "program": b58(&l.program), "accounts": l.accounts.len() })).collect::<Vec<_>>() }))) });
+    out
+}
+
+/// a signed transaction's accounts, in order, with how each is named (static or through a lookup table) and whether it
+/// signs or is written (the dry run's record)
+pub fn accounts_of(raw: &[u8], alts: &HashMap<Pk, Arc<Vec<Pk>>>) -> Value {
+    let Some((tx, _)) = crate::tx::parse_wire(raw) else { return Value::Null };
+    let Some(all) = tx.resolve(|t| alts.get(t).cloned()) else { return Value::Null };
+    let n = tx.keys.len();
+    let sig = tx.num_signers as usize;
+    json!(all.iter().enumerate().map(|(i, k)| json!({ "key": b58(k), "signer": i < sig, "writable": tx.is_writable(i), "via": if i < n { json!("static") } else {
+        // which table it was loaded from
+        json!(tx.lookups.iter().find(|l| alts.get(&l.table).is_some_and(|a| l.writable.iter().chain(&l.readonly).any(|&j| a.get(j as usize) == Some(k)))).map(|l| b58(&l.table)))
+    } })).collect::<Vec<_>>())
+}
+
+#[cfg(test)]
+mod tests;
