@@ -412,7 +412,13 @@ pub struct Recorder {
     pub notes: Vec<String>,
     /// plan addendum I-9 (WP-08): rivals.jsonl's `why = venues` rows, 1 in `[record] rivals_venues_sample` kept
     pub(crate) rival_venues: sample::Sampler,
+    /// WP-20: every events.jsonl event is shown to the alerts (`Rec::set_alert_tap`; src/alerts.rs `classify`), on the
+    /// producer's thread: the tap never waits
+    alert_tap: OnceLock<AlertTap>,
 }
+
+/// WP-20: what the recorder hands every events.jsonl event to (kind, subsystem, feed, detail) before it queues it
+pub type AlertTap = Box<dyn Fn(&'static str, &'static str, Option<u16>, &Value) + Send + Sync>;
 
 /// The handle every producer holds. `Rec::off()` records nothing (tools, tests, the recorder-off benchmark)
 #[derive(Clone, Default)]
@@ -470,7 +476,7 @@ pub fn start(opts: Opts) -> Result<Rec> {
         echo_dropped: AtomicU64::new(0), close_timeout: Mutex::new(Vec::new()), crash: Default::default(),
         close_wait_ms: AtomicU64::new(CLOSE_WAIT.as_millis() as u64),
         entries, core_lost: AtomicBool::new(false), gate: OnceLock::new(), stopper: OnceLock::new(), engine_tid: AtomicI32::new(0), runtimes: OnceLock::new(),
-        udp: Mutex::new(Vec::new()), stall: Default::default(), monitor: Mutex::new(None), notes });
+        udp: Mutex::new(Vec::new()), stall: Default::default(), monitor: Mutex::new(None), notes, alert_tap: OnceLock::new() });
     // the plain streams exist from the start, their headers stamped with the recorder's start (review F4, N2)
     for (i, s) in r.streams.iter().enumerate() {
         if s.spec.format.plain() && S(i as u16) != STATUS { let _ = r.tx[s.spec.class.idx()].send(Ctl::Open(S(i as u16), started_ns, None)); }
@@ -672,6 +678,7 @@ impl Recorder {
 
     /// events.jsonl (§4.6)
     pub fn event(&self, kind: &'static str, subsystem: &'static str, feed: Option<u16>, detail: Value) {
+        if let Some(tap) = self.alert_tap.get() { tap(kind, subsystem, feed, &detail); }
         let t = now_ns();
         self.push(EVENTS, None, 0, Record::Json(json!({ "t_ns": t, "kind": kind, "subsystem": subsystem, "feed": feed, "detail": detail })));
     }
@@ -937,6 +944,9 @@ impl Rec {
     /// counted (manifest.json `sampling.rivals_venues`). Some(the counts, which the row carries as `sample`) when it is
     /// written; None when it is left out, or when nothing records
     pub fn sample_rival_venues(&self, sig: &[u8]) -> Option<sample::Kept> { self.0.as_ref()?.rival_venues.take(sig) }
+
+    /// WP-20: show every events.jsonl event to the alerts (once; a tap must never wait)
+    pub fn set_alert_tap(&self, tap: AlertTap) { if let Some(x) = &self.0 { let _ = x.alert_tap.set(tap); } }
 
     pub fn sync(&self) { if let Some(x) = &self.0 { x.sync(); } }
     pub fn close(&self) { if let Some(x) = &self.0 { x.close(); } }

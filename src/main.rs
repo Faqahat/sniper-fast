@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use arbx::control::{self, StopInfo, StopReason};
 use arbx::feeds::clock::now_ns;
-use arbx::{build, chainfetch, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, reads, rec, replay, rpc, runtime, send, store, tx, venues, wallet};
+use arbx::{alerts, build, chainfetch, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, reads, rec, replay, rpc, runtime, send, store, tx, venues, wallet, watchdog};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -199,6 +199,35 @@ enum Cmd {
         /// the run's registry (default: <run>/pools.json; its registry-run.json beside it)
         #[arg(long)] pools: Option<PathBuf>,
     },
+    /// The watchdog (PLAN-ADDENDUM WP-20): a long-running process that watches the runs directory (`[watchdog]`) and
+    /// tells Telegram (`[alerts]`) whether a segment runs: "running" every `status_min`, "NOT running" when no segment
+    /// process has been alive for `grace_s` or the running one's status.jsonl is `stale_s` old, "back up" when it
+    /// recovers. One per runs directory (a lock). Reads only the runs directory and /proc; sends no transaction. Stops on
+    /// SIGINT or SIGTERM (exit 0)
+    Watchdog {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        /// the .env to load (default: the .env beside the config)
+        #[arg(long)] env_file: Option<PathBuf>,
+        /// look once, print the verdict as JSON and exit (0 running, 1 not); sends nothing and takes no lock
+        #[arg(long)] once: bool,
+    },
+    /// Send one test message through `[alerts]` (whatever its `enabled` says) and print whether it went out. Never prints
+    /// the token or the chat id. Exit 0 sent, 1 not
+    AlertTest {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        /// the .env to load (default: the .env beside the config)
+        #[arg(long)] env_file: Option<PathBuf>,
+    },
+    /// Post an operator's note to the alerts' chat now (`[alerts]`, whatever its `enabled` says): a field test's goal when
+    /// it starts and its result when it ends (docs/field-tests/README.md). The first line is the title; the text is
+    /// escaped (no markup). Never prints the token or the chat id. Exit 0 sent, 1 not
+    Notify {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        /// the .env to load (default: the .env beside the config)
+        #[arg(long)] env_file: Option<PathBuf>,
+        /// the note (its first line is the title)
+        #[arg(long)] text: String,
+    },
     /// (tests) install `run`'s signal handler, control socket and stop path, without feeds or RPC; print "ready <pid>",
     /// wait for a stop, write stop.json and exit with its code
     #[command(hide = true)]
@@ -321,6 +350,15 @@ fn main() -> Result<()> {
                     None => println!("  geo table not on this machine (loaded at start; without it regions stay null)"),
                 }
             }
+            // WP-20: the alerts and the watchdog (the variables are named here, never read)
+            let al = &cfg.alerts;
+            println!("alerts: {} (Telegram; token from ${}, chat from ${}): at most {} messages a minute, dedup {} s, min level {}, coalesce {} ms, heartbeat {}, daily summary {}{}",
+                if al.enabled { "on" } else { "off" }, al.token_env, al.chat_env, al.rate_per_min, al.dedup_s, al.min_level, al.coalesce_ms,
+                if al.heartbeat_min == 0 { "off".to_string() } else { format!("every {} min", al.heartbeat_min) }, if al.daily_summary { "on" } else { "off" },
+                if al.low_balance_sol > 0.0 { format!(", low balance under {} SOL", al.low_balance_sol) } else { String::new() });
+            let w = &cfg.watchdog;
+            println!("watchdog: watches {} (not running after {} s without a segment process, or a status.jsonl {} s old, or {} s of boot); running every {} min; looks every {} s",
+                w.dir(&cfg.out_dir).display(), w.grace_s, w.stale_s, w.boot_s, w.status_min, w.poll_s);
             Ok(())
         }
         Cmd::Pools { config } => {
@@ -346,6 +384,8 @@ fn main() -> Result<()> {
             let a = RunArgs { config, minutes, name, only, canary, dry_run, live, ov: Overrides { shadow, budget_left }, campaign_dir, env_file };
             let sess = control::Session::new();
             control::install_panic_hook(sess.clone());
+            // WP-20: a main-thread panic sends a Critical alert after stop.json is written (best effort, bounded)
+            alerts::install_panic_hook();
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&a, &sess)));
             std::process::exit(end_run(&sess, res))
         }
@@ -354,6 +394,35 @@ fn main() -> Result<()> {
             control::install_panic_hook(sess.clone());
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wait_signal(&dir, minutes, panic, fail_after_stop, &sess)));
             std::process::exit(end_run(&sess, res))
+        }
+        Cmd::Watchdog { config, env_file, once } => {
+            let note = match &env_file { Some(f) => load_env_file(f), None => { load_env(&config); None } };
+            let cfg = config::Config::load(&config)?;
+            let runs = cfg.watchdog.dir(&cfg.out_dir);
+            if once {
+                let (v, up) = watchdog::once(&runs, &cfg.watchdog);
+                println!("{}", serde_json::to_string_pretty(&v)?);
+                std::process::exit(if up { 0 } else { 1 });
+            }
+            std::process::exit(watchdog::run(&cfg.alerts, &cfg.watchdog, &runs, note)?)
+        }
+        Cmd::AlertTest { config, env_file } => {
+            if let Some(n) = match &env_file { Some(f) => load_env_file(f), None => { load_env(&config); None } } { eprintln!("{n}"); }
+            let cfg = config::Config::load(&config)?;
+            if !cfg.alerts.enabled { println!("note: [alerts] enabled = false in {}: runs of this config send no alerts", config.display()); }
+            let what = format!("arbx alert-test from {} (build {}, config {})", provenance::hostname(), provenance::build_short(), config.display());
+            match alerts::send_test(&cfg.alerts, &alerts::env_var, &what, std::time::Duration::from_secs(15)) {
+                Ok(line) => { println!("{line}"); Ok(()) }
+                Err(e) => { println!("failed: {e}"); std::process::exit(1) }
+            }
+        }
+        Cmd::Notify { config, env_file, text } => {
+            if let Some(n) = match &env_file { Some(f) => load_env_file(f), None => { load_env(&config); None } } { eprintln!("{n}"); }
+            let cfg = config::Config::load(&config)?;
+            match alerts::send_note(&cfg.alerts, &alerts::env_var, &text, std::time::Duration::from_secs(15)) {
+                Ok(line) => { println!("{line}"); Ok(()) }
+                Err(e) => { println!("failed: {e}"); std::process::exit(1) }
+            }
         }
         Cmd::Provenance { config, offline } => {
             load_env(&config);
@@ -891,6 +960,16 @@ fn run_dir(out_dir: &str, campaign_dir: Option<&Path>, name: &str) -> PathBuf {
 /// The end of `run` / `wait-signal`: the stop reason they set, or error / panic; stop.json; the exit code. An error or
 /// panic after a stop request keeps that reason, is stop.json `secondary`, and exits 30 (review M5)
 fn end_run(sess: &control::Session, res: std::thread::Result<Result<()>>) -> i32 {
+    let code = end_code(sess, res);
+    // WP-20: the stop message (reason, run time, the last status line's numbers) and whatever alerts are still queued,
+    // after stop.json; bounded (alerts::EXIT_WAIT), a no-op without alerts
+    if let Some(i) = sess.stopper.info() {
+        alerts::on_exit(code, i.reason.as_str(), &i.detail, sess.secondary().map(|(r, d)| (r.as_str(), d.as_str())));
+    }
+    code
+}
+
+fn end_code(sess: &control::Session, res: std::thread::Result<Result<()>>) -> i32 {
     match res {
         Ok(Ok(())) => sess.finish(StopInfo::new(StopReason::Error, "the run ended without a stop reason")),
         Ok(Err(e)) => {
@@ -1051,6 +1130,13 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     }
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     sess.set_dir(dir.clone());
+    // WP-20: the alerts (src/alerts.rs), before anything else can fail: from here on every end of the run sends its stop
+    // message (`alerts::on_exit` in end_run). The token and chat id come from the environment loaded above; missing ones
+    // turn the alerts off with one warning (said once the recorder runs). Producers never wait; the sender runs on rt_bg
+    let runs_dir = match a.campaign_dir.as_deref() { Some(c) => c.parent().map(Path::to_path_buf), None => dir.parent().map(Path::to_path_buf) };
+    let (alerter, alert_notes) = alerts::Alerts::new(&cfg.alerts, &alerts::env_var, alerts::Ctx { label: name.clone(), dir: Some(dir.clone()), runs_dir, started_ns, seg: None,
+        max_blockhash_age_slots: cfg.send_policy.max_blockhash_age_slots });
+    alerts::install(alerter.clone());
     // WP-02: the recorder, always on (MEASUREMENT §0), before anything records. Its writer threads write every stream
     // (run.log too: `say` hands the line over; the engine thread writes nothing); a core-stream drop or the disk
     // budget's last step closes the SendGate. Closed on every way out of `run`, before stop.json's line
@@ -1061,6 +1147,13 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let say = |s: &str| rec.say(s);
     say(&format!("arbx {} build {} ({}), config {} (sha256 {}), run {}", env!("CARGO_PKG_VERSION"), provenance::build_short(), env!("ARBX_PROFILE"),
         a.config.display(), &provenance::sha256_hex(&raw)[..16], dir.display()));
+    // WP-20: the alerts' own events go to events.jsonl, and every events.jsonl event is shown to them (`alerts::classify`)
+    alerter.set_rec(rec.clone());
+    {
+        let w = Arc::downgrade(&alerter);
+        rec.set_alert_tap(Box::new(move |kind, _subsystem, _feed, d| if let Some(x) = w.upgrade() { x.on_event(kind, d) }));
+    }
+    for n in &alert_notes { say(n); }
     if let Some(n) = &env_note { say(n); }
     for n in rec.recorder().map(|r| r.notes.clone()).unwrap_or_default() { say(&n); }
     // the run's identity, and a partial meta.json that stop.json's writer leaves if the boot fails before the full one
@@ -1093,6 +1186,12 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let rts = runtime::Runtimes::new(cfg.runtime.bg_threads)?;
     let (hot, bg) = (rts.hot.handle().clone(), rts.bg.handle().clone());
     rec.set_runtimes(hot.clone(), bg.clone());
+    // WP-20: on rt_bg, the alerts' sender, the SendGate watcher (every change, with its reason) and the monitor (the last
+    // status line: a stale blockhash, the failed-fee cap, a low balance; the RPC 429 storms; the heartbeat and the daily
+    // summary)
+    alerter.start(&bg, stop.clone());
+    alerter.watch_gate(&bg, sess.gate.clone(), stop.clone());
+    alerter.start_monitor(&bg, stop.clone());
     let (eps, skipped) = cfg.rpc.endpoints();
     if eps.is_empty() { anyhow::bail!("no RPC provider configured (skipped: {skipped:?})"); }
     let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover).bind(bg.clone()).with_role(rpc::Role::Boot);
@@ -1363,11 +1462,18 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         "send_policy": provenance::section(&cfg.send_policy), "dry_run": provenance::section(&cfg.dry_run),
         "record": provenance::section(&cfg.record), "control": provenance::section(&cfg.control), "tips": null,
         "runtime": provenance::section(&cfg.runtime),
+        // WP-20: the alerts' config (the variables' names, never their values) and whether they are on
+        "alerts": { "enabled": alerter.enabled(), "off_why": alerter.off_why(), "config": provenance::section(&cfg.alerts) },
         "send_gate": sess.gate.json(),
         // what the command line changed in the config for this run (--shadow, --budget-left)
         "overrides": a.ov.json(),
     });
     control::write_atomic(&dir.join("meta.json"), serde_json::to_string_pretty(&meta)?.as_bytes())?;
+    // WP-20: the segment start message (mode, build, config hash, wallet, budget)
+    alerter.segment_start(alerts::SegmentStart { segment: name.clone(), mode: mode.as_str().into(), gate_mode: sess.gate.mode().as_str().into(),
+        gate_reason: Some(sess.gate.reason()).filter(|r| !r.is_empty()), build: provenance::build_short(),
+        config_sha: config_json["normalized_sha256"].as_str().map(|h| h.chars().take(12).collect()).unwrap_or_default(), wallet: cfg.wallet.clone(),
+        budget_left_lamports: a.ov.budget_left, fee_cap_lamports: if canary { cfg.canary.max_spend_lamports } else { cfg.live.max_failed_fees_lamports } });
     if sess.stopper.stopping() { return Ok(()); }
     let fs = feeds::start(&cfg.feeds, interest.clone(), tx.clone(), stop.clone(), &hot, &rec, Some(roles.clone()))?;
     anyhow::ensure!(fs.names == feed_names, "feed ids changed: {:?} vs {:?}", fs.names, feed_names);
@@ -1470,6 +1576,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     if let Some(x) = &eng.exec { say(&format!("exec final {}", x.status())); }
     if runtime::hot_violations() > 0 { say(&format!("WARNING: {} RPC calls ran on an arbx-hot thread", runtime::hot_violations())); }
     stop.store(true, Ordering::Relaxed);
+    // WP-20: what the alerts' sender holds goes out before its runtime stops (bounded); the rest with the stop message
+    alerter.flush(alerts::FLUSH_WAIT);
     // the feeds and send tasks stop with the runtimes; then the recorder drains what they handed it (its guard closes it)
     rts.shutdown(std::time::Duration::from_secs(2));
     say(&format!("done: {} (stop: {reason})", dir.display()));

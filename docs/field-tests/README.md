@@ -33,11 +33,39 @@ Only these go to `/root/arbx` on Cherry:
 
 Never uploaded: `src/`, `program/`, `tools/`, `docs/`, or any script (.py/.sh/.ts). Anything that must run on Cherry, such as a campaign supervisor, becomes a subcommand of the binary. Secrets live only in `/root/arbx/deploy/.env` (mode 600).
 
+## Alerts and the watchdog on Cherry (WP-20)
+
+- **Alerts** come from each segment by itself: both maintained configs have `[alerts] enabled = true`. They need `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `/root/arbx/deploy/.env` (mode 600). The owner sets them there, never in git or a config. Without them a segment runs as before, with one run.log WARNING (`alerts off: … not set`).
+- **Check the pair** after the .env changes (one test message to the group; it prints `ok: …` or `failed: <why>`, never the token or the chat id; exit 0 or 1):
+
+  ```
+  cd /root/arbx && bin/arbx-<hash> alert-test --config deploy/<cfg>.toml
+  ```
+
+- **A note to the group** (a field test's goal when it starts, its result when it ends), sent with the same .env, so the operator never sees the token. The first line is the title:
+
+  ```
+  cd /root/arbx && bin/arbx-<hash> notify --config deploy/<cfg>.toml --text "FT-001 goal: <one sentence>"
+  ```
+
+- **The watchdog** is a separate, long-running process. Start it once, detached from the SSH session:
+
+  ```
+  cd /root/arbx && setsid nohup bin/arbx-<hash> watchdog --config deploy/<cfg>.toml >> runs/watchdog.out 2>&1 < /dev/null &
+  ```
+
+  - It watches `[watchdog] runs_dir` (`/root/arbx/runs`). It tells the group "✅ running" every `status_min` (60 min), and "❌ NOT running" when no segment process has been alive for more than `grace_s` (120 s) or the running segment's status.jsonl is more than 60 s old. While it stays down, it repeats the reminder every `status_min`; "✅ back up" follows when the bot recovers.
+  - Its journal is `runs/watchdog.jsonl`, and `runs/watchdog.out` has the same lines with times.
+  - One per runs directory: a second one refuses to start, and `runs/.watchdog.lock` holds the pid of the one running.
+  - To look once without sending: `bin/arbx-<hash> watchdog --config deploy/<cfg>.toml --once` prints JSON (exit 0 running, 1 not).
+  - To stop it: `kill $(cat runs/.watchdog.lock)`. On SIGTERM it says "⏹ watchdog stopped" and exits 0. For a new binary, stop the old watchdog and start the new one with the new hash.
+- The watchdog is the binary itself (a subcommand) started from its config, so the owner rule above holds: Cherry gets the binary, its config and its data, never source or scripts.
+
 ## Protocol for each test (an entry `FT-NNN-<slug>.md`)
 
 1. **Before:**
    - ID and title;
-   - **the goal in one sentence**, posted to the owner's Telegram group when the run starts; the result against that goal is posted when it ends;
+   - **the goal in one sentence**, posted to the owner's Telegram group when the run starts; the result against that goal is posted when it ends (`arbx notify`, above);
    - purpose and hypothesis;
    - **pass/fail criteria, written before it runs**;
    - mode (shadow / dry-run / canary / live);

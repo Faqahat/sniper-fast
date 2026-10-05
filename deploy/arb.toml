@@ -406,3 +406,20 @@ preload = "auto"
 # WP-04: hint accuracy against the pre-state; log only in Stage 0
 action = "log"
 ring_versions = 8
+
+[alerts]
+# WP-20: Telegram alerts; the token and chat id only in /root/arbx/deploy/.env (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID).
+# Missing ones turn the alerts off with one warning (never fatal). `arbx alert-test --config <this file>` checks them
+enabled = true
+token_env = "TELEGRAM_BOT_TOKEN"
+chat_env = "TELEGRAM_CHAT_ID"
+heartbeat_min = 60
+min_level = "info"
+dedup_s = 600
+rate_per_min = 20
+
+[watchdog]
+# WP-20: `arbx watchdog --config deploy/arb.toml` (docs/field-tests/README.md)
+runs_dir = "/root/arbx/runs"
+grace_s = 120
+status_min = 60

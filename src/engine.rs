@@ -1661,6 +1661,8 @@ impl Engine {
             "latency": lat, "latency_run": lat_run,
             "exec": exec, "money": money, "recorder": recorder, "chainfetch": chainfetch, "coverage": coverage });
         if let Some(r) = stop_reason { line["stop_reason"] = json!(r); }
+        // WP-20: the alerts' counters (atomics only; null without alerts)
+        line["alerts"] = crate::alerts::status();
         p.t = t;
         p.counts = self.counts.clone();
         p.updates = self.store.updates;
