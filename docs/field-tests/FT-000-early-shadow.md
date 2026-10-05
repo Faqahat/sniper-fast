@@ -28,9 +28,38 @@ Problems found here get fixed while WP-05/06/07 are built, not after.
 
 ## Setup
 
-- **Build:** master (code at 323e3bf plus later docs-only commits), built in a clean worktree. The binary's sha256 is recorded in `meta.json`.
-- **Config:** `deploy/arbx-stage0.toml` (mode shadow), with keys from `/root/arbx/deploy/.env` (arbx's own).
-- **Command (on Cherry):** `cd /root/arbx && nohup bin/arbx-<hash> run --config deploy/arbx-stage0.toml --minutes 150 --name ft000 > runs/ft000.out 2>&1 &`
+- **Build:** master `735901e` (code from 323e3bf; later commits are docs only), release, built in a clean worktree. `arbx --version` prints `arbx 0.1.0 (git 735901ee…, dirty false, release)`.
+- **Upload (build artifacts only):** the debug-stripped binary `bin/arbx-735901e` (sha256 `0b6a78c6a91f0302…`, 16.4 MB), plus `deploy/ft000-shadow.toml` and 6 data files. Each was verified with `sha256sum -c` on Cherry.
+- **Config:** `deploy/ft000-shadow.toml` is master's `deploy/arbx-stage0.toml` (sha256 `d48bda02e8d7f107…`) with two changes:
+  - `wallet = "FRZh63L6…"`, the production wallet;
+  - `wallet_keystore = ""`, so the owner's existing keystore (profile "trading") is used in place. Shadow mode never loads it.
+- **Keys:** from arbx's own `/root/arbx/deploy/.env`, which `arbx check` loads.
+- **Signer stats:** start empty. The cmp2-polluted file was moved aside to `runs/signer-stats.json.polluted-cmp2`.
+- **Pre-flight:** `arbx check` exits 0 on Cherry: only jito-bundle enabled, shadow, the route program's hash checked at start, 21 crowded pools, geo table 872 ranges.
+
+## Segments (chosen by Claude; the owner asked for segmented test runs)
+
+| Segment | Length | Why |
+|---|---|---|
+| s1 | 30 min | Quick health check: boot, the state gate, the recorder, decisions. Stop if anything is fatal. |
+| s2 | 60 min | Stability over an hour: memory growth, rotations, the lookup-table cache, Haan reconnects. Warm start from s1's lookup tables. |
+| s3 | 60 min | Repeat for variance, and reconnect behaviour if Haan drops. |
+
+- Each segment starts only after the previous process has fully exited, because Haan grants its streams to the first process (I-3).
+- Each segment is analysed while the next one runs.
+- Command per segment: `cd /root/arbx && (setsid nohup bin/arbx-735901e run --config deploy/ft000-shadow.toml --minutes N --name ft000-sK > runs/ft000-sK.out 2>&1 < /dev/null &)`
+
+## Observed at s1 + 3.5 min
+
+- **State:**
+  - connected, `tier_a_complete`, 1,030 Tier-A pools;
+  - last update 19 ms old, 0 reconnects, 1 re-snapshot (boot);
+  - `unavailable_total` 1: the boot window. No send while the re-read was pending: "nothing is sent until it has".
+- **Recorder:** 0 drops, 0 I/O errors, no dead writers. 199 MB in 3.5 min, about 3.4 GB/h compressed; `exec.jsonl` is the largest stream.
+  - Multi-day canaries need old runs moved off Cherry; there are 137 GB free.
+- **CPU:** about 0.5 core (user + sys) of 4; load 0.44.
+- **RPC:** Haan carried 76% of first replies, getMultipleAccounts p50 0.7 ms, 0 errors.
+- **Dead feeds**, as known (OD-6): constantk-prism (401), erpc (timeout), raiden, corvus and getblock (0 transactions). They only add log noise.
 
 ## Results
 
