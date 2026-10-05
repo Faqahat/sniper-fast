@@ -20,6 +20,7 @@
 //!   projection per scenario (pools by fixture name). WP-16 changes the maths: regenerate them with
 //!   `ARBX_BLESS=1 cargo test --release --lib scenarios` and review the diff. The structural expectations (what is never
 //!   priced, which reasons, which counters) are asserted in the code and do not change with the maths.
+mod exec_replay;
 mod harness;
 mod s1_torn_reads;
 mod s2_failed_sells;
@@ -29,6 +30,8 @@ mod s5_bolt;
 mod s6_lookup_tables;
 mod s7_warmup;
 mod s8_forks;
+mod s9_inflight;
+mod s11_bands;
 mod synth;
 
 use crate::config::Config;
@@ -152,9 +155,58 @@ pub(crate) struct Rig {
     wv: u64,
     /// readable names of the scenario's transactions (for the expected projections)
     pub sig_names: HashMap<[u8; 64], String>,
+    /// ---- WP-09 (the executor replay): the run's SendGate (its executor reads it; `Setup::exec`) and LeaderBook
+    pub gate: Arc<crate::control::SendGate>,
+    pub book: Arc<crate::leaders::LeaderBook>,
     /// keep the run directory (`ARBX_KEEP_SCENARIOS`), or it was handed to the scenario's `Done`
     keep: bool,
     handed_over: bool,
+}
+
+/// ---- WP-09 (review WP-09 "For the WP-05 merge" item 9). A real executor in the run (WP-05: every `arbx run` builds
+/// one), as `arbx run` builds it: `Exec::assemble` on the boot's lookup tables, PumpSwap GlobalConfig and held tokens
+/// (the fixtures hold none of them: a made-up GlobalConfig, and a lookup table of every account the fixture pools' legs
+/// name, as Stage 0's `[exec] alts` hold the venues' common accounts), the run's SendGate, a LeaderBook that knows the
+/// test leaders' kinds, the engine's health, the crowding map with WP-00's static list; its exec_init record journaled
+/// after engine_init. No RPC endpoint, no send path, no key (a dry run's throwaway key aside)
+pub(crate) struct ExecSetup<'a> {
+    pub mode: crate::exec::Mode,
+    /// the wallet holds an account for every token of the registry (else WSOL only: Stage 0 creates none,
+    /// `max_new_token_accounts = 0`, so a route through a token not held is `rent_cap`)
+    pub hold_tokens: bool,
+    /// WP-00's crowded-pools list, by fixture pool name
+    pub crowded: &'a [&'a str],
+    /// the SendGate starts shadow for the whole segment (`mode_shadow`, as `arbx run` without `--live` starts), else live
+    /// (a test moves it)
+    pub sticky_shadow: bool,
+}
+
+impl Default for ExecSetup<'_> {
+    fn default() -> Self { ExecSetup { mode: crate::exec::Mode::Shadow, hold_tokens: true, crowded: &[], sticky_shadow: true } }
+}
+
+/// the test leaders: two Jito validators and one of another kind (the LeaderBook's list, `Rig::new`)
+pub(crate) const LEADER_JITO: Pk = [0xa7; 32];
+pub(crate) const LEADER_JITO2: Pk = [0xa9; 32];
+pub(crate) const LEADER_OTHER: Pk = [0xa8; 32];
+
+/// A lookup table holding every account the registry pools' legs name (both directions, every followed DLMM bin array;
+/// the payer aside), as the boot reads one of `[exec] alts`
+fn fixture_alt(reg: &Registry, chain: &HashMap<Pk, Vec<u8>>, store: &Store, payer: Pk, pump: &crate::build::PumpGlobal) -> (Pk, Vec<Pk>) {
+    let mut keys: Vec<Pk> = Vec::new();
+    let mut add = |k: Pk| if k != payer && !keys.contains(&k) { keys.push(k); };
+    for m in &reg.pools {
+        let mint = if m.t0 == *crate::venues::WSOL { m.t1 } else { m.t0 };
+        let arrays: Vec<(i64, Pk)> = store.dlmm_arrays.get(&m.pool).cloned().unwrap_or_default();
+        for a in &arrays { add(a.1); }
+        let live: Vec<i64> = arrays.iter().map(|a| a.0).collect();
+        for (tin, tout) in [(*crate::venues::WSOL, mint), (mint, *crate::venues::WSOL)] {
+            let leg = crate::build::leg(&crate::build::LegIn { m, pool: &chain[&m.pool], tin, tout, amount_in: SOL, payer, pump: Some(pump), dlmm_live: &live, dlmm_end: None });
+            if let Ok(l) = leg { add(l.out); for a in &l.accounts { add(a.key); } }
+        }
+    }
+    keys.truncate(256);
+    ([0xa1; 32], keys)
 }
 
 /// What a scenario changes in the Stage-0 config (exact text replacements of deploy/arbx-stage0.toml) and in the boot
@@ -169,10 +221,12 @@ pub(crate) struct Setup<'a> {
     pub rotate_mb: Option<f64>,
     /// engine_init says the run had an executor (the engine itself has none: its decisions are `no_executor`)
     pub executor: bool,
+    /// ---- WP-09: a real executor in the run (`ExecSetup`)
+    pub exec: Option<ExecSetup<'a>>,
 }
 
 impl Default for Setup<'_> {
-    fn default() -> Self { Setup { pools: &[], config: &[], s0: None, omit: &[], rotate_mb: None, executor: false } }
+    fn default() -> Self { Setup { pools: &[], config: &[], s0: None, omit: &[], rotate_mb: None, executor: false, exec: None } }
 }
 
 pub(crate) fn nop() -> impl FnMut(&str) { |_: &str| {} }
@@ -237,13 +291,62 @@ impl Rig {
         let min_tip = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.tip_lamports).min().unwrap_or(0);
         e.apply_init(&EngineInit { min_tip, strategy_sha256: engine::strategy_sha256(&cfg.strategy), executor: s.executor, signer_stats_file: String::new(),
             signer_stats_sha256: None, signer_stats: Default::default(), knobs: Some(EngineKnobs::from_cfg(&cfg)) }).unwrap();
+        // ---- WP-09: the run's executor (`ExecSetup`), its gate and LeaderBook
+        let gate = crate::control::SendGate::new();
+        let book = crate::leaders::LeaderBook::new(Rec::off());
+        book.set_list("kobe", &json!({ "validators": [{ "identity_account": b58(&LEADER_JITO), "running_jito": true }, { "identity_account": b58(&LEADER_JITO2),
+            "running_jito": true }, { "identity_account": b58(&LEADER_OTHER), "running_jito": false }] }), T0).unwrap();
+        if let Some(x) = &s.exec {
+            if x.sticky_shadow { let _ = gate.shadow("mode_shadow", "no --live or --canary: nothing is sent", true); }
+            let payer = crate::tx::pk(&cfg.wallet);
+            let pump = crate::build::PumpGlobal { disable_flags: 0, protocol: vec![[0x71; 32]], reserved: vec![[0x72; 32]], buyback: vec![[0x73; 32]] };
+            let alt = fixture_alt(&reg, &chain, &e.store, payer, &pump);
+            let mut held: rustc_hash::FxHashSet<Pk> = [*crate::venues::WSOL].into_iter().collect();
+            if x.hold_tokens { for m in &reg.pools { held.insert(m.t0); held.insert(m.t1); } }
+            let key = (x.mode == crate::exec::Mode::DryRun).then(|| crate::exec::ephemeral_key().unwrap());
+            let rt = crate::exec::offline_runtime();
+            let _in = rt.enter();
+            let mut ex = crate::exec::Exec::assemble(&cfg, crate::rpc::Rpc::race(vec![]), None, rec.clone(), crossbeam_channel::unbounded().0,
+                vec!["shred".into(), "tx".into()], vec![alt], Some(pump), held, x.mode, key).expect("the run's executor");
+            ex.set_gate(gate.clone());
+            ex.set_leaders(book.clone());
+            ex.set_health(e.health_flags());
+            let b = &cfg.send_policy.crowding_buckets;
+            e.set_crowding(crate::crowding::Activity::new(cfg.send_policy.crowding_window_h, [b[0], b[1]], x.crowded.iter().map(|n| f.pool(n).1).collect()));
+            e.exec = Some(ex);
+            e.gate = Some(gate.clone());
+        }
         // (`Setup::executor`: the record says so, as a run with an executor writes it; this engine has none)
         let mut init = e.init().json();
-        init["executor"] = json!(s.executor);
+        init["executor"] = json!(s.executor || e.exec.is_some());
         e.journal().input(0, InputKind::EngineInit, Arc::new(init));
-        Rig { name, dir, rec, ar, e, reg, cfg, chain, s0, unix0, wv: 1_000, sig_names: HashMap::default(), keep: std::env::var_os("ARBX_KEEP_SCENARIOS").is_some(),
-            handed_over: false }
+        e.journal_exec_init();
+        Rig { name, dir, rec, ar, e, reg, cfg, chain, s0, unix0, wv: 1_000, sig_names: HashMap::default(), gate, book,
+            keep: std::env::var_os("ARBX_KEEP_SCENARIOS").is_some(), handed_over: false }
     }
+
+    /// ---- WP-09. INPUT 1 `blockhash_head`: the WP-03b ring's confirmed head at `slot` (what the send checks age and a
+    /// bundle is built on), as the chain-fetch service hands it to the engine
+    pub fn blockhash(&mut self, slot: u64, t: u64) {
+        let h = crate::provenance::sha256_hex(format!("scenario-blockhash:{slot}").as_bytes());
+        let mut hash = [0u8; 32];
+        for (i, b) in h.as_bytes().chunks(2).take(32).enumerate() { hash[i] = u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap(); }
+        self.input(InputKind::BlockhashHead, json!({ "hash": b58(&hash), "slot": slot, "height": slot.saturating_sub(1_000_000), "src": "slotidx",
+            "commitment": "confirmed", "t_ns": t }), t);
+    }
+
+    /// ---- WP-09. The leader schedule from `start` (INPUT 2 `leader_window`, as the LeaderBook's refresher hands it to the
+    /// engine; the book holds the same slots)
+    pub fn leaders(&mut self, start: u64, leaders: &[Pk], t: u64) {
+        self.book.add_window(start, leaders);
+        self.input(InputKind::LeaderWindow, json!({ "start": start, "leaders": leaders.iter().map(b58).collect::<Vec<_>>() }), t);
+    }
+
+    /// ---- WP-09. The decisions' opportunities (main lines with an `opp`)
+    pub fn opportunities(&self) -> Vec<Value> { self.evaluations().into_iter().filter(|d| d["opp"].is_u64()).collect() }
+
+    /// ---- WP-09. attempts.jsonl so far
+    pub fn attempts(&self) -> Vec<Value> { self.rec.sync(); rec::read_jsonl(&self.dir, "attempts").unwrap_or_default() }
 
     pub fn meta(&self, name: &str) -> PoolMeta { let (_, p) = fixtures().pool(name); self.reg.pools[self.reg.by_pool[&p]].clone() }
     pub fn data(&self, k: &Pk) -> Vec<u8> { self.chain.get(k).cloned().unwrap_or_else(|| panic!("no chain account {}", b58(k))) }
@@ -326,6 +429,12 @@ impl Rig {
         assert_eq!((r.summary["digests"]["checked"].as_bool(), r.summary["digests"]["same"].as_bool()), (Some(true), Some(true)), "{}: {}", self.name,
             r.summary["digests"]);
         assert_eq!(r.summary["whole"], json!(true), "{}", self.name);
+        // ---- WP-09: a run with an executor replays it (exec_init), attempt for attempt
+        if self.e.exec.is_some() {
+            assert_eq!((r.summary["executor"]["replayed"].as_bool(), s["executor_replayed"].as_bool()), (Some(true), Some(true)), "{}: {}", self.name, r.summary["executor"]);
+            assert_eq!((s["attempts_differ"].as_u64(), s["attempts_missing_in_replay"].as_u64(), s["attempts_extra_in_replay"].as_u64()), (Some(0), Some(0), Some(0)), "{}", self.name);
+            assert_eq!(s["attempts_compared"], s["attempts_run"], "{}: every attempt compared", self.name);
+        }
         self.handed_over = true;
         Done { name: self.name, dir: self.dir.clone(), decisions, commits, sig_names: std::mem::take(&mut self.sig_names), replay: r.summary, keep: self.keep }
     }

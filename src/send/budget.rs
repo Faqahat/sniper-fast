@@ -61,6 +61,9 @@ impl TokenBucket {
         if self.units >= TOKEN { self.units -= TOKEN; true } else { false }
     }
 
+    /// (units held, the time of the last take or refund): the executor's digest (WP-09)
+    pub fn state(&self) -> (u128, Option<u64>) { (self.units, self.last_ns) }
+
     /// give back a token taken by a send that never left (WP-00 review F5's residual: a bundle dropped from the rate
     /// queue); never above the burst
     pub fn refund(&mut self, now_ns: u64) {

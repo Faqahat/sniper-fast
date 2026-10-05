@@ -419,6 +419,17 @@ pub fn engine_init(journal: &[JRec]) -> Option<crate::engine::EngineInit> {
     })
 }
 
+/// ---- WP-09 (review WP-09 "For the WP-05 merge" item 2). The run's exec_init record (INPUT 12 in the boot section,
+/// written after engine_init when the run had an executor): what its executor started with that the frozen config does
+/// not hold. None: a run without an executor, or one recorded before the executor replay (a WP-05 recording made before
+/// the merge: `executor_not_replayed`)
+pub fn exec_init(journal: &[JRec]) -> Option<&serde_json::Value> {
+    journal.iter().take_while(|r| boot_rec(r)).find_map(|r| match &r.body {
+        JBody::Input { kind, data } if *kind == InputKind::ExecInit as u8 => Some(data),
+        _ => None,
+    })
+}
+
 /// The engine a replay starts from (the path WP-04 / WP-09 replays take): the boot snapshot applied to a store
 /// (`boot_store`), an offline engine on `cfg` (the run's `[strategy]`, checked against the record's hash), and the
 /// run's engine_init record applied (its `min_tip` and signer statistics). An error when the journal has no
@@ -444,8 +455,11 @@ pub struct ReplayStats {
     pub verdict_mismatches: u64,
     /// journal gaps (replay refuses to compare decisions inside them)
     pub gaps: Vec<(u64, u64)>,
-    /// INPUT records not fed to the engine: settlements (the executor's, WP-05 / WP-09) and unknown kinds
+    /// INPUT records not fed to the engine: unknown kinds, and settlements in a form this build does not read
     pub skipped: u64,
+    /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 4): INPUT 9 settlements fed back (to the executor, when the
+    /// engine has one)
+    pub settled: u64,
     /// decision-point gate records (`src` "decision"): what the run's decisions read of the SendGate
     pub gate_observed: u64,
     /// ---- WP-09 (review WP-09 #3): of those, the ones staged for the replay's decisions (`Engine::gate_seen`)
@@ -474,13 +488,14 @@ pub fn gate_of(d: &serde_json::Value) -> Option<Arc<crate::control::SendGate>> {
 
 /// ---- WP-09 (review WP-09 #3). The look-ahead: the decision-point gate records that follow a record (its decisions'
 /// gate, written while it was handled; TICK records may sit between them), staged on the engine before it handles the
-/// record; each applies at its opportunity
+/// record; each applies at its opportunity: the gate of a decision without an executor, everything a replay's offline
+/// executor reads of the run's (review WP-09 "For the WP-05 merge" item 3)
 fn stage_gate_decisions(eng: &mut crate::engine::Engine, after: &[JRec], st: &mut ReplayStats) {
     for n in after {
         match &n.body {
             JBody::Input { data, .. } if is_gate_decision(n) => {
                 let Some(opp) = data["opp"].as_u64() else { continue };
-                eng.gate_seen.script.push_back((opp, gate_of(data)));
+                eng.gate_seen.script.push_back((opp, Arc::new(data.clone())));
                 st.gate_staged += 1;
             }
             JBody::Tick => continue,
@@ -528,9 +543,14 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
             JBody::Alt { table, preload: Some(v), .. } => { eng.preload_alt(*table, v.clone(), None, false); continue; }
             JBody::Alt { table, addrs, err, .. } => Event::Alt { table: *table, addrs: addrs.clone().map(Arc::new), err: err.clone() },
             JBody::Input { kind, data } => match InputKind::from_u8(*kind) {
-                // a settlement belongs to the executor, which an offline engine does not have (WP-05 / WP-09 replay it);
-                // engine_init belongs to the boot section
-                Some(InputKind::Settled) | Some(InputKind::EngineInit) | None => { st.skipped += 1; continue; }
+                // ---- WP-09 (review WP-09 "For the WP-05 merge" item 4): an executor task's result, back to the executor
+                // as the run's engine handed it over (an engine without one ignores it)
+                Some(InputKind::Settled) => match crate::exec::Settled::from_json(data) {
+                    Some(s) => { st.settled += 1; Event::Settled(Box::new(s)) }
+                    None => { st.skipped += 1; continue; }
+                },
+                // engine_init and exec_init belong to the boot section
+                Some(InputKind::EngineInit) | Some(InputKind::ExecInit) | None => { st.skipped += 1; continue; }
                 // what a decision read of the SendGate, journaled by the engine while handling the record before it: not
                 // an input (staged before that record was handed over)
                 Some(InputKind::Gate) if data["src"].as_str() == Some("decision") => { st.gate_observed += 1; continue; }

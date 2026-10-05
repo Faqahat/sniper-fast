@@ -869,6 +869,34 @@ pub struct Sent {
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Fired { pub id: u64, pub t_ns: u64, pub copies: Vec<Sent> }
 
+impl Fired {
+    /// ---- WP-09: read back as `Serialize` wrote it (journal INPUT 9 `settled` `fired`: a replay hands it to its executor)
+    pub fn from_json(v: &serde_json::Value) -> Option<Fired> {
+        Some(Fired { id: v["id"].as_u64()?, t_ns: v["t_ns"].as_u64()?, copies: v["copies"].as_array()?.iter().map(Sent::from_json).collect::<Option<Vec<_>>>()? })
+    }
+}
+
+impl Sent {
+    /// ---- WP-09: read back as `Serialize` wrote it (a copy of journal INPUT 9 `fired`)
+    pub fn from_json(v: &serde_json::Value) -> Option<Sent> {
+        let s = |k: &str| v[k].as_str().map(String::from);
+        Some(Sent { attempt: v["attempt"].as_u64()?, path: v["path"].as_str()?.to_string(), sig: s("sig"), tip_account: s("tip_account"),
+            tip_lamports: v["tip_lamports"].as_u64()?, t_sent: v["t_sent"].as_u64()?, t_ack: v["t_ack"].as_u64()?, ms: v["ms"].as_f64().unwrap_or(0.0),
+            ok: v["ok"].as_bool()?, status: v["status"].as_u64().and_then(|x| u16::try_from(x).ok()), reply: s("reply"), bundle: s("bundle"),
+            blockhash_slot: v["blockhash_slot"].as_u64(), queue_wait_us: v["queue_wait_us"].as_u64(), drop: v["drop"].as_str().map(drop_code),
+            lambda: v["lambda"].as_i64() })
+    }
+}
+
+/// a copy's `drop` code (copies.jsonl, MEASUREMENT §4.38) as the static string the sender writes; one this build does
+/// not write: `other`
+pub fn drop_code(s: &str) -> &'static str {
+    match s {
+        "rate_queue_timeout" => "rate_queue_timeout", "crowded_pool" => "crowded_pool", "bad_tx" => "bad_tx", "jito_auth_stale" => "jito_auth_stale",
+        "send_task" => "send_task", _ => "other",
+    }
+}
+
 pub struct Paths {
     pub list: Vec<Arc<Path>>,
     /// copies.jsonl (core) and keepalive.jsonl (slow), through the recorder

@@ -143,6 +143,32 @@ impl Activity {
     /// (pool, signer) pairs in the window
     pub fn entries(&self) -> usize { self.pairs }
 
+    /// ---- WP-09: what the map was made with: its window (hours), buckets and static list (sorted). The executor's
+    /// exec_init record carries them; a replay makes its map from them (`Activity::new`)
+    pub fn params(&self) -> (u64, [u32; 2], Vec<Pk>) {
+        let mut l: Vec<Pk> = self.static_list.iter().copied().collect();
+        l.sort();
+        (self.window_ns / 3_600_000_000_000, self.buckets, l)
+    }
+
+    /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 7): the map's state in the engine's digest: when it started,
+    /// the candidates (with their first sighting), every (pool, signer) pair with its last landing, the evictions
+    pub fn digest(&self, x: &mut xxhash_rust::xxh3::Xxh3) {
+        x.update(&self.started.unwrap_or(u64::MAX).to_le_bytes());
+        x.update(&(self.cand_order.len() as u64).to_le_bytes());
+        for (t, s) in &self.cand_order { x.update(&t.to_le_bytes()); x.update(s); x.update(self.cand.get(s).map_or(&[0u8; 32], |k| k)); }
+        let mut pools: Vec<(&Pk, &HashMap<Pk, u32>)> = self.by_pool.iter().collect();
+        pools.sort_by_key(|p| *p.0);
+        for (p, m) in pools {
+            x.update(p);
+            let mut sg: Vec<(&Pk, u64)> = m.iter().map(|(k, i)| (k, self.nodes[*i as usize].t)).collect();
+            sg.sort();
+            for (k, t) in sg { x.update(k); x.update(&t.to_le_bytes()); }
+        }
+        x.update(&(self.pairs as u64).to_le_bytes());
+        x.update(&self.evicted.to_le_bytes());
+    }
+
     // ---- the recency list
 
     fn push_back(&mut self, i: u32) {

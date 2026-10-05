@@ -395,7 +395,10 @@ pub struct Engine {
     /// crowding (F6): distinct arbitrage-like signers that landed on each pool over the window
     activity: crate::crowding::Activity,
     /// what the last journaled decision-point record said (gate mode, leader kind, token valid, recorder healthy)
-    seen_journaled: Option<(crate::control::GateMode, crate::leaders::LeaderKind, bool, bool)>,
+    /// (WP-09: and the gate's reason)
+    seen_journaled: Option<(crate::control::GateMode, String, crate::leaders::LeaderKind, bool, bool)>,
+    /// ---- WP-09: the exec_init record was journaled (`journal_exec_init`)
+    exec_init_journaled: bool,
 }
 
 /// {signer: [ok, failed]} as a file holds it; with the sha256 of the bytes read. Missing or unreadable: empty, no hash
@@ -594,10 +597,11 @@ fn band_of(gross: i64) -> u8 { crate::bands::of_gross(gross) }
 /// simulation)
 fn settled_json(st: &crate::exec::Settled) -> Value { st.json() }
 
-/// a transaction's PoH position: the engine's map (entries feeds' arrivals), else the process's PoH index (shred feeds'
-/// walks: WP-08)
-fn poh_of(poh: &HashMap<[u8; 64], crate::feeds::entries::Poh>, s: &[u8; 64]) -> Option<crate::feeds::entries::Poh> {
-    poh.get(s).copied().or_else(|| crate::feeds::poh_index().get_sig(s).map(|x| x.0))
+/// a transaction's PoH position: the engine's map (entries feeds' arrivals), else, in a run (`global`), the process's PoH
+/// index (shred feeds' walks: WP-08). The index is not journaled, so it only ever reaches a gauge and outcome lines, never
+/// a verdict, and an offline engine (a replay) never reads it (WP-09 review item 5)
+fn poh_of(poh: &HashMap<[u8; 64], crate::feeds::entries::Poh>, s: &[u8; 64], global: bool) -> Option<crate::feeds::entries::Poh> {
+    poh.get(s).copied().or_else(|| if global { crate::feeds::poh_index().get_sig(s).map(|x| x.0) } else { None })
 }
 
 /// What `run` evaluates after an input: the commit timers only when the queue is empty and a deadline is due (an update
@@ -670,6 +674,25 @@ impl Engine {
         if self.init_journaled || !self.journal.is_on() { return; }
         self.init_journaled = true;
         self.journal.input_sized(0, InputKind::EngineInit, Arc::new(self.init().json()), 512 + 64 * self.signer_stats.len() as u64);
+    }
+
+    /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 2). What this engine's executor starts with that the frozen
+    /// config does not hold (`exec::ExecInit`), with the crowding map's window, buckets and static list. None without an
+    /// executor
+    pub fn exec_init(&self) -> Option<crate::exec::ExecInit> {
+        let mut i = self.exec.as_ref()?.init();
+        (i.crowding_window_h, i.crowding_buckets, i.crowded) = self.activity.params();
+        Some(i)
+    }
+
+    /// ---- WP-09. Journal the exec_init record (INPUT 12, `t_engine_ns` 0, with the boot records, after engine_init) once,
+    /// before the first input: `run` calls it after `journal_init`. Nothing without an executor
+    pub fn journal_exec_init(&mut self) {
+        if self.exec_init_journaled || !self.journal.is_on() { return; }
+        let Some(i) = self.exec_init() else { return };
+        self.exec_init_journaled = true;
+        let keys = i.alts.iter().map(|a| a.1.len()).sum::<usize>() + i.held.len() + i.crowded.len();
+        self.journal.input_sized(0, InputKind::ExecInit, Arc::new(i.json()), 1_024 + 48 * keys as u64);
     }
 
     /// Start from a run's engine_init record (replay): its `min_tip`, signer statistics and knobs. An error when the
@@ -767,7 +790,7 @@ impl Engine {
             acc_by_venue: Default::default(), commit_lag: Series::new("commit_lag"),
             commit_lag_src: [Series::new("commit_lag_tx"), Series::new("commit_lag_shred"), Series::new("commit_lag_unknown")], stop_req: None, boot_warned: false,
             reads: Reads::default(), resync: None, unverified: HashSet::default(), last_account_t: 0, knobs,
-            sendview: Default::default(), activity: Default::default(), seen_journaled: None }
+            sendview: Default::default(), activity: Default::default(), seen_journaled: None, exec_init_journaled: false }
     }
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
@@ -968,6 +991,7 @@ impl Engine {
         // the executor's sends are gated on this engine's health (warm-up, state availability)
         if let Some(x) = self.exec.as_mut() { x.set_health(self.flags.clone()); }
         self.journal_init();
+        self.journal_exec_init();
         let end = loop {
             if stop.load(std::sync::atomic::Ordering::Relaxed) { break RunEnd::Stopped; }
             if self.stop_req.is_some() { break RunEnd::StateUnavailable; }
@@ -1106,7 +1130,7 @@ impl Engine {
                 // wallet's transactions (an attempt landed) and the block engine's results for our bundles
                 InputKind::BlockhashHead => self.sendview.on_head(&data),
                 InputKind::LeaderWindow => self.sendview.on_window(&data),
-                InputKind::WalletTx => { let poh = &self.poh; if let Some(x) = self.exec.as_mut() { x.on_wallet_tx(&data, &|s| poh_of(poh, s)); } }
+                InputKind::WalletTx => { let (poh, t, global) = (&self.poh, self.t_now, self.io.is_some()); if let Some(x) = self.exec.as_mut() { x.on_wallet_tx(&data, t, &|s| poh_of(poh, s, global)); } }
                 InputKind::InflightRelease => { let t = self.t_now; if let Some(x) = self.exec.as_mut() { x.on_release(&data, t); } }
                 // gate records (the 100 ms watch: status only), quarantines (Stage 1), settlements (`Event::Settled`)
                 _ => {}
@@ -1116,7 +1140,7 @@ impl Engine {
                 let a = match (addrs, err) { (Some(v), _) => Answer::Found(v.to_vec()), (None, Some(e)) => Answer::Error(e), (None, None) => Answer::Missing };
                 self.on_alt(table, a);
             }
-            Event::Settled(st) => { let (poh, t) = (&self.poh, self.t_now); if let Some(x) = self.exec.as_mut() { x.on_settled(*st, t, &|s| poh_of(poh, s)); } }
+            Event::Settled(st) => { let (poh, t, global) = (&self.poh, self.t_now, self.io.is_some()); if let Some(x) = self.exec.as_mut() { x.on_settled(*st, t, &|s| poh_of(poh, s, global)); } }
         }
     }
 
@@ -1455,6 +1479,9 @@ impl Engine {
         for (at, p, _) in &self.deferred { x.update(&at.to_le_bytes()); x.update(&p.to_le_bytes()); }
         x.update(&(self.acc_queue.len() as u64).to_le_bytes());
         x.update(&self.decisions.to_le_bytes());
+        // ---- WP-09 (review WP-09 "For the WP-05 merge" item 7): the executor's own state, and the crowding map it ranks
+        // routes by (an engine without an executor never reads the map: its digest is what it was before WP-09's merge)
+        if let Some(e) = &self.exec { e.digest(&mut x); self.activity.digest(&mut x); }
         x.digest()
     }
 
@@ -2029,18 +2056,28 @@ impl Engine {
         let Some(size) = self.opps.get(&id).map(|o| o.size) else { return crate::exec::Decided::reject("no_opportunity") };
         let tip = self.tip_slot();
         let (t, slot) = (self.t_now, self.slot);
-        let Some(x) = self.exec.as_mut() else {
+        if self.exec.is_none() {
             // no executor: nothing can send
             let why = self.gate_no_executor(id); // ---- WP-09 (review WP-09 #3): journaled at the decision, replayed from the journal
             return crate::exec::Decided::reject(why);
-        };
-        let sim = x.wants_sim(size);
+        }
+        // ---- WP-09 (review WP-09 "For the WP-05 merge" item 3): a replay's offline executor reads what the run's decision
+        // read from outside the journal: the run's records, staged ahead, the last at or before this opportunity (a run
+        // stages none)
+        let staged = self.staged_records(id);
+        let Some(x) = self.exec.as_mut() else { return crate::exec::Decided::reject("no_executor") };
+        for (opp, d) in staged { x.stage_seen(opp, id, &d); }
+        let sim = x.wants_sim(size, t);
         let inputs = x.inputs(&self.sendview, tip, t);
         let token_ok = !matches!(inputs.token, crate::exec::TokenSeen::Stale);
-        let seen = (inputs.gate, inputs.leader.kind, token_ok, inputs.recorder_ok);
-        if self.seen_journaled != Some(seen) {
+        // ---- WP-09: the gate's reason is part of what is journaled (a reason that changes while the mode stays, a pause
+        // then a lag-SLO shadow, changes every refusal's `gate_shadow:<reason>`)
+        let seen = (inputs.gate, inputs.gate_reason.clone(), inputs.leader.kind, token_ok, inputs.recorder_ok);
+        if self.seen_journaled.as_ref() != Some(&seen) {
             let mut g = x.gate_json();
             g["mode"] = json!(seen.0.as_str());
+            // the reason the check read (the gate may have moved on since)
+            g["reason"] = json!(Some(&seen.1).filter(|r| !r.is_empty()));
             g["src"] = json!("decision");
             g["opp"] = json!(id);
             g["leader"] = json!({ "slot": inputs.leader.slot, "identity": inputs.leader.identity, "kind": inputs.leader.kind, "kind_src": inputs.leader.kind_src });
@@ -2048,17 +2085,18 @@ impl Engine {
             g["recorder_ok"] = json!(inputs.recorder_ok);
             self.journal.input(self.t_now, InputKind::Gate, Arc::new(g));
             self.gate_journaled = Some(seen.0);
-            self.seen_journaled = Some(seen);
+            self.seen_journaled = Some(seen.clone());
         }
         let cap = x.size_cap();
         let d = match self.route_in(id, size.min(cap)) {
             Some(r) => {
                 self.decisions = fold(self.decisions, &[b"exec", &id.to_le_bytes(), &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes(), &[seen.0 as u8]]);
                 let trig = r.trig;
+                let global = self.io.is_some();
                 let x = self.exec.as_mut().unwrap();
                 let d = x.decide(r, &inputs, &self.sendview, slot.max(tip), t);
                 // the poh_trigger_pct gauge, after the fire (the PoH index is shared with the feed threads; review WP-05 #8)
-                if d.attempt.is_some() { x.note_poh(trig != [0; 64] && poh_of(&self.poh, &trig).is_some()); }
+                if d.attempt.is_some() { x.note_poh(trig != [0; 64] && poh_of(&self.poh, &trig, global).is_some()); }
                 d
             }
             None => { self.count("send_unquotable"); crate::exec::Decided::reject("build_error:unquotable") }
@@ -2790,8 +2828,9 @@ impl Engine {
 #[derive(Default)]
 pub struct GateSeen {
     last: Option<String>,
-    /// (opportunity id, the gate the run's decision read; None: the run had none)
-    pub script: VecDeque<(u64, Option<Arc<crate::control::SendGate>>)>,
+    /// (opportunity id, the run's record: the gate a decision without an executor read, or everything an executor's
+    /// decision read from outside the journal, `exec::Seen`)
+    pub script: VecDeque<(u64, Arc<Value>)>,
 }
 
 /// One route priced on the store as a decision prices it (`Engine::quote_route`)
@@ -2810,6 +2849,14 @@ pub struct RouteQuote {
 }
 
 impl Engine {
+    /// ---- WP-09. The run's decision-point records staged for opportunities up to `id` (a replay's; a run stages none),
+    /// taken in order
+    fn staged_records(&mut self, id: u64) -> Vec<(u64, Arc<Value>)> {
+        let mut out = Vec::new();
+        while self.gate_seen.script.front().is_some_and(|(o, _)| *o <= id) { if let Some(x) = self.gate_seen.script.pop_front() { out.push(x); } }
+        out
+    }
+
     /// ---- WP-09 (review WP-09 #3). The reason of a decision without an executor: `no_executor` while the SendGate
     /// allows sends, else `gate_<mode>:<reason>`. A run reads its live gate (a pause from the control socket closes it at
     /// once) and journals what it read, as the executor's send checks journal theirs: an INPUT 3 `src` "decision" record
@@ -2817,9 +2864,7 @@ impl Engine {
     /// the input being handled, whenever the reason differs from the last one journaled. A replay applies the run's
     /// records first (`gate_seen.script`)
     fn gate_no_executor(&mut self, id: u64) -> String {
-        while self.gate_seen.script.front().is_some_and(|(o, _)| *o <= id) {
-            if let Some((_, g)) = self.gate_seen.script.pop_front() { self.gate = g; }
-        }
+        for (_, d) in self.staged_records(id) { self.gate = crate::rec::journal::gate_of(&d); }
         let why = self.gate.as_ref().filter(|g| !g.allows()).map_or("no_executor".to_string(), |g| format!("gate_{}:{}", g.mode().as_str(), g.reason()));
         if self.gate_seen.last.as_deref() != Some(why.as_str()) {
             let mut g = self.gate.as_ref().map_or_else(|| json!({ "mode": null }), |g| g.json());

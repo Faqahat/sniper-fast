@@ -477,7 +477,9 @@ J_NAMES = {1: "TX_FIRST", 2: "TX_COPY", 3: "ACCOUNT", 4: "SLOT", 5: "BLOCK_META"
 INPUT_KINDS = {1: "blockhash_head", 2: "leader_window", 3: "gate", 4: "quarantine", 5: "inflight_release",
                6: "health", 7: "wallet_tx", 8: "slotidx_missing", 9: "settled", 10: "engine_init",
                # WP-04 review #1: how one chunk of an engine RPC read ended (re-read, fork refetch, DLMM arrays)
-               11: "fetch"}
+               11: "fetch",
+               # WP-09: what the executor started with (boot section, t_engine 0; the replay's offline executor)
+               12: "exec_init"}
 
 #: journal record framing: `u8 kind | u32 body_len | u64 seq | u64 t_engine_ns | body`. body_len counts the body
 #: only (not seq and t_engine_ns). Keep in step with src/rec/journal.rs (WP-03).

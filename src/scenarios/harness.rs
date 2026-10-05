@@ -193,7 +193,7 @@ fn reprice_sizes_requotes_every_opportunity_at_its_decision() {
 }
 
 /// the raw records of an uncompressed journal file (after its header): (kind, seq, t_engine, the record's bytes)
-fn raw_records(b: &[u8]) -> (usize, Vec<(u8, u64, u64, Vec<u8>)>) {
+pub(super) fn raw_records(b: &[u8]) -> (usize, Vec<(u8, u64, u64, Vec<u8>)>) {
     let hlen = u16::from_le_bytes([b[10], b[11]]) as usize;
     let mut p = 12 + hlen;
     let mut out = Vec::new();
@@ -208,7 +208,7 @@ fn raw_records(b: &[u8]) -> (usize, Vec<(u8, u64, u64, Vec<u8>)>) {
 }
 
 /// the run's journal rewritten: `edit` gets each raw record and returns what to write in its place
-fn rewrite_journal(dir: &Path, mut edit: impl FnMut(usize, &(u8, u64, u64, Vec<u8>)) -> Vec<u8>) {
+pub(super) fn rewrite_journal(dir: &Path, mut edit: impl FnMut(usize, &(u8, u64, u64, Vec<u8>)) -> Vec<u8>) {
     let files = rec::stream_files(dir, "journal");
     assert_eq!(files.len(), 1);
     let bytes = rec::decode_zst(&files[0]).unwrap().0;
@@ -220,7 +220,7 @@ fn rewrite_journal(dir: &Path, mut edit: impl FnMut(usize, &(u8, u64, u64, Vec<u
 }
 
 /// a GAP record for `n` records from `seq`
-fn gap_rec(seq: u64, t: u64, n: u64) -> Vec<u8> {
+pub(super) fn gap_rec(seq: u64, t: u64, n: u64) -> Vec<u8> {
     let mut o = vec![crate::rec::journal::J_GAP];
     o.extend(16u32.to_le_bytes());
     o.extend(seq.to_le_bytes());
@@ -558,8 +558,9 @@ fn later_copies_are_replayed_with_their_time_and_slot() {
     r.finish_and_replay();
 }
 
-/// Review WP-09 #4: a run with an executor is never replayed OK until the offline executor replays its verdicts
-/// (`executor_not_replayed`), even when every decision line compares equal
+/// Review WP-09 #4: a run with an executor whose executor the replay cannot rebuild (engine_init `executor` true, no
+/// exec_init record: a recording made before the executor replay) is never replayed OK (`executor_not_replayed`), even
+/// when every decision line compares equal
 #[test]
 fn a_run_with_an_executor_is_not_ok_until_its_executor_is_replayed() {
     let mut r = Rig::new("h-exec", Setup { pools: &POOLS, executor: true, ..Default::default() });
@@ -579,8 +580,9 @@ fn a_run_with_an_executor_is_not_ok_until_its_executor_is_replayed() {
     assert_eq!(rp.summary["executor_replayed"], json!(false));
     assert_eq!(rp.diff.as_ref().unwrap()["summary"]["differences_ok"], json!(true), "the lines themselves compare equal: {}", rp.diff.as_ref().unwrap()["summary"]);
     assert!(!rp.ok, "never a silent OK");
-    assert!(rp.summary["not_whole"].as_array().unwrap().iter().any(|w| w["why"] == "executor_not_replayed" && w["detail"].as_str().unwrap().contains("executor replay not implemented")),
+    assert!(rp.summary["not_whole"].as_array().unwrap().iter().any(|w| w["why"] == "executor_not_replayed" && w["detail"].as_str().unwrap().contains("no exec_init record")),
         "{}", rp.summary["not_whole"]);
+    assert_eq!(rp.summary["executor"]["replayed"], json!(false));
 }
 
 /// Review WP-09 #6: the run records its digests (events.jsonl `engine_digests`, before and after `finish`), a replay

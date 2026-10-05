@@ -154,11 +154,12 @@ enum Cmd {
         runs: Vec<PathBuf>,
     },
     /// Replay a recorded run (PLAN WP-09): the run's engine rebuilt offline from its boot records, registry (pools.json,
-    /// registry-run.json) and frozen config, fed its journal in order at the journaled times. Nothing is built or sent.
-    /// Writes the replay's own streams, replay.json and (--compare) replay-diff.json into --out. Recordings made before
-    /// WP-03 cannot be replayed. Exit code: 0 a whole replay and (--compare) no difference; 1 differences, or a replay
-    /// that is not whole (journal or accounts.bin gaps, missing account records, store verdicts not reproduced, recorder
-    /// drops, a run with an executor: replay.json `not_whole`); 2 refused
+    /// registry-run.json) and frozen config, fed its journal in order at the journaled times; a shadow or dry-run
+    /// executor rebuilt offline from its exec_init record (no RPC, no send path, no key). Nothing is sent. Writes the
+    /// replay's own streams, replay.json and (--compare) replay-diff.json into --out. Recordings made before WP-03 cannot
+    /// be replayed. Exit code: 0 a whole replay and (--compare) no difference; 1 differences, or a replay that is not
+    /// whole (journal or accounts.bin gaps, missing account records, store verdicts not reproduced, recorder drops, an
+    /// executor not replayed: replay.json `not_whole`); 2 refused
     Replay {
         /// the segment's run directory
         #[arg(long)] run: PathBuf,

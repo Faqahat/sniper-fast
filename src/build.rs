@@ -50,7 +50,7 @@ pub struct Ix { pub program: Pk, pub accounts: Vec<Meta>, pub data: Vec<u8> }
 
 /// PumpSwap GlobalConfig (949 bytes, disc 95089ccaa0fcb0d9): disable_flags @56 (bit 3 buy, bit 4 sell),
 /// protocol_fee_recipients[8] @57, reserved_fee_recipient @385 + [7] @418 (mayhem pools), buyback[8] @643
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PumpGlobal { pub disable_flags: u8, pub protocol: Vec<Pk>, pub reserved: Vec<Pk>, pub buyback: Vec<Pk> }
 
 pub fn decode_pump_global(d: &[u8]) -> Option<PumpGlobal> {

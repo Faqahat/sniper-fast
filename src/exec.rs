@@ -359,7 +359,7 @@ impl Inflight {
 
 /// The bundle path's tip (`[[send]]` jito-bundle: `tip_share` of the edge within `tip_lamports`..`tip_max_lamports`, to
 /// its accounts in rotation), the same with or without a built path (shadow and dry runs tip as live ones would)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TipPolicy { pub accounts: Vec<Pk>, pub floor: u64, pub share: Option<f64>, pub max: u64, cursor: usize, pub path: String }
 
 impl TipPolicy {
@@ -409,7 +409,30 @@ impl Settled {
             Settled::DrySim { attempt, line } => json!({ "what": "dry_sim", "attempt": attempt, "line": line }),
         }
     }
+
+    /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 4). The journal's INPUT 9 body read back, in `json`'s
+    /// `{what: fired | statuses | dry_sim}` forms: a replay hands it to its executor as the run's engine handed the event.
+    /// None: not one of them (an older form, or a label this build does not write)
+    pub fn from_json(v: &Value) -> Option<Settled> {
+        match v["what"].as_str()? {
+            "fired" => Some(Settled::Fired { attempt: v["attempt"].as_u64()?, fired: Fired::from_json(&v["fired"])? }),
+            "statuses" => {
+                let why = match v["why"].as_str()? { "check" => "check", "expiry" => "expiry", _ => return None };
+                let at = v["at"].as_array()?.iter().map(|x| Some((x[0].as_u64()?, status_label(x[1].as_str()?)?))).collect::<Option<Vec<_>>>()?;
+                let result = match &v["result"] {
+                    Value::Array(a) => Ok(a.iter().map(|s| if s.is_null() { Some(None) } else { SigStatus::from_json(s).map(Some) }).collect::<Option<Vec<_>>>()?),
+                    r => Err(r["error"].as_str()?.to_string()),
+                };
+                Some(Settled::Statuses { why, at, result, t_ns: v["t_ns"].as_u64()? })
+            }
+            "dry_sim" => Some(Settled::DrySim { attempt: v["attempt"].as_u64()?, line: v["line"].clone() }),
+            _ => None,
+        }
+    }
 }
+
+/// a statuses entry's label (`CHECKS`', or the expiry check's) as the static string the executor writes
+fn status_label(s: &str) -> Option<&'static str> { CHECKS.iter().map(|c| c.1).chain(["expiry"]).find(|l| *l == s) }
 
 /// An attempt sent (live, canary) and not final yet
 struct Open {
@@ -433,6 +456,8 @@ struct Open {
     bh_height: Option<u64>,
     target_slot: u64,
     leader: Option<(String, LeaderKind)>,
+    /// the decision's engine time (journaled): the expiry without a slot counts from it (WP-09: never the real clock)
+    t_engine: u64,
     t_signed: u64,
     t_sent: Option<u64>,
     bundle: Option<String>,
@@ -555,6 +580,22 @@ pub struct Exec {
     stopped: Option<&'static str>,
     leader_seen: (u64, u64),
     leader_prev: (u64, u64),
+    // ---- WP-09: a replay's offline executor (`Exec::offline`)
+    /// its send checks read what the run's decisions read from outside the journal (`journaled`: the run's
+    /// decision-point records), never its own gate, LeaderBook, token or recorder; it spawns nothing (no RPC call, no
+    /// send, no key)
+    offline: bool,
+    /// `cfg_sha256` of the config it was assembled from (exec_init)
+    cfg_sha256: String,
+    /// the run's last decision-point record at or before the opportunity being decided, and whether it is this
+    /// opportunity's own
+    journaled: Option<Seen>,
+    journaled_fresh: bool,
+    /// records that are not this replay's: one staged at another opportunity than its own, one this build cannot read,
+    /// or one whose target slot or leader identity is not the replay's (the replay diverged)
+    pub seen_mismatch: u64,
+    /// decisions made before any record (fail closed: the gate read as stopped)
+    pub seen_missing: u64,
     /// tests: the route instruction is built with these (amount_in, min_profit) instead of the decision's (a builder
     /// regression the dry run's checks must catch: review #12)
     #[cfg(test)]
@@ -739,7 +780,8 @@ impl Exec {
             big: TokenBucket::new(cfg.send_policy.big_band_max_per_sec, 1), mint_cool: HashMap::default(), open: BTreeMap::new(), by_sig: HashMap::default(),
             finals: HashMap::default(), finals_order: VecDeque::new(), feeds, seen: HashMap::default(), net: Arc::new(AtomicU64::new(0)), poh_gauge: &crate::feeds::POH_GAUGE,
             decisions: 0, refusals: 0, would_sends: 0, sent: 0, last_sent_ns: 0, landed: 0, wins: 0, spent: 0, reserved: 0, fees: 0, tips_paid: 0, round_trip: 0,
-            round_trip_unknown: 0, never_left: 0, new_atas: 0, stopped: None, leader_seen: (0, 0), leader_prev: (0, 0), #[cfg(test)] fault_route: None };
+            round_trip_unknown: 0, never_left: 0, new_atas: 0, stopped: None, leader_seen: (0, 0), leader_prev: (0, 0), offline: false, cfg_sha256: cfg_sha256(cfg), journaled: None,
+            journaled_fresh: false, seen_mismatch: 0, seen_missing: 0, #[cfg(test)] fault_route: None };
         x.install_sink();
         Ok(x)
     }
@@ -796,13 +838,14 @@ impl Exec {
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
 
-    /// the size to simulate this decision at, if a simulation slot is free (at most max_per_sec)
-    pub fn wants_sim(&mut self, size: u64) -> Option<u64> {
+    /// the size to simulate this decision at, if a simulation slot is free (at most max_per_sec), at the engine's time `t`
+    /// (WP-09 review item 5: never the real clock; the window decides which decisions are simulated, folded into the
+    /// decision digest)
+    pub fn wants_sim(&mut self, size: u64, t: u64) -> Option<u64> {
         let per = self.sim_rate?;
-        let now = now_ns();
-        while self.sim_recent.front().is_some_and(|t| now - t >= 1_000_000_000) { self.sim_recent.pop_front(); }
+        while self.sim_recent.front().is_some_and(|x| t.saturating_sub(*x) >= 1_000_000_000) { self.sim_recent.pop_front(); }
         if self.sim_recent.len() >= per { self.count("sim_skipped_rate"); return None; }
-        self.sim_recent.push_back(now);
+        self.sim_recent.push_back(t);
         Some(size.min(self.sim_size_max))
     }
 
@@ -827,21 +870,56 @@ impl Exec {
     }
 
     /// What the send checks see now: the gate, the recorder, the store's health, the sender, the blockhash of `view` aged
-    /// against `tip_slot`, the leader of `tip_slot + 1`, the token. `now_ns` is the engine's time
+    /// against `tip_slot`, the leader of `tip_slot + 1`, the token. `now_ns` is the engine's time. An offline executor
+    /// (a replay) reads the gate, the leader's kind, the token and the recorder from the run's journaled record instead
+    /// (`journaled`); the store's health, the sender, the blockhash and the leader's identity are the engine's own
     pub fn inputs(&mut self, view: &SendView, tip_slot: u64, now_ns: u64) -> SendInputs {
-        let gate = self.gate.mode();
-        self.gate_seen = Some(gate);
         let target = tip_slot + 1;
         let bh = view.blockhash(&self.pol.blockhash_commitment).map(|b| BhSeen { slot: b.slot, age_slots: (tip_slot > 0).then(|| tip_slot.saturating_sub(b.slot)),
             src: b.src.clone(), commitment: b.commitment });
-        let leader = self.leader_seen(view, target);
-        let token = match (&self.jito, self.mode.sends()) {
-            (_, false) => TokenSeen::NotUsed,
-            (None, true) => TokenSeen::Stale,
-            (Some(j), true) => match j.token_state((now_ns / 1_000_000) as i64) { jito::TokenState::Valid { age_s, .. } => TokenSeen::Valid { age_s }, jito::TokenState::Stale => TokenSeen::Stale },
+        let (gate, gate_reason, recorder_ok, leader, token) = if self.offline { self.journaled_inputs(view, target) } else {
+            let token = match (&self.jito, self.mode.sends()) {
+                (_, false) => TokenSeen::NotUsed,
+                (None, true) => TokenSeen::Stale,
+                (Some(j), true) => match j.token_state((now_ns / 1_000_000) as i64) { jito::TokenState::Valid { age_s, .. } => TokenSeen::Valid { age_s }, jito::TokenState::Stale => TokenSeen::Stale },
+            };
+            (self.gate.mode(), self.gate.reason(), self.rec.core_ok(), self.leader_seen(view, target), token)
         };
-        SendInputs { gate, gate_reason: self.gate.reason(), recorder_ok: self.rec.core_ok(), shut: self.health.shut(), sender: self.sender_state(now_ns), blockhash: bh,
+        self.gate_seen = Some(gate);
+        SendInputs { gate, gate_reason, recorder_ok, shut: self.health.shut(), sender: self.sender_state(now_ns), blockhash: bh,
             max_blockhash_age_slots: self.pol.max_blockhash_age_slots, leader, skip_leader_kinds: self.skip_kinds.clone(), token }
+    }
+
+    /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 3). An offline executor's gate, recorder, leader and token: the
+    /// run's last decision-point record (`stage_seen`), the leader's identity from the journaled schedule. A record staged
+    /// for this very opportunity must name the same target slot and identity (else `seen_mismatch`). Before any record,
+    /// fail closed: the gate stopped, the recorder not ok (`seen_missing`)
+    fn journaled_inputs(&mut self, view: &SendView, target: u64) -> (GateMode, String, bool, LeaderSeen, TokenSeen) {
+        let identity = view.leader(target).map(|k| b58(&k));
+        let fresh = std::mem::take(&mut self.journaled_fresh);
+        let Some(s) = &self.journaled else {
+            self.seen_missing += 1;
+            return (GateMode::Stopped, "replay_no_record".into(), false, LeaderSeen { slot: target, identity, kind: LeaderKind::Unknown, kind_src: Some("replay_no_record".into()) },
+                TokenSeen::Stale);
+        };
+        if fresh && (s.leader_slot != Some(target) || s.identity != identity) { self.seen_mismatch += 1; }
+        let token = if !s.token_ok { TokenSeen::Stale } else if self.mode.sends() { TokenSeen::Valid { age_s: 0 } } else { TokenSeen::NotUsed };
+        (s.gate, s.gate_reason.clone(), s.recorder_ok, LeaderSeen { slot: target, identity, kind: s.kind, kind_src: s.kind_src.clone() }, token)
+    }
+
+    /// ---- WP-09. A replay hands an offline executor the run's decision-point record of opportunity `opp` (INPUT 3 `src`
+    /// "decision", staged ahead by `journal::replay`) when it decides opportunity `at` (`opp` ≤ `at`; the last one holds
+    /// until the next). A record of another opportunity than the one being decided, or one this build cannot read, means
+    /// the replay is not the run's (`seen_mismatch`)
+    pub fn stage_seen(&mut self, opp: u64, at: u64, d: &Value) {
+        match Seen::from_json(d) {
+            Some(s) => {
+                if opp != at { self.seen_mismatch += 1; }
+                self.journaled = Some(s);
+                self.journaled_fresh = opp == at;
+            }
+            None => self.seen_mismatch += 1,
+        }
     }
 
     /// The target slot's leader: its identity from the journaled schedule only (INPUT 2: a replay sees the same; none
@@ -980,10 +1058,11 @@ impl Exec {
                 line["dry_run"] = json!({ "signer": b58(&dk.verifying_key().to_bytes()), "tx_b64": base64_of(&raw), "bytes": raw.len(), "checks": checks, "checks_ok": ok,
                     "accounts": accounts_of(&raw, &self.alt_lists) });
                 self.count(if ok { "dry_run_ok" } else { "dry_run_check_failed" });
+                // the simulation's rate window on the engine's time (WP-09 review item 5: never the real clock)
                 let sim = self.dry.as_mut().is_some_and(|dry| {
-                    while dry.sim_recent.front().is_some_and(|x| t_signed.saturating_sub(*x) >= 1_000_000_000) { dry.sim_recent.pop_front(); }
+                    while dry.sim_recent.front().is_some_and(|x| t.saturating_sub(*x) >= 1_000_000_000) { dry.sim_recent.pop_front(); }
                     let go = dry.simulate && dry.sim_recent.len() < dry.sim_per_sec;
-                    if go { dry.sim_recent.push_back(t_signed); }
+                    if go { dry.sim_recent.push_back(t); }
                     go
                 });
                 line["dry_run"]["simulated"] = json!(sim);
@@ -1022,7 +1101,7 @@ impl Exec {
         self.by_sig.insert(sig, attempt);
         self.open.insert(attempt, Open { attempt, decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
             trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit, creates_ata: built.creates_ata, worst: BASE_FEE, bh_slot: bh.slot, bh_height: bh.height,
-            target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_signed, t_sent: None, bundle: None,
+            target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_engine: t, t_signed, t_sent: None, bundle: None,
             path: paths.list[bp].name.clone(), fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
             send_error: None, cooled: false });
         d.verdict = "send";
@@ -1073,8 +1152,10 @@ impl Exec {
     }
 
     /// a dry run's read-only simulation (sigVerify off: the throwaway key is not the payer; the blockhash checked): its
-    /// answer comes back to the engine (INPUT 9) and is written to sims.jsonl with the attempt's id. Never a send
+    /// answer comes back to the engine (INPUT 9) and is written to sims.jsonl with the attempt's id. Never a send. An
+    /// offline executor (a replay) calls nothing: the run's answers are in its journal
     fn spawn_dry_sim(&self, attempt: u64, raw: Vec<u8>) {
+        if self.offline { return; }
         let (rpc, back) = (self.rpc.clone(), self.back.clone());
         self.rt.spawn(async move {
             let t = std::time::Instant::now();
@@ -1130,6 +1211,8 @@ impl Exec {
         line["cu_limit"] = json!(b.cu_limit);
         line["creates_ata"] = json!(b.creates_ata);
         line["min_profit"] = json!(min_profit);
+        // an offline executor (a replay) calls nothing (the diagnostic answer is not a journaled input: not replayed)
+        if self.offline { return; }
         let raw = build::unsigned(&b.msg);
         let rpc = self.rpc.clone();
         self.rt.spawn(async move {
@@ -1211,14 +1294,15 @@ impl Exec {
     /// INPUT 7 `wallet_tx` (WP-03b): one of our wallet's transactions. One of our attempts' signatures landed: final
     /// (`landed_ok` / `landed_fail`, from the wallet), or an amend line when it was final already: a landing after a
     /// final that said not landed, or the wallet record of a landing the expiry check found first, which brings its fee,
-    /// CU and the route program's events (review WP-05 #3)
-    pub fn on_wallet_tx(&mut self, d: &Value, poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
+    /// CU and the route program's events (review WP-05 #3). `t`: the engine's time (the record's journaled one: WP-09
+    /// review item 5, never the real clock)
+    pub fn on_wallet_tx(&mut self, d: &Value, t: u64, poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
         let Some(sig) = d["sig"].as_str().and_then(sig64) else { return };
         let attempt = self.by_sig.get(&sig).copied().or_else(|| d["attempt"].as_u64().filter(|a| self.open.contains_key(a) || self.finals.contains_key(a)));
         let Some(attempt) = attempt else { return };
         let ok = d["ok"].as_bool().unwrap_or(false);
         let landed = Landed { slot: d["slot"].as_u64(), idx: d["idx"].as_u64(), ok, err: d.get("err").cloned().filter(|e| !e.is_null()), fee: d["fee"].as_u64(),
-            cu: d["cu_consumed"].as_u64(), prog_events: d.get("prog_events").cloned().unwrap_or(Value::Null), t_wallet: now_ns() };
+            cu: d["cu_consumed"].as_u64(), prog_events: d.get("prog_events").cloned().unwrap_or(Value::Null), t_wallet: t };
         if let Some(o) = self.open.remove(&attempt) {
             let fin = if ok { "landed_ok" } else { "landed_fail" };
             self.finalize(o, fin, "wallet", Some(landed), None, false, poh);
@@ -1263,14 +1347,16 @@ impl Exec {
 
     /// The executor's timers (the engine's housekeeping, journaled): in-flight expiry, the cross-checks due (one batched
     /// getSignatureStatuses, 500 ms) and the attempts whose blockhash expired (one batched getSignatureStatuses with
-    /// `searchTransactionHistory`, F43), each on the background runtime; the answers come back as INPUT 9
+    /// `searchTransactionHistory`, F43), each on the background runtime; the answers come back as INPUT 9. Without a slot
+    /// an attempt expires `EXPIRY_NS` after its decision's engine time. An offline executor (a replay) keeps the same
+    /// books and calls nothing: the run's answers are in its journal
     pub fn tick(&mut self, t: u64, view: &SendView, tip_slot: u64) {
         self.inflight.expire(tip_slot);
         let mut checks: Vec<(u64, &'static str, [u8; 64])> = Vec::new();
         let mut expiry: Vec<(u64, &'static str, [u8; 64])> = Vec::new();
         for o in self.open.values_mut() {
             if !o.fired { continue; }
-            let expired = view.expired(o.bh_slot, o.bh_height, tip_slot).unwrap_or(t.saturating_sub(o.t_signed) >= EXPIRY_NS);
+            let expired = view.expired(o.bh_slot, o.bh_height, tip_slot).unwrap_or(t.saturating_sub(o.t_engine) >= EXPIRY_NS);
             if expired && !o.expiry_asked { o.expiry_asked = true; expiry.push((o.attempt, "expiry", o.sig)); continue; }
             while let Some(&(due, label)) = o.checks_due.first() {
                 if due > t { break; }
@@ -1284,6 +1370,7 @@ impl Exec {
                 let sigs: Vec<[u8; 64]> = chunk.iter().map(|x| x.2).collect();
                 let (rpc, back) = (self.settle.clone(), self.back.clone());
                 self.count(if why == "check" { "status_check" } else { "expiry_check" });
+                if self.offline { continue; }
                 self.rt.spawn(async move {
                     let b = Bounds { deadline: Duration::from_millis(ms), retries: if search { 1 } else { 0 }, attempt_timeout: Duration::from_millis(ms),
                         backoff_first: Duration::from_millis(100), backoff_max: Duration::from_millis(500) };
@@ -1522,6 +1609,226 @@ impl Exec {
     }
 
     pub fn payer(&self) -> Pk { self.payer }
+
+    // -------------------------------------------------------------------------------------------- replay (WP-09)
+
+    /// ---- WP-09. A replay's executor (review WP-09 "For the WP-05 merge" item 1): `assemble` on the run's exec_init
+    /// record (its lookup tables, PumpSwap GlobalConfig and held tokens), with no RPC endpoint, no send path and no key,
+    /// and the record's size cap, would-send rate and tip policy. A dry run's would-sends are signed by a new throwaway
+    /// key: only their signatures differ from the run's. It reads the run's journaled decision inputs (`stage_seen`) and
+    /// spawns nothing. A live or canary executor is not replayed (its sends cannot be): refused
+    pub fn offline(cfg: &Config, init: &ExecInit, rec: Rec) -> Result<Exec> {
+        anyhow::ensure!(!init.mode.sends(), "a {} executor is not replayed (its sends cannot be): only shadow and dry-run executors are", init.mode.as_str());
+        let key = if init.mode == Mode::DryRun { Some(ephemeral_key()?) } else { None };
+        let rt = offline_runtime();
+        let _in = rt.enter();
+        let mut x = Exec::assemble(cfg, Rpc::race(vec![]), None, rec, crossbeam_channel::unbounded().0, vec![], init.alts.clone(), init.pump.clone(),
+            init.held.iter().copied().collect(), init.mode, key)?;
+        x.offline = true;
+        x.max_size = init.size_cap();
+        x.path_rate = init.would_send_per_sec;
+        x.tips = init.tips.clone();
+        Ok(x)
+    }
+
+    /// whether this is a replay's offline executor
+    pub fn is_offline(&self) -> bool { self.offline }
+
+    /// What this executor started with: its part of the exec_init record (the engine adds the crowding map's,
+    /// `Engine::exec_init`). Taken before its first decision (the tip rotation's cursor is then 0)
+    pub fn init(&self) -> ExecInit {
+        let mut held: Vec<Pk> = self.held.iter().copied().collect();
+        held.sort();
+        ExecInit { mode: self.mode, alts: self.alts.iter().map(|a| (a.key, self.alt_lists.get(&a.key).map(|l| l.to_vec()).unwrap_or_default())).collect(),
+            pump: self.pump.clone(), held, max_size: self.max_size, max_size_src: if self.mode == Mode::Canary { "canary" } else { "live" }.into(), bankroll_cap: None,
+            would_send_per_sec: self.path_rate, tips: self.tips.clone(), crowding_window_h: 0, crowding_buckets: [0, 0], crowded: vec![], cfg_sha256: self.cfg_sha256.clone() }
+    }
+
+    /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 7). A digest of the executor's decision state, folded into
+    /// `Engine::digest`: its totals and counters, the in-flight map, the ≥1M class's bucket, token cooling, the would-send
+    /// and simulation windows, the open and final attempts, its copies' arrivals, the held tokens, the tip rotation, what
+    /// the last decision read of the gate. Left out: stage times and latency series (real clock reads), the network-call
+    /// scope, the recorder, the LeaderBook, a replay's own bookkeeping (`seen_*`)
+    pub fn digest(&self, x: &mut xxhash_rust::xxh3::Xxh3) {
+        fn u(x: &mut xxhash_rust::xxh3::Xxh3, v: u64) { x.update(&v.to_le_bytes()); }
+        x.update(self.mode.as_str().as_bytes());
+        for v in [self.decisions, self.refusals, self.would_sends, self.sent as u64, self.last_sent_ns, self.landed as u64, self.wins as u64, self.spent, self.reserved,
+            self.fees, self.tips_paid, self.round_trip as u64, self.round_trip_unknown as u64, self.never_left as u64, self.new_atas as u64, self.next_attempt,
+            self.leader_seen.0, self.leader_seen.1] { u(x, v); }
+        x.update(self.stopped.unwrap_or("-").as_bytes());
+        x.update(self.refused.as_deref().unwrap_or("-").as_bytes());
+        x.update(&[self.gate_seen.map_or(9, |g| g as u8)]);
+        let mut counts: Vec<(&&str, &u64)> = self.counts.iter().collect();
+        counts.sort();
+        for (k, v) in counts { x.update(k.as_bytes()); u(x, *v); }
+        let mut inflight: Vec<(&InflightKey, &InflightEntry)> = self.inflight.map.iter().collect();
+        inflight.sort_by_key(|e| (e.0.buy, e.0.sell, e.0.mint));
+        u(x, inflight.len() as u64);
+        for (k, e) in inflight {
+            x.update(&k.buy); x.update(&k.sell); x.update(&k.mint);
+            for v in [e.sv, e.target_slot, e.attempt, e.t] { u(x, v); }
+            x.update(&e.leader.unwrap_or([0; 32]));
+        }
+        let (units, last) = self.big.state();
+        x.update(&units.to_le_bytes());
+        u(x, last.unwrap_or(u64::MAX));
+        let mut cool: Vec<(&Pk, &(u32, u64, u32))> = self.mint_cool.iter().collect();
+        cool.sort();
+        for (k, c) in cool { x.update(k); for v in [c.0 as u64, c.1, c.2 as u64] { u(x, v); } }
+        for w in [&self.would_recent, &self.sim_recent] { u(x, w.len() as u64); for t in w { u(x, *t); } }
+        if let Some(d) = &self.dry { u(x, d.sim_recent.len() as u64); for t in &d.sim_recent { u(x, *t); } }
+        u(x, self.open.len() as u64);
+        for (a, o) in &self.open {
+            u(x, *a);
+            x.update(&o.sig);
+            x.update(&o.mint);
+            for v in [o.decision, o.opp, o.size, o.expected as u64, o.tip, o.min_profit, o.worst, o.bh_slot, o.bh_height.unwrap_or(u64::MAX), o.target_slot, o.t_engine,
+                o.t_sent.unwrap_or(u64::MAX), o.checks.len() as u64, o.status_hit.as_ref().map_or(u64::MAX, |s| s.slot)] { u(x, v); }
+            x.update(&[o.creates_ata as u8, o.fired as u8, o.took_big as u8, o.expiry_asked as u8, o.cooled as u8]);
+            x.update(o.bundle.as_deref().unwrap_or("-").as_bytes());
+            x.update(o.send_error.as_deref().unwrap_or("-").as_bytes());
+            for (t, l) in &o.checks_due { u(x, *t); x.update(l.as_bytes()); }
+        }
+        let mut finals: Vec<(&u64, &Final)> = self.finals.iter().collect();
+        finals.sort_by_key(|f| *f.0);
+        u(x, finals.len() as u64);
+        for (a, f) in finals {
+            u(x, *a);
+            x.update(f.sig58.as_bytes());
+            x.update(&f.mint);
+            x.update(f.src.as_bytes());
+            x.update(&[f.landed as u8, f.ok as u8, f.creates_ata as u8, f.wallet_seen as u8, f.cooled as u8]);
+            let c = &f.counted;
+            for v in [f.tip, f.size, c.landed as u64, c.win as u64, c.tip, c.fee, c.failed_fee, c.round_trip as u64, c.rt_unknown as u64, c.atas as u64] { u(x, v); }
+        }
+        let mut by_sig: Vec<(&[u8; 64], &u64)> = self.by_sig.iter().collect();
+        by_sig.sort();
+        for (s, a) in by_sig { x.update(s); u(x, *a); }
+        let mut seen: Vec<(&[u8; 64], &(u64, u16, Vec<(u16, u64)>))> = self.seen.iter().collect();
+        seen.sort_by_key(|s| *s.0);
+        for (s, (t, f, by)) in seen { x.update(s); u(x, *t); u(x, *f as u64); for (f, t) in by { u(x, *f as u64); u(x, *t); } }
+        let mut held: Vec<&Pk> = self.held.iter().collect();
+        held.sort();
+        u(x, held.len() as u64);
+        for k in held { x.update(k); }
+        u(x, self.tips.as_ref().map_or(u64::MAX, |p| p.cursor as u64));
+    }
+}
+
+/// ---- WP-09 (review WP-09 "For the WP-05 merge" items 1, 2). What an executor starts with that the run's frozen
+/// config does not hold, journaled once with the boot records as INPUT 12 `exec_init` (`t_engine_ns` 0; MEASUREMENT
+/// §4.13) by `Engine::journal_exec_init`: the mode; the `[exec] alts` lookup tables as the boot read them; PumpSwap's
+/// GlobalConfig as the boot decoded it; the tokens the wallet held an account for; the size cap (`[live]`'s or the
+/// canary's) and a bankroll-derived cap (none before WP-06 / WP-07); the would-send rate (the bundle path's); the
+/// bundle path's tip policy; the crowding map's window, buckets and WP-00's static list (the crowded-pools file's
+/// contents, as read at the start); the sha256 of the config sections the executor decides with. A replay builds its
+/// offline executor and the crowding map from it, and reads no file outside the run
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExecInit {
+    pub mode: Mode,
+    pub alts: Vec<(Pk, Vec<Pk>)>,
+    pub pump: Option<PumpGlobal>,
+    pub held: Vec<Pk>,
+    pub max_size: u64,
+    pub max_size_src: String,
+    pub bankroll_cap: Option<u64>,
+    pub would_send_per_sec: usize,
+    pub tips: Option<TipPolicy>,
+    pub crowding_window_h: u64,
+    pub crowding_buckets: [u32; 2],
+    pub crowded: Vec<Pk>,
+    /// `cfg_sha256(cfg)` of the run's config
+    pub cfg_sha256: String,
+}
+
+fn pk58(s: &str) -> Option<Pk> { bs58::decode(s).into_vec().ok()?.try_into().ok() }
+
+impl ExecInit {
+    /// the journal's INPUT 12 body
+    pub fn json(&self) -> Value {
+        let keys = |v: &[Pk]| v.iter().map(b58).collect::<Vec<_>>();
+        json!({ "mode": self.mode, "alts": self.alts.iter().map(|(k, a)| json!({ "table": b58(k), "addrs": keys(a) })).collect::<Vec<_>>(),
+            "pump": self.pump.as_ref().map(|g| json!({ "disable_flags": g.disable_flags, "protocol": keys(&g.protocol), "reserved": keys(&g.reserved), "buyback": keys(&g.buyback) })),
+            "held_mints": keys(&self.held), "max_size_lamports": self.max_size, "max_size_src": self.max_size_src, "bankroll_cap_lamports": self.bankroll_cap,
+            "would_send_per_sec": self.would_send_per_sec,
+            "tips": self.tips.as_ref().map(|p| json!({ "path": p.path, "accounts": keys(&p.accounts), "floor": p.floor, "share": p.share, "max": p.max })),
+            "crowding": { "window_h": self.crowding_window_h, "buckets": self.crowding_buckets, "static_list": keys(&self.crowded) },
+            "cfg_sha256": self.cfg_sha256 })
+    }
+
+    /// read back (None: not an exec_init body this build reads)
+    pub fn from_json(v: &Value) -> Option<ExecInit> {
+        let keys = |v: &Value| -> Option<Vec<Pk>> { v.as_array()?.iter().map(|k| k.as_str().and_then(pk58)).collect() };
+        let mode = match v["mode"].as_str()? { "live" => Mode::Live, "canary" => Mode::Canary, "shadow" => Mode::Shadow, "dry_run" => Mode::DryRun, _ => return None };
+        let alts = v["alts"].as_array()?.iter().map(|a| Some((pk58(a["table"].as_str()?)?, keys(&a["addrs"])?))).collect::<Option<Vec<_>>>()?;
+        let pump = match &v["pump"] {
+            Value::Null => None,
+            g => Some(PumpGlobal { disable_flags: u8::try_from(g["disable_flags"].as_u64()?).ok()?, protocol: keys(&g["protocol"])?, reserved: keys(&g["reserved"])?,
+                buyback: keys(&g["buyback"])? }),
+        };
+        let tips = match &v["tips"] {
+            Value::Null => None,
+            p => Some(TipPolicy { accounts: keys(&p["accounts"])?, floor: p["floor"].as_u64()?, share: p["share"].as_f64(), max: p["max"].as_u64()?, cursor: 0,
+                path: p["path"].as_str()?.to_string() }),
+        };
+        let c = &v["crowding"];
+        let b = c["buckets"].as_array()?;
+        Some(ExecInit { mode, alts, pump, held: keys(&v["held_mints"])?, max_size: v["max_size_lamports"].as_u64()?, max_size_src: v["max_size_src"].as_str().unwrap_or("").into(),
+            bankroll_cap: v["bankroll_cap_lamports"].as_u64(), would_send_per_sec: usize::try_from(v["would_send_per_sec"].as_u64()?).ok()?, tips,
+            crowding_window_h: c["window_h"].as_u64()?, crowding_buckets: [u32::try_from(b.first()?.as_u64()?).ok()?, u32::try_from(b.get(1)?.as_u64()?).ok()?],
+            crowded: keys(&c["static_list"])?, cfg_sha256: v["cfg_sha256"].as_str()?.to_string() })
+    }
+
+    /// the largest size a decision trades: the size cap, under a bankroll-derived one when there is one
+    pub fn size_cap(&self) -> u64 { self.bankroll_cap.map_or(self.max_size, |b| b.min(self.max_size)) }
+}
+
+/// ---- WP-09 (review WP-09 "For the WP-05 merge" item 3). What a run's executor decision read from outside the journal,
+/// as the engine journaled it at the decision (INPUT 3 `src` "decision", written whenever it differs from the last
+/// one: the SendGate's mode or reason, the target slot's leader kind, the Jito token, the recorder), read back by a
+/// replay's offline executor. The record also names the decision's target slot and leader identity, which the replay
+/// computes itself from the journaled schedule (a difference is a divergence)
+#[derive(Clone, Debug, PartialEq)]
+pub struct Seen {
+    pub opp: u64,
+    pub gate: GateMode,
+    pub gate_reason: String,
+    pub leader_slot: Option<u64>,
+    pub identity: Option<String>,
+    pub kind: LeaderKind,
+    pub kind_src: Option<String>,
+    pub token_ok: bool,
+    pub recorder_ok: bool,
+}
+
+impl Seen {
+    /// a record as `Engine::after_opportunity` writes it; None for one without the executor's fields (a decision without
+    /// an executor writes `executor: false` records)
+    pub fn from_json(d: &Value) -> Option<Seen> {
+        let gate = match d["mode"].as_str()? { "live" => GateMode::Live, "shadow" => GateMode::Shadow, "stopped" => GateMode::Stopped, _ => return None };
+        let l = &d["leader"];
+        Some(Seen { opp: d["opp"].as_u64()?, gate, gate_reason: d["reason"].as_str().unwrap_or("").to_string(), leader_slot: l["slot"].as_u64(),
+            identity: l["identity"].as_str().map(String::from), kind: kind_of(l["kind"].as_str()?)?, kind_src: l["kind_src"].as_str().map(String::from),
+            token_ok: d["jito_token_ok"].as_bool()?, recorder_ok: d["recorder_ok"].as_bool()? })
+    }
+}
+
+/// the runtime an offline executor is assembled on: never driven (an offline executor spawns nothing) and never dropped
+pub fn offline_runtime() -> tokio::runtime::Handle {
+    static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RT.get_or_init(|| tokio::runtime::Builder::new_current_thread().build().expect("a current-thread runtime")).handle().clone()
+}
+
+/// sha256 of the config the executor decides with (exec_init `cfg_sha256`): `[exec]`, `[[send]]`, `[send_policy]`,
+/// `[live]` without its failed-fee cap (the supervisor's `--budget-left` lowers it for a segment, and only a sending
+/// executor reads it), `[canary]`, `[sim]`, `[dry_run]`, the wallet and `[strategy] cu_price_micro`. A replay's config must
+/// give the run's
+pub fn cfg_sha256(cfg: &Config) -> String {
+    let mut live = serde_json::to_value(&cfg.live).unwrap_or(Value::Null);
+    if let Some(o) = live.as_object_mut() { o.remove("max_failed_fees_lamports"); }
+    let v = json!({ "wallet": cfg.wallet, "exec": cfg.exec, "sends": cfg.sends, "send_policy": cfg.send_policy, "live": live, "canary": cfg.canary, "sim": cfg.sim,
+        "dry_run": cfg.dry_run, "cu_price_micro": cfg.strategy.cu_price_micro });
+    crate::provenance::sha256_hex(&serde_json::to_vec(&v).unwrap_or_default())
 }
 
 fn sig58_of(s: &[u8; 64]) -> String { bs58::encode(s).into_string() }

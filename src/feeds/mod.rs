@@ -70,13 +70,16 @@ pub enum InputKind { BlockhashHead = 1, LeaderWindow = 2, Gate = 3, Quarantine =
     EngineInit = 10,
     /// how one chunk of an engine RPC read ended (`reads.rs`; review WP-04 #1, #7): `{job, chunk, what, attempt, ok,
     /// slot, n, missing: [pk]}` or `{..., ok: false, err}`, after the chunk's account events
-    Fetch = 11 }
+    Fetch = 11,
+    /// ---- WP-09: what the executor starts with that the frozen config does not hold (`exec::ExecInit`): journaled once
+    /// by the engine after engine_init, with `t_engine_ns` 0, never an `Event`; a replay builds its offline executor from it
+    ExecInit = 12 }
 
 impl InputKind {
     pub fn from_u8(k: u8) -> Option<InputKind> {
         use InputKind::*;
         Some(match k { 1 => BlockhashHead, 2 => LeaderWindow, 3 => Gate, 4 => Quarantine, 5 => InflightRelease, 6 => Health, 7 => WalletTx, 8 => SlotidxMissing, 9 => Settled,
-            10 => EngineInit, 11 => Fetch, _ => return None })
+            10 => EngineInit, 11 => Fetch, 12 => ExecInit, _ => return None })
     }
 }
 

@@ -1227,6 +1227,13 @@ pub struct Sim { pub slot: u64, pub err: Option<Value>, pub units: Option<u64>, 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct SigStatus { pub slot: u64, pub err: Option<Value>, pub confirmation: Option<String> }
 
+impl SigStatus {
+    /// ---- WP-09: read back as `Serialize` wrote it (journal INPUT 9 `settled` `statuses`: a replay hands it to its executor)
+    pub fn from_json(v: &Value) -> Option<SigStatus> {
+        Some(SigStatus { slot: v["slot"].as_u64()?, err: v.get("err").cloned().filter(|e| !e.is_null()), confirmation: v["confirmation"].as_str().map(String::from) })
+    }
+}
+
 fn parse_account(v: &Value) -> Option<Account> {
     if v.is_null() { return None; }
     let data = base64::engine::general_purpose::STANDARD.decode(v["data"][0].as_str()?).ok()?;

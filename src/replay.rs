@@ -8,23 +8,34 @@
 //!   section and its accounts.bin records: `journal::replay_engine`), then every journal record through
 //!   `journal::replay` (the WP-03 / WP-04 replay on the replay clock). What a decision read of the SendGate is the run's
 //!   own journaled record (INPUT 3 `src` "decision"), staged ahead of the input whose handling made the decision and
-//!   applied at its opportunity (review WP-09 #3); the 100 ms watch samples are status only. Nothing is built or sent:
-//!   an offline engine has no RPC, runtime or executor. The replay records into a new directory of its own (`--out`;
-//!   default `./replay-<run>-<unix s>-<pid>`, never inside the run) as a run does (decisions.jsonl, commits.jsonl, ...;
-//!   its own journal is switched off: it would not be replayable), and writes `replay.json`.
+//!   applied at its opportunity (review WP-09 #3); the 100 ms watch samples are status only. The replay records into a
+//!   new directory of its own (`--out`; default `./replay-<run>-<unix s>-<pid>`, never inside the run) as a run does
+//!   (decisions.jsonl, commits.jsonl, attempts.jsonl, ...; its own journal is switched off: it would not be
+//!   replayable), and writes `replay.json`.
+//! - **The executor** (the WP-05 merge; review WP-09 "For the WP-05 merge"). A run with an executor journals its
+//!   exec_init record (INPUT 12 in the boot section: the lookup tables, PumpSwap's GlobalConfig, the held tokens, the
+//!   mode, the size cap, the would-send rate, the tip policy, the crowding map's static list; `exec::ExecInit`). The
+//!   replay builds an offline executor from it (`Exec::offline`: no RPC, no send path, no key; it spawns nothing) and
+//!   the crowding map; its send checks read the run's decision-point records (the gate's mode and reason, the leader's
+//!   kind, the Jito token, the recorder; `Exec::stage_seen`), and the run's settlements (INPUT 9) and the other
+//!   executor inputs reach it as they reached the run's. Nothing is sent. Shadow and dry-run executors are replayed; a
+//!   live or canary one is not (`executor_not_replayed`), nor one recorded before this (no exec_init).
 //! - **Whole.** `ok` (exit 0) needs a whole replay: no journal gap, no account record the journal names missing from
 //!   accounts.bin, no accounts.bin gap, every journaled store verdict reproduced, no record dropped by the run's or the
-//!   replay's recorder, and no executor whose verdicts were not replayed (an offline executor comes with the WP-05
-//!   merge: until then a recording made with an executor is `ok: false`, `executor_not_replayed`; review WP-09 #2, #4).
+//!   replay's recorder, no executor whose verdicts were not replayed, and every decision-point record the offline
+//!   executor read was its own (review WP-09 #2, #4).
 //! - **Streaming.** journal.bin and accounts.bin are read one rotation file at a time, and an account record is held
-//!   only until the journal names it; the compare reads decisions and commits a zstd frame at a time, one line per side
-//!   at a time (review WP-09 #7).
+//!   only until the journal names it; the compare reads decisions, commits and attempts a zstd frame at a time, one line
+//!   per side at a time (review WP-09 #7).
 //! - **`--compare`** diffs the replay's decisions.jsonl and commits.jsonl against the run's into `replay-diff.json`
 //!   (field by field; `stages.t_priced` / `stages.t_decided` aside: they are the run's real clock reads), and checks
-//!   the run's state and decision digests (events.jsonl `engine_digests`, written by `Engine::finish`) when the replay
-//!   ran to the end. An executor's verdict the offline engine stands in for (`no_executor` / `gate_*` where the run's
-//!   executor decided) and the executor's own fields are counted, not compared, and keep `ok` false. Journal gaps are
-//!   listed and the decisions inside them are not compared.
+//!   the run's state and decision digests (events.jsonl `engine_digests`, written by `Engine::finish`; the state digest
+//!   folds the executor's state) when the replay ran to the end. With the executor replayed every field is compared,
+//!   the executor's verdicts and fields (`sent`, `would_send`, `reason_ungated`, `ev`, `rank`, `crowding`, `attempt`,
+//!   `band`) among them, and so are attempts.jsonl's lines (`attempt_projection`: the real clock's stage times, the
+//!   LeaderBook's snapshot and a dry run's signature aside). For a recording whose executor was not replayed, its
+//!   verdict where the offline engine stands in (`no_executor` / `gate_*`) and its own fields are counted, not
+//!   compared, and keep `ok` false. Journal gaps are listed and the decisions inside them are not compared.
 //! - **What-if** (`--set key=value`, `--reprice-sizes`): the replay on another `[strategy]` / `[state]` setting, and the
 //!   best route of every opportunity re-priced at other sizes at the state its decision priced (X3), in the same pass.
 //! - **`arbx quote`** replays up to one state version (an accounts.bin `aseq`, a `slot:write_version`, a transaction's
@@ -377,11 +388,55 @@ struct Boot {
     gaps: Vec<GapAt>,
     /// the run's engine_init (the overrides not applied)
     init: EngineInit,
+    /// the run's executor (review WP-09 "For the WP-05 merge"): none, one to replay from its exec_init record, or one that
+    /// is not replayed
+    exec: RunExec,
+}
+
+/// A run's executor as a replay sees it
+#[derive(Clone, Debug)]
+pub enum RunExec {
+    /// the run had none (engine_init `executor` false)
+    None,
+    /// replayed: an offline executor made from the run's exec_init record
+    Replayed(crate::exec::ExecInit),
+    /// not replayed, and why: no exec_init record (a recording made before the executor replay), or a live or canary
+    /// executor (its sends cannot be replayed)
+    NotReplayed(String),
+}
+
+impl RunExec {
+    fn json(&self) -> Value {
+        match self {
+            RunExec::None => json!({ "run": false, "replayed": false, "mode": null, "why_not": null }),
+            RunExec::Replayed(i) => json!({ "run": true, "replayed": true, "mode": i.mode, "why_not": null, "cfg_sha256": i.cfg_sha256 }),
+            RunExec::NotReplayed(why) => json!({ "run": true, "replayed": false, "mode": null, "why_not": why }),
+        }
+    }
+}
+
+/// The run's executor from its boot section: replayed when it has an exec_init record of a shadow or dry-run executor,
+/// whose config sections the replay's config gives (else refused: the replay would not be the run's)
+fn run_exec(inp: &Inputs, init: &EngineInit, records: &[JRec]) -> Result<RunExec> {
+    if !init.executor { return Ok(RunExec::None); }
+    let Some(v) = journal::exec_init(records) else {
+        return Ok(RunExec::NotReplayed("the run had an executor (engine_init executor true) and its journal has no exec_init record: a recording made before the \
+            executor replay (WP-09 with WP-05), whose executor verdicts and fields cannot be rebuilt".into()));
+    };
+    let ei = crate::exec::ExecInit::from_json(v).context("the journal's exec_init record (INPUT 12) does not read")?;
+    if ei.mode.sends() {
+        return Ok(RunExec::NotReplayed(format!("a {} executor: its sends are not replayed (only shadow and dry-run executors are)", ei.mode.as_str())));
+    }
+    let mine = crate::exec::cfg_sha256(&inp.cfg);
+    anyhow::ensure!(ei.cfg_sha256 == mine, "the config's executor sections (sha256 {}) are not the run's ({}): give the run's frozen config", &mine[..16],
+        &ei.cfg_sha256[..16.min(ei.cfg_sha256.len())]);
+    Ok(RunExec::Replayed(ei))
 }
 
 /// Read the boot section and refuse what cannot be replayed before anything is written (review WP-09 #9): no
-/// engine_init, a `[strategy]` that is not the run's, an override the engine does not have
-fn open_boot(inp: &Inputs, sets: &[Set]) -> Result<Boot> {
+/// engine_init, a `[strategy]` that is not the run's, an override the engine does not have, an executor config that is
+/// not the run's. `with_exec`: rebuild the run's executor (a replay; a quote reads the store only, and needs none)
+fn open_boot(inp: &Inputs, sets: &[Set], with_exec: bool) -> Result<Boot> {
     let mut jf = JFiles::open(&inp.dir);
     let mut acc = AcctSource::open(&inp.dir);
     let mut records = Vec::new();
@@ -394,6 +449,7 @@ fn open_boot(inp: &Inputs, sets: &[Set]) -> Result<Boot> {
     anyhow::ensure!(init.strategy_sha256 == run_hash, "the config's [strategy] (sha256 {}) is not the run's ({}): give the run's frozen config", &run_hash[..16],
         &init.strategy_sha256[..16.min(init.strategy_sha256.len())]);
     apply_sets(&mut inp.cfg.strategy.clone(), &mut init.clone(), sets)?;
+    let exec = if with_exec { run_exec(inp, &init, &records)? } else { RunExec::None };
     let (mut accts, mut missing, mut gaps) = (HashMap::default(), 0, Vec::new());
     for r in &records {
         match r.body {
@@ -402,12 +458,14 @@ fn open_boot(inp: &Inputs, sets: &[Set]) -> Result<Boot> {
             _ => {}
         }
     }
-    Ok(Boot { jf, acc, records, accts, missing, gaps, init })
+    Ok(Boot { jf, acc, records, accts, missing, gaps, init, exec })
 }
 
 /// Build the replay's engine from the boot section: the boot store, the run's engine_init (or the what-if overrides on
 /// it), the preloaded lookup tables, the watch list and roles, the SendGate as meta.json recorded it at the start (the
-/// status lines show it; each decision's gate is the run's journaled record). `rec`: where it records
+/// status lines show it; each decision's gate is the run's journaled record), and the run's executor when it is replayed
+/// (an offline one from its exec_init record, on the engine's health, with the crowding map it ranked routes by).
+/// `rec`: where it records
 fn build_engine(inp: &Inputs, boot: &Boot, sets: &[Set], rec: &Rec) -> Result<(Engine, EngineInit)> {
     let (mut e, init) = if sets.is_empty() {
         journal::replay_engine(inp.reg.clone(), inp.cfg.strategy.clone(), &boot.records, &boot.accts)?
@@ -426,6 +484,13 @@ fn build_engine(inp: &Inputs, boot: &Boot, sets: &[Set], rec: &Rec) -> Result<(E
     e.set_acct_rec(AcctRec::new(rec.clone(), roles));
     e.set_base_watch(inp.watch.iter().map(|w| w.0).collect());
     e.gate = inp.meta.as_ref().map(|m| &m["send_gate"]).filter(|g| g.is_object()).and_then(journal::gate_of);
+    // ---- WP-09 (review WP-09 "For the WP-05 merge" items 1, 2)
+    if let RunExec::Replayed(ei) = &boot.exec {
+        e.set_crowding(crate::crowding::Activity::new(ei.crowding_window_h, ei.crowding_buckets, ei.crowded.iter().copied().collect()));
+        let mut x = crate::exec::Exec::offline(&inp.cfg, ei, rec.clone())?;
+        x.set_health(e.health_flags());
+        e.exec = Some(x);
+    }
     Ok((e, init))
 }
 
@@ -441,6 +506,8 @@ pub struct Drive {
     pub missing_accounts: u64,
     pub verdict_mismatches: u64,
     pub skipped: u64,
+    /// INPUT 9 settlements fed back (to the executor)
+    pub settled: u64,
     /// decision-point gate records (INPUT 3 `src` "decision"), and those staged for the replay's decisions
     pub gate_observed: u64,
     pub gate_staged: u64,
@@ -523,6 +590,7 @@ fn drive(inp: &Inputs, boot: Boot, sets: &[Set], rec: &Rec, hook: &mut dyn Hook)
         d.missing_accounts += st.missing_accounts;
         d.verdict_mismatches += st.verdict_mismatches;
         d.skipped += st.skipped;
+        d.settled += st.settled;
         d.gate_observed += st.gate_observed;
         d.gate_staged += st.gate_staged;
         // an offline engine keeps the fetches it would have sent; a replay has the run's answers in the journal
@@ -622,7 +690,7 @@ impl Hook for MainHook<'_> {
 /// The run's losses that make a replay not whole (review WP-09 #2): journal gaps, account records the journal names
 /// that accounts.bin lacks, accounts.bin gaps, store verdicts not reproduced, records the run's recorder dropped
 /// (manifest.json: journal, accounts, decisions, commits), the replay's own recorder drops, an executor not replayed
-fn not_whole(run: &Path, d: &Drive, replay_dropped: u64, executor: bool) -> Vec<Value> {
+fn not_whole(run: &Path, d: &Drive, replay_dropped: u64, exec: &RunExec, uses: RecordUse, what_if: bool) -> Vec<Value> {
     let mut v = Vec::new();
     if !d.gaps.is_empty() {
         v.push(json!({ "why": "journal_gap", "n": d.gaps.len(), "records_lost": d.gaps.iter().map(|g| g.n_lost).sum::<u64>(),
@@ -652,12 +720,31 @@ fn not_whole(run: &Path, d: &Drive, replay_dropped: u64, executor: bool) -> Vec<
     if replay_dropped > 0 || d.backpressure_gave_up {
         v.push(json!({ "why": "replay_recorder_loss", "n": replay_dropped, "detail": "the replay's own recorder dropped records (its decisions and commits are incomplete)" }));
     }
-    if executor {
-        v.push(json!({ "why": "executor_not_replayed", "n": 1, "detail": "executor replay not implemented: the run had an executor (engine_init executor true), \
-            whose verdicts and fields a replay without one cannot reproduce; the offline executor comes with the WP-05 merge" }));
+    // ---- WP-09 (review WP-09 "For the WP-05 merge" items 6, 9): an executor recorded before the executor replay (no
+    // exec_init) or a sending one is not replayed; a replayed one must have read the run's records as its own
+    if let RunExec::NotReplayed(why) = exec { v.push(json!({ "why": "executor_not_replayed", "n": 1, "detail": why })); }
+    // (a what-if decides other opportunities than the run by design: its use of the run's records is reported, not a loss)
+    if what_if { return v; }
+    if uses.mismatch > 0 {
+        v.push(json!({ "why": "decision_records_mismatch", "n": uses.mismatch, "detail": "decision-point records (INPUT 3 `src` \"decision\") the replay's executor read \
+            that were not its own: staged at another opportunity, unreadable, or naming another target slot or leader than the replay's (the replay diverged)" }));
+    }
+    if uses.missing > 0 {
+        v.push(json!({ "why": "decision_records_missing", "n": uses.missing, "detail": "executor decisions the replay made before any decision-point record (they read the \
+            gate as stopped: fail closed)" }));
+    }
+    if uses.unused > 0 {
+        v.push(json!({ "why": "decision_records_unused", "n": uses.unused, "detail": "decision-point records no decision of the replay read: the run decided \
+            opportunities the replay did not (the replay diverged)" }));
     }
     v
 }
+
+/// ---- WP-09. What a replay made of the run's decision-point records: records its executor read that were not its own
+/// (`Exec::seen_mismatch`), executor decisions before any record (`seen_missing`), records left unread by a replay that
+/// ran to the end
+#[derive(Clone, Copy, Debug, Default)]
+struct RecordUse { mismatch: u64, missing: u64, unused: u64 }
 
 /// The run's digests as `Engine::finish` recorded them (events.jsonl `engine_digests`; review WP-09 #6)
 fn run_digests(run: &Path) -> Option<Value> {
@@ -684,7 +771,7 @@ fn digests_check(run: Option<Value>, before: (u64, u64), after: (u64, u64), d: &
 pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
     let inp = inputs(run, o.config.as_deref(), o.pools.as_deref())?;
     // everything that can be refused is, before anything is written (review WP-09 #9)
-    let boot = open_boot(&inp, &o.sets)?;
+    let boot = open_boot(&inp, &o.sets, true)?;
     let want = if o.reprice.is_empty() { None } else { Some(opportunities(run, &Window { from_slot: o.from_slot, to_slot: o.to_slot, t_cut: None })?) };
     let build = build_check(inp.meta.as_ref());
     if build["same_source"] == json!(false) {
@@ -702,8 +789,11 @@ pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
     let cap = (cfg.sizes_sol.iter().cloned().fold(0.0, f64::max) * 1e9) as u64;
     let n_want = want.as_ref().map_or(0, |w| w.len());
     let mut hook = MainHook { to_slot: o.to_slot, reprice: want.map(|w| RepriceHook { want: w, sizes: &o.reprice, cfg, cap, seen: 0, out: Vec::new() }) };
+    let run_exec = boot.exec.clone();
     let res = drive(&inp, boot, &o.sets, &rec, &mut hook);
     let (mut e, init, d) = match res { Ok(x) => x, Err(err) => { rec.close(); return Err(err); } };
+    let uses = RecordUse { mismatch: e.exec.as_ref().map_or(0, |x| x.seen_mismatch), missing: e.exec.as_ref().map_or(0, |x| x.seen_missing),
+        unused: if d.stopped_at.is_none() { e.gate_seen.script.len() as u64 } else { 0 } };
     let before = (e.digest(), e.decision_digest());
     e.finish();
     let (digest, decision_digest) = (e.digest(), e.decision_digest());
@@ -712,10 +802,10 @@ pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
     let dropped: u64 = rec_stats.as_ref().map_or(0, |s| s.dropped.iter().map(|x| x.1).sum::<u64>() + s.io_lost.iter().map(|x| x.1).sum::<u64>());
     let span_ns = d.t_first.map_or(0, |t| d.t_last.saturating_sub(t));
     let window = Window { from_slot: o.from_slot, to_slot: o.to_slot, t_cut: d.stopped_at.map(|s| s.1) };
-    let losses = not_whole(run, &d, dropped, init.executor);
+    let losses = not_whole(run, &d, dropped, &run_exec, uses, !o.sets.is_empty());
     let whole = losses.is_empty();
     let digests = digests_check(run_digests(run), before, (digest, decision_digest), &d, &o.sets);
-    let mut diff = if o.compare { Some(compare(run, &out, &window, &d, init.executor, !o.sets.is_empty(), &digests)?) } else { None };
+    let mut diff = if o.compare { Some(compare(run, &out, &window, &d, &run_exec, !o.sets.is_empty(), &digests)?) } else { None };
     let differences_ok = diff.as_ref().map_or(true, |x| x["summary"]["differences_ok"] == json!(true));
     let ok = whole && differences_ok;
     if let Some(x) = diff.as_mut() {
@@ -731,7 +821,9 @@ pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
         "build": build, "config": inp.config_path.display().to_string(), "pools_file": inp.pools_path.display().to_string(), "pools_sha256": inp.pools_sha256,
         "pools": inp.reg.pools.len(), "pairs": inp.reg.pairs.len(),
         "engine_init": { "min_tip": init.min_tip, "executor": init.executor, "strategy_sha256": init.strategy_sha256, "knobs": init.knobs },
-        "executor_replayed": !init.executor,
+        "executor_replayed": !matches!(run_exec, RunExec::NotReplayed(_)),
+        "executor": { "run": init.executor, "replayed": matches!(run_exec, RunExec::Replayed(_)), "exec_init": run_exec.json(), "records_staged": d.gate_staged,
+            "records_mismatch": uses.mismatch, "records_missing": uses.missing, "records_unused": uses.unused, "settled_fed": d.settled },
         "overrides": o.sets.iter().map(|s| format!("{}={}", s.key, s.value)).collect::<Vec<_>>(),
         "window": { "from_slot": o.from_slot, "to_slot": o.to_slot, "stopped_at_seq": d.stopped_at.map(|s| s.0), "stopped_at_t_ns": d.stopped_at.map(|s| s.1) },
         "journal": { "boot_records": d.boot_records, "records": d.records, "events": d.events, "timers": d.timers, "skipped_inputs": d.skipped,
@@ -960,7 +1052,10 @@ fn diff_fields(prefix: &str, a: &Value, b: &Value, out: &mut Vec<(String, Value,
 
 /// Compare the replay's decisions.jsonl and commits.jsonl with the run's, and the digests (see the module doc). The
 /// summary's `differences_ok`: no field, flag, commit or digest difference (the caller's `ok` also needs a whole replay)
-fn compare(run: &Path, out: &Path, w: &Window, d: &Drive, executor: bool, what_if: bool, digests: &Value) -> Result<Value> {
+fn compare(run: &Path, out: &Path, w: &Window, d: &Drive, exec: &RunExec, what_if: bool, digests: &Value) -> Result<Value> {
+    // ---- WP-09 (review WP-09 "For the WP-05 merge" item 6): a replayed executor's verdicts and fields are compared like
+    // every other field; only a recording whose executor was not replayed keeps the exemptions (and is never ok)
+    let (exec_run, exec_replayed) = (!matches!(exec, RunExec::None), matches!(exec, RunExec::Replayed(_)));
     // the intervals a journal gap left without inputs, and each account input skipped for want of its record: decisions
     // inside are not compared; differences after the first are marked `after_gap` (the store may differ from then on)
     // (a gap among the boot records skips nothing: every difference is then `after_gap`)
@@ -1002,12 +1097,12 @@ fn compare(run: &Path, out: &Path, w: &Window, d: &Drive, executor: bool, what_i
         for v in [&mut x, &mut y] {
             if let Some(s) = v.get_mut("stages").and_then(|s| s.as_object_mut()) { for f in NOT_COMPARED { s.remove(f.trim_start_matches("stages.")); } }
         }
-        if executor {
-            // an executor's own fields: not compared until the offline executor replays them (counted)
+        if exec_run && !exec_replayed {
+            // an executor's own fields: not compared when the executor is not replayed (counted)
             if EXECUTOR_FIELDS.iter().any(|f| !x[*f].is_null() && x[*f] != y[*f]) { exec_fields += 1; }
             for f in EXECUTOR_FIELDS { x.as_object_mut().map(|o| o.remove(f)); y.as_object_mut().map(|o| o.remove(f)); }
             let (rr, rp) = (x["reason"].as_str().unwrap_or("").to_string(), y["reason"].as_str().unwrap_or("").to_string());
-            if rr != rp && executor_not_replayed(&rr, &rp, executor) {
+            if rr != rp && executor_not_replayed(&rr, &rp, true) {
                 exec_verdicts += 1;
                 for f in ["verdict", "reason"] { x.as_object_mut().map(|o| o.remove(f)); y.as_object_mut().map(|o| o.remove(f)); }
             }
@@ -1038,11 +1133,18 @@ fn compare(run: &Path, out: &Path, w: &Window, d: &Drive, executor: bool, what_i
             if first_commit_diff.is_null() { first_commit_diff = json!({ "line": n_ca.max(n_cb) - 1, "run": x, "replay": y }); }
         }
     }
+    // ---- WP-09: a replayed executor's attempts.jsonl, attempt by attempt (those of the decisions compared)
+    let att = if exec_replayed { Some(compare_attempts(run, out, &compared_ids)?) } else { None };
+    let att_ok = att.as_ref().map_or(true, |a| a.differ == 0 && a.missing == 0 && a.extra == 0);
     let flags_n = flags_differ.len() as u64;
     let digests_ok = digests["same"] != json!(false);
-    let differences_ok = acc.n == 0 && flags_n == 0 && c_differ == 0 && digests_ok;
+    let differences_ok = acc.n == 0 && flags_n == 0 && c_differ == 0 && digests_ok && att_ok;
     let summary = json!({
-        "what_if": what_if, "executor": executor,
+        "what_if": what_if, "executor": exec_run, "executor_replayed": exec_replayed,
+        "attempts_run": att.as_ref().map(|a| a.n_run), "attempts_replay": att.as_ref().map(|a| a.n_replay), "attempts_compared": att.as_ref().map(|a| a.compared),
+        "attempts_identical": att.as_ref().map(|a| a.compared - a.differ), "attempts_differ": att.as_ref().map(|a| a.differ),
+        "attempts_missing_in_replay": att.as_ref().map(|a| a.missing), "attempts_extra_in_replay": att.as_ref().map(|a| a.extra),
+        "attempts_by_field": att.as_ref().map(|a| a.by_field.clone()),
         "decisions_run": n_run, "decisions_replay": n_replay, "outside_window": outside, "compared": compared, "identical": identical,
         "differ": compared - identical, "missing_in_replay": missing, "extra_in_replay": extra, "skipped_gap": skipped_gap,
         "executor_verdicts_not_replayed": exec_verdicts, "executor_fields_not_replayed": exec_fields, "field_diffs": acc.n, "by_field": acc.by_field, "by_class": acc.by_class,
@@ -1050,13 +1152,94 @@ fn compare(run: &Path, out: &Path, w: &Window, d: &Drive, executor: bool, what_i
         "flags_differ": flags_n, "commits_run": n_ca, "commits_replay": n_cb, "commits_differ": c_differ,
         "digests_checked": digests["checked"], "digests_same": digests["same"], "differences_ok": differences_ok,
     });
+    let not_replayed = if exec_run && !exec_replayed {
+        json!({ "executor_fields": EXECUTOR_FIELDS, "executor_verdicts": "a run whose executor is not replayed (no exec_init record, or a live or canary one): \
+            its verdict where the replay (no executor) gives no_executor / gate_* and the run's reason is past the state and pricing stages" })
+    } else { Value::Null };
     Ok(json!({ "schema": DIFF_SCHEMA, "run": run.display().to_string(), "replay": out.display().to_string(), "t_ns": crate::feeds::clock::now_ns(),
-        "not_replayed": { "executor_fields": EXECUTOR_FIELDS, "executor_verdicts": "a run with an executor: its verdict where the replay (no executor) gives \
-            no_executor / gate_* and the run's reason is past the state and pricing stages (the offline executor comes with the WP-05 merge)" },
+        "not_replayed": not_replayed, "attempts_not_compared": if exec_replayed { json!(ATTEMPT_NOT_COMPARED) } else { Value::Null },
+        "attempt_diffs": att.as_ref().map(|a| a.entries.clone()),
         "not_compared": NOT_COMPARED, "window": { "from_slot": w.from_slot, "to_slot": w.to_slot, "t_cut": w.t_cut },
         "gaps": d.gaps.iter().map(|g| json!({ "first_lost_seq": g.first_lost_seq, "n_lost": g.n_lost, "t_before": g.t_before, "t_after": g.t_after })).collect::<Vec<_>>(),
         "digests": digests, "summary": summary, "diffs": acc.entries, "diffs_truncated": acc.n.saturating_sub(MAX_DIFFS as u64), "flags": flags_differ,
         "first_commit_diff": first_commit_diff }))
+}
+
+/// ---- WP-09 (review WP-09 "For the WP-05 merge" item 6). The fields of an attempts.jsonl line (MEASUREMENT §4.37) a
+/// replay does not reproduce, left out of the compare: the real clock (`t_ns`; the stage times of the build, the
+/// signature and the send; the decision's own clock reads `t_priced` and `t_decided`), the LeaderBook's snapshot
+/// (`leader`: places and RTTs read live, not journaled; the kind the send checks read is in the decision-point record),
+/// and a dry run's signature and signer (a new throwaway key each run: `tx.sig`, `copies[].sig`, `dry_run.signer`,
+/// `dry_run.tx_b64`, the signature check's detail). Everything else is compared: the route, sizes, the expected
+/// profit, the tip and its account, min_profit, the built transaction's size, locks, lookup tables and CU, the
+/// blockhash, the crowding, the in-flight key and why it was allowed, the queue rank, the route's account versions, a
+/// dry run's checks and accounts
+pub const ATTEMPT_NOT_COMPARED: [&str; 16] = ["t_ns", "leader", "stages.t_priced", "stages.t_decided", "stages.t_built", "stages.t_build_start", "stages.t_signed",
+    "stages.t_enqueued", "stages.t_dequeued", "stages.t_sent", "stages.t_ack", "tx.sig", "copies[].sig", "dry_run.signer", "dry_run.tx_b64",
+    "dry_run.checks[signature_verifies].detail"];
+
+/// an attempts.jsonl line without `ATTEMPT_NOT_COMPARED`
+pub fn attempt_projection(mut v: Value) -> Value {
+    if let Some(o) = v.as_object_mut() { o.remove("t_ns"); o.remove("leader"); }
+    if let Some(s) = v.get_mut("stages").and_then(|s| s.as_object_mut()) {
+        for k in ["t_priced", "t_decided", "t_built", "t_build_start", "t_signed", "t_enqueued", "t_dequeued", "t_sent", "t_ack"] { s.remove(k); }
+    }
+    if let Some(t) = v.get_mut("tx").and_then(|t| t.as_object_mut()) { t.remove("sig"); }
+    for c in v.get_mut("copies").and_then(|c| c.as_array_mut()).into_iter().flatten() { if let Some(o) = c.as_object_mut() { o.remove("sig"); } }
+    if let Some(d) = v.get_mut("dry_run").and_then(|d| d.as_object_mut()) {
+        d.remove("signer");
+        d.remove("tx_b64");
+        for c in d.get_mut("checks").and_then(|c| c.as_array_mut()).into_iter().flatten() {
+            if c["check"] == "signature_verifies" { if let Some(o) = c.as_object_mut() { o.remove("detail"); } }
+        }
+    }
+    v
+}
+
+/// What the attempts compare found
+struct AttemptsCmp { n_run: u64, n_replay: u64, compared: u64, differ: u64, missing: u64, extra: u64, by_field: BTreeMap<String, u64>, entries: Vec<Value> }
+
+/// attempts.jsonl of the run and of the replay, joined by attempt id (both in id order), each on `attempt_projection`:
+/// the attempts of the decisions compared (`compared`); an attempt one side has and the other not is missing or extra
+fn compare_attempts(run: &Path, out: &Path, compared: &IdRanges) -> Result<AttemptsCmp> {
+    let (mut a, mut b) = (Lines::open(run, "attempts"), Lines::open(out, "attempts"));
+    let mut c = AttemptsCmp { n_run: 0, n_replay: 0, compared: 0, differ: 0, missing: 0, extra: 0, by_field: BTreeMap::new(), entries: Vec::new() };
+    let id = |v: &Option<Value>| v.as_ref().map(|v| v["attempt"].as_u64().unwrap_or(u64::MAX));
+    let (mut pa, mut pb) = (a.next()?, b.next()?);
+    loop {
+        let (x, y) = match (id(&pa), id(&pb)) {
+            (None, None) => break,
+            (Some(i), Some(j)) if i == j => { let r = (pa.take(), pb.take()); pa = a.next()?; pb = b.next()?; r }
+            (Some(i), Some(j)) if i < j => { let r = (pa.take(), None); pa = a.next()?; r }
+            (Some(_), None) => { let r = (pa.take(), None); pa = a.next()?; r }
+            _ => { let r = (None, pb.take()); pb = b.next()?; r }
+        };
+        let (has_x, has_y) = (x.is_some(), y.is_some());
+        if has_x { c.n_run += 1; }
+        if has_y { c.n_replay += 1; }
+        let any = x.as_ref().or(y.as_ref()).context("an attempt line")?;
+        let (att, dec) = (any["attempt"].as_u64().unwrap_or(u64::MAX), any["decision"].as_u64().unwrap_or(u64::MAX));
+        if !compared.contains(dec) { continue; }
+        let (Some(x), Some(y)) = (x, y) else {
+            if has_x { c.missing += 1; } else { c.extra += 1; }
+            if c.entries.len() < MAX_DIFFS {
+                c.entries.push(json!({ "attempt": att, "decision": dec, "field": "attempt", "run": if has_x { json!("present") } else { Value::Null },
+                    "replay": if has_y { json!("present") } else { Value::Null } }));
+            }
+            continue;
+        };
+        c.compared += 1;
+        let (x, y) = (attempt_projection(x), attempt_projection(y));
+        if x == y { continue; }
+        c.differ += 1;
+        let mut fields = Vec::new();
+        diff_fields("", &x, &y, &mut fields);
+        for (name, u, v) in fields {
+            *c.by_field.entry(name.split(['[', '.']).next().unwrap_or(&name).to_string()).or_default() += 1;
+            if c.entries.len() < MAX_DIFFS { c.entries.push(json!({ "attempt": att, "decision": dec, "field": name, "run": u, "replay": v })); }
+        }
+    }
+    Ok(c)
 }
 
 // ------------------------------------------------------------------ pricing a route on the engine's store
@@ -1280,7 +1463,7 @@ impl Hook for QuoteHook {
 /// state after every update stamped with a transaction (`<txn>`), or right before the first of them (`pre:<txn>`)
 pub fn quote(run: &Path, config: Option<&Path>, pools: Option<&Path>, reqs: Vec<QuoteReq>) -> Result<Vec<Value>> {
     let inp = inputs(run, config, pools)?;
-    let boot = open_boot(&inp, &[])?;
+    let boot = open_boot(&inp, &[], false)?;
     let boot_aseqs: HashSet<u64> = boot.records.iter().filter_map(|r| match r.body { JBody::Account { aseq, .. } => Some(aseq), _ => None }).collect();
     // the versions asked, looked up in one pass over accounts.bin
     let mut by_aseq: HashMap<u64, bool> = HashMap::default();
@@ -1357,12 +1540,23 @@ pub fn cli_replay(run: &Path, o: &Opts) -> Result<i32> {
     println!("  accounts missing {}, verdict mismatches {}, journal gaps {}, replay recorder drops {}", s["accounts"]["missing"], s["accounts"]["verdict_mismatches"],
         s["journal"]["gaps"].as_array().map_or(0, |g| g.len()), s["recorder_dropped"]);
     if s["build"]["same_source"] == json!(false) { println!("  WARNING: the run was recorded by another build (replay.json `build`)"); }
+    let x = &s["executor"];
+    if x["run"] == json!(true) {
+        println!("  executor: {}", if x["replayed"] == json!(true) {
+            format!("{} replayed offline from exec_init; {} decision-point records staged ({} not its own, {} unread), {} settlements fed", x["exec_init"]["mode"].as_str().unwrap_or("?"),
+                x["records_staged"], x["records_mismatch"], x["records_unused"], x["settled_fed"])
+        } else { format!("NOT replayed: {}", x["exec_init"]["why_not"].as_str().unwrap_or("?")) });
+    }
     for w in s["not_whole"].as_array().into_iter().flatten() { println!("  NOT WHOLE: {} ({}): {}", w["why"].as_str().unwrap_or("?"), w["n"], w["detail"].as_str().unwrap_or("")); }
     if let Some(c) = s["compare"].as_object() {
         println!("  compare: {} decisions in the window, {} identical, {} differ ({} field differences), {} missing, {} extra, {} in gaps, {} executor verdicts not replayed; commits {} vs {}, {} differ; digests {} -> replay-diff.json",
             c["compared"], c["identical"], c["differ"], c["field_diffs"], c["missing_in_replay"], c["extra_in_replay"], c["skipped_gap"], c["executor_verdicts_not_replayed"],
             c["commits_run"], c["commits_replay"], c["commits_differ"],
             match (c["digests_checked"].as_bool(), c["digests_same"].as_bool()) { (Some(true), Some(true)) => "same", (Some(true), _) => "DIFFER", _ => "not checked" });
+    }
+    if let Some(c) = s["compare"].as_object().filter(|c| c["executor_replayed"] == json!(true)) {
+        println!("  attempts: {} vs {}, {} compared, {} differ, {} missing, {} extra", c["attempts_run"], c["attempts_replay"], c["attempts_compared"], c["attempts_differ"],
+            c["attempts_missing_in_replay"], c["attempts_extra_in_replay"]);
     }
     if !s["reprice"].is_null() { println!("  reprice: {}", s["reprice"]); }
     println!("  {}", if r.ok { "OK" } else if s["whole"] == json!(false) { "NOT OK: the replay is not whole (see `not_whole` in replay.json)" } else { "DIFFERENCES (see replay-diff.json)" });

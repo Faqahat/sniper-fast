@@ -670,7 +670,7 @@ async fn settlement_from_the_chain() {
     // attempt 0 lands (the wallet stream), with the route program's events
     let events = |back: u64| json!([{ "kind": "leg", "leg": 0 }, { "kind": "out", "leg": 0, "amount": 77 }, { "kind": "out", "leg": 1, "amount": back }]);
     r.x.on_wallet_tx(&json!({ "sig": sigs[0], "attempt": 0, "slot": 101, "idx": 12, "ok": true, "err": null, "fee": 5_000, "cu_consumed": 87_000,
-        "prog_events": events(1_000_049_000) }), &|_| None);
+        "prog_events": events(1_000_049_000) }), now_ns(), &|_| None);
     // a cross-check of attempt 1 (+2 s): nothing yet
     r.x.on_settled(Settled::Statuses { why: "check", at: vec![(1, "+2s")], result: Ok(vec![None]), t_ns: t }, t, &|_| None);
     // the expiry check: attempt 1 landed (the wallet stream missed it), attempt 2 did not
@@ -685,13 +685,13 @@ async fn settlement_from_the_chain() {
         (Some(49_000), Some(1), Some(2 * 31_499), Some(10_000)));
     // attempt 2 landed after all (seen later): an amend line; its failed fee counts against the cap
     r.x.on_wallet_tx(&json!({ "sig": sigs[2], "attempt": 2, "slot": 140, "idx": 3, "ok": false, "err": { "InstructionError": [2, { "Custom": 1314390018u64 }] },
-        "fee": 5_000 }), &|_| None);
+        "fee": 5_000 }), now_ns(), &|_| None);
     // attempt 1's wallet record comes after its final: it amends the fee, CU and events, and its round trip is counted
     r.x.on_wallet_tx(&json!({ "sig": sigs[1], "attempt": 1, "slot": 102, "idx": 7, "ok": true, "err": null, "fee": 5_000, "cu_consumed": 91_000,
-        "prog_events": events(1_000_021_000) }), &|_| None);
+        "prog_events": events(1_000_021_000) }), now_ns(), &|_| None);
     // a second copy of a wallet record changes nothing
     r.x.on_wallet_tx(&json!({ "sig": sigs[1], "attempt": 1, "slot": 102, "idx": 7, "ok": true, "err": null, "fee": 5_000, "cu_consumed": 91_000,
-        "prog_events": events(1_000_021_000) }), &|_| None);
+        "prog_events": events(1_000_021_000) }), now_ns(), &|_| None);
     let o = r.lines("outcomes");
     let by = |a: u64| o.iter().filter(|l| l["attempt"].as_u64() == Some(a)).cloned().collect::<Vec<_>>();
     let o0 = &by(0)[0];
@@ -755,7 +755,7 @@ async fn a_failed_landing_found_by_the_expiry_check_counts_against_the_cap() {
     assert_eq!(r.x.status()["stopped"].as_str(), Some("failed-fee cap reached"));
     // the wallet record then says 6,000 (the fee it really paid): it replaces the 5,000, the landing counts once
     r.x.on_wallet_tx(&json!({ "sig": sig, "attempt": attempt, "slot": 102, "idx": 1, "ok": false, "err": { "InstructionError": [2, { "Custom": 1314390018u64 }] },
-        "fee": 6_000 }), &|_| None);
+        "fee": 6_000 }), now_ns(), &|_| None);
     let (exec, m) = r.x.status_v2(&mut ExecPrev::default());
     assert_eq!((m["failed_fees_total_lamports"].as_u64(), m["fees_landed_total_lamports"].as_u64(), exec["landed_total"].as_u64(), exec["ok_total"].as_u64()),
         (Some(6_000), Some(6_000), Some(1), Some(0)));
@@ -1196,7 +1196,7 @@ async fn a_send_without_an_answer_stays_open() {
     assert_eq!(r.decide(route(1, damm(2, MINT), 50_000, 1), 100, t + 1).reason, "inflight_same_state", "its entry holds");
     // attempt 0 had arrived after all: the wallet stream records it
     r.x.on_wallet_tx(&json!({ "sig": sigs[0], "attempt": 0, "slot": 101, "idx": 2, "ok": true, "err": null, "fee": 5_000, "cu_consumed": 80_000,
-        "prog_events": [{ "kind": "out", "leg": 0, "amount": 9 }, { "kind": "out", "leg": 1, "amount": 1_000_020_000u64 }] }), &|_| None);
+        "prog_events": [{ "kind": "out", "leg": 0, "amount": 9 }, { "kind": "out", "leg": 1, "amount": 1_000_020_000u64 }] }), now_ns(), &|_| None);
     // attempt 1 did not: its blockhash expires, the expiry check finds nothing
     r.x.on_settled(Settled::Statuses { why: "expiry", at: vec![(1, "expiry")], result: Ok(vec![None]), t_ns: t }, t, &|_| None);
     let o = r.lines("outcomes");
@@ -1336,4 +1336,106 @@ async fn probe_decide_costs() {
             println!("PROBE live decided_to_signed p50 {:.1} us p90 {:.1} us; signed_to_fired p50 {:.1} us p90 {:.1} us", a as f64 / 1e3, b as f64 / 1e3, c as f64 / 1e3, d as f64 / 1e3);
         }
     }
+}
+
+// ------------------------------------------------------------------------------------------------ WP-09: the replay's forms
+
+/// Review WP-09 "For the WP-05 merge" item 4: INPUT 9 `settled` reads back in each of WP-05's `{what: …}` forms (a fire
+/// result with its copies, a drop code among them; a statuses answer, landed, not found and failed; a dry run's
+/// simulation) as the same settlement: written again, the same body
+#[test]
+fn settlements_read_back_from_the_journal() {
+    let copy = |drop: Option<&'static str>| send::Sent { attempt: 3, path: "jito-bundle".into(), sig: Some("5ig".into()), tip_account: Some(b58(&[9; 32])), tip_lamports: 1_000,
+        t_sent: 11, t_ack: 12, ms: 1.5, ok: drop.is_none(), status: Some(200), reply: None, bundle: Some("b0".into()), blockhash_slot: Some(99), queue_wait_us: Some(40),
+        drop, lambda: Some(4) };
+    let all = vec![
+        Settled::Fired { attempt: 3, fired: Fired { id: 3, t_ns: 10, copies: vec![copy(None), copy(Some("rate_queue_timeout")), copy(Some("crowded_pool"))] } },
+        Settled::Statuses { why: "expiry", at: vec![(1, "expiry"), (2, "expiry")], result: Ok(vec![Some(SigStatus { slot: 102, err: None, confirmation: Some("confirmed".into()) }), None]),
+            t_ns: 20 },
+        Settled::Statuses { why: "check", at: vec![(4, "+2s"), (5, "+10s"), (6, "+60s")], result: Err("timeout".into()), t_ns: 30 },
+        Settled::Statuses { why: "check", at: vec![(4, "+2s")], result: Ok(vec![Some(SigStatus { slot: 7, err: Some(json!({ "InstructionError": [2, { "Custom": 6001 }] })),
+            confirmation: None })]), t_ns: 31 },
+        Settled::DrySim { attempt: 8, line: json!({ "attempt": 8, "src": "dry_run", "sim_ms": 2.5, "err": null }) },
+    ];
+    for s in &all {
+        let j = s.json();
+        let back = Settled::from_json(&j).unwrap_or_else(|| panic!("reads back: {j}"));
+        assert_eq!(back.json(), j);
+    }
+    assert!(Settled::from_json(&json!({ "error": null, "landed": { "sig": "x" } })).is_none(), "the pre-WP-05 form is not a settlement");
+    assert!(Settled::from_json(&json!({ "what": "statuses", "why": "other", "at": [], "result": [], "t_ns": 1 })).is_none());
+    assert_eq!(send::drop_code("something new"), "other");
+}
+
+/// Review WP-09 "For the WP-05 merge" item 2: the exec_init record reads back as what the executor started with (its
+/// lookup tables in order, PumpSwap's GlobalConfig, the held tokens, the size cap, the would-send rate, the tip policy,
+/// the crowding map's static list); its size cap is the smaller of the cap and a bankroll's
+#[tokio::test]
+async fn exec_init_reads_back() {
+    let dir = test_dir("exec-init");
+    let cfg = test_cfg(&dir, "");
+    let held: HashSet<Pk> = [*WSOL, MINT, M2].into_iter().collect();
+    let pump = PumpGlobal { disable_flags: 8, protocol: vec![[1; 32], [2; 32]], reserved: vec![[3; 32]], buyback: vec![[4; 32]] };
+    let x = Exec::assemble(&cfg, Rpc::race(vec![]), None, Rec::off(), crossbeam_channel::unbounded().0, vec![], vec![([7; 32], vec![[8; 32], [9; 32]]), ([6; 32], vec![[5; 32]])],
+        Some(pump.clone()), held, Mode::Shadow, None).unwrap();
+    let mut i = x.init();
+    (i.crowding_window_h, i.crowding_buckets, i.crowded) = (6, [20, 150], vec![[11; 32], [12; 32]]);
+    assert_eq!((i.alts[0].0, i.alts[1].0, i.pump.clone(), i.held.len(), i.max_size, i.would_send_per_sec), ([7; 32], [6; 32], Some(pump), 3, sol(cfg.live.max_size_sol), 5));
+    assert_eq!(i.tips.as_ref().map(|p| (p.floor, p.share, p.max)), Some((1_000, Some(0.7), 100_000)));
+    assert_eq!(i.cfg_sha256, cfg_sha256(&cfg));
+    let back = ExecInit::from_json(&i.json()).unwrap();
+    assert_eq!(back, i);
+    assert_eq!(back.size_cap(), back.max_size);
+    assert_eq!(ExecInit { bankroll_cap: Some(7), ..back.clone() }.size_cap(), 7);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// exec_init's `cfg_sha256`: the config the executor decides with. The supervisor's `--budget-left` (a lower failed-fee
+/// cap for the segment; only a sending executor reads it) does not change it; the send policy does
+#[test]
+fn the_executor_config_hash() {
+    let dir = std::env::temp_dir();
+    let base = cfg_sha256(&test_cfg(&dir, ""));
+    let mut c = test_cfg(&dir, "");
+    c.live.max_failed_fees_lamports = 1;
+    assert_eq!(cfg_sha256(&c), base);
+    assert_ne!(cfg_sha256(&test_cfg(&dir, "[send_policy]\ninflight_hold_slots = 3\n")), base);
+    c.strategy.cu_price_micro += 1;
+    assert_ne!(cfg_sha256(&c), base);
+}
+
+/// Review WP-09 "For the WP-05 merge" items 1, 3: an offline executor (a replay's) reads the gate, the leader's kind, the
+/// token and the recorder from the run's decision-point records, the last one at or before the opportunity, and nothing
+/// of its own; the leader's identity is the journaled schedule's. A record of another opportunity, or one naming another
+/// target slot or leader, is counted (`seen_mismatch`); a decision before any record reads the gate stopped
+#[test]
+fn an_offline_executor_reads_the_runs_records() {
+    let cfg = test_cfg(&std::env::temp_dir(), "");
+    let init = ExecInit { mode: Mode::Shadow, alts: vec![], pump: None, held: vec![*WSOL, MINT], max_size: 1_000, max_size_src: "live".into(), bankroll_cap: None,
+        would_send_per_sec: 3, tips: None, crowding_window_h: 6, crowding_buckets: [20, 150], crowded: vec![], cfg_sha256: cfg_sha256(&cfg) };
+    let mut x = Exec::offline(&cfg, &init, Rec::off()).unwrap();
+    assert!(x.is_offline() && x.paths.is_none() && x.key.is_none() && x.jito.is_none());
+    assert_eq!((x.size_cap(), x.path_rate), (1_000, 3));
+    assert!(Exec::offline(&cfg, &ExecInit { mode: Mode::Live, ..init.clone() }, Rec::off()).is_err(), "a live executor is not replayed");
+    let view = view();
+    // before any record: fail closed
+    let i = x.inputs(&view, 100, 1);
+    assert_eq!((i.gate, i.recorder_ok, x.seen_missing), (GateMode::Stopped, false, 1));
+    // the run's record of opportunity 4, at opportunity 4: its gate, kind and recorder; the schedule's identity (slot 101: LJ)
+    let rec4 = json!({ "mode": "shadow", "reason": "paused", "src": "decision", "opp": 4, "leader": { "slot": 101, "identity": b58(&LJ), "kind": "bam", "kind_src": "kobe" },
+        "jito_token_ok": true, "recorder_ok": true });
+    x.stage_seen(4, 4, &rec4);
+    let i = x.inputs(&view, 100, 2);
+    assert_eq!((i.gate, i.gate_reason.as_str(), i.leader.kind, i.leader.identity.clone(), i.recorder_ok, i.token), (GateMode::Shadow, "paused", LeaderKind::Bam, Some(b58(&LJ)),
+        true, TokenSeen::NotUsed));
+    assert_eq!(x.seen_mismatch, 0);
+    // the last record holds at the next opportunities
+    assert_eq!(x.inputs(&view, 104, 3).leader.kind, LeaderKind::Bam);
+    // a record naming another target slot than the replay's, a record staged at another opportunity, one it cannot read
+    x.stage_seen(5, 5, &json!({ "mode": "live", "reason": null, "src": "decision", "opp": 5, "leader": { "slot": 999, "identity": b58(&LJ), "kind": "jito" },
+        "jito_token_ok": true, "recorder_ok": true }));
+    let _ = x.inputs(&view, 100, 4);
+    x.stage_seen(6, 7, &rec4);
+    x.stage_seen(8, 8, &json!({ "mode": null, "src": "decision", "opp": 8, "executor": false }));
+    assert_eq!(x.seen_mismatch, 3);
 }
