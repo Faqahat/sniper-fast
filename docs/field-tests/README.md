@@ -24,6 +24,15 @@ Every test that runs on Cherry (shadow, dry run, canary or live) is documented h
   - Absent from the source and unused by the canary: `BLOXROUTE_KEY`, `FALCON_KEY`, `LANDER_SHYFT_URL`, `LUNAR_KEY`, `NODEONE_KEY`, `ZEROSLOT_KEY`.
 - **Shared keys:** the Haan token and the Jito UUID are the same keys arb-lab used. Haan grants its streams to the first process only (I-3), and Jito's rate limit is per key, so arb-lab must not run while arbx tests run.
 
+## Deploying to Cherry (owner rule, 2026-10-05): build artifacts only, never source code
+
+Only these go to `/root/arbx` on Cherry:
+- the compiled binary, `bin/arbx-<git short hash>`, release build with debug info stripped (its sha256 goes in each FT entry and in meta.json);
+- the config file the run uses (`deploy/<config>.toml`);
+- the data files that config references (`data/`: seed list, registry, templates, crowded-pools, validators-meta, ip-geo).
+
+Never uploaded: `src/`, `program/`, `tools/`, `docs/`, or any script (.py/.sh/.ts). Anything that must run on Cherry, such as a campaign supervisor, becomes a subcommand of the binary. Secrets live only in `/root/arbx/deploy/.env` (mode 600).
+
 ## Protocol for each test (an entry `FT-NNN-<slug>.md`)
 
 1. **Before:**
