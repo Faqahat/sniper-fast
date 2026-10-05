@@ -323,3 +323,28 @@ Other monitor counters: `pred_not_committed` 1,467, `pred_trigger_failed` 90, qu
 ## Results: segments 2–3 and the overall verdict
 
 (filled in when they end)
+
+## Results: segment 2 (60 min, 01:39–02:40 UTC): PASS
+
+- **Goal:** stability over an hour. Pass means no crash or hang, state connected ≥ 95%, 0 record drops, RSS < 8 GB, and decisions flowing all hour.
+- **Stop:** `deadline` ("--minutes 60 reached"), exit 0, no unsettled attempts.
+- **State:** connected in 360 of 360 status lines (100%), 0 reconnects, `unavailable_total` 1 (the boot window). The newest update was at most 152 ms old across the watcher's 77 checks.
+- **Recorder:** 0 drops, 0 I/O errors, no dead writers.
+- **Activity:** decisions rose in every one of 77 watcher intervals (810 → 56,907), with 1,976 opportunities in the hour.
+- **Memory:** RSS rose from 60 MB to 1,121 MB with no plateau (about 18 MB/min), under the 8 GB criterion. This is the unbounded lookup-table cache issue from s1, being fixed on lane/ft000-fixes. It must be fixed before any 24 h run.
+
+## gRPC probe between s2 and s3 (02:40–02:43 UTC, Haan alone)
+
+| Subscription | Result |
+|---|---|
+| accounts_full (8,468 accounts) | accepted, first message after 51 ms |
+| slots_interslot | accepted: slot statuses including dead and fork statuses are available |
+| blocks_meta | accepted |
+| tx_filter_1 | accepted |
+| tx_filter_2, tx_filter_5 | **refused by the plan**: `ResourceExhausted: TX_INCLUDE exceeded: 2/1` and `5/1` |
+| blocks_account_include | **refused by the plan**: `BLOCK_GROUPS exceeded: 1/0` |
+| deshred_5 | accepted on Astralane (first after 9 ms) and on Haan (131 ms) |
+
+- **For OD-1:** the Haan token allows ONE transaction filter and no block subscriptions. Executed-transaction coverage across the five venues therefore needs a bigger Haan plan or a second provider; RPC backfill is limited to about 4 req/s.
+- **Probe bug:** `ResourceExhausted … exceeded n/m` is a definite plan refusal, but the probe labelled it inconclusive (exit 3) and did not write probe.json. It is fixed on the FT-000 fixes lane (classify it as `refused_plan_limit`).
+- **For s3:** the probe is re-run with `--only` on the accepted subscriptions, so probe.json exists and s3 runs with `slot_statuses = all`, testing fork handling.
