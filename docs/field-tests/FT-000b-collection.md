@@ -19,3 +19,5 @@
 ## Segment log
 | Segment | UTC | Result |
 |---|---|---|
+| c1 | 04:46–05:43 | PASS: `deadline` stop, exit 0; state connected, 0 drops at the end. The operator's network was down about 05:25–06:10, so the live checks lapsed; the segment was unaffected |
+| c2 | 06:11– | running |
