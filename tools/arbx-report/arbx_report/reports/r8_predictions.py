@@ -1,7 +1,8 @@
 """R8 Predictions and accuracy (MEASUREMENT.md §6.4).
 
 In-bot hints are scored against the pre-state version (`exact`); the v1-style at-hint rate is shown beside it and
-`pre_state_unknown` is counted, never scored. Every-swap scoring and the closer check need `arbx quote` (WP-09)."""
+`pre_state_unknown` is counted, never scored, as are swaps that did not quote (`unquotable`, and `refused` by
+arbx-sizing's reason) and exact-out swaps solved through exact-in quotes (`exact_out_solved`: out of the rate). Every-swap scoring and the closer check need `arbx quote` (WP-09)."""
 from __future__ import annotations
 
 from .. import stats
@@ -25,7 +26,8 @@ def run(seg, ctx: dict) -> dict:
     q: dict = {}
     for p in preds:
         v = p.get("venue") or "unknown"
-        b = by.setdefault(v, {"n": 0, "scored": 0, "exact": 0, "pre_state_unknown": 0, "hint_scored": 0, "hint_exact": 0,
+        b = by.setdefault(v, {"n": 0, "scored": 0, "exact": 0, "pre_state_unknown": 0, "unquotable": 0, "refused": {},
+                              "exact_out_solved": 0, "exact_out_solved_exact": 0, "hint_scored": 0, "hint_exact": 0,
                               "dlmm_bins_checked": 0, "dlmm_bins_exact": 0})
         b["n"] += 1
         if seg.v1("predictions"):
@@ -34,8 +36,19 @@ def run(seg, ctx: dict) -> dict:
                 b["hint_scored"] += 1
                 b["hint_exact"] += e
             continue
+        # WP-16: a null `exact` is a lost pre-state only when `pre_state.known` is false; with a known pre-state the
+        # swap did not quote (`refused` names arbx-sizing's reason: MEASUREMENT §4.34). An exact-out swap solved through
+        # exact-in quotes (`exact_out_model` "solved") is not the venue's own rounding: counted apart, out of the rate
         if p.get("exact") is None:
-            b["pre_state_unknown"] += 1
+            if (p.get("pre_state") or {}).get("known") is False:
+                b["pre_state_unknown"] += 1
+            elif p.get("refused"):
+                b["refused"][p["refused"]] = b["refused"].get(p["refused"], 0) + 1
+            else:
+                b["unquotable"] += 1
+        elif p.get("exact_out_model") == "solved":
+            b["exact_out_solved"] += 1
+            b["exact_out_solved_exact"] += bool(p["exact"])
         else:
             b["scored"] += 1
             b["exact"] += bool(p["exact"])

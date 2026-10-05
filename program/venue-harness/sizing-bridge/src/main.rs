@@ -2,7 +2,7 @@
 //!
 //! LegReq  = {id, kind (1..=6), base_or_token0_in, n_bin_arrays, pump_bump, [max_bins (DLMM; default 255)], program,
 //!            input_mint, accounts: [{key, owner, data (base64)}]   (the leg's own account list, engine layout),
-//!            amounts: [u64]}
+//!            amounts: [u64], [exact_out (a PumpSwap buy leg: each amount is the base out, `PumpLeg::quote_exact_out`)]}
 //! LegResp = {id, parse: "ok" | "abort:<Abort>" | "desc:<DescError>", max_bins,
 //!            quotes: [{amount, ok, out, spent, err, [bins], [unbounded: {ok, out, spent, err}]}]}
 //! A DLMM quote carries the bins with liquidity the swap needs without a budget (`bins`); one that ends at the walk
@@ -80,8 +80,12 @@ fn adapter(clock: &Value, leg: &Value, accts: &[Acct], amounts: &mut Vec<u64>) -
         extra.dedup();
         amounts.extend(extra);
     }
+    // `"exact_out": true` (a PumpSwap buy leg): each amount is the base out, quoted by `PumpLeg::quote_exact_out`
+    let exact_out = leg["exact_out"].as_bool() == Some(true);
     let quotes = amounts.iter().map(|&x| {
-        let r = l.quote(x);
+        let r = if exact_out {
+            match l { AnyLeg::Pump(p) => p.quote_exact_out(x).map(|(_, q)| q), _ => Err(QuoteErr::Abort(Abort::Unsupported)) }
+        } else { l.quote(x) };
         let mut row = quote_row(&r);
         if let AnyLeg::Dlmm(d) = l {
             // the bins with liquidity the swap needs (no budget): the venue's own CU grows with them

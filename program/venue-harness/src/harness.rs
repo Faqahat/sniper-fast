@@ -211,8 +211,9 @@ impl Session<'_> {
             Ok(s) => s,
             Err(e) => return SwapOutcome::failed(amount_in, format!("build: {e}")),
         };
-        // fund the input with twice the amount, so a debit above `amount_in` would show
-        let want = amount_in.saturating_mul(2).max(1);
+        // fund the input with twice the amount, so a debit above `amount_in` would show (an exact-out buy spends what the
+        // venue computes: funded far above any pool's quote reserve)
+        let want = if o.exact_out { 1u64 << 60 } else { amount_in.saturating_mul(2).max(1) };
         if self.token_amount(&sw.user_in) < want { self.set_balance(&sw.user_in, want); }
         let (pre_in, pre_out) = (self.token_amount(&sw.user_in), self.token_amount(&sw.user_out));
         let user = &h.user;

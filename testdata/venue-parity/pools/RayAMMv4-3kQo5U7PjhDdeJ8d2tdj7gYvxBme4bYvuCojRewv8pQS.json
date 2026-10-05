@@ -1,0 +1,91 @@
+{
+  "venue": "RayAMMv4",
+  "pool": "3kQo5U7PjhDdeJ8d2tdj7gYvxBme4bYvuCojRewv8pQS",
+  "label": "ammv4 3kQo (seed-pools-fresh)",
+  "fetched_at": "2026-10-04T09:38:23Z",
+  "slot": 453218333,
+  "clock": {
+    "slot": 453218333,
+    "epoch_start_timestamp": 1791093247,
+    "epoch": 1049,
+    "leader_schedule_epoch": 1050,
+    "unix_timestamp": 1791106702
+  },
+  "rent": {
+    "lamports_per_byte": 5080,
+    "exemption_threshold": 1.0,
+    "burn_percent": 50
+  },
+  "token0": "So11111111111111111111111111111111111111112",
+  "token1": "9LP2G638UhznC1hztK4d4j7TW9sHuRpBSmZkqDW9pump",
+  "accounts": [
+    {
+      "pubkey": "3kQo5U7PjhDdeJ8d2tdj7gYvxBme4bYvuCojRewv8pQS",
+      "lamports": 6124800,
+      "owner": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "BgAAAAAAAAD+AAAAAAAAAAcAAAAAAAAAAwAAAAAAAAAJAAAAAAAAAAYAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAICWmAAAAAAA9AEAAAAAAABAS0wAAAAAAICWmAAAAAAAgJaYAAAAAAABAAAAAAAAAADKmjsAAAAAAMqaOwAAAAAFAAAAAAAAABAnAAAAAAAAGQAAAAAAAAAQJwAAAAAAAAwAAAAAAAAAZAAAAAAAAAAZAAAAAAAAABAnAAAAAAAAAAAAAAAAAAAAAAAAAAAAACW5nubqIwAA0K3A7AEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFmd925mAwAAAAAAAAAAAABxY46ToDw8AAAAAAAAAAAAEikX1NYmAAAryx9kq688AAAAAAAAAAAAUWch2WkDAAAAAAAAAAAAAJTWEy0CAAAADdoKTAjiAR4qlhNVoDMsgBVDyKiWL02M1K29I5JBNkpjzYDQBJzRPSEAJuYXEKeEVi+eu8JYbfHit4VklBJxwwabiFf+q4GE+2h/Y0YYwDXaxDncGus7VZig8AAAAAABe9RuSsVHfALljzvnG0bx/bpGvokGdgcmzNem0du5RG9pCOhuAKIecKernUwcemSWaPhsjNYeJCkcEYqkHoEFboiHgWeHEpOFxpFmQvPzCsOqzep28g7Vro/xrT3weko8zXqlYtWzAAqsS8Xzqz6vcLtMirNZVBz1GtWwkEavws4NB1GoKC2mEwX+KZw3uZjlhHHbETUDcxD4vhBFpgr27pbNsoiFFI/GeJWZdvXdbCQTpntSrQpdop/rngGH+xXWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOW2K2XLO72m9WiI5m/ujmTcVWAZnA+IsR/ic70FnoqhcT07WK0DAAAAAAAAAAAAABkEAAAAAAAAAAAAAAAAAAA="
+    },
+    {
+      "pubkey": "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
+      "lamports": 34599135246,
+      "owner": "11111111111111111111111111111111",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": ""
+    },
+    {
+      "pubkey": "7ib7PUAJsKYmDkRxLuufoZCyLHACZ7Tw1JuwMfbhJeH8",
+      "lamports": 2039280,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "e9RuSsVHfALljzvnG0bx/bpGvokGdgcmzNem0du5RG9BV7BYDzHF/ORKYlgtvPnXjudZQ6CEo5OzUDaNIomTCKh1JpG0sgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "pubkey": "9LP2G638UhznC1hztK4d4j7TW9sHuRpBSmZkqDW9pump",
+      "lamports": 1461600,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "AAAAAAbFwc5jjSVn0mRosF65UdGijcxuEjSCtcZ1FJdw5ivyEFxDXOCMAwAGAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+      "pubkey": "So11111111111111111111111111111111111111112",
+      "lamports": 1849199403457,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+      "pubkey": "w58tLKLSmERMHVya28PgVSxFdNDvJC798cSNu6sKdfF",
+      "lamports": 112201148620,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAFBV7BYDzHF/ORKYlgtvPnXjudZQ6CEo5OzUDaNIomTCJTynh8aAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEAAAA4thYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  ],
+  "absent": [],
+  "notes": {
+    "decimals": [
+      9,
+      6
+    ],
+    "status": 6,
+    "swap_fee": [
+      25,
+      10000
+    ],
+    "token_programs": [
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    ],
+    "vault_amounts": [
+      112199660180,
+      196488599074216
+    ]
+  }
+}

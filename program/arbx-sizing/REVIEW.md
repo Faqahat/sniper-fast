@@ -363,7 +363,7 @@ statically from the block alone and measured below that bound on every route.
 | **F6** minor | **Fixed** | the guard runs on every step once an optimum is known and the profit is not rising | `review.rs::f6_guard_stops_the_walk_after_the_optimum`; probe: the reversion arb walks 4 bins (was 64), cu-runner 19.6k |
 | **F7** minor | **Fixed** | pair 0 aborted ⇒ `E(e)` unknown: another pair executes only if it clears `min_profit` (net of tip and lamports), else Fallback at `e` with the abort's reason; never NoProfit | `review.rs::f7_basket_keeps_e_when_pair_0_aborts` (BASKET and SELF_SIZE, with EARLY_ABORT) |
 | **F8** minor | **Fixed** | the walker's advance uses the pair's `min_bin_id`/`max_bin_id` (@24/@28) | `review.rs::f8_pair_bin_bounds_cap_the_walk`; `venues.rs::dlmm_properties` (random bounds); `adversarial.rs` "min_bin_id = active−1 …" (4 pools: both refuse, 0 mismatches) |
-| **F9** minor | **Fixed** | the pool must be exactly 301 bytes (`Abort::Layout`), unidentified tail bytes 270 and 287..301 must be zero (`Abort::Pump(UnknownTail)`) | in `f1_f9_…`; `adversarial.rs` "tail byte 270 set" (aborted) |
+| **F9** minor | **Fixed; corrected by the WP-16 review** | the pool must be exactly 301 bytes (`Abort::Layout`), unidentified tail bytes 270 and 287..301 must be zero (`Abort::Pump(UnknownTail)`). **2026-10-05 (docs/reviews/WP-16-review.md F1, F2):** right for on-chain sizing, where an abort falls back to `e`, wrong for the engine, where a refusal drops the route: 300-byte pools (14 live, ≈12,000 SOL) and holder-reward pools (byte 270 = `is_holder_reward`, 34 live) trade and the crate is exact on them on the dumped binary. Now: every length the program reads (211..=301, each missing trailing group read as zero, pinned per group), a longer pool `Layout`; byte 270 0 or 1 (another byte `Layout`); 287..301 must still be zero | `f1_f9_…` (lengths, byte 270, the tail), `wp16_short_pools_read_their_missing_groups_as_zero`; `adversarial.rs` "pool cut to L bytes", "is_holder_reward = 1", "byte 270 = 2 (no Borsh bool)" |
 | **F10** minor | **Fixed** | new flag `LAMPORTS` (bit 5) carries `lamport_offset: i32` in the block; `PlanIn::lamport_offset`; NoProfit judges `g = profit + offset` net of the tip on `g` | `review.rs::f10_lamport_offset_enters_the_no_profit_verdict`; `desc.rs::rules`/round trip |
 | **F11** minor | **Measured; build choice for arbx-exec** | sizing adds ≈192 KB (206,392 B vs 14,584 B baseline); LTO fat + z 154,544 B; PumpSwap + DLMM only 137,528 B (LTO + z 107,096 B). `plan` is now `#[inline(never)]`: the LTO build had merged its parsed legs into the shell's frame (5,184 B > 4 KB) | SBF builds at v0/v2/v3 and LTO without frame warnings |
 | **F12** minor | **Documented precondition** | quotes assume `x ≤` the payer's balance (the shell's `cap = min(amount_in, quote balance)` and leg 1's input is what leg 0 delivered), so `vault + x ≤ supply ≤ u64::MAX`; the harness keeps skipping sizes above 2^62, where its wallet is funded beyond the supply | — |
@@ -395,7 +395,8 @@ successful swap read 256): not a maths verdict, and the engine's budgets keep si
 Venues and states sizing refuses (and must): DAMM v2 with the rate limiter in force (b→a); PumpSwap with held amounts
 above the vault, a pool length other than 301, or bytes 270 / 287..301 set (plus the existing mayhem, cashback,
 disabled, virtual-reserve and fee aborts); Token-2022 transfer fees and hooks; DLMM/DAMM states listed in DESIGN §2.4,
-§2.5. A DLMM walk past `max_bins` is not refused but falls back to `e`.
+§2.5. A DLMM walk past `max_bins` is not refused but falls back to `e`. (Corrected by the WP-16 review, 2026-10-05:
+PumpSwap pools of 211..=301 bytes and byte 270 = 1 are priced, and so are mayhem pools; see the F9 row.)
 
 ### CU (sbpfv3, sizing only; full table in DESIGN §4.7)
 
@@ -443,7 +444,8 @@ cheaper on long walks).
 3. **Code size** (F11): ≈192 KB of sizing (≈144 KB with LTO); build arbx-exec's feature with only the kinds in use and
    budget the rent.
 4. **PumpSwap tail.** `held_0`/`held_1` are named from behaviour, not from an IDL; bytes 270 and 287..301 are refused
-   when set. Re-pin when pump.fun publishes a newer IDL.
+   when set. Re-pin when pump.fun publishes a newer IDL. (2026-10-05: byte 270 is `is_holder_reward` in pump.fun's
+   public IDL and is priced; 287..301 stay refused when set.)
 5. **BASKET CU.** A leg shared by two pairs is walked once per pair; a per-leg walk cache would cut long baskets
    (bin-step-1 legs) by up to a third. Not needed for the few-bin baskets (41k).
 6. **Three-pool basket on real binaries.** C9xc is drained; another same-mint pool set is needed for a 3-pair basket

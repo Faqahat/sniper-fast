@@ -1,5 +1,7 @@
-//! Meteora DAMM v2 (cp-amm, cpamdpZC…): pool decode, the exact fee model, exact-in swap quote and the pool's state
-//! after the swap, plus decoding of a third party's `swap` / `swap2` instruction.
+//! LEGACY (tests only, see `legacy/mod.rs`): the engine's DAMM v2 port before WP-16 (arbx-sizing's
+//! `venue::dammv2` was ported from this file; the differential tests hold the two equal). Meteora DAMM v2 (cp-amm,
+//! cpamdpZC…): pool decode, the exact fee model, exact-in swap quote and the pool's state after the swap, plus
+//! decoding of a third party's `swap` / `swap2` instruction.
 //!
 //! Ported from arbed's src/venues/quote/dammv2.ts and checked against the program itself
 //! (github.com/MeteoraAg/damm-v2, programs/cp-amm @ a85c926, 2026-09-08): state/pool.rs, state/fee.rs, base_fee/*.rs,
@@ -41,7 +43,7 @@
 // The whole program-facing API (instruction account indices, swap2 modes, exact-out) is public for the engine; not
 // every item is wired yet.
 #![allow(dead_code)]
-use super::{pk_at, u128_at, u16_at, u32_at, u64_at};
+use crate::venues::{pk_at, u128_at, u16_at, u32_at, u64_at};
 use crate::tx::Pk;
 use std::cmp::Ordering;
 

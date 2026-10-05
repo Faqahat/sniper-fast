@@ -888,6 +888,8 @@ mod tests {
             for v in [m.vault0, m.vault1] { store.update(v, Arc::from(fixture::vault_data(1_000_000)), 1_999, 1, None); }
         }
         store.update(*crate::pools::PUMP_FEE_CONFIG, Arc::from(&[0u8; 64][..]), 1_999, 1, None);
+        // a part of every PumpSwap pool since WP-16 (arbx-sizing reads its disable flags)
+        store.update(*crate::pools::PUMP_GLOBAL_CONFIG, Arc::from(&[0u8; 64][..]), 1_999, 1, None);
         store.update(k(0x41), Arc::from(&[0u8; 82][..]), 1_999, 1, None);
         reg.pairs.insert(crate::pools::pair_key(&k(0x41), &crate::venues::WSOL), vec![0, 1, 2]);
         let mut e = crate::engine::Engine::new_offline(Arc::new(reg), store, crate::config::StrategyCfg { state_triggers: true, ..Default::default() });

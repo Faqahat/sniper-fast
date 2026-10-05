@@ -45,6 +45,11 @@ class Rules(unittest.TestCase):
         p = r8_predictions.run(self.seg, self.ctx)["data"]["by_venue"]["Dlmm"]
         self.assertEqual((p["scored"], p["pre_state_unknown"], p["exact"]), (1, 1, 1))
         self.assertEqual(p["exact_rate_pre_state"], 1.0)
+        # WP-16: a refused swap and a solved exact-out swap are counted apart, never in the exact rate
+        p = r8_predictions.run(self.seg, self.ctx)["data"]["by_venue"]["PumpSwap"]
+        self.assertEqual((p["scored"], p["exact"], p["pre_state_unknown"], p["refused"], p["exact_out_solved"], p["exact_out_solved_exact"]),
+                         (1, 1, 0, {"sz_transfer_fee": 1}, 1, 0))
+        self.assertEqual(p["exact_rate_pre_state"], 1.0)
 
     def test_landed_only_caveat_is_printed(self):
         sec = r3_attempts.run(self.seg, self.ctx)

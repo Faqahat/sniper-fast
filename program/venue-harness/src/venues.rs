@@ -57,6 +57,8 @@ pub fn token_amount(d: &[u8]) -> Option<u64> { if d.len() >= 72 { u64_at(d, 64) 
 
 const PUMP_SELL: [u8; 8] = [0x33, 0xe6, 0x85, 0xa4, 0x01, 0x7f, 0x83, 0xad];
 const PUMP_BUY_EXACT_QUOTE_IN: [u8; 8] = [0xc6, 0x2e, 0x15, 0x52, 0xb4, 0xd9, 0xe8, 0x70];
+/// pump-amm `buy` (base_amount_out exact, max_quote_amount_in): the exact-out buy third parties send
+const PUMP_BUY: [u8; 8] = [0x66, 0x06, 0x3d, 0x12, 0x01, 0xda, 0xeb, 0xea];
 const CPMM_SWAP_BASE_INPUT: [u8; 8] = [0x8f, 0xbe, 0x5a, 0xda, 0xc4, 0x1e, 0x33, 0xde];
 const DLMM_SWAP2: [u8; 8] = [0x41, 0x4b, 0x3f, 0x4c, 0xeb, 0x5b, 0x5b, 0x88];
 const DAMMV2_SWAP: [u8; 8] = [0xf8, 0xc6, 0x9e, 0x91, 0xe1, 0x75, 0x87, 0xc8];
@@ -99,8 +101,11 @@ pub struct BuildOpts {
     pub dlmm_max_arrays: usize,
     /// DLMM: pass exactly these bin-array indices, in this order (pin tests)
     pub dlmm_arrays: Option<Vec<i64>>,
+    /// PumpSwap OneForZero: the exact-out `buy` (WP-16 review F6) instead of `buy_exact_quote_in`: the swap's amount is
+    /// then the base amount out, the quote it may spend is unbounded, and the wallet's quote account is funded for it
+    pub exact_out: bool,
 }
-impl Default for BuildOpts { fn default() -> Self { BuildOpts { min_out: 1, dlmm_max_arrays: 12, dlmm_arrays: None } } }
+impl Default for BuildOpts { fn default() -> Self { BuildOpts { min_out: 1, dlmm_max_arrays: 12, dlmm_arrays: None, exact_out: false } } }
 
 /// the token program owning a mint (Tokenkeg when the mint is not in the view yet: fetcher round 1)
 pub fn mint_program(v: &impl View, mint: &Address) -> Address { v.acct(mint).map(|a| a.owner).unwrap_or(TOKEN) }
@@ -141,7 +146,7 @@ pub fn build_swap(venue: Venue, pool: &Address, v: &impl View, user: &Address, d
             (RAYCPMM, acc, data)
         }
         Venue::PumpSwap => {
-            let (acc, data) = pump_accounts(pool, d, v, user, &t, p0, p1, zfo, amount_in, o.min_out)?;
+            let (acc, data) = pump_accounts(pool, d, v, user, &t, p0, p1, zfo, amount_in, o.min_out, o.exact_out)?;
             (PUMPSWAP, acc, data)
         }
         Venue::Dlmm => {
@@ -170,6 +175,12 @@ pub fn build_swap(venue: Venue, pool: &Address, v: &impl View, user: &Address, d
         user_in, user_out, dlmm_arrays })
 }
 
+/// Whether the engine's swap leg (this harness's builder, the engine's `src/build.rs`) can execute on the pool: not on a
+/// PumpSwap cashback coin (byte 244): with a pool_v2 the leg leaves out the cashback accounts (the program fails 6060 /
+/// 6061), without one the program refuses the leg's buyback recipient (6053). arbx-sizing refuses such a pool
+/// (`Pump(Cashback)`); the suites check that the venue refuses it too
+pub fn engine_leg_executes(venue: Venue, pool_data: &[u8]) -> bool { !(venue == Venue::PumpSwap && pool_data.get(244) == Some(&1)) }
+
 /// PumpSwap GlobalConfig: the fee recipients (mayhem pools use the reserved set) and the buyback recipients
 pub struct PumpGlobal { pub disable_flags: u8, pub protocol: Vec<Address>, pub reserved: Vec<Address>, pub buyback: Vec<Address> }
 pub fn decode_pump_global(g: &[u8]) -> Option<PumpGlobal> {
@@ -190,10 +201,11 @@ pub fn pump_canonical_bump(pool_data: &[u8]) -> u8 {
 
 #[allow(clippy::too_many_arguments)]
 fn pump_accounts(pool: &Address, d: &[u8], v: &impl View, user: &Address, t: &PoolTokens, base_prog: Address, quote_prog: Address,
-                 sell: bool, amount: u64, min_out: u64) -> Result<(Vec<AccountMeta>, Vec<u8>), String> {
+                 sell: bool, amount: u64, min_out: u64, exact_out: bool) -> Result<(Vec<AccountMeta>, Vec<u8>), String> {
     let g = v.acct(&PUMP_GLOBAL_CONFIG).and_then(|a| decode_pump_global(&a.data)).ok_or("pump: GlobalConfig missing")?;
     if g.disable_flags & if sell { 1 << 4 } else { 1 << 3 } != 0 { return Err(format!("pump: {} disabled", if sell { "sell" } else { "buy" })); }
-    let creator = pk_at(d, 211).ok_or("pump pool short")?;
+    // a pool written before coin_creator existed (shorter than 243 bytes): the program reads it as zero
+    let creator = pk_at(d, 211).unwrap_or_default();
     let mayhem = d.get(243) == Some(&1);
     let cashback = d.get(244) == Some(&1);
     let fees = if mayhem { &g.reserved } else { &g.protocol };
@@ -218,9 +230,11 @@ fn pump_accounts(pool: &Address, d: &[u8], v: &impl View, user: &Address, t: &Po
     if has_v2 { acc.push(r(pda(&[b"pool-v2", t.t0.as_ref()], &PUMPSWAP).0)); }
     acc.push(r(buyback));
     acc.push(w(quote_ata(&buyback)));
-    let mut data = if sell { PUMP_SELL.to_vec() } else { PUMP_BUY_EXACT_QUOTE_IN.to_vec() };
+    // `buy` (exact out): base_amount_out, max_quote_amount_in (unbounded here); the others: amount in, minimum out
+    let exact_out = exact_out && !sell;
+    let mut data = if sell { PUMP_SELL.to_vec() } else if exact_out { PUMP_BUY.to_vec() } else { PUMP_BUY_EXACT_QUOTE_IN.to_vec() };
     data.extend(amount.to_le_bytes());
-    data.extend(min_out.to_le_bytes());
+    data.extend(if exact_out { u64::MAX } else { min_out }.to_le_bytes());
     Ok((acc, data))
 }
 

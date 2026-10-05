@@ -1,6 +1,7 @@
 //! Account store: every followed account (pools, vaults, configs, mints, DLMM bin arrays, the Clock sysvar, ...) with
-//! its last versions, updated by the state stream and by RPC reads, plus the per-pool snapshot builders the engine
-//! quotes against and the readiness rules a route must pass before it is priced (PLAN WP-04 items 2, 4 and 6).
+//! its last versions, updated by the state stream and by RPC reads, and the readiness rules a route must pass before
+//! it is priced (PLAN WP-04 items 2, 4 and 6). The quotes themselves are arbx-sizing's, from these account bytes
+//! (`src/quote.rs`, PLAN-ADDENDUM WP-16).
 //!
 //! - **Versions** (item 2). An update is applied only if its version is newer than the account's current one. The
 //!   order is `(slot, write_version)` for stream updates; an RPC read has no write version, so within one slot it orders
@@ -19,9 +20,9 @@
 //!   replaces the old snapshot skew check and its PumpSwap exemption (the PumpSwap pool account is an "other part").
 //! - **Chain clock** (item 6): the Clock sysvar's `unix_timestamp`, which DLMM and DAMM v2 fees are priced on.
 use crate::feeds::src as asrc;
-use crate::pools::{Registry, CLOCK_SYSVAR, PUMP_FEE_CONFIG};
+use crate::pools::{Registry, CLOCK_SYSVAR, PUMP_FEE_CONFIG, PUMP_GLOBAL_CONFIG};
 use crate::tx::Pk;
-use crate::venues::{cp, dlmm, i32_at, i64_at, u64_at, PoolMeta, Venue};
+use crate::venues::{dlmm, i32_at, i64_at, u64_at, PoolMeta, Venue};
 use rustc_hash::FxHashMap as HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -125,16 +126,19 @@ pub fn consistency_set(m: &PoolMeta) -> Vec<Pk> {
     }
 }
 
-/// The pool's other parts (present and not pending, no age rule): the PumpSwap pool account, its fee config and base
-/// mint; the CPMM config; the AMM v4 amm account; the DLMM bitmap extension when it exists
+/// The pool's other parts (present and not pending, no age rule): the PumpSwap pool account, its fee config,
+/// GlobalConfig and base mint; the CPMM config; the AMM v4 amm account; the DLMM bitmap extension when it exists; and
+/// every Token-2022 mint of the pool its quote scans (PLAN-ADDENDUM WP-16: arbx-sizing refuses a transfer fee or hook)
 pub fn other_parts(m: &PoolMeta) -> Vec<Pk> {
-    match m.venue {
-        Venue::PumpSwap => { let mut v = vec![m.pool, *PUMP_FEE_CONFIG]; v.extend(m.extra.iter().copied()); v }
+    let mut v = match m.venue {
+        Venue::PumpSwap => { let mut v = vec![m.pool, *PUMP_FEE_CONFIG, *PUMP_GLOBAL_CONFIG]; v.extend(m.extra.iter().copied()); v }
         Venue::RayCpmm => m.extra.clone(),
         Venue::RayAmmV4 => vec![m.pool],
         Venue::Dlmm => if m.flag { m.extra.clone() } else { vec![] },
         Venue::DammV2 => vec![],
-    }
+    };
+    v.extend(crate::pools::t22_mints(m));
+    v
 }
 
 /// What the readiness check needs from outside the store: which accounts are pending (the CommitTracker), which slots
@@ -213,7 +217,6 @@ pub struct Store {
     accts: HashMap<Pk, Hist>,
     /// versions kept per account ([accuracy] ring_versions)
     pub ring_versions: usize,
-    pub pump_cfg: Option<Arc<cp::PumpFeeCfg>>,
     /// DLMM pool -> bin array index -> array account (the arrays we follow)
     pub dlmm_arrays: HashMap<Pk, Vec<(i64, Pk)>>,
     pub updates: u64,
@@ -227,16 +230,9 @@ pub struct Store {
 
 impl Default for Store {
     fn default() -> Self {
-        Store { accts: HashMap::default(), ring_versions: RING_VERSIONS, pump_cfg: None, dlmm_arrays: HashMap::default(), updates: 0, stale_dropped: 0,
+        Store { accts: HashMap::default(), ring_versions: RING_VERSIONS, dlmm_arrays: HashMap::default(), updates: 0, stale_dropped: 0,
             kept_below: 0, stream_slot_max: 0 }
     }
-}
-
-pub enum Snap<'a> {
-    Cp(cp::CpSnap),
-    Dlmm { pair: &'a [u8], arrays: HashMap<i64, &'a [u8]>, slot: u64 },
-    /// DAMM v2: everything is in the pool account (price, liquidity, the whole fee schedule)
-    Damm(crate::venues::dammv2::DammPool, u64),
 }
 
 impl Store {
@@ -262,7 +258,6 @@ impl Store {
                 return false;
             }
         }
-        if key == *PUMP_FEE_CONFIG { self.pump_cfg = cp::decode_pump_fee_cfg(&v.data).map(Arc::new); }
         if v.src == asrc::GRPC && v.slot > self.stream_slot_max { self.stream_slot_max = v.slot; }
         let h = self.accts.entry(key).or_default();
         h.ring.push_back(v);
@@ -336,7 +331,6 @@ impl Store {
         out.sort_by(|a, b| a.0.cmp(&b.0));
         for (k, _, empty) in &out {
             if *empty { self.accts.remove(k); }
-            if *k == *PUMP_FEE_CONFIG { self.pump_cfg = self.get(k).and_then(|a| cp::decode_pump_fee_cfg(&a.data)).map(Arc::new); }
         }
         out
     }
@@ -346,13 +340,6 @@ impl Store {
         let a = self.get(&CLOCK_SYSVAR)?;
         let (slot, unix_timestamp) = decode_clock(&a.data)?;
         Some(ChainClock { slot, unix_timestamp, t_recv: a.t_recv })
-    }
-
-    /// Snapshot of a pool from the current versions. `Err` = why it can't be quoted. No readiness rule here: the engine
-    /// checks `pool_view` first
-    pub fn snapshot<'a>(&'a self, m: &PoolMeta, now_unix: i64) -> Result<Snap<'a>, &'static str> {
-        let arrays = self.dlmm_arrays.get(&m.pool).map(|l| l.as_slice()).unwrap_or(&[]);
-        snapshot_with(m, &|k| self.get(k), arrays, &|_| true, self.pump_cfg.as_ref(), now_unix)
     }
 
     /// Readiness of one pool (PLAN WP-04 item 4): every part present and not pending, the consistency set's slots at most
@@ -405,33 +392,6 @@ impl Store {
             if !ok { out.push((m.pool, crate::pools::dlmm_arrays(&m.pool, active))); }
         }
         out
-    }
-}
-
-/// A pool's snapshot from accounts `get` returns (the store's current versions, or the accuracy monitor's pre-state).
-/// `arrays`: the DLMM bin arrays to load, `use_array`: whether one may be used (the engine leaves out pending ones);
-/// `pump_cfg`: the PumpSwap fee config to price with
-pub fn snapshot_with<'a>(m: &PoolMeta, get: &dyn Fn(&Pk) -> Option<&'a Acct>, arrays: &[(i64, Pk)], use_array: &dyn Fn(i64) -> bool,
-    pump_cfg: Option<&Arc<cp::PumpFeeCfg>>, now_unix: i64) -> Result<Snap<'a>, &'static str> {
-    let pool = get(&m.pool).ok_or("no-pool-account")?;
-    match m.venue {
-        Venue::Dlmm => {
-            let mut map = HashMap::default();
-            for (i, k) in arrays { if !use_array(*i) { continue; } if let Some(a) = get(k) { map.insert(*i, &a.data[..]); } }
-            Ok(Snap::Dlmm { pair: &pool.data, arrays: map, slot: pool.slot })
-        }
-        Venue::DammV2 => crate::venues::dammv2::decode(&pool.data)
-            .map(|mut p| { if m.flag { p.transfer_fee_known_zero = true; } Snap::Damm(p, pool.slot) }).ok_or("damm-undecodable"),
-        _ => {
-            let v0 = get(&m.vault0).ok_or("no-vault0")?;
-            let v1 = get(&m.vault1).ok_or("no-vault1")?;
-            let extra: Vec<&[u8]> = m.extra.iter().filter_map(|k| get(k).map(|a| &a.data[..])).collect();
-            if extra.len() != m.extra.len() { return Err("no-extra-account"); }
-            // the snapshot's slot is the newest part's; the readiness check (`pool_view`) bounds the consistency set's skew
-            let hi = pool.slot.max(v0.slot).max(v1.slot);
-            let a = cp::Accounts { pool: &pool.data, vault0: &v0.data, vault1: &v1.data, extra };
-            cp::snapshot(m, &a, hi, now_unix, pump_cfg).map(Snap::Cp)
-        }
     }
 }
 
@@ -545,6 +505,7 @@ mod tests {
         let ctx = ReadyCtx { pending: &no, contested: &none, unverified: &no, max_skew: 2 };
         s.apply(m.pool, stream(1_000, 1, 1, None));
         s.apply(*PUMP_FEE_CONFIG, stream(1_000, 2, 1, None));
+        s.apply(*PUMP_GLOBAL_CONFIG, stream(1_000, 2, 1, None));
         s.apply(m.extra[0], stream(1_000, 3, 1, None));
         s.apply(m.vault0, stream(11_000, 4, 1, Some(1)));
         s.apply(m.vault1, stream(11_003, 5, 1, Some(2)));

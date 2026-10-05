@@ -98,6 +98,8 @@ fn pumpswap_matches_design_formulas_and_debit_pin() {
     for p in fx.pools.values().filter(|p| p.venue == Venue::PumpSwap) {
         let h = h(&fx, p);
         let pool = acct_data(&h, &h.pool);
+        // a cashback coin: the engine's leg cannot execute it (tests/swaps.rs)
+        if !venue_harness::venues::engine_leg_executes(p.venue, &pool) { continue; }
         let (b_res, q_res) = (amt(&h, &h.tokens.vault0), amt(&h, &h.tokens.vault1));
         let v = i128::from_le_bytes(pool[245..261].try_into().unwrap());
         let qv = (q_res as i128 + v) as u128;
@@ -114,7 +116,9 @@ fn pumpswap_matches_design_formulas_and_debit_pin() {
                 continue;
             }
             let e = pump_event(&o, false);
-            assert_eq!((e.cb, e.bb > 0), (0, true), "cashback / buyback bps");
+            // a mayhem pool carves no buyback out of its protocol fee (GxqG: 0 bps in every event); user amounts are
+            // the same either way (the buyback is a share of the protocol fee)
+            assert_eq!((e.cb, e.bb > 0), (0, pool.get(243) != Some(&1)), "{}: cashback / buyback bps (bb {})", p.pool, e.bb);
             let q = qv * b as u128 / (b_res + b as u128);
             let out = q - cdiv(q * e.lp, 10_000) - cdiv(q * e.pr, 10_000) - cdiv(q * e.cr, 10_000);
             assert_eq!(o.amount_out as u128, out, "{} sell {b}: model {out} vs program {}", p.pool, o.amount_out);
@@ -163,6 +167,49 @@ fn pumpswap_matches_design_formulas_and_debit_pin() {
               eff + fees(eff) < x in {n_leftover} buys; SellEvent.user_quote_amount_out != delivered in {n_sell_event_diff} sells");
     assert!(n_short > 0 && n_eff_fees > 0, "the snapshot no longer exercises both debit cases: widen the scan");
     assert!(n_sell >= 1000 && n_buy >= 1000);
+}
+
+/// WP-16 review F6: the exact-out `buy` (base_amount_out, max_quote_amount_in), the instruction third parties send most:
+/// the program delivers exactly the base asked for and debits `q + ⌈q·lp/1e4⌉ + ⌈q·pr/1e4⌉ + ⌈q·cr/1e4⌉` with
+/// `q = ⌈Qv·out / (B − out)⌉` (fee bps from its BuyEvent): every size from 1 to below the base reserve swaps (a quote
+/// amount of 1 at least); 0 fails 6001 ZeroBaseAmount and the whole reserve or more fails too. Every PumpSwap pool the
+/// engine's leg executes, sizes from 1 base unit to half the base reserve plus dense runs of consecutive sizes
+#[test]
+fn pumpswap_exact_out_buy_matches_its_closed_form() {
+    let fx = Fixtures::load().unwrap();
+    let opts = BuildOpts { exact_out: true, ..Default::default() };
+    let (mut n, mut n_fail) = (0, 0);
+    for p in fx.pools.values().filter(|p| p.venue == Venue::PumpSwap) {
+        let h = h(&fx, p);
+        let pool = acct_data(&h, &h.pool);
+        if !venue_harness::venues::engine_leg_executes(p.venue, pool) { continue; }
+        let b_res = amt(&h, &h.tokens.vault0);
+        let qv = (amt(&h, &h.tokens.vault1) as i128 + if pool.len() >= 261 { i128::from_le_bytes(pool[245..261].try_into().unwrap()) } else { 0 }) as u128;
+        let dense = (1_000..1_200).chain(1_000_000..1_000_300).chain((b_res as u64 / 1_000)..(b_res as u64 / 1_000 + 300));
+        for out in sizes(1, (b_res / 2) as u64, 300, 3).into_iter().chain([0, 1, 2, 3, 10, b_res as u64 - 1, b_res as u64, b_res as u64 + 1]).chain(dense) {
+            let o = h.swap_opts(Dir::OneForZero, out, &opts);
+            if out == 0 || out as u128 >= b_res {
+                assert!(!o.ok, "{} buy out {out} of a {b_res} base reserve swapped", p.pool);
+                if out == 0 { assert!(o.venue_error().contains("6001"), "{} buy out 0: {}", p.pool, o.venue_error()); }
+                n_fail += 1;
+                continue;
+            }
+            let q = cdiv(qv * out as u128, b_res - out as u128);
+            // a quote amount (or debit) past u64 fails the program (6024 Truncation, 6023 Overflow)
+            if q.saturating_mul(2) > u64::MAX as u128 {
+                if q > u64::MAX as u128 { assert!(!o.ok, "{} buy out {out}: q {q} past u64 swapped", p.pool); n_fail += 1; continue; }
+                if !o.ok { n_fail += 1; continue; }
+            }
+            assert!(o.ok, "{} buy out {out}: {}", p.pool, o.venue_error());
+            let e = pump_event(&o, true);
+            let debit = q + cdiv(q * e.lp, 10_000) + cdiv(q * e.pr, 10_000) + cdiv(q * e.cr, 10_000);
+            assert_eq!(o.amount_out, out, "{} buy out {out}: delivered {}", p.pool, o.amount_out);
+            assert_eq!(o.spent as u128, debit, "{} buy out {out}: debit {} vs model {debit} (q {q}, bps {}/{}/{})", p.pool, o.spent, e.lp, e.pr, e.cr);
+            n += 1;
+        }
+    }
+    println!("PumpSwap exact-out buy: {n} exact to the unit; {n_fail} sizes of 0, of the whole base reserve or with a quote past u64 refused as the model says");
+    assert!(n >= 5_000, "{n}");
 }
 
 // ------------------------------------------------------------------------------------- CPMM, AMM v4 (§2.2, §2.3)

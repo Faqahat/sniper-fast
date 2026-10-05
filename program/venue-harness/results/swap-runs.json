@@ -2240,6 +2240,306 @@
     ]
   },
   {
+    "venue": "PumpSwap",
+    "pool": "3KFCgJ5R3zshW8hTDbzjSrrKSRYmKvsMfhc4Vo4iddxD",
+    "label": "pump 3KFC (is_holder_reward = 1, negative virtual reserve, held amounts; WP-16 review F2)",
+    "slot": 453426901,
+    "dir": "0->1",
+    "input_reserve": 42754072699556,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 4275407,
+        "amount_out": 280642,
+        "spent": 4275407,
+        "cu_venue": 74239,
+        "cu_tx": 74389,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 14004992,
+        "amount_out": 919303,
+        "spent": 14004992,
+        "cu_venue": 74394,
+        "cu_tx": 74544,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 45876287,
+        "amount_out": 3011370,
+        "spent": 45876287,
+        "cu_venue": 74394,
+        "cu_tx": 74544,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 150277390,
+        "amount_out": 9864353,
+        "spent": 150277390,
+        "cu_venue": 74394,
+        "cu_tx": 74544,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 492265082,
+        "amount_out": 32312499,
+        "spent": 492265082,
+        "cu_venue": 74394,
+        "cu_tx": 74544,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1612517424,
+        "amount_out": 105843592,
+        "spent": 1612517424,
+        "cu_venue": 74394,
+        "cu_tx": 74544,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 5282138702,
+        "amount_out": 346683116,
+        "spent": 5282138702,
+        "cu_venue": 74394,
+        "cu_tx": 74544,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 17302752116,
+        "amount_out": 1135314033,
+        "spent": 17302752116,
+        "cu_venue": 74393,
+        "cu_tx": 74543,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 56678790102,
+        "amount_out": 3715538419,
+        "spent": 56678790102,
+        "cu_venue": 74493,
+        "cu_tx": 74643,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 185663253205,
+        "amount_out": 12134464719,
+        "spent": 185663253205,
+        "cu_venue": 74510,
+        "cu_tx": 74660,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 608178888942,
+        "amount_out": 39361673347,
+        "spent": 608178888942,
+        "cu_venue": 74511,
+        "cu_tx": 74661,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1992217385878,
+        "amount_out": 124949271676,
+        "spent": 1992217385878,
+        "cu_venue": 74509,
+        "cu_tx": 74659,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 6525925487973,
+        "amount_out": 371642578454,
+        "spent": 6525925487973,
+        "cu_venue": 74510,
+        "cu_tx": 74660,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 21377036349778,
+        "amount_out": 935476284881,
+        "spent": 21377036349778,
+        "cu_venue": 74510,
+        "cu_tx": 74660,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "3KFCgJ5R3zshW8hTDbzjSrrKSRYmKvsMfhc4Vo4iddxD",
+    "label": "pump 3KFC (is_holder_reward = 1, negative virtual reserve, held amounts; WP-16 review F2)",
+    "slot": 453426901,
+    "dir": "1->0",
+    "input_reserve": 2819967121200,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 281996,
+        "amount_out": 4254932,
+        "spent": 281996,
+        "cu_venue": 87951,
+        "cu_tx": 88101,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 923739,
+        "amount_out": 13938058,
+        "spent": 923739,
+        "cu_venue": 88106,
+        "cu_tx": 88256,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3025901,
+        "amount_out": 45657081,
+        "spent": 3025901,
+        "cu_venue": 88106,
+        "cu_tx": 88256,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 9911975,
+        "amount_out": 149559068,
+        "spent": 9911975,
+        "cu_venue": 88106,
+        "cu_tx": 88256,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 32468751,
+        "amount_out": 489908266,
+        "spent": 32468751,
+        "cu_venue": 88106,
+        "cu_tx": 88256,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 106358197,
+        "amount_out": 1604755402,
+        "spent": 106358197,
+        "cu_venue": 88106,
+        "cu_tx": 88256,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 348398562,
+        "amount_out": 5256263754,
+        "spent": 348398562,
+        "cu_venue": 88203,
+        "cu_tx": 88353,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1141252493,
+        "amount_out": 17213177509,
+        "spent": 1141252493,
+        "cu_venue": 88223,
+        "cu_tx": 88373,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3738411675,
+        "amount_out": 56333755641,
+        "spent": 3738411675,
+        "cu_venue": 88222,
+        "cu_tx": 88372,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 12245950773,
+        "amount_out": 183981347484,
+        "spent": 12245950773,
+        "cu_venue": 88223,
+        "cu_tx": 88373,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 40114177722,
+        "amount_out": 596824784657,
+        "spent": 40114177722,
+        "cu_venue": 88209,
+        "cu_tx": 88359,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 131402394479,
+        "amount_out": 1894830183874,
+        "spent": 131402394479,
+        "cu_venue": 88223,
+        "cu_tx": 88373,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 430436076600,
+        "amount_out": 5638251476825,
+        "spent": 430436076600,
+        "cu_venue": 88222,
+        "cu_tx": 88372,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1409983560600,
+        "amount_out": 14205906885034,
+        "spent": 1409983560600,
+        "cu_venue": 88222,
+        "cu_tx": 88372,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
     "venue": "RayAMMv4",
     "pool": "3kQo5U7PjhDdeJ8d2tdj7gYvxBme4bYvuCojRewv8pQS",
     "label": "ammv4 3kQo (seed-pools-fresh)",
@@ -3580,6 +3880,306 @@
     ]
   },
   {
+    "venue": "PumpSwap",
+    "pool": "5PGhKctym6odbHGo2tKMST2AjmJsb2uZBQrKkn4ZuFT5",
+    "label": "pump 5PGh (is_holder_reward = 1, negative virtual reserve, held amounts; WP-16 review F2)",
+    "slot": 453426896,
+    "dir": "0->1",
+    "input_reserve": 71791954094083,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 7179195,
+        "amount_out": 238969,
+        "spent": 7179195,
+        "cu_venue": 71354,
+        "cu_tx": 71504,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 23516958,
+        "amount_out": 782797,
+        "spent": 23516958,
+        "cu_venue": 71509,
+        "cu_tx": 71659,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 77034726,
+        "amount_out": 2564219,
+        "spent": 77034726,
+        "cu_venue": 71509,
+        "cu_tx": 71659,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 252343387,
+        "amount_out": 8399619,
+        "spent": 252343387,
+        "cu_venue": 71509,
+        "cu_tx": 71659,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 826603641,
+        "amount_out": 27514496,
+        "spent": 826603641,
+        "cu_venue": 71509,
+        "cu_tx": 71659,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2707713431,
+        "amount_out": 90127142,
+        "spent": 2707713431,
+        "cu_venue": 71509,
+        "cu_tx": 71659,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 8869682706,
+        "amount_out": 295205009,
+        "spent": 8869682706,
+        "cu_venue": 71509,
+        "cu_tx": 71659,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 29054504220,
+        "amount_out": 966734095,
+        "spent": 29054504220,
+        "cu_venue": 71508,
+        "cu_tx": 71658,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 95174116527,
+        "amount_out": 3163827424,
+        "spent": 95174116527,
+        "cu_venue": 71518,
+        "cu_tx": 71668,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 311762761053,
+        "amount_out": 10332648443,
+        "spent": 311762761053,
+        "cu_venue": 71626,
+        "cu_tx": 71776,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1021244249238,
+        "amount_out": 33516957050,
+        "spent": 1021244249238,
+        "cu_venue": 71625,
+        "cu_tx": 71775,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3345299525438,
+        "amount_out": 106395867249,
+        "spent": 3345299525438,
+        "cu_venue": 71625,
+        "cu_tx": 71775,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 10958229555025,
+        "amount_out": 316458302729,
+        "spent": 10958229555025,
+        "cu_venue": 71626,
+        "cu_tx": 71776,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 35895977047041,
+        "amount_out": 796569754165,
+        "spent": 35895977047041,
+        "cu_venue": 71626,
+        "cu_tx": 71776,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "5PGhKctym6odbHGo2tKMST2AjmJsb2uZBQrKkn4ZuFT5",
+    "label": "pump 5PGh (is_holder_reward = 1, negative virtual reserve, held amounts; WP-16 review F2)",
+    "slot": 453426896,
+    "dir": "1->0",
+    "input_reserve": 2407768962301,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 240776,
+        "amount_out": 7125680,
+        "spent": 240776,
+        "cu_venue": 85052,
+        "cu_tx": 85202,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 788715,
+        "amount_out": 23341816,
+        "spent": 788715,
+        "cu_venue": 85221,
+        "cu_tx": 85371,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2583601,
+        "amount_out": 76461140,
+        "spent": 2583601,
+        "cu_venue": 85221,
+        "cu_tx": 85371,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 8463129,
+        "amount_out": 250464083,
+        "spent": 8463129,
+        "cu_venue": 85221,
+        "cu_tx": 85371,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 27722752,
+        "amount_out": 820441293,
+        "spent": 27722752,
+        "cu_venue": 85229,
+        "cu_tx": 85379,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 90811685,
+        "amount_out": 2687457670,
+        "spent": 90811685,
+        "cu_venue": 85230,
+        "cu_tx": 85380,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 297472704,
+        "amount_out": 8802581035,
+        "spent": 297472704,
+        "cu_venue": 85341,
+        "cu_tx": 85491,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 974434173,
+        "amount_out": 28826655344,
+        "spent": 974434173,
+        "cu_venue": 85337,
+        "cu_tx": 85487,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3191963315,
+        "amount_out": 94341543892,
+        "spent": 3191963315,
+        "cu_venue": 85337,
+        "cu_tx": 85487,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 10455944668,
+        "amount_out": 308114079451,
+        "spent": 10455944668,
+        "cu_venue": 85337,
+        "cu_tx": 85487,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 34250637655,
+        "amount_out": 999530011780,
+        "spent": 34250637655,
+        "cu_venue": 85337,
+        "cu_tx": 85487,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 112195140369,
+        "amount_out": 3173617804752,
+        "spent": 112195140369,
+        "cu_venue": 85337,
+        "cu_tx": 85487,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 367518691158,
+        "amount_out": 9445625242809,
+        "spent": 367518691158,
+        "cu_venue": 85338,
+        "cu_tx": 85488,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1203884481150,
+        "amount_out": 23811602937736,
+        "spent": 1203884481150,
+        "cu_venue": 85324,
+        "cu_tx": 85474,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
     "venue": "DLMM",
     "pool": "6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo",
     "label": "dlmm HOTBOT/SOL 6D4E (bin step 100, limit orders)",
@@ -4802,6 +5402,906 @@
     ]
   },
   {
+    "venue": "PumpSwap",
+    "pool": "8ewuF2o8ACro7fqWepZ3tKhkbBjndZU4Ldk9scRPw83d",
+    "label": "pump 8ewu (is_holder_reward = 1, positive virtual reserve, held amounts; seed-pools-merged; WP-16 review F2)",
+    "slot": 453426905,
+    "dir": "0->1",
+    "input_reserve": 56043452530067,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 5604345,
+        "amount_out": 58570,
+        "spent": 5604345,
+        "cu_venue": 77411,
+        "cu_tx": 77561,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 18358207,
+        "amount_out": 191863,
+        "spent": 18358207,
+        "cu_venue": 77411,
+        "cu_tx": 77561,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 60136154,
+        "amount_out": 628488,
+        "spent": 60136154,
+        "cu_venue": 77566,
+        "cu_tx": 77716,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 196988574,
+        "amount_out": 2058746,
+        "spent": 196988574,
+        "cu_venue": 77566,
+        "cu_tx": 77716,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 645277350,
+        "amount_out": 6743805,
+        "spent": 645277350,
+        "cu_venue": 77566,
+        "cu_tx": 77716,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2113741171,
+        "amount_out": 22090170,
+        "spent": 2113741171,
+        "cu_venue": 77566,
+        "cu_tx": 77716,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 6924002111,
+        "amount_out": 72354777,
+        "spent": 6924002111,
+        "cu_venue": 77566,
+        "cu_tx": 77716,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 22681019740,
+        "amount_out": 236946627,
+        "spent": 22681019740,
+        "cu_venue": 77565,
+        "cu_tx": 77715,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 74296432643,
+        "amount_out": 775454435,
+        "spent": 74296432643,
+        "cu_venue": 77566,
+        "cu_tx": 77716,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 243373532873,
+        "amount_out": 2532533224,
+        "spent": 243373532873,
+        "cu_venue": 77566,
+        "cu_tx": 77716,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 797221002353,
+        "amount_out": 8215009717,
+        "spent": 797221002353,
+        "cu_venue": 77681,
+        "cu_tx": 77831,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2611464439414,
+        "amount_out": 26077638318,
+        "spent": 2611464439414,
+        "cu_venue": 77682,
+        "cu_tx": 77832,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 8554398966154,
+        "amount_out": 77563963476,
+        "spent": 8554398966154,
+        "cu_venue": 77683,
+        "cu_tx": 77833,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 28021726265033,
+        "amount_out": 195239331011,
+        "spent": 28021726265033,
+        "cu_venue": 77682,
+        "cu_tx": 77832,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "8ewuF2o8ACro7fqWepZ3tKhkbBjndZU4Ldk9scRPw83d",
+    "label": "pump 8ewu (is_holder_reward = 1, positive virtual reserve, held amounts; seed-pools-merged; WP-16 review F2)",
+    "slot": 453426905,
+    "dir": "1->0",
+    "input_reserve": 573756914759,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 57375,
+        "amount_out": 5386309,
+        "spent": 57375,
+        "cu_venue": 91123,
+        "cu_tx": 91273,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 187946,
+        "amount_out": 17644513,
+        "spent": 187946,
+        "cu_venue": 91123,
+        "cu_tx": 91273,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 615656,
+        "amount_out": 57799023,
+        "spent": 615656,
+        "cu_venue": 91278,
+        "cu_tx": 91428,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2016712,
+        "amount_out": 189333009,
+        "spent": 2016712,
+        "cu_venue": 91278,
+        "cu_tx": 91428,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 6606165,
+        "amount_out": 620196077,
+        "spent": 6606165,
+        "cu_venue": 91264,
+        "cu_tx": 91414,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 21639880,
+        "amount_out": 2031531319,
+        "spent": 21639880,
+        "cu_venue": 91277,
+        "cu_tx": 91427,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 70885962,
+        "amount_out": 6654158272,
+        "spent": 70885962,
+        "cu_venue": 91374,
+        "cu_tx": 91524,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 232201824,
+        "amount_out": 21791202503,
+        "spent": 232201824,
+        "cu_venue": 91395,
+        "cu_tx": 91545,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 760625729,
+        "amount_out": 71318543741,
+        "spent": 760625729,
+        "cu_venue": 91395,
+        "cu_tx": 91545,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2491588955,
+        "amount_out": 232944234248,
+        "spent": 2491588955,
+        "cu_venue": 91395,
+        "cu_tx": 91545,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 8161721700,
+        "amount_out": 755907542188,
+        "spent": 8161721700,
+        "cu_venue": 91395,
+        "cu_tx": 91545,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 26735429601,
+        "amount_out": 2402393273880,
+        "spent": 26735429601,
+        "cu_venue": 91395,
+        "cu_tx": 91545,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 87577501685,
+        "amount_out": 7170086484183,
+        "spent": 87577501685,
+        "cu_venue": 91394,
+        "cu_tx": 91544,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 286878457379,
+        "amount_out": 18190857911664,
+        "spent": 286878457379,
+        "cu_venue": 91395,
+        "cu_tx": 91545,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "98ewLHSKoxMu9g9NguMykjgUFz2rc8WsrscXB67BMubh",
+    "label": "pump 98ew (cashback coin with pool_v2: the engine's leg cannot execute it; refused)",
+    "slot": 453426914,
+    "dir": "0->1",
+    "input_reserve": 25155094766645,
+    "swaps": [
+      {
+        "ok": false,
+        "amount_in": 2515509,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61190,
+        "cu_tx": 61340,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 8240078,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61190,
+        "cu_tx": 61340,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 26992103,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61345,
+        "cu_tx": 61495,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 88418290,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61345,
+        "cu_tx": 61495,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 289632636,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61345,
+        "cu_tx": 61495,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 948752389,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61345,
+        "cu_tx": 61495,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 3107837247,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61345,
+        "cu_tx": 61495,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 10180372108,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61345,
+        "cu_tx": 61495,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 33347941991,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61343,
+        "cu_tx": 61493,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 109238171574,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61432,
+        "cu_tx": 61582,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 357832520282,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61462,
+        "cu_tx": 61612,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 1172155398847,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61460,
+        "cu_tx": 61610,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 3839640617248,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61460,
+        "cu_tx": 61610,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 12577547383322,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 61462,
+        "cu_tx": 61612,
+        "err": "InstructionError(1, Custom(6060))",
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "98ewLHSKoxMu9g9NguMykjgUFz2rc8WsrscXB67BMubh",
+    "label": "pump 98ew (cashback coin with pool_v2: the engine's leg cannot execute it; refused)",
+    "slot": 453426914,
+    "dir": "1->0",
+    "input_reserve": 860314391339,
+    "swaps": [
+      {
+        "ok": false,
+        "amount_in": 86031,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75181,
+        "cu_tx": 75331,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 281814,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75195,
+        "cu_tx": 75345,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 923140,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75350,
+        "cu_tx": 75500,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 3023941,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75350,
+        "cu_tx": 75500,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 9905553,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75350,
+        "cu_tx": 75500,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 32447714,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75350,
+        "cu_tx": 75500,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 106289287,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75437,
+        "cu_tx": 75587,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 348172833,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75453,
+        "cu_tx": 75603,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 1140513072,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75467,
+        "cu_tx": 75617,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 3735989546,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75465,
+        "cu_tx": 75615,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 12238016582,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75466,
+        "cu_tx": 75616,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 40088187616,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75467,
+        "cu_tx": 75617,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 131317258441,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75466,
+        "cu_tx": 75616,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      },
+      {
+        "ok": false,
+        "amount_in": 430157195669,
+        "amount_out": 0,
+        "spent": 0,
+        "cu_venue": 75466,
+        "cu_tx": 75616,
+        "err": "InstructionError(1, Custom(6061))",
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+    "label": "pump 9qKx (a 300-byte pool, the census's largest: 7,134 SOL of quote; WP-16 review F1)",
+    "slot": 453426883,
+    "dir": "0->1",
+    "input_reserve": 89606704712334,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 8960670,
+        "amount_out": 718848,
+        "spent": 8960670,
+        "cu_venue": 63680,
+        "cu_tx": 63830,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 29352553,
+        "amount_out": 2354742,
+        "spent": 29352553,
+        "cu_venue": 63680,
+        "cu_tx": 63830,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 96150440,
+        "amount_out": 7713447,
+        "spent": 96150440,
+        "cu_venue": 63680,
+        "cu_tx": 63830,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 314960913,
+        "amount_out": 25266954,
+        "spent": 314960913,
+        "cu_venue": 63680,
+        "cu_tx": 63830,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1031720467,
+        "amount_out": 82766544,
+        "spent": 1031720467,
+        "cu_venue": 63680,
+        "cu_tx": 63830,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3379616573,
+        "amount_out": 271112054,
+        "spent": 3379616573,
+        "cu_venue": 63680,
+        "cu_tx": 63830,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 11070642235,
+        "amount_out": 888008125,
+        "spent": 11070642235,
+        "cu_venue": 63678,
+        "cu_tx": 63828,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 36264208337,
+        "amount_out": 2908039174,
+        "spent": 36264208337,
+        "cu_venue": 63687,
+        "cu_tx": 63837,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 118791013053,
+        "amount_out": 9517130027,
+        "spent": 118791013053,
+        "cu_venue": 63797,
+        "cu_tx": 63947,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 389124854206,
+        "amount_out": 31081707544,
+        "spent": 389124854206,
+        "cu_venue": 63796,
+        "cu_tx": 63946,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1274659995474,
+        "amount_out": 100822578306,
+        "spent": 1274659995474,
+        "cu_venue": 63796,
+        "cu_tx": 63946,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 4175415901863,
+        "amount_out": 320050106011,
+        "spent": 4175415901863,
+        "cu_venue": 63797,
+        "cu_tx": 63947,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 13677449684964,
+        "amount_out": 951940295740,
+        "spent": 13677449684964,
+        "cu_venue": 63797,
+        "cu_tx": 63947,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 44803352356167,
+        "amount_out": 2396166701321,
+        "spent": 44803352356167,
+        "cu_venue": 63797,
+        "cu_tx": 63947,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+    "label": "pump 9qKx (a 300-byte pool, the census's largest: 7,134 SOL of quote; WP-16 review F1)",
+    "slot": 453426883,
+    "dir": "1->0",
+    "input_reserve": 7210130495453,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 721013,
+        "amount_out": 8933837,
+        "spent": 721013,
+        "cu_venue": 77186,
+        "cu_tx": 77336,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2361829,
+        "amount_out": 29264724,
+        "spent": 2361829,
+        "cu_venue": 77172,
+        "cu_tx": 77322,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 7736666,
+        "amount_out": 95862720,
+        "spent": 7736666,
+        "cu_venue": 77172,
+        "cu_tx": 77322,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 25343073,
+        "amount_out": 314017725,
+        "spent": 25343073,
+        "cu_venue": 77186,
+        "cu_tx": 77336,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 83016546,
+        "amount_out": 1028622716,
+        "spent": 83016546,
+        "cu_venue": 77185,
+        "cu_tx": 77335,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 271938094,
+        "amount_out": 3369381322,
+        "spent": 271938094,
+        "cu_venue": 77268,
+        "cu_tx": 77418,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 890790208,
+        "amount_out": 11036170212,
+        "spent": 890790208,
+        "cu_venue": 77288,
+        "cu_tx": 77438,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2917969980,
+        "amount_out": 36141158346,
+        "spent": 2917969980,
+        "cu_venue": 77303,
+        "cu_tx": 77453,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 9558422090,
+        "amount_out": 118279372719,
+        "spent": 9558422090,
+        "cu_venue": 77301,
+        "cu_tx": 77451,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 31310614388,
+        "amount_out": 386288497528,
+        "spent": 31310614388,
+        "cu_venue": 77289,
+        "cu_tx": 77439,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 102564478118,
+        "amount_out": 1253075701863,
+        "spent": 102564478118,
+        "cu_venue": 77289,
+        "cu_tx": 77439,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 335971438988,
+        "amount_out": 3978112891476,
+        "spent": 335971438988,
+        "cu_venue": 77289,
+        "cu_tx": 77439,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1100544846394,
+        "amount_out": 11835403096032,
+        "spent": 1100544846394,
+        "cu_venue": 77289,
+        "cu_tx": 77439,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3605065247726,
+        "amount_out": 29809283004752,
+        "spent": 3605065247726,
+        "cu_venue": 77302,
+        "cu_tx": 77452,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
     "venue": "DAMMv2",
     "pool": "C8BUgLyzT1ayVVbho1cjXRu5Dyrxd7SRZdrWjXUSQHzh",
     "label": "damm C8BU (base-fee mode 4)",
@@ -5702,6 +7202,306 @@
     ]
   },
   {
+    "venue": "PumpSwap",
+    "pool": "DDGNQcE6rfKSkksWwfsLNP8XMjuTB9yq4Y9Adi3H8d4L",
+    "label": "pump DDGN (a 287-byte dust pool, non-SOL quote)",
+    "slot": 453426918,
+    "dir": "0->1",
+    "input_reserve": 133,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 1000,
+        "amount_out": 77,
+        "spent": 1000,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1193,
+        "amount_out": 78,
+        "spent": 1193,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1425,
+        "amount_out": 80,
+        "spent": 1425,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1701,
+        "amount_out": 81,
+        "spent": 1701,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2030,
+        "amount_out": 82,
+        "spent": 2030,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2424,
+        "amount_out": 83,
+        "spent": 2424,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2894,
+        "amount_out": 84,
+        "spent": 2894,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3455,
+        "amount_out": 84,
+        "spent": 3455,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 4124,
+        "amount_out": 85,
+        "spent": 4124,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 4923,
+        "amount_out": 85,
+        "spent": 4923,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 5878,
+        "amount_out": 86,
+        "spent": 5878,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 7017,
+        "amount_out": 86,
+        "spent": 7017,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 8376,
+        "amount_out": 86,
+        "spent": 8376,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 10000,
+        "amount_out": 86,
+        "spent": 10000,
+        "cu_venue": 65832,
+        "cu_tx": 65982,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "DDGNQcE6rfKSkksWwfsLNP8XMjuTB9yq4Y9Adi3H8d4L",
+    "label": "pump DDGN (a 287-byte dust pool, non-SOL quote)",
+    "slot": 453426918,
+    "dir": "1->0",
+    "input_reserve": 90,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 1000,
+        "amount_out": 121,
+        "spent": 1000,
+        "cu_venue": 79373,
+        "cu_tx": 79523,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1193,
+        "amount_out": 123,
+        "spent": 1193,
+        "cu_venue": 79359,
+        "cu_tx": 79509,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1425,
+        "amount_out": 125,
+        "spent": 1425,
+        "cu_venue": 79345,
+        "cu_tx": 79495,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1701,
+        "amount_out": 126,
+        "spent": 1701,
+        "cu_venue": 79345,
+        "cu_tx": 79495,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2030,
+        "amount_out": 127,
+        "spent": 2030,
+        "cu_venue": 106134,
+        "cu_tx": 106284,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2424,
+        "amount_out": 128,
+        "spent": 2424,
+        "cu_venue": 106134,
+        "cu_tx": 106284,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2894,
+        "amount_out": 128,
+        "spent": 2894,
+        "cu_venue": 106134,
+        "cu_tx": 106284,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3455,
+        "amount_out": 129,
+        "spent": 3455,
+        "cu_venue": 106120,
+        "cu_tx": 106270,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 4124,
+        "amount_out": 130,
+        "spent": 4124,
+        "cu_venue": 106134,
+        "cu_tx": 106284,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 4923,
+        "amount_out": 130,
+        "spent": 4923,
+        "cu_venue": 106134,
+        "cu_tx": 106284,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 5878,
+        "amount_out": 130,
+        "spent": 5878,
+        "cu_venue": 106120,
+        "cu_tx": 106270,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 7017,
+        "amount_out": 131,
+        "spent": 7017,
+        "cu_venue": 106127,
+        "cu_tx": 106277,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 8376,
+        "amount_out": 131,
+        "spent": 8376,
+        "cu_venue": 106113,
+        "cu_tx": 106263,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 10000,
+        "amount_out": 131,
+        "spent": 10000,
+        "cu_venue": 106113,
+        "cu_tx": 106263,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
     "venue": "DAMMv2",
     "pool": "DxSBgaYreFNFxGu9TEC17n4Usq5jjy4Zf9djT7RBLrGf",
     "label": "damm DxSB (collect_fee_mode 2: compounding, base-fee mode 0, no transfer fee)",
@@ -5996,6 +7796,606 @@
         "spent": 170367621545,
         "cu_venue": 21249,
         "cu_tx": 21399,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "EBNUexqpB5WjKXJsfm3ruFt7zb7ZbXHZGR7YdhYuvuyy",
+    "label": "pump EBNU (300 bytes and is_holder_reward = 1; WP-16 review F1, F2)",
+    "slot": 453426892,
+    "dir": "0->1",
+    "input_reserve": 166107524666958,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 16610752,
+        "amount_out": 34995,
+        "spent": 16610752,
+        "cu_venue": 71714,
+        "cu_tx": 71864,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 54412000,
+        "amount_out": 114636,
+        "spent": 54412000,
+        "cu_venue": 71869,
+        "cu_tx": 72019,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 178237908,
+        "amount_out": 375515,
+        "spent": 178237908,
+        "cu_venue": 71869,
+        "cu_tx": 72019,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 583855615,
+        "amount_out": 1230074,
+        "spent": 583855615,
+        "cu_venue": 71869,
+        "cu_tx": 72019,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1912541405,
+        "amount_out": 4029339,
+        "spent": 1912541405,
+        "cu_venue": 71869,
+        "cu_tx": 72019,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 6264930120,
+        "amount_out": 13198601,
+        "spent": 6264930120,
+        "cu_venue": 71869,
+        "cu_tx": 72019,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 20522091334,
+        "amount_out": 43231078,
+        "spent": 20522091334,
+        "cu_venue": 71869,
+        "cu_tx": 72019,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 67224410274,
+        "amount_out": 141572663,
+        "spent": 67224410274,
+        "cu_venue": 71868,
+        "cu_tx": 72018,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 220207641764,
+        "amount_out": 463324383,
+        "spent": 220207641764,
+        "cu_venue": 71869,
+        "cu_tx": 72019,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 721336271945,
+        "amount_out": 1513157118,
+        "spent": 721336271945,
+        "cu_venue": 71869,
+        "cu_tx": 72019,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2362888104410,
+        "amount_out": 4908366179,
+        "spent": 2362888104410,
+        "cu_venue": 71969,
+        "cu_tx": 72119,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 7740135095249,
+        "amount_out": 15581064705,
+        "spent": 7740135095249,
+        "cu_venue": 71986,
+        "cu_tx": 72136,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 25354434338590,
+        "amount_out": 46343503926,
+        "spent": 25354434338590,
+        "cu_venue": 71986,
+        "cu_tx": 72136,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 83053762333479,
+        "amount_out": 116653073129,
+        "spent": 83053762333479,
+        "cu_venue": 71986,
+        "cu_tx": 72136,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "EBNUexqpB5WjKXJsfm3ruFt7zb7ZbXHZGR7YdhYuvuyy",
+    "label": "pump EBNU (300 bytes and is_holder_reward = 1; WP-16 review F1, F2)",
+    "slot": 453426892,
+    "dir": "1->0",
+    "input_reserve": 354030570957,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 35403,
+        "amount_out": 16421171,
+        "spent": 35403,
+        "cu_venue": 85412,
+        "cu_tx": 85562,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 115970,
+        "amount_out": 53792121,
+        "spent": 115970,
+        "cu_venue": 85581,
+        "cu_tx": 85731,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 379884,
+        "amount_out": 176209664,
+        "spent": 379884,
+        "cu_venue": 85581,
+        "cu_tx": 85731,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1244391,
+        "amount_out": 577214025,
+        "spent": 1244391,
+        "cu_venue": 85581,
+        "cu_tx": 85731,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 4076264,
+        "amount_out": 1890774805,
+        "spent": 4076264,
+        "cu_venue": 85567,
+        "cu_tx": 85717,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 13352656,
+        "amount_out": 6193470115,
+        "spent": 13352656,
+        "cu_venue": 85678,
+        "cu_tx": 85828,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 43739425,
+        "amount_out": 20286290803,
+        "spent": 43739425,
+        "cu_venue": 85698,
+        "cu_tx": 85848,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 143277653,
+        "amount_out": 66433537028,
+        "spent": 143277653,
+        "cu_venue": 85698,
+        "cu_tx": 85848,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 469335975,
+        "amount_out": 217419090295,
+        "spent": 469335975,
+        "cu_venue": 85683,
+        "cu_tx": 85833,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1537408330,
+        "amount_out": 710086661041,
+        "spent": 1537408330,
+        "cu_venue": 85698,
+        "cu_tx": 85848,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 5036103128,
+        "amount_out": 2303627174961,
+        "spent": 5036103128,
+        "cu_venue": 85697,
+        "cu_tx": 85847,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 16496811041,
+        "amount_out": 7315146050745,
+        "spent": 16496811041,
+        "cu_venue": 85697,
+        "cu_tx": 85847,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 54038761237,
+        "amount_out": 21779565130388,
+        "spent": 54038761237,
+        "cu_venue": 85698,
+        "cu_tx": 85848,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 177015285478,
+        "amount_out": 54947907596840,
+        "spent": 177015285478,
+        "cu_venue": 85697,
+        "cu_tx": 85847,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "FKfRK3WdaGXokysR1fPGgCDEeGkV1b1YYnX9ykVpG3JG",
+    "label": "pump FKfR (a 300-byte pool, 2,041 SOL; WP-16 review F1)",
+    "slot": 453426887,
+    "dir": "0->1",
+    "input_reserve": 20536007982761,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 2053600,
+        "amount_out": 204545,
+        "spent": 2053600,
+        "cu_venue": 74343,
+        "cu_tx": 74493,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 6726999,
+        "amount_out": 670033,
+        "spent": 6726999,
+        "cu_venue": 74343,
+        "cu_tx": 74493,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 22035697,
+        "amount_out": 2194840,
+        "spent": 22035697,
+        "cu_venue": 74498,
+        "cu_tx": 74648,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 72182543,
+        "amount_out": 7189644,
+        "spent": 72182543,
+        "cu_venue": 74498,
+        "cu_tx": 74648,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 236449045,
+        "amount_out": 23551001,
+        "spent": 236449045,
+        "cu_venue": 74498,
+        "cu_tx": 74648,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 774538391,
+        "amount_out": 77144219,
+        "spent": 774538391,
+        "cu_venue": 74498,
+        "cu_tx": 74648,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2537162794,
+        "amount_out": 252680372,
+        "spent": 2537162794,
+        "cu_venue": 74497,
+        "cu_tx": 74647,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 8311008359,
+        "amount_out": 827474888,
+        "spent": 8311008359,
+        "cu_venue": 74497,
+        "cu_tx": 74647,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 27224449333,
+        "amount_out": 2708074288,
+        "spent": 27224449333,
+        "cu_venue": 74507,
+        "cu_tx": 74657,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 89179388282,
+        "amount_out": 8844218037,
+        "spent": 89179388282,
+        "cu_venue": 74617,
+        "cu_tx": 74767,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 292125772579,
+        "amount_out": 28688799176,
+        "spent": 292125772579,
+        "cu_venue": 74615,
+        "cu_tx": 74765,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 956919178841,
+        "amount_out": 91069414932,
+        "spent": 956919178841,
+        "cu_venue": 74614,
+        "cu_tx": 74764,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3134589278960,
+        "amount_out": 270872104572,
+        "spent": 3134589278960,
+        "cu_venue": 74614,
+        "cu_tx": 74764,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 10268003991380,
+        "amount_out": 681822925452,
+        "spent": 10268003991380,
+        "cu_venue": 74614,
+        "cu_tx": 74764,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "FKfRK3WdaGXokysR1fPGgCDEeGkV1b1YYnX9ykVpG3JG",
+    "label": "pump FKfR (a 300-byte pool, 2,041 SOL; WP-16 review F1)",
+    "slot": 453426887,
+    "dir": "1->0",
+    "input_reserve": 2051623647305,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 205162,
+        "amount_out": 2047420,
+        "spent": 205162,
+        "cu_venue": 88053,
+        "cu_tx": 88203,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 672052,
+        "amount_out": 6706834,
+        "spent": 672052,
+        "cu_venue": 88053,
+        "cu_tx": 88203,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2201448,
+        "amount_out": 21969738,
+        "spent": 2201448,
+        "cu_venue": 88208,
+        "cu_tx": 88358,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 7211304,
+        "amount_out": 71966365,
+        "spent": 7211304,
+        "cu_venue": 88193,
+        "cu_tx": 88343,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 23622139,
+        "amount_out": 235739089,
+        "spent": 23622139,
+        "cu_venue": 88194,
+        "cu_tx": 88344,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 77379268,
+        "amount_out": 772192667,
+        "spent": 77379268,
+        "cu_venue": 88194,
+        "cu_tx": 88344,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 253472008,
+        "amount_out": 2529262506,
+        "spent": 253472008,
+        "cu_venue": 88280,
+        "cu_tx": 88430,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 830300674,
+        "amount_out": 8282807818,
+        "spent": 830300674,
+        "cu_venue": 88314,
+        "cu_tx": 88464,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 2719823837,
+        "amount_out": 27107191902,
+        "spent": 2719823837,
+        "cu_venue": 88325,
+        "cu_tx": 88475,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 8909352879,
+        "amount_out": 88529353825,
+        "spent": 8909352879,
+        "cu_venue": 88324,
+        "cu_tx": 88474,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 29184452183,
+        "amount_out": 287179097777,
+        "spent": 29184452183,
+        "cu_venue": 88325,
+        "cu_tx": 88475,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 95599788309,
+        "amount_out": 911701399532,
+        "spent": 95599788309,
+        "cu_venue": 88323,
+        "cu_tx": 88473,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 313157138169,
+        "amount_out": 2712430205284,
+        "spent": 313157138169,
+        "cu_venue": 88325,
+        "cu_tx": 88475,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1025811823652,
+        "amount_out": 6831672648942,
+        "spent": 1025811823652,
+        "cu_venue": 88325,
+        "cu_tx": 88475,
         "err": null,
         "dlmm_arrays": []
       }
@@ -6896,6 +9296,306 @@
         "spent": 45299594824423,
         "cu_venue": 25148,
         "cu_tx": 25298,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "GxqGY3UHL36SjMZPsu49fAKAm9EETGzxseuqWabLmpME",
+    "label": "pump GxqG (mayhem: market cap on the fixed 1e15 supply; seed-pools-merged)",
+    "slot": 453426909,
+    "dir": "0->1",
+    "input_reserve": 41450582223332,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 4145058,
+        "amount_out": 846,
+        "spent": 4145058,
+        "cu_venue": 73217,
+        "cu_tx": 73367,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 13578006,
+        "amount_out": 2776,
+        "spent": 13578006,
+        "cu_venue": 73217,
+        "cu_tx": 73367,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 44477606,
+        "amount_out": 9099,
+        "spent": 44477606,
+        "cu_venue": 73210,
+        "cu_tx": 73360,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 145695718,
+        "amount_out": 29808,
+        "spent": 145695718,
+        "cu_venue": 73210,
+        "cu_tx": 73360,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 477256854,
+        "amount_out": 97647,
+        "spent": 477256854,
+        "cu_venue": 73210,
+        "cu_tx": 73360,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1563354830,
+        "amount_out": 319857,
+        "spent": 1563354830,
+        "cu_venue": 73210,
+        "cu_tx": 73360,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 5121096325,
+        "amount_out": 1047673,
+        "spent": 5121096325,
+        "cu_venue": 73365,
+        "cu_tx": 73515,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 16775224067,
+        "amount_out": 3430911,
+        "spent": 16775224067,
+        "cu_venue": 73364,
+        "cu_tx": 73514,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 54950761438,
+        "amount_out": 11228337,
+        "spent": 54950761438,
+        "cu_venue": 73364,
+        "cu_tx": 73514,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 180002733235,
+        "amount_out": 36670292,
+        "spent": 180002733235,
+        "cu_venue": 73364,
+        "cu_tx": 73514,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 589636669698,
+        "amount_out": 118950784,
+        "spent": 589636669698,
+        "cu_venue": 73365,
+        "cu_tx": 73515,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1931478461488,
+        "amount_out": 377596093,
+        "spent": 1931478461488,
+        "cu_venue": 73364,
+        "cu_tx": 73514,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 6326962414164,
+        "amount_out": 1123102073,
+        "spent": 6326962414164,
+        "cu_venue": 73365,
+        "cu_tx": 73515,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 20725291111666,
+        "amount_out": 2827004807,
+        "spent": 20725291111666,
+        "cu_venue": 73463,
+        "cu_tx": 73613,
+        "err": null,
+        "dlmm_arrays": []
+      }
+    ]
+  },
+  {
+    "venue": "PumpSwap",
+    "pool": "GxqGY3UHL36SjMZPsu49fAKAm9EETGzxseuqWabLmpME",
+    "label": "pump GxqG (mayhem: market cap on the fixed 1e15 supply; seed-pools-merged)",
+    "slot": 453426909,
+    "dir": "1->0",
+    "input_reserve": 8588369040,
+    "swaps": [
+      {
+        "ok": true,
+        "amount_in": 1000,
+        "amount_out": 4753966,
+        "spent": 1000,
+        "cu_venue": 86969,
+        "cu_tx": 87119,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3237,
+        "amount_out": 15420222,
+        "spent": 3237,
+        "cu_venue": 86955,
+        "cu_tx": 87105,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 10481,
+        "amount_out": 49943138,
+        "spent": 10481,
+        "cu_venue": 86955,
+        "cu_tx": 87105,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 33936,
+        "amount_out": 161754907,
+        "spent": 33936,
+        "cu_venue": 86955,
+        "cu_tx": 87105,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 109871,
+        "amount_out": 523711630,
+        "spent": 109871,
+        "cu_venue": 86955,
+        "cu_tx": 87105,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 355719,
+        "amount_out": 1695552443,
+        "spent": 355719,
+        "cu_venue": 86955,
+        "cu_tx": 87105,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1151673,
+        "amount_out": 5489028699,
+        "spent": 1151673,
+        "cu_venue": 87226,
+        "cu_tx": 87376,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 3728645,
+        "amount_out": 17765992898,
+        "spent": 3728645,
+        "cu_venue": 87227,
+        "cu_tx": 87377,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 12071819,
+        "amount_out": 57463893766,
+        "spent": 12071819,
+        "cu_venue": 87227,
+        "cu_tx": 87377,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 39083579,
+        "amount_out": 185469117973,
+        "spent": 39083579,
+        "cu_venue": 87227,
+        "cu_tx": 87377,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 126536531,
+        "amount_out": 594520300390,
+        "spent": 126536531,
+        "cu_venue": 87227,
+        "cu_tx": 87377,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 409673164,
+        "amount_out": 1864958925509,
+        "spent": 409673164,
+        "cu_venue": 87227,
+        "cu_tx": 87377,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 1326352955,
+        "amount_out": 5485699649893,
+        "spent": 1326352955,
+        "cu_venue": 87227,
+        "cu_tx": 87377,
+        "err": null,
+        "dlmm_arrays": []
+      },
+      {
+        "ok": true,
+        "amount_in": 4294184519,
+        "amount_out": 13702671802236,
+        "spent": 4294184519,
+        "cu_venue": 87225,
+        "cu_tx": 87375,
         "err": null,
         "dlmm_arrays": []
       }

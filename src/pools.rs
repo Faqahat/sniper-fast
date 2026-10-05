@@ -7,11 +7,15 @@ use crate::rec::accounts::{role, RoleOf, NO_POOL};
 use crate::rpc::Rpc;
 use crate::tx::{b58, pk, Pk};
 use crate::venues::{dlmm, pk_at, PoolMeta, Venue, WSOL};
+use arbx_sizing::venue::dammv2;
 use anyhow::{Context, Result};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::sync::LazyLock;
 
 pub static PUMP_FEE_CONFIG: LazyLock<Pk> = LazyLock::new(|| pk("5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx"));
+/// PumpSwap's GlobalConfig: its disable flags and configurable-creator-fee switch are part of every PumpSwap quote
+/// (arbx-sizing `pumpswap::parse`, PLAN-ADDENDUM WP-16), so the state stream follows it
+pub static PUMP_GLOBAL_CONFIG: LazyLock<Pk> = LazyLock::new(|| arbx_sizing::layout::PUMP_GLOBAL_CONFIG);
 pub static PUMP_FUN: LazyLock<Pk> = LazyLock::new(|| pk("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"));
 /// the Clock sysvar (chain time; WP-03 item 2)
 pub static CLOCK_SYSVAR: LazyLock<Pk> = LazyLock::new(|| pk("SysvarC1ock11111111111111111111111111111111"));
@@ -30,6 +34,17 @@ pub struct Registry {
 }
 
 pub fn pair_key(a: &Pk, b: &Pk) -> (Pk, Pk) { if a <= b { (*a, *b) } else { (*b, *a) } }
+
+/// The pool's Token-2022 mints its quote scans for a transfer fee or hook (arbx-sizing refuses both: `sz_transfer_fee`,
+/// `sz_transfer_hook`), beyond the accounts it already follows (a PumpSwap pool's base mint is `extra[0]`). SPL Token
+/// mints can carry neither, so they are not followed
+pub fn t22_mints(m: &PoolMeta) -> Vec<Pk> {
+    let mut v = Vec::new();
+    for (mint, prog) in [(m.t0, m.t0_prog), (m.t1, m.t1_prog)] {
+        if prog == *pda::TOKEN_2022 && !m.extra.contains(&mint) && !v.contains(&mint) { v.push(mint); }
+    }
+    v
+}
 
 /// (venue, pool) candidates from the seed CSV and the registry
 pub fn candidates(cfg: &PoolsCfg) -> Result<(Vec<(Venue, Pk)>, HashSet<Pk>, HashSet<Pk>)> {
@@ -70,56 +85,72 @@ pub fn candidates(cfg: &PoolsCfg) -> Result<(Vec<(Venue, Pk)>, HashSet<Pk>, Hash
     Ok((out, seeds, ours))
 }
 
-/// Read every candidate pool from chain and build its metadata.
-pub async fn boot(rpc: &Rpc, cands: &[(Venue, Pk)], seeds: HashSet<Pk>, ours: HashSet<Pk>) -> Result<Registry> {
-    let keys: Vec<Pk> = cands.iter().map(|c| c.1).collect();
-    let (_, accts) = rpc.accounts(&keys).await?;
-    let mut metas = Vec::new();
+/// A candidate pool `boot` did not keep, and why (WP-16 review F8: meta.json `pools.dropped`, events.jsonl
+/// `pools_dropped`): `missing` (no account), `owner` (not the venue's program), `layout` (an account the venue's quote
+/// does not read: a length or discriminator arbx-sizing does not accept), `transfer_fee`, `transfer_hook`,
+/// `mint_layout` (a mint arbx-sizing refuses: a nonzero Token-2022 transfer fee, a transfer hook with a program set, an
+/// extension list it cannot read; `mint` names it)
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Dropped { pub venue: Venue, pub pool: String, pub why: &'static str, pub mint: Option<String> }
+
+/// The drops as a boot record: `{total, counts: {why: n}, pools: [{venue, pool, why, mint}]}`
+pub fn drops_json(d: &[Dropped]) -> serde_json::Value {
+    let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+    for x in d { *counts.entry(x.why).or_default() += 1; }
+    serde_json::json!({ "total": d.len(), "counts": counts, "pools": d })
+}
+
+/// The candidates' metadata from their accounts (None: not found), and the ones that are not kept
+pub fn pool_metas(cands: &[(Venue, Pk)], accts: &[Option<crate::rpc::Account>]) -> (Vec<PoolMeta>, Vec<Dropped>) {
+    let (mut metas, mut drops) = (Vec::new(), Vec::new());
     for ((venue, pool), a) in cands.iter().zip(accts) {
-        let Some(a) = a else { continue };
-        if a.owner != venue.program() { continue; }
-        let d = &a.data;
-        let m = match venue {
-            Venue::RayAmmV4 if d.len() >= 752 => (pk_at(d, 400), pk_at(d, 432), pk_at(d, 336), pk_at(d, 368), vec![], false),
-            Venue::RayCpmm if d.len() >= 413 => (pk_at(d, 168), pk_at(d, 200), pk_at(d, 72), pk_at(d, 104), vec![pk_at(d, 8).unwrap()], false),
-            Venue::PumpSwap if d.len() >= 253 => {
-                let base = pk_at(d, 43).unwrap();
-                let canonical = pk_at(d, 11) == Some(pda::find_program_address(&[b"pool-authority", &base], &PUMP_FUN).0);
-                (Some(base), pk_at(d, 75), pk_at(d, 139), pk_at(d, 171), vec![base], canonical)
-            }
-            // DAMM v2: mints and vaults straight from the pool (t0 = token a, t1 = token b: the program's own order)
-            Venue::DammV2 => match crate::venues::dammv2::decode(d) {
-                Some(p) => (Some(p.token_a_mint), Some(p.token_b_mint), Some(p.token_a_vault), Some(p.token_b_vault), vec![], false),
-                None => continue,
-            },
-            Venue::Dlmm if d.len() >= 904 => {
-                let ext = pda::find_program_address(&[b"bitmap", pool], &venue.program()).0;
-                (pk_at(d, 88), pk_at(d, 120), pk_at(d, 152), pk_at(d, 184), vec![ext], false)
-            }
-            _ => continue,
+        let why = match a {
+            None => "missing",
+            Some(a) if a.owner != venue.program() => "owner",
+            Some(a) => match meta_of(*venue, pool, &a.data) { Some(m) => { metas.push(m); continue } None => "layout" },
         };
-        let (Some(t0), Some(t1), Some(v0), Some(v1)) = (m.0, m.1, m.2, m.3) else { continue };
-        metas.push(PoolMeta { venue: *venue, pool: *pool, t0, t1, vault0: v0, vault1: v1, t0_prog: *pda::TOKEN_PROGRAM, t1_prog: *pda::TOKEN_PROGRAM, extra: m.4, flag: m.5 });
+        drops.push(Dropped { venue: *venue, pool: b58(pool), why, mint: None });
     }
-    // token programs from the mints' owners
-    let mints: Vec<Pk> = metas.iter().flat_map(|m| [m.t0, m.t1]).collect::<HashSet<_>>().into_iter().collect();
-    let (_, macc) = rpc.accounts(&mints).await?;
-    let mut nofee: HashSet<Pk> = HashSet::default();
-    let owner: HashMap<Pk, Pk> = mints.iter().zip(macc).filter_map(|(k, a)| a.map(|a| {
-        if !has_transfer_fee(&a.data) { nofee.insert(*k); }
+    (metas, drops)
+}
+
+/// The token programs from the mints' owners (`mints` and their accounts, None: not found), DAMM v2's `flag`, and the
+/// pools whose mint arbx-sizing refuses dropped (returned)
+pub fn apply_mints(metas: &mut Vec<PoolMeta>, mints: &[Pk], macc: &[Option<crate::rpc::Account>]) -> Vec<Dropped> {
+    let mut refused: HashMap<Pk, &'static str> = HashMap::default();
+    let owner: HashMap<Pk, Pk> = mints.iter().zip(macc).filter_map(|(k, a)| a.as_ref().map(|a| {
+        if let Some(why) = mint_refused(&a.data) { refused.insert(*k, why); }
         (*k, a.owner)
     })).collect();
-    for m in &mut metas {
+    for m in metas.iter_mut() {
         if let Some(o) = owner.get(&m.t0) { m.t0_prog = *o; }
         if let Some(o) = owner.get(&m.t1) { m.t1_prog = *o; }
-        // DAMM v2: `flag` = neither mint charges a Token-2022 transfer fee (the quote refuses pools where it may)
-        if m.venue == Venue::DammV2 { m.flag = nofee.contains(&m.t0) && nofee.contains(&m.t1); }
+        // DAMM v2: `flag` = neither mint charges a Token-2022 transfer fee (kept for the tools; the quote scans the mints)
+        if m.venue == Venue::DammV2 { m.flag = !refused.contains_key(&m.t0) && !refused.contains_key(&m.t1); }
     }
-    // a token that takes a transfer fee ("tax token", Token-2022) shrinks every leg by it; none of our quotes model it,
-    // so its pools only make fake gaps (2026-10-03: exactly -100 / -300 bps per leg on such pools). Drop them.
-    let before = metas.len();
-    metas.retain(|m| nofee.contains(&m.t0) && nofee.contains(&m.t1));
-    if metas.len() < before { eprintln!("pools: dropped {} pools whose token charges a transfer fee", before - metas.len()); }
+    // a token that takes a transfer fee ("tax token", Token-2022) shrinks every leg by it, and one with a transfer hook
+    // needs accounts our legs do not pass: arbx-sizing refuses both (`sz_transfer_fee`, `sz_transfer_hook`), so their
+    // pools could only make fake gaps (2026-10-03: exactly -100 / -300 bps per leg on fee pools). Drop them here; a
+    // mint that turns its fee or hook on later is refused at quote time (the engine follows Token-2022 mints).
+    let mut drops = Vec::new();
+    metas.retain(|m| {
+        let Some((mint, why)) = [m.t0, m.t1].into_iter().find_map(|k| refused.get(&k).map(|w| (k, *w))) else { return true };
+        let why = if why == "layout" { "mint_layout" } else { why };
+        drops.push(Dropped { venue: m.venue, pool: b58(&m.pool), why, mint: Some(b58(&mint)) });
+        false
+    });
+    drops
+}
+
+/// Read every candidate pool from chain and build its metadata; the candidates not kept, with why (`Dropped`)
+pub async fn boot(rpc: &Rpc, cands: &[(Venue, Pk)], seeds: HashSet<Pk>, ours: HashSet<Pk>) -> Result<(Registry, Vec<Dropped>)> {
+    let keys: Vec<Pk> = cands.iter().map(|c| c.1).collect();
+    let (_, accts) = rpc.accounts(&keys).await?;
+    let (mut metas, mut drops) = pool_metas(cands, &accts);
+    let mints: Vec<Pk> = metas.iter().flat_map(|m| [m.t0, m.t1]).collect::<HashSet<_>>().into_iter().collect();
+    let (_, macc) = rpc.accounts(&mints).await?;
+    drops.extend(apply_mints(&mut metas, &mints, &macc));
+    if !drops.is_empty() { eprintln!("pools: dropped {} candidates {} (meta.json pools.dropped)", drops.len(), drops_json(&drops)["counts"]); }
     // DLMM: does the bitmap extension exist? (kept in extra[0] only if it does)
     let exts: Vec<Pk> = metas.iter().filter(|m| m.venue == Venue::Dlmm).map(|m| m.extra[0]).collect();
     let (_, eacc) = rpc.accounts(&exts).await?;
@@ -130,26 +161,50 @@ pub async fn boot(rpc: &Rpc, cands: &[(Venue, Pk)], seeds: HashSet<Pk>, ours: Ha
     for (i, m) in metas.iter().enumerate() { pairs.entry(pair_key(&m.t0, &m.t1)).or_default().push(i); }
     pairs.retain(|k, v| (k.0 == *WSOL || k.1 == *WSOL) && v.len() >= 2);
     let by_pool = metas.iter().enumerate().map(|(i, m)| (m.pool, i)).collect();
-    Ok(Registry { pools: metas, by_pool, pairs, seeds, ours })
+    Ok((Registry { pools: metas, by_pool, pairs, seeds, ours }, drops))
 }
 
-/// A Token-2022 mint with a TransferFeeConfig extension (type 1) whose older or newer fee is non-zero. Mint base 82
-/// bytes, padding to 165, account type at 165, then TLV (u16 type, u16 length, value). SPL mints never charge one.
-fn has_transfer_fee(d: &[u8]) -> bool {
-    if d.len() <= 166 { return false; }
-    let mut o = 166;
-    while o + 4 <= d.len() {
-        let (t, l) = (u16::from_le_bytes([d[o], d[o + 1]]), u16::from_le_bytes([d[o + 2], d[o + 3]]) as usize);
-        if t == 0 { return false; }
-        if t == 1 {
-            // authorities 32 + 32, withheld u64, older {epoch u64, max u64, bps u16}, newer {epoch u64, max u64, bps u16}
-            let v = &d[o + 4..(o + 4 + l).min(d.len())];
-            let bps = |at: usize| v.get(at..at + 2).map_or(1, |b| u16::from_le_bytes([b[0], b[1]]));
-            return bps(72 + 16) != 0 || bps(72 + 18 + 16) != 0;
+/// A pool's metadata from its own account bytes (the token programs default to SPL Token: `boot` sets them from the
+/// mints' owners; DLMM's `flag`, the bitmap extension's existence, is false until `boot` checks it). None: not a
+/// pool of this venue the engine reads
+pub fn meta_of(venue: Venue, pool: &Pk, d: &[u8]) -> Option<PoolMeta> {
+    let m = match venue {
+        Venue::RayAmmV4 if d.len() >= 752 => (pk_at(d, 400), pk_at(d, 432), pk_at(d, 336), pk_at(d, 368), vec![], false),
+        Venue::RayCpmm if d.len() >= 413 => (pk_at(d, 168), pk_at(d, 200), pk_at(d, 72), pk_at(d, 104), vec![pk_at(d, 8)?], false),
+        // every length the program (and arbx-sizing) reads: from the original layout up (a pool written before a trailing
+        // field existed is shorter; WP-16 review F1)
+        Venue::PumpSwap if d.len() >= arbx_sizing::venue::pumpswap::POOL_MIN_LEN => {
+            let base = pk_at(d, 43)?;
+            let canonical = pk_at(d, 11) == Some(pda::find_program_address(&[b"pool-authority", &base], &PUMP_FUN).0);
+            (Some(base), pk_at(d, 75), pk_at(d, 139), pk_at(d, 171), vec![base], canonical)
         }
-        o += 4 + l;
+        // DAMM v2: mints and vaults straight from the pool (t0 = token a, t1 = token b: the program's own order); a pool of
+        // another length or discriminator is not one arbx-sizing prices
+        Venue::DammV2 => {
+            let k = dammv2::decode(d).and_then(|_| dammv2::keys(d))?;
+            (Some(*k.token_a_mint), Some(*k.token_b_mint), Some(*k.token_a_vault), Some(*k.token_b_vault), vec![], false)
+        }
+        Venue::Dlmm if d.len() >= 904 => {
+            let ext = pda::find_program_address(&[b"bitmap", pool], &venue.program()).0;
+            (pk_at(d, 88), pk_at(d, 120), pk_at(d, 152), pk_at(d, 184), vec![ext], false)
+        }
+        _ => return None,
+    };
+    let (Some(t0), Some(t1), Some(v0), Some(v1)) = (m.0, m.1, m.2, m.3) else { return None };
+    Some(PoolMeta { venue, pool: *pool, t0, t1, vault0: v0, vault1: v1, t0_prog: *pda::TOKEN_PROGRAM, t1_prog: *pda::TOKEN_PROGRAM, extra: m.4, flag: m.5 })
+}
+
+/// Why arbx-sizing refuses a mint (DESIGN.md §2.0, `token::scan_extensions`): a Token-2022 TransferFeeConfig whose
+/// older or newer fee is nonzero (`transfer_fee`), a TransferHook with a program set (`transfer_hook`), or an extension
+/// list it cannot read (`layout`). SPL mints (82 bytes) have none
+pub fn mint_refused(d: &[u8]) -> Option<&'static str> {
+    if d.len() <= 82 { return None; }
+    match arbx_sizing::token::scan_extensions(d) {
+        Ok(()) => None,
+        Err(arbx_sizing::Abort::TransferFee) => Some("transfer_fee"),
+        Err(arbx_sizing::Abort::TransferHook) => Some("transfer_hook"),
+        Err(_) => Some("layout"),
     }
-    false
 }
 
 impl Registry {
@@ -163,12 +218,13 @@ impl Registry {
             add(m.pool, &mut s);
             // DLMM and DAMM v2 price off the pool account alone (DLMM adds its bin arrays through the engine)
             if !matches!(m.venue, Venue::Dlmm | Venue::DammV2) { add(m.vault0, &mut s); add(m.vault1, &mut s); for e in &m.extra { add(*e, &mut s); } }
-            if m.venue == Venue::PumpSwap { add(*PUMP_FEE_CONFIG, &mut s); }
+            if m.venue == Venue::PumpSwap { add(*PUMP_FEE_CONFIG, &mut s); add(*PUMP_GLOBAL_CONFIG, &mut s); }
+            for k in t22_mints(m) { add(k, &mut s); }
         }
         s
     }
     /// Every account `static_accounts` follows, with its role (accounts.bin DICT, exec.jsonl `watched`; WP-03): pools,
-    /// vaults, PumpSwap base mints, CPMM configs, the PumpSwap fee config
+    /// vaults, PumpSwap base mints, CPMM configs, the PumpSwap fee config and GlobalConfig, Token-2022 mints (WP-16)
     pub fn watch_roles(&self) -> Vec<(Pk, RoleOf)> {
         let mut out = Vec::new();
         let r = |role: u8, i: usize| RoleOf { role, pool_index: i as u32 };
@@ -180,7 +236,11 @@ impl Registry {
                 out.push((m.vault1, r(role::VAULT, i)));
                 for e in &m.extra { out.push((*e, r(if m.venue == Venue::PumpSwap { role::MINT } else { role::EXTRA }, i))); }
             }
-            if m.venue == Venue::PumpSwap { out.push((*PUMP_FEE_CONFIG, RoleOf { role: role::PUMP_FEE_CONFIG, pool_index: NO_POOL })); }
+            if m.venue == Venue::PumpSwap {
+                out.push((*PUMP_FEE_CONFIG, RoleOf { role: role::PUMP_FEE_CONFIG, pool_index: NO_POOL }));
+                out.push((*PUMP_GLOBAL_CONFIG, RoleOf { role: role::PUMP_GLOBAL_CONFIG, pool_index: NO_POOL }));
+            }
+            for k in t22_mints(m) { out.push((k, r(role::MINT, i))); }
         }
         out
     }
@@ -244,3 +304,42 @@ pub fn dlmm_arrays(pool: &Pk, active: i32) -> Vec<(i64, Pk)> {
 }
 
 pub fn show(k: &Pk) -> String { let s = b58(k); format!("{}…", &s[..8]) }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rpc::Account;
+
+    /// WP-16 review F8: the candidates `boot` does not keep are named with why: a missing account, another owner, a
+    /// layout no venue reads (a PumpSwap pool below the program's 211 bytes), a mint arbx-sizing refuses (a Token-2022
+    /// transfer fee, a transfer hook with a program set); the others are kept, a mint's owner setting the token program
+    #[test]
+    fn boot_names_every_candidate_it_drops() {
+        let pump = |len: usize, base: u8| { let mut d = vec![0u8; len]; d[43..75].fill(base); d[75..107].copy_from_slice(&*WSOL); d[139..171].fill(base + 1); d[171..203].fill(base + 2); d };
+        let acct = |owner: Pk, data: Vec<u8>| Some(Account { owner, lamports: 1, data });
+        let p = |n: u8| [n; 32];
+        let cands = vec![(Venue::PumpSwap, p(1)), (Venue::PumpSwap, p(2)), (Venue::PumpSwap, p(3)), (Venue::PumpSwap, p(4)), (Venue::PumpSwap, p(5)), (Venue::PumpSwap, p(6))];
+        let pump_prog = Venue::PumpSwap.program();
+        let accts = vec![acct(pump_prog, pump(301, 10)), None, acct([9; 32], pump(301, 20)), acct(pump_prog, pump(210, 30)), acct(pump_prog, pump(211, 40)),
+            acct(pump_prog, pump(300, 50))];
+        let (mut metas, drops) = pool_metas(&cands, &accts);
+        assert_eq!(metas.iter().map(|m| m.pool[0]).collect::<Vec<_>>(), vec![1, 5, 6], "301, 211 and 300 bytes are read");
+        assert_eq!(drops.iter().map(|d| (d.pool.clone(), d.why)).collect::<Vec<_>>(),
+            vec![(b58(&p(2)), "missing"), (b58(&p(3)), "owner"), (b58(&p(4)), "layout")]);
+        // the mints: pool 5's base charges a transfer fee, pool 6's has a transfer hook; pool 1's is clean Token-2022
+        let t22 = |ext: Option<(u16, Vec<u8>)>| { let mut d = vec![0u8; 166]; d[165] = 1; if let Some((t, v)) = ext { d.extend(t.to_le_bytes()); d.extend((v.len() as u16).to_le_bytes()); d.extend(v); } d };
+        let mut fee = vec![0u8; 108];
+        fee[88..90].copy_from_slice(&300u16.to_le_bytes());
+        let mut hook = vec![0u8; 64];
+        hook[32..64].fill(7);
+        let mints = vec![[10; 32], [40; 32], [50; 32], *WSOL];
+        let macc = vec![acct(*pda::TOKEN_2022, t22(None)), acct(*pda::TOKEN_2022, t22(Some((1, fee)))), acct(*pda::TOKEN_2022, t22(Some((14, hook)))),
+            acct(*pda::TOKEN_PROGRAM, vec![0u8; 82])];
+        let drops = apply_mints(&mut metas, &mints, &macc);
+        assert_eq!(metas.iter().map(|m| (m.pool[0], m.t0_prog == *pda::TOKEN_2022)).collect::<Vec<_>>(), vec![(1, true)]);
+        assert_eq!(drops.iter().map(|d| (d.pool.clone(), d.why, d.mint.clone())).collect::<Vec<_>>(),
+            vec![(b58(&p(5)), "transfer_fee", Some(b58(&[40; 32]))), (b58(&p(6)), "transfer_hook", Some(b58(&[50; 32])))]);
+        let j = drops_json(&drops);
+        assert_eq!((j["total"].as_u64(), j["counts"]["transfer_fee"].as_u64(), j["pools"][1]["why"].as_str()), (Some(2), Some(1), Some("transfer_hook")));
+    }
+}

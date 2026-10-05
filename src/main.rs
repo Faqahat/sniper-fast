@@ -274,8 +274,11 @@ fn main() -> Result<()> {
                 if eps.is_empty() { anyhow::bail!("no RPC provider configured (skipped: {skipped:?})"); }
                 let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover);
                 let (cands, seeds, ours) = pools::candidates(&cfg.pools)?;
-                let reg = pools::boot(&rpc, &cands, seeds, ours).await?;
+                let (reg, drops) = pools::boot(&rpc, &cands, seeds, ours).await?;
                 println!("{} candidates -> {}", cands.len(), reg.summary());
+                // the candidates not kept, with why (WP-16 review F8)
+                println!("dropped: {}", pools::drops_json(&drops)["counts"]);
+                for d in &drops { println!("  {:?} {} {}{}", d.venue, d.pool, d.why, d.mint.as_ref().map_or(String::new(), |m| format!(" (mint {m})"))); }
                 for (k, v) in &reg.pairs {
                     let mint = if k.0 == *venues::WSOL { k.1 } else { k.0 };
                     let names: Vec<String> = v.iter().map(|&i| format!("{:?}:{}", reg.pools[i].venue, pools::show(&reg.pools[i].pool))).collect();
@@ -543,7 +546,8 @@ fn simcheck(config: &Path, max: usize, size_sol: f64, canaries: u32) -> Result<(
         Ok(())
     };
     let (cands, seeds, ours) = pools::candidates(&cfg.pools)?;
-    let reg = rt.block_on(pools::boot(&rpc, &cands, seeds, ours))?;
+    let (reg, drops) = rt.block_on(pools::boot(&rpc, &cands, seeds, ours))?;
+    rec.event("pools_dropped", "engine", None, pools::drops_json(&drops));
     let mut store = store::Store::default();
     fetch(&mut store, &reg.static_accounts())?;
     engine::initial_dlmm_arrays(&reg, &mut store);
@@ -1090,7 +1094,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // pools, then a first snapshot of every followed account
     let (reg, store, snapshot_slot) = rts.bg.block_on(async {
         let (cands, seeds, ours) = pools::candidates(&cfg.pools)?;
-        let reg = pools::boot(&rpc, &cands, seeds, ours).await?;
+        let (reg, drops) = pools::boot(&rpc, &cands, seeds, ours).await?;
+        // the candidates the registry did not keep, with why (WP-16 review F8): a boot record in events.jsonl, and meta.json
+        // `pools.dropped` below
+        rec.event("pools_dropped", "engine", None, pools::drops_json(&drops));
         let programs: Vec<tx::Pk> = if cfg.state.watch_programdata { provenance::program_specs(&cfg).iter().map(|p| p.id).collect() } else { vec![] };
         // (a wallet that is not a key leaves the wallet accounts out: the run's keystore check names it)
         let wallet = cfg.state.watch_wallet.then(|| bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok())).flatten();
@@ -1126,10 +1133,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
             for (k, a) in chunk.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, s); } }
         }
         acct_rec.mark(rec::accounts::MARK_BOOT_END, &[]);
-        boot_extra = Some((roles, acct_rec, base, extra.len()));
+        boot_extra = Some((roles, acct_rec, base, extra.len(), drops));
         anyhow::Ok((reg, store, slot))
     })?;
-    let (roles, acct_rec, base_watch, n_extra) = boot_extra.expect("set by the boot");
+    let (roles, acct_rec, base_watch, n_extra, pool_drops) = boot_extra.expect("set by the boot");
     let snapshot_ns = now_ns();
     // review F1: the state stream starts right after the snapshot, as in arb-lab. It sends only the writes after it
     // subscribes and the engine never re-reads the pools, so every step put between the two (the programs, the send
@@ -1255,6 +1262,9 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     programs.extend(venue_specs.iter().map(provenance::pending_entry));
     let mut streams = provenance::streams_json();
     if let (Some(m), Value::Object(r)) = (streams.as_object_mut(), rec.streams_json()) { m.extend(r); }
+    // the registry and the candidates it did not keep (WP-16 review F8)
+    let mut pools_meta = provenance::pools_json(&reg, &cfg);
+    pools_meta["dropped"] = pools::drops_json(&pool_drops);
     let meta = json!({
         "schema": provenance::META_SCHEMA,
         "run": run_json, "build": provenance::build_json(), "config": config_json,
@@ -1267,7 +1277,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
             "slot_statuses": if interslot { "all" } else { "commitment" }, "extra_watched": n_extra, "config": provenance::section(&cfg.state),
             "snapshot_slot": snapshot_slot, "snapshot_ns": snapshot_ns, "stream_started_ns": stream_started_ns, "followed": followed },
         "probe": probe_meta, "chainfetch": cf_meta, "leaders": provenance::section(&cfg.leaders),
-        "pools": provenance::pools_json(&reg, &cfg), "inputs": provenance::inputs_json(&cfg),
+        "pools": pools_meta, "inputs": provenance::inputs_json(&cfg),
         "streams": streams, "experiments": null,
         "limits": limits, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()),
         "clock": provenance::clock_json(),

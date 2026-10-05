@@ -11,35 +11,13 @@
 //!      least every pair's realized profit at its own planned size, and pair 0 at e.
 //!
 //!   VENUE_HARNESS_REQUIRE_SIZING=1 cargo test --release --test route -- --nocapture
+mod common;
 use serde_json::{json, Value};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use venue_harness::venues::pump_canonical_bump;
 use venue_harness::*;
-
-const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
-
-fn build_bridge(sizing: &Path) -> Result<PathBuf, String> {
-    let root = Path::new(MANIFEST_DIR);
-    let target = root.join("target").join("sizing-bridge-route");
-    let src = target.join("crate");
-    std::fs::create_dir_all(src.join("src")).unwrap();
-    let manifest = std::fs::read_to_string(root.join("sizing-bridge/Cargo.toml")).unwrap()
-        .replace("path = \"../../arbx-sizing\"", &format!("path = {:?}", sizing.canonicalize().unwrap()));
-    std::fs::write(src.join("Cargo.toml"), manifest).unwrap();
-    let _ = std::fs::remove_file(src.join("Cargo.lock"));
-    std::fs::copy(root.join("sizing-bridge/src/main.rs"), src.join("src/main.rs")).unwrap();
-    let mut cmd = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
-    cmd.args(["build", "--release", "--manifest-path"]).arg(src.join("Cargo.toml")).arg("--target-dir").arg(&target);
-    for (k, _) in std::env::vars() {
-        if k.starts_with("CARGO_") && !matches!(k.as_str(), "CARGO_HOME" | "CARGO_BUILD_JOBS" | "CARGO_NET_OFFLINE") { cmd.env_remove(&k); }
-    }
-    if std::env::var("CARGO_BUILD_JOBS").is_err() { cmd.env("CARGO_BUILD_JOBS", "4"); }
-    let out = cmd.output().map_err(|e| format!("running cargo: {e}"))?;
-    if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).lines().rev().take(30).collect::<Vec<_>>().join("\n")); }
-    Ok(target.join("release").join("sizing-bridge"))
-}
 
 fn b64(b: &[u8]) -> String { use base64::Engine as _; base64::engine::general_purpose::STANDARD.encode(b) }
 
@@ -80,11 +58,11 @@ fn realized(a: &Harness, da: Dir, b: &Harness, db: Dir, opts: &BuildOpts, x: u64
 
 #[test]
 fn hotbot_routes_plan_on_the_real_programs() {
-    let sizing = std::env::var("VENUE_HARNESS_SIZING_DIR").map(PathBuf::from).unwrap_or_else(|_| Path::new(MANIFEST_DIR).join("../arbx-sizing"));
+    let sizing = common::sizing_dir();
     if !sizing.join("Cargo.toml").exists() { println!("SKIP route: no arbx-sizing"); return; }
-    let bridge = match build_bridge(&sizing) {
+    let bridge = match common::build_bridge(&sizing, "sizing-bridge-route") {
         Ok(b) => b,
-        Err(e) => { if std::env::var("VENUE_HARNESS_REQUIRE_SIZING").is_ok_and(|v| v == "1") { panic!("{e}") } println!("SKIP route: {e}"); return; }
+        Err(e) => { if common::required() { panic!("{e}") } println!("SKIP route: {e}"); return; }
     };
     let fx = Fixtures::load().unwrap();
     let (Some(gll3), Some(d6)) = (fx.find("GLL3"), fx.find("6D4E")) else { println!("SKIP route: HOTBOT fixtures missing"); return };
@@ -146,11 +124,11 @@ fn hotbot_routes_plan_on_the_real_programs() {
 /// planned size (DESIGN.md §6.3 assertion 5). With min_profit above every candidate: NoProfit (EARLY_ABORT's verdict).
 #[test]
 fn hotbot_basket_on_the_real_programs() {
-    let sizing = std::env::var("VENUE_HARNESS_SIZING_DIR").map(PathBuf::from).unwrap_or_else(|_| Path::new(MANIFEST_DIR).join("../arbx-sizing"));
+    let sizing = common::sizing_dir();
     if !sizing.join("Cargo.toml").exists() { println!("SKIP basket: no arbx-sizing"); return; }
-    let bridge = match build_bridge(&sizing) {
+    let bridge = match common::build_bridge(&sizing, "sizing-bridge-route") {
         Ok(b) => b,
-        Err(e) => { if std::env::var("VENUE_HARNESS_REQUIRE_SIZING").is_ok_and(|v| v == "1") { panic!("{e}") } println!("SKIP basket: {e}"); return; }
+        Err(e) => { if common::required() { panic!("{e}") } println!("SKIP basket: {e}"); return; }
     };
     let fx = Fixtures::load().unwrap();
     let (Some(gll3), Some(d6)) = (fx.find("GLL3"), fx.find("6D4E")) else { println!("SKIP basket: HOTBOT fixtures missing"); return };

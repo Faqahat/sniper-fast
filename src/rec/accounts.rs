@@ -43,11 +43,13 @@ pub mod role {
     pub const WALLET: u8 = 9;
     pub const WALLET_TOKEN_ACCOUNT: u8 = 10;
     pub const PUMP_FEE_CONFIG: u8 = 11;
+    /// PumpSwap's GlobalConfig (WP-16: part of every PumpSwap quote)
+    pub const PUMP_GLOBAL_CONFIG: u8 = 12;
     /// exec.jsonl `watched[].role`
     pub fn name(r: u8) -> &'static str {
         match r { POOL => "pool", VAULT => "vault", EXTRA => "extra", DLMM_BIN_ARRAY => "dlmm_bin_array", MINT => "mint", CLOCK_SYSVAR => "clock_sysvar",
             DLMM_BITMAP_EXT => "dlmm_bitmap_ext", PROGRAMDATA => "programdata", WALLET => "wallet", WALLET_TOKEN_ACCOUNT => "wallet_token_account",
-            PUMP_FEE_CONFIG => "pump_fee_config", _ => "other" }
+            PUMP_FEE_CONFIG => "pump_fee_config", PUMP_GLOBAL_CONFIG => "pump_global_config", _ => "other" }
     }
 }
 

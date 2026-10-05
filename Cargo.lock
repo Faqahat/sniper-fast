@@ -99,6 +99,7 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
+ "arbx-sizing",
  "base64 0.22.1",
  "bs58",
  "clap",
@@ -128,6 +129,10 @@ dependencies = [
  "xxhash-rust",
  "zstd",
 ]
+
+[[package]]
+name = "arbx-sizing"
+version = "0.1.0"
 
 [[package]]
 name = "async-stream"

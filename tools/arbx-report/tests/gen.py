@@ -487,7 +487,13 @@ def generate(d: str) -> str:
              {"sig": S["T1"], "venue": "Dlmm", "pool": PB, "t_ns": t_slot(1003, 25), "slot": 1003, "hint": {"exact": False, "err": 1},
               "pre_state": {"known": True, "versions": []}, "input_src": "executed", "exact": True, "dlmm_bins": {"checked": 2, "exact": 2}, "window_exact_pct": 98.5, "quarantine_action": "log"},
              {"sig": S["T3"], "venue": "Dlmm", "pool": PB, "t_ns": t_slot(1008, 25), "slot": 1008, "hint": {"exact": False, "err": 3},
-              "pre_state": {"known": False, "versions": []}, "input_src": "decoded", "exact": None, "dlmm_bins": None, "window_exact_pct": 98.5, "quarantine_action": "log"}]
+              "pre_state": {"known": False, "versions": []}, "input_src": "decoded", "exact": None, "dlmm_bins": None, "window_exact_pct": 98.5, "quarantine_action": "log"},
+             # WP-16: a swap arbx-sizing refuses (known pre-state, `refused`), and an exact-out swap solved through exact-in quotes
+             {"sig": S["T3"], "venue": "PumpSwap", "pool": PA, "t_ns": t_slot(1009, 25), "slot": 1009, "hint": {"exact": None, "err": None},
+              "pre_state": {"known": True, "versions": []}, "input_src": "decoded", "exact": None, "refused": "sz_transfer_fee", "quarantine_action": "log"},
+             {"sig": S["T3"], "venue": "PumpSwap", "pool": PA, "t_ns": t_slot(1010, 25), "slot": 1010, "hint": {"exact": None, "err": None},
+              "pre_state": {"known": True, "versions": []}, "input_src": "decoded", "exact": False, "exact_out": True, "exact_out_model": "solved",
+              "window_exact_pct": 50.0, "quarantine_action": "log"}]
     write_zjsonl(d, "predictions", "2.0", preds)
     caps = [{"id": i, "kind": "state", "slot": 1000 + s, "buy": PA, "sell": PB, "buy_venue": "PumpSwap", "sell_venue": "Dlmm", "mint": MINT,
              "best_size": 10 ** 8, "best_net": 1000 * (i + 1), "at_trade_size": [10 ** 8, 1000 * (i + 1)],
