@@ -24,6 +24,6 @@
 | c3 | 09:42–10:43 | PASS: `deadline`, exit 0. The operator's machine was out of memory about 10:00–11:26, so the watcher lapsed; the segment was unaffected |
 | c4 | 11:27–12:28 | PASS: `deadline`, exit 0. Watcher lapse during the operator-side outage about 12:20–13:05 |
 | c5 | 13:10–14:10 | PASS: `deadline`, exit 0. At 59 min: 2.94M txs, 73,272 decisions, 1,621 opportunities, state connected |
-| c6 | 14:10– | running |
+| c6 | 14:10–15:10 | PASS: `deadline`, exit 0. Last segment before the usage pause; no new segments started |
 
 **Note (2026-10-05):** the operator-side "network outages" were in fact the dev machine running out of memory. /tmp is RAM, and it held build target dirs while four parallel builds ran, so the OOM killer took down processes, DNS among them. Since then there is one build at a time (a global flock) and the target dirs are on disk. Cherry and the segments were never affected.
