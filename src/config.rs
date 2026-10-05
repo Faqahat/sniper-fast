@@ -7,6 +7,7 @@
 //! formatting (meta.json `config.normalized_sha256`).
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -113,6 +114,18 @@ pub struct ChainfetchCfg {
     /// which providers serve which chain-fetch role, and each provider's budget
     #[serde(default, rename = "provider")]
     pub providers: Vec<ChainfetchProviderCfg>,
+    /// FT-000 (S1-1): a share of each provider's `max_rps` reserved for a role, on every provider that serves it (a
+    /// chain-fetch role: the providers `[[chainfetch.provider]]` gives it; `engine`, `alt`, `exec`, ...: every [rpc]
+    /// provider). A reserved role is served ahead of the priority order while its share holds a token, so the slot index
+    /// and the backfill are never starved by busier roles (FT-000: 4 backfill fetches in 30 minutes, the slot index 3,005
+    /// slots behind). The shares on one provider add up to at most `rpc::MAX_RESERVE` (0.95)
+    #[serde(default = "cf_reserve")]
+    pub reserve: BTreeMap<String, f64>,
+    /// FT-000 (S1-12): where source (d) of our wallet's transactions starts: "auto" (the newest `wallet-cursor.json` among
+    /// this run directory's sibling segments: only what is newer than the last segment recorded is listed and fetched),
+    /// a path, or "" (none: the last hour, as before)
+    #[serde(default = "auto")]
+    pub wallet_cursor: String,
 }
 
 /// One `[[chainfetch.provider]]`: an [rpc] endpoint, the chain-fetch roles it serves (`wallet`, `blockhash`, `slotidx`,
@@ -128,6 +141,10 @@ pub struct ChainfetchProviderCfg {
     pub max_rps: Option<f64>,
     /// the bucket's burst (default: max(1, max_rps))
     pub burst: Option<f64>,
+    /// FT-000 (S1-1): this provider's reserved shares by role, in place of `[chainfetch] reserve` (the share of this
+    /// provider's `max_rps`; a role it does not serve gets none)
+    #[serde(default)]
+    pub reserve: Option<BTreeMap<String, f64>>,
 }
 
 /// `[chainfetch] rps`: "auto" or a fixed rate
@@ -148,11 +165,12 @@ fn cf_sigs() -> u64 { 3_600 }
 fn cf_default_rps() -> f64 { 0.0 }
 fn cf_boot_retry() -> u64 { 90 }
 fn cf_txver() -> u8 { 1 }
+fn cf_reserve() -> BTreeMap<String, f64> { BTreeMap::from([("slotidx".to_string(), 0.5), ("backfill".to_string(), 0.25)]) }
 impl Default for ChainfetchCfg {
     fn default() -> Self {
         ChainfetchCfg { enabled: true, after_ms: cf_after_ms(), rps: CfRps::default(), max_backlog: cf_backlog(), sample_every_s: cf_sample(),
             blockhash_poll_ms: cf_bh_poll(), sigs_every_s: cf_sigs(), default_max_rps: cf_default_rps(), boot_retry_s: cf_boot_retry(),
-            max_tx_version: cf_txver(), providers: vec![] }
+            max_tx_version: cf_txver(), providers: vec![], reserve: cf_reserve(), wallet_cursor: auto() }
     }
 }
 
@@ -162,6 +180,24 @@ impl ChainfetchCfg {
     pub fn providers_for(&self, role: &str, all: &[String]) -> Vec<String> {
         let named: Vec<String> = self.providers.iter().filter(|p| p.roles.iter().any(|r| r == role)).map(|p| p.name.clone()).filter(|n| all.contains(n)).collect();
         if self.providers.iter().any(|p| p.roles.iter().any(|r| r == role)) { named } else { all.to_vec() }
+    }
+    /// FT-000 (S1-1): the reserved shares, (provider, role, requests/s), for every provider of `all` (the [rpc]
+    /// providers) with a limit: its `[[chainfetch.provider]] reserve` if it has one, else `[chainfetch] reserve`, each
+    /// share of a role the provider serves (a chain-fetch role: the providers `providers_for` gives it; any other role:
+    /// every provider)
+    pub fn reserves(&self, all: &[String]) -> Vec<(String, crate::rpc::Role, f64)> {
+        let mut out = Vec::new();
+        for p in all {
+            let (rate, _) = self.limit_of(p);
+            if rate <= 0.0 { continue; }
+            let shares = self.providers.iter().find(|x| &x.name == p).and_then(|x| x.reserve.as_ref()).unwrap_or(&self.reserve);
+            for (r, share) in shares {
+                let Some(role) = crate::rpc::Role::parse(r) else { continue };
+                let serves = !crate::rpc::Role::FETCH.contains(&role) || self.providers_for(r, all).contains(p);
+                if serves && *share > 0.0 { out.push((p.clone(), role, share * rate)); }
+            }
+        }
+        out
     }
     /// (rate, burst) of provider `name`'s bucket: its entry's `max_rps`, else `default_max_rps` (0: no limit)
     pub fn limit_of(&self, name: &str) -> (f64, Option<f64>) {
@@ -237,6 +273,13 @@ pub struct RecordCfg {
     /// (`sample`). 1 keeps every row
     #[serde(default = "rec_rivals_venues_sample")]
     pub rivals_venues_sample: u32,
+    /// FT-000 (S1-5): exec.jsonl keeps every transaction-stream record that touches a watched account (a pool, vault,
+    /// DLMM bin array or bitmap extension, our wallet or its token accounts, read or written) or writes any watched
+    /// account, and 1 in this many of the others, chosen by the signature (I-9's rule), each kept one carrying the rate
+    /// and the running counts (`sample`; manifest.json `sampling.exec_unwatched`). 72% of FT-000's exec.jsonl bytes were
+    /// PumpSwap transactions that touched none. 1 keeps every record
+    #[serde(default = "rec_exec_unwatched_sample")]
+    pub exec_unwatched_sample: u32,
 }
 
 impl Default for RecordCfg {
@@ -244,7 +287,7 @@ impl Default for RecordCfg {
         RecordCfg { disk_budget_gb: rec_budget_gb(), min_free_gb: rec_min_free_gb(), rotate_mb: rec_rotate_mb(), rotate_min: rec_rotate_min(), flush_ms: rec_flush_ms(),
             zstd_level: rec_zstd_level(), archive_feeds: vec![], queue_core: rec_queue_core(), queue_accounts: rec_queue_accounts(), queue_journal: rec_queue_journal(),
             queue_chain: rec_queue_core(), queue_bulk: rec_queue_bulk(), queue_max_mb: rec_queue_max_mb(), accounts_keyframe_every: rec_keyframe(), writer_cpus: vec![],
-            rivals_venues_sample: rec_rivals_venues_sample() }
+            rivals_venues_sample: rec_rivals_venues_sample(), exec_unwatched_sample: rec_exec_unwatched_sample() }
     }
 }
 fn rec_budget_gb() -> f64 { 40.0 }
@@ -260,6 +303,7 @@ fn rec_queue_bulk() -> u64 { 131_072 }
 fn rec_queue_max_mb() -> f64 { 1_024.0 }
 fn rec_keyframe() -> u32 { 64 }
 fn rec_rivals_venues_sample() -> u32 { 10 }
+fn rec_exec_unwatched_sample() -> u32 { 20 }
 
 /// The runtime split (src/runtime.rs; PLAN WP-02 item 1): the hot runtime (2 workers) runs stream I/O and sends; the
 /// background runtime runs every RPC call
@@ -692,9 +736,27 @@ pub struct AltsCfg {
     /// transactions waiting for tables, at most (the oldest are dropped and counted)
     #[serde(default = "alt_wait_cap")]
     pub wait_cap: usize,
-    /// fetches running at once, at most (the rest queue)
+    /// tables being fetched at once, at most (the rest queue). FT-000 (S1-1): the fetches are batched (`batch_max` tables
+    /// a getMultipleAccounts), so this counts tables, not requests: 16 tables (one a request) took 76% of the RPC budget
     #[serde(default = "alt_inflight")]
     pub max_inflight: usize,
+    /// FT-000 (S1-1): at most this many tables in one getMultipleAccounts (deduplicated; the RPC's limit is 100), and at
+    /// most `calls_inflight` such requests at once: the tables asked for meanwhile wait for the next one
+    #[serde(default = "alt_batch_max")]
+    pub batch_max: usize,
+    #[serde(default = "alt_calls_inflight")]
+    pub calls_inflight: usize,
+    /// ... and at most one request every this many ms unless its batch is full (500: about 2 requests a second at FT-000's
+    /// demand, against 6 one table each; a table waits at most this much more before it is asked)
+    #[serde(default = "alt_call_every_ms")]
+    pub call_every_ms: u64,
+    /// FT-000 (S1-4): the cache is bounded. Past `max_tables` tables, or `max_mb` MiB of entries (33 bytes each plus 64
+    /// per table), the least recently used tables are evicted (alts.jsonl `evicted`, journaled: a replay evicts the
+    /// same) down to 90% of the cap; one needed again is fetched again (`refetch`). 0: no cap
+    #[serde(default = "alt_max_tables")]
+    pub max_tables: usize,
+    #[serde(default = "alt_max_mb")]
+    pub max_mb: f64,
     /// a previous segment's `alts-final.jsonl.zst` to start with: "auto" (the newest one in this run directory's sibling
     /// segments), a path, or "" (none)
     #[serde(default = "auto")]
@@ -711,14 +773,20 @@ fn alt_retry_ms() -> Vec<u64> { vec![50, 250, 1_000, 5_000] }
 fn alt_retry_every() -> u64 { 30 }
 fn alt_give_up() -> u64 { 600 }
 fn alt_wait_cap() -> usize { 10_000 }
-fn alt_inflight() -> usize { 16 }
+fn alt_inflight() -> usize { 400 }
+fn alt_batch_max() -> usize { 100 }
+fn alt_calls_inflight() -> usize { 2 }
+fn alt_call_every_ms() -> u64 { 500 }
+fn alt_max_tables() -> usize { 20_000 }
+fn alt_max_mb() -> f64 { 192.0 }
 fn auto() -> String { "auto".into() }
 fn alt_preload_age() -> u64 { 24 }
 fn alt_preload_max() -> usize { 5_000 }
 impl Default for AltsCfg {
     fn default() -> Self {
         AltsCfg { retry_ms: alt_retry_ms(), retry_every_s: alt_retry_every(), give_up_s: alt_give_up(), wait_cap: alt_wait_cap(), max_inflight: alt_inflight(), preload: auto(),
-            preload_max_age_h: alt_preload_age(), preload_max_tables: alt_preload_max() }
+            preload_max_age_h: alt_preload_age(), preload_max_tables: alt_preload_max(), batch_max: alt_batch_max(), calls_inflight: alt_calls_inflight(),
+            call_every_ms: alt_call_every_ms(), max_tables: alt_max_tables(), max_mb: alt_max_mb() }
     }
 }
 
@@ -1163,6 +1231,14 @@ impl Config {
         let a = &cfg.alts;
         if a.retry_ms.is_empty() || a.retry_ms.contains(&0) || a.retry_ms.windows(2).any(|w| w[0] > w[1]) { bail!("[alts] retry_ms must be a non-empty, non-decreasing list of positive delays"); }
         if a.retry_every_s == 0 || a.give_up_s == 0 || a.wait_cap == 0 || a.max_inflight == 0 { bail!("[alts] retry_every_s, give_up_s, wait_cap and max_inflight must be > 0"); }
+        // FT-000: batched fetches, the bounded cache
+        if !(1..=100).contains(&a.batch_max) { bail!("[alts] batch_max must be 1..100 (getMultipleAccounts takes at most 100 accounts)"); }
+        if a.calls_inflight == 0 { bail!("[alts] calls_inflight must be > 0"); }
+        if a.call_every_ms > 10_000 { bail!("[alts] call_every_ms must be at most 10,000 (a table waits that much more before it is asked)"); }
+        if !a.max_mb.is_finite() || a.max_mb < 0.0 { bail!("[alts] max_mb must be >= 0 (0: no byte cap)"); }
+        if a.max_tables > 0 && a.max_tables < 1_000 { bail!("[alts] max_tables must be 0 (no cap) or at least 1,000"); }
+        // the preload's tables arrive newest first, each older than those held: they cannot evict one another
+        if a.max_tables > 0 && a.preload_max_tables > a.max_tables { bail!("[alts] preload_max_tables must be at most max_tables"); }
         // OD-8: no quarantine acts in Stage 0
         if cfg.accuracy.action != "log" { bail!("[accuracy] action must be \"log\" in Stage 0 (no quarantine acts; OD-8)"); }
         if cfg.accuracy.ring_versions < 2 || cfg.accuracy.ring_versions > 64 { bail!("[accuracy] ring_versions must be 2..64"); }
@@ -1182,6 +1258,7 @@ impl Config {
         let rps = cfg.leaders.rtt_per_sec;
         if !(rps.is_finite() && rps > 0.0 && rps <= 20.0) { bail!("[leaders] rtt_per_sec must be in (0, 20] handshakes a second (got {rps})"); }
         if r.rivals_venues_sample == 0 { bail!("[record] rivals_venues_sample must be >= 1 (1 keeps every row)"); }
+        if r.exec_unwatched_sample == 0 { bail!("[record] exec_unwatched_sample must be >= 1 (1 keeps every record)"); }
         // a typo would archive nothing, silently
         for a in &r.archive_feeds {
             match cfg.feeds.iter().find(|f| &f.name == a) {
@@ -1205,6 +1282,15 @@ impl Config {
         if !cf.default_max_rps.is_finite() || cf.default_max_rps < 0.0 { bail!("[chainfetch] default_max_rps must be a rate >= 0 (0 = no limit)"); }
         if cf.boot_retry_s == 0 { bail!("[chainfetch] boot_retry_s must be > 0"); }
         if cf.max_tx_version > 1 { bail!("[chainfetch] max_tx_version must be 0 or 1"); }
+        // FT-000: the reserved shares
+        for (what, shares) in std::iter::once(("[chainfetch] reserve".to_string(), &cf.reserve))
+            .chain(cf.providers.iter().filter_map(|p| p.reserve.as_ref().map(|r| (format!("[[chainfetch.provider]] {} reserve", p.name), r)))) {
+            for (r, share) in shares {
+                if crate::rpc::Role::parse(r).is_none() { bail!("{what}: {r:?} is not a role (wallet, blockhash, backfill, slotidx, sample, engine, alt, ...)"); }
+                let max = crate::rpc::MAX_RESERVE;
+                if !share.is_finite() || *share < 0.0 || *share > max { bail!("{what}: {r} = {share} must be a share in [0, {max}] of the provider's max_rps"); }
+            }
+        }
         let rpc_names: Vec<String> = cfg.rpc.url_env.iter().map(|_| "default".to_string()).chain(cfg.rpc.endpoints.iter().map(|e| e.name.clone())).collect();
         let mut seen = std::collections::HashSet::new();
         for p in &cf.providers {
@@ -1217,6 +1303,16 @@ impl Config {
             }
             if let Some(m) = p.max_rps { if !m.is_finite() || m < 0.0 { bail!("[[chainfetch.provider]] {}: max_rps must be >= 0 (0 = no limit)", p.name); } }
             if let Some(b) = p.burst { if !b.is_finite() || b < 1.0 { bail!("[[chainfetch.provider]] {}: burst must be at least 1", p.name); } }
+        }
+        {
+            let mut per: BTreeMap<String, f64> = BTreeMap::new();
+            for (p, _, rate) in cf.reserves(&rpc_names) { *per.entry(p).or_default() += rate; }
+            for (p, sum) in per {
+                let max = cf.limit_of(&p).0;
+                if sum > crate::rpc::MAX_RESERVE * max + 1e-9 {
+                    bail!("[chainfetch] reserve: the shares on {p} add up to {:.2} of its max_rps (at most {})", sum / max, crate::rpc::MAX_RESERVE);
+                }
+            }
         }
         Ok(cfg)
     }
@@ -1696,6 +1792,53 @@ mod tests {
         }
     }
 
+    /// FT-000's keys: `[alts]` batch_max, calls_inflight, max_tables, max_mb; `[record] exec_unwatched_sample`;
+    /// `[chainfetch] reserve` (shares per role, at most 0.95 of a provider's rate in all) and `wallet_cursor`; their
+    /// defaults, their checks, and the deploy configs' reserved rates (their providers' own shares: the slot index 3.8/s
+    /// of Shyft, the backfill 2/s of Haan)
+    #[test]
+    fn ft000_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        assert_eq!((c.alts.batch_max, c.alts.calls_inflight, c.alts.call_every_ms, c.alts.max_tables, c.alts.max_mb), (100, 2, 500, 20_000, 192.0));
+        assert_eq!((c.record.exec_unwatched_sample, c.chainfetch.wallet_cursor.as_str()), (20, "auto"));
+        assert_eq!(c.chainfetch.reserve, BTreeMap::from([("slotidx".to_string(), 0.5), ("backfill".to_string(), 0.25)]));
+        let k = crate::engine::EngineKnobs::from_cfg(&c);
+        assert_eq!((k.alts.batch_max, k.alts.calls_inflight, k.alts.call_every_ms, k.alts.max_tables, k.alts.max_bytes), (100, 2, 500, 20_000, 192 * 1_048_576));
+        for (bad, why) in [("[alts]\nbatch_max = 101\n", "batch_max"), ("[alts]\ncalls_inflight = 0\n", "calls_inflight"), ("[alts]\nmax_tables = 50\n", "max_tables"),
+            ("[alts]\nmax_mb = -1\n", "max_mb"), ("[alts]\ncall_every_ms = 20000\n", "call_every_ms"), ("[record]\nexec_unwatched_sample = 0\n", "exec_unwatched_sample"),
+            ("[chainfetch]\nreserve = { slotidx = 1.5 }\n", "reserve"), ("[chainfetch]\nreserve = { nope = 0.1 }\n", "not a role"),
+            ("[[chainfetch.provider]]\nname = \"x\"\nreserve = { slotidx = 0.96 }\n", "x reserve")] {
+            let e = Config::parse(&format!("{MINIMAL}{bad}")).map(|_| ()).unwrap_err().to_string();
+            assert!(e.contains(why), "{why}: {e}");
+        }
+        assert!(Config::parse(&format!("{MINIMAL}[alts]\nmax_tables = 0\nmax_mb = 0\n")).is_ok(), "0: no cap");
+        // the deploy split: Shyft's own shares (the slot index's 3.7 getBlock/s need most of it), Haan's (the backfill)
+        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] {
+            let c = Config::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(f)).unwrap();
+            let all: Vec<String> = ["haan", "shyft"].map(String::from).to_vec();
+            let mut r = c.chainfetch.reserves(&all);
+            r.sort_by(|a, b| (a.0.as_str(), a.1).cmp(&(b.0.as_str(), b.1)));
+            assert_eq!(r, vec![("haan".to_string(), crate::rpc::Role::Backfill, 2.0), ("shyft".to_string(), crate::rpc::Role::Slotidx, 3.8)], "{f}");
+        }
+        // without its own shares a provider takes `[chainfetch] reserve`'s for the roles it serves: a chain-fetch role that
+        // some provider names runs only on those (`providers_for`), one that none names on every provider
+        let mut cf = Config::parse(MINIMAL).unwrap().chainfetch;
+        let p = |name: &str, roles: &[&str]| ChainfetchProviderCfg { name: name.into(), roles: roles.iter().map(|r| r.to_string()).collect(), max_rps: Some(4.0),
+            burst: None, reserve: None };
+        cf.providers = vec![p("a", &["backfill"]), p("b", &["slotidx"])];
+        let ab = ["a".to_string(), "b".to_string()];
+        assert_eq!(cf.reserves(&ab), vec![("a".to_string(), crate::rpc::Role::Backfill, 1.0), ("b".to_string(), crate::rpc::Role::Slotidx, 2.0)],
+            "the slot index is b's only, the backfill a's only");
+        cf.providers = vec![p("a", &["backfill"])];
+        assert_eq!(cf.reserves(&["a".to_string()]), vec![("a".to_string(), crate::rpc::Role::Backfill, 1.0), ("a".to_string(), crate::rpc::Role::Slotidx, 2.0)],
+            "no provider names the slot index: it runs on every provider, a too");
+        // shares that add up to more than 0.95 of a provider's rate do not load
+        let text = format!("{}[chainfetch]\nreserve = {{ slotidx = 0.6, backfill = 0.4 }}\n[[chainfetch.provider]]\nname = \"r\"\nroles = [\"slotidx\", \"backfill\"]\nmax_rps = 4\n",
+            MINIMAL.replace("[rpc]\n", "[rpc]\n[[rpc.endpoint]]\nname = \"r\"\nurl = \"http://r\"\n"));
+        let e = Config::parse(&text).map(|_| ()).unwrap_err().to_string();
+        assert!(e.contains("add up to 1.00"), "{e}");
+    }
+
     /// PLAN WP-04 config keys: the state consistency keys, [alts] and [accuracy] with the plan's defaults and checks; the
     /// removed keys (`strategy.confirm_trigger_ms`, `strategy.decoded_sends`: there is no decoded send path) refuse to load
     #[test]
@@ -1707,7 +1850,7 @@ mod tests {
         assert_eq!((st.tier_a_grace_s, st.boot_timeout_s, st.max_update_age_ms, st.resnapshot), (60, 60, 2_000, true));
         assert_eq!((st.resync_warn_s, st.resync_give_up_s), (10, 300), "review WP-04 #1");
         assert_eq!((c.alts.retry_ms.clone(), c.alts.retry_every_s, c.alts.give_up_s, c.alts.wait_cap, c.alts.max_inflight, c.alts.preload.as_str()),
-            (vec![50, 250, 1_000, 5_000], 30, 600, 10_000, 16, "auto"));
+            (vec![50, 250, 1_000, 5_000], 30, 600, 10_000, 400, "auto"), "FT-000: max_inflight counts tables of batched requests (16 before)");
         assert_eq!((c.alts.preload_max_age_h, c.alts.preload_max_tables), (24, 5_000), "review WP-04 #11");
         assert_eq!((c.accuracy.action.as_str(), c.accuracy.ring_versions, c.accuracy.queue), ("log", 8, 10_000));
         for k in ["confirm_trigger_ms = 60", "decoded_sends = false"] {

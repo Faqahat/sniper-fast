@@ -172,21 +172,21 @@ const STATIC: [(&str, Class, Format, &str, bool); 35] = [
     ("bundles", Class::Core, Format::Jsonl, "arbx.bundles/2.0", false),
     ("outcomes", Class::Core, Format::Jsonl, "arbx.outcomes/2.0", false),
     ("accounts", Class::Replay, Format::Bin { magic: ACCOUNTS_MAGIC, format: 2 }, "arbx.accounts/2.1", false),
-    ("journal", Class::Replay, Format::Bin { magic: JOURNAL_MAGIC, format: 2 }, "arbx.journal/2.2", false),
-    ("exec", Class::Chain, Format::Jsonl, "arbx.exec/2.1", false),
+    ("journal", Class::Replay, Format::Bin { magic: JOURNAL_MAGIC, format: 2 }, "arbx.journal/2.3", false),
+    ("exec", Class::Chain, Format::Jsonl, "arbx.exec/2.2", false),
     ("txarr", Class::Chain, Format::Text, "arbx.txarr/1.1", false),
     ("arrivals", Class::Chain, Format::Jsonl, "arbx.arrivals/1.1", false),
     ("moves", Class::Chain, Format::Text, "arbx.moves/2.0", false),
     ("poh", Class::Chain, Format::Text, "arbx.poh/2.0", false),
     ("slots-feed", Class::Chain, Format::Text, "arbx.slots-feed/2.0", false),
-    ("alts-final", Class::Chain, Format::Jsonl, "arbx.alts-final/1.1", true),
+    ("alts-final", Class::Chain, Format::Jsonl, "arbx.alts-final/1.2", true),
     ("triggers", Class::Chain, Format::Jsonl, "arbx.triggers/2.0", false),
     ("predictions", Class::Chain, Format::Jsonl, "arbx.predictions/2.0", false),
     ("caps", Class::Chain, Format::Jsonl, "arbx.caps/1.2", false),
     ("sims", Class::Chain, Format::Jsonl, "arbx.sims/1.1", false),
     ("opportunities", Class::Chain, Format::Jsonl, "arbx.opportunities/1.2", false),
     ("rivals", Class::Bulk, Format::Jsonl, "arbx.rivals/1.2", false),
-    ("status", Class::Slow, Format::PlainJsonl, "arbx.status/2.0", false),
+    ("status", Class::Slow, Format::PlainJsonl, "arbx.status/2.1", false),
     ("events", Class::Slow, Format::PlainJsonl, "arbx.events/1.0", false),
     ("feedhealth", Class::Slow, Format::PlainJsonl, "arbx.feedhealth/1.0", false),
     ("resources", Class::Slow, Format::PlainJsonl, "arbx.resources/1.0", false),
@@ -197,9 +197,9 @@ const STATIC: [(&str, Class, Format, &str, bool); 35] = [
     ("leaders", Class::Chain, Format::Jsonl, "arbx.leaders/1.1", false),
     ("commits", Class::Core, Format::Jsonl, "arbx.commits/1.0", false),
     ("decisions", Class::Core, Format::Jsonl, "arbx.decisions/1.1", false),
-    ("alts", Class::Chain, Format::Jsonl, "arbx.alts/2.0", false),
-    ("wallet", Class::Core, Format::Jsonl, "arbx.wallet/1.0", false),
-    ("slotidx", Class::Chain, Format::Jsonl, "arbx.slotidx/1.0", false),
+    ("alts", Class::Chain, Format::Jsonl, "arbx.alts/2.1", false),
+    ("wallet", Class::Core, Format::Jsonl, "arbx.wallet/1.1", false),
+    ("slotidx", Class::Chain, Format::Jsonl, "arbx.slotidx/1.1", false),
     ("txfetch", Class::Chain, Format::Jsonl, "arbx.txfetch/1.0", false),
     ("validators", Class::Bulk, Format::Jsonl, "arbx.validators/1.0", false),
 ];
@@ -412,6 +412,9 @@ pub struct Recorder {
     pub notes: Vec<String>,
     /// plan addendum I-9 (WP-08): rivals.jsonl's `why = venues` rows, 1 in `[record] rivals_venues_sample` kept
     pub(crate) rival_venues: sample::Sampler,
+    /// FT-000 (S1-5): exec.jsonl's transaction-stream records that touch no watched account, 1 in
+    /// `[record] exec_unwatched_sample` kept
+    pub(crate) exec_unwatched: sample::Sampler,
 }
 
 /// The handle every producer holds. `Rec::off()` records nothing (tools, tests, the recorder-off benchmark)
@@ -465,7 +468,7 @@ pub fn start(opts: Opts) -> Result<Rec> {
     let (echo_done_tx, echo_done_rx) = crossbeam_channel::bounded::<()>(1);
     let started_ns = now_ns();
     let r = Arc::new(Recorder { dir: opts.dir.clone(), run: opts.run, producer: opts.producer, keyframe_every: AtomicU32::new(cfg.accounts_keyframe_every),
-        rival_venues: sample::Sampler::new(cfg.rivals_venues_sample), disk: Mutex::new(disk::Ladder::new(&cfg)), cfg, streams, queues, tx, threads: Mutex::new(Vec::new()), closed: AtomicBool::new(false), started_ns,
+        rival_venues: sample::Sampler::new(cfg.rivals_venues_sample), exec_unwatched: sample::Sampler::new(cfg.exec_unwatched_sample), disk: Mutex::new(disk::Ladder::new(&cfg)), cfg, streams, queues, tx, threads: Mutex::new(Vec::new()), closed: AtomicBool::new(false), started_ns,
         dead: Default::default(), progress: Default::default(), fatal: OnceLock::new(), echo: echo_tx, echo_done: Mutex::new(Some(echo_done_rx)),
         echo_dropped: AtomicU64::new(0), close_timeout: Mutex::new(Vec::new()), crash: Default::default(),
         close_wait_ms: AtomicU64::new(CLOSE_WAIT.as_millis() as u64),
@@ -937,6 +940,11 @@ impl Rec {
     /// counted (manifest.json `sampling.rivals_venues`). Some(the counts, which the row carries as `sample`) when it is
     /// written; None when it is left out, or when nothing records
     pub fn sample_rival_venues(&self, sig: &[u8]) -> Option<sample::Kept> { self.0.as_ref()?.rival_venues.take(sig) }
+
+    /// FT-000 (S1-5): whether exec.jsonl writes the record of the transaction `sig`, which touches no watched account:
+    /// 1 in `[record] exec_unwatched_sample`, by the signature (I-9's rule), counted (manifest.json
+    /// `sampling.exec_unwatched`). Some(the counts the record carries as `sample`), None when it is left out
+    pub fn sample_exec_unwatched(&self, sig: &[u8]) -> Option<sample::Kept> { self.0.as_ref()?.exec_unwatched.take(sig) }
 
     pub fn sync(&self) { if let Some(x) = &self.0 { x.sync(); } }
     pub fn close(&self) { if let Some(x) = &self.0 { x.close(); } }

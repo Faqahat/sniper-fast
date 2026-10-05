@@ -362,8 +362,17 @@ pub fn tx_stream_item(u: UpdateTx, t: u64, rec: &crate::rec::Rec, roles: Option<
     let tx = tx_from_pb(&info.signature, info.is_vote, &pb, &lw, &lr);
     if let Some(meta) = meta.filter(|_| recent.first(&info.signature, u.slot)) {
         let sig: Option<[u8; 64]> = info.signature.as_slice().try_into().ok();
-        let recorded = crate::rec::exec::emit_grpc(rec, roles, crate::rec::exec::GrpcTx { sig: info.signature, slot: u.slot, idx: info.index, t, tx: pb.clone(), meta,
-            bank_id: (u.bank_id != 0).then_some(u.bank_id) });
+        // FT-000 (S1-5): in full only when it touches a watched account; of the rest (72% of FT-000's exec.jsonl bytes:
+        // PumpSwap transactions on pools we do not follow) 1 in `[record] exec_unwatched_sample`, by the signature. A
+        // record left out is not "recorded": nothing needs one (the chain fetch backfills only watched transactions),
+        // and its idx is still checked against the slot index
+        let sample = if crate::rec::exec::touches_watched(roles.map(|r| r.as_ref()), &pb, Some(&meta)) { Ok(None) }
+            else { rec.sample_exec_unwatched(&info.signature).map(Some).ok_or(()) };
+        let recorded = match sample {
+            Ok(sample) => crate::rec::exec::emit_grpc(rec, roles, crate::rec::exec::GrpcTx { sig: info.signature, slot: u.slot, idx: info.index, t, tx: pb.clone(), meta,
+                bank_id: (u.bank_id != 0).then_some(u.bank_id), sample }),
+            Err(()) => false,
+        };
         // WP-03b tap: this signature has its exec.jsonl record when the recorder took it (else the backfill fetches it:
         // review WP-03b #13), and its idx is checked against the slot index
         if let Some(sig) = sig { crate::chainfetch::note_stream_tx(&sig, u.slot, info.index, ok, recorded); }

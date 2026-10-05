@@ -85,28 +85,32 @@ pub fn scrub(msg: &str) -> String {
 
 // ------------------------------------------------------------------ roles, phases, bounds, failures
 
-/// Who makes a call: the stats key (with the provider) and the token bucket's priority
+/// Who makes a call: the stats key (with the provider) and the token bucket's priority. FT-000 (S1-1, S1-3): the
+/// engine's lookup-table fetches have their own role (`alt`), and the state stream's re-read after a (re)connection runs
+/// as `snapshot` (critical: it queued behind the lookup-table fetches and took 51.4 s at boot)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Role { Boot, Snapshot, Exec, Settle, Engine, Leaders, Provenance, Wallet, Blockhash, Backfill, Slotidx, Sample, Warm, Other }
+pub enum Role { Boot, Snapshot, Exec, Settle, Engine, Alt, Leaders, Provenance, Wallet, Blockhash, Backfill, Slotidx, Sample, Warm, Other }
 
 impl Role {
-    pub const ALL: [Role; 14] = [Role::Boot, Role::Snapshot, Role::Exec, Role::Settle, Role::Engine, Role::Leaders, Role::Provenance, Role::Wallet,
+    pub const ALL: [Role; 15] = [Role::Boot, Role::Snapshot, Role::Exec, Role::Settle, Role::Engine, Role::Alt, Role::Leaders, Role::Provenance, Role::Wallet,
         Role::Blockhash, Role::Backfill, Role::Slotidx, Role::Sample, Role::Warm, Role::Other];
     /// the roles of the chain-fetch service, the ones a `[[chainfetch.provider]]` names
     pub const FETCH: [Role; 5] = [Role::Wallet, Role::Blockhash, Role::Backfill, Role::Slotidx, Role::Sample];
     pub fn as_str(self) -> &'static str {
         match self { Role::Boot => "boot", Role::Snapshot => "snapshot", Role::Exec => "exec", Role::Settle => "settle", Role::Engine => "engine",
-            Role::Leaders => "leaders", Role::Provenance => "provenance", Role::Wallet => "wallet", Role::Blockhash => "blockhash", Role::Backfill => "backfill",
-            Role::Slotidx => "slotidx", Role::Sample => "sample", Role::Warm => "warm", Role::Other => "other" }
+            Role::Alt => "alt", Role::Leaders => "leaders", Role::Provenance => "provenance", Role::Wallet => "wallet", Role::Blockhash => "blockhash",
+            Role::Backfill => "backfill", Role::Slotidx => "slotidx", Role::Sample => "sample", Role::Warm => "warm", Role::Other => "other" }
     }
     pub fn parse(s: &str) -> Option<Role> { Role::ALL.into_iter().find(|r| r.as_str() == s) }
     /// The bucket priority: 0 critical (may take the bucket's last token), 1 normal (keeps a quarter of the burst), 2 index
     /// and 3 bulk (keep half). Waiting callers are served by priority, then in order: the slot index, the coverage sample
-    /// and the blockhash poll (2) always go before the backfill (3) on a provider they share
+    /// and the blockhash poll (2) go before the backfill (3) on a provider they share. FT-000 (S1-1): a role with a
+    /// reserved share of a bucket ([`Limiter::set_reserve`], `[chainfetch] reserve`) is served ahead of that order while
+    /// its share holds a token, so a busy normal role can no longer starve the slot index or the backfill
     pub fn priority(self) -> u8 {
         match self {
             Role::Boot | Role::Snapshot | Role::Exec | Role::Settle => 0,
-            Role::Engine | Role::Leaders | Role::Provenance | Role::Wallet => 1,
+            Role::Engine | Role::Alt | Role::Leaders | Role::Provenance | Role::Wallet => 1,
             Role::Slotidx | Role::Sample | Role::Blockhash => 2,
             Role::Backfill | Role::Warm | Role::Other => 3,
         }
@@ -219,14 +223,67 @@ pub fn code_is_answer(code: Option<i64>) -> bool {
 // ------------------------------------------------------------------ token buckets
 
 /// A provider's token bucket (requests/s, with a burst), shared by every role of the process. A caller takes a token
-/// when the bucket holds its priority's threshold (critical 1 token; normal also a quarter of the burst in reserve;
-/// index and bulk half) and nobody is waiting ahead of it. Callers that must wait queue by priority, then in order of
-/// arrival: the first in line takes the next token its threshold allows, and nobody behind it (a later caller, a lower
-/// priority) can take one before it (review WP-03b #1: the backfill's many waiters overtook the slot index's few). A
-/// 429 drains the bucket and cools the provider down (250 ms, doubling with every 429 in a row, at most 8 s); no tokens
-/// accrue while it cools. `rate` 0: no limit (the cool-down still applies)
+/// when the bucket holds its lane's threshold and nobody is waiting ahead of it. The lanes, in the order callers are
+/// served:
+/// 1. **critical** (boot, snapshot, exec, settle): may take the bucket's last token;
+/// 2. **reserved** (FT-000 S1-1): a role with a reserved share of the bucket ([`Limiter::set_reserve`]) whose share holds
+///    a token. Each share is a second bucket of entitlement (the share's rate, a burst of `max(1, rate)`), not of
+///    capacity: every grant still takes a token of the provider's bucket, so the provider's rate is never exceeded, and
+///    an idle role's unused share is simply taken by the others. A reserved caller keeps a quarter of the burst for the
+///    critical ones, as a normal one does (it never takes the token a boot or exec call needs next);
+/// 3. **priority**: everyone else (and a reserved role whose share is spent), by priority, then in order of arrival;
+///    normal roles keep a quarter of the burst for the critical ones, index and bulk roles half.
+///
+/// The first in line takes the next token its lane allows, and nobody behind it can take one before it (review WP-03b
+/// #1: the backfill's many waiters overtook the slot index's few). In FT-000 the engine's lookup-table fetches (normal)
+/// held both providers' buckets: the slot index (index) and the backfill (bulk) never got a token while one waited; a
+/// reserved share gives each of them its rate whatever waits ahead in the priority order. A 429 drains the bucket and
+/// cools the provider down (250 ms, doubling with every 429 in a row, at most 8 s); no tokens accrue while it cools.
+/// `rate` 0: no limit (the cool-down still applies)
 pub struct Limiter { pub rate: f64, pub burst: f64, st: Mutex<LimState>, wake: tokio::sync::Notify }
-struct LimState { tokens: f64, last: Instant, cool_until: Option<Instant>, streak: u32, queue: std::collections::BTreeSet<(u8, u64)>, seq: u64 }
+struct LimState {
+    tokens: f64,
+    last: Instant,
+    cool_until: Option<Instant>,
+    streak: u32,
+    /// the waiting callers: (priority, arrival) -> their role (None: a caller without one, never in the reserved lane)
+    queue: BTreeMap<(u8, u64), Option<Role>>,
+    seq: u64,
+    /// the reserved shares (FT-000), and their entitlement
+    res: Vec<Share>,
+}
+
+/// A role's reserved share of a bucket: `rate` requests/s of entitlement, up to `burst`
+#[derive(Clone, Copy, Debug)]
+struct Share { role: Role, rate: f64, burst: f64, ent: f64 }
+
+/// How a token was granted
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lane { Critical, Reserved, Priority }
+
+/// The most of a bucket's rate its reserved shares may add up to: the slot index needs one getBlock per confirmed slot,
+/// 3.7/s in FT-000, 92.5% of Shyft's 4/s (its share is 0.95 in the deploy configs). Critical callers never wait for a
+/// share (their lane comes first), and the others keep at least 5% of the rate
+pub const MAX_RESERVE: f64 = 0.95;
+
+impl LimState {
+    fn share(&self, r: Option<Role>) -> Option<&Share> { r.and_then(|r| self.res.iter().find(|x| x.role == r)) }
+    fn entitled(&self, r: Option<Role>) -> bool { self.share(r).is_some_and(|x| x.ent >= 1.0) }
+    /// the lane a caller is in now
+    fn lane(&self, prio: u8, r: Option<Role>) -> Lane {
+        if prio == 0 { Lane::Critical } else if self.entitled(r) { Lane::Reserved } else { Lane::Priority }
+    }
+    /// a caller's place in the serving order now: its lane, then arrival (critical, reserved) or priority and arrival
+    fn order(&self, key: (u8, u64), r: Option<Role>) -> (u8, u8, u64) {
+        match self.lane(key.0, r) { Lane::Critical => (0, 0, key.1), Lane::Reserved => (1, 0, key.1), Lane::Priority => (2, key.0, key.1) }
+    }
+    /// the waiting callers served before `key` (None: a newcomer of priority `prio` and role `r`, behind everyone of its
+    /// lane already waiting)
+    fn ahead(&self, prio: u8, r: Option<Role>, key: Option<(u8, u64)>) -> usize {
+        let me = match key { Some(k) => self.order(k, r), None => { let o = self.order((prio, u64::MAX), r); (o.0, o.1, u64::MAX) } };
+        self.queue.iter().filter(|(k, rr)| Some(**k) != key && self.order(**k, **rr) < me).count()
+    }
+}
 
 /// A caller's place in a bucket's queue; leaving it (served, timed out, or dropped) wakes the callers behind it
 struct Place<'a> { lim: &'a Limiter, key: (u8, u64), held: bool }
@@ -244,18 +301,38 @@ impl Limiter {
     pub fn new(rate: f64, burst: f64) -> Limiter {
         let burst = if rate > 0.0 { burst.max(1.0) } else { 0.0 };
         Limiter { rate: rate.max(0.0), burst, wake: tokio::sync::Notify::new(),
-            st: Mutex::new(LimState { tokens: burst, last: Instant::now(), cool_until: None, streak: 0, queue: Default::default(), seq: 0 }) }
+            st: Mutex::new(LimState { tokens: burst, last: Instant::now(), cool_until: None, streak: 0, queue: Default::default(), seq: 0, res: Vec::new() }) }
     }
     pub fn unlimited() -> Limiter { Limiter::new(0.0, 0.0) }
-    /// the tokens a caller of priority `prio` needs in the bucket: 1 for critical roles, plus a reserve of a quarter
-    /// (normal) or half (index, bulk) of the burst, never more than the burst
-    fn threshold(&self, prio: u8) -> f64 {
-        let t = match prio { 0 => 1.0, 1 => 1.0 + 0.25 * self.burst, _ => 1.0 + 0.5 * self.burst };
+    /// FT-000 (S1-1): reserve `rate` requests/s of this bucket for `role` (0 removes it). The shares of one bucket never
+    /// add up to more than [`MAX_RESERVE`] of its rate (`[chainfetch] reserve` is checked so; a larger sum is scaled down
+    /// here)
+    pub fn set_reserve(&self, role: Role, rate: f64) {
+        let mut s = self.st.lock().unwrap_or_else(|e| e.into_inner());
+        s.res.retain(|x| x.role != role);
+        if self.rate > 0.0 && rate > 0.0 && rate.is_finite() {
+            let burst = rate.max(1.0);
+            s.res.push(Share { role, rate, burst, ent: burst });
+        }
+        let sum: f64 = s.res.iter().map(|x| x.rate).sum();
+        if sum > MAX_RESERVE * self.rate { let k = MAX_RESERVE * self.rate / sum; for x in s.res.iter_mut() { x.rate *= k; } }
+        s.res.sort_by_key(|x| x.role);
+    }
+    /// the rate reserved for `role` (0: none)
+    pub fn reserved(&self, role: Role) -> f64 { self.st.lock().unwrap_or_else(|e| e.into_inner()).share(Some(role)).map_or(0.0, |x| x.rate) }
+    /// every reserved share: (role, requests/s)
+    pub fn reserves(&self) -> Vec<(Role, f64)> { self.st.lock().unwrap_or_else(|e| e.into_inner()).res.iter().map(|x| (x.role, x.rate)).collect() }
+    /// the tokens a caller needs in the bucket: 1 for critical callers; plus a reserve of a quarter of the burst for
+    /// reserved and normal ones, half for index and bulk ones in the priority lane; never more than the burst
+    fn threshold(&self, lane: Lane, prio: u8) -> f64 {
+        let t = match (lane, prio) { (Lane::Critical, _) | (_, 0) => 1.0, (Lane::Reserved, _) | (_, 1) => 1.0 + 0.25 * self.burst, _ => 1.0 + 0.5 * self.burst };
         t.min(self.burst.max(1.0))
     }
     /// tokens accrue at `rate` up to the burst, never during a cool-down (review WP-03b #19: a bucket that refilled while
-    /// it cooled sent a whole burst the moment the cool-down ended)
+    /// it cooled sent a whole burst the moment the cool-down ended); the shares' entitlement accrues at their rates
     fn refill(&self, s: &mut LimState, now: Instant) {
+        let dt_all = now.saturating_duration_since(s.last).as_secs_f64();
+        for x in s.res.iter_mut() { x.ent = (x.ent + dt_all * x.rate).min(x.burst); }
         if let Some(c) = s.cool_until {
             if now < c { s.last = now; return; }
             s.cool_until = None;
@@ -267,52 +344,68 @@ impl Limiter {
         }
         if now > s.last { s.last = now; }
     }
-    /// the callers queued ahead of one of priority `prio` (`key`: its place; None: a newcomer, behind every queued caller
-    /// of its priority or a higher one)
-    fn ahead(s: &LimState, prio: u8, key: Option<(u8, u64)>) -> usize {
-        match key { Some(k) => s.queue.range(..k).count(), None => s.queue.range(..(prio, u64::MAX)).count() }
-    }
-    /// a token now if the caller is first in line and the bucket holds its threshold; else an estimate of the wait (the
-    /// cool-down, or the tokens it and the callers ahead of it need)
-    fn grant(&self, s: &mut LimState, prio: u8, ahead: usize, now: Instant) -> std::result::Result<(), Duration> {
+    /// a token now if the caller is first in line and the bucket holds its lane's threshold; else an estimate of the wait
+    /// (the cool-down, or the tokens it and the callers ahead of it need; for a caller with a spent share, also when its
+    /// share holds a token again)
+    fn grant(&self, s: &mut LimState, prio: u8, r: Option<Role>, ahead: usize, now: Instant) -> std::result::Result<Lane, Duration> {
         if let Some(c) = s.cool_until { if now < c { return Err(c - now); } }
-        if self.rate <= 0.0 { return Ok(()); }
-        let th = self.threshold(prio);
-        if ahead == 0 && s.tokens >= th { s.tokens -= 1.0; return Ok(()); }
+        let lane = s.lane(prio, r);
+        if self.rate <= 0.0 { return Ok(lane); }
+        let th = self.threshold(lane, prio);
+        if ahead == 0 && s.tokens >= th {
+            s.tokens -= 1.0;
+            if lane == Lane::Reserved { if let Some(x) = s.res.iter_mut().find(|x| Some(x.role) == r) { x.ent -= 1.0; } }
+            return Ok(lane);
+        }
         let need = (th + ahead as f64 - s.tokens).max(0.0);
-        Err(Duration::from_secs_f64(need / self.rate).max(Duration::from_millis(1)))
+        let mut w = need / self.rate;
+        if lane == Lane::Priority {
+            // a spent share: it may be served sooner, in the reserved lane, once its share holds a token again
+            let th_res = self.threshold(Lane::Reserved, prio);
+            if let Some(x) = s.share(r) { w = w.min(((1.0 - x.ent) / x.rate).max((th_res - s.tokens).max(0.0) / self.rate)); }
+        }
+        Err(Duration::from_secs_f64(w).max(Duration::from_millis(1)))
     }
     /// Take a token now if the cool-down, the bucket and the queue allow it (a newcomer goes behind every queued caller of
     /// its priority or a higher one); else how long until they may
-    pub fn try_take(&self, prio: u8, now: Instant) -> std::result::Result<(), Duration> {
+    pub fn try_take(&self, prio: u8, now: Instant) -> std::result::Result<(), Duration> { self.try_take_as(prio, None, now).map(|_| ()) }
+    /// `try_take` for a caller of `role` (its reserved share, if any, applies)
+    pub fn try_take_role(&self, role: Role, now: Instant) -> std::result::Result<Lane, Duration> { self.try_take_as(role.priority(), Some(role), now) }
+    fn try_take_as(&self, prio: u8, r: Option<Role>, now: Instant) -> std::result::Result<Lane, Duration> {
         let mut s = self.st.lock().unwrap_or_else(|e| e.into_inner());
         self.refill(&mut s, now);
-        let ahead = Self::ahead(&s, prio, None);
-        self.grant(&mut s, prio, ahead, now)
+        let ahead = s.ahead(prio, r, None);
+        self.grant(&mut s, prio, r, ahead, now)
     }
     /// How long a newcomer of priority `prio` would wait now (zero: a token is there for it), without taking one
-    pub fn wait_hint(&self, prio: u8, now: Instant) -> Duration {
+    pub fn wait_hint(&self, prio: u8, now: Instant) -> Duration { self.wait_hint_as(prio, None, now) }
+    /// `wait_hint` for a caller of `role`
+    pub fn wait_hint_role(&self, role: Role, now: Instant) -> Duration { self.wait_hint_as(role.priority(), Some(role), now) }
+    fn wait_hint_as(&self, prio: u8, r: Option<Role>, now: Instant) -> Duration {
         let mut s = self.st.lock().unwrap_or_else(|e| e.into_inner());
         self.refill(&mut s, now);
         if let Some(c) = s.cool_until { if now < c { return c - now; } }
         if self.rate <= 0.0 { return Duration::ZERO; }
-        let (th, ahead) = (self.threshold(prio), Self::ahead(&s, prio, None));
+        let (th, ahead) = (self.threshold(s.lane(prio, r), prio), s.ahead(prio, r, None));
         if ahead == 0 && s.tokens >= th { Duration::ZERO } else { Duration::from_secs_f64((th + ahead as f64 - s.tokens).max(0.0) / self.rate) }
     }
     /// the callers waiting in the queue now
     pub fn queued(&self) -> usize { self.st.lock().unwrap_or_else(|e| e.into_inner()).queue.len() }
     /// Wait for a token (at most until `until`; a wait that cannot end in time fails at once): Ok(how long it waited:
     /// zero when the token was there), Err when `until` comes first
-    pub async fn take(&self, prio: u8, until: Option<Instant>) -> std::result::Result<Duration, ()> {
+    pub async fn take(&self, prio: u8, until: Option<Instant>) -> std::result::Result<Duration, ()> { self.take_as(prio, None, until).await.map(|x| x.0) }
+    /// `take` for a caller of `role`: Ok(the wait, the lane that granted it)
+    pub async fn take_role(&self, role: Role, until: Option<Instant>) -> std::result::Result<(Duration, Lane), ()> { self.take_as(role.priority(), Some(role), until).await }
+    async fn take_as(&self, prio: u8, r: Option<Role>, until: Option<Instant>) -> std::result::Result<(Duration, Lane), ()> {
         let start = Instant::now();
         let key = {
             let mut s = self.st.lock().unwrap_or_else(|e| e.into_inner());
             self.refill(&mut s, start);
-            let ahead = Self::ahead(&s, prio, None);
-            match self.grant(&mut s, prio, ahead, start) {
-                Ok(()) => return Ok(Duration::ZERO),
-                Err(w) if until.is_some_and(|u| start + w > u) => return Err(()),
-                Err(_) => { s.seq += 1; let k = (prio, s.seq); s.queue.insert(k); k }
+            let ahead = s.ahead(prio, r, None);
+            match self.grant(&mut s, prio, r, ahead, start) {
+                Ok(lane) => return Ok((Duration::ZERO, lane)),
+                Err(w) if until.is_some_and(|u| start + w > u) && s.share(r).is_none() => return Err(()),
+                Err(_) => { s.seq += 1; let k = (prio, s.seq); s.queue.insert(k, r); k }
             }
         };
         let mut place = Place { lim: self, key, held: true };
@@ -321,22 +414,25 @@ impl Limiter {
             tokio::pin!(woken);
             woken.as_mut().enable();
             let now = Instant::now();
-            let r = {
+            let got = {
                 let mut s = self.st.lock().unwrap_or_else(|e| e.into_inner());
                 self.refill(&mut s, now);
-                let ahead = Self::ahead(&s, prio, Some(key));
-                let r = self.grant(&mut s, prio, ahead, now);
-                if r.is_ok() { s.queue.remove(&key); }
-                r
+                let ahead = s.ahead(prio, r, Some(key));
+                let g = self.grant(&mut s, prio, r, ahead, now);
+                if g.is_ok() { s.queue.remove(&key); }
+                g
             };
-            match r {
-                Ok(()) => {
+            match got {
+                Ok(lane) => {
                     place.held = false;
                     self.wake.notify_waiters();
-                    return Ok((now - start).max(Duration::from_nanos(1)));
+                    return Ok(((now - start).max(Duration::from_nanos(1)), lane));
                 }
                 Err(w) => {
-                    if until.is_some_and(|u| now + w > u) { place.leave(); return Err(()); }
+                    if until.is_some_and(|u| now >= u) { place.leave(); return Err(()); }
+                    // a wait that cannot end in time fails at once (a caller with a share may be served sooner than the
+                    // estimate: it waits until its deadline)
+                    let w = match until { Some(u) if now + w > u => { if self.st.lock().unwrap_or_else(|e| e.into_inner()).share(r).is_none() { place.leave(); return Err(()); } u - now } _ => w };
                     tokio::select! { _ = &mut woken => {}, _ = tokio::time::sleep(w) => {} }
                 }
             }
@@ -368,6 +464,8 @@ pub struct Totals {
     pub rpc: u64, pub no_result: u64, pub budget: u64,
     /// requests that waited for their token (a token granted at once is no wait: review WP-03b #7), and how long in all (µs)
     pub throttled: u64, pub throttle_wait_us: u64,
+    /// FT-000: tokens granted through the role's reserved share of the bucket (`Lane::Reserved`)
+    pub reserved: u64,
 }
 
 impl Totals {
@@ -375,7 +473,7 @@ impl Totals {
         Totals { calls: self.calls - p.calls, ok: self.ok - p.ok, errors: self.errors - p.errors, rate_limited: self.rate_limited - p.rate_limited,
             timeouts: self.timeouts - p.timeouts, body: self.body - p.body, http: self.http - p.http, transport: self.transport - p.transport, rpc: self.rpc - p.rpc,
             no_result: self.no_result - p.no_result, budget: self.budget - p.budget, throttled: self.throttled - p.throttled,
-            throttle_wait_us: self.throttle_wait_us - p.throttle_wait_us }
+            throttle_wait_us: self.throttle_wait_us - p.throttle_wait_us, reserved: self.reserved - p.reserved }
     }
 }
 
@@ -385,6 +483,8 @@ const LAT_KEEP_NS: u64 = 120_000_000_000;
 
 #[derive(Default)]
 struct KeyStats { t: Totals, lat: VecDeque<(u64, u32)>, sent: Decay }
+
+fn r3(x: f64) -> f64 { (x * 1_000.0).round() / 1_000.0 }
 
 /// the time constant of the request rates the registry keeps per (role, provider) (`used_rps`)
 const RATE_TAU_S: f64 = 10.0;
@@ -413,6 +513,8 @@ pub struct Registry {
     last_used: Mutex<HashMap<String, Instant>>,
     /// events.jsonl for the boot policy (`rpc_boot_retry`, `rpc_boot_failed`)
     sink: OnceLock<crate::rec::Rec>,
+    /// FT-000: when each `budget_json` consumer last took its deltas (the runtime's clock: a paused clock in tests)
+    budget_t: Mutex<HashMap<&'static str, Instant>>,
     last_boot_event: AtomicU64,
     boot_events_suppressed: AtomicU64,
 }
@@ -445,7 +547,13 @@ impl Registry {
         let m = self.limits.lock().unwrap();
         let mut v: Vec<(&String, &Arc<Limiter>)> = m.iter().collect();
         v.sort_by(|a, b| a.0.cmp(b.0));
-        Value::Object(v.into_iter().map(|(k, l)| (k.clone(), json!({ "max_rps": (l.rate > 0.0).then_some(l.rate), "burst": (l.rate > 0.0).then_some(l.burst) }))).collect())
+        Value::Object(v.into_iter().map(|(k, l)| {
+            let mut x = json!({ "max_rps": (l.rate > 0.0).then_some(l.rate), "burst": (l.rate > 0.0).then_some(l.burst) });
+            // FT-000: the reserved shares, requests/s by role (absent: none)
+            let res = l.reserves();
+            if !res.is_empty() { x["reserve"] = Value::Object(res.into_iter().map(|(r, rate)| (r.as_str().to_string(), json!(r3(rate)))).collect()); }
+            (k.clone(), x)
+        }).collect())
     }
 
     /// the boot policy's events go to `rec` (events.jsonl)
@@ -491,13 +599,24 @@ impl Registry {
     }
 
     /// What is left of provider `name`'s budget for `role` after every other role's recent requests: its rate minus what
-    /// they used (0 while it cools down after a 429; None: the provider has no limit). The backfill sizes itself to the
-    /// sum over its providers (review WP-03b #1b, #10)
+    /// they used, and never less than the role's reserved share (FT-000: the backfill paced itself to 0.03/s while the
+    /// lookup-table fetches used everything); 0 while it cools down after a 429; None: the provider has no limit. The
+    /// backfill sizes itself to the sum over its providers (review WP-03b #1b, #10)
     pub fn spare_rps(&self, name: &str, role: Role) -> Option<f64> {
         let l = self.limiter(name);
         if l.rate <= 0.0 { return None; }
         if !l.cooling(Instant::now()).is_zero() { return Some(0.0); }
-        Some((l.rate - self.used_rps(name, role)).max(0.0))
+        Some((l.rate - self.used_rps(name, role)).max(0.0).max(l.reserved(role)))
+    }
+
+    /// FT-000 (S1-1): reserve `rate` requests/s of provider `name`'s bucket for `role` (after `set_limit`; a provider
+    /// without a limit has nothing to reserve)
+    pub fn set_reserve(&self, name: &str, role: Role, rate: f64) { self.limiter(name).set_reserve(role, rate); }
+
+    /// a token granted through `role`'s reserved share (counted as `reserved`)
+    pub fn record_lane(&self, role: Role, provider: &str, lane: Lane) {
+        if lane != Lane::Reserved { return; }
+        self.stats.lock().unwrap().entry((role, provider.to_string())).or_default().t.reserved += 1;
     }
 
     /// every (role, provider)'s totals since the start
@@ -527,6 +646,51 @@ impl Registry {
         out
     }
 
+    /// FT-000 (S1-1): status.jsonl `rpc_budget` (MEASUREMENT §4.8): each provider's budget and what each role used of it
+    /// since `consumer`'s previous call: `{interval_s, providers: {<name>: {max_rps, calls_delta, rps, used_pct,
+    /// queued_now, cooling_ms_now, roles: {<role>: {calls_delta, rps, share_pct, reserved_rps, reserved_delta,
+    /// throttled_delta, wait_ms_delta, rate_budget_delta}}}}, roles: {<role>: {calls_delta, rps, share_pct}}}`. `rps` is
+    /// requests sent per second of the interval; `share_pct` the share of the provider's `max_rps` (of the summed
+    /// `max_rps` of the limited providers in `roles`); a role with a reserved share is listed even when it sent nothing
+    pub fn budget_json(&self, consumer: &'static str) -> Value {
+        let d = self.take(consumer, false);
+        let now = Instant::now();
+        let secs = self.budget_t.lock().unwrap().insert(consumer, now).map_or(0.0, |t| now.saturating_duration_since(t).as_secs_f64());
+        let rate = |n: u64| if secs > 0.0 { Some(r3(n as f64 / secs)) } else { None };
+        let limits: Vec<(String, Arc<Limiter>)> = { let m = self.limits.lock().unwrap(); let mut v: Vec<_> = m.iter().map(|(k, l)| (k.clone(), l.clone())).collect(); v.sort_by(|a, b| a.0.cmp(&b.0)); v };
+        let mut providers = serde_json::Map::new();
+        let mut by_role: BTreeMap<Role, u64> = BTreeMap::new();
+        let mut cap_sum = 0.0;
+        for (name, l) in &limits {
+            let rows: Vec<&((Role, String), Totals, Option<[f64; 3]>)> = d.iter().filter(|x| &x.0 .1 == name).collect();
+            let reserves = l.reserves();
+            if rows.is_empty() && reserves.is_empty() && l.rate <= 0.0 { continue; }
+            let max = (l.rate > 0.0).then_some(l.rate);
+            if let Some(m) = max { cap_sum += m; }
+            let calls: u64 = rows.iter().map(|x| x.1.calls).sum();
+            let mut roles = serde_json::Map::new();
+            let mut names: Vec<Role> = rows.iter().map(|x| x.0 .0).chain(reserves.iter().map(|x| x.0)).collect();
+            names.sort();
+            names.dedup();
+            for r in names {
+                let t = rows.iter().find(|x| x.0 .0 == r).map(|x| x.1).unwrap_or_default();
+                *by_role.entry(r).or_default() += t.calls;
+                let res = reserves.iter().find(|x| x.0 == r).map(|x| r3(x.1));
+                roles.insert(r.as_str().to_string(), json!({ "calls_delta": t.calls, "rps": rate(t.calls),
+                    "share_pct": max.and_then(|m| rate(t.calls).map(|x| r3(x * 100.0 / m))), "reserved_rps": res, "reserved_delta": t.reserved,
+                    "throttled_delta": t.throttled, "wait_ms_delta": r3(t.throttle_wait_us as f64 / 1e3), "rate_budget_delta": t.budget }));
+            }
+            providers.insert(name.clone(), json!({ "max_rps": max, "calls_delta": calls, "rps": rate(calls),
+                "used_pct": max.and_then(|m| rate(calls).map(|x| r3(x * 100.0 / m))), "queued_now": l.queued(),
+                "cooling_ms_now": l.cooling(now).as_millis() as u64, "roles": roles }));
+        }
+        // roles of providers without a bucket entry (no limit) still count in `roles`
+        for ((r, p), t, _) in &d { if !limits.iter().any(|(n, _)| n == p) { *by_role.entry(*r).or_default() += t.calls; } }
+        let roles: serde_json::Map<String, Value> = by_role.into_iter().map(|(r, n)| (r.as_str().to_string(), json!({ "calls_delta": n, "rps": rate(n),
+            "share_pct": (cap_sum > 0.0).then(|| rate(n).map(|x| r3(x * 100.0 / cap_sum))).flatten() }))).collect();
+        json!({ "interval_s": (secs > 0.0).then(|| r3(secs)), "providers": providers, "roles": roles })
+    }
+
     /// resources.jsonl `rpc` (MEASUREMENT §4.10): `{"<role>/<provider>": {calls_delta, ok_delta, errors_delta,
     /// rate_limited_delta, timeouts_delta, body_errors_delta, http_errors_delta, transport_errors_delta, rpc_errors_delta,
     /// no_result_delta, rate_budget_delta, throttled_delta, throttle_wait_ms_delta, p50_ms, p90_ms, p99_ms}}` for the
@@ -536,7 +700,7 @@ impl Registry {
             "calls_delta": d.calls, "ok_delta": d.ok, "errors_delta": d.errors, "rate_limited_delta": d.rate_limited, "timeouts_delta": d.timeouts,
             "body_errors_delta": d.body, "http_errors_delta": d.http, "transport_errors_delta": d.transport, "rpc_errors_delta": d.rpc,
             "no_result_delta": d.no_result, "rate_budget_delta": d.budget, "throttled_delta": d.throttled,
-            "throttle_wait_ms_delta": (d.throttle_wait_us as f64 / 10.0).round() / 100.0,
+            "throttle_wait_ms_delta": (d.throttle_wait_us as f64 / 10.0).round() / 100.0, "reserved_delta": d.reserved,
             "p50_ms": p.map(|x| x[0]), "p90_ms": p.map(|x| x[1]), "p99_ms": p.map(|x| x[2]) }))).collect())
     }
 
@@ -721,8 +885,8 @@ impl Rpc {
     async fn attempt(&self, ep: &Endpoint, body: &Value, method: &str, timeout: Duration, until: Option<Instant>) -> std::result::Result<(Value, usize, Duration), RpcFailure> {
         crate::runtime::check_not_hot("an RPC call");
         let lim = self.reg.limiter(&ep.name);
-        let waited = match lim.take(self.role.priority(), until).await {
-            Ok(w) => w,
+        let waited = match lim.take_role(self.role, until).await {
+            Ok((w, lane)) => { self.reg.record_lane(self.role, &ep.name, lane); w }
             Err(()) => {
                 self.reg.record(self.role, &ep.name, Err(ErrClass::Budget), Duration::ZERO);
                 return Err(RpcFailure::new(ErrClass::Budget, Some(&ep.name), format!("{} {method}: no token of its {:.1}/s budget in time", ep.name, lim.rate)));
@@ -802,7 +966,6 @@ impl Rpc {
         let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
         let start = Instant::now();
         let deadline = start + b.deadline;
-        let prio = self.role.priority();
         let (mut attempts, mut next) = (0u32, 0usize);
         // the providers asked in this round (each once per round; then the backoff), and those that answered with an
         // error of their own (asked no more in this call)
@@ -834,7 +997,7 @@ impl Rpc {
             // of the providers not asked in this round (nor refused), the next in order that is ready now (not cooling down
             // after a 429, a token in its bucket for this role); none ready: the one ready soonest
             let k = (0..n).map(|i| (next + i) % n).filter(|&i| !tried[i] && !answered[i])
-                .min_by_key(|&i| (self.reg.limiter(&self.eps[i].name).wait_hint(prio, now), (i + n - next % n) % n)).unwrap_or(next % n);
+                .min_by_key(|&i| (self.reg.limiter(&self.eps[i].name).wait_hint_role(self.role, now), (i + n - next % n) % n)).unwrap_or(next % n);
             tried[k] = true;
             let ep = &self.eps[k];
             attempts += 1;
@@ -885,8 +1048,8 @@ impl Rpc {
                 // WP-03b: a provider whose bucket (or 429 cool-down) would make the call wait is passed over while a later
                 // one is ready (the shared budgets spread the load instead of queueing behind the first provider)
                 if !is_last {
-                    let (now, prio) = (Instant::now(), self.role.priority());
-                    let ready = |e: &Endpoint| self.reg.limiter(&e.name).wait_hint(prio, now).is_zero();
+                    let now = Instant::now();
+                    let ready = |e: &Endpoint| self.reg.limiter(&e.name).wait_hint_role(self.role, now).is_zero();
                     if !ready(ep) && self.eps[k + 1..].iter().any(ready) { continue; }
                 }
                 let t0 = Instant::now();

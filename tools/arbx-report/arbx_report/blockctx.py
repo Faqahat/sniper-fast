@@ -8,6 +8,15 @@ signatures and `leaders.jsonl`. Deterministic: the same files give the same rows
 - Slots shared by several attempts are built once (`slot_cache`), then filtered per attempt.
 - A slot without a slot-index line, or a route-writing transaction without an `exec` record with `idx`, is a gap:
   the row is `complete: false`. `fill_gaps` fetches the full block of such a slot through `chain.py`.
+- Positions (FT-000 S1-2): a slot's transactions are ordered by ONE kind of position. In FT-000 the slot index's
+  provider (Shyft) left the vote transactions out of getBlock's list, so its positions are ranks among the non-votes
+  (`pos_kind` `nonvote_rank` in slotidx.jsonl 1.1), while exec.jsonl's `idx` is the block index (the stream's
+  `TransactionInfo.index`, getTransaction's `transactionIndex`). Both keep the block order, but compared with each other
+  they misorder (73% of FT-000's comparisons disagreed). Per slot: every transaction's exec block index when all have
+  one (`pos_kind` `block_index`); else every transaction's slot-index position (the line's `pos_kind`; a line written
+  before 1.1 is `unverified`); else the kind most of them have, the others without a position (`complete: false`, the
+  slot's `pos_kind` `mixed`). An `idx` merged from an `idx_update` of a line that is not `block_index` (written before
+  the fix) is not a block index.
 """
 from __future__ import annotations
 
@@ -64,6 +73,54 @@ def our_sigs(seg, a: dict) -> set:
     return s
 
 
+VOTE_PROGRAM = "Vote111111111111111111111111111111111111111"
+
+
+def slot_pos_kind(si: dict | None) -> str | None:
+    """What a slot-index line's positions are: `block_index`, `nonvote_rank` or `unverified` (a line written before
+    slotidx 1.1 does not say: `unverified`); None without an ok line."""
+    if not si or si.get("status") != "ok":
+        return None
+    return si.get("pos_kind") or "unverified"
+
+
+def exec_block_index(e: dict, si_kind: str | None):
+    """An exec / wallet record's block index: its `idx`, unless that came from a slot-index line whose positions are not
+    block indexes (an `idx_update` merged by `streams.iter_exec`, `idx_src` slotidx)."""
+    idx = e.get("idx")
+    if idx is None or (e.get("idx_src") == "slotidx" and si_kind != "block_index"):
+        return None
+    return idx
+
+
+def order_slot(txs: dict, si_pos: dict, si_kind: str | None) -> str | None:
+    """Give every transaction of one slot (`txs[sig]` with `_bi`, its exec block index) one kind of position, in place:
+    `idx` and the slot's `pos_kind` (module doc)."""
+    if not txs:
+        return si_kind
+    bi = {s: t.get("_bi") for s, t in txs.items()}
+    sp = {s: si_pos.get(s) for s in txs}
+    if all(v is not None for v in bi.values()):
+        for s, t in txs.items():
+            t["idx"] = bi[s]
+        return "block_index"
+    if si_kind == "block_index":
+        # both are block indexes
+        for s, t in txs.items():
+            t["idx"] = bi[s] if bi[s] is not None else sp[s]
+        return "block_index"
+    if si_kind is not None and all(v is not None for v in sp.values()):
+        for s, t in txs.items():
+            t["idx"] = sp[s]
+        return si_kind
+    n_bi = sum(v is not None for v in bi.values())
+    n_sp = sum(v is not None for v in sp.values())
+    use = bi if n_bi >= n_sp else sp
+    for s, t in txs.items():
+        t["idx"] = use[s]
+    return "mixed"
+
+
 def build(seg, chain=None, fill_gaps: bool = False) -> dict:
     """{"rows": [per attempt], "slots_processed": n, "slot_refs": n, "gaps_filled": n, "gap_slots": [...]}"""
     att = [a for a in seg.attempts if a.get("attempt") is not None]
@@ -115,10 +172,11 @@ def build(seg, chain=None, fill_gaps: bool = False) -> dict:
     for slot in sorted(union_slots):
         si = seg.slotidx.get(slot)
         pos = {sig: idx for sig, idx in (si or {}).get("tracked") or []}
+        si_kind = slot_pos_kind(si)
         txs = {}
         for sig, accts in writes.get(slot, {}).items():
             e = execs.get(sig) or {}
-            txs[sig] = {"sig": sig, "idx": pos.get(sig, e.get("idx")), "signer": e.get("signer"), "ok": e.get("ok", True),
+            txs[sig] = {"sig": sig, "idx": None, "_bi": exec_block_index(e, si_kind), "signer": e.get("signer"), "ok": e.get("ok", True),
                         "wrote": sorted(accts), "versions": {k: v[0] for k, v in accts.items()},
                         "has_exec": bool(e), "jito_tipped": e.get("jito_tipped"), "tip": e.get("tip_total"),
                         "bundle_pos": (e.get("bundle") or {}).get("pos"), "bundle_id": (e.get("bundle") or {}).get("id"), "keys": e.get("keys") or [],
@@ -126,16 +184,19 @@ def build(seg, chain=None, fill_gaps: bool = False) -> dict:
         for sig, e in execs.items():
             if e.get("slot") != slot or sig in txs:
                 continue
-            txs[sig] = {"sig": sig, "idx": pos.get(sig, e.get("idx")), "signer": e.get("signer"), "ok": e.get("ok"),
+            txs[sig] = {"sig": sig, "idx": None, "_bi": exec_block_index(e, si_kind), "signer": e.get("signer"), "ok": e.get("ok"),
                         "wrote": [], "versions": {}, "has_exec": True, "jito_tipped": e.get("jito_tipped"),
                         "tip": e.get("tip_total"), "bundle_pos": (e.get("bundle") or {}).get("pos"), "bundle_id": (e.get("bundle") or {}).get("id"),
                         "keys": e.get("keys") or [], "pools": e.get("pools") or [], "venues": e.get("venues") or [],
                         "arb_like": (e.get("arb_like") or {}).get("is")}
         for sig, idx in pos.items():  # ours, landed but without an exec/wallet record yet
             if sig in ours_all and sig not in txs:
-                txs[sig] = {"sig": sig, "idx": idx, "signer": seg.wallet, "ok": None, "wrote": [], "versions": {},
+                txs[sig] = {"sig": sig, "idx": None, "_bi": None, "signer": seg.wallet, "ok": None, "wrote": [], "versions": {},
                             "has_exec": False, "keys": [], "pools": [], "venues": [], "arb_like": None}
-        complete = si is not None and si.get("status") in ("ok", "skipped") and all(
+        pos_kind = order_slot(txs, pos, si_kind)
+        for t in txs.values():
+            t.pop("_bi", None)
+        complete = si is not None and si.get("status") in ("ok", "skipped") and pos_kind != "mixed" and all(
             t["has_exec"] and t["idx"] is not None for t in txs.values() if t["wrote"])
         src = "recorded"
         if not complete and fill_gaps and chain is not None:
@@ -143,13 +204,14 @@ def build(seg, chain=None, fill_gaps: bool = False) -> dict:
             if filled:
                 gaps_filled += 1
                 src = "rpc-block"
+                pos_kind = filled
                 complete = all(t["idx"] is not None and t["ok"] is not None for t in txs.values())
         if not complete:
             gap_slots.append(slot)
         ld = seg.leaders.get(slot) or {}
         slot_cache[slot] = {"slot": slot, "leader": ld.get("leader"), "kind": ld.get("kind"),
                             "tx_count": (si or {}).get("tx_count"), "status": (si or {}).get("status"),
-                            "complete": complete, "src": src, "txs": txs}
+                            "complete": complete, "src": src, "pos_kind": pos_kind, "txs": txs}
 
     rows = []
     for a in att:
@@ -184,13 +246,16 @@ def build(seg, chain=None, fill_gaps: bool = False) -> dict:
                     ours_pos = {"slot": slot, "idx": t["idx"]}
             tl.sort(key=lambda x: (x["idx"] is None, x["idx"] if x["idx"] is not None else 0, x["sig"]))
             out_slots.append({"slot": slot, "leader": sc["leader"], "kind": sc["kind"], "tx_count": sc["tx_count"],
-                              "complete": sc["complete"], "txs": tl})
+                              "complete": sc["complete"], "pos_kind": sc["pos_kind"], "txs": tl})
         if trig_pos is None and trig:
-            # the trigger may have written nothing on our route (a hint); its position can still be in the slot index
+            # the trigger may have written nothing on our route (a hint); its position can still be in the slot index,
+            # comparable with the slot's other positions only when they are of its kind
             for slot in range(lo, hi + 1):
                 si = seg.slotidx.get(slot) or {}
                 for sig, idx in si.get("tracked") or []:
-                    if sig == trig:
+                    if sig != trig:
+                        continue
+                    if not slot_cache[slot]["txs"] or slot_cache[slot]["pos_kind"] == slot_pos_kind(si):
                         trig_pos = {"slot": slot, "idx": idx}
         src = "recorded" if srcs == {"recorded"} else ("rpc-block" if srcs == {"rpc-block"} else "mixed")
         rows.append({"attempt": a["attempt"], "route_accounts": ra, "window": {"from_slot": lo, "to_slot": hi},
@@ -201,6 +266,8 @@ def build(seg, chain=None, fill_gaps: bool = False) -> dict:
 
 
 FILE_TX_FIELDS = ("idx", "sig", "signer", "ok", "wrote", "ours", "jito_tipped", "tip", "bundle_pos")
+#: blockctx.jsonl slot fields (FT-000: `pos_kind`, what the slot's `idx` values are)
+FILE_SLOT_FIELDS = ("slot", "leader", "kind", "tx_count", "complete", "pos_kind")
 
 RUNG_NAMES = {0: "0 same bundle as opener", 1: "1 idx+1", 2: "2 idx+2..5", 3: "3 same slot, later", 4: "4 next slot",
               5: "5 two or more slots later"}
@@ -223,14 +290,23 @@ def rung(opener: tuple, pos: tuple, same_bundle: bool = False) -> int | None:
 
 
 def positions(seg, rows=None) -> dict:
-    """{sig: (slot, idx)} from the slot index (tracked signatures) and exec records (idx, idx_update merged)."""
+    """{sig: (slot, idx)} from the slot index (tracked signatures) and exec records (idx, idx_update merged). FT-000
+    (S1-2): within a slot whose slot-index line is not `block_index`, the line's positions are the only ones used (an
+    exec block index would not compare with them); an exec block index fills in where the slot has no line."""
     pos = {}
+    kinds = {}
     for slot, r in seg.slotidx.items():
+        kinds[slot] = slot_pos_kind(r)
         for sig, idx in r.get("tracked") or []:
             pos[sig] = (slot, idx)
     for e in rows if rows is not None else seg.iter_exec():
-        if e.get("idx") is not None and e.get("sig") not in pos:
-            pos[e["sig"]] = (e.get("slot"), e["idx"])
+        slot = e.get("slot")
+        k = kinds.get(slot)
+        if e.get("idx") is None or e.get("sig") in pos or (k is not None and k != "block_index"):
+            continue
+        if exec_block_index(e, k) is None:
+            continue
+        pos[e["sig"]] = (slot, e["idx"])
     return pos
 
 
@@ -272,7 +348,7 @@ def file_rows(built: dict) -> list:
     """Rows as written to report/blockctx.jsonl (§4.41 fields only)."""
     out = []
     for r in built["rows"]:
-        slots = [{**{k: s[k] for k in ("slot", "leader", "kind", "tx_count", "complete")},
+        slots = [{**{k: s.get(k) for k in FILE_SLOT_FIELDS},
                   "txs": [{k: t.get(k) for k in FILE_TX_FIELDS} for t in s["txs"]]} for s in r["slots"]]
         c = r.get("closer")
         closer = None if not c else {k: c.get(k) for k in ("sig", "signer", "slot", "idx", "kind", "ms_after_trigger_poh")}
@@ -281,19 +357,27 @@ def file_rows(built: dict) -> list:
     return out
 
 
-def _fill(chain, slot: int, txs: dict, accts: set, ours: dict) -> bool:
-    """Fill a gap slot from a full getBlock: positions, results and signers of route-touching transactions."""
+def _fill(chain, slot: int, txs: dict, accts: set, ours: dict):
+    """Fill a gap slot from a full getBlock: positions, results and signers of route-touching transactions. Returns the
+    positions' kind (`block_index`; `nonvote_rank` when the provider's list holds no vote transaction: it left them out,
+    FT-000 S1-2), or False when there was no block."""
     try:
         blk = chain.get_block(slot, full=True)
     except Exception:
         return False
     if not blk:
         return False
+    views = []
+    for t in blk.get("transactions") or []:
+        views.append(solana.TxView({"transaction": t.get("transaction"), "meta": t.get("meta"), "slot": slot, "version": t.get("version")}))
+    kind = "block_index" if any(VOTE_PROGRAM in (v.keys or []) for v in views) or not views else "nonvote_rank"
+    for t in txs.values():
+        t["idx"] = None
     for idx, t in enumerate(blk.get("transactions") or []):
-        v = solana.TxView({"transaction": t.get("transaction"), "meta": t.get("meta"), "slot": slot, "version": t.get("version")})
+        v = views[idx]
         if v.sig in txs:
             txs[v.sig].update({"idx": idx, "ok": v.ok, "signer": v.signer, "has_exec": True, "keys": v.keys})
         elif accts.intersection(v.keys) or v.sig in ours:
             txs[v.sig] = {"sig": v.sig, "idx": idx, "signer": v.signer, "ok": v.ok, "wrote": [], "versions": {},
                           "has_exec": True, "keys": v.keys, "pools": [], "venues": [], "arb_like": None}
-    return True
+    return kind

@@ -131,7 +131,8 @@ enum Cmd {
     /// probe.json (`[state] probe_file`, default <out_dir>/probe.json) and a dated copy. Sends no transaction. Refuses
     /// to start while a segment or campaign may hold the provider (Haan serves the first process only), and holds the
     /// campaign supervisor's lock while it runs. A 503 / Unavailable result is inconclusive: probe.json is then not
-    /// replaced and the exit code is 3
+    /// replaced and the exit code is 3. A plan limit (ResourceExhausted `<LIMIT> exceeded: n/m`) is a refusal
+    /// (`refused_plan_limit`, its numbers recorded): it never keeps probe.json from being written
     GrpcProbe {
         #[arg(long, default_value = "arb.toml")] config: PathBuf,
         #[arg(long, default_value_t = 30.0)] seconds: f64,
@@ -256,7 +257,7 @@ fn main() -> Result<()> {
                 st.commit_timeout_ms, st.quiescence_ms, st.max_part_skew_slots, st.max_tip_lag_slots, st.clock_max_age_slots, st.lag_slo_p50_ms, st.lag_slo_p90_ms, st.slo_action,
                 st.boot_timeout_s, st.max_update_age_ms, st.resnapshot, st.resync_warn_s, st.resync_give_up_s,
                 if st.unavailable_stop_s == 0 { "an outage after the first message does not stop the run".to_string() } else { format!("stop after {} s unavailable", st.unavailable_stop_s) });
-            println!("lookup tables: retries {:?} ms then every {} s, give up after {} s, at most {} waiting, {} fetches at once, preload {:?} (used in the last {} h, at most {}); accuracy {} ({} versions per account)",
+            println!("lookup tables: retries {:?} ms then every {} s, give up after {} s, at most {} waiting, {} tables fetched at once, preload {:?} (used in the last {} h, at most {}); accuracy {} ({} versions per account)",
                 cfg.alts.retry_ms, cfg.alts.retry_every_s, cfg.alts.give_up_s, cfg.alts.wait_cap, cfg.alts.max_inflight, cfg.alts.preload, cfg.alts.preload_max_age_h,
                 cfg.alts.preload_max_tables, cfg.accuracy.action, cfg.accuracy.ring_versions);
             // WP-03b: the providers' budgets (every client of the process) and the chain-fetch roles
@@ -267,6 +268,11 @@ fn main() -> Result<()> {
             println!("chain fetch {}: after {} ms, backfill rps {}, backlog {}, sample every {} s, blockhash poll {} ms, sigs every {} s, tx version {}; roles {}", if cf.enabled { "on" } else { "off" },
                 cf.after_ms, cf.rps.fixed().map_or("auto".to_string(), |r| format!("{r}/s")), cf.max_backlog, cf.sample_every_s, cf.blockhash_poll_ms, cf.sigs_every_s, cf.max_tx_version,
                 rpc::Role::FETCH.iter().map(|r| format!("{}={}", r.as_str(), cf.providers_for(r.as_str(), &all).join("+"))).collect::<Vec<_>>().join(" "));
+            // FT-000: the reserved shares, the lookup tables' batching and cache, the wallet cursor, exec.jsonl's sampling
+            let res: Vec<String> = cf.reserves(&all).iter().map(|(p, r, rate)| format!("{} {:.2}/s of {p}", r.as_str(), rate)).collect();
+            println!("reserved shares: {}; lookup tables: {} a request at most every {} ms ({} at once), cache {} tables / {} MiB; wallet cursor {:?}; exec.jsonl keeps 1 in {} unwatched",
+                if res.is_empty() { "none".to_string() } else { res.join(", ") }, cfg.alts.batch_max, cfg.alts.call_every_ms, cfg.alts.calls_inflight,
+                cfg.alts.max_tables, cfg.alts.max_mb, cf.wallet_cursor, cfg.record.exec_unwatched_sample);
             let payer = bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok());
             let mut keys_checked = 0;
             for s in &cfg.sends {
@@ -573,7 +579,8 @@ fn grpc_probe(config: &Path, seconds: f64, out: Option<PathBuf>, only: Option<St
     let subs = rt.block_on(probe::probe(&plan, std::time::Duration::from_secs_f64(seconds), only.as_deref()));
     drop(lock);
     for s in &subs {
-        let what = match s.verdict { "accepted" if s.messages_30s == 0 => "SILENT", "accepted" => "accepted", "refused" => "REFUSED", _ => "INCONCLUSIVE" };
+        let what = match s.verdict { "accepted" if s.messages_30s == 0 => "SILENT", "accepted" => "accepted", "refused" => "REFUSED", "refused_plan_limit" => "PLAN LIMIT",
+            _ => "INCONCLUSIVE" };
         println!("  {:<24} {:<12} {:>6} msgs  first {:>8}  {}{}", s.sub, what, s.messages_30s,
             s.first_msg_ms.map(|m| format!("{m:.0} ms")).unwrap_or_else(|| "-".into()), s.host, s.error.as_ref().map(|e| format!("  ({e})")).unwrap_or_default());
     }
@@ -1102,6 +1109,9 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // reason); each provider's host resolved once and its connection opened (no DNS lookup on a reconnect)
     let rpc_reg = rpc::Registry::global();
     for n in rpc.names() { let (r, b) = cfg.chainfetch.limit_of(&n); rpc_reg.set_limit(&n, r, b); }
+    // FT-000 (S1-1): the reserved shares (`[chainfetch] reserve`): the slot index and the backfill keep their rate on every
+    // provider that serves them, whatever the busier roles ask
+    for (p, role, rate) in cfg.chainfetch.reserves(&rpc.names()) { rpc_reg.set_reserve(&p, role, rate); }
     rpc_reg.set_sink(rec.clone());
     rpc.set_phase(rpc::Phase::Boot);
     rpc.set_boot_budget(std::time::Duration::from_secs(cfg.chainfetch.boot_retry_s));
@@ -1223,8 +1233,15 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         let (cap, wallet_pk) = (cf_clients.cap(rpc::Role::Backfill), bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok()));
         let gate = sess.gate.clone();
         let on_dead: chainfetch::OnDead = Arc::new(move |why: &str| { let _ = gate.shadow("chainfetch_dead", why, true); });
+        // FT-000 (S1-12): our wallet's history starts after the previous segment's cursor
+        let cursor = chainfetch::read_wallet_cursor(&cfg.chainfetch.wallet_cursor, &dir, &cfg.wallet);
+        match &cursor {
+            Some((sig, slot, file)) => say(&format!("wallet history: after {}…'s slot {slot} ({}): only newer signatures are listed", &sig[..sig.len().min(12)], file.display())),
+            None => say(&format!("wallet history: no cursor ([chainfetch] wallet_cursor {:?}): the last hour is listed", cfg.chainfetch.wallet_cursor)),
+        }
         chainfetch::start(chainfetch::Opts { cfg: cfg.chainfetch.clone(), wallet: wallet_pk, route_program: tx::pk(&cfg.exec.program), roles: roles.clone(), rec: rec.clone(),
-            back: Some(tx.clone()), chain: Arc::new(cf_clients), backfill_cap: cap }, rpc_reg.clone(), &bg, stop.clone(), Some(on_dead));
+            back: Some(tx.clone()), chain: Arc::new(cf_clients), backfill_cap: cap, wallet_cursor: cursor.map(|c| (c.0, c.1)) }, rpc_reg.clone(), &bg, stop.clone(),
+            Some(on_dead));
     }
     rpc.start_warm(&bg, stop.clone(), std::time::Duration::from_secs(20), std::time::Duration::from_secs(5));
     feeds::start_state(cfg.state.url.clone(), state_token, wrx, state_subs, tx.clone(), stop.clone(), &hot, state_counters.clone(), rec.clone(),

@@ -552,6 +552,13 @@ def _parse_journal_body(kind: int, b: bytes) -> dict:
                 else:
                     addrs.append(None)
             return {"table": table, "found": True, "preload": True, "addrs": addrs}
+        if found == 4:
+            # journal 2.3 (FT-000): the cache evicted these tables (u16 n | n x 32), then the running count and hash
+            n = struct.unpack_from("<H", b, 33)[0]
+            tables = [solana.b58encode(b[35 + 32 * i:67 + 32 * i]) for i in range(n)]
+            p = 35 + 32 * n
+            total, h = struct.unpack_from("<QQ", b, p) if len(b) >= p + 16 else (None, None)
+            return {"evicted": tables, "evicted_total": total, "evict_hash": h}
         n = struct.unpack_from("<H", b, 33)[0]
         d = {"table": table, "found": found == 1, "addrs": [solana.b58encode(b[35 + 32 * i:67 + 32 * i]) for i in range(n)]}
         if found == 2:

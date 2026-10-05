@@ -180,6 +180,22 @@ impl Journal {
         });
     }
 
+    /// ALT `found` 4 (2.3, FT-000 S1-4): the lookup tables the engine's cache evicted while handling the input before it
+    /// (or the boot's preload): `[0; 32] | 4 | u16 n | 32 × each table | u64 evicted_total | u64 evict_hash` (the running
+    /// count and hash after them; at most 65,535 tables listed, the count and hash cover all). Not an input: a replay
+    /// evicts the same tables itself and checks the pair (`ReplayStats::alt_evict_mismatches`)
+    pub fn alt_evict(&self, t: u64, tables: &[Pk], total: u64, hash: u64) {
+        let v: Vec<Pk> = tables.iter().take(u16::MAX as usize).copied().collect();
+        self.put(J_ALT, t, 32 * v.len() as u64, move |o| {
+            o.extend_from_slice(&[0u8; 32]);
+            o.push(4);
+            o.extend((v.len() as u16).to_le_bytes());
+            for k in &v { o.extend_from_slice(k); }
+            o.extend(total.to_le_bytes());
+            o.extend(hash.to_le_bytes());
+        });
+    }
+
     /// INPUT: an input from another subsystem (or the engine's own engine_init / decision-point gate records). `data`
     /// is shared, not copied: it is serialized on the recorder's writer (review WP-03 N3)
     pub fn input(&self, t: u64, kind: InputKind, data: Arc<serde_json::Value>) { self.input_sized(t, kind, data, 0) }
@@ -237,6 +253,8 @@ pub enum JBody {
     BlockMeta { slot: u64, blockhash: [u8; 32], height: Option<u64>, parent_slot: u64, t: u64, bank_id: Option<u64> },
     /// a fetch's answer (`addrs` found; neither: no such table; `err`: the fetch failed), or a preloaded table (`preload`)
     Alt { table: Pk, addrs: Option<Vec<Pk>>, err: Option<String>, preload: Option<Vec<Option<Pk>>> },
+    /// 2.3 (FT-000): tables the cache evicted, with the running count and hash after them (ALT `found` 4)
+    AltEvict { tables: Vec<Pk>, total: u64, hash: u64 },
     Input { kind: u8, data: serde_json::Value },
     Tick,
     Status { feed: u16, msg: String },
@@ -303,6 +321,10 @@ fn body(kind: u8, b: &[u8]) -> Result<JBody> {
                     let mut v = Vec::with_capacity(n);
                     for i in 0..n { v.push(if bits[i / 8] & (1 << (i % 8)) != 0 { Some(c.arr::<32>()?) } else { None }); }
                     JBody::Alt { table, addrs: None, err: None, preload: Some(v) }
+                }
+                4 => {
+                    let tables = c.keys()?;
+                    JBody::AltEvict { tables, total: c.u64()?, hash: c.u64()? }
                 }
                 found => {
                     let a = c.keys()?;
@@ -450,6 +472,10 @@ pub struct ReplayStats {
     pub gate_observed: u64,
     /// ---- WP-09 (review WP-09 #3): of those, the ones staged for the replay's decisions (`Engine::gate_seen`)
     pub gate_staged: u64,
+    /// FT-000 (S1-4): ALT `found` 4 records whose eviction count and hash the replayed engine does not have at that point
+    /// (its lookup-table cache diverged; a what-if with other `[alts]` caps differs by design)
+    pub alt_evictions: u64,
+    pub alt_evict_mismatches: u64,
 }
 
 /// ---- WP-09 (review WP-09 #3). A decision-point gate record: INPUT 3 `src` "decision", what a decision read of the
@@ -526,6 +552,12 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
                 bank_id: *bank_id }),
             // a preloaded table outside the boot section would be a writer's error: applied like one inside it
             JBody::Alt { table, preload: Some(v), .. } => { eng.preload_alt(*table, v.clone(), None, false); continue; }
+            // the cache's evictions while the run handled the record before: the replayed engine has evicted the same
+            JBody::AltEvict { total, hash, .. } => {
+                st.alt_evictions += 1;
+                if eng.alt_evictions() != (*total, *hash) { st.alt_evict_mismatches += 1; }
+                continue;
+            }
             JBody::Alt { table, addrs, err, .. } => Event::Alt { table: *table, addrs: addrs.clone().map(Arc::new), err: err.clone() },
             JBody::Input { kind, data } => match InputKind::from_u8(*kind) {
                 // a settlement belongs to the executor, which an offline engine does not have (WP-05 / WP-09 replay it);
@@ -703,6 +735,125 @@ mod tests {
         }
         assert_eq!(seen[0], seen[1], "the same journal twice: the same state and decisions");
         assert_eq!(seen[0], (digest, decisions), "and the run's own");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// FT-000 (S1-4), the replay determinism check with eviction: a run whose lookup-table cache is capped (4 tables
+    /// here) handles transactions that load their pools' vaults through 10 tables in turn: each needed table is fetched
+    /// (the answer an ALT record), the cache evicts the least recently used (ALT `found` 4 records with the running count
+    /// and hash), and a table needed again after its eviction is fetched again (`refetch`). Three tables preloaded from a
+    /// previous segment that nothing here uses go first, by address (not by their previous segment's use, which the
+    /// journal does not carry). The journal replays to the run's state and decisions, reproducing every eviction at its
+    /// record; a what-if with another cap evicts other tables (the check sees it)
+    #[test]
+    fn a_run_whose_lookup_table_cache_evicts_replays_to_the_run() {
+        let d = std::env::temp_dir().join(format!("arbx-journal-evict-{}-{}", std::process::id(), crate::feeds::clock::now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec!["a".into(), "b".into()],
+            monitor: false, echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let reg = registry();
+        let acct = AcctRec::new(rec.clone(), Arc::new(Roles::new(reg.watch_roles())));
+        let cfg = StrategyCfg { state_triggers: true, budget_caps_sol: vec![0.5, 2.0], ..StrategyCfg::default() };
+        let rec_acct = |key: Pk, data: &Arc<[u8]>, slot: u64, t: u64, txn: Option<[u8; 64]>, src: u8| -> u64 {
+            acct.record(&AcctUpdate { pubkey: key, slot, write_version: if src == 0 { t } else { 0 }, t_recv: t, src, is_startup: false, txn, lamports: 1, owner: [3; 32], data, bank_id: None })
+        };
+        let boot_j = Journal::new(rec.clone());
+        let mut store = Store::default();
+        for (n, sol) in [(1u8, 1_000u64), (2, 1_010)] {
+            let m = meta(n);
+            for (k, data) in [(m.pool, ammv4_pool()), (m.vault0, vault(1_000_000_000_000_000)), (m.vault1, vault(sol * 1_000_000_000))] {
+                let data: Arc<[u8]> = data.into();
+                let aseq = rec_acct(k, &data, 10, T0, None, src::RPC_BOOT);
+                boot_j.account(0, aseq, store.is_stale(&k, 10, src::RPC_BOOT, 0, aseq));
+                store.apply(k, crate::store::Acct::rpc(data, 10, T0, aseq, src::RPC_BOOT));
+            }
+        }
+        crate::engine::initial_dlmm_arrays(&reg, &mut store);
+        let knobs = crate::engine::EngineKnobs { alts: crate::alts::Policy { max_tables: 4, max_inflight: 400, ..crate::alts::Policy::default() },
+            ..crate::engine::EngineKnobs::default() };
+        let mut e = Engine::new_offline(reg.clone(), store, cfg.clone());
+        e.set_rec(rec.clone());
+        e.set_knobs(knobs.clone());
+        e.journal_init();
+        // the previous segment's tables (journaled with the boot records), last used there in another order than their
+        // addresses'
+        let preloaded: [Pk; 3] = [[0xC1; 32], [0xC2; 32], [0xC3; 32]];
+        for (k, used) in preloaded.iter().zip([300u64, 100, 200]) { e.preload_alt(*k, vec![Some([0x71; 32]), None, Some([0x72; 32])], Some(T0 - 1_000 + used), true); }
+        let mut status = |_: &str| {};
+        let mut t = T0 + 1_000_000;
+        let mut tick = || { t += 1_000_003; t };
+        // table n holds the vaults of pool 1 + n % 2 at entries 0 and 1 (and two other addresses)
+        let table = |n: u64| -> Pk { let mut k = [0xB0u8; 32]; k[1] = n as u8; k };
+        let entries = |n: u64| { let m = meta(1 + (n % 2) as u8); vec![m.vault1, m.vault0, [0x61; 32], [0x62; 32]] };
+        let mut answered = 0usize;
+        for i in 0..50u64 {
+            let n = (i * 3) % 10;
+            let m = meta(1 + (n % 2) as u8);
+            let s = [i as u8 + 1; 64];
+            let slot = 11 + i / 4;
+            // the transaction from a shred feed: v0, its vaults loaded from table n (the pool and the program static)
+            let x = Tx { sig: s, num_signers: 1, num_ro_signed: 0, num_ro_unsigned: 2, keys: vec![[0x52; 32], m.pool, [0x53; 32]],
+                ixs: vec![crate::tx::Ix { program: 2, accounts: vec![0, 3, 4, 1], data: vec![1, 2, 3] }],
+                lookups: vec![crate::tx::Lookup { table: table(n), writable: vec![0, 1], readonly: vec![] }], ..Default::default() };
+            let w = crate::tx::to_wire(&x).unwrap();
+            let (x, _) = crate::tx::parse_wire(&w).unwrap();
+            let (tr, te) = (tick(), tick());
+            e.step(Event::Tx(Arrival { feed: 0, slot, t_rx: tr, t_decoded: tr, executed: None, tx: x, poh: None, raw: RawTx::Wire(Arc::from(&w[..])) }), te, &mut status);
+            // the fetches it asked for come back (the fetcher's answers, one ALT record each)
+            let asked: Vec<Pk> = e.offline_fetches[answered..].iter().filter(|f| f.0 == "alt").flat_map(|f| f.1.clone()).collect();
+            answered = e.offline_fetches.len();
+            for tb in asked {
+                let k = (0..10u64).find(|k| table(*k) == tb).unwrap();
+                let te = tick();
+                e.step(Event::Alt { table: tb, addrs: Some(Arc::new(entries(k))), err: None }, te, &mut status);
+            }
+            // its writes: the two vaults, a gap every 5th
+            let sol = if i % 5 == 0 { 1_030 + i } else { 1_000 + i % 7 };
+            for (k, data) in [(m.vault1, vault(sol * 1_000_000_000)), (m.vault0, vault(999_000_000_000_000 - i * 1_000_000_000))] {
+                let data: Arc<[u8]> = data.into();
+                let tt = tick();
+                let aseq = rec_acct(k, &data, slot, tt, Some(s), src::GRPC);
+                let te = tick();
+                e.step(Event::Account { slot, pubkey: k, owner: [3; 32], lamports: 1, data, t: tt, txn: Some(s), write_version: tt, is_startup: false, src: src::GRPC, aseq, bank_id: None },
+                    te, &mut status);
+            }
+            let te = tick();
+            e.timers(te, &mut status);
+        }
+        let te = tick() + 20_000_000_000;
+        e.timers(te, &mut status);
+        let (digest, decisions) = (e.digest(), e.decision_digest());
+        let (evicted, refetched) = (e.counter("alt_evicted"), e.counter("alt_refetch"));
+        assert!(evicted >= 20 && refetched >= 10, "the cache evicted {evicted} tables and fetched {refetched} again");
+        assert!(e.counter("evaluation") > 0 && decisions != 0, "the run priced its pools");
+        rec.close();
+        let j = read_dir(&d).unwrap();
+        let by: HashMap<u64, AcctRecord> = accounts::read_dir(&d).unwrap().records.into_iter().map(|r| (r.aseq, r)).collect();
+        let evict_recs: Vec<(usize, u64)> = j.iter().filter_map(|r| match &r.body { JBody::AltEvict { tables, total, .. } => Some((tables.len(), *total)), _ => None }).collect();
+        assert!(!evict_recs.is_empty(), "the evictions are journaled");
+        assert_eq!(evict_recs.iter().map(|x| x.0 as u64).sum::<u64>(), evicted, "every evicted table listed");
+        assert_eq!(evict_recs.last().unwrap().1, evicted, "the running count");
+        let first: Vec<Pk> = j.iter().find_map(|r| match &r.body { JBody::AltEvict { tables, .. } => Some(tables.clone()), _ => None }).unwrap();
+        assert_eq!(first, preloaded[..2].to_vec(), "the preloaded tables nobody used go first, by address");
+        // alts.jsonl `evicted`: a preloaded table nobody used has no idle time here; the others theirs
+        let ev = crate::rec::read_jsonl(&d, "alts").unwrap();
+        let evicted_ev: Vec<&serde_json::Value> = ev.iter().filter(|x| x["event"] == "evicted").collect();
+        assert_eq!(evicted_ev.len() as u64, evicted);
+        for x in &evicted_ev {
+            let pre = preloaded.iter().any(|k| x["table"] == serde_json::json!(crate::tx::b58(k)));
+            assert_eq!(x["idle_ms"].is_null(), pre, "{x}");
+        }
+        // the replay: the same evictions at the same records, the run's state and decisions
+        let (mut r, init) = replay_engine(reg.clone(), cfg.clone(), &j, &by).unwrap();
+        assert_eq!(init.knobs.map(|k| k.alts.max_tables), Some(4), "the cap comes from engine_init");
+        let st = replay(&mut r, &j, &by).unwrap();
+        assert_eq!((st.missing_accounts, st.verdict_mismatches, st.alt_evictions as usize, st.alt_evict_mismatches), (0, 0, evict_recs.len(), 0), "{st:?}");
+        assert_eq!((r.digest(), r.decision_digest()), (digest, decisions), "run vs replay");
+        assert_eq!((r.counter("alt_evicted"), r.counter("alt_refetch")), (evicted, refetched));
+        // a what-if with another cap evicts other tables: the check sees it (and the state differs)
+        let (mut w, _) = replay_engine(reg.clone(), cfg.clone(), &j, &by).unwrap();
+        w.set_knobs(crate::engine::EngineKnobs { alts: crate::alts::Policy { max_tables: 6, ..knobs.alts.clone() }, ..knobs.clone() });
+        let st = replay(&mut w, &j, &by).unwrap();
+        assert!(st.alt_evict_mismatches > 0, "{st:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
