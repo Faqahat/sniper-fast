@@ -58,7 +58,7 @@ wallet_keystore = ""
 [pools]
 # OD-4 (owner confirms the seed list): the live w5h3 campaign's list (exp3 list + fresh discovery, 2026-10-03 evening),
 # copied from Cherry into arbx/data (commit c777f26). The fallback named by PLAN.md WP-00 is data/seed-pools-merged.csv
-seed_csv = "/root/arbx/data/seed-pools-w4.csv"
+seed_csv = "/root/arbx/data/seed-pools-ft000s3.csv"   # refreshed 2026-10-05 (FT-000 s3): 1,147 w4 pools active in FT-000 + 353 pooldisco discoveries; priced +36% pools vs w4
 registry_json = "/root/arbx/data/registry.json"
 registry_all = true
 templates_json = "/root/arbx/data/templates.json"
