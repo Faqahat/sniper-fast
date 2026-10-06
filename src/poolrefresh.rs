@@ -237,7 +237,8 @@ static DAMM_SWAPS: LazyLock<[[u8; 8]; 2]> = LazyLock::new(|| [hex8("f8c69e91e175
 /// The pool account of a swap instruction on one of our venues, at the position the engine's decoders read it
 /// (`venues::cp::decode_pending`, `venues::dlmm::decode_pending`, `engine::damm_pending`): PumpSwap buy / sell /
 /// buy_exact_quote_in account 0, CPMM swap_base_input / output account 3, AMM v4 swap (tags 9, 11, 16, 17) account 1,
-/// DLMM's swaps account 0, DAMM v2 swap / swap2 account 1. `data`: the instruction data's first bytes
+/// DLMM's swaps account 0, DAMM v2 swap / swap2 account 1; any other venue: None. `data`: the instruction data's first
+/// bytes
 pub fn swap_pool_index(venue: Venue, data: &[u8], n_acc: usize) -> Option<usize> {
     let d8: Option<[u8; 8]> = data.get(..8).map(|b| b.try_into().unwrap());
     let (ok, i, min) = match venue {
@@ -246,6 +247,10 @@ pub fn swap_pool_index(venue: Venue, data: &[u8], n_acc: usize) -> Option<usize>
         Venue::RayAmmV4 => (data.first().is_some_and(|t| [9u8, 11, 16, 17].contains(t)) && data.len() >= 17, 1, 8),
         Venue::Dlmm => (d8.is_some_and(|d| DLMM_SWAPS.contains(&d)), 0, 11),
         Venue::DammV2 => (d8.is_some_and(|d| DAMM_SWAPS.contains(&d)), 1, 9),
+        // venues added later (WP-21A's CLMM and Whirlpool): their swaps are not read for candidates yet (PLAN-ADDENDUM
+        // WP-22 "later"); unreachable until they exist
+        #[allow(unreachable_patterns)]
+        _ => return None,
     };
     (ok && n_acc >= min).then_some(i)
 }
