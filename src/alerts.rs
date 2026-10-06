@@ -35,7 +35,7 @@ pub mod format;
 pub mod summary;
 pub mod telegram;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::feeds::clock::real_ns;
 use crate::rec::Rec;
@@ -339,13 +339,16 @@ pub fn low_balance_alert(b: &LowBalance) -> Alert {
         .icon("🪫").body(Body::new().kv("warn below", sol(b.warn_below_lamports as i64)))
 }
 
-/// The alert of one of WP-07's notices (src/notify.rs on lane/wp-07: the ledger's, its in-process supervisor's and the
-/// campaign's money and lifecycle events: `equity_floor`, `equity_hour`, `equity_day`, `token_floor`, `recon_miss`,
-/// `low_native_sol`, `stranded_token`, `equity_unknown`, `campaign_start`, `equity_start`, `segment_end`,
-/// `segment_not_sending`, `segment_start_failed`, `campaign_shadow`, `campaign_end`). The merge wires it with
-/// `notify::set_hook(|n| { alerts::notice(<n.level as a Level: Warn is Warning>, n.kind, &n.subject, &n.text); })`.
-/// Its level is WP-07's; its key `<kind>:<subject>`; it is never deduplicated (WP-07 raises each once); `text`, WP-07's
-/// line for a person, is the title (escaped, cut at 200 characters)
+/// The alert of one of WP-07's notices (src/notify.rs: the ledger's, its in-process supervisor's and the campaign's
+/// money and lifecycle events: `equity_floor`, `equity_hour`, `equity_day`, `token_floor`, `recon_miss`,
+/// `recon_undecided`, `equity_stale`, `equity_fresh`, `owner_transfer`, `low_native_sol`, `stranded_token`,
+/// `equity_unknown`, `campaign_start`, `equity_start`, `segment_end`, `segment_not_sending`, `segment_start_failed`,
+/// `segment_unreaped`, `campaign_shadow`, `data_files_changed`, `campaign_end`). [`notice_hook`] hands them over. Its
+/// level is WP-07's; `text`, WP-07's line for a person, is the title (escaped, cut at 200 characters). Integration
+/// (integ/stage0): deduplicated by kind and subject (the key `<kind>:<subject>`, `dedup_s`: a flapping money view or a
+/// run of failed segment starts is one message per window, the next one saying how many came between; a higher level
+/// than the one last sent for the key always passes, [`Alerts::raise`]); the money view's stale / fresh notices are one
+/// transition family, so the last word the owner reads is never the wrong one for longer than `dedup_s`
 pub fn notice_alert(level: Level, kind: &'static str, subject: &str, text: &str) -> Alert {
     let icon = match kind {
         "equity_floor" | "equity_hour" | "equity_day" | "token_floor" => "🛑",
@@ -354,10 +357,35 @@ pub fn notice_alert(level: Level, kind: &'static str, subject: &str, text: &str)
         "campaign_start" | "equity_start" => "🟢",
         "campaign_shadow" | "segment_not_sending" => "🚦",
         "campaign_end" | "segment_end" if level < Level::Error => "⏹",
+        "equity_fresh" => "✅",
+        "owner_transfer" => "💸",
         _ => level.icon(),
     };
-    Alert::new(level, kind, format!("{kind}:{subject}"), text).icon(icon).once()
+    let a = Alert::new(level, kind, format!("{kind}:{subject}"), text).icon(icon);
+    match kind { "equity_stale" | "equity_fresh" => a.family("equity_view"), _ => a }
 }
+
+/// integration (WP-07 x WP-20): a notice's level as the alerts' (WP-07's `Warn` is `Warning`)
+pub fn level_of(l: crate::notify::Level) -> Level {
+    match l { crate::notify::Level::Info => Level::Info, crate::notify::Level::Warn => Level::Warning, crate::notify::Level::Error => Level::Error,
+        crate::notify::Level::Critical => Level::Critical }
+}
+
+/// integration (WP-07 x WP-20): the `notify` hook (`notify::set_hook`) that hands WP-07's notices to `a`, as `arbx run`
+/// installs it for the engine (the ledger, the in-process supervisor) and `arbx campaign` for its loop. It never waits
+/// ([`Alerts::raise`]: a level check, a dedup check under a lock tried without waiting, a `try_send`); WP-07 calls it
+/// after it acted (a stop is requested before its notice) and inside `catch_unwind`. From then on the SendGate watcher
+/// leaves the gate changes of the supervisor's rules to these notices ([`Alerts::watch_gate`])
+pub fn notice_hook(a: Arc<Alerts>) -> impl Fn(&crate::notify::Notice) + Send + Sync + 'static {
+    a.notices_hooked.store(true, Relaxed);
+    move |n| { a.notice(level_of(n.level), n.kind, &n.subject, &n.text); }
+}
+
+/// The SendGate's reasons that WP-07's supervisor sets with a notice of its own right after (`Supervisor::evaluate`:
+/// the four stop rules, which the stop message tells as well; `reconcile_miss_at`): with the notices hooked, their gate
+/// change is not told again (the owner would get two or three Critical messages for one stop). `equity_stale` stays: its
+/// re-shadow after an operator's resume (`hold_stale`) has no notice
+pub const NOTICED_GATE_REASONS: [&str; 5] = ["equity_floor", "equity_hour", "equity_day", "token_floor", "reconcile_miss"];
 
 // ------------------------------------------------------------------ events.jsonl kinds -> alerts
 
@@ -450,6 +478,8 @@ pub fn gate_alert(prev: &(String, String), mode: &str, reason: &str, detail: &st
                 "control" | "mode_shadow" | "forced_shadow" | "dry_run" => Level::Info,
                 "state_slo" => Level::Warning,
                 "core_record_loss" | "recorder_unhealthy" | "disk_budget" | "chainfetch_dead" | "program_hash_mismatch" => Level::Error,
+                // integration: WP-07's stale money view pauses sending until it is fresh (no money lost: its notice is Error too)
+                "equity_stale" => Level::Error,
                 // the money stops: WP-07's equity and token floors (its supervisor's rule names), a reconciliation miss
                 "token_floor" => Level::Critical,
                 r if r.contains("equity") || r.contains("budget") || r.contains("recon") || r.contains("fee_cap") => Level::Critical,
@@ -633,7 +663,8 @@ struct Counters {
     last_sent_ns: AtomicU64,
 }
 
-struct Seen { last_ns: u64, suppressed: u64 }
+/// a key's last send, its repeats since, and the level it was sent at (integration: a higher level passes the window)
+struct Seen { last_ns: u64, suppressed: u64, level: Level }
 struct Fam { last_key: String, pending: Option<Alert> }
 
 /// the dedup state, under one lock: each key's last send and its repeats since; per family, the key sent last and the
@@ -688,6 +719,9 @@ pub struct Alerts {
     exit_sent: AtomicBool,
     /// the panic hook tried the crash alert (sent, or put back with the undelivered ones: the exit sends it then)
     crash_tried: AtomicBool,
+    /// integration: WP-07's notices reach these alerts ([`notice_hook`]): the gate watcher leaves the supervisor's rule
+    /// reasons to them ([`NOTICED_GATE_REASONS`])
+    notices_hooked: AtomicBool,
     last_log_ns: AtomicU64,
     last_drop_event_ns: AtomicU64,
 }
@@ -788,7 +822,7 @@ impl Alerts {
         let a = Arc::new(Alerts { min_level: cfg.level(), cfg: cfg.clone(), t, creds, off_why, tx, rx, dd: Mutex::new(Dedup::default()), held_now: AtomicU64::new(0),
             work: Mutex::new(Work::default()), rate, c: Counters::default(), last_error: Mutex::new(None), rec: OnceLock::new(), ctx: Mutex::new(ctx),
             storms: Mutex::new(HashMap::new()), sender_alive: AtomicBool::new(false), flush_req: AtomicBool::new(false), exit_sent: AtomicBool::new(false),
-            crash_tried: AtomicBool::new(false), last_log_ns: AtomicU64::new(0),
+            crash_tried: AtomicBool::new(false), notices_hooked: AtomicBool::new(false), last_log_ns: AtomicU64::new(0),
             last_drop_event_ns: AtomicU64::new(0) });
         (a, notes)
     }
@@ -839,10 +873,13 @@ impl Alerts {
         let now = real_ns();
         let win = self.t.dedup.as_nanos() as u64;
         let d = &mut *g;
+        // integration (WP-07's notices, deduplicated by kind and subject): within the window a repeat at the level last
+        // sent (or below) is counted, not sent; a higher level passes (an Error reconciliation miss, then a Critical one:
+        // a refused bundle that landed)
         let pass = match d.seen.get_mut(&a.key) {
-            Some(s) if now.saturating_sub(s.last_ns) < win => { s.suppressed += 1; false }
-            Some(s) => { a.repeats = s.suppressed; s.suppressed = 0; s.last_ns = now; true }
-            None => { if d.seen.len() < MAX_KEYS { d.seen.insert(a.key.clone(), Seen { last_ns: now, suppressed: 0 }); } true }
+            Some(s) if now.saturating_sub(s.last_ns) < win && a.level <= s.level => { s.suppressed += 1; false }
+            Some(s) => { a.repeats = s.suppressed; s.suppressed = 0; s.last_ns = now; s.level = a.level; true }
+            None => { if d.seen.len() < MAX_KEYS { d.seen.insert(a.key.clone(), Seen { last_ns: now, suppressed: 0, level: a.level }); } true }
         };
         if let Some(f) = a.family {
             let e = d.fams.entry(f).or_insert_with(|| Fam { last_key: String::new(), pending: None });
@@ -1004,7 +1041,7 @@ impl Alerts {
                 if !due { continue; }
                 let Some(mut a) = f.pending.take() else { continue };
                 sub_sat(&self.held_now, 1);
-                if let Some(s) = seen.get_mut(&a.key) { a.repeats = s.suppressed.saturating_sub(1); s.suppressed = 0; s.last_ns = now; }
+                if let Some(s) = seen.get_mut(&a.key) { a.repeats = s.suppressed.saturating_sub(1); s.suppressed = 0; s.last_ns = now; s.level = a.level; }
                 f.last_key = a.key.clone();
                 out.push(a);
             }
@@ -1323,7 +1360,7 @@ impl Alerts {
                     let cur = (g["mode"].as_str().unwrap_or("?").to_string(), g["reason"].as_str().unwrap_or("").to_string());
                     if let Some(prev) = &last {
                         if *prev != cur {
-                            if let Some(a) = gate_alert(prev, &cur.0, &cur.1, g["detail"].as_str().unwrap_or(""), g["sticky"] == json!(true)) { me.raise(a); }
+                            if let Some(a) = me.gate_change_alert(prev, &cur.0, &cur.1, g["detail"].as_str().unwrap_or(""), g["sticky"] == json!(true)) { me.raise(a); }
                         }
                     }
                     last = Some(cur);
@@ -1332,6 +1369,14 @@ impl Alerts {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
+    }
+
+    /// A gate change as this process tells it: [`gate_alert`], except a shadow for one of [`NOTICED_GATE_REASONS`] once
+    /// WP-07's notices reach these alerts ([`notice_hook`]): the supervisor's own notice, raised right after the change,
+    /// tells it (integration; the WP-20 self-review's merge item 6)
+    pub fn gate_change_alert(&self, prev: &(String, String), mode: &str, reason: &str, detail: &str, sticky: bool) -> Option<Alert> {
+        if mode == "shadow" && self.notices_hooked.load(Relaxed) && NOTICED_GATE_REASONS.contains(&reason) { return None; }
+        gate_alert(prev, mode, reason, detail, sticky)
     }
 
     /// The monitor of a segment (every 15 s; its file reads on `rt`'s blocking pool): from the segment's last status
@@ -1466,20 +1511,57 @@ static GLOBAL: OnceLock<Arc<Alerts>> = OnceLock::new();
 pub fn install(a: Arc<Alerts>) -> bool { GLOBAL.set(a).is_ok() }
 pub fn global() -> Option<&'static Arc<Alerts>> { GLOBAL.get() }
 
+#[cfg(test)]
+thread_local! {
+    /// tests: the alerts this thread raises through the process's functions while [`capture`] runs (the process's alerts
+    /// are one per process, and tests run in parallel)
+    static CAPTURE: std::cell::RefCell<Option<Vec<Alert>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// tests: capture this thread's alerts (the process's functions: [`win`], [`failed_landing`], [`budget_floor`], ...)
+/// while `f` runs, built as the installed alerts would build them
+#[cfg(test)]
+pub fn capture<R>(f: impl FnOnce() -> R) -> (R, Vec<Alert>) {
+    CAPTURE.with(|c| *c.borrow_mut() = Some(Vec::new()));
+    let r = f();
+    let got = CAPTURE.with(|c| c.borrow_mut().take()).unwrap_or_default();
+    (r, got)
+}
+
+/// tests: the alert goes to this thread's capture when one runs (true); never in a build that is not a test
+#[inline]
+fn captured(a: impl FnOnce() -> Alert) -> bool {
+    #[cfg(test)]
+    {
+        if CAPTURE.with(|c| c.borrow().is_some()) {
+            let a = a();
+            CAPTURE.with(|c| if let Some(v) = c.borrow_mut().as_mut() { v.push(a) });
+            return true;
+        }
+    }
+    #[cfg(not(test))]
+    let _ = a;
+    false
+}
+
 /// [`Alerts::raise`] on the process's alerts (a no-op without them)
-pub fn raise(a: Alert) -> bool { global().is_some_and(|g| g.raise(a)) }
+pub fn raise(a: Alert) -> bool { if captured(|| a.clone()) { return true; } global().is_some_and(|g| g.raise(a)) }
 /// WP-05 merge hook: a landing whose route succeeded (never waits)
-pub fn win(w: Win) -> bool { global().is_some_and(|g| g.win(&w)) }
+pub fn win(w: Win) -> bool { if captured(|| win_alert(&w)) { return true; } global().is_some_and(|g| g.win(&w)) }
 /// WP-05 merge hook: a landed transaction that failed (never waits)
-pub fn failed_landing(f: FailedLanding) -> bool { global().is_some_and(|g| g.failed_landing(&f)) }
+pub fn failed_landing(f: FailedLanding) -> bool { if captured(|| failed_landing_alert(&f)) { return true; } global().is_some_and(|g| g.failed_landing(&f)) }
 /// WP-07 merge hook: a realised loss (never waits)
-pub fn loss(l: Loss) -> bool { global().is_some_and(|g| g.loss(&l)) }
+pub fn loss(l: Loss) -> bool { if captured(|| loss_alert(&l)) { return true; } global().is_some_and(|g| g.loss(&l)) }
 /// WP-05 / WP-07 merge hook: a budget or equity floor reached (never waits)
-pub fn budget_floor(b: BudgetFloor) -> bool { global().is_some_and(|g| g.budget_floor(&b)) }
+pub fn budget_floor(b: BudgetFloor) -> bool { if captured(|| budget_floor_alert(&b)) { return true; } global().is_some_and(|g| g.budget_floor(&b)) }
 /// WP-07 merge hook: a balance under its warning level (never waits)
-pub fn low_balance(b: LowBalance) -> bool { global().is_some_and(|g| g.low_balance(&b)) }
-/// WP-07 merge hook: one of its notices (`notify::set_hook`; [`notice_alert`]; never waits)
-pub fn notice(level: Level, kind: &'static str, subject: &str, text: &str) -> bool { global().is_some_and(|g| g.notice(level, kind, subject, text)) }
+pub fn low_balance(b: LowBalance) -> bool { if captured(|| low_balance_alert(&b)) { return true; } global().is_some_and(|g| g.low_balance(&b)) }
+/// WP-07 merge hook: one of its notices ([`notice_alert`]; never waits). The process's hook is [`notice_hook`], which
+/// holds its alerts itself
+pub fn notice(level: Level, kind: &'static str, subject: &str, text: &str) -> bool {
+    if captured(|| notice_alert(level, kind, subject, text)) { return true; }
+    global().is_some_and(|g| g.notice(level, kind, subject, text))
+}
 /// the feeds' hook: a gRPC stream's failed connection (never waits)
 pub fn note_stream_error(stream: &str, msg: &str) { if let Some(g) = global() { g.note_stream_error(stream, msg); } }
 /// status.jsonl `alerts`: null without alerts

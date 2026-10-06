@@ -45,7 +45,8 @@ fn out(c: &mut Command) -> (Option<i32>, String, String) {
 
 #[test]
 fn check_names_the_alerts_and_the_watchdog() {
-    for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] {
+    // integration: the frz canary (WP-07's config, the first live-money test) has them too
+    for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml", "deploy/arbx-canary-frz.toml"] {
         let (code, so, se) = out(Command::new(BIN).args(["check", "--config"]).arg(repo(f)));
         assert_eq!(code, Some(0), "{f}: {so}{se}");
         assert!(so.contains("alerts: on (Telegram; token from $TELEGRAM_BOT_TOKEN, chat from $TELEGRAM_CHAT_ID): at most 20 messages a minute, dedup 600 s"), "{f}: {so}");

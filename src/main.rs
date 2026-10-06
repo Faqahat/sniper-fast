@@ -1277,6 +1277,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let (alerter, alert_notes) = alerts::Alerts::new(&cfg.alerts, &alerts::env_var, alerts::Ctx { label: name.clone(), dir: Some(dir.clone()), runs_dir, started_ns, seg: None,
         max_blockhash_age_slots: cfg.send_policy.max_blockhash_age_slots });
     alerts::install(alerter.clone());
+    // integration (WP-07 x WP-20): WP-07's notices (the ledger's, the in-process supervisor's: every stop, money event and
+    // stale money view) go to these alerts, mapped to their levels and deduplicated by kind and subject; the hook never
+    // waits, and runs after the stop it tells of (notify::notify, inside catch_unwind)
+    arbx::notify::set_hook(alerts::notice_hook(alerter.clone()));
     // WP-02: the recorder, always on (MEASUREMENT §0), before anything records. Its writer threads write every stream
     // (run.log too: `say` hands the line over; the engine thread writes nothing); a core-stream drop or the disk
     // budget's last step closes the SendGate. Closed on every way out of `run`, before stop.json's line
@@ -1464,12 +1468,36 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // source; review WP-03b #12). The idle providers' connections are kept warm
     let cf_clients = chainfetch::RoleClients::new(&rpc, &cfg.chainfetch);
     let cf_meta = chainfetch::meta_json(&cfg.chainfetch, &cf_clients, &rpc_reg);
+    // WP-07: the campaign so far (the earlier segments' snapshots, ledgers and reconciliations of the last 25 h), read once
+    // here: the ledger below takes it, and (integration, FT-000 x WP-07) the wallet cursor never passes the window it
+    // reconciles first
+    let campaign_hist = a.campaign_dir.as_deref().map(|c| ledger::history(c, Some(name.as_str()), now_ns(), arbx::supervisor::DAY_NS + arbx::supervisor::HOUR_NS));
     if cfg.chainfetch.enabled {
         let (cap, wallet_pk) = (cf_clients.cap(rpc::Role::Backfill), bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok()));
         let gate = sess.gate.clone();
         let on_dead: chainfetch::OnDead = Arc::new(move |why: &str| { let _ = gate.shadow("chainfetch_dead", why, true); });
         // FT-000 (S1-12): our wallet's history starts after the previous segment's cursor
         let cursor = chainfetch::read_wallet_cursor(&cfg.chainfetch.wallet_cursor, &dir, &cfg.wallet);
+        // integration (FT-000 x WP-07): in a campaign, not past the window the ledger reconciles between segments
+        let cursor = match (&campaign_hist, cursor) {
+            (Some(h), Some((sig, slot, file))) => {
+                let from = h.prev_window.as_ref().map_or(0, |w| w.from.slot);
+                match ledger::bound_wallet_cursor(Some((sig.clone(), slot)), h) {
+                    (Some((s2, sl2)), "moved_back") => {
+                        say(&format!("wallet history: the cursor {}… (slot {slot}) is past the ledger's window between segments (from slot {from}): \
+                            from {}… (slot {sl2}), the newest earlier ledger entry before it", &sig[..sig.len().min(12)], &s2[..s2.len().min(12)]));
+                        Some((s2, sl2, file))
+                    }
+                    (None, _) => {
+                        say(&format!("wallet history: the cursor {}… (slot {slot}) is past the ledger's window between segments (from slot {from}) and no \
+                            earlier ledger entry precedes it: not used", &sig[..sig.len().min(12)]));
+                        None
+                    }
+                    (c, _) => c.map(|(s, sl)| (s, sl, file)),
+                }
+            }
+            (_, c) => c,
+        };
         match &cursor {
             Some((sig, slot, file)) => say(&format!("wallet history: after {}…'s slot {slot} ({}): only newer signatures are listed", &sig[..sig.len().min(12)], file.display())),
             None => say(&format!("wallet history: no cursor ([chainfetch] wallet_cursor {:?}): the last hour is listed", cfg.chainfetch.wallet_cursor)),
@@ -1580,7 +1608,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // first snapshot (`equity_unknown`)
     let wallet_pk = bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok());
     let ledger = wallet_pk.map(|w| {
-        let hist = a.campaign_dir.as_deref().map(|c| ledger::history(c, Some(name.as_str()), now_ns(), arbx::supervisor::DAY_NS + arbx::supervisor::HOUR_NS)).unwrap_or_default();
+        let hist = campaign_hist.unwrap_or_default();
         if a.campaign_dir.is_some() {
             say(&format!("ledger: the campaign so far: {} segments read ({:?}), start {}, test budget {:?}, net spend {}, SOL + WSOL now {:?}, {} lines unreadable",
                 hist.segments_read.len(), hist.segments_read, hist.start.as_ref().map_or("not yet (this segment's first snapshot)".to_string(), |s| format!("{} lamports of SOL + WSOL in {} at slot {}",
@@ -1653,7 +1681,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     alerter.segment_start(alerts::SegmentStart { segment: name.clone(), mode: mode.as_str().into(), gate_mode: sess.gate.mode().as_str().into(),
         gate_reason: Some(sess.gate.reason()).filter(|r| !r.is_empty()), build: provenance::build_short(),
         config_sha: config_json["normalized_sha256"].as_str().map(|h| h.chars().take(12).collect()).unwrap_or_default(), wallet: cfg.wallet.clone(),
-        budget_left_lamports: a.ov.budget_left, fee_cap_lamports: if canary { cfg.canary.max_spend_lamports } else { cfg.live.max_failed_fees_lamports } });
+        // integration: the budget this run has (WP-07: its share of the owner's budget state, or what the campaign left it)
+        budget_left_lamports: budget_left, fee_cap_lamports: if canary { cfg.canary.max_spend_lamports } else { cfg.live.max_failed_fees_lamports } });
     if sess.stopper.stopping() { return Ok(()); }
     let fs = feeds::start(&cfg.feeds, interest.clone(), tx.clone(), stop.clone(), &hot, &rec, Some(roles.clone()))?;
     anyhow::ensure!(fs.names == feed_names, "feed ids changed: {:?} vs {:?}", fs.names, feed_names);
@@ -1996,6 +2025,32 @@ mod tests {
         assert!(body.contains("\"chainfetch\": cf_meta"), "meta.json `chainfetch`");
         assert!(body.contains("rpc.with_role(rpc::Role::Engine)") && body.contains("rpc.with_role(rpc::Role::Leaders).with_own_phase(rpc::Phase::Run)"), "per-role clients");
         assert!(body.contains("gate.shadow(\"chainfetch_dead\""), "the watchdog closes the SendGate");
+    }
+
+    /// integration (WP-07 x WP-20 x FT-000), a structural guard on `run` and `arbx campaign` (they need RPC, a gRPC server
+    /// and a frozen binary, so they are not run here): the alerts are the process's and WP-07's notice hook before the
+    /// recorder starts, so every notice of the ledger and the in-process supervisor reaches them; the campaign's history is
+    /// read once, before the chain-fetch service starts, and bounds its wallet cursor, then goes to the ledger, whose RPC
+    /// is its own role; the start message names the run's budget. `arbx campaign` starts its own alerts after the detach
+    /// and finishes them after its last segment
+    #[test]
+    fn the_alerts_take_wp07s_notices_and_the_cursor_follows_the_ledger() {
+        let src = include_str!("main.rs");
+        let body = &src[src.find("\nfn run(a: &RunArgs").expect("run")..];
+        let body = &body[..body.find("\n#[cfg(test)]").unwrap_or(body.len())];
+        let at = |needle: &str| body.find(needle).unwrap_or_else(|| panic!("{needle} not in run()"));
+        let order = ["alerts::install(alerter.clone())", "arbx::notify::set_hook(alerts::notice_hook(alerter.clone()))", "rec::start(rec::Opts", "let campaign_hist =",
+            "ledger::bound_wallet_cursor(", "chainfetch::start(", "let hist = campaign_hist.unwrap_or_default()", "rpc.with_role(rpc::Role::Ledger)",
+            "write_atomic(&dir.join(\"meta.json\")", "budget_left_lamports: budget_left,", "engine::Engine::new("];
+        for w in order.windows(2) { assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]); }
+        assert!(!body.contains("rpc::Role::Snapshot"), "the state re-read's role is the FT-000 fixes', the ledger's is `ledger`");
+        let camp = include_str!("campaign.rs");
+        let m = &camp[camp.find("\npub fn main(o: Opts").expect("campaign main")..];
+        let m = &m[..m.find("\n}\n").unwrap_or(m.len())];
+        let at = |needle: &str| m.find(needle).unwrap_or_else(|| panic!("{needle} not in campaign::main"));
+        for w in ["daemonize(&dir.join(\"supervisor.log\"))", "CampaignAlerts::start(a, true)", "c.run(&mut runner, &RealClock)", "alerts.finish()"].windows(2) {
+            assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]);
+        }
     }
 
     /// review F3: a supervised segment needs its control socket (the supervisor pauses through it): refused before

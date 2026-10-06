@@ -886,6 +886,28 @@ pub struct History {
     pub prev_window: Option<PrevWindow>,
     /// a stop reconciliation of the last segment left undecided (`final: false`), the next segment decides it
     pub undecided: Option<(String, u64)>,
+    /// integration (FT-000 x WP-07): the newest earlier ledger entry (sig, slot) at or before `prev_window`'s first
+    /// snapshot: where a wallet cursor may start at the latest ([`bound_wallet_cursor`])
+    pub window_cursor: Option<(String, u64)>,
+}
+
+/// Integration (FT-000 x WP-07): the wallet cursor a campaign's segment may start from. FT-000's cursor
+/// (`wallet-cursor.json`, the newest signature the previous segment recorded) makes source (d) list only newer
+/// signatures. This ledger reconciles the window between segments from the previous segment's last good snapshot (or
+/// the start of its undecided stop reconciliation) with the earlier ledgers' entries and this segment's own records of
+/// the span. A record the previous segment wrote to wallet.jsonl but never entered in its ledger (at its end, or killed)
+/// is in neither: a cursor past the window's start would keep it from being listed again, and a residual under the
+/// tolerance (a failed landing's fee) would hide it from the net spend. So the cursor never passes the window's start:
+/// a later one is moved back to the newest earlier ledger entry at or before it (`History::window_cursor`; what it lists
+/// again the ledger finds `dup` or counts), or dropped (the last hour is listed, as without a cursor) when there is none.
+/// Without a window (no good snapshot yet in the campaign) the cursor stands: the campaign's start is this segment's
+/// first snapshot, and nothing before it counts. Returns the cursor and what was done: `kept`, `moved_back`, `dropped`,
+/// `none`
+pub fn bound_wallet_cursor(cursor: Option<(String, u64)>, h: &History) -> (Option<(String, u64)>, &'static str) {
+    let Some(c) = cursor else { return (None, "none") };
+    let Some(w) = &h.prev_window else { return (Some(c), "kept") };
+    if c.1 <= w.from.slot { return (Some(c), "kept"); }
+    match &h.window_cursor { Some(e) => (Some(e.clone()), "moved_back"), None => (None, "dropped") }
 }
 
 /// The window between segments: its first snapshot, the segment it is from, and the entries of the earlier segments that
@@ -1030,6 +1052,7 @@ fn history_of(segs: Vec<(String, std::path::PathBuf)>, test_budget: Option<u64>,
     // good snapshot
     let from = undecided_from.as_ref().and_then(|(slot, _, _)| snaps_by_slot.get(slot).cloned()).or(last_good);
     if let Some((s, seg)) = from {
+        h.window_cursor = all.iter().filter(|e| e.slot <= s.slot).max_by_key(|e| e.slot).map(|e| (e.sig.clone(), e.slot));
         let entries = all.into_iter().filter(|e| e.slot > s.slot).collect();
         h.prev_window = Some(PrevWindow { from: s, segment: seg, entries, undecided: undecided_from.is_some() });
     }

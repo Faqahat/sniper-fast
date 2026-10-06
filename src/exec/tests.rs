@@ -1710,3 +1710,141 @@ async fn wp07_the_run_loop_arms_the_equity_stops() {
     assert_eq!(d.iter().map(|l| l["reason"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>(), ["equity_unknown", "sent"], "{d:?}");
     assert_eq!(r.got.lock().unwrap().len(), 1, "one bundle left, after the snapshot");
 }
+
+// ------------------------------------------------------------------------------------------------ integration (integ/stage0)
+
+/// one live send of the route `n` (its pools of its own) to the fake block engine, settled as fired: (attempt, signature)
+async fn integ_send(r: &mut Rig, n: u8, t: u64) -> (u64, String) {
+    assert_eq!(r.decide(route(n, damm(n + 1, MINT), 50_000, n as u64), 100, t).reason, "sent");
+    let Settled::Fired { attempt, fired } = r.settled().await else { panic!("a fire result") };
+    let sig = fired.copies[0].sig.clone().unwrap();
+    r.x.on_settled(Settled::Fired { attempt, fired }, now_ns(), &|_| None);
+    (attempt, sig)
+}
+
+/// a wallet record of our attempt (INPUT 7 as the executor gets it: the route program's events, the ledger's line)
+fn integ_record(sig: &str, attempt: u64, slot: u64, ok: bool, fee: u64, events: &Value, ledger_line: Value) -> Value {
+    json!({ "sig": sig, "attempt": attempt, "slot": slot, "idx": 7, "ok": ok, "err": if ok { Value::Null } else { json!({ "InstructionError": [2, { "Custom": 6001 }] }) },
+        "fee": fee, "cu_consumed": 90_000, "prog_events": events, "ledger_line": ledger_line })
+}
+
+/// Integration (WP-05 x WP-07 x WP-20: the settlement hook of docs/reviews/WP-20-exec-hooks.patch, wired at the merge). A
+/// landing of ours is told from chain data, through the process's alert functions (captured here). Its wallet record
+/// brings the route program's events (the round trip: the last leg's output − the size) and the ledger's line of the same
+/// transaction (its fee, its tip, the rent it left locked): the alert says "succeeded" and the net = round trip − tip −
+/// fee − rent, a gain only above 0 and never "profitable". One that created an account pays the ledger's exact rent in
+/// its net (not the estimate) and reads as a loss; one the expiry check found first is told without its net, then again
+/// when its record brings it; a failed landing is told with its fee and the program's error; the failed-fee cap is the
+/// budget floor, told once
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn integ_landings_are_told_with_their_chain_net() {
+    let mut r = rig("integ-alerts", Mode::Live, "[live]\nmax_failed_fees_lamports = 12000\n").await;
+    let t = now_ns();
+    let mut all: Vec<crate::alerts::Alert> = Vec::new();
+    let events = json!([{ "kind": "out", "leg": 0, "amount": 77 }, { "kind": "out", "leg": 1, "amount": SIZE + 49_000 }]);
+    let line = |rent: u64| json!({ "trade_gross": 49_000, "tip": 31_499, "fee": 6_000, "rent_nonrecoverable": 0, "rent_locked": rent, "rent_reclaimed": 0,
+        "trade_net": 11_501, "equity_delta": 11_501, "liquid_delta": 11_501 - rent as i64 });
+    let fail_line = json!({ "trade_gross": 0, "tip": 0, "fee": 5_000, "rent_nonrecoverable": 0, "rent_locked": 0, "rent_reclaimed": 0, "trade_net": -5_000,
+        "equity_delta": -5_000, "liquid_delta": -5_000 });
+    // a win, settled by its wallet record (the ledger's line beside the route program's events)
+    let (a1, s1) = integ_send(&mut r, 10, t).await;
+    let (_, got) = crate::alerts::capture(|| r.x.on_wallet_tx(&integ_record(&s1, a1, 102, true, 6_000, &events, line(0)), now_ns(), &|_| None));
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!((got[0].kind, got[0].level, got[0].icon, got[0].key.as_str()), ("win", crate::alerts::Level::Info, "💰", format!("win:{s1}").as_str()));
+    assert_eq!(got[0].title, "succeeded · net +0.000011501 SOL", "49,000 − 31,499 − 6,000, every part from the chain");
+    assert!(got[0].body.contains("DammV2&gt;DammV2") && got[0].body.contains("size 0.0500 · gross +0.000049 · tip 0.000031499 · fee 0.000006"), "{}", got[0].body);
+    assert!(got[0].body.contains("slot 102"), "{}", got[0].body);
+    all.extend(got);
+    // a win whose transaction created a token account: the ledger's rent (2,039,280) is in the net, which is below 0
+    let (a2, s2) = integ_send(&mut r, 12, t + 1).await;
+    let (_, got) = crate::alerts::capture(|| r.x.on_wallet_tx(&integ_record(&s2, a2, 103, true, 6_000, &events, line(2_039_280)), now_ns(), &|_| None));
+    assert_eq!((got.len(), got[0].level), (1, crate::alerts::Level::Warning));
+    assert_eq!(got[0].title, "succeeded but lost: net -0.002027779 SOL after fee, tip, rent", "11,501 − 2,039,280");
+    assert!(got[0].body.contains("rent 0.00203928"), "{}", got[0].body);
+    all.extend(got);
+    // found by the expiry check first: told without its net; its record brings the net, and it is told again
+    let (a3, s3) = integ_send(&mut r, 14, t + 2).await;
+    let hit = SigStatus { slot: 104, err: None, confirmation: Some("confirmed".into()) };
+    let (_, got) = crate::alerts::capture(|| r.x.on_settled(Settled::Statuses { why: "expiry", at: vec![(a3, "expiry")], result: Ok(vec![Some(hit)]), t_ns: t }, t, &|_| None));
+    assert_eq!(got.iter().map(|a| a.title.as_str()).collect::<Vec<_>>(), ["succeeded · net not known yet"]);
+    all.extend(got);
+    let (_, got) = crate::alerts::capture(|| r.x.on_wallet_tx(&integ_record(&s3, a3, 104, true, 6_000, &events, line(0)), now_ns(), &|_| None));
+    assert_eq!(got.iter().map(|a| a.title.as_str()).collect::<Vec<_>>(), ["succeeded · net +0.000011501 SOL"], "the amend tells the net");
+    all.extend(got);
+    // a failed landing: its fee lost and the program's error
+    let (a4, s4) = integ_send(&mut r, 16, t + 3).await;
+    let (_, got) = crate::alerts::capture(|| r.x.on_wallet_tx(&integ_record(&s4, a4, 105, false, 5_000, &Value::Null, fail_line.clone()), now_ns(), &|_| None));
+    assert_eq!((got.len(), got[0].kind, got[0].level), (1, "failed_landing", crate::alerts::Level::Error));
+    assert_eq!(got[0].title, "failed landing · fee 0.000005 SOL lost");
+    assert!(got[0].body.contains("custom 0x1771"), "{}", got[0].body);
+    all.extend(got);
+    // the failed-fee cap (12,000): 5,000 spent, and the next send's 5,000 fit; after a second failure there is no room:
+    // the budget floor, told once (the sender stays stopped)
+    let (a5, s5) = integ_send(&mut r, 18, t + 4).await;
+    let (_, got) = crate::alerts::capture(|| r.x.on_wallet_tx(&integ_record(&s5, a5, 106, false, 5_000, &Value::Null, fail_line.clone()), now_ns(), &|_| None));
+    all.extend(got);
+    let (d, got) = crate::alerts::capture(|| r.decide(route(20, damm(21, MINT), 50_000, 20), 100, t + 5));
+    assert_eq!(d.reason, "fee_cap");
+    assert_eq!(got.iter().map(|a| (a.kind, a.level)).collect::<Vec<_>>(), [("budget_floor", crate::alerts::Level::Critical)]);
+    assert_eq!(got[0].title, "BUDGET FLOOR (failed_fee_cap): sending stops");
+    all.extend(got);
+    let (d, got) = crate::alerts::capture(|| r.decide(route(22, damm(23, MINT), 50_000, 22), 100, t + 6));
+    assert!(d.reason == "sender_stopped" && got.is_empty(), "once: {} {got:?}", d.reason);
+    // Stage-1 plan review F12: no alert ever calls a landing "profitable"
+    assert_eq!(all.len(), 7);
+    assert!(all.iter().all(|a| !a.title.contains("profitable") && !a.body.contains("profitable")), "{all:?}");
+}
+
+/// Integration (WP-20's daily summary x WP-07's money x the merged engine's status line): the win ratio is wins ÷ bundles
+/// sent, with both numbers and the ledger's net after fees, tips and rent. The real engine settles two live sends from
+/// their wallet records (the ledger first, as `Engine::step` does: a win of 11,501 net, a failed landing of 5,000) and
+/// writes its status line (status 2.2: the executor's `exec`, the ledger's `money`, `rpc_budget`, `alerts`); the daily
+/// totals read that line: 1 win / 2 sent, net +6,501 from the ledger
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn integ_the_daily_ratio_reads_the_merged_status_line() {
+    let mut r = rig("integ-daily", Mode::Live, "").await;
+    let t = now_ns();
+    let (a1, s1) = integ_send(&mut r, 10, t).await;
+    let (a2, s2) = integ_send(&mut r, 12, t + 1).await;
+    let (mut e, _a, _b) = amm_engine();
+    e.set_rec(r.rec.clone());
+    let mut x = std::mem::replace(&mut r.x, idle_exec());
+    x.set_gate(SendGate::new());
+    let payer = x.payer();
+    e.exec = Some(x);
+    e.ledger = Some(crate::ledger::Ledger::new(Default::default(), Default::default(), payer, Rec::off(), "integ-daily"));
+    let mut status = |_: &str| {};
+    let step = |e: &mut crate::engine::Engine, kind: InputKind, d: Value, status: &mut dyn FnMut(&str)| e.step(Event::Input { kind, data: Arc::new(d) }, now_ns(), status);
+    // the start: a balance snapshot (INPUT 13) below the landings' slots
+    step(&mut e, InputKind::Snapshot, crate::ledger::test_snapshot_answer(&payer, 90, 222_956_693, 191_524_924, 0, "start"), &mut status);
+    let events = json!([{ "kind": "out", "leg": 0, "amount": 77 }, { "kind": "out", "leg": 1, "amount": SIZE + 49_000 }]);
+    let win = crate::ledger::Raw { kind: "route".into(), ok: true, payer: true, wallet_sol: -37_499, wsol: 49_000, fee: 6_000, tip: 31_499, ..Default::default() };
+    let lost = crate::ledger::Raw { kind: "route".into(), ok: false, payer: true, wallet_sol: -5_000, fee: 5_000, ..Default::default() };
+    let rec_of = |sig: &str, a: u64, slot: u64, ok: bool, fee: u64, ev: Value, raw: &crate::ledger::Raw| json!({ "sig": sig, "attempt": a, "slot": slot, "idx": 3, "ok": ok,
+        "err": if ok { Value::Null } else { json!({ "InstructionError": [2, { "Custom": 6001 }] }) }, "fee": fee, "prog_events": ev, "ledger": raw.json() });
+    let ((), got) = crate::alerts::capture(|| crate::notify::capture(|| {
+        step(&mut e, InputKind::WalletTx, rec_of(&s1, a1, 102, true, 6_000, events.clone(), &win), &mut status);
+        step(&mut e, InputKind::WalletTx, rec_of(&s2, a2, 103, false, 5_000, Value::Null, &lost), &mut status);
+    }).0);
+    assert_eq!(got.iter().map(|a| a.kind).collect::<Vec<_>>(), ["win", "failed_landing"], "{got:?}");
+    assert_eq!(got[0].title, "succeeded · net +0.000011501 SOL", "the fee and tip of the ledger's line the engine added to the record");
+    e.write_final_status(0, "deadline");
+    r.rec.sync();
+    let line = crate::alerts::summary::last_status(&r.dir.join("status.jsonl")).expect("the engine's status line");
+    assert_eq!(line["exec"]["sent_total"].as_u64(), Some(2));
+    assert_eq!(line["money"]["src"].as_str(), Some("ledger"));
+    assert!(line.get("rpc_budget").is_some() && line.get("alerts").is_some(), "status 2.2: FT-000's rpc_budget and WP-20's alerts beside WP-07's money");
+    let s = crate::alerts::summary::Snapshot::of(&line);
+    assert_eq!((s.sends, s.wins, s.net_lamports, s.net_src), (Some(2), Some(1), Some(11_501 - 5_000), Some("ledger")), "{line}");
+    // the day's totals over a runs directory holding that segment, and the daily summary's line
+    let runs = test_dir("integ-daily-runs");
+    let seg = runs.join("integ-p1");
+    std::fs::create_dir_all(&seg).unwrap();
+    std::fs::copy(r.dir.join("status.jsonl"), seg.join("status.jsonl")).unwrap();
+    let day = now_ns() / crate::alerts::summary::DAY_NS * crate::alerts::summary::DAY_NS;
+    let tot = crate::alerts::summary::day_totals(&runs, day);
+    assert_eq!((tot.sends, tot.wins, tot.net_lamports, tot.net_src), (2, 1, 6_501, Some("ledger")));
+    let a = crate::alerts::daily_alert(&tot);
+    assert!(a.body.contains("win ratio 50.0% (1 win / 2 sent) · net +0.000006501 SOL (ledger)"), "{}", a.body);
+    let _ = std::fs::remove_dir_all(&runs);
+}

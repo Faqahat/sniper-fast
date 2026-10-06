@@ -1,6 +1,8 @@
 //! WP-20 tests. No test reaches the network: every sender here posts to a fake Bot API on 127.0.0.1 ([`Fake`]), whose
 //! script says how it answers (200, 429 with `retry_after`, 5xx, a refusal that names the token, a dropped connection).
 //! The token is a fake one made at run time (never a literal: tools/secret-scan.py would flag one).
+//! The fake Bot API and the sink's helpers are crate-visible: the integration's wiring tests (the campaign's alerts,
+//! src/campaign/tests.rs) post to it too.
 use super::*;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -9,21 +11,21 @@ use std::net::TcpStream;
 fn token() -> String { format!("{}:AA{}", 987_654_321u64, "Zq9x".repeat(9)) }
 const CHAT: &str = "-1001234567890";
 
-fn env_ok(k: &str) -> Option<String> {
+pub(crate) fn env_ok(k: &str) -> Option<String> {
     match k { "TELEGRAM_BOT_TOKEN" => Some(token()), "TELEGRAM_CHAT_ID" => Some(CHAT.to_string()), _ => None }
 }
 fn env_none(_: &str) -> Option<String> { None }
 
 /// short timings: no coalescing, no dedup, no spacing, a wide rate, quick retries
-fn quick() -> Tuning {
+pub(crate) fn quick() -> Tuning {
     Tuning { window: Duration::from_secs(60), spacing: Duration::ZERO, coalesce: Duration::ZERO, dedup: Duration::ZERO, retry_base: Duration::from_millis(10),
         max_attempts: 3, retry_after_cap: Duration::from_secs(5), refused_pause: Duration::from_millis(20), http_timeout: Duration::from_secs(5), queue: 256,
         tick: Duration::from_millis(20) }
 }
 
-fn on(rate: u32) -> AlertsCfg { AlertsCfg { enabled: true, rate_per_min: rate, ..Default::default() } }
+pub(crate) fn on(rate: u32) -> AlertsCfg { AlertsCfg { enabled: true, rate_per_min: rate, ..Default::default() } }
 
-fn alerts_at(base: &str, cfg: &AlertsCfg, t: Tuning) -> Arc<Alerts> {
+pub(crate) fn alerts_at(base: &str, cfg: &AlertsCfg, t: Tuning) -> Arc<Alerts> {
     let (a, _) = Alerts::with(cfg, t, &env_ok, base, Ctx { label: "seg-test".into(), ..Default::default() });
     assert!(a.enabled(), "{:?}", a.off_why());
     a
@@ -31,7 +33,7 @@ fn alerts_at(base: &str, cfg: &AlertsCfg, t: Tuning) -> Arc<Alerts> {
 
 fn runtime() -> tokio::runtime::Runtime { tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap() }
 
-fn wait_for(what: &str, secs: u64, f: impl Fn() -> bool) {
+pub(crate) fn wait_for(what: &str, secs: u64, f: impl Fn() -> bool) {
     let until = Instant::now() + Duration::from_secs(secs);
     while !f() {
         assert!(Instant::now() < until, "timed out waiting for {what}");
@@ -49,10 +51,10 @@ struct Req { path: String, body: Value, at: Instant }
 #[derive(Clone, Debug)]
 enum Reply { Ok, Status(u16, String), Close, Hang(Duration) }
 
-struct Fake { base: String, reqs: Arc<Mutex<Vec<Req>>>, script: Arc<Mutex<VecDeque<Reply>>> }
+pub(crate) struct Fake { pub(crate) base: String, reqs: Arc<Mutex<Vec<Req>>>, script: Arc<Mutex<VecDeque<Reply>>> }
 
 impl Fake {
-    fn start() -> Fake {
+    pub(crate) fn start() -> Fake {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", l.local_addr().unwrap());
         let (reqs, script) = (Arc::new(Mutex::new(Vec::new())), Arc::new(Mutex::new(VecDeque::new())));
@@ -70,8 +72,8 @@ impl Fake {
     }
     fn push(&self, r: Reply) { self.script.lock().unwrap().push_back(r); }
     fn reqs(&self) -> Vec<Req> { self.reqs.lock().unwrap().clone() }
-    fn n(&self) -> usize { self.reqs.lock().unwrap().len() }
-    fn texts(&self) -> Vec<String> { self.reqs().iter().map(|r| r.body["text"].as_str().unwrap_or("").to_string()).collect() }
+    pub(crate) fn n(&self) -> usize { self.reqs.lock().unwrap().len() }
+    pub(crate) fn texts(&self) -> Vec<String> { self.reqs().iter().map(|r| r.body["text"].as_str().unwrap_or("").to_string()).collect() }
 }
 
 fn serve(mut c: TcpStream, n: u64, reqs: &Mutex<Vec<Req>>, script: &Mutex<VecDeque<Reply>>) {
@@ -574,34 +576,83 @@ fn events_classify_into_alerts() {
     for r in ["equity_hour", "equity_day", "token_floor", "reconcile_miss"] { assert_eq!(gate_alert(&live, "shadow", r, "", true).unwrap().level, Level::Critical, "{r}"); }
     assert_eq!(gate_alert(&("shadow".into(), "control".into()), "live", "", "resume", false).unwrap().key, "gate:live");
     assert!(gate_alert(&live, "stopped", "deadline", "", true).is_none(), "the stop message says it");
+    // integration: a stale money view pauses sending (Error, as its notice is); once WP-07's notices are hooked, the
+    // supervisor's rule reasons are told by their own notices (and the stop message), not again by the gate watcher
+    assert_eq!(gate_alert(&live, "shadow", "equity_stale", "the view is 600 s old", false).unwrap().level, Level::Error);
+    let (h, _) = Alerts::new(&on(20), &env_ok, Ctx::default());
+    assert!(h.gate_change_alert(&live, "shadow", "equity_floor", "", true).is_some(), "no hook yet: told");
+    let _hook = notice_hook(h.clone());
+    for r in NOTICED_GATE_REASONS { assert!(h.gate_change_alert(&live, "shadow", r, "", true).is_none(), "{r}"); }
+    for r in ["equity_stale", "control", "core_record_loss"] { assert!(h.gate_change_alert(&live, "shadow", r, "", false).is_some(), "{r}"); }
+    assert!(h.gate_change_alert(&("shadow".into(), "equity_stale".into()), "live", "", "fresh", false).is_some(), "sending resumed is still told");
 }
 
-/// WP-07's notices (src/notify.rs on lane/wp-07, wired at the merge with `notify::set_hook`): every kind it raises keeps
-/// its level and text, is keyed `<kind>:<subject>`, never deduplicated (WP-07 raises each once), and escaped
+/// WP-07's notices (src/notify.rs, wired at the merge by `notice_hook`): every kind it raises keeps its level and
+/// text, is keyed `<kind>:<subject>` and escaped. Integration (integ/stage0): deduplicated by kind and subject within
+/// `dedup_s` (a repeat at the level last sent is counted, not sent; another subject, or a higher level, passes); the
+/// money view's stale / fresh notices are one transition family (a change held in the window is sent when it ends)
 #[test]
 fn wp07_notices() {
     let kinds = [("equity_floor", Level::Critical, "🛑"), ("equity_hour", Level::Critical, "🛑"), ("equity_day", Level::Critical, "🛑"), ("token_floor", Level::Critical, "🛑"),
         ("recon_miss", Level::Error, "❌"), ("low_native_sol", Level::Warning, "🪫"), ("stranded_token", Level::Warning, "🪙"), ("equity_unknown", Level::Error, "❌"),
         ("campaign_start", Level::Info, "🟢"), ("equity_start", Level::Info, "🟢"), ("segment_end", Level::Error, "❌"), ("segment_end", Level::Critical, "🚨"),
         ("segment_not_sending", Level::Warning, "🚦"), ("segment_start_failed", Level::Error, "❌"), ("campaign_shadow", Level::Error, "🚦"),
-        ("campaign_end", Level::Info, "⏹"), ("campaign_end", Level::Critical, "🚨")];
+        ("campaign_end", Level::Info, "⏹"), ("campaign_end", Level::Critical, "🚨"), ("equity_stale", Level::Error, "❌"), ("equity_fresh", Level::Info, "✅"),
+        ("owner_transfer", Level::Warning, "💸"), ("recon_undecided", Level::Warning, "⚠️"), ("segment_unreaped", Level::Critical, "🚨"),
+        ("data_files_changed", Level::Warning, "⚠️")];
     for (k, level, icon) in kinds {
         let a = notice_alert(level, k, "w6-p3", &format!("{k}: SOL + WSOL 0.380 < floor 0.381 <b>&</b> (segment w6-p3): sending stopped"));
-        assert_eq!((a.level, a.kind, a.key.as_str(), a.icon, a.dedup), (level, k, format!("{k}:w6-p3").as_str(), icon, false), "{k}");
+        assert_eq!((a.level, a.kind, a.key.as_str(), a.icon, a.dedup), (level, k, format!("{k}:w6-p3").as_str(), icon, true), "{k}");
+        assert_eq!(a.family, if k == "equity_stale" || k == "equity_fresh" { Some("equity_view") } else { None }, "{k}");
         assert!(a.title.contains("&lt;b&gt;&amp;&lt;/b&gt;") && !a.title.contains("<b>"), "escaped: {}", a.title);
     }
-    // through the sink: never deduplicated, every one sent
+    // the levels as WP-07 names them
+    assert_eq!([crate::notify::Level::Info, crate::notify::Level::Warn, crate::notify::Level::Error, crate::notify::Level::Critical].map(level_of),
+        [Level::Info, Level::Warning, Level::Error, Level::Critical]);
+    // through the sink, deduplicated by kind and subject
     let fake = Fake::start();
     let a = alerts_at(&fake.base, &on(20), Tuning { dedup: Duration::from_secs(600), ..quick() });
     let rt = runtime();
     a.start(rt.handle(), Arc::new(AtomicBool::new(false)));
     assert!(a.notice(Level::Critical, "equity_floor", "w6-p3", "equity_floor: below the floor (segment w6-p3): sending stopped, campaign stops"));
-    assert!(a.notice(Level::Critical, "equity_floor", "w6-p3", "equity_floor: again"), "a notice is never deduplicated");
-    wait_for("the notices", 10, || { let t = fake.texts().join("\n"); t.contains("🛑 <b>equity_floor: below the floor") && t.contains("equity_floor: again") });
+    assert!(!a.notice(Level::Critical, "equity_floor", "w6-p3", "equity_floor: again"), "the same kind and subject within dedup_s: counted, not sent");
+    assert!(a.notice(Level::Critical, "equity_floor", "w6-p4", "equity_floor: the next segment"), "another subject passes");
+    assert!(a.notice(Level::Error, "recon_miss", "w6-p3", "reconciliation miss (segment w6-p3): residual 15000"));
+    assert!(!a.notice(Level::Error, "recon_miss", "w6-p3", "reconciliation miss (segment w6-p3): residual 16000"), "a repeat at the same level");
+    assert!(a.notice(Level::Critical, "recon_miss", "w6-p3", "reconciliation miss (segment w6-p3): a refused bundle landed"), "a higher level passes the window");
+    wait_for("the notices", 10, || { let t = fake.texts().join("\n"); t.contains("🛑 <b>equity_floor: below the floor") && t.contains("the next segment")
+        && t.contains("a refused bundle landed") && t.contains("residual 15000") });
+    let t = fake.texts().join("\n");
+    assert!(!t.contains("equity_floor: again") && !t.contains("residual 16000"), "{t}");
+    assert_eq!(a.status_json()["deduped_total"], 2);
     // off: nothing, and no notice without installed alerts
     let (off, _) = Alerts::new(&AlertsCfg::default(), &env_ok, Ctx::default());
     assert!(!off.notice(Level::Critical, "equity_floor", "x", "x"));
     assert!(!notice(Level::Critical, "equity_floor", "x", "x") || global().is_some());
+}
+
+/// Integration (WP-07 x WP-20): the money view going stale and fresh again inside one `dedup_s` is one transition family:
+/// the first stale and the first fresh are sent; a second stale within the window is held (not lost), and sent when the
+/// window ends, so the last word is right; had it gone fresh again meanwhile, nothing would be held
+#[test]
+fn a_flapping_money_view_ends_on_the_right_word() {
+    let fake = Fake::start();
+    let window = Duration::from_secs(3);
+    let a = alerts_at(&fake.base, &on(20), Tuning { dedup: window, ..quick() });
+    let rt = runtime();
+    a.start(rt.handle(), Arc::new(AtomicBool::new(false)));
+    let n = |l: crate::notify::Level, k: &'static str, t: &str| crate::notify::now(l, k, "ledger", "w6-p3", t, Value::Null);
+    let hook = notice_hook(a.clone());
+    let t0 = Instant::now();
+    hook(&n(crate::notify::Level::Error, "equity_stale", "money view stale (segment w6-p3): age: sending paused"));
+    hook(&n(crate::notify::Level::Info, "equity_fresh", "money view fresh again (segment w6-p3)"));
+    hook(&n(crate::notify::Level::Error, "equity_stale", "money view stale (segment w6-p3): failures: sending paused"));
+    wait_for("the stale and the fresh", 10, || { let t = fake.texts().join("\n"); t.contains("age: sending paused") && t.contains("fresh again") });
+    if t0.elapsed() < window - Duration::from_millis(500) { assert!(!fake.texts().join("\n").contains("failures"), "the second stale is held in the window"); }
+    wait_for("the held stale, once the window ended", 10, || fake.texts().join("\n").contains("failures: sending paused"));
+    let t = fake.texts().join("\n");
+    assert!(t.rfind("failures: sending paused") > t.rfind("fresh again"), "the last word is the stale view: {t}");
+    assert_eq!(a.status_json()["held_total"], 1);
 }
 
 /// the SendGate watcher tells every change after its first look (a pause, a resume, a sticky shadow), never the stop,
@@ -983,7 +1034,8 @@ fn an_operator_note() {
 /// the shipped configs turn the alerts on (naming the variables, never holding them) and watch /root/arbx/runs
 #[test]
 fn deploy_configs_turn_alerts_on() {
-    for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] {
+    // integration (the WP-20 self-review's merge item 5): the frz canary, WP-07's config for the first live-money test
+    for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml", "deploy/arbx-canary-frz.toml"] {
         let c = crate::config::Config::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(f)).unwrap();
         let a = &c.alerts;
         assert!(a.enabled, "{f}");
@@ -994,4 +1046,32 @@ fn deploy_configs_turn_alerts_on() {
         let sec = crate::provenance::section(a);
         assert_eq!((sec["token_env"].as_str(), sec["chat_env"].as_str()), (Some("TELEGRAM_BOT_TOKEN"), Some("TELEGRAM_CHAT_ID")));
     }
+}
+
+/// Integration (WP-07 x WP-20, `arbx run`'s wiring: `notify::set_hook(alerts::notice_hook(..))`): a stop rule of WP-07's
+/// in-process supervisor reaches the owner's chat through the process's `notify` hook. The stop is requested first, then
+/// the Critical notice goes out (🛑 and WP-07's text, its segment named); the gate change the rule made is left to that
+/// notice (the watcher would have sent a second Critical message)
+#[test]
+fn integ_a_supervisor_stop_reaches_the_chat_through_the_hook() {
+    let _hook = crate::notify::hook_test_lock();
+    let fake = Fake::start();
+    let a = alerts_at(&fake.base, &on(20), quick());
+    let rt = runtime();
+    a.start(rt.handle(), Arc::new(AtomicBool::new(false)));
+    crate::notify::set_hook(notice_hook(a.clone()));
+    let sess = crate::control::Session::new();
+    let mut sup = crate::supervisor::Supervisor::new(crate::config::SupervisorCfg::default(), Rec::off(), "integ-stop-p1");
+    sup.bind(sess.gate.clone(), sess.stopper.clone());
+    sup.limits.floor = Some(100);
+    let mut s = crate::supervisor::Series::new();
+    s.push(1, 99);
+    let fired = sup.evaluate(1, &s, 99, &Default::default());
+    crate::notify::clear_hook();
+    assert_eq!(fired, Some(crate::supervisor::Rule::EquityFloor));
+    assert_eq!(sess.stopper.info().map(|i| i.reason), Some(crate::control::StopReason::EquityFloor), "the stop was requested");
+    wait_for("the stop's notice", 10, || fake.texts().iter().any(|t| t.contains("🛑 <b>equity_floor:") && t.contains("(segment integ-stop-p1): sending stopped, campaign stops")));
+    assert!(a.gate_change_alert(&("live".into(), String::new()), "shadow", "equity_floor", "", true).is_none(), "its gate change is not told again");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(fake.texts().iter().filter(|t| t.contains("integ-stop-p1")).count(), 1, "one Critical message for the stop (the segment's stop message comes at its end)");
 }

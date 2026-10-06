@@ -443,6 +443,8 @@ fn status_label(s: &str) -> Option<&'static str> { CHECKS.iter().map(|c| c.1).ch
 /// An attempt sent (live, canary) and not final yet
 struct Open {
     attempt: u64,
+    /// WP-20 (integration): the route's venues in order (`PumpSwap>Dlmm`), for the money alerts
+    route: String,
     decision: u64,
     opp: u64,
     sig: [u8; 64],
@@ -486,8 +488,8 @@ struct Open {
 /// expiry check found the landing, whose fee and events only the wallet record brings), what its landing adds to the
 /// money so far (`counted`), whether the wallet record came, whether a would-fail of it counted toward cooling
 #[derive(Clone)]
-struct Final { sig58: String, mint: Pk, landed: bool, ok: bool, tip: u64, size: u64, creates_ata: bool, src: &'static str, counted: Counted, wallet_seen: bool,
-    cooled: bool,
+struct Final { route: String, sig58: String, mint: Pk, landed: bool, ok: bool, tip: u64, size: u64, creates_ata: bool, src: &'static str, counted: Counted,
+    wallet_seen: bool, cooled: bool,
     /// WP-07: the final (`landed_ok`, `landed_fail`, `not_landed_expired`, `not_landed_refused`, `unsettled`; an amend's
     /// landing replaces it): the ledger's reconciliation confirms no refused bundle ever lands
     fin: &'static str,
@@ -918,7 +920,12 @@ impl Exec {
         if self.money_guard && !self.money.equity_known { return Some("equity_unknown"); }
         if self.money_guard && self.money.stale { return Some("equity_stale"); }
         if self.spent + self.reserved + BASE_FEE > self.cap_failed_fees {
-            if self.open.is_empty() { self.stopped = Some(if self.mode == Mode::Canary { "spend cap reached" } else { "failed-fee cap reached" }); }
+            if self.open.is_empty() {
+                self.stopped = Some(if self.mode == Mode::Canary { "spend cap reached" } else { "failed-fee cap reached" });
+                // WP-20 (integration): the budget floor, at once (the status line's `exec.stopped` says it too, deduplicated)
+                crate::alerts::budget_floor(crate::alerts::BudgetFloor { what: "failed_fee_cap".into(), value_lamports: (self.spent + self.reserved) as i64,
+                    floor_lamports: self.cap_failed_fees as i64, detail: self.stopped.map(String::from) });
+            }
             return Some("fee_cap");
         }
         if let Some(c) = self.canary {
@@ -1168,7 +1175,8 @@ impl Exec {
         self.count(if self.mode == Mode::Canary { "canary_sent" } else { "live_sent" });
         if crowding.rank() > 0 { self.count("rank_crowded"); }
         self.by_sig.insert(sig, attempt);
-        self.open.insert(attempt, Open { attempt, decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
+        self.open.insert(attempt, Open { attempt, route: format!("{:?}>{:?}", r.buy.venue, r.sell.venue),
+            decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
             trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit, creates_ata: built.creates_ata, worst: BASE_FEE, bh_slot: bh.slot, bh_height: bh.height,
             target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_engine: t, t_signed, t_sent: None, bundle: None,
             path: paths.list[bp].name.clone(), fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
@@ -1502,11 +1510,14 @@ impl Exec {
         // WP-07 (the WP-05 hand-off): a landing the expiry check found before its wallet record counts provisional money
         // (the base fee, an unknown round trip); its record is asked for now, and settles it (an amend line)
         if src == "statuses" { crate::chainfetch::note_landed(&o.sig, landed.as_ref().and_then(|l| l.slot), Some(o.attempt)); }
+        // WP-20 (integration): the money alerts of attempts that really went out (live, canary): never waits (a try_send)
+        if self.mode.sends() { if let Some(l) = landed.as_ref() { landing_alert(&o.route, &o.mint, o.size, o.attempt, &o.sig58, l, &counted); } }
         let line = self.outcome_line(&o, fin, src, landed.as_ref(), error, amend, seen.as_ref(), poh);
         self.rec.json(rec::OUTCOMES, line);
         self.count(match fin { "landed_ok" => "landed_ok", "landed_fail" => "landed_fail", "not_landed_expired" => "not_landed_expired", "unsettled" => "unsettled",
             _ => "not_landed_refused" });
-        self.finals.insert(o.attempt, Final { sig58: o.sig58.clone(), mint: o.mint, landed: landed.is_some(), ok: landed.as_ref().is_some_and(|l| l.ok), tip: o.tip,
+        self.finals.insert(o.attempt, Final { route: o.route.clone(), sig58: o.sig58.clone(), mint: o.mint, landed: landed.is_some(),
+            ok: landed.as_ref().is_some_and(|l| l.ok), tip: o.tip,
             size: o.size, creates_ata: o.creates_ata, src, counted, wallet_seen: src == "wallet", cooled: o.cooled, fin, refused: fin == "not_landed_refused",
             t_fin: self.t_now });
         if landed.is_some() && src != "wallet" { self.provisional.insert(o.attempt, self.t_now); }
@@ -1533,6 +1544,13 @@ impl Exec {
         let counted = Counted::of(&l, f.tip, f.size, f.creates_ata);
         self.sub(f.counted);
         self.add(counted, f.mint);
+        // WP-20 (integration): a landing found late (its final said not landed) is told like one found at once; a success
+        // told without its net (the expiry check found it first) is told again once its record brings the net (the route
+        // program's round trip, or the ledger's line)
+        let net_now = counted.rt_unknown == 0 || l.ledger["liquid_delta"].is_i64();
+        if self.mode.sends() && (!f.landed || (l.ok && f.ok && f.counted.rt_unknown > 0 && net_now)) {
+            landing_alert(&f.route, &f.mint, f.size, attempt, &f.sig58, &l, &counted);
+        }
         let t = self.t_now;
         let mut wallet_now = false;
         if let Some(x) = self.finals.get_mut(&attempt) {
@@ -1966,6 +1984,34 @@ fn sig58_of(s: &[u8; 64]) -> String { bs58::encode(s).into_string() }
 fn lookups_of(msg: &build::Message) -> Vec<String> {
     crate::tx::parse_wire(&build::unsigned(msg)).map(|(tx, _)| tx.lookups.iter().map(|l| b58(&l.table)).collect()).unwrap_or_default()
 }
+/// WP-20 (integration, the WP-05 settlement hook): the alert of a landing of ours, from chain data. A route that
+/// succeeded is an `alerts::Win`: its gross is the route program's round trip (its events: the last leg's output − the
+/// size); its fee, tip and rent come from the ledger's line of the same transaction when the wallet record brought one
+/// (WP-07: the record's fee, its transfers to the tip accounts, the rent of the accounts it created less those it
+/// closed), else the record's fee, the attempt's tip and the estimate (new token accounts × ATA rent, never below the
+/// real rent); with no round trip in the events, the ledger's change of SOL + WSOL plus what was paid (the net is then
+/// that change). `alerts::win_alert` says "succeeded" with that net, a gain only when it is above 0 (Stage-1 plan
+/// review F12). A landing that failed is an `alerts::FailedLanding` (the fee lost, the program's error)
+fn landing_alert(route: &str, mint: &Pk, size: u64, attempt: u64, sig58: &str, l: &Landed, counted: &Counted) {
+    if l.ok {
+        let lg = &l.ledger;
+        let led = lg.is_object();
+        let g = |k: &str| lg[k].as_u64().unwrap_or(0);
+        let (fee, tip, rent) = if led { (g("fee"), g("tip"), g("rent_locked").saturating_add(g("rent_nonrecoverable")).saturating_sub(g("rent_reclaimed"))) }
+            else { (counted.fee, counted.tip, counted.atas as u64 * crate::alerts::summary::ATA_RENT_LAMPORTS) };
+        let gross = if counted.rt_unknown == 0 { Some(counted.round_trip) } else {
+            lg["liquid_delta"].as_i64().filter(|_| led).map(|d| crate::alerts::clamp_i64(d as i128 + fee as i128 + tip as i128 + rent as i128))
+        };
+        crate::alerts::win(crate::alerts::Win { route: Some(route.to_string()), mint: b58(mint), mint_name: None, size_lamports: size, gross_lamports: gross,
+            tip_lamports: tip, fee_lamports: fee, rent_lamports: rent, slot: l.slot, signature: sig58.to_string(), attempt: Some(attempt) });
+    } else {
+        let code = l.err.as_ref().and_then(build::custom_code);
+        let error = Some(format!("{}{}", code.map(|c| format!("custom {} ", hex_code(c))).unwrap_or_default(), crate::proglog::meaning(code, &l.err)));
+        crate::alerts::failed_landing(crate::alerts::FailedLanding { route: Some(route.to_string()), mint: b58(mint), mint_name: None, size_lamports: size,
+            fee_lamports: counted.failed_fee, slot: l.slot, signature: sig58.to_string(), error, attempt: Some(attempt) });
+    }
+}
+
 /// what each leg delivered, in order: the `out` events of the route program's logs (`proglog::events`, as the wallet
 /// stream's record carries them)
 fn delivered_of(prog_events: &Value) -> Vec<u64> {

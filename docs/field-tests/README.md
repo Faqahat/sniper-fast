@@ -65,7 +65,8 @@ Never uploaded: `src/`, `program/`, `tools/`, `docs/`, or any script (.py/.sh/.t
 
 ## Alerts and the watchdog on Cherry (WP-20)
 
-- **Alerts** come from each segment by itself: both maintained configs have `[alerts] enabled = true`. They need `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `/root/arbx/deploy/.env` (mode 600). The owner sets them there, never in git or a config. Without them a segment runs as before, with one run.log WARNING (`alerts off: … not set`).
+- **Alerts** come from each segment by itself: the maintained configs and the frz canary (`deploy/arbx-canary-frz.toml`) have `[alerts] enabled = true`. They need `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `/root/arbx/deploy/.env` (mode 600). The owner sets them there, never in git or a config. Without them a segment runs as before, with one run.log WARNING (`alerts off: … not set`).
+- **What the money alerts say** (integration, integ/stage0): a landing of ours "succeeded" with its net from chain data (the route program's round trip less the fee, tip and rent of the ledger's line for that transaction); never "profitable", and a gain only when that net is above 0. WP-07's stops, reconciliation misses, stale money views and owner transfers come as their notices, deduplicated by kind and subject. `arbx campaign` tells the campaign's start and end, and its campaign-wide stops, from its own process with the same .env (only the two variables are read from it). The daily summary's win ratio is wins ÷ bundles sent, with both numbers.
 - **Check the pair** after the .env changes (one test message to the group; it prints `ok: …` or `failed: <why>`, never the token or the chat id; exit 0 or 1):
 
   ```

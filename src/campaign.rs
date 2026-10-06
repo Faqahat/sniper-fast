@@ -687,10 +687,69 @@ pub fn main(o: Opts, detach: bool) -> Result<i32> {
     }
     for sig in [libc::SIGINT, libc::SIGTERM] { let _ = signal_hook::flag::register(sig, c.stop.clone()); }
     let _ = signal_hook::flag::register(libc::SIGHUP, Arc::new(AtomicBool::new(false)));
+    // integration (WP-20 x WP-07): the campaign's own alerts, after the detach (a runtime does not survive a fork): its
+    // notices (the start, the campaign-wide stops, a crash or safety segment end, the end) reach the owner's chat
+    let (a, notes) = CampaignAlerts::new(&cfg.alerts, &env_lookup(&env_file, &[&cfg.alerts.token_env, &cfg.alerts.chat_env]), &o.name, &runs);
+    for n in &notes { c.say(n); }
+    let alerts = CampaignAlerts::start(a, true);
     let mut runner = ProcessRunner { bin, config: frozen, dir, runs, env_file, drain_s: o.drain_s, pass, force: o.force };
     let why = c.run(&mut runner, &RealClock);
+    alerts.finish();
     drop(lock);
     Ok(if why.starts_with("safety") || why.starts_with("crash limit") || why.starts_with("the test budget") { 20 } else { 0 })
+}
+
+/// Integration (WP-20 x WP-07): the alerts of `arbx campaign`, a process of its own (a segment's alerts end with the
+/// segment). They read the frozen config's `[alerts]`; the token and the chat id come from the campaign's .env (only
+/// those two names are read from it, never put in the process's environment, which the segments inherit:
+/// [`env_lookup`]). Started after the detach, they run their sender on a one-worker runtime of their own (the campaign's
+/// loop is synchronous) and are the `notify` hook ([`crate::alerts::notice_hook`]): the campaign's notices
+/// (`campaign_start`, `equity_start`, the campaign-wide stops, a crash or safety `segment_end`, `campaign_shadow`,
+/// `segment_start_failed`, `segment_unreaped`, `segment_not_sending`, `data_files_changed`, `campaign_end`) go to the
+/// owner's chat, deduplicated by kind and subject. At the end what is queued goes out (bounded: FLUSH_WAIT, then
+/// EXIT_WAIT); `campaign_end` tells the end, so there is no stop message of its own
+pub struct CampaignAlerts { pub alerts: Arc<crate::alerts::Alerts>, rt: Option<tokio::runtime::Runtime>, stop: Arc<AtomicBool> }
+
+impl CampaignAlerts {
+    /// the campaign `name`'s alerts in `runs` (the heartbeat and daily markers stay the segments' and the watchdog's), and
+    /// their notes (on, or off and why: one warning, never fatal)
+    pub fn new(cfg: &crate::alerts::AlertsCfg, env: &dyn Fn(&str) -> Option<String>, name: &str, runs: &Path) -> (Arc<crate::alerts::Alerts>, Vec<String>) {
+        crate::alerts::Alerts::new(cfg, env, crate::alerts::Ctx { label: format!("campaign {name}"), runs_dir: Some(runs.to_path_buf()), started_ns: now_ns(),
+            ..Default::default() })
+    }
+
+    /// Start them: the sender (when they are on), the `notify` hook; with `process`, the process's alerts and their panic
+    /// hook too (`arbx campaign`; a test leaves those alone)
+    pub fn start(a: Arc<crate::alerts::Alerts>, process: bool) -> CampaignAlerts {
+        let stop = Arc::new(AtomicBool::new(false));
+        let rt = if a.enabled() {
+            tokio::runtime::Builder::new_multi_thread().worker_threads(1).thread_name("arbx-camp-alerts").enable_all().build().ok()
+        } else { None };
+        if let Some(rt) = &rt { a.start(rt.handle(), stop.clone()); }
+        if process {
+            crate::alerts::install(a.clone());
+            crate::alerts::install_panic_hook();
+        }
+        notify::set_hook(crate::alerts::notice_hook(a.clone()));
+        CampaignAlerts { alerts: a, rt, stop }
+    }
+
+    /// The campaign's end: what the sender holds goes out, then what is left now (both bounded); the hook goes
+    pub fn finish(mut self) {
+        self.alerts.flush(crate::alerts::FLUSH_WAIT);
+        let _ = self.alerts.deliver_now(Vec::new(), crate::alerts::EXIT_WAIT);
+        notify::clear_hook();
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(rt) = self.rt.take() { rt.shutdown_timeout(Duration::from_secs(1)); }
+    }
+}
+
+/// The campaign's lookup of `names` (its alerts' token and chat id variables): the .env's value when the file has one
+/// (only those names are kept), else the process's environment
+pub fn env_lookup(env_file: &Path, names: &[&str]) -> impl Fn(&str) -> Option<String> {
+    let kept: Vec<(String, String)> = dotenvy::from_path_iter(env_file).map(|it| it.filter_map(|x| x.ok()).filter(|(k, _)| names.contains(&k.as_str())).collect())
+        .unwrap_or_default();
+    move |k: &str| kept.iter().find(|(n, _)| n == k).map(|(_, v)| v.trim().to_string()).filter(|v| !v.is_empty()).or_else(|| crate::alerts::env_var(k))
 }
 
 /// The data files the config names (the seed list, the registry and templates, the crowded-pools list, the leaders'

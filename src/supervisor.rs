@@ -454,6 +454,7 @@ mod tests {
     /// on. Through the process's real hook (not a capture): it acts only on this test's segment
     #[test]
     fn the_stop_comes_before_its_notice_and_a_panicking_hook_loses_nothing() {
+        let _hook = notify::hook_test_lock();
         let sess = crate::control::Session::new();
         let seen: Arc<std::sync::Mutex<Vec<(String, bool)>>> = Default::default();
         let (s2, stopper) = (seen.clone(), sess.stopper.clone());

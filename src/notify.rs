@@ -1,8 +1,9 @@
 //! The alert hook point (PLAN WP-07, for WP-20's Telegram alerts). Every stop and every alert-worthy money event of the
 //! ledger, the in-process supervisor and the campaign supervisor is written to its `events.jsonl` with a clear kind
 //! (MEASUREMENT A.6) and handed to [`notify`] as a [`Notice`]. Until a hook is installed `notify` does nothing: arbx
-//! does not depend on WP-20. WP-20's merge installs its sink with [`set_hook`] (once, at start); its hook must never
-//! block (a bounded channel with `try_send`: `notify` is called on the engine thread and the campaign's loop).
+//! does not depend on WP-20. WP-20's merge installs its sink with [`set_hook`] (once, at start: `alerts::notice_hook`,
+//! in `arbx run` and in `arbx campaign`'s own process); its hook must never block (a bounded channel with `try_send`:
+//! `notify` is called on the engine thread and the campaign's loop).
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::{Arc, RwLock};
@@ -36,6 +37,14 @@ pub fn set_hook(f: impl Fn(&Notice) + Send + Sync + 'static) { *HOOK.write().unw
 
 /// Remove the sink (tests)
 pub fn clear_hook() { *HOOK.write().unwrap_or_else(|e| e.into_inner()) = None; }
+
+/// tests that install the process's hook hold this lock while it is theirs (one hook per process; tests run in
+/// parallel: integration, the alerts' wiring tests beside WP-07's own)
+#[cfg(test)]
+pub fn hook_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static L: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    L.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 #[cfg(test)]
 thread_local! {

@@ -374,3 +374,31 @@ fn a_data_file_changed_mid_campaign_is_reported() {
     assert!(notes.iter().any(|n| n.kind == "data_files_changed" && n.level == Level::Warn), "{notes:?}");
     assert_eq!(r.json("campaign.json")["data_files_changed"][0]["sha256_now"].as_str(), Some(crate::provenance::sha256_hex(b"b").as_str()));
 }
+
+/// Integration (WP-20 x WP-07, `arbx campaign`'s wiring): the campaign's own alerts (`CampaignAlerts`, as `main` starts
+/// them after the detach) are the process's `notify` hook, so the campaign's notices reach the owner's chat: its start
+/// (🟢 with the plan) and its end (⏹ with the reason), in WP-07's words; `finish` sends what is still queued (bounded)
+/// before the process ends, and takes the hook away
+#[test]
+fn integ_the_campaign_tells_its_start_and_its_end() {
+    let _hook = notify::hook_test_lock();
+    let fake = crate::alerts::tests::Fake::start();
+    let (a, _) = crate::alerts::Alerts::with(&crate::alerts::tests::on(20), crate::alerts::tests::quick(), &crate::alerts::tests::env_ok, &fake.base,
+        crate::alerts::Ctx { label: "campaign integ-c".into(), ..Default::default() });
+    assert!(a.enabled());
+    let alerts = CampaignAlerts::start(a.clone(), false);
+    let mut r = rig("integ-alerts", Mode::Shadow, 1.0, vec![script(60, 0, "deadline", |_, _| {})]);
+    r.camp.name = "integ-c".into();
+    let why = r.run();
+    alerts.finish();
+    assert_eq!(why, "time up");
+    crate::alerts::tests::wait_for("the start and the end", 10, || {
+        let t = fake.texts().join("\n");
+        t.contains("🟢 <b>campaign integ-c: started: 1 h, 1 segments of 60 min, mode shadow</b>") && t.contains("⏹ <b>campaign integ-c: ended: time up</b>")
+    });
+    // the hook went with `finish`: a later notice reaches no chat
+    let before = fake.n();
+    notify::notify(notify::now(Level::Info, "campaign_start", "campaign", "integ-c-later", "after the end", json!({})));
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(fake.n(), before);
+}

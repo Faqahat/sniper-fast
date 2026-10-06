@@ -953,3 +953,36 @@ fn a_record_the_snapshot_already_holds_is_not_counted_twice() {
     rec.close();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Integration (FT-000 x WP-07: the wallet history's cursor against this ledger's window between segments). Segment 1
+/// entered two wallet transactions (slots 1,100 and 1,200) and took its last good snapshot at 1,300; it recorded one
+/// more at 1,400 in wallet.jsonl, which its cursor names, but was killed before its ledger entered it. Segment 2's window
+/// starts at 1,300: the cursor (1,400) is moved back to the newest earlier ledger entry at or before it (1,200), so the
+/// record at 1,400 is listed again and the window gets it; a cursor at or before the window's start is kept; with no
+/// entry before the window the cursor is dropped (the last hour is listed); with no window (no good snapshot yet) it is
+/// kept. A stop reconciliation left undecided moves the window's start back to its first snapshot, and the cursor with it
+#[test]
+fn the_wallet_cursor_never_passes_the_window_between_segments() {
+    let camp = std::env::temp_dir().join(format!("arbx-camp-cursor-{}-{}", std::process::id(), crate::feeds::clock::now_ns()));
+    std::fs::create_dir_all(&camp).unwrap();
+    let (s0, s1) = (frz_snap(1_000, 223_000_000, 191_500_000, 22_970_000, T0), frz_snap(1_300, 223_000_000 - 2_000, 191_500_000, 22_970_000, T0 + 50 * M));
+    write_segment(&camp, "c-p1", T0, &[s0, s1], &[entry_t("a", 1_100, T0 + 10 * M, 1_000), entry_t("b", 1_200, T0 + 20 * M, 1_000)], &[]);
+    let h = history(&camp, Some("c-p2"), T0 + 61 * M, DAY_NS);
+    assert_eq!(h.prev_window.as_ref().map(|w| w.from.slot), Some(1_300));
+    assert_eq!(h.window_cursor, Some(("b".to_string(), 1_200)), "the newest entry at or before the window's first snapshot");
+    let c = |sig: &str, slot: u64| Some((sig.to_string(), slot));
+    assert_eq!(bound_wallet_cursor(c("k", 1_400), &h), (c("b", 1_200), "moved_back"), "past the window: moved back");
+    assert_eq!(bound_wallet_cursor(c("b", 1_200), &h), (c("b", 1_200), "kept"));
+    assert_eq!(bound_wallet_cursor(c("s", 1_300), &h), (c("s", 1_300), "kept"), "at the window's first snapshot");
+    assert_eq!(bound_wallet_cursor(None, &h), (None, "none"));
+    let none_before = History { window_cursor: None, ..h.clone() };
+    assert_eq!(bound_wallet_cursor(c("k", 1_400), &none_before), (None, "dropped"), "nothing earlier to start from: the last hour is listed");
+    assert_eq!(bound_wallet_cursor(c("k", 1_400), &History::default()), (c("k", 1_400), "kept"), "no window yet: nothing before this segment's start counts");
+    // segment 1's stop reconciliation (1,000 -> 1,300) left undecided: the window starts at 1,000, before every entry
+    std::fs::write(camp.join("c-p1").join("recon.jsonl"), format!("{}\n{}\n", json!({ "schema": "arbx.recon/1.0", "file_seq": 0 }),
+        json!({ "t_ns": T0 + 51 * M, "ok": false, "final": false, "from": { "slot": 1_000 }, "to": { "slot": 1_300 }, "residual": 20_000 }))).unwrap();
+    let h = history(&camp, Some("c-p2"), T0 + 61 * M, DAY_NS);
+    assert_eq!((h.prev_window.as_ref().map(|w| (w.from.slot, w.undecided)), h.window_cursor.clone()), (Some((1_000, true)), None));
+    assert_eq!(bound_wallet_cursor(c("b", 1_200), &h), (None, "dropped"), "the undecided window needs every record from 1,000 on");
+    let _ = std::fs::remove_dir_all(&camp);
+}
