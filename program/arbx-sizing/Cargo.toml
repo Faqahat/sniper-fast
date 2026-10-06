@@ -20,6 +20,11 @@ cpmm = []
 ammv4 = []
 dlmm = []
 dammv2 = []
+# PLAN-ADDENDUM WP-21: Raydium CLMM and Orca Whirlpool. Off by default: their AnyLeg/Abort variants exist only with the
+# feature, so the engine (default features) builds unchanged until it integrates them (DESIGN.md §9)
+rayclmm = []
+whirlpool = []
+clmm = ["rayclmm", "whirlpool"]
 # golden-section fallback (still gated at run time by the SEARCH flag)
 search = []
 # alloc-based sizing-block encoder for the engine and the tests

@@ -26,7 +26,7 @@ fn leg_json(h: &Harness, dir: Dir, opts: &BuildOpts) -> Value {
     let sw = h.build(dir, 1, opts).unwrap();
     let kind = match h.venue {
         Venue::PumpSwap => if dir.zfo() { 2 } else { 1 },
-        Venue::RayCpmm => 3, Venue::RayAmmV4 => 4, Venue::Dlmm => 5, Venue::DammV2 => 6,
+        Venue::RayCpmm => 3, Venue::RayAmmV4 => 4, Venue::Dlmm => 5, Venue::DammV2 => 6, Venue::RayClmm => 7, Venue::Whirlpool => 8,
     };
     let accounts: Vec<Value> = sw.ix.accounts.iter().map(|m| {
         let a = h.svm().get_account(&m.pubkey).unwrap_or_default();

@@ -40,10 +40,24 @@ pub mod cost {
     /// one exact DLMM quote: its setup, plus EXACT_BIN per bin it reads
     pub const EVAL_DLMM: u64 = 1_500;
     pub const EXACT_BIN: u64 = 1_500;
+    /// Raydium CLMM / Orca Whirlpool (PLAN-ADDENDUM WP-21): ESTIMATES, not measured on SBF yet (DESIGN.md §4.7, §7 item 11: on-chain
+    /// sizing of these kinds stays off until sbf-check measures them). A step is one swap step of the program's loop
+    /// (to the next initialized tick, tick-spacing or tick-group boundary, or a limit-order fill): a few U256 mul-divs
+    /// (≈3.3k each, §4.7) and a tick-to-sqrt-price conversion
+    pub const PARSE_CLMM: u64 = 4_000;
+    pub const PARSE_CLMM_ARRAY: u64 = 600;
+    pub const EVAL_CLMM: u64 = 8_000;
+    pub const EXACT_STEP: u64 = 16_000;
+    pub const LOCATE_STEP: u64 = 20_000;
 }
 
-/// DLMM bins a walk over this leg may read (0 for the other kinds)
-fn walk(l: &LegDesc) -> u64 { if l.kind == Kind::Dlmm { l.max_bins as u64 } else { 0 } }
+/// DLMM bins (CLMM swap steps) a walk over this leg may read (0 for the other kinds)
+fn walk(l: &LegDesc) -> u64 { if l.kind.has_budget() { l.max_bins as u64 } else { 0 } }
+
+fn is_clmm(l: &LegDesc) -> bool { matches!(l.kind, Kind::RayClmm | Kind::Whirlpool) }
+
+/// CU of the locator's pieces over this leg: DLMM bins, or CLMM swap steps
+fn locate_cu(l: &LegDesc) -> u64 { walk(l) * if is_clmm(l) { cost::LOCATE_STEP } else { cost::LOCATE_BIN } }
 
 /// CU to check and parse one leg
 pub fn parse_cu(l: &LegDesc) -> u64 {
@@ -54,6 +68,8 @@ pub fn parse_cu(l: &LegDesc) -> u64 {
         Kind::RayAmmV4 => PARSE_AMM,
         Kind::Dlmm => PARSE_DLMM + PARSE_DLMM_ARRAY * l.n_bin_arrays as u64,
         Kind::DammV2 => PARSE_DAMM,
+        Kind::RayClmm => PARSE_CLMM + PARSE_CLMM_ARRAY * l.n_bin_arrays as u64,
+        Kind::Whirlpool => PARSE_CLMM + PARSE_CLMM_ARRAY * (3 + l.n_bin_arrays as u64),
     }
 }
 
@@ -66,6 +82,8 @@ pub fn eval_cu(l: &LegDesc, bins: u64) -> u64 {
         Kind::RayAmmV4 => EVAL_AMM,
         Kind::Dlmm => EVAL_DLMM + EXACT_BIN * bins.min(walk(l)),
         Kind::DammV2 => EVAL_DAMM,
+        // a CLMM quote walks from the pool's price (no resumable state): every evaluation may take the whole budget
+        Kind::RayClmm | Kind::Whirlpool => EVAL_CLMM + EXACT_STEP * walk(l),
     }
 }
 
@@ -81,13 +99,13 @@ pub fn cu_bound(b: &SizingBlock) -> u64 {
     for (k, &(bi, si)) in b.pairs().iter().enumerate() {
         let (lb, ls) = (leg(bi), leg(si));
         let rt = |bins: u64| eval_cu(&lb, bins) + eval_cu(&ls, bins);
-        cu += LOCATE + LOCATE_BIN * (walk(&lb) + walk(&ls));
+        cu += LOCATE + locate_cu(&lb) + locate_cu(&ls);
         cu += n_cand * rt(NEAR_BINS as u64);
         // the engine's amount: a full walk of each DLMM leg, up to its budget
         if k == 0 { cu += eval_cu(&lb, walk(&lb)) + eval_cu(&ls, walk(&ls)); }
         back = back.max(rt(NEAR_BACK as u64));
         // the golden-section search where the model refuses (SEARCH; no DLMM leg)
-        if b.flags.search() && lb.kind != Kind::Dlmm && ls.kind != Kind::Dlmm { cu += (b.max_iters as u64 + 4) * rt(0); }
+        if b.flags.search() && !lb.kind.has_budget() && !ls.kind.has_budget() { cu += (b.max_iters as u64 + 4) * rt(0); }
     }
     cu + MAX_BACK as u64 * back
 }

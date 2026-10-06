@@ -41,6 +41,9 @@ fn kind_of(venue: Venue, dir: Dir) -> (u8, bool) {
         Venue::RayAmmV4 => (4, dir.zfo()),
         Venue::Dlmm => (5, dir.zfo()),
         Venue::DammV2 => (6, dir.zfo()),
+        // WP-21's venues: their suites are tests/clmm_exactness.rs and tests/clmm_adversarial.rs
+        Venue::RayClmm => (7, dir.zfo()),
+        Venue::Whirlpool => (8, dir.zfo()),
     }
 }
 
@@ -300,6 +303,8 @@ fn probes(fx: &Fixtures, p: &PoolFixture) -> Vec<Probe> {
                     add("rate limiter in force".into(), vec![Patch::new(pool, 8, &bf), Patch::new(pool, 472, &act.to_le_bytes())], snap, opts5.clone(), true, both.clone());
                 }
             }
+            // WP-21's venues: tests/clmm_adversarial.rs
+            Venue::RayClmm | Venue::Whirlpool => {}
         }
     }
     out

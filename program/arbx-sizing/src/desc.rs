@@ -5,7 +5,10 @@
 //! sz_flags u8 | min_size u32 | engine_amount u64 | [lamport_offset i32 if LAMPORTS] | [max_iters u8 if SEARCH]
 //!   | [n_pairs u8, n × (buy u8, sell u8) if BASKET]
 //! per leg: kd u8 | [bump u8 if PumpSwap] | [max_bins u8 if DLMM] | [n_pos u8, n_pos × u8 if EXPLICIT_POS]
-//! kd: bits 0-3 kind (1..=6) | bit 4 dir (0 = token0 / x / a / base is the input) | bits 5-7 n_bin_arrays (DLMM 1..=5)
+//! kd: bits 0-3 kind (1..=8) | bit 4 dir (0 = token0 / x / a / base is the input) | bits 5-7 n_bin_arrays (DLMM 1..=5
+//!     bin arrays; Raydium CLMM 1..=7 remaining accounts: the bitmap extension and tick arrays; Orca Whirlpool 0..=3
+//!     supplemental tick arrays)
+//! [max_bins u8: the walk budget, DLMM bins / CLMM swap steps]
 //! ```
 use crate::error::{DescCode, DescError};
 use crate::layout;
@@ -31,13 +34,17 @@ pub enum Kind {
     Dlmm = 5,
     /// Meteora DAMM v2 swap (exact in)
     DammV2 = 6,
+    /// Raydium CLMM swap_v2 (exact in; PLAN-ADDENDUM WP-21, feature `rayclmm`)
+    RayClmm = 7,
+    /// Orca Whirlpool swap_v2 (exact in; PLAN-ADDENDUM WP-21, feature `whirlpool`)
+    Whirlpool = 8,
 }
 
 impl Kind {
     pub const fn from_u8(v: u8) -> Option<Kind> {
         match v {
             1 => Some(Kind::PumpBuy), 2 => Some(Kind::PumpSell), 3 => Some(Kind::RayCpmm), 4 => Some(Kind::RayAmmV4),
-            5 => Some(Kind::Dlmm), 6 => Some(Kind::DammV2), _ => None,
+            5 => Some(Kind::Dlmm), 6 => Some(Kind::DammV2), 7 => Some(Kind::RayClmm), 8 => Some(Kind::Whirlpool), _ => None,
         }
     }
     /// the venue program the leg must invoke
@@ -48,6 +55,8 @@ impl Kind {
             Kind::RayAmmV4 => &layout::RAY_AMM_V4,
             Kind::Dlmm => &layout::DLMM,
             Kind::DammV2 => &layout::DAMM_V2,
+            Kind::RayClmm => &layout::RAY_CLMM,
+            Kind::Whirlpool => &layout::WHIRLPOOL,
         }
     }
     /// index into arbx-exec's ALLOWLIST_B58
@@ -58,13 +67,20 @@ impl Kind {
             Kind::RayAmmV4 => layout::ALLOW_AMM_V4,
             Kind::Dlmm => layout::ALLOW_DLMM,
             Kind::DammV2 => layout::ALLOW_DAMM_V2,
+            Kind::RayClmm => layout::ALLOW_RAY_CLMM,
+            Kind::Whirlpool => layout::ALLOW_WHIRLPOOL,
         }
     }
     /// entries of an explicit position list (DLMM: lb_pair, mint_x, mint_y, first bin array)
     pub const fn n_positions(self) -> usize { layout::default_positions(self).len() }
     pub const fn has_bump(self) -> bool { matches!(self, Kind::PumpBuy | Kind::PumpSell) }
-    /// DLMM legs carry their walk budget (`max_bins`)
-    pub const fn has_budget(self) -> bool { matches!(self, Kind::Dlmm) }
+    /// DLMM legs carry their walk budget (`max_bins`: bins read), CLMM legs theirs (swap steps)
+    pub const fn has_budget(self) -> bool { matches!(self, Kind::Dlmm | Kind::RayClmm | Kind::Whirlpool) }
+    /// the range of the descriptor's 3-bit array count: DLMM bin arrays, Raydium CLMM remaining accounts (the bitmap
+    /// extension and tick arrays), Orca Whirlpool supplemental tick arrays; 0 for the other kinds
+    pub const fn array_count_range(self) -> (u8, u8) {
+        match self { Kind::Dlmm => (1, MAX_BIN_ARRAYS), Kind::RayClmm => (1, 7), Kind::Whirlpool => (0, 3), _ => (0, 0) }
+    }
     /// the venue program's amount offset in the leg data (for the shell's cross-check)
     pub const fn amount_offset(self) -> u8 { if matches!(self, Kind::RayAmmV4) { 1 } else { 8 } }
 }
@@ -74,13 +90,14 @@ pub struct LegDesc {
     pub kind: Kind,
     /// dir bit 0: token0 / x / a / base is the input (PumpSell: true; PumpBuy: false)
     pub base_or_token0_in: bool,
-    /// DLMM: bin arrays passed (1..=5); other kinds 0
+    /// DLMM: bin arrays passed (1..=5); Raydium CLMM: remaining accounts passed (the TickArrayBitmapExtension and tick
+    /// arrays, 1..=7); Orca Whirlpool: supplemental tick arrays (0..=3); other kinds 0
     pub n_bin_arrays: u8,
     /// PumpSwap: the pool-authority PDA bump (0 = the pool is not canonical); other kinds 0
     pub pump_bump: u8,
     /// DLMM: the walk budget, in bins with liquidity (1..=255). The engine sets it from its own quote of the leg's
     /// largest input (the cap; `DlmmLeg::bins_for`), so the engine's amount is always inside it (DESIGN.md §4.3).
-    /// Other kinds 0.
+    /// Raydium CLMM / Orca Whirlpool: the walk budget in swap steps (`steps_for`). Other kinds 0.
     pub max_bins: u8,
     /// EXPLICIT_POS: positions in the kind's order (first `kind.n_positions()` entries used)
     pub positions: Option<[u8; 8]>,
@@ -218,9 +235,8 @@ pub fn parse_block(data: &[u8], at: usize, n_legs: usize, basket: bool, amount_i
             Kind::PumpSell if !token0_in => return Err(DescError::new(DescCode::Dir, i as u8, 0xFF)),
             _ => {}
         }
-        if (kind == Kind::Dlmm && !(1..=MAX_BIN_ARRAYS).contains(&nba)) || (kind != Kind::Dlmm && nba != 0) {
-            return Err(DescError::new(DescCode::BinArrays, i as u8, 0xFF));
-        }
+        let (lo, hi) = kind.array_count_range();
+        if !(lo..=hi).contains(&nba) { return Err(DescError::new(DescCode::BinArrays, i as u8, 0xFF)); }
         let pump_bump = if kind.has_bump() { r.u8()? } else { 0 };
         let max_bins = if kind.has_budget() {
             let b = r.u8()?;

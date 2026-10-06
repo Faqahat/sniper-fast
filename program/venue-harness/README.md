@@ -2,15 +2,17 @@
 
 The exactness oracle for `program/arbx-sizing` (DESIGN.md §6.3). The venue programs are the real mainnet ELFs, dumped
 read-only into `fixtures/programs`. They run in LiteSVM 0.17 (mainnet feature set) on mainnet account snapshots
-stored in `fixtures/pools`.
+stored in `fixtures/pools` (the engine's venues) and `fixtures/pools-clmm` (Raydium CLMM and Orca Whirlpool,
+PLAN-ADDENDUM WP-21: priced by arbx-sizing, not traded by the engine yet).
 
-Each swap is a real venue instruction, built byte for byte the way the engine builds it (`src/build.rs::leg`). A
-funded test wallet executes it, and the harness records the exact output and input deltas plus the venue's CU.
+Each swap is a real venue instruction, built byte for byte the way the engine builds it (`src/build.rs::leg`; for the
+two CLMM venues, the `swap_v2` layouts DESIGN.md §9 specifies for the engine). A funded test wallet executes it, and
+the harness records the exact output and input deltas plus the venue's CU.
 
 ## Commands
 
 ```
-cargo run --release --bin fetch-fixtures              # programs + pools in fixtures/pool-list.json (cached: skips what exists)
+cargo run --release --bin fetch-fixtures              # programs + pools in fixtures/pool-list.json and pool-list-clmm.json (cached: skips what exists)
 cargo run --release --bin fetch-fixtures -- --refresh # re-snapshot everything (read-only RPC, <= 2.5 req/s)
 cargo run --release --bin fetch-fixtures -- --check   # upgrade watch: programdata last-deploy slot vs MANIFEST.json
 cargo run --release --bin venue-swap -- list
@@ -39,11 +41,15 @@ no TLS stack.
 | `tests/exactness.rs` | The arbx-sizing comparison (below) |
 | `tests/adversarial.rs` | The same comparison at the crate's own boundary sizes ±1, ±2 (exact capacities included), under Clock variations and 50+ state mutations (below) |
 | `tests/route.rs` | `plan` on real legs, each planned size executed on the real programs: HOTBOT routes in both directions and a 2-pair BASKET (below) |
+| `tests/clmm_exactness.rs` | WP-21: the same comparison for Raydium CLMM and Orca Whirlpool (kinds 7, 8), exact in and exact out, amounts and the whole post-swap pool state (below) |
+| `tests/clmm_adversarial.rs` | WP-21: their step boundaries ±1, ±2, Clock edges, 51 state families and Token-2022 mint states, every refusal checked against the venue (below) |
+| `tests/clmm_route.rs` | WP-21: `plan` over Raydium DCAL ↔ Orca 4uny (the same pair) executed on both programs, and a 2-pair BASKET (below) |
 
 ## API
 
 ```rust
 let fx = Fixtures::load()?;                                     // fixtures/programs + fixtures/pools
+let fx = Fixtures::load_clmm()?;                                // fixtures/programs + fixtures/pools-clmm (load_all: both pool sets)
 let (out, cu) = venue_swap_output(&fx, &pool, Dir::ZeroForOne, amount_in)?;   // Err(SwapOutcome) when the venue fails
 let h = Harness::new(&fx, &pool)?;                              // or Harness::with_patches(&fx, &pool, &[Patch::new(key, off, bytes)])
 let o: SwapOutcome = h.swap(dir, x);                            // ok, amount_out, spent, cu_venue, cu_tx, err, logs, events
@@ -51,11 +57,13 @@ let o = h.swap_opts(dir, x, &BuildOpts { dlmm_arrays: Some(vec![-8, -9]), ..Defa
 let o = h.swap_opts(Dir::OneForZero, base_out, &BuildOpts { exact_out: true, ..Default::default() });   // PumpSwap `buy`
 let h = Harness::with_patches(&fx, &pool, &[Patch::resize(pool, 300)])?;   // an account cut (or zero-extended) to 300 bytes
 let o = h.swap_with(dir, x, &BuildOpts::default(), |svm| svm.set_sysvar(&clock));   // mutate state first
+let o = h.swap_opts(dir, x, &BuildOpts { tick_arrays: Some(vec![-21120, -21180]), clmm_ext: false, ..Default::default() });
+                                                                // CLMM: the tick arrays passed, the extension left out
 let mut s = h.session(); s.swap(..); s.swap(..);                // swaps that see each other's effects
 ```
 
 `Dir` is in the pool's own token order: PumpSwap base/quote (ZeroForOne = `sell`, OneForZero = `buy_exact_quote_in`),
-CPMM mint0/mint1, AMM v4 coin/pc, DLMM x/y, DAMM v2 a/b.
+CPMM mint0/mint1, AMM v4 coin/pc, DLMM x/y, DAMM v2 a/b, Raydium CLMM token0/token1, Orca Whirlpool a/b.
 
 Each swap runs in a clone of the base state (snapshot + wallet), so swaps are independent and deterministic. About
 600 swaps run in 0.3 s.
@@ -63,7 +71,8 @@ Each swap runs in a clone of the base state (snapshot + wallet), so swaps are in
 ## Fixtures
 
 - **`fixtures/programs/<id>.so` + `MANIFEST.json`:** PumpSwap, the pump fee program, Raydium CPMM and AMM v4, DLMM,
-  DAMM v2, and mainnet's SPL Token (p-token), Token-2022 and ATA.
+  DAMM v2, Raydium CLMM (ed1eb41, deployed at slot 451,479,902), Orca Whirlpool (0.9.0, slot 440,170,207), and
+  mainnet's SPL Token (p-token), Token-2022 and ATA.
   - Each ELF is cut at its own extent. Upgradeable programs carry zero padding up to their max length; the manifest
     keeps the on-chain size and sha256 alongside.
   - Set `VENUE_HARNESS_LITESVM_SPL=1` to use LiteSVM's bundled token programs instead of the mainnet dumps.
@@ -82,6 +91,13 @@ Each swap runs in a clone of the base state (snapshot + wallet), so swaps are in
     negative virtual reserve, 8ewu with a positive one), a mayhem pool (GxqG), a cashback coin (98ew, which the
     engine's leg cannot execute) and a 287-byte dust pool with a non-SOL quote (DDGN).
   - Edit the list and rerun the fetcher to add pools. A pool that cannot swap is reported and skipped.
+- **`fixtures/pool-list-clmm.json` → `fixtures/pools-clmm/`** (WP-21): 10 Raydium CLMM and 10 Orca Whirlpool pools,
+  snapshotted at slots 453,942,354-440 (2026-10-06) with every account `swap_v2` takes, the mints, the AmmConfig, the
+  bitmap extension, the oracle, and the tick arrays around the price (Raydium: the current one and the first 5
+  initialized ones each way; Orca: the current one ±3, fixed or dynamic). They span the fee tiers (0.01% to 3%), tick
+  spacings 1 to 32,896 (a splash pool), dynamic and adaptive fees, fee_on 0/1/2, real limit orders (3ucN, 2uoK), a
+  pool beyond the default bitmap (DCAL), current ticks at array boundaries, uninitialized arrays in a swap's sequence
+  (G1vH) and Token-2022 mints (a 3% transfer fee on ASk8, Pausable and DefaultAccountState on 7tJV, PYUSD on 5Kqo).
 - **`fixtures/rpc-cache/`:** the arbx-sizing research cache. It is not used by this crate.
 
 **Mainnet rent is 5,080 lamports per byte.** LiteSVM's default is 6,960. Accounts created on mainnet since the change
@@ -188,3 +204,51 @@ programs (leg 1 spends what leg 0 delivered):
 - a BASKET of both directions (legs GLL3 buy, 6D4E sell, 6D4E buy, GLL3 sell; pairs (0,1), (2,3)) at four gaps: the
   profitable pair is chosen, realizes its modeled profit, beats pair 0 at `e` and each pair at its own planned size;
   `min_profit` above the plan gives NoProfit. (The third HOTBOT pool C9xc has no liquidity any more.)
+
+## Concentrated liquidity: Raydium CLMM and Orca Whirlpool (PLAN-ADDENDUM WP-21)
+
+The builders (`src/venues.rs`) emit each venue's `swap_v2`, the layouts DESIGN.md §9 specifies for the engine:
+- **Raydium CLMM:** payer, amm_config, pool, user in/out, vault in/out, observation, Token, Token-2022, Memo, mint in,
+  mint out; then the TickArrayBitmapExtension (when it exists; `clmm_ext: false` leaves it out) and the tick arrays in
+  walk order (by default the current array and the snapshot's initialized arrays onward; `tick_arrays` overrides);
+  data amount, threshold, `sqrt_price_limit` (0: none), is_base_input.
+- **Orca Whirlpool:** token programs a/b, Memo, the authority, whirlpool, mints a/b, owner account a, vault a, owner
+  account b, vault b, the 3 tick arrays of the program's own sequence (initialized or not), the oracle PDA; tick
+  arrays past the third go as supplemental (`remaining_accounts_info` slice type 6); data amount, threshold,
+  `sqrt_price_limit`, amount_specified_is_input, a_to_b.
+
+`exact_out: true` swaps exact out on both (the bridge then calls `quote_exact_out`).
+
+**`tests/clmm_exactness.rs`:** every snapshot in both directions, ≈45 log-spaced sizes plus the crate's step ends ±1,
+exact in and exact out, and byte mutations (Raydium fee_on 0/1/2, the dynamic fee cleared and set; Orca the adaptive
+state reset). The bridge returns the crate's walk (`clmm`: steps, ticks crossed, the arrays read, the post-swap pool),
+and the test compares the output, the debit and the post-swap pool (sqrt price, tick, liquidity, fee growth, owed fees,
+the dynamic fee's or the oracle's variables) with the venue's accounts after the swap. Verdicts as in
+`tests/exactness.rs`, refusals lifted the same way (a Token-2022 transfer fee zeroed). Results (2026-10-06):
+
+| Venue | exact (post-state exact) | both refuse | venue CU limit | necessary refusals | FALSE | MISMATCH |
+|---|---|---|---|---|---|---|
+| Raydium CLMM | 9,862 (9,862) | 169 | 56 | 1,105 (ASk8's 3% transfer fee) | 0 | 0 |
+| Orca Whirlpool | 6,198 (6,198) | 138 | 2 | 0 | 0 | 0 |
+
+**`tests/clmm_adversarial.rs`:** the bridge's probe mode (each step's end, `cap_in`, fee residues, ±1 and ±2) on 30
+Raydium and 21 Orca state families per pool — tick arrays missing, reversed, unrelated or only the first; no bitmap
+extension; limit orders injected (fresh, part-filled, both cohorts, tiny); liquidity 0; fee, protocol and fund rates;
+owed fees near u64::MAX; status bits; open_time; the dynamic fee's cap, reference and Clock edges; Orca's adaptive
+control, reference above and below, the Clock before its reference, trading not enabled, the reward updated in the
+future, the needed arrays as supplemental, only the current array — and Token-2022 mint states (paused, default
+frozen, set or with the extension appended; a 1% transfer fee with its cap lifted). 88,273 rows: Raydium 48,296 exact,
+5,072 both refuse, 366 venue CU limit, 935 necessary refusals; Orca 29,913 / 3,576 / 68 / 47; 0 FALSE REFUSAL, 0
+MISMATCH. `results/clmm-exactness.json` (≈22 MB) and `results/clmm-adversarial.json` (≈80 MB) hold every row; both are
+gitignored.
+
+**`tests/clmm_route.rs`:** Raydium DCAL and Orca 4uny trade the same pair (J6pQ/SOL). With 4uny's price moved by ±60 and
+±120 ticks, `plan` runs in the bridge and every planned size is executed leg by leg on the two programs (one Clock, the
+later snapshot's, for both: Orca refuses a Clock before its own stamps): realized == modeled to the unit, ≥ the profit
+at `e`, ≥ the best of a grid; a BASKET of both directions picks the profitable pair and is NoProfit with `min_profit`
+above the plan.
+
+**The venues' CU** (every exact swap above): Raydium CLMM ≈41.5k + ≈9.1k per tick crossed + ≈8.5k per other step
+(within 64k + 10k per step; the 1.4M limit at ≈147 steps); Orca Whirlpool ≈28-30k + ≈7.0k per crossing + ≈8.6k per
+other step (within 48k + 10k per step; the limit at ≈190 steps). A dynamic or adaptive fee far from its reference adds
+sub-steps without crossings (up to 0.77M and 1.27M with no crossing at all).

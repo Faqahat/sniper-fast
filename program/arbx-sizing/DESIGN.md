@@ -23,6 +23,17 @@ venue by venue.
   passed (§3.4).
 - CU: measured, and bounded statically by `budget::cu_bound` from the block alone (§4.7).
 
+**Revision 2026-10-06 (PLAN-ADDENDUM WP-21 phase A, step 1): Raydium CLMM and Orca Whirlpool**, kinds 7 and 8:
+- exact swap maths for both concentrated-liquidity venues, exact in and exact out, ported from the deployed commits and
+  proven against the deployed binaries in the venue harness: 0 mismatches and 0 false refusals, amounts and post-swap
+  pool state, on 20 mainnet pools, their byte mutations and the adversarial states (§2.8, §2.9, §6.3);
+- every state the maths does not cover is refused with a typed reason (`Abort::Clmm`, `Abort::Whirl`; a paused or
+  default-frozen Token-2022 mint too), never approximated, and each refusal is checked against the venue;
+- the locator treats them as piecewise Möbius legs, one piece per exact swap step (§3.4);
+- behind the crate features `rayclmm` and `whirlpool` (`clmm` = both), **off by default**: the engine and arbx-exec
+  build and behave exactly as before until they integrate the kinds. §9 lists what that integration needs. On-chain
+  sizing of these kinds stays off: their `budget` costs are estimates until sbf-check measures them (§4.7).
+
 Inputs:
 - `docs/research/redesign-final.md` §3.9 (the v3 layout and the reserved SELF_SIZE/BASKET bits; target of at most ~60k
   extra CU for a 3-pair DLMM basket).
@@ -138,9 +149,14 @@ Everything marked **verified** in this document was checked for this design. The
 | 4 `RayAmmV4` | Raydium AMM v4 `swap_base_in_v2` (tag 16) | 7 | 1 | 8 |
 | 5 `Dlmm` | Meteora DLMM `swap2` (exact in) | 0 | 8 | 16 + 1..=5 bin arrays |
 | 6 `DammV2` | Meteora DAMM v2 `swap` (or `swap2` mode 0, ExactIn) | 8 | 8 | 14 |
+| 7 `RayClmm` | Raydium CLMM `swap_v2` (exact in, no price limit) | 2 | 8 | 13 + 1..=7 remaining (the bitmap extension when it exists, then the tick arrays) |
+| 8 `Whirlpool` | Orca Whirlpool `swap_v2` (exact in, no price limit) | 1 | 8 | 15 + 0..=3 supplemental tick arrays |
 
-These are exactly the instructions `src/build.rs::leg()` builds today. Kinds 0 and 7-15 are invalid. Whitelisted
-pre-activation swaps (DAMM v2), transfer-hook mints, exact-out variants and partial-fill modes are out of scope.
+Kinds 1-6 are exactly the instructions `src/build.rs::leg()` builds today. Kinds 7 and 8 (PLAN-ADDENDUM WP-21) are
+parsed only with the crate features `rayclmm` / `whirlpool`; without them they are `Abort::Unsupported`, and the engine
+does not build their legs yet (§9). Kinds 0 and 9-15 are invalid. Whitelisted pre-activation swaps (DAMM v2),
+transfer-hook mints and partial-fill modes are out of scope. Exact out is priced host-side only (PumpSwap `buy`, the
+CLMM kinds' `quote_exact_out`): the route's legs are exact in.
 
 ### 1.3 The guard, defaults and modes
 
@@ -194,7 +210,13 @@ byte is at 165):
 - type 14 (TransferHook) → `Abort::TransferHook`.
 
 This is the same rule as `src/pools.rs::has_transfer_fee`. The HOTBOT mint (Token-2022, extensions 18 and 19 only)
-passes.
+passes. A TransferFeeConfig with a nonzero rate but `maximum_fee = 0` charges nothing (Token-2022 caps the fee at
+`maximum_fee`); the scan still refuses it, a conservative refusal (§7 item 10).
+
+**Paused and default-frozen mints (kinds 7 and 8).** `token::mint_blocked` also refuses a Token-2022 mint with
+extension 26 (Pausable) whose `paused` byte (value + 32) is set — every transfer fails — and one with extension 6
+(DefaultAccountState) set to Frozen (2): the token account the leg creates for it is frozen, so the swap fails at every
+size (the harness: both refuse, appended or set, on both venues). The kinds 1-6 do not check these yet (§7 item 9).
 
 **Clock.** Read once through the `sol_get_clock_sysvar` syscall: `slot`, `unix_timestamp`, `epoch`. No account is
 needed.
@@ -574,6 +596,142 @@ DLMM limit-order and fee-on-output pairs (41 of 216, 34 of them above the progra
    - The bitmap jump to the next array with liquidity is not modeled. The engine stops at a missing array instead.
 5. **DAMM v2.** None found.
 
+### 2.8 Raydium CLMM (`CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK`), raydium-clmm ed1eb41
+
+PLAN-ADDENDUM WP-21, feature `rayclmm` (`src/venue/raydium_clmm.rs`). The deployed program is raydium-io/raydium-clmm at
+ed1eb41 (2026-09-29; programdata last deployed at slot 451,479,902; the dump's sha256 starts `e6963f72991821e2`,
+`fixtures/programs/MANIFEST.json`), built with `overflow-checks = true`: an overflow panics, so the port's checked
+arithmetic fails exactly where the program does.
+
+**State.** Positions are in the `swap_v2` leg (§9.1).
+
+| Pos | Account | Fields |
+|---|---|---|
+| 2 | PoolState (owner CAMM, len **1,544**, disc `f7ede3f5d7c3de46`) | amm_config @9, token_mint_0 @73, token_mint_1 @105, token_vault_0 @137, token_vault_1 @169, observation_key @201, tick_spacing u16 @235, liquidity u128 @237, sqrt_price_x64 u128 @253, tick_current i32 @269, fee_growth_global_0/1 u128 @277/@293, protocol_fees_token_0/1 u64 @309/@317, **status u8 @389** (bit 4: swaps disabled), **fee_on u8 @390** (1: the fee in token 0, 2: in token 1, any other value: on the input), **tick_array_bitmap [u64;16] @904** (the default range: arrays −512..511, bit = array index + 512), fund_fees_token_0/1 u64 @1064/@1072, **open_time u64 @1080**, **DynamicFeeInfo @1096** (80 B: filter_period u16 @+0, decay_period @+2, reduction_factor @+4, dynamic_fee_control u32 @+6, max_volatility_accumulator u32 @+10, tick_spacing_index_reference i32 @+14, volatility_reference u32 @+18, volatility_accumulator u32 @+22, last_update_timestamp u64 @+26; all 80 bytes zero = no dynamic fee) |
+| 1 | AmmConfig (len **117**, disc `daf42168cbcb2b6f`, key == pool @9) | protocol_fee_rate u32 @43, trade_fee_rate u32 @47, fund_fee_rate u32 @53 (out of 1e6) |
+| 5, 6 | input / output vault | key == the pool's vault of the direction; amount @64 (the output vault bounds the payout) |
+| 11, 12 | input / output mint | key == the pool's mint of the direction; Token-2022 scan (§2.0) |
+| 13 .. 13+n | the remaining accounts, n = 1..=7 (descriptor) | classified by length as the program does, each owned by CAMM with its discriminator and naming this pool (pool_id @8; else DescError): the **TickArrayBitmapExtension** PDA["pool_tick_array_bitmap_extension", pool] (len **1,832**, disc `3c9624db61808b99`: 14 positive bitmaps of 512 bits @40, 14 negative @936) and **TickArrayState** PDA["tick_array", pool, start as i32 big-endian] (len **10,240**, disc `c09b55cd31f9812a`: start_tick_index i32 @40, ticks[60] @44 of 168 B — tick i32 @0, liquidity_net i128 @4, liquidity_gross u128 @20, order_phase u64 @116, orders_amount u64 @124, part_filled_orders_remaining u64 @132, unfilled_ratio_x64 u128 @140 — initialized_tick_count u8 @10,124). An account of any other length ends the list: the program stops reading there |
+
+Real pools carry **limit orders** on ticks (3ucN SOL/USDC: 7 ticks, 2uoK: 1 on 2026-10-06); the walk fills them.
+
+**Exact.** The program's `swap_internal` and its callees, step for step and rounding for rounding:
+
+```
+pre:  status bit 4 clear; Clock.unix_timestamp > open_time; tick_spacing ≠ 0; trade_fee_rate ≤ 1e6;
+      the default price limit (MIN_SQRT+1 for 0→1, MAX_SQRT−1 for 1→0) strictly beyond the pool's price
+      fee side: fee_on 1 → token 0 (on the input of 0→1, on the output of 1→0); 2 → token 1; else the input
+      dynamic fee (DynamicFeeInfo not all zero): update_reference(ts): elapsed = ts − last_update;
+        < filter: nothing; < decay: idx_ref = ⌊tick/ts⌋, v_ref = ⌊va·reduction/1e4⌋; else idx_ref = ⌊tick/ts⌋, v_ref = 0
+first array: the current tick's array when initialized (the default bitmap, or the extension beyond ±ts·60·512 ticks:
+      needed for tick spacings below 15), else the next initialized one in the swap direction; it must be passed
+loop while remaining > 0 and price ≠ limit:                                    (one OUTER iteration per tick)
+  next tick: the next initialized tick (liquidity or resting orders) of the current array; else the first one of the
+      next initialized array (bitmap jump, through the extension past the default range), which must be the next
+      passed array (the program consumes the passed arrays front to back)
+  inner step: to the next tick's price, or under the dynamic fee to the tick-spacing boundary while va < max_va:
+      va = min(v_ref + |idx_ref − ts_index|·1e4, max_va); rate = min(trade + ⌈control·(va·ts)²/1e13⌉, 1e5)
+      compute_swap: fee on the input: net = ⌊x·(1e6−r)/1e6⌋, fee = ⌈in·r/(1e6−r)⌉ (target reached) or x − in;
+        fee on the output: fee = ⌈out·r/1e6⌉ out of the output; amounts between sqrt prices over 256/512-bit
+        products (U256/U512 mul-div, ruint semantics), the input rounded up and the output down
+      fees: protocol ⌊fee·p/1e6⌋, fund ⌊fee·f/1e6⌋, the rest into fee growth ⌊rest·2^64/L⌋ (wrapping)
+  on the tick: its limit orders fill first at the tick's price (the output with the swap's direction rounded down, the
+      input with the ORDER's direction, the opposite, rounded up; the part-filled cohort first), and the tick is
+      crossed (L ∓ liquidity_net) only once none is left; tick_current = the tick (− 1 after a downward crossing;
+      while orders remain on it, on the side the swap came from)
+post: the amount met in full (swap_v2 without a price limit: a partial fill fails); in > 0 and out > 0
+      (else TooSmallInputOrOutputAmount: ZeroOut); out ≤ the output vault; the owed fees' checked additions
+```
+
+Exact out (`is_base_input = 0`) runs the same loop on the output (`quote_exact_out`): the engine's hints.
+
+**Model.** One piece per exact swap step. Within a step the liquidity and the fee rate are constant, so the step is a
+CPMM on its virtual reserves `X = L·2^64/P` (token 0) and `Y = L·P/2^64` (token 1): `A = (1 − f)·R_out`, `B = R_in`,
+`C = 1 − f` with the fee on the input, `C = 1` on the output (§2.5's model). Each piece starts and ends at the step's
+EXACT cumulative input and output (`Steps`, from the same walker as the exact quote), so the model's error does not
+accumulate along the walk. A limit-order fill is a line at the tick's price. The bound for the non-concavity guard
+after a step is the marginal price at its end net of the trade fee (the dynamic part is never negative).
+
+**Walk budget.** The descriptor's `max_bins` counts **swap steps** (inner steps: ranges, tick crossings, dynamic-fee
+sub-steps, limit-order fills). `RayClmmLeg::steps_for(x)` gives the steps of `x`, for the engine's `max_bins` rule
+(§4.3). Past the budget a quote is `Budget` (not evaluated), as for DLMM.
+
+**Capacity.** The swap fills every smaller input once it fills a larger one, so `cap_in` bisects the exact quote (host
+only). A walk ends (TooLarge) where the program fails: the passed tick arrays end, no initialized array is left in the
+direction, the extension is needed and not passed (also when an array's last tick is crossed beyond the default
+range: the program flips its bit in the extension), an amount passes u64, or the output vault is too small.
+
+**Abort** (each fails `swap_v2` at every size; the harness checks every refusal against the venue): `Clmm(Status)`,
+`Clmm(NotOpen)`, `Clmm(Fee)` (trade fee rate above 1e6), `Clmm(BitmapExtension)` (the current tick beyond the default
+range, the extension not passed), `Clmm(NoLiquidity)` (no initialized array in the direction), `Clmm(TickArrays)` (the
+first array not passed), `Clmm(PriceLimit)`, `Clmm(State)` (tick spacing 0, the current tick outside the range, a
+bitmap the program cannot read), `Clmm(MintPaused)`, `Clmm(MintFrozen)`, `TransferFee`, `TransferHook`, `Layout` (any
+other length of the pool or the config).
+
+**The venue's CU** (the deployed binary in LiteSVM, every exact harness swap: §6.3): ≈41.5k + ≈9.1k per tick crossed
++ ≈8.5k per other step (a dynamic-fee sub-step, a limit-order fill). Every swap is within **64k + 10k per step**. The
+1.4M transaction limit falls at ≈147 steps (the largest swap that fit: 147 steps, 1,392,658 CU); a dynamic-fee pool far
+from its reference reaches 478-774k with no crossing at all (51-87 sub-steps).
+
+### 2.9 Orca Whirlpool (`whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc`), whirlpool 0.9.0
+
+PLAN-ADDENDUM WP-21, feature `whirlpool` (`src/venue/orca_whirlpool.rs`). The deployed program is orca-so/whirlpools at
+0e72771 (program 0.9.0; programdata last deployed at slot 440,170,207, 2026-08-19; sha256 `4b5cb126a352f68d…`), built
+with **`overflow-checks = false`**: its plain `+ − *` wrap and only its `checked_*` calls and index bounds fail. The port
+keeps that (wrapping operations where the program has plain ones). Its own U256 division (`U256Muldiv::div`, Knuth D) is
+ported as deployed, including the add-back on the top word that reads out of bounds — the binary panics there, and so
+does the port (`None`, TooLarge); upstream fixed it after this deploy (4aac511, 2026-10-06, §7 item 12).
+
+**State.**
+
+| Pos | Account | Fields |
+|---|---|---|
+| 4 | Whirlpool (owner whirL, len **653**, disc `3f95d10ce1806309`) | tick_spacing u16 @41, fee_tier_index_seed @43, fee_rate u16 @45 (out of 1e6), protocol_fee_rate u16 @47 (out of 1e4), liquidity u128 @49, sqrt_price u128 @65, tick_current_index i32 @81, protocol_fee_owed_a/b u64 @85/@93, token_mint_a @101, token_vault_a @133, fee_growth_global_a u128 @165, token_mint_b @181, token_vault_b @213, fee_growth_global_b @245, **reward_last_updated_timestamp u64 @261** |
+| 5, 6 | mint a / mint b | key == @101 / @181; Token-2022 scan (§2.0) |
+| 8, 10 | vault a / vault b | key == @133 / @213; amount @64 |
+| 11, 12, 13 (+ 15.. supplemental, 0..=3) | tick arrays PDA["tick_array", whirlpool, start as a decimal string] | **fixed** TickArray (len **9,988**, disc `4561bdbe6e0742bb`: start_tick_index i32 @8, ticks[88] @12 of 113 B — initialized u8 @0, liquidity_net i128 @1, liquidity_gross u128 @17 — whirlpool @9,956) or **dynamic** DynamicTickArray (len **148..=10,004**, disc `11d8f68ee1c7da38`: start @8, whirlpool @12, tick_bitmap u128 @44, the ticks from @60, each a Borsh enum: 0 = uninitialized (1 byte) or 1 + 112 bytes; bytes past the account's end read as zero), or the PDA of an array that does not exist (System-owned, empty), which the program reads as **zeroed** when it is the PDA of a start index the swap needs |
+| 14 | Oracle PDA["oracle", whirlpool] (len **254**, disc `8bc283b38cb3e5f4`, whirlpool @8), or uninitialized (System, empty: no adaptive fee) | trade_enable_timestamp u64 @40; AdaptiveFeeConstants @48: filter_period u16, decay_period u16, reduction_factor u16, adaptive_fee_control_factor u32, max_volatility_accumulator u32, tick_group_size u16, major_swap_threshold_ticks u16; AdaptiveFeeVariables @82: last_reference_update_timestamp u64, last_major_swap_timestamp u64, volatility_reference u32, tick_group_index_reference i32, volatility_accumulator u32 |
+
+**Exact.** `swap_manager::swap` (0e72771), step for step:
+
+```
+pre:  tick_spacing ≠ 0; the default limit (MIN_SQRT_PRICE for a→b, MAX_SQRT_PRICE) strictly beyond the price;
+      Clock ≥ reward_last_updated_timestamp (else InvalidTimestamp at every size)
+      oracle initialized → trade_enable_timestamp ≤ Clock, and the adaptive fee (FeeRateManager::Adaptive):
+        group = ⌊tick/tick_group_size⌋; update_reference(group, ts): ts ≥ max(last_reference_update, last_major_swap)
+        (else InvalidTimestamp); ts − last_reference_update > 3,600 → reset (idx_ref = group, v_ref = 0); else by
+        elapsed = ts − max(…): < filter: nothing; < decay: v_ref = ⌊va·reduction/1e4⌋; else v_ref = 0
+        core range: idx_ref ± ⌈(max_va − v_ref)/1e4⌉ groups (outside it va is at its maximum: no sub-steps)
+sequence (SparseSwapTickSequenceBuilder): the start indexes the swap needs — the current tick's array and the next two
+      in the direction (b→a starts one array later when the tick is within one tick spacing of its array's end);
+      each from an initialized passed array (static or supplemental, any order), else from a passed uninitialized
+      PDA of that start index (zeroed), else the sequence stops there; an empty sequence fails every size
+loop while remaining > 0 and price ≠ limit:
+  next tick: the next initialized tick along the sequence (at its end: the sequence's last tick, or MIN/MAX tick)
+  inner step: to that tick's price, bounded at the tick-group boundary inside the core range (adaptive):
+      va = min(v_ref + |idx_ref − group|·1e4, max_va); rate = min(fee_rate + ⌈control·(va·tgs)²/1e13⌉, 1e5)
+      compute_swap: the fee always on the input: net = ⌊x·(1e6−r)/1e6⌋; fee = ⌈in·r/(1e6−r)⌉ (target reached) or
+        remaining − in; amounts over the program's U256Muldiv as deployed (in up, out down)
+      fees: protocol ⌊fee·p/1e4⌋ (wrapping), fee growth += ⌊rest·2^64/L⌋ (wrapping)
+  on an initialized tick: L ∓ liquidity_net (checked); tick_current = tick (− 1 for a→b)
+post: exact out must fill in full (PartialFillError); out > 0; out ≤ the output vault; the oracle's major-swap stamp
+      when the price moved past major_swap_threshold_ticks
+```
+
+**Model, walk budget, capacity.** As §2.8 (the fee on the input: `C = 1 − f`). The sequence bounds any swap to 3 tick
+arrays (≤ 264 tick spacings) whatever the input.
+
+**Abort** (each fails `swap_v2` at every size; checked against the venue): `Whirl(TradeNotEnabled)`, `Whirl(Timestamp)`
+(the Clock before the reward update, or before the oracle's reference / major-swap stamps), `Whirl(TickArrays)` (none of
+the needed arrays passed), `Whirl(PriceLimit)`, `Whirl(State)` (tick spacing or tick group size 0, a core-range bound
+outside the tick range), `Whirl(MintPaused)`, `Whirl(MintFrozen)`, `TransferFee`, `TransferHook`, `Layout` (the pool or
+the oracle at another length).
+
+**The venue's CU** (LiteSVM, every exact harness swap): ≈28-30k + ≈7.0k per tick crossed + ≈8.6k per other step (an
+adaptive-fee sub-step). Every swap is within **48k + 10k per step**. The 1.4M limit falls at ≈190 steps (the largest
+swap that fit: 183 steps, 1,347,253 CU; the smallest that ran out: 232 steps); an adaptive pool 100 groups from its
+reference takes 153 sub-steps (1.27M) with no crossing at all.
+
 ---
 
 ## 3. The optimizer
@@ -638,7 +796,7 @@ The square root is taken in the approximate arithmetic of §3.8, about 40 CU. Fe
    size beats `⌊x*⌋` by at most 0.31 × `2ε`. The worst case was 64 units, on a pair where one unit of X was worth
    about 100 units of A.
 
-### 3.4 Mixes with DLMM or DAMM v2: the marginal walk
+### 3.4 Mixes with DLMM, DAMM v2 or CLMM legs: the marginal walk
 
 The search walks breakpoints in `x`:
 - leg 0's own segment ends (`U_k`) if it is piecewise;
@@ -703,6 +861,21 @@ the guard runs, `out1(y)` only where an optimum is recorded.
 **Cost (measured, §4.7).** ≈1.85k CU per bin the walk reads (the walk ≈0.35k, the exact drain ≈0.6k, the model
 ≈0.9k); a candidate's exact evaluation ≈1.5k plus ≈1k per bin it reads. A typical arb ends in the active bin or one of
 the next two, so 1-3 bins. One DLMM bin is a 0.2-1% price step, against arb gaps of tens of bps.
+
+**CLMM legs (kinds 7 and 8, WP-21).** A CLMM leg streams its exact swap of an unbounded input step by step
+(`raydium_clmm::Steps`, `orca_whirlpool::Steps`). Each step is one piece, a `Seg`: absolute coordinates `y = v0 +
+M(u − u0)` on `[u0, u1)`, where `(u0, v0)` and `(u1, v1)` are the step's EXACT cumulative input and output and `M` is
+the step's Möbius curve in local coordinates (§2.8; a limit-order fill is the line `c = 0`). A step that ends inside its
+range ends the stream (the input is used up), so does the venue's capacity, and the walk budget ends the domain like a
+DLMM leg's. On an interval where a CLMM piece is involved the interior root comes from the same table after re-centring
+both pieces at the interval's start (`opt::recentre`, `root_general`): a Möbius `a·u/(b + c·u)` re-centred at `s` is
+`a' = a·b/(b + c·s)`, `b' = b + c·s`, `c' = c`, so the CPMM, DLMM and DAMM pieces keep their old formulas and only
+the CLMM ones go through the general form. The non-concavity guard uses each step's bound (§2.8). There is no
+resumable cursor yet: an exact CLMM evaluation walks from the pool's price, bounded by the leg's budget, which
+`budget::cu_bound` charges per evaluation (§4.7). The golden-section fallback never runs over a walking leg (DLMM or
+CLMM, `AnyLeg::walks`). Checked on the fixtures (`tests/clmm.rs`): over the Raydium DCAL ↔ Orca 4uny route at four
+gaps, the locator's choice matches or beats the best of a 2,000-point grid of exact round trips; on the real programs
+(`venue-harness tests/clmm_route.rs`) the realized profit equals the modeled one to the unit and beats `e` and a grid.
 
 ### 3.5 Candidates and choice ("never worse than the fixed amount")
 
@@ -829,10 +1002,13 @@ leg) ≈ **25-29 bytes**.
 ### 4.3 Leg sizing descriptor
 
 ```
-u8 kd:  bits 0-3 kind (1..=6, §1.2) | bit 4 dir (0 = token0 / x / a / BASE is the input; PumpBuy requires 1, PumpSell 0)
-        bits 5-7 n_bin_arrays (DLMM only: 1..=5 → bin arrays at positions 16..16+n; else must be 0)
+u8 kd:  bits 0-3 kind (1..=8, §1.2) | bit 4 dir (0 = token0 / x / a / BASE is the input; PumpBuy requires 1, PumpSell 0)
+        bits 5-7 n_bin_arrays: DLMM 1..=5 bin arrays at positions 16..; RayClmm 1..=7 remaining accounts at 13.. (the
+                 bitmap extension when passed, then the tick arrays); Whirlpool 0..=3 supplemental tick arrays at
+                 15..; any other kind 0
 u8 bump                      PumpBuy / PumpSell only: pool-authority PDA bump (0 = pool is not canonical) (§2.1)
-u8 max_bins                  Dlmm only: the walk budget, bins the leg's walks may read (1..=255; 0 is a DescError)
+u8 max_bins                  Dlmm, RayClmm, Whirlpool: the walk budget — DLMM bins, CLMM swap steps — the leg's
+                             walks may read (1..=255; 0 is a DescError)
 [EXPLICIT_POS] u8 n_pos, n_pos × u8 position                   positions in the kind's order below
 ```
 
@@ -858,9 +1034,18 @@ the crate's `layout` module (§5).
 | RayAmmV4 | amm 1, coin_vault 3, pc_vault 4 |
 | Dlmm | lb_pair 0, mint_x 6, mint_y 7, first_bin_array 16 (count from `kd`) |
 | DammV2 | pool 1, mint_a 6, mint_b 7 |
+| RayClmm | pool 2, amm_config 1, vault_in 5, vault_out 6, mint_in 11, mint_out 12, first remaining 13 (count from `kd`) |
+| Whirlpool | whirlpool 4, mint_a 5, mint_b 6, vault_a 8, vault_b 10, tick_array_0 11 (then 12, 13), oracle 14, first supplemental 15 (count from `kd`) |
 
 The leg's program account (`accounts[start+1]`) must be the kind's venue. The `kind ↔ allowlist index` map is
-DLMM 0, PumpSwap 3, CPMM 6, AMM v4 7, DAMM v2 8. Constant keys are checked too (GlobalConfig, FeeConfig).
+DLMM 0, Whirlpool 1, Raydium CLMM 2, PumpSwap 3, CPMM 6, AMM v4 7, DAMM v2 8 (arbx-exec's `ALLOWLIST_B58`). Constant
+keys are checked too (GlobalConfig, FeeConfig).
+
+**Tick arrays for the CLMM kinds** (§9): Raydium CLMM passes the extension when it exists, then the tick arrays in walk
+order from the first one the swap reads (`ClmmWalk.arrays`) up to the array where a quote **at the cap** ends, plus
+one more initialized array, at most 7 remaining accounts in all — the DLMM rule. Orca Whirlpool passes, as its 3
+static tick arrays, the PDAs of the 3 start indexes the program's sequence needs (`needed_starts`, initialized or not;
+the last one repeated where fewer than 3 are valid) and no supplemental array: no swap reads beyond them.
 
 **Bin arrays for DLMM.** The engine passes, in the swap's own order:
 - the arrays the swap would visit up to the array where a quote **at the cap** ends;
@@ -1069,6 +1254,16 @@ e.g. 48 bins per leg for the 3-pair bin-step-1 basket (441k sizing + two DLMM CP
 crossed at the cap) + `cu_bound(block)`. `x̂ ≤ cap` and crossings are monotone in `x`, so the chosen size never needs
 more. With BASKET it takes the maximum over pairs. Bundles pay no priority fee, so a generous limit costs nothing there.
 
+**The CLMM kinds (WP-21): estimates, not measured on SBF.** `budget::cost` charges PARSE_CLMM 4,000 + 600 per tick
+array passed, EVAL_CLMM 8,000 + EXACT_STEP 16,000 per step of the walk budget for EVERY exact evaluation (no resumable
+cursor yet: each may walk the whole budget), and LOCATE_STEP 20,000 per step for the locator. A step is a few 256-bit
+mul-divs (≈3.3k each, above) and a tick ↔ sqrt-price conversion; the figures are rounded well up. With them the bound
+of a SELF_SIZE pair CLMM ↔ CPMM is ≈118k + 212k per budget step (4 steps: ≈0.97M), because a plan may evaluate a leg up
+to 12 times. So on-chain sizing of kinds 7 and 8 needs, first, exact resumable states per step (as DLMM's cursors, §3.4)
+and then the sbf-check measurements; until then arbx-exec keeps the features off and the kinds are used off chain only
+(§9). The venues' own CPI costs are measured: Raydium CLMM ≈41.5k + ≈9.1k per tick crossed + ≈8.5k per other step,
+Orca Whirlpool ≈28-30k + ≈7.0k per crossing + ≈8.6k per other step (§2.8, §2.9).
+
 ### 4.8 SBF limits and discipline
 
 - **No allocation in the crate.** The plan works on borrowed slices and small structs. The shell's view array is
@@ -1109,9 +1304,11 @@ arbx-sizing/
   src/layout.rs         compiled-in default positions, constant keys (GlobalConfig, FeeConfig, program ids), discriminators
   src/fx.rs             Fx pseudo-float (§3.8)
   src/math.rs           ceil_div, mul_shr_q64 / shl_div_q64 (split 64×128), checked helpers, isqrt_u64
-  src/u256.rs           U256 subset (ported from src/venues/dammv2.rs; same semantics as the ruint ops it replaces)
-  src/token.rs          token-account / mint views, Token-2022 TLV scan
+  src/u256.rs           U256 subset (ported from src/venues/dammv2.rs; same semantics as the ruint ops it replaces),
+                        plus the 512-bit product and Knuth division the CLMM kinds need (mul_full, div_512, mul_div_wide)
+  src/token.rs          token-account / mint views, Token-2022 TLV scan, paused / default-frozen mints (mint_blocked)
   src/venue/{pumpswap,cpmm,ammv4,dlmm,dammv2}.rs   parse + exact quote + model + capacity, each behind a feature
+  src/venue/{raydium_clmm,orca_whirlpool}.rs       the same for kinds 7 and 8 (WP-21), features rayclmm / whirlpool
   src/leg.rs            AnyLeg enum dispatch (no dyn, no generics explosion), LegModel {Mobius | Bins}
   src/opt.rs            closed form, marginal walk, golden section, candidate choice
   src/plan.rs           plan(): descriptor + views → Plan
@@ -1123,6 +1320,7 @@ arbx-sizing/
 | Feature | Default | Purpose |
 |---|---|---|
 | `pumpswap`, `cpmm`, `ammv4`, `dlmm`, `dammv2` | on | per-venue code; a kind whose feature is off is `Abort::Unsupported` |
+| `rayclmm`, `whirlpool` (`clmm` = both) | off | Raydium CLMM, Orca Whirlpool (kinds 7, 8; WP-21). Their `AnyLeg`, `LegModel` and `Abort` variants exist only with the feature, so a default build (the engine, arbx-exec) is unchanged |
 | `search` | on | golden-section fallback (still gated at runtime by the SEARCH flag) |
 | `encode` | off | `alloc`-based descriptor encoder for the engine and tests |
 | `std` | off | `std::error::Error` impls and `Debug` detail for host builds |
@@ -1134,9 +1332,10 @@ arbx-sizing/
 pub struct Clock { pub slot: u64, pub unix_timestamp: i64, pub epoch: u64 }
 pub struct AcctRef<'a> { pub key: &'a [u8; 32], pub owner: &'a [u8; 32], pub data: &'a [u8] }
 
-#[repr(u8)] pub enum Kind { PumpBuy = 1, PumpSell = 2, RayCpmm = 3, RayAmmV4 = 4, Dlmm = 5, DammV2 = 6 }
+#[repr(u8)] pub enum Kind { PumpBuy = 1, PumpSell = 2, RayCpmm = 3, RayAmmV4 = 4, Dlmm = 5, DammV2 = 6,
+                            RayClmm = 7, Whirlpool = 8 /* WP-21: parsed with the features rayclmm / whirlpool */ }
 pub struct LegDesc { pub kind: Kind, pub base_or_token0_in: bool, pub n_bin_arrays: u8, pub pump_bump: u8,
-                     pub max_bins: u8 /* DLMM walk budget */, pub positions: Option<[u8; 8]> }
+                     pub max_bins: u8 /* walk budget: DLMM bins, CLMM steps */, pub positions: Option<[u8; 8]> }
 pub struct SizingBlock { pub flags: SzFlags, pub min_size: u32, pub engine_amount: u64, pub lamport_offset: i32,
                          pub max_iters: u8, pub pairs: [(u8, u8); 3], pub n_pairs: u8, pub legs: [LegDesc; 6], … }
 /// Parse the sizing block at `data[at..]`; returns the block and its length (arbx-exec adds it to the leg-data start).
@@ -1170,12 +1369,17 @@ pub fn plan(p: &PlanIn) -> Result<Plan, DescError>;
 
 // Per venue (used by plan, tests, the harness, and the engine off chain):
 pub enum Abort { Unsupported /* kind's feature off */, Layout, TransferFee, TransferHook, Math, Pump(PumpWhy), Cpmm(CpmmWhy), Amm(AmmWhy),
-                 Dlmm(DlmmWhy), Damm(DammWhy) }
-pub enum QuoteErr { Abort(Abort), TooLarge, ZeroOut, Budget /* past a DLMM walk budget: not evaluated */ }
+                 Dlmm(DlmmWhy), Damm(DammWhy),
+                 Clmm(ClmmWhy) /* feature rayclmm, §2.8 */, Whirl(WhirlWhy) /* feature whirlpool, §2.9 */ }
+pub enum QuoteErr { Abort(Abort), TooLarge, ZeroOut, Budget /* past a DLMM / CLMM walk budget: not evaluated */ }
 pub struct Quote { pub out: u64, pub spent: u64 }
-pub enum AnyLeg<'a> { Pump(PumpLeg), Cpmm(CpmmLeg), Amm(AmmLeg), Dlmm(DlmmLeg<'a>), Damm(DammLeg) }
+pub enum AnyLeg<'a> { Pump(PumpLeg), Cpmm(CpmmLeg), Amm(AmmLeg), Dlmm(DlmmLeg<'a>), Damm(DammLeg),
+                      RayClmm(RayClmmLeg<'a>) /* rayclmm */, Whirl(WhirlLeg<'a>) /* whirlpool */ }
 impl<'a> AnyLeg<'a> {
-    pub fn parse(l: &LegIn<'a>, clock: &Clock) -> Result<Result<Self, Abort>, DescError>; // outer: engine bug; inner: fallback
+    // outer: engine bug; inner (Parsed.leg): fallback. `pda`: create_program_address (PumpSwap's canonical bump, the
+    // PDAs of uninitialized Whirlpool tick arrays)
+    pub fn parse(l: &LegIn<'a>, clock: &Clock, pda: PdaFn) -> Result<Parsed<'a>, DescError>;
+    pub fn walks(&self) -> bool;                                      // DLMM or CLMM: no golden-section search over it
     pub fn quote(&self, amount_in: u64) -> Result<Quote, QuoteErr>;   // EXACT: equals the venue to the unit
     pub fn model(&self) -> LegModel<'_>;                              // Mobius{a,b,c: Fx} | Bins(walker)
     pub fn cap_in(&self) -> Option<u64>;                              // None = unbounded
@@ -1195,6 +1399,31 @@ pub mod venue::pumpswap { pub fn parse(pool, global, fee_cfg, base_mint, quote_m
     pub fn pool_len_ok(len: usize) -> bool;                    // POOL_MIN_LEN 211 ..= POOL_LEN 301 (WP-16 review F1)
     pub fn buy_exact_out(base, qv, fees, out) -> Result<(u64, Quote), QuoteErr>;   // the exact-out `buy` (host only, F6)
     impl PumpLeg { pub fn quote_exact_out(&self, out: u64) -> Result<(u64, Quote), QuoteErr>; } }
+pub mod venue::raydium_clmm {                                     // feature "rayclmm" (WP-21, §2.8)
+    /// `remaining`: the leg's remaining accounts in the order passed (classified by length like the program)
+    pub fn parse(pool, cfg, remaining: &[&[u8]], vault0: u64, vault1: u64, zero_for_one: bool, clock: &Clock)
+        -> Result<RayClmmLeg, Abort>;
+    impl RayClmmLeg<'a> {
+        pub fn quote(&self, x: u64) -> Result<Quote, QuoteErr>;               // EXACT (swap_v2 exact in)
+        pub fn quote_exact_out(&self, out: u64) -> Result<Quote, QuoteErr>;   // EXACT (swap_v2 exact out)
+        // the exact swap step by step (ClmmStep: prices, liquidity, fee rate, amounts, the tick crossed, its limit-order
+        // fill, the array read) and its ClmmWalk: quote, steps, ticks crossed, the arrays read in the order the leg must
+        // pass them, and the post-swap pool (sqrt price, tick, liquidity, fee growth, owed fees, dynamic fee)
+        pub fn fills(&self, amount: u64, exact_out: bool, f: &mut dyn FnMut(&ClmmStep)) -> Result<ClmmWalk, QuoteErr>;
+        pub fn steps_for(&self, x: u64) -> Option<u16>;    // the max_bins that covers x
+        pub fn with_budget(self, steps: u16) -> Self;      // NO_BUDGET = unbounded
+        pub fn cap_in(&self) -> Option<u64>;  pub fn stream(&self) -> Steps;  pub fn has_extension(&self) -> bool;
+    }
+    pub fn array_start(tick: i32, ts: u16) -> i32;  pub fn sqrt_price_at_tick(t: i32) -> Option<u128>;  … }
+pub mod venue::orca_whirlpool {                                   // feature "whirlpool" (WP-21, §2.9)
+    /// `arrays`: every tick array the leg passes (start index; bytes, None for a passed PDA that does not exist)
+    pub fn parse(pool, oracle: Option<&[u8]>, arrays: &[TickArrayIn], vault_a: u64, vault_b: u64, a_to_b: bool,
+                 clock: &Clock) -> Result<WhirlLeg, Abort>;
+    pub fn needed_starts(tick: i32, ts: u16, a_to_b: bool) -> ([i32; 3], usize);   // the program's sequence
+    pub fn start_seed(start: i32, buf: &mut [u8; 12]) -> &[u8];                     // the tick-array PDA seed
+    impl WhirlLeg<'a> { quote, quote_exact_out, fills (→ WhirlWalk: …, arrays_used, post incl. the oracle's
+                        variables), steps_for, with_budget, cap_in, stream, sequence() -> ([i32; 3], u8), is_adaptive() }
+}
 // … one `parse` per venue taking plain byte slices, so the engine can call the same code with its own snapshots.
 ```
 
@@ -1223,7 +1452,8 @@ pub mod venue::pumpswap { pub fn parse(pool, global, fee_cfg, base_mint, quote_m
   ladder plus `opt::locate`), the opportunity's legs, the budget caps, the hint checks and the accuracy monitor's
   amounts. Each refusal state (`Abort`, `Budget`, a PumpSwap sell past the held-back quote, the DAMM v2 rate limiter on
   our leg, a Token-2022 transfer fee or hook) is a decision's reason (`sz_*`). The engine's former maths is kept, tests
-  only, in `src/venues/legacy` as the differential reference.
+  only, in `src/venues/legacy` as the differential reference. Kinds 7 and 8 (WP-21) are not used by the engine or
+  arbx-exec yet: §9 lists what integrating them needs.
 
 ---
 
@@ -1347,6 +1577,53 @@ awaits another same-mint pool set.
      `ERR_SIZING_UNSUPPORTED`; EARLY_ABORT reverts before any CPI (no venue log lines);
   7. DescError cases (wrong position, wrong owner, swapped direction, same pool twice) revert with `ERR_SIZING_DESC`.
 
+**The CLMM kinds (WP-21): `tests/clmm_exactness.rs`, `tests/clmm_adversarial.rs`, `tests/clmm_route.rs`.**
+- **Binaries.** `fixtures/programs/CAMMCzo5….so` (1,523,736 B, sha256 `e6963f72991821e2…`, last deployed at slot
+  451,479,902) and `whirLbMi….so` (1,488,104 B, sha256 `4b5cb126a352f68d…`, slot 440,170,207), dumped read-only
+  (`MANIFEST.json`).
+- **Snapshots** (`fixtures/pool-list-clmm.json` → `fixtures/pools-clmm/`, 20 pools, 1.6 MB, slots 453,942,354-440 on
+  2026-10-06): every account `swap_v2` takes, the mints, the AmmConfig, the bitmap extension, the oracle, and the tick
+  arrays around the price (Raydium: the current one and 5 initialized ones each way; Orca: the current one and 3 each
+  way, fixed or dynamic).
+  - Raydium CLMM (10): 3ucN SOL/USDC (tick spacing 1, 0.04%, real limit orders, 2 spacings from its array's end), 2uoK
+    SOL/JitoSOL (1, 0.01%: the lowest tier), E8TR (60, 0.25%), dAVk (120, 1%), DCAL (1, dynamic fee, beyond the default
+    bitmap: needs the extension), DRW2 (120, fee_on 1, dynamic), HBfk (120, fee_on 2, dynamic), 7tJV (60, fee_on 2; a
+    Token-2022 mint with Pausable, DefaultAccountState, a null transfer hook, ScaledUiAmount), ASk8 (120, 3%: the
+    highest tier seen; a Token-2022 mint charging a 3% transfer fee), 45ss PUMP/SOL (10; Token-2022 PUMP).
+  - Orca Whirlpool (10): Czfq SOL/USDC (4, fixed arrays), Hp53 SOL/JitoSOL (1, 0.01%), 5Kqo (4, adaptive fee, dynamic
+    arrays; PYUSD, Token-2022 with a zero transfer fee), FAqh (64, 0.3%), Hxw7 ORCA/SOL (16), G1vH (256, 2%, adaptive;
+    its sequence ends in uninitialized arrays), H2yE (a splash pool, tick spacing 32,896), CeaZ cbBTC/SOL (16; the tick
+    on its array's first tick), 4uny J6pQ/SOL (8, adaptive, dynamic arrays; DCAL's pair), AfrD (96, 0.65%, dynamic
+    arrays).
+- **Exactness** (`clmm_exactness`): every snapshot in both directions at ≈45 log-spaced sizes plus the crate's own step
+  ends ±1, exact in AND exact out; the output, the input debited and the whole post-swap pool state (sqrt price,
+  tick, liquidity, fee growth, owed fees, the dynamic fee's or the oracle's variables) compared to the unit; byte
+  mutations: Raydium fee_on 0/1/2, the dynamic fee cleared and set; Orca the adaptive state reset. Every refusal is
+  lifted (the crate's maths run without it) and checked against the venue: a refusal where the lifted maths prices
+  every venue-swapped size exactly is a FALSE REFUSAL and fails the suite like a mismatch.
+
+  | Venue | exact (post-state exact) | both refuse | venue CU limit | necessary refusals | FALSE | MISMATCH |
+  |---|---|---|---|---|---|---|
+  | Raydium CLMM | 9,862 (9,862): snapshots 4,362 in / 802 out, mutations 2,292 / 2,406 | 169 | 56 | 1,105 (ASk8's 3% transfer fee) | **0** | **0** |
+  | Orca Whirlpool | 6,198 (6,198): snapshots 4,833 / 878, mutations 237 / 250 | 138 | 2 | 0 | **0** | **0** |
+
+- **Adversarial** (`clmm_adversarial`): the crate's step boundaries ±1 and ±2, Clock edges, 30 Raydium and 21 Orca
+  state families on every pool: tick arrays missing, reversed, unrelated or only the first; no bitmap extension;
+  limit orders (fresh, part-filled, both cohorts, tiny) injected on ticks; liquidity 0; fee rates 0 to the caps;
+  protocol and fund rates; owed fees near u64::MAX; status bits; open_time; the dynamic fee at its cap, its reference
+  far away, `va = v_ref = max_va`, the Clock past every period; Orca's adaptive control, reference above and below,
+  the Clock before the reference, trading not enabled, the reward updated in the future, the needed arrays passed as
+  supplemental, only the current array; Token-2022 mints paused, default-frozen (set, or the extension appended) and
+  charging 1% (bps and cap set). 88,273 rows: Raydium 48,296 exact, 5,072 both refuse, 366 venue CU limit, 935
+  necessary refusals; Orca 29,913 / 3,576 / 68 / 47; **0 FALSE REFUSAL, 0 MISMATCH**. The both-refuse rows by the
+  crate's answer (the venue failing too): TooLarge 3,424, ZeroOut 1,196, NotOpen 521, Status 521, Raydium TickArrays
+  550, BitmapExtension 58, Orca TickArrays 521, Timestamp 811, TradeNotEnabled 174, TransferFee 526, MintPaused
+  115 + 58, MintFrozen 115 + 58.
+- **Route** (`clmm_route`): Raydium DCAL ↔ Orca 4uny (the same pair, J6pQ/SOL) with 4uny's price moved ±60 and ±120
+  ticks, `plan` in the bridge, every candidate executed leg by leg on the two programs: the realized profit equals the
+  modeled one to the unit, is at least the profit at `e` and the best of a grid; a BASKET of the two directions picks
+  the profitable pair and is NoProfit with `min_profit` above the plan.
+
 ### 6.4 CU measurement
 
 - **Per mix.** Sizing CU = CU(route with SELF_SIZE, SHADOW) − CU(the same route unsized at `x = e`). SHADOW executes
@@ -1411,6 +1688,18 @@ of redesign §3.8's "programdata change → venue to shadow".
 7. **DAMM v2 rate limiter.** Settled: the limited direction cannot execute through the engine's leg (6049 without the
    instructions sysvar), so the leg is refused (§2.5). Sizing it would need the sysvar in the leg first.
 8. **Account-lock limit.** Confirm the cluster's `max_tx_account_locks` before planning baskets above 64 unique keys.
+9. **Paused and default-frozen mints for kinds 1-6.** Kinds 7 and 8 refuse a paused (Pausable) or DefaultAccountState
+   Frozen Token-2022 mint (§2.0); the older kinds do not check them yet, so such a route reverts on chain instead of
+   being skipped. Adding `token::mint_blocked` to their parses needs the harness's Token-2022 states run on them.
+10. **A transfer-fee rate with `maximum_fee = 0`.** `token::scan_extensions` refuses any nonzero rate, although
+    Token-2022 caps the fee at `maximum_fee` and so charges nothing there. Conservative (never a wrong price); exempting
+    it needs the epoch rule (the newer fee applies from its epoch) pinned in the harness first.
+11. **On-chain sizing of kinds 7 and 8.** Their `budget` costs are estimates and an exact evaluation has no resumable
+    state, so the static bound is large (§4.7). Before arbx-exec builds the features: per-step resumable states, then
+    the sbf-check measurements and the cu-runner gate.
+12. **Orca's U256 division.** The deployed 0.9.0 binary panics where `U256Muldiv::div`'s add-back reads past the top
+    word, and the port fails there too; upstream fixed it in 4aac511 (2026-10-06) after this deploy. When Orca deploys
+    a new binary the upgrade watch (§6.5) must stop the kind until the port follows it and the harness passes again.
 
 ---
 
@@ -1423,3 +1712,123 @@ of redesign §3.8's "programdata change → venue to shadow".
 | `pump_events.py`, `pump_events_check.py` → `pump-events-check.txt` | PumpSwap Buy/SellEvent decoder and the field-by-field check of §2.1 on 300 signatures: 112/112 events exact |
 | `math_checks.py` → `math-checks.txt` | brute-force checks: DLMM drain-test equivalence (1.2M cases, 0 differences), DAMM v2 exact capacity closed forms (60k, 0 failures), CPMM-CPMM closed-form integer loss (≤ 0.31 × 2ε) |
 | `cubench/` | SBF CU micro-benchmark (program + LiteSVM runner) behind §4.7 |
+
+---
+
+## 9. Engine integration of the CLMM kinds (WP-21: what it needs; not done in this step)
+
+The crate side is done and proven (§2.8, §2.9, §6.3). Nothing in the engine or arbx-exec uses kinds 7 and 8 yet, and a
+default build of either is unchanged. Integrating them into the engine needs the following, per venue. On-chain sizing
+(arbx-exec) comes later still (§4.7, §7 item 11): the engine prices and sends these legs exact in at its own amount,
+like any unsized leg.
+
+### 9.0 Both venues
+
+1. **The dependency.** `arbx`'s `arbx-sizing` dependency gains `features = ["clmm"]` (or one venue's). That adds the
+   `Abort::Clmm` / `Abort::Whirl`, `AnyLeg::RayClmm` / `AnyLeg::Whirl` and `LegModel` variants, so `src/quote.rs`
+   needs their arms: `abort_reason` and `REASONS` with one reason (and its counters, `every_reason_has_its_counter`)
+   per refusal — `sz_clmm_status`, `sz_clmm_not_open`, `sz_clmm_fee`, `sz_clmm_bitmap_extension`,
+   `sz_clmm_no_liquidity`, `sz_clmm_tick_arrays`, `sz_clmm_price_limit`, `sz_clmm_state`, `sz_clmm_mint_paused`,
+   `sz_clmm_mint_frozen`, `sz_whirl_trade_not_enabled`, `sz_whirl_timestamp`, `sz_whirl_tick_arrays`,
+   `sz_whirl_price_limit`, `sz_whirl_state`, `sz_whirl_mint_paused`, `sz_whirl_mint_frozen` — and `Leg::why` maps
+   `Budget` as for DLMM. arbx-exec keeps the default features.
+2. **Venue and pool metadata.** `src/venues::Venue` gains `RayClmm` and `Whirlpool` (`engine.rs::amm_programs`
+   already names both programs, to recognise rival arbitrage); `PoolMeta` carries the tick spacing, Raydium's
+   AmmConfig and observation keys and its extension PDA, and Orca's oracle PDA. Pool discovery lists the pools
+   (WSOL-quoted first; `docs/research/venue-census.md`: Whirlpool alone +5.0 points of rival arbs and +10.3 of their
+   gross, Raydium CLMM +4.1 / +3.4, both together +19.2 points of arbs).
+3. **State following.** Per pool: the pool, the vaults, its Token-2022 mints (scanned at every change: §2.0's transfer
+   fee, hook, Pausable, DefaultAccountState), Raydium's AmmConfig and its extension (which may not exist), Orca's oracle
+   (which may not exist), and the tick arrays around the price in both directions (Raydium: the current array and the
+   next initialized ones by the bitmaps, enough for a swap at the cap, ≥ 3 each way; Orca: the current array and the
+   next two each way, as PDAs, initialized or not). The set moves with the price: re-derive it when the current
+   array changes. An Orca dynamic tick array changes length as ticks are initialized or freed: follow it by key, never
+   by length. The stream must follow every account a quote reads (`the_stream_follows_every_account_a_quote_reads`).
+4. **The Clock.** Both read it: Raydium for open_time and the dynamic fee's reference, Orca for the reward and oracle
+   stamps and the adaptive fee's reference. Quote with the Clock of the slot being targeted, never older than the
+   pool's own stamps: Orca refuses (Timestamp) a Clock before `reward_last_updated_timestamp` or the oracle's last
+   update, and both fees depend on the elapsed time.
+5. **Quote** (`src/quote.rs::leg`). Raydium: `raydium_clmm::parse(pool, cfg, remaining, vault0, vault1, zfo, clock)`
+   with `remaining` = exactly the accounts the leg will pass (route), or every followed array in walk order (a third
+   party's swap). Orca: `orca_whirlpool::parse(pool, oracle, arrays, vault_a, vault_b, a_to_b, clock)` with
+   `TickArrayIn { start, data: None }` for a followed PDA that does not exist. `fills` gives the walk: `steps`
+   (`max_bins`, the CU), `crossed` (the CU table's bucket), the arrays read (the builder's list) and `post` (the
+   accuracy monitor). `cap_in` bisects 64 exact quotes: the sizing ladder should use `quote` directly.
+   `quote_exact_out` gives the input of a wanted output (hints), as PumpSwap's does.
+6. **CU** (`src/cu_table.rs`): key `<venue>|<crossed bucket>` like DLMM's bins; the fallback `Venue::leg_cu` from the
+   harness's bounds on every real swap: Raydium 64k + 10k per step, Orca 48k + 10k per step (`steps` from `fills`; a
+   dynamic or adaptive fee adds sub-steps without crossings, so bucket by steps, not by crossings alone).
+7. **The accuracy monitor** (`src/accuracy.rs`): `PostSwap` against the next observed pool state — Raydium sqrt
+   price, tick, liquidity, the fee token's fee growth, protocol and fund fees owed, the dynamic fee's variables; Orca
+   sqrt price, tick, liquidity, the input token's fee growth, protocol fee owed, the oracle's variables.
+8. **Parity in CI.** Copy `fixtures/pools-clmm` into `testdata/venue-parity` with their real swaps (`capture_post`
+   over `Fixtures::load_all`) and extend `tools/ci-venue-parity.sh` steps 3 and 4, so the engine's quotes of these
+   venues are checked against the real programs as for the others.
+9. **Rollout.** A config switch per venue, off by default: quote only first (the accuracy monitor on third-party
+   swaps), then send.
+
+### 9.1 Raydium CLMM leg: `swap_v2` (amount at data offset 8)
+
+| # | Account | Notes |
+|---|---|---|
+| 0 | payer | signer |
+| 1 | amm_config | pool @9 |
+| 2 | pool_state | writable |
+| 3, 4 | input / output token account | the payer's ATAs; writable |
+| 5, 6 | input / output vault | the pool's vaults of the direction; writable |
+| 7 | observation_state | pool @201; writable |
+| 8, 9, 10 | Token program, Token-2022 program, Memo program | |
+| 11, 12 | input mint, output mint | |
+| 13.. | the TickArrayBitmapExtension PDA["pool_tick_array_bitmap_extension", pool] when the account exists, then the tick arrays PDA["tick_array", pool, start (i32 big-endian)] in walk order | writable; at most 7 in all (the descriptor's count) |
+
+Data (41 B): `swap_v2` `2b04ed0b1ac91e62`, amount u64, other_amount_threshold u64 (1), sqrt_price_limit_x64 u128 (0:
+none, so a partial fill fails), is_base_input u8 (1). 13 + 1..=7 accounts fit the v2 layout's 63 per leg.
+
+- **Tick arrays ahead.** The first array the swap reads (`ClmmWalk.arrays[0]`: the current tick's array when
+  initialized, else the next initialized one in the direction), then every array the walk of a quote **at the cap**
+  reads (`ClmmWalk.arrays` of `fills(cap)`), then one more initialized array; never an uninitialized one (the program
+  jumps over them by the bitmap). With the extension that is at most 6 arrays. A walk at the cap needing more ends the
+  leg's domain there (TooLarge past it), so the engine's sizing stops there.
+- **The extension.** Needed when the current tick, or any array the walk reaches or empties, lies beyond ±ts·60·512
+  ticks (tick spacings below 15): pass it whenever it exists (one account; the program and the crate classify by
+  length).
+- **CU.** ≈41.5k + ≈9.1k per tick crossed + ≈8.5k per other step; every real swap is within 64k + 10k per step; the
+  1.4M limit falls at ≈147 steps.
+- **Refusals** (each fails at every size; skip the pool with the reason): §2.8's list — status, not open, the fee rate,
+  the extension missing, no liquidity in the direction, the first array not passed, the price at its limit, an
+  inconsistent state, a paused or default-frozen mint, a transfer fee or hook, an unknown layout.
+
+### 9.2 Orca Whirlpool leg: `swap_v2` (amount at data offset 8)
+
+| # | Account | Notes |
+|---|---|---|
+| 0, 1 | token program of mint a, of mint b | |
+| 2 | Memo program | |
+| 3 | token_authority (payer) | signer |
+| 4 | whirlpool | writable |
+| 5, 6 | mint a, mint b | the POOL's order (a, b), whatever the direction |
+| 7 | token_owner_account_a (the payer's ATA of mint a) | writable |
+| 8 | token_vault_a | writable |
+| 9 | token_owner_account_b | writable |
+| 10 | token_vault_b | writable |
+| 11, 12, 13 | tick_array_0..2: PDA["tick_array", whirlpool, start as a decimal string] of `needed_starts(tick, ts, a_to_b)`, initialized or not; the last repeated where fewer than 3 are valid | writable |
+| 14 | oracle PDA["oracle", whirlpool], initialized or not | writable |
+| 15.. | supplemental tick arrays | none needed |
+
+Data (43 B): `swap_v2` `2b04ed0b1ac91e62`, amount u64, other_amount_threshold u64 (1), sqrt_price_limit u128 (0: the
+direction's limit), amount_specified_is_input u8 (1), a_to_b u8, remaining_accounts_info Option (0: None). 15 accounts.
+
+- **Tick arrays ahead.** Exactly the program's sequence: the current array and the next two in the direction (b→a one
+  later near the array's end), whatever the size. No swap reads past them, so the leg's domain ends at the third
+  array's end — 264 tick spacings, ≈2.7% of price at tick spacing 1 — and a cap beyond that is TooLarge there.
+- **CU.** ≈28-30k + ≈7.0k per tick crossed + ≈8.6k per other step (adaptive sub-steps); every real swap is within 48k
+  + 10k per step; the 1.4M limit falls at ≈190 steps.
+- **Refusals:** §2.9's list — trading not enabled yet, a Clock before the pool's or the oracle's stamps, none of the
+  needed arrays passed, the price at its limit, an inconsistent state, a paused or default-frozen mint, a transfer fee
+  or hook, an unknown layout.
+
+### 9.3 Next: the CLMM forks
+
+PancakeSwap v3 and Byreal share this maths (a Uniswap v3 / Raydium CLMM lineage). Each needs its own dump, layout
+check and harness run on its deployed binary before any of this code prices it; nothing here is assumed to carry over
+until the harness shows it.

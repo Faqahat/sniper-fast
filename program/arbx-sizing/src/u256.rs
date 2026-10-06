@@ -201,3 +201,116 @@ impl U256 {
         None
     }
 }
+
+/// The full 512-bit product a·b, as 8 little-endian u64 limbs (concentrated-liquidity maths: Raydium CLMM's `U512`
+/// mul-div paths, Orca's U256Muldiv products).
+pub fn mul_full(a: U256, b: U256) -> [u64; 8] {
+    let mut r = [0u64; 8];
+    for (i, &x) in a.0.iter().enumerate() {
+        let mut carry = 0u128;
+        for (j, &y) in b.0.iter().enumerate() {
+            let k = i + j;
+            let t = x as u128 * y as u128 + r[k] as u128 + carry;
+            r[k] = t as u64;
+            carry = t >> 64;
+        }
+        r[i + 4] = carry as u64;
+    }
+    r
+}
+
+/// Knuth algorithm D on little-endian u64 limbs: (quotient, remainder) of the `m`-limb `u` by the `n`-limb `v`
+/// (v[n−1] ≠ 0, 1 ≤ n ≤ 4, n ≤ m ≤ 8). The quotient has m − n + 1 limbs, the remainder n. None on bad input.
+fn divmod_limbs(u: &[u64], v: &[u64]) -> Option<([u64; 8], [u64; 4])> {
+    let (m, n) = (u.len(), v.len());
+    if n == 0 || n > 4 || m < n || m > 8 || *v.last()? == 0 { return None; }
+    let mut q = [0u64; 8];
+    let mut r = [0u64; 4];
+    if n == 1 {
+        let d = *v.first()? as u128;
+        let mut k = 0u128;
+        for j in (0..m).rev() {
+            let cur = (k << 64) | *u.get(j)? as u128;
+            *q.get_mut(j)? = (cur / d) as u64;
+            k = cur % d;
+        }
+        r[0] = k as u64;
+        return Some((q, r));
+    }
+    let s = v.get(n - 1)?.leading_zeros();
+    let shl = |hi: u64, lo: u64| if s == 0 { hi } else { (hi << s) | (lo >> (64 - s)) };
+    let mut vn = [0u64; 4];
+    for i in (1..n).rev() { *vn.get_mut(i)? = shl(*v.get(i)?, *v.get(i - 1)?); }
+    vn[0] = v.first()? << s;
+    let mut un = [0u64; 9];
+    *un.get_mut(m)? = if s == 0 { 0 } else { u.get(m - 1)? >> (64 - s) };
+    for i in (1..m).rev() { *un.get_mut(i)? = shl(*u.get(i)?, *u.get(i - 1)?); }
+    un[0] = u.first()? << s;
+    let b: u128 = 1 << 64;
+    let (vt, vt2) = (*vn.get(n - 1)? as u128, *vn.get(n - 2)? as u128);
+    for j in (0..=m - n).rev() {
+        let num = ((*un.get(j + n)? as u128) << 64) | *un.get(j + n - 1)? as u128;
+        let mut qhat = num / vt;
+        let mut rhat = num % vt;
+        while qhat >= b || qhat * vt2 > ((rhat << 64) | *un.get(j + n - 2)? as u128) {
+            qhat -= 1;
+            rhat += vt;
+            if rhat >= b { break; }
+        }
+        // multiply and subtract
+        let mut k: i128 = 0;
+        for i in 0..n {
+            let p = qhat * *vn.get(i)? as u128;
+            let t = *un.get(i + j)? as i128 - k - (p as u64) as i128;
+            *un.get_mut(i + j)? = t as u64;
+            k = (p >> 64) as i128 - (t >> 64);
+        }
+        let t = *un.get(j + n)? as i128 - k;
+        *un.get_mut(j + n)? = t as u64;
+        if t < 0 {
+            // add back
+            qhat -= 1;
+            let mut c = 0u128;
+            for i in 0..n {
+                let s2 = *un.get(i + j)? as u128 + *vn.get(i)? as u128 + c;
+                *un.get_mut(i + j)? = s2 as u64;
+                c = s2 >> 64;
+            }
+            let top = un.get_mut(j + n)?;
+            *top = top.wrapping_add(c as u64);
+        }
+        *q.get_mut(j)? = qhat as u64;
+    }
+    for i in 0..n {
+        let lo = *un.get(i)?;
+        let hi = *un.get(i + 1)?;
+        *r.get_mut(i)? = if s == 0 { lo } else { (lo >> s) | (hi << (64 - s)) };
+    }
+    Some((q, r))
+}
+
+/// ⌊n/d⌋ (`up`: ⌈n/d⌉) of a 512-bit `n` by a nonzero `d`; None when d = 0 or the quotient exceeds 256 bits (the
+/// semantics of the uint crate's `U256::mul_div_floor` / `mul_div_ceil`, Raydium CLMM full_math.rs)
+pub fn div_512(n: &[u64; 8], d: U256, up: bool) -> Option<U256> {
+    let nd = d.0.iter().rposition(|&w| w != 0)? + 1;
+    let nn = n.iter().rposition(|&w| w != 0).map_or(0, |i| i + 1);
+    if nn < nd {
+        // quotient 0, remainder n
+        return Some(if up && nn > 0 { U256::ONE } else { U256::ZERO });
+    }
+    let (q, r) = divmod_limbs(n.get(..nn)?, d.0.get(..nd)?)?;
+    if q.get(4..)?.iter().any(|&w| w != 0) { return None; }
+    let q = U256([q[0], q[1], q[2], q[3]]);
+    if up && r.iter().any(|&w| w != 0) { q.checked_add(U256::ONE) } else { Some(q) }
+}
+
+/// ⌊a·b/d⌋ or ⌈a·b/d⌉ over the full 512-bit product; None for d = 0 or a quotient beyond 256 bits
+pub fn mul_div_wide(a: U256, b: U256, d: U256, up: bool) -> Option<U256> { div_512(&mul_full(a, b), d, up) }
+
+impl U256 {
+    pub fn leading_zeros(self) -> u32 { 256 - self.bits() }
+    pub fn from_u64(x: u64) -> U256 { U256([x, 0, 0, 0]) }
+    /// the low 64 bits (callers check the value fits)
+    pub fn low_u64(self) -> u64 { self.0[0] }
+    pub fn fits_u64(self) -> bool { self.0[1] == 0 && self.0[2] == 0 && self.0[3] == 0 }
+}

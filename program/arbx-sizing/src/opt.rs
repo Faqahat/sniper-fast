@@ -6,12 +6,21 @@
 //!   drain amounts; the exact swap states passed near each optimum (and the furthest one) go back to the planner,
 //!   which resumes its exact quotes from them instead of walking from the active bin again.
 //! * Golden section over exact evaluations (§3.6), for states the model refuses.
+//! * Concentrated-liquidity legs (Raydium CLMM, Orca Whirlpool; PLAN-ADDENDUM WP-21): piecewise Möbius. Each piece is
+//!   one exact swap step (a constant-liquidity range between initialized ticks, tick-spacing or tick-group boundaries)
+//!   with its exact input and output, modelled by the range's virtual-reserve curve; a limit-order fill at a tick is
+//!   a linear piece (DESIGN.md §2.8, §3.4).
 use crate::fx::Fx;
 use crate::venue::dlmm::{Cursor, DlmmLeg, RateMemo, MAX_ARRAYS};
+#[cfg(feature = "rayclmm")]
+use crate::venue::raydium_clmm::{self, RayClmmLeg};
+#[cfg(feature = "whirlpool")]
+use crate::venue::orca_whirlpool::{self, WhirlLeg};
 
 /// Walk steps per pair: every step ends at least one piece of one leg, a Möbius leg has one piece and a DLMM leg
 /// one per bin with liquidity it may consume (its budget, and at most 70 per passed array). So the bound is per leg
-/// (REVIEW.md F3): it never cuts a walk short.
+/// (REVIEW.md F3): it never cuts a walk short. A CLMM leg's pieces are bounded by its walk budget (swap steps, at most
+/// 255 on chain, two pieces per step at most) and by `MAX_STEPS` off chain, where a long walk ends the domain.
 pub const MAX_STEPS: usize = 2 * (MAX_ARRAYS * 70) + 4;
 /// local optima kept per pair
 pub const MAX_OPTIMA: usize = 3;
@@ -45,21 +54,42 @@ impl Line {
     pub fn inv(&self, v: Fx) -> Fx { self.u0.add(v.sub(self.v0).div(self.s)) }
 }
 
+/// One exact CLMM swap step in absolute coordinates: `y = v0 + M(u − u0)` on `[u0, u1)`, ending exactly at `v1` (the
+/// step's exact input and output); `m` is the step's curve in local coordinates (`m.c == 0`: a line, a limit-order fill
+/// at the tick's price). `bound`: an upper bound on the slope of every later piece of the leg.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Piece { Mob(Mob), Line(Line), End }
+pub struct Seg { pub u0: Fx, pub v0: Fx, pub m: Mob, pub u1: Fx, pub v1: Fx, pub bound: Fx }
+
+impl Seg {
+    pub fn f(&self, u: Fx) -> Fx { self.v0.add(self.m.f(u.sub(self.u0))) }
+    pub fn d(&self, u: Fx) -> Fx { self.m.d(u.sub(self.u0)) }
+    pub fn inv(&self, v: Fx) -> Fx { self.u0.add(self.m.inv(v.sub(self.v0))) }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Piece { Mob(Mob), Line(Line), Seg(Seg), End }
 
 impl Piece {
-    fn end(&self) -> Fx { match self { Piece::Mob(m) => m.cap, Piece::Line(l) => l.u1, Piece::End => Fx::ZERO } }
-    fn f(&self, u: Fx) -> Fx { match self { Piece::Mob(m) => m.f(u), Piece::Line(l) => l.f(u), Piece::End => Fx::ZERO } }
-    /// the value at the piece's end (a line's is exact)
-    fn f_end(&self) -> Fx { match self { Piece::Mob(m) => m.f(m.cap), Piece::Line(l) => l.v1, Piece::End => Fx::ZERO } }
-    fn d(&self, u: Fx) -> Fx { match self { Piece::Mob(m) => m.d(u), Piece::Line(l) => l.s, Piece::End => Fx::ZERO } }
-    fn inv(&self, v: Fx) -> Fx { match self { Piece::Mob(m) => m.inv(v), Piece::Line(l) => l.inv(v), Piece::End => Fx::INF } }
+    fn end(&self) -> Fx { match self { Piece::Mob(m) => m.cap, Piece::Line(l) => l.u1, Piece::Seg(g) => g.u1, Piece::End => Fx::ZERO } }
+    fn f(&self, u: Fx) -> Fx { match self { Piece::Mob(m) => m.f(u), Piece::Line(l) => l.f(u), Piece::Seg(g) => g.f(u), Piece::End => Fx::ZERO } }
+    /// the value at the piece's end (a line's and a step's are exact)
+    fn f_end(&self) -> Fx { match self { Piece::Mob(m) => m.f(m.cap), Piece::Line(l) => l.v1, Piece::Seg(g) => g.v1, Piece::End => Fx::ZERO } }
+    fn d(&self, u: Fx) -> Fx { match self { Piece::Mob(m) => m.d(u), Piece::Line(l) => l.s, Piece::Seg(g) => g.d(u), Piece::End => Fx::ZERO } }
+    fn inv(&self, v: Fx) -> Fx { match self { Piece::Mob(m) => m.inv(v), Piece::Line(l) => l.inv(v), Piece::Seg(g) => g.inv(v), Piece::End => Fx::INF } }
 }
 
 /// A leg's model
 #[derive(Clone, Copy, Debug)]
-pub enum LegModel<'l, 'a> { Mobius(Mob), Bins(&'l DlmmLeg<'a>) }
+pub enum LegModel<'l, 'a> {
+    Mobius(Mob),
+    Bins(&'l DlmmLeg<'a>),
+    /// Raydium CLMM: its exact swap steps (feature `rayclmm`)
+    #[cfg(feature = "rayclmm")]
+    RayClmm(&'l RayClmmLeg<'a>),
+    /// Orca Whirlpool: its exact swap steps (feature `whirlpool`)
+    #[cfg(feature = "whirlpool")]
+    Whirl(&'l WhirlLeg<'a>),
+}
 
 /// Exact swap states (DLMM cursors) the locator passed on one leg near a point: positioned at the bin of the piece it
 /// was in and at the bin of the piece before. The planner resumes exact quotes from the furthest one an amount
@@ -71,6 +101,12 @@ pub type Marks<'l, 'a> = [Option<Cursor<'l, 'a>>; 2];
 pub struct Stream<'l, 'a> {
     mob: Option<Mob>,
     leg: Option<&'l DlmmLeg<'a>>,
+    /// a CLMM leg's exact swap steps, and the pieces of the step read but not yet handed out
+    #[cfg(feature = "rayclmm")]
+    ray: Option<raydium_clmm::Steps<'l, 'a>>,
+    #[cfg(feature = "whirlpool")]
+    whirl: Option<orca_whirlpool::Steps<'l, 'a>>,
+    queue: [Option<Seg>; 2],
     /// the furthest exact state: where the next piece starts, unless `ended`
     cur: Option<Cursor<'l, 'a>>,
     ended: bool,
@@ -87,16 +123,71 @@ pub struct Stream<'l, 'a> {
 
 impl<'l, 'a> Stream<'l, 'a> {
     pub fn new(m: &LegModel<'l, 'a>) -> Self {
-        let (mob, leg, cur) = match m {
-            LegModel::Mobius(mob) => (Some(*mob), None, None),
-            LegModel::Bins(leg) => (None, Some(*leg), Some(leg.start())),
+        let mut st = Stream { mob: None, leg: None, cur: None, ended: false, starts: [None; 2], which: 0, u: Fx::ZERO, v: Fx::ZERO,
+            memo: RateMemo::default(), bins: 0,
+            #[cfg(feature = "rayclmm")]
+            ray: None,
+            #[cfg(feature = "whirlpool")]
+            whirl: None,
+            queue: [None; 2] };
+        match m {
+            LegModel::Mobius(mob) => st.mob = Some(*mob),
+            LegModel::Bins(leg) => { st.leg = Some(*leg); st.cur = Some(leg.start()); }
+            #[cfg(feature = "rayclmm")]
+            LegModel::RayClmm(leg) => st.ray = Some(leg.stream()),
+            #[cfg(feature = "whirlpool")]
+            LegModel::Whirl(leg) => st.whirl = Some(leg.stream()),
+        }
+        st
+    }
+
+    /// The next piece of a CLMM leg: one exact swap step (range or limit-order fill) as a [`Seg`]
+    #[allow(unused_mut, unused_variables)]
+    fn next_clmm(&mut self) -> Option<Piece> {
+        if let Some(g) = self.queue.iter_mut().find_map(|q| q.take()) { return Some(Piece::Seg(g)); }
+        let (u, v) = (self.u, self.v);
+        let mut buf: [Option<Seg>; 2] = [None; 2];
+        let mut n = 0usize;
+        let mut cu = u;
+        let mut cv = v;
+        let mut push = |used: u64, out: u64, mob: Option<(Fx, Fx, Fx)>, bound: Fx| {
+            if used == 0 { return; }
+            let (fu, fo) = (Fx::from_u64(used), Fx::from_u64(out));
+            // a line (a limit-order fill at the tick's price): a = out, b = used, c = 0 — the slope out/used
+            let (a, b, c) = mob.unwrap_or((fo, fu, Fx::ZERO));
+            let g = Seg { u0: cu, v0: cv, m: Mob::new(a, b, c, fu), u1: cu.add(fu), v1: cv.add(fo), bound };
+            cu = g.u1;
+            cv = g.v1;
+            if let Some(slot) = buf.get_mut(n) { *slot = Some(g); n += 1; }
         };
-        Stream { mob, leg, cur, ended: false, starts: [None; 2], which: 0, u: Fx::ZERO, v: Fx::ZERO, memo: RateMemo::default(), bins: 0 }
+        let mut any = false;
+        #[cfg(feature = "rayclmm")]
+        if let Some(st) = self.ray.as_mut() {
+            any = true;
+            if st.next(&mut |p| push(p.used, p.out, p.mobius, p.bound)).is_err() { self.ended = true; }
+        }
+        #[cfg(feature = "whirlpool")]
+        if let Some(st) = self.whirl.as_mut() {
+            any = true;
+            if st.next(&mut |p| push(p.used, p.out, p.mobius, p.bound)).is_err() { self.ended = true; }
+        }
+        if !any { return None; }
+        self.bins = self.bins.saturating_add(1);
+        let [first, second] = buf;
+        let Some(g) = first else {
+            // a step with no input taken (a zero step on a boundary): read on
+            return if self.ended { Some(Piece::End) } else { self.next_clmm() };
+        };
+        self.u = second.map_or(g.u1, |h| h.u1);
+        self.v = second.map_or(g.v1, |h| h.v1);
+        self.queue = [second, None];
+        Some(Piece::Seg(g))
     }
 
     #[inline(never)]
     pub fn next(&mut self) -> Piece {
         if let Some(m) = self.mob.take() { return Piece::Mob(m); }
+        if let Some(p) = self.next_clmm() { return p; }
         if self.ended { return Piece::End; }
         let (Some(leg), Some(mut c)) = (self.leg, self.cur) else { return Piece::End };
         let mut start = c;
@@ -120,6 +211,7 @@ impl<'l, 'a> Stream<'l, 'a> {
         match (p, self.leg) {
             (Piece::Mob(m), _) => if ended { Fx::ZERO } else { m.d(u) },
             (Piece::Line(l), Some(leg)) => { let ub = leg.bound_after(l.id, l.price); if ended { ub } else { l.s.max(ub) } }
+            (Piece::Seg(g), _) => if ended { g.bound } else { g.d(u).max(g.bound) },
             _ => Fx::ZERO,
         }
     }
@@ -196,10 +288,55 @@ pub fn mobius_root(m0: &Mob, m1: &Mob) -> Option<Fx> {
     Some(a.mul(b).sqrt().sub(b).div(c))
 }
 
+/// A piece re-centred at a point of its domain, for the CLMM roots: a Möbius `a·ξ/(b + c·ξ)` of the distance ξ from that
+/// point (re-centring a Möbius through its origin at `s` gives `a' = a·b/(b + c·s)`, `b' = b + c·s`, `c' = c`), or a line
+/// of slope `s`
+#[derive(Clone, Copy, Debug)]
+enum Shape { Mob { a: Fx, b: Fx, c: Fx }, Lin { s: Fx } }
+
+fn recentre(p: &Piece, at: Fx) -> Option<Shape> {
+    let mob = |a: Fx, b: Fx, c: Fx, s: Fx| { let b2 = b.add(c.mul(s)); Shape::Mob { a: a.mul(b).div(b2), b: b2, c } };
+    Some(match p {
+        Piece::Mob(m) => mob(m.a, m.b, m.c, at),
+        Piece::Line(l) => Shape::Lin { s: l.s },
+        Piece::Seg(g) if g.m.c.is_zero() => Shape::Lin { s: g.m.a.div(g.m.b) },
+        Piece::Seg(g) => mob(g.m.a, g.m.b, g.m.c, at.sub(g.u0)),
+        Piece::End => return None,
+    })
+}
+
+/// The interior root of π' = 1 when a CLMM step is one of the pieces: both pieces re-centred at the interval's start
+/// (leg 0 at `lo`, leg 1 at `out0(lo)`), the table's formulas from there (DESIGN.md §3.4). Some(None): no root after
+/// `lo`; None: no interior root at all (line × line, π' constant)
+fn root_general(p0: &Piece, p1: &Piece, lo: Fx) -> Option<Option<Fx>> {
+    let (s0, s1) = (recentre(p0, lo)?, recentre(p1, p0.f(lo))?);
+    Some(match (s0, s1) {
+        (Shape::Mob { a: a0, b: b0, c: c0 }, Shape::Mob { a: a1, b: b1, c: c1 }) => {
+            let (a, b, c) = (a0.mul(a1), b0.mul(b1), c0.mul(b1).add(c1.mul(a0)));
+            let t = a.mul(b).sqrt();
+            if t <= b || c.is_zero() { None } else { Some(lo.add(t.sub(b).div(c))) }
+        }
+        (Shape::Lin { s }, Shape::Mob { a, b, c }) => {
+            // (b + c·y')² = s·a·b at leg 1's distance y' from out0(lo); x = lo + y'/s
+            let t = s.mul(a).mul(b).sqrt();
+            if t <= b || c.is_zero() || s.is_zero() { None } else { Some(lo.add(t.sub(b).div(c).div(s))) }
+        }
+        (Shape::Mob { a, b, c }, Shape::Lin { s }) => {
+            let t = s.mul(a).mul(b).sqrt();
+            if t <= b || c.is_zero() { None } else { Some(lo.add(t.sub(b).div(c))) }
+        }
+        (Shape::Lin { .. }, Shape::Lin { .. }) => return None,
+    })
+}
+
 #[inline(never)]
 /// The interior root of π' = 1 on (lo, hi) for the current pieces (DESIGN.md §3.4 table); `Some(lo)` when rounding
 /// puts it at or before `lo`
 fn root(p0: &Piece, p1: &Piece, lo: Fx, hi: Fx) -> Option<Fx> {
+    if matches!(p0, Piece::Seg(_)) || matches!(p1, Piece::Seg(_)) {
+        let Some(r) = root_general(p0, p1, lo)? else { return Some(lo) };
+        return if r <= lo { Some(lo) } else if r < hi { Some(r) } else { None };
+    }
     let r = match (p0, p1) {
         (Piece::Mob(m0), Piece::Mob(m1)) => mobius_root(m0, m1)?,
         (Piece::Line(l), Piece::Mob(m)) => {

@@ -43,6 +43,9 @@ fn kind_of(venue: Venue, dir: Dir) -> (u8, bool) {
         Venue::RayAmmV4 => (4, dir.zfo()),
         Venue::Dlmm => (5, dir.zfo()),
         Venue::DammV2 => (6, dir.zfo()),
+        // WP-21's venues: their suites are tests/clmm_exactness.rs and tests/clmm_adversarial.rs
+        Venue::RayClmm => (7, dir.zfo()),
+        Venue::Whirlpool => (8, dir.zfo()),
     }
 }
 

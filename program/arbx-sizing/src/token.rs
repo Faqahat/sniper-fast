@@ -78,3 +78,23 @@ pub fn scan_extensions(d: &[u8]) -> Result<(), Abort> {
     }
     Ok(())
 }
+
+/// Why a Token-2022 mint's transfers fail whatever the amount: its Pausable extension (26: `PausableConfig { authority,
+/// paused }`) is paused, or its DefaultAccountState (6) is Frozen (2), so the token account a leg receives into (a new
+/// associated account) is frozen. None for an SPL mint and a Token-2022 mint with neither. Raydium CLMM and Orca
+/// Whirlpool refuse such a leg (PLAN-ADDENDUM WP-21); the other venues' scan does not look yet (DESIGN.md §7 item 9)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MintBlock { Paused, DefaultFrozen }
+
+pub fn mint_blocked(d: &[u8]) -> Option<MintBlock> {
+    if d.len() <= 166 || u8_at(d, 165) != Some(1) { return None; }
+    let mut o = 166usize;
+    while o + 4 <= d.len() {
+        let (Some(t), Some(l)) = (u16_at(d, o), u16_at(d, o + 2)) else { return None };
+        if t == 0 { return None; }
+        if t == 26 && u8_at(d, o + 4 + 32) == Some(1) { return Some(MintBlock::Paused); }
+        if t == 6 && u8_at(d, o + 4) == Some(2) { return Some(MintBlock::DefaultFrozen); }
+        o += 4 + l as usize;
+    }
+    None
+}
