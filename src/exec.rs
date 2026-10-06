@@ -1019,6 +1019,9 @@ impl Exec {
     }
 
     pub fn mode(&self) -> Mode { self.mode }
+    /// PLAN-ADDENDUM WP-21 (review F3): the venues a route of this run may not go through: the ones not switched to
+    /// "send", in a mode that sends (canary, live); none otherwise (shadow and dry runs build every venue's bundles)
+    pub fn quote_only_held_back(&self) -> &[crate::venues::Venue] { if self.mode.sends() { &self.quote_only } else { &[] } }
 
     /// WP-01: follow the run's SendGate (a new Exec has its own, always live)
     pub fn set_gate(&mut self, gate: Arc<SendGate>) { self.gate = gate; }
@@ -1286,8 +1289,11 @@ impl Exec {
         // the same cap first (`Engine::after_opportunity`; tests::the_engine_caps_the_size), so this refuses only a route
         // sized past it
         if r.size > self.size_cap() { return fail(d, "size_cap"); }
-        // PLAN-ADDENDUM WP-21 (DESIGN.md §9.0 item 9): a venue switched to "quote" is priced and built, never sent
-        if self.mode.sends() && !gated && [r.buy.venue, r.sell.venue].iter().any(|v| self.quote_only.contains(v)) { return fail(d, "venue_quote_only"); }
+        // PLAN-ADDENDUM WP-21 (DESIGN.md §9.0 item 9): a venue switched to "quote" (or "off") is priced and built, never
+        // sent; checked whenever the mode sends, the gate open or not (review F3: a gated decision says so in
+        // `reason_ungated`, never a would-send). The engine keeps such routes out of a sending run's pick (`Engine`
+        // `quote_only_held_back`): this refuses whatever reaches it all the same
+        if self.mode.sends() && [r.buy.venue, r.sell.venue].iter().any(|v| self.quote_only.contains(v)) { return fail(d, "venue_quote_only"); }
         if self.mint_cool.get(&r.mint).is_some_and(|c| t < c.1) { return fail(d, "token_cooling"); }
         // WP-06 item 2: a PumpSwap buy names the wallet's user volume accumulator and creates it when it is missing
         // (1,346,200 lamports, never recovered, outside the route's profit check): refused unless the owner allowed it.

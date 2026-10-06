@@ -537,11 +537,12 @@ pub fn state_request(accounts: Vec<String>, subs: StateSubs) -> SubscribeRequest
 /// Pool-state stream: account updates plus slot updates (and block meta when on), at processed commitment. The account
 /// list comes from a watch channel: whenever the engine changes it (DLMM bin arrays following the active bin), a full
 /// replacement request is sent on the same stream. `c`: the stream's counters (provider lag)
-pub async fn accounts_once(url: &str, token: Option<&str>, mut list: tokio::sync::watch::Receiver<Vec<String>>, subs: StateSubs, c: &FeedCounters,
+pub async fn accounts_once(url: &str, token: Option<&str>, mut list: tokio::sync::watch::Receiver<Vec<crate::tx::Pk>>, subs: StateSubs, c: &FeedCounters,
     sink: &(dyn Fn(Item) -> bool + Send + Sync)) -> Result<()> {
     let mut grpc = tonic::client::Grpc::new(channel(url).await?).max_decoding_message_size(256 * 1024 * 1024);
     grpc.ready().await.context("state service not ready")?;
-    let request = move |accounts: Vec<String>| state_request(accounts, subs);
+    // the keys are encoded here, on the stream's task (review F2: never on the engine thread)
+    let request = move |accounts: Vec<crate::tx::Pk>| state_request(accounts.iter().map(crate::tx::b58).collect(), subs);
     let (out_tx, out_rx) = tokio::sync::mpsc::channel::<SubscribeRequest>(16);
     let first = list.borrow_and_update().clone();
     out_tx.send(request(first)).await.ok();
@@ -553,7 +554,7 @@ pub async fn accounts_once(url: &str, token: Option<&str>, mut list: tokio::sync
                 _ = ping.tick() => { if out_tx.send(SubscribeRequest { ping: Some(Ping { id: 1 }), ..Default::default() }).await.is_err() { break; } }
                 ch = list.changed() => {
                     if ch.is_err() { break; }
-                    let l: Vec<String> = list.borrow_and_update().clone();
+                    let l: Vec<crate::tx::Pk> = list.borrow_and_update().clone();
                     if out_tx.send(request(l)).await.is_err() { break; }
                 }
             }

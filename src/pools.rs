@@ -78,7 +78,10 @@ pub fn candidates(cfg: &PoolsCfg) -> Result<(Vec<(Venue, Pk)>, HashSet<Pk>, Hash
         let rows: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(reg).with_context(|| format!("reading {reg}"))?)?;
         for r in rows {
             let (Some(v), Some(p), Some(t0), Some(t1)) = (r["venue"].as_str().and_then(Venue::parse), r["pool"].as_str(), r["t0"].as_str(), r["t1"].as_str()) else { continue };
-            if !cfg.venue_on(v) { continue; }
+            // PLAN-ADDENDUM WP-21 (review F1): the CLMM venues' pools come from the seed list only, each one vetted; the
+            // registry's rows of them are never candidates (its "RayCLMM" rows here; its "Whirl" and fork rows are no venue
+            // `Venue::parse` reads, and stay out above)
+            if v.is_clmm() || !cfg.venue_on(v) { continue; }
             let (p, t0, t1) = (pk(p), pk(t0), pk(t1));
             if cfg.registry_all || seed_pairs.contains(&pair_key(&t0, &t1)) {
                 ours.insert(p);

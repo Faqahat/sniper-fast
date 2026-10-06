@@ -396,15 +396,20 @@ impl Store {
         Ok(v)
     }
 
-    /// PLAN-ADDENDUM WP-21: the Raydium CLMM and Orca Whirlpool pools whose tick arrays to follow changed (the price left
-    /// the current array, the bitmaps changed: `venues::clmm::follow_starts`); returns (pool, new array list) to re-follow.
-    /// A pool not held yet is left out
+    /// PLAN-ADDENDUM WP-21: the Raydium CLMM and Orca Whirlpool pools whose tick arrays to follow moved; returns (pool, new
+    /// array list) to re-follow. With hysteresis (review F2, as `dlmm_drift`): a pool's set moves only once an array a
+    /// quote needs near the price is not in it (`venues::clmm::need_starts`: the price left the set's middle, or the
+    /// bitmaps initialized an array between), and then to the whole set around the new price (`follow_starts`). A pool
+    /// not held yet is left out
     pub fn clmm_drift(&self, reg: &Registry) -> Vec<(Pk, Vec<(i64, Pk)>)> {
         let mut out = Vec::new();
         for m in reg.pools.iter().filter(|m| m.venue.is_clmm()) {
+            let Some(pool) = self.get(&m.pool) else { continue };
             let held = self.dlmm_arrays.get(&m.pool).map(|l| l.as_slice()).unwrap_or(&[]);
+            let ext = m.clmm_ext().and_then(|k| self.get(k)).filter(|a| a.data.len() == arbx_sizing::venue::raydium_clmm::EXT_LEN);
+            let need = crate::venues::clmm::need_starts(m, &pool.data, ext.map(|a| &a.data[..]));
+            if !held.is_empty() && need.iter().all(|st| held.iter().any(|(i, _)| *i == *st as i64)) { continue; }
             let get = |k: &Pk| self.get(k).map(|a| a.data.to_vec());
-            if self.get(&m.pool).is_none() { continue; }
             let want = crate::pools::clmm_arrays(m, &get, held);
             if want.is_empty() || want.as_slice() == held { continue; }
             out.push((m.pool, want));

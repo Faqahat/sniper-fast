@@ -130,6 +130,10 @@ impl CuModel {
             let (k1, k2) = (leg_key(bv, c1), leg_key(sv, c2));
             let ov = (t.overhead.n >= self.min_samples).then_some(t.overhead.p99).flatten();
             if let (Some(ov), Some(p1), Some(p2)) = (ov, ok(t.legs.get(&k1)), ok(t.legs.get(&k2))) {
+                // PLAN-ADDENDUM WP-21 (review F7): a CLMM leg's bucket spans many step counts (16+: 16 to the budget's 100),
+                // so its p99 is never below the fallback's allowance for the leg's own steps
+                let floor = |v: Venue, c: u32, p: f64| if v.is_clmm() { p.max(v.leg_cu(c) as f64) } else { p };
+                let (p1, p2) = (floor(bv, c1, p1), floor(sv, c2, p2));
                 return (round_up(with_margin(ov + p1 + p2 + t.extras.tip) as f64).min(MAX_CU), CuSrc::Table(format!("{k1}+{k2}")));
             }
         }
@@ -171,6 +175,23 @@ mod tests {
         legs.insert("RayCpmm|na".into(), stat(84, 29_168.0));
         CuTable { schema: SCHEMA.into(), built_ns: Some(1), source_runs: vec!["seg".into()], source: None, legs,
             overhead: Overhead { n: 31, p99: Some(20_000.0), program: vec![] }, extras: Extras { ata_create: 21_000.0, ata_close: 3_000.0, tip: 150.0 } }
+    }
+
+    /// PLAN-ADDENDUM WP-21 (review F7): a CLMM leg from the table never asks less than the fallback's allowance for its own
+    /// steps (64,000 / 48,000 + 10,000 a step): a 60-step Raydium leg in the 16+ bucket of mostly 16-20-step samples gets
+    /// its 664,000, a 16-step one the bucket's p99 when that is more
+    #[test]
+    fn a_clmm_leg_never_asks_less_than_its_steps_allow() {
+        let mut t = table();
+        t.legs.insert("RayClmm|16+".into(), stat(40, 230_000.0));
+        t.legs.insert("Whirlpool|2-3".into(), stat(40, 70_000.0));
+        let m = CuModel { table: Some(t), min_samples: 30 };
+        let (ov, tip) = (20_000.0, 150.0);
+        let want = |legs: f64| (((ov + legs + tip) as f64).ceil() as u64 * 11).div_ceil(10).div_ceil(1_000) * 1_000;
+        assert_eq!(m.route(Venue::RayClmm, 60, Venue::PumpSwap, 0).0, want(664_000.0 + 106_134.0), "the steps' allowance over the bucket's p99");
+        assert_eq!(m.route(Venue::RayClmm, 16, Venue::PumpSwap, 0).0, want(230_000.0 + 106_134.0), "the bucket's p99 over 224,000");
+        assert_eq!(m.route(Venue::Whirlpool, 3, Venue::RayClmm, 20).0, want(78_000.0 + 264_000.0), "both legs floored");
+        assert!(matches!(m.route(Venue::RayClmm, 60, Venue::PumpSwap, 0).1, CuSrc::Table(_)));
     }
 
     /// A cell whose overhead and legs are sampled enough comes from the table ((ov + legs + tip) × 1.10, rounded up to

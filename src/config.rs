@@ -879,14 +879,16 @@ pub struct PoolsCfg {
     /// PLAN-ADDENDUM WP-21 (arbx-sizing DESIGN.md §9.0 item 9): Raydium CLMM (seed-list venue `RayCLMM`) and Orca
     /// Whirlpool (`Whirlpool`), one switch each. "off" (the default): their rows are not read. "quote": priced, decided and
     /// monitored (the accuracy monitor on third-party swaps); shadow and dry runs build their bundles, a live or canary route
-    /// through one is refused `venue_quote_only`. "send": traded like the other venues
-    #[serde(default = "venue_off")]
+    /// through one is refused `venue_quote_only`. "send": traded like the other venues. Left out of the normalized config
+    /// while "off" (review F8): a config without them keeps the `normalized_sha256` it had before WP-21
+    #[serde(default = "venue_off", skip_serializing_if = "is_venue_off")]
     pub rayclmm: String,
-    #[serde(default = "venue_off")]
+    #[serde(default = "venue_off", skip_serializing_if = "is_venue_off")]
     pub whirlpool: String,
 }
 fn wsol() -> Vec<String> { vec!["So11111111111111111111111111111111111111112".into()] }
 fn venue_off() -> String { "off".into() }
+fn is_venue_off(s: &str) -> bool { s == "off" }
 
 /// a WP-21 venue switch's values (`[pools] rayclmm`, `whirlpool`)
 pub const VENUE_MODES: [&str; 3] = ["off", "quote", "send"];

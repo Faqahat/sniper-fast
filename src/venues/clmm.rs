@@ -66,6 +66,23 @@ pub fn deployed_as_proven(v: Venue, programdata: &[u8]) -> bool {
     crate::provenance::parse_programdata_header(programdata).is_ok_and(|h| h.last_deploy_slot == want)
 }
 
+/// PLAN-ADDENDUM WP-21 (review F5): a venue's deploy check, as a segment records it at its start and end (meta.json
+/// `clmm_deploy`): its programdata's header read now (`header`: the first 45 bytes; None when the read failed, `error`
+/// then says why) against the deploy slot its port was proven on. `ok` false (changed, or unknown) switches the venue
+/// off for the segment: it is not priced on a binary its port was not proven against
+pub fn deploy_entry(v: Venue, header: Option<&[u8]>, error: Option<&str>) -> serde_json::Value {
+    let proven = if v == Venue::Whirlpool { WHIRL_DEPLOY_SLOT } else { RAY_DEPLOY_SLOT };
+    let parsed = header.map(crate::provenance::parse_programdata_header);
+    let slot = parsed.as_ref().and_then(|h| h.as_ref().ok()).map(|h| h.last_deploy_slot);
+    let why = match (header, &parsed) {
+        (None, _) => Some(error.unwrap_or("the programdata account was not found").to_string()),
+        (_, Some(Err(e))) => Some(format!("{e:#}")),
+        _ => None,
+    };
+    serde_json::json!({ "venue": crate::replay::venue_name(v), "program": crate::tx::b58(&v.program()), "programdata": crate::tx::b58(&programdata(v)),
+        "proven_deploy_slot": proven, "last_deploy_slot": slot, "ok": slot == Some(proven), "error": why })
+}
+
 // ------------------------------------------------------------------ pool fields
 
 /// the pool's tick spacing (Raydium @235, Orca @41)
@@ -94,31 +111,45 @@ pub fn amm_config(pool: &[u8]) -> Option<Pk> { pk_at(pool, ray::off::AMM_CONFIG)
 /// classification (`check_tick_array_is_initialized`; arbx-sizing ports it for the walk itself): here only to choose the
 /// arrays to follow and to name
 pub fn ray_array_bit(pool: &[u8], ext: Option<&[u8]>, start: i32) -> Option<bool> {
+    match ray_word_at(pool, ext, start) { BitWord::At(w, i) => Some(w >> i & 1 == 1), BitWord::Outside => Some(false), BitWord::Unknown => None }
+}
+
+/// Where a Raydium bitmap holds tick array `start`'s bit (`ray_array_bit`)
+enum BitWord {
+    /// the u64 word holding it and the bit within it: a word's 64 bits are 64 consecutive arrays, in start order
+    At(u64, u32),
+    /// past every bitmap (beyond the tick range)
+    Outside,
+    /// beyond the default range without the extension, or the bytes too short
+    Unknown,
+}
+
+/// The word of the pool's default bitmap (@904: arrays −512..511 of the pool's spacing, bit = array index + 512) or,
+/// beyond it, of the TickArrayBitmapExtension (`ext`: 14 positive bitmaps of 512 bits @40, 14 negative @936) holding
+/// tick array `start`'s bit
+fn ray_word_at(pool: &[u8], ext: Option<&[u8]>, start: i32) -> BitWord {
     // in i64: no input overflows
-    let ts = tick_spacing(Venue::RayClmm, pool)? as i64;
-    let start = start as i64;
-    let per = ray::TICK_ARRAY_SIZE as i64 * ts;
+    let Some(ts) = tick_spacing(Venue::RayClmm, pool) else { return BitWord::Unknown };
+    let (start, per) = (start as i64, ray::TICK_ARRAY_SIZE as i64 * ts as i64);
     let boundary = per * 512;
-    if (-boundary..boundary).contains(&start) {
-        let b = (start.div_euclid(per) + 512) as usize;
-        return crate::venues::u64_at(pool, ray::off::BITMAP + 8 * (b / 64)).map(|w| w >> (b % 64) & 1 == 1);
-    }
-    let ext = ext?;
+    let word = |d: &[u8], at: usize, bit: usize| crate::venues::u64_at(d, at + 8 * (bit / 64)).map_or(BitWord::Unknown, |w| BitWord::At(w, (bit % 64) as u32));
+    if (-boundary..boundary).contains(&start) { return word(pool, ray::off::BITMAP, (start.div_euclid(per) + 512) as usize); }
+    let Some(ext) = ext else { return BitWord::Unknown };
     let mut offset = start.abs() / boundary - 1;
     if start < 0 && start.abs() % boundary == 0 { offset -= 1; }
-    if !(0..14).contains(&offset) { return Some(false); }
+    if !(0..14).contains(&offset) { return BitWord::Outside; }
     let m = start.abs() % boundary;
     let mut bit = m / per;
     if start < 0 && m != 0 { bit = 512 - bit; }
-    if !(0..512).contains(&bit) { return Some(false); }
-    let base = (if start < 0 { ray::off::E_NEGATIVE } else { ray::off::E_POSITIVE }) + 64 * offset as usize;
-    let bit = bit as usize;
-    crate::venues::u64_at(ext, base + 8 * (bit / 64)).map(|w| w >> (bit % 64) & 1 == 1)
+    if !(0..512).contains(&bit) { return BitWord::Outside; }
+    word(ext, (if start < 0 { ray::off::E_NEGATIVE } else { ray::off::E_POSITIVE }) + 64 * offset as usize, bit as usize)
 }
 
 /// Raydium CLMM: the start indexes of up to `k` initialized tick arrays from the current tick's array (inclusive) in the
 /// swap's direction, in walk order, by the bitmaps (`ext`: the extension's bytes when it exists). Stops at the tick
-/// range's end, or where the default bitmap ends and no extension is given
+/// range's end, or where the default bitmap ends and no extension is given. Word by word (review F2): the rest of a
+/// bitmap word in the walk's direction is one test, so crossing the whole range of a tick-spacing-1 pool reads about
+/// 240 words, not 14,788 arrays (the answer is `ray_array_bit`'s, array by array: `the_word_scan_is_the_array_scan`)
 pub fn ray_initialized_arrays(pool: &[u8], ext: Option<&[u8]>, zfo: bool, k: usize) -> Vec<i32> {
     let mut out = Vec::new();
     let (Some(ts), Some(st0)) = (tick_spacing(Venue::RayClmm, pool), current_array(Venue::RayClmm, pool)) else { return out };
@@ -126,8 +157,24 @@ pub fn ray_initialized_arrays(pool: &[u8], ext: Option<&[u8]>, zfo: bool, k: usi
     let (lo, hi) = (ray::array_start(ray::MIN_TICK, ts), ray::array_start(ray::MAX_TICK, ts));
     let mut st = st0;
     while out.len() < k && (lo..=hi).contains(&st) {
-        match ray_array_bit(pool, ext, st) { Some(true) => out.push(st), Some(false) => {} None => break }
-        st = if zfo { st - per } else { st + per };
+        match ray_word_at(pool, ext, st) {
+            BitWord::Unknown => break,
+            BitWord::Outside => st = if zfo { st - per } else { st + per },
+            // the bits from `i` down (a→b) or up (b→a): the nearest set one is the next initialized array, none means
+            // the whole rest of the word is skipped at once
+            BitWord::At(w, i) => {
+                let (rest, step) = if zfo { (if i == 63 { w } else { w & ((1u64 << (i + 1)) - 1) }, -1) } else { (w & (u64::MAX << i), 1) };
+                if rest == 0 {
+                    st += step * if zfo { i as i32 + 1 } else { 64 - i as i32 } * per;
+                    continue;
+                }
+                let j = if zfo { 63 - rest.leading_zeros() } else { rest.trailing_zeros() };
+                let found = st + (j as i32 - i as i32) * per;
+                if !(lo..=hi).contains(&found) { break; }
+                out.push(found);
+                st = found + step * per;
+            }
+        }
     }
     out
 }
@@ -152,6 +199,26 @@ pub fn follow_starts(m: &PoolMeta, pool: &[u8], ext: Option<&[u8]>) -> Vec<i32> 
         _ => vec![],
     }
 }
+
+/// The tick arrays a quote needs near the price, by start index (review F2's hysteresis: the follow set of a pool is
+/// re-derived only once one of them is not in it): Raydium the current array and the next [`RAY_NEED_EACH_WAY`]
+/// initialized arrays each way, Orca the 3 arrays of a swap's sequence each way (`whirl_leg_starts`)
+pub fn need_starts(m: &PoolMeta, pool: &[u8], ext: Option<&[u8]>) -> Vec<i32> {
+    match m.venue {
+        Venue::RayClmm => {
+            let Some(cur) = current_array(Venue::RayClmm, pool) else { return vec![] };
+            let mut v = vec![cur];
+            for zfo in [true, false] { v.extend(ray_initialized_arrays(pool, ext, zfo, RAY_NEED_EACH_WAY)); }
+            v
+        }
+        Venue::Whirlpool => [true, false].iter().filter_map(|z| whirl_leg_starts(pool, *z)).flatten().collect(),
+        _ => vec![],
+    }
+}
+
+/// Raydium CLMM: the initialized arrays each way that must stay followed before the follow set moves (half of
+/// [`RAY_FOLLOW_EACH_WAY`])
+pub const RAY_NEED_EACH_WAY: usize = 3;
 
 /// `follow_starts` with each start's PDA: the keys of `held` (the arrays followed now) are reused, the others derived
 pub fn follow_list(m: &PoolMeta, pool: &[u8], ext: Option<&[u8]>, held: &[(i64, Pk)]) -> Vec<(i64, Pk)> {
@@ -236,6 +303,88 @@ mod tests {
         p[ray::off::TICK_CURRENT..ray::off::TICK_CURRENT + 4].copy_from_slice(&tick.to_le_bytes());
         for &b in bits { let o = ray::off::BITMAP + 8 * (b / 64); let w = u64::from_le_bytes(p[o..o + 8].try_into().unwrap()) | 1 << (b % 64); p[o..o + 8].copy_from_slice(&w.to_le_bytes()); }
         p
+    }
+
+    /// review F5: a venue's deploy check passes only on the deploy slot its port was proven on; another slot, a header
+    /// that is not a programdata account's, or no account at all (the read failed) each fail it, saying why
+    #[test]
+    fn the_deploy_check_passes_only_the_proven_binary() {
+        let header = |tag: u32, slot: u64| { let mut h = vec![0u8; 45]; h[..4].copy_from_slice(&tag.to_le_bytes()); h[4..12].copy_from_slice(&slot.to_le_bytes()); h };
+        for (v, proven) in [(Venue::RayClmm, RAY_DEPLOY_SLOT), (Venue::Whirlpool, WHIRL_DEPLOY_SLOT)] {
+            let e = deploy_entry(v, Some(&header(3, proven)), None);
+            assert_eq!((e["ok"].as_bool(), e["last_deploy_slot"].as_u64(), e["proven_deploy_slot"].as_u64(), e["error"].is_null()), (Some(true), Some(proven), Some(proven), true));
+            assert_eq!(e["programdata"].as_str(), Some(crate::tx::b58(&programdata(v)).as_str()));
+            let e = deploy_entry(v, Some(&header(3, proven + 1)), None);
+            assert_eq!((e["ok"].as_bool(), e["last_deploy_slot"].as_u64()), (Some(false), Some(proven + 1)), "an upgrade");
+            let e = deploy_entry(v, Some(&header(2, proven)), None);
+            assert!(e["ok"] == false && e["error"].as_str().is_some_and(|w| w.contains("not a programdata")), "{e}");
+            let e = deploy_entry(v, None, Some("rpc: 429"));
+            assert_eq!((e["ok"].as_bool(), e["error"].as_str(), e["last_deploy_slot"].clone()), (Some(false), Some("rpc: 429"), serde_json::Value::Null), "unknown fails closed");
+        }
+    }
+
+    /// the scan array by array (`ray_array_bit` at every start): the reference of `ray_initialized_arrays`
+    fn arrays_one_by_one(pool: &[u8], ext: Option<&[u8]>, zfo: bool, k: usize) -> Vec<i32> {
+        let mut out = Vec::new();
+        let (Some(ts), Some(st0)) = (tick_spacing(Venue::RayClmm, pool), current_array(Venue::RayClmm, pool)) else { return out };
+        let per = ray::TICK_ARRAY_SIZE * ts as i32;
+        let (lo, hi) = (ray::array_start(ray::MIN_TICK, ts), ray::array_start(ray::MAX_TICK, ts));
+        let mut st = st0;
+        while out.len() < k && (lo..=hi).contains(&st) {
+            match ray_array_bit(pool, ext, st) { Some(true) => out.push(st), Some(false) => {} None => break }
+            st = if zfo { st - per } else { st + per };
+        }
+        out
+    }
+
+    struct Rng(u64);
+    impl Rng { fn next(&mut self) -> u64 { self.0 ^= self.0 << 13; self.0 ^= self.0 >> 7; self.0 ^= self.0 << 17; self.0 } }
+
+    /// Review F2: the word-by-word scan answers what the array-by-array one did, on random bitmaps (empty, sparse, dense;
+    /// with the extension, with an empty one, without; every tick spacing; ticks over the whole range; short bytes) and on
+    /// the venue-parity snapshots, both ways, for every count asked
+    #[test]
+    fn the_word_scan_is_the_array_scan() {
+        let mut r = Rng(0x9e37_79b9_7f4a_7c15);
+        let word = |r: &mut Rng, density: u64| -> u64 {
+            match density { 0 => 0, 1 => if r.next() % 16 == 0 { 1 << (r.next() % 64) } else { 0 }, 2 => if r.next() % 3 == 0 { r.next() & r.next() } else { 0 }, _ => r.next() }
+        };
+        let mut found = 0usize;
+        for it in 0..1_500u64 {
+            let ts: u16 = [1, 2, 4, 5, 8, 10, 15, 16, 20, 50, 60, 100, 120, 200][(r.next() % 14) as usize];
+            let tick = (r.next() % (2 * 443_636 + 1)) as i32 - 443_636;
+            let density = r.next() % 4;
+            let mut pool = ray_pool(ts, tick, &[]);
+            for w in 0..16 { let v = word(&mut r, density); pool[ray::off::BITMAP + 8 * w..ray::off::BITMAP + 8 * w + 8].copy_from_slice(&v.to_le_bytes()); }
+            let mut ext = vec![0u8; ray::EXT_LEN];
+            if it % 3 != 0 {
+                for base in [ray::off::E_POSITIVE, ray::off::E_NEGATIVE] {
+                    for w in 0..14 * 8 { let v = word(&mut r, density); ext[base + 8 * w..base + 8 * w + 8].copy_from_slice(&v.to_le_bytes()); }
+                }
+            }
+            let short = &pool[..ray::off::BITMAP + 8 * (r.next() % 17) as usize];
+            for (pl, e) in [(&pool[..], Some(&ext[..])), (&pool[..], None), (short, Some(&ext[..]))] {
+                for k in [1usize, 6, 40] {
+                    for zfo in [true, false] {
+                        let (a, b) = (ray_initialized_arrays(pl, e, zfo, k), arrays_one_by_one(pl, e, zfo, k));
+                        assert_eq!(a, b, "ts {ts} tick {tick} density {density} ext {} k {k} zfo {zfo}", e.is_some());
+                        found += a.len();
+                    }
+                }
+            }
+        }
+        // the snapshots (both venue-parity sets' Raydium pools, with their extension when it exists)
+        let mut pools = 0;
+        for fx in crate::quote::clmm_tests::fixtures().values().filter(|f| f.venue == Venue::RayClmm) {
+            let m = crate::quote::clmm_tests::meta(fx);
+            let pool = &fx.accts[&fx.pool].1;
+            let ext = m.clmm_ext().and_then(|k| fx.accts.get(k)).map(|a| &a.1[..]);
+            for k in [1usize, 6, 40, 1_000] {
+                for zfo in [true, false] { assert_eq!(ray_initialized_arrays(pool, ext, zfo, k), arrays_one_by_one(pool, ext, zfo, k), "{} k {k} zfo {zfo}", fx.file); }
+            }
+            pools += 1;
+        }
+        assert!(found > 10_000 && pools == 10, "{found} {pools}");
     }
 
     /// Raydium: the initialized arrays by the default bitmap, both ways from the current one, in walk order; the current

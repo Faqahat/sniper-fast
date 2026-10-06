@@ -95,3 +95,41 @@ fn s17_a_run_with_clmm_pools_replays_identically() {
     let done = r.finish_and_replay();
     assert_eq!(done.replay["compare"]["attempts_compared"].as_u64(), Some(attempts.len() as u64));
 }
+
+/// the canary's `[canary]` (`CANARY`: 0.2 SOL, no wait) with S17's switches
+const CANARY_CLMM: [(&str, &str); 4] = [CANARY[0], CANARY[1], CLMM_QUOTE[0], CLMM_QUOTE[1]];
+const POOLS4: [&str; 4] = ["usdc.pump", "usdc.cpmm", "usdc.rayclmm", "usdc.whirl"];
+
+/// Review F3: in a run that sends, a route through a venue switched to "quote" is priced and recorded (`venue_quote_only`,
+/// `route_quote_only`) but never the pick. S17's USDC sale into the PumpSwap pool, in a canary run: the shadow run's best
+/// route (PumpSwap -> Whirlpool) is held back, the best route of the venues that send is decided and sent (one bundle to
+/// the block engine in memory), and the replay gives the same decisions, attempt and digests
+#[test]
+fn s17_a_canary_sends_the_best_route_of_the_venues_that_send() {
+    let (mut r, s2) = super::s13_verdicts::canary_rig("s17-canary", &POOLS4, &CANARY_CLMM, true);
+    let (ray, whirl, pump) = (r.meta("usdc.rayclmm"), r.meta("usdc.whirl"), r.meta("usdc.pump"));
+    let mut t = T0 + 10 * MS;
+    let sale = r.sig("S17-pump");
+    super::s13_verdicts::usdc_sale(&mut r, &pump, 40, sale, s2, &mut t);
+    r.timers(t + 4 * MS);
+    let ev = r.evaluations();
+    let d = ev.last().unwrap();
+    let through = |x: &Value, p: &Pk| x["buy"] == json!(b58(p)) || x["sell"] == json!(b58(p));
+    let held: Vec<&Value> = d["routes"].as_array().unwrap().iter().filter(|x| through(x, &ray.pool) || through(x, &whirl.pool)).collect();
+    eprintln!("S17 canary: {} routes, best {}, reason {}; the CLMM ones {:?}", d["routes"].as_array().unwrap().len(), d["best"], d["reason"],
+        held.iter().map(|x| (nm(&pk(x["buy"].as_str().unwrap())), nm(&pk(x["sell"].as_str().unwrap())), x["reason"].clone(), x["gross"].clone())).collect::<Vec<_>>());
+    assert!(held.len() >= 4, "{held:?}");
+    for x in &held {
+        assert_eq!(x["reason"].as_str(), Some("venue_quote_only"), "{x}");
+        assert!(x["size"].as_u64().is_some_and(|s| s > 0) && x["gross"].is_i64(), "priced and recorded: {x}");
+    }
+    let b = &d["routes"][d["best"].as_u64().expect("a best route of the venues that send") as usize];
+    assert!(!through(b, &ray.pool) && !through(b, &whirl.pool), "{b}");
+    assert_eq!((d["reason"].as_str(), d["attempt"].as_u64()), (Some("sent"), Some(0)), "{d}");
+    assert_eq!(r.bundles_sent().len(), 1, "one bundle reached the block engine");
+    assert!(r.e.counter("route_quote_only") >= 4);
+    let fired = r.pump(1, t + 5 * MS);
+    assert_eq!(fired[0]["what"], "fired");
+    let done = r.finish_and_replay();
+    assert_eq!(done.replay["compare"]["attempts_compared"].as_u64(), Some(1));
+}
