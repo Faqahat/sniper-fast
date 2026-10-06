@@ -1,0 +1,1720 @@
+[
+ {
+  "chainId": "solana",
+  "dexId": "pancakeswap",
+  "url": "https://dexscreener.com/solana/3nlr2knqc4zhmpbjjgzcmfkazpjyxzeeqqv77sctcs4p",
+  "pairAddress": "3nLR2KnqC4ZHmPbjJgZCmfKazPjyxZEeqQv77sctcs4P",
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.4147",
+  "priceUsd": "2693.58",
+  "txns": {
+   "m5": {
+    "buys": 21,
+    "sells": 12
+   },
+   "h1": {
+    "buys": 254,
+    "sells": 212
+   },
+   "h6": {
+    "buys": 1474,
+    "sells": 1648
+   },
+   "h24": {
+    "buys": 4739,
+    "sells": 4542
+   }
+  },
+  "volume": {
+   "h24": 354448.6,
+   "h6": 117125.01,
+   "h1": 17617.8,
+   "m5": 1456.01
+  },
+  "priceChange": {
+   "m5": -0.14,
+   "h1": -0.38,
+   "h6": -0.66,
+   "h24": -0.08
+  },
+  "liquidity": {
+   "usd": 237950.56,
+   "base": 66.8295,
+   "quote": 482.1479
+  },
+  "fdv": 127495515,
+  "marketCap": 127495515,
+  "pairCreatedAt": 1753282723000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/hktfl7iwgkt5qhjywqkcdnzxscoh811k7akrmzjkccef",
+  "pairAddress": "HktfL7iwGKT5QHjywQkcDnZXScoh811k7akrMZJkCcEF",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.4024",
+  "priceUsd": "2692.099",
+  "txns": {
+   "m5": {
+    "buys": 85,
+    "sells": 5
+   },
+   "h1": {
+    "buys": 458,
+    "sells": 226
+   },
+   "h6": {
+    "buys": 2239,
+    "sells": 2487
+   },
+   "h24": {
+    "buys": 8292,
+    "sells": 7834
+   }
+  },
+  "volume": {
+   "h24": 7826897.9,
+   "h6": 2475107.11,
+   "h1": 367359.01,
+   "m5": 40969.14
+  },
+  "priceChange": {
+   "m5": -0.17,
+   "h1": -0.51,
+   "h6": -0.69,
+   "h24": -0.35
+  },
+  "liquidity": {
+   "usd": 7504393.9,
+   "base": 2160.4304,
+   "quote": 14049
+  },
+  "fdv": 234401403,
+  "marketCap": 234401403,
+  "pairCreatedAt": 1669602341000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/3potghhanyzvcnq1cgh2wlbzllmjpdptg1hpj8q2ddvr",
+  "pairAddress": "3potGhhaNyzvCNq1CGh2wLbZLLMjpdPtG1Hpj8q2DDVR",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.4105",
+  "priceUsd": "2693.075",
+  "txns": {
+   "m5": {
+    "buys": 23,
+    "sells": 2
+   },
+   "h1": {
+    "buys": 63,
+    "sells": 44
+   },
+   "h6": {
+    "buys": 417,
+    "sells": 429
+   },
+   "h24": {
+    "buys": 1486,
+    "sells": 1377
+   }
+  },
+  "volume": {
+   "h24": 635370.83,
+   "h6": 225642.51,
+   "h1": 32847.39,
+   "m5": 3316.25
+  },
+  "priceChange": {
+   "h1": -0.4,
+   "h6": -0.68,
+   "h24": -0.03
+  },
+  "liquidity": {
+   "usd": 111285.13,
+   "base": 24.8632,
+   "quote": 368.866
+  },
+  "fdv": 234486351,
+  "marketCap": 234486351,
+  "pairCreatedAt": 1713446811000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/au971drpyhhrprnmebp5pdtwl2ny7nofb5vybjdjkr2e",
+  "pairAddress": "AU971DrPyhhrpRnmEBp5pDTWL2ny7nofb5vYBjDJkR2E",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "2694.4526",
+  "priceUsd": "2694.45",
+  "txns": {
+   "m5": {
+    "buys": 2,
+    "sells": 13
+   },
+   "h1": {
+    "buys": 52,
+    "sells": 51
+   },
+   "h6": {
+    "buys": 440,
+    "sells": 420
+   },
+   "h24": {
+    "buys": 1206,
+    "sells": 1104
+   }
+  },
+  "volume": {
+   "h24": 86485.52,
+   "h6": 33989.88,
+   "h1": 6306.46,
+   "m5": 295.94
+  },
+  "priceChange": {
+   "m5": -0.17,
+   "h1": -0.43,
+   "h6": -0.69,
+   "h24": -0.12
+  },
+  "liquidity": {
+   "usd": 229112.41,
+   "base": 55.8904,
+   "quote": 78518
+  },
+  "fdv": 234606252,
+  "marketCap": 234606252,
+  "pairCreatedAt": 1669602341000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/4yrhms7ekgtbgjg77zj33tswrraqhscxdtuszqusughb",
+  "pairAddress": "4yrHms7ekgTBgJg77zJ33TsWrraqHsCXDtuSZqUsuGHb",
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.4413",
+  "priceUsd": "2703.066",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 10,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 12,
+    "sells": 233
+   },
+   "h24": {
+    "buys": 86,
+    "sells": 800
+   }
+  },
+  "volume": {
+   "h24": 5613.31,
+   "h6": 1262.41,
+   "h1": 58,
+   "m5": 0.15
+  },
+  "priceChange": {
+   "m5": -0.1,
+   "h1": -0.23,
+   "h6": -0.26,
+   "h24": 0.3
+  },
+  "liquidity": {
+   "usd": 501962.23,
+   "base": 92.9667,
+   "quote": 2081.08771
+  },
+  "fdv": 235356230,
+  "marketCap": 235356230,
+  "pairCreatedAt": 1669602453000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/4regglbesqpaeazdajv9hhga2tgj45ogcyruevhatdmm",
+  "pairAddress": "4reGGLbesqpAeAZdAJv9hhgA2tgj45oGcyRuEvhATdMm",
+  "labels": [
+   "v2"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "2695.8207",
+  "priceUsd": "2695.82",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 1
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 14
+   },
+   "h6": {
+    "buys": 12,
+    "sells": 24
+   },
+   "h24": {
+    "buys": 82,
+    "sells": 74
+   }
+  },
+  "volume": {
+   "h24": 525.86,
+   "h6": 117.45,
+   "h1": 35.77,
+   "m5": 0.16
+  },
+  "priceChange": {
+   "m5": 0.01,
+   "h1": -0.21,
+   "h6": -0.75,
+   "h24": -0.08
+  },
+  "liquidity": {
+   "usd": 60691.63,
+   "base": 11.2415,
+   "quote": 30386
+  },
+  "fdv": 234725376,
+  "marketCap": 234725376,
+  "pairCreatedAt": 1669603787000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/8eylmmyt8vnqhu8c2nzj2bctezzk4w9sccbeoie2rar7",
+  "pairAddress": "8EyLmmyt8VNqhu8c2NzJ2BCTEZZk4W9SccbEoie2raR7",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.4406",
+  "priceUsd": "2701.85",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 20,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 46,
+    "sells": 150
+   },
+   "h24": {
+    "buys": 210,
+    "sells": 318
+   }
+  },
+  "volume": {
+   "h24": 6850.65,
+   "h6": 2347.61,
+   "h1": 195.46,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": 0.08,
+   "h6": -0.43,
+   "h24": -0.27
+  },
+  "liquidity": {
+   "usd": 53068.06,
+   "base": 16.1619,
+   "quote": 78.07826
+  },
+  "fdv": 235251203,
+  "marketCap": 235251203,
+  "pairCreatedAt": 1733590614000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/fcero2ufphcb7z785cbs6q12kmjqujka8vtxpi4ttbmf",
+  "pairAddress": "FcEro2uFpHcb7Z785CBs6q12KMJqUJKa8VTXPi4TTBMf",
+  "labels": [
+   "v2"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.3176",
+  "priceUsd": "2714.94",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 147
+   },
+   "h24": {
+    "buys": 31,
+    "sells": 330
+   }
+  },
+  "volume": {
+   "h24": 275.02,
+   "h6": 105.07,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h24": 0.02
+  },
+  "liquidity": {
+   "usd": 42293.71,
+   "base": 7.7779,
+   "quote": 174.08279
+  },
+  "fdv": 236390129,
+  "marketCap": 236390129,
+  "pairCreatedAt": 1669602455000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/e8mubdovguuatmymuqmepqdx6ft1rjhkqfox4lyyowbe",
+  "pairAddress": "E8MUbDoVguUatmYMuQMEPqdx6fT1RjHkqfox4LyyoWbe",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+   "name": "Coinbase Wrapped BTC",
+   "symbol": "cbBTC"
+  },
+  "priceNative": "0.03157",
+  "priceUsd": "2704.91",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 8,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 20,
+    "sells": 11
+   },
+   "h24": {
+    "buys": 47,
+    "sells": 50
+   }
+  },
+  "volume": {
+   "h24": 2375.98,
+   "h6": 547.64,
+   "h1": 121.16,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": 0.07,
+   "h6": -0.23,
+   "h24": 0.14
+  },
+  "liquidity": {
+   "usd": 36028.95,
+   "base": 4.1126,
+   "quote": 0.2906
+  },
+  "fdv": 235516976,
+  "marketCap": 235516976,
+  "pairCreatedAt": 1733589259000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/gt61wspicgveqhvee2paezkbjfwxmeobhpukohxazxpx",
+  "pairAddress": "GT61WSpicGVEQHVEE2pAEZkbJfwxmeoBHPUkohXazXPX",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.4750",
+  "priceUsd": "2735.65",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 6,
+    "sells": 13
+   },
+   "h24": {
+    "buys": 10,
+    "sells": 17
+   }
+  },
+  "volume": {
+   "h24": 721.38,
+   "h6": 436.63,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 1.14,
+   "h24": 0.75
+  },
+  "liquidity": {
+   "usd": 26090.33,
+   "base": 2.7249,
+   "quote": 153.1035
+  },
+  "fdv": 238194048,
+  "marketCap": 238194048,
+  "pairCreatedAt": 1716718165000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/gcqlssu7amh6sqg9bztggpjdsn3ersnzhstntqtwjkyt",
+  "pairAddress": "GcQLSSU7AMH6Sqg9bzTGGPjdsN3erSnzhstNtqTwJkYt",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "2698.2681",
+  "priceUsd": "2698.26",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 2
+   },
+   "h6": {
+    "buys": 4,
+    "sells": 7
+   },
+   "h24": {
+    "buys": 22,
+    "sells": 17
+   }
+  },
+  "volume": {
+   "h24": 7.99,
+   "h6": 2.22,
+   "h1": 0.49,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.31,
+   "h6": -0.42,
+   "h24": 0.05
+  },
+  "liquidity": {
+   "usd": 10683.9,
+   "base": 3.9412,
+   "quote": 49.3231
+  },
+  "fdv": 234938468,
+  "marketCap": 234938468,
+  "pairCreatedAt": 1754408725000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/6auj3j3rkxcvf6qbmykdaczdbiuaplgabsmbdy4xh5wz",
+  "pairAddress": "6aUJ3j3RKxCVf6QbMYkdaCzDBiuApLGaBSmbDy4xH5WZ",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.4236",
+  "priceUsd": "2694.64",
+  "txns": {
+   "m5": {
+    "buys": 3,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 27,
+    "sells": 14
+   },
+   "h6": {
+    "buys": 117,
+    "sells": 133
+   },
+   "h24": {
+    "buys": 359,
+    "sells": 361
+   }
+  },
+  "volume": {
+   "h24": 329.87,
+   "h6": 117.9,
+   "h1": 15.21,
+   "m5": 1.45
+  },
+  "priceChange": {
+   "m5": -0.04,
+   "h1": -0.33,
+   "h6": -0.63
+  },
+  "liquidity": {
+   "usd": 182.91,
+   "base": 0.04784,
+   "quote": 0.4493
+  },
+  "fdv": 234623167,
+  "marketCap": 234623167,
+  "pairCreatedAt": 1752938441000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "pancakeswap",
+  "url": "https://dexscreener.com/solana/as1jlamubofxoj9qkydyjfzko2h8wf7k2guvmrhmwbte",
+  "pairAddress": "AS1jLaMUboFXoj9QkYdYJfzKo2h8WF7k2GuVmrhMWBte",
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+   "name": "Wrapped BTC (Wormhole)",
+   "symbol": "WBTC"
+  },
+  "priceNative": "0.03152",
+  "priceUsd": "2697.71",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 3,
+    "sells": 7
+   },
+   "h6": {
+    "buys": 31,
+    "sells": 23
+   },
+   "h24": {
+    "buys": 70,
+    "sells": 57
+   }
+  },
+  "volume": {
+   "h24": 974.24,
+   "h6": 363.32,
+   "h1": 60.21,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.16,
+   "h6": -0.55,
+   "h24": 0.41
+  },
+  "liquidity": {
+   "usd": 9165.72,
+   "base": 0.9229,
+   "quote": 0.07801
+  },
+  "fdv": 127691019,
+  "marketCap": 127691019,
+  "pairCreatedAt": 1755263364000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/9pvglz8vkr1jqf7wifdcalpvkpdypmjmxynhkllrmygd",
+  "pairAddress": "9pVGLz8VKR1JQF7wiFdCALpVkPDypMJMXYNHkLLrMyGD",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.4515",
+  "priceUsd": "2704.28",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 11,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 13,
+    "sells": 30
+   },
+   "h24": {
+    "buys": 68,
+    "sells": 72
+   }
+  },
+  "volume": {
+   "h24": 3174.37,
+   "h6": 832.35,
+   "h1": 129.21,
+   "m5": 41.7
+  },
+  "priceChange": {
+   "m5": -0.1,
+   "h1": 0.3,
+   "h6": -0.32,
+   "h24": 0.22
+  },
+  "liquidity": {
+   "usd": 8856.61,
+   "base": 2.1941,
+   "quote": 24.2684
+  },
+  "fdv": 235462273,
+  "marketCap": 235462273,
+  "pairCreatedAt": 1731948535000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/eonrn8iuhwgjysd1phu8qxm5gsqqlk3za4m8xzd2rueb",
+  "pairAddress": "EoNrn8iUhwgJySD1pHu8Qxm5gSQqLK3za4m8xzD2RuEb",
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "2694.3936",
+  "priceUsd": "2694.39",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 1
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 20
+   },
+   "h6": {
+    "buys": 10,
+    "sells": 37
+   },
+   "h24": {
+    "buys": 76,
+    "sells": 78
+   }
+  },
+  "volume": {
+   "h24": 68.19,
+   "h6": 16.24,
+   "h1": 3.87,
+   "m5": 0.08
+  },
+  "priceChange": {
+   "m5": -0.05,
+   "h1": -0.23,
+   "h6": -0.81,
+   "h24": -0.19
+  },
+  "liquidity": {
+   "usd": 7663.47,
+   "base": 1.4202,
+   "quote": 3836.8633
+  },
+  "fdv": 234601115,
+  "marketCap": 234601115,
+  "pairCreatedAt": 1669603305000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/2be8nvnrfanbzsbiqqhytwf4d8qcpjyp4w2tynmzwq2a",
+  "pairAddress": "2BE8nvNrFaNbzSbiQqhyTwF4d8QCpjyp4W2tYNMZwQ2A",
+  "labels": [
+   "CLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+   "name": "USDT",
+   "symbol": "USDT"
+  },
+  "priceNative": "2701.9563",
+  "priceUsd": "2701.95",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 3
+   },
+   "h6": {
+    "buys": 4,
+    "sells": 11
+   },
+   "h24": {
+    "buys": 28,
+    "sells": 24
+   }
+  },
+  "volume": {
+   "h24": 3.13,
+   "h6": 0.76,
+   "h1": 0.19,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.28,
+   "h6": -0.28,
+   "h24": 0.27
+  },
+  "liquidity": {
+   "usd": 6344.16,
+   "base": 2.3445,
+   "quote": 9.2806
+  },
+  "fdv": 235259599,
+  "marketCap": 235259599,
+  "pairCreatedAt": 1740524840000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "pancakeswap",
+  "url": "https://dexscreener.com/solana/2mv68czkxnqb5ahca96eybtiswqkv6skzhcak7fffvfo",
+  "pairAddress": "2mV68czKxnQB5AhCA96eyBtisWQkv6Skzhcak7fffvFo",
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "2696.7469",
+  "priceUsd": "2696.74",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 2,
+    "sells": 7
+   },
+   "h6": {
+    "buys": 32,
+    "sells": 39
+   },
+   "h24": {
+    "buys": 139,
+    "sells": 125
+   }
+  },
+  "volume": {
+   "h24": 67.3,
+   "h6": 20.43,
+   "h1": 2.04,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.29,
+   "h6": -0.56,
+   "h24": -0.01
+  },
+  "liquidity": {
+   "usd": 650.22,
+   "base": 0.2171,
+   "quote": 64.67
+  },
+  "fdv": 127645416,
+  "marketCap": 127645416,
+  "pairCreatedAt": 1751317216000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/gjdp2supwxgkjpablkmucqbenm8ims7dpddb9x99zxsp",
+  "pairAddress": "GjDp2sUpWxgKjpabLkmUcQBENM8iMs7dpDdB9X99zXsP",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "2699.5005",
+  "priceUsd": "2699.50",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 3,
+    "sells": 3
+   },
+   "h6": {
+    "buys": 12,
+    "sells": 17
+   },
+   "h24": {
+    "buys": 41,
+    "sells": 37
+   }
+  },
+  "volume": {
+   "h24": 1087.19,
+   "h6": 425.4,
+   "h1": 50.41,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.45,
+   "h6": -0.51,
+   "h24": 0.22
+  },
+  "liquidity": {
+   "usd": 4501.02,
+   "base": 0.9176,
+   "quote": 2023.9363
+  },
+  "fdv": 235045773,
+  "marketCap": 235045773,
+  "pairCreatedAt": 1716996805000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/z5unzbcunzqpoehe5evpoyczatq2bhwwdd9pn7fq16v",
+  "pairAddress": "z5UnzBcUnzQPoeHe5eVPoYczaTQ2BhwwDD9PN7Fq16v",
+  "labels": [
+   "CLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.3843",
+  "priceUsd": "2695.074",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 2,
+    "sells": 35
+   },
+   "h24": {
+    "buys": 29,
+    "sells": 57
+   }
+  },
+  "volume": {
+   "h24": 137.93,
+   "h6": 50.72,
+   "h1": 2.1,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.55,
+   "h6": -0.97,
+   "h24": -0.92
+  },
+  "liquidity": {
+   "usd": 1249.44,
+   "base": 0.3532,
+   "quote": 2.47
+  },
+  "fdv": 234660409,
+  "marketCap": 234660409,
+  "pairCreatedAt": 1733957834000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/e7kqcbmfkblyec2mfsjzj1n8xabv2mrmaztzpr4uxkfb",
+  "pairAddress": "E7kqCbmFKBLYEc2mFSjzJ1n8XaBV2mrMAZTZPr4UXKfb",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.4154",
+  "priceUsd": "2699.93",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 3,
+    "sells": 2
+   },
+   "h6": {
+    "buys": 12,
+    "sells": 24
+   },
+   "h24": {
+    "buys": 56,
+    "sells": 53
+   }
+  },
+  "volume": {
+   "h24": 81.8,
+   "h6": 26.48,
+   "h1": 2.98,
+   "m5": 0.24
+  },
+  "priceChange": {
+   "m5": 0.29,
+   "h1": -0.1,
+   "h6": -0.26,
+   "h24": 0.02
+  },
+  "liquidity": {
+   "usd": 355.56,
+   "base": 0.05565,
+   "quote": 1.7044
+  },
+  "fdv": 235083852,
+  "marketCap": 235083852,
+  "pairCreatedAt": 1706213623000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/endlpaxenwvsploeurwfsyupymrgcrxnlnc5ypmdhcdd",
+  "pairAddress": "EnDLpaxeNwvsPLoeuRwfSyuPYMrGcRxnLnc5YPmDhcDd",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.3721",
+  "priceUsd": "2726.040",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 2,
+    "sells": 4
+   },
+   "h24": {
+    "buys": 7,
+    "sells": 8
+   }
+  },
+  "volume": {
+   "h24": 20.66,
+   "h6": 17.88,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 1.23,
+   "h24": 0.39
+  },
+  "liquidity": {
+   "usd": 1984.01,
+   "base": 0.5011,
+   "quote": 5.07171
+  },
+  "fdv": 237356630,
+  "marketCap": 237356630,
+  "pairCreatedAt": 1720158287000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/79u4uze46zqfvfr7arhj8ilb81dvf7mcums9iy79wax9",
+  "pairAddress": "79U4uzE46ZQFVFr7arhJ8iLB81DVf7mcuMs9iy79wAX9",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Ether (Portal)",
+   "symbol": "ETH"
+  },
+  "quoteToken": {
+   "address": "BgCeigJo2iY3dJhqS2z9w4pjjufFd4F9oKS3FrkMbmbJ",
+   "name": "Trump Bucks",
+   "symbol": "TrumpBucks"
+  },
+  "priceNative": "11672431.4463",
+  "priceUsd": "2888.38",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 1
+   },
+   "h24": {
+    "buys": 0,
+    "sells": 1
+   }
+  },
+  "volume": {
+   "h24": 1.25,
+   "h6": 1.25,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {},
+  "liquidity": {
+   "usd": 2313.74,
+   "base": 0.4007,
+   "quote": 4672501
+  },
+  "fdv": 125151911,
+  "marketCap": 125151911,
+  "pairCreatedAt": 1772512709000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/7t6hixjyufzsr88dhwc9tajasxcdfydrkmdtuzrxgt9j",
+  "pairAddress": "7T6HixJyUfzSR88dhWC9tAjasXcdFyDrKmDtuzrXgt9j",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Ether (Portal)",
+   "symbol": "ETH"
+  },
+  "quoteToken": {
+   "address": "ASTYqeaoK83Zs1pTFEXZUB6BM8cG8YLTsN852NUkt7ZR",
+   "name": "ArbStrategy",
+   "symbol": "ASTY"
+  },
+  "priceNative": "94188.8967",
+  "priceUsd": "2750.62",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 1
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 3
+   },
+   "h24": {
+    "buys": 0,
+    "sells": 6
+   }
+  },
+  "volume": {
+   "h24": 7.46,
+   "h6": 3.83,
+   "h1": 1.39,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.25,
+   "h6": 0.49,
+   "h24": 0.81
+  },
+  "liquidity": {
+   "usd": 2088.1,
+   "base": 0.3798,
+   "quote": 35727
+  },
+  "fdv": 119182755,
+  "marketCap": 119182755,
+  "pairCreatedAt": 1770236296000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/fn9gzdgdfraj2wxyxvxjstaqehvc77ew83kaq44c8ybq",
+  "pairAddress": "FN9GzdgdFRAJ2WXyXVXjSTAqeHvC77eW83kAq44C8yBQ",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Ether (Portal)",
+   "symbol": "ETH"
+  },
+  "quoteToken": {
+   "address": "HygNWegGFjQqNMCsQmXbFgr3ViybkEN6fQtmvLXVXJmd",
+   "name": "Circuit",
+   "symbol": "Circuit"
+  },
+  "priceNative": "16565228.5142",
+  "priceUsd": "2693.055",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h24": {
+    "buys": 2,
+    "sells": 0
+   }
+  },
+  "volume": {
+   "h24": 3.99,
+   "h6": 0,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h24": 0.48
+  },
+  "liquidity": {
+   "usd": 1149.46,
+   "base": 0.2129,
+   "quote": 3543656
+  },
+  "fdv": 116688215,
+  "marketCap": 116688215,
+  "pairCreatedAt": 1765700420000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/5csbv2ikbn5qg7he7155bq8khutjuzetga8ntbwgr6es",
+  "pairAddress": "5Csbv2ikbN5QG7HE7155bQ8kHutjuZEtgA8nTBWgR6eS",
+  "labels": [
+   "CPMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "FUAfBo2jgks6gB4Z4LfZkqSZgzNucisEHqnNebaRxM1P",
+   "name": "Melania Meme",
+   "symbol": "MELANIA"
+  },
+  "priceNative": "26344.03184",
+  "priceUsd": "2657.80",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 5,
+    "sells": 6
+   },
+   "h24": {
+    "buys": 18,
+    "sells": 18
+   }
+  },
+  "volume": {
+   "h24": 29.29,
+   "h6": 8.71,
+   "h1": 0.8,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -2.25,
+   "h6": -2.52,
+   "h24": 1.36
+  },
+  "liquidity": {
+   "usd": 432.45,
+   "base": 0.08135,
+   "quote": 2143.2276
+  },
+  "fdv": 231415733,
+  "marketCap": 231415733,
+  "pairCreatedAt": 1737332753000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/fwxmbfkktkynkgoecjqzavpyvxtzuq4nvykubppw84wd",
+  "pairAddress": "FwXmBFKKTkyNkgoECjqZAVPyVxTzuq4nVYkUbPPW84wD",
+  "labels": [
+   "DYN"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Ether (Portal)",
+   "symbol": "ETH"
+  },
+  "quoteToken": {
+   "address": "9xbgwwXdzJYv8sLmVCFsRSNKwzCCNQWiEhWVGNhWCNGE",
+   "name": "Pawel",
+   "symbol": "Pawel"
+  },
+  "priceNative": "104210913.07866",
+  "priceUsd": "2724.0097",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 1,
+    "sells": 2
+   },
+   "h24": {
+    "buys": 2,
+    "sells": 2
+   }
+  },
+  "volume": {
+   "h24": 1.69,
+   "h6": 1.49,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 0.51,
+   "h24": 0.51
+  },
+  "liquidity": {
+   "usd": 937.33,
+   "base": 0.1714,
+   "quote": 17996613
+  },
+  "fdv": 118029450,
+  "marketCap": 118029450,
+  "pairCreatedAt": 1734711536000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/2bpstoocr4vdwsdy5fhbgjtcpxmqam9k7b4e9anupu8p",
+  "pairAddress": "2BpstoocR4VdwsDY5FhbgJTcPXmQAM9K7B4e9AnUPu8P",
+  "labels": [
+   "CLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "2681.3469",
+  "priceUsd": "2681.34",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 2
+   },
+   "h6": {
+    "buys": 4,
+    "sells": 5
+   },
+   "h24": {
+    "buys": 6,
+    "sells": 9
+   }
+  },
+  "volume": {
+   "h24": 1.44,
+   "h6": 0.79,
+   "h1": 0.14,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -1.26,
+   "h6": -0.75,
+   "h24": -2.2
+  },
+  "liquidity": {
+   "usd": 58.76,
+   "base": 0.001533,
+   "quote": 54.6536
+  },
+  "fdv": 233465136,
+  "marketCap": 233465136,
+  "pairCreatedAt": 1747642476000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/45fzygkt7mj91yusjapbznhqhu2jgavqbaqbmxknjayk",
+  "pairAddress": "45FzYGkT7mJ91yuSjAPbznhQHu2jGavQbaqbmxKNJAYk",
+  "labels": [
+   "CLMM"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Wrapped Ether (Wormhole)",
+   "symbol": "WETH"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "22.5430",
+  "priceUsd": "2746.86",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 2
+   },
+   "h24": {
+    "buys": 2,
+    "sells": 3
+   }
+  },
+  "volume": {
+   "h24": 0.5,
+   "h6": 0.04,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 0.29,
+   "h24": 1.81
+  },
+  "liquidity": {
+   "usd": 192.68,
+   "base": 0.03507,
+   "quote": 0.7906
+  },
+  "fdv": 239170145,
+  "marketCap": 239170145,
+  "pairCreatedAt": 1790811308000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/aq7qtevcxhdafambvzuzrefwryt8i37ca6wrtpvsn7pk",
+  "pairAddress": "Aq7QTEvcXhdaFAmbvzuzreFWRYT8i37ca6wRTPvsn7Pk",
+  "labels": [
+   "DYN"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Ether (Portal)",
+   "symbol": "ETH"
+  },
+  "quoteToken": {
+   "address": "DnQhkyY9iWhhnK56zkinpVBrAwcotLqxQL6NcoRZ1k5F",
+   "name": "Energy",
+   "symbol": "NRG"
+  },
+  "priceNative": "228211211.5148",
+  "priceUsd": "2714.17",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 1
+   },
+   "h24": {
+    "buys": 1,
+    "sells": 4
+   }
+  },
+  "volume": {
+   "h24": 1.14,
+   "h6": 0.22,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 0.2,
+   "h24": -0.08
+  },
+  "liquidity": {
+   "usd": 146.06,
+   "base": 0.02692,
+   "quote": 6137045
+  },
+  "fdv": 117603114,
+  "marketCap": 117603114,
+  "pairCreatedAt": 1748376170000
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/fchav1xnpqakecyndc3qestm5z9dgs12mpvz8npf7aeb",
+  "pairAddress": "FChav1XnPqAkeCyNdc3Qestm5z9dGs12mpVZ8npf7aEB",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "name": "Ether (Portal)",
+   "symbol": "ETH"
+  },
+  "quoteToken": {
+   "address": "imE1nbjWM9QGUzxH2WHYNjcrUqgh9tT8RFYoj9UnMj3",
+   "name": "Infinite Money Ecoverse",
+   "symbol": "IME"
+  },
+  "priceNative": "23141226.1894",
+  "priceUsd": "2678.036",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h24": {
+    "buys": 4,
+    "sells": 0
+   }
+  },
+  "volume": {
+   "h24": 1.22,
+   "h6": 0,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h24": 1.14
+  },
+  "liquidity": {
+   "usd": 112.35,
+   "base": 0.02093,
+   "quote": 486467
+  },
+  "fdv": 116037462,
+  "marketCap": 116037462,
+  "pairCreatedAt": 1781314860000
+ }
+]

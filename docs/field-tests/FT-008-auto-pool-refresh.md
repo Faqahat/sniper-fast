@@ -39,5 +39,21 @@ Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the wa
 - bundle-only with 0 failed-landing fees;
 - reconciliation ok at every stop.
 
+## Pre-flight (WP-22, before the run; read-only)
+On Cherry, with the FT-008 binary and config deployed, against FT-006's records (nothing is locked or sent, the gRPC
+stream is never opened, the verification RPC is `[pool_refresh] rpc`: the public RPC, at most 2 requests a second):
+
+    nice -n 10 arbx pools refresh --config /root/arbx/deploy/arbx-ft008-frz.toml --runs /root/arbx/runs/ft006 \
+        --out /root/arbx/runs/wp22-preflight/pools.csv --segment preflight
+    arbx pools refresh --config /root/arbx/deploy/arbx-ft008-frz.toml --inputs /root/arbx/runs/wp22-preflight/pools.csv.inputs.json \
+        --out /root/arbx/runs/wp22-preflight/replayed.csv --segment preflight     (the same sha256: deterministic)
+
+Check in `pools.csv.report.json`: `status` ok (`kept_previous` with an RPC reason: the public RPC refuses Cherry, switch
+`rpc`); `duration_ms` well under 225,000 (the refresh's own deadline); `sources.*.status` ok; `records` one entry per
+FT-006 segment, each `ok`, with `unlisted_pools_seen` > 0; `counts.rows` <= 1,500; `added` tokens with 2+ pools that look
+right (BINDER-like), every one with `quote_liquidity` >= 2 SOL; `rejected_by` mostly `group`, `liquidity`, `quote`.
+A local run of the same command on FT-005b's first segment (2026-10-06): 53 s, +13 added (4 records, 3 GeckoTerminal, 6
+DexScreener), 13 idle pools cut by the cap, 23 getMultipleAccounts on the public RPC.
+
 ## Results
 (filled in)

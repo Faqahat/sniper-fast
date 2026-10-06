@@ -32,6 +32,14 @@
 //!   A stop not obeyed gets SIGINT after 60 s and SIGKILL after 180 s.
 //! - **Records:** campaign.json (`arbx.campaign/1.1`), events.jsonl (the campaign's events, each also a
 //!   [`crate::notify`] notice), supervisor.jsonl and supervisor.log, control.jsonl, spend.json, `<segment>.out`.
+//! - **Pool refresh** (WP-22, `[pool_refresh] enabled`): the seed list is the one data file that changes between
+//!   segments. Each segment boots on its own list in the campaign directory (`pools-<segment>.csv`, `arbx run
+//!   --pools-csv`): the first a copy of the config's `[pools] seed_csv`, every later one what `arbx pools refresh` wrote
+//!   during the segment before it (started `lead_s` before that segment's end, a process of its own beside it, killed
+//!   past `timeout_s`), once its report says `ok` and the file hashes as the report says; otherwise a copy of the previous
+//!   list, with why. Every list is hashed in campaign.json `pool_lists` (and the segment's meta.json `overrides.pools_csv`
+//!   and `pools.seed_csv_sha256`); each refresh is an events.jsonl `pool_refresh` event and one Telegram notice. The
+//!   other data files stay frozen and checked.
 //! - **Passphrase** (a `wallet_keystore` file and a sending mode): asked once, checked against the wallet, kept in one
 //!   mlock'd page of this process (`wallet::Pass`: read with read(2), wiped when it goes, locked again after `--detach`'s
 //!   fork; review WP-07 #15) and handed to each sending segment over a pipe; never argv, the environment or a file. The
@@ -54,6 +62,9 @@ pub const SCHEMA: &str = "arbx.campaign/1.1";
 pub const CRASH_LIMIT: usize = 6;
 /// a segment shorter than this is not started (the time is up)
 const MIN_SEGMENT_MIN: f64 = 2.0;
+/// WP-22: a refresh still running when its segment ends is waited for at most this long (and never past its own
+/// deadline): the gap between segments stays about a minute
+pub const REFRESH_WAIT_S: u64 = 45;
 /// what the stop basis is, in campaign.json and the equity events (STAGE1-PLAN review F6)
 pub const BASIS: &str = "net_spend: the stops measure the net spend since the campaign's start (fees + tips + non-recoverable rent - the routes' trading result; the owner's transfers are not in it) against the start's SOL + WSOL (lamports); every non-SOL token a quantity floor moved by routes only; recoverable rent apart";
 
@@ -94,7 +105,27 @@ pub struct Opts {
 /// only), what is left of the test budget, the floor, and why it records only
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spec { pub index: u32, pub name: String, pub dir: PathBuf, pub minutes: f64, pub flag: Option<&'static str>, pub budget_left: Option<u64>,
-    pub equity_floor: Option<i64>, pub why_shadow: Option<String> }
+    pub equity_floor: Option<i64>, pub why_shadow: Option<String>,
+    /// WP-22: the segment's own seed list (`--pools-csv`; None: the config's, refresh off)
+    pub pools_csv: Option<PathBuf> }
+
+/// WP-22: one pool refresh to run during a segment, for the next one (`arbx pools refresh`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct RefreshJob {
+    /// the segment the new list is for
+    pub segment: String,
+    /// the running segment's list
+    pub current: PathBuf,
+    pub out: PathBuf,
+    pub report: PathBuf,
+    /// its stdout and stderr
+    pub log: PathBuf,
+    /// its own deadline (`--deadline-s`): it keeps the previous list past it
+    pub deadline_s: u64,
+}
+
+/// a refresh under way (WP-22)
+struct Refreshing { job: RefreshJob, child: Option<Box<dyn Child>>, started_ns: u64, rc: Option<i32>, killed: bool, error: Option<String> }
 
 /// A running segment's process
 pub trait Child {
@@ -113,6 +144,8 @@ pub trait Runner {
     fn busy(&self) -> Vec<String>;
     /// free space of the runs filesystem, GB
     fn free_gb(&self) -> Option<f64>;
+    /// WP-22: start a pool refresh beside the running segment (`arbx pools refresh` of the frozen binary and config)
+    fn refresh(&mut self, _job: &RefreshJob) -> Result<Box<dyn Child>> { bail!("this runner runs no pool refresh") }
 }
 
 /// time and waiting (tests advance their own)
@@ -149,7 +182,20 @@ impl ProcessRunner {
             "--env-file".into(), self.env_file.display().to_string(), "--drain-s".into(), self.drain_s.to_string()]);
         if let Some(b) = s.budget_left { a.extend(["--budget-left".to_string(), b.to_string()]); }
         if let Some(f) = s.equity_floor { a.extend(["--equity-floor".to_string(), f.to_string()]); }
+        if let Some(p) = &s.pools_csv { a.extend(["--pools-csv".to_string(), p.display().to_string()]); }
         if let Some(f) = s.flag { a.push(f.to_string()); }
+        a
+    }
+
+    /// `arbx pools refresh`'s arguments for a refresh (WP-22): the frozen config, the campaign's records, the .env
+    pub fn refresh_args(&self, j: &RefreshJob) -> Vec<String> {
+        let mut a: Vec<String> = ["pools", "refresh", "--config"].iter().map(|x| x.to_string()).collect();
+        a.push(self.config.display().to_string());
+        for (k, v) in [("--current", &j.current), ("--runs", &self.dir), ("--out", &j.out), ("--report", &j.report), ("--env-file", &self.env_file)] {
+            a.push(k.to_string());
+            a.push(v.display().to_string());
+        }
+        a.extend(["--segment".to_string(), j.segment.clone(), "--deadline-s".into(), j.deadline_s.to_string()]);
         a
     }
 }
@@ -171,6 +217,12 @@ impl Runner for ProcessRunner {
     fn ctl(&mut self, s: &Spec, cmd: &str, why: &str) -> Result<Value> { control::send_command(&s.dir, cmd, "supervisor", why) }
     fn busy(&self) -> Vec<String> { if self.force { Vec::new() } else { crate::probe::busy(&self.runs, true) } }
     fn free_gb(&self) -> Option<f64> { free_gb(&self.runs) }
+    fn refresh(&mut self, j: &RefreshJob) -> Result<Box<dyn Child>> {
+        let out = std::fs::File::create(&j.log).context("the refresh's log")?;
+        let mut cmd = std::process::Command::new(&self.bin);
+        cmd.args(self.refresh_args(j)).stdout(out.try_clone()?).stderr(out).stdin(std::process::Stdio::null());
+        Ok(Box::new(ProcChild(cmd.spawn().with_context(|| format!("starting {} pools refresh", self.bin.display()))?)))
+    }
 }
 
 /// free space of the filesystem holding `p`, GB
@@ -237,6 +289,18 @@ pub struct Campaign {
     pub echo: bool,
     /// a segment whose exit could not be waited for (the campaign ends: none may start beside it)
     pub unreaped: Option<String>,
+    /// WP-22: the pool refresh's policy when it is on
+    pub refresh: Option<crate::config::PoolRefreshCfg>,
+    /// the config's seed list (the first segment's list is a copy of it)
+    pub seed_csv: PathBuf,
+    /// the list the last segment booted on
+    prev_list: Option<PathBuf>,
+    /// the refresh running beside the segment
+    refreshing: Option<Refreshing>,
+    /// how long after a segment's end its refresh is still waited for (at most its own deadline)
+    pub refresh_wait: Duration,
+    /// the segment after the running one, when there will be one (its refresh runs during this one)
+    next_name: Option<String>,
 }
 
 impl Campaign {
@@ -253,7 +317,9 @@ impl Campaign {
             "segments": [], "crash_count_15min": 0, "records_only_why": null, "end_reason": null });
         Campaign { dir, runs, name: name.to_string(), mode, config_live: cfg.mode == "live", hours, segment_min, test_budget, max_segments: None, limits,
             min_free_gb: cfg.record.min_free_gb, poll: Duration::from_secs(2), stop_int_s: 60, stop_kill_s: 180, backoff: Duration::from_secs(10), busy_wait_s: 120,
-            stop: Arc::new(AtomicBool::new(false)), state, echo: true, unreaped: None }
+            stop: Arc::new(AtomicBool::new(false)), state, echo: true, unreaped: None,
+            refresh: cfg.pool_refresh.enabled.then(|| cfg.pool_refresh.clone()), seed_csv: PathBuf::from(&cfg.pools.seed_csv), prev_list: None, refreshing: None,
+            refresh_wait: Duration::from_secs(REFRESH_WAIT_S), next_name: None }
     }
 
     fn file(&self, ext: &str) -> PathBuf { self.runs.join(format!("{}.{ext}", self.name)) }
@@ -326,6 +392,9 @@ impl Campaign {
     fn check_data_files(&mut self) {
         let Some(m) = self.state["data_files"].as_object().cloned() else { return };
         for (p, h) in m {
+            // WP-22: with the pool refresh on, the seed list is the one data file that changes between segments (each segment
+            // boots on its own copy, hashed in `pool_lists`); every other file stays checked
+            if self.refresh.is_some() && Path::new(&p) == self.seed_csv.as_path() { continue; }
             let now = std::fs::read(&p).ok().map(|b| json!(crate::provenance::sha256_hex(&b))).unwrap_or(Value::Null);
             let seen = self.state["data_files_changed"].as_array().is_some_and(|a| a.iter().any(|x| x["path"] == json!(p)));
             if now != h && !seen {
@@ -358,6 +427,11 @@ impl Campaign {
         self.sj("start", "", &format!("hours={} segment_min={} mode={}", self.hours, self.segment_min, self.mode.as_str()));
         self.event("campaign_start", Some(Level::Info), &format!("started: {} h, {} segments of {} min, mode {}", self.hours, (self.hours * 60.0 / self.segment_min).ceil(),
             self.segment_min, self.mode.as_str()), json!({ "mode": self.mode.as_str(), "hours": self.hours, "segment_min": self.segment_min, "test_budget_lamports": self.test_budget }));
+        if let Some(pr) = &self.refresh {
+            self.state["pool_refresh"] = json!({ "policy": pr, "first_list": self.seed_csv.display().to_string() });
+            self.state["pool_lists"] = json!([]);
+            self.save();
+        }
         let mut i = 0u32;
         let mut crashes: Vec<u64> = Vec::new();
         let mut paused_logged = false;
@@ -406,6 +480,16 @@ impl Campaign {
             };
             let mins = self.segment_min.min((t_end - now) as f64 / 60e9);
             if mins < MIN_SEGMENT_MIN { break "time up".into(); }
+            // WP-22: the list this segment boots on (the refresh that ran during the previous segment, checked; else the
+            // previous list)
+            let next = format!("{}-p{}", self.name, i + 1);
+            let pools_csv = match self.list_for(&next, clock) {
+                Ok(p) => p,
+                Err(e) => {
+                    self.event("pool_list_failed", Some(Level::Error), &format!("{next} has no seed list: {e:#}"), json!({ "segment": next, "error": format!("{e:#}") }));
+                    break format!("segment {next} has no seed list: {e:#}");
+                }
+            };
             // PLAN-ADDENDUM I-3: nothing else may hold the provider (the previous segment's process has been reaped)
             let mut busy = runner.busy();
             let t_busy = clock.now_ns();
@@ -421,7 +505,11 @@ impl Campaign {
             // what is left of the test budget and the floor go to a segment that may send
             let sends = self.mode.sends();
             let spec = Spec { index: i, name: name.clone(), dir: self.dir.join(&name), minutes: (mins * 100.0).floor() / 100.0, flag,
-                budget_left: left.filter(|_| sends), equity_floor: floor.filter(|_| sends), why_shadow: records_only.clone() };
+                budget_left: left.filter(|_| sends), equity_floor: floor.filter(|_| sends), why_shadow: records_only.clone(), pools_csv };
+            // WP-22: the segment after this one, if there will be one (its list is refreshed during this one)
+            let after = t_end.saturating_sub(clock.now_ns() + (spec.minutes * 60e9) as u64) as f64 / 60e9;
+            self.next_name = (self.refresh.is_some() && !self.max_segments.is_some_and(|m| i >= m) && after >= MIN_SEGMENT_MIN)
+                .then(|| format!("{}-p{}", self.name, i + 1));
             let t_start = clock.now_ns();
             self.say(&format!("segment {i} ({name}): {} min, {}, budget left {:?}, floor {:?}{}", spec.minutes, flag.unwrap_or("shadow config"), spec.budget_left, floor,
                 records_only.as_ref().map(|w| format!(", records only ({w})")).unwrap_or_default()));
@@ -447,6 +535,10 @@ impl Campaign {
             crashes.retain(|t| t_exit.saturating_sub(*t) < 900_000_000_000);
             let mut seg = json!({ "name": name, "started_ns": t_start, "ended_ns": t_exit, "exit_code": rc, "stop_reason": reason, "class": class, "pid": pid, "flag": flag,
                 "budget_left": spec.budget_left, "equity_floor": floor, "records_only": records_only });
+            if let Some(p) = &spec.pools_csv {
+                seg["pools_csv"] = json!(p.display().to_string());
+                seg["pools_csv_sha256"] = json!(std::fs::read(p).ok().map(|b| crate::provenance::sha256_hex(&b)));
+            }
             if let Ok(st) = std::fs::read(spec.dir.join("stop.json")).map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice::<Value>(&b)?)) {
                 seg["unsettled"] = st["unsettled"].clone();
                 seg["drain_ms"] = st["drain_ms"].clone();
@@ -471,6 +563,16 @@ impl Campaign {
 
     /// The end: campaign.json's end, spend.json, the money's last word, an event
     pub fn finish(&mut self, why: &str, now: u64) {
+        // WP-22: a refresh still running has no segment to serve: it goes (never left behind the campaign)
+        if let Some(mut r) = self.refreshing.take() {
+            if let Some(c) = r.child.as_mut() {
+                if !matches!(c.try_wait(), Ok(Some(_))) {
+                    c.signal(libc::SIGKILL);
+                    for _ in 0..20 { if !matches!(c.try_wait(), Ok(None)) { break; } std::thread::sleep(Duration::from_millis(50)); }
+                    self.say(&format!("pool refresh for {}: stopped (the campaign ends)", r.job.segment));
+                }
+            }
+        }
         let h = self.update_equity(now);
         self.state["ended_ns"] = json!(now);
         self.state["end_reason"] = json!(why);
@@ -503,6 +605,7 @@ impl Campaign {
         let mut wait_failed: Option<u64> = None;
         let sends = matches!(spec.flag, Some("--canary") | Some("--live"));
         let paused_start = spec.why_shadow.as_deref() == Some("paused");
+        let t_seg = clock.now_ns();
         loop {
             match child.try_wait() {
                 Ok(Some(rc)) => return rc,
@@ -606,7 +709,115 @@ impl Campaign {
                     stop_sent = Some(now);
                 }
             }
+            // WP-22: the pool refresh for the next segment, beside this one (none once a stop was sent)
+            self.tick_refresh(runner, spec, t_seg, clock.now_ns(), stop_sent.is_none());
             clock.sleep(self.poll);
+        }
+    }
+
+    /// WP-22: start the refresh for the next segment `lead_s` before this one's end (when there will be a next one and
+    /// the segment is not stopping), and kill one past its `timeout_s`
+    fn tick_refresh(&mut self, runner: &mut dyn Runner, spec: &Spec, t_seg: u64, now: u64, running: bool) {
+        let Some(pr) = self.refresh.clone() else { return };
+        let mut said = Vec::new();
+        if let Some(r) = self.refreshing.as_mut() {
+            if r.rc.is_none() && !r.killed {
+                if let Some(c) = r.child.as_mut() {
+                    match c.try_wait() {
+                        Ok(Some(rc)) => r.rc = Some(rc),
+                        Ok(None) if now >= r.started_ns + pr.timeout_s * 1_000_000_000 => {
+                            c.signal(libc::SIGKILL);
+                            r.killed = true;
+                            said.push(format!("pool refresh for {}: still running {} s after its start: killed (the previous list stays)", r.job.segment, pr.timeout_s));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        } else if let Some(next) = self.next_name.clone().filter(|_| running) {
+            let due = t_seg + ((spec.minutes * 60.0) as u64).saturating_sub(pr.lead_s) * 1_000_000_000;
+            if now >= due {
+                let job = RefreshJob { segment: next.clone(), current: spec.pools_csv.clone().unwrap_or_else(|| self.seed_csv.clone()),
+                    out: self.dir.join(format!("pools-{next}.csv")), report: self.dir.join(format!("pool-refresh-{next}.json")),
+                    log: self.dir.join(format!("pool-refresh-{next}.out")), deadline_s: pr.timeout_s.saturating_sub(15).max(15) };
+                let (child, error) = match runner.refresh(&job) { Ok(c) => (Some(c), None), Err(e) => (None, Some(format!("{e:#}"))) };
+                said.push(match &error { None => format!("pool refresh for {next}: started ({} s before {}'s end)", pr.lead_s, spec.name),
+                    Some(e) => format!("pool refresh for {next}: could not start: {e}") });
+                self.sj("pool_refresh_start", &spec.name, &format!("for={next} ok={}", error.is_none()));
+                self.refreshing = Some(Refreshing { job, child, started_ns: now, rc: None, killed: false, error });
+            }
+        }
+        for m in said { self.say(&m); }
+    }
+
+    /// WP-22: the list segment `name` boots on, in the campaign directory (`pools-<name>.csv`): the first segment's a copy
+    /// of the config's seed list; a later one's what the refresh during the previous segment wrote, once its report says
+    /// `ok` and the file hashes as the report says, else a copy of the previous list. Recorded (campaign.json
+    /// `pool_lists`, an events.jsonl `pool_refresh` event, one notice). None: the refresh is off (the config's list)
+    fn list_for(&mut self, name: &str, clock: &dyn Clock) -> Result<Option<PathBuf>> {
+        let Some(pr) = self.refresh.clone() else { return Ok(None) };
+        let path = self.dir.join(format!("pools-{name}.csv"));
+        let t0 = clock.now_ns();
+        let (source, reason, report): (&str, Option<String>, Value) = match self.prev_list.clone() {
+            None => {
+                std::fs::copy(&self.seed_csv, &path).with_context(|| format!("copying the seed list {}", self.seed_csv.display()))?;
+                ("config", None, Value::Null)
+            }
+            Some(prev) => {
+                let (ok, reason, report) = self.finish_refresh(name, &pr, clock);
+                if !ok { std::fs::copy(&prev, &path).with_context(|| format!("copying the previous list {}", prev.display()))?; }
+                (if ok { "refresh" } else { "previous" }, reason, report)
+            }
+        };
+        let (rows, sha) = crate::poolrefresh::check_list(&path, None)?;
+        let rec = json!({ "segment": name, "file": path.display().to_string(), "sha256": sha, "rows": rows, "source": source, "reason": reason,
+            "waited_ms": clock.now_ns().saturating_sub(t0) / 1_000_000, "report": if report.is_null() { Value::Null } else { json!(self.dir.join(format!("pool-refresh-{name}.json")).display().to_string()) },
+            "status": report["status"], "counts": report["counts"], "duration_ms": report["duration_ms"], "sources": report["sources"] });
+        if let Some(a) = self.state["pool_lists"].as_array_mut() { a.push(rec.clone()); } else { self.state["pool_lists"] = json!([rec.clone()]); }
+        self.save();
+        self.say(&format!("segment {name} boots on {} ({rows} pools, sha256 {}, {source}{})", path.display(), &sha[..16], reason.as_ref().map(|r| format!(": {r}")).unwrap_or_default()));
+        if source != "config" {
+            let text = if source == "refresh" { format!("pool refresh for {name}: {}", crate::poolrefresh::summary_line(&report)) }
+                else { format!("pool refresh for {name}: the previous list stays ({})", reason.as_deref().unwrap_or("?")) };
+            let level = if source == "refresh" { Level::Info } else { Level::Warn };
+            control::append_line(&self.dir.join("events.jsonl"), &json!({ "t_ns": now_ns(), "kind": "pool_refresh", "subsystem": "campaign", "feed": null, "detail": rec }).to_string());
+            notify::notify(notify::now(level, "pool_refresh", "campaign", name.to_string(), format!("campaign {}: {text}", self.name), rec));
+        }
+        self.prev_list = Some(path.clone());
+        Ok(Some(path))
+    }
+
+    /// WP-22: the refresh that ran during the previous segment, for `name`: waited for (at most `refresh_wait` and never
+    /// past its own `timeout_s`), killed past that, its outputs checked. (used, why not, its report)
+    fn finish_refresh(&mut self, name: &str, pr: &crate::config::PoolRefreshCfg, clock: &dyn Clock) -> (bool, Option<String>, Value) {
+        let Some(mut r) = self.refreshing.take() else {
+            return (false, Some("no refresh ran during the previous segment (it ended before the refresh's lead time, or it was stopping)".into()), Value::Null);
+        };
+        if r.job.segment != name { return (false, Some(format!("the refresh was for {}", r.job.segment)), Value::Null); }
+        if let Some(e) = &r.error { return (false, Some(format!("the refresh could not start: {e}")), Value::Null); }
+        let until = (r.started_ns + pr.timeout_s * 1_000_000_000).min(clock.now_ns() + self.refresh_wait.as_nanos() as u64);
+        if let Some(c) = r.child.as_mut() {
+            while r.rc.is_none() {
+                match c.try_wait() { Ok(Some(rc)) => { r.rc = Some(rc); break } Ok(None) => {} Err(e) => { r.error = Some(format!("{e:#}")); break } }
+                if r.killed || clock.now_ns() >= until { break; }
+                clock.sleep(self.poll.min(Duration::from_millis(500)));
+            }
+            if r.rc.is_none() {
+                if !r.killed { c.signal(libc::SIGKILL); r.killed = true; }
+                for _ in 0..20 { if let Ok(Some(rc)) = c.try_wait() { r.rc = Some(rc); break } clock.sleep(Duration::from_millis(50)); }
+            }
+        }
+        let report: Value = std::fs::read(&r.job.report).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+        let took = clock.now_ns().saturating_sub(r.started_ns) / 1_000_000_000;
+        if r.killed { return (false, Some(format!("the refresh did not finish in time: killed {took} s after its start")), report); }
+        match report["status"].as_str() {
+            Some("ok") => match crate::poolrefresh::check_list(&r.job.out, report["out"]["sha256"].as_str()) {
+                Ok(_) if report["segment"].as_str() == Some(name) => (true, None, report),
+                Ok(_) => (false, Some(format!("the report is for {:?}", report["segment"])), report),
+                Err(e) => (false, Some(format!("the refreshed list does not check: {e:#}")), report),
+            },
+            Some("kept_previous") => (false, Some(format!("the refresh kept the previous list: {}", report["reason"].as_str().unwrap_or("?"))), report),
+            _ => (false, Some(format!("the refresh wrote no report (exit {:?}{})", r.rc, r.error.as_ref().map(|e| format!(", {e}")).unwrap_or_default())), report),
         }
     }
 }
@@ -620,6 +831,10 @@ pub fn main(o: Opts, detach: bool) -> Result<i32> {
     let (cfg, raw) = Config::load_raw(&conf)?;
     if mode == Mode::Canary && !cfg.canary.enabled { bail!("--mode canary needs [canary] enabled = true in the config"); }
     if mode == Mode::Live && cfg.mode != "live" { bail!("--mode live needs mode = \"live\" in the config"); }
+    // WP-22: the refresh starts `lead_s` before a segment's end: a segment must be longer than that
+    if cfg.pool_refresh.enabled && cfg.pool_refresh.lead_s as f64 >= o.segment_min * 60.0 {
+        bail!("[pool_refresh] lead_s {} is not shorter than a {}-minute segment", cfg.pool_refresh.lead_s, o.segment_min);
+    }
     // the stricter of the operator's allotment and the frozen config's budget (the frz config's is FT-004's allotment)
     let budget = match (o.test_budget, (cfg.supervisor.test_budget_lamports > 0).then_some(cfg.supervisor.test_budget_lamports)) {
         (Some(a), Some(b)) => Some(a.min(b)), (a, b) => a.or(b) };
