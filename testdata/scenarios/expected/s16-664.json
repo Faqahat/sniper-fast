@@ -1,0 +1,187 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 2,
+      "group": 0,
+      "late": null,
+      "members": 3,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "s16.pump"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "S16-664-state",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 2,
+      "group": 1,
+      "late": null,
+      "members": 1,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "s16.pump"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "S16-664-v-now",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 2,
+      "group": 2,
+      "late": null,
+      "members": 3,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "s16.pump"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "S16-664-trigger-state",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": 0,
+      "best": 0,
+      "decision": 0,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "below_min_profit",
+      "routes": [
+        {
+          "buy": "s16.pump",
+          "crossed": [
+            0,
+            1
+          ],
+          "cu": 200000,
+          "gross": -3475526,
+          "net": -3481526,
+          "reason": "below_min_profit",
+          "sell": "s16.dlmm",
+          "size": 5000000
+        },
+        {
+          "buy": "s16.dlmm",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "broken_quote",
+          "sell": "s16.pump",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "s16.pump",
+        "slot": 453386132,
+        "txn": "S16-664-state"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 0,
+      "best": 0,
+      "decision": 1,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "below_min_profit",
+      "routes": [
+        {
+          "buy": "s16.pump",
+          "crossed": [
+            0,
+            1
+          ],
+          "cu": 200000,
+          "gross": -3475537,
+          "net": -3481537,
+          "reason": "below_min_profit",
+          "sell": "s16.dlmm",
+          "size": 5000000
+        },
+        {
+          "buy": "s16.dlmm",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "broken_quote",
+          "sell": "s16.pump",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "s16.pump",
+        "slot": 453386132,
+        "txn": "S16-664-v-now"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 0,
+      "best": 0,
+      "decision": 2,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "below_min_profit",
+      "routes": [
+        {
+          "buy": "s16.pump",
+          "crossed": [
+            0,
+            1
+          ],
+          "cu": 200000,
+          "gross": -3467266,
+          "net": -3473266,
+          "reason": "below_min_profit",
+          "sell": "s16.dlmm",
+          "size": 5000000
+        },
+        {
+          "buy": "s16.dlmm",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "broken_quote",
+          "sell": "s16.pump",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "s16.pump",
+        "slot": 453386132,
+        "txn": "S16-664-trigger-state"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    }
+  ],
+  "executor": {
+    "attempts": [],
+    "bundles": [],
+    "ledger": [],
+    "opportunities": [],
+    "outcomes": [],
+    "recon": []
+  },
+  "scenario": "s16-664"
+}

@@ -700,6 +700,10 @@ pub struct Exec {
     pub seen_mismatch: u64,
     /// decisions made before any record (fail closed: the gate read as stopped)
     pub seen_missing: u64,
+    /// ---- WP-09 part 2 (a sending executor replayed): the run's `sent` record staged for the next send, (opportunity,
+    /// attempt, signature); sends replayed without one (`take_sent`)
+    sent_next: Option<(u64, u64, String)>,
+    pub sent_missing: u64,
     /// the payer's token accounts no leg may name (review WP-06 #7): its USDC and USDT accounts, which the route's
     /// min_profit (on the quote account) does not watch, unless the route trades through one of them
     payer_tokens: Vec<Pk>,
@@ -950,7 +954,7 @@ impl Exec {
             finals: HashMap::default(), finals_order: VecDeque::new(), feeds, seen: HashMap::default(), net: Arc::new(AtomicU64::new(0)), poh_gauge: &crate::feeds::POH_GAUGE,
             decisions: 0, refusals: 0, would_sends: 0, sent: 0, last_sent_ns: 0, landed: 0, wins: 0, spent: 0, reserved: 0, fees: 0, tips_paid: 0, round_trip: 0,
             round_trip_unknown: 0, never_left: 0, new_atas: 0, stopped: None, leader_seen: (0, 0), leader_prev: (0, 0), offline: false, cfg_sha256: cfg_sha256(cfg), journaled: None,
-            journaled_fresh: false, seen_mismatch: 0, seen_missing: 0,
+            journaled_fresh: false, seen_mismatch: 0, seen_missing: 0, sent_next: None, sent_missing: 0,
             payer_tokens: PERMANENT_MINTS[1..].iter().map(|m| build::ata_of(&payer, m, &crate::pda::TOKEN_PROGRAM)).collect(),
             money: Default::default(), money_guard: false, bankroll_share: cfg.live.bankroll_share, bankroll_reserve: sol(cfg.live.bankroll_reserve_sol),
             rent_cap: sol(cfg.supervisor.rent_cap_sol), t_now: 0, provisional: BTreeMap::new(), refused_landed: Vec::new(),
@@ -1093,9 +1097,12 @@ impl Exec {
         if self.spent + self.reserved + BASE_FEE > self.cap_failed_fees {
             if self.open.is_empty() {
                 self.stopped = Some(if self.mode == Mode::Canary { "spend cap reached" } else { "failed-fee cap reached" });
-                // WP-20 (integration): the budget floor, at once (the status line's `exec.stopped` says it too, deduplicated)
-                crate::alerts::budget_floor(crate::alerts::BudgetFloor { what: "failed_fee_cap".into(), value_lamports: (self.spent + self.reserved) as i64,
-                    floor_lamports: self.cap_failed_fees as i64, detail: self.stopped.map(String::from) });
+                // WP-20 (integration): the budget floor, at once (the status line's `exec.stopped` says it too, deduplicated);
+                // never from a replay (WP-09 part 2: an offline executor of a sending run alerts nobody)
+                if !self.offline {
+                    crate::alerts::budget_floor(crate::alerts::BudgetFloor { what: "failed_fee_cap".into(), value_lamports: (self.spent + self.reserved) as i64,
+                        floor_lamports: self.cap_failed_fees as i64, detail: self.stopped.map(String::from) });
+                }
             }
             return Some("fee_cap");
         }
@@ -1150,6 +1157,19 @@ impl Exec {
     /// until the next). A record of another opportunity than the one being decided, or one this build cannot read, means
     /// the replay is not the run's (`seen_mismatch`)
     pub fn stage_seen(&mut self, opp: u64, at: u64, d: &Value) {
+        // ---- WP-09 part 2: a send of a live or canary run (`sent`: its attempt and signature, journaled right after the
+        // decision): the signature the offline executor's replayed send takes (`take_sent`). One staged at another
+        // opportunity, or one replacing a record no send took, is not the replay's
+        if let Some(s) = d.get("sent").filter(|s| s.is_object()) {
+            match (s["attempt"].as_u64(), s["sig"].as_str()) {
+                (Some(a), Some(sig)) => {
+                    if opp != at || self.sent_next.is_some() { self.seen_mismatch += 1; }
+                    self.sent_next = Some((opp, a, sig.to_string()));
+                }
+                _ => self.seen_mismatch += 1,
+            }
+            return;
+        }
         match Seen::from_json(d) {
             Some(s) => {
                 if opp != at { self.seen_mismatch += 1; }
@@ -1192,7 +1212,10 @@ impl Exec {
         // what else refused such a decision is `ungated_<reason>`, so the `reject_*` counters sum to the refusals
         // (review WP-05 #16)
         if let Err(g) = &gate { self.count(reject_counter(g)); }
+        let opp = r.opp;
         let mut d = crate::netcount::on_thread(&net, || self.decide_inner(r, i, view, alts, slot, t, gate.is_err()));
+        // ---- WP-09 part 2: the run sent this opportunity and the replay did not (its `sent` record left untaken)
+        if self.sent_next.as_ref().is_some_and(|s| s.0 <= opp) { self.sent_next = None; self.seen_mismatch += 1; }
         if d.attempt.is_none() { let k = if gate.is_err() { ungated_counter(&d.reason) } else { reject_counter(&d.reason) }; self.count(k); }
         if let Err(g) = gate {
             // send_checks' order: the gate's reason first; what would have refused it otherwise beside it
@@ -1270,8 +1293,11 @@ impl Exec {
             Err(e) => return fail(d, &build_reason(&e)),
         };
         let t_built = now_ns();
+        // ---- WP-09 part 2: a replay's offline executor of a live or canary run holds no path and no key: the run's send is
+        // replayed as sent, with the run's signature (its `sent` record), and what came back to the run comes from the journal
+        let replayed_send = !would && self.offline;
         // a sending mode's path (always there: `Exec::new` refuses a live or canary executor without its bundle path)
-        let send_path = if would { None } else {
+        let send_path = if would || replayed_send { None } else {
             match (self.paths.clone(), self.bundle_path) { (Some(p), Some(bp)) => Some((p, bp)), _ => return fail(d, "sender_stopped") }
         };
         // the attempt: from here on nothing refuses it
@@ -1297,7 +1323,7 @@ impl Exec {
         let mut line = AttemptLine { attempt, r: &r, mode: self.mode, expected, band, crowding, tip, tip_share: tipped.map(|x| x.1.share), tip_policy: self.tips.as_ref(),
             min_profit: built.min_profit, margin, built: &built, bh: &bh, bh_age: age, leader: snap, key, prev, why_allowed, prio, lambda: self.paths.as_ref().and_then(|p| p.queue_now().1),
             t_built0, t_built, payer: self.payer, program: self.program }.json();
-        let Some((paths, bp, raw, fire, t_signed, t_fired)) = fired else {
+        if fired.is_none() && !replayed_send {
             // a would-send (shadow, dry run, a closed gate): recorded with sent = false
             self.would_recent.push_back(t);
             self.would_sends += 1;
@@ -1333,28 +1359,37 @@ impl Exec {
             self.rec.json(rec::ATTEMPTS, line);
             self.count("would_send");
             return d;
+        }
+        let (sig58, t_signed, t_fired, path_name) = match fired {
+            Some((paths, bp, raw, fire, t_signed, t_fired)) => {
+                let sig58 = send::first_signature(&raw).unwrap_or_default();
+                let sig = sig64(&sig58).unwrap_or([0; 64]);
+                let pools = [r.buy.pool, r.sell.pool];
+                let back = self.back.clone();
+                self.rt.spawn(async move {
+                    let fired = match fire.await { Ok(f) => f, Err(e) => Fired { id: attempt, t_ns: 0, copies: vec![send::Sent { attempt, path: "?".into(), sig: Some(sig58_of(&sig)),
+                        tip_account: None, tip_lamports: 0, t_sent: 0, t_ack: 0, ms: 0.0, ok: false, status: None, reply: Some(format!("send task failed: {e}")), bundle: None,
+                        blockhash_slot: None, queue_wait_us: None, drop: Some("send_task"), lambda: None }] } };
+                    // WP-03b tap, after the firing: the copy that left (the wallet's source (b), watched until a few slots past its
+                    // target slot) and the route's pools (backfill priority 0)
+                    crate::chainfetch::note_fired(attempt, &fired.copies, &pools, Some(target));
+                    let _ = back.send(Event::Settled(Box::new(Settled::Fired { attempt, fired })));
+                });
+                self.lat[LAT_DECIDED_TO_SIGNED].push(t_signed.saturating_sub(r.st[4]));
+                self.lat[LAT_SIGNED_TO_FIRED].push(t_fired.saturating_sub(t_signed));
+                (sig58, t_signed, t_fired, paths.list[bp].name.clone())
+            }
+            // ---- WP-09 part 2: the run's send, replayed: its signature from the run's record, nothing fired (its result is
+            // the journal's INPUT 9), the stage times the engine's
+            None => (self.take_sent(r.opp, attempt), t, t, self.tips.as_ref().map_or_else(|| "jito-bundle".to_string(), |p| p.path.clone())),
         };
-        let sig58 = send::first_signature(&raw).unwrap_or_default();
         let sig = sig64(&sig58).unwrap_or([0; 64]);
-        let pools = [r.buy.pool, r.sell.pool];
-        let back = self.back.clone();
-        self.rt.spawn(async move {
-            let fired = match fire.await { Ok(f) => f, Err(e) => Fired { id: attempt, t_ns: 0, copies: vec![send::Sent { attempt, path: "?".into(), sig: Some(sig58_of(&sig)),
-                tip_account: None, tip_lamports: 0, t_sent: 0, t_ack: 0, ms: 0.0, ok: false, status: None, reply: Some(format!("send task failed: {e}")), bundle: None,
-                blockhash_slot: None, queue_wait_us: None, drop: Some("send_task"), lambda: None }] } };
-            // WP-03b tap, after the firing: the copy that left (the wallet's source (b), watched until a few slots past its
-            // target slot) and the route's pools (backfill priority 0)
-            crate::chainfetch::note_fired(attempt, &fired.copies, &pools, Some(target));
-            let _ = back.send(Event::Settled(Box::new(Settled::Fired { attempt, fired })));
-        });
         line["sent"] = json!(true);
         line["tx"]["sig"] = json!(sig58);
         line["copies"][0]["sig"] = json!(sig58);
         line["stages"]["t_signed"] = json!(t_signed);
         line["stages"]["t_enqueued"] = json!(t_fired);
         self.rec.json(rec::ATTEMPTS, line);
-        self.lat[LAT_DECIDED_TO_SIGNED].push(t_signed.saturating_sub(r.st[4]));
-        self.lat[LAT_SIGNED_TO_FIRED].push(t_fired.saturating_sub(t_signed));
         self.sent += 1;
         self.last_sent_ns = t;
         self.reserved += BASE_FEE;
@@ -1366,7 +1401,7 @@ impl Exec {
             trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit: built.min_profit, held_addition: built.held_addition(), worst: BASE_FEE, bh_slot: bh.slot,
             bh_height: bh.height,
             target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_engine: t, t_signed, t_sent: None, bundle: None,
-            path: paths.list[bp].name.clone(), fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
+            path: path_name, fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
             send_error: None, cooled: false });
         d.verdict = "send";
         d.reason = "sent".into();
@@ -1798,9 +1833,10 @@ impl Exec {
         self.add(counted, o.mint);
         // WP-07 (the WP-05 hand-off): a landing the expiry check found before its wallet record counts provisional money
         // (the base fee, an unknown round trip); its record is asked for now, and settles it (an amend line)
-        if src == "statuses" { crate::chainfetch::note_landed(&o.sig, landed.as_ref().and_then(|l| l.slot), Some(o.attempt)); }
+        // (WP-09 part 2: a replay's offline executor of a sending run asks nothing and alerts nobody)
+        if src == "statuses" && !self.offline { crate::chainfetch::note_landed(&o.sig, landed.as_ref().and_then(|l| l.slot), Some(o.attempt)); }
         // WP-20 (integration): the money alerts of attempts that really went out (live, canary): never waits (a try_send)
-        if self.mode.sends() { if let Some(l) = landed.as_ref() { landing_alert(&o.route, &o.mint, o.size, o.attempt, &o.sig58, l, &counted); } }
+        if self.mode.sends() && !self.offline { if let Some(l) = landed.as_ref() { landing_alert(&o.route, &o.mint, o.size, o.attempt, &o.sig58, l, &counted); } }
         let line = self.outcome_line(&o, fin, src, landed.as_ref(), error, amend, seen.as_ref(), poh);
         self.rec.json(rec::OUTCOMES, line);
         self.count(match fin { "landed_ok" => "landed_ok", "landed_fail" => "landed_fail", "not_landed_expired" => "not_landed_expired", "unsettled" => "unsettled",
@@ -1837,7 +1873,7 @@ impl Exec {
         // told without its net (the expiry check found it first) is told again once its record brings the net (the route
         // program's round trip, or the ledger's line)
         let net_now = counted.rt_unknown == 0 || l.ledger["liquid_delta"].is_i64();
-        if self.mode.sends() && (!f.landed || (l.ok && f.ok && f.counted.rt_unknown > 0 && net_now)) {
+        if self.mode.sends() && !self.offline && (!f.landed || (l.ok && f.ok && f.counted.rt_unknown > 0 && net_now)) {
             landing_alert(&f.route, &f.mint, f.size, attempt, &f.sig58, &l, &counted);
         }
         let t = self.t_now;
@@ -1854,7 +1890,7 @@ impl Exec {
         }
         if wallet_now { self.provisional.remove(&attempt); } else { self.provisional.entry(attempt).or_insert(t); }
         // a late cross-check's landing: its record settles the money (WP-07)
-        if src == "statuses" { if let Some(sig) = sig64(&f.sig58) { crate::chainfetch::note_landed(&sig, l.slot, Some(attempt)); } }
+        if src == "statuses" && !self.offline { if let Some(sig) = sig64(&f.sig58) { crate::chainfetch::note_landed(&sig, l.slot, Some(attempt)); } }
         // WP-07 (review #6): a bundle refused by the block engine that landed all the same: the first final stays, and the
         // engine hands it to the ledger at once (`take_refused_landed`)
         let refused_then_landed = f.refused && !f.landed;
@@ -2050,9 +2086,12 @@ impl Exec {
     /// record (its lookup tables, PumpSwap GlobalConfig and held tokens), with no RPC endpoint, no send path and no key,
     /// and the record's size cap, would-send rate and tip policy. A dry run's would-sends are signed by a new throwaway
     /// key: only their signatures differ from the run's. It reads the run's journaled decision inputs (`stage_seen`) and
-    /// spawns nothing. A live or canary executor is not replayed (its sends cannot be): refused
+    /// spawns nothing. ---- WP-09 part 2: a live or canary executor is replayed too. It holds no key and no send path
+    /// either: a decision the run sent is replayed as sent with the run's signature (its decision-point `sent` record,
+    /// `stage_seen`), and what came back to the run (the fire's result, the block engine's verdicts, the statuses, the
+    /// wallet's record) comes back from the journal as it came to the run. The record's failed-fee cap and equity guard
+    /// apply (the frozen config does not show `--budget-left`)
     pub fn offline(cfg: &Config, init: &ExecInit, rec: Rec) -> Result<Exec> {
-        anyhow::ensure!(!init.mode.sends(), "a {} executor is not replayed (its sends cannot be): only shadow and dry-run executors are", init.mode.as_str());
         let key = if init.mode == Mode::DryRun { Some(ephemeral_key()?) } else { None };
         let rt = offline_runtime();
         let _in = rt.enter();
@@ -2066,11 +2105,33 @@ impl Exec {
         x.tips = init.tips.clone();
         x.uva = init.uva;
         if let Some(t) = &x.tips { x.bands = t.model.bands; }
+        // ---- WP-09 part 2: a sending executor's equity guard and failed-fee cap, as the run's
+        x.money_guard = init.money_guard;
+        if let Some(c) = init.cap_failed_fees { x.cap_failed_fees = c; }
         Ok(x)
     }
 
     /// whether this is a replay's offline executor
     pub fn is_offline(&self) -> bool { self.offline }
+
+    /// ---- WP-09 part 2. The signature of attempt `a` while it is open (a send's, right after its decision: the engine
+    /// journals it, so a replay's offline executor sends with the run's signature)
+    pub fn attempt_sig(&self, a: u64) -> Option<String> { self.open.get(&a).map(|o| o.sig58.clone()) }
+
+    /// ---- WP-09 part 2. The run's signature of the send a replay's offline executor makes now (attempt `attempt` of
+    /// opportunity `opp`), from the run's `sent` record staged for it. Without one (a live or canary recording made before
+    /// the sent records, or a replay that diverged) the send is counted (`sent_missing`, not whole) and goes on with no
+    /// signature
+    fn take_sent(&mut self, opp: u64, attempt: u64) -> String {
+        match self.sent_next.take() {
+            Some((o, a, sig)) if o == opp && a == attempt => sig,
+            other => {
+                self.sent_missing += 1;
+                if other.is_some() { self.seen_mismatch += 1; }
+                String::new()
+            }
+        }
+    }
 
     /// ---- WP-06 (review #8). A what-if replay's tip model (`--set tips.*`, `min_tip` on the run's engine_init `builder`):
     /// the offline executor tips, sets min_profit and bands by it, as the replay's engine prices with it
@@ -2087,7 +2148,7 @@ impl Exec {
         ExecInit { mode: self.mode, alts: self.alts.iter().map(|a| (a.key, self.alt_lists.get(&a.key).map(|l| l.to_vec()).unwrap_or_default())).collect(),
             pump: self.pump.clone(), held, max_size: self.max_size, max_size_src: if self.mode == Mode::Canary { "canary" } else { "live" }.into(),
             would_send_per_sec: self.path_rate, tips: self.tips.clone(), crowding_window_h: 0, crowding_buckets: [0, 0], crowded: vec![], cfg_sha256: self.cfg_sha256.clone(),
-            uva: self.uva, version: EXEC_INIT_VERSION }
+            uva: self.uva, version: EXEC_INIT_VERSION, money_guard: self.money_guard, cap_failed_fees: Some(self.cap_failed_fees) }
     }
 
     /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 7). A digest of the executor's decision state, folded into
@@ -2193,6 +2254,13 @@ pub struct ExecInit {
     /// the record's version: `EXEC_INIT_VERSION` from WP-06 (the tip policy by band, the accumulator); a record without one
     /// was written before WP-06's builder, whose bundles a replay cannot rebuild
     pub version: u32,
+    /// ---- WP-09 part 2 (a sending executor replayed). WP-07: the run had a ledger, so live and canary sends waited for
+    /// the start equity (`require_equity`; false in a record written before)
+    pub money_guard: bool,
+    /// ---- WP-09 part 2. The failed-fee cap the run's executor stopped at (`[live] max_failed_fees_lamports` lowered by
+    /// `--budget-left`, which the frozen config does not show; the canary's `max_spend_lamports`). None in a record
+    /// written before: the config's
+    pub cap_failed_fees: Option<u64>,
 }
 
 /// exec_init's version from WP-06 (the bundle's layout, rent-neutral create+close, the tips by band)
@@ -2210,7 +2278,9 @@ impl ExecInit {
             "would_send_per_sec": self.would_send_per_sec,
             "tips": self.tips.as_ref().map(|p| p.json()),
             "crowding": { "window_h": self.crowding_window_h, "buckets": self.crowding_buckets, "static_list": keys(&self.crowded) },
-            "cfg_sha256": self.cfg_sha256, "uva": self.uva, "version": self.version })
+            "cfg_sha256": self.cfg_sha256, "uva": self.uva, "version": self.version,
+            // WP-09 part 2 (additive: a version-2 record without them reads as before)
+            "money_guard": self.money_guard, "cap_failed_fees_lamports": self.cap_failed_fees })
     }
 
     /// read back (None: not an exec_init body this build reads)
@@ -2233,7 +2303,8 @@ impl ExecInit {
         Some(ExecInit { mode, alts, pump, held: keys(&v["held_mints"])?, max_size: v["max_size_lamports"].as_u64()?, max_size_src: v["max_size_src"].as_str().unwrap_or("").into(),
             would_send_per_sec: usize::try_from(v["would_send_per_sec"].as_u64()?).ok()?, tips,
             crowding_window_h: c["window_h"].as_u64()?, crowding_buckets: [u32::try_from(b.first()?.as_u64()?).ok()?, u32::try_from(b.get(1)?.as_u64()?).ok()?],
-            crowded: keys(&c["static_list"])?, cfg_sha256: v["cfg_sha256"].as_str()?.to_string(), uva: v["uva"].as_bool(), version: EXEC_INIT_VERSION })
+            crowded: keys(&c["static_list"])?, cfg_sha256: v["cfg_sha256"].as_str()?.to_string(), uva: v["uva"].as_bool(), version: EXEC_INIT_VERSION,
+            money_guard: v["money_guard"].as_bool().unwrap_or(false), cap_failed_fees: v["cap_failed_fees_lamports"].as_u64() })
     }
 }
 

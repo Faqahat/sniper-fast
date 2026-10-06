@@ -249,7 +249,10 @@ pub fn raw(x: &RpcTx, wallet: &Pk, wsol_ata: &Pk, route: &Pk) -> Raw {
                 }
             } else if pre == 0 && post == 0 {
                 // made and closed in this transaction (WP-06's rent-neutral create + close): its rent went out and came back
-                // (MEASUREMENT §4.42: rent_locked = rent_reclaimed)
+                // (MEASUREMENT §4.42: rent_locked = rent_reclaimed). ---- WP-09 part 2 (S14): only when it succeeded. A
+                // failed transaction made and closed nothing (everything but its fee is reverted), though its record still
+                // lists the inner create that ran before the failure and the message holds its CloseAccount
+                if !ok { continue; }
                 let Some((funder, owner, _, lamports)) = system_create_of(&ixs, k) else { continue };
                 let Some(to) = token_close_of(&ixs, k) else { continue };
                 if funder != *wallet || lamports == 0 { continue; }
@@ -1184,6 +1187,8 @@ pub struct Ledger {
     unreconciled_now: i64,
     pub counts: BTreeMap<&'static str, u64>,
     entries_seen_delta: u64,
+    /// ---- WP-09 part 2: the failed fees' total the previous status line reported (with the provisional ones)
+    prev_failed_reported: u64,
     // ---- the money view's freshness (review WP-07 #3)
     /// engine time of the last good snapshot; snapshots failed (or mismatched) in a row since; a wallet-record failure
     /// (since when, why) a snapshot asked for after it clears; the chain-fetch give-ups last read
@@ -1207,7 +1212,8 @@ impl Ledger {
             snaps: Vec::new(), last_good: None, pending: Vec::new(), inflight: false, want: None, next_periodic: 0, retry_at: None, stop_asked: false, stop_done: false,
             started: false, t_start: 0, series: Series::new(), start: None, start_src: "segment", test_budget: None, budget_left: None, floor_arg: None, cur: None,
             totals: Totals::default(), prev: Totals::default(), spent_before: 0, route_tokens: BTreeMap::new(), own_start_value: None, stranded: BTreeMap::new(),
-            recon_seq: 0, recon_misses: 0, last_recon: None, unreconciled_now: 0, counts: BTreeMap::new(), entries_seen_delta: 0, last_good_t: None, fail_run: 0,
+            recon_seq: 0, recon_misses: 0, last_recon: None, unreconciled_now: 0, counts: BTreeMap::new(), entries_seen_delta: 0, prev_failed_reported: 0,
+            last_good_t: None, fail_run: 0,
             suspect: None, gave_up_seen: None, stale: None, stale_kind: None, prev_window: None, undecided: None }
     }
 
@@ -1742,6 +1748,12 @@ impl Ledger {
         let token_value_now = last.map(|s| s.token_value);
         let entries_delta = std::mem::take(&mut self.entries_seen_delta);
         let spent = self.spent();
+        // ---- WP-09 part 2 (S15; MEASUREMENT §2.2): the failed fees' total holds the base fees of failed landings found by a
+        // status check whose records have not come (what the supervisor reads); its delta is that total's change since the
+        // previous line, so the deltas sum to it on every line (they summed to the settled part only)
+        let failed_total = (tt.fee_fail.max(0) as u64).saturating_add(provisional_failed_fees);
+        let failed_delta = failed_total as i64 - self.prev_failed_reported as i64;
+        self.prev_failed_reported = failed_total;
         let mut m = json!({ "src": "ledger", "stop_basis": STOP_BASIS,
             "stop_value_now": v, "net_spend_now": spent, "equity_stop_now": eq, "equity_liquid_now": self.cur.as_ref().map(|c| c.sol + c.wsol),
             "native_sol_now": self.cur.as_ref().map(|c| c.sol), "wsol_now": self.cur.as_ref().map(|c| c.wsol), "rent_recoverable_now": self.cur.as_ref().map(|c| c.rent),
@@ -1753,7 +1765,7 @@ impl Ledger {
             "budget_left_now": self.test_budget.map(|b| b as i64 - spent), "stale": self.stale });
         let totals = json!({ "trade_gross_total": tt.trade_gross, "trade_pnl_total": tt.trade_pnl, "tips_total": tt.tips, "fees_win_total": tt.fee_win, "fees_fail_total": tt.fee_fail,
             "fees_other_total": tt.fee_other, "rent_nonrecoverable_total": tt.rent_nonrecoverable,
-            "failed_fees_total_lamports": tt.fee_fail as u64 + provisional_failed_fees, "failed_fees_delta_lamports": tt.fee_fail - p.fee_fail,
+            "failed_fees_total_lamports": failed_total, "failed_fees_delta_lamports": failed_delta,
             "rent_locked_total": tt.rent_locked, "rent_locked_delta": tt.rent_locked - p.rent_locked, "rent_reclaimed_total": tt.rent_reclaimed,
             "rent_reclaimed_delta": tt.rent_reclaimed - p.rent_reclaimed, "trade_net_total": tt.trade_net, "net_spend_total": tt.net_spend(),
             "transfer_in_total": tt.transfer_in, "transfer_out_total": tt.transfer_out, "owner_transfers_total": tt.owner_transfers, "entries_total": tt.entries,

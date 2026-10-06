@@ -1,35 +1,48 @@
-//! S9 (PLAN WP-09, after WP-05): the in-flight lock in a run with a shadow executor, and its replay. The lock is keyed
-//! by (buy pool, sell pool, mint) and holds an attempt's state version, target slot and leader: the same state to the
-//! same leader is refused (`inflight_same_state` at the same slot, `inflight_same_leader` at a later slot of the same
-//! leader), a new state version or a new leader is allowed (the attempt's `inflight.why_allowed`: `new_state`,
-//! `new_leader`). Each run is replayed: the replay's offline executor (built from the run's exec_init record, its send
-//! checks reading the run's decision-point records) gives every verdict, every attempt and the digests the run gave.
+//! S9 (PLAN WP-09, after WP-05): the in-flight checks. The WP-05 send checks (`exec::send_checks`) and the in-flight
+//! lock, in runs with an executor, with the in-flight and leader inputs replayed (INPUT 2 `leader_window`, INPUT 5
+//! `inflight_release`). The lock is keyed by (buy pool, sell pool, mint) and holds an attempt's state version, target
+//! slot and leader for `[send_policy] inflight_hold_slots` (2) past its target slot:
+//! - the same route on the same state to the same leader is held: `inflight_same_state` at the same slot,
+//!   `inflight_same_leader` at a later slot of the same leader;
+//! - a new state version (`new_state`), a new leader (`new_leader`) or the hold's end (the entry expired: `first`) lets
+//!   a new attempt go;
+//! - the block engine's results reach the lock through the Jito client's sink (INPUT 5): a landing (`processed`)
+//!   releases the entry at once; a would-fail does NOT (review WP-05 #2: final is a landing or the blockhash's expiry),
+//!   nor does `accepted`.
 //!
-//! - **Same state blocked, new state allowed** (two pools, so that both evaluations price the same two routes): a
-//!   rival's transaction writes both pools; its commit group evaluates both pools on one state, the second decision is
+//! Each run is replayed: the replay's offline executor (built from the run's exec_init record, its send checks reading
+//! the run's decision-point records; WP-09 part 2: a canary executor too, its sends with the run's signatures) gives
+//! every verdict, attempt and digest the run gave, and each run's executor projection is checked against
+//! `testdata/scenarios/expected/<name>.json`.
+//!
+//! - **Same state blocked, new state allowed** (shadow, two pools, so that both evaluations price the same two routes):
+//!   a rival's transaction writes both pools; its commit group evaluates both pools on one state, the second decision is
 //!   refused by the lock; a later trade on one pool is a new state.
-//! - **New leader allowed / same leader refused** (three pools): the same state is decided twice in two inputs. A trade
-//!   moves the AMM v4 pool (its write set unknown: it resolves by quiescence, and its routes must be quiet); a trade on
-//!   PumpSwap right after it makes the AMM v4 / PumpSwap routes not quiet, so that evaluation is deferred, while the
-//!   AMM v4 / CPMM route is decided at once. The deferred evaluation runs a slot later on the same state: the same
-//!   route, the same state version, the next slot's leader.
+//! - **New leader allowed, same leader held, the hold's end releases** (shadow, three pools): the same state is decided
+//!   twice in two inputs. A trade moves the AMM v4 pool (its write set unknown: it resolves by quiescence, and its routes
+//!   must be quiet); a trade on CPMM right after it makes the AMM v4 / CPMM routes not quiet, so that evaluation is
+//!   deferred, while the AMM v4 / PumpSwap route is decided at once. The deferred evaluation runs `k` slots later on the
+//!   same state: the same route, the same state version, the target slot's leader. One slot later to another Jito
+//!   validator: allowed; to the same one: held; three slots later (past the hold) to the same one: allowed again.
+//! - **A would-fail keeps the lock, a landing releases it** (a canary against the block engine in memory; S13's
+//!   deferral): the first decision is sent; the block engine answers `accepted` then `would-fail` (the deferred
+//!   evaluation of the same state is refused `inflight_same_state`), or `processed` (it is sent: the entry went).
 //!
-//! The gate is shadow for the whole segment (`mode_shadow`, as `arbx run` without `--live` starts): every decision's
-//! reason is `gate_shadow:mode_shadow`, and `reason_ungated` says what else refused it (null: a would-send).
+//! The shadow runs' gate is shadow for the whole segment (`mode_shadow`, as `arbx run` without `--live` starts): every
+//! decision's reason is `gate_shadow:mode_shadow`, and `reason_ungated` says what else refused it (null: a would-send).
+use super::s13_verdicts::{canary_rig, same_state_twice, usdc_sale};
 use super::*;
-
-/// a USDC sale of 1/`frac` of pool `m`'s USDC reserve by transaction `sig` at `slot` (its writes from `t`, 100 µs apart)
-fn usdc_sale(r: &mut Rig, m: &PoolMeta, frac: u64, sig: [u8; 64], slot: u64, t: &mut u64) {
-    let usdc_in = token_amount(&r.data(if sol_is_t0(m) { &m.vault1 } else { &m.vault0 })) / frac;
-    let w = swap(&r.chain, m, !sol_is_t0(m), usdc_in, slot, r.unix0).0;
-    for (k, d) in w { r.write(k, d, slot, Some(sig), *t); *t += 100 * US; }
-}
 
 /// S9 tests the lock, not the ≥1M class's throttle (S11): its rate is lifted
 const NO_BAND_THROTTLE: [(&str, &str); 1] = [("big_band_max_per_sec = 0.5", "big_band_max_per_sec = 1000.0")];
+/// the canary's (`CANARY`), the throttle lifted
+const CANARY_NO_THROTTLE: [(&str, &str); 3] = [CANARY[0], CANARY[1], NO_BAND_THROTTLE[0]];
 
-/// the run's opportunity decisions as (decision, reason, reason_ungated, attempt, buy pool, sell pool, sv)
-fn opps(r: &Rig) -> Vec<(u64, String, Option<String>, Option<u64>, String, String, String)> {
+/// (decision, reason, reason_ungated, attempt, buy pool, sell pool, sv)
+type Opp = (u64, String, Option<String>, Option<u64>, String, String, String);
+
+/// the run's opportunity decisions
+fn opps(r: &Rig) -> Vec<Opp> {
     r.opportunities().iter().map(|d| {
         let b = &d["routes"][d["best"].as_u64().unwrap() as usize];
         (d["decision"].as_u64().unwrap(), d["reason"].as_str().unwrap().to_string(), d["reason_ungated"].as_str().map(String::from), d["attempt"].as_u64(),
@@ -77,16 +90,16 @@ fn s9_same_state_blocked_new_state_allowed() {
     assert_eq!(att[1]["inflight"]["prev_sv"].as_str(), Some(sv1.as_str()));
     let done = r.finish_and_replay();
     assert_eq!(done.replay["compare"]["attempts_compared"].as_u64(), Some(2));
+    done.check_expected();
 }
 
-/// S9, a new leader: the same state decided again a slot later (a deferred evaluation), to the next slot's leader
-/// (another Jito validator: allowed, `new_leader`) or to the same leader (refused, `inflight_same_leader`). Returns the
-/// run's opportunities on the AMM v4 / PumpSwap pair of pools, in order
-fn same_state_a_slot_later(name: &'static str, next_leader: Pk) -> (Done, Vec<(u64, String, Option<String>, Option<u64>, String, String, String)>) {
+/// S9, the same state decided again `k` slots later (a deferred evaluation): the schedule is the Jito leader up to s0+3
+/// (the first decision's target slot), then `next_leader`. Returns the run and its opportunities on the AMM v4 /
+/// PumpSwap pair of pools, in order
+fn same_state_later(name: &'static str, next_leader: Pk, k: u64) -> (Done, Vec<Opp>) {
     let mut r = Rig::new(name, Setup { pools: &["usdc.pump", "usdc.cpmm", "usdc.ammv4"], config: &NO_BAND_THROTTLE, exec: Some(ExecSetup::default()), ..Default::default() });
     r.make_ready(T0);
     let s0 = r.s0;
-    // the schedule: the Jito leader up to s0+3, then `next_leader`
     let mut sched = vec![LEADER_JITO; 4];
     sched.extend([next_leader; 60]);
     r.leaders(s0, &sched, T0 + 7 * MS);
@@ -98,9 +111,8 @@ fn same_state_a_slot_later(name: &'static str, next_leader: Pk) -> (Done, Vec<(u
     let sale = r.sig("S9-sale");
     let mut t = T0 + 10 * MS;
     usdc_sale(&mut r, &a, 40, sale, s2, &mut t);
-    // 1 ms later a small USDC sale into CPMM (it makes CPMM a worse place to sell USDC), seen in shreds first (its write
-    // set known: it commits at its last write); the CPMM routes of the AMM v4 pool are then not quiet when the sale's group
-    // resolves
+    // 1 ms later a small USDC sale into CPMM, seen in shreds first (its write set known: it commits at its last write);
+    // the CPMM routes of the AMM v4 pool are then not quiet when the sale's group resolves
     let p = r.sig("S9-cpmm");
     t += MS;
     let usdc_in = token_amount(&r.data(if sol_is_t0(&c) { &c.vault1 } else { &c.vault0 })) / 3_000;
@@ -111,20 +123,21 @@ fn same_state_a_slot_later(name: &'static str, next_leader: Pk) -> (Done, Vec<(u
     // the sale's group resolves: the AMM v4 / PumpSwap route is decided (the Jito leader's slot), the CPMM ones deferred
     r.timers(t + 2 * MS);
     let before = opps(&r);
-    // a slot later (the target slot's leader is now `next_leader`), the deferred evaluation runs on the same state
-    r.tick(s0 + 3, t + 2 * MS + 200 * US);
+    // `k` slots later (the target slot's leader is the schedule's), the deferred evaluation runs on the same state
+    for j in 1..=k { r.tick(s2 + j, t + 2 * MS + j * 50 * US); }
     r.timers(t + 4 * MS + 500 * US);
     let o = opps(&r);
-    eprintln!("{name}: opportunities before the slot {before:#?}\nafter it {o:#?}");
+    eprintln!("{name}: opportunities before the slots {before:#?}\nafter them {o:#?}");
     let done = r.finish_and_replay();
     let ap: Vec<_> = o.into_iter().filter(|x| [x.4.as_str(), x.5.as_str()].contains(&"usdc.ammv4") && [x.4.as_str(), x.5.as_str()].contains(&"usdc.pump")).collect();
     (done, ap)
 }
 
+fn route(x: &Opp) -> (String, String, String) { (x.4.clone(), x.5.clone(), x.6.clone()) }
+
 #[test]
 fn s9_new_leader_allowed_same_leader_refused() {
-    let route = |x: &(u64, String, Option<String>, Option<u64>, String, String, String)| (x.4.clone(), x.5.clone(), x.6.clone());
-    let (done, ap) = same_state_a_slot_later("s9-new-leader", LEADER_JITO2);
+    let (done, ap) = same_state_later("s9-new-leader", LEADER_JITO2, 1);
     assert!(ap.len() == 2 && route(&ap[0]) == route(&ap[1]) && ap[0].0 < ap[1].0, "the AMM v4 / PumpSwap route decided twice on one state: {ap:?}");
     assert_eq!((ap[0].2.clone(), ap[1].2.clone()), (None, None), "both would-sends: the second to a new leader");
     let att = rec::read_jsonl(&done.dir, "attempts").unwrap();
@@ -132,7 +145,66 @@ fn s9_new_leader_allowed_same_leader_refused() {
     assert_eq!((second["inflight"]["why_allowed"].as_str(), second["inflight"]["prev_attempt"].as_u64()), (Some("new_leader"), ap[0].3), "{}", second["inflight"]);
     assert_eq!((first["leader"]["leader"].as_str(), second["leader"]["leader"].as_str()), (Some(b58(&LEADER_JITO).as_str()), Some(b58(&LEADER_JITO2).as_str())));
     assert_eq!(second["blockhash"]["slot"], first["blockhash"]["slot"]);
-    let (_done2, ap2) = same_state_a_slot_later("s9-same-leader", LEADER_JITO);
+    done.check_expected();
+    let (done2, ap2) = same_state_later("s9-same-leader", LEADER_JITO, 1);
     assert!(ap2.len() == 2 && route(&ap2[0]) == route(&ap2[1]), "{ap2:?}");
     assert_eq!((ap2[0].2.as_deref(), ap2[1].2.as_deref()), (None, Some("inflight_same_leader")), "the same state to the same leader a slot later: {ap2:?}");
+    done2.check_expected();
+}
+
+/// The hold's end: the same state to the same leader three slots after the first decision (its target slot s0+3 plus
+/// the 2-slot hold has passed) goes again, on an entry that expired (`first`, no previous attempt); two slots later it is
+/// still held (`inflight_same_leader`)
+#[test]
+fn s9_the_holds_end_releases_the_same_state() {
+    let (done, ap) = same_state_later("s9-expiry", LEADER_JITO, 3);
+    assert!(ap.len() == 2 && route(&ap[0]) == route(&ap[1]), "{ap:?}");
+    assert_eq!((ap[0].2.as_deref(), ap[1].2.as_deref()), (None, None), "three slots later the entry expired: a would-send again: {ap:?}");
+    let att = rec::read_jsonl(&done.dir, "attempts").unwrap();
+    let second = att.iter().find(|l| l["attempt"].as_u64() == ap[1].3).unwrap();
+    assert_eq!((second["inflight"]["why_allowed"].as_str(), second["inflight"]["prev_attempt"].clone(), second["leader"]["leader"].as_str()),
+        (Some("first"), Value::Null, Some(b58(&LEADER_JITO).as_str())), "{second}");
+    done.check_expected();
+    let (done2, ap2) = same_state_later("s9-hold", LEADER_JITO, 2);
+    assert!(ap2.len() == 2 && route(&ap2[0]) == route(&ap2[1]), "{ap2:?}");
+    assert_eq!(ap2[1].2.as_deref(), Some("inflight_same_leader"), "two slots later the hold has not ended: {ap2:?}");
+    done2.check_expected();
+}
+
+/// The block engine's answers through the Jito client's sink (a canary against the block engine in memory), then the
+/// deferred evaluation of the same state at the same slot and leader. Returns the run, its decisions of that route and
+/// what was handed to the engine
+fn verdicts_then_same_state(name: &'static str, verdicts: &[(&'static str, Option<&'static str>)]) -> (Done, Vec<Value>, Vec<Value>) {
+    let (mut r, s2) = canary_rig(name, &["usdc.pump", "usdc.cpmm", "usdc.ammv4"], &CANARY_NO_THROTTLE, true);
+    let mut fed = Vec::new();
+    same_state_twice(&mut r, s2, &mut |r, t| {
+        fed.extend(r.pump(1, t));
+        for (k, (o, d)) in verdicts.iter().enumerate() { fed.push(r.verdict("b0", o, Some(s2 + 1), *d, t + (k as u64 + 1) * MS)); }
+        t + 5 * MS
+    });
+    let opps = r.opportunities();
+    let route = |d: &Value| { let b = &d["routes"][d["best"].as_u64().unwrap() as usize]; (b["buy"].clone(), b["sell"].clone(), d["sv"]["h"].clone()) };
+    let same: Vec<Value> = opps.iter().filter(|d| route(d) == route(&opps[0])).cloned().collect();
+    eprintln!("{name}: fed {fed:?}; the route's decisions {:?}", same.iter().map(|d| (d["decision"].clone(), d["reason"].clone(), d["attempt"].clone())).collect::<Vec<_>>());
+    let done = r.finish_and_replay();
+    done.check_expected();
+    (done, same, fed)
+}
+
+/// A would-fail keeps the lock, a landing releases it: after `accepted` and `would-fail` the deferred evaluation of the
+/// same state is refused `inflight_same_state`; after `processed` (a landing) the entry went at once and it is sent, on
+/// an entry that is gone (`first`)
+#[test]
+fn s9_a_would_fail_keeps_the_lock_a_landing_releases_it() {
+    let (_done, same, fed) = verdicts_then_same_state("s9-would-fail", &[("accepted", None), ("would-fail", Some(super::s13_verdicts::PROFIT_FAIL))]);
+    assert!(fed.iter().skip(1).all(|f| f["release"] == json!(false)), "neither result is a landing: {fed:?}");
+    assert!(same.len() >= 2, "{same:?}");
+    assert_eq!((same[0]["reason"].as_str(), same[0]["attempt"].as_u64()), (Some("sent"), Some(0)), "{}", same[0]);
+    assert_eq!((same[1]["reason"].as_str(), same[1]["attempt"].as_u64()), (Some("inflight_same_state"), None), "a would-fail does not release: {}", same[1]);
+    let (done, same, fed) = verdicts_then_same_state("s9-landed", &[("processed", None)]);
+    assert_eq!((fed[1]["outcome"].as_str(), fed[1]["release"].as_bool()), (Some("processed"), Some(true)), "{fed:?}");
+    assert!(same.len() >= 2, "{same:?}");
+    assert_eq!((same[1]["reason"].as_str(), same[1]["attempt"].as_u64()), (Some("sent"), Some(1)), "the landing released the entry: {}", same[1]);
+    let att = rec::read_jsonl(&done.dir, "attempts").unwrap();
+    assert_eq!((att[1]["inflight"]["why_allowed"].as_str(), att[1]["inflight"]["prev_attempt"].clone()), (Some("first"), Value::Null), "{}", att[1]);
 }

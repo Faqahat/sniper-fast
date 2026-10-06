@@ -871,11 +871,21 @@ fn amm_move(e: &mut crate::engine::Engine, m: &PoolMeta, n: u8, sol: u64, t: &mu
     e.timers(*t, &mut status);
 }
 
-/// the journal's decision-point records (INPUT 3 `gate`, `src` "decision")
+/// the journal's decision-point records (INPUT 3 `gate`, `src` "decision") of what the send checks read (WP-09 part 2's
+/// `sent` records, a send's signature, apart: `sent_records`)
 fn decision_records(dir: &std::path::Path) -> Vec<(usize, Value)> {
     use crate::rec::journal::{self, JBody};
     journal::read_dir(dir).unwrap().iter().enumerate().filter_map(|(i, r)| match &r.body {
-        JBody::Input { kind: 3, data } if data["src"] == "decision" => Some((i, data.clone())),
+        JBody::Input { kind: 3, data } if data["src"] == "decision" && data.get("sent").is_none() => Some((i, data.clone())),
+        _ => None,
+    }).collect()
+}
+
+/// ---- WP-09 part 2. The journal's `sent` records (a live or canary send's attempt and signature, right after its decision)
+fn sent_records(dir: &std::path::Path) -> Vec<(usize, Value)> {
+    use crate::rec::journal::{self, JBody};
+    journal::read_dir(dir).unwrap().iter().enumerate().filter_map(|(i, r)| match &r.body {
+        JBody::Input { kind: 3, data } if data["src"] == "decision" && data.get("sent").is_some() => Some((i, data.clone())),
         _ => None,
     }).collect()
 }
@@ -971,6 +981,14 @@ async fn the_gate_each_send_check_saw_is_journaled() {
         (Some("control"), Some("jito"), Some(true), Some(true)));
     let j = journal::read_dir(&r.dir).unwrap();
     assert!(matches!(j[i - 1].body, JBody::Timer { .. }) && j[i - 1].t_engine == j[*i].t_engine, "{:?}", j[i - 1]);
+    // WP-09 part 2: the send journaled its attempt's signature right after its decision (a replay sends with it): the
+    // signature the block engine got, at the decision's engine time, after the record of what its checks read
+    let sent = sent_records(&r.dir);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let (k, s) = &sent[0];
+    let got = crate::send::first_signature(&r.got.lock().unwrap()[0].0).unwrap();
+    assert_eq!((s["opp"].as_u64(), s["sent"]["attempt"].as_u64(), s["sent"]["sig"].as_str()), (Some(0), Some(0), Some(got.as_str())));
+    assert!(*k > recs[0].0 && j[*k].t_engine == j[recs[0].0].t_engine, "right after the decision's own record");
 }
 
 // ------------------------------------------------------------------------------------------------ the dry run
@@ -1450,11 +1468,15 @@ fn an_offline_executor_reads_the_runs_records() {
     let cfg = test_cfg(&std::env::temp_dir(), "");
     let init = ExecInit { mode: Mode::Shadow, alts: vec![], pump: None, held: vec![*WSOL, MINT], max_size: 1_000, max_size_src: "live".into(),
         would_send_per_sec: 3, tips: None, crowding_window_h: 6, crowding_buckets: [20, 150], crowded: vec![], cfg_sha256: cfg_sha256(&cfg), uva: Some(true),
-        version: EXEC_INIT_VERSION };
+        version: EXEC_INIT_VERSION, money_guard: false, cap_failed_fees: None };
     let mut x = Exec::offline(&cfg, &init, Rec::off()).unwrap();
     assert!(x.is_offline() && x.paths.is_none() && x.key.is_none() && x.jito.is_none());
     assert_eq!((x.size_cap(), x.path_rate), (1_000, 3));
-    assert!(Exec::offline(&cfg, &ExecInit { mode: Mode::Live, ..init.clone() }, Rec::off()).is_err(), "a live executor is not replayed");
+    // WP-09 part 2: a live executor is replayed too, offline as well: no key, no send path, no Jito client; the run's
+    // failed-fee cap and equity guard from its record
+    let live = Exec::offline(&cfg, &ExecInit { mode: Mode::Live, money_guard: true, cap_failed_fees: Some(77_000), ..init.clone() }, Rec::off()).unwrap();
+    assert!(live.is_offline() && live.paths.is_none() && live.key.is_none() && live.jito.is_none() && live.mode.sends());
+    assert_eq!((live.cap_failed_fees, live.money_guard), (77_000, true));
     let view = view();
     // before any record: fail closed
     let i = x.inputs(&view, 100, 1);

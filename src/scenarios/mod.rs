@@ -1,5 +1,14 @@
 //! Scenario tests (PLAN WP-09 item 4): every catalogued kind of loss, S1-S8 with S1b, S1b', S4b and S8b, reproduced on
-//! real account layouts and replayed.
+//! real account layouts and replayed; WP-09 part 2: S9 (the in-flight checks), S10 (rent neutrality), S11 (bands,
+//! crowding and the send queue), S12 (a hint never creates a send), S13 (a verdict sequence recorded in full), S14 (the
+//! ledger's categories and reconciliation), S15 (the status counters), S16 (the old bot's mispricings, F42).
+//!
+//! - **Executors.** A scenario that involves sending runs an executor as `arbx run` arms it (`ExecSetup`): a shadow one
+//!   (would-sends), a dry run, or a canary whose jito-bundle path sends to a block engine in memory (`Sending`: the
+//!   bundles it got, its results handed back as the result stream hands them, `Rig::verdict`; nothing leaves the
+//!   process), with the run's ledger (`ExecSetup::ledger`; a live or canary run always has one). The executor's tasks'
+//!   results come back to the engine through `Rig::pump`, journaled as the run's engine journals them, and the replay's
+//!   offline executor (a canary one too: its sends with the run's signatures) reproduces every attempt.
 //!
 //! - **Inputs.** `testdata/scenarios/accounts.json`: the real accounts of seven mainnet pools (USDC/SOL on PumpSwap,
 //!   Raydium CPMM, Raydium AMM v4, Meteora DLMM and DAMM v2; the bolt trade's PumpSwap and DLMM pools on 9dSMwFfP/SOL)
@@ -33,6 +42,11 @@ mod s8_forks;
 mod s9_inflight;
 mod s10_rent;
 mod s11_bands;
+mod s12_hints;
+mod s13_verdicts;
+mod s14_ledger;
+mod s15_counters;
+mod s16_mispricing;
 mod synth;
 
 use crate::config::Config;
@@ -91,6 +105,24 @@ pub(crate) fn fixtures() -> &'static Fixtures {
                 lamports: a["lamports"].as_u64().unwrap(), data });
         }
         for p in v["pools"].as_array().unwrap() {
+            f.pools.push((p["pair"].as_str().unwrap().into(), p["name"].as_str().unwrap().into(), Venue::parse(p["venue"].as_str().unwrap()).unwrap(),
+                pk(p["pool"].as_str().unwrap())));
+        }
+        // ---- WP-09 part 2: S16's case pools (testdata/scenarios/s16/accounts.json, captured later on their own: pair
+        // `s16`). An account the base capture holds (WSOL's mint) is the base capture's; the boot's slot stays the base
+        // capture's (the scenarios' Clock and the GlobalConfig bracket it)
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/scenarios/s16/accounts.json");
+        let s16: Value = serde_json::from_slice(&std::fs::read(&path).expect("testdata/scenarios/s16/accounts.json")).expect("s16/accounts.json is JSON");
+        assert_eq!(s16["schema"], "arbx.fixture.scenario-accounts/1");
+        for a in s16["accounts"].as_array().unwrap() {
+            let data = base64::engine::general_purpose::STANDARD.decode(a["data"].as_str().unwrap()).unwrap();
+            assert_eq!(crate::provenance::sha256_hex(&data), a["sha256"].as_str().unwrap(), "s16 {}: the fixture's bytes changed", a["what"]);
+            let key = pk(a["pubkey"].as_str().unwrap());
+            if f.by_key.contains_key(&key) { continue; }
+            f.by_key.insert(key, f.accounts.len());
+            f.accounts.push(Fix { key, what: a["what"].as_str().unwrap().into(), owner: pk(a["owner"].as_str().unwrap()), lamports: a["lamports"].as_u64().unwrap(), data });
+        }
+        for p in s16["pools"].as_array().unwrap() {
             f.pools.push((p["pair"].as_str().unwrap().into(), p["name"].as_str().unwrap().into(), Venue::parse(p["venue"].as_str().unwrap()).unwrap(),
                 pk(p["pool"].as_str().unwrap())));
         }
@@ -186,6 +218,8 @@ pub(crate) struct Rig {
     /// ---- WP-09 (the executor replay): the run's SendGate (its executor reads it; `Setup::exec`) and LeaderBook
     pub gate: Arc<crate::control::SendGate>,
     pub book: Arc<crate::leaders::LeaderBook>,
+    /// ---- WP-09 part 2: a live or canary executor's block engine in memory and its tasks' results (`ExecSetup::mode`)
+    pub sending: Option<Sending>,
     /// keep the run directory (`ARBX_KEEP_SCENARIOS`), or it was handed to the scenario's `Done`
     keep: bool,
     handed_over: bool,
@@ -209,10 +243,55 @@ pub(crate) struct ExecSetup<'a> {
     /// the SendGate starts shadow for the whole segment (`mode_shadow`, as `arbx run` without `--live` starts), else live
     /// (a test moves it)
     pub sticky_shadow: bool,
+    /// ---- WP-09 part 2: the run's ledger, as `arbx run` assembles it (WP-07: every run with a wallet has one; a live or
+    /// canary run always, and sends nothing before its start snapshot: `equity_unknown`). Snapshots and wallet records are
+    /// the scenario's inputs (INPUT 13, INPUT 7)
+    pub ledger: bool,
 }
 
 impl Default for ExecSetup<'_> {
-    fn default() -> Self { ExecSetup { mode: crate::exec::Mode::Shadow, hold_tokens: true, uva: true, crowded: &[], sticky_shadow: true } }
+    fn default() -> Self { ExecSetup { mode: crate::exec::Mode::Shadow, hold_tokens: true, uva: true, crowded: &[], sticky_shadow: true, ledger: false } }
+}
+
+/// ---- WP-09 part 2. The trading key of a scenario's live or canary run: a test key made from a constant (never a
+/// wallet's key, PLAN-ADDENDUM I-10), whose public key replaces the Stage-0 config's wallet in such a run
+pub(crate) fn trading_key() -> ed25519_dalek::SigningKey { ed25519_dalek::SigningKey::from_bytes(&[0x5c; 32]) }
+
+/// the Stage-0 config's wallet line (a sending scenario replaces it with `trading_key`'s)
+const STAGE0_WALLET: &str = "wallet = \"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE\"";
+
+/// a sending scenario's test budget (`--budget-left`, lamports: the ledger's equity floor is the start less this)
+pub(crate) const SCENARIO_BUDGET: u64 = 20_000_000;
+
+/// ---- WP-09 part 2. A canary run's `[canary]` for the scenarios: trades of up to 0.2 SOL (the canary's most; Stage 0
+/// ships 0.01) and no wait between two attempts (Stage 0: 5 s), so one scenario sees several attempts in a few slots
+pub(crate) const CANARY: [(&str, &str); 2] = [("size_sol = 0.01", "size_sol = 0.2"), ("every_ms = 5000", "every_ms = 0")];
+
+/// ---- WP-09 part 2. The ledger's balance snapshot of `wallet` as its background read answers it (INPUT 13 `snapshot`,
+/// the engine's input): the wallet's SOL, its WSOL account holding `wsol` (rent 2,039,280), its USDC account when it holds
+/// one (`usdc`: amount; rent 2,039,280), its PumpSwap volume accumulator when `uva`, at one context slot
+pub(crate) fn snapshot_answer(wallet: &Pk, slot: u64, sol: u64, wsol: u64, usdc: Option<u64>, uva: bool, why: &str) -> Value {
+    use base64::Engine as _;
+    let acct = |lamports: u64, owner: &Pk, data: &[u8]| json!({ "lamports": lamports, "owner": b58(owner), "data": [base64::engine::general_purpose::STANDARD.encode(data), "base64"] });
+    let (tokp, usdc_mint) = (*crate::pda::TOKEN_PROGRAM, crate::tx::pk("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+    let (wa, ua, acc) = (crate::build::ata_of(wallet, &crate::venues::WSOL, &tokp), crate::build::ata_of(wallet, &usdc_mint, &tokp), crate::ledger::accumulator_of(wallet));
+    json!({ "what": "snapshot", "why": why, "keys": [b58(wallet), b58(&wa), b58(&ua), b58(&acc)],
+        "answers": [{ "slot": slot, "values": [acct(sol, &[0u8; 32], &[]), acct(wsol + 2_039_280, &tokp, &token_account(&crate::venues::WSOL, wallet, wsol)),
+            usdc.map_or(Value::Null, |u| acct(2_039_280, &tokp, &token_account(&usdc_mint, wallet, u))),
+            if uva { acct(1_346_200, &*crate::ledger::PUMPSWAP, &[0u8; 137]) } else { Value::Null }] }],
+        "slot_mismatch": false, "attempts": 1, "provider": "scenario", "ms": 1.0, "error": null })
+}
+
+/// ---- WP-09 part 2. A sending executor's world in a scenario: the Jito client of its jito-bundle path, whose block
+/// engine is in memory (`bundles`: each bundle's transaction as sent, ids b0, b1, ... in order; nothing leaves the
+/// process), the runtime its send tasks run on, and the channel their results come back on (`Rig::pump`)
+pub(crate) struct Sending {
+    pub jito: Arc<crate::send::jito::Jito>,
+    pub bundles: Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    back: crossbeam_channel::Receiver<Event>,
+    /// results that came back and were not handed to the engine yet
+    pending: Vec<Event>,
+    rt: Option<tokio::runtime::Runtime>,
 }
 
 /// the test leaders: two Jito validators and one of another kind (the LeaderBook's list, `Rig::new`)
@@ -294,6 +373,12 @@ impl Rig {
         let src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arbx-stage0.toml")).unwrap();
         let mut text = src.clone();
         for (a, b) in s.config { assert_eq!(text.matches(a).count(), 1, "config replacement {a:?}"); text = text.replacen(a, b, 1); }
+        // ---- WP-09 part 2: a live or canary run signs with the scenarios' test trading key: the config's wallet is its key
+        let sends = s.exec.as_ref().is_some_and(|x| x.mode.sends());
+        if sends {
+            assert_eq!(text.matches(STAGE0_WALLET).count(), 1, "the Stage-0 config's wallet line");
+            text = text.replacen(STAGE0_WALLET, &format!("wallet = \"{}\"", b58(&trading_key().verifying_key().to_bytes())), 1);
+        }
         let cfg = Config::parse(&text).expect("the scenario's config");
         let dir = std::env::temp_dir().join(format!("arbx-scenario-{name}-{}-{}", std::process::id(), crate::feeds::clock::real_ns()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -378,10 +463,29 @@ impl Rig {
             let alt = fixture_alt(&reg, &chain, &e.store, payer, &pump);
             let mut held: rustc_hash::FxHashSet<Pk> = [*crate::venues::WSOL].into_iter().collect();
             if x.hold_tokens { for m in &reg.pools { held.insert(m.t0); held.insert(m.t1); } }
-            let key = (x.mode == crate::exec::Mode::DryRun).then(|| crate::exec::ephemeral_key().unwrap());
-            let rt = crate::exec::offline_runtime();
-            let _in = rt.enter();
-            let mut ex = crate::exec::Exec::assemble(&cfg, crate::rpc::Rpc::race(vec![]), None, rec.clone(), crossbeam_channel::unbounded().0,
+            let key = match x.mode { crate::exec::Mode::DryRun => Some(crate::exec::ephemeral_key().unwrap()), m if m.sends() => Some(trading_key()), _ => None };
+            // ---- WP-09 part 2: a live or canary executor sends through a jito-bundle path whose block engine is in memory
+            // (a valid cached token: valid at the scenario's engine times and at the real clock the send path reads), on a
+            // runtime of its own; its tasks' results come back on `back`. Shadow and dry runs: no path, a runtime never driven
+            let (sending, paths, back_tx) = if sends {
+                let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+                let _in = rt.enter();
+                let j = crate::send::jito::Jito::for_test(rec.clone());
+                let real_ms = (crate::feeds::clock::real_ns() / 1_000_000) as i64;
+                j.set_cached(Some(crate::send::jito::CachedToken { value: "scenario".into(), exp_ms: real_ms + 3_600_000, issued_ms: (T0 / 1_000_000) as i64 - 1_000 }));
+                let bundles: Arc<std::sync::Mutex<Vec<Vec<u8>>>> = Default::default();
+                let got = bundles.clone();
+                j.set_fake(Arc::new(move |txs: &[&[u8]]| { let mut g = got.lock().unwrap(); g.push(txs[0].to_vec()); format!("b{}", g.len() - 1) }));
+                // the config's jito-bundle path: its rate (Stage 0: 5 a second) and the queue's wait (`[send_policy] queue_ms`)
+                let rate = cfg.sends.iter().find(|p| p.enabled && p.kind == crate::config::SendKind::JitoBundle).and_then(|p| p.max_per_sec).unwrap_or(5);
+                let paths = crate::send::Paths::for_test(vec![crate::send::Path::test_bundle(j.clone(), Some(rate), cfg.send_policy.queue_ms)], rec.clone());
+                let (tx, rx) = crossbeam_channel::unbounded();
+                drop(_in);
+                (Some(Sending { jito: j, bundles, back: rx, pending: Vec::new(), rt: Some(rt) }), Some(paths), tx)
+            } else { (None, None, crossbeam_channel::unbounded().0) };
+            let offline = crate::exec::offline_runtime();
+            let _in = match &sending { Some(sd) => sd.rt.as_ref().unwrap().enter(), None => offline.enter() };
+            let mut ex = crate::exec::Exec::assemble(&cfg, crate::rpc::Rpc::race(vec![]), paths, rec.clone(), back_tx,
                 vec!["shred".into(), "tx".into()], vec![alt], Some(pump), held, x.mode, key).expect("the run's executor");
             ex.set_gate(gate.clone());
             ex.set_leaders(book.clone());
@@ -389,15 +493,30 @@ impl Rig {
             ex.set_uva(Some(x.uva));
             let b = &cfg.send_policy.crowding_buckets;
             e.set_crowding(crate::crowding::Activity::new(cfg.send_policy.crowding_window_h, [b[0], b[1]], x.crowded.iter().map(|n| f.pool(n).1).collect()));
+            // ---- WP-09 part 2: the ledger as `arbx run` assembles it (its stops act in a run that sends), and with it the
+            // equity guard: a live or canary run sends nothing before the start snapshot (`Engine::run` sets it)
+            if x.ledger || sends {
+                let stopper = crate::control::Stopper::new(gate.clone());
+                e.ledger = Some(crate::ledger::Ledger::for_run(&cfg, payer, rec.clone(), name, sends, gate.clone(), stopper, Default::default(),
+                    sends.then_some(SCENARIO_BUDGET), None));
+                ex.require_equity(true);
+            }
+            drop(_in);
             e.exec = Some(ex);
             e.gate = Some(gate.clone());
+            let mut init = e.init().json();
+            init["executor"] = json!(true);
+            e.journal().input(0, InputKind::EngineInit, Arc::new(init));
+            e.journal_exec_init();
+            return Rig { name, dir, rec, ar, e, reg, cfg, chain, s0, unix0, wv: 1_000, sig_names: HashMap::default(), gate, book, sending,
+                keep: std::env::var_os("ARBX_KEEP_SCENARIOS").is_some(), handed_over: false };
         }
         // (`Setup::executor`: the record says so, as a run with an executor writes it; this engine has none)
         let mut init = e.init().json();
         init["executor"] = json!(s.executor || e.exec.is_some());
         e.journal().input(0, InputKind::EngineInit, Arc::new(init));
         e.journal_exec_init();
-        Rig { name, dir, rec, ar, e, reg, cfg, chain, s0, unix0, wv: 1_000, sig_names: HashMap::default(), gate, book,
+        Rig { name, dir, rec, ar, e, reg, cfg, chain, s0, unix0, wv: 1_000, sig_names: HashMap::default(), gate, book, sending: None,
             keep: std::env::var_os("ARBX_KEEP_SCENARIOS").is_some(), handed_over: false }
     }
 
@@ -423,6 +542,84 @@ impl Rig {
 
     /// ---- WP-09. attempts.jsonl so far
     pub fn attempts(&self) -> Vec<Value> { self.rec.sync(); rec::read_jsonl(&self.dir, "attempts").unwrap_or_default() }
+
+    /// ---- WP-09 part 2. The ledger's balance snapshot of the run's wallet (`snapshot_answer`), handed to the engine at `t`
+    pub fn snapshot(&mut self, slot: u64, sol: u64, wsol: u64, usdc: Option<u64>, why: &str, t: u64) {
+        let w = crate::tx::pk(&self.cfg.wallet);
+        self.input(InputKind::Snapshot, snapshot_answer(&w, slot, sol, wsol, usdc, true, why), t);
+    }
+
+    /// ---- WP-09 part 2. A stream of the run so far (bundles, outcomes, copies, ledger, recon, snapshots, status, ...)
+    pub fn lines(&self, stream: &str) -> Vec<Value> { self.rec.sync(); rec::read_jsonl(&self.dir, stream).unwrap_or_default() }
+
+    /// ---- WP-09 part 2. The results of a sending executor's tasks (a fire's result, a statuses answer) and of the block
+    /// engine (its verdicts on our bundles, through the Jito client's sink), as they come back to `arbx run`'s engine:
+    /// wait for `n` of them (10 s at most) and hand each to the engine at `t` + k µs, in a fixed order (fires, statuses,
+    /// verdicts; each by attempt), journaled as the run journals them (INPUT 9 `settled`, INPUT 5 `inflight_release`).
+    /// Returns what was handed over (`what`, `attempt`, `outcome`)
+    pub fn pump(&mut self, n: usize, t: u64) -> Vec<Value> {
+        let name = self.name;
+        let sd = self.sending.as_mut().expect("a sending executor");
+        let t0 = std::time::Instant::now();
+        while sd.pending.len() < n {
+            match sd.back.recv_timeout(std::time::Duration::from_millis(5)) {
+                Ok(ev) => sd.pending.push(ev),
+                Err(_) => assert!(t0.elapsed() < std::time::Duration::from_secs(10), "{name}: {} of {n} results came back", sd.pending.len()),
+            }
+        }
+        let key = |ev: &Event| -> (u8, u64) {
+            match ev {
+                Event::Settled(s) => match &**s {
+                    crate::exec::Settled::Fired { attempt, .. } => (0, *attempt),
+                    crate::exec::Settled::Statuses { at, .. } => (1, at.first().map_or(0, |a| a.0)),
+                    crate::exec::Settled::DrySim { attempt, .. } => (2, *attempt),
+                },
+                Event::Input { kind: InputKind::InflightRelease, data } => (3, data["attempt"].as_u64().unwrap_or(u64::MAX)),
+                _ => (9, 0),
+            }
+        };
+        let mut evs: Vec<Event> = sd.pending.drain(..n).collect();
+        evs.sort_by_key(|e| key(e));
+        let mut out = Vec::new();
+        for (k, ev) in evs.into_iter().enumerate() {
+            let what = match &ev {
+                Event::Settled(s) => { let j = s.json(); json!({ "what": j["what"], "attempt": j["attempt"].as_u64().or(j["at"][0][0].as_u64()), "why": j["why"] }) }
+                Event::Input { kind: InputKind::InflightRelease, data } => json!({ "what": "inflight_release", "attempt": data["attempt"], "outcome": data["outcome"],
+                    "release": data["release"] }),
+                _ => json!({ "what": "other" }),
+            };
+            self.e.step(ev, t + k as u64 * US, &mut nop());
+            out.push(what);
+        }
+        out
+    }
+
+    /// ---- WP-09 part 2. `n` results of the executor's tasks as they come back, NOT handed to the engine (a scenario that
+    /// stands in for the answer: an expiry check's RPC call answered by the scenario, `pump` hands over the rest)
+    pub fn take_results(&mut self, n: usize) -> Vec<Event> {
+        let name = self.name;
+        let sd = self.sending.as_mut().expect("a sending executor");
+        let t0 = std::time::Instant::now();
+        while sd.pending.len() < n {
+            match sd.back.recv_timeout(std::time::Duration::from_millis(5)) {
+                Ok(ev) => sd.pending.push(ev),
+                Err(_) => assert!(t0.elapsed() < std::time::Duration::from_secs(10), "{name}: {} of {n} results came back", sd.pending.len()),
+            }
+        }
+        sd.pending.drain(..n).collect()
+    }
+
+    /// ---- WP-09 part 2. The block engine's result `outcome` for bundle `bundle` (the Jito client records it in
+    /// bundles.jsonl and hands it to the executor's sink, as its result stream does), handed to the engine at `t`
+    pub fn verdict(&mut self, bundle: &str, outcome: &'static str, slot: Option<u64>, detail: Option<&str>, t: u64) -> Value {
+        let j = self.sending.as_ref().expect("a sending executor").jito.clone();
+        j.on_result_at(crate::send::jito::Outcome { bundle: bundle.into(), outcome, slot, index: (outcome == "processed").then_some(7), bid: None,
+            detail: detail.map(String::from), validator: slot.map(|_| b58(&LEADER_JITO)) }, t);
+        self.pump(1, t).remove(0)
+    }
+
+    /// ---- WP-09 part 2. The transactions the block engine in memory got so far, in order (bundle `b<k>` is the k-th)
+    pub fn bundles_sent(&self) -> Vec<Vec<u8>> { self.sending.as_ref().map(|s| s.bundles.lock().unwrap().clone()).unwrap_or_default() }
 
     pub fn meta(&self, name: &str) -> PoolMeta { let (_, p) = fixtures().pool(name); self.reg.pools[self.reg.by_pool[&p]].clone() }
     pub fn data(&self, k: &Pk) -> Vec<u8> { self.chain.get(k).cloned().unwrap_or_else(|| panic!("no chain account {}", b58(k))) }
@@ -523,13 +720,16 @@ impl Rig {
             }
         }
         self.handed_over = true;
-        Done { name: self.name, dir: self.dir.clone(), decisions, commits, sig_names: std::mem::take(&mut self.sig_names), replay: r.summary, keep: self.keep }
+        Done { name: self.name, dir: self.dir.clone(), decisions, commits, sig_names: std::mem::take(&mut self.sig_names), replay: r.summary, keep: self.keep,
+            exec: self.e.exec.is_some() }
     }
 }
 
 impl Drop for Rig {
     fn drop(&mut self) {
         self.rec.close();
+        // ---- WP-09 part 2: a sending executor's runtime (its send tasks are done or abandoned with the run)
+        if let Some(rt) = self.sending.as_mut().and_then(|s| s.rt.take()) { rt.shutdown_background(); }
         if !self.keep && !self.handed_over { let _ = std::fs::remove_dir_all(&self.dir); }
     }
 }
@@ -543,6 +743,8 @@ pub(crate) struct Done {
     pub sig_names: HashMap<[u8; 64], String>,
     pub replay: Value,
     keep: bool,
+    /// ---- WP-09 part 2: the run had an executor (its expected projection carries the executor's records too)
+    pub exec: bool,
 }
 
 impl Drop for Done {
@@ -571,8 +773,9 @@ impl Done {
         let commits: Vec<Value> = self.commits.iter().map(|c| json!({ "group": c["group"], "txn": name(&c["txn"]), "slot": c["slot"], "w_src": c["w_src"],
             "outcome": c["outcome"], "resolved_by": c["resolved_by"], "late": c.get("late"), "members": c["w_seen"].as_array().map(|v| v.len()),
             "pools": c["pools"].as_array().map(|v| v.iter().map(name).collect::<Vec<_>>()), "evaluated": c["evaluated"] })).collect();
-        let got = json!({ "scenario": self.name, "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+        let mut got = json!({ "scenario": self.name, "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
             "decisions": decisions, "commits": commits });
+        if self.exec { got["executor"] = self.exec_projection(&name); }
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/scenarios/expected").join(format!("{}.json", self.name));
         if std::env::var_os("ARBX_BLESS").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -588,6 +791,35 @@ impl Done {
             panic!("{}: differs from {} at line {first}:\n--- expected\n{}\n--- got\n{}\n(if the venue maths changed on purpose: ARBX_BLESS=1 cargo test --release --lib scenarios, then review the diff)",
                 self.name, path.display(), ctx(&w), ctx(&g));
         }
+    }
+
+    /// ---- WP-09 part 2. The executor's part of a scenario's expected projection (a run with an executor): each
+    /// opportunity's verdict beyond the gate (`reason_ungated`, the attempt, the queue rank, the bands, the crowding
+    /// bucket, the expected net), each attempt (sent, size, expected gross, tip, the in-flight lock's why, the queue
+    /// rank, the create+close), and, when the run had them, the block engine's results (bundles.jsonl), the finals
+    /// (outcomes.jsonl: final, source, the verdicts in order, the landing), the ledger's lines and reconciliations.
+    /// Signatures are left out (a shadow run has none, a dry run's are a new key's each run): attempts by id
+    fn exec_projection(&self, name: &dyn Fn(&Value) -> Value) -> Value {
+        let read = |s: &str| rec::read_jsonl(&self.dir, s).unwrap_or_default();
+        let opps: Vec<Value> = self.decisions.iter().filter(|d| d["opp"].is_u64()).map(|d| json!({ "decision": d["decision"], "reason": d["reason"],
+            "reason_ungated": d["reason_ungated"], "attempt": d["attempt"], "sent": d["sent"], "would_send": d["would_send"], "rank": d["rank"], "band": d["band"],
+            "band_at_opp": d["band_at_opp"], "crowding_bucket": d["crowding"]["bucket"], "ev": d["ev"] })).collect();
+        let attempts: Vec<Value> = read("attempts").iter().map(|a| json!({ "attempt": a["attempt"], "decision": a["decision"], "kind": a["kind"], "sent": a["sent"],
+            "not_sent": a["not_sent"], "buy": name(&a["route"]["buy_pool"]), "sell": name(&a["route"]["sell_pool"]), "size": a["size_lamports"],
+            "gross": a["expected"]["gross"], "tip": a["tip"]["lamports"], "min_profit": a["min_profit_onchain"], "band": a["band"],
+            "inflight": { "why_allowed": a["inflight"]["why_allowed"], "prev_attempt": a["inflight"]["prev_attempt"] }, "queue_rank": a["queue"]["rank"],
+            "creates_ata": a["tx"]["creates_ata"], "closes_ata": a["tx"]["closes_ata"], "target_slot": a["leader"]["slot"] })).collect();
+        let bundles: Vec<Value> = read("bundles").iter().map(|b| json!({ "bundle": b["bundle"], "attempt": b["attempt"], "seq": b["seq"], "outcome": b["outcome"],
+            "slot": b["slot"], "code": b["code"] })).collect();
+        let outcomes: Vec<Value> = read("outcomes").iter().map(|o| json!({ "attempt": o["attempt"], "final": o["final"], "final_src": o["final_src"], "amend": o["amend"],
+            "verdicts": o["verdicts"].as_array().map(|v| v.iter().map(|x| x["outcome"].clone()).collect::<Vec<_>>()), "landed_slot": o["landed"]["slot"],
+            "ok": o["ok"], "fee": o["fee_lamports"], "tip": o["tip_lamports"], "round_trip_on_chain": o["round_trip_on_chain"], "ledger": o["ledger"] })).collect();
+        let ledger: Vec<Value> = read("ledger").iter().map(|l| json!({ "attempt": l["attempt"], "kind": l["kind"], "ok": l["ok"], "categories": l["categories"],
+            "fee": l["fee"], "tip": l["tip"], "rent_locked": l["rent_locked"], "rent_reclaimed": l["rent_reclaimed"], "trade_gross": l["trade_gross"],
+            "trade_net": l["trade_net"], "liquid_delta": l["liquid_delta"], "equity_delta": l["equity_delta"] })).collect();
+        let recon: Vec<Value> = read("recon").iter().map(|r| json!({ "from_slot": r["from"]["slot"], "to_slot": r["to"]["slot"], "entries": r["entries"], "ok": r["ok"],
+            "residual": r["residual"], "liquid": r["liquid"], "by_category": r["by_category"], "executor": r["executor"] })).collect();
+        json!({ "opportunities": opps, "attempts": attempts, "bundles": bundles, "outcomes": outcomes, "ledger": ledger, "recon": recon })
     }
 }
 

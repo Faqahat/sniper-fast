@@ -9,7 +9,11 @@ here or elsewhere in this repository (PLAN-ADDENDUM I-11).
 |---|---|---|
 | `capture.json` | which pools to capture, and why each | by hand |
 | `accounts.json` | the captured accounts: real mainnet layouts, never edited | `tools/capture-fixtures.py --scenarios` |
-| `expected/<scenario>.json` | each scenario's decisions and commit groups, projected (pools and transactions by name) | the tests, with `ARBX_BLESS=1` |
+| `expected/<scenario>.json` | each scenario's decisions and commit groups, projected (pools and transactions by name); for a run with an executor (WP-09 part 2) also its executor's records: each opportunity's verdict, rank, bands and crowding, each attempt, and when the run had them the block engine's results (bundles.jsonl), the finals (outcomes.jsonl), the ledger's lines and reconciliations | the tests, with `ARBX_BLESS=1` |
+| `s16/capture.json` | S16's case pools (w5h3-p2#664: PumpSwap DreMAMRc, DLMM AwmaWjsR), the cases' transactions and the old bot's lines to copy | by hand |
+| `s16/accounts.json` | the case pools' accounts as `accounts.json` holds the base ones (pair `s16`) | `tools/capture-fixtures.py --s16` |
+| `s16/tx/<sig>.json` | getTransaction (base64, JSON meta) of #664's landing and trigger and of w5h2-p10#156's landing | `tools/capture-fixtures.py --s16` |
+| `s16/legacy.json` | the old bot's v1 attempt and outcome lines of both cases, verbatim (from `testdata/legacy/raw/w5h3-p2` and w5h2-p10's own files), secret-checked | `tools/capture-fixtures.py --s16 --runs <arb-lab runs>` |
 
 Inputs (`capture.json`, `accounts.json`) and expected outputs (`expected/`) are kept apart: a change of the venue
 maths (WP-16) changes only `expected/`.
@@ -36,6 +40,18 @@ With each pool: the accounts arbx follows for it, derived from the pool account 
 vaults, the PumpSwap base mint and global fee config `5PHirr8j...`, the CPMM config, every token mint, the DLMM bitmap
 extension and the 7 bin arrays around the active bin), and the Clock sysvar.
 
+## S16's fixtures (WP-09 part 2)
+
+- Read on 2026-10-06 at 08:32 UTC (accounts; the transactions at 08:30) from the public endpoint `https://api.mainnet-beta.solana.com`: `getMultipleAccounts`
+  (base64, commitment `confirmed`) at context slot 453,848,719 for the two pools and the 13 accounts arbx follows for
+  them (the DLMM pair's bitmap extension does not exist: `missing`), and `getTransaction` (finalized) for the three
+  transactions. Read-only; 5 calls.
+- `fixtures()` (src/scenarios/mod.rs) adds them to the base capture as pair `s16`; an account the base capture holds
+  (WSOL's mint) stays the base capture's, and the scenarios' boot slot stays the base capture's.
+- S16 rebuilds #664's PumpSwap pool from its landing's pre-token balances and the pool account as captured, but for its
+  virtual quote reserve, which the PumpSwap events of #664's two transactions pin (it has moved since): see
+  `src/scenarios/s16_mispricing.rs`.
+
 ## How the tests use them
 
 A scenario boots a registry through the real `pools::boot` (a local mock RPC serves `accounts.json`), boots its run as
@@ -45,8 +61,12 @@ effective reserves, the DLMM bin walk, the DAMM v2 price), asserts its expected 
 with `replay::replay` (`--compare`): the replay must be whole and give the run's state and decision digests (as the run
 recorded them too) and identical decisions and commit groups.
 
-`capture.json` and `accounts.json` are pinned in `testdata/legacy/fixtures.sha256` (`tools/capture-fixtures.py --verify`;
-`--manifest` after a new capture). The analysis toolkit reads one scenario run as a recording of arbx's own:
+`capture.json` and `accounts.json`, and every file under `s16/`, are pinned in `testdata/legacy/fixtures.sha256`
+(`tools/capture-fixtures.py --verify`; `--manifest` after a new capture).
+
+A scenario that involves sending (WP-09 part 2: S9, S11, S13-S15) runs its executor as `arbx run` arms it: shadow, or a
+canary whose jito-bundle path sends to a block engine in memory (nothing leaves the process), with the run's ledger; the
+replay's offline executor reproduces every attempt, a canary's sends too. The analysis toolkit reads one scenario run as a recording of arbx's own:
 `tools/arbx-report/tests/fixtures/wp09-run/` (written by the test `the_toolkit_fixture_is_this_codes_recording`, which
 also checks it is what the code writes).
 

@@ -1,0 +1,775 @@
+{
+  "schema": "arbx.fixture.s16-legacy/1",
+  "_doc": "The old bot's (arb-lab v1) attempt and outcome lines of S16's cases, verbatim (MEASUREMENT.md section 7 has their schema), copied by `tools/capture-fixtures.py --s16` (spec: capture.json `legacy`) after the secret patterns' check; `src` says where each came from (testdata/legacy/raw, or the run's own files).",
+  "cases": {
+    "w5h3-p2#664": {
+      "attempts": {
+        "src": "testdata/legacy/raw/w5h3-p2/attempts.jsonl.xz",
+        "line": {
+          "attempt": 664,
+          "buy_pool": "DreMAMRc83uJtbvWuWrDqDaQUGHDbFGopmbTYbM3tJFW",
+          "buy_source": "mriya",
+          "buy_venue": "PumpSwap",
+          "copies": [
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "helius",
+              "sig": "4SeKxWhvxXjjwjX5WWCDuqScXF55xgzALSSfTouFE9dKEh9Wndk2NuZC1Rrkqa64ScEaAfvR4ZgTCi3xKSumUNUx",
+              "tip": 1000000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 10001,
+              "path": "rpcfast",
+              "sig": "4onqy2VisgLjd7CYzEEx9Kx3AFmAvyeppfUuaZmDihen2e97EwCLnGCmiimkeRiG7Wnve3vsJmXbrBdeQ1F3x4Rw",
+              "tip": 10000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 5001,
+              "path": "jito-tx",
+              "sig": "5a11p2hYgGFPgANygqFZKMLig5dznyFW1vLwkQNZ4AqKTw782aQzh4GjLKh4W4WhuNDXLo7XciKEmZpEZS6LrS2C",
+              "tip": 5000
+            },
+            {
+              "bytes": 1095,
+              "min_profit": 1,
+              "path": "haan",
+              "sig": "3D39o9t96AiKgWbkTwiMhRDhdYR447beCH5w6y4yTKiXqrpbfiSR8g11M2bHpcnV5Ex4Qksoxpwwfobu9qPszm1B",
+              "tip": null
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "astralane",
+              "sig": "5A9bLoYLpidcu8w5nGoKq7rpAz16BS6XEZQzKGGduXTiKUrPbQMQvvv2zvNbTwJRgPqMTUuYt42VsmYAGEDHDnW1",
+              "tip": 1000000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "bolt",
+              "sig": "rwUprm3NXoYu3hxNFVLDdssXaTBxzGYkGAuBPrysT85Nq9GVEm2tec7hGZQiwv1T73yfGR7mKeRg44SHqNPzM4T",
+              "tip": 1000000
+            },
+            {
+              "bytes": 1095,
+              "min_profit": 1,
+              "path": "tpu-direct",
+              "sig": "5RXis75VddXj7Ca8V4K8vJhZbVmYMWvR2eV2TknQ1KMJ81n1FnAGchAiGjRJ76bqpXrYDwZFJuZYqrFk52SwBVwH",
+              "tip": null
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "everstake",
+              "sig": "3Z4HQVnLL2LyMk8pT8jtDEtkfrx9UXNPMXPhi3ozNkJm76rK4pdMniSvqNBbaKdkJDRxRA74Eri72Vib9Ucoonux",
+              "tip": 1000000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "nozomi",
+              "sig": "3xRFAy3XBcms8ei5UgdPQ7QZwcCjHuAPu76oxMmSvvLA9mgE9X4q1hXm1diAHhH2o3A396Kts6GYrCyRchZtmTkP",
+              "tip": 1000000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 100001,
+              "path": "blockrazor",
+              "sig": "oJbQroejTuMLz2EAQHBf91r3SDQbLBHUuMnV3Vz56hhCBC1SB3B6FjGGuwta3qi5Th1uTxexZca1TNpunougWMU",
+              "tip": 100000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 100001,
+              "path": "flashblock",
+              "sig": "nn8MzTLXBy2fRM2hWXf1Xz3CeiuA9DKZg7CFtMCRMzbeK7cDoKAvE6p9KgNo2Nb9nF2QyFrmqhC1F7DksG7KUH6",
+              "tip": 100000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "nextblock",
+              "sig": "2z7whtqJ8N6enCLT6Uurf88dSBtnHhrxxLaNTk9tvWK6fCZToQmBMJFLCcW6CbDRsHpY4YNhhBzJJeuX7vrZuxwK",
+              "tip": 1000000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "jupiter",
+              "sig": "5fPs4aqzByDw5fMSGu9x9WbASccRH3ZcMfYUfdmF5KkA5WxbaxeH6zwBrJpADA9m569J9ZSCQNTaemfteJXNe9Un",
+              "tip": 1000000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "landx-fra3",
+              "sig": "2rLX28bDqgyPx4bwJAXWveNqAF5E1MQuobq3A9ZWqrJCY7QbzkiYqG9AFRxQAGqPXVp4GXSLP6Nff9D2q5j2oq4L",
+              "tip": 1000000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "landx-fra1",
+              "sig": "2owjoPkxEBjWVS8Td4nwzoZMX552fwLyJTWB84W8Bw9oRXeGTyfHq6M1pWypQdBVJkUmV6h8ApeqeSXmsMw8S6dL",
+              "tip": 1000000
+            },
+            {
+              "bytes": 1144,
+              "min_profit": 1000001,
+              "path": "speedlanding",
+              "sig": "3jRgqrAReVEegV6nQQurdjLLHDSeQgrFcWEhapfGXroHVUGZNRdEbXztqiwhvyxsAyUFhRWiT2nqh887kapMMWG7",
+              "tip": 1000000
+            }
+          ],
+          "creates_token_account": true,
+          "cu_limit": 248015,
+          "cu_price_micro": 100000,
+          "expected_profit": 454489365,
+          "fee_arm": "flat",
+          "gross_at_opp": 514117768,
+          "kind": "live",
+          "mint": "3Dgwn5E7H5a8k6iGrz3qirkaJqUaJrKHEZ2xPcLRpump",
+          "net_at_opp": 514104048,
+          "nonce": {
+            "account": "9B42xGWEBv23RDbxUuYitnPrTVqZx8au8qUg4N7vDEUT",
+            "value": "ENV7vHC2xcBF1kd5LeFZTFAU49U9mApmT27xeQr8EYP4"
+          },
+          "opp": 1304,
+          "path_arm": "tpu",
+          "predicted_back": 4654489365,
+          "predicted_mid": 311092620532,
+          "predicted_profit": 454489365,
+          "priority_fee_lamports": 24801,
+          "rival_cu_price_micro": 37280,
+          "sell_pool": "AwmaWjsRQ55hYGJfiHcqTwzQX9QLBtGZHPQnjhjDpPkz",
+          "sell_source": "mriya",
+          "sell_venue": "Dlmm",
+          "size_lamports": 4200000000,
+          "slot": 453108630,
+          "st": {
+            "built": 1791077399885673273,
+            "decided": 1791077399864020831,
+            "decoded": 1791077399863993530,
+            "engine": 1791077399863993700,
+            "resolved": 1791077399863994282,
+            "rx": 1791077399863980235,
+            "signed": 1791077399886106883
+          },
+          "t_ns": 1791077399886106883,
+          "trigger": "4ukKBXf9gczLfJ47XbZn62JbUGj3ntfnD6spxTQEAqMVtZ3A7BdZj6x7Prot8G8LsKzRfe5Pfs1kJXp5298S4uyY",
+          "trigger_cu_price_micro": 500,
+          "trigger_feed": "dz-retransmit-eu",
+          "worst_fee_lamports": 29801
+        }
+      },
+      "outcomes": {
+        "src": "testdata/legacy/raw/w5h3-p2/outcomes.jsonl.xz",
+        "line": {
+          "attempt": 664,
+          "cap_lamports": 23421837,
+          "code": "0x4e580002",
+          "copies": [
+            {
+              "accepted": true,
+              "path": "helius",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "4SeKxWhvxXjjwjX5WWCDuqScXF55xgzALSSfTouFE9dKEh9Wndk2NuZC1Rrkqa64ScEaAfvR4ZgTCi3xKSumUNUx",
+              "status": 200,
+              "t_sent": 1791077399888236962
+            },
+            {
+              "accepted": false,
+              "path": "rpcfast",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "4onqy2VisgLjd7CYzEEx9Kx3AFmAvyeppfUuaZmDihen2e97EwCLnGCmiimkeRiG7Wnve3vsJmXbrBdeQ1F3x4Rw",
+              "status": null,
+              "t_sent": 0
+            },
+            {
+              "accepted": true,
+              "path": "jito-tx",
+              "seen_first_feed": "dz-retransmit-eu",
+              "seen_first_ns": 1791077400069260695,
+              "send_to_seen_ms": 181.064448,
+              "sig": "5a11p2hYgGFPgANygqFZKMLig5dznyFW1vLwkQNZ4AqKTw782aQzh4GjLKh4W4WhuNDXLo7XciKEmZpEZS6LrS2C",
+              "status": 200,
+              "t_sent": 1791077399888196356
+            },
+            {
+              "accepted": false,
+              "path": "haan",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "3D39o9t96AiKgWbkTwiMhRDhdYR447beCH5w6y4yTKiXqrpbfiSR8g11M2bHpcnV5Ex4Qksoxpwwfobu9qPszm1B",
+              "status": null,
+              "t_sent": 0
+            },
+            {
+              "accepted": true,
+              "path": "astralane",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "5A9bLoYLpidcu8w5nGoKq7rpAz16BS6XEZQzKGGduXTiKUrPbQMQvvv2zvNbTwJRgPqMTUuYt42VsmYAGEDHDnW1",
+              "status": 200,
+              "t_sent": 1791077399888269633
+            },
+            {
+              "accepted": true,
+              "path": "bolt",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "rwUprm3NXoYu3hxNFVLDdssXaTBxzGYkGAuBPrysT85Nq9GVEm2tec7hGZQiwv1T73yfGR7mKeRg44SHqNPzM4T",
+              "status": 200,
+              "t_sent": 1791077399888326199
+            },
+            {
+              "accepted": true,
+              "path": "tpu-direct",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "5RXis75VddXj7Ca8V4K8vJhZbVmYMWvR2eV2TknQ1KMJ81n1FnAGchAiGjRJ76bqpXrYDwZFJuZYqrFk52SwBVwH",
+              "status": null,
+              "t_sent": 1791077399888374659
+            },
+            {
+              "accepted": true,
+              "path": "everstake",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "3Z4HQVnLL2LyMk8pT8jtDEtkfrx9UXNPMXPhi3ozNkJm76rK4pdMniSvqNBbaKdkJDRxRA74Eri72Vib9Ucoonux",
+              "status": 200,
+              "t_sent": 1791077399888474325
+            },
+            {
+              "accepted": true,
+              "path": "nozomi",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "3xRFAy3XBcms8ei5UgdPQ7QZwcCjHuAPu76oxMmSvvLA9mgE9X4q1hXm1diAHhH2o3A396Kts6GYrCyRchZtmTkP",
+              "status": 200,
+              "t_sent": 1791077399888515593
+            },
+            {
+              "accepted": true,
+              "path": "blockrazor",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "oJbQroejTuMLz2EAQHBf91r3SDQbLBHUuMnV3Vz56hhCBC1SB3B6FjGGuwta3qi5Th1uTxexZca1TNpunougWMU",
+              "status": 200,
+              "t_sent": 1791077399888554555
+            },
+            {
+              "accepted": true,
+              "path": "flashblock",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "nn8MzTLXBy2fRM2hWXf1Xz3CeiuA9DKZg7CFtMCRMzbeK7cDoKAvE6p9KgNo2Nb9nF2QyFrmqhC1F7DksG7KUH6",
+              "status": 200,
+              "t_sent": 1791077399888339073
+            },
+            {
+              "accepted": true,
+              "path": "nextblock",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "2z7whtqJ8N6enCLT6Uurf88dSBtnHhrxxLaNTk9tvWK6fCZToQmBMJFLCcW6CbDRsHpY4YNhhBzJJeuX7vrZuxwK",
+              "status": 200,
+              "t_sent": 1791077399888369259
+            },
+            {
+              "accepted": false,
+              "path": "jupiter",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "5fPs4aqzByDw5fMSGu9x9WbASccRH3ZcMfYUfdmF5KkA5WxbaxeH6zwBrJpADA9m569J9ZSCQNTaemfteJXNe9Un",
+              "status": null,
+              "t_sent": 0
+            },
+            {
+              "accepted": true,
+              "path": "landx-fra3",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "2rLX28bDqgyPx4bwJAXWveNqAF5E1MQuobq3A9ZWqrJCY7QbzkiYqG9AFRxQAGqPXVp4GXSLP6Nff9D2q5j2oq4L",
+              "status": null,
+              "t_sent": 1791077399888437457
+            },
+            {
+              "accepted": false,
+              "path": "landx-fra1",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "2owjoPkxEBjWVS8Td4nwzoZMX552fwLyJTWB84W8Bw9oRXeGTyfHq6M1pWypQdBVJkUmV6h8ApeqeSXmsMw8S6dL",
+              "status": 419,
+              "t_sent": 1791077399888459337
+            },
+            {
+              "accepted": true,
+              "path": "speedlanding",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "3jRgqrAReVEegV6nQQurdjLLHDSeQgrFcWEhapfGXroHVUGZNRdEbXztqiwhvyxsAyUFhRWiT2nqh887kapMMWG7",
+              "status": 200,
+              "t_sent": 1791077399888202949
+            }
+          ],
+          "delivered": [
+            276985551117,
+            4061405592
+          ],
+          "err": {
+            "InstructionError": [
+              4,
+              {
+                "Custom": 1314390018
+              }
+            ]
+          },
+          "expected_profit": 454489365,
+          "failed_fees_lamports": 1726367,
+          "fee_lamports": 29801,
+          "gate": null,
+          "jito": null,
+          "kind": "live",
+          "landed": "jito-tx",
+          "meaning": "profit check: every leg ran, the round trip did not pay",
+          "ok": false,
+          "opp": 1304,
+          "poh": {
+            "ours": null,
+            "ours_ms_after_trigger": null,
+            "trigger": null
+          },
+          "predicted": [
+            311092620532,
+            4654489365
+          ],
+          "profit_lamports": -29801,
+          "profit_vs_expected": -454519166,
+          "round_trip_on_chain": -138594408,
+          "round_trip_predicted": 454489365,
+          "run_profit_lamports": 0,
+          "seen_by": {
+            "astralane-deshred": 1791077400071493867,
+            "dz-retransmit-eu": 1791077400069260695,
+            "haan-deshred": 1791077400082935532,
+            "haan-grpc": 1791077400100242175
+          },
+          "send_to_seen_ms": 181.064448,
+          "settle_error": null,
+          "sig": "5a11p2hYgGFPgANygqFZKMLig5dznyFW1vLwkQNZ4AqKTw782aQzh4GjLKh4W4WhuNDXLo7XciKEmZpEZS6LrS2C",
+          "slot": 453108631,
+          "slots_after_trigger": 1,
+          "t_ns": 1791077400900394926,
+          "tip_paid_lamports": 0,
+          "trigger": "4ukKBXf9gczLfJ47XbZn62JbUGj3ntfnD6spxTQEAqMVtZ3A7BdZj6x7Prot8G8LsKzRfe5Pfs1kJXp5298S4uyY",
+          "trigger_slot": 453108630
+        }
+      }
+    },
+    "w5h2-p10#156": {
+      "attempts": {
+        "src": "<runs>/w5h2-p10/attempts.jsonl",
+        "line": {
+          "attempt": 156,
+          "buy_pool": "BKH29Cr5mZf8eahp7vD28jaBqU9HavY9v6SAbphbSA2D",
+          "buy_source": "mriya",
+          "buy_venue": "DammV2",
+          "copies": [
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "helius",
+              "sig": "5JSakSpm7A3pL8Qckti4yqR7yWnhaQmmMWYuzQUvmLwvqp8RLZ55p2YiXpQHjR8k8GaPf7Am9DDANGzjAhNBRhVP",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "rpcfast",
+              "sig": "4KFwCq9GXBkajfFffShpD8h7b8TDUYaeXMVwEnCjpQj5zghHYt8bAyCys1AfJXBmD6SgLYBH6wrGP7D2PxRTpg4Z",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "jito-tx",
+              "sig": "5XbNa9BfkgBVv2bpGvVyvrEZhkwomDv7BcTmgpcFiZ9NdSxHFrwXzZVv8BFqo1tXd1Ww7PAiCqGoDWUfFBGhutQi",
+              "tip": 18643655
+            },
+            {
+              "bytes": 905,
+              "min_profit": 1,
+              "path": "haan",
+              "sig": "4w1pVXhc2pJUWPGfoNp1ok6ACEtD8mhjwsEx553L9VsCU7rRS5quVJD5sQPZ5VfACUGh1mMQHZxHMjpFcMgQB8hN",
+              "tip": null
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "astralane",
+              "sig": "cwmvozabX4EbEJpBMEXL65z2RVWNqBxUZ6CTTXfKBa7iHBWismjuXRamsRYnnHHC3dQ4ZEnjBdAvc4HYpUfQDdV",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "bolt",
+              "sig": "5Sopwbo2QRgnwEmVPTT5ED8bGdKs9bGn7W11KCvWTBxzxAmsN8XnGGhgGiKZGcWBx6PzdPN5va5fDjFXouR5DgQr",
+              "tip": 18643655
+            },
+            {
+              "bytes": 905,
+              "min_profit": 1,
+              "path": "tpu-direct",
+              "sig": "46MNhABwwCc8ZAwLgZrATUg618FsNbWBvPxh3zqYUb9x6RG8Qj6n1D4d31ASfRQ634dKXSx8yvcUj4yznxAhFJvQ",
+              "tip": null
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "everstake",
+              "sig": "27sRqt9V53KujL9mWYU3wLyBoFFLnnDF1vyHuakoFMx3BupfRgFn9jBZEJrdx5EamNeu4Zs28VCUL2MSPB48nL3K",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "nozomi",
+              "sig": "2gP13uG4HmLJcod1pH6vjXyyYp9NDq4HKxHEdJ2vWLFZq9DpWqA2CuCSRpB4vZSGp3zcfLCyFA5taKxeKPbPmiw5",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "blockrazor",
+              "sig": "5PteMLhHXBja9s925eZ7GXi4rinz8RE8hePEzqXBC8MgU4LdCS7njwfdZ1fCk3hhq4hfZ1wjCriq3jfAd1n67zxj",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "flashblock",
+              "sig": "3PXcHsJnt9iiCF7oMmxKkvEKqZnzrsMUyJMMFLWURb7FjraSM4hhYK53NvyKYNoi3coE6sY5z6Wz8thH8cmpav4G",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "nextblock",
+              "sig": "phMjSZaYHNesswL28DCppRpmV34YTVWGqJkz9J6QTyWNHzfHtSJCgWxaJkp9GhcZSavPa4hFcBGazFtgQKULc5D",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 1000001,
+              "path": "jupiter",
+              "sig": "5LHybiiTHtnLm41vm3QSW9kMzj23roukNxXE5pP5Y2fMtaxT4t7a5iGtRSJK45W3AcXo3Jo3uDZ8fDJZo2niAYL1",
+              "tip": 1000000
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "landx-fra3",
+              "sig": "oiHmSVeqd2njLKWxVy1PCjx6tbEZDYycjemEdJQdvrAGLuxb4W9QSqeTXk7CWrKPyvEx5j2MHRdtDBz1jAU4ENq",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "landx-fra1",
+              "sig": "TEPrDDPpUGWZZ8Qjui86WE5BzjLuWgw8dTc1DzPJVSSCTYSdksdNoVBJ6HH1V8RXof2ZFMoHBtE3VFpXU7zJJq7",
+              "tip": 18643655
+            },
+            {
+              "bytes": 954,
+              "min_profit": 18643656,
+              "path": "speedlanding",
+              "sig": "6CRphsSQgM9FchDkXpzU52M8FuGmQkEhztap3qMS62qnt6oVtzLKPnSvH1EEXrzT8wA2hid6ySREsme4QAwb9s6",
+              "tip": 18643655
+            }
+          ],
+          "creates_token_account": false,
+          "cu_limit": 129015,
+          "cu_price_micro": 100000,
+          "expected_profit": 37287310,
+          "fee_arm": "flat",
+          "gross_at_opp": 37287310,
+          "kind": "live",
+          "mint": "2AVjqmGbMqg7rSyHVv2deVdggsBgBtu1Bi69BUvE5WRv",
+          "net_at_opp": 37277150,
+          "nonce": {
+            "account": "BppgM2hhGfEw1JGLd8Cq5WFQ7rvrvEr3Lg9QQ8XRWniz",
+            "value": "5rWj2Y2HGT5nSUGEq1vNfva8sZ2yETvpVdA4uAfTr5KW"
+          },
+          "opp": 257,
+          "path_arm": "tpu",
+          "predicted_back": 3075214183,
+          "predicted_mid": 188780020269,
+          "predicted_profit": 37287310,
+          "priority_fee_lamports": 12901,
+          "rival_cu_price_micro": 3309,
+          "sell_pool": "HRhgfZpzapYZNY9QwBN2CS4j3ftxgAySYWjFaUa1g7KH",
+          "sell_source": "mriya",
+          "sell_venue": "Dlmm",
+          "size_lamports": 3037926873,
+          "slot": 453089316,
+          "st": {
+            "built": 1791072226774434339,
+            "decided": 1791072226773670323,
+            "decoded": 1791072226773551152,
+            "engine": 1791072226773551152,
+            "resolved": 1791072226773551152,
+            "rx": 1791072226773551152,
+            "signed": 1791072226774774876
+          },
+          "t_ns": 1791072226774774876,
+          "trigger": "4ZbQ5o3DG5aWRFTtx5VnxHRDvXC2QVSawjN58x2vjNvN2dGTy4wHBp42rpZhDFmBq6HB3EoFndmsFJ27ZaoRBQfe",
+          "trigger_cu_price_micro": null,
+          "trigger_feed": "state",
+          "worst_fee_lamports": 17901
+        }
+      },
+      "outcomes": {
+        "src": "<runs>/w5h2-p10/outcomes.jsonl",
+        "line": {
+          "attempt": 156,
+          "cap_lamports": 19020371,
+          "code": "0x4e580002",
+          "copies": [
+            {
+              "accepted": true,
+              "path": "helius",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "5JSakSpm7A3pL8Qckti4yqR7yWnhaQmmMWYuzQUvmLwvqp8RLZ55p2YiXpQHjR8k8GaPf7Am9DDANGzjAhNBRhVP",
+              "status": 200,
+              "t_sent": 1791072226776647118
+            },
+            {
+              "accepted": false,
+              "path": "rpcfast",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "4KFwCq9GXBkajfFffShpD8h7b8TDUYaeXMVwEnCjpQj5zghHYt8bAyCys1AfJXBmD6SgLYBH6wrGP7D2PxRTpg4Z",
+              "status": null,
+              "t_sent": 0
+            },
+            {
+              "accepted": false,
+              "path": "jito-tx",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "5XbNa9BfkgBVv2bpGvVyvrEZhkwomDv7BcTmgpcFiZ9NdSxHFrwXzZVv8BFqo1tXd1Ww7PAiCqGoDWUfFBGhutQi",
+              "status": null,
+              "t_sent": 0
+            },
+            {
+              "accepted": false,
+              "path": "haan",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "4w1pVXhc2pJUWPGfoNp1ok6ACEtD8mhjwsEx553L9VsCU7rRS5quVJD5sQPZ5VfACUGh1mMQHZxHMjpFcMgQB8hN",
+              "status": null,
+              "t_sent": 0
+            },
+            {
+              "accepted": true,
+              "path": "astralane",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "cwmvozabX4EbEJpBMEXL65z2RVWNqBxUZ6CTTXfKBa7iHBWismjuXRamsRYnnHHC3dQ4ZEnjBdAvc4HYpUfQDdV",
+              "status": 200,
+              "t_sent": 1791072226776694357
+            },
+            {
+              "accepted": true,
+              "path": "bolt",
+              "seen_first_feed": "dz-retransmit-eu",
+              "seen_first_ns": 1791072226916091094,
+              "send_to_seen_ms": 139.348736,
+              "sig": "5Sopwbo2QRgnwEmVPTT5ED8bGdKs9bGn7W11KCvWTBxzxAmsN8XnGGhgGiKZGcWBx6PzdPN5va5fDjFXouR5DgQr",
+              "status": 200,
+              "t_sent": 1791072226776742376
+            },
+            {
+              "accepted": true,
+              "path": "tpu-direct",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "46MNhABwwCc8ZAwLgZrATUg618FsNbWBvPxh3zqYUb9x6RG8Qj6n1D4d31ASfRQ634dKXSx8yvcUj4yznxAhFJvQ",
+              "status": null,
+              "t_sent": 1791072226776764198
+            },
+            {
+              "accepted": true,
+              "path": "everstake",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "27sRqt9V53KujL9mWYU3wLyBoFFLnnDF1vyHuakoFMx3BupfRgFn9jBZEJrdx5EamNeu4Zs28VCUL2MSPB48nL3K",
+              "status": 200,
+              "t_sent": 1791072226776800154
+            },
+            {
+              "accepted": true,
+              "path": "nozomi",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "2gP13uG4HmLJcod1pH6vjXyyYp9NDq4HKxHEdJ2vWLFZq9DpWqA2CuCSRpB4vZSGp3zcfLCyFA5taKxeKPbPmiw5",
+              "status": 200,
+              "t_sent": 1791072226776845620
+            },
+            {
+              "accepted": false,
+              "path": "blockrazor",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "5PteMLhHXBja9s925eZ7GXi4rinz8RE8hePEzqXBC8MgU4LdCS7njwfdZ1fCk3hhq4hfZ1wjCriq3jfAd1n67zxj",
+              "status": null,
+              "t_sent": 0
+            },
+            {
+              "accepted": true,
+              "path": "flashblock",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "3PXcHsJnt9iiCF7oMmxKkvEKqZnzrsMUyJMMFLWURb7FjraSM4hhYK53NvyKYNoi3coE6sY5z6Wz8thH8cmpav4G",
+              "status": 200,
+              "t_sent": 1791072226776704958
+            },
+            {
+              "accepted": true,
+              "path": "nextblock",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "phMjSZaYHNesswL28DCppRpmV34YTVWGqJkz9J6QTyWNHzfHtSJCgWxaJkp9GhcZSavPa4hFcBGazFtgQKULc5D",
+              "status": 200,
+              "t_sent": 1791072226776732518
+            },
+            {
+              "accepted": false,
+              "path": "jupiter",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "5LHybiiTHtnLm41vm3QSW9kMzj23roukNxXE5pP5Y2fMtaxT4t7a5iGtRSJK45W3AcXo3Jo3uDZ8fDJZo2niAYL1",
+              "status": null,
+              "t_sent": 0
+            },
+            {
+              "accepted": true,
+              "path": "landx-fra3",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "oiHmSVeqd2njLKWxVy1PCjx6tbEZDYycjemEdJQdvrAGLuxb4W9QSqeTXk7CWrKPyvEx5j2MHRdtDBz1jAU4ENq",
+              "status": null,
+              "t_sent": 1791072226776779537
+            },
+            {
+              "accepted": true,
+              "path": "landx-fra1",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "TEPrDDPpUGWZZ8Qjui86WE5BzjLuWgw8dTc1DzPJVSSCTYSdksdNoVBJ6HH1V8RXof2ZFMoHBtE3VFpXU7zJJq7",
+              "status": 200,
+              "t_sent": 1791072226776804131
+            },
+            {
+              "accepted": true,
+              "path": "speedlanding",
+              "seen_first_feed": null,
+              "seen_first_ns": null,
+              "send_to_seen_ms": null,
+              "sig": "6CRphsSQgM9FchDkXpzU52M8FuGmQkEhztap3qMS62qnt6oVtzLKPnSvH1EEXrzT8wA2hid6ySREsme4QAwb9s6",
+              "status": 200,
+              "t_sent": 1791072226776847333
+            }
+          ],
+          "delivered": [
+            186118876247,
+            2993742708
+          ],
+          "err": {
+            "InstructionError": [
+              3,
+              {
+                "Custom": 1314390018
+              }
+            ]
+          },
+          "expected_profit": 37287310,
+          "failed_fees_lamports": 476024,
+          "fee_lamports": 17901,
+          "gate": null,
+          "jito": null,
+          "kind": "live",
+          "landed": "bolt",
+          "meaning": "profit check: every leg ran, the round trip did not pay",
+          "ok": false,
+          "opp": 257,
+          "poh": {
+            "ours": null,
+            "ours_ms_after_trigger": null,
+            "trigger": null
+          },
+          "predicted": [
+            188780020269,
+            3075214183
+          ],
+          "profit_lamports": -17901,
+          "profit_vs_expected": -37305211,
+          "round_trip_on_chain": -44184165,
+          "round_trip_predicted": 37287310,
+          "run_profit_lamports": 0,
+          "seen_by": {
+            "astralane-deshred": 1791072226916830844,
+            "dz-retransmit-eu": 1791072226916091094,
+            "haan-deshred": 1791072226921472867
+          },
+          "send_to_seen_ms": 139.348736,
+          "settle_error": null,
+          "sig": "5Sopwbo2QRgnwEmVPTT5ED8bGdKs9bGn7W11KCvWTBxzxAmsN8XnGGhgGiKZGcWBx6PzdPN5va5fDjFXouR5DgQr",
+          "slot": 453089316,
+          "slots_after_trigger": 0,
+          "t_ns": 1791072227788878954,
+          "tip_paid_lamports": 0,
+          "trigger": "4ZbQ5o3DG5aWRFTtx5VnxHRDvXC2QVSawjN58x2vjNvN2dGTy4wHBp42rpZhDFmBq6HB3EoFndmsFJ27ZaoRBQfe",
+          "trigger_slot": 453089316
+        }
+      }
+    }
+  }
+}

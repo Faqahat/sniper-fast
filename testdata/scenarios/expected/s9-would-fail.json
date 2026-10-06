@@ -1,0 +1,315 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 4,
+      "group": 1,
+      "late": null,
+      "members": 2,
+      "outcome": "complete",
+      "pools": [
+        "usdc.cpmm"
+      ],
+      "resolved_by": "member",
+      "slot": 453386132,
+      "txn": "S13-cpmm",
+      "w_src": "shred"
+    },
+    {
+      "evaluated": 4,
+      "group": 0,
+      "late": null,
+      "members": 2,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.ammv4"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "S13-sale",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": 0,
+      "best": 0,
+      "decision": 0,
+      "kind": "commit",
+      "parts_skew_slots": {
+        "buy": 2,
+        "sell": 0
+      },
+      "reason": "below_min_profit",
+      "routes": [
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 181000,
+          "gross": -43015,
+          "net": -49015,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 181000,
+          "gross": -47307,
+          "net": -53307,
+          "reason": "below_min_profit",
+          "sell": "usdc.cpmm",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "pending_commit",
+          "sell": "usdc.ammv4",
+          "size": null
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "pending_commit",
+          "sell": "usdc.cpmm",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.cpmm",
+        "slot": 453386132,
+        "txn": "S13-cpmm"
+      },
+      "verdict": "reject",
+      "w_src": "shred"
+    },
+    {
+      "band": 3,
+      "best": 0,
+      "decision": 1,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "sent",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": 195946033,
+          "net": 195841033,
+          "reason": "best",
+          "sell": "usdc.pump",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -276295,
+          "net": -282295,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "route_not_quiet",
+          "sell": "usdc.cpmm",
+          "size": null
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "route_not_quiet",
+          "sell": "usdc.ammv4",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386132,
+        "txn": "S13-sale"
+      },
+      "verdict": "send",
+      "w_src": "unknown"
+    },
+    {
+      "band": 3,
+      "best": 0,
+      "decision": 2,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "inflight_same_state",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": 195946033,
+          "net": 195841033,
+          "reason": "best",
+          "sell": "usdc.pump",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -276295,
+          "net": -282295,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": 815841,
+          "net": 710841,
+          "reason": "not_best",
+          "sell": "usdc.cpmm",
+          "size": 35539454
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": -288743,
+          "net": -294743,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386132,
+        "txn": "S13-sale"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    }
+  ],
+  "executor": {
+    "attempts": [
+      {
+        "attempt": 0,
+        "band": 3,
+        "buy": "usdc.ammv4",
+        "closes_ata": false,
+        "creates_ata": false,
+        "decision": 1,
+        "gross": 9377994,
+        "inflight": {
+          "prev_attempt": null,
+          "why_allowed": "first"
+        },
+        "kind": "canary",
+        "min_profit": 105001,
+        "not_sent": null,
+        "queue_rank": 2,
+        "sell": "usdc.pump",
+        "sent": true,
+        "size": 200000000,
+        "target_slot": 453386133,
+        "tip": 100000
+      }
+    ],
+    "bundles": [
+      {
+        "attempt": 0,
+        "bundle": "b0",
+        "code": null,
+        "outcome": "accepted",
+        "seq": 0,
+        "slot": 453386133
+      },
+      {
+        "attempt": 0,
+        "bundle": "b0",
+        "code": "0x4e580002",
+        "outcome": "would-fail",
+        "seq": 1,
+        "slot": 453386133
+      }
+    ],
+    "ledger": [],
+    "opportunities": [
+      {
+        "attempt": 0,
+        "band": 3,
+        "band_at_opp": 4,
+        "crowding_bucket": 0,
+        "decision": 1,
+        "ev": 9272994,
+        "rank": 2,
+        "reason": "sent",
+        "reason_ungated": null,
+        "sent": true,
+        "would_send": false
+      },
+      {
+        "attempt": null,
+        "band": 3,
+        "band_at_opp": 4,
+        "crowding_bucket": 0,
+        "decision": 2,
+        "ev": null,
+        "rank": null,
+        "reason": "inflight_same_state",
+        "reason_ungated": null,
+        "sent": null,
+        "would_send": false
+      }
+    ],
+    "outcomes": [],
+    "recon": []
+  },
+  "scenario": "s9-would-fail"
+}

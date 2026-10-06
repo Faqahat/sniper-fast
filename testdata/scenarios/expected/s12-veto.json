@@ -1,0 +1,164 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 2,
+      "group": 1,
+      "late": null,
+      "members": 2,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.ammv4"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "U",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 2,
+      "group": 0,
+      "late": null,
+      "members": 2,
+      "outcome": "complete",
+      "pools": [
+        "usdc.pump"
+      ],
+      "resolved_by": "member",
+      "slot": 453386132,
+      "txn": "T",
+      "w_src": "shred"
+    }
+  ],
+  "decisions": [
+    {
+      "band": null,
+      "best": null,
+      "decision": 0,
+      "kind": "quiescent",
+      "parts_skew_slots": null,
+      "reason": "pending_commit",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "pending_commit",
+          "sell": "usdc.pump",
+          "size": null
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": null,
+          "cu": null,
+          "gross": null,
+          "net": null,
+          "reason": "pending_commit",
+          "sell": "usdc.ammv4",
+          "size": null
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386132,
+        "txn": "U"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 3,
+      "best": 1,
+      "decision": 1,
+      "kind": "commit",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "sent",
+      "routes": [
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -257404,
+          "net": -263404,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": 178438523,
+          "net": 178333523,
+          "reason": "best",
+          "sell": "usdc.pump",
+          "size": 4200000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.pump",
+        "slot": 453386132,
+        "txn": "T"
+      },
+      "verdict": "send",
+      "w_src": "shred"
+    }
+  ],
+  "executor": {
+    "attempts": [
+      {
+        "attempt": 0,
+        "band": 3,
+        "buy": "usdc.ammv4",
+        "closes_ata": false,
+        "creates_ata": false,
+        "decision": 1,
+        "gross": 8544037,
+        "inflight": {
+          "prev_attempt": null,
+          "why_allowed": "first"
+        },
+        "kind": "canary",
+        "min_profit": 105001,
+        "not_sent": null,
+        "queue_rank": 2,
+        "sell": "usdc.pump",
+        "sent": true,
+        "size": 200000000,
+        "target_slot": 453386133,
+        "tip": 100000
+      }
+    ],
+    "bundles": [],
+    "ledger": [],
+    "opportunities": [
+      {
+        "attempt": 0,
+        "band": 3,
+        "band_at_opp": 4,
+        "crowding_bucket": 0,
+        "decision": 1,
+        "ev": 8439037,
+        "rank": 2,
+        "reason": "sent",
+        "reason_ungated": null,
+        "sent": true,
+        "would_send": false
+      }
+    ],
+    "outcomes": [],
+    "recon": []
+  },
+  "scenario": "s12-veto"
+}

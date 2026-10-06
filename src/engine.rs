@@ -2366,6 +2366,14 @@ impl Engine {
                 let d = x.decide(r, &inputs, &self.sendview, &alts, slot.max(tip), t);
                 // the poh_trigger_pct gauge, after the fire (the PoH index is shared with the feed threads; review WP-05 #8)
                 if d.attempt.is_some() { x.note_poh(trig != [0; 64] && poh_of(&self.poh, &trig, global).is_some()); }
+                // ---- WP-09 part 2: a send (live, canary) journals its attempt's signature right after the decision (INPUT 3
+                // `src` "decision" with `sent`), after the fire: a replay's offline executor sends with the run's signature,
+                // so our transaction's later arrivals, verdicts, statuses and wallet record find their attempt as in the run
+                let sent = if d.sent == Some(true) && !x.is_offline() { d.attempt.and_then(|a| x.attempt_sig(a).map(|s| (a, s))) } else { None };
+                if let Some((a, sig)) = sent {
+                    self.journal.input(self.t_now, InputKind::Gate, Arc::new(json!({ "src": "decision", "opp": id, "executor": true,
+                        "sent": { "attempt": a, "sig": sig } })));
+                }
                 d
             }
             None => { self.count("send_unquotable"); crate::exec::Decided::reject("build_error:unquotable") }

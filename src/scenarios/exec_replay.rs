@@ -325,3 +325,39 @@ fn a_frz_like_recording_with_the_bankroll_cap_replays_identically() {
         && x["replay"] == json!(4_200_000_000u64)), "{diff}");
     assert!(diff["diffs"].as_array().unwrap().iter().any(|x| x["field"] == json!("ev")), "{diff}");
 }
+
+/// ---- WP-09 part 2. A canary run (its bundle to a block engine in memory) replays with its sends: the offline executor
+/// replays the run's send as sent, with the run's signature (the decision-point `sent` record journaled right after it),
+/// and the fire's result, the block engine's verdicts and the expiry check's answer come back from the journal: every
+/// decision, the attempt and the digests are the run's (S13 and S9 assert it on their own runs). The same journal without
+/// its `sent` record (a live or canary recording made before part 2) is never a silent OK: the send is replayed without
+/// a signature and counted (`sent_records_missing`, not whole), and its signature-keyed state differs
+#[test]
+fn a_canary_recording_replays_its_sends_and_one_without_its_sent_records_is_not_whole() {
+    let (mut r, s2) = super::s13_verdicts::canary_rig("x-canary", &POOLS3, &CANARY, true);
+    let a = r.meta("usdc.ammv4");
+    let t = usdc_sale(&mut r, &a, 40, "C-sale", s2, T0 + 10 * MS);
+    let att = r.attempts();
+    assert_eq!((att.len(), att[0]["sent"].as_bool(), att[0]["kind"].as_str()), (1, Some(true), Some("canary")), "{att:?}");
+    r.pump(1, t);
+    r.verdict("b0", "accepted", Some(s2 + 1), None, t + MS);
+    r.rec.sync();
+    let sent: Vec<Value> = crate::rec::journal::read_dir(&r.dir).unwrap().into_iter().filter(crate::rec::journal::is_gate_decision)
+        .filter_map(|x| match x.body { JBody::Input { data, .. } if data.get("sent").is_some() => Some(data), _ => None }).collect();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!((sent[0]["sent"]["attempt"].as_u64(), sent[0]["sent"]["sig"].clone()), (Some(0), att[0]["tx"]["sig"].clone()), "the attempt and its signature");
+    let done = r.finish_and_replay();
+    assert_eq!((done.replay["executor"]["exec_init"]["mode"].as_str(), done.replay["executor"]["sent_missing"].as_u64()), (Some("canary"), Some(0)));
+    // without the `sent` record
+    let mut dropped = 0;
+    rewrite_journal(&done.dir, |_, x| {
+        let d = &x.3[21..];
+        let it = x.0 == crate::rec::journal::J_INPUT && d[0] == InputKind::Gate as u8 && String::from_utf8_lossy(d).contains("\"sent\"");
+        if it { dropped += 1; vec![] } else { x.3.clone() }
+    });
+    assert_eq!(dropped, 1);
+    let rp = crate::replay::replay(&done.dir, &crate::replay::Opts { compare: true, out: Some(done.dir.join("no-sent")), ..Default::default() }).unwrap();
+    assert!(!rp.ok, "never a silent OK");
+    assert!(rp.summary["not_whole"].as_array().unwrap().iter().any(|w| w["why"] == "sent_records_missing" && w["n"] == json!(1)), "{}", rp.summary["not_whole"]);
+    assert_eq!(rp.summary["executor"]["sent_missing"].as_u64(), Some(1));
+}

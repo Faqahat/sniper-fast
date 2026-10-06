@@ -1,0 +1,139 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 4,
+      "group": 0,
+      "late": null,
+      "members": 2,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.cpmm"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "S11-c3",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": 4,
+      "best": 3,
+      "decision": 0,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 2
+      },
+      "reason": "gate_shadow:mode_shadow",
+      "routes": [
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 181000,
+          "gross": -921282,
+          "net": -927282,
+          "reason": "below_min_profit",
+          "sell": "usdc.pump",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 181000,
+          "gross": 14503968,
+          "net": 14398968,
+          "reason": "not_best",
+          "sell": "usdc.cpmm",
+          "size": 146458665
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": -927470,
+          "net": -933470,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": 14874619,
+          "net": 14769619,
+          "reason": "best",
+          "sell": "usdc.cpmm",
+          "size": 148136333
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.cpmm",
+        "slot": 453386132,
+        "txn": "S11-c3"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    }
+  ],
+  "executor": {
+    "attempts": [
+      {
+        "attempt": 0,
+        "band": 4,
+        "buy": "usdc.ammv4",
+        "closes_ata": false,
+        "creates_ata": false,
+        "decision": 0,
+        "gross": 14874619,
+        "inflight": {
+          "prev_attempt": null,
+          "why_allowed": "first"
+        },
+        "kind": "shadow",
+        "min_profit": 105001,
+        "not_sent": "gate_shadow:mode_shadow",
+        "queue_rank": 3,
+        "sell": "usdc.cpmm",
+        "sent": false,
+        "size": 148136333,
+        "target_slot": 453386133,
+        "tip": 100000
+      }
+    ],
+    "bundles": [],
+    "ledger": [],
+    "opportunities": [
+      {
+        "attempt": 0,
+        "band": 4,
+        "band_at_opp": 4,
+        "crowding_bucket": 2,
+        "decision": 0,
+        "ev": 14769619,
+        "rank": 3,
+        "reason": "gate_shadow:mode_shadow",
+        "reason_ungated": null,
+        "sent": false,
+        "would_send": true
+      }
+    ],
+    "outcomes": [],
+    "recon": []
+  },
+  "scenario": "s11-crowded-rank"
+}

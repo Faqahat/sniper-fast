@@ -1,0 +1,268 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 4,
+      "group": 0,
+      "late": null,
+      "members": 4,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.ammv4",
+        "usdc.cpmm"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "S9-both",
+      "w_src": "unknown"
+    },
+    {
+      "evaluated": 2,
+      "group": 1,
+      "late": null,
+      "members": 2,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.ammv4"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "S9-next",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": 2,
+      "best": 0,
+      "decision": 0,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 2
+      },
+      "reason": "gate_shadow:mode_shadow",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": 821904,
+          "net": 716904,
+          "reason": "best",
+          "sell": "usdc.cpmm",
+          "size": 35669806
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": -289531,
+          "net": -295531,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386132,
+        "txn": "S9-both"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 2,
+      "best": 1,
+      "decision": 1,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 2
+      },
+      "reason": "gate_shadow:mode_shadow",
+      "routes": [
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": -289531,
+          "net": -295531,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": 821904,
+          "net": 716904,
+          "reason": "best",
+          "sell": "usdc.cpmm",
+          "size": 35669806
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.cpmm",
+        "slot": 453386132,
+        "txn": "S9-both"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    },
+    {
+      "band": 3,
+      "best": 0,
+      "decision": 2,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 2
+      },
+      "reason": "gate_shadow:mode_shadow",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": 1936910,
+          "net": 1831910,
+          "reason": "best",
+          "sell": "usdc.cpmm",
+          "size": 54082464
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": -404980,
+          "net": -410980,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386132,
+        "txn": "S9-next"
+      },
+      "verdict": "reject",
+      "w_src": "unknown"
+    }
+  ],
+  "executor": {
+    "attempts": [
+      {
+        "attempt": 0,
+        "band": 2,
+        "buy": "usdc.ammv4",
+        "closes_ata": false,
+        "creates_ata": false,
+        "decision": 0,
+        "gross": 821904,
+        "inflight": {
+          "prev_attempt": null,
+          "why_allowed": "first"
+        },
+        "kind": "shadow",
+        "min_profit": 105001,
+        "not_sent": "gate_shadow:mode_shadow",
+        "queue_rank": 0,
+        "sell": "usdc.cpmm",
+        "sent": false,
+        "size": 35669806,
+        "target_slot": 453386133,
+        "tip": 100000
+      },
+      {
+        "attempt": 1,
+        "band": 3,
+        "buy": "usdc.ammv4",
+        "closes_ata": false,
+        "creates_ata": false,
+        "decision": 2,
+        "gross": 1936910,
+        "inflight": {
+          "prev_attempt": 0,
+          "why_allowed": "new_state"
+        },
+        "kind": "shadow",
+        "min_profit": 105001,
+        "not_sent": "gate_shadow:mode_shadow",
+        "queue_rank": 2,
+        "sell": "usdc.cpmm",
+        "sent": false,
+        "size": 54082464,
+        "target_slot": 453386133,
+        "tip": 100000
+      }
+    ],
+    "bundles": [],
+    "ledger": [],
+    "opportunities": [
+      {
+        "attempt": 0,
+        "band": 2,
+        "band_at_opp": 2,
+        "crowding_bucket": 0,
+        "decision": 0,
+        "ev": 716904,
+        "rank": 0,
+        "reason": "gate_shadow:mode_shadow",
+        "reason_ungated": null,
+        "sent": false,
+        "would_send": true
+      },
+      {
+        "attempt": null,
+        "band": 2,
+        "band_at_opp": 2,
+        "crowding_bucket": 0,
+        "decision": 1,
+        "ev": null,
+        "rank": null,
+        "reason": "gate_shadow:mode_shadow",
+        "reason_ungated": "inflight_same_state",
+        "sent": null,
+        "would_send": false
+      },
+      {
+        "attempt": 1,
+        "band": 3,
+        "band_at_opp": 3,
+        "crowding_bucket": 0,
+        "decision": 2,
+        "ev": 1831910,
+        "rank": 2,
+        "reason": "gate_shadow:mode_shadow",
+        "reason_ungated": null,
+        "sent": false,
+        "would_send": true
+      }
+    ],
+    "outcomes": [],
+    "recon": []
+  },
+  "scenario": "s9"
+}

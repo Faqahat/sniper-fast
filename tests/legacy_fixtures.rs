@@ -82,6 +82,8 @@ fn fixture_files() -> BTreeSet<PathBuf> {
     walk(&testdata().join("wallet"), &mut all);
     // the WP-09 scenario inputs (tools/capture-fixtures.py `SCENARIO_INPUTS`; their expected outputs are not fixtures)
     all.extend(["capture.json", "accounts.json"].iter().map(|f| testdata().join("scenarios").join(f)).filter(|p| p.exists()));
+    // WP-09 part 2: S16's inputs (`--s16`: its capture spec, accounts, transactions and the old bot's lines)
+    if testdata().join("scenarios/s16").is_dir() { walk(&testdata().join("scenarios/s16"), &mut all); }
     all.into_iter().filter(|p| is_fixture(p)).map(|p| normalize(&p)).collect()
 }
 

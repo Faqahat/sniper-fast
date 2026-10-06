@@ -1,0 +1,48 @@
+{
+  "schema": "arbx.fixture.scenarios-capture/1",
+  "_doc": "What `tools/capture-fixtures.py --s16` reads from public RPC into testdata/scenarios/s16/ for S16 (PLAN WP-09 item 4, F42: mispricing not explained by phantoms). The pools of w5h3-p2#664 (the CP-family case: rebuilt from the landed transaction's pre-token balances and the current pool config) with every account arbx follows for them, as pools::boot derives them (the same rule as testdata/scenarios/capture.json; the Clock, PumpSwap's global fee config and GlobalConfig are the base capture's), and the transactions of both cases (getTransaction, base64): #664's landing and its trigger, and p10#156's landing (w5h2-p10#156: its DLMM leg's state is not retrievable; the open item of PLAN WP-09 S16); and (`legacy`) the old bot's v1 attempt and outcome lines of both cases, into legacy.json.",
+  "pairs": {
+    "s16": {
+      "why": "w5h3-p2#664 (docs/research/wallet-synthesis.md section 4, 'real gap, but our quote was wrong anyway': 4.2 SOL, expected 454.5M; testdata/legacy/raw/w5h3-p2 attempts/outcomes #664): the token 3Dgwn5E7...pump bought on PumpSwap DreMAMRc and sold on DLMM AwmaWjsR. The landing (5a11p2hY...) failed the route's profit check; its pre-token balances are the PumpSwap pool's reserves at its execution, its logs the delivered amounts",
+      "pools": [
+        {
+          "name": "pump",
+          "venue": "PumpSwap",
+          "pool": "DreMAMRc83uJtbvWuWrDqDaQUGHDbFGopmbTYbM3tJFW"
+        },
+        {
+          "name": "dlmm",
+          "venue": "DLMM",
+          "pool": "AwmaWjsRQ55hYGJfiHcqTwzQX9QLBtGZHPQnjhjDpPkz"
+        }
+      ]
+    }
+  },
+  "extra": [],
+  "transactions": [
+    {
+      "sig": "5a11p2hYgGFPgANygqFZKMLig5dznyFW1vLwkQNZ4AqKTw782aQzh4GjLKh4W4WhuNDXLo7XciKEmZpEZS6LrS2C",
+      "what": "w5h3-p2#664: our landing (jito-tx copy), slot 453,108,631, failed 0x4e580002"
+    },
+    {
+      "sig": "4ukKBXf9gczLfJ47XbZn62JbUGj3ntfnD6spxTQEAqMVtZ3A7BdZj6x7Prot8G8LsKzRfe5Pfs1kJXp5298S4uyY",
+      "what": "w5h3-p2#664: its trigger, a PumpSwap sell on DreMAMRc, slot 453,108,630"
+    },
+    {
+      "sig": "5Sopwbo2QRgnwEmVPTT5ED8bGdKs9bGn7W11KCvWTBxzxAmsN8XnGGhgGiKZGcWBx6PzdPN5va5fDjFXouR5DgQr",
+      "what": "w5h2-p10#156: our landing (bolt copy), slot 453,089,316, failed 0x4e580002 (DAMM v2 BKH29Cr5 -> DLMM HRhgfZpz)"
+    }
+  ],
+  "legacy": [
+    {
+      "case": "w5h3-p2#664",
+      "seg": "w5h3-p2",
+      "attempt": 664
+    },
+    {
+      "case": "w5h2-p10#156",
+      "seg": "w5h2-p10",
+      "attempt": 156
+    }
+  ]
+}

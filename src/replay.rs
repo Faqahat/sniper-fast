@@ -18,8 +18,13 @@
 //!   replay builds an offline executor from it (`Exec::offline`: no RPC, no send path, no key; it spawns nothing) and
 //!   the crowding map; its send checks read the run's decision-point records (the gate's mode and reason, the leader's
 //!   kind, the Jito token, the recorder; `Exec::stage_seen`), and the run's settlements (INPUT 9) and the other
-//!   executor inputs reach it as they reached the run's. Nothing is sent. Shadow and dry-run executors are replayed; a
-//!   live or canary one is not (`executor_not_replayed`), nor one recorded before this (no exec_init).
+//!   executor inputs reach it as they reached the run's. Nothing is sent. Shadow and dry-run executors are replayed, and
+//!   (WP-09 part 2) live and canary ones: a decision the run sent is replayed as sent, with the run's signature (the
+//!   decision-point `sent` record the run journals right after the send), its fire's result, the block engine's verdicts,
+//!   the statuses and the wallet's record from the journal; the record's failed-fee cap and equity guard apply. Not
+//!   replayed: an executor recorded before this (no exec_init), or of an exec_init version this build does not rebuild.
+//!   A send replayed without its `sent` record (a live or canary recording made before part 2) makes the replay not
+//!   whole (`sent_records_missing`).
 //! - **Whole.** `ok` (exit 0) needs a whole replay: no journal gap, no account record the journal names missing from
 //!   accounts.bin, no accounts.bin gap, every journaled store verdict reproduced, no record dropped by the run's or the
 //!   replay's recorder, no executor whose verdicts were not replayed, and every decision-point record the offline
@@ -421,8 +426,8 @@ pub enum RunExec {
     None,
     /// replayed: an offline executor made from the run's exec_init record
     Replayed(crate::exec::ExecInit),
-    /// not replayed, and why: no exec_init record (a recording made before the executor replay), or a live or canary
-    /// executor (its sends cannot be replayed)
+    /// not replayed, and why: no exec_init record (a recording made before the executor replay), or one of an earlier
+    /// version (before WP-06's builder). WP-09 part 2: a live or canary executor is replayed (`Exec::offline`)
     NotReplayed(String),
 }
 
@@ -436,8 +441,9 @@ impl RunExec {
     }
 }
 
-/// The run's executor from its boot section: replayed when it has an exec_init record of a shadow or dry-run executor,
-/// whose config sections the replay's config gives (else refused: the replay would not be the run's)
+/// The run's executor from its boot section: replayed when it has an exec_init record (WP-09 part 2: of any mode; a
+/// live or canary executor's sends with the run's signatures, its `sent` records), whose config sections the replay's
+/// config gives (else refused: the replay would not be the run's)
 fn run_exec(inp: &Inputs, init: &EngineInit, records: &[JRec]) -> Result<RunExec> {
     if !init.executor { return Ok(RunExec::None); }
     let Some(v) = journal::exec_init(records) else {
@@ -451,9 +457,8 @@ fn run_exec(inp: &Inputs, init: &EngineInit, records: &[JRec]) -> Result<RunExec
             create+close, measured CU, tips by band), whose bundles this build does not rebuild", v["version"], crate::exec::EXEC_INIT_VERSION)));
     }
     let ei = crate::exec::ExecInit::from_json(v).context("the journal's exec_init record (INPUT 12) does not read")?;
-    if ei.mode.sends() {
-        return Ok(RunExec::NotReplayed(format!("a {} executor: its sends are not replayed (only shadow and dry-run executors are)", ei.mode.as_str())));
-    }
+    // ---- WP-09 part 2: a live or canary executor is replayed too (its sends with the run's signatures, from its `sent`
+    // records; what came back to the run, from the journal); a send without its record makes the replay not whole
     let mine = crate::exec::cfg_sha256(&inp.cfg);
     anyhow::ensure!(ei.cfg_sha256 == mine, "the config's executor sections (sha256 {}) are not the run's ({}): give the run's frozen config", &mine[..16],
         &ei.cfg_sha256[..16.min(ei.cfg_sha256.len())]);
@@ -777,14 +782,18 @@ fn not_whole(run: &Path, d: &Drive, replay_dropped: u64, exec: &RunExec, uses: R
         v.push(json!({ "why": "decision_records_unused", "n": uses.unused, "detail": "decision-point records no decision of the replay read: the run decided \
             opportunities the replay did not (the replay diverged)" }));
     }
+    if uses.sent_missing > 0 {
+        v.push(json!({ "why": "sent_records_missing", "n": uses.sent_missing, "detail": "sends the replay's executor made without the run's `sent` record (the \
+            attempt's signature): a live or canary recording made before WP-09 part 2, or a replay that diverged" }));
+    }
     v
 }
 
 /// ---- WP-09. What a replay made of the run's decision-point records: records its executor read that were not its own
 /// (`Exec::seen_mismatch`), executor decisions before any record (`seen_missing`), records left unread by a replay that
-/// ran to the end
+/// ran to the end; WP-09 part 2: sends replayed without the run's `sent` record (`Exec::sent_missing`)
 #[derive(Clone, Copy, Debug, Default)]
-struct RecordUse { mismatch: u64, missing: u64, unused: u64 }
+struct RecordUse { mismatch: u64, missing: u64, unused: u64, sent_missing: u64 }
 
 /// The run's digests as `Engine::finish` recorded them (events.jsonl `engine_digests`; review WP-09 #6)
 fn run_digests(run: &Path) -> Option<Value> {
@@ -834,7 +843,7 @@ pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
     let res = drive(&inp, boot, &o.sets, &rec, &mut hook);
     let (mut e, init, d) = match res { Ok(x) => x, Err(err) => { rec.close(); return Err(err); } };
     let uses = RecordUse { mismatch: e.exec.as_ref().map_or(0, |x| x.seen_mismatch), missing: e.exec.as_ref().map_or(0, |x| x.seen_missing),
-        unused: if d.stopped_at.is_none() { e.gate_seen.script.len() as u64 } else { 0 } };
+        unused: if d.stopped_at.is_none() { e.gate_seen.script.len() as u64 } else { 0 }, sent_missing: e.exec.as_ref().map_or(0, |x| x.sent_missing) };
     let before = (e.digest(), e.decision_digest());
     e.finish();
     let (digest, decision_digest) = (e.digest(), e.decision_digest());
@@ -864,7 +873,8 @@ pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
         "engine_init": { "min_tip": init.min_tip, "executor": init.executor, "strategy_sha256": init.strategy_sha256, "knobs": init.knobs },
         "executor_replayed": !matches!(run_exec, RunExec::NotReplayed(_)),
         "executor": { "run": init.executor, "replayed": matches!(run_exec, RunExec::Replayed(_)), "exec_init": run_exec.json(), "records_staged": d.gate_staged,
-            "records_mismatch": uses.mismatch, "records_missing": uses.missing, "records_unused": uses.unused, "settled_fed": d.settled },
+            "records_mismatch": uses.mismatch, "records_missing": uses.missing, "records_unused": uses.unused, "settled_fed": d.settled,
+            "sent_missing": uses.sent_missing },
         "overrides": o.sets.iter().map(|s| format!("{}={}", s.key, s.value)).collect::<Vec<_>>(),
         "window": { "from_slot": o.from_slot, "to_slot": o.to_slot, "stopped_at_seq": d.stopped_at.map(|s| s.0), "stopped_at_t_ns": d.stopped_at.map(|s| s.1) },
         "journal": { "boot_records": d.boot_records, "records": d.records, "events": d.events, "timers": d.timers, "skipped_inputs": d.skipped,
@@ -1195,7 +1205,7 @@ fn compare(run: &Path, out: &Path, w: &Window, d: &Drive, exec: &RunExec, what_i
         "digests_checked": digests["checked"], "digests_same": digests["same"], "differences_ok": differences_ok,
     });
     let not_replayed = if exec_run && !exec_replayed {
-        json!({ "executor_fields": EXECUTOR_FIELDS, "executor_verdicts": "a run whose executor is not replayed (no exec_init record, or a live or canary one): \
+        json!({ "executor_fields": EXECUTOR_FIELDS, "executor_verdicts": "a run whose executor is not replayed (no exec_init record, or one of an earlier version): \
             its verdict where the replay (no executor) gives no_executor / gate_* and the run's reason is past the state and pricing stages" })
     } else { Value::Null };
     Ok(json!({ "schema": DIFF_SCHEMA, "run": run.display().to_string(), "replay": out.display().to_string(), "t_ns": crate::feeds::clock::now_ns(),
@@ -1215,14 +1225,16 @@ fn compare(run: &Path, out: &Path, w: &Window, d: &Drive, exec: &RunExec, what_i
 /// `dry_run.tx_b64`, the signature check's detail). Everything else is compared: the route, sizes, the expected
 /// profit, the tip and its account, min_profit, the built transaction's size, locks, lookup tables and CU, the
 /// blockhash, the crowding, the in-flight key and why it was allowed, the queue rank, the route's account versions, a
-/// dry run's checks and accounts
-pub const ATTEMPT_NOT_COMPARED: [&str; 16] = ["t_ns", "leader", "stages.t_priced", "stages.t_decided", "stages.t_built", "stages.t_build_start", "stages.t_signed",
+/// dry run's checks and accounts. WP-09 part 2 (a live or canary executor replayed): the send queue's λ estimate
+/// (`queue.lambda`, the bundle path's queue as it was: PLAN WP-09 takes λ from the recording)
+pub const ATTEMPT_NOT_COMPARED: [&str; 17] = ["t_ns", "leader", "stages.t_priced", "stages.t_decided", "stages.t_built", "stages.t_build_start", "stages.t_signed",
     "stages.t_enqueued", "stages.t_dequeued", "stages.t_sent", "stages.t_ack", "tx.sig", "copies[].sig", "dry_run.signer", "dry_run.tx_b64",
-    "dry_run.checks[signature_verifies].detail"];
+    "dry_run.checks[signature_verifies].detail", "queue.lambda"];
 
 /// an attempts.jsonl line without `ATTEMPT_NOT_COMPARED`
 pub fn attempt_projection(mut v: Value) -> Value {
     if let Some(o) = v.as_object_mut() { o.remove("t_ns"); o.remove("leader"); }
+    if let Some(q) = v.get_mut("queue").and_then(|q| q.as_object_mut()) { q.remove("lambda"); }
     if let Some(s) = v.get_mut("stages").and_then(|s| s.as_object_mut()) {
         for k in ["t_priced", "t_decided", "t_built", "t_build_start", "t_signed", "t_enqueued", "t_dequeued", "t_sent", "t_ack"] { s.remove(k); }
     }

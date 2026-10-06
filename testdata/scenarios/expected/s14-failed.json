@@ -1,0 +1,194 @@
+{
+  "_doc": "WP-09 scenario projection (src/scenarios/mod.rs `Done::check_expected`): pricing-dependent values. Regenerate with ARBX_BLESS=1 cargo test --release --lib scenarios, after review",
+  "commits": [
+    {
+      "evaluated": 4,
+      "group": 0,
+      "late": null,
+      "members": 2,
+      "outcome": "timeout_quiescent",
+      "pools": [
+        "usdc.ammv4"
+      ],
+      "resolved_by": "timer",
+      "slot": 453386132,
+      "txn": "S14-sale",
+      "w_src": "unknown"
+    }
+  ],
+  "decisions": [
+    {
+      "band": 3,
+      "best": 0,
+      "decision": 0,
+      "kind": "quiescent",
+      "parts_skew_slots": {
+        "buy": 0,
+        "sell": 0
+      },
+      "reason": "sent",
+      "routes": [
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": 195946033,
+          "net": 195841033,
+          "reason": "best",
+          "sell": "usdc.pump",
+          "size": 4200000000
+        },
+        {
+          "buy": "usdc.pump",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 164000,
+          "gross": -276295,
+          "net": -282295,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        },
+        {
+          "buy": "usdc.ammv4",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": 840237,
+          "net": 735237,
+          "reason": "not_best",
+          "sell": "usdc.cpmm",
+          "size": 36060845
+        },
+        {
+          "buy": "usdc.cpmm",
+          "crossed": [
+            0,
+            0
+          ],
+          "cu": 93000,
+          "gross": -291905,
+          "net": -297905,
+          "reason": "below_min_profit",
+          "sell": "usdc.ammv4",
+          "size": 5000000
+        }
+      ],
+      "trigger": {
+        "pool": "usdc.ammv4",
+        "slot": 453386132,
+        "txn": "S14-sale"
+      },
+      "verdict": "send",
+      "w_src": "unknown"
+    }
+  ],
+  "executor": {
+    "attempts": [
+      {
+        "attempt": 0,
+        "band": 3,
+        "buy": "usdc.ammv4",
+        "closes_ata": true,
+        "creates_ata": true,
+        "decision": 0,
+        "gross": 9377994,
+        "inflight": {
+          "prev_attempt": null,
+          "why_allowed": "first"
+        },
+        "kind": "canary",
+        "min_profit": 105001,
+        "not_sent": null,
+        "queue_rank": 2,
+        "sell": "usdc.pump",
+        "sent": true,
+        "size": 200000000,
+        "target_slot": 453386133,
+        "tip": 100000
+      }
+    ],
+    "bundles": [
+      {
+        "attempt": 0,
+        "bundle": "b0",
+        "code": null,
+        "outcome": "processed",
+        "seq": 0,
+        "slot": 453386133
+      }
+    ],
+    "ledger": [
+      {
+        "attempt": 0,
+        "categories": [
+          {
+            "cat": "fee_fail",
+            "lamports": -5000
+          }
+        ],
+        "equity_delta": -5000,
+        "fee": 5000,
+        "kind": "route",
+        "liquid_delta": -5000,
+        "ok": false,
+        "rent_locked": 0,
+        "rent_reclaimed": 0,
+        "tip": 0,
+        "trade_gross": 0,
+        "trade_net": -5000
+      }
+    ],
+    "opportunities": [
+      {
+        "attempt": 0,
+        "band": 3,
+        "band_at_opp": 4,
+        "crowding_bucket": 0,
+        "decision": 0,
+        "ev": 9272994,
+        "rank": 2,
+        "reason": "sent",
+        "reason_ungated": null,
+        "sent": true,
+        "would_send": false
+      }
+    ],
+    "outcomes": [
+      {
+        "amend": false,
+        "attempt": 0,
+        "fee": 5000,
+        "final": "landed_fail",
+        "final_src": "wallet",
+        "landed_slot": 453386133,
+        "ledger": {
+          "equity_delta": -5000,
+          "fee": 5000,
+          "liquid_delta": -5000,
+          "rent_locked": 0,
+          "rent_nonrecoverable": 0,
+          "rent_reclaimed": 0,
+          "tip": 0,
+          "trade_gross": 0,
+          "trade_net": -5000
+        },
+        "ok": false,
+        "round_trip_on_chain": 9377994,
+        "tip": 100000,
+        "verdicts": [
+          "processed"
+        ]
+      }
+    ],
+    "recon": []
+  },
+  "scenario": "s14-failed"
+}
