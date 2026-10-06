@@ -63,6 +63,9 @@ fn leg_for(rng: &mut Rng, kind: Kind, t0_in: bool, input: Pk, x: Pk, damm: &[Vec
             OwnedLeg::new(kind, t0_in, vec![Acct { key: rng.key(), owner: arbx_sizing::layout::DAMM_V2, data: raw }, mint(ma, 0, false, None), mint(mb, 0, false, None)],
                 if t0_in { ma } else { mb })
         }
+        // WP-21's kinds reach this test only through the block noise: an account list the parser must refuse (their
+        // real legs are fuzzed on the harness fixtures, tests/clmm.rs)
+        Kind::RayClmm | Kind::Whirlpool => OwnedLeg::new(kind, t0_in, vec![Acct { key: rng.key(), owner: *kind.program(), data: vec![0u8; 64] }], input),
     }
 }
 

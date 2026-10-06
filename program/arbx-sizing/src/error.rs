@@ -26,6 +26,12 @@ pub enum Abort {
     Amm(AmmWhy),
     Dlmm(DlmmWhy),
     Damm(DammWhy),
+    /// Raydium CLMM (PLAN-ADDENDUM WP-21; feature `rayclmm`, off by default: the engine does not trade it yet)
+    #[cfg(feature = "rayclmm")]
+    Clmm(ClmmWhy),
+    /// Orca Whirlpool (PLAN-ADDENDUM WP-21; feature `whirlpool`, off by default)
+    #[cfg(feature = "whirlpool")]
+    Whirl(WhirlWhy),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +57,54 @@ pub enum DlmmWhy { Status, NotActive, FunctionType, CollectFeeMode, ZeroPrice, A
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DammWhy { Status, NotActive, RateLimiter, Mode, Fee100, Liquidity, Range, Time }
 
+/// Why a Raydium CLMM leg is refused (DESIGN.md §2.8). Every one of these fails the venue's `swap_v2` at every size.
+#[cfg(feature = "rayclmm")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClmmWhy {
+    /// pool status bit 4: swaps disabled
+    Status,
+    /// the Clock's unix_timestamp is not after the pool's open_time
+    NotOpen,
+    /// a trade fee rate above 1e6 (the program's u32 `1e6 − fee_rate` fails at every size; a fee_on other than 1 or 2
+    /// is read as fee on the input, as the program reads it)
+    Fee,
+    /// the current tick's array is beyond the pool's default bitmap and the leg does not pass the TickArrayBitmapExtension
+    BitmapExtension,
+    /// no initialized tick array in the swap direction (InsufficientLiquidityForDirection)
+    NoLiquidity,
+    /// the first tick array the swap needs is not among the leg's tick arrays (NotEnoughTickArrayAccount /
+    /// InvalidFirstTickArrayAccount)
+    TickArrays,
+    /// the pool's sqrt price is at the end of the price range (the default limit cannot be below / above it)
+    PriceLimit,
+    /// the state is inconsistent where the program checks it (current tick outside the tick range, tick spacing 0)
+    State,
+    /// a Token-2022 mint of the pool has its Pausable extension set to paused (every transfer fails)
+    MintPaused,
+    /// a Token-2022 mint of the pool has DefaultAccountState Frozen: the leg's new token account is frozen
+    MintFrozen,
+}
+
+/// Why an Orca Whirlpool leg is refused (DESIGN.md §2.9). Every one of these fails the venue's `swap_v2` at every size.
+#[cfg(feature = "whirlpool")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WhirlWhy {
+    /// the adaptive-fee Oracle's trade_enable_timestamp is in the future (TradeIsNotEnabled)
+    TradeNotEnabled,
+    /// the Clock is before the pool's reward or the oracle's reference/major-swap timestamps (InvalidTimestamp)
+    Timestamp,
+    /// none of the tick arrays the swap needs first is among the leg's (InvalidTickArraySequence)
+    TickArrays,
+    /// the pool's sqrt price is at the end of the price range in the swap direction
+    PriceLimit,
+    /// the state is inconsistent where the program checks it (tick spacing 0, a tick array of another pool)
+    State,
+    /// a Token-2022 mint of the pool has its Pausable extension set to paused (every transfer fails)
+    MintPaused,
+    /// a Token-2022 mint of the pool has DefaultAccountState Frozen: the leg's new token account is frozen
+    MintFrozen,
+}
+
 impl Abort {
     /// The AXZ1 `reason` code (stable; the recorder decodes it).
     pub fn code(self) -> u16 {
@@ -67,6 +121,10 @@ impl Abort {
             Amm(w) => 0x40 + w as u16,
             Dlmm(w) => 0x50 + w as u16,
             Damm(w) => 0x60 + w as u16,
+            #[cfg(feature = "rayclmm")]
+            Clmm(w) => 0x70 + w as u16,
+            #[cfg(feature = "whirlpool")]
+            Whirl(w) => 0x80 + w as u16,
         }
     }
 }
@@ -123,9 +181,10 @@ pub enum DescCode {
     Kind,
     /// PumpBuy needs dir 1, PumpSell dir 0
     Dir,
-    /// n_bin_arrays: DLMM 1..=5, any other kind 0
+    /// n_bin_arrays: DLMM 1..=5, Raydium CLMM 1..=7 (its remaining accounts), Orca Whirlpool 0..=3 (supplemental tick
+    /// arrays), any other kind 0
     BinArrays,
-    /// DLMM max_bins (the walk budget) is 0
+    /// the walk budget (`max_bins`: DLMM bins, CLMM swap steps) is 0
     BinBudget,
     /// EXPLICIT_POS: n_pos is not the kind's count
     PosCount,

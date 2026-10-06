@@ -182,12 +182,26 @@ pub struct Fixtures {
     pub pools: BTreeMap<Address, PoolFixture>,
 }
 
+/// The snapshot directory of a venue: `pools` for the engine's venues (copied to testdata/venue-parity), `pools-clmm` for
+/// PLAN-ADDENDUM WP-21's concentrated-liquidity venues (Raydium CLMM, Orca Whirlpool: not in the engine yet)
+pub fn pools_dir_name(venue: Venue) -> &'static str { if venue.is_clmm() { "pools-clmm" } else { "pools" } }
+
 impl Fixtures {
+    /// the engine's venues: `fixtures/pools`
     pub fn load() -> Result<Self, String> { Self::load_from(&fixtures_dir()) }
-    pub fn load_from(dir: &Path) -> Result<Self, String> {
+    /// WP-21's concentrated-liquidity venues: `fixtures/pools-clmm`
+    pub fn load_clmm() -> Result<Self, String> { Self::load_dir(&fixtures_dir(), "pools-clmm") }
+    /// both sets (the CLI)
+    pub fn load_all() -> Result<Self, String> {
+        let mut f = Self::load()?;
+        f.pools.extend(Self::load_clmm()?.pools);
+        Ok(f)
+    }
+    pub fn load_from(dir: &Path) -> Result<Self, String> { Self::load_dir(dir, "pools") }
+    pub fn load_dir(dir: &Path, sub: &str) -> Result<Self, String> {
         let manifest = Manifest::load()?;
         let mut pools = BTreeMap::new();
-        let pdir = dir.join("pools");
+        let pdir = dir.join(sub);
         if pdir.exists() {
             let mut files: Vec<PathBuf> = std::fs::read_dir(&pdir).map_err(|e| e.to_string())?
                 .filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();

@@ -24,12 +24,15 @@ pub const MAX_INFLIGHT: usize = 4;
 const RETRY_MS: [u64; 4] = [250, 1_000, 2_000, 5_000];
 const RETRY_EVERY_MS: u64 = 10_000;
 
-/// What a job reads (journal INPUT 11 `what`, `offline_fetches`)
+/// What a job reads (journal INPUT 11 `what`, `offline_fetches`). PLAN-ADDENDUM WP-21: `ClmmArrays`, newly followed
+/// Raydium CLMM and Orca Whirlpool tick arrays (one the node does not have is then known not to exist)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum What { Resync, ForkRefetch, DlmmArrays }
+pub enum What { Resync, ForkRefetch, DlmmArrays, ClmmArrays }
 
 impl What {
-    pub fn as_str(self) -> &'static str { match self { What::Resync => "resnapshot", What::ForkRefetch => "fork_refetch", What::DlmmArrays => "dlmm_arrays" } }
+    pub fn as_str(self) -> &'static str {
+        match self { What::Resync => "resnapshot", What::ForkRefetch => "fork_refetch", What::DlmmArrays => "dlmm_arrays", What::ClmmArrays => "clmm_arrays" }
+    }
     /// accounts.bin `src` of what it reads
     pub fn src(self) -> u8 { match self { What::Resync => asrc::RPC_SNAPSHOT, _ => asrc::RPC_REFETCH } }
 }

@@ -478,6 +478,10 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(w) = cfg.pricing_warning() { println!("{w}"); }
+            // PLAN-ADDENDUM WP-21: the CLMM venues' switches (off: not read; quote: priced and monitored, never sent live)
+            let note = |m: &str| match m { "off" => "its seed-list rows are not read", "quote" => "priced, decided and monitored; shadow and dry runs build its bundles; live and canary sends refused (venue_quote_only)", _ => "traded" };
+            println!("venues (WP-21): Raydium CLMM {} ({}); Orca Whirlpool {} ({}); PumpSwap, Raydium CPMM and AMM v4, DLMM, DAMM v2 traded",
+                cfg.pools.rayclmm, note(&cfg.pools.rayclmm), cfg.pools.whirlpool, note(&cfg.pools.whirlpool));
             let e = &cfg.exec;
             println!("route program {}: {}", e.program, if e.expected_program_sha256.is_empty() && e.expected_program_md5.is_empty() { "no expected hash (recorded, not checked)".to_string() }
                 else { format!("expected sha256 {} md5 {} (checked at start; a mismatch refuses live sends)", e.expected_program_sha256, e.expected_program_md5) });
@@ -826,7 +830,7 @@ fn grpc_probe(config: &Path, seconds: f64, out: Option<PathBuf>, only: Option<St
     for p in provenance::program_specs(&cfg) { keys.push(tx::b58(&pda::find_program_address(&[&p.id], &loader).0)); }
     let n = (4 * cands.len()).max(probe::MIN_ACCOUNTS);
     let accounts = probe::pad_accounts(&keys, n);
-    let venue_programs: Vec<String> = provenance::venue_specs().iter().map(|p| tx::b58(&p.id)).collect();
+    let venue_programs: Vec<String> = provenance::venue_specs(&cfg.pools).iter().map(|p| tx::b58(&p.id)).collect();
     let mut deshred = Vec::new();
     for f in cfg.feeds.iter().filter(|f| f.enabled && f.kind == config::FeedKind::YellowstoneDeshred) {
         if let Some(u) = &f.url { deshred.push((f.name.clone(), target(u, &f.token_env, &f.token_header, &f.name)?)); }
@@ -1297,6 +1301,16 @@ fn alts_preload(cfg: &config::AltsCfg, dir: &Path, now: u64) -> Option<(PathBuf,
     Some((file, out, held))
 }
 
+/// PLAN-ADDENDUM WP-21 (review F5): the programdata headers of venues `vs` read now, as `venues::clmm::deploy_entry`s (one
+/// call; a failed read is each venue's error)
+async fn clmm_deploy_read(rpc: &rpc::Rpc, vs: &[venues::Venue]) -> Vec<Value> {
+    let keys: Vec<tx::Pk> = vs.iter().map(|v| venues::clmm::programdata(*v)).collect();
+    match rpc.accounts_slice(&keys, 0, provenance::PROGRAMDATA_HEADER).await {
+        Ok((_, accts)) => vs.iter().zip(accts).map(|(v, a)| venues::clmm::deploy_entry(*v, a.as_ref().map(|a| &a.data[..]), None)).collect(),
+        Err(e) => vs.iter().map(|v| venues::clmm::deploy_entry(*v, None, Some(&format!("{e:#}")))).collect(),
+    }
+}
+
 fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let started_ns = now_ns();
     let (live, canary, dry_run) = (a.live, a.canary, a.dry_run);
@@ -1512,6 +1526,21 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // Clock sysvar, the programs' programdata, the wallet and its token accounts) and every account's role
     let journal = rec::journal::Journal::new(rec.clone());
     let mut boot_extra = None;
+    // PLAN-ADDENDUM WP-21 (review F5): a CLMM venue is priced only on the binary its port was proven on. Each one switched
+    // on has its programdata's last deploy slot read now: changed, or unknown (the read failed), the venue is switched off
+    // for this segment (fail closed) with a WARNING. meta.json `clmm_deploy` records the reads at the start and at the end
+    let clmm_on: Vec<venues::Venue> = [venues::Venue::RayClmm, venues::Venue::Whirlpool].into_iter().filter(|v| cfg.pools.venue_on(*v)).collect();
+    let clmm_start = if clmm_on.is_empty() { vec![] } else { rts.bg.block_on(clmm_deploy_read(&rpc, &clmm_on)) };
+    // (review R2-4: the venues switched off here are meta.json `overrides.clmm_switched_off` too)
+    let mut clmm_off: Vec<Value> = Vec::new();
+    for (v, e) in clmm_on.iter().zip(&clmm_start) {
+        if e["ok"] == json!(true) { say(&format!("{}: deployed at slot {} as proven: priced ({})", e["venue"].as_str().unwrap_or("?"), e["last_deploy_slot"], cfg.pools.venue_mode(*v))); continue; }
+        say(&format!("WARNING: {}: programdata last deployed at {} (proven on {}{}): the venue is OFF for this segment (fail closed: its port was not proven on this binary)",
+            e["venue"].as_str().unwrap_or("?"), e["last_deploy_slot"], e["proven_deploy_slot"], e["error"].as_str().map(|w| format!("; {w}")).unwrap_or_default()));
+        let was = cfg.pools.venue_mode(*v).to_string();
+        if *v == venues::Venue::RayClmm { cfg.pools.rayclmm = "off".into() } else { cfg.pools.whirlpool = "off".into() }
+        clmm_off.push(json!({ "venue": e["venue"], "was": was, "why": "deploy_slot", "last_deploy_slot": e["last_deploy_slot"], "error": e["error"] }));
+    }
     // pools, then a first snapshot of every followed account
     let (reg, store, snapshot_slot) = rts.bg.block_on(async {
         let (cands, seeds, ours) = pools::candidates(&cfg.pools)?;
@@ -1538,20 +1567,31 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         // last call's, put early accounts at a slot they were not read at). The stream's first connection reads them all
         // again (the engine's re-read), closing the gap between this snapshot and the subscription
         let mut slot = 0;
+        // PLAN-ADDENDUM WP-21: a CLMM pool's account that may not exist (Raydium's bitmap extension, Orca's oracle, their
+        // followed tick arrays), not found, is recorded empty: known not to exist (the quote must tell it from unread)
+        let mut absentable: std::collections::HashSet<tx::Pk> = reg.pools.iter().filter(|m| m.venue.is_clmm())
+            .flat_map(|m| m.clmm_ext().into_iter().chain(m.whirl_oracle()).copied()).collect();
+        let absent = || rpc::Account { owner: [0u8; 32], lamports: 0, data: vec![] };
         for (n, chunk) in keys.chunks(reads::CHUNK).enumerate() {
             if n > 0 { tokio::time::sleep(std::time::Duration::from_millis(120)).await; }
             let (s, accts) = rpc.accounts(chunk).await?;
             slot = slot.max(s);
-            for (k, a) in chunk.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, s); } }
+            for (k, a) in chunk.iter().zip(accts) {
+                match a { Some(a) => boot_account(&mut store, &acct_rec, &journal, *k, a, s), None if absentable.contains(k) => boot_account(&mut store, &acct_rec, &journal, *k, absent(), s), None => {} }
+            }
         }
         engine::initial_dlmm_arrays(&reg, &mut store);
         let arr: Vec<tx::Pk> = store.dlmm_arrays.values().flatten().map(|x| x.1).collect();
         roles.add(store.dlmm_arrays.iter().flat_map(|(p, l)| { let pi = reg.by_pool.get(p).map_or(rec::accounts::NO_POOL, |i| *i as u32);
-            l.iter().map(move |(_, k)| (*k, rec::accounts::RoleOf { role: rec::accounts::role::DLMM_BIN_ARRAY, pool_index: pi })) }).collect::<Vec<_>>());
+            let role = reg.by_pool.get(p).map_or(rec::accounts::role::DLMM_BIN_ARRAY, |&i| pools::array_role(&reg.pools[i]));
+            l.iter().map(move |(_, k)| (*k, rec::accounts::RoleOf { role, pool_index: pi })) }).collect::<Vec<_>>());
+        absentable.extend(reg.pools.iter().filter(|m| m.venue.is_clmm()).flat_map(|m| store.dlmm_arrays.get(&m.pool).into_iter().flatten().map(|x| x.1)));
         for chunk in arr.chunks(reads::CHUNK) {
             tokio::time::sleep(std::time::Duration::from_millis(120)).await;
             let (s, accts) = rpc.accounts(chunk).await?;
-            for (k, a) in chunk.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, s); } }
+            for (k, a) in chunk.iter().zip(accts) {
+                match a { Some(a) => boot_account(&mut store, &acct_rec, &journal, *k, a, s), None if absentable.contains(k) => boot_account(&mut store, &acct_rec, &journal, *k, absent(), s), None => {} }
+            }
         }
         acct_rec.mark(rec::accounts::MARK_BOOT_END, &[]);
         boot_extra = Some((roles, acct_rec, base, extra.len(), drops));
@@ -1564,8 +1604,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // paths, the executor, meta.json) would leave pools on a pre-write price until their next write. Its updates queue
     // until the engine starts; the tx feeds still start after meta.json
     let (tx, rx) = crossbeam_channel::unbounded::<feeds::Event>();
-    let mut list: Vec<String> = base_watch.iter().map(tx::b58).collect();
-    for l in store.dlmm_arrays.values() { for (_, k) in l { list.push(tx::b58(k)); } }
+    let mut list: Vec<tx::Pk> = base_watch.clone();
+    for l in store.dlmm_arrays.values() { list.extend(l.iter().map(|x| x.1)); }
     let followed = list.len();
     let (wtx, wrx) = tokio::sync::watch::channel(list);
     let state_counters = Arc::new(feeds::FeedCounters::named("state", "state-stream"));
@@ -1643,7 +1683,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         });
     }
     // WP-03 item 3: the transaction streams' `@watched_writable` / `@venue_programs`, now that the registry is known
-    let venue_programs: Vec<String> = provenance::venue_specs().iter().map(|p| tx::b58(&p.id)).collect();
+    let venue_programs: Vec<String> = provenance::venue_specs(&cfg.pools).iter().map(|p| tx::b58(&p.id)).collect();
     config::expand_includes(&mut cfg.feeds, &reg.watched_writable(), &venue_programs)?;
     let reg = Arc::new(reg);
     // ---- WP-09 wiring: pools.json (MEASUREMENT §4.29: the registry this segment trades, the toolkit's attribution reads
@@ -1745,7 +1785,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let tx_streams: Vec<Value> = cfg.feeds.iter().filter(|f| f.enabled && f.kind == config::FeedKind::YellowstoneTx)
         .map(|f| json!({ "name": f.name, "url_host": f.url.as_deref().map(provenance::host_of), "account_include": f.account_include, "max_accounts": f.max_accounts,
             "failed": f.failed.unwrap_or(true) })).collect();
-    let venue_specs = provenance::venue_specs();
+    let venue_specs = provenance::venue_specs(&cfg.pools);
     let mut programs = route.clone();
     programs.extend(venue_specs.iter().map(provenance::pending_entry));
     let mut streams = provenance::streams_json();
@@ -1754,7 +1794,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // (WP-09: pools.json, its sha256 and registry-run.json beside it)
     let mut pools_meta = replay::meta_pools(provenance::pools_json(&reg, &cfg), &pools_sha256);
     pools_meta["dropped"] = pools::drops_json(&pool_drops);
-    let meta = json!({
+    let mut meta = json!({
         "schema": provenance::META_SCHEMA,
         "run": run_json, "build": provenance::build_json(), "config": config_json,
         "programs": programs, "programs_pending": true,
@@ -1783,7 +1823,11 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         "send_gate": sess.gate.json(),
         // what the command line changed in the config for this run (--shadow, --budget-left)
         "overrides": a.ov.json(),
+        // PLAN-ADDENDUM WP-21 (review F5): the CLMM venues switched on, their deploy slots read at the start (`end` at the end)
+        "clmm_deploy": { "start": clmm_start, "end": null },
     });
+    // review R2-4: a venue the deploy check switched off is a change to the config this run made, as the command line's are
+    if !clmm_off.is_empty() { meta["overrides"]["clmm_switched_off"] = json!(clmm_off); }
     control::write_atomic(&dir.join("meta.json"), serde_json::to_string_pretty(&meta)?.as_bytes())?;
     // WP-20: the segment start message (mode, build, config hash, wallet, budget)
     alerter.segment_start(alerts::SegmentStart { segment: name.clone(), mode: mode.as_str().into(), gate_mode: sess.gate.mode().as_str().into(),
@@ -1906,6 +1950,19 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
             Ok(()) => say(&format!("budget: this run spent {spent} lamports net ({})", arbx::budget::path(&h.runs).display())),
             Err(e) => say(&format!("WARNING: the budget state was not updated: {e:#} (the next start re-reads this run's ledger)")),
         }
+    }
+    // PLAN-ADDENDUM WP-21 (review F5): the CLMM venues' deploy slots at the segment's end, beside the start's (meta.json
+    // `clmm_deploy.end`): an upgrade during the segment shows there (and stopped pricing at once: `venue_upgraded`)
+    if !clmm_on.is_empty() {
+        let end = rts.bg.block_on(async { tokio::time::timeout(std::time::Duration::from_secs(10), clmm_deploy_read(&rpc, &clmm_on)).await
+            .unwrap_or_else(|_| clmm_on.iter().map(|v| venues::clmm::deploy_entry(*v, None, Some("timed out"))).collect()) });
+        for e in end.iter().filter(|e| e["ok"] != json!(true)) {
+            say(&format!("WARNING: {} at the segment's end: programdata last deployed at {} (proven on {})", e["venue"].as_str().unwrap_or("?"), e["last_deploy_slot"], e["proven_deploy_slot"]));
+        }
+        let path = dir.join("meta.json");
+        let wrote = std::fs::read_to_string(&path).map_err(anyhow::Error::from).and_then(|t| Ok(serde_json::from_str::<Value>(&t)?))
+            .and_then(|mut m| { m["clmm_deploy"]["end"] = json!(end); control::write_atomic(&path, serde_json::to_string_pretty(&m)?.as_bytes()) });
+        if let Err(e) = wrote { say(&format!("meta.json: the CLMM venues' end deploy slots NOT recorded: {e:#}")); }
     }
     stop.store(true, Ordering::Relaxed);
     exit.store(true, Ordering::Relaxed);
@@ -2180,6 +2237,22 @@ mod tests {
     /// FT-001: `run` stops as the scenario tests stop a run: the loop (`finish`, the `run_end` digest point), then
     /// `Engine::stop_sequence` (the drain, the stop snapshot, the final reconciliation, `settle_at_stop`, the `stop_end`
     /// digest point), then the final status line; each once
+    /// PLAN-ADDENDUM WP-21 (review F5), a structural guard on `run`: the CLMM venues' deploy check runs before the pools
+    /// are read (a venue it switches off contributes no candidate), meta.json carries its start and its end reads, and the
+    /// end's read comes after the engine's stop sequence
+    #[test]
+    fn the_clmm_deploy_check_comes_before_the_candidates() {
+        let src = include_str!("main.rs");
+        let body = &src[src.find("\nfn run(a: &RunArgs").expect("run")..];
+        let body = &body[..body.find("\n#[cfg(test)]").unwrap_or(body.len())];
+        let at = |s: &str| body.find(s).unwrap_or_else(|| panic!("{s} not in run()"));
+        for w in ["clmm_deploy_read(&rpc, &clmm_on)", "pools::candidates(&cfg.pools)", "\"clmm_deploy\": { \"start\": clmm_start",
+            "meta[\"overrides\"][\"clmm_switched_off\"] = json!(clmm_off)", "write_atomic(&dir.join(\"meta.json\")", "eng.stop_sequence(&rx",
+            "m[\"clmm_deploy\"][\"end\"] = json!(end)"].windows(2) {
+            assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]);
+        }
+    }
+
     #[test]
     fn run_stops_through_the_engines_stop_sequence() {
         let src = include_str!("main.rs");

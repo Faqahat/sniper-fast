@@ -118,6 +118,21 @@ class Rules(unittest.TestCase):
         self.assertFalse(d["x5"]["enough_data"])
 
 
+class CuTableKeys(unittest.TestCase):
+    """PLAN-ADDENDUM WP-21: the table's leg keys are the engine's (src/cu_table.rs `leg_key`, `steps_bucket`): DLMM by bins,
+    Raydium CLMM and Orca Whirlpool by swap steps, the other venues `na`; a third party's CLMM leg (steps unknown) `unk`"""
+
+    def test_leg_keys_match_the_engine(self):
+        from arbx_report.reports import cu_table
+        self.assertEqual([cu_table.leg_key("RayClmm", n) for n in (0, 1, 2, 3, 4, 7, 8, 15, 16, 200)],
+                         ["RayClmm|1", "RayClmm|1", "RayClmm|2-3", "RayClmm|2-3", "RayClmm|4-7", "RayClmm|4-7", "RayClmm|8-15", "RayClmm|8-15",
+                          "RayClmm|16+", "RayClmm|16+"])
+        self.assertEqual(cu_table.leg_key("Whirlpool", None), "Whirlpool|unk")
+        self.assertEqual((cu_table.leg_key("Dlmm", 3), cu_table.leg_key("PumpSwap", 9)), ("Dlmm|3-5", "PumpSwap|na"))
+        self.assertEqual(cu_table.CU_VENUES["whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"], "Whirlpool")
+        self.assertEqual(cu_table.CU_VENUES["CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"], "RayClmm")
+
+
 class CampaignReport(unittest.TestCase):
     def test_campaign_sums_last_totals_and_joins_late_landings(self):
         with TmpDir() as root:

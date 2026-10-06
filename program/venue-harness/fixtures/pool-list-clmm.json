@@ -1,0 +1,22 @@
+[
+  {"venue": "RayCLMM", "pool": "3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv", "label": "rayclmm SOL/USDC 3ucN (tick spacing 1, 0.04%; current tick 2 spacings from its array's end)"},
+  {"venue": "RayCLMM", "pool": "2uoKbPEidR7KAMYtY4x7xdkHXWqYib5k4CutJauSL3Mc", "label": "rayclmm SOL/JitoSOL 2uoK (tick spacing 1, 0.01%: the lowest fee tier)"},
+  {"venue": "RayCLMM", "pool": "E8TRsCYBVaB4GD4Nx3F8SGpH3KMYTADR1EkdQC2EJFGK", "label": "rayclmm BCNT/SOL E8TR (tick spacing 60, 0.25%)"},
+  {"venue": "RayCLMM", "pool": "dAVkU4eGCj9qzEV2pDFynpF3nwL97odmbFHfDBKDvLz", "label": "rayclmm PAYmo/SOL dAVk (tick spacing 120, 1%; current tick 2 spacings from its array's end)"},
+  {"venue": "RayCLMM", "pool": "DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J", "label": "rayclmm J6pQ/SOL DCAL (tick spacing 1, 0.05%, dynamic fee; beyond the default bitmap: needs the extension)"},
+  {"venue": "RayCLMM", "pool": "DRW2W2VzaXSSSZP9M1tB8LQKamY5qmEKTK7L3UUEbtUH", "label": "rayclmm DRW2 (tick spacing 120, 1%, fee_on 1: fee in token 0 only, dynamic fee)"},
+  {"venue": "RayCLMM", "pool": "HBfkHGsEefSkLQqQz3xpLzUsA1EmaikfZ4Fni8empMUt", "label": "rayclmm PEPE/SOL HBfk (tick spacing 120, 1%, fee_on 2: fee in token 1 only, dynamic fee)"},
+  {"venue": "RayCLMM", "pool": "7tJVK2uEaK1tKEykDHQ8KHdaV3aXrVuSH1J4u3xgkS7U", "label": "rayclmm 7tJV (tick spacing 60, 0.6%, fee_on 2, static fee)"},
+  {"venue": "RayCLMM", "pool": "ASk8js1ZXfhx16prbntnmx5NiH4Eh6QaNmoTVJHX9R55", "label": "rayclmm ASk8 (tick spacing 120, 3%: the highest fee tier seen)"},
+  {"venue": "RayCLMM", "pool": "45ssPkUQs1ssbeDqxD2mZrMdJYAXF7GyQyhS5xDXuWC5", "label": "rayclmm PUMP/SOL 45ss (tick spacing 10, 0.1%)"},
+  {"venue": "Whirlpool", "pool": "Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE", "label": "whirlpool SOL/USDC Czfq (tick spacing 4, 0.04%)"},
+  {"venue": "Whirlpool", "pool": "Hp53XEtt4S8SvPCXarsLSdGfZBuUr5mMmZmX2DRNXQKp", "label": "whirlpool SOL/JitoSOL Hp53 (tick spacing 1, 0.01%: the lowest fee tier)"},
+  {"venue": "Whirlpool", "pool": "5KqohoeGjTjyHAFJJywK4J7fkFuK82PfMyuseGgLKZu2", "label": "whirlpool 5Kqo (tick spacing 4, 0.04%, adaptive fee)"},
+  {"venue": "Whirlpool", "pool": "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz", "label": "whirlpool FAqh (tick spacing 64, 0.3%)"},
+  {"venue": "Whirlpool", "pool": "Hxw77h9fEx598afiiZunwHaX3vYu9UskDk9EpPNZp1mG", "label": "whirlpool ORCA/SOL Hxw7 (tick spacing 16, 0.16%; GLiCiNEn's pool)"},
+  {"venue": "Whirlpool", "pool": "G1vH3TjRLfYebrPykMJDJ4yjrircGWsBbXUMQwtb3U5e", "label": "whirlpool G1vH (tick spacing 256, 2%, adaptive fee: the highest fee tier)"},
+  {"venue": "Whirlpool", "pool": "H2yEzfFUt3NCC13v95cLu2y1mKDzgXD8hcYuucHmcudH", "label": "whirlpool H2yE (splash pool: tick spacing 32896, full range only, 1%)"},
+  {"venue": "Whirlpool", "pool": "CeaZcxBNLpJWtxzt58qQmfMBtJY8pQLvursXTJYGQpbN", "label": "whirlpool cbBTC/SOL CeaZ (tick spacing 16, 0.16%; current tick on its array's first tick)"},
+  {"venue": "Whirlpool", "pool": "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15", "label": "whirlpool J6pQ/SOL 4uny (tick spacing 8, 0.05%, adaptive fee; the pair of rayclmm DCAL)"},
+  {"venue": "Whirlpool", "pool": "AfrddTGYwCVEQB1gxCAhR8i48o6qtxYqksdVkeLudEhg", "label": "whirlpool AfrD (tick spacing 96, 0.65%)"}
+]

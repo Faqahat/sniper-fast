@@ -135,10 +135,14 @@ impl Drop for Rig { fn drop(&mut self) { self.rec.close(); let _ = std::fs::remo
 async fn rig(name: &str, mode: Mode, extra: &str) -> Rig { rig_full(name, mode, extra, None, [*WSOL, MINT].into_iter().collect()).await }
 
 /// `rig` with PumpSwap's GlobalConfig and the tokens the wallet holds an account for
-async fn rig_full(name: &str, mode: Mode, extra: &str, pump: Option<PumpGlobal>, held: HashSet<Pk>) -> Rig {
+async fn rig_full(name: &str, mode: Mode, extra: &str, pump: Option<PumpGlobal>, held: HashSet<Pk>) -> Rig { rig_cfg(name, mode, extra, pump, held, vec![], &|_| {}).await }
+
+/// `rig_full` with `[exec]` lookup tables and the config edited before the executor is assembled (WP-21: the venue switches)
+async fn rig_cfg(name: &str, mode: Mode, extra: &str, pump: Option<PumpGlobal>, held: HashSet<Pk>, alts: Vec<(Pk, Vec<Pk>)>, edit: &dyn Fn(&mut Config)) -> Rig {
     let dir = test_dir(name);
     let rec = test_rec(&dir);
-    let cfg = test_cfg(&dir, extra);
+    let mut cfg = test_cfg(&dir, extra);
+    edit(&mut cfg);
     let (tx, rx) = crossbeam_channel::unbounded();
     let (paths, jito, got) = if mode.sends() {
         let j = Jito::for_test(rec.clone());
@@ -147,7 +151,7 @@ async fn rig_full(name: &str, mode: Mode, extra: &str, pump: Option<PumpGlobal>,
         (Some(Paths::for_test(vec![Path::test_bundle(j.clone(), Some(5), cfg.send_policy.queue_ms)], rec.clone())), Some(j), got)
     } else { (None, None, Got::default()) };
     let key = match mode { Mode::Live | Mode::Canary => Some(wallet_key()), Mode::DryRun => Some(dry_key()), Mode::Shadow => None };
-    let mut x = Exec::assemble(&cfg, Rpc::race(vec![]), paths, rec.clone(), tx, vec![], vec![], pump, held, mode, key).unwrap();
+    let mut x = Exec::assemble(&cfg, Rpc::race(vec![]), paths, rec.clone(), tx, vec![], alts, pump, held, mode, key).unwrap();
     let health = Arc::new(HealthFlags::default());
     health.set(Shut::Ready);
     x.set_health(health.clone());
@@ -2264,6 +2268,365 @@ async fn bundle_vectors_for_the_venue_harness() {
     }
     let have = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(have == text, "{path} is not what this builder makes: ARBX_BLESS=1 cargo test --release --lib bundle_vectors (then run program/venue-harness tests/arbx_bundle.rs)");
+}
+
+// ------------------------------------------------------------------------------------------------ WP-21: CLMM vectors
+
+/// How a CLMM vector opens its price gap on the snapshots: a token vault's amount scaled by num/1000 (PumpSwap's quote
+/// vault, AMM v4's coin vault), or an Orca pool's price moved by k ticks (as program/venue-harness `tests/clmm_route.rs`
+/// `moved_whirlpool`: the sqrt price in the middle of tick (tick + k), the current tick set to it). Each case tries its
+/// candidates in order and keeps the first whose best route pays 0.0001 SOL (deterministic: the same on every run)
+#[derive(Clone, Copy, Debug)]
+enum Gap { Vault { pool: &'static str, side: u8, nums: &'static [u64] }, WhirlTicks { pool: &'static str, ks: &'static [i32] } }
+
+/// One CLMM bundle: the buy and sell pools (fixture prefixes), the gap, the wallet holding the mid token's account or not,
+/// min_profit above what the route makes (`profit_fail`)
+struct ClmmCase { name: &'static str, buy: &'static str, sell: &'static str, gap: Gap, held: bool, profit_fail: bool }
+
+/// the byte patches of a gap candidate: (key, offset, bytes)
+fn gap_patches(g: Gap, i: usize) -> Option<Vec<(Pk, usize, Vec<u8>)>> {
+    use crate::quote::clmm_tests::any_fx;
+    match g {
+        Gap::Vault { pool, side, nums } => {
+            let num = *nums.get(i)?;
+            let fx = any_fx(pool);
+            let m = crate::quote::clmm_tests::meta(fx);
+            let v = if side == 0 { m.vault0 } else { m.vault1 };
+            let amount = u64::from_le_bytes(fx.accts[&v].1[64..72].try_into().unwrap());
+            Some(vec![(v, 64, (amount / 1_000 * num).to_le_bytes().to_vec())])
+        }
+        Gap::WhirlTicks { pool, ks } => {
+            let k = *ks.get(i)?;
+            let fx = any_fx(pool);
+            let d = &fx.accts[&fx.pool].1;
+            let t = i32::from_le_bytes(d[81..85].try_into().unwrap()) + k;
+            let sp = (1.0001f64.powf((t as f64 + 0.5) / 2.0) * 18_446_744_073_709_551_616.0) as u128;
+            Some(vec![(fx.pool, 65, sp.to_le_bytes().to_vec()), (fx.pool, 81, t.to_le_bytes().to_vec())])
+        }
+    }
+}
+
+/// One CLMM route of the vectors, built: the route as the executor takes it, the tip and min_profit the executor sets, the
+/// gap's patches, the fixtures, the later snapshot (its Clock), the legs' steps
+struct ClmmBuilt { r: RouteIn, tip: u64, min_profit: u64, patches: Vec<(Pk, usize, Vec<u8>)>, files: [String; 2], clock_from: String, steps: [u32; 2], gap: String }
+
+/// the vectors' cases (`clmm_bundle_vectors_for_the_venue_harness`)
+fn clmm_cases() -> Vec<ClmmCase> {
+    const UP: &[u64] = &[1_000, 1_020, 1_050, 1_100, 1_250, 1_500, 2_000, 3_000, 5_000];
+    const DOWN: &[u64] = &[1_000, 980, 950, 900, 800, 650, 500, 330, 200];
+    const KUP: &[i32] = &[60, 120, 250, 500];
+    const KDOWN: &[i32] = &[-60, -120, -250, -500];
+    vec![
+        ClmmCase { name: "whirl_buy_pump_sell_create_close", buy: "FAqh", sell: "9qKx", gap: Gap::Vault { pool: "9qKx", side: 1, nums: UP }, held: false, profit_fail: false },
+        ClmmCase { name: "pump_buy_whirl_sell_create_close", buy: "9qKx", sell: "FAqh", gap: Gap::Vault { pool: "9qKx", side: 1, nums: DOWN }, held: false, profit_fail: false },
+        ClmmCase { name: "whirl_buy_rayclmm_sell_create_close", buy: "4uny", sell: "DCAL", gap: Gap::WhirlTicks { pool: "4uny", ks: KUP }, held: false, profit_fail: false },
+        ClmmCase { name: "rayclmm_buy_whirl_sell_held", buy: "DCAL", sell: "4uny", gap: Gap::WhirlTicks { pool: "4uny", ks: KDOWN }, held: true, profit_fail: false },
+        ClmmCase { name: "rayclmm_buy_ammv4_sell_create_close", buy: "3ucN", sell: "58oQ", gap: Gap::Vault { pool: "58oQ", side: 0, nums: UP }, held: false, profit_fail: false },
+        ClmmCase { name: "whirl_buy_pump_sell_profit_fail", buy: "FAqh", sell: "9qKx", gap: Gap::Vault { pool: "9qKx", side: 1, nums: UP }, held: false, profit_fail: true },
+    ]
+}
+
+/// PumpSwap's GlobalConfig of the vectors (PumpSwap 9qKx's snapshot)
+fn clmm_pump() -> PumpGlobal {
+    let fx = crate::quote::clmm_tests::any_fx("9qKx");
+    build::decode_pump_global(&fx.accts[&*crate::pools::PUMP_GLOBAL_CONFIG].1).unwrap()
+}
+
+/// Case `c` quoted by arbx-sizing on its patched snapshots: the first gap candidate whose best route pays 0.0001 SOL, the
+/// route built as the engine's `route_in` fills it (the tick arrays the engine names, the bitmap extension when it exists)
+fn clmm_built(c: &ClmmCase) -> ClmmBuilt {
+    use crate::quote::clmm_tests::{any_fx, meta};
+    use crate::quote::{self as q, Use};
+    let (fb, fs) = (any_fx(c.buy), any_fx(c.sell));
+    let (bm, sm) = (meta(fb), meta(fs));
+    let mint = if bm.t0 == *WSOL { bm.t1 } else { bm.t0 };
+    assert!([sm.t0, sm.t1].contains(&mint) && [sm.t0, sm.t1].contains(&WSOL), "{}: one pair", c.name);
+    let mint_prog = if bm.t0 == mint { bm.t0_prog } else { bm.t1_prog };
+    // the later snapshot's Clock (Orca refuses one before its stamps)
+    let later = if fb.unix >= fs.unix { fb } else { fs };
+    let u = Use::Route { dlmm_budget: if bm.venue.walks() && sm.venue.walks() { q::DLMM_BUDGET_SHARED } else { q::DLMM_BUDGET_ALONE } };
+    let mut found: Option<ClmmBuilt> = None;
+    for i in 0.. {
+        let Some(patches) = gap_patches(c.gap, i) else { break };
+        // the store as the engine would hold it: both snapshots (the sell's last), patched, the accounts that do not exist empty
+        let mut accts: HashMap<Pk, crate::store::Acct> = HashMap::default();
+        for fx in [fb, fs] {
+            for (k, (_, d)) in &fx.accts {
+                let mut d = d.clone();
+                for (pk_, o, b) in &patches { if pk_ == k { d[*o..*o + b.len()].copy_from_slice(b); } }
+                accts.insert(*k, crate::store::Acct::rpc(Arc::from(d), fx.slot, 0, 0, crate::feeds::src::RPC_BOOT));
+            }
+            for k in &fx.absent { accts.entry(*k).or_insert_with(|| crate::store::Acct::rpc(Arc::from(&[][..]), fx.slot, 0, 0, crate::feeds::src::RPC_BOOT)); }
+        }
+        let get = |k: &Pk| accts.get(k);
+        let getv = |k: &Pk| accts.get(k).map(|a| a.data.to_vec());
+        // the arrays the engine follows (`pools::clmm_arrays`, as `initial_dlmm_arrays` sets them at boot)
+        let follow = |m: &PoolMeta| if m.venue.is_clmm() { crate::pools::clmm_arrays(m, &getv, &[]) } else { vec![] };
+        let (ab, as_) = (follow(&bm), follow(&sm));
+        let all = |_: i64| true;
+        let (srcb, srcs) = (q::Src { get: &get, arrays: &ab, usable: &all, clock: q::clock(later.slot, later.unix) },
+            q::Src { get: &get, arrays: &as_, usable: &all, clock: q::clock(later.slot, later.unix) });
+        let (zb, zs) = (bm.t0 == *WSOL, sm.t0 == mint);
+        let (lb, ls) = (q::leg(&bm, zb, &srcb, u).unwrap_or_else(|w| panic!("{}: buy leg {w:?}", c.name)), q::leg(&sm, zs, &srcs, u).unwrap_or_else(|w| panic!("{}: sell leg {w:?}", c.name)));
+        let ladder: Vec<u64> = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0].iter().map(|s| (s * 1e9) as u64).collect();
+        let Ok(t) = q::best(&lb, &ls, &ladder, 1_000_000, 2_000_000_000) else { continue };
+        if t.profit() < 100_000 { continue; }
+        let (wb, ws) = (lb.walk(t.x).unwrap(), ls.walk(t.mid).unwrap());
+        let names = |m: &PoolMeta, l: &q::Leg, x: u64, z: bool| -> Vec<i64> {
+            match m.venue {
+                Venue::RayClmm => l.clmm_arrays(x).unwrap().unwrap().into_iter().map(i64::from).collect(),
+                Venue::Whirlpool => crate::venues::clmm::whirl_leg_starts(&accts[&m.pool].data, z).unwrap().into_iter().map(i64::from).collect(),
+                _ => vec![],
+            }
+        };
+        let (nb, ns) = (names(&bm, &lb, t.x, zb), names(&sm, &ls, t.mid, zs));
+        let (cu, cu_src) = crate::cu_table::CuModel::default().route(bm.venue, wb.crossed, sm.venue, ws.crossed);
+        let mut r = route_m2(1, 2, 0, 1);
+        (r.buy, r.sell, r.mint, r.mint_prog) = (bm.clone(), sm.clone(), mint, mint_prog);
+        (r.buy_data, r.sell_data) = (accts[&bm.pool].data.to_vec(), accts[&sm.pool].data.to_vec());
+        (r.size, r.mid, r.back, r.spent, r.buy_end, r.sell_end) = (t.x, wb.out, ws.out, wb.spent, wb.end, ws.end);
+        (r.buy_live, r.sell_live) = (nb, ns);
+        let ext = |m: &PoolMeta| (m.venue == Venue::RayClmm).then(|| m.clmm_ext().copied()).flatten().filter(|e| accts.get(e).is_some_and(|a| !a.data.is_empty()));
+        (r.buy_ext, r.sell_ext) = (ext(&bm), ext(&sm));
+        (r.cu, r.cu_src, r.cu_ata, r.mid_held, r.uva) = (cu, cu_src.as_str(), crate::cu_table::CuModel::default().ata_ops(), Some(c.held), Some(true));
+        r.sizes = accts.iter().map(|(k, a)| (*k, a.data.len() as u32)).collect();
+        r.sizes.sort();
+        let expected = r.expected();
+        assert_eq!(expected, t.profit(), "{}: the route's expected profit is the trip's", c.name);
+        let tip_l = crate::tip::TipModel::default().tip(expected - 5_000, false).lamports;
+        let min_profit = if c.profit_fail { expected as u64 + 1_000_000 } else { tip_l + 5_000 + 1 };
+        found = Some(ClmmBuilt { r, tip: tip_l, min_profit, patches, files: [fb.file.clone(), fs.file.clone()], clock_from: later.file.clone(), steps: [wb.crossed, ws.crossed],
+            gap: format!("{:?} candidate {i}", c.gap) });
+        break;
+    }
+    found.unwrap_or_else(|| panic!("{}: no gap candidate pays", c.name))
+}
+
+/// The lookup table the vectors' bundles load their accounts from: every account `x0`'s compile of each route names (both
+/// legs, the create and close, the tip), the payer's own accounts left out (a shared table holds none of ours)
+fn clmm_alt(x0: &Exec, built: &[ClmmBuilt], payer: Pk, tip_acct: Pk) -> Vec<Pk> {
+    let mut keys: Vec<Pk> = Vec::new();
+    for b in built {
+        let r = &b.r;
+        let ours = [build::ata_of(&payer, &WSOL, &crate::pda::TOKEN_PROGRAM), build::ata_of(&payer, &r.mint, &r.mint_prog), build::pump_uva(&payer)];
+        let route = build::route_ix(x0.program, payer, ours[0], r.size, b.min_profit, &[leg_of(x0, r, true), leg_of(x0, r, false)], None).unwrap();
+        let plan = Some(build::AtaOps { mint: r.mint, token_program: r.mint_prog, close: true });
+        for k in x0.compile(r, &route, plan, Some((tip_acct, 1)), BH, &[], None).unwrap().msg.loadable { if !ours.contains(&k) && !keys.contains(&k) { keys.push(k); } }
+    }
+    keys
+}
+
+/// PLAN-ADDENDUM WP-21 point 6 (the on-chain route program): routes through Raydium CLMM and Orca Whirlpool legs as the
+/// engine builds them (`Exec::build`: the CU limit, the loaded-data limit, the create, nexus-v2's route with the
+/// `swap_v2` legs `build::leg` lays out, the close, the tip), written to testdata/builder/bundle-vectors-clmm.json for
+/// program/venue-harness `tests/arbx_bundle_clmm.rs`, which runs them in LiteSVM on the dumped mainnet programs (Orca
+/// Whirlpool, Raydium CLMM, PumpSwap and its fee program, Raydium AMM v4, SPL Token, the ATA program) and the deployed
+/// nexus-v2 ELF. The pairs come from the venue-parity fixtures (testdata/venue-parity: the pools sharing a mint):
+/// Whirlpool FAqh ↔ PumpSwap 9qKx (2zMM/SOL) both ways, Raydium CLMM DCAL ↔ Whirlpool 4uny (J6pQ/SOL, the pair of
+/// tests/clmm_route.rs) both ways, Raydium CLMM 3ucN → Raydium AMM v4 58oQ (USDC/SOL), and one whose min_profit the
+/// route cannot reach. The quotes are arbx-sizing's on the same patched snapshots, the Clock the later snapshot's; the
+/// tick arrays the legs name are the engine's (Raydium: `Leg::clmm_arrays` over the arrays the engine follows,
+/// `pools::clmm_arrays`; Orca: `venues::clmm::whirl_leg_starts`). `ARBX_BLESS=1` rewrites the file
+#[tokio::test]
+async fn clmm_bundle_vectors_for_the_venue_harness() {
+    let cases = clmm_cases();
+    let built: Vec<ClmmBuilt> = cases.iter().map(clmm_built).collect();
+    let cfg = test_cfg(&std::env::temp_dir(), "");
+    let payer = wallet_key().verifying_key().to_bytes();
+    let pump = clmm_pump();
+    let tip_acct = tip_accounts()[0];
+    let mk = |alts: Vec<(Pk, Vec<Pk>)>| Exec::assemble(&cfg, Rpc::race(vec![]), None, Rec::off(), crossbeam_channel::unbounded().0, vec![], alts, Some(pump.clone()),
+        [*WSOL].into_iter().collect(), Mode::Shadow, None).unwrap();
+    // the [exec] lookup table: every account the bundles load from one (the payer's own accounts left out)
+    let x0 = mk(vec![]);
+    let keys = clmm_alt(&x0, &built, payer, tip_acct);
+    assert!(keys.len() <= 256, "{} keys for one table", keys.len());
+    let table = ([0xa2u8; 32], keys);
+    let x = mk(vec![table.clone()]);
+    let mut cases_out = Vec::new();
+    for (c, b) in cases.iter().zip(&built) {
+        let r = &b.r;
+        let bx = x.build(r, b.min_profit, BH, Some((tip_acct, b.tip)), &AltSource::none()).unwrap_or_else(|e| panic!("{}: {e}", c.name));
+        assert!(bx.fits() && bx.alt_fallback == "none", "{}: {} bytes", c.name, build::tx_bytes(&bx.msg));
+        assert_eq!((bx.creates_ata(), bx.closes_ata()), (!c.held, !c.held), "{}", c.name);
+        let raw = build::sign(&bx.msg, &wallet_key());
+        let mut want = x.want(r, payer, BH, Some((tip_acct, b.tip)), b.min_profit, &raw, &AltSource::none());
+        want.signer = payer;
+        assert_eq!(failing(&raw, &want), Vec::<String>::new(), "{}", c.name);
+        let (tx, _) = crate::tx::parse_wire(&raw).unwrap();
+        let all = tx.resolve(|t| want.alts.get(t).cloned()).unwrap();
+        let tables: Vec<Alt> = tx.lookups.iter().map(|l| Alt::new(l.table, &want.alts[&l.table])).collect();
+        let again = build::compile_v0(payer, &signed_ixs(&tx, &all).unwrap(), BH, &tables.iter().collect::<Vec<_>>(), &[tip_acct]).unwrap();
+        assert_eq!(again.bytes, bx.msg.bytes, "{}", c.name);
+        // the route instruction's legs as nexus-v2 parses them: each venue's swap_v2, its account count, the amount at offset 8
+        let (bl, sl) = (leg_of(&x, r, true), leg_of(&x, r, false));
+        let leg_json = |m: &PoolMeta, l: &build::Leg, names: &[i64], steps: u32| json!({ "venue": crate::replay::venue_name(m.venue), "pool": b58(&m.pool),
+            "program": b58(&l.program), "n_accounts": l.accounts.len(), "data_len": l.data.len(), "amount_offset": l.amount_offset, "tick_arrays": names,
+            "steps": steps, "cu_allowed": m.venue.leg_cu(steps) });
+        cases_out.push(json!({ "name": c.name, "gap": b.gap, "patches": b.patches.iter().map(|(k, o, d)| json!([b58(k), o, d.iter().map(|x| format!("{x:02x}")).collect::<String>()])).collect::<Vec<_>>(),
+            "fixtures": b.files, "clock_from": b.clock_from, "buy_pool": b58(&r.buy.pool), "sell_pool": b58(&r.sell.pool), "mint": b58(&r.mint), "token_program": b58(&r.mint_prog),
+            "mid_account": b58(&build::ata_of(&payer, &r.mint, &r.mint_prog)), "held": c.held, "size": r.size, "mid": r.mid, "spent": r.spent, "back": r.back,
+            "expected_profit": r.expected(), "min_profit": b.min_profit, "tip": [b58(&tip_acct), b.tip], "cu_limit": bx.cu_limit, "cu_src": bx.cu_src, "cu_route": r.cu,
+            "cu_ata": [r.cu_ata.0, r.cu_ata.1], "loaded_data_limit": bx.loaded_data_limit, "legs": [leg_json(&r.buy, &bl, &r.buy_live, b.steps[0]), leg_json(&r.sell, &sl, &r.sell_live, b.steps[1])],
+            "expect": if c.profit_fail { "profit_fail" } else { "ok" }, "bytes": raw.len(), "tx_b64": base64_of(&raw) }));
+    }
+    let (tk, ta) = table;
+    let doc = json!({ "schema": "arbx.bundle-vectors/1", "about": "arbx's own bundles through Raydium CLMM and Orca Whirlpool legs (src/exec/tests.rs \
+        clmm_bundle_vectors_for_the_venue_harness), executed by program/venue-harness tests/arbx_bundle_clmm.rs on the dumped mainnet programs and the \
+        deployed nexus-v2 ELF (PLAN-ADDENDUM WP-21 point 6)", "payer": b58(&payer), "payer_seed_byte": 1, "program": b58(&pk(&cfg.exec.program)), "blockhash": b58(&BH),
+        "alt": { "table": b58(&tk), "addrs": ta.iter().map(b58).collect::<Vec<_>>() }, "cases": cases_out });
+    let path = format!("{}/testdata/builder/bundle-vectors-clmm.json", env!("CARGO_MANIFEST_DIR"));
+    let text = serde_json::to_string_pretty(&doc).unwrap() + "\n";
+    if std::env::var_os("ARBX_BLESS").is_some() { std::fs::write(&path, &text).unwrap(); }
+    let have = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(have == text, "{path} is not what this builder makes: ARBX_BLESS=1 cargo test --release --lib clmm_bundle_vectors (then run program/venue-harness tests/arbx_bundle_clmm.rs)");
+}
+
+/// a round trip through venues `bv` (buy) and `sv` (sell): `route`'s DAMM v2 one with its venues changed (enough for a
+/// check that refuses it before anything is built)
+fn venue_route(bv: Venue, sv: Venue, n: u8) -> RouteIn {
+    let mut r = route(n, damm(n + 1, MINT), 50_000, n as u64);
+    (r.buy.venue, r.sell.venue) = (bv, sv);
+    r
+}
+
+/// a canary that sends: no attempt cap, 1 ms between attempts, 0.2 SOL
+const CANARY_OK: &str = "[canary]\nenabled = true\ncount = 0\nevery_ms = 1\nsize_sol = 0.2\n";
+
+/// PLAN-ADDENDUM WP-21 (review F4, F3): the guard that keeps money off the CLMM venues. In a mode that sends (live,
+/// canary), a route with a Raydium CLMM or Orca Whirlpool leg (the buy, the sell or both, beside an older venue or not)
+/// through a venue switched to "quote" or "off" is refused `venue_quote_only` before anything is built: no attempt, no
+/// in-flight entry, nothing fired; the older venues' routes still send. With the gate closed the refusal is the gated
+/// decision's `reason_ungated`, never a would-send, while an older venue's route is a would-send. A venue switched to
+/// "send" is not refused here (`a_send_venue_builds_its_clmm_route_and_a_dry_run_signs_it`)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_quote_only_guard_refuses_clmm_routes_before_anything_is_built() {
+    let legs = [(Venue::RayClmm, Venue::DammV2), (Venue::DammV2, Venue::Whirlpool), (Venue::RayClmm, Venue::Whirlpool), (Venue::Whirlpool, Venue::RayClmm)];
+    let ms = 10_000_000u64;
+    for mode in [Mode::Live, Mode::Canary] {
+        for (ray, whirl) in [("quote", "quote"), ("off", "off"), ("quote", "send"), ("send", "off")] {
+            let extra = if mode == Mode::Canary { CANARY_OK } else { "" };
+            let mut r = rig_cfg(&format!("qo-{}-{ray}-{whirl}", mode.as_str()), mode, extra, None, [*WSOL, MINT].into_iter().collect(), vec![],
+                &|c: &mut Config| { c.pools.rayclmm = ray.into(); c.pools.whirlpool = whirl.into(); }).await;
+            let t = now_ns();
+            let mut n = 0u64;
+            for (k, (bv, sv)) in legs.into_iter().enumerate() {
+                let held_back = [bv, sv].iter().any(|v| (*v == Venue::RayClmm && ray != "send") || (*v == Venue::Whirlpool && whirl != "send"));
+                if !held_back { continue; }
+                n += 1;
+                let d = r.decide(venue_route(bv, sv, 10 + 2 * k as u8), 100, t + n * ms);
+                assert_eq!((d.verdict, d.reason.as_str(), d.attempt, d.sent, d.would_send, d.reason_ungated.as_deref()), ("reject", "venue_quote_only", None, None, false, None),
+                    "{mode:?} {ray}/{whirl} {bv:?} -> {sv:?}: {d:?}");
+            }
+            assert!(n >= 3, "{n}");
+            // nothing was built, held in flight or fired
+            assert_eq!(r.x.inflight.len(), 0, "no in-flight entry");
+            assert_eq!((r.lines("attempts").len(), r.got.lock().unwrap().len()), (0, 0), "no attempt, nothing reached the block engine");
+            r.drain();
+            assert!(r.buffered.is_empty(), "nothing fired");
+            assert_eq!(r.n("reject_venue_quote_only"), n);
+            // the older venues still send
+            let d = r.decide(route(60, damm(61, MINT), 50_000, 1), 100, t + 10 * ms);
+            assert_eq!((d.reason.as_str(), d.attempt), ("sent", Some(0)), "{mode:?}: {d:?}");
+            let _ = r.settled().await;
+            // the gate closed: the check still applies (the gated decision's reason_ungated, never a would-send); an older
+            // venue's route is a would-send
+            let gate = SendGate::new();
+            gate.shadow("control", "pause-sending by test", false).unwrap();
+            r.x.set_gate(gate);
+            let (bv, sv) = if ray != "send" { (Venue::RayClmm, Venue::DammV2) } else { (Venue::DammV2, Venue::Whirlpool) };
+            let d = r.decide(venue_route(bv, sv, 70), 100, t + 20 * ms);
+            assert_eq!((d.reason.as_str(), d.would_send, d.attempt, d.reason_ungated.as_deref()), ("gate_shadow:control", false, None, Some("venue_quote_only")), "{d:?}");
+            let d = r.decide(route(80, damm(81, MINT), 50_000, 2), 100, t + 30 * ms);
+            assert_eq!((d.reason.as_str(), d.would_send, d.attempt.is_some(), d.reason_ungated.as_deref()), ("gate_shadow:control", true, true, None), "{d:?}");
+        }
+    }
+}
+
+/// PLAN-ADDENDUM WP-21 (review F4): with both venues switched to "send" a live run builds and sends routes with CLMM
+/// legs (the vectors' Whirlpool -> PumpSwap and Raydium CLMM -> Whirlpool, on the venue-parity snapshots): one bundle each
+/// reaches the block engine, its route instruction naming the venues' swap_v2 legs in order at the route's size; a dry
+/// run with them left at "quote" builds and signs the same routes (its throwaway key), never refused `venue_quote_only`
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_send_venue_builds_its_clmm_route_and_a_dry_run_signs_it() {
+    let cases = clmm_cases();
+    let built: Vec<ClmmBuilt> = [&cases[0], &cases[3]].into_iter().map(clmm_built).collect();
+    let pump = clmm_pump();
+    let payer = wallet_key().verifying_key().to_bytes();
+    let x0 = Exec::assemble(&test_cfg(&std::env::temp_dir(), ""), Rpc::race(vec![]), None, Rec::off(), crossbeam_channel::unbounded().0, vec![], vec![],
+        Some(pump.clone()), [*WSOL].into_iter().collect(), Mode::Shadow, None).unwrap();
+    let alt = ([0xa3u8; 32], clmm_alt(&x0, &built, payer, tip_accounts()[0]));
+    let ms = 10_000_000u64;
+    for mode in [Mode::Live, Mode::DryRun] {
+        let (ray, whirl) = if mode == Mode::Live { ("send", "send") } else { ("quote", "quote") };
+        let mut r = rig_cfg(&format!("clmm-build-{}", mode.as_str()), mode, "[live]\nmax_size_sol = 2.0\n", Some(pump.clone()), [*WSOL].into_iter().collect(),
+            vec![alt.clone()], &|c: &mut Config| { c.pools.rayclmm = ray.into(); c.pools.whirlpool = whirl.into(); }).await;
+        let t = now_ns();
+        for (k, b) in built.iter().enumerate() {
+            let d = r.decide(b.r.clone(), 100, t + k as u64 * ms);
+            let raw = match mode {
+                Mode::Live => {
+                    assert_eq!((d.reason.as_str(), d.attempt, d.sent), ("sent", Some(k as u64), Some(true)), "{k}: {d:?}");
+                    let Settled::Fired { fired, .. } = r.settled().await else { panic!("a fire result") };
+                    assert!(fired.copies[0].ok, "{:?}", fired.copies[0]);
+                    r.got.lock().unwrap()[k].0.clone()
+                }
+                _ => {
+                    assert_eq!((d.reason.as_str(), d.would_send, d.attempt), ("would_send", true, Some(k as u64)), "{k}: {d:?}");
+                    signed(&r.lines("attempts")[k])
+                }
+            };
+            let (tx, _) = crate::tx::parse_wire(&raw).unwrap();
+            let all = tx.resolve(|t| r.x.alt_lists.get(t).cloned()).unwrap();
+            let seen = route_of(&tx, &all, &r.x.program).unwrap();
+            assert_eq!((seen.amount_in, seen.legs[0].program, seen.legs[1].program), (b.r.size, b.r.buy.venue.program(), b.r.sell.venue.program()), "{k}");
+            // the payer is the wallet; a dry run signs with its throwaway key, a live run with the wallet's
+            assert_eq!(tx.keys[0], payer);
+        }
+        assert_eq!(r.n("reject_venue_quote_only"), 0);
+    }
+}
+
+/// PLAN-ADDENDUM WP-21 (review F11): do CLMM routes fit a transaction with the lookup tables a run has? The vectors' five
+/// routes built (the executor's own build: create, route, close, tip) with no table, with the default `[exec] alts` as
+/// they are on chain (testdata/builder/exec-alts-20261006.json: the 10 of `v2_alts`' 12 tables that exist; they hold
+/// both CLMM programs, the token programs, Memo and nexus-v2, and 28 of the 242 WP-21 pools), and with those plus one
+/// table of the route's own accounts (the vectors' table)
+#[tokio::test]
+async fn clmm_routes_and_the_lookup_tables() {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(format!("{}/testdata/builder/exec-alts-20261006.json", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap();
+    let mut default: Vec<(Pk, Vec<Pk>)> = v["tables"].as_object().unwrap().iter().map(|(t, a)| (pk(t), a.as_array().unwrap().iter().map(|x| pk(x.as_str().unwrap())).collect())).collect();
+    default.sort();
+    let cases = clmm_cases();
+    let built: Vec<ClmmBuilt> = cases.iter().filter(|c| !c.profit_fail).map(clmm_built).collect();
+    let payer = wallet_key().verifying_key().to_bytes();
+    let tip_acct = tip_accounts()[0];
+    let cfg = test_cfg(&std::env::temp_dir(), "");
+    let mk = |alts: Vec<(Pk, Vec<Pk>)>| Exec::assemble(&cfg, Rpc::race(vec![]), None, Rec::off(), crossbeam_channel::unbounded().0, vec![], alts, Some(clmm_pump()),
+        [*WSOL].into_iter().collect(), Mode::Shadow, None).unwrap();
+    let own = ([0xa4u8; 32], clmm_alt(&mk(vec![]), &built, payer, tip_acct));
+    let mut with_own = default.clone();
+    with_own.push(own);
+    let mut rows = Vec::new();
+    for (label, tables) in [("none", vec![]), ("default", default.clone()), ("default+own", with_own)] {
+        let x = mk(tables);
+        for (c, b) in cases.iter().filter(|c| !c.profit_fail).zip(&built) {
+            let r = x.build(&b.r, b.min_profit, BH, Some((tip_acct, b.tip)), &AltSource::none());
+            // an oversized build says its size: "oversized(N bytes, M locks...)"
+            let (fits, bytes) = match &r {
+                Ok(bx) => (bx.fits(), build::tx_bytes(&bx.msg)),
+                Err(e) if e.starts_with("oversized(") => (false, e["oversized(".len()..].split(' ').next().and_then(|n| n.parse().ok()).unwrap_or(0)),
+                Err(e) => panic!("{}: {e}", c.name),
+            };
+            rows.push((label, c.name, fits, bytes));
+        }
+    }
+    for r in &rows { eprintln!("lookup tables {:<12} {:<40} fits {:<5} {} bytes", r.0, r.1, r.2, r.3); }
+    let fits = |label: &str| rows.iter().filter(|r| r.0 == label && r.2).count();
+    assert_eq!(fits("default+own"), built.len(), "with a table of their own accounts every route fits");
+    // without any table the two PumpSwap <-> Whirlpool routes are oversized (1,382 and 1,448 bytes) and Whirlpool <->
+    // Raydium CLMM fits by one byte (1,231); the default tables hold the venues' programs and common accounts: all fit
+    assert_eq!((fits("none"), fits("default")), (3, built.len()), "{rows:?}");
 }
 
 // ------------------------------------------------------------------------------------------------ WP-07

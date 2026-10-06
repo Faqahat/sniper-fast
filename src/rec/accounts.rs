@@ -47,11 +47,14 @@ pub mod role {
     pub const PUMP_GLOBAL_CONFIG: u8 = 12;
     /// the wallet's PumpSwap user volume accumulator (WP-06 item 2: a buy creates it when it is missing)
     pub const WALLET_PUMP_UVA: u8 = 13;
+    /// PLAN-ADDENDUM WP-21: a Raydium CLMM or Orca Whirlpool tick array the engine follows (the pool's `pool_index`)
+    pub const CLMM_TICK_ARRAY: u8 = 14;
     /// exec.jsonl `watched[].role`
     pub fn name(r: u8) -> &'static str {
         match r { POOL => "pool", VAULT => "vault", EXTRA => "extra", DLMM_BIN_ARRAY => "dlmm_bin_array", MINT => "mint", CLOCK_SYSVAR => "clock_sysvar",
             DLMM_BITMAP_EXT => "dlmm_bitmap_ext", PROGRAMDATA => "programdata", WALLET => "wallet", WALLET_TOKEN_ACCOUNT => "wallet_token_account",
-            PUMP_FEE_CONFIG => "pump_fee_config", PUMP_GLOBAL_CONFIG => "pump_global_config", WALLET_PUMP_UVA => "wallet_pump_uva", _ => "other" }
+            PUMP_FEE_CONFIG => "pump_fee_config", PUMP_GLOBAL_CONFIG => "pump_global_config", WALLET_PUMP_UVA => "wallet_pump_uva",
+            CLMM_TICK_ARRAY => "clmm_tick_array", _ => "other" }
     }
 }
 

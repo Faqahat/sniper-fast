@@ -1042,8 +1042,33 @@ pub struct PoolsCfg {
     /// quote mints we start and end a cycle in (default: WSOL)
     #[serde(default = "wsol")]
     pub quote_mints: Vec<String>,
+    /// PLAN-ADDENDUM WP-21 (arbx-sizing DESIGN.md §9.0 item 9): Raydium CLMM (seed-list venue `RayCLMM`) and Orca
+    /// Whirlpool (`Whirlpool`), one switch each. "off" (the default): their rows are not read. "quote": priced, decided and
+    /// monitored (the accuracy monitor on third-party swaps); shadow and dry runs build their bundles, a live or canary route
+    /// through one is refused `venue_quote_only`. "send": traded like the other venues. Left out of the normalized config
+    /// while "off" (review F8): a config without them keeps the `normalized_sha256` it had before WP-21
+    #[serde(default = "venue_off", skip_serializing_if = "is_venue_off")]
+    pub rayclmm: String,
+    #[serde(default = "venue_off", skip_serializing_if = "is_venue_off")]
+    pub whirlpool: String,
 }
 fn wsol() -> Vec<String> { vec!["So11111111111111111111111111111111111111112".into()] }
+fn venue_off() -> String { "off".into() }
+fn is_venue_off(s: &str) -> bool { s == "off" }
+
+/// a WP-21 venue switch's values (`[pools] rayclmm`, `whirlpool`)
+pub const VENUE_MODES: [&str; 3] = ["off", "quote", "send"];
+
+impl PoolsCfg {
+    /// The switch of venue `v`: "off", "quote" or "send". The five venues traded before WP-21 always "send"
+    pub fn venue_mode(&self, v: crate::venues::Venue) -> &str {
+        match v { crate::venues::Venue::RayClmm => &self.rayclmm, crate::venues::Venue::Whirlpool => &self.whirlpool, _ => "send" }
+    }
+    /// whether the registry reads venue `v`'s pools (its switch is not "off")
+    pub fn venue_on(&self, v: crate::venues::Venue) -> bool { self.venue_mode(v) != "off" }
+    /// whether a live or canary route may go through venue `v` (its switch is "send")
+    pub fn venue_sends(&self, v: crate::venues::Venue) -> bool { self.venue_mode(v) == "send" }
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -1618,6 +1643,9 @@ impl Config {
         let cfg: Config = toml::from_str(text).map_err(|e| anyhow::anyhow!("{}", crate::alerts::telegram::mask_token_shapes(&e.to_string())))?;
         if cfg.config_version != Some(CONFIG_VERSION) { bail!("config_version = {CONFIG_VERSION} is required"); }
         if cfg.mode != "shadow" && cfg.mode != "live" { bail!("mode must be \"shadow\" or \"live\""); }
+        for (k, v) in [("rayclmm", &cfg.pools.rayclmm), ("whirlpool", &cfg.pools.whirlpool)] {
+            if !VENUE_MODES.contains(&v.as_str()) { bail!("[pools] {k} must be one of {VENUE_MODES:?} (PLAN-ADDENDUM WP-21)"); }
+        }
         for (k, v, n) in [("expected_program_sha256", &cfg.exec.expected_program_sha256, 64), ("expected_program_md5", &cfg.exec.expected_program_md5, 32)] {
             if !v.is_empty() && (v.len() != n || !v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) {
                 bail!("[exec] {k} must be {n} lowercase hex characters (or \"\" for no check)");

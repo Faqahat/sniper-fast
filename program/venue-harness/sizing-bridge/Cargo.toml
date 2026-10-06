@@ -8,7 +8,8 @@ publish = false
 [workspace]
 
 [dependencies]
-arbx-sizing = { path = "../../arbx-sizing" }
+# the concentrated-liquidity venues (PLAN-ADDENDUM WP-21) are off by default in the crate: the bridge turns them on
+arbx-sizing = { path = "../../arbx-sizing", features = ["clmm"] }
 base64 = "0.22"
 serde_json = "1"
 # the host-side create_program_address (arbx-sizing's PdaFn): SHA-256 + "off the ed25519 curve"

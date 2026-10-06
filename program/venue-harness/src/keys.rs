@@ -8,6 +8,10 @@ pub const RAYCPMM: Address = Address::from_str_const("CPMMoo8L3F4NbTegBCKVNunggL
 pub const RAYAMMV4: Address = Address::from_str_const("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
 pub const DLMM: Address = Address::from_str_const("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo");
 pub const DAMMV2: Address = Address::from_str_const("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
+/// Raydium CLMM (PLAN-ADDENDUM WP-21)
+pub const RAYCLMM: Address = Address::from_str_const("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
+/// Orca Whirlpool (PLAN-ADDENDUM WP-21)
+pub const WHIRLPOOL: Address = Address::from_str_const("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 
 pub const TOKEN: Address = Address::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 pub const TOKEN_2022: Address = Address::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
@@ -39,6 +43,8 @@ pub const PROGRAMS: &[(&str, Address)] = &[
     ("RayAMMv4", RAYAMMV4),
     ("DLMM", DLMM),
     ("DAMMv2", DAMMV2),
+    ("RayCLMM", RAYCLMM),
+    ("Whirlpool", WHIRLPOOL),
     ("SplToken", TOKEN),
     ("Token2022", TOKEN_2022),
     ("AssociatedToken", ATA_PROGRAM),
@@ -61,6 +67,20 @@ pub fn dlmm_bin_array(pair: &Address, index: i64) -> Address {
 pub fn dlmm_bitmap_extension(pair: &Address) -> Address { pda(&[b"bitmap", pair.as_ref()], &DLMM).0 }
 /// DLMM bin array index of a bin (70 bins per array, floor division)
 pub fn dlmm_array_index(bin: i32) -> i64 { (bin as i64).div_euclid(70) }
+
+/// Raydium CLMM tick array: PDA["tick_array", pool, start_tick_index (i32, big-endian)]
+pub fn rayclmm_tick_array(pool: &Address, start: i32) -> Address { pda(&[b"tick_array", pool.as_ref(), &start.to_be_bytes()], &RAYCLMM).0 }
+/// Raydium CLMM TickArrayBitmapExtension: PDA["pool_tick_array_bitmap_extension", pool]
+pub fn rayclmm_bitmap_extension(pool: &Address) -> Address { pda(&[b"pool_tick_array_bitmap_extension", pool.as_ref()], &RAYCLMM).0 }
+/// Raydium CLMM tick array start index of a tick (60 ticks of `tick_spacing` per array, floor)
+pub fn rayclmm_array_start(tick: i32, tick_spacing: u16) -> i32 { let n = 60 * tick_spacing as i32; tick.div_euclid(n) * n }
+
+/// Orca Whirlpool tick array: PDA["tick_array", whirlpool, start_tick_index as a decimal string]
+pub fn whirl_tick_array(pool: &Address, start: i32) -> Address { pda(&[b"tick_array", pool.as_ref(), start.to_string().as_bytes()], &WHIRLPOOL).0 }
+/// Orca Whirlpool Oracle (adaptive fee): PDA["oracle", whirlpool]
+pub fn whirl_oracle(pool: &Address) -> Address { pda(&[b"oracle", pool.as_ref()], &WHIRLPOOL).0 }
+/// Orca Whirlpool tick array start index of a tick (88 ticks of `tick_spacing` per array, floor)
+pub fn whirl_array_start(tick: i32, tick_spacing: u16) -> i32 { let n = 88 * tick_spacing as i32; tick.div_euclid(n) * n }
 
 /// The fixed test wallet (deterministic, so every user-derived PDA is stable across runs). Test-only key: it never
 /// holds anything outside LiteSVM.

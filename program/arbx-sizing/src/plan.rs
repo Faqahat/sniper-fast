@@ -288,7 +288,7 @@ fn size_pair<'a>(p: &PlanIn<'a>, q: &mut Quotes<'_, 'a>, k: u8, pair: (u8, u8), 
         // the model refused: the exact golden-section search (DESIGN.md §3.6), never over a DLMM leg (its exact
         // evaluations walk bins: REVIEW.md F4)
         (Err(a), _) | (_, Err(a)) => {
-            if !(p.flags.search() && cfg!(feature = "search")) || b.is_dlmm() || s.is_dlmm() { return Err(a); }
+            if !(p.flags.search() && cfg!(feature = "search")) || b.walks() || s.walks() { return Err(a); }
             if cap_int >= p.min_size {
                 let mut ev = |x: u64| q.full(pair, x, None).ok().map(|r| r.0);
                 if let Some((x, _)) = crate::opt::golden(p.min_size, cap_int, p.max_iters, &mut ev) {

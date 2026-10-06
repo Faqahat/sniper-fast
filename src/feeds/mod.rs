@@ -581,7 +581,7 @@ pub fn state_health(connected: bool, connects: u64, reconnects: u64, error: Opti
 /// `fwd`: accounts.bin, slots.jsonl and blocks.jsonl (WP-03). Each connection's first message and each end are engine
 /// inputs (`state_health`, WP-04 / I-4)
 #[allow(clippy::too_many_arguments)]
-pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch::Receiver<Vec<String>>, subs: grpc::StateSubs, out: UnboundedSender<Event>,
+pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch::Receiver<Vec<crate::tx::Pk>>, subs: grpc::StateSubs, out: UnboundedSender<Event>,
     stop: Arc<AtomicBool>, rt: &tokio::runtime::Handle, c: Arc<FeedCounters>, rec: Rec, fwd: Fwd) {
     rt.spawn(async move {
         let mut backoff = 500u64;

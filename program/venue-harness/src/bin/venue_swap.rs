@@ -5,7 +5,7 @@ use venue_harness::{Dir, Fixtures, Harness};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let fx = Fixtures::load().unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
+    let fx = Fixtures::load_all().unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
     if args.first().map(|s| s.as_str()) == Some("list") || args.len() < 3 {
         for p in fx.pools.values() { println!("{:<9} {} slot {} {}  t0 {} t1 {}", p.venue.name(), p.pool, p.slot, p.label, p.token0, p.token1); }
         if args.len() < 3 && args.first().map(|s| s.as_str()) != Some("list") { eprintln!("usage: venue-swap <pool> <1|0: token0 in?> <amount>... [-v]"); }

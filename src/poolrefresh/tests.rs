@@ -532,11 +532,20 @@ fn the_refresh_never_holds_or_uses_haan() {
 fn registry_pools_count_only_with_registry_all() {
     let d = tmp("reg");
     let f = d.join("registry.json");
-    std::fs::write(&f, json!([{ "venue": "DLMM", "pool": b58(&k(1)), "t0": b58(&tok(1)), "t1": b58(&WSOL) }, { "venue": "Orca", "pool": b58(&k(2)), "t0": "x", "t1": "y" }]).to_string()).unwrap();
-    let cfg = |all: bool| Config::parse(&format!("config_version = 2\nout_dir = \"/tmp/x\"\nwallet = \"w\"\n[pools]\nseed_csv = \"s.csv\"\nregistry_json = \"{}\"\nregistry_all = {all}\n\
-        [rpc]\n[state]\nurl = \"http://localhost\"\n", f.display())).unwrap();
+    // WP-21 review R2-2: the registry's Raydium CLMM ("RayCLMM", which `Venue::parse` reads) and Orca ("Whirl", which it
+    // does not) rows never count, whatever the venues' switches: the boot never loads them (`pools::candidates`)
+    std::fs::write(&f, json!([{ "venue": "DLMM", "pool": b58(&k(1)), "t0": b58(&tok(1)), "t1": b58(&WSOL) }, { "venue": "Orca", "pool": b58(&k(2)), "t0": "x", "t1": "y" },
+        { "venue": "RayCLMM", "pool": b58(&k(3)), "t0": b58(&tok(1)), "t1": b58(&WSOL) }, { "venue": "Whirl", "pool": b58(&k(4)), "t0": b58(&tok(1)), "t1": b58(&WSOL) }])
+        .to_string()).unwrap();
+    let cfg_with = |all: bool, clmm: &str| Config::parse(&format!("config_version = 2\nout_dir = \"/tmp/x\"\nwallet = \"w\"\n[pools]\nseed_csv = \"s.csv\"\nregistry_json = \"{}\"\nregistry_all = {all}\n\
+        rayclmm = \"{clmm}\"\nwhirlpool = \"{clmm}\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n", f.display())).unwrap();
+    let cfg = |all: bool| cfg_with(all, "off");
     assert_eq!(registry_for(&cfg(true)).iter().map(|r| r.pool.clone()).collect::<Vec<_>>(), [b58(&k(1))], "our venues only");
     assert!(registry_for(&cfg(false)).is_empty());
+    for clmm in ["quote", "send"] {
+        assert_eq!(registry_for(&cfg_with(true, clmm)).iter().map(|r| r.pool.clone()).collect::<Vec<_>>(), [b58(&k(1))], "{clmm}: no CLMM registry row");
+    }
+    assert!(read_registry(&f.display().to_string()).unwrap().iter().any(|r| r.venue == "RayCLMM"), "the file holds one: registry_for leaves it out");
     let _ = std::fs::remove_dir_all(&d);
 }
 

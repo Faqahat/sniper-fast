@@ -5,3 +5,7 @@ pub mod cpmm;
 pub mod dammv2;
 pub mod dlmm;
 pub mod pumpswap;
+#[cfg(feature = "rayclmm")]
+pub mod raydium_clmm;
+#[cfg(feature = "whirlpool")]
+pub mod orca_whirlpool;

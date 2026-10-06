@@ -118,12 +118,17 @@ fn check_upgrades(rpc: &mut Rpc) -> Result<(), String> {
 fn base64_decode(s: &str) -> Vec<u8> { use base64::Engine as _; base64::engine::general_purpose::STANDARD.decode(s).unwrap_or_default() }
 
 fn fetch_pools(rpc: &mut Rpc, refresh: bool) -> Result<(), String> {
-    let dir = fixtures_dir().join("pools");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let rows: Vec<PoolRow> = serde_json::from_str(&std::fs::read_to_string(fixtures_dir().join("pool-list.json")).map_err(|e| e.to_string())?)
+    // the engine's venues (pool-list.json -> pools/) and WP-21's concentrated-liquidity venues (pool-list-clmm.json -> pools-clmm/)
+    let mut rows: Vec<PoolRow> = serde_json::from_str(&std::fs::read_to_string(fixtures_dir().join("pool-list.json")).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
+    let clmm = fixtures_dir().join("pool-list-clmm.json");
+    if clmm.exists() {
+        rows.extend(serde_json::from_str::<Vec<PoolRow>>(&std::fs::read_to_string(&clmm).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?);
+    }
     for row in rows {
         let venue = Venue::parse(&row.venue).ok_or(format!("unknown venue {}", row.venue))?;
+        let dir = fixtures_dir().join(fixture::pools_dir_name(venue));
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let pool = keys::parse(&row.pool)?;
         let path = dir.join(PoolFixture::file_name(venue, &pool));
         if !refresh && path.exists() { println!("pool {:<9} {} cached", venue.name(), row.pool); continue; }
@@ -193,7 +198,7 @@ fn amount(v: &HashMap<Address, Account>, k: &Address) -> u64 { v.get(k).and_then
 fn live(venue: Venue, pool: &Address, v: &HashMap<Address, Account>, clock: &ClockSnap) -> Result<(), String> {
     let d = &v[pool].data;
     let t = venues::pool_tokens(venue, d).unwrap();
-    if venue != Venue::Dlmm && venue != Venue::DammV2 && (amount(v, &t.vault0) == 0 || amount(v, &t.vault1) == 0) {
+    if !matches!(venue, Venue::Dlmm | Venue::DammV2 | Venue::RayClmm | Venue::Whirlpool) && (amount(v, &t.vault0) == 0 || amount(v, &t.vault1) == 0) {
         return Err("an empty vault".into());
     }
     match venue {
@@ -218,6 +223,12 @@ fn live(venue: Venue, pool: &Address, v: &HashMap<Address, Account>, clock: &Clo
             if d[360..376].iter().all(|b| *b == 0) { return Err("damm: zero liquidity".into()); }
         }
         Venue::PumpSwap => {}
+        Venue::RayClmm => {
+            // status bit 4: swap disabled; open_time: swaps need unix_timestamp > open_time
+            if d[389] >> 4 & 1 == 1 { return Err("clmm swap disabled".into()); }
+            if (clock.unix_timestamp as u64) <= venues::u64_at(d, 1080).unwrap() { return Err("clmm not open".into()); }
+        }
+        Venue::Whirlpool => {}
     }
     Ok(())
 }
@@ -263,6 +274,46 @@ fn notes(venue: Venue, pool: &Address, v: &HashMap<Address, Account>, t: &venues
         Venue::RayAmmV4 => {
             n.insert("status".into(), json!(venues::u64_at(d, 0)));
             n.insert("swap_fee".into(), json!([venues::u64_at(d, 176), venues::u64_at(d, 184)]));
+        }
+        Venue::RayClmm => {
+            let ts = rayclmm_tick_spacing(d);
+            let tick = rayclmm_tick_current(d);
+            let cfg = venues::pk_at(d, 9).and_then(|k| v.get(&k)).map(|a| a.data.clone()).unwrap_or_default();
+            let u32_ = |b: &[u8], o: usize| b.get(o..o + 4).map(|x| u32::from_le_bytes(x.try_into().unwrap()));
+            let held: Vec<i32> = v.iter().filter(|(_, a)| a.owner == RAYCLMM && a.data.len() == 10_240 && a.data.get(8..40) == Some(pool.as_ref()))
+                .filter_map(|(_, a)| venues::i32_at(&a.data, 40)).collect::<std::collections::BTreeSet<i32>>().into_iter().collect();
+            n.insert("tick_spacing".into(), json!(ts));
+            n.insert("tick_current".into(), json!(tick));
+            n.insert("current_array".into(), json!(rayclmm_array_start(tick, ts)));
+            n.insert("liquidity".into(), json!(d.get(237..253).map(|b| u128::from_le_bytes(b.try_into().unwrap()).to_string())));
+            n.insert("sqrt_price_x64".into(), json!(d.get(253..269).map(|b| u128::from_le_bytes(b.try_into().unwrap()).to_string())));
+            n.insert("status".into(), json!(d[389]));
+            n.insert("fee_on".into(), json!(d[390]));
+            n.insert("dynamic_fee".into(), json!(d[1096..1176].iter().any(|b| *b != 0)));
+            n.insert("trade_fee_rate".into(), json!(u32_(&cfg, 47)));
+            n.insert("protocol_fee_rate".into(), json!(u32_(&cfg, 43)));
+            n.insert("fund_fee_rate".into(), json!(u32_(&cfg, 53)));
+            n.insert("bitmap_extension".into(), json!(v.contains_key(&rayclmm_bitmap_extension(pool))));
+            n.insert("tick_arrays_fetched".into(), json!(held));
+        }
+        Venue::Whirlpool => {
+            let ts = whirl_tick_spacing(d);
+            let tick = whirl_tick_current(d);
+            let held: Vec<(i32, &str)> = v.iter().filter(|(_, a)| a.owner == WHIRLPOOL && a.data.len() >= 8 && a.data.len() != 653 && a.data.len() != 254)
+                .filter_map(|(_, a)| {
+                    let fixed = a.data.len() == 9_988;
+                    venues::i32_at(&a.data, 8).map(|st| (st, if fixed { "fixed" } else { "dynamic" }))
+                }).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+            n.insert("tick_spacing".into(), json!(ts));
+            n.insert("tick_current".into(), json!(tick));
+            n.insert("current_array".into(), json!(whirl_array_start(tick, ts)));
+            n.insert("fee_rate".into(), json!(u16::from_le_bytes([d[45], d[46]])));
+            n.insert("protocol_fee_rate".into(), json!(u16::from_le_bytes([d[47], d[48]])));
+            n.insert("fee_tier_index_seed".into(), json!(u16::from_le_bytes([d[43], d[44]])));
+            n.insert("liquidity".into(), json!(d.get(49..65).map(|b| u128::from_le_bytes(b.try_into().unwrap()).to_string())));
+            n.insert("sqrt_price".into(), json!(d.get(65..81).map(|b| u128::from_le_bytes(b.try_into().unwrap()).to_string())));
+            n.insert("oracle".into(), json!(v.contains_key(&whirl_oracle(pool))));
+            n.insert("tick_arrays_fetched".into(), json!(held));
         }
     }
     n

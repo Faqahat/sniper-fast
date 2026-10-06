@@ -132,7 +132,9 @@ fn rules() {
     // kinds and directions
     let leg = |kd: u8, extra: &[u8]| { let mut v = simple(0); v.push(Kind::RayCpmm as u8); v.push(kd); v.extend_from_slice(extra); v };
     assert_eq!(err(parse_block(&leg(0, &[]), 0, 2, false, 1000)), DescCode::Kind);
-    assert_eq!(err(parse_block(&leg(7, &[]), 0, 2, false, 1000)), DescCode::Kind);
+    // kinds 7 (Raydium CLMM) and 8 (Orca Whirlpool) exist since PLAN-ADDENDUM WP-21: 9..=15 are invalid
+    assert_eq!(err(parse_block(&leg(9, &[]), 0, 2, false, 1000)), DescCode::Kind);
+    assert_eq!(err(parse_block(&leg(15, &[]), 0, 2, false, 1000)), DescCode::Kind);
     assert_eq!(err(parse_block(&leg(Kind::PumpBuy as u8, &[1]), 0, 2, false, 1000)), DescCode::Dir);
     assert_eq!(err(parse_block(&leg(Kind::PumpSell as u8 | 0x10, &[1]), 0, 2, false, 1000)), DescCode::Dir);
     assert_eq!(err(parse_block(&leg(Kind::Dlmm as u8, &[5]), 0, 2, false, 1000)), DescCode::BinArrays);

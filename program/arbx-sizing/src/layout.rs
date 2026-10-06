@@ -22,6 +22,12 @@ pub const RAY_AMM_V4: [u8; 32] = [75, 217, 73, 196, 54, 2, 195, 63, 32, 119, 144
 pub const DLMM: [u8; 32] = [4, 233, 225, 47, 188, 132, 232, 38, 201, 50, 204, 233, 226, 100, 12, 206, 21, 89, 12, 28, 98, 115, 176, 146, 87, 8, 186, 59, 133, 32, 176, 188];
 /// cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG
 pub const DAMM_V2: [u8; 32] = [9, 45, 33, 53, 101, 122, 21, 156, 43, 135, 212, 182, 106, 112, 219, 142, 151, 82, 56, 159, 247, 106, 175, 32, 108, 237, 6, 58, 56, 249, 90, 237];
+/// CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK (Raydium CLMM)
+pub const RAY_CLMM: [u8; 32] = [165, 213, 202, 158, 4, 207, 93, 181, 144, 183, 20, 186, 47, 227, 44, 177, 89, 19, 63, 193, 193, 146, 183, 34, 87, 253, 7, 211, 156, 176, 64, 30];
+/// whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc (Orca Whirlpool)
+pub const WHIRLPOOL: [u8; 32] = [14, 3, 104, 95, 142, 144, 144, 83, 228, 88, 18, 28, 102, 245, 167, 106, 237, 199, 112, 106, 161, 28, 130, 248, 170, 149, 42, 143, 43, 120, 121, 169];
+/// 11111111111111111111111111111111 (the System program: an account that does not exist yet)
+pub const SYSTEM_PROGRAM: [u8; 32] = [0u8; 32];
 /// TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
 pub const TOKEN_PROGRAM: [u8; 32] = [6, 221, 246, 225, 215, 101, 161, 147, 217, 203, 225, 70, 206, 235, 121, 172, 28, 180, 133, 237, 95, 91, 55, 145, 58, 140, 245, 133, 126, 255, 0, 169];
 /// TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
@@ -47,9 +53,23 @@ pub const DISC_AMM_CONFIG: [u8; 8] = [218, 244, 33, 104, 203, 203, 43, 111];
 pub const DISC_LB_PAIR: [u8; 8] = [33, 11, 49, 98, 181, 101, 177, 13];
 /// sha256("account:BinArray")[..8]
 pub const DISC_BIN_ARRAY: [u8; 8] = [92, 142, 92, 220, 5, 148, 70, 181];
+/// sha256("account:TickArrayState")[..8] (Raydium CLMM; its PoolState and AmmConfig share CPMM's names)
+pub const DISC_TICK_ARRAY_STATE: [u8; 8] = [192, 155, 85, 205, 49, 249, 129, 42];
+/// sha256("account:TickArrayBitmapExtension")[..8] (Raydium CLMM)
+pub const DISC_TICK_ARRAY_BITMAP_EXT: [u8; 8] = [60, 150, 36, 219, 97, 128, 139, 153];
+/// sha256("account:Whirlpool")[..8]
+pub const DISC_WHIRLPOOL: [u8; 8] = [63, 149, 209, 12, 225, 128, 99, 9];
+/// sha256("account:TickArray")[..8] (Orca's fixed tick array)
+pub const DISC_WHIRL_TICK_ARRAY: [u8; 8] = [69, 97, 189, 190, 110, 7, 66, 187];
+/// sha256("account:DynamicTickArray")[..8] (Orca)
+pub const DISC_DYNAMIC_TICK_ARRAY: [u8; 8] = [17, 216, 246, 142, 225, 199, 218, 56];
+/// sha256("account:Oracle")[..8] (Orca's adaptive fee)
+pub const DISC_ORACLE: [u8; 8] = [139, 194, 131, 179, 140, 179, 229, 244];
 
 /// arbx-exec allowlist indexes (ALLOWLIST_B58 order; append-only there)
 pub const ALLOW_DLMM: u8 = 0;
+pub const ALLOW_WHIRLPOOL: u8 = 1;
+pub const ALLOW_RAY_CLMM: u8 = 2;
 pub const ALLOW_PUMPSWAP: u8 = 3;
 pub const ALLOW_CPMM: u8 = 6;
 pub const ALLOW_AMM_V4: u8 = 7;
@@ -63,10 +83,20 @@ pub const POS_CPMM: [u8; 6] = [3, 2, 6, 7, 10, 11];
 pub const POS_AMM_V4: [u8; 3] = [1, 3, 4];
 pub const POS_DLMM: [u8; 4] = [0, 6, 7, 16];
 pub const POS_DAMM_V2: [u8; 3] = [1, 6, 7];
+/// Raydium CLMM `swap_v2` (DESIGN.md §2.8): pool_state 2, amm_config 1, input vault 5, output vault 6, input mint 11,
+/// output mint 12, then the leg's n remaining accounts from 13 (the TickArrayBitmapExtension and the tick arrays, in the
+/// order the program reads them)
+pub const POS_RAY_CLMM: [u8; 7] = [2, 1, 5, 6, 11, 12, 13];
+/// Orca Whirlpool `swap_v2` (DESIGN.md §2.9): whirlpool 4, mint a 5, mint b 6, vault a 8, vault b 10, tick_array_0 11
+/// (then 12, 13), oracle 14, then the n supplemental tick arrays from 15
+pub const POS_WHIRLPOOL: [u8; 8] = [4, 5, 6, 8, 10, 11, 14, 15];
 
 /// The leg accounts each kind's engine layout has (DESIGN.md §1.2; PumpSwap: without its variable tail)
 pub const fn min_leg_accounts(k: Kind) -> usize {
-    match k { Kind::PumpBuy => 23, Kind::PumpSell => 21, Kind::RayCpmm => 13, Kind::RayAmmV4 => 8, Kind::Dlmm => 17, Kind::DammV2 => 14 }
+    match k {
+        Kind::PumpBuy => 23, Kind::PumpSell => 21, Kind::RayCpmm => 13, Kind::RayAmmV4 => 8, Kind::Dlmm => 17, Kind::DammV2 => 14,
+        Kind::RayClmm => 14, Kind::Whirlpool => 15,
+    }
 }
 
 /// The default position list of a kind (EXPLICIT_POS gives the same number of entries)
@@ -78,11 +108,14 @@ pub const fn default_positions(k: Kind) -> &'static [u8] {
         Kind::RayAmmV4 => &POS_AMM_V4,
         Kind::Dlmm => &POS_DLMM,
         Kind::DammV2 => &POS_DAMM_V2,
+        Kind::RayClmm => &POS_RAY_CLMM,
+        Kind::Whirlpool => &POS_WHIRLPOOL,
     }
 }
 
-/// Max state accounts of one leg: DLMM 3 + 5 bin arrays; PumpSwap 7
-pub const MAX_STATE: usize = 8;
+/// Max state accounts of one leg: DLMM 3 + 5 bin arrays; PumpSwap 7; Raydium CLMM 6 + 7 remaining accounts; Orca
+/// Whirlpool 9 + 3 supplemental tick arrays
+pub const MAX_STATE: usize = 16;
 
 /// The positions of a leg's state accounts, in the kind's state order (DLMM: lb_pair, mint_x, mint_y, then every bin
 /// array). A fixed-capacity list: no allocation.
@@ -102,8 +135,9 @@ impl IntoIterator for Positions {
 }
 
 /// The leg's state-account positions: the explicit list when the descriptor carries one, else the defaults; DLMM's
-/// bin arrays expanded from the first one. Positions above 255 (an explicit first bin array near the top) are
-/// refused as `DescCode::Position`.
+/// bin arrays expanded from the first one, Raydium CLMM's remaining accounts from the first one, Orca Whirlpool's three
+/// static tick arrays from tick_array_0 and its supplemental ones from the first. Positions above 255 (an explicit
+/// first bin array near the top) are refused as `DescCode::Position`.
 pub fn positions(d: &LegDesc) -> Result<Positions, DescError> {
     let base: &[u8] = match &d.positions { Some(p) => p.get(..d.kind.n_positions()).unwrap_or(&[]), None => default_positions(d.kind) };
     let mut out = Positions { buf: [0; MAX_STATE], len: 0 };
@@ -113,15 +147,27 @@ pub fn positions(d: &LegDesc) -> Result<Positions, DescError> {
         out.len += 1;
         Ok(())
     };
-    if d.kind == Kind::Dlmm {
-        let first = *base.get(3).ok_or(DescError::block(DescCode::PosCount))?;
-        for &p in base.get(..3).unwrap_or(&[]) { push(&mut out, p)?; }
-        for i in 0..d.n_bin_arrays {
-            let p = first.checked_add(i).ok_or(DescError::block(DescCode::Position))?;
-            push(&mut out, p)?;
+    let run = |out: &mut Positions, first: u8, n: u8| -> Result<(), DescError> {
+        for i in 0..n { push(out, first.checked_add(i).ok_or(DescError::block(DescCode::Position))?)?; }
+        Ok(())
+    };
+    let at = |i: usize| base.get(i).copied().ok_or(DescError::block(DescCode::PosCount));
+    match d.kind {
+        Kind::Dlmm => {
+            for &p in base.get(..3).unwrap_or(&[]) { push(&mut out, p)?; }
+            run(&mut out, at(3)?, d.n_bin_arrays)?;
         }
-    } else {
-        for &p in base { push(&mut out, p)?; }
+        Kind::RayClmm => {
+            for &p in base.get(..6).unwrap_or(&[]) { push(&mut out, p)?; }
+            run(&mut out, at(6)?, d.n_bin_arrays)?;
+        }
+        Kind::Whirlpool => {
+            for &p in base.get(..5).unwrap_or(&[]) { push(&mut out, p)?; }
+            run(&mut out, at(5)?, 3)?;
+            push(&mut out, at(6)?)?;
+            run(&mut out, at(7)?, d.n_bin_arrays)?;
+        }
+        _ => for &p in base { push(&mut out, p)?; },
     }
     Ok(out)
 }

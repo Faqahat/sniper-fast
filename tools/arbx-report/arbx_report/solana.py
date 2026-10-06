@@ -26,6 +26,11 @@ VENUE_PROGRAMS = {
     RAY_CPMM: "RayCpmm",
     RAY_AMM_V4: "RayAmmV4",
 }
+# PLAN-ADDENDUM WP-21: the concentrated-liquidity venues the engine prices behind `[pools] rayclmm` / `whirlpool` (the
+# cu-table samples their legs by swap steps; the other reports keep the five venues above)
+RAY_CLMM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+WHIRLPOOL = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+CLMM_PROGRAMS = {RAY_CLMM: "RayClmm", WHIRLPOOL: "Whirlpool"}
 TOKEN_PROGRAMS = {TOKEN, TOKEN_2022}
 
 

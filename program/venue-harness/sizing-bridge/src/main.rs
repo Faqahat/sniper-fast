@@ -1,10 +1,13 @@
 //! sizing-bridge: stdin = {"clock": {slot, unix_timestamp, epoch}, "legs": [LegReq]}, stdout = {"legs": [LegResp]}.
 //!
-//! LegReq  = {id, kind (1..=6), base_or_token0_in, n_bin_arrays, pump_bump, [max_bins (DLMM; default 255)], program,
-//!            input_mint, accounts: [{key, owner, data (base64)}]   (the leg's own account list, engine layout),
-//!            amounts: [u64], [exact_out (a PumpSwap buy leg: each amount is the base out, `PumpLeg::quote_exact_out`)]}
+//! LegReq  = {id, kind (1..=8), base_or_token0_in, n_bin_arrays, pump_bump, [max_bins (DLMM; default 255; CLMM: none
+//!            unless given)], program, input_mint, accounts: [{key, owner, data (base64)}]   (the leg's own account list,
+//!            engine layout), amounts: [u64], [exact_out (a PumpSwap buy leg: each amount is the base out,
+//!            `PumpLeg::quote_exact_out`; a Raydium CLMM / Orca Whirlpool leg: each amount is the output wanted)]}
 //! LegResp = {id, parse: "ok" | "abort:<Abort>" | "desc:<DescError>", max_bins,
-//!            quotes: [{amount, ok, out, spent, err, [bins], [unbounded: {ok, out, spent, err}]}]}
+//!            quotes: [{amount, ok, out, spent, err, [bins], [unbounded: {ok, out, spent, err}], [clmm]}]}
+//! A Raydium CLMM / Orca Whirlpool quote carries `clmm`: the walk (steps, initialized ticks crossed, the tick arrays read)
+//! and the post-swap pool the crate predicts (PLAN-ADDENDUM WP-21: compared with the real program's post-state).
 //! A DLMM quote carries the bins with liquidity the swap needs without a budget (`bins`); one that ends at the walk
 //! budget (`err` "Budget": not evaluated) also carries the same quote without a budget (`unbounded`, the maths the
 //! test compares with the venue).
@@ -63,6 +66,9 @@ fn adapter(clock: &Value, leg: &Value, accts: &[Acct], amounts: &mut Vec<u64>) -
     desc.n_bin_arrays = leg["n_bin_arrays"].as_u64().unwrap() as u8;
     desc.pump_bump = leg["pump_bump"].as_u64().unwrap() as u8;
     if kind == Kind::Dlmm { desc.max_bins = leg["max_bins"].as_u64().unwrap_or(255) as u8; }
+    // a CLMM leg's walk budget (swap steps): only when the request gives one (else unbounded after parse)
+    let clmm = matches!(kind, Kind::RayClmm | Kind::Whirlpool);
+    if clmm { desc.max_bins = leg["max_bins"].as_u64().unwrap_or(255).clamp(1, 255) as u8; }
     let pos = match layout::check_positions(&desc, accts.len()) { Ok(p) => p, Err(e) => return (format!("desc:{e:?}"), vec![]) };
     let state: Vec<AcctRef> = pos.into_iter().map(|i| { let a = &accts[i as usize]; AcctRef { key: &a.key, owner: &a.owner, data: &a.data } }).collect();
     let program = b58(leg["program"].as_str().unwrap());
@@ -73,6 +79,13 @@ fn adapter(clock: &Value, leg: &Value, accts: &[Acct], amounts: &mut Vec<u64>) -
         Ok(Parsed { leg: Err(a), .. }) => return (format!("abort:{a:?}"), vec![]),
         Ok(Parsed { leg: Ok(l), .. }) => l,
     };
+    let l = if clmm && leg["max_bins"].as_u64().is_none() {
+        match l {
+            AnyLeg::RayClmm(x) => AnyLeg::RayClmm(x.with_budget(arbx_sizing::venue::raydium_clmm::NO_BUDGET)),
+            AnyLeg::Whirl(x) => AnyLeg::Whirl(x.with_budget(arbx_sizing::venue::orca_whirlpool::NO_BUDGET)),
+            o => o,
+        }
+    } else { l };
     if leg["probe"].as_bool() == Some(true) {
         let mut extra = boundaries(&l, amounts);
         extra.retain(|x| *x > 0 && !amounts.contains(x));
@@ -83,10 +96,13 @@ fn adapter(clock: &Value, leg: &Value, accts: &[Acct], amounts: &mut Vec<u64>) -
     // `"exact_out": true` (a PumpSwap buy leg): each amount is the base out, quoted by `PumpLeg::quote_exact_out`
     let exact_out = leg["exact_out"].as_bool() == Some(true);
     let quotes = amounts.iter().map(|&x| {
-        let r = if exact_out {
+        // a CLMM leg: the walk and the post-swap pool with the quote
+        let walk = clmm_walk(&l, x, exact_out);
+        let r = if let Some(w) = &walk { w.0 } else if exact_out {
             match l { AnyLeg::Pump(p) => p.quote_exact_out(x).map(|(_, q)| q), _ => Err(QuoteErr::Abort(Abort::Unsupported)) }
         } else { l.quote(x) };
         let mut row = quote_row(&r);
+        if let Some((_, Some(v))) = walk { row["clmm"] = v; }
         if let AnyLeg::Dlmm(d) = l {
             // the bins with liquidity the swap needs (no budget): the venue's own CU grows with them
             row["bins"] = json!(d.bins_for(x));
@@ -95,6 +111,43 @@ fn adapter(clock: &Value, leg: &Value, accts: &[Acct], amounts: &mut Vec<u64>) -
         row
     }).collect();
     ("ok".into(), quotes)
+}
+
+/// A CLMM leg's exact swap: the quote and, when Ok, its walk and the post-swap pool as JSON. None for other kinds
+fn clmm_walk(l: &arbx_sizing::AnyLeg, x: u64, exact_out: bool) -> Option<(Result<arbx_sizing::Quote, arbx_sizing::QuoteErr>, Option<Value>)> {
+    use arbx_sizing::AnyLeg;
+    match l {
+        AnyLeg::RayClmm(c) => {
+            let r = c.fills(x, exact_out, &mut |_| {});
+            Some(match r {
+                Ok(w) => {
+                    let d = w.post.dynamic;
+                    (Ok(w.quote), Some(json!({"steps": w.steps, "crossed": w.crossed, "arrays": w.arrays[..w.n_arrays as usize].to_vec(),
+                        "post": {"sqrt_price": w.post.sqrt_price.to_string(), "tick": w.post.tick, "liquidity": w.post.liquidity.to_string(),
+                            "fee_growth_global": w.post.fee_growth_global.to_string(), "protocol_fees": w.post.protocol_fees, "fund_fees": w.post.fund_fees,
+                            "fee_on_token0": c.fee_on_token0,
+                            "dynamic": d.map(|d| json!({"idx_ref": d.idx_ref, "v_ref": d.v_ref, "va": d.va, "last_update": d.last_update}))}})))
+                }
+                Err(e) => (Err(e), None),
+            })
+        }
+        AnyLeg::Whirl(c) => {
+            let r = c.fills(x, exact_out, &mut |_| {});
+            Some(match r {
+                Ok(w) => {
+                    let a = w.post.adaptive;
+                    (Ok(w.quote), Some(json!({"steps": w.steps, "crossed": w.crossed, "arrays": w.arrays[..w.n_arrays as usize].to_vec(),
+                        "arrays_used": w.arrays_used,
+                        "post": {"sqrt_price": w.post.sqrt_price.to_string(), "tick": w.post.tick, "liquidity": w.post.liquidity.to_string(),
+                            "fee_growth_global": w.post.fee_growth_global.to_string(), "protocol_fee_owed": w.post.protocol_fee_owed,
+                            "adaptive": a.map(|a| json!({"last_reference_update": a.last_reference_update, "last_major_swap": a.last_major_swap,
+                                "v_ref": a.v_ref, "idx_ref": a.idx_ref, "va": a.va}))}})))
+                }
+                Err(e) => (Err(e), None),
+            })
+        }
+        _ => None,
+    }
 }
 
 fn quote_row(r: &Result<arbx_sizing::Quote, arbx_sizing::QuoteErr>) -> Value {
@@ -130,6 +183,29 @@ fn boundaries(l: &arbx_sizing::AnyLeg, amounts: &[u64]) -> Vec<u64> {
         }
         _ => {}
     }
+    // a CLMM leg: the cumulative input at the end of each swap step of an unbounded swap (a tick crossing, a
+    // tick-spacing or tick-group boundary, a limit-order fill), first 48 steps
+    match l {
+        AnyLeg::RayClmm(c) => {
+            let mut st = c.stream();
+            let mut acc = 0u128;
+            for _ in 0..48 {
+                let mut ends: Vec<u128> = vec![];
+                if st.next(&mut |p| { acc += p.used as u128; ends.push(acc); }).is_err() { break; }
+                b.extend(ends);
+            }
+        }
+        AnyLeg::Whirl(c) => {
+            let mut st = c.stream();
+            let mut acc = 0u128;
+            for _ in 0..48 {
+                let mut ends: Vec<u128> = vec![];
+                if st.next(&mut |p| { acc += p.used as u128; ends.push(acc); }).is_err() { break; }
+                b.extend(ends);
+            }
+        }
+        _ => {}
+    }
     // every closed-form or walked capacity is exact now (DLMM within the leg's budget)
     if let Some(c) = l.cap_in() { b.push(c as u128); }
     // fee-rounding residues: x·f mod den in {0, den-1} next to each requested amount
@@ -137,6 +213,8 @@ fn boundaries(l: &arbx_sizing::AnyLeg, amounts: &[u64]) -> Vec<u64> {
         AnyLeg::Cpmm(c) => Some((c.fee_in as u128, 1_000_000u128)),
         AnyLeg::Amm(a) => Some((a.num as u128, a.den as u128)),
         AnyLeg::Damm(d) => d.fee_fixed.map(|f| (f as u128, 1_000_000_000u128)),
+        AnyLeg::RayClmm(c) => Some((c.trade_fee_rate as u128, 1_000_000u128)),
+        AnyLeg::Whirl(c) => Some((c.fee_rate as u128, 1_000_000u128)),
         _ => None,
     };
     if let Some((f, den)) = fee {
@@ -189,6 +267,7 @@ fn plan_mode(req: &Value) -> Value {
         d.n_bin_arrays = leg["n_bin_arrays"].as_u64().unwrap() as u8;
         d.pump_bump = leg["pump_bump"].as_u64().unwrap() as u8;
         if d.kind == Kind::Dlmm { d.max_bins = leg["max_bins"].as_u64().unwrap_or(255) as u8; }
+        if matches!(d.kind, Kind::RayClmm | Kind::Whirlpool) { d.max_bins = leg["max_bins"].as_u64().unwrap_or(255).clamp(1, 255) as u8; }
         descs.push(d);
         keys.push((b58(leg["program"].as_str().unwrap()), b58(leg["input_mint"].as_str().unwrap())));
     }

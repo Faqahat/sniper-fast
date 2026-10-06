@@ -1,0 +1,127 @@
+{
+  "venue": "Whirlpool",
+  "pool": "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+  "label": "whirlpool J6pQ/SOL 4uny (tick spacing 8, 0.05%, adaptive fee; the pair of rayclmm DCAL)",
+  "fetched_at": "2026-10-06T15:30:45Z",
+  "slot": 453942436,
+  "clock": {
+    "slot": 453942436,
+    "epoch_start_timestamp": 1791208832,
+    "epoch": 1050,
+    "leader_schedule_epoch": 1051,
+    "unix_timestamp": 1791300644
+  },
+  "rent": {
+    "lamports_per_byte": 5080,
+    "exemption_threshold": 1.0,
+    "burn_percent": 50
+  },
+  "token0": "So11111111111111111111111111111111111111112",
+  "token1": "J6pQQ3FAcJQeWPPGppWRb4nM8jU3wLyYbRrLh7feMfvd",
+  "accounts": [
+    {
+      "pubkey": "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+      "lamports": 3967480,
+      "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "P5XRDOGAYwkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czf8IAAUE9AEUBRgkfWs/FwAAAAAAAAAAAABawQ+1CU6g8xAAAAAAAAAAIt0AAMSCAwEAAAAAbilcSwEAAAAGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAcPcggweRQb6ORqIB/+UrNveAE3V8ckk8XS0uVkPz5kVUmnWdH13GgAAAAAAAAAAAP4ULlVLYgqiPzRTuNzPqIZggMcb77A4h/sPRW6j17ouRHHUCCO96lWumQn0QwOCTqdmIXyNfZ0x6fhcTfZEtZMrmjLDNOM1FAAAAAAAAAAAIxTFagAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAui6/LwKaI7GKR1R798LZ7CubYjLuw+NoR9dh+omDPGYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    {
+      "pubkey": "5cBPqW8psLk5SGY6qqS7VEogPGbQEj4JSWeyfNBH7QgJ",
+      "lamports": 1488440,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "/hQuVUtiCqI/NFO43M+ohmCAxxvvsDiH+w9FbqPXui46GTzzVDGQPJnmdt2xE4AMOHBsTDA/3XCJx5kH/Ho94F59lcX7igEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "pubkey": "66JttFSf4JBW5gW2CzbGWfYDwfmTkAJLm5rTJeGmb33L",
+      "lamports": 1940560,
+      "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "i8KDs4yz5fQ6GTzzVDGQPJnmdt2xE4AMOHBsTDA/3XCJx5kH/Ho94AAAAAAAAAAAHgBYAogTYOoAAMC2BgAIAAgAAAAAAAAAAAAAAAAAAAAAACAUxWoAAAAA8gbFagAAAACVKQAApRsAAKVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    {
+      "pubkey": "7DPJreopyJdwdrUP74mdNefDcoPZbmneNZCsKSNhEng",
+      "lamports": 1920960,
+      "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "Edj2juHH2jiA1gAAOhk881QxkDyZ5nbdsROADDhwbEwwP91wiceZB/x6PeAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+      "pubkey": "EBZX8SkH9U5y7Hq34p1oSNGB1f4qVHFpmaySQe1wLXWt",
+      "lamports": 1510759081032,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAE6GTzzVDGQPJnmdt2xE4AMOHBsTDA/3XCJx5kH/Ho94P5tK8BfAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEAAAA4thYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "pubkey": "J6pQQ3FAcJQeWPPGppWRb4nM8jU3wLyYbRrLh7feMfvd",
+      "lamports": 784356478,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "AQAAAPzLGaR9OxKEiASrWdPAHuPDieDCKs+IyudF5+eEAPXBg8cKYSMH4A0IAQAAAAD8yxmkfTsShIgEq1nTwB7jw4ngwirPiMrnRefnhAD1wQ=="
+    },
+    {
+      "pubkey": "QiTceia6SiHrnvcwt3cMTiSq2oyHqhGehHW6xXWuTL6",
+      "lamports": 1920960,
+      "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "Edj2juHH2jjA0wAAOhk881QxkDyZ5nbdsROADDhwbEwwP91wiceZB/x6PeAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+      "pubkey": "So11111111111111111111111111111111111111112",
+      "lamports": 1849313377323,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rent_epoch": 18446744073709551615,
+      "data": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    }
+  ],
+  "absent": [
+    "4NZSzGE2JhfnPKbTJLwHAzfvim6eAytb2jmCSUpd4FBX",
+    "AFZvrKf1kNDJCdK4CNbtMjwo4wrst962XNqCr88QWJMq",
+    "Bpt9Q2KDNBrjVWQLzxSUR4qwCLdKqXqjy8TfRSnsR8Rw",
+    "CTqnvM6pypfRFjJxGBXJHeowKjYD2h48kWeUQf2Qogu5",
+    "GNehRUMcrfLmRjXEicrPNhktvRdZZWkD1ECtaCBf8aHd"
+  ],
+  "notes": {
+    "current_array": 56320,
+    "decimals": [
+      9,
+      8
+    ],
+    "fee_rate": 500,
+    "fee_tier_index_seed": 1029,
+    "liquidity": "25561153741848",
+    "oracle": true,
+    "protocol_fee_rate": 1300,
+    "sqrt_price": "312703022330442400090",
+    "tick_arrays_fetched": [
+      [
+        54208,
+        "dynamic"
+      ],
+      [
+        54912,
+        "dynamic"
+      ]
+    ],
+    "tick_current": 56610,
+    "tick_spacing": 8,
+    "token_programs": [
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    ],
+    "vault_amounts": [
+      1510757592574,
+      434288933043550
+    ]
+  }
+}
