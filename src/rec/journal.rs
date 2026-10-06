@@ -361,7 +361,7 @@ pub fn account_event(r: &AcctRecord) -> Event {
 /// the store version an account record was (boot snapshots)
 pub fn account_version(r: &AcctRecord) -> crate::store::Acct {
     crate::store::Acct { data: Arc::from(&r.data[..]), slot: r.slot, write_version: r.write_version, txn: r.txn, t_recv: r.t_recv, aseq: r.aseq, src: r.src,
-        bank_id: r.bank_id }
+        bank_id: r.bank_id, lamports: r.lamports }
 }
 
 /// The arrival a TX_FIRST record was (its transaction decoded from the journaled bytes)
@@ -436,7 +436,7 @@ pub fn exec_init(journal: &[JRec]) -> Option<&serde_json::Value> {
 /// engine_init record or `cfg` is not the run's
 pub fn replay_engine(reg: Arc<crate::pools::Registry>, cfg: crate::config::StrategyCfg, journal: &[JRec], accounts: &HashMap<u64, AcctRecord>)
     -> Result<(crate::engine::Engine, crate::engine::EngineInit)> {
-    let init = engine_init(journal).context("the journal has no engine_init record (INPUT 10): it was not written by `Engine::run` of WP-03 or later")?;
+    let init = engine_init(journal).context("the journal has no engine_init record (INPUT 10) this build reads: it was not written by `Engine::run` of WP-03 or later, or its record does not read (a WP-06 builder model of another schema)")?;
     let mut e = crate::engine::Engine::new_offline(reg.clone(), boot_store(journal, accounts, &reg), cfg);
     e.apply_init(&init)?;
     // the tables the run preloaded (journaled with the boot records), applied as the run applied them
@@ -641,7 +641,7 @@ mod tests {
                 let data: Arc<[u8]> = data.into();
                 let aseq = rec_acct(k, &data, 10, T0, None, src::RPC_BOOT);
                 boot_j.account(0, aseq, store.is_stale(&k, 10, src::RPC_BOOT, 0, aseq));
-                store.apply(k, crate::store::Acct::rpc(data, 10, T0, aseq, src::RPC_BOOT));
+                store.apply(k, crate::store::Acct::rpc(data, 10, T0, aseq, src::RPC_BOOT).with_lamports(1));
             }
         }
         crate::engine::initial_dlmm_arrays(&reg, &mut store);
@@ -784,7 +784,7 @@ mod tests {
         for (k, data) in boot {
             let aseq = acct.record(&AcctUpdate { pubkey: k, slot: 10, write_version: 0, t_recv: t0, src: src::RPC_BOOT, is_startup: false, txn: None, lamports: 1, owner: [3; 32], data: &data, bank_id: None });
             boot_j.account(0, aseq, store.is_stale(&k, 10, src::RPC_BOOT, 0, aseq));
-            store.apply(k, crate::store::Acct::rpc(data, 10, t0, aseq, src::RPC_BOOT));
+            store.apply(k, crate::store::Acct::rpc(data, 10, t0, aseq, src::RPC_BOOT).with_lamports(1));
         }
         crate::engine::initial_dlmm_arrays(&reg, &mut store);
         let held0 = store.dlmm_arrays[&dl.pool].clone();
@@ -945,7 +945,7 @@ mod tests {
                 let aseq = acct.record(&AcctUpdate { pubkey: k, slot: 10, write_version: 0, t_recv: t0, src: src::RPC_BOOT, is_startup: false, txn: None, lamports: 1,
                     owner: [3; 32], data: &data, bank_id: None });
                 boot_j.account(0, aseq, store.is_stale(&k, 10, src::RPC_BOOT, 0, aseq));
-                store.apply(k, crate::store::Acct::rpc(data, 10, t0, aseq, src::RPC_BOOT));
+                store.apply(k, crate::store::Acct::rpc(data, 10, t0, aseq, src::RPC_BOOT).with_lamports(1));
             }
         }
         crate::engine::initial_dlmm_arrays(&reg, &mut store);

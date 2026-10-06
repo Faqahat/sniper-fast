@@ -1,0 +1,9 @@
+{
+  "schema": "arbx.cu-table/1.0",
+  "built_ns": null,
+  "source_runs": [],
+  "source": "interim: no samples yet (every route takes the fallback formula)",
+  "legs": {},
+  "overhead": {"n": 0, "p99": null, "program": []},
+  "extras": {"ata_create": 0, "ata_close": 0, "tip": 150}
+}

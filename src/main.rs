@@ -177,7 +177,8 @@ enum Cmd {
         #[arg(long)] compare: bool,
         /// re-price every opportunity's best route at these fractions of its size and/or `opt` (X3), e.g. 0.5,0.25,0.125,opt
         #[arg(long, value_delimiter = ',')] reprice_sizes: Vec<String>,
-        /// what-if: strategy.<field>=<v>, state.<knob>=<v>, alts.<knob>=<v>, accuracy.ring_versions=<v>, min_tip=<v> (repeatable)
+        /// what-if: strategy.<field>=<v>, state.<knob>=<v>, alts.<knob>=<v>, accuracy.ring_versions=<v>, min_tip=<v>, tips.<field>=<v>,
+        /// cu.min_samples=<v> (repeatable)
         #[arg(long = "set")] set: Vec<String>,
     },
     /// Price one route at one recorded state version of a run (PLAN WP-09 item 3; the toolkit's R4, R8): the run replayed
@@ -271,7 +272,13 @@ fn main() -> Result<()> {
             let payer = bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok());
             let mut keys_checked = 0;
             for s in &cfg.sends {
-                let tip = match (s.tip_share, s.tip_lamports) { (Some(x), l) => format!("{:.0}% of the edge, {l}..{} lamports", x * 100.0, s.tip_max_lamports.unwrap_or(u64::MAX)), (None, 0) => "no tip".into(), (None, l) => format!("tip {l} lamports") };
+                let tip = match (s.kind, s.tip_share, s.tip_lamports) {
+                    // WP-06: a bundle tips [tips] by band (its floor is the path's minimum)
+                    (config::SendKind::JitoBundle, _, l) => format!("[tips] by band {:?} of the edge, {}..{} lamports (path minimum {l})", cfg.tips.shares, cfg.tips.floor, cfg.tips.cap),
+                    (_, Some(x), l) => format!("{:.0}% of the edge, {l}..{} lamports", x * 100.0, s.tip_max_lamports.unwrap_or(u64::MAX)),
+                    (_, None, 0) => "no tip".into(),
+                    (_, None, l) => format!("tip {l} lamports"),
+                };
                 let rate = s.max_per_sec.map(|n| format!(", max {n}/s")).unwrap_or_default();
                 println!("  send {:<20} {:?} {tip}{rate}{}", s.name, s.kind, if s.enabled { "" } else { " (disabled)" });
                 // PLAN-ADDENDUM I-10: a secret over plain http only with a recorded exception; no provider key is the payer's
@@ -283,8 +290,33 @@ fn main() -> Result<()> {
             println!("enabled send paths: {}{}", if on.is_empty() { "none".to_string() } else { on.join(", ") },
                 if config::bundle_only(&cfg.sends).is_ok() { " (bundle-only: a live or canary run may start)" } else { " (NOT bundle-only: live and canary runs refuse to start)" });
             let (s, l, sp) = (&cfg.strategy, &cfg.live, &cfg.send_policy);
-            println!("safety: decoded swaps are hints only, skip_failing_signers {}, state_triggers {}; live: max {} SOL a trade, {} new token accounts, stop after {} lamports of failed fees; canary: {} SOL, {} attempts",
-                s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_new_token_accounts, l.max_failed_fees_lamports, cfg.canary.size_sol, cfg.canary.count);
+            println!("safety: decoded swaps are hints only, skip_failing_signers {}, state_triggers {}; live: max {} SOL a trade, stop after {} lamports of failed fees; canary: {} SOL, {} attempts",
+                s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_failed_fees_lamports, cfg.canary.size_sol, cfg.canary.count);
+            // WP-06: the builder
+            let b = &cfg.builder;
+            // the CU table where this machine has it (the configured path, or the repo's data/ copy): a table that does not
+            // parse fails the check; a missing one is read at start (a run without it refuses to start)
+            let cu = if b.cu_table.is_empty() { "none (every route the fallback formula)".to_string() } else {
+                let p = Path::new(&b.cu_table);
+                let repo_copy = config.parent().and_then(|d| d.parent()).zip(p.file_name()).map(|(d, f)| d.join("data").join(f));
+                match std::iter::once(p.to_path_buf()).chain(repo_copy).find(|c| c.is_file()) {
+                    Some(c) => {
+                        let t = arbx::cu_table::CuTable::load(&c.to_string_lossy()).map_err(|e| anyhow::anyhow!("[builder] cu_table: {e}"))?;
+                        format!("{}: {} legs, overhead n {}, source {}", c.display(), t.legs.len(), t.overhead.n, t.source.clone().unwrap_or_else(|| t.source_runs.join(",")))
+                    }
+                    None => format!("{} not on this machine (read at start: a run without it refuses to start)", b.cu_table),
+                }
+            };
+            // review WP-06 #1, #9: whether a trade can leave an account (and its rent) behind
+            let accounts = if !b.create_close { "none created: routes through a token the wallet holds no account for are refused (mid_not_held, the held-only arm)".to_string() }
+                else if b.held_max == 0 { "created and closed in the same transaction (rent-neutral: nothing stays locked); held-set additions off (held_max = 0)".to_string() }
+                else { format!("created and closed in the same transaction; HELD-SET ADDITIONS ON (held_max = {}): an oversized bundle may keep its account, locking up to {} lamports \
+                    of rent each, only when the expected profit covers min_profit + that rent (the go-live gate wants nothing locked: an owner decision)", b.held_max, arbx::build::HELD_RENT_BOUND) };
+            println!("builder (WP-06): new token accounts {accounts}; \
+                PumpSwap volume accumulator creation {}; loaded-data limit {}; CU table {} (cells under {} samples: the fallback); lookup-table index {} (max {}); payer guard {}; bands {:?}",
+                if b.allow_uva_create { "ALLOWED" } else { "refused (uva_missing)" },
+                match b.loaded_limit() { None => "off".to_string(), Some(None) => "auto".to_string(), Some(Some(n)) => format!("{n} bytes") }, cu, b.cu_min_samples, b.alt_index, b.max_alts,
+                if b.payer_guard { format!("on, max drop {}", b.payer_guard_max_drop) } else { "off".into() }, cfg.bands.edges);
             println!("send policy (WP-05): live and canary sends are one-transaction bundles, fail closed; blockhash {} at most {} slots old; skip leaders {:?}; in-flight hold {} slots; queue {} ms; >=1M bands at {}/s; crowding {:?} over {} h, crowded list {}; on-chain margin max({}, {} x net); dry run simulate {}",
                 sp.blockhash_commitment, sp.max_blockhash_age_slots, sp.skip_leader_kinds, sp.inflight_hold_slots, sp.queue_ms, sp.big_band_max_per_sec, sp.crowding_buckets,
                 sp.crowding_window_h, if sp.crowded_pools_file.is_empty() { "none".to_string() } else { sp.crowded_pools_file.clone() }, sp.margin_floor, sp.margin_share, cfg.dry_run.simulate);
@@ -814,7 +846,11 @@ fn limits_json(cfg: &config::Config, live: bool, canary: bool) -> serde_json::Va
     serde_json::json!({
         "sending": if live { "live" } else if canary { "canary" } else { "none" },
         "max_size_sol": max_size, "max_size_src": src, "sim_max_size_sol": cfg.exec.max_size_sol,
-        "max_failed_fees_lamports": l.max_failed_fees_lamports, "max_new_token_accounts": l.max_new_token_accounts,
+        "max_failed_fees_lamports": l.max_failed_fees_lamports,
+        // WP-06: rent-neutral create+close (`create_close`); the held set grows only by the size budget's fallback, at most
+        // held_max, off at 0 (the default: review WP-06 #1), and `rent_neutral` says whether any account can stay locked
+        "rent_neutral": cfg.builder.rent_neutral(), "create_close": cfg.builder.create_close, "held_max": cfg.builder.held_max,
+        "allow_uva_create": cfg.builder.allow_uva_create, "payer_guard": cfg.builder.payer_guard,
         "decoded_sends": false, "state_triggers": cfg.strategy.state_triggers,
         // WP-04: prices only committed, complete, canonical state; nothing priced or sent while the state is unavailable
         "state_gate": { "boot_timeout_s": cfg.state.boot_timeout_s, "max_update_age_ms": cfg.state.max_update_age_ms },
@@ -967,7 +1003,7 @@ fn boot_account(store: &mut store::Store, ar: &rec::accounts::AcctRec, j: &rec::
     let aseq = ar.record(&rec::accounts::AcctUpdate { pubkey: k, slot, write_version: 0, t_recv: t, src, is_startup: false, txn: None,
         lamports: a.lamports, owner: a.owner, data: &data, bank_id: None });
     j.account(0, aseq, store.is_stale(&k, slot, src, 0, aseq));
-    store.apply(k, store::Acct::rpc(data, slot, t, aseq, src));
+    store.apply(k, store::Acct::rpc(data, slot, t, aseq, src).with_lamports(a.lamports));
 }
 
 /// a preloaded lookup table: its address, its entries (gaps kept), when a transaction last used it (ns)
@@ -1420,6 +1456,11 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     eng.set_base_watch(base_watch);
     // ---- WP-04 wiring: state consistency knobs, signer statistics per segment (I-5), lookup-table preload (I-6)
     eng.set_knobs(engine::EngineKnobs::from_cfg(&cfg));
+    // ---- WP-06 wiring: the fee and CU model (the tips by band, the measured CU table), journaled with engine_init
+    let model = engine::BuilderModel::from_cfg(&cfg).map_err(|e| anyhow::anyhow!("[builder] / [tips]: {e}"))?;
+    say(&format!("builder: CU table {}; tips by band {:?} of the edge, {}..{} lamports", model.cu.table.as_ref().map_or("none (the fallback formula)".to_string(),
+        |t| format!("{} ({} legs; source {})", cfg.builder.cu_table, t.legs.len(), t.source.clone().unwrap_or_else(|| t.source_runs.join(",")))), model.tips.shares, model.tips.floor, model.tips.cap));
+    eng.set_builder(model);
     eng.set_signer_stats_out(&dir);
     if !cfg.strategy.signer_stats_file.is_empty() {
         say(&format!("signer statistics: read {} (sha256 {}); this segment writes signer-stats.json and signer-stats-delta.json here (`arbx signer-stats merge` folds the delta back)",
@@ -1506,7 +1547,14 @@ mod tests {
         // review WP-05 #17: a canary run's cap is the canary's size, as the executor applies it
         let c = limits_json(&cfg, false, true);
         assert_eq!((c["max_size_sol"].as_f64(), c["max_size_src"].as_str(), c["canary_max_size_sol"].as_f64()), (Some(cfg.canary.size_sol), Some("canary"), Some(cfg.canary.size_sol)));
-        assert_eq!((l["max_size_sol"].as_f64(), l["max_new_token_accounts"].as_u64(), l["max_size_src"].as_str()), (Some(4.2), Some(0), Some("config")));
+        assert_eq!((l["max_size_sol"].as_f64(), l["max_size_src"].as_str()), (Some(4.2), Some("config")));
+        // WP-06: trades are rent-neutral; held-set additions are off (review #1); `rent_neutral` says whether any can stay
+        assert_eq!((l["rent_neutral"].as_bool(), l["create_close"].as_bool(), l["held_max"].as_u64(), l["allow_uva_create"].as_bool(), l["payer_guard"].as_bool()),
+            (Some(true), Some(true), Some(0), Some(false), Some(false)));
+        let mut opted = cfg.clone();
+        opted.builder.held_max = 3;
+        assert_eq!((limits_json(&opted, true, false)["rent_neutral"].as_bool(), limits_json(&opted, true, false)["held_max"].as_u64()), (Some(false), Some(3)));
+        assert!(l.get("max_new_token_accounts").is_none());
         assert_eq!((l["decoded_sends"].as_bool(), l["state_triggers"].as_bool(), l["record"].as_bool()), (Some(false), Some(true), Some(true)));
         assert_eq!((l["big_band_min_expected_lamports"].as_u64(), l["big_band_max_per_sec"].as_f64()), (Some(1_000_000), Some(0.5)));
         assert_eq!((l["crowded_pools_file"].as_str(), l["crowded_skip_min_expected_lamports"].as_u64()), (Some("/root/arbx/data/crowded-pools.json"), Some(100_000)));

@@ -1,0 +1,99 @@
+{
+  "runs": [
+    {
+      "bytes": 667,
+      "cu_allowed": {
+        "ata_close": 5000,
+        "ata_create": 30000,
+        "route": 212000
+      },
+      "cu_ata_close": 1464,
+      "cu_ata_create": 18616,
+      "cu_legs": [
+        83968,
+        47805
+      ],
+      "cu_limit": 247000,
+      "cu_overhead": 18204,
+      "cu_route_outer": 149977,
+      "cu_tx": 170507,
+      "loaded_data_limit": 20185088,
+      "name": "pump_buy_dlmm_sell_create_close",
+      "native_delta": -105000,
+      "ok": true,
+      "rent_locked": 1513840,
+      "rent_reclaimed": 1513840,
+      "tip": 100000,
+      "wsol_delta": 60507179
+    },
+    {
+      "bytes": 650,
+      "cu_allowed": {
+        "ata_close": 5000,
+        "ata_create": 30000,
+        "route": 212000
+      },
+      "cu_ata_close": null,
+      "cu_ata_create": null,
+      "cu_legs": [
+        83968,
+        47805
+      ],
+      "cu_limit": 212000,
+      "cu_overhead": 18204,
+      "cu_route_outer": 149977,
+      "cu_tx": 150427,
+      "loaded_data_limit": 20185088,
+      "name": "pump_buy_dlmm_sell_held",
+      "native_delta": -105000,
+      "ok": true,
+      "rent_locked": 0,
+      "rent_reclaimed": 0,
+      "tip": 100000,
+      "wsol_delta": 60507179
+    },
+    {
+      "err": "InstructionError(3, Custom(1314390018))",
+      "name": "pump_buy_dlmm_sell_create_close_profit_fail",
+      "native_delta": -5000,
+      "ok": false
+    },
+    {
+      "bytes": 632,
+      "cu_allowed": {
+        "ata_close": 5000,
+        "ata_create": 30000,
+        "route": 206000
+      },
+      "cu_ata_close": 1464,
+      "cu_ata_create": 18616,
+      "cu_legs": [
+        73129,
+        42209
+      ],
+      "cu_limit": 241000,
+      "cu_overhead": 17405,
+      "cu_route_outer": 132743,
+      "cu_tx": 153273,
+      "loaded_data_limit": 20119552,
+      "name": "dlmm_buy_pump_sell_create_close",
+      "native_delta": -105000,
+      "ok": true,
+      "rent_locked": 1513840,
+      "rent_reclaimed": 1513840,
+      "tip": 100000,
+      "wsol_delta": 55666586
+    },
+    {
+      "cu_ata_close": 120,
+      "cu_ata_create": 14917,
+      "cu_tx": 15037,
+      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "name": "spl_usdc_create_close",
+      "native_delta": -5000,
+      "rent_locked": 1488440,
+      "rent_reclaimed": 1488440
+    }
+  ],
+  "vectors": 4
+}

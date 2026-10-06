@@ -748,3 +748,47 @@ fn per_leg_cost() {
         eprintln!("AMM v4 route (3kQo, {name}): quote::best {route:.0} ns, with both legs parsed {both:.0} ns; best {:?}", t.map(|t| (t.x, t.profit())));
     }
 }
+
+/// PLAN WP-06 item 6 (the DLMM cap): a route's DLMM leg walks only the builder's window (`dlmm_window`: the active
+/// array, then the held arrays contiguous with it in the swap's direction, at most 5; the builder names a prefix of it,
+/// build.rs `dlmm_arrays`); a size past it is `unquotable_dlmm_array`, and the size search stops below it and says so
+/// (`best_bound`'s bound, decisions `dlmm_cap_bound`). On the HOTBOT route (GLL3 made cheap, sold into DLMM 6D4E: its
+/// active bin -533 sits 27 bins above the bottom of array -8, which holds 24.8 SOL at or below it) with only the active
+/// array held, the size stops where the window ends, never beyond, at a profit no better than with every array the
+/// fixture holds; the ladder runs past Stage 0's 4.2 SOL to 42 SOL so that a wide gap reaches the window's end
+#[test]
+fn the_dlmm_window_caps_the_size() {
+    let have = |set: &[i64], i: i64| set.contains(&i);
+    assert_eq!(dlmm_window(10, false, &|i| have(&[10, 11, 12, 14], i)), vec![10, 11, 12], "contiguous: 13 is not held");
+    assert_eq!(dlmm_window(10, true, &|i| have(&[7, 8, 9, 10, 11], i)), vec![10, 9, 8, 7], "in the swap's direction");
+    assert_eq!(dlmm_window(-3, false, &|_| true), vec![-3, -2, -1, 0, 1], "at most 5");
+    assert!(dlmm_window(10, false, &|i| have(&[11, 12], i)).is_empty(), "the active array not held: none");
+    let ladder: Vec<u64> = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.2, 8.4, 21.0, 42.0].iter().map(|s| (s * 1e9) as u64).collect();
+    let (top, lo) = (*ladder.last().unwrap(), ladder[0] / 4);
+    let g = find("GLL3");
+    let q = u64::from_le_bytes(g.accts[&meta(g).vault1].1[64..72].try_into().unwrap());
+    let mut capped = 0;
+    for num in [880u64, 800, 700, 600, 500] {
+        let b = case_on("GLL3", vec![patch(&meta(g).vault1, 64, &(q / 1_000 * num).to_le_bytes())], false, 0);
+        let mut s = case_on("6D4E", vec![], true, 0);
+        let lb = b.leg_as(ROUTE).unwrap();
+        let (full, full_bound) = best_bound(&lb, &s.leg_as(ROUTE).unwrap(), &ladder, lo, top).unwrap();
+        let active = i32::from_le_bytes(s.pre[&s.fx.pool].data[76..80].try_into().unwrap());
+        s.passed = vec![crate::venues::dlmm::array_index(active)];
+        let ls = s.leg_as(ROUTE).unwrap();
+        let (t, bound) = best_bound(&lb, &ls, &ladder, lo, top).unwrap();
+        eprintln!("GLL3 x{num}/1000 -> 6D4E: every array: size {} profit {} bound {full_bound:?}; the active array only: size {} profit {} bound {bound:?}",
+            full.x, full.profit(), t.x, t.profit());
+        assert!(round_trip(&lb, &ls, t.x).is_ok_and(|r| r.profit() == t.profit()), "the size chosen quotes inside the window");
+        // a narrower window never prices better (the locator lands within a few units of an optimum)
+        assert!(t.profit() <= full.profit() + 10, "x{num}: the active array alone {} > every array {}", t.profit(), full.profit());
+        if bound == Some(Why::DlmmArray) {
+            // the window binds: a larger size walks past it
+            let past = [t.x + 1, t.x.saturating_mul(2).min(top)].into_iter().chain(ladder.iter().copied()).filter(|&x| x > t.x && x <= top)
+                .any(|x| matches!(round_trip(&lb, &ls, x), Err(Why::DlmmArray)));
+            assert!(past, "x{num}: bound by the window, yet no larger size walks past it");
+            if full.x > t.x { capped += 1; }
+        }
+    }
+    assert!(capped >= 1, "the window bound the size on at least one gap where every array would have gone further");
+}

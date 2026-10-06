@@ -37,7 +37,7 @@
           ],
           "cu": 200000,
           "gross": -173210,
-          "net": -187210,
+          "net": -179210,
           "reason": "below_min_profit",
           "sell": "bolt.dlmm",
           "size": 5000000
@@ -50,7 +50,7 @@
           ],
           "cu": 200000,
           "gross": -172594,
-          "net": -186594,
+          "net": -178594,
           "reason": "below_min_profit",
           "sell": "bolt.pump",
           "size": 5000000
@@ -83,7 +83,7 @@
           ],
           "cu": 200000,
           "gross": -172594,
-          "net": -186594,
+          "net": -178594,
           "reason": "below_min_profit",
           "sell": "bolt.pump",
           "size": 5000000
@@ -96,7 +96,7 @@
           ],
           "cu": 200000,
           "gross": -173210,
-          "net": -187210,
+          "net": -179210,
           "reason": "below_min_profit",
           "sell": "bolt.dlmm",
           "size": 5000000

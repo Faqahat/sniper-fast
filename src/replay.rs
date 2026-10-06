@@ -311,7 +311,8 @@ fn is_boot(r: &JRec) -> bool { r.t_engine == 0 || matches!(r.body, JBody::Gap { 
 // ------------------------------------------------------------------ overrides (what-if)
 
 /// One `--set key=value`: `strategy.<field>` (the `[strategy]` section), `state.<knob>` / `alts.<knob>` /
-/// `accuracy.ring_versions` / `accuracy.queue` (the engine's knobs, `engine::EngineKnobs`), or `min_tip`
+/// `accuracy.ring_versions` / `accuracy.queue` (the engine's knobs, `engine::EngineKnobs`), `min_tip`, or WP-06's
+/// `tips.<field>` / `cu.min_samples` (the run's engine_init `builder`)
 #[derive(Clone, Debug)]
 pub struct Set { pub key: String, pub value: String }
 
@@ -351,8 +352,28 @@ pub fn apply_sets(cfg: &mut StrategyCfg, init: &mut EngineInit, sets: &[Set]) ->
             ["alts", rest @ ..] => { let mut p = vec!["alts"]; p.extend_from_slice(rest); set_path(&mut k, &p, val, &x.key)?; }
             ["accuracy", "ring_versions"] => set_path(&mut k, &["ring_versions"], val, &x.key)?,
             ["accuracy", "queue"] => set_path(&mut k, &["accuracy_queue"], val, &x.key)?,
-            ["min_tip"] => init.min_tip = val.as_u64().with_context(|| format!("--set {}: not a number", x.key))?,
-            _ => bail!("--set {}: unknown key (strategy.<field>, state.<knob>, alts.<knob>, accuracy.ring_versions, accuracy.queue, min_tip)", x.key),
+            // the tip every net is computed with: a pre-WP-06 journal's min_tip; with WP-06's model, its floor too
+            ["min_tip"] => {
+                init.min_tip = val.as_u64().with_context(|| format!("--set {}: not a number", x.key))?;
+                if let Some(b) = init.builder.as_mut() {
+                    b.tips.floor = init.min_tip;
+                    b.tips.cap = b.tips.cap.max(init.min_tip);
+                    b.tips.check().map_err(|e| anyhow::anyhow!("--set {}: {e}", x.key))?;
+                }
+            }
+            // WP-06: the run's tip model (`tips.floor`, `tips.cap`, `tips.shares`, `tips.contested_shares`) and CU model
+            // (`cu.min_samples`)
+            ["tips", rest @ ..] | ["cu", rest @ ..] => {
+                let b = init.builder.as_mut().with_context(|| format!("--set {}: the run's journal has no WP-06 builder model", x.key))?;
+                let mut m = serde_json::to_value(&*b)?;
+                let mut p = vec![if parts[0] == "tips" { "tips" } else { "cu" }];
+                p.extend_from_slice(rest);
+                set_path(&mut m, &p, val, &x.key)?;
+                *b = serde_json::from_value(m).with_context(|| format!("--set {}: the builder model does not load", x.key))?;
+                b.tips.check().map_err(|e| anyhow::anyhow!("--set {}: {e}", x.key))?;
+                anyhow::ensure!(b.cu.min_samples >= 1, "--set {}: cu.min_samples >= 1", x.key);
+            }
+            _ => bail!("--set {}: unknown key (strategy.<field>, state.<knob>, alts.<knob>, accuracy.ring_versions, accuracy.queue, min_tip, tips.<field>, cu.min_samples)", x.key),
         }
     }
     *cfg = serde_json::from_value(s).context("--set: the [strategy] does not load")?;
@@ -423,6 +444,12 @@ fn run_exec(inp: &Inputs, init: &EngineInit, records: &[JRec]) -> Result<RunExec
         return Ok(RunExec::NotReplayed("the run had an executor (engine_init executor true) and its journal has no exec_init record: a recording made before the \
             executor replay (WP-09 with WP-05), whose executor verdicts and fields cannot be rebuilt".into()));
     };
+    // WP-06: an exec_init record of an earlier version was written by a build whose bundles (their layout, CU, tips) this
+    // one does not make: not replayed, with why (the engine's own decisions still are)
+    if v["version"].as_u64() != Some(crate::exec::EXEC_INIT_VERSION as u64) {
+        return Ok(RunExec::NotReplayed(format!("an exec_init record of version {} (this build writes {}): recorded before WP-06's builder (rent-neutral \
+            create+close, measured CU, tips by band), whose bundles this build does not rebuild", v["version"], crate::exec::EXEC_INIT_VERSION)));
+    }
     let ei = crate::exec::ExecInit::from_json(v).context("the journal's exec_init record (INPUT 12) does not read")?;
     if ei.mode.sends() {
         return Ok(RunExec::NotReplayed(format!("a {} executor: its sends are not replayed (only shadow and dry-run executors are)", ei.mode.as_str())));
@@ -444,7 +471,7 @@ fn open_boot(inp: &Inputs, sets: &[Set], with_exec: bool) -> Result<Boot> {
         if !is_boot(&r) { jf.push_back(r); break; }
         records.push(r);
     }
-    let init = journal::engine_init(&records).context("the journal has no engine_init record (INPUT 10): it was not written by `Engine::run` of WP-03 or later")?;
+    let init = journal::engine_init(&records).context("the journal has no engine_init record (INPUT 10) this build reads: it was not written by `Engine::run` of WP-03 or later, or its record does not read (a WP-06 builder model of another schema)")?;
     let run_hash = engine::strategy_sha256(&inp.cfg.strategy);
     anyhow::ensure!(init.strategy_sha256 == run_hash, "the config's [strategy] (sha256 {}) is not the run's ({}): give the run's frozen config", &run_hash[..16],
         &init.strategy_sha256[..16.min(init.strategy_sha256.len())]);
@@ -489,6 +516,8 @@ fn build_engine(inp: &Inputs, boot: &Boot, sets: &[Set], rec: &Rec) -> Result<(E
         e.set_crowding(crate::crowding::Activity::new(ei.crowding_window_h, ei.crowding_buckets, ei.crowded.iter().copied().collect()));
         let mut x = crate::exec::Exec::offline(&inp.cfg, ei, rec.clone())?;
         x.set_health(e.health_flags());
+        // review WP-06 #8: a what-if tip model (`tips.*`, `min_tip`) is the executor's too, not only the engine's fee
+        if !sets.is_empty() { if let Some(b) = &init.builder { x.set_tip_model(b.tips.clone()); } }
         e.exec = Some(x);
     }
     Ok((e, init))
@@ -788,7 +817,8 @@ pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
     apply_sets(&mut cfg, &mut boot.init.clone(), &o.sets)?;
     let cap = (cfg.sizes_sol.iter().cloned().fold(0.0, f64::max) * 1e9) as u64;
     let n_want = want.as_ref().map_or(0, |w| w.len());
-    let mut hook = MainHook { to_slot: o.to_slot, reprice: want.map(|w| RepriceHook { want: w, sizes: &o.reprice, cfg, cap, seen: 0, out: Vec::new() }) };
+    let fee_rule = if boot.init.builder.is_some() { "tips_by_band" } else { "legacy" };
+    let mut hook = MainHook { to_slot: o.to_slot, reprice: want.map(|w| RepriceHook { want: w, sizes: &o.reprice, cfg, cap, seen: 0, out: Vec::new(), fee_rule }) };
     let run_exec = boot.exec.clone();
     let res = drive(&inp, boot, &o.sets, &rec, &mut hook);
     let (mut e, init, d) = match res { Ok(x) => x, Err(err) => { rec.close(); return Err(err); } };
@@ -1246,8 +1276,9 @@ fn compare_attempts(run: &Path, out: &Path, compared: &IdRanges) -> Result<Attem
 
 /// The engine's own price of route (buy, sell, mint) at `size` on its store as it is, as a decision prices it
 /// (`Engine::quote_route`): what the buy leg delivers and debits (`spent`), what the sell leg returns, the gross (the
-/// guard's quote delta, `back` − `spent`), the CU it asks, and the net with the engine's fee rule (base fee +
-/// `cu_price_micro` × CU + the run's `min_tip`)
+/// guard's quote delta, `back` − `spent`), the CU it asks (WP-06: the run's CU model), and the net with the engine's fee
+/// rule (WP-06: base fee + the tip of the gross's edge by band, the run's engine_init `builder`; a journal written before
+/// WP-06: base fee + `cu_price_micro` × CU + the run's `min_tip`)
 pub fn price(e: &Engine, buy: &Pk, sell: &Pk, mint: &Pk, size: u64) -> Result<Value, String> {
     quote_json(e.quote_route(buy, sell, mint, size))
 }
@@ -1284,7 +1315,9 @@ fn opportunities(run: &Path, w: &Window) -> Result<BTreeMap<u64, Value>> {
 
 /// The repricing, in the replay's own pass (`Engine::quote_route` changes nothing the replay records): after each
 /// record, the run's opportunities that record decided, at the fractions of their size and at the optimum
-struct RepriceHook<'a> { want: BTreeMap<u64, Value>, sizes: &'a [Reprice], cfg: StrategyCfg, cap: u64, seen: u64, out: Vec<Value> }
+struct RepriceHook<'a> { want: BTreeMap<u64, Value>, sizes: &'a [Reprice], cfg: StrategyCfg, cap: u64, seen: u64, out: Vec<Value>,
+    /// WP-06: the fee rule the prices used (`tips_by_band`: the run's builder model; `legacy`: a pre-WP-06 journal's)
+    fee_rule: &'static str }
 impl Hook for RepriceHook<'_> {
     fn after(&mut self, e: &mut Engine, _r: &JRec, _a: Option<u64>) -> Result<bool> {
         let now = e.counter("evaluation");
@@ -1315,7 +1348,7 @@ impl Hook for RepriceHook<'_> {
 fn write_reprice(inp: &Inputs, h: RepriceHook, n_want: usize, sizes: &[Reprice], out: &Path, min_tip: u64) -> Result<Value> {
     let mut text = String::new();
     text.push_str(&json!({ "schema": REPRICE_SCHEMA, "run": inp.dir.display().to_string(), "sizes": sizes.iter().map(|s| match s { Reprice::Frac(f) => json!(f), Reprice::Opt => json!("opt") }).collect::<Vec<_>>(),
-        "min_tip": min_tip, "cu_price_micro": h.cfg.cu_price_micro, "cap_lamports": h.cap }).to_string());
+        "min_tip": min_tip, "cu_price_micro": h.cfg.cu_price_micro, "cap_lamports": h.cap, "fee_rule": h.fee_rule }).to_string());
     text.push('\n');
     for l in &h.out { text.push_str(&l.to_string()); text.push('\n'); }
     std::fs::write(out.join("reprice.jsonl"), text)?;
@@ -1608,6 +1641,17 @@ mod tests {
             assert!(apply_sets(&mut cfg.clone(), &mut init.clone(), &[bad.parse().unwrap()]).is_err(), "{bad}");
         }
         assert!("novalue".parse::<Set>().is_err());
+        // WP-06: the builder model (tips by band, CU) as engine_init journals it; a journal without one refuses its keys
+        assert!(apply_sets(&mut cfg.clone(), &mut init.clone(), &["tips.floor=5000".parse().unwrap()]).is_err(), "no builder model in a pre-WP-06 journal");
+        init.builder = Some(engine::BuilderModel { tips: crate::tip::TipModel::default(), cu: crate::cu_table::CuModel::default() });
+        let sets: Vec<Set> = ["tips.shares=[0.5,0.5,0.6,0.6,0.6]", "tips.cap=200000", "tips.bands.edges=[10000,100000,1000000,10000000]", "cu.min_samples=10", "min_tip=3000"]
+            .iter().map(|s| s.parse().unwrap()).collect();
+        apply_sets(&mut cfg, &mut init, &sets).unwrap();
+        let b = init.builder.clone().unwrap();
+        assert_eq!((b.tips.shares, b.tips.cap, b.tips.floor, b.tips.bands.edges, b.cu.min_samples), ([0.5, 0.5, 0.6, 0.6, 0.6], 200_000, 3_000, [10_000, 100_000, 1_000_000, 10_000_000], 10));
+        for bad in ["tips.floor=0", "tips.shares=[2,0,0,0,0]", "tips.shares=[0.5]", "tips.bands.edges=[3,2,1,0]", "tips.nope=1", "cu.min_samples=0", "min_tip=0", "cu.nope=1"] {
+            assert!(apply_sets(&mut cfg.clone(), &mut init.clone(), &[bad.parse().unwrap()]).is_err(), "{bad}");
+        }
     }
 
     /// decision reasons by stage (MEASUREMENT A.1), and what a compare does not compare: an executor's verdict only

@@ -36,7 +36,7 @@
           ],
           "cu": 164000,
           "gross": -17419,
-          "net": -29979,
+          "net": -23419,
           "reason": "below_min_profit",
           "sell": "usdc.pump",
           "size": 5000000
@@ -49,7 +49,7 @@
           ],
           "cu": 164000,
           "gross": -37458,
-          "net": -50018,
+          "net": -43458,
           "reason": "below_min_profit",
           "sell": "usdc.ammv4",
           "size": 5000000

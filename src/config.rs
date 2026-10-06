@@ -68,6 +68,119 @@ pub struct Config {
     /// WP-03b: wallet transactions, watched-transaction backfill, slot index, blockhash sources; per-provider RPC budgets
     #[serde(default)]
     pub chainfetch: ChainfetchCfg,
+    /// WP-06: the one band table (decisions, the send queue, the tips; src/bands.rs)
+    #[serde(default)]
+    pub bands: BandsCfg,
+    /// WP-06: the builder (rent-neutral create+close, the held set, the PumpSwap volume accumulator, measured CU, the
+    /// loaded-data limit, the size budget's lookup tables, the payer guard)
+    #[serde(default)]
+    pub builder: BuilderCfg,
+    /// WP-06: the bundle tip by band (src/tip.rs): clamp(share(band) x edge, floor, cap)
+    #[serde(default)]
+    pub tips: TipsCfg,
+}
+
+/// `[bands]` (PLAN WP-06 item 8, F22): four increasing edges over the expected edge (gross − base fee), bands 0-4; 3 and
+/// 4 are the ≥1M class
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BandsCfg {
+    #[serde(default = "bands_edges")]
+    pub edges: Vec<i64>,
+}
+fn bands_edges() -> Vec<i64> { crate::bands::EDGES.to_vec() }
+impl Default for BandsCfg { fn default() -> Self { BandsCfg { edges: bands_edges() } } }
+
+/// `[tips]` (PLAN WP-06 item 8): a bundle tips clamp(⌊share(band, contested) × edge⌋, floor, cap). Stage 0's shares are
+/// 0.7 in every band (the status quo; X4 changes the numbers); "contested" stays false until the Stage 2A Selector. The
+/// jito-bundle path keeps its floor (`tip_lamports`, at most `floor`) and its accounts; its `tip_share` and
+/// `tip_max_lamports` moved here
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TipsCfg {
+    #[serde(default = "tips_shares")]
+    pub shares: Vec<f64>,
+    #[serde(default = "tips_contested")]
+    pub contested_shares: Vec<f64>,
+    #[serde(default = "tips_floor")]
+    pub floor: u64,
+    #[serde(default = "tips_cap")]
+    pub cap: u64,
+}
+fn tips_shares() -> Vec<f64> { vec![0.7; 5] }
+fn tips_contested() -> Vec<f64> { vec![0.16, 0.47, 0.54, 0.64, 0.64] }
+fn tips_floor() -> u64 { 1_000 }
+fn tips_cap() -> u64 { 100_000 }
+impl Default for TipsCfg { fn default() -> Self { TipsCfg { shares: tips_shares(), contested_shares: tips_contested(), floor: tips_floor(), cap: tips_cap() } } }
+
+/// `[builder] loaded_data_limit`: "auto" (the transaction's accounts and programs, measured sizes, with a margin), "off"
+/// (no SetLoadedAccountsDataSizeLimit), or a number of bytes
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum LoadedLimit { Bytes(u32), Mode(String) }
+impl Default for LoadedLimit { fn default() -> Self { LoadedLimit::Mode("auto".into()) } }
+
+/// `[builder]` (PLAN WP-06)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuilderCfg {
+    /// a token account the wallet holds none of is created and closed in the same transaction (item 2: rent-neutral);
+    /// false: routes through such a token are refused (`mid_not_held`) and nothing is created: the held-only control arm
+    /// (STAGE1-PLAN §3.1; review WP-06 #9)
+    #[serde(default = "yes")]
+    pub create_close: bool,
+    /// the size budget's held-ATA fallback (create without the close: the account and its rent, 1.49-1.51M lamports, stay
+    /// with the wallet): OFF at 0, the default (review WP-06 #1; go-live gate item 2: nothing stays locked). An explicit
+    /// opt-in above 0: at most this many hot mints held beyond WSOL, USDC and USDT (the additions in flight counted), and
+    /// a held addition only when its expected profit also covers the rent it locks (`build::HELD_RENT_BOUND` on top of
+    /// its on-chain min_profit). WP-07 adds its rent cap
+    #[serde(default = "held_max")]
+    pub held_max: usize,
+    /// a PumpSwap buy while the wallet has no user volume accumulator creates it (1,346,200 lamports, not recoverable):
+    /// refused (`uva_missing`) unless true. Creating it once is an owner action
+    #[serde(default)]
+    pub allow_uva_create: bool,
+    #[serde(default)]
+    pub loaded_data_limit: LoadedLimit,
+    /// the measured CU table (`arbx-report cu-table`, schema arbx.cu-table/1.0); "" = none (every route the fallback)
+    #[serde(default = "cu_table_path")]
+    pub cu_table: String,
+    /// a table cell (each leg, the overhead) with fewer samples falls back to the formula
+    #[serde(default = "cu_min_samples")]
+    pub cu_min_samples: u64,
+    /// the size budget (item 7): an oversized transaction adds lookup tables seen in decoded transactions that name the
+    /// route's pools, at most `max_alts`
+    #[serde(default = "yes")]
+    pub alt_index: bool,
+    #[serde(default = "max_alts")]
+    pub max_alts: usize,
+    /// nexus-v2's optional 8-byte `max_payer_lamport_drop` trailer (item 9): ships off until X6 and a canary
+    #[serde(default)]
+    pub payer_guard: bool,
+    #[serde(default)]
+    pub payer_guard_max_drop: u64,
+}
+fn held_max() -> usize { 0 }
+fn cu_table_path() -> String { "data/cu-table.json".into() }
+fn cu_min_samples() -> u64 { crate::cu_table::MIN_SAMPLES }
+fn max_alts() -> usize { 4 }
+impl Default for BuilderCfg {
+    fn default() -> Self {
+        BuilderCfg { create_close: true, held_max: held_max(), allow_uva_create: false, loaded_data_limit: LoadedLimit::default(), cu_table: cu_table_path(),
+            cu_min_samples: cu_min_samples(), alt_index: true, max_alts: max_alts(), payer_guard: false, payer_guard_max_drop: 0 }
+    }
+}
+
+impl BuilderCfg {
+    /// the loaded-data limit: None off, Some(None) auto, Some(Some(bytes)) fixed
+    pub fn loaded_limit(&self) -> Option<Option<u32>> {
+        match &self.loaded_data_limit { LoadedLimit::Bytes(b) => Some(Some(*b)), LoadedLimit::Mode(m) if m == "off" => None, LoadedLimit::Mode(_) => Some(None) }
+    }
+    /// held-set additions are configured (`held_max` > 0, an explicit opt-in; off by default) and can happen (an account
+    /// is created at all: `create_close`)
+    pub fn held_additions(&self) -> bool { self.held_max > 0 && self.create_close }
+    /// no account a trade creates stays locked (meta.json `limits.rent_neutral`): create+close only, or nothing created
+    pub fn rent_neutral(&self) -> bool { !self.held_additions() }
 }
 
 /// The chain-fetch service (src/chainfetch; PLAN WP-03b) and the RPC budgets every client shares (src/rpc.rs)
@@ -295,17 +408,16 @@ pub struct LiveCfg {
     /// rule, kept); the on-chain floor is `[send_policy] margin_floor` / `margin_share`
     #[serde(default = "live_margin")]
     pub margin_lamports: u64,
-    /// new token accounts a winning trade may create (rent, recoverable by closing them); 0 = none (WP-06 makes trades
-    /// rent-neutral and removes the key)
-    #[serde(default = "live_atas")]
-    pub max_new_token_accounts: u32,
+    // WP-06: `max_new_token_accounts` is gone (a config that still has it does not load): a trade through a token the
+    // wallet holds no account for creates it and closes it in the same transaction (rent-neutral; `[builder]
+    // create_close = false` trades held tokens only); the held set grows only by `[builder] held_max`'s size-budget
+    // fallback, off by default
 }
 fn live_size() -> f64 { 0.1 }
 fn live_fee_cap() -> u64 { 20_000_000 }
 fn live_margin() -> u64 { 1_000 }
-fn live_atas() -> u32 { 5 }
 impl Default for LiveCfg {
-    fn default() -> Self { LiveCfg { max_size_sol: live_size(), max_failed_fees_lamports: live_fee_cap(), margin_lamports: live_margin(), max_new_token_accounts: live_atas() } }
+    fn default() -> Self { LiveCfg { max_size_sol: live_size(), max_failed_fees_lamports: live_fee_cap(), margin_lamports: live_margin() } }
 }
 
 /// PLAN WP-05: the send policy. Bundle-only, fail-closed send checks (blockhash age, leader kind, cached Jito token,
@@ -1097,6 +1209,11 @@ impl Config {
                 if !(0.0..=1.0).contains(&x) { bail!("send path {}: tip_share is a share of the edge, 0..1", s.name); }
             }
             if s.tip_max_lamports.is_some_and(|m| m < s.tip_lamports) { bail!("send path {}: tip_max_lamports is below tip_lamports", s.name); }
+            // WP-06: a bundle's tip is [tips] (by band); the path keeps its floor and accounts
+            if s.kind == SendKind::JitoBundle && (s.tip_share.is_some() || s.tip_max_lamports.is_some()) {
+                bail!("send path {}: tip_share and tip_max_lamports of a jito-bundle path moved to [tips] (shares by band, floor, cap; PLAN WP-06 item 8)", s.name);
+            }
+            if s.kind == SendKind::JitoBundle && s.tip_lamports > cfg.tips.floor { bail!("send path {}: tip_lamports {} is above [tips] floor {}: a bundle tip below its path's floor", s.name, s.tip_lamports, cfg.tips.floor); }
             if s.max_per_sec == Some(0) { bail!("send path {}: max_per_sec must be at least 1", s.name); }
             if s.queue_ms > 0 && s.max_per_sec.is_none() { bail!("send path {}: queue_ms needs max_per_sec", s.name); }
             // WP-05: the bundle path's queue is the send policy's (one queue_ms for the bands, the crowding and lambda)
@@ -1125,6 +1242,17 @@ impl Config {
         for k in &sp.skip_leader_kinds {
             if !["jito", "bam", "other", "unknown"].contains(&k.as_str()) { bail!("[send_policy] skip_leader_kinds: {k:?} is not a leader kind (jito, bam, other, unknown)"); }
         }
+        // WP-06: [bands], [tips], [builder]
+        crate::tip::TipModel::from_cfg(&cfg).map_err(|e| anyhow::anyhow!(e))?;
+        let b = &cfg.builder;
+        match &b.loaded_data_limit {
+            LoadedLimit::Mode(m) if m == "auto" || m == "off" => {}
+            LoadedLimit::Mode(m) => bail!("[builder] loaded_data_limit must be \"auto\", \"off\" or a number of bytes (got {m:?})"),
+            LoadedLimit::Bytes(n) if *n == 0 || *n > crate::build::MAX_LOADED_DATA => bail!("[builder] loaded_data_limit {n}: 1..{} bytes", crate::build::MAX_LOADED_DATA),
+            LoadedLimit::Bytes(_) => {}
+        }
+        if b.cu_min_samples == 0 { bail!("[builder] cu_min_samples must be >= 1"); }
+        if b.max_alts > 8 { bail!("[builder] max_alts {}: at most 8 lookup tables from the index", b.max_alts); }
         if !(cfg.canary.size_sol > 0.0 && cfg.canary.size_sol <= CANARY_MAX_SIZE_SOL) { bail!("[canary] size_sol must be in (0, {CANARY_MAX_SIZE_SOL}] (PLAN WP-05: a canary is a small live run)"); }
         if cfg.dry_run.max_sim_per_sec == 0 { bail!("[dry_run] max_sim_per_sec must be >= 1"); }
         if cfg.feeds.len() > u16::MAX as usize { bail!("too many feeds"); }
@@ -1362,7 +1490,17 @@ mod tests {
         assert_eq!(on, ["jito-bundle"], "bundle-only");
         let j = cfg.sends.iter().find(|s| s.name == "jito-bundle").unwrap();
         assert_eq!(j.kind, SendKind::JitoBundle);
-        assert_eq!((j.tip_share, j.tip_max_lamports, j.max_per_sec), (Some(0.7), Some(100_000), Some(5)));
+        assert_eq!((j.tip_share, j.tip_max_lamports, j.tip_lamports, j.max_per_sec), (None, None, 1_000, Some(5)), "WP-06: the share and the cap are [tips]");
+        // WP-06 item 8: Stage 0's tips are the status quo (0.7 of the edge in every band, 1,000..100,000)
+        assert_eq!((cfg.tips.shares.clone(), cfg.tips.floor, cfg.tips.cap), (vec![0.7; 5], 1_000, 100_000));
+        assert_eq!(cfg.bands.edges, vec![20_000, 100_000, 1_000_000, 10_000_000]);
+        let b = &cfg.builder;
+        // review WP-06 #1: held-set additions off (nothing stays locked), create+close on
+        assert_eq!((b.create_close, b.held_max, b.allow_uva_create, b.cu_table.as_str(), b.cu_min_samples, b.alt_index, b.max_alts, b.payer_guard, b.payer_guard_max_drop),
+            (true, 0, false, "/root/arbx/data/cu-table.json", 30, true, 4, false, 0));
+        assert!(b.rent_neutral() && !b.held_additions());
+        assert!(in_repo(&b.cu_table).is_file(), "the CU table is in arbx/data");
+        assert_eq!(b.loaded_limit(), Some(None), "loaded_data_limit = auto");
         // review F2: a 10 ms queue only delayed sends (it reordered none in the legacy replay); WP-05 brings the queue
         assert_eq!(j.queue_ms, 0, "the budget refuses at once, as in arb-lab");
         for name in ["helius", "rpcfast", "jito-tx", "haan", "astralane", "bolt", "tpu-direct", "everstake", "nozomi", "blockrazor", "flashblock",
@@ -1371,7 +1509,7 @@ mod tests {
         }
         let (st, l, sp) = (&cfg.strategy, &cfg.live, &cfg.send_policy);
         assert!(st.skip_failing_signers && st.state_triggers);
-        assert_eq!((l.max_new_token_accounts, l.max_size_sol), (0, 4.2));
+        assert_eq!(l.max_size_sol, 4.2);
         // WP-05: the send policy (bundle-only is enforced at load for a live config: `live_configs_are_bundle_only`)
         assert_eq!((sp.big_band_max_per_sec, sp.queue_ms, sp.max_blockhash_age_slots, sp.blockhash_commitment.as_str(), sp.inflight_hold_slots), (0.5, 10, 20, "confirmed", 2));
         assert_eq!(sp.crowded_skip_min_expected_lamports, 100_000, "OD-3's alternative on top of the rank (review F2), kept by WP-05");
@@ -1407,11 +1545,22 @@ mod tests {
         assert!(Config::parse(MINIMAL).unwrap().pricing_warning().is_some(), "the defaults price nothing: warned");
     }
 
+    /// review WP-06 #1: both maintained configs keep held-set additions off (nothing stays locked) and create+close on
+    #[test]
+    fn maintained_configs_lock_no_rent() {
+        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] {
+            let b = Config::load(&repo(f)).unwrap().builder;
+            assert_eq!((b.create_close, b.held_max, b.rent_neutral()), (true, 0, true), "{f}");
+        }
+    }
+
     #[test]
     fn arb_toml_jito_tip_matches_live() {
         let cfg = Config::load(&repo("deploy/arb.toml")).unwrap();
         let j = cfg.sends.iter().find(|s| s.kind == SendKind::JitoBundle).unwrap();
-        assert_eq!((j.tip_share, j.tip_max_lamports), (Some(0.7), Some(100_000)), "R §3.6: no drift from the live config");
+        assert_eq!((j.tip_share, j.tip_max_lamports), (None, None), "WP-06: [tips]");
+        assert_eq!((cfg.tips.shares.clone(), cfg.tips.floor, cfg.tips.cap), (vec![0.7; 5], 10_000, 100_000), "R §3.6: no drift from the live config (this config's floor)");
+        assert_eq!(j.tip_lamports, 10_000);
     }
 
     const MINIMAL: &str = "config_version = 2\nout_dir = \"/tmp/x\"\nwallet = \"w\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n";
@@ -1456,18 +1605,18 @@ mod tests {
     /// `normalized_json`: defaults filled, keys sorted, comments and formatting ignored; a changed value changes it
     #[test]
     fn normalized_hash_ignores_comments_and_order() {
-        let a = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nmax_new_token_accounts = 3\n")).unwrap();
-        let b = Config::parse(&format!("# a comment\n{}[live]\nmax_new_token_accounts   =   3 # inline\nmax_size_sol = 0.50\n", MINIMAL.replace("wallet = \"w\"\n", "")
+        let a = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nmargin_lamports = 3\n")).unwrap();
+        let b = Config::parse(&format!("# a comment\n{}[live]\nmargin_lamports   =   3 # inline\nmax_size_sol = 0.50\n", MINIMAL.replace("wallet = \"w\"\n", "")
             .replace("out_dir", "wallet = \"w\"\nout_dir"))).unwrap();
         assert_eq!(a.normalized_json(), b.normalized_json());
         assert_eq!(a.normalized_sha256(), b.normalized_sha256());
-        let c = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.6\nmax_new_token_accounts = 3\n")).unwrap();
+        let c = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.6\nmargin_lamports = 3\n")).unwrap();
         assert_ne!(a.normalized_sha256(), c.normalized_sha256());
         // a default written out explicitly is the same config
-        let d = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nmax_new_token_accounts = 3\nmargin_lamports = 1000\n")).unwrap();
+        let d = Config::parse(&format!("{MINIMAL}[live]\nmax_size_sol = 0.5\nmargin_lamports = 3\nmax_failed_fees_lamports = 20000000\n")).unwrap();
         assert_eq!(a.normalized_sha256(), d.normalized_sha256());
         let v: serde_json::Value = serde_json::from_str(&a.normalized_json()).unwrap();
-        assert_eq!((v["config_version"].as_u64(), v["live"]["max_new_token_accounts"].as_u64(), v["control"]["socket"].as_bool()), (Some(2), Some(3), Some(true)));
+        assert_eq!((v["config_version"].as_u64(), v["live"]["margin_lamports"].as_u64(), v["control"]["socket"].as_bool()), (Some(2), Some(3), Some(true)));
         let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
         let mut sorted_keys = keys.clone();
         sorted_keys.sort();
@@ -1632,6 +1781,45 @@ mod tests {
         assert!(Config::parse(&format!("{MINIMAL}[canary]\nsize_sol = 0.2\n")).is_ok());
         assert!(err(&format!("{MINIMAL}[[send]]\nname = \"j\"\nkind = \"jito-bundle\"\nurl = \"https://x\"\ntip_lamports = 1000\nmax_per_sec = 5\nqueue_ms = 10\n"))
             .contains("[send_policy] queue_ms"));
+    }
+
+    /// PLAN WP-06 config keys: `[bands]`, `[builder]`, `[tips]` with the plan's defaults and checks; `[live]
+    /// max_new_token_accounts` is gone (trades are rent-neutral); a jito-bundle path's `tip_share` / `tip_max_lamports`
+    /// moved to `[tips]`, and its floor may not be above `[tips] floor`
+    #[test]
+    fn wp06_builder_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        assert_eq!(c.bands.edges, vec![20_000, 100_000, 1_000_000, 10_000_000]);
+        let b = &c.builder;
+        // review WP-06 #1, #9: held-set additions are an explicit opt-in (off at 0, the default); create+close can be off
+        assert_eq!((b.create_close, b.held_max, b.allow_uva_create, b.cu_table.as_str(), b.cu_min_samples, b.alt_index, b.max_alts, b.payer_guard, b.payer_guard_max_drop),
+            (true, 0, false, "data/cu-table.json", 30, true, 4, false, 0));
+        assert!(b.rent_neutral() && !b.held_additions());
+        assert_eq!((b.loaded_data_limit.clone(), b.loaded_limit()), (LoadedLimit::Mode("auto".into()), Some(None)));
+        assert_eq!((c.tips.shares.clone(), c.tips.contested_shares.clone(), c.tips.floor, c.tips.cap), (vec![0.7; 5], vec![0.16, 0.47, 0.54, 0.64, 0.64], 1_000, 100_000));
+        let ok = |sec: &str, k: &str| Config::parse(&format!("{MINIMAL}{sec}\n{k}\n")).map_err(|e| format!("{e:#}"));
+        assert_eq!(ok("[builder]", "loaded_data_limit = \"off\"").unwrap().builder.loaded_limit(), None);
+        let on = ok("[builder]", "held_max = 3").unwrap().builder;
+        assert!(on.held_additions() && !on.rent_neutral(), "opted in");
+        let off = ok("[builder]", "create_close = false\nheld_max = 3").unwrap().builder;
+        assert!(!off.create_close && !off.held_additions() && off.rent_neutral(), "nothing is created: nothing can stay locked");
+        assert_eq!(ok("[builder]", "loaded_data_limit = 3000000").unwrap().builder.loaded_limit(), Some(Some(3_000_000)));
+        for (sec, bad, why) in [("[builder]", "loaded_data_limit = \"on\"", "loaded_data_limit"), ("[builder]", "loaded_data_limit = 0", "loaded_data_limit"),
+            ("[builder]", "loaded_data_limit = 70000000", "loaded_data_limit"), ("[builder]", "cu_min_samples = 0", "cu_min_samples"),
+            ("[builder]", "max_alts = 9", "max_alts"), ("[bands]", "edges = [1, 2, 3]", "four edges"), ("[bands]", "edges = [5, 4, 6, 7]", "increasing"),
+            ("[tips]", "shares = [0.7, 0.7]", "one share per band"), ("[tips]", "shares = [0.7, 0.7, 0.7, 0.7, 1.5]", "0..1"), ("[tips]", "floor = 0", "floor"),
+            ("[tips]", "floor = 2000\ncap = 1000", "floor"), ("[builder]", "held_maxx = 1", "unknown field `held_maxx`")] {
+            let e = ok(sec, bad).unwrap_err();
+            assert!(e.contains(why), "{bad}: {e}");
+        }
+        // removed and moved keys
+        assert!(err(&format!("{MINIMAL}[live]\nmax_new_token_accounts = 0\n")).contains("unknown field `max_new_token_accounts`"));
+        for k in ["tip_share = 0.7", "tip_max_lamports = 100000"] {
+            assert!(err(&format!("{MINIMAL}{JITO}{k}\n")).contains("moved to [tips]"), "{k}");
+        }
+        assert!(err(&format!("{MINIMAL}{}[tips]\nfloor = 1000\n", JITO.replace("tip_lamports = 1000", "tip_lamports = 5000"))).contains("above [tips] floor"));
+        // other kinds keep their share (the direct experiment's paths)
+        assert!(Config::parse(&format!("{MINIMAL}[[send]]\nname = \"h\"\nkind = \"helius\"\nurl = \"https://x\"\nenabled = false\ntip_lamports = 5000\ntip_share = 0.5\n")).is_ok());
     }
 
     const JITO: &str = "[[send]]\nname = \"jito-bundle\"\nkind = \"jito-bundle\"\nurl = \"https://frankfurt.mainnet.block-engine.jito.wtf\"\ntip_lamports = 1000\n";

@@ -151,11 +151,8 @@ pub async fn boot(rpc: &Rpc, cands: &[(Venue, Pk)], seeds: HashSet<Pk>, ours: Ha
     let (_, macc) = rpc.accounts(&mints).await?;
     drops.extend(apply_mints(&mut metas, &mints, &macc));
     if !drops.is_empty() { eprintln!("pools: dropped {} candidates {} (meta.json pools.dropped)", drops.len(), drops_json(&drops)["counts"]); }
-    // DLMM: does the bitmap extension exist? (kept in extra[0] only if it does)
-    let exts: Vec<Pk> = metas.iter().filter(|m| m.venue == Venue::Dlmm).map(|m| m.extra[0]).collect();
-    let (_, eacc) = rpc.accounts(&exts).await?;
-    let exists: HashSet<Pk> = exts.iter().zip(eacc).filter(|(_, a)| a.is_some()).map(|(k, _)| *k).collect();
-    for m in metas.iter_mut().filter(|m| m.venue == Venue::Dlmm) { m.flag = exists.contains(&m.extra[0]); }
+    // DLMM: the bitmap extension's PDA is `extra[0]`, followed on the state stream whether or not it exists (`extra_watch`);
+    // the builder reads it from the store per send (PLAN WP-06 item 6: the boot-time check is gone, `flag` stays false)
     // index by pair; keep pairs with WSOL and 2+ pools
     let mut pairs: HashMap<(Pk, Pk), Vec<usize>> = HashMap::default();
     for (i, m) in metas.iter().enumerate() { pairs.entry(pair_key(&m.t0, &m.t1)).or_default().push(i); }
@@ -165,8 +162,8 @@ pub async fn boot(rpc: &Rpc, cands: &[(Venue, Pk)], seeds: HashSet<Pk>, ours: Ha
 }
 
 /// A pool's metadata from its own account bytes (the token programs default to SPL Token: `boot` sets them from the
-/// mints' owners; DLMM's `flag`, the bitmap extension's existence, is false until `boot` checks it). None: not a
-/// pool of this venue the engine reads
+/// mints' owners; DLMM's `flag` is unused since WP-06: the builder reads the bitmap extension, `extra[0]`, from the store
+/// per send). None: not a pool of this venue the engine reads
 pub fn meta_of(venue: Venue, pool: &Pk, d: &[u8]) -> Option<PoolMeta> {
     let m = match venue {
         Venue::RayAmmV4 if d.len() >= 752 => (pk_at(d, 400), pk_at(d, 432), pk_at(d, 336), pk_at(d, 368), vec![], false),
@@ -246,9 +243,11 @@ impl Registry {
     }
 
     /// The extra accounts the state stream follows (WP-03 item 2), with their roles: the Clock sysvar (chain time), every
-    /// DLMM pool's bitmap-extension PDA whether or not it exists (an update arrives if one is created), the programdata
-    /// accounts of `programs` (upgrade detection), and the wallet with its token accounts (its WSOL account and its
-    /// associated account for every registry mint: every landed transaction we pay for writes the wallet)
+    /// DLMM pool's bitmap-extension PDA whether or not it exists (an update arrives if one is created; the builder passes
+    /// it when the store holds it, WP-06), the programdata accounts of `programs` (upgrade detection), and the wallet with
+    /// its token accounts (its WSOL account and its associated account for every registry mint: every landed transaction
+    /// we pay for writes the wallet; WP-06: whether the wallet holds a mint's account is the store's) and, with a PumpSwap
+    /// pool, its PumpSwap user volume accumulator (WP-06 item 2: followed, so its creation is seen)
     pub fn extra_watch(&self, clock: bool, programs: &[Pk], wallet: Option<&Pk>) -> Vec<(Pk, RoleOf)> {
         let mut out = Vec::new();
         let none = |role: u8| RoleOf { role, pool_index: NO_POOL };
@@ -266,6 +265,7 @@ impl Registry {
             mints.sort();
             mints.dedup();
             for (mint, prog) in mints { out.push((pda::ata(w, &mint, &prog), none(role::WALLET_TOKEN_ACCOUNT))); }
+            if self.pairs.values().flatten().any(|&i| self.pools[i].venue == Venue::PumpSwap) { out.push((crate::build::pump_uva(w), none(role::WALLET_PUMP_UVA))); }
         }
         let mut seen = HashSet::default();
         out.retain(|(k, _)| seen.insert(*k));

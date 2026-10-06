@@ -48,6 +48,9 @@ pub struct Acct {
     pub src: u8,
     /// the bank it was written in, when the provider says (`SubscribeUpdateAccount.bank_id`; WP-04 forks)
     pub bank_id: Option<u64>,
+    /// the account's lamports (WP-06: the wallet's native SOL, a bankroll input derived from journaled records, so a replay
+    /// reads the same; 0 where the source does not say: tests, `Store::update`)
+    pub lamports: u64,
 }
 
 /// A version's place in the store's order: (slot, 1 for an RPC read, write_version for a stream update / aseq for an RPC
@@ -64,9 +67,15 @@ impl Acct {
     pub fn key(&self) -> VKey { vkey(self.slot, self.src, self.write_version, self.aseq) }
     /// an RPC read of `data` at `slot` (boot snapshots, tests)
     pub fn rpc(data: Arc<[u8]>, slot: u64, t_recv: u64, aseq: u64, src: u8) -> Acct {
-        Acct { data, slot, write_version: 0, txn: None, t_recv, aseq, src, bank_id: None }
+        Acct { data, slot, write_version: 0, txn: None, t_recv, aseq, src, bank_id: None, lamports: 0 }
     }
+    /// the same version with its lamports (the RPC answer's, the stream update's)
+    pub fn with_lamports(mut self, lamports: u64) -> Acct { self.lamports = lamports; self }
 }
+
+/// WP-06: an SPL Token / Token-2022 account that is initialized (state 1) or frozen (2) at the base layout's offset 108:
+/// a token account that exists. A closed account comes back from the stream empty (its data cut to 0 bytes)
+pub fn token_account_exists(d: &[u8]) -> bool { d.len() >= 165 && matches!(d[108], 1 | 2) }
 
 /// The Clock sysvar as the chain last said (WP-04 item 6)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,14 +136,16 @@ pub fn consistency_set(m: &PoolMeta) -> Vec<Pk> {
 }
 
 /// The pool's other parts (present and not pending, no age rule): the PumpSwap pool account, its fee config,
-/// GlobalConfig and base mint; the CPMM config; the AMM v4 amm account; the DLMM bitmap extension when it exists; and
-/// every Token-2022 mint of the pool its quote scans (PLAN-ADDENDUM WP-16: arbx-sizing refuses a transfer fee or hook)
+/// GlobalConfig and base mint; the CPMM config; the AMM v4 amm account; and every Token-2022 mint of the pool its quote
+/// scans (PLAN-ADDENDUM WP-16: arbx-sizing refuses a transfer fee or hook). The DLMM bitmap extension is not one since
+/// WP-06 (no quote reads it: arbx-sizing's walk stops where the pair's own bitmap ends; the builder passes it when the
+/// store holds it)
 pub fn other_parts(m: &PoolMeta) -> Vec<Pk> {
     let mut v = match m.venue {
         Venue::PumpSwap => { let mut v = vec![m.pool, *PUMP_FEE_CONFIG, *PUMP_GLOBAL_CONFIG]; v.extend(m.extra.iter().copied()); v }
         Venue::RayCpmm => m.extra.clone(),
         Venue::RayAmmV4 => vec![m.pool],
-        Venue::Dlmm => if m.flag { m.extra.clone() } else { vec![] },
+        Venue::Dlmm => vec![],
         Venue::DammV2 => vec![],
     };
     v.extend(crate::pools::t22_mints(m));
@@ -402,7 +413,7 @@ mod tests {
 
     fn k(n: u8) -> Pk { [n; 32] }
     fn stream(slot: u64, wv: u64, data: u8, txn: Option<u8>) -> Acct {
-        Acct { data: Arc::from(&[data; 8][..]), slot, write_version: wv, txn: txn.map(|t| [t; 64]), t_recv: slot * 1_000 + wv, aseq: 0, src: asrc::GRPC, bank_id: None }
+        Acct { data: Arc::from(&[data; 8][..]), slot, write_version: wv, txn: txn.map(|t| [t; 64]), t_recv: slot * 1_000 + wv, aseq: 0, src: asrc::GRPC, bank_id: None, lamports: 0 }
     }
 
     /// PLAN WP-04 acceptance, store: updates are ordered by (slot, write_version); a same-slot reordering no longer
@@ -553,7 +564,7 @@ mod tests {
         let mut d = vec![0u8; 40];
         d[0..8].copy_from_slice(&1_234u64.to_le_bytes());
         d[32..40].copy_from_slice(&1_759_000_000i64.to_le_bytes());
-        s.apply(*CLOCK_SYSVAR, Acct { data: d.into(), slot: 1_234, write_version: 1, txn: None, t_recv: 77, aseq: 0, src: asrc::GRPC, bank_id: None });
+        s.apply(*CLOCK_SYSVAR, Acct { data: d.into(), slot: 1_234, write_version: 1, txn: None, t_recv: 77, aseq: 0, src: asrc::GRPC, bank_id: None, lamports: 0 });
         assert_eq!(s.chain_clock(), Some(ChainClock { slot: 1_234, unix_timestamp: 1_759_000_000, t_recv: 77 }));
     }
 }

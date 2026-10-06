@@ -309,7 +309,7 @@ mod tests {
     use crate::feeds::src;
     use crate::venues::WSOL;
 
-    fn acct(data: Vec<u8>, slot: u64) -> Acct { Acct { data: data.into(), slot, write_version: slot, txn: None, t_recv: 0, aseq: 0, src: src::GRPC, bank_id: None } }
+    fn acct(data: Vec<u8>, slot: u64) -> Acct { Acct { data: data.into(), slot, write_version: slot, txn: None, t_recv: 0, aseq: 0, src: src::GRPC, bank_id: None, lamports: 0 } }
     fn ammv4() -> Vec<u8> {
         let mut p = vec![0u8; 752];
         p[0..8].copy_from_slice(&1u64.to_le_bytes());

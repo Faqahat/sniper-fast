@@ -31,6 +31,7 @@ mod s6_lookup_tables;
 mod s7_warmup;
 mod s8_forks;
 mod s9_inflight;
+mod s10_rent;
 mod s11_bands;
 mod synth;
 
@@ -198,9 +199,11 @@ pub(crate) struct Rig {
 /// after engine_init. No RPC endpoint, no send path, no key (a dry run's throwaway key aside)
 pub(crate) struct ExecSetup<'a> {
     pub mode: crate::exec::Mode,
-    /// the wallet holds an account for every token of the registry (else WSOL only: Stage 0 creates none,
-    /// `max_new_token_accounts = 0`, so a route through a token not held is `rent_cap`)
+    /// the wallet holds an account for every token of the registry (else WSOL only: WP-06 creates the mid token's account
+    /// and closes it in the same transaction, rent-neutral)
     pub hold_tokens: bool,
+    /// WP-06: the wallet's PumpSwap user volume accumulator exists (the boot read; else PumpSwap buys are `uva_missing`)
+    pub uva: bool,
     /// WP-00's crowded-pools list, by fixture pool name
     pub crowded: &'a [&'a str],
     /// the SendGate starts shadow for the whole segment (`mode_shadow`, as `arbx run` without `--live` starts), else live
@@ -209,7 +212,7 @@ pub(crate) struct ExecSetup<'a> {
 }
 
 impl Default for ExecSetup<'_> {
-    fn default() -> Self { ExecSetup { mode: crate::exec::Mode::Shadow, hold_tokens: true, crowded: &[], sticky_shadow: true } }
+    fn default() -> Self { ExecSetup { mode: crate::exec::Mode::Shadow, hold_tokens: true, uva: true, crowded: &[], sticky_shadow: true } }
 }
 
 /// the test leaders: two Jito validators and one of another kind (the LeaderBook's list, `Rig::new`)
@@ -228,7 +231,7 @@ fn fixture_alt(reg: &Registry, chain: &HashMap<Pk, Vec<u8>>, store: &Store, paye
         for a in &arrays { add(a.1); }
         let live: Vec<i64> = arrays.iter().map(|a| a.0).collect();
         for (tin, tout) in [(*crate::venues::WSOL, mint), (mint, *crate::venues::WSOL)] {
-            let leg = crate::build::leg(&crate::build::LegIn { m, pool: &chain[&m.pool], tin, tout, amount_in: SOL, payer, pump: Some(pump), dlmm_live: &live, dlmm_end: None });
+            let leg = crate::build::leg(&crate::build::LegIn { m, pool: &chain[&m.pool], tin, tout, amount_in: SOL, payer, pump: Some(pump), dlmm_live: &live, dlmm_end: None, dlmm_ext: None });
             if let Ok(l) = leg { add(l.out); for a in &l.accounts { add(a.key); } }
         }
     }
@@ -250,13 +253,38 @@ pub(crate) struct Setup<'a> {
     pub executor: bool,
     /// ---- WP-09: a real executor in the run (`ExecSetup`)
     pub exec: Option<ExecSetup<'a>>,
+    /// ---- WP-06: the state stream follows the wallet (`[state] watch_wallet`, as `arbx run`): its account, its token
+    /// accounts and its PumpSwap user volume accumulator, with the ones named here in the boot snapshot
+    pub wallet: Option<WalletSetup<'a>>,
+}
+
+/// The wallet as the boot snapshot reads it (WP-06): the tokens it holds an account for (by fixture pool name: that pool's
+/// non-SOL token; WSOL always), whether its PumpSwap user volume accumulator exists
+#[derive(Clone, Copy)]
+pub(crate) struct WalletSetup<'a> { pub holds: &'a [&'a str], pub uva: bool, pub lamports: u64 }
+
+/// an initialized SPL token account of `mint` owned by `owner` holding `amount` (WP-06 reads it as held)
+pub(crate) fn token_account(mint: &Pk, owner: &Pk, amount: u64) -> Vec<u8> {
+    let mut d = vec![0u8; 165];
+    d[..32].copy_from_slice(mint);
+    d[32..64].copy_from_slice(owner);
+    d[64..72].copy_from_slice(&amount.to_le_bytes());
+    d[108] = 1;
+    d
 }
 
 impl Default for Setup<'_> {
-    fn default() -> Self { Setup { pools: &[], config: &[], s0: None, omit: &[], rotate_mb: None, executor: false, exec: None } }
+    fn default() -> Self { Setup { pools: &[], config: &[], s0: None, omit: &[], rotate_mb: None, executor: false, exec: None, wallet: None } }
 }
 
 pub(crate) fn nop() -> impl FnMut(&str) { |_: &str| {} }
+
+/// the Stage-0 config with its `/root/arbx/...` data paths read from this checkout (the CU table)
+pub(crate) fn scenario_paths(cfg: &Config) -> Config {
+    let mut c = cfg.clone();
+    if let Some(rel) = c.builder.cu_table.strip_prefix("/root/arbx/") { c.builder.cu_table = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel).display().to_string(); }
+    c
+}
 
 impl Rig {
     /// Boot a scenario as `arbx run` boots a segment (see the module doc)
@@ -273,8 +301,10 @@ impl Rig {
         let rcfg = crate::config::RecordCfg { rotate_mb: s.rotate_mb.unwrap_or(crate::config::RecordCfg::default().rotate_mb), ..Default::default() };
         let rec = rec::start(rec::Opts { dir: dir.clone(), run: name.into(), producer: "scenario".into(), cfg: rcfg, feeds: vec!["shred".into(), "tx".into()],
             monitor: false, echo: Some(Box::new(std::io::sink())) }).unwrap();
-        // the state stream's base watch list and roles, as `arbx run` builds them (the Clock; no programdata, no wallet)
-        let extra = reg.extra_watch(true, &[], None);
+        // the state stream's base watch list and roles, as `arbx run` builds them (the Clock; no programdata; the wallet
+        // when the setup follows it, WP-06)
+        let payer = crate::tx::pk(&cfg.wallet);
+        let extra = reg.extra_watch(true, &[], s.wallet.as_ref().map(|_| &payer));
         let mut role_list = reg.watch_roles();
         role_list.extend(extra.iter().copied());
         let roles = Arc::new(Roles::new(role_list));
@@ -285,6 +315,21 @@ impl Rig {
         let mut chain: HashMap<Pk, Vec<u8>> = f.accounts.iter().map(|a| (a.key, a.data.clone())).collect();
         let unix0 = i64::from_le_bytes(chain[&*CLOCK_SYSVAR][32..40].try_into().unwrap());
         chain.insert(*CLOCK_SYSVAR, clock_at(&chain[&*CLOCK_SYSVAR], s0, unix0));
+        // ---- WP-06: the wallet's accounts the boot snapshot reads (a system account: no data; its WSOL account; the token
+        // accounts it holds; its PumpSwap user volume accumulator)
+        let mut wallet_lamports: HashMap<Pk, u64> = HashMap::default();
+        if let Some(w) = &s.wallet {
+            chain.insert(payer, vec![]);
+            wallet_lamports.insert(payer, w.lamports);
+            let wsol = crate::build::ata_of(&payer, &crate::venues::WSOL, &crate::pda::TOKEN_PROGRAM);
+            chain.insert(wsol, token_account(&crate::venues::WSOL, &payer, 5 * SOL));
+            for n in w.holds {
+                let m = reg.pools[reg.by_pool[&f.pool(n).1]].clone();
+                let (mint, prog) = if m.t0 == *crate::venues::WSOL { (m.t1, m.t1_prog) } else { (m.t0, m.t0_prog) };
+                chain.insert(crate::build::ata_of(&payer, &mint, &prog), token_account(&mint, &payer, 0));
+            }
+            if w.uva { chain.insert(crate::build::pump_uva(&payer), vec![7u8; 64]); }
+        }
         // the boot snapshot: accounts.bin (src rpc_boot) and the journal's ACCOUNT records with t_engine 0
         let j = Journal::new(rec.clone());
         let mut store = Store::default();
@@ -293,10 +338,11 @@ impl Rig {
             let Some(d) = chain.get(&k) else { return };
             let (fx, slot) = (f.get(&k), s0);
             let data: Arc<[u8]> = d.clone().into();
+            let lamports = fx.map_or_else(|| wallet_lamports.get(&k).copied().unwrap_or(1), |x| x.lamports);
             let aseq = ar.record(&AcctUpdate { pubkey: k, slot, write_version: 0, t_recv: T0 - 1_000 * MS, src: asrc::RPC_BOOT, is_startup: false, txn: None,
-                lamports: fx.map_or(1, |x| x.lamports), owner: fx.map_or([0; 32], |x| x.owner), data: &data, bank_id: None });
+                lamports, owner: fx.map_or([0; 32], |x| x.owner), data: &data, bank_id: None });
             j.account(0, aseq, store.is_stale(&k, slot, asrc::RPC_BOOT, 0, aseq));
-            store.apply(k, Acct::rpc(data, slot, T0 - 1_000 * MS, aseq, asrc::RPC_BOOT));
+            store.apply(k, Acct::rpc(data, slot, T0 - 1_000 * MS, aseq, asrc::RPC_BOOT).with_lamports(lamports));
         };
         ar.mark(accounts::MARK_BOOT_BEGIN, &[]);
         for k in &base { boot_one(&mut store, *k, &chain); }
@@ -317,7 +363,9 @@ impl Rig {
         e.set_base_watch(base);
         let min_tip = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.tip_lamports).min().unwrap_or(0);
         e.apply_init(&EngineInit { min_tip, strategy_sha256: engine::strategy_sha256(&cfg.strategy), executor: s.executor, signer_stats_file: String::new(),
-            signer_stats_sha256: None, signer_stats: Default::default(), knobs: Some(EngineKnobs::from_cfg(&cfg)) }).unwrap();
+            signer_stats_sha256: None, signer_stats: Default::default(), knobs: Some(EngineKnobs::from_cfg(&cfg)),
+            // WP-06: the fee and CU model as `arbx run` builds it (the config's [tips], [bands] and CU table: the repo's copy)
+            builder: Some(engine::BuilderModel::from_cfg(&scenario_paths(&cfg)).expect("the builder model")) }).unwrap();
         // ---- WP-09: the run's executor (`ExecSetup`), its gate and LeaderBook
         let gate = crate::control::SendGate::new();
         let book = crate::leaders::LeaderBook::new(Rec::off());
@@ -338,6 +386,7 @@ impl Rig {
             ex.set_gate(gate.clone());
             ex.set_leaders(book.clone());
             ex.set_health(e.health_flags());
+            ex.set_uva(Some(x.uva));
             let b = &cfg.send_policy.crowding_buckets;
             e.set_crowding(crate::crowding::Activity::new(cfg.send_policy.crowding_window_h, [b[0], b[1]], x.crowded.iter().map(|n| f.pool(n).1).collect()));
             e.exec = Some(ex);
@@ -696,6 +745,11 @@ fn the_fixture_pools_boot_and_quote() {
     }
     let bolt = boot_registry(&["bolt.pump", "bolt.dlmm"]);
     assert!(bolt.pools.iter().any(|m| m.venue == Venue::PumpSwap && m.t0_prog == pk("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")), "the bolt token is Token-2022");
-    assert!(bolt.pools.iter().any(|m| m.venue == Venue::Dlmm && !m.flag), "the bolt DLMM pair has no bitmap extension");
-    assert!(reg.pools.iter().any(|m| m.venue == Venue::Dlmm && m.flag), "the USDC DLMM pair has one");
+    // WP-06: the bitmap extension is read from the store per send (the boot check is gone): the fixtures hold the USDC
+    // pair's and not the bolt pair's, and the engine's store as the boot snapshot left it says the same
+    let ext_of = |reg: &Registry| reg.pools.iter().find(|m| m.venue == Venue::Dlmm).map(|m| m.extra[0]).unwrap();
+    assert!(f.get(&ext_of(&bolt)).is_none(), "the bolt DLMM pair has no bitmap extension");
+    assert!(f.get(&ext_of(&reg)).is_some(), "the USDC DLMM pair has one");
+    assert!(r.e.store.get(&ext_of(&reg)).is_some_and(|a| !a.data.is_empty()), "followed and held by the store");
+    assert!(reg.pools.iter().chain(&bolt.pools).all(|m| m.venue != Venue::Dlmm || !m.flag), "no boot-time flag");
 }

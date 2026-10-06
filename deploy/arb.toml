@@ -177,9 +177,7 @@ name = "jito-bundle"
 kind = "jito-bundle"
 url = "https://frankfurt.mainnet.block-engine.jito.wtf"
 auth_keypair = "~/.nexus-v2-jito-auth.json"
-tip_lamports = 10000          # floor
-tip_share = 0.7               # 70% of the predicted edge after the base fee (WP-00: aligned with the live config, R §3.6)
-tip_max_lamports = 100000     # owner 2026-10-04: bundle tips capped at 0.0001 SOL (WP-00: aligned with the live config)
+tip_lamports = 10000          # floor (WP-06: the tip itself is [tips] below)
 max_per_sec = 5               # Jito's limit on our gRPC key since 2026-10-02 (per key: arbx gets its own key at go-live)
 
 [[send]]
@@ -282,7 +280,7 @@ max_spend_lamports = 3000000   # 0.003 SOL of fees of landed failures in all
 max_size_sol = 0.165                # about $20 a trade (owner, 2026-10-03), paid from the wallet's WSOL
 max_failed_fees_lamports = 20000000 # stop after 0.02 SOL of fees on landed transactions that failed
 margin_lamports = 1000              # the decision's bar: expected profit >= tip + base fee + this
-max_new_token_accounts = 5          # rent of new token accounts (recoverable)
+# (WP-06: max_new_token_accounts is gone: a token account the wallet holds none of is created and closed in the trade)
 
 [send_policy]
 # PLAN WP-05 (the defaults, written out): fail-closed send checks, the in-flight lock, the rate queue, the on-chain margin
@@ -296,6 +294,25 @@ crowding_window_h = 6
 crowding_buckets = [20, 150]
 margin_floor = 1
 margin_share = 0.0
+
+[tips]
+# WP-06 item 8: clamp(share(band) x edge, floor, cap); 70% in every band, 10,000..100,000 (this config's bundle tips
+# before WP-06, R §3.6: aligned with the live config)
+shares = [0.7, 0.7, 0.7, 0.7, 0.7]
+floor = 10000
+cap = 100000
+
+[builder]
+# WP-06 (the defaults, written out): rent-neutral create+close, measured CU, the size budget
+create_close = true
+held_max = 0   # held-set additions off: nothing stays locked (review WP-06 #1)
+allow_uva_create = false
+loaded_data_limit = "auto"
+cu_table = "/root/arbx/data/cu-table.json"
+cu_min_samples = 30
+alt_index = true
+max_alts = 4
+payer_guard = false
 
 [send_policy.direct]
 # the direct arm's durable nonces, kept for its experiment only (direct_experiment is refused in Stage 0)

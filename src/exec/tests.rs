@@ -34,11 +34,12 @@ fn leader_of(slot: u64) -> Pk { match slot { 102..=105 => LB, 106..=109 => LO, _
 fn schedule() -> Vec<Pk> { (96..120).map(leader_of).collect() }
 fn window_json() -> Value { json!({ "start": 96, "leaders": schedule().iter().map(b58).collect::<Vec<_>>() }) }
 
-/// a config with one jito-bundle path (70% of the edge, 1,000-100,000 lamports, 5 a second); `extra`: more TOML
+/// a config with one jito-bundle path (5 a second; WP-06: `[tips]`' defaults, 70% of the edge in every band, 1,000-100,000
+/// lamports); `extra`: more TOML
 fn test_cfg(dir: &std::path::Path, extra: &str) -> Config {
     let wallet = b58(&wallet_key().verifying_key().to_bytes());
     Config::parse(&format!("config_version = 2\nout_dir = \"{}\"\nwallet = \"{wallet}\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n\
-        [[send]]\nname = \"jito-bundle\"\nkind = \"jito-bundle\"\nurl = \"https://127.0.0.1:9\"\ntip_lamports = 1000\ntip_share = 0.7\ntip_max_lamports = 100000\nmax_per_sec = 5\n{extra}",
+        [[send]]\nname = \"jito-bundle\"\nkind = \"jito-bundle\"\nurl = \"https://127.0.0.1:9\"\ntip_lamports = 1000\nmax_per_sec = 5\n{extra}",
         dir.display())).unwrap()
 }
 
@@ -66,7 +67,9 @@ fn route(buy: u8, sell: PoolMeta, expected: u64, sv: u64) -> RouteIn {
         gross_at_opp: expected as i64, net_at_opp: expected as i64, cu: 100_000,
         buy_live: vec![], sell_live: vec![], buy_end: None, sell_end: None, state_version: sv, route_age_ms: Some(1.5), decision: 40 + sv,
         trig_kind: "commit", t_first_shred: Some(90), t_commit: 150, t_priced: 400, parts_skew: Some((0, 1)),
-        crowding: Crowding { signers_6h: Some(3), bucket: 0, src: "map_partial" }, accounts: vec![([buy; 32], 98, 7)] }
+        crowding: Crowding { signers_6h: Some(3), bucket: 0, src: "map_partial" }, accounts: vec![([buy; 32], 98, 7)],
+        cu_src: "fallback".into(), cu_ata: (30_000, 5_000), mint_prog: *crate::pda::TOKEN_PROGRAM, mid_held: None, uva: None, buy_ext: None, sell_ext: None,
+        sizes: vec![] }
 }
 
 /// what the in-memory block engine got: each bundle's transaction, and the send path's network calls when it got it
@@ -125,7 +128,10 @@ impl Drop for Rig { fn drop(&mut self) { self.rec.close(); let _ = std::fs::remo
 /// jito-bundle path whose block engine is in memory (a valid cached token); shadow and dry runs hold no path (the dry run's
 /// key is a throwaway one). The store is ready, the LeaderBook knows the schedule and the kinds, the ring's head is slot
 /// 100, the `poh_trigger_pct` gauge is the rig's own. `extra`: more config
-async fn rig(name: &str, mode: Mode, extra: &str) -> Rig {
+async fn rig(name: &str, mode: Mode, extra: &str) -> Rig { rig_full(name, mode, extra, None, [*WSOL, MINT].into_iter().collect()).await }
+
+/// `rig` with PumpSwap's GlobalConfig and the tokens the wallet holds an account for
+async fn rig_full(name: &str, mode: Mode, extra: &str, pump: Option<PumpGlobal>, held: HashSet<Pk>) -> Rig {
     let dir = test_dir(name);
     let rec = test_rec(&dir);
     let cfg = test_cfg(&dir, extra);
@@ -137,8 +143,7 @@ async fn rig(name: &str, mode: Mode, extra: &str) -> Rig {
         (Some(Paths::for_test(vec![Path::test_bundle(j.clone(), Some(5), cfg.send_policy.queue_ms)], rec.clone())), Some(j), got)
     } else { (None, None, Got::default()) };
     let key = match mode { Mode::Live | Mode::Canary => Some(wallet_key()), Mode::DryRun => Some(dry_key()), Mode::Shadow => None };
-    let held: HashSet<Pk> = [*WSOL, MINT].into_iter().collect();
-    let mut x = Exec::assemble(&cfg, Rpc::race(vec![]), paths, rec.clone(), tx, vec![], vec![], None, held, mode, key).unwrap();
+    let mut x = Exec::assemble(&cfg, Rpc::race(vec![]), paths, rec.clone(), tx, vec![], vec![], pump, held, mode, key).unwrap();
     let health = Arc::new(HealthFlags::default());
     health.set(Shut::Ready);
     x.set_health(health.clone());
@@ -159,7 +164,7 @@ impl Rig {
     /// the executor's turn at chain tip `tip` (target slot `tip + 1`), engine time `t`
     fn decide(&mut self, r: RouteIn, tip: u64, t: u64) -> Decided {
         let i = self.x.inputs(&self.view, tip, t);
-        self.x.decide(r, &i, &self.view, tip, t)
+        self.x.decide(r, &i, &self.view, &AltSource::none(), tip, t)
     }
     /// what came back from the executor's tasks so far, into `buffered`
     fn drain(&mut self) { while let Ok(ev) = self.rx.try_recv() { self.buffered.push(ev); } }
@@ -303,15 +308,20 @@ fn margins_and_tips() {
     assert_eq!(min_profit_onchain(31_500, 50_000, 2_000, 0.02), (38_500, 2_000), "the floor");
     assert_eq!(min_profit_onchain(0, -5, 1, 0.5), (5_001, 1), "a negative net takes the floor");
     let c = test_cfg(&std::env::temp_dir(), "");
-    let mut t = TipPolicy::from_path(&c.sends[0]);
+    let mut t = TipPolicy::from_path(&c.sends[0], crate::tip::TipModel::from_cfg(&c).unwrap());
     let (a, x) = t.tip(50_000).unwrap();
     let (b, _) = t.tip(50_000).unwrap();
-    assert_eq!(x, 35_000);
-    assert_eq!(t.tip(45_000).unwrap().1, 31_499, "the share is rounded down: never more than it");
+    assert_eq!((x.lamports, x.band, x.share), (35_000, 1, 0.7));
+    assert_eq!(t.tip(45_000).unwrap().1.lamports, 31_499, "the share is rounded down: never more than it");
     assert_ne!(a, b, "the accounts rotate");
-    assert_eq!(t.tip(100).unwrap().1, 1_000, "the floor");
-    assert_eq!(t.tip(10_000_000).unwrap().1, 100_000, "the cap");
+    assert_eq!(t.tip(100).unwrap().1.lamports, 1_000, "the floor");
+    assert_eq!(t.tip(10_000_000).unwrap().1.lamports, 100_000, "the cap");
     assert!(tip_accounts().contains(&a));
+    // WP-06 item 8: the shares by band ([tips] shares), the same table as decisions and the queue
+    let c = test_cfg(&std::env::temp_dir(), "[tips]\nshares = [0.5, 0.6, 0.7, 0.8, 0.9]\ncap = 10000000\n");
+    let mut t = TipPolicy::from_path(&c.sends[0], crate::tip::TipModel::from_cfg(&c).unwrap());
+    let got: Vec<(u64, u8)> = [10_000i64, 50_000, 500_000, 5_000_000, 20_000_000].iter().map(|e| { let x = t.tip(*e).unwrap().1; (x.lamports, x.band) }).collect();
+    assert_eq!(got, vec![(5_000, 0), (30_000, 1), (350_000, 2), (4_000_000, 3), (10_000_000, 4)]);
 }
 
 /// data/crowded-pools.json: the 21 pools with 150 or more bots, with its source and date; bad entries are errors
@@ -462,11 +472,14 @@ async fn a_live_decision_sends_one_bundle_copy_with_no_network_call() {
 fn c_sig(raw: &[u8]) -> Option<String> { send::first_signature(raw) }
 
 /// what a live rig's bundle on the test route (pools [1; 32] and [2; 32], 1 SOL, DAMM v2 legs, signed by the wallet)
-/// must be, with its tip and on-chain min_profit
-fn live_want(x: &Exec, tip: Option<(Pk, u64)>, min_profit: u64) -> VerifyWant<'_> {
-    VerifyWant { payer: x.payer, signer: x.payer, blockhash: BH, tip, tips: tip_accounts(), program: x.program, pools: [[1; 32], [2; 32]], cu_limit: 100_000,
-        alts: &x.alt_lists, amount_in: 1_000_000_000, min_profit, margin_floor: 1, quote: build::ata_of(&x.payer, &WSOL, &crate::pda::TOKEN_PROGRAM),
-        mid: build::ata_of(&x.payer, &MINT, &crate::pda::TOKEN_PROGRAM), leg_programs: [Venue::DammV2.program(), Venue::DammV2.program()] }
+/// must be, with its tip and on-chain min_profit: the decision's route CU (100,000) and ATA allowances (30,000, 5,000),
+/// `[builder]`'s defaults (`auto` loaded-data limit, held-set additions off), the route's sizes (none in the store)
+fn live_want(x: &Exec, tip: Option<(Pk, u64)>, min_profit: u64) -> VerifyWant {
+    VerifyWant { payer: x.payer, signer: x.payer, blockhash: BH, tip, tips: tip_accounts(), program: x.program, pools: [[1; 32], [2; 32]], cu_route: 100_000,
+        cu_ata: (30_000, 5_000), alts: x.alt_lists.clone(), amount_in: 1_000_000_000, min_profit, margin_floor: 1,
+        quote: build::ata_of(&x.payer, &WSOL, &crate::pda::TOKEN_PROGRAM), mid: build::ata_of(&x.payer, &MINT, &crate::pda::TOKEN_PROGRAM),
+        leg_programs: [Venue::DammV2.program(), Venue::DammV2.program()], ata: None, held_ok: false, held_rent: build::HELD_RENT_BOUND, loaded_limit: Some(None),
+        sizes: vec![], guard: None, payer_tokens: x.payer_tokens.clone() }
 }
 
 /// Fail closed (WP-04 review #8; PLAN WP-05 item 2): an executor is not ready until an engine installs its health; a
@@ -511,8 +524,9 @@ async fn the_executor_fails_closed() {
 
 /// The route checks in a live run: the in-flight lock (the same state, a later slot of the same leader, a new state, a new
 /// leader), the ≥1M class's bucket (a token every 2 s), the crowded skip (`crowded_skip`, from
-/// `crowded_skip_min_expected_lamports`) and the crowded rank, the decision's bar, an implausible gap, the rent cap, token
-/// cooling after 25 attempts' would-fails in a row (a second would-fail of one bundle does not count again: review #16)
+/// `crowded_skip_min_expected_lamports`) and the crowded rank, the decision's bar, an implausible gap, a token not held
+/// (WP-06: created and closed, not refused), token cooling after 25 attempts' would-fails in a row (a second would-fail
+/// of one bundle does not count again: review #16)
 #[tokio::test]
 async fn the_route_checks() {
     let mut r = rig("route", Mode::Live, "[send_policy]\ncrowded_skip_min_expected_lamports = 100000\n").await;
@@ -545,19 +559,21 @@ async fn the_route_checks() {
     assert_eq!(r.decide(route(7, damm(8, MINT), 6_999, 1), 100, t).reason, "expected_below_min_profit");
     assert_eq!(r.decide(route(7, damm(8, MINT), 0, 2), 100, t).reason, "expected_below_min_profit");
     assert_eq!(r.decide(route(7, damm(8, MINT), 2_000_000_000, 3), 100, t).reason, "implausible_gap");
-    // a token the wallet holds no account for, the rent cap reached ([live] max_new_token_accounts)
+    // WP-06: a token the wallet holds no account for is no longer refused (`rent_cap` and `max_new_token_accounts` are
+    // gone): its account is created and closed in the same transaction (rent_neutral_create_and_close has the bytes)
     let mut m2 = route(7, damm(8, M2), 50_000, 4);
     m2.mint = M2;
     m2.buy = damm(7, M2);
-    r.x.max_new_atas = 0;
-    assert_eq!(r.decide(m2, 100, t).reason, "rent_cap");
+    assert_eq!(r.decide(m2, 100, t).reason, "sent");
+    let l = r.lines("attempts").last().unwrap().clone();
+    assert_eq!((l["tx"]["creates_ata"].as_bool(), l["tx"]["closes_ata"].as_bool(), l["tx"]["held_addition"].as_bool()), (Some(true), Some(true), Some(false)));
     assert_eq!((r.n("reject_inflight_same_state"), r.n("reject_inflight_same_leader"), r.n("reject_band_throttle"), r.n("reject_crowded_skip"), r.n("rank_crowded")),
         (2, 1, 1, 1, 1));
     // token cooling: would-fails of 25 attempts in a row (the block engine's results) pause the token 60 s; one bundle's
     // repeated would-fails count once
     for k in 0..24u8 { assert_eq!(r.decide(route(40 + 2 * k, damm(41 + 2 * k, MINT), 50_000, 1), 100, t).reason, "sent"); }
-    let open = r.x.open_attempts();
-    assert_eq!(open.len(), 30);
+    let open: Vec<u64> = r.x.open_attempts().into_iter().filter(|a| *a != 6).collect();
+    assert_eq!(open.len(), 30, "the M2 attempt (6) aside");
     let wf = |a: u64| json!({ "attempt": a, "outcome": "would-fail", "release": false, "sig": null });
     for k in 0..24 { r.x.on_release(&wf(open[k]), t + k as u64); }
     for _ in 0..5 { r.x.on_release(&wf(open[0]), t + 30); }
@@ -568,12 +584,12 @@ async fn the_route_checks() {
     assert_eq!(r.n("verdict_would_fail"), 30, "every result is counted as a verdict");
     // the run stops: every attempt still open gets its `unsettled` final line (stop.json lists them)
     let open = r.x.open_attempts();
-    assert_eq!(open.len(), 32);
+    assert_eq!(open.len(), 33);
     assert_eq!(r.x.settle_at_stop(), open);
     let o = r.lines("outcomes");
-    assert_eq!((o.len(), o.iter().all(|l| l["final"] == "unsettled" && l["final_src"] == "stop")), (32, true));
+    assert_eq!((o.len(), o.iter().all(|l| l["final"] == "unsettled" && l["final_src"] == "stop")), (33, true));
     assert!(r.x.open_attempts().is_empty() && r.x.inflight.is_empty());
-    assert_eq!(r.n("unsettled"), 32);
+    assert_eq!(r.n("unsettled"), 33);
 }
 
 /// PLAN WP-05 item 1: a canary run is a live run under `[canary]`'s caps: trades of at most `size_sol` (never above 0.2
@@ -1005,7 +1021,7 @@ async fn a_dry_run_signs_and_never_sends() {
         let names: Vec<&str> = dr["checks"].as_array().unwrap().iter().map(|c| c["check"].as_str().unwrap()).collect();
         assert_eq!(names, ["parses", "one_signature", "signature_verifies", "payer_is_wallet", "size", "accounts_resolve", "locks", "blockhash", "cu_limit", "no_cu_price",
             "tip_last", "tip_to_jito", "tip_check", "route_program", "pools_named", "route_data", "route_amount_in", "route_min_profit", "min_profit_covers_tip",
-            "route_accounts"]);
+            "route_accounts", "route_payer_accounts", "ix_order", "loaded_data_limit", "ata_create", "ata_close", "rent_returns", "held_addition", "route_guard"]);
         // the route as signed: the decision's size and on-chain min_profit (review #12)
         let route = dr["checks"].as_array().unwrap().iter().find(|c| c["check"] == "route_min_profit").unwrap();
         assert_eq!((route["detail"]["signed"].as_u64(), l["min_profit_onchain"].as_u64()), (route["detail"]["want"].as_u64(), route["detail"]["want"].as_u64()));
@@ -1055,7 +1071,9 @@ async fn a_dry_run_reads_and_simulates_only() {
     let m = crate::rpc::mock::MockRpc::start();
     m.slot.store(500, Relaxed);
     let payer = wallet_key().verifying_key().to_bytes();
-    for mint in [*WSOL, MINT] { m.set(build::ata_of(&payer, &mint, &crate::pda::TOKEN_PROGRAM), &[0u8; 165]); }
+    // initialized token accounts (state 1 at 108: WP-06 reads a held account as one that exists)
+    let acct = { let mut d = [0u8; 165]; d[108] = 1; d };
+    for mint in [*WSOL, MINT] { m.set(build::ata_of(&payer, &mint, &crate::pda::TOKEN_PROGRAM), &acct); }
     let dir = test_dir("dry-sim");
     let rec = test_rec(&dir);
     let cfg = test_cfg(&dir, "[exec]\nrpc = [\"mock\"]\n[dry_run]\nsimulate = true\nmax_sim_per_sec = 2\n");
@@ -1063,6 +1081,9 @@ async fn a_dry_run_reads_and_simulates_only() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let (x, notes) = Exec::new(&cfg, &rpc, None, rec.clone(), tx, vec![], Mode::DryRun, Some(dry_key()), vec![(MINT, *crate::pda::TOKEN_PROGRAM)]).await.unwrap();
     assert!(notes.iter().any(|n| n.starts_with("DRY RUN") && n.contains("simulated read-only")), "{notes:?}");
+    // WP-06: the wallet's PumpSwap user volume accumulator was read with its token accounts (the mock has none)
+    assert!(notes.iter().any(|n| n.contains("no PumpSwap user volume accumulator") && n.contains("uva_missing")), "{notes:?}");
+    assert_eq!(x.uva, Some(false));
     let mut held = vec![b58(&WSOL), b58(&MINT)];
     held.sort();
     assert_eq!(x.held_mints(), held);
@@ -1321,7 +1342,7 @@ async fn probe_decide_costs() {
             let i = r.x.inputs(&r.view, 100, t);
             vi.push(ti.elapsed().as_nanos() as u64);
             let t0 = std::time::Instant::now();
-            let d = r.x.decide(rt, &i, &r.view, 100, t);
+            let d = r.x.decide(rt, &i, &r.view, &AltSource::none(), 100, t);
             v.push(t0.elapsed().as_nanos() as u64);
             assert!(d.attempt.is_some(), "{d:?}");
             t += S; // past the rate window
@@ -1381,7 +1402,11 @@ async fn exec_init_reads_back() {
     let mut i = x.init();
     (i.crowding_window_h, i.crowding_buckets, i.crowded) = (6, [20, 150], vec![[11; 32], [12; 32]]);
     assert_eq!((i.alts[0].0, i.alts[1].0, i.pump.clone(), i.held.len(), i.max_size, i.would_send_per_sec), ([7; 32], [6; 32], Some(pump), 3, sol(cfg.live.max_size_sol), 5));
-    assert_eq!(i.tips.as_ref().map(|p| (p.floor, p.share, p.max)), Some((1_000, Some(0.7), 100_000)));
+    assert_eq!(i.tips.as_ref().map(|p| (p.model.floor, p.model.shares, p.model.cap)), Some((1_000, [0.7; 5], 100_000)));
+    assert_eq!((i.uva, i.version), (None, EXEC_INIT_VERSION));
+    let mut j = i.json();
+    j["version"] = Value::Null;
+    assert!(ExecInit::from_json(&j).is_none(), "a record written before WP-06's builder is not read as one");
     assert_eq!(i.cfg_sha256, cfg_sha256(&cfg));
     let back = ExecInit::from_json(&i.json()).unwrap();
     assert_eq!(back, i);
@@ -1400,6 +1425,8 @@ fn the_executor_config_hash() {
     c.live.max_failed_fees_lamports = 1;
     assert_eq!(cfg_sha256(&c), base);
     assert_ne!(cfg_sha256(&test_cfg(&dir, "[send_policy]\ninflight_hold_slots = 3\n")), base);
+    // WP-06: the builder, the tips and the bands are the executor's too
+    for extra in ["[builder]\nheld_max = 3\n", "[builder]\ncreate_close = false\n", "[tips]\ncap = 200000\n", "[bands]\nedges = [1, 2, 3, 4]\n"] { assert_ne!(cfg_sha256(&test_cfg(&dir, extra)), base, "{extra}"); }
     c.strategy.cu_price_micro += 1;
     assert_ne!(cfg_sha256(&c), base);
 }
@@ -1412,7 +1439,8 @@ fn the_executor_config_hash() {
 fn an_offline_executor_reads_the_runs_records() {
     let cfg = test_cfg(&std::env::temp_dir(), "");
     let init = ExecInit { mode: Mode::Shadow, alts: vec![], pump: None, held: vec![*WSOL, MINT], max_size: 1_000, max_size_src: "live".into(), bankroll_cap: None,
-        would_send_per_sec: 3, tips: None, crowding_window_h: 6, crowding_buckets: [20, 150], crowded: vec![], cfg_sha256: cfg_sha256(&cfg) };
+        would_send_per_sec: 3, tips: None, crowding_window_h: 6, crowding_buckets: [20, 150], crowded: vec![], cfg_sha256: cfg_sha256(&cfg), uva: Some(true),
+        version: EXEC_INIT_VERSION };
     let mut x = Exec::offline(&cfg, &init, Rec::off()).unwrap();
     assert!(x.is_offline() && x.paths.is_none() && x.key.is_none() && x.jito.is_none());
     assert_eq!((x.size_cap(), x.path_rate), (1_000, 3));
@@ -1438,4 +1466,718 @@ fn an_offline_executor_reads_the_runs_records() {
     x.stage_seen(6, 7, &rec4);
     x.stage_seen(8, 8, &json!({ "mode": null, "src": "decision", "opp": 8, "executor": false }));
     assert_eq!(x.seen_mismatch, 3);
+}
+
+// ------------------------------------------------------------------------------------------------ WP-06: the builder
+
+/// a route through M2, a token the wallet holds no account for (DAMM v2 legs)
+fn route_m2(buy: u8, sell: u8, expected: u64, sv: u64) -> RouteIn {
+    let mut r = route(buy, damm(sell, M2), expected, sv);
+    r.mint = M2;
+    r.buy = damm(buy, M2);
+    r
+}
+
+/// the dry-run attempt lines' signed transactions
+fn signed(l: &Value) -> Vec<u8> { use base64::Engine as _; base64::engine::general_purpose::STANDARD.decode(l["dry_run"]["tx_b64"].as_str().unwrap()).unwrap() }
+
+/// the checks of `raw` that fail against `want`
+fn failing(raw: &[u8], want: &VerifyWant) -> Vec<String> {
+    verify_bundle(raw, want).iter().filter(|c| c["ok"] != json!(true)).map(|c| c["check"].as_str().unwrap().to_string()).collect()
+}
+
+/// The ledger of one bundle transaction, instruction by instruction, on the payer's native lamports (what WP-07's ledger
+/// books from the chain, read here from the signed bytes): the base fee, every System transfer from the payer (the tip),
+/// the rent an ATA create takes (`rent`: the account's rent-exempt minimum) and what a CloseAccount of an account this
+/// transaction created gives back (every lamport of it: its rent, it holds nothing else). Returns (native delta, rent
+/// locked, rent reclaimed)
+fn payer_ledger(tx: &crate::tx::Tx, payer: &Pk, rent: u64) -> (i64, u64, u64) {
+    let mut native = -(BASE_FEE as i64);
+    let (mut locked, mut reclaimed) = (0u64, 0u64);
+    let mut created: HashMap<Pk, u64> = HashMap::default();
+    for ix in &tx.ixs {
+        let p = tx.keys[ix.program as usize];
+        let key = |k: usize| tx.keys[ix.accounts[k] as usize];
+        if p == *crate::pda::ATA_PROGRAM && ix.data == [1] && key(0) == *payer {
+            native -= rent as i64;
+            locked += rent;
+            created.insert(key(1), rent);
+        } else if (p == *crate::pda::TOKEN_PROGRAM || p == *crate::pda::TOKEN_2022) && ix.data == [9] && key(1) == *payer {
+            let back = created.remove(&key(0)).expect("a close of an account this transaction did not create");
+            native += back as i64;
+            reclaimed += back;
+        } else if p == [0u8; 32] && ix.data.len() == 12 && ix.data[..4] == [2, 0, 0, 0] && key(0) == *payer {
+            native -= u64::from_le_bytes(ix.data[4..12].try_into().unwrap()) as i64;
+        }
+    }
+    (native, locked, reclaimed)
+}
+
+/// PLAN WP-06 items 1-2, the go-live gate's rent-neutral create+close: a route through a token the wallet holds no account
+/// for creates the payer's ATA before the route and closes it to the payer after it, in the same transaction, in the
+/// plan's order (CU limit, loaded-data limit, create, route, close, tip); its CU limit adds the create and the close. The
+/// ledger of the signed bytes: the native lamports move by the fee and the tip only (rent locked = rent reclaimed: 1,488,440
+/// for an SPL account at mainnet's rent, 1,513,840 for a Token-2022 one); the dry run's checks pass on the new layout. A held
+/// token's route creates and closes nothing. The executor's attempt lines say which (`creates_ata`, `closes_ata`)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rent_neutral_create_and_close() {
+    let mut r = rig("rent-neutral", Mode::DryRun, "").await;
+    let t = now_ns();
+    let payer = r.x.payer;
+    assert_eq!(r.decide(route_m2(1, 2, 50_000, 1), 100, t).reason, "would_send");
+    assert_eq!(r.decide(route(3, damm(4, MINT), 50_000, 1), 100, t + S).reason, "would_send");
+    let a = r.lines("attempts");
+    let (cc, held) = (&a[0], &a[1]);
+    for l in [cc, held] { assert_eq!(l["dry_run"]["checks_ok"].as_bool(), Some(true), "{}", l["dry_run"]["checks"]); }
+    assert_eq!((cc["tx"]["creates_ata"].as_bool(), cc["tx"]["closes_ata"].as_bool(), cc["tx"]["held_addition"].as_bool(), cc["tx"]["cu_limit"].as_u64()),
+        (Some(true), Some(true), Some(false), Some(100_000 + 30_000 + 5_000)), "the create and the close are in the CU limit");
+    assert_eq!((held["tx"]["creates_ata"].as_bool(), held["tx"]["closes_ata"].as_bool(), held["tx"]["cu_limit"].as_u64()), (Some(false), Some(false), Some(100_000)));
+    assert_eq!(cc["tx"]["mid_account"].as_str(), Some(b58(&build::ata_of(&payer, &M2, &crate::pda::TOKEN_PROGRAM)).as_str()));
+    let (tx, _) = crate::tx::parse_wire(&signed(cc)).unwrap();
+    let progs: Vec<Pk> = tx.ixs.iter().map(|ix| tx.keys[ix.program as usize]).collect();
+    assert_eq!(progs, vec![crate::tx::COMPUTE_BUDGET, crate::tx::COMPUTE_BUDGET, *crate::pda::ATA_PROGRAM, r.x.program, *crate::pda::TOKEN_PROGRAM, [0u8; 32]]);
+    let tip = cc["tip"]["lamports"].as_u64().unwrap();
+    for rent in [1_488_440u64, 1_513_840] {
+        let (native, locked, reclaimed) = payer_ledger(&tx, &payer, rent);
+        assert_eq!((native, locked, reclaimed), (-(BASE_FEE as i64) - tip as i64, rent, rent), "rent-neutral: the fee and the tip only");
+    }
+    let (tx, _) = crate::tx::parse_wire(&signed(held)).unwrap();
+    assert_eq!(tx.ixs.len(), 4, "CU limit, loaded-data limit, route, tip");
+    assert_eq!(payer_ledger(&tx, &payer, 1_488_440), (-(BASE_FEE as i64) - held["tip"]["lamports"].as_i64().unwrap(), 0, 0));
+    for (name, ok) in [("ix_order", true), ("ata_create", true), ("ata_close", true), ("rent_returns", true)] {
+        let c = cc["dry_run"]["checks"].as_array().unwrap().iter().find(|c| c["check"] == name).unwrap().clone();
+        assert_eq!(c["ok"].as_bool(), Some(ok), "{c}");
+    }
+    let rr = cc["dry_run"]["checks"].as_array().unwrap().iter().find(|c| c["check"] == "rent_returns").unwrap()["detail"].clone();
+    assert_eq!((rr["created"].clone(), rr["closed"].clone()), (json!([b58(&build::ata_of(&payer, &M2, &crate::pda::TOKEN_PROGRAM))]), rr["created"].clone()));
+}
+
+/// PLAN WP-06 + go-live gate item 4: the dry run's checks on the new layout catch every way the rent could stay locked or
+/// the order break, from the signed bytes alone (review WP-06 #2: what the transaction creates, keeps and closes is read
+/// from it, never taken from the build): no close (`ix_order`, `ata_close`, `rent_returns`, `held_addition`, and
+/// `min_profit_covers_tip`: the kept account's rent is not covered; `cu_limit`: the close's allowance is in the limit
+/// without the close); a close to another account (the rent leaves: the same, the order aside); the close before the
+/// route (`ix_order`, `rent_returns`); a close of a held token's account the transaction did not create (`cu_limit`,
+/// `ix_order`, `ata_close`, `rent_returns`); another token's account created (`ata_create`, `ata_close`; `rent_returns`
+/// holds: it is closed); a kept account, held-set additions off (the default) or on but the close fitting; a wrong
+/// loaded-data limit; a missing guard trailer. min_profit still covers the tip + the base fee + the margin floor: the
+/// create's rent comes back in the transaction, so it is not paid out
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn verify_bundle_on_the_new_layout() {
+    let mut r = rig("verify-wp06", Mode::DryRun, "").await;
+    let t = now_ns();
+    assert_eq!(r.decide(route_m2(1, 2, 50_000, 1), 100, t).reason, "would_send");
+    let l = r.lines("attempts")[0].clone();
+    let (mp, tip0) = (l["min_profit_onchain"].as_u64().unwrap(), (pk(l["tip"]["account"].as_str().unwrap()), l["tip"]["lamports"].as_u64().unwrap()));
+    let x = &r.x;
+    let payer = x.payer;
+    let dk = dry_key();
+    let ata = build::AtaOps { mint: M2, token_program: *crate::pda::TOKEN_PROGRAM, close: true };
+    let limit = l["tx"]["loaded_data_limit"].as_u64().unwrap() as u32;
+    // the executor's own want re-derives the `auto` limit from the message; these hand-laid variants keep it fixed, so
+    // each one fails for what it changes
+    let auto = VerifyWant { signer: dk.verifying_key().to_bytes(), mid: build::ata_of(&payer, &M2, &crate::pda::TOKEN_PROGRAM), ata: Some((M2, *crate::pda::TOKEN_PROGRAM)),
+        ..live_want(x, Some(tip0), mp) };
+    assert_eq!(failing(&signed(&l), &auto), Vec::<String>::new(), "the executor's own bytes");
+    let want = VerifyWant { loaded_limit: Some(Some(limit)), ..want_clone(&auto) };
+    assert_eq!(failing(&signed(&l), &want), Vec::<String>::new());
+    // the same route, its instructions laid out by hand
+    let rt = route_m2(1, 2, 50_000, 1);
+    let leg = |m: &PoolMeta, tin: Pk, tout: Pk| build::leg(&build::LegIn { m, pool: &[], tin, tout, amount_in: rt.size, payer, pump: None, dlmm_live: &[], dlmm_end: None,
+        dlmm_ext: None }).unwrap();
+    let quote = build::ata_of(&payer, &WSOL, &crate::pda::TOKEN_PROGRAM);
+    let route_ix = build::route_ix(x.program, payer, quote, rt.size, mp, &[leg(&rt.buy, *WSOL, M2), leg(&rt.sell, M2, *WSOL)], None).unwrap();
+    let sign = |ixs: Vec<build::Ix>| { let m = build::compile_v0(payer, &ixs, BH, &[], &[tip0.0]).unwrap(); build::sign(&m, &dk) };
+    // the CU limit each plan asks: the route's 100,000 plus the create's 30,000 and the close's 5,000 when it makes them
+    let plan = |a: Option<build::AtaOps>| build::Plan { payer, cu_limit: 100_000 + a.map_or(0, |a| 30_000 + if a.close { 5_000 } else { 0 }), loaded_data_limit: Some(limit),
+        ata: a, tip: Some(tip0) };
+    let good = build::bundle_ixs(&plan(Some(ata)), route_ix.clone());
+    assert_eq!(failing(&sign(good.clone()), &want), Vec::<String>::new());
+    // no close: the rent stays locked (and the limit still asks the close's CU)
+    let mut v = good.clone();
+    v.remove(4);
+    assert_eq!(failing(&sign(v), &want), ["cu_limit", "min_profit_covers_tip", "ix_order", "ata_close", "rent_returns", "held_addition"]);
+    // the close sends the rent elsewhere
+    let mut v = good.clone();
+    v[4] = build::close_account_ix(want.mid, [250; 32], payer, *crate::pda::TOKEN_PROGRAM);
+    assert_eq!(failing(&sign(v), &want), ["min_profit_covers_tip", "ata_close", "rent_returns", "held_addition"]);
+    // the close before the route (it would fail on chain, or close an account the route then needs)
+    let mut v = good.clone();
+    v.swap(3, 4);
+    assert_eq!(failing(&sign(v), &want), ["ix_order", "rent_returns"]);
+    // a held token: the transaction must create and close nothing; a close of its account (not created here) is caught
+    let held_want = VerifyWant { ata: None, ..want_clone(&want) };
+    let mut v = build::bundle_ixs(&plan(None), route_ix.clone());
+    v.insert(3, build::close_account_ix(want.mid, payer, payer, *crate::pda::TOKEN_PROGRAM));
+    assert_eq!(failing(&sign(v), &held_want), ["cu_limit", "ix_order", "ata_close", "rent_returns"]);
+    // another token's account created (and closed): not the route's mid account
+    let other = build::AtaOps { mint: [249; 32], ..ata };
+    assert_eq!(failing(&sign(build::bundle_ixs(&plan(Some(other)), route_ix.clone())), &want), ["ata_create", "ata_close"]);
+    // an account created and kept: with held-set additions off (the default) it is caught whatever else holds; with them
+    // configured and allowed (`held_ok`) it is caught still, as this bundle carries its close easily (only an addition
+    // the size budget needed passes: the_size_budget_ladder)
+    let kept = build::bundle_ixs(&plan(Some(build::AtaOps { close: false, ..ata })), route_ix.clone());
+    let kept_fails = ["min_profit_covers_tip", "ix_order", "ata_close", "rent_returns", "held_addition"];
+    assert_eq!(failing(&sign(kept.clone()), &want), kept_fails);
+    let on = VerifyWant { held_ok: true, ..want_clone(&want) };
+    assert_eq!(failing(&sign(kept.clone()), &on), kept_fails);
+    let c = verify_bundle(&sign(kept), &on).into_iter().find(|c| c["check"] == "held_addition").unwrap();
+    assert!(c["detail"]["with_close"]["bytes"].as_u64().unwrap() <= build::MAX_TX_BYTES as u64, "{c}");
+    // a wrong loaded-data limit; the guard trailer missing when one is wanted
+    let mut p2 = plan(Some(ata));
+    p2.loaded_data_limit = Some(limit - 32 * 1024);
+    assert_eq!(failing(&sign(build::bundle_ixs(&p2, route_ix.clone())), &want), ["loaded_data_limit"]);
+    assert_eq!(failing(&sign(build::bundle_ixs(&p2, route_ix.clone())), &auto), ["loaded_data_limit"], "auto: re-derived from the message");
+    assert_eq!(failing(&sign(good.clone()), &VerifyWant { guard: Some(0), ..want_clone(&want) }), ["route_guard"]);
+    // a leg that spends from the payer's USDC account (review WP-06 #7): min_profit does not watch it
+    let usdc = build::ata_of(&payer, &PERMANENT_MINTS[1], &crate::pda::TOKEN_PROGRAM);
+    let mut b1 = leg(&rt.buy, *WSOL, M2);
+    b1.accounts[2].key = usdc;
+    let bad_route = build::route_ix(x.program, payer, quote, rt.size, mp, &[b1, leg(&rt.sell, M2, *WSOL)], None).unwrap();
+    let bad = sign(build::bundle_ixs(&plan(Some(ata)), bad_route));
+    assert_eq!(failing(&bad, &want), ["route_payer_accounts"]);
+    assert!(failing(&bad, &VerifyWant { payer_tokens: vec![], ..want_clone(&want) }).is_empty(), "only that check sees it");
+    // min_profit covers the tip, the fee and the margin floor; the rent is not paid out (it comes back)
+    let c = verify_bundle(&sign(good), &want).into_iter().find(|c| c["check"] == "min_profit_covers_tip").unwrap();
+    assert_eq!((c["ok"].as_bool(), c["detail"]["signed_paid_out"].as_u64(), c["detail"]["kept_rent"].as_u64()), (Some(true), Some(tip0.1), Some(0)));
+}
+
+fn want_clone(w: &VerifyWant) -> VerifyWant {
+    VerifyWant { payer: w.payer, signer: w.signer, blockhash: w.blockhash, tip: w.tip, tips: w.tips.clone(), program: w.program, pools: w.pools, cu_route: w.cu_route,
+        cu_ata: w.cu_ata, alts: w.alts.clone(), amount_in: w.amount_in, min_profit: w.min_profit, margin_floor: w.margin_floor, quote: w.quote, mid: w.mid,
+        leg_programs: w.leg_programs, ata: w.ata, held_ok: w.held_ok, held_rent: w.held_rent, loaded_limit: w.loaded_limit, sizes: w.sizes.clone(), guard: w.guard,
+        payer_tokens: w.payer_tokens.clone() }
+}
+
+/// PLAN WP-06 item 2: a PumpSwap buy names the wallet's user volume accumulator and creates it when it is missing
+/// (1,346,200 lamports, never recovered, outside the route's profit check): refused `uva_missing` while it is absent or
+/// unknown (fail closed), unless `[builder] allow_uva_create`; the store's view (the route's `uva`) overrides the boot
+/// read. A PumpSwap sell does not name it
+#[tokio::test]
+async fn uva_missing_refuses_pumpswap_buys() {
+    let mut r = rig("uva", Mode::Live, "").await;
+    let t = now_ns();
+    let pump_buy = |n: u8, uva: Option<bool>| { let mut x = route(n, damm(n + 1, MINT), 50_000, 1); x.buy.venue = Venue::PumpSwap; x.uva = uva; x };
+    assert_eq!(r.decide(pump_buy(1, None), 100, t).reason, "uva_missing", "unknown: the boot read none");
+    r.x.set_uva(Some(false));
+    assert_eq!(r.decide(pump_buy(3, None), 100, t).reason, "uva_missing");
+    assert_eq!(r.decide(pump_buy(5, Some(false)), 100, t).reason, "uva_missing", "the store says it is not there");
+    // present: past the check (this test's pool has no PumpSwap bytes to build a leg from: the build refuses next)
+    assert!(r.decide(pump_buy(7, Some(true)), 100, t).reason.starts_with("build_error:buy leg"), "the store says it is there");
+    r.x.set_uva(Some(true));
+    assert!(r.decide(pump_buy(9, None), 100, t).reason.starts_with("build_error:buy leg"), "the boot read it");
+    assert_eq!(r.decide(pump_buy(11, Some(false)), 100, t).reason, "uva_missing", "the store's view wins");
+    // a sell on PumpSwap is not a buy
+    let mut sell = route(13, damm(14, MINT), 50_000, 1);
+    sell.sell.venue = Venue::PumpSwap;
+    sell.uva = Some(false);
+    assert_ne!(r.decide(sell, 100, t).reason, "uva_missing");
+    // review WP-06 #13: a buy is a PumpSwap leg its quote token (t1) goes into, on either leg: a sell leg on a pool whose
+    // quote is the route's token buys it
+    let mut sell_buys = route(17, damm(18, MINT), 50_000, 1);
+    (sell_buys.sell.venue, sell_buys.sell.t0, sell_buys.sell.t1, sell_buys.uva) = (Venue::PumpSwap, *WSOL, MINT, Some(false));
+    assert_eq!(r.decide(sell_buys, 100, t).reason, "uva_missing");
+    r.x.builder.allow_uva_create = true;
+    assert!(r.decide(pump_buy(15, Some(false)), 100, t).reason.starts_with("build_error:buy leg"), "the owner allowed the creation");
+    assert_eq!(r.n("reject_uva_missing"), 5);
+}
+
+/// PLAN WP-06 item 2: whether the wallet holds the mid token's account is the store's view when the engine follows it
+/// (the route's `mid_held`), else the boot read's: a token the boot read held but the store shows closed is created and
+/// closed again; a token the boot read missed but the store holds is neither
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_held_view_comes_from_the_store() {
+    let mut r = rig("held-view", Mode::DryRun, "").await;
+    let t = now_ns();
+    let mut gone = route(1, damm(2, MINT), 50_000, 1);
+    gone.mid_held = Some(false);
+    let mut there = route_m2(3, 4, 50_000, 1);
+    there.mid_held = Some(true);
+    for (k, x) in [gone, there].into_iter().enumerate() { assert_eq!(r.decide(x, 100, t + k as u64 * S).reason, "would_send"); }
+    let a = r.lines("attempts");
+    assert_eq!(a.iter().map(|l| (l["tx"]["creates_ata"].as_bool().unwrap(), l["tx"]["closes_ata"].as_bool().unwrap(), l["dry_run"]["checks_ok"].as_bool().unwrap()))
+        .collect::<Vec<_>>(), vec![(true, true, true), (false, false, true)]);
+}
+
+/// PLAN WP-06 items 4 and 9: the CU limit is the route's (the engine's CU model: `RouteIn::cu`) plus the ATA create and
+/// close it makes (`cu_ata`), and the attempt says where it came from; with `[builder] payer_guard` the route carries
+/// nexus-v2's 8-byte trailer (`max_payer_lamport_drop`, `payer_guard_max_drop`) and the dry run's `route_guard` checks it;
+/// the tip is the band's share of the edge (attempts `tip.share`, `tip.band`)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cu_limit_guard_and_tip_band_in_the_bundle() {
+    let mut r = rig("cu-guard", Mode::DryRun, "[builder]\npayer_guard = true\npayer_guard_max_drop = 7\n[tips]\nshares = [0.5, 0.6, 0.7, 0.8, 0.9]\ncap = 10000000\n").await;
+    let t = now_ns();
+    let mut x = route_m2(1, 2, 2_005_000, 1);
+    (x.cu, x.cu_src, x.cu_ata) = (211_000, "table:DammV2|na+DammV2|na".into(), (23_100, 3_300));
+    assert_eq!(r.decide(x, 100, t).reason, "would_send");
+    let l = r.lines("attempts")[0].clone();
+    assert_eq!(l["dry_run"]["checks_ok"].as_bool(), Some(true), "{}", l["dry_run"]["checks"]);
+    assert_eq!((l["tx"]["cu_limit"].as_u64(), l["tx"]["cu_src"].as_str(), l["tx"]["guard_max_drop"].as_u64()), (Some(211_000 + 23_100 + 3_300),
+        Some("table:DammV2|na+DammV2|na"), Some(7)));
+    // the edge 2,000,000 is band 3 (1M-10M): 0.8 of it
+    assert_eq!((l["band"].as_u64(), l["tip"]["band"].as_u64(), l["tip"]["share"].as_f64(), l["tip"]["lamports"].as_u64()), (Some(3), Some(3), Some(0.8), Some(1_600_000)));
+    let raw = signed(&l);
+    let (tx, _) = crate::tx::parse_wire(&raw).unwrap();
+    let all = tx.resolve(|_| None).unwrap();
+    let seen = route_of(&tx, &all, &r.x.program).unwrap();
+    assert_eq!((seen.guard, seen.min_profit), (Some(7), l["min_profit_onchain"].as_u64().unwrap()));
+    let g = l["dry_run"]["checks"].as_array().unwrap().iter().find(|c| c["check"] == "route_guard").unwrap().clone();
+    assert_eq!((g["ok"].as_bool(), g["detail"]["signed"].as_u64()), (Some(true), Some(7)));
+}
+
+/// WP-06's hook for WP-07: the size cap under a bankroll cap; none before WP-07 (the size cap alone), whatever the store says
+#[tokio::test]
+async fn the_bankroll_hook() {
+    let x = idle_exec();
+    for b in [Bankroll::default(), Bankroll { native: Some(1), wsol: Some(0) }, Bankroll { native: Some(u64::MAX), wsol: Some(u64::MAX) }] {
+        assert_eq!((x.bankroll_cap(&b), x.size_cap_for(&b)), (None, x.size_cap()));
+    }
+}
+
+/// Review WP-06 #2 (the review's mutant M1, in the dry run itself): a builder that keeps the account it creates (no close)
+/// fails the dry run's own checks, read from the signed bytes: the order, the close, the rent's return, the held-set
+/// addition (none is configured; or one is, but this bundle carries its close easily) and min_profit (the kept rent is
+/// not covered); the attempt says which. Nothing comes from the build: its own record of the kept account changes none
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dry_run_catches_a_kept_account() {
+    for extra in ["", "[builder]\nheld_max = 40\n"] {
+        let mut r = rig("dry-kept", Mode::DryRun, extra).await;
+        let t = now_ns();
+        r.x.fault_keep = true;
+        assert_eq!(r.decide(route_m2(1, 2, 50_000, 1), 100, t).reason, "would_send");
+        let l = r.lines("attempts")[0].clone();
+        assert_eq!((l["tx"]["creates_ata"].as_bool(), l["tx"]["closes_ata"].as_bool(), l["tx"]["held_addition"].as_bool()), (Some(true), Some(false), Some(true)));
+        let failed: Vec<&str> = l["dry_run"]["checks"].as_array().unwrap().iter().filter(|c| c["ok"] != json!(true)).map(|c| c["check"].as_str().unwrap()).collect();
+        assert_eq!(failed, ["min_profit_covers_tip", "ix_order", "ata_close", "rent_returns", "held_addition"], "{extra:?}");
+        assert_eq!((l["dry_run"]["checks_ok"].as_bool(), r.n("dry_run_check_failed"), r.n("dry_run_ok"), r.n("held_addition")), (Some(false), 1, 0, 1));
+        let c = l["dry_run"]["checks"].as_array().unwrap().iter().find(|c| c["check"] == "held_addition").unwrap().clone();
+        assert_eq!((c["detail"]["held_ok"].as_bool(), c["detail"]["rent"].as_u64()), (Some(!extra.is_empty()), Some(build::HELD_RENT_BOUND)), "{c}");
+    }
+}
+
+/// Review WP-06 #2: the dry run re-derives the CU limit and the loaded-data limit from the signed message's own
+/// instructions and accounts, on the decision's route CU, ATA allowances and account sizes, never the build's numbers: a
+/// builder that asks another CU limit (here without the create's allowance) or another loaded-data limit fails `cu_limit`
+/// / `loaded_data_limit` although its own record agrees with its bytes; the sizes the decision holds move the limit
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dry_run_rederives_the_cu_and_loaded_data_limits() {
+    let mut r = rig("dry-limits", Mode::DryRun, "").await;
+    let t = now_ns();
+    let failed = |l: &Value| -> Vec<String> { l["dry_run"]["checks"].as_array().unwrap().iter().filter(|c| c["ok"] != json!(true)).map(|c| c["check"].as_str().unwrap().to_string()).collect() };
+    let detail = |l: &Value, k: &str| l["dry_run"]["checks"].as_array().unwrap().iter().find(|c| c["check"] == k).unwrap()["detail"].clone();
+    assert_eq!(r.decide(route_m2(1, 2, 50_000, 1), 100, t).reason, "would_send");
+    let good = r.lines("attempts")[0].clone();
+    assert_eq!(failed(&good), Vec::<String>::new());
+    let cu = detail(&good, "cu_limit");
+    assert_eq!((cu["want"].as_u64(), cu["route"].as_u64(), cu["creates"].as_u64(), cu["closes"].as_u64()), (Some(135_000), Some(100_000), Some(1), Some(1)));
+    let ld = detail(&good, "loaded_data_limit");
+    let limit = good["tx"]["loaded_data_limit"].as_u64().unwrap();
+    assert_eq!((ld["signed"].as_u64(), ld["want"].as_u64()), (Some(limit), Some(build::loaded_data_padded(ld["need"].as_u64().unwrap()) as u64)));
+    // the CU limit without the create's 30,000
+    r.x.fault_cu = Some(100_000 + 5_000);
+    assert_eq!(r.decide(route_m2(3, 4, 50_000, 1), 100, t + S).reason, "would_send");
+    let l = r.lines("attempts")[1].clone();
+    assert_eq!((l["tx"]["cu_limit"].as_u64(), failed(&l)), (Some(105_000), vec!["cu_limit".to_string()]), "the build's own number agrees with its bytes");
+    r.x.fault_cu = None;
+    // 1 MiB less loaded data
+    r.x.fault_loaded = Some(limit as u32 - (1 << 20));
+    assert_eq!(r.decide(route_m2(5, 6, 50_000, 1), 100, t + 2 * S).reason, "would_send");
+    let l = r.lines("attempts")[2].clone();
+    assert_eq!((l["tx"]["loaded_data_limit"].as_u64(), failed(&l)), (Some(limit - (1 << 20)), vec!["loaded_data_limit".to_string()]));
+    r.x.fault_loaded = None;
+    // a pool the store sizes at 10 MB: both the build and the dry run's derivation count it
+    let mut big = route_m2(7, 8, 50_000, 1);
+    big.sizes = vec![([7; 32], 10_000_000)];
+    assert_eq!(r.decide(big, 100, t + 3 * S).reason, "would_send");
+    let l = r.lines("attempts")[3].clone();
+    assert_eq!(failed(&l), Vec::<String>::new());
+    assert!(l["tx"]["loaded_data_limit"].as_u64().unwrap() > limit + 10_000_000, "{}", l["tx"]["loaded_data_limit"]);
+    assert_eq!((r.n("dry_run_ok"), r.n("dry_run_check_failed")), (2, 2));
+}
+
+/// Review WP-06 #3 (the review's mutant M4 survived every test): the size cap holds end to end. The engine re-quotes every
+/// route at the executor's cap (`Engine::after_opportunity`: `size_cap_for(bankroll)`: the canary's `size_sol`, else
+/// `[live] max_size_sol`) before the executor decides, so no attempt trades above it whatever size the engine priced: a
+/// canary's bundles (decoded from what the block engine received) and a shadow run's would-sends. The executor's own
+/// refusal (`size_cap`) comes with lane/wp-07
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_engine_caps_the_size() {
+    let canary = "[canary]\nenabled = true\ncount = 10\nevery_ms = 1\nsize_sol = 0.05\nmax_spend_lamports = 20000\n";
+    for (mode, extra, cap) in [(Mode::Canary, canary, 50_000_000u64), (Mode::Shadow, "[live]\nmax_size_sol = 0.03\n", 30_000_000)] {
+        let mut r = rig("size-cap", mode, &format!("[send_policy]\nbig_band_max_per_sec = 1000\n{extra}")).await;
+        let gate = SendGate::new();
+        if mode == Mode::Shadow { let _ = gate.shadow("mode_shadow", "no --live or --canary: nothing is sent", true); }
+        let (mut e, a, b) = amm_engine();
+        e.set_rec(r.rec.clone());
+        let mut x = std::mem::replace(&mut r.x, idle_exec());
+        assert_eq!(x.size_cap(), cap);
+        x.set_gate(gate);
+        x.set_health(e.health_flags());
+        let program = x.program;
+        e.exec = Some(x);
+        let mut t = now_ns();
+        amm_start(&mut e, &mut t);
+        amm_move(&mut e, &a, 0, 1_030, &mut t);
+        amm_move(&mut e, &b, 1, 1_060, &mut t);
+        r.rec.sync();
+        let d: Vec<Value> = rec::read_jsonl(&r.dir, "decisions").unwrap().into_iter().filter(|l| l["opp"].is_u64()).collect();
+        let priced: Vec<u64> = d.iter().filter_map(|l| l["routes"][l["best"].as_u64()? as usize]["size"].as_u64()).collect();
+        assert!(!priced.is_empty() && priced.iter().all(|s| *s > cap), "{mode:?}: the engine priced above the cap: {priced:?}");
+        let att = rec::read_jsonl(&r.dir, "attempts").unwrap();
+        assert!(!att.is_empty(), "{mode:?}: {d:?}");
+        for l in &att { assert!(l["size_lamports"].as_u64().unwrap() <= cap, "{mode:?}: {}", l["size_lamports"]); }
+        if mode.sends() {
+            let _ = r.settled().await;
+            let got = r.got.lock().unwrap().clone();
+            assert!(!got.is_empty());
+            for (raw, _) in &got {
+                let (tx, _) = crate::tx::parse_wire(raw).unwrap();
+                assert!(route_of(&tx, &tx.resolve(|_| None).unwrap(), &program).unwrap().amount_in <= cap, "the signed amount_in");
+            }
+        }
+    }
+}
+
+/// a rich worst-case route (3M expected: it covers min_profit and a held account's rent) through `mint`, on pools
+/// `buy`/`sell`, and the learned table (key `table`, indexed by its buy pool) with the fewest of its accounts that makes
+/// the held-ATA fallback the one that fits (held-set additions configured)
+fn held_route(x: &mut Exec, mint: Pk, buy: u8, sell: u8, table: Pk) -> (RouteIn, Vec<Option<Pk>>) {
+    let mut w = worst_route();
+    (w.mint, w.buy.t0, w.sell.t0, w.buy.extra, w.buy.pool, w.sell.pool, w.back) = (mint, mint, mint, vec![mint], [buy; 32], [sell; 32], w.size + 3_000_000);
+    let tip = Some((tip_accounts()[0], 35_000));
+    let route = build::route_ix(x.program, x.payer, build::ata_of(&x.payer, &WSOL, &crate::pda::TOKEN_PROGRAM), w.size, 40_001, &[leg_of(x, &w, true), leg_of(x, &w, false)], None).unwrap();
+    let full = x.compile(&w, &route, Some(build::AtaOps { mint, token_program: *crate::pda::TOKEN_PROGRAM, close: true }), tip, BH, &[], None).unwrap().msg.loadable.clone();
+    let entries = |n: usize| -> Vec<Option<Pk>> { full[..n].iter().map(|k| Some(*k)).chain([Some(*crate::pda::TOKEN_PROGRAM)]).collect() };
+    let by_pool: HashMap<Pk, Vec<Pk>> = [(w.buy.pool, vec![table])].into_iter().collect();
+    let keep = x.builder.held_max;
+    x.builder.held_max = 40;
+    let n = (0..full.len()).find(|n| {
+        let t: HashMap<Pk, Vec<Option<Pk>>> = [(table, entries(*n))].into_iter().collect();
+        x.build(&w, 40_001, BH, tip, &AltSource { tables: &t, by_pool: &by_pool }).is_ok_and(|b| b.alt_fallback == "held_ata")
+    }).expect("a table size where only the held-ATA fallback fits");
+    x.builder.held_max = keep;
+    (w, entries(n))
+}
+
+/// Review WP-06 #5 (the review's mutant M5 survived): `held_max` counts every held-set addition, the landed ones and the
+/// ones in flight. With `held_max = 1` (configured), a live held addition in flight stops another token's (`oversized`:
+/// "1 tokens held of held_max 1"); once it lands its token is in the held set (`new_token_accounts_total` 1) and the limit
+/// still binds; a higher `held_max` lets the next one go
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn held_additions_count_in_flight_and_landed() {
+    let mut r = rig_full("held-count", Mode::Live, "[builder]\nheld_max = 1\n[send_policy]\nbig_band_max_per_sec = 1000\n", Some(pump_global()), [*WSOL].into_iter().collect()).await;
+    let m3: Pk = [247; 32];
+    let (ta, tb) = ([0xab; 32], [0xac; 32]);
+    let (a, ea) = held_route(&mut r.x, M2, 21, 22, ta);
+    let (b, eb) = held_route(&mut r.x, m3, 41, 42, tb);
+    let tables: HashMap<Pk, Vec<Option<Pk>>> = [(ta, ea), (tb, eb)].into_iter().collect();
+    let by_pool: HashMap<Pk, Vec<Pk>> = [(a.buy.pool, vec![ta]), (b.buy.pool, vec![tb])].into_iter().collect();
+    let alts = AltSource { tables: &tables, by_pool: &by_pool };
+    let t = now_ns();
+    let decide = |r: &mut Rig, w: &RouteIn, sv: u64, t: u64| { let mut w = w.clone(); w.state_version = sv; let i = r.x.inputs(&r.view, 100, t); r.x.decide(w, &i, &r.view, &alts, 100, t) };
+    assert_eq!(decide(&mut r, &a, 1, t).reason, "sent");
+    let la = r.lines("attempts")[0].clone();
+    assert_eq!((la["tx"]["alt_fallback"].as_str(), la["tx"]["held_addition"].as_bool()), (Some("held_ata"), Some(true)));
+    assert_eq!(r.x.held_count(), 1, "in flight");
+    // another token while the first is in flight: the held set is full
+    assert_eq!(decide(&mut r, &b, 1, t + S).reason, "oversized");
+    assert!(r.x.build(&b, 40_001, BH, Some((tip_accounts()[0], 35_000)), &alts).err().unwrap().contains("held_ata: 1 tokens held of held_max 1"));
+    // the first lands: its token joins the held set; the limit still binds
+    let sig = la["tx"]["sig"].as_str().unwrap().to_string();
+    r.x.on_wallet_tx(&json!({ "sig": sig, "ok": true, "slot": 101, "fee": 5_000 }), t + 2 * S, &|_| None);
+    assert!(r.x.open_attempts().is_empty() && r.x.held.contains(&M2));
+    assert_eq!((r.x.held_count(), r.x.new_atas), (1, 1));
+    assert_eq!(decide(&mut r, &b, 2, t + 3 * S).reason, "oversized", "landed: counted");
+    // room for one more
+    r.x.builder.held_max = 2;
+    assert_eq!(decide(&mut r, &b, 3, t + 4 * S).reason, "sent");
+    assert_eq!((r.x.held_count(), r.n("reject_oversized")), (2, 2));
+}
+
+/// Review WP-06 #9: `[builder] create_close = false` (the held-only control arm) trades only tokens the wallet holds an
+/// account for: a route through any other is refused (`mid_not_held`) before anything is built; a held token's route goes
+#[tokio::test]
+async fn create_close_off_trades_held_tokens_only() {
+    let mut r = rig("held-only", Mode::Live, "[builder]\ncreate_close = false\n").await;
+    let t = now_ns();
+    assert_eq!(r.decide(route_m2(1, 2, 50_000, 1), 100, t).reason, "mid_not_held");
+    let mut there = route_m2(3, 4, 50_000, 1);
+    there.mid_held = Some(true);
+    assert_eq!(r.decide(there, 100, t + 1).reason, "sent", "the store holds it");
+    assert_eq!(r.decide(route(5, damm(6, MINT), 50_000, 1), 100, t + 2).reason, "sent", "the boot read held it");
+    let a = r.lines("attempts");
+    assert!(a.iter().all(|l| l["tx"]["creates_ata"] == json!(false)), "nothing created");
+    assert_eq!(r.n("reject_mid_not_held"), 1);
+}
+
+/// PumpSwap's GlobalConfig as the rig's PumpSwap legs read it
+fn pump_global() -> PumpGlobal { PumpGlobal { disable_flags: 0, protocol: vec![[30; 32], [31; 32], [32; 32]], reserved: vec![[33; 32]], buyback: vec![[34; 32], [35; 32]] } }
+
+/// the worst-case 2-leg route of PLAN WP-06's size acceptance: a PumpSwap buy (pool v2: 25 accounts) and a DLMM sell
+/// naming 5 bin arrays, through M2 (not held: create and close)
+fn worst_route() -> RouteIn {
+    let mut r = route_m2(1, 2, 50_000, 1);
+    r.buy = PoolMeta { venue: Venue::PumpSwap, pool: [21; 32], t0: M2, t1: *WSOL, vault0: [23; 32], vault1: [24; 32], t0_prog: *crate::pda::TOKEN_PROGRAM,
+        t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![M2], flag: false };
+    r.sell = PoolMeta { venue: Venue::Dlmm, pool: [22; 32], t0: M2, t1: *WSOL, vault0: [25; 32], vault1: [26; 32], t0_prog: *crate::pda::TOKEN_PROGRAM,
+        t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![[27; 32]], flag: false };
+    let mut pool = vec![0u8; 300];
+    pool[211..243].copy_from_slice(&[40; 32]);
+    r.buy_data = pool;
+    let mut pair = vec![0u8; 904];
+    pair[76..80].copy_from_slice(&150i32.to_le_bytes());   // array 2; selling X walks down
+    pair[552..584].copy_from_slice(&[13; 32]);
+    r.sell_data = pair;
+    (r.sell_live, r.sell_end, r.sell_ext, r.uva) = (vec![-2, -1, 0, 1, 2], Some(-120), Some([27; 32]), Some(true));
+    r
+}
+
+/// PLAN WP-06 item 7, the size budget, on the worst-case route: over 1,232 bytes with the `[exec]` tables alone; a table
+/// the engine learned that names the route's pools is added (`alt_index`) and the bundle fits, every check passing on
+/// the signed bytes (the table resolves); with fewer accounts in the index, where create+close does not fit and keeping
+/// the new account would: `oversized` by default (review WP-06 #1: held-set additions are off, `held_max = 0`); with
+/// held-set additions configured (an explicit opt-in), still `oversized` unless the expected profit covers min_profit and
+/// the rent the account would lock, or once the held set is full; else `held_ata`, its route asking min_profit +
+/// `HELD_RENT_BOUND` on chain, and the dry run passes it (the close does not fit: a justified addition); else `oversized`
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_size_budget_ladder() {
+    let mut r = rig_full("size", Mode::DryRun, "", Some(pump_global()), [*WSOL].into_iter().collect()).await;
+    let t = now_ns();
+    let w = worst_route();
+    let tip = Some((tip_accounts()[0], 35_000));
+    assert_eq!(r.x.builder.held_max, 0, "held-set additions are off by default");
+    // nothing to add: oversized (keeping the account saves the close, not 200 bytes)
+    let e = r.x.build(&w, 40_001, BH, tip, &AltSource::none()).err().unwrap();
+    assert!(e.starts_with("oversized("), "{e}");
+    assert_eq!(build_reason(&e), "oversized");
+    // a learned table naming the PumpSwap pool and every account the message could load
+    let full = { let m = r.x.compile(&w, &build::route_ix(r.x.program, r.x.payer, build::ata_of(&r.x.payer, &WSOL, &crate::pda::TOKEN_PROGRAM), w.size, 40_001,
+        &[leg_of(&r.x, &w, true), leg_of(&r.x, &w, false)], None).unwrap(), Some(build::AtaOps { mint: M2, token_program: *crate::pda::TOKEN_PROGRAM, close: true }), tip, BH, &[], None).unwrap();
+        m.msg.loadable.clone() };
+    assert!(full.len() > 20, "{}", full.len());
+    // (a learned table holds the token program too: loadable once no CloseAccount invokes it)
+    let table = [0xab; 32];
+    let entries = |n: usize| -> Vec<Option<Pk>> { full[..n].iter().map(|k| Some(*k)).chain([Some(*crate::pda::TOKEN_PROGRAM)]).collect() };
+    let tables: HashMap<Pk, Vec<Option<Pk>>> = [(table, entries(full.len()))].into_iter().collect();
+    let by_pool: HashMap<Pk, Vec<Pk>> = [(w.buy.pool, vec![table])].into_iter().collect();
+    let alts = AltSource { tables: &tables, by_pool: &by_pool };
+    let b = r.x.build(&w, 40_001, BH, tip, &alts).unwrap();
+    assert_eq!((b.alt_fallback, b.index_tables.clone(), b.creates_ata(), b.closes_ata()), ("alt_index", vec![table], true, true));
+    assert!(b.fits() && build::tx_bytes(&b.msg) <= build::MAX_TX_BYTES);
+    // the executor's own decision with that table: a would-send whose signed bytes pass every check (the table resolves)
+    let i = r.x.inputs(&r.view, 100, t);
+    let d = r.x.decide(w.clone(), &i, &r.view, &alts, 100, t);
+    assert_eq!(d.reason, "would_send", "{d:?}");
+    let l = r.lines("attempts")[0].clone();
+    assert_eq!((l["tx"]["alt_fallback"].as_str(), l["tx"]["alt_index_tables"][0].as_str(), l["dry_run"]["checks_ok"].as_bool()), (Some("alt_index"), Some(b58(&table).as_str()),
+        Some(true)), "{}", l["dry_run"]["checks"]);
+    assert!(l["tx"]["bytes"].as_u64().unwrap() <= 1_232);
+    // a route whose expected profit (3M) covers min_profit and the rent a kept account locks; the 50,000 one does not
+    let mut rich = worst_route();
+    (rich.back, rich.state_version) = (rich.size + 3_000_000, 2);
+    // fewer accounts in the index: a table size where create+close does not fit and keeping the account would (held-set
+    // additions configured)
+    let n = (0..full.len()).find(|n| {
+        let part: HashMap<Pk, Vec<Option<Pk>>> = [(table, entries(*n))].into_iter().collect();
+        r.x.builder.held_max = 40;
+        let ok = r.x.build(&rich, 40_001, BH, tip, &AltSource { tables: &part, by_pool: &by_pool }).is_ok_and(|b| b.alt_fallback == "held_ata");
+        r.x.builder.held_max = 0;
+        ok
+    }).expect("some table size makes the held-ATA fallback the one that fits");
+    let part: HashMap<Pk, Vec<Option<Pk>>> = [(table, entries(n))].into_iter().collect();
+    let alts = AltSource { tables: &part, by_pool: &by_pool };
+    // the default: no held-set addition, the bundle is refused
+    let e = r.x.build(&rich, 40_001, BH, tip, &alts).err().unwrap();
+    assert!(e.starts_with("oversized(") && !e.contains("held_ata"), "{e}");
+    // configured: the poor route cannot pay the rent; the rich one keeps the account and its route asks the rent too
+    r.x.builder.held_max = 40;
+    let e = r.x.build(&w, 40_001, BH, tip, &alts).err().unwrap();
+    assert!(e.starts_with("oversized(") && e.contains("held_ata: expected 50000 below min_profit + the rent kept"), "{e}");
+    let b = r.x.build(&rich, 40_001, BH, tip, &alts).unwrap();
+    assert_eq!((b.alt_fallback, b.creates_ata(), b.closes_ata(), b.held_addition(), b.min_profit, b.held_rent),
+        ("held_ata", true, false, true, 40_001 + build::HELD_RENT_BOUND, build::HELD_RENT_BOUND));
+    let raw = build::sign(&b.msg, &wallet_key());
+    let (tx, _) = crate::tx::parse_wire(&raw).unwrap();
+    let list = |t: &Pk| alts.list(t);
+    assert_eq!(route_of(&tx, &tx.resolve(list).unwrap(), &r.x.program).unwrap().min_profit, 40_001 + build::HELD_RENT_BOUND, "on chain");
+    // the held set full (held_max tokens held beyond WSOL, USDC, USDT): oversized
+    r.x.builder.held_max = 1;
+    r.x.held.insert([248; 32]);
+    let e = r.x.build(&rich, 40_001, BH, tip, &alts).err().unwrap();
+    assert!(e.contains("held_ata: 1 tokens held of held_max 1"), "{e}");
+    r.x.held.remove(&[248; 32]);
+    // the executor's own dry-run decision: a held-set addition its checks pass from the signed bytes (configured and
+    // allowed, the close does not fit, the rent in min_profit)
+    r.x.builder.held_max = 40;
+    let i = r.x.inputs(&r.view, 100, t + S);
+    let d = r.x.decide(rich.clone(), &i, &r.view, &alts, 100, t + S);
+    assert_eq!(d.reason, "would_send", "{d:?}");
+    let l = r.lines("attempts")[1].clone();
+    assert_eq!((l["tx"]["alt_fallback"].as_str(), l["tx"]["held_addition"].as_bool(), l["tx"]["held_rent_lamports"].as_u64(), l["dry_run"]["checks_ok"].as_bool()),
+        (Some("held_ata"), Some(true), Some(build::HELD_RENT_BOUND), Some(true)), "{}", l["dry_run"]["checks"]);
+    assert_eq!(l["min_profit_onchain"].as_u64(), Some(100_000 + 5_000 + 1 + build::HELD_RENT_BOUND), "the tip (capped), the fee, the margin floor and the rent");
+    assert_eq!((r.n("held_addition"), r.n("dry_run_ok")), (1, 2), "counted");
+    let c = l["dry_run"]["checks"].as_array().unwrap().iter().find(|c| c["check"] == "held_addition").unwrap().clone();
+    assert!(c["detail"]["with_close"]["bytes"].as_u64().unwrap() > build::MAX_TX_BYTES as u64, "{c}");
+    // max_alts = 0: no table from the index
+    r.x.builder.max_alts = 0;
+    assert!(r.x.build(&w, 40_001, BH, tip, &alts).err().unwrap().starts_with("oversized"));
+}
+
+/// one leg of `worst_route` as the executor builds it
+fn leg_of(x: &Exec, r: &RouteIn, buy: bool) -> build::Leg {
+    let (m, data, tin, tout, live, end, ext) = if buy { (&r.buy, &r.buy_data, *WSOL, r.mint, &r.buy_live, r.buy_end, r.buy_ext) }
+        else { (&r.sell, &r.sell_data, r.mint, *WSOL, &r.sell_live, r.sell_end, r.sell_ext) };
+    build::leg(&build::LegIn { m, pool: data, tin, tout, amount_in: r.size, payer: x.payer, pump: x.pump.as_ref(), dlmm_live: live, dlmm_end: end, dlmm_ext: ext }).unwrap()
+}
+
+// ------------------------------------------------------------------------------------------------ WP-06: LiteSVM vectors
+
+/// a venue-parity fixture (testdata/venue-parity/pools: the venue harness's snapshots): every account (owner, data) and
+/// its Clock (slot, unix time)
+struct ParityFx { pool: Pk, venue: Venue, slot: u64, unix: i64, accts: Vec<(Pk, Pk, Vec<u8>)> }
+
+fn parity_fx(file: &str) -> ParityFx {
+    use base64::Engine as _;
+    let path = format!("{}/testdata/venue-parity/pools/{file}", env!("CARGO_MANIFEST_DIR"));
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let accts = v["accounts"].as_array().unwrap().iter().map(|a| (pk(a["pubkey"].as_str().unwrap()), pk(a["owner"].as_str().unwrap()),
+        base64::engine::general_purpose::STANDARD.decode(a["data"].as_str().unwrap()).unwrap())).collect();
+    ParityFx { pool: pk(v["pool"].as_str().unwrap()), venue: Venue::parse(v["venue"].as_str().unwrap()).unwrap(), slot: v["clock"]["slot"].as_u64().unwrap(),
+        unix: v["clock"]["unix_timestamp"].as_i64().unwrap(), accts }
+}
+
+impl ParityFx {
+    fn data(&self, k: &Pk) -> Option<&Vec<u8>> { self.accts.iter().find(|a| a.0 == *k).map(|a| &a.2) }
+    /// the engine's metadata (`pools::meta_of`, the token programs from the mints' owners)
+    fn meta(&self) -> PoolMeta {
+        let mut m = crate::pools::meta_of(self.venue, &self.pool, self.data(&self.pool).unwrap()).unwrap();
+        let prog = |k: &Pk| self.accts.iter().find(|a| a.0 == *k).map_or(*crate::pda::TOKEN_PROGRAM, |a| a.1);
+        (m.t0_prog, m.t1_prog) = (prog(&m.t0), prog(&m.t1));
+        m
+    }
+}
+
+/// One bundle of the vectors: its route (which pool buys), GLL3's quote vault scaled by `num`/1000, the wallet holding the
+/// mid token's account or not, the on-chain min_profit (`profit_fail`: above anything the route can make)
+struct Case { name: &'static str, num: u64, gll3_buys: bool, held: bool, profit_fail: bool }
+
+/// PLAN WP-06 / go-live gate (rent-neutral create+close) on the real programs: the bundles arbx's builder makes for the
+/// recorded HOTBOT route (PumpSwap GLL3 ↔ DLMM 6D4E; HOTBOT is a Token-2022 mint), written to
+/// testdata/builder/bundle-vectors.json for program/venue-harness `tests/arbx_bundle.rs`, which executes them in LiteSVM
+/// on the dumped mainnet programs (PumpSwap, its fee program, DLMM, SPL Token, Token-2022, the ATA program) and the
+/// deployed nexus-v2 ELF. Each vector is the executor's own build (`Exec::build`: the CU limit, the loaded-data limit,
+/// the create, the route, the close, the tip), signed by the test wallet; the quote is arbx-sizing's on the same
+/// snapshot (the gap opened as program/venue-harness `tests/route.rs` does). The file must be what this builder makes:
+/// `ARBX_BLESS=1` rewrites it
+#[tokio::test]
+async fn bundle_vectors_for_the_venue_harness() {
+    use crate::quote::{self as q, Use};
+    let (g, d) = (parity_fx("PumpSwap-GLL3CzybpSCLZdoACf8QUM5YrKVwyA65kQ2RcTsJxxzV.json"), parity_fx("DLMM-6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo.json"));
+    let (gm, dm) = (g.meta(), d.meta());
+    let mint = gm.t0;
+    assert_eq!((dm.t0, gm.t1, dm.t1), (mint, *WSOL, *WSOL), "HOTBOT/SOL on both");
+    let mint_prog = gm.t0_prog;
+    assert_eq!(mint_prog, *crate::pda::TOKEN_2022, "HOTBOT is a Token-2022 mint: its account and its close are Token-2022's");
+    let cfg = test_cfg(&std::env::temp_dir(), "");
+    let payer = wallet_key().verifying_key().to_bytes();
+    let pump = build::decode_pump_global(g.data(&crate::pools::PUMP_GLOBAL_CONFIG).unwrap()).unwrap();
+    let arrays: Vec<(i64, Pk)> = { let mut v: Vec<(i64, Pk)> = d.accts.iter().filter(|a| a.1 == Venue::Dlmm.program() && a.2.len() == 10_136)
+        .map(|a| (i64::from_le_bytes(a.2[8..16].try_into().unwrap()), a.0)).collect(); v.sort(); v };
+    let tip_acct = tip_accounts()[0];
+    let cases = [Case { name: "pump_buy_dlmm_sell_create_close", num: 880, gll3_buys: true, held: false, profit_fail: false },
+        Case { name: "pump_buy_dlmm_sell_held", num: 880, gll3_buys: true, held: true, profit_fail: false },
+        Case { name: "pump_buy_dlmm_sell_create_close_profit_fail", num: 880, gll3_buys: true, held: false, profit_fail: true },
+        Case { name: "dlmm_buy_pump_sell_create_close", num: 1_120, gll3_buys: false, held: false, profit_fail: false }];
+    let mk = |alts: Vec<(Pk, Vec<Pk>)>| Exec::assemble(&cfg, Rpc::race(vec![]), None, Rec::off(), crossbeam_channel::unbounded().0, vec![], alts, Some(pump.clone()),
+        [*WSOL].into_iter().collect(), Mode::Shadow, None).unwrap();
+    let ours = [build::ata_of(&payer, &WSOL, &crate::pda::TOKEN_PROGRAM), build::ata_of(&payer, &mint, &mint_prog), build::pump_uva(&payer)];
+    // each case's route, quoted by arbx-sizing on the snapshot with GLL3's quote vault scaled (the gap)
+    let mut routes: Vec<(RouteIn, u64, u64, u64)> = Vec::new();
+    for c in &cases {
+        let q0 = u64::from_le_bytes(g.data(&gm.vault1).unwrap()[64..72].try_into().unwrap());
+        let scaled = q0 / 1_000 * c.num;
+        let mut accts: HashMap<Pk, crate::store::Acct> = HashMap::default();
+        for fx in [&g, &d] {
+            for (k, _, data) in &fx.accts {
+                let mut data = data.clone();
+                if *k == gm.vault1 { data[64..72].copy_from_slice(&scaled.to_le_bytes()); }
+                accts.insert(*k, crate::store::Acct::rpc(Arc::from(data), fx.slot, 0, 0, crate::feeds::src::RPC_BOOT));
+            }
+        }
+        let get = |k: &Pk| accts.get(k);
+        let usable = |_: i64| true;
+        let src = q::Src { get: &get, arrays: &arrays, usable: &usable, clock: q::clock(d.slot, d.unix) };
+        let u = Use::Route { dlmm_budget: q::DLMM_BUDGET_ALONE };
+        let (bm, sm) = if c.gll3_buys { (&gm, &dm) } else { (&dm, &gm) };
+        let (lb, ls) = (q::leg(bm, bm.t0 == *WSOL, &src, u).unwrap(), q::leg(sm, sm.t0 == mint, &src, u).unwrap());
+        let ladder: Vec<u64> = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0].iter().map(|s| (s * 1e9) as u64).collect();
+        let t = q::best(&lb, &ls, &ladder, 1_000_000, 1_000_000_000).unwrap();
+        assert!(t.profit() > 100_000, "{}: the gap pays: {}", c.name, t.profit());
+        let (wb, ws) = (lb.walk(t.x).unwrap(), ls.walk(t.mid).unwrap());
+        let (cu, cu_src) = crate::cu_table::CuModel::default().route(bm.venue, wb.crossed, sm.venue, ws.crossed);
+        let mut r = route_m2(1, 2, 0, 1);
+        (r.buy, r.sell, r.mint, r.mint_prog) = (bm.clone(), sm.clone(), mint, mint_prog);
+        (r.buy_data, r.sell_data) = (accts[&bm.pool].data.to_vec(), accts[&sm.pool].data.to_vec());
+        (r.size, r.mid, r.back, r.spent, r.buy_end, r.sell_end) = (t.x, wb.out, ws.out, wb.spent, wb.end, ws.end);
+        let live: Vec<i64> = arrays.iter().map(|a| a.0).collect();
+        (r.buy_live, r.sell_live) = if c.gll3_buys { (vec![], live) } else { (live, vec![]) };
+        (r.cu, r.cu_src, r.cu_ata, r.mid_held, r.uva) = (cu, cu_src.as_str(), crate::cu_table::CuModel::default().ata_ops(), Some(c.held), Some(true));
+        r.sizes = accts.iter().map(|(k, a)| (*k, a.data.len() as u32)).collect();
+        r.sizes.sort();
+        let expected = r.expected();
+        // the tip and min_profit as the executor sets them (70% of the edge, the base fee, the margin floor 1)
+        let tip_l = crate::tip::TipModel::default().tip(expected - 5_000, false).lamports;
+        let min_profit = if c.profit_fail { expected as u64 + 1_000_000 } else { tip_l + 5_000 + 1 };
+        routes.push((r, tip_l, min_profit, scaled));
+    }
+    // the [exec] lookup table: every account the bundles could load from one (the payer's own accounts and its volume
+    // accumulator left out: a shared table holds none of ours), both directions
+    let mut keys: Vec<Pk> = Vec::new();
+    let x0 = mk(vec![]);
+    for (r, _, min_profit, _) in &routes {
+        let route = build::route_ix(x0.program, payer, ours[0], r.size, *min_profit, &[leg_of(&x0, r, true), leg_of(&x0, r, false)], None).unwrap();
+        let plan = Some(build::AtaOps { mint, token_program: mint_prog, close: true });
+        for k in x0.compile(r, &route, plan, Some((tip_acct, 1)), BH, &[], None).unwrap().msg.loadable { if !ours.contains(&k) && !keys.contains(&k) { keys.push(k); } }
+    }
+    let table = ([0xa1u8; 32], keys);
+    let x = mk(vec![table.clone()]);
+    let mut cases_out = Vec::new();
+    for (c, (r, tip_l, min_profit, scaled)) in cases.iter().zip(&routes) {
+        let (bm, sm) = (&r.buy, &r.sell);
+        let b = x.build(r, *min_profit, BH, Some((tip_acct, *tip_l)), &AltSource::none()).unwrap_or_else(|e| panic!("{}: {e}", c.name));
+        assert!(b.fits() && b.alt_fallback == "none", "{}: {} bytes", c.name, build::tx_bytes(&b.msg));
+        assert_eq!((b.creates_ata(), b.closes_ata()), (!c.held, !c.held), "{}", c.name);
+        let raw = build::sign(&b.msg, &wallet_key());
+        // the dry run's checks pass on the signed bytes (the table resolves), every value re-derived from them
+        let mut want = x.want(r, payer, BH, Some((tip_acct, *tip_l)), *min_profit, &raw, &AltSource::none());
+        want.signer = payer;
+        assert_eq!(failing(&raw, &want), Vec::<String>::new(), "{}", c.name);
+        // the signed instructions recompile to the same message on the tables it names (what `with_close` builds on)
+        let (tx, _) = crate::tx::parse_wire(&raw).unwrap();
+        let all = tx.resolve(|t| want.alts.get(t).cloned()).unwrap();
+        let tables: Vec<Alt> = tx.lookups.iter().map(|l| Alt::new(l.table, &want.alts[&l.table])).collect();
+        let again = build::compile_v0(payer, &signed_ixs(&tx, &all).unwrap(), BH, &tables.iter().collect::<Vec<_>>(), &[tip_acct]).unwrap();
+        assert_eq!(again.bytes, b.msg.bytes, "{}", c.name);
+        cases_out.push(json!({ "name": c.name, "gll3_quote_vault_scale": [c.num, 1_000], "gll3_quote_vault": b58(&gm.vault1), "gll3_quote_vault_amount": scaled,
+            "buy_pool": b58(&bm.pool), "sell_pool": b58(&sm.pool), "mint": b58(&mint), "token_program": b58(&mint_prog),
+            "mid_account": b58(&build::ata_of(&payer, &mint, &mint_prog)), "held": c.held, "size": r.size, "spent": r.spent, "back": r.back, "expected_profit": r.expected(),
+            "min_profit": min_profit, "tip": [b58(&tip_acct), tip_l], "cu_limit": b.cu_limit, "cu_src": b.cu_src, "cu_route": r.cu, "cu_ata": [r.cu_ata.0, r.cu_ata.1],
+            "loaded_data_limit": b.loaded_data_limit,
+            "expect": if c.profit_fail { "profit_fail" } else { "ok" }, "bytes": raw.len(), "tx_b64": base64_of(&raw) }));
+    }
+    let (tk, ta) = table;
+    let doc = json!({ "schema": "arbx.bundle-vectors/1", "about": "arbx's own bundles (src/exec/tests.rs bundle_vectors_for_the_venue_harness), executed by \
+        program/venue-harness tests/arbx_bundle.rs on the dumped mainnet programs and the deployed nexus-v2 ELF (PLAN WP-06)",
+        "payer": b58(&payer), "payer_seed_byte": 1, "program": b58(&pk(&cfg.exec.program)), "blockhash": b58(&BH), "clock_from": "DLMM-6D4E",
+        "fixtures": ["PumpSwap-GLL3CzybpSCLZdoACf8QUM5YrKVwyA65kQ2RcTsJxxzV.json", "DLMM-6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo.json"],
+        "alt": { "table": b58(&tk), "addrs": ta.iter().map(b58).collect::<Vec<_>>() }, "cases": cases_out });
+    let path = format!("{}/testdata/builder/bundle-vectors.json", env!("CARGO_MANIFEST_DIR"));
+    let text = serde_json::to_string_pretty(&doc).unwrap() + "\n";
+    if std::env::var_os("ARBX_BLESS").is_some() {
+        std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap()).unwrap();
+        std::fs::write(&path, &text).unwrap();
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(have == text, "{path} is not what this builder makes: ARBX_BLESS=1 cargo test --release --lib bundle_vectors (then run program/venue-harness tests/arbx_bundle.rs)");
 }

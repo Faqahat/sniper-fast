@@ -257,9 +257,24 @@ struct Resync {
     missing: u64,
 }
 
-/// one priced route
+/// one priced route (WP-06: the size search stopped at the DLMM window, `dlmm_cap_bound`)
 #[derive(Clone, Debug)]
-struct Priced { size: u64, gross: i64, net: i64, cu: u64, crossed: (u32, u32) }
+struct Priced { size: u64, gross: i64, net: i64, cu: u64, crossed: (u32, u32), dlmm_cap_bound: bool }
+
+/// WP-06: what the engine prices a route's fee and CU with (PLAN WP-06 items 4, 5, 8): the tip policy by band (the fee
+/// estimate is the base fee plus the tip of the gross's edge: a bundle pays CU price 0; and the band table) and the CU
+/// model (the measured table, its sample floor, the fallback formula). Journaled with the engine_init record
+/// (`builder`), so a replay prices as the run did without reading the table file. A journal without it (written before
+/// WP-06) replays with the old rule: base fee + `cu_price_micro` × CU + `min_tip`, today's CU formula
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct BuilderModel { pub tips: crate::tip::TipModel, pub cu: crate::cu_table::CuModel }
+
+impl BuilderModel {
+    /// from `[tips]`, `[bands]` and `[builder] cu_table` / `cu_min_samples` (the table read here, once)
+    pub fn from_cfg(c: &crate::config::Config) -> Result<BuilderModel, String> {
+        Ok(BuilderModel { tips: crate::tip::TipModel::from_cfg(c)?, cu: crate::cu_table::CuModel::from_cfg(&c.builder)? })
+    }
+}
 
 /// one route of an evaluation
 struct RouteRes { buy: usize, sell: usize, priced: Option<Priced>, reason: &'static str, sv: Option<RouteView>, slots: Vec<u64>, txns: Vec<(u64, u64)> }
@@ -400,6 +415,16 @@ pub struct Engine {
     seen_journaled: Option<(crate::control::GateMode, String, crate::leaders::LeaderKind, bool, bool)>,
     /// ---- WP-09: the exec_init record was journaled (`journal_exec_init`)
     exec_init_journaled: bool,
+    // ------------------------------------------------------------ WP-06
+    /// the fee and CU model (`BuilderModel`; None: a pre-WP-06 journal's rule)
+    builder: Option<BuilderModel>,
+    /// the lookup tables of the cache that name each registry pool (the size budget's index, PLAN WP-06 item 7)
+    alt_by_pool: HashMap<Pk, Vec<Pk>>,
+    /// every account the state stream follows (`set_base_watch`): whether the store's view of the wallet's token accounts
+    /// and of its PumpSwap user volume accumulator can be trusted (WP-06 item 2)
+    watch_set: HashSet<Pk>,
+    /// the executor's wallet's PumpSwap user volume accumulator (derived once)
+    uva_key: std::cell::OnceCell<Pk>,
 }
 
 /// {signer: [ok, failed]} as a file holds it; with the sha256 of the bytes read. Missing or unreadable: empty, no hash
@@ -481,20 +506,26 @@ pub struct EngineInit {
     pub signer_stats: HashMap<Pk, (u32, u32)>,
     /// None in a WP-03 journal (the defaults then)
     pub knobs: Option<EngineKnobs>,
+    /// WP-06: the fee and CU model (None in a journal written before WP-06: the old rule)
+    pub builder: Option<BuilderModel>,
 }
 
 impl EngineInit {
     pub fn json(&self) -> Value {
         json!({ "min_tip": self.min_tip, "strategy_sha256": self.strategy_sha256, "executor": self.executor,
             "signer_stats_file": self.signer_stats_file, "signer_stats_sha256": self.signer_stats_sha256, "signer_stats": signer_stats_json(&self.signer_stats),
-            "knobs": self.knobs })
+            "knobs": self.knobs, "builder": self.builder })
     }
 
     pub fn from_json(v: &Value) -> Option<EngineInit> {
         let stats = parse_signer_stats(v["signer_stats"].as_object()?);
         Some(EngineInit { min_tip: v["min_tip"].as_u64()?, strategy_sha256: v["strategy_sha256"].as_str()?.to_string(), executor: v["executor"].as_bool()?,
             signer_stats_file: v["signer_stats_file"].as_str().unwrap_or("").to_string(), signer_stats_sha256: v["signer_stats_sha256"].as_str().map(String::from),
-            signer_stats: stats, knobs: serde_json::from_value(v["knobs"].clone()).ok() })
+            signer_stats: stats, knobs: serde_json::from_value(v["knobs"].clone()).ok(),
+            // review WP-06 #10: absent or null is a journal written before WP-06 (its replay prices with its own rule); a
+            // model present but unreadable (a later schema, a corrupt record) makes the record unreadable: never the legacy
+            // rule in its place
+            builder: match &v["builder"] { Value::Null => None, b => Some(serde_json::from_value(b.clone()).ok()?) } })
     }
 }
 
@@ -564,7 +595,11 @@ struct LateRec { group: u64, txn: Sig58, late: bool, t: u64, late_members: Vec<M
 
 #[derive(Serialize)]
 struct RouteRec { buy: B58, sell: B58, mint: B58, buy_venue: Venue, sell_venue: Venue, size: Option<u64>, gross: Option<i64>, net: Option<i64>, cu: Option<u64>,
-    crossed: Option<[u32; 2]>, reason: &'static str }
+    crossed: Option<[u32; 2]>, reason: &'static str,
+    /// WP-06 (decisions 1.2): the size search stopped where the DLMM bin arrays the builder names end (null: not priced;
+    /// absent under a pre-WP-06 journal's pricing)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dlmm_cap_bound: Option<Option<bool>> }
 
 #[derive(Serialize)]
 struct TriggerRef { txn: Option<Sig58>, slot: u64, t_first_shred: Option<u64>, pool: B58, group: Option<u64> }
@@ -593,9 +628,9 @@ struct DecisionRec {
     sent: Option<bool>, would_send: bool, reason_ungated: Option<String>,
 }
 
-/// the shared band table (src/bands.rs; MEASUREMENT §4.32 `band`; WP-06 brings `[bands]`): over the expected edge =
-/// gross − base fee
-fn band_of(gross: i64) -> u8 { crate::bands::of_gross(gross) }
+/// the shared band table (src/bands.rs; MEASUREMENT §4.32 `band`; `[bands]`, WP-06): over the expected edge = gross −
+/// base fee
+fn band_of(b: &Option<BuilderModel>, gross: i64) -> u8 { b.as_ref().map_or_else(|| crate::bands::of_gross(gross), |m| m.tips.bands.of_gross(gross)) }
 
 /// journal INPUT 9 `settled`: an executor task's result in full (WP-05: a fire result, a statuses answer, a dry run's
 /// simulation)
@@ -634,7 +669,11 @@ impl Engine {
 
     /// the state stream's fixed accounts (registry plus the extra watched accounts); the DLMM bin arrays are added to it
     /// whenever the watch list is published
-    pub fn set_base_watch(&mut self, keys: Vec<Pk>) { self.base_watch = Some(keys); }
+    pub fn set_base_watch(&mut self, keys: Vec<Pk>) { self.watch_set = keys.iter().copied().collect(); self.base_watch = Some(keys); }
+
+    /// WP-06: the fee and CU model (`BuilderModel::from_cfg`); before the engine_init record is journaled (`journal_init`)
+    pub fn set_builder(&mut self, b: BuilderModel) { self.builder = Some(b); }
+    pub fn builder(&self) -> Option<&BuilderModel> { self.builder.as_ref() }
 
     /// An engine with no RPC, runtime or watch channel (PLAN WP-02 item 11): fetches are recorded in `offline_fetches`
     /// instead of sent, and it records nothing until `set_rec`. For benchmarks and replay (WP-09). It never reads or
@@ -670,7 +709,7 @@ impl Engine {
     pub fn init(&self) -> EngineInit {
         EngineInit { min_tip: self.min_tip, strategy_sha256: strategy_sha256(&self.cfg), executor: self.exec.is_some(),
             signer_stats_file: self.cfg.signer_stats_file.clone(), signer_stats_sha256: self.signer_stats_sha256.clone(), signer_stats: self.signer_stats.clone(),
-            knobs: Some(self.knobs.clone()) }
+            knobs: Some(self.knobs.clone()), builder: self.builder.clone() }
     }
 
     /// Journal the engine_init record (INPUT 10, `t_engine_ns` 0) once, before the first input: `run` calls it first
@@ -710,6 +749,8 @@ impl Engine {
         self.signer_delta.clear();
         self.signer_stats_sha256 = init.signer_stats_sha256.clone();
         if let Some(k) = &init.knobs { self.set_knobs(k.clone()); }
+        // WP-06: the run's fee and CU model (none in a journal written before WP-06: the old rule)
+        self.builder = init.builder.clone();
         self.init_journaled = true;
         Ok(())
     }
@@ -719,6 +760,7 @@ impl Engine {
     pub fn preload_alt(&mut self, table: Pk, addrs: Vec<Option<Pk>>, last_used: Option<u64>, journal: bool) {
         if journal { self.journal.alt_preload(table, &addrs); }
         self.alts.preload(table, addrs, last_used);
+        self.index_alt(table);
         self.count("alt_preloaded");
     }
 
@@ -774,7 +816,7 @@ impl Engine {
         store.ring_versions = knobs.ring_versions;
         Engine { journal, t_now: 0, last_hk_t: 0, last_status_t: 0, last_drift_t: 0, anchored: false, t_anchor: 0, init_journaled: false, gate_journaled: None,
             gate_seen: GateSeen::default(), queue_now: 0,
-            decisions: 0, last_block_meta: None, acct_rec: None, base_watch: None,
+            decisions: 0, last_block_meta: None, acct_rec: None, base_watch: None, builder: None, alt_by_pool: HashMap::default(), watch_set: HashSet::default(), uva_key: std::cell::OnceCell::new(),
             reg, store, cfg, feeds, min_tip, interest, ata: AtaCache::default(), sigs: HashMap::default(), sig_order: VecDeque::new(),
             alts: Alts::new(knobs.alts.clone()), acct_pool, part_pools, eval_pools, tier_a, tier_a_complete: false,
             watch: HashMap::default(), opps: HashMap::default(), next_id: 0, next_decision: 0, slot: 0, shred_slot: 0,
@@ -1115,8 +1157,8 @@ impl Engine {
         self.t_now = t_engine;
         match ev {
             Event::Tx(a) => self.on_tx(a, t_engine),
-            Event::Account { slot, pubkey, data, t, txn, write_version, src, aseq, bank_id, .. } => {
-                let v = Acct { data, slot, write_version, txn, t_recv: t, aseq, src, bank_id };
+            Event::Account { slot, pubkey, data, t, txn, write_version, src, aseq, bank_id, lamports, .. } => {
+                let v = Acct { data, slot, write_version, txn, t_recv: t, aseq, src, bank_id, lamports };
                 self.on_account(pubkey, v, t_engine);
             }
             Event::Slot { slot, status: st, t, parent, bank_id, .. } => self.on_slot(slot, st, t, parent, bank_id, t_engine),
@@ -1442,7 +1484,7 @@ impl Engine {
             x.update(k);
             for a in self.store.versions(k) {
                 x.update(&a.slot.to_le_bytes()); x.update(&a.write_version.to_le_bytes()); x.update(&a.t_recv.to_le_bytes()); x.update(&a.aseq.to_le_bytes());
-                x.update(a.txn.as_ref().map_or(&[0u8; 64][..], |s| &s[..])); x.update(&a.data);
+                x.update(a.txn.as_ref().map_or(&[0u8; 64][..], |s| &s[..])); x.update(&a.data); x.update(&a.lamports.to_le_bytes());
             }
         }
         let mut arr: Vec<(&Pk, &Vec<(i64, Pk)>)> = self.store.dlmm_arrays.iter().collect();
@@ -1844,6 +1886,7 @@ impl Engine {
         }
         for t in learned {
             self.alts.learned(t);
+            self.index_alt(t);
             let waiting = self.alts.take_waiters(&t);
             if !waiting.is_empty() { self.count("alt_learned"); }
             for (a, te) in waiting { self.process(a, te); }
@@ -1875,6 +1918,7 @@ impl Engine {
     fn on_alt(&mut self, table: Pk, a: Answer) {
         let mut fetch = Vec::new();
         let released = self.alts.on_answer(table, a, self.t_now, &mut fetch);
+        self.index_alt(table);
         for f in fetch { self.fetch_alt(f); }
         self.emit_alt_events();
         for (a, t_engine) in released { self.process(a, t_engine); }
@@ -1940,16 +1984,55 @@ impl Engine {
         let sizes = self.ladder();
         let Some(&top) = sizes.iter().max() else { return Err("no_sizes") };
         let lo = sizes.iter().copied().min().unwrap_or(top) / 4;
-        let t = quote::best(lb, ls, &sizes, lo, top).map_err(quote::Why::reason)?;
+        let (t, bound) = quote::best_bound(lb, ls, &sizes, lo, top).map_err(quote::Why::reason)?;
         // a round trip returning over twice its input is a broken quote (w5h seg 4: one PumpSwap pool quoted 9.9e12
         // lamports, 663 times): it must not win the pick over the token's real cycles
         if t.profit() > t.x as i64 { return Err("broken_quote"); }
         // DLMM legs: the bins with liquidity the chosen size crosses (the CU table's input); the trip already quoted the rest
         let crossed = |l: &quote::Leg, x: u64| if l.is_dlmm() { l.walk(x).map(|w| w.crossed).map_err(quote::Why::reason) } else { Ok(0) };
         let (c1, c2) = (crossed(lb, t.x)?, crossed(ls, t.mid)?);
-        let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
-        let fee = 5_000 + self.cfg.cu_price_micro * cu / 1_000_000 + self.min_tip;
-        Ok(Priced { size: t.x, gross: t.profit(), net: t.profit() - fee as i64, cu, crossed: (c1, c2) })
+        let cu = self.route_cu(pb.venue, c1, ps.venue, c2).0;
+        let fee = self.fee_of(t.profit(), cu);
+        Ok(Priced { size: t.x, gross: t.profit(), net: t.profit() - fee as i64, cu, crossed: (c1, c2), dlmm_cap_bound: bound == Some(quote::Why::DlmmArray) })
+    }
+
+    /// WP-06: a route's CU before any ATA create or close (the measured table's, else today's formula: `CuModel`), and
+    /// where it came from
+    fn route_cu(&self, bv: Venue, c1: u32, sv: Venue, c2: u32) -> (u64, crate::cu_table::CuSrc) {
+        match &self.builder {
+            Some(b) => b.cu.route(bv, c1, sv, c2),
+            None => (crate::cu_table::fallback(bv, c1, sv, c2), crate::cu_table::CuSrc::Fallback),
+        }
+    }
+
+    /// WP-06 item 5: the fee a route's gross pays: the base fee plus the tip of its edge (a bundle pays CU price 0). A
+    /// journal written before WP-06 replays with its rule: base fee + `cu_price_micro` × CU + `min_tip`
+    fn fee_of(&self, gross: i64, cu: u64) -> u64 {
+        match &self.builder {
+            Some(b) => b.tips.fee(gross),
+            None => 5_000 + self.cfg.cu_price_micro * cu / 1_000_000 + self.min_tip,
+        }
+    }
+
+    /// WP-06 (bankroll hook for WP-07): what the wallet holds as the store has it: its native lamports and its WSOL
+    /// account's token amount (the state stream follows both: journaled, so a replay reads the same)
+    pub fn bankroll(&self, payer: &Pk) -> crate::exec::Bankroll {
+        let followed = |k: &Pk| self.watch_set.contains(k);
+        let wsol = self.ata.get(payer, &WSOL, &crate::pda::TOKEN_PROGRAM);
+        crate::exec::Bankroll {
+            native: followed(payer).then(|| self.store.get(payer).map(|a| a.lamports)).flatten(),
+            wsol: followed(&wsol).then(|| self.store.get(&wsol).filter(|a| crate::store::token_account_exists(&a.data)).and_then(|a| crate::venues::token_amount(&a.data))).flatten(),
+        }
+    }
+
+    /// WP-06 item 7: index a lookup table of the cache under every registry pool it names (the size budget's candidates)
+    fn index_alt(&mut self, table: Pk) {
+        let Some(entries) = self.alts.tables.get(&table) else { return };
+        let pools: Vec<Pk> = entries.iter().flatten().filter(|k| self.reg.by_pool.contains_key(*k)).copied().collect();
+        for p in pools {
+            let v = self.alt_by_pool.entry(p).or_default();
+            if !v.contains(&table) { v.push(table); }
+        }
     }
 
     /// every feed's arrival time for one trigger, written once all feeds had 10 s to deliver it
@@ -2083,14 +2166,18 @@ impl Engine {
             self.gate_journaled = Some(seen.0);
             self.seen_journaled = Some(seen.clone());
         }
-        let cap = x.size_cap();
+        // WP-06 (WP-07's hook): the size cap, under a bankroll cap derived from the store's wallet accounts when there is one
+        let payer = x.payer();
+        let bankroll = self.bankroll(&payer);
+        let cap = self.exec.as_ref().map_or(0, |x| x.size_cap_for(&bankroll));
         let d = match self.route_in(id, size.min(cap)) {
             Some(r) => {
                 self.decisions = fold(self.decisions, &[b"exec", &id.to_le_bytes(), &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes(), &[seen.0 as u8]]);
                 let trig = r.trig;
                 let global = self.io.is_some();
+                let alts = crate::exec::AltSource { tables: &self.alts.tables, by_pool: &self.alt_by_pool };
                 let x = self.exec.as_mut().unwrap();
-                let d = x.decide(r, &inputs, &self.sendview, slot.max(tip), t);
+                let d = x.decide(r, &inputs, &self.sendview, &alts, slot.max(tip), t);
                 // the poh_trigger_pct gauge, after the fire (the PoH index is shared with the feed threads; review WP-05 #8)
                 if d.attempt.is_some() { x.note_poh(trig != [0; 64] && poh_of(&self.poh, &trig, global).is_some()); }
                 d
@@ -2134,7 +2221,7 @@ impl Engine {
                     });
                     // a state the crate refuses is counted by its reason (`probe_sz_*`, WP-16 review F10)
                     let (c1, c2) = match q { Ok(c) => c, Err(w) => { self.count(w.crate_reason().map_or("probe_unquotable", |r| r.probe)); continue } };
-                    let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
+                    let cu = self.route_cu(pb.venue, c1, ps.venue, c2).0;
                     let id = self.next_id;
                     self.next_id += 1;
                     let st = Stages { rx: 0, decoded: 0, engine: 0, resolved: 0, decided: now_ns() };
@@ -2161,7 +2248,7 @@ impl Engine {
             let w2 = ls.walk(w1.out).ok()?;
             (w1.crossed, w2.crossed)
         };
-        let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
+        let cu = self.route_cu(pb.venue, c1, ps.venue, c2).0;
         let id = self.next_id;
         self.next_id += 1;
         let st = Stages { rx: 0, decoded: 0, engine: 0, resolved: 0, decided: now_ns() };
@@ -2187,8 +2274,11 @@ impl Engine {
     }
 
     /// Everything a build needs for opportunity `id` at `size`: both pools as the store holds them now (the state the
-    /// decision priced: it is made in the same input), our legs at that size, and for DLMM the bin arrays we hold and
-    /// where the quote ends.
+    /// decision priced: it is made in the same input), our legs at that size, and for DLMM the bin arrays the quote may use
+    /// (the builder names a prefix of them: `quote::dlmm_window`) and where the quote ends. WP-06: the CU the route asks at
+    /// this size (the model's) and what an ATA create and close add; whether the wallet holds the mid token's account, its
+    /// PumpSwap user volume accumulator exists, each DLMM pair's bitmap extension exists (the store's view where the state
+    /// stream follows them: journaled, so a replay builds the same); the store's data sizes of the route's accounts
     fn route_in(&self, id: u64, size: u64) -> Option<crate::exec::RouteIn> {
         let o = self.opps.get(&id)?;
         // the decision's clock (review WP-04 N4: without a Clock sysvar, the engine's time, as `evaluate_pool` priced it,
@@ -2197,24 +2287,45 @@ impl Engine {
         let (bi, si) = (*self.reg.by_pool.get(&o.buy)?, *self.reg.by_pool.get(&o.sell)?);
         let (pb, ps) = (&self.reg.pools[bi], &self.reg.pools[si]);
         let (clk, u) = (quote::clock(dslot, now), route_use(pb, ps));
-        let (lb, ls) = (self.leg_of(pb, pb.t0 == *WSOL, clk, &self.skip_arrays(pb), u).ok()?, self.leg_of(ps, ps.t0 == o.mint, clk, &self.skip_arrays(ps), u).ok()?);
+        let (skip_b, skip_s) = (self.skip_arrays(pb), self.skip_arrays(ps));
+        let (lb, ls) = (self.leg_of(pb, pb.t0 == *WSOL, clk, &skip_b, u).ok()?, self.leg_of(ps, ps.t0 == o.mint, clk, &skip_s, u).ok()?);
         // the legs at `size` (WP-16: arbx-sizing's exact quotes; a DLMM leg's walk ends where the builder names arrays up to)
         let wb = lb.walk(size).ok()?;
         let ws = ls.walk(wb.out).ok()?;
         let (mid, buy_end, back, sell_end, spent) = (wb.out, wb.end, ws.out, ws.end, wb.spent);
-        let live = |p: &crate::venues::PoolMeta| -> Vec<i64> { self.store.dlmm_arrays.get(&p.pool).map(|l| l.iter().filter(|(_, k)| self.store.get(k).is_some()).map(|(i, _)| *i).collect()).unwrap_or_default() };
+        // the arrays the quote may use (followed, read, not left out): the builder's window is drawn from the same ones
+        let live = |p: &crate::venues::PoolMeta, skip: &[i64]| -> Vec<i64> {
+            self.store.dlmm_arrays.get(&p.pool).map(|l| l.iter().filter(|(i, k)| self.store.get(k).is_some() && !skip.contains(i)).map(|(i, _)| *i).collect()).unwrap_or_default()
+        };
         let data = |p: &crate::venues::PoolMeta| self.store.get(&p.pool).map(|a| a.data.to_vec());
         let trig_feed = if o.trig_feed == u16::MAX { Some("state".to_string()) } else { self.feeds.get(o.trig_feed as usize).cloned() };
         // WP-05: the route's crowding (F6: two counts, review WP-05 #1) and the versions of its accounts it was priced on
         // (attempts `route_in`); whether its trigger has a PoH position is looked up after the decision (review #8)
         let crowding = self.activity.crowding(&pb.pool, &ps.pool, self.t_now);
-        let accounts: Vec<(Pk, u64, u64)> = self.route_accounts_of(pb, ps).into_iter().filter_map(|k| self.store.get(&k).map(|a| (k, a.slot, a.write_version))).collect();
+        let route_keys = self.route_accounts_of(pb, ps);
+        let accounts: Vec<(Pk, u64, u64)> = route_keys.iter().filter_map(|k| self.store.get(k).map(|a| (*k, a.slot, a.write_version))).collect();
+        // ---- WP-06
+        let (cu, cu_src) = self.route_cu(pb.venue, wb.crossed, ps.venue, ws.crossed);
+        let cu_ata = self.builder.as_ref().map_or((crate::cu_table::FALLBACK_ATA_CREATE, crate::cu_table::FALLBACK_ATA_CLOSE), |b| b.cu.ata_ops());
+        let mint_prog = if o.mint == pb.t0 { pb.t0_prog } else { pb.t1_prog };
+        let payer = self.exec.as_ref().map(|x| x.payer());
+        let followed = |k: &Pk| self.watch_set.contains(k);
+        let mid_held = payer.map(|p| self.ata.get(&p, &o.mint, &mint_prog)).filter(|a| followed(a))
+            .map(|a| self.store.get(&a).is_some_and(|x| crate::store::token_account_exists(&x.data)));
+        let uva = payer.map(|p| *self.uva_key.get_or_init(|| crate::build::pump_uva(&p))).filter(|a| followed(a))
+            .map(|a| self.store.get(&a).is_some_and(|x| !x.data.is_empty()));
+        let ext = |p: &crate::venues::PoolMeta| (p.venue == Venue::Dlmm).then(|| p.extra.first().copied()).flatten()
+            .filter(|e| self.store.get(e).is_some_and(|a| !a.data.is_empty()));
+        let mut sizes: Vec<(Pk, u32)> = route_keys.iter().chain([&pb.t0, &pb.t1, &ps.t0, &ps.t1]).filter_map(|k| self.store.get(k).map(|a| (*k, a.data.len() as u32))).collect();
+        sizes.sort();
+        sizes.dedup();
         Some(crate::exec::RouteIn { opp: id, trig: o.trig, trig_feed, slot: o.slot,
             st: [o.st.rx, o.st.decoded, o.st.engine, o.st.resolved, o.st.decided], buy: pb.clone(), sell: ps.clone(), buy_data: data(pb)?, sell_data: data(ps)?,
             buy_source: self.reg.source(&pb.pool), sell_source: self.reg.source(&ps.pool), mint: o.mint, size, mid, back, spent,
-            gross_at_opp: o.gross, net_at_opp: o.net, cu: o.cu,
-            buy_live: live(pb), sell_live: live(ps), buy_end, sell_end, state_version: o.sv, route_age_ms: o.route_age_ms, decision: o.decision,
-            trig_kind: o.kind, t_first_shred: o.t_first_shred, t_commit: o.t_commit, t_priced: o.t_priced, parts_skew: o.parts_skew, crowding, accounts })
+            gross_at_opp: o.gross, net_at_opp: o.net, cu,
+            buy_live: live(pb, &skip_b), sell_live: live(ps, &skip_s), buy_end, sell_end, state_version: o.sv, route_age_ms: o.route_age_ms, decision: o.decision,
+            trig_kind: o.kind, t_first_shred: o.t_first_shred, t_commit: o.t_commit, t_priced: o.t_priced, parts_skew: o.parts_skew, crowding, accounts,
+            cu_src: cu_src.as_str(), cu_ata, mint_prog, mid_held, uva, buy_ext: ext(pb), sell_ext: ext(ps), sizes })
     }
 
     /// caps.jsonl: the decided pair's best round trip at each budget in [strategy] budget_caps_sol. Profit rises with
@@ -2561,13 +2672,14 @@ impl Engine {
                     let (pb, ps) = (&self.reg.pools[r.buy], &self.reg.pools[r.sell]);
                     RouteRec { buy: B58(pb.pool), sell: B58(ps.pool), mint: B58(mint), buy_venue: pb.venue, sell_venue: ps.venue, size: r.priced.as_ref().map(|p| p.size),
                         gross: r.priced.as_ref().map(|p| p.gross), net: r.priced.as_ref().map(|p| p.net), cu: r.priced.as_ref().map(|p| p.cu),
-                        crossed: r.priced.as_ref().map(|p| [p.crossed.0, p.crossed.1]), reason: r.reason }
+                        crossed: r.priced.as_ref().map(|p| [p.crossed.0, p.crossed.1]), reason: r.reason,
+                        dlmm_cap_bound: self.builder.as_ref().map(|_| r.priced.as_ref().map(|p| p.dlmm_cap_bound)) }
                 }).collect(),
                 best, sv: bestr.and_then(|r| r.sv.as_ref()).map(|v| SvRec { h: hex16(v.h), slot_max: v.slot_max, wv_max: v.wv_max }),
                 route_age_ms: bestr.and_then(|r| r.sv.as_ref()).map(|v| self.t_now.saturating_sub(v.t_last_write) as f64 / 1e6),
                 parts_skew_slots: bestr.and_then(|r| r.sv.as_ref()).map(|v| SkewRec { buy: v.skew.0, sell: v.skew.1 }), w_src: ctx.w_src, torn_suspect: false,
-                fork_priced: false, band: dec.band.or_else(|| bestr.and_then(|r| r.priced.as_ref()).map(|p| band_of(p.gross))),
-                band_at_opp: bestr.and_then(|r| r.priced.as_ref()).map(|p| band_of(p.gross)), crowding: dec.crowding, verdict: dec.verdict,
+                fork_priced: false, band: dec.band.or_else(|| bestr.and_then(|r| r.priced.as_ref()).map(|p| band_of(&self.builder, p.gross))),
+                band_at_opp: bestr.and_then(|r| r.priced.as_ref()).map(|p| band_of(&self.builder, p.gross)), crowding: dec.crowding, verdict: dec.verdict,
                 reason: dec.reason, ev: dec.ev, rank: dec.rank, attempt: dec.attempt, opp: opp_id, experiments: serde_json::Map::new(),
                 stages: StagesRec { t_first_shred: ctx.t_first_shred, t_update_recv: ctx.t_update_recv, t_commit: ctx.t_commit, t_engine: ctx.t_resolved, t_priced, t_decided },
                 sent: dec.sent, would_send: dec.would_send, reason_ungated: dec.reason_ungated };
@@ -2910,9 +3022,9 @@ impl Engine {
         let wb = lb.walk(size).map_err(quote::Why::reason)?;
         let ws = ls.walk(wb.out).map_err(quote::Why::reason)?;
         let (c1, c2) = (wb.crossed, ws.crossed);
-        let cu = (((29_000 + pb.venue.leg_cu(c1) + ps.venue.leg_cu(c2)) as f64 * 1.10 / 1000.0).ceil() * 1000.0) as u64;
-        let fee = 5_000 + self.cfg.cu_price_micro * cu / 1_000_000 + self.min_tip;
+        let cu = self.route_cu(pb.venue, c1, ps.venue, c2).0;
         let gross = ws.out as i64 - wb.spent as i64;
+        let fee = self.fee_of(gross, cu);
         Ok(RouteQuote { size, mid: wb.out, back: ws.out, spent: wb.spent, gross, fee, net: gross - fee as i64, cu, crossed: (c1, c2), buy_end: wb.end, sell_end: ws.end })
     }
 
@@ -4388,5 +4500,22 @@ mod tests {
             eprintln!("{what}: state_recv_to_decided p50/p99 ns (opportunities): recorder off {off:?}, on {on:?}; best p99 off {p99_off} on {p99_on}");
             assert!(p99_on <= p99_off + 5_000, "{what}: recorder on adds {} ns to the p99", p99_on as i64 - p99_off as i64);
         }
+    }
+
+    /// Review WP-06 #10: engine_init's `builder` reads back; absent or null is a journal written before WP-06 (its replay
+    /// prices with its own rule); present but unreadable (a later schema, a corrupt record) makes the record unreadable,
+    /// never the legacy rule in its place
+    #[test]
+    fn engine_init_builder_reads_back_or_refuses() {
+        let model = BuilderModel { tips: crate::tip::TipModel::default(), cu: crate::cu_table::CuModel::default() };
+        let init = EngineInit { min_tip: 1_000, strategy_sha256: "s".into(), builder: Some(model), ..Default::default() };
+        assert_eq!(EngineInit::from_json(&init.json()).unwrap(), init);
+        let mut v = init.json();
+        v["builder"] = Value::Null;
+        assert_eq!(EngineInit::from_json(&v).unwrap().builder, None, "a journal before WP-06");
+        v.as_object_mut().unwrap().remove("builder");
+        assert_eq!(EngineInit::from_json(&v).unwrap().builder, None);
+        v["builder"] = json!({ "tips": "a later schema" });
+        assert!(EngineInit::from_json(&v).is_none(), "unreadable: refused, not the legacy rule");
     }
 }

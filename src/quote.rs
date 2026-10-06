@@ -43,6 +43,20 @@ pub const DLMM_BUDGET_SHARED: u16 = 100;
 /// the most bin arrays a DLMM leg names (the builder's rule, `build.rs::dlmm_leg`; the crate's `MAX_ARRAYS`)
 pub const DLMM_MAX_ARRAYS: usize = dlmm::MAX_ARRAYS;
 
+/// The bin arrays a route's DLMM leg may use (PLAN WP-06 item 6, the DLMM cap), the one rule the quote and the builder
+/// share: the active bin's array `c`, then onward in the swap's direction while the next one is held (`have`: followed,
+/// read, usable), contiguous, at most `DLMM_MAX_ARRAYS`. The quote walks only these (a size past them is
+/// `unquotable_dlmm_array`, PLAN's `dlmm_cap`; the size search steps back below it, decisions `dlmm_cap_bound`), and the
+/// builder names a prefix of them (`build::dlmm_arrays`: as far as the quote's end bin, plus one buffer array). Empty
+/// when the active array is not held
+pub fn dlmm_window(c: i64, zfo: bool, have: &dyn Fn(i64) -> bool) -> Vec<i64> {
+    let step = if zfo { -1 } else { 1 };
+    let mut out = Vec::with_capacity(DLMM_MAX_ARRAYS);
+    let mut i = c;
+    while out.len() < DLMM_MAX_ARRAYS && have(i) { out.push(i); i += step; }
+    out
+}
+
 /// The Clock a quote is priced under (the chain's Clock sysvar: DLMM and DAMM v2 fees, CPMM / AMM v4 open times)
 pub fn clock(slot: u64, unix_timestamp: i64) -> sz::Clock { sz::Clock { slot, unix_timestamp, epoch: 0 } }
 
@@ -264,20 +278,23 @@ pub fn leg<'a>(m: &PoolMeta, zfo: bool, src: &Src<'_, 'a>, use_: Use) -> Result<
             let step = if zfo { -1 } else { 1 };
             let have = |i: i64| src.arrays.iter().find(|(j, _)| *j == i).filter(|_| (src.usable)(i)).and_then(|(_, k)| (src.get)(k));
             // the active bin's array must be there (the program needs it passed); then, for our route, the arrays
-            // the builder names: onward from it, contiguous, at most 5; for a third party's swap, every one we hold
+            // the builder names (`dlmm_window`: onward from it, contiguous, at most 5); for a third party's swap, every
+            // one we hold
             if have(c).is_none() { return Err(Why::Missing(Venue::Dlmm)); }
             // on the stack (WP-16 review F7): the arrays' bytes in walk order, and the last one's index
             let mut data: [&'a [u8]; DLMM_MAX_ARRAYS] = [&[]; DLMM_MAX_ARRAYS];
             let (mut n, mut last) = (0, c);
-            let mut i = c;
-            while n < DLMM_MAX_ARRAYS && (c - i).abs() <= 512 {
-                match have(i) {
-                    Some(a) => { data[n] = &a.data[..]; n += 1; last = i; }
-                    None if route => break,
-                    None => {}
+            if route {
+                for i in dlmm_window(c, zfo, &|i| have(i).is_some()) {
+                    if let Some(a) = have(i) { data[n] = &a.data[..]; n += 1; last = i; }
                 }
-                if !src.arrays.iter().any(|(j, _)| (*j - i) * step > 0) { break; }
-                i += step;
+            } else {
+                let mut i = c;
+                while n < DLMM_MAX_ARRAYS && (c - i).abs() <= 512 {
+                    if let Some(a) = have(i) { data[n] = &a.data[..]; n += 1; last = i; }
+                    if !src.arrays.iter().any(|(j, _)| (*j - i) * step > 0) { break; }
+                    i += step;
+                }
             }
             let leg = dlmm::parse(&pair.data, &data[..n], zfo, &src.clock).map_err(Why::Abort)?;
             let leg = match use_ { Use::Route { dlmm_budget } => leg.with_budget(dlmm_budget), Use::Third => leg };
@@ -359,8 +376,15 @@ pub fn round_trip(b: &Leg, s: &Leg, x: u64) -> Result<Trip, Why> {
 /// model of both legs: the Möbius closed form, the marginal walk over DLMM bins; DESIGN.md §3.3-§3.4). An optimum past a
 /// capacity steps back to the last size the venues fill. Ties go to the smaller size. Err: no rung quotes (the most
 /// telling reason: a refusal of a whole leg, then a capacity or the walk budget, then a size too small)
-pub fn best(b: &Leg, s: &Leg, ladder: &[u64], lo: u64, cap: u64) -> Result<Trip, Why> {
+pub fn best(b: &Leg, s: &Leg, ladder: &[u64], lo: u64, cap: u64) -> Result<Trip, Why> { best_bound(b, s, ladder, lo, cap).map(|x| x.0) }
+
+/// [`best`], with what bounded its size: the reason the smallest size tried above the chosen one failed (None: none
+/// failed above it; the profit fell, or the cap). `Some(Why::DlmmArray)` is PLAN WP-06's DLMM cap: the size stopped where
+/// the bin arrays the builder names end (decisions `dlmm_cap_bound`)
+pub fn best_bound(b: &Leg, s: &Leg, ladder: &[u64], lo: u64, cap: u64) -> Result<(Trip, Option<Why>), Why> {
     let lo = lo.max(1).min(cap);
+    // every size that failed above a size that quoted, with why (a handful: the rungs past a capacity, the optima)
+    let mut fails: Vec<(u64, Why)> = Vec::new();
     let mut top: Option<Trip> = None;
     let mut why: Option<Why> = None;
     // the largest size that quotes and, past it, the smallest that does not (feasibility is an interval in x)
@@ -391,7 +415,7 @@ pub fn best(b: &Leg, s: &Leg, ladder: &[u64], lo: u64, cap: u64) -> Result<Trip,
                 if last.is_some_and(|p| t.profit() < p) { break; }
                 last = Some(t.profit());
             }
-            Err(e) => { why = Some(worse(why, e)); if good.is_some() { bad = Some(x); } }
+            Err(e) => { why = Some(worse(why, e)); if good.is_some() { bad = Some(x); fails.push((x, e)); } }
         }
     }
     if top.is_some_and(|t| t.profit() > 0) {
@@ -404,12 +428,17 @@ pub fn best(b: &Leg, s: &Leg, ladder: &[u64], lo: u64, cap: u64) -> Result<Trip,
                 match round_trip(b, s, x) {
                     Ok(t) => keep(t, &mut top),
                     // past a capacity (or the walk budget): the last size below it that quotes
-                    Err(_) => if let Some(t) = good.filter(|&g| g < x).and_then(|g| back_off(b, s, g, bad.map_or(x, |b| b.min(x)))) { keep(t, &mut top) },
+                    Err(e) => {
+                        fails.push((x, e));
+                        if let Some(t) = good.filter(|&g| g < x).and_then(|g| back_off(b, s, g, bad.map_or(x, |b| b.min(x)))) { keep(t, &mut top) }
+                    }
                 }
             }
         }
     }
-    top.ok_or_else(|| why.unwrap_or(Why::Unquotable(b.venue)))
+    let t = top.ok_or_else(|| why.unwrap_or(Why::Unquotable(b.venue)))?;
+    let bound = fails.iter().filter(|(x, _)| *x > t.x).min_by_key(|(x, _)| *x).map(|f| f.1);
+    Ok((t, bound))
 }
 
 /// rungs kept on the stack (Stage 0 has 10)

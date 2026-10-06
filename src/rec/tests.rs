@@ -100,7 +100,7 @@ fn a_file_being_written_is_readable_up_to_its_last_frame() {
     };
     // no sync: the writer's own 20 ms flush ends the frame while the recorder is open
     let v = read(3);
-    assert_eq!(v[0]["schema"], "arbx.attempts/2.0");
+    assert_eq!(v[0]["schema"], "arbx.attempts/2.1");
     assert_eq!(v[1..].iter().map(|x| x["attempt"].as_u64().unwrap()).collect::<Vec<_>>(), vec![0, 1, 2]);
     for i in 3..6 { rec.json(ATTEMPTS, json!({ "attempt": i })); }
     assert_eq!(read(6).len(), 7, "the next frame is appended and readable too");
@@ -398,7 +398,7 @@ fn headers_and_plain_streams() {
     assert_eq!((st["files"][0]["path"].as_str(), st["files"][0]["sha256"].as_str()), (Some("status.jsonl"), None), "plain files stay open to appends: no hash");
     // meta.json `streams`
     let s = rec.streams_json();
-    assert_eq!((s["attempts"].as_str(), s["status"].as_str(), s["accounts"].as_str()), (Some("arbx.attempts/2.0"), Some("arbx.status/2.0"), Some("arbx.accounts/2.1")));
+    assert_eq!((s["attempts"].as_str(), s["status"].as_str(), s["accounts"].as_str()), (Some("arbx.attempts/2.1"), Some("arbx.status/2.0"), Some("arbx.accounts/2.1")));
     let _ = std::fs::remove_dir_all(&d);
 }
 

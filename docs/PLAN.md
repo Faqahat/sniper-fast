@@ -908,7 +908,7 @@ Removed:
    6. the tip, a top-level System transfer, last.
 
    New in build.rs: `loaded_data_limit_ix(bytes)` (ComputeBudget instruction 4, u32) and `close_account_ix(account, destination, owner, token_program)` (token instruction 9; the same for Token-2022).
-2. **Held set.** WSOL, USDC and USDT accounts are permanent, plus up to `held_max` (40) hot mints.
+2. **Held set.** WSOL, USDC and USDT accounts are permanent, plus up to `held_max` hot mints: 0 by default since the WP-06 review (#1), so the size budget's held-ATA rung is an explicit opt-in whose route asks the kept account's rent on chain.
    - The set is refreshed from the wallet stream and the snapshots (WP-07), not only at boot (exec.rs:255-263).
    - A non-held mid mint gets create and close in the same transaction; a held one gets neither.
    - `max_new_token_accounts` (config.rs:69-71, exec.rs:437) goes. Trades are rent-neutral by construction, and the supervisor caps the rent locked in the held set (WP-07).
@@ -948,7 +948,7 @@ Removed:
    - It costs 8 bytes (R §3.9).
    - The flag ships `false`. It is switched on after X6 shows the routes still fit and a canary run shows no guard failures.
 
-**Config keys.** `[bands] edges = [20000, 100000, 1000000, 10000000]`; `[builder] held_max = 40`, `allow_uva_create = false`, `loaded_data_limit = "auto"`, `cu_table = "data/cu-table.json"`, `cu_min_samples = 30`, `alt_index = true`, `max_alts = 4`, `payer_guard = false`, `payer_guard_max_drop = 0`; `[tips] shares = [0.7, 0.7, 0.7, 0.7, 0.7]`, `contested_shares = [0.16, 0.47, 0.54, 0.64, 0.64]`, `floor = 1000`, `cap = 100000`. Removed: `live.max_new_token_accounts`.
+**Config keys.** `[bands] edges = [20000, 100000, 1000000, 10000000]`; `[builder] create_close = true` (false: the held-only control arm, `mid_not_held`; review WP-06 #9), `held_max = 0` (40 in the first draft; off since review WP-06 #1), `allow_uva_create = false`, `loaded_data_limit = "auto"`, `cu_table = "data/cu-table.json"`, `cu_min_samples = 30`, `alt_index = true`, `max_alts = 4`, `payer_guard = false`, `payer_guard_max_drop = 0`; `[tips] shares = [0.7, 0.7, 0.7, 0.7, 0.7]`, `contested_shares = [0.16, 0.47, 0.54, 0.64, 0.64]`, `floor = 1000`, `cap = 100000`. Removed: `live.max_new_token_accounts`.
 
 **Offline acceptance (CI).**
 - Golden byte tests for the instruction order with and without create/close, and for the encodings of `close_account_ix` and `loaded_data_limit_ix`. The existing `legs_match_arbed` and `v2_data_layout` still pass.

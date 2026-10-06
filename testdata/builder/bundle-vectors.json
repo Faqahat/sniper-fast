@@ -1,0 +1,189 @@
+{
+  "about": "arbx's own bundles (src/exec/tests.rs bundle_vectors_for_the_venue_harness), executed by program/venue-harness tests/arbx_bundle.rs on the dumped mainnet programs and the deployed nexus-v2 ELF (PLAN WP-06)",
+  "alt": {
+    "addrs": [
+      "GLL3CzybpSCLZdoACf8QUM5YrKVwyA65kQ2RcTsJxxzV",
+      "FhPnTvitQFA8HwcD8eQwAYwTBVov642Bp2vJxXJftmks",
+      "GGf2tpFKavF5jwZQj4jsAMmExtnLCAS1BZR5wa6mQhje",
+      "Bvtgim23rfocUzxVX9j9QFxTbBnH8JZxnaGLCEkXvjKS",
+      "JC643MqXPebvHzhF1u96MFmHJ8giCmZSHcAPynEvJz5X",
+      "6rVkF4HSgy1jrnC3HogfRgPHrq4CtLg5f11URpsC4i9D",
+      "6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo",
+      "GZ4wWbyaeR3xsn54SgjRfNMLETJUWzgaDHxYi7EfovqN",
+      "4d7oqC3fWVT7Fw3UW4XMZeVG6LSJX2aXrnwFDae8wck5",
+      "Cmf2SnVHSiGSezNedmCY4yiBn6FNvfarp4dT94ofgD1B",
+      "51ZQJS6iYgYVA86xWYkQX43QJo3ophcMkcPKieMoiCUN",
+      "DURDeCsG6rwpp5YfsxRXo2KoUhxJVns4ifEu5yfppAJC",
+      "8nnaeWCw8mUypcGAgbmSuzAT85uWx4UN12adDrMhXrGF",
+      "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+      "ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw",
+      "So11111111111111111111111111111111111111112",
+      "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR",
+      "CLvRLsuyMvf1NrjauJUxJyysY2YYw6qwzizaH5FYeKRA",
+      "C2aFPdENg4A2HQsmrd5rTw5TaYBX5Ku887cWjbFKtZpw",
+      "5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx",
+      "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+      "2Si8Mpy2kwvCLRn5WBudQQhyFyuq27Wz8Enq7b1hMWnW",
+      "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+      "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+      "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+      "D1ZN9Wj1fRSUQfCjhvnu1hqDMT7hzjzBBpi12nVniYD6",
+      "RJ4okizPC5XEWph9reKTfotemZCzKEEZHrJkm9BfKoM"
+    ],
+    "table": "Bswb3UyeD1pUTaGiE6WvqwFpJZsQSEY1xhJePCDTHdvp"
+  },
+  "blockhash": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+  "cases": [
+    {
+      "back": 1060507179,
+      "buy_pool": "GLL3CzybpSCLZdoACf8QUM5YrKVwyA65kQ2RcTsJxxzV",
+      "bytes": 667,
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 247000,
+      "cu_route": 212000,
+      "cu_src": "fallback",
+      "expect": "ok",
+      "expected_profit": 60507179,
+      "gll3_quote_vault": "GGf2tpFKavF5jwZQj4jsAMmExtnLCAS1BZR5wa6mQhje",
+      "gll3_quote_vault_amount": 300308594960,
+      "gll3_quote_vault_scale": [
+        880,
+        1000
+      ],
+      "held": false,
+      "loaded_data_limit": 20185088,
+      "mid_account": "J5nr685J2bc2qgrvZqNXUF8rg7XfcRrcgoV9hWH1Moqh",
+      "min_profit": 105001,
+      "mint": "8nnaeWCw8mUypcGAgbmSuzAT85uWx4UN12adDrMhXrGF",
+      "name": "pump_buy_dlmm_sell_create_close",
+      "sell_pool": "6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo",
+      "size": 1000000000,
+      "spent": 1000000000,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "tx_b64": "AfG7wxGw7fJZ65xyUIyuhQ26MieIccLfpHRuYeRuh/nEfNIDKgs6CImRZaz67dHfksmqwfx9Z2kPFU2agMqUjwSAAQAFCoqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29c/dDW8S9X9DRmX5l7qX1pKwGzJCb8dHfYdl4ijR8lheBh2yLOUjr/KruoFQopUROQ7aa+XJbQy47Rh2Z7vQVy/fcY5ud1uvvt0UFU/9DuUo7K9x0qrwXHN8eQZBBBxLX9eFIcsXnOu4WJtVai1eyU0kmGgv35uyr1rWTkkcxBU9oDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG3fbh7nWP3hhCXbzkbM3athr8TYO5DSf+vfko2KGL/GynNe4clCpLBNHME1vY6egs9YnK9pq+oZtlgl9n1q3ZBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUGBQAFAtjEAwAFAAUEAAA0AQYGAAEAFgcIAQEJMgACARcKABgWGQECCwwaDQgbBwYcFw4dHgMfICEiDwIjECMREgECFhkTIwAIGyQlIxQVTgICAMqaOwAAAAApmgEAAAAAABoIGAASCBwAxi4VUrTZ6HAAypo7AAAAAAEAAAAAAAAAQUs/TOtbW4gAypo7AAAAAAEAAAAAAAAAAAAAAAgDAQAAAQkHAgAEDAIAAACghgEAAAAAAAGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoQwAAQIDBAUGBwgJCgsQDA0ODxAREhMUFRYXGBkaGw=="
+    },
+    {
+      "back": 1060507179,
+      "buy_pool": "GLL3CzybpSCLZdoACf8QUM5YrKVwyA65kQ2RcTsJxxzV",
+      "bytes": 650,
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 212000,
+      "cu_route": 212000,
+      "cu_src": "fallback",
+      "expect": "ok",
+      "expected_profit": 60507179,
+      "gll3_quote_vault": "GGf2tpFKavF5jwZQj4jsAMmExtnLCAS1BZR5wa6mQhje",
+      "gll3_quote_vault_amount": 300308594960,
+      "gll3_quote_vault_scale": [
+        880,
+        1000
+      ],
+      "held": true,
+      "loaded_data_limit": 20185088,
+      "mid_account": "J5nr685J2bc2qgrvZqNXUF8rg7XfcRrcgoV9hWH1Moqh",
+      "min_profit": 105001,
+      "mint": "8nnaeWCw8mUypcGAgbmSuzAT85uWx4UN12adDrMhXrGF",
+      "name": "pump_buy_dlmm_sell_held",
+      "sell_pool": "6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo",
+      "size": 1000000000,
+      "spent": 1000000000,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "tx_b64": "AXFXQQaCziBG2v1YqTTswgpG2BemE4VlhWAPR4kepxJV3I8HzzoNqO2JUQeDuBw1SKo0DDuS27Z4MlX2UPoZKgOAAQAFCoqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29cYdsizlI6/yq7qBUKKVETkO2mvlyW0MuO0Ydme70Fcv390NbxL1f0NGZfmXupfWkrAbMkJvx0d9h2XiKNHyWF4PcY5ud1uvvt0UFU/9DuUo7K9x0qrwXHN8eQZBBBxLX9eFIcsXnOu4WJtVai1eyU0kmGgv35uyr1rWTkkcxBU9oDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAGynNe4clCpLBNHME1vY6egs9YnK9pq+oZtlgl9n1q3ZBt324e51j94YQl285GzN2rYa/E2DuQ0n/r35KNihi/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEBQAFAiA8AwAFAAUEAAA0AQYyAAECFgoAFxgZAgELDBoNBxsICRwWDh0eAx8gISIPASMQIxESAgEYGRMjAAcbJCUjFBVOAgIAypo7AAAAACmaAQAAAAAAGggYABIIHADGLhVStNnocADKmjsAAAAAAQAAAAAAAABBSz9M61tbiADKmjsAAAAAAQAAAAAAAAAAAAAACAIABAwCAAAAoIYBAAAAAAABoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaEMAAECAwQFBgcICQoLEA0ODA8QERITFBUWFxgZGhs="
+    },
+    {
+      "back": 1060507179,
+      "buy_pool": "GLL3CzybpSCLZdoACf8QUM5YrKVwyA65kQ2RcTsJxxzV",
+      "bytes": 667,
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 247000,
+      "cu_route": 212000,
+      "cu_src": "fallback",
+      "expect": "profit_fail",
+      "expected_profit": 60507179,
+      "gll3_quote_vault": "GGf2tpFKavF5jwZQj4jsAMmExtnLCAS1BZR5wa6mQhje",
+      "gll3_quote_vault_amount": 300308594960,
+      "gll3_quote_vault_scale": [
+        880,
+        1000
+      ],
+      "held": false,
+      "loaded_data_limit": 20185088,
+      "mid_account": "J5nr685J2bc2qgrvZqNXUF8rg7XfcRrcgoV9hWH1Moqh",
+      "min_profit": 61507179,
+      "mint": "8nnaeWCw8mUypcGAgbmSuzAT85uWx4UN12adDrMhXrGF",
+      "name": "pump_buy_dlmm_sell_create_close_profit_fail",
+      "sell_pool": "6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo",
+      "size": 1000000000,
+      "spent": 1000000000,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "tx_b64": "AVR5zhL9/VogqVwuuSIqODosxGp1DIaxqiIDeHC2tMEG155RGh5cBWN8GCs08uqhTcEUdZ5xT7TFsebFRWhOOwWAAQAFCoqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29c/dDW8S9X9DRmX5l7qX1pKwGzJCb8dHfYdl4ijR8lheBh2yLOUjr/KruoFQopUROQ7aa+XJbQy47Rh2Z7vQVy/fcY5ud1uvvt0UFU/9DuUo7K9x0qrwXHN8eQZBBBxLX9eFIcsXnOu4WJtVai1eyU0kmGgv35uyr1rWTkkcxBU9oDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG3fbh7nWP3hhCXbzkbM3athr8TYO5DSf+vfko2KGL/GynNe4clCpLBNHME1vY6egs9YnK9pq+oZtlgl9n1q3ZBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUGBQAFAtjEAwAFAAUEAAA0AQYGAAEAFgcIAQEJMgACARcKABgWGQECCwwaDQgbBwYcFw4dHgMfICEiDwIjECMREgECFhkTIwAIGyQlIxQVTgICAMqaOwAAAABrhqoDAAAAABoIGAASCBwAxi4VUrTZ6HAAypo7AAAAAAEAAAAAAAAAQUs/TOtbW4gAypo7AAAAAAEAAAAAAAAAAAAAAAgDAQAAAQkHAgAEDAIAAACghgEAAAAAAAGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoQwAAQIDBAUGBwgJCgsQDA0ODxAREhMUFRYXGBkaGw=="
+    },
+    {
+      "back": 1055666586,
+      "buy_pool": "6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo",
+      "bytes": 632,
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 241000,
+      "cu_route": 206000,
+      "cu_src": "fallback",
+      "expect": "ok",
+      "expected_profit": 55666586,
+      "gll3_quote_vault": "GGf2tpFKavF5jwZQj4jsAMmExtnLCAS1BZR5wa6mQhje",
+      "gll3_quote_vault_amount": 382210939040,
+      "gll3_quote_vault_scale": [
+        1120,
+        1000
+      ],
+      "held": false,
+      "loaded_data_limit": 20119552,
+      "mid_account": "J5nr685J2bc2qgrvZqNXUF8rg7XfcRrcgoV9hWH1Moqh",
+      "min_profit": 105001,
+      "mint": "8nnaeWCw8mUypcGAgbmSuzAT85uWx4UN12adDrMhXrGF",
+      "name": "dlmm_buy_pump_sell_create_close",
+      "sell_pool": "GLL3CzybpSCLZdoACf8QUM5YrKVwyA65kQ2RcTsJxxzV",
+      "size": 1000000000,
+      "spent": 1000000000,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "tx_b64": "AWsSjAil5SVxJMOBqXwfldCrbfDM5IcjP0ikJ2bw36eG9zsRDttDfuaZWeStAaRrLS+PfKc4XWe6wEXxmxKj5QeAAQAFCYqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29c/dDW8S9X9DRmX5l7qX1pKwGzJCb8dHfYdl4ijR8lheBh2yLOUjr/KruoFQopUROQ7aa+XJbQy47Rh2Z7vQVy/XhSHLF5zruFibVWotXslNJJhoL9+bsq9a1k5JHMQVPaAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAACMlyWPTiSJ8bs9ECkUjg2DC1oTmdr/EIQEjnvY2+n4WQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABt324e51j94YQl285GzN2rYa/E2DuQ0n/r35KNihi/xspzXuHJQqSwTRzBNb2OnoLPWJyvaavqGbZYJfZ9at2QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBgQABQJorQMABAAFBAAAMwEFBgABABUGBwEBCDAAAgEWCRYKCwIBFRcMFgAHGBkaFg0OAhsPABwVFwECEBEdEgcYBgUeGxMfICEiIxROAgIAypo7AAAAACmaAQAAAAAAEggcABgIGABBSz9M61tbiADKmjsAAAAAAQAAAAAAAAAAAAAAM+aFpAF/g60Aypo7AAAAAAEAAAAAAAAABwMBAAABCQYCAAMMAgAAAKCGAQAAAAAAAaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhDAYHCAkKHAABAgMEBQ8MGQ8RGhsNDhASExUWFxg="
+    }
+  ],
+  "clock_from": "DLMM-6D4E",
+  "fixtures": [
+    "PumpSwap-GLL3CzybpSCLZdoACf8QUM5YrKVwyA65kQ2RcTsJxxzV.json",
+    "DLMM-6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo.json"
+  ],
+  "payer": "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+  "payer_seed_byte": 1,
+  "program": "8K8uyQDtVKHYRPACP9fepz91q4sEZLBppR2Ty4vdXuWg",
+  "schema": "arbx.bundle-vectors/1"
+}

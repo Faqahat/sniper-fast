@@ -72,7 +72,7 @@ fn record(dir: &Path) -> [u8; 64] {
         let aseq = ar.record(&AcctUpdate { pubkey: *k, slot: 10, write_version: 0, t_recv: T0, src: src::RPC_BOOT, is_startup: false, txn: None, lamports: 1, owner: [3; 32],
             data: &data, bank_id: None });
         j.account(0, aseq, store.is_stale(k, 10, src::RPC_BOOT, 0, aseq));
-        store.apply(*k, Acct::rpc(data, 10, T0, aseq, src::RPC_BOOT));
+        store.apply(*k, Acct::rpc(data, 10, T0, aseq, src::RPC_BOOT).with_lamports(1));
     }
     let reg = Arc::new(reg);
     arbx::replay::write_pools_json(dir, &reg, &base, &roles).unwrap();

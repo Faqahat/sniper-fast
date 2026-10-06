@@ -8,7 +8,9 @@
 #   - bundles expecting 1M or more throttled to 0.5/s; crowded pools ranked last and kept out from 100k expected
 #     (OD-3's alternative); since WP-05 in [send_policy] with the rest of the send policy (fail-closed send checks, the
 #     in-flight lock, the rate queue's bands and crowding, the on-chain margin)
-#   - no new token accounts ([live] max_new_token_accounts = 0: rent turned the bundle arm's +163k into -17.9M)
+#   - no rent locked by a trade: WP-06 creates a token account the wallet holds none of and closes it in the same
+#     transaction (rent-neutral; [live] max_new_token_accounts, WP-00's 0, is gone: rent turned the bundle arm's +163k
+#     into -17.9M); the size budget's held-set additions are off ([builder] held_max = 0: nothing stays locked)
 #   - the recorder on (WP-02: always on, [record] only sets budgets); skip_failing_signers on; the sim gate and the
 #     durable nonces are gone (WP-05: a recent blockhash; attempts settle from the chain)
 #   - paths repointed to the arbx tree (/root/arbx)
@@ -259,9 +261,7 @@ enabled = true   # WP-00: the only enabled send path
 kind = "jito-bundle"
 url = "https://frankfurt.mainnet.block-engine.jito.wtf"
 auth_keypair = "~/.nexus-v2-jito-auth.json"
-tip_lamports = 1000   # EXP-1: floor; the bundle-only bots tip 1,000-6,000
-tip_share = 0.7               # 70% of the predicted edge after the base fee (live value)
-tip_max_lamports = 100000   # owner 2026-10-04: bundle tips capped at 0.0001 SOL (70% share below that)
+tip_lamports = 1000   # EXP-1: Jito's floor; WP-06: the tip itself is [tips] (by band, floor, cap) below
 max_per_sec = 5               # Jito's limit on our gRPC key since 2026-10-02 (per key: arbx gets its own key at go-live)
 # the bundle path's rate queue waits [send_policy] queue_ms (no queue_ms here: WP-05)
 
@@ -372,7 +372,7 @@ max_spend_lamports = 3000000   # 0.003 SOL of fees of landed failures in all
 max_size_sol = 4.2                # OD-4 (owner): ships with the live value 4.2 (or R §3.8's ladder 0.2 -> 1 -> 4.2); in meta.json limits
 max_failed_fees_lamports = 25000000   # EXP: $3 for tonight experiments
 margin_lamports = 1000              # the decision's bar: expected profit >= tip + base fee + this (the on-chain floor is [send_policy])
-max_new_token_accounts = 0   # WP-00: none until WP-06 makes trades rent-neutral (rent turned the bundle arm's +163k into -17.9M)
+# (WP-06: max_new_token_accounts is gone: a token account the wallet holds none of is created and closed in the trade)
 
 [send_policy]
 # PLAN WP-05: bundle-only, fail closed (no network call between a decision and its fire). A send needs a blockhash from
@@ -403,6 +403,33 @@ direct_experiment = false   # the direct (non-bundle) arm: refused in Stage 0
 [send_policy.direct]
 # the direct arm's durable nonces (the NEW wallet's arb-nonce-0..19, 2026-10-03), kept for its experiment only
 nonce_accounts = ["7FhgBHwRoyydy8Q3WhrePceJyLFFeKy9dRifyQk5XsdP", "bzZ8duYQu9pR8LW4kadiQpmGQiT82SRr87UxDnUk882", "9B42xGWEBv23RDbxUuYitnPrTVqZx8au8qUg4N7vDEUT", "7PTHLfiRwYbYkNMDg78HMEBG52eU9m3fYZdybZC1QyKF", "AfCEs8r7va62X9wHNwUWv7BrmF1y7tNHT3DnCFt8TQt2", "2eB1kJDEe2qm9eeHW8eA8nLKv3EjoiZZKCV38Ypk4EP4", "9vDG6azq7P8ajF5ZWUFg8q67oAaVkM4aePt821wzCmJH", "8QNXNscS8aZVq5uG1WRuKm2g51pchwEDxb2Fh7uvp24S", "8XtyztY27tFio2HZLAR2oPHQJsGSLm5zJ4ebycWmMAsm", "5fLLJC9am82hGh4oC4vojstJ95XMyshYfVTd6s2WrDdc", "BaNnigdYTuf6JNwQeBJe4Xx5EN5XnrYuZVZJ52uMekVz", "5H3wjior6RrJ5yBQRHGQiDqX9ccxhQESrxMQY6cjJHcj", "BppgM2hhGfEw1JGLd8Cq5WFQ7rvrvEr3Lg9QQ8XRWniz", "2FbH2shEAqUiTXHBYvnjGQdYb3qTE4D292f6JKiao6b5", "ta5JaGyCqfmVhQcncwuit1QhuVX16m2DBytMpwxYPmu", "3bdQ9NHoskMHmBi6eohrQgpmYaXfPge46R9maDWyzhbW", "E7EPka7JhgCPMafvPU8FKRcJeTwo9S144bTs99TuqGPR", "4xHsSvGJGbkc14AM1dSyneEDXHtF3PhaHaCaX3PMMQJs", "Fb2fYXYqYNRzDWJ4RmXAwDR2Ux7vsytaKtHXhyG3tcmW", "BbzRg7HfeohNpYzLnkXbzE2ThzwKa2PxWFbZGpG3Gs3Z"]
+
+[bands]
+# WP-06 item 8 (F22): the one band table (decisions, the send queue, the tips), over the expected edge = gross - base fee;
+# bands 0-4, 3 and 4 the >=1M class
+edges = [20000, 100000, 1000000, 10000000]
+
+[tips]
+# WP-06 item 8: a bundle tips clamp(share(band) x edge, floor, cap). Stage 0: 0.7 in every band (the status quo: the
+# mechanism changes, not the behaviour; X4 changes the numbers); contested_shares wait for the Stage 2A Selector
+shares = [0.7, 0.7, 0.7, 0.7, 0.7]
+contested_shares = [0.16, 0.47, 0.54, 0.64, 0.64]
+floor = 1000
+cap = 100000   # owner 2026-10-04: bundle tips capped at 0.0001 SOL
+
+[builder]
+# WP-06: a token account the wallet holds none of is created and closed in the same transaction (rent-neutral); the held
+# set is WSOL, USDC, USDT and the tokens the wallet already holds
+create_close = true   # false: trade held tokens only (mid_not_held), the held-only control arm
+held_max = 0   # the size budget's held-ATA fallback (create, no close: 1.49-1.51M lamports stay locked per account) is OFF (go-live gate item 2; review WP-06 #1). An explicit opt-in above 0: at most this many hot mints, each kept only when the expected profit covers min_profit + its rent
+allow_uva_create = false   # a PumpSwap buy without the wallet's volume accumulator would create it (1,346,200 lamports, never recovered): refused (uva_missing); owner action
+loaded_data_limit = "auto" # the transaction's accounts and programs at their measured sizes, +25% +256 KiB (the dry run's simulation checks it)
+cu_table = "/root/arbx/data/cu-table.json"   # measured CU per leg (arbx-report cu-table); a cell under cu_min_samples takes the old formula
+cu_min_samples = 30
+alt_index = true   # over 1,232 bytes: lookup tables learned from decoded transactions that name the route's pools, at most max_alts
+max_alts = 4
+payer_guard = false   # nexus-v2's max_payer_lamport_drop trailer: on after X6 and a canary
+payer_guard_max_drop = 0
 
 [dry_run]
 # go-live gate item 4 (`arbx run --dry-run`): every would-send bundle is signed by a throwaway key made in memory (never

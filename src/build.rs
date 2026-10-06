@@ -3,10 +3,14 @@
 //! lookup tables, the nonce guard) and src/venues/encoders.ts (each venue's swap, from the synthetic templates and
 //! buildSwap's rules, which arbed verified against real on-chain swaps). Only arb-lab's four venues.
 //!
-//! Instruction order (the winners' shape arbed copied): [AdvanceNonce] > CU limit > CU price > [create token
-//! account] > nexus-v2 route > [tip]. The route's legs chain balances on chain: leg 1 spends `amount_in` of the
-//! quote account, every later leg spends what the previous one delivered, and the program fails the whole
-//! transaction (0x4e580002) unless the quote account ends at least `min_profit` above where it started.
+//! Instruction order (PLAN WP-06 item 1, `bundle_ixs`): CU limit > SetLoadedAccountsDataSizeLimit > [create the mid
+//! token's ATA (idempotent), only when the wallet holds none] > nexus-v2 route > [CloseAccount of that ATA to the payer,
+//! only when this transaction created it] > tip (a top-level System transfer, last). No CU price: a bundle pays its tip
+//! only. The create's rent comes back in the same transaction (the close sends every lamport of the account to the
+//! payer), so a trade through a token the wallet holds no account for is rent-neutral, and a route that fails reverts
+//! the create too. The route's legs chain balances on chain: leg 1 spends `amount_in` of the quote account, every later
+//! leg spends what the previous one delivered (the mid account, created empty, ends empty again), and the program fails
+//! the whole transaction (0x4e580002) unless the quote account ends at least `min_profit` above where it started.
 use crate::pda::{self, ATA_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM};
 use crate::tx::{pk, Pk, COMPUTE_BUDGET};
 use crate::venues::{dlmm, i32_at, pk_at, u64_at, PoolMeta, Venue};
@@ -34,6 +38,8 @@ const AMMV4_SWAP_BASE_IN_V2: u8 = 16;
 /// v0 transaction size limit, and the runtime's account-lock limit
 pub const MAX_TX_BYTES: usize = 1232;
 pub const MAX_LOCKS: usize = 64;
+/// the runtime's largest loaded-accounts data size (64 MiB, the default when a transaction sets none)
+pub const MAX_LOADED_DATA: u32 = 64 * 1024 * 1024;
 /// nexus-arb-v2 errors (ERR_BASE 0x4e580000)
 pub const ERR_PROFIT: u32 = 0x4e58_0002;
 /// v2 layout: n_accounts shares its byte with the NATIVE_IN / NATIVE_OUT flags (bits 7 and 6)
@@ -75,9 +81,13 @@ pub struct LegIn<'a> {
     pub amount_in: u64,
     pub payer: Pk,
     pub pump: Option<&'a PumpGlobal>,
-    /// DLMM: bin-array indices we hold (they exist), and the bin where our quote ends
+    /// DLMM: bin-array indices the quote may use (followed, read, usable: `quote::dlmm_window`'s `have`), and the bin
+    /// where our quote ends
     pub dlmm_live: &'a [i64],
     pub dlmm_end: Option<i32>,
+    /// DLMM: the pair's bitmap extension when the store holds it (it exists), read per send (PLAN WP-06 item 6; the
+    /// boot-time check is gone)
+    pub dlmm_ext: Option<Pk>,
 }
 
 fn prog_of(m: &PoolMeta, mint: &Pk) -> Pk { if *mint == m.t0 { m.t0_prog } else { m.t1_prog } }
@@ -130,6 +140,10 @@ pub fn leg(a: &LegIn) -> Result<Leg, String> {
     }
 }
 
+/// PumpSwap's user volume accumulator of `user` (a PDA of PumpSwap): every buy names it, and creates it when it is
+/// missing (1,346,200 lamports of rent, never recovered: PLAN WP-06 item 2)
+pub fn pump_uva(user: &Pk) -> Pk { pda::find_program_address(&[b"user_volume_accumulator", user], &crate::venues::PUMPSWAP).0 }
+
 /// PumpSwap `sell` (base in) or `buy_exact_quote_in` (quote in): arbed's pumpSwapTemplate + buildSwap's PumpSwap rules
 /// (creator vault from the LIVE coin_creator, the payer's own volume accumulator, no cashback block before pool_v2).
 fn pump_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
@@ -150,7 +164,7 @@ fn pump_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
     let fee_recipient = fees[pick % fees.len()];
     let buyback = g.buyback[pick % g.buyback.len()];
     let creator_auth = pda::find_program_address(&[b"creator_vault", &creator], &pid).0;
-    let uva = pda::find_program_address(&[b"user_volume_accumulator", &a.payer], &pid).0;
+    let uva = pump_uva(&a.payer);
     let quote_ata = |owner: &Pk| ata_of(owner, &quote, &quote_prog);
     let mut acc = vec![w(m.pool), s(a.payer), r(*PUMP_GLOBAL_CONFIG), r(m.t0), r(m.t1),
         w(ata_of(&a.payer, &m.t0, &base_prog)), w(ata_of(&a.payer, &m.t1, &quote_prog)), w(m.vault0), w(m.vault1),
@@ -160,9 +174,11 @@ fn pump_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
     acc.push(r(*crate::pools::PUMP_FEE_CONFIG));
     acc.push(r(*PUMP_FEE_PROGRAM));
     let has_v2 = creator != [0u8; 32];
-    // arbed drops the payer-seeded cashback block in front of pool_v2 (the program refuses it, 6062 InvalidPoolV2);
-    // it is kept only when there is no pool_v2 after it
-    if cashback && !has_v2 { acc.push(w(quote_ata(&uva))); if sell { acc.push(w(uva)); } }
+    // arbed drops the payer-seeded cashback block in front of pool_v2 (the program refuses it, 6062 InvalidPoolV2) and
+    // keeps it when there is no pool_v2 after it. That block names the user volume accumulator's WSOL account, which the
+    // program could create at the payer's expense, rent we could not reclaim (review WP-06 #12): refused here too
+    // (arbx-sizing refuses every cashback pool already, `sz_pump_cashback`)
+    if cashback && !has_v2 { return Err("pump-cashback-without-pool-v2".into()); }
     if has_v2 { acc.push(r(pda::find_program_address(&[b"pool-v2", &m.t0], &pid).0)); }
     acc.push(r(buyback));
     acc.push(w(quote_ata(&buyback)));
@@ -172,27 +188,39 @@ fn pump_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
     Ok(Leg { program: pid, out, accounts: acc, data, amount_offset: 8 })
 }
 
-/// DLMM `swap2`: arbed's dlmmTemplate + buildSwap's DLMM rules. Bin arrays: the active one first, then onward in the
-/// direction of travel as far as our quote's end bin (plus one buffer array), naming only arrays we hold (exist).
+/// the bin-array indices the pair's own bitmap covers: a named array outside needs the bitmap extension
+pub const DLMM_INTERNAL_ARRAYS: std::ops::RangeInclusive<i64> = -512..=511;
+
+/// The bin arrays a DLMM leg names (PLAN WP-06 item 6): the quote's window (`quote::dlmm_window`: the active bin's array,
+/// then onward in the swap's direction while held, contiguous, at most 5) as far as the array of the quote's end bin,
+/// plus one buffer array. The window is the one the quote walked, so the leg never runs past the liquidity it names.
+/// An array outside the pair's own bitmap needs the bitmap extension: a buffer array there is left out when the pair has
+/// none; an array the quote walks there is refused (`dlmm_ext_needed`)
+pub fn dlmm_arrays(active: i32, zfo: bool, live: &[i64], end: Option<i32>, ext: bool) -> Result<Vec<i64>, String> {
+    let c = dlmm::array_index(active);
+    let window = crate::quote::dlmm_window(c, zfo, &|i| live.contains(&i));
+    if window.is_empty() { return Err(format!("dlmm-active-binarray-not-held({c})")); }
+    let e = end.map(dlmm::array_index).unwrap_or(c);
+    let k = window.iter().position(|i| *i == e).ok_or_else(|| format!("dlmm-quote-end-outside-window({e})"))?;
+    let mut names: Vec<i64> = window[..(k + 2).min(window.len())].to_vec();
+    if !ext {
+        if names[..=k].iter().any(|i| !DLMM_INTERNAL_ARRAYS.contains(i)) { return Err("dlmm_ext_needed".into()); }
+        names.retain(|i| DLMM_INTERNAL_ARRAYS.contains(i));
+    }
+    Ok(names)
+}
+
+/// DLMM `swap2`: arbed's dlmmTemplate + buildSwap's DLMM rules. Bin arrays: `dlmm_arrays` (the quote's window as far as
+/// its end bin, plus one buffer array). The bitmap extension when it exists (read from the store per send), else the
+/// program id in its place (Anchor's None)
 fn dlmm_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
     let m = a.m;
     let pid = m.venue.program();
     let oracle = pk_at(a.pool, 552).ok_or("dlmm-pool-short")?;
     let active = i32_at(a.pool, 76).ok_or("dlmm-pool-short")?;
     let zfo = a.tin == m.t0;
-    let c = dlmm::array_index(active);
-    if !a.dlmm_live.contains(&c) { return Err(format!("dlmm-active-binarray-not-held({c})")); }
-    let step: i64 = if zfo { -1 } else { 1 };
-    let end = a.dlmm_end.map(dlmm::array_index).unwrap_or(c);
-    let mut picks = vec![c];
-    let mut i = c;
-    while picks.len() < 5 {
-        i += step;
-        if !a.dlmm_live.contains(&i) { break; }
-        picks.push(i);
-        if (i - end) * step >= 1 { break; }   // one array past the quote's end
-    }
-    let ext = if m.flag { w(m.extra[0]) } else { r(pid) };
+    let picks = dlmm_arrays(active, zfo, a.dlmm_live, a.dlmm_end, a.dlmm_ext.is_some())?;
+    let ext = match a.dlmm_ext { Some(e) => w(e), None => r(pid) };
     let mut acc = vec![w(m.pool), ext, w(m.vault0), w(m.vault1), w(ata_of(&a.payer, &a.tin, &prog_of(m, &a.tin))), w(out),
         r(m.t0), r(m.t1), w(oracle), r(pid), s(a.payer), r(m.t0_prog), r(m.t1_prog), r(*MEMO), r(*DLMM_EVENT_AUTHORITY), r(pid)];
     for p in &picks { acc.push(w(dlmm::bin_array_pda(&m.pool, *p))); }
@@ -204,9 +232,10 @@ fn dlmm_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
 }
 
 /// nexus-arb-v2 route instruction. data: [0] 0x02 [1] n_legs [2..10] amount_in [10..18] min_profit, per leg
-/// {n_accounts u8, amount_offset u8, data_len u16}, then every leg's data. accounts: authority, quote account, then per
-/// leg: output account, program, the leg's accounts.
-pub fn route_ix(program: Pk, authority: Pk, quote: Pk, amount_in: u64, min_profit: u64, legs: &[Leg]) -> Result<Ix, String> {
+/// {n_accounts u8, amount_offset u8, data_len u16}, then every leg's data, then with `guard` the 8-byte
+/// `max_payer_lamport_drop` trailer (nexus-v2's `encode_guarded`: presence is decided by the exact length; PLAN WP-06
+/// item 9). accounts: authority, quote account, then per leg: output account, program, the leg's accounts.
+pub fn route_ix(program: Pk, authority: Pk, quote: Pk, amount_in: u64, min_profit: u64, legs: &[Leg], guard: Option<u64>) -> Result<Ix, String> {
     if legs.is_empty() || legs.len() > 8 { return Err(format!("v2: {} legs, allowed 1..8", legs.len())); }
     if min_profit < 1 { return Err("v2: min_profit must be >= 1".into()); }
     if legs.last().unwrap().out != quote { return Err("v2: the last leg must deliver into the quote account".into()); }
@@ -223,6 +252,7 @@ pub fn route_ix(program: Pk, authority: Pk, quote: Pk, amount_in: u64, min_profi
         data.extend((l.data.len() as u16).to_le_bytes());
     }
     for l in legs { data.extend(&l.data); }
+    if let Some(g) = guard { data.extend(g.to_le_bytes()); }
     let mut accounts = vec![s(authority), w(quote)];
     for l in legs { accounts.push(w(l.out)); accounts.push(r(l.program)); accounts.extend(l.accounts.iter().cloned()); }
     Ok(Ix { program, accounts, data })
@@ -338,6 +368,13 @@ pub fn route_ix_v3(program: Pk, authority: Pk, quote: Pk, amount_in: u64, min_pr
 }
 
 pub fn cu_limit_ix(units: u32) -> Ix { let mut d = vec![2]; d.extend(units.to_le_bytes()); Ix { program: COMPUTE_BUDGET, accounts: vec![], data: d } }
+/// ComputeBudget SetLoadedAccountsDataSizeLimit (instruction 4, u32 bytes)
+pub fn loaded_data_limit_ix(bytes: u32) -> Ix { let mut d = vec![4]; d.extend(bytes.to_le_bytes()); Ix { program: COMPUTE_BUDGET, accounts: vec![], data: d } }
+/// SPL Token / Token-2022 CloseAccount (instruction 9): every lamport of `account` (empty) to `destination`, signed by
+/// its `owner`
+pub fn close_account_ix(account: Pk, destination: Pk, owner: Pk, token_program: Pk) -> Ix {
+    Ix { program: token_program, accounts: vec![w(account), w(destination), Meta { key: owner, signer: true, writable: false }], data: vec![9] }
+}
 pub fn cu_price_ix(micro: u64) -> Ix { let mut d = vec![3]; d.extend(micro.to_le_bytes()); Ix { program: COMPUTE_BUDGET, accounts: vec![], data: d } }
 pub fn transfer_ix(from: Pk, to: Pk, lamports: u64) -> Ix {
     let mut d = 2u32.to_le_bytes().to_vec();
@@ -375,6 +412,107 @@ pub fn create_ata_idempotent_ix(payer: Pk, owner: Pk, mint: Pk, token_prog: Pk) 
     Ix { program: *ATA_PROGRAM, accounts: vec![s(payer), w(ata_of(&owner, &mint, &token_prog)), r(owner), r(mint), r(*SYSTEM_PROGRAM), r(token_prog)], data: vec![1] }
 }
 
+/// The mid token's account in a bundle (PLAN WP-06 item 2): created (idempotent) before the route when the wallet holds
+/// none, and closed to the payer after it when `close` (create+close: rent-neutral). `close` false is a deliberate
+/// held-set addition (the size budget's fallback, off unless `[builder] held_max` > 0)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AtaOps { pub mint: Pk, pub token_program: Pk, pub close: bool }
+
+/// The rent a token account the builder creates and keeps (a held-set addition: `[builder] held_max` > 0, an explicit
+/// opt-in, off by default) may lock, taken as an upper bound: a 200-byte account (SPL Token's are 165 bytes, a Token-2022
+/// ATA 170 with its ImmutableOwner extension, plus the account extensions a tradable mint can add) with the 128-byte
+/// overhead, at 6,960 lamports a byte (3,480 a byte-year for two years: the rent before mainnet's reduction; on 2026-10-04
+/// mainnet took 5,080 a byte, 1,488,440 lamports for an SPL account and 1,513,840 for a Token-2022 one, res-pnl §2 and
+/// the venue harness). A held addition's on-chain min_profit adds it: the WSOL the route must make covers the SOL the
+/// account keeps (review WP-06 #1), and the dry run's checks demand it (`min_profit_covers_tip`)
+pub const HELD_RENT_BOUND: u64 = (200 + 128) * 6_960;
+
+/// Everything a bundle transaction holds besides its route
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plan { pub payer: Pk, pub cu_limit: u32, pub loaded_data_limit: Option<u32>, pub ata: Option<AtaOps>, pub tip: Option<(Pk, u64)> }
+
+/// One bundle transaction's instructions, in PLAN WP-06 item 1's order: the CU limit; the loaded-accounts data size
+/// limit; the mid token's ATA create (idempotent; the wallet holds none); the route; the CloseAccount of that ATA to the
+/// payer (only when this transaction created it and `close`: its rent comes back in the same transaction); the tip, a
+/// top-level System transfer, last (Jito ignores a tip account named through a table)
+pub fn bundle_ixs(p: &Plan, route: Ix) -> Vec<Ix> {
+    let mut ixs = vec![cu_limit_ix(p.cu_limit)];
+    if let Some(b) = p.loaded_data_limit { ixs.push(loaded_data_limit_ix(b)); }
+    if let Some(a) = &p.ata { ixs.push(create_ata_idempotent_ix(p.payer, p.payer, a.mint, a.token_program)); }
+    ixs.push(route);
+    if let Some(a) = p.ata.filter(|a| a.close) { ixs.push(close_account_ix(ata_of(&p.payer, &a.mint, &a.token_program), p.payer, p.payer, a.token_program)); }
+    if let Some((to, lamports)) = p.tip { ixs.push(transfer_ix(p.payer, to, lamports)); }
+    ixs
+}
+
+// ------------------------------------------------------------------ the loaded-accounts data size (PLAN WP-06 item 1)
+
+/// SIMD-0186's per-account base size and per-lookup-table size
+pub const ACCOUNT_BASE_BYTES: u64 = 64;
+pub const ALT_BASE_BYTES: u64 = 8_248;
+/// what an account the store does not hold may weigh (DLMM oracles, fee recipients' accounts, PDAs): generous
+pub const UNKNOWN_ACCOUNT_BYTES: u64 = 64 * 1024;
+/// a program missing from `PROGRAM_BYTES`
+pub const UNKNOWN_PROGRAM_BYTES: u64 = 4 * 1024 * 1024;
+
+/// The programs our bundles invoke or name, with what loading one weighs beyond its own 64 base bytes: its program
+/// account's data (36 bytes for an upgradeable one) plus, for an upgradeable one, its programdata account (64 base bytes,
+/// the 45-byte header and the ELF region: program/venue-harness/fixtures/programs/MANIFEST.json `onchain_size`, which is
+/// the region after the header, read on 2026-10-04; testdata/programs for nexus-v2, whose 43,485 bytes include the
+/// header). An upgrade that extends a programdata account grows it: the estimate's margin covers that, and the dry run's
+/// simulation checks the limit on chain (go-live gate item 4)
+pub const PROGRAM_BYTES: [(&str, u64); 15] = [
+    ("8K8uyQDtVKHYRPACP9fepz91q4sEZLBppR2Ty4vdXuWg", 36 + 64 + 43_485),       // nexus-arb-v2
+    ("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", 36 + 64 + 45 + 10_485_715),    // PumpSwap
+    ("pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ", 36 + 64 + 45 + 948_944),       // PumpSwap's fee program
+    ("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", 36 + 64 + 45 + 793_824),      // Raydium CPMM
+    ("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", 36 + 64 + 45 + 1_406_384),    // Raydium AMM v4
+    ("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", 36 + 64 + 45 + 2_229_776),     // Meteora DLMM
+    ("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", 36 + 64 + 45 + 2_174_352),     // Meteora DAMM v2
+    ("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", 36 + 64 + 45 + 108_600),       // SPL Token (p-token)
+    ("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", 36 + 64 + 45 + 1_382_016),     // Token-2022
+    ("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", 105_032),            // the ATA program (BPFLoader2: the ELF in its account)
+    ("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", 128 * 1024),          // Memo v3 (named by DLMM's swap2), generous
+    ("11111111111111111111111111111111", 64),                              // the System program (native)
+    ("ComputeBudget111111111111111111111111111111", 64),                   // the ComputeBudget program (native)
+    ("SysvarRent111111111111111111111111111111111", 64),
+    ("SysvarC1ock11111111111111111111111111111111", 64),
+];
+
+/// What one account weighs when the transaction loads it: a listed program's bytes, else the store's size for it, else
+/// `UNKNOWN_PROGRAM_BYTES` for a program the transaction invokes and `UNKNOWN_ACCOUNT_BYTES` for any other account
+fn account_bytes(k: &Pk, invoked: bool, size: &dyn Fn(&Pk) -> Option<usize>) -> u64 {
+    static PROGS: LazyLock<HashMap<Pk, u64>> = LazyLock::new(|| PROGRAM_BYTES.iter().map(|(k, b)| (pk(k), *b)).collect());
+    if let Some(b) = PROGS.get(k) { return *b; }
+    size(k).map_or(if invoked { UNKNOWN_PROGRAM_BYTES } else { UNKNOWN_ACCOUNT_BYTES }, |n| n as u64)
+}
+
+/// The bytes a transaction loads before any margin (SIMD-0186): 64 plus the weight (`account_bytes`) of every distinct
+/// account, given as (key, whether the transaction invokes it as a program; a key given twice counts once, invoked if
+/// either says so), and 8,248 per lookup table the message loads from
+pub fn loaded_data_raw(accounts: impl IntoIterator<Item = (Pk, bool)>, n_alts: usize, size: &dyn Fn(&Pk) -> Option<usize>) -> u64 {
+    let mut seen: HashMap<Pk, bool> = HashMap::default();
+    for (k, invoked) in accounts { *seen.entry(k).or_default() |= invoked; }
+    seen.iter().map(|(k, invoked)| ACCOUNT_BASE_BYTES + account_bytes(k, *invoked, size)).sum::<u64>() + ALT_BASE_BYTES * n_alts as u64
+}
+
+/// `[builder] loaded_data_limit = "auto"`'s margin on a raw count: 25% and 256 KiB on top, rounded up to 32 KiB, at most
+/// 64 MiB
+pub fn loaded_data_padded(raw: u64) -> u32 {
+    let padded = raw + raw / 4 + 256 * 1024;
+    (padded.div_ceil(32 * 1024) * 32 * 1024).min(MAX_LOADED_DATA as u64) as u32
+}
+
+/// `[builder] loaded_data_limit = "auto"`: an upper bound of the bytes the transaction loads (SIMD-0186: 64 bytes plus
+/// the data of every distinct account, programs with their programdata, 8,248 per lookup table it loads from), from its
+/// instructions and the payer, with `loaded_data_padded`'s margin. `size`: an account's data length as the store holds
+/// it. The dry run derives the same number from the signed message's own accounts (`exec::verify_bundle`)
+pub fn loaded_data_estimate(payer: &Pk, ixs: &[Ix], n_alts: usize, size: &dyn Fn(&Pk) -> Option<usize>) -> u32 {
+    let programs = ixs.iter().map(|ix| (ix.program, true));
+    let accounts = ixs.iter().flat_map(|ix| ix.accounts.iter().map(|a| (a.key, false)));
+    loaded_data_padded(loaded_data_raw(programs.chain([(*payer, false)]).chain(accounts), n_alts, size))
+}
+
 /// A durable nonce account's stored value (the blockhash field the transaction carries), from its 80 bytes. The direct
 /// experiment's, like `advance_nonce_ix`: no reader in Stage 0
 pub fn nonce_value(d: &[u8]) -> Option<[u8; 32]> {
@@ -397,8 +535,10 @@ fn compact(n: usize, out: &mut Vec<u8>) {
     loop { let mut b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); break; } b |= 0x80; out.push(b); }
 }
 
-/// A compiled v0 message, ready to sign
-pub struct Message { pub bytes: Vec<u8>, pub static_keys: usize, pub locks: usize }
+/// A compiled v0 message, ready to sign. `loadable`: its static keys a lookup table could hold instead (not a signer,
+/// not an invoked program, not kept static): what the size budget's index tables may cover (PLAN WP-06 item 7);
+/// `lookups`: the tables it loads accounts from (of those it was compiled with, the ones that hold any)
+pub struct Message { pub bytes: Vec<u8>, pub static_keys: usize, pub locks: usize, pub loadable: Vec<Pk>, pub lookups: usize }
 
 /// Compile a v0 message exactly as web3.js's compileToV0Message (arbed's compileV0Fast): payer first; a non-signer,
 /// non-program account found in a table is loaded from it (tables in order, writable then readonly, first index);
@@ -463,7 +603,8 @@ pub fn compile_v0(payer: Pk, ixs: &[Ix], blockhash: [u8; 32], alts: &[&Alt], kee
         compact(wi.len(), &mut b); b.extend(wi);
         compact(ri.len(), &mut b); b.extend(ri);
     }
-    Ok(Message { bytes: b, static_keys: keys.len(), locks: all.len() })
+    let loadable: Vec<Pk> = keys.iter().filter(|k| { let f = meta[*k]; !f.signer && !f.invoked && !keep_static.contains(k) }).copied().collect();
+    Ok(Message { bytes: b, static_keys: keys.len(), locks: all.len(), loadable, lookups: lookups.len() })
 }
 
 /// signed wire bytes: one signature (the payer's), then the message
@@ -523,7 +664,7 @@ mod tests {
     fn v2_data_layout() {
         let l = Leg { program: [5; 32], out: [6; 32], accounts: vec![w([7; 32])], data: vec![9; 24], amount_offset: 8 };
         let l2 = Leg { out: [8; 32], ..l.clone() };
-        let ix = route_ix([1; 32], [2; 32], [8; 32], 1_000, 7, &[l, l2]).unwrap();
+        let ix = route_ix([1; 32], [2; 32], [8; 32], 1_000, 7, &[l, l2], None).unwrap();
         assert_eq!(&ix.data[..2], &[2, 2]);
         assert_eq!(u64::from_le_bytes(ix.data[2..10].try_into().unwrap()), 1_000);
         assert_eq!(u64::from_le_bytes(ix.data[10..18].try_into().unwrap()), 7);
@@ -531,7 +672,7 @@ mod tests {
         assert_eq!(ix.data.len(), 18 + 2 * 4 + 48);
         assert_eq!(ix.accounts.len(), 2 + 2 * 3);
         assert!(ix.accounts[0].signer && ix.accounts[0].key == [2; 32]);
-        assert!(route_ix([1; 32], [2; 32], [99; 32], 1, 1, &[Leg { program: [5; 32], out: [6; 32], accounts: vec![], data: vec![0; 16], amount_offset: 8 }]).is_err(), "last leg must pay the quote account");
+        assert!(route_ix([1; 32], [2; 32], [99; 32], 1, 1, &[Leg { program: [5; 32], out: [6; 32], accounts: vec![], data: vec![0; 16], amount_offset: 8 }], None).is_err(), "last leg must pay the quote account");
     }
 
     // ---- golden vectors shared with program/arbx-exec (its tests assert the same files) ----
@@ -549,18 +690,118 @@ mod tests {
     #[test]
     fn v2_route_matches_the_shared_golden_vector() {
         let (quote, x) = ([8; 32], [6; 32]);
-        let ix = route_ix([1; 32], [2; 32], quote, 0x0102_0304_0506_0708, 0x1112_1314_1516_1718, &[legn(3, x, 0xAA, 16), legn(4, quote, 0xBB, 16)]).unwrap();
+        let ix = route_ix([1; 32], [2; 32], quote, 0x0102_0304_0506_0708, 0x1112_1314_1516_1718, &[legn(3, x, 0xAA, 16), legn(4, quote, 0xBB, 16)], None).unwrap();
         assert_eq!(ix.data, golden("v2_route.hex"));
+    }
+
+    /// PLAN WP-06 item 9: the payer guard's trailer is nexus-v2's `encode_guarded`, byte for byte: the test vector pinned
+    /// in program/nexus-arb-v2/src/lib.rs (`GUARDED_FIXTURE_HEX`: the legs (3, 8, 0xAA x 16) and (4, 8, 0xBB x 16),
+    /// amount_in 0x0102030405060708, min_profit 0x1112131415161718, max_payer_lamport_drop 0x2122232425262728); without
+    /// a guard the bytes are the pre-upgrade `FIXTURE_HEX` (the shared golden vector), so nexus-v2 parses both
+    #[test]
+    fn guard_trailer_matches_nexus_v2_encode_guarded() {
+        let src = include_str!("../program/nexus-arb-v2/src/lib.rs");
+        let fixture = |name: &str| -> String {
+            let start = src.find(&format!("const {name}: &str = concat!(")).unwrap_or_else(|| panic!("{name} in nexus-arb-v2"));
+            let block = &src[start..start + src[start..].find(");").unwrap()];
+            block.split('"').skip(1).step_by(2).filter(|p| p.chars().all(|c| c.is_ascii_hexdigit())).collect()
+        };
+        let hex = |d: &[u8]| d.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let (quote, x) = ([8; 32], [6; 32]);
+        let legs = [legn(3, x, 0xAA, 16), legn(4, quote, 0xBB, 16)];
+        let g = route_ix([1; 32], [2; 32], quote, 0x0102_0304_0506_0708, 0x1112_1314_1516_1718, &legs, Some(0x2122_2324_2526_2728)).unwrap();
+        assert_eq!(hex(&g.data), fixture("GUARDED_FIXTURE_HEX"));
+        assert_eq!(hex(&g.data), "0202080706050403020118171615141312110308100004081000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2827262524232221");
+        let plain = route_ix([1; 32], [2; 32], quote, 0x0102_0304_0506_0708, 0x1112_1314_1516_1718, &legs, None).unwrap();
+        assert_eq!(hex(&plain.data), fixture("FIXTURE_HEX"));
+        assert_eq!((g.data.len(), plain.data.len()), (plain.data.len() + 8, 18 + 8 + 32), "8 bytes (R §3.9)");
+        assert_eq!(g.accounts.len(), plain.accounts.len(), "no account added");
+    }
+
+    /// PLAN WP-06 item 1: the new instructions' encodings. SetLoadedAccountsDataSizeLimit is ComputeBudget instruction 4
+    /// with a u32; CloseAccount is token instruction 9 (SPL Token and Token-2022 alike) over [account (writable),
+    /// destination (writable), owner (signer)]
+    #[test]
+    fn close_account_and_loaded_data_limit_encodings() {
+        let l = loaded_data_limit_ix(0x0012_D687);
+        assert_eq!((l.program, l.accounts.len(), l.data.clone()), (COMPUTE_BUDGET, 0, vec![4, 0x87, 0xD6, 0x12, 0x00]));
+        for prog in [*TOKEN_PROGRAM, *crate::pda::TOKEN_2022] {
+            let c = close_account_ix([3; 32], [4; 32], [5; 32], prog);
+            assert_eq!((c.program, c.data.clone()), (prog, vec![9]));
+            assert_eq!(c.accounts, vec![w([3; 32]), w([4; 32]), Meta { key: [5; 32], signer: true, writable: false }]);
+        }
+        // the create they pair with: the ATA program's CreateIdempotent (1) over [payer, the account, owner, mint, System, token program]
+        let a = create_ata_idempotent_ix([7; 32], [7; 32], [9; 32], *crate::pda::TOKEN_2022);
+        assert_eq!((a.program, a.data.clone(), a.accounts[1].key), (*ATA_PROGRAM, vec![1], ata_of(&[7; 32], &[9; 32], &crate::pda::TOKEN_2022)));
+    }
+
+    /// PLAN WP-06 item 1, golden: the instruction order with and without create/close (CU limit, loaded-data limit, [ATA
+    /// create], route, [CloseAccount of that ATA to the payer], tip last), and the compiled message: the create and the
+    /// close name the same account, the close sends it to the payer, the tip stays a static key and the last instruction
+    #[test]
+    fn bundle_instruction_order_golden() {
+        let payer = [77u8; 32];
+        let (mint, quote) = ([9u8; 32], ata_of(&payer, &crate::venues::WSOL, &TOKEN_PROGRAM));
+        let mid = ata_of(&payer, &mint, &TOKEN_PROGRAM);
+        let route = route_ix([60; 32], payer, quote, 1_000, 5, &[legn(3, mid, 0xAA, 16), legn(4, quote, 0xBB, 16)], None).unwrap();
+        let tip = ([96; 32], 1_234u64);
+        let names = |ixs: &[Ix]| -> Vec<(Pk, Vec<u8>)> { ixs.iter().map(|ix| (ix.program, ix.data.iter().take(1).copied().collect())).collect() };
+        let held = bundle_ixs(&Plan { payer, cu_limit: 200_000, loaded_data_limit: Some(1 << 20), ata: None, tip: Some(tip) }, route.clone());
+        assert_eq!(names(&held), vec![(COMPUTE_BUDGET, vec![2]), (COMPUTE_BUDGET, vec![4]), ([60; 32], vec![2]), (*SYSTEM_PROGRAM, vec![2])]);
+        let ata = Some(AtaOps { mint, token_program: *TOKEN_PROGRAM, close: true });
+        let cc = bundle_ixs(&Plan { payer, cu_limit: 235_000, loaded_data_limit: Some(1 << 20), ata, tip: Some(tip) }, route.clone());
+        assert_eq!(names(&cc), vec![(COMPUTE_BUDGET, vec![2]), (COMPUTE_BUDGET, vec![4]), (*ATA_PROGRAM, vec![1]), ([60; 32], vec![2]), (*TOKEN_PROGRAM, vec![9]),
+            (*SYSTEM_PROGRAM, vec![2])]);
+        assert_eq!((cc[2].accounts[1].key, cc[4].accounts[0].key, cc[4].accounts[1].key, cc[4].accounts[2].key), (mid, mid, payer, payer), "create and close the same account, to the payer");
+        assert_eq!(cc[0].data, [vec![2], 235_000u32.to_le_bytes().to_vec()].concat());
+        assert_eq!(cc[1].data, [vec![4], (1u32 << 20).to_le_bytes().to_vec()].concat());
+        // a held-set addition: the create without the close
+        let kept = bundle_ixs(&Plan { payer, cu_limit: 230_000, loaded_data_limit: None, ata: Some(AtaOps { mint, token_program: *TOKEN_PROGRAM, close: false }), tip: None },
+            route.clone());
+        assert_eq!(names(&kept), vec![(COMPUTE_BUDGET, vec![2]), (*ATA_PROGRAM, vec![1]), ([60; 32], vec![2])]);
+        // compiled: the tip account static and last; the message parses back to the same instruction order
+        let m = compile_v0(payer, &cc, [8; 32], &[], &[tip.0]).unwrap();
+        let key = ed25519_dalek::SigningKey::from_bytes(&[3; 32]);
+        let (tx, _) = crate::tx::parse_wire(&sign(&m, &key)).unwrap();
+        let progs: Vec<Pk> = tx.ixs.iter().map(|ix| tx.keys[ix.program as usize]).collect();
+        assert_eq!(progs, vec![COMPUTE_BUDGET, COMPUTE_BUDGET, *ATA_PROGRAM, [60; 32], *TOKEN_PROGRAM, *SYSTEM_PROGRAM]);
+        assert_eq!(tx.keys[*tx.ixs[5].accounts.get(1).unwrap() as usize], tip.0);
+        assert!(m.loadable.contains(&mid) && !m.loadable.contains(&payer) && !m.loadable.contains(&tip.0) && !m.loadable.contains(&*TOKEN_PROGRAM),
+            "the payer signs, the tip stays static, the token program is invoked (the close): none of them loadable");
+    }
+
+    /// `[builder] loaded_data_limit = "auto"`: an upper bound of SIMD-0186's loaded size: every listed program at its
+    /// on-chain size (PumpSwap's 10.5 MB programdata), the store's sizes, 64 KiB for an account it does not hold, 8,248 per
+    /// table, +25% +256 KiB, rounded to 32 KiB, never above 64 MiB
+    #[test]
+    fn loaded_data_estimate_bounds() {
+        let payer = [77u8; 32];
+        let route = |prog: Pk| Ix { program: prog, accounts: vec![w([1; 32]), w([2; 32]), r(*TOKEN_PROGRAM)], data: vec![] };
+        let pump = crate::venues::Venue::PumpSwap.program();
+        let ixs = [cu_limit_ix(1), route(pump)];
+        let est = loaded_data_estimate(&payer, &ixs, 1, &|k| (*k == [1; 32]).then_some(300));
+        // payer (unknown: 64 KiB), the compute budget program, PumpSwap, account 1 (300 bytes), account 2 (unknown), SPL Token;
+        // an upgradeable program with its programdata account (64 base bytes, the 45-byte header, the ELF region)
+        let raw = 6 * 64 + 64 * 1024 + 64 + (36 + 64 + 45 + 10_485_715) + 300 + 64 * 1024 + (36 + 64 + 45 + 108_600) + 8_248u64;
+        let want = (raw + raw / 4 + 256 * 1024).div_ceil(32 * 1024) * 32 * 1024;
+        assert_eq!(est as u64, want);
+        assert!(est % (32 * 1024) == 0 && est as u64 > raw);
+        // repeated accounts count once; an unlisted program is generous
+        let twice = loaded_data_estimate(&payer, &[cu_limit_ix(1), route(pump), route(pump)], 1, &|k| (*k == [1; 32]).then_some(300));
+        assert_eq!(twice, est);
+        assert!(loaded_data_estimate(&payer, &[route([42; 32])], 0, &|_| None) as u64 >= UNKNOWN_PROGRAM_BYTES);
+        let many: Vec<Ix> = (0..40u8).map(|i| route([100 + i; 32])).collect();
+        assert_eq!(loaded_data_estimate(&payer, &many, 4, &|_| None), MAX_LOADED_DATA, "capped at 64 MiB");
     }
 
     /// arbx-exec REVIEW.md #9: a v2 leg of 64+ accounts is re-read on chain as a NATIVE leg; the builder refuses it.
     #[test]
     fn v2_refuses_a_leg_of_64_accounts() {
         let (quote, x) = ([8; 32], [6; 32]);
-        assert!(route_ix([1; 32], [2; 32], quote, 1, 1, &[legn(63, x, 0, 24), legn(7, quote, 0, 24)]).is_ok());
-        let e = route_ix([1; 32], [2; 32], quote, 1, 1, &[legn(64, x, 0, 24), legn(7, quote, 0, 24)]).unwrap_err();
+        assert!(route_ix([1; 32], [2; 32], quote, 1, 1, &[legn(63, x, 0, 24), legn(7, quote, 0, 24)], None).is_ok());
+        let e = route_ix([1; 32], [2; 32], quote, 1, 1, &[legn(64, x, 0, 24), legn(7, quote, 0, 24)], None).unwrap_err();
         assert!(e.contains("64 accounts"), "{e}");
-        assert!(route_ix([1; 32], [2; 32], quote, 1, 1, &[legn(7, x, 0, 24), legn(200, quote, 0, 24)]).is_err());
+        assert!(route_ix([1; 32], [2; 32], quote, 1, 1, &[legn(7, x, 0, 24), legn(200, quote, 0, 24)], None).is_err());
         // the same 64-account leg is fine in the v3 layout
         let o = V3Route { max_payer_lamport_drop: 0, count_lamports: false, tip: None };
         assert!(route_ix_v3([1; 32], [2; 32], quote, 1, 1, &[legn(64, x, 0, 24), legn(7, quote, 0, 24)], &[0, 0], &o).is_ok());
@@ -631,7 +872,7 @@ mod tests {
         pool[8..40].copy_from_slice(&[11; 32]);
         pool[296..328].copy_from_slice(&[12; 32]);
         let payer = [77; 32];
-        let a = LegIn { m: &m, pool: &pool, tin: m.t1, tout: m.t0, amount_in: 5, payer, pump: None, dlmm_live: &[], dlmm_end: None };
+        let a = LegIn { m: &m, pool: &pool, tin: m.t1, tout: m.t0, amount_in: 5, payer, pump: None, dlmm_live: &[], dlmm_end: None, dlmm_ext: None };
         let l = leg(&a).unwrap();
         assert_eq!(l.accounts[6].key, m.vault1, "vault in = the WSOL side");
         assert_eq!(l.accounts[7].key, m.vault0);
@@ -644,22 +885,53 @@ mod tests {
 
     #[test]
     fn dlmm_bin_arrays_follow_the_quote() {
-        let mut m = meta(Venue::Dlmm);
-        m.flag = true;
+        let m = meta(Venue::Dlmm);
         let mut pool = vec![0u8; 904];
         pool[76..80].copy_from_slice(&(150i32).to_le_bytes());   // array 2
         pool[552..584].copy_from_slice(&[13; 32]);
         let live = [0i64, 1, 2, 3, 4];
-        // selling X (t0): price falls, arrays 2, 1, then one past the quote's end (bin 75, array 1) -> 0
-        let a = LegIn { m: &m, pool: &pool, tin: m.t0, tout: m.t1, amount_in: 5, payer: [77; 32], pump: None, dlmm_live: &live, dlmm_end: Some(75) };
+        // selling X (t0): price falls, arrays 2, 1, then one past the quote's end (bin 75, array 1) -> 0; the bitmap
+        // extension the store holds (it exists), read per send
+        let a = LegIn { m: &m, pool: &pool, tin: m.t0, tout: m.t1, amount_in: 5, payer: [77; 32], pump: None, dlmm_live: &live, dlmm_end: Some(75), dlmm_ext: Some([9; 32]) };
         let l = leg(&a).unwrap();
         let arrays: Vec<Pk> = l.accounts[16..].iter().map(|x| x.key).collect();
         assert_eq!(arrays, vec![dlmm::bin_array_pda(&m.pool, 2), dlmm::bin_array_pda(&m.pool, 1), dlmm::bin_array_pda(&m.pool, 0)]);
         assert!(l.accounts[1].writable && l.accounts[1].key == [9; 32], "the real bitmap extension, writable");
         assert!(l.accounts[10].signer);
         assert_eq!(l.data.len(), 28);
+        // no extension in the store: the program id in its place (Anchor's None)
+        let none = leg(&LegIn { dlmm_ext: None, ..a }).unwrap();
+        assert!(!none.accounts[1].writable && none.accounts[1].key == m.venue.program());
         let no = LegIn { dlmm_live: &[1, 3], ..a };
         assert!(leg(&no).is_err(), "active array not held");
+    }
+
+    /// PLAN WP-06 item 6: the arrays a DLMM leg names are the quote's window (contiguous held arrays from the active one,
+    /// at most 5) as far as its end bin's array plus one buffer; a quote end outside the window is refused (the leg would
+    /// run past the liquidity it names); an array outside the pair's own bitmap (-512..=511) needs the extension: a
+    /// buffer array there is left out without one, a walked one is refused `dlmm_ext_needed`
+    #[test]
+    fn dlmm_arrays_capped_and_the_extension_rule() {
+        let live: Vec<i64> = (-10..=10).collect();
+        // buying X (y in): upward from array 0 (bin 10), the quote ends in array 2: 0, 1, 2 and the buffer 3
+        assert_eq!(dlmm_arrays(10, false, &live, Some(150), false).unwrap(), vec![0, 1, 2, 3]);
+        // never more than 5, whatever the end
+        assert_eq!(dlmm_arrays(10, false, &live, Some(4 * 70 + 5), false).unwrap(), vec![0, 1, 2, 3, 4]);
+        assert!(dlmm_arrays(10, false, &live, Some(5 * 70 + 5), false).unwrap_err().contains("outside-window"), "a quote end the window cannot hold");
+        // a gap in the held arrays ends the window
+        assert_eq!(dlmm_arrays(10, false, &[0, 1, 3, 4], Some(70), false).unwrap(), vec![0, 1]);
+        assert!(dlmm_arrays(10, false, &[0, 1, 3, 4], Some(3 * 70), false).is_err());
+        // selling X: downward
+        assert_eq!(dlmm_arrays(-1, true, &live, Some(-140), false).unwrap(), vec![-1, -2, -3]);
+        // the pair's own bitmap ends at array 511: the buffer array 512 is left out without an extension, kept with one
+        let edge: Vec<i64> = (505..=515).collect();
+        let bin = |a: i64| (a * 70 + 3) as i32;
+        assert_eq!(dlmm_arrays(bin(510), false, &edge, Some(bin(511)), false).unwrap(), vec![510, 511]);
+        assert_eq!(dlmm_arrays(bin(510), false, &edge, Some(bin(511)), true).unwrap(), vec![510, 511, 512]);
+        // a walked array outside it: refused without the extension
+        assert_eq!(dlmm_arrays(bin(511), false, &edge, Some(bin(512)), false).unwrap_err(), "dlmm_ext_needed");
+        assert_eq!(dlmm_arrays(bin(511), false, &edge, Some(bin(512)), true).unwrap(), vec![511, 512, 513]);
+        assert_eq!(dlmm_arrays(-512 * 70 + 3, true, &(-520..=-500).collect::<Vec<_>>(), None, false).unwrap(), vec![-512], "buffer -513 left out");
     }
 
     #[test]
@@ -710,7 +982,7 @@ mod tests {
             let mut pool = pump_pool.clone();
             pool[244] = cashback as u8;
             for (dir, tin, tout) in [("buy", m.t1, m.t0), ("sell", m.t0, m.t1)] {
-                let a = LegIn { m: &m, pool: &pool, tin, tout, amount_in: 5, payer, pump: Some(&g), dlmm_live: &[], dlmm_end: None };
+                let a = LegIn { m: &m, pool: &pool, tin, tout, amount_in: 5, payer, pump: Some(&g), dlmm_live: &[], dlmm_end: None, dlmm_ext: None };
                 check(&format!("{name}_{dir}"), leg(&a).unwrap());
             }
         }
@@ -718,17 +990,54 @@ mod tests {
         let mut pool = vec![0u8; 400];
         pool[8..40].copy_from_slice(&[11; 32]);
         pool[296..328].copy_from_slice(&[12; 32]);
-        check("cpmm_buy", leg(&LegIn { m: &m, pool: &pool, tin: m.t1, tout: m.t0, amount_in: 5, payer, pump: None, dlmm_live: &[], dlmm_end: None }).unwrap());
+        check("cpmm_buy", leg(&LegIn { m: &m, pool: &pool, tin: m.t1, tout: m.t0, amount_in: 5, payer, pump: None, dlmm_live: &[], dlmm_end: None, dlmm_ext: None }).unwrap());
         let m = meta(Venue::RayAmmV4);
         let mut pool = vec![0u8; 752];
         let bump = pda::find_program_address(&[b"amm authority"], &m.venue.program()).1;
         pool[8] = bump;
-        check("ammv4_sell", leg(&LegIn { m: &m, pool: &pool, tin: m.t0, tout: m.t1, amount_in: 5, payer, pump: None, dlmm_live: &[], dlmm_end: None }).unwrap());
+        check("ammv4_sell", leg(&LegIn { m: &m, pool: &pool, tin: m.t0, tout: m.t1, amount_in: 5, payer, pump: None, dlmm_live: &[], dlmm_end: None, dlmm_ext: None }).unwrap());
         let m = meta(Venue::Dlmm);
         let mut pool = vec![0u8; 904];
         pool[76..80].copy_from_slice(&150i32.to_le_bytes());
         pool[552..584].copy_from_slice(&[13; 32]);
-        check("dlmm_buy", leg(&LegIn { m: &m, pool: &pool, tin: m.t1, tout: m.t0, amount_in: 5, payer, pump: None, dlmm_live: &[2], dlmm_end: None }).unwrap());
+        check("dlmm_buy", leg(&LegIn { m: &m, pool: &pool, tin: m.t1, tout: m.t0, amount_in: 5, payer, pump: None, dlmm_live: &[2], dlmm_end: None, dlmm_ext: None }).unwrap());
+    }
+
+    /// Review WP-06 #12: a cashback PumpSwap pool without pool_v2 would name the user volume accumulator's WSOL account,
+    /// which the program could create at the payer's expense (rent we could not reclaim): the leg refuses it, both ways;
+    /// with pool_v2 the block is not named and the leg builds
+    #[test]
+    fn pump_cashback_without_pool_v2_is_refused() {
+        let m = meta(Venue::PumpSwap);
+        let g = PumpGlobal { disable_flags: 0, protocol: vec![[30; 32]], reserved: vec![[33; 32]], buyback: vec![[34; 32]] };
+        let mut pool = vec![0u8; 300];
+        pool[244] = 1;
+        let a = |pool: &[u8], tin: Pk, tout: Pk| leg(&LegIn { m: &m, pool, tin, tout, amount_in: 5, payer: [77; 32], pump: Some(&g), dlmm_live: &[], dlmm_end: None, dlmm_ext: None });
+        for (tin, tout) in [(m.t1, m.t0), (m.t0, m.t1)] { assert_eq!(a(&pool, tin, tout).unwrap_err(), "pump-cashback-without-pool-v2"); }
+        pool[211..243].copy_from_slice(&[40; 32]);
+        for (tin, tout) in [(m.t1, m.t0), (m.t0, m.t1)] {
+            let l = a(&pool, tin, tout).unwrap();
+            assert!(!l.accounts.iter().any(|x| x.key == ata_of(&pump_uva(&[77; 32]), &m.t1, &m.t1_prog)), "no accumulator WSOL account");
+        }
+    }
+
+    /// `auto`'s count from a message's own accounts (the dry run's) is the instructions' (the build's): the same keys
+    /// counted once, a program invoked as one; only the lookup tables the message loads from count
+    #[test]
+    fn loaded_data_from_the_message_is_the_instructions() {
+        let payer = [77u8; 32];
+        let pump = crate::venues::Venue::PumpSwap.program();
+        let route = Ix { program: pump, accounts: vec![w([1; 32]), w([2; 32]), r(*TOKEN_PROGRAM), r(pump)], data: vec![] };
+        let ixs = [cu_limit_ix(1), route, close_account_ix([1; 32], payer, payer, *TOKEN_PROGRAM)];
+        let size = |k: &Pk| (*k == [1; 32]).then_some(300);
+        let m = compile_v0(payer, &ixs, [8; 32], &[], &[]).unwrap();
+        let key = ed25519_dalek::SigningKey::from_bytes(&[3; 32]);
+        let (tx, _) = crate::tx::parse_wire(&sign(&m, &key)).unwrap();
+        let invoked: Vec<Pk> = tx.ixs.iter().map(|ix| tx.keys[ix.program as usize]).collect();
+        let raw = loaded_data_raw(tx.keys.iter().map(|k| (*k, invoked.contains(k))), m.lookups, &size);
+        assert_eq!(loaded_data_padded(raw), loaded_data_estimate(&payer, &ixs, 0, &size));
+        assert_eq!(loaded_data_raw([([42; 32], false), ([42; 32], true)], 0, &|_| None), 64 + UNKNOWN_PROGRAM_BYTES, "once, invoked");
+        assert_eq!(loaded_data_raw([], 2, &|_| None), 2 * ALT_BASE_BYTES);
     }
 
     #[test]

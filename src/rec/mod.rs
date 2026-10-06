@@ -165,9 +165,11 @@ pub const ENTRIES_MAGIC: [u8; 8] = *b"ARBXENT\0";
 /// module's. WP-03 also brings exec v2 (src/rec/exec.rs), slots, blocks and leaders; WP-04 commits, decisions and alts;
 /// WP-03b wallet, slotidx and txfetch; WP-08 exec 2.1 (the derived fields), leaders 1.1 (region, endpoint, RTT, client,
 /// kind updates), rivals 1.2 (the sampled `venues` rows, `sample`; plan addendum I-9) and validators; WP-05 attempts,
-/// bundles and outcomes 2.0 (their v2 shapes), copies 1.2 and decisions 1.1 (fields added)
+/// bundles and outcomes 2.0 (their v2 shapes), copies 1.2 and decisions 1.1 (fields added); WP-06 attempts 2.1 (the bundle's
+/// layout: CU source, loaded-data limit, create/close, the size budget's fallback, the tip's band share) and decisions
+/// 1.2 (`dlmm_cap_bound`)
 const STATIC: [(&str, Class, Format, &str, bool); 35] = [
-    ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/2.0", false),
+    ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/2.1", false),
     ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.2", false),
     ("bundles", Class::Core, Format::Jsonl, "arbx.bundles/2.0", false),
     ("outcomes", Class::Core, Format::Jsonl, "arbx.outcomes/2.0", false),
@@ -196,7 +198,7 @@ const STATIC: [(&str, Class, Format, &str, bool); 35] = [
     ("blocks", Class::Chain, Format::Jsonl, "arbx.blocks/1.0", false),
     ("leaders", Class::Chain, Format::Jsonl, "arbx.leaders/1.1", false),
     ("commits", Class::Core, Format::Jsonl, "arbx.commits/1.0", false),
-    ("decisions", Class::Core, Format::Jsonl, "arbx.decisions/1.1", false),
+    ("decisions", Class::Core, Format::Jsonl, "arbx.decisions/1.2", false),
     ("alts", Class::Chain, Format::Jsonl, "arbx.alts/2.0", false),
     ("wallet", Class::Core, Format::Jsonl, "arbx.wallet/1.0", false),
     ("slotidx", Class::Chain, Format::Jsonl, "arbx.slotidx/1.0", false),

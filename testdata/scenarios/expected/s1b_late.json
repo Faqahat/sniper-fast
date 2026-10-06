@@ -63,7 +63,7 @@
           ],
           "cu": 230000,
           "gross": 5523224,
-          "net": 5508024,
+          "net": 5418224,
           "reason": "not_best",
           "sell": "usdc.dlmm",
           "size": 4200000000
@@ -76,7 +76,7 @@
           ],
           "cu": 200000,
           "gross": -41970,
-          "net": -55970,
+          "net": -47970,
           "reason": "below_min_profit",
           "sell": "usdc.pump",
           "size": 5000000
@@ -89,7 +89,7 @@
           ],
           "cu": 164000,
           "gross": 46598810,
-          "net": 46586250,
+          "net": 46493810,
           "reason": "best",
           "sell": "usdc.ammv4",
           "size": 4200000000
@@ -102,7 +102,7 @@
           ],
           "cu": 164000,
           "gross": -110115,
-          "net": -122675,
+          "net": -116115,
           "reason": "below_min_profit",
           "sell": "usdc.pump",
           "size": 5000000
@@ -135,7 +135,7 @@
           ],
           "cu": 200000,
           "gross": -41970,
-          "net": -55970,
+          "net": -47970,
           "reason": "below_min_profit",
           "sell": "usdc.pump",
           "size": 5000000
@@ -148,7 +148,7 @@
           ],
           "cu": 230000,
           "gross": 5523224,
-          "net": 5508024,
+          "net": 5418224,
           "reason": "not_best",
           "sell": "usdc.dlmm",
           "size": 4200000000
@@ -161,7 +161,7 @@
           ],
           "cu": 136000,
           "gross": 36325658,
-          "net": 36314218,
+          "net": 36220658,
           "reason": "best",
           "sell": "usdc.ammv4",
           "size": 4200000000
@@ -174,7 +174,7 @@
           ],
           "cu": 112000,
           "gross": -72178,
-          "net": -82658,
+          "net": -78178,
           "reason": "below_min_profit",
           "sell": "usdc.dlmm",
           "size": 5000000
@@ -219,7 +219,7 @@
           ],
           "cu": 200000,
           "gross": -41479,
-          "net": -55479,
+          "net": -47479,
           "reason": "below_min_profit",
           "sell": "usdc.pump",
           "size": 5000000
@@ -232,7 +232,7 @@
           ],
           "cu": 236000,
           "gross": 5194877,
-          "net": 5179437,
+          "net": 5089877,
           "reason": "not_best",
           "sell": "usdc.dlmm",
           "size": 4200000000
@@ -245,7 +245,7 @@
           ],
           "cu": 142000,
           "gross": 36625398,
-          "net": 36613718,
+          "net": 36520398,
           "reason": "best",
           "sell": "usdc.ammv4",
           "size": 4200000000
@@ -258,7 +258,7 @@
           ],
           "cu": 112000,
           "gross": -72178,
-          "net": -82658,
+          "net": -78178,
           "reason": "below_min_profit",
           "sell": "usdc.dlmm",
           "size": 5000000
