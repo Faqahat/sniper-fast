@@ -12,6 +12,8 @@ pub const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// PLAN-ADDENDUM WP-21's venues (Raydium CLMM, Orca Whirlpool)
 pub mod clmm;
+/// arbx's own bundles on the real programs (tests/arbx_bundle.rs, tests/arbx_bundle_clmm.rs)
+pub mod bundle;
 
 /// VENUE_HARNESS_REQUIRE_SIZING=1: a missing or unbuildable sizing crate fails the test instead of skipping it
 pub fn required() -> bool { std::env::var("VENUE_HARNESS_REQUIRE_SIZING").is_ok_and(|v| v == "1") }

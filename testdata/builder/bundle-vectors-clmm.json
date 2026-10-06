@@ -1,0 +1,516 @@
+{
+  "about": "arbx's own bundles through Raydium CLMM and Orca Whirlpool legs (src/exec/tests.rs clmm_bundle_vectors_for_the_venue_harness), executed by program/venue-harness tests/arbx_bundle_clmm.rs on the dumped mainnet programs and the deployed nexus-v2 ELF (PLAN-ADDENDUM WP-21 point 6)",
+  "alt": {
+    "addrs": [
+      "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz",
+      "J757hq9DXGPDYfCoeGpTcD9A71NFgNqBRMXHrdVGyRxK",
+      "SdFLxX6sWTkKWje3Xb4YNewbm5ieaj3tfEJYeLTyqyg",
+      "8vPSYzRfUjHoV7CkPKWCNYZnLCc314HgGYU2dQs7a5fD",
+      "9Cn1YHwrjVNupjDHsnhJAe5hRkHsNjEt42Vaw3Ez4PNT",
+      "HY9Rfs5MhRpk6GZwfbZM5e7dT3jry75Zb4LC2e7iTRXj",
+      "YJFvei9n6hfrtK4iFhm5YFPHjb6kn9KguJXE4ssbC7D",
+      "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+      "Gjf3veaUaWk4eYdksHUXvXFGZDZmGAdTRhe2yTG26hbk",
+      "Fkq88cXY51ANFL7jXJivs3GX2YfTTTSsiRn4Vu9oMtWu",
+      "Bvtgim23rfocUzxVX9j9QFxTbBnH8JZxnaGLCEkXvjKS",
+      "Ei6iux5MMYG8JxCTr58goADqFTtMroL9TXJityF3fAQc",
+      "6rVkF4HSgy1jrnC3HogfRgPHrq4CtLg5f11URpsC4i9D",
+      "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+      "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+      "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+      "So11111111111111111111111111111111111111112",
+      "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+      "ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw",
+      "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+      "GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR",
+      "8N3GDaZ2iwN65oxVatKTLPNooAVUJTbfiVJ1ahyqwjSk",
+      "5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx",
+      "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+      "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+      "5g9Mrko2AsYkvhrSA4eUgV8D3QKzE5hrT5jzTn5K127S",
+      "CHZf2wzUaoLvoCPYnFcpZNMGMrCwBa4m48utaGfBYyHz",
+      "C2aFPdENg4A2HQsmrd5rTw5TaYBX5Ku887cWjbFKtZpw",
+      "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+      "EBZX8SkH9U5y7Hq34p1oSNGB1f4qVHFpmaySQe1wLXWt",
+      "5cBPqW8psLk5SGY6qqS7VEogPGbQEj4JSWeyfNBH7QgJ",
+      "GNehRUMcrfLmRjXEicrPNhktvRdZZWkD1ECtaCBf8aHd",
+      "4NZSzGE2JhfnPKbTJLwHAzfvim6eAytb2jmCSUpd4FBX",
+      "7DPJreopyJdwdrUP74mdNefDcoPZbmneNZCsKSNhEng",
+      "66JttFSf4JBW5gW2CzbGWfYDwfmTkAJLm5rTJeGmb33L",
+      "DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J",
+      "2VFNRQ36ztRf1YojEX7z6K6qLX8qVyR9KfyusKSMVn5o",
+      "5Vhb3CmrbQfJdxGkYhX9vH9Y3Dv8q2rsGzBBXCdKpZYi",
+      "6qm846s2TFUMy9cZJpJLhfr5p1uzvsSQ8Z8KxwAjxiZU",
+      "13NecS3JQSvvruM8D4wbmVmyiJ2gE9wwnnR4QiF6r2MX",
+      "Gi1wCgHpGWWyTZ6oUHNtD4Le9mo7k7qAufuJSUSEGVWK",
+      "J6pQQ3FAcJQeWPPGppWRb4nM8jU3wLyYbRrLh7feMfvd",
+      "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+      "3XCQJQryqpDvvZBfGxR7CLAw5dpGJ9aa7kt1jRLdyxuZ",
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "8B3Dy84GMwGPzjd4Qof5NKLg9WZXd3fuw3WyQyp4zee4",
+      "AFZvrKf1kNDJCdK4CNbtMjwo4wrst962XNqCr88QWJMq",
+      "Bpt9Q2KDNBrjVWQLzxSUR4qwCLdKqXqjy8TfRSnsR8Rw",
+      "3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv",
+      "4ct7br2vTPzfdmY3S5HLtTxcGSBfn6pnw98hsS6v359A",
+      "5it83u57VRrVgc51oNV19TTmAJuffPx5GtGwQr7gQNUo",
+      "3Y695CuQ8AP4anbwAqiEBeQF9KxqHFr8piEwvw3UePnQ",
+      "4NFvUKqknMpoe6CWTzK758B8ojVLzURL5pC6MtiaJ8TQ",
+      "7W9ek6XnUEHPJQ1KCAa9rJbgFAtNRuwiuPKRXzVJVXvx",
+      "GamghVsuRYt6yuHQyapXxx6wXYNvRTKiVUpr9FimGLKK",
+      "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
+      "DQyrAcCrDXQ7NeoqGgDCZwBvWDcYmFCjSb9JtteuvPpz",
+      "HLmqeL62xR1QoZ1HKKbXRrdN1p3phKpxRMb2VVopvBBz",
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "3h2e43PunVA5K34vwKCLHWhZF4aZpyaC9RmxvshGAQpL",
+      "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+      "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"
+    ],
+    "table": "BwrtBnSeoK7hbfXDfPqr8p2aYj5c7JDqX6yJSaG42yFX"
+  },
+  "blockhash": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+  "cases": [
+    {
+      "back": 1398453047,
+      "buy_pool": "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz",
+      "bytes": 641,
+      "clock_from": "Whirlpool-FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz.json",
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 241000,
+      "cu_route": 206000,
+      "cu_src": "fallback",
+      "expect": "ok",
+      "expected_profit": 298254,
+      "fixtures": [
+        "Whirlpool-FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz.json",
+        "PumpSwap-9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA.json"
+      ],
+      "gap": "Vault { pool: \"9qKx\", side: 1, nums: [1000, 1020, 1050, 1100, 1250, 1500, 2000, 3000, 5000] } candidate 0",
+      "held": false,
+      "legs": [
+        {
+          "amount_offset": 8,
+          "cu_allowed": 58000,
+          "data_len": 43,
+          "n_accounts": 15,
+          "pool": "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz",
+          "program": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+          "steps": 1,
+          "tick_arrays": [
+            22528,
+            16896,
+            11264
+          ],
+          "venue": "Whirlpool"
+        },
+        {
+          "amount_offset": 8,
+          "cu_allowed": 100000,
+          "data_len": 24,
+          "n_accounts": 23,
+          "pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+          "steps": 0,
+          "tick_arrays": [],
+          "venue": "PumpSwap"
+        }
+      ],
+      "loaded_data_limit": 28540928,
+      "mid": 17435508149,
+      "mid_account": "6VK96kf4kKi5HfgEUJ6kQSik3NdiFwCYPpVCnTMtocP3",
+      "min_profit": 105001,
+      "mint": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+      "name": "whirl_buy_pump_sell_create_close",
+      "patches": [
+        [
+          "Fkq88cXY51ANFL7jXJivs3GX2YfTTTSsiRn4Vu9oMtWu",
+          64,
+          "185644bd8e060000"
+        ]
+      ],
+      "sell_pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+      "size": 1398154793,
+      "spent": 1398154793,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "tx_b64": "AafIEEohO078b9q6j2GIFu1sgjxO2faIdIVnvVJ2DHpRtspalWcnZbuS+SNRR6rnEyckWQapwRbMYCfaNn08XwmAAQAFCYqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29cUYs1NTqJ+7fDpi+TUxj2X4iwrpjOGm4xb4N3yQ34aMph2yLOUjr/KruoFQopUROQ7aa+XJbQy47Rh2Z7vQVy/XhSHLF5zruFibVWotXslNJJhoL9+bsq9a1k5JHMQVPaAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAACMlyWPTiSJ8bs9ECkUjg2DC1oTmdr/EIQEjnvY2+n4WQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKlspzXuHJQqSwTRzBNb2OnoLPWJyvaavqGbZYJfZ9at2QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBgQABQJorQMABAAFBACAswEFBgABABYGBwEBCCwAAgEXBwcYAAkZFgIKAQsMDQ4PAhoQABsWGQECERIcEwcHBgUdGhQeHyAhFV0CAikmVlMAAAAAKZoBAAAAAAAPCCsAFwgYACsE7QsayR5iKSZWUwAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAQAz5oWkAX+DrSkmVlMAAAAAAQAAAAAAAAAHAwEAAAEJBgIAAwwCAAAAoIYBAAAAAAABoqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqINAAECAwQFBgcICQoLDAwNDg8QERITFBUWFxg="
+    },
+    {
+      "back": 2014971409,
+      "buy_pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+      "bytes": 676,
+      "clock_from": "Whirlpool-FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz.json",
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 241000,
+      "cu_route": 206000,
+      "cu_src": "fallback",
+      "expect": "ok",
+      "expected_profit": 14971409,
+      "fixtures": [
+        "PumpSwap-9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA.json",
+        "Whirlpool-FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz.json"
+      ],
+      "gap": "Vault { pool: \"9qKx\", side: 1, nums: [1000, 980, 950, 900, 800, 650, 500, 330, 200] } candidate 1",
+      "held": false,
+      "legs": [
+        {
+          "amount_offset": 8,
+          "cu_allowed": 100000,
+          "data_len": 24,
+          "n_accounts": 25,
+          "pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+          "steps": 0,
+          "tick_arrays": [],
+          "venue": "PumpSwap"
+        },
+        {
+          "amount_offset": 8,
+          "cu_allowed": 58000,
+          "data_len": 43,
+          "n_accounts": 15,
+          "pool": "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz",
+          "program": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+          "steps": 1,
+          "tick_arrays": [
+            22528,
+            28160,
+            33792
+          ],
+          "venue": "Whirlpool"
+        }
+      ],
+      "loaded_data_limit": 28639232,
+      "mid": 25280044069,
+      "mid_account": "6VK96kf4kKi5HfgEUJ6kQSik3NdiFwCYPpVCnTMtocP3",
+      "min_profit": 105001,
+      "mint": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+      "name": "pump_buy_whirl_sell_create_close",
+      "patches": [
+        [
+          "Fkq88cXY51ANFL7jXJivs3GX2YfTTTSsiRn4Vu9oMtWu",
+          64,
+          "2c211f2a6d060000"
+        ]
+      ],
+      "sell_pool": "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz",
+      "size": 2000000000,
+      "spent": 2000000000,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "tx_b64": "AcXpsKFLCLPhuYi2C+8nT9tbOGw43LQlmyLC6nnpKi2Dm7RE6+bx1JB9mS8FPYRUtaxN5yQrqEokMca4uNpuMgWAAQAFCoqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29cUYs1NTqJ+7fDpi+TUxj2X4iwrpjOGm4xb4N3yQ34aMph2yLOUjr/KruoFQopUROQ7aa+XJbQy47Rh2Z7vQVy/fcY5ud1uvvt0UFU/9DuUo7K9x0qrwXHN8eQZBBBxLX9eFIcsXnOu4WJtVai1eyU0kmGgv35uyr1rWTkkcxBU9oDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqWynNe4clCpLBNHME1vY6egs9YnK9pq+oZtlgl9n1q3ZBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUGBQAFAmitAwAFAAUEAAC1AQYGAAEAFwcIAQEJLgACARgKABkXGgECCwwbDQgIBwYcGA4dHgMfICEPAiIICCMAEBoXAhEBEhMUFRZdAgIAlDV3AAAAACmaAQAAAAAAGQgYAA8IKwDGLhVStNnocACUNXcAAAAAAQAAAAAAAAArBO0LGskeYgCUNXcAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAACAMBAAABCQcCAAQMAgAAAKCGAQAAAAAAAaKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKiDQcICQoLDAABAgMZGgYNDRESEBMUFRsWFxgODw=="
+    },
+    {
+      "back": 1287326651,
+      "buy_pool": "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+      "bytes": 645,
+      "clock_from": "Whirlpool-4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15.json",
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 389000,
+      "cu_route": 354000,
+      "cu_src": "fallback",
+      "expect": "ok",
+      "expected_profit": 1512674,
+      "fixtures": [
+        "Whirlpool-4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15.json",
+        "RayCLMM-DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J.json"
+      ],
+      "gap": "WhirlTicks { pool: \"4uny\", ks: [60, 120, 250, 500] } candidate 0",
+      "held": false,
+      "legs": [
+        {
+          "amount_offset": 8,
+          "cu_allowed": 78000,
+          "data_len": 43,
+          "n_accounts": 15,
+          "pool": "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+          "program": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+          "steps": 3,
+          "tick_arrays": [
+            56320,
+            55616,
+            54912
+          ],
+          "venue": "Whirlpool"
+        },
+        {
+          "amount_offset": 8,
+          "cu_allowed": 214000,
+          "data_len": 41,
+          "n_accounts": 15,
+          "pool": "DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J",
+          "program": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+          "steps": 15,
+          "tick_arrays": [
+            443580
+          ],
+          "venue": "RayCLMM"
+        }
+      ],
+      "loaded_data_limit": 18087936,
+      "mid": 370651647024,
+      "mid_account": "6qeZMAB2h56UUaoFjn7ysJbSZNoowSTXj4FdjycdVQhS",
+      "min_profit": 105001,
+      "mint": "J6pQQ3FAcJQeWPPGppWRb4nM8jU3wLyYbRrLh7feMfvd",
+      "name": "whirl_buy_rayclmm_sell_create_close",
+      "patches": [
+        [
+          "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+          65,
+          "000003602d67bd001100000000000000"
+        ],
+        [
+          "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+          81,
+          "5edd0000"
+        ]
+      ],
+      "sell_pool": "DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J",
+      "size": 1285813977,
+      "spent": 1285813977,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "tx_b64": "AVm3RLQTdzuFq802o8/9D3C5YM1PQLu5JGWt+rac0gx3rej3ZMHB9sweq65TL4MJKKMWAJGAnpn42LSr9gCUlgCAAQAFCYqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29cVsDHtXgHYmcQ1qTn8QRoxXKy/1Yd5d1cAYpTI9GhweVh2yLOUjr/KruoFQopUROQ7aa+XJbQy47Rh2Z7vQVy/XhSHLF5zruFibVWotXslNJJhoL9+bsq9a1k5JHMQVPaAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAACMlyWPTiSJ8bs9ECkUjg2DC1oTmdr/EIQEjnvY2+n4WQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKlspzXuHJQqSwTRzBNb2OnoLPWJyvaavqGbZYJfZ9at2QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBgQABQKI7wUABAAFBAAAFAEFBgABABYGBwEBCCQAAgEXBwcYAAkZFgIKAQsMDQ4PAhoAGxABAhESEwccGBYZFBVuAgLZ9qNMAAAAACmaAQAAAAAADwgrAA8IKQArBO0LGskeYtn2o0wAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEAKwTtCxrJHmLZ9qNMAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEHAwEAAAEJBgIAAwwCAAAAoIYBAAAAAAABoqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqINHB0eHyAhIiMkJSYnKAcpDg8QKiss"
+    },
+    {
+      "back": 1173683882,
+      "buy_pool": "DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J",
+      "bytes": 596,
+      "clock_from": "Whirlpool-4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15.json",
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 343000,
+      "cu_route": 343000,
+      "cu_src": "fallback",
+      "expect": "ok",
+      "expected_profit": 1290584,
+      "fixtures": [
+        "RayCLMM-DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J.json",
+        "Whirlpool-4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15.json"
+      ],
+      "gap": "WhirlTicks { pool: \"4uny\", ks: [-60, -120, -250, -500] } candidate 0",
+      "held": true,
+      "legs": [
+        {
+          "amount_offset": 8,
+          "cu_allowed": 204000,
+          "data_len": 41,
+          "n_accounts": 15,
+          "pool": "DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J",
+          "program": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+          "steps": 14,
+          "tick_arrays": [
+            -443640
+          ],
+          "venue": "RayCLMM"
+        },
+        {
+          "amount_offset": 8,
+          "cu_allowed": 78000,
+          "data_len": 43,
+          "n_accounts": 15,
+          "pool": "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+          "program": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+          "steps": 3,
+          "tick_arrays": [
+            56320,
+            57024,
+            57728
+          ],
+          "venue": "Whirlpool"
+        }
+      ],
+      "loaded_data_limit": 17956864,
+      "mid": 336692028796,
+      "mid_account": "6qeZMAB2h56UUaoFjn7ysJbSZNoowSTXj4FdjycdVQhS",
+      "min_profit": 105001,
+      "mint": "J6pQQ3FAcJQeWPPGppWRb4nM8jU3wLyYbRrLh7feMfvd",
+      "name": "rayclmm_buy_whirl_sell_held",
+      "patches": [
+        [
+          "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+          65,
+          "000076d3baf1b3e61000000000000000"
+        ],
+        [
+          "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+          81,
+          "e6dc0000"
+        ]
+      ],
+      "sell_pool": "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+      "size": 1172393298,
+      "spent": 1172393298,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "tx_b64": "AUrAoXjKQb4jtIdNXzgKcLc222cstC5V4VfpA2T+rIEnpjWjwjtAO5KpPnOGHMGA6xzs8E/nAw/2jqp+guzrQw2AAQAECIqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29cYdsizlI6/yq7qBUKKVETkO2mvlyW0MuO0Ydme70Fcv1WwMe1eAdiZxDWpOfxBGjFcrL/Vh3l3VwBilMj0aHB5XhSHLF5zruFibVWotXslNJJhoL9+bsq9a1k5JHMQVPaAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAABspzXuHJQqSwTRzBNb2OnoLPWJyvaavqGbZYJfZ9at2Qbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQQEAAUC2DsFAAQABQQAABIBBSQAAQIVABYIAQIJCgsGFxgZGgwNARsGBhgADhkaAQ8CEBESExRuAgJSTeFFAAAAACmaAQAAAAAADwgpAA8IKwArBO0LGskeYlJN4UUAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASsE7QsayR5iUk3hRQAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAHAgADDAIAAACghgEAAAAAAAGioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKiog0jJSQmJy0cHR4fLi8iByorLA8QKQ4="
+    },
+    {
+      "back": 2039596704,
+      "buy_pool": "3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv",
+      "bytes": 611,
+      "clock_from": "RayCLMM-3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv.json",
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 171000,
+      "cu_route": 136000,
+      "cu_src": "fallback",
+      "expect": "ok",
+      "expected_profit": 39596704,
+      "fixtures": [
+        "RayCLMM-3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv.json",
+        "RayAMMv4-58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2.json"
+      ],
+      "gap": "Vault { pool: \"58oQ\", side: 0, nums: [1000, 1020, 1050, 1100, 1250, 1500, 2000, 3000, 5000] } candidate 1",
+      "held": false,
+      "legs": [
+        {
+          "amount_offset": 8,
+          "cu_allowed": 74000,
+          "data_len": 41,
+          "n_accounts": 16,
+          "pool": "3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv",
+          "program": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+          "steps": 1,
+          "tick_arrays": [
+            -21120,
+            -21180
+          ],
+          "venue": "RayCLMM"
+        },
+        {
+          "amount_offset": 1,
+          "cu_allowed": 20000,
+          "data_len": 17,
+          "n_accounts": 8,
+          "pool": "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
+          "program": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+          "steps": 0,
+          "tick_arrays": [],
+          "venue": "RayAMMv4"
+        }
+      ],
+      "loaded_data_limit": 6750208,
+      "mid": 242568763,
+      "mid_account": "3wvJdyFnGvaMWpbq93NU91SggiVRveULUXL6iX5VZDGP",
+      "min_profit": 105001,
+      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "name": "rayclmm_buy_ammv4_sell_create_close",
+      "patches": [
+        [
+          "DQyrAcCrDXQ7NeoqGgDCZwBvWDcYmFCjSb9JtteuvPpz",
+          64,
+          "a0df33a9287a0000"
+        ]
+      ],
+      "sell_pool": "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
+      "size": 2000000000,
+      "spent": 2000000000,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "tx_b64": "AcGoNiVicEbLN8FTw2u1rqH2EJLhtA2F12IKFNHlmQ1hBe+xXcYiB+2zp/eJpX5G95rT2TkSwRXmoGCDs5HPIgeAAQAFCYqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29cK8kCOGhpAsJh82TGFPHsq0/z4F9YGhwIBT/HU9NN52xh2yLOUjr/KruoFQopUROQ7aa+XJbQy47Rh2Z7vQVy/XhSHLF5zruFibVWotXslNJJhoL9+bsq9a1k5JHMQVPaAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAACMlyWPTiSJ8bs9ECkUjg2DC1oTmdr/EIQEjnvY2+n4WQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKlspzXuHJQqSwTRzBNb2OnoLPWJyvaavqGbZYJfZ9at2QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBgQABQL4mwIABAAFBAAAZwAFBgABABMGBwEBCB4AAgEUABUJAgEKCwwHFhcYEw0ODwIZBxAaERIBAgBUAgIAlDV3AAAAACmaAQAAAAAAEAgpAAgBEQArBO0LGskeYgCUNXcAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARAAlDV3AAAAAAEAAAAAAAAABwMBAAABCQYCAAMMAgAAAKCGAQAAAAAAAaKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKiCjAxMjM0NTY3ODkIOio7LA8QPD0="
+    },
+    {
+      "back": 1398453047,
+      "buy_pool": "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz",
+      "bytes": 641,
+      "clock_from": "Whirlpool-FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz.json",
+      "cu_ata": [
+        30000,
+        5000
+      ],
+      "cu_limit": 241000,
+      "cu_route": 206000,
+      "cu_src": "fallback",
+      "expect": "profit_fail",
+      "expected_profit": 298254,
+      "fixtures": [
+        "Whirlpool-FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz.json",
+        "PumpSwap-9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA.json"
+      ],
+      "gap": "Vault { pool: \"9qKx\", side: 1, nums: [1000, 1020, 1050, 1100, 1250, 1500, 2000, 3000, 5000] } candidate 0",
+      "held": false,
+      "legs": [
+        {
+          "amount_offset": 8,
+          "cu_allowed": 58000,
+          "data_len": 43,
+          "n_accounts": 15,
+          "pool": "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz",
+          "program": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+          "steps": 1,
+          "tick_arrays": [
+            22528,
+            16896,
+            11264
+          ],
+          "venue": "Whirlpool"
+        },
+        {
+          "amount_offset": 8,
+          "cu_allowed": 100000,
+          "data_len": 24,
+          "n_accounts": 23,
+          "pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+          "steps": 0,
+          "tick_arrays": [],
+          "venue": "PumpSwap"
+        }
+      ],
+      "loaded_data_limit": 28540928,
+      "mid": 17435508149,
+      "mid_account": "6VK96kf4kKi5HfgEUJ6kQSik3NdiFwCYPpVCnTMtocP3",
+      "min_profit": 1298254,
+      "mint": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+      "name": "whirl_buy_pump_sell_profit_fail",
+      "patches": [
+        [
+          "Fkq88cXY51ANFL7jXJivs3GX2YfTTTSsiRn4Vu9oMtWu",
+          64,
+          "185644bd8e060000"
+        ]
+      ],
+      "sell_pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+      "size": 1398154793,
+      "spent": 1398154793,
+      "tip": [
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        100000
+      ],
+      "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "tx_b64": "Ac2yhVG39CQofN/VBkmxvL5HSQiRLT0eThtRzc3pnNmyQSSw0rIanJPjvMRui8oLvq+Wy43DsWe91QmJc4fEhAmAAQAFCYqI4910CfGV/VLbLTy6XXLKZwm/HZQSG/N0iAG0D29cUYs1NTqJ+7fDpi+TUxj2X4iwrpjOGm4xb4N3yQ34aMph2yLOUjr/KruoFQopUROQ7aa+XJbQy47Rh2Z7vQVy/XhSHLF5zruFibVWotXslNJJhoL9+bsq9a1k5JHMQVPaAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAACMlyWPTiSJ8bs9ECkUjg2DC1oTmdr/EIQEjnvY2+n4WQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKlspzXuHJQqSwTRzBNb2OnoLPWJyvaavqGbZYJfZ9at2QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBgQABQJorQMABAAFBACAswEFBgABABYGBwEBCCwAAgEXBwcYAAkZFgIKAQsMDQ4PAhoQABsWGQECERIcEwcHBgUdGhQeHyAhFV0CAikmVlMAAAAATs8TAAAAAAAPCCsAFwgYACsE7QsayR5iKSZWUwAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAQAz5oWkAX+DrSkmVlMAAAAAAQAAAAAAAAAHAwEAAAEJBgIAAwwCAAAAoIYBAAAAAAABoqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqINAAECAwQFBgcICQoLDAwNDg8QERITFBUWFxg="
+    }
+  ],
+  "payer": "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+  "payer_seed_byte": 1,
+  "program": "8K8uyQDtVKHYRPACP9fepz91q4sEZLBppR2Ty4vdXuWg",
+  "schema": "arbx.bundle-vectors/1"
+}

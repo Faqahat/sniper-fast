@@ -1,0 +1,248 @@
+{
+  "runs": [
+    {
+      "bytes": 641,
+      "cu_ata_close": 120,
+      "cu_ata_create": 13417,
+      "cu_legs": [
+        31281,
+        63680
+      ],
+      "cu_limit": 241000,
+      "cu_overhead": 16283,
+      "cu_route_outer": 111244,
+      "cu_tx": 125231,
+      "delivered": [
+        17435508149,
+        1398453047
+      ],
+      "legs": [
+        {
+          "cu_allowed": 58000,
+          "n_accounts": 15,
+          "pool": "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz",
+          "steps": 1,
+          "tick_arrays": [
+            22528,
+            16896,
+            11264
+          ],
+          "venue": "Whirlpool"
+        },
+        {
+          "cu_allowed": 100000,
+          "n_accounts": 23,
+          "pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+          "steps": 0,
+          "tick_arrays": [],
+          "venue": "PumpSwap"
+        }
+      ],
+      "loaded_data_limit": 28540928,
+      "name": "whirl_buy_pump_sell_create_close",
+      "native_delta": -105000,
+      "ok": true,
+      "rent_locked": 1488440,
+      "tip": 100000,
+      "wsol_delta": 298254
+    },
+    {
+      "bytes": 676,
+      "cu_ata_close": 120,
+      "cu_ata_create": 13417,
+      "cu_legs": [
+        74289,
+        29362
+      ],
+      "cu_limit": 241000,
+      "cu_overhead": 17070,
+      "cu_route_outer": 120721,
+      "cu_tx": 134708,
+      "delivered": [
+        25280044069,
+        2014971409
+      ],
+      "legs": [
+        {
+          "cu_allowed": 100000,
+          "n_accounts": 25,
+          "pool": "9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA",
+          "steps": 0,
+          "tick_arrays": [],
+          "venue": "PumpSwap"
+        },
+        {
+          "cu_allowed": 58000,
+          "n_accounts": 15,
+          "pool": "FAqh648xeeaTqL7du49sztp9nfj5PjRQrfvaMccyd9cz",
+          "steps": 1,
+          "tick_arrays": [
+            22528,
+            28160,
+            33792
+          ],
+          "venue": "Whirlpool"
+        }
+      ],
+      "loaded_data_limit": 28639232,
+      "name": "pump_buy_whirl_sell_create_close",
+      "native_delta": -105000,
+      "ok": true,
+      "rent_locked": 1488440,
+      "tip": 100000,
+      "wsol_delta": 14971409
+    },
+    {
+      "bytes": 645,
+      "cu_ata_close": 120,
+      "cu_ata_create": 20917,
+      "cu_legs": [
+        68666,
+        175354
+      ],
+      "cu_limit": 389000,
+      "cu_overhead": 12957,
+      "cu_route_outer": 256977,
+      "cu_tx": 278464,
+      "delivered": [
+        370651647024,
+        1287326651
+      ],
+      "legs": [
+        {
+          "cu_allowed": 78000,
+          "n_accounts": 15,
+          "pool": "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+          "steps": 3,
+          "tick_arrays": [
+            56320,
+            55616,
+            54912
+          ],
+          "venue": "Whirlpool"
+        },
+        {
+          "cu_allowed": 214000,
+          "n_accounts": 15,
+          "pool": "DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J",
+          "steps": 15,
+          "tick_arrays": [
+            443580
+          ],
+          "venue": "RayCLMM"
+        }
+      ],
+      "loaded_data_limit": 18087936,
+      "name": "whirl_buy_rayclmm_sell_create_close",
+      "native_delta": -105000,
+      "ok": true,
+      "rent_locked": 1488440,
+      "tip": 100000,
+      "wsol_delta": 1512674
+    },
+    {
+      "bytes": 596,
+      "cu_ata_close": null,
+      "cu_ata_create": null,
+      "cu_legs": [
+        172524,
+        65623
+      ],
+      "cu_limit": 343000,
+      "cu_overhead": 12957,
+      "cu_route_outer": 251104,
+      "cu_tx": 251554,
+      "delivered": [
+        336692028796,
+        1173683882
+      ],
+      "legs": [
+        {
+          "cu_allowed": 204000,
+          "n_accounts": 15,
+          "pool": "DCALKkpdk4dHE6bg7t3LXniuZ7VyDx4U4v4wTJtoBa6J",
+          "steps": 14,
+          "tick_arrays": [
+            -443640
+          ],
+          "venue": "RayCLMM"
+        },
+        {
+          "cu_allowed": 78000,
+          "n_accounts": 15,
+          "pool": "4uny6Y7daYwY4bt8B5DLrj4yqCD4XCYDkssKCyoVpS15",
+          "steps": 3,
+          "tick_arrays": [
+            56320,
+            57024,
+            57728
+          ],
+          "venue": "Whirlpool"
+        }
+      ],
+      "loaded_data_limit": 17956864,
+      "name": "rayclmm_buy_whirl_sell_held",
+      "native_delta": -105000,
+      "ok": true,
+      "rent_locked": 0,
+      "tip": 100000,
+      "wsol_delta": 1290584
+    },
+    {
+      "bytes": 611,
+      "cu_ata_close": 120,
+      "cu_ata_create": 14917,
+      "cu_legs": [
+        47642,
+        15404
+      ],
+      "cu_limit": 171000,
+      "cu_overhead": 11530,
+      "cu_route_outer": 74576,
+      "cu_tx": 90063,
+      "delivered": [
+        242568763,
+        2039596704
+      ],
+      "legs": [
+        {
+          "cu_allowed": 74000,
+          "n_accounts": 16,
+          "pool": "3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv",
+          "steps": 1,
+          "tick_arrays": [
+            -21120,
+            -21180
+          ],
+          "venue": "RayCLMM"
+        },
+        {
+          "cu_allowed": 20000,
+          "n_accounts": 8,
+          "pool": "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
+          "steps": 0,
+          "tick_arrays": [],
+          "venue": "RayAMMv4"
+        }
+      ],
+      "loaded_data_limit": 6750208,
+      "name": "rayclmm_buy_ammv4_sell_create_close",
+      "native_delta": -105000,
+      "ok": true,
+      "rent_locked": 1488440,
+      "tip": 100000,
+      "wsol_delta": 39596704
+    },
+    {
+      "delivered": [
+        17435508149,
+        1398453047
+      ],
+      "err": "InstructionError(3, Custom(1314390018))",
+      "name": "whirl_buy_pump_sell_profit_fail",
+      "native_delta": -5000,
+      "ok": false
+    }
+  ],
+  "vectors": 6
+}

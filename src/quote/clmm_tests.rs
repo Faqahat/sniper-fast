@@ -22,29 +22,45 @@ use std::sync::{Arc, OnceLock};
 const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/venue-parity");
 
 /// one fixture: the pool's accounts (owner, data) at one slot, the accounts that do not exist, that slot's Clock
-pub(crate) struct Fx { pub venue: Venue, pub pool: Pk, pub slot: u64, pub unix: i64, pub accts: HashMap<Pk, (Pk, Vec<u8>)>, pub absent: Vec<Pk> }
+pub(crate) struct Fx { pub venue: Venue, pub pool: Pk, pub slot: u64, pub unix: i64, pub accts: HashMap<Pk, (Pk, Vec<u8>)>, pub absent: Vec<Pk>, pub file: String }
 
 fn pk58(s: &str) -> Pk { crate::tx::pk(s) }
 
+/// every fixture of `testdata/venue-parity/<sub>` by pool
+fn load_dir(sub: &str) -> HashMap<Pk, Fx> {
+    let mut out = HashMap::default();
+    let mut files: Vec<_> = std::fs::read_dir(format!("{DIR}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
+    files.sort();
+    for f in files {
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+        let accts = v["accounts"].as_array().unwrap().iter().map(|a| {
+            let data = base64::engine::general_purpose::STANDARD.decode(a["data"].as_str().unwrap()).unwrap();
+            (pk58(a["pubkey"].as_str().unwrap()), (pk58(a["owner"].as_str().unwrap()), data))
+        }).collect();
+        let absent = v["absent"].as_array().into_iter().flatten().map(|a| pk58(a.as_str().unwrap())).collect();
+        let pool = pk58(v["pool"].as_str().unwrap());
+        out.insert(pool, Fx { venue: Venue::parse(v["venue"].as_str().unwrap()).unwrap(), pool, slot: v["clock"]["slot"].as_u64().unwrap(),
+            unix: v["clock"]["unix_timestamp"].as_i64().unwrap(), accts, absent, file: f.file_name().unwrap().to_string_lossy().into_owned() });
+    }
+    out
+}
+
+/// the CLMM fixtures (`pools-clmm`)
 pub(crate) fn fixtures() -> &'static HashMap<Pk, Fx> {
     static F: OnceLock<HashMap<Pk, Fx>> = OnceLock::new();
-    F.get_or_init(|| {
-        let mut out = HashMap::default();
-        let mut files: Vec<_> = std::fs::read_dir(format!("{DIR}/pools-clmm")).unwrap().map(|e| e.unwrap().path()).collect();
-        files.sort();
-        for f in files {
-            let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
-            let accts = v["accounts"].as_array().unwrap().iter().map(|a| {
-                let data = base64::engine::general_purpose::STANDARD.decode(a["data"].as_str().unwrap()).unwrap();
-                (pk58(a["pubkey"].as_str().unwrap()), (pk58(a["owner"].as_str().unwrap()), data))
-            }).collect();
-            let absent = v["absent"].as_array().into_iter().flatten().map(|a| pk58(a.as_str().unwrap())).collect();
-            let pool = pk58(v["pool"].as_str().unwrap());
-            out.insert(pool, Fx { venue: Venue::parse(v["venue"].as_str().unwrap()).unwrap(), pool, slot: v["clock"]["slot"].as_u64().unwrap(),
-                unix: v["clock"]["unix_timestamp"].as_i64().unwrap(), accts, absent });
-        }
-        out
-    })
+    F.get_or_init(|| load_dir("pools-clmm"))
+}
+
+/// the older venues' fixtures (`pools`: PumpSwap, Raydium CPMM and AMM v4, DLMM, DAMM v2), for routes pairing them with
+/// the CLMM ones
+pub(crate) fn other_fixtures() -> &'static HashMap<Pk, Fx> {
+    static F: OnceLock<HashMap<Pk, Fx>> = OnceLock::new();
+    F.get_or_init(|| load_dir("pools"))
+}
+
+/// a fixture of either set by its pool's base58 prefix
+pub(crate) fn any_fx(prefix: &str) -> &'static Fx {
+    fixtures().values().chain(other_fixtures().values()).find(|f| crate::tx::b58(&f.pool).starts_with(prefix)).unwrap_or_else(|| panic!("no fixture {prefix}"))
 }
 
 fn swaps() -> &'static Vec<Value> {
@@ -419,7 +435,7 @@ fn orca_u256_division_refuses_never_panics() {
     let edge = [0u64, 1, 2, (1 << 63) - 1, 1 << 63, u64::MAX - 1, u64::MAX];
     let (mut ok, mut none) = (0usize, 0usize);
     for i in 0..200_000 {
-        let mut limb = |r: &mut Rng| if r.below(3) == 0 { r.next() } else { edge[r.below(edge.len() as u64) as usize] };
+        let limb = |r: &mut Rng| if r.below(3) == 0 { r.next() } else { edge[r.below(edge.len() as u64) as usize] };
         let n = [limb(&mut rng), limb(&mut rng), limb(&mut rng), limb(&mut rng)];
         let mut d = [limb(&mut rng), limb(&mut rng), limb(&mut rng), if i % 2 == 0 { 0 } else { limb(&mut rng) }];
         if i % 5 == 0 { d[2] = 0; d[3] = 0; }
