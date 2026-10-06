@@ -31,5 +31,38 @@ Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the wa
 - bundle-only with 0 failed-landing fees;
 - reconciliation ok at every stop.
 
-## Results
-(filled in)
+## Results (3 h: 20:16–23:17 UTC, bin/arbx-6f6163c, `deploy/arbx-ft007-frz.toml`: FT-006's 0.2 tips kept by its rule)
+
+| Segment | Sent | Landed | Win ratio | Net (chain ledger) |
+|---|---|---|---|---|
+| p1 (20:16–21:17) | 800 | 23 | 2.9% | +58,386 |
+| p2 (21:17–22:18) | 738 | 31 | 4.2% | +65,904 |
+| p3 (22:18–23:17) | 555 | 11 | 2.0% | +111,648 |
+| **Total** | **2,093** | **65** | **3.1%** | **+235,938 lamports** |
+
+**Safety: pass.**
+- Bundle-only; **0 failed-landing fees**.
+- **Every landed trade nets > 0:** 65 of 65, the smallest +953.
+- Final reconciliation ok in all 3 segments (residual 0, executor diff 0, no refused bundle landed).
+- Budget: ft007 −235,938, a profit.
+
+**Measured against FT-006:**
+
+| Measure | FT-006 | FT-007 |
+|---|---|---|
+| **Net SOL/h** | 77,562 | **78,668** |
+| Win ratio per send | 1.6% | **3.1%** (best so far) |
+| Wins/h | 12.7 | 21.7 |
+| Net per win | 6,121 | 3,630 |
+| Gross / tips / fees | 555,298 / 132,698 / 190,000 | 797,760 / 236,822 / 325,000 |
+| Median winning trade | — | 0.002 SOL (47 of 65 under 0.005) |
+| BAM-led / Jito-led land rate | 1.77% / 1.47% | 3.41% / 2.92% |
+
+**Decision (rule written before the run): keep the 0.05 SOL cap and the small rungs.** Net SOL/h 78,668 ≥ FT-006's 77,562. The FT-008 launcher applied it, so FT-008 runs `deploy/arbx-ft008-frz.toml` (FT-007's config + `[pool_refresh]`).
+- The margin is small and time-separated: indicative.
+- Smaller trades nearly doubled the win ratio, at about 60% of the net per win.
+- Fees are now the largest cost: 41% of gross.
+
+**Win mix (Stage 0 exit criterion):**
+- 30 meme wins vs 35 common (USDC 29, MET 2, PUMP 1, CAKE 1, …), the closest yet.
+- Memes made about 69% of the net. Attention+ alone: 7 wins, +48,028.

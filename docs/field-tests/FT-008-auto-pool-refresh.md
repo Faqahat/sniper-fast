@@ -43,7 +43,7 @@ Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the wa
     - stablecoins: USDC, USDT, USD1, PYUSD;
     - liquid-staking SOL: JitoSOL, mSOL, JupSOL, bSOL, INF;
     - wrapped majors: WBTC, cbBTC, WETH, ZEC;
-    - protocol tokens: JUP, MET (Meteora), RAY, ORCA, JTO, PYTH, W, DRIFT, KMNO, JLP, BELIEVE.
+    - protocol tokens: JUP, MET (Meteora), RAY, ORCA, JTO, PYTH, W, DRIFT, KMNO, JLP, BELIEVE, PUMP (pump.fun), CAKE (PancakeSwap).
   - **Meme:** every other token (pump.fun, bonk.fun and other launches).
   - **How it is counted:** each win by the token its route trades through (`route.mint` in attempts.jsonl). The exit report lists every win's token, and the mix is also reported by net.
   - **Standing on 2026-10-06 at 18:30 UTC:**
