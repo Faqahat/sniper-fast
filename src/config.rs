@@ -215,16 +215,36 @@ impl PoolRefreshCfg {
         if !(1..=60).contains(&self.http_timeout_s) { return e(format!("http_timeout_s {}: 1..60", self.http_timeout_s)); }
         if !self.rpc_max_rps.is_finite() || !(0.1..=10.0).contains(&self.rpc_max_rps) { return e(format!("rpc_max_rps {}: 0.1..10 requests a second", self.rpc_max_rps)); }
         if self.rpc.is_empty() { return e("rpc: name at least one [[rpc.endpoint]] for the verification".into()); }
+        // review #8: Haan by name, by host (any case), or by the variables its endpoints read
+        let is_haan = |x: &RpcEndpointCfg| x.name.to_ascii_lowercase().contains("haan")
+            || x.url.as_deref().and_then(crate::rpc::url_host).is_some_and(|h| h.to_ascii_lowercase().contains("haandigital"));
+        let haan_env: Vec<&str> = rpc.endpoints.iter().filter(|x| is_haan(x)).flat_map(|x| [x.url_env.as_deref(), x.bearer_env.as_deref()]).flatten().collect();
+        let haan_var = |v: &Option<String>| v.as_deref().is_some_and(|v| v.to_ascii_uppercase().contains("HAAN") || haan_env.contains(&v));
         for n in &self.rpc {
             let Some(ep) = rpc.endpoints.iter().find(|x| &x.name == n) else { return e(format!("rpc {n:?}: no [[rpc.endpoint]] of that name")) };
-            let host = ep.url.as_deref().and_then(crate::rpc::url_host).unwrap_or_default();
-            if n.to_ascii_lowercase().contains("haan") || host.contains("haandigital") {
+            if is_haan(ep) || haan_var(&ep.url_env) || haan_var(&ep.bearer_env) {
                 return e(format!("rpc {n:?}: never Haan (it serves the running segment: its RPC budget and its one gRPC stream)"));
             }
         }
         if self.timeout_s < 30 { return e(format!("timeout_s {}: at least 30", self.timeout_s)); }
         if self.lead_s <= self.timeout_s { return e(format!("lead_s {} must be above timeout_s {} (the refresh ends before its segment)", self.lead_s, self.timeout_s)); }
         Ok(())
+    }
+    /// Review #8: the environment variables the verification endpoints read (`url_env`, `bearer_env`, `${VAR}` in a URL):
+    /// the only ones a refresh loads from the .env
+    pub fn env_names(&self, rpc: &RpcCfg) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for ep in rpc.endpoints.iter().filter(|x| self.rpc.contains(&x.name)) {
+            for v in [&ep.url_env, &ep.bearer_env].into_iter().flatten() { if !out.contains(v) { out.push(v.clone()); } }
+            let mut rest = ep.url.as_deref().unwrap_or("");
+            while let Some(i) = rest.find("${") {
+                let Some(j) = rest[i..].find('}') else { break };
+                let v = rest[i + 2..i + j].to_string();
+                if !v.is_empty() && !out.contains(&v) { out.push(v); }
+                rest = &rest[i + j + 1..];
+            }
+        }
+        out
     }
     /// `arbx check`'s line
     pub fn describe(&self) -> String {

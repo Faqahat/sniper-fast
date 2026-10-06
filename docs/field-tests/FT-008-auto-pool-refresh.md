@@ -43,7 +43,9 @@ Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the wa
 On Cherry, with the WP-22 binary and deploy/arbx-ft008-frz.toml uploaded, against FT-006's records (FT-007's when they
 exist). It may run while a campaign runs: nothing is locked or sent, the gRPC stream is never opened, it runs at nice 10,
 and it verifies through `[pool_refresh] rpc` (the public RPC, at most 2 requests a second, never Haan or Shyft); a running
-segment's records are read as far as they are written. `<bin>` is the uploaded WP-22 binary (`/root/arbx/bin/arbx-<commit>`):
+segment's records are read as far as they are written. It loads only its verification endpoints' variables from the
+.env (none for the public RPC) and runs at nice +10 with the I/O class idle. `<bin>` is the uploaded WP-22 binary
+(`/root/arbx/bin/arbx-<commit>`):
 
     nice -n 10 <bin> pools refresh --config /root/arbx/deploy/arbx-ft008-frz.toml --runs /root/arbx/runs/ft006 \
         --out /root/arbx/runs/wp22-preflight/pools.csv --segment preflight
@@ -60,8 +62,10 @@ inputs give the same list). Exit 0 when the list was refreshed, 3 when the previ
 - `sources.geckoterminal.status`, `sources.dexscreener.status` ok; `sources.records.status` ok with
   `unlisted_pools_seen` > 0 (the last segment's rival arbitrage on pools we do not list).
 - `records`: one entry per FT-006 segment, each `ok`.
-- `counts.rows` <= 1,500; `counts.dropped_by` with few `dead:*` (more than max(25, a twentieth of the list), 75 for
-  1,500 rows, among those the last segment's boot found alive, keeps the previous list: the RPC or a decoder is suspect).
+- `counts.rows` <= 1,500; `counts.dropped_by` with few `dead:*` (only pools the last boot had dropped too); few
+  `counts.kept_unconfirmed` (pools the RPC called dead but the last boot found alive: kept; more than 75 for 1,500 rows
+  keeps the previous list); `shrink_guard.idle_dropped` <= 150 (max(25, a tenth of the list)).
+- `segments_counted_for_idle`: every complete ft006 segment `counts: true` (its triggers cover 80% of its 60 minutes).
 - `added`: tokens with 2+ pools that look right (BINDER-like), every one with `quote_liquidity` >= 2,000,000,000.
 - `rejected_by` mostly `group`, `liquidity`, `quote`; `rpc.calls` about 20-50.
 

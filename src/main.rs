@@ -43,9 +43,12 @@ enum PoolsCmd {
         #[arg(long, default_value = "manual")] segment: String,
         /// replay a refresh from its inputs file: nothing read or fetched, the same list
         #[arg(long)] inputs: Option<PathBuf>,
-        /// the .env naming the verification RPC's variables (default: `.env` beside the config; only the variables the
-        /// `[pool_refresh] rpc` endpoints name are used)
+        /// the .env holding the verification RPC's variables (default: `.env` beside the config): only the variables the
+        /// `[pool_refresh] rpc` endpoints name are read from it, never Haan's
         #[arg(long)] env_file: Option<PathBuf>,
+        /// the campaign's segment length in minutes: a segment counts toward a pool's idle streak only when its triggers
+        /// cover 80% of it (default: each segment's own --minutes)
+        #[arg(long)] segment_min: Option<f64>,
         /// stop and keep the previous list past this many seconds (default: `[pool_refresh] timeout_s` less 15)
         #[arg(long)] deadline_s: Option<u64>,
         /// (fixtures) answer GeckoTerminal and DexScreener from recorded files in this directory
@@ -509,10 +512,13 @@ fn main() -> Result<()> {
                 w.dir(&cfg.out_dir).display(), w.grace_s, w.stale_s, w.boot_s, w.status_min, w.poll_s);
             Ok(())
         }
-        Cmd::Pools { sub: Some(PoolsCmd::Refresh { config, current, runs, out, report, segment, inputs, env_file, deadline_s, web_dir }), .. } => {
-            if let Some(n) = match &env_file { Some(f) => load_env_file(f), None => { load_env(&config); None } } { eprintln!("{n}"); }
+        Cmd::Pools { sub: Some(PoolsCmd::Refresh { config, current, runs, out, report, segment, inputs, env_file, deadline_s, web_dir, segment_min }), .. } => {
             let cfg = config::Config::load(&config)?;
-            let o = arbx::poolrefresh::Opts { current, runs, out, report, segment, inputs, deadline_s, web_dir };
+            // review #8: only the variables the verification endpoints name are read from the .env (never Haan's)
+            let file = env_file.unwrap_or_else(|| config.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).join(".env"));
+            let (_, warn) = arbx::poolrefresh::load_env_names(&file, &cfg.pool_refresh.env_names(&cfg.rpc));
+            if let Some(w) = warn { eprintln!("{w}"); }
+            let o = arbx::poolrefresh::Opts { current, runs, out, report, segment, inputs, deadline_s, web_dir, segment_min, process: None };
             let r = arbx::poolrefresh::main(&cfg, &o)?;
             std::process::exit(if r["status"] == "ok" { 0 } else { 3 })
         }

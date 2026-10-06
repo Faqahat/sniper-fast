@@ -57,9 +57,10 @@ fn cand(pool: Pk, src: Src, base: Option<Pk>, score: f64) -> Cand {
     Cand { pool: b58(&pool), venue: "DLMM".into(), src, base: base.map(|b| b58(&b)), quote: base.map(|_| b58(&WSOL)), score, symbol: None, via: "test".into() }
 }
 fn row(v: Venue, p: Pk) -> Row { Row { venue: v, pool: p, source: "seed".into() } }
+/// a full 30-minute segment (its triggers cover all of it)
 fn seg(name: &str, listed: &[Pk], active: &[Pk], ok: bool) -> SegAct {
     SegAct { name: name.into(), started_ns: 0, complete: true, ok, listed: Some(listed.iter().map(b58).collect()),
-        pools: active.iter().map(|p| (b58(p), Counts { triggers: 1, ..Default::default() })).collect(), ..Default::default() }
+        pools: active.iter().map(|p| (b58(p), Counts { triggers: 1, ..Default::default() })).collect(), covered_min: 30, planned_min: Some(30.0), ..Default::default() }
 }
 fn inputs(rows: &[Row], segs: Vec<SegAct>, cands: Vec<Cand>, w: &World) -> Inputs {
     let mut i = Inputs { segments: segs, cands: merge(cands), accounts: w.accts.clone(), ..Default::default() };
@@ -131,13 +132,13 @@ fn swap_pools_are_read_where_the_decoders_read_them() {
 fn a_segments_records() {
     let d = tmp("seg");
     let (a, b, c, u) = (b58(&k(1)), b58(&k(2)), b58(&k(3)), b58(&k(4)));
-    std::fs::write(d.join("meta.json"), json!({ "run": { "segment": "c-p3", "started_ns": 42 } }).to_string()).unwrap();
+    std::fs::write(d.join("meta.json"), json!({ "run": { "segment": "c-p3", "started_ns": 42, "argv": ["arbx", "run", "--minutes", "30", "--canary"] } }).to_string()).unwrap();
     std::fs::write(d.join("pools.json"), json!([{ "pool": a }, { "pool": b }, { "pool": c }]).to_string()).unwrap();
     let hdr = |s: &str| json!({ "schema": s, "file_seq": 0 }).to_string();
     // triggers in two rotation files, zstd: the second ends with an incomplete frame (a write in progress)
-    let t1 = format!("{}\n{}\n", hdr("arbx.triggers/2.0"), json!({ "pool": a, "sig": "x" }));
+    let t1 = format!("{}\n{}\n", hdr("arbx.triggers/2.0"), json!({ "pool": a, "sig": "x", "st": { "rx": 1_800_000_000_000_000_000u64, "decoded": 1 } }));
     std::fs::write(d.join("triggers.000.jsonl.zst"), zstd::bulk::compress(t1.as_bytes(), 3).unwrap()).unwrap();
-    let mut z = zstd::bulk::compress(format!("{}\n", json!({ "pool": a })).as_bytes(), 3).unwrap();
+    let mut z = zstd::bulk::compress(format!("{}\n", json!({ "pool": a, "st": { "rx": 1_800_000_061_000_000_000u64 } })).as_bytes(), 3).unwrap();
     let partial = zstd::bulk::compress(format!("{}\n", json!({ "pool": b })).as_bytes(), 3).unwrap();
     z.extend(&partial[..partial.len() - 3]);
     std::fs::write(d.join("triggers.001.jsonl.zst"), z).unwrap();
@@ -159,6 +160,8 @@ fn a_segments_records() {
     assert_eq!(s.unlisted.len(), 1, "a listed pool's arbitrage is the rivals' count");
     assert_eq!(s.unlisted[&u], Seen { venue: "DLMM".into(), txs: 2 }, "landed rival arbitrage only");
     assert_eq!(s.streams["triggers"]["files"], 2);
+    // review #3a: the minutes its triggers cover (their receive times), and the minutes it was started for
+    assert_eq!((s.covered_min, s.planned_min), (2, Some(30.0)));
     // without exec, nothing unlisted; without rivals, the segment is not ok (it cannot count toward an idle streak)
     assert!(read_segment(&d, false, far).unlisted.is_empty());
     std::fs::remove_file(d.join("rivals.jsonl")).unwrap();
@@ -319,9 +322,9 @@ fn priority_and_the_cap() {
     assert_eq!(why_rejected(&out.report, k(20)).as_deref(), Some("cap_group"));
 }
 
-/// Listed pools: dead ones (no account, another owner, a layout no decoder reads) are dropped; so are pools idle in
-/// `idle_segments` consecutive segments they were listed in. A segment that did not list the pool, or whose records were
-/// not read whole, ends the streak; 0 never drops
+/// Listed pools: dead ones (no account, another owner, a layout no decoder reads) that the last boot had dropped too (no
+/// pools.json lists them) are dropped; so are pools idle in `idle_segments` consecutive full segments they were listed
+/// in. A segment that did not list the pool, or whose records were not read whole, ends the streak; 0 never drops
 #[test]
 fn dead_and_idle_listed_pools() {
     let mut w = World::new();
@@ -330,29 +333,210 @@ fn dead_and_idle_listed_pools() {
     w.put(k(6), None);
     w.put(k(7), Some(Account { owner: Venue::PumpSwap.program(), lamports: 1, data: vec![0; 904] }));
     w.put(k(8), Some(Account { owner: Venue::Dlmm.program(), lamports: 1, data: vec![0; 20] }));
-    let rows: Vec<Row> = (1..=8).map(|n| row(Venue::Dlmm, k(n))).collect();
-    let all: Vec<Pk> = (1..=8).map(k).collect();
+    // 32 busy pools keep the shrink guard's floor out of the way (8 of the 40 rows may go)
+    for n in 100..132 { w.dlmm(k(n), t, *WSOL, 5_000_000_000); }
+    let busy: Vec<Pk> = (100..132).map(k).collect();
+    let rows: Vec<Row> = (1..=8).chain(100..132).map(|n| row(Venue::Dlmm, k(n))).collect();
+    // the boot dropped the dead ones: no segment lists them
+    let all: Vec<Pk> = (1..=5).map(k).chain(busy.iter().copied()).collect();
     let no4: Vec<Pk> = all.iter().copied().filter(|p| *p != k(4)).collect();
-    // k1 active in p3; k2 active in p1 only; k3 and k5 never; k4 not listed in p2
-    let segs = vec![seg("p1", &all, &[k(2)], true), seg("p2", &no4, &[], true), seg("p3", &all, &[k(1)], true), seg("p4", &all, &[], true)];
+    let act = |x: &[Pk]| -> Vec<Pk> { x.iter().copied().chain(busy.iter().copied()).collect() };
+    // k1 active in p3; k2 active in p1 only; k3 and k5 never; k4 not listed in p2; the busy pools in every segment
+    let segs = vec![seg("p1", &all, &act(&[k(2)]), true), seg("p2", &no4, &act(&[]), true), seg("p3", &all, &act(&[k(1)]), true), seg("p4", &all, &act(&[]), true)];
     let out = plan(&pol(), &inputs(&rows, segs.clone(), vec![], &w), "x").unwrap();
     let why: BTreeMap<String, String> = out.report["dropped"].as_array().unwrap().iter().map(|d| (d["pool"].as_str().unwrap().to_string(), d["why"].as_str().unwrap().to_string())).collect();
     assert_eq!(why.get(&b58(&k(6))).map(|s| s.as_str()), Some("dead:missing"));
     assert_eq!(why.get(&b58(&k(7))).map(|s| s.as_str()), Some("dead:owner"));
     assert_eq!(why.get(&b58(&k(8))).map(|s| s.as_str()), Some("dead:layout"));
     for n in [2, 3, 4, 5] { assert_eq!(why.get(&b58(&k(n))).map(|s| s.as_str()), Some("idle"), "k{n}: idle in the last 2 segments it was listed in"); }
-    assert_eq!(pools_of(&out.rows), vec![k(1)], "k1: active in p3, idle in p4 only");
+    assert_eq!(pools_of(&out.rows), [vec![k(1)], busy.clone()].concat(), "k1: active in p3, idle in p4 only");
     let mut p = pol();
     p.idle_segments = 3;
     let out = plan(&p, &inputs(&rows, segs.clone(), vec![], &w), "x").unwrap();
-    assert_eq!(pools_of(&out.rows), vec![k(1), k(4)], "k4: p2 did not list it, its streak is 2");
+    assert_eq!(pools_of(&out.rows), [vec![k(1), k(4)], busy.clone()].concat(), "k4: p2 did not list it, its streak is 2");
     // a segment whose records were not read whole ends every streak
     let mut segs2 = segs.clone();
     segs2[2].ok = false;
     let out = plan(&p, &inputs(&rows, segs2, vec![], &w), "x").unwrap();
-    assert_eq!(pools_of(&out.rows), vec![k(1), k(2), k(3), k(4), k(5)]);
+    assert_eq!(pools_of(&out.rows), [(1..=5).map(k).collect::<Vec<_>>(), busy.clone()].concat());
     p.idle_segments = 0;
-    assert_eq!(plan(&p, &inputs(&rows, segs, vec![], &w), "x").unwrap().rows.len(), 5, "0: never idle-dropped");
+    assert_eq!(plan(&p, &inputs(&rows, segs, vec![], &w), "x").unwrap().rows.len(), 37, "0: never idle-dropped");
+}
+
+/// Review #2: a listed pool that one verification answer calls dead, but that the last boot found alive (its pools.json
+/// lists it) or that the last segment saw active, is kept (`unconfirmed_dead`): the next boot re-checks it on its own
+/// provider. Once a boot has dropped it and it shows no activity, it goes
+#[test]
+fn a_pool_the_last_boot_found_alive_is_never_dropped_on_one_answer() {
+    let mut w = World::new();
+    let t = tok(1);
+    for n in 1..=3 { w.dlmm(k(n), t, *WSOL, 5_000_000_000); }
+    w.put(k(4), None);
+    w.put(k(5), Some(Account { owner: Venue::PumpSwap.program(), lamports: 1, data: vec![0; 904] }));
+    w.put(k(6), None);
+    let rows: Vec<Row> = (1..=6).map(|n| row(Venue::Dlmm, k(n))).collect();
+    // k4: booted alive, the answer says missing; k5: not booted but active in the last segment (50 triggers, as the
+    // review's demo), the answer says another owner; k6: the boot dropped it, no activity
+    let mut last = seg("p1", &[k(1), k(2), k(3), k(4)], &[k(1)], true);
+    last.pools.insert(b58(&k(5)), Counts { triggers: 50, decisions: 5, opps: 3, rivals: 0 });
+    let out = plan(&pol(), &inputs(&rows, vec![last], vec![], &w), "x").unwrap();
+    assert_eq!(pools_of(&out.rows), (1..=5).map(k).collect::<Vec<_>>());
+    let kept: BTreeMap<String, (String, Value)> = out.report["kept"].as_array().unwrap().iter()
+        .map(|x| (x["pool"].as_str().unwrap().to_string(), (x["why"].as_str().unwrap().to_string(), x["rpc"].clone()))).collect();
+    assert_eq!(kept[&b58(&k(4))], ("unconfirmed_dead".to_string(), json!("dead:missing")));
+    assert_eq!(kept[&b58(&k(5))], ("unconfirmed_dead".to_string(), json!("dead:owner")));
+    assert_eq!(out.report["dropped"].as_array().unwrap().iter().map(|d| (d["pool"].as_str().unwrap().to_string(), d["why"].as_str().unwrap().to_string())).collect::<Vec<_>>(),
+        [(b58(&k(6)), "dead:missing".to_string())]);
+    assert_eq!(out.report["counts"]["kept_unconfirmed"].as_u64(), Some(2));
+}
+
+/// Review #3a: a segment counts toward an idle streak only when its triggers cover 80% of a segment's minutes (the
+/// campaign's `--segment-min`, else its own `--minutes`): a short, crashed or degraded segment ends the streak
+#[test]
+fn short_segments_do_not_count_toward_idleness() {
+    let mut w = World::new();
+    let t = tok(1);
+    for n in 1..=40 { w.dlmm(k(n), t, *WSOL, 5_000_000_000); }
+    let rows: Vec<Row> = (1..=40).map(|n| row(Venue::Dlmm, k(n))).collect();
+    let all: Vec<Pk> = (1..=40).map(k).collect();
+    let busy: Vec<Pk> = (2..=40).map(k).collect();
+    let full = |n: &str| seg(n, &all, &busy, true);
+    let has_k1 = |i: &Inputs| pools_of(&plan(&pol(), i, "x").unwrap().rows).contains(&k(1));
+    assert!(!has_k1(&inputs(&rows, vec![full("p1"), full("p2")], vec![], &w)), "two full segments: k1 is idle");
+    let mut short = full("p2");
+    short.covered_min = 23;
+    assert!(has_k1(&inputs(&rows, vec![full("p1"), short.clone()], vec![], &w)), "23 of 30 minutes (under 24): the streak ends");
+    let mut i = inputs(&rows, vec![full("p1"), short], vec![], &w);
+    i.segment_min = Some(25.0);
+    assert!(!has_k1(&i), "the campaign's segment length decides: 23 of 25 minutes counts");
+    let mut unknown = full("p2");
+    unknown.planned_min = None;
+    assert!(has_k1(&inputs(&rows, vec![full("p1"), unknown], vec![], &w)), "no length known: it does not count");
+    let r = plan(&pol(), &inputs(&rows, vec![full("p1"), full("p2")], vec![], &w), "x").unwrap().report;
+    assert_eq!(r["segments_counted_for_idle"][0], json!({ "segment": "p1", "counts": true, "covered_min": 30, "minutes": 30.0 }));
+}
+
+/// Review #3b: one refresh drops at most max(25, a tenth of the list) idle pools, the longest idle first, and never so
+/// many that the list falls under 80% of its rows; the others stay (idle, last in priority) and the report says so
+#[test]
+fn the_shrink_guard_bounds_idle_drops() {
+    let mut w = World::new();
+    let t = tok(1);
+    for n in 1..=200u8 { w.dlmm(k(n), t, *WSOL, 5_000_000_000); }
+    let rows: Vec<Row> = (1..=200u8).map(|n| row(Venue::Dlmm, k(n))).collect();
+    let all: Vec<Pk> = (1..=200u8).map(k).collect();
+    let mut p = pol();
+    p.idle_segments = 4;
+    p.cap = 1_000;
+    // the review's case: four full segments, one pool active: 199 idle, 25 go (max(25, 200 / 10))
+    let segs: Vec<SegAct> = (1..=4).map(|i| seg(&format!("p{i}"), &all, &[k(1)], true)).collect();
+    let out = plan(&p, &inputs(&rows, segs, vec![], &w), "x").unwrap();
+    assert_eq!(out.rows.len(), 175);
+    assert_eq!(out.report["shrink_guard"], json!({ "idle_candidates": 199, "idle_dropped": 25, "idle_held": 174, "idle_bound": 25, "floor_rows": 160, "applied": true }));
+    assert_eq!(out.report["counts"]["idle_held"].as_u64(), Some(174));
+    // the longest idle first: k2..k31 were active in p2 (idle 4 segments), the rest never (idle 6): k32..k56 go
+    let mut segs: Vec<SegAct> = (1..=6).map(|i| seg(&format!("p{i}"), &all, &[k(1)], true)).collect();
+    for n in 2..=31u8 { segs[1].pools.insert(b58(&k(n)), Counts { triggers: 1, ..Default::default() }); }
+    let out = plan(&p, &inputs(&rows, segs, vec![], &w), "x").unwrap();
+    let gone: Vec<Pk> = out.report["dropped"].as_array().unwrap().iter().map(|d| pk_opt(d["pool"].as_str().unwrap()).unwrap()).collect();
+    assert_eq!(gone, (32..=56u8).map(k).collect::<Vec<_>>());
+    // never under 80% of the rows: 40 rows, 30 idle: 8 go
+    let rows40 = &rows[..40];
+    let segs: Vec<SegAct> = (1..=4).map(|i| seg(&format!("p{i}"), &all[..40], &all[..10], true)).collect();
+    let out = plan(&p, &inputs(rows40, segs, vec![], &w), "x").unwrap();
+    assert_eq!((out.rows.len(), out.report["shrink_guard"]["idle_dropped"].as_u64()), (32, Some(8)));
+}
+
+/// Review #10: a refresh adds pools only on the five venues the engine trades at FT-008 (`ADD_VENUES`), whatever
+/// `Venue` knows: a candidate owned by Raydium CLMM or Orca Whirlpool (a DexScreener "raydium" pair with no labels, say)
+/// is refused (`venue`), and the sources' dex ids map only into the five
+#[test]
+fn only_our_five_venues_are_added() {
+    assert_eq!(ADD_VENUES, [Venue::PumpSwap, Venue::RayCpmm, Venue::RayAmmV4, Venue::Dlmm, Venue::DammV2]);
+    let mut w = World::new();
+    let t = tok(1);
+    for n in 1..=4 { w.dlmm(k(n), t, *WSOL, 5_000_000_000); }
+    for (n, prog) in [(3, "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"), (4, "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc")] {
+        if let Some(Some(a)) = w.accts.get_mut(&b58(&k(n))) { a.owner = prog.to_string(); }
+    }
+    let rows = vec![row(Venue::Dlmm, k(1)), row(Venue::Dlmm, k(2))];
+    let out = plan(&pol(), &inputs(&rows, vec![], vec![cand(k(3), Src::Ds, Some(t), 1.0), cand(k(4), Src::Gt, Some(t), 1.0)], &w), "x").unwrap();
+    assert_eq!((why_rejected(&out.report, k(3)).as_deref(), why_rejected(&out.report, k(4)).as_deref()), (Some("venue"), Some("venue")));
+    assert_eq!(out.rows.len(), 2);
+    for dex in ["pumpswap", "meteora", "meteora-damm-v2", "raydium", "raydium-cp", "raydium-clmm", "orca", "whirlpool"] {
+        if let Some(v) = gt_venue(dex) { assert!(ADD_VENUES.contains(&v), "{dex}"); }
+        for labels in [vec![], vec!["CLMM".to_string()], vec!["DLMM".to_string()], vec!["DYN2".to_string()], vec!["CPMM".to_string()]] {
+            if let Some(v) = ds_venue(dex, &labels) { assert!(ADD_VENUES.contains(&v), "{dex} {labels:?}"); }
+        }
+    }
+    assert_eq!(ds_venue("raydium", &["CLMM".to_string()]), None, "a labelled CLMM pair is not a candidate at all");
+}
+
+/// Review #8: the refresh's environment holds only what its verification endpoints name (never a HAAN variable); the
+/// config check refuses Haan by name, by host in any case, or by the variables Haan's endpoints read; the run-time check
+/// refuses a url_env that resolves to Haan; and the endpoint's limiter is the policy's rate with a burst of 1 (review #4)
+#[test]
+fn the_refresh_never_holds_or_uses_haan() {
+    let base = "config_version = 2\nout_dir = \"/tmp/x\"\nwallet = \"w\"\n[pools]\nseed_csv = \"s.csv\"\n[rpc]\n\
+        [[rpc.endpoint]]\nname = \"haan\"\nurl = \"https://rpc.haandigital.eu/\"\nbearer_env = \"HAAN_API_KEY\"\n\
+        [[rpc.endpoint]]\nname = \"alt1\"\nurl = \"https://RPC.HaanDigital.EU/x\"\nenabled = false\n\
+        [[rpc.endpoint]]\nname = \"alt2\"\nurl = \"https://x.example/\"\nbearer_env = \"HAAN_API_KEY\"\nenabled = false\n\
+        [[rpc.endpoint]]\nname = \"alt3\"\nurl_env = \"MY_HAAN_URL\"\nenabled = false\n\
+        [[rpc.endpoint]]\nname = \"good\"\nurl = \"https://api.example/?k=${WP22_T_KEY}\"\nbearer_env = \"WP22_T_BEARER\"\nenabled = false\n\
+        [[rpc.endpoint]]\nname = \"wp22-t-url\"\nurl_env = \"WP22_T_URL_3\"\nenabled = false\n\
+        [[rpc.endpoint]]\nname = \"wp22-t-limit\"\nurl = \"https://example.invalid/\"\nenabled = false\n\
+        [state]\nurl = \"http://localhost\"\n[pool_refresh]\nenabled = true\nrpc = [\"good\"]\n";
+    let mut cfg = Config::parse(base).unwrap();
+    for n in ["haan", "alt1", "alt2", "alt3"] {
+        cfg.pool_refresh.rpc = vec![n.into()];
+        assert!(cfg.pool_refresh.check(&cfg.rpc).unwrap_err().contains("never Haan"), "{n}");
+    }
+    cfg.pool_refresh.rpc = vec!["good".into()];
+    cfg.pool_refresh.check(&cfg.rpc).unwrap();
+    assert_eq!(cfg.pool_refresh.env_names(&cfg.rpc), ["WP22_T_BEARER", "WP22_T_KEY"]);
+    let pairs = vec![("WP22_T_KEY".to_string(), "k".to_string()), ("WP22_T_BEARER".into(), "b".into()), ("WP22_T_OTHER".into(), "o".into()), ("HAAN_API_KEY".into(), "secret".into())];
+    let (set, remove) = env_plan(pairs, &["WP22_T_KEY".to_string(), "WP22_T_BEARER".to_string(), "HAAN_API_KEY".to_string()],
+        vec!["PATH".into(), "HAAN_X_TOKEN".into(), "haan_api_key".into()]);
+    assert_eq!(set, [("WP22_T_KEY".to_string(), "k".to_string()), ("WP22_T_BEARER".into(), "b".into())], "only what the endpoints name, never a HAAN variable");
+    assert_eq!(remove, ["HAAN_X_TOKEN", "haan_api_key"]);
+    // a url_env resolving to Haan (any case) is refused when the refresh starts
+    std::env::set_var("WP22_T_URL_3", "https://Rpc.HAANDIGITAL.eu/abc");
+    cfg.pool_refresh.rpc = vec!["wp22-t-url".into()];
+    cfg.pool_refresh.check(&cfg.rpc).unwrap();
+    assert!(format!("{:#}", RpcChain::new(&cfg).err().unwrap()).contains("never Haan"));
+    assert!(is_haan_url("https://RPC.HaanDigital.eu/") && !is_haan_url("https://api.mainnet-beta.solana.com"));
+    // the limiter: the policy's rate, a burst of 1, on the endpoint's name
+    cfg.pool_refresh.rpc = vec!["wp22-t-limit".into()];
+    cfg.pool_refresh.rpc_max_rps = 1.5;
+    let _chain = RpcChain::new(&cfg).unwrap();
+    assert_eq!(crate::rpc::Registry::global().limits_json()["wp22-t-limit"], json!({ "max_rps": 1.5, "burst": 1.0 }));
+}
+
+/// Review #9: registry pools count toward a token's group only when the boot loads them (`[pools] registry_all`)
+#[test]
+fn registry_pools_count_only_with_registry_all() {
+    let d = tmp("reg");
+    let f = d.join("registry.json");
+    std::fs::write(&f, json!([{ "venue": "DLMM", "pool": b58(&k(1)), "t0": b58(&tok(1)), "t1": b58(&WSOL) }, { "venue": "Orca", "pool": b58(&k(2)), "t0": "x", "t1": "y" }]).to_string()).unwrap();
+    let cfg = |all: bool| Config::parse(&format!("config_version = 2\nout_dir = \"/tmp/x\"\nwallet = \"w\"\n[pools]\nseed_csv = \"s.csv\"\nregistry_json = \"{}\"\nregistry_all = {all}\n\
+        [rpc]\n[state]\nurl = \"http://localhost\"\n", f.display())).unwrap();
+    assert_eq!(registry_for(&cfg(true)).iter().map(|r| r.pool.clone()).collect::<Vec<_>>(), [b58(&k(1))], "our venues only");
+    assert!(registry_for(&cfg(false)).is_empty());
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Review #12: the refresh runs below the segment for the CPU (nice +10) and the disk (I/O class idle); in a thread of
+/// its own here (both are per thread on Linux, and threads made later inherit them)
+#[test]
+fn the_refresh_runs_below_the_segment() {
+    let (before, v, io) = std::thread::spawn(|| {
+        let before = unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
+        let v = lower_priority();
+        (before, v, unsafe { libc::syscall(libc::SYS_ioprio_get, 1, 0) })
+    }).join().unwrap();
+    assert_eq!(v["io_class"], "idle", "{v}");
+    assert_eq!(io, 3 << 13, "IOPRIO_CLASS_IDLE");
+    assert_eq!(v["nice"].as_i64(), Some((before + 10).min(19) as i64), "{v}");
 }
 
 /// Fail-safe: more listed pools dead in one refresh than max(25, a twentieth of the list), among those the last segment's
@@ -498,6 +682,15 @@ fn a_refresh_end_to_end_on_recorded_fixtures() {
     let r2 = refresh(&cfg, &o2, &mut No, &mut No).unwrap();
     assert_eq!(std::fs::read(&o2.out).unwrap(), body, "the same inputs, the same list");
     assert_eq!(r2["added"], r["added"]);
+    // review #7: the inputs carry the policy, the segment and the current list's hash: a replay refuses another policy
+    // or another current list
+    let saved = load_inputs(Path::new(r["inputs_file"].as_str().unwrap())).unwrap();
+    assert_eq!((saved.policy.as_ref(), saved.segment.as_deref(), saved.failure.as_deref()), (Some(&cfg.pool_refresh), Some("fx-p2"), None));
+    let mut other = fixture_cfg();
+    other.pool_refresh.max_adds = 7;
+    assert!(format!("{:#}", refresh(&other, &o2, &mut No, &mut No).unwrap_err()).contains("another [pool_refresh] policy"));
+    let o3 = Opts { current: Some(o.out.clone()), ..o2.clone() };
+    assert!(format!("{:#}", refresh(&cfg, &o3, &mut No, &mut No).unwrap_err()).contains("is not the current list the refresh read"));
     let _ = std::fs::remove_dir_all(&out_dir);
 }
 
@@ -516,6 +709,14 @@ fn a_failed_verification_keeps_the_previous_list() {
     assert_eq!(std::fs::read(&o.out).unwrap(), std::fs::read(base.join("current.csv")).unwrap(), "the previous list, unchanged");
     assert_eq!(r["out"]["sha256"], r["current"]["sha256"]);
     assert!(summary_line(&r).starts_with("kept the previous list"), "{}", summary_line(&r));
+    // review #7: the failure is in the inputs file, so its replay keeps the previous list too, for the same reason
+    struct Off;
+    impl Web for Off { fn get(&mut self, _: &str) -> std::result::Result<String, String> { panic!("no web in a replay") } }
+    impl Chain for Off { fn accounts(&mut self, _: &[Pk]) -> std::result::Result<Vec<Option<Account>>, String> { panic!("no chain in a replay") } fn name(&self) -> String { "none".into() } }
+    let o2 = Opts { inputs: Some(PathBuf::from(r["inputs_file"].as_str().unwrap())), out: out_dir.join("replayed.csv"), segment: "fx-p2".into(), ..Default::default() };
+    let r2 = refresh(&cfg, &o2, &mut Off, &mut Off).unwrap();
+    assert_eq!((r2["status"].as_str(), &r2["reason"]), (Some("kept_previous"), &r["reason"]));
+    assert_eq!(std::fs::read(&o2.out).unwrap(), std::fs::read(&o.out).unwrap());
     // no web at all: our records still propose (BINDER's DLMM pool has no second pool without the trending lists: refused)
     struct Down;
     impl Web for Down { fn get(&mut self, _: &str) -> std::result::Result<String, String> { Err("timeout".into()) } }

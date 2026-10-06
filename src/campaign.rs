@@ -65,6 +65,9 @@ const MIN_SEGMENT_MIN: f64 = 2.0;
 /// WP-22: a refresh still running when its segment ends is waited for at most this long (and never past its own
 /// deadline): the gap between segments stays about a minute
 pub const REFRESH_WAIT_S: u64 = 45;
+/// WP-22: a refreshed list with fewer rows than this share of the previous list is not used (review #3b, a second line
+/// behind the plan's own shrink guard)
+pub const MIN_LIST_SHARE: f64 = 0.5;
 /// what the stop basis is, in campaign.json and the equity events (STAGE1-PLAN review F6)
 pub const BASIS: &str = "net_spend: the stops measure the net spend since the campaign's start (fees + tips + non-recoverable rent - the routes' trading result; the owner's transfers are not in it) against the start's SOL + WSOL (lamports); every non-SOL token a quantity floor moved by routes only; recoverable rent apart";
 
@@ -116,12 +119,16 @@ pub struct RefreshJob {
     pub segment: String,
     /// the running segment's list
     pub current: PathBuf,
+    /// where the refresh writes its list: a staging file (`pools-<segment>.refresh.csv`); only the campaign writes the
+    /// file a segment boots from, a checked copy of this or of the previous list (review #6)
     pub out: PathBuf,
     pub report: PathBuf,
     /// its stdout and stderr
     pub log: PathBuf,
     /// its own deadline (`--deadline-s`): it keeps the previous list past it
     pub deadline_s: u64,
+    /// the campaign's segment length (`--segment-min`: a segment counts toward an idle streak when its triggers cover 80% of it)
+    pub segment_min: f64,
 }
 
 /// a refresh under way (WP-22)
@@ -195,7 +202,7 @@ impl ProcessRunner {
             a.push(k.to_string());
             a.push(v.display().to_string());
         }
-        a.extend(["--segment".to_string(), j.segment.clone(), "--deadline-s".into(), j.deadline_s.to_string()]);
+        a.extend(["--segment".to_string(), j.segment.clone(), "--deadline-s".into(), j.deadline_s.to_string(), "--segment-min".into(), j.segment_min.to_string()]);
         a
     }
 }
@@ -220,6 +227,9 @@ impl Runner for ProcessRunner {
     fn refresh(&mut self, j: &RefreshJob) -> Result<Box<dyn Child>> {
         let out = std::fs::File::create(&j.log).context("the refresh's log")?;
         let mut cmd = std::process::Command::new(&self.bin);
+        // review #8: a clean environment (the refresh reads its verification RPC's variables, and only those, from the .env)
+        cmd.env_clear();
+        for k in ["PATH", "HOME", "LANG", "TZ"] { if let Some(v) = std::env::var_os(k) { cmd.env(k, v); } }
         cmd.args(self.refresh_args(j)).stdout(out.try_clone()?).stderr(out).stdin(std::process::Stdio::null());
         Ok(Box::new(ProcChild(cmd.spawn().with_context(|| format!("starting {} pools refresh", self.bin.display()))?)))
     }
@@ -301,6 +311,14 @@ pub struct Campaign {
     pub refresh_wait: Duration,
     /// the segment after the running one, when there will be one (its refresh runs during this one)
     next_name: Option<String>,
+    /// whether the last segment ended as planned: after a crash or a stop the boundary does not wait for its refresh
+    /// (review #11)
+    last_natural: bool,
+    /// review #5: the source of the last list ("config", "refresh", ...), whether the segment on it crashed, and the last
+    /// list a segment ran on without crashing
+    prev_source: &'static str,
+    prev_crashed: bool,
+    last_good: Option<PathBuf>,
 }
 
 impl Campaign {
@@ -319,7 +337,7 @@ impl Campaign {
             min_free_gb: cfg.record.min_free_gb, poll: Duration::from_secs(2), stop_int_s: 60, stop_kill_s: 180, backoff: Duration::from_secs(10), busy_wait_s: 120,
             stop: Arc::new(AtomicBool::new(false)), state, echo: true, unreaped: None,
             refresh: cfg.pool_refresh.enabled.then(|| cfg.pool_refresh.clone()), seed_csv: PathBuf::from(&cfg.pools.seed_csv), prev_list: None, refreshing: None,
-            refresh_wait: Duration::from_secs(REFRESH_WAIT_S), next_name: None }
+            refresh_wait: Duration::from_secs(REFRESH_WAIT_S), next_name: None, last_natural: true, prev_source: "config", prev_crashed: false, last_good: None }
     }
 
     fn file(&self, ext: &str) -> PathBuf { self.runs.join(format!("{}.{ext}", self.name)) }
@@ -498,6 +516,13 @@ impl Campaign {
                 busy = runner.busy();
             }
             if !busy.is_empty() { break format!("the provider is busy: {}", busy.join("; ")); }
+            // review #11: a stop that came during the boundary (the refresh's wait, the provider's) starts no segment
+            if self.stop.load(Ordering::Relaxed) { break "signal: the supervisor was asked to stop".to_string(); }
+            if self.file("stop").exists() {
+                let w = reason_of(&self.file("stop"));
+                self.cj(&owner_of(&self.file("stop")), "stop", &w, true, "campaign ends");
+                break format!("stop file: {w}");
+            }
             i += 1;
             let name = format!("{}-p{i}", self.name);
             let floor = self.state["equity"]["floor_lamports"].as_i64();
@@ -532,6 +557,11 @@ impl Campaign {
             }
             let (class, reason) = classify(&spec.dir, rc);
             if class == "crash" { crashes.push(t_exit); }
+            // WP-22: the boundary waits for the refresh only after a planned end; a list a segment ran on without
+            // crashing is a good one (review #5, #11)
+            self.last_natural = class == "natural";
+            self.prev_crashed = class == "crash";
+            if class != "crash" { if let Some(p) = &spec.pools_csv { self.last_good = Some(p.clone()); } }
             crashes.retain(|t| t_exit.saturating_sub(*t) < 900_000_000_000);
             let mut seg = json!({ "name": name, "started_ns": t_start, "ended_ns": t_exit, "exit_code": rc, "stop_reason": reason, "class": class, "pid": pid, "flag": flag,
                 "budget_left": spec.budget_left, "equity_floor": floor, "records_only": records_only });
@@ -738,8 +768,8 @@ impl Campaign {
             let due = t_seg + ((spec.minutes * 60.0) as u64).saturating_sub(pr.lead_s) * 1_000_000_000;
             if now >= due {
                 let job = RefreshJob { segment: next.clone(), current: spec.pools_csv.clone().unwrap_or_else(|| self.seed_csv.clone()),
-                    out: self.dir.join(format!("pools-{next}.csv")), report: self.dir.join(format!("pool-refresh-{next}.json")),
-                    log: self.dir.join(format!("pool-refresh-{next}.out")), deadline_s: pr.timeout_s.saturating_sub(15).max(15) };
+                    out: self.dir.join(format!("pools-{next}.refresh.csv")), report: self.dir.join(format!("pool-refresh-{next}.json")),
+                    log: self.dir.join(format!("pool-refresh-{next}.out")), deadline_s: pr.timeout_s.saturating_sub(15).max(15), segment_min: self.segment_min };
                 let (child, error) = match runner.refresh(&job) { Ok(c) => (Some(c), None), Err(e) => (None, Some(format!("{e:#}"))) };
                 said.push(match &error { None => format!("pool refresh for {next}: started ({} s before {}'s end)", pr.lead_s, spec.name),
                     Some(e) => format!("pool refresh for {next}: could not start: {e}") });
@@ -758,15 +788,45 @@ impl Campaign {
         let Some(pr) = self.refresh.clone() else { return Ok(None) };
         let path = self.dir.join(format!("pools-{name}.csv"));
         let t0 = clock.now_ns();
-        let (source, reason, report): (&str, Option<String>, Value) = match self.prev_list.clone() {
+        let (source, reason, report): (&'static str, Option<String>, Value) = match self.prev_list.clone() {
             None => {
                 std::fs::copy(&self.seed_csv, &path).with_context(|| format!("copying the seed list {}", self.seed_csv.display()))?;
                 ("config", None, Value::Null)
             }
             Some(prev) => {
-                let (ok, reason, report) = self.finish_refresh(name, &pr, clock);
-                if !ok { std::fs::copy(&prev, &path).with_context(|| format!("copying the previous list {}", prev.display()))?; }
-                (if ok { "refresh" } else { "previous" }, reason, report)
+                let (ok, why, report) = self.finish_refresh(name, &pr, clock);
+                // review #6: the segment boots on the campaign's own copy, of the refresh's staging file once it checks
+                // against the report (the refresh never writes this file), else of the previous list
+                let mut used = ok.then(|| report["out"]["sha256"].as_str().map(String::from)).flatten().and_then(|want| {
+                    let staged = self.dir.join(format!("pools-{name}.refresh.csv"));
+                    std::fs::copy(&staged, &path).ok()?;
+                    crate::poolrefresh::check_list(&path, Some(&want)).ok().map(|x| x.0)
+                }).map(|rows| (rows, None)).unwrap_or((0, Some(why.clone().unwrap_or_else(|| "the refreshed list's copy does not check".into()))));
+                // a refreshed list far shorter than the previous one is not used (the plan bounds its own drops: this is a
+                // second line, review #3b)
+                if used.1.is_none() {
+                    let prev_rows = crate::poolrefresh::check_list(&prev, None).map(|x| x.0).unwrap_or(0);
+                    if (used.0 as f64) < MIN_LIST_SHARE * prev_rows as f64 {
+                        used.1 = Some(format!("the refreshed list has {} rows, under {:.0}% of the previous list's {prev_rows}", used.0, MIN_LIST_SHARE * 100.0));
+                    }
+                }
+                // review #5: after a crash on a refreshed list, the last list a segment ran on without crashing
+                let fallback = match (&self.last_good, self.prev_crashed && self.prev_source == "refresh") {
+                    (Some(g), true) if *g != prev => Some(g.clone()),
+                    _ => None,
+                };
+                match (used.1, fallback) {
+                    (_, Some(g)) => {
+                        std::fs::copy(&g, &path).with_context(|| format!("copying the last good list {}", g.display()))?;
+                        ("last_good", Some(format!("the previous segment crashed on its refreshed list: the last list a segment ran on without crashing ({})",
+                            g.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default())), report)
+                    }
+                    (None, None) => ("refresh", None, report),
+                    (Some(why), None) => {
+                        std::fs::copy(&prev, &path).with_context(|| format!("copying the previous list {}", prev.display()))?;
+                        ("previous", Some(why), report)
+                    }
+                }
             }
         };
         let (rows, sha) = crate::poolrefresh::check_list(&path, None)?;
@@ -784,6 +844,7 @@ impl Campaign {
             notify::notify(notify::now(level, "pool_refresh", "campaign", name.to_string(), format!("campaign {}: {text}", self.name), rec));
         }
         self.prev_list = Some(path.clone());
+        self.prev_source = source;
         Ok(Some(path))
     }
 
@@ -795,7 +856,9 @@ impl Campaign {
         };
         if r.job.segment != name { return (false, Some(format!("the refresh was for {}", r.job.segment)), Value::Null); }
         if let Some(e) = &r.error { return (false, Some(format!("the refresh could not start: {e}")), Value::Null); }
-        let until = (r.started_ns + pr.timeout_s * 1_000_000_000).min(clock.now_ns() + self.refresh_wait.as_nanos() as u64);
+        // after a crash or a stop the boundary does not wait (review #11): a refresh still running is killed at once
+        let wait = if self.last_natural { self.refresh_wait.as_nanos() as u64 } else { 0 };
+        let until = (r.started_ns + pr.timeout_s * 1_000_000_000).min(clock.now_ns() + wait);
         if let Some(c) = r.child.as_mut() {
             while r.rc.is_none() {
                 match c.try_wait() { Ok(Some(rc)) => { r.rc = Some(rc); break } Ok(None) => {} Err(e) => { r.error = Some(format!("{e:#}")); break } }
@@ -813,7 +876,7 @@ impl Campaign {
         match report["status"].as_str() {
             Some("ok") => match crate::poolrefresh::check_list(&r.job.out, report["out"]["sha256"].as_str()) {
                 Ok(_) if report["segment"].as_str() == Some(name) => (true, None, report),
-                Ok(_) => (false, Some(format!("the report is for {:?}", report["segment"])), report),
+                Ok(_) => (false, Some(format!("the report is for {}", report["segment"].as_str().unwrap_or("no segment"))), report),
                 Err(e) => (false, Some(format!("the refreshed list does not check: {e:#}")), report),
             },
             Some("kept_previous") => (false, Some(format!("the refresh kept the previous list: {}", report["reason"].as_str().unwrap_or("?"))), report),

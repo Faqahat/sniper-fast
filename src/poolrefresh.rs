@@ -48,10 +48,22 @@ pub static USDT: LazyLock<Pk> = LazyLock::new(|| crate::tx::pk("Es9vMFrzaCERmJfr
 const RECORD_CANDS_PER_ADD: usize = 5;
 /// rejected candidates listed in the report (the counts are complete)
 const REPORT_REJECTED_MAX: usize = 300;
-/// more listed pools than this (or than a twentieth of the list) found dead in one refresh, among those the last
-/// segment's boot found alive, means the RPC, or a decoder after a program upgrade, is suspect rather than the pools: the
-/// previous list stays (pools die a few at a time; pools the boot already dropped are dropped whatever their number)
+/// more listed pools than this (or than a twentieth of the list) that one verification answer calls dead although the
+/// last segment's boot found them alive (or the last segment saw them active) means the RPC, or a decoder after a program
+/// upgrade, is suspect: the previous list stays. Below it they are kept anyway (review #2): the next boot re-checks them
+/// on its own provider, and the refresh after it drops the ones that boot dropped
 const DEAD_MAX_MIN: usize = 25;
+/// a segment counts toward an idle streak only when its triggers cover at least this share of a segment's minutes
+/// (review #3a: a short, crashed or degraded segment says little about its pools)
+pub const IDLE_COVER_SHARE: f64 = 0.8;
+/// the shrink guard (review #3b): one refresh drops at most max(IDLE_DROP_MIN, a tenth of the list) idle pools, the
+/// longest idle first, and never so many that the list falls below SHRINK_FLOOR of its rows; the rest stay (idle, last
+/// in priority) for a later refresh
+pub const IDLE_DROP_MIN: usize = 25;
+pub const SHRINK_FLOOR: f64 = 0.8;
+/// the venues a refresh may add pools on: the five the engine trades at FT-008 (review #10: a venue added to `Venue`
+/// later, such as WP-21A's CLMM and Whirlpool, is never added by a refresh until it is named here)
+pub const ADD_VENUES: [Venue; 5] = [Venue::PumpSwap, Venue::RayCpmm, Venue::RayAmmV4, Venue::Dlmm, Venue::DammV2];
 
 pub fn pk_opt(s: &str) -> Option<Pk> { bs58::decode(s.trim()).into_vec().ok().and_then(|v| Pk::try_from(v).ok()) }
 
@@ -134,6 +146,13 @@ pub struct SegAct {
     pub unlisted: BTreeMap<String, Seen>,
     /// per stream: files, lines, bytes, an error
     pub streams: BTreeMap<String, Value>,
+    /// the minutes (UTC wall-clock minutes) in which it recorded at least one trigger: how much of the segment its records
+    /// cover (review #3a)
+    #[serde(default)]
+    pub covered_min: u32,
+    /// the minutes it was started for (meta.json `run.argv` `--minutes`)
+    #[serde(default)]
+    pub planned_min: Option<f64>,
 }
 
 fn find(h: &[u8], n: &[u8]) -> Option<usize> {
@@ -158,6 +177,13 @@ fn str_after<'a>(line: &'a [u8], key: &[u8]) -> Option<&'a str> {
     let s = find(line, key)? + key.len();
     let e = line[s..].iter().position(|b| *b == b'"')?;
     std::str::from_utf8(&line[s..s + e]).ok()
+}
+
+/// the unsigned number right after `key` (which ends with `:`)
+fn num_after(line: &[u8], key: &[u8]) -> Option<u64> {
+    let s = find(line, key)? + key.len();
+    let e = line[s..].iter().position(|b| !b.is_ascii_digit()).unwrap_or(line.len() - s);
+    std::str::from_utf8(&line[s..s + e]).ok()?.parse().ok()
 }
 
 /// the strings of the array right after `key` (which ends with `[`)
@@ -285,14 +311,24 @@ pub fn read_segment(dir: &Path, exec: bool, deadline: Instant) -> SegAct {
     let started_ns = meta["run"]["started_ns"].as_u64().unwrap_or(0);
     let listed: Option<BTreeSet<String>> = std::fs::read(dir.join(crate::replay::POOLS_FILE)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
         .and_then(|v| v.as_array().map(|a| a.iter().filter_map(|p| p["pool"].as_str().map(String::from)).collect()));
-    let mut s = SegAct { name, started_ns, complete: dir.join("stop.json").is_file(), ok: true, listed, ..Default::default() };
+    let planned_min = meta["run"]["argv"].as_array().and_then(|a| a.iter().position(|x| x == "--minutes").and_then(|i| a.get(i + 1)))
+        .and_then(|m| m.as_str()).and_then(|m| m.parse::<f64>().ok());
+    let mut s = SegAct { name, started_ns, complete: dir.join("stop.json").is_file(), ok: true, listed, planned_min, ..Default::default() };
     let mut counts: HashMap<String, Counts> = HashMap::new();
+    let mut minutes: HashSet<u64> = HashSet::new();
     {
         let mut bump = |p: &str, f: fn(&mut Counts)| { if !p.is_empty() { f(counts.entry(p.to_string()).or_default()); } };
         // a segment that recorded no trigger at all (its state stream was down, or it ended in its boot) says nothing about
-        // its pools' activity: not ok, so it never counts toward an idle streak
+        // its pools' activity: not ok, so it never counts toward an idle streak; the minutes its triggers cover (their
+        // receive time, `st.rx`) say how much of it does (review #3a)
         let mut trig = 0u64;
-        let st = each_line(dir, "triggers", deadline, &mut |l| { if let Some(p) = str_after(l, b"\"pool\":\"") { trig += 1; bump(p, |c| c.triggers += 1); } });
+        let st = each_line(dir, "triggers", deadline, &mut |l| {
+            if let Some(p) = str_after(l, b"\"pool\":\"") {
+                trig += 1;
+                bump(p, |c| c.triggers += 1);
+                if let Some(t) = find(l, b"\"st\":{").and_then(|i| num_after(&l[i..], b"\"rx\":")) { minutes.insert(t / 60_000_000_000); }
+            }
+        });
         if st.files == 0 || trig == 0 { s.ok = false; }
         s.streams.insert("triggers".into(), st.json());
         if st.error.is_some() || st.stopped { s.ok = false; }
@@ -311,6 +347,7 @@ pub fn read_segment(dir: &Path, exec: bool, deadline: Instant) -> SegAct {
         s.streams.insert("rivals".into(), st.json());
     }
     s.pools = counts.into_iter().filter(|(_, c)| c.total() > 0).collect();
+    s.covered_min = minutes.len() as u32;
     if exec {
         let listed = s.listed.clone().unwrap_or_default();
         let mut seen: HashMap<String, Seen> = HashMap::new();
@@ -490,6 +527,13 @@ pub fn read_registry(path: &str) -> Result<Vec<RegPool>> {
     }).collect())
 }
 
+/// The registry pools the group rule may count: the boot loads registry.json's pools only with `[pools] registry_all`
+/// (or on seed pairs named by mint columns, which the lists the refresh writes do not have), so without it none count
+/// (review #9)
+pub fn registry_for(cfg: &Config) -> Vec<RegPool> {
+    match (&cfg.pools.registry_json, cfg.pools.registry_all) { (Some(r), true) => read_registry(r).unwrap_or_default(), _ => vec![] }
+}
+
 /// An account as saved in the inputs file (base64 data)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedAcct { pub owner: String, pub lamports: u64, pub data: String }
@@ -509,6 +553,19 @@ pub struct Inputs {
     pub cands: Vec<Cand>,
     /// every account fetched (null: none on chain)
     pub accounts: BTreeMap<String, Option<SavedAcct>>,
+    /// the campaign's segment length (`--segment-min`); None: each segment's own `--minutes` (review #3a)
+    #[serde(default)]
+    pub segment_min: Option<f64>,
+    /// review #7: the policy the plan ran with, the segment the list is for, why the fetch failed (the plan then keeps
+    /// the previous list), and the current list's sha256: a replay uses them and refuses another policy or list
+    #[serde(default)]
+    pub policy: Option<PoolRefreshCfg>,
+    #[serde(default)]
+    pub segment: Option<String>,
+    #[serde(default)]
+    pub failure: Option<String>,
+    #[serde(default)]
+    pub current_sha256: Option<String>,
 }
 
 impl Inputs {
@@ -525,6 +582,18 @@ pub struct Outcome { pub rows: Vec<Row>, pub report: Value }
 #[derive(Clone, Debug)]
 struct Verified { c: Cand, m: PoolMeta, token: Pk, quote: Pk, liq: u64 }
 
+/// A listed pool the plan keeps (for now): its row and index in the list, its metadata (None: one verification answer
+/// called it dead, `rpc`, but the last boot found it alive or the last segment saw it active), its activity, its idle streak
+#[derive(Clone, Debug)]
+struct Listed { i: usize, row: Row, meta: Option<PoolMeta>, total: u64, streak: u32, rpc: Option<&'static str> }
+
+/// the minutes a segment is measured against: the campaign's segment length, else its own `--minutes`
+fn seg_minutes(inp: &Inputs, s: &SegAct) -> Option<f64> { inp.segment_min.or(s.planned_min).filter(|m| *m > 0.0) }
+
+/// whether a segment counts toward an idle streak: its records whole, and its triggers covering IDLE_COVER_SHARE of its
+/// minutes (review #3a)
+fn counts_for_idle(inp: &Inputs, s: &SegAct) -> bool { s.ok && seg_minutes(inp, s).is_some_and(|m| s.covered_min as f64 >= IDLE_COVER_SHARE * m) }
+
 /// the order of a new pool among the new ones: our records first, then the trending lists; the higher score; the pool
 fn add_key(c: &Cand) -> (Src, i64, String) { (c.src, -(c.score.max(0.0).min(9e15) as i64), c.pool.clone()) }
 
@@ -536,9 +605,15 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
     let get = |k: &Pk| -> std::result::Result<Option<&Account>, String> { accts.get(k).map(|a| a.as_ref()).ok_or_else(|| format!("account {} was not fetched", b58(k))) };
     let current = inp.rows();
     let segs = &inp.segments;
+    // what the last boot saw (the most recent segment with a pools.json: the running one, booted on its own provider) and
+    // what the most recent segment saw active: a pool either vouches for is never dropped on one verification answer
+    let booted: Option<&BTreeSet<String>> = segs.iter().rev().find_map(|s| s.listed.as_ref());
+    let last_active = |key: &str| segs.last().is_some_and(|s| s.pools.get(key).is_some_and(|c| c.total() > 0));
     // 1. the listed pools: alive, active or idle
     let mut drops: Vec<Value> = Vec::new();
-    let mut listed: Vec<(usize, Row, PoolMeta, u64, u32)> = Vec::new();
+    let mut listed: Vec<Listed> = Vec::new();
+    let mut idle: Vec<Listed> = Vec::new();
+    let mut unconfirmed = 0usize;
     for (i, r) in current.iter().enumerate() {
         let a = get(&r.pool)?;
         let meta = match a {
@@ -547,33 +622,56 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
             Some(a) => pools::meta_of(r.venue, &r.pool, &a.data).ok_or("dead:layout"),
         };
         let key = b58(&r.pool);
-        let m = match meta { Ok(m) => m, Err(why) => { drops.push(json!({ "venue": venue_name(r.venue), "pool": key, "why": why, "source": r.source })); continue } };
         let total: u64 = segs.iter().filter_map(|s| s.pools.get(&key)).map(|c| c.total()).sum();
+        let m = match meta {
+            Ok(m) => m,
+            // review #2: alive at the last boot, or active since: kept; the next boot re-checks it and drops it if it is
+            // gone, and the refresh after that drops it (it is then in no boot's pools.json)
+            Err(why) if booted.is_some_and(|b| b.contains(&key)) || last_active(&key) => {
+                unconfirmed += 1;
+                listed.push(Listed { i, row: r.clone(), meta: None, total, streak: 0, rpc: Some(why) });
+                continue;
+            }
+            Err(why) => { drops.push(json!({ "venue": venue_name(r.venue), "pool": key, "why": why, "source": r.source })); continue }
+        };
         let mut streak = 0u32;
         for s in segs.iter().rev() {
             let listed_here = s.listed.as_ref().is_some_and(|l| l.contains(&key));
-            if !s.ok || !listed_here || s.pools.get(&key).is_some_and(|c| c.total() > 0) { break; }
+            if !counts_for_idle(inp, s) || !listed_here || s.pools.get(&key).is_some_and(|c| c.total() > 0) { break; }
             streak += 1;
         }
-        if p.idle_segments > 0 && streak >= p.idle_segments {
-            drops.push(json!({ "venue": venue_name(r.venue), "pool": key, "why": "idle", "idle_segments": streak, "source": r.source }));
-            continue;
-        }
-        listed.push((i, r.clone(), m, total, streak));
+        let x = Listed { i, row: r.clone(), meta: Some(m), total, streak, rpc: None };
+        if p.idle_segments > 0 && streak >= p.idle_segments { idle.push(x); } else { listed.push(x); }
     }
-    // the newly dead: alive at the last segment's boot (its pools.json lists them), or every dead one without records
-    let booted: Option<&BTreeSet<String>> = segs.iter().rev().find_map(|s| s.listed.as_ref());
-    let dead = drops.iter().filter(|d| d["why"].as_str().is_some_and(|w| w.starts_with("dead"))
-        && booted.is_none_or(|b| d["pool"].as_str().is_some_and(|x| b.contains(x)))).count();
+    // the suspect-RPC guard: the listed pools one answer calls dead against the last boot or the last segment's activity
+    // (without any boot record, every dead one)
+    let suspect = unconfirmed + if booted.is_none() { drops.len() } else { 0 };
     let max_dead = DEAD_MAX_MIN.max(current.len() / 20);
-    if dead > max_dead {
-        return Err(format!("{dead} of the {} listed pools came back dead (more than {max_dead} in one refresh{}): the RPC or a decoder is suspect", current.len(),
-            if booted.is_some() { ", all alive at the last segment's boot" } else { "" }));
+    if suspect > max_dead {
+        return Err(format!("{suspect} of the {} listed pools came back dead (more than {max_dead} in one refresh{}): the RPC or a decoder is suspect", current.len(),
+            if booted.is_some() { ", all alive at the last segment's boot or active in it" } else { "" }));
     }
+    // the shrink guard (review #3b): at most max(IDLE_DROP_MIN, a tenth of the list) idle pools go, the longest idle
+    // first, and never below SHRINK_FLOOR of the list's rows; the others stay, idle, last in priority
+    let n = current.len();
+    let idle_bound = IDLE_DROP_MIN.max(n / 10);
+    let floor_rows = (n as f64 * SHRINK_FLOOR).ceil() as usize;
+    let idle_room = idle_bound.min(n.saturating_sub(drops.len()).saturating_sub(floor_rows));
+    idle.sort_by(|a, b| b.streak.cmp(&a.streak).then(a.total.cmp(&b.total)).then(a.i.cmp(&b.i)));
+    let idle_candidates = idle.len();
+    let held = idle.split_off(idle_room.min(idle.len()));
+    for x in &idle {
+        drops.push(json!({ "venue": venue_name(x.row.venue), "pool": b58(&x.row.pool), "why": "idle", "idle_segments": x.streak, "source": x.row.source }));
+    }
+    let idle_held = held.len();
+    listed.extend(held);
+    listed.sort_by_key(|x| x.i);
+    let shrink = json!({ "idle_candidates": idle_candidates, "idle_dropped": idle.len(), "idle_held": idle_held, "idle_bound": idle_bound, "floor_rows": floor_rows,
+        "applied": idle_held > 0 });
     let listed_set: HashSet<Pk> = current.iter().map(|r| r.pool).collect();
     // the pools on a pair: listed (alive) and the registry's (alive on chain, fetched with the candidates)
     let mut on_pair: HashMap<(Pk, Pk), BTreeSet<Pk>> = HashMap::new();
-    for (_, r, m, _, _) in &listed { on_pair.entry(pair_key(&m.t0, &m.t1)).or_default().insert(r.pool); }
+    for x in &listed { if let Some(m) = &x.meta { on_pair.entry(pair_key(&m.t0, &m.t1)).or_default().insert(x.row.pool); } }
     let reg_pools: HashSet<Pk> = inp.registry.iter().filter_map(|r| pk_opt(&r.pool)).collect();
     let mut reg_alive: HashMap<(Pk, Pk), BTreeSet<Pk>> = HashMap::new();
     for r in &inp.registry {
@@ -593,7 +691,7 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
         if reg_pools.contains(&pool) { rejected.push((c.clone(), "in_registry".into())); continue; }
         let res: std::result::Result<Verified, String> = 'v: {
             let Some(a) = get(&pool)? else { break 'v Err("missing".into()) };
-            let Some(venue) = Venue::of_program(&a.owner) else { break 'v Err("venue".into()) };
+            let Some(venue) = Venue::of_program(&a.owner).filter(|v| ADD_VENUES.contains(v)) else { break 'v Err("venue".into()) };
             let Some(m) = pools::meta_of(venue, &pool, &a.data) else { break 'v Err("layout".into()) };
             if let (Some(b), Some(q)) = (c.base.as_deref().and_then(pk_opt), c.quote.as_deref().and_then(pk_opt)) {
                 if pair_key(&b, &q) != pair_key(&m.t0, &m.t1) { break 'v Err("mints".into()); }
@@ -637,9 +735,9 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
     // loses its additions (and the room goes back to the idle pools)
     let final_set = loop {
         let mut order: Vec<(u8, i64, String, Pk)> = Vec::new();
-        for (i, r, _, total, _) in &listed { if *total > 0 { order.push((0, -(*total as i64), format!("{i:08}"), r.pool)); } }
+        for x in &listed { if x.total > 0 { order.push((0, -(x.total as i64), format!("{:08}", x.i), x.row.pool)); } }
         for (n, v) in adds.iter().enumerate() { order.push((1, 0, format!("{n:08}"), v.m.pool)); }
-        for (i, r, _, total, _) in &listed { if *total == 0 { order.push((2, 0, format!("{i:08}"), r.pool)); } }
+        for x in &listed { if x.total == 0 { order.push((2, 0, format!("{:08}", x.i), x.row.pool)); } }
         order.sort();
         let kept: HashSet<Pk> = order.iter().take(p.cap).map(|x| x.3).collect();
         let broken: BTreeSet<(Pk, Pk)> = adds.iter().map(|v| pair_key(&v.token, &v.quote)).filter(|k| {
@@ -654,16 +752,16 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
     };
     let mut rows: Vec<Row> = Vec::new();
     let mut kept_j: Vec<Value> = Vec::new();
-    let (mut n_active, mut n_idle) = (0usize, 0usize);
-    let in_listed: HashMap<Pk, (u64, u32)> = listed.iter().map(|(_, r, _, t, s)| (r.pool, (*t, *s))).collect();
+    let (mut n_active, mut n_idle, mut n_unconfirmed) = (0usize, 0usize, 0usize);
+    let in_listed: HashMap<Pk, &Listed> = listed.iter().map(|x| (x.row.pool, x)).collect();
     for r in &current {
-        let Some((total, streak)) = in_listed.get(&r.pool) else { continue };
+        let Some(x) = in_listed.get(&r.pool) else { continue };
         if final_set.contains(&r.pool) {
             rows.push(r.clone());
-            if *total > 0 { n_active += 1; } else { n_idle += 1; }
-            kept_j.push(json!({ "pool": b58(&r.pool), "why": if *total > 0 { "active" } else { "idle" }, "activity": total, "idle_segments": streak }));
+            let why = if x.rpc.is_some() { n_unconfirmed += 1; "unconfirmed_dead" } else if x.total > 0 { n_active += 1; "active" } else { n_idle += 1; "idle" };
+            kept_j.push(json!({ "pool": b58(&r.pool), "why": why, "activity": x.total, "idle_segments": x.streak, "rpc": x.rpc }));
         } else {
-            drops.push(json!({ "venue": venue_name(r.venue), "pool": b58(&r.pool), "why": "cap", "activity": total, "source": r.source }));
+            drops.push(json!({ "venue": venue_name(r.venue), "pool": b58(&r.pool), "why": "cap", "activity": x.total, "source": r.source }));
         }
     }
     let mut added_j: Vec<Value> = Vec::new();
@@ -691,7 +789,8 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
     for c in &inp.cands { *cands_by.entry(c.src.tag()).or_default() += 1; }
     rejected.sort_by(|a, b| a.0.pool.cmp(&b.0.pool));
     let report = json!({
-        "counts": { "current": current.len(), "rows": rows.len(), "kept": n_active + n_idle, "kept_active": n_active, "kept_idle": n_idle, "added": added_j.len(),
+        "counts": { "current": current.len(), "rows": rows.len(), "kept": n_active + n_idle + n_unconfirmed, "kept_active": n_active, "kept_idle": n_idle,
+            "kept_unconfirmed": n_unconfirmed, "idle_held": idle_held, "added": added_j.len(),
             "added_by_source": adds_by_src, "dropped": drops.len(), "dropped_by": dropped_by, "candidates": inp.cands.len(), "candidates_by_source": cands_by,
             "rejected_by": rejected_by },
         "added": added_j,
@@ -699,6 +798,9 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
         "top_tokens": top.iter().take(10).map(|(k, (s, n, sc))| json!({ "token": b58(k), "symbol": s, "pools": n, "score": sc })).collect::<Vec<_>>(),
         "rejected": rejected.iter().take(REPORT_REJECTED_MAX).map(|(c, w)| json!({ "pool": c.pool, "venue": c.venue, "src": c.src.tag(), "via": c.via, "why": w })).collect::<Vec<_>>(),
         "kept": kept_j,
+        "shrink_guard": shrink,
+        "segments_counted_for_idle": segs.iter().map(|s| json!({ "segment": s.name, "counts": counts_for_idle(inp, s), "covered_min": s.covered_min,
+            "minutes": seg_minutes(inp, s) })).collect::<Vec<_>>(),
     });
     Ok(Outcome { rows, report })
 }
@@ -776,7 +878,8 @@ impl RpcChain {
             one.url_env = None;
             one.endpoints = vec![crate::config::RpcEndpointCfg { enabled: true, ..e.clone() }];
             let (got, sk) = one.endpoints();
-            if got.iter().any(|x| x.url.contains("haandigital")) { bail!("[pool_refresh] rpc {n:?}: never Haan"); }
+            // review #8: the resolved URL's host, compared without case (a url_env names it only at run time)
+            if got.iter().any(|x| is_haan_url(&x.url)) { bail!("[pool_refresh] rpc {n:?}: never Haan"); }
             eps.extend(got);
             skipped.extend(sk);
         }
@@ -803,6 +906,45 @@ impl Chain for RpcChain {
         Err(format!("{last} (3 attempts)"))
     }
     fn name(&self) -> String { self.names.join(", ") }
+}
+
+/// whether a URL's host is Haan's (any case)
+pub fn is_haan_url(url: &str) -> bool {
+    crate::rpc::url_host(url).unwrap_or_else(|| url.to_string()).to_ascii_lowercase().contains("haandigital")
+}
+
+/// Review #8: what a refresh's environment becomes, from the .env's `pairs`, the `names` its verification endpoints read
+/// and the `inherited` variable names: (the variables to set: only those named, never a HAAN one; the inherited ones to
+/// remove: every HAAN one)
+pub fn env_plan(pairs: Vec<(String, String)>, names: &[String], inherited: Vec<String>) -> (Vec<(String, String)>, Vec<String>) {
+    let haan = |k: &str| k.to_ascii_uppercase().contains("HAAN");
+    (pairs.into_iter().filter(|(k, _)| names.contains(k) && !haan(k)).collect(), inherited.into_iter().filter(|k| haan(k)).collect())
+}
+
+/// Review #8: the environment of a refresh holds only what its verification endpoints name: every inherited HAAN
+/// variable is removed, and only `names` are read from the .env `file` (a missing file is fine when nothing is needed).
+/// The names loaded, and a warning
+pub fn load_env_names(file: &Path, names: &[String]) -> (Vec<String>, Option<String>) {
+    let inherited: Vec<String> = std::env::vars_os().map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+    let (pairs, warn) = match dotenvy::from_path_iter(file) {
+        Ok(it) => (it.flatten().collect::<Vec<_>>(), None),
+        Err(e) if !names.is_empty() => (vec![], Some(format!("WARNING: {}: {e}: the verification RPC's variables {names:?} were not loaded", file.display()))),
+        Err(_) => (vec![], None),
+    };
+    let (set, remove) = env_plan(pairs, names, inherited);
+    for k in remove { std::env::remove_var(k); }
+    let loaded = set.iter().map(|(k, _)| k.clone()).collect();
+    for (k, v) in set { std::env::set_var(k, v); }
+    (loaded, warn)
+}
+
+/// Review #12: below the running segment, for the CPU (nice 10) and for the disk (I/O class idle). Called first: the
+/// threads made later inherit both. What it did, for the report
+pub fn lower_priority() -> Value {
+    let nice = unsafe { libc::nice(10) };
+    // ioprio_set(IOPRIO_WHO_PROCESS, 0: this thread, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE = 3, 0))
+    let io = unsafe { libc::syscall(libc::SYS_ioprio_set, 1, 0, 3 << 13) };
+    json!({ "nice": nice, "io_class": if io == 0 { "idle".to_string() } else { format!("unchanged: {}", std::io::Error::last_os_error()) } })
 }
 
 /// what one source's fetch did
@@ -837,6 +979,11 @@ pub struct Opts {
     pub deadline_s: Option<u64>,
     /// answer the web from recorded files (`DirWeb`) instead of the network (fixtures; the chain is still the RPC)
     pub web_dir: Option<PathBuf>,
+    /// the campaign's segment length in minutes: a segment counts toward an idle streak when its triggers cover 80% of it
+    /// (default: each segment's own `--minutes`)
+    pub segment_min: Option<f64>,
+    /// what lowering the process's priority did (`main`), for the report
+    pub process: Option<Value>,
 }
 
 /// An inputs file (`{schema, inputs}`, as the refresh writes it, or the bare inputs)
@@ -860,10 +1007,22 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
     let t0 = crate::feeds::clock::now_ns();
     let start = Instant::now();
     let p = &cfg.pool_refresh;
+    // review #7: a replay plans with what the refresh had: its policy (a config with another one is refused), its
+    // segment, its fetch failure, and the same current list (checked by its sha256)
+    let loaded: Option<Inputs> = match &o.inputs { Some(f) => Some(load_inputs(f)?), None => None };
+    if let Some(pol) = loaded.as_ref().and_then(|i| i.policy.as_ref()) {
+        let (mut a, mut b) = (pol.clone(), p.clone());
+        a.enabled = true;
+        b.enabled = true;
+        if a != b { bail!("the inputs file was planned with another [pool_refresh] policy than this config's: replay it with the config the refresh ran with"); }
+    }
     let deadline = start + Duration::from_secs(o.deadline_s.unwrap_or(p.timeout_s.saturating_sub(15).max(15)));
     let current_path = o.current.clone().unwrap_or_else(|| PathBuf::from(&cfg.pools.seed_csv));
     let current_raw = std::fs::read(&current_path).with_context(|| format!("reading the current list {}", current_path.display()))?;
     let current_sha = crate::provenance::sha256_hex(&current_raw);
+    if let Some(want) = loaded.as_ref().and_then(|i| i.current_sha256.as_ref()) {
+        if *want != current_sha { bail!("{} (sha256 {current_sha}) is not the current list the refresh read (sha256 {want}): pass that one with --current", current_path.display()); }
+    }
     let (rows, unreadable) = parse_list(std::str::from_utf8(&current_raw).context("the current list is not UTF-8")?)?;
     let report_p = report_path(o);
     let inputs_p = inputs_path(&report_p);
@@ -875,13 +1034,14 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
     let mut sources = serde_json::Map::new();
     let quotes: Vec<Pk> = p.quotes.iter().map(|q| if q == "USDC" { *USDC } else { *WSOL }).collect();
     let mut rpc_j = json!({ "endpoints": chain.name(), "max_rps": p.rpc_max_rps, "calls": 0, "accounts": 0, "ms": 0.0 });
-    let (inp, failure): (Inputs, Option<String>) = if let Some(f) = &o.inputs {
+    let (inp, failure): (Inputs, Option<String>) = if let (Some(f), Some(inp)) = (&o.inputs, loaded) {
         sources.insert("inputs_file".into(), json!(f.display().to_string()));
-        (load_inputs(f)?, None)
+        let failure = inp.failure.clone();
+        (inp, failure)
     } else {
         let mut inp = Inputs::default();
         inp.set_rows(&rows);
-        if let Some(r) = &cfg.pools.registry_json { inp.registry = read_registry(r).unwrap_or_default(); }
+        inp.registry = registry_for(cfg);
         // records
         let t = Instant::now();
         let dirs = segment_dirs(&o.runs);
@@ -970,7 +1130,7 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
             for c in &inp.cands {
                 let Some(pool) = pk_opt(&c.pool) else { continue };
                 let Some(Some(a)) = inp.accounts.get(&c.pool).map(|a| a.as_ref().and_then(|a| a.account())) else { continue };
-                let Some(m) = Venue::of_program(&a.owner).and_then(|v| pools::meta_of(v, &pool, &a.data)) else { continue };
+                let Some(m) = Venue::of_program(&a.owner).filter(|v| ADD_VENUES.contains(v)).and_then(|v| pools::meta_of(v, &pool, &a.data)) else { continue };
                 r2.extend([m.vault0, m.vault1, m.t0, m.t1]);
                 pairs.insert(pair_key(&m.t0, &m.t1));
             }
@@ -984,6 +1144,11 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
         // only the registry pools the plan may count are kept in the inputs (the file stays small)
         let fetched: HashSet<String> = inp.accounts.keys().cloned().collect();
         inp.registry.retain(|r| fetched.contains(&r.pool));
+        inp.segment_min = o.segment_min;
+        inp.policy = Some(p.clone());
+        inp.segment = Some(o.segment.clone());
+        inp.failure = failure.clone();
+        inp.current_sha256 = Some(current_sha.clone());
         (inp, failure)
     };
     // the inputs file (`--inputs` replays it): one that cannot be written is recorded, never fatal (the list does not need it)
@@ -991,7 +1156,8 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
         .and_then(|b| crate::control::write_atomic(&inputs_p, &b)).err().map(|e| format!("{e:#}"));
     // the plan, or the previous list
     let t = Instant::now();
-    let planned = match &failure { Some(e) => Err(e.clone()), None => plan(p, &inp, &o.segment) };
+    let segment = inp.segment.clone().unwrap_or_else(|| o.segment.clone());
+    let planned = match &failure { Some(e) => Err(e.clone()), None => plan(p, &inp, &segment) };
     phases.insert("plan_ms".into(), json!(t.elapsed().as_millis() as u64));
     let (status, reason, body, detail) = match planned {
         Ok(out) => ("ok", Value::Null, list_csv(&out.rows).into_bytes(), out.report),
@@ -1000,7 +1166,7 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
     crate::control::write_atomic(&o.out, &body)?;
     let out_sha = crate::provenance::sha256_hex(&body);
     let t1 = crate::feeds::clock::now_ns();
-    let mut report = json!({ "schema": SCHEMA, "segment": o.segment, "status": status, "reason": reason, "t_start_ns": t0, "t_end_ns": t1,
+    let mut report = json!({ "schema": SCHEMA, "segment": segment, "status": status, "reason": reason, "t_start_ns": t0, "t_end_ns": t1,
         "duration_ms": start.elapsed().as_millis() as u64, "phases": phases, "policy": p,
         "current": { "path": current_path.display().to_string(), "sha256": current_sha, "rows": rows.len(), "unreadable_rows": unreadable },
         "out": { "path": o.out.display().to_string(), "sha256": out_sha, "rows": parse_list(std::str::from_utf8(&body).unwrap_or("")).map(|x| x.0.len()).unwrap_or(0) },
@@ -1008,7 +1174,7 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
         "records": inp.segments.iter().map(|s| json!({ "segment": s.name, "complete": s.complete, "ok": s.ok, "listed": s.listed.as_ref().map(|l| l.len()),
             "active_pools": s.pools.len(), "unlisted_pools": s.unlisted.len(), "streams": s.streams })).collect::<Vec<_>>(),
         "inputs_file": inputs_p.display().to_string(), "inputs_sha256": std::fs::read(&inputs_p).ok().map(|b| crate::provenance::sha256_hex(&b)),
-        "inputs_error": inputs_error });
+        "inputs_error": inputs_error, "process": o.process, "segment_min": inp.segment_min });
     if let (Some(r), Some(d)) = (report.as_object_mut(), detail.as_object()) { for (k, v) in d { r.insert(k.clone(), v.clone()); } }
     crate::control::write_atomic(&report_p, format!("{}\n", serde_json::to_string_pretty(&report)?).as_bytes())?;
     Ok(report)
@@ -1023,8 +1189,13 @@ pub fn summary_line(r: &Value) -> String {
     }).collect()).unwrap_or_default();
     let secs = r["duration_ms"].as_u64().unwrap_or(0) as f64 / 1e3;
     match r["status"].as_str() {
-        Some("ok") => format!("+{} added, -{} dropped, {} kept ({} active, {} idle) -> {} pools in {secs:.0} s{}", c["added"], c["dropped"], c["kept"], c["kept_active"], c["kept_idle"],
-            c["rows"], if tops.is_empty() { String::new() } else { format!("; new: {}", tops.join(", ")) }),
+        Some("ok") => {
+            let n = |k: &str| c[k].as_u64().unwrap_or(0);
+            format!("+{} added, -{} dropped, {} kept ({} active, {} idle{}) -> {} pools in {secs:.0} s{}{}", n("added"), n("dropped"), n("kept"), n("kept_active"), n("kept_idle"),
+                if n("kept_unconfirmed") > 0 { format!(", {} the RPC called dead but the last boot found alive", n("kept_unconfirmed")) } else { String::new() }, n("rows"),
+                if tops.is_empty() { String::new() } else { format!("; new: {}", tops.join(", ")) },
+                if n("idle_held") > 0 { format!("; {} idle pools held by the shrink guard", n("idle_held")) } else { String::new() })
+        }
         _ => format!("kept the previous list ({} pools) after {secs:.0} s: {}", c["rows"], r["reason"].as_str().unwrap_or("?")),
     }
 }
@@ -1033,8 +1204,10 @@ pub fn summary_line(r: &Value) -> String {
 pub fn main(cfg: &Config, o: &Opts) -> Result<Value> {
     if !cfg.pool_refresh.enabled { eprintln!("note: [pool_refresh] enabled = false in this config: the refresh runs with its policy anyway"); }
     cfg.pool_refresh.check(&cfg.rpc).map_err(|e| anyhow::anyhow!(e))?;
-    // politeness to the running segment: a lower CPU priority (the records are read on one core)
-    unsafe { libc::nice(10); }
+    // politeness to the running segment: a lower CPU and I/O priority (the records are read on one core)
+    let mut o = o.clone();
+    o.process = Some(lower_priority());
+    let o = &o;
     struct NoWeb;
     impl Web for NoWeb { fn get(&mut self, _: &str) -> std::result::Result<String, String> { Err("offline (--inputs)".into()) } }
     struct NoChain;
