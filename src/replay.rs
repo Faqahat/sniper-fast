@@ -563,6 +563,58 @@ pub struct Drive {
     /// the replay's recorder did not drain within `BACKPRESSURE_GIVE_UP` (a writer gone): records may be lost
     pub backpressure_gave_up: bool,
     pub wall_ns: u64,
+    /// ---- FT-001: the run's digest points the replay reached, with the replay's digests there (`DigestPlan`); `finished`:
+    /// `Engine::finish` ran at the run's `run_end` point (as the run's did: before its stop sequence)
+    pub points: Vec<DigestAt>,
+    pub finished: bool,
+}
+
+/// ---- FT-001. Where a replay digests: at the run's digest-point records (INPUT 14, `Engine::digest_point`: the end of
+/// its loop, `run_end`, and of its stop sequence, `stop_end`), doing there what the run did there (`finish` at
+/// `run_end`, the executor's `settle_at_stop` at `stop_end`). A recording made before them (FT-001 p1, build 11e25d1) has
+/// only events.jsonl's `engine_digests`, taken by `finish` once the run had handled its last record at `t_engine`: the
+/// replay digests (and finishes) right after its own last record at or before that time (`legacy`), the run's stop
+/// sequence having journaled only later records (its drain reads the clock after `finish`). `on` false: no digest point
+/// (`arbx quote`)
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DigestPlan { pub on: bool, pub legacy: Option<(u64, Value)> }
+
+/// ---- FT-001. Whether `r` is past the digest point of a recording made before INPUT 14: a record after the engine
+/// time its `finish` recorded (`t_engine`; the stop sequence's records are later: it reads the clock after `finish`)
+pub(crate) fn past_digest_point(r: &JRec, t_engine: u64) -> bool { r.t_engine > t_engine }
+
+/// ---- FT-001. A digest point a replay reached: which (`run_end`, `stop_end`), how it was found (`marker`: the run's
+/// INPUT 14 record, at journal `seq`; `inferred_t_engine`: a recording made before the record, at its engine_digests'
+/// `t_engine`), the run's digests there, the replay's (for `run_end` before and after `finish`, as the run's) and the
+/// replay's counters there
+#[derive(Clone, Debug)]
+pub struct DigestAt {
+    pub point: String,
+    pub how: &'static str,
+    pub seq: Option<u64>,
+    pub t_engine: u64,
+    pub run: Value,
+    pub before: Option<engine::Digests>,
+    pub replay: engine::Digests,
+    pub counts: Value,
+}
+
+/// ---- FT-001. The replay at the run's digest point: what the run did there, then the replay's digests (`run_end`:
+/// `finish`, before and after its bookkeeping; `stop_end`: the executor's `settle_at_stop`, then the digests)
+fn at_digest_point(e: &mut Engine, d: &mut Drive, run: Value, how: &'static str, seq: Option<u64>, t_engine: u64) {
+    let point = run["point"].as_str().unwrap_or(engine::DIGEST_RUN_END).to_string();
+    let (before, replay) = if point == engine::DIGEST_STOP_END {
+        if let Some(x) = e.exec.as_mut() { x.settle_at_stop(); }
+        (None, e.digest_point(engine::DIGEST_STOP_END, None))
+    } else if d.finished {
+        // a second run_end (not written by `arbx run`): the state as it is
+        (None, e.digests())
+    } else {
+        d.finished = true;
+        let (b, a) = e.finish();
+        (Some(b), a)
+    };
+    d.points.push(DigestAt { point, how, seq, t_engine, run, before, replay, counts: e.counts_json() });
 }
 
 /// What a pass does around each record (a quote's version, the repricing, `--to-slot`)
@@ -575,8 +627,9 @@ trait Hook {
 
 /// One pass: the boot section builds the engine, then every record is handed to `journal::replay` in order (one at a
 /// time with the decision-point gate records the run wrote while handling it, which `journal::replay` stages ahead of
-/// it; the hooks act between records); `rec` is the replay's recorder (or off)
-fn drive(inp: &Inputs, boot: Boot, sets: &[Set], rec: &Rec, hook: &mut dyn Hook) -> Result<(Engine, EngineInit, Drive)> {
+/// it; the hooks act between records); `rec` is the replay's recorder (or off). FT-001: at the run's digest points
+/// (`plan`) the replay digests and does what the run did there (`at_digest_point`)
+fn drive(inp: &Inputs, boot: Boot, sets: &[Set], rec: &Rec, hook: &mut dyn Hook, plan: &DigestPlan) -> Result<(Engine, EngineInit, Drive)> {
     let t0 = std::time::Instant::now();
     let mut d = Drive { boot_records: boot.records.len() as u64, missing_accounts: boot.missing, gaps: boot.gaps.clone(),
         alts_overridden: sets.iter().any(|x| x.key.starts_with("alts.") || x.key.starts_with("knobs.alts.")), ..Default::default() };
@@ -585,6 +638,9 @@ fn drive(inp: &Inputs, boot: Boot, sets: &[Set], rec: &Rec, hook: &mut dyn Hook)
     let none: HashMap<u64, AcctRecord> = HashMap::default();
     let mut one: HashMap<u64, AcctRecord> = HashMap::default();
     let caps = rec.recorder().map(|r| (r.cfg.queue_core, r.cfg.queue_chain, r.cfg.queue_bulk, r.cfg.queue_journal));
+    // a recording made before the digest-point records: the run's digest point is right before its first record after
+    // the time the run digested at (reached once, unless a record of the run's says where it is)
+    let mut legacy = plan.legacy.clone().filter(|_| plan.on);
     while let Some(r) = jf.next()? {
         d.records += 1;
         if let JBody::Gap { first_lost_seq, n_lost } = r.body {
@@ -592,6 +648,13 @@ fn drive(inp: &Inputs, boot: Boot, sets: &[Set], rec: &Rec, hook: &mut dyn Hook)
             continue;
         }
         if let Some(g) = d.gaps.last_mut() { if g.t_after.is_none() { g.t_after = Some(r.t_engine); } }
+        // ---- FT-001: the run's digest point
+        if let Some(v) = journal::digest_point(&r) {
+            legacy = None;
+            if plan.on { at_digest_point(&mut e, &mut d, v.clone(), "marker", Some(r.seq), r.t_engine); }
+            continue;
+        }
+        if let Some((t, v)) = legacy.take_if(|(t, _)| past_digest_point(&r, *t)) { at_digest_point(&mut e, &mut d, v, "inferred_t_engine", None, t); }
         let aseq = match r.body { JBody::Account { aseq, .. } => Some(aseq), _ => None };
         if !hook.before(&mut e, &r, aseq)? { d.stopped_at = Some((r.seq, r.t_engine)); break; }
         d.t_first.get_or_insert(r.t_engine);
@@ -646,6 +709,8 @@ fn drive(inp: &Inputs, boot: Boot, sets: &[Set], rec: &Rec, hook: &mut dyn Hook)
             }
         }
     }
+    // (a recording whose last record is the one the run digested after: its digest point is the end)
+    if d.stopped_at.is_none() { if let Some((t, v)) = legacy.take() { at_digest_point(&mut e, &mut d, v, "inferred_t_engine", None, t); } }
     if d.stopped_at.is_none() { acc.read_all()?; }
     d.accounts_gaps = acc.gaps.clone();
     d.wall_ns = t0.elapsed().as_nanos() as u64;
@@ -786,24 +851,71 @@ fn not_whole(run: &Path, d: &Drive, replay_dropped: u64, exec: &RunExec, uses: R
 #[derive(Clone, Copy, Debug, Default)]
 struct RecordUse { mismatch: u64, missing: u64, unused: u64 }
 
-/// The run's digests as `Engine::finish` recorded them (events.jsonl `engine_digests`; review WP-09 #6)
-fn run_digests(run: &Path) -> Option<Value> {
-    rec::read_jsonl(run, "events").ok()?.into_iter().filter(|e| e["kind"] == "engine_digests").last().map(|e| e["detail"].clone())
+/// The run's digests as `Engine::finish` and `Engine::digest_point` recorded them (events.jsonl `engine_digests`; review
+/// WP-09 #6), in order
+fn run_digests(run: &Path) -> Vec<Value> {
+    rec::read_jsonl(run, "events").unwrap_or_default().into_iter().filter(|e| e["kind"] == "engine_digests").map(|e| e["detail"].clone()).collect()
 }
 
-/// The digests check: the run's against the replay's, before and after `finish`, when the replay ran to the end
-fn digests_check(run: Option<Value>, before: (u64, u64), after: (u64, u64), d: &Drive, sets: &[Set]) -> Value {
-    let replay = json!({ "before_finish": { "digest": format!("{:016x}", before.0), "decision_digest": format!("{:016x}", before.1) },
-        "digest": format!("{:016x}", after.0), "decision_digest": format!("{:016x}", after.1) });
-    let why_not = if run.is_none() { Some("not recorded (a run before WP-09, or one that ended before Engine::finish)") }
-        else if d.stopped_at.is_some() { Some("the replay stopped early (--to-slot)") }
-        else if !sets.is_empty() { Some("what-if (--set)") }
-        else { None };
-    let same = match (&run, why_not) {
-        (Some(r), None) => Some(["digest", "decision_digest"].iter().all(|k| r["before_finish"][k] == replay["before_finish"][k] && r[k] == replay[k])),
-        _ => None,
-    };
-    json!({ "checked": same.is_some(), "same": same, "not_checked": why_not, "run": run, "replay": replay })
+/// ---- FT-001. Where the replay digests (`DigestPlan`): at the run's digest-point records; for a recording made before
+/// them (no `point` in its engine_digests), after its last record at or before the `t_engine` its `finish` recorded
+pub(crate) fn digest_plan(run_events: &[Value]) -> DigestPlan {
+    let legacy = if run_events.iter().any(|v| v.get("point").is_some()) { None }
+        else { run_events.last().and_then(|v| v["t_engine"].as_u64().map(|t| (t, v.clone()))) };
+    DigestPlan { on: true, legacy }
+}
+
+/// ---- FT-001. The counters of a digest point that differ, run vs replay: `{counter: [run, replay]}` (engine's and
+/// executor's; null: a record written before FT-001 has none)
+fn counts_differ(run: &Value, replay: &Value) -> Value {
+    if !run["counts"].is_object() { return Value::Null; }
+    let mut out = serde_json::Map::new();
+    for (side, prefix) in [("engine", ""), ("exec", "exec.")] {
+        let (a, b) = (run["counts"][side].as_object(), replay[side].as_object());
+        let keys: std::collections::BTreeSet<&String> = a.into_iter().flat_map(|m| m.keys()).chain(b.into_iter().flat_map(|m| m.keys())).collect();
+        for k in keys {
+            let (x, y) = (a.and_then(|m| m.get(k)).cloned().unwrap_or(json!(0)), b.and_then(|m| m.get(k)).cloned().unwrap_or(json!(0)));
+            if x != y { out.insert(format!("{prefix}{k}"), json!([x, y])); }
+        }
+    }
+    Value::Object(out)
+}
+
+/// The digests check (review WP-09 #6; FT-001): at each of the run's digest points the replay reached, the run's state
+/// and decision digests (for `run_end` before and after `finish`) against the replay's taken at the same point of the
+/// journal, with the parts and counters that differ. Not checked (never a difference): a what-if, a replay that stopped
+/// before the point, a run that recorded no digests, a recording whose digest point is unknown (made before the
+/// digest-point records, with no `t_engine` to place it by). `end`: the replay's digests at the end of the journal
+fn digests_check(run_events: &[Value], d: &Drive, end: &engine::Digests, sets: &[Set]) -> Value {
+    let hex = |x: u64| format!("{x:016x}");
+    let same_as = |rec: &Value, mine: &engine::Digests| rec["digest"].as_str() == Some(hex(mine.state).as_str())
+        && rec["decision_digest"].as_str() == Some(hex(mine.decision).as_str());
+    let points: Vec<Value> = d.points.iter().map(|p| {
+        let rb = &p.run["before_finish"];
+        let before_same = p.before.as_ref().filter(|_| rb.is_object()).map(|b| same_as(rb, b));
+        let same = same_as(&p.run, &p.replay) && before_same != Some(false);
+        let mut replay = p.replay.json();
+        if let Some(b) = &p.before { replay["before_finish"] = b.json(); }
+        let mut run = p.run.clone();
+        if let Some(o) = run.as_object_mut() { o.remove("counts"); }
+        json!({ "point": p.point, "how": p.how, "seq": p.seq, "t_engine": p.t_engine, "same": same, "before_finish_same": before_same,
+            "parts_differ": p.replay.parts_differ(&p.run), "before_finish_parts_differ": p.before.as_ref().and_then(|b| b.parts_differ(rb)),
+            "counts_differ": counts_differ(&p.run, &p.counts), "run": run, "replay": replay })
+    }).collect();
+    let why_not = if !sets.is_empty() { Some("what-if (--set)") }
+        else if !points.is_empty() { None }
+        else if d.stopped_at.is_some() { Some("the replay stopped early (--to-slot), before the run's digest point") }
+        else if run_events.is_empty() { Some("not recorded (a run before WP-09, or one that ended before Engine::finish): the digest point is unknown") }
+        else { Some("the digest point is unknown: the run's digest-point record is not in its journal (a recording made before FT-001's record whose \
+            engine_digests has no t_engine, or the record was lost)") };
+    let same = why_not.is_none().then(|| points.iter().all(|p| p["same"] == json!(true)));
+    // review WP-09 #6's fields: the run's `run_end` digests and the replay's there (else the replay's at the end)
+    let run_end = points.iter().find(|p| p["point"] == engine::DIGEST_RUN_END);
+    json!({ "checked": same.is_some(), "same": same, "not_checked": why_not,
+        "point": run_end.map(|p| p["how"].clone()), "points": points,
+        "run": run_end.map(|p| p["run"].clone()).or_else(|| run_events.last().cloned()),
+        "replay": run_end.map_or_else(|| end.json(), |p| p["replay"].clone()),
+        "replay_end": end.json() })
 }
 
 /// Replay a run directory (see the module doc). Writes into `o.out`: the replay's own streams, `replay.json`, and with
@@ -831,13 +943,16 @@ pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
     let fee_rule = if boot.init.builder.is_some() { "tips_by_band" } else { "legacy" };
     let mut hook = MainHook { to_slot: o.to_slot, reprice: want.map(|w| RepriceHook { want: w, sizes: &o.reprice, cfg, cap, seen: 0, out: Vec::new(), fee_rule }) };
     let run_exec = boot.exec.clone();
-    let res = drive(&inp, boot, &o.sets, &rec, &mut hook);
+    // FT-001: the run's digest points (its INPUT 14 records; a recording made before them, its engine_digests' time)
+    let run_events = run_digests(run);
+    let res = drive(&inp, boot, &o.sets, &rec, &mut hook, &digest_plan(&run_events));
     let (mut e, init, d) = match res { Ok(x) => x, Err(err) => { rec.close(); return Err(err); } };
     let uses = RecordUse { mismatch: e.exec.as_ref().map_or(0, |x| x.seen_mismatch), missing: e.exec.as_ref().map_or(0, |x| x.seen_missing),
         unused: if d.stopped_at.is_none() { e.gate_seen.script.len() as u64 } else { 0 } };
-    let before = (e.digest(), e.decision_digest());
-    e.finish();
-    let (digest, decision_digest) = (e.digest(), e.decision_digest());
+    // `finish` ran at the run's `run_end` point (where the run's did, before its stop sequence); else here, at the end
+    if !d.finished { e.finish(); }
+    let end = e.digests();
+    let (digest, decision_digest) = (end.state, end.decision);
     rec.close();
     let rec_stats = rec.stats();
     let dropped: u64 = rec_stats.as_ref().map_or(0, |s| s.dropped.iter().map(|x| x.1).sum::<u64>() + s.io_lost.iter().map(|x| x.1).sum::<u64>());
@@ -845,7 +960,7 @@ pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
     let window = Window { from_slot: o.from_slot, to_slot: o.to_slot, t_cut: d.stopped_at.map(|s| s.1) };
     let losses = not_whole(run, &d, dropped, &run_exec, uses, !o.sets.is_empty());
     let whole = losses.is_empty();
-    let digests = digests_check(run_digests(run), before, (digest, decision_digest), &d, &o.sets);
+    let digests = digests_check(&run_events, &d, &end, &o.sets);
     let mut diff = if o.compare { Some(compare(run, &out, &window, &d, &run_exec, !o.sets.is_empty(), &digests)?) } else { None };
     let differences_ok = diff.as_ref().map_or(true, |x| x["summary"]["differences_ok"] == json!(true));
     let ok = whole && differences_ok;
@@ -1553,7 +1668,7 @@ pub fn quote(run: &Path, config: Option<&Path>, pools: Option<&Path>, reqs: Vec<
     }
     h.reqs = reqs;
     if h.open > 0 {
-        let (e, _, _) = drive(&inp, boot, &[], &Rec::off(), &mut h)?;
+        let (e, _, _) = drive(&inp, boot, &[], &Rec::off(), &mut h, &DigestPlan::default())?;
         // a journal with no input after its boot section: the boot state answers
         h.boot(&e);
     }
@@ -1592,6 +1707,17 @@ pub fn cli_replay(run: &Path, o: &Opts) -> Result<i32> {
     if let Some(c) = s["compare"].as_object().filter(|c| c["executor_replayed"] == json!(true)) {
         println!("  attempts: {} vs {}, {} compared, {} differ, {} missing, {} extra", c["attempts_run"], c["attempts_replay"], c["attempts_compared"], c["attempts_differ"],
             c["attempts_missing_in_replay"], c["attempts_extra_in_replay"]);
+    }
+    // FT-001: the state digests at the run's digest points (where it took them), with the parts that differ
+    let dg = &s["digests"];
+    let at = |p: &Value| format!("{} ({}{})", p["point"].as_str().unwrap_or("?"), p["how"].as_str().unwrap_or("?"), p["seq"].as_u64().map_or(String::new(), |q| format!(" at seq {q}")));
+    let points = dg["points"].as_array().cloned().unwrap_or_default();
+    match (dg["checked"].as_bool(), dg["same"].as_bool()) {
+        (Some(true), Some(true)) => println!("  digests: the run's state and decision digests at {}", points.iter().map(at).collect::<Vec<_>>().join(", ")),
+        (Some(true), _) => for p in points.iter().filter(|p| p["same"] != json!(true)) {
+            println!("  digests DIFFER at {}: parts {} (before finish: {}), counters {}", at(p), p["parts_differ"], p["before_finish_parts_differ"], p["counts_differ"]);
+        },
+        _ => println!("  digests not checked: {}", dg["not_checked"].as_str().unwrap_or("?")),
     }
     if !s["reprice"].is_null() { println!("  reprice: {}", s["reprice"]); }
     println!("  {}", if r.ok { "OK" } else if s["whole"] == json!(false) { "NOT OK: the replay is not whole (see `not_whole` in replay.json)" } else { "DIFFERENCES (see replay-diff.json)" });

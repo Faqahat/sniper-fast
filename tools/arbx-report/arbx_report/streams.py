@@ -481,7 +481,11 @@ INPUT_KINDS = {1: "blockhash_head", 2: "leader_window", 3: "gate", 4: "quarantin
                # WP-04 review #1: how one chunk of an engine RPC read ended (re-read, fork refetch, DLMM arrays)
                11: "fetch",
                # WP-09: what the executor started with (boot section, t_engine 0; the replay's offline executor)
-               12: "exec_init"}
+               12: "exec_init",
+               # WP-07: the ledger's RPC answers (a balance snapshot, a reconciliation's window search)
+               13: "snapshot",
+               # FT-001: the engine's digest points (run_end, stop_end): the state and decision digests where they were taken
+               14: "digest_point"}
 
 #: journal record framing: `u8 kind | u32 body_len | u64 seq | u64 t_engine_ns | body`. body_len counts the body
 #: only (not seq and t_engine_ns). Keep in step with src/rec/journal.rs (WP-03).

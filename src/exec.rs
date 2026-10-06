@@ -2095,71 +2095,99 @@ impl Exec {
     /// and simulation windows, the open and final attempts, its copies' arrivals, the held tokens, the tip rotation, what
     /// the last decision read of the gate. Left out: stage times and latency series (real clock reads), the network-call
     /// scope, the recorder, the LeaderBook, a replay's own bookkeeping (`seen_*`)
-    pub fn digest(&self, x: &mut xxhash_rust::xxh3::Xxh3) {
-        fn u(x: &mut xxhash_rust::xxh3::Xxh3, v: u64) { x.update(&v.to_le_bytes()); }
-        x.update(self.mode.as_str().as_bytes());
-        for v in [self.decisions, self.refusals, self.would_sends, self.sent as u64, self.last_sent_ns, self.landed as u64, self.wins as u64, self.spent, self.reserved,
-            self.fees, self.tips_paid, self.round_trip as u64, self.round_trip_unknown as u64, self.never_left as u64, self.new_atas as u64, self.next_attempt,
-            self.leader_seen.0, self.leader_seen.1] { u(x, v); }
-        x.update(self.stopped.unwrap_or("-").as_bytes());
-        x.update(self.refused.as_deref().unwrap_or("-").as_bytes());
-        x.update(&[self.gate_seen.map_or(9, |g| g as u8)]);
-        let mut counts: Vec<(&&str, &u64)> = self.counts.iter().collect();
-        counts.sort();
-        for (k, v) in counts { x.update(k.as_bytes()); u(x, *v); }
-        let mut inflight: Vec<(&InflightKey, &InflightEntry)> = self.inflight.map.iter().collect();
-        inflight.sort_by_key(|e| (e.0.buy, e.0.sell, e.0.mint));
-        u(x, inflight.len() as u64);
-        for (k, e) in inflight {
-            x.update(&k.buy); x.update(&k.sell); x.update(&k.mint);
-            for v in [e.sv, e.target_slot, e.attempt, e.t] { u(x, v); }
-            x.update(&e.leader.unwrap_or([0; 32]));
-        }
-        let (units, last) = self.big.state();
-        x.update(&units.to_le_bytes());
-        u(x, last.unwrap_or(u64::MAX));
-        let mut cool: Vec<(&Pk, &(u32, u64, u32))> = self.mint_cool.iter().collect();
-        cool.sort();
-        for (k, c) in cool { x.update(k); for v in [c.0 as u64, c.1, c.2 as u64] { u(x, v); } }
-        for w in [&self.would_recent, &self.sim_recent] { u(x, w.len() as u64); for t in w { u(x, *t); } }
-        if let Some(d) = &self.dry { u(x, d.sim_recent.len() as u64); for t in &d.sim_recent { u(x, *t); } }
-        u(x, self.open.len() as u64);
-        for (a, o) in &self.open {
-            u(x, *a);
-            x.update(&o.sig);
-            x.update(&o.mint);
-            for v in [o.decision, o.opp, o.size, o.expected as u64, o.tip, o.min_profit, o.worst, o.bh_slot, o.bh_height.unwrap_or(u64::MAX), o.target_slot, o.t_engine,
-                o.t_sent.unwrap_or(u64::MAX), o.checks.len() as u64, o.status_hit.as_ref().map_or(u64::MAX, |s| s.slot)] { u(x, v); }
-            x.update(&[o.held_addition as u8, o.fired as u8, o.took_big as u8, o.expiry_asked as u8, o.cooled as u8]);
-            x.update(o.bundle.as_deref().unwrap_or("-").as_bytes());
-            x.update(o.send_error.as_deref().unwrap_or("-").as_bytes());
-            for (t, l) in &o.checks_due { u(x, *t); x.update(l.as_bytes()); }
-        }
-        let mut finals: Vec<(&u64, &Final)> = self.finals.iter().collect();
-        finals.sort_by_key(|f| *f.0);
-        u(x, finals.len() as u64);
-        for (a, f) in finals {
-            u(x, *a);
-            x.update(f.sig58.as_bytes());
-            x.update(&f.mint);
-            x.update(f.src.as_bytes());
-            x.update(&[f.landed as u8, f.ok as u8, f.held_addition as u8, f.wallet_seen as u8, f.cooled as u8, f.refused as u8]);
-            let c = &f.counted;
-            for v in [f.tip, f.size, c.landed as u64, c.win as u64, c.tip, c.fee, c.failed_fee, c.round_trip as u64, c.rt_unknown as u64, c.atas as u64] { u(x, v); }
-        }
-        let mut by_sig: Vec<(&[u8; 64], &u64)> = self.by_sig.iter().collect();
-        by_sig.sort();
-        for (s, a) in by_sig { x.update(s); u(x, *a); }
-        let mut seen: Vec<(&[u8; 64], &(u64, u16, Vec<(u16, u64)>))> = self.seen.iter().collect();
-        seen.sort_by_key(|s| *s.0);
-        for (s, (t, f, by)) in seen { x.update(s); u(x, *t); u(x, *f as u64); for (f, t) in by { u(x, *f as u64); u(x, *t); } }
-        let mut held: Vec<&Pk> = self.held.iter().collect();
-        held.sort();
-        u(x, held.len() as u64);
-        for k in held { x.update(k); }
-        u(x, self.tips.as_ref().map_or(u64::MAX, |p| p.cursor as u64));
+    pub fn digest(&self, x: &mut dyn crate::engine::Fold) { self.digest_walk(&mut |_, feed| feed(&mut *x)); }
+
+    /// ---- FT-001. `digest`'s parts in order, each handed to `f` with what it folds (`Engine::digest_walk` folds them
+    /// into the state digest and names them in the digest points): `exec.totals`, `exec.counts`, `exec.inflight`,
+    /// `exec.big`, `exec.cooling`, `exec.windows`, `exec.open`, `exec.finals`, `exec.by_sig`, `exec.seen`, `exec.held`,
+    /// `exec.tips`, `exec.uva`
+    pub fn digest_walk(&self, f: &mut dyn FnMut(&'static str, &dyn Fn(&mut dyn crate::engine::Fold))) {
+        fn u(x: &mut dyn crate::engine::Fold, v: u64) { x.update(&v.to_le_bytes()); }
+        f("exec.totals", &|x| {
+            x.update(self.mode.as_str().as_bytes());
+            for v in [self.decisions, self.refusals, self.would_sends, self.sent as u64, self.last_sent_ns, self.landed as u64, self.wins as u64, self.spent, self.reserved,
+                self.fees, self.tips_paid, self.round_trip as u64, self.round_trip_unknown as u64, self.never_left as u64, self.new_atas as u64, self.next_attempt,
+                self.leader_seen.0, self.leader_seen.1] { u(x, v); }
+            x.update(self.stopped.unwrap_or("-").as_bytes());
+            x.update(self.refused.as_deref().unwrap_or("-").as_bytes());
+            x.update(&[self.gate_seen.map_or(9, |g| g as u8)]);
+        });
+        f("exec.counts", &|x| {
+            let mut counts: Vec<(&&str, &u64)> = self.counts.iter().collect();
+            counts.sort();
+            for (k, v) in counts { x.update(k.as_bytes()); u(x, *v); }
+        });
+        f("exec.inflight", &|x| {
+            let mut inflight: Vec<(&InflightKey, &InflightEntry)> = self.inflight.map.iter().collect();
+            inflight.sort_by_key(|e| (e.0.buy, e.0.sell, e.0.mint));
+            u(x, inflight.len() as u64);
+            for (k, e) in inflight {
+                x.update(&k.buy); x.update(&k.sell); x.update(&k.mint);
+                for v in [e.sv, e.target_slot, e.attempt, e.t] { u(x, v); }
+                x.update(&e.leader.unwrap_or([0; 32]));
+            }
+        });
+        f("exec.big", &|x| {
+            let (units, last) = self.big.state();
+            x.update(&units.to_le_bytes());
+            u(x, last.unwrap_or(u64::MAX));
+        });
+        f("exec.cooling", &|x| {
+            let mut cool: Vec<(&Pk, &(u32, u64, u32))> = self.mint_cool.iter().collect();
+            cool.sort();
+            for (k, c) in cool { x.update(k); for v in [c.0 as u64, c.1, c.2 as u64] { u(x, v); } }
+        });
+        f("exec.windows", &|x| {
+            for w in [&self.would_recent, &self.sim_recent] { u(x, w.len() as u64); for t in w { u(x, *t); } }
+            if let Some(d) = &self.dry { u(x, d.sim_recent.len() as u64); for t in &d.sim_recent { u(x, *t); } }
+        });
+        f("exec.open", &|x| {
+            u(x, self.open.len() as u64);
+            for (a, o) in &self.open {
+                u(x, *a);
+                x.update(&o.sig);
+                x.update(&o.mint);
+                for v in [o.decision, o.opp, o.size, o.expected as u64, o.tip, o.min_profit, o.worst, o.bh_slot, o.bh_height.unwrap_or(u64::MAX), o.target_slot, o.t_engine,
+                    o.t_sent.unwrap_or(u64::MAX), o.checks.len() as u64, o.status_hit.as_ref().map_or(u64::MAX, |s| s.slot)] { u(x, v); }
+                x.update(&[o.held_addition as u8, o.fired as u8, o.took_big as u8, o.expiry_asked as u8, o.cooled as u8]);
+                x.update(o.bundle.as_deref().unwrap_or("-").as_bytes());
+                x.update(o.send_error.as_deref().unwrap_or("-").as_bytes());
+                for (t, l) in &o.checks_due { u(x, *t); x.update(l.as_bytes()); }
+            }
+        });
+        f("exec.finals", &|x| {
+            let mut finals: Vec<(&u64, &Final)> = self.finals.iter().collect();
+            finals.sort_by_key(|f| *f.0);
+            u(x, finals.len() as u64);
+            for (a, f) in finals {
+                u(x, *a);
+                x.update(f.sig58.as_bytes());
+                x.update(&f.mint);
+                x.update(f.src.as_bytes());
+                x.update(&[f.landed as u8, f.ok as u8, f.held_addition as u8, f.wallet_seen as u8, f.cooled as u8, f.refused as u8]);
+                let c = &f.counted;
+                for v in [f.tip, f.size, c.landed as u64, c.win as u64, c.tip, c.fee, c.failed_fee, c.round_trip as u64, c.rt_unknown as u64, c.atas as u64] { u(x, v); }
+            }
+        });
+        f("exec.by_sig", &|x| {
+            let mut by_sig: Vec<(&[u8; 64], &u64)> = self.by_sig.iter().collect();
+            by_sig.sort();
+            for (s, a) in by_sig { x.update(s); u(x, *a); }
+        });
+        f("exec.seen", &|x| {
+            let mut seen: Vec<(&[u8; 64], &(u64, u16, Vec<(u16, u64)>))> = self.seen.iter().collect();
+            seen.sort_by_key(|s| *s.0);
+            for (s, (t, f, by)) in seen { x.update(s); u(x, *t); u(x, *f as u64); for (f, t) in by { u(x, *f as u64); u(x, *t); } }
+        });
+        f("exec.held", &|x| {
+            let mut held: Vec<&Pk> = self.held.iter().collect();
+            held.sort();
+            u(x, held.len() as u64);
+            for k in held { x.update(k); }
+        });
+        f("exec.tips", &|x| u(x, self.tips.as_ref().map_or(u64::MAX, |p| p.cursor as u64)));
         // WP-06: the boot read of the user volume accumulator
-        x.update(&[self.uva.map_or(2, |b| b as u8)]);
+        f("exec.uva", &|x| x.update(&[self.uva.map_or(2, |b| b as u8)]));
     }
 }
 

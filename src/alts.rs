@@ -411,7 +411,7 @@ impl<W> Alts<W> {
 
     /// a digest of the state (replay determinism). A table is hashed at 256 slots whatever its stored length (the digest
     /// of a run recorded before FT-000's compact tables is the same); with a cap, the LRU clocks and the eviction count too
-    pub fn digest(&self, x: &mut xxhash_rust::xxh3::Xxh3) {
+    pub fn digest(&self, x: &mut dyn crate::engine::Fold) {
         let mut t: Vec<(&Pk, &Vec<Option<Pk>>)> = self.tables.iter().collect();
         t.sort_by(|a, b| a.0.cmp(b.0));
         for (k, v) in t {

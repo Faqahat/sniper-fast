@@ -336,7 +336,7 @@ impl CommitTracker {
     }
 
     /// a digest of the tracker's state (replay determinism)
-    pub fn digest(&self, x: &mut xxhash_rust::xxh3::Xxh3) {
+    pub fn digest(&self, x: &mut dyn crate::engine::Fold) {
         for g in self.pending.values() {
             x.update(&g.id.to_le_bytes());
             x.update(&g.txn);

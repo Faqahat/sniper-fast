@@ -1813,32 +1813,14 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         engine::RunEnd::Stopped => {}
     }
     let reason = sess.stopper.info().map_or("error", |i| i.reason.as_str());
-    // WP-07: the stop's drain (`--drain-s`; the gate is closed, nothing new is sent): the attempts still open settle from
-    // the wallet stream, the block engine's results and their expiry checks. Then the stop snapshot (at most 20 s), 5 s
-    // for the records of what landed just before it, and the final reconciliation. Whatever is still open gets its
-    // `unsettled` outcome line (WP-05) and stop.json lists it (the next segment's ledger joins its landing by signature).
-    // No executor: null (review M11)
-    let in_flight = eng.exec.as_ref().map(|x| x.open_attempts().len());
-    let t_drain = now_ns();
-    if in_flight.is_some_and(|n| n > 0) { say(&format!("stop: waiting at most {} s for {} open attempts to settle", a.drain_s, in_flight.unwrap_or(0))); }
-    let mut drain_say = |l: &str| say(l);
-    let settled = eng.drain(&rx, t_drain + a.drain_s * 1_000_000_000, &|e| e.exec.as_ref().is_none_or(|x| x.open_attempts().is_empty()), &mut drain_say);
-    let drain_ms = now_ns().saturating_sub(t_drain) as f64 / 1e6;
-    if eng.ledger.is_some() {
-        eng.ledger_stop_snapshot();
-        if !eng.drain(&rx, now_ns() + 20_000_000_000, &|e| e.ledger_stop_snapshot_done(), &mut drain_say) { say("stop: no stop snapshot within 20 s"); }
-        // the stop's reconciliation (review WP-07 #7): decided at once when it passes; otherwise its window is searched and
-        // decided once more within `recon_grace_s` while the records of what landed just before the stop come in; still
-        // unexplained, it is written `final: false` and the next segment decides it again
-        let grace = eng.ledger_final_begin();
-        if !eng.drain(&rx, now_ns() + grace, &|e| e.ledger_final_settled(), &mut drain_say) { say("stop: the stop's reconciliation is decided without more records"); }
-        eng.ledger_final();
-    }
-    let open = eng.exec.as_mut().map(|x| x.settle_at_stop());
+    // WP-07: the stop's drain (`--drain-s`), the stop snapshot and the final reconciliation, then `unsettled` for what is
+    // still open (`Engine::stop_sequence`; FT-001: it journals its `stop_end` digest point last). No executor: null
+    // (review M11)
+    let st = eng.stop_sequence(&rx, a.drain_s * 1_000_000_000, &mut |l: &str| say(l));
     eng.write_final_status(rx.len(), reason);
-    *sess.drain.lock().unwrap() = control::Drain { in_flight_at_stop: in_flight, drained: open.as_ref().map(|o| o.is_empty()),
-        unsettled: open.unwrap_or_default(), drain_ms: in_flight.map(|_| drain_ms), final_status_seq: eng.status_lines.checked_sub(1) };
-    if !settled { say(&format!("stop: {} attempts still open after {:.0} ms: unsettled", sess.drain.lock().unwrap().unsettled.len(), drain_ms)); }
+    *sess.drain.lock().unwrap() = control::Drain { in_flight_at_stop: st.in_flight, drained: st.open.as_ref().map(|o| o.is_empty()),
+        unsettled: st.open.clone().unwrap_or_default(), drain_ms: st.in_flight.map(|_| st.drain_ms), final_status_seq: eng.status_lines.checked_sub(1) };
+    if !st.settled { say(&format!("stop: {} attempts still open after {:.0} ms: unsettled", sess.drain.lock().unwrap().unsettled.len(), st.drain_ms)); }
     for l in rpc_stats.summary() { say(&format!("rpc final {l}")); }
     for l in rpc_stats.reasons(5) { say(&format!("rpc failure {l}")); }
     // WP-03b: every client's requests by role and provider (resources.jsonl `rpc` has them every 10 s)
@@ -2114,6 +2096,21 @@ mod tests {
         let at = |needle: &str| m.find(needle).unwrap_or_else(|| panic!("{needle} not in campaign::main"));
         for w in ["daemonize(&dir.join(\"supervisor.log\"))", "CampaignAlerts::start(a, true)", "c.run(&mut runner, &RealClock)", "alerts.finish()"].windows(2) {
             assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]);
+        }
+    }
+
+    /// FT-001: `run` stops as the scenario tests stop a run: the loop (`finish`, the `run_end` digest point), then
+    /// `Engine::stop_sequence` (the drain, the stop snapshot, the final reconciliation, `settle_at_stop`, the `stop_end`
+    /// digest point), then the final status line; each once
+    #[test]
+    fn run_stops_through_the_engines_stop_sequence() {
+        let src = include_str!("main.rs");
+        let body = &src[src.find("\nfn run(a: &RunArgs").expect("run")..];
+        let body = &body[..body.find("\n#[cfg(test)]").unwrap_or(body.len())];
+        let at = |needle: &str| body.find(needle).unwrap_or_else(|| panic!("{needle} not in run()"));
+        for w in ["eng.run(&rx", "eng.stop_sequence(&rx", "eng.write_final_status("].windows(2) { assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]); }
+        for n in ["eng.stop_sequence(", "eng.write_final_status(", "settle_at_stop", "eng.drain(", "digest_point("] {
+            assert_eq!(body.matches(n).count(), usize::from(n == "eng.stop_sequence(" || n == "eng.write_final_status("), "{n} in run(): the stop sequence is the engine's");
         }
     }
 

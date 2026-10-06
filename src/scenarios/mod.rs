@@ -20,6 +20,7 @@
 //!   projection per scenario (pools by fixture name). WP-16 changes the maths: regenerate them with
 //!   `ARBX_BLESS=1 cargo test --release --lib scenarios` and review the diff. The structural expectations (what is never
 //!   priced, which reasons, which counters) are asserted in the code and do not change with the maths.
+mod digest_points;
 mod exec_replay;
 mod harness;
 mod s1_torn_reads;
