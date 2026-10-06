@@ -328,3 +328,32 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
 - **The $500 trigger:** net positive over 48 h of canary.
 - **Still open:** the exec-coverage gate (≥ 99%) needs more Haan capacity or a second provider (OD-1), or an explicit owner waiver.
 - **Owner, 2026-10-06 (later):** the Stage 0 exit canary (FT-005) runs **12 h instead of 24 h**. PLAN §6's "24 h live" gate items and the trade-success criteria are measured over the 12 h run. The $500 trigger (net positive over 48 h of canary) is unchanged.
+
+## WP-21: Venue coverage (owner request, 2026-10-06: "add DFlow, Jupiter for venue coverage")
+
+**Why:** the rival dossiers (docs/research/rival-GLiCiNEn.md, and the En3NPq8o sample) show the gaps we miss sit on venues we don't trade.
+- GLiCiNEn: 79% of its pools are outside our list, on 12 venues.
+- En3NPq8o: routes through Jupiter v6 and DFlow into Raydium CLMM, Tessera V, Manifest and BisonFi.
+
+**Constraint:** the deployed Nexus v2 (8K8uyQDt) CPIs only its 12-program ALLOWLIST (program/nexus-arb-v2/src/lib.rs:670), which does not include Jupiter v6 (JUP6Lkb…) or DFlow (DF1ow4ts…).
+- An aggregator instruction placed outside our program is not covered by `check_profit`, so a landed trade could lose. That breaks invariant 2, so it is not allowed.
+
+**Phase A (no deploy, no rent): native venues the deployed program already allows.**
+- Venues, in order of priority: **Raydium CLMM** (CAMMCzo5…), **Orca Whirlpool** (whirLbMi…), then the CLMM forks **PancakeSwap v3** (HpNfyc2S…) and **Byreal** (REALQqNE…), then the launchpad curves **pump.fun** (6EF8rrec…), **Meteora DBC** (dbcij3LW…) and **Raydium LaunchLab** (LanMV9sA…).
+- Per venue:
+  - exact maths in arbx-sizing, validated against the real program binaries in program/venue-harness (exactness + adversarial, 0 mismatches, 0 false refusals, as WP-16);
+  - decoders and registry boot;
+  - state following tick arrays (like DLMM bin arrays) in the WP-04 consistency sets;
+  - leg builders with account lists;
+  - CU table entries;
+  - pooldisco's candidates for those venues fed into the seed list.
+- **Acceptance:**
+  - the harness passes on real pools;
+  - an FT shadow segment prices the new venues with 0 phantom/poisoned decisions;
+  - the dry run (as FT-002) shows the bundles verify and simulate without account or CU errors.
+
+**Phase B (needs an owner decision: a program upgrade): Jupiter v6 and DFlow as legs.**
+- Add both to the allowlist, by upgrading Nexus v2 (the owner's upgrade authority) or through arbx-exec at the $500 stage. The profit guard then covers aggregator legs like any other.
+- An off-chain quote path is required (Jupiter/DFlow quote API, or self-hosted routing). Quotes are journaled as inputs so the replay stays exact.
+- Expected value: broad coverage of long-tail venues. The cost is quote latency (tens to hundreds of ms), so it suits slower long-tail gaps, not contested ones.
+- **Gate:** Phase A measured first. Phase B's design and the latency budget go to the owner before any upgrade.
