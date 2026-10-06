@@ -161,3 +161,15 @@ B tests: one-sided, α 0.05, 80% power (two-sided: +27%).
 **Sources:** PL `docs/PLAN.md`; A `docs/PLAN-ADDENDUM.md`; M `docs/MEASUREMENT.md`; FT `docs/field-tests/`. In `docs/research/`: R `redesign-final.md`, W `wallet-synthesis.md`, C `cmp2-shadow-comparison.md`, RS `rival-synthesis.md`, P `PATTERNS.md`, S `sol-trade-sdk-audit.md`, D `docs-review-synthesis.md`, RC `res-compete.md`. R05 `docs/reviews/WP-05-review.md`; DESIGN `program/arbx-sizing/DESIGN.md`; RPC: the review's public-RPC reads; F1–F20: the review.
 
 **Glossary.** *Bundle:* our transaction sent via Jito; it lands whole or not at all, so a miss is free. *Would-fail:* Jito's simulation rejects it. *Shred:* a piece of a block in flight. *BAM:* a Jito block-building variant (≈38% of slots). *Closer (R4):* the first transaction, in block order, after which our gap no longer pays.
+
+## Inputs from the GLiCiNEn rival dossier (2026-10-06, docs/research/rival-GLiCiNEn.md)
+- **X4 tip share:** add a 0.15–0.20 arm for gaps under ~50k lamports gross. GLiCiNEn lands about 1,360 arbitrages an hour paying about 15% of gross. At 15%, FT-004's 12 wins would have kept about 62,700 more lamports, if they still landed.
+- **Size arm:** go well below 0.05 SOL. Its median trade is 0.00065 SOL against our median send of 0.056 SOL.
+- **Coverage:**
+  - 79% of its 438 pools in 218 trades are outside our list;
+  - 58% of its routes have 3–4 legs, and 17% start and end in USDC;
+  - it uses venues we lack (Whirlpool, Raydium CLMM, Tessera V).
+
+  Discovery (WP-14), multi-leg and USDC routes, and new venues are the levers.
+- **BAM (X5):** our BAM-targeted sends landed 2 of 170 (1.2%) against 10 of 245 (4.1%) on Jito leaders. Its plain bundles land on BAM in proportion to BAM's slots. Investigate our BAM submission path.
+- **Direct competitors on our current gaps** are others: En3NPq8o, GgGap6ti, rLsi2DPw and MriyaNN8 moved first after our FT-004 triggers 22, 18, 14 and 8 times, against GLiCiNEn's 3.
