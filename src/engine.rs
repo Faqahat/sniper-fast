@@ -342,6 +342,10 @@ pub struct Engine {
     leads: Vec<Series>,
     fh: rec::health::FeedHealth,
     pub exec: Option<crate::exec::Exec>,
+    /// WP-07: the run's ledger (src/ledger.rs: entries, balance snapshots, reconciliation) and its supervisor's equity
+    /// stops; fed by INPUT 7 `wallet_tx` and INPUT 13 `snapshot`, its timers at most once a second (`ledger_tick`)
+    pub ledger: Option<crate::ledger::Ledger>,
+    last_ledger_tick: u64,
     /// per trigger signer: (triggers that moved the pool or landed, triggers that failed or never showed). Loaded once
     /// (its sha256 recorded), never written back to the shared file (I-5): `signer_delta` is this segment's part, and
     /// `signer_stats` = `signer_base` (as loaded, shared with the recorder's writer) + `signer_delta`
@@ -397,7 +401,7 @@ pub struct Engine {
     activity: crate::crowding::Activity,
     /// what the last journaled decision-point record said (gate mode, leader kind, token valid, recorder healthy)
     /// (WP-09: and the gate's reason)
-    seen_journaled: Option<(crate::control::GateMode, String, crate::leaders::LeaderKind, bool, bool)>,
+    seen_journaled: Option<(crate::control::GateMode, String, crate::leaders::LeaderKind, bool, bool, crate::ledger::MoneyView)>,
     /// ---- WP-09: the exec_init record was journaled (`journal_exec_init`)
     exec_init_journaled: bool,
 }
@@ -783,7 +787,8 @@ impl Engine {
             queue_hwm: 0,
             t_start: t0, sp: StatusPrev { t: t0, ..Default::default() }, exec_prev: Default::default(), feed_counters: Vec::new(), state_counters: None, leads: Vec::new(),
             fh: rec::health::FeedHealth::new(t0),
-            exec: None, signer_base: Arc::new(signer_stats.clone()), signer_stats, signer_delta: HashMap::default(), signer_stats_sha256, signer_stats_out: None,
+            exec: None, ledger: None, last_ledger_tick: 0, signer_base: Arc::new(signer_stats.clone()), signer_stats, signer_delta: HashMap::default(), signer_stats_sha256,
+            signer_stats_out: None,
             trig_pending: HashMap::default(),
             caps_pending: Vec::new(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(),
             moves_seen: HashSet::default(), poh: HashMap::default(), poh_order: VecDeque::new(),
@@ -992,8 +997,10 @@ impl Engine {
     /// - after an input, every 10 s while the queue never empties: housekeeping (and the commit timers if it is empty).
     pub fn run(&mut self, rx: &Receiver<Event>, stop: &std::sync::atomic::AtomicBool, until_ns: u64, mut status: impl FnMut(&str)) -> RunEnd {
         self.rec.set_engine_tid(crate::runtime::gettid());
-        // the executor's sends are gated on this engine's health (warm-up, state availability)
-        if let Some(x) = self.exec.as_mut() { x.set_health(self.flags.clone()); }
+        // the executor's sends are gated on this engine's health (warm-up, state availability) and, with a ledger, on the
+        // start equity being known (WP-07: the equity floor needs it)
+        let with_ledger = self.ledger.is_some();
+        if let Some(x) = self.exec.as_mut() { x.set_health(self.flags.clone()); x.require_equity(with_ledger); }
         self.journal_init();
         self.journal_exec_init();
         let end = loop {
@@ -1134,7 +1141,19 @@ impl Engine {
                 // wallet's transactions (an attempt landed) and the block engine's results for our bundles
                 InputKind::BlockhashHead => self.sendview.on_head(&data),
                 InputKind::LeaderWindow => self.sendview.on_window(&data),
-                InputKind::WalletTx => { let (poh, t, global) = (&self.poh, self.t_now, self.io.is_some()); if let Some(x) = self.exec.as_mut() { x.on_wallet_tx(&data, t, &|s| poh_of(poh, s, global)); } }
+                InputKind::WalletTx => {
+                    // WP-07: the ledger first (its line goes into the attempt's outcome), then the executor's settlement; a
+                    // refused bundle the record shows landed is raised at once (review WP-07 #6)
+                    let data = self.ledger_wallet_tx(data);
+                    let (poh, t, global) = (&self.poh, self.t_now, self.io.is_some());
+                    let refused = match self.exec.as_mut() { Some(x) => { x.on_wallet_tx(&data, t, &|s| poh_of(poh, s, global)); x.take_refused_landed() } None => Vec::new() };
+                    if !refused.is_empty() { if let Some(l) = self.ledger.as_mut() { l.on_refused_landed(t, refused); } }
+                    self.ledger_tick(self.t_now, true);
+                }
+                InputKind::Snapshot => {
+                    if let Some(mut l) = self.ledger.take() { l.on_input(&data, self.t_now, &|m, a| self.sol_value(m, a)); self.ledger = Some(l); }
+                    self.ledger_tick(self.t_now, true);
+                }
                 InputKind::InflightRelease => { let t = self.t_now; if let Some(x) = self.exec.as_mut() { x.on_release(&data, t); } }
                 // gate records (the 100 ms watch: status only), quarantines (Stage 1), settlements (`Event::Settled`)
                 _ => {}
@@ -1513,12 +1532,125 @@ impl Engine {
         self.write_status_line(queue, Some(stop_reason));
     }
 
+    // ---------------------------------------------------------------- WP-07: the ledger
+
+    /// INPUT 7 into the ledger (valued at the engine's pools); returns the input with the ledger's line for the attempt's
+    /// outcome (`ledger_line`)
+    fn ledger_wallet_tx(&mut self, data: Arc<Value>) -> Arc<Value> {
+        let Some(mut l) = self.ledger.take() else { return data };
+        let rt = self.exec.as_ref().and_then(|x| x.round_trip_of(data["attempt"].as_u64(), data["sig"].as_str().unwrap_or(""), &data["prog_events"]));
+        let e = l.on_wallet_tx(&data, self.t_now, &|m, a| self.sol_value(m, a), rt);
+        self.ledger = Some(l);
+        match e {
+            Some(e) => { let mut d = (*data).clone(); d["ledger_line"] = e.outcome_json(); Arc::new(d) }
+            None => data,
+        }
+    }
+
+    /// The ledger's timers (snapshots, reconciliations, the stop rules), at most once a second unless `now_too`; the
+    /// executor then reads what the ledger knows (the start equity, the bankroll, the rent)
+    fn ledger_tick(&mut self, t: u64, now_too: bool) {
+        if !now_too && t.saturating_sub(self.last_ledger_tick) < 1_000_000_000 { return; }
+        let Some(mut l) = self.ledger.take() else { return };
+        self.last_ledger_tick = t;
+        // what the money view's freshness reads (review WP-07 #3): the executor's oldest landing still without its wallet
+        // record, the chain-fetch service's wallet give-ups (a run's only)
+        let tin = crate::ledger::TickIn { provisional_since: self.exec.as_ref().and_then(|x| x.oldest_provisional_ns()),
+            wallet_gave_up: if self.io.is_some() { crate::chainfetch::wallet_gave_up_total() } else { None } };
+        let v = l.tick_with(t, &|| self.exec.as_ref().map(|x| x.landings()).unwrap_or_default(), tin);
+        self.ledger = Some(l);
+        if let Some(x) = self.exec.as_mut() { x.set_money(v); }
+    }
+
+    /// The run is stopping (WP-07): ask for the stop snapshot (taken at the next ledger tick)
+    pub fn ledger_stop_snapshot(&mut self) {
+        if let Some(l) = self.ledger.as_mut() { l.want_stop_snapshot(); }
+        let t = self.t_now.max(now_ns());
+        self.ledger_tick(t, true);
+    }
+
+    /// whether the stop snapshot came (or failed, or there is no ledger)
+    pub fn ledger_stop_snapshot_done(&self) -> bool { self.ledger.as_ref().is_none_or(|l| l.stop_snapshot_done()) }
+
+    /// The stop's reconciliation begins (after the stop snapshot): every pending window is due now; one that does not
+    /// pass is searched and decided once more `recon_grace_s` later, while the drain keeps handling the records
+    /// (review WP-07 #7). Returns how long to wait at most (ns)
+    pub fn ledger_final_begin(&mut self) -> u64 {
+        let t = self.t_now.max(now_ns());
+        let Some(l) = self.ledger.as_mut() else { return 0 };
+        l.final_begin(t);
+        let grace = l.cfg.recon_grace_s * 1_000_000_000;
+        self.ledger_tick(t, true);
+        grace + 1_000_000_000
+    }
+
+    /// whether the stop's reconciliation has nothing left to wait for (or there is no ledger)
+    pub fn ledger_final_settled(&self) -> bool { self.ledger.as_ref().is_none_or(|l| l.final_settled()) }
+
+    /// The final reconciliation (the end of the stop): what is still pending is decided now (a residual still unexplained
+    /// is written `final: false`: the next segment decides it again)
+    pub fn ledger_final(&mut self) {
+        let t = self.t_now.max(now_ns());
+        let Some(mut l) = self.ledger.take() else { return };
+        l.final_recon(t, &|| self.exec.as_ref().map(|x| x.landings()).unwrap_or_default());
+        self.ledger = Some(l);
+    }
+
+    /// What `amount` of `mint` is worth in WSOL now: the best quote for selling it through a WSOL pool of the registry,
+    /// on committed state (the ledger's valuation, `[ledger] mid_source = "pools"`). None: no pool quotes it
+    pub fn sol_value(&self, mint: &Pk, amount: u128) -> Option<(u64, String)> {
+        if *mint == *WSOL { return Some((amount.min(u64::MAX as u128) as u64, "wsol".into())); }
+        let amount = u64::try_from(amount).ok()?;
+        let pools = self.reg.pairs.get(&crate::pools::pair_key(mint, &WSOL))?;
+        let (now, slot) = self.chain_now();
+        let clk = quote::clock(slot, now);
+        let mut best: Option<(u64, Pk)> = None;
+        for &i in pools {
+            let m = &self.reg.pools[i];
+            let skip = self.skip_arrays(m);
+            // selling `mint` (spending the pool's token 0 when it is `mint`) as the venue executes a third party's swap
+            let Ok(leg) = self.leg_of(m, m.t0 == *mint, clk, &skip, Use::Third) else { continue };
+            if let Ok(q) = leg.walk(amount) {
+                if best.is_none_or(|b| q.out > b.0) { best = Some((q.out, m.pool)); }
+            }
+        }
+        best.map(|(out, pool)| (out, b58(&pool)))
+    }
+
+    /// WP-07 (the stop's drain): after the engine loop ended, keep handling what settles the open attempts (the wallet's
+    /// records, the block engine's results, the statuses, the ledger's snapshot) until `done` holds or `until_ns`; nothing
+    /// is priced (account and transaction updates are left out: the SendGate is closed). True when `done` held
+    pub fn drain(&mut self, rx: &Receiver<Event>, until_ns: u64, done: &dyn Fn(&Engine) -> bool, status: &mut dyn FnMut(&str)) -> bool {
+        self.drain_on(rx, until_ns, done, status, &now_ns)
+    }
+
+    /// `drain` on the clock `clock` (tests: a virtual one); a wait for the next event lasts at most 50 ms of real time
+    pub fn drain_on(&mut self, rx: &Receiver<Event>, until_ns: u64, done: &dyn Fn(&Engine) -> bool, status: &mut dyn FnMut(&str), clock: &dyn Fn() -> u64) -> bool {
+        loop {
+            if done(self) { return true; }
+            let now = clock();
+            if now >= until_ns { return false; }
+            match rx.recv_timeout(std::time::Duration::from_nanos((until_ns - now).min(50_000_000))) {
+                Ok(ev) => {
+                    let keep = matches!(ev, Event::Input { .. } | Event::Settled(_) | Event::Slot { .. } | Event::BlockMeta(_) | Event::Status { .. });
+                    if keep { let t = clock(); self.step(ev, t, status); }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return done(self),
+            }
+            // housekeeping (journaled as a TIMER: the executor's expiries and statuses, the ledger's timers, status lines)
+            let t = clock();
+            if t.saturating_sub(self.last_hk_t) >= 100_000_000 { self.queue_now = rx.len(); self.timers_at(t, TIMER_HK, status); }
+        }
+    }
+
     fn housekeeping(&mut self, now: u64, status: &mut dyn FnMut(&str)) {
         self.last_hk_t = now;
         // WP-05: the executor's timers (in-flight expiry, the status cross-checks, the blockhash expiries) and the
         // crowding map's window
         let tip = self.tip_slot();
         if let Some(x) = self.exec.as_mut() { x.tick(now, &self.sendview, tip); }
+        self.ledger_tick(now, false);
         self.activity.expire(now);
         // finish opportunities whose watch window ended
         let due: Vec<u64> = self.opps.values().filter(|o| o.deadline <= now).map(|o| o.id).collect();
@@ -1617,7 +1749,12 @@ impl Engine {
             let x = v - p.counts.get(k).copied().unwrap_or(0);
             (x > 0).then(|| (k.to_string(), json!(x)))
         }).collect();
-        let (exec, money) = match self.exec.as_ref() { Some(x) => x.status_v2(&mut self.exec_prev), None => (Value::Null, Value::Null) };
+        let (exec, mut money) = match self.exec.as_ref() { Some(x) => x.status_v2(&mut self.exec_prev), None => (Value::Null, Value::Null) };
+        // WP-07: money is the ledger's (chain truth); the executor's own counters are `money.bot`, diagnostics
+        if let Some(l) = self.ledger.as_mut() {
+            let prov = self.exec.as_ref().map_or(0, |x| x.provisional_failed_fees());
+            money = l.money_json(self.t_now, money, prov);
+        }
         let st = self.rec.stats();
         let recorder = st.as_ref().map(|st| {
             let dropped_total: serde_json::Map<String, Value> = st.dropped.iter().filter(|(_, n)| *n > 0).map(|(k, n)| (k.clone(), json!(n))).collect();
@@ -2068,10 +2205,13 @@ impl Engine {
         let token_ok = !matches!(inputs.token, crate::exec::TokenSeen::Stale);
         // ---- WP-09: the gate's reason is part of what is journaled (a reason that changes while the mode stays, a pause
         // then a lag-SLO shadow, changes every refusal's `gate_shadow:<reason>`)
-        let seen = (inputs.gate, inputs.gate_reason.clone(), inputs.leader.kind, token_ok, inputs.recorder_ok);
+        // WP-07 (review WP-07 #1): and the ledger's money view the executor decides with (the bankroll cap, the rent cap,
+        // equity_unknown / equity_stale): the replay has no ledger, its offline executor applies the run's
+        let seen = (inputs.gate, inputs.gate_reason.clone(), inputs.leader.kind, token_ok, inputs.recorder_ok, x.money());
         if self.seen_journaled.as_ref() != Some(&seen) {
             let mut g = x.gate_json();
             g["mode"] = json!(seen.0.as_str());
+            g["money"] = seen.5.json();
             // the reason the check read (the gate may have moved on since)
             g["reason"] = json!(Some(&seen.1).filter(|r| !r.is_empty()));
             g["src"] = json!("decision");
@@ -2084,7 +2224,8 @@ impl Engine {
             self.seen_journaled = Some(seen.clone());
         }
         let cap = x.size_cap();
-        let d = match self.route_in(id, size.min(cap)) {
+        // WP-07: a bankroll that allows nothing (no WSOL, or the liquid SOL under the reserve) is refused as such, not quoted
+        let d = if cap == 0 { self.count("send_bankroll_empty"); crate::exec::Decided::reject("bankroll_empty") } else { match self.route_in(id, size.min(cap)) {
             Some(r) => {
                 self.decisions = fold(self.decisions, &[b"exec", &id.to_le_bytes(), &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes(), &[seen.0 as u8]]);
                 let trig = r.trig;
@@ -2096,7 +2237,7 @@ impl Engine {
                 d
             }
             None => { self.count("send_unquotable"); crate::exec::Decided::reject("build_error:unquotable") }
-        };
+        } };
         self.decisions = fold(self.decisions, &[b"exec_verdict", &id.to_le_bytes(), d.reason.as_bytes(), &[d.sent.map_or(2, |b| b as u8)]]);
         if let Some(sz) = sim {
             match self.route_in(id, sz) {

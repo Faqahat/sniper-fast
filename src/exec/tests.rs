@@ -58,9 +58,13 @@ fn damm(n: u8, t0: Pk) -> PoolMeta {
         t0_prog: *crate::pda::TOKEN_PROGRAM, t1_prog: *crate::pda::TOKEN_PROGRAM, extra: vec![], flag: false }
 }
 
-/// a round trip of 1 SOL through DAMM v2 pools `buy` and `sell` expecting `expected`, priced on state version `sv`
+/// the test routes' size: 0.05 SOL, within every size cap the tests set (WP-07 review #12: the executor refuses a route
+/// above its size cap, `size_cap`)
+const SIZE: u64 = 50_000_000;
+
+/// a round trip of `SIZE` through DAMM v2 pools `buy` and `sell` expecting `expected`, priced on state version `sv`
 fn route(buy: u8, sell: PoolMeta, expected: u64, sv: u64) -> RouteIn {
-    let size = 1_000_000_000u64;
+    let size = SIZE;
     RouteIn { opp: buy as u64, trig: [3u8; 64], trig_feed: None, slot: 99, st: [100, 100, 200, 300, now_ns()], buy: damm(buy, MINT), sell,
         buy_data: vec![], sell_data: vec![], buy_source: "ours", sell_source: "ours", mint: MINT, size, mid: 1_000, back: size + expected, spent: size,
         gross_at_opp: expected as i64, net_at_opp: expected as i64, cu: 100_000,
@@ -429,7 +433,7 @@ async fn a_live_decision_sends_one_bundle_copy_with_no_network_call() {
     // the route instruction as signed: the size and min_profit = the 35,000 tip + the base fee + 1
     let all = tx.resolve(|t| r.x.alt_lists.get(t).cloned()).unwrap();
     let seen = route_of(&tx, &all, &r.x.program).unwrap();
-    assert_eq!((seen.amount_in, seen.min_profit, seen.authority, seen.legs.len()), (1_000_000_000, 40_001, r.x.payer, 2));
+    assert_eq!((seen.amount_in, seen.min_profit, seen.authority, seen.legs.len()), (SIZE, 40_001, r.x.payer, 2));
     assert_eq!((seen.legs[0].program, seen.legs[1].program), (Venue::DammV2.program(), Venue::DammV2.program()));
     assert_eq!(send::tip_paid(&tx, &tip_accounts()), 35_000, "70% of the 50,000 edge");
     r.x.on_settled(Settled::Fired { attempt, fired }, now_ns(), &|_| None);
@@ -461,11 +465,11 @@ async fn a_live_decision_sends_one_bundle_copy_with_no_network_call() {
 
 fn c_sig(raw: &[u8]) -> Option<String> { send::first_signature(raw) }
 
-/// what a live rig's bundle on the test route (pools [1; 32] and [2; 32], 1 SOL, DAMM v2 legs, signed by the wallet)
+/// what a live rig's bundle on the test route (pools [1; 32] and [2; 32], `SIZE`, DAMM v2 legs, signed by the wallet)
 /// must be, with its tip and on-chain min_profit
 fn live_want(x: &Exec, tip: Option<(Pk, u64)>, min_profit: u64) -> VerifyWant<'_> {
     VerifyWant { payer: x.payer, signer: x.payer, blockhash: BH, tip, tips: tip_accounts(), program: x.program, pools: [[1; 32], [2; 32]], cu_limit: 100_000,
-        alts: &x.alt_lists, amount_in: 1_000_000_000, min_profit, margin_floor: 1, quote: build::ata_of(&x.payer, &WSOL, &crate::pda::TOKEN_PROGRAM),
+        alts: &x.alt_lists, amount_in: SIZE, min_profit, margin_floor: 1, quote: build::ata_of(&x.payer, &WSOL, &crate::pda::TOKEN_PROGRAM),
         mid: build::ata_of(&x.payer, &MINT, &crate::pda::TOKEN_PROGRAM), leg_programs: [Venue::DammV2.program(), Venue::DammV2.program()] }
 }
 
@@ -670,7 +674,7 @@ async fn settlement_from_the_chain() {
     // attempt 0 lands (the wallet stream), with the route program's events
     let events = |back: u64| json!([{ "kind": "leg", "leg": 0 }, { "kind": "out", "leg": 0, "amount": 77 }, { "kind": "out", "leg": 1, "amount": back }]);
     r.x.on_wallet_tx(&json!({ "sig": sigs[0], "attempt": 0, "slot": 101, "idx": 12, "ok": true, "err": null, "fee": 5_000, "cu_consumed": 87_000,
-        "prog_events": events(1_000_049_000) }), now_ns(), &|_| None);
+        "prog_events": events(SIZE + 49_000) }), now_ns(), &|_| None);
     // a cross-check of attempt 1 (+2 s): nothing yet
     r.x.on_settled(Settled::Statuses { why: "check", at: vec![(1, "+2s")], result: Ok(vec![None]), t_ns: t }, t, &|_| None);
     // the expiry check: attempt 1 landed (the wallet stream missed it), attempt 2 did not
@@ -688,16 +692,16 @@ async fn settlement_from_the_chain() {
         "fee": 5_000 }), now_ns(), &|_| None);
     // attempt 1's wallet record comes after its final: it amends the fee, CU and events, and its round trip is counted
     r.x.on_wallet_tx(&json!({ "sig": sigs[1], "attempt": 1, "slot": 102, "idx": 7, "ok": true, "err": null, "fee": 5_000, "cu_consumed": 91_000,
-        "prog_events": events(1_000_021_000) }), now_ns(), &|_| None);
+        "prog_events": events(SIZE + 21_000) }), now_ns(), &|_| None);
     // a second copy of a wallet record changes nothing
     r.x.on_wallet_tx(&json!({ "sig": sigs[1], "attempt": 1, "slot": 102, "idx": 7, "ok": true, "err": null, "fee": 5_000, "cu_consumed": 91_000,
-        "prog_events": events(1_000_021_000) }), now_ns(), &|_| None);
+        "prog_events": events(SIZE + 21_000) }), now_ns(), &|_| None);
     let o = r.lines("outcomes");
     let by = |a: u64| o.iter().filter(|l| l["attempt"].as_u64() == Some(a)).cloned().collect::<Vec<_>>();
     let o0 = &by(0)[0];
     assert_eq!((o0["final"].as_str(), o0["final_src"].as_str(), o0["landed"]["slot"].as_u64(), o0["fee_lamports"].as_u64(), o0["cu_consumed"].as_u64()),
         (Some("landed_ok"), Some("wallet"), Some(101), Some(5_000), Some(87_000)));
-    assert_eq!((o0["delivered"].clone(), o0["round_trip_on_chain"].as_i64(), o0["landed"]["leader_kind"].as_str()), (json!([77, 1_000_049_000u64]), Some(49_000), Some("jito")));
+    assert_eq!((o0["delivered"].clone(), o0["round_trip_on_chain"].as_i64(), o0["landed"]["leader_kind"].as_str()), (json!([77, SIZE + 49_000]), Some(49_000), Some("jito")));
     assert_eq!(o0["verdicts"].as_array().map(|v| v.iter().map(|x| x["outcome"].as_str().unwrap().to_string()).collect::<Vec<_>>()),
         Some(vec!["accepted".to_string(), "processed".into()]), "every result, in order");
     assert_eq!((o0["processed"]["index"].as_u64(), o0["accepted"]["validator"].as_str(), o0["bundle"].as_str()), (Some(4), Some(b58(&LJ).as_str()), Some("b0")));
@@ -1196,7 +1200,7 @@ async fn a_send_without_an_answer_stays_open() {
     assert_eq!(r.decide(route(1, damm(2, MINT), 50_000, 1), 100, t + 1).reason, "inflight_same_state", "its entry holds");
     // attempt 0 had arrived after all: the wallet stream records it
     r.x.on_wallet_tx(&json!({ "sig": sigs[0], "attempt": 0, "slot": 101, "idx": 2, "ok": true, "err": null, "fee": 5_000, "cu_consumed": 80_000,
-        "prog_events": [{ "kind": "out", "leg": 0, "amount": 9 }, { "kind": "out", "leg": 1, "amount": 1_000_020_000u64 }] }), now_ns(), &|_| None);
+        "prog_events": [{ "kind": "out", "leg": 0, "amount": 9 }, { "kind": "out", "leg": 1, "amount": SIZE + 20_000 }] }), now_ns(), &|_| None);
     // attempt 1 did not: its blockhash expires, the expiry check finds nothing
     r.x.on_settled(Settled::Statuses { why: "expiry", at: vec![(1, "expiry")], result: Ok(vec![None]), t_ns: t }, t, &|_| None);
     let o = r.lines("outcomes");
@@ -1231,7 +1235,7 @@ async fn a_dry_run_catches_a_wrong_min_profit() {
     let mp = good["min_profit_onchain"].as_u64().unwrap();
     assert_eq!(mp, 31_499 + 5_000 + 1, "the tip (70% of the 45,000 edge) + the base fee + the margin floor");
     // the builder signs min_profit 1
-    r.x.fault_route = Some((1_000_000_000, 1));
+    r.x.fault_route = Some((SIZE, 1));
     assert_eq!(r.decide(route(3, damm(4, MINT), 50_000, 1), 100, t + S).reason, "would_send");
     let bad = r.lines("attempts")[1].clone();
     assert_eq!((bad["min_profit_onchain"].as_u64(), bad["dry_run"]["checks_ok"].as_bool()), (Some(mp), Some(false)), "the decision's value is recorded, the signed one is not it");
@@ -1438,4 +1442,271 @@ fn an_offline_executor_reads_the_runs_records() {
     x.stage_seen(6, 7, &rec4);
     x.stage_seen(8, 8, &json!({ "mode": null, "src": "decision", "opp": 8, "executor": false }));
     assert_eq!(x.seen_mismatch, 3);
+}
+
+// ------------------------------------------------------------------------------------------------ WP-07
+
+fn money(liquid: u64, wsol: u64, rent: u64) -> crate::ledger::MoneyView {
+    crate::ledger::MoneyView { equity_known: true, stale: false, liquid: Some(liquid), wsol: Some(wsol), native: Some(liquid - wsol), rent_recoverable: Some(rent) }
+}
+
+/// WP-07, the WP-05 hand-off (provisional money): a landing the expiry check found first asks the chain-fetch service
+/// for its record (`note_landed`) and is counted provisionally (the base fee, an unknown round trip); its record settles
+/// it (the fee and round trip from the chain, the ledger's line in the amend), and the ledger's view of the executor
+/// (`landings`) follows. A refused bundle keeps its final for the reconciliation. And a run with a ledger sends nothing
+/// before the start equity is known (`equity_unknown`)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wp07_provisional_money_is_settled_by_its_record() {
+    let mut r = rig("wp07-prov", Mode::Live, "").await;
+    let t = now_ns();
+    r.x.require_equity(true);
+    assert_eq!(r.decide(route(10, damm(11, MINT), 50_000, 1), 100, t).reason, "equity_unknown", "no balance snapshot yet");
+    assert_eq!(r.n("reject_equity_unknown"), 1);
+    // review WP-07 #3: a stale money view sends nothing either
+    r.x.set_money(crate::ledger::MoneyView { stale: true, ..money(414_500_000, 191_500_000, 4_078_560) });
+    assert_eq!(r.decide(route(10, damm(11, MINT), 50_000, 1), 100, t).reason, "equity_stale");
+    assert_eq!(r.n("reject_equity_stale"), 1);
+    r.x.set_money(money(414_500_000, 191_500_000, 4_078_560));
+    assert_eq!(r.decide(route(10, damm(11, MINT), 50_000, 1), 100, t).reason, "sent");
+    let Settled::Fired { attempt, fired } = r.settled().await else { panic!("a fire result") };
+    let sig = fired.copies[0].sig.clone().unwrap();
+    r.x.on_settled(Settled::Fired { attempt, fired }, now_ns(), &|_| None);
+    // the expiry check finds it landed before its wallet record: provisional, and its record is asked for
+    let (shared, notes) = crate::chainfetch::Shared::new(crate::rpc::Registry::global());
+    let hit = SigStatus { slot: 102, err: None, confirmation: Some("confirmed".into()) };
+    crate::chainfetch::with_test_service(shared, || r.x.on_settled(Settled::Statuses { why: "expiry", at: vec![(attempt, "expiry")], result: Ok(vec![Some(hit)]), t_ns: t }, t, &|_| None));
+    match notes.try_recv() {
+        Ok(crate::chainfetch::Note::Landed { sig: s, slot, attempt: a, .. }) => assert_eq!((bs58::encode(s).into_string(), slot, a), (sig.clone(), Some(102), Some(attempt))),
+        other => panic!("the record is asked for: {:?}", other.map(|_| ())),
+    }
+    let l = r.x.landings();
+    assert_eq!((l[0].landed, l[0].wallet_seen, l[0].src, l[0].fee, l[0].rt_unknown, l[0].fin), (true, false, "statuses", 5_000, true, "landed_ok"));
+    assert!(l[0].provisional());
+    // its record settles it: the fee and round trip as the chain says, the ledger's line in the amend
+    let events = json!([{ "kind": "out", "leg": 0, "amount": 77 }, { "kind": "out", "leg": 1, "amount": SIZE + 49_000 }]);
+    assert_eq!(r.x.round_trip_of(Some(attempt), &sig, &events), Some(49_000), "the ledger's check of a win");
+    r.x.on_wallet_tx(&json!({ "sig": sig, "attempt": attempt, "slot": 102, "idx": 7, "ok": true, "err": null, "fee": 6_000, "cu_consumed": 90_000, "prog_events": events,
+        "ledger_line": { "trade_net": 11_501, "fee": 6_000, "tip": 31_499 } }), now_ns(), &|_| None);
+    let l = r.x.landings();
+    assert_eq!((l[0].wallet_seen, l[0].src, l[0].fee, l[0].tip, l[0].round_trip, l[0].rt_unknown), (true, "wallet", 6_000, 31_499, 49_000, false));
+    let o = r.lines("outcomes");
+    assert_eq!((o[1]["amend"].as_bool(), o[1]["amends"].as_str(), o[1]["ledger"]["trade_net"].as_i64()), (Some(true), Some("statuses"), Some(11_501)));
+    assert!(o[0]["ledger"].is_null(), "no record yet at the final line");
+    // a failed landing found first by the expiry check: its base fee is provisional failed fees until its record
+    assert_eq!(r.decide(route(12, damm(13, MINT), 50_000, 1), 100, t + 1).reason, "sent");
+    let Settled::Fired { attempt: a2, fired } = r.settled().await else { panic!("a fire result") };
+    r.x.on_settled(Settled::Fired { attempt: a2, fired }, now_ns(), &|_| None);
+    let fail = SigStatus { slot: 103, err: Some(json!({ "InstructionError": [2, { "Custom": 1314390018u64 }] })), confirmation: Some("confirmed".into()) };
+    r.x.on_settled(Settled::Statuses { why: "expiry", at: vec![(a2, "expiry")], result: Ok(vec![Some(fail)]), t_ns: t }, t, &|_| None);
+    assert_eq!(r.x.provisional_failed_fees(), 5_000);
+    // a refused bundle: its final stays `not_landed_refused` (the reconciliation confirms it never lands)
+    assert_eq!(r.decide(route(14, damm(15, MINT), 50_000, 1), 100, t + 2).reason, "sent");
+    let Settled::Fired { attempt: a3, fired: mut f } = r.settled().await else { panic!("a fire result") };
+    f.copies[0].ok = false;
+    f.copies[0].t_ack = 1;
+    f.copies[0].reply = Some("refused: invalid argument".into());
+    r.x.on_settled(Settled::Fired { attempt: a3, fired: f }, now_ns(), &|_| None);
+    let l = r.x.landings();
+    assert_eq!(l.iter().find(|x| x.attempt == a3).map(|x| (x.fin, x.landed)), Some(("not_landed_refused", false)));
+}
+
+/// WP-07 (go-live gate): the bankroll caps a trade at `bankroll_share` x the liquid SOL + WSOL − the reserve and at the
+/// WSOL, within the size cap; nothing while the ledger has no balances. The rent cap stops the held set from growing
+/// (a route that would create a token account) while the recoverable rent is near `rent_cap_sol`. A canary `count` of 0
+/// is no attempt cap
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wp07_bankroll_rent_cap_and_canary_count() {
+    let mut r = rig("wp07-bank", Mode::Live, "[live]\nmax_size_sol = 0.2\nbankroll_share = 0.85\nbankroll_reserve_sol = 0.03\n[supervisor]\nrent_cap_sol = 0.006\n").await;
+    assert_eq!((r.x.size_cap(), r.x.bankroll_cap()), (200_000_000, None), "no balances yet: the configured cap (a run with a ledger refuses equity_unknown)");
+    r.x.set_money(money(414_500_000, 191_500_000, 0));
+    assert_eq!(r.x.size_cap(), 191_500_000, "frz on 2026-10-05: its WSOL (the bankroll allows 0.32 SOL, the canary cap 0.2)");
+    r.x.set_money(money(100_000_000, 90_000_000, 0));
+    assert_eq!((r.x.size_cap(), r.x.bankroll_cap()), (55_000_000, Some(55_000_000)), "85% of 0.1 SOL − 0.03");
+    // review WP-07 #12: the executor itself refuses a route sized above its cap, whoever sized it
+    let mut big = route(40, damm(41, MINT), 50_000, 1);
+    (big.size, big.back, big.spent) = (60_000_000, 60_050_000, 60_000_000);
+    assert_eq!(r.decide(big, 100, now_ns()).reason, "size_cap", "a route above the bankroll's 55M");
+    assert_eq!(r.n("reject_size_cap"), 1);
+    r.x.set_money(money(30_000_000, 30_000_000, 0));
+    assert_eq!(r.x.size_cap(), 0, "the reserve takes it all: the engine refuses bankroll_empty");
+    r.x.set_money(money(1_000_000_000, 0, 0));
+    assert_eq!(r.x.size_cap(), 0, "no WSOL to spend");
+    r.x.set_money(money(1_000_000_000, 900_000_000, 0));
+    assert_eq!(r.x.size_cap(), 200_000_000, "the size cap");
+    // the rent cap: a route through a token the wallet holds no account for would create one
+    let mut rt = route(20, damm(21, M2), 50_000, 1);
+    rt.buy = damm(20, M2);
+    rt.mint = M2;
+    r.x.set_money(money(1_000_000_000, 900_000_000, 4_078_560));
+    assert_eq!(r.decide(rt.clone(), 100, now_ns()).reason, "rent_cap", "4.08M + a new account's 2.1M is over 6M");
+    r.x.set_money(money(1_000_000_000, 900_000_000, 2_039_280));
+    assert_eq!(r.decide(rt, 100, now_ns()).reason, "sent", "under the cap");
+    // a canary with count = 0 is not capped by count
+    let mut c = rig("wp07-canary", Mode::Canary, "[canary]\nenabled = true\ncount = 0\nevery_ms = 1\nsize_sol = 0.2\n").await;
+    let t = now_ns();
+    for k in 0..3u64 {
+        let n = 30 + 2 * k as u8;
+        assert_eq!(c.decide(route(n, damm(n + 1, MINT), 50_000, k), 100, t + k * 10_000_000).reason, "sent", "{k}");
+    }
+}
+
+/// PLAN WP-07 acceptance ("drain logic under a virtual clock"): at a stop the engine keeps handling what settles the
+/// open attempts (their wallet records, the block engine's results, the expiry checks) and leaves out what would price
+/// (account updates), until none is open or the drain's time is up on the clock it is given
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wp07_the_stop_drain_on_a_virtual_clock() {
+    let mut r = rig("wp07-drain", Mode::Live, "[send_policy]\nbig_band_max_per_sec = 1000\n").await;
+    let (mut e, a, _b) = amm_engine();
+    e.set_rec(r.rec.clone());
+    let mut x = std::mem::replace(&mut r.x, idle_exec());
+    x.set_gate(SendGate::new());
+    x.set_health(e.health_flags());
+    e.exec = Some(x);
+    let mut t = now_ns();
+    amm_start(&mut e, &mut t);
+    amm_move(&mut e, &a, 0, 1_030, &mut t);
+    let sent = e.exec.as_ref().unwrap().landings();
+    assert_eq!((sent.len(), sent[0].fin), (1, "open"), "one attempt in flight at the stop");
+    // the virtual clock: 5 s pass at every reading
+    let vt = std::cell::Cell::new(t);
+    let clock = || { vt.set(vt.get() + 5 * S); vt.get() };
+    let open_none = |e: &crate::engine::Engine| e.exec.as_ref().is_none_or(|x| x.open_attempts().is_empty());
+    let mut status = |_: &str| {};
+    let (tx, rx) = crossbeam_channel::unbounded::<Event>();
+    // nothing comes: the drain gives up when its 60 s are up on the virtual clock (a few real milliseconds)
+    let t_real = std::time::Instant::now();
+    assert!(!e.drain_on(&rx, vt.get() + 60 * S, &open_none, &mut status, &clock));
+    assert!(vt.get() >= t + 60 * S && t_real.elapsed() < std::time::Duration::from_secs(5), "{:?}", t_real.elapsed());
+    assert_eq!(e.exec.as_ref().unwrap().open_attempts().len(), 1);
+    // an account update (left out: nothing is priced) and then the attempt's wallet record: it settles, the drain ends
+    let before = e.store.get(&a.vault1).map(|x| x.data.to_vec());
+    tx.send(Event::Account { slot: 101, pubkey: a.vault1, owner: [3; 32], lamports: 1, data: amm_vault(2_000 * 1_000_000_000), t: vt.get(), txn: Some([77; 64]),
+        write_version: vt.get(), is_startup: false, src: 0, aseq: 0, bank_id: None }).unwrap();
+    tx.send(Event::Input { kind: InputKind::WalletTx, data: Arc::new(json!({ "sig": sent[0].sig, "slot": 101, "idx": 3, "ok": true, "err": null, "fee": 5_000,
+        "attempt": sent[0].attempt, "found_by": ["account_update"], "prog_events": null })) }).unwrap();
+    assert!(e.drain_on(&rx, vt.get() + 60 * S, &open_none, &mut status, &clock));
+    assert_eq!(e.store.get(&a.vault1).map(|x| x.data.to_vec()), before, "the account update was left out");
+    let o = r.lines("outcomes");
+    assert_eq!((o.len(), o[0]["final"].as_str(), o[0]["final_src"].as_str()), (1, Some("landed_ok"), Some("wallet")), "{o:?}");
+    assert!(e.exec.as_mut().unwrap().settle_at_stop().is_empty(), "nothing left unsettled");
+}
+
+/// Review WP-07 #6, in the order the real system produces: a bundle the block engine refused (final `not_landed_refused`)
+/// whose wallet record comes all the same, to the ledger first and then to the executor (`Engine::step`'s order). The
+/// executor keeps its first final (`refused`), says so in the amend line (`refused_then_landed`, `first_final`) and hands
+/// it over once (`take_refused_landed`); the reconciliation flags it. Through the engine, such a record puts the gate in
+/// shadow at once (`reconcile_miss`) with a Critical notice
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wp07_a_refused_bundle_that_lands_is_flagged() {
+    let mut r = rig("wp07-refused", Mode::Live, "").await;
+    let t = now_ns();
+    r.x.set_money(money(414_500_000, 191_500_000, 4_078_560));
+    assert_eq!(r.decide(route(14, damm(15, MINT), 50_000, 14), 100, t).reason, "sent");
+    let Settled::Fired { attempt: a3, fired: mut f } = r.settled().await else { panic!("a fire result") };
+    let sig = f.copies[0].sig.clone().unwrap();
+    f.copies[0].ok = false;
+    f.copies[0].t_ack = 1;
+    f.copies[0].reply = Some("refused: invalid argument".into());
+    r.x.on_settled(Settled::Fired { attempt: a3, fired: f }, now_ns(), &|_| None);
+    assert_eq!(r.x.landings().iter().find(|x| x.attempt == a3).map(|x| (x.fin, x.refused)), Some(("not_landed_refused", true)));
+    // it lands anyway: its record to the ledger, then to the executor
+    let mut ledger = crate::ledger::Ledger::new(Default::default(), Default::default(), r.x.payer(), Rec::off(), "rv");
+    let raw = crate::ledger::Raw { kind: "route".into(), ok: true, payer: true, wallet_sol: -36_499, wsol: 49_000, fee: 5_000, tip: 31_499, ..Default::default() };
+    let events = json!([{ "kind": "out", "leg": 0, "amount": 77 }, { "kind": "out", "leg": 1, "amount": SIZE + 49_000 }]);
+    let d = json!({ "sig": sig, "slot": 120, "idx": 3, "ok": true, "err": null, "fee": 5_000, "attempt": a3, "prog_events": events, "ledger": raw.json() });
+    ledger.on_wallet_tx(&d, now_ns(), &crate::ledger::no_prices, None);
+    r.x.on_wallet_tx(&d, now_ns(), &|_| None);
+    assert_eq!(r.x.take_refused_landed().len(), 1);
+    assert!(r.x.take_refused_landed().is_empty(), "handed over once");
+    assert_eq!(r.x.landings().iter().find(|x| x.attempt == a3).map(|x| (x.fin, x.refused, x.landed)), Some(("landed_ok", true, true)), "the first final is kept");
+    let (line, ok) = crate::ledger::exec_recon(&ledger.entries, &r.x.landings(), &Default::default(), 10_000);
+    assert!(!ok && line["refused_landed"][0]["sig"] == json!(sig), "a refused bundle that landed is flagged: {line}");
+    let o = r.lines("outcomes");
+    let amend = o.iter().find(|l| l["amend"] == json!(true)).unwrap();
+    assert_eq!((amend["refused_then_landed"].as_bool(), amend["first_final"].as_str()), (Some(true), Some("not_landed_refused")));
+    assert_eq!(r.n("refused_then_landed"), 1);
+    // through the engine: another refused bundle whose record comes as INPUT 7 puts the gate in shadow at once
+    assert_eq!(r.decide(route(20, damm(21, MINT), 50_000, 20), 100, t + 1).reason, "sent");
+    let Settled::Fired { attempt: a4, fired: mut f } = r.settled().await else { panic!("a fire result") };
+    let sig4 = f.copies[0].sig.clone().unwrap();
+    f.copies[0].ok = false;
+    f.copies[0].t_ack = 1;
+    f.copies[0].reply = Some("refused".into());
+    r.x.on_settled(Settled::Fired { attempt: a4, fired: f }, now_ns(), &|_| None);
+    let (mut e, _a, _b) = amm_engine();
+    e.set_rec(r.rec.clone());
+    let sess = crate::control::Session::new();
+    let mut x = std::mem::replace(&mut r.x, idle_exec());
+    x.set_gate(sess.gate.clone());
+    let payer = x.payer();
+    e.exec = Some(x);
+    let mut l = crate::ledger::Ledger::new(Default::default(), Default::default(), payer, r.rec.clone(), "rv-engine");
+    l.bind(sess.gate.clone(), sess.stopper.clone());
+    e.ledger = Some(l);
+    let d4 = json!({ "sig": sig4, "slot": 130, "idx": 1, "ok": false, "err": { "InstructionError": [2, { "Custom": 6001 }] }, "fee": 5_000, "attempt": a4,
+        "ledger": crate::ledger::Raw { kind: "route".into(), ok: false, payer: true, wallet_sol: -5_000, fee: 5_000, ..Default::default() }.json() });
+    let mut status = |_: &str| {};
+    let (_, notes) = crate::notify::capture(|| e.step(Event::Input { kind: InputKind::WalletTx, data: Arc::new(d4) }, now_ns(), &mut status));
+    assert_eq!((sess.gate.reason().as_str(), sess.gate.sticky()), ("reconcile_miss", true), "at once, for the rest of the segment");
+    assert!(notes.iter().any(|n| n.kind == "recon_miss" && n.level == crate::notify::Level::Critical), "{notes:?}");
+}
+
+/// Review WP-07 #2 (mutant M1), through the run loop (`Engine::run`, as `arbx run` drives it): a live executor with a
+/// ledger (`Ledger::for_run`, as `run()` assembles it, the config's 5,000,000 allotment) sends nothing before the first
+/// balance snapshot (`equity_unknown`: the floor cannot be armed yet); after it, a route is sent; a wallet record whose
+/// loss passes the floor puts the gate in shadow, asks the run to stop (`equity_floor`, exit 20) and ends the loop
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wp07_the_run_loop_arms_the_equity_stops() {
+    let extra = "[send_policy]\nbig_band_max_per_sec = 1000\n[supervisor]\ntest_budget_lamports = 5000000\n";
+    let mut r = rig("wp07-arm", Mode::Live, extra).await;
+    let sess = crate::control::Session::new();
+    let (mut e, a, b) = amm_engine();
+    e.set_rec(r.rec.clone());
+    let payer = r.x.payer();
+    let mut x = std::mem::replace(&mut r.x, idle_exec());
+    x.set_gate(sess.gate.clone());
+    e.exec = Some(x);
+    e.gate = Some(sess.gate.clone());
+    let cfg = test_cfg(&r.dir, extra);
+    e.ledger = Some(crate::ledger::Ledger::for_run(&cfg, payer, r.rec.clone(), "wp07-arm", true, sess.gate.clone(), sess.stopper.clone(), Default::default(), None, None));
+    let (tx, rx) = crossbeam_channel::unbounded::<Event>();
+    let (done_tx, done_rx) = crossbeam_channel::bounded::<()>(1);
+    let feeder = std::thread::spawn(move || {
+        let pause = || std::thread::sleep(std::time::Duration::from_millis(40));
+        let t = now_ns();
+        tx.send(Event::Slot { slot: 100, status: 0, t, parent: Some(99), dead_error: None, bank_id: None }).unwrap();
+        tx.send(Event::Input { kind: InputKind::BlockhashHead, data: Arc::new(json!({ "hash": b58(&BH), "slot": 99, "height": 89, "src": "slotidx",
+            "commitment": "confirmed", "t_ns": t })) }).unwrap();
+        tx.send(Event::Input { kind: InputKind::LeaderWindow, data: Arc::new(window_json()) }).unwrap();
+        pause();
+        let mv = |m: &PoolMeta, n: u8, sol: u64| {
+            for (k, data) in [(m.vault1, amm_vault(sol * 1_000_000_000)), (m.vault0, amm_vault(1_000_000_000_000_000 - n as u64))] {
+                let t = now_ns();
+                tx.send(Event::Account { slot: 100, pubkey: k, owner: [3; 32], lamports: 1, data, t, txn: Some([n + 50; 64]), write_version: t, is_startup: false,
+                    src: 0, aseq: 0, bank_id: None }).unwrap();
+            }
+        };
+        // a decision before any balance snapshot, then the start snapshot, then a decision with it
+        mv(&a, 0, 1_030);
+        pause();
+        tx.send(Event::Input { kind: InputKind::Snapshot, data: Arc::new(crate::ledger::test_snapshot_answer(&payer, 90, 300_000_000, 200_000_000, 0, "start")) }).unwrap();
+        pause();
+        mv(&b, 1, 1_060);
+        pause();
+        // a route landing of ours that lost 6,000,000: past the floor (start less 5,000,000)
+        let raw = crate::ledger::Raw { kind: "route".into(), ok: false, payer: true, wallet_sol: -6_000_000, fee: 6_000_000, ..Default::default() };
+        tx.send(Event::Input { kind: InputKind::WalletTx, data: Arc::new(json!({ "sig": bs58::encode([9u8; 64]).into_string(), "slot": 101, "idx": 1, "ok": false,
+            "err": { "InstructionError": [2, { "Custom": 6001 }] }, "fee": 6_000_000, "attempt": null, "ledger": raw.json() })) }).unwrap();
+        let _ = done_rx.recv_timeout(std::time::Duration::from_secs(10));
+    });
+    let stop = sess.stopper.flag();
+    let end = e.run(&rx, &stop, now_ns() + 8_000_000_000, |_| {});
+    let _ = done_tx.send(());
+    feeder.join().unwrap();
+    assert_eq!(end, crate::engine::RunEnd::Stopped, "the floor stopped the loop");
+    assert_eq!(sess.stopper.info().map(|i| (i.reason, i.reason.exit_code())), Some((crate::control::StopReason::EquityFloor, 20)));
+    assert_eq!(sess.gate.mode(), GateMode::Stopped);
+    let d: Vec<Value> = r.lines("decisions").into_iter().filter(|l| l["opp"].is_u64()).collect();
+    assert_eq!(d.iter().map(|l| l["reason"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>(), ["equity_unknown", "sent"], "{d:?}");
+    assert_eq!(r.got.lock().unwrap().len(), 1, "one bundle left, after the snapshot");
 }

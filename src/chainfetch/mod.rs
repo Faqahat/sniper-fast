@@ -75,6 +75,10 @@ pub enum Note {
     Ours { attempt: u64, sigs: Vec<[u8; 64]>, accounts: Vec<Pk>, target_slot: Option<u64>, t: u64 },
     /// a Jito `processed` result for a transaction of ours
     JitoProcessed { sig: [u8; 64], slot: Option<u64>, t: u64 },
+    /// WP-07: a signature of ours known to have landed whose record the wallet service may not have fetched: the
+    /// executor's expiry check found it first (its record settles the provisional money), or the ledger's
+    /// reconciliation found it in its window (getSignaturesForAddress). Fetched at once
+    Landed { sig: [u8; 64], slot: Option<u64>, attempt: Option<u64>, t: u64 },
     /// the last entry hash of a completed slot (its blockhash) from a shred or entries assembler
     EntryHash { slot: u64, hash: [u8; 32], feed: u16, t: u64 },
 }
@@ -188,10 +192,22 @@ pub fn note_fired(attempt: u64, copies: &[crate::send::Sent], accounts: &[Pk], t
 /// A Jito `processed` result of a transaction of ours (source (c); send/jito.rs calls it, WP-05)
 pub fn note_jito_processed(sig: &[u8; 64], slot: Option<u64>) { with_shared(|s| s.send(Note::JitoProcessed { sig: *sig, slot, t: now_ns() })); }
 
+/// WP-07: a signature of ours that landed (the executor's expiry check found it before its record; the ledger's
+/// reconciliation found it in its window): its record is fetched at once (`found_by` `executor_status`)
+pub fn note_landed(sig: &[u8; 64], slot: Option<u64>, attempt: Option<u64>) { with_shared(|s| s.send(Note::Landed { sig: *sig, slot, attempt, t: now_ns() })); }
+
 /// The last entry hash of a completed slot from a shred or entries assembler (blockhash source `entries`): a shred feed's
 /// slot walked whole (feeds/shred.rs, at its last shred), an entries feed's slot followed from its first entry (feeds/mod.rs
 /// `forward`, when the next slot starts)
 pub fn note_entry_hash(slot: u64, hash: [u8; 32], feed: u16) { with_shared(|s| s.send(Note::EntryHash { slot, hash, feed, t: now_ns() })); }
+
+/// WP-07 (review #3): how many wallet records the service gave up on so far (None: no service running); the ledger's
+/// money view is stale from a new give-up until a snapshot asked for after it
+pub fn wallet_gave_up_total() -> Option<u64> {
+    let mut out = None;
+    with_shared(|s| out = Some(s.published.lock().unwrap_or_else(|e| e.into_inner()).wallet_gave_up));
+    out
+}
 
 /// status.jsonl `chainfetch` and `coverage` (MEASUREMENT §4.8): null while the service is not running
 pub fn status_sections() -> (Value, Value) {
@@ -584,6 +600,9 @@ impl Service {
                 if let Some(w) = &mut self.wallet { w.found(sig, F_JITO, slot, None, now); }
                 if let Some(e) = self.known.get_mut(&sig) { e.bits |= F_JITO; }
             }
+            Note::Landed { sig, slot, attempt, t: _ } => {
+                if let Some(w) = &mut self.wallet { w.found(sig, wallet::F_EXEC, slot, attempt, now); }
+            }
             Note::EntryHash { slot, hash, feed: _, t } => self.ring_insert(Entry { hash, slot, height: None, src: Src::Entries, commitment: Commitment::Processed, t_ns: t }),
         }
     }
@@ -939,10 +958,12 @@ impl Service {
         // exec.jsonl too when it wrote a watched account (it is a D1 signature, or it moved the wallet) and has no record yet
         let wrote_wallet = x.keys.first() == Some(&w.wallet) || f.wallet_sol.is_some_and(|s| s != 0) || !f.wallet_tok.is_empty();
         let in_exec = known.as_ref().map_or(wrote_wallet, |e| e.rec.is_none() && (e.denom || wrote_wallet));
-        // WP-05: the route program's events (each leg's delivered amount) and the CU used, for the attempt's outcome line
+        // WP-05: the route program's events (each leg's delivered amount) and the CU used, for the attempt's outcome line;
+        // WP-07: the ledger's raw fields (lamports, token amounts, fee, tip, rent by class), from the full transaction
+        let ledger = crate::ledger::raw(&x, &w.wallet, &w.wsol, &w.route).json();
         let input = json!({ "sig": b58s(&sig), "slot": slot, "idx": idx, "ok": ok, "err": err, "fee": fee, "wallet_kind": f.wallet_kind, "wallet_sol": f.wallet_sol,
             "wallet_tok": f.wallet_tok, "attempt": attempt, "found_by": wallet::found_by(bits), "created": f.created.len(), "closed": f.closed.len(), "pre_run": pre_run,
-            "prog_events": meta.map(|m| crate::proglog::events(&m.log_messages)), "cu_consumed": meta.and_then(|m| m.compute_units_consumed) });
+            "prog_events": meta.map(|m| crate::proglog::events(&m.log_messages)), "cu_consumed": meta.and_then(|m| m.compute_units_consumed), "ledger": ledger });
         let bytes = r.as_ref().map_or(0, |f| f.bytes);
         let x = Arc::new(x);
         self.emit_tx(rec::WALLET, x.clone(), slot, idx, "rpc-wallet", bits, Some(extras), bytes);

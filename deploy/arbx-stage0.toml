@@ -583,3 +583,33 @@ enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fe
 kind = "speed-landing"
 url = "http://fra.speedlanding.trade/sendTx?apikey=${SPEEDLANDING_KEY}"   # Frankfurt; JSON-RPC sendTransaction, port 80
 tip_lamports = 1000000   # its documented minimum, 0.001 SOL
+
+[ledger]
+# WP-07: money from the chain: every wallet transaction split into summing categories (ledger.jsonl), balance snapshots at
+# start, every snapshot_min inside the segment and at stop (snapshots.jsonl), the reconciliation within tolerance_lamports on
+# both bases and of the executor's money against the chain (recon.jsonl; a miss puts the bot in shadow). The money view (the
+# last snapshot and the entries after it) is stale, and nothing is sent (`equity_stale`), once it is older than
+# max_view_age_s, after stale_after_failures failed snapshots in a row, or while a landing waits max_record_wait_s for its record
+snapshot_min = 10
+max_view_age_s = 600
+stale_after_failures = 3
+max_record_wait_s = 120
+tolerance_lamports = 10000
+recon_grace_s = 60
+token_haircut = 0.10
+
+[supervisor]
+# WP-07 (OD-11, campaign-wide; review WP-07 #4): shadow and stop when the net spend (fees, tips, non-recoverable rent,
+# trading loss; the owner's transfers are not in it) passes max_drop_per_hour_sol within a rolling hour, max_drop_per_day_sol
+# within 24 h, or the test budget since the campaign's start; a token held at the start below its start amount less
+# token_floor_tolerance. test_budget_lamports = 0: none here, so a live or canary run of this file refuses to start until the
+# owner sets one (or a campaign passes --budget-left). Every live or canary start also draws on the owner's cumulative budget
+# (<out_dir>/budget-state.json, src/budget.rs). The frz canary: deploy/arbx-canary-frz.toml
+max_drop_per_hour_sol = 0.02
+max_drop_per_day_sol = 0.15
+test_budget_lamports = 0
+token_floor_tolerance = 0.001
+rent_cap_sol = 0.1
+native_floor_sol = 0.02
+auto_unwrap = false
+stranded_s = 60

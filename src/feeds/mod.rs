@@ -73,13 +73,16 @@ pub enum InputKind { BlockhashHead = 1, LeaderWindow = 2, Gate = 3, Quarantine =
     Fetch = 11,
     /// ---- WP-09: what the executor starts with that the frozen config does not hold (`exec::ExecInit`): journaled once
     /// by the engine after engine_init, with `t_engine_ns` 0, never an `Event`; a replay builds its offline executor from it
-    ExecInit = 12 }
+    ExecInit = 12,
+    /// WP-07: the ledger's RPC answers (src/ledger.rs): a balance snapshot (`what` `snapshot`: the accounts' raw answers
+    /// at their context slots) or the window search of an unexplained reconciliation (`what` `sigs`)
+    Snapshot = 13 }
 
 impl InputKind {
     pub fn from_u8(k: u8) -> Option<InputKind> {
         use InputKind::*;
         Some(match k { 1 => BlockhashHead, 2 => LeaderWindow, 3 => Gate, 4 => Quarantine, 5 => InflightRelease, 6 => Health, 7 => WalletTx, 8 => SlotidxMissing, 9 => Settled,
-            10 => EngineInit, 11 => Fetch, 12 => ExecInit, _ => return None })
+            10 => EngineInit, 11 => Fetch, 12 => ExecInit, 13 => Snapshot, _ => return None })
     }
 }
 

@@ -18,6 +18,8 @@ crossbeam-channel = "0.5"
 clap = { version = "4", features = ["derive"] }
 curve25519-dalek = "4"
 aes-gcm = "0.10"
+# review WP-07 #15: the keystore cipher's round keys (the first two are the scrypt key itself) are wiped when it goes
+aes = { version = "0.8", features = ["zeroize"] }
 dotenvy = "0.15"
 ed25519-dalek = "2"
 http = "1"

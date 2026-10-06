@@ -406,3 +406,7 @@ preload = "auto"
 # WP-04: hint accuracy against the pre-state; log only in Stage 0
 action = "log"
 ring_versions = 8
+
+[supervisor]
+# WP-07: a shadow config records what the equity stops would do (a shadow run never acts on them); no test budget
+test_budget_lamports = 0

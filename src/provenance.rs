@@ -509,7 +509,7 @@ pub fn parse_chrony_csv(line: &str) -> Option<Value> {
 // ------------------------------------------------------------------ meta.json
 
 /// The files a segment writes outside the recorder, with their schemas (MEASUREMENT §4). `arbx run` adds every recorder
-/// stream (`rec::Rec::streams_json`: `attempts` `arbx.attempts/1.1`, `status` `arbx.status/2.0`, ...; WP-02)
+/// stream (`rec::Rec::streams_json`: `attempts` `arbx.attempts/1.1`, `status` `arbx.status/2.1`, ...; WP-02)
 pub fn streams_json() -> Value {
     let mut m = serde_json::Map::new();
     for (k, v) in [("meta", META_SCHEMA), ("stop", crate::control::STOP_SCHEMA), ("control", crate::control::CONTROL_SCHEMA), ("config", "toml (frozen copy)"),

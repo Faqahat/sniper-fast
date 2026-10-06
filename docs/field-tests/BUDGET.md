@@ -15,3 +15,16 @@
 | — | (no live test yet) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 34,000,000 |
 
 Net spend = fees + tips + rent locked that cannot be recovered − trading profit. Every figure comes from chain data, either the WP-07 ledger or `getTransaction` balance deltas, never from our own predictions.
+- **Trading P&L** (WP-07: `ledger::Entry::trade_pnl`) is each route's change of SOL + WSOL and of recoverable rent, plus what it paid in fee, tip and non-recoverable rent. A token a route left behind counts 0 there; its quoted value is reported apart.
+- **The owner's own transfers** into or out of frz are not spend. They are listed apart as `owner_transfers`.
+- **The same net spend is what the WP-07 stops measure** (review WP-07 #4): the floor (the test budget) and the hourly and daily caps.
+
+Each campaign's row (WP-07):
+- `runs/<name>/spend.json` (`arbx.spend/1.1`; MEASUREMENT §4.42) sums its segments' ledgers. It counts each signature once, and only what landed after the campaign's start.
+- Its `budget_md_row` gives the row's first eight columns. Rent locked = recoverable + non-recoverable. Cumulative and Remaining follow from the row above.
+- `arbx campaign-equity --campaign-dir runs/<name>` prints the campaign's money now: the start, the stop value, the floor, SOL + WSOL, the drops, the net spend, what is left, and the owner's transfers.
+
+**The cumulative budget is enforced, not only written here** (review WP-07 #5). `/root/arbx/runs/budget-state.json` (`arbx.budget/1.0`, src/budget.rs) is the machine copy of this table.
+- It holds each sending campaign and manual run with its allotment and its net spend. Entries not final are re-read from their own ledgers.
+- Every live or canary start reads it. A start is refused when 34,000,000 less the cumulative spend is not above 0, and is cut to what is left otherwise.
+- After each test, copy its row here from spend.json; budget-state.json should then show the same Cumulative.

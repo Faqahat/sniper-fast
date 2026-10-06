@@ -259,3 +259,68 @@ fn a_dry_run_replays_with_its_settlements() {
     let replay_sims = rec::read_jsonl(&done.dir.join("replay"), "sims").unwrap();
     assert_eq!(replay_sims, run_sims, "the run's simulation answer, through the journal");
 }
+
+/// Review WP-07 #1 (the blocker; go-live gate item 3 on the frz config): a frz-like recording replays identically with
+/// the bankroll cap binding. The run's executor (a shadow one under the frz canary's bankroll: 85% of the liquid SOL +
+/// WSOL less 0.03 SOL, at most the WSOL; the size cap 4.2 SOL) decides with the ledger's money view after its start
+/// snapshot (INPUT 13: frz on 2026-10-05, 222,956,693 native and 191,524,924 WSOL), so every route is sized at most
+/// 191,524,924 and the large ones exactly that. The decision-point records carry the money view (`money`, journaled
+/// whenever it differs from the last record) and the replay, which has no ledger, applies them: every decision, attempt
+/// and digest is the run's. The same journal without `money` replays at the configured cap, and differs
+#[test]
+fn a_frz_like_recording_with_the_bankroll_cap_replays_identically() {
+    const FRZ_BANKROLL: [(&str, &str); 2] = [("big_band_max_per_sec = 0.5", "big_band_max_per_sec = 1000.0"),
+        ("max_new_token_accounts = 0   # WP-00", "bankroll_share = 0.85\nbankroll_reserve_sol = 0.03\nmax_new_token_accounts = 0   # WP-00")];
+    let mut r = Rig::new("x-frz-bankroll", Setup { pools: &POOLS3, config: &FRZ_BANKROLL, exec: Some(ExecSetup::default()), ..Default::default() });
+    assert_eq!((r.cfg.live.bankroll_share, r.cfg.live.bankroll_reserve_sol, r.cfg.live.max_size_sol), (0.85, 0.03, 4.2));
+    r.make_ready(T0);
+    // the ledger, as `arbx run` assembles it (a shadow run: its stops record only)
+    let wallet = crate::tx::pk(&r.cfg.wallet);
+    let stopper = crate::control::Stopper::new(r.gate.clone());
+    r.e.ledger = Some(crate::ledger::Ledger::for_run(&r.cfg, wallet, r.rec.clone(), "x-frz-bankroll", false, r.gate.clone(), stopper, Default::default(), None, None));
+    let s0 = r.s0;
+    r.leaders(s0, &[LEADER_JITO; 64], T0 + 7 * MS);
+    let a = r.meta("usdc.ammv4");
+    let s2 = s0 + 2;
+    r.tick(s2, T0 + 8 * MS);
+    r.blockhash(s2, T0 + 8 * MS + 200 * US);
+    // a first decision before the ledger's start snapshot (the configured cap), then frz's balances
+    let mut t = usdc_sale(&mut r, &a, 100, "F-before", s2, T0 + 10 * MS);
+    r.input(InputKind::Snapshot, crate::ledger::test_snapshot_answer(&wallet, s2, 222_956_693, 191_524_924, 22_967_379, "start"), t + MS);
+    for (k, frac) in [100u64, 60, 300, 40].into_iter().enumerate() { t = usdc_sale(&mut r, &a, frac, &format!("F-{k}"), s2, t + 5 * MS); }
+    let att = r.attempts();
+    let sizes: Vec<u64> = att.iter().map(|x| x["size_lamports"].as_u64().unwrap()).collect();
+    eprintln!("frz-like bankroll: attempt sizes {sizes:?}");
+    assert!(sizes.len() >= 3, "{sizes:?}");
+    assert!(sizes[0] > 191_524_924, "before the snapshot: the configured cap (4.2 SOL) applies: {sizes:?}");
+    assert!(sizes[1..].iter().all(|s| *s <= 191_524_924), "after it, the bankroll caps every size: {sizes:?}");
+    assert!(sizes[1..].contains(&191_524_924), "the cap binds: {sizes:?}");
+    r.rec.sync();
+    let recs = decision_records(&r.dir);
+    assert!(recs.iter().any(|d| d["money"]["wsol"].as_u64() == Some(191_524_924) && d["money"]["liquid"].as_u64() == Some(414_481_617)), "{recs:?}");
+    let done = r.finish_and_replay();
+    assert!(done.replay["executor"]["records_staged"].as_u64().unwrap() >= 2);
+    // the same journal without the money view: the replay sizes at the configured cap and differs
+    rewrite_journal(&done.dir, |_, x| {
+        let b = &x.3;
+        if x.0 != crate::rec::journal::J_INPUT || b[21] != InputKind::Gate as u8 { return b.clone(); }
+        let mut v: Value = serde_json::from_slice(&b[26..]).unwrap();
+        if v["src"] != json!("decision") { return b.clone(); }
+        if let Some(o) = v.as_object_mut() { o.remove("money"); }
+        let js = serde_json::to_vec(&v).unwrap();
+        let mut body = vec![InputKind::Gate as u8];
+        body.extend((js.len() as u32).to_le_bytes());
+        body.extend(&js);
+        let mut o = vec![b[0]];
+        o.extend((body.len() as u32).to_le_bytes());
+        o.extend(&b[5..21]);
+        o.extend(body);
+        o
+    });
+    let rp = crate::replay::replay(&done.dir, &crate::replay::Opts { compare: true, out: Some(done.dir.join("no-money")), ..Default::default() }).unwrap();
+    let diff = rp.diff.unwrap();
+    assert!(!rp.ok, "{}", diff["summary"]);
+    assert!(diff["attempt_diffs"].as_array().unwrap().iter().any(|x| x["field"] == json!("size_lamports") && x["run"] == json!(191_524_924u64)
+        && x["replay"] == json!(4_200_000_000u64)), "{diff}");
+    assert!(diff["diffs"].as_array().unwrap().iter().any(|x| x["field"] == json!("ev")), "{diff}");
+}

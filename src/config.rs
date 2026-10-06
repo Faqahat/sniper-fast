@@ -68,6 +68,141 @@ pub struct Config {
     /// WP-03b: wallet transactions, watched-transaction backfill, slot index, blockhash sources; per-provider RPC budgets
     #[serde(default)]
     pub chainfetch: ChainfetchCfg,
+    /// WP-07: the ledger (src/ledger.rs): money by signature, balance snapshots, the hourly reconciliation
+    #[serde(default)]
+    pub ledger: LedgerCfg,
+    /// WP-07: the equity stops and the money alerts (src/supervisor.rs), for the segment and the whole campaign
+    #[serde(default)]
+    pub supervisor: SupervisorCfg,
+}
+
+/// The owner's hard cap on the test budget (docs/field-tests/BUDGET.md, 2026-10-05: $3-5 of the frz wallet), lamports.
+/// `[supervisor] test_budget_lamports` and `arbx campaign --test-budget-lamports` above it do not load
+pub const TEST_BUDGET_HARD_CAP: u64 = 34_000_000;
+
+/// The ledger (src/ledger.rs; PLAN WP-07 items 2-4, MEASUREMENT §4.42-§4.44): every wallet transaction is split into
+/// summing categories from its chain record; balance snapshots (one common context slot) are taken at start, every
+/// `snapshot_min` inside the segment and at stop; consecutive snapshots are reconciled against the entries between them,
+/// and the executor's money against the entries of its landings. The money view (the last snapshot and the entries
+/// after it) is what live and canary sends need: stale, nothing is sent (`equity_stale`, review WP-07 #3)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LedgerCfg {
+    /// a balance snapshot this often inside a segment (minutes; each asked for up to 30 s early so the view is fresh
+    /// when it is due), besides the one at start and the one at stop
+    #[serde(default = "snapshot_min")]
+    pub snapshot_min: u64,
+    /// the money view is stale (the gate in shadow, `equity_stale`) once its last good snapshot is older than this, s
+    /// (at least `snapshot_min`)
+    #[serde(default = "max_view_age_s")]
+    pub max_view_age_s: u64,
+    /// ... or once this many snapshots in a row failed (or came back on different slots)
+    #[serde(default = "stale_after_failures")]
+    pub stale_after_failures: u32,
+    /// ... or while a landing the executor found by a status check has had no wallet record for this long, s
+    #[serde(default = "max_record_wait_s")]
+    pub max_record_wait_s: u64,
+    /// a reconciliation passes when both residuals (total and liquid) are within this, lamports
+    #[serde(default = "recon_tolerance")]
+    pub tolerance_lamports: u64,
+    /// where token mids come from: "pools" (the engine's committed pool state: the quote for selling the amount into WSOL)
+    #[serde(default = "mid_pools")]
+    pub mid_source: String,
+    /// a snapshot whose answers' context slots differ is taken again this many times; then it is written with
+    /// `slot_mismatch` and not reconciled (F34)
+    #[serde(default = "snapshot_retries")]
+    pub snapshot_retries: u32,
+    /// a snapshot that failed is tried again after this many seconds
+    #[serde(default = "snapshot_retry_s")]
+    pub snapshot_retry_s: u64,
+    /// a reconciliation is decided this long after its snapshot (the window's wallet records may still be on their
+    /// way); an unexplained residual is searched with getSignaturesForAddress and decided once more this long later
+    #[serde(default = "recon_grace_s")]
+    pub recon_grace_s: u64,
+    /// non-SOL holdings are valued at the engine's quote for selling them into WSOL, less this share (status and
+    /// snapshots only: no stop reads a token's value, each held token has its own floor instead)
+    #[serde(default = "token_haircut")]
+    pub token_haircut: f64,
+    /// mints whose wallet ATA (SPL Token) every snapshot reads, besides the token accounts held at boot and those the
+    /// wallet's transactions create (default USDC and USDT)
+    #[serde(default = "extra_mints")]
+    pub extra_mints: Vec<String>,
+}
+fn snapshot_min() -> u64 { 10 }
+fn max_view_age_s() -> u64 { 600 }
+fn stale_after_failures() -> u32 { 3 }
+fn max_record_wait_s() -> u64 { 120 }
+fn recon_tolerance() -> u64 { 10_000 }
+fn mid_pools() -> String { "pools".into() }
+fn snapshot_retries() -> u32 { 3 }
+fn snapshot_retry_s() -> u64 { 30 }
+fn recon_grace_s() -> u64 { 60 }
+fn token_haircut() -> f64 { 0.10 }
+fn extra_mints() -> Vec<String> { vec!["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into(), "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB".into()] }
+impl Default for LedgerCfg {
+    fn default() -> Self {
+        LedgerCfg { snapshot_min: snapshot_min(), max_view_age_s: max_view_age_s(), stale_after_failures: stale_after_failures(), max_record_wait_s: max_record_wait_s(),
+            tolerance_lamports: recon_tolerance(), mid_source: mid_pools(), snapshot_retries: snapshot_retries(),
+            snapshot_retry_s: snapshot_retry_s(), recon_grace_s: recon_grace_s(), token_haircut: token_haircut(), extra_mints: extra_mints() }
+    }
+}
+
+/// The equity stops and money alerts (src/supervisor.rs; PLAN WP-07 item 5, OD-11). Each holding is tracked on its
+/// own (STAGE1-PLAN review F6): SOL + WSOL (lamports; the start read from the chain) carries the budget floor and the
+/// drop caps; every non-SOL token held at the campaign's start has a quantity floor (`token_floor_tolerance`); the
+/// recoverable rent is tracked apart. Each rule names its reason in stop.json, events.jsonl and the SendGate
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupervisorCfg {
+    /// OD-11: the bot goes to shadow and the campaign stops (`equity_hour`, exit 20) when SOL + WSOL falls more than
+    /// this within a rolling hour, campaign-wide (SOL; PLAN WP-07's `hour_drop_sol`)
+    #[serde(default = "hour_drop")]
+    pub max_drop_per_hour_sol: f64,
+    /// the same over a rolling 24 h (`equity_day`, exit 20; PLAN WP-07's `day_drop_sol`)
+    #[serde(default = "day_drop")]
+    pub max_drop_per_day_sol: f64,
+    /// the test budget, lamports (at most `TEST_BUDGET_HARD_CAP`); the floor is the campaign's start SOL + WSOL minus
+    /// it (`equity_floor`, exit 20). 0: none here; a live or canary run then needs `--budget-left`
+    #[serde(default)]
+    pub test_budget_lamports: u64,
+    /// a non-SOL token held at the campaign's start may lose at most this share of its start amount (rounding, dust)
+    /// before the campaign stops (`token_floor`, exit 20)
+    #[serde(default = "token_tolerance")]
+    pub token_floor_tolerance: f64,
+    /// no held-set growth (no new token account) while the recoverable rent is above this, SOL (create-and-close
+    /// stays allowed: it is rent-neutral)
+    #[serde(default = "rent_cap")]
+    pub rent_cap_sol: f64,
+    /// an alert when native SOL (tips and fees are paid from it) falls below this, SOL
+    #[serde(default = "native_floor")]
+    pub native_floor_sol: f64,
+    /// the automatic unwrap of `unwrap_sol` WSOL when native SOL is low: it writes to the wallet, an owner decision
+    /// (R §6). Stage 0 refuses `true`
+    #[serde(default)]
+    pub auto_unwrap: bool,
+    #[serde(default = "unwrap_sol")]
+    pub unwrap_sol: f64,
+    /// an alert when a token a route left behind is still held this long after, s (automatic sale is Stage 2+)
+    #[serde(default = "stranded_s")]
+    pub stranded_s: u64,
+    /// a live or canary run sends nothing until its first balance snapshot (the floor needs the start equity); an
+    /// alert when it has none this long after the start, s
+    #[serde(default = "equity_wait_s")]
+    pub equity_wait_s: u64,
+}
+fn hour_drop() -> f64 { 0.02 }
+fn token_tolerance() -> f64 { 0.001 }
+fn day_drop() -> f64 { 0.15 }
+fn rent_cap() -> f64 { 0.1 }
+fn native_floor() -> f64 { 0.02 }
+fn unwrap_sol() -> f64 { 0.05 }
+fn stranded_s() -> u64 { 60 }
+fn equity_wait_s() -> u64 { 120 }
+impl Default for SupervisorCfg {
+    fn default() -> Self {
+        SupervisorCfg { max_drop_per_hour_sol: hour_drop(), max_drop_per_day_sol: day_drop(), test_budget_lamports: 0, token_floor_tolerance: token_tolerance(), rent_cap_sol: rent_cap(),
+            native_floor_sol: native_floor(), auto_unwrap: false, unwrap_sol: unwrap_sol(), stranded_s: stranded_s(), equity_wait_s: equity_wait_s() }
+    }
 }
 
 /// The chain-fetch service (src/chainfetch; PLAN WP-03b) and the RPC budgets every client shares (src/rpc.rs)
@@ -299,13 +434,25 @@ pub struct LiveCfg {
     /// rent-neutral and removes the key)
     #[serde(default = "live_atas")]
     pub max_new_token_accounts: u32,
+    /// WP-07 (go-live gate: the size capped by the bankroll): a trade is at most `bankroll_share` x the wallet's liquid
+    /// SOL (native + WSOL, the ledger's chain truth) minus `bankroll_reserve_sol`, and never more than its WSOL (the
+    /// route spends WSOL). 0 = off. Shadow and dry runs model it too. Before the ledger's first balance snapshot the
+    /// configured cap applies (live and canary send nothing then: `equity_unknown`); a bankroll that allows nothing is
+    /// refused `bankroll_empty`
+    #[serde(default)]
+    pub bankroll_share: f64,
+    #[serde(default)]
+    pub bankroll_reserve_sol: f64,
 }
 fn live_size() -> f64 { 0.1 }
 fn live_fee_cap() -> u64 { 20_000_000 }
 fn live_margin() -> u64 { 1_000 }
 fn live_atas() -> u32 { 5 }
 impl Default for LiveCfg {
-    fn default() -> Self { LiveCfg { max_size_sol: live_size(), max_failed_fees_lamports: live_fee_cap(), margin_lamports: live_margin(), max_new_token_accounts: live_atas() } }
+    fn default() -> Self {
+        LiveCfg { max_size_sol: live_size(), max_failed_fees_lamports: live_fee_cap(), margin_lamports: live_margin(), max_new_token_accounts: live_atas(),
+            bankroll_share: 0.0, bankroll_reserve_sol: 0.0 }
+    }
 }
 
 /// PLAN WP-05: the send policy. Bundle-only, fail-closed send checks (blockhash age, leader kind, cached Jito token,
@@ -471,7 +618,8 @@ impl Default for SimCfg { fn default() -> Self { SimCfg { enabled: false, max_pe
 pub struct CanaryCfg {
     #[serde(default)]
     pub enabled: bool,
-    /// how many attempts in all
+    /// how many attempts in all (per segment); 0 = no attempt cap (WP-07: a 24 h baseline such as FT-005 is bounded by
+    /// the equity stops, the spend cap and `every_ms` instead)
     #[serde(default = "canary_count")]
     pub count: u32,
     /// at least this long between two attempts, ms
@@ -1126,6 +1274,35 @@ impl Config {
             if !["jito", "bam", "other", "unknown"].contains(&k.as_str()) { bail!("[send_policy] skip_leader_kinds: {k:?} is not a leader kind (jito, bam, other, unknown)"); }
         }
         if !(cfg.canary.size_sol > 0.0 && cfg.canary.size_sol <= CANARY_MAX_SIZE_SOL) { bail!("[canary] size_sol must be in (0, {CANARY_MAX_SIZE_SOL}] (PLAN WP-05: a canary is a small live run)"); }
+        // WP-07: the bankroll cap, the ledger and the equity stops
+        let l = &cfg.live;
+        if !l.bankroll_share.is_finite() || !(0.0..=1.0).contains(&l.bankroll_share) { bail!("[live] bankroll_share is a share of the liquid SOL, 0..1 (0 = off)"); }
+        if !l.bankroll_reserve_sol.is_finite() || l.bankroll_reserve_sol < 0.0 { bail!("[live] bankroll_reserve_sol must be >= 0"); }
+        let lg = &cfg.ledger;
+        if lg.snapshot_min == 0 || lg.snapshot_min > 24 * 60 { bail!("[ledger] snapshot_min must be 1..1440 minutes"); }
+        // review WP-07 #3: the view must be refreshed before it can go stale by construction
+        if lg.max_view_age_s < lg.snapshot_min * 60 { bail!("[ledger] max_view_age_s ({}) must be at least snapshot_min ({} min): the money view would go stale between snapshots", lg.max_view_age_s, lg.snapshot_min); }
+        if lg.stale_after_failures == 0 { bail!("[ledger] stale_after_failures must be >= 1"); }
+        if lg.max_record_wait_s < 10 { bail!("[ledger] max_record_wait_s must be >= 10"); }
+        if lg.tolerance_lamports == 0 { bail!("[ledger] tolerance_lamports must be > 0"); }
+        if lg.mid_source != "pools" { bail!("[ledger] mid_source must be \"pools\" (the engine's committed pool state)"); }
+        if lg.snapshot_retries > 10 { bail!("[ledger] snapshot_retries must be 0..10"); }
+        if lg.snapshot_retry_s == 0 || lg.recon_grace_s == 0 || lg.recon_grace_s > 3_600 { bail!("[ledger] snapshot_retry_s must be > 0 and recon_grace_s 1..3600"); }
+        if !lg.token_haircut.is_finite() || !(0.0..1.0).contains(&lg.token_haircut) { bail!("[ledger] token_haircut is a share, 0..1"); }
+        for m in &lg.extra_mints {
+            if !bs58::decode(m).into_vec().is_ok_and(|b| b.len() == 32) { bail!("[ledger] extra_mints: {m:?} is not a base58 mint"); }
+        }
+        let sv = &cfg.supervisor;
+        for (k, v) in [("max_drop_per_hour_sol", sv.max_drop_per_hour_sol), ("max_drop_per_day_sol", sv.max_drop_per_day_sol)] {
+            if !v.is_finite() || v <= 0.0 { bail!("[supervisor] {k} must be a positive amount of SOL"); }
+        }
+        if sv.test_budget_lamports > TEST_BUDGET_HARD_CAP { bail!("[supervisor] test_budget_lamports {} is over the owner's hard cap {TEST_BUDGET_HARD_CAP} (docs/field-tests/BUDGET.md)", sv.test_budget_lamports); }
+        if !sv.token_floor_tolerance.is_finite() || !(0.0..=0.1).contains(&sv.token_floor_tolerance) { bail!("[supervisor] token_floor_tolerance is a share of the start amount, 0..0.1"); }
+        for (k, v) in [("rent_cap_sol", sv.rent_cap_sol), ("native_floor_sol", sv.native_floor_sol), ("unwrap_sol", sv.unwrap_sol)] {
+            if !v.is_finite() || v < 0.0 { bail!("[supervisor] {k} must be >= 0"); }
+        }
+        if sv.auto_unwrap { bail!("[supervisor] auto_unwrap = true is refused in Stage 0: it writes to the wallet, an owner decision (R §6)"); }
+        if sv.stranded_s == 0 || sv.equity_wait_s == 0 { bail!("[supervisor] stranded_s and equity_wait_s must be > 0"); }
         if cfg.dry_run.max_sim_per_sec == 0 { bail!("[dry_run] max_sim_per_sec must be >= 1"); }
         if cfg.feeds.len() > u16::MAX as usize { bail!("too many feeds"); }
         // WP-03: the state stream's options and its transaction streams (feeds after the [[feed]] list)
@@ -1632,6 +1809,45 @@ mod tests {
         assert!(Config::parse(&format!("{MINIMAL}[canary]\nsize_sol = 0.2\n")).is_ok());
         assert!(err(&format!("{MINIMAL}[[send]]\nname = \"j\"\nkind = \"jito-bundle\"\nurl = \"https://x\"\ntip_lamports = 1000\nmax_per_sec = 5\nqueue_ms = 10\n"))
             .contains("[send_policy] queue_ms"));
+    }
+
+    /// WP-07: the ledger's and the equity stops' keys: their defaults (OD-11: 0.02 SOL a rolling hour; no test budget until
+    /// one is set), the frz canary's values, and every refusal (a budget over the owner's hard cap, auto_unwrap in Stage 0,
+    /// a share outside 0..1, a mint that is not one)
+    #[test]
+    fn wp07_ledger_and_supervisor_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        let (lg, sv) = (&c.ledger, &c.supervisor);
+        assert_eq!((lg.snapshot_min, lg.tolerance_lamports, lg.mid_source.as_str(), lg.snapshot_retries, lg.snapshot_retry_s, lg.recon_grace_s, lg.token_haircut),
+            (10, 10_000, "pools", 3, 30, 60, 0.10), "review WP-07 #3: a snapshot every 10 minutes inside a segment");
+        assert_eq!((lg.max_view_age_s, lg.stale_after_failures, lg.max_record_wait_s), (600, 3, 120), "the money view's freshness");
+        assert_eq!(lg.extra_mints.len(), 2, "USDC and USDT");
+        assert_eq!((sv.max_drop_per_hour_sol, sv.max_drop_per_day_sol, sv.test_budget_lamports, sv.token_floor_tolerance, sv.rent_cap_sol, sv.native_floor_sol, sv.auto_unwrap),
+            (0.02, 0.15, 0, 0.001, 0.1, 0.02, false));
+        assert_eq!((c.live.bankroll_share, c.live.bankroll_reserve_sol), (0.0, 0.0), "the bankroll cap is off unless set");
+        let frz = Config::parse(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/deploy/arbx-canary-frz.toml")).unwrap()).unwrap();
+        assert_eq!((frz.supervisor.test_budget_lamports, frz.live.bankroll_share, frz.live.bankroll_reserve_sol, frz.live.max_new_token_accounts, frz.canary.size_sol),
+            (5_000_000, 0.85, 0.03, 0, 0.2), "review WP-07 #5: one run's allotment (FT-004's), never the whole hard cap");
+        assert_eq!((frz.ledger.snapshot_min, frz.ledger.max_view_age_s), (10, 600));
+        let e = |section: &str, k: &str| err(&format!("{MINIMAL}[{section}]\n{k}\n"));
+        assert!(e("supervisor", "test_budget_lamports = 34000001").contains("hard cap"));
+        assert!(Config::parse(&format!("{MINIMAL}[supervisor]\ntest_budget_lamports = 34000000\n")).is_ok());
+        assert!(e("supervisor", "auto_unwrap = true").contains("owner decision"));
+        assert!(e("supervisor", "max_drop_per_hour_sol = 0").contains("positive"));
+        assert!(e("supervisor", "token_floor_tolerance = 0.5").contains("0..0.1"));
+        assert!(e("supervisor", "stranded_s = 0").contains("> 0"));
+        assert!(e("supervisor", "hour_drop_sol = 0.05").contains("unknown field `hour_drop_sol`"), "the key is max_drop_per_hour_sol");
+        assert!(e("live", "bankroll_share = 1.5").contains("0..1"));
+        assert!(e("live", "bankroll_reserve_sol = -0.1").contains(">= 0"));
+        assert!(e("ledger", "mid_source = \"oracle\"").contains("pools"));
+        assert!(e("ledger", "tolerance_lamports = 0").contains("> 0"));
+        assert!(e("ledger", "token_haircut = 1.0").contains("0..1"));
+        assert!(e("ledger", "extra_mints = [\"USDC\"]").contains("base58 mint"));
+        assert!(e("ledger", "snapshot_min = 0").contains("1..1440"));
+        assert!(e("ledger", "snapshot_min = 60").contains("max_view_age_s (600) must be at least snapshot_min"), "the view would go stale between snapshots");
+        assert!(Config::parse(&format!("{MINIMAL}[ledger]\nsnapshot_min = 60\nmax_view_age_s = 3600\n")).is_ok());
+        assert!(e("ledger", "stale_after_failures = 0").contains(">= 1"));
+        assert!(e("ledger", "max_record_wait_s = 5").contains(">= 10"));
     }
 
     const JITO: &str = "[[send]]\nname = \"jito-bundle\"\nkind = \"jito-bundle\"\nurl = \"https://frankfurt.mainnet.block-engine.jito.wtf\"\ntip_lamports = 1000\n";
