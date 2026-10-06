@@ -46,3 +46,14 @@
 3. **Astralane dropped** (owner, 2026-10-06), commit after 349140d. The feed is disabled in all maintained configs.
 
 **Verdict:** soak PASS for p1–p2 (2 h, with the p3 portion until the owner's stop). The re-soak of the next build (WP-09 part 2 + the digest and stop-snapshot fixes, no Astralane) adds 60 min and must replay identically at the digest point. That closes go-live items 2–3 together with FT-001.
+
+## Re-soak of the final build (ft001b, from 10:33 UTC)
+
+- **Build:** master `374fda1`, release, stripped `bin/arbx-374fda1` (sha256 `bb84e4eb9c4aaefa…`). It adds WP-09 part 2, the digest-point fix and the stop-snapshot fix on top of 11e25d1.
+- **Config:** `deploy/arbx-canary-frz.toml` (sha256 `40ec3fda7f8386ca…`, Astralane disabled), mode shadow. The watchdog was restarted on the new binary.
+- **Command:** `bin/arbx-374fda1 campaign --name ft001b --config deploy/arbx-canary-frz.toml --hours 1 --segment-min 60 --mode shadow --who claude --detach`
+- **Pass:**
+  - clean deadline stop **with a successful stop snapshot** (not `snapshot_failed`);
+  - state ≥ 95%, 0 drops, RSS < 2 GB;
+  - `arbx replay --compare` of the segment: ok, whole, every decision identical, and the state and decision digests equal at the journaled digest point (INPUT 14).
+
