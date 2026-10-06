@@ -143,7 +143,9 @@ pub enum RunEnd { Stopped, Deadline, Disconnected, StateUnavailable }
 
 /// The engine's outside world: RPC (bound to the background runtime), the background runtime it spawns fetches on,
 /// the event channel their answers come back on, and the state stream's watch list. `Engine::new_offline` has none
-struct Io { rpc: crate::rpc::Rpc, rt: tokio::runtime::Handle, tx_back: Sender<Event>, watch_list: tokio::sync::watch::Sender<Vec<String>> }
+struct Io { rpc: crate::rpc::Rpc, rt: tokio::runtime::Handle, tx_back: Sender<Event>, watch_list: tokio::sync::watch::Sender<Vec<String>>,
+    /// FT-000 (S1-1): the batched lookup-table fetcher (role `alt`), started at the first fetch with `[alts]`'s settings
+    alt_fetch: std::cell::OnceCell<crate::alts::Fetcher> }
 
 /// what status.jsonl v2's deltas are against (the previous line)
 #[derive(Default)]
@@ -180,6 +182,10 @@ pub struct EngineKnobs {
     pub alts: crate::alts::Policy,
     pub ring_versions: usize,
     pub accuracy_queue: usize,
+    /// FT-000 (S1-8): W(T) leaves PumpSwap pools' mints out (`write_set`). A run journaled before it has no such knob
+    /// (false): its replay waits for the mints as the run did
+    #[serde(default)]
+    pub wt_skip_pump_mints: bool,
 }
 fn resync_warn_s() -> u64 { 10 }
 fn resync_give_up_s() -> u64 { 300 }
@@ -189,7 +195,7 @@ impl Default for EngineKnobs {
         EngineKnobs { commit_timeout_ms: 5, quiescence_ms: 3, max_part_skew_slots: 2, max_tip_lag_slots: 2, clock_max_age_slots: 2, lag_slo_p50_ms: 16.0,
             lag_slo_p90_ms: 30.0, lag_slo_breach_minutes: 5, slo_action: "log".into(), slo_recover_minutes: 10, tier_a_grace_s: 60, boot_timeout_s: 60,
             max_update_age_ms: 2_000, unavailable_stop_s: 0, resnapshot: true, resync_warn_s: resync_warn_s(), resync_give_up_s: resync_give_up_s(), alts: crate::alts::Policy::default(),
-            ring_versions: crate::store::RING_VERSIONS, accuracy_queue: 10_000 }
+            ring_versions: crate::store::RING_VERSIONS, accuracy_queue: 10_000, wt_skip_pump_mints: true }
     }
 }
 
@@ -202,8 +208,9 @@ impl EngineKnobs {
             max_update_age_ms: s.max_update_age_ms, unavailable_stop_s: s.unavailable_stop_s, resnapshot: s.resnapshot, resync_warn_s: s.resync_warn_s,
             resync_give_up_s: s.resync_give_up_s,
             alts: crate::alts::Policy { retry_ms: c.alts.retry_ms.clone(), retry_every_s: c.alts.retry_every_s, give_up_s: c.alts.give_up_s, wait_cap: c.alts.wait_cap,
-                max_inflight: c.alts.max_inflight },
-            ring_versions: c.accuracy.ring_versions, accuracy_queue: c.accuracy.queue }
+                max_inflight: c.alts.max_inflight, batch_max: c.alts.batch_max, calls_inflight: c.alts.calls_inflight, call_every_ms: c.alts.call_every_ms,
+                max_tables: c.alts.max_tables, max_bytes: (c.alts.max_mb * 1_048_576.0) as u64 },
+            ring_versions: c.accuracy.ring_versions, accuracy_queue: c.accuracy.queue, wt_skip_pump_mints: true }
     }
 }
 
@@ -629,7 +636,7 @@ impl Engine {
         rec: Rec, rpc: crate::rpc::Rpc, rt_bg: tokio::runtime::Handle, tx_back: Sender<Event>,
         watch_list: tokio::sync::watch::Sender<Vec<String>>) -> anyhow::Result<Engine> {
         let mut e = Engine::build(reg, store, cfg, feeds, min_tip, interest, rec);
-        e.io = Some(Io { rpc, rt: rt_bg, tx_back, watch_list });
+        e.io = Some(Io { rpc, rt: rt_bg, tx_back, watch_list, alt_fetch: Default::default() });
         Ok(e)
     }
 
@@ -724,7 +731,21 @@ impl Engine {
         if journal { self.journal.alt_preload(table, &addrs); }
         self.alts.preload(table, addrs, last_used);
         self.count("alt_preloaded");
+        self.journal_evictions(0);
     }
+
+    /// FT-000 (S1-4): the lookup tables the cache evicted while an input (or the boot's preload) was handled, as one ALT
+    /// `found` 4 journal record after it, with the running count and hash a replay checks (`journal::replay`)
+    fn journal_evictions(&mut self, t: u64) {
+        let ev = self.alts.take_evicted();
+        if ev.is_empty() { return; }
+        self.count_n("alt_evicted", ev.len() as u64);
+        self.journal.alt_evict(t, &ev, self.alts.evicted_total, self.alts.evict_hash);
+    }
+
+    /// FT-000: what the lookup-table cache has evicted so far (count, running hash): what a replay compares with the
+    /// journal's ALT `found` 4 records
+    pub fn alt_evictions(&self) -> (u64, u64) { (self.alts.evicted_total, self.alts.evict_hash) }
 
     /// record (and journal) through `rec` from now on
     pub fn set_rec(&mut self, rec: Rec) { self.journal = Journal::new(rec.clone()); self.rec = rec; }
@@ -862,7 +883,7 @@ impl Engine {
     /// only recently used tables). Each table is serialized on the recorder's writer
     fn write_alts(&self) {
         if !self.rec.is_on() { return; }
-        for (t, v) in &self.alts.tables {
+        for (t, v) in self.alts.iter() {
             let (t, v, used) = (*t, v.clone(), self.alts.last_used.get(t).copied());
             self.rec.emit(rec::ALTS_FINAL, Record::enc(move |o| {
                 let addrs: Vec<Value> = v.iter().map(|a| a.map_or(Value::Null, |k| json!(b58(&k)))).collect();
@@ -879,6 +900,7 @@ impl Engine {
             match e.event {
                 "retry_scheduled" => self.count("alt_retry"),
                 "give_up" => self.count("alt_gave_up"),
+                "fetch_start" if e.refetch => self.count("alt_refetch"),
                 "fetch_error" | "fetch_missing" => self.count("alt_fetch_failed"),
                 "waiters_dropped" => self.count("alt_wait_dropped"),
                 _ => {}
@@ -890,7 +912,7 @@ impl Engine {
             for (k, e) in evs.iter().enumerate() {
                 if k > 0 { o.push(b'\n'); }
                 let _ = serde_json::to_writer(&mut *o, &json!({ "t_ns": t, "table": b58(&e.table), "event": e.event, "n_addrs": e.n_addrs, "attempt": e.attempt,
-                    "next_retry_ms": e.next_retry_ms, "waiting_txs": e.waiting_txs, "err": e.err }));
+                    "next_retry_ms": e.next_retry_ms, "waiting_txs": e.waiting_txs, "err": e.err, "idle_ms": e.idle_ms, "refetch": e.refetch }));
             }
         }));
     }
@@ -1085,6 +1107,7 @@ impl Engine {
             }
         }
         self.on_event(ev, t_engine, status);
+        self.journal_evictions(t_engine);
         self.refresh_health(t_engine);
     }
 
@@ -1105,6 +1128,7 @@ impl Engine {
             self.alts.due(t, &mut fetch);
             for f in fetch { self.fetch_alt(f); }
             self.emit_alt_events();
+            self.journal_evictions(t);
             let mut reads = Vec::new();
             self.reads.due(t, &mut reads);
             for f in reads { self.spawn_read(f); }
@@ -1258,7 +1282,10 @@ impl Engine {
     /// chunk ended. An offline engine records the read in `offline_fetches` instead
     fn spawn_read(&mut self, f: Fetch) {
         let Some(io) = &self.io else { self.offline_fetches.push((f.what.as_str(), f.keys.clone())); self.offline_reads.push(f); return };
-        let (rpc, back, ar) = (io.rpc.clone(), io.tx_back.clone(), self.acct_rec.clone());
+        // FT-000 (S1-3): the state stream's re-read is critical (role `snapshot`): pricing waits for it, and at boot it
+        // queued 51.4 s behind the lookup-table fetches; fork refetches and new bin arrays stay `engine`
+        let rpc = if f.what == What::Resync { io.rpc.with_role(crate::rpc::Role::Snapshot) } else { io.rpc.clone() };
+        let (back, ar) = (io.tx_back.clone(), self.acct_rec.clone());
         io.rt.spawn(async move {
             let (src, what) = (f.what.src(), f.what.as_str());
             let head = json!({ "job": f.job, "chunk": f.chunk, "what": what, "attempt": f.attempt, "n": f.keys.len() });
@@ -1821,13 +1848,18 @@ impl Engine {
                 "ok": self.slo.last.as_ref().map(|m| m.ok), "breaches_in_row": self.slo.breaches_in_row, "good_in_row": self.slo.good_in_row, "action": self.slo.action },
             "accuracy": { "scored_delta": d("pred_scored"), "exact_delta": d("pred_exact"), "pre_state_unknown_delta": d("pred_pre_state_unknown"), "by_venue": by_venue,
                 "queue_now": self.acc_queue.len(), "overflow_total": cnt("pred_queue_overflow"), "action": "log" },
-            "alts": { "cached_now": self.alts.tables.len(), "waiting_txs_now": self.alts.waiting_txs(), "fetching_now": self.alts.inflight(),
+            "alts": { "cached_now": self.alts.len(), "bytes_now": self.alts.bytes(), "evicted_delta": d("alt_evicted"), "refetch_delta": d("alt_refetch"),
+                "fetch_calls_total": self.io.as_ref().and_then(|io| io.alt_fetch.get()).map(|f| f.stats.calls.load(std::sync::atomic::Ordering::Relaxed)),
+                "fetch_tables_total": self.io.as_ref().and_then(|io| io.alt_fetch.get()).map(|f| f.stats.tables.load(std::sync::atomic::Ordering::Relaxed)),
+                "waiting_txs_now": self.alts.waiting_txs(), "fetching_now": self.alts.inflight(),
                 "pending_retries_now": self.alts.pending_retries(), "gave_up_now": self.alts.gave_up(), "retries_delta": d("alt_retry"), "gave_up_delta": d("alt_gave_up"),
                 "learned_delta": d("alt_learned") },
             "opps_open_now": self.opps.len(), "ata_misses_total": self.ata.misses.get(),
             "counts_total": self.counts, "counts_delta": counts_delta,
             "latency": lat, "latency_run": lat_run,
-            "exec": exec, "money": money, "recorder": recorder, "chainfetch": chainfetch, "coverage": coverage });
+            "exec": exec, "money": money, "recorder": recorder, "chainfetch": chainfetch, "coverage": coverage,
+            // FT-000 (S1-1): each provider's budget and every role's use of it since the previous line
+            "rpc_budget": crate::rpc::Registry::global().budget_json("status_budget") });
         if let Some(r) = stop_reason { line["stop_reason"] = json!(r); }
         // WP-20: the alerts' counters (atomics only; null without alerts)
         line["alerts"] = crate::alerts::status();
@@ -1897,9 +1929,21 @@ impl Engine {
         }
     }
 
-    /// W(T): the transaction's writable accounts that are parts of watched pools
+    /// W(T): the transaction's writable accounts that are parts of watched pools. FT-000 (S1-8): not a PumpSwap pool's
+    /// mint. A transaction marks a mint writable without writing it (a swap moves balances, not a mint's supply), and an
+    /// account a transaction leaves unchanged sends no update: in FT-000, 628 of the 1,405 groups that waited the full
+    /// `commit_timeout_ms` for a missing member missed only mints, and none of the 29,550 groups saw a mint written
+    /// together with a pool account or vault (the 3,374 that saw a mint written saw nothing else; 3,245 of them the PUMP
+    /// mint). A mint write still joins its transaction's group, or arrives as a late member. A run journaled before this
+    /// fix replays without it (`EngineKnobs::wt_skip_pump_mints` false)
     fn write_set(&self, tx: &Tx, keys: &[Pk]) -> Vec<Pk> {
-        keys.iter().enumerate().filter(|(i, k)| tx.is_writable(*i) && self.part_pools.contains_key(*k)).map(|(_, k)| *k).collect()
+        let skip = self.knobs.wt_skip_pump_mints;
+        keys.iter().enumerate().filter(|(i, k)| tx.is_writable(*i) && self.part_pools.get(*k).is_some_and(|ps| !(skip && self.pump_mint(k, ps)))).map(|(_, k)| *k).collect()
+    }
+
+    /// whether `k`, a part of the pools `ps`, is a PumpSwap pool's mint (its `extra`)
+    fn pump_mint(&self, k: &Pk, ps: &[usize]) -> bool {
+        ps.iter().any(|&p| { let m = &self.reg.pools[p]; m.venue == Venue::PumpSwap && m.extra.contains(k) })
     }
 
     /// resolve lookup tables, then register the write set and look for triggers
@@ -1954,7 +1998,7 @@ impl Engine {
         for pass in 0..2 {
             for l in &tx.lookups {
                 let idx = if pass == 0 { &l.writable } else { &l.readonly };
-                let t = self.alts.tables.get(&l.table);
+                let t = self.alts.get(&l.table);
                 for &i in idx {
                     match t.and_then(|t| t.get(i as usize).copied().flatten()) {
                         Some(k) => out.push(k),
@@ -1974,12 +2018,12 @@ impl Engine {
         if nw != w.len() || nr != r.len() { return; }
         let (mut wi, mut ri) = (0, 0);
         let mut learned = Vec::new();
+        let t_now = self.t_now;
         for l in &tx.lookups {
-            let t = self.alts.tables.entry(l.table).or_insert_with(|| vec![None; 256]);
-            let mut new = false;
-            for &i in &l.writable { if t[i as usize].is_none() { t[i as usize] = Some(w[wi]); new = true; } wi += 1; }
-            for &i in &l.readonly { if t[i as usize].is_none() { t[i as usize] = Some(r[ri]); new = true; } ri += 1; }
-            if new { learned.push(l.table); }
+            let mut entries: Vec<(u8, Pk)> = Vec::with_capacity(l.writable.len() + l.readonly.len());
+            for &i in &l.writable { entries.push((i, w[wi])); wi += 1; }
+            for &i in &l.readonly { entries.push((i, r[ri])); ri += 1; }
+            if self.alts.learn(l.table, &entries, t_now) { learned.push(l.table); }
         }
         for t in learned {
             self.alts.learned(t);
@@ -1991,23 +2035,13 @@ impl Engine {
     }
 
     /// a lookup table, fetched on the background runtime (its answer comes back as `Event::Alt`: found, no such account,
-    /// or the error)
+    /// or the error). FT-000 (S1-1): through the batched fetcher (`alts::Fetcher`, role `alt`): the tables asked for
+    /// while a request waits for its token share the next getMultipleAccounts
     fn fetch_alt(&mut self, table: Pk) {
         let Some(io) = &self.io else { self.offline_fetches.push(("alt", vec![table])); return };
-        let (rpc, back) = (io.rpc.clone(), io.tx_back.clone());
-        io.rt.spawn(async move {
-            let ev = match rpc.accounts(&[table]).await {
-                Ok((_, v)) => match v.into_iter().next().flatten() {
-                    Some(a) => match crate::tx::parse_alt(&a.data) {
-                        Some(addrs) => Event::Alt { table, addrs: Some(Arc::new(addrs)), err: None },
-                        None => Event::Alt { table, addrs: None, err: Some("not a lookup table".into()) },
-                    },
-                    None => Event::Alt { table, addrs: None, err: None },
-                },
-                Err(e) => Event::Alt { table, addrs: None, err: Some(crate::rpc::scrub(&format!("{e:#}"))) },
-            };
-            let _ = back.send(ev);
-        });
+        let p = &self.knobs.alts;
+        io.alt_fetch.get_or_init(|| crate::alts::Fetcher::start(io.rpc.with_role(crate::rpc::Role::Alt), &io.rt, io.tx_back.clone(), p.batch_max, p.calls_inflight,
+            std::time::Duration::from_millis(p.call_every_ms))).request(table);
     }
 
     /// a lookup table fetch answered: found tables release their waiting transactions; a failure is retried (I-6)
@@ -3506,6 +3540,51 @@ mod tests {
         assert!((ct["lag_ms"].as_f64().unwrap() - 15.016).abs() < 0.01, "first shred (T0+10 ms) to complete commit (T0+25.016 ms): {}", ct["lag_ms"]);
         // every route of those two decisions was priced on the complete state (no pending reason)
         for x in &d[1..] { assert!(x["routes"].as_array().unwrap().iter().all(|r| r["reason"] != "pending_commit"), "{x}"); }
+    }
+
+    /// FT-000 (S1-8): a PumpSwap pool's mint is never in W(T). A transaction marks the mint writable without changing it
+    /// (no update ever comes): its group completes at its last vault, not after `commit_timeout_ms` (628 of FT-000's 1,405
+    /// `timeout_unknown` groups missed only mints); the other parts and the pools' own accounts stay in it. A run
+    /// journaled before the fix (no `wt_skip_pump_mints` in its knobs) waits for the mint as it did: `timeout_unknown`
+    #[test]
+    fn a_pumpswap_mint_is_not_waited_for() {
+        let mut p = meta_k(1);
+        p.venue = Venue::PumpSwap;
+        let mint: Pk = [0x77; 32];
+        p.extra = vec![mint];
+        let mut r = rig_metas("wt-mint", StrategyCfg { state_triggers: true, ..StrategyCfg::default() }, &[(p.clone(), 1_000), (meta_k(2), 1_000)]);
+        assert!(r.e.part_pools.contains_key(&mint), "the mint is one of the pool's parts (present, not pending)");
+        let t = T0 + 10 * MS;
+        tx_ev(&mut r.e, shred_tx(sig(7), &[p.vault0, p.vault1, mint], None, 12, t));
+        acct(&mut r.e, p.vault1, vault(1_030 * SOL), 12, t + 15 * MS, Some(sig(7)), 10);
+        // the group is open: it waits for vault0, not for the mint
+        assert!(r.e.tracker.is_pending(&p.vault0) && !r.e.tracker.is_pending(&mint), "W(T) without the mint");
+        acct(&mut r.e, p.vault0, vault(970_000_000_000_000), 12, t + 15 * MS + 1_000, Some(sig(7)), 11);
+        let c = commits(&r);
+        let ct = c.iter().find(|x| x["txn"] == json!(sigs58(&sig(7)))).expect("resolved without a timer");
+        assert_eq!((ct["outcome"].as_str(), ct["resolved_by"].as_str()), (Some("complete"), Some("member")), "{ct}");
+        let w: Vec<&str> = ct["w_expected"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
+        assert!(w.contains(&b58(&p.vault0).as_str()) && !w.contains(&b58(&mint).as_str()), "{w:?}");
+        // a write to the mint stamped with the transaction after its group resolved is a late member (counted, marked)
+        acct(&mut r.e, mint, vault(5), 12, t + 16 * MS, Some(sig(7)), 12);
+        assert_eq!(r.e.counter("commit_late_member"), 1);
+        // a run journaled before the fix (its engine_init knobs lack the key) replays as it ran: the mint is waited for
+        let mut old = serde_json::to_value(EngineKnobs::default()).unwrap();
+        assert_eq!(old.as_object_mut().unwrap().remove("wt_skip_pump_mints"), Some(json!(true)), "on by default");
+        let k: EngineKnobs = serde_json::from_value(old).unwrap();
+        assert!(!k.wt_skip_pump_mints);
+        let mut r2 = rig_metas("wt-mint-old", StrategyCfg { state_triggers: true, ..StrategyCfg::default() }, &[(p.clone(), 1_000), (meta_k(2), 1_000)]);
+        r2.e.set_knobs(k);
+        tx_ev(&mut r2.e, shred_tx(sig(8), &[p.vault0, p.vault1, mint], None, 12, t));
+        acct(&mut r2.e, p.vault1, vault(1_030 * SOL), 12, t + 15 * MS, Some(sig(8)), 10);
+        assert!(r2.e.tracker.is_pending(&mint), "the W(T) of a run journaled before FT-000's fix names the mint");
+        acct(&mut r2.e, p.vault0, vault(970_000_000_000_000), 12, t + 15 * MS + 1_000, Some(sig(8)), 11);
+        assert!(!commits(&r2).iter().any(|x| x["txn"] == json!(sigs58(&sig(8)))), "both vaults written: still waiting for the mint");
+        r2.e.timers(t + 21 * MS, &mut nop());
+        let c2 = commits(&r2);
+        let ct2 = c2.iter().find(|x| x["txn"] == json!(sigs58(&sig(8)))).expect("resolved by the timer");
+        assert_eq!((ct2["outcome"].as_str(), ct2["resolved_by"].as_str()), (Some("timeout_unknown"), Some("timer")), "{ct2}");
+        assert!(ct2["w_expected"].as_array().unwrap().contains(&json!(b58(&mint))), "{ct2}");
     }
 
     /// S1b (F2): the same split transaction not seen in shreds (W(T) unknown): resolved by quiescence, and no route is

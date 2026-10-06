@@ -173,28 +173,33 @@ pub const ENTRIES_MAGIC: [u8; 8] = *b"ARBXENT\0";
 /// bundles and outcomes 2.0 (their v2 shapes), copies 1.2 and decisions 1.1 (fields added); WP-07 ledger (core),
 /// snapshots and recon (plain), status 2.1 (`money` from the ledger), the journal (same framing, 2.2: INPUT 13
 /// `snapshot`, INPUT 7's `ledger`, the decision-point record's `money`), wallet 1.1 (`found_by` `executor_status`),
-/// outcomes 2.1 (`ledger` filled)
+/// outcomes 2.1 (`ledger` filled); the FT-000 fixes the journal 2.3 (ALT `found` 4, the cache's evictions), exec 2.2
+/// (`sample`), alts 2.1, alts-final 1.2, slotidx 1.1 (`pos_kind`), status 2.1 (`rpc_budget`) and wallet 1.1 (block
+/// indexes only, the hour's rows, the cursor). At their merge (integ/stage0) WP-07's and the FT-000 fixes' status 2.1
+/// and wallet 1.1 were two shapes under one number each: the merged streams are status 2.2 (`money`, `rpc_budget`,
+/// WP-20's `alerts`) and wallet 1.2 (both lanes' changes); the journal stays 2.3, now with WP-07's INPUT 13 and
+/// `money` too (WP-07 added them within 2.2's framing; MEASUREMENT §4.13)
 const STATIC: [(&str, Class, Format, &str, bool); 38] = [
     ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/2.0", false),
     ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.2", false),
     ("bundles", Class::Core, Format::Jsonl, "arbx.bundles/2.0", false),
     ("outcomes", Class::Core, Format::Jsonl, "arbx.outcomes/2.1", false),
     ("accounts", Class::Replay, Format::Bin { magic: ACCOUNTS_MAGIC, format: 2 }, "arbx.accounts/2.1", false),
-    ("journal", Class::Replay, Format::Bin { magic: JOURNAL_MAGIC, format: 2 }, "arbx.journal/2.2", false),
-    ("exec", Class::Chain, Format::Jsonl, "arbx.exec/2.1", false),
+    ("journal", Class::Replay, Format::Bin { magic: JOURNAL_MAGIC, format: 2 }, "arbx.journal/2.3", false),
+    ("exec", Class::Chain, Format::Jsonl, "arbx.exec/2.2", false),
     ("txarr", Class::Chain, Format::Text, "arbx.txarr/1.1", false),
     ("arrivals", Class::Chain, Format::Jsonl, "arbx.arrivals/1.1", false),
     ("moves", Class::Chain, Format::Text, "arbx.moves/2.0", false),
     ("poh", Class::Chain, Format::Text, "arbx.poh/2.0", false),
     ("slots-feed", Class::Chain, Format::Text, "arbx.slots-feed/2.0", false),
-    ("alts-final", Class::Chain, Format::Jsonl, "arbx.alts-final/1.1", true),
+    ("alts-final", Class::Chain, Format::Jsonl, "arbx.alts-final/1.2", true),
     ("triggers", Class::Chain, Format::Jsonl, "arbx.triggers/2.0", false),
     ("predictions", Class::Chain, Format::Jsonl, "arbx.predictions/2.0", false),
     ("caps", Class::Chain, Format::Jsonl, "arbx.caps/1.2", false),
     ("sims", Class::Chain, Format::Jsonl, "arbx.sims/1.1", false),
     ("opportunities", Class::Chain, Format::Jsonl, "arbx.opportunities/1.2", false),
     ("rivals", Class::Bulk, Format::Jsonl, "arbx.rivals/1.2", false),
-    ("status", Class::Slow, Format::PlainJsonl, "arbx.status/2.1", false),
+    ("status", Class::Slow, Format::PlainJsonl, "arbx.status/2.2", false),
     ("events", Class::Slow, Format::PlainJsonl, "arbx.events/1.0", false),
     ("feedhealth", Class::Slow, Format::PlainJsonl, "arbx.feedhealth/1.0", false),
     ("resources", Class::Slow, Format::PlainJsonl, "arbx.resources/1.0", false),
@@ -205,9 +210,9 @@ const STATIC: [(&str, Class, Format, &str, bool); 38] = [
     ("leaders", Class::Chain, Format::Jsonl, "arbx.leaders/1.1", false),
     ("commits", Class::Core, Format::Jsonl, "arbx.commits/1.0", false),
     ("decisions", Class::Core, Format::Jsonl, "arbx.decisions/1.1", false),
-    ("alts", Class::Chain, Format::Jsonl, "arbx.alts/2.0", false),
-    ("wallet", Class::Core, Format::Jsonl, "arbx.wallet/1.1", false),
-    ("slotidx", Class::Chain, Format::Jsonl, "arbx.slotidx/1.0", false),
+    ("alts", Class::Chain, Format::Jsonl, "arbx.alts/2.1", false),
+    ("wallet", Class::Core, Format::Jsonl, "arbx.wallet/1.2", false),
+    ("slotidx", Class::Chain, Format::Jsonl, "arbx.slotidx/1.1", false),
     ("txfetch", Class::Chain, Format::Jsonl, "arbx.txfetch/1.0", false),
     ("validators", Class::Bulk, Format::Jsonl, "arbx.validators/1.0", false),
     ("ledger", Class::Core, Format::Jsonl, "arbx.ledger/1.0", false),
@@ -426,6 +431,9 @@ pub struct Recorder {
     /// WP-20: every events.jsonl event is shown to the alerts (`Rec::set_alert_tap`; src/alerts.rs `classify`), on the
     /// producer's thread: the tap never waits
     alert_tap: OnceLock<AlertTap>,
+    /// FT-000 (S1-5): exec.jsonl's transaction-stream records that touch no watched account, 1 in
+    /// `[record] exec_unwatched_sample` kept
+    pub(crate) exec_unwatched: sample::Sampler,
 }
 
 /// WP-20: what the recorder hands every events.jsonl event to (kind, subsystem, feed, detail) before it queues it
@@ -482,7 +490,7 @@ pub fn start(opts: Opts) -> Result<Rec> {
     let (echo_done_tx, echo_done_rx) = crossbeam_channel::bounded::<()>(1);
     let started_ns = now_ns();
     let r = Arc::new(Recorder { dir: opts.dir.clone(), run: opts.run, producer: opts.producer, keyframe_every: AtomicU32::new(cfg.accounts_keyframe_every),
-        rival_venues: sample::Sampler::new(cfg.rivals_venues_sample), disk: Mutex::new(disk::Ladder::new(&cfg)), cfg, streams, queues, tx, threads: Mutex::new(Vec::new()), closed: AtomicBool::new(false), started_ns,
+        rival_venues: sample::Sampler::new(cfg.rivals_venues_sample), exec_unwatched: sample::Sampler::new(cfg.exec_unwatched_sample), disk: Mutex::new(disk::Ladder::new(&cfg)), cfg, streams, queues, tx, threads: Mutex::new(Vec::new()), closed: AtomicBool::new(false), started_ns,
         dead: Default::default(), progress: Default::default(), fatal: OnceLock::new(), echo: echo_tx, echo_done: Mutex::new(Some(echo_done_rx)),
         echo_dropped: AtomicU64::new(0), close_timeout: Mutex::new(Vec::new()), crash: Default::default(),
         close_wait_ms: AtomicU64::new(CLOSE_WAIT.as_millis() as u64),
@@ -958,6 +966,10 @@ impl Rec {
 
     /// WP-20: show every events.jsonl event to the alerts (once; a tap must never wait)
     pub fn set_alert_tap(&self, tap: AlertTap) { if let Some(x) = &self.0 { let _ = x.alert_tap.set(tap); } }
+    /// FT-000 (S1-5): whether exec.jsonl writes the record of the transaction `sig`, which touches no watched account:
+    /// 1 in `[record] exec_unwatched_sample`, by the signature (I-9's rule), counted (manifest.json
+    /// `sampling.exec_unwatched`). Some(the counts the record carries as `sample`), None when it is left out
+    pub fn sample_exec_unwatched(&self, sig: &[u8]) -> Option<sample::Kept> { self.0.as_ref()?.exec_unwatched.take(sig) }
 
     pub fn sync(&self) { if let Some(x) = &self.0 { x.sync(); } }
     pub fn close(&self) { if let Some(x) = &self.0 { x.close(); } }

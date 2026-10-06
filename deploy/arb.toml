@@ -88,11 +88,13 @@ max_tx_version = 1
 name = "haan"
 roles = ["wallet", "blockhash", "backfill"]
 max_rps = 4
+reserve = { backfill = 0.5 }   # FT-000 S1-1: 2/s of Haan's 4 for the backfill, whatever the busier roles ask (it got 4 fetches in 30 min)
 
 [[chainfetch.provider]]
 name = "shyft"
 roles = ["slotidx", "sample", "backfill", "wallet"]
 max_rps = 4
+reserve = { slotidx = 0.95 }   # FT-000 S1-1: 3.8/s of Shyft's 4 for the slot index (one getBlock a confirmed slot, 3.7/s; it fell 3,005 slots behind)
 
 [strategy]
 sizes_sol = [0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
@@ -398,8 +400,14 @@ min_free_gb = 25
 bg_threads = 3
 
 [alts]
-# WP-04 / I-6: lookup-table fetches retried (never cached as missing), capped, the previous segment's tables preloaded
-max_inflight = 16
+# WP-04 / I-6: lookup-table fetches retried (never cached as missing), capped, the previous segment's tables preloaded.
+# FT-000: batched (up to batch_max tables a getMultipleAccounts; max_inflight counts tables), the cache bounded (LRU)
+max_inflight = 400
+batch_max = 100
+calls_inflight = 2
+call_every_ms = 500
+max_tables = 20000
+max_mb = 192
 preload = "auto"
 
 [accuracy]

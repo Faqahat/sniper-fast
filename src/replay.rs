@@ -505,6 +505,11 @@ pub struct Drive {
     pub timers: u64,
     pub missing_accounts: u64,
     pub verdict_mismatches: u64,
+    /// FT-000 (S1-4): the run's lookup-table evictions (ALT `found` 4 records) and those the replay did not reproduce;
+    /// `alts_overridden`: a what-if changed `[alts]` (its evictions differ by design)
+    pub alt_evictions: u64,
+    pub alt_evict_mismatches: u64,
+    pub alts_overridden: bool,
     pub skipped: u64,
     /// INPUT 9 settlements fed back (to the executor)
     pub settled: u64,
@@ -544,7 +549,8 @@ trait Hook {
 /// it; the hooks act between records); `rec` is the replay's recorder (or off)
 fn drive(inp: &Inputs, boot: Boot, sets: &[Set], rec: &Rec, hook: &mut dyn Hook) -> Result<(Engine, EngineInit, Drive)> {
     let t0 = std::time::Instant::now();
-    let mut d = Drive { boot_records: boot.records.len() as u64, missing_accounts: boot.missing, gaps: boot.gaps.clone(), ..Default::default() };
+    let mut d = Drive { boot_records: boot.records.len() as u64, missing_accounts: boot.missing, gaps: boot.gaps.clone(),
+        alts_overridden: sets.iter().any(|x| x.key.starts_with("alts.") || x.key.starts_with("knobs.alts.")), ..Default::default() };
     let (mut e, init) = build_engine(inp, &boot, sets, rec)?;
     let Boot { mut jf, mut acc, .. } = boot;
     let none: HashMap<u64, AcctRecord> = HashMap::default();
@@ -589,6 +595,8 @@ fn drive(inp: &Inputs, boot: Boot, sets: &[Set], rec: &Rec, hook: &mut dyn Hook)
         d.timers += st.timers;
         d.missing_accounts += st.missing_accounts;
         d.verdict_mismatches += st.verdict_mismatches;
+        d.alt_evictions += st.alt_evictions;
+        d.alt_evict_mismatches += st.alt_evict_mismatches;
         d.skipped += st.skipped;
         d.settled += st.settled;
         d.gate_observed += st.gate_observed;
@@ -705,6 +713,9 @@ fn not_whole(run: &Path, d: &Drive, replay_dropped: u64, exec: &RunExec, uses: R
     }
     if d.verdict_mismatches > 0 {
         v.push(json!({ "why": "verdict_mismatch", "n": d.verdict_mismatches, "detail": "ACCOUNT records whose journaled store verdict the replayed store does not give: the replayed store diverged" }));
+    }
+    if d.alt_evict_mismatches > 0 && !d.alts_overridden {
+        v.push(json!({ "why": "alt_evict_mismatch", "n": d.alt_evict_mismatches, "detail": "lookup-table evictions (ALT found 4) the replay did not reproduce: its cache diverged" }));
     }
     let manifest: Option<Value> = std::fs::read(run.join("manifest.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
     for s in manifest.as_ref().and_then(|m| m["streams"].as_array()).into_iter().flatten() {
@@ -827,7 +838,8 @@ pub fn replay(run: &Path, o: &Opts) -> Result<Report> {
         "overrides": o.sets.iter().map(|s| format!("{}={}", s.key, s.value)).collect::<Vec<_>>(),
         "window": { "from_slot": o.from_slot, "to_slot": o.to_slot, "stopped_at_seq": d.stopped_at.map(|s| s.0), "stopped_at_t_ns": d.stopped_at.map(|s| s.1) },
         "journal": { "boot_records": d.boot_records, "records": d.records, "events": d.events, "timers": d.timers, "skipped_inputs": d.skipped,
-            "gate_observed": d.gate_observed, "gate_staged": d.gate_staged, "t_first_ns": d.t_first, "t_last_ns": d.t_last, "span_ms": span_ns as f64 / 1e6,
+            "gate_observed": d.gate_observed, "gate_staged": d.gate_staged, "alt_evictions": d.alt_evictions, "alt_evict_mismatches": d.alt_evict_mismatches,
+            "t_first_ns": d.t_first, "t_last_ns": d.t_last, "span_ms": span_ns as f64 / 1e6,
             "gaps": d.gaps.iter().map(|g| json!({ "first_lost_seq": g.first_lost_seq, "n_lost": g.n_lost, "t_before": g.t_before, "t_after": g.t_after })).collect::<Vec<_>>() },
         "accounts": { "missing": d.missing_accounts, "verdict_mismatches": d.verdict_mismatches,
             "gaps": d.accounts_gaps.iter().map(|g| json!({ "first_lost_aseq": g.0, "n_lost": g.1 })).collect::<Vec<_>>() },

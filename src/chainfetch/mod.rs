@@ -279,6 +279,8 @@ pub struct Opts {
     pub chain: Arc<dyn Chain>,
     /// the backfill providers' summed max_rps (INFINITY: unlimited): the most the backfill ever asks for
     pub backfill_cap: f64,
+    /// FT-000 (S1-12): the previous segment's wallet cursor (signature, slot): source (d) lists only what is newer
+    pub wallet_cursor: Option<(String, u64)>,
 }
 
 /// the gauges and totals the service publishes (once a second) for the status line
@@ -288,6 +290,10 @@ pub struct Published {
     pub queued: u64, pub dropped: u64, pub fetched: u64, pub gave_up: u64, pub expired: u64, pub refused: u64, pub deferred: u64, pub dup_records: u64,
     pub slotidx_lag: Option<u64>, pub slotidx_pending: usize, pub slot_ok: u64, pub slot_skipped: u64, pub slot_error: u64, pub slot_dropped: u64, pub slot_refused: u64,
     pub idx_n: u64, pub idx_mismatch: u64, pub idx_updates: u64, pub missing_sigs: u64, pub d2_landed: u64, pub d2_absent: u64, pub d2_unknown: u64,
+    /// FT-000 (S1-2): stream comparisons listed below / above the stream's index; lines by position kind; positions given
+    /// as ranks only; the providers whose lists leave votes out
+    pub idx_below: u64, pub idx_above: u64, pub kind_block_index: u64, pub kind_nonvote_rank: u64, pub kind_unverified: u64, pub rank_only: u64,
+    pub votes_omitted_by: Vec<String>,
     pub wallet_pending: usize, pub wallet_watch: usize, pub wallet_fetched: u64, pub wallet_gave_up: u64, pub wallet_missing: u64, pub wallet_unlanded: u64,
     pub wallet_unlanded_by_slot: u64, pub wallet_landed_by_status: u64, pub wallet_status_calls: u64,
     pub bh: Option<(String, u64, Option<u64>, u64)>, pub bh_disagree: u64, pub bh_polls: u64, pub bh_poll_skipped: u64,
@@ -321,7 +327,8 @@ impl Shared {
             "slotidx_lag_slots_now": p.slotidx_lag, "slotidx_pending_now": p.slotidx_pending,
             "slotidx_delta": { "ok": d(p.slot_ok, prev.slot_ok), "skipped": d(p.slot_skipped, prev.slot_skipped), "error": d(p.slot_error, prev.slot_error),
                 "dropped": d(p.slot_dropped, prev.slot_dropped), "refused": d(p.slot_refused, prev.slot_refused) },
-            "idx_check_delta": { "n": d(p.idx_n, prev.idx_n), "mismatches": d(p.idx_mismatch, prev.idx_mismatch) },
+            "idx_check_delta": { "n": d(p.idx_n, prev.idx_n), "mismatches": d(p.idx_mismatch, prev.idx_mismatch), "below": d(p.idx_below, prev.idx_below),
+                "above": d(p.idx_above, prev.idx_above) },
             "idx_updates_delta": d(p.idx_updates, prev.idx_updates), "missing_delta": d(p.missing_sigs, prev.missing_sigs),
             "d2_landed_delta": d(p.d2_landed, prev.d2_landed), "d2_absent_delta": d(p.d2_absent, prev.d2_absent), "d2_unknown_delta": d(p.d2_unknown, prev.d2_unknown),
             "wallet_pending_now": p.wallet_pending, "wallet_watch_now": p.wallet_watch, "wallet_fetched_delta": d(p.wallet_fetched, prev.wallet_fetched),
@@ -337,6 +344,13 @@ impl Shared {
             "published_age_ms_now": age,
             "by_role": self.reg.by_role_json("status"),
         });
+        // FT-000 (S1-2): what the slot index's positions were (its lines by kind, positions kept as ranks only, the
+        // providers whose lists leave the votes out)
+        let mut cf = cf;
+        cf["slotidx_pos_kind_delta"] = json!({ "block_index": d(p.kind_block_index, prev.kind_block_index), "nonvote_rank": d(p.kind_nonvote_rank, prev.kind_nonvote_rank),
+            "unverified": d(p.kind_unverified, prev.kind_unverified) });
+        cf["slotidx_rank_only_delta"] = json!(d(p.rank_only, prev.rank_only));
+        cf["slotidx_votes_omitted_by_now"] = json!(p.votes_omitted_by.clone());
         let dn = d(p.denom, prev.denom);
         let wn = d(p.wallet_n, prev.wallet_n);
         let sn = d(p.slots_n, prev.slots_n);
@@ -398,6 +412,32 @@ fn pool_role(r: u8) -> bool { matches!(r, role::POOL | role::VAULT | role::DLMM_
 /// a call refused for want of a token: nothing was sent (no txfetch.jsonl line; the registry counts it as `rate_budget`)
 fn refused<T>(r: &Result<T, RpcFailure>) -> bool { matches!(r, Err(e) if e.class == ErrClass::Budget) }
 
+/// FT-000 (S1-12): the wallet cursor's file in a run directory
+pub const WALLET_CURSOR: &str = "wallet-cursor.json";
+
+/// The newest sibling segment's wallet cursor for `wallet` (`[chainfetch] wallet_cursor`: "auto" among `dir`'s siblings,
+/// a path, or "" for none): (signature, slot, the file)
+pub fn read_wallet_cursor(setting: &str, dir: &std::path::Path, wallet: &str) -> Option<(String, u64, std::path::PathBuf)> {
+    let file = match setting {
+        "" => return None,
+        "auto" => {
+            let parent = dir.parent()?;
+            let mut best: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+            for e in std::fs::read_dir(parent).ok()?.flatten() {
+                let p = e.path().join(WALLET_CURSOR);
+                if e.path() == dir || !p.is_file() { continue; }
+                let Ok(t) = std::fs::metadata(&p).and_then(|m| m.modified()) else { continue };
+                if best.as_ref().is_none_or(|b| t > b.0) { best = Some((t, p)); }
+            }
+            best?.1
+        }
+        p => std::path::PathBuf::from(p),
+    };
+    let v: Value = serde_json::from_slice(&std::fs::read(&file).ok()?).ok()?;
+    if v["wallet"].as_str() != Some(wallet) || !v["schema"].as_str().is_some_and(|x| x.starts_with("arbx.wallet-cursor/1.")) { return None; }
+    Some((v["sig"].as_str()?.to_string(), v["slot"].as_u64()?, file))
+}
+
 /// a blockhash older than this is not offered (it expires after 150 blocks, about a minute)
 const BH_MAX_AGE_NS: u64 = 60_000_000_000;
 /// the poll is skipped while another source gave a confirmed blockhash this fresh, this close to the chain's tip
@@ -458,24 +498,35 @@ pub struct Service {
     next_tick: u64,
     last_backlog_event: Option<u64>,
     last_tap_event: (u64, u64),
+    /// FT-000 (S1-12): the newest cursor so far, (slot, signature, carried: the one this segment started from), whether
+    /// `wallet-cursor.json` holds it, and when it is next looked at
+    cursor: Option<(u64, String, bool)>,
+    cursor_written: bool,
+    next_cursor_write: u64,
     unseen: Option<(u64, u64, u64)>,
     // totals
     denom_n: u64, with_tx: u64, with_idx: u64, dup_records: u64, idx_updates: u64, missing_sigs: u64, d2_landed: u64, d2_absent: u64, d2_unknown: u64,
     deferred: u64, bh_polls: u64, bh_poll_skipped: u64, status_calls: u64,
+    /// FT-000 (S1-2): tracked positions a slot index line gave as non-vote ranks (or unverified): not written as `idx`
+    rank_only: u64,
 }
 
 impl Service {
     pub fn new(o: Opts, shared: Arc<Shared>) -> Service {
         let wallet = o.wallet.map(|w| Wallet::new(w, crate::build::ata_of(&w, &crate::venues::WSOL, &crate::pda::TOKEN_PROGRAM), o.route_program));
         let bf = Backfill::new(o.cfg.after_ms, o.cfg.max_backlog, o.cfg.rps.fixed(), o.backfill_cap, 16);
+        let mut wallet = wallet;
+        if let Some(w) = wallet.as_mut() { w.until = o.wallet_cursor.as_ref().map(|c| c.0.clone()); }
         let first_sample = o.cfg.sample_every_s.max(30) * SEC;
         Service { wallet58: o.wallet.map(|w| b58(&w)), wallet, cfg: o.cfg, roles: o.roles, rec: o.rec, back: o.back, chain: o.chain, shared, base: tokio::time::Instant::now(),
             known: HashMap::new(), known_order: VecDeque::new(), stream: HashMap::new(), stream_order: VecDeque::new(), checks: BinaryHeap::new(), cov_q: VecDeque::new(),
             ours_accounts: HashMap::new(), ours_pools: HashMap::new(), bf, cap_cfg: if o.backfill_cap > 0.0 { o.backfill_cap } else { f64::INFINITY },
             si: SlotIndex::new(4, 3_000), ring: Ring::new(512), last_head: None, started: false,
             next_sigs: 30 * SEC, sigs_inflight: false, next_status: 0, status_inflight: false, wallet_inflight: 0, next_sample: first_sample, sample_inflight: false,
-            next_poll: 0, poll_inflight: false, next_tick: 0, last_backlog_event: None, last_tap_event: (0, 0), unseen: None, denom_n: 0, with_tx: 0, with_idx: 0,
-            dup_records: 0, idx_updates: 0, missing_sigs: 0, d2_landed: 0, d2_absent: 0, d2_unknown: 0, deferred: 0, bh_polls: 0, bh_poll_skipped: 0, status_calls: 0 }
+            next_poll: 0, poll_inflight: false, next_tick: 0, last_backlog_event: None, last_tap_event: (0, 0), cursor: o.wallet_cursor.map(|(sig, slot)| (slot, sig, true)), cursor_written: false,
+            next_cursor_write: 0, unseen: None, denom_n: 0, with_tx: 0, with_idx: 0,
+            dup_records: 0, idx_updates: 0, missing_sigs: 0, d2_landed: 0, d2_absent: 0, d2_unknown: 0, deferred: 0, bh_polls: 0, bh_poll_skipped: 0, status_calls: 0,
+            rank_only: 0 }
     }
 
     /// the service's monotonic clock, ns since it started (tokio's: a paused clock in tests)
@@ -499,6 +550,23 @@ impl Service {
         }
         let now = self.mono();
         self.publish(now);
+        self.write_cursor(true);
+    }
+
+    /// FT-000 (S1-12): `wallet-cursor.json` in the run directory (the next segment's (d) starts after it): this segment's
+    /// cursor when it has one, else the one it started from; written when it changes (at most every 10 s) and at the end
+    fn write_cursor(&mut self, last: bool) {
+        let Some(w) = &self.wallet else { return };
+        let Some(dir) = self.rec.dir().map(|d| d.to_path_buf()) else { return };
+        // the cursor only moves forward (its signatures may be forgotten after 2 h: the newest one stays)
+        if let Some((slot, sig)) = w.cursor() {
+            if self.cursor.as_ref().is_none_or(|c| slot > c.0) { self.cursor = Some((slot, b58s(&sig), false)); self.cursor_written = false; }
+        }
+        let Some((slot, sig, carried)) = self.cursor.clone() else { return };
+        if self.cursor_written || (carried && !last) { return; }
+        self.cursor_written = true;
+        let v = json!({ "schema": "arbx.wallet-cursor/1.0", "wallet": b58(&w.wallet), "sig": sig, "slot": slot, "carried": carried, "t_ns": now_ns() });
+        self.rec.task(move || { let _ = crate::control::write_atomic(&dir.join(WALLET_CURSOR), v.to_string().as_bytes()); });
     }
 
     fn spawn(&self, job: Job, role: Role, method: &'static str, params: Value, b: Bounds, dtx: &tokio::sync::mpsc::UnboundedSender<Done>) {
@@ -706,8 +774,9 @@ impl Service {
                 self.sigs_inflight = true;
                 self.next_sigs = now + self.cfg.sigs_every_s * SEC;
                 let since_unix = (now_ns() / SEC) as i64 - 3_600 - 60;
-                self.spawn(Job::Sigs { page: 0, since_unix }, Role::Wallet, "getSignaturesForAddress",
-                    json!([w58, { "limit": 1_000, "commitment": "confirmed" }]), Bounds::fetch(Duration::from_secs(5), 1), dtx);
+                let mut opt = json!({ "limit": 1_000, "commitment": "confirmed" });
+                if let Some(u) = self.wallet.as_ref().and_then(|w| w.until.clone()) { opt["until"] = json!(u); }
+                self.spawn(Job::Sigs { page: 0, since_unix }, Role::Wallet, "getSignaturesForAddress", json!([w58, opt]), Bounds::fetch(Duration::from_secs(5), 1), dtx);
             }
         }
         // the slot index
@@ -786,6 +855,7 @@ impl Service {
         }
         self.ours_accounts.retain(|_, u| *u > now);
         self.ours_pools.retain(|_, u| *u > now);
+        if now >= self.next_cursor_write { self.next_cursor_write = now + 10 * SEC; self.write_cursor(false); }
         let td = self.shared.tap_dropped.load(Relaxed);
         if td > self.last_tap_event.1 && now.saturating_sub(self.last_tap_event.0) >= 60 * SEC {
             self.last_tap_event = (now, td);
@@ -807,6 +877,9 @@ impl Service {
             slotidx_lag: self.si.lag_slots(), slotidx_pending: self.si.pending_now(), slot_ok: self.si.ok_total, slot_skipped: self.si.skipped_total,
             slot_error: self.si.error_total, slot_dropped: self.si.dropped_total, slot_refused: self.si.refused_total, idx_n: self.si.idx_n_total,
             idx_mismatch: self.si.idx_mismatch_total, idx_updates: self.idx_updates, missing_sigs: self.missing_sigs, d2_landed: self.d2_landed, d2_absent: self.d2_absent,
+            idx_below: self.si.idx_below_total, idx_above: self.si.idx_above_total, kind_block_index: self.si.kind_block_index_total,
+            kind_nonvote_rank: self.si.kind_nonvote_rank_total, kind_unverified: self.si.kind_unverified_total, rank_only: self.rank_only,
+            votes_omitted_by: { let mut v: Vec<String> = self.si.omits_votes.iter().cloned().collect(); v.sort(); v },
             d2_unknown: self.d2_unknown,
             wallet_pending: w.map_or(0, |w| w.pending_now()), wallet_watch: w.map_or(0, |w| w.watching()), wallet_fetched: wv(|w| w.fetched_total),
             wallet_gave_up: wv(|w| w.gave_up_total), wallet_missing: wv(|w| w.missing_total), wallet_unlanded: wv(|w| w.unlanded_total),
@@ -990,25 +1063,33 @@ impl Service {
         let Ok(f) = r else { self.sigs_inflight = false; self.next_sigs = self.next_sigs.min(now + 60 * SEC); return };
         let Some(w) = &mut self.wallet else { self.sigs_inflight = false; return };
         let (_new, before, more) = w.sigs_page(&f.value, since_unix, now);
+        let until = w.until.clone();
         match (more && page < 20, before) {
-            (true, Some(b)) => self.spawn(Job::Sigs { page: page + 1, since_unix }, Role::Wallet, "getSignaturesForAddress",
-                json!([key, { "limit": 1_000, "commitment": "confirmed", "before": b }]), Bounds::fetch(Duration::from_secs(5), 1), dtx),
+            (true, Some(b)) => {
+                let mut opt = json!({ "limit": 1_000, "commitment": "confirmed", "before": b });
+                if let Some(u) = until { opt["until"] = json!(u); }
+                self.spawn(Job::Sigs { page: page + 1, since_unix }, Role::Wallet, "getSignaturesForAddress", json!([key, opt]), Bounds::fetch(Duration::from_secs(5), 1), dtx)
+            }
             _ => self.sigs_inflight = false,
         }
     }
 
-    /// what one slot index line says: positions, D2 landings, fork evidence, the blockhash
+    /// what one slot index line says: positions, D2 landings, fork evidence, the blockhash. FT-000 (S1-2): only a line
+    /// whose positions are block indexes (`pos_kind` `block_index`) gives a record its `idx`; a non-vote rank keeps the
+    /// order within the slot (slotidx.jsonl `tracked`) but is never written as an index
     fn apply_index(&mut self, ix: Indexed, now: u64) {
         let slot = ix.slot;
         let status = ix.line["status"].clone();
+        let exact = ix.pos_kind == "block_index";
         self.rec.json(rec::SLOTIDX, ix.line);
         let after = self.bf.after_ns;
         for (sig, idx, kind) in &ix.found {
+            if !exact { self.rank_only += 1; }
             if let Some(e) = self.known.get_mut(sig) {
-                e.idx = Some(*idx);
+                if exact { e.idx = Some(*idx); }
                 e.forked = false;
-                if e.rec.is_some() && e.t_idx.is_none() { e.t_idx = Some(now); }
-                if matches!(e.rec, Some(RecSrc::Backfill | RecSrc::Sample)) && !e.rec_idx {
+                if exact && e.rec.is_some() && e.t_idx.is_none() { e.t_idx = Some(now); }
+                if exact && matches!(e.rec, Some(RecSrc::Backfill | RecSrc::Sample)) && !e.rec_idx {
                     e.rec_idx = true;
                     self.idx_updates += 1;
                     self.rec.json(rec::EXEC, json!({ "sig": b58s(sig), "idx_update": idx, "src": "slotidx" }));
@@ -1020,7 +1101,7 @@ impl Service {
                     if e.rec.is_none() && !e.queued { self.checks.push(Reverse((e.first + after, *sig))); }
                 }
             }
-            if let Some(w) = &mut self.wallet {
+            if let Some(w) = self.wallet.as_mut().filter(|_| exact) {
                 if let Some(s) = w.get_mut(sig) {
                     if s.recorded.is_some() && s.idx.is_none() {
                         s.idx = Some(*idx);
@@ -1058,9 +1139,13 @@ impl Service {
         self.txfetch(Role::Sample, "getBlock", slot.to_string(), "coverage_sample", queued_ns, &r, None, None);
         let Ok(f) = r else { return };
         let Some(txs) = f.value["transactions"].as_array() else { return };
+        let parsed: Vec<Option<RpcTx>> = txs.iter().map(|t| txjson::from_rpc(t).ok()).collect();
+        // FT-000 (S1-2): a list without a single vote transaction left the votes out (every block has them): its positions
+        // are non-vote ranks, kept as `block_rank`, never as `idx`
+        let with_votes = parsed.iter().flatten().any(|x| x.keys.contains(&crate::feeds::entries::VOTE_PROGRAM));
         let (mut watched, mut unseen) = (0u64, 0u64);
-        for (i, t) in txs.iter().enumerate() {
-            let Ok(x) = txjson::from_rpc(t) else { continue };
+        for (i, x) in parsed.into_iter().enumerate() {
+            let Some(x) = x else { continue };
             if !x.keys.iter().any(|k| self.roles.get(k).is_some_and(|r| touch_role(r.role))) { continue; }
             watched += 1;
             let in_wallet = self.wallet.as_ref().is_some_and(|w| w.get(&x.sig).is_some());
@@ -1069,18 +1154,20 @@ impl Service {
             let has_rec = self.stream.contains_key(&x.sig) || in_wallet || self.known.get(&x.sig).is_some_and(|e| e.rec.is_some());
             if has_rec || x.meta.is_none() { continue; }
             // a watched transaction of the block with no record yet: its record from the block (saves its getTransaction)
+            let idx = with_votes.then_some(i as u64);
             let mut fresh = Sig::new(now, slot, 0, backfill::PRIO_REST);
-            fresh.rec_idx = true;
+            fresh.rec_idx = with_votes;
             let e = self.know(x.sig, fresh, now);
             e.bits |= F_SAMPLE;
             e.rec = Some(RecSrc::Sample);
-            e.idx = Some(i as u64);
-            e.rec_idx = true;
+            if idx.is_some() { e.idx = idx; }
+            e.rec_idx = e.idx.is_some();
             e.t_exec = Some(now);
-            e.t_idx = Some(now);
-            let bits = e.bits;
+            if e.idx.is_some() { e.t_idx = Some(now); }
+            let (bits, idx) = (e.bits, e.idx);
             if e.queued { e.queued = false; self.bf.remove(&x.sig); }
-            self.emit_tx(rec::EXEC, Arc::new(x), slot, Some(i as u64), "rpc-block-sample", bits, None, 4_096);
+            let extras = (!with_votes).then(|| Map::from_iter([("block_rank".to_string(), json!(i)), ("pos_kind".to_string(), json!("nonvote_rank"))]));
+            self.emit_tx(rec::EXEC, Arc::new(x), slot, idx, "rpc-block-sample", bits, extras, 4_096);
         }
         self.unseen = Some((slot, watched, unseen));
     }

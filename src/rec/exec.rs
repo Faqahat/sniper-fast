@@ -16,8 +16,40 @@ use base64::Engine as _;
 use serde_json::{json, Map, Value};
 use std::sync::{Arc, LazyLock};
 
-/// One transaction of a gRPC transaction stream
-pub struct GrpcTx { pub sig: Vec<u8>, pub slot: u64, pub idx: u64, pub t: u64, pub tx: Arc<PbTransaction>, pub meta: PbMeta, pub bank_id: Option<u64> }
+/// One transaction of a gRPC transaction stream. `sample`: FT-000 (S1-5), the counts of the sampled population when it
+/// touches no watched account (None: kept in full)
+pub struct GrpcTx { pub sig: Vec<u8>, pub slot: u64, pub idx: u64, pub t: u64, pub tx: Arc<PbTransaction>, pub meta: PbMeta, pub bank_id: Option<u64>,
+    pub sample: Option<super::sample::Kept> }
+
+/// FT-000 (S1-5): the roles whose accounts make a transaction worth its full exec.jsonl record when it only reads them:
+/// pool-specific state (pools, vaults, DLMM bin arrays and bitmap extensions) and our wallet and its token accounts (the
+/// chain-fetch service's D2 rule). Mints, configs, the fee config, the Clock and programdata are read by every
+/// transaction of a venue; one that writes any watched account is kept in full too
+pub fn touch_role(r: u8) -> bool { matches!(r, role::POOL | role::VAULT | role::DLMM_BIN_ARRAY | role::DLMM_BITMAP_EXT | role::WALLET | role::WALLET_TOKEN_ACCOUNT) }
+
+/// Solana's writability of account `i`: signed writable, unsigned writable, then the loaded writable addresses
+pub fn writable(i: usize, n_static: usize, n_lw: usize, h: &crate::feeds::grpc::PbHeader) -> bool {
+    let nreq = h.num_required_signatures as usize;
+    if i >= n_static { return i < n_static + n_lw; }
+    if i < nreq { i < nreq.saturating_sub(h.num_readonly_signed_accounts as usize) } else { i < n_static.saturating_sub(h.num_readonly_unsigned_accounts as usize) }
+}
+
+/// FT-000 (S1-5): whether a stream transaction touches a watched account: it reads or writes a pool-specific or wallet
+/// account (`touch_role`), or writes any watched account (a failed transaction writes only its fee payer). None of the
+/// roles known (`roles` None): true, every record is kept
+pub fn touches_watched(roles: Option<&Roles>, tx: &PbTransaction, meta: Option<&PbMeta>) -> bool {
+    let Some(r) = roles else { return true };
+    let Some(msg) = tx.message.as_ref() else { return true };
+    let h = msg.header.clone().unwrap_or_default();
+    let n_static = msg.account_keys.len();
+    let (lw, lr): (&[Vec<u8>], &[Vec<u8>]) = meta.map_or((&[], &[]), |m| (&m.loaded_writable_addresses, &m.loaded_readonly_addresses));
+    let ok = meta.is_none_or(|m| m.err.is_none());
+    for (i, k) in msg.account_keys.iter().chain(lw).chain(lr).enumerate() {
+        let Some(x) = pk_of(k).and_then(|k| r.get(&k)) else { continue };
+        if touch_role(x.role) || (writable(i, n_static, lw.len(), &h) && (ok || i == 0)) { return true; }
+    }
+    false
+}
 
 /// The (signature, slot) pairs a transaction stream wrote lately (review WP-03 #10). A stream at processed commitment
 /// can deliver one transaction twice (around a reconnect the provider re-sends the recent past): exec.jsonl keeps one
@@ -50,6 +82,8 @@ pub fn emit_grpc(rec: &Rec, roles: Option<&Arc<Roles>>, x: GrpcTx) -> bool {
         let mut v = exec_json(&x.sig, x.slot, Some(x.idx), x.t, "grpc-tx", &["tx_stream"], &x.tx, &x.meta, roles.as_deref());
         // the bank it executed in, when the provider sends it (review WP-03 #12)
         v["bank_id"] = serde_json::json!(x.bank_id);
+        // FT-000 (S1-5): a record of the sampled population (touches no watched account) carries the rate and the counts
+        v["sample"] = serde_json::json!(x.sample);
         derive(&mut v);
         let _ = serde_json::to_writer(o, &v);
     }))
@@ -105,10 +139,7 @@ pub fn exec_json(sig: &[u8], slot: u64, idx: Option<u64>, t: u64, src: &str, fou
     let n_static = stat.len();
     let nreq = h.num_required_signatures as usize;
     // Solana's writability: signed writable, unsigned writable, then the loaded writable addresses
-    let writable = |i: usize| -> bool {
-        if i >= n_static { return i < n_static + lw.len(); }
-        if i < nreq { i < nreq.saturating_sub(h.num_readonly_signed_accounts as usize) } else { i < n_static.saturating_sub(h.num_readonly_unsigned_accounts as usize) }
-    };
+    let writable = |i: usize| -> bool { writable(i, n_static, lw.len(), &h) };
     let ok = meta.err.is_none();
     let err = meta.err.as_ref().map(|e| super::tx_error(&e.err));
     let why = if err.is_some() {
@@ -182,7 +213,8 @@ pub fn exec_json(sig: &[u8], slot: u64, idx: Option<u64>, t: u64, src: &str, fou
     put("watched", json!(watched)); put("venues", json!(venues)); put("pools", json!(pools));
     // derived fields: null here; [`derive`] fills the WP-08 ones (transfers, tips, bundle, arb_like) on the writer thread;
     // `ours` and `prog_events` come with WP-05 / the log decoders
-    for k in ["transfers", "tip_total", "tip_asked", "tip_senders", "jito_tipped", "bundle", "arb_like", "ours", "prog_events"] { put(k, Value::Null); }
+    // `sample` (FT-000): null for a record kept in full; a sampled transaction-stream record's counts (`emit_grpc`)
+    for k in ["transfers", "tip_total", "tip_asked", "tip_senders", "jito_tipped", "bundle", "arb_like", "ours", "prog_events", "sample"] { put(k, Value::Null); }
     Value::Object(m)
 }
 

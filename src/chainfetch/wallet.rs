@@ -4,7 +4,11 @@
 //!   transaction we pay for writes the wallet, failed ones too: the fee is charged);
 //! - (b) `ours`: our attempts' signatures, once fired (`chainfetch::note_fired`);
 //! - (c) `jito_processed`: Jito `processed` results (`chainfetch::note_jito_processed`; the send side is WP-05's);
-//! - (d) `sigs_for_address`: `getSignaturesForAddress(wallet)` over the last hour, every `sigs_every_s` (hourly).
+//! - (d) `sigs_for_address`: `getSignaturesForAddress(wallet)` over the last hour, every `sigs_every_s` (hourly). FT-000
+//!   (S1-12): only the rows of the last hour are taken (the first page used to bring the wallet's whole history: 748
+//!   transactions back to five days before, 749 Shyft calls at every segment start), and a segment lists only what is
+//!   newer than the previous segment's cursor (`until`): the newest signature it recorded with nothing older still
+//!   pending ([`Wallet::cursor`], `wallet-cursor.json` in its run directory, `[chainfetch] wallet_cursor`).
 //!
 //! (a) and (d) show the signature landed: it is fetched at once. Most of (b) never lands (Jito drops a losing bundle),
 //! so a signature known only from (b) or (c) is watched instead: batched `getSignatureStatuses` (up to 256 a call, one
@@ -108,6 +112,8 @@ pub struct Wallet {
     watch: VecDeque<(u64, [u8; 64])>,
     /// the state stream's first slot: (d)'s signatures before it cannot have had an update in this run
     pub stream_first_slot: Option<u64>,
+    /// FT-000 (S1-12): the previous segment's cursor: (d) lists only signatures newer than it (`until`)
+    pub until: Option<String>,
     missing_checks: VecDeque<(u64, [u8; 64])>,
     pub fetched_total: u64,
     pub gave_up_total: u64,
@@ -117,6 +123,8 @@ pub struct Wallet {
     pub unlanded_total: u64,
     pub unlanded_by_slot_total: u64,
     pub landed_by_status_total: u64,
+    /// FT-000 (S1-12): (d)'s rows older than its hour, not taken
+    pub older_rows_total: u64,
     /// coverage (`wallet_with_tx_pct`): landed signatures whose minute has passed, and those recorded within it
     cov_q: VecDeque<(u64, [u8; 64])>,
     pub cov_n_total: u64,
@@ -125,8 +133,9 @@ pub struct Wallet {
 
 impl Wallet {
     pub fn new(wallet: Pk, wsol: Pk, route: Pk) -> Wallet {
-        Wallet { wallet, wsol, route, sigs: HashMap::new(), order: VecDeque::new(), due: BTreeSet::new(), watch: VecDeque::new(), stream_first_slot: None,
+        Wallet { wallet, wsol, route, sigs: HashMap::new(), order: VecDeque::new(), due: BTreeSet::new(), watch: VecDeque::new(), stream_first_slot: None, until: None,
             missing_checks: VecDeque::new(), fetched_total: 0, gave_up_total: 0, missing_total: 0, unlanded_total: 0, unlanded_by_slot_total: 0, landed_by_status_total: 0,
+            older_rows_total: 0,
             cov_q: VecDeque::new(), cov_n_total: 0, cov_with_total: 0 }
     }
 
@@ -219,6 +228,15 @@ impl Wallet {
         }
     }
 
+    /// FT-000 (S1-12): this segment's cursor for the next one: (slot, signature) of the newest transaction it recorded
+    /// with no landed signature of an older or equal slot still waiting for its fetch (one still pending when the segment
+    /// stops is newer than the cursor, so the next segment lists and fetches it). None: nothing recorded yet
+    pub fn cursor(&self) -> Option<(u64, [u8; 64])> {
+        let pending = self.sigs.values().filter(|s| matches!(s.state, State::Due | State::InFlight)).filter_map(|s| s.slot).min();
+        self.sigs.iter().filter(|(_, s)| s.state == State::Done && s.recorded.is_some()).filter_map(|(k, s)| s.slot.map(|sl| (sl, *k)))
+            .filter(|(sl, _)| pending.is_none_or(|p| *sl < p)).max()
+    }
+
     /// The fetch of `sig` was refused for want of a token (nothing was sent): due again shortly, its tries unchanged
     pub fn refused(&mut self, sig: &[u8; 64], now: u64) { if self.sigs.contains_key(sig) { self.schedule(*sig, now + 250_000_000); } }
 
@@ -247,11 +265,13 @@ impl Wallet {
 
     /// A `getSignaturesForAddress` page (`result`: [{signature, slot, err, blockTime, ...}], newest first): the new
     /// signatures, the cursor for the next page (`before`), and whether that page is needed (the page is full and its
-    /// oldest entry is newer than `since_unix`)
+    /// oldest entry is newer than `since_unix`). FT-000 (S1-12): a row older than `since_unix` is not taken (an hour's
+    /// window; a row without a block time is)
     pub fn sigs_page(&mut self, page: &Value, since_unix: i64, now: u64) -> (Vec<[u8; 64]>, Option<String>, bool) {
         let rows = page.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
         let mut new = Vec::new();
         for r in rows {
+            if r["blockTime"].as_i64().is_some_and(|t| t < since_unix) { self.older_rows_total += 1; continue; }
             let Some(sig) = r["signature"].as_str().and_then(|s| bs58::decode(s).into_vec().ok()).and_then(|v| <[u8; 64]>::try_from(v).ok()) else { continue };
             if self.found(sig, F_SIGS, r["slot"].as_u64(), None, now) { new.push(sig); }
         }

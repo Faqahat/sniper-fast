@@ -360,18 +360,22 @@ pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event
                 let mut backoff = 500u64;
                 let fwd = Fwd::default();
                 let mut recent = crate::rec::exec::Recent::default();
+                let mut lines = ReconnectLog::default();
                 while !stop.load(Ordering::Relaxed) {
                     let clock = std::sync::Mutex::new(entries::PohClock::default());
-                    let sink = |it: grpc::Item| -> bool { forward(id, &interest, &out, &c, Some(&clock), &rec, &fwd, it) };
+                    let got = AtomicBool::new(false);
+                    let sink = |it: grpc::Item| -> bool { got.store(true, Ordering::Relaxed); forward(id, &interest, &out, &c, Some(&clock), &rec, &fwd, it) };
                     let started = now_ns();
                     let res = grpc::feed_once(&f, &sink, &rec, &c, roles.as_ref(), &mut recent).await;
                     c.connected.store(false, Ordering::Relaxed);
                     if stop.load(Ordering::Relaxed) { break; }
                     c.reconnects.fetch_add(1, Ordering::Relaxed);
+                    // FT-000 (S1-11): a connection that delivered ends a run of failures (said once, if lines were left out)
+                    if got.load(Ordering::Relaxed) { if let Some(l) = lines.delivered(&f.name) { let _ = out.send(Event::Status { feed: id, msg: l }); } }
                     let msg = match res { Ok(()) => "stream closed".to_string(), Err(e) => { c.errors.fetch_add(1, Ordering::Relaxed); format!("{e:#}") } };
                     // WP-20: 503 / 429 storms (counted per stream; never waits)
                     crate::alerts::note_stream_error(&f.name, &msg);
-                    let _ = out.send(Event::Status { feed: id, msg: format!("{}: {msg}; reconnecting in {backoff} ms", f.name) });
+                    if let Some(l) = lines.failed(now_ns(), format!("{}: {msg}; reconnecting in {backoff} ms", f.name)) { let _ = out.send(Event::Status { feed: id, msg: l }); }
                     if now_ns() - started > 30_000_000_000 { backoff = 500; }
                     tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
                     backoff = (backoff * 2).min(10_000);
@@ -527,6 +531,38 @@ pub fn slot_status_name(s: i32) -> &'static str {
     match s { 0 => "processed", 1 => "confirmed", 2 => "finalized", 3 => "first_shred", 4 => "completed", 5 => "created_bank", 6 => "dead", _ => "unknown" }
 }
 
+/// FT-000 (S1-11): a feed's reconnect lines for run.log. A dead feed fails every 10-20 s for the whole run: in FT-000
+/// constantk-prism (401) and erpc (connect timeout) wrote 276 of run.log's 725 lines. The first `FIRST` failures in a row
+/// are logged, then one line every `EVERY_NS` saying how many were left out since; the first delivery after left-out
+/// failures says how many there were. Every failure is still counted (feedhealth.jsonl `reconnects`, `errors`)
+#[derive(Debug, Default)]
+pub struct ReconnectLog { fails: u64, left_out: u64, last_line_t: u64 }
+
+impl ReconnectLog {
+    pub const FIRST: u64 = 3;
+    pub const EVERY_NS: u64 = 300_000_000_000;
+    /// a failure at `t` (`line`: what to log): Some(the line) when it is logged, None when it is left out (counted)
+    pub fn failed(&mut self, t: u64, line: String) -> Option<String> {
+        self.fails += 1;
+        if self.fails > Self::FIRST && t.saturating_sub(self.last_line_t) < Self::EVERY_NS { self.left_out += 1; return None; }
+        let out = match (self.fails > Self::FIRST, self.left_out) {
+            (true, n) if n > 0 => format!("{line} [{} failures in a row; {n} not logged since the last line, one line every {} min]", self.fails, Self::EVERY_NS / 60_000_000_000),
+            (true, _) => format!("{line} [{} failures in a row]", self.fails),
+            _ => line,
+        };
+        self.left_out = 0;
+        self.last_line_t = t;
+        Some(out)
+    }
+    /// the stream delivered: the run of failures ends; Some(a line) when failures were left out of run.log
+    pub fn delivered(&mut self, name: &str) -> Option<String> {
+        let n = self.fails;
+        let quiet = n > Self::FIRST;
+        *self = ReconnectLog::default();
+        quiet.then(|| format!("{name}: delivering again after {n} failures in a row"))
+    }
+}
+
 /// The state stream's health as an engine input (journaled INPUT kind 6 `health`; PLAN-ADDENDUM I-4): `connected` true
 /// right before the first message of each (re)connection, false when the stream ends or fails (with the error). The
 /// engine prices nothing while the stream is down, and reads every followed account again after a reconnect
@@ -547,6 +583,7 @@ pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch:
         let mut backoff = 500u64;
         let interest = Interest::default();
         let mut connects = 0u64;
+        let lines = std::sync::Mutex::new(ReconnectLog::default());
         while !stop.load(Ordering::Relaxed) {
             // accounts.bin MARK stream_reconnect: updates written between the two connections were not seen
             if connects > 0 { if let Some(a) = &fwd.acct { a.mark(crate::rec::accounts::MARK_STREAM_RECONNECT, &[]); } }
@@ -559,6 +596,7 @@ pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch:
             let first = std::sync::atomic::AtomicBool::new(true);
             let sink = |it: grpc::Item| -> bool {
                 if first.swap(false, Ordering::Relaxed) {
+                    if let Some(l) = lines.lock().unwrap_or_else(|e| e.into_inner()).delivered("state stream") { let _ = out.send(Event::Status { feed: u16::MAX, msg: l }); }
                     let _ = out.send(state_health(true, connects, reconnects, None));
                     let (slot, what) = match &it { grpc::Item::Account { slot, .. } => (*slot, "account"), grpc::Item::Slot { slot, .. } => (*slot, "slot"), _ => (0, "other") };
                     let _ = out.send(Event::Status { feed: u16::MAX, msg: format!("state stream: first update at slot {slot} ({what}), {:.0} ms after connecting",
@@ -574,7 +612,8 @@ pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch:
             // WP-20: 503 / 429 storms (I-2, I-3: Haan's 503s; counted per stream, never waits)
             crate::alerts::note_stream_error("state", &msg);
             let _ = out.send(state_health(false, connects, reconnects, Some(msg.clone())));
-            let _ = out.send(Event::Status { feed: u16::MAX, msg: format!("state stream: {msg}; reconnecting in {backoff} ms") });
+            let line = lines.lock().unwrap_or_else(|e| e.into_inner()).failed(now_ns(), format!("state stream: {msg}; reconnecting in {backoff} ms"));
+            if let Some(l) = line { let _ = out.send(Event::Status { feed: u16::MAX, msg: l }); }
             if now_ns() - started > 30_000_000_000 { backoff = 500; }
             tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
             backoff = (backoff * 2).min(10_000);
@@ -1011,5 +1050,30 @@ mod tests {
         assert_eq!((c.slot_max.load(Ordering::Relaxed), c.last_msg_ns.load(Ordering::Relaxed)), (4_000, 30));
         assert!(forward(u16::MAX, &interest, &out, &c, None, &Rec::off(), &Fwd::default(), slot(4_001, 1, 40)));
         assert_eq!(c.slot_max.load(Ordering::Relaxed), 4_001);
+    }
+
+    /// FT-000 (S1-11): a dead feed's reconnect lines. FT-000's run.log had 276 of its 725 lines from two dead feeds:
+    /// constantk-prism failing every ~10 s (184 in 30 minutes) and erpc every ~20 s (92). Now the first three failures in
+    /// a row are logged, then one line every 5 minutes saying how many were not; every failure is still counted
+    /// (feedhealth.jsonl). A delivery after left-out failures says so once, and the next failures are logged again
+    #[test]
+    fn repeated_reconnect_lines_are_rate_limited() {
+        let lines_of = |every_ms: u64, n: u64| -> Vec<String> {
+            let mut l = ReconnectLog::default();
+            (0..n).filter_map(|i| l.failed(i * every_ms * 1_000_000, format!("f: Unauthenticated #{i}; reconnecting in 10000 ms"))).collect()
+        };
+        let (prism, erpc) = (lines_of(10_000, 184), lines_of(20_000, 92));
+        assert_eq!((prism.len(), erpc.len()), (9, 8), "{prism:#?}");
+        assert!(prism[..3].iter().all(|x| !x.contains('[')), "the first three as they are");
+        assert!(prism[3].ends_with("[33 failures in a row; 29 not logged since the last line, one line every 5 min]"), "{}", prism[3]);
+        assert!(erpc[3].ends_with("[18 failures in a row; 14 not logged since the last line, one line every 5 min]"), "{}", erpc[3]);
+        assert_eq!(prism.len() + erpc.len(), 17, "where FT-000's 30 minutes had 276 lines");
+        let mut l = ReconnectLog::default();
+        for i in 0..10u64 { l.failed(i * 1_000_000_000, "x".into()); }
+        assert_eq!(l.delivered("prism").as_deref(), Some("prism: delivering again after 10 failures in a row"));
+        assert_eq!(l.failed(20_000_000_000, "y".into()).as_deref(), Some("y"), "a new run of failures is logged from its start");
+        let mut q = ReconnectLog::default();
+        q.failed(0, "z".into());
+        assert_eq!(q.delivered("f"), None, "nothing was left out: nothing to say");
     }
 }

@@ -693,7 +693,7 @@ where F: Fn(Value) -> Fut, Fut: std::future::Future<Output = Result<(Value, Stri
         "ms": t0.elapsed().as_secs_f64() * 1e3 }))
 }
 
-/// `fetch_with` through the bounded RPC (role `snapshot`; 5 s, two more providers)
+/// `fetch_with` through the bounded RPC (role `ledger`; 5 s, two more providers)
 pub async fn fetch_snapshot(rpc: Rpc, keys: Vec<Pk>, retries: u32, why: &str) -> Value {
     fetch_with(|params| {
         let rpc = rpc.clone();
@@ -1202,7 +1202,7 @@ impl Ledger {
         l
     }
 
-    /// the snapshots' RPC (role `snapshot`), the background runtime, the engine's channel (INPUT 13 comes back on it)
+    /// the snapshots' RPC (role `ledger`), the background runtime, the engine's channel (INPUT 13 comes back on it)
     pub fn set_io(&mut self, rpc: Rpc, rt: tokio::runtime::Handle, back: crossbeam_channel::Sender<Event>) { self.io = Some(Io { rpc, rt, back }); }
 
     /// the run's SendGate and stop path (the supervisor acts on them)

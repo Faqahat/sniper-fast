@@ -380,7 +380,7 @@ fn headers_and_plain_streams() {
     let status = std::fs::read_to_string(d.join("status.jsonl")).unwrap();
     let l: Vec<&str> = status.lines().collect();
     assert_eq!(l.len(), 2);
-    assert_eq!(serde_json::from_str::<Value>(l[0]).unwrap()["schema"], "arbx.status/2.1");
+    assert_eq!(serde_json::from_str::<Value>(l[0]).unwrap()["schema"], "arbx.status/2.2");
     assert_eq!(l[1], r#"{"seq":0}"#);
     let run = std::fs::read_to_string(d.join("run.log")).unwrap();
     assert!(run.lines().next().unwrap().ends_with(" hello run.log"), "{run}");
@@ -398,7 +398,7 @@ fn headers_and_plain_streams() {
     assert_eq!((st["files"][0]["path"].as_str(), st["files"][0]["sha256"].as_str()), (Some("status.jsonl"), None), "plain files stay open to appends: no hash");
     // meta.json `streams`
     let s = rec.streams_json();
-    assert_eq!((s["attempts"].as_str(), s["status"].as_str(), s["accounts"].as_str()), (Some("arbx.attempts/2.0"), Some("arbx.status/2.1"), Some("arbx.accounts/2.1")));
+    assert_eq!((s["attempts"].as_str(), s["status"].as_str(), s["accounts"].as_str()), (Some("arbx.attempts/2.0"), Some("arbx.status/2.2"), Some("arbx.accounts/2.1")));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -783,7 +783,7 @@ fn plain_files_at_start_and_core_records_at_once() {
     assert_eq!(std::fs::read_to_string(d.join("feedhealth.jsonl")).unwrap().lines().count(), 1, "the header only");
     rec.open_now(STATUS).unwrap();
     let s = std::fs::read_to_string(d.join("status.jsonl")).unwrap();
-    assert_eq!(serde_json::from_str::<Value>(s.lines().next().unwrap()).unwrap()["schema"], "arbx.status/2.1");
+    assert_eq!(serde_json::from_str::<Value>(s.lines().next().unwrap()).unwrap()["schema"], "arbx.status/2.2");
     assert_eq!(s.lines().count(), 1);
     rec.json(ATTEMPTS, json!({ "attempt": 7 }));
     let path = d.join("attempts.000.jsonl.zst");
