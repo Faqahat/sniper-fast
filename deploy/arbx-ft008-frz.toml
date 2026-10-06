@@ -1,14 +1,4 @@
-# FT-008 (docs/field-tests/FT-008-auto-pool-refresh.md): FT-006's config (deploy/arbx-ft006-frz.toml, below unchanged)
-# with ONE change, the WP-22 automatic pool refresh ([pool_refresh] at the end). The owner sets the tips and sizes from
-# FT-006's and FT-007's decision rules before the run. The first segment boots on [pools] seed_csv
-# (data/seed-pools-20261006.csv, as FT-005 to FT-007); every later one on the list refreshed during the segment before
-# it (<runs>/<campaign>/pools-<segment>.csv, hashed in campaign.json `pool_lists` and the segment's meta.json).
-#   arbx check --config deploy/arbx-ft008-frz.toml          (prints the [pool_refresh] policy)
-#   pre-flight (read-only, no lock, no Haan): arbx pools refresh --config deploy/arbx-ft008-frz.toml \
-#       --runs /root/arbx/runs/ft006 --out /root/arbx/runs/wp22-preflight/pools.csv --segment preflight \
-#       --env-file /root/arbx/deploy/.env
-#   arbx campaign --name ft008 --config deploy/arbx-ft008-frz.toml --mode canary --hours 3 --segment-min 30 --who <you> --detach
-#
+# FT-008 (WP-22 automatic pool refresh, owner 2026-10-06): FT-007's config (deploy/arbx-ft007-frz.toml, as it ran) + [pool_refresh] at the end.
 # arbx canary on the frz wallet (DRAFT, WP-07; WP-06's builder since the Stage-0 merge; docs/field-tests/README.md: FT-004
 # first live canary hour, FT-005 24 h canary).
 # Derived from deploy/arbx-stage0.toml (the Stage-0 safety switch: bundle-only, fail-closed, no decoded sends); what
@@ -207,7 +197,7 @@ skip_failing_signers = true   # WP-00: stopgap (R §4 day 0); live had false. Wi
 state_triggers = true   # price on committed state (complete commit groups): the only path that prices and sends
 budget_caps_sol = [0.165, 2.1, 4.2, 8.4, 21.0, 42.0, 84.0]   # EXP-4: $20, $250, $500, $1k, $2.5k, $5k, $10k at SOL $119: the best round trip at each budget (recorded, not traded)
 signer_stats_file = "/root/arbx/runs/signer-stats.json"   # read at start, never written (I-5): each segment writes signer-stats.json and signer-stats-delta.json into its run dir; `arbx signer-stats merge` folds deltas back
-sizes_sol = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.2]   # $500 run: the size search reaches the 4.2 SOL cap
+sizes_sol = [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05]   # FT-007 (owner 2026-10-06): smaller trades; GLiCiNEn's median trade is 0.00065 SOL
 # record every round trip that clears base + priority fee; the report applies each send path's tip
 min_profit_lamports = 1
 cu_price_micro = 40000
@@ -402,7 +392,7 @@ max_per_sec = 2
 enabled = true
 count = 100000
 every_ms = 1000
-size_sol = 0.2                 # WP-05's canary cap; the bankroll ([live] below) caps it further
+size_sol = 0.05                # FT-007: the canary cap from 0.2 to 0.05 SOL
 max_spend_lamports = 5000000   # fees of landed failures per segment (a bundle that fails does not land: should stay 0)
 
 [live]
@@ -410,7 +400,7 @@ max_spend_lamports = 5000000   # fees of landed failures per segment (a bundle t
 # arm's keys are gone: test_all_paths, bid_*, rotate_paths, race_mix, bundle_mix, tpu_*, pair_lock_ms, sim_gate,
 # compete_*, gross_floor, bundle_*, spec/max priority; settle_s: attempts settle from the chain; the durable nonces:
 # [send_policy.direct]; big band and crowding: [send_policy])
-max_size_sol = 0.2                # the canary's cap here too (R §3.8's ladder starts at 0.2)
+max_size_sol = 0.05               # FT-007: the canary's cap here too
 max_failed_fees_lamports = 5000000  # each segment's cap; a campaign also passes what is left of the test budget (--budget-left)
 margin_lamports = 1000              # the decision's bar: expected profit >= tip + base fee + this (the on-chain floor is [send_policy])
 # (WP-06: max_new_token_accounts is gone: a token account the wallet holds none of is created and closed in the trade)
