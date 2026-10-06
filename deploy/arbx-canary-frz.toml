@@ -437,6 +437,17 @@ direct_experiment = false   # the direct (non-bundle) arm: refused in Stage 0
 # (the durable nonces of 2g7rYv7y..., the direct arm's, are not frz's: none here)
 nonce_accounts = []
 
+[send_policy.bam]
+# FT-006, the BAM landing fix (src/config.rs BamPolicyCfg). FT-004/FT-005: bundles bidding < 0.045 lamports per requested CU
+# landed 19/147 on Jito leaders but 2/112 on BAM leaders (also 0/22 behind the Frankfurt BAM node, 0.6 ms away); higher bids
+# landed alike (10/508 vs 5/334). Jito's block engine ranks bundles against bundles only (tip per requested CU, 50 ms
+# auctions); BAM ranks them against all transactions by fees per CU (bam.dev). So a BAM-led slot bids at least 0.05
+# lamports per CU of its CU limit, within 90% of the edge and the decision's bar; Jito-led slots are unchanged
+enabled = true
+min_tip_per_cu = 0.05
+max_share = 0.9
+below_floor = "send"   # out of reach: bid what the edge allows (up to max_share); "skip" would not send to the BAM slot
+
 [bands]
 # WP-06 item 8 (F22): the one band table (decisions, the send queue, the tips), over the expected edge = gross - base fee;
 # bands 0-4, 3 and 4 the >=1M class (as deploy/arbx-stage0.toml)

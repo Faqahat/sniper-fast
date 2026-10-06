@@ -1034,6 +1034,8 @@ pub fn reason_stage(r: &str) -> &'static str {
         "inflight_same_state" | "inflight_same_leader" | "band_throttle" | "rate_queue_timeout" | "crowded_pool" => "send_slot",
         // WP-05's names for the queue's outcomes (MEASUREMENT A.1 as WP-05 writes them)
         "crowded_skip" | "would_rate" | "would_rate_crowded" => "send_slot",
+        // FT-006: a BAM-led slot whose bid cannot reach `[send_policy.bam]`'s floor (`below_floor = "skip"`)
+        "bam_bid_below_floor" => "send_slot",
         "blockhash_stale" | "leader_unknown" | "leader_skip_kind" | "program_hash_mismatch" | "jito_auth_stale" => "inputs",
         "uva_missing" | "dlmm_ext_needed" | "oversized" | "build_error" | "expected_below_min_profit" => "build",
         "sent" | "send" => "sent",

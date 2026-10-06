@@ -434,6 +434,40 @@ impl TipPolicy {
     }
 }
 
+/// FT-006 (`[send_policy.bam]`): a bundle's bid for a BAM-led target slot
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BamBid {
+    /// the tip the bundle carries
+    pub lamports: u64,
+    /// the band's tip (`[tips]`): the bid is never below it
+    pub band_tip: u64,
+    /// the floor: `min_tip_per_cu` × the CU limit, rounded up
+    pub floor: u64,
+    /// the CU limit the floor is taken over (the build's: the route's CU and the ATA create and close it makes)
+    pub cu_limit: u64,
+    /// the most the bid may be: `max_share` of the edge, the `[tips]` cap and the decision's own bar, the least of them
+    pub room: u64,
+}
+
+impl BamBid {
+    /// the bid reaches the floor
+    pub fn reached(&self) -> bool { self.lamports >= self.floor }
+    /// attempts.jsonl `tip.bam`
+    fn json(&self, p: &crate::config::BamPolicyCfg) -> Value {
+        json!({ "band_tip": self.band_tip, "floor": self.floor, "cu_limit": self.cu_limit, "room": self.room, "reached": self.reached(),
+            "raised": self.lamports > self.band_tip, "min_tip_per_cu": p.min_tip_per_cu, "max_share": p.max_share, "below_floor": p.below_floor })
+    }
+}
+
+/// The bid on a BAM-led slot (FT-006): the band's tip raised toward `min_tip_per_cu` × `cu_limit`, never above
+/// `max_share` × `edge`, `cap`, or `bar_room` (the most the tip may be while the decision's own bar holds), and never below
+/// the band's tip (nothing is ever lowered). A pure function of its inputs: the executor and a replay bid the same
+pub fn bam_bid(p: &crate::config::BamPolicyCfg, band_tip: u64, edge: i64, cu_limit: u64, cap: u64, bar_room: i64) -> BamBid {
+    let floor = (p.min_tip_per_cu * cu_limit as f64).ceil() as u64;
+    let room = ((edge.max(0) as f64 * p.max_share) as u64).min(cap).min(bar_room.max(0) as u64);
+    BamBid { lamports: band_tip.max(floor.min(room)), band_tip, floor, cu_limit, room }
+}
+
 // ------------------------------------------------------------------------------------------------ WP-06
 
 /// The lookup tables the size budget may add (PLAN WP-06 item 7): the engine's cache of the tables it learned from decoded
@@ -605,6 +639,9 @@ pub struct Exec {
     /// live and canary only: the send paths and the bundle path's index; a shadow or dry-run executor has none
     paths: Option<Arc<Paths>>,
     bundle_path: Option<usize>,
+    /// FT-006: the host of the configured jito-bundle path's block engine (attempts `copies[].endpoint`): from the config,
+    /// so a would-send and a replay name the endpoint a send goes to (None: no bundle path, or a URL from the environment)
+    bundle_host: Option<String>,
     jito: Option<Arc<jito::Jito>>,
     /// live and canary: the trading key
     key: Option<ed25519_dalek::SigningKey>,
@@ -944,6 +981,7 @@ impl Exec {
         let model = crate::tip::TipModel::from_cfg(cfg).map_err(|e| anyhow::anyhow!(e))?;
         let x = Exec { mode, payer, program: pk(&cfg.exec.program), alts: alts.iter().map(|(k, a)| Alt::new(*k, a)).collect(), alt_lists, pump, held, rpc, settle,
             rt: tokio::runtime::Handle::current(), back, paths, bundle_path, jito, key, dry, pol: cfg.send_policy.clone(), skip_kinds,
+            bundle_host: bundle_cfg.filter(|c| !c.url.contains("${")).map(|c| send::host_of(&c.url)).filter(|h| !h.is_empty()),
             tips: bundle_cfg.map(|c| TipPolicy::from_path(c, model.clone())), path_rate: bundle_cfg.and_then(|c| c.max_per_sec).unwrap_or(5) as usize, would_recent: VecDeque::new(),
             max_size, cap_failed_fees: if mode == Mode::Canary { cfg.canary.max_spend_lamports } else { cfg.live.max_failed_fees_lamports },
             margin_lamports: cfg.live.margin_lamports, builder: cfg.builder.clone(), bands: model.bands, uva: None, canary,
@@ -1271,7 +1309,21 @@ impl Exec {
         // the tip (by band, WP-06 item 8), the on-chain min_profit (WP-05 item 8) and the decision's own bar (today's: tip
         // + fee + [live] margin)
         let tipped = self.tips.as_mut().and_then(|p| p.tip(expected - BASE_FEE as i64));
-        let tip = tipped.map(|(a, t)| (a, t.lamports));
+        let mut tip = tipped.map(|(a, t)| (a, t.lamports));
+        // FT-006 (`[send_policy.bam]`): a BAM-led target slot's bid, raised toward the floor per CU of the transaction's CU
+        // limit, within the edge's share, the cap and the decision's bar below; Jito leaders bid the band's tip
+        let bam = match (tip, i.leader.kind == LeaderKind::Bam && self.pol.bam.enabled) {
+            (Some((_, band_tip)), true) => {
+                let cap = self.tips.as_ref().map_or(u64::MAX, |p| p.model.cap);
+                let bar_room = expected - BASE_FEE as i64 - self.pol.margin_floor.max(self.margin_lamports) as i64;
+                Some(bam_bid(&self.pol.bam, band_tip, expected - BASE_FEE as i64, self.cu_limit_of(&r), cap, bar_room))
+            }
+            _ => None,
+        };
+        if let Some(b) = &bam {
+            if !b.reached() && self.pol.bam.below_floor == "skip" { return fail(d, "bam_bid_below_floor"); }
+            tip = tip.map(|(a, _)| (a, b.lamports));
+        }
         let tip_l = tip.map_or(0, |x| x.1);
         let net = expected - tip_l as i64 - BASE_FEE as i64;
         let (min_profit, margin) = min_profit_onchain(tip_l, net, self.pol.margin_floor, self.pol.margin_share);
@@ -1314,15 +1366,18 @@ impl Exec {
         let fired = send_path.map(|(paths, bp)| {
             let raw = Arc::new(build::sign(&built.msg, self.key.as_ref().expect("a sending mode holds its key")));
             let t_signed = now_ns();
-            let fire = paths.fire(attempt, vec![Copy { path: bp, raw: raw.clone(), tip, blockhash_slot: Some(bh.slot) }], prio);
+            let fire = paths.fire(attempt, vec![Copy { path: bp, raw: raw.clone(), tip, blockhash_slot: Some(bh.slot), leader_kind: Some(i.leader.kind.as_str()) }], prio);
             (paths, bp, raw, fire, t_signed, now_ns())
         });
         let snap = self.leaders.as_ref().map(|b| serde_json::to_value(b.snapshot(target)).unwrap_or(Value::Null))
             .unwrap_or_else(|| json!({ "slot": target, "leader": i.leader.identity, "kind": i.leader.kind, "kind_src": i.leader.kind_src, "be_rtt_ms": crate::leaders::be_rtt(now_ns()) }));
         let age = i.blockhash.as_ref().and_then(|b| b.age_slots);
+        // FT-006: the endpoint the copy goes to (the configured bundle path's host: a would-send and a replay name it too) and
+        // the leader kind it bids for
+        let endpoint = self.bundle_host.clone();
         let mut line = AttemptLine { attempt, r: &r, mode: self.mode, expected, band, crowding, tip, tip_share: tipped.map(|x| x.1.share), tip_policy: self.tips.as_ref(),
             min_profit: built.min_profit, margin, built: &built, bh: &bh, bh_age: age, leader: snap, key, prev, why_allowed, prio, lambda: self.paths.as_ref().and_then(|p| p.queue_now().1),
-            t_built0, t_built, payer: self.payer, program: self.program }.json();
+            t_built0, t_built, payer: self.payer, program: self.program, bam: bam.map(|b| b.json(&self.pol.bam)), endpoint, leader_kind: i.leader.kind }.json();
         if fired.is_none() && !replayed_send {
             // a would-send (shadow, dry run, a closed gate): recorded with sent = false
             self.would_recent.push_back(t);
@@ -1366,10 +1421,11 @@ impl Exec {
                 let sig = sig64(&sig58).unwrap_or([0; 64]);
                 let pools = [r.buy.pool, r.sell.pool];
                 let back = self.back.clone();
+                let leader_kind = Some(i.leader.kind.as_str());
                 self.rt.spawn(async move {
                     let fired = match fire.await { Ok(f) => f, Err(e) => Fired { id: attempt, t_ns: 0, copies: vec![send::Sent { attempt, path: "?".into(), sig: Some(sig58_of(&sig)),
                         tip_account: None, tip_lamports: 0, t_sent: 0, t_ack: 0, ms: 0.0, ok: false, status: None, reply: Some(format!("send task failed: {e}")), bundle: None,
-                        blockhash_slot: None, queue_wait_us: None, drop: Some("send_task"), lambda: None }] } };
+                        blockhash_slot: None, queue_wait_us: None, drop: Some("send_task"), lambda: None, endpoint: None, leader_kind }] } };
                     // WP-03b tap, after the firing: the copy that left (the wallet's source (b), watched until a few slots past its
                     // target slot) and the route's pools (backfill priority 0)
                     crate::chainfetch::note_fired(attempt, &fired.copies, &pools, Some(target));
@@ -1432,6 +1488,20 @@ impl Exec {
             ata: (!held).then_some((r.mint, r.mint_prog)), held_ok: self.held_growth_ok(), held_rent: build::HELD_RENT_BOUND,
             loaded_limit: self.builder.loaded_limit(), sizes: r.sizes.clone(), guard: self.builder.payer_guard.then_some(self.builder.payer_guard_max_drop),
             payer_tokens: self.payer_tokens.iter().filter(|k| **k != mid).copied().collect() }
+    }
+
+    /// The CU limit `build` gives route `r` (as `compile` adds it up): the route's CU, plus the ATA create and close when the
+    /// wallet holds no account for the mid token (FT-006: the BAM bid's floor is per CU of it, known before the build)
+    fn cu_limit_of(&self, r: &RouteIn) -> u64 {
+        let held = r.mid_held.unwrap_or_else(|| self.held.contains(&r.mint));
+        #[cfg(not(test))]
+        let close = true;
+        #[cfg(test)]
+        let close = !self.fault_keep;
+        let cu = (r.cu + if held { 0 } else { r.cu_ata.0 + if close { r.cu_ata.1 } else { 0 } }).min(crate::cu_table::MAX_CU);
+        #[cfg(test)]
+        let cu = self.fault_cu.unwrap_or(cu);
+        cu
     }
 
     /// One bundle transaction (PLAN WP-06; `build::bundle_ixs` has the instruction order): the CU limit (the route's, from
@@ -2457,7 +2527,7 @@ macro_rules! reasons {
 reasons!("gate_shadow", "gate_stopped", "recorder_unhealthy", "warmup", "state_unavailable", "resync", "equity_unknown", "equity_stale", "fee_cap", "sender_stopped",
     "canary_wait", "canary_count", "blockhash_stale", "leader_unknown", "leader_skip_kind", "jito_auth_stale", "expected_below_min_profit", "implausible_gap", "size_cap",
     "token_cooling", "rent_cap", "uva_missing", "mid_not_held", "inflight_same_state", "inflight_same_leader", "band_throttle", "crowded_skip", "would_rate",
-    "would_rate_crowded", "oversized", "dlmm_ext_needed", "build_error");
+    "would_rate_crowded", "oversized", "dlmm_ext_needed", "build_error", "bam_bid_below_floor");
 
 /// the counter of a copy that never left (copies.jsonl `drop`, MEASUREMENT §4.38): `drop_<code>`. Such an attempt was
 /// handed to the fire, so it is not a refused decision (review WP-05 #16)
@@ -2528,6 +2598,12 @@ struct AttemptLine<'a> {
     t_built: u64,
     payer: Pk,
     program: Pk,
+    /// FT-006: the BAM bid (`tip.bam`; null on other leaders or with `[send_policy.bam]` off)
+    bam: Option<Value>,
+    /// FT-006: the copy's endpoint (the bundle path's host) and the target slot's leader kind (`copies[].endpoint`,
+    /// `copies[].leader_kind`)
+    endpoint: Option<String>,
+    leader_kind: LeaderKind,
 }
 
 impl AttemptLine<'_> {
@@ -2548,7 +2624,8 @@ impl AttemptLine<'_> {
             "parts_skew_slots": r.parts_skew.map(|(b, s)| json!({ "buy": b, "sell": s })),
             "min_profit_onchain": self.min_profit, "margin": self.margin,
             "tip": { "lamports": tip_l, "account": self.tip.map(|t| b58(&t.0)), "sender": self.tip_policy.map(|p| p.path.clone()), "share": self.tip_share,
-                "band": self.band, "floor": self.tip_policy.map(|p| p.model.floor), "cap": self.tip_policy.map(|p| p.model.cap), "arm": null, "policy": "share_of_edge" },
+                "band": self.band, "floor": self.tip_policy.map(|p| p.model.floor), "cap": self.tip_policy.map(|p| p.model.cap), "arm": null,
+                "policy": if self.bam.as_ref().is_some_and(|b| b["raised"] == json!(true)) { "bam_floor" } else { "share_of_edge" }, "bam": self.bam },
             "tx": { "sig": null, "bytes": build::tx_bytes(&b.msg), "locks": b.msg.locks, "alts": lookups_of(&b.msg), "alt_fallback": b.alt_fallback,
                 "alt_index_tables": b.index_tables.iter().map(b58).collect::<Vec<_>>(), "cu_limit": b.cu_limit, "cu_src": b.cu_src, "cu_price_micro": 0,
                 "loaded_data_limit": b.loaded_data_limit, "creates_ata": b.creates_ata(), "closes_ata": b.closes_ata(), "held_addition": b.held_addition(),
@@ -2564,7 +2641,8 @@ impl AttemptLine<'_> {
             "checks": checks,
             "stages": { "t_first_shred": r.t_first_shred, "t_update_recv": r.st[0], "t_commit": r.t_commit, "t_engine": r.st[2], "t_priced": r.t_priced, "t_decided": r.st[4],
                 "t_built": self.t_built, "t_build_start": self.t_built0, "t_signed": null, "t_enqueued": null, "t_dequeued": null, "t_sent": null, "t_ack": null },
-            "copies": [{ "path": self.tip_policy.map(|p| p.path.clone()), "sig": null, "bytes": build::tx_bytes(&self.built.msg), "tip": tip_l, "min_profit": self.min_profit }],
+            "copies": [{ "path": self.tip_policy.map(|p| p.path.clone()), "sig": null, "bytes": build::tx_bytes(&self.built.msg), "tip": tip_l, "min_profit": self.min_profit,
+                "endpoint": self.endpoint, "leader_kind": self.leader_kind.as_str() }],
             "route_in": { "accounts": r.accounts.iter().map(|(k, slot, wv)| json!({ "acct": b58(k), "slot": slot, "wv": wv })).collect::<Vec<_>>(),
                 "dlmm_arrays": { "buy": r.buy_live, "sell": r.sell_live }, "buy_end": r.buy_end, "sell_end": r.sell_end },
             "net_at_opp": r.net_at_opp, "gross_at_opp": r.gross_at_opp,

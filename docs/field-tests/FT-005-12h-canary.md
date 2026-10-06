@@ -1,6 +1,7 @@
 # FT-005: 12 h canary on frz (Stage 0 exit)
 
-> **Owner, 2026-10-06:** 12 hours instead of 24. Every "24 h" measure below now applies to the 12 h run.
+> **Owner, 2026-10-06:** 12 hours instead of 24, then **shortened to 3 h** (part A 13:40–14:26 + part B 15:00–17:14 UTC).
+> **Owner, later:** FT-005 is **no longer the Stage 0 exit by itself**. Stage 0 closes **after FT-007**, with the criteria below measured over the whole canary series FT-005 + FT-006 + FT-007 (about 9 h).
 
 - **Status:** running in two parts (owner-requested pool refresh in between).
   - **Part A (`ft005`):** 13:40–14:26 UTC on `seed-pools-ft000s3.csv`, stopped for the refresh. Net spend −93,543 lamports, a profit. Stop reconciliation done.

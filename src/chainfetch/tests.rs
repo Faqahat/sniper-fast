@@ -1286,7 +1286,7 @@ fn our_attempts_are_watched_until_their_target_slot_passes() {
 fn the_exec_tap_reports_the_copies_that_left() {
     let (shared, rx) = Shared::new(Arc::new(Registry::default()));
     let sent = |sig: [u8; 64], t_sent: u64| crate::send::Sent { attempt: 3, path: "jito".into(), sig: Some(b58s(&sig)), tip_account: None, tip_lamports: 0, t_sent,
-        t_ack: 0, ms: 0.0, ok: true, status: None, reply: None, bundle: None, blockhash_slot: None, queue_wait_us: None, drop: None, lambda: None };
+        t_ack: 0, ms: 0.0, ok: true, status: None, reply: None, bundle: None, blockhash_slot: None, queue_wait_us: None, drop: None, lambda: None, endpoint: None, leader_kind: None };
     with_test_service(shared, || note_fired(3, &[sent(sig_of(1), 5), sent(sig_of(2), 0)], &[[7u8; 32]], Some(900)));
     let notes: Vec<Note> = rx.try_iter().collect();
     assert!(matches!(&notes[..], [Note::Ours { attempt: 3, sigs, accounts, target_slot: Some(900), .. }] if *sigs == vec![sig_of(1)] && *accounts == vec![[7u8; 32]]), "{notes:?}");

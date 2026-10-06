@@ -245,7 +245,7 @@ fn a_dry_run_replays_with_its_settlements() {
     assert_eq!((att[0]["kind"].as_str(), att[0]["dry_run"]["checks_ok"].as_bool(), att[0]["dry_run"]["simulated"].as_bool()), (Some("dry_run"), Some(true), Some(true)), "{}", att[0]["dry_run"]);
     // the executor's tasks answer (the run's would come back from its runtime): journaled as INPUT 9 when the engine takes them
     let sent = crate::send::Sent { attempt: 7, path: "jito-bundle".into(), sig: None, tip_account: None, tip_lamports: 0, t_sent: 0, t_ack: 0, ms: 0.0, ok: false, status: None,
-        reply: Some("never left".into()), bundle: None, blockhash_slot: None, queue_wait_us: None, drop: Some("rate_queue_timeout"), lambda: None };
+        reply: Some("never left".into()), bundle: None, blockhash_slot: None, queue_wait_us: None, drop: Some("rate_queue_timeout"), lambda: None, endpoint: None, leader_kind: None };
     for (k, st) in [Settled::DrySim { attempt: 0, line: json!({ "attempt": 0, "src": "dry_run", "t_ns": t, "sim_ms": 1.25, "sim_slot": s2, "err": null, "units": 91_000 }) },
         Settled::Fired { attempt: 7, fired: crate::send::Fired { id: 7, t_ns: t, copies: vec![sent] } },
         Settled::Statuses { why: "check", at: vec![(7, "+2s")], result: Ok(vec![None]), t_ns: t }].into_iter().enumerate() {
