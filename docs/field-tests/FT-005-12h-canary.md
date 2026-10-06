@@ -43,5 +43,31 @@
 ### C. The $500 trigger (owner decision, 2026-10-06)
 Net positive over 48 h of canary (chain ledger). It is reported to the owner when met; the owner scales the wallet.
 
-## Results
-(filled in)
+## Results (3 h of run time: part A 13:40–14:26 + part B 15:00–17:14 UTC)
+
+| Segment | Sent | Landed | Win ratio | Net (chain ledger) |
+|---|---|---|---|---|
+| A p1 (13:40–14:26) | 415 | 12 | 2.9% | +93,543 |
+| B p1 (15:00–16:00, fresh list) | 745 | 24 | 3.2% | +76,938 |
+| B p2 (16:00–17:01) | 815 | 16 | 2.0% | +45,716 |
+| B p3 (17:01–17:14) | 103 | 2 | 1.9% | +6,676 |
+| **Total** | **2,078** | **54** | **2.6%** | **+222,873 lamports** |
+
+1. **Bundle-only:** **0 failed-landing fees**; the 2,024 bundles that did not land cost 0.
+2. **Every landed trade nets > 0:** 54 of 54, the smallest +1,002 lamports.
+   - Gross 1,029,727; tips 536,854 (52% of gross); fees 270,000 (26%). We keep 22% of gross.
+   - Rent: 38,978,840 locked and recovered in the same transactions (create+close), 0 non-recoverable.
+3. **Money reconciles:** the final stop reconciliation is ok in all 4 segments.
+   - residual 0; executor vs chain diff 0;
+   - no refused bundle landed; 0 provisional; 0 unexplained.
+   - `budget-state.json`: ft005 −93,543, ft005b −129,330 (each signature counted once).
+4. **Spend ≤ budget:** a net profit; no stop fired.
+5. **By leader kind:** Jito-led slots 43 / 1,253 (3.4%), BAM-led 11 / 825 (1.3%). BAM lands at 39% of Jito's rate; FT-006's target is ≥ 70%.
+6. **Baseline for FT-006/FT-007's decision rules:**
+   - **net +74,600 lamports/h** over 2.99 h of run time;
+   - net per win 4,127;
+   - win ratio 2.6%.
+
+**Observations:**
+- **The win ratio fell from 3.2% to 2.0% within 2 h on the same fresh list.** Pools go stale fast, which is the case for WP-22's automatic refresh.
+- **The analysis toolkit counts pre-run rows.** `arbx-report ledger` sums the ledger rows the wallet scanner re-reads at boot (`pre_run: true`, previous segments' signatures) into its totals. ft005b-p1 shows 32 wins / +123,283 there instead of 24 / +76,938. The bot's counters, spend.json and budget-state.json are correct; the toolkit needs a fix.
