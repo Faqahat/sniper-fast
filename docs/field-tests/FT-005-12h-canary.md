@@ -2,7 +2,11 @@
 
 > **Owner, 2026-10-06:** 12 hours instead of 24. Every "24 h" measure below now applies to the 12 h run.
 
-- **Status:** planned, after FT-004 passes.
+- **Status:** running in two parts (owner-requested pool refresh in between).
+  - **Part A (`ft005`):** 13:40–14:26 UTC on `seed-pools-ft000s3.csv`, stopped for the refresh. Net spend −93,543 lamports, a profit. Stop reconciliation done.
+  - **Pool refresh:** pooldisco 14:26–14:57 UTC (3,313 pools seen, 750 tokens with 2+ pools). New list `data/seed-pools-20261006.csv` (commit 02a45ef): 1,165 kept, led by the 771 active in FT-004/FT-005, plus 335 new discoveries; 335 idle dropped.
+  - **Part B (`ft005b`):** from 15:00 UTC for 11.25 h on the fresh list. Boot: 364 SOL pairs with 2+ pools, 1,344 pools (FT-001: 317 pairs, 1,082 pools).
+  - The 12 h criteria are measured over part A + part B.
 - **Mode:** canary under `arbx campaign` (**12 h**, segments of 60 min), bundle-only.
 - **Wallet:** frz FRZh63L6….
 - **Budget allotment:** 10,000,000 lamports (0.01 SOL), within the cumulative 34,000,000 hard cap.
