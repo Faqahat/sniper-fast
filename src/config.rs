@@ -74,6 +74,12 @@ pub struct Config {
     /// WP-07: the equity stops and the money alerts (src/supervisor.rs), for the segment and the whole campaign
     #[serde(default)]
     pub supervisor: SupervisorCfg,
+    /// WP-20: Telegram alerts (src/alerts.rs). The token and the chat id are named by environment variables, never held
+    #[serde(default)]
+    pub alerts: crate::alerts::AlertsCfg,
+    /// WP-20: `arbx watchdog` (src/watchdog.rs)
+    #[serde(default)]
+    pub watchdog: crate::watchdog::WatchdogCfg,
 }
 
 /// The owner's hard cap on the test budget (docs/field-tests/BUDGET.md, 2026-10-05: $3-5 of the frz wallet), lamports.
@@ -1209,7 +1215,8 @@ impl Config {
                 Some(x) => bail!("config_version {x} is not supported: this binary reads config_version = {CONFIG_VERSION}"),
             }
         }
-        let cfg: Config = toml::from_str(text)?;
+        // a parse error quotes the line: a bot token pasted where a name belongs (`token_env = 123:AA…`, unquoted) is masked
+        let cfg: Config = toml::from_str(text).map_err(|e| anyhow::anyhow!("{}", crate::alerts::telegram::mask_token_shapes(&e.to_string())))?;
         if cfg.config_version != Some(CONFIG_VERSION) { bail!("config_version = {CONFIG_VERSION} is required"); }
         if cfg.mode != "shadow" && cfg.mode != "live" { bail!("mode must be \"shadow\" or \"live\""); }
         for (k, v, n) in [("expected_program_sha256", &cfg.exec.expected_program_sha256, 64), ("expected_program_md5", &cfg.exec.expected_program_md5, 32)] {
@@ -1395,6 +1402,9 @@ impl Config {
             if let Some(m) = p.max_rps { if !m.is_finite() || m < 0.0 { bail!("[[chainfetch.provider]] {}: max_rps must be >= 0 (0 = no limit)", p.name); } }
             if let Some(b) = p.burst { if !b.is_finite() || b < 1.0 { bail!("[[chainfetch.provider]] {}: burst must be at least 1", p.name); } }
         }
+        // WP-20: [alerts] (a token_env / chat_env that holds a value instead of a variable's name is refused) and [watchdog]
+        cfg.alerts.check()?;
+        cfg.watchdog.check()?;
         Ok(cfg)
     }
 

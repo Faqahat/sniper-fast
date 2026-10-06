@@ -613,3 +613,24 @@ rent_cap_sol = 0.1
 native_floor_sol = 0.02
 auto_unwrap = false
 stranded_s = 60
+
+[alerts]
+# WP-20 (PLAN-ADDENDUM): Telegram alerts to the owner's "ArbX" group. The token and the chat id live only in
+# /root/arbx/deploy/.env (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID; mode 600), never in this file: missing ones turn the alerts
+# off with one warning, never fatal. Producers never wait (a bounded queue); one sender on rt_bg posts over HTTPS.
+# `arbx alert-test --config <this file>` sends one test message.
+enabled = true
+token_env = "TELEGRAM_BOT_TOKEN"
+chat_env = "TELEGRAM_CHAT_ID"
+heartbeat_min = 60      # a heartbeat with the key numbers every hour, across segments (0: none)
+min_level = "info"      # info, warning, error, critical
+dedup_s = 600           # the same alert again within 10 minutes is counted, not sent
+rate_per_min = 20       # Telegram allows a group 20 messages a minute
+coalesce_ms = 2000      # a burst within 2 s goes out as one message (a Critical alert goes at once)
+daily_summary = true    # at 00:00 UTC, the day before: win ratio (wins / bundles sent), net, fees, tips, rent
+
+[watchdog]
+# WP-20: `arbx watchdog --config deploy/arbx-stage0.toml`, a separate long-running process (docs/field-tests/README.md)
+runs_dir = "/root/arbx/runs"
+grace_s = 120           # no segment process for longer than this is "not running" (covers the gap between two segments)
+status_min = 60         # "running" every hour, and a reminder every hour while it is down

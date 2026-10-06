@@ -369,6 +369,8 @@ pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event
                     if stop.load(Ordering::Relaxed) { break; }
                     c.reconnects.fetch_add(1, Ordering::Relaxed);
                     let msg = match res { Ok(()) => "stream closed".to_string(), Err(e) => { c.errors.fetch_add(1, Ordering::Relaxed); format!("{e:#}") } };
+                    // WP-20: 503 / 429 storms (counted per stream; never waits)
+                    crate::alerts::note_stream_error(&f.name, &msg);
                     let _ = out.send(Event::Status { feed: id, msg: format!("{}: {msg}; reconnecting in {backoff} ms", f.name) });
                     if now_ns() - started > 30_000_000_000 { backoff = 500; }
                     tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
@@ -569,6 +571,8 @@ pub fn start_state(url: String, token: Option<String>, list: tokio::sync::watch:
             if stop.load(Ordering::Relaxed) { break; }
             let reconnects = c.reconnects.fetch_add(1, Ordering::Relaxed) + 1;
             let msg = match res { Ok(()) => "stream closed".to_string(), Err(e) => { c.errors.fetch_add(1, Ordering::Relaxed); format!("{e:#}") } };
+            // WP-20: 503 / 429 storms (I-2, I-3: Haan's 503s; counted per stream, never waits)
+            crate::alerts::note_stream_error("state", &msg);
             let _ = out.send(state_health(false, connects, reconnects, Some(msg.clone())));
             let _ = out.send(Event::Status { feed: u16::MAX, msg: format!("state stream: {msg}; reconnecting in {backoff} ms") });
             if now_ns() - started > 30_000_000_000 { backoff = 500; }
