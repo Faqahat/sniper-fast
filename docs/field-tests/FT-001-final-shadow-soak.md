@@ -1,6 +1,6 @@
 # FT-001: shadow soak of the final Stage-0 build (go-live gate items 2–3)
 
-- **Status:** planned. It runs as soon as master holds WP-06 + integ/stage0 (WP-07, WP-20, FT-000 fixes) and the build passes.
+- **Status:** running since 2026-10-06 06:58 UTC (started by Claude).
 - **Mode:** shadow, under `arbx campaign` (the supervisor is a binary subcommand; nothing but build artifacts goes to Cherry).
 - **Wallet:** frz FRZh63L6… (profile "trading"). Shadow never signs.
 - **Budget:** 0 lamports.
@@ -22,8 +22,15 @@
    - reconciliation at each stop is within tolerance (shadow: no sends, so spend = 0).
 9. **Decisions:** decisions and opportunities flow all hour, within ±50% of FT-000b's per-hour counts on the same pool list.
 
-## Setup (to be filled in at deploy)
-Build hash and binary sha256; config `deploy/arbx-stage0.toml` (refreshed pool list); the commands.
+## Setup
+- **Build:** master `11e25d1`, the final Stage-0 merge (WP-06 + WP-07 + WP-20 + FT-000 fixes). 567 tests pass and the synthetic hour replays identically. Release build, debug info stripped: `bin/arbx-11e25d1` (sha256 `76e680bb3440631f…`, 19.9 MB). The campaign freezes it as `runs/ft001/arbx-76e680bb`.
+- **Config:** `deploy/arbx-canary-frz.toml` at `8181498` (sha256 `5863166b87137a66…`): mode shadow, wallet FRZh63L6… (profile "trading", used in place, never signs in shadow), the refreshed 1,500-pool list `data/seed-pools-ft000s3.csv`, `[builder]` rent-neutral with held_max 0, `[tips]` by band, `[dry_run] simulate = true`, alerts on, watchdog configured.
+  - The config differs from the plan's `arbx-stage0.toml`: only the frz canary config soaks the frz wallet and the WP-07 ledger, and FT-002 needs it.
+- **Upload:** build artifacts only (binary, config, 7 data files incl. `cu-table.json`), each checked with `sha256sum -c`. `arbx check` on Cherry: exit 0.
+- **Commands (on Cherry, in /root/arbx):**
+  - `bin/arbx-11e25d1 campaign --name ft001 --config deploy/arbx-canary-frz.toml --hours 3 --segment-min 60 --mode shadow --who claude --detach`
+  - `setsid nohup bin/arbx-11e25d1 watchdog --config deploy/arbx-canary-frz.toml > runs/watchdog.out 2>&1 &`
+- **Live watch:** the WP-20 alerts and the watchdog post from Cherry; the operator's `segwatch.py` posts goal, heartbeats and results.
 
 ## Results
 (filled in per segment)
