@@ -417,6 +417,12 @@ fn main() -> Result<()> {
                 sp.blockhash_commitment, sp.max_blockhash_age_slots, sp.skip_leader_kinds, sp.inflight_hold_slots, sp.queue_ms, sp.big_band_max_per_sec, sp.crowding_buckets,
                 sp.crowding_window_h, if sp.crowded_pools_file.is_empty() { "none".to_string() } else { sp.crowded_pools_file.clone() }, sp.margin_floor, sp.margin_share, cfg.dry_run.simulate);
             if sp.crowded_skip_min_expected_lamports > 0 { println!("  crowded pools not sent from {} lamports expected", sp.crowded_skip_min_expected_lamports); }
+            // FT-006: the BAM landing fix
+            let bp = &sp.bam;
+            if bp.enabled {
+                println!("  BAM-led slots (FT-006): bid at least {} lamports per CU of the CU limit, within {:.0}% of the edge and the decision's bar; out of reach: {}; Jito-led slots bid the band's tip",
+                    bp.min_tip_per_cu, bp.max_share * 100.0, if bp.below_floor == "skip" { "not sent (bam_bid_below_floor)" } else { "bid what the edge allows" });
+            } else { println!("  BAM-led slots: the band's tip, as Jito-led ones ([send_policy.bam] off)"); }
             // review N3: the crowded list, where this machine has it (the configured path, or the repo's data/ copy)
             if !sp.crowded_pools_file.is_empty() {
                 let p = Path::new(&sp.crowded_pools_file);
@@ -923,7 +929,7 @@ fn senders(config: &Path, rounds: u32, only: Option<String>, raw: Option<PathBuf
         let (ps, _) = send::Paths::new(&enabled, opts, rec.clone(), false).await?;
         let stop = Arc::new(AtomicBool::new(false));
         ps.start(stop.clone(), std::time::Duration::from_secs(30), |m: String| println!("  {m}"));
-        let copies = (0..ps.list.len()).map(|i| send::Copy { path: i, raw: Arc::new(raw.clone()), tip: None, blockhash_slot: None }).collect();
+        let copies = (0..ps.list.len()).map(|i| send::Copy { path: i, raw: Arc::new(raw.clone()), tip: None, blockhash_slot: None, leader_kind: None }).collect();
         let fired = ps.fire(0, copies, send::Prio::default()).await?;
         for c in &fired.copies {
             println!("  {:<16} {:>7.1} ms  {} {}", c.path, c.ms, if c.ok { "ok" } else { "REFUSED" }, c.reply.as_deref().unwrap_or("-"));

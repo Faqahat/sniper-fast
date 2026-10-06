@@ -336,6 +336,9 @@ fn is_signature(s: &str) -> bool { bs58::decode(s).into_vec().is_ok_and(|v| v.le
 
 fn short(s: &str) -> String { s.chars().take(200).collect() }
 
+/// a URL's host ("" when it has none); never the URL itself, whose path or query may hold a key
+pub fn host_of(url: &str) -> String { reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default() }
+
 /// An endpoint's reply: a JSON-RPC result, Bolt's / Iris's `{"signature"|"result": …}`, or Haan's plain signature.
 fn parse_reply(name: &str, status: u16, body: &[u8]) -> Result<String> {
     let text = String::from_utf8_lossy(body);
@@ -499,6 +502,8 @@ pub struct Path {
     cursor: AtomicUsize,
     budget: Option<Budget>,
     url: String,
+    /// the URL's host (copies.jsonl `endpoint`; never the URL: keys live in some)
+    host: String,
     ping: Ping,
     headers: HeaderMap,
     preflight: bool,
@@ -607,8 +612,9 @@ impl Path {
             sock.connect(addr).await.with_context(|| format!("{what}: udp connect {addr}"))?;
             Some((Arc::new(sock), key.into_bytes()))
         } else { None };
+        let host = host_of(&url);
         Ok(Path { name: c.name.clone(), kind: c.kind, tips, tip_lamports: c.tip_lamports, tip_share: c.tip_share,
-            tip_max: c.tip_max_lamports.unwrap_or(u64::MAX), cursor: AtomicUsize::new(0), budget, url, ping, headers,
+            tip_max: c.tip_max_lamports.unwrap_or(u64::MAX), cursor: AtomicUsize::new(0), budget, url, host, ping, headers,
             preflight: c.preflight, http, jito, tpu, udp, stats: Default::default() })
     }
 
@@ -618,13 +624,18 @@ impl Path {
     pub fn test_bundle(jito: Arc<jito::Jito>, max_per_sec: Option<u32>, queue_ms: u64) -> Path {
         Path { name: "jito-bundle".into(), kind: SendKind::JitoBundle, tips: known_tip_accounts(SendKind::JitoBundle).iter().map(|a| crate::tx::pk(a)).collect(),
             tip_lamports: 1_000, tip_share: Some(0.7), tip_max: 100_000, cursor: AtomicUsize::new(0),
-            budget: max_per_sec.map(|n| Budget::new(n, Duration::from_millis(queue_ms))), url: "https://127.0.0.1:9".into(), ping: Ping::Tips, headers: HeaderMap::new(),
+            budget: max_per_sec.map(|n| Budget::new(n, Duration::from_millis(queue_ms))), url: "https://127.0.0.1:9".into(), host: "127.0.0.1".into(), ping: Ping::Tips,
+            headers: HeaderMap::new(),
             preflight: false, http: reqwest::Client::new(), jito: Some(jito), tpu: None, udp: None, stats: Default::default() }
     }
 
+    /// the endpoint's host (never the full URL: keys live in some); a jito-bundle path: its block engine (copies.jsonl
+    /// `endpoint`, FT-006)
+    pub fn endpoint(&self) -> String { self.host.clone() }
+
     /// kind and endpoint host (never the full URL: keys live in some)
     pub fn describe(&self) -> String {
-        let host = reqwest::Url::parse(&self.url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+        let host = self.endpoint();
         let rate = self.budget.as_ref().map(|b| format!(" max {}/s", b.per_sec())).unwrap_or_default();
         format!("{:?} {host}{rate}", self.kind)
     }
@@ -833,9 +844,10 @@ impl Path {
     }
 }
 
-/// One copy of a trade for one path, the tip it carries (account, lamports), and the slot of its blockhash
+/// One copy of a trade for one path, the tip it carries (account, lamports), the slot of its blockhash, and (FT-006) the
+/// kind of the leader it is aimed at (`jito`, `bam`, ...: copies.jsonl `leader_kind`)
 #[derive(Clone)]
-pub struct Copy { pub path: usize, pub raw: Arc<Vec<u8>>, pub tip: Option<(Pk, u64)>, pub blockhash_slot: Option<u64> }
+pub struct Copy { pub path: usize, pub raw: Arc<Vec<u8>>, pub tip: Option<(Pk, u64)>, pub blockhash_slot: Option<u64>, pub leader_kind: Option<&'static str> }
 
 /// One line of copies.jsonl: one copy sent (or not) to one path
 #[derive(Clone, Debug, serde::Serialize)]
@@ -863,6 +875,10 @@ pub struct Sent {
     pub queue_wait_us: Option<u64>,
     pub drop: Option<&'static str>,
     pub lambda: Option<i64>,
+    /// (1.3, FT-006) the endpoint the copy went to (the path's host, never its URL: keys live in some; a jito-bundle path:
+    /// its block engine) and the kind of the target slot's leader (`jito`, `bam`, `other`, `unknown`; null: not given)
+    pub endpoint: Option<String>,
+    pub leader_kind: Option<&'static str>,
 }
 
 /// Everything that happened to one fired trade
@@ -884,8 +900,13 @@ impl Sent {
             tip_lamports: v["tip_lamports"].as_u64()?, t_sent: v["t_sent"].as_u64()?, t_ack: v["t_ack"].as_u64()?, ms: v["ms"].as_f64().unwrap_or(0.0),
             ok: v["ok"].as_bool()?, status: v["status"].as_u64().and_then(|x| u16::try_from(x).ok()), reply: s("reply"), bundle: s("bundle"),
             blockhash_slot: v["blockhash_slot"].as_u64(), queue_wait_us: v["queue_wait_us"].as_u64(), drop: v["drop"].as_str().map(drop_code),
-            lambda: v["lambda"].as_i64() })
+            lambda: v["lambda"].as_i64(), endpoint: s("endpoint"), leader_kind: v["leader_kind"].as_str().and_then(leader_kind_code) })
     }
+}
+
+/// a copy's `leader_kind` (copies.jsonl 1.3) as the static string the sender writes; None: not a leader kind
+pub fn leader_kind_code(s: &str) -> Option<&'static str> {
+    ["jito", "bam", "other", "unknown"].into_iter().find(|k| *k == s)
 }
 
 /// a copy's `drop` code (copies.jsonl, MEASUREMENT §4.38) as the static string the sender writes; one this build does
@@ -989,12 +1010,14 @@ impl Paths {
                 tokio::spawn(crate::netcount::in_task(net.clone(), async move {
                     let mut out = Sent { attempt, path: p.name.clone(), sig: first_signature(&c.raw), tip_account: c.tip.map(|t| crate::tx::b58(&t.0)),
                         tip_lamports: c.tip.map_or(0, |t| t.1), t_sent: 0, t_ack: 0, ms: 0.0, ok: false, status: None, reply: None, bundle: None,
-                        blockhash_slot: c.blockhash_slot, queue_wait_us: None, drop: None, lambda: p.queue_now().and_then(|q| q.1) };
+                        blockhash_slot: c.blockhash_slot, queue_wait_us: None, drop: None, lambda: p.queue_now().and_then(|q| q.1), endpoint: None,
+                        leader_kind: c.leader_kind };
                     let t = Instant::now();
                     out.t_sent = now_ns();
                     let r = tokio::time::timeout(SEND_TIMEOUT, p.send(&c.raw, prio, Some(attempt))).await
                         .unwrap_or_else(|_| Err(refuse(None, format!("{}: no answer in {SEND_TIMEOUT:?}", p.name))));
                     out.ms = t.elapsed().as_secs_f64() * 1e3;
+                    out.endpoint = Some(p.endpoint());
                     match r {
                         Ok(r) => {
                             out.t_ack = now_ns();
@@ -1274,7 +1297,7 @@ mod tests {
         c.tip_lamports = 5_000;
         let (ps, _) = Paths::new(&[c], no_opts(), rec.clone(), false).await.unwrap();
         let raw = Arc::new(tx(crate::tx::pk(known_tip_accounts(SendKind::Helius)[0]), 5_000, true));
-        let fired = ps.fire(42, vec![Copy { path: 0, raw, tip: None, blockhash_slot: Some(77) }], Prio::default()).await.unwrap();
+        let fired = ps.fire(42, vec![Copy { path: 0, raw, tip: None, blockhash_slot: Some(77), leader_kind: Some("bam") }], Prio::default()).await.unwrap();
         let _ = h.await;
         assert!(fired.copies[0].ok);
         rec.close();
@@ -1285,6 +1308,44 @@ mod tests {
         assert!(v[0]["t_sent"].as_u64().unwrap() > 0 && v[0]["t_ack"].as_u64().unwrap() >= v[0]["t_sent"].as_u64().unwrap());
         // copies 1.2 (WP-05): the blockhash's slot; not queued (no rate budget), nothing dropped
         assert_eq!((v[0]["blockhash_slot"].as_u64(), v[0]["queue_wait_us"].is_null(), v[0]["drop"].is_null()), (Some(77), true, true));
+        // copies 1.3 (FT-006): the endpoint's host (never the URL) and the target leader's kind
+        assert_eq!((v[0]["endpoint"].as_str(), v[0]["leader_kind"].as_str()), (Some("127.0.0.1"), Some("bam")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// FT-006 through the in-memory block engine: a bundle copy aimed at a BAM-led slot reaches the block engine as one
+    /// signed transaction, and copies.jsonl names its endpoint (the block engine's host) and the leader kind; a copy line of
+    /// 1.2 (no endpoint, no kind) still reads back (journal INPUT 9 `fired`)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_bundle_copy_records_its_endpoint_and_leader_kind() {
+        let d = std::env::temp_dir().join(format!("arbx-copies-bam-{}-{}", std::process::id(), now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let j = jito::Jito::for_test(rec.clone());
+        j.set_cached(Some(jito::CachedToken { value: "tok".into(), exp_ms: now_ns() as i64 / 1_000_000 + 600_000, issued_ms: now_ns() as i64 / 1_000_000 }));
+        let got: Arc<Mutex<Vec<Vec<u8>>>> = Default::default();
+        let g2 = got.clone();
+        j.set_fake(Arc::new(move |txs: &[&[u8]]| { g2.lock().unwrap().push(txs[0].to_vec()); "bam-b0".into() }));
+        let ps = Paths::for_test(vec![Path::test_bundle(j, Some(5), 10)], rec.clone());
+        assert_eq!(ps.list[0].endpoint(), "127.0.0.1");
+        let raw = Arc::new(tx(crate::tx::pk(known_tip_accounts(SendKind::JitoBundle)[2]), 5_000, false));
+        let fired = ps.fire(9, vec![Copy { path: 0, raw: raw.clone(), tip: Some((crate::tx::pk(known_tip_accounts(SendKind::JitoBundle)[2]), 5_000)),
+            blockhash_slot: Some(100), leader_kind: Some("bam") }], Prio::default()).await.unwrap();
+        let c = &fired.copies[0];
+        assert!(c.ok && c.bundle.as_deref() == Some("bam-b0"), "{c:?}");
+        assert_eq!((c.endpoint.as_deref(), c.leader_kind, c.tip_lamports), (Some("127.0.0.1"), Some("bam"), 5_000));
+        assert_eq!(*got.lock().unwrap(), vec![raw.to_vec()], "the one signed transaction reached the block engine");
+        rec.close();
+        let v = crate::rec::read_jsonl(&d, "copies").unwrap();
+        assert_eq!((v[0]["endpoint"].as_str(), v[0]["leader_kind"].as_str(), v[0]["bundle"].as_str()), (Some("127.0.0.1"), Some("bam"), Some("bam-b0")));
+        // read back as written (1.3), and a 1.2 line without the new fields
+        let back = Sent::from_json(&v[0]).unwrap();
+        assert_eq!((back.endpoint.as_deref(), back.leader_kind), (Some("127.0.0.1"), Some("bam")));
+        let mut old = v[0].clone();
+        for k in ["endpoint", "leader_kind"] { old.as_object_mut().unwrap().remove(k); }
+        let back = Sent::from_json(&old).unwrap();
+        assert_eq!((back.endpoint, back.leader_kind, back.attempt), (None, None, 9));
+        assert_eq!((leader_kind_code("jito"), leader_kind_code("other"), leader_kind_code("x")), (Some("jito"), Some("other"), None));
         let _ = std::fs::remove_dir_all(&d);
     }
 

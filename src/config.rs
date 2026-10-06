@@ -670,6 +670,11 @@ pub struct SendPolicyCfg {
     /// the direct arm's durable nonces (only with `direct_experiment`)
     #[serde(default)]
     pub direct: DirectCfg,
+    /// FT-006's BAM landing fix: what a bundle bids when its target slot's leader runs BAM (`[send_policy.bam]`). Left out
+    /// of the serialized policy while off, so a config without it hashes as before (exec_init `cfg_sha256`: replays of
+    /// older runs)
+    #[serde(default, skip_serializing_if = "BamPolicyCfg::off")]
+    pub bam: BamPolicyCfg,
 }
 fn pol_bh_age() -> u64 { 20 }
 fn pol_bh_commitment() -> String { "confirmed".into() }
@@ -685,7 +690,55 @@ impl Default for SendPolicyCfg {
         SendPolicyCfg { max_blockhash_age_slots: pol_bh_age(), blockhash_commitment: pol_bh_commitment(), queue_ms: pol_queue_ms(), big_band_max_per_sec: pol_big_rate(),
             crowding_window_h: pol_crowd_h(), crowding_buckets: pol_crowd_buckets(), crowded_pools_file: String::new(), crowded_skip_min_expected_lamports: 0,
             margin_floor: pol_margin_floor(), margin_share: 0.0, inflight_hold_slots: pol_hold(), skip_leader_kinds: pol_skip_kinds(), direct_experiment: false,
-            direct: DirectCfg::default() }
+            direct: DirectCfg::default(), bam: BamPolicyCfg::default() }
+    }
+}
+
+/// `[send_policy.bam]` (FT-006, the BAM landing fix). FT-004/FT-005 (1,101 sent bundles): a bundle bidding under 0.045
+/// lamports per CU it asks for landed 19 of 147 times on Jito leaders and 2 of 112 on BAM leaders (one-sided Fisher p =
+/// 0.0006), also behind the Frankfurt BAM node 0.6 ms from us (0 of 22, against 11 of 72 on Frankfurt Jito leaders), while
+/// higher bids landed alike (10/508 against 5/334). The block engine forwards both kinds about as often (`accepted` 43/655
+/// and 39/446), but 24 of the 43 forwarded to Jito leaders landed and 4 of the 39 forwarded to BAM leaders. Jito's block
+/// engine ranks a bundle against other bundles only (tip per requested CU, 50 ms auctions; the leader's bundle stage runs
+/// the winners), a BAM node against every transaction it holds, by fees per CU (bam.dev: "bundles and regular
+/// transactions compete on the same priority score"): a low bid waits behind paying flow and its gap is gone. So on a
+/// BAM-led target slot the bundle bids at least `min_tip_per_cu` × its CU limit, never above `max_share` of the edge, the
+/// `[tips]` cap, or what keeps the decision's own bar (expected ≥ tip + base fee + max(`margin_floor`, `[live]
+/// margin_lamports`)): the band's tip stays the minimum, and nothing changes on Jito leaders. Off unless `enabled` (a
+/// replay of an older run tips as it ran); the defaults are FT-006's values
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BamPolicyCfg {
+    #[serde(default)]
+    pub enabled: bool,
+    /// the bid floor on a BAM-led slot, lamports per CU of the transaction's CU limit (0.05 = 50,000 micro-lamports a CU)
+    #[serde(default = "bam_min_tip_per_cu")]
+    pub min_tip_per_cu: f64,
+    /// the most of the edge (gross − base fee) a BAM bid may take: a floor out of reach bids up to this (`below_floor`)
+    #[serde(default = "bam_max_share")]
+    pub max_share: f64,
+    /// a floor out of reach: "send" bids what it can, up to `max_share`; "skip" does not send to the BAM-led slot (reason
+    /// `bam_bid_below_floor`)
+    #[serde(default = "bam_below_floor")]
+    pub below_floor: String,
+}
+fn bam_min_tip_per_cu() -> f64 { 0.05 }
+fn bam_max_share() -> f64 { 0.9 }
+fn bam_below_floor() -> String { "send".into() }
+impl Default for BamPolicyCfg {
+    fn default() -> Self { BamPolicyCfg { enabled: false, min_tip_per_cu: bam_min_tip_per_cu(), max_share: bam_max_share(), below_floor: bam_below_floor() } }
+}
+impl BamPolicyCfg {
+    /// off: every leader kind bids its band's tip
+    pub fn off(&self) -> bool { !self.enabled }
+    /// what `Config::check` refuses
+    pub fn check(&self) -> Result<(), String> {
+        if !self.min_tip_per_cu.is_finite() || !(0.0..=10.0).contains(&self.min_tip_per_cu) {
+            return Err(format!("[send_policy.bam] min_tip_per_cu {}: lamports per CU, 0..10", self.min_tip_per_cu));
+        }
+        if !self.max_share.is_finite() || !(0.0..=1.0).contains(&self.max_share) { return Err(format!("[send_policy.bam] max_share {}: a share of the edge, 0..1", self.max_share)); }
+        if !["send", "skip"].contains(&self.below_floor.as_str()) { return Err(format!("[send_policy.bam] below_floor {:?}: \"send\" or \"skip\"", self.below_floor)); }
+        Ok(())
     }
 }
 
@@ -1465,6 +1518,7 @@ impl Config {
         for k in &sp.skip_leader_kinds {
             if !["jito", "bam", "other", "unknown"].contains(&k.as_str()) { bail!("[send_policy] skip_leader_kinds: {k:?} is not a leader kind (jito, bam, other, unknown)"); }
         }
+        sp.bam.check().map_err(|e| anyhow::anyhow!(e))?;
         // WP-06: [bands], [tips], [builder]
         crate::tip::TipModel::from_cfg(&cfg).map_err(|e| anyhow::anyhow!(e))?;
         let b = &cfg.builder;
@@ -2077,6 +2131,23 @@ mod tests {
         assert!(Config::parse(&format!("{MINIMAL}[canary]\nsize_sol = 0.2\n")).is_ok());
         assert!(err(&format!("{MINIMAL}[[send]]\nname = \"j\"\nkind = \"jito-bundle\"\nurl = \"https://x\"\ntip_lamports = 1000\nmax_per_sec = 5\nqueue_ms = 10\n"))
             .contains("[send_policy] queue_ms"));
+    }
+
+    /// FT-006 `[send_policy.bam]`: off by default with FT-006's values; checked when given; left out of the serialized
+    /// policy while off, so a config without it serializes (and hashes: exec_init `cfg_sha256`) as before
+    #[test]
+    fn ft006_bam_policy_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        assert_eq!(c.send_policy.bam, BamPolicyCfg { enabled: false, min_tip_per_cu: 0.05, max_share: 0.9, below_floor: "send".into() });
+        assert!(serde_json::to_value(&c.send_policy).unwrap().get("bam").is_none(), "off: not serialized");
+        let on = Config::parse(&format!("{MINIMAL}[send_policy.bam]\nenabled = true\n")).unwrap();
+        assert!(on.send_policy.bam.enabled && on.send_policy.bam.min_tip_per_cu == 0.05);
+        assert_eq!(serde_json::to_value(&on.send_policy).unwrap()["bam"]["min_tip_per_cu"], 0.05, "on: serialized");
+        let bam = |k: &str| Config::parse(&format!("{MINIMAL}[send_policy.bam]\nenabled = true\n{k}\n")).map(|_| ()).map_err(|e| format!("{e:#}"));
+        assert!(bam("min_tip_per_cu = 0.08").is_ok() && bam("max_share = 0.85").is_ok() && bam("below_floor = \"skip\"").is_ok());
+        assert!(bam("min_tip_per_cu = -1").unwrap_err().contains("min_tip_per_cu") && bam("min_tip_per_cu = 11").is_err());
+        assert!(bam("max_share = 1.2").unwrap_err().contains("max_share") && bam("below_floor = \"drop\"").unwrap_err().contains("below_floor"));
+        assert!(bam("tip_share = 0.9").unwrap_err().contains("unknown field `tip_share`"));
     }
 
     /// PLAN WP-06 config keys: `[bands]`, `[builder]`, `[tips]` with the plan's defaults and checks; `[live]

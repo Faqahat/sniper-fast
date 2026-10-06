@@ -182,10 +182,12 @@ pub const ENTRIES_MAGIC: [u8; 8] = *b"ARBXENT\0";
 /// Stage 0): attempts 2.1 (the bundle's layout: CU source, loaded-data limit, create/close, the size budget's fallback,
 /// the tip's band share) and decisions 1.2 (`dlmm_cap_bound`); the journal 2.4 (2.3's records, with engine_init's
 /// `builder` and exec_init version 2: a 2.3 journal of integ/stage0 has neither, and its executor is not replayed);
-/// after it, sims 1.2 (WP-06's `closes_ata`, which its lane added under 1.1)
+/// after it, sims 1.2 (WP-06's `closes_ata`, which its lane added under 1.1). FT-006 (the BAM landing fix): copies 1.3
+/// (`endpoint`, `leader_kind`) and attempts 2.2 (`tip.bam`, `tip.policy` `bam_floor`, `copies[].endpoint` and
+/// `copies[].leader_kind`)
 const STATIC: [(&str, Class, Format, &str, bool); 38] = [
-    ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/2.1", false),
-    ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.2", false),
+    ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/2.2", false),
+    ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.3", false),
     ("bundles", Class::Core, Format::Jsonl, "arbx.bundles/2.0", false),
     ("outcomes", Class::Core, Format::Jsonl, "arbx.outcomes/2.1", false),
     ("accounts", Class::Replay, Format::Bin { magic: ACCOUNTS_MAGIC, format: 2 }, "arbx.accounts/2.1", false),

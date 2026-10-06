@@ -1390,7 +1390,7 @@ async fn probe_decide_costs() {
 fn settlements_read_back_from_the_journal() {
     let copy = |drop: Option<&'static str>| send::Sent { attempt: 3, path: "jito-bundle".into(), sig: Some("5ig".into()), tip_account: Some(b58(&[9; 32])), tip_lamports: 1_000,
         t_sent: 11, t_ack: 12, ms: 1.5, ok: drop.is_none(), status: Some(200), reply: None, bundle: Some("b0".into()), blockhash_slot: Some(99), queue_wait_us: Some(40),
-        drop, lambda: Some(4) };
+        drop, lambda: Some(4), endpoint: Some("fra.example".into()), leader_kind: Some("bam") };
     let all = vec![
         Settled::Fired { attempt: 3, fired: Fired { id: 3, t_ns: 10, copies: vec![copy(None), copy(Some("rate_queue_timeout")), copy(Some("crowded_pool"))] } },
         Settled::Statuses { why: "expiry", at: vec![(1, "expiry"), (2, "expiry")], result: Ok(vec![Some(SigStatus { slot: 102, err: None, confirmation: Some("confirmed".into()) }), None]),
@@ -1455,6 +1455,9 @@ fn the_executor_config_hash() {
     assert_ne!(cfg_sha256(&test_cfg(&dir, "[send_policy]\ninflight_hold_slots = 3\n")), base);
     // WP-06: the builder, the tips and the bands are the executor's too
     for extra in ["[builder]\nheld_max = 3\n", "[builder]\ncreate_close = false\n", "[tips]\ncap = 200000\n", "[bands]\nedges = [1, 2, 3, 4]\n"] { assert_ne!(cfg_sha256(&test_cfg(&dir, extra)), base, "{extra}"); }
+    // FT-006: the BAM bid policy is the executor's when on; off, it hashes as a config without it (replays of older runs)
+    assert_ne!(cfg_sha256(&test_cfg(&dir, "[send_policy.bam]\nenabled = true\n")), base);
+    assert_eq!(cfg_sha256(&test_cfg(&dir, "[send_policy.bam]\nenabled = false\nmin_tip_per_cu = 0.07\n")), base);
     c.strategy.cu_price_micro += 1;
     assert_ne!(cfg_sha256(&c), base);
 }
@@ -2689,4 +2692,115 @@ async fn the_permanent_mints_are_the_ledgers() {
     assert_eq!(x.payer_tokens, PERMANENT_MINTS[1..].iter().map(|m| build::ata_of(&x.payer, m, &crate::pda::TOKEN_PROGRAM)).collect::<Vec<_>>());
     let frz_wallet = pk(&frz.wallet);
     assert_eq!(build::pump_uva(&frz_wallet), crate::ledger::accumulator_of(&frz_wallet));
+}
+
+// ------------------------------------------------------------------------------------------------ FT-006: BAM
+
+fn bam_on(min_tip_per_cu: f64, below_floor: &str) -> crate::config::BamPolicyCfg {
+    crate::config::BamPolicyCfg { enabled: true, min_tip_per_cu, max_share: 0.9, below_floor: below_floor.into() }
+}
+
+/// FT-006 (`bam_bid`, the routing of a bid by leader kind): the band's tip is raised toward `min_tip_per_cu` × the CU
+/// limit; never above `max_share` of the edge, the `[tips]` cap or the decision's bar room; never below the band's tip
+#[test]
+fn bam_bid_raises_toward_the_floor_within_its_bounds() {
+    let p = bam_on(0.05, "send");
+    let bid = |band: u64, edge: i64, cu: u64, cap: u64, bar: i64| bam_bid(&p, band, edge, cu, cap, bar);
+    // 100,000 CU: the floor is 5,000 lamports
+    let b = bid(7_000, 10_000, 100_000, 100_000, 9_000);
+    assert_eq!((b.lamports, b.floor, b.reached()), (7_000, 5_000, true), "the band's tip is over the floor: unchanged");
+    let b = bid(4_200, 6_000, 100_000, 100_000, 5_000);
+    assert_eq!((b.lamports, b.room, b.reached()), (5_000, 5_000, true), "raised to the floor (0.9 x 6,000 = 5,400 room; the bar allows 5,000)");
+    let b = bid(3_500, 5_000, 100_000, 100_000, 10_000);
+    assert_eq!((b.lamports, b.room, b.reached()), (4_500, 4_500, false), "out of reach: 0.9 of the edge");
+    assert_eq!(bid(3_500, 5_000, 100_000, 100_000, 4_000).lamports, 4_000, "the decision's bar first");
+    assert_eq!(bid(4_200, 6_000, 100_000, 4_800, 5_000).lamports, 4_800, "the [tips] cap");
+    assert_eq!(bid(6_000, 6_000, 100_000, 100_000, 4_000).lamports, 6_000, "never below the band's tip");
+    assert_eq!(bid(1_000, -5, 100_000, 100_000, -5).lamports, 1_000, "no edge, no raise");
+    assert_eq!(bid(4_200, 6_000, 101_001, 100_000, 6_000).floor, 5_051, "rounded up");
+    assert_eq!(bam_bid(&bam_on(0.0, "send"), 4_200, 6_000, 100_000, 100_000, 6_000).lamports, 4_200, "a floor of 0: the band's tip");
+}
+
+/// FT-006: a BAM-led target slot's bundle bids its floor through the in-memory block engine (the signed tip, the signed
+/// min_profit over it, the decision's net), records the bid (attempts `tip.policy` `bam_floor`, `tip.bam`) and the copy's
+/// endpoint and leader kind (attempts `copies[0]`, copies.jsonl 1.3); a Jito-led slot's bundle keeps the band's tip
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bam_led_slot_bids_its_floor() {
+    let mut r = rig("bam-floor", Mode::Live, "[send_policy.bam]\nenabled = true\nmin_tip_per_cu = 0.05\nmax_share = 0.9\n").await;
+    // 12,000 expected, edge 7,000: the band's tip 4,900; the CU limit 100,000 (the wallet holds MINT: no ATA) -> floor 5,000
+    let d = r.decide(route(1, damm(2, MINT), 12_000, 7), 101, now_ns());
+    assert_eq!((d.reason.as_str(), d.sent, d.ev), ("sent", Some(true), Some(2_000)), "net: 12,000 - the 5,000 bid - the base fee: {d:?}");
+    let Settled::Fired { attempt, fired } = r.settled().await else { panic!("a fire result") };
+    let raw = r.got.lock().unwrap()[0].0.clone();
+    let (tx, _) = crate::tx::parse_wire(&raw).unwrap();
+    assert_eq!(send::tip_paid(&tx, &tip_accounts()), 5_000, "the floor, 0.05 x 100,000 CU, reached the block engine");
+    let all = tx.resolve(|t| r.x.alt_lists.get(t).cloned()).unwrap();
+    assert_eq!(route_of(&tx, &all, &r.x.program).unwrap().min_profit, 10_001, "the signed min_profit covers the raised tip + the base fee + 1");
+    let tip = Some((tx.keys[tx.ixs.last().unwrap().accounts[1] as usize], 5_000));
+    for c in verify_bundle(&raw, &live_want(&r.x, tip, 10_001)) { assert_eq!(c["ok"], json!(true), "{c}"); }
+    assert_eq!((fired.copies[0].leader_kind, fired.copies[0].endpoint.as_deref()), (Some("bam"), Some("127.0.0.1")));
+    r.x.on_settled(Settled::Fired { attempt, fired }, now_ns(), &|_| None);
+    // a Jito-led slot (target 98): the band's tip, nothing raised
+    let d = r.decide(route(3, damm(4, MINT), 12_000, 8), 97, now_ns());
+    assert_eq!((d.reason.as_str(), d.ev), ("sent", Some(2_100)), "{d:?}");
+    let Settled::Fired { attempt, fired } = r.settled().await else { panic!("a fire result") };
+    let (tx, _) = crate::tx::parse_wire(&r.got.lock().unwrap()[1].0).unwrap();
+    assert_eq!(send::tip_paid(&tx, &tip_accounts()), 4_900, "70% of the 7,000 edge");
+    r.x.on_settled(Settled::Fired { attempt, fired }, now_ns(), &|_| None);
+    let a = r.lines("attempts");
+    assert_eq!(a.len(), 2);
+    let (b, j) = (&a[0], &a[1]);
+    assert_eq!((b["leader"]["kind"].as_str(), b["tip"]["lamports"].as_u64(), b["tip"]["policy"].as_str(), b["tip"]["share"].as_f64()),
+        (Some("bam"), Some(5_000), Some("bam_floor"), Some(0.7)), "the band's share stays recorded");
+    assert_eq!((b["tip"]["bam"]["band_tip"].as_u64(), b["tip"]["bam"]["floor"].as_u64(), b["tip"]["bam"]["cu_limit"].as_u64(), b["tip"]["bam"]["room"].as_u64(),
+        b["tip"]["bam"]["reached"].as_bool(), b["tip"]["bam"]["raised"].as_bool()), (Some(4_900), Some(5_000), Some(100_000), Some(6_000), Some(true), Some(true)),
+        "room: the decision's bar (12,000 - 5,000 - the 1,000 [live] margin) under 0.9 x 7,000");
+    assert_eq!((b["tx"]["cu_limit"].as_u64(), b["min_profit_onchain"].as_u64()), (Some(100_000), Some(10_001)), "the floor's CU limit is the build's");
+    assert_eq!((b["copies"][0]["leader_kind"].as_str(), b["copies"][0]["endpoint"].as_str()), (Some("bam"), Some("127.0.0.1")));
+    assert_eq!((j["leader"]["kind"].as_str(), j["tip"]["lamports"].as_u64(), j["tip"]["policy"].as_str(), j["tip"]["bam"].is_null(), j["copies"][0]["leader_kind"].as_str()),
+        (Some("jito"), Some(4_900), Some("share_of_edge"), true, Some("jito")));
+    let cp = r.lines("copies");
+    assert_eq!(cp.iter().map(|c| (c["leader_kind"].as_str(), c["endpoint"].as_str(), c["tip_lamports"].as_u64())).collect::<Vec<_>>(),
+        vec![(Some("bam"), Some("127.0.0.1"), Some(5_000)), (Some("jito"), Some("127.0.0.1"), Some(4_900))]);
+}
+
+/// FT-006: a floor out of reach bids what the edge allows (`below_floor = "send"`, up to the decision's bar), or is not
+/// sent to the BAM-led slot (`"skip"`: `bam_bid_below_floor`, nothing reaches the block engine); with the policy off a
+/// BAM-led slot bids the band's tip, as before
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bam_floor_out_of_reach_sends_or_skips() {
+    // 9,000 expected, edge 4,000: the band's tip 2,800, the floor 5,000; the bar allows 9,000 - 5,000 - 1,000 = 3,000
+    let mut r = rig("bam-skip", Mode::Live, "[send_policy.bam]\nenabled = true\nbelow_floor = \"skip\"\n").await;
+    let d = r.decide(route(1, damm(2, MINT), 9_000, 7), 101, now_ns());
+    assert_eq!((d.verdict, d.reason.as_str(), d.attempt, d.sent), ("reject", "bam_bid_below_floor", None, None), "{d:?}");
+    assert_eq!(r.n("reject_bam_bid_below_floor"), 1);
+    assert!(r.got.lock().unwrap().is_empty() && r.lines("attempts").is_empty(), "nothing sent, nothing built");
+    let d = r.decide(route(3, damm(4, MINT), 9_000, 7), 97, now_ns());
+    assert_eq!(d.reason, "sent", "a Jito-led slot is not skipped: {d:?}");
+    let mut s = rig("bam-send", Mode::Live, "[send_policy.bam]\nenabled = true\n").await;
+    let d = s.decide(route(1, damm(2, MINT), 9_000, 7), 101, now_ns());
+    assert_eq!((d.reason.as_str(), d.ev), ("sent", Some(1_000)), "the bar's room, 3,000: {d:?}");
+    let _ = s.settled().await;
+    let (tx, _) = crate::tx::parse_wire(&s.got.lock().unwrap()[0].0).unwrap();
+    assert_eq!(send::tip_paid(&tx, &tip_accounts()), 3_000);
+    let a = s.lines("attempts");
+    assert_eq!((a[0]["tip"]["bam"]["reached"].as_bool(), a[0]["tip"]["policy"].as_str()), (Some(false), Some("bam_floor")));
+    let mut o = rig("bam-off", Mode::Live, "").await;
+    let d = o.decide(route(1, damm(2, MINT), 9_000, 7), 101, now_ns());
+    assert_eq!((d.reason.as_str(), d.ev), ("sent", Some(1_200)), "off: the band's 2,800: {d:?}");
+    let _ = o.settled().await;
+    let a = o.lines("attempts");
+    assert_eq!((a[0]["leader"]["kind"].as_str(), a[0]["tip"]["lamports"].as_u64(), a[0]["tip"]["bam"].is_null()), (Some("bam"), Some(2_800), true));
+}
+
+/// FT-006: the dry run bids for a BAM-led slot as a live run would, and its checks of the signed bytes pass (the signed
+/// min_profit covers the raised tip, the base fee and the margin floor)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dry_run_bids_for_a_bam_slot_as_live() {
+    let mut r = rig("bam-dry", Mode::DryRun, "[send_policy.bam]\nenabled = true\n").await;
+    let d = r.decide(route(1, damm(2, MINT), 12_000, 7), 101, now_ns());
+    assert!(d.would_send, "{d:?}");
+    let a = r.lines("attempts");
+    assert_eq!((a[0]["tip"]["lamports"].as_u64(), a[0]["dry_run"]["checks_ok"].as_bool(), a[0]["copies"][0]["leader_kind"].as_str(), a[0]["copies"][0]["endpoint"].as_str()),
+        (Some(5_000), Some(true), Some("bam"), Some("127.0.0.1")), "the configured block engine, where a send would go: {}", a[0]["dry_run"]["checks"]);
 }
