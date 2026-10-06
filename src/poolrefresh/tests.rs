@@ -163,6 +163,14 @@ fn a_segments_records() {
     assert!(read_segment(&d, false, far).unlisted.is_empty());
     std::fs::remove_file(d.join("rivals.jsonl")).unwrap();
     assert!(!read_segment(&d, false, far).ok);
+    // a segment that recorded no trigger at all (its state stream was down) is not ok either
+    let e = tmp("seg-empty");
+    std::fs::write(e.join("triggers.jsonl"), format!("{}\n", hdr("arbx.triggers/2.0"))).unwrap();
+    std::fs::write(e.join("rivals.jsonl"), format!("{}\n", hdr("arbx.rivals/1.2"))).unwrap();
+    assert!(!read_segment(&e, false, far).ok);
+    std::fs::write(e.join("triggers.jsonl"), format!("{}\n{}\n", hdr("arbx.triggers/2.0"), json!({ "pool": a }))).unwrap();
+    assert!(read_segment(&e, false, far).ok);
+    let _ = std::fs::remove_dir_all(&e);
     // a campaign directory: its segments, oldest first
     let camp = d.join("camp");
     for (n, t) in [("c-p2", 20), ("c-p1", 10)] {
@@ -347,6 +355,31 @@ fn dead_and_idle_listed_pools() {
     assert_eq!(plan(&p, &inputs(&rows, segs, vec![], &w), "x").unwrap().rows.len(), 5, "0: never idle-dropped");
 }
 
+/// Fail-safe: more listed pools dead in one refresh than max(25, a twentieth of the list), among those the last segment's
+/// boot found alive, is the RPC's or a decoder's fault, not the pools': the plan refuses (the refresh keeps the previous
+/// list, with the reason). Pools the boot had already dropped go whatever their number
+#[test]
+fn many_dead_listed_pools_keep_the_previous_list() {
+    let mut w = World::new();
+    let t = tok(1);
+    for n in 1..=40 { if n <= 14 { w.dlmm(k(n), t, *WSOL, 5_000_000_000); } else { w.put(k(n), None); } }
+    let rows: Vec<Row> = (1..=40).map(|n| row(Venue::Dlmm, k(n))).collect();
+    let e = plan(&pol(), &inputs(&rows, vec![], vec![], &w), "x").unwrap_err();
+    assert!(e.contains("26 of the 40 listed pools came back dead (more than 25 in one refresh)"), "{e}");
+    // the last segment's boot found them all alive: as suspect
+    let all: Vec<Pk> = (1..=40).map(k).collect();
+    let e = plan(&pol(), &inputs(&rows, vec![seg("p1", &all, &[k(1)], true)], vec![], &w), "x").unwrap_err();
+    assert!(e.contains("all alive at the last segment's boot"), "{e}");
+    // its boot had already dropped them (a stale list): they go, whatever their number
+    let alive: Vec<Pk> = (1..=14).map(k).collect();
+    let out = plan(&pol(), &inputs(&rows, vec![seg("p1", &all, &[], true), seg("p2", &alive, &alive, true)], vec![], &w), "x").unwrap();
+    assert_eq!((out.rows.len(), out.report["counts"]["dropped_by"]["dead:missing"].as_u64()), (14, Some(26)));
+    // 25 dead: the bound itself passes (pools die)
+    w.dlmm(k(15), t, *WSOL, 5_000_000_000);
+    let out = plan(&pol(), &inputs(&rows, vec![], vec![], &w), "x").unwrap();
+    assert_eq!((out.rows.len(), out.report["counts"]["dropped_by"]["dead:missing"].as_u64()), (15, Some(25)));
+}
+
 /// The plan is a function of its inputs: the same inputs (in any order of candidates) give the same list and report;
 /// an account the plan needs that was not fetched is an error (the refresh then keeps the previous list)
 #[test]
@@ -418,11 +451,16 @@ fn a_refresh_end_to_end_on_recorded_fixtures() {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/poolrefresh");
     let out_dir = tmp("e2e");
     let cfg = fixture_cfg();
-    let o = Opts { runs: vec![fixture_runs(&out_dir)], out: out_dir.join("pools-fx-p2.csv"), segment: "fx-p2".into(), ..Default::default() };
+    // the output directory does not exist yet (a pre-flight's): the list, the report and the inputs file all land in it
+    let o = Opts { runs: vec![fixture_runs(&out_dir)], out: out_dir.join("preflight/pools-fx-p2.csv"), segment: "fx-p2".into(), ..Default::default() };
     let mut web = DirWeb { dir: base.join("api"), asked: vec![] };
     let mut chain = recorded(false);
     let r = refresh(&cfg, &o, &mut web, &mut chain).unwrap();
     assert_eq!(r["status"], "ok", "{r:#}");
+    assert_eq!(r["inputs_file"].as_str(), Some(out_dir.join("preflight/pools-fx-p2.csv.inputs.json").display().to_string().as_str()));
+    assert_eq!(r["inputs_sha256"].as_str(), Some(crate::provenance::sha256_hex(&std::fs::read(out_dir.join("preflight/pools-fx-p2.csv.inputs.json")).unwrap()).as_str()));
+    assert!(r["inputs_error"].is_null(), "{}", r["inputs_error"]);
+    assert!(out_dir.join("preflight/pools-fx-p2.csv.report.json").is_file());
     let added: Vec<(String, String)> = r["added"].as_array().unwrap().iter().map(|a| (a["pool"].as_str().unwrap()[..8].to_string(), a["src"].as_str().unwrap().to_string())).collect();
     assert_eq!(added[..2], [("67mcDJDV".to_string(), "records".to_string()), ("CHQ5CAEG".to_string(), "gt".to_string())], "BINDER first: our records, then the trending list");
     assert_eq!(r["counts"]["added"].as_u64(), Some(14), "{}", r["counts"]);

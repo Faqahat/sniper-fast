@@ -48,6 +48,10 @@ pub static USDT: LazyLock<Pk> = LazyLock::new(|| crate::tx::pk("Es9vMFrzaCERmJfr
 const RECORD_CANDS_PER_ADD: usize = 5;
 /// rejected candidates listed in the report (the counts are complete)
 const REPORT_REJECTED_MAX: usize = 300;
+/// more listed pools than this (or than a twentieth of the list) found dead in one refresh, among those the last
+/// segment's boot found alive, means the RPC, or a decoder after a program upgrade, is suspect rather than the pools: the
+/// previous list stays (pools die a few at a time; pools the boot already dropped are dropped whatever their number)
+const DEAD_MAX_MIN: usize = 25;
 
 pub fn pk_opt(s: &str) -> Option<Pk> { bs58::decode(s.trim()).into_vec().ok().and_then(|v| Pk::try_from(v).ok()) }
 
@@ -119,8 +123,8 @@ pub struct SegAct {
     pub started_ns: u64,
     /// its stop.json exists (a segment still running is read as far as it got)
     pub complete: bool,
-    /// every stream read without error, and the essential ones (triggers, rivals) present: only such a segment counts
-    /// toward a pool's idle streak
+    /// every stream read without error, the essential ones (triggers, rivals) present, and at least one trigger recorded:
+    /// only such a segment counts toward a pool's idle streak
     pub ok: bool,
     /// the pools it listed (its pools.json); None: unknown (no idle streak counts across it)
     pub listed: Option<BTreeSet<String>>,
@@ -280,8 +284,11 @@ pub fn read_segment(dir: &Path, exec: bool, deadline: Instant) -> SegAct {
     let mut counts: HashMap<String, Counts> = HashMap::new();
     {
         let mut bump = |p: &str, f: fn(&mut Counts)| { if !p.is_empty() { f(counts.entry(p.to_string()).or_default()); } };
-        let st = each_line(dir, "triggers", deadline, &mut |l| { if let Some(p) = str_after(l, b"\"pool\":\"") { bump(p, |c| c.triggers += 1); } });
-        if st.files == 0 { s.ok = false; }
+        // a segment that recorded no trigger at all (its state stream was down, or it ended in its boot) says nothing about
+        // its pools' activity: not ok, so it never counts toward an idle streak
+        let mut trig = 0u64;
+        let st = each_line(dir, "triggers", deadline, &mut |l| { if let Some(p) = str_after(l, b"\"pool\":\"") { trig += 1; bump(p, |c| c.triggers += 1); } });
+        if st.files == 0 || trig == 0 { s.ok = false; }
         s.streams.insert("triggers".into(), st.json());
         if st.error.is_some() || st.stopped { s.ok = false; }
         let st = each_line(dir, "opportunities", deadline, &mut |l| {
@@ -548,6 +555,15 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
             continue;
         }
         listed.push((i, r.clone(), m, total, streak));
+    }
+    // the newly dead: alive at the last segment's boot (its pools.json lists them), or every dead one without records
+    let booted: Option<&BTreeSet<String>> = segs.iter().rev().find_map(|s| s.listed.as_ref());
+    let dead = drops.iter().filter(|d| d["why"].as_str().is_some_and(|w| w.starts_with("dead"))
+        && booted.is_none_or(|b| d["pool"].as_str().is_some_and(|x| b.contains(x)))).count();
+    let max_dead = DEAD_MAX_MIN.max(current.len() / 20);
+    if dead > max_dead {
+        return Err(format!("{dead} of the {} listed pools came back dead (more than {max_dead} in one refresh{}): the RPC or a decoder is suspect", current.len(),
+            if booted.is_some() { ", all alive at the last segment's boot" } else { "" }));
     }
     let listed_set: HashSet<Pk> = current.iter().map(|r| r.pool).collect();
     // the pools on a pair: listed (alive) and the registry's (alive on chain, fetched with the candidates)
@@ -846,6 +862,10 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
     let (rows, unreadable) = parse_list(std::str::from_utf8(&current_raw).context("the current list is not UTF-8")?)?;
     let report_p = report_path(o);
     let inputs_p = inputs_path(&report_p);
+    // the output directories first: the inputs file is written before the list (a pre-flight writes into a new one)
+    for f in [&o.out, &report_p, &inputs_p] {
+        if let Some(d) = f.parent().filter(|d| !d.as_os_str().is_empty()) { std::fs::create_dir_all(d).with_context(|| format!("creating {}", d.display()))?; }
+    }
     let mut phases = serde_json::Map::new();
     let mut sources = serde_json::Map::new();
     let quotes: Vec<Pk> = p.quotes.iter().map(|q| if q == "USDC" { *USDC } else { *WSOL }).collect();
@@ -961,7 +981,9 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
         inp.registry.retain(|r| fetched.contains(&r.pool));
         (inp, failure)
     };
-    let _ = std::fs::write(&inputs_p, serde_json::to_vec(&json!({ "schema": INPUTS_SCHEMA, "inputs": &inp })).unwrap_or_default());
+    // the inputs file (`--inputs` replays it): one that cannot be written is recorded, never fatal (the list does not need it)
+    let inputs_error = serde_json::to_vec(&json!({ "schema": INPUTS_SCHEMA, "inputs": &inp })).map_err(anyhow::Error::from)
+        .and_then(|b| crate::control::write_atomic(&inputs_p, &b)).err().map(|e| format!("{e:#}"));
     // the plan, or the previous list
     let t = Instant::now();
     let planned = match &failure { Some(e) => Err(e.clone()), None => plan(p, &inp, &o.segment) };
@@ -970,7 +992,6 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
         Ok(out) => ("ok", Value::Null, list_csv(&out.rows).into_bytes(), out.report),
         Err(e) => ("kept_previous", json!(e), current_raw.clone(), json!({ "counts": { "current": rows.len(), "rows": rows.len(), "kept": rows.len(), "added": 0, "dropped": 0 } })),
     };
-    if let Some(d) = o.out.parent().filter(|d| !d.as_os_str().is_empty()) { std::fs::create_dir_all(d)?; }
     crate::control::write_atomic(&o.out, &body)?;
     let out_sha = crate::provenance::sha256_hex(&body);
     let t1 = crate::feeds::clock::now_ns();
@@ -981,7 +1002,8 @@ pub fn refresh(cfg: &Config, o: &Opts, web: &mut dyn Web, chain: &mut dyn Chain)
         "sources": sources, "rpc": rpc_j,
         "records": inp.segments.iter().map(|s| json!({ "segment": s.name, "complete": s.complete, "ok": s.ok, "listed": s.listed.as_ref().map(|l| l.len()),
             "active_pools": s.pools.len(), "unlisted_pools": s.unlisted.len(), "streams": s.streams })).collect::<Vec<_>>(),
-        "inputs_file": inputs_p.display().to_string(), "inputs_sha256": std::fs::read(&inputs_p).ok().map(|b| crate::provenance::sha256_hex(&b)) });
+        "inputs_file": inputs_p.display().to_string(), "inputs_sha256": std::fs::read(&inputs_p).ok().map(|b| crate::provenance::sha256_hex(&b)),
+        "inputs_error": inputs_error });
     if let (Some(r), Some(d)) = (report.as_object_mut(), detail.as_object()) { for (k, v) in d { r.insert(k.clone(), v.clone()); } }
     crate::control::write_atomic(&report_p, format!("{}\n", serde_json::to_string_pretty(&report)?).as_bytes())?;
     Ok(report)

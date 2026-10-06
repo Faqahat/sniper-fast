@@ -40,20 +40,35 @@ Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the wa
 - reconciliation ok at every stop.
 
 ## Pre-flight (WP-22, before the run; read-only)
-On Cherry, with the FT-008 binary and config deployed, against FT-006's records (nothing is locked or sent, the gRPC
-stream is never opened, the verification RPC is `[pool_refresh] rpc`: the public RPC, at most 2 requests a second):
+On Cherry, with the WP-22 binary and deploy/arbx-ft008-frz.toml uploaded, against FT-006's records (FT-007's when they
+exist). It may run while a campaign runs: nothing is locked or sent, the gRPC stream is never opened, it runs at nice 10,
+and it verifies through `[pool_refresh] rpc` (the public RPC, at most 2 requests a second, never Haan or Shyft); a running
+segment's records are read as far as they are written. `<bin>` is the uploaded WP-22 binary (`/root/arbx/bin/arbx-<commit>`):
 
-    nice -n 10 arbx pools refresh --config /root/arbx/deploy/arbx-ft008-frz.toml --runs /root/arbx/runs/ft006 \
+    nice -n 10 <bin> pools refresh --config /root/arbx/deploy/arbx-ft008-frz.toml --runs /root/arbx/runs/ft006 \
         --out /root/arbx/runs/wp22-preflight/pools.csv --segment preflight
-    arbx pools refresh --config /root/arbx/deploy/arbx-ft008-frz.toml --inputs /root/arbx/runs/wp22-preflight/pools.csv.inputs.json \
-        --out /root/arbx/runs/wp22-preflight/replayed.csv --segment preflight     (the same sha256: deterministic)
+    <bin> pools refresh --config /root/arbx/deploy/arbx-ft008-frz.toml --inputs /root/arbx/runs/wp22-preflight/pools.csv.inputs.json \
+        --out /root/arbx/runs/wp22-preflight/replayed.csv --segment preflight
 
-Check in `pools.csv.report.json`: `status` ok (`kept_previous` with an RPC reason: the public RPC refuses Cherry, switch
-`rpc`); `duration_ms` well under 225,000 (the refresh's own deadline); `sources.*.status` ok; `records` one entry per
-FT-006 segment, each `ok`, with `unlisted_pools_seen` > 0; `counts.rows` <= 1,500; `added` tokens with 2+ pools that look
-right (BINDER-like), every one with `quote_liquidity` >= 2 SOL; `rejected_by` mostly `group`, `liquidity`, `quote`.
-A local run of the same command on FT-005b's first segment (2026-10-06): 53 s, +13 added (4 records, 3 GeckoTerminal, 6
-DexScreener), 13 idle pools cut by the cap, 23 getMultipleAccounts on the public RPC.
+Each prints `pool refresh for preflight: ...` and `list <file> (sha256 <hash>)`: the two hashes must be equal (the same
+inputs give the same list). Exit 0 when the list was refreshed, 3 when the previous list was kept. Check in
+`pools.csv.report.json`:
+- `status` ok. `kept_previous` with an RPC reason (HTTP 403 or 429 from api.mainnet-beta.solana.com) means the public
+  RPC refuses Cherry: name another `[[rpc.endpoint]]` in `[pool_refresh] rpc` (a key of its own; never Haan's, and not
+  Shyft's, whose slot index takes 3.8 of its 4 req/s).
+- `duration_ms` well under 225,000 (the refresh's own deadline; locally 20-53 s).
+- `sources.geckoterminal.status`, `sources.dexscreener.status` ok; `sources.records.status` ok with
+  `unlisted_pools_seen` > 0 (the last segment's rival arbitrage on pools we do not list).
+- `records`: one entry per FT-006 segment, each `ok`.
+- `counts.rows` <= 1,500; `counts.dropped_by` with few `dead:*` (more than max(25, a twentieth of the list), 75 for
+  1,500 rows, among those the last segment's boot found alive, keeps the previous list: the RPC or a decoder is suspect).
+- `added`: tokens with 2+ pools that look right (BINDER-like), every one with `quote_liquidity` >= 2,000,000,000.
+- `rejected_by` mostly `group`, `liquidity`, `quote`; `rpc.calls` about 20-50.
+
+Local runs (2026-10-06, the public RPC): FT-005b's first segment with 1 of its 31 exec files and live GeckoTerminal and
+DexScreener, 53 s, +13 added (4 records, 3 GeckoTerminal, 6 DexScreener; BINDER and EXTRACTOR 3 pools each), 13 idle pools
+cut by the cap, 23 getMultipleAccounts; the same segment with a full hour of exec files (31 files, 5.0 GB decompressed)
+and recorded web answers: the records read in 9.6 s, the refresh 20 s.
 
 ## Results
 (filled in)
