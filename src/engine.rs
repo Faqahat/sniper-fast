@@ -4880,6 +4880,24 @@ mod tests {
         }
     }
 
+    /// Review F2: a change of the followed arrays costs the engine thread the watch list's keys only (`watch_keys`, a copy);
+    /// the base58 encoding, about 8.5 ms for 12,000 keys on the engine thread before, runs on the state stream's task
+    #[test]
+    fn the_watch_list_is_published_as_keys() {
+        let mut r = rig("watch-keys");
+        let base: Vec<Pk> = (0..12_000u32).map(|i| { let mut k = [0u8; 32]; k[..4].copy_from_slice(&i.to_le_bytes()); k }).collect();
+        r.e.set_base_watch(base.clone());
+        let t = std::time::Instant::now();
+        let keys = r.e.watch_keys();
+        let copy_us = t.elapsed().as_nanos() as f64 / 1e3;
+        let t = std::time::Instant::now();
+        let enc: Vec<String> = keys.iter().map(b58).collect();
+        let b58_us = t.elapsed().as_nanos() as f64 / 1e3;
+        eprintln!("watch list of {} keys: the engine thread's copy {copy_us:.0} µs; their base58 encoding (now on the stream's task) {b58_us:.0} µs", keys.len());
+        assert_eq!((keys.len(), enc.len()), (12_000, 12_000));
+        assert_eq!(&keys[..], &base[..], "the base watch list, then the followed arrays (none here)");
+    }
+
     /// PLAN-ADDENDUM WP-21 (review F6): a newly followed Orca tick array that a read finds missing is held empty but not
     /// priced as absent until a second read, at the next drift tick (the stream's subscription then covers it), finds it
     /// missing again; one found by the second read is held as read. Until then the pool's quotes leave it out

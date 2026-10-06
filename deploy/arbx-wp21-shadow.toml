@@ -416,7 +416,7 @@ socket = true
 max_per_sec = 2
 
 [canary]
-# WP-05: a canary run is a live run under these caps (`arbx run --canary` AND enabled = false   # WP-21: shadow and dry runs only): real bundles of at most
+# WP-05: a canary run is a live run under these caps (`arbx run --canary` AND enabled = true): real bundles of at most
 # size_sol (0.2 SOL at most), at most `count` attempts per segment `every_ms` apart. WP-07: `count` is set for FT-005's 24 h
 # baseline: at one attempt a second at most, a 60-minute segment makes at most 3,600 and a whole day 86,400, so the cap
 # never binds; the equity stops, the spend cap and the bankroll do (0 would mean no cap at all)

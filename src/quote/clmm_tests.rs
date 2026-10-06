@@ -533,6 +533,51 @@ fn older_venues_refuse_paused_and_default_frozen_mints() {
     }
 }
 
+/// Review F2, measured as the review's bench did (wp21-review/bench: leg parse p99 36 µs, 39-42 µs on the tick-spacing-1
+/// pools 2uoK and DCAL whose bitmap scan crossed thousands of empty arrays; the drift's follow-set check p99 58 µs, 218
+/// µs at most): each CLMM snapshot's leg parsed 200 times both ways (`quote::leg`, a route's), and its follow set derived
+/// 200 times (`pools::clmm_arrays`, the drift's per-pool cost). With the word scan the slow pools parse in about a
+/// microsecond: their median is held under 10 µs here (a loaded machine moves the tails, not the median)
+#[test]
+fn clmm_leg_parse_and_drift_latency() {
+    let (mut parse, mut drift) = (Vec::new(), Vec::new());
+    let mut worst: Vec<(u64, String)> = Vec::new();
+    let mut pools: Vec<&Fx> = fixtures().values().collect();
+    pools.sort_by_key(|f| f.pool);
+    for fx in pools {
+        let m = meta(fx);
+        let accts = accounts(fx, &Value::Null);
+        let getv = |k: &Pk| accts.get(k).map(|a| a.data.to_vec());
+        let arrays = followed(fx, &m, &accts);
+        for _ in 0..200 {
+            let t = std::time::Instant::now();
+            let l = crate::pools::clmm_arrays(&m, &getv, &arrays);
+            drift.push(t.elapsed().as_nanos() as u64);
+            std::hint::black_box(l);
+        }
+        let get = |k: &Pk| accts.get(k);
+        let src = Src { get: &get, arrays: &arrays, usable: &|_| true, clock: clock(fx.slot, fx.unix) };
+        let mut own = Vec::new();
+        for zfo in [true, false] {
+            for _ in 0..200 {
+                let t = std::time::Instant::now();
+                let l = leg(&m, zfo, &src, Use::Route { dlmm_budget: DLMM_BUDGET_ALONE });
+                own.push(t.elapsed().as_nanos() as u64);
+                let _ = std::hint::black_box(l);
+            }
+        }
+        own.sort_unstable();
+        worst.push((own[own.len() / 2], fx.file.clone()));
+        parse.extend(own);
+    }
+    let q = |v: &mut Vec<u64>, x: f64| { v.sort_unstable(); v[((v.len() as f64 * x) as usize).min(v.len() - 1)] as f64 / 1e3 };
+    worst.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    eprintln!("CLMM leg parse (quote::leg, a route's), 20 pools x 2 ways x 200: p50 {:.1} µs, p99 {:.1} µs, max {:.1} µs; slowest medians {:?}; \
+        follow-set check (pools::clmm_arrays) p50 {:.1} µs, p99 {:.1} µs, max {:.1} µs", q(&mut parse, 0.5), q(&mut parse, 0.99), q(&mut parse, 1.0),
+        worst.iter().take(3).map(|(ns, f)| (ns / 1_000, &f[..f.len().min(14)])).collect::<Vec<_>>(), q(&mut drift, 0.5), q(&mut drift, 0.99), q(&mut drift, 1.0));
+    assert!(worst[0].0 < 10_000, "the slowest pool's median parse: {} ns ({})", worst[0].0, worst[0].1);
+}
+
 /// Orca's U256 division as deployed (`U256Muldiv::div`, Knuth D with a carry word: DESIGN.md §2.9, §7 item 12): never a
 /// panic. Against a 256-bit long division on random and edge-limbed operands (the add-back and qhat-correction paths of
 /// Knuth D need such limbs): equal wherever it answers; None only where the deployed binary panics (the add-back that
