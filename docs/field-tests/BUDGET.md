@@ -12,7 +12,7 @@
 
 | Date (UTC) | Test | Fees | Tips | Rent locked | Rent recovered | Trading P&L | Net spend | Cumulative | Remaining (hard cap) |
 |---|---|---|---|---|---|---|---|---|---|
-| — | (no live test yet) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 34,000,000 |
+| 2026-10-06 | FT-004 (ft004, 1 h canary) | 60,000 | 90,852 | 9,006,840 | 9,006,840 | +187,905 | **−37,053** (profit) | −37,053 | 34,037,053 |
 
 Net spend = fees + tips + rent locked that cannot be recovered − trading profit. Every figure comes from chain data, either the WP-07 ledger or `getTransaction` balance deltas, never from our own predictions.
 - **Trading P&L** (WP-07: `ledger::Entry::trade_pnl`) is each route's change of SOL + WSOL and of recoverable rent, plus what it paid in fee, tip and non-recoverable rent. A token a route left behind counts 0 there; its quoted value is reported apart.
