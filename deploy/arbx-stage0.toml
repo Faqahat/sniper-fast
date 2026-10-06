@@ -227,6 +227,7 @@ url = "https://shreds-fra6-1.erpc.global"
 
 [[feed]]
 name = "astralane-deshred"
+enabled = false   # owner 2026-10-06: dropped (Astralane deshred refused us: "subscriber limit reached", ResourceExhausted / 429 storm in FT-001 p3)
 kind = "yellowstone-deshred"
 url = "http://fr2.shreds.astralane.io:12000"
 token_env = "ASTRALANE_KEY"
