@@ -153,6 +153,12 @@ pub struct SegAct {
     /// the minutes it was started for (meta.json `run.argv` `--minutes`)
     #[serde(default)]
     pub planned_min: Option<f64>,
+    /// the minutes from its start (meta.json `run.started_ns`, else its first trigger) to its last trigger
+    #[serde(default)]
+    pub span_min: f64,
+    /// the minutes from its start to when the refresh read it (a running segment is read before its end)
+    #[serde(default)]
+    pub elapsed_min: f64,
 }
 
 fn find(h: &[u8], n: &[u8]) -> Option<usize> {
@@ -316,6 +322,8 @@ pub fn read_segment(dir: &Path, exec: bool, deadline: Instant) -> SegAct {
     let mut s = SegAct { name, started_ns, complete: dir.join("stop.json").is_file(), ok: true, listed, planned_min, ..Default::default() };
     let mut counts: HashMap<String, Counts> = HashMap::new();
     let mut minutes: HashSet<u64> = HashSet::new();
+    let read_ns = crate::feeds::clock::now_ns();
+    let (mut first_rx, mut last_rx) = (u64::MAX, 0u64);
     {
         let mut bump = |p: &str, f: fn(&mut Counts)| { if !p.is_empty() { f(counts.entry(p.to_string()).or_default()); } };
         // a segment that recorded no trigger at all (its state stream was down, or it ended in its boot) says nothing about
@@ -326,7 +334,11 @@ pub fn read_segment(dir: &Path, exec: bool, deadline: Instant) -> SegAct {
             if let Some(p) = str_after(l, b"\"pool\":\"") {
                 trig += 1;
                 bump(p, |c| c.triggers += 1);
-                if let Some(t) = find(l, b"\"st\":{").and_then(|i| num_after(&l[i..], b"\"rx\":")) { minutes.insert(t / 60_000_000_000); }
+                if let Some(t) = find(l, b"\"st\":{").and_then(|i| num_after(&l[i..], b"\"rx\":")) {
+                    minutes.insert(t / 60_000_000_000);
+                    first_rx = first_rx.min(t);
+                    last_rx = last_rx.max(t);
+                }
             }
         });
         if st.files == 0 || trig == 0 { s.ok = false; }
@@ -348,6 +360,11 @@ pub fn read_segment(dir: &Path, exec: bool, deadline: Instant) -> SegAct {
     }
     s.pools = counts.into_iter().filter(|(_, c)| c.total() > 0).collect();
     s.covered_min = minutes.len() as u32;
+    if last_rx > 0 {
+        let from = if started_ns > 0 && started_ns <= first_rx { started_ns } else { first_rx };
+        s.span_min = (last_rx - from) as f64 / 60e9;
+    }
+    s.elapsed_min = if started_ns > 0 { read_ns.saturating_sub(started_ns) as f64 / 60e9 } else { s.span_min };
     if exec {
         let listed = s.listed.clone().unwrap_or_default();
         let mut seen: HashMap<String, Seen> = HashMap::new();
@@ -590,9 +607,15 @@ struct Listed { i: usize, row: Row, meta: Option<PoolMeta>, total: u64, streak: 
 /// the minutes a segment is measured against: the campaign's segment length, else its own `--minutes`
 fn seg_minutes(inp: &Inputs, s: &SegAct) -> Option<f64> { inp.segment_min.or(s.planned_min).filter(|m| *m > 0.0) }
 
-/// whether a segment counts toward an idle streak: its records whole, and its triggers covering IDLE_COVER_SHARE of its
-/// minutes (review #3a)
-fn counts_for_idle(inp: &Inputs, s: &SegAct) -> bool { s.ok && seg_minutes(inp, s).is_some_and(|m| s.covered_min as f64 >= IDLE_COVER_SHARE * m) }
+/// whether a segment counts toward an idle streak (review #3a): its records whole; its triggers spanning
+/// IDLE_COVER_SHARE of its minutes (a complete segment's: the campaign's segment length or its own `--minutes`; a
+/// running one's: those elapsed when the refresh read it, at least half a segment) with a trigger in IDLE_COVER_SHARE of
+/// the minutes of that span (a stream that died, or stalled for a while, leaves gaps)
+fn counts_for_idle(inp: &Inputs, s: &SegAct) -> bool {
+    let Some(m) = seg_minutes(inp, s) else { return false };
+    let need = if s.complete { m } else if s.elapsed_min >= 0.5 * m { s.elapsed_min.min(m) } else { return false };
+    s.ok && s.span_min >= IDLE_COVER_SHARE * need && s.covered_min as f64 >= IDLE_COVER_SHARE * s.span_min
+}
 
 /// the order of a new pool among the new ones: our records first, then the trending lists; the higher score; the pool
 fn add_key(c: &Cand) -> (Src, i64, String) { (c.src, -(c.score.max(0.0).min(9e15) as i64), c.pool.clone()) }
@@ -799,7 +822,8 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
         "rejected": rejected.iter().take(REPORT_REJECTED_MAX).map(|(c, w)| json!({ "pool": c.pool, "venue": c.venue, "src": c.src.tag(), "via": c.via, "why": w })).collect::<Vec<_>>(),
         "kept": kept_j,
         "shrink_guard": shrink,
-        "segments_counted_for_idle": segs.iter().map(|s| json!({ "segment": s.name, "counts": counts_for_idle(inp, s), "covered_min": s.covered_min,
+        "segments_counted_for_idle": segs.iter().map(|s| json!({ "segment": s.name, "counts": counts_for_idle(inp, s), "complete": s.complete,
+            "covered_min": s.covered_min, "span_min": (s.span_min * 10.0).round() / 10.0, "elapsed_min": (s.elapsed_min * 10.0).round() / 10.0,
             "minutes": seg_minutes(inp, s) })).collect::<Vec<_>>(),
     });
     Ok(Outcome { rows, report })

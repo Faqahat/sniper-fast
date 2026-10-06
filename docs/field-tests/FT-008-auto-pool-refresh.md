@@ -65,7 +65,8 @@ inputs give the same list). Exit 0 when the list was refreshed, 3 when the previ
 - `counts.rows` <= 1,500; `counts.dropped_by` with few `dead:*` (only pools the last boot had dropped too); few
   `counts.kept_unconfirmed` (pools the RPC called dead but the last boot found alive: kept; more than 75 for 1,500 rows
   keeps the previous list); `shrink_guard.idle_dropped` <= 150 (max(25, a tenth of the list)).
-- `segments_counted_for_idle`: every complete ft006 segment `counts: true` (its triggers cover 80% of its 60 minutes).
+- `segments_counted_for_idle`: every complete ft006 segment `counts: true` (its triggers span 80% of its 60 minutes,
+  with a trigger in 80% of them); a running one counts once half of it has elapsed.
 - `added`: tokens with 2+ pools that look right (BINDER-like), every one with `quote_liquidity` >= 2,000,000,000.
 - `rejected_by` mostly `group`, `liquidity`, `quote`; `rpc.calls` about 20-50.
 

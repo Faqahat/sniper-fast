@@ -60,7 +60,8 @@ fn row(v: Venue, p: Pk) -> Row { Row { venue: v, pool: p, source: "seed".into() 
 /// a full 30-minute segment (its triggers cover all of it)
 fn seg(name: &str, listed: &[Pk], active: &[Pk], ok: bool) -> SegAct {
     SegAct { name: name.into(), started_ns: 0, complete: true, ok, listed: Some(listed.iter().map(b58).collect()),
-        pools: active.iter().map(|p| (b58(p), Counts { triggers: 1, ..Default::default() })).collect(), covered_min: 30, planned_min: Some(30.0), ..Default::default() }
+        pools: active.iter().map(|p| (b58(p), Counts { triggers: 1, ..Default::default() })).collect(), covered_min: 30, planned_min: Some(30.0), span_min: 30.0,
+        elapsed_min: 31.0, ..Default::default() }
 }
 fn inputs(rows: &[Row], segs: Vec<SegAct>, cands: Vec<Cand>, w: &World) -> Inputs {
     let mut i = Inputs { segments: segs, cands: merge(cands), accounts: w.accts.clone(), ..Default::default() };
@@ -132,7 +133,7 @@ fn swap_pools_are_read_where_the_decoders_read_them() {
 fn a_segments_records() {
     let d = tmp("seg");
     let (a, b, c, u) = (b58(&k(1)), b58(&k(2)), b58(&k(3)), b58(&k(4)));
-    std::fs::write(d.join("meta.json"), json!({ "run": { "segment": "c-p3", "started_ns": 42, "argv": ["arbx", "run", "--minutes", "30", "--canary"] } }).to_string()).unwrap();
+    std::fs::write(d.join("meta.json"), json!({ "run": { "segment": "c-p3", "started_ns": 1_799_999_940_000_000_000u64, "argv": ["arbx", "run", "--minutes", "30", "--canary"] } }).to_string()).unwrap();
     std::fs::write(d.join("pools.json"), json!([{ "pool": a }, { "pool": b }, { "pool": c }]).to_string()).unwrap();
     let hdr = |s: &str| json!({ "schema": s, "file_seq": 0 }).to_string();
     // triggers in two rotation files, zstd: the second ends with an incomplete frame (a write in progress)
@@ -152,7 +153,7 @@ fn a_segments_records() {
     std::fs::write(d.join("exec.jsonl"), format!("{}\n{}\n{}\n{}\n{}\n{}\n", hdr("arbx.exec/2.2"), ex(true, true, &u), ex(true, true, &u), ex(false, true, &u), ex(true, false, &u), ex(true, true, &a))).unwrap();
     let far = Instant::now() + Duration::from_secs(60);
     let s = read_segment(&d, true, far);
-    assert_eq!((s.name.as_str(), s.started_ns, s.complete, s.ok), ("c-p3", 42, false, true));
+    assert_eq!((s.name.as_str(), s.started_ns, s.complete, s.ok), ("c-p3", 1_799_999_940_000_000_000, false, true));
     assert_eq!(s.listed.as_ref().map(|l| l.len()), Some(3));
     assert_eq!(s.pools[&a], Counts { triggers: 2, decisions: 0, opps: 1, rivals: 0 }, "the partial frame's trigger is left out");
     assert_eq!(s.pools[&b], Counts { rivals: 1, ..Default::default() });
@@ -162,6 +163,7 @@ fn a_segments_records() {
     assert_eq!(s.streams["triggers"]["files"], 2);
     // review #3a: the minutes its triggers cover (their receive times), and the minutes it was started for
     assert_eq!((s.covered_min, s.planned_min), (2, Some(30.0)));
+    assert!((s.span_min - 121.0 / 60.0).abs() < 1e-9, "from its start to its last trigger: {}", s.span_min);
     // without exec, nothing unlisted; without rivals, the segment is not ok (it cannot count toward an idle streak)
     assert!(read_segment(&d, false, far).unlisted.is_empty());
     std::fs::remove_file(d.join("rivals.jsonl")).unwrap();
@@ -390,8 +392,10 @@ fn a_pool_the_last_boot_found_alive_is_never_dropped_on_one_answer() {
     assert_eq!(out.report["counts"]["kept_unconfirmed"].as_u64(), Some(2));
 }
 
-/// Review #3a: a segment counts toward an idle streak only when its triggers cover 80% of a segment's minutes (the
-/// campaign's `--segment-min`, else its own `--minutes`): a short, crashed or degraded segment ends the streak
+/// Review #3a: a segment counts toward an idle streak only when its triggers span 80% of a segment's minutes (the
+/// campaign's `--segment-min`, else its own `--minutes`; a running segment: the minutes elapsed when it was read, at
+/// least half a segment) with a trigger in 80% of the minutes of that span: a short, crashed or degraded segment ends
+/// the streak
 #[test]
 fn short_segments_do_not_count_toward_idleness() {
     let mut w = World::new();
@@ -402,18 +406,29 @@ fn short_segments_do_not_count_toward_idleness() {
     let busy: Vec<Pk> = (2..=40).map(k).collect();
     let full = |n: &str| seg(n, &all, &busy, true);
     let has_k1 = |i: &Inputs| pools_of(&plan(&pol(), i, "x").unwrap().rows).contains(&k(1));
-    assert!(!has_k1(&inputs(&rows, vec![full("p1"), full("p2")], vec![], &w)), "two full segments: k1 is idle");
+    let with = |s: SegAct| inputs(&rows, vec![full("p1"), s], vec![], &w);
+    assert!(!has_k1(&with(full("p2"))), "two full segments: k1 is idle");
     let mut short = full("p2");
-    short.covered_min = 23;
-    assert!(has_k1(&inputs(&rows, vec![full("p1"), short.clone()], vec![], &w)), "23 of 30 minutes (under 24): the streak ends");
-    let mut i = inputs(&rows, vec![full("p1"), short], vec![], &w);
+    (short.span_min, short.covered_min) = (23.0, 23);
+    assert!(has_k1(&with(short.clone())), "a 23-minute span of 30 (under 24): the streak ends");
+    let mut i = with(short);
     i.segment_min = Some(25.0);
     assert!(!has_k1(&i), "the campaign's segment length decides: 23 of 25 minutes counts");
+    let mut gap = full("p2");
+    gap.covered_min = 20;
+    assert!(has_k1(&with(gap)), "triggers in 20 of its 30 minutes (a stall): the streak ends");
     let mut unknown = full("p2");
     unknown.planned_min = None;
-    assert!(has_k1(&inputs(&rows, vec![full("p1"), unknown], vec![], &w)), "no length known: it does not count");
-    let r = plan(&pol(), &inputs(&rows, vec![full("p1"), full("p2")], vec![], &w), "x").unwrap().report;
-    assert_eq!(r["segments_counted_for_idle"][0], json!({ "segment": "p1", "counts": true, "covered_min": 30, "minutes": 30.0 }));
+    assert!(has_k1(&with(unknown)), "no length known: it does not count");
+    // the running segment, read 25 minutes in (FT-008: lead 300 s of 30 min), its boot taking a minute
+    let mut running = full("p2");
+    (running.complete, running.elapsed_min, running.span_min, running.covered_min) = (false, 25.1, 25.0, 24);
+    assert!(!has_k1(&with(running.clone())), "running, read 25 minutes in: it counts");
+    (running.elapsed_min, running.span_min, running.covered_min) = (12.0, 12.0, 12);
+    assert!(has_k1(&with(running)), "running, read before half a segment: it does not count");
+    let r = plan(&pol(), &with(full("p2")), "x").unwrap().report;
+    assert_eq!(r["segments_counted_for_idle"][0], json!({ "segment": "p1", "counts": true, "complete": true, "covered_min": 30, "span_min": 30.0, "elapsed_min": 31.0,
+        "minutes": 30.0 }));
 }
 
 /// Review #3b: one refresh drops at most max(25, a tenth of the list) idle pools, the longest idle first, and never so
