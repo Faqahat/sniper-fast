@@ -403,3 +403,4 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
   - the CLMM and Whirlpool venues once WP-21A merges;
   - new-pool events from our own shred feed.
 - **Owner, 2026-10-06 (evening):** **Stage 0 closes after FT-008** (WP-22's test), no longer after FT-007. The exit criteria are measured over the canary series FT-005 + FT-006 + FT-007 + FT-008 (about 12 h).
+- **Owner, 2026-10-06 (evening), Stage 0 exit:** wins must include more meme / long-tail tokens than common tokens (USDT, USDC, JUP, Meteora and the like), counted over FT-005..FT-008. The definition and the current standing are in FT-008-auto-pool-refresh.md, "Stage 0 exit".
