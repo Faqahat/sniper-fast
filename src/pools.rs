@@ -8,6 +8,7 @@ use crate::rpc::Rpc;
 use crate::tx::{b58, pk, Pk};
 use crate::venues::{dlmm, pk_at, PoolMeta, Venue, WSOL};
 use arbx_sizing::venue::dammv2;
+use arbx_sizing::venue::{orca_whirlpool as orca, raydium_clmm as ray};
 use anyhow::{Context, Result};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::sync::LazyLock;
@@ -61,6 +62,8 @@ pub fn candidates(cfg: &PoolsCfg) -> Result<(Vec<(Venue, Pk)>, HashSet<Pk>, Hash
     for l in lines {
         let f: Vec<&str> = l.split(',').collect();
         let (Some(v), Some(p)) = (f.get(cv).and_then(|s| Venue::parse(s.trim())), f.get(cp)) else { continue };
+        // PLAN-ADDENDUM WP-21: a venue switched off (`[pools] rayclmm`, `whirlpool`) is not read
+        if !cfg.venue_on(v) { continue; }
         let Ok(key) = bs58::decode(p.trim()).into_vec() else { continue };
         let Ok(key): Result<Pk, _> = key.try_into() else { continue };
         out.push((v, key));
@@ -75,6 +78,7 @@ pub fn candidates(cfg: &PoolsCfg) -> Result<(Vec<(Venue, Pk)>, HashSet<Pk>, Hash
         let rows: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(reg).with_context(|| format!("reading {reg}"))?)?;
         for r in rows {
             let (Some(v), Some(p), Some(t0), Some(t1)) = (r["venue"].as_str().and_then(Venue::parse), r["pool"].as_str(), r["t0"].as_str(), r["t1"].as_str()) else { continue };
+            if !cfg.venue_on(v) { continue; }
             let (p, t0, t1) = (pk(p), pk(t0), pk(t1));
             if cfg.registry_all || seed_pairs.contains(&pair_key(&t0, &t1)) {
                 ours.insert(p);
@@ -184,6 +188,19 @@ pub fn meta_of(venue: Venue, pool: &Pk, d: &[u8]) -> Option<PoolMeta> {
         Venue::Dlmm if d.len() >= 904 => {
             let ext = pda::find_program_address(&[b"bitmap", pool], &venue.program()).0;
             (pk_at(d, 88), pk_at(d, 120), pk_at(d, 152), pk_at(d, 184), vec![ext], false)
+        }
+        // PLAN-ADDENDUM WP-21: Raydium CLMM's PoolState and Orca's Whirlpool at the one length and discriminator
+        // arbx-sizing reads (DESIGN.md §2.8, §2.9); `extra`: Raydium [AmmConfig, the bitmap extension's PDA], Orca [the
+        // oracle's PDA] (`PoolMeta::clmm_config`, `clmm_ext`, `whirl_oracle`)
+        Venue::RayClmm if d.len() == ray::POOL_LEN && d.get(..8) == Some(&arbx_sizing::layout::DISC_POOL_STATE[..]) => {
+            use ray::off;
+            if crate::venues::clmm::tick_spacing(venue, d).is_none() { return None; }
+            (pk_at(d, off::MINT0), pk_at(d, off::MINT1), pk_at(d, off::VAULT0), pk_at(d, off::VAULT1), vec![pk_at(d, off::AMM_CONFIG)?, crate::venues::clmm::ray_ext_pda(pool)], false)
+        }
+        Venue::Whirlpool if d.len() == orca::POOL_LEN && d.get(..8) == Some(&arbx_sizing::layout::DISC_WHIRLPOOL[..]) => {
+            use orca::off;
+            if crate::venues::clmm::tick_spacing(venue, d).is_none() { return None; }
+            (pk_at(d, off::MINT_A), pk_at(d, off::MINT_B), pk_at(d, off::VAULT_A), pk_at(d, off::VAULT_B), vec![crate::venues::clmm::whirl_oracle_pda(pool)], false)
         }
         _ => return None,
     };
@@ -301,6 +318,18 @@ impl Registry {
 pub fn dlmm_arrays(pool: &Pk, active: i32) -> Vec<(i64, Pk)> {
     let c = dlmm::array_index(active);
     (c - DLMM_ARRAY_SPAN..=c + DLMM_ARRAY_SPAN).map(|i| (i, dlmm::bin_array_pda(pool, i))).collect()
+}
+
+/// The role of the arrays the engine follows for pool `m` (accounts.bin DICT): DLMM bin arrays, or (PLAN-ADDENDUM WP-21)
+/// Raydium CLMM / Orca Whirlpool tick arrays
+pub fn array_role(m: &PoolMeta) -> u8 { if m.venue.is_clmm() { role::CLMM_TICK_ARRAY } else { role::DLMM_BIN_ARRAY } }
+
+/// The tick arrays to follow first for CLMM pool `m` from the store's versions of its pool account and (Raydium) its
+/// bitmap extension (`venues::clmm::follow_list`); empty while the pool is not held
+pub fn clmm_arrays(m: &PoolMeta, get: &dyn Fn(&Pk) -> Option<Vec<u8>>, held: &[(i64, Pk)]) -> Vec<(i64, Pk)> {
+    let Some(pool) = get(&m.pool) else { return vec![] };
+    let ext = m.clmm_ext().and_then(|k| get(k)).filter(|d| d.len() == ray::EXT_LEN);
+    crate::venues::clmm::follow_list(m, &pool, ext.as_deref(), held)
 }
 
 pub fn show(k: &Pk) -> String { let s = b58(k); format!("{}…", &s[..8]) }

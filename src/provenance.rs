@@ -285,7 +285,7 @@ pub struct ProgramSpec { pub role: &'static str, pub id: Pk, pub name: String, p
 /// The route program (`[exec] program`, with the expected hashes) and every venue program
 pub fn program_specs(cfg: &Config) -> Vec<ProgramSpec> {
     let mut v = vec![route_spec(cfg)];
-    v.extend(venue_specs());
+    v.extend(venue_specs(&cfg.pools));
     v
 }
 
@@ -295,10 +295,12 @@ pub fn route_spec(cfg: &Config) -> ProgramSpec {
         expected_sha256: cfg.exec.expected_program_sha256.clone(), expected_md5: cfg.exec.expected_program_md5.clone() }
 }
 
-/// The venue programs: recorded, not checked (fetched in the background, `fetch_programs_cached`)
-pub fn venue_specs() -> Vec<ProgramSpec> {
+/// The venue programs: recorded, not checked (fetched in the background, `fetch_programs_cached`). PLAN-ADDENDUM WP-21:
+/// Raydium CLMM and Orca Whirlpool when their switch is on (`[pools] rayclmm`, `whirlpool`): their programdata accounts are
+/// then followed with the others (`watch_programdata`), and the transaction streams' `@venue_programs` name them
+pub fn venue_specs(pools: &crate::config::PoolsCfg) -> Vec<ProgramSpec> {
     use crate::venues::Venue;
-    [Venue::PumpSwap, Venue::RayCpmm, Venue::RayAmmV4, Venue::Dlmm, Venue::DammV2].into_iter()
+    Venue::ALL.into_iter().filter(|v| pools.venue_on(*v))
         .map(|x| ProgramSpec { role: "venue", id: x.program(), name: format!("{x:?}"), expected_sha256: String::new(), expected_md5: String::new() }).collect()
 }
 

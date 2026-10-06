@@ -26,11 +26,15 @@
 //!   side − what it gave); limit-order fills are booked in the order fields; the active id ends on the last bin the
 //!   swap took from;
 //! - DAMM v2: the crate's full port gives the pool after the swap (sqrt price).
+//! - Raydium CLMM and Orca Whirlpool (PLAN-ADDENDUM WP-21; DESIGN.md §9.0 item 7): the crate's exact walk gives the pool
+//!   after the swap (`PostSwap`, checked against the deployed binaries in the venue harness): sqrt price, current tick,
+//!   liquidity, the fee token's (Orca: the input token's) fee growth and protocol fees owed, Raydium's fund fees owed and
+//!   dynamic-fee variables, Orca's oracle variables.
 use crate::quote::{self, Use, Why};
 use crate::store::Acct;
 use crate::tx::Pk;
 use crate::venues::{i32_at, u128_at, u64_at, PoolMeta, Venue};
-use arbx_sizing::venue::{ammv4, cpmm, dammv2, dlmm, pumpswap};
+use arbx_sizing::venue::{ammv4, cpmm, dammv2, dlmm, orca_whirlpool, pumpswap, raydium_clmm};
 use arbx_sizing::AnyLeg;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -43,6 +47,38 @@ pub enum Pred {
     /// the active bin and every bin the swap changed (bin, amount_x, amount_y)
     Dlmm { active: i32, bins: Vec<(i32, u64, u64)> },
     Damm { sqrt_price: u128 },
+    /// PLAN-ADDENDUM WP-21: a Raydium CLMM or Orca Whirlpool pool after the swap
+    Clmm(ClmmPost),
+}
+
+/// A CLMM pool's state after a swap, in the fields the swap moves (PLAN-ADDENDUM WP-21)
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClmmPost {
+    pub sqrt_price: u128,
+    pub tick: i32,
+    pub liquidity: u128,
+    /// the fee token's global fee growth and protocol fees owed (Raydium: the token `fee_on` and the direction name;
+    /// Orca: the input token), Raydium's fund fees owed (Orca: 0)
+    pub fee_growth: u128,
+    pub protocol_fees: u64,
+    pub fund_fees: u64,
+    /// the fee token (Orca: the input token) is token 0
+    pub side0: bool,
+    /// Raydium's dynamic fee [idx_ref, v_ref, va, last_update]; Orca's oracle [last_reference_update, last_major_swap,
+    /// v_ref, idx_ref, va]; None without one
+    pub vars: Option<Vec<i64>>,
+}
+
+impl ClmmPost {
+    pub fn json(&self) -> Value {
+        json!({ "sqrt_price": self.sqrt_price.to_string(), "tick": self.tick, "liquidity": self.liquidity.to_string(), "fee_growth": self.fee_growth.to_string(),
+            "protocol_fees": self.protocol_fees, "fund_fees": self.fund_fees, "side0": self.side0, "vars": self.vars })
+    }
+}
+
+/// a CLMM walk's failure as a prediction's: a state the crate refuses is its reason
+fn clmm_no_pred(e: arbx_sizing::QuoteErr) -> NoPred {
+    match e { arbx_sizing::QuoteErr::Abort(a) => NoPred::Refused(quote::abort_reason(a)), _ => NoPred::Quote }
 }
 
 /// One decoded hint waiting for its transaction's commit
@@ -98,7 +134,8 @@ fn token_amount(a: &Acct) -> Option<u64> { if a.data.len() >= 72 { u64_at(&a.dat
 /// size that reaches the amount, not the venue's own exact-out rounding, so such a prediction is not exact by
 /// construction and stays out of the per-venue exact rate. None for an exact-in swap
 pub fn exact_out_model(venue: Venue, zfo: bool, exact_out: bool) -> Option<&'static str> {
-    if !exact_out { None } else if venue == Venue::PumpSwap && !zfo { Some("exact") } else { Some("solved") }
+    // (PLAN-ADDENDUM WP-21: swap_v2 exact out is the crate's own on Raydium CLMM and Orca Whirlpool)
+    if !exact_out { None } else if (venue == Venue::PumpSwap && !zfo) || venue.is_clmm() { Some("exact") } else { Some("solved") }
 }
 
 /// The pool's predicted state after a swap of `amount` (exact out: `amount` is the output; the input is the debit the
@@ -107,6 +144,25 @@ pub fn exact_out_model(venue: Venue, zfo: bool, exact_out: bool) -> Option<&'sta
 pub fn predict(m: &PoolMeta, v: &View, zfo: bool, amount: u64, exact_out: bool) -> Result<(Pred, u64), NoPred> {
     let src = quote::Src { get: v.get, arrays: v.arrays, usable: &|_| true, clock: quote::clock(v.slot, v.now_unix) };
     let leg = quote::leg(m, zfo, &src, Use::Third).map_err(no_pred)?;
+    // PLAN-ADDENDUM WP-21: a CLMM swap's exact walk (exact in, or swap_v2's exact out) and the pool it leaves
+    match &leg.any {
+        AnyLeg::RayClmm(c) => {
+            let w = c.fills(amount, exact_out, &mut |_| {}).map_err(clmm_no_pred)?;
+            let p = w.post;
+            let vars = p.dynamic.map(|d| vec![d.idx_ref as i64, d.v_ref as i64, d.va as i64, d.last_update.min(i64::MAX as u64) as i64]);
+            return Ok((Pred::Clmm(ClmmPost { sqrt_price: p.sqrt_price, tick: p.tick, liquidity: p.liquidity, fee_growth: p.fee_growth_global,
+                protocol_fees: p.protocol_fees, fund_fees: p.fund_fees, side0: c.fee_on_token0, vars }), w.quote.spent));
+        }
+        AnyLeg::Whirl(c) => {
+            let w = c.fills(amount, exact_out, &mut |_| {}).map_err(clmm_no_pred)?;
+            let p = w.post;
+            let vars = p.adaptive.map(|a| vec![a.last_reference_update.min(i64::MAX as u64) as i64, a.last_major_swap.min(i64::MAX as u64) as i64, a.v_ref as i64,
+                a.idx_ref as i64, a.va as i64]);
+            return Ok((Pred::Clmm(ClmmPost { sqrt_price: p.sqrt_price, tick: p.tick, liquidity: p.liquidity, fee_growth: p.fee_growth_global,
+                protocol_fees: p.protocol_fee_owed, fund_fees: 0, side0: zfo, vars }), w.quote.spent));
+        }
+        _ => {}
+    }
     // a DAMM v2 exact-out swap (swap2 mode 2) is priced from its output with its own rounding: not modelled
     if exact_out && m.venue == Venue::DammV2 { return Err(NoPred::Quote); }
     let get = |k: &Pk| (v.get)(k).ok_or(NoPred::Snapshot);
@@ -159,6 +215,8 @@ pub fn predict(m: &PoolMeta, v: &View, zfo: bool, amount: u64, exact_out: bool) 
             let (b2, q2) = pump_post(p, b, qv, amount_in, q.out, q.spent).ok_or(NoPred::Quote)?;
             Pred::Cp { r0: b2, r1: q2 }
         }
+        // (handled above)
+        AnyLeg::RayClmm(_) | AnyLeg::Whirl(_) => return Err(NoPred::Quote),
     };
     Ok((pred, amount_in))
 }
@@ -232,8 +290,44 @@ fn reserves(m: &PoolMeta, v: &View) -> Option<(u128, u128)> {
             (v0.saturating_sub(g(PROTOCOL0)? + g(FUND0)? + g(CREATOR0)?), v1.saturating_sub(g(PROTOCOL1)? + g(FUND1)? + g(CREATOR1)?))
         }
         Venue::PumpSwap => (v0, v1),
-        Venue::Dlmm | Venue::DammV2 => return None,
+        Venue::Dlmm | Venue::DammV2 | Venue::RayClmm | Venue::Whirlpool => return None,
     })
+}
+
+/// PLAN-ADDENDUM WP-21: a CLMM pool's committed state on `v` in the fields `like` predicts (its fee side): the pool's
+/// sqrt price, tick, liquidity, the side's fee growth and fees owed, Raydium's dynamic fee (when the pool has one: its 80
+/// bytes not all zero) or Orca's oracle variables (when the oracle exists)
+fn clmm_actual(m: &PoolMeta, v: &View, like: &ClmmPost) -> Option<ClmmPost> {
+    let p = &(v.get)(&m.pool)?.data;
+    let u64v = |o: usize| u64_at(p, o);
+    match m.venue {
+        Venue::RayClmm => {
+            use raydium_clmm::off;
+            let dynamic = p.get(off::DYN..off::DYN + off::DYN_LEN)?.iter().any(|b| *b != 0);
+            let d = off::DYN;
+            let vars = if dynamic { Some(vec![i32_at(p, d + 14)? as i64, crate::venues::u32_at(p, d + 18)? as i64, crate::venues::u32_at(p, d + 22)? as i64,
+                u64v(d + 26)?.min(i64::MAX as u64) as i64]) } else { None };
+            let s0 = like.side0;
+            Some(ClmmPost { sqrt_price: u128_at(p, off::SQRT_PRICE)?, tick: i32_at(p, off::TICK_CURRENT)?, liquidity: u128_at(p, off::LIQUIDITY)?,
+                fee_growth: u128_at(p, if s0 { off::FEE_GROWTH0 } else { off::FEE_GROWTH1 })?, protocol_fees: u64v(if s0 { off::PROTOCOL_FEES0 } else { off::PROTOCOL_FEES1 })?,
+                fund_fees: u64v(if s0 { off::FUND_FEES0 } else { off::FUND_FEES1 })?, side0: s0, vars })
+        }
+        Venue::Whirlpool => {
+            use orca_whirlpool::off;
+            let o = m.whirl_oracle().and_then(|k| (v.get)(k)).filter(|a| !a.data.is_empty());
+            let vars = match o {
+                Some(a) => { let d = &a.data; let b = off::O_VARIABLES;
+                    Some(vec![u64_at(d, b)?.min(i64::MAX as u64) as i64, u64_at(d, b + 8)?.min(i64::MAX as u64) as i64, crate::venues::u32_at(d, b + 16)? as i64,
+                        i32_at(d, b + 20)? as i64, crate::venues::u32_at(d, b + 24)? as i64]) }
+                None => None,
+            };
+            let s0 = like.side0;
+            Some(ClmmPost { sqrt_price: u128_at(p, off::SQRT_PRICE)?, tick: i32_at(p, off::TICK_CURRENT)?, liquidity: u128_at(p, off::LIQUIDITY)?,
+                fee_growth: u128_at(p, if s0 { off::FEE_GROWTH_A } else { off::FEE_GROWTH_B })?, protocol_fees: u64v(if s0 { off::PROTOCOL_FEE_OWED_A } else { off::PROTOCOL_FEE_OWED_B })?,
+                fund_fees: 0, side0: s0, vars })
+        }
+        _ => None,
+    }
 }
 
 /// The committed state on `v`, in the prediction's terms (`like`: for DLMM, the bins to read)
@@ -247,6 +341,8 @@ pub fn actual(m: &PoolMeta, v: &View, like: &Pred) -> Option<Pred> {
         }
         (Venue::DammV2, _) => dammv2::decode(&(v.get)(&m.pool)?.data).map(|p| Pred::Damm { sqrt_price: p.sqrt_price }),
         (Venue::Dlmm, _) => None,
+        (Venue::RayClmm | Venue::Whirlpool, Pred::Clmm(c)) => clmm_actual(m, v, c).map(Pred::Clmm),
+        (Venue::RayClmm | Venue::Whirlpool, _) => None,
         _ => reserves(m, v).map(|(r0, r1)| Pred::Cp { r0, r1 }),
     }
 }
@@ -273,6 +369,8 @@ pub fn v1_fields(p: &Pred, a: &Pred) -> Value {
         }
         (Pred::Dlmm { active: pa, .. }, Pred::Dlmm { active: aa, .. }) => json!({ "pred_active": pa, "actual_active": aa, "match": pa == aa }),
         (Pred::Damm { sqrt_price: ps }, Pred::Damm { sqrt_price: s }) => json!({ "sqrt_price_pred": ps.to_string(), "sqrt_price": s.to_string(), "match": ps == s }),
+        (Pred::Clmm(p), Pred::Clmm(a)) => json!({ "sqrt_price_pred": p.sqrt_price.to_string(), "sqrt_price": a.sqrt_price.to_string(), "tick_pred": p.tick, "tick": a.tick,
+            "match": p == a }),
         _ => json!({}),
     }
 }
@@ -287,6 +385,7 @@ pub fn err_of(p: &Pred, a: &Pred) -> Option<f64> {
         }
         (Pred::Dlmm { active: pa, .. }, Pred::Dlmm { active: aa, .. }) => Some((*pa as f64 - *aa as f64).abs()),
         (Pred::Damm { sqrt_price: ps }, Pred::Damm { sqrt_price: s }) => Some(if *s == 0 { 0.0 } else { ((*ps as f64 - *s as f64) / *s as f64 * 1e4).abs() }),
+        (Pred::Clmm(p), Pred::Clmm(a)) => Some(if a.sqrt_price == 0 { 0.0 } else { ((p.sqrt_price as f64 - a.sqrt_price as f64) / a.sqrt_price as f64 * 1e4).abs() }),
         _ => None,
     }
 }

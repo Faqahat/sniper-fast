@@ -35,6 +35,8 @@ const PUMP_BUY_EXACT_QUOTE_IN: [u8; 8] = [0xc6, 0x2e, 0x15, 0x52, 0xb4, 0xd9, 0x
 const CPMM_SWAP_BASE_INPUT: [u8; 8] = [0x8f, 0xbe, 0x5a, 0xda, 0xc4, 0x1e, 0x33, 0xde];
 const DLMM_SWAP2: [u8; 8] = [0x41, 0x4b, 0x3f, 0x4c, 0xeb, 0x5b, 0x5b, 0x88];
 const AMMV4_SWAP_BASE_IN_V2: u8 = 16;
+/// Raydium CLMM's and Orca Whirlpool's `swap_v2` (Anchor `global:swap_v2`, the same name in both)
+const CLMM_SWAP_V2: [u8; 8] = crate::venues::clmm::SWAP_V2;
 /// v0 transaction size limit, and the runtime's account-lock limit
 pub const MAX_TX_BYTES: usize = 1232;
 pub const MAX_LOCKS: usize = 64;
@@ -82,11 +84,13 @@ pub struct LegIn<'a> {
     pub payer: Pk,
     pub pump: Option<&'a PumpGlobal>,
     /// DLMM: bin-array indices the quote may use (followed, read, usable: `quote::dlmm_window`'s `have`), and the bin
-    /// where our quote ends
+    /// where our quote ends. PLAN-ADDENDUM WP-21: Raydium CLMM the start indexes of the tick arrays the leg names, in walk
+    /// order (`quote::Leg::clmm_arrays`: the quote's walk, then one buffer array); Orca Whirlpool the program's own 3
+    /// (`venues::clmm::whirl_leg_starts`)
     pub dlmm_live: &'a [i64],
     pub dlmm_end: Option<i32>,
     /// DLMM: the pair's bitmap extension when the store holds it (it exists), read per send (PLAN WP-06 item 6; the
-    /// boot-time check is gone)
+    /// boot-time check is gone). PLAN-ADDENDUM WP-21: Raydium CLMM's TickArrayBitmapExtension when it exists
     pub dlmm_ext: Option<Pk>,
 }
 
@@ -127,6 +131,8 @@ pub fn leg(a: &LegIn) -> Result<Leg, String> {
         }
         Venue::PumpSwap => pump_leg(a, out),
         Venue::Dlmm => dlmm_leg(a, out),
+        Venue::RayClmm => rayclmm_leg(a, out),
+        Venue::Whirlpool => whirlpool_leg(a, out),
         Venue::DammV2 => {
             // `swap` (exact in), arbed's encoder: the vaults and mints are in the POOL's order (a then b) whatever the
             // direction; only the two user accounts follow the trade. referral_token_account None = the program id.
@@ -228,6 +234,66 @@ fn dlmm_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
     data.extend(a.amount_in.to_le_bytes());
     data.extend(1u64.to_le_bytes());
     data.extend(0u32.to_le_bytes());   // remaining_accounts_info: no transfer-hook slices
+    Ok(Leg { program: pid, out, accounts: acc, data, amount_offset: 8 })
+}
+
+/// PLAN-ADDENDUM WP-21 (arbx-sizing DESIGN.md §9.1): Raydium CLMM `swap_v2`, exact in, the venue harness's layout
+/// (program/venue-harness src/venues.rs, proven on the deployed binary): payer (signer), amm_config, pool (w), the
+/// payer's input and output token accounts (w), the input and output vaults of the direction (w), observation (w), SPL
+/// Token, Token-2022, Memo, the input and output mints; then the remaining accounts: the TickArrayBitmapExtension when it
+/// exists (w), then the tick arrays in walk order (w), at most 7 in all. Data (41 B): amount, other_amount_threshold 1,
+/// sqrt_price_limit_x64 0 (none: a partial fill fails), is_base_input 1
+fn rayclmm_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
+    let m = a.m;
+    let pid = m.venue.program();
+    let cfg = crate::venues::clmm::amm_config(a.pool).ok_or("rayclmm-pool-short")?;
+    let obs = crate::venues::clmm::observation(a.pool).ok_or("rayclmm-pool-short")?;
+    if Some(&cfg) != m.clmm_config() { return Err("rayclmm-config-mismatch".into()); }
+    let zfo = a.tin == m.t0;
+    let (vin, vout) = if zfo { (m.vault0, m.vault1) } else { (m.vault1, m.vault0) };
+    if a.dlmm_live.is_empty() { return Err("rayclmm-no-tick-array".into()); }
+    let n = a.dlmm_live.len() + a.dlmm_ext.is_some() as usize;
+    if n > arbx_sizing::venue::raydium_clmm::MAX_REMAINING { return Err(format!("rayclmm-{n}-remaining-accounts")); }
+    let mut acc = vec![s(a.payer), r(cfg), w(m.pool), w(ata_of(&a.payer, &a.tin, &prog_of(m, &a.tin))), w(out), w(vin), w(vout), w(obs),
+        r(*TOKEN_PROGRAM), r(*crate::pda::TOKEN_2022), r(*MEMO), r(a.tin), r(a.tout)];
+    if let Some(e) = a.dlmm_ext { acc.push(w(e)); }
+    for st in a.dlmm_live {
+        let st = i32::try_from(*st).map_err(|_| "rayclmm-bad-start")?;
+        acc.push(w(crate::venues::clmm::ray_tick_array_pda(&m.pool, st)));
+    }
+    let mut data = CLMM_SWAP_V2.to_vec();
+    data.extend(a.amount_in.to_le_bytes());
+    data.extend(1u64.to_le_bytes());
+    data.extend(0u128.to_le_bytes());
+    data.push(1);
+    Ok(Leg { program: pid, out, accounts: acc, data, amount_offset: 8 })
+}
+
+/// PLAN-ADDENDUM WP-21 (arbx-sizing DESIGN.md §9.2): Orca Whirlpool `swap_v2`, exact in, the venue harness's layout:
+/// token programs of mint a and b, Memo, the payer (signer), the whirlpool (w), mints a and b, the payer's account of a
+/// (w), vault a (w), the payer's account of b (w), vault b (w), all in the POOL's order whatever the direction; the 3 tick
+/// arrays of the program's own sequence (w, initialized or not; the last repeated where fewer are valid), the oracle PDA
+/// (w, initialized or not); no supplemental arrays. Data (43 B): amount, other_amount_threshold 1, sqrt_price_limit 0 (the
+/// direction's limit), amount_specified_is_input 1, a_to_b, remaining_accounts_info None
+fn whirlpool_leg(a: &LegIn, out: Pk) -> Result<Leg, String> {
+    let m = a.m;
+    let pid = m.venue.program();
+    let a_to_b = a.tin == m.t0;
+    let starts = crate::venues::clmm::whirl_leg_starts(a.pool, a_to_b).ok_or("whirlpool-no-tick-array")?;
+    // the engine names the same 3 (route_in), from the same pool bytes
+    if !a.dlmm_live.is_empty() && a.dlmm_live.iter().map(|x| *x as i32).ne(starts.iter().copied()) { return Err("whirlpool-tick-arrays-differ".into()); }
+    let oracle = *m.whirl_oracle().ok_or("whirlpool-no-oracle-key")?;
+    let mut acc = vec![r(m.t0_prog), r(m.t1_prog), r(*MEMO), s(a.payer), w(m.pool), r(m.t0), r(m.t1),
+        w(ata_of(&a.payer, &m.t0, &m.t0_prog)), w(m.vault0), w(ata_of(&a.payer, &m.t1, &m.t1_prog)), w(m.vault1)];
+    for st in starts { acc.push(w(crate::venues::clmm::whirl_tick_array_pda(&m.pool, st))); }
+    acc.push(w(oracle));
+    let mut data = CLMM_SWAP_V2.to_vec();
+    data.extend(a.amount_in.to_le_bytes());
+    data.extend(1u64.to_le_bytes());
+    data.extend(0u128.to_le_bytes());
+    data.push(1);
+    data.push(a_to_b as u8);
+    data.push(0);
     Ok(Leg { program: pid, out, accounts: acc, data, amount_offset: 8 })
 }
 
@@ -461,7 +527,7 @@ pub const UNKNOWN_PROGRAM_BYTES: u64 = 4 * 1024 * 1024;
 /// the region after the header, read on 2026-10-04; testdata/programs for nexus-v2, whose 43,485 bytes include the
 /// header). An upgrade that extends a programdata account grows it: the estimate's margin covers that, and the dry run's
 /// simulation checks the limit on chain (go-live gate item 4)
-pub const PROGRAM_BYTES: [(&str, u64); 15] = [
+pub const PROGRAM_BYTES: [(&str, u64); 17] = [
     ("8K8uyQDtVKHYRPACP9fepz91q4sEZLBppR2Ty4vdXuWg", 36 + 64 + 43_485),       // nexus-arb-v2
     ("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", 36 + 64 + 45 + 10_485_715),    // PumpSwap
     ("pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ", 36 + 64 + 45 + 948_944),       // PumpSwap's fee program
@@ -469,6 +535,9 @@ pub const PROGRAM_BYTES: [(&str, u64); 15] = [
     ("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", 36 + 64 + 45 + 1_406_384),    // Raydium AMM v4
     ("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", 36 + 64 + 45 + 2_229_776),     // Meteora DLMM
     ("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", 36 + 64 + 45 + 2_174_352),     // Meteora DAMM v2
+    // PLAN-ADDENDUM WP-21 (MANIFEST.json of 2026-10-06)
+    ("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", 36 + 64 + 45 + 1_700_160),    // Raydium CLMM
+    ("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc", 36 + 64 + 45 + 10_485_715),   // Orca Whirlpool
     ("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", 36 + 64 + 45 + 108_600),       // SPL Token (p-token)
     ("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", 36 + 64 + 45 + 1_382_016),     // Token-2022
     ("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", 105_032),            // the ATA program (BPFLoader2: the ELF in its account)

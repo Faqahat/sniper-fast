@@ -624,6 +624,9 @@ struct CanaryCaps { count: u32, every_ns: u64 }
 
 pub struct Exec {
     mode: Mode,
+    /// PLAN-ADDENDUM WP-21: the venues a live or canary route may not go through (`[pools] rayclmm` / `whirlpool` not
+    /// "send"): refused `venue_quote_only`; shadow and dry runs build them
+    quote_only: Vec<crate::venues::Venue>,
     payer: Pk,
     program: Pk,
     alts: Vec<Alt>,
@@ -996,6 +999,7 @@ impl Exec {
             payer_tokens: PERMANENT_MINTS[1..].iter().map(|m| build::ata_of(&payer, m, &crate::pda::TOKEN_PROGRAM)).collect(),
             money: Default::default(), money_guard: false, bankroll_share: cfg.live.bankroll_share, bankroll_reserve: sol(cfg.live.bankroll_reserve_sol),
             rent_cap: sol(cfg.supervisor.rent_cap_sol), t_now: 0, provisional: BTreeMap::new(), refused_landed: Vec::new(),
+            quote_only: crate::venues::Venue::ALL.into_iter().filter(|v| !cfg.pools.venue_sends(*v)).collect(),
             #[cfg(test)] fault_route: None, #[cfg(test)] fault_keep: false, #[cfg(test)] fault_cu: None, #[cfg(test)] fault_loaded: None };
         x.install_sink();
         Ok(x)
@@ -1282,6 +1286,8 @@ impl Exec {
         // the same cap first (`Engine::after_opportunity`; tests::the_engine_caps_the_size), so this refuses only a route
         // sized past it
         if r.size > self.size_cap() { return fail(d, "size_cap"); }
+        // PLAN-ADDENDUM WP-21 (DESIGN.md §9.0 item 9): a venue switched to "quote" is priced and built, never sent
+        if self.mode.sends() && !gated && [r.buy.venue, r.sell.venue].iter().any(|v| self.quote_only.contains(v)) { return fail(d, "venue_quote_only"); }
         if self.mint_cool.get(&r.mint).is_some_and(|c| t < c.1) { return fail(d, "token_cooling"); }
         // WP-06 item 2: a PumpSwap buy names the wallet's user volume accumulator and creates it when it is missing
         // (1,346,200 lamports, never recovered, outside the route's profit check): refused unless the owner allowed it.
@@ -2527,7 +2533,7 @@ macro_rules! reasons {
 reasons!("gate_shadow", "gate_stopped", "recorder_unhealthy", "warmup", "state_unavailable", "resync", "equity_unknown", "equity_stale", "fee_cap", "sender_stopped",
     "canary_wait", "canary_count", "blockhash_stale", "leader_unknown", "leader_skip_kind", "jito_auth_stale", "expected_below_min_profit", "implausible_gap", "size_cap",
     "token_cooling", "rent_cap", "uva_missing", "mid_not_held", "inflight_same_state", "inflight_same_leader", "band_throttle", "crowded_skip", "would_rate",
-    "would_rate_crowded", "oversized", "dlmm_ext_needed", "build_error", "bam_bid_below_floor");
+    "would_rate_crowded", "oversized", "dlmm_ext_needed", "build_error", "bam_bid_below_floor", "venue_quote_only");
 
 /// the counter of a copy that never left (copies.jsonl `drop`, MEASUREMENT §4.38): `drop_<code>`. Such an attempt was
 /// handed to the fire, so it is not a refused decision (review WP-05 #16)

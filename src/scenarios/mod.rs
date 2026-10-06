@@ -435,7 +435,7 @@ impl Rig {
         for k in &base { boot_one(&mut store, *k, &chain); }
         engine::initial_dlmm_arrays(&reg, &mut store);
         let arrays: Vec<(Pk, u32)> = store.dlmm_arrays.iter().flat_map(|(p, l)| { let pi = reg.by_pool[p] as u32; l.iter().map(move |(_, k)| (*k, pi)) }).collect();
-        roles.add(arrays.iter().map(|(k, pi)| (*k, RoleOf { role: accounts::role::DLMM_BIN_ARRAY, pool_index: *pi })).collect::<Vec<_>>());
+        roles.add(arrays.iter().map(|(k, pi)| (*k, RoleOf { role: crate::pools::array_role(&reg.pools[*pi as usize]), pool_index: *pi })).collect::<Vec<_>>());
         let mut arrays = arrays;
         arrays.sort();
         for (k, _) in &arrays { boot_one(&mut store, *k, &chain); }

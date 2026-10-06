@@ -190,6 +190,12 @@ fn muldiv_div(x: &W4, divisor: &W4) -> Option<(W4, W4)> {
     Some((quotient, shift_right(&dividend, s)))
 }
 
+/// `U256Muldiv::div` as deployed, for the engine's no-panic property tests (DESIGN.md §7 item 12; PLAN-ADDENDUM WP-21):
+/// (quotient, remainder) of little-endian u64 words; None where the deployed binary panics (a zero divisor, the add-back's
+/// read past the top word that upstream fixed in 4aac511 after this deploy). The swap reads None as TooLarge
+#[doc(hidden)]
+pub fn muldiv_div_as_deployed(x: [u64; 4], divisor: [u64; 4]) -> Option<([u64; 4], [u64; 4])> { muldiv_div(&x, &divisor) }
+
 fn w4(x: U256) -> W4 { x.0 }
 fn w4_u128(x: &W4) -> Option<u128> { if num_words(x) > 2 { None } else { Some(hi_lo(x[1], x[0])) } }
 /// `shift_word_left` (a 64-bit shift that drops the top word) and its checked form

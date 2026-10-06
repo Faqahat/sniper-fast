@@ -47,6 +47,6 @@ pub fn decode_pending<'a>(venue: Venue, data: &[u8], acc: &[Pk], meta: &dyn Fn(&
             // sell: min_quote_out @16; buy_exact_quote_in: min_base_out @16; buy: max_quote_in @16
             Some(PendingSwap { pool, venue, zero_for_one: sell, amount: u64_at(data, 8)?, exact_out, user: acc[1], limit: u64_at(data, 16).unwrap_or(0) })
         }
-        Venue::Dlmm | Venue::DammV2 => None,
+        Venue::Dlmm | Venue::DammV2 | Venue::RayClmm | Venue::Whirlpool => None,
     }
 }

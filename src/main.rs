@@ -433,6 +433,10 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(w) = cfg.pricing_warning() { println!("{w}"); }
+            // PLAN-ADDENDUM WP-21: the CLMM venues' switches (off: not read; quote: priced and monitored, never sent live)
+            let note = |m: &str| match m { "off" => "its seed-list rows are not read", "quote" => "priced, decided and monitored; shadow and dry runs build its bundles; live and canary sends refused (venue_quote_only)", _ => "traded" };
+            println!("venues (WP-21): Raydium CLMM {} ({}); Orca Whirlpool {} ({}); PumpSwap, Raydium CPMM and AMM v4, DLMM, DAMM v2 traded",
+                cfg.pools.rayclmm, note(&cfg.pools.rayclmm), cfg.pools.whirlpool, note(&cfg.pools.whirlpool));
             let e = &cfg.exec;
             println!("route program {}: {}", e.program, if e.expected_program_sha256.is_empty() && e.expected_program_md5.is_empty() { "no expected hash (recorded, not checked)".to_string() }
                 else { format!("expected sha256 {} md5 {} (checked at start; a mismatch refuses live sends)", e.expected_program_sha256, e.expected_program_md5) });
@@ -771,7 +775,7 @@ fn grpc_probe(config: &Path, seconds: f64, out: Option<PathBuf>, only: Option<St
     for p in provenance::program_specs(&cfg) { keys.push(tx::b58(&pda::find_program_address(&[&p.id], &loader).0)); }
     let n = (4 * cands.len()).max(probe::MIN_ACCOUNTS);
     let accounts = probe::pad_accounts(&keys, n);
-    let venue_programs: Vec<String> = provenance::venue_specs().iter().map(|p| tx::b58(&p.id)).collect();
+    let venue_programs: Vec<String> = provenance::venue_specs(&cfg.pools).iter().map(|p| tx::b58(&p.id)).collect();
     let mut deshred = Vec::new();
     for f in cfg.feeds.iter().filter(|f| f.enabled && f.kind == config::FeedKind::YellowstoneDeshred) {
         if let Some(u) = &f.url { deshred.push((f.name.clone(), target(u, &f.token_env, &f.token_header, &f.name)?)); }
@@ -1477,20 +1481,31 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         // last call's, put early accounts at a slot they were not read at). The stream's first connection reads them all
         // again (the engine's re-read), closing the gap between this snapshot and the subscription
         let mut slot = 0;
+        // PLAN-ADDENDUM WP-21: a CLMM pool's account that may not exist (Raydium's bitmap extension, Orca's oracle, their
+        // followed tick arrays), not found, is recorded empty: known not to exist (the quote must tell it from unread)
+        let mut absentable: std::collections::HashSet<tx::Pk> = reg.pools.iter().filter(|m| m.venue.is_clmm())
+            .flat_map(|m| m.clmm_ext().into_iter().chain(m.whirl_oracle()).copied()).collect();
+        let absent = || rpc::Account { owner: [0u8; 32], lamports: 0, data: vec![] };
         for (n, chunk) in keys.chunks(reads::CHUNK).enumerate() {
             if n > 0 { tokio::time::sleep(std::time::Duration::from_millis(120)).await; }
             let (s, accts) = rpc.accounts(chunk).await?;
             slot = slot.max(s);
-            for (k, a) in chunk.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, s); } }
+            for (k, a) in chunk.iter().zip(accts) {
+                match a { Some(a) => boot_account(&mut store, &acct_rec, &journal, *k, a, s), None if absentable.contains(k) => boot_account(&mut store, &acct_rec, &journal, *k, absent(), s), None => {} }
+            }
         }
         engine::initial_dlmm_arrays(&reg, &mut store);
         let arr: Vec<tx::Pk> = store.dlmm_arrays.values().flatten().map(|x| x.1).collect();
         roles.add(store.dlmm_arrays.iter().flat_map(|(p, l)| { let pi = reg.by_pool.get(p).map_or(rec::accounts::NO_POOL, |i| *i as u32);
-            l.iter().map(move |(_, k)| (*k, rec::accounts::RoleOf { role: rec::accounts::role::DLMM_BIN_ARRAY, pool_index: pi })) }).collect::<Vec<_>>());
+            let role = reg.by_pool.get(p).map_or(rec::accounts::role::DLMM_BIN_ARRAY, |&i| pools::array_role(&reg.pools[i]));
+            l.iter().map(move |(_, k)| (*k, rec::accounts::RoleOf { role, pool_index: pi })) }).collect::<Vec<_>>());
+        absentable.extend(reg.pools.iter().filter(|m| m.venue.is_clmm()).flat_map(|m| store.dlmm_arrays.get(&m.pool).into_iter().flatten().map(|x| x.1)));
         for chunk in arr.chunks(reads::CHUNK) {
             tokio::time::sleep(std::time::Duration::from_millis(120)).await;
             let (s, accts) = rpc.accounts(chunk).await?;
-            for (k, a) in chunk.iter().zip(accts) { if let Some(a) = a { boot_account(&mut store, &acct_rec, &journal, *k, a, s); } }
+            for (k, a) in chunk.iter().zip(accts) {
+                match a { Some(a) => boot_account(&mut store, &acct_rec, &journal, *k, a, s), None if absentable.contains(k) => boot_account(&mut store, &acct_rec, &journal, *k, absent(), s), None => {} }
+            }
         }
         acct_rec.mark(rec::accounts::MARK_BOOT_END, &[]);
         boot_extra = Some((roles, acct_rec, base, extra.len(), drops));
@@ -1582,7 +1597,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         });
     }
     // WP-03 item 3: the transaction streams' `@watched_writable` / `@venue_programs`, now that the registry is known
-    let venue_programs: Vec<String> = provenance::venue_specs().iter().map(|p| tx::b58(&p.id)).collect();
+    let venue_programs: Vec<String> = provenance::venue_specs(&cfg.pools).iter().map(|p| tx::b58(&p.id)).collect();
     config::expand_includes(&mut cfg.feeds, &reg.watched_writable(), &venue_programs)?;
     let reg = Arc::new(reg);
     // ---- WP-09 wiring: pools.json (MEASUREMENT §4.29: the registry this segment trades, the toolkit's attribution reads
@@ -1684,7 +1699,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let tx_streams: Vec<Value> = cfg.feeds.iter().filter(|f| f.enabled && f.kind == config::FeedKind::YellowstoneTx)
         .map(|f| json!({ "name": f.name, "url_host": f.url.as_deref().map(provenance::host_of), "account_include": f.account_include, "max_accounts": f.max_accounts,
             "failed": f.failed.unwrap_or(true) })).collect();
-    let venue_specs = provenance::venue_specs();
+    let venue_specs = provenance::venue_specs(&cfg.pools);
     let mut programs = route.clone();
     programs.extend(venue_specs.iter().map(provenance::pending_entry));
     let mut streams = provenance::streams_json();

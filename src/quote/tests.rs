@@ -276,7 +276,7 @@ fn legacy_maths_vs_the_crate_on_recorded_states() {
                     }
                     // §2.7 item 4: limit orders (function_type 2) and the fee on the output (collect_fee_mode 1)
                     Venue::Dlmm => pool[35] == 2 || pool[36] == 1,
-                    Venue::RayAmmV4 | Venue::DammV2 => false,
+                    Venue::RayAmmV4 | Venue::DammV2 | Venue::RayClmm | Venue::Whirlpool => false,
                 };
                 if !documented { problems.push(format!("{} x={} {}: legacy {o} vs program {real} (crate {})", label(s), c.x, s["dir"], q.out)); }
             }

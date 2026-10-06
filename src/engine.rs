@@ -574,9 +574,10 @@ fn fold(h: u64, parts: &[&[u8]]) -> u64 {
 }
 fn sigs58(s: &[u8; 64]) -> String { bs58::encode(s).into_string() }
 /// How a route's legs are parsed (PLAN-ADDENDUM WP-16): as the builder sends them, with each DLMM leg's walk budget
-/// from the transaction's CU limit (`quote::DLMM_BUDGET_*`: two DLMM legs share it)
+/// from the transaction's CU limit (`quote::DLMM_BUDGET_*`: two DLMM legs share it). PLAN-ADDENDUM WP-21: two walking legs
+/// share it whichever walks (DLMM bins, Raydium CLMM or Orca Whirlpool steps: `quote::clmm_budget`); two DLMM legs as before
 fn route_use(pb: &PoolMeta, ps: &PoolMeta) -> Use {
-    let both = pb.venue == Venue::Dlmm && ps.venue == Venue::Dlmm;
+    let both = pb.venue.walks() && ps.venue.walks();
     Use::Route { dlmm_budget: if both { quote::DLMM_BUDGET_SHARED } else { quote::DLMM_BUDGET_ALONE } }
 }
 
@@ -1378,10 +1379,20 @@ impl Engine {
             if let Some(keys) = self.reads.landed(job, chunk, t, &mut out) {
                 self.count("read_chunk_ok");
                 self.count_n("read_missing", missing.len() as u64);
+                // PLAN-ADDENDUM WP-21: a CLMM account the node does not have (a followed tick array, Raydium's bitmap
+                // extension, Orca's oracle) is known not to exist from this read's slot on: the store holds it empty (Orca's
+                // program reads such a tick array as zeroed; the quote must know it is not merely unread). A newer version
+                // the store holds wins (the store's order)
+                for k in keys.iter().filter(|k| missing.contains(*k)) {
+                    if self.clmm_absentable(k) { self.store.apply(*k, Acct::rpc(Arc::from(&[][..]), slot, t, 0, what.src())); self.count("clmm_absent"); }
+                }
                 if what == What::Resync {
                     // an account the node does not have stays unverified while the store holds a version of it (its pools
-                    // are refused until the stream writes it); one the store never had has nothing to verify
-                    for k in keys.iter().filter(|k| !missing.contains(*k) || self.store.get(k).is_none()) { self.unverified.remove(k); }
+                    // are refused until the stream writes it); one the store never had has nothing to verify. WP-21: a CLMM
+                    // account the store holds as not existing is verified by the node not having it
+                    let absent = |k: &Pk| self.clmm_absentable(k) && self.store.get(k).is_some_and(|a| a.data.is_empty());
+                    let ok: Vec<Pk> = keys.iter().filter(|k| !missing.contains(*k) || self.store.get(k).is_none() || absent(k)).copied().collect();
+                    for k in ok { self.unverified.remove(&k); }
                     if let Some(r) = self.resync.as_mut() { r.missing += missing.len() as u64; }
                 }
             }
@@ -2198,6 +2209,7 @@ impl Engine {
             let acc: Option<Vec<Pk>> = ix.accounts.iter().map(|&i| keys.get(i as usize).copied()).collect();
             let Some(acc) = acc else { continue };
             let sw = match venue { Venue::Dlmm => dlmm::decode_pending(&ix.data, &acc, &meta, &ata), Venue::DammV2 => damm_pending(&ix.data, &acc, &meta, &ata),
+                Venue::RayClmm | Venue::Whirlpool => crate::venues::clmm::decode_pending(venue, &ix.data, &acc, &meta),
                 _ => cp::decode_pending(venue, &ix.data, &acc, &meta, &ata) };
             if let Some(sw) = sw { if self.reg.by_pool.contains_key(&sw.pool) && self.acct_pool.contains_key(&sw.pool) { out.push(sw); } }
         }
@@ -2220,15 +2232,20 @@ impl Engine {
     /// arbx-sizing (PLAN-ADDENDUM WP-16, `src/quote.rs`). `skip`: DLMM bin arrays left out (pending or on a contested
     /// slot). Err: why it cannot be quoted (`Why::reason`, MEASUREMENT A.1)
     fn leg_of(&self, m: &PoolMeta, zfo: bool, clock: arbx_sizing::Clock, skip: &[i64], use_: Use) -> Result<quote::Leg<'_>, quote::Why> {
+        // PLAN-ADDENDUM WP-21 (DESIGN.md §6.5): a CLMM program the stream says was upgraded is not priced
+        if m.venue.is_clmm() && self.store.get(&crate::venues::clmm::programdata(m.venue)).is_some_and(|a| !crate::venues::clmm::deployed_as_proven(m.venue, &a.data)) {
+            return Err(quote::Why::VenueUpgraded);
+        }
         let arrays = self.store.dlmm_arrays.get(&m.pool).map(|l| l.as_slice()).unwrap_or(&[]);
         let get = |k: &Pk| self.store.get(k);
         let usable = |i: i64| !skip.contains(&i);
         quote::leg(m, zfo, &quote::Src { get: &get, arrays, usable: &usable, clock }, use_)
     }
 
-    /// the DLMM bin arrays of pool `m` a quote must not use now (a pending group writes them, or their slot is contested)
+    /// the DLMM bin arrays (WP-21: the CLMM tick arrays) of pool `m` a quote must not use now (a pending group writes them,
+    /// or their slot is contested)
     fn skip_arrays(&self, m: &PoolMeta) -> Vec<i64> {
-        if m.venue != Venue::Dlmm { return vec![]; }
+        if !m.venue.walks() { return vec![]; }
         self.store.dlmm_arrays.get(&m.pool).map(|l| l.iter().filter(|(_, k)| {
             self.tracker.is_pending(k) || self.store.get(k).is_some_and(|a| self.forks.is_contested(a.slot)) || self.unverified.contains(k)
         }).map(|(i, _)| *i).collect()).unwrap_or_default()
@@ -2249,8 +2266,9 @@ impl Engine {
         // a round trip returning over twice its input is a broken quote (w5h seg 4: one PumpSwap pool quoted 9.9e12
         // lamports, 663 times): it must not win the pick over the token's real cycles
         if t.profit() > t.x as i64 { return Err("broken_quote"); }
-        // DLMM legs: the bins with liquidity the chosen size crosses (the CU table's input); the trip already quoted the rest
-        let crossed = |l: &quote::Leg, x: u64| if l.is_dlmm() { l.walk(x).map(|w| w.crossed).map_err(quote::Why::reason) } else { Ok(0) };
+        // DLMM legs: the bins with liquidity the chosen size crosses (the CU table's input); WP-21: CLMM legs their swap
+        // steps; the trip already quoted the rest
+        let crossed = |l: &quote::Leg, x: u64| if l.walks() { l.walk(x).map(|w| w.crossed).map_err(quote::Why::reason) } else { Ok(0) };
         let (c1, c2) = (crossed(lb, t.x)?, crossed(ls, t.mid)?);
         let cu = self.route_cu(pb.venue, c1, ps.venue, c2).0;
         let fee = self.fee_of(t.profit(), cu);
@@ -2546,6 +2564,8 @@ impl Engine {
             k.push(m.pool);
             if m.venue == Venue::Dlmm { if let Some(l) = self.store.dlmm_arrays.get(&m.pool) { k.extend(l.iter().map(|x| x.1)); } }
             else if m.venue != Venue::DammV2 { k.push(m.vault0); k.push(m.vault1); k.extend(m.extra.iter().copied()); }
+            // WP-21: and a CLMM pool's followed tick arrays
+            if m.venue.is_clmm() { if let Some(l) = self.store.dlmm_arrays.get(&m.pool) { k.extend(l.iter().map(|x| x.1)); } }
         }
         k
     }
@@ -2570,10 +2590,21 @@ impl Engine {
         let wb = lb.walk(size).ok()?;
         let ws = ls.walk(wb.out).ok()?;
         let (mid, buy_end, back, sell_end, spent) = (wb.out, wb.end, ws.out, ws.end, wb.spent);
-        // the arrays the quote may use (followed, read, not left out): the builder's window is drawn from the same ones
+        // the arrays the quote may use (followed, read, not left out): the builder's window is drawn from the same ones.
+        // WP-21: a Raydium CLMM leg's are the tick arrays it names (its walk at its size, then one held buffer array), an
+        // Orca Whirlpool leg's the program's own 3 (initialized or not), both in the order the leg passes them
         let live = |p: &crate::venues::PoolMeta, skip: &[i64]| -> Vec<i64> {
             self.store.dlmm_arrays.get(&p.pool).map(|l| l.iter().filter(|(i, k)| self.store.get(k).is_some() && !skip.contains(i)).map(|(i, _)| *i).collect()).unwrap_or_default()
         };
+        let clmm_names = |p: &crate::venues::PoolMeta, l: &quote::Leg, x: u64, zfo: bool| -> Option<Vec<i64>> {
+            match p.venue {
+                Venue::RayClmm => l.clmm_arrays(x)?.ok().map(|v| v.into_iter().map(i64::from).collect()),
+                Venue::Whirlpool => crate::venues::clmm::whirl_leg_starts(&self.store.get(&p.pool)?.data, zfo).map(|v| v.into_iter().map(i64::from).collect()),
+                _ => None,
+            }
+        };
+        let (buy_names, sell_names) = (clmm_names(pb, &lb, size, pb.t0 == *WSOL), clmm_names(ps, &ls, wb.out, ps.t0 == o.mint));
+        if (pb.venue.is_clmm() && buy_names.is_none()) || (ps.venue.is_clmm() && sell_names.is_none()) { return None; }
         let data = |p: &crate::venues::PoolMeta| self.store.get(&p.pool).map(|a| a.data.to_vec());
         let trig_feed = if o.trig_feed == u16::MAX { Some("state".to_string()) } else { self.feeds.get(o.trig_feed as usize).cloned() };
         // WP-05: the route's crowding (F6: two counts, review WP-05 #1) and the versions of its accounts it was priced on
@@ -2591,7 +2622,8 @@ impl Engine {
             .map(|a| self.store.get(&a).is_some_and(|x| crate::store::token_account_exists(&x.data)));
         let uva = payer.map(|p| *self.uva_key.get_or_init(|| crate::build::pump_uva(&p))).filter(|a| followed(a))
             .map(|a| self.store.get(&a).is_some_and(|x| !x.data.is_empty()));
-        let ext = |p: &crate::venues::PoolMeta| (p.venue == Venue::Dlmm).then(|| p.extra.first().copied()).flatten()
+        // DLMM's bitmap extension, WP-21 Raydium CLMM's TickArrayBitmapExtension: when the store holds it (it exists)
+        let ext = |p: &crate::venues::PoolMeta| match p.venue { Venue::Dlmm => p.extra.first().copied(), Venue::RayClmm => p.clmm_ext().copied(), _ => None }
             .filter(|e| self.store.get(e).is_some_and(|a| !a.data.is_empty()));
         let mut sizes: Vec<(Pk, u32)> = route_keys.iter().chain([&pb.t0, &pb.t1, &ps.t0, &ps.t1]).filter_map(|k| self.store.get(k).map(|a| (*k, a.data.len() as u32))).collect();
         sizes.sort();
@@ -2600,7 +2632,8 @@ impl Engine {
             st: [o.st.rx, o.st.decoded, o.st.engine, o.st.resolved, o.st.decided], buy: pb.clone(), sell: ps.clone(), buy_data: data(pb)?, sell_data: data(ps)?,
             buy_source: self.reg.source(&pb.pool), sell_source: self.reg.source(&ps.pool), mint: o.mint, size, mid, back, spent,
             gross_at_opp: o.gross, net_at_opp: o.net, cu,
-            buy_live: live(pb, &skip_b), sell_live: live(ps, &skip_s), buy_end, sell_end, state_version: o.sv, route_age_ms: o.route_age_ms, decision: o.decision,
+            buy_live: buy_names.unwrap_or_else(|| live(pb, &skip_b)), sell_live: sell_names.unwrap_or_else(|| live(ps, &skip_s)), buy_end, sell_end, state_version: o.sv,
+            route_age_ms: o.route_age_ms, decision: o.decision,
             trig_kind: o.kind, t_first_shred: o.t_first_shred, t_commit: o.t_commit, t_priced: o.t_priced, parts_skew: o.parts_skew, crowding, accounts,
             cu_src: cu_src.as_str(), cu_ata, mint_prog, mid_held, uva, buy_ext: ext(pb), sell_ext: ext(ps), sizes })
     }
@@ -2861,7 +2894,9 @@ impl Engine {
                         continue;
                     }
                     rr.sv = Some(rv);
-                    let needs_clock = matches!(pb.venue, Venue::Dlmm | Venue::DammV2) || matches!(ps.venue, Venue::Dlmm | Venue::DammV2);
+                    // (WP-21: Raydium CLMM's open time and dynamic fee, Orca's timestamps and adaptive fee read it too)
+                    let timed = |v: Venue| matches!(v, Venue::Dlmm | Venue::DammV2 | Venue::RayClmm | Venue::Whirlpool);
+                    let needs_clock = timed(pb.venue) || timed(ps.venue);
                     if needs_clock && !clock_ok { rr.reason = NotReady::ClockStale.reason(); routes.push(rr); continue; }
                     // both legs parsed by arbx-sizing (WP-16): a state it refuses is the route's reason (`sz_*`)
                     let (clk, u) = (quote::clock(dslot, now), route_use(pb, ps));
@@ -3148,16 +3183,33 @@ impl Engine {
         (res, line)
     }
 
-    /// Follow DLMM bin arrays around each pool's active bin; fetch newly followed arrays once over RPC.
+    /// PLAN-ADDENDUM WP-21: an account a CLMM pool reads that may not exist (its followed tick arrays, Raydium's bitmap
+    /// extension, Orca's oracle): a read that does not find it records it as not existing
+    fn clmm_absentable(&self, k: &Pk) -> bool {
+        self.part_pools.get(k).is_some_and(|ps| ps.iter().any(|&i| {
+            let m = &self.reg.pools[i];
+            m.venue.is_clmm() && (m.clmm_ext() == Some(k) || m.whirl_oracle() == Some(k)
+                || self.store.dlmm_arrays.get(&m.pool).is_some_and(|l| l.iter().any(|x| x.1 == *k)))
+        }))
+    }
+
+    /// Follow DLMM bin arrays around each pool's active bin, and (PLAN-ADDENDUM WP-21) the tick arrays of each Raydium CLMM
+    /// and Orca Whirlpool pool (`Store::clmm_drift`); fetch newly followed arrays once over RPC (a CLMM tick array the node
+    /// does not have is then known not to exist: `on_fetch`)
     fn follow_dlmm(&mut self) {
-        let drift = self.store.dlmm_drift(&self.reg);
+        let mut drift = self.store.dlmm_drift(&self.reg);
+        let clmm = self.store.clmm_drift(&self.reg);
+        let clmm_fetch_from = drift.len();
+        drift.extend(clmm);
         if drift.is_empty() { return; }
         let mut fetch = Vec::new();
+        let mut fetch_clmm = Vec::new();
         let mut roles = Vec::new();
-        for (pool, list) in drift {
-            for (_, k) in &list { if self.store.get(k).is_none() { fetch.push(*k); } }
+        for (n, (pool, list)) in drift.into_iter().enumerate() {
+            for (_, k) in &list { if self.store.get(k).is_none() { if n < clmm_fetch_from { fetch.push(*k); } else { fetch_clmm.push(*k); } } }
             let pi = self.reg.by_pool.get(&pool).map_or(crate::rec::accounts::NO_POOL, |i| *i as u32);
-            roles.extend(list.iter().map(|(_, k)| (*k, crate::rec::accounts::RoleOf { role: crate::rec::accounts::role::DLMM_BIN_ARRAY, pool_index: pi })));
+            let role = self.reg.by_pool.get(&pool).map_or(crate::rec::accounts::role::DLMM_BIN_ARRAY, |&i| pools::array_role(&self.reg.pools[i]));
+            roles.extend(list.iter().map(|(_, k)| (*k, crate::rec::accounts::RoleOf { role, pool_index: pi })));
             if let Some(&i) = self.reg.by_pool.get(&pool) {
                 for (_, k) in &list {
                     for map in [&mut self.part_pools, &mut self.eval_pools] { let v = map.entry(*k).or_default(); if !v.contains(&i) { v.push(i); } }
@@ -3172,6 +3224,7 @@ impl Engine {
         }
         self.publish_watch_list();
         self.start_read(What::DlmmArrays, fetch);
+        self.start_read(What::ClmmArrays, fetch_clmm);
     }
 
     pub fn publish_watch_list(&self) {
@@ -3418,6 +3471,8 @@ fn reject_counter(reason: &str) -> &'static str {
         "fork_pending" => "reject_fork_pending", "state_unavailable" => "reject_state_unavailable", "warmup" => "reject_warmup", "resync" => "reject_resync",
         "unquotable_dlmm_array" => "reject_unquotable_dlmm_array", "unquotable_dlmm_liquidity" => "reject_unquotable_dlmm_liquidity",
         "unquotable_damm" => "reject_unquotable_damm", "unquotable_cp" => "reject_unquotable_cp", "broken_quote" => "reject_broken_quote",
+        // PLAN-ADDENDUM WP-21
+        "unquotable_clmm_array" => "reject_unquotable_clmm_array", "unquotable_clmm" => "reject_unquotable_clmm",
         // arbx-sizing's refusal states (PLAN-ADDENDUM WP-16, `quote::REASONS`)
         r => quote::reason_row(r).map_or("reject_other", |x| x.reject),
     }
@@ -3433,6 +3488,7 @@ fn pred_json(p: &Pred) -> Value {
         Pred::Cp { r0, r1 } => json!({ "r0": r0.to_string(), "r1": r1.to_string() }),
         Pred::Dlmm { active, bins } => json!({ "active": active, "bins": bins }),
         Pred::Damm { sqrt_price } => json!({ "sqrt_price": sqrt_price.to_string() }),
+        Pred::Clmm(c) => c.json(),
     }
 }
 
@@ -3481,9 +3537,17 @@ pub fn interest(reg: &Registry, templates: Option<&str>) -> Interest {
     Interest { keys, tables: std::sync::RwLock::new(tables) }
 }
 
+/// The arrays followed from the boot snapshot on: each DLMM pool's bin arrays around its active bin and (PLAN-ADDENDUM
+/// WP-21) each Raydium CLMM and Orca Whirlpool pool's tick arrays (`venues::clmm`), from the store's versions of their
+/// pool accounts (and Raydium's bitmap extension)
 pub fn initial_dlmm_arrays(reg: &Registry, store: &mut Store) {
     for m in reg.pools.iter().filter(|m| m.venue == Venue::Dlmm) {
         if let Some(a) = store.get(&m.pool) { if let Some(active) = crate::venues::i32_at(&a.data, 76) { store.dlmm_arrays.insert(m.pool, pools::dlmm_arrays(&m.pool, active)); } }
+    }
+    for m in reg.pools.iter().filter(|m| m.venue.is_clmm()) {
+        let get = |k: &Pk| store.get(k).map(|a| a.data.to_vec());
+        let l = pools::clmm_arrays(m, &get, &[]);
+        if !l.is_empty() { store.dlmm_arrays.insert(m.pool, l); }
     }
 }
 

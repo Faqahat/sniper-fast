@@ -84,10 +84,16 @@ pub fn bins_bucket(crossed: u32) -> &'static str {
     match crossed { 0 => "0", 1..=2 => "1-2", 3..=5 => "3-5", _ => "6+" }
 }
 
-/// a leg's key in the table (`<venue>|<bucket>`, the toolkit's)
+/// PLAN-ADDENDUM WP-21 (arbx-sizing DESIGN.md §9.0 item 6): a Raydium CLMM or Orca Whirlpool leg's bucket, by the swap
+/// steps of its exact walk (a dynamic or adaptive fee adds steps without a crossing, so steps, not crossings alone)
+pub fn steps_bucket(steps: u32) -> &'static str {
+    match steps { 0..=1 => "1", 2..=3 => "2-3", 4..=7 => "4-7", 8..=15 => "8-15", _ => "16+" }
+}
+
+/// a leg's key in the table (`<venue>|<bucket>`, the toolkit's): DLMM by bins, Raydium CLMM and Orca Whirlpool by steps
 pub fn leg_key(v: Venue, crossed: u32) -> String {
     let name = serde_json::to_value(v).ok().and_then(|x| x.as_str().map(String::from)).unwrap_or_default();
-    if v == Venue::Dlmm { format!("{name}|{}", bins_bucket(crossed)) } else { format!("{name}|na") }
+    if v == Venue::Dlmm { format!("{name}|{}", bins_bucket(crossed)) } else if v.is_clmm() { format!("{name}|{}", steps_bucket(crossed)) } else { format!("{name}|na") }
 }
 
 /// Today's formula (engine.rs before WP-06): (29,000 + both legs' `leg_cu`) × 1.10, rounded up to 1,000

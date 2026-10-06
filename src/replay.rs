@@ -87,7 +87,8 @@ const BACKPRESSURE_GIVE_UP: std::time::Duration = std::time::Duration::from_secs
 
 /// The venue's name as the seed lists and pools.json write it (`Venue::parse` reads it back)
 pub fn venue_name(v: Venue) -> &'static str {
-    match v { Venue::PumpSwap => "PumpSwap", Venue::RayCpmm => "RayCPMM", Venue::RayAmmV4 => "RayAMMv4", Venue::Dlmm => "DLMM", Venue::DammV2 => "DAMMv2" }
+    match v { Venue::PumpSwap => "PumpSwap", Venue::RayCpmm => "RayCPMM", Venue::RayAmmV4 => "RayAMMv4", Venue::Dlmm => "DLMM", Venue::DammV2 => "DAMMv2",
+        Venue::RayClmm => "RayCLMM", Venue::Whirlpool => "Whirlpool" }
 }
 
 fn pk_of(v: &Value) -> Result<Pk> {
@@ -389,12 +390,14 @@ pub fn apply_sets(cfg: &mut StrategyCfg, init: &mut EngineInit, sets: &[Set]) ->
 
 // ------------------------------------------------------------------ the replay engine
 
-/// The roles `arbx run` gives the accounts it follows: the watch list's, and the DLMM bin arrays the boot store follows
+/// The roles `arbx run` gives the accounts it follows: the watch list's, and the DLMM bin arrays (WP-21: the CLMM tick
+/// arrays) the boot store follows
 fn roles_of(watch: &[(Pk, RoleOf)], reg: &Registry, store: &crate::store::Store) -> Arc<Roles> {
     let roles = Roles::new(watch.iter().copied());
     roles.add(store.dlmm_arrays.iter().flat_map(|(p, l)| {
         let pi = reg.by_pool.get(p).map_or(NO_POOL, |i| *i as u32);
-        l.iter().map(move |(_, k)| (*k, RoleOf { role: accounts::role::DLMM_BIN_ARRAY, pool_index: pi }))
+        let role = reg.by_pool.get(p).map_or(accounts::role::DLMM_BIN_ARRAY, |&i| crate::pools::array_role(&reg.pools[i]));
+        l.iter().map(move |(_, k)| (*k, RoleOf { role, pool_index: pi }))
     }).collect::<Vec<_>>());
     Arc::new(roles)
 }

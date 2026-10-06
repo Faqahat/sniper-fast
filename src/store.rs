@@ -126,11 +126,12 @@ impl NotReady {
 /// none may be pending. PumpSwap: the two vaults (a swap does not need to write the pool account: that was the old
 /// exemption's reason); Raydium CPMM: pool and vaults (the owed fees move); Raydium AMM v4: the vaults (whether swaps
 /// write the amm account is measured first, PLAN); DLMM: the lb_pair (the bin arrays a quote crosses are checked when it
-/// is priced); DAMM v2: the pool
+/// is priced); DAMM v2: the pool; Raydium CLMM and Orca Whirlpool (PLAN-ADDENDUM WP-21): the pool and both vaults (every
+/// swap moves the price and both balances; the tick arrays a quote crosses are checked when it is priced, as DLMM's)
 pub fn consistency_set(m: &PoolMeta) -> Vec<Pk> {
     match m.venue {
         Venue::PumpSwap | Venue::RayAmmV4 => vec![m.vault0, m.vault1],
-        Venue::RayCpmm => vec![m.pool, m.vault0, m.vault1],
+        Venue::RayCpmm | Venue::RayClmm | Venue::Whirlpool => vec![m.pool, m.vault0, m.vault1],
         Venue::Dlmm | Venue::DammV2 => vec![m.pool],
     }
 }
@@ -139,11 +140,13 @@ pub fn consistency_set(m: &PoolMeta) -> Vec<Pk> {
 /// GlobalConfig and base mint; the CPMM config; the AMM v4 amm account; and every Token-2022 mint of the pool its quote
 /// scans (PLAN-ADDENDUM WP-16: arbx-sizing refuses a transfer fee or hook). The DLMM bitmap extension is not one since
 /// WP-06 (no quote reads it: arbx-sizing's walk stops where the pair's own bitmap ends; the builder passes it when the
-/// store holds it)
+/// store holds it). PLAN-ADDENDUM WP-21: Raydium CLMM's AmmConfig and TickArrayBitmapExtension, Orca's Oracle (both
+/// read by the quote: the extension's bitmaps, the adaptive fee; either may not exist, which the store holds as an empty
+/// account: known to be absent)
 pub fn other_parts(m: &PoolMeta) -> Vec<Pk> {
     let mut v = match m.venue {
         Venue::PumpSwap => { let mut v = vec![m.pool, *PUMP_FEE_CONFIG, *PUMP_GLOBAL_CONFIG]; v.extend(m.extra.iter().copied()); v }
-        Venue::RayCpmm => m.extra.clone(),
+        Venue::RayCpmm | Venue::RayClmm | Venue::Whirlpool => m.extra.clone(),
         Venue::RayAmmV4 => vec![m.pool],
         Venue::Dlmm => vec![],
         Venue::DammV2 => vec![],
@@ -228,7 +231,8 @@ pub struct Store {
     accts: HashMap<Pk, Hist>,
     /// versions kept per account ([accuracy] ring_versions)
     pub ring_versions: usize,
-    /// DLMM pool -> bin array index -> array account (the arrays we follow)
+    /// DLMM pool -> bin array index -> array account (the arrays we follow). PLAN-ADDENDUM WP-21: also each Raydium CLMM
+    /// and Orca Whirlpool pool's followed tick arrays, by start tick index (`venues::clmm`)
     pub dlmm_arrays: HashMap<Pk, Vec<(i64, Pk)>>,
     pub updates: u64,
     /// versions not applied as current (older than the current one: stale, or kept below it for a fork rollback)
@@ -379,7 +383,8 @@ impl Store {
         if contested { return Err(NotReady::ForkPending); }
         v.skew = v.max_slot - v.min_slot;
         if v.skew > ctx.max_skew { return Err(NotReady::PartsSkewed); }
-        if m.venue == Venue::Dlmm {
+        // the followed arrays (DLMM bin arrays; WP-21: Raydium CLMM and Orca Whirlpool tick arrays)
+        if m.venue.walks() {
             for (i, k) in self.dlmm_arrays.get(&m.pool).map(|l| l.as_slice()).unwrap_or(&[]) {
                 let Some(a) = self.get(k) else { continue };
                 if (ctx.pending)(k) || (ctx.contested)(a.slot) || (ctx.unverified)(k) { v.pending_arrays.push(*i); continue; }
@@ -389,6 +394,22 @@ impl Store {
             }
         }
         Ok(v)
+    }
+
+    /// PLAN-ADDENDUM WP-21: the Raydium CLMM and Orca Whirlpool pools whose tick arrays to follow changed (the price left
+    /// the current array, the bitmaps changed: `venues::clmm::follow_starts`); returns (pool, new array list) to re-follow.
+    /// A pool not held yet is left out
+    pub fn clmm_drift(&self, reg: &Registry) -> Vec<(Pk, Vec<(i64, Pk)>)> {
+        let mut out = Vec::new();
+        for m in reg.pools.iter().filter(|m| m.venue.is_clmm()) {
+            let held = self.dlmm_arrays.get(&m.pool).map(|l| l.as_slice()).unwrap_or(&[]);
+            let get = |k: &Pk| self.get(k).map(|a| a.data.to_vec());
+            if self.get(&m.pool).is_none() { continue; }
+            let want = crate::pools::clmm_arrays(m, &get, held);
+            if want.is_empty() || want.as_slice() == held { continue; }
+            out.push((m.pool, want));
+        }
+        out
     }
 
     /// the DLMM pools whose active bin left the followed span; returns (pool, new array list) to re-follow

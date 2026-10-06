@@ -117,7 +117,7 @@ pub fn snapshot(m: &PoolMeta, a: &Accounts, slot: u64, now_unix: i64, pump_cfg: 
             CpSnap { venue: m.venue, r0: v0, r1: v1, virt: i64_at(p, 245).unwrap() as i128, slot,
                 fee: Fee::Pump { cfg: cfg.clone(), canonical: m.flag, creator_fee, supply } }
         }
-        Venue::Dlmm | Venue::DammV2 => return Err("not-cp"),
+        Venue::Dlmm | Venue::DammV2 | Venue::RayClmm | Venue::Whirlpool => return Err("not-cp"),
     };
     if snap.r0 == 0 || snap.r1 == 0 { return Err("empty-reserves"); }
     Ok(snap)

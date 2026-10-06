@@ -11,7 +11,8 @@ build = "buildinfo.rs"
 anyhow = "1"
 # the venue maths (PLAN-ADDENDUM WP-16): exact quotes proven against the real venue binaries (program/venue-harness),
 # the same code arbx-exec's on-chain sizing runs. no_std, no dependencies of its own
-arbx-sizing = { path = "program/arbx-sizing" }
+# PLAN-ADDENDUM WP-21: with Raydium CLMM and Orca Whirlpool (kinds 7 and 8, feature "clmm"; DESIGN.md §9)
+arbx-sizing = { path = "program/arbx-sizing", features = ["clmm"] }
 base64 = "0.22"
 bs58 = "0.5"
 crossbeam-channel = "0.5"

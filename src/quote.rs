@@ -30,8 +30,8 @@ use crate::store::Acct;
 use crate::tx::Pk;
 use crate::venues::{PoolMeta, Venue, WSOL};
 use arbx_sizing as sz;
-use sz::error::{AmmWhy, CpmmWhy, DammWhy, DlmmWhy, PumpWhy};
-use sz::venue::{ammv4, cpmm, dammv2, dlmm, pumpswap};
+use sz::error::{AmmWhy, ClmmWhy, CpmmWhy, DammWhy, DlmmWhy, PumpWhy, WhirlWhy};
+use sz::venue::{ammv4, cpmm, dammv2, dlmm, orca_whirlpool, pumpswap, raydium_clmm};
 use sz::{Abort, AnyLeg, Fx, Quote, QuoteErr};
 
 /// A DLMM leg of a route may read this many bins (empty ones inside a visited array included) when the other leg is
@@ -42,6 +42,13 @@ pub const DLMM_BUDGET_ALONE: u16 = 200;
 pub const DLMM_BUDGET_SHARED: u16 = 100;
 /// the most bin arrays a DLMM leg names (the builder's rule, `build.rs::dlmm_leg`; the crate's `MAX_ARRAYS`)
 pub const DLMM_MAX_ARRAYS: usize = dlmm::MAX_ARRAYS;
+
+/// PLAN-ADDENDUM WP-21: the walk budget of a Raydium CLMM or Orca Whirlpool leg of a route, in swap steps: half its
+/// route's DLMM budget (`Use::Route::dlmm_budget`: 200 alone, 100 when both legs walk). A step costs at most 10k CU on the
+/// deployed binaries (Raydium 64k + 10k per step, Orca 48k + 10k: DESIGN.md §2.8, §2.9) against a DLMM bin's 5.45k, so
+/// with the engine's CU estimate ((29k + legs)·1.1) a CLMM leg at 100 steps beside a CPMM-family leg asks ≈1.31M, two
+/// walking legs at their shared budgets ≈1.30M: under the 1.4M transaction limit
+pub fn clmm_budget(dlmm_budget: u16) -> u16 { dlmm_budget / 2 }
 
 /// The bin arrays a route's DLMM leg may use (PLAN WP-06 item 6, the DLMM cap), the one rule the quote and the builder
 /// share: the active bin's array `c`, then onward in the swap's direction while the next one is held (`have`: followed,
@@ -66,6 +73,7 @@ pub enum Use {
     /// one leg of our route, as the builder sends it: the crate's on-chain refusals apply (a DAMM v2 rate limiter in
     /// force refuses: our 14-account leg does not pass the instructions sysvar, 6049 at every size), DLMM bin arrays
     /// as the builder names them (from the active one, contiguous, at most 5) and the walk budget of the CU limit
+    /// (PLAN-ADDENDUM WP-21: a Raydium CLMM or Orca Whirlpool leg walks at most `clmm_budget(dlmm_budget)` swap steps)
     Route { dlmm_budget: u16 },
     /// a third party's decoded swap (hints, the accuracy monitor), priced as the venue executes it: a DAMM v2 rate
     /// limiter's fee is priced (that swap carries the sysvar or fails on its own), any followed DLMM bin array in the
@@ -82,6 +90,18 @@ pub enum Why {
     Unquotable(Venue),
     /// DLMM: the walk needs a bin array we do not follow or would not name (A.1 `unquotable_dlmm_array`)
     DlmmArray,
+    /// PLAN-ADDENDUM WP-21, Raydium CLMM and Orca Whirlpool: the walk needs a tick array we do not follow or would not
+    /// name, or one of Orca's three is not known (held, or known not to exist) (`unquotable_clmm_array`)
+    ClmmArray,
+    /// PLAN-ADDENDUM WP-21: the venue's program was upgraded since the binary the port was proven on (the state stream
+    /// delivered its programdata with another deploy slot; DESIGN.md §6.5): not priced (`venue_upgraded`)
+    VenueUpgraded,
+    /// arbx-sizing DESIGN.md §7 item 9 (PumpSwap, Raydium CPMM, DLMM, DAMM v2; the CLMM venues have the crate's own
+    /// `sz_clmm_mint_*` / `sz_whirl_mint_*`): a Token-2022 mint of the pool is paused (Pausable: every transfer fails) or
+    /// creates its accounts frozen (DefaultAccountState Frozen: the account the route creates for the mid token is frozen).
+    /// Either fails the swap at every size (`mint_paused`, `mint_frozen`)
+    MintPaused,
+    MintFrozen,
     /// a PumpSwap sell past the quote the pool pays out net of its held-back amounts (u64 @271, @279): the program
     /// fails 6063 above it (`sz_pump_held_capacity`)
     PumpHeldCapacity,
@@ -102,9 +122,15 @@ impl Why {
                 (Why::Missing(_), Venue::Dlmm) => "unquotable_dlmm_array",
                 (_, Venue::Dlmm) => "unquotable_dlmm_liquidity",
                 (_, Venue::DammV2) => "unquotable_damm",
+                (Why::Missing(_), Venue::RayClmm | Venue::Whirlpool) => "unquotable_clmm_array",
+                (_, Venue::RayClmm | Venue::Whirlpool) => "unquotable_clmm",
                 _ => "unquotable_cp",
             },
             Why::DlmmArray => "unquotable_dlmm_array",
+            Why::ClmmArray => "unquotable_clmm_array",
+            Why::VenueUpgraded => "venue_upgraded",
+            Why::MintPaused => "mint_paused",
+            Why::MintFrozen => "mint_frozen",
             Why::PumpHeldCapacity => "sz_pump_held_capacity",
             Why::Budget => "sz_budget",
             Why::PumpQuoteNotSol => "pump_quote_not_sol",
@@ -113,7 +139,7 @@ impl Why {
         }
     }
     /// a parse-time refusal of the whole leg (every size), as opposed to one size's
-    pub fn whole_leg(self) -> bool { !matches!(self, Why::Unquotable(_) | Why::DlmmArray | Why::PumpHeldCapacity | Why::Budget) }
+    pub fn whole_leg(self) -> bool { !matches!(self, Why::Unquotable(_) | Why::DlmmArray | Why::ClmmArray | Why::PumpHeldCapacity | Why::Budget) }
 }
 
 /// The reason of every state arbx-sizing refuses (`Abort`), prefixed `sz_` (MEASUREMENT A.1, WP-16)
@@ -148,6 +174,18 @@ pub fn abort_reason(a: Abort) -> &'static str {
             DammWhy::Mode => "sz_damm_mode", DammWhy::Fee100 => "sz_damm_fee100", DammWhy::Liquidity => "sz_damm_liquidity", DammWhy::Range => "sz_damm_range",
             DammWhy::Time => "sz_damm_time",
         },
+        // PLAN-ADDENDUM WP-21 (DESIGN.md §2.8, §2.9, §9.0 item 1): each fails the venue's swap_v2 at every size
+        Abort::Clmm(w) => match w {
+            ClmmWhy::Status => "sz_clmm_status", ClmmWhy::NotOpen => "sz_clmm_not_open", ClmmWhy::Fee => "sz_clmm_fee",
+            ClmmWhy::BitmapExtension => "sz_clmm_bitmap_extension", ClmmWhy::NoLiquidity => "sz_clmm_no_liquidity", ClmmWhy::TickArrays => "sz_clmm_tick_arrays",
+            ClmmWhy::PriceLimit => "sz_clmm_price_limit", ClmmWhy::State => "sz_clmm_state", ClmmWhy::MintPaused => "sz_clmm_mint_paused",
+            ClmmWhy::MintFrozen => "sz_clmm_mint_frozen",
+        },
+        Abort::Whirl(w) => match w {
+            WhirlWhy::TradeNotEnabled => "sz_whirl_trade_not_enabled", WhirlWhy::Timestamp => "sz_whirl_timestamp", WhirlWhy::TickArrays => "sz_whirl_tick_arrays",
+            WhirlWhy::PriceLimit => "sz_whirl_price_limit", WhirlWhy::State => "sz_whirl_state", WhirlWhy::MintPaused => "sz_whirl_mint_paused",
+            WhirlWhy::MintFrozen => "sz_whirl_mint_frozen",
+        },
     }
 }
 
@@ -166,7 +204,7 @@ macro_rules! reasons {
 }
 
 reasons!(
-    "sz_pump_held_capacity", "sz_budget", "pump_quote_not_sol", "sz_ammv4_token_2022",
+    "sz_pump_held_capacity", "sz_budget", "pump_quote_not_sol", "sz_ammv4_token_2022", "venue_upgraded", "mint_paused", "mint_frozen",
     "sz_unsupported", "sz_layout", "sz_transfer_fee", "sz_transfer_hook", "sz_math", "sz_model_refused",
     "sz_pump_mayhem", "sz_pump_cashback", "sz_pump_disabled", "sz_pump_virtual", "sz_pump_fee_total", "sz_pump_fee_config", "sz_pump_empty",
     "sz_pump_held_exceeds_vault", "sz_pump_unknown_tail",
@@ -175,6 +213,10 @@ reasons!(
     "sz_dlmm_status", "sz_dlmm_not_active", "sz_dlmm_function_type", "sz_dlmm_collect_fee_mode", "sz_dlmm_zero_price", "sz_dlmm_activation_type",
     "sz_damm_status", "sz_damm_not_active", "sz_damm_rate_limiter", "sz_damm_mode", "sz_damm_fee100", "sz_damm_liquidity", "sz_damm_range",
     "sz_damm_time",
+    "sz_clmm_status", "sz_clmm_not_open", "sz_clmm_fee", "sz_clmm_bitmap_extension", "sz_clmm_no_liquidity", "sz_clmm_tick_arrays",
+    "sz_clmm_price_limit", "sz_clmm_state", "sz_clmm_mint_paused", "sz_clmm_mint_frozen",
+    "sz_whirl_trade_not_enabled", "sz_whirl_timestamp", "sz_whirl_tick_arrays", "sz_whirl_price_limit", "sz_whirl_state", "sz_whirl_mint_paused",
+    "sz_whirl_mint_frozen",
 );
 
 /// The counters of `reason` when it is one of this module's (the crate's refusal states and the routes we do not trade)
@@ -184,7 +226,7 @@ impl Why {
     /// The row of a reason the crate (or our route rules) gives, None for "an account is missing" and "the venue cannot
     /// fill it" (A.1's `unquotable_*`, counted generically: `trigger_unquotable`, `probe_unquotable`, `pred_unquotable`)
     pub fn crate_reason(self) -> Option<&'static Reason> {
-        match self { Why::Missing(_) | Why::Unquotable(_) | Why::DlmmArray => None, w => reason_row(w.reason()) }
+        match self { Why::Missing(_) | Why::Unquotable(_) | Why::DlmmArray | Why::ClmmArray => None, w => reason_row(w.reason()) }
     }
 }
 
@@ -225,14 +267,62 @@ fn mint_ok(d: &[u8]) -> Result<(), Why> {
     Ok(())
 }
 
+/// arbx-sizing DESIGN.md §7 item 9: a paused or default-frozen Token-2022 mint (`sz::token::mint_blocked`) fails every
+/// swap of the pool's (the older five venues; the CLMM venues refuse it with the crate's own reasons)
+fn mint_usable(d: &[u8]) -> Result<(), Why> {
+    match sz::token::mint_blocked(d) { Some(sz::token::MintBlock::Paused) => Err(Why::MintPaused), Some(sz::token::MintBlock::DefaultFrozen) => Err(Why::MintFrozen), None => Ok(()) }
+}
+
 /// The pool's Token-2022 mints must be in `src` and scanned clean (`pools.rs` follows them as parts of the pool);
-/// an SPL Token side needs no account
+/// an SPL Token side needs no account. Not paused or default-frozen either (DESIGN.md §7 item 9; the CLMM venues check
+/// it with their own reasons, `clmm_mints_blocked`)
 fn mints_ok(m: &PoolMeta, src: &Src) -> Result<(), Why> {
     for (mint, prog) in [(&m.t0, &m.t0_prog), (&m.t1, &m.t1_prog)] {
-        if *prog == *crate::pda::TOKEN_2022 { mint_ok(&(src.get)(mint).ok_or(Why::Missing(m.venue))?.data)?; }
+        if *prog == *crate::pda::TOKEN_2022 {
+            let d = &(src.get)(mint).ok_or(Why::Missing(m.venue))?.data;
+            mint_ok(d)?;
+            if !m.venue.is_clmm() { mint_usable(d)?; }
+        }
     }
     Ok(())
 }
+
+/// PLAN-ADDENDUM WP-21: a paused (Pausable) or default-frozen (DefaultAccountState Frozen) Token-2022 mint of a CLMM
+/// pool fails its swap_v2 at every size (DESIGN.md §2.0): the venue's own refusal (`sz_clmm_mint_*`, `sz_whirl_mint_*`)
+fn clmm_mints_blocked(m: &PoolMeta, src: &Src) -> Result<(), Why> {
+    for (mint, prog) in [(&m.t0, &m.t0_prog), (&m.t1, &m.t1_prog)] {
+        if *prog != *crate::pda::TOKEN_2022 { continue; }
+        let Some(b) = (src.get)(mint).and_then(|a| sz::token::mint_blocked(&a.data)) else { continue };
+        let paused = b == sz::token::MintBlock::Paused;
+        return Err(Why::Abort(match (m.venue, paused) {
+            (Venue::RayClmm, true) => Abort::Clmm(ClmmWhy::MintPaused),
+            (Venue::RayClmm, false) => Abort::Clmm(ClmmWhy::MintFrozen),
+            (_, true) => Abort::Whirl(WhirlWhy::MintPaused),
+            (_, false) => Abort::Whirl(WhirlWhy::MintFrozen),
+        }));
+    }
+    Ok(())
+}
+
+/// a crate refusal of a CLMM leg: "the first tick array the swap needs is not passed" is ours (the arrays we hold and
+/// name), not the pool's (`unquotable_clmm_array`); every other one is the venue's (`sz_*`)
+fn clmm_abort(a: Abort) -> Why {
+    match a { Abort::Clmm(ClmmWhy::TickArrays) | Abort::Whirl(WhirlWhy::TickArrays) => Why::ClmmArray, a => Why::Abort(a) }
+}
+
+/// Orca Whirlpool: the Clock a quote is priced under, never before the pool's own stamps (its reward update, the oracle's
+/// reference update and major-swap stamp: the program refuses an earlier Clock, `Whirl(Timestamp)`). The slot the route
+/// targets is later than the slots that wrote them; a Clock sysvar version that has not caught up with the pool's write
+/// is raised to them (DESIGN.md §9.0 item 4)
+fn whirl_clock(c: sz::Clock, pool: &[u8], oracle: Option<&[u8]>) -> sz::Clock {
+    let stamp = |d: &[u8], o: usize| sz::math::u64_at(d, o).map_or(0, |v| v.min(i64::MAX as u64) as i64);
+    let mut ts = c.unix_timestamp.max(stamp(pool, orca_whirlpool::off::REWARD_LAST_UPDATED));
+    if let Some(o) = oracle { ts = ts.max(stamp(o, orca_whirlpool::off::O_VARIABLES)).max(stamp(o, orca_whirlpool::off::O_VARIABLES + 8)); }
+    sz::Clock { unix_timestamp: ts, ..c }
+}
+
+/// the most tick arrays a Raydium CLMM leg is quoted with: the followed set holds at most 13 (`venues::clmm`)
+const RAY_HELD_MAX: usize = 16;
 
 /// Parse pool `m` for a swap spending its token 0 (`zfo`) or token 1, from `src`
 pub fn leg<'a>(m: &PoolMeta, zfo: bool, src: &Src<'_, 'a>, use_: Use) -> Result<Leg<'a>, Why> {
@@ -261,7 +351,8 @@ pub fn leg<'a>(m: &PoolMeta, zfo: bool, src: &Src<'_, 'a>, use_: Use) -> Result<
             let fee_cfg = get(&sz::layout::PUMP_FEE_CONFIG)?;
             let base_mint = get(m.extra.first().ok_or(miss)?)?;
             mint_ok(&base_mint.data)?;
-            if m.t1_prog == *crate::pda::TOKEN_2022 { mint_ok(&get(&m.t1)?.data)?; }
+            mint_usable(&base_mint.data)?;
+            if m.t1_prog == *crate::pda::TOKEN_2022 { mint_ok(&get(&m.t1)?.data)?; mint_usable(&get(&m.t1)?.data)?; }
             let supply = sz::math::u64_at(&base_mint.data, 36).ok_or(miss)?;
             let quote_mint = sz::math::key_at(&pool.data, pumpswap::off::QUOTE_MINT).copied().ok_or(Why::Abort(Abort::Layout))?;
             let (b, q) = (token_amount(get(&m.vault0)?).ok_or(miss)?, token_amount(get(&m.vault1)?).ok_or(miss)?);
@@ -309,19 +400,94 @@ pub fn leg<'a>(m: &PoolMeta, zfo: bool, src: &Src<'_, 'a>, use_: Use) -> Result<
             let leg = if route { dammv2::parse(&pool.data, zfo, true, &src.clock) } else { dammv2::parse_with_limiter(&pool.data, zfo, true, &src.clock) };
             (AnyLeg::Damm(leg.map_err(Why::Abort)?), unq)
         }
+        // PLAN-ADDENDUM WP-21 (DESIGN.md §9.0 item 5, §9.1): the pool, its AmmConfig, the vaults' balances, the mints'
+        // scans, then the remaining accounts the leg passes as the program reads them: the bitmap extension when it
+        // exists, then the tick arrays in walk order (the followed ones from the current array onward in the swap's
+        // direction that the bitmaps say are initialized: the program jumps over every other), at most 7 accounts
+        Venue::RayClmm => {
+            let pool = get(&m.pool)?;
+            let p: &'a [u8] = &pool.data;
+            let cfg = get(m.clmm_config().ok_or(miss)?)?;
+            // the extension when it exists (the store holds one that does not exist as an empty account; a route's
+            // readiness check requires it known)
+            let ext: Option<&'a [u8]> = m.clmm_ext().and_then(|k| (src.get)(k)).map(|a| &a.data[..]).filter(|d| d.len() == raydium_clmm::EXT_LEN);
+            let (v0, v1) = (token_amount(get(&m.vault0)?).ok_or(miss)?, token_amount(get(&m.vault1)?).ok_or(miss)?);
+            mints_ok(m, src)?;
+            clmm_mints_blocked(m, src)?;
+            let room = raydium_clmm::MAX_REMAINING - ext.is_some() as usize;
+            // the held arrays in walk order, on the stack
+            let mut held: [(i32, &'a [u8]); RAY_HELD_MAX] = [(0, &[]); RAY_HELD_MAX];
+            let mut n_held = 0usize;
+            if let Some(cur) = crate::venues::clmm::current_array(Venue::RayClmm, p) {
+                for (i, k) in src.arrays {
+                    if n_held == RAY_HELD_MAX || !(src.usable)(*i) { continue; }
+                    let (Ok(st), Some(a)) = (i32::try_from(*i), (src.get)(k)) else { continue };
+                    if a.data.len() != raydium_clmm::ARRAY_LEN || (zfo && st > cur) || (!zfo && st < cur) { continue; }
+                    if crate::venues::clmm::ray_array_bit(p, ext, st) != Some(true) { continue; }
+                    held[n_held] = (st, &a.data[..]);
+                    n_held += 1;
+                }
+            }
+            let held = &mut held[..n_held];
+            held.sort_unstable_by_key(|(st, _)| if zfo { -(*st as i64) } else { *st as i64 });
+            let mut rem: [&'a [u8]; raydium_clmm::MAX_REMAINING] = [&[]; raydium_clmm::MAX_REMAINING];
+            let mut n = 0usize;
+            if let Some(e) = ext { rem[0] = e; n = 1; }
+            for (_, d) in held.iter().take(room) { rem[n] = d; n += 1; }
+            let passed = n - ext.is_some() as usize;
+            let leg = raydium_clmm::parse(p, &cfg.data, &rem[..n], v0, v1, zfo, &src.clock).map_err(clmm_abort)?;
+            let leg = match use_ { Use::Route { dlmm_budget } => leg.with_budget(clmm_budget(dlmm_budget)), Use::Third => leg };
+            // a walk that ends where our arrays end, with an initialized array beyond them by the bitmaps (or one between
+            // them we do not hold), ends on our window, not the venue's
+            let want = crate::venues::clmm::ray_initialized_arrays(p, ext, zfo, passed + 1);
+            let beyond = want.len() > passed || want.iter().zip(held.iter()).any(|(w, (h, _))| w != h);
+            (AnyLeg::RayClmm(leg), if beyond { Why::ClmmArray } else { unq })
+        }
+        // PLAN-ADDENDUM WP-21 (DESIGN.md §9.0 item 5, §9.2): the pool, its oracle (none when it does not exist), the vaults,
+        // the mints' scans and the program's own sequence of 3 tick arrays: each held and usable, initialized (its bytes)
+        // or known not to exist (the store holds it empty: zeroed, as the program reads an uninitialized PDA). A needed
+        // array not known is a missing account: its absence would price it as zeroed. No swap reads past the 3
+        Venue::Whirlpool => {
+            let pool = get(&m.pool)?;
+            let p: &'a [u8] = &pool.data;
+            let o = get(m.whirl_oracle().ok_or(miss)?)?;
+            let oracle: Option<&'a [u8]> = Some(&o.data[..]).filter(|d| !d.is_empty());
+            let (va, vb) = (token_amount(get(&m.vault0)?).ok_or(miss)?, token_amount(get(&m.vault1)?).ok_or(miss)?);
+            mints_ok(m, src)?;
+            clmm_mints_blocked(m, src)?;
+            let mut ins = [orca_whirlpool::TickArrayIn { start: 0, data: None }; 3];
+            // (a current tick outside the tick range: the program cannot hold one; refused before its starts overflow)
+            let (need, nn) = match (crate::venues::clmm::tick_spacing(Venue::Whirlpool, p), crate::venues::clmm::tick_current(Venue::Whirlpool, p)) {
+                (Some(ts), Some(t)) if (orca_whirlpool::MIN_TICK..=orca_whirlpool::MAX_TICK).contains(&t) => orca_whirlpool::needed_starts(t, ts, zfo),
+                (Some(_), Some(_)) => return Err(Why::Abort(Abort::Whirl(WhirlWhy::State))),
+                _ => ([0; 3], 0),
+            };
+            for (j, st) in need.iter().take(nn).enumerate() {
+                let (i, k) = src.arrays.iter().find(|(i, _)| *i == *st as i64).ok_or(Why::ClmmArray)?;
+                if !(src.usable)(*i) { return Err(Why::ClmmArray); }
+                let a = (src.get)(k).ok_or(Why::ClmmArray)?;
+                ins[j] = orca_whirlpool::TickArrayIn { start: *st, data: Some(&a.data[..]).filter(|d| !d.is_empty()) };
+            }
+            let clock = whirl_clock(src.clock, p, oracle);
+            let leg = orca_whirlpool::parse(p, oracle, &ins[..nn], va, vb, zfo, &clock).map_err(clmm_abort)?;
+            let leg = match use_ { Use::Route { dlmm_budget } => leg.with_budget(clmm_budget(dlmm_budget)), Use::Third => leg };
+            (AnyLeg::Whirl(leg), unq)
+        }
     };
     Ok(Leg { venue: m.venue, zfo, any, too_large })
 }
 
 impl<'a> Leg<'a> {
     pub fn is_dlmm(&self) -> bool { self.any.is_dlmm() }
+    /// a leg whose quote walks (DLMM bins; PLAN-ADDENDUM WP-21: CLMM swap steps): its CU depends on the walk
+    pub fn walks(&self) -> bool { self.any.walks() }
 
     fn why(&self, e: QuoteErr) -> Why {
         match e {
             QuoteErr::TooLarge => self.too_large,
             QuoteErr::ZeroOut => Why::Unquotable(self.venue),
             QuoteErr::Budget => Why::Budget,
-            QuoteErr::Abort(a) => Why::Abort(a),
+            QuoteErr::Abort(a) => clmm_abort(a),
         }
     }
 
@@ -334,6 +500,9 @@ impl<'a> Leg<'a> {
     pub fn exact_out(&self, out: u64) -> Option<Result<(u64, Quote), Why>> {
         match &self.any {
             AnyLeg::Pump(p) if !p.sell => Some(p.quote_exact_out(out).map_err(|e| self.why(e))),
+            // PLAN-ADDENDUM WP-21: swap_v2 exact out, as the venue rounds it (`quote_exact_out`)
+            AnyLeg::RayClmm(c) => Some(c.quote_exact_out(out).map(|q| (q.spent, q)).map_err(|e| self.why(e))),
+            AnyLeg::Whirl(c) => Some(c.quote_exact_out(out).map(|q| (q.spent, q)).map_err(|e| self.why(e))),
             _ => None,
         }
     }
@@ -344,15 +513,37 @@ impl<'a> Leg<'a> {
         match &self.any { AnyLeg::Dlmm(d) => Some(d.fills(x, f).map_err(|e| self.why(e))), _ => None }
     }
 
-    /// The exact quote of `x` with the walk (DLMM: bins with liquidity taken from, the bin it ends on, bins read)
+    /// The exact quote of `x` with the walk (DLMM: bins with liquidity taken from, the bin it ends on, bins read;
+    /// PLAN-ADDENDUM WP-21, Raydium CLMM and Orca Whirlpool: `crossed` and `walked` are the swap steps, the CU table's key)
     pub fn walk(&self, x: u64) -> Result<Quoted, Why> {
         match &self.any {
             AnyLeg::Dlmm(d) => {
                 let w = d.fills(x, &mut |_| {}).map_err(|e| self.why(e))?;
                 Ok(Quoted { out: w.quote.out, spent: w.quote.spent, crossed: w.liquid as u32, end: Some(w.end), walked: w.walked })
             }
+            AnyLeg::RayClmm(c) => {
+                let w = c.fills(x, false, &mut |_| {}).map_err(|e| self.why(e))?;
+                Ok(Quoted { out: w.quote.out, spent: w.quote.spent, crossed: w.steps as u32, end: None, walked: w.steps })
+            }
+            AnyLeg::Whirl(c) => {
+                let w = c.fills(x, false, &mut |_| {}).map_err(|e| self.why(e))?;
+                Ok(Quoted { out: w.quote.out, spent: w.quote.spent, crossed: w.steps as u32, end: None, walked: w.steps })
+            }
             _ => { let q = self.quote(x)?; Ok(Quoted { out: q.out, spent: q.spent, crossed: 0, end: None, walked: 0 }) }
         }
+    }
+
+    /// PLAN-ADDENDUM WP-21 (DESIGN.md §9.1): the tick arrays a Raydium CLMM leg of `x` names, in walk order: every array
+    /// the exact walk reads (the first one, then each it moves into), then the next one the leg holds (a buffer: a state
+    /// that moved by the time the leg runs may walk one array further), within the remaining accounts' 7 (the extension
+    /// counts). None for the other venues (Orca's leg names the program's own 3: `venues::clmm::whirl_leg_starts`)
+    pub fn clmm_arrays(&self, x: u64) -> Option<Result<Vec<i32>, Why>> {
+        let AnyLeg::RayClmm(c) = &self.any else { return None };
+        let w = match c.fills(x, false, &mut |_| {}) { Ok(w) => w, Err(e) => return Some(Err(self.why(e))) };
+        let mut names: Vec<i32> = w.arrays.iter().take(w.n_arrays as usize).copied().collect();
+        let room = raydium_clmm::MAX_REMAINING - c.has_extension() as usize;
+        if let Some(next) = c.array_starts().skip_while(|s| Some(s) != names.last()).nth(1) { if names.len() < room { names.push(next); } }
+        Some(Ok(names))
     }
 }
 
@@ -459,9 +650,11 @@ fn back_off(b: &Leg, s: &Leg, good: u64, bad: u64) -> Option<Trip> {
 /// the reason a route records when no size quotes: a refusal of a whole leg first, then a capacity or the budget,
 /// then the first reason seen ("too small")
 fn worse(have: Option<Why>, e: Why) -> Why {
-    let rank = |w: Why| if w.whole_leg() { 2 } else if matches!(w, Why::Budget | Why::PumpHeldCapacity | Why::DlmmArray) { 1 } else { 0 };
+    let rank = |w: Why| if w.whole_leg() { 2 } else if matches!(w, Why::Budget | Why::PumpHeldCapacity | Why::DlmmArray | Why::ClmmArray) { 1 } else { 0 };
     match have { Some(h) if rank(h) >= rank(e) => h, _ => e }
 }
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) mod clmm_tests;

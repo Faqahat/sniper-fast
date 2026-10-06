@@ -25,7 +25,7 @@ pub struct GrpcTx { pub sig: Vec<u8>, pub slot: u64, pub idx: u64, pub t: u64, p
 /// pool-specific state (pools, vaults, DLMM bin arrays and bitmap extensions) and our wallet and its token accounts (the
 /// chain-fetch service's D2 rule). Mints, configs, the fee config, the Clock and programdata are read by every
 /// transaction of a venue; one that writes any watched account is kept in full too
-pub fn touch_role(r: u8) -> bool { matches!(r, role::POOL | role::VAULT | role::DLMM_BIN_ARRAY | role::DLMM_BITMAP_EXT | role::WALLET | role::WALLET_TOKEN_ACCOUNT) }
+pub fn touch_role(r: u8) -> bool { matches!(r, role::POOL | role::VAULT | role::DLMM_BIN_ARRAY | role::DLMM_BITMAP_EXT | role::CLMM_TICK_ARRAY | role::WALLET | role::WALLET_TOKEN_ACCOUNT) }
 
 /// Solana's writability of account `i`: signed writable, unsigned writable, then the loaded writable addresses
 pub fn writable(i: usize, n_static: usize, n_lw: usize, h: &crate::feeds::grpc::PbHeader) -> bool {

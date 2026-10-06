@@ -407,8 +407,8 @@ enum Job { Wallet([u8; 64]), Statuses(Vec<[u8; 64]>), Backfill(Item), Sigs { pag
 
 /// the roles whose accounts make a transaction "watched" for D2 and the coverage sampler (pool-specific state and the
 /// wallet; mints, configs and the fee config are read by every pool of a venue)
-fn touch_role(r: u8) -> bool { matches!(r, role::POOL | role::VAULT | role::DLMM_BIN_ARRAY | role::DLMM_BITMAP_EXT | role::WALLET | role::WALLET_TOKEN_ACCOUNT) }
-fn pool_role(r: u8) -> bool { matches!(r, role::POOL | role::VAULT | role::DLMM_BIN_ARRAY | role::DLMM_BITMAP_EXT) }
+fn touch_role(r: u8) -> bool { matches!(r, role::POOL | role::VAULT | role::DLMM_BIN_ARRAY | role::DLMM_BITMAP_EXT | role::CLMM_TICK_ARRAY | role::WALLET | role::WALLET_TOKEN_ACCOUNT) }
+fn pool_role(r: u8) -> bool { matches!(r, role::POOL | role::VAULT | role::DLMM_BIN_ARRAY | role::DLMM_BITMAP_EXT | role::CLMM_TICK_ARRAY) }
 /// a call refused for want of a token: nothing was sent (no txfetch.jsonl line; the registry counts it as `rate_budget`)
 fn refused<T>(r: &Result<T, RpcFailure>) -> bool { matches!(r, Err(e) if e.class == ErrClass::Budget) }
 

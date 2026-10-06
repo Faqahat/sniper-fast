@@ -4,6 +4,7 @@
 //! chain); the accuracy monitor checks every prediction against the pool's real next state, so any remaining mismatch
 //! is measured, not assumed. The engine's own maths before WP-16 is kept, for the differential tests only, in
 //! `legacy`.
+pub mod clmm;
 pub mod cp;
 pub mod dlmm;
 #[cfg(test)]
@@ -17,23 +18,41 @@ pub static RAYCPMM: LazyLock<Pk> = LazyLock::new(|| pk("CPMMoo8L3F4NbTegBCKVNung
 pub static RAYAMMV4: LazyLock<Pk> = LazyLock::new(|| pk("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"));
 pub static DLMM: LazyLock<Pk> = LazyLock::new(|| pk("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"));
 pub static DAMMV2: LazyLock<Pk> = LazyLock::new(|| pk("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"));
+/// PLAN-ADDENDUM WP-21: Raydium CLMM and Orca Whirlpool (`swap_v2`, arbx-sizing kinds 7 and 8; DESIGN.md §9)
+pub static RAYCLMM: LazyLock<Pk> = LazyLock::new(|| pk("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"));
+pub static WHIRLPOOL: LazyLock<Pk> = LazyLock::new(|| pk("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"));
 pub static WSOL: LazyLock<Pk> = LazyLock::new(|| pk("So11111111111111111111111111111111111111112"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
-pub enum Venue { PumpSwap, RayCpmm, RayAmmV4, Dlmm, DammV2 }
+pub enum Venue { PumpSwap, RayCpmm, RayAmmV4, Dlmm, DammV2,
+    /// Raydium CLMM (PLAN-ADDENDUM WP-21; seed lists name it `RayCLMM`)
+    RayClmm,
+    /// Orca Whirlpool (PLAN-ADDENDUM WP-21; seed lists name it `Whirlpool`)
+    Whirlpool }
 
 impl Venue {
     pub fn program(&self) -> Pk {
-        match self { Venue::PumpSwap => *PUMPSWAP, Venue::RayCpmm => *RAYCPMM, Venue::RayAmmV4 => *RAYAMMV4, Venue::Dlmm => *DLMM, Venue::DammV2 => *DAMMV2 }
+        match self { Venue::PumpSwap => *PUMPSWAP, Venue::RayCpmm => *RAYCPMM, Venue::RayAmmV4 => *RAYAMMV4, Venue::Dlmm => *DLMM, Venue::DammV2 => *DAMMV2,
+            Venue::RayClmm => *RAYCLMM, Venue::Whirlpool => *WHIRLPOOL }
     }
     pub fn of_program(p: &Pk) -> Option<Venue> {
         if *p == *PUMPSWAP { Some(Venue::PumpSwap) } else if *p == *RAYCPMM { Some(Venue::RayCpmm) }
-        else if *p == *RAYAMMV4 { Some(Venue::RayAmmV4) } else if *p == *DLMM { Some(Venue::Dlmm) } else if *p == *DAMMV2 { Some(Venue::DammV2) } else { None }
+        else if *p == *RAYAMMV4 { Some(Venue::RayAmmV4) } else if *p == *DLMM { Some(Venue::Dlmm) } else if *p == *DAMMV2 { Some(Venue::DammV2) }
+        else if *p == *RAYCLMM { Some(Venue::RayClmm) } else if *p == *WHIRLPOOL { Some(Venue::Whirlpool) } else { None }
     }
     pub fn parse(s: &str) -> Option<Venue> {
-        match s { "PumpSwap" => Some(Venue::PumpSwap), "RayCPMM" => Some(Venue::RayCpmm), "RayAMMv4" => Some(Venue::RayAmmV4), "DLMM" => Some(Venue::Dlmm), "DAMMv2" => Some(Venue::DammV2), _ => None }
+        match s { "PumpSwap" => Some(Venue::PumpSwap), "RayCPMM" => Some(Venue::RayCpmm), "RayAMMv4" => Some(Venue::RayAmmV4), "DLMM" => Some(Venue::Dlmm), "DAMMv2" => Some(Venue::DammV2),
+            "RayCLMM" => Some(Venue::RayClmm), "Whirlpool" => Some(Venue::Whirlpool), _ => None }
     }
-    /// compute units for one leg (current bot's measured table), before the 1.10 margin
+    /// the five venues traded before WP-21, then the CLMM venues
+    pub const ALL: [Venue; 7] = [Venue::PumpSwap, Venue::RayCpmm, Venue::RayAmmV4, Venue::Dlmm, Venue::DammV2, Venue::RayClmm, Venue::Whirlpool];
+    /// Raydium CLMM or Orca Whirlpool (PLAN-ADDENDUM WP-21)
+    pub fn is_clmm(&self) -> bool { matches!(self, Venue::RayClmm | Venue::Whirlpool) }
+    /// a venue whose exact quote walks (DLMM bins, CLMM swap steps) over arrays the engine follows around the price
+    pub fn walks(&self) -> bool { matches!(self, Venue::Dlmm | Venue::RayClmm | Venue::Whirlpool) }
+    /// compute units for one leg (current bot's measured table), before the 1.10 margin. `crossings`: DLMM the bins with
+    /// liquidity the leg takes from; Raydium CLMM and Orca Whirlpool the swap steps of its exact walk (`quote::Quoted`
+    /// `crossed`; a dynamic or adaptive fee adds steps without a crossing, so steps, not crossings: DESIGN.md §9.0 item 6)
     pub fn leg_cu(&self, crossings: u32) -> u64 {
         match self {
             Venue::PumpSwap => 100_000,
@@ -42,6 +61,10 @@ impl Venue {
             Venue::Dlmm => 47_000 + 5_450 * crossings.max(1) as u64,
             // measured 16,171 by the current bot (FINDINGS B13); it asked ~55k more than used, so a margin, not that much
             Venue::DammV2 => 30_000,
+            // the venue harness on the deployed binaries (DESIGN.md §2.8, §2.9): every exact swap within these bounds
+            // (Raydium ≈41.5k + 9.1k per tick crossed + 8.5k per other step; Orca ≈28-30k + 7.0k + 8.6k)
+            Venue::RayClmm => 64_000 + 10_000 * crossings.max(1) as u64,
+            Venue::Whirlpool => 48_000 + 10_000 * crossings.max(1) as u64,
         }
     }
 }
@@ -51,17 +74,32 @@ impl Venue {
 pub struct PoolMeta {
     pub venue: Venue,
     pub pool: Pk,
-    /// token 0 / token 1 in the program's own order (AMMv4 coin/pc, CPMM mint0/mint1, PumpSwap base/quote, DLMM x/y)
+    /// token 0 / token 1 in the program's own order (AMMv4 coin/pc, CPMM mint0/mint1, PumpSwap base/quote, DLMM x/y,
+    /// Raydium CLMM token_mint_0/1, Orca Whirlpool token_mint_a/b)
     pub t0: Pk,
     pub t1: Pk,
     pub vault0: Pk,
     pub vault1: Pk,
     pub t0_prog: Pk,
     pub t1_prog: Pk,
-    /// venue-specific extra accounts the snapshot needs (CPMM amm_config, PumpSwap fee config + base mint, ...)
+    /// venue-specific extra accounts the snapshot needs (CPMM amm_config, PumpSwap fee config + base mint, ...). WP-21
+    /// (DESIGN.md §9.0 item 2): Raydium CLMM `[amm_config, the TickArrayBitmapExtension PDA]`, Orca Whirlpool `[the Oracle
+    /// PDA]` (`clmm_config`, `clmm_ext`, `whirl_oracle`); the extension and the oracle may not exist (the store then holds
+    /// them empty). The tick spacing and Raydium's observation account are read from the pool account itself
+    /// (`clmm::tick_spacing`, `clmm::observation`): pools.json and every journaled registry carry `extra` unchanged, so a
+    /// replay rebuilds the same metadata
     pub extra: Vec<Pk>,
     /// PumpSwap: created by the pump.fun migration (fee tiers apply); DLMM: bitmap extension exists
     pub flag: bool,
+}
+
+impl PoolMeta {
+    /// Raydium CLMM: the pool's AmmConfig (`extra[0]`, the key the pool names at @9)
+    pub fn clmm_config(&self) -> Option<&Pk> { (self.venue == Venue::RayClmm).then(|| self.extra.first()).flatten() }
+    /// Raydium CLMM: the TickArrayBitmapExtension PDA (`extra[1]`; it may not exist)
+    pub fn clmm_ext(&self) -> Option<&Pk> { (self.venue == Venue::RayClmm).then(|| self.extra.get(1)).flatten() }
+    /// Orca Whirlpool: the Oracle PDA (`extra[0]`; it does not exist on a pool without the adaptive fee)
+    pub fn whirl_oracle(&self) -> Option<&Pk> { (self.venue == Venue::Whirlpool).then(|| self.extra.first()).flatten() }
 }
 
 /// A third party's swap, decoded from its instruction.
