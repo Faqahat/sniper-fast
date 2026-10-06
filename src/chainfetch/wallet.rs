@@ -34,12 +34,16 @@ pub const F_OURS: u8 = 8;
 pub const F_JITO: u8 = 16;
 pub const F_SIGS: u8 = 32;
 pub const F_SAMPLE: u8 = 64;
-/// the sources that show a signature landed: a wallet-account write (a), getSignaturesForAddress (d)
-pub const LANDED_BITS: u8 = F_ACCOUNT | F_SIGS;
+/// WP-07: the executor's status check found the signature landed before its record came (`chainfetch::note_landed`:
+/// the record settles the executor's provisional money), or the ledger's reconciliation found it in the window
+pub const F_EXEC: u8 = 128;
+/// the sources that show a signature landed: a wallet-account write (a), getSignaturesForAddress (d), the executor's
+/// status check or the reconciliation's search (WP-07)
+pub const LANDED_BITS: u8 = F_ACCOUNT | F_SIGS | F_EXEC;
 
 pub fn found_by(bits: u8) -> Vec<&'static str> {
     [(F_ACCOUNT, "account_update"), (F_SHRED, "shred"), (F_STREAM, "tx_stream"), (F_OURS, "ours"), (F_JITO, "jito_processed"), (F_SIGS, "sigs_for_address"),
-        (F_SAMPLE, "block_sample")].iter().filter(|(b, _)| bits & b != 0).map(|(_, n)| *n).collect()
+        (F_SAMPLE, "block_sample"), (F_EXEC, "executor_status")].iter().filter(|(b, _)| bits & b != 0).map(|(_, n)| *n).collect()
 }
 
 /// a wallet signature's fetch is given up this long after it was found
@@ -164,6 +168,9 @@ impl Wallet {
                 match state {
                     State::Watch | State::Unlanded => { self.landed(sig, now); self.schedule(sig, now); }
                     State::Due if bit == F_ACCOUNT && due_at.is_some_and(|t| t > now) => self.schedule(sig, now),
+                    // WP-07: the executor saw it landed: one more fetch of a signature given up (its record settles the
+                    // executor's provisional money)
+                    State::GaveUp if bit == F_EXEC => self.schedule(sig, now),
                     _ => {}
                 }
             }
@@ -308,7 +315,7 @@ pub struct Fields { pub wallet_kind: &'static str, pub wallet_sol: Option<i64>, 
 const SYSTEM: Pk = [0u8; 32];
 
 /// every instruction, top-level then inner: (program, account keys, data)
-fn all_ixs<'a>(x: &'a RpcTx) -> Vec<(Pk, Vec<Pk>, &'a [u8])> {
+pub(crate) fn all_ixs<'a>(x: &'a RpcTx) -> Vec<(Pk, Vec<Pk>, &'a [u8])> {
     let msg = x.tx.message.as_ref();
     let k = |i: u32| x.keys.get(i as usize).copied();
     let mut out = Vec::new();

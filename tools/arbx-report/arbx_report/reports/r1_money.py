@@ -42,7 +42,7 @@ def run(seg, ctx: dict) -> dict:
         if v:
             bad_identity.append({"sig": r.get("sig"), "violations": v})
     eq_sum = sum(r.get("equity_delta") or 0 for r in rows)
-    d["ledger"] = {"transactions": len(rows), "equity_delta_sum": eq_sum, "equity_delta_missing": eq_missing,
+    d["ledger"] = {"transactions": len(rows), "dup_skipped": len(seg.ledger_dup), "equity_delta_sum": eq_sum, "equity_delta_missing": eq_missing,
                    "summing_categories": cats, "summing_total": sum(cats.values()), "informational": info,
                    "identity_violations": bad_identity[:50], "identity_violations_n": len(bad_identity)}
     if sum(cats.values()) != eq_sum:

@@ -1,5 +1,7 @@
 #!/bin/bash
 # arbx campaign supervisor (PLAN WP-01 item 8; it replaced arb-lab's supervisor script, removed with tools/analysis in I-11).
+# WP-07: on Cherry `arbx campaign` (src/campaign.rs; the ledger's budget and the campaign-wide equity stops) replaces this
+# script, since no script goes to Cherry (docs/field-tests/README.md); it stays for local campaigns and tools/test-run-w.sh.
 #
 # usage: deploy/run-w.sh <campaign> <hours> <segment min> <fee budget lamports> <config> [operator]
 #   e.g. from your own machine: ssh -t root@<host> 'cd /root/arbx && deploy/run-w.sh w6 5 20 25000000 deploy/arbx-stage0.toml moiz'

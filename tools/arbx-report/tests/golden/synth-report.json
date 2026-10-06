@@ -1100,6 +1100,7 @@
      }
     },
     "ledger": {
+     "dup_skipped": 0,
      "equity_delta_missing": 0,
      "equity_delta_sum": 10000,
      "identity_violations": [],

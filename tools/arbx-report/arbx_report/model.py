@@ -244,7 +244,14 @@ class Segment:
 
     @cached_property
     def ledger(self) -> list:
-        return self.jsonl("ledger")
+        """ledger.jsonl's lines this segment counts: a line marked `dup` (a signature an earlier segment of the campaign
+        already recorded, written again by this one's pre-run fetch; WP-07) is left out, as the Rust side leaves it out
+        (review WP-07 #11): `ledger_dup` has them"""
+        return [r for r in self.jsonl("ledger") if not r.get("dup")]
+
+    @cached_property
+    def ledger_dup(self) -> list:
+        return [r for r in self.jsonl("ledger") if r.get("dup")]
 
     @cached_property
     def ledger_by_sig(self) -> dict:

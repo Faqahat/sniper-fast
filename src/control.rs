@@ -85,6 +85,21 @@ impl SendGate {
         }
     }
 
+    /// Back to live only from a non-sticky shadow whose reason is `reason` (WP-07: the money view is fresh again; a pause
+    /// or any other shadow keeps the gate as it is). Ok(true): the gate went live
+    pub fn resume_if(&self, reason: &str, detail: &str) -> Result<bool, String> {
+        let mut i = self.info.lock().unwrap_or_else(|e| e.into_inner());
+        match self.mode() {
+            GateMode::Stopped => Err("stopping".into()),
+            GateMode::Shadow if !i.sticky && i.reason == reason => {
+                *i = GateInfo { reason: String::new(), detail: detail.into(), since_ns: now_ns(), sticky: false };
+                self.mode.store(GateMode::Live as u8, Ordering::Relaxed);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     /// Closed for good (a stop was requested)
     pub fn stop(&self, reason: &str) {
         let mut i = self.info.lock().unwrap_or_else(|e| e.into_inner());
@@ -105,21 +120,32 @@ impl SendGate {
 
 /// MEASUREMENT A.5 stop reasons. `StateUnavailable` (PLAN-ADDENDUM I-4): the state stream delivered nothing within
 /// `[state] boot_timeout_s` of the engine's start (cmp2: a 503 for 28 minutes, priced blind, exit 0); it is a failure
-/// (exit 30, a crash to the supervisor: retried after its back-off, counted toward the crash limit), not a safety stop
+/// (exit 30, a crash to the supervisor: retried after its back-off, counted toward the crash limit), not a safety stop.
+/// WP-07's equity stops (src/supervisor.rs) are safety stops (exit 20: the campaign ends): `equity_floor` (the stop
+/// equity below the campaign's start minus its test budget), `equity_hour` (OD-11: more than `max_drop_per_hour_sol`
+/// lost within a rolling hour), `equity_day` (the same over 24 h), `token_floor` (a non-SOL token held at the campaign's
+/// start fell below its start amount)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum StopReason { Deadline, Signal, Control, EquityDay, DiskBudget, StateUnavailable, Error, Panic }
+pub enum StopReason { Deadline, Signal, Control, EquityDay, EquityHour, EquityFloor, TokenFloor, DiskBudget, StateUnavailable, Error, Panic }
 
 impl StopReason {
     pub fn as_str(self) -> &'static str {
         match self { StopReason::Deadline => "deadline", StopReason::Signal => "signal", StopReason::Control => "control", StopReason::EquityDay => "equity_day",
+            StopReason::EquityHour => "equity_hour", StopReason::EquityFloor => "equity_floor", StopReason::TokenFloor => "token_floor",
             StopReason::DiskBudget => "disk_budget", StopReason::StateUnavailable => "state_unavailable", StopReason::Error => "error", StopReason::Panic => "panic" }
     }
     /// 0 deadline, 10 operator stop, 20 safety stop (ends the campaign), 30 error
     pub fn exit_code(self) -> i32 {
-        match self { StopReason::Deadline => 0, StopReason::Signal | StopReason::Control => 10, StopReason::EquityDay | StopReason::DiskBudget => 20,
+        match self { StopReason::Deadline => 0, StopReason::Signal | StopReason::Control => 10,
+            StopReason::EquityDay | StopReason::EquityHour | StopReason::EquityFloor | StopReason::TokenFloor | StopReason::DiskBudget => 20,
             StopReason::StateUnavailable | StopReason::Error | StopReason::Panic => 30 }
     }
+    /// every reason (tests, the campaign's classification)
+    pub const ALL: [StopReason; 11] = [StopReason::Deadline, StopReason::Signal, StopReason::Control, StopReason::EquityDay, StopReason::EquityHour,
+        StopReason::EquityFloor, StopReason::TokenFloor, StopReason::DiskBudget, StopReason::StateUnavailable, StopReason::Error, StopReason::Panic];
+    /// the reason named `s` (stop.json `reason`)
+    pub fn parse(s: &str) -> Option<StopReason> { StopReason::ALL.into_iter().find(|r| r.as_str() == s) }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -268,7 +294,8 @@ pub fn install_panic_hook(sess: Arc<Session>) {
         let msg = p.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.payload().downcast_ref::<String>().cloned()).unwrap_or_else(|| "?".into());
         let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
         let text = format!("panic in thread {thread} at {}: {msg}", p.location().map(|l| l.to_string()).unwrap_or_default());
-        if thread == "main" {
+        // a panic in the alert hook is caught there (`notify::notify`): logged, never the run's failure (review WP-07 #13)
+        if thread == "main" && !crate::notify::in_hook() {
             *sess.last_panic.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.clone());
             sess.fail(StopInfo::new(StopReason::Panic, crate::rpc::scrub(&text)));
         } else if let Some(d) = sess.dir() {

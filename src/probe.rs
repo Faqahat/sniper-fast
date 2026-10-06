@@ -229,8 +229,13 @@ pub fn inconclusive(subs: &[SubResult]) -> Vec<&SubResult> { subs.iter().filter(
 /// or arb-lab's `arb-lab … run …`
 pub fn is_bot_run(argv: &[String]) -> bool {
     let Some(a0) = argv.first() else { return false };
-    let base = a0.rsplit('/').next().unwrap_or(a0);
-    (base.starts_with("arbx") || base.starts_with("arb-lab")) && argv.iter().skip(1).any(|a| a == "run")
+    let base = |a: &String| a.rsplit('/').next().unwrap_or(a).to_string();
+    let runs = argv.iter().skip(1).any(|a| a == "run");
+    let b0 = base(a0);
+    if (b0.starts_with("arbx") || b0.starts_with("arb-lab")) && runs { return true; }
+    // WP-07 (review #14): arbed's bot, `bun bin/arbed.ts run ...` under pm2 (`arbed-live`), on the same frz keystore and the
+    // same Haan token: its script is one of the first arguments
+    runs && argv.iter().take(3).any(|a| base(a).starts_with("arbed"))
 }
 
 /// What may hold the provider now (review WP-03 #4 ii): a live control socket of a segment under `out_dir`
@@ -257,6 +262,16 @@ pub fn busy(out_dir: &std::path::Path, procs: bool) -> Vec<String> {
         }
     }
     out
+}
+
+/// Whether something holds the campaign supervisor's lock in `out_dir` now (WP-07: a campaign's live or canary segment
+/// runs only while its supervisor holds it). False when the lock file cannot be opened
+pub fn lock_held(out_dir: &std::path::Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(out_dir.join(".supervisor.lock")) else { return false };
+    let free = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
+    if free { unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_UN); } }
+    !free
 }
 
 /// The campaign supervisor's lock (`<out_dir>/.supervisor.lock`, deploy/run-w.sh), taken for the probe's duration so
@@ -454,6 +469,10 @@ mod tests {
         assert!(is_bot_run(&s(&["/root/arbx/runs/c1/arbx-1a2b3c4d", "run", "--campaign-dir", "c"])));
         assert!(is_bot_run(&s(&["./arb-lab", "run", "--config", "arb.toml"])));
         assert!(!is_bot_run(&s(&["arbx", "grpc-probe", "--config", "x"])) && !is_bot_run(&s(&["vim", "run"])) && !is_bot_run(&[]));
+        // WP-07 (review #14): arbed's bot under pm2, on the same frz keystore and Haan token
+        assert!(is_bot_run(&s(&["bun", "bin/arbed.ts", "run", "--live", "--stop-after-wins", "1", "--profile", "winning"])));
+        assert!(is_bot_run(&s(&["/root/.bun/bin/bun", "/root/arbed/bin/arbed.ts", "run"])));
+        assert!(!is_bot_run(&s(&["bun", "bin/arbed.ts", "report"])) && !is_bot_run(&s(&["bun", "run", "build"])));
         let out = std::env::temp_dir().join(format!("arbx-probe-busy-{}-{}", std::process::id(), now_ns()));
         let (live, stale) = (out.join("camp").join("camp-p1"), out.join("seg-old"));
         std::fs::create_dir_all(&live).unwrap();
