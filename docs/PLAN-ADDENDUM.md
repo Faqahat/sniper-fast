@@ -357,3 +357,4 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
 - An off-chain quote path is required (Jupiter/DFlow quote API, or self-hosted routing). Quotes are journaled as inputs so the replay stays exact.
 - Expected value: broad coverage of long-tail venues. The cost is quote latency (tens to hundreds of ms), so it suits slower long-tail gaps, not contested ones.
 - **Gate:** Phase A measured first. Phase B's design and the latency budget go to the owner before any upgrade.
+- **Owner, 2026-10-06 (later still):** FT-005 was shortened to 3 h. **Stage 0 closes after FT-007**, with the exit criteria measured over the canary series FT-005 + FT-006 (tips + BAM fix) + FT-007 (smaller sizes), about 9 h in total.

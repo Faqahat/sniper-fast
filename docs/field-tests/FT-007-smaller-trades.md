@@ -19,5 +19,15 @@ Same as FT-006: bundle-only, 0 failed-landing fees, every landed trade nets > 0,
 
 **Caveat:** time-separated, as FT-006.
 
+## Stage 0 exit (owner, 2026-10-06)
+Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the waived coverage gate) and the owner's trade-success criteria over the whole canary series **FT-005 + FT-006 + FT-007 (about 9 h)**:
+- every landed trade nets > 0 (0 exceptions);
+- series net ≥ 0;
+- ≥ 10 wins;
+- realised vs quoted median within ±10%;
+- win ratio per send ≥ 0.3% (stretch 0.5%);
+- bundle-only with 0 failed-landing fees;
+- reconciliation ok at every stop.
+
 ## Results
 (filled in)
