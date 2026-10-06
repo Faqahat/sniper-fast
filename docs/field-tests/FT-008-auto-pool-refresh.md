@@ -37,7 +37,18 @@ Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the wa
 - realised vs quoted median within ±10%;
 - win ratio per send ≥ 0.3% (stretch 0.5%);
 - bundle-only with 0 failed-landing fees;
-- reconciliation ok at every stop.
+- reconciliation ok at every stop;
+- **win mix (owner, 2026-10-06 evening): more wins through meme / long-tail tokens than through common tokens.**
+  - **Common tokens:**
+    - stablecoins: USDC, USDT, USD1, PYUSD;
+    - liquid-staking SOL: JitoSOL, mSOL, JupSOL, bSOL, INF;
+    - wrapped majors: WBTC, cbBTC, WETH, ZEC;
+    - protocol tokens: JUP, MET (Meteora), RAY, ORCA, JTO, PYTH, W, DRIFT, KMNO, JLP, BELIEVE.
+  - **Meme:** every other token (pump.fun, bonk.fun and other launches).
+  - **How it is counted:** each win by the token its route trades through (`route.mint` in attempts.jsonl). The exit report lists every win's token, and the mix is also reported by net.
+  - **Standing on 2026-10-06 at 18:30 UTC:**
+    - FT-005: 15 meme wins vs 39 common (USDC 28, MET 5, JUP 4, BELIEVE 1, USDT 1), but memes made 56% of the net (+125,384 of +222,873).
+    - FT-006 so far: 1 meme win vs 7 common; the one meme win (+82,773) is 82% of its net.
 
 ## Results
 (filled in)
