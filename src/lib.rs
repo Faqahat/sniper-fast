@@ -32,6 +32,7 @@ pub mod netcount;
 pub mod notify;
 pub mod pda;
 pub mod pools;
+pub mod poolrefresh;
 pub mod probe;
 pub mod proglog;
 pub mod provenance;

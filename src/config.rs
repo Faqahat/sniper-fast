@@ -91,6 +91,172 @@ pub struct Config {
     /// WP-20: `arbx watchdog` (src/watchdog.rs)
     #[serde(default)]
     pub watchdog: crate::watchdog::WatchdogCfg,
+    /// WP-22: the automatic pool refresh (src/poolrefresh.rs: `arbx pools refresh`, run by `arbx campaign` during each
+    /// segment). Off unless `enabled`; left out of the serialized config while off, so a config without it hashes as
+    /// before (meta.json `config.normalized_sha256`: replays of older runs, the campaigns' frozen-config checks)
+    #[serde(default, skip_serializing_if = "PoolRefreshCfg::off")]
+    pub pool_refresh: PoolRefreshCfg,
+}
+
+/// `[pool_refresh]` (WP-22, PLAN-ADDENDUM "WP-22: Automatic pool refresh"; FT-008). `arbx pools refresh` builds the next
+/// seed list from the current one, the previous segments' records and the public trending lists, verifying every pool
+/// it adds on chain with the engine's own decoders; `arbx campaign` runs it `lead_s` before each segment ends, so the next
+/// segment boots on the refreshed list (a per-segment file in the campaign directory, hashed in campaign.json and the
+/// segment's meta.json). It never touches the Haan gRPC stream and verifies through `rpc` (named `[[rpc.endpoint]]`s,
+/// never Haan) at most `rpc_max_rps` requests a second. A refresh that cannot verify keeps the previous list
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PoolRefreshCfg {
+    #[serde(default)]
+    pub enabled: bool,
+    /// the most seed rows the list keeps (default: the 2026-10-06 list's 1,500)
+    #[serde(default = "pr_cap")]
+    pub cap: usize,
+    /// the most pools one refresh adds
+    #[serde(default = "pr_max_adds")]
+    pub max_adds: usize,
+    /// an added WSOL-quoted pool holds at least this much WSOL in its quote vault (on chain)
+    #[serde(default = "pr_min_sol")]
+    pub min_liquidity_sol: f64,
+    /// an added USDC-quoted pool holds at least this many USDC in its quote vault (on chain)
+    #[serde(default = "pr_min_usdc")]
+    pub min_liquidity_usdc: f64,
+    /// a listed pool idle (no trigger, decision, opportunity or rival arbitrage) in this many consecutive segments it was
+    /// listed in is dropped (0: never)
+    #[serde(default = "pr_idle")]
+    pub idle_segments: u32,
+    /// the quote mints a new pool may have: "WSOL", "USDC" (the engine prices WSOL pairs only: pools.rs keeps pairs with
+    /// WSOL, so a USDC pool is dead weight until it prices USDC pairs)
+    #[serde(default = "pr_quotes")]
+    pub quotes: Vec<String>,
+    /// the sources: our own records (the segments' triggers, decisions, opportunities, rivals and exec records)
+    #[serde(default = "yes")]
+    pub records: bool,
+    /// ... GeckoTerminal's public trending_pools (5m, 1h, 6h) and new_pools
+    #[serde(default = "yes")]
+    pub geckoterminal: bool,
+    /// ... DexScreener's token-pairs for every candidate token (each token's full pool set)
+    #[serde(default = "yes")]
+    pub dexscreener: bool,
+    /// how many of the most recent segments' exec records are read for rival arbitrage on pools we do not list
+    #[serde(default = "pr_exec_segments")]
+    pub exec_segments: u32,
+    #[serde(default = "pr_gt_url")]
+    pub geckoterminal_url: String,
+    #[serde(default = "pr_ds_url")]
+    pub dexscreener_url: String,
+    /// request rates (GeckoTerminal allows about 30 a minute without a key, DexScreener's token-pairs about 300)
+    #[serde(default = "pr_gt_rpm")]
+    pub geckoterminal_per_min: u32,
+    #[serde(default = "pr_ds_rpm")]
+    pub dexscreener_per_min: u32,
+    /// the most candidate tokens looked up on DexScreener per refresh
+    #[serde(default = "pr_max_tokens")]
+    pub max_tokens: usize,
+    /// one HTTP request's timeout
+    #[serde(default = "pr_http_timeout")]
+    pub http_timeout_s: u64,
+    /// the verification RPC: `[[rpc.endpoint]]` names, tried in order (their `enabled` flag is the segments'; never Haan:
+    /// it serves the running segment)
+    #[serde(default = "pr_rpc")]
+    pub rpc: Vec<String>,
+    /// the verification RPC's own budget, requests a second (getMultipleAccounts of 100 accounts each)
+    #[serde(default = "pr_rpc_rps")]
+    pub rpc_max_rps: f64,
+    /// the campaign starts the refresh this long before a segment ends
+    #[serde(default = "pr_lead")]
+    pub lead_s: u64,
+    /// the refresh's whole budget: past it the campaign kills it and the next segment keeps the previous list
+    #[serde(default = "pr_timeout")]
+    pub timeout_s: u64,
+}
+fn pr_cap() -> usize { 1_500 }
+fn pr_max_adds() -> usize { 60 }
+fn pr_min_sol() -> f64 { 2.0 }
+fn pr_min_usdc() -> f64 { 250.0 }
+fn pr_idle() -> u32 { 4 }
+fn pr_quotes() -> Vec<String> { vec!["WSOL".into()] }
+fn pr_exec_segments() -> u32 { 1 }
+fn pr_gt_url() -> String { "https://api.geckoterminal.com/api/v2".into() }
+fn pr_ds_url() -> String { "https://api.dexscreener.com".into() }
+fn pr_gt_rpm() -> u32 { 20 }
+fn pr_ds_rpm() -> u32 { 120 }
+fn pr_max_tokens() -> usize { 80 }
+fn pr_http_timeout() -> u64 { 10 }
+fn pr_rpc() -> Vec<String> { vec!["public".into()] }
+fn pr_rpc_rps() -> f64 { 2.0 }
+fn pr_lead() -> u64 { 300 }
+fn pr_timeout() -> u64 { 240 }
+impl Default for PoolRefreshCfg {
+    fn default() -> Self {
+        PoolRefreshCfg { enabled: false, cap: pr_cap(), max_adds: pr_max_adds(), min_liquidity_sol: pr_min_sol(), min_liquidity_usdc: pr_min_usdc(), idle_segments: pr_idle(),
+            quotes: pr_quotes(), records: true, geckoterminal: true, dexscreener: true, exec_segments: pr_exec_segments(), geckoterminal_url: pr_gt_url(),
+            dexscreener_url: pr_ds_url(), geckoterminal_per_min: pr_gt_rpm(), dexscreener_per_min: pr_ds_rpm(), max_tokens: pr_max_tokens(), http_timeout_s: pr_http_timeout(),
+            rpc: pr_rpc(), rpc_max_rps: pr_rpc_rps(), lead_s: pr_lead(), timeout_s: pr_timeout() }
+    }
+}
+impl PoolRefreshCfg {
+    /// off: the list is the config's `[pools] seed_csv` for every segment, as before WP-22
+    pub fn off(&self) -> bool { !self.enabled }
+    /// what `Config::check` refuses (`rpc`: the config's providers, so a name must be one of them and none Haan's)
+    pub fn check(&self, rpc: &RpcCfg) -> Result<(), String> {
+        let e = |m: String| Err(format!("[pool_refresh] {m}"));
+        if !(2..=20_000).contains(&self.cap) { return e(format!("cap {}: 2..20000 seed rows", self.cap)); }
+        if self.max_adds > self.cap { return e(format!("max_adds {} is above cap {}", self.max_adds, self.cap)); }
+        for (k, v) in [("min_liquidity_sol", self.min_liquidity_sol), ("min_liquidity_usdc", self.min_liquidity_usdc)] {
+            if !v.is_finite() || v < 0.0 { return e(format!("{k} {v}: an amount >= 0")); }
+        }
+        if self.quotes.is_empty() || self.quotes.iter().any(|q| !["WSOL", "USDC"].contains(&q.as_str())) { return e(format!("quotes {:?}: \"WSOL\" and/or \"USDC\"", self.quotes)); }
+        for (k, u) in [("geckoterminal_url", &self.geckoterminal_url), ("dexscreener_url", &self.dexscreener_url)] {
+            if !u.starts_with("https://") { return e(format!("{k} {u:?}: an https:// URL")); }
+        }
+        if self.geckoterminal_per_min == 0 || self.geckoterminal_per_min > 30 { return e(format!("geckoterminal_per_min {}: 1..30 (its public limit)", self.geckoterminal_per_min)); }
+        if self.dexscreener_per_min == 0 || self.dexscreener_per_min > 300 { return e(format!("dexscreener_per_min {}: 1..300 (its public limit)", self.dexscreener_per_min)); }
+        if !(1..=60).contains(&self.http_timeout_s) { return e(format!("http_timeout_s {}: 1..60", self.http_timeout_s)); }
+        if !self.rpc_max_rps.is_finite() || !(0.1..=10.0).contains(&self.rpc_max_rps) { return e(format!("rpc_max_rps {}: 0.1..10 requests a second", self.rpc_max_rps)); }
+        if self.rpc.is_empty() { return e("rpc: name at least one [[rpc.endpoint]] for the verification".into()); }
+        // review #8: Haan by name, by host (any case), or by the variables its endpoints read
+        let is_haan = |x: &RpcEndpointCfg| x.name.to_ascii_lowercase().contains("haan")
+            || x.url.as_deref().and_then(crate::rpc::url_host).is_some_and(|h| h.to_ascii_lowercase().contains("haandigital"));
+        let haan_env: Vec<&str> = rpc.endpoints.iter().filter(|x| is_haan(x)).flat_map(|x| [x.url_env.as_deref(), x.bearer_env.as_deref()]).flatten().collect();
+        let haan_var = |v: &Option<String>| v.as_deref().is_some_and(|v| v.to_ascii_uppercase().contains("HAAN") || haan_env.contains(&v));
+        for n in &self.rpc {
+            let Some(ep) = rpc.endpoints.iter().find(|x| &x.name == n) else { return e(format!("rpc {n:?}: no [[rpc.endpoint]] of that name")) };
+            if is_haan(ep) || haan_var(&ep.url_env) || haan_var(&ep.bearer_env) {
+                return e(format!("rpc {n:?}: never Haan (it serves the running segment: its RPC budget and its one gRPC stream)"));
+            }
+        }
+        if self.timeout_s < 30 { return e(format!("timeout_s {}: at least 30", self.timeout_s)); }
+        if self.lead_s <= self.timeout_s { return e(format!("lead_s {} must be above timeout_s {} (the refresh ends before its segment)", self.lead_s, self.timeout_s)); }
+        Ok(())
+    }
+    /// Review #8: the environment variables the verification endpoints read (`url_env`, `bearer_env`, `${VAR}` in a URL):
+    /// the only ones a refresh loads from the .env
+    pub fn env_names(&self, rpc: &RpcCfg) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for ep in rpc.endpoints.iter().filter(|x| self.rpc.contains(&x.name)) {
+            for v in [&ep.url_env, &ep.bearer_env].into_iter().flatten() { if !out.contains(v) { out.push(v.clone()); } }
+            let mut rest = ep.url.as_deref().unwrap_or("");
+            while let Some(i) = rest.find("${") {
+                let Some(j) = rest[i..].find('}') else { break };
+                let v = rest[i + 2..i + j].to_string();
+                if !v.is_empty() && !out.contains(&v) { out.push(v); }
+                rest = &rest[i + j + 1..];
+            }
+        }
+        out
+    }
+    /// `arbx check`'s line
+    pub fn describe(&self) -> String {
+        if !self.enabled { return "pool refresh (WP-22): off (every segment boots on [pools] seed_csv)".into(); }
+        let src: Vec<&str> = [("records", self.records), ("geckoterminal", self.geckoterminal), ("dexscreener", self.dexscreener)].iter().filter(|x| x.1).map(|x| x.0).collect();
+        format!("pool refresh (WP-22): on: a refresh {} s before each segment ends (killed after {} s: the previous list stays); cap {} pools, at most {} added a refresh; \
+            a token needs 2+ verified pools of one quote ({}); added pools hold >= {} SOL / {} USDC on the quote side; listed pools idle {} segments dropped; sources {}; \
+            verification RPC {:?} at most {} req/s (never Haan); GeckoTerminal {}/min, DexScreener {}/min for at most {} tokens, HTTP timeout {} s",
+            self.lead_s, self.timeout_s, self.cap, self.max_adds, self.quotes.join("/"), self.min_liquidity_sol, self.min_liquidity_usdc,
+            if self.idle_segments == 0 { "never".to_string() } else { self.idle_segments.to_string() }, if src.is_empty() { "none".to_string() } else { src.join("+") },
+            self.rpc, self.rpc_max_rps, self.geckoterminal_per_min, self.dexscreener_per_min, self.max_tokens, self.http_timeout_s)
+    }
 }
 
 /// `[bands]` (PLAN WP-06 item 8, F22): four increasing edges over the expected edge (gross − base fee), bands 0-4; 3 and
@@ -1547,6 +1713,8 @@ impl Config {
             if !["jito", "bam", "other", "unknown"].contains(&k.as_str()) { bail!("[send_policy] skip_leader_kinds: {k:?} is not a leader kind (jito, bam, other, unknown)"); }
         }
         sp.bam.check().map_err(|e| anyhow::anyhow!(e))?;
+        // WP-22: the pool refresh's policy (only when on: off, it is not serialized and changes nothing)
+        if cfg.pool_refresh.enabled { cfg.pool_refresh.check(&cfg.rpc).map_err(|e| anyhow::anyhow!(e))?; }
         // WP-06: [bands], [tips], [builder]
         crate::tip::TipModel::from_cfg(&cfg).map_err(|e| anyhow::anyhow!(e))?;
         let b = &cfg.builder;

@@ -59,7 +59,76 @@ impl Child for FakeChild {
 }
 
 struct FakeRunner { scripts: std::collections::VecDeque<Script>, runs: PathBuf, camp: String, clock: Rc<FakeClock>, log: Log, specs: Vec<Spec>, ctl: Vec<(String, String)>,
-    stopped: Rc<Cell<bool>>, busy: Vec<Vec<String>>, stubborn: bool, signals: Rc<RefCell<Vec<(String, i32, u64)>>> }
+    stopped: Rc<Cell<bool>>, busy: Vec<Vec<String>>, stubborn: bool, signals: Rc<RefCell<Vec<(String, i32, u64)>>>,
+    /// WP-22: what each pool refresh does, in order, and the refreshes started (the job, when); a flag its kill sets
+    refreshes: std::collections::VecDeque<RefreshEnd>, jobs: Vec<(RefreshJob, u64)>, stop_on_kill: Option<Arc<AtomicBool>> }
+
+/// how a fake pool refresh ends (WP-22): after `secs`, a new list (its pools), the previous list kept, no report at
+/// all; or never (killed)
+/// (review #4: a list whose hash is not the report's, a report for another segment, a refresh that cannot start, one
+/// that crashes; one that hangs and writes its staging file after its SIGKILL)
+#[derive(Clone)]
+enum RefreshEnd { Ok(u64, Vec<u8>), Kept(u64), NoReport(u64), Hang, BadHash(u64), WrongSegment(u64), NoStart, Crash(u64), HangLateWriter }
+
+struct FakeRefresh { job: RefreshJob, start: u64, end: RefreshEnd, clock: Rc<FakeClock>, killed: bool, done: bool, signals: Rc<RefCell<Vec<(String, i32, u64)>>>,
+    /// set when it is killed (a stop that arrives at the segments' boundary, review #11)
+    stop_on_kill: Option<Arc<AtomicBool>> }
+impl Child for FakeRefresh {
+    fn pid(&self) -> u32 { 9_000 }
+    fn try_wait(&mut self) -> Result<Option<i32>> {
+        if self.killed { return Ok(Some(128 + libc::SIGKILL)); }
+        let secs = match &self.end {
+            RefreshEnd::Ok(s, _) | RefreshEnd::Kept(s) | RefreshEnd::NoReport(s) | RefreshEnd::BadHash(s) | RefreshEnd::WrongSegment(s) | RefreshEnd::Crash(s) => *s,
+            RefreshEnd::Hang | RefreshEnd::HangLateWriter | RefreshEnd::NoStart => return Ok(None),
+        };
+        if self.clock.now_ns() < self.start + secs * 1_000_000_000 { return Ok(None); }
+        if !self.done {
+            self.done = true;
+            let rep = |status: &str, body: &[u8], extra: Value| {
+                let mut r = json!({ "schema": crate::poolrefresh::SCHEMA, "segment": self.job.segment, "status": status, "reason": if status == "ok" { Value::Null } else { json!("the RPC refused (test)") },
+                    "duration_ms": secs * 1000, "out": { "sha256": crate::provenance::sha256_hex(body) }, "counts": { "added": 2, "dropped": 1, "kept": 1, "kept_active": 1, "kept_idle": 0, "rows": 3 },
+                    "top_tokens": [{ "token": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F", "symbol": "BINDER", "pools": 2 }] });
+                if let (Some(o), Some(e)) = (r.as_object_mut(), extra.as_object()) { for (k, v) in e { o.insert(k.clone(), v.clone()); } }
+                std::fs::write(&self.job.report, r.to_string()).unwrap();
+            };
+            match &self.end {
+                RefreshEnd::Ok(_, n) => {
+                    let body: String = std::iter::once("venue,pool,source".to_string()).chain(n.iter().map(|x| format!("DLMM,{},wp22:gt:{}", crate::tx::b58(&[*x; 32]), self.job.segment)))
+                        .collect::<Vec<_>>().join("\n") + "\n";
+                    std::fs::write(&self.job.out, &body).unwrap();
+                    rep("ok", body.as_bytes(), json!({}));
+                }
+                RefreshEnd::Kept(_) => {
+                    let body = std::fs::read(&self.job.current).unwrap();
+                    std::fs::write(&self.job.out, &body).unwrap();
+                    rep("kept_previous", &body, json!({}));
+                }
+                RefreshEnd::BadHash(_) => {
+                    std::fs::write(&self.job.out, "venue,pool,source\nDLMM,11111111111111111111111111111112,x\n").unwrap();
+                    rep("ok", b"another list", json!({}));
+                }
+                RefreshEnd::WrongSegment(_) => {
+                    let body = std::fs::read(&self.job.current).unwrap();
+                    std::fs::write(&self.job.out, &body).unwrap();
+                    rep("ok", &body, json!({ "segment": "c-p99" }));
+                }
+                // a panic halfway through writing (no rename: the staging file is a fragment, no report)
+                RefreshEnd::Crash(_) => std::fs::write(&self.job.out, "venue,pool,sou").unwrap(),
+                _ => {}
+            }
+        }
+        Ok(Some(match self.end { RefreshEnd::Ok(..) | RefreshEnd::BadHash(_) | RefreshEnd::WrongSegment(_) => 0, RefreshEnd::Crash(_) => 101, _ => 3 }))
+    }
+    fn signal(&mut self, sig: i32) {
+        self.signals.borrow_mut().push((format!("refresh {}", self.job.segment), sig, self.clock.now_ns()));
+        if sig == libc::SIGKILL {
+            self.killed = true;
+            // review #6: a refresh whose last rename lands after its kill touches only its staging file
+            if matches!(self.end, RefreshEnd::HangLateWriter) { std::fs::write(&self.job.out, "venue,pool,source\nDLMM,late,x\n").unwrap(); }
+            if let Some(f) = &self.stop_on_kill { f.store(true, Ordering::Relaxed); }
+        }
+    }
+}
 impl Runner for FakeRunner {
     fn start(&mut self, spec: &Spec) -> Result<Box<dyn Child>> {
         let now = self.clock.now_ns();
@@ -84,6 +153,14 @@ impl Runner for FakeRunner {
     }
     fn busy(&self) -> Vec<String> { self.busy.first().cloned().unwrap_or_default() }
     fn free_gb(&self) -> Option<f64> { Some(100.0) }
+    fn refresh(&mut self, job: &RefreshJob) -> Result<Box<dyn Child>> {
+        let now = self.clock.now_ns();
+        self.jobs.push((job.clone(), now));
+        let end = self.refreshes.pop_front().expect("a refresh script for every refresh");
+        if matches!(end, RefreshEnd::NoStart) { anyhow::bail!("fork: Resource temporarily unavailable (test)"); }
+        Ok(Box::new(FakeRefresh { job: job.clone(), start: now, end, clock: self.clock.clone(), killed: false, done: false, signals: self.signals.clone(),
+            stop_on_kill: self.stop_on_kill.clone() }))
+    }
 }
 
 fn snap(t: u64, slot: u64, sol: u64, wsol: u64) -> Snapshot { Snapshot { t_ns: t, slot, sol, wsol, rent_recoverable: 4_078_560, ..Default::default() } }
@@ -114,7 +191,7 @@ fn rig(tag: &str, mode: Mode, hours: f64, scripts: Vec<Script>) -> Rig {
     let clock = Rc::new(FakeClock { t: Cell::new(T0) });
     let log: Log = Default::default();
     let runner = FakeRunner { scripts: scripts.into(), runs: runs.clone(), camp: "c".into(), clock: clock.clone(), log: log.clone(), specs: vec![], ctl: vec![],
-        stopped: Rc::new(Cell::new(false)), busy: vec![], stubborn: false, signals: Default::default() };
+        stopped: Rc::new(Cell::new(false)), busy: vec![], stubborn: false, signals: Default::default(), refreshes: Default::default(), jobs: vec![], stop_on_kill: None };
     Rig { camp, runner, clock, root, log }
 }
 impl Rig {
@@ -302,9 +379,16 @@ fn segments_wait_for_the_previous_process_to_exit() {
 fn the_segments_command_line() {
     let p = ProcessRunner { bin: "/r/c/arbx-12345678".into(), config: "/r/c/config.frozen.toml".into(), dir: "/r/c".into(), runs: "/r".into(), env_file: "/root/arbx/deploy/.env".into(),
         drain_s: 60, pass: None, force: false };
-    let s = Spec { index: 2, name: "c-p2".into(), dir: "/r/c/c-p2".into(), minutes: 60.0, flag: Some("--canary"), budget_left: Some(22_000_000), equity_floor: Some(380_500_000), why_shadow: None };
+    let s = Spec { index: 2, name: "c-p2".into(), dir: "/r/c/c-p2".into(), minutes: 60.0, flag: Some("--canary"), budget_left: Some(22_000_000), equity_floor: Some(380_500_000), why_shadow: None, pools_csv: None };
     assert_eq!(p.args(&s).join(" "), "run --config /r/c/config.frozen.toml --minutes 60 --name c-p2 --campaign-dir /r/c --env-file /root/arbx/deploy/.env --drain-s 60 \
 --budget-left 22000000 --equity-floor 380500000 --canary");
+    // WP-22: a segment's own list, and the refresh's command line (the frozen config and binary, the campaign's records)
+    let s = Spec { pools_csv: Some("/r/c/pools-c-p2.csv".into()), ..s };
+    assert!(p.args(&s).join(" ").ends_with("--equity-floor 380500000 --pools-csv /r/c/pools-c-p2.csv --canary"));
+    let j = RefreshJob { segment: "c-p3".into(), current: "/r/c/pools-c-p2.csv".into(), out: "/r/c/pools-c-p3.refresh.csv".into(), report: "/r/c/pool-refresh-c-p3.json".into(),
+        log: "/r/c/pool-refresh-c-p3.out".into(), deadline_s: 225, segment_min: 30.0 };
+    assert_eq!(p.refresh_args(&j).join(" "), "pools refresh --config /r/c/config.frozen.toml --current /r/c/pools-c-p2.csv --runs /r/c --out /r/c/pools-c-p3.refresh.csv \
+--report /r/c/pool-refresh-c-p3.json --env-file /root/arbx/deploy/.env --segment c-p3 --deadline-s 225 --segment-min 30");
     assert_eq!(Mode::parse("dry-run"), Some(Mode::DryRun));
     assert!(Mode::Canary.sends() && !Mode::DryRun.sends());
     assert_eq!(iso(T0), "2027-01-15T08:00:00Z");
@@ -401,4 +485,185 @@ fn integ_the_campaign_tells_its_start_and_its_end() {
     notify::notify(notify::now(Level::Info, "campaign_start", "campaign", "integ-c-later", "after the end", json!({})));
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(fake.n(), before);
+}
+
+/// WP-22, the campaign boundary: with the pool refresh on, each segment boots on its own list in the campaign directory
+/// (the first a copy of the config's seed list); the refresh for the next segment starts `lead_s` before a segment ends,
+/// beside it; the next segment boots on its list once its report says ok and the file hashes as it says (p2), else on a
+/// copy of the previous list with why: the refresh kept the previous list (p3), it hung and was killed at `timeout_s`
+/// (p4). The last segment runs no refresh. Every list is hashed in campaign.json `pool_lists` and the segment's entry;
+/// each refresh is an events.jsonl `pool_refresh` event and one notice (Info when used, Warn when not). The gap between
+/// segments does not grow. The seed list is the one data file allowed to change; the others are still checked
+#[test]
+fn wp22_each_segment_boots_on_its_refreshed_list() {
+    let scripts: Vec<Script> = (0..4).map(|_| script(30, 0, "deadline", |_, _| {})).collect();
+    let mut r = rig("wp22", Mode::Canary, 2.0, scripts);
+    r.camp.segment_min = 30.0;
+    let seed = r.root.join("seed.csv");
+    let other = r.root.join("registry.json");
+    std::fs::write(&seed, format!("venue,pool,source\nDLMM,{},mriya\n", crate::tx::b58(&[1; 32]))).unwrap();
+    std::fs::write(&other, "[]").unwrap();
+    r.camp.seed_csv = seed.clone();
+    r.camp.refresh = Some(crate::config::PoolRefreshCfg { enabled: true, lead_s: 300, timeout_s: 240, ..Default::default() });
+    let mut m = serde_json::Map::new();
+    for f in [&seed, &other] { m.insert(f.display().to_string(), json!(crate::provenance::sha256_hex(&std::fs::read(f).unwrap()))); }
+    r.camp.state["data_files"] = Value::Object(m);
+    r.runner.refreshes = vec![RefreshEnd::Ok(60, vec![1, 2, 3]), RefreshEnd::Kept(30), RefreshEnd::Hang].into();
+    // mid-campaign, both data files change: only the registry's change is reported (the seed list is per segment now)
+    let (s2, o2) = (seed.clone(), other.clone());
+    r.runner.scripts[0].files = Box::new(move |_, _| { std::fs::write(&s2, "venue,pool,source\n").unwrap(); std::fs::write(&o2, "[1]").unwrap(); });
+    let (why, notes) = notify::capture(|| r.run());
+    assert_eq!(why, "time up");
+    let dir = r.camp.dir.clone();
+    let lists: Vec<PathBuf> = r.runner.specs.iter().map(|s| s.pools_csv.clone().unwrap()).collect();
+    assert_eq!(lists, (1..=4).map(|i| dir.join(format!("pools-c-p{i}.csv"))).collect::<Vec<_>>(), "each segment its own list");
+    let body = |p: &Path| std::fs::read(p).unwrap();
+    assert_eq!(body(&lists[0]), format!("venue,pool,source\nDLMM,{},mriya\n", crate::tx::b58(&[1; 32])).into_bytes(), "p1: the config's list as it was at the start");
+    assert!(String::from_utf8(body(&lists[1])).unwrap().contains(&format!("{},wp22:gt:c-p2", crate::tx::b58(&[3; 32]))), "p2: the refreshed list");
+    assert_eq!(body(&lists[2]), body(&lists[1]), "p3: the refresh kept the previous list");
+    assert_eq!(body(&lists[3]), body(&lists[2]), "p4: the refresh hung: the previous list");
+    // the refreshes: during p1, p2, p3 (not p4: no next segment), each `lead_s` before its segment's end, for the next one
+    let starts: Vec<u64> = r.log.borrow().iter().filter(|x| x.0 == "start").map(|x| x.2).collect();
+    assert_eq!(r.runner.jobs.iter().map(|(j, _)| j.segment.as_str()).collect::<Vec<_>>(), ["c-p2", "c-p3", "c-p4"]);
+    for (i, (j, t)) in r.runner.jobs.iter().enumerate() {
+        assert_eq!((t - starts[i]) / M, 25, "{} started 25 min into its segment", j.segment);
+        assert_eq!(j.current, lists[i]);
+        assert_eq!(j.out, dir.join(format!("pools-c-p{}.refresh.csv", i + 2)), "the refresh writes a staging file, never the list a segment boots from");
+        assert_eq!(j.segment_min, 30.0);
+    }
+    let kills: Vec<(String, i32, u64)> = r.runner.signals.borrow().iter().filter(|x| x.0.starts_with("refresh")).cloned().collect();
+    assert_eq!(kills.len(), 1, "{kills:?}");
+    assert_eq!((kills[0].0.as_str(), kills[0].1, (kills[0].2 - r.runner.jobs[2].1) / 1_000_000_000), ("refresh c-p4", libc::SIGKILL, 240), "killed at timeout_s");
+    // no gap added: each segment starts as soon as the previous one exited
+    let log = r.log.borrow().clone();
+    for w in log.windows(2).filter(|w| w[0].0 == "exited") { assert!(w[1].2 - w[0].2 <= M, "{w:?}"); }
+    // recorded: campaign.json `pool_lists` and each segment's list and hash
+    let c = r.json("campaign.json");
+    let pl = c["pool_lists"].as_array().unwrap();
+    assert_eq!(pl.iter().map(|x| x["source"].as_str().unwrap()).collect::<Vec<_>>(), ["config", "refresh", "previous", "previous"]);
+    for (i, x) in pl.iter().enumerate() {
+        assert_eq!(x["sha256"].as_str(), Some(crate::provenance::sha256_hex(&body(&lists[i])).as_str()));
+        assert_eq!(c["segments"][i]["pools_csv_sha256"], x["sha256"]);
+        assert_eq!(c["segments"][i]["pools_csv"].as_str(), Some(lists[i].display().to_string().as_str()));
+    }
+    assert_eq!(pl[1]["counts"]["added"].as_u64(), Some(2));
+    assert!(pl[2]["reason"].as_str().unwrap().contains("kept the previous list"), "{}", pl[2]);
+    assert!(pl[3]["reason"].as_str().unwrap().contains("did not finish in time"), "{}", pl[3]);
+    assert!(c["pool_refresh"]["policy"]["enabled"].as_bool().unwrap());
+    let ev: Vec<Value> = r.events().into_iter().filter(|e| e["kind"] == "pool_refresh").collect();
+    assert_eq!(ev.len(), 3);
+    let pn: Vec<(Level, String)> = notes.iter().filter(|n| n.kind == "pool_refresh").map(|n| (n.level, n.subject.clone())).collect();
+    assert_eq!(pn, [(Level::Info, "c-p2".to_string()), (Level::Warn, "c-p3".to_string()), (Level::Warn, "c-p4".to_string())]);
+    let t = notes.iter().find(|n| n.kind == "pool_refresh").unwrap();
+    assert!(t.text.contains("pool refresh for c-p2: +2 added, -1 dropped") && t.text.contains("BINDER (2)"), "{}", t.text);
+    let changed: Vec<String> = c["data_files_changed"].as_array().unwrap().iter().map(|x| x["path"].as_str().unwrap().to_string()).collect();
+    assert_eq!(changed, [other.display().to_string()], "the seed list may change; the registry may not");
+}
+
+/// WP-22: a refresh that wrote no report, or one whose list does not hash as its report says, is not used; a segment
+/// that ends before its refresh's lead time leaves the next one on the previous list (with why); the refresh off, the
+/// segments run the config's list (no --pools-csv)
+#[test]
+fn wp22_an_unusable_refresh_keeps_the_previous_list() {
+    let mut r = rig("wp22b", Mode::Shadow, 2.0, vec![script(30, 0, "deadline", |_, _| {}), script(10, 0, "deadline", |_, _| {}), script(30, 0, "deadline", |_, _| {})]);
+    r.camp.segment_min = 30.0;
+    r.camp.max_segments = Some(3);
+    let seed = r.root.join("seed.csv");
+    std::fs::write(&seed, format!("venue,pool,source\nDLMM,{},mriya\n", crate::tx::b58(&[1; 32]))).unwrap();
+    r.camp.seed_csv = seed;
+    r.camp.refresh = Some(crate::config::PoolRefreshCfg { enabled: true, lead_s: 300, timeout_s: 240, ..Default::default() });
+    r.runner.refreshes = vec![RefreshEnd::NoReport(20)].into();
+    let _ = r.run();
+    let c = r.json("campaign.json");
+    let pl = c["pool_lists"].as_array().unwrap();
+    assert_eq!(pl.iter().map(|x| x["source"].as_str().unwrap()).collect::<Vec<_>>(), ["config", "previous", "previous"]);
+    assert!(pl[1]["reason"].as_str().unwrap().contains("wrote no report"), "{}", pl[1]);
+    assert!(pl[2]["reason"].as_str().unwrap().contains("no refresh ran"), "p2 ended after 10 min, before its lead time: {}", pl[2]);
+    assert_eq!(r.runner.jobs.len(), 1);
+    // off: no list of its own
+    let mut r = rig("wp22c", Mode::Shadow, 1.0, vec![script(60, 0, "deadline", |_, _| {})]);
+    r.run();
+    assert_eq!(r.runner.specs[0].pools_csv, None);
+    assert!(r.json("campaign.json").get("pool_lists").is_none());
+}
+
+/// a WP-22 campaign rig: 30-minute segments, the refresh on (lead 300 s, timeout 240 s), a one-pool seed list
+fn wp22_rig(tag: &str, hours: f64, scripts: Vec<Script>, refreshes: Vec<RefreshEnd>) -> Rig {
+    let mut r = rig(tag, Mode::Shadow, hours, scripts);
+    r.camp.segment_min = 30.0;
+    let seed = r.root.join("seed.csv");
+    std::fs::write(&seed, format!("venue,pool,source\nDLMM,{},mriya\n", crate::tx::b58(&[1; 32]))).unwrap();
+    r.camp.seed_csv = seed;
+    r.camp.refresh = Some(crate::config::PoolRefreshCfg { enabled: true, lead_s: 300, timeout_s: 240, ..Default::default() });
+    r.runner.refreshes = refreshes.into();
+    r
+}
+
+/// Review #4: every way a refresh can fail leaves the next segment on a checked copy of the previous list, with why: a
+/// list that does not hash as its report says, a report for another segment, a refresh that cannot start, one that
+/// crashes (exit 101, a fragment of a staging file, no report). The file a segment boots from is only ever the
+/// campaign's copy
+#[test]
+fn wp22_failed_refreshes_leave_the_previous_list() {
+    let scripts: Vec<Script> = (0..5).map(|_| script(30, 0, "deadline", |_, _| {})).collect();
+    let mut r = wp22_rig("wp22f", 2.5, scripts, vec![RefreshEnd::BadHash(60), RefreshEnd::WrongSegment(60), RefreshEnd::NoStart, RefreshEnd::Crash(60)]);
+    let (why, notes) = notify::capture(|| r.run());
+    assert_eq!(why, "time up");
+    assert_eq!(r.runner.specs.len(), 5);
+    let c = r.json("campaign.json");
+    let pl = c["pool_lists"].as_array().unwrap();
+    assert_eq!(pl.iter().map(|x| x["source"].as_str().unwrap()).collect::<Vec<_>>(), ["config", "previous", "previous", "previous", "previous"]);
+    let reason = |i: usize| pl[i]["reason"].as_str().unwrap().to_string();
+    assert!(reason(1).contains("the refreshed list does not check") && reason(1).contains("is not the report's"), "{}", reason(1));
+    assert!(reason(2).contains("the report is for c-p99"), "{}", reason(2));
+    assert!(reason(3).contains("the refresh could not start: fork"), "{}", reason(3));
+    assert!(reason(4).contains("the refresh wrote no report (exit Some(101)"), "{}", reason(4));
+    let first = std::fs::read(r.camp.dir.join("pools-c-p1.csv")).unwrap();
+    for i in 2..=5 { assert_eq!(std::fs::read(r.camp.dir.join(format!("pools-c-p{i}.csv"))).unwrap(), first, "p{i} boots on the previous list"); }
+    assert_eq!(std::fs::read_to_string(r.camp.dir.join("pools-c-p5.refresh.csv")).unwrap(), "venue,pool,sou", "the crash left only its staging file");
+    assert_eq!(notes.iter().filter(|n| n.kind == "pool_refresh" && n.level == Level::Warn).count(), 4);
+}
+
+/// Review #6 and #4: a refresh killed past its timeout that still writes afterwards touches only its staging file (the
+/// segment boots on the campaign's copy of the previous list); a refresh still running when the campaign ends (here a
+/// stop file during p2, after p3's refresh started) is killed by finish()
+#[test]
+fn wp22_a_killed_refresh_never_touches_the_boot_file_and_the_end_kills_one() {
+    let mut s2 = script(30, 0, "deadline", |_, _| {});
+    s2.drop_file = Some((26, "stop"));
+    let mut r = wp22_rig("wp22k", 2.0, vec![script(30, 0, "deadline", |_, _| {}), s2], vec![RefreshEnd::HangLateWriter, RefreshEnd::Hang]);
+    let why = r.run();
+    assert!(why.starts_with("stop file"), "{why}");
+    let dir = r.camp.dir.clone();
+    assert_eq!(std::fs::read(dir.join("pools-c-p2.csv")).unwrap(), std::fs::read(dir.join("pools-c-p1.csv")).unwrap(), "p2: the previous list, not the late write");
+    assert!(std::fs::read_to_string(dir.join("pools-c-p2.refresh.csv")).unwrap().contains("late"), "the late write landed in the staging file only");
+    let c = r.json("campaign.json");
+    assert!(c["pool_lists"][1]["reason"].as_str().unwrap().contains("did not finish in time"), "{}", c["pool_lists"][1]);
+    let kills: Vec<(String, i32, u64)> = r.runner.signals.borrow().iter().filter(|x| x.0.starts_with("refresh")).cloned().collect();
+    assert_eq!(kills.iter().map(|x| (x.0.as_str(), x.1)).collect::<Vec<_>>(), [("refresh c-p2", libc::SIGKILL), ("refresh c-p3", libc::SIGKILL)]);
+    let p3_job = r.runner.jobs[1].1;
+    assert!(kills[1].2 > p3_job && (kills[1].2 - p3_job) / 1_000_000_000 < 240, "c-p3's refresh: killed by the campaign's end, before its own timeout");
+}
+
+/// Review #11 and #5: after a crash the boundary does not wait for the refresh (it is killed at once); a segment that
+/// crashed on a refreshed list sends the next one to the last list a segment ran on without crashing; and a stop that
+/// arrives during the boundary (here with that kill) starts no further segment
+#[test]
+fn wp22_a_crash_and_a_stop_at_the_boundary() {
+    let scripts = vec![script(30, 0, "deadline", |_, _| {}), script(27, 1, "panic", |_, _| {}), script(30, 0, "deadline", |_, _| {})];
+    let mut r = wp22_rig("wp22c", 2.0, scripts, vec![RefreshEnd::Ok(60, vec![1, 2, 3]), RefreshEnd::Hang]);
+    r.runner.stop_on_kill = Some(r.camp.stop.clone());
+    let why = r.run();
+    assert_eq!(why, "signal: the supervisor was asked to stop");
+    assert_eq!(r.runner.specs.len(), 2, "no segment starts after a stop at the boundary");
+    let log = r.log.borrow().clone();
+    let crash_exit = log.iter().filter(|x| x.0 == "exited").nth(1).unwrap().2;
+    let kills: Vec<(String, i32, u64)> = r.runner.signals.borrow().iter().filter(|x| x.0.starts_with("refresh")).cloned().collect();
+    assert_eq!((kills[0].0.as_str(), kills[0].1), ("refresh c-p3", libc::SIGKILL));
+    assert!(kills[0].2 - crash_exit <= 11_000_000_000, "killed at once after the crash (the 10 s backoff only), not after a 45 s wait");
+    let c = r.json("campaign.json");
+    let pl = c["pool_lists"].as_array().unwrap();
+    assert_eq!(pl.iter().map(|x| x["source"].as_str().unwrap()).collect::<Vec<_>>(), ["config", "refresh", "last_good"]);
+    assert!(pl[2]["reason"].as_str().unwrap().contains("crashed on its refreshed list"), "{}", pl[2]);
+    assert_eq!(std::fs::read(r.camp.dir.join("pools-c-p3.csv")).unwrap(), std::fs::read(r.camp.dir.join("pools-c-p1.csv")).unwrap(), "p3's list is p1's");
 }
