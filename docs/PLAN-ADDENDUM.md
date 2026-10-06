@@ -327,3 +327,4 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
 - **Profit is not a Stage 0 gate:** expected at this wallet size is about $0–7/day (STAGE1-PLAN).
 - **The $500 trigger:** net positive over 48 h of canary.
 - **Still open:** the exec-coverage gate (≥ 99%) needs more Haan capacity or a second provider (OD-1), or an explicit owner waiver.
+- **Owner, 2026-10-06 (later):** the Stage 0 exit canary (FT-005) runs **12 h instead of 24 h**. PLAN §6's "24 h live" gate items and the trade-success criteria are measured over the 12 h run. The $500 trigger (net positive over 48 h of canary) is unchanged.

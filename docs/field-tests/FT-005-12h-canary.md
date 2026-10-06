@@ -1,14 +1,16 @@
-# FT-005: 24 h canary on frz (Stage 0 exit)
+# FT-005: 12 h canary on frz (Stage 0 exit)
+
+> **Owner, 2026-10-06:** 12 hours instead of 24. Every "24 h" measure below now applies to the 12 h run.
 
 - **Status:** planned, after FT-004 passes.
-- **Mode:** canary under `arbx campaign` (24 h, segments of 60 min), bundle-only.
+- **Mode:** canary under `arbx campaign` (**12 h**, segments of 60 min), bundle-only.
 - **Wallet:** frz FRZh63L6….
 - **Budget allotment:** 10,000,000 lamports (0.01 SOL), within the cumulative 34,000,000 hard cap.
 - **Goal:** close Stage 0. Meet the plan's exit gate (docs/PLAN.md §6) and the owner-agreed trade-success criteria, and produce the first real numbers: win ratio per send, wins/h, net SOL/h.
 
 ## Pass/fail criteria (written before the run)
 
-### A. The plan's Stage 0 exit gate, over the 24 h
+### A. The plan's Stage 0 exit gate, over the 12 h
 - bundle-only with 0 failed-landing fees;
 - hourly reconciliation within 10k lamports;
 - no prediction pricing (≤ 0.1% `torn_suspect` sends);
@@ -28,8 +30,8 @@
 | Criterion | Pass mark |
 |---|---|
 | Every landed trade nets > 0 after fee + tip + rent | 0 exceptions (the on-chain guard makes a landed loss impossible; any loss is a bug) |
-| 24 h net (chain ledger) | ≥ 0 SOL |
-| Wins in 24 h | ≥ 10. If fewer, extend the canary rather than fail |
+| 12 h net (chain ledger) | ≥ 0 SOL |
+| Wins in 12 h | ≥ 10. If fewer, extend the canary rather than fail |
 | Realised vs quoted profit on wins | median within ±10% |
 | Win ratio per bundle sent | ≥ 0.3% (the old bot's level); stretch 0.5% |
 
