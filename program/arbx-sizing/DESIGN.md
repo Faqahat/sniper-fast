@@ -1689,8 +1689,11 @@ of redesign §3.8's "programdata change → venue to shadow".
    instructions sysvar), so the leg is refused (§2.5). Sizing it would need the sysvar in the leg first.
 8. **Account-lock limit.** Confirm the cluster's `max_tx_account_locks` before planning baskets above 64 unique keys.
 9. **Paused and default-frozen mints for kinds 1-6.** Kinds 7 and 8 refuse a paused (Pausable) or DefaultAccountState
-   Frozen Token-2022 mint (§2.0); the older kinds do not check them yet, so such a route reverts on chain instead of
-   being skipped. Adding `token::mint_blocked` to their parses needs the harness's Token-2022 states run on them.
+   Frozen Token-2022 mint (§2.0); the older kinds do not check them in the crate, so such a route would revert on chain
+   instead of being skipped. **Closed in the engine (WP-21):** its shared mint checks (`src/quote.rs` `mints_ok`, and
+   PumpSwap's base mint) apply `token::mint_blocked` to every Token-2022 mint of a kind 1-6 pool and refuse the leg
+   (`mint_paused`, `mint_frozen`; test `older_venues_refuse_paused_and_default_frozen_mints`). Moving the check into
+   the crate's parses still needs the harness's Token-2022 states run on them.
 10. **A transfer-fee rate with `maximum_fee = 0`.** `token::scan_extensions` refuses any nonzero rate, although
     Token-2022 caps the fee at `maximum_fee` and so charges nothing there. Conservative (never a wrong price); exempting
     it needs the epoch rule (the newer fee applies from its epoch) pinned in the harness first.
@@ -1700,6 +1703,10 @@ of redesign §3.8's "programdata change → venue to shadow".
 12. **Orca's U256 division.** The deployed 0.9.0 binary panics where `U256Muldiv::div`'s add-back reads past the top
     word, and the port fails there too; upstream fixed it in 4aac511 (2026-10-06) after this deploy. When Orca deploys
     a new binary the upgrade watch (§6.5) must stop the kind until the port follows it and the harness passes again.
+    The port "fails" as a refusal, never a panic: `muldiv_div` answers None there (and on a zero divisor), which a swap
+    step reads as TooLarge. The engine's test `orca_u256_division_refuses_never_panics` runs the deployed division
+    (`muldiv_div_as_deployed`) on 200,000 random and edge-limbed operands against a 256-bit reference: equal wherever it
+    answers, None otherwise (722 cases). The engine's `venue_upgraded` refusal is the upgrade watch (WP-21).
 
 ---
 
@@ -1715,7 +1722,11 @@ of redesign §3.8's "programdata change → venue to shadow".
 
 ---
 
-## 9. Engine integration of the CLMM kinds (WP-21: what it needs; not done in this step)
+## 9. Engine integration of the CLMM kinds (WP-21: what it needs)
+
+**Status (lane/wp21, 2026-10-06):** done in the engine as listed below (docs/PLAN-ADDENDUM.md WP-21 "Status, phase A").
+The deployed nexus-v2 routes both venues' `swap_v2` legs with no upgrade (its allowlist holds both programs; engine-built
+routes land through it in LiteSVM, program/venue-harness `tests/arbx_bundle_clmm.rs`).
 
 The crate side is done and proven (§2.8, §2.9, §6.3). Nothing in the engine or arbx-exec uses kinds 7 and 8 yet, and a
 default build of either is unchanged. Integrating them into the engine needs the following, per venue. On-chain sizing

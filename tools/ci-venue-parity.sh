@@ -13,10 +13,14 @@
 #      refusal checked against the venue: a false refusal fails like a mismatch), the adversarial boundary sizes and
 #      states, route and basket plans, pins and swaps, all against the dumped mainnet programs in LiteSVM;
 #   3. the engine's copy of the oracle is current: testdata/venue-parity/pools equals the harness fixtures, and
-#      testdata/venue-parity/real-swaps.json equals what `capture_post` produces from them now;
+#      testdata/venue-parity/real-swaps.json equals what `capture_post` produces from them now; PLAN-ADDENDUM WP-21: the
+#      same for the CLMM venues (pools-clmm, real-swaps-clmm.json from `capture_post --clmm`);
 #   4. the engine's parity tests on that copy (src/quote/tests.rs: its quotes against the real swaps, the differential
 #      against the legacy maths, the accuracy monitor's post-states, every refusal state, the accounts the stream
-#      follows, sizing on a recorded route).
+#      follows, sizing on a recorded route; WP-21 src/quote/clmm_tests.rs: Raydium CLMM and Orca Whirlpool quotes and
+#      post-states against the real swaps, the reasons, no panics), the builder's bundle vectors the harness ran in step 2
+#      are what it builds now (testdata/builder/bundle-vectors.json, bundle-vectors-clmm.json), and a run with CLMM
+#      pools replays identically (scenario S17).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 target() { if [ -n "${TARGET_BASE:-}" ]; then echo "$TARGET_BASE/$1"; else echo "$2/target"; fi; }
@@ -40,11 +44,14 @@ git -C "$root" diff --quiet -- program/venue-harness/results/swap-runs.json || {
 
 echo "== 3. testdata/venue-parity is the harness's oracle"
 diff -r "$harness/fixtures/pools" "$root/testdata/venue-parity/pools" || { echo "testdata/venue-parity/pools differs from the fixtures: copy them again"; exit 1; }
+diff -r "$harness/fixtures/pools-clmm" "$root/testdata/venue-parity/pools-clmm" || { echo "testdata/venue-parity/pools-clmm differs from the fixtures: copy them again"; exit 1; }
 fresh="$(mktemp)"
 trap 'rm -f "$fresh"' EXIT
 (cd "$harness" && CARGO_TARGET_DIR="$harness_t" cargo run --release --quiet --bin capture_post > "$fresh")
 cmp -s "$fresh" "$root/testdata/venue-parity/real-swaps.json" || { echo "testdata/venue-parity/real-swaps.json is stale: regenerate it with capture_post"; exit 1; }
+(cd "$harness" && CARGO_TARGET_DIR="$harness_t" cargo run --release --quiet --bin capture_post -- --clmm > "$fresh")
+cmp -s "$fresh" "$root/testdata/venue-parity/real-swaps-clmm.json" || { echo "testdata/venue-parity/real-swaps-clmm.json is stale: regenerate it with capture_post --clmm"; exit 1; }
 
 echo "== 4. the engine's parity tests"
-(cd "$root" && CARGO_TARGET_DIR="$engine_t" cargo test --release --lib quote::)
+(cd "$root" && CARGO_TARGET_DIR="$engine_t" cargo test --release --lib -- quote:: bundle_vectors scenarios::s17)
 echo "venue parity: ok"

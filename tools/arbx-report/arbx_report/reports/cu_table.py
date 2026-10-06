@@ -2,7 +2,9 @@
 `Program <id> consumed X of Y compute units` lines at the swap's invoke depth, in every watched transaction of
 `exec.jsonl` (rivals included), keyed by (venue, bins-crossed bucket). Our program's overhead = our transactions' outer
 consumption minus their legs. Cell limit = (overhead p99 + Σ leg p99 + ATA create/close + tip) × 1.10; a cell whose
-legs have fewer than 30 samples is `fallback`."""
+legs have fewer than 30 samples is `fallback`. PLAN-ADDENDUM WP-21: Raydium CLMM and Orca Whirlpool legs are keyed by
+the swap steps of the engine's walk (`steps_bucket`, the engine's `cu_table::steps_bucket`), known for our own
+transactions (the decision's route `crossed`); a third party's leg is `unk`."""
 from __future__ import annotations
 
 import re
@@ -28,6 +30,34 @@ def bins_bucket(n) -> str:
     if n <= 5:
         return "3-5"
     return "6+"
+
+
+def steps_bucket(n) -> str:
+    """A Raydium CLMM or Orca Whirlpool leg's bucket by swap steps (src/cu_table.rs `steps_bucket`)."""
+    if n is None:
+        return "unk"
+    if n <= 1:
+        return "1"
+    if n <= 3:
+        return "2-3"
+    if n <= 7:
+        return "4-7"
+    if n <= 15:
+        return "8-15"
+    return "16+"
+
+
+def leg_key(v: str, n) -> str:
+    """A leg's key in the table (src/cu_table.rs `leg_key`): DLMM by bins crossed, the CLMM venues by steps, others `na`."""
+    if v == "Dlmm":
+        return f"{v}|{bins_bucket(n)}"
+    if v in solana.CLMM_PROGRAMS.values():
+        return f"{v}|{steps_bucket(n)}"
+    return f"{v}|na"
+
+
+# every venue program the table samples
+CU_VENUES = {**solana.VENUE_PROGRAMS, **solana.CLMM_PROGRAMS}
 
 
 def parse_invocations(logs: list) -> list:
@@ -105,11 +135,11 @@ def run(seg, ctx: dict) -> dict:
             leg_i = 0
             leg_sum_by_parent: dict = {}
             for x in inv:
-                v = solana.VENUE_PROGRAMS.get(x["program"])
+                v = CU_VENUES.get(x["program"])
                 if v:
                     bc = crossed[leg_i] if (crossed and leg_i < len(crossed)) else None
                     leg_i += 1
-                    key = f"{v}|{bins_bucket(bc)}" if v == "Dlmm" else f"{v}|na"
+                    key = leg_key(v, bc)
                     legs.setdefault(key, []).append(x["consumed"])
                     if x["parent"] in ours_progs:
                         leg_sum_by_parent[x["parent"]] = leg_sum_by_parent.get(x["parent"], 0) + x["consumed"]
@@ -135,21 +165,24 @@ def run(seg, ctx: dict) -> dict:
             routes = dec.get("routes") or []
             b = dec.get("best")
             cr = routes[b].get("crossed") if (b is not None and b < len(routes)) else None
-            # the cell's bucket: the most bins any DLMM leg of the route crosses
-            dl = [c for v, c in zip((rt["buy_venue"], rt["sell_venue"]), cr or []) if v == "Dlmm"]
+            # the cell's bucket: the most bins any DLMM leg of the route crosses; WP-21: a CLMM leg's own steps bucket
+            vs = (rt["buy_venue"], rt["sell_venue"])
+            dl = [c for v, c in zip(vs, cr or []) if v == "Dlmm"]
             worst = max(dl) if dl else None
-            pairs.add((rt["buy_venue"], rt["sell_venue"], bins_bucket(worst) if "Dlmm" in (rt["buy_venue"], rt["sell_venue"]) else "na",
-                       bool((a.get("tx") or {}).get("creates_ata"))))
-    for bv, sv, bb, ata in sorted(pairs):
-        lk = [f"{v}|{bb if v == 'Dlmm' else 'na'}" for v in (bv, sv)]
+            steps = tuple(steps_bucket(c) if v in solana.CLMM_PROGRAMS.values() else None for v, c in zip(vs, list(cr or []) + [None, None]))
+            pairs.add((rt["buy_venue"], rt["sell_venue"], bins_bucket(worst) if "Dlmm" in vs else "na",
+                       bool((a.get("tx") or {}).get("creates_ata")), steps))
+    for bv, sv, bb, ata, steps in sorted(pairs, key=lambda p: (p[0], p[1], p[2], p[3], tuple(x or "" for x in p[4]))):
+        lk = [f"{v}|{st}" if st else f"{v}|{bb if v == 'Dlmm' else 'na'}" for v, st in zip((bv, sv), steps)]
         ns = [leg_stats.get(k, {}).get("n", 0) for k in lk]
         p99s = [leg_stats.get(k, {}).get("p99") for k in lk]
         ok = all(n >= MIN_SAMPLES for n in ns) and ov["p99"] is not None and None not in p99s
+        ck = f"{bv}|{sv}|{bb}|{str(ata).lower()}" + (f"|{steps[0] or '-'}/{steps[1] or '-'}" if any(steps) else "")
         if ok:
             limit = int((ov["p99"] + sum(p99s) + (extras["ata_create"] + extras["ata_close"] if ata else 0) + extras["tip"]) * MARGIN)
-            cells[f"{bv}|{sv}|{bb}|{str(ata).lower()}"] = {"limit": limit, "src": "legs", "leg_samples": ns}
+            cells[ck] = {"limit": limit, "src": "legs", "leg_samples": ns}
         else:
-            cells[f"{bv}|{sv}|{bb}|{str(ata).lower()}"] = {"limit": None, "src": "fallback", "leg_samples": ns}
+            cells[ck] = {"limit": None, "src": "fallback", "leg_samples": ns}
     # built_ns is the segment's end (not the wall clock), so the table is reproducible from the files
     d["table"] = {"schema": "arbx.cu-table/1.0", "built_ns": seg.window.get("end_ns"), "source_runs": [seg.name],
                   "legs": leg_stats, "overhead": ov,

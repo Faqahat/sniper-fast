@@ -407,6 +407,132 @@ fn clmm_quote_path_never_panics() {
     assert!(runs > 10_000 && answered > 1_000, "{runs} {answered}");
 }
 
+/// The decoders and builders of these venues never panic either (PLAN-ADDENDUM WP-21): on every fixture pool with random
+/// bytes of the pool, its extension or oracle and its tick arrays rewritten (0xFF runs, zeroes, random), and at random
+/// lengths: the registry's decoder (`pools::meta_of`), the arrays to follow (`pools::clmm_arrays`, `follow_starts`, the
+/// bitmap reads at any start), Orca's 3 arrays (`whirl_leg_starts`), the builder's legs (`build::leg`, with random tick
+/// array names), the accuracy monitor's read of a post-state (`accuracy::actual`), and a third party's swap decoded from
+/// random instruction data and account lists (`decode_pending`): each answers or refuses
+#[test]
+fn clmm_decoders_and_builders_never_panic() {
+    let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+    let mut pools: Vec<&Fx> = fixtures().values().collect();
+    pools.sort_by_key(|f| f.pool);
+    let (mut built, mut runs) = (0usize, 0usize);
+    let payer = [9u8; 32];
+    for fx in pools {
+        let m = meta(fx);
+        let base = accounts(fx, &Value::Null);
+        let arrays = followed(fx, &m, &base);
+        let mut keys: Vec<Pk> = base.keys().copied().collect();
+        keys.sort();
+        for it in 0..200 {
+            runs += 1;
+            let mut accts = base.clone();
+            for _ in 0..1 + rng.below(4) {
+                // the pool itself half the time: its fields drive every decoder
+                let k = if rng.below(2) == 0 { m.pool } else { keys[rng.below(keys.len() as u64) as usize] };
+                let mut d = accts[&k].data.to_vec();
+                if d.is_empty() { continue; }
+                match it % 4 {
+                    // a random length
+                    3 => d.truncate(rng.below(d.len() as u64 + 1) as usize),
+                    v => {
+                        let at = rng.below(d.len() as u64) as usize;
+                        let n = (1 + rng.below(16) as usize).min(d.len() - at);
+                        for b in &mut d[at..at + n] { *b = match v { 0 => 0xFF, 1 => 0, _ => rng.next() as u8 }; }
+                    }
+                }
+                accts.insert(k, Acct::rpc(Arc::from(d), fx.slot, 0, 0, asrc::RPC_BOOT));
+            }
+            let pool = accts[&m.pool].data.to_vec();
+            let _ = crate::pools::meta_of(m.venue, &m.pool, &pool);
+            let getv = |k: &Pk| accts.get(k).map(|a| a.data.to_vec());
+            let _ = crate::pools::clmm_arrays(&m, &getv, &arrays);
+            let ext = m.clmm_ext().and_then(|k| accts.get(k)).map(|a| a.data.to_vec());
+            let _ = clmm::follow_starts(&m, &pool, ext.as_deref());
+            let _ = clmm::current_array(m.venue, &pool);
+            for st in [0, i32::MIN, i32::MAX, rng.next() as i32, -443_636, 443_636] {
+                let _ = clmm::ray_array_bit(&pool, ext.as_deref(), st);
+                let _ = clmm::tick_array_pda(&m, st);
+            }
+            let _ = clmm::ray_initialized_arrays(&pool, ext.as_deref(), it % 2 == 0, 8);
+            let _ = clmm::whirl_leg_starts(&pool, it % 2 == 0);
+            // the builder: both directions, the engine's names or random ones
+            for zfo in [true, false] {
+                let (tin, tout) = if zfo { (m.t0, m.t1) } else { (m.t1, m.t0) };
+                let live: Vec<i64> = if it % 3 == 0 { (0..rng.below(9)).map(|_| rng.next() as i32 as i64).collect() } else { arrays.iter().map(|a| a.0).take(rng.below(8) as usize).collect() };
+                let li = crate::build::LegIn { m: &m, pool: &pool, tin, tout, amount_in: rng.next(), payer, pump: None, dlmm_live: &live, dlmm_end: None,
+                    dlmm_ext: m.clmm_ext().copied() };
+                if crate::build::leg(&li).is_ok() { built += 1; }
+            }
+            // the accuracy monitor reading a (mutated) post-state against a prediction made on the snapshot
+            let get0 = |k: &Pk| base.get(k);
+            let get1 = |k: &Pk| accts.get(k);
+            let v0 = accuracy::View { get: &get0, arrays: &arrays, now_unix: fx.unix, slot: fx.slot };
+            let v1 = accuracy::View { get: &get1, arrays: &arrays, now_unix: fx.unix, slot: fx.slot };
+            if let Ok((p, _)) = accuracy::predict(&m, &v0, it % 2 == 0, 1 + rng.below(1 << 36), false) {
+                let _ = accuracy::actual(&m, &v1, &p);
+                let _ = accuracy::predict(&m, &v1, it % 2 == 1, 1 + rng.below(1 << 36), true);
+            }
+        }
+    }
+    // a third party's swap: random data after the swap / swap_v2 discriminators, random account lists naming the pools
+    let metas: Vec<PoolMeta> = fixtures().values().map(meta).collect();
+    let by_pool = |k: &Pk| metas.iter().find(|m| m.pool == *k);
+    for i in 0..50_000u64 {
+        let v = if i % 2 == 0 { Venue::RayClmm } else { Venue::Whirlpool };
+        let mut d = match i % 3 { 0 => clmm::SWAP_V2.to_vec(), 1 => crate::venues::clmm::SWAP.to_vec(), _ => vec![] };
+        for _ in 0..rng.below(64) { d.push(rng.next() as u8); }
+        let n = rng.below(24) as usize;
+        let acc: Vec<Pk> = (0..n).map(|_| if rng.below(3) == 0 { metas[rng.below(metas.len() as u64) as usize].pool } else { let mut k = [0u8; 32]; k[0] = rng.next() as u8; k }).collect();
+        let _ = clmm::decode_pending(v, &d, &acc, &by_pool);
+    }
+    eprintln!("{runs} mutated pools decoded, {built} legs built, 50,000 random third-party instructions decoded, without a panic");
+    assert!(runs >= 4_000 && built > 1_000, "{runs} {built}");
+}
+
+/// arbx-sizing DESIGN.md §7 item 9, closed for the older venues in the engine's shared mint checks: a Token-2022 mint that
+/// is paused (Pausable, paused) or creates its accounts frozen (DefaultAccountState Frozen) fails every swap, so the leg is
+/// refused (`mint_paused`, `mint_frozen`) where it used to be priced and sent to revert. On the recorded HOTBOT pools
+/// (PumpSwap GLL3, DLMM 6D4E: HOTBOT is a Token-2022 mint), the mint's extensions replaced by one of each (an unpaused
+/// Pausable and an Initialized default state pass)
+#[test]
+fn older_venues_refuse_paused_and_default_frozen_mints() {
+    let mint_with = |base: &[u8], ext: &[(u16, Vec<u8>)]| -> Vec<u8> {
+        let mut d = base[..82].to_vec();
+        d.resize(165, 0);
+        d.push(1); // AccountType::Mint
+        for (t, v) in ext { d.extend(t.to_le_bytes()); d.extend((v.len() as u16).to_le_bytes()); d.extend(v); }
+        d
+    };
+    let pausable = |paused: u8| { let mut v = vec![7u8; 32]; v.push(paused); (26u16, v) };
+    let default_state = |state: u8| (6u16, vec![state]);
+    for prefix in ["GLL3", "6D4E"] {
+        let fx = any_fx(prefix);
+        let m = meta(fx);
+        let (mint, prog) = if m.t0 == *crate::venues::WSOL { (m.t1, m.t1_prog) } else { (m.t0, m.t0_prog) };
+        assert_eq!(prog, *crate::pda::TOKEN_2022, "{prefix}: HOTBOT is a Token-2022 mint");
+        let base = accounts(fx, &Value::Null);
+        let arrays: Vec<(i64, Pk)> = { let mut v: Vec<(i64, Pk)> = fx.accts.iter().filter(|(_, (o, d))| *o == Venue::Dlmm.program() && d.len() == 10_136)
+            .map(|(k, (_, d))| (i64::from_le_bytes(d[8..16].try_into().unwrap()), *k)).collect(); v.sort(); v };
+        let orig = base[&mint].data.to_vec();
+        let quote = |d: Vec<u8>| {
+            let mut accts = base.clone();
+            accts.insert(mint, Acct::rpc(Arc::from(d), fx.slot, 0, 0, asrc::RPC_BOOT));
+            let get = |k: &Pk| accts.get(k);
+            let src = Src { get: &get, arrays: &arrays, usable: &|_| true, clock: clock(fx.slot, fx.unix) };
+            [true, false].map(|z| leg(&m, z, &src, Use::Route { dlmm_budget: DLMM_BUDGET_ALONE }).and_then(|l| l.quote(10_000_000)).map(|_| ()))
+        };
+        assert_eq!(quote(orig.clone()), [Ok(()), Ok(())], "{prefix}: the recorded mint");
+        assert_eq!(quote(mint_with(&orig, &[pausable(1)])), [Err(Why::MintPaused), Err(Why::MintPaused)], "{prefix}");
+        assert_eq!(quote(mint_with(&orig, &[default_state(2)])), [Err(Why::MintFrozen), Err(Why::MintFrozen)], "{prefix}");
+        assert_eq!(quote(mint_with(&orig, &[default_state(1), pausable(0)])), [Ok(()), Ok(())], "{prefix}: not paused, accounts initialized");
+        // the reasons count as the crate's (their reject_ / pred_ counters) and refuse the whole leg
+        assert_eq!((Why::MintPaused.reason(), Why::MintFrozen.reason()), ("mint_paused", "mint_frozen"));
+    }
+}
+
 /// Orca's U256 division as deployed (`U256Muldiv::div`, Knuth D with a carry word: DESIGN.md §2.9, §7 item 12): never a
 /// panic. Against a 256-bit long division on random and edge-limbed operands (the add-back and qhat-correction paths of
 /// Knuth D need such limbs): equal wherever it answers; None only where the deployed binary panics (the add-back that

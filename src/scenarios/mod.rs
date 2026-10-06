@@ -49,6 +49,7 @@ mod s13_verdicts;
 mod s14_ledger;
 mod s15_counters;
 mod s16_mispricing;
+mod s17_clmm;
 mod synth;
 
 use crate::config::Config;
@@ -128,12 +129,41 @@ pub(crate) fn fixtures() -> &'static Fixtures {
             f.pools.push((p["pair"].as_str().unwrap().into(), p["name"].as_str().unwrap().into(), Venue::parse(p["venue"].as_str().unwrap()).unwrap(),
                 pk(p["pool"].as_str().unwrap())));
         }
+        // ---- PLAN-ADDENDUM WP-21: S17's CLMM pools (pair `usdc`), the venue harness's USDC/SOL snapshots of Raydium CLMM
+        // 3ucN and Orca Whirlpool Czfq (testdata/venue-parity/pools-clmm: read from mainnet by the venue harness, later than
+        // the base capture; tools/ci-venue-parity.sh keeps them equal to its fixtures). An account the base capture holds
+        // (the mints) is the base capture's; one that does not exist (`absent`: an oracle or a tick array nobody created) is
+        // held as `arbx run`'s boot records it (empty, no owner, no lamports); the boot's slot stays the base capture's
+        for (name, file) in CLMM_POOLS {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/venue-parity/pools-clmm").join(file);
+            let v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap();
+            let pool = pk(v["pool"].as_str().unwrap());
+            for a in v["accounts"].as_array().unwrap() {
+                let key = pk(a["pubkey"].as_str().unwrap());
+                if f.by_key.contains_key(&key) { continue; }
+                let data = base64::engine::general_purpose::STANDARD.decode(a["data"].as_str().unwrap()).unwrap();
+                let what = if key == pool { format!("usdc.{name}.pool") } else { format!("usdc.{name}.{}", &b58(&key)[..6]) };
+                f.by_key.insert(key, f.accounts.len());
+                f.accounts.push(Fix { key, what, owner: pk(a["owner"].as_str().unwrap()), lamports: a["lamports"].as_u64().unwrap(), data });
+            }
+            for a in v["absent"].as_array().into_iter().flatten() {
+                let key = pk(a.as_str().unwrap());
+                if f.by_key.contains_key(&key) { continue; }
+                f.by_key.insert(key, f.accounts.len());
+                f.accounts.push(Fix { key, what: format!("usdc.{name}.absent.{}", &b58(&key)[..6]), owner: [0; 32], lamports: 0, data: vec![] });
+            }
+            f.pools.push(("usdc".into(), name.to_string(), Venue::parse(v["venue"].as_str().unwrap()).unwrap(), pool));
+        }
         let g = pump_global_config(f.slot);
         f.by_key.insert(g.key, f.accounts.len());
         f.accounts.push(g);
         f
     })
 }
+
+/// PLAN-ADDENDUM WP-21: the CLMM pools S17 adds to the fixtures (name in pair `usdc`, testdata/venue-parity/pools-clmm file)
+pub(crate) const CLMM_POOLS: [(&str, &str); 2] = [("rayclmm", "RayCLMM-3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv.json"),
+    ("whirl", "Whirlpool-Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE.json")];
 
 /// ---- WP-16 merge. PumpSwap's GlobalConfig, a part of every PumpSwap pool since WP-16 (arbx-sizing reads its disable
 /// flags and creator-fee switch; the state stream follows it): accounts.json, captured before WP-16, does not hold it.
