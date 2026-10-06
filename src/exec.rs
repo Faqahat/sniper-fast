@@ -85,9 +85,11 @@ use std::time::Duration;
 
 const BASE_FEE: u64 = bands::BASE_FEE;
 /// the tokens whose account the wallet keeps for good (PLAN WP-06 item 2): WSOL, USDC, USDT; `[builder] held_max` counts
-/// the others
+/// the others. USDT is Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB (WP-06 had a mistyped key here, so the dry run's
+/// `route_payer_accounts` watched an account that is not the payer's USDT one: fixed after the merge with integ/stage0,
+/// whose `[ledger] extra_mints` names the same two: tests::the_permanent_mints_are_the_ledgers)
 pub static PERMANENT_MINTS: std::sync::LazyLock<[Pk; 3]> = std::sync::LazyLock::new(|| [*WSOL, pk("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
-    pk("Es9vMFrzaCERmJfrF8H2T7Unt11yvbdcNGNM2LE3Gz9V")]);
+    pk("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")]);
 /// a blockhash is valid for this many blocks after its own (an attempt is open until the chain passes it)
 pub const BLOCKHASH_VALID_BLOCKS: u64 = 150;
 /// without a block height an attempt expires this many slots after its blockhash's slot (150 blocks, skipped slots

@@ -2646,3 +2646,25 @@ async fn integ_the_daily_ratio_reads_the_merged_status_line() {
     assert!(a.body.contains("win ratio 50.0% (1 win / 2 sent) · net +0.000006501 SOL (ledger)"), "{}", a.body);
     let _ = std::fs::remove_dir_all(&runs);
 }
+
+// ------------------------------------------------------------------------------------------------ after the merge
+
+/// The two lanes name the same accounts (merge fixes, after WP-06 met integ/stage0): WP-06's permanent mints are WSOL and
+/// the USDC and USDT that WP-07's ledger snapshots (`[ledger] extra_mints`, the default and the frz canary's), so the dry
+/// run's `route_payer_accounts` watches the payer's real USDC and USDT accounts (WP-06 had a mistyped USDT key); and the
+/// builder's PumpSwap user volume accumulator (`build::pump_uva`, `uva_missing`) is the one the ledger reads as
+/// non-recoverable (`ledger::accumulator_of`)
+#[tokio::test]
+async fn the_permanent_mints_are_the_ledgers() {
+    let mints = |c: &Config| -> Vec<Pk> { c.ledger.extra_mints.iter().map(|m| pk(m)).collect() };
+    let frz = Config::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arbx-canary-frz.toml")).unwrap();
+    let cfg = test_cfg(&std::env::temp_dir(), "");
+    assert_eq!(PERMANENT_MINTS[0], *WSOL);
+    assert_eq!(PERMANENT_MINTS[1..].to_vec(), mints(&cfg), "the ledger's default extra_mints");
+    assert_eq!(PERMANENT_MINTS[1..].to_vec(), mints(&frz), "the frz canary's");
+    assert_eq!(b58(&PERMANENT_MINTS[2]), "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", "USDT");
+    let x = idle_exec();
+    assert_eq!(x.payer_tokens, PERMANENT_MINTS[1..].iter().map(|m| build::ata_of(&x.payer, m, &crate::pda::TOKEN_PROGRAM)).collect::<Vec<_>>());
+    let frz_wallet = pk(&frz.wallet);
+    assert_eq!(build::pump_uva(&frz_wallet), crate::ledger::accumulator_of(&frz_wallet));
+}

@@ -403,6 +403,8 @@ fn headers_and_plain_streams() {
     // (WP-07), wallet 1.2 (WP-07 + FT-000), the journal 2.4 (2.3's records with WP-06's engine_init builder and exec_init v2)
     assert_eq!((s["decisions"].as_str(), s["outcomes"].as_str(), s["wallet"].as_str(), s["journal"].as_str(), s["exec"].as_str()),
         (Some("arbx.decisions/1.2"), Some("arbx.outcomes/2.1"), Some("arbx.wallet/1.2"), Some("arbx.journal/2.4"), Some("arbx.exec/2.2")));
+    // and sims 1.2: WP-06's `closes_ata`, which its lane added under 1.1 (the FT-000b recordings' 1.1 has no such field)
+    assert_eq!(s["sims"].as_str(), Some("arbx.sims/1.2"));
     let _ = std::fs::remove_dir_all(&d);
 }
 

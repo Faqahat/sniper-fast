@@ -181,7 +181,8 @@ pub const ENTRIES_MAGIC: [u8; 8] = *b"ARBXENT\0";
 /// `money` too (WP-07 added them within 2.2's framing; MEASUREMENT §4.13). WP-06 (merged after them, at the end of
 /// Stage 0): attempts 2.1 (the bundle's layout: CU source, loaded-data limit, create/close, the size budget's fallback,
 /// the tip's band share) and decisions 1.2 (`dlmm_cap_bound`); the journal 2.4 (2.3's records, with engine_init's
-/// `builder` and exec_init version 2: a 2.3 journal of integ/stage0 has neither, and its executor is not replayed)
+/// `builder` and exec_init version 2: a 2.3 journal of integ/stage0 has neither, and its executor is not replayed);
+/// after it, sims 1.2 (WP-06's `closes_ata`, which its lane added under 1.1)
 const STATIC: [(&str, Class, Format, &str, bool); 38] = [
     ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/2.1", false),
     ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.2", false),
@@ -199,7 +200,7 @@ const STATIC: [(&str, Class, Format, &str, bool); 38] = [
     ("triggers", Class::Chain, Format::Jsonl, "arbx.triggers/2.0", false),
     ("predictions", Class::Chain, Format::Jsonl, "arbx.predictions/2.0", false),
     ("caps", Class::Chain, Format::Jsonl, "arbx.caps/1.2", false),
-    ("sims", Class::Chain, Format::Jsonl, "arbx.sims/1.1", false),
+    ("sims", Class::Chain, Format::Jsonl, "arbx.sims/1.2", false),
     ("opportunities", Class::Chain, Format::Jsonl, "arbx.opportunities/1.2", false),
     ("rivals", Class::Bulk, Format::Jsonl, "arbx.rivals/1.2", false),
     ("status", Class::Slow, Format::PlainJsonl, "arbx.status/2.2", false),
