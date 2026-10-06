@@ -318,8 +318,16 @@ def _misc(seg, sec):
     d["unsettled"] = finals.get("unsettled", 0)
     d["amends"] = seg.amends
     rc = seg.jsonl("recon")
-    d["recon"] = {"windows": len(rc), "failed": sum(1 for r in rc if not r.get("ok"))}
+    # FT-001: a stop without its snapshot is a line of its own (`kind` stop_snapshot_failed, `ok` null), not a window;
+    # a window is failed only when `ok` is false (null: skipped, `snapshot_incomplete`, the next snapshot closes it)
+    stop_missing = [r for r in rc if r.get("kind") == "stop_snapshot_failed"]
+    wins = [r for r in rc if r.get("kind") != "stop_snapshot_failed"]
+    d["recon"] = {"windows": len(wins), "failed": sum(1 for r in wins if r.get("ok") is False)}
+    if stop_missing:
+        d["recon"]["stop_snapshot_missing"] = [r.get("why") for r in stop_missing]
     sn = seg.jsonl("snapshots")
     d["snapshots"] = {"n": len(sn), "slot_mismatch": sum(1 for s in sn if s.get("slot_mismatch"))}
     if d["recon"]["failed"]:
         sec["caveats"].append(f"{d['recon']['failed']} reconciliation window(s) failed")
+    for why in d["recon"].get("stop_snapshot_missing", []):
+        sec["caveats"].append(f"no stop snapshot ({why}): the next segment's first snapshot reconciles the window since the last good one")

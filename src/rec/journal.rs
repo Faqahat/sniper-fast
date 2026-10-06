@@ -490,6 +490,14 @@ pub struct ReplayStats {
     /// (its lookup-table cache diverged; a what-if with other `[alts]` caps differs by design)
     pub alt_evictions: u64,
     pub alt_evict_mismatches: u64,
+    /// ---- FT-001: the run's digest-point records passed over (INPUT 14)
+    pub digest_points: u64,
+}
+
+/// ---- FT-001. The run's digest point a record is (INPUT 14 `digest_point`: `{point, t_engine, digest, decision_digest,
+/// parts, before_finish, counts, ...}`, `Engine::digest_point`), or None
+pub fn digest_point(r: &JRec) -> Option<&serde_json::Value> {
+    match &r.body { JBody::Input { kind, data } if *kind == InputKind::DigestPoint as u8 => Some(data), _ => None }
 }
 
 /// ---- WP-09 (review WP-09 #3). A decision-point gate record: INPUT 3 `src` "decision", what a decision read of the
@@ -583,6 +591,9 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
                 },
                 // engine_init and exec_init belong to the boot section
                 Some(InputKind::EngineInit) | Some(InputKind::ExecInit) | None => { st.skipped += 1; continue; }
+                // ---- FT-001: the run's digest point: not an input (`replay::replay` digests there and does what the run did
+                // there; a caller of this function handles it with `digest_point`)
+                Some(InputKind::DigestPoint) => { st.digest_points += 1; continue; }
                 // what a decision read of the SendGate, journaled by the engine while handling the record before it: not
                 // an input (staged before that record was handed over)
                 Some(InputKind::Gate) if data["src"].as_str() == Some("decision") => { st.gate_observed += 1; continue; }

@@ -585,23 +585,44 @@ fn a_run_with_an_executor_is_not_ok_until_its_executor_is_replayed() {
     assert_eq!(rp.summary["executor"]["replayed"], json!(false));
 }
 
-/// Review WP-09 #6: the run records its digests (events.jsonl `engine_digests`, before and after `finish`), a replay
-/// that ran to the end checks them, and a run whose state the replay does not reach is not ok
+/// Review WP-09 #6, FT-001: the run records its digests where it takes them (journal INPUT 14 `digest_point` and
+/// events.jsonl `engine_digests`: before and after `finish`, each part's too), a replay checks them at that point of the
+/// journal, and a run whose state the replay does not reach is not ok, the part that differs named
 #[test]
 fn the_run_records_its_digests_and_the_replay_checks_them() {
     let (done, _ta, _tp) = run("h-digests");
     let ev = rec::read_jsonl(&done.dir, "events").unwrap();
     let dg = ev.iter().find(|e| e["kind"] == "engine_digests").expect("an engine_digests event");
-    assert!(dg["detail"]["before_finish"]["digest"].is_string() && dg["detail"]["decision_digest"].is_string(), "{dg}");
-    assert_eq!(done.replay["digests"]["same"], json!(true));
-    // the same run with another state digest recorded: the replay finds it
-    let p = rec::stream_files(&done.dir, "events")[0].clone();
-    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(dg["detail"]["before_finish"]["digest"].is_string() && dg["detail"]["decision_digest"].is_string() && dg["detail"]["point"] == json!("run_end"), "{dg}");
+    assert!(dg["detail"]["parts"]["store.accounts"].is_string() && dg["detail"]["before_finish"]["parts"]["opps"].is_string(), "{dg}");
+    assert_eq!((done.replay["digests"]["same"].clone(), done.replay["digests"]["point"].clone()), (json!(true), json!("marker")), "{}", done.replay["digests"]);
+    // the same run with another state digest recorded at its digest point, and another digest of its commit groups: the
+    // replay finds it and names the part
     let real = dg["detail"]["before_finish"]["digest"].as_str().unwrap().to_string();
     let fake = format!("{:016x}", u64::from_str_radix(&real, 16).unwrap() ^ 1);
-    std::fs::write(&p, text.replace(&real, &fake)).unwrap();
+    let mut n = 0;
+    rewrite_journal(&done.dir, |_, x| {
+        let b = &x.3;
+        if x.0 != crate::rec::journal::J_INPUT || b[21] != InputKind::DigestPoint as u8 { return b.clone(); }
+        n += 1;
+        let mut v: Value = serde_json::from_slice(&b[26..]).unwrap();
+        v["before_finish"]["digest"] = json!(fake);
+        v["before_finish"]["parts"]["commit"] = json!("0000000000000000");
+        let js = serde_json::to_vec(&v).unwrap();
+        let mut body = vec![InputKind::DigestPoint as u8];
+        body.extend((js.len() as u32).to_le_bytes());
+        body.extend(&js);
+        let mut o = vec![b[0]];
+        o.extend((body.len() as u32).to_le_bytes());
+        o.extend(&b[5..21]);
+        o.extend(body);
+        o
+    });
+    assert_eq!(n, 1, "one digest point (the run ended with finish, no stop sequence)");
     let r = replay::replay(&done.dir, &Opts { compare: true, out: Some(done.dir.join("tampered")), ..Default::default() }).unwrap();
-    assert_eq!((r.summary["digests"]["checked"].as_bool(), r.summary["digests"]["same"].as_bool()), (Some(true), Some(false)), "{}", r.summary["digests"]);
+    let d = &r.summary["digests"];
+    assert_eq!((d["checked"].as_bool(), d["same"].as_bool()), (Some(true), Some(false)), "{d}");
+    assert_eq!((d["points"][0]["before_finish_parts_differ"].clone(), d["points"][0]["parts_differ"].clone()), (json!(["commit"]), json!([])), "{d}");
     assert!(!r.ok && r.diff.unwrap()["summary"]["field_diffs"] == json!(0), "the lines are identical; the state is not");
 }
 

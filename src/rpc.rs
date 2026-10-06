@@ -880,7 +880,11 @@ impl Rpc {
     /// how long a boot-time call retries before the boot gives up
     pub fn set_boot_budget(&self, d: Duration) { self.boot_budget_ms.store(d.as_millis().max(1) as u64, Relaxed); }
     pub fn boot_budget(&self) -> Duration { Duration::from_millis(self.boot_budget_ms.load(Relaxed)) }
-    /// a bounded call stops retrying once `flag` is set (a stop during the boot)
+    /// a boot-policy call stops retrying once `flag` is set (a stop during the boot: its retries run for the boot budget,
+    /// 90 s). FT-001 p1: the flag is the run's stop flag, set when the stop is requested, before the stop sequence; every
+    /// bounded call failed at once from then on ("no attempt before the deadline", no provider asked), so the ledger's stop
+    /// snapshot, its window search and the executor's expiry checks never ran. Any other call is bounded by its own
+    /// deadline and goes on: the stop sequence's calls are what it waits for
     pub fn set_stop(&self, flag: Arc<AtomicBool>) { let _ = self.stop.set(flag); }
     fn stopping(&self) -> bool { self.stop.get().is_some_and(|f| f.load(Relaxed)) }
 
@@ -981,11 +985,14 @@ impl Rpc {
         loop {
             let now = Instant::now();
             let all_answered = answered.iter().all(|a| *a);
-            let out_of = if self.stopping() { Some("the run is stopping") } else if all_answered { Some("every provider refused the request") }
+            // FT-001 p1: only a boot-policy call ends on the run's stop (`set_stop`); the stop sequence's calls go on
+            let stopping = boot && self.stopping();
+            let out_of = if stopping { Some("the run is stopping") } else if all_answered { Some("every provider refused the request") }
                 else if attempts > b.retries { Some("retries spent") } else if now >= deadline { Some("deadline") } else { None };
             if let Some(why) = out_of {
-                let mut f = last.unwrap_or_else(|| RpcFailure::new(ErrClass::Budget, None, format!("rpc {method}: no attempt before the deadline")));
-                if self.stopping() { f.class = ErrClass::Stopped; f.retryable = false; }
+                let mut f = last.unwrap_or_else(|| if stopping { RpcFailure::new(ErrClass::Stopped, None, format!("rpc {method}: not asked: the run is stopping")) }
+                    else { RpcFailure::new(ErrClass::Budget, None, format!("rpc {method}: no attempt before the deadline")) });
+                if stopping { f.class = ErrClass::Stopped; f.retryable = false; }
                 f.attempts = attempts;
                 let summary: Vec<String> = hist.iter().map(|((p, c), k)| format!("{p} {c} x{k}")).collect();
                 if attempts > 1 {

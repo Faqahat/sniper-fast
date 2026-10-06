@@ -663,11 +663,30 @@ impl Snapshot {
 /// `slot_mismatch: true`. A failed call: asked again (same budget), then `error`. Returns INPUT 13's body
 pub async fn fetch_with<F, Fut>(call: F, keys: Vec<Pk>, retries: u32, why: &str) -> Value
 where F: Fn(Value) -> Fut, Fut: std::future::Future<Output = Result<(Value, String), String>> {
+    fetch_within(|p, _| call(p), keys, retries, why, None).await
+}
+
+/// one snapshot call's deadline (a bounded call, every provider in turn)
+pub const SNAPSHOT_CALL: Duration = Duration::from_secs(5);
+
+/// FT-001 p1: how long the stop snapshot may take in all, its retries included: inside the 20 s the stop sequence waits
+/// for it (`Engine::stop_sequence`), so its answer, or why there is none, reaches the ledger (and the journal) before the
+/// stop's reconciliation
+pub const STOP_SNAPSHOT_BUDGET: Duration = Duration::from_secs(15);
+
+/// `fetch_with` within `budget` (FT-001 p1: the stop snapshot). None: as `fetch_with` (`retries` more attempts in all,
+/// each call bounded on its own). Some: a call that failed is asked again after a backoff (250 ms, doubling to 2 s) as
+/// long as the budget lasts, each call bounded by what is left of it (at most `SNAPSHOT_CALL`), and answers on
+/// different slots are asked again up to `retries` times. `call` gets the params and its deadline
+pub async fn fetch_within<F, Fut>(call: F, keys: Vec<Pk>, retries: u32, why: &str, budget: Option<Duration>) -> Value
+where F: Fn(Value, Duration) -> Fut, Fut: std::future::Future<Output = Result<(Value, String), String>> {
     let t0 = std::time::Instant::now();
+    let until = budget.map(|b| tokio::time::Instant::now() + b);
     let ks: Vec<String> = keys.iter().map(b58).collect();
-    let mut last_err = None;
-    let mut out = None;
-    for attempt in 0..=retries {
+    let (mut last_err, mut out, mut attempts, mut mismatched) = (None, None, 0u32, 0u32);
+    let mut backoff = Duration::from_millis(250);
+    loop {
+        attempts += 1;
         let mut answers = Vec::new();
         let mut first: Option<u64> = None;
         let mut provider = String::new();
@@ -675,7 +694,8 @@ where F: Fn(Value) -> Fut, Fut: std::future::Future<Output = Result<(Value, Stri
         for chunk in ks.chunks(100) {
             let mut cfg = json!({ "encoding": "base64", "commitment": "confirmed" });
             if let Some(s) = first { cfg["minContextSlot"] = json!(s); }
-            match call(json!([chunk, cfg])).await {
+            let deadline = until.map_or(SNAPSHOT_CALL, |u| u.saturating_duration_since(tokio::time::Instant::now()).clamp(Duration::from_millis(1), SNAPSHOT_CALL));
+            match call(json!([chunk, cfg]), deadline).await {
                 Ok((v, p)) => {
                     let slot = v["context"]["slot"].as_u64().unwrap_or(0);
                     first.get_or_insert(slot);
@@ -685,23 +705,39 @@ where F: Fn(Value) -> Fut, Fut: std::future::Future<Output = Result<(Value, Stri
                 Err(e) => { failed = Some(e); break; }
             }
         }
-        if let Some(e) = failed { last_err = Some(e); continue; }
+        if let Some(e) = failed {
+            last_err = Some(e);
+            match until {
+                None if attempts > retries => break,
+                None => continue,
+                Some(u) => {
+                    if tokio::time::Instant::now() + backoff >= u { break; }
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(Duration::from_secs(2));
+                    continue;
+                }
+            }
+        }
         let mismatch = answers.windows(2).any(|w| w[0]["slot"] != w[1]["slot"]);
-        let v = json!({ "what": "snapshot", "why": why, "keys": ks, "answers": answers, "slot_mismatch": mismatch, "attempts": attempt + 1, "provider": provider,
+        let v = json!({ "what": "snapshot", "why": why, "keys": ks, "answers": answers, "slot_mismatch": mismatch, "attempts": attempts, "provider": provider,
             "ms": t0.elapsed().as_secs_f64() * 1e3, "error": null });
         if !mismatch { return v; }
         out = Some(v);
+        mismatched += 1;
+        let spent = match until { None => attempts > retries, Some(u) => mismatched > retries || tokio::time::Instant::now() >= u };
+        if spent { break; }
     }
-    out.unwrap_or_else(|| json!({ "what": "snapshot", "why": why, "keys": ks, "error": last_err.unwrap_or_else(|| "no answer".into()), "attempts": retries + 1,
+    out.unwrap_or_else(|| json!({ "what": "snapshot", "why": why, "keys": ks, "error": last_err.unwrap_or_else(|| "no answer".into()), "attempts": attempts,
         "ms": t0.elapsed().as_secs_f64() * 1e3 }))
 }
 
-/// `fetch_with` through the bounded RPC (role `ledger`; 5 s, two more providers)
-pub async fn fetch_snapshot(rpc: Rpc, keys: Vec<Pk>, retries: u32, why: &str) -> Value {
-    fetch_with(|params| {
+/// `fetch_within` through the bounded RPC (role `ledger`: critical, the bucket's last token; each call asks every
+/// provider in turn, the ready one first: `Rpc::call_bounded`)
+pub async fn fetch_snapshot(rpc: Rpc, keys: Vec<Pk>, retries: u32, why: &str, budget: Option<Duration>) -> Value {
+    fetch_within(|params, deadline| {
         let rpc = rpc.clone();
-        async move { rpc.call_bounded("getMultipleAccounts", params, Bounds::fetch(Duration::from_secs(5), 2)).await.map(|f| (f.value, f.provider)).map_err(|e| e.msg) }
-    }, keys, retries, why).await
+        async move { rpc.call_bounded("getMultipleAccounts", params, Bounds::fetch(deadline, 2)).await.map(|f| (f.value, f.provider)).map_err(|e| e.msg) }
+    }, keys, retries, why, budget).await
 }
 
 // ------------------------------------------------------------------ reconciliation (pure)
@@ -914,9 +950,10 @@ pub fn bound_wallet_cursor(cursor: Option<(String, u64)>, h: &History) -> (Optio
 }
 
 /// The window between segments: its first snapshot, the segment it is from, and the entries of the earlier segments that
-/// landed after it
+/// landed after it. FT-001: `stop_missing`, the last segment ended without its stop snapshot (`{segment, why, t_ns}`:
+/// its recon.jsonl `stop_snapshot_failed`), so the window spans that segment's last minutes too
 #[derive(Clone, Debug, Default)]
-pub struct PrevWindow { pub from: Snapshot, pub segment: String, pub entries: Vec<Entry>, pub undecided: bool }
+pub struct PrevWindow { pub from: Snapshot, pub segment: String, pub entries: Vec<Entry>, pub undecided: bool, pub stop_missing: Option<Value> }
 
 impl History {
     /// the stop value now: the start's SOL + WSOL less the net spend since
@@ -977,6 +1014,9 @@ fn history_of(segs: Vec<(String, std::path::PathBuf)>, test_budget: Option<u64>,
     let mut last_good: Option<(Snapshot, String)> = None;
     let mut all: Vec<Entry> = Vec::new();
     let mut undecided_from: Option<(u64, String, u64)> = None;
+    // FT-001: the last segment's stop snapshot did not come (its `stop_snapshot_failed` line), until a window between
+    // segments decided it
+    let mut stop_missing: Option<Value> = None;
     let mut snaps_by_slot: BTreeMap<u64, (Snapshot, String)> = BTreeMap::new();
     for (k, (name, p)) in segs.into_iter().enumerate() {
         let (snaps, b1) = read_lines(&p, "snapshots");
@@ -986,8 +1026,10 @@ fn history_of(segs: Vec<(String, std::path::PathBuf)>, test_budget: Option<u64>,
         h.segments_read.push(name.clone());
         for r in &recons {
             if r["ok"] == json!(false) && r["final"] != json!(false) { h.recon_misses.push((name.clone(), r["t_ns"].as_u64().unwrap_or(0))); }
-            // the window between segments decides an undecided one (passed, or a miss counted above)
-            if r["between_segments"] == json!(true) { undecided_from = None; }
+            // the window between segments decides an undecided one (passed, or a miss counted above), and a missing stop
+            // snapshot's window
+            if r["between_segments"] == json!(true) { undecided_from = None; stop_missing = None; }
+            if r["kind"] == json!("stop_snapshot_failed") { stop_missing = Some(json!({ "segment": name, "why": r["why"], "t_ns": r["t_ns"] })); }
             // a stop reconciliation left undecided: the next segment decides it again, from its first snapshot
             if r["ok"] == json!(false) && r["final"] == json!(false) {
                 if let Some(s) = r["from"]["slot"].as_u64() { undecided_from = Some((s, name.clone(), r["t_ns"].as_u64().unwrap_or(0))); }
@@ -1057,7 +1099,7 @@ fn history_of(segs: Vec<(String, std::path::PathBuf)>, test_budget: Option<u64>,
     if let Some((s, seg)) = from {
         h.window_cursor = all.iter().filter(|e| e.slot <= s.slot).max_by_key(|e| e.slot).map(|e| (e.sig.clone(), e.slot));
         let entries = all.into_iter().filter(|e| e.slot > s.slot).collect();
-        h.prev_window = Some(PrevWindow { from: s, segment: seg, entries, undecided: undecided_from.is_some() });
+        h.prev_window = Some(PrevWindow { from: s, segment: seg, entries, undecided: undecided_from.is_some(), stop_missing });
     }
     h.undecided = undecided_from.map(|(_, seg, t)| (seg, t));
     h.series.trim(now, keep_ns);
@@ -1203,6 +1245,9 @@ pub struct Ledger {
     // ---- between segments (review WP-07 #7, #9)
     prev_window: Option<PrevWindow>,
     undecided: Option<(String, u64)>,
+    // ---- FT-001 p1: the stop snapshot's budget, and why it did not come (recorded once: `stop_snapshot_missing`)
+    stop_budget: Duration,
+    stop_missing: Option<String>,
 }
 
 impl Ledger {
@@ -1214,7 +1259,8 @@ impl Ledger {
             totals: Totals::default(), prev: Totals::default(), spent_before: 0, route_tokens: BTreeMap::new(), own_start_value: None, stranded: BTreeMap::new(),
             recon_seq: 0, recon_misses: 0, last_recon: None, unreconciled_now: 0, counts: BTreeMap::new(), entries_seen_delta: 0, prev_failed_reported: 0,
             last_good_t: None, fail_run: 0,
-            suspect: None, gave_up_seen: None, stale: None, stale_kind: None, prev_window: None, undecided: None }
+            suspect: None, gave_up_seen: None, stale: None, stale_kind: None, prev_window: None, undecided: None, stop_budget: STOP_SNAPSHOT_BUDGET,
+            stop_missing: None }
     }
 
     /// The ledger and its stops as `arbx run` assembles them (review WP-07 #2: the wiring that arms them is tested here):
@@ -1233,6 +1279,9 @@ impl Ledger {
 
     /// the snapshots' RPC (role `ledger`), the background runtime, the engine's channel (INPUT 13 comes back on it)
     pub fn set_io(&mut self, rpc: Rpc, rt: tokio::runtime::Handle, back: crossbeam_channel::Sender<Event>) { self.io = Some(Io { rpc, rt, back }); }
+
+    /// how long the stop snapshot may take in all (`STOP_SNAPSHOT_BUDGET`; tests shorten it)
+    pub fn set_stop_budget(&mut self, d: Duration) { self.stop_budget = d; }
 
     /// the run's SendGate and stop path (the supervisor acts on them)
     pub fn bind(&mut self, gate: Arc<SendGate>, stopper: Arc<Stopper>) { self.sup.bind(gate, stopper); }
@@ -1398,7 +1447,10 @@ impl Ledger {
                 self.fail_run += 1;
                 self.retry_later(t);
                 if why == "stop" { self.stop_done = true; }
-                self.rec.event("snapshot_failed", "ledger", None, json!({ "why": why, "error": crate::rpc::scrub(&e), "retry_s": self.cfg.snapshot_retry_s, "failed_in_a_row": self.fail_run }));
+                self.rec.event("snapshot_failed", "ledger", None, json!({ "why": why, "error": crate::rpc::scrub(&e), "retry_s": self.cfg.snapshot_retry_s, "failed_in_a_row": self.fail_run,
+                    "attempts": d["attempts"], "ms": d["ms"] }));
+                if why == "stop" { self.stop_snapshot_missing(t, &format!("the stop snapshot failed after {} attempts in {} ms: {}", d["attempts"], d["ms"].as_f64().map_or(0, |m| m.round() as u64),
+                    crate::rpc::scrub(&e))); }
                 return;
             }
         };
@@ -1482,6 +1534,27 @@ impl Ledger {
     pub fn want_stop_snapshot(&mut self) { self.stop_asked = true; }
     pub fn stop_snapshot_done(&self) -> bool { self.stop_done || self.io.is_none() }
 
+    /// FT-001 p1: the stop snapshot did not come (it failed within its budget, or not within the stop sequence's wait):
+    /// the window from the last good snapshot stays open, and the next segment's first snapshot reconciles it, between
+    /// segments, as it reconciles any segment's start (`History::prev_window`; a gap whose landings its records explain
+    /// passes there). Written once, with why: recon.jsonl `kind` `stop_snapshot_failed` (`ok` null: neither a pass nor a
+    /// miss; `final` false: the next segment decides the window), and a Warn notice
+    pub fn stop_snapshot_missing(&mut self, t: u64, why: &str) {
+        if self.stop_missing.is_some() { return; }
+        self.stop_missing = Some(why.to_string());
+        self.count("stop_snapshot_missing");
+        self.recon_seq += 1;
+        let from = self.last_good.map(|i| json!({ "t_ns": self.snaps[i].t_ns, "slot": self.snaps[i].slot }));
+        self.rec.json(rec::RECON, json!({ "t_ns": t, "seq": self.recon_seq, "kind": "stop_snapshot_failed", "from": from.clone(), "to": null, "ok": null, "final": false,
+            "at_stop": true, "why": why, "action": "next_segment",
+            "detail": "no stop snapshot: the next segment's first snapshot reconciles the window from the last good snapshot (between segments)" }));
+        self.sup.alert_once("stop_snapshot_missing", "stop_snapshot_missing", Level::Warn,
+            format!("no stop snapshot ({why}): the next segment's first snapshot reconciles the window since the last good one"), json!({ "why": why, "from": from }));
+    }
+
+    /// why the stop snapshot did not come (None: it came, or it was not asked for)
+    pub fn stop_missing(&self) -> Option<&str> { self.stop_missing.as_deref() }
+
     fn spawn_snapshot(&mut self, why: &'static str, t: u64) {
         let Some(io) = &self.io else { return };
         if self.inflight { return; }
@@ -1489,8 +1562,10 @@ impl Ledger {
         let mut keys = vec![self.wallet];
         keys.extend(self.candidates.iter().copied());
         let (rpc, back, retries) = (io.rpc.clone(), io.back.clone(), self.cfg.snapshot_retries);
+        // FT-001 p1: the stop snapshot retries within its budget (inside the stop sequence's wait); the others as before
+        let budget = (why == "stop").then_some(self.stop_budget);
         io.rt.spawn(async move {
-            let mut d = fetch_snapshot(rpc, keys, retries, why).await;
+            let mut d = fetch_snapshot(rpc, keys, retries, why, budget).await;
             d["t_req_ns"] = json!(t);
             let _ = back.send(Event::Input { kind: InputKind::Snapshot, data: Arc::new(d) });
         });
@@ -1689,6 +1764,8 @@ impl Ledger {
                 line["between_segments"] = json!(true);
                 line["from"]["segment"] = json!(seg);
                 line["decides"] = json!(self.undecided.as_ref().map(|(s, t0)| json!({ "segment": s, "t_ns": t0 })));
+                // FT-001: the window spans the earlier segment's end without its stop snapshot (why it did not come)
+                if let From::Earlier(w) = &p.from { line["stop_snapshot_missing"] = w.stop_missing.clone().unwrap_or(Value::Null); }
             }
             line["action"] = if ok { Value::Null } else if undecided { json!("undecided") } else { json!("shadow") };
             self.unreconciled_now = line["residual"].as_i64().unwrap_or(0);

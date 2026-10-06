@@ -153,7 +153,7 @@ impl Activity {
 
     /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 7): the map's state in the engine's digest: when it started,
     /// the candidates (with their first sighting), every (pool, signer) pair with its last landing, the evictions
-    pub fn digest(&self, x: &mut xxhash_rust::xxh3::Xxh3) {
+    pub fn digest(&self, x: &mut dyn crate::engine::Fold) {
         x.update(&self.started.unwrap_or(u64::MAX).to_le_bytes());
         x.update(&(self.cand_order.len() as u64).to_le_bytes());
         for (t, s) in &self.cand_order { x.update(&t.to_le_bytes()); x.update(s); x.update(self.cand.get(s).map_or(&[0u8; 32], |k| k)); }

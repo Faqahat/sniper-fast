@@ -1526,60 +1526,108 @@ impl Engine {
     }
 
     /// A digest of the engine's decision state (WP-03: replay determinism). Two engines fed the same journal have the
-    /// same digest. Stage timestamps and latency series (real clock reads) are left out, as are counters of recording
+    /// same digest. Stage timestamps and latency series (real clock reads) are left out, as are counters of recording.
+    /// FT-001: the digest of the parts `digest_walk` names, in its order (the bytes and their order are what they were
+    /// before the parts: a recording made before them checks against the same value)
     pub fn digest(&self) -> u64 {
         let mut x = xxhash_rust::xxh3::Xxh3::new();
-        let mut keys: Vec<&Pk> = self.store.keys().collect();
-        keys.sort();
-        for k in keys {
-            x.update(k);
-            for a in self.store.versions(k) {
-                x.update(&a.slot.to_le_bytes()); x.update(&a.write_version.to_le_bytes()); x.update(&a.t_recv.to_le_bytes()); x.update(&a.aseq.to_le_bytes());
-                x.update(a.txn.as_ref().map_or(&[0u8; 64][..], |s| &s[..])); x.update(&a.data); x.update(&a.lamports.to_le_bytes());
+        self.digest_walk(&mut |_, feed| feed(&mut x));
+        x.digest()
+    }
+
+    /// ---- FT-001 (the p1 replay's state digest). The state digest and the decision digest with each part's own digest
+    /// (`digest_walk`'s names), in one pass: what the run records at its digest points and a replay computes at the same
+    /// journaled points, so a difference names the part that differs
+    pub fn digests(&self) -> Digests {
+        let t0 = std::time::Instant::now();
+        let mut all = xxhash_rust::xxh3::Xxh3::new();
+        let mut parts = Vec::new();
+        self.digest_walk(&mut |name, feed| {
+            let mut p = xxhash_rust::xxh3::Xxh3::new();
+            feed(&mut Tee(&mut all, &mut p));
+            parts.push((name, p.digest()));
+        });
+        Digests { state: all.digest(), decision: self.decision_digest(), parts, ms: t0.elapsed().as_secs_f64() * 1e3 }
+    }
+
+    /// ---- FT-001. The state digest's parts in order, each handed to `f` with what it folds: the store (accounts and
+    /// their ring versions, the followed DLMM bin arrays, its totals), the signatures' arrival windows, the open
+    /// opportunities, the signer statistics, the pending triggers, the lookup-table cache, the commit groups, the fork
+    /// tree, the account reads, the re-read, the unverified accounts, the counters, the ids, the slots, the health gate,
+    /// the state stream's messages, the deferred evaluations, the accuracy queue, the decision hash, and with an executor
+    /// its parts (`Exec::digest_walk`) and the crowding map
+    fn digest_walk(&self, f: &mut dyn FnMut(&'static str, &dyn Fn(&mut dyn Fold))) {
+        f("store.accounts", &|x| {
+            let mut keys: Vec<&Pk> = self.store.keys().collect();
+            keys.sort();
+            for k in keys {
+                x.update(k);
+                for a in self.store.versions(k) {
+                    x.update(&a.slot.to_le_bytes()); x.update(&a.write_version.to_le_bytes()); x.update(&a.t_recv.to_le_bytes()); x.update(&a.aseq.to_le_bytes());
+                    x.update(a.txn.as_ref().map_or(&[0u8; 64][..], |s| &s[..])); x.update(&a.data); x.update(&a.lamports.to_le_bytes());
+                }
             }
-        }
-        let mut arr: Vec<(&Pk, &Vec<(i64, Pk)>)> = self.store.dlmm_arrays.iter().collect();
-        arr.sort();
-        for (k, l) in arr { x.update(k); for (i, a) in l { x.update(&i.to_le_bytes()); x.update(a); } }
-        x.update(&self.store.updates.to_le_bytes()); x.update(&self.store.stale_dropped.to_le_bytes());
-        let mut sigs: Vec<(&u64, &SigInfo)> = self.sigs.iter().collect();
-        sigs.sort_by_key(|x| *x.0);
-        for (k, v) in sigs { x.update(&k.to_le_bytes()); x.update(&v.first_t.to_le_bytes()); x.update(&v.first_feed.to_le_bytes()); x.update(&v.slot.to_le_bytes()); for a in v.arr { x.update(&a.to_le_bytes()); } }
-        let mut opps: Vec<&Opp> = self.opps.values().collect();
-        opps.sort_by_key(|o| o.id);
-        for o in opps {
-            x.update(&o.id.to_le_bytes()); x.update(&o.trig); x.update(&o.buy); x.update(&o.sell); x.update(&o.size.to_le_bytes()); x.update(&o.net.to_le_bytes());
-            x.update(&o.deadline.to_le_bytes()); x.update(&o.touches.len().to_le_bytes()); x.update(&o.landed.unwrap_or(u64::MAX).to_le_bytes());
-        }
-        let mut ss: Vec<(&Pk, &(u32, u32))> = self.signer_stats.iter().collect();
-        ss.sort();
-        for (k, v) in ss { x.update(k); x.update(&v.0.to_le_bytes()); x.update(&v.1.to_le_bytes()); }
-        let mut tp: Vec<(&[u8; 64], &(Pk, u64))> = self.trig_pending.iter().collect();
-        tp.sort();
-        for (k, v) in tp { x.update(k); x.update(&v.0); x.update(&v.1.to_le_bytes()); }
-        self.alts.digest(&mut x);
-        self.tracker.digest(&mut x);
-        self.forks.digest(&mut x);
+        });
+        f("store.dlmm_arrays", &|x| {
+            let mut arr: Vec<(&Pk, &Vec<(i64, Pk)>)> = self.store.dlmm_arrays.iter().collect();
+            arr.sort();
+            for (k, l) in arr { x.update(k); for (i, a) in l { x.update(&i.to_le_bytes()); x.update(a); } }
+        });
+        f("store.totals", &|x| { x.update(&self.store.updates.to_le_bytes()); x.update(&self.store.stale_dropped.to_le_bytes()); });
+        f("sigs", &|x| {
+            let mut sigs: Vec<(&u64, &SigInfo)> = self.sigs.iter().collect();
+            sigs.sort_by_key(|x| *x.0);
+            for (k, v) in sigs { x.update(&k.to_le_bytes()); x.update(&v.first_t.to_le_bytes()); x.update(&v.first_feed.to_le_bytes()); x.update(&v.slot.to_le_bytes()); for a in v.arr { x.update(&a.to_le_bytes()); } }
+        });
+        f("opps", &|x| {
+            let mut opps: Vec<&Opp> = self.opps.values().collect();
+            opps.sort_by_key(|o| o.id);
+            for o in opps {
+                x.update(&o.id.to_le_bytes()); x.update(&o.trig); x.update(&o.buy); x.update(&o.sell); x.update(&o.size.to_le_bytes()); x.update(&o.net.to_le_bytes());
+                x.update(&o.deadline.to_le_bytes()); x.update(&o.touches.len().to_le_bytes()); x.update(&o.landed.unwrap_or(u64::MAX).to_le_bytes());
+            }
+        });
+        f("signer_stats", &|x| {
+            let mut ss: Vec<(&Pk, &(u32, u32))> = self.signer_stats.iter().collect();
+            ss.sort();
+            for (k, v) in ss { x.update(k); x.update(&v.0.to_le_bytes()); x.update(&v.1.to_le_bytes()); }
+        });
+        f("trig_pending", &|x| {
+            let mut tp: Vec<(&[u8; 64], &(Pk, u64))> = self.trig_pending.iter().collect();
+            tp.sort();
+            for (k, v) in tp { x.update(k); x.update(&v.0); x.update(&v.1.to_le_bytes()); }
+        });
+        f("alts", &|x| self.alts.digest(x));
+        f("commit", &|x| self.tracker.digest(x));
+        f("forks", &|x| self.forks.digest(x));
         // the re-read (review WP-04 #1): its job and resume slot, the reads in progress, the accounts still unverified
-        self.reads.digest(&mut x);
-        if let Some(r) = &self.resync { x.update(&r.job.unwrap_or(u64::MAX).to_le_bytes()); x.update(&r.floor.unwrap_or(u64::MAX).to_le_bytes()); x.update(&r.t_connect.to_le_bytes()); }
-        let mut unv: Vec<&Pk> = self.unverified.iter().collect();
-        unv.sort();
-        for k in unv { x.update(k); }
-        let mut counts: Vec<(&&str, &u64)> = self.counts.iter().collect();
-        counts.sort();
-        for (k, v) in counts { x.update(k.as_bytes()); x.update(&v.to_le_bytes()); }
-        x.update(&self.next_id.to_le_bytes()); x.update(&self.next_decision.to_le_bytes()); x.update(&self.slot.to_le_bytes()); x.update(&self.shred_slot.to_le_bytes());
-        for s in self.slots { x.update(&s.to_le_bytes()); }
-        x.update(&[self.shut as u8, self.tier_a_complete as u8]);
-        x.update(&self.state.msgs.to_le_bytes()); x.update(&self.state.last_msg_t.to_le_bytes());
-        for (at, p, _) in &self.deferred { x.update(&at.to_le_bytes()); x.update(&p.to_le_bytes()); }
-        x.update(&(self.acc_queue.len() as u64).to_le_bytes());
-        x.update(&self.decisions.to_le_bytes());
+        f("reads", &|x| self.reads.digest(x));
+        f("resync", &|x| {
+            if let Some(r) = &self.resync { x.update(&r.job.unwrap_or(u64::MAX).to_le_bytes()); x.update(&r.floor.unwrap_or(u64::MAX).to_le_bytes()); x.update(&r.t_connect.to_le_bytes()); }
+        });
+        f("unverified", &|x| {
+            let mut unv: Vec<&Pk> = self.unverified.iter().collect();
+            unv.sort();
+            for k in unv { x.update(k); }
+        });
+        f("counts", &|x| {
+            let mut counts: Vec<(&&str, &u64)> = self.counts.iter().collect();
+            counts.sort();
+            for (k, v) in counts { x.update(k.as_bytes()); x.update(&v.to_le_bytes()); }
+        });
+        f("ids", &|x| { x.update(&self.next_id.to_le_bytes()); x.update(&self.next_decision.to_le_bytes()); });
+        f("slots", &|x| { x.update(&self.slot.to_le_bytes()); x.update(&self.shred_slot.to_le_bytes()); for s in self.slots { x.update(&s.to_le_bytes()); } });
+        f("health", &|x| x.update(&[self.shut as u8, self.tier_a_complete as u8]));
+        f("state_stream", &|x| { x.update(&self.state.msgs.to_le_bytes()); x.update(&self.state.last_msg_t.to_le_bytes()); });
+        f("deferred", &|x| { for (at, p, _) in &self.deferred { x.update(&at.to_le_bytes()); x.update(&p.to_le_bytes()); } });
+        f("acc_queue", &|x| x.update(&(self.acc_queue.len() as u64).to_le_bytes()));
+        f("decision_hash", &|x| x.update(&self.decisions.to_le_bytes()));
         // ---- WP-09 (review WP-09 "For the WP-05 merge" item 7): the executor's own state, and the crowding map it ranks
         // routes by (an engine without an executor never reads the map: its digest is what it was before WP-09's merge)
-        if let Some(e) = &self.exec { e.digest(&mut x); self.activity.digest(&mut x); }
-        x.digest()
+        if let Some(e) = &self.exec {
+            e.digest_walk(f);
+            f("crowding", &|x| self.activity.digest(x));
+        }
     }
 
     /// the running hash of every decision made (each evaluation's best route and verdict, the routes handed to the
@@ -1587,18 +1635,20 @@ impl Engine {
     pub fn decision_digest(&self) -> u64 { self.decisions }
 
     /// the end of the run: open opportunities finished, the signatures still in their window written, the lookup
-    /// tables dumped (alts-final), the signer statistics saved (into the run directory)
-    pub fn finish(&mut self) {
+    /// tables dumped (alts-final), the signer statistics saved (into the run directory). Returns the digests before and
+    /// after this bookkeeping (FT-001: journaled here as the `run_end` digest point, `digest_point`)
+    pub fn finish(&mut self) -> (Digests, Digests) {
         // ---- WP-09 (review WP-09 #6): the digests as the run ends (its last journaled record handled), before this
         // bookkeeping empties the opportunities and the signature windows
-        let before = (self.digest(), self.decision_digest());
+        let before = self.digests();
         let ids: Vec<u64> = self.opps.keys().copied().collect();
         for id in ids { self.finish_opp(id); }
         let left: Vec<u64> = self.sigs.keys().copied().collect();
         for k in left { if let Some(s) = self.sigs.remove(&k) { self.write_txarr(k, &s); if s.trigger.is_some() { self.write_arrivals(&s); } } }
         self.write_alts();
         self.save_signer_stats();
-        self.record_digests(before);
+        let after = self.digest_point(DIGEST_RUN_END, Some(&before));
+        (before, after)
     }
 
     /// The last status.jsonl line, with the run's stop reason (MEASUREMENT A.5; WP-01)
@@ -1696,6 +1746,39 @@ impl Engine {
     /// is priced (account and transaction updates are left out: the SendGate is closed). True when `done` held
     pub fn drain(&mut self, rx: &Receiver<Event>, until_ns: u64, done: &dyn Fn(&Engine) -> bool, status: &mut dyn FnMut(&str)) -> bool {
         self.drain_on(rx, until_ns, done, status, &now_ns)
+    }
+
+    /// WP-07's stop sequence, after the run loop ended (`run`: `finish` journaled the `run_end` digest point), as `arbx
+    /// run` stops (moved here from main.rs by FT-001, unchanged, so the scenario tests run it): the drain (at most
+    /// `drain_ns`; the gate is closed, nothing new is sent): the attempts still open settle from the wallet stream, the
+    /// block engine's results and their expiry checks. Then, with a ledger, the stop snapshot (at most 20 s) and the
+    /// final reconciliation (review WP-07 #7: decided at once when it passes; otherwise its window is searched and decided
+    /// once more within `recon_grace_s` while the records of what landed just before the stop come in; still unexplained,
+    /// it is written `final: false` and the next segment decides it again). Whatever is still open gets its `unsettled`
+    /// outcome line (WP-05; stop.json lists it, the next segment's ledger joins its landing by signature). FT-001: the
+    /// `stop_end` digest point last, after the sequence's last journaled record (a replay digests there too). `say`: the
+    /// run log. FT-001 p1: the stop snapshot is fetched within `ledger::STOP_SNAPSHOT_BUDGET` (inside the 20 s wait); a
+    /// stop without it records why (`Ledger::stop_snapshot_missing`), and the next segment reconciles the window
+    pub fn stop_sequence(&mut self, rx: &Receiver<Event>, drain_ns: u64, say: &mut dyn FnMut(&str)) -> StopSeq {
+        let in_flight = self.exec.as_ref().map(|x| x.open_attempts().len());
+        let t_drain = now_ns();
+        if in_flight.is_some_and(|n| n > 0) { say(&format!("stop: waiting at most {} s for {} open attempts to settle", drain_ns / 1_000_000_000, in_flight.unwrap_or(0))); }
+        let settled = self.drain(rx, t_drain + drain_ns, &|e| e.exec.as_ref().is_none_or(|x| x.open_attempts().is_empty()), say);
+        let drain_ms = now_ns().saturating_sub(t_drain) as f64 / 1e6;
+        if self.ledger.is_some() {
+            self.ledger_stop_snapshot();
+            if !self.drain(rx, now_ns() + 20_000_000_000, &|e| e.ledger_stop_snapshot_done(), say) {
+                say("stop: no stop snapshot within 20 s");
+                let t = self.t_now.max(now_ns());
+                if let Some(l) = self.ledger.as_mut() { l.stop_snapshot_missing(t, "no stop snapshot within the stop sequence's 20 s"); }
+            }
+            let grace = self.ledger_final_begin();
+            if !self.drain(rx, now_ns() + grace, &|e| e.ledger_final_settled(), say) { say("stop: the stop's reconciliation is decided without more records"); }
+            self.ledger_final();
+        }
+        let open = self.exec.as_mut().map(|x| x.settle_at_stop());
+        self.digest_point(DIGEST_STOP_END, None);
+        StopSeq { in_flight, settled, drain_ms, open }
     }
 
     /// `drain` on the clock `clock` (tests: a virtual one); a wait for the next event lasts at most 50 ms of real time
@@ -3135,6 +3218,59 @@ impl Engine {
     }
 }
 
+// ---------------------------------------------------------------- FT-001: the digest points and the digest's parts
+
+/// What a state digest folds bytes into (`Engine::digest_walk` and the parts' own `digest` functions): one hasher, or
+/// the whole digest and one part's at once (`Tee`)
+pub trait Fold { fn update(&mut self, b: &[u8]); }
+
+impl Fold for xxhash_rust::xxh3::Xxh3 {
+    #[inline]
+    fn update(&mut self, b: &[u8]) { xxhash_rust::xxh3::Xxh3::update(self, b) }
+}
+
+/// the whole digest and one part's, fed the same bytes (`Engine::digests`: one pass for both)
+struct Tee<'a>(&'a mut xxhash_rust::xxh3::Xxh3, &'a mut xxhash_rust::xxh3::Xxh3);
+
+impl Fold for Tee<'_> {
+    #[inline]
+    fn update(&mut self, b: &[u8]) { self.0.update(b); self.1.update(b); }
+}
+
+/// The digest point at the end of the run loop (`Engine::finish`: its digests before and after finish's bookkeeping),
+/// and the one at the end of the stop sequence (`arbx run`, after the drain, the stop snapshot, the final reconciliation
+/// and the executor's `settle_at_stop`)
+pub const DIGEST_RUN_END: &str = "run_end";
+pub const DIGEST_STOP_END: &str = "stop_end";
+
+/// What `Engine::stop_sequence` did: the attempts open when it began (None: no executor), whether the drain saw them
+/// settle, how long the drain took, the attempts still open at its end (settled `unsettled`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct StopSeq { pub in_flight: Option<usize>, pub settled: bool, pub drain_ms: f64, pub open: Option<Vec<u64>> }
+
+/// ---- FT-001. The digests at one point: the state digest, the decision digest and each part's digest, in
+/// `Engine::digest_walk`'s order; `ms`: how long they took (a real clock read, reported only: the stop waits for them)
+#[derive(Clone, Debug, PartialEq)]
+pub struct Digests { pub state: u64, pub decision: u64, pub parts: Vec<(&'static str, u64)>, pub ms: f64 }
+
+impl Digests {
+    /// `{digest, decision_digest, parts: {name: hex}}` (hex: 16 characters)
+    pub fn json(&self) -> Value {
+        json!({ "digest": hex16(self.state), "decision_digest": hex16(self.decision), "ms": (self.ms * 1e3).round() / 1e3,
+            "parts": self.parts.iter().map(|(k, v)| (k.to_string(), json!(hex16(*v)))).collect::<serde_json::Map<String, Value>>() })
+    }
+
+    /// The parts whose digest differs from a recorded `{parts: {name: hex}}` (a part only one side has differs too); None
+    /// when the record has no parts (written before FT-001)
+    pub fn parts_differ(&self, rec: &Value) -> Option<Vec<String>> {
+        let theirs = rec["parts"].as_object()?;
+        let mine: std::collections::BTreeMap<&str, String> = self.parts.iter().map(|(k, v)| (*k, hex16(*v))).collect();
+        let mut out: Vec<String> = mine.iter().filter(|(k, v)| theirs.get(**k).and_then(|x| x.as_str()) != Some(v.as_str())).map(|(k, _)| k.to_string()).collect();
+        out.extend(theirs.keys().filter(|k| !mine.contains_key(k.as_str())).cloned());
+        Some(out)
+    }
+}
+
 // ---------------------------------------------------------------- WP-09: what a replay needs of the engine (src/replay.rs)
 
 /// ---- WP-09 (review WP-09 #3). The SendGate as decisions without an executor read it. A run keeps the reason it
@@ -3196,13 +3332,35 @@ impl Engine {
         why
     }
 
-    /// ---- WP-09 (review WP-09 #6). The digests as the run ends, as an events.jsonl `engine_digests` record:
-    /// `before_finish` once its last journaled record was handled (what a whole replay reaches), then after `finish`'s
-    /// bookkeeping. `arbx replay --compare` checks a replay that ran to the end against them
-    fn record_digests(&self, before: (u64, u64)) {
-        self.rec.event("engine_digests", "engine", None, json!({ "t_engine": self.t_now, "decisions": self.next_decision, "opportunities": self.next_id,
-            "before_finish": { "digest": hex16(before.0), "decision_digest": hex16(before.1) },
-            "digest": hex16(self.digest()), "decision_digest": hex16(self.decision_digest()) }));
+    /// ---- WP-09 (review WP-09 #6), FT-001. A digest point: the digests now, each part's too (`digests`), as an
+    /// events.jsonl `engine_digests` record and journaled right here as INPUT 14 `digest_point` (at the engine time of the
+    /// last record handled), so that a replay digests at exactly this point of the journal whatever the run journaled
+    /// after it. FT-001 p1: the run digested at the end of its loop (`finish`), then journaled 0.209 s of its stop
+    /// sequence (the drain's inputs and housekeeping), which the replay applied before it digested: the decision digests
+    /// agreed and the state digests did not. `run_end` (`finish`) carries `before_finish` too, the digests once the
+    /// loop's last record was handled (finish's bookkeeping then empties the opportunities and the signature windows);
+    /// `stop_end` is the end of the stop sequence. The engine's and the executor's counters ride along (`counts`: a
+    /// replay names the counters that differ). Returns the digests now
+    pub fn digest_point(&mut self, point: &'static str, before: Option<&Digests>) -> Digests {
+        let now = self.digests();
+        let mut v = now.json();
+        v["point"] = json!(point);
+        v["t_engine"] = json!(self.t_now);
+        v["decisions"] = json!(self.next_decision);
+        v["opportunities"] = json!(self.next_id);
+        if let Some(b) = before { v["before_finish"] = b.json(); }
+        v["counts"] = self.counts_json();
+        let v = Arc::new(v);
+        self.journal.input_sized(self.t_now, InputKind::DigestPoint, v.clone(), 8_192);
+        self.rec.event("engine_digests", "engine", None, (*v).clone());
+        now
+    }
+
+    /// ---- FT-001. The engine's and the executor's counters, `{engine: {name: n}, exec: {name: n} | null}` (a digest
+    /// point's `counts`)
+    pub fn counts_json(&self) -> Value {
+        let sorted = |m: &HashMap<&'static str, u64>| -> Value { Value::Object(m.iter().map(|(k, n)| (k.to_string(), json!(n))).collect()) };
+        json!({ "engine": sorted(&self.counts), "exec": self.exec.as_ref().map(|x| sorted(&x.counts)) })
     }
 
     /// ---- WP-09 (review WP-09 #10). Route (buy, sell) of `mint` priced at `size` on the store as it is, as a decision

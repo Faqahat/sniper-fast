@@ -76,13 +76,17 @@ pub enum InputKind { BlockhashHead = 1, LeaderWindow = 2, Gate = 3, Quarantine =
     ExecInit = 12,
     /// WP-07: the ledger's RPC answers (src/ledger.rs): a balance snapshot (`what` `snapshot`: the accounts' raw answers
     /// at their context slots) or the window search of an unexplained reconciliation (`what` `sigs`)
-    Snapshot = 13 }
+    Snapshot = 13,
+    /// ---- FT-001: a digest point (`Engine::digest_point`: the run's state and decision digests with each part's, where
+    /// it took them: the end of its loop, `run_end`, and of its stop sequence, `stop_end`), journaled by the engine
+    /// itself, never an `Event`: a replay digests at the record (and mirrors what the run did there) and compares
+    DigestPoint = 14 }
 
 impl InputKind {
     pub fn from_u8(k: u8) -> Option<InputKind> {
         use InputKind::*;
         Some(match k { 1 => BlockhashHead, 2 => LeaderWindow, 3 => Gate, 4 => Quarantine, 5 => InflightRelease, 6 => Health, 7 => WalletTx, 8 => SlotidxMissing, 9 => Settled,
-            10 => EngineInit, 11 => Fetch, 12 => ExecInit, 13 => Snapshot, _ => return None })
+            10 => EngineInit, 11 => Fetch, 12 => ExecInit, 13 => Snapshot, 14 => DigestPoint, _ => return None })
     }
 }
 

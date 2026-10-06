@@ -207,7 +207,7 @@ impl SlotTree {
     }
 
     /// a digest of the tree (replay determinism)
-    pub fn digest(&self, x: &mut xxhash_rust::xxh3::Xxh3) {
+    pub fn digest(&self, x: &mut dyn crate::engine::Fold) {
         for (s, n) in &self.nodes {
             x.update(&s.to_le_bytes());
             x.update(&n.parent.unwrap_or(u64::MAX).to_le_bytes());

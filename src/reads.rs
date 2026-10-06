@@ -156,7 +156,7 @@ impl Reads {
     }
 
     /// a digest of the state (replay determinism)
-    pub fn digest(&self, x: &mut xxhash_rust::xxh3::Xxh3) {
+    pub fn digest(&self, x: &mut dyn crate::engine::Fold) {
         x.update(&self.next_id.to_le_bytes());
         x.update(&(self.inflight as u64).to_le_bytes());
         for j in self.jobs.values() {

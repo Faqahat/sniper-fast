@@ -1,0 +1,23 @@
+{
+  "_doc": "FT-001 segment p1's journal tail (src/scenarios/digest_points.rs `cut_the_ft001_p1_tail_fixture`): the last records of its run loop and every record of its stop sequence, with the run's engine_digests",
+  "engine_digests": {
+    "before_finish": {
+      "decision_digest": "676f917fa5525f25",
+      "digest": "9eb9360e6daaf99c"
+    },
+    "decision_digest": "676f917fa5525f25",
+    "decisions": 55520,
+    "digest": "6d674eafbf2d0209",
+    "opportunities": 1597,
+    "t_engine": 1791273479256727634
+  },
+  "first_seq": 12539849,
+  "journal_file": "journal.041.bin.zst",
+  "journal_file_sha256": "a45dc621e757b1716dca2de1fac4b0623f0f40fe4a7b3cef4d36a8df60088054",
+  "kept_from_index": 35867,
+  "last_seq": 12539898,
+  "loop_records_kept": 40,
+  "records_in_file": 35917,
+  "run": "ft001-p1 (Cherry, 60 min shadow of the frz canary config, build 11e25d1)",
+  "stop_records": 10
+}
