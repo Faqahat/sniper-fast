@@ -533,6 +533,55 @@ fn older_venues_refuse_paused_and_default_frozen_mints() {
     }
 }
 
+/// Review F10 (WP-16 review F4's check, for these venues; DESIGN.md §9.0 item 3): the state stream follows every account a
+/// CLMM quote reads. Over the 20 snapshots, both directions, as a route's leg and as a third party's swap, `quote::leg`
+/// and its walks run on a store that holds only what the registry has the stream follow (`static_accounts`: the pool, its
+/// vaults, its Token-2022 mints, Raydium's AmmConfig and bitmap extension, Orca's oracle; the ones that do not exist held
+/// empty) and the tick arrays the engine follows (`pools::clmm_arrays`): no leg is `Missing`, nothing else is read, and
+/// every account read outside the tick arrays has its role and is a part the readiness check covers
+#[test]
+fn the_stream_follows_every_account_a_clmm_quote_reads() {
+    use std::cell::RefCell;
+    let mut fxs: Vec<&Fx> = fixtures().values().collect();
+    fxs.sort_by_key(|f| f.pool);
+    let metas: Vec<PoolMeta> = fxs.iter().map(|f| meta(f)).collect();
+    let mut pairs: HashMap<(Pk, Pk), Vec<usize>> = HashMap::default();
+    for (i, m) in metas.iter().enumerate() { pairs.entry(crate::pools::pair_key(&m.t0, &m.t1)).or_default().push(i); }
+    let reg = crate::pools::Registry { pools: metas.clone(), by_pool: metas.iter().enumerate().map(|(i, m)| (m.pool, i)).collect(), pairs,
+        seeds: Default::default(), ours: Default::default() };
+    let followed: std::collections::HashSet<Pk> = reg.static_accounts().into_iter().collect();
+    let roles: std::collections::HashSet<Pk> = reg.watch_roles().into_iter().map(|r| r.0).collect();
+    assert_eq!(followed, roles, "every followed account has its role and nothing else");
+    let (mut legs, mut walked) = (0, 0);
+    for (fx, m) in fxs.iter().zip(&metas) {
+        let pre = accounts(fx, &Value::Null);
+        let getv = |k: &Pk| pre.get(k).map(|a| a.data.to_vec());
+        let arrays = crate::pools::clmm_arrays(m, &getv, &[]);
+        assert!(!arrays.is_empty(), "{}", fx.file);
+        let read: RefCell<Vec<Pk>> = RefCell::new(vec![]);
+        let is_array = |k: &Pk| arrays.iter().any(|a| a.1 == *k);
+        let get = |k: &Pk| { read.borrow_mut().push(*k); if followed.contains(k) || is_array(k) { pre.get(k) } else { None } };
+        let parts: Vec<Pk> = crate::store::consistency_set(m).into_iter().chain(crate::store::other_parts(m)).collect();
+        for zfo in [true, false] {
+            for u in [Use::Route { dlmm_budget: DLMM_BUDGET_ALONE }, Use::Third] {
+                read.borrow_mut().clear();
+                let r = leg(m, zfo, &Src { get: &get, arrays: &arrays, usable: &|_| true, clock: clock(fx.slot, fx.unix) }, u);
+                assert!(!matches!(r, Err(Why::Missing(_))), "{} zfo {zfo} {u:?}: an account the quote reads is not followed: {:?}", fx.file,
+                    read.borrow().iter().filter(|k| !followed.contains(*k) && !is_array(k)).map(crate::tx::b58).collect::<Vec<_>>());
+                if let Ok(l) = &r {
+                    for x in [1_000_000u64, 100_000_000, 1_000_000_000] { if l.walk(x).is_ok() { walked += 1; } }
+                }
+                for k in read.borrow().iter().filter(|k| !is_array(k)) {
+                    assert!(followed.contains(k), "{}: the quote read {} the stream does not follow", fx.file, crate::tx::b58(k));
+                    assert!(parts.contains(k), "{}: the quote read {} the readiness check does not cover", fx.file, crate::tx::b58(k));
+                }
+                legs += 1;
+            }
+        }
+    }
+    assert!(legs == 80 && walked > 100, "{legs} legs, {walked} walks");
+}
+
 /// Review F2, measured as the review's bench did (wp21-review/bench: leg parse p99 36 µs, 39-42 µs on the tick-spacing-1
 /// pools 2uoK and DCAL whose bitmap scan crossed thousands of empty arrays; the drift's follow-set check p99 58 µs, 218
 /// µs at most): each CLMM snapshot's leg parsed 200 times both ways (`quote::leg`, a route's), and its follow set derived
