@@ -16,11 +16,16 @@
 //! - `accepted`: the stream stayed open for the window (`auto` also needs at least one message);
 //! - `refused`: the provider answered with a definite refusal (PermissionDenied, InvalidArgument, Unimplemented, ...),
 //!   or closed the stream early;
-//! - `inconclusive` (`accepted` null): Unavailable / HTTP 503 (and 429, 502, 504), ResourceExhausted, DeadlineExceeded,
-//!   or no gRPC answer at all (a transport error, not opened in time). Haan grants its streams to the first process
-//!   only and answers every other one 503 (I-3), and its outages are transient (I-2): such a result says nothing about
-//!   what the provider supports. Its gRPC `code` and `http_status` are recorded, `auto` treats it as off, and
-//!   `arbx grpc-probe` then exits non-zero without replacing probe.json.
+//! - `refused_plan_limit` (`accepted` false): ResourceExhausted whose message names a plan limit, `<LIMIT> exceeded:
+//!   <requested>/<allowed>` (the 2026-10-05 02:40 probe on Cherry: `TX_INCLUDE exceeded: 2/1` for the 2-account
+//!   transaction filter, `BLOCK_GROUPS exceeded: 1/0` for the blocks filter). A definite answer about the plan: the
+//!   limit's name and both numbers are recorded (`limit`);
+//! - `inconclusive` (`accepted` null): Unavailable / HTTP 503 (and 429, 502, 504), any other ResourceExhausted (a rate
+//!   limit), DeadlineExceeded, or no gRPC answer at all (a transport error, not opened in time). Haan grants its streams
+//!   to the first process only and answers every other one 503 (I-3), and its outages are transient (I-2): such a result
+//!   says nothing about what the provider supports. Its gRPC `code` and `http_status` are recorded, `auto` treats it as
+//!   off, and `arbx grpc-probe` then exits non-zero without replacing probe.json. Only an inconclusive result blocks
+//!   the write: a probe whose subscriptions were all accepted or refused (plan limits included) writes probe.json.
 //!
 //! The probe holds the provider for about 4 minutes (8 subscriptions one after the other), so it refuses to start while
 //! anything else may hold it (`busy`: a campaign supervisor's lock, a live segment's control socket, an `arbx run` or
@@ -34,7 +39,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tonic::codec::ProstCodec;
 
-pub const SCHEMA: &str = "arbx.probe/1.0";
+/// 1.1: the `refused_plan_limit` verdict and `limit` (a reader takes any 1.x: `accepted`)
+pub const SCHEMA: &str = "arbx.probe/1.1";
 /// the accounts filter is probed at no fewer keys than this (PLAN WP-03 item 5)
 pub const MIN_ACCOUNTS: usize = 3_000;
 
@@ -60,8 +66,10 @@ pub struct SubResult {
     pub sub: String,
     /// true accepted, false refused, None inconclusive (see the module doc)
     pub accepted: Option<bool>,
-    /// "accepted", "refused" or "inconclusive"
+    /// "accepted", "refused", "refused_plan_limit" or "inconclusive"
     pub verdict: &'static str,
+    /// the plan limit a `refused_plan_limit` named (1.1)
+    #[serde(skip_serializing_if = "Option::is_none")] pub limit: Option<PlanLimit>,
     pub error: Option<String>,
     /// the gRPC status code of an error (`Unavailable`, `PermissionDenied`, ...; None: no gRPC answer)
     pub code: Option<String>,
@@ -105,16 +113,39 @@ impl SubErr {
     fn status(s: &tonic::Status) -> SubErr { SubErr { code: Some(s.code()), text: crate::rpc::scrub(&format!("{:?}: {}", s.code(), s.message())) } }
     fn other(text: String) -> SubErr { SubErr { code: None, text: crate::rpc::scrub(&text) } }
     /// says nothing about what the provider supports: it is busy (another process holds the stream, I-3), down (I-2) or
-    /// unreachable
+    /// unreachable. A ResourceExhausted that names a plan limit (`plan_limit`) is a definite refusal
     pub fn inconclusive(&self) -> bool {
         use tonic::Code::*;
+        if self.plan_limit().is_some() { return false; }
         match self.code { None => true, Some(c) => matches!(c, Unavailable | ResourceExhausted | DeadlineExceeded | Aborted | Cancelled) }
+    }
+    /// The plan limit a ResourceExhausted refusal names: `<LIMIT> exceeded: <requested>/<allowed>` (the provider's text,
+    /// e.g. `TX_INCLUDE exceeded: 2/1`, `BLOCK_GROUPS exceeded: 1/0`); None for any other error
+    pub fn plan_limit(&self) -> Option<PlanLimit> {
+        if self.code != Some(tonic::Code::ResourceExhausted) { return None; }
+        plan_limit(&self.text)
     }
     /// the HTTP status of a reply without gRPC status (tonic: "... mapped from HTTP status code 503")
     pub fn http_status(&self) -> Option<u16> {
         let i = self.text.find("HTTP status code ")? + "HTTP status code ".len();
         self.text[i..].chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok()
     }
+}
+
+/// A plan limit a provider refused a subscription for: `name` (`TX_INCLUDE`, `BLOCK_GROUPS`, ...), what the request
+/// asked for and what the plan allows (probe.json `limit`)
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct PlanLimit { pub name: String, pub requested: u64, pub allowed: u64 }
+
+/// `<LIMIT> exceeded: <requested>/<allowed>` anywhere in `text` (the colon and spaces optional)
+pub fn plan_limit(text: &str) -> Option<PlanLimit> {
+    let i = text.find(" exceeded")?;
+    let name: String = text[..i].chars().rev().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect::<Vec<_>>().into_iter().rev().collect();
+    let rest = text[i + " exceeded".len()..].trim_start_matches(|c: char| c == ':' || c.is_whitespace());
+    let num = |s: &str| -> Option<(u64, usize)> { let d: String = s.chars().take_while(|c| c.is_ascii_digit()).collect(); Some((d.parse().ok()?, d.len())) };
+    let (requested, n) = num(rest)?;
+    let (allowed, _) = num(rest[n..].strip_prefix('/')?)?;
+    (!name.is_empty()).then_some(PlanLimit { name, requested, allowed })
 }
 
 /// Open one bidi subscription (`first` as its request) and count the messages `counts` accepts for `window`.
@@ -180,14 +211,15 @@ pub async fn probe(plan: &Plan, window: Duration, only: Option<&[String]>) -> Ve
     let host = crate::provenance::host_of(&plan.state.url);
     let mut out = Vec::new();
     let res = |sub: &str, r: Result<(u64, Option<f64>, Option<String>), SubErr>, host: &str, feed: Option<String>, n_accounts: Option<usize>| {
-        let (accepted, error, code, http, n, first) = match r {
-            Ok((n, f, None)) => (Some(true), None, None, None, n, f),
-            Ok((n, f, Some(closed))) => (Some(false), Some(closed), None, None, n, f),
-            Err(e) => ((!e.inconclusive()).then_some(false), Some(e.text.clone()), e.code.map(|c| format!("{c:?}")), e.http_status(), 0, None),
+        let (accepted, error, code, http, n, first, limit) = match r {
+            Ok((n, f, None)) => (Some(true), None, None, None, n, f, None),
+            Ok((n, f, Some(closed))) => (Some(false), Some(closed), None, None, n, f, None),
+            Err(e) => ((!e.inconclusive()).then_some(false), Some(e.text.clone()), e.code.map(|c| format!("{c:?}")), e.http_status(), 0, None, e.plan_limit()),
         };
-        let verdict = match accepted { Some(true) => "accepted", Some(false) => "refused", None => "inconclusive" };
-        SubResult { sub: sub.into(), accepted, verdict, error, code, http_status: http, messages_30s: n, first_msg_ms: first, host: host.into(), feed, n_accounts,
-            window_s: window.as_secs_f64() }
+        let verdict = match (accepted, &limit) { (Some(true), _) => "accepted", (Some(false), Some(_)) => "refused_plan_limit", (Some(false), None) => "refused",
+            (None, _) => "inconclusive" };
+        SubResult { sub: sub.into(), accepted, verdict, limit, error, code, http_status: http, messages_30s: n, first_msg_ms: first, host: host.into(), feed,
+            n_accounts, window_s: window.as_secs_f64() }
     };
     for (name, req, n_acc) in requests(plan) {
         if !want(name) { continue; }
@@ -214,7 +246,7 @@ pub fn probe_json(plan: &Plan, subs: &[SubResult]) -> Value {
 /// only for a stream that stayed open AND delivered at least one message (review WP-03 #4 iii); Some(false) refused.
 /// None: no usable answer (no file, another provider, not probed, inconclusive, or open but silent): `auto` is off
 pub fn accepted(probe: &Value, host: &str, sub: &str) -> Option<bool> {
-    if probe["schema"].as_str() != Some(SCHEMA) || probe["provider_host"].as_str() != Some(host) { return None; }
+    if !probe["schema"].as_str().is_some_and(|x| x.starts_with("arbx.probe/1.")) || probe["provider_host"].as_str() != Some(host) { return None; }
     let s = probe["subs"].as_array()?.iter().find(|s| s["sub"].as_str() == Some(sub) && s.get("feed").map_or(true, |f| f.is_null()))?;
     match s["accepted"].as_bool()? {
         true => (s["messages_30s"].as_u64().unwrap_or(0) > 0).then_some(true),
@@ -222,15 +254,21 @@ pub fn accepted(probe: &Value, host: &str, sub: &str) -> Option<bool> {
     }
 }
 
-/// The results that say nothing (503 / Unavailable and the like)
+/// The results that say nothing (503 / Unavailable and the like): any of them keeps `arbx grpc-probe` from writing
+/// probe.json (accepted and refused ones, plan limits included, never do)
 pub fn inconclusive(subs: &[SubResult]) -> Vec<&SubResult> { subs.iter().filter(|s| s.accepted.is_none()).collect() }
 
 /// Whether a command line is a bot run that may hold the provider: `arbx … run …` (a campaign's copy `arbx-<sha8>` too)
 /// or arb-lab's `arb-lab … run …`
 pub fn is_bot_run(argv: &[String]) -> bool {
     let Some(a0) = argv.first() else { return false };
-    let base = a0.rsplit('/').next().unwrap_or(a0);
-    (base.starts_with("arbx") || base.starts_with("arb-lab")) && argv.iter().skip(1).any(|a| a == "run")
+    let base = |a: &String| a.rsplit('/').next().unwrap_or(a).to_string();
+    let runs = argv.iter().skip(1).any(|a| a == "run");
+    let b0 = base(a0);
+    if (b0.starts_with("arbx") || b0.starts_with("arb-lab")) && runs { return true; }
+    // WP-07 (review #14): arbed's bot, `bun bin/arbed.ts run ...` under pm2 (`arbed-live`), on the same frz keystore and the
+    // same Haan token: its script is one of the first arguments
+    runs && argv.iter().take(3).any(|a| base(a).starts_with("arbed"))
 }
 
 /// What may hold the provider now (review WP-03 #4 ii): a live control socket of a segment under `out_dir`
@@ -259,6 +297,16 @@ pub fn busy(out_dir: &std::path::Path, procs: bool) -> Vec<String> {
     out
 }
 
+/// Whether something holds the campaign supervisor's lock in `out_dir` now (WP-07: a campaign's live or canary segment
+/// runs only while its supervisor holds it). False when the lock file cannot be opened
+pub fn lock_held(out_dir: &std::path::Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(out_dir.join(".supervisor.lock")) else { return false };
+    let free = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
+    if free { unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_UN); } }
+    !free
+}
+
 /// The campaign supervisor's lock (`<out_dir>/.supervisor.lock`, deploy/run-w.sh), taken for the probe's duration so
 /// no campaign starts meanwhile. Err: a supervisor holds it (a campaign is running, between segments too). Ok(None):
 /// there is no runs directory here to guard (the lock file cannot be opened)
@@ -282,7 +330,9 @@ mod tests {
     /// An in-process Yellowstone server: `Subscribe` refuses a request with `blocks_meta` (PermissionDenied) and
     /// otherwise streams a slot update every 20 ms; `SubscribeDeshred` streams deshred transactions. `mode` 1: every
     /// call is refused Unavailable (another process holds the provider, PLAN-ADDENDUM I-3); 2: every call gets a bare
-    /// HTTP 503; 3: every stream opens and stays silent
+    /// HTTP 503; 3: every stream opens and stays silent; 4: Haan's plan as Cherry's probe found it on 2026-10-05
+    /// (blocks_meta accepted, a transaction filter of more than one account refused `TX_INCLUDE exceeded: n/1`, a blocks
+    /// filter refused `BLOCK_GROUPS exceeded: 1/0`)
     #[derive(Clone, Default)]
     struct Fake { seen: Arc<std::sync::Mutex<Vec<SubscribeRequest>>>, mode: Arc<std::sync::atomic::AtomicU8> }
 
@@ -303,7 +353,12 @@ mod tests {
                 let first = inb.message().await?.ok_or_else(|| tonic::Status::invalid_argument("no request"))?;
                 seen.lock().unwrap().push(first.clone());
                 if mode == 1 { return Err(tonic::Status::unavailable("stream limit reached for this token")); }
-                if !first.blocks_meta.is_empty() { return Err(tonic::Status::permission_denied("blocks_meta is not enabled for this token")); }
+                if mode == 4 {
+                    if let Some(f) = first.transactions.get("probe").filter(|f| f.account_include.len() > 1) {
+                        return Err(tonic::Status::resource_exhausted(format!("TX_INCLUDE exceeded: {}/1", f.account_include.len())));
+                    }
+                    if !first.blocks.is_empty() { return Err(tonic::Status::resource_exhausted("BLOCK_GROUPS exceeded: 1/0")); }
+                } else if !first.blocks_meta.is_empty() { return Err(tonic::Status::permission_denied("blocks_meta is not enabled for this token")); }
                 let (tx, rx) = tokio::sync::mpsc::channel(16);
                 tokio::spawn(async move {
                     if mode == 3 { tx.closed().await; return; }
@@ -446,6 +501,66 @@ mod tests {
         assert_eq!(accepted(&probe_json(&plan, &subs), &host, "slots_interslot"), None);
     }
 
+    /// Coordinator item (Cherry's probe, 2026-10-05 02:40 UTC): a ResourceExhausted that names a plan limit is a definite
+    /// refusal, `refused_plan_limit`, with the limit's name and numbers (`TX_INCLUDE exceeded: 2/1`, `BLOCK_GROUPS
+    /// exceeded: 1/0`, the provider's exact strings), not inconclusive: with every other subscription accepted the probe
+    /// has nothing inconclusive and writes probe.json. A ResourceExhausted without a limit (a rate limit) and Unavailable
+    /// stay inconclusive
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn plan_limit_refusals_are_definite_and_the_probe_is_written() {
+        // the classification on the exact error strings
+        let st = |s: tonic::Status| SubErr::status(&s);
+        let tx2 = st(tonic::Status::resource_exhausted("TX_INCLUDE exceeded: 2/1"));
+        assert_eq!(tx2.text, "ResourceExhausted: TX_INCLUDE exceeded: 2/1");
+        assert_eq!((tx2.inconclusive(), tx2.plan_limit()), (false, Some(PlanLimit { name: "TX_INCLUDE".into(), requested: 2, allowed: 1 })));
+        let bg = st(tonic::Status::resource_exhausted("BLOCK_GROUPS exceeded: 1/0"));
+        assert_eq!((bg.inconclusive(), bg.plan_limit()), (false, Some(PlanLimit { name: "BLOCK_GROUPS".into(), requested: 1, allowed: 0 })));
+        for (e, why) in [(st(tonic::Status::resource_exhausted("rate limit reached, slow down")), "a rate limit"),
+            (st(tonic::Status::unavailable("stream limit reached for this token")), "Unavailable"),
+            (SubErr::other("status: Unavailable, message: \"grpc-status header missing, mapped from HTTP status code 503\"".into()), "a bare 503")] {
+            assert!(e.inconclusive() && e.plan_limit().is_none(), "{why}: {e:?}");
+        }
+        assert_eq!(st(tonic::Status::permission_denied("TX_INCLUDE exceeded: 2/1")).plan_limit(), None, "only a ResourceExhausted names a plan limit");
+        assert_eq!(plan_limit("ResourceExhausted: TX_INCLUDE exceeded 5/1"), Some(PlanLimit { name: "TX_INCLUDE".into(), requested: 5, allowed: 1 }), "colon optional");
+        assert_eq!((plan_limit("exceeded: 2/1"), plan_limit("TX_INCLUDE exceeded: two/1")), (None, None));
+        // through the probe, against a server with Cherry's plan
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let fake = Fake::default();
+        fake.mode.store(4, std::sync::atomic::Ordering::Relaxed);
+        tokio::spawn(tonic::transport::Server::builder().add_service(fake).serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(l)));
+        let url = format!("http://{addr}");
+        let host = crate::provenance::host_of(&url);
+        let venues: Vec<String> = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+            "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"].map(String::from).to_vec();
+        let t = Target { url: url.clone(), token: None, header: None };
+        let plan = Plan { state: t.clone(), accounts: vec![], venue_programs: venues, deshred: vec![("haan-deshred".into(), t)] };
+        let subs = probe(&plan, Duration::from_millis(300), None).await;
+        let by: HashMap<&str, &SubResult> = subs.iter().map(|s| (s.sub.as_str(), s)).collect();
+        for ok in ["accounts_full", "slots_interslot", "blocks_meta", "tx_filter_1", "deshred_5"] {
+            assert_eq!((by[ok].accepted, by[ok].verdict, by[ok].limit.as_ref()), (Some(true), "accepted", None), "{ok}: {:?}", by[ok]);
+        }
+        for (sub, name, requested, allowed) in [("tx_filter_2", "TX_INCLUDE", 2, 1), ("tx_filter_5", "TX_INCLUDE", 5, 1), ("blocks_account_include", "BLOCK_GROUPS", 1, 0)] {
+            let s = by[sub];
+            assert_eq!((s.accepted, s.verdict, s.code.as_deref()), (Some(false), "refused_plan_limit", Some("ResourceExhausted")), "{sub}: {s:?}");
+            assert_eq!(s.limit, Some(PlanLimit { name: name.into(), requested, allowed }), "{sub}");
+            assert_eq!(s.error.as_deref(), Some(format!("ResourceExhausted: {name} exceeded: {requested}/{allowed}").as_str()));
+        }
+        assert!(inconclusive(&subs).is_empty(), "nothing inconclusive: probe.json is written");
+        let v = probe_json(&plan, &subs);
+        assert_eq!(v["schema"], json!("arbx.probe/1.1"));
+        let tx2 = v["subs"].as_array().unwrap().iter().find(|s| s["sub"] == "tx_filter_2").unwrap();
+        assert_eq!((tx2["verdict"].clone(), tx2["limit"].clone()), (json!("refused_plan_limit"), json!({ "name": "TX_INCLUDE", "requested": 2, "allowed": 1 })));
+        assert!(v["subs"].as_array().unwrap().iter().filter(|s| s["verdict"] == "accepted").all(|s| s.get("limit").is_none()), "no limit on an accepted one");
+        // `auto` reads it: blocks_meta and interslot slots on, the 2-account filter refused; a 1.0 file is still read
+        assert_eq!((accepted(&v, &host, "blocks_meta"), accepted(&v, &host, "slots_interslot"), accepted(&v, &host, "tx_filter_2")), (Some(true), Some(true), Some(false)));
+        let mut old = v.clone();
+        old["schema"] = json!("arbx.probe/1.0");
+        assert_eq!(accepted(&old, &host, "blocks_meta"), Some(true));
+        old["schema"] = json!("arbx.probe/2.0");
+        assert_eq!(accepted(&old, &host, "blocks_meta"), None, "another major is not read");
+    }
+
     /// review WP-03 #4 ii: what may hold the provider, and the supervisor's lock the probe takes
     #[test]
     fn busy_finds_live_segments_and_bot_processes() {
@@ -454,6 +569,10 @@ mod tests {
         assert!(is_bot_run(&s(&["/root/arbx/runs/c1/arbx-1a2b3c4d", "run", "--campaign-dir", "c"])));
         assert!(is_bot_run(&s(&["./arb-lab", "run", "--config", "arb.toml"])));
         assert!(!is_bot_run(&s(&["arbx", "grpc-probe", "--config", "x"])) && !is_bot_run(&s(&["vim", "run"])) && !is_bot_run(&[]));
+        // WP-07 (review #14): arbed's bot under pm2, on the same frz keystore and Haan token
+        assert!(is_bot_run(&s(&["bun", "bin/arbed.ts", "run", "--live", "--stop-after-wins", "1", "--profile", "winning"])));
+        assert!(is_bot_run(&s(&["/root/.bun/bin/bun", "/root/arbed/bin/arbed.ts", "run"])));
+        assert!(!is_bot_run(&s(&["bun", "bin/arbed.ts", "report"])) && !is_bot_run(&s(&["bun", "run", "build"])));
         let out = std::env::temp_dir().join(format!("arbx-probe-busy-{}-{}", std::process::id(), now_ns()));
         let (live, stale) = (out.join("camp").join("camp-p1"), out.join("seg-old"));
         std::fs::create_dir_all(&live).unwrap();

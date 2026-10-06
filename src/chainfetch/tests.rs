@@ -5,6 +5,7 @@ use super::*;
 use crate::feeds::grpc::PbTransaction;
 use crate::rec::accounts::{RoleOf, NO_POOL};
 use base64::Engine as _;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const WALLET: &str = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE";
@@ -65,7 +66,14 @@ impl FakeChain {
                 (Some(453_034_312), _) => reply(&fixture("getBlock-453034312-signatures-first40.json")),
                 (s, _) => { let mut f = RpcFailure::new(ErrClass::Rpc, Some("fake"), format!("Block not available for slot {s:?}")); f.code = Some(-32004); f.retryable = false; Err(f) }
             },
-            "getSignaturesForAddress" => reply(&fixture("getSignaturesForAddress-2g7rYv7y-before-4RT9wv.json")),
+            "getSignaturesForAddress" => {
+                // the recorded page, its block times moved to the last minutes (a listing takes only its last hour: FT-000)
+                let mut v = fixture("getSignaturesForAddress-2g7rYv7y-before-4RT9wv.json");
+                let now = (now_ns() / 1_000_000_000) as i64;
+                let newest = v["result"][0]["blockTime"].as_i64().unwrap_or(now);
+                if let Some(rows) = v["result"].as_array_mut() { for r in rows { if let Some(t) = r["blockTime"].as_i64() { r["blockTime"] = json!(t - newest + now - 60); } } }
+                reply(&v)
+            }
             "getLatestBlockhash" => reply(&fixture("getLatestBlockhash.json")),
             m => Err(RpcFailure::new(ErrClass::Rpc, Some("fake"), format!("{m}: not recorded"))),
         }
@@ -104,7 +112,7 @@ fn run(cfg: ChainfetchCfg, roles: Arc<Roles>, rec: Rec, chain: Arc<dyn Chain>, c
 fn run_reg(cfg: ChainfetchCfg, roles: Arc<Roles>, rec: Rec, chain: Arc<dyn Chain>, cap: f64, reg: Arc<Registry>) -> Run {
     let (shared, rx) = Shared::new(reg);
     let (btx, back) = crossbeam_channel::unbounded();
-    let svc = Service::new(Opts { cfg, wallet: Some(pk(WALLET)), route_program: pk(ROUTE), roles, rec, back: Some(btx), chain, backfill_cap: cap }, shared.clone());
+    let svc = Service::new(Opts { cfg, wallet: Some(pk(WALLET)), route_program: pk(ROUTE), roles, rec, back: Some(btx), chain, backfill_cap: cap, wallet_cursor: None }, shared.clone());
     let stop = Arc::new(AtomicBool::new(false));
     let h = tokio::spawn(svc.run(rx, stop.clone()));
     Run { shared, stop, h, back }
@@ -363,6 +371,86 @@ async fn a_wallet_signature_never_found_is_given_up_after_ten_minutes() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// FT-000 (S1-12): the wallet's history at a segment's start. The listing's rows older than its hour are not fetched
+/// (FT-000's first page brought the wallet's last 748 transactions, five days back: 749 Shyft calls); the segment's
+/// cursor (the newest transaction it recorded with nothing older pending) is written to `wallet-cursor.json` at its end;
+/// the next segment finds it among its siblings and lists only what is newer (`until`), and carries it on when it
+/// records nothing itself. `Wallet::cursor` stays behind a landed signature still waiting for its fetch
+#[tokio::test(start_paused = true)]
+async fn the_wallet_history_starts_after_the_previous_segments_cursor() {
+    // the cursor rule
+    let mut w = Wallet::new(pk(WALLET), [1; 32], [2; 32]);
+    let (s1, s2, s3) = (sig_of(1), sig_of(2), sig_of(3));
+    for (s, slot) in [(s1, 100u64), (s2, 101), (s3, 102)] { w.found(s, wallet::F_ACCOUNT, Some(slot), None, 0); }
+    assert_eq!(w.cursor(), None, "nothing recorded");
+    w.done(&s1, Some(Some(5)), false, 1);
+    w.done(&s3, Some(Some(6)), false, 1);
+    assert_eq!(w.cursor(), Some((100, s1)), "slot 101 still pending: the cursor stays before it");
+    w.done(&s2, Some(None), false, 1);
+    assert_eq!(w.cursor(), Some((102, s3)));
+    // the listing: 3 rows of the last minutes, then 748 from five days back
+    let now_unix = (now_ns() / 1_000_000_000) as i64;
+    let recent: Vec<[u8; 64]> = (0..3u32).map(|i| sig_of(500 + i)).collect();
+    let rows: Vec<Value> = recent.iter().enumerate().map(|(i, s)| json!({ "signature": b58s(s), "slot": 453_600_010 - i as u64, "blockTime": now_unix - 60 - i as i64, "err": null }))
+        .chain((0..748u32).map(|i| json!({ "signature": b58s(&sig_of(10_000 + i)), "slot": 452_817_831 + i as u64, "blockTime": now_unix - 5 * 86_400 - i as i64, "err": null })))
+        .collect();
+    let rows2 = rows.clone();
+    let fake = FakeChain::new(Box::new(move |_, m, p| match m {
+        "getSignaturesForAddress" => {
+            // `until`: only the rows newer than it
+            let until = p[1]["until"].as_str().map(String::from);
+            let page: Vec<Value> = rows2.iter().take_while(|r| until.as_deref() != r["signature"].as_str()).cloned().collect();
+            Some(Ok(json!(page)))
+        }
+        "getTransaction" => p[0].as_str().and_then(|x| bs58::decode(x).into_vec().ok()).and_then(|v| <[u8; 64]>::try_from(v).ok()).map(|x| Ok(tx_as(&x, Some(7)))),
+        _ => None,
+    }));
+    let parent = std::env::temp_dir().join(format!("arbx-cf-cursor-{}-{}", std::process::id(), now_ns()));
+    let seg = |name: &str| -> (Rec, PathBuf) {
+        let dir = parent.join(name);
+        let rec = crate::rec::start(crate::rec::Opts { dir: dir.clone(), run: name.into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        (rec, dir)
+    };
+    let cfg = ChainfetchCfg { sigs_every_s: 3_600, ..quiet_cfg() };
+    // segment 1: no cursor
+    let (rec1, dir1) = seg("s1");
+    assert_eq!(read_wallet_cursor("auto", &dir1, WALLET), None);
+    let r = run(cfg.clone(), Arc::new(Roles::default()), rec1.clone(), fake.clone(), f64::INFINITY);
+    tokio::time::sleep(Duration::from_secs(40)).await;
+    let _ = r.end().await;
+    rec1.close();
+    let lists = fake.calls("getSignaturesForAddress");
+    assert_eq!(lists.len(), 1);
+    assert!(lists[0].1[1].get("until").is_none(), "no cursor yet: {}", lists[0].1);
+    let fetched: Vec<String> = fake.calls("getTransaction").iter().map(|c| c.1[0].as_str().unwrap().to_string()).collect();
+    assert_eq!(fetched.len(), 3, "only the last hour's rows: {} fetched", fetched.len());
+    let c: Value = json_file(&dir1.join(WALLET_CURSOR));
+    assert_eq!((c["sig"].as_str(), c["slot"].as_u64(), c["carried"].as_bool(), c["wallet"].as_str()), (Some(b58s(&recent[0]).as_str()), Some(453_600_010), Some(false), Some(WALLET)));
+    // segment 2: the sibling's cursor; its listing stops there, so nothing is fetched, and the cursor is carried on
+    let (rec2, dir2) = seg("s2");
+    let cur = read_wallet_cursor("auto", &dir2, WALLET).unwrap();
+    assert_eq!((cur.0.as_str(), cur.1, cur.2.clone()), (b58s(&recent[0]).as_str(), 453_600_010, dir1.join(WALLET_CURSOR)));
+    assert_eq!(read_wallet_cursor("auto", &dir2, "another-wallet"), None, "another wallet's cursor is not ours");
+    assert_eq!(read_wallet_cursor("", &dir2, WALLET), None, "\"\": none");
+    let (shared, rx) = Shared::new(Arc::new(Registry::default()));
+    let (btx, _back) = crossbeam_channel::unbounded();
+    let svc = Service::new(Opts { cfg, wallet: Some(pk(WALLET)), route_program: pk(ROUTE), roles: Arc::new(Roles::default()), rec: rec2.clone(), back: Some(btx),
+        chain: fake.clone(), backfill_cap: f64::INFINITY, wallet_cursor: Some((cur.0.clone(), cur.1)) }, shared);
+    let stop = Arc::new(AtomicBool::new(false));
+    let h = tokio::spawn(svc.run(rx, stop.clone()));
+    tokio::time::sleep(Duration::from_secs(40)).await;
+    stop.store(true, Relaxed);
+    h.await.unwrap();
+    rec2.close();
+    let lists = fake.calls("getSignaturesForAddress");
+    assert_eq!((lists.len(), lists[1].1[1]["until"].as_str()), (2, Some(b58s(&recent[0]).as_str())));
+    assert_eq!(fake.calls("getTransaction").len(), 3, "nothing fetched again");
+    let c: Value = json_file(&dir2.join(WALLET_CURSOR));
+    assert_eq!((c["sig"].as_str(), c["carried"].as_bool()), (Some(b58s(&recent[0]).as_str()), Some(true)));
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
 // ---------------------------------------------------------------- backfill
 
 /// PLAN WP-03b acceptance: backfill priority and the auto rate under tokio's paused clock, with the backlog drop and
@@ -429,8 +517,9 @@ async fn backfill_priority_and_auto_rate_under_a_paused_clock() {
 /// record without a `transactionIndex` gets its idx from the block (`idx_update`); a wallet transaction keeps its
 /// `transactionIndex` (29, its position); a signature an account update stamped with the slot but absent from the block
 /// is `missing` (fork evidence: an INPUT slotidx_missing, and it is no longer fetched); the transaction stream's idx
-/// matches once and not once; the confirmed blockhash reaches the ring (INPUT blockhash_head), and a shred assembler
-/// naming another hash for the slot is a disagreement
+/// matches twice, so the line's positions are block indexes (FT-000: `pos_kind`; a list without the votes is the next
+/// test); the confirmed blockhash reaches the ring (INPUT blockhash_head), and a shred assembler naming another hash for
+/// the slot is a disagreement
 #[tokio::test(start_paused = true)]
 async fn slot_index_maps_idx_reports_missing_and_checks_the_stream() {
     let p = [10u8; 32];
@@ -444,7 +533,7 @@ async fn slot_index_maps_idx_reports_missing_and_checks_the_stream() {
     let slot = 453_032_285;
     for s in [x, y, w] { r.shared.send(acct(p, slot, s)); }
     r.shared.send(Note::StreamTx { sig: sig64(&list[154]), slot, idx: 154, ok: true, recorded: true, t: 0 });
-    r.shared.send(Note::StreamTx { sig: sig64(&list[10]), slot, idx: 11, ok: true, recorded: true, t: 0 });
+    r.shared.send(Note::StreamTx { sig: sig64(&list[10]), slot, idx: 10, ok: true, recorded: true, t: 0 });
     // the backfill runs 1.5 s in; the slot is confirmed at 4 s
     tokio::time::sleep(Duration::from_secs(4)).await;
     r.shared.send(Note::Slot { slot, status: 1, parent: Some(slot - 1), t: 0 });
@@ -460,7 +549,8 @@ async fn slot_index_maps_idx_reports_missing_and_checks_the_stream() {
     assert_eq!(l["blockhash"].as_str(), Some("4Lfy7vyBkHtohTXP44W8yQcKF2Gy3kQbE6ctLkDFcYMv"));
     assert_eq!(l["tracked"], json!([[list[29], 29], [list[100], 100]]));
     assert_eq!(l["missing"], json!([b58s(&y)]));
-    assert_eq!(l["idx_check"], json!({ "n": 2, "mismatches": 1, "absent": 0 }));
+    assert_eq!(l["idx_check"], json!({ "n": 2, "mismatches": 0, "absent": 0, "below": 0, "above": 0 }));
+    assert_eq!((l["pos_kind"].as_str(), l["votes_omitted"].clone()), (Some("block_index"), Value::Null));
     let ex = crate::rec::read_jsonl(&dir, "exec").unwrap();
     let rx = ex.iter().find(|e| e["sig"] == list[100] && e.get("idx_update").is_none()).unwrap();
     assert!(rx["idx"].is_null() && rx["src"] == "rpc-backfill");
@@ -479,12 +569,81 @@ async fn slot_index_maps_idx_reports_missing_and_checks_the_stream() {
     let d = ev.iter().find(|e| e["kind"] == "blockhash_source_disagree").unwrap();
     assert_eq!((d["detail"]["slot"].as_u64(), d["detail"]["a"]["src"].as_str(), d["detail"]["b"]["src"].as_str()), (Some(slot), Some("slotidx"), Some("entries")));
     let (cf, cov) = shared.status_json();
-    assert_eq!(cf["idx_check_delta"], json!({ "n": 2, "mismatches": 1 }));
+    assert_eq!(cf["idx_check_delta"], json!({ "n": 2, "mismatches": 0, "below": 0, "above": 0 }));
+    assert_eq!(cf["slotidx_pos_kind_delta"], json!({ "block_index": 1, "nonvote_rank": 0, "unverified": 0 }));
     assert_eq!((cf["missing_delta"].as_u64(), cf["idx_updates_delta"].as_u64()), (Some(1), Some(1)));
     assert_eq!(cf["slotidx_lag_slots_now"].as_u64(), Some(0));
     assert!(cov["slotidx_pct"].is_null(), "the slot's minute has not passed yet");
     let txf = crate::rec::read_jsonl(&dir, "txfetch").unwrap();
     assert!(txf.iter().any(|t| t["method"] == "getBlock" && t["role"] == "slotidx" && t["reason"] == "slot_index" && t["ok"] == true));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// FT-000 (S1-2): a provider whose getBlock list leaves the vote transactions out (Shyft's, in FT-000): its positions are
+/// ranks among the non-votes. The stream's transactions sit at their block indexes, after the votes before them: listed
+/// below their index (and one at an index past the list's end), so the line is `nonvote_rank` with `votes_omitted`, a
+/// backfilled record without a `transactionIndex` keeps `idx` null (no `idx_update` from a rank), and the provider is
+/// remembered: its next slot is `nonvote_rank` although all its comparisons match (every vote of that block after the
+/// non-votes). The order of the tracked signatures is kept (`tracked`). `pos_kind` itself: stray mismatches
+#[tokio::test(start_paused = true)]
+async fn a_list_without_the_votes_gives_ranks_not_block_indexes() {
+    assert_eq!(slotidx::pos_kind(200, 1, 0, false, false), ("block_index", false), "a stray mismatch (another fork's copy)");
+    assert_eq!(slotidx::pos_kind(2, 1, 0, false, false), ("unverified", false));
+    assert_eq!(slotidx::pos_kind(200, 150, 0, false, false), ("nonvote_rank", true));
+    assert_eq!(slotidx::pos_kind(10, 0, 0, true, false), ("nonvote_rank", true), "an index past the list's end");
+    assert_eq!(slotidx::pos_kind(10, 0, 0, false, true), ("nonvote_rank", true), "the provider's earlier evidence");
+    assert_eq!(slotidx::pos_kind(0, 0, 0, false, false), ("unverified", false));
+    let p = [10u8; 32];
+    let roles = Arc::new(Roles::new([(p, role_of(role::POOL, 0))]));
+    let (s1, s2) = (453_500_001u64, 453_500_002u64);
+    // the non-vote transactions of each block, in block order (60 of them; each block has votes before them)
+    let nonvotes = |slot: u64| -> Vec<[u8; 64]> { (0..60u32).map(|i| { let mut s = sig_of(i); s[60..64].copy_from_slice(&(slot as u32).to_le_bytes()); s }).collect() };
+    let (a, b) = (nonvotes(s1), nonvotes(s2));
+    let (a2, b2) = (a.clone(), b.clone());
+    let fake = FakeChain::new(Box::new(move |_, m, p| match (m, p[0].as_u64()) {
+        ("getBlock", Some(s)) if s == s1 || s == s2 => {
+            let l = if s == s1 { &a2 } else { &b2 };
+            Some(Ok(json!({ "blockhash": b58(&[s as u8; 32]), "parentSlot": s - 1, "blockHeight": 1, "blockTime": 1, "previousBlockhash": b58(&[2u8; 32]),
+                "signatures": l.iter().map(b58s).collect::<Vec<_>>() })))
+        }
+        // a backfilled transaction: no transactionIndex
+        ("getTransaction", _) => p[0].as_str().and_then(|x| bs58::decode(x).into_vec().ok()).and_then(|v| <[u8; 64]>::try_from(v).ok()).map(|x| Ok(tx_as(&x, None))),
+        _ => None,
+    }));
+    let (rec, dir) = rec_in("slotidx-ranks");
+    let r = run(quiet_cfg(), roles, rec.clone(), fake.clone(), f64::INFINITY);
+    // slot 1: a watched transaction at rank 10 (the backfill fetches it); the stream's transactions at ranks 5 and 20 sit
+    // at block indexes 31 and 77 (votes before them), and the one at rank 40 at index 130, past the list's 60
+    r.shared.send(acct(p, s1, a[10]));
+    for (rank, idx) in [(5usize, 31u64), (20, 77), (40, 130)] { r.shared.send(Note::StreamTx { sig: a[rank], slot: s1, idx, ok: true, recorded: true, t: 0 }); }
+    // slot 2: every stream transaction at its rank (that block's votes came after its non-votes)
+    r.shared.send(acct(p, s2, b[7]));
+    for rank in [3usize, 9] { r.shared.send(Note::StreamTx { sig: b[rank], slot: s2, idx: rank as u64, ok: true, recorded: true, t: 0 }); }
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    r.shared.send(Note::Slot { slot: s1, status: 1, parent: Some(s1 - 1), t: 0 });
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    r.shared.send(Note::Slot { slot: s2, status: 1, parent: Some(s1), t: 0 });
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let (shared, _) = r.end().await;
+    rec.close();
+    let si = crate::rec::read_jsonl(&dir, "slotidx").unwrap();
+    let line = |s: u64| si.iter().find(|l| l["slot"] == s).unwrap().clone();
+    let (l1, l2) = (line(s1), line(s2));
+    assert_eq!((l1["pos_kind"].as_str(), l1["votes_omitted"].as_bool()), (Some("nonvote_rank"), Some(true)), "{l1}");
+    assert_eq!(l1["idx_check"], json!({ "n": 3, "mismatches": 3, "absent": 0, "below": 3, "above": 0 }));
+    assert_eq!(l1["tracked"], json!([[b58s(&a[10]), 10]]), "the order among non-votes is kept");
+    assert_eq!((l2["pos_kind"].as_str(), l2["idx_check"]["mismatches"].as_u64()), (Some("nonvote_rank"), Some(0)), "the provider is remembered: {l2}");
+    let ex = crate::rec::read_jsonl(&dir, "exec").unwrap();
+    for s in [a[10], b[7]] {
+        let rx = ex.iter().find(|e| e["sig"] == b58s(&s) && e.get("idx_update").is_none()).unwrap();
+        assert!(rx["idx"].is_null() && rx["src"] == "rpc-backfill", "{rx}");
+        assert!(!ex.iter().any(|e| e["sig"] == b58s(&s) && e.get("idx_update").is_some()), "no idx from a rank");
+    }
+    let (cf, _) = shared.status_json();
+    assert_eq!(cf["slotidx_pos_kind_delta"], json!({ "block_index": 0, "nonvote_rank": 2, "unverified": 0 }));
+    assert_eq!((cf["slotidx_rank_only_delta"].as_u64(), cf["idx_updates_delta"].as_u64()), (Some(2), Some(0)));
+    assert_eq!(cf["slotidx_votes_omitted_by_now"], json!(["fake"]));
+    assert_eq!(cf["idx_check_delta"], json!({ "n": 5, "mismatches": 3, "below": 3, "above": 0 }));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -671,13 +830,12 @@ impl Chain for BucketChain {
         let (reg, list, blocks, served, latency, base) = (self.reg.clone(), self.providers.get(&role).cloned().unwrap_or_default(), self.blocks.clone(),
             self.served.clone(), self.latency, self.base);
         Box::pin(async move {
-            let prio = role.priority();
             let now = tokio::time::Instant::now();
-            let Some(p) = list.iter().enumerate().min_by_key(|(i, p)| (reg.limiter(p).wait_hint(prio, now), *i)).map(|(_, p)| *p) else {
+            let Some(p) = list.iter().enumerate().min_by_key(|(i, p)| (reg.limiter(p).wait_hint_role(role, now), *i)).map(|(_, p)| *p) else {
                 return Err(RpcFailure::new(ErrClass::NoProvider, None, format!("{method}: no provider")));
             };
-            let waited = match reg.limiter(p).take(prio, Some(now + b.deadline)).await {
-                Ok(w) => w,
+            let waited = match reg.limiter(p).take_role(role, Some(now + b.deadline)).await {
+                Ok((w, lane)) => { reg.record_lane(role, p, lane); w }
                 Err(()) => {
                     reg.record(role, p, Err(ErrClass::Budget), Duration::ZERO);
                     return Err(RpcFailure::new(ErrClass::Budget, Some(p), format!("{p} {method}: no token in time")));
@@ -786,6 +944,251 @@ async fn the_slot_index_keeps_up_while_the_backfill_has_demand() {
     eprintln!("P1 (150 s): {confirmed} confirmed slots, {blocks} slot-index blocks (lag at most {lag_max}), {polls} polls ({} skipped), backfill {bh} on Haan + {bs} on \
         Shyft ({refused} refused), need {need} have {have} cap {cap} rps", cf["blockhash"]["poll_skipped_delta"]);
     let (_, _) = r.end().await;
+}
+
+// ---------------------------------------------------------------- FT-000: the RPC budget split (S1-1, S1-3)
+
+/// A lookup-table (or re-read) source on the same buckets: one token of the provider ready soonest for `role` (what the
+/// failover client picks), then `latency`; every account found
+#[derive(Clone)]
+struct BucketTables { reg: Arc<Registry>, providers: Vec<&'static str>, role: Role, latency: Duration, calls: Arc<AtomicU64> }
+
+impl crate::alts::Source for BucketTables {
+    fn fetch_tables(&self, tables: Vec<Pk>) -> crate::alts::Accounts {
+        let me = self.clone();
+        Box::pin(async move {
+            let now = tokio::time::Instant::now();
+            let p = me.providers.iter().enumerate().min_by_key(|(i, p)| (me.reg.limiter(p).wait_hint_role(me.role, now), *i)).map(|(_, p)| *p).unwrap();
+            match me.reg.limiter(p).take_role(me.role, Some(now + Duration::from_secs(10))).await {
+                Ok((w, lane)) => {
+                    me.reg.record_lane(me.role, p, lane);
+                    tokio::time::sleep(me.latency).await;
+                    me.reg.record(me.role, p, Ok(me.latency.as_micros() as u32), w);
+                }
+                Err(()) => { me.reg.record(me.role, p, Err(ErrClass::Budget), Duration::ZERO); return Err("no token in time".into()); }
+            }
+            me.calls.fetch_add(1, Relaxed);
+            Ok(tables.iter().map(|t| { let mut d = vec![0u8; 56]; d.extend_from_slice(t); Some(d) }).collect())
+        })
+    }
+}
+
+/// One simulated run of FT-000's workload on the deploy split (Haan and Shyft at 4 requests/s each): the lookup tables
+/// the engine asks for at `alt_ms`, the state re-read's 58 chunks after the stream's first connection (`resync_at_ms`,
+/// paced 120 ms), the wallet's start-of-segment history (`wallet_fetches` getTransaction calls from 30 s), 3.7
+/// confirmed slots a second for the slot index, `need_rps` uncovered watched signatures a second for the backfill, the
+/// blockhash poll. `fixed`: FT-000's fixes (batched lookup tables, the re-read critical, the reserved shares); without
+/// them, FT-000's build (one table a request, 16 at once, the re-read at the engine's normal priority, no reserve)
+#[derive(Clone, Debug)]
+struct Workload { secs: u64, alt_ms: Vec<u64>, resync_at_ms: u64, resync_chunks: usize, wallet_fetches: usize, need_rps: f64 }
+
+#[derive(Clone, Debug, Default)]
+struct Split {
+    alt_tables: u64, alt_calls: u64, alt_wait_p50_ms: f64, alt_wait_p90_ms: f64, resync_ms: u64, confirmed: u64, slotidx_blocks: u64, slotidx_lag_max: u64,
+    slotidx_lag_end: u64, backfill: u64, wallet: u64, poll: u64, poll_skipped: u64, by_role: BTreeMap<String, u64>,
+}
+
+async fn simulate(w: &Workload, fixed: bool) -> Split {
+    let reg = Arc::new(Registry::default());
+    reg.set_limit("haan", 4.0, None);
+    reg.set_limit("shyft", 4.0, None);
+    if fixed {
+        // the shipped deploy split's reserved shares (deploy/arbx-stage0.toml: the slot index 3.8/s of Shyft, the backfill
+        // 2/s of Haan)
+        let cfg = crate::config::Config::load(&repo("deploy/arbx-stage0.toml")).unwrap().chainfetch;
+        for (p, role, rate) in cfg.reserves(&["haan".to_string(), "shyft".to_string()]) { reg.set_reserve(&p, role, rate); }
+    }
+    let chain = BucketChain::new(reg.clone(), deploy_split(), Duration::from_millis(10));
+    let (ps, roles) = pools(50);
+    let cfg = ChainfetchCfg { sigs_every_s: 0, sample_every_s: 60, ..ChainfetchCfg::default() };
+    let r = run_reg(cfg, roles, Rec::off(), chain.clone(), 8.0, reg.clone());
+    let t0 = tokio::time::Instant::now();
+    let ms = move |t: tokio::time::Instant| t.saturating_duration_since(t0).as_millis() as u64;
+    // the lookup-table fetcher: FT-000's (one table a request, 16 at once, role engine) or the batched one (role alt)
+    let calls = Arc::new(AtomicU64::new(0));
+    let src = BucketTables { reg: reg.clone(), providers: vec!["haan", "shyft"], role: if fixed { Role::Alt } else { Role::Engine }, latency: Duration::from_millis(2),
+        calls: calls.clone() };
+    let (atx, arx) = crossbeam_channel::unbounded();
+    let fetcher = if fixed { crate::alts::Fetcher::start(src, &tokio::runtime::Handle::current(), atx, 100, 2, Duration::from_millis(500)) }
+        else { crate::alts::Fetcher::start(src, &tokio::runtime::Handle::current(), atx, 1, 16, Duration::ZERO) };
+    let asked: Arc<Mutex<HashMap<Pk, u64>>> = Default::default();
+    // the answers, as they come (polled: the paused clock runs one thread)
+    let waits: Arc<Mutex<Vec<u64>>> = Default::default();
+    {
+        let (asked, waits) = (asked.clone(), waits.clone());
+        tokio::spawn(async move {
+            loop {
+                while let Ok(e) = arx.try_recv() {
+                    if let Event::Alt { table, .. } = e {
+                        if let Some(a) = asked.lock().unwrap().get(&table) { waits.lock().unwrap().push(ms(tokio::time::Instant::now()).saturating_sub(*a)); }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        });
+    }
+    {
+        let (alt_ms, asked) = (w.alt_ms.clone(), asked.clone());
+        tokio::spawn(async move {
+            for (n, at) in alt_ms.into_iter().enumerate() {
+                tokio::time::sleep_until(t0 + Duration::from_millis(at)).await;
+                let mut t = [0u8; 32];
+                t[..8].copy_from_slice(&(n as u64).to_le_bytes());
+                t[31] = 0xA1;
+                asked.lock().unwrap().insert(t, ms(tokio::time::Instant::now()));
+                fetcher.request(t);
+            }
+            // keep the fetcher (its channel) open until the run ends
+            tokio::time::sleep(Duration::from_secs(100_000)).await;
+        });
+    }
+    // the state re-read: 58 chunks paced 120 ms, critical with the fixes, normal (the engine's) before
+    let resync_done = Arc::new(AtomicU64::new(0));
+    {
+        let src = BucketTables { reg: reg.clone(), providers: vec!["haan", "shyft"], role: if fixed { Role::Snapshot } else { Role::Engine }, latency: Duration::from_millis(5),
+            calls: Arc::new(AtomicU64::new(0)) };
+        let (n, at, done) = (w.resync_chunks, w.resync_at_ms, resync_done.clone());
+        tokio::spawn(async move {
+            tokio::time::sleep_until(t0 + Duration::from_millis(at + 400)).await;
+            let mut hs = Vec::new();
+            for i in 0..n {
+                let src = src.clone();
+                hs.push(tokio::spawn(async move {
+                    // a chunk refused for want of a token is read again (the engine's `Reads` retries it)
+                    loop { if crate::alts::Source::fetch_tables(&src, vec![[i as u8; 32]; 100]).await.is_ok() { break; } }
+                }));
+                tokio::time::sleep(Duration::from_millis(120)).await;
+            }
+            for h in hs { let _ = h.await; }
+            done.store(ms(tokio::time::Instant::now()) - at, Relaxed);
+        });
+    }
+    // the wallet's start-of-segment history (FT-000: 748 old transactions, 4 at once, from 30 s)
+    if w.wallet_fetches > 0 {
+        let (chain, n) = (chain.clone(), w.wallet_fetches);
+        tokio::spawn(async move {
+            tokio::time::sleep_until(t0 + Duration::from_secs(30)).await;
+            let next = Arc::new(AtomicU64::new(0));
+            let hs: Vec<_> = (0..4).map(|_| {
+                let (chain, next) = (chain.clone(), next.clone());
+                tokio::spawn(async move {
+                    while (next.fetch_add(1, Relaxed) as usize) < n {
+                        let s = b58s(&sig_of(9_000_000 + next.load(Relaxed) as u32));
+                        loop {
+                            let r = chain.call(Role::Wallet, "getTransaction", json!([s, {}]), Bounds::fetch(Duration::from_secs(2), 1)).await;
+                            if !matches!(&r, Err(e) if e.class == ErrClass::Budget) { break; }
+                            tokio::time::sleep(Duration::from_millis(250)).await;
+                        }
+                    }
+                })
+            }).collect();
+            for h in hs { let _ = h.await; }
+        });
+    }
+    // the chain: 3.7 confirmed slots a second, `need_rps` uncovered watched signatures a second
+    let (mut slot, mut n, mut next_slot, mut next_sig) = (453_400_000u64, 0u64, t0, t0);
+    let gap = Duration::from_secs_f64(1.0 / w.need_rps.max(0.1));
+    let (mut lag_max, mut lag_end, mut poll_skipped) = (0, 0, 0);
+    let mut next_look = t0 + Duration::from_secs(60);
+    while t0.elapsed() < Duration::from_secs(w.secs) {
+        let now = tokio::time::Instant::now();
+        if now >= next_slot {
+            next_slot += Duration::from_millis(270);
+            slot += 1;
+            r.shared.send(Note::Slot { slot, status: 0, parent: Some(slot - 1), t: 0 });
+            r.shared.send(Note::Slot { slot: slot - 3, status: 1, parent: Some(slot - 4), t: 0 });
+        }
+        if now >= next_sig {
+            next_sig += gap;
+            n += 1;
+            let s = sig_of(n as u32);
+            chain.blocks.lock().unwrap().entry(slot).or_default().push(b58s(&s));
+            r.shared.send(acct(ps[(n % 50) as usize], slot, s));
+        }
+        if now >= next_look {
+            next_look += Duration::from_secs(1);
+            let (cf, _) = r.shared.status_json();
+            lag_end = cf["slotidx_lag_slots_now"].as_u64().unwrap_or(0);
+            lag_max = lag_max.max(lag_end);
+            // the poll is skipped while the slot index gives a fresh confirmed blockhash
+            poll_skipped += cf["blockhash"]["poll_skipped_delta"].as_u64().unwrap_or(0);
+        }
+        tokio::time::sleep_until(next_slot.min(next_sig).min(next_look)).await;
+    }
+    // the lookup tables' waits: from the request to the answer
+    let mut waits = waits.lock().unwrap().clone();
+    waits.sort_unstable();
+    let q = |p: f64| if waits.is_empty() { 0.0 } else { waits[((waits.len() - 1) as f64 * p) as usize] as f64 };
+    let mut by_role = BTreeMap::new();
+    for ((role, _), t) in reg.totals() { *by_role.entry(role.as_str().to_string()).or_default() += t.calls; }
+    let out = Split { alt_tables: waits.len() as u64, alt_calls: calls.load(Relaxed), alt_wait_p50_ms: q(0.5), alt_wait_p90_ms: q(0.9), resync_ms: resync_done.load(Relaxed),
+        confirmed: slot - 3 - 453_400_000, slotidx_blocks: chain.served(Role::Slotidx, "shyft", "getBlock") as u64, slotidx_lag_max: lag_max, slotidx_lag_end: lag_end,
+        backfill: (chain.served(Role::Backfill, "haan", "getTransaction") + chain.served(Role::Backfill, "shyft", "getTransaction")) as u64,
+        wallet: chain.served(Role::Wallet, "haan", "getTransaction") as u64 + chain.served(Role::Wallet, "shyft", "getTransaction") as u64,
+        poll: chain.served(Role::Blockhash, "haan", "getLatestBlockhash") as u64, poll_skipped, by_role };
+    let _ = r.end().await;
+    out
+}
+
+fn split_line(name: &str, s: &Split, secs: u64) -> String {
+    let rate = |n: u64| n as f64 / secs as f64;
+    format!("{name}: lookup tables {} in {} requests ({:.1} a request; wait p50 {:.0} ms, p90 {:.0} ms); re-read {:.1} s; slot index {} of {} confirmed slots \
+        ({:.2}/s, lag at most {}, {} at the end); backfill {} ({:.2}/s); wallet {}; poll {} ({} skipped: a fresh blockhash from the slot index); \
+        requests by role {:?}", s.alt_tables, s.alt_calls,
+        s.alt_tables as f64 / s.alt_calls.max(1) as f64, s.alt_wait_p50_ms, s.alt_wait_p90_ms, s.resync_ms as f64 / 1e3, s.slotidx_blocks, s.confirmed,
+        rate(s.slotidx_blocks), s.slotidx_lag_max, s.slotidx_lag_end, s.backfill, rate(s.backfill), s.wallet, s.poll, s.poll_skipped, s.by_role)
+}
+
+/// FT-000 (S1-1, S1-3) on a synthetic 6 minutes of its workload: lookup tables asked for at 7.5 a second, the re-read
+/// after the first connection at 14 s, the wallet's 748-transaction history, the slot index (3.7/s), the backfill's
+/// measured need (15.8/s). FT-000's build: one table a request starves the slot index and the backfill and the re-read
+/// waits behind them. With the fixes: the tables ride a few to a request, the re-read finishes in seconds, the slot index
+/// keeps up and the backfill gets at least its reserved share (1/s on each provider)
+#[tokio::test(start_paused = true)]
+async fn ft000_the_rpc_budget_split_before_and_after() {
+    let secs = 360;
+    let alt_ms: Vec<u64> = (0..(secs * 15 / 2)).map(|i| i * 2_000 / 15 + (i * 7_919 % 97)).collect();
+    let w = Workload { secs, alt_ms, resync_at_ms: 14_300, resync_chunks: 58, wallet_fetches: 748, need_rps: 15.8 };
+    let before = simulate(&w, false).await;
+    let after = simulate(&Workload { wallet_fetches: 0, ..w.clone() }, true).await;
+    eprintln!("{}\n{}", split_line("FT-000's build", &before, secs), split_line("with the fixes", &after, secs));
+    // before: one table a request, the slot index far behind, the backfill starved, the re-read behind the tables
+    assert_eq!(before.alt_calls, before.alt_tables, "one table a request");
+    assert!(before.slotidx_blocks * 10 < before.confirmed * 8 && before.slotidx_lag_max > 50, "{before:?}");
+    assert!(before.backfill * 50 < secs, "{before:?}");
+    assert!(before.resync_ms > after.resync_ms, "{before:?} vs {after:?}");
+    // after: batched (at most a request every 500 ms unless its batch is full: 7.5 tables a second ride about 4 to a
+    // request), the re-read quick, the slot index keeps up (it falls a few slots behind only while the critical re-read
+    // takes the tokens), the backfill gets its share
+    assert!(after.alt_calls <= 2 * secs + 2 && after.alt_tables >= 3 * after.alt_calls && after.alt_tables >= before.alt_tables, "{after:?}");
+    assert!(after.alt_wait_p90_ms < 2_000.0, "{after:?}");
+    assert!(after.resync_ms < 10_000, "the re-read: {} ms", after.resync_ms);
+    assert!(after.slotidx_blocks + 8 >= after.confirmed && after.slotidx_lag_max <= 40 && after.slotidx_lag_end <= 8, "{after:?}");
+    assert!(after.backfill as f64 >= 0.9 * 2.0 * (secs - 30) as f64, "at least the reserved 2/s of Haan: {after:?}");
+    assert!(after.backfill > 10 * before.backfill.max(1), "{after:?} vs {before:?}");
+}
+
+/// The same split on FT-000's recorded workload (an `arbx` copy of segment 1: `ARBX_FT000_RUN=<run dir>`): the lookup
+/// tables at the times its alts.jsonl started their fetches (11,009 in 30 minutes; the true demand was higher where its
+/// 16-at-once queue held tables back), its re-read at 14.3 s, the wallet's 748 transactions, the backfill's measured
+/// need (p50 15.8/s). Prints both splits (the measurement in the FT-000 fixes' commit)
+#[tokio::test(start_paused = true)]
+#[ignore = "needs a copy of FT-000's segment 1 (ARBX_FT000_RUN)"]
+async fn ft000_the_rpc_budget_split_on_the_recorded_workload() {
+    let Ok(dir) = std::env::var("ARBX_FT000_RUN") else { return };
+    let dir = PathBuf::from(dir);
+    let meta = json_file(&dir.join("meta.json"));
+    let t0 = meta["run"]["started_ns"].as_u64().unwrap();
+    let mut alt_ms: Vec<u64> = crate::rec::read_jsonl(&dir, "alts").unwrap().iter().filter(|e| e["event"] == "fetch_start")
+        .filter_map(|e| e["t_ns"].as_u64()).map(|t| t.saturating_sub(t0) / 1_000_000).collect();
+    alt_ms.sort_unstable();
+    let secs = 1_800;
+    alt_ms.retain(|t| *t < secs * 1_000);
+    let w = Workload { secs, alt_ms, resync_at_ms: 14_300, resync_chunks: 58, wallet_fetches: 748, need_rps: 15.8 };
+    let before = simulate(&w, false).await;
+    let after = simulate(&Workload { wallet_fetches: 0, ..w.clone() }, true).await;
+    eprintln!("FT-000 segment 1, 30 minutes, recorded lookup-table workload:\n{}\n{}", split_line("FT-000's build", &before, secs),
+        split_line("with the fixes", &after, secs));
 }
 
 // ---------------------------------------------------------------- our attempts (review WP-03b #2, #20)
@@ -968,6 +1371,8 @@ async fn shred_seen_transactions_join_the_denominator_when_their_block_has_them(
     let r = run(quiet_cfg(), roles, rec.clone(), fake.clone(), f64::INFINITY);
     let keys = vec![[1u8; 32], p];
     for (s, slot) in [(s1, 500), (s2, 500), (s3, 501)] { r.shared.send(Note::Seen { sig: s, slot, feed: 2, keys: keys.clone(), t: 0 }); }
+    // (FT-000: the stream's copy of the block's first transaction, at its index: slot 500's positions are block indexes)
+    r.shared.send(Note::StreamTx { sig: sig_of(9), slot: 500, idx: 0, ok: true, recorded: true, t: 0 });
     // a shred-seen transaction touching nothing watched is not a candidate
     r.shared.send(Note::Seen { sig: sig_of(4), slot: 500, feed: 2, keys: vec![[1u8; 32]], t: 0 });
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -985,7 +1390,7 @@ async fn shred_seen_transactions_join_the_denominator_when_their_block_has_them(
     assert!(txf.iter().any(|t| t["key"] == b58s(&s1) && t["reason"] == "shred_seen_landed" && t["role"] == "backfill"));
     let ex = crate::rec::read_jsonl(&dir, "exec").unwrap();
     let e1 = ex.iter().find(|e| e["sig"] == b58s(&s1) && e.get("idx_update").is_none()).unwrap();
-    assert_eq!((e1["src"].as_str(), e1["found_by"].clone(), e1["idx"].as_u64()), (Some("rpc-backfill"), json!(["shred"]), Some(1)), "idx from the slot index");
+    assert_eq!((e1["src"].as_str(), e1["found_by"].clone(), e1["idx"].as_u64()), (Some("rpc-backfill"), json!(["shred"]), Some(1)), "idx from the slot index (a block_index line)");
     let si = crate::rec::read_jsonl(&dir, "slotidx").unwrap();
     assert!(si.iter().any(|l| l["slot"] == 501 && l["status"] == "error"));
     let _ = std::fs::remove_dir_all(&dir);
@@ -1080,6 +1485,64 @@ fn the_feed_taps_report_what_the_stream_carries() {
     assert!(off.iter().filter(|n| matches!(n, Note::StreamTx { .. })).all(|n| matches!(n, Note::StreamTx { recorded: false, .. })));
 }
 
+/// FT-000 (S1-5): exec.jsonl keeps in full every stream transaction that touches a watched account (a pool or vault read
+/// or written, any watched account written) and 1 in `[record] exec_unwatched_sample` of the others, chosen by the
+/// signature, each kept one carrying `sample` {one_in, kept, seen}; manifest.json counts them (`sampling.exec_unwatched`).
+/// One left out is not "recorded" (the chain fetch backfills only watched transactions), and its idx is still checked
+#[test]
+fn exec_jsonl_keeps_watched_transactions_in_full_and_samples_the_rest() {
+    use crate::feeds::grpc::{PbHeader, PbMessage, PbMeta, TxInfo, UpdateTx};
+    let (pool, mint, other) = ([0x31u8; 32], [0x32u8; 32], [0x33u8; 32]);
+    let roles = Arc::new(Roles::new([(pool, role_of(role::POOL, 0)), (mint, role_of(role::MINT, 0))]));
+    // keys: the signer (writable), then `w` writable and `r` readonly unsigned accounts
+    let mk = |n: u32, w: &[Pk], r: &[Pk]| -> UpdateTx {
+        let mut sig = sig_of(n);
+        sig[40] = 0x5A;
+        let mut keys = vec![[0x50u8; 32].to_vec()];
+        keys.extend(w.iter().chain(r).map(|k| k.to_vec()));
+        let msg = PbMessage { header: Some(PbHeader { num_required_signatures: 1, num_readonly_signed_accounts: 0, num_readonly_unsigned_accounts: r.len() as u32 }),
+            account_keys: keys, recent_blockhash: vec![7; 32], ..Default::default() };
+        UpdateTx { transaction: Some(TxInfo { signature: sig.to_vec(), is_vote: false, transaction: Some(PbTransaction { signatures: vec![sig.to_vec()], message: Some(msg) }),
+            meta: Some(PbMeta::default()), index: n as u64 }), slot: 1_000, bank_id: 0 }
+    };
+    let dir = std::env::temp_dir().join(format!("arbx-cf-execsample-{}-{}", std::process::id(), now_ns()));
+    let rec = crate::rec::start(crate::rec::Opts { dir: dir.clone(), run: "t".into(), producer: "p".into(),
+        cfg: crate::config::RecordCfg { exec_unwatched_sample: 4, ..Default::default() }, feeds: vec![], monitor: false, echo: Some(Box::new(std::io::sink())) }).unwrap();
+    let (shared, rx) = Shared::new(Arc::new(Registry::default()));
+    with_test_service(shared, || {
+        let mut recent = crate::rec::exec::Recent::default();
+        for n in 0..200u32 { crate::feeds::grpc::tx_stream_item(mk(n, &[other], &[]), 1, &rec, Some(&roles), &mut recent).unwrap(); }
+        crate::feeds::grpc::tx_stream_item(mk(1_000, &[], &[pool]), 1, &rec, Some(&roles), &mut recent).unwrap();
+        crate::feeds::grpc::tx_stream_item(mk(1_001, &[mint], &[]), 1, &rec, Some(&roles), &mut recent).unwrap();
+        crate::feeds::grpc::tx_stream_item(mk(1_002, &[], &[mint]), 1, &rec, Some(&roles), &mut recent).unwrap();
+    });
+    rec.close();
+    let ex = crate::rec::read_jsonl(&dir, "exec").unwrap();
+    let sig = |n: u32| { let mut s = sig_of(n); s[40] = 0x5A; s };
+    let has = |n: u32| ex.iter().find(|e| e["sig"] == b58s(&sig(n))).cloned();
+    // touching a watched pool (read only), writing a watched mint: in full; reading only a mint: sampled like the rest
+    assert!(has(1_000).is_some_and(|e| e["sample"].is_null()) && has(1_001).is_some_and(|e| e["sample"].is_null()));
+    let kept: Vec<u32> = (0..200).chain([1_002]).filter(|n| crate::rec::sample::keep_1_in(&sig(*n), 4)).collect();
+    assert!((30..=80).contains(&kept.len()), "about 1 in 4: {}", kept.len());
+    let sampled: Vec<&Value> = ex.iter().filter(|e| !e["sample"].is_null()).collect();
+    assert_eq!(sampled.len(), kept.len());
+    for (i, n) in kept.iter().enumerate() {
+        let e = has(*n).unwrap();
+        assert_eq!((e["sample"]["one_in"].as_u64(), e["sample"]["kept"].as_u64()), (Some(4), Some(i as u64 + 1)), "{e}");
+    }
+    assert!((0..200).filter(|n| !crate::rec::sample::keep_1_in(&sig(*n), 4)).all(|n| has(n).is_none()), "the others are left out");
+    let manifest: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["sampling"]["exec_unwatched"], json!({ "one_in": 4, "kept": kept.len(), "seen": 201 }));
+    // the taps: a record left out does not cover its signature; every one is still checked against the slot index
+    let notes: Vec<Note> = rx.try_iter().collect();
+    let rec_of = |n: u32| notes.iter().find_map(|x| match x { Note::StreamTx { sig: s, recorded, .. } if *s == sig(n) => Some(*recorded), _ => None });
+    assert_eq!((rec_of(1_000), rec_of(1_001)), (Some(true), Some(true)));
+    let left = (0..200).find(|n| !crate::rec::sample::keep_1_in(&sig(*n), 4)).unwrap();
+    assert_eq!(rec_of(left), Some(false));
+    assert_eq!(notes.iter().filter(|x| matches!(x, Note::StreamTx { .. })).count(), 203);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Review WP-03b #21: the taps' queue is bounded; past it notes are dropped and counted, and the service reports the
 /// drops (events.jsonl `chainfetch_tap_drop`, status `tap_dropped_delta`)
 #[tokio::test(start_paused = true)]
@@ -1091,7 +1554,7 @@ async fn tap_drops_are_counted_and_reported() {
     let fake = FakeChain::new(no_extra());
     let stop = Arc::new(AtomicBool::new(false));
     let h = spawn_watched(Opts { cfg: quiet_cfg(), wallet: None, route_program: pk(ROUTE), roles: Arc::new(Roles::default()), rec: rec.clone(), back: None, chain: fake,
-        backfill_cap: f64::INFINITY }, shared.clone(), rx, &tokio::runtime::Handle::current(), stop.clone(), None);
+        backfill_cap: f64::INFINITY, wallet_cursor: None }, shared.clone(), rx, &tokio::runtime::Handle::current(), stop.clone(), None);
     tokio::time::sleep(Duration::from_secs(61)).await;
     let (cf, _) = shared.status_json();
     assert_eq!((cf["tap_dropped_delta"].as_u64(), cf["service_ok_now"].as_bool()), (Some(3), Some(true)));
@@ -1124,7 +1587,7 @@ async fn a_dead_service_is_reported_and_closes_the_gate() {
     let on_dead: OnDead = Arc::new(move |why: &str| { let _ = g2.shadow("chainfetch_dead", why, true); });
     let cfg = ChainfetchCfg { blockhash_poll_ms: 400, ..quiet_cfg() };
     let h = spawn_watched(Opts { cfg, wallet: None, route_program: pk(ROUTE), roles: Arc::new(Roles::default()), rec: rec.clone(), back: None, chain: Arc::new(Boom),
-        backfill_cap: f64::INFINITY }, shared.clone(), rx, &tokio::runtime::Handle::current(), Arc::new(AtomicBool::new(false)), Some(on_dead));
+        backfill_cap: f64::INFINITY, wallet_cursor: None }, shared.clone(), rx, &tokio::runtime::Handle::current(), Arc::new(AtomicBool::new(false)), Some(on_dead));
     tokio::time::sleep(Duration::from_secs(2)).await;
     h.await.unwrap();
     assert!(shared.dead.load(Relaxed));

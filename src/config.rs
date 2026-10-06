@@ -7,6 +7,7 @@
 //! formatting (meta.json `config.normalized_sha256`).
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -78,6 +79,18 @@ pub struct Config {
     /// WP-06: the bundle tip by band (src/tip.rs): clamp(share(band) x edge, floor, cap)
     #[serde(default)]
     pub tips: TipsCfg,
+    /// WP-07: the ledger (src/ledger.rs): money by signature, balance snapshots, the hourly reconciliation
+    #[serde(default)]
+    pub ledger: LedgerCfg,
+    /// WP-07: the equity stops and the money alerts (src/supervisor.rs), for the segment and the whole campaign
+    #[serde(default)]
+    pub supervisor: SupervisorCfg,
+    /// WP-20: Telegram alerts (src/alerts.rs). The token and the chat id are named by environment variables, never held
+    #[serde(default)]
+    pub alerts: crate::alerts::AlertsCfg,
+    /// WP-20: `arbx watchdog` (src/watchdog.rs)
+    #[serde(default)]
+    pub watchdog: crate::watchdog::WatchdogCfg,
 }
 
 /// `[bands]` (PLAN WP-06 item 8, F22): four increasing edges over the expected edge (gross − base fee), bands 0-4; 3 and
@@ -133,7 +146,7 @@ pub struct BuilderCfg {
     /// with the wallet): OFF at 0, the default (review WP-06 #1; go-live gate item 2: nothing stays locked). An explicit
     /// opt-in above 0: at most this many hot mints held beyond WSOL, USDC and USDT (the additions in flight counted), and
     /// a held addition only when its expected profit also covers the rent it locks (`build::HELD_RENT_BOUND` on top of
-    /// its on-chain min_profit). WP-07 adds its rent cap
+    /// its on-chain min_profit) and (WP-07) the recoverable rent plus that bound stays within `[supervisor] rent_cap_sol`
     #[serde(default = "held_max")]
     pub held_max: usize,
     /// a PumpSwap buy while the wallet has no user volume accumulator creates it (1,346,200 lamports, not recoverable):
@@ -183,6 +196,136 @@ impl BuilderCfg {
     pub fn rent_neutral(&self) -> bool { !self.held_additions() }
 }
 
+/// The owner's hard cap on the test budget (docs/field-tests/BUDGET.md, 2026-10-05: $3-5 of the frz wallet), lamports.
+/// `[supervisor] test_budget_lamports` and `arbx campaign --test-budget-lamports` above it do not load
+pub const TEST_BUDGET_HARD_CAP: u64 = 34_000_000;
+
+/// The ledger (src/ledger.rs; PLAN WP-07 items 2-4, MEASUREMENT §4.42-§4.44): every wallet transaction is split into
+/// summing categories from its chain record; balance snapshots (one common context slot) are taken at start, every
+/// `snapshot_min` inside the segment and at stop; consecutive snapshots are reconciled against the entries between them,
+/// and the executor's money against the entries of its landings. The money view (the last snapshot and the entries
+/// after it) is what live and canary sends need: stale, nothing is sent (`equity_stale`, review WP-07 #3)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LedgerCfg {
+    /// a balance snapshot this often inside a segment (minutes; each asked for up to 30 s early so the view is fresh
+    /// when it is due), besides the one at start and the one at stop
+    #[serde(default = "snapshot_min")]
+    pub snapshot_min: u64,
+    /// the money view is stale (the gate in shadow, `equity_stale`) once its last good snapshot is older than this, s
+    /// (at least `snapshot_min`)
+    #[serde(default = "max_view_age_s")]
+    pub max_view_age_s: u64,
+    /// ... or once this many snapshots in a row failed (or came back on different slots)
+    #[serde(default = "stale_after_failures")]
+    pub stale_after_failures: u32,
+    /// ... or while a landing the executor found by a status check has had no wallet record for this long, s
+    #[serde(default = "max_record_wait_s")]
+    pub max_record_wait_s: u64,
+    /// a reconciliation passes when both residuals (total and liquid) are within this, lamports
+    #[serde(default = "recon_tolerance")]
+    pub tolerance_lamports: u64,
+    /// where token mids come from: "pools" (the engine's committed pool state: the quote for selling the amount into WSOL)
+    #[serde(default = "mid_pools")]
+    pub mid_source: String,
+    /// a snapshot whose answers' context slots differ is taken again this many times; then it is written with
+    /// `slot_mismatch` and not reconciled (F34)
+    #[serde(default = "snapshot_retries")]
+    pub snapshot_retries: u32,
+    /// a snapshot that failed is tried again after this many seconds
+    #[serde(default = "snapshot_retry_s")]
+    pub snapshot_retry_s: u64,
+    /// a reconciliation is decided this long after its snapshot (the window's wallet records may still be on their
+    /// way); an unexplained residual is searched with getSignaturesForAddress and decided once more this long later
+    #[serde(default = "recon_grace_s")]
+    pub recon_grace_s: u64,
+    /// non-SOL holdings are valued at the engine's quote for selling them into WSOL, less this share (status and
+    /// snapshots only: no stop reads a token's value, each held token has its own floor instead)
+    #[serde(default = "token_haircut")]
+    pub token_haircut: f64,
+    /// mints whose wallet ATA (SPL Token) every snapshot reads, besides the token accounts held at boot and those the
+    /// wallet's transactions create (default USDC and USDT)
+    #[serde(default = "extra_mints")]
+    pub extra_mints: Vec<String>,
+}
+fn snapshot_min() -> u64 { 10 }
+fn max_view_age_s() -> u64 { 600 }
+fn stale_after_failures() -> u32 { 3 }
+fn max_record_wait_s() -> u64 { 120 }
+fn recon_tolerance() -> u64 { 10_000 }
+fn mid_pools() -> String { "pools".into() }
+fn snapshot_retries() -> u32 { 3 }
+fn snapshot_retry_s() -> u64 { 30 }
+fn recon_grace_s() -> u64 { 60 }
+fn token_haircut() -> f64 { 0.10 }
+fn extra_mints() -> Vec<String> { vec!["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into(), "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB".into()] }
+impl Default for LedgerCfg {
+    fn default() -> Self {
+        LedgerCfg { snapshot_min: snapshot_min(), max_view_age_s: max_view_age_s(), stale_after_failures: stale_after_failures(), max_record_wait_s: max_record_wait_s(),
+            tolerance_lamports: recon_tolerance(), mid_source: mid_pools(), snapshot_retries: snapshot_retries(),
+            snapshot_retry_s: snapshot_retry_s(), recon_grace_s: recon_grace_s(), token_haircut: token_haircut(), extra_mints: extra_mints() }
+    }
+}
+
+/// The equity stops and money alerts (src/supervisor.rs; PLAN WP-07 item 5, OD-11). Each holding is tracked on its
+/// own (STAGE1-PLAN review F6): SOL + WSOL (lamports; the start read from the chain) carries the budget floor and the
+/// drop caps; every non-SOL token held at the campaign's start has a quantity floor (`token_floor_tolerance`); the
+/// recoverable rent is tracked apart. Each rule names its reason in stop.json, events.jsonl and the SendGate
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupervisorCfg {
+    /// OD-11: the bot goes to shadow and the campaign stops (`equity_hour`, exit 20) when SOL + WSOL falls more than
+    /// this within a rolling hour, campaign-wide (SOL; PLAN WP-07's `hour_drop_sol`)
+    #[serde(default = "hour_drop")]
+    pub max_drop_per_hour_sol: f64,
+    /// the same over a rolling 24 h (`equity_day`, exit 20; PLAN WP-07's `day_drop_sol`)
+    #[serde(default = "day_drop")]
+    pub max_drop_per_day_sol: f64,
+    /// the test budget, lamports (at most `TEST_BUDGET_HARD_CAP`); the floor is the campaign's start SOL + WSOL minus
+    /// it (`equity_floor`, exit 20). 0: none here; a live or canary run then needs `--budget-left`
+    #[serde(default)]
+    pub test_budget_lamports: u64,
+    /// a non-SOL token held at the campaign's start may lose at most this share of its start amount (rounding, dust)
+    /// before the campaign stops (`token_floor`, exit 20)
+    #[serde(default = "token_tolerance")]
+    pub token_floor_tolerance: f64,
+    /// no held-set addition (a token account a trade creates and keeps: the size budget's `held_ata`, only with
+    /// `[builder] held_max` > 0) while the recoverable rent plus the rent the addition may lock (`build::HELD_RENT_BOUND`)
+    /// would pass this, SOL. A create+close in one transaction locks nothing: never capped (`exec::Exec::held_growth_ok`)
+    #[serde(default = "rent_cap")]
+    pub rent_cap_sol: f64,
+    /// an alert when native SOL (tips and fees are paid from it) falls below this, SOL
+    #[serde(default = "native_floor")]
+    pub native_floor_sol: f64,
+    /// the automatic unwrap of `unwrap_sol` WSOL when native SOL is low: it writes to the wallet, an owner decision
+    /// (R §6). Stage 0 refuses `true`
+    #[serde(default)]
+    pub auto_unwrap: bool,
+    #[serde(default = "unwrap_sol")]
+    pub unwrap_sol: f64,
+    /// an alert when a token a route left behind is still held this long after, s (automatic sale is Stage 2+)
+    #[serde(default = "stranded_s")]
+    pub stranded_s: u64,
+    /// a live or canary run sends nothing until its first balance snapshot (the floor needs the start equity); an
+    /// alert when it has none this long after the start, s
+    #[serde(default = "equity_wait_s")]
+    pub equity_wait_s: u64,
+}
+fn hour_drop() -> f64 { 0.02 }
+fn token_tolerance() -> f64 { 0.001 }
+fn day_drop() -> f64 { 0.15 }
+fn rent_cap() -> f64 { 0.1 }
+fn native_floor() -> f64 { 0.02 }
+fn unwrap_sol() -> f64 { 0.05 }
+fn stranded_s() -> u64 { 60 }
+fn equity_wait_s() -> u64 { 120 }
+impl Default for SupervisorCfg {
+    fn default() -> Self {
+        SupervisorCfg { max_drop_per_hour_sol: hour_drop(), max_drop_per_day_sol: day_drop(), test_budget_lamports: 0, token_floor_tolerance: token_tolerance(), rent_cap_sol: rent_cap(),
+            native_floor_sol: native_floor(), auto_unwrap: false, unwrap_sol: unwrap_sol(), stranded_s: stranded_s(), equity_wait_s: equity_wait_s() }
+    }
+}
+
 /// The chain-fetch service (src/chainfetch; PLAN WP-03b) and the RPC budgets every client shares (src/rpc.rs)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -226,6 +369,18 @@ pub struct ChainfetchCfg {
     /// which providers serve which chain-fetch role, and each provider's budget
     #[serde(default, rename = "provider")]
     pub providers: Vec<ChainfetchProviderCfg>,
+    /// FT-000 (S1-1): a share of each provider's `max_rps` reserved for a role, on every provider that serves it (a
+    /// chain-fetch role: the providers `[[chainfetch.provider]]` gives it; `engine`, `alt`, `exec`, ...: every [rpc]
+    /// provider). A reserved role is served ahead of the priority order while its share holds a token, so the slot index
+    /// and the backfill are never starved by busier roles (FT-000: 4 backfill fetches in 30 minutes, the slot index 3,005
+    /// slots behind). The shares on one provider add up to at most `rpc::MAX_RESERVE` (0.95)
+    #[serde(default = "cf_reserve")]
+    pub reserve: BTreeMap<String, f64>,
+    /// FT-000 (S1-12): where source (d) of our wallet's transactions starts: "auto" (the newest `wallet-cursor.json` among
+    /// this run directory's sibling segments: only what is newer than the last segment recorded is listed and fetched),
+    /// a path, or "" (none: the last hour, as before)
+    #[serde(default = "auto")]
+    pub wallet_cursor: String,
 }
 
 /// One `[[chainfetch.provider]]`: an [rpc] endpoint, the chain-fetch roles it serves (`wallet`, `blockhash`, `slotidx`,
@@ -241,6 +396,10 @@ pub struct ChainfetchProviderCfg {
     pub max_rps: Option<f64>,
     /// the bucket's burst (default: max(1, max_rps))
     pub burst: Option<f64>,
+    /// FT-000 (S1-1): this provider's reserved shares by role, in place of `[chainfetch] reserve` (the share of this
+    /// provider's `max_rps`; a role it does not serve gets none)
+    #[serde(default)]
+    pub reserve: Option<BTreeMap<String, f64>>,
 }
 
 /// `[chainfetch] rps`: "auto" or a fixed rate
@@ -261,11 +420,12 @@ fn cf_sigs() -> u64 { 3_600 }
 fn cf_default_rps() -> f64 { 0.0 }
 fn cf_boot_retry() -> u64 { 90 }
 fn cf_txver() -> u8 { 1 }
+fn cf_reserve() -> BTreeMap<String, f64> { BTreeMap::from([("slotidx".to_string(), 0.5), ("backfill".to_string(), 0.25)]) }
 impl Default for ChainfetchCfg {
     fn default() -> Self {
         ChainfetchCfg { enabled: true, after_ms: cf_after_ms(), rps: CfRps::default(), max_backlog: cf_backlog(), sample_every_s: cf_sample(),
             blockhash_poll_ms: cf_bh_poll(), sigs_every_s: cf_sigs(), default_max_rps: cf_default_rps(), boot_retry_s: cf_boot_retry(),
-            max_tx_version: cf_txver(), providers: vec![] }
+            max_tx_version: cf_txver(), providers: vec![], reserve: cf_reserve(), wallet_cursor: auto() }
     }
 }
 
@@ -275,6 +435,24 @@ impl ChainfetchCfg {
     pub fn providers_for(&self, role: &str, all: &[String]) -> Vec<String> {
         let named: Vec<String> = self.providers.iter().filter(|p| p.roles.iter().any(|r| r == role)).map(|p| p.name.clone()).filter(|n| all.contains(n)).collect();
         if self.providers.iter().any(|p| p.roles.iter().any(|r| r == role)) { named } else { all.to_vec() }
+    }
+    /// FT-000 (S1-1): the reserved shares, (provider, role, requests/s), for every provider of `all` (the [rpc]
+    /// providers) with a limit: its `[[chainfetch.provider]] reserve` if it has one, else `[chainfetch] reserve`, each
+    /// share of a role the provider serves (a chain-fetch role: the providers `providers_for` gives it; any other role:
+    /// every provider)
+    pub fn reserves(&self, all: &[String]) -> Vec<(String, crate::rpc::Role, f64)> {
+        let mut out = Vec::new();
+        for p in all {
+            let (rate, _) = self.limit_of(p);
+            if rate <= 0.0 { continue; }
+            let shares = self.providers.iter().find(|x| &x.name == p).and_then(|x| x.reserve.as_ref()).unwrap_or(&self.reserve);
+            for (r, share) in shares {
+                let Some(role) = crate::rpc::Role::parse(r) else { continue };
+                let serves = !crate::rpc::Role::FETCH.contains(&role) || self.providers_for(r, all).contains(p);
+                if serves && *share > 0.0 { out.push((p.clone(), role, share * rate)); }
+            }
+        }
+        out
     }
     /// (rate, burst) of provider `name`'s bucket: its entry's `max_rps`, else `default_max_rps` (0: no limit)
     pub fn limit_of(&self, name: &str) -> (f64, Option<f64>) {
@@ -350,6 +528,13 @@ pub struct RecordCfg {
     /// (`sample`). 1 keeps every row
     #[serde(default = "rec_rivals_venues_sample")]
     pub rivals_venues_sample: u32,
+    /// FT-000 (S1-5): exec.jsonl keeps every transaction-stream record that touches a watched account (a pool, vault,
+    /// DLMM bin array or bitmap extension, our wallet or its token accounts, read or written) or writes any watched
+    /// account, and 1 in this many of the others, chosen by the signature (I-9's rule), each kept one carrying the rate
+    /// and the running counts (`sample`; manifest.json `sampling.exec_unwatched`). 72% of FT-000's exec.jsonl bytes were
+    /// PumpSwap transactions that touched none. 1 keeps every record
+    #[serde(default = "rec_exec_unwatched_sample")]
+    pub exec_unwatched_sample: u32,
 }
 
 impl Default for RecordCfg {
@@ -357,7 +542,7 @@ impl Default for RecordCfg {
         RecordCfg { disk_budget_gb: rec_budget_gb(), min_free_gb: rec_min_free_gb(), rotate_mb: rec_rotate_mb(), rotate_min: rec_rotate_min(), flush_ms: rec_flush_ms(),
             zstd_level: rec_zstd_level(), archive_feeds: vec![], queue_core: rec_queue_core(), queue_accounts: rec_queue_accounts(), queue_journal: rec_queue_journal(),
             queue_chain: rec_queue_core(), queue_bulk: rec_queue_bulk(), queue_max_mb: rec_queue_max_mb(), accounts_keyframe_every: rec_keyframe(), writer_cpus: vec![],
-            rivals_venues_sample: rec_rivals_venues_sample() }
+            rivals_venues_sample: rec_rivals_venues_sample(), exec_unwatched_sample: rec_exec_unwatched_sample() }
     }
 }
 fn rec_budget_gb() -> f64 { 40.0 }
@@ -373,6 +558,7 @@ fn rec_queue_bulk() -> u64 { 131_072 }
 fn rec_queue_max_mb() -> f64 { 1_024.0 }
 fn rec_keyframe() -> u32 { 64 }
 fn rec_rivals_venues_sample() -> u32 { 10 }
+fn rec_exec_unwatched_sample() -> u32 { 20 }
 
 /// The runtime split (src/runtime.rs; PLAN WP-02 item 1): the hot runtime (2 workers) runs stream I/O and sends; the
 /// background runtime runs every RPC call
@@ -411,13 +597,24 @@ pub struct LiveCfg {
     // WP-06: `max_new_token_accounts` is gone (a config that still has it does not load): a trade through a token the
     // wallet holds no account for creates it and closes it in the same transaction (rent-neutral; `[builder]
     // create_close = false` trades held tokens only); the held set grows only by `[builder] held_max`'s size-budget
-    // fallback, off by default
+    // fallback, off by default, and under WP-07's `[supervisor] rent_cap_sol`
+    /// WP-07 (go-live gate: the size capped by the bankroll): a trade is at most `bankroll_share` x the wallet's liquid
+    /// SOL (native + WSOL, the ledger's chain truth) minus `bankroll_reserve_sol`, and never more than its WSOL (the
+    /// route spends WSOL). 0 = off. Shadow and dry runs model it too. Before the ledger's first balance snapshot the
+    /// configured cap applies (live and canary send nothing then: `equity_unknown`); a bankroll that allows nothing is
+    /// refused `bankroll_empty`
+    #[serde(default)]
+    pub bankroll_share: f64,
+    #[serde(default)]
+    pub bankroll_reserve_sol: f64,
 }
 fn live_size() -> f64 { 0.1 }
 fn live_fee_cap() -> u64 { 20_000_000 }
 fn live_margin() -> u64 { 1_000 }
 impl Default for LiveCfg {
-    fn default() -> Self { LiveCfg { max_size_sol: live_size(), max_failed_fees_lamports: live_fee_cap(), margin_lamports: live_margin() } }
+    fn default() -> Self {
+        LiveCfg { max_size_sol: live_size(), max_failed_fees_lamports: live_fee_cap(), margin_lamports: live_margin(), bankroll_share: 0.0, bankroll_reserve_sol: 0.0 }
+    }
 }
 
 /// PLAN WP-05: the send policy. Bundle-only, fail-closed send checks (blockhash age, leader kind, cached Jito token,
@@ -583,7 +780,8 @@ impl Default for SimCfg { fn default() -> Self { SimCfg { enabled: false, max_pe
 pub struct CanaryCfg {
     #[serde(default)]
     pub enabled: bool,
-    /// how many attempts in all
+    /// how many attempts in all (per segment); 0 = no attempt cap (WP-07: a 24 h baseline such as FT-005 is bounded by
+    /// the equity stops, the spend cap and `every_ms` instead)
     #[serde(default = "canary_count")]
     pub count: u32,
     /// at least this long between two attempts, ms
@@ -804,9 +1002,27 @@ pub struct AltsCfg {
     /// transactions waiting for tables, at most (the oldest are dropped and counted)
     #[serde(default = "alt_wait_cap")]
     pub wait_cap: usize,
-    /// fetches running at once, at most (the rest queue)
+    /// tables being fetched at once, at most (the rest queue). FT-000 (S1-1): the fetches are batched (`batch_max` tables
+    /// a getMultipleAccounts), so this counts tables, not requests: 16 tables (one a request) took 76% of the RPC budget
     #[serde(default = "alt_inflight")]
     pub max_inflight: usize,
+    /// FT-000 (S1-1): at most this many tables in one getMultipleAccounts (deduplicated; the RPC's limit is 100), and at
+    /// most `calls_inflight` such requests at once: the tables asked for meanwhile wait for the next one
+    #[serde(default = "alt_batch_max")]
+    pub batch_max: usize,
+    #[serde(default = "alt_calls_inflight")]
+    pub calls_inflight: usize,
+    /// ... and at most one request every this many ms unless its batch is full (500: about 2 requests a second at FT-000's
+    /// demand, against 6 one table each; a table waits at most this much more before it is asked)
+    #[serde(default = "alt_call_every_ms")]
+    pub call_every_ms: u64,
+    /// FT-000 (S1-4): the cache is bounded. Past `max_tables` tables, or `max_mb` MiB of entries (33 bytes each plus 64
+    /// per table), the least recently used tables are evicted (alts.jsonl `evicted`, journaled: a replay evicts the
+    /// same) down to 90% of the cap; one needed again is fetched again (`refetch`). 0: no cap
+    #[serde(default = "alt_max_tables")]
+    pub max_tables: usize,
+    #[serde(default = "alt_max_mb")]
+    pub max_mb: f64,
     /// a previous segment's `alts-final.jsonl.zst` to start with: "auto" (the newest one in this run directory's sibling
     /// segments), a path, or "" (none)
     #[serde(default = "auto")]
@@ -823,14 +1039,20 @@ fn alt_retry_ms() -> Vec<u64> { vec![50, 250, 1_000, 5_000] }
 fn alt_retry_every() -> u64 { 30 }
 fn alt_give_up() -> u64 { 600 }
 fn alt_wait_cap() -> usize { 10_000 }
-fn alt_inflight() -> usize { 16 }
+fn alt_inflight() -> usize { 400 }
+fn alt_batch_max() -> usize { 100 }
+fn alt_calls_inflight() -> usize { 2 }
+fn alt_call_every_ms() -> u64 { 500 }
+fn alt_max_tables() -> usize { 20_000 }
+fn alt_max_mb() -> f64 { 192.0 }
 fn auto() -> String { "auto".into() }
 fn alt_preload_age() -> u64 { 24 }
 fn alt_preload_max() -> usize { 5_000 }
 impl Default for AltsCfg {
     fn default() -> Self {
         AltsCfg { retry_ms: alt_retry_ms(), retry_every_s: alt_retry_every(), give_up_s: alt_give_up(), wait_cap: alt_wait_cap(), max_inflight: alt_inflight(), preload: auto(),
-            preload_max_age_h: alt_preload_age(), preload_max_tables: alt_preload_max() }
+            preload_max_age_h: alt_preload_age(), preload_max_tables: alt_preload_max(), batch_max: alt_batch_max(), calls_inflight: alt_calls_inflight(),
+            call_every_ms: alt_call_every_ms(), max_tables: alt_max_tables(), max_mb: alt_max_mb() }
     }
 }
 
@@ -1173,7 +1395,8 @@ impl Config {
                 Some(x) => bail!("config_version {x} is not supported: this binary reads config_version = {CONFIG_VERSION}"),
             }
         }
-        let cfg: Config = toml::from_str(text)?;
+        // a parse error quotes the line: a bot token pasted where a name belongs (`token_env = 123:AA…`, unquoted) is masked
+        let cfg: Config = toml::from_str(text).map_err(|e| anyhow::anyhow!("{}", crate::alerts::telegram::mask_token_shapes(&e.to_string())))?;
         if cfg.config_version != Some(CONFIG_VERSION) { bail!("config_version = {CONFIG_VERSION} is required"); }
         if cfg.mode != "shadow" && cfg.mode != "live" { bail!("mode must be \"shadow\" or \"live\""); }
         for (k, v, n) in [("expected_program_sha256", &cfg.exec.expected_program_sha256, 64), ("expected_program_md5", &cfg.exec.expected_program_md5, 32)] {
@@ -1254,6 +1477,35 @@ impl Config {
         if b.cu_min_samples == 0 { bail!("[builder] cu_min_samples must be >= 1"); }
         if b.max_alts > 8 { bail!("[builder] max_alts {}: at most 8 lookup tables from the index", b.max_alts); }
         if !(cfg.canary.size_sol > 0.0 && cfg.canary.size_sol <= CANARY_MAX_SIZE_SOL) { bail!("[canary] size_sol must be in (0, {CANARY_MAX_SIZE_SOL}] (PLAN WP-05: a canary is a small live run)"); }
+        // WP-07: the bankroll cap, the ledger and the equity stops
+        let l = &cfg.live;
+        if !l.bankroll_share.is_finite() || !(0.0..=1.0).contains(&l.bankroll_share) { bail!("[live] bankroll_share is a share of the liquid SOL, 0..1 (0 = off)"); }
+        if !l.bankroll_reserve_sol.is_finite() || l.bankroll_reserve_sol < 0.0 { bail!("[live] bankroll_reserve_sol must be >= 0"); }
+        let lg = &cfg.ledger;
+        if lg.snapshot_min == 0 || lg.snapshot_min > 24 * 60 { bail!("[ledger] snapshot_min must be 1..1440 minutes"); }
+        // review WP-07 #3: the view must be refreshed before it can go stale by construction
+        if lg.max_view_age_s < lg.snapshot_min * 60 { bail!("[ledger] max_view_age_s ({}) must be at least snapshot_min ({} min): the money view would go stale between snapshots", lg.max_view_age_s, lg.snapshot_min); }
+        if lg.stale_after_failures == 0 { bail!("[ledger] stale_after_failures must be >= 1"); }
+        if lg.max_record_wait_s < 10 { bail!("[ledger] max_record_wait_s must be >= 10"); }
+        if lg.tolerance_lamports == 0 { bail!("[ledger] tolerance_lamports must be > 0"); }
+        if lg.mid_source != "pools" { bail!("[ledger] mid_source must be \"pools\" (the engine's committed pool state)"); }
+        if lg.snapshot_retries > 10 { bail!("[ledger] snapshot_retries must be 0..10"); }
+        if lg.snapshot_retry_s == 0 || lg.recon_grace_s == 0 || lg.recon_grace_s > 3_600 { bail!("[ledger] snapshot_retry_s must be > 0 and recon_grace_s 1..3600"); }
+        if !lg.token_haircut.is_finite() || !(0.0..1.0).contains(&lg.token_haircut) { bail!("[ledger] token_haircut is a share, 0..1"); }
+        for m in &lg.extra_mints {
+            if !bs58::decode(m).into_vec().is_ok_and(|b| b.len() == 32) { bail!("[ledger] extra_mints: {m:?} is not a base58 mint"); }
+        }
+        let sv = &cfg.supervisor;
+        for (k, v) in [("max_drop_per_hour_sol", sv.max_drop_per_hour_sol), ("max_drop_per_day_sol", sv.max_drop_per_day_sol)] {
+            if !v.is_finite() || v <= 0.0 { bail!("[supervisor] {k} must be a positive amount of SOL"); }
+        }
+        if sv.test_budget_lamports > TEST_BUDGET_HARD_CAP { bail!("[supervisor] test_budget_lamports {} is over the owner's hard cap {TEST_BUDGET_HARD_CAP} (docs/field-tests/BUDGET.md)", sv.test_budget_lamports); }
+        if !sv.token_floor_tolerance.is_finite() || !(0.0..=0.1).contains(&sv.token_floor_tolerance) { bail!("[supervisor] token_floor_tolerance is a share of the start amount, 0..0.1"); }
+        for (k, v) in [("rent_cap_sol", sv.rent_cap_sol), ("native_floor_sol", sv.native_floor_sol), ("unwrap_sol", sv.unwrap_sol)] {
+            if !v.is_finite() || v < 0.0 { bail!("[supervisor] {k} must be >= 0"); }
+        }
+        if sv.auto_unwrap { bail!("[supervisor] auto_unwrap = true is refused in Stage 0: it writes to the wallet, an owner decision (R §6)"); }
+        if sv.stranded_s == 0 || sv.equity_wait_s == 0 { bail!("[supervisor] stranded_s and equity_wait_s must be > 0"); }
         if cfg.dry_run.max_sim_per_sec == 0 { bail!("[dry_run] max_sim_per_sec must be >= 1"); }
         if cfg.feeds.len() > u16::MAX as usize { bail!("too many feeds"); }
         // WP-03: the state stream's options and its transaction streams (feeds after the [[feed]] list)
@@ -1291,6 +1543,14 @@ impl Config {
         let a = &cfg.alts;
         if a.retry_ms.is_empty() || a.retry_ms.contains(&0) || a.retry_ms.windows(2).any(|w| w[0] > w[1]) { bail!("[alts] retry_ms must be a non-empty, non-decreasing list of positive delays"); }
         if a.retry_every_s == 0 || a.give_up_s == 0 || a.wait_cap == 0 || a.max_inflight == 0 { bail!("[alts] retry_every_s, give_up_s, wait_cap and max_inflight must be > 0"); }
+        // FT-000: batched fetches, the bounded cache
+        if !(1..=100).contains(&a.batch_max) { bail!("[alts] batch_max must be 1..100 (getMultipleAccounts takes at most 100 accounts)"); }
+        if a.calls_inflight == 0 { bail!("[alts] calls_inflight must be > 0"); }
+        if a.call_every_ms > 10_000 { bail!("[alts] call_every_ms must be at most 10,000 (a table waits that much more before it is asked)"); }
+        if !a.max_mb.is_finite() || a.max_mb < 0.0 { bail!("[alts] max_mb must be >= 0 (0: no byte cap)"); }
+        if a.max_tables > 0 && a.max_tables < 1_000 { bail!("[alts] max_tables must be 0 (no cap) or at least 1,000"); }
+        // the preload's tables arrive newest first, each older than those held: they cannot evict one another
+        if a.max_tables > 0 && a.preload_max_tables > a.max_tables { bail!("[alts] preload_max_tables must be at most max_tables"); }
         // OD-8: no quarantine acts in Stage 0
         if cfg.accuracy.action != "log" { bail!("[accuracy] action must be \"log\" in Stage 0 (no quarantine acts; OD-8)"); }
         if cfg.accuracy.ring_versions < 2 || cfg.accuracy.ring_versions > 64 { bail!("[accuracy] ring_versions must be 2..64"); }
@@ -1310,6 +1570,7 @@ impl Config {
         let rps = cfg.leaders.rtt_per_sec;
         if !(rps.is_finite() && rps > 0.0 && rps <= 20.0) { bail!("[leaders] rtt_per_sec must be in (0, 20] handshakes a second (got {rps})"); }
         if r.rivals_venues_sample == 0 { bail!("[record] rivals_venues_sample must be >= 1 (1 keeps every row)"); }
+        if r.exec_unwatched_sample == 0 { bail!("[record] exec_unwatched_sample must be >= 1 (1 keeps every record)"); }
         // a typo would archive nothing, silently
         for a in &r.archive_feeds {
             match cfg.feeds.iter().find(|f| &f.name == a) {
@@ -1333,6 +1594,15 @@ impl Config {
         if !cf.default_max_rps.is_finite() || cf.default_max_rps < 0.0 { bail!("[chainfetch] default_max_rps must be a rate >= 0 (0 = no limit)"); }
         if cf.boot_retry_s == 0 { bail!("[chainfetch] boot_retry_s must be > 0"); }
         if cf.max_tx_version > 1 { bail!("[chainfetch] max_tx_version must be 0 or 1"); }
+        // FT-000: the reserved shares
+        for (what, shares) in std::iter::once(("[chainfetch] reserve".to_string(), &cf.reserve))
+            .chain(cf.providers.iter().filter_map(|p| p.reserve.as_ref().map(|r| (format!("[[chainfetch.provider]] {} reserve", p.name), r)))) {
+            for (r, share) in shares {
+                if crate::rpc::Role::parse(r).is_none() { bail!("{what}: {r:?} is not a role (wallet, blockhash, backfill, slotidx, sample, engine, alt, ...)"); }
+                let max = crate::rpc::MAX_RESERVE;
+                if !share.is_finite() || *share < 0.0 || *share > max { bail!("{what}: {r} = {share} must be a share in [0, {max}] of the provider's max_rps"); }
+            }
+        }
         let rpc_names: Vec<String> = cfg.rpc.url_env.iter().map(|_| "default".to_string()).chain(cfg.rpc.endpoints.iter().map(|e| e.name.clone())).collect();
         let mut seen = std::collections::HashSet::new();
         for p in &cf.providers {
@@ -1346,6 +1616,19 @@ impl Config {
             if let Some(m) = p.max_rps { if !m.is_finite() || m < 0.0 { bail!("[[chainfetch.provider]] {}: max_rps must be >= 0 (0 = no limit)", p.name); } }
             if let Some(b) = p.burst { if !b.is_finite() || b < 1.0 { bail!("[[chainfetch.provider]] {}: burst must be at least 1", p.name); } }
         }
+        {
+            let mut per: BTreeMap<String, f64> = BTreeMap::new();
+            for (p, _, rate) in cf.reserves(&rpc_names) { *per.entry(p).or_default() += rate; }
+            for (p, sum) in per {
+                let max = cf.limit_of(&p).0;
+                if sum > crate::rpc::MAX_RESERVE * max + 1e-9 {
+                    bail!("[chainfetch] reserve: the shares on {p} add up to {:.2} of its max_rps (at most {})", sum / max, crate::rpc::MAX_RESERVE);
+                }
+            }
+        }
+        // WP-20: [alerts] (a token_env / chat_env that holds a value instead of a variable's name is refused) and [watchdog]
+        cfg.alerts.check()?;
+        cfg.watchdog.check()?;
         Ok(cfg)
     }
 
@@ -1537,7 +1820,7 @@ mod tests {
     /// only pricing path since WP-04)
     #[test]
     fn maintained_configs_have_a_pricing_path() {
-        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] {
+        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml", "deploy/arbx-canary-frz.toml"] {
             let cfg = Config::load(&repo(f)).unwrap();
             assert!(cfg.strategy.state_triggers, "{f} prices nothing");
             assert!(cfg.pricing_warning().is_none(), "{f}");
@@ -1545,13 +1828,26 @@ mod tests {
         assert!(Config::parse(MINIMAL).unwrap().pricing_warning().is_some(), "the defaults price nothing: warned");
     }
 
-    /// review WP-06 #1: both maintained configs keep held-set additions off (nothing stays locked) and create+close on
+    /// review WP-06 #1: both maintained configs and the frz canary (merge of WP-06 with integ/stage0) keep held-set
+    /// additions off (nothing stays locked) and create+close on, read the CU table from Cherry's absolute path (review
+    /// WP-06 #11: a run without it refuses to start), and leave the PumpSwap volume accumulator's creation to the owner.
+    /// The frz canary tips as its jito-bundle path did (0.7 of the edge, 1,000-100,000: `[tips]`) and its dry run
+    /// simulates (FT-002, review WP-06 #6: the `auto` loaded-data limit is checked by simulation only)
     #[test]
     fn maintained_configs_lock_no_rent() {
-        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml"] {
-            let b = Config::load(&repo(f)).unwrap().builder;
-            assert_eq!((b.create_close, b.held_max, b.rent_neutral()), (true, 0, true), "{f}");
+        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml", "deploy/arbx-canary-frz.toml"] {
+            let c = Config::load(&repo(f)).unwrap();
+            let b = &c.builder;
+            assert_eq!((b.create_close, b.held_max, b.rent_neutral(), b.allow_uva_create, b.payer_guard, b.loaded_limit()), (true, 0, true, false, false, Some(None)), "{f}");
+            assert_eq!(b.cu_table, "/root/arbx/data/cu-table.json", "{f}");
+            let j = c.sends.iter().find(|s| s.kind == SendKind::JitoBundle).unwrap();
+            assert_eq!((j.tip_share, j.tip_max_lamports), (None, None), "{f}: WP-06 moved them to [tips]");
+            assert_eq!(c.bands.edges, vec![20_000, 100_000, 1_000_000, 10_000_000], "{f}");
         }
+        let frz = Config::load(&repo("deploy/arbx-canary-frz.toml")).unwrap();
+        assert_eq!((frz.tips.shares.clone(), frz.tips.floor, frz.tips.cap), (vec![0.7; 5], 1_000, 100_000));
+        assert!(frz.dry_run.simulate, "FT-002 simulates");
+        assert!(std::fs::read_to_string(repo("deploy/arbx-canary-frz.toml")).unwrap().lines().all(|l| !l.trim_start().starts_with("max_new_token_accounts")));
     }
 
     #[test]
@@ -1822,6 +2118,45 @@ mod tests {
         assert!(Config::parse(&format!("{MINIMAL}[[send]]\nname = \"h\"\nkind = \"helius\"\nurl = \"https://x\"\nenabled = false\ntip_lamports = 5000\ntip_share = 0.5\n")).is_ok());
     }
 
+    /// WP-07: the ledger's and the equity stops' keys: their defaults (OD-11: 0.02 SOL a rolling hour; no test budget until
+    /// one is set), the frz canary's values, and every refusal (a budget over the owner's hard cap, auto_unwrap in Stage 0,
+    /// a share outside 0..1, a mint that is not one)
+    #[test]
+    fn wp07_ledger_and_supervisor_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        let (lg, sv) = (&c.ledger, &c.supervisor);
+        assert_eq!((lg.snapshot_min, lg.tolerance_lamports, lg.mid_source.as_str(), lg.snapshot_retries, lg.snapshot_retry_s, lg.recon_grace_s, lg.token_haircut),
+            (10, 10_000, "pools", 3, 30, 60, 0.10), "review WP-07 #3: a snapshot every 10 minutes inside a segment");
+        assert_eq!((lg.max_view_age_s, lg.stale_after_failures, lg.max_record_wait_s), (600, 3, 120), "the money view's freshness");
+        assert_eq!(lg.extra_mints.len(), 2, "USDC and USDT");
+        assert_eq!((sv.max_drop_per_hour_sol, sv.max_drop_per_day_sol, sv.test_budget_lamports, sv.token_floor_tolerance, sv.rent_cap_sol, sv.native_floor_sol, sv.auto_unwrap),
+            (0.02, 0.15, 0, 0.001, 0.1, 0.02, false));
+        assert_eq!((c.live.bankroll_share, c.live.bankroll_reserve_sol), (0.0, 0.0), "the bankroll cap is off unless set");
+        let frz = Config::parse(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/deploy/arbx-canary-frz.toml")).unwrap()).unwrap();
+        assert_eq!((frz.supervisor.test_budget_lamports, frz.live.bankroll_share, frz.live.bankroll_reserve_sol, frz.canary.size_sol),
+            (5_000_000, 0.85, 0.03, 0.2), "review WP-07 #5: one run's allotment (FT-004's), never the whole hard cap");
+        assert_eq!((frz.ledger.snapshot_min, frz.ledger.max_view_age_s), (10, 600));
+        let e = |section: &str, k: &str| err(&format!("{MINIMAL}[{section}]\n{k}\n"));
+        assert!(e("supervisor", "test_budget_lamports = 34000001").contains("hard cap"));
+        assert!(Config::parse(&format!("{MINIMAL}[supervisor]\ntest_budget_lamports = 34000000\n")).is_ok());
+        assert!(e("supervisor", "auto_unwrap = true").contains("owner decision"));
+        assert!(e("supervisor", "max_drop_per_hour_sol = 0").contains("positive"));
+        assert!(e("supervisor", "token_floor_tolerance = 0.5").contains("0..0.1"));
+        assert!(e("supervisor", "stranded_s = 0").contains("> 0"));
+        assert!(e("supervisor", "hour_drop_sol = 0.05").contains("unknown field `hour_drop_sol`"), "the key is max_drop_per_hour_sol");
+        assert!(e("live", "bankroll_share = 1.5").contains("0..1"));
+        assert!(e("live", "bankroll_reserve_sol = -0.1").contains(">= 0"));
+        assert!(e("ledger", "mid_source = \"oracle\"").contains("pools"));
+        assert!(e("ledger", "tolerance_lamports = 0").contains("> 0"));
+        assert!(e("ledger", "token_haircut = 1.0").contains("0..1"));
+        assert!(e("ledger", "extra_mints = [\"USDC\"]").contains("base58 mint"));
+        assert!(e("ledger", "snapshot_min = 0").contains("1..1440"));
+        assert!(e("ledger", "snapshot_min = 60").contains("max_view_age_s (600) must be at least snapshot_min"), "the view would go stale between snapshots");
+        assert!(Config::parse(&format!("{MINIMAL}[ledger]\nsnapshot_min = 60\nmax_view_age_s = 3600\n")).is_ok());
+        assert!(e("ledger", "stale_after_failures = 0").contains(">= 1"));
+        assert!(e("ledger", "max_record_wait_s = 5").contains(">= 10"));
+    }
+
     const JITO: &str = "[[send]]\nname = \"jito-bundle\"\nkind = \"jito-bundle\"\nurl = \"https://frankfurt.mainnet.block-engine.jito.wtf\"\ntip_lamports = 1000\n";
 
     /// PLAN WP-05 acceptance: a live config with a non-bundle path enabled fails to load (and one without an enabled bundle
@@ -1884,6 +2219,54 @@ mod tests {
         }
     }
 
+    /// FT-000's keys: `[alts]` batch_max, calls_inflight, max_tables, max_mb; `[record] exec_unwatched_sample`;
+    /// `[chainfetch] reserve` (shares per role, at most 0.95 of a provider's rate in all) and `wallet_cursor`; their
+    /// defaults, their checks, and the deploy configs' reserved rates (their providers' own shares: the slot index 3.8/s
+    /// of Shyft, the backfill 2/s of Haan)
+    #[test]
+    fn ft000_keys() {
+        let c = Config::parse(MINIMAL).unwrap();
+        assert_eq!((c.alts.batch_max, c.alts.calls_inflight, c.alts.call_every_ms, c.alts.max_tables, c.alts.max_mb), (100, 2, 500, 20_000, 192.0));
+        assert_eq!((c.record.exec_unwatched_sample, c.chainfetch.wallet_cursor.as_str()), (20, "auto"));
+        assert_eq!(c.chainfetch.reserve, BTreeMap::from([("slotidx".to_string(), 0.5), ("backfill".to_string(), 0.25)]));
+        let k = crate::engine::EngineKnobs::from_cfg(&c);
+        assert_eq!((k.alts.batch_max, k.alts.calls_inflight, k.alts.call_every_ms, k.alts.max_tables, k.alts.max_bytes), (100, 2, 500, 20_000, 192 * 1_048_576));
+        for (bad, why) in [("[alts]\nbatch_max = 101\n", "batch_max"), ("[alts]\ncalls_inflight = 0\n", "calls_inflight"), ("[alts]\nmax_tables = 50\n", "max_tables"),
+            ("[alts]\nmax_mb = -1\n", "max_mb"), ("[alts]\ncall_every_ms = 20000\n", "call_every_ms"), ("[record]\nexec_unwatched_sample = 0\n", "exec_unwatched_sample"),
+            ("[chainfetch]\nreserve = { slotidx = 1.5 }\n", "reserve"), ("[chainfetch]\nreserve = { nope = 0.1 }\n", "not a role"),
+            ("[[chainfetch.provider]]\nname = \"x\"\nreserve = { slotidx = 0.96 }\n", "x reserve")] {
+            let e = Config::parse(&format!("{MINIMAL}{bad}")).map(|_| ()).unwrap_err().to_string();
+            assert!(e.contains(why), "{why}: {e}");
+        }
+        assert!(Config::parse(&format!("{MINIMAL}[alts]\nmax_tables = 0\nmax_mb = 0\n")).is_ok(), "0: no cap");
+        // the deploy split: Shyft's own shares (the slot index's 3.7 getBlock/s need most of it), Haan's (the backfill); the
+        // frz canary (WP-07's, from stage0 before these fixes) gets the same at their merge
+        for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml", "deploy/arbx-canary-frz.toml"] {
+            let c = Config::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(f)).unwrap();
+            let all: Vec<String> = ["haan", "shyft"].map(String::from).to_vec();
+            let mut r = c.chainfetch.reserves(&all);
+            r.sort_by(|a, b| (a.0.as_str(), a.1).cmp(&(b.0.as_str(), b.1)));
+            assert_eq!(r, vec![("haan".to_string(), crate::rpc::Role::Backfill, 2.0), ("shyft".to_string(), crate::rpc::Role::Slotidx, 3.8)], "{f}");
+        }
+        // without its own shares a provider takes `[chainfetch] reserve`'s for the roles it serves: a chain-fetch role that
+        // some provider names runs only on those (`providers_for`), one that none names on every provider
+        let mut cf = Config::parse(MINIMAL).unwrap().chainfetch;
+        let p = |name: &str, roles: &[&str]| ChainfetchProviderCfg { name: name.into(), roles: roles.iter().map(|r| r.to_string()).collect(), max_rps: Some(4.0),
+            burst: None, reserve: None };
+        cf.providers = vec![p("a", &["backfill"]), p("b", &["slotidx"])];
+        let ab = ["a".to_string(), "b".to_string()];
+        assert_eq!(cf.reserves(&ab), vec![("a".to_string(), crate::rpc::Role::Backfill, 1.0), ("b".to_string(), crate::rpc::Role::Slotidx, 2.0)],
+            "the slot index is b's only, the backfill a's only");
+        cf.providers = vec![p("a", &["backfill"])];
+        assert_eq!(cf.reserves(&["a".to_string()]), vec![("a".to_string(), crate::rpc::Role::Backfill, 1.0), ("a".to_string(), crate::rpc::Role::Slotidx, 2.0)],
+            "no provider names the slot index: it runs on every provider, a too");
+        // shares that add up to more than 0.95 of a provider's rate do not load
+        let text = format!("{}[chainfetch]\nreserve = {{ slotidx = 0.6, backfill = 0.4 }}\n[[chainfetch.provider]]\nname = \"r\"\nroles = [\"slotidx\", \"backfill\"]\nmax_rps = 4\n",
+            MINIMAL.replace("[rpc]\n", "[rpc]\n[[rpc.endpoint]]\nname = \"r\"\nurl = \"http://r\"\n"));
+        let e = Config::parse(&text).map(|_| ()).unwrap_err().to_string();
+        assert!(e.contains("add up to 1.00"), "{e}");
+    }
+
     /// PLAN WP-04 config keys: the state consistency keys, [alts] and [accuracy] with the plan's defaults and checks; the
     /// removed keys (`strategy.confirm_trigger_ms`, `strategy.decoded_sends`: there is no decoded send path) refuse to load
     #[test]
@@ -1895,7 +2278,7 @@ mod tests {
         assert_eq!((st.tier_a_grace_s, st.boot_timeout_s, st.max_update_age_ms, st.resnapshot), (60, 60, 2_000, true));
         assert_eq!((st.resync_warn_s, st.resync_give_up_s), (10, 300), "review WP-04 #1");
         assert_eq!((c.alts.retry_ms.clone(), c.alts.retry_every_s, c.alts.give_up_s, c.alts.wait_cap, c.alts.max_inflight, c.alts.preload.as_str()),
-            (vec![50, 250, 1_000, 5_000], 30, 600, 10_000, 16, "auto"));
+            (vec![50, 250, 1_000, 5_000], 30, 600, 10_000, 400, "auto"), "FT-000: max_inflight counts tables of batched requests (16 before)");
         assert_eq!((c.alts.preload_max_age_h, c.alts.preload_max_tables), (24, 5_000), "review WP-04 #11");
         assert_eq!((c.accuracy.action.as_str(), c.accuracy.ring_versions, c.accuracy.queue), ("log", 8, 10_000));
         for k in ["confirm_trigger_ms = 60", "decoded_sends = false"] {

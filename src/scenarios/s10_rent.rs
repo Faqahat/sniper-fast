@@ -92,9 +92,10 @@ fn s10_the_held_view_follows_the_wallet_on_the_stream_and_replays() {
     let t = trade(&mut r, &["S10-w1", "S10-w2"], s2, T0 + 10 * MS);
     let before = bundles(&r);
     assert!(!before.is_empty() && before.iter().all(|b| b.0 && b.1 && b.2), "not held at boot: create and close: {before:?}");
-    // the bankroll the WP-07 cap will read: the wallet's lamports and WSOL from the store
-    let bk = r.e.bankroll(&payer);
-    assert_eq!((bk.native, bk.wsol), (Some(3 * SOL), Some(5 * SOL)));
+    // the store follows the wallet's lamports and its WSOL account (journaled ACCOUNT records). The bankroll cap reads
+    // neither (merge of WP-06 with integ/stage0: one bankroll source, WP-07's money view from the ledger's snapshots)
+    let wsol_ata = crate::build::ata_of(&payer, &crate::venues::WSOL, &crate::pda::TOKEN_PROGRAM);
+    assert_eq!((r.e.store.get(&payer).map(|a| a.lamports), r.e.store.get(&wsol_ata).and_then(|a| crate::venues::token_amount(&a.data))), (Some(3 * SOL), Some(5 * SOL)));
     // the USDC account appears
     let usdc = { let m = r.meta("usdc.ammv4"); if m.t0 == *crate::venues::WSOL { (m.t1, m.t1_prog) } else { (m.t0, m.t0_prog) } };
     let ata = crate::build::ata_of(&payer, &usdc.0, &usdc.1);

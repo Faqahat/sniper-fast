@@ -8,9 +8,12 @@
 //! The library holds every module; `main.rs` is the command line over it (PLAN WP-01 item 1), so integration tests,
 //! offline subcommands and the verifier client can use the engine without the CLI.
 pub mod accuracy;
+pub mod alerts;
 pub mod alts;
 pub mod bands;
+pub mod budget;
 pub mod build;
+pub mod campaign;
 pub mod chainfetch;
 pub mod classify;
 pub mod commit;
@@ -24,7 +27,9 @@ pub mod feeds;
 pub mod forks;
 pub mod lat;
 pub mod leaders;
+pub mod ledger;
 pub mod netcount;
+pub mod notify;
 pub mod pda;
 pub mod pools;
 pub mod probe;
@@ -41,10 +46,12 @@ mod scenarios;
 pub mod send;
 pub mod store;
 pub mod store_health;
+pub mod supervisor;
 pub mod tip;
 pub mod tx;
 pub mod venues;
 pub mod wallet;
+pub mod watchdog;
 
 /// the build script, included so its pure helpers (the resolved ref file of `rerun-if-changed`) are unit-tested
 #[cfg(test)]

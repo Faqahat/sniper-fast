@@ -47,11 +47,17 @@ def run(seg, ctx: dict) -> dict:
         sec["caveats"].append("v1: executed results exist only for PumpSwap transactions (one program filter)")
     else:
         n = 0
+        sampled = 0
         wins = []
         all_pos_rows = []
         for e in seg.iter_exec():
+            # FT-000 (exec 2.2): a record of the sampled population (it touched no watched account, `sample` set) is
+            # outside this report's population (transactions touching watched accounts): left out, counted
+            if e.get("sample") is not None:
+                sampled += 1
+                continue
             if e.get("idx") is not None:
-                all_pos_rows.append({"sig": e.get("sig"), "slot": e.get("slot"), "idx": e.get("idx")})
+                all_pos_rows.append({"sig": e.get("sig"), "slot": e.get("slot"), "idx": e.get("idx"), "idx_src": e.get("idx_src")})
             if not (e.get("arb_like") or {}).get("is"):
                 continue
             n += 1
@@ -60,6 +66,7 @@ def run(seg, ctx: dict) -> dict:
             if g is not None and e.get("signer") != ours:
                 wins.append((e.get("sig"), e.get("slot"), e.get("idx"), e.get("pools") or [], g, e.get("signer")))
         d["arb_like_txs"] = n
+        d["sampled_unwatched_rows_left_out"] = sampled
         # the ladder (rival-synthesis §5): each clean win against the last earlier writer of its pools (its opener)
         pos = blockctx.positions(seg, all_pos_rows)
         writers = blockctx.pool_writers(seg, pos)

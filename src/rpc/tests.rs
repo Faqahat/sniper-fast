@@ -520,3 +520,92 @@ async fn idle_providers_are_kept_warm() {
     assert!((2..=8).contains(&wa.ok), "idle a: a warm-up call about every 300-400 ms: {wa:?}");
     assert_eq!(wb.calls, 0, "busy b: none");
 }
+
+/// FT-000 (S1-1): a reserved share. A 4/s bucket kept busy by a normal role (the lookup tables, 8 callers always
+/// waiting) starves the slot index (index priority) and the backfill (bulk) without a reserve; with 2/s reserved for the
+/// slot index and 1/s for the backfill, each gets at least its share, the normal role the rest, the bucket as a whole
+/// never more than its rate, and a critical caller still goes first. The reserved grants are counted (`reserved`), the
+/// backfill's spare rate is never under its share, and the reserves are in `limits_json` and the status's
+/// `rpc_budget`
+#[tokio::test(start_paused = true)]
+async fn reserved_shares_are_served_ahead_of_busier_roles() {
+    async fn run(reserve: bool) -> (Arc<Registry>, BTreeMap<Role, u64>) {
+        let reg = Arc::new(Registry::default());
+        reg.set_limit("p", 4.0, None);
+        if reserve { reg.set_reserve("p", Role::Slotidx, 2.0); reg.set_reserve("p", Role::Backfill, 1.0); }
+        let lim = reg.limiter("p");
+        let got: Arc<Mutex<BTreeMap<Role, u64>>> = Default::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut hs = Vec::new();
+        for (role, n) in [(Role::Alt, 8), (Role::Slotidx, 3), (Role::Backfill, 3)] {
+            for _ in 0..n {
+                let (lim, got, stop, reg) = (lim.clone(), got.clone(), stop.clone(), reg.clone());
+                hs.push(tokio::spawn(async move {
+                    while !stop.load(Relaxed) {
+                        if let Ok((w, lane)) = lim.take_role(role, Some(Instant::now() + Duration::from_secs(30))).await {
+                            reg.record_lane(role, "p", lane);
+                            reg.record(role, "p", Ok(1_000), w);
+                            *got.lock().unwrap().entry(role).or_default() += 1;
+                        }
+                    }
+                }));
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        let out = got.lock().unwrap().clone();
+        // a critical caller arriving now is served at once, ahead of everyone: the reserved and normal callers left a
+        // quarter of the burst in the bucket for it
+        let t = Instant::now();
+        let (w, lane) = lim.take_role(Role::Snapshot, None).await.unwrap();
+        assert!(lane == Lane::Critical && w.is_zero() && t.elapsed().is_zero(), "{w:?} {:?}", t.elapsed());
+        stop.store(true, Relaxed);
+        tokio::time::sleep(Duration::from_secs(40)).await;
+        for h in hs { h.abort(); }
+        (reg, out)
+    }
+    let (_, before) = run(false).await;
+    assert_eq!((before.get(&Role::Slotidx).copied().unwrap_or(0), before.get(&Role::Backfill).copied().unwrap_or(0)), (0, 0), "without a reserve: starved {before:?}");
+    let (reg, after) = run(true).await;
+    let (si, bf, alt) = (after[&Role::Slotidx], after[&Role::Backfill], after[&Role::Alt]);
+    // 60 s at 4/s (plus the burst, and the tail while the callers stop)
+    assert!(si >= 115 && bf >= 57, "the reserved shares: slotidx {si} (>= 2/s), backfill {bf} (>= 1/s)");
+    assert!(alt >= 40, "the normal role gets the rest: {alt}");
+    assert!(si + bf + alt <= 4 * 60 + 4, "the bucket never exceeds its rate: {after:?}");
+    let t = reg.total(Role::Slotidx, "p");
+    assert!(t.reserved >= 100 && t.reserved <= t.calls, "{t:?}");
+    assert_eq!(reg.total(Role::Alt, "p").reserved, 0, "no share, no reserved grant");
+    assert!(reg.spare_rps("p", Role::Backfill).unwrap() >= 1.0, "the backfill paces to at least its share");
+    assert_eq!(reg.limits_json()["p"]["reserve"], json!({ "backfill": 1.0, "slotidx": 2.0 }));
+    // the status's budget section: per provider and role, with the shares; then the next interval's deltas only
+    let b = reg.budget_json("test");
+    assert!(b["interval_s"].is_null(), "the first call has no interval");
+    let p = &b["providers"]["p"];
+    assert_eq!((p["max_rps"].as_f64(), p["roles"]["slotidx"]["reserved_rps"].as_f64(), p["roles"]["alt"]["reserved_rps"].clone()), (Some(4.0), Some(2.0), Value::Null));
+    assert_eq!(p["roles"]["slotidx"]["calls_delta"].as_u64(), Some(t.calls));
+    assert!(b["roles"]["alt"]["calls_delta"].as_u64().unwrap() >= 40);
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    for _ in 0..20 { if let Ok((w, l)) = reg.limiter("p").take_role(Role::Alt, None).await { reg.record_lane(Role::Alt, "p", l); reg.record(Role::Alt, "p", Ok(1), w); } }
+    let b = reg.budget_json("test");
+    let p = &b["providers"]["p"];
+    let secs = b["interval_s"].as_f64().unwrap();
+    assert!(secs > 10.0, "{b}");
+    assert_eq!(p["roles"]["alt"]["calls_delta"].as_u64(), Some(20));
+    assert!((p["roles"]["alt"]["rps"].as_f64().unwrap() - 20.0 / secs).abs() < 0.01 && (p["used_pct"].as_f64().unwrap() - 2_000.0 / secs / 4.0).abs() < 0.1, "{p}");
+    assert_eq!(p["roles"]["slotidx"]["calls_delta"].as_u64(), Some(0), "a reserved role is listed even when idle");
+}
+
+/// FT-000 (S1-1): a share set on a bucket is scaled down when the shares add up to more than 95% of its rate, removed
+/// with 0, and a provider without a limit has none
+#[test]
+fn reserves_are_bounded_and_need_a_limit() {
+    let l = Limiter::new(4.0, 4.0);
+    l.set_reserve(Role::Slotidx, 3.0);
+    l.set_reserve(Role::Backfill, 3.0);
+    let sum: f64 = l.reserves().iter().map(|x| x.1).sum();
+    assert!((sum - 4.0 * MAX_RESERVE).abs() < 1e-9 && (sum - 3.8).abs() < 1e-9, "{:?}", l.reserves());
+    l.set_reserve(Role::Backfill, 0.0);
+    assert_eq!(l.reserves().len(), 1);
+    let u = Limiter::unlimited();
+    u.set_reserve(Role::Slotidx, 2.0);
+    assert!(u.reserves().is_empty());
+}

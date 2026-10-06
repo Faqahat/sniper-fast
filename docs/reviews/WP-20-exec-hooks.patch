@@ -1,0 +1,95 @@
+diff --git a/src/exec.rs b/src/exec.rs
+index 87ba41c8865c7af29d74547c2a320b5100ad8009..f4e68ede217e4422695f183b082cb64f89fe756b 100644
+--- a/src/exec.rs
++++ b/src/exec.rs
+@@ -414,6 +414,8 @@ impl Settled {
+ /// An attempt sent (live, canary) and not final yet
+ struct Open {
+     attempt: u64,
++    /// WP-20: the route's venues in order (`PumpSwap>Dlmm`), for the money alerts
++    route: String,
+     decision: u64,
+     opp: u64,
+     sig: [u8; 64],
+@@ -455,7 +457,7 @@ struct Open {
+ /// expiry check found the landing, whose fee and events only the wallet record brings), what its landing adds to the
+ /// money so far (`counted`), whether the wallet record came, whether a would-fail of it counted toward cooling
+ #[derive(Clone)]
+-struct Final { sig58: String, mint: Pk, landed: bool, ok: bool, tip: u64, size: u64, creates_ata: bool, src: &'static str, counted: Counted, wallet_seen: bool,
++struct Final { route: String, sig58: String, mint: Pk, landed: bool, ok: bool, tip: u64, size: u64, creates_ata: bool, src: &'static str, counted: Counted, wallet_seen: bool,
+     cooled: bool }
+ 
+ /// the dry run's key and options
+@@ -815,7 +817,12 @@ impl Exec {
+         if !self.mode.sends() { return None; }
+         if self.stopped.is_some() { return Some("sender_stopped"); }
+         if self.spent + self.reserved + BASE_FEE > self.cap_failed_fees {
+-            if self.open.is_empty() { self.stopped = Some(if self.mode == Mode::Canary { "spend cap reached" } else { "failed-fee cap reached" }); }
++            if self.open.is_empty() {
++                self.stopped = Some(if self.mode == Mode::Canary { "spend cap reached" } else { "failed-fee cap reached" });
++                // WP-20: the budget floor, at once (the status line's `exec.stopped` says it too, deduplicated)
++                crate::alerts::budget_floor(crate::alerts::BudgetFloor { what: "failed_fee_cap".into(), value_lamports: (self.spent + self.reserved) as i64,
++                    floor_lamports: self.cap_failed_fees as i64, detail: self.stopped.map(String::from) });
++            }
+             return Some("fee_cap");
+         }
+         if let Some(c) = self.canary {
+@@ -1020,7 +1027,7 @@ impl Exec {
+         self.count(if self.mode == Mode::Canary { "canary_sent" } else { "live_sent" });
+         if crowding.rank() > 0 { self.count("rank_crowded"); }
+         self.by_sig.insert(sig, attempt);
+-        self.open.insert(attempt, Open { attempt, decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
++        self.open.insert(attempt, Open { attempt, route: format!("{:?}>{:?}", r.buy.venue, r.sell.venue), decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
+             trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit, creates_ata: built.creates_ata, worst: BASE_FEE, bh_slot: bh.slot, bh_height: bh.height,
+             target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_signed, t_sent: None, bundle: None,
+             path: paths.list[bp].name.clone(), fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
+@@ -1339,11 +1346,27 @@ impl Exec {
+         let error = error.or_else(|| o.send_error.clone());
+         let counted = landed.as_ref().map(|l| Counted::of(l, o.tip, o.size, o.creates_ata)).unwrap_or_default();
+         self.add(counted, o.mint);
++        // WP-20: the money alerts (never wait: a try_send into the alerts' queue), for attempts that really went out
++        if self.mode.sends() {
++            let (slot, signature) = (landed.as_ref().and_then(|l| l.slot), o.sig58.clone());
++            match fin {
++                "landed_ok" => { crate::alerts::win(crate::alerts::Win { route: Some(o.route.clone()), mint: b58(&o.mint), mint_name: None, size_lamports: o.size,
++                    gross_lamports: (counted.rt_unknown == 0).then_some(counted.round_trip), tip_lamports: counted.tip, fee_lamports: counted.fee,
++                    rent_lamports: counted.atas as u64 * crate::alerts::summary::ATA_RENT_LAMPORTS, slot, signature, attempt: Some(o.attempt) }); }
++                "landed_fail" => {
++                    let code = landed.as_ref().and_then(|l| l.err.as_ref()).and_then(build::custom_code);
++                    let error = landed.as_ref().map(|l| format!("{}{}", code.map(|c| format!("custom {} ", hex_code(c))).unwrap_or_default(), crate::proglog::meaning(code, &l.err)));
++                    crate::alerts::failed_landing(crate::alerts::FailedLanding { route: Some(o.route.clone()), mint: b58(&o.mint), mint_name: None, size_lamports: o.size,
++                        fee_lamports: counted.failed_fee, slot, signature, error, attempt: Some(o.attempt) });
++                }
++                _ => {}
++            }
++        }
+         let line = self.outcome_line(&o, fin, src, landed.as_ref(), error, amend, seen.as_ref(), poh);
+         self.rec.json(rec::OUTCOMES, line);
+         self.count(match fin { "landed_ok" => "landed_ok", "landed_fail" => "landed_fail", "not_landed_expired" => "not_landed_expired", "unsettled" => "unsettled",
+             _ => "not_landed_refused" });
+-        self.finals.insert(o.attempt, Final { sig58: o.sig58.clone(), mint: o.mint, landed: landed.is_some(), ok: landed.as_ref().is_some_and(|l| l.ok), tip: o.tip,
++        self.finals.insert(o.attempt, Final { route: o.route.clone(), sig58: o.sig58.clone(), mint: o.mint, landed: landed.is_some(), ok: landed.as_ref().is_some_and(|l| l.ok), tip: o.tip,
+             size: o.size, creates_ata: o.creates_ata, src, counted, wallet_seen: src == "wallet", cooled: o.cooled });
+         self.finals_order.push_back(o.attempt);
+         while self.finals_order.len() > FINALS_KEEP { if let Some(a) = self.finals_order.pop_front() { self.finals.remove(&a); } }
+@@ -1368,6 +1391,20 @@ impl Exec {
+         let counted = Counted::of(&l, f.tip, f.size, f.creates_ata);
+         self.sub(f.counted);
+         self.add(counted, f.mint);
++        // WP-20: a landing found late (the final said not landed) is told like one found at once; a success whose round
++        // trip only the wallet record brings (the expiry check found it first) is told again with its net
++        if self.mode.sends() && (!f.landed || (l.ok && f.counted.rt_unknown > 0 && counted.rt_unknown == 0)) {
++            if l.ok {
++                crate::alerts::win(crate::alerts::Win { route: Some(f.route.clone()), mint: b58(&f.mint), mint_name: None, size_lamports: f.size,
++                    gross_lamports: (counted.rt_unknown == 0).then_some(counted.round_trip), tip_lamports: counted.tip, fee_lamports: counted.fee,
++                    rent_lamports: counted.atas as u64 * crate::alerts::summary::ATA_RENT_LAMPORTS, slot: l.slot, signature: f.sig58.clone(), attempt: Some(attempt) });
++            } else if !f.landed {
++                let code = l.err.as_ref().and_then(build::custom_code);
++                crate::alerts::failed_landing(crate::alerts::FailedLanding { route: Some(f.route.clone()), mint: b58(&f.mint), mint_name: None, size_lamports: f.size,
++                    fee_lamports: counted.failed_fee, slot: l.slot, signature: f.sig58.clone(),
++                    error: Some(format!("{}{}", code.map(|c| format!("custom {} ", hex_code(c))).unwrap_or_default(), crate::proglog::meaning(code, &l.err))), attempt: Some(attempt) });
++            }
++        }
+         if let Some(x) = self.finals.get_mut(&attempt) {
+             x.landed = true;
+             x.ok = l.ok;

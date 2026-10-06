@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use arbx::control::{self, StopInfo, StopReason};
 use arbx::feeds::clock::now_ns;
-use arbx::{build, chainfetch, config, engine, exec, feeds, leaders, pda, pools, probe, provenance, reads, rec, replay, rpc, runtime, send, store, tx, venues, wallet};
+use arbx::{alerts, build, campaign, chainfetch, config, engine, exec, feeds, leaders, ledger, pda, pools, probe, provenance, reads, rec, replay, rpc, runtime, send, store, tx, venues, wallet, watchdog};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -103,6 +103,57 @@ enum Cmd {
         /// the .env file to load (default: `.env` beside the config). The supervisor runs the campaign's frozen config
         /// copy and names the .env of the config it froze (a path, never a secret)
         #[arg(long)] env_file: Option<PathBuf>,
+        /// WP-07: at a stop, wait at most this long for the attempts still open to settle (their wallet records, the
+        /// block engine's results, the expiry checks: longer than a blockhash's validity) before listing them as
+        /// unsettled in stop.json; then the stop snapshot and the final reconciliation
+        #[arg(long, default_value_t = 60)]
+        drain_s: u64,
+        /// WP-07: the campaign's equity floor, lamports of SOL + WSOL (`arbx campaign` passes it once the campaign's start
+        /// is known): the segment stops (`equity_floor`, exit 20) below it; the highest of the floors applies
+        #[arg(long)]
+        equity_floor: Option<i64>,
+    },
+    /// WP-07: the campaign supervisor (on the server it replaces deploy/run-w.sh: Cherry gets only this binary, its
+    /// config and data). It freezes the binary and the config into <runs>/<name>/, runs segments of --segment-min back to
+    /// back for --hours (each `arbx run` of the frozen copies, started only once the previous segment's process has
+    /// exited: Haan grants its streams to the first process, I-3), passes each what is left of the test budget, applies
+    /// the campaign-wide equity stops (the start read from the chain: SOL + WSOL, each token, the rent), and writes
+    /// campaign.json, events.jsonl, supervisor.jsonl and spend.json. Controls: <runs>/<name>.pause, .next, .stop (a
+    /// reason inside)
+    Campaign {
+        #[arg(long)] name: String,
+        #[arg(long)] config: PathBuf,
+        #[arg(long)] hours: f64,
+        #[arg(long, default_value_t = 60.0)] segment_min: f64,
+        /// what every segment does: shadow (records only, the default), dry-run, canary, live
+        #[arg(long, default_value = "shadow")] mode: String,
+        /// the campaign's test budget, lamports (at most 34,000,000: the owner's hard cap, docs/field-tests/BUDGET.md);
+        /// default the config's `[supervisor] test_budget_lamports`. Required for canary and live
+        #[arg(long)] test_budget_lamports: Option<u64>,
+        /// who started it (campaign.json `operator`)
+        #[arg(long)] who: Option<String>,
+        /// the runs directory (default: the config's out_dir)
+        #[arg(long)] runs: Option<PathBuf>,
+        /// stop after this many segments
+        #[arg(long)] max_segments: Option<u32>,
+        /// the .env the segments load (default: `.env` beside the config given; a path, never read here)
+        #[arg(long)] env_file: Option<PathBuf>,
+        /// each segment's `--drain-s`
+        #[arg(long, default_value_t = 60)] drain_s: u64,
+        /// run in the background, detached from the terminal (its log: <runs>/<name>/supervisor.log)
+        #[arg(long)] detach: bool,
+        /// start although something may hold the provider (a live segment socket, another `arbx … run` or `arb-lab … run`
+        /// process: Haan serves the first process only, I-3), and do not wait for it between segments; recorded in
+        /// campaign.json `forced`. Only when you know nothing else uses the provider
+        #[arg(long)] force: bool,
+        /// (tests) the control-file poll and the back-off after a crash
+        #[arg(long, hide = true, default_value_t = 2000)] poll_ms: u64,
+        #[arg(long, hide = true, default_value_t = 10)] backoff_s: u64,
+    },
+    /// WP-07: a campaign's money from its segments' files (`ledger::history`, the code the segments and `arbx campaign`
+    /// use): the start, SOL + WSOL now, the rolling drops, the floor, the spend (JSON). Reads only
+    CampaignEquity {
+        #[arg(long)] campaign_dir: PathBuf,
     },
     /// Print the provenance of this binary and a config without starting anything: build (git commit, dirty state,
     /// rustc), the binary's sha256, the config's file and normalized sha256, host and clock; unless --offline, also the
@@ -131,7 +182,8 @@ enum Cmd {
     /// probe.json (`[state] probe_file`, default <out_dir>/probe.json) and a dated copy. Sends no transaction. Refuses
     /// to start while a segment or campaign may hold the provider (Haan serves the first process only), and holds the
     /// campaign supervisor's lock while it runs. A 503 / Unavailable result is inconclusive: probe.json is then not
-    /// replaced and the exit code is 3
+    /// replaced and the exit code is 3. A plan limit (ResourceExhausted `<LIMIT> exceeded: n/m`) is a refusal
+    /// (`refused_plan_limit`, its numbers recorded): it never keeps probe.json from being written
     GrpcProbe {
         #[arg(long, default_value = "arb.toml")] config: PathBuf,
         #[arg(long, default_value_t = 30.0)] seconds: f64,
@@ -201,6 +253,35 @@ enum Cmd {
         /// the run's registry (default: <run>/pools.json; its registry-run.json beside it)
         #[arg(long)] pools: Option<PathBuf>,
     },
+    /// The watchdog (PLAN-ADDENDUM WP-20): a long-running process that watches the runs directory (`[watchdog]`) and
+    /// tells Telegram (`[alerts]`) whether a segment runs: "running" every `status_min`, "NOT running" when no segment
+    /// process has been alive for `grace_s` or the running one's status.jsonl is `stale_s` old, "back up" when it
+    /// recovers. One per runs directory (a lock). Reads only the runs directory and /proc; sends no transaction. Stops on
+    /// SIGINT or SIGTERM (exit 0)
+    Watchdog {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        /// the .env to load (default: the .env beside the config)
+        #[arg(long)] env_file: Option<PathBuf>,
+        /// look once, print the verdict as JSON and exit (0 running, 1 not); sends nothing and takes no lock
+        #[arg(long)] once: bool,
+    },
+    /// Send one test message through `[alerts]` (whatever its `enabled` says) and print whether it went out. Never prints
+    /// the token or the chat id. Exit 0 sent, 1 not
+    AlertTest {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        /// the .env to load (default: the .env beside the config)
+        #[arg(long)] env_file: Option<PathBuf>,
+    },
+    /// Post an operator's note to the alerts' chat now (`[alerts]`, whatever its `enabled` says): a field test's goal when
+    /// it starts and its result when it ends (docs/field-tests/README.md). The first line is the title; the text is
+    /// escaped (no markup). Never prints the token or the chat id. Exit 0 sent, 1 not
+    Notify {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        /// the .env to load (default: the .env beside the config)
+        #[arg(long)] env_file: Option<PathBuf>,
+        /// the note (its first line is the title)
+        #[arg(long)] text: String,
+    },
     /// (tests) install `run`'s signal handler, control socket and stop path, without feeds or RPC; print "ready <pid>",
     /// wait for a stop, write stop.json and exit with its code
     #[command(hide = true)]
@@ -258,7 +339,7 @@ fn main() -> Result<()> {
                 st.commit_timeout_ms, st.quiescence_ms, st.max_part_skew_slots, st.max_tip_lag_slots, st.clock_max_age_slots, st.lag_slo_p50_ms, st.lag_slo_p90_ms, st.slo_action,
                 st.boot_timeout_s, st.max_update_age_ms, st.resnapshot, st.resync_warn_s, st.resync_give_up_s,
                 if st.unavailable_stop_s == 0 { "an outage after the first message does not stop the run".to_string() } else { format!("stop after {} s unavailable", st.unavailable_stop_s) });
-            println!("lookup tables: retries {:?} ms then every {} s, give up after {} s, at most {} waiting, {} fetches at once, preload {:?} (used in the last {} h, at most {}); accuracy {} ({} versions per account)",
+            println!("lookup tables: retries {:?} ms then every {} s, give up after {} s, at most {} waiting, {} tables fetched at once, preload {:?} (used in the last {} h, at most {}); accuracy {} ({} versions per account)",
                 cfg.alts.retry_ms, cfg.alts.retry_every_s, cfg.alts.give_up_s, cfg.alts.wait_cap, cfg.alts.max_inflight, cfg.alts.preload, cfg.alts.preload_max_age_h,
                 cfg.alts.preload_max_tables, cfg.accuracy.action, cfg.accuracy.ring_versions);
             // WP-03b: the providers' budgets (every client of the process) and the chain-fetch roles
@@ -269,6 +350,11 @@ fn main() -> Result<()> {
             println!("chain fetch {}: after {} ms, backfill rps {}, backlog {}, sample every {} s, blockhash poll {} ms, sigs every {} s, tx version {}; roles {}", if cf.enabled { "on" } else { "off" },
                 cf.after_ms, cf.rps.fixed().map_or("auto".to_string(), |r| format!("{r}/s")), cf.max_backlog, cf.sample_every_s, cf.blockhash_poll_ms, cf.sigs_every_s, cf.max_tx_version,
                 rpc::Role::FETCH.iter().map(|r| format!("{}={}", r.as_str(), cf.providers_for(r.as_str(), &all).join("+"))).collect::<Vec<_>>().join(" "));
+            // FT-000: the reserved shares, the lookup tables' batching and cache, the wallet cursor, exec.jsonl's sampling
+            let res: Vec<String> = cf.reserves(&all).iter().map(|(p, r, rate)| format!("{} {:.2}/s of {p}", r.as_str(), rate)).collect();
+            println!("reserved shares: {}; lookup tables: {} a request at most every {} ms ({} at once), cache {} tables / {} MiB; wallet cursor {:?}; exec.jsonl keeps 1 in {} unwatched",
+                if res.is_empty() { "none".to_string() } else { res.join(", ") }, cfg.alts.batch_max, cfg.alts.call_every_ms, cfg.alts.calls_inflight,
+                cfg.alts.max_tables, cfg.alts.max_mb, cf.wallet_cursor, cfg.record.exec_unwatched_sample);
             let payer = bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok());
             let mut keys_checked = 0;
             for s in &cfg.sends {
@@ -291,7 +377,8 @@ fn main() -> Result<()> {
                 if config::bundle_only(&cfg.sends).is_ok() { " (bundle-only: a live or canary run may start)" } else { " (NOT bundle-only: live and canary runs refuse to start)" });
             let (s, l, sp) = (&cfg.strategy, &cfg.live, &cfg.send_policy);
             println!("safety: decoded swaps are hints only, skip_failing_signers {}, state_triggers {}; live: max {} SOL a trade, stop after {} lamports of failed fees; canary: {} SOL, {} attempts",
-                s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_failed_fees_lamports, cfg.canary.size_sol, cfg.canary.count);
+                s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_failed_fees_lamports, cfg.canary.size_sol,
+                if cfg.canary.count == 0 { "no cap on".to_string() } else { cfg.canary.count.to_string() });
             // WP-06: the builder
             let b = &cfg.builder;
             // the CU table where this machine has it (the configured path, or the repo's data/ copy): a table that does not
@@ -311,12 +398,21 @@ fn main() -> Result<()> {
             let accounts = if !b.create_close { "none created: routes through a token the wallet holds no account for are refused (mid_not_held, the held-only arm)".to_string() }
                 else if b.held_max == 0 { "created and closed in the same transaction (rent-neutral: nothing stays locked); held-set additions off (held_max = 0)".to_string() }
                 else { format!("created and closed in the same transaction; HELD-SET ADDITIONS ON (held_max = {}): an oversized bundle may keep its account, locking up to {} lamports \
-                    of rent each, only when the expected profit covers min_profit + that rent (the go-live gate wants nothing locked: an owner decision)", b.held_max, arbx::build::HELD_RENT_BOUND) };
+                    of rent each, only when the expected profit covers min_profit + that rent and the recoverable rent plus it stays within the rent cap ([supervisor] \
+                    rent_cap_sol {} SOL) (the go-live gate wants nothing locked: an owner decision)", b.held_max, arbx::build::HELD_RENT_BOUND, cfg.supervisor.rent_cap_sol) };
             println!("builder (WP-06): new token accounts {accounts}; \
                 PumpSwap volume accumulator creation {}; loaded-data limit {}; CU table {} (cells under {} samples: the fallback); lookup-table index {} (max {}); payer guard {}; bands {:?}",
                 if b.allow_uva_create { "ALLOWED" } else { "refused (uva_missing)" },
                 match b.loaded_limit() { None => "off".to_string(), Some(None) => "auto".to_string(), Some(Some(n)) => format!("{n} bytes") }, cu, b.cu_min_samples, b.alt_index, b.max_alts,
                 if b.payer_guard { format!("on, max drop {}", b.payer_guard_max_drop) } else { "off".into() }, cfg.bands.edges);
+            // WP-07: the ledger, the equity stops (OD-11), the bankroll cap
+            let (lg, sv) = (&cfg.ledger, &cfg.supervisor);
+            println!("ledger (WP-07): snapshots at start, every {} min inside the segment and at stop; the money view stale (nothing sent: equity_stale) past {} s, after {} failed snapshots in a row, or a landing {} s without its record; reconciliation within {} lamports on both bases ({} s after each snapshot); tokens valued at the pools' quote less {:.0}%; extra token accounts {:?}",
+                lg.snapshot_min, lg.max_view_age_s, lg.stale_after_failures, lg.max_record_wait_s, lg.tolerance_lamports, lg.recon_grace_s, lg.token_haircut * 100.0, lg.extra_mints);
+            println!("equity stops (WP-07, OD-11; basis: the net spend since the campaign's start, fees + tips + non-recoverable rent - the trading result, the owner's transfers not in it; each token its own floor, rent apart): shadow and stop the campaign when the net spend passes {} SOL within an hour, {} SOL within 24 h, or {}; a token moved by routes below its start less {:.2}%; test budget {} lamports a run (hard cap {} in all tests: <out_dir>/budget-state.json); rent cap {} SOL (on held-set additions only: a create+close locks nothing); native SOL alert under {} SOL",
+                sv.max_drop_per_hour_sol, sv.max_drop_per_day_sol, if sv.test_budget_lamports > 0 { format!("{} lamports since the start", sv.test_budget_lamports) } else { "the budget given (--budget-left; none here)".into() },
+                sv.token_floor_tolerance * 100.0, sv.test_budget_lamports, config::TEST_BUDGET_HARD_CAP, sv.rent_cap_sol, sv.native_floor_sol);
+            if l.bankroll_share > 0.0 { println!("bankroll (WP-07): a trade at most {:.0}% of the liquid SOL + WSOL - {} SOL, and at most the WSOL", l.bankroll_share * 100.0, l.bankroll_reserve_sol); }
             println!("send policy (WP-05): live and canary sends are one-transaction bundles, fail closed; blockhash {} at most {} slots old; skip leaders {:?}; in-flight hold {} slots; queue {} ms; >=1M bands at {}/s; crowding {:?} over {} h, crowded list {}; on-chain margin max({}, {} x net); dry run simulate {}",
                 sp.blockhash_commitment, sp.max_blockhash_age_slots, sp.skip_leader_kinds, sp.inflight_hold_slots, sp.queue_ms, sp.big_band_max_per_sec, sp.crowding_buckets,
                 sp.crowding_window_h, if sp.crowded_pools_file.is_empty() { "none".to_string() } else { sp.crowded_pools_file.clone() }, sp.margin_floor, sp.margin_share, cfg.dry_run.simulate);
@@ -354,6 +450,15 @@ fn main() -> Result<()> {
                     None => println!("  geo table not on this machine (loaded at start; without it regions stay null)"),
                 }
             }
+            // WP-20: the alerts and the watchdog (the variables are named here, never read)
+            let al = &cfg.alerts;
+            println!("alerts: {} (Telegram; token from ${}, chat from ${}): at most {} messages a minute, dedup {} s, min level {}, coalesce {} ms, heartbeat {}, daily summary {}{}",
+                if al.enabled { "on" } else { "off" }, al.token_env, al.chat_env, al.rate_per_min, al.dedup_s, al.min_level, al.coalesce_ms,
+                if al.heartbeat_min == 0 { "off".to_string() } else { format!("every {} min", al.heartbeat_min) }, if al.daily_summary { "on" } else { "off" },
+                if al.low_balance_sol > 0.0 { format!(", low balance under {} SOL", al.low_balance_sol) } else { String::new() });
+            let w = &cfg.watchdog;
+            println!("watchdog: watches {} (not running after {} s without a segment process, or a status.jsonl {} s old, or {} s of boot); running every {} min; looks every {} s",
+                w.dir(&cfg.out_dir).display(), w.grace_s, w.stale_s, w.boot_s, w.status_min, w.poll_s);
             Ok(())
         }
         Cmd::Pools { config } => {
@@ -378,10 +483,12 @@ fn main() -> Result<()> {
                 Ok(())
             })
         }
-        Cmd::Run { config, minutes, name, only, canary, dry_run, live, shadow, budget_left, campaign_dir, env_file } => {
-            let a = RunArgs { config, minutes, name, only, canary, dry_run, live, ov: Overrides { shadow, budget_left }, campaign_dir, env_file };
+        Cmd::Run { config, minutes, name, only, canary, dry_run, live, shadow, budget_left, campaign_dir, env_file, drain_s, equity_floor } => {
+            let a = RunArgs { config, minutes, name, only, canary, dry_run, live, ov: Overrides { shadow, budget_left }, campaign_dir, env_file, drain_s, equity_floor };
             let sess = control::Session::new();
             control::install_panic_hook(sess.clone());
+            // WP-20: a main-thread panic sends a Critical alert after stop.json is written (best effort, bounded)
+            alerts::install_panic_hook();
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&a, &sess)));
             std::process::exit(end_run(&sess, res))
         }
@@ -390,6 +497,44 @@ fn main() -> Result<()> {
             control::install_panic_hook(sess.clone());
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wait_signal(&dir, minutes, panic, fail_after_stop, &sess)));
             std::process::exit(end_run(&sess, res))
+        }
+        Cmd::Campaign { name, config, hours, segment_min, mode, test_budget_lamports, who, runs, max_segments, env_file, drain_s, detach, force, poll_ms, backoff_s } => {
+            let o = campaign::Opts { name, config, hours, segment_min, mode, test_budget: test_budget_lamports, who, runs, max_segments, env_file, drain_s, force,
+                poll: std::time::Duration::from_millis(poll_ms.max(10)), backoff: std::time::Duration::from_secs(backoff_s) };
+            std::process::exit(campaign::main(o, detach)?)
+        }
+        Cmd::CampaignEquity { campaign_dir } => {
+            println!("{}", serde_json::to_string_pretty(&campaign::equity_json(&campaign_dir, now_ns()))?);
+            Ok(())
+        }
+        Cmd::Watchdog { config, env_file, once } => {
+            let note = match &env_file { Some(f) => load_env_file(f), None => { load_env(&config); None } };
+            let cfg = config::Config::load(&config)?;
+            let runs = cfg.watchdog.dir(&cfg.out_dir);
+            if once {
+                let (v, up) = watchdog::once(&runs, &cfg.watchdog);
+                println!("{}", serde_json::to_string_pretty(&v)?);
+                std::process::exit(if up { 0 } else { 1 });
+            }
+            std::process::exit(watchdog::run(&cfg.alerts, &cfg.watchdog, &runs, note)?)
+        }
+        Cmd::AlertTest { config, env_file } => {
+            if let Some(n) = match &env_file { Some(f) => load_env_file(f), None => { load_env(&config); None } } { eprintln!("{n}"); }
+            let cfg = config::Config::load(&config)?;
+            if !cfg.alerts.enabled { println!("note: [alerts] enabled = false in {}: runs of this config send no alerts", config.display()); }
+            let what = format!("arbx alert-test from {} (build {}, config {})", provenance::hostname(), provenance::build_short(), config.display());
+            match alerts::send_test(&cfg.alerts, &alerts::env_var, &what, std::time::Duration::from_secs(15)) {
+                Ok(line) => { println!("{line}"); Ok(()) }
+                Err(e) => { println!("failed: {e}"); std::process::exit(1) }
+            }
+        }
+        Cmd::Notify { config, env_file, text } => {
+            if let Some(n) = match &env_file { Some(f) => load_env_file(f), None => { load_env(&config); None } } { eprintln!("{n}"); }
+            let cfg = config::Config::load(&config)?;
+            match alerts::send_note(&cfg.alerts, &alerts::env_var, &text, std::time::Duration::from_secs(15)) {
+                Ok(line) => { println!("{line}"); Ok(()) }
+                Err(e) => { println!("failed: {e}"); std::process::exit(1) }
+            }
         }
         Cmd::Provenance { config, offline } => {
             load_env(&config);
@@ -459,8 +604,8 @@ fn main() -> Result<()> {
             let p2 = wallet::prompt_pass("again: ")?;
             if p1 != p2 { anyhow::bail!("the passphrases differ"); }
             if p1.len() < 16 { anyhow::bail!("use a passphrase of at least 16 characters"); }
-            let blob = wallet::encrypt(&secret, &p1, wallet::V3_LOG_N)?;
-            let key = wallet::keypair(&wallet::decrypt(&blob, &p1)?)?;
+            let blob = wallet::encrypt(&secret, p1.as_bytes(), wallet::V3_LOG_N)?;
+            let key = wallet::keypair(&wallet::decrypt(&blob, p1.as_bytes())?)?;
             if out.exists() { anyhow::bail!("{} exists: not overwriting", out.display()); }
             use std::os::unix::fs::OpenOptionsExt;
             let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&out)?;
@@ -472,7 +617,7 @@ fn main() -> Result<()> {
         Cmd::KeystoreCheck { file } => {
             let blob = std::fs::read_to_string(&file)?;
             let pass = wallet::prompt_pass("passphrase: ")?;
-            let key = wallet::keypair(&wallet::decrypt(&blob, &pass)?)?;
+            let key = wallet::keypair(&wallet::decrypt(&blob, pass.as_bytes())?)?;
             println!("{} unlocks to wallet {}", file.display(), bs58::encode(key.verifying_key().as_bytes()).into_string());
             Ok(())
         }
@@ -492,6 +637,29 @@ fn main() -> Result<()> {
 /// every token of the registry's pools, with its token program (the wallet's possible token accounts)
 fn reg_mints(reg: &pools::Registry) -> Vec<(tx::Pk, tx::Pk)> {
     reg.pools.iter().flat_map(|m| [(m.t0, m.t0_prog), (m.t1, m.t1_prog)]).collect()
+}
+
+/// the run's mode as the budget state names it
+fn mode_name(live: bool, canary: bool) -> &'static str { if live { "live" } else if canary { "canary" } else { "shadow" } }
+
+/// WP-07: the accounts every balance snapshot reads besides the wallet: its WSOL account, its ATAs of the mints it held
+/// at boot (the executor's read) and of `[ledger] extra_mints` (USDC, USDT; each with its registry token program, SPL
+/// Token otherwise), the configured nonce accounts and lookup tables (counted only when the wallet is their authority),
+/// its PumpSwap accumulator. The token accounts its transactions touch join them as they come
+fn ledger_candidates(cfg: &config::Config, reg: &pools::Registry, held: &[String], wallet: &tx::Pk) -> Vec<tx::Pk> {
+    let progs: std::collections::HashMap<tx::Pk, tx::Pk> = reg_mints(reg).into_iter().collect();
+    let prog = |m: &tx::Pk| progs.get(m).copied().unwrap_or(*pda::TOKEN_PROGRAM);
+    let mut out = vec![build::ata_of(wallet, &venues::WSOL, &pda::TOKEN_PROGRAM)];
+    for m in held.iter().chain(cfg.ledger.extra_mints.iter()).filter_map(|m| bs58::decode(m).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok())) {
+        out.push(build::ata_of(wallet, &m, &prog(&m)));
+    }
+    for k in cfg.send_policy.direct.nonce_accounts.iter().chain(cfg.exec.alts.iter()).filter_map(|k| bs58::decode(k).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok())) {
+        out.push(k);
+    }
+    out.push(ledger::accumulator_of(wallet));
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|k| seen.insert(*k));
+    out
 }
 
 fn wrap(config: &Path, sol: f64) -> Result<()> {
@@ -609,7 +777,8 @@ fn grpc_probe(config: &Path, seconds: f64, out: Option<PathBuf>, only: Option<St
     let subs = rt.block_on(probe::probe(&plan, std::time::Duration::from_secs_f64(seconds), only.as_deref()));
     drop(lock);
     for s in &subs {
-        let what = match s.verdict { "accepted" if s.messages_30s == 0 => "SILENT", "accepted" => "accepted", "refused" => "REFUSED", _ => "INCONCLUSIVE" };
+        let what = match s.verdict { "accepted" if s.messages_30s == 0 => "SILENT", "accepted" => "accepted", "refused" => "REFUSED", "refused_plan_limit" => "PLAN LIMIT",
+            _ => "INCONCLUSIVE" };
         println!("  {:<24} {:<12} {:>6} msgs  first {:>8}  {}{}", s.sub, what, s.messages_30s,
             s.first_msg_ms.map(|m| format!("{m:.0} ms")).unwrap_or_else(|| "-".into()), s.host, s.error.as_ref().map(|e| format!("  ({e})")).unwrap_or_default());
     }
@@ -858,7 +1027,9 @@ fn limits_json(cfg: &config::Config, live: bool, canary: bool) -> serde_json::Va
         // (the bands are over the expected edge, gross − the base fee: src/bands.rs)
         "big_band_min_expected_lamports": arbx::bands::EDGES[arbx::bands::BIG_FROM as usize - 1], "big_band_max_per_sec": cfg.send_policy.big_band_max_per_sec,
         "crowded_pools_file": cfg.send_policy.crowded_pools_file, "crowded_skip_min_expected_lamports": cfg.send_policy.crowded_skip_min_expected_lamports,
-        "bundle_only": config::bundle_only(&cfg.sends).is_ok(), "canary_max_size_sol": cfg.canary.size_sol,
+        "bundle_only": config::bundle_only(&cfg.sends).is_ok(), "canary_max_size_sol": cfg.canary.size_sol, "canary_count": cfg.canary.count,
+        // WP-07: the trade size capped by the bankroll (0 = off)
+        "bankroll_share": cfg.live.bankroll_share, "bankroll_reserve_sol": cfg.live.bankroll_reserve_sol,
         "max_blockhash_age_slots": cfg.send_policy.max_blockhash_age_slots, "skip_leader_kinds": cfg.send_policy.skip_leader_kinds,
         "margin_floor": cfg.send_policy.margin_floor, "margin_share": cfg.send_policy.margin_share,
         // WP-02: always on
@@ -879,7 +1050,7 @@ fn send_setup(live: bool, canary: bool, dry_run: bool, any_send: bool, load_key:
 
 /// `arbx run`'s arguments
 struct RunArgs { config: PathBuf, minutes: Option<f64>, name: Option<String>, only: Option<String>, canary: bool, dry_run: bool, live: bool, ov: Overrides,
-    campaign_dir: Option<PathBuf>, env_file: Option<PathBuf> }
+    campaign_dir: Option<PathBuf>, env_file: Option<PathBuf>, drain_s: u64, equity_floor: Option<i64> }
 
 /// A run's config: `cfg` with the command line applied (what the run uses); `config_json` (meta.json `config`) hashes
 /// the file as loaded, before the overrides (review F2: the normalized hash is the same in every segment of a campaign,
@@ -932,6 +1103,16 @@ fn run_dir(out_dir: &str, campaign_dir: Option<&Path>, name: &str) -> PathBuf {
 /// The end of `run` / `wait-signal`: the stop reason they set, or error / panic; stop.json; the exit code. An error or
 /// panic after a stop request keeps that reason, is stop.json `secondary`, and exits 30 (review M5)
 fn end_run(sess: &control::Session, res: std::thread::Result<Result<()>>) -> i32 {
+    let code = end_code(sess, res);
+    // WP-20: the stop message (reason, run time, the last status line's numbers) and whatever alerts are still queued,
+    // after stop.json; bounded (alerts::EXIT_WAIT), a no-op without alerts
+    if let Some(i) = sess.stopper.info() {
+        alerts::on_exit(code, i.reason.as_str(), &i.detail, sess.secondary().map(|(r, d)| (r.as_str(), d.as_str())));
+    }
+    code
+}
+
+fn end_code(sess: &control::Session, res: std::thread::Result<Result<()>>) -> i32 {
     match res {
         Ok(Ok(())) => sess.finish(StopInfo::new(StopReason::Error, "the run ended without a stop reason")),
         Ok(Err(e)) => {
@@ -1067,11 +1248,52 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     if cfg.canary.enabled && !canary { println!("[canary] is enabled in the config but --canary was not given: no canaries this run"); }
     // PLAN WP-05 item 1: a live or canary run sends one-transaction Jito bundles only
     if live || canary { config::bundle_only(&cfg.sends).context("PLAN WP-05: live and canary runs are bundle-only")?; }
+    // WP-07 (docs/field-tests/README.md "Enforcement"; review WP-07 #5, #8): a live or canary run arms the equity floor, so
+    // it needs a test budget (the config's `[supervisor] test_budget_lamports`, or what a campaign has left:
+    // --budget-left), never above the owner's hard cap; a floor given is a lamport amount
+    // (a run that sends nothing has no use for them: its ledger reads the budget at the cap, for its records)
+    if (live || canary) && a.ov.budget_left.is_some_and(|b| b > config::TEST_BUDGET_HARD_CAP) {
+        anyhow::bail!("--budget-left {} is over the owner's hard cap {} (docs/field-tests/BUDGET.md)", a.ov.budget_left.unwrap_or(0), config::TEST_BUDGET_HARD_CAP);
+    }
+    if (live || canary) && a.equity_floor.is_some_and(|f| f < 0) { anyhow::bail!("--equity-floor must be >= 0 lamports"); }
+    if (live || canary) && cfg.supervisor.test_budget_lamports == 0 && a.ov.budget_left.is_none() {
+        anyhow::bail!("a live or canary run needs a test budget for its equity floor: [supervisor] test_budget_lamports (at most {}) or --budget-left", config::TEST_BUDGET_HARD_CAP);
+    }
     // review F3: a supervised segment is paused through its socket; without one, `.pause` could not reach it
     if a.campaign_dir.is_some() && !cfg.control.socket { anyhow::bail!("[control] socket = false: a supervised segment (--campaign-dir) needs its control socket (the supervisor pauses sending through it)"); }
     // WP-05 crowding (F6; review F8 c): a configured crowded list must load, before anything starts (fail closed: a missing
     // one would put the crowded pools back in front of the queue)
     let crowded = if cfg.send_policy.crowded_pools_file.is_empty() { Default::default() } else { exec::load_crowded_pools(&cfg.send_policy.crowded_pools_file)? };
+    // the run's name and directory. review F13: a directory that already holds a run is refused (the recorder would
+    // replace its compressed files and append to its plain ones); nothing is written into it
+    let name = a.name.clone().unwrap_or_else(utc_stamp);
+    let dir = run_dir(&cfg.out_dir, a.campaign_dir.as_deref(), &name);
+    if let Some(n) = std::fs::read_dir(&dir).ok().map(|d| d.count()).filter(|n| *n > 0) {
+        anyhow::bail!("{} already holds {n} files (an earlier run?): choose another --name", dir.display());
+    }
+    // WP-07 (review #5): a live or canary start. Outside a campaign: the runs directory's lock (no campaign, no other
+    // manual run), no other bot on the provider or the wallet (I-3, arbed's bot), and the owner's cumulative budget
+    // (`<out_dir>/budget-state.json`: refused when nothing is left; this run gets the smaller of what it asks and what is
+    // left). A campaign's segment: its campaign's supervisor holds the lock (it did all of that)
+    let wanted = match (a.ov.budget_left, cfg.supervisor.test_budget_lamports) { (Some(b), c) if c > 0 => b.min(c), (Some(b), _) => b, (None, c) => c };
+    let hold = if !(live || canary) { None } else {
+        match a.campaign_dir.as_deref() {
+            Some(c) => {
+                let runs = c.parent().unwrap_or(Path::new("."));
+                if !probe::lock_held(runs) { anyhow::bail!("--campaign-dir {}: no campaign supervisor holds {} (a live or canary segment runs only under `arbx campaign`)", c.display(), runs.display()); }
+                None
+            }
+            None => {
+                let runs = PathBuf::from(&cfg.out_dir);
+                std::fs::create_dir_all(&runs).with_context(|| format!("creating {}", runs.display()))?;
+                let h = arbx::budget::manual_start(&runs, &name, &dir, mode_name(live, canary), wanted, &|| probe::busy(&runs, true), now_ns())?;
+                println!("budget: {} lamports for this run ({} left of the owner's {} before it; {})", h.grant.allotment, h.grant.remaining_before, config::TEST_BUDGET_HARD_CAP,
+                    arbx::budget::path(&runs).display());
+                Some(h)
+            }
+        }
+    };
+    let budget_left = hold.as_ref().map(|h| h.grant.allotment).or(a.ov.budget_left);
     // the trading key is read only when something will really be sent, and must be the config's wallet. Before the
     // signal handlers: Ctrl-C at the passphrase prompt still ends the process at once (nothing has started). A dry run
     // makes a throwaway key in memory instead (never the keystore); a shadow run holds none
@@ -1083,15 +1305,19 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     }
     let feed_names: Vec<String> = cfg.feeds.iter().filter(|f| f.enabled).map(|f| f.name.clone()).collect();
     // the run directory next: from here on every end, even a failed boot, leaves stop.json
-    let name = a.name.clone().unwrap_or_else(utc_stamp);
-    let dir = run_dir(&cfg.out_dir, a.campaign_dir.as_deref(), &name);
-    // review F13: a directory that already holds a run is refused (the recorder would replace its compressed files and
-    // append to its plain ones); nothing is written into it
-    if let Some(n) = std::fs::read_dir(&dir).ok().map(|d| d.count()).filter(|n| *n > 0) {
-        anyhow::bail!("{} already holds {n} files (an earlier run?): choose another --name", dir.display());
-    }
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     sess.set_dir(dir.clone());
+    // WP-20: the alerts (src/alerts.rs), before anything else can fail: from here on every end of the run sends its stop
+    // message (`alerts::on_exit` in end_run). The token and chat id come from the environment loaded above; missing ones
+    // turn the alerts off with one warning (said once the recorder runs). Producers never wait; the sender runs on rt_bg
+    let runs_dir = match a.campaign_dir.as_deref() { Some(c) => c.parent().map(Path::to_path_buf), None => dir.parent().map(Path::to_path_buf) };
+    let (alerter, alert_notes) = alerts::Alerts::new(&cfg.alerts, &alerts::env_var, alerts::Ctx { label: name.clone(), dir: Some(dir.clone()), runs_dir, started_ns, seg: None,
+        max_blockhash_age_slots: cfg.send_policy.max_blockhash_age_slots });
+    alerts::install(alerter.clone());
+    // integration (WP-07 x WP-20): WP-07's notices (the ledger's, the in-process supervisor's: every stop, money event and
+    // stale money view) go to these alerts, mapped to their levels and deduplicated by kind and subject; the hook never
+    // waits, and runs after the stop it tells of (notify::notify, inside catch_unwind)
+    arbx::notify::set_hook(alerts::notice_hook(alerter.clone()));
     // WP-02: the recorder, always on (MEASUREMENT §0), before anything records. Its writer threads write every stream
     // (run.log too: `say` hands the line over; the engine thread writes nothing); a core-stream drop or the disk
     // budget's last step closes the SendGate. Closed on every way out of `run`, before stop.json's line
@@ -1102,6 +1328,13 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let say = |s: &str| rec.say(s);
     say(&format!("arbx {} build {} ({}), config {} (sha256 {}), run {}", env!("CARGO_PKG_VERSION"), provenance::build_short(), env!("ARBX_PROFILE"),
         a.config.display(), &provenance::sha256_hex(&raw)[..16], dir.display()));
+    // WP-20: the alerts' own events go to events.jsonl, and every events.jsonl event is shown to them (`alerts::classify`)
+    alerter.set_rec(rec.clone());
+    {
+        let w = Arc::downgrade(&alerter);
+        rec.set_alert_tap(Box::new(move |kind, _subsystem, _feed, d| if let Some(x) = w.upgrade() { x.on_event(kind, d) }));
+    }
+    for n in &alert_notes { say(n); }
     if let Some(n) = &env_note { say(n); }
     for n in rec.recorder().map(|r| r.notes.clone()).unwrap_or_default() { say(&n); }
     // the run's identity, and a partial meta.json that stop.json's writer leaves if the boot fails before the full one
@@ -1134,6 +1367,12 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let rts = runtime::Runtimes::new(cfg.runtime.bg_threads)?;
     let (hot, bg) = (rts.hot.handle().clone(), rts.bg.handle().clone());
     rec.set_runtimes(hot.clone(), bg.clone());
+    // WP-20: on rt_bg, the alerts' sender, the SendGate watcher (every change, with its reason) and the monitor (the last
+    // status line: a stale blockhash, the failed-fee cap, a low balance; the RPC 429 storms; the heartbeat and the daily
+    // summary)
+    alerter.start(&bg, stop.clone());
+    alerter.watch_gate(&bg, sess.gate.clone(), stop.clone());
+    alerter.start_monitor(&bg, stop.clone());
     let (eps, skipped) = cfg.rpc.endpoints();
     if eps.is_empty() { anyhow::bail!("no RPC provider configured (skipped: {skipped:?})"); }
     let rpc = rpc::Rpc::race(eps).with_failover(cfg.rpc.failover).bind(bg.clone()).with_role(rpc::Role::Boot);
@@ -1143,6 +1382,9 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // reason); each provider's host resolved once and its connection opened (no DNS lookup on a reconnect)
     let rpc_reg = rpc::Registry::global();
     for n in rpc.names() { let (r, b) = cfg.chainfetch.limit_of(&n); rpc_reg.set_limit(&n, r, b); }
+    // FT-000 (S1-1): the reserved shares (`[chainfetch] reserve`): the slot index and the backfill keep their rate on every
+    // provider that serves them, whatever the busier roles ask
+    for (p, role, rate) in cfg.chainfetch.reserves(&rpc.names()) { rpc_reg.set_reserve(&p, role, rate); }
     rpc_reg.set_sink(rec.clone());
     rpc.set_phase(rpc::Phase::Boot);
     rpc.set_boot_budget(std::time::Duration::from_secs(cfg.chainfetch.boot_retry_s));
@@ -1263,12 +1505,43 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // source; review WP-03b #12). The idle providers' connections are kept warm
     let cf_clients = chainfetch::RoleClients::new(&rpc, &cfg.chainfetch);
     let cf_meta = chainfetch::meta_json(&cfg.chainfetch, &cf_clients, &rpc_reg);
+    // WP-07: the campaign so far (the earlier segments' snapshots, ledgers and reconciliations of the last 25 h), read once
+    // here: the ledger below takes it, and (integration, FT-000 x WP-07) the wallet cursor never passes the window it
+    // reconciles first
+    let campaign_hist = a.campaign_dir.as_deref().map(|c| ledger::history(c, Some(name.as_str()), now_ns(), arbx::supervisor::DAY_NS + arbx::supervisor::HOUR_NS));
     if cfg.chainfetch.enabled {
         let (cap, wallet_pk) = (cf_clients.cap(rpc::Role::Backfill), bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok()));
         let gate = sess.gate.clone();
         let on_dead: chainfetch::OnDead = Arc::new(move |why: &str| { let _ = gate.shadow("chainfetch_dead", why, true); });
+        // FT-000 (S1-12): our wallet's history starts after the previous segment's cursor
+        let cursor = chainfetch::read_wallet_cursor(&cfg.chainfetch.wallet_cursor, &dir, &cfg.wallet);
+        // integration (FT-000 x WP-07): in a campaign, not past the window the ledger reconciles between segments
+        let cursor = match (&campaign_hist, cursor) {
+            (Some(h), Some((sig, slot, file))) => {
+                let from = h.prev_window.as_ref().map_or(0, |w| w.from.slot);
+                match ledger::bound_wallet_cursor(Some((sig.clone(), slot)), h) {
+                    (Some((s2, sl2)), "moved_back") => {
+                        say(&format!("wallet history: the cursor {}… (slot {slot}) is past the ledger's window between segments (from slot {from}): \
+                            from {}… (slot {sl2}), the newest earlier ledger entry before it", &sig[..sig.len().min(12)], &s2[..s2.len().min(12)]));
+                        Some((s2, sl2, file))
+                    }
+                    (None, _) => {
+                        say(&format!("wallet history: the cursor {}… (slot {slot}) is past the ledger's window between segments (from slot {from}) and no \
+                            earlier ledger entry precedes it: not used", &sig[..sig.len().min(12)]));
+                        None
+                    }
+                    (c, _) => c.map(|(s, sl)| (s, sl, file)),
+                }
+            }
+            (_, c) => c,
+        };
+        match &cursor {
+            Some((sig, slot, file)) => say(&format!("wallet history: after {}…'s slot {slot} ({}): only newer signatures are listed", &sig[..sig.len().min(12)], file.display())),
+            None => say(&format!("wallet history: no cursor ([chainfetch] wallet_cursor {:?}): the last hour is listed", cfg.chainfetch.wallet_cursor)),
+        }
         chainfetch::start(chainfetch::Opts { cfg: cfg.chainfetch.clone(), wallet: wallet_pk, route_program: tx::pk(&cfg.exec.program), roles: roles.clone(), rec: rec.clone(),
-            back: Some(tx.clone()), chain: Arc::new(cf_clients), backfill_cap: cap }, rpc_reg.clone(), &bg, stop.clone(), Some(on_dead));
+            back: Some(tx.clone()), chain: Arc::new(cf_clients), backfill_cap: cap, wallet_cursor: cursor.map(|c| (c.0, c.1)) }, rpc_reg.clone(), &bg, stop.clone(),
+            Some(on_dead));
     }
     rpc.start_warm(&bg, stop.clone(), std::time::Duration::from_secs(20), std::time::Duration::from_secs(5));
     feeds::start_state(cfg.state.url.clone(), state_token, wrx, state_subs, tx.clone(), stop.clone(), &hot, state_counters.clone(), rec.clone(),
@@ -1365,6 +1638,28 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         }
         Err(e) => return Err(e.context("the executor")),
     };
+    // ---- WP-07 wiring: the ledger (money by signature from the wallet stream, balance snapshots at start, hourly and at
+    // stop, the hourly reconciliation) and the equity stops: campaign-wide with --campaign-dir (the earlier segments'
+    // snapshots and ledgers of the last 25 h; the campaign's start read from the chain). Its snapshots run on rt_bg
+    // (role ledger); a stop rule acts on this run's gate and stop path; a live or canary run sends nothing until the
+    // first snapshot (`equity_unknown`)
+    let wallet_pk = bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok());
+    let ledger = wallet_pk.map(|w| {
+        let hist = campaign_hist.unwrap_or_default();
+        if a.campaign_dir.is_some() {
+            say(&format!("ledger: the campaign so far: {} segments read ({:?}), start {}, test budget {:?}, net spend {}, SOL + WSOL now {:?}, {} lines unreadable",
+                hist.segments_read.len(), hist.segments_read, hist.start.as_ref().map_or("not yet (this segment's first snapshot)".to_string(), |s| format!("{} lamports of SOL + WSOL in {} at slot {}",
+                    s.equity_stop, s.segment, s.slot)), hist.test_budget, hist.spent, hist.equity_stop_now, hist.bad_lines));
+        }
+        // the stop rules act in a run that can send; a shadow or dry run records what would have fired (review WP-07 #2:
+        // `Ledger::for_run` is what this assembles, and its tests arm it)
+        let mut l = ledger::Ledger::for_run(&cfg, w, rec.clone(), &name, mode.sends(), sess.gate.clone(), sess.stopper.clone(), hist, budget_left, a.equity_floor);
+        l.set_io(rpc.with_role(rpc::Role::Ledger), bg.clone(), tx.clone());
+        l.add_candidates(ledger_candidates(&cfg, &reg, &exec.as_ref().map(|x| x.held_mints()).unwrap_or_default(), &w));
+        l
+    });
+    if ledger.is_none() && mode.sends() { anyhow::bail!("the config's wallet is not a public key: no ledger, no equity stops: a live or canary run refuses to start"); }
+    if ledger.is_none() { say("WARNING: the config's wallet is not a public key: no ledger, no equity stops"); }
     // WP-03b: the boot is over (pools, snapshot, route program, executor): every client calls as configured again
     rpc.set_phase(rpc::Phase::Run);
     say(&format!("rpc: boot done; budgets {} (requests/s, every role); chain fetch {}", rpc_reg.limits_json(),
@@ -1372,9 +1667,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // meta.json v2 (MEASUREMENT §4.2), written before the feeds start; rewritten once when the venue programs are hashed
     let built: Vec<String> = paths.as_ref().map(|p| p.list.iter().map(|x| x.name.clone()).collect()).unwrap_or_default();
     let mut limits = limits_json(&cfg, live, canary);
-    limits["supervisor"] = json!({ "budget_left_lamports": a.ov.budget_left, "config_max_failed_fees_lamports": config_cap,
+    limits["supervisor"] = json!({ "budget_left_lamports": budget_left, "budget_state": hold.as_ref().map(|h| json!({ "file": arbx::budget::path(&h.runs).display().to_string(),
+            "allotment": h.grant.allotment, "remaining_before": h.grant.remaining_before, "spent_before": h.grant.spent_before })), "config_max_failed_fees_lamports": config_cap,
         "effective_max_failed_fees_lamports": cfg.live.max_failed_fees_lamports });
-    limits["ledger"] = Value::Null;
+    limits["ledger"] = ledger.as_ref().map_or(Value::Null, |l| l.limits_json());
     let tx_streams: Vec<Value> = cfg.feeds.iter().filter(|f| f.enabled && f.kind == config::FeedKind::YellowstoneTx)
         .map(|f| json!({ "name": f.name, "url_host": f.url.as_deref().map(provenance::host_of), "account_include": f.account_include, "max_accounts": f.max_accounts,
             "failed": f.failed.unwrap_or(true) })).collect();
@@ -1411,11 +1707,19 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         "send_policy": provenance::section(&cfg.send_policy), "dry_run": provenance::section(&cfg.dry_run),
         "record": provenance::section(&cfg.record), "control": provenance::section(&cfg.control), "tips": null,
         "runtime": provenance::section(&cfg.runtime),
+        // WP-20: the alerts' config (the variables' names, never their values) and whether they are on
+        "alerts": { "enabled": alerter.enabled(), "off_why": alerter.off_why(), "config": provenance::section(&cfg.alerts) },
         "send_gate": sess.gate.json(),
         // what the command line changed in the config for this run (--shadow, --budget-left)
         "overrides": a.ov.json(),
     });
     control::write_atomic(&dir.join("meta.json"), serde_json::to_string_pretty(&meta)?.as_bytes())?;
+    // WP-20: the segment start message (mode, build, config hash, wallet, budget)
+    alerter.segment_start(alerts::SegmentStart { segment: name.clone(), mode: mode.as_str().into(), gate_mode: sess.gate.mode().as_str().into(),
+        gate_reason: Some(sess.gate.reason()).filter(|r| !r.is_empty()), build: provenance::build_short(),
+        config_sha: config_json["normalized_sha256"].as_str().map(|h| h.chars().take(12).collect()).unwrap_or_default(), wallet: cfg.wallet.clone(),
+        // integration: the budget this run has (WP-07: its share of the owner's budget state, or what the campaign left it)
+        budget_left_lamports: budget_left, fee_cap_lamports: if canary { cfg.canary.max_spend_lamports } else { cfg.live.max_failed_fees_lamports } });
     if sess.stopper.stopping() { return Ok(()); }
     let fs = feeds::start(&cfg.feeds, interest.clone(), tx.clone(), stop.clone(), &hot, &rec, Some(roles.clone()))?;
     anyhow::ensure!(fs.names == feed_names, "feed ids changed: {:?} vs {:?}", fs.names, feed_names);
@@ -1483,6 +1787,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let b = &cfg.send_policy.crowding_buckets;
     eng.set_crowding(arbx::crowding::Activity::new(cfg.send_policy.crowding_window_h, [b[0], b[1]], crowded));
     eng.exec = exec;
+    eng.ledger = ledger;
     eng.gate = Some(sess.gate.clone());
     // the minutes count from the engine's start, as in arb-lab (boot time is not part of the segment)
     let until = a.minutes.map(|m| now_ns() + (m * 60e9) as u64).unwrap_or(u64::MAX);
@@ -1508,13 +1813,32 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         engine::RunEnd::Stopped => {}
     }
     let reason = sess.stopper.info().map_or("error", |i| i.reason.as_str());
-    // what was still open when the stop began: each gets its `unsettled` outcome line (WP-05) and stop.json lists them
-    // (the next segment's wallet stream and WP-07's ledger pick their landings up by signature). No executor: null
-    // (review M11)
+    // WP-07: the stop's drain (`--drain-s`; the gate is closed, nothing new is sent): the attempts still open settle from
+    // the wallet stream, the block engine's results and their expiry checks. Then the stop snapshot (at most 20 s), 5 s
+    // for the records of what landed just before it, and the final reconciliation. Whatever is still open gets its
+    // `unsettled` outcome line (WP-05) and stop.json lists it (the next segment's ledger joins its landing by signature).
+    // No executor: null (review M11)
+    let in_flight = eng.exec.as_ref().map(|x| x.open_attempts().len());
+    let t_drain = now_ns();
+    if in_flight.is_some_and(|n| n > 0) { say(&format!("stop: waiting at most {} s for {} open attempts to settle", a.drain_s, in_flight.unwrap_or(0))); }
+    let mut drain_say = |l: &str| say(l);
+    let settled = eng.drain(&rx, t_drain + a.drain_s * 1_000_000_000, &|e| e.exec.as_ref().is_none_or(|x| x.open_attempts().is_empty()), &mut drain_say);
+    let drain_ms = now_ns().saturating_sub(t_drain) as f64 / 1e6;
+    if eng.ledger.is_some() {
+        eng.ledger_stop_snapshot();
+        if !eng.drain(&rx, now_ns() + 20_000_000_000, &|e| e.ledger_stop_snapshot_done(), &mut drain_say) { say("stop: no stop snapshot within 20 s"); }
+        // the stop's reconciliation (review WP-07 #7): decided at once when it passes; otherwise its window is searched and
+        // decided once more within `recon_grace_s` while the records of what landed just before the stop come in; still
+        // unexplained, it is written `final: false` and the next segment decides it again
+        let grace = eng.ledger_final_begin();
+        if !eng.drain(&rx, now_ns() + grace, &|e| e.ledger_final_settled(), &mut drain_say) { say("stop: the stop's reconciliation is decided without more records"); }
+        eng.ledger_final();
+    }
     let open = eng.exec.as_mut().map(|x| x.settle_at_stop());
     eng.write_final_status(rx.len(), reason);
-    *sess.drain.lock().unwrap() = control::Drain { in_flight_at_stop: open.as_ref().map(|o| o.len()), drained: open.as_ref().map(|o| o.is_empty()),
-        unsettled: open.unwrap_or_default(), drain_ms: None, final_status_seq: eng.status_lines.checked_sub(1) };
+    *sess.drain.lock().unwrap() = control::Drain { in_flight_at_stop: in_flight, drained: open.as_ref().map(|o| o.is_empty()),
+        unsettled: open.unwrap_or_default(), drain_ms: in_flight.map(|_| drain_ms), final_status_seq: eng.status_lines.checked_sub(1) };
+    if !settled { say(&format!("stop: {} attempts still open after {:.0} ms: unsettled", sess.drain.lock().unwrap().unsettled.len(), drain_ms)); }
     for l in rpc_stats.summary() { say(&format!("rpc final {l}")); }
     for l in rpc_stats.reasons(5) { say(&format!("rpc failure {l}")); }
     // WP-03b: every client's requests by role and provider (resources.jsonl `rpc` has them every 10 s)
@@ -1522,7 +1846,17 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     if let Some(p) = &paths { for l in p.summary() { say(&format!("send final {l}")); } }
     if let Some(x) = &eng.exec { say(&format!("exec final {}", x.status())); }
     if runtime::hot_violations() > 0 { say(&format!("WARNING: {} RPC calls ran on an arbx-hot thread", runtime::hot_violations())); }
+    // WP-07 (review #5): a manual live or canary run's net spend into the owner's budget state (its entry final)
+    if let (Some(h), Some(l)) = (&hold, eng.ledger.as_ref()) {
+        let spent = l.totals.net_spend();
+        match arbx::budget::update(&h.runs, &h.id, spent, true, now_ns()) {
+            Ok(()) => say(&format!("budget: this run spent {spent} lamports net ({})", arbx::budget::path(&h.runs).display())),
+            Err(e) => say(&format!("WARNING: the budget state was not updated: {e:#} (the next start re-reads this run's ledger)")),
+        }
+    }
     stop.store(true, Ordering::Relaxed);
+    // WP-20: what the alerts' sender holds goes out before its runtime stops (bounded); the rest with the stop message
+    alerter.flush(alerts::FLUSH_WAIT);
     // the feeds and send tasks stop with the runtimes; then the recorder drains what they handed it (its guard closes it)
     rts.shutdown(std::time::Duration::from_secs(2));
     say(&format!("done: {} (stop: {reason})", dir.display()));
@@ -1555,6 +1889,13 @@ mod tests {
         opted.builder.held_max = 3;
         assert_eq!((limits_json(&opted, true, false)["rent_neutral"].as_bool(), limits_json(&opted, true, false)["held_max"].as_u64()), (Some(false), Some(3)));
         assert!(l.get("max_new_token_accounts").is_none());
+        // WP-07 beside them (merge): the bankroll cap (off in this file) and the canary's attempt cap; the frz canary's
+        // bankroll, with the same rent-neutral builder
+        assert_eq!((l["bankroll_share"].as_f64(), l["bankroll_reserve_sol"].as_f64(), l["canary_count"].as_u64()), (Some(0.0), Some(0.0), Some(cfg.canary.count as u64)));
+        let frz = config::Config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/arbx-canary-frz.toml")).unwrap();
+        let f = limits_json(&frz, false, true);
+        assert_eq!((f["max_size_sol"].as_f64(), f["bankroll_share"].as_f64(), f["bankroll_reserve_sol"].as_f64(), f["rent_neutral"].as_bool(), f["create_close"].as_bool(),
+            f["held_max"].as_u64()), (Some(0.2), Some(0.85), Some(0.03), Some(true), Some(true), Some(0)));
         assert_eq!((l["decoded_sends"].as_bool(), l["state_triggers"].as_bool(), l["record"].as_bool()), (Some(false), Some(true), Some(true)));
         assert_eq!((l["big_band_min_expected_lamports"].as_u64(), l["big_band_max_per_sec"].as_f64()), (Some(1_000_000), Some(0.5)));
         assert_eq!((l["crowded_pools_file"].as_str(), l["crowded_skip_min_expected_lamports"].as_u64()), (Some("/root/arbx/data/crowded-pools.json"), Some(100_000)));
@@ -1633,7 +1974,7 @@ mod tests {
     }
 
     fn args(config: &Path, ov: Overrides, live: bool, canary: bool, campaign_dir: Option<PathBuf>) -> RunArgs {
-        RunArgs { config: config.to_path_buf(), minutes: None, name: None, only: None, canary, dry_run: false, live, ov, campaign_dir, env_file: None }
+        RunArgs { config: config.to_path_buf(), minutes: None, name: None, only: None, canary, dry_run: false, live, ov, campaign_dir, env_file: None, drain_s: 60, equity_floor: None }
     }
 
     /// review F2: meta.json `config.normalized_sha256` hashes the file as loaded, so every override leaves it equal to
@@ -1740,6 +2081,40 @@ mod tests {
         assert!(body.contains("\"chainfetch\": cf_meta"), "meta.json `chainfetch`");
         assert!(body.contains("rpc.with_role(rpc::Role::Engine)") && body.contains("rpc.with_role(rpc::Role::Leaders).with_own_phase(rpc::Phase::Run)"), "per-role clients");
         assert!(body.contains("gate.shadow(\"chainfetch_dead\""), "the watchdog closes the SendGate");
+    }
+
+    /// integration (WP-07 x WP-20 x FT-000), a structural guard on `run` and `arbx campaign` (they need RPC, a gRPC server
+    /// and a frozen binary, so they are not run here): the alerts are the process's and WP-07's notice hook before the
+    /// recorder starts, so every notice of the ledger and the in-process supervisor reaches them; the campaign's history is
+    /// read once, before the chain-fetch service starts, and bounds its wallet cursor, then goes to the ledger, whose RPC
+    /// is its own role; the start message names the run's budget. WP-06 (at its merge with integ/stage0): the executor
+    /// (its boot read of the wallet's token accounts and PumpSwap volume accumulator) before the ledger, which takes its
+    /// held mints; the builder's fee and CU model (the tips by band, the CU table) on the engine after it is made and
+    /// before the executor and the ledger are handed to it and it runs (engine_init journals the model at the run's
+    /// start). Each step is found once in `run`. `arbx campaign` starts its own alerts after the detach and finishes them
+    /// after its last segment
+    #[test]
+    fn the_alerts_take_wp07s_notices_and_the_cursor_follows_the_ledger() {
+        let src = include_str!("main.rs");
+        let body = &src[src.find("\nfn run(a: &RunArgs").expect("run")..];
+        let body = &body[..body.find("\n#[cfg(test)]").unwrap_or(body.len())];
+        let at = |needle: &str| body.find(needle).unwrap_or_else(|| panic!("{needle} not in run()"));
+        let order = ["alerts::install(alerter.clone())", "arbx::notify::set_hook(alerts::notice_hook(alerter.clone()))", "rec::start(rec::Opts", "let campaign_hist =",
+            "ledger::bound_wallet_cursor(", "chainfetch::start(", "exec::Exec::new(&cfg", "let hist = campaign_hist.unwrap_or_default()", "rpc.with_role(rpc::Role::Ledger)",
+            "ledger_candidates(&cfg, &reg, &exec.as_ref().map(|x| x.held_mints())", "write_atomic(&dir.join(\"meta.json\")", "budget_left_lamports: budget_left,",
+            "engine::Engine::new(", "engine::BuilderModel::from_cfg(&cfg)", "eng.set_builder(model)", "eng.exec = exec;", "eng.ledger = ledger;", "eng.run(&rx"];
+        for w in order.windows(2) { assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]); }
+        for n in ["exec::Exec::new(", "engine::BuilderModel::from_cfg(", "eng.set_builder(", "eng.exec = ", "eng.ledger = "] {
+            assert_eq!(body.matches(n).count(), 1, "{n} once in run()");
+        }
+        assert!(!body.contains("rpc::Role::Snapshot"), "the state re-read's role is the FT-000 fixes', the ledger's is `ledger`");
+        let camp = include_str!("campaign.rs");
+        let m = &camp[camp.find("\npub fn main(o: Opts").expect("campaign main")..];
+        let m = &m[..m.find("\n}\n").unwrap_or(m.len())];
+        let at = |needle: &str| m.find(needle).unwrap_or_else(|| panic!("{needle} not in campaign::main"));
+        for w in ["daemonize(&dir.join(\"supervisor.log\"))", "CampaignAlerts::start(a, true)", "c.run(&mut runner, &RealClock)", "alerts.finish()"].windows(2) {
+            assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]);
+        }
     }
 
     /// review F3: a supervised segment needs its control socket (the supervisor pauses through it): refused before

@@ -369,14 +369,14 @@ fn exec_jsonl_lines_carry_the_derived_fields() {
         echo: Some(Box::new(std::io::sink())) }).unwrap();
     let r: Value = serde_json::from_str(&std::fs::read_to_string(td("classify/3hdmTiRUBQUDTbGai4jnHMrocdjhoLVMAmqd4Rrdcg9NReC3FtJQBgZbkKY4FYTyfYCDuGzhmPkJ33tjQMaifgz8.json")).unwrap()).unwrap();
     let (sig, tx, meta) = pb_of_rpc(&r);
-    crate::rec::exec::emit_grpc(&rec, None, crate::rec::exec::GrpcTx { sig: sig.to_vec(), slot: 453_330_549, idx: 90, t: 1, tx: std::sync::Arc::new(tx), meta, bank_id: None });
+    crate::rec::exec::emit_grpc(&rec, None, crate::rec::exec::GrpcTx { sig: sig.to_vec(), slot: 453_330_549, idx: 90, t: 1, tx: std::sync::Arc::new(tx), meta, bank_id: None, sample: None });
     rec.close();
     let ex = crate::rec::read_jsonl(&d, "exec").unwrap();
     assert_eq!(ex.len(), 1);
     assert_eq!((ex[0]["tip_total"].as_u64(), ex[0]["jito_tipped"].as_bool(), ex[0]["transfers"][1]["kind"].as_str()), (Some(202_846), Some(true), Some("cpi_tip")));
     assert!(ex[0]["arb_like"].is_object() && ex[0]["ours"].is_null());
     let head = String::from_utf8(crate::rec::read_files(&d, "exec").unwrap().remove(0)).unwrap();
-    assert!(head.lines().next().unwrap().contains("\"arbx.exec/2.1\""), "{}", head.lines().next().unwrap());
+    assert!(head.lines().next().unwrap().contains("\"arbx.exec/2.2\""), "{}", head.lines().next().unwrap());
     let _ = std::fs::remove_dir_all(&d);
 }
 

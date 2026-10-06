@@ -1037,6 +1037,22 @@ Removed:
 
 **Config keys.** `[ledger] snapshot_min = 60`, `tolerance_lamports = 10000`, `mid_source = "pools"`, `snapshot_retries = 3`; `[supervisor] hour_drop_sol = 0.05`, `day_drop_sol = 0.15`, `rent_cap_sol = 0.1`, `native_floor_sol = 0.02`, `auto_unwrap = false`, `unwrap_sol = 0.05`, `stranded_s = 60`, `accuracy_action = "log"`, `accuracy_floor` (unset until OD-8), `accuracy_window = 200`; CLI `--drain-s`, `arbx campaign-equity`.
 
+**As built (2026-10-05, with the fixes of `docs/reviews/WP-07-review.md`; where this differs from the design above, the build is the rule).**
+- **The stops measure the net spend** (review #4; STAGE1-PLAN review F6). It is the ledger's cumulative fees + tips + non-recoverable rent − the routes' trading result since the campaign's start, not an equity series, so the owner's deposits and withdrawals move nothing (each is recorded and alerted as `owner_transfer`).
+  - `[supervisor] max_drop_per_hour_sol = 0.02` (OD-11, stricter than item 5's 0.05) and `max_drop_per_day_sol = 0.15` are safety stops: exit 20 ends the campaign. They are not a shadow until the drop is back under the limit.
+  - The floor is the test budget (`test_budget_lamports`, at most the 34,000,000 hard cap), on the same basis.
+  - Each token held at the start is a quantity floor moved by routes only (`token_floor`).
+- **The money view must be fresh** (review #3). `[ledger] snapshot_min = 10`, inside the segment. It is stale past `max_view_age_s = 600`, after `stale_after_failures = 3`, while a landing waits `max_record_wait_s = 120` for its record, or after a chain-fetch give-up. While it is stale: `equity_stale`, the gate in shadow, nothing sent.
+- **The budget is cumulative over all tests** (review #5): `<runs>/budget-state.json`, src/budget.rs. Manual live and canary runs take the campaign lock and the other-bot check, as campaigns do.
+- **The supervisor on Cherry is `arbx campaign`** (item 8; Cherry runs only the binary). `deploy/run-w.sh` stays for local use, and `arbx campaign-equity` prints the campaign's money.
+- **The passphrase** (OD-7's hardened launcher; review #15). It is needed only for a `wallet_keystore` file: frz's profile keystore needs none.
+  - `arbx campaign` and `arbx run` read it with read(2) straight into one mlock'd page (`wallet::Pass`), from the terminal with echo off or from a pipe, and wipe it when it goes.
+  - The campaign hands it to each sending segment over a pipe, and locks its page again after `--detach`'s fork.
+  - The scrypt key, the AES key schedule and the decrypted secret key are wiped on every path.
+- **Replay** (review #1). The journal's INPUT 13 carries the ledger's RPC answers. The decision-point record carries the money view the executor decided with. A replay has no ledger and applies those records.
+- **Reconciliation** (review #7, #9): at the stop, with its search and grace (`final: false` when still undecided), and between segments.
+- **Deferred: `venue_quarantine`** (item 5's programdata rule; review #10). A venue program upgrade mid-segment is recorded (the state stream watches the programdata accounts, accounts.bin role `programdata`); its routes are not refused. A venue that behaves differently after an upgrade cannot cost more than the route program's on-chain guard allows: the route reverts below its `min_profit`, and a bundle that reverts does not land. Owner: the next work package that touches the engine's venue checks (Stage 1).
+
 **Offline acceptance (CI).**
 - **Golden ledger cases** (F7, fixtures from WP-00b `testdata/wallet/` and `testdata/legacy/expected.json`). Each case's categories sum to `equity_delta` exactly, and the rent fields match res-pnl to the lamport:
   - create only;

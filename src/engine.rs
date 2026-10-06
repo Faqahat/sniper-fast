@@ -143,7 +143,9 @@ pub enum RunEnd { Stopped, Deadline, Disconnected, StateUnavailable }
 
 /// The engine's outside world: RPC (bound to the background runtime), the background runtime it spawns fetches on,
 /// the event channel their answers come back on, and the state stream's watch list. `Engine::new_offline` has none
-struct Io { rpc: crate::rpc::Rpc, rt: tokio::runtime::Handle, tx_back: Sender<Event>, watch_list: tokio::sync::watch::Sender<Vec<String>> }
+struct Io { rpc: crate::rpc::Rpc, rt: tokio::runtime::Handle, tx_back: Sender<Event>, watch_list: tokio::sync::watch::Sender<Vec<String>>,
+    /// FT-000 (S1-1): the batched lookup-table fetcher (role `alt`), started at the first fetch with `[alts]`'s settings
+    alt_fetch: std::cell::OnceCell<crate::alts::Fetcher> }
 
 /// what status.jsonl v2's deltas are against (the previous line)
 #[derive(Default)]
@@ -180,6 +182,10 @@ pub struct EngineKnobs {
     pub alts: crate::alts::Policy,
     pub ring_versions: usize,
     pub accuracy_queue: usize,
+    /// FT-000 (S1-8): W(T) leaves PumpSwap pools' mints out (`write_set`). A run journaled before it has no such knob
+    /// (false): its replay waits for the mints as the run did
+    #[serde(default)]
+    pub wt_skip_pump_mints: bool,
 }
 fn resync_warn_s() -> u64 { 10 }
 fn resync_give_up_s() -> u64 { 300 }
@@ -189,7 +195,7 @@ impl Default for EngineKnobs {
         EngineKnobs { commit_timeout_ms: 5, quiescence_ms: 3, max_part_skew_slots: 2, max_tip_lag_slots: 2, clock_max_age_slots: 2, lag_slo_p50_ms: 16.0,
             lag_slo_p90_ms: 30.0, lag_slo_breach_minutes: 5, slo_action: "log".into(), slo_recover_minutes: 10, tier_a_grace_s: 60, boot_timeout_s: 60,
             max_update_age_ms: 2_000, unavailable_stop_s: 0, resnapshot: true, resync_warn_s: resync_warn_s(), resync_give_up_s: resync_give_up_s(), alts: crate::alts::Policy::default(),
-            ring_versions: crate::store::RING_VERSIONS, accuracy_queue: 10_000 }
+            ring_versions: crate::store::RING_VERSIONS, accuracy_queue: 10_000, wt_skip_pump_mints: true }
     }
 }
 
@@ -202,8 +208,9 @@ impl EngineKnobs {
             max_update_age_ms: s.max_update_age_ms, unavailable_stop_s: s.unavailable_stop_s, resnapshot: s.resnapshot, resync_warn_s: s.resync_warn_s,
             resync_give_up_s: s.resync_give_up_s,
             alts: crate::alts::Policy { retry_ms: c.alts.retry_ms.clone(), retry_every_s: c.alts.retry_every_s, give_up_s: c.alts.give_up_s, wait_cap: c.alts.wait_cap,
-                max_inflight: c.alts.max_inflight },
-            ring_versions: c.accuracy.ring_versions, accuracy_queue: c.accuracy.queue }
+                max_inflight: c.alts.max_inflight, batch_max: c.alts.batch_max, calls_inflight: c.alts.calls_inflight, call_every_ms: c.alts.call_every_ms,
+                max_tables: c.alts.max_tables, max_bytes: (c.alts.max_mb * 1_048_576.0) as u64 },
+            ring_versions: c.accuracy.ring_versions, accuracy_queue: c.accuracy.queue, wt_skip_pump_mints: true }
     }
 }
 
@@ -357,6 +364,10 @@ pub struct Engine {
     leads: Vec<Series>,
     fh: rec::health::FeedHealth,
     pub exec: Option<crate::exec::Exec>,
+    /// WP-07: the run's ledger (src/ledger.rs: entries, balance snapshots, reconciliation) and its supervisor's equity
+    /// stops; fed by INPUT 7 `wallet_tx` and INPUT 13 `snapshot`, its timers at most once a second (`ledger_tick`)
+    pub ledger: Option<crate::ledger::Ledger>,
+    last_ledger_tick: u64,
     /// per trigger signer: (triggers that moved the pool or landed, triggers that failed or never showed). Loaded once
     /// (its sha256 recorded), never written back to the shared file (I-5): `signer_delta` is this segment's part, and
     /// `signer_stats` = `signer_base` (as loaded, shared with the recorder's writer) + `signer_delta`
@@ -412,14 +423,16 @@ pub struct Engine {
     activity: crate::crowding::Activity,
     /// what the last journaled decision-point record said (gate mode, leader kind, token valid, recorder healthy)
     /// (WP-09: and the gate's reason)
-    seen_journaled: Option<(crate::control::GateMode, String, crate::leaders::LeaderKind, bool, bool)>,
+    seen_journaled: Option<(crate::control::GateMode, String, crate::leaders::LeaderKind, bool, bool, crate::ledger::MoneyView)>,
     /// ---- WP-09: the exec_init record was journaled (`journal_exec_init`)
     exec_init_journaled: bool,
     // ------------------------------------------------------------ WP-06
     /// the fee and CU model (`BuilderModel`; None: a pre-WP-06 journal's rule)
     builder: Option<BuilderModel>,
-    /// the lookup tables of the cache that name each registry pool (the size budget's index, PLAN WP-06 item 7)
+    /// the lookup tables of the cache that name each registry pool (the size budget's index, PLAN WP-06 item 7), and the
+    /// pools each table is indexed under (an evicted table leaves the index: `unindex_alts`)
     alt_by_pool: HashMap<Pk, Vec<Pk>>,
+    alt_pools: HashMap<Pk, Vec<Pk>>,
     /// every account the state stream follows (`set_base_watch`): whether the store's view of the wallet's token accounts
     /// and of its PumpSwap user volume accumulator can be trusted (WP-06 item 2)
     watch_set: HashSet<Pk>,
@@ -660,7 +673,7 @@ impl Engine {
         rec: Rec, rpc: crate::rpc::Rpc, rt_bg: tokio::runtime::Handle, tx_back: Sender<Event>,
         watch_list: tokio::sync::watch::Sender<Vec<String>>) -> anyhow::Result<Engine> {
         let mut e = Engine::build(reg, store, cfg, feeds, min_tip, interest, rec);
-        e.io = Some(Io { rpc, rt: rt_bg, tx_back, watch_list });
+        e.io = Some(Io { rpc, rt: rt_bg, tx_back, watch_list, alt_fetch: Default::default() });
         Ok(e)
     }
 
@@ -762,7 +775,23 @@ impl Engine {
         self.alts.preload(table, addrs, last_used);
         self.index_alt(table);
         self.count("alt_preloaded");
+        self.journal_evictions(0);
     }
+
+    /// FT-000 (S1-4): the lookup tables the cache evicted while an input (or the boot's preload) was handled, as one ALT
+    /// `found` 4 journal record after it, with the running count and hash a replay checks (`journal::replay`)
+    fn journal_evictions(&mut self, t: u64) {
+        let ev = self.alts.take_evicted();
+        if ev.is_empty() { return; }
+        self.count_n("alt_evicted", ev.len() as u64);
+        self.journal.alt_evict(t, &ev, self.alts.evicted_total, self.alts.evict_hash);
+        // WP-06's index of the cache (the size budget's candidates) drops what the cache evicted
+        self.unindex_alts(&ev);
+    }
+
+    /// FT-000: what the lookup-table cache has evicted so far (count, running hash): what a replay compares with the
+    /// journal's ALT `found` 4 records
+    pub fn alt_evictions(&self) -> (u64, u64) { (self.alts.evicted_total, self.alts.evict_hash) }
 
     /// record (and journal) through `rec` from now on
     pub fn set_rec(&mut self, rec: Rec) { self.journal = Journal::new(rec.clone()); self.rec = rec; }
@@ -816,7 +845,8 @@ impl Engine {
         store.ring_versions = knobs.ring_versions;
         Engine { journal, t_now: 0, last_hk_t: 0, last_status_t: 0, last_drift_t: 0, anchored: false, t_anchor: 0, init_journaled: false, gate_journaled: None,
             gate_seen: GateSeen::default(), queue_now: 0,
-            decisions: 0, last_block_meta: None, acct_rec: None, base_watch: None, builder: None, alt_by_pool: HashMap::default(), watch_set: HashSet::default(), uva_key: std::cell::OnceCell::new(),
+            decisions: 0, last_block_meta: None, acct_rec: None, base_watch: None, builder: None, alt_by_pool: HashMap::default(), alt_pools: HashMap::default(),
+            watch_set: HashSet::default(), uva_key: std::cell::OnceCell::new(),
             reg, store, cfg, feeds, min_tip, interest, ata: AtaCache::default(), sigs: HashMap::default(), sig_order: VecDeque::new(),
             alts: Alts::new(knobs.alts.clone()), acct_pool, part_pools, eval_pools, tier_a, tier_a_complete: false,
             watch: HashMap::default(), opps: HashMap::default(), next_id: 0, next_decision: 0, slot: 0, shred_slot: 0,
@@ -825,7 +855,8 @@ impl Engine {
             queue_hwm: 0,
             t_start: t0, sp: StatusPrev { t: t0, ..Default::default() }, exec_prev: Default::default(), feed_counters: Vec::new(), state_counters: None, leads: Vec::new(),
             fh: rec::health::FeedHealth::new(t0),
-            exec: None, signer_base: Arc::new(signer_stats.clone()), signer_stats, signer_delta: HashMap::default(), signer_stats_sha256, signer_stats_out: None,
+            exec: None, ledger: None, last_ledger_tick: 0, signer_base: Arc::new(signer_stats.clone()), signer_stats, signer_delta: HashMap::default(), signer_stats_sha256,
+            signer_stats_out: None,
             trig_pending: HashMap::default(),
             caps_pending: Vec::new(), amm: amm_programs(), tip_names: crate::send::tip_owner_names(), arbers: HashSet::default(),
             moves_seen: HashSet::default(), poh: HashMap::default(), poh_order: VecDeque::new(),
@@ -899,7 +930,7 @@ impl Engine {
     /// only recently used tables). Each table is serialized on the recorder's writer
     fn write_alts(&self) {
         if !self.rec.is_on() { return; }
-        for (t, v) in &self.alts.tables {
+        for (t, v) in self.alts.iter() {
             let (t, v, used) = (*t, v.clone(), self.alts.last_used.get(t).copied());
             self.rec.emit(rec::ALTS_FINAL, Record::enc(move |o| {
                 let addrs: Vec<Value> = v.iter().map(|a| a.map_or(Value::Null, |k| json!(b58(&k)))).collect();
@@ -916,6 +947,7 @@ impl Engine {
             match e.event {
                 "retry_scheduled" => self.count("alt_retry"),
                 "give_up" => self.count("alt_gave_up"),
+                "fetch_start" if e.refetch => self.count("alt_refetch"),
                 "fetch_error" | "fetch_missing" => self.count("alt_fetch_failed"),
                 "waiters_dropped" => self.count("alt_wait_dropped"),
                 _ => {}
@@ -927,7 +959,7 @@ impl Engine {
             for (k, e) in evs.iter().enumerate() {
                 if k > 0 { o.push(b'\n'); }
                 let _ = serde_json::to_writer(&mut *o, &json!({ "t_ns": t, "table": b58(&e.table), "event": e.event, "n_addrs": e.n_addrs, "attempt": e.attempt,
-                    "next_retry_ms": e.next_retry_ms, "waiting_txs": e.waiting_txs, "err": e.err }));
+                    "next_retry_ms": e.next_retry_ms, "waiting_txs": e.waiting_txs, "err": e.err, "idle_ms": e.idle_ms, "refetch": e.refetch }));
             }
         }));
     }
@@ -1034,8 +1066,10 @@ impl Engine {
     /// - after an input, every 10 s while the queue never empties: housekeeping (and the commit timers if it is empty).
     pub fn run(&mut self, rx: &Receiver<Event>, stop: &std::sync::atomic::AtomicBool, until_ns: u64, mut status: impl FnMut(&str)) -> RunEnd {
         self.rec.set_engine_tid(crate::runtime::gettid());
-        // the executor's sends are gated on this engine's health (warm-up, state availability)
-        if let Some(x) = self.exec.as_mut() { x.set_health(self.flags.clone()); }
+        // the executor's sends are gated on this engine's health (warm-up, state availability) and, with a ledger, on the
+        // start equity being known (WP-07: the equity floor needs it)
+        let with_ledger = self.ledger.is_some();
+        if let Some(x) = self.exec.as_mut() { x.set_health(self.flags.clone()); x.require_equity(with_ledger); }
         self.journal_init();
         self.journal_exec_init();
         let end = loop {
@@ -1120,6 +1154,7 @@ impl Engine {
             }
         }
         self.on_event(ev, t_engine, status);
+        self.journal_evictions(t_engine);
         self.refresh_health(t_engine);
     }
 
@@ -1140,6 +1175,7 @@ impl Engine {
             self.alts.due(t, &mut fetch);
             for f in fetch { self.fetch_alt(f); }
             self.emit_alt_events();
+            self.journal_evictions(t);
             let mut reads = Vec::new();
             self.reads.due(t, &mut reads);
             for f in reads { self.spawn_read(f); }
@@ -1176,7 +1212,19 @@ impl Engine {
                 // wallet's transactions (an attempt landed) and the block engine's results for our bundles
                 InputKind::BlockhashHead => self.sendview.on_head(&data),
                 InputKind::LeaderWindow => self.sendview.on_window(&data),
-                InputKind::WalletTx => { let (poh, t, global) = (&self.poh, self.t_now, self.io.is_some()); if let Some(x) = self.exec.as_mut() { x.on_wallet_tx(&data, t, &|s| poh_of(poh, s, global)); } }
+                InputKind::WalletTx => {
+                    // WP-07: the ledger first (its line goes into the attempt's outcome), then the executor's settlement; a
+                    // refused bundle the record shows landed is raised at once (review WP-07 #6)
+                    let data = self.ledger_wallet_tx(data);
+                    let (poh, t, global) = (&self.poh, self.t_now, self.io.is_some());
+                    let refused = match self.exec.as_mut() { Some(x) => { x.on_wallet_tx(&data, t, &|s| poh_of(poh, s, global)); x.take_refused_landed() } None => Vec::new() };
+                    if !refused.is_empty() { if let Some(l) = self.ledger.as_mut() { l.on_refused_landed(t, refused); } }
+                    self.ledger_tick(self.t_now, true);
+                }
+                InputKind::Snapshot => {
+                    if let Some(mut l) = self.ledger.take() { l.on_input(&data, self.t_now, &|m, a| self.sol_value(m, a)); self.ledger = Some(l); }
+                    self.ledger_tick(self.t_now, true);
+                }
                 InputKind::InflightRelease => { let t = self.t_now; if let Some(x) = self.exec.as_mut() { x.on_release(&data, t); } }
                 // gate records (the 100 ms watch: status only), quarantines (Stage 1), settlements (`Event::Settled`)
                 _ => {}
@@ -1281,7 +1329,10 @@ impl Engine {
     /// chunk ended. An offline engine records the read in `offline_fetches` instead
     fn spawn_read(&mut self, f: Fetch) {
         let Some(io) = &self.io else { self.offline_fetches.push((f.what.as_str(), f.keys.clone())); self.offline_reads.push(f); return };
-        let (rpc, back, ar) = (io.rpc.clone(), io.tx_back.clone(), self.acct_rec.clone());
+        // FT-000 (S1-3): the state stream's re-read is critical (role `snapshot`): pricing waits for it, and at boot it
+        // queued 51.4 s behind the lookup-table fetches; fork refetches and new bin arrays stay `engine`
+        let rpc = if f.what == What::Resync { io.rpc.with_role(crate::rpc::Role::Snapshot) } else { io.rpc.clone() };
+        let (back, ar) = (io.tx_back.clone(), self.acct_rec.clone());
         io.rt.spawn(async move {
             let (src, what) = (f.what.src(), f.what.as_str());
             let head = json!({ "job": f.job, "chunk": f.chunk, "what": what, "attempt": f.attempt, "n": f.keys.len() });
@@ -1555,12 +1606,125 @@ impl Engine {
         self.write_status_line(queue, Some(stop_reason));
     }
 
+    // ---------------------------------------------------------------- WP-07: the ledger
+
+    /// INPUT 7 into the ledger (valued at the engine's pools); returns the input with the ledger's line for the attempt's
+    /// outcome (`ledger_line`)
+    fn ledger_wallet_tx(&mut self, data: Arc<Value>) -> Arc<Value> {
+        let Some(mut l) = self.ledger.take() else { return data };
+        let rt = self.exec.as_ref().and_then(|x| x.round_trip_of(data["attempt"].as_u64(), data["sig"].as_str().unwrap_or(""), &data["prog_events"]));
+        let e = l.on_wallet_tx(&data, self.t_now, &|m, a| self.sol_value(m, a), rt);
+        self.ledger = Some(l);
+        match e {
+            Some(e) => { let mut d = (*data).clone(); d["ledger_line"] = e.outcome_json(); Arc::new(d) }
+            None => data,
+        }
+    }
+
+    /// The ledger's timers (snapshots, reconciliations, the stop rules), at most once a second unless `now_too`; the
+    /// executor then reads what the ledger knows (the start equity, the bankroll, the rent)
+    fn ledger_tick(&mut self, t: u64, now_too: bool) {
+        if !now_too && t.saturating_sub(self.last_ledger_tick) < 1_000_000_000 { return; }
+        let Some(mut l) = self.ledger.take() else { return };
+        self.last_ledger_tick = t;
+        // what the money view's freshness reads (review WP-07 #3): the executor's oldest landing still without its wallet
+        // record, the chain-fetch service's wallet give-ups (a run's only)
+        let tin = crate::ledger::TickIn { provisional_since: self.exec.as_ref().and_then(|x| x.oldest_provisional_ns()),
+            wallet_gave_up: if self.io.is_some() { crate::chainfetch::wallet_gave_up_total() } else { None } };
+        let v = l.tick_with(t, &|| self.exec.as_ref().map(|x| x.landings()).unwrap_or_default(), tin);
+        self.ledger = Some(l);
+        if let Some(x) = self.exec.as_mut() { x.set_money(v); }
+    }
+
+    /// The run is stopping (WP-07): ask for the stop snapshot (taken at the next ledger tick)
+    pub fn ledger_stop_snapshot(&mut self) {
+        if let Some(l) = self.ledger.as_mut() { l.want_stop_snapshot(); }
+        let t = self.t_now.max(now_ns());
+        self.ledger_tick(t, true);
+    }
+
+    /// whether the stop snapshot came (or failed, or there is no ledger)
+    pub fn ledger_stop_snapshot_done(&self) -> bool { self.ledger.as_ref().is_none_or(|l| l.stop_snapshot_done()) }
+
+    /// The stop's reconciliation begins (after the stop snapshot): every pending window is due now; one that does not
+    /// pass is searched and decided once more `recon_grace_s` later, while the drain keeps handling the records
+    /// (review WP-07 #7). Returns how long to wait at most (ns)
+    pub fn ledger_final_begin(&mut self) -> u64 {
+        let t = self.t_now.max(now_ns());
+        let Some(l) = self.ledger.as_mut() else { return 0 };
+        l.final_begin(t);
+        let grace = l.cfg.recon_grace_s * 1_000_000_000;
+        self.ledger_tick(t, true);
+        grace + 1_000_000_000
+    }
+
+    /// whether the stop's reconciliation has nothing left to wait for (or there is no ledger)
+    pub fn ledger_final_settled(&self) -> bool { self.ledger.as_ref().is_none_or(|l| l.final_settled()) }
+
+    /// The final reconciliation (the end of the stop): what is still pending is decided now (a residual still unexplained
+    /// is written `final: false`: the next segment decides it again)
+    pub fn ledger_final(&mut self) {
+        let t = self.t_now.max(now_ns());
+        let Some(mut l) = self.ledger.take() else { return };
+        l.final_recon(t, &|| self.exec.as_ref().map(|x| x.landings()).unwrap_or_default());
+        self.ledger = Some(l);
+    }
+
+    /// What `amount` of `mint` is worth in WSOL now: the best quote for selling it through a WSOL pool of the registry,
+    /// on committed state (the ledger's valuation, `[ledger] mid_source = "pools"`). None: no pool quotes it
+    pub fn sol_value(&self, mint: &Pk, amount: u128) -> Option<(u64, String)> {
+        if *mint == *WSOL { return Some((amount.min(u64::MAX as u128) as u64, "wsol".into())); }
+        let amount = u64::try_from(amount).ok()?;
+        let pools = self.reg.pairs.get(&crate::pools::pair_key(mint, &WSOL))?;
+        let (now, slot) = self.chain_now();
+        let clk = quote::clock(slot, now);
+        let mut best: Option<(u64, Pk)> = None;
+        for &i in pools {
+            let m = &self.reg.pools[i];
+            let skip = self.skip_arrays(m);
+            // selling `mint` (spending the pool's token 0 when it is `mint`) as the venue executes a third party's swap
+            let Ok(leg) = self.leg_of(m, m.t0 == *mint, clk, &skip, Use::Third) else { continue };
+            if let Ok(q) = leg.walk(amount) {
+                if best.is_none_or(|b| q.out > b.0) { best = Some((q.out, m.pool)); }
+            }
+        }
+        best.map(|(out, pool)| (out, b58(&pool)))
+    }
+
+    /// WP-07 (the stop's drain): after the engine loop ended, keep handling what settles the open attempts (the wallet's
+    /// records, the block engine's results, the statuses, the ledger's snapshot) until `done` holds or `until_ns`; nothing
+    /// is priced (account and transaction updates are left out: the SendGate is closed). True when `done` held
+    pub fn drain(&mut self, rx: &Receiver<Event>, until_ns: u64, done: &dyn Fn(&Engine) -> bool, status: &mut dyn FnMut(&str)) -> bool {
+        self.drain_on(rx, until_ns, done, status, &now_ns)
+    }
+
+    /// `drain` on the clock `clock` (tests: a virtual one); a wait for the next event lasts at most 50 ms of real time
+    pub fn drain_on(&mut self, rx: &Receiver<Event>, until_ns: u64, done: &dyn Fn(&Engine) -> bool, status: &mut dyn FnMut(&str), clock: &dyn Fn() -> u64) -> bool {
+        loop {
+            if done(self) { return true; }
+            let now = clock();
+            if now >= until_ns { return false; }
+            match rx.recv_timeout(std::time::Duration::from_nanos((until_ns - now).min(50_000_000))) {
+                Ok(ev) => {
+                    let keep = matches!(ev, Event::Input { .. } | Event::Settled(_) | Event::Slot { .. } | Event::BlockMeta(_) | Event::Status { .. });
+                    if keep { let t = clock(); self.step(ev, t, status); }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return done(self),
+            }
+            // housekeeping (journaled as a TIMER: the executor's expiries and statuses, the ledger's timers, status lines)
+            let t = clock();
+            if t.saturating_sub(self.last_hk_t) >= 100_000_000 { self.queue_now = rx.len(); self.timers_at(t, TIMER_HK, status); }
+        }
+    }
+
     fn housekeeping(&mut self, now: u64, status: &mut dyn FnMut(&str)) {
         self.last_hk_t = now;
         // WP-05: the executor's timers (in-flight expiry, the status cross-checks, the blockhash expiries) and the
         // crowding map's window
         let tip = self.tip_slot();
         if let Some(x) = self.exec.as_mut() { x.tick(now, &self.sendview, tip); }
+        self.ledger_tick(now, false);
         self.activity.expire(now);
         // finish opportunities whose watch window ended
         let due: Vec<u64> = self.opps.values().filter(|o| o.deadline <= now).map(|o| o.id).collect();
@@ -1659,7 +1823,12 @@ impl Engine {
             let x = v - p.counts.get(k).copied().unwrap_or(0);
             (x > 0).then(|| (k.to_string(), json!(x)))
         }).collect();
-        let (exec, money) = match self.exec.as_ref() { Some(x) => x.status_v2(&mut self.exec_prev), None => (Value::Null, Value::Null) };
+        let (exec, mut money) = match self.exec.as_ref() { Some(x) => x.status_v2(&mut self.exec_prev), None => (Value::Null, Value::Null) };
+        // WP-07: money is the ledger's (chain truth); the executor's own counters are `money.bot`, diagnostics
+        if let Some(l) = self.ledger.as_mut() {
+            let prov = self.exec.as_ref().map_or(0, |x| x.provisional_failed_fees());
+            money = l.money_json(self.t_now, money, prov);
+        }
         let st = self.rec.stats();
         let recorder = st.as_ref().map(|st| {
             let dropped_total: serde_json::Map<String, Value> = st.dropped.iter().filter(|(_, n)| *n > 0).map(|(k, n)| (k.clone(), json!(n))).collect();
@@ -1726,14 +1895,21 @@ impl Engine {
                 "ok": self.slo.last.as_ref().map(|m| m.ok), "breaches_in_row": self.slo.breaches_in_row, "good_in_row": self.slo.good_in_row, "action": self.slo.action },
             "accuracy": { "scored_delta": d("pred_scored"), "exact_delta": d("pred_exact"), "pre_state_unknown_delta": d("pred_pre_state_unknown"), "by_venue": by_venue,
                 "queue_now": self.acc_queue.len(), "overflow_total": cnt("pred_queue_overflow"), "action": "log" },
-            "alts": { "cached_now": self.alts.tables.len(), "waiting_txs_now": self.alts.waiting_txs(), "fetching_now": self.alts.inflight(),
+            "alts": { "cached_now": self.alts.len(), "bytes_now": self.alts.bytes(), "evicted_delta": d("alt_evicted"), "refetch_delta": d("alt_refetch"),
+                "fetch_calls_total": self.io.as_ref().and_then(|io| io.alt_fetch.get()).map(|f| f.stats.calls.load(std::sync::atomic::Ordering::Relaxed)),
+                "fetch_tables_total": self.io.as_ref().and_then(|io| io.alt_fetch.get()).map(|f| f.stats.tables.load(std::sync::atomic::Ordering::Relaxed)),
+                "waiting_txs_now": self.alts.waiting_txs(), "fetching_now": self.alts.inflight(),
                 "pending_retries_now": self.alts.pending_retries(), "gave_up_now": self.alts.gave_up(), "retries_delta": d("alt_retry"), "gave_up_delta": d("alt_gave_up"),
                 "learned_delta": d("alt_learned") },
             "opps_open_now": self.opps.len(), "ata_misses_total": self.ata.misses.get(),
             "counts_total": self.counts, "counts_delta": counts_delta,
             "latency": lat, "latency_run": lat_run,
-            "exec": exec, "money": money, "recorder": recorder, "chainfetch": chainfetch, "coverage": coverage });
+            "exec": exec, "money": money, "recorder": recorder, "chainfetch": chainfetch, "coverage": coverage,
+            // FT-000 (S1-1): each provider's budget and every role's use of it since the previous line
+            "rpc_budget": crate::rpc::Registry::global().budget_json("status_budget") });
         if let Some(r) = stop_reason { line["stop_reason"] = json!(r); }
+        // WP-20: the alerts' counters (atomics only; null without alerts)
+        line["alerts"] = crate::alerts::status();
         p.t = t;
         p.counts = self.counts.clone();
         p.updates = self.store.updates;
@@ -1800,9 +1976,21 @@ impl Engine {
         }
     }
 
-    /// W(T): the transaction's writable accounts that are parts of watched pools
+    /// W(T): the transaction's writable accounts that are parts of watched pools. FT-000 (S1-8): not a PumpSwap pool's
+    /// mint. A transaction marks a mint writable without writing it (a swap moves balances, not a mint's supply), and an
+    /// account a transaction leaves unchanged sends no update: in FT-000, 628 of the 1,405 groups that waited the full
+    /// `commit_timeout_ms` for a missing member missed only mints, and none of the 29,550 groups saw a mint written
+    /// together with a pool account or vault (the 3,374 that saw a mint written saw nothing else; 3,245 of them the PUMP
+    /// mint). A mint write still joins its transaction's group, or arrives as a late member. A run journaled before this
+    /// fix replays without it (`EngineKnobs::wt_skip_pump_mints` false)
     fn write_set(&self, tx: &Tx, keys: &[Pk]) -> Vec<Pk> {
-        keys.iter().enumerate().filter(|(i, k)| tx.is_writable(*i) && self.part_pools.contains_key(*k)).map(|(_, k)| *k).collect()
+        let skip = self.knobs.wt_skip_pump_mints;
+        keys.iter().enumerate().filter(|(i, k)| tx.is_writable(*i) && self.part_pools.get(*k).is_some_and(|ps| !(skip && self.pump_mint(k, ps)))).map(|(_, k)| *k).collect()
+    }
+
+    /// whether `k`, a part of the pools `ps`, is a PumpSwap pool's mint (its `extra`)
+    fn pump_mint(&self, k: &Pk, ps: &[usize]) -> bool {
+        ps.iter().any(|&p| { let m = &self.reg.pools[p]; m.venue == Venue::PumpSwap && m.extra.contains(k) })
     }
 
     /// resolve lookup tables, then register the write set and look for triggers
@@ -1857,7 +2045,7 @@ impl Engine {
         for pass in 0..2 {
             for l in &tx.lookups {
                 let idx = if pass == 0 { &l.writable } else { &l.readonly };
-                let t = self.alts.tables.get(&l.table);
+                let t = self.alts.get(&l.table);
                 for &i in idx {
                     match t.and_then(|t| t.get(i as usize).copied().flatten()) {
                         Some(k) => out.push(k),
@@ -1877,12 +2065,12 @@ impl Engine {
         if nw != w.len() || nr != r.len() { return; }
         let (mut wi, mut ri) = (0, 0);
         let mut learned = Vec::new();
+        let t_now = self.t_now;
         for l in &tx.lookups {
-            let t = self.alts.tables.entry(l.table).or_insert_with(|| vec![None; 256]);
-            let mut new = false;
-            for &i in &l.writable { if t[i as usize].is_none() { t[i as usize] = Some(w[wi]); new = true; } wi += 1; }
-            for &i in &l.readonly { if t[i as usize].is_none() { t[i as usize] = Some(r[ri]); new = true; } ri += 1; }
-            if new { learned.push(l.table); }
+            let mut entries: Vec<(u8, Pk)> = Vec::with_capacity(l.writable.len() + l.readonly.len());
+            for &i in &l.writable { entries.push((i, w[wi])); wi += 1; }
+            for &i in &l.readonly { entries.push((i, r[ri])); ri += 1; }
+            if self.alts.learn(l.table, &entries, t_now) { learned.push(l.table); }
         }
         for t in learned {
             self.alts.learned(t);
@@ -1895,23 +2083,13 @@ impl Engine {
     }
 
     /// a lookup table, fetched on the background runtime (its answer comes back as `Event::Alt`: found, no such account,
-    /// or the error)
+    /// or the error). FT-000 (S1-1): through the batched fetcher (`alts::Fetcher`, role `alt`): the tables asked for
+    /// while a request waits for its token share the next getMultipleAccounts
     fn fetch_alt(&mut self, table: Pk) {
         let Some(io) = &self.io else { self.offline_fetches.push(("alt", vec![table])); return };
-        let (rpc, back) = (io.rpc.clone(), io.tx_back.clone());
-        io.rt.spawn(async move {
-            let ev = match rpc.accounts(&[table]).await {
-                Ok((_, v)) => match v.into_iter().next().flatten() {
-                    Some(a) => match crate::tx::parse_alt(&a.data) {
-                        Some(addrs) => Event::Alt { table, addrs: Some(Arc::new(addrs)), err: None },
-                        None => Event::Alt { table, addrs: None, err: Some("not a lookup table".into()) },
-                    },
-                    None => Event::Alt { table, addrs: None, err: None },
-                },
-                Err(e) => Event::Alt { table, addrs: None, err: Some(crate::rpc::scrub(&format!("{e:#}"))) },
-            };
-            let _ = back.send(ev);
-        });
+        let p = &self.knobs.alts;
+        io.alt_fetch.get_or_init(|| crate::alts::Fetcher::start(io.rpc.with_role(crate::rpc::Role::Alt), &io.rt, io.tx_back.clone(), p.batch_max, p.calls_inflight,
+            std::time::Duration::from_millis(p.call_every_ms))).request(table);
     }
 
     /// a lookup table fetch answered: found tables release their waiting transactions; a failure is retried (I-6)
@@ -2014,24 +2192,28 @@ impl Engine {
         }
     }
 
-    /// WP-06 (bankroll hook for WP-07): what the wallet holds as the store has it: its native lamports and its WSOL
-    /// account's token amount (the state stream follows both: journaled, so a replay reads the same)
-    pub fn bankroll(&self, payer: &Pk) -> crate::exec::Bankroll {
-        let followed = |k: &Pk| self.watch_set.contains(k);
-        let wsol = self.ata.get(payer, &WSOL, &crate::pda::TOKEN_PROGRAM);
-        crate::exec::Bankroll {
-            native: followed(payer).then(|| self.store.get(payer).map(|a| a.lamports)).flatten(),
-            wsol: followed(&wsol).then(|| self.store.get(&wsol).filter(|a| crate::store::token_account_exists(&a.data)).and_then(|a| crate::venues::token_amount(&a.data))).flatten(),
-        }
-    }
-
     /// WP-06 item 7: index a lookup table of the cache under every registry pool it names (the size budget's candidates)
     fn index_alt(&mut self, table: Pk) {
-        let Some(entries) = self.alts.tables.get(&table) else { return };
+        let Some(entries) = self.alts.get(&table) else { return };
         let pools: Vec<Pk> = entries.iter().flatten().filter(|k| self.reg.by_pool.contains_key(*k)).copied().collect();
         for p in pools {
             let v = self.alt_by_pool.entry(p).or_default();
-            if !v.contains(&table) { v.push(table); }
+            if !v.contains(&table) { v.push(table); self.alt_pools.entry(table).or_default().push(p); }
+        }
+    }
+
+    /// (merge of WP-06 with the FT-000 fixes) the index follows the bounded cache: a table the cache evicted, and does not
+    /// hold again, leaves it, so the index never outgrows the cache. Decisions do not change: a table the cache does not
+    /// hold is never a candidate (`AltSource::alt` finds none)
+    fn unindex_alts(&mut self, evicted: &[Pk]) {
+        for t in evicted {
+            if self.alts.get(t).is_some() { continue; }
+            for p in self.alt_pools.remove(t).unwrap_or_default() {
+                if let Some(v) = self.alt_by_pool.get_mut(&p) {
+                    v.retain(|x| x != t);
+                    if v.is_empty() { self.alt_by_pool.remove(&p); }
+                }
+            }
         }
     }
 
@@ -2151,10 +2333,13 @@ impl Engine {
         let token_ok = !matches!(inputs.token, crate::exec::TokenSeen::Stale);
         // ---- WP-09: the gate's reason is part of what is journaled (a reason that changes while the mode stays, a pause
         // then a lag-SLO shadow, changes every refusal's `gate_shadow:<reason>`)
-        let seen = (inputs.gate, inputs.gate_reason.clone(), inputs.leader.kind, token_ok, inputs.recorder_ok);
+        // WP-07 (review WP-07 #1): and the ledger's money view the executor decides with (the bankroll cap, the rent cap,
+        // equity_unknown / equity_stale): the replay has no ledger, its offline executor applies the run's
+        let seen = (inputs.gate, inputs.gate_reason.clone(), inputs.leader.kind, token_ok, inputs.recorder_ok, x.money());
         if self.seen_journaled.as_ref() != Some(&seen) {
             let mut g = x.gate_json();
             g["mode"] = json!(seen.0.as_str());
+            g["money"] = seen.5.json();
             // the reason the check read (the gate may have moved on since)
             g["reason"] = json!(Some(&seen.1).filter(|r| !r.is_empty()));
             g["src"] = json!("decision");
@@ -2166,16 +2351,17 @@ impl Engine {
             self.gate_journaled = Some(seen.0);
             self.seen_journaled = Some(seen.clone());
         }
-        // WP-06 (WP-07's hook): the size cap, under a bankroll cap derived from the store's wallet accounts when there is one
-        let payer = x.payer();
-        let bankroll = self.bankroll(&payer);
-        let cap = self.exec.as_ref().map_or(0, |x| x.size_cap_for(&bankroll));
-        let d = match self.route_in(id, size.min(cap)) {
+        // the size cap: the canary's or `[live] max_size_sol`, under (WP-07) the bankroll's on the ledger's money view (the
+        // one source of the bankroll: the view this decision's record journals, so a replay caps as the run did). The route
+        // is re-quoted at it (review WP-06 #3: the executor also refuses `size_cap` above it, whoever sized the route)
+        let cap = x.size_cap();
+        // WP-07: a bankroll that allows nothing (no WSOL, or the liquid SOL under the reserve) is refused as such, not quoted
+        let d = if cap == 0 { self.count("send_bankroll_empty"); crate::exec::Decided::reject("bankroll_empty") } else { match self.route_in(id, size.min(cap)) {
             Some(r) => {
                 self.decisions = fold(self.decisions, &[b"exec", &id.to_le_bytes(), &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes(), &[seen.0 as u8]]);
                 let trig = r.trig;
                 let global = self.io.is_some();
-                let alts = crate::exec::AltSource { tables: &self.alts.tables, by_pool: &self.alt_by_pool };
+                let alts = crate::exec::AltSource { tables: self.alts.tables(), by_pool: &self.alt_by_pool };
                 let x = self.exec.as_mut().unwrap();
                 let d = x.decide(r, &inputs, &self.sendview, &alts, slot.max(tip), t);
                 // the poh_trigger_pct gauge, after the fire (the PoH index is shared with the feed threads; review WP-05 #8)
@@ -2183,7 +2369,7 @@ impl Engine {
                 d
             }
             None => { self.count("send_unquotable"); crate::exec::Decided::reject("build_error:unquotable") }
-        };
+        } };
         self.decisions = fold(self.decisions, &[b"exec_verdict", &id.to_le_bytes(), d.reason.as_bytes(), &[d.sent.map_or(2, |b| b as u8)]]);
         if let Some(sz) = sim {
             match self.route_in(id, sz) {
@@ -3475,6 +3661,51 @@ mod tests {
         assert!((ct["lag_ms"].as_f64().unwrap() - 15.016).abs() < 0.01, "first shred (T0+10 ms) to complete commit (T0+25.016 ms): {}", ct["lag_ms"]);
         // every route of those two decisions was priced on the complete state (no pending reason)
         for x in &d[1..] { assert!(x["routes"].as_array().unwrap().iter().all(|r| r["reason"] != "pending_commit"), "{x}"); }
+    }
+
+    /// FT-000 (S1-8): a PumpSwap pool's mint is never in W(T). A transaction marks the mint writable without changing it
+    /// (no update ever comes): its group completes at its last vault, not after `commit_timeout_ms` (628 of FT-000's 1,405
+    /// `timeout_unknown` groups missed only mints); the other parts and the pools' own accounts stay in it. A run
+    /// journaled before the fix (no `wt_skip_pump_mints` in its knobs) waits for the mint as it did: `timeout_unknown`
+    #[test]
+    fn a_pumpswap_mint_is_not_waited_for() {
+        let mut p = meta_k(1);
+        p.venue = Venue::PumpSwap;
+        let mint: Pk = [0x77; 32];
+        p.extra = vec![mint];
+        let mut r = rig_metas("wt-mint", StrategyCfg { state_triggers: true, ..StrategyCfg::default() }, &[(p.clone(), 1_000), (meta_k(2), 1_000)]);
+        assert!(r.e.part_pools.contains_key(&mint), "the mint is one of the pool's parts (present, not pending)");
+        let t = T0 + 10 * MS;
+        tx_ev(&mut r.e, shred_tx(sig(7), &[p.vault0, p.vault1, mint], None, 12, t));
+        acct(&mut r.e, p.vault1, vault(1_030 * SOL), 12, t + 15 * MS, Some(sig(7)), 10);
+        // the group is open: it waits for vault0, not for the mint
+        assert!(r.e.tracker.is_pending(&p.vault0) && !r.e.tracker.is_pending(&mint), "W(T) without the mint");
+        acct(&mut r.e, p.vault0, vault(970_000_000_000_000), 12, t + 15 * MS + 1_000, Some(sig(7)), 11);
+        let c = commits(&r);
+        let ct = c.iter().find(|x| x["txn"] == json!(sigs58(&sig(7)))).expect("resolved without a timer");
+        assert_eq!((ct["outcome"].as_str(), ct["resolved_by"].as_str()), (Some("complete"), Some("member")), "{ct}");
+        let w: Vec<&str> = ct["w_expected"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
+        assert!(w.contains(&b58(&p.vault0).as_str()) && !w.contains(&b58(&mint).as_str()), "{w:?}");
+        // a write to the mint stamped with the transaction after its group resolved is a late member (counted, marked)
+        acct(&mut r.e, mint, vault(5), 12, t + 16 * MS, Some(sig(7)), 12);
+        assert_eq!(r.e.counter("commit_late_member"), 1);
+        // a run journaled before the fix (its engine_init knobs lack the key) replays as it ran: the mint is waited for
+        let mut old = serde_json::to_value(EngineKnobs::default()).unwrap();
+        assert_eq!(old.as_object_mut().unwrap().remove("wt_skip_pump_mints"), Some(json!(true)), "on by default");
+        let k: EngineKnobs = serde_json::from_value(old).unwrap();
+        assert!(!k.wt_skip_pump_mints);
+        let mut r2 = rig_metas("wt-mint-old", StrategyCfg { state_triggers: true, ..StrategyCfg::default() }, &[(p.clone(), 1_000), (meta_k(2), 1_000)]);
+        r2.e.set_knobs(k);
+        tx_ev(&mut r2.e, shred_tx(sig(8), &[p.vault0, p.vault1, mint], None, 12, t));
+        acct(&mut r2.e, p.vault1, vault(1_030 * SOL), 12, t + 15 * MS, Some(sig(8)), 10);
+        assert!(r2.e.tracker.is_pending(&mint), "the W(T) of a run journaled before FT-000's fix names the mint");
+        acct(&mut r2.e, p.vault0, vault(970_000_000_000_000), 12, t + 15 * MS + 1_000, Some(sig(8)), 11);
+        assert!(!commits(&r2).iter().any(|x| x["txn"] == json!(sigs58(&sig(8)))), "both vaults written: still waiting for the mint");
+        r2.e.timers(t + 21 * MS, &mut nop());
+        let c2 = commits(&r2);
+        let ct2 = c2.iter().find(|x| x["txn"] == json!(sigs58(&sig(8)))).expect("resolved by the timer");
+        assert_eq!((ct2["outcome"].as_str(), ct2["resolved_by"].as_str()), (Some("timeout_unknown"), Some("timer")), "{ct2}");
+        assert!(ct2["w_expected"].as_array().unwrap().contains(&json!(b58(&mint))), "{ct2}");
     }
 
     /// S1b (F2): the same split transaction not seen in shreds (W(T) unknown): resolved by quiescence, and no route is

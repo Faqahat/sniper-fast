@@ -150,6 +150,7 @@ def _money_line(seg, r1) -> dict:
 
 
 def _campaign_money_v2(segs) -> dict:
+    """The v2 segments' ledgers summed (`Segment.ledger` leaves out a later segment's `dup` lines: review WP-07 #11)"""
     cats = {c: 0 for c in ledgercalc.SUMMING}
     trade_net = 0
     for s in segs:

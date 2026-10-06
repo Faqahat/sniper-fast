@@ -1,8 +1,25 @@
 //! The slot index (PLAN WP-03b item 3; F1, F10; MEASUREMENT §4.16b): one `getBlock(slot, {transactionDetails:
 //! "signatures", rewards: false, commitment: "confirmed"})` per confirmed slot (about 3.7/s). The position of a
-//! signature in the returned list is its block index, which equals Yellowstone `TransactionInfo.index` (checked every
-//! slot against the transaction stream's `idx`, `idx_check`; and the 2 wallet transactions of slot 453,032,285 sit at
-//! their `getTransaction` `transactionIndex`, 29 and 154).
+//! signature in the returned list is checked every slot against the transaction stream's `idx` (`idx_check`).
+//!
+//! **Positions and what they are (FT-000 S1-2).** In FT-000 the stream's `idx` and the slot index's position disagreed
+//! in 73% of 394,225 comparisons, whole slots at a time, following the leader's client. The cause: Shyft's getBlock
+//! with `transactionDetails: "signatures"` leaves the vote transactions out. Its list is the block's non-vote
+//! transactions in block order, so a position is a signature's rank among the non-votes, not its block index (checked
+//! on the public RPC: slots 453,426,744 / 745 / 747 hold 1,126 / 960 / 1,265 transactions, Shyft listed 461 / 331 /
+//! 623, exactly the non-votes, and all 59 tracked positions equal the non-vote rank). It equals the block index only up
+//! to the first vote, which is why slots whose leader puts every vote after the non-votes matched (453,426,743: 583
+//! non-votes, then 667 votes). The other sources are block indexes: the stream's `TransactionInfo.index` (1,081 of 1,081
+//! equal to the public RPC's getBlock position, slots 453,433,382..387) and Shyft's getTransaction `transactionIndex`
+//! (2 of 2). So:
+//! - each line says what its positions are (`pos_kind`): `nonvote_rank` when the provider's list leaves votes out (this
+//!   slot shows it: a stream transaction listed below its index, none above; or the same provider showed it before:
+//!   `votes_omitted`, kept per provider), `block_index` when the provider has not shown it and this slot's comparisons
+//!   all match, `unverified` otherwise (no comparison, or one listed above its index); `idx_check` counts `below` and
+//!   `above` beside the mismatches;
+//! - a rank keeps the block order among non-vote transactions (what attribution compares within a slot), but it is
+//!   never written as an `idx`: exec.jsonl / wallet.jsonl `idx_update` lines come only from `block_index` lines, and a
+//!   record's `idx` is always a block index (the stream's, getTransaction's, or a full block's that holds the votes).
 //!
 //! What it yields, per slot (slotidx.jsonl, one line): blockhash, parent, height, block time, transaction count, the
 //! positions of every tracked signature (D1: account updates stamped with the slot; D2: shred-seen candidates; ours),
@@ -58,6 +75,22 @@ pub struct Indexed {
     /// (blockhash, height) of an ok block
     pub blockhash: Option<([u8; 32], Option<u64>)>,
     pub ok: bool,
+    /// FT-000 (S1-2): what the positions in `found` are (`block_index`, `nonvote_rank`, `unverified`)
+    pub pos_kind: &'static str,
+}
+
+/// FT-000 (S1-2): what a slot line's positions are, from the slot's `n` stream comparisons (`below`: listed before the
+/// stream's index, `above`: after; `beyond`: a stream transaction sits at an index past the list's end) and whether the
+/// provider has left votes out before. The list leaves transactions out when `beyond`, or when at least two comparisons
+/// and half of them are listed below their index and none above (a list without the votes puts every non-vote at or
+/// before its index); that is kept for the provider. `block_index`: no omission, and at least 90% of the comparisons
+/// match (a stray mismatch is a stream copy from another fork); `unverified` otherwise. Returns (kind, omits)
+pub fn pos_kind(n: u64, below: u64, above: u64, beyond: bool, omits_before: bool) -> (&'static str, bool) {
+    let omits_here = beyond || (below >= 2 && above == 0 && below * 2 >= n);
+    let omits = omits_before || omits_here;
+    let matched = n.saturating_sub(below + above);
+    let kind = if omits { "nonvote_rank" } else if n > 0 && matched * 10 >= n * 9 { "block_index" } else { "unverified" };
+    (kind, omits)
 }
 
 /// What a getBlock reply came to
@@ -89,6 +122,14 @@ pub struct SlotIndex {
     pub slots_with_line_total: u64,
     /// calls refused for want of a token (asked again without using a try)
     pub refused_total: u64,
+    /// FT-000 (S1-2): the providers whose getBlock list left the vote transactions out (seen once: kept), and the lines
+    /// by position kind
+    pub omits_votes: HashSet<String>,
+    pub kind_block_index_total: u64,
+    pub kind_nonvote_rank_total: u64,
+    pub kind_unverified_total: u64,
+    pub idx_below_total: u64,
+    pub idx_above_total: u64,
 }
 
 /// the longest gap a new confirmed slot fills (a longer one, after an outage, is dropped and counted)
@@ -102,7 +143,8 @@ impl SlotIndex {
     pub fn new(max_inflight: usize, max_lag: u64) -> SlotIndex {
         SlotIndex { pending: BTreeMap::new(), tracked: HashMap::new(), stream: HashMap::new(), last_confirmed: None, newest_confirmed: 0, newest_done: 0, inflight: 0,
             max_inflight: max_inflight.max(1), max_lag: max_lag.max(10), recent_ok: VecDeque::new(), cov_q: VecDeque::new(), line_at: HashMap::new(), ok_total: 0,
-            skipped_total: 0, error_total: 0, dropped_total: 0, idx_n_total: 0, idx_mismatch_total: 0, slots_n_total: 0, slots_with_line_total: 0, refused_total: 0 }
+            skipped_total: 0, error_total: 0, dropped_total: 0, idx_n_total: 0, idx_mismatch_total: 0, slots_n_total: 0, slots_with_line_total: 0, refused_total: 0,
+            omits_votes: HashSet::new(), kind_block_index_total: 0, kind_nonvote_rank_total: 0, kind_unverified_total: 0, idx_below_total: 0, idx_above_total: 0 }
     }
 
     pub fn pending_now(&self) -> usize { self.pending.len() }
@@ -176,7 +218,7 @@ impl SlotIndex {
         let line = json!({ "slot": slot, "parent_slot": null, "status": "skipped", "by": "parent", "blockhash": null, "previous_blockhash": null,
             "block_height": null, "block_time": null, "tx_count": 0, "tracked": [], "missing": track.d1.iter().map(b58s).collect::<Vec<_>>(),
             "idx_check": null, "t_fetch_ns": t_ns, "latency_ms": null, "provider": null });
-        Indexed { slot, line, found: vec![], missing: track.d1, d2_absent: track.d2, d2_unknown: vec![], blockhash: None, ok: false }
+        Indexed { slot, line, found: vec![], missing: track.d1, d2_absent: track.d2, d2_unknown: vec![], blockhash: None, ok: false, pos_kind: "unverified" }
     }
 
     fn finish(&mut self, slot: u64, now: u64) {
@@ -204,10 +246,15 @@ impl SlotIndex {
                 self.finish(slot, now);
                 let track = self.tracked.remove(&slot).unwrap_or_default();
                 let stream = self.stream.remove(&slot).unwrap_or_default();
-                let ix = index_block(slot, &f.value, &track, &stream, t_ns, lat, provider);
+                let omits_before = provider.as_ref().is_some_and(|p| self.omits_votes.contains(p));
+                let ix = index_block(slot, &f.value, &track, &stream, t_ns, lat, provider.clone(), omits_before);
+                if ix.line["votes_omitted"] == json!(true) { if let Some(p) = provider { self.omits_votes.insert(p); } }
                 self.ok_total += 1;
                 self.idx_n_total += ix.line["idx_check"]["n"].as_u64().unwrap_or(0);
                 self.idx_mismatch_total += ix.line["idx_check"]["mismatches"].as_u64().unwrap_or(0);
+                self.idx_below_total += ix.line["idx_check"]["below"].as_u64().unwrap_or(0);
+                self.idx_above_total += ix.line["idx_check"]["above"].as_u64().unwrap_or(0);
+                match ix.pos_kind { "block_index" => self.kind_block_index_total += 1, "nonvote_rank" => self.kind_nonvote_rank_total += 1, _ => self.kind_unverified_total += 1 }
                 self.recent_ok.push_back((now, slot));
                 while self.recent_ok.len() > 2_000 { self.recent_ok.pop_front(); }
                 Reply::Done(Box::new(ix))
@@ -223,7 +270,8 @@ impl SlotIndex {
                 let line = json!({ "slot": slot, "parent_slot": null, "status": "skipped", "by": "rpc", "blockhash": null, "previous_blockhash": null,
                     "block_height": null, "block_time": null, "tx_count": 0, "tracked": [], "missing": track.d1.iter().map(b58s).collect::<Vec<_>>(),
                     "idx_check": null, "t_fetch_ns": t_ns, "latency_ms": lat, "provider": provider, "rpc_code": e.code });
-                Reply::Done(Box::new(Indexed { slot, line, found: vec![], missing: track.d1, d2_absent: track.d2, d2_unknown: vec![], blockhash: None, ok: false }))
+                Reply::Done(Box::new(Indexed { slot, line, found: vec![], missing: track.d1, d2_absent: track.d2, d2_unknown: vec![], blockhash: None, ok: false,
+                    pos_kind: "unverified" }))
             }
             // refused for want of a token: nothing was sent; asked again soon, without using a try
             Err(e) if e.class == ErrClass::Budget => {
@@ -253,7 +301,8 @@ impl SlotIndex {
             "idx_check": null, "t_fetch_ns": t_ns, "latency_ms": lat, "provider": provider });
         // an unknown block says nothing about its candidates: the D2 ones are unknown (not absent), the D1 ones keep their
         // records
-        Reply::Done(Box::new(Indexed { slot, line, found: vec![], missing: vec![], d2_absent: vec![], d2_unknown: track.d2, blockhash: None, ok: false }))
+        Reply::Done(Box::new(Indexed { slot, line, found: vec![], missing: vec![], d2_absent: vec![], d2_unknown: track.d2, blockhash: None, ok: false,
+            pos_kind: "unverified" }))
     }
 
     /// the newest ok slot indexed at least `min_age_ns` ago (the coverage sampler's block)
@@ -281,8 +330,11 @@ impl SlotIndex {
 }
 
 /// The slotidx.jsonl line of one ok block, and what it says about the tracked signatures (`stream`: the transaction
-/// stream's (signature, idx) stamped with this slot, for `idx_check`)
-pub fn index_block(slot: u64, b: &Value, track: &Track, stream: &[([u8; 64], u64)], t_ns: u64, latency_ms: Option<f64>, provider: Option<String>) -> Indexed {
+/// stream's (signature, idx) stamped with this slot, for `idx_check`; `omits_before`: the provider has left the votes
+/// out of a list before, FT-000 S1-2)
+#[allow(clippy::too_many_arguments)]
+pub fn index_block(slot: u64, b: &Value, track: &Track, stream: &[([u8; 64], u64)], t_ns: u64, latency_ms: Option<f64>, provider: Option<String>,
+    omits_before: bool) -> Indexed {
     let sigs = b["signatures"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
     let pos: HashMap<&str, u64> = sigs.iter().enumerate().filter_map(|(i, s)| s.as_str().map(|s| (s, i as u64))).collect();
     let (mut found, mut missing, mut d2_absent) = (Vec::new(), Vec::new(), Vec::new());
@@ -292,19 +344,22 @@ pub fn index_block(slot: u64, b: &Value, track: &Track, stream: &[([u8; 64], u64
             None => match k { Kind::D1 => missing.push(sig), Kind::D2 => d2_absent.push(sig), Kind::Ours => {} },
         }
     }
-    let (mut n, mut mism, mut absent) = (0u64, 0u64, 0u64);
+    let (mut n, mut mism, mut absent, mut below, mut above) = (0u64, 0u64, 0u64, 0u64, 0u64);
     for (sig, idx) in stream {
         match pos.get(b58s(sig).as_str()) {
-            Some(i) => { n += 1; if i != idx { mism += 1; } }
+            Some(i) => { n += 1; if i != idx { mism += 1; if i < idx { below += 1; } else { above += 1; } } }
             None => absent += 1,
         }
     }
+    let beyond = stream.iter().any(|(sig, idx)| *idx >= sigs.len() as u64 && pos.contains_key(b58s(sig).as_str()));
+    let (kind, omits) = pos_kind(n, below, above, beyond, omits_before);
     found.sort_by_key(|f| f.1);
     let blockhash = b["blockhash"].as_str().and_then(|h| bs58::decode(h).into_vec().ok()).and_then(|v| <[u8; 32]>::try_from(v).ok());
     let height = b["blockHeight"].as_u64();
     let line = json!({ "slot": slot, "parent_slot": b["parentSlot"], "status": "ok", "blockhash": b["blockhash"], "previous_blockhash": b["previousBlockhash"],
         "block_height": height, "block_time": b["blockTime"], "tx_count": sigs.len(),
         "tracked": found.iter().map(|(s, i, _)| json!([b58s(s), i])).collect::<Vec<_>>(), "missing": missing.iter().map(b58s).collect::<Vec<_>>(),
-        "idx_check": { "n": n, "mismatches": mism, "absent": absent }, "t_fetch_ns": t_ns, "latency_ms": latency_ms, "provider": provider });
-    Indexed { slot, line, found, missing, d2_absent, d2_unknown: vec![], blockhash: blockhash.map(|h| (h, height)), ok: true }
+        "idx_check": { "n": n, "mismatches": mism, "absent": absent, "below": below, "above": above }, "pos_kind": kind, "votes_omitted": omits.then_some(true),
+        "t_fetch_ns": t_ns, "latency_ms": latency_ms, "provider": provider });
+    Indexed { slot, line, found, missing, d2_absent, d2_unknown: vec![], blockhash: blockhash.map(|h| (h, height)), ok: true, pos_kind: kind }
 }

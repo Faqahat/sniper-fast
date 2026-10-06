@@ -37,7 +37,7 @@ pub fn json(r: &Recorder, last: bool) -> Value {
         "close_timeout": r.close_timeout.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         "fatal": r.fatal.get(), "echo_dropped": r.echo_dropped.load(Relaxed),
         // plan addendum I-9 (WP-08): the sampled populations' totals (kept + left out = seen)
-        "sampling": { "rivals_venues": r.rival_venues.counts() } })
+        "sampling": { "rivals_venues": r.rival_venues.counts(), "exec_unwatched": r.exec_unwatched.counts() } })
 }
 
 pub fn write(r: &Recorder, last: bool) -> anyhow::Result<()> {

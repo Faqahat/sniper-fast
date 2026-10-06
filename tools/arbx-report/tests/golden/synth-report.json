@@ -1100,6 +1100,7 @@
      }
     },
     "ledger": {
+     "dup_skipped": 0,
      "equity_delta_missing": 0,
      "equity_delta_sum": 10000,
      "identity_violations": [],
@@ -2272,6 +2273,7 @@
      }
     },
     "ladder_note": "rung 0 needs bundle membership, which v2 exec only has when known; such wins show as rung 1",
+    "sampled_unwatched_rows_left_out": 0,
     "signers": 2,
     "top_by_clean_profit": [
      {

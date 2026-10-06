@@ -8,7 +8,9 @@
 //! processed one) from the LeaderBook, whose kind is not in `skip_leader_kinds`; a valid cached Jito auth token (the
 //! send path never refreshes it, F28). The first that fails is the decision's reason.
 //!
-//! **Route checks**, in order: an expected profit, a plausible gap, token cooling, PumpSwap's user volume accumulator
+//! **Route checks**, in order: an expected profit, a plausible gap, the size cap (`size_cap`, WP-07: the canary's or
+//! `[live]`'s cap under the bankroll's on the ledger's money view; the engine re-quotes at it first), token cooling,
+//! PumpSwap's user volume accumulator
 //! (`uva_missing`: a PumpSwap buy would create it, 1,346,200 lamports never recovered, unless `[builder]
 //! allow_uva_create`), the mid token's account (`mid_not_held`: with `[builder] create_close = false`, the held-only
 //! control arm, a token the wallet holds no account for), the in-flight lock keyed by (buy pool, sell pool, mint) (a
@@ -28,7 +30,8 @@
 //! explicit opt-in, off by default: go-live gate item 2, nothing stays locked; review WP-06 #1) does it keep the new
 //! account instead of closing it first (`held_ata`: a deliberate held-set addition, at most `held_max` hot mints with the
 //! additions in flight, and only when the expected profit also covers the rent it locks, which its on-chain min_profit
-//! then demands: `build::HELD_RENT_BOUND`).
+//! then demands: `build::HELD_RENT_BOUND`; and, WP-07's rent cap, while the ledger's recoverable rent plus that bound stays
+//! within `[supervisor] rent_cap_sol`: `held_growth_ok`. A create+close is never capped: it locks nothing).
 //!
 //! **Modes** ([`Mode`]): `live` and `canary` (live under `[canary]`'s caps, at most 0.2 SOL) sign with the trading key
 //! and fire through the jito-bundle path's rate queue (bands, crowding, EV; send/budget.rs). `shadow` (PLAN-ADDENDUM
@@ -299,7 +302,8 @@ pub struct SendInputs {
     pub gate_reason: String,
     pub recorder_ok: bool,
     pub shut: Shut,
-    /// the sender's own state: None ready, else why not (`fee_cap`, `sender_stopped`, `canary_wait`, `canary_count`)
+    /// the sender's own state: None ready, else why not (`equity_unknown` (WP-07), `fee_cap`, `sender_stopped`, `canary_wait`,
+    /// `canary_count`)
     pub sender: Option<&'static str>,
     pub blockhash: Option<BhSeen>,
     pub max_blockhash_age_slots: u64,
@@ -430,12 +434,6 @@ impl TipPolicy {
 
 // ------------------------------------------------------------------------------------------------ WP-06
 
-/// What a bankroll-aware size cap reads (WP-07's `bankroll_cap`; go-live gate: 85% of liquid SOL + WSOL − 0.03 SOL, at
-/// most the WSOL held), from the store: the wallet's native lamports and its WSOL account's token amount (None: the store
-/// does not hold it). The store holds them from the state stream's journaled records, so a replay caps as the run did
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Bankroll { pub native: Option<u64>, pub wsol: Option<u64> }
-
 /// The lookup tables the size budget may add (PLAN WP-06 item 7): the engine's cache of the tables it learned from decoded
 /// transactions (fetched, learned from loaded addresses, preloaded: all journaled), indexed by the registry pools their
 /// entries name. A replay's engine holds the same tables, so its builds add the same ones
@@ -524,6 +522,8 @@ fn status_label(s: &str) -> Option<&'static str> { CHECKS.iter().map(|c| c.1).ch
 /// An attempt sent (live, canary) and not final yet
 struct Open {
     attempt: u64,
+    /// WP-20 (integration): the route's venues in order (`PumpSwap>Dlmm`), for the money alerts
+    route: String,
     decision: u64,
     opp: u64,
     sig: [u8; 64],
@@ -568,8 +568,16 @@ struct Open {
 /// expiry check found the landing, whose fee and events only the wallet record brings), what its landing adds to the
 /// money so far (`counted`), whether the wallet record came, whether a would-fail of it counted toward cooling
 #[derive(Clone)]
-struct Final { sig58: String, mint: Pk, landed: bool, ok: bool, tip: u64, size: u64, held_addition: bool, src: &'static str, counted: Counted, wallet_seen: bool,
-    cooled: bool }
+struct Final { route: String, sig58: String, mint: Pk, landed: bool, ok: bool, tip: u64, size: u64, held_addition: bool, src: &'static str, counted: Counted,
+    wallet_seen: bool, cooled: bool,
+    /// WP-07: the final (`landed_ok`, `landed_fail`, `not_landed_expired`, `not_landed_refused`, `unsettled`; an amend's
+    /// landing replaces it): the ledger's reconciliation confirms no refused bundle ever lands
+    fin: &'static str,
+    /// WP-07 (review #6): its first final was `not_landed_refused`; never cleared (an amend's landing of it is the broken
+    /// invariant the ledger raises at once)
+    refused: bool,
+    /// the engine time of its final (or of the amend that last changed it)
+    t_fin: u64 }
 
 /// the dry run's key and options
 struct Dry { key: ed25519_dalek::SigningKey, simulate: bool, sim_recent: VecDeque<u64>, sim_per_sec: usize }
@@ -693,6 +701,23 @@ pub struct Exec {
     /// the payer's token accounts no leg may name (review WP-06 #7): its USDC and USDT accounts, which the route's
     /// min_profit (on the quote account) does not watch, unless the route trades through one of them
     payer_tokens: Vec<Pk>,
+    /// WP-07: what the ledger says of the wallet (chain truth: the last balance snapshot and the entries after it), and
+    /// whether a send needs it (a run with a ledger: live and canary send nothing until the start equity is known,
+    /// `equity_unknown`); the bankroll cap (`[live] bankroll_share` x liquid − `bankroll_reserve_sol`, at most the WSOL)
+    /// and the rent cap (`[supervisor] rent_cap_sol`: no held-set addition while the recoverable rent and the rent it
+    /// may lock would pass it, `held_growth_ok`; a create+close locks nothing and is never capped)
+    money: crate::ledger::MoneyView,
+    money_guard: bool,
+    bankroll_share: f64,
+    bankroll_reserve: u64,
+    rent_cap: u64,
+    /// WP-07: the engine time of the input being handled (finals and amends are stamped with it)
+    t_now: u64,
+    /// WP-07: landings found by a status check whose wallet record has not come: attempt → engine time (the ledger's
+    /// freshness: `max_record_wait_s`)
+    provisional: BTreeMap<u64, u64>,
+    /// WP-07 (review #6): refused attempts that landed since the engine last asked (`take_refused_landed`)
+    refused_landed: Vec<Value>,
     /// tests: the route instruction is built with these (amount_in, min_profit) instead of the decision's (a builder
     /// regression the dry run's checks must catch: review #12)
     #[cfg(test)]
@@ -925,6 +950,8 @@ impl Exec {
             round_trip_unknown: 0, never_left: 0, new_atas: 0, stopped: None, leader_seen: (0, 0), leader_prev: (0, 0), offline: false, cfg_sha256: cfg_sha256(cfg), journaled: None,
             journaled_fresh: false, seen_mismatch: 0, seen_missing: 0,
             payer_tokens: PERMANENT_MINTS[1..].iter().map(|m| build::ata_of(&payer, m, &crate::pda::TOKEN_PROGRAM)).collect(),
+            money: Default::default(), money_guard: false, bankroll_share: cfg.live.bankroll_share, bankroll_reserve: sol(cfg.live.bankroll_reserve_sol),
+            rent_cap: sol(cfg.supervisor.rent_cap_sol), t_now: 0, provisional: BTreeMap::new(), refused_landed: Vec::new(),
             #[cfg(test)] fault_route: None, #[cfg(test)] fault_keep: false, #[cfg(test)] fault_cu: None, #[cfg(test)] fault_loaded: None };
         x.install_sink();
         Ok(x)
@@ -998,16 +1025,32 @@ impl Exec {
     }
 
     /// the largest size a decision may trade (live: `[live] max_size_sol`; canary: its size; shadow and dry runs model
-    /// live)
-    pub fn size_cap(&self) -> u64 { self.max_size }
+    /// live), and (WP-07, `[live] bankroll_share` > 0) never more than the bankroll allows: `bankroll_share` x the liquid
+    /// SOL (native + WSOL) − `bankroll_reserve_sol`, and at most the WSOL the route spends. Before the ledger's first
+    /// balance snapshot the configured cap (live and canary refuse `equity_unknown` until then: nothing leaves). 0: the
+    /// bankroll allows nothing (the engine refuses `bankroll_empty`)
+    pub fn size_cap(&self) -> u64 {
+        match self.bankroll_cap() { Some(c) if self.bankroll_share > 0.0 => self.max_size.min(c), _ => self.max_size }
+    }
 
-    /// The largest size a decision may trade now: the size cap, under a bankroll cap when there is one (WP-06's hook for
-    /// WP-07). Its inputs are the store's (the engine's `bankroll`), so a replay caps as the run did
-    pub fn size_cap_for(&self, b: &Bankroll) -> u64 { self.bankroll_cap(b).map_or(self.max_size, |c| c.min(self.max_size)) }
+    /// the bankroll's cap on a trade (see `size_cap`); None before the ledger has balances
+    pub fn bankroll_cap(&self) -> Option<u64> {
+        match (self.money.liquid, self.money.wsol) {
+            (Some(l), Some(w)) => Some(((l as f64 * self.bankroll_share) as u64).saturating_sub(self.bankroll_reserve).min(w)),
+            _ => None,
+        }
+    }
 
-    /// WP-07's bankroll cap (go-live gate: min(cap, 85% of liquid SOL + WSOL − 0.03 SOL reserve), at most the WSOL held)
-    /// goes here, on `b` (journaled inputs only). None until WP-07: the size cap alone
-    pub fn bankroll_cap(&self, _b: &Bankroll) -> Option<u64> { None }
+    /// WP-07: the ledger's view of the wallet (after every ledger input and housekeeping tick)
+    pub fn set_money(&mut self, m: crate::ledger::MoneyView) { self.money = m; }
+
+    /// WP-07: the money view this executor decides with (the engine journals it in the decision-point record: a replay's
+    /// offline executor applies the run's, review WP-07 #1)
+    pub fn money(&self) -> crate::ledger::MoneyView { self.money }
+
+    /// WP-07: a run with a ledger: live and canary send nothing until the ledger knows the start equity (the equity
+    /// floor needs it; fail closed)
+    pub fn require_equity(&mut self, on: bool) { self.money_guard = on; }
 
     /// The tokens held beyond WSOL, USDC and USDT, as `[builder] held_max` counts them: the boot read's, every held-set
     /// addition that landed (`add` puts its token in the held set), and every one still in flight (an open attempt that
@@ -1019,22 +1062,44 @@ impl Exec {
     }
 
     /// Whether the held set may grow by one (the size budget's `held_ata` fallback: a token account created and kept):
-    /// held-set additions are configured (`[builder] held_max` > 0: off by default, review WP-06 #1) and fewer than
-    /// `held_max` tokens are held, the additions in flight counted (`held_count`). WP-07's rent cap (no held-set growth
-    /// while recoverable rent is above `rent_cap_sol`) joins here
-    pub fn held_growth_ok(&self) -> bool { self.builder.held_additions() && self.held_count() < self.builder.held_max }
+    /// held-set additions are configured (`[builder] held_max` > 0: off by default, review WP-06 #1), fewer than
+    /// `held_max` tokens are held, the additions in flight counted (`held_count`), and (WP-07's rent cap, applied here
+    /// at the merge of WP-06 with integ/stage0) the recoverable rent of the ledger's money view plus the rent the
+    /// addition may lock (`build::HELD_RENT_BOUND`) stays within `[supervisor] rent_cap_sol`. A create+close locks no rent,
+    /// so the rent cap never refuses one; the money view is the journaled one, so a replay decides as the run did
+    pub fn held_growth_ok(&self) -> bool { self.held_growth_why().is_none() }
+
+    /// why the held set may not grow by one now (None: it may; see `held_growth_ok`): the build's `held_ata` detail
+    fn held_growth_why(&self) -> Option<String> {
+        if !self.builder.held_additions() { return Some("held-set additions off".into()); }
+        let n = self.held_count();
+        if n >= self.builder.held_max { return Some(format!("{n} tokens held of held_max {}", self.builder.held_max)); }
+        if let Some(r) = self.money.rent_recoverable.filter(|r| r.saturating_add(build::HELD_RENT_BOUND) > self.rent_cap) {
+            return Some(format!("recoverable rent {r} + {} over the rent cap {}", build::HELD_RENT_BOUND, self.rent_cap));
+        }
+        None
+    }
 
     /// the sender's own state for the send checks (None: ready)
     fn sender_state(&mut self, t: u64) -> Option<&'static str> {
         if !self.mode.sends() { return None; }
         if self.stopped.is_some() { return Some("sender_stopped"); }
+        // WP-07: no balance snapshot yet: the equity stops cannot be armed, nothing is sent; a stale money view (review #3:
+        // an old last snapshot, snapshots or wallet records failing) sends nothing until it is fresh
+        if self.money_guard && !self.money.equity_known { return Some("equity_unknown"); }
+        if self.money_guard && self.money.stale { return Some("equity_stale"); }
         if self.spent + self.reserved + BASE_FEE > self.cap_failed_fees {
-            if self.open.is_empty() { self.stopped = Some(if self.mode == Mode::Canary { "spend cap reached" } else { "failed-fee cap reached" }); }
+            if self.open.is_empty() {
+                self.stopped = Some(if self.mode == Mode::Canary { "spend cap reached" } else { "failed-fee cap reached" });
+                // WP-20 (integration): the budget floor, at once (the status line's `exec.stopped` says it too, deduplicated)
+                crate::alerts::budget_floor(crate::alerts::BudgetFloor { what: "failed_fee_cap".into(), value_lamports: (self.spent + self.reserved) as i64,
+                    floor_lamports: self.cap_failed_fees as i64, detail: self.stopped.map(String::from) });
+            }
             return Some("fee_cap");
         }
         if let Some(c) = self.canary {
             // the attempts that left (or may have): one the queue dropped is no canary (review WP-05 #16)
-            if self.sent.saturating_sub(self.never_left) >= c.count { self.stopped = Some("canary count reached"); return Some("canary_count"); }
+            if c.count > 0 && self.sent.saturating_sub(self.never_left) >= c.count { self.stopped = Some("canary count reached"); return Some("canary_count"); }
             if self.sent > 0 && t < self.last_sent_ns + c.every_ns { return Some("canary_wait"); }
         }
         None
@@ -1086,6 +1151,8 @@ impl Exec {
         match Seen::from_json(d) {
             Some(s) => {
                 if opp != at { self.seen_mismatch += 1; }
+                // WP-07 (review #1): the money view the run's decision read (the bankroll cap, the rent cap)
+                if let Some(m) = s.money { self.money = m; }
                 self.journaled = Some(s);
                 self.journaled_fresh = opp == at;
             }
@@ -1116,6 +1183,7 @@ impl Exec {
     /// `sent = false`. `slot` is the engine's processed slot (in-flight expiry), `t` its time
     pub fn decide(&mut self, r: RouteIn, i: &SendInputs, view: &SendView, alts: &AltSource, slot: u64, t: u64) -> Decided {
         self.decisions += 1;
+        self.t_now = t;
         let net = self.net.clone();
         let gate = gate_check(i);
         // a closed gate is counted for every decision it held back (MEASUREMENT A.5: `reject_gate_shadow`, `_stopped`);
@@ -1146,10 +1214,11 @@ impl Exec {
         if expected <= 0 { return fail(d, "expected_below_min_profit"); }
         // a gap worth more than the trade is a broken quote, not an opportunity (seen: 9.9e12 lamports)
         if expected > r.size as i64 { return fail(d, "implausible_gap"); }
-        // (review WP-06 #3) the executor's own size check, `if r.size > <the size cap> { return fail(d, "size_cap") }`,
-        // comes with lane/wp-07 at the merge (its review #12, on its `size_cap()`): until then the engine's cap is the
-        // only one (`Engine::after_opportunity` re-quotes the route at `size_cap_for(bankroll)`; tests::
-        // the_engine_caps_the_size holds it)
+        // WP-07 (review #12; review WP-06 #3): never above the size cap (the canary's, `[live] max_size_sol`, and the
+        // bankroll's on the ledger's money view: `size_cap`), whoever sized the route. The engine re-quotes the route at
+        // the same cap first (`Engine::after_opportunity`; tests::the_engine_caps_the_size), so this refuses only a route
+        // sized past it
+        if r.size > self.size_cap() { return fail(d, "size_cap"); }
         if self.mint_cool.get(&r.mint).is_some_and(|c| t < c.1) { return fail(d, "token_cooling"); }
         // WP-06 item 2: a PumpSwap buy names the wallet's user volume accumulator and creates it when it is missing
         // (1,346,200 lamports, never recovered, outside the route's profit check): refused unless the owner allowed it.
@@ -1160,6 +1229,9 @@ impl Exec {
         // review WP-06 #9: `[builder] create_close = false` (the held-only control arm) trades only tokens the wallet
         // holds an account for (the store's view, else the boot read's): nothing is created
         if !self.builder.create_close && !r.mid_held.unwrap_or_else(|| self.held.contains(&r.mint)) { return fail(d, "mid_not_held"); }
+        // (merge of WP-06 with integ/stage0) no new-account cap here: a token the wallet holds no account for is traded with
+        // create+close in the same transaction, which locks no rent. WP-07's rent cap (`[supervisor] rent_cap_sol`)
+        // limits held-set additions only (`held_growth_ok`: the size budget's `held_ata`, off by default)
         self.inflight.expire(slot);
         let key = InflightKey { buy: r.buy.pool, sell: r.sell.pool, mint: r.mint };
         let leader_pk = i.leader.identity.as_deref().and_then(|s| bs58::decode(s).into_vec().ok()).and_then(|v| Pk::try_from(v).ok());
@@ -1287,8 +1359,10 @@ impl Exec {
         self.count(if self.mode == Mode::Canary { "canary_sent" } else { "live_sent" });
         if crowding.rank() > 0 { self.count("rank_crowded"); }
         self.by_sig.insert(sig, attempt);
-        self.open.insert(attempt, Open { attempt, decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
-            trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit: built.min_profit, held_addition: built.held_addition(), worst: BASE_FEE, bh_slot: bh.slot, bh_height: bh.height,
+        self.open.insert(attempt, Open { attempt, route: format!("{:?}>{:?}", r.buy.venue, r.sell.venue),
+            decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
+            trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit: built.min_profit, held_addition: built.held_addition(), worst: BASE_FEE, bh_slot: bh.slot,
+            bh_height: bh.height,
             target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_engine: t, t_signed, t_sent: None, bundle: None,
             path: paths.list[bp].name.clone(), fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
             send_error: None, cooled: false });
@@ -1364,13 +1438,14 @@ impl Exec {
             (b, tables) = self.with_index(r, &route, ata, tip, blockhash, alts, guard)?;
             if b.fits() { return Ok(done(b, "alt_index", min_profit, 0)); }
         }
-        // still over: a configured held-set addition keeps the new account (no close), when the held set may grow and
-        // the expected profit covers the decision's bar plus the rent the account locks
+        // still over: a configured held-set addition keeps the new account (no close), when the held set may grow (the
+        // held_max count and WP-07's rent cap: `held_growth_ok`) and the expected profit covers the decision's bar plus
+        // the rent the account locks
         let mut why = String::new();
         if let Some(a) = ata.filter(|a| a.close && self.builder.held_additions()) {
             let rent = build::HELD_RENT_BOUND;
             let bar = min_profit.max(tip.map_or(0, |t| t.1) + BASE_FEE + self.margin_lamports) + rent;
-            if !self.held_growth_ok() { why = format!("; held_ata: {} tokens held of held_max {}", self.held_count(), self.builder.held_max); }
+            if let Some(w) = self.held_growth_why() { why = format!("; held_ata: {w}"); }
             else if r.expected() < bar as i64 { why = format!("; held_ata: expected {} below min_profit + the rent kept, {bar}", r.expected()); }
             else {
                 let route = route_at(min_profit + rent)?;
@@ -1542,6 +1617,7 @@ impl Exec {
     /// A result of the executor's tasks (journaled INPUT 9) at engine time `t`: a fire result, a statuses answer, a dry
     /// run's simulation
     pub fn on_settled(&mut self, s: Settled, t: u64, poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
+        self.t_now = t;
         match s {
             Settled::Fired { attempt, fired } => self.on_fired(attempt, fired, t, poh),
             Settled::Statuses { why, at, result, t_ns } => self.on_statuses(why, at, result, t_ns, poh),
@@ -1586,12 +1662,14 @@ impl Exec {
     /// CU and the route program's events (review WP-05 #3). `t`: the engine's time (the record's journaled one: WP-09
     /// review item 5, never the real clock)
     pub fn on_wallet_tx(&mut self, d: &Value, t: u64, poh: &dyn Fn(&[u8; 64]) -> Option<crate::feeds::entries::Poh>) {
+        self.t_now = t;
         let Some(sig) = d["sig"].as_str().and_then(sig64) else { return };
         let attempt = self.by_sig.get(&sig).copied().or_else(|| d["attempt"].as_u64().filter(|a| self.open.contains_key(a) || self.finals.contains_key(a)));
         let Some(attempt) = attempt else { return };
         let ok = d["ok"].as_bool().unwrap_or(false);
         let landed = Landed { slot: d["slot"].as_u64(), idx: d["idx"].as_u64(), ok, err: d.get("err").cloned().filter(|e| !e.is_null()), fee: d["fee"].as_u64(),
-            cu: d["cu_consumed"].as_u64(), prog_events: d.get("prog_events").cloned().unwrap_or(Value::Null), t_wallet: t };
+            cu: d["cu_consumed"].as_u64(), prog_events: d.get("prog_events").cloned().unwrap_or(Value::Null), t_wallet: t,
+            ledger: d.get("ledger_line").cloned().unwrap_or(Value::Null) };
         if let Some(o) = self.open.remove(&attempt) {
             let fin = if ok { "landed_ok" } else { "landed_fail" };
             self.finalize(o, fin, "wallet", Some(landed), None, false, poh);
@@ -1640,6 +1718,7 @@ impl Exec {
     /// an attempt expires `EXPIRY_NS` after its decision's engine time. An offline executor (a replay) keeps the same
     /// books and calls nothing: the run's answers are in its journal
     pub fn tick(&mut self, t: u64, view: &SendView, tip_slot: u64) {
+        self.t_now = t;
         self.inflight.expire(tip_slot);
         let mut checks: Vec<(u64, &'static str, [u8; 64])> = Vec::new();
         let mut expiry: Vec<(u64, &'static str, [u8; 64])> = Vec::new();
@@ -1715,14 +1794,22 @@ impl Exec {
         let error = error.or_else(|| o.send_error.clone());
         let counted = landed.as_ref().map(|l| Counted::of(l, o.tip, o.size, o.held_addition)).unwrap_or_default();
         self.add(counted, o.mint);
+        // WP-07 (the WP-05 hand-off): a landing the expiry check found before its wallet record counts provisional money
+        // (the base fee, an unknown round trip); its record is asked for now, and settles it (an amend line)
+        if src == "statuses" { crate::chainfetch::note_landed(&o.sig, landed.as_ref().and_then(|l| l.slot), Some(o.attempt)); }
+        // WP-20 (integration): the money alerts of attempts that really went out (live, canary): never waits (a try_send)
+        if self.mode.sends() { if let Some(l) = landed.as_ref() { landing_alert(&o.route, &o.mint, o.size, o.attempt, &o.sig58, l, &counted); } }
         let line = self.outcome_line(&o, fin, src, landed.as_ref(), error, amend, seen.as_ref(), poh);
         self.rec.json(rec::OUTCOMES, line);
         self.count(match fin { "landed_ok" => "landed_ok", "landed_fail" => "landed_fail", "not_landed_expired" => "not_landed_expired", "unsettled" => "unsettled",
             _ => "not_landed_refused" });
-        self.finals.insert(o.attempt, Final { sig58: o.sig58.clone(), mint: o.mint, landed: landed.is_some(), ok: landed.as_ref().is_some_and(|l| l.ok), tip: o.tip,
-            size: o.size, held_addition: o.held_addition, src, counted, wallet_seen: src == "wallet", cooled: o.cooled });
+        self.finals.insert(o.attempt, Final { route: o.route.clone(), sig58: o.sig58.clone(), mint: o.mint, landed: landed.is_some(),
+            ok: landed.as_ref().is_some_and(|l| l.ok), tip: o.tip,
+            size: o.size, held_addition: o.held_addition, src, counted, wallet_seen: src == "wallet", cooled: o.cooled, fin, refused: fin == "not_landed_refused",
+            t_fin: self.t_now });
+        if landed.is_some() && src != "wallet" { self.provisional.insert(o.attempt, self.t_now); }
         self.finals_order.push_back(o.attempt);
-        while self.finals_order.len() > FINALS_KEEP { if let Some(a) = self.finals_order.pop_front() { self.finals.remove(&a); } }
+        while self.finals_order.len() > FINALS_KEEP { if let Some(a) = self.finals_order.pop_front() { self.finals.remove(&a); self.provisional.remove(&a); } }
     }
 
     /// The run is stopping: every attempt still open gets its final line now, `unsettled` (`final_src` `stop`; A.2), and
@@ -1744,18 +1831,41 @@ impl Exec {
         let counted = Counted::of(&l, f.tip, f.size, f.held_addition);
         self.sub(f.counted);
         self.add(counted, f.mint);
+        // WP-20 (integration): a landing found late (its final said not landed) is told like one found at once; a success
+        // told without its net (the expiry check found it first) is told again once its record brings the net (the route
+        // program's round trip, or the ledger's line)
+        let net_now = counted.rt_unknown == 0 || l.ledger["liquid_delta"].is_i64();
+        if self.mode.sends() && (!f.landed || (l.ok && f.ok && f.counted.rt_unknown > 0 && net_now)) {
+            landing_alert(&f.route, &f.mint, f.size, attempt, &f.sig58, &l, &counted);
+        }
+        let t = self.t_now;
+        let mut wallet_now = false;
         if let Some(x) = self.finals.get_mut(&attempt) {
             x.landed = true;
             x.ok = l.ok;
             x.src = src;
             x.counted = counted;
             x.wallet_seen |= src == "wallet";
+            wallet_now = x.wallet_seen;
+            x.fin = fin;
+            x.t_fin = t;
+        }
+        if wallet_now { self.provisional.remove(&attempt); } else { self.provisional.entry(attempt).or_insert(t); }
+        // a late cross-check's landing: its record settles the money (WP-07)
+        if src == "statuses" { if let Some(sig) = sig64(&f.sig58) { crate::chainfetch::note_landed(&sig, l.slot, Some(attempt)); } }
+        // WP-07 (review #6): a bundle refused by the block engine that landed all the same: the first final stays, and the
+        // engine hands it to the ledger at once (`take_refused_landed`)
+        let refused_then_landed = f.refused && !f.landed;
+        if refused_then_landed {
+            self.count("refused_then_landed");
+            self.refused_landed.push(json!({ "attempt": attempt, "sig": f.sig58, "slot": l.slot, "fee": l.fee, "ok": l.ok, "src": src }));
         }
         let delivered = delivered_of(&l.prog_events);
         self.rec.json(rec::OUTCOMES, json!({ "attempt": attempt, "t_ns": now_ns(), "sig": f.sig58, "final": fin, "final_t_ns": now_ns(), "final_src": src, "amend": true,
             "amends": if f.landed { f.src } else { "not_landed" }, "landed": l.json(None), "ok": l.ok, "err": l.err, "fee_lamports": l.fee, "cu_consumed": l.cu,
             "prog_events": l.prog_events, "delivered": delivered, "round_trip_on_chain": last_leg_out(&l.prog_events).map(|b| b as i64 - f.size as i64),
-            "failed_fees_total_lamports": self.spent }));
+            "failed_fees_total_lamports": self.spent, "ledger": l.ledger, "first_final": if f.refused { Some("not_landed_refused") } else { None },
+            "refused_then_landed": refused_then_landed }));
     }
 
     /// a landing's money into the counters (and its new token account into the held set)
@@ -1826,7 +1936,8 @@ impl Exec {
         v["min_profit_onchain"] = json!(o.min_profit);
         v["blockhash"] = json!({ "slot": o.bh_slot, "height": o.bh_height, "valid_until_height": o.bh_height.map(|h| h + BLOCKHASH_VALID_BLOCKS) });
         v["target_slot"] = json!(o.target_slot);
-        v["ledger"] = Value::Null;
+        // WP-07: the ledger's line of the landing's transaction (null until its wallet record: MEASUREMENT §4.40)
+        v["ledger"] = landed.map(|l| l.ledger.clone()).unwrap_or(Value::Null);
         v["closer"] = Value::Null;
         v["statuses_checks"] = json!(o.checks);
         // status.jsonl v2 counter semantics (MEASUREMENT §2.2): the running total after this attempt
@@ -1855,6 +1966,36 @@ impl Exec {
 
     /// the blockhash commitment the send checks use
     pub fn blockhash_commitment(&self) -> &str { &self.pol.blockhash_commitment }
+
+    /// WP-07: what the executor counted for each attempt it sent (open ones, then the finals it remembers): the ledger's
+    /// reconciliation compares it with the chain by signature
+    pub fn landings(&self) -> Vec<crate::ledger::Landing> {
+        let open = self.open.values().map(|o| crate::ledger::Landing { attempt: o.attempt, sig: o.sig58.clone(), fin: "open", landed: false, ok: false, src: "open",
+            wallet_seen: false, fee: 0, tip: 0, round_trip: 0, rt_unknown: false, refused: false, t_final: 0 });
+        let finals = self.finals_order.iter().filter_map(|a| self.finals.get(a).map(|f| (a, f))).map(|(a, f)| crate::ledger::Landing { attempt: *a, sig: f.sig58.clone(),
+            fin: f.fin, landed: f.landed, ok: f.ok, src: f.src, wallet_seen: f.wallet_seen, fee: f.counted.fee, tip: f.counted.tip, round_trip: f.counted.round_trip,
+            rt_unknown: f.counted.rt_unknown > 0, refused: f.refused, t_final: f.t_fin });
+        open.chain(finals).collect()
+    }
+
+    /// WP-07 (review #3): the engine time since which the oldest landing found by a status check has waited for its wallet
+    /// record (None: none waits)
+    pub fn oldest_provisional_ns(&self) -> Option<u64> { self.provisional.values().copied().min() }
+
+    /// WP-07 (review #6): the refused attempts that landed since the last call (the engine hands them to the ledger at once)
+    pub fn take_refused_landed(&mut self) -> Vec<Value> { std::mem::take(&mut self.refused_landed) }
+
+    /// failed landings counted from a status check whose wallet record has not come (their base fee): status
+    /// `money.failed_fees_total_lamports` adds them to the ledger's
+    pub fn provisional_failed_fees(&self) -> u64 { self.finals.values().filter(|f| f.landed && !f.wallet_seen).map(|f| f.counted.failed_fee).sum() }
+
+    /// the on-chain round trip of an attempt's landing (the last leg's output − the size), for the ledger's check of a
+    /// win: by attempt id, else by signature
+    pub fn round_trip_of(&self, attempt: Option<u64>, sig: &str, prog_events: &Value) -> Option<i64> {
+        let size = attempt.and_then(|a| self.open.get(&a).map(|o| o.size).or_else(|| self.finals.get(&a).map(|f| f.size)))
+            .or_else(|| sig64(sig).and_then(|s| self.by_sig.get(&s)).and_then(|a| self.open.get(a)).map(|o| o.size))?;
+        last_leg_out(prog_events).map(|b| b as i64 - size as i64)
+    }
 
     /// status.jsonl v2 (MEASUREMENT §4.8, §2.2): the `exec` section and the `money` section, deltas against `prev`.
     /// `money` holds the bot's own counters until WP-07's ledger (`src: "bot"`; zeros for a shadow or dry run, which
@@ -1916,7 +2057,9 @@ impl Exec {
         let mut x = Exec::assemble(cfg, Rpc::race(vec![]), None, rec, crossbeam_channel::unbounded().0, vec![], init.alts.clone(), init.pump.clone(),
             init.held.iter().copied().collect(), init.mode, key)?;
         x.offline = true;
-        x.max_size = init.size_cap();
+        // the run's size cap; the bankroll's (WP-07) follows the money view of the run's decision-point records
+        // (`stage_seen`), on the config's `[live] bankroll_share` / `bankroll_reserve_sol` (the run's: `cfg_sha256`)
+        x.max_size = init.max_size;
         x.path_rate = init.would_send_per_sec;
         x.tips = init.tips.clone();
         x.uva = init.uva;
@@ -1940,7 +2083,7 @@ impl Exec {
         let mut held: Vec<Pk> = self.held.iter().copied().collect();
         held.sort();
         ExecInit { mode: self.mode, alts: self.alts.iter().map(|a| (a.key, self.alt_lists.get(&a.key).map(|l| l.to_vec()).unwrap_or_default())).collect(),
-            pump: self.pump.clone(), held, max_size: self.max_size, max_size_src: if self.mode == Mode::Canary { "canary" } else { "live" }.into(), bankroll_cap: None,
+            pump: self.pump.clone(), held, max_size: self.max_size, max_size_src: if self.mode == Mode::Canary { "canary" } else { "live" }.into(),
             would_send_per_sec: self.path_rate, tips: self.tips.clone(), crowding_window_h: 0, crowding_buckets: [0, 0], crowded: vec![], cfg_sha256: self.cfg_sha256.clone(),
             uva: self.uva, version: EXEC_INIT_VERSION }
     }
@@ -1998,7 +2141,7 @@ impl Exec {
             x.update(f.sig58.as_bytes());
             x.update(&f.mint);
             x.update(f.src.as_bytes());
-            x.update(&[f.landed as u8, f.ok as u8, f.held_addition as u8, f.wallet_seen as u8, f.cooled as u8]);
+            x.update(&[f.landed as u8, f.ok as u8, f.held_addition as u8, f.wallet_seen as u8, f.cooled as u8, f.refused as u8]);
             let c = &f.counted;
             for v in [f.tip, f.size, c.landed as u64, c.win as u64, c.tip, c.fee, c.failed_fee, c.round_trip as u64, c.rt_unknown as u64, c.atas as u64] { u(x, v); }
         }
@@ -2022,10 +2165,12 @@ impl Exec {
 /// config does not hold, journaled once with the boot records as INPUT 12 `exec_init` (`t_engine_ns` 0; MEASUREMENT
 /// §4.13) by `Engine::journal_exec_init`: the mode; the `[exec] alts` lookup tables as the boot read them; PumpSwap's
 /// GlobalConfig as the boot decoded it; the tokens the wallet held an account for; the size cap (`[live]`'s or the
-/// canary's) and a bankroll-derived cap (none before WP-06 / WP-07); the would-send rate (the bundle path's); the
-/// bundle path's tip policy; the crowding map's window, buckets and WP-00's static list (the crowded-pools file's
-/// contents, as read at the start); the sha256 of the config sections the executor decides with. A replay builds its
-/// offline executor and the crowding map from it, and reads no file outside the run
+/// canary's); the would-send rate (the bundle path's); the bundle path's tip policy; the crowding map's window, buckets
+/// and WP-00's static list (the crowded-pools file's contents, as read at the start); the sha256 of the config sections
+/// the executor decides with. A replay builds its offline executor and the crowding map from it, and reads no file
+/// outside the run. The bankroll's cap is not here (merge of WP-06 with integ/stage0: one bankroll source, WP-07's): it
+/// moves with the ledger's money view, which every decision-point record carries (INPUT 3 `money`), on `[live]
+/// bankroll_share` and `bankroll_reserve_sol` (in `cfg_sha256`); a replay's offline executor applies the run's records
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExecInit {
     pub mode: Mode,
@@ -2034,7 +2179,6 @@ pub struct ExecInit {
     pub held: Vec<Pk>,
     pub max_size: u64,
     pub max_size_src: String,
-    pub bankroll_cap: Option<u64>,
     pub would_send_per_sec: usize,
     pub tips: Option<TipPolicy>,
     pub crowding_window_h: u64,
@@ -2060,7 +2204,7 @@ impl ExecInit {
         let keys = |v: &[Pk]| v.iter().map(b58).collect::<Vec<_>>();
         json!({ "mode": self.mode, "alts": self.alts.iter().map(|(k, a)| json!({ "table": b58(k), "addrs": keys(a) })).collect::<Vec<_>>(),
             "pump": self.pump.as_ref().map(|g| json!({ "disable_flags": g.disable_flags, "protocol": keys(&g.protocol), "reserved": keys(&g.reserved), "buyback": keys(&g.buyback) })),
-            "held_mints": keys(&self.held), "max_size_lamports": self.max_size, "max_size_src": self.max_size_src, "bankroll_cap_lamports": self.bankroll_cap,
+            "held_mints": keys(&self.held), "max_size_lamports": self.max_size, "max_size_src": self.max_size_src,
             "would_send_per_sec": self.would_send_per_sec,
             "tips": self.tips.as_ref().map(|p| p.json()),
             "crowding": { "window_h": self.crowding_window_h, "buckets": self.crowding_buckets, "static_list": keys(&self.crowded) },
@@ -2078,17 +2222,17 @@ impl ExecInit {
                 buyback: keys(&g["buyback"])? }),
         };
         if v["version"].as_u64() != Some(EXEC_INIT_VERSION as u64) { return None; }
+        // a static bankroll cap (WP-06's `bankroll_cap_lamports`, always null where written) is not what this build applies:
+        // the bankroll caps on each decision's money view (the record would not replay as it ran: refused, fail closed)
+        if !v["bankroll_cap_lamports"].is_null() { return None; }
         let tips = match &v["tips"] { Value::Null => None, p => Some(TipPolicy::from_json(p)?) };
         let c = &v["crowding"];
         let b = c["buckets"].as_array()?;
         Some(ExecInit { mode, alts, pump, held: keys(&v["held_mints"])?, max_size: v["max_size_lamports"].as_u64()?, max_size_src: v["max_size_src"].as_str().unwrap_or("").into(),
-            bankroll_cap: v["bankroll_cap_lamports"].as_u64(), would_send_per_sec: usize::try_from(v["would_send_per_sec"].as_u64()?).ok()?, tips,
+            would_send_per_sec: usize::try_from(v["would_send_per_sec"].as_u64()?).ok()?, tips,
             crowding_window_h: c["window_h"].as_u64()?, crowding_buckets: [u32::try_from(b.first()?.as_u64()?).ok()?, u32::try_from(b.get(1)?.as_u64()?).ok()?],
             crowded: keys(&c["static_list"])?, cfg_sha256: v["cfg_sha256"].as_str()?.to_string(), uva: v["uva"].as_bool(), version: EXEC_INIT_VERSION })
     }
-
-    /// the largest size a decision trades: the size cap, under a bankroll-derived one when there is one
-    pub fn size_cap(&self) -> u64 { self.bankroll_cap.map_or(self.max_size, |b| b.min(self.max_size)) }
 }
 
 /// ---- WP-09 (review WP-09 "For the WP-05 merge" item 3). What a run's executor decision read from outside the journal,
@@ -2107,6 +2251,8 @@ pub struct Seen {
     pub kind_src: Option<String>,
     pub token_ok: bool,
     pub recorder_ok: bool,
+    /// WP-07 (review #1): the ledger's money view the decision read (None: a record without it, made before WP-07)
+    pub money: Option<crate::ledger::MoneyView>,
 }
 
 impl Seen {
@@ -2117,7 +2263,7 @@ impl Seen {
         let l = &d["leader"];
         Some(Seen { opp: d["opp"].as_u64()?, gate, gate_reason: d["reason"].as_str().unwrap_or("").to_string(), leader_slot: l["slot"].as_u64(),
             identity: l["identity"].as_str().map(String::from), kind: kind_of(l["kind"].as_str()?)?, kind_src: l["kind_src"].as_str().map(String::from),
-            token_ok: d["jito_token_ok"].as_bool()?, recorder_ok: d["recorder_ok"].as_bool()? })
+            token_ok: d["jito_token_ok"].as_bool()?, recorder_ok: d["recorder_ok"].as_bool()?, money: crate::ledger::MoneyView::from_json(&d["money"]) })
     }
 }
 
@@ -2129,13 +2275,15 @@ pub fn offline_runtime() -> tokio::runtime::Handle {
 
 /// sha256 of the config the executor decides with (exec_init `cfg_sha256`): `[exec]`, `[[send]]`, `[send_policy]`,
 /// `[live]` without its failed-fee cap (the supervisor's `--budget-left` lowers it for a segment, and only a sending
-/// executor reads it), `[canary]`, `[sim]`, `[dry_run]`, the wallet, `[strategy] cu_price_micro`, and WP-06's `[builder]`,
-/// `[tips]` and `[bands]`. A replay's config must give the run's
+/// executor reads it), `[canary]`, `[sim]`, `[dry_run]`, the wallet, `[strategy] cu_price_micro`, WP-06's `[builder]`,
+/// `[tips]` and `[bands]`, and (WP-07) `[supervisor] rent_cap_sol` (the rent cap on held-set additions reads it; `[live]`
+/// holds the bankroll's share and reserve). A replay's config must give the run's
 pub fn cfg_sha256(cfg: &Config) -> String {
     let mut live = serde_json::to_value(&cfg.live).unwrap_or(Value::Null);
     if let Some(o) = live.as_object_mut() { o.remove("max_failed_fees_lamports"); }
     let v = json!({ "wallet": cfg.wallet, "exec": cfg.exec, "sends": cfg.sends, "send_policy": cfg.send_policy, "live": live, "canary": cfg.canary, "sim": cfg.sim,
-        "dry_run": cfg.dry_run, "cu_price_micro": cfg.strategy.cu_price_micro, "builder": cfg.builder, "tips": cfg.tips, "bands": cfg.bands });
+        "dry_run": cfg.dry_run, "cu_price_micro": cfg.strategy.cu_price_micro, "builder": cfg.builder, "tips": cfg.tips, "bands": cfg.bands,
+        "rent_cap_sol": cfg.supervisor.rent_cap_sol });
     crate::provenance::sha256_hex(&serde_json::to_vec(&v).unwrap_or_default())
 }
 
@@ -2144,6 +2292,34 @@ fn sig58_of(s: &[u8; 64]) -> String { bs58::encode(s).into_string() }
 fn lookups_of(msg: &build::Message) -> Vec<String> {
     crate::tx::parse_wire(&build::unsigned(msg)).map(|(tx, _)| tx.lookups.iter().map(|l| b58(&l.table)).collect()).unwrap_or_default()
 }
+/// WP-20 (integration, the WP-05 settlement hook): the alert of a landing of ours, from chain data. A route that
+/// succeeded is an `alerts::Win`: its gross is the route program's round trip (its events: the last leg's output − the
+/// size); its fee, tip and rent come from the ledger's line of the same transaction when the wallet record brought one
+/// (WP-07: the record's fee, its transfers to the tip accounts, the rent of the accounts it created less those it
+/// closed), else the record's fee, the attempt's tip and the estimate (new token accounts × ATA rent, never below the
+/// real rent); with no round trip in the events, the ledger's change of SOL + WSOL plus what was paid (the net is then
+/// that change). `alerts::win_alert` says "succeeded" with that net, a gain only when it is above 0 (Stage-1 plan
+/// review F12). A landing that failed is an `alerts::FailedLanding` (the fee lost, the program's error)
+fn landing_alert(route: &str, mint: &Pk, size: u64, attempt: u64, sig58: &str, l: &Landed, counted: &Counted) {
+    if l.ok {
+        let lg = &l.ledger;
+        let led = lg.is_object();
+        let g = |k: &str| lg[k].as_u64().unwrap_or(0);
+        let (fee, tip, rent) = if led { (g("fee"), g("tip"), g("rent_locked").saturating_add(g("rent_nonrecoverable")).saturating_sub(g("rent_reclaimed"))) }
+            else { (counted.fee, counted.tip, counted.atas as u64 * crate::alerts::summary::ATA_RENT_LAMPORTS) };
+        let gross = if counted.rt_unknown == 0 { Some(counted.round_trip) } else {
+            lg["liquid_delta"].as_i64().filter(|_| led).map(|d| crate::alerts::clamp_i64(d as i128 + fee as i128 + tip as i128 + rent as i128))
+        };
+        crate::alerts::win(crate::alerts::Win { route: Some(route.to_string()), mint: b58(mint), mint_name: None, size_lamports: size, gross_lamports: gross,
+            tip_lamports: tip, fee_lamports: fee, rent_lamports: rent, slot: l.slot, signature: sig58.to_string(), attempt: Some(attempt) });
+    } else {
+        let code = l.err.as_ref().and_then(build::custom_code);
+        let error = Some(format!("{}{}", code.map(|c| format!("custom {} ", hex_code(c))).unwrap_or_default(), crate::proglog::meaning(code, &l.err)));
+        crate::alerts::failed_landing(crate::alerts::FailedLanding { route: Some(route.to_string()), mint: b58(mint), mint_name: None, size_lamports: size,
+            fee_lamports: counted.failed_fee, slot: l.slot, signature: sig58.to_string(), error, attempt: Some(attempt) });
+    }
+}
+
 /// what each leg delivered, in order: the `out` events of the route program's logs (`proglog::events`, as the wallet
 /// stream's record carries them)
 fn delivered_of(prog_events: &Value) -> Vec<u64> {
@@ -2175,10 +2351,12 @@ macro_rules! reasons {
     };
 }
 
-reasons!("gate_shadow", "gate_stopped", "recorder_unhealthy", "warmup", "state_unavailable", "resync", "fee_cap", "sender_stopped", "canary_wait", "canary_count",
-    "blockhash_stale", "leader_unknown", "leader_skip_kind", "jito_auth_stale", "expected_below_min_profit", "implausible_gap", "token_cooling", "rent_cap",
-    "uva_missing", "mid_not_held", "inflight_same_state", "inflight_same_leader", "band_throttle", "crowded_skip", "would_rate", "would_rate_crowded", "oversized", "dlmm_ext_needed",
-    "build_error");
+// (merge of WP-06 with integ/stage0) `rent_cap` stays defined and produces nothing: create+close replaced the new-account
+// cap, and WP-07's rent cap limits held-set additions only (`held_growth_ok`: a refused addition leaves the bundle `oversized`)
+reasons!("gate_shadow", "gate_stopped", "recorder_unhealthy", "warmup", "state_unavailable", "resync", "equity_unknown", "equity_stale", "fee_cap", "sender_stopped",
+    "canary_wait", "canary_count", "blockhash_stale", "leader_unknown", "leader_skip_kind", "jito_auth_stale", "expected_below_min_profit", "implausible_gap", "size_cap",
+    "token_cooling", "rent_cap", "uva_missing", "mid_not_held", "inflight_same_state", "inflight_same_leader", "band_throttle", "crowded_skip", "would_rate",
+    "would_rate_crowded", "oversized", "dlmm_ext_needed", "build_error");
 
 /// the counter of a copy that never left (copies.jsonl `drop`, MEASUREMENT §4.38): `drop_<code>`. Such an attempt was
 /// handed to the fire, so it is not a refused decision (review WP-05 #16)
@@ -2189,9 +2367,9 @@ pub fn drop_counter(code: &str) -> &'static str {
     }
 }
 
-/// a landing as the settlement knows it
+/// a landing as the settlement knows it (`ledger`: the ledger's line of its transaction, outcomes.jsonl `ledger`; WP-07)
 #[derive(Clone, Debug)]
-struct Landed { slot: Option<u64>, idx: Option<u64>, ok: bool, err: Option<Value>, fee: Option<u64>, cu: Option<u64>, prog_events: Value, t_wallet: u64 }
+struct Landed { slot: Option<u64>, idx: Option<u64>, ok: bool, err: Option<Value>, fee: Option<u64>, cu: Option<u64>, prog_events: Value, t_wallet: u64, ledger: Value }
 
 /// What one landing adds to the bot's money counters: the landing, a win and its tip, its fee (and as a failed fee
 /// when it failed), a win's round trip when the route program's events give it (else it is unknown), the token account
@@ -2211,7 +2389,8 @@ impl Counted {
 }
 
 impl Landed {
-    fn of_status(s: &SigStatus) -> Landed { Landed { slot: Some(s.slot), idx: None, ok: s.err.is_none(), err: s.err.clone(), fee: None, cu: None, prog_events: Value::Null, t_wallet: 0 } }
+    fn of_status(s: &SigStatus) -> Landed { Landed { slot: Some(s.slot), idx: None, ok: s.err.is_none(), err: s.err.clone(), fee: None, cu: None, prog_events: Value::Null, t_wallet: 0,
+        ledger: Value::Null } }
     fn json(&self, leader: Option<&(String, LeaderKind)>) -> Value {
         json!({ "slot": self.slot, "idx": self.idx, "t_wallet_ns": (self.t_wallet > 0).then_some(self.t_wallet), "leader": leader.map(|l| l.0.clone()), "leader_kind": leader.map(|l| l.1) })
     }
