@@ -315,3 +315,15 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
 - message formatting.
 
 **Placement:** a lane, merged after WP-05 so the win and settlement hooks can be wired. Cherry gets only the binary (owner rule): the watchdog is a subcommand, not a script.
+
+## Owner decision (2026-10-06): trade-success criteria for the Stage 0 exit, and the $500 trigger
+
+- **Trade-success criteria** added to the Stage 0 exit (PLAN §6 has only safety and measurement gates). They are measured over the 24 h canary FT-005 from the chain ledger:
+  - every landed trade nets > 0 after fee + tip + rent (0 exceptions);
+  - 24 h net ≥ 0;
+  - ≥ 10 wins, else extend;
+  - realised vs quoted median within ±10%;
+  - win ratio per bundle sent ≥ 0.3%, stretch 0.5%.
+- **Profit is not a Stage 0 gate:** expected at this wallet size is about $0–7/day (STAGE1-PLAN).
+- **The $500 trigger:** net positive over 48 h of canary.
+- **Still open:** the exec-coverage gate (≥ 99%) needs more Haan capacity or a second provider (OD-1), or an explicit owner waiver.
