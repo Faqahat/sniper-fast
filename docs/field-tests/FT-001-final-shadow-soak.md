@@ -33,4 +33,16 @@
 - **Live watch:** the WP-20 alerts and the watchdog post from Cherry; the operator's `segwatch.py` posts goal, heartbeats and results.
 
 ## Results
-(filled in per segment)
+
+| Segment | UTC | Result |
+|---|---|---|
+| p1 | 06:58–07:58 | **PASS.** `deadline`, exit 0; state 100% (360/360); 0 drops, 0 I/O errors; RSS 769 MB at the end, levelling off (721 MB at 33 min); 2.5 GB recorded. **Replay:** whole, 55,520/55,520 decisions, 53,482 commit groups and 954/954 attempts identical; the state digest differed only because of the digest point (see below) |
+| p2 | 07:58–08:58 | **PASS.** `deadline`, exit 0; state 100% (360/360); 0 drops, 0 I/O errors; RSS 691 MB at the end; 1.9 GB recorded |
+| p3 | 08:58–09:10 | **Stopped by the owner** (stop control, exit 10, class operator). Astralane's deshred feed refused us ("subscriber limit reached", a 429 storm), and the owner decided to drop Astralane. Healthy until then |
+
+**Findings:**
+1. **Replay digest point (go-live item 3), fixed on lane/digest 2e5a632.** The run took its state digest in `Engine::finish`, before WP-07's stop sequence journaled 10 more records; the replay digested after them (0.209 s later). The fix journals the digest point (INPUT 14) and the replay digests there. Replaying p1 with the fix reproduces the run's state and decision digests exactly, deterministically, twice.
+2. **The stop snapshot fails** (both p1 and p2): `rpc getMultipleAccounts: no attempt before the deadline`. The ledger's snapshot role was throttled on Haan (32 of 37 calls). It must be fixed before FT-004: priority, provider failover, and the gap reconciled at the next segment.
+3. **Astralane dropped** (owner, 2026-10-06), commit after 349140d. The feed is disabled in all maintained configs.
+
+**Verdict:** soak PASS for p1–p2 (2 h, with the p3 portion until the owner's stop). The re-soak of the next build (WP-09 part 2 + the digest and stop-snapshot fixes, no Astralane) adds 60 min and must replay identically at the digest point. That closes go-live items 2–3 together with FT-001.
