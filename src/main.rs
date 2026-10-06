@@ -1360,6 +1360,10 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // the frozen copy of the config this run uses (meta.json config.frozen_copy)
     std::fs::write(dir.join("config.toml"), &raw)?;
     let stop = sess.stopper.flag();
+    // FT-001 p1: what the stop sequence waits for runs until it ends (`exit`, set after `Engine::stop_sequence`): the
+    // chain-fetch service (the wallet's records of what landed) and the send paths' result streams and block-engine token
+    // (the bundles' results). With `stop` they ended at the stop request, before the drain that waits for them
+    let exit = Arc::new(AtomicBool::new(false));
     // WP-02 (F9): two runtimes. rt_hot (2 workers, `arbx-hot`) runs only stream I/O and sends: the state stream, the gRPC
     // feeds, the send paths, the Jito result streams, keep-alives. rt_bg (`[runtime] bg_threads`, `arbx-bg`, niced +5)
     // runs every RPC call: the client is bound to it, so the boot, the engine's fetches, the executor's simulations and
@@ -1540,7 +1544,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
             None => say(&format!("wallet history: no cursor ([chainfetch] wallet_cursor {:?}): the last hour is listed", cfg.chainfetch.wallet_cursor)),
         }
         chainfetch::start(chainfetch::Opts { cfg: cfg.chainfetch.clone(), wallet: wallet_pk, route_program: tx::pk(&cfg.exec.program), roles: roles.clone(), rec: rec.clone(),
-            back: Some(tx.clone()), chain: Arc::new(cf_clients), backfill_cap: cap, wallet_cursor: cursor.map(|c| (c.0, c.1)) }, rpc_reg.clone(), &bg, stop.clone(),
+            back: Some(tx.clone()), chain: Arc::new(cf_clients), backfill_cap: cap, wallet_cursor: cursor.map(|c| (c.0, c.1)) }, rpc_reg.clone(), &bg, exit.clone(),
             Some(on_dead));
     }
     rpc.start_warm(&bg, stop.clone(), std::time::Duration::from_secs(20), std::time::Duration::from_secs(5));
@@ -1611,7 +1615,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         let (p, notes) = rts.hot.block_on(send::Paths::new(&cfg.sends, paths_opts, rec.clone(), true))?;
         for n in notes { say(&format!("send path {n}")); }
         let back = tx.clone();
-        p.start(stop.clone(), std::time::Duration::from_secs(cfg.exec.keepalive_s), move |m: String| { let _ = back.send(feeds::Event::Status { feed: u16::MAX, msg: m }); });
+        p.start(exit.clone(), std::time::Duration::from_secs(cfg.exec.keepalive_s), move |m: String| { let _ = back.send(feeds::Event::Status { feed: u16::MAX, msg: m }); });
         say(&format!("send paths: {} (keep-alive every {} s)", p.list.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(", "), cfg.exec.keepalive_s));
         Some(p)
     } else {
@@ -1837,6 +1841,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         }
     }
     stop.store(true, Ordering::Relaxed);
+    exit.store(true, Ordering::Relaxed);
     // WP-20: what the alerts' sender holds goes out before its runtime stops (bounded); the rest with the stop message
     alerter.flush(alerts::FLUSH_WAIT);
     // the feeds and send tasks stop with the runtimes; then the recorder drains what they handed it (its guard closes it)
@@ -2112,6 +2117,13 @@ mod tests {
         for n in ["eng.stop_sequence(", "eng.write_final_status(", "settle_at_stop", "eng.drain(", "digest_point("] {
             assert_eq!(body.matches(n).count(), usize::from(n == "eng.stop_sequence(" || n == "eng.write_final_status("), "{n} in run(): the stop sequence is the engine's");
         }
+        // FT-001 p1: what the stop sequence waits for (the chain-fetch service: the wallet's records; the send paths: the
+        // bundles' results and the block-engine token) runs until it ends, not until the stop request
+        let cf = &body[at("chainfetch::start(")..];
+        assert!(cf[..cf.find(';').unwrap()].contains("exit.clone()"), "the chain-fetch service stops at the exit, after the stop sequence");
+        assert!(body.contains("p.start(exit.clone()"), "the send paths' result streams stop at the exit");
+        assert!(at("eng.stop_sequence(&rx") < at("exit.store(true"), "the exit comes after the stop sequence");
+        assert_eq!(body.matches("exit.store(true").count(), 1);
     }
 
     /// review F3: a supervised segment needs its control socket (the supervisor pauses through it): refused before

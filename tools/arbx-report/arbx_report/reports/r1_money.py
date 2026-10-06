@@ -79,7 +79,7 @@ def run(seg, ctx: dict) -> dict:
                    "delta_equity": r.get("delta_equity"), "sum_entries": r.get("sum_entries"),
                    "inventory_reval": r.get("inventory_reval"), "residual": r.get("residual"),
                    "liquid_residual": (r.get("liquid") or {}).get("residual"), "ok": r.get("ok"),
-                   "arithmetic": ledgercalc.recon_check(r) or "ok"} for r in rc]
+                   "arithmetic": (ledgercalc.recon_check(r) or "ok") if "delta_equity" in r else f"n/a ({r.get('kind') or r.get('skipped') or 'no window'})"} for r in rc]
     # splits by band, venue pair, leader kind, experiment arm
     d["splits"] = _splits(seg, route)
     hours = seg.window.get("trading_hours")

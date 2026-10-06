@@ -22,6 +22,7 @@
 //!   priced, which reasons, which counters) are asserted in the code and do not change with the maths.
 mod digest_points;
 mod exec_replay;
+mod stop_snapshot;
 mod harness;
 mod s1_torn_reads;
 mod s2_failed_sells;

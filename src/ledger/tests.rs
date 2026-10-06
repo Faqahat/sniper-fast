@@ -394,6 +394,44 @@ async fn snapshot_calls_on_one_slot() {
     assert_eq!((v["error"].as_str(), v["attempts"].as_u64()), (Some("down"), Some(3)));
 }
 
+/// FT-001 p1: the stop snapshot within its budget. Failing calls are asked again after a backoff while the budget lasts
+/// (not `retries` times at once: the providers' trouble may pass), each call bounded by what is left of the budget (at
+/// most 5 s); it answers as soon as a call does, and gives up when the budget would end during the next backoff
+#[tokio::test(start_paused = true)]
+async fn the_stop_snapshot_retries_within_its_budget() {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+    let keys: Vec<Pk> = (0..3u8).map(|n| [n; 32]).collect();
+    let budget = STOP_SNAPSHOT_BUDGET;
+    // down for 3 s: asked again until it answers
+    let (n, deadlines) = (Arc::new(AtomicU64::new(0)), Arc::new(std::sync::Mutex::new(Vec::new())));
+    let t0 = tokio::time::Instant::now();
+    let call = |p: Value, d: Duration| {
+        let (n, dl) = (n.clone(), deadlines.clone());
+        async move {
+            n.fetch_add(1, Relaxed);
+            dl.lock().unwrap().push(d);
+            if t0.elapsed() < Duration::from_secs(3) { return Err("rpc getMultipleAccounts: haan HTTP 503".to_string()); }
+            Ok((json!({ "context": { "slot": 7 }, "value": vec![Value::Null; p[0].as_array().unwrap().len()] }), "shyft".to_string()))
+        }
+    };
+    let v = fetch_within(call, keys.clone(), 3, "stop", Some(budget)).await;
+    assert!(v["error"].is_null() && v["provider"] == "shyft", "{v}");
+    assert!(v["attempts"].as_u64().unwrap() > 4, "more than retries + 1 attempts: {v}");
+    assert!(t0.elapsed() >= Duration::from_secs(3) && t0.elapsed() < Duration::from_secs(6), "{:?}", t0.elapsed());
+    assert!(deadlines.lock().unwrap().iter().all(|d| *d <= SNAPSHOT_CALL && !d.is_zero()));
+    // down for good: it gives up inside the budget, with the last error
+    let n2 = Arc::new(AtomicU64::new(0));
+    let t1 = tokio::time::Instant::now();
+    let v = fetch_within(|_: Value, _: Duration| { let n2 = n2.clone(); async move { n2.fetch_add(1, Relaxed); Err::<(Value, String), String>("down".into()) } }, keys.clone(), 3,
+        "stop", Some(budget)).await;
+    assert_eq!(v["error"].as_str(), Some("down"));
+    assert!(t1.elapsed() <= budget && t1.elapsed() >= budget - Duration::from_secs(3), "{:?}", t1.elapsed());
+    assert_eq!(v["attempts"].as_u64(), Some(n2.load(Relaxed)));
+    // no budget: `retries` + 1 attempts, as before
+    let v = fetch_within(|_: Value, _: Duration| async { Err::<(Value, String), String>("down".into()) }, keys, 3, "periodic", None).await;
+    assert_eq!(v["attempts"].as_u64(), Some(4));
+}
+
 // ------------------------------------------------------------------ the ledger on a virtual clock
 
 /// a ledger of the frz wallet in its own directory, bound to a fresh session (its gate live, as a canary's)

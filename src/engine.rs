@@ -1757,7 +1757,8 @@ impl Engine {
     /// it is written `final: false` and the next segment decides it again). Whatever is still open gets its `unsettled`
     /// outcome line (WP-05; stop.json lists it, the next segment's ledger joins its landing by signature). FT-001: the
     /// `stop_end` digest point last, after the sequence's last journaled record (a replay digests there too). `say`: the
-    /// run log
+    /// run log. FT-001 p1: the stop snapshot is fetched within `ledger::STOP_SNAPSHOT_BUDGET` (inside the 20 s wait); a
+    /// stop without it records why (`Ledger::stop_snapshot_missing`), and the next segment reconciles the window
     pub fn stop_sequence(&mut self, rx: &Receiver<Event>, drain_ns: u64, say: &mut dyn FnMut(&str)) -> StopSeq {
         let in_flight = self.exec.as_ref().map(|x| x.open_attempts().len());
         let t_drain = now_ns();
@@ -1766,7 +1767,11 @@ impl Engine {
         let drain_ms = now_ns().saturating_sub(t_drain) as f64 / 1e6;
         if self.ledger.is_some() {
             self.ledger_stop_snapshot();
-            if !self.drain(rx, now_ns() + 20_000_000_000, &|e| e.ledger_stop_snapshot_done(), say) { say("stop: no stop snapshot within 20 s"); }
+            if !self.drain(rx, now_ns() + 20_000_000_000, &|e| e.ledger_stop_snapshot_done(), say) {
+                say("stop: no stop snapshot within 20 s");
+                let t = self.t_now.max(now_ns());
+                if let Some(l) = self.ledger.as_mut() { l.stop_snapshot_missing(t, "no stop snapshot within the stop sequence's 20 s"); }
+            }
             let grace = self.ledger_final_begin();
             if !self.drain(rx, now_ns() + grace, &|e| e.ledger_final_settled(), say) { say("stop: the stop's reconciliation is decided without more records"); }
             self.ledger_final();

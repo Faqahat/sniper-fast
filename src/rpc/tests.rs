@@ -159,6 +159,32 @@ async fn a_sustained_boot_failure_aborts_with_its_reason() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// FT-001 p1: the run's stop flag (`set_stop`, the stopper's) ends boot-policy calls only. Set by the stop request,
+/// before the stop sequence, it had made every bounded call fail at once ("rpc getMultipleAccounts: no attempt before the
+/// deadline", no provider asked): the ledger's stop snapshot, its window search, the executor's expiry checks. A bounded
+/// call after the stop request asks its providers (and fails over) as before; a boot call still ends at once, unasked
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_run_stop_ends_boot_calls_only() {
+    let (down, nd) = fake_http(|_, _| Reply::Status(503)).await;
+    let (up, nu) = fake_http(|req, _| ok(gma(req))).await;
+    let reg = Arc::new(Registry::default());
+    let root = Rpc::race(vec![ep("down", &down), ep("up", &up)]).with_failover(true).with_registry(reg.clone());
+    root.set_stop(Arc::new(AtomicBool::new(true)));
+    let ledger = root.with_role(Role::Ledger);
+    let f = ledger.call_bounded("getMultipleAccounts", json!([[b58(&[1u8; 32])], { "encoding": "base64" }]), Bounds::fetch(Duration::from_secs(5), 2)).await
+        .expect("a bounded call after the stop request asks its providers");
+    assert_eq!((f.provider.as_str(), f.attempts, f.value["context"]["slot"].as_u64()), ("up", 2, Some(777)), "the first failed, the call failed over");
+    assert_eq!((nd.load(Relaxed), nu.load(Relaxed)), (1, 1));
+    assert_eq!((reg.total(Role::Ledger, "down").errors, reg.total(Role::Ledger, "up").ok), (1, 1));
+    // a boot call: the stop ends it at once, no provider asked
+    root.set_phase(Phase::Boot);
+    let e = root.accounts(&[[1u8; 32]]).await.unwrap_err();
+    let f = e.downcast_ref::<RpcFailure>().unwrap();
+    assert_eq!((f.class, f.attempts), (ErrClass::Stopped, 0), "{f:?}");
+    assert!(f.msg.contains("the run is stopping"), "{}", f.msg);
+    assert_eq!((nd.load(Relaxed), nu.load(Relaxed)), (1, 1), "nothing sent");
+}
+
 /// WP-03b item 5: `call_bounded` classifies every failure, moves to the next provider at once after a retryable one,
 /// returns a JSON-RPC answer (a skipped slot) at once, and respects its retries; the per-(role, provider) stats
 /// (resources.jsonl `rpc`, status `chainfetch.by_role`) count calls, 429s, timeouts and body errors, as deltas per
