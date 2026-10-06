@@ -1,0 +1,1201 @@
+[
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/chq5caegdj5aretyivnjk3cmnjziwjhaxtkdgnpvke7p",
+  "pairAddress": "CHQ5CAEGDj5aREtyivnjk3CmNJZiWJhaXTKDGNpvKE7p",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.000004766",
+  "priceUsd": "0.0005731",
+  "txns": {
+   "m5": {
+    "buys": 12,
+    "sells": 20
+   },
+   "h1": {
+    "buys": 703,
+    "sells": 690
+   },
+   "h6": {
+    "buys": 7060,
+    "sells": 7359
+   },
+   "h24": {
+    "buys": 7060,
+    "sells": 7359
+   }
+  },
+  "volume": {
+   "h24": 2167050.58,
+   "h6": 2167050.58,
+   "h1": 136414.77,
+   "m5": 2847.44
+  },
+  "priceChange": {
+   "m5": 2.55,
+   "h1": -35.02,
+   "h6": 714,
+   "h24": 714
+  },
+  "liquidity": {
+   "usd": 101357.07,
+   "base": 88433025,
+   "quote": 421.4849
+  },
+  "fdv": 573111,
+  "marketCap": 573111,
+  "pairCreatedAt": 1791298827000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/67mcdjdvsjpwf5no5ztfxhzhqlht63pntc5g3svmwwcb",
+  "pairAddress": "67mcDJDVSJpWf5No5ZtFxhZHqLHt63pntc5g3SVmwWCB",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.000004932",
+  "priceUsd": "0.0005941",
+  "txns": {
+   "m5": {
+    "buys": 3,
+    "sells": 1
+   },
+   "h1": {
+    "buys": 212,
+    "sells": 238
+   },
+   "h6": {
+    "buys": 761,
+    "sells": 771
+   },
+   "h24": {
+    "buys": 761,
+    "sells": 771
+   }
+  },
+  "volume": {
+   "h24": 64370.92,
+   "h6": 64370.92,
+   "h1": 23215.24,
+   "m5": 99.9
+  },
+  "priceChange": {
+   "m5": 3.17,
+   "h1": -34.4,
+   "h6": -27.03,
+   "h24": -27.03
+  },
+  "liquidity": {
+   "usd": 4565.93,
+   "base": 2822861,
+   "quote": 23.9828
+  },
+  "fdv": 594150,
+  "marketCap": 594150,
+  "pairCreatedAt": 1791300568000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/d4ghcnabhww36zjvsjjnreqf94qzyngft7xtx95wcqm6",
+  "pairAddress": "D4ghcnAbHWW36ZjVSJJNreqf94QzynGFt7XTx95WcQm6",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.000004925",
+  "priceUsd": "0.0005932",
+  "txns": {
+   "m5": {
+    "buys": 2,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 68,
+    "sells": 90
+   },
+   "h6": {
+    "buys": 318,
+    "sells": 416
+   },
+   "h24": {
+    "buys": 318,
+    "sells": 416
+   }
+  },
+  "volume": {
+   "h24": 17731.34,
+   "h6": 17731.34,
+   "h1": 1984.98,
+   "m5": 4.02
+  },
+  "priceChange": {
+   "m5": 4.56,
+   "h1": -34.13,
+   "h6": -27.06,
+   "h24": -27.06
+  },
+  "liquidity": {
+   "usd": 222.36,
+   "base": 162054,
+   "quote": 1.04792
+  },
+  "fdv": 593242,
+  "marketCap": 593242,
+  "pairCreatedAt": 1791300457000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/gdppfj2r7pzkxhmg5qvgrhhasxymkp3uzb2ogxv1jpx6",
+  "pairAddress": "GdppfJ2r7PzkXhMG5QvGrhHAsxYMkp3uzB2ogXV1jPX6",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "0.0005260",
+  "priceUsd": "0.0005260",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 9,
+    "sells": 18
+   },
+   "h6": {
+    "buys": 45,
+    "sells": 48
+   },
+   "h24": {
+    "buys": 45,
+    "sells": 48
+   }
+  },
+  "volume": {
+   "h24": 37.47,
+   "h6": 37.47,
+   "h1": 5.35,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -39.83,
+   "h6": 80.28,
+   "h24": 80.28
+  },
+  "liquidity": {
+   "usd": 19.68,
+   "base": 18385,
+   "quote": 10.01054
+  },
+  "fdv": 526086,
+  "marketCap": 526086,
+  "pairCreatedAt": 1791298899000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/cqrj6vnji8qxctrxbkmpz6ctye2fdueeqrr3pxkmpeph",
+  "pairAddress": "CqRJ6VNJi8QXcTrxbKMPz6CTYe2FdUeeQrr3PXkmPePH",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.000004465",
+  "priceUsd": "0.0005370",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 5,
+    "sells": 12
+   },
+   "h6": {
+    "buys": 41,
+    "sells": 23
+   },
+   "h24": {
+    "buys": 41,
+    "sells": 23
+   }
+  },
+  "volume": {
+   "h24": 2.29,
+   "h6": 2.29,
+   "h1": 0.64,
+   "m5": 0.05
+  },
+  "priceChange": {
+   "m5": 9.19,
+   "h1": -39.7,
+   "h6": 156,
+   "h24": 156
+  },
+  "liquidity": {
+   "usd": 1.86,
+   "base": 1687.5824,
+   "quote": 0.007964
+  },
+  "fdv": 537064,
+  "marketCap": 537064,
+  "pairCreatedAt": 1791298895000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/4fdzagdekd7xrevxqzerbdgprbvuy2ncgyq7cwgvtjvu",
+  "pairAddress": "4fdzAGDEKd7XrEVXQZERbDgpRBvUy2NCgyQ7cWGVtJVu",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.000004210",
+  "priceUsd": "0.0005071",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 13,
+    "sells": 16
+   },
+   "h6": {
+    "buys": 106,
+    "sells": 90
+   },
+   "h24": {
+    "buys": 106,
+    "sells": 90
+   }
+  },
+  "volume": {
+   "h24": 4.47,
+   "h6": 4.47,
+   "h1": 0.46,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -46.17,
+   "h6": 4.45,
+   "h24": 4.45
+  },
+  "liquidity": {
+   "usd": 1.2,
+   "base": 1165.5777,
+   "quote": 0.005096
+  },
+  "fdv": 507148,
+  "marketCap": 507148,
+  "pairCreatedAt": 1791299293000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/gyjxexbdjrytwb1npvfkkchdhpia1mtdxviihhwgwrxs",
+  "pairAddress": "GyjXeXBdjrYtWB1NPvFKKchDhpia1MtDXviiHHWgwRXS",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "0.0005227",
+  "priceUsd": "0.0005227",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 5,
+    "sells": 11
+   },
+   "h6": {
+    "buys": 63,
+    "sells": 60
+   },
+   "h24": {
+    "buys": 63,
+    "sells": 60
+   }
+  },
+  "volume": {
+   "h24": 2.98,
+   "h6": 2.98,
+   "h1": 0.22,
+   "m5": 0.01
+  },
+  "priceChange": {
+   "m5": -11.72,
+   "h1": -45.56,
+   "h6": 89.78,
+   "h24": 89.78
+  },
+  "liquidity": {
+   "usd": 0.64,
+   "base": 602.2506,
+   "quote": 0.3296
+  },
+  "fdv": 522791,
+  "marketCap": 522791,
+  "pairCreatedAt": 1791298885000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/6b6ohexftvxdmt6qqubfejmypjp3ksircekt9v88shjq",
+  "pairAddress": "6B6oHeXfTVxDMT6qQuBFEjmYpjP3ksircEKt9V88sHJq",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+   "name": "USDT",
+   "symbol": "USDT"
+  },
+  "priceNative": "0.0005161",
+  "priceUsd": "0.0005161",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 4,
+    "sells": 10
+   },
+   "h6": {
+    "buys": 61,
+    "sells": 59
+   },
+   "h24": {
+    "buys": 61,
+    "sells": 59
+   }
+  },
+  "volume": {
+   "h24": 2.29,
+   "h6": 2.29,
+   "h1": 0.19,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -40.83,
+   "h6": 116,
+   "h24": 116
+  },
+  "liquidity": {
+   "usd": 0.72,
+   "base": 689.918,
+   "quote": 0.3684
+  },
+  "fdv": 516136,
+  "marketCap": 516136,
+  "pairCreatedAt": 1791298889000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/8bjumg75wkmmmjj6mgms8c22yzdfmw4fk2qleyj6fsb8",
+  "pairAddress": "8BjuMg75wkMmmjj6MgMS8C22yZdfmw4fk2QLEYJ6fsB8",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "0.0005590",
+  "priceUsd": "0.0005590",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 5,
+    "sells": 14
+   },
+   "h6": {
+    "buys": 30,
+    "sells": 25
+   },
+   "h24": {
+    "buys": 30,
+    "sells": 25
+   }
+  },
+  "volume": {
+   "h24": 2.14,
+   "h6": 2.14,
+   "h1": 0.67,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -37.66,
+   "h6": 11.78,
+   "h24": 11.78
+  },
+  "liquidity": {
+   "usd": 2.13,
+   "base": 1918.04198,
+   "quote": 1.05797
+  },
+  "fdv": 559030,
+  "marketCap": 559030,
+  "pairCreatedAt": 1791299294000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/e7s12cupcn5nwhjb4ackt7wf86ctgjnmh3ycrbru5cvc",
+  "pairAddress": "E7s12cupCN5NwhjB4aCkt7wF86ctGjNMh3yCrbru5cVC",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.000004379",
+  "priceUsd": "0.0005263",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 6,
+    "sells": 11
+   },
+   "h6": {
+    "buys": 26,
+    "sells": 19
+   },
+   "h24": {
+    "buys": 26,
+    "sells": 19
+   }
+  },
+  "volume": {
+   "h24": 1.25,
+   "h6": 1.25,
+   "h1": 0.36,
+   "m5": 0.02
+  },
+  "priceChange": {
+   "m5": 4.93,
+   "h1": -39.4,
+   "h6": 4.55,
+   "h24": 4.55
+  },
+  "liquidity": {
+   "usd": 1.25,
+   "base": 1170.2069,
+   "quote": 0.005312
+  },
+  "fdv": 526365,
+  "marketCap": 526365,
+  "pairCreatedAt": 1791299293000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/ansfmbcvvehdzh1ki3xplf9e5cqtyt1fnxzcfwgftyc2",
+  "pairAddress": "AnsFMBCvvEHDzh1ki3xPLf9E5CQTYt1fNxZCfWgFtyc2",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+   "name": "USDT",
+   "symbol": "USDT"
+  },
+  "priceNative": "0.0005182",
+  "priceUsd": "0.0005182",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 4,
+    "sells": 10
+   },
+   "h6": {
+    "buys": 27,
+    "sells": 17
+   },
+   "h24": {
+    "buys": 27,
+    "sells": 17
+   }
+  },
+  "volume": {
+   "h24": 1.12,
+   "h6": 1.12,
+   "h1": 0.3,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -41.39,
+   "h6": 5.16,
+   "h24": 5.16
+  },
+  "liquidity": {
+   "usd": 1.26,
+   "base": 1202.6957,
+   "quote": 0.6416
+  },
+  "fdv": 518292,
+  "marketCap": 518292,
+  "pairCreatedAt": 1791299295000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/6th7kauedex8e4ddfgaaxerzdw7gcc7fjvwer3nfbxcm",
+  "pairAddress": "6th7KauEdEX8e4DDfGAAXeRZdw7gCC7FJvWEr3nfBxCm",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "0.0005315",
+  "priceUsd": "0.0005315",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 1,
+    "sells": 7
+   },
+   "h6": {
+    "buys": 14,
+    "sells": 17
+   },
+   "h24": {
+    "buys": 14,
+    "sells": 17
+   }
+  },
+  "volume": {
+   "h24": 2.88,
+   "h6": 2.88,
+   "h1": 0.31,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -32.67,
+   "h6": -78.13,
+   "h24": -78.13
+  },
+  "liquidity": {
+   "usd": 2.05,
+   "base": 1892.3278,
+   "quote": 1.05401
+  },
+  "fdv": 531573,
+  "marketCap": 531573,
+  "pairCreatedAt": 1791299587000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/8ctbjowzwckfx4swyrwobauexmhj8juhdvmwch21zrq9",
+  "pairAddress": "8CTBJowzwckfx4sWyrWobauExmhj8JuhDVmWcH21zrq9",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+   "name": "USDT",
+   "symbol": "USDT"
+  },
+  "priceNative": "0.0005265",
+  "priceUsd": "0.0005265",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 2,
+    "sells": 7
+   },
+   "h6": {
+    "buys": 18,
+    "sells": 12
+   },
+   "h24": {
+    "buys": 18,
+    "sells": 12
+   }
+  },
+  "volume": {
+   "h24": 0.4,
+   "h6": 0.4,
+   "h1": 0.11,
+   "m5": 0.01
+  },
+  "priceChange": {
+   "m5": 6.33,
+   "h1": -43.67,
+   "h6": 5.11,
+   "h24": 5.11
+  },
+  "liquidity": {
+   "usd": 0.51,
+   "base": 479.7905,
+   "quote": 0.263
+  },
+  "fdv": 526545,
+  "marketCap": 526545,
+  "pairCreatedAt": 1791298946000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/2aynukcvpdgxroznlw619d5vkoeuxmqzrmpzbgaylizz",
+  "pairAddress": "2aYNUkcvpdgXrozNLW619D5VkoEuXmQzRmpZbGAYLizZ",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.000004418",
+  "priceUsd": "0.0005316",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 2,
+    "sells": 8
+   },
+   "h6": {
+    "buys": 13,
+    "sells": 13
+   },
+   "h24": {
+    "buys": 13,
+    "sells": 13
+   }
+  },
+  "volume": {
+   "h24": 1.15,
+   "h6": 1.15,
+   "h1": 0.32,
+   "m5": 0.03
+  },
+  "priceChange": {
+   "m5": 7.08,
+   "h1": -33.29,
+   "h6": -37.29,
+   "h24": -37.29
+  },
+  "liquidity": {
+   "usd": 1.85,
+   "base": 1712.2675,
+   "quote": 0.007862
+  },
+  "fdv": 531639,
+  "marketCap": 531639,
+  "pairCreatedAt": 1791299584000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/3o2ulyj5z8td5smcaswhnfw26x1tcvhgz6av6qliasbm",
+  "pairAddress": "3o2ULYj5z8tD5smCaswhnfw26x1tcVHgZ6Av6qLiASbm",
+  "labels": [
+   "DYN2"
+  ],
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+   "name": "USDT",
+   "symbol": "USDT"
+  },
+  "priceNative": "0.0005126",
+  "priceUsd": "0.0005126",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 1,
+    "sells": 4
+   },
+   "h6": {
+    "buys": 11,
+    "sells": 8
+   },
+   "h24": {
+    "buys": 11,
+    "sells": 8
+   }
+  },
+  "volume": {
+   "h24": 0.49,
+   "h6": 0.49,
+   "h1": 0.1,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -35.71,
+   "h6": -40.03,
+   "h24": -40.03
+  },
+  "liquidity": {
+   "usd": 0.87,
+   "base": 842.6347,
+   "quote": 0.4451
+  },
+  "fdv": 512678,
+  "marketCap": 512678,
+  "pairCreatedAt": 1791299589000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteoradbc",
+  "url": "https://dexscreener.com/solana/ebaeueajmhtbnnvclkacuc6nwnullxazdef3hxjdcnqp",
+  "pairAddress": "EbaEUEAjmhtBNNvcLKaCUC6NWnuLLxazDeF3hxJdcnQp",
+  "baseToken": {
+   "address": "BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F",
+   "name": "BINDER",
+   "symbol": "BINDER"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.0000005385",
+  "priceUsd": "0.00006556",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 19,
+    "sells": 2
+   },
+   "h24": {
+    "buys": 19,
+    "sells": 2
+   }
+  },
+  "volume": {
+   "h24": 19427.01,
+   "h6": 19427.01,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 1610,
+   "h24": 1610
+  },
+  "fdv": 65567.09,
+  "marketCap": 65567.09,
+  "pairCreatedAt": 1791298826000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/NnA5IPv8ZotAQ5FB?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/TU-UKz_NIeE2Q8rs?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/BQxzR4pLkDw46gzbrkRjFuUSsgvN5BhTWHh6EXUwf3F?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://binder.finance/",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://x.com/BinderFinance",
+     "type": "twitter"
+    }
+   ]
+  }
+ }
+]

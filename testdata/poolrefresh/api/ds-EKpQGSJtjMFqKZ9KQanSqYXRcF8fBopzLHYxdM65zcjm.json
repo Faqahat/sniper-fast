@@ -1,0 +1,2356 @@
+[
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/d6ndkrknqpmrzccng1gqxtf7mmohb7qr6gu5tkg59qz1",
+  "pairAddress": "D6NdKrKNQPmRZCCnG1GqXtF7MMoHB7qR6GU5TkG59Qz1",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002072",
+  "priceUsd": "0.2491",
+  "txns": {
+   "m5": {
+    "buys": 15,
+    "sells": 4
+   },
+   "h1": {
+    "buys": 216,
+    "sells": 291
+   },
+   "h6": {
+    "buys": 1328,
+    "sells": 1611
+   },
+   "h24": {
+    "buys": 4611,
+    "sells": 4503
+   }
+  },
+  "volume": {
+   "h24": 227342.67,
+   "h6": 76189.26,
+   "h1": 11522.48,
+   "m5": 328.41
+  },
+  "priceChange": {
+   "m5": -0.36,
+   "h1": 0.21,
+   "h6": -1.17,
+   "h24": -2.02
+  },
+  "liquidity": {
+   "usd": 178434.94,
+   "base": 549679,
+   "quote": 345.3818
+  },
+  "fdv": 248820707,
+  "marketCap": 248820707,
+  "pairCreatedAt": 1716065147000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/ep2ib6dydeeqd8mfe2ezhcxx3kp3k2elkkirfpm5eymx",
+  "pairAddress": "EP2ib6dYdEeqD8MfE2ezHCxX3kP3K2eLKkirfPm5eyMx",
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002071",
+  "priceUsd": "0.2495",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 6
+   },
+   "h1": {
+    "buys": 138,
+    "sells": 47
+   },
+   "h6": {
+    "buys": 715,
+    "sells": 898
+   },
+   "h24": {
+    "buys": 1251,
+    "sells": 1699
+   }
+  },
+  "volume": {
+   "h24": 504295.23,
+   "h6": 205657.43,
+   "h1": 24597.46,
+   "m5": 2165.89
+  },
+  "priceChange": {
+   "m5": -0.14,
+   "h1": 0.48,
+   "h6": -1.15,
+   "h24": -1.35
+  },
+  "liquidity": {
+   "usd": 6878030.04,
+   "base": 13765020,
+   "quote": 28586
+  },
+  "fdv": 249240764,
+  "marketCap": 249240764,
+  "pairCreatedAt": 1700510070000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/cn8m75ch57duznzw5wsuptxtmrsfxbfscjoqxvcgaxes",
+  "pairAddress": "CN8M75cH57DuZNzW5wSUpTXtMrSfXBFScJoQxVCgAXes",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "0.2492",
+  "priceUsd": "0.2492",
+  "txns": {
+   "m5": {
+    "buys": 2,
+    "sells": 9
+   },
+   "h1": {
+    "buys": 37,
+    "sells": 27
+   },
+   "h6": {
+    "buys": 123,
+    "sells": 143
+   },
+   "h24": {
+    "buys": 439,
+    "sells": 444
+   }
+  },
+  "volume": {
+   "h24": 4616.85,
+   "h6": 1632.07,
+   "h1": 448.76,
+   "m5": 142.46
+  },
+  "priceChange": {
+   "m5": -0.23,
+   "h1": 0.23,
+   "h6": -1.31,
+   "h24": -2.02
+  },
+  "liquidity": {
+   "usd": 15221.3,
+   "base": 28506,
+   "quote": 8115.8204
+  },
+  "fdv": 248972172,
+  "marketCap": 248972172,
+  "pairCreatedAt": 1702237068000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/6qgydw4fhvptamfnzvpauetebvwrkfvauuhfnzvempky",
+  "pairAddress": "6qgyDW4fHvpTAmfNZvPAuETEbVwRKFVAuuHfNzvEmPkY",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002052",
+  "priceUsd": "0.2482",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 2
+   },
+   "h6": {
+    "buys": 7,
+    "sells": 13
+   },
+   "h24": {
+    "buys": 19,
+    "sells": 62
+   }
+  },
+  "volume": {
+   "h24": 594.08,
+   "h6": 271.37,
+   "h1": 17.22,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.2,
+   "h6": -1.57,
+   "h24": -3.84
+  },
+  "liquidity": {
+   "usd": 24038.13,
+   "base": 47174,
+   "quote": 101.9272
+  },
+  "fdv": 247939875,
+  "marketCap": 247939875,
+  "pairCreatedAt": 1702336783000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/adejbfryutjfrjtpzffprmfhf7xbispy63awe79evhe9",
+  "pairAddress": "ADEjbFryutjfrJTpZfFPRMFhF7XBisPY63Awe79EVhe9",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "0.2506",
+  "priceUsd": "0.2506",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 2,
+    "sells": 6
+   },
+   "h24": {
+    "buys": 2,
+    "sells": 26
+   }
+  },
+  "volume": {
+   "h24": 1949.2,
+   "h6": 1414.69,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 1.99,
+   "h24": -0.03
+  },
+  "liquidity": {
+   "usd": 20995.28,
+   "base": 33376,
+   "quote": 12629
+  },
+  "fdv": 250357890,
+  "marketCap": 250357890,
+  "pairCreatedAt": 1721341513000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/4mmdq5kg9ffrbsqeedersuotbhy5kknskwgvenxrtwsy",
+  "pairAddress": "4mMDQ5kG9fFrBSQeedErsUoTBhY5KKnsKWGvenXRTwSy",
+  "labels": [
+   "CLMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002073",
+  "priceUsd": "0.2504",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 9,
+    "sells": 16
+   },
+   "h24": {
+    "buys": 25,
+    "sells": 76
+   }
+  },
+  "volume": {
+   "h24": 944.17,
+   "h6": 413.57,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 0.48,
+   "h24": -1.94
+  },
+  "liquidity": {
+   "usd": 9548.01,
+   "base": 13241,
+   "quote": 51.6039
+  },
+  "fdv": 250150957,
+  "marketCap": 250150957,
+  "pairCreatedAt": 1723729962000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/bj3mc7vxog1ggirq1zmzfy6vewlgtpe9uzjfm7bvukge",
+  "pairAddress": "BJ3MC7VXog1Ggirq1zmzfY6VEWLgtPE9uZJfM7BvUKGe",
+  "labels": [
+   "CLMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002078",
+  "priceUsd": "0.2503",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 2
+   },
+   "h1": {
+    "buys": 29,
+    "sells": 10
+   },
+   "h6": {
+    "buys": 62,
+    "sells": 75
+   },
+   "h24": {
+    "buys": 170,
+    "sells": 235
+   }
+  },
+  "volume": {
+   "h24": 3538.49,
+   "h6": 1150.55,
+   "h1": 253.16,
+   "m5": 21.27
+  },
+  "priceChange": {
+   "m5": -0.1,
+   "h1": 0.46,
+   "h6": -0.52,
+   "h24": -1.21
+  },
+  "liquidity": {
+   "usd": 2777.96,
+   "base": 3367.869,
+   "quote": 16.06233
+  },
+  "fdv": 250092230,
+  "marketCap": 250092230,
+  "pairCreatedAt": 1791119224000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/8ve9ktgntlrxcqnavfkhep5grzhjdj6bjb1rqfzewg6v",
+  "pairAddress": "8Ve9KtGNtLRxCQNAVfkHEP5GRZHjdj6BjB1RQFZewG6V",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002079",
+  "priceUsd": "0.2503",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 15,
+    "sells": 17
+   },
+   "h24": {
+    "buys": 25,
+    "sells": 35
+   }
+  },
+  "volume": {
+   "h24": 1310.29,
+   "h6": 1231.46,
+   "h1": 4.21,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": 0.36,
+   "h6": -0.54,
+   "h24": -2.24
+  },
+  "liquidity": {
+   "usd": 8203.22,
+   "base": 19148,
+   "quote": 28.3112
+  },
+  "fdv": 250097054,
+  "marketCap": 250097054,
+  "pairCreatedAt": 1706213627000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/a6cvomu1z7ori9r774qarvxhumhpqkxqfyvfgnquax2b",
+  "pairAddress": "A6cVoMU1Z7oRi9R774QarVxHUmHPQkxQfYVFGNQuAx2b",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002073",
+  "priceUsd": "0.2491",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 1
+   },
+   "h1": {
+    "buys": 12,
+    "sells": 2
+   },
+   "h6": {
+    "buys": 28,
+    "sells": 41
+   },
+   "h24": {
+    "buys": 98,
+    "sells": 136
+   }
+  },
+  "volume": {
+   "h24": 762.11,
+   "h6": 235.07,
+   "h1": 43.78,
+   "m5": 0.24
+  },
+  "priceChange": {
+   "m5": -0.82,
+   "h1": 0.18,
+   "h6": -1.18,
+   "h24": -1.95
+  },
+  "liquidity": {
+   "usd": 5106.9,
+   "base": 9443.9027,
+   "quote": 22.9142
+  },
+  "fdv": 248898583,
+  "marketCap": 248898583,
+  "pairCreatedAt": 1702640409000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/58ovxjhmvqoxl2gtcp9jrayqt3plj8apqwkzcjgmmsco",
+  "pairAddress": "58oVxJHmvQoxL2GTCP9JrAYQt3PLJ8ApQwkZcjgmmSco",
+  "labels": [
+   "DYN"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "0.2491",
+  "priceUsd": "0.2491",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 19,
+    "sells": 1
+   },
+   "h24": {
+    "buys": 51,
+    "sells": 53
+   }
+  },
+  "volume": {
+   "h24": 66.03,
+   "h6": 6.03,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": -1.08,
+   "h24": -2.68
+  },
+  "liquidity": {
+   "usd": 4547.74,
+   "base": 9088.8074,
+   "quote": 2282.923
+  },
+  "fdv": 248898516,
+  "marketCap": 248898516,
+  "pairCreatedAt": 1703167204000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/8wbdqt2pe3p6ydvcftxknql3wlrj8g8zwonzixhbuhbl",
+  "pairAddress": "8WBdqT2pE3P6yDVCFTxknQL3wLRj8g8ZWoNZiXHBUHBL",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002076",
+  "priceUsd": "0.2496",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 3,
+    "sells": 2
+   },
+   "h6": {
+    "buys": 13,
+    "sells": 18
+   },
+   "h24": {
+    "buys": 39,
+    "sells": 57
+   }
+  },
+  "volume": {
+   "h24": 30.61,
+   "h6": 9.16,
+   "h1": 2.51,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": 0.16,
+   "h6": -0.54,
+   "h24": -1.13
+  },
+  "liquidity": {
+   "usd": 2036.68,
+   "base": 7320.07964,
+   "quote": 1.7387
+  },
+  "fdv": 249383631,
+  "marketCap": 249383631,
+  "pairCreatedAt": 1712309506000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/4e6q7eje6vbndquqzyyi5gvzd5mnpwiqkhjbrtrqguqd",
+  "pairAddress": "4E6q7eJE6vBNdquqzYYi5gvzd5MNpwiQKhjbRTRQGuQd",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002077",
+  "priceUsd": "0.2501",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 1
+   },
+   "h1": {
+    "buys": 7,
+    "sells": 5
+   },
+   "h6": {
+    "buys": 26,
+    "sells": 29
+   },
+   "h24": {
+    "buys": 75,
+    "sells": 83
+   }
+  },
+  "volume": {
+   "h24": 72.02,
+   "h6": 24.61,
+   "h1": 5.06,
+   "m5": 0.53
+  },
+  "priceChange": {
+   "m5": -0.16,
+   "h1": 0.52,
+   "h6": -0.69,
+   "h24": -1.43
+  },
+  "liquidity": {
+   "usd": 1440.58,
+   "base": 3156.8027,
+   "quote": 5.4031
+  },
+  "fdv": 249892473,
+  "marketCap": 249892473,
+  "pairCreatedAt": 1712459720000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/d5mzur2bvkhhle5s2liwheluv4qvr1mc2mc2pwdhzwtu",
+  "pairAddress": "D5MzuR2BVKhhLe5S2LiWHeLUv4QVr1mc2MC2PWdHZWtU",
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002081",
+  "priceUsd": "0.2507",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 5,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 13,
+    "sells": 31
+   },
+   "h24": {
+    "buys": 44,
+    "sells": 99
+   }
+  },
+  "volume": {
+   "h24": 8435.22,
+   "h6": 2096.42,
+   "h1": 2.62,
+   "m5": 0.16
+  },
+  "priceChange": {
+   "m5": 0.17,
+   "h1": 0.72,
+   "h6": -15.83,
+   "h24": -1.1
+  },
+  "liquidity": {
+   "usd": 1355.73,
+   "base": 2706.7894,
+   "quote": 5.6214
+  },
+  "fdv": 250426621,
+  "marketCap": 250426621,
+  "pairCreatedAt": 1718053293000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/39degq4ucue7tgxrdrhvrlz8zzq6tu7qfkkq5uyidq9n",
+  "pairAddress": "39deGQ4Ucue7tGXRDRHvRLz8zZQ6tu7QFkKq5UYiDQ9N",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002073",
+  "priceUsd": "0.2494",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h24": {
+    "buys": 0,
+    "sells": 4
+   }
+  },
+  "volume": {
+   "h24": 15.71,
+   "h6": 0,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h24": -2.29
+  },
+  "liquidity": {
+   "usd": 2411.18,
+   "base": 7494.1667,
+   "quote": 4.5061
+  },
+  "fdv": 249136323,
+  "marketCap": 249136323,
+  "pairCreatedAt": 1706215201000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/arudckq836fkdepsscru6stfmwykjhinxekqy1ytckop",
+  "pairAddress": "ARuDcKq836fKDEPsSCRU6stFmWYKjHiNxEKQY1ytckoP",
+  "labels": [
+   "DLMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump",
+   "name": "Fartcoin ",
+   "symbol": "Fartcoin "
+  },
+  "priceNative": "1.4457",
+  "priceUsd": "0.2499",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 4,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 5,
+    "sells": 3
+   },
+   "h24": {
+    "buys": 10,
+    "sells": 6
+   }
+  },
+  "volume": {
+   "h24": 212.75,
+   "h6": 101.77,
+   "h1": 45.42,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": 0.01,
+   "h6": 1.86,
+   "h24": -1.93
+  },
+  "liquidity": {
+   "usd": 1074.37,
+   "base": 2198.2014,
+   "quote": 3035.6055
+  },
+  "fdv": 249689791,
+  "marketCap": 249689791,
+  "pairCreatedAt": 1789989395000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/5tekmfqxyxogcsz6pt7mb4cxuaqkphyntmrvcwm8yshu",
+  "pairAddress": "5tekMFqXyxoGCSZ6PT7Mb4cxuAqkPHYnTMRvcwM8YShu",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "name": "USD Coin",
+   "symbol": "USDC"
+  },
+  "priceNative": "0.2534",
+  "priceUsd": "0.2534",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 3,
+    "sells": 0
+   },
+   "h24": {
+    "buys": 10,
+    "sells": 18
+   }
+  },
+  "volume": {
+   "h24": 17.12,
+   "h6": 1.82,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 0.5,
+   "h24": -1.27
+  },
+  "liquidity": {
+   "usd": 810.69,
+   "base": 1595.4401,
+   "quote": 406.2746
+  },
+  "fdv": 253189290,
+  "marketCap": 253189290,
+  "pairCreatedAt": 1702514129000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/9kjqppdnfk1carg24gaddsopoaefcwerpq8um72tkbgd",
+  "pairAddress": "9kJqpPDNfk1cARg24gADDSoPoaEFCwerpq8Um72tKBGd",
+  "labels": [
+   "DYN"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002075",
+  "priceUsd": "0.2498",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 2,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 5,
+    "sells": 9
+   },
+   "h24": {
+    "buys": 19,
+    "sells": 24
+   }
+  },
+  "volume": {
+   "h24": 14.98,
+   "h6": 5.15,
+   "h1": 0.71,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": 0.18,
+   "h6": -0.79,
+   "h24": -1.36
+  },
+  "liquidity": {
+   "usd": 479.85,
+   "base": 960.2944,
+   "quote": 1.993
+  },
+  "fdv": 249539402,
+  "marketCap": 249539402,
+  "pairCreatedAt": 1703167204000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/fsynx6cdfajxdjswdg38bj2tu3amz4eo64lrhsouucj3",
+  "pairAddress": "FSYNx6cdFajxDJswDg38bJ2tU3AMZ4eo64LRhSouuCj3",
+  "labels": [
+   "CPMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002106",
+  "priceUsd": "0.2532",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 5,
+    "sells": 9
+   },
+   "h24": {
+    "buys": 13,
+    "sells": 32
+   }
+  },
+  "volume": {
+   "h24": 1707.35,
+   "h6": 1.98,
+   "h1": 0.12,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.44,
+   "h6": -1.18,
+   "h24": -1.86
+  },
+  "liquidity": {
+   "usd": 350.72,
+   "base": 692.4177,
+   "quote": 1.4585
+  },
+  "fdv": 252966736,
+  "marketCap": 252966736,
+  "pairCreatedAt": 1772830646000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/czrvf5ccaf7botqlkmest2czjobx4zfpphez2gajwhaf",
+  "pairAddress": "CZrvf5cCAf7BoTqLkMEsT2czJobx4zfppHez2gaJwHaF",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002078",
+  "priceUsd": "0.2498",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 1,
+    "sells": 1
+   },
+   "h6": {
+    "buys": 7,
+    "sells": 6
+   },
+   "h24": {
+    "buys": 23,
+    "sells": 16
+   }
+  },
+  "volume": {
+   "h24": 1.37,
+   "h6": 0.29,
+   "h1": 0.07,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": -0.62,
+   "h6": 0.08,
+   "h24": -1.52
+  },
+  "liquidity": {
+   "usd": 379.25,
+   "base": 1027.9693,
+   "quote": 1.01783
+  },
+  "fdv": 249599868,
+  "marketCap": 249599868,
+  "pairCreatedAt": 1705563319000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/7zyqjxujqjpnrhaft8kuhuinjabuzn4wj2k9ugwau7dx",
+  "pairAddress": "7ZYQJXujQjpnrHAfT8KUhUiNJabuzN4WJ2K9UgWAu7DX",
+  "labels": [
+   "DYN"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+   "name": "Bonk",
+   "symbol": "Bonk"
+  },
+  "priceNative": "67182.7290",
+  "priceUsd": "0.2488",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 2,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 2,
+    "sells": 0
+   },
+   "h24": {
+    "buys": 2,
+    "sells": 0
+   }
+  },
+  "volume": {
+   "h24": 0.56,
+   "h6": 0.56,
+   "h1": 0.56,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": 0.33,
+   "h6": 0.33,
+   "h24": 0.33
+  },
+  "liquidity": {
+   "usd": 344.32,
+   "base": 702.2939,
+   "quote": 45784033
+  },
+  "fdv": 248538325,
+  "marketCap": 248538325,
+  "pairCreatedAt": 1703167204000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/cyzbhr82eqj9kqxmjp1cwzfkcsktftxplfif6zqe1ypg",
+  "pairAddress": "CYzbHR82eQj9kqXMjp1cwzFkcSkTfTxPLFif6zqe1Ypg",
+  "labels": [
+   "DYN"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "E1kvzJNxShvvWTrudokpzuc789vRiDXfXG3duCuY6ooE",
+   "name": "Dither",
+   "symbol": "DITH"
+  },
+  "priceNative": "11.5467",
+  "priceUsd": "0.2509",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h24": {
+    "buys": 0,
+    "sells": 4
+   }
+  },
+  "volume": {
+   "h24": 0.58,
+   "h6": 0,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h24": 6.09
+  },
+  "liquidity": {
+   "usd": 181.86,
+   "base": 356.8131,
+   "quote": 4249.5602
+  },
+  "fdv": 250615391,
+  "marketCap": 250615391,
+  "pairCreatedAt": 1708012349000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/f4etmpcjmyzkhvxkdsddyyaywvcw6ikr3fbn5ul2uqab",
+  "pairAddress": "F4etmPcJMYzkhvXKdSddYYAyWVCw6iKR3Fbn5uL2UqAB",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump",
+   "name": "Fartcoin ",
+   "symbol": "Fartcoin "
+  },
+  "priceNative": "1.4463",
+  "priceUsd": "0.2478",
+  "txns": {
+   "m5": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 2,
+    "sells": 0
+   },
+   "h24": {
+    "buys": 7,
+    "sells": 2
+   }
+  },
+  "volume": {
+   "h24": 1.75,
+   "h6": 0.25,
+   "h1": 0.24,
+   "m5": 0.24
+  },
+  "priceChange": {
+   "m5": -1.99,
+   "h1": -1.99,
+   "h6": 1.02,
+   "h24": -3.24
+  },
+  "liquidity": {
+   "usd": 170.58,
+   "base": 346.6714,
+   "quote": 493.8812
+  },
+  "fdv": 247604724,
+  "marketCap": 247604724,
+  "pairCreatedAt": 1731412071000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/3wcfquhjqv8luqs1mnz8ambu4cd6hygglhjltnfcvbjb",
+  "pairAddress": "3wcFQuhjqv8LuQS1Mnz8aMBU4Cd6HYggLHJLtnfcvBjB",
+  "labels": [
+   "DYN"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+   "name": "Jupiter",
+   "symbol": "JUP"
+  },
+  "priceNative": "0.7097",
+  "priceUsd": "0.2543",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 2
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 2
+   },
+   "h24": {
+    "buys": 0,
+    "sells": 5
+   }
+  },
+  "volume": {
+   "h24": 0.37,
+   "h6": 0.2,
+   "h1": 0.2,
+   "m5": 0
+  },
+  "priceChange": {
+   "h1": 1.58,
+   "h6": 1.58,
+   "h24": 0.97
+  },
+  "liquidity": {
+   "usd": 79.38,
+   "base": 152.3464,
+   "quote": 113.3527
+  },
+  "fdv": 254103053,
+  "marketCap": 254103053,
+  "pairCreatedAt": 1706722059000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/49rnewoscjuhnqxfwth1ajbdgr76mpzy6acsg6htm7bq",
+  "pairAddress": "49RnewoSCJUHnQXfWTh1AjBdgR76mPZy6aCSg6hTM7BQ",
+  "labels": [
+   "CPMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002607",
+  "priceUsd": "0.3158",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 5,
+    "sells": 3
+   },
+   "h24": {
+    "buys": 16,
+    "sells": 17
+   }
+  },
+  "volume": {
+   "h24": 33.1,
+   "h6": 0.06,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 0.19,
+   "h24": -0.22
+  },
+  "liquidity": {
+   "usd": 26.52,
+   "base": 41.9934,
+   "quote": 0.1095
+  },
+  "fdv": 315490324,
+  "marketCap": 315490324,
+  "pairCreatedAt": 1751487150000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "orca",
+  "url": "https://dexscreener.com/solana/14rhx8b2qhh7a3zotarwukmvuszv7vye74jk8igrv1zs",
+  "pairAddress": "14rHX8b2qhh7a3zoTARwukMvuSZV7vYE74Jk8igrv1ZS",
+  "labels": [
+   "wp"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82",
+   "name": "BOOK OF MEME",
+   "symbol": "BOME"
+  },
+  "priceNative": "242.2347",
+  "priceUsd": "0.2517",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 3
+   },
+   "h24": {
+    "buys": 3,
+    "sells": 4
+   }
+  },
+  "volume": {
+   "h24": 0.86,
+   "h6": 0.32,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 1.12,
+   "h24": 2.95
+  },
+  "liquidity": {
+   "usd": 19.21,
+   "base": 35.8126,
+   "quote": 9810.3927
+  },
+  "fdv": 251460386,
+  "marketCap": 251460386,
+  "pairCreatedAt": 1710647555000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/bgkdk4akbrmfb6goz7gapfuysujrspu3k51kc6wfsvsv",
+  "pairAddress": "BGKdk4aKbRMfB6GoZ7gAPFUysuJrspu3k51kc6WFsVsv",
+  "labels": [
+   "CPMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82",
+   "name": "BOOK OF MEME",
+   "symbol": "BOME"
+  },
+  "priceNative": "248.4495",
+  "priceUsd": "0.2582",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 0,
+    "sells": 2
+   },
+   "h24": {
+    "buys": 3,
+    "sells": 4
+   }
+  },
+  "volume": {
+   "h24": 0.71,
+   "h6": 0.17,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 1.71,
+   "h24": 6.31
+  },
+  "liquidity": {
+   "usd": 39.19,
+   "base": 75.9033,
+   "quote": 18858
+  },
+  "fdv": 257911954,
+  "marketCap": 257911954,
+  "pairCreatedAt": 1733574914000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "raydium",
+  "url": "https://dexscreener.com/solana/5knakuadcs9tbabspwxfcn7erhxwreszhtxhghp2p5j7",
+  "pairAddress": "5KNAKuadcs9TbabspwxFCN7ERhxWrEsZhtXhGhP2p5j7",
+  "labels": [
+   "CLMM"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+   "name": "USDT",
+   "symbol": "USDT"
+  },
+  "priceNative": "0.2522",
+  "priceUsd": "0.2522",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 3,
+    "sells": 0
+   },
+   "h24": {
+    "buys": 3,
+    "sells": 3
+   }
+  },
+  "volume": {
+   "h24": 0.26,
+   "h6": 0.1,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 1.92,
+   "h24": -0.59
+  },
+  "liquidity": {
+   "usd": 3.8,
+   "base": 4.9125,
+   "quote": 2.568
+  },
+  "fdv": 251919650,
+  "marketCap": 251919650,
+  "pairCreatedAt": 1733474165000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/4lkfqa3xegzawceasjffqddgndfn19jxy1xwj9m7yyki",
+  "pairAddress": "4LKfQA3xEgZAWCeaSjfFqdDGndFn19JXy1XWj9m7Yyki",
+  "labels": [
+   "DYN"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002076",
+  "priceUsd": "0.2520",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 1,
+    "sells": 1
+   },
+   "h24": {
+    "buys": 2,
+    "sells": 4
+   }
+  },
+  "volume": {
+   "h24": 0.04,
+   "h6": 0.01,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 2.01,
+   "h24": -0.94
+  },
+  "liquidity": {
+   "usd": 2.13,
+   "base": 4.2362,
+   "quote": 0.008768
+  },
+  "fdv": 251727728,
+  "marketCap": 251727728,
+  "pairCreatedAt": 1737757943000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "meteora",
+  "url": "https://dexscreener.com/solana/amw8qpfhmfkhdbwamt4edxqyan2bfml48e222sgwtzbh",
+  "pairAddress": "AMw8QpfhMFkhDBWamt4eDXqYan2bFmL48E222SgwTzBH",
+  "labels": [
+   "DYN"
+  ],
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002070",
+  "priceUsd": "0.2513",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 1,
+    "sells": 1
+   },
+   "h24": {
+    "buys": 1,
+    "sells": 4
+   }
+  },
+  "volume": {
+   "h24": 0.03,
+   "h6": 0.01,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 1.11,
+   "h24": -0.95
+  },
+  "liquidity": {
+   "usd": 2.94,
+   "base": 5.8489,
+   "quote": 0.01214
+  },
+  "fdv": 251035198,
+  "marketCap": 251035198,
+  "pairCreatedAt": 1719389629000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ },
+ {
+  "chainId": "solana",
+  "dexId": "pumpswap",
+  "url": "https://dexscreener.com/solana/hafy6jt5n87adimtr2c1dp5nmdcnnvc3x5fufxqp1tgk",
+  "pairAddress": "HAFy6jt5N87aDiMtr2c1DP5NmdCNnVc3X5fUFxqp1tGK",
+  "baseToken": {
+   "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "name": "dogwifhat",
+   "symbol": "$WIF"
+  },
+  "quoteToken": {
+   "address": "So11111111111111111111111111111111111111112",
+   "name": "Wrapped SOL",
+   "symbol": "SOL"
+  },
+  "priceNative": "0.002076",
+  "priceUsd": "0.2498",
+  "txns": {
+   "m5": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h1": {
+    "buys": 0,
+    "sells": 0
+   },
+   "h6": {
+    "buys": 1,
+    "sells": 0
+   },
+   "h24": {
+    "buys": 1,
+    "sells": 4
+   }
+  },
+  "volume": {
+   "h24": 0.01,
+   "h6": 0,
+   "h1": 0,
+   "m5": 0
+  },
+  "priceChange": {
+   "h6": 0.75,
+   "h24": -2
+  },
+  "liquidity": {
+   "usd": 1.1,
+   "base": 2.2183,
+   "quote": 0.004608
+  },
+  "fdv": 249559378,
+  "marketCap": 249559378,
+  "pairCreatedAt": 1771609629000,
+  "info": {
+   "imageUrl": "https://cdn.dexscreener.com/cms/images/c3788335fe7010d9c32ede4f211118f4a703e0b47fee61cd503c33cc9cde242a?width=800&height=800&quality=95&format=auto",
+   "header": "https://cdn.dexscreener.com/cms/images/1f234bc019b34703f77577917ab371d2c819ddffc609bd584eb02bfe119754c7?width=1500&height=500&quality=95&format=auto",
+   "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm?timestamp=1791306900000",
+   "websites": [
+    {
+     "url": "https://dogwifcoin.org",
+     "label": "Website"
+    }
+   ],
+   "socials": [
+    {
+     "url": "https://twitter.com/dogwifcoin",
+     "type": "twitter"
+    },
+    {
+     "url": "https://t.me/dogwifcoin",
+     "type": "telegram"
+    }
+   ]
+  }
+ }
+]

@@ -118,6 +118,25 @@ fn the_frz_canary_config_passes_arbx_check() {
     assert!(text.contains("dry run simulate true"), "{text}");
 }
 
+/// WP-22: `arbx check` passes on the FT-008 config (FT-006's with `[pool_refresh]` on) and prints the policy; the other
+/// deploy configs pass and print it off
+#[test]
+fn the_ft008_config_passes_arbx_check_with_the_pool_refresh() {
+    let out = Command::new(BIN).env_clear().args(["check", "--config"]).arg(repo("deploy/arbx-ft008-frz.toml")).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{text}{}", String::from_utf8_lossy(&out.stderr));
+    let line = text.lines().find(|l| l.starts_with("pool refresh (WP-22): ")).unwrap_or_else(|| panic!("no pool refresh line: {text}"));
+    assert!(line.contains("on: a refresh 300 s before each segment ends (killed after 240 s: the previous list stays); cap 1500 pools, at most 60 added a refresh"), "{line}");
+    assert!(line.contains("verification RPC [\"public\"] at most 2 req/s (never Haan)"), "{line}");
+    // (its tips and sizes are the owner's, from FT-006's and FT-007's decision rules: not asserted here)
+    for f in ["deploy/arbx-stage0.toml", "deploy/arb.toml", "deploy/arbx-canary-frz.toml", "deploy/arbx-ft006-frz.toml"] {
+        let out = Command::new(BIN).env_clear().args(["check", "--config"]).arg(repo(f)).output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{f}: {text}{}", String::from_utf8_lossy(&out.stderr));
+        assert!(text.contains("pool refresh (WP-22): off"), "{f}: {text}");
+    }
+}
+
 /// Review WP-07 #2 (mutants M3, M10), #5, #8, through the real binary, before anything reaches the network or a key: a
 /// canary run without a test budget is refused for the budget; `--budget-left` above the owner's hard cap is refused; a
 /// canary campaign without a budget is refused for the budget; a canary run is refused when the owner's cumulative

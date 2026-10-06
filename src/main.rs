@@ -20,12 +20,51 @@ use std::sync::Arc;
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), " (git ", env!("ARBX_GIT_COMMIT"), ", dirty ", env!("ARBX_GIT_DIRTY"), ", ", env!("ARBX_PROFILE"), ")"), about)]
 struct Cli { #[command(subcommand)] cmd: Cmd }
 
+/// `arbx pools ...`
+#[derive(Subcommand)]
+enum PoolsCmd {
+    /// WP-22: build the next seed list (src/poolrefresh.rs): the current list, the records of --runs (segment or campaign
+    /// directories), GeckoTerminal's trending and new pools, DexScreener's pools of each candidate token; every pool
+    /// added verified on chain through `[pool_refresh] rpc` (never Haan). Writes --out (venue,pool,source), the report
+    /// (default <out>.report.json) and the inputs file beside it (`--inputs` replays it: the same list). A verification
+    /// that cannot complete writes the previous list unchanged (report `status` kept_previous, with the reason). Sends
+    /// nothing, holds no lock, never touches the gRPC stream; runs at a lower CPU priority (nice 10)
+    Refresh {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        /// the current list (default: the config's `[pools] seed_csv`)
+        #[arg(long)] current: Option<PathBuf>,
+        /// segment or campaign directories whose records are read (oldest first by their start)
+        #[arg(long, num_args = 1..)] runs: Vec<PathBuf>,
+        /// the new list
+        #[arg(long)] out: PathBuf,
+        /// the report (default: <out>.report.json)
+        #[arg(long)] report: Option<PathBuf>,
+        /// the segment the list is for: the `source` tag of the pools it adds (`wp22:<source>:<segment>`)
+        #[arg(long, default_value = "manual")] segment: String,
+        /// replay a refresh from its inputs file: nothing read or fetched, the same list
+        #[arg(long)] inputs: Option<PathBuf>,
+        /// the .env holding the verification RPC's variables (default: `.env` beside the config): only the variables the
+        /// `[pool_refresh] rpc` endpoints name are read from it, never Haan's
+        #[arg(long)] env_file: Option<PathBuf>,
+        /// the campaign's segment length in minutes: a segment counts toward a pool's idle streak only when its triggers
+        /// cover 80% of it (default: each segment's own --minutes)
+        #[arg(long)] segment_min: Option<f64>,
+        /// stop and keep the previous list past this many seconds (default: `[pool_refresh] timeout_s` less 15)
+        #[arg(long)] deadline_s: Option<u64>,
+        /// (fixtures) answer GeckoTerminal and DexScreener from recorded files in this directory
+        #[arg(long, hide = true)] web_dir: Option<PathBuf>,
+    },
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Check a config file and print what it would run
     Check { #[arg(long, default_value = "arb.toml")] config: PathBuf },
-    /// Boot the pools from chain and print the registry (no feeds)
-    Pools { #[arg(long, default_value = "arb.toml")] config: PathBuf },
+    /// Boot the pools from chain and print the registry (no feeds). `arbx pools refresh` builds the next seed list (WP-22)
+    Pools {
+        #[arg(long, default_value = "arb.toml")] config: PathBuf,
+        #[command(subcommand)] sub: Option<PoolsCmd>,
+    },
     /// Check every enabled send path WITHOUT sending a transaction: build it (jito-bundle: connect, authenticate, compare
     /// tip accounts with the block engine's), then time keep-alive round trips. With --raw, also send that signed
     /// transaction through the paths and follow the bundle results (this spends its fee and tips if it lands).
@@ -112,6 +151,10 @@ enum Cmd {
         /// is known): the segment stops (`equity_floor`, exit 20) below it; the highest of the floors applies
         #[arg(long)]
         equity_floor: Option<i64>,
+        /// WP-22: boot on this seed list instead of `[pools] seed_csv` (`arbx campaign` passes each segment's own list, the
+        /// one its pool refresh wrote; meta.json `overrides.pools_csv` records its path and sha256, and `pools` its hash)
+        #[arg(long)]
+        pools_csv: Option<PathBuf>,
     },
     /// WP-07: the campaign supervisor (on the server it replaces deploy/run-w.sh: Cherry gets only this binary, its
     /// config and data). It freezes the binary and the config into <runs>/<name>/, runs segments of --segment-min back to
@@ -423,6 +466,8 @@ fn main() -> Result<()> {
                 println!("  BAM-led slots (FT-006): bid at least {} lamports per CU of the CU limit, within {:.0}% of the edge and the decision's bar; out of reach: {}; Jito-led slots bid the band's tip",
                     bp.min_tip_per_cu, bp.max_share * 100.0, if bp.below_floor == "skip" { "not sent (bam_bid_below_floor)" } else { "bid what the edge allows" });
             } else { println!("  BAM-led slots: the band's tip, as Jito-led ones ([send_policy.bam] off)"); }
+            // WP-22: the pool refresh's policy
+            println!("{}", cfg.pool_refresh.describe());
             // review N3: the crowded list, where this machine has it (the configured path, or the repo's data/ copy)
             if !sp.crowded_pools_file.is_empty() {
                 let p = Path::new(&sp.crowded_pools_file);
@@ -467,7 +512,17 @@ fn main() -> Result<()> {
                 w.dir(&cfg.out_dir).display(), w.grace_s, w.stale_s, w.boot_s, w.status_min, w.poll_s);
             Ok(())
         }
-        Cmd::Pools { config } => {
+        Cmd::Pools { sub: Some(PoolsCmd::Refresh { config, current, runs, out, report, segment, inputs, env_file, deadline_s, web_dir, segment_min }), .. } => {
+            let cfg = config::Config::load(&config)?;
+            // review #8: only the variables the verification endpoints name are read from the .env (never Haan's)
+            let file = env_file.unwrap_or_else(|| config.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).join(".env"));
+            let (_, warn) = arbx::poolrefresh::load_env_names(&file, &cfg.pool_refresh.env_names(&cfg.rpc));
+            if let Some(w) = warn { eprintln!("{w}"); }
+            let o = arbx::poolrefresh::Opts { current, runs, out, report, segment, inputs, deadline_s, web_dir, segment_min, process: None };
+            let r = arbx::poolrefresh::main(&cfg, &o)?;
+            std::process::exit(if r["status"] == "ok" { 0 } else { 3 })
+        }
+        Cmd::Pools { config, sub: None } => {
             load_env(&config);
             let cfg = config::Config::load(&config)?;
             let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
@@ -489,8 +544,8 @@ fn main() -> Result<()> {
                 Ok(())
             })
         }
-        Cmd::Run { config, minutes, name, only, canary, dry_run, live, shadow, budget_left, campaign_dir, env_file, drain_s, equity_floor } => {
-            let a = RunArgs { config, minutes, name, only, canary, dry_run, live, ov: Overrides { shadow, budget_left }, campaign_dir, env_file, drain_s, equity_floor };
+        Cmd::Run { config, minutes, name, only, canary, dry_run, live, shadow, budget_left, campaign_dir, env_file, drain_s, equity_floor, pools_csv } => {
+            let a = RunArgs { config, minutes, name, only, canary, dry_run, live, ov: Overrides { shadow, budget_left, pools_csv }, campaign_dir, env_file, drain_s, equity_floor };
             let sess = control::Session::new();
             control::install_panic_hook(sess.clone());
             // WP-20: a main-thread panic sends a Critical alert after stop.json is written (best effort, bounded)
@@ -988,8 +1043,8 @@ fn rpc_test(config: &Path, calls: usize, concurrency: usize) -> Result<()> {
 
 /// command-line changes to the config for one run, recorded in meta.json `overrides` (WP-02: `--no-record` is gone,
 /// recording cannot be turned off)
-#[derive(Clone, Copy, Default)]
-struct Overrides { shadow: bool, budget_left: Option<u64> }
+#[derive(Clone, Default)]
+struct Overrides { shadow: bool, budget_left: Option<u64>, pools_csv: Option<PathBuf> }
 
 impl Overrides {
     /// apply them; Err when they contradict the other flags
@@ -1002,6 +1057,9 @@ impl Overrides {
         }
         // the supervisor's budget never raises the config's own cap (res-stops: sed used to overwrite it)
         if let Some(b) = self.budget_left { cfg.live.max_failed_fees_lamports = cfg.live.max_failed_fees_lamports.min(b); }
+        // WP-22: the segment's own seed list (the campaign's per-segment file); the config file is not touched, so its hash
+        // stays the campaign's
+        if let Some(p) = &self.pools_csv { cfg.pools.seed_csv = p.display().to_string(); }
         Ok(())
     }
 
@@ -1009,6 +1067,9 @@ impl Overrides {
         let mut v = serde_json::Map::new();
         if self.shadow { v.insert("mode".into(), "shadow".into()); }
         if let Some(b) = self.budget_left { v.insert("budget_left_lamports".into(), b.into()); }
+        if let Some(p) = &self.pools_csv {
+            v.insert("pools_csv".into(), serde_json::json!({ "path": p.display().to_string(), "sha256": std::fs::read(p).ok().map(|b| provenance::sha256_hex(&b)) }));
+        }
         v.into()
     }
 }
@@ -1904,7 +1965,7 @@ mod tests {
         assert_eq!(cfg.mode, "shadow", "ships in shadow: a plain run is a shadow run");
         let mut live = stage0();
         live.mode = "live".into();
-        let ov = Overrides { shadow: true, budget_left: None };
+        let ov = Overrides { shadow: true, ..Default::default() };
         ov.apply(&mut live, false, false).unwrap();
         assert_eq!(live.mode, "shadow");
         assert_eq!(ov.json(), serde_json::json!({ "mode": "shadow" }));
@@ -1983,16 +2044,22 @@ mod tests {
             Overrides { budget_left: Some(1_000_000), ..Default::default() },
             Overrides { budget_left: Some(99_999_999_999), ..Default::default() },
             Overrides { shadow: true, ..Default::default() },
-            Overrides { shadow: true, budget_left: Some(0) },
+            Overrides { shadow: true, budget_left: Some(0), ..Default::default() },
+            // WP-22: a segment's own seed list changes what it boots on, not the config's hash
+            Overrides { pools_csv: Some(path.with_file_name("no-such-list.csv")), ..Default::default() },
         ];
         for ov in all {
-            let rc = run_config(&args(&path, ov, false, false, None)).unwrap();
+            let rc = run_config(&args(&path, ov.clone(), false, false, None)).unwrap();
             assert_eq!(rc.config_json["normalized_sha256"], want, "{:?}", ov.json());
             assert_eq!(rc.config_json["file_sha256"], provenance::sha256_hex(&raw));
             assert_eq!((rc.config_json["mode"].as_str(), rc.config_json["effective_mode"].as_str()), (Some("shadow"), Some("shadow")));
             assert_eq!(rc.config_cap, 25_000_000, "the file's cap");
             // the overrides did apply to what the run uses
             if let Some(b) = ov.budget_left { assert_eq!(rc.cfg.live.max_failed_fees_lamports, b.min(25_000_000)); }
+            if let Some(p) = &ov.pools_csv {
+                assert_eq!(rc.cfg.pools.seed_csv, p.display().to_string(), "WP-22: the segment boots on its own list");
+                assert_eq!(ov.json()["pools_csv"]["path"].as_str(), Some(p.display().to_string().as_str()), "recorded in meta.json overrides");
+            }
         }
         // a live config under --shadow: the file's mode is kept, the effective one is shadow
         let d = std::env::temp_dir().join(format!("arbx-runcfg-{}-{}", std::process::id(), now_ns()));
