@@ -1520,6 +1520,13 @@ A decision memo with each experiment's go or no-go (X1-X9 and the margin arm), p
 | OD-9 | **SLO action** (F32) | `log` (Stage 0 default) or `shadow` with automatic recovery | Log | After a week of SLO data |
 | OD-10 | Existing R §6 decisions | `auto_unwrap`, `allow_uva_create` (creating the accumulator expenses 1,346,200), capital, Jito key or limit, break-even B, and a daily copy-off of finished segments | Off / not created | As in R §6 |
 
+
+**Recorded owner decisions:**
+- **OD-1, waiver for Stage 0 (owner, 2026-10-06):**
+  - "We don't have RPC options right now. Haan is all we have as is. We gotta make do for now. Before Stage 1 I'll try to manage another."
+  - The Stage 0 exit's exec-coverage gate (≥ 99%, F1) is WAIVED for Stage 0. Haan's plan allows one transaction filter (gRPC probe, FT-000), so coverage of the non-PumpSwap venues stays partial; the chain-fetch backfill covers what the RPC budget allows.
+  - Stage 1 needs the second provider or bigger plan: discovery (WP-14/X8), the X1 census and full exec coverage. The owner will try to arrange it before Stage 1.
+- **Trade-success criteria and the $500 trigger (owner, 2026-10-06):** see PLAN-ADDENDUM, "Owner decision (2026-10-06)".
 ---
 
 ## Appendix A. Measurement requirement → WP → stream

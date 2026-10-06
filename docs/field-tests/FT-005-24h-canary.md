@@ -21,7 +21,7 @@
 - provenance;
 - deterministic reports.
 
-**Exec coverage ≥ 99%** cannot be met on the current Haan plan (one transaction filter). It is met only with more capacity (OD-1) or an explicit owner waiver written into PLAN §9.
+**Exec coverage ≥ 99%** is **waived for Stage 0** by the owner (2026-10-06, PLAN §9 OD-1): Haan is the only provider for now, and its plan allows one transaction filter. Coverage is still measured and reported. A second provider is to be arranged before Stage 1.
 
 ### B. Trade-success criteria (agreed by the owner, 2026-10-06)
 
