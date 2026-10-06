@@ -66,10 +66,16 @@ fn the_wp21_seed_list_extends_the_2026_10_06_list() {
     for v in ["RayCLMM", "Whirlpool"] { assert!(added.iter().filter(|r| r[0] == v).count() >= 50, "{v}"); }
 }
 
-/// The other maintained configs keep the WP-21 venues off (`[pools] rayclmm` / `whirlpool` default "off")
+/// Every other deploy config passes `arbx check` and keeps the WP-21 venues off (`[pools] rayclmm` / `whirlpool` default
+/// "off")
 #[test]
 fn the_other_configs_keep_the_wp21_venues_off() {
-    for f in ["deploy/arbx-stage0.toml", "deploy/arbx-canary-frz.toml", "deploy/arbx-ft006-frz.toml", "deploy/arb.toml"] {
+    let mut files: Vec<String> = std::fs::read_dir(repo("deploy")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".toml") && n != "arbx-wp21-shadow.toml").map(|n| format!("deploy/{n}")).collect();
+    files.sort();
+    assert!(files.len() >= 4, "{files:?}");
+    for f in &files {
+        let f = f.as_str();
         let text = check(f);
         let venues = text.lines().find(|l| l.starts_with("venues (WP-21): ")).unwrap_or_else(|| panic!("{f}: no venues line"));
         assert!(venues.contains("Raydium CLMM off (") && venues.contains("Orca Whirlpool off ("), "{f}: {venues}");
