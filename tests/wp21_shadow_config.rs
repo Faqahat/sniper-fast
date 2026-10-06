@@ -81,3 +81,35 @@ fn the_other_configs_keep_the_wp21_venues_off() {
         assert!(venues.contains("Raydium CLMM off (") && venues.contains("Orca Whirlpool off ("), "{f}: {venues}");
     }
 }
+
+/// Review F1 (round 2's gap): the CLMM venues' pools come from the seed list only. A registry.json (with `registry_all`)
+/// naming a Raydium CLMM pool (`RayCLMM`, a venue `Venue::parse` reads), an Orca one (`Whirl`, which it does not) and a
+/// DLMM one gives the DLMM one as a candidate and neither CLMM one, whatever the venues' switches; the seed list's Raydium
+/// CLMM and Whirlpool rows are candidates when their venue is on
+#[test]
+fn registry_rows_of_the_clmm_venues_are_never_candidates() {
+    let d = std::env::temp_dir().join(format!("arbx-wp21-f1-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir_all(&d).unwrap();
+    let key = |n: u8| bs58::encode([n; 32]).into_string();
+    std::fs::write(d.join("seed.csv"), format!("venue,pool,source\nDLMM,{},seed\nRayCLMM,{},wp21:seed-token\nWhirlpool,{},wp21:seed-token\n", key(1), key(2), key(3))).unwrap();
+    let wsol = "So11111111111111111111111111111111111111112";
+    std::fs::write(d.join("registry.json"), serde_json::json!([
+        { "venue": "DLMM", "pool": key(11), "t0": key(50), "t1": wsol },
+        { "venue": "RayCLMM", "pool": key(12), "t0": key(50), "t1": wsol },
+        { "venue": "Whirl", "pool": key(13), "t0": key(50), "t1": wsol },
+        { "venue": "Whirlpool", "pool": key(14), "t0": key(50), "t1": wsol }]).to_string()).unwrap();
+    for mode in ["off", "quote", "send"] {
+        let cfg = arbx::config::Config::parse(&format!("config_version = 2\nout_dir = \"/tmp/x\"\nwallet = \"w\"\n[pools]\nseed_csv = \"{}\"\nregistry_json = \"{}\"\n\
+            registry_all = true\nrayclmm = \"{mode}\"\nwhirlpool = \"{mode}\"\n[rpc]\n[state]\nurl = \"http://localhost\"\n", d.join("seed.csv").display(),
+            d.join("registry.json").display())).unwrap();
+        let (cands, seeds, ours) = arbx::pools::candidates(&cfg.pools).unwrap();
+        let mut got: Vec<(String, String)> = cands.iter().map(|(v, p)| (arbx::replay::venue_name(*v).to_string(), bs58::encode(p).into_string())).collect();
+        got.sort();
+        let mut want = vec![("DLMM".to_string(), key(1)), ("DLMM".to_string(), key(11))];
+        if mode != "off" { want.extend([("RayCLMM".to_string(), key(2)), ("Whirlpool".to_string(), key(3))]); }
+        want.sort();
+        assert_eq!(got, want, "{mode}");
+        assert_eq!((seeds.len(), ours.len()), (if mode == "off" { 1 } else { 3 }, 1), "{mode}: only the DLMM registry row is ours");
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}

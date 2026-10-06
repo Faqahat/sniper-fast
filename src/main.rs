@@ -1531,11 +1531,15 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // for this segment (fail closed) with a WARNING. meta.json `clmm_deploy` records the reads at the start and at the end
     let clmm_on: Vec<venues::Venue> = [venues::Venue::RayClmm, venues::Venue::Whirlpool].into_iter().filter(|v| cfg.pools.venue_on(*v)).collect();
     let clmm_start = if clmm_on.is_empty() { vec![] } else { rts.bg.block_on(clmm_deploy_read(&rpc, &clmm_on)) };
+    // (review R2-4: the venues switched off here are meta.json `overrides.clmm_switched_off` too)
+    let mut clmm_off: Vec<Value> = Vec::new();
     for (v, e) in clmm_on.iter().zip(&clmm_start) {
         if e["ok"] == json!(true) { say(&format!("{}: deployed at slot {} as proven: priced ({})", e["venue"].as_str().unwrap_or("?"), e["last_deploy_slot"], cfg.pools.venue_mode(*v))); continue; }
         say(&format!("WARNING: {}: programdata last deployed at {} (proven on {}{}): the venue is OFF for this segment (fail closed: its port was not proven on this binary)",
             e["venue"].as_str().unwrap_or("?"), e["last_deploy_slot"], e["proven_deploy_slot"], e["error"].as_str().map(|w| format!("; {w}")).unwrap_or_default()));
+        let was = cfg.pools.venue_mode(*v).to_string();
         if *v == venues::Venue::RayClmm { cfg.pools.rayclmm = "off".into() } else { cfg.pools.whirlpool = "off".into() }
+        clmm_off.push(json!({ "venue": e["venue"], "was": was, "why": "deploy_slot", "last_deploy_slot": e["last_deploy_slot"], "error": e["error"] }));
     }
     // pools, then a first snapshot of every followed account
     let (reg, store, snapshot_slot) = rts.bg.block_on(async {
@@ -1790,7 +1794,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     // (WP-09: pools.json, its sha256 and registry-run.json beside it)
     let mut pools_meta = replay::meta_pools(provenance::pools_json(&reg, &cfg), &pools_sha256);
     pools_meta["dropped"] = pools::drops_json(&pool_drops);
-    let meta = json!({
+    let mut meta = json!({
         "schema": provenance::META_SCHEMA,
         "run": run_json, "build": provenance::build_json(), "config": config_json,
         "programs": programs, "programs_pending": true,
@@ -1822,6 +1826,8 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         // PLAN-ADDENDUM WP-21 (review F5): the CLMM venues switched on, their deploy slots read at the start (`end` at the end)
         "clmm_deploy": { "start": clmm_start, "end": null },
     });
+    // review R2-4: a venue the deploy check switched off is a change to the config this run made, as the command line's are
+    if !clmm_off.is_empty() { meta["overrides"]["clmm_switched_off"] = json!(clmm_off); }
     control::write_atomic(&dir.join("meta.json"), serde_json::to_string_pretty(&meta)?.as_bytes())?;
     // WP-20: the segment start message (mode, build, config hash, wallet, budget)
     alerter.segment_start(alerts::SegmentStart { segment: name.clone(), mode: mode.as_str().into(), gate_mode: sess.gate.mode().as_str().into(),
@@ -2240,7 +2246,8 @@ mod tests {
         let body = &src[src.find("\nfn run(a: &RunArgs").expect("run")..];
         let body = &body[..body.find("\n#[cfg(test)]").unwrap_or(body.len())];
         let at = |s: &str| body.find(s).unwrap_or_else(|| panic!("{s} not in run()"));
-        for w in ["clmm_deploy_read(&rpc, &clmm_on)", "pools::candidates(&cfg.pools)", "\"clmm_deploy\": { \"start\": clmm_start", "eng.stop_sequence(&rx",
+        for w in ["clmm_deploy_read(&rpc, &clmm_on)", "pools::candidates(&cfg.pools)", "\"clmm_deploy\": { \"start\": clmm_start",
+            "meta[\"overrides\"][\"clmm_switched_off\"] = json!(clmm_off)", "write_atomic(&dir.join(\"meta.json\")", "eng.stop_sequence(&rx",
             "m[\"clmm_deploy\"][\"end\"] = json!(end)"].windows(2) {
             assert!(at(w[0]) < at(w[1]), "{} must come before {}", w[0], w[1]);
         }

@@ -546,9 +546,15 @@ pub fn read_registry(path: &str) -> Result<Vec<RegPool>> {
 
 /// The registry pools the group rule may count: the boot loads registry.json's pools only with `[pools] registry_all`
 /// (or on seed pairs named by mint columns, which the lists the refresh writes do not have), so without it none count
-/// (review #9)
+/// (review #9); and only on the venues the boot reads from the registry, as `pools::candidates` (PLAN-ADDENDUM WP-21
+/// review R2-2: never Raydium CLMM or Orca Whirlpool rows, whose pools come from the seed list only, nor a venue switched
+/// off)
 pub fn registry_for(cfg: &Config) -> Vec<RegPool> {
-    match (&cfg.pools.registry_json, cfg.pools.registry_all) { (Some(r), true) => read_registry(r).unwrap_or_default(), _ => vec![] }
+    match (&cfg.pools.registry_json, cfg.pools.registry_all) {
+        (Some(r), true) => read_registry(r).unwrap_or_default().into_iter()
+            .filter(|p| Venue::parse(&p.venue).is_some_and(|v| !v.is_clmm() && cfg.pools.venue_on(v))).collect(),
+        _ => vec![],
+    }
 }
 
 /// An account as saved in the inputs file (base64 data)
@@ -699,7 +705,9 @@ pub fn plan(p: &PoolRefreshCfg, inp: &Inputs, segment: &str) -> std::result::Res
     let mut reg_alive: HashMap<(Pk, Pk), BTreeSet<Pk>> = HashMap::new();
     for r in &inp.registry {
         let (Some(v), Some(pool), Some(t0), Some(t1)) = (Venue::parse(&r.venue), pk_opt(&r.pool), pk_opt(&r.t0), pk_opt(&r.t1)) else { continue };
-        if listed_set.contains(&pool) { continue; }
+        // (WP-21 review R2-2: the boot never loads the registry's CLMM rows: an inputs file saved before `registry_for`
+        // left them out does not count them either)
+        if v.is_clmm() || listed_set.contains(&pool) { continue; }
         // alive: fetched, the venue's, decodes, the pair the registry names (not fetched: not counted, the safe side)
         let alive = accts.get(&pool).and_then(|a| a.as_ref()).is_some_and(|a| a.owner == v.program()
             && pools::meta_of(v, &pool, &a.data).is_some_and(|m| pair_key(&m.t0, &m.t1) == pair_key(&t0, &t1)));

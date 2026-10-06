@@ -201,16 +201,13 @@ pub fn follow_starts(m: &PoolMeta, pool: &[u8], ext: Option<&[u8]>) -> Vec<i32> 
 }
 
 /// The tick arrays a quote needs near the price, by start index (review F2's hysteresis: the follow set of a pool is
-/// re-derived only once one of them is not in it): Raydium the current array and the next [`RAY_NEED_EACH_WAY`]
-/// initialized arrays each way, Orca the 3 arrays of a swap's sequence each way (`whirl_leg_starts`)
+/// re-derived only once one of them is not in it): Raydium the [`RAY_NEED_EACH_WAY`] nearest initialized arrays each way
+/// from the current one (it among them when it is initialized: a swap never reads an uninitialized one, so the price
+/// crossing empty arrays moves nothing; review round 2), Orca the 3 arrays of a swap's sequence each way
+/// (`whirl_leg_starts`)
 pub fn need_starts(m: &PoolMeta, pool: &[u8], ext: Option<&[u8]>) -> Vec<i32> {
     match m.venue {
-        Venue::RayClmm => {
-            let Some(cur) = current_array(Venue::RayClmm, pool) else { return vec![] };
-            let mut v = vec![cur];
-            for zfo in [true, false] { v.extend(ray_initialized_arrays(pool, ext, zfo, RAY_NEED_EACH_WAY)); }
-            v
-        }
+        Venue::RayClmm => [true, false].iter().flat_map(|z| ray_initialized_arrays(pool, ext, *z, RAY_NEED_EACH_WAY)).collect(),
         Venue::Whirlpool => [true, false].iter().filter_map(|z| whirl_leg_starts(pool, *z)).flatten().collect(),
         _ => vec![],
     }
@@ -303,6 +300,21 @@ mod tests {
         p[ray::off::TICK_CURRENT..ray::off::TICK_CURRENT + 4].copy_from_slice(&tick.to_le_bytes());
         for &b in bits { let o = ray::off::BITMAP + 8 * (b / 64); let w = u64::from_le_bytes(p[o..o + 8].try_into().unwrap()) | 1 << (b % 64); p[o..o + 8].copy_from_slice(&w.to_le_bytes()); }
         p
+    }
+
+    /// Review round 2 (F2's hysteresis): Raydium's arrays a quote needs are the nearest initialized ones each way, so the
+    /// price crossing uninitialized arrays between them moves nothing; the current array is among them once initialized
+    #[test]
+    fn raydium_needs_its_initialized_arrays_only() {
+        let m = PoolMeta { venue: Venue::RayClmm, pool: [1; 32], t0: [2; 32], t1: [3; 32], vault0: [4; 32], vault1: [5; 32], t0_prog: [0; 32], t1_prog: [0; 32],
+            extra: vec![], flag: false };
+        // spacing 10 (600 ticks an array): arrays at -1,200, 0 (bits 510, 512) and +3,000 / +6,000 (bits 517, 522) initialized
+        for tick in [1_250, 1_850, 2_450] {
+            let p = ray_pool(10, tick, &[510, 512, 517, 522]);
+            assert_eq!(need_starts(&m, &p, None), vec![0, -1_200, 3_000, 6_000], "tick {tick}: the current array ({}) is not initialized", tick / 600 * 600);
+        }
+        let p = ray_pool(10, 3_100, &[510, 512, 517, 522]);
+        assert_eq!(need_starts(&m, &p, None), vec![3_000, 0, -1_200, 3_000, 6_000], "the current array initialized: both ways start at it");
     }
 
     /// review F5: a venue's deploy check passes only on the deploy slot its port was proven on; another slot, a header

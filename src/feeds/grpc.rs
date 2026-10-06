@@ -534,6 +534,19 @@ pub fn state_request(accounts: Vec<String>, subs: StateSubs) -> SubscribeRequest
     }
 }
 
+/// The state stream's account list as its request names it (base58) from the engine's keys, each key encoded once:
+/// `cache` holds the strings of the previous lists (the sender task keeps it across replacements), so a re-follow of a
+/// few arrays encodes those only (PLAN-ADDENDUM WP-21 review R2-3: 12,000 keys took 8.8 ms to encode from scratch). It
+/// keeps only the listed keys once it holds twice as many. The caller runs it on a blocking thread
+pub fn encode_watch(keys: Vec<crate::tx::Pk>, mut cache: HashMap<crate::tx::Pk, String>) -> (Vec<String>, HashMap<crate::tx::Pk, String>) {
+    let out: Vec<String> = keys.iter().map(|k| cache.entry(*k).or_insert_with(|| crate::tx::b58(k)).clone()).collect();
+    if cache.len() > 2 * keys.len() + 1_024 {
+        let listed: std::collections::HashSet<&crate::tx::Pk> = keys.iter().collect();
+        cache.retain(|k, _| listed.contains(k));
+    }
+    (out, cache)
+}
+
 /// Pool-state stream: account updates plus slot updates (and block meta when on), at processed commitment. The account
 /// list comes from a watch channel: whenever the engine changes it (DLMM bin arrays following the active bin), a full
 /// replacement request is sent on the same stream. `c`: the stream's counters (provider lag)
@@ -541,11 +554,12 @@ pub async fn accounts_once(url: &str, token: Option<&str>, mut list: tokio::sync
     sink: &(dyn Fn(Item) -> bool + Send + Sync)) -> Result<()> {
     let mut grpc = tonic::client::Grpc::new(channel(url).await?).max_decoding_message_size(256 * 1024 * 1024);
     grpc.ready().await.context("state service not ready")?;
-    // the keys are encoded here, on the stream's task (review F2: never on the engine thread)
-    let request = move |accounts: Vec<crate::tx::Pk>| state_request(accounts.iter().map(crate::tx::b58).collect(), subs);
+    // the keys are encoded on a blocking thread, each once (`encode_watch`): never on the engine thread (WP-21 review F2)
+    // nor on this hot runtime's workers (review R2-3)
     let (out_tx, out_rx) = tokio::sync::mpsc::channel::<SubscribeRequest>(16);
     let first = list.borrow_and_update().clone();
-    out_tx.send(request(first)).await.ok();
+    let (strings, mut cache) = tokio::task::spawn_blocking(move || encode_watch(first, HashMap::new())).await.context("encoding the watch list")?;
+    out_tx.send(state_request(strings, subs)).await.ok();
     let sender = tokio::spawn(async move {
         let mut ping = tokio::time::interval(Duration::from_secs(10));
         ping.tick().await;
@@ -555,7 +569,10 @@ pub async fn accounts_once(url: &str, token: Option<&str>, mut list: tokio::sync
                 ch = list.changed() => {
                     if ch.is_err() { break; }
                     let l: Vec<crate::tx::Pk> = list.borrow_and_update().clone();
-                    if out_tx.send(request(l)).await.is_err() { break; }
+                    let c = std::mem::take(&mut cache);
+                    let Ok((strings, c)) = tokio::task::spawn_blocking(move || encode_watch(l, c)).await else { break };
+                    cache = c;
+                    if out_tx.send(state_request(strings, subs)).await.is_err() { break; }
                 }
             }
         }
@@ -588,6 +605,31 @@ mod tests {
     use super::*;
     use crate::feeds::fixture::{self, first_field, k, sig, Proto};
     use prost::Message as _;
+
+    /// PLAN-ADDENDUM WP-21 review R2-3: the watch list's encoding, off the hot runtime and each key once. 12,000 keys from
+    /// scratch (what a replacement cost a hot worker before), then the same list with 10 arrays replaced (a re-follow) on
+    /// the warm cache: the strings are base58's, in the list's order
+    #[test]
+    fn the_watch_list_is_encoded_once_per_key() {
+        let key = |i: u32| { let mut k = [0u8; 32]; k[..4].copy_from_slice(&i.to_le_bytes()); k[31] = 7; k };
+        let keys: Vec<crate::tx::Pk> = (0..12_000).map(key).collect();
+        let t = std::time::Instant::now();
+        let (cold, cache) = encode_watch(keys.clone(), HashMap::new());
+        let cold_us = t.elapsed().as_nanos() as f64 / 1e3;
+        let mut next = keys.clone();
+        for (j, k) in next.iter_mut().rev().take(10).enumerate() { *k = key(1_000_000 + j as u32); }
+        let t = std::time::Instant::now();
+        let (warm, cache) = encode_watch(next.clone(), cache);
+        let warm_us = t.elapsed().as_nanos() as f64 / 1e3;
+        eprintln!("watch list of 12,000 keys: encoded from scratch {cold_us:.0} µs (the hot worker's cost per replacement before); a re-follow of 10 \
+            arrays on the warm cache {warm_us:.0} µs, on a blocking thread");
+        assert_eq!(cold, keys.iter().map(crate::tx::b58).collect::<Vec<_>>());
+        assert_eq!(warm, next.iter().map(crate::tx::b58).collect::<Vec<_>>());
+        assert_eq!(cache.len(), 12_010, "the replaced keys stay until the cache doubles");
+        // a list much smaller than the cache prunes it to the listed keys
+        let (_, cache) = encode_watch(next[..100].to_vec(), cache);
+        assert_eq!(cache.len(), 100);
+    }
 
     /// PLAN WP-03 item 4: every field of the hand-written structs this module reads or sends has the number the vendored
     /// upstream text (testdata/proto/) gives it. Each struct is encoded with one field set and its first tag compared

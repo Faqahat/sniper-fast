@@ -2891,7 +2891,11 @@ impl Engine {
         {
             let pending = |a: &Pk| self.tracker.is_pending(a);
             let contested = |s: u64| self.forks.is_contested(s);
-            let unverified = |a: &Pk| !self.unverified.is_empty() && self.unverified.contains(a);
+            // review R2-1 (F6): a tick array read missing once and not yet confirmed (held empty) is left out of the quote as an
+            // unverified one, as `skip_arrays` leaves it out of the build: the route is `unquotable_clmm_array` until the second
+            // read, never priced as if the array were zeroed
+            let unverified = |a: &Pk| (!self.unverified.is_empty() && self.unverified.contains(a))
+                || (!self.clmm_provisional.is_empty() && self.clmm_provisional.contains_key(a) && self.store.get(a).is_some_and(|x| x.data.is_empty()));
             let rc = ReadyCtx { pending: &pending, contested: &contested, unverified: &unverified, max_skew: self.knobs.max_part_skew_slots };
             let mut views: HashMap<usize, Result<PoolView, NotReady>> = HashMap::default();
             for &p in std::iter::once(&i).chain(others.iter()) { views.entry(p).or_insert_with(|| self.store.pool_view(&self.reg.pools[p], &rc)); }
@@ -4971,6 +4975,95 @@ mod tests {
             e.follow_dlmm();
             assert!(e.offline_reads.is_empty());
         }
+    }
+
+    /// Review R2-1 (F6 where routes are priced): an evaluation leaves a provisional tick array out of the quote too. A
+    /// Whirlpool snapshot whose follow set names an array that does not exist, on the side one direction's swap needs, and an
+    /// AMM v4 pool of its token at its price: after the first read finds the array missing, the routes whose Whirlpool leg
+    /// needs it are `unquotable_clmm_array` (never priced as if the array were zeroed); once the second read confirms it,
+    /// they are priced
+    #[test]
+    fn a_provisional_tick_array_keeps_its_routes_unquotable() {
+        use crate::quote::clmm_tests::{fixtures, meta as clmm_meta};
+        let mut fx: Vec<_> = fixtures().values().filter(|f| f.venue == Venue::Whirlpool).collect();
+        fx.sort_by_key(|f| f.pool);
+        // a snapshot whose followed arrays that do not exist include one a swap's sequence needs
+        let (f, w) = fx.into_iter().find_map(|f| {
+            let m = clmm_meta(f);
+            let get = |k: &Pk| f.accts.get(k).map(|a| a.1.clone());
+            let absent: Vec<i64> = pools::clmm_arrays(&m, &get, &[]).into_iter().filter(|(_, k)| f.absent.contains(k)).map(|x| x.0).collect();
+            let pool = &f.accts[&f.pool].1;
+            let needs = [true, false].iter().any(|z| crate::venues::clmm::whirl_leg_starts(pool, *z).is_some_and(|s| s.iter().any(|st| absent.contains(&(*st as i64)))));
+            needs.then_some((f, m))
+        }).expect("a Whirlpool fixture whose swap sequence names an array that does not exist");
+        let mint = if w.t0 == *WSOL { w.t1 } else { w.t0 };
+        let d = &f.accts[&f.pool].1;
+        let sp = crate::venues::u128_at(d, 65).unwrap() as f64 / 18_446_744_073_709_551_616.0;
+        let mint_per_wsol = if w.t0 == *WSOL { sp * sp } else { 1.0 / (sp * sp) };
+        let mut a = meta_k(1);
+        a.t0 = mint;
+        let mut reg = Registry { pools: vec![w.clone(), a.clone()], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+        reg.by_pool.insert(w.pool, 0);
+        reg.by_pool.insert(a.pool, 1);
+        reg.pairs.insert(pair_key(&mint, &WSOL), vec![0, 1]);
+        let mut store = Store::default();
+        for (k, (_, d)) in &f.accts { store.update(*k, Arc::from(d.as_slice()), 10, 1, None); }
+        let coin = (1_000.0 * SOL as f64 * mint_per_wsol).clamp(1e6, 1e18) as u64;
+        store.update(a.pool, ammv4_pool(), 10, 1, None);
+        store.update(a.vault0, vault(coin), 10, 1, None);
+        store.update(a.vault1, vault(1_000 * SOL), 10, 1, None);
+        store.update(*CLOCK_SYSVAR, clock_data(11, f.unix), 11, 1, None);
+        let dir = std::env::temp_dir().join(format!("arbx-engine-provisional-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rec = rec::start(rec::Opts { dir: dir.clone(), run: "test".into(), producer: "test".into(), cfg: Default::default(), feeds: vec![], monitor: false, echo: None }).unwrap();
+        let mut e = Engine::new_offline(Arc::new(reg), store, StrategyCfg { state_triggers: true, min_profit_lamports: 1, ..StrategyCfg::default() });
+        e.set_rec(rec.clone());
+        e.tier_a_complete = true;
+        let mut t = T0;
+        slot_ev(&mut e, 11, 0, Some(10), t);
+        // the node's answers: the snapshot's accounts, the ones it lists absent missing
+        let answer = |e: &mut Engine, slot: u64, t: u64| {
+            for (i, r) in std::mem::take(&mut e.offline_reads).iter().enumerate() {
+                let te = t + i as u64 * 10_000;
+                let mut missing = Vec::new();
+                for k in &r.keys {
+                    match f.accts.get(k) {
+                        Some(x) => e.step(Event::Account { slot, pubkey: *k, owner: x.0, lamports: 1, data: Arc::from(x.1.as_slice()), t: te, txn: None, write_version: 0,
+                            is_startup: false, src: r.what.src(), aseq: 0, bank_id: None }, te + 100, &mut nop()),
+                        None => missing.push(b58(k)),
+                    }
+                }
+                e.step(Event::Input { kind: InputKind::Fetch, data: Arc::new(json!({ "job": r.job, "chunk": r.chunk, "what": r.what.as_str(), "attempt": r.attempt,
+                    "ok": true, "slot": slot, "n": r.keys.len(), "missing": missing })) }, te + 5_000, &mut nop());
+            }
+        };
+        // an AMM pool's write evaluates the pair: (routes through the Whirlpool unquotable for want of the array, priced)
+        let mut k = 0u64;
+        let mut evaluate = |e: &mut Engine, t: &mut u64| -> (u64, u64) {
+            let (u0, p0) = (e.counter("reject_unquotable_clmm_array"), e.counter("route_priced"));
+            k += 1;
+            *t += 4 * MS;
+            let mut s = [0u8; 64];
+            s[..8].copy_from_slice(&k.to_le_bytes());
+            e.step(Event::Account { slot: 11, pubkey: a.vault1, owner: [0; 32], lamports: 0, data: vault((1_000 + k) * SOL), t: *t, txn: Some(s), write_version: 100 + k,
+                is_startup: false, src: 0, aseq: 0, bank_id: None }, *t + 10_000, &mut nop());
+            e.timers(*t + 3_500_000, &mut nop());
+            (e.counter("reject_unquotable_clmm_array") - u0, e.counter("route_priced") - p0)
+        };
+        e.follow_dlmm();
+        answer(&mut e, 11, t);
+        assert!(!e.clmm_provisional.is_empty(), "read missing once: provisional");
+        let (unq, priced) = evaluate(&mut e, &mut t);
+        assert!(unq >= 1, "a route whose Whirlpool leg needs the provisional array is unquotable_clmm_array ({unq} unquotable, {priced} priced)");
+        // the next drift tick reads it again: missing again, confirmed; the same routes are priced
+        e.follow_dlmm();
+        answer(&mut e, 12, t + MS);
+        assert!(e.clmm_provisional.is_empty() && e.counter("clmm_absent_confirmed") >= 1);
+        let (unq2, priced2) = evaluate(&mut e, &mut t);
+        assert_eq!(unq2, 0, "confirmed absent: priced as not existing");
+        assert_eq!(priced2, priced + unq, "every route priced");
+        rec.close();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// PLAN-ADDENDUM WP-21 (review F2): the engine benchmark's CLMM shape. The 20 Raydium CLMM and Orca Whirlpool pools of
