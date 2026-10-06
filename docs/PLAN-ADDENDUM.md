@@ -358,3 +358,48 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
 - Expected value: broad coverage of long-tail venues. The cost is quote latency (tens to hundreds of ms), so it suits slower long-tail gaps, not contested ones.
 - **Gate:** Phase A measured first. Phase B's design and the latency budget go to the owner before any upgrade.
 - **Owner, 2026-10-06 (later still):** FT-005 was shortened to 3 h. **Stage 0 closes after FT-007**, with the exit criteria measured over the canary series FT-005 + FT-006 (tips + BAM fix) + FT-007 (smaller sizes), about 9 h in total.
+
+## WP-22: Automatic pool refresh (owner request, 2026-10-06: "start wp22, test it before closing stage 0")
+
+**Why:** our pool list is refreshed by hand between tests, so tokens that turn active mid-test are missed.
+- GMGN trending check: BINDER traded in 3 pools, including a DAMM v2 pool doing ~$1.3M volume/h. None were in our list (docs/research/gmgn-trending-2026-10-06.md).
+- Venue census: on our own venues, rivals mostly trade pools we don't watch. The watched share is 17% on DAMM v2, 21% on PumpSwap, 36% on CPMM and 48% on AMM v4 (docs/research/venue-census.md).
+
+**What:** `arbx pools refresh` builds the next pool list. The campaign runs it during each segment, so the next segment boots on a fresh list.
+- **Sources:**
+  1. **Our own records:**
+     - activity of rival arbitrage on our venues, including pools we don't watch (rivals.jsonl / classify);
+     - our own triggers, decisions and opportunities per pool.
+  2. **GeckoTerminal** (free, no key): `trending_pools` (5m / 1h / 6h) and `new_pools`.
+  3. **DexScreener** `token-pairs`: every pool of each candidate token.
+  - GMGN is skipped: its API key needs a $100 balance.
+- **Rules:**
+  - Venues: only those we trade. Quote: WSOL or USDC.
+  - A token needs ≥ 2 verified pools on our venues with the same quote, counting pools already listed.
+  - **Every pool is verified on chain:**
+    - the account exists;
+    - its owner is the venue program;
+    - it decodes with the engine's own decoder;
+    - its mints match;
+    - its liquidity is at least the minimum;
+    - the existing Token-2022 and refusal rules apply.
+  - Keep active pools, drop dead or idle ones, and cap the size (default: today's 1,500).
+  - Priority: active listed pools first, then new pools from our records, then new pools from trending, then idle listed pools.
+  - Output: a deterministic CSV plus a JSON report of added, dropped and kept pools, with reasons, sources and timings.
+- **Fail-safe:** if verification fails, the previous list is kept with the reason recorded. A segment never boots on an unverified list.
+- **Campaign:**
+  - The pool list becomes a per-segment artifact in the campaign directory, hashed in campaign.json and the segment's meta.
+  - It is the only data file allowed to change between segments. Every other file is still frozen and checked (review WP-07 #16).
+  - The refresh never uses Haan gRPC (one process only).
+  - Its RPC calls stay out of the running segment's Haan budget.
+  - Each refresh posts one Telegram notice.
+- **Replay:** a segment's input is its own pool list.
+- **Acceptance:**
+  - unit and fixture tests (recorded API responses, no network);
+  - a pre-flight `arbx pools refresh` on Cherry against FT-006/FT-007 records, checked before FT-008;
+  - FT-008.
+- **Later, not in FT-008:**
+  - hot-adding pools mid-segment;
+  - the CLMM and Whirlpool venues once WP-21A merges;
+  - new-pool events from our own shred feed.
+- **Owner, 2026-10-06 (evening):** **Stage 0 closes after FT-008** (WP-22's test), no longer after FT-007. The exit criteria are measured over the canary series FT-005 + FT-006 + FT-007 + FT-008 (about 12 h).

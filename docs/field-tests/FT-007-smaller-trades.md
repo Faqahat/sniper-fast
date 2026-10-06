@@ -20,6 +20,8 @@ Same as FT-006: bundle-only, 0 failed-landing fees, every landed trade nets > 0,
 **Caveat:** time-separated, as FT-006.
 
 ## Stage 0 exit (owner, 2026-10-06)
+> **Superseded (owner, 2026-10-06 evening):** Stage 0 now closes **after FT-008** (WP-22 automatic pool refresh), with the criteria below measured over FT-005 + FT-006 + FT-007 + FT-008. See FT-008-auto-pool-refresh.md.
+
 Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the waived coverage gate) and the owner's trade-success criteria over the whole canary series **FT-005 + FT-006 + FT-007 (about 9 h)**:
 - every landed trade nets > 0 (0 exceptions);
 - series net ≥ 0;
