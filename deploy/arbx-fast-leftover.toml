@@ -92,7 +92,7 @@ wallet_keystore = ""
 [pools]
 # OD-4 (owner confirms the seed list): the live w5h3 campaign's list (exp3 list + fresh discovery, 2026-10-03 evening),
 # copied from Cherry into arbx/data (commit c777f26). The fallback named by PLAN.md WP-00 is data/seed-pools-merged.csv
-seed_csv = "/home/moiz/arbed/arbx-fast/data/seed-pools-glici.csv"   # FT-012 (owner 2026-10-07): + 242 vetted Raydium CLMM / Orca Whirlpool SOL pools
+seed_csv = "/home/moiz/arbed/arbx-fast/data/seed-pools-fast.csv"   # FT-012 (owner 2026-10-07): + 242 vetted Raydium CLMM / Orca Whirlpool SOL pools
 # WP-21: live sends through both venues (FT-009 passed; FT-013 traded them live: 12 CLMM wins, 0 failed fees)
 rayclmm = "send"
 whirlpool = "send"
