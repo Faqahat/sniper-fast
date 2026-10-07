@@ -415,6 +415,8 @@ pub struct Engine {
     hints: HashMap<[u8; 64], Vec<Hint>>,
     /// arbx-fast: the pending trigger's predicted accounts, set only while that one trigger is evaluated (`price_pending`)
     overlay: Option<crate::overlay::Overlay>,
+    /// arbx-fast: transactions already priced as pending triggers (engine time): their commit is not priced again
+    pending_done: HashMap<[u8; 64], u64>,
     hint_order: VecDeque<(u64, [u8; 64])>,
     acc_queue: VecDeque<Hint>,
     acc_windows: HashMap<usize, accuracy::Window>,
@@ -915,7 +917,7 @@ impl Engine {
             tracker: CommitTracker::new(TrackerCfg::new(knobs.commit_timeout_ms, knobs.quiescence_ms)), forks: SlotTree::default(), state: StateStream::default(),
             flags: Arc::new(HealthFlags::default()), shut: Shut::Warmup,
             slo: LagSlo::new(knobs.lag_slo_p50_ms, knobs.lag_slo_p90_ms, knobs.lag_slo_breach_minutes, knobs.slo_recover_minutes, &knobs.slo_action),
-            deferred: Vec::new(), recent: VecDeque::new(), hints: HashMap::default(), overlay: None, hint_order: VecDeque::new(), acc_queue: VecDeque::new(), acc_windows: HashMap::default(),
+            deferred: Vec::new(), recent: VecDeque::new(), hints: HashMap::default(), overlay: None, pending_done: HashMap::default(), hint_order: VecDeque::new(), acc_queue: VecDeque::new(), acc_windows: HashMap::default(),
             acc_by_venue: Default::default(), commit_lag: Series::new("commit_lag"),
             commit_lag_src: [Series::new("commit_lag_tx"), Series::new("commit_lag_shred"), Series::new("commit_lag_unknown")], stop_req: None, boot_warned: false,
             reads: Reads::default(), resync: None, unverified: HashSet::default(), clmm_provisional: HashMap::default(), follow_ticks: 0, last_account_t: 0, knobs,
@@ -2546,6 +2548,10 @@ impl Engine {
         let n = self.evaluate_pool(i, &ctx);
         self.overlay = None;
         if n > 0 { self.count("pending_evaluated"); }
+        // its commit is not priced again (a second send on the same gap, and the send slot it would take); entries older
+        // than the trigger window are dropped
+        self.pending_done.retain(|_, t| t_engine.saturating_sub(*t) < TRIG_KEEP_NS);
+        self.pending_done.insert(a.tx.sig, t_engine);
     }
 
     /// The executor's turn for opportunity `id` (exec.rs): the send checks on this engine's journaled view (the
@@ -2933,7 +2939,10 @@ impl Engine {
         }
         let mut evaluated = 0u32;
         let ours = self.exec.as_ref().is_some_and(|x| x.is_ours(&g.txn));
-        if r.outcome != Outcome::ForkDropped && self.cfg.state_triggers && !ours {
+        // arbx-fast: a transaction already priced from its shreds (pending trigger) is not priced again at its commit
+        let priced_pending = self.pending_done.remove(&g.txn).is_some();
+        if priced_pending { self.count("commit_after_pending"); }
+        if r.outcome != Outcome::ForkDropped && self.cfg.state_triggers && !ours && !priced_pending {
             let kind = match r.outcome { Outcome::TimeoutQuiescent => "quiescent", Outcome::TimeoutUnknown => "timeout", _ => "commit" };
             let ctx = EvalCtx { kind, txn: Some(g.txn), slot: g.slot, t_first_shred, t_update_recv: g.t_first_update, t_first_engine: g.t_first_engine,
                 t_commit: r.t_clock, t_resolved: r.t_resolved, quiet: r.outcome.timed_out(), now_clock: r.t_clock, w_src: g.w_src.as_str(), group: Some(g.id), deferrals: 0 };
@@ -3938,6 +3947,30 @@ mod tests {
         make_ready(&mut off.e, T0);
         tx_ev(&mut off.e, shred_tx(sig(9), &[a.pool, a.vault0, a.vault1], Some((&a, SOL, false)), 11, T0 + 10 * MS));
         assert_eq!((off.e.counter("pending_priced"), off.e.counter("pending_no_overlay"), off.e.counter("evaluation")), (0, 0, 0), "off: a hint only");
+    }
+
+    /// arbx-fast: a swap priced from its shreds (pending) is not priced again when its account updates commit; a swap
+    /// the shreds did not price still is
+    #[test]
+    fn a_pending_priced_swap_is_not_priced_again_at_its_commit() {
+        let mut r = rig("pending-commit");
+        r.e.cfg.pending_triggers = true;
+        make_ready(&mut r.e, T0);
+        let a = meta(1);
+        let mut t = T0 + 10 * MS;
+        tx_ev(&mut r.e, shred_tx(sig(31), &[a.pool, a.vault0, a.vault1], Some((&a, 50 * SOL, false)), 11, t));
+        assert_eq!(r.e.counter("pending_priced"), 1);
+        let evals = r.e.counter("evaluation");
+        for (k, d) in [(a.pool, ammv4_pool()), (a.vault0, vault(999_000_000_000_000)), (a.vault1, vault(1_050 * SOL))] { t += 100_000; acct(&mut r.e, k, d, 11, t, Some(sig(31)), t); }
+        r.e.timers(t + 10 * MS, &mut nop());
+        assert_eq!((r.e.counter("commit_after_pending"), r.e.counter("evaluation")), (1, evals), "its commit resolved, not priced again");
+        // a transaction never priced from shreds (no decoded swap) is priced at its commit as before
+        t += 20 * MS;
+        tx_ev(&mut r.e, shred_tx(sig(32), &[a.pool, a.vault0, a.vault1], None, 11, t));
+        for (k, d) in [(a.pool, ammv4_pool()), (a.vault0, vault(998_000_000_000_000)), (a.vault1, vault(1_051 * SOL))] { t += 100_000; acct(&mut r.e, k, d, 11, t, Some(sig(32)), t); }
+        r.e.timers(t + 10 * MS, &mut nop());
+        assert_eq!(r.e.counter("commit_after_pending"), 1);
+        assert!(r.e.counter("evaluation") > evals, "priced at its commit");
     }
 
     /// arbx-fast timing (run with `--ignored --nocapture`): wall time on the engine thread from a shred-decoded swap's

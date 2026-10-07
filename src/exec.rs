@@ -1504,7 +1504,8 @@ impl Exec {
                 let raw = build::sign(&built.msg, &dk);
                 let t_signed = now_ns();
                 // what the signed bytes must be, from the decision and the policy, never from the build (review WP-06 #2)
-                let want = self.want(&r, dk.verifying_key().to_bytes(), bh.hash, tip, min_profit, margin_floor, &raw, alts);
+                let mut want = self.want(&r, dk.verifying_key().to_bytes(), bh.hash, tip, min_profit, margin_floor, &raw, alts);
+                if hel { want.helius = Some(HeliusWant { cu_price: hel_cu_price, extra: extra_tips.clone(), accounts: self.helius.as_ref().map(|h| h.tips.clone()).unwrap_or_default() }); }
                 let checks = verify_bundle(&raw, &want);
                 let ok = checks.iter().all(|c| c["ok"] == json!(true));
                 line["tx"]["sig"] = json!(send::first_signature(&raw));
@@ -1599,7 +1600,7 @@ impl Exec {
             quote: build::ata_of(&self.payer, &WSOL, &crate::pda::TOKEN_PROGRAM), mid, leg_programs: [r.buy.venue.program(), r.sell.venue.program()],
             ata: (!held).then_some((r.mint, r.mint_prog)), held_ok: self.held_growth_ok(), held_rent: build::HELD_RENT_BOUND,
             loaded_limit: self.builder.loaded_limit(), sizes: r.sizes.clone(), guard: self.builder.payer_guard.then_some(self.builder.payer_guard_max_drop),
-            payer_tokens: self.payer_tokens.iter().filter(|k| **k != mid).copied().collect() }
+            payer_tokens: self.payer_tokens.iter().filter(|k| **k != mid).copied().collect(), helius: None }
     }
 
     /// The CU limit `build` gives route `r` (as `compile` adds it up): the route's CU, plus the ATA create and close when the
@@ -2810,7 +2811,14 @@ pub struct VerifyWant {
     /// the payer's token accounts no leg may name (its USDC and USDT accounts, the route's mid account aside: review
     /// WP-06 #7)
     pub payer_tokens: Vec<Pk>,
+    /// arbx-fast: a big gap's Helius Sender transaction (None: a Jito bundle)
+    pub helius: Option<HeliusWant>,
 }
+
+/// arbx-fast: what a Helius Sender transaction carries beyond a bundle's: its compute-unit price (right after the CU
+/// limit), the `also` paths' tip transfers after the Helius tip (in order, the last one last), and Helius's tip accounts
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeliusWant { pub cu_price: u64, pub extra: Vec<(Pk, u64)>, pub accounts: Vec<Pk> }
 
 /// The nexus-v2 route instruction as a signed transaction carries it (data `[2, n, amount_in u64, min_profit u64, per
 /// leg {n_accounts, amount_offset, data_len u16}, leg data, [max_payer_lamport_drop u64]]`; accounts: authority, quote,
@@ -2966,18 +2974,35 @@ pub fn verify_bundle(raw: &[u8], w: &VerifyWant) -> Vec<Value> {
     let cu_want = (w.cu_route + count("ata_create") * w.cu_ata.0 + count("ata_close") * w.cu_ata.1).min(crate::cu_table::MAX_CU);
     put("cu_limit", tx.cu_limit == Some(cu_want as u32), json!({ "tx": tx.cu_limit, "want": cu_want, "route": w.cu_route, "creates": count("ata_create"),
         "closes": count("ata_close") }));
-    put("no_cu_price", tx.cu_price_micro.unwrap_or(0) == 0, json!(tx.cu_price_micro));
+    match &w.helius {
+        // arbx-fast: a Helius Sender copy carries the compute-unit price Helius requires
+        Some(h) => put("cu_price", tx.cu_price_micro == Some(h.cu_price), json!({ "tx": tx.cu_price_micro, "want": h.cu_price })),
+        None => put("no_cu_price", tx.cu_price_micro.unwrap_or(0) == 0, json!(tx.cu_price_micro)),
+    }
     // the tip as signed: the last instruction, a System transfer (2) from the payer
     let signed_tip = tx.ixs.last().filter(|ix| tx.keys.get(ix.program as usize) == Some(&[0u8; 32]) && ix.data.len() == 12 && ix.data[..4] == [2, 0, 0, 0])
         .and_then(|ix| Some((*tx.keys.get(*ix.accounts.first()? as usize)?, *tx.keys.get(*ix.accounts.get(1)? as usize)?, u64::from_le_bytes(ix.data[4..12].try_into().unwrap()))));
-    let last_is_tip = signed_tip.is_some_and(|(from, to, lamports)| from == w.payer && w.tip == Some((to, lamports)));
+    // (a Helius copy's last transfer is its last `also` tip, when it has any)
+    let last_want = w.helius.as_ref().and_then(|h| h.extra.last().copied()).or(w.tip);
+    let last_is_tip = signed_tip.is_some_and(|(from, to, lamports)| from == w.payer && last_want == Some((to, lamports)));
     let tip_ok = w.tip.is_none() || last_is_tip;
     // (what was signed is spelled out only when it is not what was wanted: the dry run's decisions stay cheap)
     put("tip_last", tip_ok, json!({ "account": w.tip.map(|t| b58(&t.0)), "lamports": w.tip.map(|t| t.1),
         "signed": if tip_ok { Value::Null } else { json!(signed_tip.map(|(f, t, l)| json!({ "from": b58(&f), "to": b58(&t), "lamports": l }))) } }));
-    let paid = send::tip_paid(&tx, &w.tips);
-    put("tip_to_jito", w.tip.map_or(true, |t| paid == t.1 && w.tips.contains(&t.0)), json!({ "paid": paid }));
-    put("tip_check", send::verify_copy(raw, SendKind::JitoBundle, &w.tips, "jito-bundle").is_ok(), Value::Null);
+    match &w.helius {
+        // arbx-fast: the Helius tip to a Helius account, and every `also` tip to its own account, each exactly once
+        Some(h) => {
+            let paid = send::tip_paid(&tx, &h.accounts);
+            let each = h.extra.iter().all(|(to, l)| send::tip_paid(&tx, &[*to]) == *l);
+            put("tip_to_paths", w.tip.is_some_and(|t| paid == t.1 && h.accounts.contains(&t.0)) && each, json!({ "helius_paid": paid, "also": h.extra.len() }));
+            put("tip_check", send::verify_copy(raw, SendKind::Helius, &h.accounts, "helius").is_ok(), Value::Null);
+        }
+        None => {
+            let paid = send::tip_paid(&tx, &w.tips);
+            put("tip_to_jito", w.tip.map_or(true, |t| paid == t.1 && w.tips.contains(&t.0)), json!({ "paid": paid }));
+            put("tip_check", send::verify_copy(raw, SendKind::JitoBundle, &w.tips, "jito-bundle").is_ok(), Value::Null);
+        }
+    }
     let route = tx.ixs.iter().any(|ix| tx.keys.get(ix.program as usize) == Some(&w.program));
     put("route_program", route, json!(b58(&w.program)));
     let has = |p: &Pk| all.as_ref().is_some_and(|a| a.contains(p));
@@ -3014,11 +3039,13 @@ pub fn verify_bundle(raw: &[u8], w: &VerifyWant) -> Vec<Value> {
     // ---- WP-06: the new layout
     let close_wanted = w.ata.is_some() && !held;
     let mut want_kinds = vec!["cu_limit"];
+    if w.helius.is_some() { want_kinds.push("cu_price"); }
     if w.loaded_limit.is_some() { want_kinds.push("loaded_data_limit"); }
     if w.ata.is_some() { want_kinds.push("ata_create"); }
     want_kinds.push("route");
     if close_wanted { want_kinds.push("ata_close"); }
     if w.tip.is_some() { want_kinds.push("tip"); }
+    for _ in w.helius.as_ref().map_or(&[][..], |h| &h.extra[..]) { want_kinds.push("tip"); }
     put("ix_order", kinds == want_kinds, json!({ "signed": kinds, "want": want_kinds }));
     // the loaded-data limit: `auto` re-derived from the signed message's own accounts (SIMD-0186: every distinct account of
     // its full list at its weight, a program it invokes as one, on the decision's sizes; 8,248 per lookup table it names),

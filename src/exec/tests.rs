@@ -487,7 +487,7 @@ fn live_want(x: &Exec, tip: Option<(Pk, u64)>, min_profit: u64) -> VerifyWant {
         cu_ata: (30_000, 5_000), alts: x.alt_lists.clone(), amount_in: SIZE, min_profit, margin_floor: 1,
         quote: build::ata_of(&x.payer, &WSOL, &crate::pda::TOKEN_PROGRAM), mid: build::ata_of(&x.payer, &MINT, &crate::pda::TOKEN_PROGRAM),
         leg_programs: [Venue::DammV2.program(), Venue::DammV2.program()], ata: None, held_ok: false, held_rent: build::HELD_RENT_BOUND, loaded_limit: Some(None),
-        sizes: vec![], guard: None, payer_tokens: x.payer_tokens.clone() }
+        sizes: vec![], guard: None, payer_tokens: x.payer_tokens.clone(), helius: None }
 }
 
 /// Fail closed (WP-04 review #8; PLAN WP-05 item 2): an executor is not ready until an engine installs its health; a
@@ -1685,7 +1685,7 @@ fn want_clone(w: &VerifyWant) -> VerifyWant {
     VerifyWant { payer: w.payer, signer: w.signer, blockhash: w.blockhash, tip: w.tip, tips: w.tips.clone(), program: w.program, pools: w.pools, cu_route: w.cu_route,
         cu_ata: w.cu_ata, alts: w.alts.clone(), amount_in: w.amount_in, min_profit: w.min_profit, margin_floor: w.margin_floor, quote: w.quote, mid: w.mid,
         leg_programs: w.leg_programs, ata: w.ata, held_ok: w.held_ok, held_rent: w.held_rent, loaded_limit: w.loaded_limit, sizes: w.sizes.clone(), guard: w.guard,
-        payer_tokens: w.payer_tokens.clone() }
+        payer_tokens: w.payer_tokens.clone(), helius: w.helius.clone() }
 }
 
 /// PLAN WP-06 item 2: a PumpSwap buy names the wallet's user volume accumulator and creates it when it is missing
@@ -3482,4 +3482,24 @@ async fn timing_decide_build_sign_fire() {
     assert!(us.len() > 100, "most decisions sent");
     us.sort_by(|a, b| a.partial_cmp(b).unwrap());
     eprintln!("decide -> build -> sign -> fire (executor): p50 {:.1} us, p90 {:.1} us, p99 {:.1} us", us[us.len() / 2], us[us.len() * 9 / 10], us[us.len() * 99 / 100]);
+}
+
+/// arbx-fast: the dry run's checks of a big gap's signed Helius transaction pass (its compute-unit price, Helius's tip
+/// and Bolt's after it, in that order), as a bundle's do
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dry_run_checks_a_helius_transaction() {
+    let extra = "[[send]]\nname = \"helius\"\nkind = \"helius\"\nurl = \"https://127.0.0.1:9/fast\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [[send]]\nname = \"bolt\"\nkind = \"bolt\"\nurl = \"https://127.0.0.1:9/bolt\"\ntoken_env = \"ARBX_TEST_BOLT\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [send_policy.helius_big]\nenabled = true\nmin_expected_lamports = 1700000\ntip_share = 0.6\npriority_fee_lamports = 10000\nmax_per_sec = 2\nalso = [\"bolt\"]\n";
+    let mut r = rig("helius-dry", Mode::DryRun, extra).await;
+    for (n, expected) in [(1u8, 5_000_000u64), (3, 2_500_000)] {
+        let d = r.decide(route(n, damm(n + 1, MINT), expected, n as u64), 97, now_ns());
+        assert!(d.would_send, "{d:?}");
+    }
+    let a = r.lines("attempts");
+    for x in &a {
+        assert!(!x["helius_big"].is_null(), "{x}");
+        assert_eq!(x["dry_run"]["checks_ok"].as_bool(), Some(true), "{}", x["dry_run"]["checks"]);
+    }
+    assert_eq!((a[0]["helius_big"]["also"].as_array().unwrap().len(), a[1]["helius_big"]["also"].as_array().unwrap().len()), (1, 0), "with Bolt, then Helius alone");
 }
