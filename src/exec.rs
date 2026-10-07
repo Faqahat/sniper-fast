@@ -584,6 +584,8 @@ struct Open {
     opp: u64,
     sig: [u8; 64],
     sig58: String,
+    /// arbx-fast: the durable-nonce variants' signatures (Bolt's, Astralane's copies of this attempt)
+    alt_sigs: Vec<String>,
     mint: Pk,
     size: u64,
     mid: u64,
@@ -627,7 +629,7 @@ struct Open {
 /// expiry check found the landing, whose fee and events only the wallet record brings), what its landing adds to the
 /// money so far (`counted`), whether the wallet record came, whether a would-fail of it counted toward cooling
 #[derive(Clone)]
-struct Final { route: String, sig58: String, mint: Pk, landed: bool, ok: bool, tip: u64, size: u64, held_addition: bool, src: &'static str, counted: Counted,
+struct Final { route: String, sig58: String, alt_sigs: Vec<String>, mint: Pk, landed: bool, ok: bool, tip: u64, size: u64, held_addition: bool, src: &'static str, counted: Counted,
     wallet_seen: bool, cooled: bool,
     /// WP-07: the final (`landed_ok`, `landed_fail`, `not_landed_expired`, `not_landed_refused`, `unsettled`; an amend's
     /// landing replaces it): the ledger's reconciliation confirms no refused bundle ever lands
@@ -1586,10 +1588,12 @@ impl Exec {
             self.count("would_send");
             return d;
         }
+        let mut alt_sigs: Vec<String> = Vec::new();
         let (sig58, t_signed, t_fired, path_name) = match fired {
             Some((paths, bp, raw, fire, t_signed, t_fired, var_sigs)) => {
                 // arbx-fast: every nonce variant's signature names this attempt too (whichever lands settles it)
                 for vs in &var_sigs { if let Some(s) = sig64(vs) { self.by_sig.insert(s, attempt); } }
+                alt_sigs = var_sigs.clone();
                 let sig58 = send::first_signature(&raw).unwrap_or_default();
                 let sig = sig64(&sig58).unwrap_or([0; 64]);
                 let pools = [r.buy.pool, r.sell.pool];
@@ -1627,7 +1631,7 @@ impl Exec {
         self.by_sig.insert(sig, attempt);
         self.open.insert(attempt, Open { attempt, route: format!("{:?}>{:?}", r.buy.venue, r.sell.venue),
             decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
-            trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit: built.min_profit, held_addition: built.held_addition(), worst: BASE_FEE + prio_fee, bh_slot: bh.slot,
+            alt_sigs: alt_sigs.clone(), trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit: built.min_profit, held_addition: built.held_addition(), worst: BASE_FEE + prio_fee, bh_slot: bh.slot,
             bh_height: bh.height,
             target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_engine: t, t_signed, t_sent: None, bundle: None,
             path: path_name, fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
@@ -2084,7 +2088,7 @@ impl Exec {
         self.rec.json(rec::OUTCOMES, line);
         self.count(match fin { "landed_ok" => "landed_ok", "landed_fail" => "landed_fail", "not_landed_expired" => "not_landed_expired", "unsettled" => "unsettled",
             _ => "not_landed_refused" });
-        self.finals.insert(o.attempt, Final { route: o.route.clone(), sig58: o.sig58.clone(), mint: o.mint, landed: landed.is_some(),
+        self.finals.insert(o.attempt, Final { route: o.route.clone(), sig58: o.sig58.clone(), alt_sigs: o.alt_sigs.clone(), mint: o.mint, landed: landed.is_some(),
             ok: landed.as_ref().is_some_and(|l| l.ok), tip: o.tip,
             size: o.size, held_addition: o.held_addition, src, counted, wallet_seen: src == "wallet", cooled: o.cooled, fin, refused: fin == "not_landed_refused",
             t_fin: self.t_now });
@@ -2255,10 +2259,10 @@ impl Exec {
     /// reconciliation compares it with the chain by signature
     pub fn landings(&self) -> Vec<crate::ledger::Landing> {
         let open = self.open.values().map(|o| crate::ledger::Landing { attempt: o.attempt, sig: o.sig58.clone(), fin: "open", landed: false, ok: false, src: "open",
-            wallet_seen: false, fee: 0, tip: 0, round_trip: 0, rt_unknown: false, refused: false, t_final: 0 });
+            wallet_seen: false, fee: 0, tip: 0, round_trip: 0, rt_unknown: false, refused: false, t_final: 0, alt_sigs: o.alt_sigs.clone() });
         let finals = self.finals_order.iter().filter_map(|a| self.finals.get(a).map(|f| (a, f))).map(|(a, f)| crate::ledger::Landing { attempt: *a, sig: f.sig58.clone(),
             fin: f.fin, landed: f.landed, ok: f.ok, src: f.src, wallet_seen: f.wallet_seen, fee: f.counted.fee, tip: f.counted.tip, round_trip: f.counted.round_trip,
-            rt_unknown: f.counted.rt_unknown > 0, refused: f.refused, t_final: f.t_fin });
+            rt_unknown: f.counted.rt_unknown > 0, refused: f.refused, t_final: f.t_fin, alt_sigs: f.alt_sigs.clone() });
         open.chain(finals).collect()
     }
 

@@ -784,7 +784,9 @@ pub fn reconcile(from: &Snapshot, to: &Snapshot, entries: &[&Entry], tol: u64, t
 /// review WP-07 #6); `t_final`: the engine time of its final (or of the landing that amended it)
 #[derive(Clone, Debug, PartialEq)]
 pub struct Landing { pub attempt: u64, pub sig: String, pub fin: &'static str, pub landed: bool, pub ok: bool, pub src: &'static str, pub wallet_seen: bool,
-    pub fee: u64, pub tip: u64, pub round_trip: i64, pub rt_unknown: bool, pub refused: bool, pub t_final: u64 }
+    pub fee: u64, pub tip: u64, pub round_trip: i64, pub rt_unknown: bool, pub refused: bool, pub t_final: u64,
+    /// arbx-fast: the attempt's other signed copies (durable-nonce variants: Bolt's, Astralane's): whichever landed is it
+    pub alt_sigs: Vec<String> }
 
 impl Landing {
     /// the provisional money of a landing whose record has not come (the executor counted the base fee)
@@ -803,11 +805,12 @@ pub struct Earlier { pub segment: String, pub attempt: u64, pub fin: String }
 /// counts as not landed, and **any refused bundle that landed**, are misses. An earlier segment's open or expired
 /// attempt that landed is listed (`earlier_landed`: its segment ended before its record came), not a miss
 pub fn exec_recon(entries: &BTreeMap<String, Entry>, view: &[Landing], earlier: &HashMap<String, Earlier>, tol: u64) -> (Value, bool) {
-    let by_sig: HashMap<&str, &Landing> = view.iter().map(|l| (l.sig.as_str(), l)).collect();
+    // arbx-fast: an attempt is known by every signature of its copies (a nonce variant lands under its own)
+    let by_sig: HashMap<&str, &Landing> = view.iter().flat_map(|l| std::iter::once(l.sig.as_str()).chain(l.alt_sigs.iter().map(|s| s.as_str())).map(move |s| (s, l))).collect();
     let (mut diff, mut matched) = (0i64, 0u64);
     let (mut diffs, mut provisional, mut refused_landed, mut not_counted, mut unknown, mut earlier_landed) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for l in view {
-        let e = entries.get(&l.sig);
+        let e = entries.get(&l.sig).or_else(|| l.alt_sigs.iter().find_map(|s| entries.get(s)));
         // a refused bundle (its first final, kept whatever amended it later) that the chain or the executor shows landed
         if l.refused || l.fin == "not_landed_refused" {
             if l.landed || e.is_some() { refused_landed.push(json!({ "attempt": l.attempt, "sig": l.sig, "slot": e.map(|e| e.slot), "fee": e.map(|e| e.fee), "fin_now": l.fin })); }

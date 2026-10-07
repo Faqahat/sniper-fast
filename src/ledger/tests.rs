@@ -304,7 +304,7 @@ fn reconciliation_both_bases() {
 }
 
 fn landing(attempt: u64, sig: &str, fin: &'static str, landed: bool, fee: u64, tip: u64, rt: i64) -> Landing {
-    Landing { attempt, sig: sig.into(), fin, landed, ok: landed && rt > 0, src: "wallet", wallet_seen: true, fee, tip, round_trip: rt, rt_unknown: false,
+    Landing { attempt, sig: sig.into(), alt_sigs: vec![], fin, landed, ok: landed && rt > 0, src: "wallet", wallet_seen: true, fee, tip, round_trip: rt, rt_unknown: false,
         refused: fin == "not_landed_refused", t_final: 0 }
 }
 
@@ -1023,4 +1023,22 @@ fn the_wallet_cursor_never_passes_the_window_between_segments() {
     assert_eq!((h.prev_window.as_ref().map(|w| (w.from.slot, w.undecided)), h.window_cursor.clone()), (Some((1_000, true)), None));
     assert_eq!(bound_wallet_cursor(c("b", 1_200), &h), (None, "dropped"), "the undecided window needs every record from 1,000 on");
     let _ = std::fs::remove_dir_all(&camp);
+}
+
+/// arbx-fast: a route landing under one of an attempt's durable-nonce variant signatures is that attempt's (matched),
+/// never an unknown route landing (fastL1-p1: a Bolt variant that landed 8 slots late tripped `reconcile_miss`)
+#[test]
+fn a_landed_nonce_variant_is_its_attempts_landing() {
+    let (mut l, _sess, dir, rec) = rig("variant", |_| {});
+    l.on_input(&snap_answer(1_000, 223_000_000, 191_500_000, 22_970_000, "start"), T0, &usdc_price);
+    // the chain shows the variant's signature, a failed route (its fee only)
+    l.on_wallet_tx(&wtx("v1", 1_100, "route", false, -15_001, 0, 15_001, 0), T0 + M, &usdc_price, None);
+    let main = landing(7, "p1", "landed_fail", true, 15_001, 0, 0);
+    let (x, ok) = exec_recon(&l.entries, &[main.clone()], &HashMap::new(), 10_000);
+    assert!(!ok && x["unknown_route_landings"].as_array().map(|a| a.len()) == Some(1), "without its variants: unknown, a miss: {x}");
+    let (x, ok) = exec_recon(&l.entries, &[Landing { alt_sigs: vec!["v1".into()], ..main }], &HashMap::new(), 10_000);
+    assert!(ok, "{x}");
+    assert_eq!((x["landings"].as_u64(), x["unknown_route_landings"].as_array().map(|a| a.len())), (Some(1), Some(0)), "{x}");
+    rec.close();
+    let _ = std::fs::remove_dir_all(&dir);
 }
