@@ -847,6 +847,49 @@ pub struct SendPolicyCfg {
     /// older runs)
     #[serde(default, skip_serializing_if = "BamPolicyCfg::off")]
     pub bam: BamPolicyCfg,
+    /// arbx-fast (owner, 2026-10-07): big gaps go to Helius Sender (`[send_policy.helius_big]`) instead of a Jito bundle.
+    /// Left out of the serialized policy while off, like `bam`
+    #[serde(default, skip_serializing_if = "HeliusBigCfg::off")]
+    pub helius_big: HeliusBigCfg,
+}
+
+/// `[send_policy.helius_big]` (arbx-fast, owner 2026-10-07): a decision expecting at least `min_expected_lamports` is
+/// sent as ONE plain transaction through the named Helius Sender path (not a Jito bundle: no ~27 ms auction hold) with
+/// a tip of `tip_share` of its edge (at least the path's minimum, Helius Sender's 0.001 SOL) and the compute-unit price
+/// Helius requires. Not a bundle: a copy that lands and fails the on-chain profit check pays its base and priority fee
+/// (the tip transfer is after the check, so it reverts with it). The on-chain min_profit covers tip + base fee +
+/// priority fee + margin, so a landed success never nets below the margin
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct HeliusBigCfg {
+    #[serde(default)]
+    pub enabled: bool,
+    /// the `[[send]]` entry (kind "helius") the copies go through
+    #[serde(default = "hb_path")]
+    pub path: String,
+    /// the decision's expected profit (lamports) from which it goes to Helius
+    #[serde(default = "hb_min_expected")]
+    pub min_expected_lamports: u64,
+    /// the tip as a share of the edge (expected - base fee - priority fee)
+    #[serde(default = "hb_share")]
+    pub tip_share: f64,
+    /// the compute-unit price (micro-lamports); Helius Sender refuses a transaction without one
+    #[serde(default = "hb_cu_price")]
+    pub cu_price_micro: u64,
+    /// at most this many Helius copies a second (a rolling window)
+    #[serde(default = "hb_rate")]
+    pub max_per_sec: u32,
+}
+fn hb_path() -> String { "helius".into() }
+fn hb_min_expected() -> u64 { 1_500_000 }
+fn hb_share() -> f64 { 0.70 }
+fn hb_cu_price() -> u64 { 10_000 }
+fn hb_rate() -> u32 { 2 }
+impl Default for HeliusBigCfg {
+    fn default() -> Self { HeliusBigCfg { enabled: false, path: hb_path(), min_expected_lamports: hb_min_expected(), tip_share: hb_share(), cu_price_micro: hb_cu_price(), max_per_sec: hb_rate() } }
+}
+impl HeliusBigCfg {
+    pub fn off(&self) -> bool { !self.enabled }
 }
 fn pol_bh_age() -> u64 { 20 }
 fn pol_bh_commitment() -> String { "confirmed".into() }
@@ -862,7 +905,7 @@ impl Default for SendPolicyCfg {
         SendPolicyCfg { max_blockhash_age_slots: pol_bh_age(), blockhash_commitment: pol_bh_commitment(), queue_ms: pol_queue_ms(), big_band_max_per_sec: pol_big_rate(),
             crowding_window_h: pol_crowd_h(), crowding_buckets: pol_crowd_buckets(), crowded_pools_file: String::new(), crowded_skip_min_expected_lamports: 0,
             margin_floor: pol_margin_floor(), margin_share: 0.0, inflight_hold_slots: pol_hold(), skip_leader_kinds: pol_skip_kinds(), direct_experiment: false,
-            direct: DirectCfg::default(), bam: BamPolicyCfg::default() }
+            direct: DirectCfg::default(), bam: BamPolicyCfg::default(), helius_big: HeliusBigCfg::default() }
     }
 }
 
@@ -1713,6 +1756,17 @@ impl Config {
             bail!("[send_policy] crowding_buckets must be two increasing positive signer counts (e.g. [20, 150])");
         }
         if sp.margin_floor == 0 { bail!("[send_policy] margin_floor must be >= 1 (a landed bundle must clear tip + fee + at least 1 lamport)"); }
+        let hb = &sp.helius_big;
+        if hb.enabled {
+            if !(hb.tip_share > 0.0 && hb.tip_share < 1.0) { bail!("[send_policy.helius_big] tip_share must be in (0, 1)"); }
+            if hb.cu_price_micro == 0 { bail!("[send_policy.helius_big] cu_price_micro must be > 0 (Helius Sender refuses a transaction without a compute-unit price)"); }
+            if hb.max_per_sec == 0 { bail!("[send_policy.helius_big] max_per_sec must be >= 1"); }
+            match cfg.sends.iter().find(|x| x.name == hb.path) {
+                Some(x) if x.kind == SendKind::Helius && x.enabled => {}
+                Some(_) => bail!("[send_policy.helius_big] path {:?} must be an enabled [[send]] of kind \"helius\"", hb.path),
+                None => bail!("[send_policy.helius_big] path {:?} is not a [[send]] entry", hb.path),
+            }
+        }
         if !sp.margin_share.is_finite() || !(0.0..=1.0).contains(&sp.margin_share) { bail!("[send_policy] margin_share is a share of the expected net, 0..1"); }
         if sp.inflight_hold_slots == 0 { bail!("[send_policy] inflight_hold_slots must be >= 1"); }
         for k in &sp.skip_leader_kinds {

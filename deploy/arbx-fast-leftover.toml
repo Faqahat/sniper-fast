@@ -339,9 +339,9 @@ url = "${SHYFT_RPC_URL}"
 
 [[send]]
 name = "helius"
-enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+enabled = true    # arbx-fast (owner 2026-10-07): big gaps only ([send_policy.helius_big]). History: WP-00 bundle-only, the direct arm lost 24.4M lamports in fees, W §2
 kind = "helius"
-url = "http://fra-sender.helius-rpc.com/fast"   # w5h tuned: dual routing (Jito + SWQoS), the mode the winners use
+url = "https://fra-sender.helius-rpc.com/fast"   # w5h tuned: dual routing (Jito + SWQoS), the mode the winners use
 tip_lamports = 1000000   # w5h tuned: winners via Helius tip ~1M
 
 [[send]]
@@ -471,6 +471,14 @@ margin_floor = 1
 margin_share = 0.0
 direct_experiment = false   # the direct (non-bundle) arm: refused in Stage 0
 
+# arbx-fast (owner 2026-10-07): big gaps go to Helius Sender, not a Jito bundle (no ~27 ms auction hold), tip 70% of the edge
+[send_policy.helius_big]
+enabled = true
+path = "helius"
+min_expected_lamports = 1500000   # 70% of the edge must clear Helius Sender's 0.001 SOL minimum tip
+tip_share = 0.70
+cu_price_micro = 10000            # Helius Sender requires a compute-unit price (~2,000 lamports at 200k CU)
+max_per_sec = 2
 [send_policy.direct]
 # (the durable nonces of 2g7rYv7y..., the direct arm's, are not frz's: none here)
 nonce_accounts = []

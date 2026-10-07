@@ -659,6 +659,9 @@ impl Path {
     /// compute-unit price. Returns the transaction's signature.
     pub fn check(&self, raw: &[u8]) -> Result<String> { verify_copy(raw, self.kind, &self.tips, &self.name) }
 
+    /// arbx-fast: the path's tip accounts (the executor picks a Helius Sender copy's tip account from them)
+    pub fn tip_accounts(&self) -> &[Pk] { &self.tips }
+
     /// the rate queue's waiting sends and λ (status `exec.queue_now`, `lambda_now`)
     pub fn queue_now(&self) -> Option<(usize, Option<i64>)> { self.budget.as_ref().map(|b| (b.waiting(), b.lambda())) }
 

@@ -495,7 +495,9 @@ pub const HELD_RENT_BOUND: u64 = (200 + 128) * 6_960;
 
 /// Everything a bundle transaction holds besides its route
 #[derive(Clone, Debug, PartialEq)]
-pub struct Plan { pub payer: Pk, pub cu_limit: u32, pub loaded_data_limit: Option<u32>, pub ata: Option<AtaOps>, pub tip: Option<(Pk, u64)> }
+pub struct Plan { pub payer: Pk, pub cu_limit: u32, pub loaded_data_limit: Option<u32>, pub ata: Option<AtaOps>, pub tip: Option<(Pk, u64)>,
+    /// arbx-fast: the compute-unit price (micro-lamports) for a Helius Sender copy; 0 = none (a Jito bundle carries none)
+    pub cu_price: u64 }
 
 /// One bundle transaction's instructions, in PLAN WP-06 item 1's order: the CU limit; the loaded-accounts data size
 /// limit; the mid token's ATA create (idempotent; the wallet holds none); the route; the CloseAccount of that ATA to the
@@ -503,6 +505,7 @@ pub struct Plan { pub payer: Pk, pub cu_limit: u32, pub loaded_data_limit: Optio
 /// top-level System transfer, last (Jito ignores a tip account named through a table)
 pub fn bundle_ixs(p: &Plan, route: Ix) -> Vec<Ix> {
     let mut ixs = vec![cu_limit_ix(p.cu_limit)];
+    if p.cu_price > 0 { ixs.push(cu_price_ix(p.cu_price)); }
     if let Some(b) = p.loaded_data_limit { ixs.push(loaded_data_limit_ix(b)); }
     if let Some(a) = &p.ata { ixs.push(create_ata_idempotent_ix(p.payer, p.payer, a.mint, a.token_program)); }
     ixs.push(route);
@@ -815,17 +818,17 @@ mod tests {
         let route = route_ix([60; 32], payer, quote, 1_000, 5, &[legn(3, mid, 0xAA, 16), legn(4, quote, 0xBB, 16)], None).unwrap();
         let tip = ([96; 32], 1_234u64);
         let names = |ixs: &[Ix]| -> Vec<(Pk, Vec<u8>)> { ixs.iter().map(|ix| (ix.program, ix.data.iter().take(1).copied().collect())).collect() };
-        let held = bundle_ixs(&Plan { payer, cu_limit: 200_000, loaded_data_limit: Some(1 << 20), ata: None, tip: Some(tip) }, route.clone());
+        let held = bundle_ixs(&Plan { payer, cu_limit: 200_000, loaded_data_limit: Some(1 << 20), ata: None, tip: Some(tip), cu_price: 0 }, route.clone());
         assert_eq!(names(&held), vec![(COMPUTE_BUDGET, vec![2]), (COMPUTE_BUDGET, vec![4]), ([60; 32], vec![2]), (*SYSTEM_PROGRAM, vec![2])]);
         let ata = Some(AtaOps { mint, token_program: *TOKEN_PROGRAM, close: true });
-        let cc = bundle_ixs(&Plan { payer, cu_limit: 235_000, loaded_data_limit: Some(1 << 20), ata, tip: Some(tip) }, route.clone());
+        let cc = bundle_ixs(&Plan { payer, cu_limit: 235_000, loaded_data_limit: Some(1 << 20), ata, tip: Some(tip), cu_price: 0 }, route.clone());
         assert_eq!(names(&cc), vec![(COMPUTE_BUDGET, vec![2]), (COMPUTE_BUDGET, vec![4]), (*ATA_PROGRAM, vec![1]), ([60; 32], vec![2]), (*TOKEN_PROGRAM, vec![9]),
             (*SYSTEM_PROGRAM, vec![2])]);
         assert_eq!((cc[2].accounts[1].key, cc[4].accounts[0].key, cc[4].accounts[1].key, cc[4].accounts[2].key), (mid, mid, payer, payer), "create and close the same account, to the payer");
         assert_eq!(cc[0].data, [vec![2], 235_000u32.to_le_bytes().to_vec()].concat());
         assert_eq!(cc[1].data, [vec![4], (1u32 << 20).to_le_bytes().to_vec()].concat());
         // a held-set addition: the create without the close
-        let kept = bundle_ixs(&Plan { payer, cu_limit: 230_000, loaded_data_limit: None, ata: Some(AtaOps { mint, token_program: *TOKEN_PROGRAM, close: false }), tip: None },
+        let kept = bundle_ixs(&Plan { payer, cu_limit: 230_000, loaded_data_limit: None, ata: Some(AtaOps { mint, token_program: *TOKEN_PROGRAM, close: false }), tip: None, cu_price: 0 },
             route.clone());
         assert_eq!(names(&kept), vec![(COMPUTE_BUDGET, vec![2]), (*ATA_PROGRAM, vec![1]), ([60; 32], vec![2])]);
         // compiled: the tip account static and last; the message parses back to the same instruction order

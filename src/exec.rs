@@ -507,6 +507,10 @@ impl<'a> AltSource<'a> {
 
 /// The on-chain min_profit of a bundle (PLAN WP-05 item 8): tip + base fee + priority (0) + margin, margin =
 /// max(`floor`, `share` × expected net). Rent is never part of it. Returns (min_profit, margin)
+/// arbx-fast: the Helius big-gap route's state (`[send_policy.helius_big]`): its path (None in shadow and dry runs, which
+/// hold no paths), its tip accounts and minimum tip, the rotating account cursor and the rolling one-second window
+struct HeliusBig { cfg: crate::config::HeliusBigCfg, path: Option<usize>, tips: Vec<Pk>, min_tip: u64, cursor: usize, recent: VecDeque<u64> }
+
 pub fn min_profit_onchain(tip: u64, expected_net: i64, floor: u64, share: f64) -> (u64, u64) {
     let margin = floor.max((expected_net.max(0) as f64 * share) as u64);
     (tip + BASE_FEE + margin, margin)
@@ -653,6 +657,8 @@ pub struct Exec {
     /// FT-006: the host of the configured jito-bundle path's block engine (attempts `copies[].endpoint`): from the config,
     /// so a would-send and a replay name the endpoint a send goes to (None: no bundle path, or a URL from the environment)
     bundle_host: Option<String>,
+    /// arbx-fast: `[send_policy.helius_big]` (None: off)
+    helius: Option<HeliusBig>,
     jito: Option<Arc<jito::Jito>>,
     /// live and canary: the trading key
     key: Option<ed25519_dalek::SigningKey>,
@@ -985,13 +991,21 @@ impl Exec {
             _ => (None, key),
         };
         let skip_kinds: Vec<LeaderKind> = cfg.send_policy.skip_leader_kinds.iter().filter_map(|k| kind_of(k)).collect();
+        let hb = &cfg.send_policy.helius_big;
+        let helius = hb.enabled.then(|| {
+            let path = paths.as_ref().and_then(|p| p.list.iter().position(|x| x.name == hb.path));
+            let tips: Vec<Pk> = path.and_then(|i| paths.as_ref().map(|p| p.list[i].tip_accounts().to_vec())).filter(|t| !t.is_empty())
+                .unwrap_or_else(|| send::known_tip_accounts(SendKind::Helius).iter().map(|a| pk(a)).collect());
+            let min_tip = cfg.sends.iter().find(|s| s.name == hb.path).map_or(0, |s| s.tip_lamports).max(SendKind::Helius.min_tip());
+            HeliusBig { cfg: hb.clone(), path, tips, min_tip, cursor: 0, recent: VecDeque::new() }
+        });
         let canary = (mode == Mode::Canary).then_some(CanaryCaps { count: cfg.canary.count, every_ns: cfg.canary.every_ms * 1_000_000 });
         let max_size = match mode { Mode::Canary => sol(cfg.canary.size_sol.min(cfg.live.max_size_sol)), _ => sol(cfg.live.max_size_sol) };
         let alt_lists: HashMap<Pk, Arc<Vec<Pk>>> = alts.iter().map(|(k, a)| (*k, Arc::new(a.clone()))).collect();
         let settle = rpc.with_role(crate::rpc::Role::Settle);
         let model = crate::tip::TipModel::from_cfg(cfg).map_err(|e| anyhow::anyhow!(e))?;
         let x = Exec { mode, payer, program: pk(&cfg.exec.program), alts: alts.iter().map(|(k, a)| Alt::new(*k, a)).collect(), alt_lists, pump, held, rpc, settle,
-            rt: tokio::runtime::Handle::current(), back, paths, bundle_path, jito, key, dry, pol: cfg.send_policy.clone(), skip_kinds,
+            rt: tokio::runtime::Handle::current(), back, paths, bundle_path, helius, jito, key, dry, pol: cfg.send_policy.clone(), skip_kinds,
             bundle_host: bundle_cfg.filter(|c| !c.url.contains("${")).map(|c| send::host_of(&c.url)).filter(|h| !h.is_empty()),
             tips: bundle_cfg.map(|c| TipPolicy::from_path(c, model.clone())), path_rate: bundle_cfg.and_then(|c| c.max_per_sec).unwrap_or(5) as usize, would_recent: VecDeque::new(),
             max_size, cap_failed_fees: if mode == Mode::Canary { cfg.canary.max_spend_lamports } else { cfg.live.max_failed_fees_lamports },
@@ -1329,7 +1343,14 @@ impl Exec {
         let target = i.leader.slot;
         let (why_allowed, prev) = match self.inflight.check(&key, r.state_version, target, leader_pk) { Ok(x) => x, Err(why) => return fail(d, why) };
         let big = bands::is_big(band);
-        if big && !self.big.peek(t) { return fail(d, "band_throttle"); }
+        // arbx-fast: a gap expecting at least `[send_policy.helius_big] min_expected_lamports` goes to Helius Sender as one
+        // plain transaction (no Jito auction hold), outside the bundle path's big-band throttle, at its own rate
+        let hel = self.helius.as_ref().is_some_and(|h| expected >= h.cfg.min_expected_lamports as i64);
+        if let Some(h) = self.helius.as_mut().filter(|_| hel) {
+            while h.recent.front().is_some_and(|x| t.saturating_sub(*x) >= 1_000_000_000) { h.recent.pop_front(); }
+            if h.recent.len() >= h.cfg.max_per_sec as usize { return fail(d, "helius_rate"); }
+        }
+        if big && !hel && !self.big.peek(t) { return fail(d, "band_throttle"); }
         // a bucket-2 route expecting this much is not sent at all (OD-3's alternative); `crowded_pool` is the queue's drop
         if crowding.bucket >= 2 && self.pol.crowded_skip_min_expected_lamports > 0 && expected >= self.pol.crowded_skip_min_expected_lamports as i64 {
             return fail(d, "crowded_skip");
@@ -1343,7 +1364,7 @@ impl Exec {
         let mut tip = tipped.map(|(a, t)| (a, t.lamports));
         // FT-006 (`[send_policy.bam]`): a BAM-led target slot's bid, raised toward the floor per CU of the transaction's CU
         // limit, within the edge's share, the cap and the decision's bar below; Jito leaders bid the band's tip
-        let bam = match (tip, i.leader.kind == LeaderKind::Bam && self.pol.bam.enabled) {
+        let bam = match (tip, i.leader.kind == LeaderKind::Bam && self.pol.bam.enabled && !hel) {
             (Some((_, band_tip)), true) => {
                 let cap = self.tips.as_ref().map_or(u64::MAX, |p| p.model.cap);
                 let bar_room = expected - BASE_FEE as i64 - margin_floor.max(self.margin_lamports) as i64;
@@ -1355,13 +1376,28 @@ impl Exec {
             if !b.reached() && self.pol.bam.below_floor == "skip" { return fail(d, "bam_bid_below_floor"); }
             tip = tip.map(|(a, _)| (a, b.lamports));
         }
+        // arbx-fast: the Helius copy's priority fee (cu price x the transaction's CU limit) and tip (`tip_share` of the edge
+        // left after base and priority fee, at least the path's minimum), to the next of Helius's tip accounts
+        let (mut prio_fee, mut hel_cu_price) = (0u64, 0u64);
+        if hel {
+            let cu_l = self.cu_limit_of(&r);
+            if let Some(h) = self.helius.as_mut() {
+                hel_cu_price = h.cfg.cu_price_micro;
+                prio_fee = cu_l * hel_cu_price / 1_000_000;
+                let edge = (expected - BASE_FEE as i64 - prio_fee as i64).max(0);
+                let lamports = ((edge as f64 * h.cfg.tip_share) as u64).max(h.min_tip);
+                let acct = h.tips[h.cursor % h.tips.len()];
+                h.cursor += 1;
+                tip = Some((acct, lamports));
+            }
+        }
         let tip_l = tip.map_or(0, |x| x.1);
-        let net = expected - tip_l as i64 - BASE_FEE as i64;
-        let (min_profit, margin) = min_profit_onchain(tip_l, net, margin_floor, self.pol.margin_share);
+        let net = expected - tip_l as i64 - BASE_FEE as i64 - prio_fee as i64;
+        let (min_profit, margin) = min_profit_onchain(tip_l + prio_fee, net, margin_floor, self.pol.margin_share);
         let prio = Prio { band: bands::rank(band), crowd: crowding.rank(), ev: net };
         d.ev = Some(net);
         d.rank = Some(prio.rank());
-        if expected < (min_profit.max(tip_l + BASE_FEE + self.margin_lamports)) as i64 { return fail(d, "expected_below_min_profit"); }
+        if expected < (min_profit.max(tip_l + prio_fee + BASE_FEE + self.margin_lamports)) as i64 { return fail(d, if hel { "helius_below_min_profit" } else { "expected_below_min_profit" }); }
         // a would-send (shadow, dry run, a closed gate) models the bundle path's rate: at most its max_per_sec a second
         // (`would_rate`; `would_rate_crowded` for a crowded route: a model, not the queue's drop, review WP-05 #10)
         let would = !self.mode.sends() || gated;
@@ -1371,7 +1407,7 @@ impl Exec {
         }
         let Some(bh) = view.blockhash(&self.pol.blockhash_commitment).cloned() else { return fail(d, "blockhash_stale") };
         let t_built0 = now_ns();
-        let built = match self.build(&r, min_profit, bh.hash, tip, alts) {
+        let built = match self.build(&r, min_profit, bh.hash, tip, alts, hel_cu_price) {
             Ok(b) => b,
             Err(e) => return fail(d, &build_reason(&e)),
         };
@@ -1381,14 +1417,16 @@ impl Exec {
         let replayed_send = !would && self.offline;
         // a sending mode's path (always there: `Exec::new` refuses a live or canary executor without its bundle path)
         let send_path = if would || replayed_send { None } else {
-            match (self.paths.clone(), self.bundle_path) { (Some(p), Some(bp)) => Some((p, bp)), _ => return fail(d, "sender_stopped") }
+            let idx = if hel { self.helius.as_ref().and_then(|h| h.path) } else { self.bundle_path };
+            match (self.paths.clone(), idx) { (Some(p), Some(bp)) => Some((p, bp)), _ => return fail(d, "sender_stopped") }
         };
         // WP-11 (X2): the decision's delay arm in scope (recorded on would-sends too: nothing is fired there)
         let delay_ms = r.arms.delay_ms(band, kind, bv, sv);
         // the attempt: from here on nothing refuses it
         let attempt = self.next_attempt;
         self.next_attempt += 1;
-        let took_big = big && self.big.try_take(t);
+        let took_big = big && !hel && self.big.try_take(t);
+        if let Some(h) = self.helius.as_mut().filter(|_| hel) { h.recent.push_back(t); }
         // review WP-06 #2: every attempt that keeps the account it creates (sent or would-send) is counted
         if built.held_addition() { self.count("held_addition"); }
         self.inflight.insert(key, InflightEntry { sv: r.state_version, target_slot: target, leader: leader_pk, attempt, t });
@@ -1418,6 +1456,7 @@ impl Exec {
         // WP-11 (review #10): every arm the decision was assigned, beside the ones that applied (only with experiments on: an
         // attempt without arms is the line it was)
         if !r.arms.is_empty() { line["experiments_assigned"] = Value::Object(r.arms.assigned_json()); }
+        if hel { line["helius_big"] = json!({ "tip": tip_l, "prio_fee": prio_fee, "cu_price_micro": hel_cu_price, "cu_limit": built.cu_limit }); }
         if fired.is_none() && !replayed_send {
             // a would-send (shadow, dry run, a closed gate): recorded with sent = false
             self.would_recent.push_back(t);
@@ -1488,13 +1527,13 @@ impl Exec {
         self.rec.json(rec::ATTEMPTS, line);
         self.sent += 1;
         self.last_sent_ns = t;
-        self.reserved += BASE_FEE;
+        self.reserved += BASE_FEE + prio_fee;
         self.count(if self.mode == Mode::Canary { "canary_sent" } else { "live_sent" });
         if crowding.rank() > 0 { self.count("rank_crowded"); }
         self.by_sig.insert(sig, attempt);
         self.open.insert(attempt, Open { attempt, route: format!("{:?}>{:?}", r.buy.venue, r.sell.venue),
             decision: r.decision, opp: r.opp, sig, sig58: sig58.clone(), mint: r.mint, size: r.size, mid: r.mid, back: r.back,
-            trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit: built.min_profit, held_addition: built.held_addition(), worst: BASE_FEE, bh_slot: bh.slot,
+            trig: r.trig, trig_slot: r.slot, expected, tip: tip_l, min_profit: built.min_profit, held_addition: built.held_addition(), worst: BASE_FEE + prio_fee, bh_slot: bh.slot,
             bh_height: bh.height,
             target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_engine: t, t_signed, t_sent: None, bundle: None,
             path: path_name, fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
@@ -1556,7 +1595,7 @@ impl Exec {
     /// WP-06 #1) is the new account kept instead of closed first (`held_ata`), while the held set may grow (the additions
     /// in flight counted) and only when the expected profit also covers the rent the account locks: its route then asks
     /// min_profit + `build::HELD_RENT_BOUND` on chain, so the WSOL it must make covers the SOL the account keeps
-    fn build(&self, r: &RouteIn, min_profit: u64, blockhash: [u8; 32], tip: Option<(Pk, u64)>, alts: &AltSource) -> Result<Built, String> {
+    fn build(&self, r: &RouteIn, min_profit: u64, blockhash: [u8; 32], tip: Option<(Pk, u64)>, alts: &AltSource, cu_price: u64) -> Result<Built, String> {
         let leg = |m: &PoolMeta, data: &[u8], tin: Pk, tout: Pk, live: &[i64], end: Option<i32>, ext: Option<Pk>| build::leg(&build::LegIn {
             m, pool: data, tin, tout, amount_in: r.size, payer: self.payer, pump: self.pump.as_ref(), dlmm_live: live, dlmm_end: end, dlmm_ext: ext });
         let l1 = leg(&r.buy, &r.buy_data, *WSOL, r.mint, &r.buy_live, r.buy_end, r.buy_ext).map_err(|e| format!("buy leg: {e}"))?;
@@ -1578,11 +1617,11 @@ impl Exec {
         let close = !self.fault_keep;
         let ata = (!held).then_some(build::AtaOps { mint: r.mint, token_program: r.mint_prog, close });
         let done = |mut b: Built, fallback: &'static str, mp: u64, rent: u64| { (b.alt_fallback, b.min_profit, b.held_rent) = (fallback, mp, rent); b };
-        let mut b = self.compile(r, &route, ata, tip, blockhash, &[], guard)?;
+        let mut b = self.compile(r, &route, ata, tip, blockhash, &[], guard, cu_price)?;
         if b.fits() { return Ok(done(b, "none", min_profit, 0)); }
         let mut tables: Vec<Alt> = Vec::new();
         if self.builder.alt_index {
-            (b, tables) = self.with_index(r, &route, ata, tip, blockhash, alts, guard)?;
+            (b, tables) = self.with_index(r, &route, ata, tip, blockhash, alts, guard, cu_price)?;
             if b.fits() { return Ok(done(b, "alt_index", min_profit, 0)); }
         }
         // still over: a configured held-set addition keeps the new account (no close), when the held set may grow (the
@@ -1597,7 +1636,7 @@ impl Exec {
             else {
                 let route = route_at(min_profit + rent)?;
                 let kept = Some(build::AtaOps { close: false, ..a });
-                let (k, _) = if self.builder.alt_index { self.with_index(r, &route, kept, tip, blockhash, alts, guard)? } else { (self.compile(r, &route, kept, tip, blockhash, &tables, guard)?, vec![]) };
+                let (k, _) = if self.builder.alt_index { self.with_index(r, &route, kept, tip, blockhash, alts, guard, cu_price)? } else { (self.compile(r, &route, kept, tip, blockhash, &tables, guard, cu_price)?, vec![]) };
                 if k.fits() { return Ok(done(k, "held_ata", min_profit + rent, rent)); }
                 b = k;
             }
@@ -1610,11 +1649,11 @@ impl Exec {
     /// of the tables given that hold any of its accounts, as the dry run counts them from the signed bytes
     #[allow(clippy::too_many_arguments)]
     fn compile(&self, r: &RouteIn, route: &build::Ix, ata: Option<build::AtaOps>, tip: Option<(Pk, u64)>, blockhash: [u8; 32], extra: &[Alt],
-        guard: Option<u64>) -> Result<Built, String> {
+        guard: Option<u64>, cu_price: u64) -> Result<Built, String> {
         let cu = (r.cu + if ata.is_some() { r.cu_ata.0 } else { 0 } + if ata.is_some_and(|a| a.close) { r.cu_ata.1 } else { 0 }).min(crate::cu_table::MAX_CU);
         #[cfg(test)]
         let cu = self.fault_cu.unwrap_or(cu);
-        let mut plan = build::Plan { payer: self.payer, cu_limit: cu as u32, loaded_data_limit: None, ata, tip };
+        let mut plan = build::Plan { payer: self.payer, cu_limit: cu as u32, loaded_data_limit: None, ata, tip, cu_price };
         let tables: Vec<&Alt> = self.alts.iter().chain(extra.iter()).collect();
         let sizes: HashMap<Pk, u32> = r.sizes.iter().copied().collect();
         // the accounts are the same with the limit instruction (the ComputeBudget program is there already)
@@ -1644,11 +1683,11 @@ impl Exec {
     /// accounts) and until the message fits, at most `[builder] max_alts`. Returns the last compile and the tables chosen
     #[allow(clippy::too_many_arguments)]
     fn with_index(&self, r: &RouteIn, route: &build::Ix, ata: Option<build::AtaOps>, tip: Option<(Pk, u64)>, blockhash: [u8; 32], alts: &AltSource,
-        guard: Option<u64>) -> Result<(Built, Vec<Alt>), String> {
+        guard: Option<u64>, cu_price: u64) -> Result<(Built, Vec<Alt>), String> {
         let statics: HashSet<Pk> = self.alts.iter().map(|a| a.key).collect();
         let cands: Vec<Alt> = alts.candidates(&[r.buy.pool, r.sell.pool]).iter().filter(|t| !statics.contains(*t)).filter_map(|t| alts.alt(t)).collect();
         let mut chosen: Vec<Alt> = Vec::new();
-        let mut b = self.compile(r, route, ata, tip, blockhash, &chosen, guard)?;
+        let mut b = self.compile(r, route, ata, tip, blockhash, &chosen, guard, cu_price)?;
         while !b.fits() && chosen.len() < self.builder.max_alts {
             let pick = cands.iter().enumerate().filter(|(_, c)| !chosen.iter().any(|x| x.key == c.key))
                 .map(|(i, c)| (b.msg.loadable.iter().filter(|k| c.index.contains_key(*k)).count(), i))
@@ -1656,7 +1695,7 @@ impl Exec {
             let Some((n, i)) = pick.filter(|(n, _)| *n >= 2) else { break };
             let _ = n;
             chosen.push(Alt { key: cands[i].key, index: cands[i].index.clone() });
-            b = self.compile(r, route, ata, tip, blockhash, &chosen, guard)?;
+            b = self.compile(r, route, ata, tip, blockhash, &chosen, guard, cu_price)?;
         }
         Ok((b, chosen))
     }
@@ -1704,7 +1743,7 @@ impl Exec {
     pub fn simulate(&mut self, r: RouteIn) {
         let t0 = now_ns();
         let min_profit = (BASE_FEE + self.cu_price * r.cu / 1_000_000).max(1);
-        let built = self.build(&r, min_profit, [0u8; 32], None, &AltSource::none());
+        let built = self.build(&r, min_profit, [0u8; 32], None, &AltSource::none(), 0);
         let t_built = now_ns();
         let mut line = Self::route_json(&r);
         line["t_ns"] = json!(t0);

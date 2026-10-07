@@ -1628,7 +1628,7 @@ async fn verify_bundle_on_the_new_layout() {
     let route_ix = build::route_ix(x.program, payer, quote, rt.size, mp, &[leg(&rt.buy, *WSOL, M2), leg(&rt.sell, M2, *WSOL)], None).unwrap();
     let sign = |ixs: Vec<build::Ix>| { let m = build::compile_v0(payer, &ixs, BH, &[], &[tip0.0]).unwrap(); build::sign(&m, &dk) };
     // the CU limit each plan asks: the route's 100,000 plus the create's 30,000 and the close's 5,000 when it makes them
-    let plan = |a: Option<build::AtaOps>| build::Plan { payer, cu_limit: 100_000 + a.map_or(0, |a| 30_000 + if a.close { 5_000 } else { 0 }), loaded_data_limit: Some(limit),
+    let plan = |a: Option<build::AtaOps>| build::Plan { payer, cu_price: 0, cu_limit: 100_000 + a.map_or(0, |a| 30_000 + if a.close { 5_000 } else { 0 }), loaded_data_limit: Some(limit),
         ata: a, tip: Some(tip0) };
     let good = build::bundle_ixs(&plan(Some(ata)), route_ix.clone());
     assert_eq!(failing(&sign(good.clone()), &want), Vec::<String>::new());
@@ -1795,7 +1795,7 @@ async fn the_rent_cap_limits_held_additions_only() {
     // 4,078,560 recoverable + 2,282,880 is over the 6,000,000 cap: no held addition, the bundle does not fit
     r.x.set_money(money(1_000_000_000, 900_000_000, 4_078_560));
     assert!(!r.x.held_growth_ok());
-    let e = r.x.build(&a, 40_001, BH, tip, &alts).err().unwrap();
+    let e = r.x.build(&a, 40_001, BH, tip, &alts, 0).err().unwrap();
     assert!(e.starts_with("oversized(") && e.contains(&format!("held_ata: recoverable rent 4078560 + {} over the rent cap 6000000", build::HELD_RENT_BOUND)), "{e}");
     let t = now_ns();
     let i = r.x.inputs(&r.view, 100, t);
@@ -1934,14 +1934,14 @@ fn held_route(x: &mut Exec, mint: Pk, buy: u8, sell: u8, table: Pk) -> (RouteIn,
     (w.mint, w.buy.t0, w.sell.t0, w.buy.extra, w.buy.pool, w.sell.pool, w.back) = (mint, mint, mint, vec![mint], [buy; 32], [sell; 32], w.size + 3_000_000);
     let tip = Some((tip_accounts()[0], 35_000));
     let route = build::route_ix(x.program, x.payer, build::ata_of(&x.payer, &WSOL, &crate::pda::TOKEN_PROGRAM), w.size, 40_001, &[leg_of(x, &w, true), leg_of(x, &w, false)], None).unwrap();
-    let full = x.compile(&w, &route, Some(build::AtaOps { mint, token_program: *crate::pda::TOKEN_PROGRAM, close: true }), tip, BH, &[], None).unwrap().msg.loadable.clone();
+    let full = x.compile(&w, &route, Some(build::AtaOps { mint, token_program: *crate::pda::TOKEN_PROGRAM, close: true }), tip, BH, &[], None, 0).unwrap().msg.loadable.clone();
     let entries = |n: usize| -> Vec<Option<Pk>> { full[..n].iter().map(|k| Some(*k)).chain([Some(*crate::pda::TOKEN_PROGRAM)]).collect() };
     let by_pool: HashMap<Pk, Vec<Pk>> = [(w.buy.pool, vec![table])].into_iter().collect();
     let keep = x.builder.held_max;
     x.builder.held_max = 40;
     let n = (0..full.len()).find(|n| {
         let t: HashMap<Pk, Vec<Option<Pk>>> = [(table, entries(*n))].into_iter().collect();
-        x.build(&w, 40_001, BH, tip, &AltSource { tables: &t, by_pool: &by_pool }).is_ok_and(|b| b.alt_fallback == "held_ata")
+        x.build(&w, 40_001, BH, tip, &AltSource { tables: &t, by_pool: &by_pool }, 0).is_ok_and(|b| b.alt_fallback == "held_ata")
     }).expect("a table size where only the held-ATA fallback fits");
     x.builder.held_max = keep;
     (w, entries(n))
@@ -1969,7 +1969,7 @@ async fn held_additions_count_in_flight_and_landed() {
     assert_eq!(r.x.held_count(), 1, "in flight");
     // another token while the first is in flight: the held set is full
     assert_eq!(decide(&mut r, &b, 1, t + S).reason, "oversized");
-    assert!(r.x.build(&b, 40_001, BH, Some((tip_accounts()[0], 35_000)), &alts).err().unwrap().contains("held_ata: 1 tokens held of held_max 1"));
+    assert!(r.x.build(&b, 40_001, BH, Some((tip_accounts()[0], 35_000)), &alts, 0).err().unwrap().contains("held_ata: 1 tokens held of held_max 1"));
     // the first lands: its token joins the held set; the limit still binds
     let sig = la["tx"]["sig"].as_str().unwrap().to_string();
     r.x.on_wallet_tx(&json!({ "sig": sig, "ok": true, "slot": 101, "fee": 5_000 }), t + 2 * S, &|_| None);
@@ -2035,12 +2035,12 @@ async fn the_size_budget_ladder() {
     let tip = Some((tip_accounts()[0], 35_000));
     assert_eq!(r.x.builder.held_max, 0, "held-set additions are off by default");
     // nothing to add: oversized (keeping the account saves the close, not 200 bytes)
-    let e = r.x.build(&w, 40_001, BH, tip, &AltSource::none()).err().unwrap();
+    let e = r.x.build(&w, 40_001, BH, tip, &AltSource::none(), 0).err().unwrap();
     assert!(e.starts_with("oversized("), "{e}");
     assert_eq!(build_reason(&e), "oversized");
     // a learned table naming the PumpSwap pool and every account the message could load
     let full = { let m = r.x.compile(&w, &build::route_ix(r.x.program, r.x.payer, build::ata_of(&r.x.payer, &WSOL, &crate::pda::TOKEN_PROGRAM), w.size, 40_001,
-        &[leg_of(&r.x, &w, true), leg_of(&r.x, &w, false)], None).unwrap(), Some(build::AtaOps { mint: M2, token_program: *crate::pda::TOKEN_PROGRAM, close: true }), tip, BH, &[], None).unwrap();
+        &[leg_of(&r.x, &w, true), leg_of(&r.x, &w, false)], None).unwrap(), Some(build::AtaOps { mint: M2, token_program: *crate::pda::TOKEN_PROGRAM, close: true }), tip, BH, &[], None, 0).unwrap();
         m.msg.loadable.clone() };
     assert!(full.len() > 20, "{}", full.len());
     // (a learned table holds the token program too: loadable once no CloseAccount invokes it)
@@ -2049,7 +2049,7 @@ async fn the_size_budget_ladder() {
     let tables: HashMap<Pk, Vec<Option<Pk>>> = [(table, entries(full.len()))].into_iter().collect();
     let by_pool: HashMap<Pk, Vec<Pk>> = [(w.buy.pool, vec![table])].into_iter().collect();
     let alts = AltSource { tables: &tables, by_pool: &by_pool };
-    let b = r.x.build(&w, 40_001, BH, tip, &alts).unwrap();
+    let b = r.x.build(&w, 40_001, BH, tip, &alts, 0).unwrap();
     assert_eq!((b.alt_fallback, b.index_tables.clone(), b.creates_ata(), b.closes_ata()), ("alt_index", vec![table], true, true));
     assert!(b.fits() && build::tx_bytes(&b.msg) <= build::MAX_TX_BYTES);
     // the executor's own decision with that table: a would-send whose signed bytes pass every check (the table resolves)
@@ -2068,20 +2068,20 @@ async fn the_size_budget_ladder() {
     let n = (0..full.len()).find(|n| {
         let part: HashMap<Pk, Vec<Option<Pk>>> = [(table, entries(*n))].into_iter().collect();
         r.x.builder.held_max = 40;
-        let ok = r.x.build(&rich, 40_001, BH, tip, &AltSource { tables: &part, by_pool: &by_pool }).is_ok_and(|b| b.alt_fallback == "held_ata");
+        let ok = r.x.build(&rich, 40_001, BH, tip, &AltSource { tables: &part, by_pool: &by_pool }, 0).is_ok_and(|b| b.alt_fallback == "held_ata");
         r.x.builder.held_max = 0;
         ok
     }).expect("some table size makes the held-ATA fallback the one that fits");
     let part: HashMap<Pk, Vec<Option<Pk>>> = [(table, entries(n))].into_iter().collect();
     let alts = AltSource { tables: &part, by_pool: &by_pool };
     // the default: no held-set addition, the bundle is refused
-    let e = r.x.build(&rich, 40_001, BH, tip, &alts).err().unwrap();
+    let e = r.x.build(&rich, 40_001, BH, tip, &alts, 0).err().unwrap();
     assert!(e.starts_with("oversized(") && !e.contains("held_ata"), "{e}");
     // configured: the poor route cannot pay the rent; the rich one keeps the account and its route asks the rent too
     r.x.builder.held_max = 40;
-    let e = r.x.build(&w, 40_001, BH, tip, &alts).err().unwrap();
+    let e = r.x.build(&w, 40_001, BH, tip, &alts, 0).err().unwrap();
     assert!(e.starts_with("oversized(") && e.contains("held_ata: expected 50000 below min_profit + the rent kept"), "{e}");
-    let b = r.x.build(&rich, 40_001, BH, tip, &alts).unwrap();
+    let b = r.x.build(&rich, 40_001, BH, tip, &alts, 0).unwrap();
     assert_eq!((b.alt_fallback, b.creates_ata(), b.closes_ata(), b.held_addition(), b.min_profit, b.held_rent),
         ("held_ata", true, false, true, 40_001 + build::HELD_RENT_BOUND, build::HELD_RENT_BOUND));
     let raw = build::sign(&b.msg, &wallet_key());
@@ -2091,7 +2091,7 @@ async fn the_size_budget_ladder() {
     // the held set full (held_max tokens held beyond WSOL, USDC, USDT): oversized
     r.x.builder.held_max = 1;
     r.x.held.insert([248; 32]);
-    let e = r.x.build(&rich, 40_001, BH, tip, &alts).err().unwrap();
+    let e = r.x.build(&rich, 40_001, BH, tip, &alts, 0).err().unwrap();
     assert!(e.contains("held_ata: 1 tokens held of held_max 1"), "{e}");
     r.x.held.remove(&[248; 32]);
     // the executor's own dry-run decision: a held-set addition its checks pass from the signed bytes (configured and
@@ -2109,7 +2109,7 @@ async fn the_size_budget_ladder() {
     assert!(c["detail"]["with_close"]["bytes"].as_u64().unwrap() > build::MAX_TX_BYTES as u64, "{c}");
     // max_alts = 0: no table from the index
     r.x.builder.max_alts = 0;
-    assert!(r.x.build(&w, 40_001, BH, tip, &alts).err().unwrap().starts_with("oversized"));
+    assert!(r.x.build(&w, 40_001, BH, tip, &alts, 0).err().unwrap().starts_with("oversized"));
 }
 
 /// one leg of `worst_route` as the executor builds it
@@ -2226,14 +2226,14 @@ async fn bundle_vectors_for_the_venue_harness() {
     for (r, _, min_profit, _) in &routes {
         let route = build::route_ix(x0.program, payer, ours[0], r.size, *min_profit, &[leg_of(&x0, r, true), leg_of(&x0, r, false)], None).unwrap();
         let plan = Some(build::AtaOps { mint, token_program: mint_prog, close: true });
-        for k in x0.compile(r, &route, plan, Some((tip_acct, 1)), BH, &[], None).unwrap().msg.loadable { if !ours.contains(&k) && !keys.contains(&k) { keys.push(k); } }
+        for k in x0.compile(r, &route, plan, Some((tip_acct, 1)), BH, &[], None, 0).unwrap().msg.loadable { if !ours.contains(&k) && !keys.contains(&k) { keys.push(k); } }
     }
     let table = ([0xa1u8; 32], keys);
     let x = mk(vec![table.clone()]);
     let mut cases_out = Vec::new();
     for (c, (r, tip_l, min_profit, scaled)) in cases.iter().zip(&routes) {
         let (bm, sm) = (&r.buy, &r.sell);
-        let b = x.build(r, *min_profit, BH, Some((tip_acct, *tip_l)), &AltSource::none()).unwrap_or_else(|e| panic!("{}: {e}", c.name));
+        let b = x.build(r, *min_profit, BH, Some((tip_acct, *tip_l)), &AltSource::none(), 0).unwrap_or_else(|e| panic!("{}: {e}", c.name));
         assert!(b.fits() && b.alt_fallback == "none", "{}: {} bytes", c.name, build::tx_bytes(&b.msg));
         assert_eq!((b.creates_ata(), b.closes_ata()), (!c.held, !c.held), "{}", c.name);
         let raw = build::sign(&b.msg, &wallet_key());
@@ -2411,7 +2411,7 @@ fn clmm_alt(x0: &Exec, built: &[ClmmBuilt], payer: Pk, tip_acct: Pk) -> Vec<Pk> 
         let ours = [build::ata_of(&payer, &WSOL, &crate::pda::TOKEN_PROGRAM), build::ata_of(&payer, &r.mint, &r.mint_prog), build::pump_uva(&payer)];
         let route = build::route_ix(x0.program, payer, ours[0], r.size, b.min_profit, &[leg_of(x0, r, true), leg_of(x0, r, false)], None).unwrap();
         let plan = Some(build::AtaOps { mint: r.mint, token_program: r.mint_prog, close: true });
-        for k in x0.compile(r, &route, plan, Some((tip_acct, 1)), BH, &[], None).unwrap().msg.loadable { if !ours.contains(&k) && !keys.contains(&k) { keys.push(k); } }
+        for k in x0.compile(r, &route, plan, Some((tip_acct, 1)), BH, &[], None, 0).unwrap().msg.loadable { if !ours.contains(&k) && !keys.contains(&k) { keys.push(k); } }
     }
     keys
 }
@@ -2446,7 +2446,7 @@ async fn clmm_bundle_vectors_for_the_venue_harness() {
     let mut cases_out = Vec::new();
     for (c, b) in cases.iter().zip(&built) {
         let r = &b.r;
-        let bx = x.build(r, b.min_profit, BH, Some((tip_acct, b.tip)), &AltSource::none()).unwrap_or_else(|e| panic!("{}: {e}", c.name));
+        let bx = x.build(r, b.min_profit, BH, Some((tip_acct, b.tip)), &AltSource::none(), 0).unwrap_or_else(|e| panic!("{}: {e}", c.name));
         assert!(bx.fits() && bx.alt_fallback == "none", "{}: {} bytes", c.name, build::tx_bytes(&bx.msg));
         assert_eq!((bx.creates_ata(), bx.closes_ata()), (!c.held, !c.held), "{}", c.name);
         let raw = build::sign(&bx.msg, &wallet_key());
@@ -2611,7 +2611,7 @@ async fn clmm_routes_and_the_lookup_tables() {
     for (label, tables) in [("none", vec![]), ("default", default.clone()), ("default+own", with_own)] {
         let x = mk(tables);
         for (c, b) in cases.iter().filter(|c| !c.profit_fail).zip(&built) {
-            let r = x.build(&b.r, b.min_profit, BH, Some((tip_acct, b.tip)), &AltSource::none());
+            let r = x.build(&b.r, b.min_profit, BH, Some((tip_acct, b.tip)), &AltSource::none(), 0);
             // an oversized build says its size: "oversized(N bytes, M locks...)"
             let (fits, bytes) = match &r {
                 Ok(bx) => (bx.fits(), build::tx_bytes(&bx.msg)),
@@ -3386,4 +3386,36 @@ async fn the_executor_refuses_a_size_past_its_arm() {
     assert_eq!(d.reason, "sent", "out of the arm's scope: {d:?}");
     let _ = r.settled().await;
     assert_eq!(r.lines("attempts")[0]["experiments_assigned"], json!({ "size_max_sol": 0.05 }), "the assigned arm recorded (review #10)");
+}
+
+// ------------------------------------------------------------------------------------------------ arbx-fast: Helius big gaps
+
+/// arbx-fast `[send_policy.helius_big]`: a decision expecting at least the threshold goes to Helius Sender with 70% of its
+/// edge (after base and priority fee) as the tip, the compute-unit price Helius requires, and an on-chain min_profit that
+/// covers tip + priority fee + base fee + margin; a smaller one stays a Jito bundle with the band's tip
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_big_gap_goes_to_helius_with_seventy_percent() {
+    let extra = "[[send]]\nname = \"helius\"\nkind = \"helius\"\nurl = \"https://127.0.0.1:9/fast\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [send_policy.helius_big]\nenabled = true\nmin_expected_lamports = 1500000\ntip_share = 0.7\ncu_price_micro = 10000\nmax_per_sec = 2\n";
+    let mut r = rig("helius-big", Mode::Shadow, extra).await;
+    let d = r.decide(route(1, damm(2, MINT), 2_000_000, 7), 97, now_ns());
+    assert!(d.would_send, "{d:?}");
+    // CU limit 100,000 (the wallet holds MINT) x 10,000 micro-lamports = 1,000 priority; edge 2,000,000 - 5,000 - 1,000
+    let prio = 1_000u64;
+    let tip = (1_994_000f64 * 0.7) as u64;
+    let a = r.lines("attempts");
+    assert_eq!((a[0]["helius_big"]["tip"].as_u64(), a[0]["helius_big"]["prio_fee"].as_u64(), a[0]["helius_big"]["cu_price_micro"].as_u64()),
+        (Some(tip), Some(prio), Some(10_000)), "{}", a[0]);
+    assert_eq!(a[0]["min_profit_onchain"].as_u64(), Some(tip + prio + BASE_FEE + 1), "tip + priority + base fee + the margin floor");
+    assert_eq!(d.ev, Some(2_000_000 - tip as i64 - BASE_FEE as i64 - prio as i64));
+    // under the threshold: a Jito bundle, no Helius fields
+    let d = r.decide(route(3, damm(4, MINT), 1_000_000, 8), 97, now_ns());
+    assert!(d.would_send, "{d:?}");
+    let a = r.lines("attempts");
+    assert!(a[1]["helius_big"].is_null(), "{}", a[1]);
+    // the Helius window: at most max_per_sec (2) a second
+    let t = now_ns();
+    let _ = r.decide(route(5, damm(6, MINT), 2_000_000, 9), 97, t);
+    let d = r.decide(route(7, damm(8, MINT), 2_000_000, 10), 97, t);
+    assert_eq!(d.reason, "helius_rate", "{d:?}");
 }
