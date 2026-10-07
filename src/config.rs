@@ -886,6 +886,11 @@ pub struct HeliusBigCfg {
     /// Helius its own minimum: a smaller big gap goes to Helius alone
     #[serde(default)]
     pub also: Vec<String>,
+    /// with `[send_policy.direct] nonce_accounts`: one variant per path instead of one shared transaction, each with a
+    /// durable nonce (AdvanceNonceAccount first, the nonce's value as its blockhash) and ONLY its own path's tip (the full
+    /// share): every variant names the same nonce value, so at most one lands and the winner pays one path's tip
+    #[serde(default)]
+    pub nonce_variants: bool,
 }
 fn hb_path() -> String { "helius".into() }
 fn hb_min_expected() -> u64 { 1_500_000 }
@@ -893,7 +898,7 @@ fn hb_share() -> f64 { 0.60 }
 fn hb_prio() -> u64 { 10_000 }
 fn hb_rate() -> u32 { 2 }
 impl Default for HeliusBigCfg {
-    fn default() -> Self { HeliusBigCfg { enabled: false, path: hb_path(), min_expected_lamports: hb_min_expected(), tip_share: hb_share(), priority_fee_lamports: hb_prio(), max_per_sec: hb_rate(), also: vec![] } }
+    fn default() -> Self { HeliusBigCfg { enabled: false, path: hb_path(), min_expected_lamports: hb_min_expected(), tip_share: hb_share(), priority_fee_lamports: hb_prio(), max_per_sec: hb_rate(), also: vec![], nonce_variants: false } }
 }
 impl HeliusBigCfg {
     pub fn off(&self) -> bool { !self.enabled }
@@ -1784,6 +1789,7 @@ impl Config {
                 Some(_) => bail!("[send_policy.helius_big] path {:?} must be an enabled [[send]] of kind \"helius\"", hb.path),
                 None => bail!("[send_policy.helius_big] path {:?} is not a [[send]] entry", hb.path),
             }
+            if hb.nonce_variants && sp.direct.nonce_accounts.is_empty() { bail!("[send_policy.helius_big] nonce_variants needs [send_policy.direct] nonce_accounts"); }
             for a in &hb.also {
                 match cfg.sends.iter().find(|x| &x.name == a) {
                     Some(x) if x.enabled && matches!(x.kind, SendKind::Bolt | SendKind::Lunar | SendKind::Iris | SendKind::Nozomi | SendKind::Falcon | SendKind::ZeroSlot) => {}

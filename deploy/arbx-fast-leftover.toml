@@ -480,11 +480,12 @@ path = "helius"
 min_expected_lamports = 1700000   # 60% of the edge must clear Helius Sender Max's 0.001 SOL minimum; Bolt and Astralane join when it also covers theirs
 tip_share = 0.60   # owner 2026-10-07: 60% of the expected profit
 priority_fee_lamports = 10000     # Sender Max: at least 5,000 lamports, 10,000 recommended (the CU price is derived from it)
-also = ["bolt", "astralane"]      # the same transaction to Raiden Bolt and Astralane at the same instant (their 0.001 SOL tips out of the 70%)
+also = ["bolt", "astralane"]      # Raiden Bolt and Astralane get the trade at the same instant as Helius
+nonce_variants = true            # owner 2026-10-07: one variant per path on a durable nonce, each tipping only its own path (at most one lands)
 max_per_sec = 2
 [send_policy.direct]
-# (the durable nonces of 2g7rYv7y..., the direct arm's, are not frz's: none here)
-nonce_accounts = []
+# arbx-fast: FRZ's arb-nonce-0..5 (initialized, authority FRZ; read 2026-10-07): the big-gap nonce variants use them in turn
+nonce_accounts = ["GneMxM94egofWv9pyD3xnqsydGSDLtwbcqTPTnquC2Jw", "FKa1EASwSoaCQQtKf5xYZ1RR39SAWn2z9r5vXkQfJGUr", "GUbhcMk1thCA5gE7feYBMmPCx2BD4hcpw4Ap9Zq4t5Qz", "9QWt3LSvztdqBtLYNtKgU6VgTdugaMH8VoRWbttawMFu", "4pfiJAsJS6qQ3aLoFtVpHnfww8dWXBE7KhLdrVvckuEN", "H7wHsenmmchQAAQjd92rJR68mNf7BZUkGHDFtyYnH1G1"]
 
 [send_policy.bam]
 # FT-006, the BAM landing fix (src/config.rs BamPolicyCfg). FT-004/FT-005: bundles bidding < 0.045 lamports per requested CU

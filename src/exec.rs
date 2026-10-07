@@ -224,6 +224,8 @@ pub struct Bh { pub hash: [u8; 32], pub slot: u64, pub height: Option<u64>, pub 
 pub struct SendView {
     pub head: Option<Bh>,
     pub meta: Option<Bh>,
+    /// arbx-fast: the durable nonces' stored values (the engine copies them from its store before each decision)
+    pub nonces: HashMap<Pk, [u8; 32]>,
     /// the newest block height seen, with its slot
     pub height: Option<(u64, u64)>,
     sched: BTreeMap<u64, Pk>,
@@ -670,6 +672,11 @@ pub struct Exec {
     helius: Option<HeliusBig>,
     /// arbx-fast: the `also` paths' tip transfers of the decision being built (set and cleared in `decide_inner`)
     build_extra_tips: Vec<(Pk, u64)>,
+    /// arbx-fast: the durable nonces the big-gap variants use in turn (`nonce_variants`), the next one's index, and the nonce
+    /// of the transaction being built (set and cleared in `decide_inner`)
+    nonce_keys: Vec<Pk>,
+    nonce_cursor: usize,
+    build_nonce: Option<Pk>,
     jito: Option<Arc<jito::Jito>>,
     /// live and canary: the trading key
     key: Option<ed25519_dalek::SigningKey>,
@@ -1024,7 +1031,10 @@ impl Exec {
         let settle = rpc.with_role(crate::rpc::Role::Settle);
         let model = crate::tip::TipModel::from_cfg(cfg).map_err(|e| anyhow::anyhow!(e))?;
         let x = Exec { mode, payer, program: pk(&cfg.exec.program), alts: alts.iter().map(|(k, a)| Alt::new(*k, a)).collect(), alt_lists, pump, held, rpc, settle,
-            rt: tokio::runtime::Handle::current(), back, paths, bundle_path, helius, build_extra_tips: Vec::new(), jito, key, dry, pol: cfg.send_policy.clone(), skip_kinds,
+            rt: tokio::runtime::Handle::current(), back, paths, bundle_path, helius, build_extra_tips: Vec::new(),
+            nonce_keys: if cfg.send_policy.helius_big.enabled && cfg.send_policy.helius_big.nonce_variants {
+                cfg.send_policy.direct.nonce_accounts.iter().filter_map(|k| bs58::decode(k).into_vec().ok().and_then(|v| Pk::try_from(v).ok())).collect() } else { vec![] },
+            nonce_cursor: 0, build_nonce: None, jito, key, dry, pol: cfg.send_policy.clone(), skip_kinds,
             bundle_host: bundle_cfg.filter(|c| !c.url.contains("${")).map(|c| send::host_of(&c.url)).filter(|h| !h.is_empty()),
             tips: bundle_cfg.map(|c| TipPolicy::from_path(c, model.clone())), path_rate: bundle_cfg.and_then(|c| c.max_per_sec).unwrap_or(5) as usize, would_recent: VecDeque::new(),
             max_size, cap_failed_fees: if mode == Mode::Canary { cfg.canary.max_spend_lamports } else { cfg.live.max_failed_fees_lamports },
@@ -1399,6 +1409,12 @@ impl Exec {
         // left after base and priority fee, at least the path's minimum), to the next of Helius's tip accounts
         let (mut prio_fee, mut hel_cu_price) = (0u64, 0u64);
         let mut extra_tips: Vec<(Pk, u64)> = Vec::new();
+        // arbx-fast `nonce_variants`: the next durable nonce whose value the engine knows (none known: the shared transaction)
+        let nonce: Option<(Pk, [u8; 32])> = if hel && !self.nonce_keys.is_empty() {
+            let n = self.nonce_keys.len();
+            (0..n).map(|j| self.nonce_keys[(self.nonce_cursor + j) % n]).find_map(|k| view.nonces.get(&k).map(|v| (k, *v)))
+        } else { None };
+        let use_nonce = nonce.is_some();
         if hel {
             let cu_l = self.cu_limit_of(&r);
             if let Some(h) = self.helius.as_mut() {
@@ -1411,9 +1427,12 @@ impl Exec {
                 let cur = h.cursor;
                 let budget = (edge as f64 * h.cfg.tip_share) as u64;
                 let mut extra = 0u64;
-                extra_tips = h.also.iter().filter_map(|(_, _, t, l)| {
-                    (budget >= extra + l + h.min_tip).then(|| { extra += l; (t[cur % t.len()], *l) })
-                }).collect();
+                // with durable-nonce variants each path's copy carries only its own tip (the full share): no shared tips
+                if !use_nonce {
+                    extra_tips = h.also.iter().filter_map(|(_, _, t, l)| {
+                        (budget >= extra + l + h.min_tip).then(|| { extra += l; (t[cur % t.len()], *l) })
+                    }).collect();
+                }
                 let lamports = budget.saturating_sub(extra).max(h.min_tip);
                 let acct = h.tips[cur % h.tips.len()];
                 h.cursor += 1;
@@ -1438,8 +1457,30 @@ impl Exec {
         let Some(bh) = view.blockhash(&self.pol.blockhash_commitment).cloned() else { return fail(d, "blockhash_stale") };
         let t_built0 = now_ns();
         self.build_extra_tips = extra_tips.clone();
-        let built = self.build(&r, min_profit, bh.hash, tip, alts, hel_cu_price);
+        self.build_nonce = nonce.map(|n| n.0);
+        let msg_hash = nonce.map_or(bh.hash, |n| n.1);
+        let built = self.build(&r, min_profit, msg_hash, tip, alts, hel_cu_price);
+        // arbx-fast: one variant per `also` path on the same nonce, each paying only its own path's tip (the full share, at
+        // least that path's minimum) and asking on chain for that tip + priority + base fee + margin; a path the edge
+        // cannot pay is left out
+        let mut variants: Vec<(Option<usize>, (Pk, u64), Built, u64)> = Vec::new();
+        if let (Some(_), Some(h)) = (nonce, self.helius.as_ref().filter(|_| hel)) {
+            let edge = (expected - BASE_FEE as i64 - prio_fee as i64).max(0);
+            let budget = (edge as f64 * h.cfg.tip_share) as u64;
+            let cur = self.nonce_cursor;
+            // every path's variant is built (a would-send records them all); one without a path (shadow, dry run) is not fired
+            let plan: Vec<(Option<usize>, (Pk, u64))> = h.also.iter().map(|(_, idx, t, l)| (*idx, (t[cur % t.len()], budget.max(*l)))).collect();
+            self.build_extra_tips.clear();
+            for (ai, vt) in plan {
+                let vnet = expected - vt.1 as i64 - BASE_FEE as i64 - prio_fee as i64;
+                let (vmp, _) = min_profit_onchain(vt.1 + prio_fee, vnet, margin_floor, self.pol.margin_share);
+                if expected < vmp as i64 { continue; }
+                if let Ok(b) = self.build(&r, vmp, msg_hash, Some(vt), alts, hel_cu_price) { variants.push((ai, vt, b, vmp)); }
+            }
+        }
         self.build_extra_tips.clear();
+        self.build_nonce = None;
+        if use_nonce { self.nonce_cursor = self.nonce_cursor.wrapping_add(1); }
         let built = match built {
             Ok(b) => b,
             Err(e) => return fail(d, &build_reason(&e)),
@@ -1472,15 +1513,22 @@ impl Exec {
             let t_signed = now_ns();
             // WP-11 (X2): the delay arm sleeps on the send task before the copy leaves, never here on the engine thread
             let mut copies = vec![Copy { path: bp, raw: raw.clone(), tip, blockhash_slot: Some(bh.slot), leader_kind: Some(i.leader.kind.as_str()) }];
+            // arbx-fast: each nonce variant signed and sent to its own path at the same instant (one nonce: at most one lands)
+            let mut var_sigs: Vec<String> = Vec::new();
+            for (ai, vt, vb, _) in variants.iter().filter_map(|(ai, vt, vb, mp)| ai.map(|ai| (ai, vt, vb, mp))) {
+                let vraw = Arc::new(build::sign(&vb.msg, self.key.as_ref().expect("a sending mode holds its key")));
+                var_sigs.push(send::first_signature(&vraw).unwrap_or_default());
+                copies.push(Copy { path: ai, raw: vraw, tip: Some(*vt), blockhash_slot: Some(bh.slot), leader_kind: Some(i.leader.kind.as_str()) });
+            }
             // arbx-fast: the same signed transaction to every `also` path at the same instant (only one copy can land)
-            if hel {
+            if hel && !use_nonce {
                 for ((_, idx, _, _), et) in self.helius.as_ref().map_or(&[][..], |h| &h.also[..]).iter().zip(extra_tips.iter()) {
                     if let Some(ai) = idx { copies.push(Copy { path: *ai, raw: raw.clone(), tip: Some(*et), blockhash_slot: Some(bh.slot), leader_kind: Some(i.leader.kind.as_str()) }); }
                 }
             }
             let fire = paths.fire_after(attempt, copies, prio,
                 std::time::Duration::from_millis(delay_ms.unwrap_or(0) as u64));
-            (paths, bp, raw, fire, t_signed, now_ns())
+            (paths, bp, raw, fire, t_signed, now_ns(), var_sigs)
         });
         let snap = self.leaders.as_ref().map(|b| serde_json::to_value(b.snapshot(target)).unwrap_or(Value::Null))
             .unwrap_or_else(|| json!({ "slot": target, "leader": i.leader.identity, "kind": i.leader.kind, "kind_src": i.leader.kind_src, "be_rtt_ms": crate::leaders::be_rtt(now_ns()) }));
@@ -1496,7 +1544,7 @@ impl Exec {
         // WP-11 (review #10): every arm the decision was assigned, beside the ones that applied (only with experiments on: an
         // attempt without arms is the line it was)
         if !r.arms.is_empty() { line["experiments_assigned"] = Value::Object(r.arms.assigned_json()); }
-        if hel { line["helius_big"] = json!({ "tip": tip.map_or(0, |x| x.1), "also": self.helius.as_ref().map(|h| h.also.iter().zip(extra_tips.iter()).map(|((n, _, _, _), t)| json!({ "path": n, "tip": t.1 })).collect::<Vec<_>>()), "tips_total": tip_l, "prio_fee": prio_fee, "cu_price_micro": hel_cu_price, "cu_limit": built.cu_limit }); }
+        if hel { line["helius_big"] = json!({ "nonce": nonce.map(|n| b58(&n.0)), "variants": variants.iter().map(|(_, vt, _, vmp)| json!({ "tip_account": b58(&vt.0), "tip": vt.1, "min_profit": vmp })).collect::<Vec<_>>(), "tip": tip.map_or(0, |x| x.1), "also": self.helius.as_ref().map(|h| h.also.iter().zip(extra_tips.iter()).map(|((n, _, _, _), t)| json!({ "path": n, "tip": t.1 })).collect::<Vec<_>>()), "tips_total": tip_l, "prio_fee": prio_fee, "cu_price_micro": hel_cu_price, "cu_limit": built.cu_limit }); }
         if fired.is_none() && !replayed_send {
             // a would-send (shadow, dry run, a closed gate): recorded with sent = false
             self.would_recent.push_back(t);
@@ -1511,8 +1559,8 @@ impl Exec {
                 let raw = build::sign(&built.msg, &dk);
                 let t_signed = now_ns();
                 // what the signed bytes must be, from the decision and the policy, never from the build (review WP-06 #2)
-                let mut want = self.want(&r, dk.verifying_key().to_bytes(), bh.hash, tip, min_profit, margin_floor, &raw, alts);
-                if hel { want.helius = Some(HeliusWant { cu_price: hel_cu_price, extra: extra_tips.clone(), accounts: self.helius.as_ref().map(|h| h.tips.clone()).unwrap_or_default() }); }
+                let mut want = self.want(&r, dk.verifying_key().to_bytes(), msg_hash, tip, min_profit, margin_floor, &raw, alts);
+                if hel { want.helius = Some(HeliusWant { cu_price: hel_cu_price, extra: extra_tips.clone(), accounts: self.helius.as_ref().map(|h| h.tips.clone()).unwrap_or_default(), nonce: nonce.map(|n| n.0) }); }
                 let checks = verify_bundle(&raw, &want);
                 let ok = checks.iter().all(|c| c["ok"] == json!(true));
                 line["tx"]["sig"] = json!(send::first_signature(&raw));
@@ -1536,7 +1584,9 @@ impl Exec {
             return d;
         }
         let (sig58, t_signed, t_fired, path_name) = match fired {
-            Some((paths, bp, raw, fire, t_signed, t_fired)) => {
+            Some((paths, bp, raw, fire, t_signed, t_fired, var_sigs)) => {
+                // arbx-fast: every nonce variant's signature names this attempt too (whichever lands settles it)
+                for vs in &var_sigs { if let Some(s) = sig64(vs) { self.by_sig.insert(s, attempt); } }
                 let sig58 = send::first_signature(&raw).unwrap_or_default();
                 let sig = sig64(&sig58).unwrap_or([0; 64]);
                 let pools = [r.buy.pool, r.sell.pool];
@@ -1694,7 +1744,7 @@ impl Exec {
         let cu = (r.cu + if ata.is_some() { r.cu_ata.0 } else { 0 } + if ata.is_some_and(|a| a.close) { r.cu_ata.1 } else { 0 }).min(crate::cu_table::MAX_CU);
         #[cfg(test)]
         let cu = self.fault_cu.unwrap_or(cu);
-        let mut plan = build::Plan { payer: self.payer, cu_limit: cu as u32, loaded_data_limit: None, ata, tip, cu_price, extra_tips: self.build_extra_tips.clone() };
+        let mut plan = build::Plan { payer: self.payer, cu_limit: cu as u32, loaded_data_limit: None, ata, tip, cu_price, extra_tips: self.build_extra_tips.clone(), nonce: self.build_nonce.map(|k| (k, self.payer)) };
         let tables: Vec<&Alt> = self.alts.iter().chain(extra.iter()).collect();
         let sizes: HashMap<Pk, u32> = r.sizes.iter().copied().collect();
         // the accounts are the same with the limit instruction (the ComputeBudget program is there already)
@@ -2194,6 +2244,9 @@ impl Exec {
 
     /// the blockhash commitment the send checks use
     pub fn blockhash_commitment(&self) -> &str { &self.pol.blockhash_commitment }
+
+    /// arbx-fast: the durable nonces the big-gap variants use (`nonce_variants`; empty: none)
+    pub fn nonce_keys(&self) -> &[Pk] { &self.nonce_keys }
 
     /// WP-07: what the executor counted for each attempt it sent (open ones, then the finals it remembers): the ledger's
     /// reconciliation compares it with the chain by signature
@@ -2825,7 +2878,7 @@ pub struct VerifyWant {
 /// arbx-fast: what a Helius Sender transaction carries beyond a bundle's: its compute-unit price (right after the CU
 /// limit), the `also` paths' tip transfers after the Helius tip (in order, the last one last), and Helius's tip accounts
 #[derive(Clone, Debug, PartialEq)]
-pub struct HeliusWant { pub cu_price: u64, pub extra: Vec<(Pk, u64)>, pub accounts: Vec<Pk> }
+pub struct HeliusWant { pub cu_price: u64, pub extra: Vec<(Pk, u64)>, pub accounts: Vec<Pk>, pub nonce: Option<Pk> }
 
 /// The nexus-v2 route instruction as a signed transaction carries it (data `[2, n, amount_in u64, min_profit u64, per
 /// leg {n_accounts, amount_offset, data_len u16}, leg data, [max_payer_lamport_drop u64]]`; accounts: authority, quote,
@@ -2880,6 +2933,7 @@ fn ix_kind(tx: &crate::tx::Tx, ix: &crate::tx::Ix, program: &Pk, token_programs:
         (x, Some(9)) if token_programs.contains(&x) => "ata_close",
         (x, _) if x == *program => "route",
         (x, Some(2)) if x == [0u8; 32] && ix.data.len() == 12 => "tip",
+        (x, Some(4)) if x == [0u8; 32] && ix.data.len() == 4 => "nonce_advance",
         _ => "other",
     }
 }
@@ -3045,7 +3099,7 @@ pub fn verify_bundle(raw: &[u8], w: &VerifyWant) -> Vec<Value> {
     put("route_payer_accounts", foreign.is_empty(), json!({ "foreign": foreign }));
     // ---- WP-06: the new layout
     let close_wanted = w.ata.is_some() && !held;
-    let mut want_kinds = vec!["cu_limit"];
+    let mut want_kinds = if w.helius.as_ref().is_some_and(|h| h.nonce.is_some()) { vec!["nonce_advance", "cu_limit"] } else { vec!["cu_limit"] };
     if w.helius.is_some() { want_kinds.push("cu_price"); }
     if w.loaded_limit.is_some() { want_kinds.push("loaded_data_limit"); }
     if w.ata.is_some() { want_kinds.push("ata_create"); }

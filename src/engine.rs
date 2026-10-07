@@ -2610,6 +2610,9 @@ impl Engine {
                 self.decisions = fold(self.decisions, &[b"exec", &id.to_le_bytes(), &r.size.to_le_bytes(), &r.buy.pool, &r.sell.pool, &r.back.to_le_bytes(), &[seen.0 as u8]]);
                 let trig = r.trig;
                 let global = self.io.is_some();
+                // arbx-fast: the durable nonces' current values, from the store the state stream keeps (journaled)
+                let nk: Vec<Pk> = self.exec.as_ref().map(|x| x.nonce_keys().to_vec()).unwrap_or_default();
+                for k in nk { if let Some(v) = self.store.get(&k).and_then(|a| crate::build::nonce_value(&a.data)) { self.sendview.nonces.insert(k, v); } }
                 let alts = crate::exec::AltSource { tables: self.alts.tables(), by_pool: &self.alt_by_pool };
                 let x = self.exec.as_mut().unwrap();
                 let d = x.decide(r, &inputs, &self.sendview, &alts, slot.max(tip), t);

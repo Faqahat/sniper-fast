@@ -1628,7 +1628,7 @@ async fn verify_bundle_on_the_new_layout() {
     let route_ix = build::route_ix(x.program, payer, quote, rt.size, mp, &[leg(&rt.buy, *WSOL, M2), leg(&rt.sell, M2, *WSOL)], None).unwrap();
     let sign = |ixs: Vec<build::Ix>| { let m = build::compile_v0(payer, &ixs, BH, &[], &[tip0.0]).unwrap(); build::sign(&m, &dk) };
     // the CU limit each plan asks: the route's 100,000 plus the create's 30,000 and the close's 5,000 when it makes them
-    let plan = |a: Option<build::AtaOps>| build::Plan { payer, cu_price: 0, extra_tips: vec![], cu_limit: 100_000 + a.map_or(0, |a| 30_000 + if a.close { 5_000 } else { 0 }), loaded_data_limit: Some(limit),
+    let plan = |a: Option<build::AtaOps>| build::Plan { payer, cu_price: 0, extra_tips: vec![], nonce: None, cu_limit: 100_000 + a.map_or(0, |a| 30_000 + if a.close { 5_000 } else { 0 }), loaded_data_limit: Some(limit),
         ata: a, tip: Some(tip0) };
     let good = build::bundle_ixs(&plan(Some(ata)), route_ix.clone());
     assert_eq!(failing(&sign(good.clone()), &want), Vec::<String>::new());
@@ -3515,4 +3515,37 @@ fn a_processed_head_serves_processed_sends_only() {
     // an older processed head does not replace a newer one
     v.on_head(&json!({ "hash": b58(&[8u8; 32]), "slot": 150, "src": "entries", "commitment": "processed", "t_ns": 3 }));
     assert_eq!(v.blockhash("processed").map(|b| b.slot), Some(157));
+}
+
+/// arbx-fast `nonce_variants`: a big gap is built as one variant per path on the same durable nonce (AdvanceNonceAccount
+/// first, the nonce's value as the blockhash), each paying only its own path's tip (the full share); the signed Helius
+/// variant passes the dry run's checks; nonces are taken in turn; without a known nonce value: the shared transaction
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn big_gap_nonce_variants_pay_one_path_each() {
+    let n0 = [61u8; 32];
+    let n1 = [62u8; 32];
+    let extra = format!("[[send]]\nname = \"helius\"\nkind = \"helius\"\nurl = \"https://127.0.0.1:9/fast\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [[send]]\nname = \"bolt\"\nkind = \"bolt\"\nurl = \"https://127.0.0.1:9/bolt\"\ntoken_env = \"ARBX_TEST_BOLT\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [send_policy.helius_big]\nenabled = true\nmin_expected_lamports = 1700000\ntip_share = 0.6\npriority_fee_lamports = 10000\nmax_per_sec = 5\nalso = [\"bolt\"]\nnonce_variants = true\n\
+        [send_policy.direct]\nnonce_accounts = [\"{}\", \"{}\"]\n", b58(&n0), b58(&n1));
+    let mut r = rig("nonce-variants", Mode::DryRun, &extra).await;
+    assert_eq!(r.x.nonce_keys(), &[n0, n1]);
+    // no nonce value known yet: the shared transaction (Helius + Bolt tips in one)
+    let d = r.decide(route(1, damm(2, MINT), 5_000_000, 1), 97, now_ns());
+    assert!(d.would_send, "{d:?}");
+    r.view.nonces.insert(n0, [71u8; 32]);
+    r.view.nonces.insert(n1, [72u8; 32]);
+    let t = now_ns();
+    let _ = r.decide(route(3, damm(4, MINT), 5_000_000, 2), 97, t);
+    let _ = r.decide(route(5, damm(6, MINT), 5_000_000, 3), 97, t + 1);
+    let a = r.lines("attempts");
+    assert!(a[0]["helius_big"]["nonce"].is_null() && a[0]["helius_big"]["also"].as_array().unwrap().len() == 1, "{}", a[0]["helius_big"]);
+    let share = (4_985_000f64 * 0.6) as u64;
+    for (x, n) in [(&a[1], n0), (&a[2], n1)] {
+        let h = &x["helius_big"];
+        assert_eq!((h["nonce"].as_str(), h["tip"].as_u64(), h["also"].as_array().map(|v| v.len()), h["variants"].as_array().map(|v| v.len())),
+            (Some(b58(&n).as_str()), Some(share), Some(0), Some(1)), "nonces in turn, Helius's full share, one Bolt variant: {h}");
+        assert_eq!(h["variants"][0]["tip"].as_u64(), Some(share), "Bolt's variant pays its own full share: {h}");
+        assert_eq!(x["dry_run"]["checks_ok"].as_bool(), Some(true), "{}", x["dry_run"]["checks"]);
+    }
 }

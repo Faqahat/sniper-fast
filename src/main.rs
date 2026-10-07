@@ -1553,7 +1553,13 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
         let programs: Vec<tx::Pk> = if cfg.state.watch_programdata { provenance::program_specs(&cfg).iter().map(|p| p.id).collect() } else { vec![] };
         // (a wallet that is not a key leaves the wallet accounts out: the run's keystore check names it)
         let wallet = cfg.state.watch_wallet.then(|| bs58::decode(&cfg.wallet).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok())).flatten();
-        let extra = reg.extra_watch(cfg.state.watch_clock, &programs, wallet.as_ref());
+        let mut extra = reg.extra_watch(cfg.state.watch_clock, &programs, wallet.as_ref());
+        // arbx-fast: the big-gap variants' durable nonces are followed like the wallet's accounts (their value after each use)
+        if cfg.send_policy.helius_big.enabled && cfg.send_policy.helius_big.nonce_variants {
+            for k in cfg.send_policy.direct.nonce_accounts.iter().filter_map(|k| bs58::decode(k).into_vec().ok().and_then(|b| tx::Pk::try_from(b).ok())) {
+                if !extra.iter().any(|(x, _)| *x == k) { extra.push((k, rec::accounts::RoleOf { role: rec::accounts::role::WALLET, pool_index: rec::accounts::NO_POOL })); }
+            }
+        }
         let mut role_list = reg.watch_roles();
         role_list.extend(extra.iter().copied());
         let roles = Arc::new(rec::accounts::Roles::new(role_list));
