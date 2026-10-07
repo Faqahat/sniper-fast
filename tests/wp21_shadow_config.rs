@@ -67,7 +67,8 @@ fn the_wp21_seed_list_extends_the_2026_10_06_list() {
 }
 
 /// Every other deploy config passes `arbx check` and keeps the WP-21 venues off (`[pools] rayclmm` / `whirlpool` default
-/// "off")
+/// "off") unless it sets them itself (FT-012's configs, 902d9eb, owner: CLMM and Whirlpool "send"): the check's line names
+/// the mode each config sets, and "off" for every config that sets none
 #[test]
 fn the_other_configs_keep_the_wp21_venues_off() {
     let mut files: Vec<String> = std::fs::read_dir(repo("deploy")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -78,7 +79,13 @@ fn the_other_configs_keep_the_wp21_venues_off() {
         let f = f.as_str();
         let text = check(f);
         let venues = text.lines().find(|l| l.starts_with("venues (WP-21): ")).unwrap_or_else(|| panic!("{f}: no venues line"));
-        assert!(venues.contains("Raydium CLMM off (") && venues.contains("Orca Whirlpool off ("), "{f}: {venues}");
+        let src = std::fs::read_to_string(repo(f)).unwrap();
+        let cfg = arbx::config::Config::load(&repo(f)).unwrap();
+        for (key, name, mode) in [("rayclmm", "Raydium CLMM", &cfg.pools.rayclmm), ("whirlpool", "Orca Whirlpool", &cfg.pools.whirlpool)] {
+            let set = src.lines().any(|l| l.trim_start().starts_with(&format!("{key} =")));
+            if !set { assert_eq!(mode.as_str(), "off", "{f}: {key} not set: off by default"); }
+            assert!(venues.contains(&format!("{name} {mode} (")), "{f}: {venues}");
+        }
     }
 }
 
