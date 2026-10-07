@@ -2736,6 +2736,7 @@
       }
      }
     },
+    "hours_src": "trading hours",
     "money": {
      "landed_without_ledger": 0,
      "ledger_without_outcome": 0,

@@ -636,9 +636,15 @@ def run(seg, ctx: dict, which: str = "all") -> dict:
     if not keys and not any(s.has("experiments") for s in segs):
         return incomplete(sec, "no experiment arms recorded (Stage 1, WP-11)")
     hours = sum((s.window.get("trading_hours") or 0) for s in segs) or None
+    hours_src = "trading hours"
+    if not hours:
+        # without warm-up and gate events (a pull without events.jsonl): the wall hours, meta.json's start to stop.json's end
+        hours = sum((s.window.get("wall_hours") or 0) for s in segs) or None
+        hours_src = "wall hours (no warm-up / gate events)" if hours else None
     run_cfg = _run_config(segs)
     run_sends_per_hour = (len(rows) / hours) if (hours and rows) else None
     d["sends_per_hour"] = stats._clean(run_sends_per_hour) if run_sends_per_hour else None
+    d["hours_src"] = hours_src
     # review #1: the canary's one send a second binds when its refusals reach the sends: the arms compete for the slot
     cw, sent = _exec_total(segs, "exec.counts_total.reject_canary_wait"), _exec_total(segs, "exec.sent_total")
     d["canary_wait"] = {"refusals": cw, "sends": sent}
@@ -660,7 +666,9 @@ def run(seg, ctx: dict, which: str = "all") -> dict:
     if would and not rows:
         sec["caveats"].append("would-sends only (a shadow or dry run, or a closed gate): the balance holds, nothing landed")
     if not hours:
-        sec["caveats"].append("no trading hours (warm-up and gate events): no net per hour")
+        sec["caveats"].append("no trading or wall hours: no net per hour")
+    elif hours_src != "trading hours":
+        sec["caveats"].append(f"net per hour on {hours_src}: pull events.jsonl for the trading hours")
     if any(r["win"] and tokens.classify(r["mint"]) == "unknown" for r in rows):
         sec["caveats"].append("a win without its route's mint is counted `unknown`, neither meme nor common")
     d["balance"] = {k: balance(seg, k) for k in keys}
