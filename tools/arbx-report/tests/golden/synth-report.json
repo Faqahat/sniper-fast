@@ -2369,11 +2369,47 @@
       }
      }
     },
+    "canary_wait": {
+     "refusals": null,
+     "sends": null
+    },
     "experiments": {
      "x4": {
       "arms": {
        "0.4": {
+        "assigned": {
+         "attempts": 2,
+         "net_total": 0,
+         "wins": 0
+        },
         "attempts": 2,
+        "by_leader_kind": {
+         "jito": {
+          "attempts": 2,
+          "net_per_attempt": 0,
+          "net_total": 0,
+          "win_rate": 0,
+          "win_rate_ci95": [
+           0,
+           0.65762
+          ],
+          "wins": 0
+         }
+        },
+        "by_tip_policy": {
+         "share": {
+          "attempts": 2,
+          "net_per_attempt": 0,
+          "net_total": 0,
+          "win_rate": 0,
+          "win_rate_ci95": [
+           0,
+           0.65762
+          ],
+          "wins": 0
+         }
+        },
+        "canary_wait": null,
         "decisions": 2,
         "failed_fees": 0,
         "gross_wins": 0,
@@ -2394,10 +2430,12 @@
          0,
          0
         ],
-        "net_per_hour_whole_run": 0,
+        "net_per_hour": 0,
         "net_per_win": null,
         "net_sum_sq": 0,
         "net_total": 0,
+        "opportunities": 0,
+        "refused": {},
         "tips_over_gross": null,
         "tips_wins": 0,
         "win_rate": 0,
@@ -2410,11 +2448,55 @@
         "wins_common_by_token": {},
         "wins_meme": 0,
         "wins_per_1k_decisions": 0,
+        "wins_unknown_token": 0,
         "would_fail": 1,
         "would_fail_rate": 0.5
        },
        "0.6": {
+        "assigned": {
+         "attempts": 3,
+         "net_total": 10000,
+         "wins": 1
+        },
         "attempts": 3,
+        "by_leader_kind": {
+         "bam": {
+          "attempts": 1,
+          "net_per_attempt": -5000,
+          "net_total": -5000,
+          "win_rate": 0,
+          "win_rate_ci95": [
+           0,
+           0.793451
+          ],
+          "wins": 0
+         },
+         "jito": {
+          "attempts": 2,
+          "net_per_attempt": 7500,
+          "net_total": 15000,
+          "win_rate": 0.5,
+          "win_rate_ci95": [
+           0.094531,
+           0.905469
+          ],
+          "wins": 1
+         }
+        },
+        "by_tip_policy": {
+         "share": {
+          "attempts": 3,
+          "net_per_attempt": 3333.33333,
+          "net_total": 10000,
+          "win_rate": 0.333333,
+          "win_rate_ci95": [
+           0.061492,
+           0.79234
+          ],
+          "wins": 1
+         }
+        },
+        "canary_wait": null,
         "decisions": 5,
         "failed_fees": 5000,
         "gross_wins": 50000,
@@ -2435,10 +2517,12 @@
          -5000,
          15000
         ],
-        "net_per_hour_whole_run": 14285714.3,
+        "net_per_hour": 11904761.9,
         "net_per_win": 15000,
         "net_sum_sq": 250000000,
         "net_total": 10000,
+        "opportunities": 0,
+        "refused": {},
         "tips_over_gross": 0.6,
         "tips_wins": 30000,
         "win_rate": 0.333333,
@@ -2451,6 +2535,7 @@
         "wins_common_by_token": {},
         "wins_meme": 1,
         "wins_per_1k_decisions": 200,
+        "wins_unknown_token": 0,
         "would_fail": 0,
         "would_fail_rate": 0
        }
@@ -2500,6 +2585,7 @@
          "0.6": 5
         },
         "n": 7,
+        "src": "decisions.jsonl",
         "weights": {
          "0.4": 0.5,
          "0.6": 0.5
@@ -2605,6 +2691,46 @@
           "z": -0.912871
          },
          "win_rate_mde_rel": 50
+        },
+        "per_send_jito_led": {
+         "land_rate": {
+          "ci95": [
+           -1.192952,
+           0.192952
+          ],
+          "diff": -0.5,
+          "fisher_p": 1,
+          "p_greater": 0.875893,
+          "p_less": 0.124107,
+          "p_two": 0.248213,
+          "rel": -1,
+          "z": -1.154701
+         },
+         "net_per_attempt_diff": -7500,
+         "net_per_attempt_diff_ci95": [
+          -15000,
+          0
+         ],
+         "sends_per_arm_for_win_rate": {
+          "+30%": 170,
+          "+50%": 58,
+          "-30%": 170,
+          "-50%": 58
+         },
+         "win_rate": {
+          "ci95": [
+           -1.192952,
+           0.192952
+          ],
+          "diff": -0.5,
+          "fisher_p": 1,
+          "p_greater": 0.875893,
+          "p_less": 0.124107,
+          "p_two": 0.248213,
+          "rel": -1,
+          "z": -1.154701
+         },
+         "win_rate_mde_rel": 50
         }
        }
       }
@@ -2620,6 +2746,7 @@
      "synth-p1"
     ],
     "sends": 5,
+    "sends_per_hour": 3571.42857,
     "trading_hours": 0.0014,
     "would_sends": 0,
     "x4": {
@@ -2628,7 +2755,22 @@
        "fewer_wins_p": 0.180655,
        "fewer_wins_per_decision_p": 0.247262,
        "go": false,
+       "go_basis": "the drop's 95% upper bound on Jito-led sends",
        "go_stage1": false,
+       "land_drop_all": {
+        "ci95": [
+         -3.70899,
+         0.970137
+        ],
+        "drop": 1
+       },
+       "land_drop_jito_led": {
+        "ci95": [
+         -6.993754,
+         0.968726
+        ],
+        "drop": 1
+       },
        "land_rate": 0,
        "land_rate_ci95": [
         0,
@@ -2639,8 +2781,7 @@
         0,
         0
        ],
-       "net_per_attempt": 0,
-       "relative_land_drop_vs_0.6": 1
+       "net_per_attempt": 0
       },
       "0.6": {
        "land_rate": 0.666667,

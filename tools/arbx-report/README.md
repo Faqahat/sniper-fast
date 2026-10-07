@@ -31,7 +31,7 @@ python3 tools/arbx-report compare <segA> <segB>
 | `feeds` | R7 feedhealth, txarr first-arrival shares and delays, dead feeds, slots-feed PoH completeness |
 | `predictions` | R8 pre-state exact rates beside the at-hint rate, `pre_state_unknown` counted |
 | `rivals` | R9 arbitrage-like transactions, clean wins per signer, tips, senders |
-| `experiments [x2\|x4\|size\|margin\|x5\|x8\|x9\|all]` | R10 on a segment or a campaign directory (WP-11): the balance (decisions and sends per arm, bands and trigger kinds per arm), per arm attempts / landed / wins with 95% intervals, net per attempt and per win, tips/gross, meme vs common wins, each arm against its control, the factorial's cells; money from the ledger (`dup` and `pre_run` lines left out); X2's two-sided trend; then each experiment against R §5's thresholds |
+| `experiments [x2\|x4\|size\|margin\|x5\|x8\|x9\|all]` | R10 on a segment or a campaign directory (WP-11): the balance (decisions per arm from status.jsonl's per-arm counters or decisions.jsonl streamed, sends, bands and trigger kinds per arm), per arm attempts / landed / wins with 95% intervals, net per attempt and per win, tips/gross, meme vs common wins, canary_wait refusals, net per hour (net per send x the run's sends per hour), by leader kind and tip policy, each arm against its control (experiments.jsonl `control`) per decision, per send and on Jito-led sends, the factorial's cells; money from the ledger as R1 counts it; X2's two-sided trend; X4's go on the drop's 95% upper bound |
 | `census`, `sizes`, `sizefit` | R11 (inputs only until WP-09/WP-12) |
 | `caps` | R12 budget tiers deduplicated into gap episodes |
 | `cu-table` | per-leg CU samples from venue log lines → `cu-table.json` (§4.48) |

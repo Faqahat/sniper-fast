@@ -23,11 +23,15 @@ SIZE = [0.05, 0.2]
 HOUR = 3_600_000_000_000
 
 
-def attempt(a: int, sig: str, band: int, kind: str, mint: str, arms: dict) -> dict:
-    return {"attempt": a, "decision": 100 + a, "opp": a, "t_ns": gen.T0_NS + a, "kind": "canary", "sent": True,
-            "trigger": {"txn": gen.sg(f"trig{a}"), "slot": 1000, "kind": kind}, "route": {"mint": mint, "buy_venue": "Dlmm", "sell_venue": "PumpSwap"},
-            "size_lamports": 50_000_000, "band": band, "experiments": arms, "tip": {"lamports": 1000, "arm": arms.get("x4_share")},
-            "leader": {"kind": "jito"}, "tx": {"sig": sig}, "copies": [{"path": "jito-bundle", "sig": sig}]}
+def attempt(a: int, sig: str, band: int, kind: str, mint: str, arms: dict, leader: str = "jito", assigned: dict | None = None) -> dict:
+    x = {"attempt": a, "decision": 100 + a, "opp": a, "t_ns": gen.T0_NS + a, "kind": "canary", "sent": True,
+         "trigger": {"txn": gen.sg(f"trig{a}"), "slot": 1000, "kind": kind}, "route": {"mint": mint, "buy_venue": "Dlmm", "sell_venue": "PumpSwap"},
+         "size_lamports": 50_000_000, "band": band, "experiments": arms,
+         "tip": {"lamports": 1000, "arm": arms.get("x4_share"), "policy": "bam_floor" if leader == "bam" else "share_of_edge"},
+         "leader": {"kind": leader}, "tx": {"sig": sig}, "copies": [{"path": "jito-bundle", "sig": sig}]}
+    if assigned is not None:
+        x["experiments_assigned"] = assigned
+    return x
 
 
 def ledger_line(sig: str, a, ok: bool, net: int, gross: int, tip: int, **kw) -> dict:
@@ -40,7 +44,7 @@ def ledger_line(sig: str, a, ok: bool, net: int, gross: int, tip: int, **kw) -> 
     return r
 
 
-def segment(root: str, name: str, k0: int, spec: list, extra_ledger: list, snapshot_slot=None) -> str:
+def segment(root: str, name: str, k0: int, spec: list, extra_ledger: list, snapshot_slot=None, status: list | None = None) -> str:
     """a canary segment: one attempt per spec row (x4 arm index, size arm index, band, kind, mint, outcome, net)"""
     d = os.path.join(root, name)
     os.makedirs(d)
@@ -63,7 +67,7 @@ def segment(root: str, name: str, k0: int, spec: list, extra_ledger: list, snaps
         arms = {"size_max_sol": SIZE[si]}
         if band <= 2:
             arms["x4_share"] = X4[xi]
-        attempts.append(attempt(i, sig, band, kind, mint, arms))
+        attempts.append(attempt(i, sig, band, kind, mint, arms, leader="bam" if i % 3 == 2 else "jito", assigned={"x4_share": X4[xi], "size_max_sol": SIZE[si]}))
         outcomes.append({"attempt": i, "final": final, "sig": sig})
         if final == "landed_ok":
             ledger.append(ledger_line(sig, i, True, net, net + 6000, 1000))
@@ -76,6 +80,8 @@ def segment(root: str, name: str, k0: int, spec: list, extra_ledger: list, snaps
     gen.write_zjsonl(d, "outcomes", "2.1", outcomes)
     gen.write_zjsonl(d, "ledger", "1.0", ledger + extra_ledger)
     gen.write_zjsonl(d, "decisions", "1.2", decisions)
+    if status is not None:
+        gen.write_plain(d, "status.jsonl", "status", "2.2", status)
     return d
 
 
@@ -151,8 +157,10 @@ class Experiments(unittest.TestCase):
         total = sum(a["net_total"] for a in size["arms"].values())
         self.assertEqual(total, sum(r[6] for r in self.rows(lambda r: True)), "the late landing in, the previous campaign's trade out")
         self.assertEqual((self.d["money"]["lines_before_start_of_our_attempts"], self.d["money"]["ledger_without_outcome"]), (0, 1))
-        # net per hour as if the whole run were on the arm: its net over its weight's share of the 2 trading hours
-        self.assertEqual(size["arms"]["0.2"]["net_per_hour_whole_run"], stats._clean(size["arms"]["0.2"]["net_total"] / 0.5 / 2))
+        # net per hour, capacity-bound (review #1): the arm's net per send times the run's sends per hour (15 sends in 2 h)
+        self.assertEqual(self.d["sends_per_hour"], 7.5)
+        a = size["arms"]["0.2"]
+        self.assertEqual(a["net_per_hour"], stats._clean(a["net_total"] / a["attempts"] * 7.5))
 
     def test_meme_and_common_by_mint(self):
         a = self.d["experiments"]["x4"]["arms"]["0.1"]
@@ -249,6 +257,106 @@ class Control(unittest.TestCase):
             e = r10_experiments.run(self.seg(root, {**base, "control": 0.1}, tips), synth_ctx())
             self.assertEqual(e["data"]["experiments"]["x4"]["control"], "0.1", "the record's control wins")
             self.assertTrue(any("is not the run's configured value 0.2" in c for c in e["caveats"]), e["caveats"])
+
+
+class Splits(unittest.TestCase):
+    """Review #4, #10, #11, #12: per arm by leader kind and tip policy, X4 against its control on Jito-led sends, every
+    attempt attributed by its assigned arm per decision, X4's go on the drop's 95% upper bound, a win without a mint
+    `unknown`"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = TmpDir()
+        root = cls.tmp.__enter__()
+        cls.camp = os.path.join(root, "camp")
+        os.makedirs(cls.camp)
+        segment(cls.camp, "c-p1", 0, P1, [], snapshot_slot=1_000)
+        segment(cls.camp, "c-p2", 1, P2, [], snapshot_slot=1_200)
+        cls.d = r10_experiments.run(model.Campaign.open(cls.camp), synth_ctx())["data"]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.__exit__(None, None, None)
+
+    def test_leader_kind_and_tip_policy(self):
+        a = self.d["experiments"]["x4"]["arms"]["0.2"]
+        self.assertEqual(sum(v["attempts"] for v in a["by_leader_kind"].values()), a["attempts"])
+        self.assertEqual(set(a["by_tip_policy"]) <= {"share_of_edge", "bam_floor"}, True)
+        self.assertEqual(a["by_leader_kind"].get("bam", {}).get("attempts", 0), a["by_tip_policy"].get("bam_floor", {}).get("attempts", 0))
+        vs = self.d["experiments"]["x4"]["vs_control"]["0.35"]
+        self.assertIn("per_send_jito_led", vs)
+
+    def test_assigned_arms_per_decision(self):
+        x4 = self.d["experiments"]["x4"]
+        # the band-3 attempt (x4 out of scope) is in no applied arm but in its assigned arm (0.2) per decision
+        applied = sum(a["attempts"] for a in x4["arms"].values())
+        assigned = sum(a["assigned"]["attempts"] for a in x4["arms"].values())
+        self.assertEqual((applied, assigned), (14, 15))
+        self.assertEqual(x4["arms"]["0.2"]["assigned"]["net_total"] - x4["arms"]["0.2"]["net_total"], 50_000, "the band-3 win, by assignment")
+
+    def test_x4_go_on_the_upper_bound(self):
+        r = r10_experiments._rel_drop(30, 1000, 40, 1000)
+        self.assertEqual(r["drop"], 0.25)
+        lo, hi = r["ci95"]
+        self.assertTrue(lo < 0.25 < hi and hi > 0.2, r)
+        rows = [{"experiments": {"x4_share": arm}, "leader": "jito", "landed": i < k} for arm, k in ((0.2, 400), (0.35, 395)) for i in range(1000)]
+        e = {"key": "x4_share", "control": "0.2", "arms": {"0.2": {"attempts": 1000, "land_rate": 0.4, "land_rate_ci95": None, "net_per_attempt": 0, "net_per_attempt_ci95": None,
+                                                                "lost_auction": 0},
+                                                         "0.35": {"attempts": 1000, "land_rate": 0.395, "land_rate_ci95": None, "net_per_attempt": 0,
+                                                                  "net_per_attempt_ci95": None, "lost_auction": 0}}, "vs_control": {}}
+        x = r10_experiments.x4_rule(e, rows)["arms"]["0.35"]
+        self.assertTrue(x["go"] and x["land_drop_jito_led"]["ci95"][1] < 0.2, x)
+        few = [{"experiments": {"x4_share": arm}, "leader": "jito", "landed": i < k} for arm, k in ((0.2, 40), (0.35, 39)) for i in range(100)]
+        x = r10_experiments.x4_rule(e, few)["arms"]["0.35"]
+        self.assertFalse(x["go"], "the same 1% drop on 100 sends: its upper bound is past 20%")
+
+    def test_unknown_mint(self):
+        self.assertEqual((tokens.classify(None), tokens.classify(""), tokens.classify(USDC), tokens.classify(MEME)), ("unknown", "unknown", "common", "meme"))
+
+
+class StatusCounters(unittest.TestCase):
+    """Review #1, #2: the engine's per-arm counters (status.jsonl `experiments`) give the decisions per arm and the
+    canary_wait refusals without decisions.jsonl, which is never held in memory; the canary's binding send slot is
+    called out"""
+
+    def test_status_counters_and_the_canary_slot(self):
+        st = [{"seq": 0, "t_ns": gen.T0_NS + 1, "exec": {"counts_total": {"reject_canary_wait": 40}, "sent_total": 9},
+               "experiments": {"x4_share": {"0.2": {"decisions": 100, "opportunities": 20, "sent": 3, "would_send": 0, "refused": {"canary_wait": 15}},
+                                            "0.1": {"decisions": 98, "opportunities": 18, "sent": 3, "would_send": 0, "refused": {"canary_wait": 12}},
+                                            "0.35": {"decisions": 102, "opportunities": 22, "sent": 3, "would_send": 0, "refused": {"canary_wait": 13}}},
+                               "size_max_sol": {"0.05": {"decisions": 150, "opportunities": 30, "sent": 4, "would_send": 0, "refused": {}},
+                                                "0.2": {"decisions": 150, "opportunities": 30, "sent": 5, "would_send": 0, "refused": {}}}}}]
+        with TmpDir() as root:
+            camp = os.path.join(root, "camp")
+            os.makedirs(camp)
+            segment(camp, "c-p1", 0, P1, [], snapshot_slot=1_000, status=st)
+            # decisions.jsonl must not be loaded whole: the status counters are read instead (and the stream would be)
+            orig = model.Segment.decisions
+            model.Segment.decisions = property(lambda self: (_ for _ in ()).throw(AssertionError("decisions.jsonl loaded whole")))
+            try:
+                sec = r10_experiments.run(model.Campaign.open(camp), synth_ctx())
+            finally:
+                model.Segment.decisions = orig
+            x4 = sec["data"]["experiments"]["x4"]
+            self.assertEqual(x4["decisions_src"], "status.jsonl experiments")
+            self.assertEqual((x4["arms"]["0.2"]["decisions"], x4["arms"]["0.2"]["canary_wait"], x4["arms"]["0.1"]["opportunities"]), (100, 15, 18))
+            self.assertEqual(x4["balance"]["decisions"]["counts"], {"0.2": 100, "0.1": 98, "0.35": 102})
+            self.assertEqual(sec["data"]["canary_wait"], {"refusals": 40, "sends": 9})
+            self.assertTrue(any("send slot binds" in c for c in sec["caveats"]), sec["caveats"])
+
+    def test_decisions_are_streamed(self):
+        with TmpDir() as root:
+            camp = os.path.join(root, "camp")
+            os.makedirs(camp)
+            segment(camp, "c-p1", 0, P1, [], snapshot_slot=1_000)
+            orig = model.Segment.decisions
+            model.Segment.decisions = property(lambda self: (_ for _ in ()).throw(AssertionError("decisions.jsonl loaded whole")))
+            try:
+                x4 = r10_experiments.run(model.Campaign.open(camp), synth_ctx())["data"]["experiments"]["x4"]
+            finally:
+                model.Segment.decisions = orig
+            self.assertEqual(x4["decisions_src"], "decisions.jsonl")
+            self.assertEqual(x4["balance"]["decisions"]["counts"], {"0.1": 3, "0.2": 3, "0.35": 3})
 
 
 class X2Trend(unittest.TestCase):

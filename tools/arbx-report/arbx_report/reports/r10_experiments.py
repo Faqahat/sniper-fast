@@ -3,19 +3,22 @@
 The arms of WP-11's experiments run side by side in one live run, assigned per decision by hash (src/experiments.rs).
 `arbx-report experiments <segment or campaign dir> [x2|x4|size|margin|x5|x8|x9|all]` reports, for each experiment:
 
-- the randomization's balance: arm counts against the weights over every decision (decisions.jsonl `experiments`, the
-  assignment) and over the sends (attempts.jsonl `experiments`, the arms that applied: a treatment may change the
-  funnel), and the bands and trigger kinds per arm (chi-square independence; the size arm moves the bands by design);
+- the randomization's balance: arm counts against the weights over every decision (the assignment: status.jsonl's
+  per-arm counters, else decisions.jsonl read one line at a time) and over the sends (the arms that applied: a
+  treatment may change the funnel), and the bands and trigger kinds per arm (chi-square independence; the size arm moves
+  the bands by design);
 - per arm: attempts, landed, the land rate and the win rate with Wilson 95% intervals, net per attempt (bootstrap 95%),
   net per win, wins, tips / gross, failed fees, the meme and common wins (the owner's Stage 0 rule, by the route's mint:
-  `tokens.py`), and the arm's net per hour were the whole run on it (its net over its weight's share of the hours);
-- each arm against its control (the configured value when the run's config.toml shows it, else the first arm), per
-  decision first (`per_decision`: the randomized unit; an arm may change which decisions are sent, the size arm by
-  design, so per-send rates compare different populations): wins per decision (two proportions, Fisher) and net per
-  decision (a normal interval; a decision not sent nets 0), the decisions counted from decisions.jsonl, else the
-  evaluations (status `counts_total.evaluation`) times the arm's weight share; then per send, descriptive
-  (`per_send`): win and land rates, net per attempt (bootstrap), the smallest change the sends so far detect, the sends
-  per arm a +-30% / +-50% change in the win rate needs;
+  `tokens.py`; a win without a mint is `unknown`), the executor's `canary_wait` refusals of the arm's decisions, and the
+  arm's net per hour as its net per send times the run's sends per hour (the canary's one send a second binds: the arms
+  compete for it, so a weight share would overstate an arm that makes more decisions eligible);
+- per arm by leader kind (jito, bam) and by tip policy (`share_of_edge`, `bam_floor`): on a BAM-led slot the BAM floor
+  often bids the same for every X4 arm, so X4's primary comparison is the Jito-led one;
+- each arm against its control (experiments.jsonl `control`: the first arm; never guessed), per decision (the randomized
+  unit, every attempt by its assigned arm, a decision not sent netting 0: wins per decision, net per decision with a
+  normal interval; the decisions from status, else decisions.jsonl, else the evaluations times the weight share) and per
+  send (descriptive: win and land rates, net per attempt by bootstrap, the smallest change the sends so far detect, the
+  sends per arm a +-30% / +-50% change needs), and on Jito-led sends;
 - with two experiments or more, the factorial's cells.
 
 Money comes from the ledger (ledger.jsonl), never from status counters: an attempt's net is its signatures' ledger
@@ -138,7 +141,8 @@ def _control(key: str, arms: list, cfg: dict | None, conf: dict | None) -> tuple
 
 def _rows(segs) -> tuple:
     """One row per sent attempt across the segments (would-sends apart), with its money from the ledger. Returns
-    (rows, would_sends, notes)"""
+    (rows, would_sends, notes). A row's `experiments` are the arms that applied; `assigned` every arm its decision was
+    assigned (attempts `experiments_assigned`; before it existed, the applied ones)"""
     ledger: dict = {}
     before: set = set()
     for s in segs:
@@ -154,7 +158,7 @@ def _rows(segs) -> tuple:
             a2s.setdefault(a, set()).add(sig)
         for a in s.would_sends:
             would.append({"seg": s.name, "attempt": a.get("attempt"), "band": a.get("band"), "kind": (a.get("trigger") or {}).get("kind"),
-                          "experiments": a.get("experiments") or {}})
+                          "experiments": a.get("experiments") or {}, "assigned": a.get("experiments_assigned") or a.get("experiments") or {}})
         for a in s.attempts:
             aid = a.get("attempt")
             sigs = a2s.get(aid, set())
@@ -164,9 +168,11 @@ def _rows(segs) -> tuple:
             final = o.get("final")
             verdicts = s.verdicts_by_attempt.get(aid, [])
             route = [x for x in lines if x.get("kind") == "route"] or lines
+            tip = a.get("tip") or {}
             row = {"seg": s.name, "attempt": aid, "decision": a.get("decision"), "band": a.get("band"), "kind": (a.get("trigger") or {}).get("kind"),
-                   "mint": (a.get("route") or {}).get("mint"), "leader": (a.get("leader") or {}).get("kind"), "size": a.get("size_lamports"),
-                   "experiments": a.get("experiments") or {}, "final": final, "landed": bool(route) or final in LANDED,
+                   "mint": (a.get("route") or {}).get("mint"), "leader": (a.get("leader") or {}).get("kind"), "policy": tip.get("policy"),
+                   "size": a.get("size_lamports"), "experiments": a.get("experiments") or {},
+                   "assigned": a.get("experiments_assigned") or a.get("experiments") or {}, "final": final, "landed": bool(route) or final in LANDED,
                    "win": any(x.get("ok") for x in route) if route else final == "landed_ok",
                    "would_fail": any(v.get("outcome") == "would-fail" for v in verdicts),
                    "lost_auction": any(v.get("outcome") == "lost-auction" for v in verdicts)}
@@ -184,7 +190,12 @@ def _rows(segs) -> tuple:
     return rows, would, notes
 
 
-def _arm_stats(rows: list, hours=None, share=None) -> dict:
+def _assigned(r: dict, key: str):
+    v = (r.get("assigned") or {}).get(key)
+    return None if v is None else _label(v)
+
+
+def _arm_stats(rows: list, run_sends_per_hour=None) -> dict:
     n = len(rows)
     landed = sum(r["landed"] for r in rows)
     wins = [r for r in rows if r["win"]]
@@ -193,30 +204,49 @@ def _arm_stats(rows: list, hours=None, share=None) -> dict:
     win_nets = [r["net"] for r in wins if r["money"]]
     gross = sum(r["gross"] for r in wins if r["money"])
     tips = sum(r["tip"] for r in wins if r["money"])
-    meme = [r for r in wins if tokens.classify(r["mint"]) == "meme"]
-    common = [r for r in wins if tokens.classify(r["mint"]) == "common"]
+    kinds = {k: [r for r in wins if tokens.classify(r["mint"]) == k] for k in ("meme", "common", "unknown")}
     by_common: dict = {}
-    for r in common:
+    for r in kinds["common"]:
         by_common[tokens.symbol(r["mint"])] = by_common.get(tokens.symbol(r["mint"]), 0) + 1
-    lookalike = sorted({r["mint"] for r in meme if r["mint"] in tokens.LOOKALIKES})
+    lookalike = sorted({r["mint"] for r in kinds["meme"] if r["mint"] in tokens.LOOKALIKES})
     total = sum(nets)
+    npa = total / len(nets) if nets else None
     out = {"attempts": n, "landed": landed, "land_rate": ratio(landed, n), "land_rate_ci95": stats.wilson(landed, n),
            "wins": len(wins), "win_rate": ratio(len(wins), n), "win_rate_ci95": stats.wilson(len(wins), n),
-           "net_total": total, "net_per_attempt": stats._clean(total / len(nets)) if nets else None,
+           "net_total": total, "net_per_attempt": stats._clean(npa) if npa is not None else None,
            "net_per_attempt_ci95": stats.bootstrap_ci(nets) if nets else None,
            "net_per_win": stats._clean(sum(win_nets) / len(win_nets)) if win_nets else None,
            "tips_over_gross": ratio(tips, gross) if gross else None, "gross_wins": gross, "tips_wins": tips,
            "failed_fees": sum(r["fee_fail"] or 0 for r in known), "landed_failures": landed - len(wins),
            "would_fail": sum(r["would_fail"] for r in rows), "would_fail_rate": ratio(sum(r["would_fail"] for r in rows), n),
            "lost_auction": sum(r["lost_auction"] for r in rows),
-           "wins_meme": len(meme), "wins_common": len(common), "net_meme": sum(r["net"] for r in meme if r["money"]),
-           "net_common": sum(r["net"] for r in common if r["money"]), "wins_common_by_token": dict(sorted(by_common.items())),
-           "money_unknown": n - len(known), "net_sum_sq": sum(v * v for v in nets)}
+           "wins_meme": len(kinds["meme"]), "wins_common": len(kinds["common"]), "wins_unknown_token": len(kinds["unknown"]),
+           "net_meme": sum(r["net"] for r in kinds["meme"] if r["money"]), "net_common": sum(r["net"] for r in kinds["common"] if r["money"]),
+           "wins_common_by_token": dict(sorted(by_common.items())), "money_unknown": n - len(known), "net_sum_sq": sum(v * v for v in nets),
+           # review #1: the capacity-bound estimate (net per send x the run's sends per hour)
+           "net_per_hour": stats._clean(npa * run_sends_per_hour) if (npa is not None and run_sends_per_hour) else None}
     if lookalike:
         out["meme_lookalikes"] = {m: tokens.LOOKALIKES[m] for m in lookalike}
-    if hours and share:
-        out["net_per_hour_whole_run"] = stats._clean(total / share / hours)
     return out
+
+
+def _split(rows: list, field: str) -> dict:
+    """attempts, wins, win rate and net per attempt by `field` (leader kind, tip policy)"""
+    out: dict = {}
+    for r in rows:
+        k = str(r.get(field))
+        b = out.setdefault(k, {"attempts": 0, "wins": 0, "net_total": 0, "money": 0})
+        b["attempts"] += 1
+        b["wins"] += r["win"]
+        if r["money"]:
+            b["net_total"] += r["net"]
+            b["money"] += 1
+    for b in out.values():
+        b["win_rate"] = ratio(b["wins"], b["attempts"])
+        b["win_rate_ci95"] = stats.wilson(b["wins"], b["attempts"])
+        b["net_per_attempt"] = stats._clean(b["net_total"] / b["money"]) if b["money"] else None
+        del b["money"]
+    return dict(sorted(out.items()))
 
 
 def _counts_by(rows: list, key: str, field: str) -> dict:
@@ -231,25 +261,58 @@ def _counts_by(rows: list, key: str, field: str) -> dict:
     return {a: dict(sorted(c.items())) for a, c in sorted(t.items())}
 
 
-def _decisions(segs, key: str) -> dict | None:
-    """the assignment's counts over every decision (decisions.jsonl `experiments`), when the decisions were kept"""
+def _status_arms(segs, key: str) -> dict | None:
+    """status.jsonl `experiments` (the engine's per-arm counters, WP-11 review #2): each segment's last line that has them,
+    summed over the segments; None when a segment's lines have none (recorded before them)"""
+    out: dict = {}
+    for s in segs:
+        last = None
+        for line in s.status:
+            if isinstance(line.get("experiments"), dict):
+                last = line["experiments"]
+        if last is None:
+            return None
+        for arm, c in (last.get(key) or {}).items():
+            o = out.setdefault(_label(_num(arm)) if _num(arm) is not None else arm, {"decisions": 0, "opportunities": 0, "sent": 0, "would_send": 0, "refused": {}})
+            for f in ("decisions", "opportunities", "sent", "would_send"):
+                o[f] += c.get(f) or 0
+            for r, n in (c.get("refused") or {}).items():
+                o["refused"][r] = o["refused"].get(r, 0) + n
+    return out
+
+
+def _decisions_stream(segs, key: str) -> dict | None:
+    """decisions.jsonl read one line at a time (never held: a 60-min segment's decisions are gigabytes of JSON), keeping
+    per assigned arm the decisions, their kinds, the opportunities, sends, would-sends and the executor's refusals by
+    reason; None when no segment kept its decisions"""
     if not any(s.has("decisions") for s in segs):
         return None
-    counts: dict = {}
-    kinds: dict = {}
-    n = 0
+    out: dict = {}
+    from .. import streams
     for s in segs:
-        for d in s.decisions:
+        # a report that already loaded them (the segment report's funnel) is read from its copy: not read twice
+        src = s.__dict__["decisions"] if "decisions" in s.__dict__ else streams.iter_jsonl(s.stream_files("decisions"), "decisions")
+        for d in src:
             if d.get("routes") is None:
                 continue
             arm = _arm(d, key)
             if arm is None:
                 continue
-            n += 1
-            counts[arm] = counts.get(arm, 0) + 1
-            kinds.setdefault(arm, {}).setdefault(str(d.get("kind")), 0)
-            kinds[arm][str(d.get("kind"))] += 1
-    return {"n": n, "counts": dict(sorted(counts.items())), "by_kind": {a: dict(sorted(c.items())) for a, c in sorted(kinds.items())}}
+            o = out.setdefault(arm, {"decisions": 0, "opportunities": 0, "sent": 0, "would_send": 0, "refused": {}, "by_kind": {}})
+            o["decisions"] += 1
+            k = str(d.get("kind"))
+            o["by_kind"][k] = o["by_kind"].get(k, 0) + 1
+            if d.get("opp") is None:
+                continue
+            o["opportunities"] += 1
+            if d.get("sent") is True:
+                o["sent"] += 1
+            elif d.get("would_send"):
+                o["would_send"] += 1
+            else:
+                r = str(d.get("reason") or "").split(":")[0]
+                o["refused"][r] = o["refused"].get(r, 0) + 1
+    return out
 
 
 def _evaluations(segs) -> int | None:
@@ -265,9 +328,21 @@ def _evaluations(segs) -> int | None:
     return tot
 
 
+def _exec_total(segs, k: str):
+    tot = 0
+    for s in segs:
+        agg = s.status_agg if isinstance(s.status_agg, dict) else {}
+        v = (agg.get("total") or {}).get(k)
+        if v is None:
+            return None
+        tot += v
+    return tot
+
+
 def _per_decision(x: dict, c: dict, da, dc) -> dict | None:
     """arm `x` against control `c` per decision (each decision is one unit, an unsent one nets 0): wins per decision and
-    net per decision, with the difference's 95% interval (normal: the decisions are many)"""
+    net per decision, with the difference's 95% interval (normal: the decisions are many). `x`/`c`: the arms' stats over
+    their assigned attempts"""
     if not da or not dc:
         return None
     ma, mc = x["net_total"] / da, c["net_total"] / dc
@@ -280,9 +355,28 @@ def _per_decision(x: dict, c: dict, da, dc) -> dict | None:
             "net_per_1k_decisions_diff_ci95": [stats._clean(1000 * (diff - 1.959964 * se)), stats._clean(1000 * (diff + 1.959964 * se))]}
 
 
+def _per_send(x: dict, c: dict, xr: list, cr: list) -> dict:
+    """arm `x` against control `c` over sends (descriptive while an arm changes which decisions are sent)"""
+    p0 = c["win_rate"] or 0
+    need = None
+    if 0 < p0 < 1:
+        need = {}
+        for k in (30, 50):
+            for sign, f in (("+", 1 + k / 100), ("-", 1 - k / 100)):
+                need[f"{sign}{k}%"] = stats.n_per_arm(p0 * f, p0) if 0 < p0 * f < 1 else None
+    anets = [r["net"] for r in xr if r["money"]]
+    cnets = [r["net"] for r in cr if r["money"]]
+    return {"win_rate": stats.two_proportions(x["wins"], x["attempts"], c["wins"], c["attempts"]),
+            "land_rate": stats.two_proportions(x["landed"], x["attempts"], c["landed"], c["attempts"]),
+            "net_per_attempt_diff": stats._clean((x["net_per_attempt"] or 0) - (c["net_per_attempt"] or 0)) if anets and cnets else None,
+            "net_per_attempt_diff_ci95": stats.bootstrap_diff_ci(anets, cnets),
+            "win_rate_mde_rel": stats.mde_rel(p0, min(x["attempts"], c["attempts"])) if 0 < p0 < 1 else None,
+            "sends_per_arm_for_win_rate": need}
+
+
 # ------------------------------------------------------------------------------------------------ one experiment
 
-def experiment(segs, key: str, rows: list, would: list, cfgs: dict, run_cfg: dict | None, hours) -> dict:
+def experiment(segs, key: str, rows: list, would: list, cfgs: dict, run_cfg: dict | None, hours, run_sends_per_hour) -> dict:
     conf = cfgs.get(key)
     in_scope = [r for r in rows if _arm(r, key) is not None]
     conf_arms = (conf or {}).get("arms") or []
@@ -293,11 +387,26 @@ def experiment(segs, key: str, rows: list, would: list, cfgs: dict, run_cfg: dic
     control, why, warn = _control(key, conf_arms or arms, run_cfg, conf)
     out = {"key": key, "config": {k: (conf or {}).get(k) for k in ("arms", "weights", "seed", "config_seed", "run", "scope", "control")} if conf else None,
            "control": control, "control_why": why, "control_warning": warn}
-    # the balance: the assignment over every decision, the sends, the bands and trigger kinds per arm
-    dec = _decisions(segs, key)
+    # the decisions each arm was assigned (the randomized unit): the engine's counters, else decisions.jsonl streamed, else
+    # expected from the evaluations and the weights
+    st = _status_arms(segs, key)
+    ds = None if st else _decisions_stream(segs, key)
+    evals = _evaluations(segs)
+    if st:
+        dsrc, dcounts = "status.jsonl experiments", {a: (st.get(a) or {}).get("decisions", 0) for a in arms}
+    elif ds:
+        dsrc, dcounts = "decisions.jsonl", {a: (ds.get(a) or {}).get("decisions", 0) for a in arms}
+    elif evals:
+        dsrc, dcounts = "expected: status counts_total.evaluation x the weight share", {a: evals * wmap.get(a, 1.0) / wsum for a in arms}
+    else:
+        dsrc, dcounts = None, {}
+    src = st or ds or {}
     bal: dict = {"decisions": None}
-    if dec:
-        bal["decisions"] = {**dec, "weights": wmap, "chi2": stats.chi_square_balance(dec["counts"], wmap) if dec["counts"] else None}
+    if st or ds:
+        counts = {a: (src.get(a) or {}).get("decisions", 0) for a in arms}
+        bal["decisions"] = {"src": dsrc, "n": sum(counts.values()), "counts": counts, "weights": wmap,
+                            "chi2": stats.chi_square_balance(counts, wmap) if sum(counts.values()) else None,
+                            "by_kind": {a: (ds.get(a) or {}).get("by_kind", {}) for a in arms} if ds else None}
     send_counts = {a: sum(1 for r in in_scope if _arm(r, key) == a) for a in arms}
     by_band, by_kind = _counts_by(in_scope, key, "band"), _counts_by(in_scope, key, "kind")
     bal.update(sends=send_counts, sends_chi2=stats.chi_square_balance(send_counts, wmap) if in_scope else None, by_band=by_band,
@@ -305,49 +414,39 @@ def experiment(segs, key: str, rows: list, would: list, cfgs: dict, run_cfg: dic
     if would:
         bal["would_sends"] = {a: sum(1 for r in would if _arm(r, key) == a) for a in arms}
     out["balance"] = bal
-    # per arm
-    per = {a: _arm_stats([r for r in in_scope if _arm(r, key) == a], hours, wmap.get(a, 1.0) / wsum) for a in arms}
-    # the decisions each arm was assigned (the randomized unit): exact from decisions.jsonl, else expected from the
-    # evaluations and the weights
-    evals = _evaluations(segs)
-    if dec and dec["n"]:
-        dcounts, dsrc = {a: dec["counts"].get(a, 0) for a in arms}, "decisions.jsonl"
-    elif evals:
-        dcounts, dsrc = {a: evals * wmap.get(a, 1.0) / wsum for a in arms}, "expected: status counts_total.evaluation x the weight share"
-    else:
-        dcounts, dsrc = {}, None
+    # per arm: per send (the arms that applied), per decision (every attempt by its assigned arm)
+    per, assigned = {}, {}
     for a in arms:
+        ar = [r for r in in_scope if _arm(r, key) == a]
+        x = _arm_stats(ar, run_sends_per_hour)
+        x["by_leader_kind"] = _split(ar, "leader")
+        x["by_tip_policy"] = _split(ar, "policy")
+        sr = src.get(a) or {}
+        x["opportunities"] = sr.get("opportunities")
+        x["refused"] = dict(sorted((sr.get("refused") or {}).items())) if sr else None
+        x["canary_wait"] = (sr.get("refused") or {}).get("canary_wait") if sr else None
         dc_ = dcounts.get(a)
-        per[a]["decisions"] = stats._clean(dc_) if dc_ is not None else None
-        per[a]["wins_per_1k_decisions"] = stats._clean(1000 * per[a]["wins"] / dc_) if dc_ else None
-        per[a]["net_per_1k_decisions"] = stats._clean(1000 * per[a]["net_total"] / dc_) if dc_ else None
+        x["decisions"] = stats._clean(dc_) if dc_ is not None else None
+        assigned[a] = _arm_stats([r for r in rows if _assigned(r, key) == a])
+        x["assigned"] = {k: assigned[a][k] for k in ("attempts", "wins", "net_total")}
+        x["wins_per_1k_decisions"] = stats._clean(1000 * assigned[a]["wins"] / dc_) if dc_ else None
+        x["net_per_1k_decisions"] = stats._clean(1000 * assigned[a]["net_total"] / dc_) if dc_ else None
+        per[a] = x
     out["decisions_src"] = dsrc
     out["arms"] = per
-    # against the control
+    # against the control: per decision (randomized), per send (descriptive), per send on Jito-led slots (X4's primary)
     vs: dict = {}
     c = per.get(control)
     crow = [r for r in in_scope if _arm(r, key) == control]
+    cj = [r for r in crow if r["leader"] == "jito"]
     for a in arms:
         if a == control or not c:
             continue
-        x = per[a]
         arow = [r for r in in_scope if _arm(r, key) == a]
-        anets = [r["net"] for r in arow if r["money"]]
-        cnets = [r["net"] for r in crow if r["money"]]
-        p0 = c["win_rate"] or 0
-        need = None
-        if 0 < p0 < 1:
-            need = {}
-            for k in (30, 50):
-                for sign, f in (("+", 1 + k / 100), ("-", 1 - k / 100)):
-                    need[f"{sign}{k}%"] = stats.n_per_arm(p0 * f, p0) if 0 < p0 * f < 1 else None
-        vs[a] = {"per_decision": _per_decision(x, c, dcounts.get(a), dcounts.get(control)),
-                 "per_send": {"win_rate": stats.two_proportions(x["wins"], x["attempts"], c["wins"], c["attempts"]),
-                              "land_rate": stats.two_proportions(x["landed"], x["attempts"], c["landed"], c["attempts"]),
-                              "net_per_attempt_diff": stats._clean((x["net_per_attempt"] or 0) - (c["net_per_attempt"] or 0)) if anets and cnets else None,
-                              "net_per_attempt_diff_ci95": stats.bootstrap_diff_ci(anets, cnets),
-                              "win_rate_mde_rel": stats.mde_rel(p0, min(x["attempts"], c["attempts"])) if 0 < p0 < 1 else None,
-                              "sends_per_arm_for_win_rate": need}}
+        aj = [r for r in arow if r["leader"] == "jito"]
+        vs[a] = {"per_decision": _per_decision(assigned[a], assigned[control], dcounts.get(a), dcounts.get(control)),
+                 "per_send": _per_send(per[a], c, arow, crow),
+                 "per_send_jito_led": _per_send(_arm_stats(aj), _arm_stats(cj), aj, cj) if aj and cj else None}
     out["vs_control"] = vs
     return out
 
@@ -398,22 +497,43 @@ def x2(rows: list) -> dict:
     return out
 
 
-def x4_rule(e: dict) -> dict:
-    """PLAN WP-11's X4 rule over `experiment`'s arms: the land rate per arm against the control, go when it drops less
-    than 20% relative; STAGE1-PLAN §4's (`go_stage1`): no lost auctions and no fewer wins per send (one-sided p >= 0.05)
-    at >= 1,000 sends per arm. Both are per send as written; `fewer_wins_per_decision_p` is the same test per decision
-    (the randomized unit: it holds when an arm changes which decisions are sent)"""
+def _rel_drop(k: int, n: int, k0: int, n0: int) -> dict | None:
+    """the relative drop of a rate, 1 - (k/n)/(k0/n0), with its 95% interval (the log rate ratio's normal interval, a
+    half success added to an empty cell)"""
+    import math
+    if not n or not n0 or not k0:
+        return None
+    a, b = (k or 0.5), k0
+    rr = (a / n) / (b / n0)
+    se = math.sqrt(max(0.0, (1 - a / n) / a + (1 - b / n0) / b))
+    lo, hi = rr * math.exp(-1.959964 * se), rr * math.exp(1.959964 * se)
+    return {"drop": stats._clean(1 - (k / n) / (k0 / n0)), "ci95": [stats._clean(1 - hi), stats._clean(1 - lo)]}
+
+
+def x4_rule(e: dict, rows: list | None = None) -> dict:
+    """PLAN WP-11's X4 rule over `experiment`'s arms: go when the land rate drops less than 20% relative to the control,
+    on the drop's 95% upper bound (review #11: a point estimate passes a true 30% drop about a quarter of the time at
+    ~2,500 sends per arm), over the Jito-led sends (review #4: the BAM floor often bids the same for every arm on a
+    BAM-led slot), and over every send beside it; STAGE1-PLAN §4's (`go_stage1`): no lost auctions and no fewer wins per
+    send (one-sided p >= 0.05) at >= 1,000 sends per arm, and the same test per decision"""
     base = e.get("control")
+    key = e.get("key") or KEYS["x4"]
     res = {}
     arms = e.get("arms") or {}
     b = arms.get(base) or {}
+    rows = rows or []
+    sel = lambda a, jito: [r for r in rows if _arm(r, key) == a and (not jito or r["leader"] == "jito")]  # noqa: E731
     for a, x in arms.items():
         r = {"n": x["attempts"], "land_rate": x["land_rate"], "land_rate_ci95": x["land_rate_ci95"], "net_per_attempt": x["net_per_attempt"],
              "net_ci95": x["net_per_attempt_ci95"]}
-        if a != base and b.get("land_rate"):
-            drop = 1 - (x["land_rate"] or 0) / b["land_rate"]
-            r["relative_land_drop_vs_" + str(base)] = stats._clean(drop)
-            r["go"] = drop < X4_MAX_REL_DROP
+        if a != base and b.get("attempts"):
+            for name, jito in (("jito_led", True), ("all", False)):
+                xa, xb = sel(a, jito), sel(base, jito)
+                d = _rel_drop(sum(t["landed"] for t in xa), len(xa), sum(t["landed"] for t in xb), len(xb)) if rows else None
+                r["land_drop_" + name] = d
+            prim = r.get("land_drop_jito_led") or r.get("land_drop_all")
+            r["go"] = bool(prim and prim["ci95"][1] < X4_MAX_REL_DROP)
+            r["go_basis"] = "the drop's 95% upper bound on Jito-led sends" if r.get("land_drop_jito_led") else "the drop's 95% upper bound on every send"
             v = (e.get("vs_control") or {}).get(a, {})
             wr = (v.get("per_send") or {}).get("win_rate") or {}
             r["fewer_wins_p"] = wr.get("p_less")
@@ -517,6 +637,15 @@ def run(seg, ctx: dict, which: str = "all") -> dict:
         return incomplete(sec, "no experiment arms recorded (Stage 1, WP-11)")
     hours = sum((s.window.get("trading_hours") or 0) for s in segs) or None
     run_cfg = _run_config(segs)
+    run_sends_per_hour = (len(rows) / hours) if (hours and rows) else None
+    d["sends_per_hour"] = stats._clean(run_sends_per_hour) if run_sends_per_hour else None
+    # review #1: the canary's one send a second binds when its refusals reach the sends: the arms compete for the slot
+    cw, sent = _exec_total(segs, "exec.counts_total.reject_canary_wait"), _exec_total(segs, "exec.sent_total")
+    d["canary_wait"] = {"refusals": cw, "sends": sent}
+    if cw is not None and sent and cw >= sent:
+        sec["caveats"].append(f"the canary's send slot binds: {cw} canary_wait refusals for {sent} sends; the arms compete for it, so per-arm sends "
+                              "and net per hour depend on the other arms (net per hour is net per send x the run's sends per hour; read the "
+                              "per-decision comparison for whether an effect exists)")
     d["segments"] = [s.name for s in segs]
     d["sends"] = len(rows)
     d["would_sends"] = len(would)
@@ -532,13 +661,15 @@ def run(seg, ctx: dict, which: str = "all") -> dict:
         sec["caveats"].append("would-sends only (a shadow or dry run, or a closed gate): the balance holds, nothing landed")
     if not hours:
         sec["caveats"].append("no trading hours (warm-up and gate events): no net per hour")
+    if any(r["win"] and tokens.classify(r["mint"]) == "unknown" for r in rows):
+        sec["caveats"].append("a win without its route's mint is counted `unknown`, neither meme nor common")
     d["balance"] = {k: balance(seg, k) for k in keys}
     d["experiments"] = {}
     for k in keys:
         name = NAMES.get(k, k)
         if which not in ("all", name):
             continue
-        e = experiment(segs, k, rows, would, cfgs, run_cfg, hours)
+        e = experiment(segs, k, rows, would, cfgs, run_cfg, hours, run_sends_per_hour)
         d["experiments"][name] = e
         if e.get("control_warning"):
             sec["caveats"].append(e["control_warning"])
@@ -555,7 +686,7 @@ def run(seg, ctx: dict, which: str = "all") -> dict:
     if which in ("all", "x2") and KEYS["x2"] in keys:
         d["x2"] = x2(rows)
     if which in ("all", "x4") and "x4" in d["experiments"]:
-        d["x4"] = x4_rule(d["experiments"]["x4"])
+        d["x4"] = x4_rule(d["experiments"]["x4"], rows)
     if which in ("all", "margin") and "margin" in d["experiments"]:
         d["margin"] = {a: {"n": x["attempts"], "landed": x["landed"], "net_per_attempt": x["net_per_attempt"], "net_ci95": x["net_per_attempt_ci95"]}
                        for a, x in d["experiments"]["margin"]["arms"].items()}

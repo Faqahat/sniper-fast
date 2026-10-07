@@ -48,7 +48,10 @@ LOOKALIKES = {
 
 
 def classify(mint: str | None) -> str:
-    """`common` or `meme` by the route's mint (an unknown mint is a meme, the rule's "every other token")."""
+    """`common` or `meme` by the route's mint (any mint not listed is a meme, the rule's "every other token");
+    `unknown` when the record has no mint (WP-11 review #12: never counted as a meme)"""
+    if not mint:
+        return "unknown"
     return "common" if mint in COMMON else "meme"
 
 
