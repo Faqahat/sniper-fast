@@ -42,7 +42,11 @@ def run(seg, ctx: dict) -> dict:
         if v:
             bad_identity.append({"sig": r.get("sig"), "violations": v})
     eq_sum = sum(r.get("equity_delta") or 0 for r in rows)
-    d["ledger"] = {"transactions": len(rows), "dup_skipped": len(seg.ledger_dup), "equity_delta_sum": eq_sum, "equity_delta_missing": eq_missing,
+    pre = seg.ledger_pre_run
+    d["ledger"] = {"transactions": len(rows), "dup_skipped": len(seg.ledger_dup),
+                   "pre_run_skipped": {"n": len(pre), "equity_delta": sum(r.get("equity_delta") or 0 for r in pre),
+                                       "trade_net": sum(r.get("trade_net") or 0 for r in pre if r.get("kind") == "route")},
+                   "equity_delta_sum": eq_sum, "equity_delta_missing": eq_missing,
                    "summing_categories": cats, "summing_total": sum(cats.values()), "informational": info,
                    "identity_violations": bad_identity[:50], "identity_violations_n": len(bad_identity)}
     if sum(cats.values()) != eq_sum:
@@ -89,6 +93,9 @@ def run(seg, ctx: dict) -> dict:
     _cross_checks(seg, sec, cats, route)
     _toolkit_recompute(seg, sec)
     sec["caveats"].append("rent is not trading: trade_net excludes recoverable rent (it moves liquid, not total equity)")
+    if pre:
+        sec["caveats"].append(f"{len(pre)} pre_run ledger line(s) left out: transactions from before this segment's state stream "
+                              "(the previous segment's or campaign's), as the Rust side's totals leave them out")
     return sec
 
 

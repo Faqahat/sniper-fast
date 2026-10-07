@@ -3,7 +3,8 @@
     python3 -m arbx_report <command> <segment-or-campaign-dir> [options]
 
 Commands: segment, campaign, quality, ledger, funnel, attempts, blockctx, attribution, latency, leaders, feeds,
-predictions, rivals, experiments [x2|x4|x5|x8|x9|margin|all], census, sizes, sizefit, caps, cu-table, compare A B.
+predictions, rivals, experiments [x2|x4|size|margin|x5|x8|x9|all] (a segment or a campaign directory), census, sizes,
+sizefit, caps, cu-table, compare A B.
 Reports go to <seg>/report/ (or --out). Nothing is fetched from the network unless --rpc-url-env names an
 environment variable holding the RPC URL; .env files are never read.
 """
@@ -84,7 +85,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="arbx-report", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=COMMANDS)
     ap.add_argument("path", help="segment directory (campaign: campaign directory; compare: segment A)")
-    ap.add_argument("extra", nargs="?", help="compare: segment B; experiments: x2|x4|x5|x8|x9|margin|all")
+    ap.add_argument("extra", nargs="?", help="compare: segment B; experiments: x2|x4|size|margin|x5|x8|x9|all")
     ap.add_argument("--out", help="output directory (default <seg>/report)")
     ap.add_argument("--rpc-url-env", help="name of the environment variable holding the RPC URL (never a URL)")
     ap.add_argument("--offline", action="store_true", help="forbid every network call")
@@ -99,6 +100,17 @@ def main(argv=None) -> int:
     ap.add_argument("--stdout", action="store_true", help="print report.json instead of writing files")
     args = ap.parse_args(argv)
     ctx = build_ctx(args)
+
+    if args.command == "experiments" and not model.is_segment_dir(args.path) and os.path.isdir(args.path):
+        # WP-11: a campaign directory: every segment's attempts, the ledger across them
+        camp = model.Campaign.open(args.path, args.match)
+        tips = load_tip_accounts(args.tip_accounts)
+        for s in camp.segments:
+            s.tip_accounts = tips
+        sec = r10_experiments.run(camp, ctx, args.extra or "all")
+        doc = {"schema": "arbx.report/1.0", "tool": render.TOOL_VERSION, "kind": "experiments", "name": camp.name, "campaign_json": camp.campaign_json,
+               "sections": [sec], "inputs": [{"segment": s.name, **i} for s in camp.segments for i in runner._inputs(s, ctx)]}
+        return _emit(doc, args.out or os.path.join(args.path, "report"), "experiments", args.stdout)
 
     if args.command == "campaign":
         wt = load_wallet_txs(args.wallet_txs)

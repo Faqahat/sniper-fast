@@ -1,5 +1,7 @@
 """Statistics with the standard library only: percentiles, concentration, bootstrap CIs (seeded, so reports are
-deterministic), binomial / Wilson, Fisher's exact test, Mann-Whitney U, and a one-sided Cochran-Armitage trend test."""
+deterministic), binomial / Wilson, Fisher's exact test, Mann-Whitney U, a Cochran-Armitage trend test (one- or
+two-sided, with the slope's interval), and (WP-11) chi-square independence, two proportions, a bootstrap difference
+and sample sizes."""
 from __future__ import annotations
 
 import math
@@ -171,7 +173,10 @@ def mann_whitney(x: list, y: list, alternative: str = "two-sided") -> dict | Non
 
 def cochran_armitage(groups: list, alternative: str = "decreasing") -> dict | None:
     """Trend in proportions over ordered groups [(score, successes, n)]. `decreasing`: the proportion falls as the
-    score rises (one-sided). Returns z, p and the fitted slope per score unit (least squares on proportions)."""
+    score rises (one-sided); `increasing` the other side; `two-sided` either (WP-11: X2's rule goes in both
+    directions). Returns z, p, the fitted slope per score unit (least squares on proportions) and its 95% interval
+    (`slope_ci95`, from the groups' own binomial variances), and both one-sided p values (`p_decreasing`,
+    `p_increasing`)."""
     g = [(s, k, n) for s, k, n in groups if n > 0]
     if len(g) < 2:
         return None
@@ -181,13 +186,99 @@ def cochran_armitage(groups: list, alternative: str = "decreasing") -> dict | No
     sbar = sum(s * n for s, _, n in g) / N
     t = sum(k * (s - sbar) for s, k, _ in g)
     var = p * (1 - p) * sum(n * (s - sbar) ** 2 for s, _, n in g)
-    if var <= 0:
-        return {"z": 0, "p": 1.0, "slope": 0}
-    z = t / math.sqrt(var)
-    pval = _norm_sf(-z) if alternative == "decreasing" else _norm_sf(z)
     sxx = sum(n * (s - sbar) ** 2 for s, _, n in g)
+    if var <= 0 or sxx <= 0:
+        return {"z": 0, "p": 1.0, "slope": 0, "slope_ci95": None, "p_decreasing": 1.0, "p_increasing": 1.0}
+    z = t / math.sqrt(var)
+    p_dec, p_inc = _norm_sf(-z), _norm_sf(z)
+    pval = {"decreasing": p_dec, "increasing": p_inc}.get(alternative, min(1.0, 2 * _norm_sf(abs(z))))
     slope = sum(n * (s - sbar) * (k / n - p) for s, k, n in g) / sxx
-    return {"z": _clean(z), "p": _clean(pval), "slope": _clean(slope)}
+    se = math.sqrt(sum(n * (s - sbar) ** 2 * (k / n) * (1 - k / n) for s, k, n in g)) / sxx
+    return {"z": _clean(z), "p": _clean(pval), "slope": _clean(slope), "slope_ci95": [_clean(slope - 1.959964 * se), _clean(slope + 1.959964 * se)],
+            "p_decreasing": _clean(p_dec), "p_increasing": _clean(p_inc)}
+
+
+def _chi2_sf(chi: float, df: int) -> float:
+    """Upper tail of the chi-square distribution (Wilson-Hilferty)."""
+    k = max(1, df)
+    if chi <= 0:
+        return 1.0
+    z = ((chi / k) ** (1 / 3) - (1 - 2 / (9 * k))) / math.sqrt(2 / (9 * k))
+    return _norm_sf(z)
+
+
+def chi_square_independence(table: dict) -> dict | None:
+    """Independence of rows and columns of {row: {col: count}} (chi-square, p by Wilson-Hilferty): e.g. an experiment's
+    arm against the band or the trigger kind. None when it has fewer than two rows or columns with counts."""
+    rows = {r: {c: v for c, v in cols.items() if v} for r, cols in table.items()}
+    rows = {r: c for r, c in rows.items() if c}
+    cols = sorted({c for cs in rows.values() for c in cs}, key=str)
+    if len(rows) < 2 or len(cols) < 2:
+        return None
+    rt = {r: sum(cs.values()) for r, cs in rows.items()}
+    ct = {c: sum(cs.get(c, 0) for cs in rows.values()) for c in cols}
+    n = sum(rt.values())
+    chi = 0.0
+    for r, cs in rows.items():
+        for c in cols:
+            e = rt[r] * ct[c] / n
+            chi += (cs.get(c, 0) - e) ** 2 / e
+    df = (len(rows) - 1) * (len(cols) - 1)
+    return {"chi2": _clean(chi), "df": df, "p": _clean(_chi2_sf(chi, df)), "n": n}
+
+
+def two_proportions(k1: int, n1: int, k2: int, n2: int) -> dict | None:
+    """Arm 1 against arm 2: the difference of proportions with its 95% interval (unpooled), the pooled z test's
+    two-sided p and both one-sided p (`p_less`: arm 1's proportion is lower), and Fisher's exact two-sided p."""
+    if not n1 or not n2:
+        return None
+    p1, p2 = k1 / n1, k2 / n2
+    pp = (k1 + k2) / (n1 + n2)
+    se0 = math.sqrt(pp * (1 - pp) * (1 / n1 + 1 / n2))
+    se = math.sqrt(p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2)
+    z = (p1 - p2) / se0 if se0 > 0 else 0.0
+    return {"diff": _clean(p1 - p2), "ci95": [_clean(p1 - p2 - 1.959964 * se), _clean(p1 - p2 + 1.959964 * se)], "z": _clean(z),
+            "p_two": _clean(min(1.0, 2 * _norm_sf(abs(z)))), "p_less": _clean(1 - _norm_sf(z)), "p_greater": _clean(_norm_sf(z)),
+            "fisher_p": _clean(fisher_exact(k1, n1 - k1, k2, n2 - k2)), "rel": _clean(p1 / p2 - 1) if p2 > 0 else None}
+
+
+def bootstrap_diff_ci(xs: list, ys: list, n: int = 2000, alpha: float = 0.05, seed: int = 0):
+    """95% bootstrap interval of mean(xs) - mean(ys) (seeded: deterministic)."""
+    if not xs or not ys:
+        return None
+    rng = random.Random(seed)
+    a, b = len(xs), len(ys)
+    vals = sorted(sum(xs[rng.randrange(a)] for _ in range(a)) / a - sum(ys[rng.randrange(b)] for _ in range(b)) / b for _ in range(n))
+    return [_clean(vals[int(alpha / 2 * n)]), _clean(vals[min(n - 1, int((1 - alpha / 2) * n))])]
+
+
+Z_975, Z_95, Z_80 = 1.959964, 1.644854, 0.841621
+
+
+def n_per_arm(p1: float, p2: float, two_sided: bool = True) -> int | None:
+    """Sends per arm to tell proportions p1 and p2 apart (alpha 0.05, power 80%; normal approximation)."""
+    if p1 == p2 or not (0 < p1 < 1) or not (0 < p2 < 1):
+        return None
+    za = Z_975 if two_sided else Z_95
+    pb = (p1 + p2) / 2
+    num = (za * math.sqrt(2 * pb * (1 - pb)) + Z_80 * math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))) ** 2
+    return int(math.ceil(num / (p1 - p2) ** 2))
+
+
+def mde_rel(p0: float, n: int, two_sided: bool = True):
+    """The smallest relative change of a proportion p0 that n sends per arm detect (alpha 0.05, power 80%), upward."""
+    if not n or not (0 < p0 < 1):
+        return None
+    lo, hi = 0.0, 50.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        p1 = min(0.999999, p0 * (1 + mid))
+        need = n_per_arm(p1, p0, two_sided)
+        if need is not None and need <= n:
+            hi = mid
+        else:
+            lo = mid
+    return _clean(round(hi, 4))
 
 
 def chi_square_balance(counts: dict, weights: dict) -> dict | None:

@@ -246,16 +246,26 @@ class Segment:
     def ledger(self) -> list:
         """ledger.jsonl's lines this segment counts: a line marked `dup` (a signature an earlier segment of the campaign
         already recorded, written again by this one's pre-run fetch; WP-07) is left out, as the Rust side leaves it out
-        (review WP-07 #11): `ledger_dup` has them"""
-        return [r for r in self.jsonl("ledger") if not r.get("dup")]
+        (review WP-07 #11): `ledger_dup` has them. So is (WP-11) a line marked `pre_run`: a transaction from before this
+        segment's state stream (the wallet's last hour, read at the start), typically the previous campaign's last
+        trades, which the Rust side's totals leave out too (they count from the campaign's start); `ledger_pre_run` has
+        them. Counting them made a campaign's first segment carry the previous campaign's trades (FT-007 p1: +51,440)"""
+        return [r for r in self.jsonl("ledger") if not r.get("dup") and not r.get("pre_run")]
 
     @cached_property
     def ledger_dup(self) -> list:
         return [r for r in self.jsonl("ledger") if r.get("dup")]
 
     @cached_property
+    def ledger_pre_run(self) -> list:
+        """the `pre_run` lines that are not `dup` (left out of `ledger`)"""
+        return [r for r in self.jsonl("ledger") if r.get("pre_run") and not r.get("dup")]
+
+    @cached_property
     def ledger_by_sig(self) -> dict:
-        return {r.get("sig"): r for r in self.ledger}
+        """every line but the `dup` ones, by signature (the recompute from wallet.jsonl, which holds the pre-run
+        transactions too)"""
+        return {r.get("sig"): r for r in self.jsonl("ledger") if not r.get("dup")}
 
     @cached_property
     def wallet_rows(self) -> list:
