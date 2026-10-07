@@ -446,14 +446,14 @@ bankroll_reserve_sol = 0.03
 # PLAN WP-05: bundle-only, fail closed (no network call between a decision and its fire). A send needs a blockhash from
 # the WP-03b ring at most max_blockhash_age_slots old, a target-slot leader whose kind is not skipped, a valid cached
 # Jito token, a healthy recorder, the SendGate live and the store ready
-max_blockhash_age_slots = 20
+max_blockhash_age_slots = 60   # landing study 2026-10-07: every stale refusal came with the Shyft slot index > 10 slots behind (about 4% of net); a blockhash is valid for 150 blocks
 blockhash_commitment = "confirmed"
 skip_leader_kinds = ["other", "unknown"]   # R §3.6: non-Jito leaders cannot take a bundle
 inflight_hold_slots = 2   # one attempt per (buy, sell, mint) until a new state version or a new leader
 queue_ms = 10   # the Jito rate queue: bands under 1M first, crowded pools last in their band, then EV
 # the >=1M bands (src/bands.rs bands 3-4; 0 of 1,869 legacy bundles there landed while they took the 5/s budget):
 # at most 0.5 a second (burst 1), behind every smaller band in the queue
-big_band_max_per_sec = 0.5
+big_band_max_per_sec = 0   # landing study 2026-10-07: bands 3-4 (>= 1M edge) took 1,291 sends for 0 wins; their send slots go to small gaps (0 = no big-band trade)
 # crowding (F6): distinct arbitrage-like signers that landed on either pool in the last 6 h, buckets < 20, 20-150, >= 150.
 # WP-00's list of the 21 pools with 150+ bots stands in until the map holds 6 h; and (OD-3's alternative, review F2)
 # a trade on such a pool expecting >= 100k is not sent: 0 of 1,896 legacy crowded bundles expecting >= 100k landed (12
