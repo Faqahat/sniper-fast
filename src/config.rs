@@ -891,14 +891,23 @@ pub struct HeliusBigCfg {
     /// share): every variant names the same nonce value, so at most one lands and the winner pays one path's tip
     #[serde(default)]
     pub nonce_variants: bool,
+    /// owner 2026-10-07 (the landing blocks: 59% of the transactions that took our gaps first paid only a priority fee,
+    /// median 50,000 lamports, 5x ours): this share of the edge (expected - base fee) is paid as PRIORITY FEE instead of
+    /// tip, at least `priority_fee_lamports` and at most `max_priority_fee_lamports`. Unlike the tip, a landed failure pays
+    /// it: the cap bounds what one costs
+    #[serde(default)]
+    pub priority_share: f64,
+    #[serde(default = "hb_prio_max")]
+    pub max_priority_fee_lamports: u64,
 }
 fn hb_path() -> String { "helius".into() }
 fn hb_min_expected() -> u64 { 1_500_000 }
 fn hb_share() -> f64 { 0.60 }
 fn hb_prio() -> u64 { 10_000 }
+fn hb_prio_max() -> u64 { 100_000 }
 fn hb_rate() -> u32 { 2 }
 impl Default for HeliusBigCfg {
-    fn default() -> Self { HeliusBigCfg { enabled: false, path: hb_path(), min_expected_lamports: hb_min_expected(), tip_share: hb_share(), priority_fee_lamports: hb_prio(), max_per_sec: hb_rate(), also: vec![], nonce_variants: false } }
+    fn default() -> Self { HeliusBigCfg { enabled: false, path: hb_path(), min_expected_lamports: hb_min_expected(), tip_share: hb_share(), priority_fee_lamports: hb_prio(), max_per_sec: hb_rate(), also: vec![], nonce_variants: false, priority_share: 0.0, max_priority_fee_lamports: hb_prio_max() } }
 }
 impl HeliusBigCfg {
     pub fn off(&self) -> bool { !self.enabled }
@@ -1782,6 +1791,8 @@ impl Config {
         let hb = &sp.helius_big;
         if hb.enabled {
             if !(hb.tip_share > 0.0 && hb.tip_share < 1.0) { bail!("[send_policy.helius_big] tip_share must be in (0, 1)"); }
+            if !(0.0..1.0).contains(&hb.priority_share) || hb.priority_share + hb.tip_share >= 1.0 { bail!("[send_policy.helius_big] priority_share must be in [0, 1) and priority_share + tip_share < 1"); }
+            if hb.max_priority_fee_lamports < hb.priority_fee_lamports { bail!("[send_policy.helius_big] max_priority_fee_lamports must be >= priority_fee_lamports"); }
             if hb.priority_fee_lamports < 5_000 { bail!("[send_policy.helius_big] priority_fee_lamports must be >= 5000 (Helius Sender Max's minimum)"); }
             if hb.max_per_sec == 0 { bail!("[send_policy.helius_big] max_per_sec must be >= 1"); }
             match cfg.sends.iter().find(|x| x.name == hb.path) {

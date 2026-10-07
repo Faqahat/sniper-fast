@@ -1418,8 +1418,11 @@ impl Exec {
         if hel {
             let cu_l = self.cu_limit_of(&r);
             if let Some(h) = self.helius.as_mut() {
-                // the CU price that makes the priority fee at least `priority_fee_lamports` at this CU limit (rounded up)
-                hel_cu_price = (h.cfg.priority_fee_lamports * 1_000_000).div_ceil(cu_l.max(1));
+                // the priority fee: `priority_share` of the edge, within [priority_fee_lamports, max_priority_fee_lamports]; the
+                // CU price that pays at least it at this CU limit (rounded up)
+                let by_share = ((expected - BASE_FEE as i64).max(0) as f64 * h.cfg.priority_share) as u64;
+                let prio_target = by_share.min(h.cfg.max_priority_fee_lamports).max(h.cfg.priority_fee_lamports);
+                hel_cu_price = (prio_target * 1_000_000).div_ceil(cu_l.max(1));
                 prio_fee = (cu_l * hel_cu_price).div_ceil(1_000_000);
                 let edge = (expected - BASE_FEE as i64 - prio_fee as i64).max(0);
                 // the `also` paths' minimum tips come out of the share, in order, only while Helius keeps at least its own

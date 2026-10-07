@@ -3549,3 +3549,19 @@ async fn big_gap_nonce_variants_pay_one_path_each() {
         assert_eq!(x["dry_run"]["checks_ok"].as_bool(), Some(true), "{}", x["dry_run"]["checks"]);
     }
 }
+
+/// arbx-fast `priority_share`: part of the edge is paid as priority fee (capped), the tip share of what is left
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_big_gap_pays_a_capped_share_as_priority_fee() {
+    let extra = "[[send]]\nname = \"helius\"\nkind = \"helius\"\nurl = \"https://127.0.0.1:9/fast\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [send_policy.helius_big]\nenabled = true\nmin_expected_lamports = 1700000\ntip_share = 0.3\npriority_share = 0.3\npriority_fee_lamports = 10000\nmax_priority_fee_lamports = 100000\nmax_per_sec = 5\n";
+    let mut r = rig("helius-prio", Mode::Shadow, extra).await;
+    // 5,000,000 expected: 30% of 4,995,000 = 1,498,500, capped at 100,000 priority (CU limit 100,000 -> 1,000,000 micro-lamports a CU)
+    let d = r.decide(route(1, damm(2, MINT), 5_000_000, 1), 97, now_ns());
+    assert!(d.would_send, "{d:?}");
+    let a = r.lines("attempts");
+    let h = &a[0]["helius_big"];
+    assert_eq!((h["prio_fee"].as_u64(), h["cu_price_micro"].as_u64()), (Some(100_000), Some(1_000_000)), "{h}");
+    assert_eq!(h["tip"].as_u64(), Some(((5_000_000 - 5_000 - 100_000) as f64 * 0.3) as u64), "30% of the edge after base and priority fee: {h}");
+    assert_eq!(a[0]["min_profit_onchain"].as_u64(), Some(h["tip"].as_u64().unwrap() + 100_000 + BASE_FEE + 1));
+}
