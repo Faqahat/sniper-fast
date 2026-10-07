@@ -96,6 +96,12 @@ pub struct Config {
     /// before (meta.json `config.normalized_sha256`: replays of older runs, the campaigns' frozen-config checks)
     #[serde(default, skip_serializing_if = "PoolRefreshCfg::off")]
     pub pool_refresh: PoolRefreshCfg,
+    /// WP-11: the experiment framework (src/experiments.rs): arms assigned per decision by hash (`seed`), run side by side
+    /// in the same live run (X2 send delay, X4 tip share, the size cap, the margin floor). Off unless a table is
+    /// `enabled`; left out of the serialized config while off (a disabled table too), so a config without them hashes as
+    /// before (meta.json `config.normalized_sha256`: replays of older runs, the campaigns' frozen-config checks)
+    #[serde(default, skip_serializing_if = "crate::experiments::ExperimentsCfg::off")]
+    pub experiments: crate::experiments::ExperimentsCfg,
 }
 
 /// `[pool_refresh]` (WP-22, PLAN-ADDENDUM "WP-22: Automatic pool refresh"; FT-008). `arbx pools refresh` builds the next
@@ -1715,6 +1721,8 @@ impl Config {
         sp.bam.check().map_err(|e| anyhow::anyhow!(e))?;
         // WP-22: the pool refresh's policy (only when on: off, it is not serialized and changes nothing)
         if cfg.pool_refresh.enabled { cfg.pool_refresh.check(&cfg.rpc).map_err(|e| anyhow::anyhow!(e))?; }
+        // WP-11: the experiments (only the enabled tables: a disabled one is not serialized and changes nothing)
+        cfg.experiments.check(&cfg).map_err(|e| anyhow::anyhow!(e))?;
         // WP-06: [bands], [tips], [builder]
         crate::tip::TipModel::from_cfg(&cfg).map_err(|e| anyhow::anyhow!(e))?;
         let b = &cfg.builder;

@@ -782,6 +782,7 @@ fn plain_files_at_start_and_core_records_at_once() {
     rec.sync();
     for f in ["events.jsonl", "feedhealth.jsonl", "resources.jsonl", "keepalive.jsonl", "run.log"] { assert!(d.join(f).exists(), "{f}"); }
     assert!(!d.join("status.jsonl").exists(), "status.jsonl waits for the engine");
+    assert!(!d.join("experiments.jsonl").exists(), "WP-11: experiments.jsonl only with an experiment on (its first line)");
     let ev = std::fs::read_to_string(d.join("events.jsonl")).unwrap();
     let ev: Vec<Value> = ev.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(ev[0]["schema"], "arbx.events/1.0");

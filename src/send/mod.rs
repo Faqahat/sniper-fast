@@ -1000,10 +1000,16 @@ impl Paths {
     /// Send one trade's copies, from any thread (the work runs on the runtime), all at once (Stage 0: one bundle copy).
     /// Every copy is a line in copies.jsonl, including the ones never sent and the ones never answered. `net`: the send
     /// path's network-call scope (`netcount`), carried into every copy's task
-    pub fn fire(self: &Arc<Self>, attempt: u64, copies: Vec<Copy>, prio: Prio) -> tokio::task::JoinHandle<Fired> {
+    pub fn fire(self: &Arc<Self>, attempt: u64, copies: Vec<Copy>, prio: Prio) -> tokio::task::JoinHandle<Fired> { self.fire_after(attempt, copies, prio, Duration::ZERO) }
+
+    /// `fire`, the copies leaving `delay` later (WP-11's X2 arm): a tokio sleep on the send task itself, so the caller (the
+    /// engine thread) returns at once; the fire result's `t_ns` and each copy's `t_sent` are taken after it. A zero delay is
+    /// `fire` exactly (no sleep)
+    pub fn fire_after(self: &Arc<Self>, attempt: u64, copies: Vec<Copy>, prio: Prio, delay: Duration) -> tokio::task::JoinHandle<Fired> {
         let me = self.clone();
         let net = crate::netcount::current();
         self.rt.spawn(crate::netcount::in_task(net.clone(), async move {
+            if !delay.is_zero() { tokio::time::sleep(delay).await; }
             let t0_ns = now_ns();
             let hs: Vec<_> = copies.into_iter().map(|c| {
                 let p = me.list[c.path].clone();
@@ -1346,6 +1352,35 @@ mod tests {
         let back = Sent::from_json(&old).unwrap();
         assert_eq!((back.endpoint, back.leader_kind, back.attempt), (None, None, 9));
         assert_eq!((leader_kind_code("jito"), leader_kind_code("other"), leader_kind_code("x")), (Some("jito"), Some("other"), None));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// WP-11 (X2): `fire_after` sleeps on the send task, never on its caller: the handle comes back at once and the copy
+    /// leaves the delay later (its `t_sent` and the fire's `t_ns` after the sleep); a zero delay is `fire`
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fire_after_sleeps_on_the_send_task() {
+        let d = std::env::temp_dir().join(format!("arbx-copies-x2-{}-{}", std::process::id(), now_ns()));
+        let rec = crate::rec::start(crate::rec::Opts { dir: d.clone(), run: "t".into(), producer: "p".into(), cfg: Default::default(), feeds: vec![], monitor: false,
+            echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let j = jito::Jito::for_test(rec.clone());
+        j.set_cached(Some(jito::CachedToken { value: "tok".into(), exp_ms: now_ns() as i64 / 1_000_000 + 600_000, issued_ms: now_ns() as i64 / 1_000_000 }));
+        j.set_fake(Arc::new(move |_: &[&[u8]]| "x2-b0".into()));
+        let ps = Paths::for_test(vec![Path::test_bundle(j, Some(50), 10)], rec.clone());
+        let tip = crate::tx::pk(known_tip_accounts(SendKind::JitoBundle)[1]);
+        for (attempt, delay_ms) in [(1u64, 20u64), (2, 0)] {
+            let raw = Arc::new(tx(tip, 5_000 + attempt, false));
+            let t0 = now_ns();
+            let h = ps.fire_after(attempt, vec![Copy { path: 0, raw, tip: Some((tip, 5_000)), blockhash_slot: Some(100), leader_kind: Some("jito") }], Prio::default(),
+                Duration::from_millis(delay_ms));
+            let handed = now_ns() - t0;
+            assert!(handed < 15_000_000, "the caller is not held by the delay: {handed} ns");
+            let fired = h.await.unwrap();
+            let c = &fired.copies[0];
+            assert!(c.ok, "{c:?}");
+            assert!(c.t_sent >= t0 + delay_ms * 1_000_000 && fired.t_ns >= t0 + delay_ms * 1_000_000, "{delay_ms} ms: the copy left {} ms after the fire",
+                (c.t_sent - t0) as f64 / 1e6);
+        }
+        rec.close();
         let _ = std::fs::remove_dir_all(&d);
     }
 

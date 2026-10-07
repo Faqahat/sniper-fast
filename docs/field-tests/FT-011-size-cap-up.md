@@ -1,6 +1,6 @@
 # FT-011: size cap back to the wallet's limit, small rungs kept (3 h, live canary on frz)
 
-- **Status:** planned (owner OK, 2026-10-07). It runs after FT-010. WP-11's side-by-side size arms supersede it once built.
+- **Status:** superseded by FT-012 (2026-10-07). WP-11 was built and reviewed early, and FT-012 tests the 0.05 vs 0.2 cap side by side in the same hours.
 - **Mode:** canary under `arbx campaign`, 6 × 30 min, bundle-only. Budget: WP-07 allotment 5,000,000 lamports.
 - **Config:** FT-010's config as decided by its rule, with ONE change:
   - `[canary] size_sol` and `[live] max_size_sol` 0.05 → **0.2 SOL**;
