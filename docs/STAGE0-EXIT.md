@@ -1,5 +1,7 @@
 # Stage 0 exit report
 
+> Win-mix correction (2026-10-07, WP-11 review #12): by mint, FT-007 is 31 meme vs 34 common and FT-007 + FT-008 is **73 vs 66** (one "CAKE" win was the cake.xmr meme); the rule still passes.
+>
 > **Stage 0 CLOSED (owner, 2026-10-07):** the three telemetry items below are waived in writing (PLAN §9, OD-T), as exec coverage was (OD-1). Their fixes are carried into Stage 1.
 
 - **Date:** 2026-10-07, written 02:20–03:10 UTC by Claude for the owner's review. Not committed.
@@ -20,7 +22,7 @@
 2. **What passes:** every other PLAN §6 gate, and all 8 of the owner's trade-success criteria.
    - 231 / 231 landings net > 0; the series made +966,055 lamports.
    - Win ratio 2.61%; realised/quoted median 1.000.
-   - 72 meme vs 67 common wins over FT-007 + FT-008.
+   - 73 meme vs 66 common wins over FT-007 + FT-008.
 3. **To close Stage 0:** a written owner waiver for those telemetry items (in PLAN §9, like OD-1), or fixes and a re-measure.
 
 ## 2. The series
@@ -33,7 +35,7 @@
 | FT-007 | 6f6163c | 3.01 | 2,093 | 65 | 3.11% | +235,938 | 78,298 | 3,630 | 29.7% | 40.7% | 30 / 35 |
 | FT-008 | b1318ef | 3.01 | 2,282 | 74 | 3.24% | +274,644 | 91,116 | 3,711 | 31.2% | 39.5% | 42 / 32 |
 | **Series FT-005…008** | | **12.05** | **8,857** | **231** | **2.61%** | **+966,055** | **80,163** | **4,182** | **36.1%** | **34.8%** | 96 / 135 |
-| Meme-rule window FT-007 + 008 | | 6.03 | 4,375 | 139 | 3.18% | +510,582 | 84,708 | 3,673 | 30.5% | 40.1% | **72 / 67** |
+| Meme-rule window FT-007 + 008 | | 6.03 | 4,375 | 139 | 3.18% | +510,582 | 84,708 | 3,673 | 30.5% | 40.1% | **73 / 66** |
 
 - **Hours** are each segment's start (`meta.json` `run.started_ns`) to its stop (`stop.json` `ended_ns`), summed. Boot and drain are included; the gaps between segments are not.
   - The FT docs used about 2.99–3.0 h, so their net/h figures are 0.5–1% higher (FT-008: 91,982 there, 91,116 here).
@@ -96,7 +98,7 @@
 | Win ratio per send ≥ 0.3% (stretch 0.5%) | **2.61%** (231 / 8,857); lowest test 1.58% (FT-006) | **Pass**, stretch met |
 | Bundle-only, 0 failed-landing fees | As in 3a | **Pass** |
 | Reconciliation ok at every stop | 16 / 16 stop reconciliations `ok`, `final`, residual 0 / 0 | **Pass** |
-| Win mix: more meme than common, over FT-007 + FT-008 | **72 meme vs 67 common** (FT-007 30 / 35, FT-008 42 / 32). PUMP and CAKE are counted as common | **Pass** (a 5-win margin) |
+| Win mix: more meme than common, over FT-007 + FT-008 | **73 meme vs 66 common** (FT-007 30 / 35, FT-008 42 / 32). PUMP and CAKE are counted as common | **Pass** (a 5-win margin) |
 
 **Realised vs quoted (each landed win: ledger `trade_net` / the attempt's `expected.net`)**
 
@@ -168,7 +170,7 @@
 6. **Scenarios** were run at HEAD (221a2d8 code), not at each canary build.
 7. **$500 trigger:** net positive over 48 h of canary. Stage 0 has 13.1 h (FT-004…FT-008), all net positive.
 8. **Win-mix margin:**
-   - 72 vs 67 holds with the owner's closed list of common tokens: any token not on it counts as meme.
+   - 73 vs 66 holds with the owner's closed list of common tokens: any token not on it counts as meme.
    - Moving 3 wins from meme to common would flip the result, so extending the list later could change it.
 9. **Follow-ups from the FT docs:**
    - **FT-002:** a wider DLMM bin-array buffer, and simulating at the decision's state (7 DLMM simulation errors).

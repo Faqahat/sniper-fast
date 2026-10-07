@@ -136,4 +136,4 @@ and recorded web answers: the records read in 9.6 s, the refresh 20 s.
 
 **Win mix (Stage 0 rule, FT-007 + FT-008):**
 - FT-008: 42 meme vs 32 common (USDC 27, USDT 5). Memes made 73% of the net.
-- Together: **72 meme vs 67 common: met.**
+- Together: **73 meme vs 66 common: met.** Classified by mint; FT-007's "CAKE" win was the cake.xmr meme (WP-11 review #12).

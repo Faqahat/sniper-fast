@@ -64,5 +64,5 @@ Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the wa
 - Fees are now the largest cost: 41% of gross.
 
 **Win mix (Stage 0 exit criterion):**
-- 30 meme wins vs 35 common (USDC 29, MET 2, PUMP 1, CAKE 1, …), the closest yet.
+- 31 meme wins vs 34 common (USDC 29, MET 2, PUMP 1, …), the closest yet. Corrected 2026-10-07: the "CAKE" win was the cake.xmr look-alike (`DAemPFNc…`), a meme, not PancakeSwap's CAKE (WP-11 review #12, classified by mint).
 - Memes made about 69% of the net. Attention+ alone: 7 wins, +48,028.
