@@ -45,7 +45,7 @@ use serde_json::{json, Value};
 /// experiments.jsonl's schema (MEASUREMENT §4.45)
 pub const SCHEMA: &str = "arbx.experiments/1.0";
 /// the evaluation kinds (decisions.jsonl `kind`): every arbx decision is state-triggered
-pub const KINDS: [&str; 4] = ["commit", "quiescent", "timeout", "fork"];
+pub const KINDS: [&str; 5] = ["commit", "quiescent", "timeout", "fork", "pending"];
 /// the band count (src/bands.rs: 0-4)
 pub const N_BANDS: u8 = 5;
 /// the most arms an experiment may have

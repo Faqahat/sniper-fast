@@ -413,6 +413,8 @@ pub struct Engine {
     recent: VecDeque<RecentDec>,
     /// hints waiting for their transaction's commit (accuracy), and the scores waiting for idle time
     hints: HashMap<[u8; 64], Vec<Hint>>,
+    /// arbx-fast: the pending trigger's predicted accounts, set only while that one trigger is evaluated (`price_pending`)
+    overlay: Option<crate::overlay::Overlay>,
     hint_order: VecDeque<(u64, [u8; 64])>,
     acc_queue: VecDeque<Hint>,
     acc_windows: HashMap<usize, accuracy::Window>,
@@ -913,7 +915,7 @@ impl Engine {
             tracker: CommitTracker::new(TrackerCfg::new(knobs.commit_timeout_ms, knobs.quiescence_ms)), forks: SlotTree::default(), state: StateStream::default(),
             flags: Arc::new(HealthFlags::default()), shut: Shut::Warmup,
             slo: LagSlo::new(knobs.lag_slo_p50_ms, knobs.lag_slo_p90_ms, knobs.lag_slo_breach_minutes, knobs.slo_recover_minutes, &knobs.slo_action),
-            deferred: Vec::new(), recent: VecDeque::new(), hints: HashMap::default(), hint_order: VecDeque::new(), acc_queue: VecDeque::new(), acc_windows: HashMap::default(),
+            deferred: Vec::new(), recent: VecDeque::new(), hints: HashMap::default(), overlay: None, hint_order: VecDeque::new(), acc_queue: VecDeque::new(), acc_windows: HashMap::default(),
             acc_by_venue: Default::default(), commit_lag: Series::new("commit_lag"),
             commit_lag_src: [Series::new("commit_lag_tx"), Series::new("commit_lag_shred"), Series::new("commit_lag_unknown")], stop_req: None, boot_warned: false,
             reads: Reads::default(), resync: None, unverified: HashSet::default(), clmm_provisional: HashMap::default(), follow_ticks: 0, last_account_t: 0, knobs,
@@ -2331,6 +2333,10 @@ impl Engine {
         }
     }
 
+    /// arbx-fast: an account as the current evaluation reads it: the pending trigger's predicted copy while one is being
+    /// priced (`price_pending`), else the store's current version
+    fn acct(&self, k: &Pk) -> Option<&crate::store::Acct> { self.overlay.as_ref().and_then(|o| o.get(k)).or_else(|| self.store.get(k)) }
+
     /// Pool `m` ready to quote in one direction (`zfo`: spending its token 0), from the store's current versions only
     /// (PLAN WP-04 item 1: there is no other state to read: a prediction is never a priced state), parsed by
     /// arbx-sizing (PLAN-ADDENDUM WP-16, `src/quote.rs`). `skip`: DLMM bin arrays left out (pending or on a contested
@@ -2341,7 +2347,7 @@ impl Engine {
             return Err(quote::Why::VenueUpgraded);
         }
         let arrays = self.store.dlmm_arrays.get(&m.pool).map(|l| l.as_slice()).unwrap_or(&[]);
-        let get = |k: &Pk| self.store.get(k);
+        let get = |k: &Pk| self.acct(k);
         let usable = |i: i64| !skip.contains(&i);
         quote::leg(m, zfo, &quote::Src { get: &get, arrays, usable: &usable, clock }, use_)
     }
@@ -2503,6 +2509,7 @@ impl Engine {
                     self.hint_order.push_back((t_engine, a.tx.sig));
                     shadow_pred = true;
                     self.count("trigger_hint_only");
+                    if self.cfg.pending_triggers && a.executed.is_none() && self.cfg.state_triggers { self.price_pending(i, sw, a, t_engine); }
                 }
             }
         }
@@ -2517,6 +2524,28 @@ impl Engine {
             "st": st, "opp": null, "hint_only": true, "signer": b58(&signer), "signer_stats": [stats.0, stats.1], "skip": skip,
             "w_expected": w.iter().map(b58).collect::<Vec<_>>(), "shadow_pred": shadow_pred });
         self.rec.json(rec::TRIGGERS, line);
+    }
+
+    /// arbx-fast `[strategy] pending_triggers`: price pool `i`'s routes on the state the decoded, not yet committed swap
+    /// `sw` leaves (its overlay), as trigger kind "pending", at once (no wait for its account updates). The overlay lives
+    /// for this one evaluation only: it never prices another trigger's routes (the old `preds` poisoning)
+    fn price_pending(&mut self, i: usize, sw: &PendingSwap, a: &Arrival, t_engine: u64) {
+        let (now, dslot) = self.chain_now();
+        let m = self.reg.pools[i].clone();
+        let arrays = self.store.dlmm_arrays.get(&m.pool).cloned().unwrap_or_default();
+        let ov = {
+            let get = |k: &Pk| self.store.get(k);
+            let v = accuracy::View { get: &get, arrays: &arrays, now_unix: now, slot: dslot };
+            crate::overlay::post_swap(&m, &v, sw, a.tx.sig)
+        };
+        let ov = match ov { Ok(o) => o, Err(_) => { self.count("pending_no_overlay"); return; } };
+        self.count("pending_priced");
+        self.overlay = Some(ov);
+        let ctx = EvalCtx { kind: "pending", txn: Some(a.tx.sig), slot: a.slot, t_first_shred: Some(a.t_rx), t_update_recv: a.t_rx, t_first_engine: t_engine,
+            t_commit: t_engine, t_resolved: t_engine, quiet: false, now_clock: t_engine, w_src: "shred", group: None, deferrals: 0 };
+        let n = self.evaluate_pool(i, &ctx);
+        self.overlay = None;
+        if n > 0 { self.count("pending_evaluated"); }
     }
 
     /// The executor's turn for opportunity `id` (exec.rs): the send checks on this engine's journaled view (the
@@ -2707,24 +2736,24 @@ impl Engine {
         // WP-21: a Raydium CLMM leg's are the tick arrays it names (its walk at its size, then one held buffer array), an
         // Orca Whirlpool leg's the program's own 3 (initialized or not), both in the order the leg passes them
         let live = |p: &crate::venues::PoolMeta, skip: &[i64]| -> Vec<i64> {
-            self.store.dlmm_arrays.get(&p.pool).map(|l| l.iter().filter(|(i, k)| self.store.get(k).is_some() && !skip.contains(i)).map(|(i, _)| *i).collect()).unwrap_or_default()
+            self.store.dlmm_arrays.get(&p.pool).map(|l| l.iter().filter(|(i, k)| self.acct(k).is_some() && !skip.contains(i)).map(|(i, _)| *i).collect()).unwrap_or_default()
         };
         let clmm_names = |p: &crate::venues::PoolMeta, l: &quote::Leg, x: u64, zfo: bool| -> Option<Vec<i64>> {
             match p.venue {
                 Venue::RayClmm => l.clmm_arrays(x)?.ok().map(|v| v.into_iter().map(i64::from).collect()),
-                Venue::Whirlpool => crate::venues::clmm::whirl_leg_starts(&self.store.get(&p.pool)?.data, zfo).map(|v| v.into_iter().map(i64::from).collect()),
+                Venue::Whirlpool => crate::venues::clmm::whirl_leg_starts(&self.acct(&p.pool)?.data, zfo).map(|v| v.into_iter().map(i64::from).collect()),
                 _ => None,
             }
         };
         let (buy_names, sell_names) = (clmm_names(pb, &lb, size, pb.t0 == *WSOL), clmm_names(ps, &ls, wb.out, ps.t0 == o.mint));
         if (pb.venue.is_clmm() && buy_names.is_none()) || (ps.venue.is_clmm() && sell_names.is_none()) { return None; }
-        let data = |p: &crate::venues::PoolMeta| self.store.get(&p.pool).map(|a| a.data.to_vec());
+        let data = |p: &crate::venues::PoolMeta| self.acct(&p.pool).map(|a| a.data.to_vec());
         let trig_feed = if o.trig_feed == u16::MAX { Some("state".to_string()) } else { self.feeds.get(o.trig_feed as usize).cloned() };
         // WP-05: the route's crowding (F6: two counts, review WP-05 #1) and the versions of its accounts it was priced on
         // (attempts `route_in`); whether its trigger has a PoH position is looked up after the decision (review #8)
         let crowding = self.activity.crowding(&pb.pool, &ps.pool, self.t_now);
         let route_keys = self.route_accounts_of(pb, ps);
-        let accounts: Vec<(Pk, u64, u64)> = route_keys.iter().filter_map(|k| self.store.get(k).map(|a| (*k, a.slot, a.write_version))).collect();
+        let accounts: Vec<(Pk, u64, u64)> = route_keys.iter().filter_map(|k| self.acct(k).map(|a| (*k, a.slot, a.write_version))).collect();
         // ---- WP-06
         let (cu, cu_src) = self.route_cu(pb.venue, wb.crossed, ps.venue, ws.crossed);
         let cu_ata = self.builder.as_ref().map_or((crate::cu_table::FALLBACK_ATA_CREATE, crate::cu_table::FALLBACK_ATA_CLOSE), |b| b.cu.ata_ops());
@@ -2732,13 +2761,13 @@ impl Engine {
         let payer = self.exec.as_ref().map(|x| x.payer());
         let followed = |k: &Pk| self.watch_set.contains(k);
         let mid_held = payer.map(|p| self.ata.get(&p, &o.mint, &mint_prog)).filter(|a| followed(a))
-            .map(|a| self.store.get(&a).is_some_and(|x| crate::store::token_account_exists(&x.data)));
+            .map(|a| self.acct(&a).is_some_and(|x| crate::store::token_account_exists(&x.data)));
         let uva = payer.map(|p| *self.uva_key.get_or_init(|| crate::build::pump_uva(&p))).filter(|a| followed(a))
-            .map(|a| self.store.get(&a).is_some_and(|x| !x.data.is_empty()));
+            .map(|a| self.acct(&a).is_some_and(|x| !x.data.is_empty()));
         // DLMM's bitmap extension, WP-21 Raydium CLMM's TickArrayBitmapExtension: when the store holds it (it exists)
         let ext = |p: &crate::venues::PoolMeta| match p.venue { Venue::Dlmm => p.extra.first().copied(), Venue::RayClmm => p.clmm_ext().copied(), _ => None }
-            .filter(|e| self.store.get(e).is_some_and(|a| !a.data.is_empty()));
-        let mut sizes: Vec<(Pk, u32)> = route_keys.iter().chain([&pb.t0, &pb.t1, &ps.t0, &ps.t1]).filter_map(|k| self.store.get(k).map(|a| (*k, a.data.len() as u32))).collect();
+            .filter(|e| self.acct(e).is_some_and(|a| !a.data.is_empty()));
+        let mut sizes: Vec<(Pk, u32)> = route_keys.iter().chain([&pb.t0, &pb.t1, &ps.t0, &ps.t1]).filter_map(|k| self.acct(k).map(|a| (*k, a.data.len() as u32))).collect();
         sizes.sort();
         sizes.dedup();
         Some(crate::exec::RouteIn { opp: id, trig: o.trig, trig_feed, slot: o.slot,
@@ -3890,6 +3919,25 @@ mod tests {
         assert!(t[0]["opp"].is_null() && t[0]["hint_only"] == json!(true) && t[0]["shadow_pred"] == json!(true) && t[0]["skip"].is_null());
         assert_eq!(t[0]["w_expected"].as_array().unwrap().len(), 3);
         assert_eq!(t[0]["signer_stats"], json!([0, 0]));
+    }
+
+    /// arbx-fast `[strategy] pending_triggers`: off, a decoded swap stays a hint (as above); on, a hint that passes its
+    /// checks is priced at once on its overlay, as trigger kind "pending" (here the overlay is refused: counted, nothing
+    /// priced, and the overlay never outlives the evaluation)
+    #[test]
+    fn pending_triggers_price_a_passed_hint_on_its_overlay() {
+        let mut r = rig("pending");
+        r.e.cfg.pending_triggers = true;
+        make_ready(&mut r.e, T0);
+        let a = meta(1);
+        tx_ev(&mut r.e, shred_tx(sig(9), &[a.pool, a.vault0, a.vault1], Some((&a, SOL, false)), 11, T0 + 10 * MS));
+        let e = &r.e;
+        assert_eq!((e.counter("trigger_hint_only"), e.counter("pending_priced") + e.counter("pending_no_overlay")), (1, 1), "every passed hint is tried");
+        assert!(e.overlay.is_none(), "the overlay lives for one evaluation only");
+        let mut off = rig("pending-off");
+        make_ready(&mut off.e, T0);
+        tx_ev(&mut off.e, shred_tx(sig(9), &[a.pool, a.vault0, a.vault1], Some((&a, SOL, false)), 11, T0 + 10 * MS));
+        assert_eq!((off.e.counter("pending_priced"), off.e.counter("pending_no_overlay"), off.e.counter("evaluation")), (0, 0, 0), "off: a hint only");
     }
 
     /// skip_failing_signers works on the hint path, and the skipped signer's statistics keep learning (its swaps landing,

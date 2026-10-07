@@ -1495,6 +1495,12 @@ pub struct StrategyCfg {
     /// resolved, WP-04), the pool's routes are evaluated. The only pricing path (decoded swaps are hints)
     #[serde(default)]
     pub state_triggers: bool,
+    /// arbx-fast (owner 2026-10-07: trigger -> send toward 1 ms): a decoded swap (shreds) that passes the hint checks
+    /// (its signer, its own slippage bound) is ALSO priced at once on its predicted post-state (`overlay`, trigger kind
+    /// "pending"), ~13 ms before its account updates arrive. Reverses WP-04's "a hint never creates a send" in this copy
+    /// only; bundle sends drop a phantom for free, the on-chain profit check reverts what does not pay
+    #[serde(default)]
+    pub pending_triggers: bool,
     /// record, per opportunity, the best round trip at each of these budgets (SOL) to caps.jsonl (what a bigger
     /// balance would add; nothing is traded above live.max_size_sol)
     #[serde(default)]
@@ -1506,7 +1512,7 @@ fn min_profit() -> u64 { 10_000 }
 fn cu_price() -> u64 { 40_000 }
 fn watch_ms() -> u64 { 2_000 }
 impl Default for StrategyCfg {
-    fn default() -> Self { StrategyCfg { sizes_sol: sizes(), min_profit_lamports: min_profit(), cu_price_micro: cu_price(), outcome_watch_ms: watch_ms(), signer_stats_file: String::new(), skip_failing_signers: true, state_triggers: false, budget_caps_sol: vec![] } }
+    fn default() -> Self { StrategyCfg { sizes_sol: sizes(), min_profit_lamports: min_profit(), cu_price_micro: cu_price(), outcome_watch_ms: watch_ms(), signer_stats_file: String::new(), skip_failing_signers: true, state_triggers: false, pending_triggers: false, budget_caps_sol: vec![] } }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
