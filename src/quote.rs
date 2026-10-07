@@ -655,6 +655,6 @@ fn worse(have: Option<Why>, e: Why) -> Why {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 pub(crate) mod clmm_tests;
