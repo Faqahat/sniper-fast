@@ -63,7 +63,7 @@ pub(crate) fn any_fx(prefix: &str) -> &'static Fx {
     fixtures().values().chain(other_fixtures().values()).find(|f| crate::tx::b58(&f.pool).starts_with(prefix)).unwrap_or_else(|| panic!("no fixture {prefix}"))
 }
 
-fn swaps() -> &'static Vec<Value> {
+pub(crate) fn swaps() -> &'static Vec<Value> {
     static S: OnceLock<Vec<Value>> = OnceLock::new();
     S.get_or_init(|| {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(format!("{DIR}/real-swaps-clmm.json")).unwrap()).unwrap();
@@ -116,9 +116,9 @@ pub(crate) fn followed(fx: &Fx, m: &PoolMeta, accts: &HashMap<Pk, Acct>) -> Vec<
 }
 
 /// one real swap's context
-struct Case { fx: &'static Fx, m: PoolMeta, pre: HashMap<Pk, Acct>, arrays: Vec<(i64, Pk)>, passed: Vec<i64>, zfo: bool, x: u64, exact_out: bool }
+pub(crate) struct Case { pub fx: &'static Fx, pub m: PoolMeta, pub pre: HashMap<Pk, Acct>, pub arrays: Vec<(i64, Pk)>, pub passed: Vec<i64>, pub zfo: bool, pub x: u64, pub exact_out: bool }
 
-fn case(s: &Value) -> Case {
+pub(crate) fn case(s: &Value) -> Case {
     let fx = &fixtures()[&pk58(s["pool"].as_str().unwrap())];
     let m = meta(fx);
     let pre = accounts(fx, &s["patches"]);
@@ -142,7 +142,7 @@ impl Case {
     fn quote(&self) -> Result<sz::Quote, Why> { self.quote_as(Use::Third) }
 }
 
-fn label(s: &Value) -> String {
+pub(crate) fn label(s: &Value) -> String {
     let v = format!("{} {}", s["venue"].as_str().unwrap(), &s["pool"].as_str().unwrap()[..4]);
     if s["case"] == "snapshot" { v } else { format!("{v} [{}]", s["case"].as_str().unwrap()) }
 }
@@ -184,7 +184,7 @@ fn clmm_quotes_equal_the_real_programs() {
 }
 
 /// the state a real swap left: `pre` with the words it changed
-fn post_of(pre: &HashMap<Pk, Acct>, post: &Value) -> HashMap<Pk, Acct> {
+pub(crate) fn post_of(pre: &HashMap<Pk, Acct>, post: &Value) -> HashMap<Pk, Acct> {
     let mut m: HashMap<Pk, Acct> = pre.clone();
     for a in post.as_array().into_iter().flatten() {
         let k = pk58(a["key"].as_str().unwrap());
