@@ -1,0 +1,804 @@
+# arbx-fast LEFTOVER profile (2026-10-07): GLiCiNEn-style breadth on leftover gaps. SEPARATE from the live arbx bot:
+# no Haan, no shared Jito key, no shared wallet until the owner assigns separate ones. Started from ft012c's frozen config.
+# X4 x size (WP-11 experiment framework, owner 2026-10-07): FT-008's config (deploy/arbx-ft008-frz.toml: FT-007's settings + WP-22's
+# pool refresh) with two concurrent, randomized experiments instead of back-to-back 3 h tests that market swings confound
+# (FT-006: tips 0.7 -> 0.2 gave +48% net per win but -57% Jito-led landings, +4% net SOL/h; FT-007: the 0.05 SOL cap doubled the
+# win ratio, but in FT-006 the 5 wins above 0.05 SOL made half the net). What differs from FT-008, and why:
+#   - [experiments.x4]: the tip share of the edge in bands 0-2 (edges under 1,000,000 lamports) is one of 0.2 (today's,
+#     the control: listed first), 0.1 and 0.35, by decision; bands 3-4 keep [tips]' 0.6 / 0.7; the floor 1,000 and the cap 100,000 stay; the BAM
+#     floor ([send_policy.bam]) still raises BAM-led bids on top; every bound stays (the on-chain min_profit, the decision's
+#     bar: expected >= tip + fee + 1,000, the BAM bid's room)
+#   - [experiments.size]: the engine's size search stops at 0.05 SOL (today's cap, the control) or at 0.2 SOL, by decision;
+#     the small rungs stay for both; so the ladder gains 0.1 and 0.2, and [canary] size_sol / [live] max_size_sol go to 0.2
+#     (the 0.05 arm is held at 0.05 by its arm). The bankroll still caps every trade (85% of the liquid SOL + WSOL - 0.03,
+#     at most the WSOL: with ~0.19 SOL of WSOL the 0.2 arm trades at most ~0.19 SOL)
+#   - the two assign independently (xxh3 of the seed, the experiment and the decision id): a 3 x 2 factorial, every send
+#     in one X4 arm and one size arm, each of the 6 cells about a sixth of the decisions
+# How many sends (two-sided 5%, 80% power; FT-007's 3.1% wins per send and net per attempt 113 +- 1,450 lamports, FT-006's
+# 1.6% and 97 +- 1,960 at the 0.2 cap; at ~700 bundle sends/h an X4 arm gets ~233 sends/h, a size arm ~350/h):
+#   - a +-50% change in wins per send: 1,500-2,400 sends per arm; a 2x change in net per attempt: ~2,600 per arm.
+#     ~7,500 sends: ~11 h (X4 ~2,500 per arm, size ~3,800 per arm). Run 12 h (12 segments of 60 min)
+#   - +-30% in wins per send: ~4,700-6,200 per arm (X4 ~27 h, size ~18 h); +50% in net per attempt: ~10,400 per arm (~45 h)
+#     (the 0.2 arm's net varies more: about 2.4x the sends for the same net precision)
+#   - the size arms: FT-007 (0.05 cap) won 3.1% of sends and FT-006 (0.2) 1.6%, a difference ~1,500 sends per arm show
+#     (~4-5 h); their net per attempt differed by ~15% (113 vs 97 lamports): ~180,000 sends per arm, out of reach (read
+#     the per-decision net with its interval: a large difference shows, a small one does not)
+# Read it with `arbx-report experiments <campaign dir>`: per arm attempts, landings and wins with 95% intervals, net per attempt
+# and per win, tips/gross and the meme / common wins from the ledger, the balance by band and trigger kind, each arm against
+# its control per decision (the randomized unit) and per send, the factorial's cells.
+# Run (Cherry holds the binary, this file and its data files only):
+#   arbx check --config deploy/arbx-ft-x4size-frz.toml
+#   arbx campaign --name <ft> --config deploy/arbx-ft-x4size-frz.toml --mode canary --hours 12 --segment-min 60 --who <you> --detach
+# then pull each segment's attempts, copies, bundles, outcomes, ledger, snapshots, status, events, experiments.jsonl and
+# config.toml (decisions.jsonl too for the exact per-decision counts) and run `arbx-report experiments <campaign dir>`.
+#
+# arbx canary on the frz wallet (DRAFT, WP-07; WP-06's builder since the Stage-0 merge; docs/field-tests/README.md: FT-004
+# first live canary hour, FT-005 24 h canary).
+# Derived from deploy/arbx-stage0.toml (the Stage-0 safety switch: bundle-only, fail-closed, no decoded sends); what
+# differs, and why:
+#   - the wallet is the production wallet frz (FRZh63L6...), the owner's existing keystore used in place: profile "trading"
+#     (~/.nexus-v2-trading-wallet.{enc,pass} on Cherry), wallet_keystore = "" (no passphrase: unattended). The run
+#     refuses to start unless the key is FRZh63L6...
+#   - a canary campaign: `arbx campaign --mode canary` with [canary] enabled below (review WP-07 #5: a manual
+#     `arbx run --canary` takes the same campaign lock, other-bot check and cumulative budget, but use the campaign); mode
+#     stays "shadow" (a plain run, and --shadow, record only). WP-05's caps: at most 0.2 SOL a trade; WP-07's bankroll cap: never
+#     more than 85% of the liquid SOL + WSOL minus a 0.03 SOL reserve, and never more than the WSOL the route spends. frz
+#     held ~0.414 SOL liquid on 2026-10-05 (0.2230 native + 0.1915 WSOL): a trade is capped at ~0.19 SOL (its WSOL) of the
+#     0.19-0.32 SOL the bankroll allows, under the 0.2 SOL canary cap. Until the first balance snapshot nothing is sent
+#     (equity_unknown); a bankroll that allows nothing (no WSOL) is refused as bankroll_empty
+#   - the equity stops (WP-07, OD-11 proposed; docs/field-tests/README.md "Enforcement"): the bot goes to shadow and the
+#     campaign stops when the net spend (fees, tips, non-recoverable rent, trading loss, from the ledger: the owner's own
+#     deposits and withdrawals are not in it) passes 0.02 SOL within a rolling hour, or the test budget since the
+#     campaign's start (read from the chain at its first balance snapshot); the ~22.97 USDC frz holds is a quantity floor
+#     of its own (routes may not move it by more than 0.1%), never valued into the floor; token-account rent is tracked
+#     apart. The test budget: [supervisor] test_budget_lamports = 5,000,000 (FT-004's allotment; --test-budget-lamports can
+#     only lower it: FT-005's 10,000,000 needs a copy of this file with 10000000), drawn from the owner's cumulative
+#     34,000,000 (/root/arbx/runs/budget-state.json: a start is refused when nothing is left, and cut to what is left)
+#   - the money view is checked fresh: snapshots every 10 minutes inside a segment; stale (10 minutes, 3 failures, a
+#     landing without its record for 2 minutes) means nothing is sent (`equity_stale`) until it is fresh
+#   - no rent locked by a trade (go-live gate item 2; WP-06, merged at the end of Stage 0): frz holds token accounts for
+#     WSOL and USDC only, so a route through any other mid token creates that token's account and closes it to the payer
+#     in the same atomic transaction (rent-neutral: a failed route reverts the create too). The canary is no longer
+#     USDC-only; [live] max_new_token_accounts is gone. The size budget's held-set additions (create, no close) are off
+#     ([builder] held_max = 0: nothing stays locked); WP-07's rent cap ([supervisor] rent_cap_sol) limits only those
+#   - the builder (WP-06): the tip is [tips] by band, 0.7 of the edge in every band within 1,000-100,000 lamports (the
+#     status quo; the jito-bundle path keeps its 1,000 floor), the CU limit from data/cu-table.json (it must be on Cherry
+#     at /root/arbx/data/cu-table.json: a run without it refuses to start), the loaded-data limit "auto"; the dry run
+#     simulates its bundles ([dry_run] simulate = true, FT-002: the venue harness cannot check "auto", which simulation does)
+#   - frz's PumpSwap user volume accumulator already exists (CUiyUSbx..., 1,346,200 lamports): no non-recoverable rent is
+#     needed for PumpSwap routes; the snapshots read it (owned, not recoverable)
+#   - the five dead feeds (OD-6: raiden, corvus, getblock, constantk-prism, erpc; 0 transactions or refused in FT-000) are
+#     disabled
+#   - the old wallet's durable nonces ([send_policy.direct]) are left out: they belong to 2g7rYv7y...
+# Check it with `arbx check --config deploy/arbx-canary-frz.toml` (CI: tests/campaign.rs the_frz_canary_config_passes_arbx_check).
+#
+# Running it on Cherry (only the binary, this file and its data files go there: docs/field-tests/README.md):
+#   arbx grpc-probe --config deploy/arbx-canary-frz.toml                       (once; Haan alone: arb-lab not running, I-3)
+#   arbx campaign --name ft004 --config deploy/arbx-canary-frz.toml --mode canary --hours 1 --segment-min 30 \
+#       --who <you> --detach                                                   (FT-004: <= 0.005 SOL, this file's allotment)
+#   arbx campaign --name ft005 --config <a copy with test_budget_lamports = 10000000> --mode canary --hours 24 \
+#       --segment-min 60 --who <you> --detach                                  (FT-005: <= 0.01 SOL)
+#   controls: touch /root/arbx/runs/<name>.pause | .next | .stop (a reason inside); money: arbx campaign-equity --campaign-dir
+#   /root/arbx/runs/<name>; BUDGET.md's row: /root/arbx/runs/<name>/spend.json `budget_md_row`
+# WP-01: the config format (required; arb-lab's v1 files do not load, and every unknown key is an error)
+config_version = 2
+out_dir = "/home/moiz/arbed/arbx-fast/runs"
+mode = "shadow"   # a canary is `--canary` with [canary] enabled (a plain run records only); "live" is the later $500 stage
+# the production wallet frz (owner, 2026-10-05): the owner's existing keystore on Cherry, used in place
+wallet = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
+wallet_profile = "trading"   # ~/.nexus-v2-trading-wallet.{enc,pass}: no passphrase step
+wallet_keystore = ""
+
+[pools]
+# OD-4 (owner confirms the seed list): the live w5h3 campaign's list (exp3 list + fresh discovery, 2026-10-03 evening),
+# copied from Cherry into arbx/data (commit c777f26). The fallback named by PLAN.md WP-00 is data/seed-pools-merged.csv
+seed_csv = "/home/moiz/arbed/arbx-fast/data/seed-pools-glici.csv"   # FT-012 (owner 2026-10-07): + 242 vetted Raydium CLMM / Orca Whirlpool SOL pools
+# WP-21: live sends through both venues (FT-009 passed; FT-013 traded them live: 12 CLMM wins, 0 failed fees)
+rayclmm = "send"
+whirlpool = "send"
+registry_json = "/home/moiz/arbed/arbx-fast/data/registry.json"
+registry_all = true
+templates_json = "/home/moiz/arbed/arbx-fast/data/templates.json"
+
+# Every RPC call is raced across all providers below; the first good answer is used and each one is timed.
+# Providers whose environment variables are missing are skipped (listed in run.log).
+[rpc]
+# 2026-10-03: Haan first, Shyft only if Haan fails (racing every call to all providers rate-limited all of them:
+# 15% of reads failed everywhere). Helius expired; the public RPC and ERPC (dead key) refused nearly everything.
+failover = true
+
+[[rpc.endpoint]]
+name = "haan"
+url = "https://rpc.haandigital.eu/"
+bearer_env = "HAAN_API_KEY"
+enabled = false   # arbx-fast: never touch Haan (its limits are the live bot's)
+
+[[rpc.endpoint]]
+name = "shyft"
+url_env = "SHYFT_RPC_URL"
+
+[[rpc.endpoint]]
+name = "public"
+url = "https://api.mainnet-beta.solana.com"
+enabled = false
+
+[[rpc.endpoint]]
+name = "helius"
+url_env = "RMR_RPC_URL"
+enabled = false
+
+[[rpc.endpoint]]
+name = "erpc"
+url = "https://edge.erpc.global?api-key=${ERPC_RPC_TOKEN}"
+enabled = false
+
+[state]
+url = "https://grpc.haandigital.eu:443"
+token_env = "HAAN_X_TOKEN"
+# WP-03: the state stream also follows the Clock sysvar, the route and venue programs' programdata accounts, and the
+# wallet with its token accounts (every landed transaction we pay for writes the wallet: its txn names it)
+watch_clock = true
+watch_programdata = true
+watch_wallet = true
+slot_statuses = "auto"  # "all" (processed, confirmed, finalized + first-shred, completed, created-bank, dead) where the probe accepted slots_interslot, else "commitment"
+block_meta = "auto"     # on only if `arbx grpc-probe --config deploy/arbx-stage0.toml` accepted it (<out_dir>/probe.json); run the probe before WP-05
+# probe_file = ""       # default <out_dir>/probe.json, where `arbx grpc-probe` writes it
+
+# WP-04: state consistency (the plan's defaults, written out). Commit groups: a known write set waits at most
+# commit_timeout_ms for its members; an unknown one resolves after quiescence_ms without updates (3 ms is a placeholder:
+# arb-lab's moves logs show 0.38-0.63 ms p99.9 across one transaction's pools); readiness: consistency-set skew, tip lag
+commit_timeout_ms = 5
+quiescence_ms = 3
+max_part_skew_slots = 2
+max_tip_lag_slots = 2
+clock_max_age_slots = 2   # DLMM / DAMM v2 are priced on the Clock sysvar; refused (clock_stale) past this
+lag_slo_p50_ms = 16       # first shred of T to T's complete commit, every minute
+lag_slo_p90_ms = 30
+lag_slo_breach_minutes = 5
+slo_action = "log"        # Stage 0: breaches are recorded only (F32)
+slo_recover_minutes = 10
+tier_a_grace_s = 60       # a pool whose parts are still missing after this leaves Tier A (the warm-up gate)
+# PLAN-ADDENDUM I-4: stop (state_unavailable, exit 30) if the state stream delivers nothing within boot_timeout_s; price
+# and send nothing while it is down or its newest message is older than max_update_age_ms; read every account again
+# after the stream's first connection and every reconnection (review WP-04 #1: the gate is `resync`, and a pool with a
+# part not read again is refused, until the re-read lands; a WARNING after resync_warn_s; a chunk still failing
+# resync_give_up_s after the start is given up, its accounts staying refused until the stream writes them)
+boot_timeout_s = 60
+max_update_age_ms = 2000
+resnapshot = true
+resync_warn_s = 10
+resync_give_up_s = 300
+unavailable_stop_s = 0    # review WP-04 #10, owner decision: stop (state_unavailable) after this long unavailable; 0 never
+
+# WP-03 item 3: the executed-transaction stream (arb-lab's `haan-grpc` [[feed]]; it runs as a feed after the [[feed]] list,
+# so its feed id is unchanged). Haan's plan allows 1 transaction filter with 1 account: PumpSwap (the busiest venue).
+# A second filter or provider covering the other venues is owner decision OD-1 (config only: another entry here)
+[[state.tx_stream]]
+name = "haan-grpc"
+# url and token_env: the [state] stream's
+account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]
+failed = true       # failed PumpSwap transactions too (exec.jsonl `ok` false)
+max_accounts = 1    # the provider's limit (an include list longer than this refuses to start)
+
+# WP-03 item 10: the LeaderBook's leader kinds (jito / bam / other) and the dated fallback
+[leaders]
+validator_lists = ["https://kobe.mainnet.jito.network/api/v1/validators"]   # Cherry's address may be refused (403): then the fallback
+static_fallback = "/home/moiz/arbed/arbx-fast/data/validators-meta.json"
+refresh_min = 60
+# WP-08: host -> leader TPU-QUIC RTT (a QUIC handshake, no data) to the endpoints the leaders of the next 64 slots
+# announce, once per endpoint (BAM / Harmonic ingress nodes serve many validators), at most 2 a second; a validator whose
+# endpoint refuses takes the median of its endpoint region's (region_bucket). Places (city, metro region) from the table
+rtt_probe = true
+rtt_per_sec = 2
+geo_table = "/home/moiz/arbed/arbx-fast/data/ip-geo.csv"
+
+# WP-03b: chain fetch (our wallet's transactions, the watched-transaction backfill, the slot index, the blockhash ring)
+# and every RPC provider's request budget. A provider's max_rps is a token bucket for the whole process: the boot, the
+# executor, the engine's lookup-table fetches and re-snapshots, the LeaderBook and chain fetch all share it (Haan
+# answered 429 at about 5 requests/s, sequential: tools/rpc_latency.py, 2026-10-04; two bots got 597-698 Haan 429s in
+# cmp2's 28 minutes). Tokens go by priority, and a waiting caller is never overtaken by a later or lower one: boot /
+# snapshot / exec first, then engine / leaders / wallet, then the slot index / coverage sample / blockhash poll, then
+# the backfill, which runs at what its providers have spare after the others (status chainfetch.cap_rps_now). With
+# this split the slot index (about 3.7 getBlock/s) takes most of Shyft, the poll is skipped while the slot index's
+# confirmed hashes are fresh, and the backfill gets about 3.9/s, nearly all on Haan (test
+# the_slot_index_keeps_up_while_the_backfill_has_demand, P1's load), against the 16-35/s that non-PumpSwap watched
+# transactions need (PLAN §0): status.jsonl chainfetch.need_rps_now against have_rps_now shows the shortfall, and OD-1
+# decides the capacity. Our attempts' signatures cost one getSignatureStatuses every 2 s while any is in flight
+[chainfetch]
+after_ms = 1500          # a watched transaction this long without an exec.jsonl record is backfilled
+rps = "auto"             # the backfill: 1.25 x the uncovered rate (1-minute EWMA), capped by its providers' max_rps
+max_backlog = 200000
+sample_every_s = 60      # one full block a minute: the share of watched transactions no source reported
+blockhash_poll_ms = 400  # getLatestBlockhash (confirmed), only while no other source gave a fresh confirmed blockhash
+sigs_every_s = 3600      # getSignaturesForAddress(wallet) over the last hour
+default_max_rps = 0      # no bucket for an [rpc] provider not listed below
+boot_retry_s = 90        # PLAN-ADDENDUM I-1: at boot a call retries with backoff across the providers this long
+max_tx_version = 1       # mainnet blocks carry v1 transactions: with 0 a provider refuses the whole block (-32015)
+
+[[chainfetch.provider]]
+name = "haan"
+roles = ["wallet", "blockhash", "backfill"]
+max_rps = 4
+reserve = { backfill = 0.5 }   # FT-000 S1-1: 2/s of Haan's 4 for the backfill, whatever the busier roles ask (it got 4 fetches in 30 min)
+
+[[chainfetch.provider]]
+name = "shyft"
+roles = ["slotidx", "sample", "backfill", "wallet"]
+max_rps = 4
+reserve = { slotidx = 0.95 }   # FT-000 S1-1: 3.8/s of Shyft's 4 for the slot index (one getBlock a confirmed slot, 3.7/s; it fell 3,005 slots behind)
+
+[strategy]
+# WP-04: decoded swaps are hints only (their write set goes to the CommitTracker, their predictions to the accuracy
+# monitor); `confirm_trigger_ms` and `decoded_sends` are gone (there is no decoded send path: a config with them does not load)
+skip_failing_signers = true   # WP-00: stopgap (R §4 day 0); live had false. With hints never priced it only drops their accuracy check
+state_triggers = true   # price on committed state (complete commit groups): the only path that prices and sends
+budget_caps_sol = [0.165, 2.1, 4.2, 8.4, 21.0, 42.0, 84.0]   # EXP-4: $20, $250, $500, $1k, $2.5k, $5k, $10k at SOL $119: the best round trip at each budget (recorded, not traded)
+signer_stats_file = ""   # read at start, never written (I-5): each segment writes signer-stats.json and signer-stats-delta.json into its run dir; `arbx signer-stats merge` folds deltas back
+sizes_sol = [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2]   # FT-007's small rungs + 0.1 and 0.2 for the 0.2 size arm ([experiments.size] caps each decision's search)
+# record every round trip that clears base + priority fee; the report applies each send path's tip
+min_profit_lamports = 1
+cu_price_micro = 40000
+outcome_watch_ms = 2000
+
+# ---------------------------------------------------------------- raw shreds
+[[feed]]
+name = "raiden"
+enabled = false   # OD-6: dead (0 transactions in FT-000)
+kind = "udp"
+bind = "0.0.0.0:8005"
+
+[[feed]]
+name = "corvus"
+enabled = false   # OD-6: dead (0 transactions in FT-000)
+kind = "udp"
+bind = "0.0.0.0:8006"
+
+[[feed]]
+name = "getblock"
+enabled = false   # OD-6: dead (0 transactions in FT-000)
+kind = "udp"
+bind = "0.0.0.0:8009"
+
+[[feed]]
+name = "dz-leader"
+kind = "multicast"
+group = "233.84.178.1"
+port = 7733
+interface = "doublezero1"
+
+[[feed]]
+name = "dz-retransmit-eu"
+kind = "multicast"
+group = "233.84.178.12"
+port = 7733
+interface = "doublezero1"
+
+# ---------------------------------------------------------------- gRPC
+[[feed]]
+name = "constantk-prism"
+enabled = false   # OD-6: dead (401 in FT-000)
+kind = "jito-entries"
+url = "https://prism-frankfurt.constant-k.com:55577"
+token_env = "CONSTANTK_TOKEN"
+
+[[feed]]
+name = "erpc"
+enabled = false   # OD-6: dead (timeout in FT-000)
+kind = "jito-entries"
+url = "https://shreds-fra6-1.erpc.global"
+
+[[feed]]
+name = "astralane-deshred"
+enabled = false   # owner 2026-10-06: dropped (Astralane deshred refused us: "subscriber limit reached", ResourceExhausted / 429 storm in FT-001 p3)
+kind = "yellowstone-deshred"
+url = "http://fr2.shreds.astralane.io:12000"
+token_env = "ASTRALANE_KEY"
+# WP-00: + DAMM v2 (cpamd...): no DAMM v2 hint arrived from the deshred feeds. If the provider refuses a fifth account,
+# the feed error shows in run.log: revert this line
+account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"]
+
+[[feed]]
+name = "haan-deshred"
+kind = "yellowstone-deshred"
+url = "https://grpc.haandigital.eu:443"
+token_env = "HAAN_X_TOKEN"
+# WP-00: + DAMM v2 (cpamd...): no DAMM v2 hint arrived from the deshred feeds. If the provider refuses a fifth account,
+# the feed error shows in run.log: revert this line
+account_include = ["pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"]
+
+# (the PumpSwap executed-transaction stream `haan-grpc` is [[state.tx_stream]] since WP-03; it keeps its feed id)
+
+# ---------------------------------------------------------------- send paths
+# Checked with `arbx senders --config arbx-stage0.toml` (sends nothing). Stage 0 sends one-transaction Jito bundles only:
+# every other path below is disabled (WP-00).
+# Secrets come from .env next to this file; `${NAME}` in a url is replaced from it. Tip accounts default to each
+# provider's documented list (src/send/mod.rs known_tip_accounts). Tips are paid only when the trade lands.
+# WP-05: live and canary runs are bundle-only (a live config with any other path enabled does not load); the Jito gate
+# ([gate]) is gone. The send policy is [send_policy] below (PLAN WP-05's `[send]` keys: TOML cannot hold a [send] table
+# beside these [[send]] paths). PLAN-ADDENDUM I-10: an enabled path may carry a `${...}` secret over plain http:// only
+# with `no_tls_endpoint = "<evidence>"`; `arbx check` refuses it otherwise, and refuses any provider key that is the
+# payer's keypair.
+
+[[send]]
+# one-transaction bundle through the searcher gRPC; auth key = the whitelisted keypair (CrQx62…EynE), never funded
+name = "jito-bundle"
+enabled = true   # WP-00: the only enabled send path
+kind = "jito-bundle"
+url = "https://frankfurt.mainnet.block-engine.jito.wtf"
+auth_keypair = "~/.nexus-v2-jito-auth.json"
+tip_lamports = 1000   # EXP-1: Jito's floor; WP-06: the tip itself is [tips] (by band, floor, cap) below
+max_per_sec = 2              # owner 2026-10-07: our Jito bundle send limit is 2/s (the earlier 5/s note was wrong); never send faster
+# the bundle path's rate queue waits [send_policy] queue_ms (no queue_ms here: WP-05)
+
+[[send]]
+# Shyft staked RPC (SWQoS), no tip. Frankfurt host, e.g. https://rpc.fra.shyft.to?api_key=...
+name = "shyft"
+enabled = false   # w5h2 seg 3: not in the sender race (no key, or far: shyft 93 ms)
+kind = "shyft"
+url = "${SHYFT_RPC_URL}"
+
+[[send]]
+name = "helius"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "helius"
+url = "http://fra-sender.helius-rpc.com/fast"   # w5h tuned: dual routing (Jito + SWQoS), the mode the winners use
+tip_lamports = 1000000   # w5h tuned: winners via Helius tip ~1M
+
+[[send]]
+# RPC Fast Beam: key in the URL (.env); tip to Beam's Astralane accounts; Start plan 60/min. Dropped for now.
+name = "rpcfast"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "rpcfast"
+url = "${LANDER_RPCFAST_URL}"
+tip_lamports = 10000
+max_per_sec = 1
+
+[[send]]
+# Jito JSON-RPC sendTransaction with our UUID (2/s). Add ?bundleOnly=true for revert protection.
+name = "jito-tx"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "jito-tx"
+url = "https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/transactions"
+token_env = "JITO_UUID"
+tip_lamports = 5000
+max_per_sec = 2
+
+[[send]]
+# Haan Sender trial: 1 tx/s, no tip
+name = "haan"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "haan"
+url = "https://sender.haandigital.eu/api/v1/transactions"
+token_env = "HAAN_API_KEY"
+jito_auth_env = "JITO_UUID"
+max_per_sec = 1
+
+[[send]]
+# Astralane Iris (binary). The key is mandatory on every tier: the account key (same as the shred feed's) works
+# (2026-10-03 probe: no key -> 401). Free tier: 0.001 SOL minimum tip, 5 tx/s, no bundles; 10,000 lamports at VIP 3
+name = "astralane"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "iris"
+url = "http://fr.gateway.astralane.io/irisb?api-key=${ASTRALANE_KEY}&method=sendTransaction"
+tip_lamports = 1000000
+max_per_sec = 5
+
+[[send]]
+# Raiden Bolt: free tier 5 tx/s, 0.001 SOL minimum tip (key accepted, 2026-10-03 probe)
+name = "bolt"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "bolt"
+url = "https://fra.bolt.raiden.wtf/api/v1/sendRawTransaction"
+token_env = "RAIDEN_BOLT_KEY"
+tip_lamports = 1000000
+max_per_sec = 5
+
+[[send]]
+# Hello Moon Lunar Lander (binary): 0.001 SOL minimum tip
+name = "lunar"
+enabled = false   # w5h2 seg 3: not in the sender race (no key, or far: shyft 93 ms)
+kind = "lunar"
+url = "http://fra.lunar-lander.hellomoon.io/send-bin?api-key=${LUNAR_KEY}"
+tip_lamports = 1000000
+
+# ---------------------------------------------------------------- steps 1-3 of the send plan
+# step 1 (keep-alives) runs whenever send paths are enabled; steps 2 and 3 below.
+[exec]
+program = "8K8uyQDtVKHYRPACP9fepz91q4sEZLBppR2Ty4vdXuWg"   # nexus-arb-v2 (arbx-exec only behind WP-15's flag)
+rpc = ["haan", "shyft"]   # Helius expired: Haan (fastest) raced with Shyft for the simulation gate, statuses, landed txs
+max_size_sol = 4.2      # $500 run (owner, 2026-10-03): the new wallet holds 4.2 WSOL
+keepalive_s = 30
+# WP-01: the deployed 8K8uyQDt ELF (programdata without header and padding; testdata/programs/README.md). A live run
+# whose program on chain differs, or cannot be read, does not send (SendGate shadow, reason program_hash_mismatch)
+expected_program_sha256 = "e4f03590bda38d95b884f56a1192070f7e34320840a6d89a568c6ed6024bae2f"
+expected_program_md5 = "809315befcb9554211f8019bf9df290b"
+
+# WP-01: <run dir>/control.sock for `arbx ctl --run <dir> status|pause-sending|resume-sending|shadow|stop --who --why`
+[control]
+socket = true
+
+[sim]
+# step 2, free: every would-send decision is built and simulated (sims.jsonl)
+max_per_sec = 2
+
+[canary]
+# WP-05: a canary run is a live run under these caps (`arbx run --canary` AND enabled = true): real bundles of at most
+# size_sol (0.2 SOL at most), at most `count` attempts per segment `every_ms` apart. WP-07: `count` is set for FT-005's 24 h
+# baseline: at one attempt a second at most, a 60-minute segment makes at most 3,600 and a whole day 86,400, so the cap
+# never binds; the equity stops, the spend cap and the bankroll do (0 would mean no cap at all)
+enabled = true
+count = 100000
+every_ms = 500   # owner 2026-10-07: Jito allows us 2 bundles/s; the canary sent 1/s and refused ~3x more than it sent
+size_sol = 0.2                 # the 0.2 size arm's cap ([experiments.size] holds the 0.05 arm at 0.05)
+max_spend_lamports = 5000000   # fees of landed failures per segment (a bundle that fails does not land: should stay 0)
+
+[live]
+# step 4: real trades; needs mode = "live" AND `arbx run --live`. WP-05: one-transaction Jito bundles only (the direct
+# arm's keys are gone: test_all_paths, bid_*, rotate_paths, race_mix, bundle_mix, tpu_*, pair_lock_ms, sim_gate,
+# compete_*, gross_floor, bundle_*, spec/max priority; settle_s: attempts settle from the chain; the durable nonces:
+# [send_policy.direct]; big band and crowding: [send_policy])
+max_size_sol = 0.2                # the canary's cap here too
+max_failed_fees_lamports = 5000000  # each segment's cap; a campaign also passes what is left of the test budget (--budget-left)
+margin_lamports = 1000              # the decision's bar: expected profit >= tip + base fee + this (the on-chain floor is [send_policy])
+# (WP-06: max_new_token_accounts is gone: a token account the wallet holds none of is created and closed in the trade)
+# WP-07 (go-live gate): a trade is at most 85% of the liquid SOL + WSOL minus a 0.03 SOL reserve, and at most the WSOL
+bankroll_share = 0.85
+bankroll_reserve_sol = 0.03
+
+[send_policy]
+# PLAN WP-05: bundle-only, fail closed (no network call between a decision and its fire). A send needs a blockhash from
+# the WP-03b ring at most max_blockhash_age_slots old, a target-slot leader whose kind is not skipped, a valid cached
+# Jito token, a healthy recorder, the SendGate live and the store ready
+max_blockhash_age_slots = 60   # landing study 2026-10-07: every stale refusal came with the Shyft slot index > 10 slots behind (about 4% of net); a blockhash is valid for 150 blocks
+blockhash_commitment = "confirmed"
+skip_leader_kinds = ["other", "unknown"]   # R §3.6: non-Jito leaders cannot take a bundle
+inflight_hold_slots = 2   # one attempt per (buy, sell, mint) until a new state version or a new leader
+queue_ms = 10   # the Jito rate queue: bands under 1M first, crowded pools last in their band, then EV
+# the >=1M bands (src/bands.rs bands 3-4; 0 of 1,869 legacy bundles there landed while they took the 5/s budget):
+# at most 0.5 a second (burst 1), behind every smaller band in the queue
+big_band_max_per_sec = 0   # landing study 2026-10-07: bands 3-4 (>= 1M edge) took 1,291 sends for 0 wins; their send slots go to small gaps (0 = no big-band trade)
+# crowding (F6): distinct arbitrage-like signers that landed on either pool in the last 6 h, buckets < 20, 20-150, >= 150.
+# WP-00's list of the 21 pools with 150+ bots stands in until the map holds 6 h; and (OD-3's alternative, review F2)
+# a trade on such a pool expecting >= 100k is not sent: 0 of 1,896 legacy crowded bundles expecting >= 100k landed (12
+# of 1,214 under 100k did: those still go). Owner: 0 here = rank only
+crowding_window_h = 6
+crowding_buckets = [20, 150]
+crowded_pools_file = "/home/moiz/arbed/arbx-fast/data/crowded-pools.json"
+crowded_skip_min_expected_lamports = 100000
+# on-chain min_profit = tip + base fee + margin, margin = max(floor, share x expected net): Stage 0 keeps today's floor
+# (F23); R §3.9's 2,000 / 2% is a WP-11 arm or OD-5
+margin_floor = 1
+margin_share = 0.0
+direct_experiment = false   # the direct (non-bundle) arm: refused in Stage 0
+
+[send_policy.direct]
+# (the durable nonces of 2g7rYv7y..., the direct arm's, are not frz's: none here)
+nonce_accounts = []
+
+[send_policy.bam]
+# FT-006, the BAM landing fix (src/config.rs BamPolicyCfg). FT-004/FT-005: bundles bidding < 0.045 lamports per requested CU
+# landed 19/147 on Jito leaders but 2/112 on BAM leaders (also 0/22 behind the Frankfurt BAM node, 0.6 ms away); higher bids
+# landed alike (10/508 vs 5/334). Jito's block engine ranks bundles against bundles only (tip per requested CU, 50 ms
+# auctions); BAM ranks them against all transactions by fees per CU (bam.dev). So a BAM-led slot bids at least 0.05
+# lamports per CU of its CU limit, within 90% of the edge and the decision's bar; Jito-led slots are unchanged
+enabled = true
+min_tip_per_cu = 0.05
+max_share = 0.9
+below_floor = "send"   # out of reach: bid what the edge allows (up to max_share); "skip" would not send to the BAM slot
+
+[bands]
+# WP-06 item 8 (F22): the one band table (decisions, the send queue, the tips), over the expected edge = gross - base fee;
+# bands 0-4, 3 and 4 the >=1M class (as deploy/arbx-stage0.toml)
+edges = [20000, 100000, 1000000, 10000000]
+
+[tips]
+# WP-06 item 8: a bundle tips clamp(share(band) x edge, floor, cap). 0.7 in every band, 1,000 to 100,000 lamports: the
+# status quo this file had on the jito-bundle path (tip_share 0.7, tip_lamports 1,000, tip_max_lamports 100,000);
+# contested_shares wait for the Stage 2A Selector
+shares = [0.20, 0.20, 0.20, 0.60, 0.70]   # FT-006 (owner 2026-10-06): 0.2 on small gaps (GLiCiNEn pays ~15% of gross), was 0.7 everywhere
+contested_shares = [0.16, 0.20, 0.20, 0.60, 0.64]   # FT-006: never above the band share
+floor = 1000   # the jito-bundle path's tip_lamports (its minimum) is at most this
+cap = 100000   # owner 2026-10-04: bundle tips capped at 0.0001 SOL
+
+[builder]
+# WP-06 (go-live gate item 2): a token account the wallet holds none of is created and closed in the same transaction
+# (rent-neutral); the held set is WSOL, USDC, USDT and the tokens frz already holds
+create_close = true   # false: trade held tokens only (mid_not_held), the held-only control arm
+held_max = 0   # the size budget's held-ATA fallback (create, no close: the account's rent stays locked) is OFF: nothing stays locked (review WP-06 #1)
+allow_uva_create = false   # a PumpSwap buy without the wallet's volume accumulator would create it (1,346,200 lamports, never recovered): refused (uva_missing); frz has it
+loaded_data_limit = "auto" # the transaction's accounts and programs at their measured sizes, +25% +256 KiB (FT-002's dry run simulates it: [dry_run] below)
+cu_table = "/home/moiz/arbed/arbx-fast/data/cu-table.json"   # absolute (review WP-06 #11): a run without the file refuses to start; upload it with the other data files
+cu_min_samples = 30
+alt_index = true   # over 1,232 bytes: lookup tables learned from decoded transactions that name the route's pools, at most max_alts
+max_alts = 4
+payer_guard = false   # nexus-v2's max_payer_lamport_drop trailer: on after X6 and a canary
+payer_guard_max_drop = 0
+
+[dry_run]
+# go-live gate item 4 (`arbx run --dry-run`): every would-send bundle is signed by a throwaway key made in memory (never
+# the trading keystore; the payer stays the wallet, so the signature cannot pass on chain), recorded in full
+# (attempts.jsonl `dry_run`: the transaction, its size, tip, accounts and checks) and never sent; no send path is built
+simulate = true   # FT-002 (review WP-06 #6): also a read-only simulateTransaction (sigVerify off, the blockhash checked), at most max_sim_per_sec: LiteSVM counts no programdata, so only the simulation validates the "auto" loaded-data limit on mainnet state
+max_sim_per_sec = 2
+
+[[send]]
+# direct to the leader over QUIC (no relay, no tip, unstaked); the RPC only answers the leader schedule and TPU addresses
+name = "tpu-direct"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "tpu"
+url = "https://rpc.haandigital.eu/"   # leader schedule + TPU addresses from Haan (the public RPC rate-limited us)
+token_env = "HAAN_API_KEY"   # Bearer key for that RPC
+
+[[send]]
+# our normal Helius RPC (paid plan: staked connections), tip-less sendTransaction
+name = "helius-rpc"
+enabled = false   # w5h2 seg 3: not in the sender race (no key, or far: shyft 93 ms)
+kind = "rpc"
+url = "${RMR_RPC_URL}"
+
+# ---------------------------------------------------------------- senders the rivals use (research log S-010/S-011)
+# Formats from each provider's docs (2026-10-03). All want their own tip; it is paid only when a trade wins. Keys go in
+# arbx's own .env beside this config (/root/arbx/deploy/.env, mode 600, created by the owner) under the names below; a path whose key is missing is left out of a run (named in run.log).
+[[send]]
+# Everstake SWQoS: NO key needed; tip >= 0.001 SOL placed first (their rule); 10 tx/s
+name = "everstake"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "everstake"
+url = "http://fra-swqos.everstake.one"
+tip_lamports = 1000000
+max_per_sec = 10
+
+[[send]]
+# Temporal Nozomi (the paid sender the backrunners use most): free self-serve key at dashboard.nozomi.temporal.xyz; 5 tx/s
+name = "nozomi"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "nozomi"
+url = "http://fra2.nozomi.temporal.xyz/?c=${NOZOMI_KEY}"
+tip_lamports = 1000000
+max_per_sec = 5
+
+[[send]]
+# 0slot: key from their sales (Discord/Telegram), free first week; 5 tx/s
+name = "0slot"
+enabled = false   # w5h2 seg 3: not in the sender race (no key, or far: shyft 93 ms)
+kind = "0slot"
+url = "http://de.0slot.trade/?api-key=${ZEROSLOT_KEY}"
+tip_lamports = 1000000
+max_per_sec = 5
+
+[[send]]
+# NodeOne: free self-serve key at node1.me/register (2 tx/s)
+name = "nodeone"
+enabled = false   # w5h2 seg 3: not in the sender race (no key, or far: shyft 93 ms)
+kind = "node-one"
+url = "http://fra.node1.me/v2"
+token_env = "NODEONE_KEY"
+tip_lamports = 1000000
+max_per_sec = 2
+
+[[send]]
+# Corvus Falcon: key via onboarding/Discord
+name = "falcon"
+enabled = false   # w5h2 seg 3: not in the sender race (no key, or far: shyft 93 ms)
+kind = "falcon"
+url = "http://fra.falcon.wtf/?api-key=${FALCON_KEY}"
+tip_lamports = 1000000
+
+[[send]]
+# BlockRazor: free self-serve key (3 tx/s); they also run a Cherry Servers Frankfurt endpoint (frankfurt-cherryservers...)
+name = "blockrazor"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "block-razor"
+url = "http://frankfurt.solana.blockrazor.xyz:443/v2/sendBinaryTransaction?auth=${BLOCKRAZOR_KEY}"
+tip_lamports = 100000
+max_per_sec = 3
+
+[[send]]
+# FlashBlock: free trial key (10 tx/s), self-serve
+name = "flashblock"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "flash-block"
+url = "http://fra.flashblock.trade/api/v2/submit-batch"
+token_env = "FLASHBLOCK_KEY"
+tip_lamports = 100000
+max_per_sec = 10
+
+[[send]]
+# NextBlock: free trial key (1 tx per 10 s) at nextblock.io/app/dashboard
+name = "nextblock"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "next-block"
+url = "https://frankfurt.nextblock.io/api/v2/submit"
+token_env = "NEXTBLOCK_KEY"
+tip_lamports = 1000000
+
+[[send]]
+# bloXroute Trader API: free tier key at portal.bloxroute.com (about 1 tx/s)
+name = "bloxroute"
+enabled = false   # w5h2 seg 3: not in the sender race (no key, or far: shyft 93 ms)
+kind = "bloxroute"
+url = "http://germany.solana.dex.blxrbdn.com/api/v2/submit"
+token_env = "BLOXROUTE_KEY"
+tip_lamports = 1000000
+max_per_sec = 1
+
+[record]
+# WP-02: the recorder is always on (MEASUREMENT §0-§1): every stream is zstd-compressed in-process into
+# <stream>.NNN.<ext>.zst (frames every flush_ms, readable while the run goes on), rotated, with a manifest.json; the
+# small streams (status, events, feedhealth, resources, keepalive, run.log) stay plain. These keys only set budgets.
+# No raw entries archive until an entries feed is alive (erpc and constantk-prism delivered 0 in p12)
+archive_feeds = []
+# WP-08 (plan addendum I-9): rivals.jsonl keeps 1 in 10 of its `why = venues` rows (88% of cmp2's 1.3 GB/h raw), chosen by
+# the signature (a replay keeps the same ones); each kept row carries `sample` {one_in, kept, seen}. 1 keeps every row
+rivals_venues_sample = 10
+disk_budget_gb = 40     # per segment; past 90% of it the disk ladder stops entries, rivals, then lengthens accounts keyframes; past it: shadow + stop
+min_free_gb = 25        # the same two stages on free space (under 25 / 0.9 GB, then under 25 GB); a run does not start under it
+rotate_mb = 256
+rotate_min = 60
+flush_ms = 1000
+zstd_level = 3
+queue_max_mb = 1024     # each bounded recorder queue's byte cap (declared payloads: binary records, the entries archive)
+
+[runtime]
+# WP-02: RPC runs on its own runtime (arbx-bg, niced +5), apart from the state stream, feeds and sends (arbx-hot, 2)
+bg_threads = 3
+
+[alts]
+# WP-04 item 7 / PLAN-ADDENDUM I-6: a failed lookup-table fetch is retried (50 ms, 250 ms, 1 s, 5 s, then every 30 s)
+# and given up after 10 minutes, never cached as missing for the run; at most max_inflight tables being fetched at once;
+# transactions wait for their tables (at most wait_cap); the newest sibling segment's alts-final is preloaded: the tables
+# a transaction used in the last preload_max_age_h hours, at most preload_max_tables (review WP-04 #11: the set no
+# longer grows per segment)
+retry_ms = [50, 250, 1000, 5000]
+retry_every_s = 30
+give_up_s = 600
+wait_cap = 10000
+max_inflight = 400       # FT-000 S1-1: tables, not requests: they go batch_max to a getMultipleAccounts (16 one-table requests took 76% of the RPC budget)
+batch_max = 100
+calls_inflight = 2
+call_every_ms = 500      # at most a request every 500 ms unless its batch is full: about 2/s at FT-000's 6 new tables a second
+max_tables = 20000       # FT-000 S1-4: the cache is bounded (LRU; evictions journaled, an evicted table fetched again when needed);
+max_mb = 192             # FT-000's 30 minutes held 19,143 tables (104 MB at their own length), 300-350 more a minute
+preload = "auto"
+preload_max_age_h = 24
+preload_max_tables = 5000
+
+[accuracy]
+# WP-04 item 13: hints scored against their transaction's pre-state (the 8-version rings); log only in Stage 0 (OD-8)
+action = "log"
+ring_versions = 8
+queue = 10000
+
+[[send]]
+name = "jupiter"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "jupiter-tx"
+url = "https://tx.jup.ag"
+token_env = "JUPITER_API_KEY"
+tip_lamports = 1000000   # its documented minimum, 0.001 SOL; flat (more does not land faster, per its docs)
+max_per_sec = 1
+
+[[send]]
+name = "landx-fra3"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "landx"
+url = "udp://fra3.landx.dev:10000"   # Cherry Servers Frankfurt, our own data centre; UDP only
+token_env = "LANDX_KEY"
+tip_lamports = 1000000   # its documented minimum, 0.001 SOL
+
+[[send]]
+name = "landx-fra1"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "landx"
+url = "http://fra1.landx.dev/txb/${LANDX_KEY}"   # TeraSwitch Frankfurt; raw transaction bytes
+tip_lamports = 1000000
+
+[[send]]
+name = "speedlanding"
+enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+kind = "speed-landing"
+url = "http://fra.speedlanding.trade/sendTx?apikey=${SPEEDLANDING_KEY}"   # Frankfurt; JSON-RPC sendTransaction, port 80
+tip_lamports = 1000000   # its documented minimum, 0.001 SOL
+
+[ledger]
+# WP-07: balance snapshots at start, every 10 minutes inside the segment and at stop (one common context slot); each window
+# reconciles the snapshots against the wallet's transactions and the executor's money against the chain, within 10,000
+# lamports (a miss: shadow for the rest of the segment, and the campaign's later segments record only). Review WP-07 #3: the
+# money view is stale, and nothing is sent (`equity_stale`), once its last snapshot is 10 minutes old, after 3 failed
+# snapshots in a row, or while a landing waits 2 minutes for its wallet record
+snapshot_min = 10
+max_view_age_s = 600
+stale_after_failures = 3
+max_record_wait_s = 120
+tolerance_lamports = 10000
+recon_grace_s = 60
+token_haircut = 0.10   # USDC's reported value: the pools' quote for selling it, less 10% (no stop reads it)
+extra_mints = ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"]   # USDC, USDT ATAs read by every snapshot
+
+[supervisor]
+# WP-07, OD-11 (proposed): shadow and stop the campaign (exit 20) when the net spend (fees, tips, non-recoverable rent,
+# trading loss: review WP-07 #4; the owner's deposits and withdrawals are not in it, each is recorded and alerted as
+# `owner_transfer`) passes 0.02 SOL within a rolling hour, 0.15 SOL within 24 h, or the test budget since the campaign's start;
+# a token held at the start (frz's USDC) moved by routes below its start amount less 0.1%. Each stop names its reason
+# (stop.json, events.jsonl, the SendGate)
+max_drop_per_hour_sol = 0.02
+max_drop_per_day_sol = 0.15
+# review WP-07 #5: one run's allotment, FT-004's (docs/field-tests/BUDGET.md); a campaign or run asking more is cut to it
+# (--test-budget-lamports may lower it). Every live or canary start also draws on the owner's cumulative budget,
+# /root/arbx/runs/budget-state.json (34,000,000 in all tests): refused when nothing is left, cut to what is left
+test_budget_lamports = 5000000
+token_floor_tolerance = 0.001
+rent_cap_sol = 0.1                # no held-set addition (off here: [builder] held_max = 0) past it; a create+close locks nothing
+native_floor_sol = 0.02           # an alert: tips and fees are paid from native SOL (auto_unwrap is an owner decision: off)
+auto_unwrap = false
+stranded_s = 60
+equity_wait_s = 120               # nothing is sent until the first balance snapshot; an alert if none after this
+
+[alerts]
+# WP-20 (PLAN-ADDENDUM): Telegram alerts to the owner's "ArbX" group, as in deploy/arbx-stage0.toml (integration: the frz
+# canary, the first live-money test, runs with them; its campaign tells its start and end). The token and the chat id
+# live only in /root/arbx/deploy/.env (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID; mode 600), never in this file: missing ones
+# turn the alerts off with one warning, never fatal. Producers never wait (a bounded queue); one sender on rt_bg posts
+# over HTTPS. `arbx alert-test --config <this file>` sends one test message.
+enabled = true
+token_env = "TELEGRAM_BOT_TOKEN"
+chat_env = "TELEGRAM_CHAT_ID"
+heartbeat_min = 60      # a heartbeat with the key numbers every hour, across segments (0: none)
+min_level = "info"      # info, warning, error, critical
+dedup_s = 600           # the same alert again within 10 minutes is counted, not sent
+rate_per_min = 20       # Telegram allows a group 20 messages a minute
+coalesce_ms = 2000      # a burst within 2 s goes out as one message (a Critical alert goes at once)
+daily_summary = true    # at 00:00 UTC, the day before: win ratio (wins / bundles sent), net, fees, tips, rent
+
+[watchdog]
+# WP-20: `arbx watchdog --config deploy/arbx-canary-frz.toml`, a separate long-running process
+# (docs/field-tests/README.md)
+runs_dir = "/home/moiz/arbed/arbx-fast/runs"
+grace_s = 120           # no segment process for longer than this is "not running" (covers the gap between two segments)
+status_min = 60         # "running" every hour, and a reminder every hour while it is down
+
+[pool_refresh]
+# WP-22 (PLAN-ADDENDUM "WP-22: Automatic pool refresh"; src/poolrefresh.rs). `arbx campaign` runs `arbx pools refresh`
+# lead_s before each segment ends, beside it (a process of its own at nice 10; it never opens the Haan gRPC stream and
+# never uses Haan's RPC); the next segment boots on what it wrote once its report says ok and the file hashes as the
+# report says, else on a copy of the previous list (the reason in campaign.json `pool_lists` and a Telegram notice).
+enabled = false             # FT-012: off while the CLMM venues are on (WP-22 does not read CLMM swaps yet)
+cap = 1500                  # the seed rows the list keeps (today's list: 1,500)
+max_adds = 60               # at most this many pools added per refresh (5 refreshes in FT-008: at most 300)
+min_liquidity_sol = 2.0     # an added pool's WSOL vault holds >= 2 SOL (on chain; FT-008 trades <= 0.2 SOL)
+min_liquidity_usdc = 250.0  # (USDC pools: off below; the engine prices WSOL pairs only)
+idle_segments = 4           # a listed pool with no trigger, decision, opportunity or rival arbitrage in 4 segments (2 h) goes
+quotes = ["WSOL"]           # a token enters with 2+ verified WSOL pools on our venues, the listed ones counted
+records = true              # our records: listed pools' activity; rival arbitrage (exec arb_like) on pools we do not list
+geckoterminal = true        # trending_pools 5m/1h/6h and new_pools, no key
+dexscreener = true          # token-pairs for each candidate token (its full pool set), no key
+exec_segments = 1           # the exec records of the running segment only (about 1.3 GB a half hour, read at nice 10)
+geckoterminal_per_min = 20  # its public limit is about 30
+dexscreener_per_min = 120   # its public limit is about 300
+max_tokens = 80             # DexScreener lookups per refresh
+http_timeout_s = 10
+rpc = ["public"]            # the verification RPC: api.mainnet-beta.solana.com ([[rpc.endpoint]] "public"), which no segment
+                            # uses: about 30-50 getMultipleAccounts a refresh, never on Haan (4-5 req/s, the segment's) or Shyft
+                            # (its slot index takes 3.8 of its 4 req/s)
+rpc_max_rps = 2.0           # this process's own budget on it (the public RPC allows about 4/s per method per IP)
+lead_s = 300                # start 5 min before a segment ends
+timeout_s = 240             # killed past 4 min (it stops itself 15 s earlier): the previous list stays
+
+[experiments]
+# WP-11 (src/experiments.rs): each decision's arm in each experiment is xxh3(seed, experiment, decision id): replayable, and
+# the experiments independent of each other; each segment mixes its name into the seed (decision ids restart each
+# segment). The first arm of each table is its control. decisions.jsonl `experiments` holds every decision's arms,
+# attempts.jsonl `experiments_assigned` the same and `experiments` (and `tip.arm`) the arms that applied, status.jsonl
+# `experiments` each arm's decisions, opportunities, sends and refusals, experiments.jsonl the configuration
+seed = 20261007
+
+[experiments.x4]
+enabled = true
+arms = [0.2, 0.1, 0.35]   # the share of the edge in bands 0-2; the first arm is the control: 0.2, today's [tips] shares
+weights = [1, 1, 1]
+scope_max_band = 2        # bands 0-2: edges under 1,000,000 lamports ([bands] edges)
+
+[experiments.size]
+enabled = true
+arms_max_sol = [0.05, 0.2]   # the engine's size search stops here; the first arm is the control: 0.05, FT-007's cap
+weights = [1, 1]

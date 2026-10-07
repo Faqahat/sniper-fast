@@ -31,6 +31,7 @@ pub mod leaders;
 pub mod ledger;
 pub mod netcount;
 pub mod notify;
+pub mod overlay;
 pub mod pda;
 pub mod pools;
 pub mod poolrefresh;
