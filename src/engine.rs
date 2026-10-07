@@ -454,6 +454,9 @@ pub struct Engine {
     // ------------------------------------------------------------ WP-11
     /// the experiments (src/experiments.rs; None: off): each decision's arms by hash of its id, journaled with engine_init
     experiments: Option<crate::experiments::Experiments>,
+    /// what each arm's decisions did (status.jsonl `experiments`; review #2: the toolkit's per-arm denominators without
+    /// decisions.jsonl)
+    arm_stats: crate::experiments::ArmStats,
 }
 
 /// {signer: [ok, failed]} as a file holds it; with the sha256 of the bytes read. Missing or unreadable: empty, no hash
@@ -801,6 +804,7 @@ impl Engine {
         self.builder = init.builder.clone();
         // WP-11: the run's experiments (none in a journal written before WP-11, or with them off)
         self.experiments = init.experiments.clone();
+        self.arm_stats = Default::default();
         self.init_journaled = true;
         Ok(())
     }
@@ -904,7 +908,8 @@ impl Engine {
             acc_by_venue: Default::default(), commit_lag: Series::new("commit_lag"),
             commit_lag_src: [Series::new("commit_lag_tx"), Series::new("commit_lag_shred"), Series::new("commit_lag_unknown")], stop_req: None, boot_warned: false,
             reads: Reads::default(), resync: None, unverified: HashSet::default(), clmm_provisional: HashMap::default(), follow_ticks: 0, last_account_t: 0, knobs,
-            sendview: Default::default(), activity: Default::default(), seen_journaled: None, exec_init_journaled: false, experiments: None }
+            sendview: Default::default(), activity: Default::default(), seen_journaled: None, exec_init_journaled: false, experiments: None,
+            arm_stats: Default::default() }
     }
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
@@ -2054,6 +2059,9 @@ impl Engine {
         if let Some(r) = stop_reason { line["stop_reason"] = json!(r); }
         // WP-20: the alerts' counters (atomics only; null without alerts)
         line["alerts"] = crate::alerts::status();
+        // WP-11: each arm's decisions, opportunities, sends and refusals (only with experiments on: a run without them writes
+        // the line it did)
+        if let Some(v) = self.experiments.as_ref().and_then(|x| self.arm_stats.json(x)) { line["experiments"] = v; }
         p.t = t;
         p.counts = self.counts.clone();
         p.updates = self.store.updates;
@@ -3053,8 +3061,12 @@ impl Engine {
         };
         let t_decided = now_ns();
         self.decisions = fold(self.decisions, &[b"decision", &id.to_le_bytes(), &i.to_le_bytes(), &best.map_or(u64::MAX, |b| b as u64).to_le_bytes(), dec.reason.as_bytes()]);
-        // WP-11: the arms join the decision digest (only with experiments on: a run without them digests as before)
-        if !arms.is_empty() { self.decisions = fold(self.decisions, &[b"arms", &id.to_le_bytes(), &arms.digest_bytes()]); }
+        // WP-11: the arms join the decision digest (only with experiments on: a run without them digests as before), and
+        // the arm's counters (status.jsonl `experiments`)
+        if !arms.is_empty() {
+            self.decisions = fold(self.decisions, &[b"arms", &id.to_le_bytes(), &arms.digest_bytes()]);
+            self.arm_stats.note(&arms, opp_id.is_some(), dec.sent == Some(true), dec.would_send, &dec.reason);
+        }
         // follow-up bookkeeping: the pools priced and the slots read (torn_suspect, fork_priced)
         let priced_pools: Vec<usize> = { let mut v: Vec<usize> = routes.iter().filter(|r| r.priced.is_some()).flat_map(|r| [r.buy, r.sell]).collect(); v.sort_unstable(); v.dedup(); v };
         if !priced_pools.is_empty() {
@@ -5495,7 +5507,7 @@ mod tests {
         let on = Experiments { seed: 7, x2: Some(Exp { arms: vec![0, 5, 10, 20], weights: vec![1.0; 4], scope: Scope::ALL }),
             x4: Some(Exp { arms: vec![0.1, 0.2, 0.35], weights: vec![1.0; 3], scope: Scope { max_band: 2, ..Scope::ALL } }),
             size: Some(Exp { arms: vec![0.05, 0.2], weights: vec![1.0; 2], scope: Scope::ALL }),
-            margin: Some(Exp { arms: vec![1, 2_000], weights: vec![1.0; 2], scope: Scope::ALL }) };
+            margin: Some(Exp { arms: vec![1, 2_000], weights: vec![1.0; 2], scope: Scope::ALL }), ..Default::default() };
         let (mut off_r, mut on_r) = (Vec::new(), Vec::new());
         for _ in 0..3 {
             off_r.push(bench(None));

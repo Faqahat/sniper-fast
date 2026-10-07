@@ -146,8 +146,8 @@ fn the_x4size_config_passes_arbx_check_with_its_experiments() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{text}{}", String::from_utf8_lossy(&out.stderr));
     let line = text.lines().find(|l| l.starts_with("experiments (WP-11): ")).unwrap_or_else(|| panic!("no experiments line: {text}"));
-    assert!(line.contains("seed 20261007; x4 tip share arms [0.1, 0.2, 0.35] (weights 1:1:1) replace [tips] shares [0.2, 0.2, 0.2, 0.6, 0.7] in bands 0-2 (edge < 1000000), floor 1000 and cap 100000 kept, the BAM floor raises BAM-led bids on top"), "{line}");
-    assert!(line.contains("size cap arms [0.05, 0.2] SOL (weights 1:1) on the engine's size search") && line.contains("never above [canary] size_sol 0.2, [live] max_size_sol 0.2 or the bankroll (85%"), "{line}");
+    assert!(line.contains("seed 20261007 (mixed with each segment's name); x4 tip share arms [0.2, 0.1, 0.35] (control 0.2; weights 1:1:1) replace [tips] shares [0.2, 0.2, 0.2, 0.6, 0.7] in bands 0-2 (edge < 1000000), floor 1000 and cap 100000 kept, the BAM floor raises BAM-led bids on top"), "{line}");
+    assert!(line.contains("size cap arms [0.05, 0.2] SOL (control 0.05; weights 1:1) on the engine's size search") && line.contains("never above [canary] size_sol 0.2, [live] max_size_sol 0.2 or the bankroll (85%"), "{line}");
     assert!(line.ends_with("the experiments independent (6 cells)"), "{line}");
     assert!(text.contains("pool refresh (WP-22): on"), "FT-008's refresh kept: {text}");
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy");

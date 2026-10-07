@@ -53,9 +53,9 @@ def segment(root: str, name: str, k0: int, spec: list, extra_ledger: list, snaps
     if snapshot_slot is not None:
         gen.write_plain(d, "snapshots.jsonl", "snapshots", "1.0", [{"t_ns": start + 1, "slot": snapshot_slot, "slot_mismatch": False, "sol": 10 ** 9, "wsol": 10 ** 8}])
     gen.write_plain(d, "experiments.jsonl", "experiments", "1.0", [
-        {"t_ns": start, "experiment": "x4", "event": "config", "key": "x4_share", "arms": X4, "weights": [1.0] * 3, "seed": 7,
+        {"t_ns": start, "experiment": "x4", "event": "config", "key": "x4_share", "arms": X4, "control": X4[0], "weights": [1.0] * 3, "seed": 7,
          "scope": {"max_band": 2, "kinds": ["commit", "quiescent", "timeout", "fork"], "venues": []}, "unit": "decision"},
-        {"t_ns": start, "experiment": "size", "event": "config", "key": "size_max_sol", "arms": SIZE, "weights": [1.0] * 2, "seed": 7,
+        {"t_ns": start, "experiment": "size", "event": "config", "key": "size_max_sol", "arms": SIZE, "control": SIZE[0], "weights": [1.0] * 2, "seed": 7,
          "scope": {"max_band": 4, "kinds": ["commit", "quiescent", "timeout", "fork"], "venues": []}, "unit": "decision"}])
     attempts, outcomes, ledger, decisions = [], [], [], []
     for i, (xi, si, band, kind, mint, final, net) in enumerate(spec):
@@ -129,7 +129,7 @@ class Experiments(unittest.TestCase):
 
     def test_per_arm_money_from_the_ledger(self):
         x4 = self.d["experiments"]["x4"]
-        self.assertEqual((x4["control"], x4["control_why"]), ("0.1", "the first arm configured"))
+        self.assertEqual((x4["control"], x4["control_why"], x4["control_warning"]), ("0.1", "experiments.jsonl `control` (the first arm configured)", None))
         for i, arm in enumerate(X4):
             rs = self.rows(lambda r: r[0] == i and r[2] <= 2)
             a = x4["arms"][str(arm)]
@@ -215,6 +215,40 @@ class Experiments(unittest.TestCase):
             doc = json.load(f)
         self.assertEqual((doc["kind"], doc["sections"][0]["data"]["segments"]), ("experiments", ["c-p1", "c-p2"]))
         self.assertEqual(doc["sections"][0]["data"]["experiments"]["x4"]["arms"]["0.2"]["attempts"], 4)
+
+
+class Control(unittest.TestCase):
+    """Review #3: the control is experiments.jsonl's `control` (the first arm); a record without one takes the run's
+    config.toml value when it is an arm, and otherwise there is no control and nothing is compared (never a guess); a
+    control that is not the config's value is warned about"""
+
+    def seg(self, root: str, line: dict, cfg_toml: str | None) -> model.Segment:
+        d = os.path.join(root, f"s{abs(hash((json.dumps(line, sort_keys=True), cfg_toml))) % 10_000}")
+        os.makedirs(d)
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump({"schema": "arbx.meta/2.0", "run": {"segment": "s", "started_ns": gen.T0_NS, "mode": "canary"}}, f)
+        gen.write_plain(d, "experiments.jsonl", "experiments", "1.0", [line])
+        attempts = [attempt(i, gen.sg(f"c{i}"), 1, "commit", USDC, {"x4_share": [0.1, 0.2, 0.35][i % 3]}) for i in range(9)]
+        gen.write_zjsonl(d, "attempts", "2.2", attempts)
+        if cfg_toml is not None:
+            with open(os.path.join(d, "config.toml"), "w") as f:
+                f.write(cfg_toml)
+        return model.Segment(d)
+
+    def test_never_guessed(self):
+        base = {"t_ns": gen.T0_NS, "experiment": "x4", "event": "config", "key": "x4_share", "arms": [0.1, 0.2, 0.35], "weights": [1.0] * 3,
+                "scope": {"max_band": 2}}
+        tips = "[tips]\nshares = [0.2, 0.2, 0.2, 0.6, 0.7]\n"
+        with TmpDir() as root:
+            e = r10_experiments.run(self.seg(root, base, None), synth_ctx())
+            x = e["data"]["experiments"]["x4"]
+            self.assertEqual((x["control"], x["vs_control"]), (None, {}), "no control, nothing compared")
+            self.assertTrue(any("no control" in c for c in e["caveats"]), e["caveats"])
+            x = r10_experiments.run(self.seg(root, base, tips), synth_ctx())["data"]["experiments"]["x4"]
+            self.assertEqual((x["control"], x["control_why"]), ("0.2", "the configured value (the run's config.toml)"))
+            e = r10_experiments.run(self.seg(root, {**base, "control": 0.1}, tips), synth_ctx())
+            self.assertEqual(e["data"]["experiments"]["x4"]["control"], "0.1", "the record's control wins")
+            self.assertTrue(any("is not the run's configured value 0.2" in c for c in e["caveats"]), e["caveats"])
 
 
 class X2Trend(unittest.TestCase):

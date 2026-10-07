@@ -8,10 +8,13 @@
 //!   out of the serialized config while off (a disabled table too), so a config without them hashes as before (meta.json
 //!   `config.normalized_sha256`, exec_init `cfg_sha256`, engine_init): replays of older runs and the campaigns'
 //!   frozen-config checks are unchanged.
+//! - **The first arm listed is the control** (experiments.jsonl `control`; the toolkit compares every other arm with it).
 //! - **The unit is the decision** (decisions.jsonl `decision`). Its arm in experiment E is
 //!   `pick(xxh3_64_with_seed(E's name, 0xff, decision as u64 LE; seed), weights)`: a pure function of the seed, the
 //!   experiment and the decision id, so a replay (same ids) assigns the same arms, and two experiments with the same seed
-//!   assign independently (their names differ in the hash: a factorial design).
+//!   assign independently (their names differ in the hash: a factorial design). The seed a run assigns with is the
+//!   config's mixed with the segment's name (`Experiments::for_run`: decision ids restart each segment, so the segments
+//!   of a campaign do not repeat one id-to-arm pattern); it is journaled with engine_init, so a replay assigns the run's.
 //! - **Where each arm applies**:
 //!   - `x4` (tip share): replaces `[tips] shares` for the route's band when the band is in scope (`scope_max_band`, by
 //!     default 2: edges under 1,000,000 lamports with the default `[bands]`). `floor` and `cap` stay; the contested table is
@@ -227,6 +230,8 @@ impl ExperimentsCfg {
         let w = |w: &[f64], n: usize| if w.is_empty() { vec![1.0; n] } else { w.to_vec() };
         let x = Experiments {
             seed: self.seed,
+            config_seed: None,
+            run: None,
             x2: self.x2.enabled.then(|| Exp { arms: self.x2.arms_ms.clone(), weights: w(&self.x2.weights, self.x2.arms_ms.len()),
                 scope: scope(self.x2.scope_max_band, &self.x2.scope_kinds, &self.x2.scope_venues, "x2") }),
             x4: self.x4.enabled.then(|| Exp { arms: self.x4.arms.clone(), weights: w(&self.x4.weights, self.x4.arms.len()),
@@ -245,28 +250,28 @@ impl ExperimentsCfg {
         let wts = |w: &[f64]| w.iter().map(|v| format!("{v}")).collect::<Vec<_>>().join(":");
         let mut parts = Vec::new();
         if let Some(e) = &x.x4 {
-            parts.push(format!("x4 tip share arms {:?} (weights {}) replace [tips] shares {:?} in bands 0-{} ({}), floor {} and cap {} kept{}{}", e.arms, wts(&e.weights),
+            parts.push(format!("x4 tip share arms {:?} (control {}; weights {}) replace [tips] shares {:?} in bands 0-{} ({}), floor {} and cap {} kept{}{}", e.arms, e.arms[0], wts(&e.weights),
                 c.tips.shares, e.scope.max_band, band_range(&c.bands.edges, e.scope.max_band), c.tips.floor, c.tips.cap,
                 if c.send_policy.bam.enabled { ", the BAM floor raises BAM-led bids on top" } else { "" }, e.scope.describe_rest()));
         }
         if let Some(e) = &x.size {
             let canary = if c.canary.enabled { format!("[canary] size_sol {}, ", c.canary.size_sol) } else { String::new() };
-            parts.push(format!("size cap arms {:?} SOL (weights {}) on the engine's size search (rungs {:?} up to the arm), never above {canary}[live] max_size_sol {}{}{}",
-                e.arms, wts(&e.weights), c.strategy.sizes_sol, c.live.max_size_sol,
+            parts.push(format!("size cap arms {:?} SOL (control {}; weights {}) on the engine's size search (rungs {:?} up to the arm), never above {canary}[live] max_size_sol {}{}{}",
+                e.arms, e.arms[0], wts(&e.weights), c.strategy.sizes_sol, c.live.max_size_sol,
                 if c.live.bankroll_share > 0.0 { format!(" or the bankroll ({:.0}% of the liquid SOL - {} SOL, at most the WSOL)", c.live.bankroll_share * 100.0, c.live.bankroll_reserve_sol) } else { String::new() },
                 e.scope.describe_rest()));
         }
         if let Some(e) = &x.margin {
-            parts.push(format!("margin floor arms {:?} lamports (weights {}) replace [send_policy] margin_floor {} in bands 0-{}{}", e.arms, wts(&e.weights),
+            parts.push(format!("margin floor arms {:?} lamports (control {}; weights {}) replace [send_policy] margin_floor {} in bands 0-{}{}", e.arms, e.arms[0], wts(&e.weights),
                 c.send_policy.margin_floor, e.scope.max_band, e.scope.describe_rest()));
         }
         if let Some(e) = &x.x2 {
-            parts.push(format!("x2 send delay arms {:?} ms (weights {}) slept on the send task before the fire (never the engine thread), bands 0-{}{}", e.arms, wts(&e.weights),
+            parts.push(format!("x2 send delay arms {:?} ms (control {}; weights {}) slept on the send task before the fire (never the engine thread), bands 0-{}{}", e.arms, e.arms[0], wts(&e.weights),
                 e.scope.max_band, e.scope.describe_rest()));
         }
         let cells: usize = [x.x2.as_ref().map(|e| e.arms.len()), x.x4.as_ref().map(|e| e.arms.len()), x.size.as_ref().map(|e| e.arms.len()),
             x.margin.as_ref().map(|e| e.arms.len())].into_iter().flatten().product();
-        format!("experiments (WP-11): seed {}; {}; each decision's arm is xxh3(seed, experiment, decision id): replayable, the experiments independent ({} cells)",
+        format!("experiments (WP-11): seed {} (mixed with each segment's name); {}; each decision's arm is xxh3(seed, experiment, decision id): replayable, the experiments independent ({} cells)",
             x.seed, parts.join("; "), cells)
     }
 }
@@ -408,7 +413,13 @@ impl<T: Copy> Exp<T> {
 /// `experiments`
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Experiments {
+    /// the seed the arms are drawn with: the config's, mixed with the segment's name by `for_run`
     pub seed: u64,
+    /// `for_run`: the config's seed and the segment the seed was mixed with (None: not mixed, e.g. a test)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_seed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x2: Option<Exp<u32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -427,6 +438,17 @@ impl Experiments {
     /// nothing enabled
     pub fn is_empty(&self) -> bool { self.x2.is_none() && self.x4.is_none() && self.size.is_none() && self.margin.is_none() }
 
+    /// The experiments as segment `run` assigns them (`arbx run`): the seed becomes xxh3-64 of the segment's name seeded
+    /// with the config's seed, so each segment of a campaign draws its own id-to-arm pattern (decision ids restart each
+    /// segment); the config's seed and the name stay recorded (engine_init, meta.json, experiments.jsonl)
+    pub fn for_run(mut self, run: &str) -> Experiments {
+        let base = self.config_seed.unwrap_or(self.seed);
+        self.seed = xxhash_rust::xxh3::xxh3_64_with_seed(run.as_bytes(), base);
+        self.config_seed = Some(base);
+        self.run = Some(run.to_string());
+        self
+    }
+
     /// every experiment's arms and weights are whole and within `ExperimentsCfg::check`'s bounds (an engine_init record
     /// read back: else the record is not read)
     pub fn valid(&self) -> bool {
@@ -443,8 +465,9 @@ impl Experiments {
     /// experiments.jsonl's `config` lines (one per enabled experiment) at engine time `t_ns`
     pub fn config_lines(&self, t_ns: u64) -> Vec<Value> {
         let line = |name: &str, key: &str, arms: Value, weights: &[f64], scope: &Scope, unit: &str| json!({ "t_ns": t_ns, "experiment": name, "event": "config",
-            "key": key, "arms": arms, "weights": weights, "seed": self.seed, "scope": scope.json(), "unit": "decision", "arm_unit": unit,
-            "assignment": "xxh3_64_with_seed(name ++ 0xff ++ decision_le, seed): the top 53 bits over the weights" });
+            "key": key, "control": arms[0].clone(), "arms": arms, "weights": weights, "seed": self.seed, "config_seed": self.config_seed, "run": self.run,
+            "scope": scope.json(), "unit": "decision", "arm_unit": unit,
+            "assignment": "xxh3_64_with_seed(name ++ 0xff ++ decision_le, seed): the top 53 bits over the weights; the first arm is the control" });
         let mut v = Vec::new();
         if let Some(e) = &self.x2 { v.push(line("x2", "x2_delay_ms", json!(e.arms), &e.weights, &e.scope, "ms")); }
         if let Some(e) = &self.x4 { v.push(line("x4", "x4_share", json!(e.arms), &e.weights, &e.scope, "share of the edge")); }
@@ -520,6 +543,58 @@ impl Arms {
         if let Some(a) = self.size.filter(|a| a.scope.kind_ok(kind)) { m.insert("size_max_sol".into(), json!(a.value)); }
         if let Some(f) = self.margin_floor(band, kind, buy, sell) { m.insert("margin".into(), json!(f)); }
         Value::Object(m)
+    }
+}
+
+/// WP-11: what one arm's decisions did (status.jsonl `experiments`): every decision assigned the arm, those that became
+/// an opportunity (a best route over `min_profit`), were sent, were would-sends, and the executor's refusals of the rest
+/// by reason (the part before a `:`)
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ArmCounts { pub decisions: u64, pub opportunities: u64, pub sent: u64, pub would_send: u64, pub refused: std::collections::BTreeMap<String, u64> }
+
+/// WP-11: the per-arm counters of a run, by experiment (x2, x4, size, margin) and arm index; status.jsonl `experiments`
+#[derive(Clone, Debug, Default)]
+pub struct ArmStats { by: Vec<((u8, u8), ArmCounts)> }
+
+impl ArmStats {
+    fn slot(&mut self, k: (u8, u8)) -> &mut ArmCounts {
+        let i = match self.by.iter().position(|x| x.0 == k) { Some(i) => i, None => { self.by.push((k, ArmCounts::default())); self.by.len() - 1 } };
+        &mut self.by[i].1
+    }
+    /// one decision of arms `a`: an opportunity or not, sent, a would-send, or refused for `reason`
+    pub fn note(&mut self, a: &Arms, opportunity: bool, sent: bool, would_send: bool, reason: &str) {
+        let ids = [a.x2.map(|x| x.idx), a.x4.map(|x| x.idx), a.size.map(|x| x.idx), a.margin.map(|x| x.idx)];
+        for (e, idx) in ids.into_iter().enumerate() {
+            let Some(i) = idx else { continue };
+            let c = self.slot((e as u8, i));
+            c.decisions += 1;
+            if !opportunity { continue; }
+            c.opportunities += 1;
+            if sent { c.sent += 1; } else if would_send { c.would_send += 1; } else {
+                let r = reason.split(':').next().unwrap_or("");
+                match c.refused.get_mut(r) { Some(n) => *n += 1, None => { c.refused.insert(r.to_string(), 1); } }
+            }
+        }
+    }
+    /// status.jsonl `experiments`: `{key: {arm: {decisions, opportunities, sent, would_send, refused: {reason: n}}}}`, the
+    /// run's totals; None before the first decision
+    pub fn json(&self, x: &Experiments) -> Option<Value> {
+        if self.by.is_empty() { return None; }
+        let label = |e: u8, i: u8| -> Option<String> {
+            let i = i as usize;
+            match e { 0 => x.x2.as_ref().and_then(|v| v.arms.get(i)).map(|a| json!(a).to_string()), 1 => x.x4.as_ref().and_then(|v| v.arms.get(i)).map(|a| json!(a).to_string()),
+                2 => x.size.as_ref().and_then(|v| v.arms.get(i)).map(|a| json!(a).to_string()), _ => x.margin.as_ref().and_then(|v| v.arms.get(i)).map(|a| json!(a).to_string()) }
+        };
+        let mut out = serde_json::Map::new();
+        let mut by = self.by.clone();
+        by.sort_by_key(|x| x.0);
+        for ((e, i), c) in by {
+            let Some(l) = label(e, i) else { continue };
+            let key = KEYS[e as usize].1;
+            let m = out.entry(key.to_string()).or_insert_with(|| json!({}));
+            m[l] = json!({ "decisions": c.decisions, "opportunities": c.opportunities, "sent": c.sent, "would_send": c.would_send, "refused": c.refused });
+        }
+        Some(Value::Object(out))
     }
 }
 

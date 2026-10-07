@@ -2,8 +2,8 @@
 # pool refresh) with two concurrent, randomized experiments instead of back-to-back 3 h tests that market swings confound
 # (FT-006: tips 0.7 -> 0.2 gave +48% net per win but -57% Jito-led landings, +4% net SOL/h; FT-007: the 0.05 SOL cap doubled the
 # win ratio, but in FT-006 the 5 wins above 0.05 SOL made half the net). What differs from FT-008, and why:
-#   - [experiments.x4]: the tip share of the edge in bands 0-2 (edges under 1,000,000 lamports) is one of 0.1, 0.2 (today's,
-#     the control) and 0.35, by decision; bands 3-4 keep [tips]' 0.6 / 0.7; the floor 1,000 and the cap 100,000 stay; the BAM
+#   - [experiments.x4]: the tip share of the edge in bands 0-2 (edges under 1,000,000 lamports) is one of 0.2 (today's,
+#     the control: listed first), 0.1 and 0.35, by decision; bands 3-4 keep [tips]' 0.6 / 0.7; the floor 1,000 and the cap 100,000 stay; the BAM
 #     floor ([send_policy.bam]) still raises BAM-led bids on top; every bound stays (the on-chain min_profit, the decision's
 #     bar: expected >= tip + fee + 1,000, the BAM bid's room)
 #   - [experiments.size]: the engine's size search stops at 0.05 SOL (today's cap, the control) or at 0.2 SOL, by decision;
@@ -780,17 +780,19 @@ timeout_s = 240             # killed past 4 min (it stops itself 15 s earlier): 
 
 [experiments]
 # WP-11 (src/experiments.rs): each decision's arm in each experiment is xxh3(seed, experiment, decision id): replayable, and
-# the experiments independent of each other. decisions.jsonl `experiments` holds every decision's arms, attempts.jsonl
-# `experiments` (and `tip.arm`) the arms that applied, experiments.jsonl the configuration
+# the experiments independent of each other; each segment mixes its name into the seed (decision ids restart each
+# segment). The first arm of each table is its control. decisions.jsonl `experiments` holds every decision's arms,
+# attempts.jsonl `experiments_assigned` the same and `experiments` (and `tip.arm`) the arms that applied, status.jsonl
+# `experiments` each arm's decisions, opportunities, sends and refusals, experiments.jsonl the configuration
 seed = 20261007
 
 [experiments.x4]
 enabled = true
-arms = [0.1, 0.2, 0.35]   # the share of the edge in bands 0-2: 0.2 is today's [tips] shares (the control)
+arms = [0.2, 0.1, 0.35]   # the share of the edge in bands 0-2; the first arm is the control: 0.2, today's [tips] shares
 weights = [1, 1, 1]
 scope_max_band = 2        # bands 0-2: edges under 1,000,000 lamports ([bands] edges)
 
 [experiments.size]
 enabled = true
-arms_max_sol = [0.05, 0.2]   # the engine's size search stops here: 0.05 is FT-007's cap (the control)
+arms_max_sol = [0.05, 0.2]   # the engine's size search stops here; the first arm is the control: 0.05, FT-007's cap
 weights = [1, 1]

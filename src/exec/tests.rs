@@ -3363,3 +3363,27 @@ async fn the_engine_prices_under_each_size_arm() {
         assert_eq!(e.exec.as_ref().unwrap().counts.get("reject_size_cap"), None, "{mode:?}: the engine re-quoted at the executor's cap");
     }
 }
+
+/// WP-11 (review #14): the executor refuses a route sized past its decision's size arm (`size_arm`, counted
+/// `reject_size_arm`: the engine's search stops at the arm, so only a route sized elsewhere reaches the check); at the arm,
+/// or with the route's evaluation kind out of the arm's scope, it is sent
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_executor_refuses_a_size_past_its_arm() {
+    use crate::experiments::{Arm, Arms, Scope};
+    let mut r = rig("size-arm-exec", Mode::Live, "").await;
+    let arm = |sol: f64, kinds: u8| Arms { size: Some(Arm { idx: 0, value: sol, scope: Scope { kinds, ..Scope::ALL } }), ..Default::default() };
+    // the test routes trade 0.05 SOL (`SIZE`); an arm of 0.01 SOL
+    let d = r.decide(with_arms(route(1, damm(2, MINT), 12_000, 7), arm(0.01, Scope::ALL.kinds)), 97, now_ns());
+    assert_eq!((d.verdict, d.reason.as_str(), d.attempt), ("reject", "size_arm", None), "{d:?}");
+    assert_eq!(r.n("reject_size_arm"), 1);
+    assert!(r.got.lock().unwrap().is_empty() && r.lines("attempts").is_empty(), "nothing built, nothing sent");
+    // at the arm (0.05 SOL): sent
+    let d = r.decide(with_arms(route(1, damm(2, MINT), 12_000, 8), arm(0.05, Scope::ALL.kinds)), 97, now_ns());
+    assert_eq!(d.reason, "sent", "{d:?}");
+    let _ = r.settled().await;
+    // an arm scoped to quiescent evaluations only: this commit-triggered route is not the arm's
+    let d = r.decide(with_arms(route(1, damm(2, MINT), 12_000, 9), arm(0.01, 0b0010)), 97, now_ns());
+    assert_eq!(d.reason, "sent", "out of the arm's scope: {d:?}");
+    let _ = r.settled().await;
+    assert_eq!(r.lines("attempts")[0]["experiments_assigned"], json!({ "size_max_sol": 0.05 }), "the assigned arm recorded (review #10)");
+}

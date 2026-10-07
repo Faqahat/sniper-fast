@@ -113,7 +113,7 @@ fn arms_apply_in_scope_and_record() {
     let x = Experiments { seed: 1, x2: Some(Exp { arms: vec![0, 20], weights: vec![1.0, 1.0], scope: Scope { max_band: 1, ..Scope::ALL } }),
         x4: Some(Exp { arms: vec![0.1, 0.35], weights: vec![1.0, 1.0], scope: Scope { max_band: 2, ..Scope::ALL } }),
         size: Some(Exp { arms: vec![0.05, 0.2], weights: vec![1.0, 1.0], scope: Scope::ALL }),
-        margin: Some(Exp { arms: vec![1, 2_000], weights: vec![1.0, 1.0], scope: Scope::ALL }) };
+        margin: Some(Exp { arms: vec![1, 2_000], weights: vec![1.0, 1.0], scope: Scope::ALL }), ..Default::default() };
     let a = x.assign(5);
     let m = a.assigned_json();
     assert_eq!(m.keys().map(String::as_str).collect::<Vec<_>>(), vec!["margin", "size_max_sol", "x2_delay_ms", "x4_share"]);
@@ -168,7 +168,8 @@ fn config_checks() {
         (7, vec![1.0; 3], 2, vec![0.05, 0.2]));
     assert!(x.x2.is_none() && x.margin.is_none());
     let d = c.experiments.describe(&c);
-    assert!(d.starts_with("experiments (WP-11): seed 7; x4 tip share arms [0.1, 0.2, 0.35]") && d.contains("(6 cells)") && d.contains("bands 0-2 (edge < 1000000)"), "{d}");
+    assert!(d.starts_with("experiments (WP-11): seed 7 (mixed with each segment's name); x4 tip share arms [0.1, 0.2, 0.35] (control 0.1;") && d.contains("(6 cells)")
+        && d.contains("bands 0-2 (edge < 1000000)") && d.contains("size cap arms [0.05, 0.2] SOL (control 0.05;"), "{d}");
     for (bad, why) in [
         ("[experiments.x4]\nenabled = true\narms = [0.2]\n", "2 to 8"),
         ("[experiments.x4]\nenabled = true\narms = [0.2, 0.2]\n", "twice"),
@@ -228,4 +229,55 @@ fn off_hashes_as_before() {
         if !has { assert!(!c.normalized_json().contains("\"experiments\""), "{}", f.path().display()); n += 1; }
     }
     assert!(n >= 9, "{n} configs without experiments");
+}
+
+/// Review #5: each segment mixes its name into the seed (decision ids restart each segment, so one id-to-arm pattern
+/// would repeat in every segment of a campaign): two segments' patterns differ, one segment's is reproducible, the
+/// config's seed and the name stay recorded, and mixing twice is mixing once (a replay's engine_init carries the mixed
+/// seed). The first arm is the control in experiments.jsonl
+#[test]
+fn each_segment_mixes_its_name_into_the_seed() {
+    let base = Experiments { seed: 20_261_007, x4: Some(Exp { arms: vec![0.2, 0.1, 0.35], weights: vec![1.0; 3], scope: Scope { max_band: 2, ..Scope::ALL } }),
+        ..Default::default() };
+    let (p1, p2) = (base.clone().for_run("ft-x4size-p1"), base.clone().for_run("ft-x4size-p2"));
+    assert_ne!(p1.seed, p2.seed);
+    assert_eq!((p1.config_seed, p1.run.as_deref()), (Some(20_261_007), Some("ft-x4size-p1")));
+    assert_eq!(p1.clone().for_run("ft-x4size-p1"), p1, "the config's seed is mixed once");
+    assert_eq!(base.clone().for_run("ft-x4size-p1"), p1, "reproducible");
+    let same = (0..10_000u64).filter(|id| p1.assign(*id).x4.unwrap().idx == p2.assign(*id).x4.unwrap().idx).count();
+    assert!((3_000..3_700).contains(&same), "two segments' patterns agree by chance only (1/3): {same}");
+    let back: Experiments = serde_json::from_value(serde_json::to_value(&p1).unwrap()).unwrap();
+    assert_eq!(back, p1);
+    let l = &p1.config_lines(1)[0];
+    assert_eq!((l["control"].as_f64(), l["seed"].as_u64(), l["config_seed"].as_u64(), l["run"].as_str()), (Some(0.2), Some(p1.seed), Some(20_261_007), Some("ft-x4size-p1")));
+}
+
+/// Review #2: status.jsonl's per-arm counters: every decision once per experiment under its arm; an opportunity sent,
+/// a would-send, or refused by its reason (before any `:`); labels as the records print the arms
+#[test]
+fn arm_counters_count_each_decision_once() {
+    let x = Experiments { seed: 3, x4: Some(Exp { arms: vec![0.2, 0.1], weights: vec![1.0; 2], scope: Scope::ALL }),
+        size: Some(Exp { arms: vec![0.05, 0.2], weights: vec![1.0; 2], scope: Scope::ALL }), ..Default::default() };
+    let mut st = ArmStats::default();
+    assert!(st.json(&x).is_none());
+    let mut want = std::collections::BTreeMap::new();
+    for id in 0..1_000u64 {
+        let a = x.assign(id);
+        let (opp, sent, would, reason) = match id % 4 { 0 => (false, false, false, "below_min_profit"), 1 => (true, true, false, "sent"),
+            2 => (true, false, false, "canary_wait"), _ => (true, false, true, "would_send") };
+        st.note(&a, opp, sent, would, if id % 8 == 6 { "gate_shadow:paused" } else { reason });
+        *want.entry(a.x4.unwrap().idx).or_insert(0u64) += 1;
+    }
+    let j = st.json(&x).unwrap();
+    assert_eq!(j["x4_share"]["0.2"]["decisions"].as_u64(), Some(want[&0]));
+    assert_eq!(j["x4_share"]["0.1"]["decisions"].as_u64(), Some(want[&1]));
+    for key in ["x4_share", "size_max_sol"] {
+        let arms: Vec<&Value> = j[key].as_object().unwrap().values().collect();
+        assert_eq!(arms.iter().map(|a| a["decisions"].as_u64().unwrap()).sum::<u64>(), 1_000);
+        assert_eq!(arms.iter().map(|a| a["opportunities"].as_u64().unwrap()).sum::<u64>(), 750);
+        assert_eq!(arms.iter().map(|a| a["sent"].as_u64().unwrap()).sum::<u64>(), 250);
+        assert_eq!(arms.iter().map(|a| a["would_send"].as_u64().unwrap()).sum::<u64>(), 250);
+        assert_eq!(arms.iter().map(|a| a["refused"]["canary_wait"].as_u64().unwrap_or(0) + a["refused"]["gate_shadow"].as_u64().unwrap_or(0)).sum::<u64>(), 250);
+    }
+    assert!(j.get("x2_delay_ms").is_none() && j.get("margin").is_none(), "only the experiments on");
 }

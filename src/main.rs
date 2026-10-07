@@ -1791,6 +1791,9 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     let mut programs = route.clone();
     programs.extend(venue_specs.iter().map(provenance::pending_entry));
     let mut streams = provenance::streams_json();
+    // WP-11: the experiments as this segment assigns them (the config's seed mixed with the segment's name: review #5);
+    // meta.json and engine_init record them
+    let experiments = cfg.experiments.compile().map(|x| x.for_run(&name));
     if let (Some(m), Value::Object(r)) = (streams.as_object_mut(), rec.streams_json()) { m.extend(r); }
     // the registry and the candidates it did not keep (WP-16 review F8)
     // (WP-09: pools.json, its sha256 and registry-run.json beside it)
@@ -1812,7 +1815,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
             "snapshot_slot": snapshot_slot, "snapshot_ns": snapshot_ns, "stream_started_ns": stream_started_ns, "followed": followed },
         "probe": probe_meta, "chainfetch": cf_meta, "leaders": provenance::section(&cfg.leaders),
         "pools": pools_meta, "inputs": provenance::inputs_json(&cfg),
-        "streams": streams, "experiments": cfg.experiments.compile().map(|x| serde_json::to_value(x).unwrap_or(Value::Null)),
+        "streams": streams, "experiments": experiments.as_ref().map(|x| serde_json::to_value(x).unwrap_or(Value::Null)),
         "limits": limits, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()),
         "clock": provenance::clock_json(),
         "strategy": provenance::section(&cfg.strategy), "send": provenance::section(&cfg.sends), "builder": provenance::section(&cfg.exec),
@@ -1884,7 +1887,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     eng.set_builder(model);
     // ---- WP-11 wiring: the experiments (arms by hash of each decision's id), journaled with engine_init; their
     // configuration into experiments.jsonl
-    eng.set_experiments(cfg.experiments.compile());
+    eng.set_experiments(experiments.clone());
     if eng.experiments().is_some() {
         say(&cfg.experiments.describe(&cfg));
         eng.record_experiments(now_ns());

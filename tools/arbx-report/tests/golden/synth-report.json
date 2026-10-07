@@ -102,12 +102,12 @@
    "truncated_bytes": null
   },
   {
-   "bytes": 296,
+   "bytes": 314,
    "file": "experiments.jsonl",
    "partial_tail": null,
    "records_read": 1,
    "schema": "arbx.experiments/1.0",
-   "sha256": "8cbc9210a40bc5fbdd526991e3811696397fa04cd61eeb0b238b6a4e61747067",
+   "sha256": "935ebe829eebc098ee6485d6fa76175cae4e590a3e3eecfa5558927ba2d3d523",
    "stream": "experiments",
    "truncated_bytes": null
   },
@@ -2521,6 +2521,9 @@
         "0.6",
         "0.4"
        ],
+       "config_seed": null,
+       "control": "0.6",
+       "run": null,
        "scope": "attempt",
        "seed": 7,
        "weights": [
@@ -2529,7 +2532,8 @@
        ]
       },
       "control": "0.6",
-      "control_why": "the first arm configured",
+      "control_warning": null,
+      "control_why": "experiments.jsonl `control` (the first arm configured)",
       "decisions_src": "decisions.jsonl",
       "key": "x4_share",
       "vs_control": {

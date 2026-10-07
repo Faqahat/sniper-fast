@@ -1303,6 +1303,8 @@ impl Exec {
         // the same cap first (`Engine::after_opportunity`; tests::the_engine_caps_the_size), so this refuses only a route
         // sized past it
         if r.size > self.size_cap() { return fail(d, "size_cap"); }
+        // WP-11 (review #14): never above the decision's size arm either (the engine's search stops at it: defense in depth)
+        if r.arms.size_cap(r.trig_kind).is_some_and(|c| r.size > c) { return fail(d, "size_arm"); }
         // PLAN-ADDENDUM WP-21 (DESIGN.md §9.0 item 9): a venue switched to "quote" (or "off") is priced and built, never
         // sent; checked whenever the mode sends, the gate open or not (review F3: a gated decision says so in
         // `reason_ungated`, never a would-send). The engine keeps such routes out of a sending run's pick (`Engine`
@@ -1413,6 +1415,9 @@ impl Exec {
             experiments: r.arms.applied_json(band, kind, bv, sv, tip_arm), tip_policy: self.tips.as_ref(),
             min_profit: built.min_profit, margin, built: &built, bh: &bh, bh_age: age, leader: snap, key, prev, why_allowed, prio, lambda: self.paths.as_ref().and_then(|p| p.queue_now().1),
             t_built0, t_built, payer: self.payer, program: self.program, bam: bam.map(|b| b.json(&self.pol.bam)), endpoint, leader_kind: i.leader.kind }.json();
+        // WP-11 (review #10): every arm the decision was assigned, beside the ones that applied (only with experiments on: an
+        // attempt without arms is the line it was)
+        if !r.arms.is_empty() { line["experiments_assigned"] = Value::Object(r.arms.assigned_json()); }
         if fired.is_none() && !replayed_send {
             // a would-send (shadow, dry run, a closed gate): recorded with sent = false
             self.would_recent.push_back(t);
@@ -2562,7 +2567,7 @@ macro_rules! reasons {
 reasons!("gate_shadow", "gate_stopped", "recorder_unhealthy", "warmup", "state_unavailable", "resync", "equity_unknown", "equity_stale", "fee_cap", "sender_stopped",
     "canary_wait", "canary_count", "blockhash_stale", "leader_unknown", "leader_skip_kind", "jito_auth_stale", "expected_below_min_profit", "implausible_gap", "size_cap",
     "token_cooling", "rent_cap", "uva_missing", "mid_not_held", "inflight_same_state", "inflight_same_leader", "band_throttle", "crowded_skip", "would_rate",
-    "would_rate_crowded", "oversized", "dlmm_ext_needed", "build_error", "bam_bid_below_floor", "venue_quote_only");
+    "would_rate_crowded", "oversized", "dlmm_ext_needed", "build_error", "bam_bid_below_floor", "venue_quote_only", "size_arm");
 
 /// the counter of a copy that never left (copies.jsonl `drop`, MEASUREMENT §4.38): `drop_<code>`. Such an attempt was
 /// handed to the fire, so it is not a refused decision (review WP-05 #16)

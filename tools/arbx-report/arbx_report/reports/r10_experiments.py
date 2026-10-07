@@ -95,27 +95,43 @@ def _run_config(segs) -> dict | None:
     return None
 
 
+def _configured(key: str, cfg: dict | None, conf: dict | None):
+    """the value the run's config.toml gives the experiment's knob (None: no config.toml, or no single value)"""
+    if key == "x2_delay_ms":
+        return 0
+    if cfg is None:
+        return None
+    if key == "x4_share":
+        shares = (cfg.get("tips") or {}).get("shares")
+        mb = ((conf or {}).get("scope") or {}).get("max_band", 2)
+        if isinstance(shares, list) and shares[:mb + 1] and len(set(shares[:mb + 1])) == 1:
+            return shares[0]
+        return None
+    if key == "margin":
+        return (cfg.get("send_policy") or {}).get("margin_floor", 1)
+    return None
+
+
 def _control(key: str, arms: list, cfg: dict | None, conf: dict | None) -> tuple:
-    """(the control arm's label, why): the configured value when the run's config shows it, else the first arm"""
+    """(the control arm's label, why, a warning or None). The control is experiments.jsonl's `control` (the first arm
+    configured: WP-11 review #3); a record without one (written before) takes the value the run's config.toml gives the
+    knob when it is an arm, and none otherwise: the report never guesses (no control, no comparison)"""
     labels = [_label(a) for a in arms]
     if not labels:
-        return None, "no arm"
-    cur = None
-    if key == "x2_delay_ms":
-        cur = 0
-    elif cfg is not None:
-        if key == "x4_share":
-            shares = (cfg.get("tips") or {}).get("shares")
-            mb = ((conf or {}).get("scope") or {}).get("max_band", 2)
-            if isinstance(shares, list) and shares[:mb + 1] and len(set(shares[:mb + 1])) == 1:
-                cur = shares[0]
-        elif key == "margin":
-            cur = (cfg.get("send_policy") or {}).get("margin_floor", 1)
-    if cur is not None:
-        for lab, a in zip(labels, arms):
-            if _num(a) is not None and abs(_num(a) - float(cur)) < 1e-12:
-                return lab, "no delay" if key == "x2_delay_ms" else "the configured value (the run's config.toml)"
-    return labels[0], "the first arm configured"
+        return None, "no arm", None
+    cur = _configured(key, cfg, conf)
+    cur_lab = next((lab for lab, a in zip(labels, arms) if cur is not None and _num(a) is not None and abs(_num(a) - float(cur)) < 1e-12), None)
+    if (conf or {}).get("control") is not None:
+        lab = _label(conf["control"])
+        warn = None
+        if cur is not None and cur_lab != lab and key != "x2_delay_ms":
+            warn = f"{key}: the control {lab} (the first arm) is not the run's configured value {cur}"
+        return lab, "experiments.jsonl `control` (the first arm configured)", warn
+    if cur_lab is not None:
+        return cur_lab, "no delay" if key == "x2_delay_ms" else "the configured value (the run's config.toml)", None
+    return None, "none: experiments.jsonl has no `control` and the run's config.toml does not give one", (
+        f"{key}: no control (an experiments.jsonl line without `control`, and no config.toml beside the records that names it): no arm is "
+        "compared; put config.toml beside the records")
 
 
 # ------------------------------------------------------------------------------------------------ rows
@@ -274,9 +290,9 @@ def experiment(segs, key: str, rows: list, would: list, cfgs: dict, run_cfg: dic
     weights = (conf or {}).get("weights") or [1.0] * len(arms)
     wmap = {a: float(w) for a, w in zip(arms, weights)}
     wsum = sum(wmap.values()) or 1.0
-    control, why = _control(key, conf_arms or arms, run_cfg, conf)
-    out = {"key": key, "config": {k: (conf or {}).get(k) for k in ("arms", "weights", "seed", "scope")} if conf else None,
-           "control": control, "control_why": why}
+    control, why, warn = _control(key, conf_arms or arms, run_cfg, conf)
+    out = {"key": key, "config": {k: (conf or {}).get(k) for k in ("arms", "weights", "seed", "config_seed", "run", "scope", "control")} if conf else None,
+           "control": control, "control_why": why, "control_warning": warn}
     # the balance: the assignment over every decision, the sends, the bands and trigger kinds per arm
     dec = _decisions(segs, key)
     bal: dict = {"decisions": None}
@@ -524,6 +540,8 @@ def run(seg, ctx: dict, which: str = "all") -> dict:
             continue
         e = experiment(segs, k, rows, would, cfgs, run_cfg, hours)
         d["experiments"][name] = e
+        if e.get("control_warning"):
+            sec["caveats"].append(e["control_warning"])
         dec = (e["balance"].get("decisions") or {}).get("chi2")
         if dec and dec["p"] is not None and dec["p"] < 0.01:
             sec["caveats"].append(f"{name}: decisions per arm are unbalanced against the weights (p={dec['p']}): the assignment is suspect")

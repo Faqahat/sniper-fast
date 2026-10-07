@@ -45,8 +45,11 @@ fn s18_arms_are_applied_recorded_and_replayed() {
     let attempts = r.attempts();
     eprintln!("S18: {} evaluations, {} attempts", decisions.len(), attempts.len());
     assert!(attempts.len() >= 6, "the sales were sent: {}", attempts.len());
+    // the seed the run assigns with: the config's mixed with the run's name (review #5), as experiments.jsonl records it
+    let seed = crate::experiments::Experiments { seed: SEED, ..Default::default() }.for_run("s18").seed;
+    assert_ne!(seed, SEED);
     // every decision: its arms are the hash of its id
-    let arm = |name: &str, id: u64, arms: &[Value]| arms[assign(SEED, name, id, &vec![1.0; arms.len()])].clone();
+    let arm = |name: &str, id: u64, arms: &[Value]| arms[assign(seed, name, id, &vec![1.0; arms.len()])].clone();
     let mut seen: std::collections::BTreeSet<(String, String)> = Default::default();
     for d in &decisions {
         let id = d["decision"].as_u64().unwrap();
@@ -68,8 +71,10 @@ fn s18_arms_are_applied_recorded_and_replayed() {
         // the decision priced is the trade sent, at the same net (the engine's fee read the same X4 arm as the tip)
         assert_eq!(a["size_lamports"], best["size"], "attempt {}: the decision's size", a["attempt"]);
         assert_eq!((d["ev"].as_i64(), a["expected"]["net"].as_i64()), (best["net"].as_i64(), best["net"].as_i64()), "attempt {}: one net", a["attempt"]);
-        // every arm applied (x4 in every band here), the tip the arm's share of the edge within the floor and cap
+        // every arm applied (x4 in every band here), the tip the arm's share of the edge within the floor and cap; the
+        // assigned arms recorded beside them (review #10)
         assert_eq!(a["experiments"], *x, "attempt {}", a["attempt"]);
+        assert_eq!(a["experiments_assigned"], *x, "attempt {}", a["attempt"]);
         let share = x["x4_share"].as_f64().unwrap();
         let edge = a["expected"]["gross"].as_i64().unwrap() - 5_000;
         assert_eq!((a["tip"]["arm"].as_f64(), a["tip"]["share"].as_f64(), a["tip"]["policy"].as_str()), (Some(share), Some(share), Some("share_of_edge")), "{a}");
@@ -95,8 +100,26 @@ fn s18_arms_are_applied_recorded_and_replayed() {
     let cfg_lines = r.lines("experiments");
     let names: Vec<(&str, &str)> = cfg_lines.iter().map(|l| (l["experiment"].as_str().unwrap(), l["key"].as_str().unwrap())).collect();
     assert_eq!(names, vec![("x2", "x2_delay_ms"), ("x4", "x4_share"), ("size", "size_max_sol"), ("margin", "margin")]);
-    assert!(cfg_lines.iter().all(|l| l["event"] == "config" && l["seed"] == json!(SEED) && l["unit"] == "decision"), "{cfg_lines:?}");
-    assert_eq!((cfg_lines[1]["arms"].clone(), cfg_lines[1]["weights"].clone(), cfg_lines[1]["scope"]["max_band"].clone()), (json!([0.1, 0.35]), json!([1.0, 1.0]), json!(4)));
+    assert!(cfg_lines.iter().all(|l| l["event"] == "config" && l["seed"] == json!(seed) && l["config_seed"] == json!(SEED) && l["run"] == "s18"
+        && l["unit"] == "decision" && l["control"] == l["arms"][0]), "{cfg_lines:?}");
+    assert_eq!((cfg_lines[1]["arms"].clone(), cfg_lines[1]["weights"].clone(), cfg_lines[1]["scope"]["max_band"].clone(), cfg_lines[1]["control"].clone()),
+        (json!([0.1, 0.35]), json!([1.0, 1.0]), json!(4), json!(0.1)));
+    // status.jsonl `experiments` (review #2): each arm's decisions, opportunities, sends; the decisions per arm are the
+    // decision records'
+    r.timers(t + 11_000 * MS);
+    let st = r.lines("status");
+    let last = st.iter().rev().find(|l| l.get("experiments").is_some()).expect("a status line with the arms' counters");
+    let ex = &last["experiments"];
+    for (key, arms) in [("x4_share", ["0.1", "0.35"]), ("size_max_sol", ["0.01", "0.05"]), ("margin", ["1", "2000"]), ("x2_delay_ms", ["0", "5"])] {
+        let n: u64 = arms.iter().map(|a| ex[key][*a]["decisions"].as_u64().unwrap_or(0)).sum();
+        assert_eq!(n, decisions.len() as u64, "{key}: every decision counted once: {ex}");
+        for a in arms {
+            let want = decisions.iter().filter(|d| d["experiments"][key].to_string() == a).count() as u64;
+            assert_eq!(ex[key][a]["decisions"].as_u64(), Some(want), "{key} = {a}: {ex}");
+            let sent = attempts.iter().filter(|x| by_id[&x["decision"].as_u64().unwrap()]["experiments"][key].to_string() == a).count() as u64;
+            assert_eq!(ex[key][a]["sent"].as_u64(), Some(sent), "{key} = {a}: {ex}");
+        }
+    }
     // the replay: every decision (its arms), every attempt, the digests
     let done = r.finish_and_replay();
     assert_eq!(done.replay["executor"]["exec_init"]["mode"].as_str(), Some("canary"));
