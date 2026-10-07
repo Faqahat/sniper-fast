@@ -3503,3 +3503,16 @@ async fn a_dry_run_checks_a_helius_transaction() {
     }
     assert_eq!((a[0]["helius_big"]["also"].as_array().unwrap().len(), a[1]["helius_big"]["also"].as_array().unwrap().len()), (1, 0), "with Bolt, then Helius alone");
 }
+
+/// arbx-fast: a processed head (the shred entries source) is the processed slot: a `processed` send takes it when newer,
+/// a `confirmed` send keeps the confirmed head
+#[test]
+fn a_processed_head_serves_processed_sends_only() {
+    let mut v = SendView::default();
+    v.on_head(&json!({ "hash": b58(&BH), "slot": 100, "height": 90, "src": "slotidx", "commitment": "confirmed", "t_ns": 1 }));
+    v.on_head(&json!({ "hash": b58(&[7u8; 32]), "slot": 157, "src": "entries", "commitment": "processed", "t_ns": 2 }));
+    assert_eq!((v.blockhash("processed").map(|b| (b.slot, b.src.as_str())), v.blockhash("confirmed").map(|b| b.slot)), (Some((157, "entries")), Some(100)));
+    // an older processed head does not replace a newer one
+    v.on_head(&json!({ "hash": b58(&[8u8; 32]), "slot": 150, "src": "entries", "commitment": "processed", "t_ns": 3 }));
+    assert_eq!(v.blockhash("processed").map(|b| b.slot), Some(157));
+}

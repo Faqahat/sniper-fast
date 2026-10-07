@@ -485,6 +485,8 @@ pub struct Service {
     si: SlotIndex,
     ring: Ring,
     last_head: Option<[u8; 32]>,
+    /// arbx-fast: the last processed head handed to the engine (the shred entries source, newer than the confirmed head)
+    last_processed: Option<[u8; 32]>,
     started: bool,
     next_sigs: u64,
     sigs_inflight: bool,
@@ -521,7 +523,7 @@ impl Service {
         Service { wallet58: o.wallet.map(|w| b58(&w)), wallet, cfg: o.cfg, roles: o.roles, rec: o.rec, back: o.back, chain: o.chain, shared, base: tokio::time::Instant::now(),
             known: HashMap::new(), known_order: VecDeque::new(), stream: HashMap::new(), stream_order: VecDeque::new(), checks: BinaryHeap::new(), cov_q: VecDeque::new(),
             ours_accounts: HashMap::new(), ours_pools: HashMap::new(), bf, cap_cfg: if o.backfill_cap > 0.0 { o.backfill_cap } else { f64::INFINITY },
-            si: SlotIndex::new(4, 3_000), ring: Ring::new(512), last_head: None, started: false,
+            si: SlotIndex::new(4, 3_000), ring: Ring::new(512), last_head: None, last_processed: None, started: false,
             next_sigs: 30 * SEC, sigs_inflight: false, next_status: 0, status_inflight: false, wallet_inflight: 0, next_sample: first_sample, sample_inflight: false,
             next_poll: 0, poll_inflight: false, next_tick: 0, last_backlog_event: None, last_tap_event: (0, 0), cursor: o.wallet_cursor.map(|(sig, slot)| (slot, sig, true)), cursor_written: false,
             next_cursor_write: 0, unseen: None, denom_n: 0, with_tx: 0, with_idx: 0,
@@ -1177,11 +1179,22 @@ impl Service {
             self.rec.event("blockhash_source_disagree", "chainfetch", None, json!({ "slot": d.slot, "height": d.height,
                 "a": { "src": d.a.0.as_str(), "hash": b58(&d.a.1) }, "b": { "src": d.b.0.as_str(), "hash": b58(&d.b.1) } }));
         }
-        if let Some(b) = self.ring.best(Commitment::Confirmed, now_ns(), BH_MAX_AGE_NS) {
+        let confirmed = self.ring.best(Commitment::Confirmed, now_ns(), BH_MAX_AGE_NS);
+        if let Some(b) = &confirmed {
             if self.last_head != Some(b.hash) {
                 self.last_head = Some(b.hash);
                 self.input(InputKind::BlockhashHead, json!({ "hash": b58(&b.hash), "slot": b.slot, "height": b.height, "src": b.src.as_str(),
                     "commitment": b.commitment.as_str(), "t_ns": b.t_ns }));
+            }
+        }
+        // arbx-fast: the newest processed blockhash too (the DoubleZero shreds' completed slots: `entries`), when it is newer
+        // than the confirmed head: a `blockhash_commitment = "processed"` send then uses it (dryE: the confirmed slot index
+        // lagged 57 slots and 112 decisions were refused stale while the shreds had every slot's blockhash)
+        if let Some(p) = self.ring.best(Commitment::Processed, now_ns(), BH_MAX_AGE_NS) {
+            if p.commitment == Commitment::Processed && confirmed.as_ref().map_or(true, |c| p.slot > c.slot) && self.last_processed != Some(p.hash) {
+                self.last_processed = Some(p.hash);
+                self.input(InputKind::BlockhashHead, json!({ "hash": b58(&p.hash), "slot": p.slot, "height": p.height, "src": p.src.as_str(),
+                    "commitment": "processed", "t_ns": p.t_ns }));
             }
         }
     }

@@ -239,7 +239,14 @@ impl SendView {
         let Some(slot) = d["slot"].as_u64() else { return };
         let height = d["height"].as_u64();
         let commitment = if d["commitment"].as_str() == Some("processed") { "processed" } else { "confirmed" };
-        self.head = Some(Bh { hash, slot, height, src: d["src"].as_str().unwrap_or("ring").to_string(), commitment, t_ns: d["t_ns"].as_u64().unwrap_or(0) });
+        let bh = Bh { hash, slot, height, src: d["src"].as_str().unwrap_or("ring").to_string(), commitment, t_ns: d["t_ns"].as_u64().unwrap_or(0) };
+        // arbx-fast: a processed head (the shred entries source) is the processed slot, beside the block metas: a
+        // `processed` send takes the newer of the two and the confirmed head; a confirmed send never sees it
+        if commitment == "processed" {
+            if self.meta.as_ref().map_or(true, |m| slot > m.slot) { self.meta = Some(bh); }
+        } else {
+            self.head = Some(bh);
+        }
         if let Some(h) = height { self.note_height(slot, h); }
     }
 
