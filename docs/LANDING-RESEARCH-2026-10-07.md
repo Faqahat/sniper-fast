@@ -136,3 +136,23 @@ Items 1–4 change send paths, so each needs the owner's OK.
 - The fronts were read on a later day than the 284 bundles.
 - Send → landed includes the return trip.
 - BAM's batch cadence, each Harmonic validator's builder mode and Bolt's delivery are published claims or unknown.
+
+## Why the 20 fastL1 landings lost (`tools/arbx-fast/landing/why_lost.py`, `why_lost.json`)
+- **8 of 20 were phantoms: the trigger swap failed on chain** (slippage 3012/6001/604).
+  - They include the 5 biggest "gaps": 57.9M, 48.6M, 28.3M, 19.6M and 15.0M lamports expected.
+  - Our 19 ms landing (attempt 79) was one of them.
+- **12 of 20 were taken:** another transaction on our pools landed successfully between the trigger and us.
+- **The winners sit 1–21 positions after the trigger, in the same block.**
+
+  | Attempt | Our time | Trigger | Winner | Us | Winner's fee |
+  |---|---|---|---|---|---|
+  | 19 | 25.6 ms | #405 | 7dGrdJRY at #411 | #454 | 24k priority + Nozomi tip |
+  | 90 | 79.9 ms | #183 | MriyaNN8 at #185, #186 | #328 | 6.8M and 1.0M lamports priority |
+  | 18 | 52.6 ms | #459 | 8oSD5a9E at #460 | next slot | 6.0M priority |
+  | 45 | 49.0 ms | #320 | Dy1jE82C at #341, CzYQ2kFn at #342 | #415 | under 1k priority |
+
+- **Meaning:** shreds are produced after a transaction executes, so a trigger seen in shreds is already in the block.
+  - The winners land a few positions behind it, so they must reach the leader together with the trigger. They either see
+    it before execution or keep transactions waiting at the leader.
+  - A shred-triggered backrun cannot reach position +1 to +6 at any send latency. Faster sending moves us from about
+    #450 to about #420, which is still behind.
