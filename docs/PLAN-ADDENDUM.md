@@ -142,6 +142,12 @@ Added 2026-10-04 at the owner's request.
 - **Owner actions:** API keys or whitelisting (Harmonic whitelist, Nozomi key, BlockRazor key, NextBlock plan, Lunar key), and approval of the step-3 test.
 - **Dependencies and effort:** after WP-05 (send policy), WP-08 (classification, leader geography) and WP-11 (experiment framework). About 2–3 days of engineering, plus owner time for keys.
 
+**Status (2026-10-07): built on `lane/wp19` (cbeb4db), reviewed, parked (not merged).** Review: `docs/reviews/WP-19-review.md`. Verdict: merge after fixes. It is safe for money (today's configs are byte-identical), but fixes #1–#4 must land before any revert test.
+- **Why parked:** the protected services' minimum tips are 1,000,000 lamports (100,000 for BlockRazor). Our wins are band 0, with edges under 20,000 lamports, so the route could carry no trade on today's live config, which also refuses bands 3–4.
+- The route keys on leader kind, so it cannot target Harmonic leaders (kind `jito`).
+- **Service keys are on hold.** We pick this up again only if edges grow (larger sizes) or for WP-19b (Harmonic direct, priority-fee bids), merging after WP-23 and WP-24 (conflicts in `exec.rs`, `build.rs`, `config.rs`).
+- The out-of-scope test fix 5791d92 is cherry-picked to master (79891e5).
+
 ## Issues found in live shadow tests (2026-10-04)
 
 - **I-1. A boot snapshot RPC error is fatal.** During the side-by-side shadow test (`cmp2`, Cherry, 13:20 UTC), arbx `e2b8fa5` exited at boot:
