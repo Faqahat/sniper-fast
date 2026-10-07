@@ -3940,6 +3940,34 @@ mod tests {
         assert_eq!((off.e.counter("pending_priced"), off.e.counter("pending_no_overlay"), off.e.counter("evaluation")), (0, 0, 0), "off: a hint only");
     }
 
+    /// arbx-fast timing (run with `--ignored --nocapture`): wall time on the engine thread from a shred-decoded swap's
+    /// arrival to its priced, decided opportunity (decode, hint checks, overlay, every route of the pair priced). A
+    /// 50 SOL swap into pool 1 opens a gap against pool 2
+    #[test]
+    #[ignore]
+    fn timing_pending_trigger_to_decision() {
+        let mut r = rig("pending-timing");
+        r.e.cfg.pending_triggers = true;
+        make_ready(&mut r.e, T0);
+        let a = meta(1);
+        let mut us = Vec::new();
+        for n in 0..400u32 {
+            let mut s = [0u8; 64];
+            s[..4].copy_from_slice(&n.to_le_bytes());
+            s[4] = 77;
+            let t = T0 + 10 * MS + n as u64 * 1_000;
+            let arr = shred_tx(s, &[a.pool, a.vault0, a.vault1], Some((&a, 50 * SOL, false)), 11, t);
+            let t0 = std::time::Instant::now();
+            tx_ev(&mut r.e, arr);
+            us.push(t0.elapsed().as_nanos() as f64 / 1_000.0);
+        }
+        us.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let (p50, p90, p99) = (us[us.len() / 2], us[us.len() * 9 / 10], us[us.len() * 99 / 100]);
+        eprintln!("pending trigger -> decision (engine thread): p50 {p50:.1} us, p90 {p90:.1} us, p99 {p99:.1} us; priced {} evaluated {} opportunities {} no_overlay {}",
+            r.e.counter("pending_priced"), r.e.counter("pending_evaluated"), r.e.counter("state_opportunity"), r.e.counter("pending_no_overlay"));
+        assert!(r.e.counter("pending_priced") > 0, "the overlay priced");
+    }
+
     /// skip_failing_signers works on the hint path, and the skipped signer's statistics keep learning (its swaps landing,
     /// credited by a state update stamped with them, let it back in)
     #[test]

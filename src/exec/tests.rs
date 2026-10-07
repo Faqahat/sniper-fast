@@ -3457,3 +3457,29 @@ async fn a_smaller_big_gap_goes_to_helius_alone() {
     assert_eq!((h["tip"].as_u64(), h["also"].as_array().map(|v| v.len()), h["tips_total"].as_u64()),
         (Some((2_485_000f64 * 0.6) as u64), Some(0), Some((2_485_000f64 * 0.6) as u64)), "60% of 2,485,000 = 1,491,000: under 2,000,000, Helius alone: {h}");
 }
+
+/// arbx-fast timing (run with `--ignored --nocapture`): wall time of the executor's decision on a big gap, from the
+/// route to the signed transaction handed to the send task (checks, tip, build, sign, fire)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn timing_decide_build_sign_fire() {
+    let mut r = rig("timing-exec", Mode::Live, "").await;
+    let mut us = Vec::new();
+    let mut why: std::collections::BTreeMap<String, u32> = Default::default();
+    let base = now_ns();
+    for n in 0..300u64 {
+        // one decision a second of engine time (the path's rate never binds); distinct pools (no in-flight hold)
+        let t = base + n * 1_000_000_000;
+        let route = route(1 + (n % 120) as u8, damm(130 + (n % 120) as u8, MINT), 12_000, 1_000 + n);
+        let t0 = std::time::Instant::now();
+        let d = r.decide(route, 97, t);
+        let dt = t0.elapsed().as_nanos() as f64 / 1_000.0;
+        *why.entry(d.reason.clone()).or_default() += 1;
+        if d.sent == Some(true) { us.push(dt); }
+        r.drain();
+    }
+    eprintln!("decisions by reason: {why:?}");
+    assert!(us.len() > 100, "most decisions sent");
+    us.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    eprintln!("decide -> build -> sign -> fire (executor): p50 {:.1} us, p90 {:.1} us, p99 {:.1} us", us[us.len() / 2], us[us.len() * 9 / 10], us[us.len() * 99 / 100]);
+}
