@@ -159,8 +159,10 @@ pub struct Predicted {
 /// The post-state's parts a `Pred` does not carry
 #[derive(Clone, Debug)]
 pub enum Detail {
-    /// AMM v4, PumpSwap and the CLMM venues: nothing beyond the prediction
+    /// AMM v4, PumpSwap and Orca Whirlpool: nothing beyond the prediction
     None,
+    /// Raydium CLMM: the ticks whose limit orders the swap filled
+    RayClmm { limit_fills: u32 },
     /// CPMM: what the swap leaves owed
     Cpmm(CpmmBook),
     /// DLMM: the pair's parameters after `update_references`, the volatility accumulator in the bin the swap ends on
@@ -178,11 +180,12 @@ pub fn predict_full(m: &PoolMeta, v: &View, zfo: bool, amount: u64, exact_out: b
     // PLAN-ADDENDUM WP-21: a CLMM swap's exact walk (exact in, or swap_v2's exact out) and the pool it leaves
     match &leg.any {
         AnyLeg::RayClmm(c) => {
-            let w = c.fills(amount, exact_out, &mut |_| {}).map_err(clmm_no_pred)?;
+            let mut limit_fills = 0u32;
+            let w = c.fills(amount, exact_out, &mut |st| limit_fills += st.limit.is_some() as u32).map_err(clmm_no_pred)?;
             let p = w.post;
             let vars = p.dynamic.map(|d| vec![d.idx_ref as i64, d.v_ref as i64, d.va as i64, d.last_update.min(i64::MAX as u64) as i64]);
             return done(Pred::Clmm(ClmmPost { sqrt_price: p.sqrt_price, tick: p.tick, liquidity: p.liquidity, fee_growth: p.fee_growth_global,
-                protocol_fees: p.protocol_fees, fund_fees: p.fund_fees, side0: c.fee_on_token0, vars }), w.quote.spent, w.quote.out, Detail::None);
+                protocol_fees: p.protocol_fees, fund_fees: p.fund_fees, side0: c.fee_on_token0, vars }), w.quote.spent, w.quote.out, Detail::RayClmm { limit_fills });
         }
         AnyLeg::Whirl(c) => {
             let w = c.fills(amount, exact_out, &mut |_| {}).map_err(clmm_no_pred)?;
