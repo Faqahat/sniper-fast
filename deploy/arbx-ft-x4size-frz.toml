@@ -90,7 +90,10 @@ wallet_keystore = ""
 [pools]
 # OD-4 (owner confirms the seed list): the live w5h3 campaign's list (exp3 list + fresh discovery, 2026-10-03 evening),
 # copied from Cherry into arbx/data (commit c777f26). The fallback named by PLAN.md WP-00 is data/seed-pools-merged.csv
-seed_csv = "/root/arbx/data/seed-pools-20261006.csv"   # refreshed 2026-10-06 14:57 UTC (owner request): 1,165 kept (771 active in FT-004/FT-005 first) + 335 new pooldisco discoveries; 335 idle dropped
+seed_csv = "/root/arbx/data/seed-pools-wp21-shadow.csv"   # FT-012 (owner 2026-10-07): + 242 vetted Raydium CLMM / Orca Whirlpool SOL pools
+# WP-21: live sends through both venues (FT-009 passed; FT-013 traded them live: 12 CLMM wins, 0 failed fees)
+rayclmm = "send"
+whirlpool = "send"
 registry_json = "/root/arbx/data/registry.json"
 registry_all = true
 templates_json = "/root/arbx/data/templates.json"
@@ -756,7 +759,7 @@ status_min = 60         # "running" every hour, and a reminder every hour while 
 # lead_s before each segment ends, beside it (a process of its own at nice 10; it never opens the Haan gRPC stream and
 # never uses Haan's RPC); the next segment boots on what it wrote once its report says ok and the file hashes as the
 # report says, else on a copy of the previous list (the reason in campaign.json `pool_lists` and a Telegram notice).
-enabled = true
+enabled = false             # FT-012: off while the CLMM venues are on (WP-22 does not read CLMM swaps yet)
 cap = 1500                  # the seed rows the list keeps (today's list: 1,500)
 max_adds = 60               # at most this many pools added per refresh (5 refreshes in FT-008: at most 300)
 min_liquidity_sol = 2.0     # an added pool's WSOL vault holds >= 2 SOL (on chain; FT-008 trades <= 0.2 SOL)
