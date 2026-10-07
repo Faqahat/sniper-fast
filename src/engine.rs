@@ -2942,7 +2942,10 @@ impl Engine {
         // arbx-fast: a transaction already priced from its shreds (pending trigger) is not priced again at its commit
         let priced_pending = self.pending_done.remove(&g.txn).is_some();
         if priced_pending { self.count("commit_after_pending"); }
-        if r.outcome != Outcome::ForkDropped && self.cfg.state_triggers && !ours && !priced_pending {
+        // arbx-fast `pending_only`: no decision at a commit, every one comes from a shred-decoded swap
+        let pending_only = self.cfg.pending_triggers && self.cfg.pending_only;
+        if pending_only && !priced_pending { self.count("commit_skipped_pending_only"); }
+        if r.outcome != Outcome::ForkDropped && self.cfg.state_triggers && !ours && !priced_pending && !pending_only {
             let kind = match r.outcome { Outcome::TimeoutQuiescent => "quiescent", Outcome::TimeoutUnknown => "timeout", _ => "commit" };
             let ctx = EvalCtx { kind, txn: Some(g.txn), slot: g.slot, t_first_shred, t_update_recv: g.t_first_update, t_first_engine: g.t_first_engine,
                 t_commit: r.t_clock, t_resolved: r.t_resolved, quiet: r.outcome.timed_out(), now_clock: r.t_clock, w_src: g.w_src.as_str(), group: Some(g.id), deferrals: 0 };
@@ -3971,6 +3974,21 @@ mod tests {
         r.e.timers(t + 10 * MS, &mut nop());
         assert_eq!(r.e.counter("commit_after_pending"), 1);
         assert!(r.e.counter("evaluation") > evals, "priced at its commit");
+    }
+
+    /// arbx-fast `pending_only`: a swap the shreds did not price is not priced at its commit either
+    #[test]
+    fn pending_only_prices_nothing_at_a_commit() {
+        let mut r = rig("pending-only");
+        r.e.cfg.pending_triggers = true;
+        r.e.cfg.pending_only = true;
+        make_ready(&mut r.e, T0);
+        let a = meta(1);
+        let mut t = T0 + 10 * MS;
+        tx_ev(&mut r.e, shred_tx(sig(41), &[a.pool, a.vault0, a.vault1], None, 11, t));
+        for (k, d) in [(a.pool, ammv4_pool()), (a.vault0, vault(998_000_000_000_000)), (a.vault1, vault(1_051 * SOL))] { t += 100_000; acct(&mut r.e, k, d, 11, t, Some(sig(41)), t); }
+        r.e.timers(t + 10 * MS, &mut nop());
+        assert_eq!((r.e.counter("evaluation"), r.e.counter("commit_skipped_pending_only")), (0, 1));
     }
 
     /// arbx-fast timing (run with `--ignored --nocapture`): wall time on the engine thread from a shred-decoded swap's
