@@ -1,5 +1,7 @@
 # Stage 0 exit report
 
+> **Stage 0 CLOSED (owner, 2026-10-07):** the three telemetry items below are waived in writing (PLAN §9, OD-T), as exec coverage was (OD-1). Their fixes are carried into Stage 1.
+
 - **Date:** 2026-10-07, written 02:20–03:10 UTC by Claude for the owner's review. Not committed.
 - **Scope:** the canary series the owner set for the exit: **FT-005 + FT-006 + FT-007 + FT-008**, 16 segments, 12.05 h, wallet frz `FRZh63L6…`. FT-004 (the first 1 h canary) is shown in the series table for reference only.
 - **Method:** every number below was recomputed from the recorded files, not copied from the FT docs.

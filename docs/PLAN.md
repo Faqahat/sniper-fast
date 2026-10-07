@@ -1527,6 +1527,17 @@ A decision memo with each experiment's go or no-go (X1-X9 and the margin arm), p
   - The Stage 0 exit's exec-coverage gate (≥ 99%, F1) is WAIVED for Stage 0. Haan's plan allows one transaction filter (gRPC probe, FT-000), so coverage of the non-PumpSwap venues stays partial; the chain-fetch backfill covers what the RPC budget allows.
   - Stage 1 needs the second provider or bigger plan: discovery (WP-14/X8), the X1 census and full exec coverage. The owner will try to arrange it before Stage 1.
 - **Trade-success criteria and the $500 trigger (owner, 2026-10-06):** see PLAN-ADDENDUM, "Owner decision (2026-10-06)".
+- **OD-T, telemetry waiver for Stage 0 (owner, 2026-10-07, answering the exit report's question "Waive them and close Stage 0?": "Waive and close"):**
+  - The "Telemetry populated" gate's three short items are WAIVED for Stage 0 (docs/STAGE0-EXIT.md):
+    - `poh_trigger_pct` 5.9% against ≥ 90%;
+    - the verdict sequence on 99.37% of sends against 100%;
+    - a complete `blockctx` on 0.7% against ≥ 95%.
+  - These are measurement items with no money effect. Every other item of the gate holds.
+  - **Fixes carried into Stage 1:**
+    - the 46 sends without a verdict sequence outside the result-stream outage;
+    - `poh_trigger_pct` redefined or wired for state triggers (the engine acts on committed state by design);
+    - `blockctx` completeness with the second data provider (same root cause as OD-1).
+  - **Stage 0 is CLOSED (2026-10-07).**
 ---
 
 ## Appendix A. Measurement requirement → WP → stream
