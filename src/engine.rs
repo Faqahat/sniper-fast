@@ -190,6 +190,13 @@ pub struct EngineKnobs {
     /// (false): its replay waits for the mints as the run did
     #[serde(default)]
     pub wt_skip_pump_mints: bool,
+    /// FT-009 (WP-21): W(T) leaves out the parts of a Raydium CLMM or Orca Whirlpool pool that no swap writes
+    /// (`write_set`, `clmm_unwritten`): Raydium's AmmConfig, and an account the store holds empty (an Oracle PDA with no
+    /// Oracle, a tick array or bitmap extension not created) unless a top-level instruction of the pool's program other
+    /// than a swap names it; and the AmmConfig's own updates join no group (`on_account`). A run journaled before it has
+    /// no such knob (false): its replay groups them as the run did
+    #[serde(default)]
+    pub wt_skip_clmm_unwritten: bool,
 }
 fn resync_warn_s() -> u64 { 10 }
 fn resync_give_up_s() -> u64 { 300 }
@@ -199,7 +206,8 @@ impl Default for EngineKnobs {
         EngineKnobs { commit_timeout_ms: 5, quiescence_ms: 3, max_part_skew_slots: 2, max_tip_lag_slots: 2, clock_max_age_slots: 2, lag_slo_p50_ms: 16.0,
             lag_slo_p90_ms: 30.0, lag_slo_breach_minutes: 5, slo_action: "log".into(), slo_recover_minutes: 10, tier_a_grace_s: 60, boot_timeout_s: 60,
             max_update_age_ms: 2_000, unavailable_stop_s: 0, resnapshot: true, resync_warn_s: resync_warn_s(), resync_give_up_s: resync_give_up_s(), alts: crate::alts::Policy::default(),
-            ring_versions: crate::store::RING_VERSIONS, accuracy_queue: 10_000, wt_skip_pump_mints: true }
+            ring_versions: crate::store::RING_VERSIONS, accuracy_queue: 10_000, wt_skip_pump_mints: true,
+            wt_skip_clmm_unwritten: true }
     }
 }
 
@@ -214,7 +222,8 @@ impl EngineKnobs {
             alts: crate::alts::Policy { retry_ms: c.alts.retry_ms.clone(), retry_every_s: c.alts.retry_every_s, give_up_s: c.alts.give_up_s, wait_cap: c.alts.wait_cap,
                 max_inflight: c.alts.max_inflight, batch_max: c.alts.batch_max, calls_inflight: c.alts.calls_inflight, call_every_ms: c.alts.call_every_ms,
                 max_tables: c.alts.max_tables, max_bytes: (c.alts.max_mb * 1_048_576.0) as u64 },
-            ring_versions: c.accuracy.ring_versions, accuracy_queue: c.accuracy.queue, wt_skip_pump_mints: true }
+            ring_versions: c.accuracy.ring_versions, accuracy_queue: c.accuracy.queue, wt_skip_pump_mints: true,
+            wt_skip_clmm_unwritten: true }
     }
 }
 
@@ -2102,9 +2111,46 @@ impl Engine {
     /// together with a pool account or vault (the 3,374 that saw a mint written saw nothing else; 3,245 of them the PUMP
     /// mint). A mint write still joins its transaction's group, or arrives as a late member. A run journaled before this
     /// fix replays without it (`EngineKnobs::wt_skip_pump_mints` false)
+    ///
+    /// FT-009 (WP-21): not a part of a Raydium CLMM or Orca Whirlpool pool that no swap writes (`clmm_unwritten`). The
+    /// stream sends an account that a transaction gives writable to the program owning it, changed or not, and no other
+    /// account: in FT-009 an Orca pool's followed tick arrays sent 3.08 updates per update of its pool account (p50 of 68
+    /// pools; a swap names 3 arrays and crosses a tick far less often), and an initialized Oracle came with 97% of its
+    /// pool's updates. Its missed members were the Oracle PDA 38,588 times (94 of the 137 do not exist; 2 more hold
+    /// lamports but no data, on two busy pools, and were never written), tick arrays 12,315 times (Orca's swaps take
+    /// arrays not created) and the AmmConfig 3,307 times (read-only to every swap; routers mark it writable). The parts a
+    /// swap writes stay in W(T): they come with the pool's update, and a tick array a swap crossed is never priced before
+    /// its group completes. A run journaled before this fix replays without it (`EngineKnobs::wt_skip_clmm_unwritten` false)
     fn write_set(&self, tx: &Tx, keys: &[Pk]) -> Vec<Pk> {
-        let skip = self.knobs.wt_skip_pump_mints;
-        keys.iter().enumerate().filter(|(i, k)| tx.is_writable(*i) && self.part_pools.get(*k).is_some_and(|ps| !(skip && self.pump_mint(k, ps)))).map(|(_, k)| *k).collect()
+        let (skip, clmm) = (self.knobs.wt_skip_pump_mints, self.knobs.wt_skip_clmm_unwritten);
+        let mut w = Vec::new();
+        for (i, k) in keys.iter().enumerate() {
+            if !tx.is_writable(i) { continue; }
+            let Some(ps) = self.part_pools.get(k) else { continue };
+            if skip && self.pump_mint(k, ps) { continue; }
+            if clmm && self.clmm_unwritten(k, i, ps, tx, keys) { continue; }
+            w.push(*k);
+        }
+        w
+    }
+
+    /// FT-009: whether `k` (account `i` of the transaction), a part of the pools `ps`, is one no swap of a CLMM pool writes:
+    /// Raydium's AmmConfig (only its admin's `update_amm_config` changes it), or an account the store holds empty (an
+    /// Oracle PDA with no Oracle, a tick array or bitmap extension not created: a swap creates nothing) unless a top-level
+    /// instruction of a CLMM program other than a swap names it (an LP instruction creates the tick arrays it names; it then
+    /// waits for them). One a swap does write is never left out: the pool, the vaults, an existing tick array, extension
+    /// or Oracle
+    fn clmm_unwritten(&self, k: &Pk, i: usize, ps: &[usize], tx: &Tx, keys: &[Pk]) -> bool {
+        let mut empty = None;
+        ps.iter().any(|&p| {
+            let m = &self.reg.pools[p];
+            if !m.venue.is_clmm() { return false; }
+            if m.clmm_config() == Some(k) { return true; }
+            *empty.get_or_insert_with(|| self.store.get(k).is_some_and(|a| a.data.is_empty()) && !tx.ixs.iter().any(|ix| {
+                ix.accounts.contains(&(i as u8)) && !crate::venues::clmm::is_swap(&ix.data)
+                    && keys.get(ix.program as usize).and_then(Venue::of_program).is_some_and(|v| v.is_clmm())
+            }))
+        })
     }
 
     /// whether `k`, a part of the pools `ps`, is a PumpSwap pool's mint (its `extra`)
@@ -2744,8 +2790,14 @@ impl Engine {
         // a pending trigger whose transaction wrote a watched account landed
         if let Some(txn) = txn { if self.trig_pending.contains_key(&txn) { self.signer_outcome(&txn, true); } }
         // the CommitTracker: pricing parts are grouped by transaction; any stream message is stream evidence
-        if self.part_pools.contains_key(&key) {
-            let (rs, late) = self.tracker.on_update(key, txn, slot, wv, aseq, t, t_engine, stream);
+        if let Some(ps) = self.part_pools.get(&key) {
+            // FT-009 (`wt_skip_clmm_unwritten`): a Raydium CLMM AmmConfig joins no group. Only Raydium's admin changes it
+            // (`update_amm_config`, which writes no pool): a version read before or after it is whole. The stream sends it,
+            // unchanged, with any transaction giving it writable to the Raydium program (18-43 times per 30-min segment in
+            // FT-009); as T's member it would arrive as a late member (torn_suspect) or open a group of unknown W that holds
+            // every pool sharing the config pending for `quiescence_ms`
+            let config = self.knobs.wt_skip_clmm_unwritten && ps.iter().any(|&p| self.reg.pools[p].clmm_config() == Some(&key));
+            let (rs, late) = self.tracker.on_update(key, if config { None } else { txn }, slot, wv, aseq, t, t_engine, stream);
             if let Some(l) = late { self.on_late(l); }
             self.on_resolutions(rs);
         } else if stream {
@@ -3996,6 +4048,244 @@ mod tests {
         assert!(ct2["w_expected"].as_array().unwrap().contains(&json!(b58(&mint))), "{ct2}");
     }
 
+    /// FT-009 (WP-21): CLMM fixture pools (every account held as read at slot 10, the ones that do not exist held empty,
+    /// their tick arrays followed as at boot) and AMM v4 pools `amm` on the first fixture's token / WSOL, on an offline
+    /// engine that records (state triggers on)
+    fn clmm_rig(name: &str, fx: &[&crate::quote::clmm_tests::Fx], amm: &[u8]) -> Rig {
+        use crate::quote::clmm_tests::meta as clmm_meta;
+        let mut reg = Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+        let mut store = Store::default();
+        let mut mint0 = None;
+        for f in fx {
+            let m = clmm_meta(f);
+            for (k, (_, d)) in &f.accts { store.update(*k, Arc::from(d.as_slice()), 10, 1, None); }
+            for k in &f.absent { store.update(*k, Arc::from(&[][..]), 10, 1, None); }
+            let mint = if m.t0 == *WSOL { m.t1 } else { m.t0 };
+            mint0.get_or_insert(mint);
+            reg.by_pool.insert(m.pool, reg.pools.len());
+            reg.pairs.entry(pair_key(&mint, &WSOL)).or_insert_with(Vec::new).push(reg.pools.len());
+            reg.pools.push(m);
+        }
+        for &n in amm {
+            let mut a = meta_k(n);
+            a.t0 = mint0.unwrap_or(MINT);
+            store.update(a.pool, ammv4_pool(), 10, 1, None);
+            store.update(a.vault0, vault(1_000_000_000_000_000), 10, 1, None);
+            store.update(a.vault1, vault(1_000 * SOL), 10, 1, None);
+            reg.by_pool.insert(a.pool, reg.pools.len());
+            reg.pairs.entry(pair_key(&a.t0, &WSOL)).or_insert_with(Vec::new).push(reg.pools.len());
+            reg.pools.push(a);
+        }
+        initial_dlmm_arrays(&reg, &mut store);
+        let dir = std::env::temp_dir().join(format!("arbx-engine-{name}-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rec = rec::start(rec::Opts { dir: dir.clone(), run: "test".into(), producer: "test".into(), cfg: Default::default(), feeds: vec!["shred".into()],
+            monitor: false, echo: Some(Box::new(std::io::sink())) }).unwrap();
+        let mut e = Engine::new_offline(Arc::new(reg), store, StrategyCfg { state_triggers: true, ..StrategyCfg::default() });
+        e.set_rec(rec.clone());
+        e.min_tip = 1_000;
+        Rig { e, dir, rec }
+    }
+
+    /// a transaction from a shred feed (unexecuted) with one top-level instruction of `program` (`data`) naming `writable`,
+    /// every one writable (its fee payer is no `meta_k` pool's key)
+    fn ix_tx(s: [u8; 64], writable: &[Pk], program: Pk, data: Vec<u8>, slot: u64, t: u64) -> Arrival {
+        let mut keys = vec![[0xf5; 32]];
+        keys.extend(writable.iter().copied());
+        let accounts = (1..keys.len() as u8).collect();
+        keys.push(program);
+        let ixs = vec![crate::tx::Ix { program: (keys.len() - 1) as u8, accounts, data }];
+        let tx = Tx { sig: s, num_signers: 1, num_ro_signed: 0, num_ro_unsigned: 1, keys, ixs, ..Default::default() };
+        Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: Default::default() }
+    }
+
+    /// the commits.jsonl group of transaction `s` (not a late line), if it resolved
+    fn group_of(r: &Rig, s: [u8; 64]) -> Option<Value> { commits(r).into_iter().find(|x| x["txn"] == json!(sigs58(&s)) && x.get("late").is_none()) }
+    fn w_expected(g: &Value) -> Vec<Pk> { g["w_expected"].as_array().unwrap().iter().map(|x| crate::tx::pk(x.as_str().unwrap())).collect() }
+
+    /// the Whirlpool fixture whose Oracle `oracle` (exists or not) and whose swap sequence (a→b) has an array that does not
+    /// exist (`absent_array`), with that sequence's 3 tick array keys
+    fn whirl_fixture(oracle: bool, absent_array: bool) -> (&'static crate::quote::clmm_tests::Fx, PoolMeta, Vec<Pk>) {
+        use crate::quote::clmm_tests::{fixtures, meta as clmm_meta};
+        let mut fx: Vec<_> = fixtures().values().filter(|f| f.venue == Venue::Whirlpool).collect();
+        fx.sort_by_key(|f| f.pool);
+        fx.into_iter().find_map(|f| {
+            let m = clmm_meta(f);
+            let starts = crate::venues::clmm::whirl_leg_starts(&f.accts[&f.pool].1, true)?;
+            let mut seq: Vec<Pk> = starts.iter().map(|s| crate::venues::clmm::tick_array_pda(&m, *s).unwrap()).collect();
+            seq.dedup();
+            let has_oracle = f.accts.get(m.whirl_oracle()?).is_some_and(|a| !a.1.is_empty());
+            let any_absent = seq.iter().any(|k| f.absent.contains(k));
+            (has_oracle == oracle && any_absent == absent_array && seq.iter().any(|k| f.accts.contains_key(k))).then_some((f, m, seq))
+        }).unwrap_or_else(|| panic!("a Whirlpool fixture with oracle {oracle}, an absent array in its sequence {absent_array}"))
+    }
+
+    /// FT-009 (WP-21): W(T) leaves out the CLMM parts no swap writes. A Whirlpool swap names its pool, both vaults, the 3
+    /// tick arrays of its sequence and the Oracle PDA writable; the stream sends what the transaction gave the program
+    /// owning it, changed or not (the pool, the vaults, every tick array that exists, an initialized Oracle) and never an
+    /// account that does not exist. Its group completes at the last of those: not after `commit_timeout_ms` (in FT-009 the
+    /// Oracle PDA was missed 38,588 times, Whirlpool tick arrays 11,675). What exists stays in W(T): until the last tick
+    /// array that exists has come, the group is pending and the pool is not priced (a crossed array is never read stale),
+    /// and an initialized Oracle is waited for too. A run journaled before the fix (no `wt_skip_clmm_unwritten` in its
+    /// knobs) waits for the accounts that do not exist: `timeout_unknown`
+    #[test]
+    fn clmm_parts_no_swap_writes_are_not_waited_for() {
+        let swap = crate::venues::clmm::SWAP_V2.to_vec();
+        // a pool without the adaptive fee: its Oracle PDA does not exist
+        let (f, m, seq) = whirl_fixture(false, false);
+        let oracle = *m.whirl_oracle().unwrap();
+        let mut r = clmm_rig("wt-clmm", &[f], &[1]);
+        assert!(r.e.store.get(&oracle).is_some_and(|a| a.data.is_empty()) && r.e.part_pools.contains_key(&oracle), "the Oracle PDA: a part held absent");
+        assert!(seq.iter().all(|k| r.e.part_pools.contains_key(k) && r.e.store.get(k).is_some_and(|a| !a.data.is_empty())), "the sequence: followed, existing");
+        let t = T0 + 10 * MS;
+        let mut named = vec![m.pool, m.vault0, m.vault1];
+        named.extend(seq.iter().copied());
+        named.push(oracle);
+        tx_ev(&mut r.e, ix_tx(sig(7), &named, *crate::venues::WHIRLPOOL, swap.clone(), 12, t));
+        assert!(r.e.tracker.pending_groups() == 0 && !r.e.tracker.is_pending(&oracle), "registered, no update yet");
+        // the stream: the pool, the vaults, then the arrays (unchanged: none crossed)
+        let mut wv = 10;
+        let mut send = |r: &mut Rig, k: &Pk, s: [u8; 64], dt: u64| {
+            wv += 1;
+            let d = r.e.store.get(k).unwrap().data.clone();
+            acct(&mut r.e, *k, d, 12, t + 300_000 + dt, Some(s), wv);
+        };
+        for (n, k) in [m.pool, m.vault0, m.vault1].iter().enumerate() { send(&mut r, k, sig(7), n as u64 * 4_000); }
+        assert!(r.e.tracker.is_pending(&seq[0]) && !r.e.tracker.is_pending(&oracle), "waiting for the tick arrays, not for the Oracle PDA");
+        assert!(r.e.tracker.is_pending(&m.pool) && r.e.counter("evaluation") == 0, "the pool is not priced meanwhile");
+        assert!(group_of(&r, sig(7)).is_none(), "an existing tick array is still waited for");
+        for (n, k) in seq.iter().enumerate() { send(&mut r, k, sig(7), 12_000 + n as u64 * 4_000); }
+        let g = group_of(&r, sig(7)).expect("resolved at its last update, without a timer");
+        assert_eq!((g["outcome"].as_str(), g["resolved_by"].as_str()), (Some("complete"), Some("member")), "{g}");
+        let w = w_expected(&g);
+        assert!(!w.contains(&oracle) && seq.iter().all(|k| w.contains(k)) && w.contains(&m.pool) && w.contains(&m.vault1), "{g}");
+        assert_eq!(r.e.counter("commit_timeout_unknown"), 0);
+        // an initialized Oracle and the arrays of the sequence that exist stay in W(T); one that does not exist leaves it
+        let (f2, m2, seq2) = whirl_fixture(true, true);
+        let oracle2 = *m2.whirl_oracle().unwrap();
+        let mut r2 = clmm_rig("wt-clmm-oracle", &[f2], &[1]);
+        let (gone, there): (Vec<Pk>, Vec<Pk>) = seq2.iter().partition(|k| r2.e.store.get(k).is_some_and(|a| a.data.is_empty()));
+        assert!(!gone.is_empty() && !there.is_empty());
+        let mut named2 = vec![m2.pool, m2.vault0, m2.vault1];
+        named2.extend(seq2.iter().copied());
+        named2.push(oracle2);
+        tx_ev(&mut r2.e, ix_tx(sig(8), &named2, *crate::venues::WHIRLPOOL, swap.clone(), 12, t));
+        let mut wv = 10;
+        let mut send2 = |r: &mut Rig, k: &Pk, dt: u64| {
+            wv += 1;
+            let d = r.e.store.get(k).unwrap().data.clone();
+            acct(&mut r.e, *k, d, 12, t + 300_000 + dt, Some(sig(8)), wv);
+        };
+        for (n, k) in [m2.pool, m2.vault0, m2.vault1].iter().chain(there.iter()).enumerate() { send2(&mut r2, k, n as u64 * 4_000); }
+        assert!(group_of(&r2, sig(8)).is_none() && r2.e.tracker.is_pending(&oracle2), "an initialized Oracle is waited for");
+        send2(&mut r2, &oracle2, 40_000);
+        let g2 = group_of(&r2, sig(8)).expect("complete at the Oracle's update");
+        assert_eq!(g2["outcome"].as_str(), Some("complete"), "{g2}");
+        let w2 = w_expected(&g2);
+        assert!(w2.contains(&oracle2) && there.iter().all(|k| w2.contains(k)) && gone.iter().all(|k| !w2.contains(k)), "{g2}");
+        // a run journaled before the fix replays as it ran: the Oracle PDA that does not exist is waited for
+        let mut old = serde_json::to_value(EngineKnobs::default()).unwrap();
+        assert_eq!(old.as_object_mut().unwrap().remove("wt_skip_clmm_unwritten"), Some(json!(true)), "on by default");
+        let k: EngineKnobs = serde_json::from_value(old).unwrap();
+        assert!(!k.wt_skip_clmm_unwritten && k.wt_skip_pump_mints);
+        let mut r3 = clmm_rig("wt-clmm-old", &[f], &[1]);
+        r3.e.set_knobs(k);
+        tx_ev(&mut r3.e, ix_tx(sig(9), &named, *crate::venues::WHIRLPOOL, swap, 12, t));
+        let mut wv = 10;
+        for (n, k) in [m.pool, m.vault0, m.vault1].iter().chain(seq.iter()).enumerate() {
+            wv += 1;
+            let d = r3.e.store.get(k).unwrap().data.clone();
+            acct(&mut r3.e, *k, d, 12, t + 300_000 + n as u64 * 4_000, Some(sig(9)), wv);
+        }
+        assert!(group_of(&r3, sig(9)).is_none() && r3.e.tracker.is_pending(&oracle), "the W(T) of a run journaled before the fix names the Oracle PDA");
+        r3.e.timers(t + 300_000 + 5 * MS, &mut nop());
+        let g3 = group_of(&r3, sig(9)).expect("resolved by the timer");
+        assert_eq!((g3["outcome"].as_str(), g3["resolved_by"].as_str()), (Some("timeout_unknown"), Some("timer")), "{g3}");
+        assert!(w_expected(&g3).contains(&oracle));
+    }
+
+    /// FT-009 (WP-21): a tick array that does not exist is left out of W(T) only where no instruction may create it: an LP
+    /// instruction of the pool's program (here Orca's `initialize_tick_array`, top-level) names it, so its transaction waits
+    /// for it, and its creation completes the group; the same array named by a swap is left out
+    #[test]
+    fn an_lp_instruction_waits_for_the_tick_array_it_creates() {
+        use sha2::Digest;
+        let (f, m, seq) = whirl_fixture(true, true);
+        let mut r = clmm_rig("wt-clmm-lp", &[f], &[1]);
+        let gone = *seq.iter().find(|k| r.e.store.get(k).is_some_and(|a| a.data.is_empty())).unwrap();
+        let init = sha2::Sha256::digest(b"global:initialize_tick_array")[..8].to_vec();
+        let t = T0 + 10 * MS;
+        tx_ev(&mut r.e, ix_tx(sig(7), &[m.pool, gone], *crate::venues::WHIRLPOOL, init, 12, t));
+        // the transaction's first update: the pool account (unchanged), then the array created
+        let d = r.e.store.get(&m.pool).unwrap().data.clone();
+        acct(&mut r.e, m.pool, d, 12, t + 300_000, Some(sig(7)), 11);
+        assert!(group_of(&r, sig(7)).is_none() && r.e.tracker.is_pending(&gone), "waiting for the array it creates");
+        acct(&mut r.e, gone, Arc::from(vec![1u8; 9_988].as_slice()), 12, t + 304_000, Some(sig(7)), 12);
+        let g = group_of(&r, sig(7)).expect("complete at the creation");
+        assert_eq!(g["outcome"].as_str(), Some("complete"), "{g}");
+        assert!(w_expected(&g).contains(&gone));
+        // a swap naming an array that does not exist never waits for it
+        let mut r2 = clmm_rig("wt-clmm-lp-swap", &[f], &[1]);
+        tx_ev(&mut r2.e, ix_tx(sig(8), &[m.pool, gone], *crate::venues::WHIRLPOOL, crate::venues::clmm::SWAP.to_vec(), 12, t));
+        let d = r2.e.store.get(&m.pool).unwrap().data.clone();
+        acct(&mut r2.e, m.pool, d, 12, t + 300_000, Some(sig(8)), 11);
+        let g2 = group_of(&r2, sig(8)).expect("complete at the pool's update");
+        assert_eq!((g2["outcome"].as_str(), w_expected(&g2)), (Some("complete"), vec![m.pool]), "{g2}");
+    }
+
+    /// FT-009 (WP-21): Raydium's AmmConfig is never in W(T) and joins no group. Routers mark it writable and never give it
+    /// writable to the Raydium program (it is never sent): a transaction naming it with an AMM v4 pool's vaults completes
+    /// at its last vault, not after `commit_timeout_ms` (in FT-009 it alone held 1,210 older-venue groups for 5 ms). A swap
+    /// that gives it writable to the program has it sent, unchanged, after its other writes: that update is neither a late
+    /// member (no torn_suspect) nor a group of its own, so no pool sharing the config waits on it. A run journaled before
+    /// the fix waits for it and takes its update as a member
+    #[test]
+    fn the_raydium_amm_config_is_not_waited_for() {
+        use crate::quote::clmm_tests::{fixtures, meta as clmm_meta};
+        let mut fx: Vec<_> = fixtures().values().filter(|f| f.venue == Venue::RayClmm).collect();
+        fx.sort_by_key(|f| f.pool);
+        let f = fx[0];
+        let m = clmm_meta(f);
+        let config = *m.clmm_config().unwrap();
+        let router: Pk = [0x42; 32];
+        let a = { let mut a = meta_k(1); a.t0 = if m.t0 == *WSOL { m.t1 } else { m.t0 }; a };
+        for old in [false, true] {
+            let mut r = clmm_rig(if old { "wt-config-old" } else { "wt-config" }, &[f], &[1]);
+            if old { r.e.set_knobs(EngineKnobs { wt_skip_clmm_unwritten: false, ..EngineKnobs::default() }); }
+            assert!(r.e.part_pools.contains_key(&config));
+            let t = T0 + 10 * MS;
+            // a router's transaction through an AMM v4 pool and (as far as we see) the config
+            tx_ev(&mut r.e, ix_tx(sig(7), &[a.vault0, a.vault1, config], router, vec![9; 8], 12, t));
+            acct(&mut r.e, a.vault1, vault(1_030 * SOL), 12, t + 300_000, Some(sig(7)), 11);
+            acct(&mut r.e, a.vault0, vault(970_000_000_000_000), 12, t + 304_000, Some(sig(7)), 12);
+            let g = group_of(&r, sig(7));
+            if old {
+                assert!(g.is_none() && r.e.tracker.is_pending(&config), "before the fix: waiting for the config");
+                r.e.timers(t + 300_000 + 5 * MS, &mut nop());
+                assert_eq!(group_of(&r, sig(7)).unwrap()["outcome"].as_str(), Some("timeout_unknown"));
+            } else {
+                let g = g.expect("complete at the last vault");
+                assert_eq!((g["outcome"].as_str(), w_expected(&g)), (Some("complete"), vec![a.vault0, a.vault1]), "{g}");
+            }
+            // a direct swap giving the config writable: the stream sends it, unchanged, after the pool and vaults
+            let t2 = t + 20 * MS;
+            tx_ev(&mut r.e, ix_tx(sig(8), &[m.pool, m.vault0, m.vault1, config], *crate::venues::RAYCLMM, crate::venues::clmm::SWAP_V2.to_vec(), 13, t2));
+            for (n, k) in [m.pool, m.vault0, m.vault1, config].iter().enumerate() {
+                let d = r.e.store.get(k).unwrap().data.clone();
+                acct(&mut r.e, *k, d, 13, t2 + 300_000 + n as u64 * 4_000, Some(sig(8)), 20 + n as u64);
+                if n == 2 && !old { assert!(group_of(&r, sig(8)).is_some(), "complete at its last vault"); }
+            }
+            let g = group_of(&r, sig(8)).expect("resolved");
+            assert_eq!(g["outcome"].as_str(), Some("complete"), "{g}");
+            assert_eq!(w_expected(&g).contains(&config), old, "{g}");
+            assert_eq!((r.e.counter("commit_late_member"), r.e.counter("torn_suspect"), r.e.tracker.is_pending(&config)), (0, 0, false), "old {old}");
+            // an update of the config stamped by a transaction we never saw opens no group either (after the fix)
+            let d = r.e.store.get(&config).unwrap().data.clone();
+            acct(&mut r.e, config, d, 14, t2 + 2 * MS, Some(sig(9)), 40);
+            assert_eq!(r.e.tracker.is_pending(&config), old, "old {old}: a group of unknown W holds the config");
+        }
+    }
+
     /// S1b (F2): the same split transaction not seen in shreds (W(T) unknown): resolved by quiescence, and no route is
     /// evaluated until both pools are quiet; S1b': a member arriving after the resolution is a late member, and the
     /// decisions priced on its pools since are marked torn_suspect
@@ -5181,6 +5471,203 @@ mod tests {
         assert!(e.counter("route_priced") > TXS, "routes with CLMM legs are priced: {}", e.counter("route_priced"));
         let _ = std::fs::remove_dir_all(&dir);
         (p99, p999)
+    }
+
+    /// FT-009 (WP-21): the engine benchmark's CLMM commit-group shape. The CLMM shape's pools (the 20 CLMM fixtures, each
+    /// with 3 AMM v4 pools of its token at its price), or only the 60 AMM v4 pools (without CLMM). One transaction every
+    /// 2 ms, round the pools, seen on a shred feed (its W(T)) 300 µs before the stream sends its updates, 4 µs apart, in key
+    /// order (a compiled message's): an AMM v4 swap names both vaults and the stream sends both; a Whirlpool swap names
+    /// its pool, vaults, the 3 tick arrays of its sequence and the Oracle PDA, and the stream sends the pool, the vaults,
+    /// the arrays that exist and an initialized Oracle; a Raydium swap names its pool, vaults and the 1 to 3 initialized
+    /// arrays ahead of its price, every second one the bitmap extension, every third one the AmmConfig as routers do
+    /// (never sent), and every sixth (one more) as a direct swap does: then the stream sends it too, unchanged, after the
+    /// rest. The timers run when due (an idle engine). Per group, on the receive clock: the commit wait (t_commit −
+    /// t_first_update, commits.jsonl); per transaction, the engine's busy time. Without CLMM pools, with them as FT-009 ran
+    /// (`wt_skip_clmm_unwritten` off) and with the fix
+    #[test]
+    fn engine_benchmark_clmm_commit_groups() {
+        let base = clmm_commit_shape(false, true);
+        let off = clmm_commit_shape(true, false);
+        let on = clmm_commit_shape(true, true);
+        for (name, s) in [("without CLMM", &base), ("with CLMM, as FT-009 ran (knob off)", &off), ("with CLMM, the fix (knob on)", &on)] {
+            eprintln!("CLMM commit-group shape, {name}: {} groups, timeout_unknown {:.1}%; commit wait p50/p90/p99 {:?} µs (CLMM groups {:?} µs, \
+                timeout_unknown {:.1}% of {}); update→decided (wait + busy) {:?} µs; busy per transaction {:?} µs; late members {}, torn_suspect {}; \
+                evaluations {}, routes priced {}, refused pending_commit {}",
+                s.groups, s.timeout_pct, s.wait, s.wait_clmm, s.timeout_clmm_pct, s.groups_clmm, s.decided, s.busy, s.late, s.torn, s.evaluations, s.priced, s.pending);
+        }
+        assert_eq!((base.groups_clmm, base.timeout_pct, base.late, base.torn), (0, 0.0, 0, 0));
+        assert!(base.wait[2] < 100, "{:?}", base.wait);
+        // as FT-009 ran: the Whirlpools without an Oracle (7 of the 10 fixtures) and every third Raydium swap time out
+        assert!(off.timeout_clmm_pct > 30.0 && off.wait_clmm[1] >= 5_000, "{:?} {}", off.wait_clmm, off.timeout_clmm_pct);
+        // the fix: every group complete at its last update, as without CLMM; nothing late, nothing torn
+        assert_eq!((on.timeout_pct, on.late, on.torn), (0.0, 0, 0), "{:?}", on.wait);
+        assert!(on.wait_clmm[2] < 100 && on.wait[2] < 100, "{:?} {:?}", on.wait, on.wait_clmm);
+        assert!(on.groups_clmm > 0 && on.groups == off.groups, "{} {}", on.groups, off.groups);
+    }
+
+    /// what one run of the commit-group shape measured: groups, timeout share, commit wait p50/p90/p99 (µs, all groups and
+    /// CLMM ones), update→decided (wait + the transaction's busy time) and busy p50/p90/p99 (µs), late members, torn_suspect
+    struct CommitShape { groups: usize, groups_clmm: usize, timeout_pct: f64, timeout_clmm_pct: f64, wait: [u64; 3], wait_clmm: [u64; 3], decided: [u64; 3],
+        busy: [u64; 3], late: u64, torn: u64, evaluations: u64, priced: u64, pending: u64 }
+
+    /// one run of `engine_benchmark_clmm_commit_groups`: CLMM pools or not, the knob
+    fn clmm_commit_shape(with_clmm: bool, fix: bool) -> CommitShape {
+        use crate::quote::clmm_tests::{fixtures, meta as clmm_meta};
+        const TXS: u64 = 12_000;
+        let dir = std::env::temp_dir().join(format!("arbx-engine-commit-shape-{}-{}", std::process::id(), now_ns()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rec = rec::start(rec::Opts { dir: dir.clone(), run: "bench".into(), producer: "test".into(), cfg: Default::default(), feeds: vec![], monitor: false, echo: None }).unwrap();
+        let mut reg = Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+        let mut store = Store::default();
+        let mut fx: Vec<_> = fixtures().values().collect();
+        fx.sort_by_key(|f| f.pool);
+        let mut unix = 0i64;
+        let mut n = 0u8;
+        for f in &fx {
+            let m = clmm_meta(f);
+            unix = unix.max(f.unix);
+            let mint = if m.t0 == *WSOL { m.t1 } else { m.t0 };
+            let d = &f.accts[&f.pool].1;
+            let sp = if m.venue == Venue::RayClmm { crate::venues::u128_at(d, 253) } else { crate::venues::u128_at(d, 65) }.unwrap_or(1 << 64) as f64 / 18_446_744_073_709_551_616.0;
+            let mint_per_wsol = if m.t0 == *WSOL { sp * sp } else { 1.0 / (sp * sp) };
+            if with_clmm {
+                for (k, (_, d)) in &f.accts { store.update(*k, Arc::from(d.as_slice()), 10, 1, None); }
+                for k in &f.absent { store.update(*k, Arc::from(&[][..]), 10, 1, None); }
+                let i = reg.pools.len();
+                reg.by_pool.insert(m.pool, i);
+                reg.pairs.entry(pair_key(&mint, &WSOL)).or_insert_with(Vec::new).push(i);
+                reg.pools.push(m);
+            }
+            for _ in 0..3 {
+                n += 1;
+                let mut a = meta_k(n);
+                a.t0 = mint;
+                let i = reg.pools.len();
+                reg.by_pool.insert(a.pool, i);
+                reg.pairs.entry(pair_key(&mint, &WSOL)).or_insert_with(Vec::new).push(i);
+                store.update(a.pool, ammv4_pool(), 10, 1, None);
+                store.update(a.vault0, vault((1_000.0 * SOL as f64 * mint_per_wsol).clamp(1e6, 1e18) as u64), 10, 1, None);
+                store.update(a.vault1, vault((1_000 + (n % 4) as u64 * 3) * SOL), 10, 1, None);
+                reg.pools.push(a);
+            }
+        }
+        store.update(*CLOCK_SYSVAR, clock_data(11, unix), 11, 1, None);
+        initial_dlmm_arrays(&reg, &mut store);
+        let clmm: std::collections::HashSet<String> = reg.pools.iter().filter(|m| m.venue.is_clmm()).map(|m| b58(&m.pool)).collect();
+        let n_pools = reg.pools.len() as u64;
+        // every route is priced as in the CLMM shape; none is an opportunity (at these made-up prices about 200 a second,
+        // far above any run's: their bookkeeping until housekeeping, every 10 s under load, is not what this measures)
+        let cfg = StrategyCfg { state_triggers: true, sizes_sol: vec![0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.2],
+            budget_caps_sol: vec![0.165, 2.1, 4.2, 8.4, 21.0, 42.0, 84.0], min_profit_lamports: u64::MAX >> 2, ..StrategyCfg::default() };
+        let mut e = Engine::new_offline(Arc::new(reg), store, cfg);
+        e.set_knobs(EngineKnobs { wt_skip_clmm_unwritten: fix, ..EngineKnobs::default() });
+        e.set_rec(rec.clone());
+        e.min_tip = 1_000;
+        e.tier_a_complete = true;
+        let t0 = T0 + 100 * MS;
+        slot_ev(&mut e, 11, 0, Some(10), T0);
+        // the engine driven as `run` drives it: after each input the timers `after_input_timers` asks for (the queue is
+        // empty between inputs here); while no input comes, all the timers once the wait (`next_due`, 0.2 to 5 ms) runs out
+        let input = |e: &mut Engine, ev: Event, t: u64| {
+            e.step(ev, t, &mut nop());
+            let what = after_input_timers(true, t.saturating_sub(e.last_status_t), e.next_due().is_some_and(|d| d <= t));
+            if what != 0 { e.timers_at(t, what, &mut nop()); }
+        };
+        let wait_until = |e: &mut Engine, from: u64, until: u64| {
+            let mut now = from;
+            loop {
+                let wait = e.next_due().map_or(5_000_000, |d| d.saturating_sub(now).clamp(200_000, 5_000_000));
+                if now + wait > until { break; }
+                now += wait;
+                e.timers_at(now, TIMER_ALL, &mut nop());
+            }
+        };
+        let mut busy: HashMap<String, u64> = HashMap::default();
+        let mut busy_all = Vec::with_capacity(TXS as usize);
+        let mut wv = 100u64;
+        let mut now = T0 + 10_000;
+        for k in 0..TXS {
+            let t = t0 + k * 2 * MS;
+            let m = e.reg.pools[(k % n_pools) as usize].clone();
+            let mut s = [0u8; 64];
+            s[..8].copy_from_slice(&(k + 1).to_le_bytes());
+            let zfo = k % 2 == 0;
+            let pool_data = e.store.get(&m.pool).map(|a| a.data.clone());
+            // (named writable, sent by the stream, the AmmConfig sent after them)
+            let (named, mut sent, config_sent): (Vec<Pk>, Vec<(Pk, Arc<[u8]>)>, Option<Pk>) = match m.venue {
+                Venue::Whirlpool => {
+                    let pd = pool_data.unwrap();
+                    // (the arrays of the sequence: Orca's swaps take them whether they exist or not)
+                    let mut seq: Vec<Pk> = crate::venues::clmm::whirl_leg_starts(&pd, zfo).map(|st| st.iter().filter_map(|s| crate::venues::clmm::tick_array_pda(&m, *s))
+                        .filter(|x| e.store.get(x).is_some()).collect()).unwrap_or_default();
+                    seq.dedup();
+                    let mut named = vec![m.pool, m.vault0, m.vault1];
+                    named.extend(seq);
+                    named.extend(m.whirl_oracle().copied());
+                    let sent = named.iter().filter_map(|x| e.store.get(x).filter(|a| !a.data.is_empty()).map(|a| (*x, a.data.clone()))).collect();
+                    (named, sent, None)
+                }
+                Venue::RayClmm => {
+                    let pd = pool_data.unwrap();
+                    let ext = m.clmm_ext().and_then(|x| e.store.get(x)).filter(|a| !a.data.is_empty()).map(|a| a.data.clone());
+                    let arrays: Vec<Pk> = crate::venues::clmm::ray_initialized_arrays(&pd, ext.as_deref(), zfo, 1 + (k / n_pools % 3) as usize).iter()
+                        .filter_map(|st| crate::venues::clmm::tick_array_pda(&m, *st)).filter(|x| e.store.get(x).is_some_and(|a| !a.data.is_empty())).collect();
+                    let mut named = vec![m.pool, m.vault0, m.vault1];
+                    named.extend(arrays);
+                    if k / n_pools % 2 == 0 { named.extend(m.clmm_ext().copied()); }
+                    let direct = k / n_pools % 6 == 1;
+                    if direct || k / n_pools % 3 == 0 { named.extend(m.clmm_config().copied()); }
+                    let config = m.clmm_config().copied().filter(|_| direct);
+                    let sent = named.iter().filter(|x| Some(*x) != m.clmm_config())
+                        .filter_map(|x| e.store.get(x).filter(|a| !a.data.is_empty()).map(|a| (*x, a.data.clone()))).collect();
+                    (named, sent, config)
+                }
+                _ => {
+                    let sent = vec![(m.vault1, vault((1_000 + k % 7) * SOL)), (m.vault0, e.store.get(&m.vault0).unwrap().data.clone())];
+                    (vec![m.vault0, m.vault1], sent, None)
+                }
+            };
+            sent.sort_by_key(|x| x.0);
+            if let Some(c) = config_sent { sent.push((c, e.store.get(&c).unwrap().data.clone())); }
+            let prog = m.venue.program();
+            let data = if m.venue.is_clmm() { crate::venues::clmm::SWAP_V2.to_vec() } else { vec![0xee] };
+            let a = std::time::Instant::now();
+            let th = t - 300_000;
+            wait_until(&mut e, now, th);
+            input(&mut e, Event::Tx(ix_tx(s, &named, prog, data, 11, th)), th + 10_000);
+            for (j, (key, d)) in sent.into_iter().enumerate() {
+                wv += 1;
+                let tr = t + j as u64 * 4_000;
+                input(&mut e, Event::Account { slot: 11, pubkey: key, owner: if key == m.vault0 || key == m.vault1 { [0; 32] } else { prog }, lamports: 1, data: d, t: tr,
+                    txn: Some(s), write_version: wv, is_startup: false, src: 0, aseq: 0, bank_id: None }, tr + 10_000);
+                now = tr + 10_000;
+            }
+            let ns = a.elapsed().as_nanos() as u64;
+            busy.insert(sigs58(&s), ns);
+            busy_all.push(ns);
+        }
+        wait_until(&mut e, now, now + 20 * MS);
+        rec.sync();
+        let lines = rec::read_jsonl(&dir, "commits").unwrap_or_default();
+        rec.close();
+        let (late, torn) = (e.counter("commit_late_member"), e.counter("torn_suspect"));
+        let (evaluations, priced, pending) = (e.counter("evaluation"), e.counter("route_priced"), e.counter("reject_pending_commit"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let groups: Vec<&Value> = lines.iter().filter(|x| x.get("late").is_none()).collect();
+        let is_clmm = |g: &Value| g["pools"].as_array().is_some_and(|p| p.iter().any(|x| x.as_str().is_some_and(|s| clmm.contains(s))));
+        let wait = |g: &Value| (g["t_commit"].as_u64().unwrap() - g["t_first_update"].as_u64().unwrap()) / 1_000;
+        let pct = |mut v: Vec<u64>| -> [u64; 3] {
+            if v.is_empty() { return [0; 3]; }
+            v.sort_unstable();
+            [0.5, 0.9, 0.99].map(|q| v[((v.len() as f64 * q) as usize).min(v.len() - 1)])
+        };
+        let tu = |gs: &[&&Value]| 100.0 * gs.iter().filter(|g| g["outcome"] == "timeout_unknown").count() as f64 / gs.len().max(1) as f64;
+        let all: Vec<&&Value> = groups.iter().collect();
+        let cl: Vec<&&Value> = groups.iter().filter(|g| is_clmm(g)).collect();
+        CommitShape { groups: groups.len(), groups_clmm: cl.len(), timeout_pct: tu(&all), timeout_clmm_pct: tu(&cl), wait: pct(all.iter().map(|g| wait(g)).collect()),
+            wait_clmm: pct(cl.iter().map(|g| wait(g)).collect()),
+            decided: pct(all.iter().map(|g| wait(g) + busy.get(g["txn"].as_str().unwrap()).copied().unwrap_or(0) / 1_000).collect()),
+            busy: pct(busy_all.iter().map(|x| x / 1_000).collect()), late, torn, evaluations, priced, pending }
     }
 
     /// The merge of WP-03b and WP-08: the status line's `coverage` section carries WP-08's PoH gauge (F38):

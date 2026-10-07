@@ -26,6 +26,16 @@ pub const WHIRL_FOLLOW: std::ops::RangeInclusive<i32> = -2..=3;
 /// `sha256("global:swap")[..8]` (Anchor; the `swap` of both programs) and `sha256("global:swap_v2")[..8]`
 pub const SWAP: [u8; 8] = [0xf8, 0xc6, 0x9e, 0x91, 0xe1, 0x75, 0x87, 0xc8];
 pub const SWAP_V2: [u8; 8] = [0x2b, 0x04, 0xed, 0x0b, 0x1a, 0xc9, 0x1e, 0x62];
+/// Orca's `two_hop_swap` and `two_hop_swap_v2`, Raydium's `swap_router_base_in` (Anchor)
+pub const TWO_HOP_SWAP: [u8; 8] = [0xc3, 0x60, 0xed, 0x6c, 0x44, 0xa2, 0xdb, 0xe6];
+pub const TWO_HOP_SWAP_V2: [u8; 8] = [0xba, 0x8f, 0xd1, 0x1d, 0xfe, 0x02, 0xc2, 0x75];
+pub const SWAP_ROUTER_BASE_IN: [u8; 8] = [0x45, 0x7d, 0x73, 0xda, 0xf5, 0xba, 0xf2, 0xc4];
+/// every swap instruction of the two programs (ed1eb41 and the deployed Whirlpool): none creates an account
+pub const SWAPS: [[u8; 8]; 5] = [SWAP, SWAP_V2, TWO_HOP_SWAP, TWO_HOP_SWAP_V2, SWAP_ROUTER_BASE_IN];
+
+/// FT-009: whether a top-level instruction (`data`) of a CLMM program is one of its swaps, the instructions that never
+/// create an account (an LP instruction may create the tick arrays it names)
+pub fn is_swap(data: &[u8]) -> bool { data.get(..8).is_some_and(|d| SWAPS.iter().any(|s| s[..] == *d)) }
 
 // ------------------------------------------------------------------ PDAs
 
@@ -292,6 +302,11 @@ mod tests {
         use sha2::Digest;
         assert_eq!(SWAP, sha2::Sha256::digest(b"global:swap")[..8]);
         assert_eq!(SWAP_V2, sha2::Sha256::digest(b"global:swap_v2")[..8]);
+        assert_eq!(TWO_HOP_SWAP, sha2::Sha256::digest(b"global:two_hop_swap")[..8]);
+        assert_eq!(TWO_HOP_SWAP_V2, sha2::Sha256::digest(b"global:two_hop_swap_v2")[..8]);
+        assert_eq!(SWAP_ROUTER_BASE_IN, sha2::Sha256::digest(b"global:swap_router_base_in")[..8]);
+        assert!(is_swap(&SWAP_V2) && is_swap(&[TWO_HOP_SWAP.as_slice(), &[1, 2]].concat()) && !is_swap(&SWAP[..7]));
+        assert!(!is_swap(&sha2::Sha256::digest(b"global:open_position_v2")[..8]) && !is_swap(&sha2::Sha256::digest(b"global:initialize_tick_array")[..8]));
     }
 
     fn ray_pool(ts: u16, tick: i32, bits: &[usize]) -> Vec<u8> {
