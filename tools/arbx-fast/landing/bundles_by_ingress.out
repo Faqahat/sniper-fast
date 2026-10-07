@@ -1,0 +1,18 @@
+('BAM node', 'far', 'later')                       n= 32 p10= 131.2 p50= 219.9 <50ms= 0.0%
+('BAM node', 'far', 'same-slot')                   n= 17 p10=  23.6 p50=  64.0 <50ms=23.5%
+('BAM node', 'near', 'later')                      n= 21 p10=  84.3 p50= 229.5 <50ms= 9.5%
+('BAM node', 'near', 'same-slot')                  n= 12 p10=  26.8 p50=  59.4 <50ms=41.7%
+('Harmonic front', 'far', 'later')                 n=  8 p10=  62.3 p50= 143.8 <50ms= 0.0%
+('Harmonic front', 'far', 'same-slot')             n= 24 p10=  40.4 p50=  55.7 <50ms=37.5%
+('Harmonic front', 'near', 'later')                n= 16 p10=  56.8 p50= 108.6 <50ms= 6.2%
+('Harmonic front', 'near', 'same-slot')            n= 23 p10=  43.1 p50=  61.8 <50ms=34.8%
+('other shared front', 'near', 'later')            n=  4 p10=  33.3 p50=  75.7 <50ms=25.0%
+('other shared front', 'near', 'same-slot')        n= 11 p10=  32.1 p50=  41.9 <50ms=72.7%
+('own TPU', 'far', 'later')                        n= 15 p10= 125.4 p50= 279.3 <50ms= 0.0%
+('own TPU', 'far', 'same-slot')                    n=  8 p10=  39.1 p50=  80.6 <50ms=37.5%
+('own TPU', 'near', 'later')                       n= 31 p10=  51.2 p50=  98.2 <50ms= 9.7%
+('own TPU', 'near', 'same-slot')                   n= 34 p10=  22.7 p50=  50.7 <50ms=50.0%
+('unknown', 'far', 'later')                        n=  9 p10= 192.3 p50= 233.3 <50ms= 0.0%
+('unknown', 'far', 'same-slot')                    n=  2 p10=  80.6 p50=  84.5 <50ms= 0.0%
+('unknown', 'near', 'later')                       n=  8 p10=  43.2 p50= 227.6 <50ms=12.5%
+('unknown', 'near', 'same-slot')                   n=  9 p10=  22.3 p50=  38.3 <50ms=66.7%

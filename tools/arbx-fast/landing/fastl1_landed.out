@@ -1,0 +1,78 @@
+mismatches outcome.landed.leader vs slot leader: [(90, 454318435), (25, 454315840), (5, 454314956), (76, 454317908)]
+attempt path      send->seen  kind  region           client          rtt   slot-cur slot+  into  poh   feed  tip
+  79 astralane      19.1  jito  DE-Frankfurt     JitoLabs         1.1   0   0(trig)   30    None dz-leader        win=2->2 sameldr=1 HcZvwZ83
+  19 astralane      25.6  jito  NL-Amsterdam     JitoLabs         6.9   0   0(trig)  142    None dz-retransmit-eu win=0->0 sameldr=1 rsbp8zMH
+  45 bolt           49.0  jito  DE-Frankfurt     HarmonicAgave    0.8   0   0(trig)   72    None dz-leader        win=2->2 sameldr=1 JUPiTERr
+  18 astralane      52.6  jito  DE-Frankfurt     HarmonicAgave    1.1   1   1(trig)  228  49.032 dz-retransmit-eu win=1->2 sameldr=1 GZ4U21pY
+  31 helius         54.7  bam   NL-Amsterdam     AgaveBam         6.5   0   0(trig)  108    None dz-leader        win=1->1 sameldr=1 AWcCdYG7
+ 104 bolt           58.7  jito  NL-Emmen         HarmonicAgave   12.3   1   1(trig)  212   37.98 dz-retransmit-eu win=1->2 sameldr=1 FwnWx7x9
+  90 helius         79.9  jito  DE-Frankfurt     JitoLabs         1.3   0   0(trig)  113    None dz-retransmit-eu win=3->3 sameldr=1 6XJ4aKjs
+  99 bolt          101.5  bam   GB-London        AgaveBam        11.8   0   0(trig)   61    None dz-leader        win=2->2 sameldr=1 61QB1Evn
+  89 bolt          114.0  bam   DE-Frankfurt     AgaveBam         0.7   1   8(trig)  254    None dz-leader        win=3->0 sameldr=0 D4r6Rcua
+  98 bolt          117.7  bam   GB-London        AgaveBam        11.8   0   0(trig)   55    None dz-leader        win=0->0 sameldr=1 61QB1Evn
+  80 astralane     133.6  bam   GB-London        AgaveBam        11.9   0   0(trig)   46    None dz-leader        win=0->0 sameldr=1 6qwYjs5v
+  23 bolt          175.6  bam   NL-Amsterdam     AgaveBam         6.4   1   1(trig)  134    None dz-retransmit-eu win=0->1 sameldr=1 Aw5wEMXh
+  10 astralane     186.1  jito  DE-Frankfurt     JitoLabs         0.8   0   0(trig)   29    None dz-leader        win=0->0 sameldr=1 4W3jdXyq
+   9 helius        201.9  bam   JP-Tokyo         AgaveBam       213.5   1   1(trig)   62  88.621 dz-retransmit-eu win=1->2 sameldr=1 DUND26mE
+  43 bolt          227.8  bam   NL-Amsterdam     AgaveBam         6.6   1   1(trig)   50    None dz-retransmit-eu win=1->2 sameldr=1 8GLRbAst
+  35 bolt          301.6  bam   US-Ashburn       AgaveBam        81.1   1   1(trig)  176 361.453 dz-retransmit-eu win=2->3 sameldr=1 DRpbCBMx
+  29 astralane     319.6  bam   SG-Singapore     AgaveBam       149.3   1   1(trig)   23    None dz-leader        win=1->2 sameldr=1 5zuNci3T
+  25 astralane     371.0  bam   US-Delta_Mills   AgaveBam        19.3   1   1(trig)    2    None dz-leader        win=3->0 sameldr=0 krakeNd6
+   5 helius        452.2  jito  NL-Amsterdam     JitoLabs         7.6   2   2(trig)   89  37.171 dz-leader        win=2->0 sameldr=0 ALp2GdA1
+  76 astralane    1065.3  jito  DE-Frankfurt     JitoLabs         3.5   4   4(trig)  169    None dz-leader        win=0->0 sameldr=0 C8Bey3LK
+
+all:
+  all                          n=20 median=  125.7 min=   19.1 max= 1065.3 <50ms=3
+
+by landed path:
+  bolt                         n= 8 median=  115.9 min=   49.0 max=  301.6 <50ms=1
+  helius                       n= 4 median=  140.9 min=   54.7 max=  452.2 <50ms=0
+  astralane                    n= 8 median=  159.9 min=   19.1 max= 1065.3 <50ms=2
+
+by leader kind:
+  jito                         n= 9 median=   58.7 min=   19.1 max= 1065.3 <50ms=3
+  bam                          n=11 median=  175.6 min=   54.7 max=  371.0 <50ms=0
+
+by leader region:
+  NL-Emmen                     n= 1 median=   58.7 min=   58.7 max=   58.7 <50ms=0
+  DE-Frankfurt                 n= 7 median=   79.9 min=   19.1 max= 1065.3 <50ms=2
+  GB-London                    n= 3 median=  117.7 min=  101.5 max=  133.6 <50ms=0
+  NL-Amsterdam                 n= 5 median=  175.6 min=   25.6 max=  452.2 <50ms=1
+  JP-Tokyo                     n= 1 median=  201.9 min=  201.9 max=  201.9 <50ms=0
+  US-Ashburn                   n= 1 median=  301.6 min=  301.6 max=  301.6 <50ms=0
+  SG-Singapore                 n= 1 median=  319.6 min=  319.6 max=  319.6 <50ms=0
+  US-Delta_Mills               n= 1 median=  371.0 min=  371.0 max=  371.0 <50ms=0
+
+by client:
+  HarmonicAgave                n= 3 median=   52.6 min=   49.0 max=   58.7 <50ms=1
+  JitoLabs                     n= 6 median=  133.0 min=   19.1 max= 1065.3 <50ms=2
+  AgaveBam                     n=11 median=  175.6 min=   54.7 max=  371.0 <50ms=0
+
+by slots after the slot current at send:
+  0                            n= 9 median=   79.9 min=   19.1 max=  186.1 <50ms=3
+  1                            n= 9 median=  201.9 min=   52.6 max=  371.0 <50ms=0
+  2                            n= 1 median=  452.2 min=  452.2 max=  452.2 <50ms=0
+  4                            n= 1 median= 1065.3 min= 1065.3 max= 1065.3 <50ms=0
+
+by ms into slot at send (bucket):
+  200                          n= 3 median=   58.7 min=   52.6 max=  114.0 <50ms=0
+  100                          n= 6 median=  127.8 min=   25.6 max= 1065.3 <50ms=1
+  0                            n=11 median=  186.1 min=   19.1 max=  452.2 <50ms=2
+
+same leader as at send (landed within the current leader window):
+  True                         n=16 median=  109.6 min=   19.1 max=  319.6 <50ms=3
+  False                        n= 4 median=  411.6 min=  114.0 max= 1065.3 <50ms=0
+
+send slot position in leader window (0-3):
+  2                            n= 5 median=  101.5 min=   19.1 max=  452.2 <50ms=2
+  3                            n= 3 median=  114.0 min=   79.9 max=  371.0 <50ms=0
+  1                            n= 6 median=  130.3 min=   52.6 max=  319.6 <50ms=0
+  0                            n= 6 median=  154.6 min=   25.6 max= 1065.3 <50ms=1
+
+kind x path:
+  ('jito', 'astralane')        n= 5 median=   52.6 min=   19.1 max= 1065.3 <50ms=2
+  ('jito', 'bolt')             n= 2 median=   53.8 min=   49.0 max=   58.7 <50ms=1
+  ('bam', 'helius')            n= 2 median=  128.3 min=   54.7 max=  201.9 <50ms=0
+  ('bam', 'bolt')              n= 6 median=  146.7 min=  101.5 max=  301.6 <50ms=0
+  ('jito', 'helius')           n= 2 median=  266.1 min=   79.9 max=  452.2 <50ms=0
+  ('bam', 'astralane')         n= 3 median=  319.6 min=  133.6 max=  371.0 <50ms=0
