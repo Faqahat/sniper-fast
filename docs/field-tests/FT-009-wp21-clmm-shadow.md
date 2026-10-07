@@ -137,3 +137,17 @@ As FT-002, restricted to bundles with a CLMM or Whirlpool leg:
 **Verdict, part 1: pass.** All 8 criteria pass. Criterion 3 has one trigger, on a fork the engine itself abandoned, that priced nothing. Criterion 4 was replayed on one 28.7-min segment. Criterion 6 is a measure: the CLMM would-sends are real. One problem was found: the commit wait on CLMM transactions (latency and coverage, not correctness).
 
 **Part 2 (dry run):** it can go ahead on the same build and config with `--mode dry-run`; the config already has `[dry_run] simulate = true` at 2 a second. Part 1 found nothing in the bundle path that part 2 tests: the shadow executor built all 2,020 CLMM bundles up to the signature with no build refusal, and none was oversized. At about 1,000 CLMM would-sends an hour, part 2's 50 bundles come easily. Run it after FT-010 ends, because Haan serves one process (I-3). The commit-wait fix is needed before phase B, not for part 2.
+
+## Results, part 2: dry run (2026-10-07 07:28–08:29 UTC, bin/arbx-4c6f2c9 with the commit-wait fix, 2 × 30 min, nothing sent)
+
+- **Bundles:** 1,050 would-sends, and **1,050 `dry_run_ok`**: every bundle passed `verify_bundle` (bytes, accounts, tip, min_profit) and was simulated.
+- **Simulations** (sims.jsonl, both segments):
+  - No account, CU or loaded-data error on any bundle.
+  - **Through a Raydium CLMM or Orca Whirlpool leg:** 386 simulated. 376 ended in our own profit check (`0x4e580002`, "every leg ran, the round trip did not pay": the gap had moved by simulation time) and 10 passed.
+  - **Older-venue bundles:** the same pattern, plus 3 venue errors (6036 and 3005) on older pools.
+  - So every CLMM/Whirlpool leg executed with the engine's account lists and data.
+- **The commit-wait fix (p2, 41,660 groups):**
+  - groups touching a CLMM pool: `timeout_unknown` **8.0%** (FT-009 part 1: 50%);
+  - other groups: 5.3%;
+  - 0 late members, 0 `torn_suspect` decisions (review finding 1's case did not occur).
+- **Verdict: part 2 passes.** The owner allowed live sends through both venues ("Yes u can", 2026-10-07). The live config is pending the owner's permission setting (see the session).
