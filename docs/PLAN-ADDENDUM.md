@@ -415,3 +415,30 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
 - **Owner, 2026-10-06 (evening):** **Stage 0 closes after FT-008** (WP-22's test), no longer after FT-007. The exit criteria are measured over the canary series FT-005 + FT-006 + FT-007 + FT-008 (about 12 h).
 - **Owner, 2026-10-06 (evening), Stage 0 exit:** wins must include more meme / long-tail tokens than common tokens (USDT, USDC, JUP, Meteora and the like), counted over FT-005..FT-008. The definition and the current standing are in FT-008-auto-pool-refresh.md, "Stage 0 exit".
 - **Owner, 2026-10-07:** the meme-win rule is counted over **FT-007 + FT-008** only (the final configuration). The other Stage 0 exit criteria still cover FT-005..FT-008.
+
+## WP-23: 3-leg routes (owner request, 2026-10-07: "yes")
+
+**Why (venue census §4):** in rival arbitrage, routes of 3 legs are 26.9% by count and **39.3% by gross**, and 4 legs add 16.9% / 14.7%. USDC-based routes are 30% by count and 45% by gross. arbx prices only 2-leg routes (buy on one pool, sell on another, ending in the hub).
+- The deployed Nexus v2 already executes **1..=8 legs** in one loop, with the profit check at the end (`program/nexus-arb-v2/src/lib.rs`, `MAX_LEGS = 8`). **No program upgrade is needed.**
+
+**What:**
+- **Route shapes**, cycles starting and ending in WSOL (or USDC) on the venues we trade, including Raydium CLMM and Orca Whirlpool:
+  - (a) the **cross-quote triangle** WSOL → X (X/WSOL pool) → USDC (X/USDC pool) → WSOL (USDC/WSOL pool), and its reverse;
+  - (b) the **token-pair triangle** WSOL → X → Y → WSOL through an X/Y pool.
+- **Engine:**
+  - a boot-time index of 3-cycles over the registry, bounded per trigger pool;
+  - each leg priced with the existing exact venue maths;
+  - the size found by an exact search over the input;
+  - the best of the 2-leg and 3-leg routes decided under the same bars;
+  - WP-04 consistency on all three pools.
+- **Builder:** one Nexus v2 route instruction with 3 legs, create+close for each intermediate token account that isn't held, the CU limit from the legs, and lookup tables for size.
+- **Switch:** `[routes] three_leg = off | quote | send`, off by default and not serialized while off (config hashes unchanged), like the WP-21 venue switches.
+- **Records and replay:** decisions and attempts carry all legs, and replays stay exact.
+
+**Acceptance:**
+- **Tests:** unit and engine tests, exactness of 3-leg routes through the deployed Nexus v2 ELF in LiteSVM (the venue harness), no-panic tests, and replay.
+- **Benchmark:** p99 within the budget.
+- **Field tests:**
+  - a shadow test (3-leg routes in `quote` mode: priced, no phantom or poisoned decision, real or not, latency);
+  - then a dry run (verify and simulate);
+  - then live, which is the owner's call.
