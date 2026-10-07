@@ -873,20 +873,26 @@ pub struct HeliusBigCfg {
     /// the tip as a share of the edge (expected - base fee - priority fee)
     #[serde(default = "hb_share")]
     pub tip_share: f64,
-    /// the compute-unit price (micro-lamports); Helius Sender refuses a transaction without one
-    #[serde(default = "hb_cu_price")]
-    pub cu_price_micro: u64,
+    /// the priority fee (lamports) a copy pays: Sender Max requires at least 5,000 and recommends 10,000. The
+    /// compute-unit price is derived from it and the transaction's CU limit (rounded up, so the fee is at least this)
+    #[serde(default = "hb_prio")]
+    pub priority_fee_lamports: u64,
     /// at most this many Helius copies a second (a rolling window)
     #[serde(default = "hb_rate")]
     pub max_per_sec: u32,
+    /// other enabled `[[send]]` paths (e.g. "bolt") that get the SAME signed transaction at the same time: it carries one
+    /// more tip transfer per path (that path's tip_lamports, its minimum), taken out of the 70%, so only one copy can
+    /// land and every path is paid only if it does
+    #[serde(default)]
+    pub also: Vec<String>,
 }
 fn hb_path() -> String { "helius".into() }
 fn hb_min_expected() -> u64 { 1_500_000 }
 fn hb_share() -> f64 { 0.70 }
-fn hb_cu_price() -> u64 { 10_000 }
+fn hb_prio() -> u64 { 10_000 }
 fn hb_rate() -> u32 { 2 }
 impl Default for HeliusBigCfg {
-    fn default() -> Self { HeliusBigCfg { enabled: false, path: hb_path(), min_expected_lamports: hb_min_expected(), tip_share: hb_share(), cu_price_micro: hb_cu_price(), max_per_sec: hb_rate() } }
+    fn default() -> Self { HeliusBigCfg { enabled: false, path: hb_path(), min_expected_lamports: hb_min_expected(), tip_share: hb_share(), priority_fee_lamports: hb_prio(), max_per_sec: hb_rate(), also: vec![] } }
 }
 impl HeliusBigCfg {
     pub fn off(&self) -> bool { !self.enabled }
@@ -1742,7 +1748,7 @@ impl Config {
         }
         // PLAN WP-05 item 1: live sends are one-transaction Jito bundles; every other kind stays compiled (`arbx senders`
         // checks, a future direct experiment) but may not be enabled in a live config
-        if cfg.mode == "live" { bundle_only(&cfg.sends).map_err(|e| anyhow::anyhow!("mode = \"live\": {e}"))?; }
+        if cfg.mode == "live" { bundle_only_cfg(&cfg).map_err(|e| anyhow::anyhow!("mode = \"live\": {e}"))?; }
         let sp = &cfg.send_policy;
         if sp.direct_experiment { bail!("[send_policy] direct_experiment = true is refused in Stage 0 (bundle-only; PLAN WP-05 item 1)"); }
         if !["confirmed", "processed"].contains(&sp.blockhash_commitment.as_str()) { bail!("[send_policy] blockhash_commitment must be \"confirmed\" or \"processed\""); }
@@ -1759,12 +1765,19 @@ impl Config {
         let hb = &sp.helius_big;
         if hb.enabled {
             if !(hb.tip_share > 0.0 && hb.tip_share < 1.0) { bail!("[send_policy.helius_big] tip_share must be in (0, 1)"); }
-            if hb.cu_price_micro == 0 { bail!("[send_policy.helius_big] cu_price_micro must be > 0 (Helius Sender refuses a transaction without a compute-unit price)"); }
+            if hb.priority_fee_lamports < 5_000 { bail!("[send_policy.helius_big] priority_fee_lamports must be >= 5000 (Helius Sender Max's minimum)"); }
             if hb.max_per_sec == 0 { bail!("[send_policy.helius_big] max_per_sec must be >= 1"); }
             match cfg.sends.iter().find(|x| x.name == hb.path) {
                 Some(x) if x.kind == SendKind::Helius && x.enabled => {}
                 Some(_) => bail!("[send_policy.helius_big] path {:?} must be an enabled [[send]] of kind \"helius\"", hb.path),
                 None => bail!("[send_policy.helius_big] path {:?} is not a [[send]] entry", hb.path),
+            }
+            for a in &hb.also {
+                match cfg.sends.iter().find(|x| &x.name == a) {
+                    Some(x) if x.enabled && matches!(x.kind, SendKind::Bolt | SendKind::Lunar | SendKind::Iris | SendKind::Nozomi | SendKind::Falcon | SendKind::ZeroSlot) => {}
+                    Some(_) => bail!("[send_policy.helius_big] also {a:?} must be an enabled single-transaction [[send]] (bolt, lunar, iris, nozomi, falcon, zero-slot)"),
+                    None => bail!("[send_policy.helius_big] also {a:?} is not a [[send]] entry"),
+                }
             }
         }
         if !sp.margin_share.is_finite() || !(0.0..=1.0).contains(&sp.margin_share) { bail!("[send_policy] margin_share is a share of the expected net, 0..1"); }
@@ -1967,6 +1980,15 @@ pub fn bundle_only(sends: &[SendPath]) -> Result<()> {
     if !other.is_empty() { bail!("only jito-bundle send paths may be enabled (bundle-only); enabled: {}", other.join(", ")); }
     if !sends.iter().any(|s| s.enabled && s.kind == SendKind::JitoBundle) { bail!("no jito-bundle send path is enabled"); }
     Ok(())
+}
+
+/// arbx-fast: `bundle_only` apart from the paths `[send_policy.helius_big]` names (its Helius path and `also`), which a
+/// live or canary run may enable for the big-gap route
+pub fn bundle_only_cfg(cfg: &Config) -> Result<()> {
+    let hb = &cfg.send_policy.helius_big;
+    let allowed: Vec<&String> = if hb.enabled { std::iter::once(&hb.path).chain(hb.also.iter()).collect() } else { vec![] };
+    let kept: Vec<SendPath> = cfg.sends.iter().filter(|s| !allowed.contains(&&s.name)).cloned().collect();
+    bundle_only(&kept)
 }
 
 /// the `${NAME}` variables a string names

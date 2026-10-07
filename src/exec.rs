@@ -509,7 +509,9 @@ impl<'a> AltSource<'a> {
 /// max(`floor`, `share` × expected net). Rent is never part of it. Returns (min_profit, margin)
 /// arbx-fast: the Helius big-gap route's state (`[send_policy.helius_big]`): its path (None in shadow and dry runs, which
 /// hold no paths), its tip accounts and minimum tip, the rotating account cursor and the rolling one-second window
-struct HeliusBig { cfg: crate::config::HeliusBigCfg, path: Option<usize>, tips: Vec<Pk>, min_tip: u64, cursor: usize, recent: VecDeque<u64> }
+struct HeliusBig { cfg: crate::config::HeliusBigCfg, path: Option<usize>, tips: Vec<Pk>, min_tip: u64, cursor: usize, recent: VecDeque<u64>,
+    /// the `also` paths: (name, path index (None without paths), tip accounts, tip lamports)
+    also: Vec<(String, Option<usize>, Vec<Pk>, u64)> }
 
 pub fn min_profit_onchain(tip: u64, expected_net: i64, floor: u64, share: f64) -> (u64, u64) {
     let margin = floor.max((expected_net.max(0) as f64 * share) as u64);
@@ -659,6 +661,8 @@ pub struct Exec {
     bundle_host: Option<String>,
     /// arbx-fast: `[send_policy.helius_big]` (None: off)
     helius: Option<HeliusBig>,
+    /// arbx-fast: the `also` paths' tip transfers of the decision being built (set and cleared in `decide_inner`)
+    build_extra_tips: Vec<(Pk, u64)>,
     jito: Option<Arc<jito::Jito>>,
     /// live and canary: the trading key
     key: Option<ed25519_dalek::SigningKey>,
@@ -916,7 +920,7 @@ impl Exec {
             Mode::Live | Mode::Canary => {
                 let k = key.as_ref().context("a live or canary executor needs the trading key")?;
                 anyhow::ensure!(k.verifying_key().to_bytes() == payer, "the trading key is not the config's wallet {}", cfg.wallet);
-                crate::config::bundle_only(&cfg.sends).context("PLAN WP-05: live sends are bundle-only")?;
+                crate::config::bundle_only_cfg(cfg).context("PLAN WP-05: live sends are bundle-only (arbx-fast: plus [send_policy.helius_big]'s paths)")?;
                 let p = paths.as_ref().context("a live or canary executor needs its send paths")?;
                 anyhow::ensure!(p.bundle_path().is_some(), "no jito-bundle send path was built (see the send path notes)");
             }
@@ -997,7 +1001,15 @@ impl Exec {
             let tips: Vec<Pk> = path.and_then(|i| paths.as_ref().map(|p| p.list[i].tip_accounts().to_vec())).filter(|t| !t.is_empty())
                 .unwrap_or_else(|| send::known_tip_accounts(SendKind::Helius).iter().map(|a| pk(a)).collect());
             let min_tip = cfg.sends.iter().find(|s| s.name == hb.path).map_or(0, |s| s.tip_lamports).max(SendKind::Helius.min_tip());
-            HeliusBig { cfg: hb.clone(), path, tips, min_tip, cursor: 0, recent: VecDeque::new() }
+            let also = hb.also.iter().map(|name| {
+                let idx = paths.as_ref().and_then(|p| p.list.iter().position(|x| &x.name == name));
+                let sc = cfg.sends.iter().find(|s| &s.name == name);
+                let kind = sc.map_or(SendKind::Bolt, |s| s.kind);
+                let tips: Vec<Pk> = idx.and_then(|i| paths.as_ref().map(|p| p.list[i].tip_accounts().to_vec())).filter(|t| !t.is_empty())
+                    .unwrap_or_else(|| send::known_tip_accounts(kind).iter().map(|a| pk(a)).collect());
+                (name.clone(), idx, tips, sc.map_or(0, |s| s.tip_lamports).max(kind.min_tip()))
+            }).collect();
+            HeliusBig { cfg: hb.clone(), path, tips, min_tip, cursor: 0, recent: VecDeque::new(), also }
         });
         let canary = (mode == Mode::Canary).then_some(CanaryCaps { count: cfg.canary.count, every_ns: cfg.canary.every_ms * 1_000_000 });
         let max_size = match mode { Mode::Canary => sol(cfg.canary.size_sol.min(cfg.live.max_size_sol)), _ => sol(cfg.live.max_size_sol) };
@@ -1005,7 +1017,7 @@ impl Exec {
         let settle = rpc.with_role(crate::rpc::Role::Settle);
         let model = crate::tip::TipModel::from_cfg(cfg).map_err(|e| anyhow::anyhow!(e))?;
         let x = Exec { mode, payer, program: pk(&cfg.exec.program), alts: alts.iter().map(|(k, a)| Alt::new(*k, a)).collect(), alt_lists, pump, held, rpc, settle,
-            rt: tokio::runtime::Handle::current(), back, paths, bundle_path, helius, jito, key, dry, pol: cfg.send_policy.clone(), skip_kinds,
+            rt: tokio::runtime::Handle::current(), back, paths, bundle_path, helius, build_extra_tips: Vec::new(), jito, key, dry, pol: cfg.send_policy.clone(), skip_kinds,
             bundle_host: bundle_cfg.filter(|c| !c.url.contains("${")).map(|c| send::host_of(&c.url)).filter(|h| !h.is_empty()),
             tips: bundle_cfg.map(|c| TipPolicy::from_path(c, model.clone())), path_rate: bundle_cfg.and_then(|c| c.max_per_sec).unwrap_or(5) as usize, would_recent: VecDeque::new(),
             max_size, cap_failed_fees: if mode == Mode::Canary { cfg.canary.max_spend_lamports } else { cfg.live.max_failed_fees_lamports },
@@ -1379,19 +1391,26 @@ impl Exec {
         // arbx-fast: the Helius copy's priority fee (cu price x the transaction's CU limit) and tip (`tip_share` of the edge
         // left after base and priority fee, at least the path's minimum), to the next of Helius's tip accounts
         let (mut prio_fee, mut hel_cu_price) = (0u64, 0u64);
+        let mut extra_tips: Vec<(Pk, u64)> = Vec::new();
         if hel {
             let cu_l = self.cu_limit_of(&r);
             if let Some(h) = self.helius.as_mut() {
-                hel_cu_price = h.cfg.cu_price_micro;
-                prio_fee = cu_l * hel_cu_price / 1_000_000;
+                // the CU price that makes the priority fee at least `priority_fee_lamports` at this CU limit (rounded up)
+                hel_cu_price = (h.cfg.priority_fee_lamports * 1_000_000).div_ceil(cu_l.max(1));
+                prio_fee = (cu_l * hel_cu_price).div_ceil(1_000_000);
                 let edge = (expected - BASE_FEE as i64 - prio_fee as i64).max(0);
-                let lamports = ((edge as f64 * h.cfg.tip_share) as u64).max(h.min_tip);
-                let acct = h.tips[h.cursor % h.tips.len()];
+                // the `also` paths' minimum tips come out of the share; Helius gets the rest (at least its minimum)
+                let cur = h.cursor;
+                extra_tips = h.also.iter().map(|(_, _, t, l)| (t[cur % t.len()], *l)).collect();
+                let extra: u64 = extra_tips.iter().map(|x| x.1).sum();
+                let lamports = ((edge as f64 * h.cfg.tip_share) as u64).saturating_sub(extra).max(h.min_tip);
+                let acct = h.tips[cur % h.tips.len()];
                 h.cursor += 1;
                 tip = Some((acct, lamports));
             }
         }
-        let tip_l = tip.map_or(0, |x| x.1);
+        // every tip the transaction pays (the bundle's or Helius's, plus the `also` paths')
+        let tip_l = tip.map_or(0, |x| x.1) + extra_tips.iter().map(|x| x.1).sum::<u64>();
         let net = expected - tip_l as i64 - BASE_FEE as i64 - prio_fee as i64;
         let (min_profit, margin) = min_profit_onchain(tip_l + prio_fee, net, margin_floor, self.pol.margin_share);
         let prio = Prio { band: bands::rank(band), crowd: crowding.rank(), ev: net };
@@ -1407,7 +1426,10 @@ impl Exec {
         }
         let Some(bh) = view.blockhash(&self.pol.blockhash_commitment).cloned() else { return fail(d, "blockhash_stale") };
         let t_built0 = now_ns();
-        let built = match self.build(&r, min_profit, bh.hash, tip, alts, hel_cu_price) {
+        self.build_extra_tips = extra_tips.clone();
+        let built = self.build(&r, min_profit, bh.hash, tip, alts, hel_cu_price);
+        self.build_extra_tips.clear();
+        let built = match built {
             Ok(b) => b,
             Err(e) => return fail(d, &build_reason(&e)),
         };
@@ -1438,7 +1460,14 @@ impl Exec {
             let raw = Arc::new(build::sign(&built.msg, self.key.as_ref().expect("a sending mode holds its key")));
             let t_signed = now_ns();
             // WP-11 (X2): the delay arm sleeps on the send task before the copy leaves, never here on the engine thread
-            let fire = paths.fire_after(attempt, vec![Copy { path: bp, raw: raw.clone(), tip, blockhash_slot: Some(bh.slot), leader_kind: Some(i.leader.kind.as_str()) }], prio,
+            let mut copies = vec![Copy { path: bp, raw: raw.clone(), tip, blockhash_slot: Some(bh.slot), leader_kind: Some(i.leader.kind.as_str()) }];
+            // arbx-fast: the same signed transaction to every `also` path at the same instant (only one copy can land)
+            if hel {
+                for ((_, idx, _, _), et) in self.helius.as_ref().map_or(&[][..], |h| &h.also[..]).iter().zip(extra_tips.iter()) {
+                    if let Some(ai) = idx { copies.push(Copy { path: *ai, raw: raw.clone(), tip: Some(*et), blockhash_slot: Some(bh.slot), leader_kind: Some(i.leader.kind.as_str()) }); }
+                }
+            }
+            let fire = paths.fire_after(attempt, copies, prio,
                 std::time::Duration::from_millis(delay_ms.unwrap_or(0) as u64));
             (paths, bp, raw, fire, t_signed, now_ns())
         });
@@ -1456,7 +1485,7 @@ impl Exec {
         // WP-11 (review #10): every arm the decision was assigned, beside the ones that applied (only with experiments on: an
         // attempt without arms is the line it was)
         if !r.arms.is_empty() { line["experiments_assigned"] = Value::Object(r.arms.assigned_json()); }
-        if hel { line["helius_big"] = json!({ "tip": tip_l, "prio_fee": prio_fee, "cu_price_micro": hel_cu_price, "cu_limit": built.cu_limit }); }
+        if hel { line["helius_big"] = json!({ "tip": tip.map_or(0, |x| x.1), "also": self.helius.as_ref().map(|h| h.also.iter().zip(extra_tips.iter()).map(|((n, _, _, _), t)| json!({ "path": n, "tip": t.1 })).collect::<Vec<_>>()), "tips_total": tip_l, "prio_fee": prio_fee, "cu_price_micro": hel_cu_price, "cu_limit": built.cu_limit }); }
         if fired.is_none() && !replayed_send {
             // a would-send (shadow, dry run, a closed gate): recorded with sent = false
             self.would_recent.push_back(t);
@@ -1653,7 +1682,7 @@ impl Exec {
         let cu = (r.cu + if ata.is_some() { r.cu_ata.0 } else { 0 } + if ata.is_some_and(|a| a.close) { r.cu_ata.1 } else { 0 }).min(crate::cu_table::MAX_CU);
         #[cfg(test)]
         let cu = self.fault_cu.unwrap_or(cu);
-        let mut plan = build::Plan { payer: self.payer, cu_limit: cu as u32, loaded_data_limit: None, ata, tip, cu_price };
+        let mut plan = build::Plan { payer: self.payer, cu_limit: cu as u32, loaded_data_limit: None, ata, tip, cu_price, extra_tips: self.build_extra_tips.clone() };
         let tables: Vec<&Alt> = self.alts.iter().chain(extra.iter()).collect();
         let sizes: HashMap<Pk, u32> = r.sizes.iter().copied().collect();
         // the accounts are the same with the limit instruction (the ComputeBudget program is there already)
@@ -1662,7 +1691,7 @@ impl Exec {
         plan.loaded_data_limit = match self.builder.loaded_limit() { None => None, Some(Some(bytes)) => Some(bytes), Some(None) => Some(estimate(&plan, tables.len())) };
         #[cfg(test)]
         { if let Some(l) = self.fault_loaded { plan.loaded_data_limit = Some(l); } }
-        let keep: Vec<Pk> = tip.map(|t| t.0).into_iter().collect();
+        let keep: Vec<Pk> = tip.map(|t| t.0).into_iter().chain(self.build_extra_tips.iter().map(|t| t.0)).collect();
         let mut msg = build::compile_v0(self.payer, &build::bundle_ixs(&plan, route.clone()), blockhash, &tables, &keep)?;
         #[allow(unused_mut)]
         let mut recount = auto && msg.lookups != tables.len();

@@ -417,7 +417,7 @@ fn main() -> Result<()> {
             println!("I-10: no secret over plain http or udp (in the URL or a header) without a recorded exception (above); {keys_checked} values a provider key could be checked (URL variables and parts, header keys, block engine keypairs): none is the payer's keypair");
             let on: Vec<&str> = cfg.sends.iter().filter(|s| s.enabled).map(|s| s.name.as_str()).collect();
             println!("enabled send paths: {}{}", if on.is_empty() { "none".to_string() } else { on.join(", ") },
-                if config::bundle_only(&cfg.sends).is_ok() { " (bundle-only: a live or canary run may start)" } else { " (NOT bundle-only: live and canary runs refuse to start)" });
+                if config::bundle_only_cfg(&cfg).is_ok() { " (bundle-only: a live or canary run may start)" } else { " (NOT bundle-only: live and canary runs refuse to start)" });
             let (s, l, sp) = (&cfg.strategy, &cfg.live, &cfg.send_policy);
             println!("safety: decoded swaps are hints only, skip_failing_signers {}, state_triggers {}; live: max {} SOL a trade, stop after {} lamports of failed fees; canary: {} SOL, {} attempts",
                 s.skip_failing_signers, s.state_triggers, l.max_size_sol, l.max_failed_fees_lamports, cfg.canary.size_sol,
@@ -1100,7 +1100,7 @@ fn limits_json(cfg: &config::Config, live: bool, canary: bool) -> serde_json::Va
         // (the bands are over the expected edge, gross − the base fee: src/bands.rs)
         "big_band_min_expected_lamports": arbx::bands::EDGES[arbx::bands::BIG_FROM as usize - 1], "big_band_max_per_sec": cfg.send_policy.big_band_max_per_sec,
         "crowded_pools_file": cfg.send_policy.crowded_pools_file, "crowded_skip_min_expected_lamports": cfg.send_policy.crowded_skip_min_expected_lamports,
-        "bundle_only": config::bundle_only(&cfg.sends).is_ok(), "canary_max_size_sol": cfg.canary.size_sol, "canary_count": cfg.canary.count,
+        "bundle_only": config::bundle_only_cfg(&cfg).is_ok(), "canary_max_size_sol": cfg.canary.size_sol, "canary_count": cfg.canary.count,
         // WP-07: the trade size capped by the bankroll (0 = off)
         "bankroll_share": cfg.live.bankroll_share, "bankroll_reserve_sol": cfg.live.bankroll_reserve_sol,
         "max_blockhash_age_slots": cfg.send_policy.max_blockhash_age_slots, "skip_leader_kinds": cfg.send_policy.skip_leader_kinds,
@@ -1330,7 +1330,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     if canary && !cfg.canary.enabled { anyhow::bail!("--canary needs [canary] enabled = true in the config (both, so neither alone can spend)"); }
     if cfg.canary.enabled && !canary { println!("[canary] is enabled in the config but --canary was not given: no canaries this run"); }
     // PLAN WP-05 item 1: a live or canary run sends one-transaction Jito bundles only
-    if live || canary { config::bundle_only(&cfg.sends).context("PLAN WP-05: live and canary runs are bundle-only")?; }
+    if live || canary { config::bundle_only_cfg(&cfg).context("PLAN WP-05: live and canary runs are bundle-only")?; }
     // WP-07 (docs/field-tests/README.md "Enforcement"; review WP-07 #5, #8): a live or canary run arms the equity floor, so
     // it needs a test budget (the config's `[supervisor] test_budget_lamports`, or what a campaign has left:
     // --budget-left), never above the owner's hard cap; a floor given is a lamport amount

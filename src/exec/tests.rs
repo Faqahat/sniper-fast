@@ -1628,7 +1628,7 @@ async fn verify_bundle_on_the_new_layout() {
     let route_ix = build::route_ix(x.program, payer, quote, rt.size, mp, &[leg(&rt.buy, *WSOL, M2), leg(&rt.sell, M2, *WSOL)], None).unwrap();
     let sign = |ixs: Vec<build::Ix>| { let m = build::compile_v0(payer, &ixs, BH, &[], &[tip0.0]).unwrap(); build::sign(&m, &dk) };
     // the CU limit each plan asks: the route's 100,000 plus the create's 30,000 and the close's 5,000 when it makes them
-    let plan = |a: Option<build::AtaOps>| build::Plan { payer, cu_price: 0, cu_limit: 100_000 + a.map_or(0, |a| 30_000 + if a.close { 5_000 } else { 0 }), loaded_data_limit: Some(limit),
+    let plan = |a: Option<build::AtaOps>| build::Plan { payer, cu_price: 0, extra_tips: vec![], cu_limit: 100_000 + a.map_or(0, |a| 30_000 + if a.close { 5_000 } else { 0 }), loaded_data_limit: Some(limit),
         ata: a, tip: Some(tip0) };
     let good = build::bundle_ixs(&plan(Some(ata)), route_ix.clone());
     assert_eq!(failing(&sign(good.clone()), &want), Vec::<String>::new());
@@ -3396,16 +3396,17 @@ async fn the_executor_refuses_a_size_past_its_arm() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_big_gap_goes_to_helius_with_seventy_percent() {
     let extra = "[[send]]\nname = \"helius\"\nkind = \"helius\"\nurl = \"https://127.0.0.1:9/fast\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
-        [send_policy.helius_big]\nenabled = true\nmin_expected_lamports = 1500000\ntip_share = 0.7\ncu_price_micro = 10000\nmax_per_sec = 2\n";
+        [send_policy.helius_big]\nenabled = true\nmin_expected_lamports = 1500000\ntip_share = 0.7\npriority_fee_lamports = 10000\nmax_per_sec = 2\n";
     let mut r = rig("helius-big", Mode::Shadow, extra).await;
     let d = r.decide(route(1, damm(2, MINT), 2_000_000, 7), 97, now_ns());
     assert!(d.would_send, "{d:?}");
-    // CU limit 100,000 (the wallet holds MINT) x 10,000 micro-lamports = 1,000 priority; edge 2,000,000 - 5,000 - 1,000
-    let prio = 1_000u64;
-    let tip = (1_994_000f64 * 0.7) as u64;
+    // CU limit 100,000 (the wallet holds MINT): 100,000 micro-lamports a CU = the 10,000-lamport priority fee; edge
+    // 2,000,000 - 5,000 - 10,000
+    let prio = 10_000u64;
+    let tip = (1_985_000f64 * 0.7) as u64;
     let a = r.lines("attempts");
     assert_eq!((a[0]["helius_big"]["tip"].as_u64(), a[0]["helius_big"]["prio_fee"].as_u64(), a[0]["helius_big"]["cu_price_micro"].as_u64()),
-        (Some(tip), Some(prio), Some(10_000)), "{}", a[0]);
+        (Some(tip), Some(prio), Some(100_000)), "{}", a[0]);
     assert_eq!(a[0]["min_profit_onchain"].as_u64(), Some(tip + prio + BASE_FEE + 1), "tip + priority + base fee + the margin floor");
     assert_eq!(d.ev, Some(2_000_000 - tip as i64 - BASE_FEE as i64 - prio as i64));
     // under the threshold: a Jito bundle, no Helius fields
@@ -3418,4 +3419,26 @@ async fn a_big_gap_goes_to_helius_with_seventy_percent() {
     let _ = r.decide(route(5, damm(6, MINT), 2_000_000, 9), 97, t);
     let d = r.decide(route(7, damm(8, MINT), 2_000_000, 10), 97, t);
     assert_eq!(d.reason, "helius_rate", "{d:?}");
+}
+
+/// arbx-fast `also = ["bolt"]`: the same transaction carries Bolt's minimum tip too, out of the 70%; Helius gets the rest
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_big_gap_pays_helius_and_bolt_out_of_seventy_percent() {
+    let extra = "[[send]]\nname = \"helius\"\nkind = \"helius\"\nurl = \"https://127.0.0.1:9/fast\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [[send]]\nname = \"bolt\"\nkind = \"bolt\"\nurl = \"https://127.0.0.1:9/bolt\"\ntoken_env = \"ARBX_TEST_BOLT\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [send_policy.helius_big]\nenabled = true\nmin_expected_lamports = 3000000\ntip_share = 0.7\npriority_fee_lamports = 10000\nmax_per_sec = 2\nalso = [\"bolt\"]\n";
+    let mut r = rig("helius-bolt", Mode::Shadow, extra).await;
+    let d = r.decide(route(1, damm(2, MINT), 5_000_000, 7), 97, now_ns());
+    assert!(d.would_send, "{d:?}");
+    let total = (4_985_000f64 * 0.7) as u64;
+    let a = r.lines("attempts");
+    let h = &a[0]["helius_big"];
+    assert_eq!((h["tip"].as_u64(), h["also"][0]["path"].as_str(), h["also"][0]["tip"].as_u64(), h["tips_total"].as_u64()),
+        (Some(total - 1_000_000), Some("bolt"), Some(1_000_000), Some(total)), "{h}");
+    assert_eq!(a[0]["min_profit_onchain"].as_u64(), Some(total + 10_000 + BASE_FEE + 1));
+    // at the threshold, 3,000,000: 70% of the 2,985,000 edge (2,089,500) still covers both 1,000,000 minimums
+    let d = r.decide(route(3, damm(4, MINT), 3_000_000, 8), 97, now_ns());
+    assert!(d.would_send, "{d:?}");
+    let a = r.lines("attempts");
+    assert_eq!((a[1]["helius_big"]["tip"].as_u64(), a[1]["helius_big"]["tips_total"].as_u64()), (Some((2_985_000f64 * 0.7) as u64 - 1_000_000), Some((2_985_000f64 * 0.7) as u64)), "{}", a[1]["helius_big"]);
 }

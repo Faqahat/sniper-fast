@@ -341,7 +341,7 @@ url = "${SHYFT_RPC_URL}"
 name = "helius"
 enabled = true    # arbx-fast (owner 2026-10-07): big gaps only ([send_policy.helius_big]). History: WP-00 bundle-only, the direct arm lost 24.4M lamports in fees, W §2
 kind = "helius"
-url = "https://fra-sender.helius-rpc.com/fast"   # w5h tuned: dual routing (Jito + SWQoS), the mode the winners use
+url = "http://fra-sender.helius-rpc.com/fast"   # Sender Max, Frankfurt (Helius documents this regional endpoint as http; no key in it)   # w5h tuned: dual routing (Jito + SWQoS), the mode the winners use
 tip_lamports = 1000000   # w5h tuned: winners via Helius tip ~1M
 
 [[send]]
@@ -386,7 +386,7 @@ max_per_sec = 5
 [[send]]
 # Raiden Bolt: free tier 5 tx/s, 0.001 SOL minimum tip (key accepted, 2026-10-03 probe)
 name = "bolt"
-enabled = false   # WP-00: bundle-only (the direct arm lost 24.4M lamports in fees, W §2)
+enabled = true    # arbx-fast (owner 2026-10-07): with Helius on big gaps ([send_policy.helius_big] also). History: WP-00 bundle-only
 kind = "bolt"
 url = "https://fra.bolt.raiden.wtf/api/v1/sendRawTransaction"
 token_env = "RAIDEN_BOLT_KEY"
@@ -475,9 +475,10 @@ direct_experiment = false   # the direct (non-bundle) arm: refused in Stage 0
 [send_policy.helius_big]
 enabled = true
 path = "helius"
-min_expected_lamports = 1500000   # 70% of the edge must clear Helius Sender's 0.001 SOL minimum tip
+min_expected_lamports = 3000000   # 70% of the edge must clear Helius Sender Max's and Bolt's 0.001 SOL minimum tips (2,000,000)
 tip_share = 0.70
-cu_price_micro = 10000            # Helius Sender requires a compute-unit price (~2,000 lamports at 200k CU)
+priority_fee_lamports = 10000     # Sender Max: at least 5,000 lamports, 10,000 recommended (the CU price is derived from it)
+also = ["bolt"]                   # the same transaction to Raiden Bolt at the same instant (its 0.001 SOL tip out of the 70%)
 max_per_sec = 2
 [send_policy.direct]
 # (the durable nonces of 2g7rYv7y..., the direct arm's, are not frz's: none here)
