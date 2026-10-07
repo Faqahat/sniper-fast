@@ -24,5 +24,35 @@
 
 **Caveat:** time-separated (FT-008 then FT-010), so indicative. WP-11 arms give the clean answer.
 
-## Results
-(filled in)
+## Results (3 h: 04:26–07:27 UTC, bin/arbx-b1318ef, `deploy/arbx-ft010-frz.toml`)
+
+| Segment | Sent | Landed | Net (chain ledger) |
+|---|---|---|---|
+| p1 | 250 | 9 | +11,621 |
+| p2 | 333 | 16 | +97,240 |
+| p3 | 274 | 4 | +4,000 |
+| p4 | 279 | 13 | +31,718 |
+| p5 | 176 | 7 | +30,055 |
+| p6 | 216 | 7 | +24,315 |
+| **Total** | **1,528** | **56 (3.7%)** | **+198,949 lamports** |
+
+**Safety: pass.**
+- Bundle-only; 0 failed-landing fees.
+- Every landed trade nets > 0 (56 of 56, the smallest +1,000).
+- Final reconciliation ok in all 6 segments (residual 0, executor diff 0).
+
+**Measured against FT-008:**
+
+| Measure | FT-008 (0.2 tips) | FT-010 (0.1 tips) |
+|---|---|---|
+| **Net SOL/h** | 91,982 | **66,612** |
+| Sent | 2,282 | 1,528 (a quieter morning; the list was refreshed down to 1,225 pools) |
+| Win ratio | 3.2% | 3.7% |
+| Net per win | 3,711 | 3,553 |
+| Tips / fees per gross | 31% / 39% | 19% / 47% |
+| Jito-led / BAM-led land rate | 3.35% / 3.04% | 4.27% / 2.77% |
+| Meme / common wins | 42 / 32 | 15 / 41 (memes 47% of the net) |
+
+**Decision (rule): return to 0.2.** Net SOL/h 66,612 is below FT-008's 91,982.
+- Time-separated: FT-010 sent a third fewer bundles in quieter hours, while its win ratio and Jito-led land rate were higher.
+- **FT-012 (side by side, same hours) decides the tip question properly.** Its 0.2 control arm stays in place.
