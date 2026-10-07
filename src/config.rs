@@ -881,14 +881,15 @@ pub struct HeliusBigCfg {
     #[serde(default = "hb_rate")]
     pub max_per_sec: u32,
     /// other enabled `[[send]]` paths (e.g. "bolt") that get the SAME signed transaction at the same time: it carries one
-    /// more tip transfer per path (that path's tip_lamports, its minimum), taken out of the 70%, so only one copy can
-    /// land and every path is paid only if it does
+    /// more tip transfer per path (that path's tip_lamports, its minimum), taken out of the tip share, so only one copy
+    /// can land and every path is paid only if it does. A path is added, in order, only while the share still leaves
+    /// Helius its own minimum: a smaller big gap goes to Helius alone
     #[serde(default)]
     pub also: Vec<String>,
 }
 fn hb_path() -> String { "helius".into() }
 fn hb_min_expected() -> u64 { 1_500_000 }
-fn hb_share() -> f64 { 0.70 }
+fn hb_share() -> f64 { 0.60 }
 fn hb_prio() -> u64 { 10_000 }
 fn hb_rate() -> u32 { 2 }
 impl Default for HeliusBigCfg {

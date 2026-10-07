@@ -3442,3 +3442,18 @@ async fn a_big_gap_pays_helius_and_bolt_out_of_seventy_percent() {
     let a = r.lines("attempts");
     assert_eq!((a[1]["helius_big"]["tip"].as_u64(), a[1]["helius_big"]["tips_total"].as_u64()), (Some((2_985_000f64 * 0.7) as u64 - 1_000_000), Some((2_985_000f64 * 0.7) as u64)), "{}", a[1]["helius_big"]);
 }
+
+/// arbx-fast: a big gap whose share cannot cover Bolt's minimum too goes to Helius alone (no `also` tip, no Bolt copy)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_smaller_big_gap_goes_to_helius_alone() {
+    let extra = "[[send]]\nname = \"helius\"\nkind = \"helius\"\nurl = \"https://127.0.0.1:9/fast\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [[send]]\nname = \"bolt\"\nkind = \"bolt\"\nurl = \"https://127.0.0.1:9/bolt\"\ntoken_env = \"ARBX_TEST_BOLT\"\ntip_lamports = 1000000\nmax_per_sec = 5\n\
+        [send_policy.helius_big]\nenabled = true\nmin_expected_lamports = 1700000\ntip_share = 0.6\npriority_fee_lamports = 10000\nmax_per_sec = 2\nalso = [\"bolt\"]\n";
+    let mut r = rig("helius-alone", Mode::Shadow, extra).await;
+    let d = r.decide(route(1, damm(2, MINT), 2_500_000, 7), 97, now_ns());
+    assert!(d.would_send, "{d:?}");
+    let a = r.lines("attempts");
+    let h = &a[0]["helius_big"];
+    assert_eq!((h["tip"].as_u64(), h["also"].as_array().map(|v| v.len()), h["tips_total"].as_u64()),
+        (Some((2_485_000f64 * 0.6) as u64), Some(0), Some((2_485_000f64 * 0.6) as u64)), "60% of 2,485,000 = 1,491,000: under 2,000,000, Helius alone: {h}");
+}

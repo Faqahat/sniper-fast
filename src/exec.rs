@@ -1399,11 +1399,15 @@ impl Exec {
                 hel_cu_price = (h.cfg.priority_fee_lamports * 1_000_000).div_ceil(cu_l.max(1));
                 prio_fee = (cu_l * hel_cu_price).div_ceil(1_000_000);
                 let edge = (expected - BASE_FEE as i64 - prio_fee as i64).max(0);
-                // the `also` paths' minimum tips come out of the share; Helius gets the rest (at least its minimum)
+                // the `also` paths' minimum tips come out of the share, in order, only while Helius keeps at least its own
+                // minimum (a smaller big gap goes to Helius alone); Helius gets the rest
                 let cur = h.cursor;
-                extra_tips = h.also.iter().map(|(_, _, t, l)| (t[cur % t.len()], *l)).collect();
-                let extra: u64 = extra_tips.iter().map(|x| x.1).sum();
-                let lamports = ((edge as f64 * h.cfg.tip_share) as u64).saturating_sub(extra).max(h.min_tip);
+                let budget = (edge as f64 * h.cfg.tip_share) as u64;
+                let mut extra = 0u64;
+                extra_tips = h.also.iter().filter_map(|(_, _, t, l)| {
+                    (budget >= extra + l + h.min_tip).then(|| { extra += l; (t[cur % t.len()], *l) })
+                }).collect();
+                let lamports = budget.saturating_sub(extra).max(h.min_tip);
                 let acct = h.tips[cur % h.tips.len()];
                 h.cursor += 1;
                 tip = Some((acct, lamports));
