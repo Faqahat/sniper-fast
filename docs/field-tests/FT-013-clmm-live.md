@@ -32,5 +32,32 @@
   - Then FT-012 (tips × sizes) runs with them on.
   - Net SOL/h against FT-008 is reported. It is time-separated and the one-a-second slot binds, so it is indicative only.
 
-## Results
-(filled in)
+## Results (part A 08:42–09:15 UTC at 1 bundle/s; part B 09:16–10:46 at 2 bundles/s; bin/arbx-4c6f2c9)
+
+- **Part A** was stopped by the owner to restart at 2 bundles/s ("restart the run with 2").
+- **Part B** was stopped at 10:46 by the recorder's disk safety stop: Cherry's free space fell under the 25 GB minimum. It was a safety stop, not a crash.
+  - The owner then approved deleting the old Stage 0 shadow recordings (44 GB), and FT-012 started at 10:58.
+
+| | Sent | Wins | Net (chain ledger) |
+|---|---|---|---|
+| Through a Raydium CLMM or Orca Whirlpool leg | 628 (57%) | **16** | **+50,728** |
+| Older venues only | 477 | 10 | +42,727 |
+| **Total (A + B, about 2.4 h)** | **1,105** | **26** | **+93,455 lamports** |
+
+**Safety: pass.**
+- Bundle-only; **0 failed-landing fees**.
+- **Every landed trade nets > 0:** 26 of 26 (the smallest +19), CLMM trades included; create+close rent fully returned.
+- Final reconciliation ok in all 3 segments (residual 0, executor diff 0).
+- **Jito simulation results for CLMM bundles:**
+  - profit-check reverts (`0x4e580002`) 428;
+  - generic `InstructionError` 205, the same share as on the older venues;
+  - a venue program error `0x1788` (6024) on **2** of 628. That one is still to be identified: which leg and program raised it.
+  - No account or CU errors reported.
+
+**Measured:**
+- **Realised vs quoted:** median **1.00** on the CLMM wins (n = 16) and on the others (n = 10).
+- **CLMM venue pairs that won:** Whirlpool→Whirlpool 5, DLMM→Raydium CLMM 3, DLMM→Whirlpool 2, Whirlpool→AMM v4 2, Whirlpool→DLMM 2, Raydium CLMM→DLMM 1.
+- **2 bundles/s (part B):** about 580 sends/h against about 450/h at 1/s. `canary_wait` refusals fell from about 22 to about 7 a minute.
+  - Stale-blockhash refusals (about 10 a minute) are the next limit: blockhashes come from rate-limited RPC (Shyft slot index, Haan poll).
+
+**Decision (rule): keep CLMM/Whirlpool sends on.** Safety holds and the CLMM wins realise their quotes. FT-012 (12 h, tip × size arms) runs with them on, at 2 bundles/s.

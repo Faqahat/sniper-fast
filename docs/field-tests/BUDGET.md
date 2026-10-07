@@ -19,6 +19,8 @@
 | 2026-10-06 | FT-007 (ft007, 3 h canary, 0.05 SOL cap + small rungs) | 325,000 | 236,822 | 54,269,640 | 54,269,640 | +797,760 | **−235,938** (profit) | −728,464 | 34,728,464 |
 | 2026-10-07 | FT-008 (ft008, 3 h canary, WP-22 pool refresh) | 370,000 | 292,859 | 70,744,080 | 70,744,080 | +937,503 | **−274,644** (profit) | −1,003,108 | 35,003,108 |
 | 2026-10-07 | FT-010 (ft010, 3 h canary, tip share 0.1) | 280,000 | 112,842 | 30,099,000 | 30,099,000 | +591,791 | **−198,949** (profit) | −1,202,057 | 35,202,057 |
+| 2026-10-07 | FT-013 part A (ft013, 33 min, CLMM live, 1/s) | 35,000 | 15,172 | 5,953,760 | 5,953,760 | +80,654 | **−30,482** (profit) | −1,232,539 | 35,232,539 |
+| 2026-10-07 | FT-013 part B (ft013b, 1.5 h, CLMM live, 2/s) | 95,000 | 33,329 | 22,352,000 | 22,352,000 | +191,302 | **−62,973** (profit) | −1,295,512 | 35,295,512 |
 
 Net spend = fees + tips + rent locked that cannot be recovered − trading profit. Every figure comes from chain data, either the WP-07 ledger or `getTransaction` balance deltas, never from our own predictions.
 - **Trading P&L** (WP-07: `ledger::Entry::trade_pnl`) is each route's change of SOL + WSOL and of recoverable rent, plus what it paid in fee, tip and non-recoverable rent. A token a route left behind counts 0 there; its quoted value is reported apart.
