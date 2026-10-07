@@ -451,7 +451,7 @@ bankroll_reserve_sol = 0.03
 # the WP-03b ring at most max_blockhash_age_slots old, a target-slot leader whose kind is not skipped, a valid cached
 # Jito token, a healthy recorder, the SendGate live and the store ready
 max_blockhash_age_slots = 60   # landing study 2026-10-07: every stale refusal came with the Shyft slot index > 10 slots behind (about 4% of net); a blockhash is valid for 150 blocks
-blockhash_commitment = "confirmed"
+blockhash_commitment = "processed"   # arbx-fast (2026-10-07): the newest blockhash, incl. the shred entries source (DoubleZero), not the lagging confirmed slot index (dryC: 113 of 365 decisions refused stale at 53 slots)
 skip_leader_kinds = ["other", "unknown"]   # R §3.6: non-Jito leaders cannot take a bundle
 inflight_hold_slots = 2   # one attempt per (buy, sell, mint) until a new state version or a new leader
 queue_ms = 10   # the Jito rate queue: bands under 1M first, crowded pools last in their band, then EV
@@ -665,13 +665,13 @@ give_up_s = 600
 wait_cap = 10000
 max_inflight = 400       # FT-000 S1-1: tables, not requests: they go batch_max to a getMultipleAccounts (16 one-table requests took 76% of the RPC budget)
 batch_max = 100
-calls_inflight = 2
-call_every_ms = 500      # at most a request every 500 ms unless its batch is full: about 2/s at FT-000's 6 new tables a second
+calls_inflight = 4        # arbx-fast: a missing table on the pending path is asked at once (Haan answers in ~1 ms)
+call_every_ms = 50       # arbx-fast (dryC: 9,054 transactions waited for a table): was 500
 max_tables = 20000       # FT-000 S1-4: the cache is bounded (LRU; evictions journaled, an evicted table fetched again when needed);
 max_mb = 192             # FT-000's 30 minutes held 19,143 tables (104 MB at their own length), 300-350 more a minute
 preload = "auto"
 preload_max_age_h = 24
-preload_max_tables = 5000
+preload_max_tables = 20000   # arbx-fast: start with every table the last run learned (dryC learned 5,801)
 
 [accuracy]
 # WP-04 item 13: hints scored against their transaction's pre-state (the 8-version rings); log only in Stage 0 (OD-8)
