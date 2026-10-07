@@ -25,6 +25,7 @@ class Segment:
         self._chain_ledger_extra = chain_ledger  # research ledger rows (legacy runs)
         self.tip_accounts: set | None = None  # known tip accounts (data/sender-tip-accounts.json), set by the CLI
         self.notes: list = []
+        self._start_slot: int | None = None  # the campaign's start snapshot slot, set by `Campaign.open`
 
     # ------------------------------------------------------------------ files
     def has(self, stream: str) -> bool:
@@ -243,23 +244,56 @@ class Segment:
         return {d.get("decision"): d for d in self.decisions}
 
     @cached_property
+    def own_start_slot(self) -> int | None:
+        """this segment's first good balance snapshot (no `slot_mismatch`, no `error`), by time; None without one"""
+        snaps = [x for x in self.jsonl("snapshots") if not x.get("slot_mismatch") and x.get("error") is None and x.get("slot") is not None]
+        snaps.sort(key=lambda x: x.get("t_ns") or 0)
+        return snaps[0]["slot"] if snaps else None
+
+    @cached_property
+    def start_slot(self) -> int | None:
+        """The slot the ledger counts from, as the Rust side's `ledger::history` does (spend.json, the equity stops, the
+        status money): the campaign's start, its first good balance snapshot in segment order (`Campaign.open` sets it;
+        a segment opened alone looks for campaign.json beside it), else this segment's own first good snapshot; None
+        without any snapshot"""
+        if self._start_slot is not None:
+            return self._start_slot
+        parent = os.path.dirname(self.dir)
+        cj_path = os.path.join(parent, "campaign.json")
+        cj = streams.read_json(cj_path, "campaign") if os.path.exists(cj_path) else None
+        for n in [x.get("name") for x in ((cj or {}).get("segments") or [])]:
+            p = os.path.join(parent, n or "")
+            if not n or not os.path.isdir(p):
+                continue
+            first = self.own_start_slot if n == self.name else Segment(p, n).own_start_slot
+            if first is not None:
+                return first
+        return self.own_start_slot
+
+    @cached_property
     def ledger(self) -> list:
-        """ledger.jsonl's lines this segment counts: a line marked `dup` (a signature an earlier segment of the campaign
-        already recorded, written again by this one's pre-run fetch; WP-07) is left out, as the Rust side leaves it out
-        (review WP-07 #11): `ledger_dup` has them. So is (WP-11) a line marked `pre_run`: a transaction from before this
-        segment's state stream (the wallet's last hour, read at the start), typically the previous campaign's last
-        trades, which the Rust side's totals leave out too (they count from the campaign's start); `ledger_pre_run` has
-        them. Counting them made a campaign's first segment carry the previous campaign's trades (FT-007 p1: +51,440)"""
-        return [r for r in self.jsonl("ledger") if not r.get("dup") and not r.get("pre_run")]
+        """ledger.jsonl's lines this segment counts, as the Rust side counts them (`ledger::history`): a line marked `dup`
+        (a signature an earlier segment of the campaign already recorded, written again by this one's pre-run fetch;
+        WP-07) is left out (review WP-07 #11: `ledger_dup` has them), and (WP-11) so is every line at or before the
+        campaign's start (`start_slot`), `pre_run` ones among them: the transactions from before the first segment's
+        state stream, typically the previous campaign's last trades (FT-007 p1 counted FT-006 p3's +51,440, FT-008 p1
+        FT-007 p3's +111,648). A later segment's `pre_run` line after the start (a landing the previous segment's wallet
+        stream missed) counts, as it does in spend.json. Without any snapshot, the `pre_run` lines are left out"""
+        rows = [r for r in self.jsonl("ledger") if not r.get("dup")]
+        start = self.start_slot
+        if start is None:
+            return [r for r in rows if not r.get("pre_run")]
+        return [r for r in rows if (r.get("slot") or 0) > start]
 
     @cached_property
     def ledger_dup(self) -> list:
         return [r for r in self.jsonl("ledger") if r.get("dup")]
 
     @cached_property
-    def ledger_pre_run(self) -> list:
-        """the `pre_run` lines that are not `dup` (left out of `ledger`)"""
-        return [r for r in self.jsonl("ledger") if r.get("pre_run") and not r.get("dup")]
+    def ledger_before_start(self) -> list:
+        """the lines that are not `dup` and not counted (`ledger`): at or before the campaign's start"""
+        counted = {id(r) for r in self.ledger}
+        return [r for r in self.jsonl("ledger") if not r.get("dup") and id(r) not in counted]
 
     @cached_property
     def ledger_by_sig(self) -> dict:
@@ -422,4 +456,8 @@ class Campaign:
                 continue
             cl = [r for r in (chain_ledger or []) if r.get("seg") in (None, n)]
             segs.append(Segment(p, n, wallet_txs=wallet_txs, chain_ledger=cl))
+        # WP-11: the campaign's start (its first good snapshot, in segment order): every segment's ledger counts from it
+        start = next((x for x in (s.own_start_slot for s in segs) if x is not None), None)
+        for s in segs:
+            s._start_slot = start
         return cls(segs, (cj or {}).get("name") or os.path.basename(os.path.abspath(path)), cj)

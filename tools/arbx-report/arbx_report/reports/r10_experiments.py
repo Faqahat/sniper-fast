@@ -9,15 +9,19 @@ The arms of WP-11's experiments run side by side in one live run, assigned per d
 - per arm: attempts, landed, the land rate and the win rate with Wilson 95% intervals, net per attempt (bootstrap 95%),
   net per win, wins, tips / gross, failed fees, the meme and common wins (the owner's Stage 0 rule, by the route's mint:
   `tokens.py`), and the arm's net per hour were the whole run on it (its net over its weight's share of the hours);
-- each arm against its control (the configured value when the run's config.toml shows it, else the first arm): the
-  differences in win rate and land rate (two proportions, Fisher) and in net per attempt (bootstrap), the smallest
-  change the sends so far can detect, and the sends per arm a +-30% / +-50% change in the win rate needs;
+- each arm against its control (the configured value when the run's config.toml shows it, else the first arm), per
+  decision first (`per_decision`: the randomized unit; an arm may change which decisions are sent, the size arm by
+  design, so per-send rates compare different populations): wins per decision (two proportions, Fisher) and net per
+  decision (a normal interval; a decision not sent nets 0), the decisions counted from decisions.jsonl, else the
+  evaluations (status `counts_total.evaluation`) times the arm's weight share; then per send, descriptive
+  (`per_send`): win and land rates, net per attempt (bootstrap), the smallest change the sends so far detect, the sends
+  per arm a +-30% / +-50% change in the win rate needs;
 - with two experiments or more, the factorial's cells.
 
 Money comes from the ledger (ledger.jsonl), never from status counters: an attempt's net is its signatures' ledger
-lines (`trade_net`), across the campaign's segments, leaving out `dup` lines and `pre_run` lines (transactions from
-before a segment's stream); an attempt that did not land nets 0; a landing without a ledger line is counted apart, not
-as 0. X2: the would-fail rate against the delay, a two-sided trend test with the slope's interval (go "speed matters"
+lines (`trade_net`), across the campaign's segments, as the Rust side counts them (`Segment.ledger`: no `dup` line,
+nothing at or before the campaign's start, so no `pre_run` line of the previous campaign); an attempt that did not
+land nets 0; a landing without a ledger line is counted apart, not as 0. X2: the would-fail rate against the delay, a two-sided trend test with the slope's interval (go "speed matters"
 when would-fail rises >= 5 points per 10 ms added, go "adopt the delay" when it falls as much, one-sided p < 0.05).
 X5, X8, X9 as before."""
 from __future__ import annotations
@@ -120,14 +124,14 @@ def _rows(segs) -> tuple:
     """One row per sent attempt across the segments (would-sends apart), with its money from the ledger. Returns
     (rows, would_sends, notes)"""
     ledger: dict = {}
-    pre_run_sigs: set = set()
+    before: set = set()
     for s in segs:
         for r in s.ledger:
             ledger.setdefault(r.get("sig"), r)
-        for r in s.ledger_pre_run:
-            pre_run_sigs.add(r.get("sig"))
+        for r in s.ledger_before_start:
+            before.add(r.get("sig"))
     rows, would = [], []
-    notes = {"landed_without_ledger": 0, "pre_run_lines_of_our_attempts": 0, "ledger_without_outcome": 0}
+    notes = {"landed_without_ledger": 0, "lines_before_start_of_our_attempts": 0, "ledger_without_outcome": 0}
     for s in segs:
         a2s: dict = {}
         for sig, a in s.sig_to_attempt.items():
@@ -139,7 +143,7 @@ def _rows(segs) -> tuple:
             aid = a.get("attempt")
             sigs = a2s.get(aid, set())
             lines = [ledger[x] for x in sigs if x in ledger]
-            notes["pre_run_lines_of_our_attempts"] += sum(1 for x in sigs if x in pre_run_sigs)
+            notes["lines_before_start_of_our_attempts"] += sum(1 for x in sigs if x in before and x not in ledger)
             o = s.outcomes.get(aid) or {}
             final = o.get("final")
             verdicts = s.verdicts_by_attempt.get(aid, [])
@@ -191,7 +195,7 @@ def _arm_stats(rows: list, hours=None, share=None) -> dict:
            "lost_auction": sum(r["lost_auction"] for r in rows),
            "wins_meme": len(meme), "wins_common": len(common), "net_meme": sum(r["net"] for r in meme if r["money"]),
            "net_common": sum(r["net"] for r in common if r["money"]), "wins_common_by_token": dict(sorted(by_common.items())),
-           "money_unknown": n - len(known)}
+           "money_unknown": n - len(known), "net_sum_sq": sum(v * v for v in nets)}
     if lookalike:
         out["meme_lookalikes"] = {m: tokens.LOOKALIKES[m] for m in lookalike}
     if hours and share:
@@ -232,6 +236,34 @@ def _decisions(segs, key: str) -> dict | None:
     return {"n": n, "counts": dict(sorted(counts.items())), "by_kind": {a: dict(sorted(c.items())) for a, c in sorted(kinds.items())}}
 
 
+def _evaluations(segs) -> int | None:
+    """every decision of the segments (the randomized units): status.jsonl's `counts_total.evaluation` (one per
+    decision), summed; None when a segment has none"""
+    tot = 0
+    for s in segs:
+        agg = s.status_agg if isinstance(s.status_agg, dict) else {}
+        v = (agg.get("total") or {}).get("counts_total.evaluation")
+        if v is None:
+            return None
+        tot += v
+    return tot
+
+
+def _per_decision(x: dict, c: dict, da, dc) -> dict | None:
+    """arm `x` against control `c` per decision (each decision is one unit, an unsent one nets 0): wins per decision and
+    net per decision, with the difference's 95% interval (normal: the decisions are many)"""
+    if not da or not dc:
+        return None
+    ma, mc = x["net_total"] / da, c["net_total"] / dc
+    va = max(0.0, x["net_sum_sq"] / da - ma * ma) / da
+    vc = max(0.0, c["net_sum_sq"] / dc - mc * mc) / dc
+    se = (va + vc) ** 0.5
+    diff = ma - mc
+    return {"decisions": [stats._clean(da), stats._clean(dc)], "wins": stats.two_proportions(x["wins"], int(round(da)), c["wins"], int(round(dc))),
+            "net_per_1k_decisions": [stats._clean(1000 * ma), stats._clean(1000 * mc)], "net_per_1k_decisions_diff": stats._clean(1000 * diff),
+            "net_per_1k_decisions_diff_ci95": [stats._clean(1000 * (diff - 1.959964 * se)), stats._clean(1000 * (diff + 1.959964 * se))]}
+
+
 # ------------------------------------------------------------------------------------------------ one experiment
 
 def experiment(segs, key: str, rows: list, would: list, cfgs: dict, run_cfg: dict | None, hours) -> dict:
@@ -259,6 +291,21 @@ def experiment(segs, key: str, rows: list, would: list, cfgs: dict, run_cfg: dic
     out["balance"] = bal
     # per arm
     per = {a: _arm_stats([r for r in in_scope if _arm(r, key) == a], hours, wmap.get(a, 1.0) / wsum) for a in arms}
+    # the decisions each arm was assigned (the randomized unit): exact from decisions.jsonl, else expected from the
+    # evaluations and the weights
+    evals = _evaluations(segs)
+    if dec and dec["n"]:
+        dcounts, dsrc = {a: dec["counts"].get(a, 0) for a in arms}, "decisions.jsonl"
+    elif evals:
+        dcounts, dsrc = {a: evals * wmap.get(a, 1.0) / wsum for a in arms}, "expected: status counts_total.evaluation x the weight share"
+    else:
+        dcounts, dsrc = {}, None
+    for a in arms:
+        dc_ = dcounts.get(a)
+        per[a]["decisions"] = stats._clean(dc_) if dc_ is not None else None
+        per[a]["wins_per_1k_decisions"] = stats._clean(1000 * per[a]["wins"] / dc_) if dc_ else None
+        per[a]["net_per_1k_decisions"] = stats._clean(1000 * per[a]["net_total"] / dc_) if dc_ else None
+    out["decisions_src"] = dsrc
     out["arms"] = per
     # against the control
     vs: dict = {}
@@ -272,13 +319,19 @@ def experiment(segs, key: str, rows: list, would: list, cfgs: dict, run_cfg: dic
         anets = [r["net"] for r in arow if r["money"]]
         cnets = [r["net"] for r in crow if r["money"]]
         p0 = c["win_rate"] or 0
-        vs[a] = {"win_rate": stats.two_proportions(x["wins"], x["attempts"], c["wins"], c["attempts"]),
-                 "land_rate": stats.two_proportions(x["landed"], x["attempts"], c["landed"], c["attempts"]),
-                 "net_per_attempt_diff": stats._clean((x["net_per_attempt"] or 0) - (c["net_per_attempt"] or 0)) if anets and cnets else None,
-                 "net_per_attempt_diff_ci95": stats.bootstrap_diff_ci(anets, cnets),
-                 "win_rate_mde_rel": stats.mde_rel(p0, min(x["attempts"], c["attempts"])) if 0 < p0 < 1 else None,
-                 "sends_per_arm_for_win_rate": {"+-30%": stats.n_per_arm(p0 * 1.3, p0) if 0 < p0 < 0.7 else None,
-                                                "+-50%": stats.n_per_arm(p0 * 1.5, p0) if 0 < p0 < 0.6 else None}}
+        need = None
+        if 0 < p0 < 1:
+            need = {}
+            for k in (30, 50):
+                for sign, f in (("+", 1 + k / 100), ("-", 1 - k / 100)):
+                    need[f"{sign}{k}%"] = stats.n_per_arm(p0 * f, p0) if 0 < p0 * f < 1 else None
+        vs[a] = {"per_decision": _per_decision(x, c, dcounts.get(a), dcounts.get(control)),
+                 "per_send": {"win_rate": stats.two_proportions(x["wins"], x["attempts"], c["wins"], c["attempts"]),
+                              "land_rate": stats.two_proportions(x["landed"], x["attempts"], c["landed"], c["attempts"]),
+                              "net_per_attempt_diff": stats._clean((x["net_per_attempt"] or 0) - (c["net_per_attempt"] or 0)) if anets and cnets else None,
+                              "net_per_attempt_diff_ci95": stats.bootstrap_diff_ci(anets, cnets),
+                              "win_rate_mde_rel": stats.mde_rel(p0, min(x["attempts"], c["attempts"])) if 0 < p0 < 1 else None,
+                              "sends_per_arm_for_win_rate": need}}
     out["vs_control"] = vs
     return out
 
@@ -332,7 +385,8 @@ def x2(rows: list) -> dict:
 def x4_rule(e: dict) -> dict:
     """PLAN WP-11's X4 rule over `experiment`'s arms: the land rate per arm against the control, go when it drops less
     than 20% relative; STAGE1-PLAN §4's (`go_stage1`): no lost auctions and no fewer wins per send (one-sided p >= 0.05)
-    at >= 1,000 sends per arm"""
+    at >= 1,000 sends per arm. Both are per send as written; `fewer_wins_per_decision_p` is the same test per decision
+    (the randomized unit: it holds when an arm changes which decisions are sent)"""
     base = e.get("control")
     res = {}
     arms = e.get("arms") or {}
@@ -344,8 +398,10 @@ def x4_rule(e: dict) -> dict:
             drop = 1 - (x["land_rate"] or 0) / b["land_rate"]
             r["relative_land_drop_vs_" + str(base)] = stats._clean(drop)
             r["go"] = drop < X4_MAX_REL_DROP
-            wr = (e.get("vs_control") or {}).get(a, {}).get("win_rate") or {}
+            v = (e.get("vs_control") or {}).get(a, {})
+            wr = (v.get("per_send") or {}).get("win_rate") or {}
             r["fewer_wins_p"] = wr.get("p_less")
+            r["fewer_wins_per_decision_p"] = ((v.get("per_decision") or {}).get("wins") or {}).get("p_less")
             r["go_stage1"] = bool(x["lost_auction"] == 0 and wr.get("p_less") is not None and wr["p_less"] >= 0.05
                                   and min(x["attempts"], b.get("attempts") or 0) >= 1_000)
         res[a] = r
@@ -449,11 +505,13 @@ def run(seg, ctx: dict, which: str = "all") -> dict:
     d["sends"] = len(rows)
     d["would_sends"] = len(would)
     d["trading_hours"] = stats._clean(hours) if hours else None
-    d["money"] = {"source": "ledger.jsonl (dup and pre_run lines left out), by the attempts' signatures", **notes}
+    d["money"] = {"source": "ledger.jsonl as the Rust side counts it (no dup line, nothing at or before the campaign's start), by the attempts' signatures",
+                  **notes}
     if notes["landed_without_ledger"]:
         sec["caveats"].append(f"{notes['landed_without_ledger']} landing(s) without a ledger line: their money is unknown (counted apart, never 0)")
-    if notes["pre_run_lines_of_our_attempts"]:
-        sec["caveats"].append(f"{notes['pre_run_lines_of_our_attempts']} pre_run ledger line(s) name our attempts' signatures and are left out")
+    if notes["lines_before_start_of_our_attempts"]:
+        sec["caveats"].append(f"{notes['lines_before_start_of_our_attempts']} ledger line(s) before the campaign's start name our attempts' signatures "
+                              "and are left out")
     if would and not rows:
         sec["caveats"].append("would-sends only (a shadow or dry run, or a closed gate): the balance holds, nothing landed")
     if not hours:
@@ -472,7 +530,7 @@ def run(seg, ctx: dict, which: str = "all") -> dict:
         b = d["balance"].get(k) or {}
         if b.get("chi2") and b["chi2"]["p"] is not None and b["chi2"]["p"] < 0.01:
             sec["caveats"].append(f"{k}: arm counts are unbalanced against the weights (p={b['chi2']['p']}); results suspect (an arm changes the "
-                                  "funnel, or the assignment is off: see the decisions' balance)")
+                                  "funnel: read the per-decision comparison; or the assignment is off: see the decisions' balance)")
         bi = e["balance"].get("band_independence")
         if bi and bi["p"] is not None and bi["p"] < 0.01 and name != "size":
             sec["caveats"].append(f"{name}: the bands differ by arm (p={bi['p']}): compare within bands")

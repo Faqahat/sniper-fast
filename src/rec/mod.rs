@@ -506,9 +506,10 @@ pub fn start(opts: Opts) -> Result<Rec> {
         close_wait_ms: AtomicU64::new(CLOSE_WAIT.as_millis() as u64),
         entries, core_lost: AtomicBool::new(false), gate: OnceLock::new(), stopper: OnceLock::new(), engine_tid: AtomicI32::new(0), runtimes: OnceLock::new(),
         udp: Mutex::new(Vec::new()), stall: Default::default(), monitor: Mutex::new(None), notes, alert_tap: OnceLock::new() });
-    // the plain streams exist from the start, their headers stamped with the recorder's start (review F4, N2)
+    // the plain streams exist from the start, their headers stamped with the recorder's start (review F4, N2); WP-11's
+    // experiments.jsonl only with its first line (an experiment on): a run without experiments writes the files it did
     for (i, s) in r.streams.iter().enumerate() {
-        if s.spec.format.plain() && S(i as u16) != STATUS { let _ = r.tx[s.spec.class.idx()].send(Ctl::Open(S(i as u16), started_ns, None)); }
+        if s.spec.format.plain() && S(i as u16) != STATUS && S(i as u16) != EXPERIMENTS { let _ = r.tx[s.spec.class.idx()].send(Ctl::Open(S(i as u16), started_ns, None)); }
     }
     for (class, rx) in Class::ALL.into_iter().zip(rx) {
         let me = r.clone();

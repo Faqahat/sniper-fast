@@ -562,7 +562,7 @@ impl EngineInit {
             builder: match &v["builder"] { Value::Null => None, b => Some(serde_json::from_value(b.clone()).ok()?) },
             // WP-11: absent or null, no experiments (a journal written before WP-11, or off); present but unreadable makes the
             // record unreadable (a replay must not assign other arms than the run's)
-            experiments: match &v["experiments"] { Value::Null => None, x => Some(serde_json::from_value(x.clone()).ok()?) } })
+            experiments: match &v["experiments"] { Value::Null => None, x => Some(serde_json::from_value::<crate::experiments::Experiments>(x.clone()).ok().filter(|e| e.valid())?) } })
     }
 }
 
@@ -5383,6 +5383,9 @@ mod tests {
         let mut v = init.json();
         v["experiments"] = json!({ "seed": "a later schema" });
         assert!(EngineInit::from_json(&v).is_none(), "unreadable: refused");
+        let mut torn = init.json();
+        torn["experiments"]["x4"]["weights"] = json!([1.0]);
+        assert!(EngineInit::from_json(&torn).is_none(), "a weight per arm, or the record is not read (an arm out of range would be drawn)");
         // the engine applies them: its decisions are assigned as the run's were
         let mut e = Engine::new_offline(Arc::new(Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() }),
             Store::default(), StrategyCfg::default());

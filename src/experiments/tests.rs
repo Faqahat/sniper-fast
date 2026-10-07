@@ -132,6 +132,14 @@ fn arms_apply_in_scope_and_record() {
     let back: Experiments = serde_json::from_value(serde_json::to_value(&x).unwrap()).unwrap();
     assert_eq!(back, x);
     assert_eq!(back.assign(5), a);
+    assert!(x.valid());
+    // a record read back with an arm out of bounds, or a weight missing, is not whole (engine_init refuses it)
+    for bad in [Experiments { x4: Some(Exp { arms: vec![0.1, 1.5], ..x.x4.clone().unwrap() }), ..x.clone() },
+        Experiments { margin: Some(Exp { arms: vec![0, 2_000], ..x.margin.clone().unwrap() }), ..x.clone() },
+        Experiments { x2: Some(Exp { arms: vec![0, 25], ..x.x2.clone().unwrap() }), ..x.clone() },
+        Experiments { size: Some(Exp { weights: vec![1.0], ..x.size.clone().unwrap() }), ..x.clone() }] {
+        assert!(!bad.valid(), "{bad:?}");
+    }
 }
 
 /// X8's block assignment: a whole block on one arm, blocks balanced (10^4 ten-minute blocks)
@@ -167,6 +175,7 @@ fn config_checks() {
         ("[experiments.x4]\nenabled = true\narms = [0.2, 1.5]\n", "0..1"),
         ("[experiments.x4]\nenabled = true\narms = [0.2, 0.3]\nweights = [1]\n", "one per arm"),
         ("[experiments.x4]\nenabled = true\narms = [0.2, 0.3]\nweights = [1, 0]\n", "each > 0"),
+        ("[experiments.x4]\nenabled = true\narms = [0.2, 0.3]\nweights = [1e308, 1e308]\n", "at most 1e9"),
         ("[experiments.x4]\nenabled = true\narms = [0.2, 0.3]\nscope_max_band = 5\n", "scope_max_band"),
         ("[experiments.x2]\nenabled = true\narms_ms = [0, 25]\n", "above 20 ms"),
         ("[experiments.x2]\nenabled = true\nscope_kinds = [\"probe\"]\n", "scope_kinds"),

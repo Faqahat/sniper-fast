@@ -18,9 +18,17 @@
 #     ~7,500 sends: ~11 h (X4 ~2,500 per arm, size ~3,800 per arm). Run 12 h (12 segments of 60 min)
 #   - +-30% in wins per send: ~4,700-6,200 per arm (X4 ~27 h, size ~18 h); +50% in net per attempt: ~10,400 per arm (~45 h)
 #     (the 0.2 arm's net varies more: about 2.4x the sends for the same net precision)
+#   - the size arms: FT-007 (0.05 cap) won 3.1% of sends and FT-006 (0.2) 1.6%, a difference ~1,500 sends per arm show
+#     (~4-5 h); their net per attempt differed by ~15% (113 vs 97 lamports): ~180,000 sends per arm, out of reach (read
+#     the per-decision net with its interval: a large difference shows, a small one does not)
 # Read it with `arbx-report experiments <campaign dir>`: per arm attempts, landings and wins with 95% intervals, net per attempt
-# and per win, tips/gross and the meme / common wins from the ledger, the balance by band and trigger kind, and each arm
-# against its control.
+# and per win, tips/gross and the meme / common wins from the ledger, the balance by band and trigger kind, each arm against
+# its control per decision (the randomized unit) and per send, the factorial's cells.
+# Run (Cherry holds the binary, this file and its data files only):
+#   arbx check --config deploy/arbx-ft-x4size-frz.toml
+#   arbx campaign --name <ft> --config deploy/arbx-ft-x4size-frz.toml --mode canary --hours 12 --segment-min 60 --who <you> --detach
+# then pull each segment's attempts, copies, bundles, outcomes, ledger, snapshots, status, events, experiments.jsonl and
+# config.toml (decisions.jsonl too for the exact per-decision counts) and run `arbx-report experiments <campaign dir>`.
 #
 # arbx canary on the frz wallet (DRAFT, WP-07; WP-06's builder since the Stage-0 merge; docs/field-tests/README.md: FT-004
 # first live canary hour, FT-005 24 h canary).

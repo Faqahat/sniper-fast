@@ -1100,6 +1100,12 @@
      }
     },
     "ledger": {
+     "before_start_skipped": {
+      "equity_delta": 0,
+      "n": 0,
+      "pre_run": 0,
+      "trade_net": 0
+     },
      "dup_skipped": 0,
      "equity_delta_missing": 0,
      "equity_delta_sum": 10000,
@@ -1110,11 +1116,7 @@
       "rent_locked": 0,
       "rent_reclaimed": 0
      },
-     "pre_run_skipped": {
-      "equity_delta": 0,
-      "n": 0,
-      "trade_net": 0
-     },
+     "start_slot": 999,
      "summing_categories": {
       "fee_fail": -5000,
       "fee_other": 0,
@@ -2372,6 +2374,7 @@
       "arms": {
        "0.4": {
         "attempts": 2,
+        "decisions": 2,
         "failed_fees": 0,
         "gross_wins": 0,
         "land_rate": 0,
@@ -2385,6 +2388,7 @@
         "money_unknown": 0,
         "net_common": 0,
         "net_meme": 0,
+        "net_per_1k_decisions": 0,
         "net_per_attempt": 0,
         "net_per_attempt_ci95": [
          0,
@@ -2392,6 +2396,7 @@
         ],
         "net_per_hour_whole_run": 0,
         "net_per_win": null,
+        "net_sum_sq": 0,
         "net_total": 0,
         "tips_over_gross": null,
         "tips_wins": 0,
@@ -2404,11 +2409,13 @@
         "wins_common": 0,
         "wins_common_by_token": {},
         "wins_meme": 0,
+        "wins_per_1k_decisions": 0,
         "would_fail": 1,
         "would_fail_rate": 0.5
        },
        "0.6": {
         "attempts": 3,
+        "decisions": 5,
         "failed_fees": 5000,
         "gross_wins": 50000,
         "land_rate": 0.666667,
@@ -2422,6 +2429,7 @@
         "money_unknown": 0,
         "net_common": 0,
         "net_meme": 15000,
+        "net_per_1k_decisions": 2000000,
         "net_per_attempt": 3333.33333,
         "net_per_attempt_ci95": [
          -5000,
@@ -2429,6 +2437,7 @@
         ],
         "net_per_hour_whole_run": 14285714.3,
         "net_per_win": 15000,
+        "net_sum_sq": 250000000,
         "net_total": 10000,
         "tips_over_gross": 0.6,
         "tips_wins": 30000,
@@ -2441,6 +2450,7 @@
         "wins_common": 0,
         "wins_common_by_token": {},
         "wins_meme": 1,
+        "wins_per_1k_decisions": 200,
         "would_fail": 0,
         "would_fail_rate": 0
        }
@@ -2520,45 +2530,78 @@
       },
       "control": "0.6",
       "control_why": "the first arm configured",
+      "decisions_src": "decisions.jsonl",
       "key": "x4_share",
       "vs_control": {
        "0.4": {
-        "land_rate": {
-         "ci95": [
-          -1.200101,
-          -0.133232
+        "per_decision": {
+         "decisions": [
+          2,
+          5
          ],
-         "diff": -0.666667,
-         "fisher_p": 0.4,
-         "p_greater": 0.931981,
-         "p_less": 0.068019,
-         "p_two": 0.136037,
-         "rel": -1,
-         "z": -1.490712
-        },
-        "net_per_attempt_diff": -3333.33333,
-        "net_per_attempt_diff_ci95": [
-         -15000,
-         5000
-        ],
-        "sends_per_arm_for_win_rate": {
-         "+-30%": 370,
-         "+-50%": 137
-        },
-        "win_rate": {
-         "ci95": [
-          -0.866768,
-          0.200101
+         "net_per_1k_decisions": [
+          0,
+          2000000
          ],
-         "diff": -0.333333,
-         "fisher_p": 1,
-         "p_greater": 0.819345,
-         "p_less": 0.180655,
-         "p_two": 0.36131,
-         "rel": -1,
-         "z": -0.912871
+         "net_per_1k_decisions_diff": -2000000,
+         "net_per_1k_decisions_diff_ci95": [
+          -7944865.15,
+          3944865.15
+         ],
+         "wins": {
+          "ci95": [
+           -0.550609,
+           0.150609
+          ],
+          "diff": -0.2,
+          "fisher_p": 1,
+          "p_greater": 0.752738,
+          "p_less": 0.247262,
+          "p_two": 0.494525,
+          "rel": -1,
+          "z": -0.68313
+         }
         },
-        "win_rate_mde_rel": 50
+        "per_send": {
+         "land_rate": {
+          "ci95": [
+           -1.200101,
+           -0.133232
+          ],
+          "diff": -0.666667,
+          "fisher_p": 0.4,
+          "p_greater": 0.931981,
+          "p_less": 0.068019,
+          "p_two": 0.136037,
+          "rel": -1,
+          "z": -1.490712
+         },
+         "net_per_attempt_diff": -3333.33333,
+         "net_per_attempt_diff_ci95": [
+          -15000,
+          5000
+         ],
+         "sends_per_arm_for_win_rate": {
+          "+30%": 370,
+          "+50%": 137,
+          "-30%": 318,
+          "-50%": 105
+         },
+         "win_rate": {
+          "ci95": [
+           -0.866768,
+           0.200101
+          ],
+          "diff": -0.333333,
+          "fisher_p": 1,
+          "p_greater": 0.819345,
+          "p_less": 0.180655,
+          "p_two": 0.36131,
+          "rel": -1,
+          "z": -0.912871
+         },
+         "win_rate_mde_rel": 50
+        }
        }
       }
      }
@@ -2566,8 +2609,8 @@
     "money": {
      "landed_without_ledger": 0,
      "ledger_without_outcome": 0,
-     "pre_run_lines_of_our_attempts": 0,
-     "source": "ledger.jsonl (dup and pre_run lines left out), by the attempts' signatures"
+     "lines_before_start_of_our_attempts": 0,
+     "source": "ledger.jsonl as the Rust side counts it (no dup line, nothing at or before the campaign's start), by the attempts' signatures"
     },
     "segments": [
      "synth-p1"
@@ -2579,6 +2622,7 @@
      "arms": {
       "0.4": {
        "fewer_wins_p": 0.180655,
+       "fewer_wins_per_decision_p": 0.247262,
        "go": false,
        "go_stage1": false,
        "land_rate": 0,

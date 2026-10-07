@@ -1,8 +1,10 @@
 """WP-11: `arbx-report experiments` over a synthetic two-segment campaign with two experiments at once (X4 tip share
 x size cap, a 3 x 2 factorial): per arm attempts, landings and wins with intervals, net per attempt and per win,
 tips / gross, the meme and common wins by the route's mint, the balance by band and trigger kind and over the
-decisions, each arm against its control, the factorial's cells; money from the ledger across the segments, `pre_run`
-and `dup` lines left out (in R1 too); X2's two-sided trend test."""
+decisions, each arm against its control per decision and per send, the factorial's cells; money from the ledger across
+the segments as the Rust side counts it (no `dup` line, nothing at or before the campaign's start: the previous
+campaign's `pre_run` trade is out, a later segment's `pre_run` record of our own late landing is in; R1 too); X2's
+two-sided trend test."""
 import json
 import os
 import unittest
@@ -38,7 +40,7 @@ def ledger_line(sig: str, a, ok: bool, net: int, gross: int, tip: int, **kw) -> 
     return r
 
 
-def segment(root: str, name: str, k0: int, spec: list, extra_ledger: list) -> str:
+def segment(root: str, name: str, k0: int, spec: list, extra_ledger: list, snapshot_slot=None) -> str:
     """a canary segment: one attempt per spec row (x4 arm index, size arm index, band, kind, mint, outcome, net)"""
     d = os.path.join(root, name)
     os.makedirs(d)
@@ -48,6 +50,8 @@ def segment(root: str, name: str, k0: int, spec: list, extra_ledger: list) -> st
     with open(os.path.join(d, "stop.json"), "w") as f:
         json.dump({"schema": "arbx.stop/1.0", "ended_ns": start + HOUR, "reason": "deadline"}, f)
     gen.write_plain(d, "events.jsonl", "events", "1.0", [{"t_ns": start, "kind": "warmup_ready", "subsystem": "engine", "feed": None, "detail": {}}])
+    if snapshot_slot is not None:
+        gen.write_plain(d, "snapshots.jsonl", "snapshots", "1.0", [{"t_ns": start + 1, "slot": snapshot_slot, "slot_mismatch": False, "sol": 10 ** 9, "wsol": 10 ** 8}])
     gen.write_plain(d, "experiments.jsonl", "experiments", "1.0", [
         {"t_ns": start, "experiment": "x4", "event": "config", "key": "x4_share", "arms": X4, "weights": [1.0] * 3, "seed": 7,
          "scope": {"max_band": 2, "kinds": ["commit", "quiescent", "timeout", "fork"], "venues": []}, "unit": "decision"},
@@ -65,6 +69,8 @@ def segment(root: str, name: str, k0: int, spec: list, extra_ledger: list) -> st
             ledger.append(ledger_line(sig, i, True, net, net + 6000, 1000))
         elif final == "landed_fail":
             ledger.append(ledger_line(sig, i, False, -5000, 0, 0))
+        for line in ledger[-1:]:
+            line["slot"] = 1_100 + 10 * k0 + i
         decisions.append({"decision": 100 + i, "kind": kind, "routes": [], "experiments": {"x4_share": X4[xi], "size_max_sol": SIZE[si]}})
     gen.write_zjsonl(d, "attempts", "2.2", attempts)
     gen.write_zjsonl(d, "outcomes", "2.1", outcomes)
@@ -81,6 +87,10 @@ P2 = [(0, 1, 2, "commit", MEME, "landed_ok", 11_000), (1, 1, 0, "commit", USDC, 
       (0, 0, 0, "commit", USDC, "not_landed_expired", 0), (1, 0, 2, "commit", MEME, "not_landed_expired", 0), (2, 1, 1, "commit", MEME, "landed_ok", 9_000)]
 
 
+# p1's attempt 3 was final not landed in p1, but landed late (+1,500): only p2's pre-run fetch recorded it
+LATE = {("p1", 3): ("landed_ok", 1_500)}
+
+
 class Experiments(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -88,11 +98,16 @@ class Experiments(unittest.TestCase):
         root = cls.tmp.__enter__()
         cls.root = os.path.join(root, "camp")
         os.makedirs(cls.root)
-        # p1 carries the previous campaign's last trade (pre_run, not ours) and p2 a dup of p1's first win: neither counts
-        prev = ledger_line(gen.sg("previous-campaign"), None, True, 99_999, 105_999, 1000, pre_run=True)
-        cls.p1 = segment(cls.root, "c-p1", 0, P1, [prev])
-        dup = ledger_line(gen.sg("c-p1-0"), 0, True, 2_000, 8_000, 1000, pre_run=True, dup=True)
-        cls.p2 = segment(cls.root, "c-p2", 1, P2, [dup])
+        # the campaign starts at p1's first snapshot (slot 1,000). p1 carries the previous campaign's last trade (pre_run,
+        # slot 900, not ours) and p2 a dup of p1's first win: neither counts; p2's pre-run record of p1's late landing (slot
+        # 1,150, after the start) counts, as in spend.json
+        prev = ledger_line(gen.sg("previous-campaign"), None, True, 99_999, 105_999, 1000, pre_run=True, slot=900)
+        cls.p1 = segment(cls.root, "c-p1", 0, P1, [prev], snapshot_slot=1_000)
+        dup = ledger_line(gen.sg("c-p1-0"), 0, True, 2_000, 8_000, 1000, pre_run=True, dup=True, slot=1_100)
+        late = ledger_line(gen.sg("c-p1-3"), None, True, 1_500, 7_500, 1000, pre_run=True, slot=1_150)
+        cls.p2 = segment(cls.root, "c-p2", 1, P2, [dup, late], snapshot_slot=1_200)
+        with open(os.path.join(cls.root, "campaign.json"), "w") as f:
+            json.dump({"schema": "arbx.campaign/1.1", "name": "camp", "segments": [{"name": "c-p1"}, {"name": "c-p2"}]}, f)
         cls.camp = model.Campaign.open(cls.root)
         cls.sec = r10_experiments.run(cls.camp, synth_ctx())
         cls.d = cls.sec["data"]
@@ -102,7 +117,15 @@ class Experiments(unittest.TestCase):
         cls.tmp.__exit__(None, None, None)
 
     def rows(self, pred):
-        return [r for seg, spec in (("p1", P1), ("p2", P2)) for r in spec if pred(r)]
+        """the spec rows as they ended (LATE's late landing applied)"""
+        out = []
+        for seg, spec in (("p1", P1), ("p2", P2)):
+            for i, r in enumerate(spec):
+                if (seg, i) in LATE:
+                    r = r[:5] + LATE[(seg, i)]
+                if pred(r):
+                    out.append(r)
+        return out
 
     def test_per_arm_money_from_the_ledger(self):
         x4 = self.d["experiments"]["x4"]
@@ -126,16 +149,17 @@ class Experiments(unittest.TestCase):
         self.assertIn(50_000, [r[6] for r in self.rows(lambda r: r[1] == 0)])
         # the previous campaign's pre_run trade (+99,999) and p2's dup of p1's first win are in no arm's money
         total = sum(a["net_total"] for a in size["arms"].values())
-        self.assertEqual(total, sum(r[6] for r in P1 + P2))
-        self.assertEqual(self.d["money"]["pre_run_lines_of_our_attempts"], 0)
+        self.assertEqual(total, sum(r[6] for r in self.rows(lambda r: True)), "the late landing in, the previous campaign's trade out")
+        self.assertEqual((self.d["money"]["lines_before_start_of_our_attempts"], self.d["money"]["ledger_without_outcome"]), (0, 1))
         # net per hour as if the whole run were on the arm: its net over its weight's share of the 2 trading hours
         self.assertEqual(size["arms"]["0.2"]["net_per_hour_whole_run"], stats._clean(size["arms"]["0.2"]["net_total"] / 0.5 / 2))
 
     def test_meme_and_common_by_mint(self):
         a = self.d["experiments"]["x4"]["arms"]["0.1"]
-        # x4 0.1's wins: USDC (2,000), the CAKE look-alike (4,000; a meme by mint), the pump meme (11,000)
-        self.assertEqual((a["wins_meme"], a["wins_common"], a["net_meme"], a["net_common"]), (2, 1, 15_000, 2_000))
-        self.assertEqual(a["wins_common_by_token"], {"USDC": 1})
+        # x4 0.1's wins: USDC (2,000), the late USDC landing (1,500), the CAKE look-alike (4,000; a meme by mint), the pump
+        # meme (11,000)
+        self.assertEqual((a["wins_meme"], a["wins_common"], a["net_meme"], a["net_common"]), (2, 2, 15_000, 3_500))
+        self.assertEqual(a["wins_common_by_token"], {"USDC": 2})
         self.assertIn(CAKE_LOOKALIKE, a["meme_lookalikes"])
         self.assertEqual((tokens.classify("4qQeZ5LwSz6HuupUu8jCtgXyW1mYQcNbFAW1sWZp89HL"), tokens.symbol("METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL")), ("common", "MET"))
 
@@ -148,8 +172,17 @@ class Experiments(unittest.TestCase):
         self.assertEqual(set(b), {"decisions", "sends", "sends_chi2", "by_band", "by_kind", "band_independence", "kind_independence"})
         vs = self.d["experiments"]["x4"]["vs_control"]["0.35"]
         a, c = self.d["experiments"]["x4"]["arms"]["0.35"], self.d["experiments"]["x4"]["arms"]["0.1"]
-        self.assertEqual(vs["win_rate"], stats.two_proportions(a["wins"], a["attempts"], c["wins"], c["attempts"]))
-        self.assertEqual(vs["net_per_attempt_diff"], stats._clean(a["net_per_attempt"] - c["net_per_attempt"]))
+        self.assertEqual(vs["per_send"]["win_rate"], stats.two_proportions(a["wins"], a["attempts"], c["wins"], c["attempts"]))
+        self.assertEqual(vs["per_send"]["net_per_attempt_diff"], stats._clean(a["net_per_attempt"] - c["net_per_attempt"]))
+        self.assertEqual(set(vs["per_send"]["sends_per_arm_for_win_rate"]), {"+30%", "-30%", "+50%", "-50%"})
+        # per decision (the randomized unit): every decision of the arm, sent or not (decisions.jsonl's counts)
+        self.assertEqual(self.d["experiments"]["x4"]["decisions_src"], "decisions.jsonl")
+        self.assertEqual((a["decisions"], c["decisions"]), (5, 5))
+        pd = vs["per_decision"]
+        self.assertEqual(pd["wins"], stats.two_proportions(a["wins"], 5, c["wins"], 5))
+        self.assertEqual(pd["net_per_1k_decisions"], [stats._clean(1000 * a["net_total"] / 5), stats._clean(1000 * c["net_total"] / 5)])
+        lo, hi = pd["net_per_1k_decisions_diff_ci95"]
+        self.assertTrue(lo <= pd["net_per_1k_decisions_diff"] <= hi)
         self.assertEqual(self.d["experiments"]["size"]["control"], "0.05")
 
     def test_factorial_cells(self):
@@ -159,15 +192,20 @@ class Experiments(unittest.TestCase):
         rs = self.rows(lambda r: r[1] == 1 and r[0] == 2 and r[2] <= 2)
         self.assertEqual((cell["attempts"], cell["wins"], cell["net_total"]), (len(rs), sum(r[5] == "landed_ok" for r in rs), sum(r[6] for r in rs)))
 
-    def test_r1_leaves_out_pre_run_lines(self):
+    def test_r1_counts_from_the_campaign_start(self):
         seg = model.Segment(self.p1)
+        self.assertEqual((seg.start_slot, seg.own_start_slot), (1_000, 1_000))
         sec = r1_money.run(seg, synth_ctx())
         self.assertEqual(sec["data"]["trading"]["trade_net"], sum(r[6] for r in P1), "the previous campaign's +99,999 is not this segment's")
-        self.assertEqual(sec["data"]["ledger"]["pre_run_skipped"], {"n": 1, "equity_delta": 99_999, "trade_net": 99_999})
+        self.assertEqual(sec["data"]["ledger"]["before_start_skipped"], {"n": 1, "pre_run": 1, "equity_delta": 99_999, "trade_net": 99_999})
         self.assertTrue(any("pre_run" in c for c in sec["caveats"]))
         self.assertEqual(len(seg.ledger_by_sig), len(seg.ledger) + 1, "the recompute still finds the pre-run transaction's line")
+        # p2 opened alone finds its campaign's start (campaign.json beside it) and counts the late landing it recorded
+        p2 = model.Segment(self.p2)
+        self.assertEqual((p2.start_slot, p2.own_start_slot), (1_000, 1_200))
+        self.assertEqual(r1_money.run(p2, synth_ctx())["data"]["trading"]["trade_net"], sum(r[6] for r in P2) + 1_500)
         money = runner._campaign_money_v2(self.camp.segments)
-        self.assertEqual(money["trade_net"], sum(r[6] for r in P1 + P2))
+        self.assertEqual(money["trade_net"], sum(r[6] for r in P1 + P2) + 1_500)
 
     def test_the_cli_reads_a_campaign_directory(self):
         from arbx_report import __main__ as cli

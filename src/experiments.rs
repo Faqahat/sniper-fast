@@ -26,13 +26,15 @@
 //!   - `margin` (on-chain margin floor, F23 / OD-5): replaces `[send_policy] margin_floor` (the min_profit's floor and
 //!     the BAM bid's bar room).
 //!   - `x2` (send delay): a tokio sleep on the send task before the fire, never on the engine thread; recorded on
-//!     would-sends too (nothing is fired there).
+//!     would-sends too (nothing is fired there). The SendGate is not read again after the sleep: a copy can leave up to
+//!     20 ms after a pause or a stop (as one waiting in the rate queue can); the on-chain guard holds either way.
 //!   - `x8` (block assignment, 10-minute blocks): needs WP-14's discovery connection, not built: `enabled = true` is
 //!     refused. The block assignment ([`block_of`]) is here for it.
 //! - **Records**: decisions.jsonl `experiments` holds every arm assigned to the decision (the randomization, scope
 //!   aside: the balance check's unit); attempts.jsonl `experiments` holds the arms that applied to the attempt (in
 //!   scope), and `tip.arm` the share when X4's arm replaced the band's; experiments.jsonl holds one `config` line per
-//!   enabled experiment at the run's start (and `block_switch` lines for block experiments).
+//!   enabled experiment at the run's start (and `block_switch` lines for block experiments); the file is opened at its
+//!   first line, so a run without experiments writes no such file.
 use crate::venues::Venue;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -282,6 +284,7 @@ fn arms_check<T: PartialEq + std::fmt::Debug>(name: &str, arms: &[T], weights: &
     }
     if !weights.is_empty() && weights.len() != arms.len() { return Err(format!("[experiments.{name}] weights: one per arm ({}), not {}", arms.len(), weights.len())); }
     if weights.iter().any(|w| !w.is_finite() || *w <= 0.0) { return Err(format!("[experiments.{name}] weights {weights:?}: each > 0")); }
+    if weights.iter().any(|w| *w > 1e9) { return Err(format!("[experiments.{name}] weights {weights:?}: each at most 1e9 (relative weights)")); }
     Ok(())
 }
 
@@ -393,6 +396,12 @@ impl<T: Copy> Exp<T> {
         let i = assign(seed, name, unit, &self.weights);
         Arm { idx: i as u8, value: self.arms[i], scope: self.scope }
     }
+    /// one positive weight per arm (at most 1e9), 1 to `MAX_ARMS` arms, every arm within `ok` (what `ExperimentsCfg::compile`
+    /// makes; a record read back must be)
+    fn valid(&self, ok: impl Fn(&T) -> bool) -> bool {
+        (1..=MAX_ARMS).contains(&self.arms.len()) && self.weights.len() == self.arms.len() && self.weights.iter().all(|w| w.is_finite() && *w > 0.0 && *w <= 1e9)
+            && self.scope.max_band < N_BANDS && self.arms.iter().all(ok)
+    }
 }
 
 /// The experiments a run applies: journaled with engine_init (a replay assigns as the run did) and written to meta.json
@@ -417,6 +426,13 @@ pub const KEYS: [(&str, &str); 4] = [("x2", "x2_delay_ms"), ("x4", "x4_share"), 
 impl Experiments {
     /// nothing enabled
     pub fn is_empty(&self) -> bool { self.x2.is_none() && self.x4.is_none() && self.size.is_none() && self.margin.is_none() }
+
+    /// every experiment's arms and weights are whole and within `ExperimentsCfg::check`'s bounds (an engine_init record
+    /// read back: else the record is not read)
+    pub fn valid(&self) -> bool {
+        self.x2.as_ref().is_none_or(|e| e.valid(|d| *d <= MAX_DELAY_MS)) && self.x4.as_ref().is_none_or(|e| e.valid(|s| s.is_finite() && (0.0..=1.0).contains(s)))
+            && self.size.as_ref().is_none_or(|e| e.valid(|s| s.is_finite() && *s > 0.0)) && self.margin.as_ref().is_none_or(|e| e.valid(|f| *f >= 1))
+    }
 
     /// What every enabled experiment assigns decision `id`
     pub fn assign(&self, id: u64) -> Arms {
@@ -507,8 +523,9 @@ impl Arms {
     }
 }
 
-/// SOL to lamports, rounded (0.05 SOL is 50,000,000 lamports)
-pub fn sol_lamports(sol: f64) -> u64 { (sol * 1e9).round() as u64 }
+/// SOL to lamports as the ladder (`Engine::ladder`) and the executor's caps convert them: truncated (0.05 SOL is
+/// 50,000,000 lamports), so an arm equal to a rung or a cap is that rung or cap to the lamport
+pub fn sol_lamports(sol: f64) -> u64 { (sol * 1e9) as u64 }
 
 #[cfg(test)]
 mod tests;

@@ -150,8 +150,8 @@ def _money_line(seg, r1) -> dict:
 
 
 def _campaign_money_v2(segs) -> dict:
-    """The v2 segments' ledgers summed (`Segment.ledger` leaves out a later segment's `dup` lines, review WP-07 #11, and
-    the `pre_run` lines, WP-11: the transactions from before each segment's stream, the previous campaign's included)"""
+    """The v2 segments' ledgers summed (`Segment.ledger` leaves out a later segment's `dup` lines, review WP-07 #11, and,
+    WP-11, the lines at or before the campaign's start: the previous campaign's, as `ledger::history` does)"""
     cats = {c: 0 for c in ledgercalc.SUMMING}
     trade_net = 0
     for s in segs:
