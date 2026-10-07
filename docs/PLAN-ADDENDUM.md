@@ -442,3 +442,73 @@ arbx has no runtime, build, test or tooling dependency on arb-lab, either locall
   - a shadow test (3-leg routes in `quote` mode: priced, no phantom or poisoned decision, real or not, latency);
   - then a dry run (verify and simulate);
   - then live, which is the owner's call.
+
+## WP-25: Shreder trial readiness: record-only preconf feed and trial analysis (owner request, 2026-10-07: "we need system ready to test")
+
+**Why:** Shreder offers a 2-hour free trial of Binary with its Preconfs add-on.
+- A **preconfirmation** is a copy of a transaction taken when a connected leader schedules it, before it is made into entries and shreds. Shreder claims it arrives "typically 5–50 ms ahead of leader shreds".
+- The landing study found we lose by tens of ms in transit.
+- Two hours is short, so recording, the pre-flight check and the analysis must all be ready before the owner requests access.
+
+**Facts** (docs.shreder.xyz and github.com/shrederxyz/shreder-rust-example, checked 2026-10-07):
+- **Service:** gRPC `shreder_binary.ShrederBinaryService/SubscribeBinaryTransactions`.
+  - The client sends a `SubscribeBinaryTransactionsRequest`: a map of named filters.
+  - Each response holds `filters`, then `transaction { transaction { signatures, binary_transaction }, slot, preconf }`, then a server `created_at` timestamp.
+  - `binary_transaction` is the bincode `VersionedTransaction`, which is the wire format.
+- **Filters:**
+  - `account_include` matches any listed account; `account_required` matches all of them.
+  - `account_exclude` is not allowed together with `preconf`.
+  - `preconf` true selects the preconf path only; false or unset selects the shred path only.
+  - Filters match static keys only: Shreder does not resolve lookup tables.
+  - A transaction can arrive once from each path.
+- **Endpoints and access:**
+  - Plain-text h2c on port 9991: `fra|ams|ny|tyo.binary.shreder.xyz`. Their preconf example uses `fra-allnodes.binary.shreder.xyz`.
+  - Their examples send no token, so access is probably an IP allowlist (Cherry).
+  - From Cherry, the ping is 0.11 ms to `fra`, 0.38 ms to `fra-allnodes` and 5.9 ms to `ams`. TCP 9991 is reachable on all three.
+- **Coverage:** it "depends on whether the current leader is connected". For comparison, Helius's preconfirmations (from BAM) cover about 34% of stake.
+- **No guarantee:** a preconfirmed transaction can still be dropped.
+
+**What:**
+1. **Feed kind `shreder`** (src/feeds):
+   - One connection per `[[feed]]`. `source = "preconf" | "shred"` sets the filter's `preconf` flag.
+   - `account_include`: empty means the watched venue programs. `all = true` sends no account filter, and Interest filters locally (this catches aggregator swaps whose venue program is in a lookup table).
+   - Optional `token_env` / `token_header`.
+   - Reconnects with backoff, and the wire bytes are decoded with the existing transaction parser.
+   - The server's `created_at` gives the provider lag.
+2. **Feed role** `role = "trigger" | "record"`:
+   - The default is trigger, and it is not serialized while default, so existing config hashes are unchanged.
+   - A record arrival only stores its time (txarr, feedhealth, per-feed leads). It never processes, triggers, registers a write set or a hint, and never moves the engine's first arrival, first shred, shred slot, PoH or executor arrival.
+   - Decisions are identical with and without record feeds.
+   - txarr shows a record feed's lead over the engine's first arrival.
+   - A per-slot preconf count gives coverage by leader.
+3. **`arbx feed-probe --config <cfg> --feed <name> [--seconds N]`:** connects one configured feed with no engine, no state stream and no sends. It prints:
+   - the connection result, including the gRPC status on refusal;
+   - the message rate and the preconf true/false counts;
+   - decode errors, slots, and the `created_at` lag.
+
+   It is the trial's first minute. It is tested against a local mock server, never against Shreder before access.
+4. **Analysis** (`arbx-report feed-trial`, on a segment):
+   - the record feeds' delivery share of our watched transactions;
+   - leads against the DoubleZero first shred, the engine's first arrival and the trigger's commit;
+   - coverage by leader and client kind (jito / bam / other);
+   - preconfirmed transactions never seen in shreds (dropped);
+   - for our attempts, how early a preconf would have shown the trigger relative to our decision and send;
+   - lost attempts whose closer was visible on preconf before we sent (sends we could skip);
+   - the accuracy monitor's exactness on preconf-first triggers;
+   - Shreder's shred path against DoubleZero.
+5. **Trial config and test plan:**
+   - `deploy/arbx-ft-shreder-frz.toml`: the live config plus two record feeds, `shreder-pre` (preconf) and `shreder-bin` (shred).
+   - It runs as one segment of the live campaign, so trading is unchanged and Haan keeps one connection.
+   - The test plan is FT-016, with its pass and fail rules written before the run.
+
+**Not in this WP: trading on preconfs.** The engine decides on committed state (the Haan account update, about 14 ms after the first shred). A preconf only makes us faster once we price from the transaction itself (the accuracy monitor's prediction) and send before the state commits. That would be a later WP, if the trial shows the lead and coverage are real.
+
+**Cost bar:** Binary starts at $1,000/month and the Preconfs add-on is extra. Today's profit is far below that, so buying needs evidence of a large gain.
+
+**Acceptance:**
+- Unit tests: decode, the filter request, and the role semantics.
+- A mock-server integration test.
+- Identical decisions with and without record feeds, and replay identity with a record feed.
+- The engine benchmark unchanged.
+- `arbx check` passes on every deploy config, with hashes unchanged.
+- The field test is the trial itself (FT-016). The owner requests access once WP-25 is merged and the binary is on Cherry.
