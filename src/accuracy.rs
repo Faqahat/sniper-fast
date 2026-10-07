@@ -142,6 +142,37 @@ pub fn exact_out_model(venue: Venue, zfo: bool, exact_out: bool) -> Option<&'sta
 /// venue computes where the crate models it, else the smallest input that buys `amount`), on `v`: the venue's own
 /// execution of a third party's swap (`quote::Use::Third`). Ok: the prediction and the swap's input
 pub fn predict(m: &PoolMeta, v: &View, zfo: bool, amount: u64, exact_out: bool) -> Result<(Pred, u64), NoPred> {
+    predict_full(m, v, zfo, amount, exact_out).map(|p| (p.pred, p.amount_in))
+}
+
+/// A prediction with what an overlay (`overlay::post_swap`) needs beyond it: the same computation, so the overlay and
+/// the monitor cannot disagree
+#[derive(Clone, Debug)]
+pub struct Predicted {
+    pub pred: Pred,
+    pub amount_in: u64,
+    /// the user's output
+    pub out: u64,
+    pub detail: Detail,
+}
+
+/// The post-state's parts a `Pred` does not carry
+#[derive(Clone, Debug)]
+pub enum Detail {
+    /// AMM v4, PumpSwap and the CLMM venues: nothing beyond the prediction
+    None,
+    /// CPMM: what the swap leaves owed
+    Cpmm(CpmmBook),
+    /// DLMM: the pair's parameters after `update_references`, the volatility accumulator in the bin the swap ends on
+    /// and every bin the walk took from, in walk order
+    Dlmm { p: dlmm::DlmmParams, va: u64, fills: Vec<dlmm::BinFill> },
+    /// DAMM v2: the pool exactly as the next swap reads it
+    Damm(dammv2::DammPool),
+}
+
+/// [`predict`] with its [`Detail`]
+pub fn predict_full(m: &PoolMeta, v: &View, zfo: bool, amount: u64, exact_out: bool) -> Result<Predicted, NoPred> {
+    let done = |pred: Pred, amount_in: u64, out: u64, detail: Detail| Ok(Predicted { pred, amount_in, out, detail });
     let src = quote::Src { get: v.get, arrays: v.arrays, usable: &|_| true, clock: quote::clock(v.slot, v.now_unix) };
     let leg = quote::leg(m, zfo, &src, Use::Third).map_err(no_pred)?;
     // PLAN-ADDENDUM WP-21: a CLMM swap's exact walk (exact in, or swap_v2's exact out) and the pool it leaves
@@ -150,16 +181,16 @@ pub fn predict(m: &PoolMeta, v: &View, zfo: bool, amount: u64, exact_out: bool) 
             let w = c.fills(amount, exact_out, &mut |_| {}).map_err(clmm_no_pred)?;
             let p = w.post;
             let vars = p.dynamic.map(|d| vec![d.idx_ref as i64, d.v_ref as i64, d.va as i64, d.last_update.min(i64::MAX as u64) as i64]);
-            return Ok((Pred::Clmm(ClmmPost { sqrt_price: p.sqrt_price, tick: p.tick, liquidity: p.liquidity, fee_growth: p.fee_growth_global,
-                protocol_fees: p.protocol_fees, fund_fees: p.fund_fees, side0: c.fee_on_token0, vars }), w.quote.spent));
+            return done(Pred::Clmm(ClmmPost { sqrt_price: p.sqrt_price, tick: p.tick, liquidity: p.liquidity, fee_growth: p.fee_growth_global,
+                protocol_fees: p.protocol_fees, fund_fees: p.fund_fees, side0: c.fee_on_token0, vars }), w.quote.spent, w.quote.out, Detail::None);
         }
         AnyLeg::Whirl(c) => {
             let w = c.fills(amount, exact_out, &mut |_| {}).map_err(clmm_no_pred)?;
             let p = w.post;
             let vars = p.adaptive.map(|a| vec![a.last_reference_update.min(i64::MAX as u64) as i64, a.last_major_swap.min(i64::MAX as u64) as i64, a.v_ref as i64,
                 a.idx_ref as i64, a.va as i64]);
-            return Ok((Pred::Clmm(ClmmPost { sqrt_price: p.sqrt_price, tick: p.tick, liquidity: p.liquidity, fee_growth: p.fee_growth_global,
-                protocol_fees: p.protocol_fee_owed, fund_fees: 0, side0: zfo, vars }), w.quote.spent));
+            return done(Pred::Clmm(ClmmPost { sqrt_price: p.sqrt_price, tick: p.tick, liquidity: p.liquidity, fee_growth: p.fee_growth_global,
+                protocol_fees: p.protocol_fee_owed, fund_fees: 0, side0: zfo, vars }), w.quote.spent, w.quote.out, Detail::None);
         }
         _ => {}
     }
@@ -175,58 +206,65 @@ pub fn predict(m: &PoolMeta, v: &View, zfo: bool, amount: u64, exact_out: bool) 
         let fee = |bps: u64| cdiv(q as u128 * bps as u128, 10_000);
         let kept = (quote.spent as u128).checked_sub(fee(p.fees.protocol).ok_or(NoPred::Quote)? + fee(p.fees.creator).ok_or(NoPred::Quote)?).ok_or(NoPred::Quote)?;
         let base_left = (b as u128).checked_sub(quote.out as u128).ok_or(NoPred::Quote)?;
-        return Ok((Pred::Cp { r0: base_left, r1: qv as u128 + kept }, quote.spent));
+        return done(Pred::Cp { r0: base_left, r1: qv as u128 + kept }, quote.spent, quote.out, Detail::None);
     }
     let amount_in = if exact_out { crate::venues::solve_exact_in(amount, |x| leg.quote(x).ok().map(|q| q.out)).ok_or(NoPred::Quote)? } else { amount };
-    let pred = match &leg.any {
-        AnyLeg::Dlmm(_) => {
-            let mut fills: Vec<(i32, u64, u64)> = Vec::new();
-            let w = leg.fills(amount_in, &mut |b| fills.push((b.id, b.paid[0], b.taken[0]))).ok_or(NoPred::Quote)?.map_err(no_pred)?;
+    let (pred, out, detail) = match &leg.any {
+        AnyLeg::Dlmm(d) => {
+            let mut fills: Vec<dlmm::BinFill> = Vec::new();
+            let w = leg.fills(amount_in, &mut |b| fills.push(*b)).ok_or(NoPred::Quote)?.map_err(no_pred)?;
             let mut bins = Vec::with_capacity(fills.len());
-            for (id, paid, taken) in fills {
-                let (x, y) = bin_of(v.arrays, v.get, id).ok_or(NoPred::DlmmArray)?;
+            for b in &fills {
+                let (x, y) = bin_of(v.arrays, v.get, b.id).ok_or(NoPred::DlmmArray)?;
+                let (paid, taken) = (b.paid[0], b.taken[0]);
                 let (nx, ny) = if zfo { (x.checked_add(paid), y.checked_sub(taken)) } else { (x.checked_sub(taken), y.checked_add(paid)) };
-                bins.push((id, nx.ok_or(NoPred::Quote)?, ny.ok_or(NoPred::Quote)?));
+                bins.push((b.id, nx.ok_or(NoPred::Quote)?, ny.ok_or(NoPred::Quote)?));
             }
-            Pred::Dlmm { active: w.end, bins }
+            let va = d.va(w.end).ok_or(NoPred::Quote)?;
+            (Pred::Dlmm { active: w.end, bins }, w.quote.out, Detail::Dlmm { p: d.p, va, fills })
         }
         AnyLeg::Damm(_) => {
             // the full port: the pool exactly as the next swap reads it (the mints were scanned by `quote::leg`)
             let mut p = dammv2::decode(&get(&m.pool)?.data).ok_or(NoPred::Snapshot)?;
             p.transfer_fee_known_zero = true;
-            let (_, after) = dammv2::swap_exact_in(&p, zfo, amount_in, v.slot, v.now_unix).map_err(|_| NoPred::Quote)?;
-            Pred::Damm { sqrt_price: after.sqrt_price }
+            let (out, after) = dammv2::swap_exact_in(&p, zfo, amount_in, v.slot, v.now_unix).map_err(|_| NoPred::Quote)?;
+            (Pred::Damm { sqrt_price: after.sqrt_price }, out, Detail::Damm(after))
         }
         AnyLeg::Amm(a) => {
             let q = leg.quote(amount_in).map_err(no_pred)?;
             let (r_in, r_out) = (a.r_in as u128 + q.spent as u128, a.r_out as u128 - q.out as u128);
-            if zfo { Pred::Cp { r0: r_in, r1: r_out } } else { Pred::Cp { r0: r_out, r1: r_in } }
+            (if zfo { Pred::Cp { r0: r_in, r1: r_out } } else { Pred::Cp { r0: r_out, r1: r_in } }, q.out, Detail::None)
         }
         AnyLeg::Cpmm(c) => {
             let q = leg.quote(amount_in).map_err(no_pred)?;
             let pool = get(&m.pool)?;
             let cfg = get(m.extra.first().ok_or(NoPred::Snapshot)?)?;
-            let (r_in, r_out) = cpmm_post(&pool.data, &cfg.data, c, amount_in, q.out).ok_or(NoPred::Quote)?;
-            if zfo { Pred::Cp { r0: r_in, r1: r_out } } else { Pred::Cp { r0: r_out, r1: r_in } }
+            let book = cpmm_book(&pool.data, &cfg.data, c, amount_in, q.out).ok_or(NoPred::Quote)?;
+            let (r_in, r_out) = cpmm_post(c, amount_in, q.out, &book).ok_or(NoPred::Quote)?;
+            (if zfo { Pred::Cp { r0: r_in, r1: r_out } } else { Pred::Cp { r0: r_out, r1: r_in } }, q.out, Detail::Cpmm(book))
         }
         AnyLeg::Pump(p) => {
             let q = leg.quote(amount_in).map_err(no_pred)?;
             let (b, qv) = (token_amount(get(&m.vault0)?).ok_or(NoPred::Snapshot)?, token_amount(get(&m.vault1)?).ok_or(NoPred::Snapshot)?);
             let (b2, q2) = pump_post(p, b, qv, amount_in, q.out, q.spent).ok_or(NoPred::Quote)?;
-            Pred::Cp { r0: b2, r1: q2 }
+            (Pred::Cp { r0: b2, r1: q2 }, q.out, Detail::None)
         }
         // (handled above)
         AnyLeg::RayClmm(_) | AnyLeg::Whirl(_) => return Err(NoPred::Quote),
     };
-    Ok((pred, amount_in))
+    done(pred, amount_in, out, detail)
 }
 
 /// ⌈a/b⌉
 fn cdiv(a: u128, b: u128) -> Option<u128> { if b == 0 { None } else { Some(a.div_ceil(b)) } }
 
-/// CPMM's effective reserves (in, out) after `x` in and `out` out (raydium-cp-swap `swap_base_input`): the protocol and
-/// fund shares of the trade fee and the creator fee become owed
-fn cpmm_post(pool: &[u8], cfg: &[u8], c: &cpmm::CpmmLeg, x: u64, out: u64) -> Option<(u128, u128)> {
+/// What a CPMM swap leaves owed (raydium-cp-swap `swap_base_input`): the protocol and fund shares of the trade fee and
+/// the creator fee on the input side, the creator fee skimmed from the gross output on the output side
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CpmmBook { pub protocol: u64, pub fund: u64, pub creator_in: u64, pub creator_out: u64 }
+
+/// [`CpmmBook`] for `x` in and `out` to the user
+fn cpmm_book(pool: &[u8], cfg: &[u8], c: &cpmm::CpmmLeg, x: u64, out: u64) -> Option<CpmmBook> {
     const RATE: u128 = 1_000_000;
     let rate = |o: usize| u64_at(cfg, o).map(|v| v as u128);
     let (t, p, f) = (rate(cpmm::off::C_TRADE)?, rate(cpmm::off::C_PROTOCOL)?, rate(cpmm::off::C_FUND)?);
@@ -239,14 +277,20 @@ fn cpmm_post(pool: &[u8], cfg: &[u8], c: &cpmm::CpmmLeg, x: u64, out: u64) -> Op
         let cr = total * creator / (t + creator);
         (total - cr, cr)
     } else { (cdiv(x * t, RATE)?, 0) };
-    let owed_in = trade_fee * p / RATE + trade_fee * f / RATE + creator_in;
-    let r_in = (c.r_in as u128 + x).checked_sub(owed_in)?;
-    let gone_out = if on_input { out as u128 } else {
-        // the creator fee skimmed from the gross output stays owed: the effective reserve loses the gross
+    let creator_out = if on_input { 0 } else {
+        // the gross output, before the creator fee the program skims and keeps owed
         let net = x - trade_fee;
-        net * c.r_out as u128 / (c.r_in as u128 + net)
+        (net * c.r_out as u128 / (c.r_in as u128 + net)).checked_sub(out as u128)?
     };
-    Some((r_in, (c.r_out as u128).checked_sub(gone_out)?))
+    let fit = |v: u128| u64::try_from(v).ok();
+    Some(CpmmBook { protocol: fit(trade_fee * p / RATE)?, fund: fit(trade_fee * f / RATE)?, creator_in: fit(creator_in)?, creator_out: fit(creator_out)? })
+}
+
+/// CPMM's effective reserves (in, out) after `x` in and `out` to the user: what becomes owed (`b`) leaves them
+fn cpmm_post(c: &cpmm::CpmmLeg, x: u64, out: u64, b: &CpmmBook) -> Option<(u128, u128)> {
+    let owed_in = b.protocol as u128 + b.fund as u128 + b.creator_in as u128;
+    let r_in = (c.r_in as u128 + x as u128).checked_sub(owed_in)?;
+    Some((r_in, (c.r_out as u128).checked_sub(out as u128 + b.creator_out as u128)?))
 }
 
 /// PumpSwap's vaults (base, quote) after a swap: a sell (`p.sell`, base `x` in) pays `out` and sends the protocol and

@@ -357,7 +357,9 @@ impl<'a> DlmmLeg<'a> {
         }
     }
 
-    fn va(&self, id: i32) -> Option<u64> {
+    /// the volatility accumulator in bin `id` (`update_volatility_accumulator`): what the pair holds after a swap that
+    /// ends there
+    pub fn va(&self, id: i32) -> Option<u64> {
         let d = (self.p.idx_ref as i64 - id as i64).unsigned_abs();
         Some(self.p.v_ref.checked_add(d.checked_mul(BPS)?)?.min(self.p.max_va))
     }

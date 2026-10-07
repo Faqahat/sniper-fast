@@ -21,11 +21,11 @@ use std::sync::{Arc, OnceLock};
 const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/venue-parity");
 
 /// one fixture: the pool's accounts (owner, data) at one slot, and that slot's Clock
-struct Fx { venue: Venue, pool: Pk, slot: u64, unix: i64, accts: HashMap<Pk, (Pk, Vec<u8>)> }
+pub(crate) struct Fx { pub venue: Venue, pub pool: Pk, pub slot: u64, pub unix: i64, pub accts: HashMap<Pk, (Pk, Vec<u8>)> }
 
 fn pk58(s: &str) -> Pk { crate::tx::pk(s) }
 
-fn fixtures() -> &'static HashMap<Pk, Fx> {
+pub(crate) fn fixtures() -> &'static HashMap<Pk, Fx> {
     static F: OnceLock<HashMap<Pk, Fx>> = OnceLock::new();
     F.get_or_init(|| {
         let mut out = HashMap::default();
@@ -45,7 +45,7 @@ fn fixtures() -> &'static HashMap<Pk, Fx> {
     })
 }
 
-fn swaps() -> &'static Vec<Value> {
+pub(crate) fn swaps() -> &'static Vec<Value> {
     static S: OnceLock<Vec<Value>> = OnceLock::new();
     S.get_or_init(|| {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(format!("{DIR}/real-swaps.json")).unwrap()).unwrap();
@@ -58,7 +58,7 @@ fn find(prefix: &str) -> &'static Fx { fixtures().values().find(|f| crate::tx::b
 fn hex(s: &str) -> Vec<u8> { (0..s.len() / 2).map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap()).collect() }
 
 /// the fixture's accounts as store versions, with byte patches applied ([key, offset, hex])
-fn accounts(fx: &Fx, patches: &Value) -> HashMap<Pk, Acct> {
+pub(crate) fn accounts(fx: &Fx, patches: &Value) -> HashMap<Pk, Acct> {
     let mut m: HashMap<Pk, Vec<u8>> = fx.accts.iter().map(|(k, (_, d))| (*k, d.clone())).collect();
     for p in patches.as_array().into_iter().flatten() {
         let (k, o, b) = (pk58(p[0].as_str().unwrap()), p[1].as_u64().unwrap() as usize, hex(p[2].as_str().unwrap()));
@@ -71,7 +71,7 @@ fn accounts(fx: &Fx, patches: &Value) -> HashMap<Pk, Acct> {
 fn patch(k: &Pk, off: usize, b: &[u8]) -> Value { serde_json::json!([crate::tx::b58(k), off, b.iter().map(|x| format!("{x:02x}")).collect::<String>()]) }
 
 /// the state a real swap left: `pre` with the words it changed
-fn post_of(pre: &HashMap<Pk, Acct>, post: &Value) -> HashMap<Pk, Acct> {
+pub(crate) fn post_of(pre: &HashMap<Pk, Acct>, post: &Value) -> HashMap<Pk, Acct> {
     let mut m: HashMap<Pk, Acct> = pre.clone();
     for a in post.as_array().into_iter().flatten() {
         let k = pk58(a["key"].as_str().unwrap());
@@ -88,7 +88,7 @@ fn post_of(pre: &HashMap<Pk, Acct>, post: &Value) -> HashMap<Pk, Acct> {
 }
 
 /// the engine's metadata for a fixture pool (`pools::meta_of`, then what `boot` adds: token programs, DAMM's and DLMM's flags)
-fn meta(fx: &Fx) -> PoolMeta {
+pub(crate) fn meta(fx: &Fx) -> PoolMeta {
     let (owner, data) = &fx.accts[&fx.pool];
     assert_eq!(*owner, fx.venue.program());
     let mut m = crate::pools::meta_of(fx.venue, &fx.pool, data).unwrap();
@@ -104,7 +104,7 @@ fn meta(fx: &Fx) -> PoolMeta {
 }
 
 /// a DLMM fixture's bin arrays (index, key)
-fn bin_arrays(fx: &Fx) -> Vec<(i64, Pk)> {
+pub(crate) fn bin_arrays(fx: &Fx) -> Vec<(i64, Pk)> {
     let mut v: Vec<(i64, Pk)> = fx.accts.iter().filter(|(_, (o, d))| *o == fx.venue.program() && d.len() == 10_136)
         .map(|(k, (_, d))| (i64::from_le_bytes(d[8..16].try_into().unwrap()), *k)).collect();
     v.sort();
@@ -112,9 +112,9 @@ fn bin_arrays(fx: &Fx) -> Vec<(i64, Pk)> {
 }
 
 /// one real swap's context: its pool, the engine's metadata, the pre-state, the arrays the harness passed
-struct Case { fx: &'static Fx, m: PoolMeta, pre: HashMap<Pk, Acct>, arrays: Vec<(i64, Pk)>, passed: Vec<i64>, zfo: bool, x: u64 }
+pub(crate) struct Case { pub fx: &'static Fx, pub m: PoolMeta, pub pre: HashMap<Pk, Acct>, pub arrays: Vec<(i64, Pk)>, pub passed: Vec<i64>, pub zfo: bool, pub x: u64 }
 
-fn case(s: &Value) -> Case {
+pub(crate) fn case(s: &Value) -> Case {
     let fx = &fixtures()[&pk58(s["pool"].as_str().unwrap())];
     let passed = s["dlmm_arrays"].as_array().map(|a| a.iter().map(|i| i.as_i64().unwrap()).collect()).unwrap_or_default();
     Case { fx, m: meta(fx), pre: accounts(fx, &s["patches"]), arrays: bin_arrays(fx), passed, zfo: s["dir"] == "0->1", x: s["amount_in"].as_u64().unwrap() }
@@ -161,7 +161,7 @@ impl Case {
 
 /// a label for tallies: the venue (DLMM: with the pool, its pairs differ in kind), and the mutation when it is not the
 /// snapshot itself
-fn label(s: &Value) -> String {
+pub(crate) fn label(s: &Value) -> String {
     let v = s["venue"].as_str().unwrap();
     let v = if v == "DLMM" { format!("DLMM {}", &s["pool"].as_str().unwrap()[..4]) } else { v.to_string() };
     if s["case"] == "snapshot" { v } else { format!("{v} [{}]", s["case"].as_str().unwrap()) }
