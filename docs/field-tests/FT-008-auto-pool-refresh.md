@@ -39,6 +39,8 @@ Stage 0 closes **after this test**. The exit report checks PLAN §6 (with the wa
 - bundle-only with 0 failed-landing fees;
 - reconciliation ok at every stop;
 - **win mix (owner, 2026-10-06 evening): more wins through meme / long-tail tokens than through common tokens.**
+  - **Counted over FT-007 + FT-008 only** (owner, 2026-10-07: "meme rule is for ft007,008"), the final configuration's tests. The other criteria still cover FT-005..FT-008.
+  - Standing at 01:00 UTC: FT-007 30 meme vs 35 common; FT-008 so far 16 vs 14; together 46 vs 49.
   - **Common tokens:**
     - stablecoins: USDC, USDT, USD1, PYUSD;
     - liquid-staking SOL: JitoSOL, mSOL, JupSOL, bSOL, INF;
