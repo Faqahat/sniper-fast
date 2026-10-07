@@ -88,5 +88,52 @@ DexScreener, 53 s, +13 added (4 records, 3 GeckoTerminal, 6 DexScreener; BINDER 
 cut by the cap, 23 getMultipleAccounts; the same segment with a full hour of exec files (31 files, 5.0 GB decompressed)
 and recorded web answers: the records read in 9.6 s, the refresh 20 s.
 
-## Results
-(filled in)
+## Results (3 h: 23:17–02:18 UTC, bin/arbx-b1318ef, `deploy/arbx-ft008-frz.toml`: FT-007's settings + WP-22)
+
+| Segment | Pools (source) | Sent | Landed | Win ratio | Net (chain ledger) |
+|---|---|---|---|---|---|
+| p1 (23:17) | 1,500 (config) | 280 | 10 | 3.6% | +32,887 |
+| p2 (23:48) | 1,500 (refresh: +26) | 363 | 11 | 3.0% | +44,295 |
+| p3 (00:19) | 1,500 (refresh: +5) | 300 | 6 | 2.0% | +13,477 |
+| p4 (00:50) | 1,500 (refresh: +1) | 346 | 9 | 2.6% | +41,727 |
+| p5 (01:21) | 1,361 (refresh: +11, −150 idle) | 478 | 20 | 4.2% | +52,159 |
+| p6 (01:52) | 1,232 (refresh: +7, −136 idle) | 515 | 18 | 3.5% | +90,099 |
+| **Total** | | **2,282** | **74** | **3.2%** | **+274,644 lamports** |
+
+**Safety: pass.**
+- Bundle-only; **0 failed-landing fees**.
+- **Every landed trade nets > 0:** 74 of 74, the smallest +84.
+- Final reconciliation ok in all 6 segments (residual 0, executor diff 0, no refused bundle landed).
+- The send gate stayed live all run (stopped only at each segment's end); recorder drops 0.
+- **No segment booted on an unverified list:** `pool_lists` shows the config list, then 5 refreshed lists, every one `ok` and hash-checked.
+
+**Function: pass.**
+- Every refresh completed `ok` in 63–79 s (limit 5 min).
+- The gap between segments stayed about 20–60 s.
+- Every added pool was verified on chain.
+- No state-health trip.
+
+**Measured:**
+
+| Measure | FT-007 | FT-008 |
+|---|---|---|
+| **Net SOL/h** | 78,668 | **91,982** (+17%) |
+| Win ratio | 3.1% | 3.2% |
+| Net per win | 3,630 | 3,711 |
+| Tips / fees / gross | 236,822 / 325,000 / 797,760 | 292,859 / 370,000 / 937,503 |
+| BAM-led / Jito-led land rate | 3.41% / 2.92% | 3.04% / 3.35% |
+
+- **Refreshes:**
+  - added 26, 5, 1, 11, 7 (records first, then DexScreener);
+  - dropped 26, 5, 1 by the cap;
+  - then 150 and 136 idle drops (the shrink guard held 280, then 157).
+  - Additions dry up between 30-minute refreshes: the trending lists repeat.
+- **Wins on WP-22-added pools:** 5 (+7,458, 3% of the net).
+  - Most of FT-008's gain is not from new pools.
+  - The two best segments (p5, p6) ran on the idle-trimmed lists. Whether trimming helps, or the hour did, is not separable here (time-separated).
+- **Decision (rule): keep the automatic refresh on for Stage 1.** Both pass/fail lists hold.
+  - Next steps: new pools from creation events in our own feed, and adding the CLMM venues to the refresh.
+
+**Win mix (Stage 0 rule, FT-007 + FT-008):**
+- FT-008: 42 meme vs 32 common (USDC 27, USDT 5). Memes made 73% of the net.
+- Together: **72 meme vs 67 common: met.**
