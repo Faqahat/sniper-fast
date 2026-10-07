@@ -88,7 +88,7 @@ frz's cap is ≈0.32 SOL a trade (85% of 0.414 SOL liquid, minus 0.03), ≈0.19 
 - **Every lever runs against a concurrent, randomized control arm** (WP-11 assigns by hash) at one size regime; no before-and-after.
 - **Tests, not point estimates,** with the rule written in the FT entry before the run [FT].
 - **Toolkit fixes first** (WP-10 follow-up; the X2 rule goes into PL WP-11):
-  - **X2 direction bug:** `r10_experiments.py` tests "decreasing" over delay *added*, but PL WP-11 and R §5 go when would-fail falls per 10 ms *removed*; M §6.4 R10 says only "falls". Fix both: a two-sided trend test with the slope's 95% interval; ≥400 sends per arm, bands balanced [PL WP-11].
+  - **X2 direction bug:** `r10_experiments.py` tests "decreasing" over delay *added*, but PL WP-11 and R §5 go when would-fail falls per 10 ms *removed*; M §6.4 R10 says only "falls". Fix both: a two-sided trend test with the slope's 95% interval; ≥400 sends per arm, bands balanced [PL WP-11]. **Done (WP-11, 2026-10-07):** `r10_experiments.py`'s X2 is two-sided with the slope's interval (`go_speed`, `go_delay`); MEASUREMENT §6.4 R10 says so.
   - **X4:** we lost on state, not in the auction (0 lost-auction verdicts in 3,858 [RC C1]). Adopt 0.35 unless its arm shows lost-auction verdicts or fewer wins per send (one-sided p < 0.05, ≥1,000 per arm); a 20% land-rate test needs ≈27,600 per arm [F7].
   - **X5:** a one-sided test of the BAM/Jito landing ratio against 0.5 at ≈85 landings (80% power) [F7]; r10's 200 attempts give ≈2 landings.
   - **X10, X11:** acceptance, verdict mix, send→ack time; landing criteria see ≈4 landings per arm.

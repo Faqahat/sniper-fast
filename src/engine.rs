@@ -139,6 +139,8 @@ struct Opp {
     t_commit: u64,
     t_priced: u64,
     parts_skew: Option<(u64, u64)>,
+    /// WP-11: the arms its decision was assigned (none: experiments off, a probe)
+    arms: crate::experiments::Arms,
 }
 
 /// Why `Engine::run` returned
@@ -449,6 +451,12 @@ pub struct Engine {
     watch_set: HashSet<Pk>,
     /// the executor's wallet's PumpSwap user volume accumulator (derived once)
     uva_key: std::cell::OnceCell<Pk>,
+    // ------------------------------------------------------------ WP-11
+    /// the experiments (src/experiments.rs; None: off): each decision's arms by hash of its id, journaled with engine_init
+    experiments: Option<crate::experiments::Experiments>,
+    /// what each arm's decisions did (status.jsonl `experiments`; review #2: the toolkit's per-arm denominators without
+    /// decisions.jsonl)
+    arm_stats: crate::experiments::ArmStats,
 }
 
 /// {signer: [ok, failed]} as a file holds it; with the sha256 of the bytes read. Missing or unreadable: empty, no hash
@@ -532,13 +540,18 @@ pub struct EngineInit {
     pub knobs: Option<EngineKnobs>,
     /// WP-06: the fee and CU model (None in a journal written before WP-06: the old rule)
     pub builder: Option<BuilderModel>,
+    /// WP-11: the experiments (None: off; the record then has no `experiments` key, as before WP-11)
+    pub experiments: Option<crate::experiments::Experiments>,
 }
 
 impl EngineInit {
     pub fn json(&self) -> Value {
-        json!({ "min_tip": self.min_tip, "strategy_sha256": self.strategy_sha256, "executor": self.executor,
+        let mut v = json!({ "min_tip": self.min_tip, "strategy_sha256": self.strategy_sha256, "executor": self.executor,
             "signer_stats_file": self.signer_stats_file, "signer_stats_sha256": self.signer_stats_sha256, "signer_stats": signer_stats_json(&self.signer_stats),
-            "knobs": self.knobs, "builder": self.builder })
+            "knobs": self.knobs, "builder": self.builder });
+        // WP-11: only when on (a run without experiments journals the record it did before)
+        if let Some(x) = &self.experiments { v["experiments"] = serde_json::to_value(x).unwrap_or(Value::Null); }
+        v
     }
 
     pub fn from_json(v: &Value) -> Option<EngineInit> {
@@ -549,7 +562,10 @@ impl EngineInit {
             // review WP-06 #10: absent or null is a journal written before WP-06 (its replay prices with its own rule); a
             // model present but unreadable (a later schema, a corrupt record) makes the record unreadable: never the legacy
             // rule in its place
-            builder: match &v["builder"] { Value::Null => None, b => Some(serde_json::from_value(b.clone()).ok()?) } })
+            builder: match &v["builder"] { Value::Null => None, b => Some(serde_json::from_value(b.clone()).ok()?) },
+            // WP-11: absent or null, no experiments (a journal written before WP-11, or off); present but unreadable makes the
+            // record unreadable (a replay must not assign other arms than the run's)
+            experiments: match &v["experiments"] { Value::Null => None, x => Some(serde_json::from_value::<crate::experiments::Experiments>(x.clone()).ok().filter(|e| e.valid())?) } })
     }
 }
 
@@ -700,6 +716,16 @@ impl Engine {
     pub fn set_builder(&mut self, b: BuilderModel) { self.builder = Some(b); }
     pub fn builder(&self) -> Option<&BuilderModel> { self.builder.as_ref() }
 
+    /// WP-11: the run's experiments (`ExperimentsCfg::compile`; None: off), journaled with engine_init (set it before the
+    /// run starts)
+    pub fn set_experiments(&mut self, x: Option<crate::experiments::Experiments>) { self.experiments = x.filter(|x| !x.is_empty()); }
+    pub fn experiments(&self) -> Option<&crate::experiments::Experiments> { self.experiments.as_ref() }
+
+    /// WP-11: experiments.jsonl's `config` lines (one per enabled experiment), at engine time `t_ns`; nothing when off
+    pub fn record_experiments(&self, t_ns: u64) {
+        if let Some(x) = &self.experiments { for l in x.config_lines(t_ns) { self.rec.json(rec::EXPERIMENTS, l); } }
+    }
+
     /// An engine with no RPC, runtime or watch channel (PLAN WP-02 item 11): fetches are recorded in `offline_fetches`
     /// instead of sent, and it records nothing until `set_rec`. For benchmarks and replay (WP-09). It never reads or
     /// writes the cross-run signer statistics file: a replay takes the run's statistics from engine_init
@@ -734,7 +760,7 @@ impl Engine {
     pub fn init(&self) -> EngineInit {
         EngineInit { min_tip: self.min_tip, strategy_sha256: strategy_sha256(&self.cfg), executor: self.exec.is_some(),
             signer_stats_file: self.cfg.signer_stats_file.clone(), signer_stats_sha256: self.signer_stats_sha256.clone(), signer_stats: self.signer_stats.clone(),
-            knobs: Some(self.knobs.clone()), builder: self.builder.clone() }
+            knobs: Some(self.knobs.clone()), builder: self.builder.clone(), experiments: self.experiments.clone() }
     }
 
     /// Journal the engine_init record (INPUT 10, `t_engine_ns` 0) once, before the first input: `run` calls it first
@@ -776,6 +802,9 @@ impl Engine {
         if let Some(k) = &init.knobs { self.set_knobs(k.clone()); }
         // WP-06: the run's fee and CU model (none in a journal written before WP-06: the old rule)
         self.builder = init.builder.clone();
+        // WP-11: the run's experiments (none in a journal written before WP-11, or with them off)
+        self.experiments = init.experiments.clone();
+        self.arm_stats = Default::default();
         self.init_journaled = true;
         Ok(())
     }
@@ -879,7 +908,8 @@ impl Engine {
             acc_by_venue: Default::default(), commit_lag: Series::new("commit_lag"),
             commit_lag_src: [Series::new("commit_lag_tx"), Series::new("commit_lag_shred"), Series::new("commit_lag_unknown")], stop_req: None, boot_warned: false,
             reads: Reads::default(), resync: None, unverified: HashSet::default(), clmm_provisional: HashMap::default(), follow_ticks: 0, last_account_t: 0, knobs,
-            sendview: Default::default(), activity: Default::default(), seen_journaled: None, exec_init_journaled: false }
+            sendview: Default::default(), activity: Default::default(), seen_journaled: None, exec_init_journaled: false, experiments: None,
+            arm_stats: Default::default() }
     }
 
     fn count(&mut self, k: &'static str) { *self.counts.entry(k).or_default() += 1; }
@@ -2029,6 +2059,9 @@ impl Engine {
         if let Some(r) = stop_reason { line["stop_reason"] = json!(r); }
         // WP-20: the alerts' counters (atomics only; null without alerts)
         line["alerts"] = crate::alerts::status();
+        // WP-11: each arm's decisions, opportunities, sends and refusals (only with experiments on: a run without them writes
+        // the line it did)
+        if let Some(v) = self.experiments.as_ref().and_then(|x| self.arm_stats.json(x)) { line["experiments"] = v; }
         p.t = t;
         p.counts = self.counts.clone();
         p.updates = self.store.updates;
@@ -2285,10 +2318,14 @@ impl Engine {
     /// candidate evaluated exactly (`quote::best`), never above the top rung (review WP-04 #5: past the size cap a
     /// decision would describe a trade the executor never sends). Gross is the guard's quote delta (sell output minus
     /// the buy leg's debit). Err: why it could not be quoted
-    fn price_route(&self, lb: &quote::Leg, ls: &quote::Leg, pb: &PoolMeta, ps: &PoolMeta) -> Result<Priced, &'static str> {
+    fn price_route(&self, lb: &quote::Leg, ls: &quote::Leg, pb: &PoolMeta, ps: &PoolMeta, arm_cap: Option<u64>, share: Option<crate::experiments::ShareArm>)
+        -> Result<Priced, &'static str> {
         let sizes = self.ladder();
         let Some(&top) = sizes.iter().max() else { return Err("no_sizes") };
         let lo = sizes.iter().copied().min().unwrap_or(top) / 4;
+        // WP-11: the size arm caps the search itself (the rungs above it are left out, the locator's optimum is clamped to
+        // it), so the decision priced is the trade sent
+        let top = arm_cap.map_or(top, |c| c.min(top));
         let (t, bound) = quote::best_bound(lb, ls, &sizes, lo, top).map_err(quote::Why::reason)?;
         // a round trip returning over twice its input is a broken quote (w5h seg 4: one PumpSwap pool quoted 9.9e12
         // lamports, 663 times): it must not win the pick over the token's real cycles
@@ -2298,7 +2335,7 @@ impl Engine {
         let crossed = |l: &quote::Leg, x: u64| if l.walks() { l.walk(x).map(|w| w.crossed).map_err(quote::Why::reason) } else { Ok(0) };
         let (c1, c2) = (crossed(lb, t.x)?, crossed(ls, t.mid)?);
         let cu = self.route_cu(pb.venue, c1, ps.venue, c2).0;
-        let fee = self.fee_of(t.profit(), cu);
+        let fee = self.fee_arm(t.profit(), cu, share);
         Ok(Priced { size: t.x, gross: t.profit(), net: t.profit() - fee as i64, cu, crossed: (c1, c2), dlmm_cap_bound: bound == Some(quote::Why::DlmmArray) })
     }
 
@@ -2313,9 +2350,12 @@ impl Engine {
 
     /// WP-06 item 5: the fee a route's gross pays: the base fee plus the tip of its edge (a bundle pays CU price 0). A
     /// journal written before WP-06 replays with its rule: base fee + `cu_price_micro` × CU + `min_tip`
-    fn fee_of(&self, gross: i64, cu: u64) -> u64 {
+    fn fee_of(&self, gross: i64, cu: u64) -> u64 { self.fee_arm(gross, cu, None) }
+
+    /// `fee_of` under WP-11's X4 arm (the executor's tip reads the same arm: one net for the decision and the executor)
+    fn fee_arm(&self, gross: i64, cu: u64, share: Option<crate::experiments::ShareArm>) -> u64 {
         match &self.builder {
-            Some(b) => b.tips.fee(gross),
+            Some(b) => b.tips.fee_arm(gross, share),
             None => 5_000 + self.cfg.cu_price_micro * cu / 1_000_000 + self.min_tip,
         }
     }
@@ -2549,7 +2589,7 @@ impl Engine {
                     let st = Stages { rx: 0, decoded: 0, engine: 0, resolved: 0, decided: now_ns() };
                     self.opps.insert(id, Opp { id, decision: u64::MAX, trig: [0; 64], trig_feed: 0, slot: self.slot, st, trig_pool: pb.pool, buy: pb.pool, sell: ps.pool,
                         mint, size, gross: 0, net: 0, cu, crossed: (c1, c2), deadline: u64::MAX, landed: None, touches: Vec::new(), sv: 0, route_age_ms: None,
-                        kind: "probe", t_first_shred: None, t_commit: 0, t_priced: 0, parts_skew: None });
+                        kind: "probe", t_first_shred: None, t_commit: 0, t_priced: 0, parts_skew: None, arms: Default::default() });
                     if let Some(r) = self.route_in(id, size) { out.push(r); } else { self.count("probe_unquotable"); }
                     self.opps.remove(&id);
                 }
@@ -2576,7 +2616,7 @@ impl Engine {
         let st = Stages { rx: 0, decoded: 0, engine: 0, resolved: 0, decided: now_ns() };
         self.opps.insert(id, Opp { id, decision: u64::MAX, trig: [0; 64], trig_feed: 0, slot: self.slot, st, trig_pool: pb.pool, buy: pb.pool, sell: ps.pool,
             mint: r.mint, size: r.size, gross: 0, net: 0, cu, crossed: (c1, c2), deadline: u64::MAX, landed: None, touches: Vec::new(), sv: 0, route_age_ms: None,
-            kind: "probe", t_first_shred: None, t_commit: 0, t_priced: 0, parts_skew: None });
+            kind: "probe", t_first_shred: None, t_commit: 0, t_priced: 0, parts_skew: None, arms: Default::default() });
         let out = self.route_in(id, r.size);
         self.opps.remove(&id);
         out
@@ -2662,7 +2702,7 @@ impl Engine {
             buy_live: buy_names.unwrap_or_else(|| live(pb, &skip_b)), sell_live: sell_names.unwrap_or_else(|| live(ps, &skip_s)), buy_end, sell_end, state_version: o.sv,
             route_age_ms: o.route_age_ms, decision: o.decision,
             trig_kind: o.kind, t_first_shred: o.t_first_shred, t_commit: o.t_commit, t_priced: o.t_priced, parts_skew: o.parts_skew, crowding, accounts,
-            cu_src: cu_src.as_str(), cu_ata, mint_prog, mid_held, uva, buy_ext: ext(pb), sell_ext: ext(ps), sizes })
+            cu_src: cu_src.as_str(), cu_ata, mint_prog, mid_held, uva, buy_ext: ext(pb), sell_ext: ext(ps), sizes, arms: o.arms })
     }
 
     /// caps.jsonl: the decided pair's best round trip at each budget in [strategy] budget_caps_sol. Profit rises with
@@ -2873,6 +2913,19 @@ impl Engine {
         let id = self.next_decision;
         self.next_decision += 1;
         self.count("evaluation");
+        // WP-11: the decision's arms (by hash of its id: a replay assigns the same). A size arm caps the search under the
+        // executor's cap too (the canary's, `[live]`'s, the bankroll's) on the money view of the last journaled
+        // decision-point record (a replay's offline executor holds the same one here), so the size priced is the size sent;
+        // a cap of 0 or under the ladder's smallest rung is left to the executor (`bankroll_empty`, its re-quote), as without
+        // the arm
+        let arms = self.experiments.as_ref().map(|x| x.assign(id)).unwrap_or_default();
+        let arm_cap = arms.size_cap(ctx.kind).map(|c| {
+            let smallest = self.cfg.sizes_sol.iter().map(|s| (s * LAMPORTS_PER_SOL) as u64).min().unwrap_or(0);
+            match (&self.exec, &self.seen_journaled) {
+                (Some(x), Some(seen)) => { let e = x.size_cap_with(&seen.5); if e > 0 && e >= smallest { c.min(e) } else { c } }
+                _ => c,
+            }
+        });
         let t_eval = now_ns();
         let m = self.reg.pools[i].clone();
         let others: Vec<usize> = self.reg.pairs.get(&pair_key(&m.t0, &m.t1)).cloned().unwrap_or_default();
@@ -2935,7 +2988,8 @@ impl Engine {
                     let (zb, zs) = (pb.t0 == *WSOL, ps.t0 == mint);
                     let lb = *legs_memo.entry((buy, zb, budget)).or_insert_with(|| self.leg_of(pb, zb, clk, &vb.pending_arrays, u));
                     let legs = lb.and_then(|lb| Ok((lb, (*legs_memo.entry((sell, zs, budget)).or_insert_with(|| self.leg_of(ps, zs, clk, &vs.pending_arrays, u)))?)));
-                    match legs.map_err(quote::Why::reason).and_then(|(lb, ls)| self.price_route(&lb, &ls, pb, ps)) {
+                    let share = arms.share_arm(ctx.kind, pb.venue, ps.venue);
+                    match legs.map_err(quote::Why::reason).and_then(|(lb, ls)| self.price_route(&lb, &ls, pb, ps, arm_cap, share)) {
                         Ok(p) => { rr.reason = "priced"; rr.priced = Some(p); }
                         Err(e) => rr.reason = e,
                     }
@@ -2997,7 +3051,7 @@ impl Engine {
                 self.opps.insert(oid, Opp { id: oid, decision: id, trig: ctx.txn.unwrap_or([0; 64]), trig_feed: u16::MAX, slot: ctx.slot, st, trig_pool: m.pool, buy, sell,
                     mint, size: p.size, gross: p.gross, net: p.net, cu: p.cu, crossed: p.crossed, deadline: self.t_now + self.cfg.outcome_watch_ms * 1_000_000,
                     landed: Some(ctx.slot), touches: Vec::new(), sv, route_age_ms, kind: ctx.kind, t_first_shred: ctx.t_first_shred, t_commit: ctx.t_commit,
-                    t_priced, parts_skew });
+                    t_priced, parts_skew, arms });
                 self.decisions = fold(self.decisions, &[b"state", &oid.to_le_bytes(), &ctx.txn.unwrap_or([0; 64]), &buy, &sell, &p.size.to_le_bytes(), &p.net.to_le_bytes()]);
                 let b = Best { buy, sell, mint, size: p.size, gross: p.gross, net: p.net, decision: id };
                 self.caps_pending.push((oid, b, now));
@@ -3007,6 +3061,12 @@ impl Engine {
         };
         let t_decided = now_ns();
         self.decisions = fold(self.decisions, &[b"decision", &id.to_le_bytes(), &i.to_le_bytes(), &best.map_or(u64::MAX, |b| b as u64).to_le_bytes(), dec.reason.as_bytes()]);
+        // WP-11: the arms join the decision digest (only with experiments on: a run without them digests as before), and
+        // the arm's counters (status.jsonl `experiments`)
+        if !arms.is_empty() {
+            self.decisions = fold(self.decisions, &[b"arms", &id.to_le_bytes(), &arms.digest_bytes()]);
+            self.arm_stats.note(&arms, opp_id.is_some(), dec.sent == Some(true), dec.would_send, &dec.reason);
+        }
         // follow-up bookkeeping: the pools priced and the slots read (torn_suspect, fork_priced)
         let priced_pools: Vec<usize> = { let mut v: Vec<usize> = routes.iter().filter(|r| r.priced.is_some()).flat_map(|r| [r.buy, r.sell]).collect(); v.sort_unstable(); v.dedup(); v };
         if !priced_pools.is_empty() {
@@ -3035,7 +3095,7 @@ impl Engine {
                 parts_skew_slots: bestr.and_then(|r| r.sv.as_ref()).map(|v| SkewRec { buy: v.skew.0, sell: v.skew.1 }), w_src: ctx.w_src, torn_suspect: false,
                 fork_priced: false, band: dec.band.or_else(|| bestr.and_then(|r| r.priced.as_ref()).map(|p| band_of(&self.builder, p.gross))),
                 band_at_opp: bestr.and_then(|r| r.priced.as_ref()).map(|p| band_of(&self.builder, p.gross)), crowding: dec.crowding, verdict: dec.verdict,
-                reason: dec.reason, ev: dec.ev, rank: dec.rank, attempt: dec.attempt, opp: opp_id, experiments: serde_json::Map::new(),
+                reason: dec.reason, ev: dec.ev, rank: dec.rank, attempt: dec.attempt, opp: opp_id, experiments: arms.assigned_json(),
                 stages: StagesRec { t_first_shred: ctx.t_first_shred, t_update_recv: ctx.t_update_recv, t_commit: ctx.t_commit, t_engine: ctx.t_resolved, t_priced, t_decided },
                 sent: dec.sent, would_send: dec.would_send, reason_ungated: dec.reason_ungated };
             self.rec.emit(rec::DECISIONS, Record::ser(rec));
@@ -3868,7 +3928,7 @@ mod tests {
         sa.r_out = r0 as u64;
         let lb = e.leg_of(&b, b.t0 == MINT, ck, &[], u).unwrap();
         // USDC into A makes A's MINT cheap: buy it on A (at the predicted state), sell it on B
-        let poisoned = e.price_route(&la, &lb, &a, &b).unwrap_or_else(|why| panic!("the poisoned route prices: {why}; {la:?}"));
+        let poisoned = e.price_route(&la, &lb, &a, &b, None, None).unwrap_or_else(|why| panic!("the poisoned route prices: {why}; {la:?}"));
         eprintln!("cmp2 poisoning pattern: priced on the failed swap's prediction the route quotes {} lamports net at {} lamports; on committed state the best route nets {}",
             poisoned.net, poisoned.size, net_committed);
         assert!(poisoned.net > 1_000_000_000, "priced on the prediction the route quotes {} lamports (cmp2: 3.88 SOL)", poisoned.net);
@@ -5318,6 +5378,146 @@ mod tests {
             eprintln!("{what}: state_recv_to_decided p50/p99 ns (opportunities): recorder off {off:?}, on {on:?}; best p99 off {p99_off} on {p99_on}");
             assert!(p99_on <= p99_off + 5_000, "{what}: recorder on adds {} ns to the p99", p99_on as i64 - p99_off as i64);
         }
+    }
+
+    /// WP-11: engine_init's `experiments` reads back (a replay assigns the run's arms); with experiments off the record is
+    /// the one written before WP-11 (no key); present but unreadable makes the record unreadable (never other arms)
+    #[test]
+    fn engine_init_experiments_read_back_or_refuse() {
+        use crate::experiments::{Exp, Experiments, Scope};
+        let x = Experiments { seed: 5, x4: Some(Exp { arms: vec![0.1, 0.35], weights: vec![1.0, 1.0], scope: Scope { max_band: 2, ..Scope::ALL } }),
+            size: Some(Exp { arms: vec![0.05, 0.2], weights: vec![1.0, 2.0], scope: Scope::ALL }), ..Default::default() };
+        let init = EngineInit { min_tip: 1_000, strategy_sha256: "s".into(), experiments: Some(x.clone()), ..Default::default() };
+        assert_eq!(EngineInit::from_json(&init.json()).unwrap(), init);
+        let off = EngineInit { experiments: None, ..init.clone() };
+        assert!(off.json().get("experiments").is_none(), "off: the record as before WP-11");
+        assert_eq!(EngineInit::from_json(&off.json()).unwrap().experiments, None);
+        let mut v = init.json();
+        v["experiments"] = json!({ "seed": "a later schema" });
+        assert!(EngineInit::from_json(&v).is_none(), "unreadable: refused");
+        let mut torn = init.json();
+        torn["experiments"]["x4"]["weights"] = json!([1.0]);
+        assert!(EngineInit::from_json(&torn).is_none(), "a weight per arm, or the record is not read (an arm out of range would be drawn)");
+        // the engine applies them: its decisions are assigned as the run's were
+        let mut e = Engine::new_offline(Arc::new(Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() }),
+            Store::default(), StrategyCfg::default());
+        e.apply_init(&EngineInit { strategy_sha256: strategy_sha256(&StrategyCfg::default()), ..init.clone() }).unwrap();
+        assert_eq!(e.experiments(), Some(&x));
+        assert_eq!(e.init().experiments, Some(x));
+    }
+
+    /// WP-11 (property, the size arm): the arm caps the engine's size search and nothing else. Over 400 random routes
+    /// (two AMM v4 pools 0.1% to 20% apart) and caps (on a rung, between rungs, under the smallest rung: nothing priced,
+    /// past the top): the priced size never passes the cap or the top rung; a cap at or past the top rung prices what no cap prices (size,
+    /// gross, net); a cap at or over the uncapped size gives no less gross; X4's share arm moves the net only (the search
+    /// is on the gross), never the size or the gross
+    #[test]
+    fn the_size_arm_caps_the_search_property() {
+        use crate::experiments::ShareArm;
+        let mut rng = 0x1234_5678_9abc_def1u64;
+        let mut next = move || { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; rng };
+        let mut r = rig("size-arm-prop");
+        r.e.set_builder(BuilderModel { tips: crate::tip::TipModel::default(), cu: crate::cu_table::CuModel::default() });
+        let (a, b) = (r.e.reg.pools[0].clone(), r.e.reg.pools[1].clone());
+        let ladder = r.e.ladder();
+        let (lo, top) = (*ladder.iter().min().unwrap(), *ladder.iter().max().unwrap());
+        let (mut bound, mut priced) = (0, 0);
+        for k in 0..400u64 {
+            let sol_b = 1_001 + next() % 200;
+            r.e.store.update(b.vault1, vault(sol_b * SOL), 11 + k, 1, None);
+            let (ck, u) = (quote::clock(0, 0), route_use(&a, &b));
+            let la = r.e.leg_of(&a, a.t0 == *WSOL, ck, &[], u).unwrap();
+            let lb = r.e.leg_of(&b, b.t0 == MINT, ck, &[], u).unwrap();
+            let Ok(free) = r.e.price_route(&la, &lb, &a, &b, None, None) else { continue };
+            priced += 1;
+            let cap = match next() % 4 {
+                0 => ladder[(next() % ladder.len() as u64) as usize],
+                1 => lo + next() % (top - lo),
+                2 => 1 + next() % lo,
+                _ => top + next() % top,
+            };
+            // under the smallest rung no rung is left to price (`Config::parse` refuses such an arm: it would price nothing)
+            if cap < lo { assert!(r.e.price_route(&la, &lb, &a, &b, Some(cap), None).is_err(), "cap {cap} under the ladder"); continue; }
+            let capped = r.e.price_route(&la, &lb, &a, &b, Some(cap), None).unwrap_or_else(|w| panic!("cap {cap}: {w}"));
+            assert!(capped.size <= cap.min(top), "cap {cap}: priced {}", capped.size);
+            if cap >= top { assert_eq!((capped.size, capped.gross, capped.net), (free.size, free.gross, free.net), "a cap past the top rung changes nothing"); }
+            if cap >= free.size { assert!(capped.gross >= free.gross, "cap {cap} >= {}: gross {} < {}", free.size, capped.gross, free.gross); } else { bound += 1; }
+            let s = r.e.price_route(&la, &lb, &a, &b, Some(cap), Some(ShareArm { share: 0.1, max_band: 4 })).unwrap();
+            assert_eq!((s.size, s.gross), (capped.size, capped.gross), "X4 moves the net only");
+            assert!(s.net >= capped.net, "a 0.1 share tips no more than the 0.7 of [tips]' default");
+        }
+        assert!(priced > 300 && bound > 50, "{priced} priced, {bound} bound by their cap");
+    }
+
+    /// WP-11: the experiments cost the engine thread nothing measurable (PLAN WP-11: WP-02's engine benchmark unchanged):
+    /// the benchmark's shape (40 pools, 50,000 transactions, about 1% opening an opportunity), recorder off, with every
+    /// experiment off and with X2, X4, the size arm and the margin arm on (each decision's arms hashed, the size search
+    /// capped, the fee estimate under the share arm): `state_recv_to_decided` p99 within 5 µs. Each mode three times,
+    /// alternating; the best p99 of each compared
+    #[test]
+    fn engine_benchmark_experiments_on_off() {
+        use crate::experiments::{Exp, Experiments, Scope};
+        const POOLS: u8 = 40;
+        const TXS: u64 = 50_000;
+        fn bench(x: Option<Experiments>) -> (u64, u64, u64) {
+            let mut reg = Registry { pools: vec![], by_pool: Default::default(), pairs: Default::default(), seeds: Default::default(), ours: Default::default() };
+            let mut store = Store::default();
+            for n in 0..POOLS {
+                let mut m = meta(n + 1);
+                m.pool = [n + 1; 32];
+                m.vault0 = { let mut k = [n + 1; 32]; k[31] = 200; k };
+                m.vault1 = { let mut k = [n + 1; 32]; k[31] = 201; k };
+                m.t0 = { let mut k = MINT; k[0] = n / 2; k };
+                reg.by_pool.insert(m.pool, n as usize);
+                reg.pairs.entry(pair_key(&m.t0, &WSOL)).or_insert_with(Vec::new).push(n as usize);
+                store.update(m.pool, ammv4_pool(), 10, 1, None);
+                store.update(m.vault0, vault(1_000_000_000_000_000), 10, 1, None);
+                store.update(m.vault1, vault((1_000 + (n % 2) as u64 * 10) * SOL), 10, 1, None);
+                reg.pools.push(m);
+            }
+            // (0.005 SOL: a 10% gap opens an opportunity at the size arms' 0.2 SOL and at the ladder's 1 SOL)
+            let mut e = Engine::new_offline(Arc::new(reg), store, StrategyCfg { state_triggers: true, min_profit_lamports: 5_000_000, budget_caps_sol: vec![0.5, 2.0, 10.0],
+                ..StrategyCfg::default() });
+            e.tier_a_complete = true;
+            e.set_builder(BuilderModel { tips: crate::tip::TipModel::default(), cu: crate::cu_table::CuModel::default() });
+            e.set_experiments(x);
+            let mut status = |_: &str| {};
+            let t0 = now_ns();
+            e.step(Event::Slot { slot: 11, status: 0, t: t0, parent: Some(10), dead_error: None, bank_id: None }, t0, &mut status);
+            for k in 0..TXS {
+                let i = (k % POOLS as u64) as usize;
+                let m = e.reg.pools[i].clone();
+                let mut sig = [0u8; 64];
+                sig[..8].copy_from_slice(&k.to_le_bytes());
+                let sol = if k % 200 == 0 { 1_100 } else { 1_000 + (k % 7) };
+                let _ = e.tracker.register(sig, vec![m.vault0, m.vault1], WSrc::Shred, now_ns());
+                let t = now_ns();
+                e.step(Event::Account { slot: 11, pubkey: m.vault1, owner: [0; 32], lamports: 0, data: vault(sol * SOL), t, txn: Some(sig), write_version: 2 * k + 10,
+                    is_startup: false, src: 0, aseq: 2 * k, bank_id: None }, now_ns(), &mut status);
+                e.step(Event::Account { slot: 11, pubkey: m.vault0, owner: [0; 32], lamports: 0, data: vault(999_000_000_000_000), t: now_ns(), txn: Some(sig),
+                    write_version: 2 * k + 11, is_startup: false, src: 0, aseq: 2 * k + 1, bank_id: None }, now_ns(), &mut status);
+                if k % 1_000 == 999 { e.finish(); }
+            }
+            let opps = e.counter("state_opportunity");
+            e.finish();
+            let s = e.series_mut("state_recv_to_decided").unwrap();
+            assert_eq!(s.n(), TXS, "every transaction evaluated");
+            (s.pct(0.5), s.pct(0.99), opps)
+        }
+        let on = Experiments { seed: 7, x2: Some(Exp { arms: vec![0, 5, 10, 20], weights: vec![1.0; 4], scope: Scope::ALL }),
+            x4: Some(Exp { arms: vec![0.1, 0.2, 0.35], weights: vec![1.0; 3], scope: Scope { max_band: 2, ..Scope::ALL } }),
+            size: Some(Exp { arms: vec![0.05, 0.2], weights: vec![1.0; 2], scope: Scope::ALL }),
+            margin: Some(Exp { arms: vec![1, 2_000], weights: vec![1.0; 2], scope: Scope::ALL }), ..Default::default() };
+        let (mut off_r, mut on_r) = (Vec::new(), Vec::new());
+        for _ in 0..3 {
+            off_r.push(bench(None));
+            on_r.push(bench(Some(on.clone())));
+        }
+        let best = |v: &[(u64, u64, u64)]| v.iter().map(|x| x.1).min().unwrap();
+        let (p99_off, p99_on) = (best(&off_r), best(&on_r));
+        eprintln!("experiments: state_recv_to_decided p50/p99 ns (opportunities): off {off_r:?}, on {on_r:?}; best p99 off {p99_off} on {p99_on}");
+        assert!(off_r.iter().chain(&on_r).all(|x| x.2 >= TXS / 1_000), "the gaps open opportunities: {off_r:?} {on_r:?}");
+        assert!(p99_on <= p99_off + 5_000, "the experiments add {} ns to the p99", p99_on as i64 - p99_off as i64);
     }
 
     /// Review WP-06 #10: engine_init's `builder` reads back; absent or null is a journal written before WP-06 (its replay

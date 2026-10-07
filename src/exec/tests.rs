@@ -73,7 +73,7 @@ fn route(buy: u8, sell: PoolMeta, expected: u64, sv: u64) -> RouteIn {
         trig_kind: "commit", t_first_shred: Some(90), t_commit: 150, t_priced: 400, parts_skew: Some((0, 1)),
         crowding: Crowding { signers_6h: Some(3), bucket: 0, src: "map_partial" }, accounts: vec![([buy; 32], 98, 7)],
         cu_src: "fallback".into(), cu_ata: (30_000, 5_000), mint_prog: *crate::pda::TOKEN_PROGRAM, mid_held: None, uva: None, buy_ext: None, sell_ext: None,
-        sizes: vec![] }
+        sizes: vec![], arms: Default::default() }
 }
 
 /// what the in-memory block engine got: each bundle's transaction, and the send path's network calls when it got it
@@ -2238,7 +2238,7 @@ async fn bundle_vectors_for_the_venue_harness() {
         assert_eq!((b.creates_ata(), b.closes_ata()), (!c.held, !c.held), "{}", c.name);
         let raw = build::sign(&b.msg, &wallet_key());
         // the dry run's checks pass on the signed bytes (the table resolves), every value re-derived from them
-        let mut want = x.want(r, payer, BH, Some((tip_acct, *tip_l)), *min_profit, &raw, &AltSource::none());
+        let mut want = x.want(r, payer, BH, Some((tip_acct, *tip_l)), *min_profit, x.pol.margin_floor, &raw, &AltSource::none());
         want.signer = payer;
         assert_eq!(failing(&raw, &want), Vec::<String>::new(), "{}", c.name);
         // the signed instructions recompile to the same message on the tables it names (what `with_close` builds on)
@@ -2450,7 +2450,7 @@ async fn clmm_bundle_vectors_for_the_venue_harness() {
         assert!(bx.fits() && bx.alt_fallback == "none", "{}: {} bytes", c.name, build::tx_bytes(&bx.msg));
         assert_eq!((bx.creates_ata(), bx.closes_ata()), (!c.held, !c.held), "{}", c.name);
         let raw = build::sign(&bx.msg, &wallet_key());
-        let mut want = x.want(r, payer, BH, Some((tip_acct, b.tip)), b.min_profit, &raw, &AltSource::none());
+        let mut want = x.want(r, payer, BH, Some((tip_acct, b.tip)), b.min_profit, x.pol.margin_floor, &raw, &AltSource::none());
         want.signer = payer;
         assert_eq!(failing(&raw, &want), Vec::<String>::new(), "{}", c.name);
         let (tx, _) = crate::tx::parse_wire(&raw).unwrap();
@@ -3166,4 +3166,224 @@ async fn a_dry_run_bids_for_a_bam_slot_as_live() {
     let a = r.lines("attempts");
     assert_eq!((a[0]["tip"]["lamports"].as_u64(), a[0]["dry_run"]["checks_ok"].as_bool(), a[0]["copies"][0]["leader_kind"].as_str(), a[0]["copies"][0]["endpoint"].as_str()),
         (Some(5_000), Some(true), Some("bam"), Some("127.0.0.1")), "the configured block engine, where a send would go: {}", a[0]["dry_run"]["checks"]);
+}
+
+// ------------------------------------------------------------------------------------------------ WP-11: the arms
+
+fn x4_arm(share: f64, max_band: u8) -> Option<crate::experiments::Arm<f64>> {
+    Some(crate::experiments::Arm { idx: 0, value: share, scope: crate::experiments::Scope { max_band, ..crate::experiments::Scope::ALL } })
+}
+fn margin_arm(floor: u64) -> Option<crate::experiments::Arm<u64>> { Some(crate::experiments::Arm { idx: 0, value: floor, scope: crate::experiments::Scope::ALL }) }
+fn with_arms(mut r: RouteIn, arms: crate::experiments::Arms) -> RouteIn { r.arms = arms; r }
+
+/// WP-11 (property): X4's share and the margin arm's floor applied exactly where intended and never past a bound, over
+/// 800 random decisions (edges in every band and on both sides of the floor and the cap, shares 0 to 1, scopes ending at
+/// every band, margin floors 1 to 50,000, BAM-led and Jito-led slots with `[send_policy.bam]` on). In the arm's bands the
+/// tip is the arm's share of the edge within `[tips]`' floor and cap (`tip.arm` the share, `experiments.x4_share`
+/// recorded); out of them it is the band's tip to the lamport (nothing recorded). The BAM floor raises a BAM-led bid on
+/// top of the arm's band tip within its room. Every would-send clears the decision's bar (tip + base fee + max(the
+/// floor, `[live] margin_lamports`)), its on-chain min_profit is tip + base fee + the floor and never above the expected
+/// profit; every other decision is refused `expected_below_min_profit`
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn x4_and_margin_arms_stay_within_every_bound() {
+    use crate::experiments::{Arms, ShareArm};
+    let mut r = rig("x4-prop", Mode::Shadow, "[send_policy]\nbig_band_max_per_sec = 1000\n[send_policy.bam]\nenabled = true\n").await;
+    let mut rng = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; rng };
+    let model = crate::tip::TipModel::default();
+    let mut cases = Vec::new();
+    let mut t = now_ns();
+    for case in 0..800u64 {
+        let expected = match next() % 4 { 0 => 1_000 + next() % 19_000, 1 => 20_000 + next() % 80_000, 2 => 100_000 + next() % 900_000, _ => 1_000_000 + next() % 2_000_000 };
+        let share = [0.0, 0.05, 0.1, 0.2, 0.35, 0.7, 1.0][(next() % 7) as usize];
+        let max_band = (next() % 5) as u8;
+        let mf = [None, Some(1u64), Some(2_000), Some(50_000)][(next() % 4) as usize];
+        let bam = next() % 2 == 0;
+        let arms = Arms { x4: x4_arm(share, max_band), margin: mf.and_then(margin_arm), ..Default::default() };
+        t += 1_000_000_000;
+        let d = r.decide(with_arms(route(1, damm(2, MINT), expected, case + 1), arms), if bam { 101 } else { 97 }, t);
+        cases.push((d, expected, share, max_band, mf, bam));
+    }
+    let lines = r.lines("attempts");
+    let by_attempt: HashMap<u64, &Value> = lines.iter().map(|a| (a["attempt"].as_u64().unwrap(), a)).collect();
+    let p = r.x.pol.bam.clone();
+    let (mut sent, mut refused, mut in_scope, mut raised) = (0, 0, 0, 0);
+    for (d, expected, share, max_band, mf, bam) in &cases {
+        let edge = *expected as i64 - 5_000;
+        let band = crate::bands::of_edge(edge);
+        let on = band <= *max_band;
+        let band_tip = model.tip_arm(edge, false, Some(ShareArm { share: *share, max_band: *max_band })).lamports;
+        let plain = model.tip(edge, false).lamports;
+        if on { assert_eq!(band_tip, ((edge as f64 * share) as u64).clamp(1_000, 100_000), "the arm's share in its bands: {edge} {share}"); }
+        else { assert_eq!(band_tip, plain, "out of the arm's bands: the band's tip to the lamport ({edge}, band {band}, scope 0-{max_band})"); }
+        let floor = mf.unwrap_or(1);
+        let bar = floor.max(1_000);
+        let tip = if *bam { bam_bid(&p, band_tip, edge, 100_000, 100_000, edge - bar as i64).lamports } else { band_tip };
+        if (*expected as i64) < (tip + 5_000 + bar) as i64 {
+            assert_eq!((d.reason.as_str(), d.would_send), ("expected_below_min_profit", false), "{expected} tip {tip} bar {bar}: {d:?}");
+            refused += 1;
+            continue;
+        }
+        assert!(d.would_send, "{expected} {share} {max_band} {mf:?} {bam}: {d:?}");
+        sent += 1;
+        in_scope += on as u32;
+        let a = by_attempt[&d.attempt.unwrap()];
+        // the decision's net and the attempt's: the expected profit less this tip and the base fee, over the bar
+        assert_eq!(d.ev, Some(*expected as i64 - tip as i64 - 5_000));
+        assert!(d.ev.unwrap() >= bar as i64);
+        assert_eq!((a["tip"]["lamports"].as_u64(), a["tip"]["arm"].as_f64()), (Some(tip), on.then_some(*share)), "{a}");
+        assert_eq!(a["experiments"].get("x4_share").and_then(|v| v.as_f64()), on.then_some(*share));
+        assert_eq!(a["experiments"].get("margin").and_then(|v| v.as_u64()), *mf);
+        assert!((1_000..=100_000).contains(&tip), "the floor and the cap: {tip}");
+        let mp = a["min_profit_onchain"].as_u64().unwrap();
+        assert_eq!((mp, a["margin"].as_u64()), (tip + 5_000 + floor, Some(floor)), "{a}");
+        assert!(mp <= *expected, "a landed bundle cannot lose: min_profit {mp} over {expected}");
+        if *bam {
+            assert_eq!(a["tip"]["bam"]["band_tip"].as_u64(), Some(band_tip), "the BAM floor raises the arm's band tip");
+            assert!(tip >= band_tip && tip <= band_tip.max(((edge as f64 * p.max_share) as u64).min(100_000)), "within the BAM room: {tip} {band_tip} {edge}");
+            raised += (tip > band_tip) as u32;
+        } else {
+            assert!(a["tip"]["bam"].is_null());
+        }
+    }
+    eprintln!("x4 property: {sent} would-sends ({in_scope} in the arm's bands, {raised} raised by the BAM floor), {refused} refused");
+    assert!(sent >= 200 && refused >= 50 && in_scope >= 100 && raised >= 20 && in_scope < sent, "every path taken: {sent} {refused} {in_scope} {raised}");
+}
+
+/// WP-11: the BAM floor per X4 arm. On a BAM-led slot each arm's band tip is raised toward the floor (0.05 x 100,000 CU =
+/// 5,000) within its room, and a band tip already over the floor is kept; on a Jito-led slot each arm bids its own share.
+/// The signed tip reaches the block engine
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_bam_floor_raises_each_arms_bid() {
+    use crate::experiments::Arms;
+    // 12,000 expected (edge 7,000): arm 0.1 -> 700, the [tips] floor 1,000; arm 0.35 -> 2,450. 105,000 expected (edge 100,000):
+    // 10,000 and 35,000, both over the BAM floor. One rig per edge (the test path's 5 sends a second)
+    let cases = [(0.1, 12_000u64, 101u64, 5_000u64, "bam_floor"), (0.35, 12_000, 101, 5_000, "bam_floor"), (0.1, 12_000, 97, 1_000, "share_of_edge"),
+        (0.35, 12_000, 97, 2_450, "share_of_edge"), (0.1, 105_000, 101, 10_000, "share_of_edge"), (0.35, 105_000, 101, 35_000, "share_of_edge"),
+        (0.1, 105_000, 97, 10_000, "share_of_edge"), (0.35, 105_000, 97, 35_000, "share_of_edge")];
+    for (j, part) in cases.chunks(4).enumerate() {
+    let mut r = rig(if j == 0 { "x4-bam-a" } else { "x4-bam-b" }, Mode::Live, "[send_policy.bam]\nenabled = true\nmin_tip_per_cu = 0.05\nmax_share = 0.9\n").await;
+    for (k, (share, expected, tip_slot, want, policy)) in part.iter().enumerate() {
+        let arms = Arms { x4: x4_arm(*share, 2), ..Default::default() };
+        let d = r.decide(with_arms(route(1, damm(2, MINT), *expected, 10 + k as u64), arms), *tip_slot, now_ns());
+        assert_eq!((d.reason.as_str(), d.ev), ("sent", Some(*expected as i64 - *want as i64 - 5_000)), "case {k}: {d:?}");
+        let Settled::Fired { attempt, fired } = r.settled().await else { panic!("a fire result") };
+        let (tx, _) = crate::tx::parse_wire(&r.got.lock().unwrap()[k].0).unwrap();
+        assert_eq!(send::tip_paid(&tx, &tip_accounts()), *want, "case {k}: the signed tip");
+        r.x.on_settled(Settled::Fired { attempt, fired }, now_ns(), &|_| None);
+        let a = &r.lines("attempts")[k];
+        assert_eq!((a["tip"]["lamports"].as_u64(), a["tip"]["arm"].as_f64(), a["tip"]["policy"].as_str()), (Some(*want), Some(*share), Some(*policy)), "case {k}: {a}");
+        assert_eq!(a["leader"]["kind"].as_str(), Some(if *tip_slot == 101 { "bam" } else { "jito" }));
+    }
+    }
+}
+
+/// WP-11 (X2): the delay arm sleeps on the send task, never on the engine thread: `decide` returns at once and the copy
+/// leaves the arm's 20 ms after the fire was handed over (attempts `experiments.x2_delay_ms`); out of its scope (a band
+/// above `max_band`) nothing is delayed or recorded; a would-send records its arm (nothing is fired)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn x2_delays_the_copy_on_the_send_task() {
+    use crate::experiments::{Arm, Arms, Scope};
+    let mut r = rig("x2-delay", Mode::Live, "").await;
+    let arms = |max_band: u8| Arms { x2: Some(Arm { idx: 1, value: 20, scope: Scope { max_band, ..Scope::ALL } }), ..Default::default() };
+    let t0 = std::time::Instant::now();
+    let d = r.decide(with_arms(route(1, damm(2, MINT), 12_000, 7), arms(4)), 97, now_ns());
+    let took = t0.elapsed();
+    assert_eq!(d.reason, "sent", "{d:?}");
+    assert!(took < std::time::Duration::from_millis(20), "the engine thread does not wait for the delay: {took:?}");
+    let Settled::Fired { attempt, fired } = r.settled().await else { panic!("a fire result") };
+    r.x.on_settled(Settled::Fired { attempt, fired: fired.clone() }, now_ns(), &|_| None);
+    let a = &r.lines("attempts")[0];
+    let handed = a["stages"]["t_enqueued"].as_u64().unwrap();
+    assert!(fired.copies[0].t_sent >= handed + 20_000_000, "the copy left {} ms after the fire", (fired.copies[0].t_sent - handed) as f64 / 1e6);
+    assert_eq!(a["experiments"], json!({ "x2_delay_ms": 20 }));
+    // a scope of band 0 only: an edge of 30,000 (band 1) is out of it, sent at once, nothing recorded
+    let d = r.decide(with_arms(route(1, damm(2, MINT), 35_000, 8), arms(0)), 97, now_ns());
+    assert_eq!(d.reason, "sent");
+    let _ = r.settled().await;
+    assert_eq!(r.lines("attempts")[1]["experiments"], json!({}), "out of scope: no arm applied");
+    let mut s = rig("x2-would", Mode::Shadow, "").await;
+    let d = s.decide(with_arms(route(1, damm(2, MINT), 12_000, 7), arms(4)), 97, now_ns());
+    assert!(d.would_send);
+    assert_eq!(s.lines("attempts")[0]["experiments"], json!({ "x2_delay_ms": 20 }), "a would-send records its arm");
+}
+
+/// WP-11 (the size arm): the cap applies where the engine picks the size. Under each arm the engine's size search stops
+/// at the arm, and at the executor's cap below it (the canary's 0.05 SOL, the bankroll's 0.055 SOL) on the money view of
+/// the last journaled decision-point record: every priced route within it, the decision's size that cap (the profit rises
+/// with the size here), and the attempt trades the decision's size. The first decision, before any record, prices at
+/// the arm and the executor re-quotes at its cap (as without the arm): no attempt ever exceeds the executor's caps
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_engine_prices_under_each_size_arm() {
+    use crate::experiments::{Exp, Experiments, Scope};
+    let canary = "[canary]\nenabled = true\ncount = 100\nevery_ms = 1\nsize_sol = 0.05\nmax_spend_lamports = 20000\n";
+    let bankroll = "[live]\nmax_size_sol = 0.2\nbankroll_share = 0.85\nbankroll_reserve_sol = 0.03\n";
+    for (mode, extra, exec_cap, view) in [(Mode::Canary, canary, 50_000_000u64, None), (Mode::Shadow, bankroll, 55_000_000, Some(money(100_000_000, 90_000_000, 0)))] {
+        let mut r = rig("size-arm", mode, &format!("[send_policy]\nbig_band_max_per_sec = 1000\n{extra}")).await;
+        let gate = SendGate::new();
+        if mode == Mode::Shadow { let _ = gate.shadow("mode_shadow", "no --live or --canary: nothing is sent", true); }
+        let (mut e, a, b) = amm_engine();
+        e.set_rec(r.rec.clone());
+        // arms 0.02 (a rung) and 0.1 (over the executor's cap); the ladder's default 0.02 - 1 SOL
+        e.set_experiments(Some(Experiments { seed: 11, size: Some(Exp { arms: vec![0.02, 0.1], weights: vec![1.0, 1.0], scope: Scope::ALL }), ..Default::default() }));
+        let mut x = std::mem::replace(&mut r.x, idle_exec());
+        if let Some(m) = view { x.set_money(m); }
+        assert_eq!(x.size_cap(), exec_cap);
+        x.set_gate(gate);
+        x.set_health(e.health_flags());
+        e.exec = Some(x);
+        let mut t = now_ns();
+        amm_start(&mut e, &mut t);
+        // a second apart (a would-send's rate model: 5 a second)
+        for k in 0..12u8 { t += 1_000_000_000; amm_move(&mut e, if k % 2 == 0 { &a } else { &b }, k, 1_030 + 30 * k as u64, &mut t); }
+        r.rec.sync();
+        let d: Vec<Value> = rec::read_jsonl(&r.dir, "decisions").unwrap().into_iter().filter(|l| l["opp"].is_u64()).collect();
+        let att = rec::read_jsonl(&r.dir, "attempts").unwrap();
+        let by_dec: HashMap<u64, &Value> = d.iter().map(|l| (l["decision"].as_u64().unwrap(), l)).collect();
+        let mut arms_seen = std::collections::BTreeSet::new();
+        let first = d[0]["decision"].as_u64().unwrap();
+        for l in &d {
+            let arm = crate::experiments::sol_lamports(l["experiments"]["size_max_sol"].as_f64().unwrap());
+            let cap = if l["decision"].as_u64() == Some(first) { arm } else { arm.min(exec_cap) };
+            for rt in l["routes"].as_array().unwrap() { if let Some(sz) = rt["size"].as_u64() { assert!(sz <= cap, "{mode:?}: priced {sz} past its cap {cap}"); } }
+            assert_eq!(l["routes"][l["best"].as_u64().unwrap() as usize]["size"].as_u64(), Some(cap), "{mode:?}: the profit rises with the size: the cap binds");
+        }
+        assert!(!att.is_empty(), "{mode:?}");
+        for x in &att {
+            let l = by_dec[&x["decision"].as_u64().unwrap()];
+            let priced = l["routes"][l["best"].as_u64().unwrap() as usize]["size"].as_u64().unwrap();
+            let size = x["size_lamports"].as_u64().unwrap();
+            assert_eq!(size, priced.min(exec_cap), "{mode:?}: the decision's size, at most the executor's cap");
+            if l["decision"].as_u64() != Some(first) { assert_eq!(size, priced, "{mode:?}: the decision priced is the trade sent"); }
+            assert!(size <= exec_cap);
+            assert_eq!(x["experiments"]["size_max_sol"], l["experiments"]["size_max_sol"]);
+            arms_seen.insert(l["experiments"]["size_max_sol"].to_string());
+        }
+        assert_eq!(arms_seen.len(), 2, "{mode:?}: both arms sent: {arms_seen:?}");
+        assert_eq!(e.exec.as_ref().unwrap().counts.get("reject_size_cap"), None, "{mode:?}: the engine re-quoted at the executor's cap");
+    }
+}
+
+/// WP-11 (review #14): the executor refuses a route sized past its decision's size arm (`size_arm`, counted
+/// `reject_size_arm`: the engine's search stops at the arm, so only a route sized elsewhere reaches the check); at the arm,
+/// or with the route's evaluation kind out of the arm's scope, it is sent
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_executor_refuses_a_size_past_its_arm() {
+    use crate::experiments::{Arm, Arms, Scope};
+    let mut r = rig("size-arm-exec", Mode::Live, "").await;
+    let arm = |sol: f64, kinds: u8| Arms { size: Some(Arm { idx: 0, value: sol, scope: Scope { kinds, ..Scope::ALL } }), ..Default::default() };
+    // the test routes trade 0.05 SOL (`SIZE`); an arm of 0.01 SOL
+    let d = r.decide(with_arms(route(1, damm(2, MINT), 12_000, 7), arm(0.01, Scope::ALL.kinds)), 97, now_ns());
+    assert_eq!((d.verdict, d.reason.as_str(), d.attempt), ("reject", "size_arm", None), "{d:?}");
+    assert_eq!(r.n("reject_size_arm"), 1);
+    assert!(r.got.lock().unwrap().is_empty() && r.lines("attempts").is_empty(), "nothing built, nothing sent");
+    // at the arm (0.05 SOL): sent
+    let d = r.decide(with_arms(route(1, damm(2, MINT), 12_000, 8), arm(0.05, Scope::ALL.kinds)), 97, now_ns());
+    assert_eq!(d.reason, "sent", "{d:?}");
+    let _ = r.settled().await;
+    // an arm scoped to quiescent evaluations only: this commit-triggered route is not the arm's
+    let d = r.decide(with_arms(route(1, damm(2, MINT), 12_000, 9), arm(0.01, 0b0010)), 97, now_ns());
+    assert_eq!(d.reason, "sent", "out of the arm's scope: {d:?}");
+    let _ = r.settled().await;
+    assert_eq!(r.lines("attempts")[0]["experiments_assigned"], json!({ "size_max_sol": 0.05 }), "the assigned arm recorded (review #10)");
 }

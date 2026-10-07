@@ -143,6 +143,8 @@ pub const VALIDATORS: S = S(id_of("validators"));
 pub const LEDGER: S = S(id_of("ledger"));
 pub const SNAPSHOTS: S = S(id_of("snapshots"));
 pub const RECON: S = S(id_of("recon"));
+/// WP-11: the experiments' configuration and block switches (§4.45), plain
+pub const EXPERIMENTS: S = S(id_of("experiments"));
 
 /// The id of the stream named `name` in the table (compile time; a name that is not in it does not compile)
 pub const fn id_of(name: &str) -> u16 {
@@ -184,8 +186,9 @@ pub const ENTRIES_MAGIC: [u8; 8] = *b"ARBXENT\0";
 /// `builder` and exec_init version 2: a 2.3 journal of integ/stage0 has neither, and its executor is not replayed);
 /// after it, sims 1.2 (WP-06's `closes_ata`, which its lane added under 1.1). FT-006 (the BAM landing fix): copies 1.3
 /// (`endpoint`, `leader_kind`) and attempts 2.2 (`tip.bam`, `tip.policy` `bam_floor`, `copies[].endpoint` and
-/// `copies[].leader_kind`)
-const STATIC: [(&str, Class, Format, &str, bool); 38] = [
+/// `copies[].leader_kind`). WP-11: experiments (plain, slow: one `config` line per enabled experiment at the start); decisions
+/// 1.2 and attempts 2.2 keep their shapes (their `experiments` maps and `tip.arm` hold the arms)
+const STATIC: [(&str, Class, Format, &str, bool); 39] = [
     ("attempts", Class::Core, Format::Jsonl, "arbx.attempts/2.2", false),
     ("copies", Class::Core, Format::Jsonl, "arbx.copies/1.3", false),
     ("bundles", Class::Core, Format::Jsonl, "arbx.bundles/2.0", false),
@@ -224,6 +227,7 @@ const STATIC: [(&str, Class, Format, &str, bool); 38] = [
     ("ledger", Class::Core, Format::Jsonl, "arbx.ledger/1.0", false),
     ("snapshots", Class::Slow, Format::PlainJsonl, "arbx.snapshots/1.0", false),
     ("recon", Class::Slow, Format::PlainJsonl, "arbx.recon/1.0", false),
+    ("experiments", Class::Slow, Format::PlainJsonl, crate::experiments::SCHEMA, false),
 ];
 
 /// a zstd frame ends at the latest when this much raw data is pending (§1.3)
@@ -502,9 +506,10 @@ pub fn start(opts: Opts) -> Result<Rec> {
         close_wait_ms: AtomicU64::new(CLOSE_WAIT.as_millis() as u64),
         entries, core_lost: AtomicBool::new(false), gate: OnceLock::new(), stopper: OnceLock::new(), engine_tid: AtomicI32::new(0), runtimes: OnceLock::new(),
         udp: Mutex::new(Vec::new()), stall: Default::default(), monitor: Mutex::new(None), notes, alert_tap: OnceLock::new() });
-    // the plain streams exist from the start, their headers stamped with the recorder's start (review F4, N2)
+    // the plain streams exist from the start, their headers stamped with the recorder's start (review F4, N2); WP-11's
+    // experiments.jsonl only with its first line (an experiment on): a run without experiments writes the files it did
     for (i, s) in r.streams.iter().enumerate() {
-        if s.spec.format.plain() && S(i as u16) != STATUS { let _ = r.tx[s.spec.class.idx()].send(Ctl::Open(S(i as u16), started_ns, None)); }
+        if s.spec.format.plain() && S(i as u16) != STATUS && S(i as u16) != EXPERIMENTS { let _ = r.tx[s.spec.class.idx()].send(Ctl::Open(S(i as u16), started_ns, None)); }
     }
     for (class, rx) in Class::ALL.into_iter().zip(rx) {
         let me = r.clone();
@@ -1077,7 +1082,7 @@ mod stream_ids {
             (STATUS, "status"), (EVENTS, "events"), (FEEDHEALTH, "feedhealth"), (RESOURCES, "resources"), (KEEPALIVE, "keepalive"), (RUN_LOG, "run"),
             (SLOTS, "slots"), (BLOCKS, "blocks"), (LEADERS, "leaders"), (COMMITS, "commits"), (DECISIONS, "decisions"), (ALTS, "alts"),
             (WALLET, "wallet"), (SLOTIDX, "slotidx"), (TXFETCH, "txfetch"), (VALIDATORS, "validators"), (LEDGER, "ledger"), (SNAPSHOTS, "snapshots"),
-            (RECON, "recon")];
+            (RECON, "recon"), (EXPERIMENTS, "experiments")];
         for (s, name) in all { assert_eq!(STATIC[s.0 as usize].0, name, "stream id {}", s.0); }
         let mut ids: Vec<u16> = all.iter().map(|x| x.0 .0).collect();
         ids.sort_unstable();

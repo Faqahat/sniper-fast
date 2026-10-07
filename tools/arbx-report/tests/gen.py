@@ -500,7 +500,7 @@ def generate(d: str) -> str:
              "caps": [[0.165, 10 ** 8, 1000 * (i + 1)], [4.2, 10 ** 8, 1200 * (i + 1)]], "decision": i} for i, s in enumerate([0, 3, 12])]
     write_zjsonl(d, "caps", "1.0", caps)
     write_plain(d, "experiments.jsonl", "experiments", "1.0", [{"t_ns": T0_NS, "experiment": "x4_share", "event": "config", "arms": ["0.6", "0.4"],
-                                                                "weights": [0.5, 0.5], "seed": 7, "scope": "attempt", "block": None}])
+                                                                "control": "0.6", "weights": [0.5, 0.5], "seed": 7, "scope": "attempt", "block": None}])
     # slow streams
     events = [{"t_ns": T0_NS + 500_000_000, "kind": "warmup_ready", "subsystem": "engine", "feed": None, "detail": {}},
               {"t_ns": t_slot(1004), "kind": "gate_change", "subsystem": "send", "feed": None, "detail": {"from": "live", "to": "shadow", "reason": "control"}},

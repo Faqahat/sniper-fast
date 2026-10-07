@@ -200,6 +200,9 @@ pub struct RouteIn {
     pub sell_ext: Option<Pk>,
     /// the data length of every account of the route the store holds (the loaded-data estimate)
     pub sizes: Vec<(Pk, u32)>,
+    /// WP-11: the arms the decision was assigned (src/experiments.rs; none: experiments off): the X4 share, the margin
+    /// floor and the X2 delay the executor applies in scope, and the size cap the engine priced under
+    pub arms: crate::experiments::Arms,
 }
 
 impl RouteIn {
@@ -417,9 +420,11 @@ impl TipPolicy {
     }
     /// the tip for an expected edge (gross − base fee), its account, its band and share ("contested" stays false until the
     /// Stage 2A Selector supplies it)
-    pub fn tip(&mut self, edge: i64) -> Option<(Pk, crate::tip::Tip)> {
+    pub fn tip(&mut self, edge: i64) -> Option<(Pk, crate::tip::Tip)> { self.tip_arm(edge, None) }
+    /// `tip` under WP-11's X4 arm (`TipModel::tip_arm`: the arm's share in its bands, the same floor and cap)
+    pub fn tip_arm(&mut self, edge: i64, arm: Option<crate::experiments::ShareArm>) -> Option<(Pk, crate::tip::Tip)> {
         if self.accounts.is_empty() { return None; }
-        let t = self.model.tip(edge, false);
+        let t = self.model.tip_arm(edge, false, arm);
         let a = self.accounts[self.cursor % self.accounts.len()];
         self.cursor += 1;
         Some((a, t))
@@ -598,6 +603,9 @@ struct Open {
     send_error: Option<String>,
     /// one of its would-fails counted toward its token's cooling already (one per attempt: review #2, #16)
     cooled: bool,
+    /// WP-11 (X2): the delay arm's sleep before the copy left, ns (the `signed_to_sent` series leaves it out: it measures
+    /// the send path)
+    delay_ns: u64,
 }
 
 /// What is remembered of a final attempt (amends, late verdicts): whether it landed and how (`src`: `statuses` when the
@@ -1080,13 +1088,19 @@ impl Exec {
     /// SOL (native + WSOL) − `bankroll_reserve_sol`, and at most the WSOL the route spends. Before the ledger's first
     /// balance snapshot the configured cap (live and canary refuse `equity_unknown` until then: nothing leaves). 0: the
     /// bankroll allows nothing (the engine refuses `bankroll_empty`)
-    pub fn size_cap(&self) -> u64 {
-        match self.bankroll_cap() { Some(c) if self.bankroll_share > 0.0 => self.max_size.min(c), _ => self.max_size }
+    pub fn size_cap(&self) -> u64 { self.size_cap_with(&self.money) }
+
+    /// `size_cap` on money view `m` (WP-11: the engine's size search under a size arm reads the last journaled view, so a
+    /// replay caps as the run did)
+    pub fn size_cap_with(&self, m: &crate::ledger::MoneyView) -> u64 {
+        match self.bankroll_cap_of(m) { Some(c) if self.bankroll_share > 0.0 => self.max_size.min(c), _ => self.max_size }
     }
 
     /// the bankroll's cap on a trade (see `size_cap`); None before the ledger has balances
-    pub fn bankroll_cap(&self) -> Option<u64> {
-        match (self.money.liquid, self.money.wsol) {
+    pub fn bankroll_cap(&self) -> Option<u64> { self.bankroll_cap_of(&self.money) }
+
+    fn bankroll_cap_of(&self, m: &crate::ledger::MoneyView) -> Option<u64> {
+        match (m.liquid, m.wsol) {
             (Some(l), Some(w)) => Some(((l as f64 * self.bankroll_share) as u64).saturating_sub(self.bankroll_reserve).min(w)),
             _ => None,
         }
@@ -1289,6 +1303,8 @@ impl Exec {
         // the same cap first (`Engine::after_opportunity`; tests::the_engine_caps_the_size), so this refuses only a route
         // sized past it
         if r.size > self.size_cap() { return fail(d, "size_cap"); }
+        // WP-11 (review #14): never above the decision's size arm either (the engine's search stops at it: defense in depth)
+        if r.arms.size_cap(r.trig_kind).is_some_and(|c| r.size > c) { return fail(d, "size_arm"); }
         // PLAN-ADDENDUM WP-21 (DESIGN.md §9.0 item 9): a venue switched to "quote" (or "off") is priced and built, never
         // sent; checked whenever the mode sends, the gate open or not (review F3: a gated decision says so in
         // `reason_ungated`, never a would-send). The engine keeps such routes out of a sending run's pick (`Engine`
@@ -1319,15 +1335,18 @@ impl Exec {
             return fail(d, "crowded_skip");
         }
         // the tip (by band, WP-06 item 8), the on-chain min_profit (WP-05 item 8) and the decision's own bar (today's: tip
-        // + fee + [live] margin)
-        let tipped = self.tips.as_mut().and_then(|p| p.tip(expected - BASE_FEE as i64));
+        // + fee + [live] margin). WP-11: the decision's arms in scope: X4's share in place of the band's (`tip_arm`: the same
+        // floor and cap, the band checked by the model), the margin arm's floor in place of `[send_policy] margin_floor`
+        let (kind, bv, sv) = (r.trig_kind, r.buy.venue, r.sell.venue);
+        let tipped = self.tips.as_mut().and_then(|p| p.tip_arm(expected - BASE_FEE as i64, r.arms.share_arm(kind, bv, sv)));
+        let margin_floor = r.arms.margin_floor(band, kind, bv, sv).unwrap_or(self.pol.margin_floor);
         let mut tip = tipped.map(|(a, t)| (a, t.lamports));
         // FT-006 (`[send_policy.bam]`): a BAM-led target slot's bid, raised toward the floor per CU of the transaction's CU
         // limit, within the edge's share, the cap and the decision's bar below; Jito leaders bid the band's tip
         let bam = match (tip, i.leader.kind == LeaderKind::Bam && self.pol.bam.enabled) {
             (Some((_, band_tip)), true) => {
                 let cap = self.tips.as_ref().map_or(u64::MAX, |p| p.model.cap);
-                let bar_room = expected - BASE_FEE as i64 - self.pol.margin_floor.max(self.margin_lamports) as i64;
+                let bar_room = expected - BASE_FEE as i64 - margin_floor.max(self.margin_lamports) as i64;
                 Some(bam_bid(&self.pol.bam, band_tip, expected - BASE_FEE as i64, self.cu_limit_of(&r), cap, bar_room))
             }
             _ => None,
@@ -1338,7 +1357,7 @@ impl Exec {
         }
         let tip_l = tip.map_or(0, |x| x.1);
         let net = expected - tip_l as i64 - BASE_FEE as i64;
-        let (min_profit, margin) = min_profit_onchain(tip_l, net, self.pol.margin_floor, self.pol.margin_share);
+        let (min_profit, margin) = min_profit_onchain(tip_l, net, margin_floor, self.pol.margin_share);
         let prio = Prio { band: bands::rank(band), crowd: crowding.rank(), ev: net };
         d.ev = Some(net);
         d.rank = Some(prio.rank());
@@ -1364,6 +1383,8 @@ impl Exec {
         let send_path = if would || replayed_send { None } else {
             match (self.paths.clone(), self.bundle_path) { (Some(p), Some(bp)) => Some((p, bp)), _ => return fail(d, "sender_stopped") }
         };
+        // WP-11 (X2): the decision's delay arm in scope (recorded on would-sends too: nothing is fired there)
+        let delay_ms = r.arms.delay_ms(band, kind, bv, sv);
         // the attempt: from here on nothing refuses it
         let attempt = self.next_attempt;
         self.next_attempt += 1;
@@ -1378,7 +1399,9 @@ impl Exec {
         let fired = send_path.map(|(paths, bp)| {
             let raw = Arc::new(build::sign(&built.msg, self.key.as_ref().expect("a sending mode holds its key")));
             let t_signed = now_ns();
-            let fire = paths.fire(attempt, vec![Copy { path: bp, raw: raw.clone(), tip, blockhash_slot: Some(bh.slot), leader_kind: Some(i.leader.kind.as_str()) }], prio);
+            // WP-11 (X2): the delay arm sleeps on the send task before the copy leaves, never here on the engine thread
+            let fire = paths.fire_after(attempt, vec![Copy { path: bp, raw: raw.clone(), tip, blockhash_slot: Some(bh.slot), leader_kind: Some(i.leader.kind.as_str()) }], prio,
+                std::time::Duration::from_millis(delay_ms.unwrap_or(0) as u64));
             (paths, bp, raw, fire, t_signed, now_ns())
         });
         let snap = self.leaders.as_ref().map(|b| serde_json::to_value(b.snapshot(target)).unwrap_or(Value::Null))
@@ -1387,9 +1410,14 @@ impl Exec {
         // FT-006: the endpoint the copy goes to (the configured bundle path's host: a would-send and a replay name it too) and
         // the leader kind it bids for
         let endpoint = self.bundle_host.clone();
-        let mut line = AttemptLine { attempt, r: &r, mode: self.mode, expected, band, crowding, tip, tip_share: tipped.map(|x| x.1.share), tip_policy: self.tips.as_ref(),
+        let tip_arm = tipped.and_then(|x| x.1.arm);
+        let mut line = AttemptLine { attempt, r: &r, mode: self.mode, expected, band, crowding, tip, tip_share: tipped.map(|x| x.1.share), tip_arm,
+            experiments: r.arms.applied_json(band, kind, bv, sv, tip_arm), tip_policy: self.tips.as_ref(),
             min_profit: built.min_profit, margin, built: &built, bh: &bh, bh_age: age, leader: snap, key, prev, why_allowed, prio, lambda: self.paths.as_ref().and_then(|p| p.queue_now().1),
             t_built0, t_built, payer: self.payer, program: self.program, bam: bam.map(|b| b.json(&self.pol.bam)), endpoint, leader_kind: i.leader.kind }.json();
+        // WP-11 (review #10): every arm the decision was assigned, beside the ones that applied (only with experiments on: an
+        // attempt without arms is the line it was)
+        if !r.arms.is_empty() { line["experiments_assigned"] = Value::Object(r.arms.assigned_json()); }
         if fired.is_none() && !replayed_send {
             // a would-send (shadow, dry run, a closed gate): recorded with sent = false
             self.would_recent.push_back(t);
@@ -1404,7 +1432,7 @@ impl Exec {
                 let raw = build::sign(&built.msg, &dk);
                 let t_signed = now_ns();
                 // what the signed bytes must be, from the decision and the policy, never from the build (review WP-06 #2)
-                let want = self.want(&r, dk.verifying_key().to_bytes(), bh.hash, tip, min_profit, &raw, alts);
+                let want = self.want(&r, dk.verifying_key().to_bytes(), bh.hash, tip, min_profit, margin_floor, &raw, alts);
                 let checks = verify_bundle(&raw, &want);
                 let ok = checks.iter().all(|c| c["ok"] == json!(true));
                 line["tx"]["sig"] = json!(send::first_signature(&raw));
@@ -1470,7 +1498,7 @@ impl Exec {
             bh_height: bh.height,
             target_slot: target, leader: i.leader.identity.clone().map(|id| (id, i.leader.kind)), t_engine: t, t_signed, t_sent: None, bundle: None,
             path: path_name, fired: false, took_big, checks_due: Vec::new(), checks: Vec::new(), status_hit: None, expiry_asked: false,
-            send_error: None, cooled: false });
+            send_error: None, cooled: false, delay_ns: delay_ms.unwrap_or(0) as u64 * 1_000_000 });
         d.verdict = "send";
         d.reason = "sent".into();
         d.sent = Some(true);
@@ -1487,7 +1515,7 @@ impl Exec {
     /// account sizes (`RouteIn::sizes`). The lookup tables are the ones the signed bytes name, as the executor knows them
     /// (the `[exec]` tables and the engine's cache: journaled)
     #[allow(clippy::too_many_arguments)]
-    fn want(&self, r: &RouteIn, signer: Pk, blockhash: [u8; 32], tip: Option<(Pk, u64)>, min_profit: u64, raw: &[u8], alts: &AltSource) -> VerifyWant {
+    fn want(&self, r: &RouteIn, signer: Pk, blockhash: [u8; 32], tip: Option<(Pk, u64)>, min_profit: u64, margin_floor: u64, raw: &[u8], alts: &AltSource) -> VerifyWant {
         let mut tables: HashMap<Pk, Arc<Vec<Pk>>> = HashMap::default();
         for l in crate::tx::parse_wire(raw).map(|(tx, _)| tx.lookups).unwrap_or_default() {
             if let Some(t) = self.alt_lists.get(&l.table).cloned().or_else(|| alts.list(&l.table)) { tables.insert(l.table, t); }
@@ -1495,7 +1523,7 @@ impl Exec {
         let held = r.mid_held.unwrap_or_else(|| self.held.contains(&r.mint));
         let mid = build::ata_of(&self.payer, &r.mint, &r.mint_prog);
         VerifyWant { payer: self.payer, signer, blockhash, tip, tips: self.tips.as_ref().map(|p| p.accounts.clone()).unwrap_or_default(), program: self.program,
-            pools: [r.buy.pool, r.sell.pool], cu_route: r.cu, cu_ata: r.cu_ata, alts: tables, amount_in: r.size, min_profit, margin_floor: self.pol.margin_floor,
+            pools: [r.buy.pool, r.sell.pool], cu_route: r.cu, cu_ata: r.cu_ata, alts: tables, amount_in: r.size, min_profit, margin_floor,
             quote: build::ata_of(&self.payer, &WSOL, &crate::pda::TOKEN_PROGRAM), mid, leg_programs: [r.buy.venue.program(), r.sell.venue.program()],
             ata: (!held).then_some((r.mint, r.mint_prog)), held_ok: self.held_growth_ok(), held_rent: build::HELD_RENT_BOUND,
             loaded_limit: self.builder.loaded_limit(), sizes: r.sizes.clone(), guard: self.builder.payer_guard.then_some(self.builder.payer_guard_max_drop),
@@ -1753,7 +1781,7 @@ impl Exec {
         let Some(o) = self.open.get_mut(&attempt) else { return };
         let c = fired.copies.first();
         let left = c.is_some_and(|c| c.t_sent > 0 && c.drop.is_none());
-        if let Some(c) = c.filter(|c| c.t_sent > 0) { self.lat[LAT_SIGNED_TO_SENT].push(c.t_sent.saturating_sub(o.t_signed)); }
+        if let Some(c) = c.filter(|c| c.t_sent > 0) { self.lat[LAT_SIGNED_TO_SENT].push(c.t_sent.saturating_sub(o.t_signed).saturating_sub(o.delay_ns)); }
         o.fired = true;
         if let Some(c) = c.filter(|c| left && (c.ok || c.t_ack == 0)) {
             o.t_sent = Some(c.t_sent);
@@ -2539,7 +2567,7 @@ macro_rules! reasons {
 reasons!("gate_shadow", "gate_stopped", "recorder_unhealthy", "warmup", "state_unavailable", "resync", "equity_unknown", "equity_stale", "fee_cap", "sender_stopped",
     "canary_wait", "canary_count", "blockhash_stale", "leader_unknown", "leader_skip_kind", "jito_auth_stale", "expected_below_min_profit", "implausible_gap", "size_cap",
     "token_cooling", "rent_cap", "uva_missing", "mid_not_held", "inflight_same_state", "inflight_same_leader", "band_throttle", "crowded_skip", "would_rate",
-    "would_rate_crowded", "oversized", "dlmm_ext_needed", "build_error", "bam_bid_below_floor", "venue_quote_only");
+    "would_rate_crowded", "oversized", "dlmm_ext_needed", "build_error", "bam_bid_below_floor", "venue_quote_only", "size_arm");
 
 /// the counter of a copy that never left (copies.jsonl `drop`, MEASUREMENT §4.38): `drop_<code>`. Such an attempt was
 /// handed to the fire, so it is not a refused decision (review WP-05 #16)
@@ -2594,6 +2622,9 @@ struct AttemptLine<'a> {
     tip: Option<(Pk, u64)>,
     /// the band's share the tip was cut with
     tip_share: Option<f64>,
+    /// WP-11: X4's share when it replaced the band's (`tip.arm`), and the arms that applied (`experiments`)
+    tip_arm: Option<f64>,
+    experiments: Value,
     tip_policy: Option<&'a TipPolicy>,
     min_profit: u64,
     margin: u64,
@@ -2636,7 +2667,7 @@ impl AttemptLine<'_> {
             "parts_skew_slots": r.parts_skew.map(|(b, s)| json!({ "buy": b, "sell": s })),
             "min_profit_onchain": self.min_profit, "margin": self.margin,
             "tip": { "lamports": tip_l, "account": self.tip.map(|t| b58(&t.0)), "sender": self.tip_policy.map(|p| p.path.clone()), "share": self.tip_share,
-                "band": self.band, "floor": self.tip_policy.map(|p| p.model.floor), "cap": self.tip_policy.map(|p| p.model.cap), "arm": null,
+                "band": self.band, "floor": self.tip_policy.map(|p| p.model.floor), "cap": self.tip_policy.map(|p| p.model.cap), "arm": self.tip_arm,
                 "policy": if self.bam.as_ref().is_some_and(|b| b["raised"] == json!(true)) { "bam_floor" } else { "share_of_edge" }, "bam": self.bam },
             "tx": { "sig": null, "bytes": build::tx_bytes(&b.msg), "locks": b.msg.locks, "alts": lookups_of(&b.msg), "alt_fallback": b.alt_fallback,
                 "alt_index_tables": b.index_tables.iter().map(b58).collect::<Vec<_>>(), "cu_limit": b.cu_limit, "cu_src": b.cu_src, "cu_price_micro": 0,
@@ -2649,7 +2680,7 @@ impl AttemptLine<'_> {
             "crowding": self.crowding,
             "inflight": { "key": self.key.json(), "prev_attempt": self.prev.map(|p| p.0), "prev_sv": self.prev.map(|p| format!("{:016x}", p.1)), "why_allowed": self.why_allowed },
             "queue": { "rank": self.prio.rank(), "band_rank": self.prio.band, "crowd_rank": self.prio.crowd, "ev": self.prio.ev, "wait_us": null, "lambda": self.lambda },
-            "experiments": {},
+            "experiments": self.experiments,
             "checks": checks,
             "stages": { "t_first_shred": r.t_first_shred, "t_update_recv": r.st[0], "t_commit": r.t_commit, "t_engine": r.st[2], "t_priced": r.t_priced, "t_decided": r.st[4],
                 "t_built": self.t_built, "t_build_start": self.t_built0, "t_signed": null, "t_enqueued": null, "t_dequeued": null, "t_sent": null, "t_ack": null },
