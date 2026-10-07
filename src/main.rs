@@ -468,6 +468,8 @@ fn main() -> Result<()> {
             } else { println!("  BAM-led slots: the band's tip, as Jito-led ones ([send_policy.bam] off)"); }
             // WP-22: the pool refresh's policy
             println!("{}", cfg.pool_refresh.describe());
+            // WP-11: the experiments (arms, scopes, the bounds they stay within)
+            println!("{}", cfg.experiments.describe(&cfg));
             // review N3: the crowded list, where this machine has it (the configured path, or the repo's data/ copy)
             if !sp.crowded_pools_file.is_empty() {
                 let p = Path::new(&sp.crowded_pools_file);
@@ -1810,7 +1812,7 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
             "snapshot_slot": snapshot_slot, "snapshot_ns": snapshot_ns, "stream_started_ns": stream_started_ns, "followed": followed },
         "probe": probe_meta, "chainfetch": cf_meta, "leaders": provenance::section(&cfg.leaders),
         "pools": pools_meta, "inputs": provenance::inputs_json(&cfg),
-        "streams": streams, "experiments": null,
+        "streams": streams, "experiments": cfg.experiments.compile().map(|x| serde_json::to_value(x).unwrap_or(Value::Null)),
         "limits": limits, "campaign_dir": a.campaign_dir.as_ref().map(|c| c.display().to_string()),
         "clock": provenance::clock_json(),
         "strategy": provenance::section(&cfg.strategy), "send": provenance::section(&cfg.sends), "builder": provenance::section(&cfg.exec),
@@ -1880,6 +1882,13 @@ fn run(a: &RunArgs, sess: &Arc<control::Session>) -> Result<()> {
     say(&format!("builder: CU table {}; tips by band {:?} of the edge, {}..{} lamports", model.cu.table.as_ref().map_or("none (the fallback formula)".to_string(),
         |t| format!("{} ({} legs; source {})", cfg.builder.cu_table, t.legs.len(), t.source.clone().unwrap_or_else(|| t.source_runs.join(",")))), model.tips.shares, model.tips.floor, model.tips.cap));
     eng.set_builder(model);
+    // ---- WP-11 wiring: the experiments (arms by hash of each decision's id), journaled with engine_init; their
+    // configuration into experiments.jsonl
+    eng.set_experiments(cfg.experiments.compile());
+    if eng.experiments().is_some() {
+        say(&cfg.experiments.describe(&cfg));
+        eng.record_experiments(now_ns());
+    }
     eng.set_signer_stats_out(&dir);
     if !cfg.strategy.signer_stats_file.is_empty() {
         say(&format!("signer statistics: read {} (sha256 {}); this segment writes signer-stats.json and signer-stats-delta.json here (`arbx signer-stats merge` folds the delta back)",

@@ -11,8 +11,12 @@
 //!   decision's net and the executor's are the same number.
 //! - It replaces `send::Path::tip`'s share logic for bundles: the jito-bundle path keeps only its floor
 //!   (`tip_lamports`, Jito's minimum) and its accounts; `[tips]` holds the rest.
-//! - WP-11's X4 arm (a share per arm) hooks in at [`TipModel::tip`].
+//! - WP-11's X4 arm (a share per arm, `[experiments.x4]`) hooks in at [`TipModel::tip_arm`]: in the bands up to its
+//!   `max_band` the arm's share replaces the band's (`shares`; the contested table is left alone), `floor` and `cap`
+//!   stay, and the engine's fee estimate (`fee_arm`) reads the same arm, so a decision's net and the executor's stay one
+//!   number. Without an arm both are the functions they were.
 use crate::bands::{Bands, BASE_FEE};
+use crate::experiments::ShareArm;
 use serde::{Deserialize, Serialize};
 
 /// the bands a share table covers (src/bands.rs: 0-4)
@@ -28,9 +32,10 @@ pub struct TipModel {
     pub cap: u64,
 }
 
-/// One tip: its lamports, the band of the edge it was cut from, the share used
+/// One tip: its lamports, the band of the edge it was cut from, the share used, and (WP-11) the X4 arm's share when it
+/// replaced the band's (attempts.jsonl `tip.arm`)
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Tip { pub lamports: u64, pub band: u8, pub share: f64 }
+pub struct Tip { pub lamports: u64, pub band: u8, pub share: f64, pub arm: Option<f64> }
 
 impl Default for TipModel {
     /// Stage 0's: 0.7 of the edge in every band, 1,000 to 100,000 lamports (the jito-bundle path's values before WP-06)
@@ -66,16 +71,25 @@ impl TipModel {
 
     /// The tip for an expected edge (gross − base fee): the share of its band (the contested one when `contested`) of
     /// the edge, rounded down (never more than it), within `floor` and `cap`. A negative edge tips the floor
-    pub fn tip(&self, edge: i64, contested: bool) -> Tip {
+    pub fn tip(&self, edge: i64, contested: bool) -> Tip { self.tip_arm(edge, contested, None) }
+
+    /// [`TipModel::tip`] under WP-11's X4 arm (`[experiments.x4]`): in bands 0..=`arm.max_band` the arm's share replaces
+    /// the band's (`shares`; a contested gap keeps the contested table), rounded down and within the same `floor` and
+    /// `cap`. Without an arm, or out of its bands, the tip is `tip`'s to the lamport
+    pub fn tip_arm(&self, edge: i64, contested: bool, arm: Option<ShareArm>) -> Tip {
         let band = self.bands.of_edge(edge);
-        let share = if contested { self.contested_shares } else { self.shares }[band as usize];
+        let arm = arm.filter(|a| !contested && band <= a.max_band).map(|a| a.share);
+        let share = arm.unwrap_or_else(|| if contested { self.contested_shares } else { self.shares }[band as usize]);
         let lamports = ((edge.max(0) as f64 * share) as u64).clamp(self.floor, self.cap.max(self.floor));
-        Tip { lamports, band, share }
+        Tip { lamports, band, share, arm }
     }
 
     /// The engine's fee estimate for an expected gross (PLAN WP-06 item 5): the base fee plus the tip of its edge. A
     /// bundle pays CU price 0, so the CU it asks costs nothing
-    pub fn fee(&self, gross: i64) -> u64 { BASE_FEE + self.tip(gross.saturating_sub(BASE_FEE as i64), false).lamports }
+    pub fn fee(&self, gross: i64) -> u64 { self.fee_arm(gross, None) }
+
+    /// [`TipModel::fee`] under WP-11's X4 arm: the base fee plus the tip `tip_arm` cuts from the gross's edge
+    pub fn fee_arm(&self, gross: i64, arm: Option<ShareArm>) -> u64 { BASE_FEE + self.tip_arm(gross.saturating_sub(BASE_FEE as i64), false, arm).lamports }
 }
 
 #[cfg(test)]
@@ -96,6 +110,39 @@ mod tests {
         for edge in (0..3_000_000i64).step_by(7_919) {
             assert_eq!(m.tip(edge, false).lamports, ((edge.max(0) as f64 * 0.7) as u64).clamp(1_000, 100_000), "{edge}");
         }
+    }
+
+    /// WP-11 (X4, property over 200,000 random edges, shares and scopes): `tip_arm` is `tip` without an arm, out of the
+    /// arm's bands and for a contested gap; in them it is the arm's share of the edge rounded down within the same floor
+    /// and cap (`arm` the share), never more than the edge (the floor aside); the fee estimate reads the same tip
+    #[test]
+    fn x4_arm_property() {
+        let m = TipModel { shares: [0.2, 0.2, 0.2, 0.6, 0.7], ..TipModel::default() };
+        let mut rng = 0x9e37_79b9_7f4a_7c15u64;
+        let mut in_band = 0;
+        for _ in 0..200_000 {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            let edge = (rng % 40_000_000) as i64 - 1_000_000;
+            let share = ((rng >> 40) % 1_001) as f64 / 1_000.0;
+            let max_band = ((rng >> 20) % 5) as u8;
+            let arm = ShareArm { share, max_band };
+            let (a, p) = (m.tip_arm(edge, false, Some(arm)), m.tip(edge, false));
+            assert_eq!(m.tip_arm(edge, false, None), p, "no arm: today's tip");
+            assert!(a.lamports >= m.floor && a.lamports <= m.cap, "{edge} {share}: {a:?}");
+            if p.band <= max_band {
+                in_band += 1;
+                assert_eq!((a.share, a.arm, a.band), (share, Some(share), p.band));
+                assert_eq!(a.lamports, ((edge.max(0) as f64 * share) as u64).clamp(m.floor, m.cap));
+                assert!(a.lamports <= (edge.max(0) as u64).max(m.floor), "never more than the edge (the floor aside)");
+            } else {
+                assert_eq!(a, p, "out of the arm's bands: the band's tip");
+            }
+            assert_eq!(m.tip_arm(edge, true, Some(arm)), m.tip(edge, true), "a contested gap keeps its table");
+            assert_eq!(m.fee_arm(edge + 5_000, Some(arm)), 5_000 + a.lamports, "the engine's fee estimate reads the same tip");
+        }
+        assert!(in_band > 50_000 && in_band < 190_000, "{in_band}");
     }
 
     /// Shares by band: each band its own share; contested gaps their own table; the fee estimate is base + tip

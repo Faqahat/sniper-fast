@@ -137,6 +137,31 @@ fn the_ft008_config_passes_arbx_check_with_the_pool_refresh() {
     }
 }
 
+/// WP-11: `arbx check` passes on the X4 x size example (FT-008's config with `[experiments.x4]` and `[experiments.size]`)
+/// and prints the experiments' line: the arms, the bounds they stay within, the factorial's cells; every other deploy
+/// config passes and prints the experiments off
+#[test]
+fn the_x4size_config_passes_arbx_check_with_its_experiments() {
+    let out = Command::new(BIN).env_clear().args(["check", "--config"]).arg(repo("deploy/arbx-ft-x4size-frz.toml")).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{text}{}", String::from_utf8_lossy(&out.stderr));
+    let line = text.lines().find(|l| l.starts_with("experiments (WP-11): ")).unwrap_or_else(|| panic!("no experiments line: {text}"));
+    assert!(line.contains("seed 20261007; x4 tip share arms [0.1, 0.2, 0.35] (weights 1:1:1) replace [tips] shares [0.2, 0.2, 0.2, 0.6, 0.7] in bands 0-2 (edge < 1000000), floor 1000 and cap 100000 kept, the BAM floor raises BAM-led bids on top"), "{line}");
+    assert!(line.contains("size cap arms [0.05, 0.2] SOL (weights 1:1) on the engine's size search") && line.contains("never above [canary] size_sol 0.2, [live] max_size_sol 0.2 or the bankroll (85%"), "{line}");
+    assert!(line.ends_with("the experiments independent (6 cells)"), "{line}");
+    assert!(text.contains("pool refresh (WP-22): on"), "FT-008's refresh kept: {text}");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy");
+    let mut n = 0;
+    for f in std::fs::read_dir(&dir).unwrap().flatten().map(|f| f.path()).filter(|p| p.extension().is_some_and(|e| e == "toml") && !p.ends_with("arbx-ft-x4size-frz.toml")) {
+        let out = Command::new(BIN).env_clear().args(["check", "--config"]).arg(&f).output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{}: {text}{}", f.display(), String::from_utf8_lossy(&out.stderr));
+        assert!(text.contains("experiments (WP-11): off"), "{}: {text}", f.display());
+        n += 1;
+    }
+    assert!(n >= 9, "{n} deploy configs checked");
+}
+
 /// Review WP-07 #2 (mutants M3, M10), #5, #8, through the real binary, before anything reaches the network or a key: a
 /// canary run without a test budget is refused for the budget; `--budget-left` above the owner's hard cap is refused; a
 /// canary campaign without a budget is refused for the budget; a canary run is refused when the owner's cumulative

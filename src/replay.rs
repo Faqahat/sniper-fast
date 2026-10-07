@@ -528,6 +528,8 @@ fn build_engine(inp: &Inputs, boot: &Boot, sets: &[Set], rec: &Rec) -> Result<(E
         if !sets.is_empty() { if let Some(b) = &init.builder { x.set_tip_model(b.tips.clone()); } }
         e.exec = Some(x);
     }
+    // WP-11: the run's experiments (engine_init's) as the replay assigns them, in its own experiments.jsonl
+    e.record_experiments(0);
     Ok((e, init))
 }
 

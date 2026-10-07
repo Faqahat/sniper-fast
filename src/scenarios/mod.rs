@@ -50,6 +50,7 @@ mod s14_ledger;
 mod s15_counters;
 mod s16_mispricing;
 mod s17_clmm;
+mod s18_experiments;
 mod synth;
 
 use crate::config::Config;
@@ -482,7 +483,11 @@ impl Rig {
         e.apply_init(&EngineInit { min_tip, strategy_sha256: engine::strategy_sha256(&cfg.strategy), executor: s.executor, signer_stats_file: String::new(),
             signer_stats_sha256: None, signer_stats: Default::default(), knobs: Some(EngineKnobs::from_cfg(&cfg)),
             // WP-06: the fee and CU model as `arbx run` builds it (the config's [tips], [bands] and CU table: the repo's copy)
-            builder: Some(engine::BuilderModel::from_cfg(&scenario_paths(&cfg)).expect("the builder model")) }).unwrap();
+            builder: Some(engine::BuilderModel::from_cfg(&scenario_paths(&cfg)).expect("the builder model")),
+            // WP-11: the config's experiments, as `arbx run` sets them (none in the shipped scenarios)
+            experiments: cfg.experiments.compile() }).unwrap();
+        // WP-11: experiments.jsonl's configuration lines, as `arbx run` writes them (none with experiments off)
+        e.record_experiments(T0);
         // ---- WP-09: the run's executor (`ExecSetup`), its gate and LeaderBook
         let gate = crate::control::SendGate::new();
         let book = crate::leaders::LeaderBook::new(Rec::off());
