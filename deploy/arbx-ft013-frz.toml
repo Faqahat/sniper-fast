@@ -1,4 +1,4 @@
-# FT-013 (owner 2026-10-07: "Yes u can", "Ok do it first"): the first LIVE sends through Raydium CLMM and Orca Whirlpool. FT-008's config with:
+# FT-013 part B (owner 2026-10-07: "restart the run with 2"): 2 bundles/s. FT-013 ("Yes u can", "Ok do it first"): the first LIVE sends through Raydium CLMM and Orca Whirlpool. FT-008's config with:
 # the WP-21 seed list (+242 vetted CLMM/Whirlpool pools), both venues set to send, and [pool_refresh] off (it does not read CLMM swaps).
 # arbx canary on the frz wallet (DRAFT, WP-07; WP-06's builder since the Stage-0 merge; docs/field-tests/README.md: FT-004
 # first live canary hour, FT-005 24 h canary).
@@ -294,7 +294,7 @@ kind = "jito-bundle"
 url = "https://frankfurt.mainnet.block-engine.jito.wtf"
 auth_keypair = "~/.nexus-v2-jito-auth.json"
 tip_lamports = 1000   # EXP-1: Jito's floor; WP-06: the tip itself is [tips] (by band, floor, cap) below
-max_per_sec = 5              # Jito's limit on our gRPC key since 2026-10-02 (per key: arbx gets its own key at go-live)
+max_per_sec = 2              # owner 2026-10-07: our Jito bundle send limit is 2/s (the earlier 5/s note was wrong); never send faster
 # the bundle path's rate queue waits [send_policy] queue_ms (no queue_ms here: WP-05)
 
 [[send]]
@@ -395,7 +395,7 @@ max_per_sec = 2
 # never binds; the equity stops, the spend cap and the bankroll do (0 would mean no cap at all)
 enabled = true
 count = 100000
-every_ms = 1000
+every_ms = 500   # owner 2026-10-07 ("restart the run with 2"): 2 bundles/s, Jito's limit for us
 size_sol = 0.05                # FT-007: the canary cap from 0.2 to 0.05 SOL
 max_spend_lamports = 5000000   # fees of landed failures per segment (a bundle that fails does not land: should stay 0)
 
