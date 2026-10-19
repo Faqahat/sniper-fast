@@ -136,6 +136,125 @@ pub fn json_send_body(raw: &[u8], out: &mut Vec<u8>) {
     out.extend_from_slice(br#"",{"encoding":"base64","maxRetries":0,"skipPreflight":true}]}"#);
 }
 
+/// FIX2: Harmonic's JSON-RPC sendBundle body: {"id":1,"jsonrpc":"2.0","method":"sendBundle","params":[["<b64>"],{"encoding":"base64"}]}
+pub fn json_bundle_body(raw: &[u8], out: &mut Vec<u8>) {
+    use base64::Engine as _;
+    out.clear();
+    out.extend_from_slice(br#"{"id":1,"jsonrpc":"2.0","method":"sendBundle","params":[[""#);
+    let start = out.len();
+    let n = (raw.len() + 2) / 3 * 4;
+    out.resize(start + n, 0);
+    let w = base64::engine::general_purpose::STANDARD.encode_slice(raw, &mut out[start..]).unwrap_or(0);
+    out.truncate(start + w);
+    out.extend_from_slice(br#""],{"encoding":"base64"}]}"#);
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// FIX2: a small HPACK DECODER (RFC 7541) for the server's header blocks on the jito-h2 connection, so a refused bundle
+// reports its grpc-status / grpc-message (the reason) instead of "rejected (no message)". It keeps the connection's
+// dynamic table (every server HEADERS block goes through it, in order), decodes Huffman strings with the RFC table.
+// ------------------------------------------------------------------------------------------------------------------
+#[path = "fast_huff.rs"]
+mod huff;
+
+const HPACK_STATIC: [(&str, &str); 61] = [(":authority", ""), (":method", "GET"), (":method", "POST"), (":path", "/"), (":path", "/index.html"),
+    (":scheme", "http"), (":scheme", "https"), (":status", "200"), (":status", "204"), (":status", "206"), (":status", "304"), (":status", "400"),
+    (":status", "404"), (":status", "500"), ("accept-charset", ""), ("accept-encoding", "gzip, deflate"), ("accept-language", ""), ("accept-ranges", ""),
+    ("accept", ""), ("access-control-allow-origin", ""), ("age", ""), ("allow", ""), ("authorization", ""), ("cache-control", ""),
+    ("content-disposition", ""), ("content-encoding", ""), ("content-language", ""), ("content-length", ""), ("content-location", ""),
+    ("content-range", ""), ("content-type", ""), ("cookie", ""), ("date", ""), ("etag", ""), ("expect", ""), ("expires", ""), ("from", ""), ("host", ""),
+    ("if-match", ""), ("if-modified-since", ""), ("if-none-match", ""), ("if-range", ""), ("if-unmodified-since", ""), ("last-modified", ""),
+    ("link", ""), ("location", ""), ("max-forwards", ""), ("proxy-authenticate", ""), ("proxy-authorization", ""), ("range", ""), ("referer", ""),
+    ("refresh", ""), ("retry-after", ""), ("server", ""), ("set-cookie", ""), ("strict-transport-security", ""), ("transfer-encoding", ""),
+    ("user-agent", ""), ("vary", ""), ("via", ""), ("www-authenticate", "")];
+
+fn huff_decode(src: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(src.len() * 2);
+    let (mut acc, mut n) = (0u64, 0usize);
+    for &b in src {
+        for i in (0..8).rev() {
+            acc = (acc << 1) | ((b >> i) & 1) as u64;
+            n += 1;
+            if n >= 5 {
+                if let Some(sym) = huff::ENCODE_TABLE.iter().position(|&(nb, code)| nb == n && code == acc) {
+                    if sym == 256 { return None; }
+                    out.push(sym as u8);
+                    acc = 0; n = 0;
+                }
+            }
+            if n > 30 { return None; }
+        }
+    }
+    // the rest must be EOS padding: < 8 bits, all ones
+    if n >= 8 || (n > 0 && acc != (1u64 << n) - 1) { return None; }
+    Some(out)
+}
+
+#[derive(Default)]
+pub struct HpackDec { tab: VecDeque<(String, String)>, size: usize, max: usize }
+impl HpackDec {
+    pub fn new() -> Self { HpackDec { tab: VecDeque::new(), size: 0, max: 4096 } }
+    fn int(b: &[u8], p: &mut usize, prefix: u8) -> Option<usize> {
+        let mask = ((1u16 << prefix) - 1) as u8;
+        let mut v = (*b.get(*p)? & mask) as usize; *p += 1;
+        if v < mask as usize { return Some(v); }
+        let mut m = 0;
+        loop { let x = *b.get(*p)?; *p += 1; v += ((x & 0x7f) as usize) << m; m += 7; if x & 0x80 == 0 { break; } if m > 28 { return None; } }
+        Some(v)
+    }
+    fn string(b: &[u8], p: &mut usize) -> Option<String> {
+        let h = *b.get(*p)? & 0x80 != 0;
+        let n = Self::int(b, p, 7)?;
+        let s = b.get(*p..*p + n)?; *p += n;
+        Some(String::from_utf8_lossy(&if h { huff_decode(s)? } else { s.to_vec() }).to_string())
+    }
+    fn get(&self, i: usize) -> Option<(String, String)> {
+        if i == 0 { return None; }
+        if i <= 61 { let (n, v) = HPACK_STATIC[i - 1]; return Some((n.to_string(), v.to_string())); }
+        self.tab.get(i - 62).cloned()
+    }
+    fn insert(&mut self, n: String, v: String) {
+        let sz = n.len() + v.len() + 32;
+        self.tab.push_front((n, v)); self.size += sz;
+        while self.size > self.max { match self.tab.pop_back() { Some((a, b)) => self.size -= a.len() + b.len() + 32, None => break } }
+    }
+    /// decode one header block; None: undecodable (the table may then be off: callers only log)
+    pub fn decode(&mut self, b: &[u8]) -> Option<Vec<(String, String)>> {
+        let mut out = Vec::new();
+        let mut p = 0;
+        while p < b.len() {
+            let x = b[p];
+            if x & 0x80 != 0 { let i = Self::int(b, &mut p, 7)?; out.push(self.get(i)?); }
+            else if x & 0xc0 == 0x40 || x & 0xf0 == 0x00 || x & 0xf0 == 0x10 {
+                let index = x & 0xc0 == 0x40;
+                let i = Self::int(b, &mut p, if index { 6 } else { 4 })?;
+                let n = if i == 0 { Self::string(b, &mut p)? } else { self.get(i)?.0 };
+                let v = Self::string(b, &mut p)?;
+                if index { self.insert(n.clone(), v.clone()); }
+                out.push((n, v));
+            } else if x & 0xe0 == 0x20 {
+                let m = Self::int(b, &mut p, 5)?; self.max = m;
+                while self.size > self.max { match self.tab.pop_back() { Some((a, c)) => self.size -= a.len() + c.len() + 32, None => break } }
+            } else { return None; }
+        }
+        Some(out)
+    }
+}
+
+/// grpc-message is percent-encoded (gRPC spec)
+fn pct_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut o = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) { o.push(v); i += 3; continue; }
+        }
+        o.push(b[i]); i += 1;
+    }
+    String::from_utf8_lossy(&o).to_string()
+}
+
 // ------------------------------------------------------------------------------------------------------------------
 // FastConn: our own HTTP/1.1 keep-alive connection
 // ------------------------------------------------------------------------------------------------------------------
@@ -490,7 +609,9 @@ impl Hpack {
     }
 }
 #[derive(Default)]
-struct H2State { next_stream: u32, conn_window: i64, peer_init_window: i64, streams: std::collections::HashMap<u32, (u64, u64, bool)>, hp: Hpack }
+struct H2State { next_stream: u32, conn_window: i64, peer_init_window: i64, streams: std::collections::HashMap<u32, (u64, u64, bool)>, hp: Hpack, dec: HpackDec,
+    /// FIX2: a header block split over CONTINUATION frames: (stream, END_STREAM, bytes so far)
+    cont: Option<(u32, bool, Vec<u8>)> }
 
 pub struct FastH2 {
     pub name: String,
@@ -669,7 +790,7 @@ impl FastH2 {
                 Err(_) => { std::thread::sleep(Duration::from_millis(backoff)); backoff = (backoff * 2).min(10_000); continue; }
             };
             backoff = 200;
-            *self.st.lock().unwrap() = H2State { next_stream: 1, conn_window: 65_535, peer_init_window: 65_535, streams: Default::default(), hp: Hpack::default() };
+            *self.st.lock().unwrap() = H2State { next_stream: 1, conn_window: 65_535, peer_init_window: 65_535, streams: Default::default(), hp: Hpack::default(), dec: HpackDec::new(), cont: None };
             *self.io.lock().unwrap() = Some(io);
             self.up.store(true, Ordering::Release);
             self.reconnects.fetch_add(1, Ordering::Relaxed);
@@ -727,7 +848,40 @@ impl FastH2 {
                             }
                             if len > 0 { frame_hdr(&mut out, 4, 0x8, 0, 0); out.extend_from_slice(&(len as u32).to_be_bytes()); }
                         }
-                        0x1 if fl & 0x1 != 0 => self.reply(sid, None, "rejected (stream ended without a message; grpc-status not decoded)"),
+                        0x1 | 0x9 => {
+                            // FIX2: HEADERS (+ CONTINUATION): decode every server block (keeps the HPACK table in step); a block
+                            // that ends the stream carries the trailers: grpc-status / grpc-message are the refusal's reason
+                            let (block, end_stream, done) = if ty == 0x1 {
+                                let mut q = pl;
+                                if fl & 0x8 != 0 && !q.is_empty() { let pad = q[0] as usize; q = &q[1..q.len().saturating_sub(pad)]; }
+                                if fl & 0x20 != 0 && q.len() >= 5 { q = &q[5..]; }
+                                if fl & 0x4 == 0 { self.st.lock().unwrap().cont = Some((sid, fl & 0x1 != 0, q.to_vec())); (Vec::new(), false, false) }
+                                else { (q.to_vec(), fl & 0x1 != 0, true) }
+                            } else {
+                                let mut st = self.st.lock().unwrap();
+                                match st.cont.take() {
+                                    Some((s0, es, mut b)) if s0 == sid => { b.extend_from_slice(pl); if fl & 0x4 == 0 { st.cont = Some((s0, es, b)); (Vec::new(), false, false) } else { (b, es, true) } }
+                                    _ => (Vec::new(), false, false),
+                                }
+                            };
+                            if done {
+                                let fields = self.st.lock().unwrap().dec.decode(&block);
+                                if end_stream {
+                                    let got_msg = self.st.lock().unwrap().streams.get(&sid).map(|e| e.2).unwrap_or(true);
+                                    if !got_msg {
+                                        let why = match &fields {
+                                            Some(f) => {
+                                                let g = |k: &str| f.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+                                                format!("rejected grpc-status={} grpc-message={}{}", g("grpc-status").unwrap_or_else(|| "-".into()),
+                                                    pct_decode(&g("grpc-message").unwrap_or_default()), g(":status").map(|s| format!(" http={s}")).unwrap_or_default())
+                                            }
+                                            None => format!("rejected (trailers not decodable: {} bytes)", block.len()),
+                                        };
+                                        self.reply(sid, None, &why);
+                                    }
+                                }
+                            }
+                        }
                         0x3 => self.reply(sid, None, "RST_STREAM"),
                         0x7 => goaway = true,
                         _ => {}

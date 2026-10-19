@@ -1636,6 +1636,11 @@ pub enum SendKind {
     NextBlock,
     /// bloXroute Trader API: POST /api/v2/submit {"transaction":{"content":b64}}, header Authorization; tip >= 0.001 SOL
     Bloxroute,
+    /// FIX2 (2026-10-19): Harmonic block engine (docs.harmonic.gg/searchers/harmonic-bundles), the public JSON-RPC
+    /// `sendBundle` at `https://<region>.be.harmonic.gg/api/v1/bundles` (params [[base64 tx], {"encoding":"base64"}], no
+    /// auth). No tip account: Harmonic's "tip" is the compute-unit price, so the copy must carry one. One-tx bundle
+    /// (revert-protected: a reverting bundle is dropped, no fee)
+    HarmonicBundle,
 }
 
 impl SendKind {
@@ -1648,7 +1653,7 @@ impl SendKind {
             SendKind::Helius => 5_000,
             SendKind::Rpcfast | SendKind::Iris => 10_000,
             SendKind::Bolt | SendKind::Lunar => 1_000_000,
-            SendKind::Shyft | SendKind::Haan | SendKind::Tpu | SendKind::Rpc => 0,
+            SendKind::Shyft | SendKind::Haan | SendKind::Tpu | SendKind::Rpc | SendKind::HarmonicBundle => 0,
             SendKind::BlockRazor | SendKind::FlashBlock => 100_000,
             SendKind::Nozomi | SendKind::ZeroSlot | SendKind::NodeOne | SendKind::Falcon | SendKind::Everstake | SendKind::NextBlock | SendKind::Bloxroute
             | SendKind::JupiterTx | SendKind::Landx | SendKind::SpeedLanding => 1_000_000,

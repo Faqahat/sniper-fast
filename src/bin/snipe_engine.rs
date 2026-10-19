@@ -198,6 +198,89 @@ impl DetLog {
     }
 }
 
+/// FIX2 (2026-10-19, /root/fix2/NOTES.md): the LANDING gates shared by the paper and live loops (all default off).
+///  --max-create-ms X           skip a launch whose create sits later than X ms into its slot on the leader's PoH clock.
+///                              Source, in order: the PoH index the shred feeds build while walking the slot from its first
+///                              data set (feeds::poh_index: dz-leader / dz-retrans-eu, needs --race-glued), else the entries
+///                              feed's (erpc) PoH position of any copy of the create. Checked when the race gate decides
+///                              (the glued run is read from the same walk, so the create's position is known by then).
+///  --max-create-ms-unknown P   pass|skip (default skip) when no PoH position is known at the decision.
+///  --log-create-poh            a CREATE-POH line ~120 ms after every create's first arrival (its PoH ms, source, sig):
+///                              the input of the on-chain validation (/root/fix2/pohval.py).
+///  paper (--paper-trade) only: --close-leaders is applied here too, at the decision, and every decided launch gets a
+///  GATE line (leader, close?, create_ms, verdict), so one paper run gives the rule-#2 count with and without each gate.
+struct LandGate {
+    max_ms: Option<f64>,
+    unknown_pass: bool,
+    log_poh: bool,
+    /// mint -> (create sig8, slot, PoH ms of any arrival, create sig (b58, 16 chars), first arrival)
+    info: std::collections::HashMap<Pk, (u64, u64, Option<f64>, String, Instant)>,
+    order: std::collections::VecDeque<Pk>,
+    pend_log: std::collections::VecDeque<Pk>,
+    pub late: u64,
+    pub unknown: u64,
+    pub passed: u64,
+    pub lines: Vec<String>,
+}
+
+impl LandGate {
+    fn new() -> Self {
+        let max_ms = arg("--max-create-ms").and_then(|s| s.parse::<f64>().ok());
+        let unknown_pass = arg("--max-create-ms-unknown").map(|s| s == "pass").unwrap_or(false);
+        LandGate { max_ms, unknown_pass, log_poh: has("--log-create-poh"), info: Default::default(), order: Default::default(), pend_log: Default::default(),
+            late: 0, unknown: 0, passed: 0, lines: Vec::new() }
+    }
+    fn on(&self) -> bool { self.max_ms.is_some() || self.log_poh }
+    fn describe(&self) -> String {
+        format!("LAND-GATE: max_create_ms={} (unknown -> {}) log_create_poh={}", self.max_ms.map(|x| format!("{x:.0}")).unwrap_or_else(|| "off".into()),
+            if self.unknown_pass { "pass" } else { "skip" }, self.log_poh)
+    }
+    /// every create arrival (first copy or not, before the dedup): remember its sig8 / slot and any PoH position
+    fn note(&mut self, a: &arbx::feeds::Arrival, mint: &Pk) {
+        if !self.on() { return; }
+        let poh = a.poh.as_ref().and_then(|p| p.ms());
+        match self.info.get_mut(mint) {
+            Some(e) => { if e.2.is_none() { e.2 = poh; } }
+            None => {
+                self.info.insert(*mint, (sig8_of(&a.tx.sig), a.slot, poh, a.tx.sig_b58()[..16].to_string(), Instant::now()));
+                self.order.push_back(*mint);
+                if self.log_poh { self.pend_log.push_back(*mint); }
+                while self.order.len() > 20_000 { if let Some(o) = self.order.pop_front() { self.info.remove(&o); } }
+            }
+        }
+    }
+    /// the create's PoH ms into its slot and where it came from
+    fn create_ms(&self, mint: &Pk) -> (Option<f64>, &'static str) {
+        let Some(e) = self.info.get(mint) else { return (None, "none") };
+        if let Some((p, _)) = arbx::feeds::poh_index().get(e.0) { if let Some(ms) = p.ms() { return (Some(ms), "poh-index"); } }
+        match e.2 { Some(ms) => (Some(ms), "arrival"), None => (None, "none") }
+    }
+    /// at the decision: true = fire. Logs (deferred) one GATE-CREATE-MS line
+    fn check(&mut self, mint: &Pk, slot: u64) -> bool {
+        let Some(max) = self.max_ms else { return true };
+        let (ms, src) = self.create_ms(mint);
+        let pass = match ms { Some(x) => x <= max, None => self.unknown_pass };
+        match (ms, pass) { (None, _) => self.unknown += 1, (Some(_), false) => self.late += 1, _ => {} }
+        if pass { self.passed += 1; }
+        self.lines.push(format!("  GATE-CREATE-MS slot={slot} mint={} create_ms={} src={src} max={max:.0} verdict={}", b58(mint),
+            ms.map(|x| format!("{x:.1}")).unwrap_or_else(|| "-".into()), if pass { "pass" } else if ms.is_none() { "skip_unknown" } else { "skip_late" }));
+        pass
+    }
+    /// off the hot path: CREATE-POH lines for creates first seen >= 120 ms ago, and the held GATE lines
+    fn flush(&mut self) {
+        for l in self.lines.drain(..) { fastfire::log_line(l); }
+        while let Some(m) = self.pend_log.front().copied() {
+            let Some(e) = self.info.get(&m) else { self.pend_log.pop_front(); continue };
+            if e.4.elapsed() < Duration::from_millis(120) { break; }
+            self.pend_log.pop_front();
+            let (ms, src) = self.create_ms(&m);
+            let e = &self.info[&m];
+            fastfire::log_line(format!("  CREATE-POH slot={} mint={} sig={} poh_ms={} src={src} arrival_poh_ms={}", e.1, b58(&m), e.3,
+                ms.map(|x| format!("{x:.1}")).unwrap_or_else(|| "-".into()), e.2.map(|x| format!("{x:.1}")).unwrap_or_else(|| "-".into())));
+        }
+    }
+}
+
 /// DET FIX: a Launch for a router (CPI) create: bonding curve + ATA derived from the mint (as --round-trip does), the
 /// creator from the router args, dev = the curve cost of the router's min_tokens_out / 0.98 (its default 2% slippage;
 /// on chain the cost of min_tokens_out was 0.978-0.980 x the true dev SOL), mayhem from the args, other flags default.
@@ -223,7 +306,8 @@ fn main() -> Result<()> {
     let paper_trade = has("--paper-trade");
     let unwrap = has("--unwrap");
     let live = has("--live");
-    if !warm_probe && !shadow && !round_trip && !snipe_once && !simulate && !paper_trade && !unwrap && !has("--sell-held") && !has("--ack-probe") {
+    if !warm_probe && !shadow && !round_trip && !snipe_once && !simulate && !paper_trade && !unwrap && !has("--sell-held") && !has("--ack-probe")
+        && !has("--landed-via-probe") && !has("--jito-poll-probe") {
         bail!("pick a mode: --warm-probe (latency), --shadow (observe launches), --round-trip (gated buy+sell on --mint), --snipe-once (gated: auto-detect a fresh launch + round-trip it), --simulate (ZERO-COST: simulateTransaction a v3 buy, no send), --paper-trade (ZERO-COST: forward paper-trade the filter+exit-ladder on live launches, no send), --unwrap (gated: close the WSOL ATA back to native SOL), optionally with --live for real txs (gated)");
     }
 
@@ -261,6 +345,13 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
     // simulateTransaction. Does not require --live (spends nothing). Handle before any send-path setup.
     if simulate {
         return run_simulate(probe, &key, user, &rpc, &stop).await;
+    }
+
+    // ---- FIX2 zero-cost probes of the attribution / status-poll code on OLD signatures / bundle ids (no send path)
+    if let Some(list) = arg("--landed-via-probe") { return fix2::landed_via_probe(&list).await; }
+    if let Some(list) = arg("--jito-poll-probe") {
+        let base = probe.sends.iter().find(|s| s.kind == config::SendKind::JitoBundle).and_then(|s| config::expand(&s.url)).context("--jito-poll-probe: no jito-bundle [[send]] in --config")?;
+        return fix2::jito_poll_probe(&base, &list).await;
     }
 
     // ---- --paper-trade: ZERO-COST. Detect launches off the feed, forward-poll each winner's real curve price, and
@@ -923,8 +1014,10 @@ async fn send_and_poll_at(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc
             match e { None => { any_ok = true; break; } Some(m) => errs.push(format!("{name}: {m}")) }
         }
         if !any_ok { bail!("send refused on every path: {}", errs.join(" / ")); }
+        fix2::spawn_jito_poll(&fan, &sig, 0);
         let out = poll_land(rpc, sig.clone(), sig_bytes, send_slot, land_timeout).await;
         jito_results(&fan, &meta);
+        fix2::spawn_landed_via(&fan, &meta, out.land_slot, 0);
         return Ok(out);
     }
     // single path (the old code path): its SEND-ACK, and the tipless --fallback-path on a refusal
@@ -968,9 +1061,8 @@ async fn poll_land(rpc: &rpc::Rpc, sig: String, sig_bytes: [u8; 64], send_slot: 
 fn jito_results(fan: &[Arc<send::Path>], meta: &lat::Meta) {
     for p in fan {
         let Some(j) = &p.jito else { continue };
-        let v = j.verdicts(&meta.sig);
-        let s = v.iter().map(|(_, o)| format!("{}{}{}", o.outcome, o.slot.map(|x| format!("@{x}")).unwrap_or_default(),
-            o.index.map(|i| format!("#{i}")).unwrap_or_default())).collect::<Vec<_>>().join(",");
+        // FIX2: with each verdict's detail and decoded error code (a would-fail's reason was dropped before)
+        let s = if j.verdicts(&meta.sig).is_empty() { String::new() } else { fix2::verdict_str(j, &meta.sig) };
         eprintln!("  JITO-RESULT path={} sig={} {}", p.name, &meta.sig[..16.min(meta.sig.len())], if s.is_empty() { "(no result yet)".to_string() } else { s.clone() });
         lat::log_json(serde_json::json!({ "ev": "jito_result", "t_ns": arbx::feeds::clock::now_ns(), "sig": meta.sig, "path": p.name, "results": s }));
     }
@@ -1023,6 +1115,25 @@ async fn run_sell_held(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<se
         }
     }
     Ok(())
+}
+
+/// FIX2: Err on an RPC failure (token_balance maps it to 0, which looks like "not created yet")
+async fn token_balance_strict(rpc: &rpc::Rpc, ata: &Pk) -> Result<u64> {
+    let v = rpc.call("getTokenAccountBalance", serde_json::json!([b58(ata), { "commitment": "processed" }])).await?;
+    v["value"]["amount"].as_str().and_then(|s| s.parse::<u64>().ok()).context("getTokenAccountBalance: no amount")
+}
+
+/// FIX2: up to `tries` reads 250 ms apart; Some(amount) on the first answer (a missing/closed account reads 0), None if
+/// every read failed
+async fn token_balance_retry(rpc: &rpc::Rpc, ata: &Pk, tries: u32) -> Option<u64> {
+    for k in 0..tries.max(1) {
+        if k > 0 { tokio::time::sleep(Duration::from_millis(250)).await; }
+        match rpc.call("getTokenAccountBalance", serde_json::json!([b58(ata), { "commitment": "processed" }])).await {
+            Ok(v) => if let Some(a) = v["value"]["amount"].as_str().and_then(|s| s.parse::<u64>().ok()) { return Some(a) },
+            Err(e) => { let m = format!("{e:#}"); if m.contains("could not find account") || m.contains("Invalid param") { return Some(0); } }
+        }
+    }
+    None
 }
 
 async fn token_balance(rpc: &rpc::Rpc, ata: &Pk) -> Result<u64> {
@@ -1781,6 +1892,17 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
 
     let mut det = DetLog::new(_feeds.names.clone());
     set_slot_clock(rpc).await;
+    // FIX2: the landing gates in paper too (at the decision, with a GATE line per decided launch: the census)
+    let mut gate = LandGate::new();
+    if gate.on() { eprintln!("{}", gate.describe()); }
+    let close_set: Option<std::collections::HashSet<String>> = arg("--close-leaders").map(|p|
+        std::fs::read_to_string(&p).unwrap_or_default().lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
+    let slot_leader: std::collections::HashMap<u64, String> = if close_set.is_some() {
+        let m = leader_map(rpc).await;
+        eprintln!("CLOSE-LEADER GATE ON (paper, at the decision): {} close leaders, {} slots mapped (current + next epoch)", close_set.as_ref().map(|s| s.len()).unwrap_or(0), m.len());
+        m
+    } else { std::collections::HashMap::new() };
+    let (mut gate_far, mut gate_late, mut gate_pass) = (0u64, 0u64, 0u64);
     let deadline = Instant::now() + Duration::from_secs(minutes * 60);
     let sink: Arc<std::sync::Mutex<Vec<PaperRec>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sem = Arc::new(tokio::sync::Semaphore::new(max_inflight));
@@ -1823,6 +1945,7 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
                     let first = det.create(&a, &launch.mint, if via_router { "router" } else if launch.is_create_v2 { "v2" } else { "v1" },
                         &format!("dev={} dev_sized={} quote={} vanilla={} snipeable={} verdict={verdict}", launch.dev_buy_lamports, snipe::dev_buy_sized(&a.tx),
                             quote.map(|q| b58(&q)[..8].to_string()).unwrap_or_else(|| "sol".into()), launch.is_vanilla(), launch.is_snipeable()));
+                    gate.note(&a, &launch.mint);
                     if !first { break 'create; }
                     if !dedup.first(launch.mint) { break 'create; } // same create seen on the other feed -> skip the duplicate
                     // DET FIX: non-SOL-quoted (31% of creates) and legacy SPL `create` launches cannot be bought by our
@@ -1852,6 +1975,18 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
         let batch: Vec<(Launch, u64, bool)> = ready.drain(..).map(|(l, s)| (l, s, true)).chain(shadows.into_iter().map(|(l, s)| (l, s, false))).collect();
         for (launch, create_slot, fired) in batch {
         let vanilla = launch.is_vanilla();
+        if fired && (close_set.is_some() || gate.max_ms.is_some()) {
+            // FIX2 census: both gates, logged for every launch the race gate passed
+            let leader = slot_leader.get(&create_slot).cloned();
+            let far = close_set.as_ref().map(|cs| leader.as_ref().map(|l| !cs.contains(l)).unwrap_or(false)).unwrap_or(false);
+            let (ms, src) = gate.create_ms(&launch.mint);
+            let ok_ms = gate.check(&launch.mint, create_slot);
+            let verdict = if far { "skip_far" } else if !ok_ms { if ms.is_none() { "skip_unknown" } else { "skip_late" } } else { "pass" };
+            eprintln!("  GATE slot={create_slot} mint={} leader={} close={} create_ms={} src={src} verdict={verdict}", b58(&launch.mint),
+                leader.as_deref().map(|l| &l[..8.min(l.len())]).unwrap_or("?"), !far, ms.map(|x| format!("{x:.1}")).unwrap_or_else(|| "-".into()));
+            if far { gate_far += 1; } else if !ok_ms { gate_late += 1; } else { gate_pass += 1; }
+            if far || !ok_ms { eprintln!("  PAPER gate-skip slot={create_slot} mint={} ({verdict})", b58(&launch.mint)); continue; }
+        }
         if fired {
             detected += 1;
             eprintln!("  PAPER launch #{detected} slot={create_slot} mint={} dev_buy={} vanilla={vanilla} — tracking price path", b58(&launch.mint), launch.dev_buy_lamports);
@@ -1964,7 +2099,9 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
             sink2.lock().unwrap().push(rec);
         });
         } // batch
+        if gate.on() { gate.flush(); }
     }
+    if close_set.is_some() || gate.max_ms.is_some() { eprintln!("LAND GATES (paper): race-gate passes {} -> skipped far {gate_far}, skipped late/unknown {gate_late}, fired {gate_pass}", gate_far + gate_late + gate_pass); }
 
     // let in-flight positions finish (max one cap window).
     eprintln!("\nPAPER-TRADE window elapsed — draining {} in-flight positions ...", max_inflight - sem.available_permits());
@@ -2090,7 +2227,13 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     let sem = Arc::new(tokio::sync::Semaphore::new(max_inflight));
     let spent = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let fired = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let start_bal = native_balance(rpc, user).await.unwrap_or(0);
+    let start_bal = match native_balance(rpc, user).await {
+        Ok(b) => b,
+        // FIX2 --strict-balance: without a start balance the kill-switch could never trip (review finding 4)
+        Err(e) if has("--strict-balance") => bail!("--strict-balance: the start balance could not be read ({e:#}): the kill-switch needs it"),
+        Err(_) => 0,
+    };
+    if has("--strict-balance") { eprintln!("START BALANCE {} lamports ({:.9} SOL); kill-switch trips below {:.9} SOL", start_bal, start_bal as f64 / 1e9, start_bal.saturating_sub(loss_cap) as f64 / 1e9); }
     let deadline = Instant::now() + Duration::from_secs(minutes * 60);
 
     // In-engine balance kill-switch: poll every 8s; if net loss exceeds --max-loss-sol, stop the whole run.
@@ -2129,6 +2272,8 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     let mut dedup = MintDedup::new(20000); // cross-feed de-dup (erpc + Kaldera): never double-buy a mint seen on both feeds
     let mut det = DetLog::new(_feeds.names.clone());
     set_slot_clock(rpc).await;
+    let mut gate = LandGate::new();
+    if gate.on() { eprintln!("{}", gate.describe()); }
 
     eprintln!("\nSNIPE-LIVE (CONCURRENT): dev_buy>={min_dev_buy}, per-buy cap {max_sol} SOL, TOTAL spend cap {max_total} SOL, loss kill-switch {max_loss} SOL, max_inflight {max_inflight}, {minutes}min. Fires every qualifying launch in parallel.");
 
@@ -2174,6 +2319,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                     let first = det.create(&a, &launch.mint, if via_router { "router" } else if launch.is_create_v2 { "v2" } else { "v1" },
                         &format!("dev={} dev_sized={} quote={} verdict={verdict}", launch.dev_buy_lamports, snipe::dev_buy_sized(&a.tx),
                             quote.map(|q| b58(&q)[..8].to_string()).unwrap_or_else(|| "sol".into())));
+                    gate.note(&a, &launch.mint);
                     if !first { break 'create; }
                     if !dedup.first(launch.mint) { break 'create; } // same create seen on the other feed -> skip the duplicate
                     // DET FIX: our buy is WSOL-quoted + Token-2022: a non-SOL or legacy-SPL launch would revert (fees lost)
@@ -2211,6 +2357,8 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         if race.cfg.active() { ready.extend(race.due()); race.shadow.clear(); } // shadows are paper-only: never fired live
         let t_dec = arbx::fast::mono_ns();
         for (launch, create_slot) in ready.drain(..) {
+        // FIX2 --max-create-ms: a create late in its slot cannot be beaten into that slot (next 50 ms auction tick / batch)
+        if !gate.check(&launch.mint, create_slot) { continue; }
         // reserve a concurrency slot (never block the detector) and budget
         // DET: a full --max-inflight SKIPS the launch (live): count it, so the backpressure cost is visible
         let permit = match sem.clone().try_acquire_owned() { Ok(p) => p, Err(_) => { skipped_inflight += 1; eprintln!("  SKIP-INFLIGHT slot={create_slot} mint={} (max_inflight {max_inflight} busy)", b58(&launch.mint)); continue } };
@@ -2241,6 +2389,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                     rec.w.iter().map(|x| format!("{}={}@{:.1}us", x.0, x.4, x.3.saturating_sub(t_dec) as f64 / 1e3)).collect::<Vec<_>>().join(" "));
                 f.trace_fire(&p, &rec, ev, t_dec);
                 f.trace_prep(&p);
+                fix2::spawn_jito_poll(&p.fan, &p.meta.sig, p.id);
                 if f.junk { return; }
                 if let Err(e) = round_trip_fast(&key2, user, &rpc2, &path2, &p, cap_lamports, max_sol, land_timeout).await {
                     eprintln!("  position {} ended: {e:#}", b58(&launch.mint));
@@ -2261,6 +2410,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             }
         });
         } // ready.drain
+        if gate.on() { gate.flush(); }
         if fast.is_some() {
             det.flush();
             race.flush();
@@ -2274,10 +2424,15 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     if let Some(f) = fast { for l in f.summary() { eprintln!("FAST: {l}"); } }
 
     if close_set.is_some() { eprintln!("CLOSE-LEADER GATE: skipped {skipped_far} far-leader launches"); }
+    if gate.max_ms.is_some() { eprintln!("CREATE-MS GATE: passed {} skipped late {} skipped unknown {}", gate.passed, gate.late, gate.unknown); }
     eprintln!("MAX-INFLIGHT: skipped {skipped_inflight} qualifying launches (all {max_inflight} slots busy)");
     if uri_whitelist { eprintln!("URI-HOST GATE: skipped {skipped_host} non-trusted-host launches"); }
     eprintln!("\nSNIPE-LIVE: window ended — draining {} in-flight positions ...", max_inflight - sem.available_permits());
-    let _ = tokio::time::timeout(Duration::from_secs(30), sem.acquire_many(max_inflight as u32)).await;
+    // FIX2: with --sell-robust / --sell-retries an in-flight position may need longer than 30 s to finish its exit
+    let drain_s = if has("--sell-robust") || arg_u64("--sell-retries", 0) > 0 {
+        30u64.max(land_timeout.as_secs() + arg_u64("--late-land-s", 45) + arg_u64("--sell-retries", 0) * (arg_u64("--sell-retry-s", 4) + 2) + 15)
+    } else { 30 };
+    let _ = tokio::time::timeout(Duration::from_secs(drain_s), sem.acquire_many(max_inflight as u32)).await;
     let end_bal = native_balance(rpc, user).await.unwrap_or(start_bal);
     eprintln!("=== SNIPE-LIVE DONE === fired {} positions; net {} SOL (start {} end {})",
         fired.load(Ordering::Relaxed), (end_bal as i64 - start_bal as i64) as f64 / 1e9, start_bal as f64/1e9, end_bal as f64/1e9);
@@ -2357,7 +2512,7 @@ async fn round_trip_launch(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Ar
     let (buy, bal_start) = tokio::join!(send_and_poll_at(key, user, rpc, path, &buy_ixs, land_timeout, create_slot),
                                         async { native_balance(rpc, user).await.unwrap_or(0) });
     let buy = buy?;
-    round_trip_tail(key, user, rpc, path, launch, buy, bal_start, spend, fill_cap, land_timeout, create_slot).await
+    round_trip_tail(key, user, rpc, path, launch, buy, bal_start, spend, fill_cap, land_timeout, create_slot, min_out).await
 }
 
 /// FAST: the buy was written by fastfire::Fast::fire; poll its land, then the same exit as round_trip_launch
@@ -2369,14 +2524,30 @@ async fn round_trip_fast(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     let send_slot = match send::tpu::SLOT.load(Ordering::Relaxed) { 0 => rpc.slot().await.unwrap_or(0), s => s };
     let (buy, bal_start) = tokio::join!(poll_land(rpc, p.meta.sig.clone(), p.sig, send_slot, land_timeout), async { native_balance(rpc, user).await.unwrap_or(0) });
     jito_results(&p.fan, &p.meta);
-    round_trip_tail(key, user, rpc, path, &p.launch, buy, bal_start, spend, fill_cap, land_timeout, Some(p.slot)).await
+    fix2::spawn_landed_via(&p.fan, &p.meta, buy.land_slot, p.id);
+    round_trip_tail(key, user, rpc, path, &p.launch, buy, bal_start, spend, fill_cap, land_timeout, Some(p.slot), p.min_out).await
 }
 
 /// the shared exit after the buy's land poll: fill-cap revert check, token balance, exit ladder / hold + sell, report
 #[allow(clippy::too_many_arguments)]
-async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, launch: &Launch, buy: Landed, bal_start: u64, spend: u64,
-    fill_cap: Option<f64>, land_timeout: Duration, create_slot: Option<u64>) -> Result<()> {
+async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, launch: &Launch, mut buy: Landed, bal_start: u64, spend: u64,
+    fill_cap: Option<f64>, land_timeout: Duration, create_slot: Option<u64>, min_out: u64) -> Result<()> {
     let mint = launch.mint;
+    // FIX2 --sell-robust: a buy not seen within the land poll may still land (its blockhash lives ~60 s): keep watching its
+    // signature AND our token account for --late-land-s (default 45) before giving up, so a late fill is still sold
+    let robust = has("--sell-robust");
+    if buy.land_slot.is_none() && robust {
+        let ata = pda::ata(&user, &mint, &pda::TOKEN_2022);
+        let mut sb = [0u8; 64];
+        if let Ok(v) = bs58::decode(&buy.sig).into_vec() { if v.len() == 64 { sb.copy_from_slice(&v); } }
+        let until = Instant::now() + Duration::from_secs(arg_u64("--late-land-s", 45));
+        eprintln!("  BUY not seen within {:?} (sig {}) — watching for a late landing ({}s)", land_timeout, buy.sig, arg_u64("--late-land-s", 45));
+        while Instant::now() < until && buy.land_slot.is_none() {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            if let Ok(v) = rpc.statuses(&[sb]).await { if let Some(Some((land, ok))) = v.into_iter().next() { buy.land_slot = Some(land); buy.ok = ok; break; } }
+            if let Ok(b) = token_balance(rpc, &ata).await { if b > 0 { eprintln!("  LATE-LAND: {b} tokens in the ATA (signature status not seen yet)"); buy.ok = true; buy.land_slot = Some(0); break; } }
+        }
+    }
     match buy.land_slot {
         Some(land) => eprintln!("  BUY  sig={} send_slot={} land_slot={} delta={} ok={}", buy.sig, buy.send_slot, land, land as i64 - buy.send_slot as i64, buy.ok),
         None => bail!("BUY did not land within {:?} (sig {}) — aborting round-trip, no sell attempted", land_timeout, buy.sig),
@@ -2392,7 +2563,21 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     // DET: the two post-buy reads run concurrently (was 2 sequential RPC round trips before the first sell leg)
     let ata = pda::ata(&user, &mint, &pda::TOKEN_2022);
     let (bal_after_buy, amount) = tokio::join!(async { native_balance(rpc, user).await.unwrap_or(bal_start) }, token_balance(rpc, &ata));
-    let amount = amount?;
+    let mut amount = amount?;
+    // FIX2 --sell-robust: a read of 0 / an RPC error right after the landing is re-read (the RPC node may trail the slot),
+    // and if it still reads nothing on a successful buy, sell the guaranteed minimum (min_tokens_out) without the close
+    let mut close_ata = true;
+    if amount == 0 && robust {
+        for k in 0..8 {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            match token_balance_strict(rpc, &ata).await { Ok(b) if b > 0 => { amount = b; eprintln!("  tokens re-read #{}: {b}", k + 1); break; } _ => {} }
+        }
+        if amount == 0 && buy.ok && min_out > 1 {
+            eprintln!("  token balance still unreadable after the landed buy — selling the guaranteed min_tokens_out {min_out} (no ATA close)");
+            amount = min_out;
+            close_ata = false;
+        }
+    }
     eprintln!("  tokens received: {amount} (ATA {})", b58(&ata));
     if amount == 0 { bail!("no tokens in the buyer ATA after the buy landed — aborting before the sell (ATA {})", b58(&ata)); }
 
@@ -2412,11 +2597,30 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     // (closeAccount -> native SOL) and reclaims the empty base-ATA rent after the sell.
     let cu = arg_u64("--cu-limit", 120_000) as u32;
     let price = arg_u64("--sell-cu-price-micro", arg_u64("--cu-price-micro", 3_000_000)); // sells: own (low) fee, buys keep --cu-price-micro
-    let sell_ixs = snipe_build::sell_message_ixs(user, launch, amount, 0, cu, price, has("--wrap"));
-    let sell = send_and_poll(key, user, rpc, sp(path), &sell_ixs, land_timeout).await?;
+    // FIX2 --sell-retries N (default 0 = one sell, as before): a sell not seen within --sell-retry-s (default 4) or seen
+    // failed is re-sent (fresh blockhash, so a new signature) for whatever the token account still holds, up to N times
+    let retries = arg_u64("--sell-retries", 0);
+    let sell_wait = if retries > 0 { Duration::from_secs(arg_u64("--sell-retry-s", 4)) } else { land_timeout };
+    let sell_ixs = if close_ata { snipe_build::sell_message_ixs(user, launch, amount, 0, cu, price, has("--wrap")) }
+        else { vec![build::cu_limit_ix(cu), build::cu_price_ix(price), snipe_build::sell_ix(user, launch, amount, 0)] };
+    let mut sell = send_and_poll(key, user, rpc, sp(path), &sell_ixs, sell_wait).await?;
+    for k in 0..retries {
+        if sell.land_slot.is_some() && sell.ok { break; }
+        let held = token_balance_retry(rpc, &ata, 4).await;
+        eprintln!("  SELL-RETRY {}/{retries}: last sell {} (sig {}); token account holds {held:?}", k + 1,
+            if sell.land_slot.is_some() { "landed FAILED" } else { "not seen" }, sell.sig);
+        match held {
+            Some(0) => { if sell.land_slot.is_none() { eprintln!("  SELL-RETRY: balance 0 — the last sell must have landed"); } break; }
+            Some(h) => {
+                let ixs = snipe_build::sell_message_ixs(user, launch, h, 0, cu, price, has("--wrap"));
+                sell = send_and_poll(key, user, rpc, sp(path), &ixs, sell_wait).await?;
+            }
+            None => { sell = send_and_poll(key, user, rpc, sp(path), &sell_ixs, sell_wait).await?; }
+        }
+    }
     match sell.land_slot {
         Some(land) => eprintln!("  SELL sig={} send_slot={} land_slot={} delta={} ok={}", sell.sig, sell.send_slot, land, land as i64 - sell.send_slot as i64, sell.ok),
-        None => eprintln!("  SELL NOT SEEN within {:?} (sig {}) — position may still be held; check on chain", land_timeout, sell.sig),
+        None => eprintln!("  SELL NOT SEEN within {:?} (sig {}) — position may still be held; check on chain", sell_wait, sell.sig),
     }
     let bal_end = native_balance(rpc, user).await.unwrap_or(bal_after_buy);
 
@@ -3000,7 +3204,8 @@ mod fastfire {
     }
 
     fn json_kind(k: SendKind) -> bool {
-        matches!(k, SendKind::Helius | SendKind::Shyft | SendKind::Rpc | SendKind::Nozomi | SendKind::ZeroSlot | SendKind::Falcon | SendKind::Everstake | SendKind::JupiterTx)
+        matches!(k, SendKind::Helius | SendKind::Shyft | SendKind::Rpc | SendKind::Nozomi | SendKind::ZeroSlot | SendKind::Falcon | SendKind::Everstake | SendKind::JupiterTx
+            | SendKind::HarmonicBundle)
     }
     fn bin_kind(k: SendKind) -> bool { matches!(k, SendKind::Haan | SendKind::Bolt | SendKind::Iris | SendKind::Lunar | SendKind::NodeOne | SendKind::BlockRazor | SendKind::Landx) }
 
@@ -3016,6 +3221,8 @@ mod fastfire {
                 }
                 else if p.kind == SendKind::JitoBundle && p.jito.is_some() { Kind::Jito }
                 else if p.kind == SendKind::Landx && p.fast_udp_ok() { Kind::Udp }
+                // FIX2: harmonic-bundle with a working Harmonic login goes through its gRPC client (async send)
+                else if p.kind == SendKind::HarmonicBundle && p.hb.is_some() { Kind::Slow }
                 else if (json_kind(p.kind) || bin_kind(p.kind)) && !p.fast_preflight() {
                     let json = json_kind(p.kind);
                     match FastConn::start(&p.name, p.fast_url(), if json { "application/json" } else { "application/octet-stream" }, &p.fast_headers(), p.fast_ping(), atx.clone(), stop.clone()) {
@@ -3198,7 +3405,9 @@ mod fastfire {
                 reqs.push(match self.fps.get(i).map(|f| &f.kind) {
                     Some(Kind::Http { conn, json }) => {
                         let mut req = Vec::with_capacity(2400);
-                        if *json { fast::json_send_body(&payload, &mut body); conn.frame(&body, &mut req); } else { conn.frame(&payload, &mut req); }
+                        // FIX2: harmonic-bundle is JSON-RPC sendBundle ([[b64], {"encoding":"base64"}]), the rest sendTransaction
+                        if *json && p.kind == SendKind::HarmonicBundle { fast::json_bundle_body(&payload, &mut body); conn.frame(&body, &mut req); }
+                        else if *json { fast::json_send_body(&payload, &mut body); conn.frame(&body, &mut req); } else { conn.frame(&payload, &mut req); }
                         Some((req, 0))
                     }
                     Some(Kind::JitoH2 { conn, jito }) => {
@@ -3453,5 +3662,181 @@ mod fastfire {
             }
             println!("{:24} {:8.2} / {:8.2}   ({bad} failed verify_strict)", "presign sign (900 B)", q(&mut s2, 0.5), q(&mut s2, 0.99));
         }
+    }
+}
+
+// ================================================================================================================
+// FIX2 (2026-10-19, /root/fix2/NOTES.md): result polling and landing attribution (logging only; all default off).
+//  --jito-poll          after every fire, poll each jito-bundle path's bundle at +0.5 s, +2 s and +10 s: the result
+//                       stream's verdicts WITH their detail and decoded error code, plus the block engine's JSON-RPC
+//                       getInflightBundleStatuses (+0.5/+2/+10 s) and getBundleStatuses (+3.2/+11.2 s). Every JSON-RPC
+//                       call to the block engine is spaced >= 1.1 s from the previous one (Jito: 1 request/s per IP).
+//                       JITO-POLL lines + "jito_poll" send-log records. In --junk-fanout the bundles are refused (no id):
+//                       JITO_POLL_PROBE_IDS=id1,id2 (old landed bundles) exercises the same code on real ids.
+//  --landed-via         after a buy LANDS: which copy landed. bundles.jito.wtf /bundles/transaction/<sig> at +8/+30/+90 s:
+//                       our own jito-bundle id -> "our-jito-bundle"; another bundle -> its txs / tippers (a 2-tx bundle
+//                       whose other tx is a tip tx = a sender's wrapper, e.g. Helius Sender's 0.001 SOL tip tx); none ->
+//                       "no-jito-bundle" (a non-bundle path of the route, or harmonic-bundle on a Harmonic leader).
+//                       LANDED-VIA lines + "landed_via" send-log records.
+//  --landed-via-probe SIG[:BUNDLE],..   ZERO COST: run the attribution on old signatures and exit.
+//  --jito-poll-probe ID,..              ZERO COST: run the status polls on old bundle ids and exit.
+// ================================================================================================================
+mod fix2 {
+    use super::*;
+    use arbx::config::SendKind;
+
+    fn http() -> &'static reqwest::Client {
+        static C: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+        C.get_or_init(|| reqwest::Client::builder().timeout(Duration::from_secs(8)).tcp_nodelay(true).build().expect("http client"))
+    }
+
+    /// one JSON-RPC call to a block engine, spaced >= 1.1 s from the previous one (all callers share the gap)
+    async fn be_call(base: &str, method: &str, ids: &[String]) -> (Option<u16>, String) {
+        static GATE: std::sync::OnceLock<tokio::sync::Mutex<Option<Instant>>> = std::sync::OnceLock::new();
+        let mut g = GATE.get_or_init(|| tokio::sync::Mutex::new(None)).lock().await;
+        if let Some(t) = *g { let since = t.elapsed(); if since < Duration::from_millis(1100) { tokio::time::sleep(Duration::from_millis(1100) - since).await; } }
+        *g = Some(Instant::now());
+        drop(g);
+        let url = format!("{}/api/v1/{method}", base.trim_end_matches('/'));
+        let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": [ids] });
+        match http().post(&url).json(&body).send().await {
+            Ok(r) => { let st = r.status().as_u16(); (Some(st), r.text().await.unwrap_or_default().chars().take(64_000).collect()) }
+            Err(e) => (None, format!("transport: {}", e.without_url())),
+        }
+    }
+
+    /// the stream's verdicts for `sig` with detail and the decoded error code: "would-fail[0x1771: custom program error ...]"
+    pub fn verdict_str(j: &send::jito::Jito, sig: &str) -> String {
+        let v = j.verdicts(sig);
+        if v.is_empty() { return "(none)".into(); }
+        v.iter().map(|(_, o)| {
+            let code = send::jito::error_code(o.detail.as_deref());
+            format!("{}{}{}{}", o.outcome, o.slot.map(|x| format!("@{x}")).unwrap_or_default(), o.index.map(|i| format!("#{i}")).unwrap_or_default(),
+                match (&o.detail, code) { (Some(d), Some(c)) => format!("[{c}: {}]", d.chars().take(160).collect::<String>()), (Some(d), None) => format!("[{}]", d.chars().take(160).collect::<String>()), _ => String::new() })
+        }).collect::<Vec<_>>().join(",")
+    }
+
+    fn short_status(method: &str, body: &str) -> String {
+        let v: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
+        if let Some(e) = v.get("error").filter(|e| !e.is_null()) { return format!("error {}", e.to_string().chars().take(160).collect::<String>()); }
+        let vals = v["result"]["value"].as_array().cloned().unwrap_or_default();
+        if vals.is_empty() { return format!("no value ({})", body.chars().take(120).collect::<String>()); }
+        vals.iter().map(|x| {
+            if x.is_null() { return "null(not landed / unknown)".to_string(); }
+            if method == "getInflightBundleStatuses" {
+                format!("{}:{}{}", x["bundle_id"].as_str().map(|s| &s[..8.min(s.len())]).unwrap_or("?"), x["status"].as_str().unwrap_or("?"),
+                    x["landed_slot"].as_u64().map(|s| format!("@{s}")).unwrap_or_default())
+            } else {
+                format!("{}:{}@{} err={}", x["bundle_id"].as_str().map(|s| &s[..8.min(s.len())]).unwrap_or("?"), x["confirmation_status"].as_str().unwrap_or("?"),
+                    x["slot"].as_u64().map(|s| s.to_string()).unwrap_or_else(|| "?".into()), x["err"].to_string().chars().take(80).collect::<String>())
+            }
+        }).collect::<Vec<_>>().join(",")
+    }
+
+    /// poll one bundle (or the probe ids) at +0.5 s, +2 s, +10 s from `t0`
+    async fn poll_one(path: Arc<send::Path>, sig: String, tag: u64, t0: Instant, probe_ids: Vec<String>) {
+        let Some(j) = path.jito.clone() else { return };
+        let base = path.fast_url().to_string();
+        for (at, with_statuses) in [(500u64, false), (2000, true), (10_000, true)] {
+            let due = t0 + Duration::from_millis(at);
+            if let Some(d) = due.checked_duration_since(Instant::now()) { tokio::time::sleep(d).await; }
+            let ids: Vec<String> = if probe_ids.is_empty() { j.bundle_of(&sig).into_iter().collect() } else { probe_ids.clone() };
+            let stream = verdict_str(&j, &sig);
+            let (mut infl, mut stat) = ("-".to_string(), "-".to_string());
+            let (mut s1, mut s2) = (None, None);
+            if !ids.is_empty() {
+                let (st, b) = be_call(&base, "getInflightBundleStatuses", &ids).await; s1 = st; infl = format!("http={} {}", st.map(|x| x.to_string()).unwrap_or_else(|| "-".into()), short_status("getInflightBundleStatuses", &b));
+                if with_statuses {
+                    let (st, b) = be_call(&base, "getBundleStatuses", &ids).await; s2 = st; stat = format!("http={} {}", st.map(|x| x.to_string()).unwrap_or_else(|| "-".into()), short_status("getBundleStatuses", &b));
+                }
+            }
+            let t = format!("+{:.1}s", at as f64 / 1e3);
+            eprintln!("  JITO-POLL tag={tag} {t} path={} sig={} bundle={} stream={stream} inflight={infl} statuses={stat}", path.name, &sig[..16.min(sig.len())],
+                ids.iter().map(|x| &x[..12.min(x.len())]).collect::<Vec<_>>().join(","));
+            lat::log_json(serde_json::json!({ "ev": "jito_poll", "t_ns": arbx::feeds::clock::now_ns(), "tag": tag, "at": t, "path": path.name, "sig": sig,
+                "bundles": ids, "stream": stream, "inflight": infl, "statuses": stat, "http_inflight": s1, "http_statuses": s2 }));
+        }
+    }
+
+    /// --jito-poll: spawn the polls for every jito-bundle path of a fire
+    pub fn spawn_jito_poll(fan: &[Arc<send::Path>], sig: &str, tag: u64) {
+        if !has("--jito-poll") { return; }
+        let probe: Vec<String> = if has("--junk-fanout") {
+            std::env::var("JITO_POLL_PROBE_IDS").ok().map(|v| v.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()).unwrap_or_default()
+        } else { Vec::new() };
+        let t0 = Instant::now();
+        for p in fan.iter().filter(|p| p.kind == SendKind::JitoBundle && p.jito.is_some()) {
+            tokio::spawn(poll_one(p.clone(), sig.to_string(), tag, t0, probe.clone()));
+        }
+    }
+
+    async fn jget(url: &str) -> (Option<u16>, serde_json::Value) {
+        match http().get(url).header("user-agent", "arbx-fix2").send().await {
+            Ok(r) => { let st = r.status().as_u16(); (Some(st), r.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null)) }
+            Err(_) => (None, serde_json::Value::Null),
+        }
+    }
+
+    /// which copy of a landed buy landed (bundle membership on the Jito explorer); `ours`: (path, bundle id) we were given
+    pub async fn landed_via(sig: String, ours: Vec<(String, String)>, route: String, client: String, land_slot: Option<u64>, tag: u64) -> String {
+        let mut verdict = String::from("unknown (explorer did not answer)");
+        for wait in [8u64, 22, 60] {
+            tokio::time::sleep(Duration::from_secs(wait)).await;
+            let (st, v) = jget(&format!("https://bundles.jito.wtf/api/v1/bundles/transaction/{sig}")).await;
+            let bid = v.as_array().and_then(|a| a.first()).and_then(|x| x["bundle_id"].as_str()).map(String::from);
+            match (st, bid) {
+                (_, Some(bid)) => {
+                    if let Some((p, _)) = ours.iter().find(|(_, id)| *id == bid) { verdict = format!("our-jito-bundle path={p} bundle={}", &bid[..12]); break; }
+                    let (_, b) = jget(&format!("https://bundles.jito.wtf/api/v1/bundles/bundle/{bid}")).await;
+                    let b0 = b.as_array().and_then(|a| a.first()).cloned().unwrap_or(serde_json::Value::Null);
+                    let ntx = b0["txSignatures"].as_array().map(|a| a.len()).unwrap_or(0);
+                    let tippers: Vec<String> = b0["tippers"].as_array().into_iter().flatten().filter_map(|x| x.as_str()).map(|x| x[..8.min(x.len())].to_string()).collect();
+                    let kind = if ntx == 2 { "2-tx bundle (ours + a sender's tip tx: Helius Sender / another relay's wrapper)" } else if ntx == 1 { "1-tx bundle (a relay's bundleOnly copy)" } else { "other bundle" };
+                    verdict = format!("other-bundle {kind} bundle={} txs={ntx} tippers={} landed_tip={} block_index={}", &bid[..12], tippers.join("|"),
+                        b0["landedTipLamports"], b0["blockIndex"]);
+                    break;
+                }
+                (Some(404), None) | (Some(200), None) => {
+                    verdict = format!("no-jito-bundle (non-bundle path of route {route}{})", if client.starts_with("Harmonic") { "; on a Harmonic leader: harmonic-bundle, nozomi or staked-rpc" } else { "" });
+                    if wait >= 22 { break; }
+                }
+                _ => {}
+            }
+        }
+        eprintln!("  LANDED-VIA tag={tag} sig={} land_slot={land_slot:?} route={route} client={client} via={verdict}", &sig[..16.min(sig.len())]);
+        lat::log_json(serde_json::json!({ "ev": "landed_via", "t_ns": arbx::feeds::clock::now_ns(), "tag": tag, "sig": sig, "land_slot": land_slot, "route": route,
+            "client": client, "via": verdict }));
+        verdict
+    }
+
+    /// spawn the attribution for a landed buy (--landed-via)
+    pub fn spawn_landed_via(fan: &[Arc<send::Path>], meta: &lat::Meta, land_slot: Option<u64>, tag: u64) {
+        if !has("--landed-via") || land_slot.is_none() { return; }
+        let ours: Vec<(String, String)> = fan.iter().filter_map(|p| p.jito.as_ref().and_then(|j| j.bundle_of(&meta.sig)).map(|id| (p.name.clone(), id))).collect();
+        tokio::spawn(landed_via(meta.sig.clone(), ours, meta.route.clone(), meta.client.clone(), land_slot, tag));
+    }
+
+    /// --landed-via-probe SIG[:BUNDLE],.. (zero cost): the attribution on old signatures
+    pub async fn landed_via_probe(list: &str) -> Result<()> {
+        let mut hs = Vec::new();
+        for (i, item) in list.split(',').map(str::trim).filter(|x| !x.is_empty()).enumerate() {
+            let (sig, bid) = match item.split_once(':') { Some((a, b)) => (a.to_string(), Some(b.to_string())), None => (item.to_string(), None) };
+            let ours = bid.map(|b| vec![("jito-bundle".to_string(), b)]).unwrap_or_default();
+            hs.push(tokio::spawn(landed_via(sig, ours, "probe".into(), String::new(), None, i as u64)));
+        }
+        for h in hs { let _ = h.await; }
+        Ok(())
+    }
+
+    /// --jito-poll-probe ID,.. (zero cost): the status polls on old bundle ids against the config's block engine
+    pub async fn jito_poll_probe(base: &str, list: &str) -> Result<()> {
+        let ids: Vec<String> = list.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+        for m in ["getInflightBundleStatuses", "getBundleStatuses"] {
+            for chunk in ids.chunks(5) {
+                let (st, b) = be_call(base, m, chunk).await;
+                eprintln!("  JITO-POLL-PROBE {m} http={st:?} {}", short_status(m, &b));
+            }
+        }
+        Ok(())
     }
 }

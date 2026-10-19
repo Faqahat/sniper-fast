@@ -314,7 +314,7 @@ pub fn known_tip_accounts(kind: SendKind) -> &'static [&'static str] {
             "bLxuETxd2tgWxBALNwPzAfHhsik4BzD3nrEBCiPNZQD", "bLxuL2gK5FW7xfahvwLrxLyW76vcCpNsKQY2CmnE6kV",
             "bLxv4Hnub7nDJWHs8s17o9bGU65Bnx6Yqp2fqtMgHmm",
         ],
-        SendKind::Shyft | SendKind::Haan | SendKind::Tpu | SendKind::Rpc => &[],
+        SendKind::Shyft | SendKind::Haan | SendKind::Tpu | SendKind::Rpc | SendKind::HarmonicBundle => &[],
     }
 }
 
@@ -359,6 +359,21 @@ fn parse_reply(name: &str, status: u16, body: &[u8]) -> Result<String> {
     if ok && is_signature(t) { return Ok(t.to_string()); }
     if status == 429 { bail!("{name}: HTTP 429, rate limited"); }
     bail!("{name}: HTTP {status} {}", short(text))
+}
+
+/// FIX2: Harmonic's sendBundle reply: `{"result":"<bundle uuid>"}` is an acceptance (the uuid is the bundle id), a JSON-RPC
+/// `error` (e.g. -32097 "rate limited", a decode error) or a non-2xx status is a refusal with the provider's whole body
+pub fn harmonic_reply(name: &str, sig: &str, status: u16, body: &[u8]) -> Result<Reply, Refusal> {
+    let text = short(String::from_utf8_lossy(body).trim());
+    let v: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    if let Some(e) = v.get("error").filter(|e| !e.is_null()) {
+        let m = match (e["code"].as_i64(), e["message"].as_str()) { (Some(c), Some(m)) => format!("{c} {m}"), _ => e.to_string() };
+        return Err(refuse(Some(status), format!("{name}: HTTP {status} {}", short(&m))));
+    }
+    match v.get("result").and_then(Value::as_str) {
+        Some(id) if (200..300).contains(&status) => Ok(Reply { sig: sig.to_string(), bundle: Some(id.to_string()), status: Some(status), reply: text, queue_wait_us: None }),
+        _ => Err(refuse(Some(status), format!("{name}: HTTP {status} {text}"))),
+    }
 }
 
 /// a transport error without its URL (keys live in some URLs, and errors go to the logs)
@@ -458,10 +473,15 @@ pub struct Reply { pub sig: String, pub bundle: Option<String>, pub status: Opti
 pub fn verify_copy(raw: &[u8], kind: SendKind, tips: &[Pk], name: &str) -> Result<String> {
     let sig = first_signature(raw).context("not a signed transaction")?;
     let min = kind.min_tip();
-    if min == 0 && kind != SendKind::Helius { return Ok(sig); }
+    if min == 0 && kind != SendKind::Helius && kind != SendKind::HarmonicBundle { return Ok(sig); }
     let (tx, used) = crate::tx::parse_wire(raw).context("transaction does not parse")?;
     if used != raw.len() { bail!("{} stray bytes after the transaction", raw.len() - used); }
     if kind == SendKind::Helius && tx.cu_price_micro.is_none() { bail!("no compute-unit price (Helius Sender rejects it)"); }
+    // FIX2: Harmonic ranks bundles by the compute-unit price (its "tip"); a copy without one would never win
+    if kind == SendKind::HarmonicBundle {
+        if tx.cu_price_micro.is_none() { bail!("no compute-unit price (Harmonic's tip is the priority fee)"); }
+        return Ok(sig);
+    }
     let paid = tip_paid(&tx, tips);
     if paid < min { bail!("pays {paid} lamports to {name}'s tip accounts; it needs at least {min}"); }
     Ok(sig)
@@ -533,7 +553,7 @@ pub fn check_key_material(c: &SendPath, payer: &Pk) -> Result<usize> {
             bail!("send path {}: its {what} is the payer's keypair (PLAN-ADDENDUM I-10: a provider key that is a keypair must be a dedicated one)", c.name);
         }
     }
-    if c.kind == SendKind::JitoBundle {
+    if c.kind == SendKind::JitoBundle || (c.kind == SendKind::HarmonicBundle && c.auth_keypair.is_some()) {
         let f = c.auth_keypair.as_deref().unwrap_or(jito::DEFAULT_AUTH_KEYPAIR);
         if let Ok(k) = jito::load_keypair(f) {
             n += 1;
@@ -560,6 +580,9 @@ pub struct Path {
     preflight: bool,
     http: reqwest::Client,
     pub jito: Option<Arc<jito::Jito>>,
+    /// FIX2: harmonic-bundle with `auth_keypair`: the authenticated SearcherService client (role 3), when the login worked
+    /// (None: not configured, or not whitelisted yet -> the public JSON-RPC)
+    pub hb: Option<Arc<jito::Jito>>,
     pub tpu: Option<Arc<tpu::Tpu>>,
     /// LandX over UDP: the connected socket and the 12-byte key every packet starts with
     udp: Option<(Arc<tokio::net::UdpSocket>, Vec<u8>)>,
@@ -630,6 +653,8 @@ impl Path {
             (None, SendKind::Tpu) => Ping::None,
             (None, SendKind::SpeedLanding) => Ping::Get(base()?.join("/ping")?.to_string()),
             (None, SendKind::Landx) => if url.starts_with("udp://") { Ping::None } else { Ping::Get(base()?.join("/ping")?.to_string()) },
+            // FIX2: GET / (nginx 404, not rate limited: measured) keeps the TLS connection warm without touching /api/v1/bundles
+            (None, SendKind::HarmonicBundle) => Ping::Get(base()?.join("/")?.to_string()),
         };
         let known = known_tip_accounts(c.kind);
         let names: Vec<&str> = if c.tip_accounts.is_empty() { known.to_vec() } else { c.tip_accounts.iter().map(String::as_str).collect() };
@@ -656,6 +681,27 @@ impl Path {
             }
             Some(j)
         } else { None };
+        // FIX2: Harmonic authenticated gRPC (Jito-style challenge-response, role 3) with its own dedicated keypair. Never
+        // fatal: a missing key, a key that is not whitelisted or an unreachable endpoint is logged and the path keeps the
+        // public JSON-RPC (5 s cap on each step, at start-up only; the send path never waits on the login)
+        let hb = if c.kind == SendKind::HarmonicBundle && c.auth_keypair.is_some() {
+            let kp = c.auth_keypair.clone().unwrap_or_default();
+            let r: Result<Arc<jito::Jito>> = async {
+                let key = jito::load_keypair(&kp)?;
+                if opts.payer.is_some_and(|p| p == key.verifying_key().to_bytes()) { bail!("the auth keypair is the payer's (PLAN-ADDENDUM I-10)"); }
+                let u = reqwest::Url::parse(&url).context("bad url")?;
+                let base = format!("{}://{}", u.scheme(), u.host_str().unwrap_or_default());
+                let j = tokio::time::timeout(Duration::from_secs(5), jito::Jito::connect_role(&base, key, rec.clone(), jito::ROLE_HARMONIC_SEARCHER)).await
+                    .map_err(|_| anyhow::anyhow!("connect timed out"))??;
+                tokio::time::timeout(Duration::from_secs(5), j.token()).await.map_err(|_| anyhow::anyhow!("login timed out"))?
+                    .with_context(|| format!("login as {}", j.pubkey()))?;
+                Ok(j)
+            }.await;
+            match r {
+                Ok(j) => { eprintln!("  {what}: HARMONIC AUTH OK as {} (authenticated SearcherService.SendBundle)", j.pubkey()); Some(j) }
+                Err(e) => { eprintln!("  {what}: HARMONIC AUTH FAILED ({}) -> public JSON-RPC sendBundle", crate::rpc::scrub(&format!("{e:#}"))); None }
+            }
+        } else { None };
         let tpu = if c.kind == SendKind::Tpu { Some(tpu::Tpu::new(url.clone(), tpu_bearer.clone()).await.with_context(|| format!("{what}: leader book"))?) } else { None };
         let udp = if c.kind == SendKind::Landx && url.starts_with("udp://") {
             let hostport = url.trim_start_matches("udp://").trim_end_matches('/').to_string();
@@ -670,7 +716,7 @@ impl Path {
         let host = host_of(&url);
         Ok(Path { name: c.name.clone(), kind: c.kind, tips, tip_lamports: c.tip_lamports, tip_share: c.tip_share,
             tip_max: c.tip_max_lamports.unwrap_or(u64::MAX), cursor: AtomicUsize::new(0), budget, url, host, ping, headers,
-            preflight: c.preflight, http, jito, tpu, udp, stats: Default::default() })
+            preflight: c.preflight, http, jito, hb, tpu, udp, stats: Default::default() })
     }
 
     /// tests: a jito-bundle path on `jito` (e.g. `Jito::for_test` with an in-memory block engine), Jito's own tip
@@ -681,7 +727,7 @@ impl Path {
             tip_lamports: 1_000, tip_share: Some(0.7), tip_max: 100_000, cursor: AtomicUsize::new(0),
             budget: max_per_sec.map(|n| Budget::new(n, Duration::from_millis(queue_ms))), url: "https://127.0.0.1:9".into(), host: "127.0.0.1".into(), ping: Ping::Tips,
             headers: HeaderMap::new(),
-            preflight: false, http: reqwest::Client::new(), jito: Some(jito), tpu: None, udp: None, stats: Default::default() }
+            preflight: false, http: reqwest::Client::new(), jito: Some(jito), hb: None, tpu: None, udp: None, stats: Default::default() }
     }
 
     /// the endpoint's host (never the full URL: keys live in some); a jito-bundle path: its block engine (copies.jsonl
@@ -692,7 +738,8 @@ impl Path {
     pub fn describe(&self) -> String {
         let host = self.endpoint();
         let rate = self.budget.as_ref().map(|b| format!(" max {}/s", b.per_sec())).unwrap_or_default();
-        format!("{:?} {host}{rate}", self.kind)
+        let auth = if self.kind == SendKind::HarmonicBundle { if self.hb.is_some() { " (grpc-auth)" } else { " (public json-rpc)" } } else { "" };
+        format!("{:?} {host}{rate}{auth}", self.kind)
     }
 
     /// true when a copy that loses costs nothing (a Jito bundle); never re-forward such a copy on a paid path
@@ -839,6 +886,23 @@ impl Path {
                 let resp = self.http.post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(net)?;
                 let status = resp.status().as_u16();
                 lenient(status, &resp.bytes().await.map_err(net)?)
+            }
+            SendKind::HarmonicBundle => {
+                // FIX2: authenticated gRPC first (when the login worked); a stale token falls back to the public JSON-RPC
+                if let Some(h) = &self.hb {
+                    match h.send_bundle(&[raw], sig, attempt).await {
+                        Ok(id) => return Ok(rep(sig.to_string(), Some(id.clone()), None, format!("grpc-auth {id}"))),
+                        Err(jito::BundleError::AuthStale) => {}
+                        Err(e @ jito::BundleError::Refused(_)) => return Err(refuse_answered(format!("{name}: grpc-auth sendBundle refused: {e}"))),
+                        Err(e) => return Err(refuse(None, format!("{name}: grpc-auth sendBundle: {e}"))),
+                    }
+                }
+                let b64 = base64::engine::general_purpose::STANDARD.encode(raw);
+                let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "sendBundle", "params": [[b64], { "encoding": "base64" }] });
+                let resp = self.http.post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(net)?;
+                let status = resp.status().as_u16();
+                let bytes = resp.bytes().await.map_err(net)?;
+                harmonic_reply(name, sig, status, &bytes)
             }
             SendKind::NodeOne | SendKind::BlockRazor => {
                 let resp = self.http.post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
@@ -1086,6 +1150,8 @@ impl Paths {
                 self.rt.spawn(j.clone().follow_results(stop.clone(), status.clone()));
                 self.rt.spawn(j.clone().keep_token(stop.clone()));
             }
+            // FIX2: Harmonic's token renewal (no result stream: Harmonic's searcher.proto defines only SendBundle)
+            if let Some(h) = &p.hb { self.rt.spawn(h.clone().keep_token(stop.clone())); }
             if let Some(t) = &p.tpu { self.rt.spawn(t.clone().keep_warm(stop.clone())); }
         }
         let me = self.clone();

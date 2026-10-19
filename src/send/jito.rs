@@ -55,6 +55,8 @@ pub struct Timestamp {
 
 // ---------- auth.proto
 pub const ROLE_SEARCHER: i32 = 1;
+/// FIX2: Harmonic's block engine uses the same challenge-response with role SEARCHER = 3 (docs.harmonic.gg/searchers/harmonic-bundles)
+pub const ROLE_HARMONIC_SEARCHER: i32 = 3;
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct GenerateAuthChallengeRequest {
     #[prost(int32, tag = "1")] pub role: i32,
@@ -348,6 +350,8 @@ pub struct Jito {
     pub counts: Mutex<std::collections::BTreeMap<&'static str, u64>>,
     /// the result stream's connection number (bundles.jsonl `stream_epoch`)
     epoch: AtomicU64,
+    /// FIX2: the auth role (Jito SEARCHER 1; Harmonic SEARCHER 3)
+    role: i32,
     /// the executor's sink for our bundles' results
     sink: OnceLock<Sink>,
     /// tests: a block engine in memory that takes (or refuses) the bundle (the real SendBundle call is not made)
@@ -369,7 +373,15 @@ impl Jito {
 
     fn with_channel(channel: Channel, key: SigningKey, rec: crate::rec::Rec) -> Jito {
         Jito { channel, key, tokens: Default::default(), cached: Default::default(), verdicts: Default::default(), rec, counts: Default::default(),
-            epoch: AtomicU64::new(0), sink: OnceLock::new(), fake: OnceLock::new(), #[cfg(test)] fake_renew: OnceLock::new() }
+            epoch: AtomicU64::new(0), role: ROLE_SEARCHER, sink: OnceLock::new(), fake: OnceLock::new(), #[cfg(test)] fake_renew: OnceLock::new() }
+    }
+
+    /// FIX2: connect with another auth role (Harmonic: ROLE_HARMONIC_SEARCHER), not yet authenticated
+    pub async fn connect_role(url: &str, key: SigningKey, rec: crate::rec::Rec, role: i32) -> Result<Arc<Jito>> {
+        let channel = crate::feeds::grpc::channel(url).await?;
+        let mut j = Jito::with_channel(channel, key, rec);
+        j.role = role;
+        Ok(Arc::new(j))
     }
 
     /// tests: a client whose channel goes nowhere (127.0.0.1:9, connected lazily)
@@ -441,7 +453,7 @@ impl Jito {
             }
             let pubkey = self.key.verifying_key().to_bytes().to_vec();
             let ch: GenerateAuthChallengeResponse = self.unary("/auth.AuthService/GenerateAuthChallenge",
-                GenerateAuthChallengeRequest { role: ROLE_SEARCHER, pubkey: pubkey.clone() }, None).await?;
+                GenerateAuthChallengeRequest { role: self.role, pubkey: pubkey.clone() }, None).await?;
             let signed = format!("{}-{}", self.pubkey(), ch.challenge);
             let sig = self.key.sign(signed.as_bytes()).to_bytes().to_vec();
             let resp: GenerateAuthTokensResponse = self.unary("/auth.AuthService/GenerateAuthTokens",
