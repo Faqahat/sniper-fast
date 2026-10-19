@@ -21,7 +21,7 @@ use std::time::Duration;
 pub static SLOT: AtomicU64 = AtomicU64::new(0);
 const ALPN: &[u8] = b"solana-tpu";
 /// leaders a transaction goes to: the current one and the next distinct one
-const FANOUT: usize = 2;
+const FANOUT: usize = 3;
 
 #[derive(Debug)]
 struct AcceptAny(Arc<rustls::crypto::CryptoProvider>);
@@ -163,9 +163,12 @@ impl Tpu {
             (id, r)
         } };
         let results = match targets.as_slice() {
-            [(i0, a0)] => vec![one(i0, *a0).await],
-            [(i0, a0), (i1, a1), ..] => { let (x, y) = tokio::join!(one(i0, *a0), one(i1, *a1)); vec![x, y] }
             [] => vec![],
+            [(i0, a0)] => vec![one(i0, *a0).await],
+            [(i0, a0), (i1, a1)] => { let (x, y) = tokio::join!(one(i0, *a0), one(i1, *a1)); vec![x, y] }
+            // FANOUT>=3: write to the current leader and the next two distinct ones at once, so a slot roll between
+            // our read and our land still finds a leader that already has the tx (and all connections are pre-warmed).
+            [(i0, a0), (i1, a1), (i2, a2), ..] => { let (x, y, z) = tokio::join!(one(i0, *a0), one(i1, *a1), one(i2, *a2)); vec![x, y, z] }
         };
         for (id, r) in results {
             match r { Ok(()) => ok.push(id[..8].to_string()), Err(e) => errs.push(format!("{}: {e:#}", &id[..8])) }
@@ -189,7 +192,9 @@ impl Tpu {
             let slot = SLOT.load(Ordering::Relaxed);
             if slot > 0 && self.book.leader(slot + 50).is_none() { let _ = self.refresh_leaders(slot).await; }
             if self.book.nodes_age(crate::feeds::clock::now_ns()).is_none_or(|a| a > NODES_STALE_NS) { let _ = self.refresh_nodes().await; }
-            for (_, a) in self.targets(4) { let _ = self.conn(a).await; }
+            // Pre-warm the next 8 leaders (up from 4): keeps QUIC open further ahead so a send never pays an 82ms
+            // cold handshake when the leader window rolls (the measured cause of some +1 lands).
+            for (_, a) in self.targets(8) { let _ = self.conn(a).await; }
             tokio::time::sleep(Duration::from_millis(400)).await;
         }
     }

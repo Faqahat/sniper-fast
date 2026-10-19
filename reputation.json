@@ -1,0 +1,3024 @@
+{
+"_meta": {
+"source": "shadow_20m.jsonl",
+"window_min": 20.0,
+"built": "2026-10-13",
+"rule": "deny>=10 launches/20min (factory), watch 3-9, neutral<3; outcome fields updated live"
+},
+"2Aw3KRNoT7yaLJUCKn1XDmdBp6AuDPc53MsWutrhZhdN": {
+"launches_20m": 5,
+"rate_per_min": 0.25,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4HXb7ivgvjbHC3TBesmmD9LovH8tmTv9DZsq12GMvEpU": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BsgNfq9AFT739yUf3gR3Kg2KUTeD4ZjXSnsDeU86Yyuw": {
+"launches_20m": 5,
+"rate_per_min": 0.25,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"G7C8ZcTuFNuKnqGLWqUE1Wvm1FaUJXCe2LWnXAqqeFTs": {
+"launches_20m": 18,
+"rate_per_min": 0.9,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7s981b9Sdo3mgbmboqeNhTSSofRcCR8fWq24xjf8ENyH": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"D19QqXv6xXawDn6dzQ8hbk7WSNJJkFYQMRpXBmJNT3FT": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"pXGQ6J2ziRCvmYSLTT55FASf2jSHeCD6gju5xka31yV": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"F9na7HpFdueAgXdswj44XLHvUXpfmPdiacbWUgr8tbiq": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"fNtkbz6z6mm27c5MKBTfyB9Sis5dBMRg3dFGRBUasbL": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2r63x37EAQv7aRTCsvFNZtqPsX695hZp2RLJJ9vWhzVe": {
+"launches_20m": 104,
+"rate_per_min": 5.2,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"ES9zJAMZFYUB1qJyzLteoZVpYiqVKubSNET6K7oHRR3A": {
+"launches_20m": 8,
+"rate_per_min": 0.4,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"92rjsyV1bKBwW5e4ikXucq6gNCisKYPf9xHYpoJJTKU4": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"timeworn2X1EwMLSzeVhdVTbVSzSCKuibKd2kQ2Lsyn": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9kEASjaJSJ8Bj6DwYkBvkjz1qHatZYX42puA5JtDQVEV": {
+"launches_20m": 50,
+"rate_per_min": 2.5,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"97K6nsFhBWDKwQf6heDDhDtsCRC4779LPHSFZkc2zqK4": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CReKTrsu3yC6ngix1bLaUzBw1mziYsfJPPLjF5NF36Fd": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8zp75jBnxbA6rSLV9MrzEPhxT96RCU6W6n7Zrg8uwm9R": {
+"launches_20m": 8,
+"rate_per_min": 0.4,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Da45k6NTdK4FXdsUDJD5BHmDEvGXXbd5n66DxesDf2pP": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Diuv4RNkyown1QrF9zfQGHXTVWBfbWgGqbw4n8Nwm8qT": {
+"launches_20m": 5,
+"rate_per_min": 0.25,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"F8u6j5Vjy5Bgo4o7NFESn2WmJ26Rbfpye7DPcFoCGiGL": {
+"launches_20m": 14,
+"rate_per_min": 0.7,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8p43wSLfiR183wmnuQAaY2wkaoo5JW1Cc87EyQrLsUFR": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8WRajRjVenzNDJR346C6W8YeDDJ2cF5gMrdxUsJ6LKDf": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GwUyFuTnMQ9H7bwDLTvPuM1qWmCuP8ffaAjC1JvrWbw7": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DMyXdBVPz4vmcXpCvQkfmU9CZciSn7mC9iYWnUYqH6F3": {
+"launches_20m": 5,
+"rate_per_min": 0.25,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"C63tKyKW6QPACsRZPMFP9H5VQeyG9kuLyWpiL8XrvWpG": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"ALCAf8NuFDtitbAGo2oBvUYeqvpTFjp5vtLwHtb4FFjM": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"98n4Y6hPz3sMseP9Xvddw7cPVLHxRjeNKQDvL9ZvEpFq": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FPT1P32SYpRebK3UrqSBkCrujjJeGimYuqm5pgpSBPae": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"34Kq3jEpUxjr41CCE9ot6nSgdANgvqA44hLpYwuPHTB6": {
+"launches_20m": 19,
+"rate_per_min": 0.95,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7PiZnC5McmHVG8z6BmYFekfXMp3rQUY9KFcv6VT6dGeh": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"soLAn2MJic1bj6gJwb6ThaNcciLzDr9bqjUNwnr4x4T": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"kLCeMLs9aFhHHNgMYUg9zubzDR1p3YhVMjTtxkWnjb1": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3485XtQrASAEz6ANwNKca1hSJQR99VQtZiGja75wZuDW": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7ML86XkrdtwoFr1GkuzLDMvMTL26LyrHBC57fMA5gc6m": {
+"launches_20m": 4,
+"rate_per_min": 0.2,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GPYrdDmW4gixcCf1o47UFS7AoB1d6fMchGne9EzXMdJn": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GKt3M9X62rPHBCLab4qw5UES8R5Jo8t5UNh5EXQLL4vs": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AwLrEFp98aKcRiHQBPdKBF1ci2cYSoQBCZqKbkUmDiMR": {
+"launches_20m": 20,
+"rate_per_min": 1.0,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"E4FPggw9yDp9PNJDuRoLYDr6a5HKCsAterw3fygLpZEA": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5UHf9K2wy25sATVEpNmcEH6C3c4Kz1Wafy5r9ggkbJEX": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FcT6B9WxyZngbpMn6Lq3NqPSoMtWQWn4qN1tsD29D3wF": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7XQb9RBTZZ2KSLsDZTneEenEBff4fJ4vQSiCPiCC7YKD": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4X4udwekEWrw65ZtdkLyejthe4YSU28crfyFudSfZoCx": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"E63XcjTbtr1GikfS4PyzrudoZix2Vy3g43JhA4HXXrHk": {
+"launches_20m": 5,
+"rate_per_min": 0.25,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BGURR1cYJYw4CYYi51YEKggvCre1XsRMarfDfo63CxFY": {
+"launches_20m": 11,
+"rate_per_min": 0.55,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"J6mVYmmnG2yoT1bbTUdMuQXxaryehgzGg4LeBVwgpTh2": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6C9Yg4YVcyR2yoasgUFZfwSE6PpKoNFgYQkikJEZrEfE": {
+"launches_20m": 4,
+"rate_per_min": 0.2,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"EGkKcpAPcvvsofKPJnrgboPrqS8BpBuUR5Ht8CzAXLQS": {
+"launches_20m": 4,
+"rate_per_min": 0.2,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"F7roh3SAZvJwUK5XphSVgDyfHYmNm8Ncu9SUWYC8crB3": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7aJ7LG3wbZ8kjDfXmXaiMKicCaigMni4Fs9L2ZyhMvWi": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GuAKE5EgK7Au7EARH81oHrWjJvvg2Axf9AVNMpt7yEzH": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4Njb5SvgoLC2nc8MzMvfhCJkDzHkn2TM9N6ueE3n6LsB": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9ay6j4hZYwxGks4GcysJwqWJqgXLreojf3dRerT6qFdg": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"29yFzeBZgxf5zqrAkKXwgZtQehRf4pL8WbV2nRJikbw8": {
+"launches_20m": 5,
+"rate_per_min": 0.25,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6jrDGnnuJnZecwkDurXgUTgwhgv5hB1Sv3qZ211SVtJb": {
+"launches_20m": 4,
+"rate_per_min": 0.2,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HpKUzxQetUfbEMRRt96HfGZ5w1MjqYaQkhZaLyxDooDW": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CHXHjEdbzDxqzXzsh9Vs1jxMixnBSAJuqQ9bjZMzFqn9": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CS3EREmMkPMsCswoxjt2oYE41SYhg4t1L6A1TahRRBTy": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"37uM1rp8TK7eVURVRnjtaxGkdJyXjgA9uz83DjApcHvq": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AECNquMGxyVK1sKgdmWdPagH1kRRpsZ1H67S5fTaRbWG": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HpimkCL4YbZfApbya7uu8DsreyPg4XFGpwxkzvm2gtuT": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5fGpD8a9g2JDMKqpqgUENMpfwkH6g1juQPvgyCjEoB6T": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2tjT1zDMqWX3xqLztYo6wK8HcV5dg8UCgxJzQPLGMw1w": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"EhXrgVgGH9qcGoKn2fXnoEPMji3WEVANP2eC4YWW1kPR": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CZ2wtLd5z13V3sh8zVGgtsJ1i79bjRd6D2bFjinSGZNy": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2FFTHmQCAkfHcHDuiMxHSSfZBwWEtb4WhXy2LoYd96am": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HCnMqsfsxcJbhnE24Y8q4ZEn1b6JjPqEdzQzvxi2r1K7": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DrbKd7Dn2duT1uyytr7tScwZmVRfVronbXhVSTrvQtzL": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FtTrJ92P2nq2XkdrvMrfjeuqKgrXiNPV9eVjDxnvvYdf": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6pCbg2V9KzgUMzWoGUTyhpzVYe6Q3267phG4fJD2SfLK": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7kGAXsa7n1qN2FuNoJAGmzebmN9KqqLAHcwj7gvoekKk": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HedPhc4MUQpqotZYmQJLbv6BrJLJ6jCrfCM1jTj6Cp2T": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9Wzs9J29pxKLsYBnYk7WcLgdiq7RByB4F71TyFtArdMW": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GdRSPexhxbQz5H2zFQrNN2BAZUqEjAULBigTPvQ6oDMP": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"sTRiVESKdsHAWX4WSqAXEDfqVV5DVJtsWSjrwnMqZG9": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4LBEBNefj5e8BJbL1xdvoYQQHEPzTK14pWSrgoAkAPe2": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DWAnGTcFGHY5EqSpT1f7GXgqEpRG86f5YBkVXkU4cdbi": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BPhWeWfnh7L2twsJMqm9qtChy6PsmsecfRJCZxrEQJMz": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"14owPpHuxojcCHCwiMRjuwXBqhSmxnkZGVjWEr3HVtoT": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2JmUv5JV33u9oApEnK12CaDMe111Wqpejskyw3D3VBC2": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5rtyaCmAAkwkhnHhtrvYRSHtac8wRf5sqdDhCVwUsssJ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Hp34goKgAhAYW6sw9iFAZofvDTr3DAhtkSKF1R9bAk2P": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FPjUVp9BxmoVjnDChHo72CKFG4bDqBepqU3agock8UGZ": {
+"launches_20m": 7,
+"rate_per_min": 0.35,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3WnsvEUunAPBWjGrwpjBCfw3B3y1LHbw7hSGiucJ3TYr": {
+"launches_20m": 7,
+"rate_per_min": 0.35,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6ewQq5dbGFmQi8rCnwxSWjGYTRENgqkZ7KuimVLFuHzD": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GxDDikhu8EyW78RT3pAeeVwJG8i8QJ7ywUAcn74zkscV": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"972KVyUyNwpKEDwPZFEXTgGguKDgfmkyeWwqPBBcvMA9": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CrEouuwqvXAA8Fcb9anBBLppdGNbBDHM6HdSxAbwDinv": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DRXPafDunsHAMoo6hqyak9J5LfqT1MKBQEp5iUJMFvb7": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"EFWumXxg8dotaV32q2MDJ4tk9uGRd4YV89EGAD2zvXqN": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"bwamJzztZsepfkteWRChggmXuiiCQvpLqPietdNfSXa": {
+"launches_20m": 9,
+"rate_per_min": 0.45,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BQ4z37aKVFptCngcE85nvQ5XLBvxkkTiGCJYJ3XtdiXw": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BCyNgSB1njYWrjHubBc56UXqDqzc4ixk8UHPhGbTQ5aQ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CjyiFWDXTrPjPVZZDxL6ntV8aVWjUG8TNUEo5n88Z16R": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CBGGCHjs8QAviUYNYq6SHpHWT63GWC7Kr27uboiL7rNn": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"deveA6Ktdz92N6neUFpcLi92vh3dhfvj7JqU2rGTZxj": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4Pu8QAnKnQjSKdEakKgz9ffVh9Ww9CmCZmjJTVBzdycZ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CDGWUhJYScMyocYpDhmi8marPJJr3Amg2NY6casUbLeB": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"ArLugmai8XHkZY4cvz3hM3jPeEwz7FA7CgZUSXQtZq1X": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"jaJXnw8z9rkYK4PrzKA4yjgVbZxfEXKndmDgAoQUsKy": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2bRoascfGCKkRnyZLmzJh7cKpiD45zyEzUmg9XPZzueC": {
+"launches_20m": 6,
+"rate_per_min": 0.3,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GaMPRt9yhnhRAB134imiwkmXAtVYkcTtZFzF1nBeqw6H": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"rhRFqo9prus2M8fEomcdEpmXbSEZcH9jEzgZkDv7vm3": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FnTS5phx2WR5QdR1zdxNEwz5F7dyZ1DoLmLW4T7T5SvD": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9PVzawGi2UU4ziMiNuFA5LXXheWWSaTEEoNePZmd7VKs": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9KNdT2Z71UNhZGpMevJrmtDKc7H5oXEGETKJuSdVXeWA": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8oTWepLVbcYotg1RSmDJXh4srJ1nM2VWNeUs2vHqpNXy": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2iFLsKa17oqeBtvmrCFFiGQBhSuWUApfGHRSch1V9wyp": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8ugD9haGAkByGk2ybpC7bp64wvYP39VsH2YZxnYcTSRr": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"V6UgaTukuJMR4959cKYWttEMfwipdDbUMLa1JWzEkyL": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4qTTwWtD1a8K7HRY8Q98qZeNnwib7KvviHeBPFQ3t3go": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3dVXkPeeM4MMeLiWi1EDNCyX8vTbA6qg4ZhDnvp8FSNN": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"whamNNP9tHoxLg92yHvJPdYhghEoCg1qYTsh5a2oLbx": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DCvG2vPBdU6fgC2jxvVibupbfaDfiNnSXULHjvEzJ7it": {
+"launches_20m": 6,
+"rate_per_min": 0.3,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Hk4QsfKteYFYKNijRZ7Cy8zfEgbURrjk3ZdyyUVcrCd8": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"48eENEL5ZbHU467YJSpZUqHcy2xPraQGS8Rys7LG3tRo": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9W2UeX5piC2jW7wMVvgXf4KwzSpGm8CXkFSmzCsugYow": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5U9xZ8YZL4rA5pVqrSkaDuFt6KtWoZ3aZuf8PdbSaenZ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5wiMnenFTHoJAeS3NxnCWdD45oo45W2rMFrRqduQK2ZT": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"72FKGPQcSu2DMR7o2eLWbnHL48rZRaQPJsHVdsKBcbyS": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2E91ny5HaN1Z6r6LwELLqdSnEiDwW88DKRsaqVc3WDWW": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7VNyDkkPNmQFvztKVmBYAW4e1uJdZPxgJ18TfcaKXBLz": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3wWAwSAFHZ5482Skhgi2KRSYYS2h5kGs6uRyFSee776s": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3MUdQvRqQbg7hgEq9BxWkdEbEJjVBVEVicxjGBA8EeGL": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8eM96pYoyYCmKKzWfEGtLhByE2jPztEieXTT2qZCNgqS": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HTM87R4mgjDdiF6Yfn8duK9vbDmZxiPCTRbGvm7eCAJY": {
+"launches_20m": 4,
+"rate_per_min": 0.2,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"D6rjoJSbrB66Sd71x81gfLojyG25Y6D4j29ZLvpBbXLU": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"42wPrinfwecqRtxEQKDunbKFEfTVDUAe8vwNqbLD987x": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5o786j42vqZuVG3Q6aQts98aUZqhpZ2P3qVMkBfyj6zm": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3t9t1Q98Z5edthGo3cQXPhuL1Y8tPmWryqWQcK3gWe8k": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4AZhHjL2rDQawNxpZD7QVGCyU5LtR9x2dvFDoPwQFVwk": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6nLf1znpcHtuXM1yZWqVykbuFvrUHLJtr1NBb1ymbRp2": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HFyW8CanqKnpx2hnVYaspndBMhE2zntry3hWTWvCYKkk": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"JAXSqGUZKeMY9CaM5dvUQbhxypsGf4yv48x3G1H7rufW": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8qGwgZiUjbi6d948sdsV7jY4ueLFTyTZyX1vw6GHUhKB": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6WAWQr82kXpEGQogeWehRKCmhZ8UxRMoyuRKhkihPR7p": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"EVqx653MoY6esB9L6qruh3dTThCV4B43cBSsVWx9LQty": {
+"launches_20m": 5,
+"rate_per_min": 0.25,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DQwvcTQSsoY5kB8XyXWwfQDmbpuPqQfzRXA88K5mNXLo": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5CLq1a4FVcPP9EBnSBuNhYDBTSbfmHpFNsvdqEFGDRde": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9b5PST7gaMrhRML5qCrpoNJ2oBB2k1T9NL9cGhBMpoBL": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"uja3b35zyqFotWgARCdGxKEdqd3FzjA2VTU9hBYyi1z": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"27QzmK2ccpDVussYyGEKU2nskTKvsanLV6fMeBPNUGY2": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BE5pQwiysftRB3sPpt1HZSfXZKWJZsiPe7MqvfifAzJW": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4Z9xGbGWdZw7kqfjdZoN8gE8YVxCkBU8kD5YvKHLTYaV": {
+"launches_20m": 5,
+"rate_per_min": 0.25,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"iNyUtaMtqWNyJcwy3CyENdou1YK7F7eGcXaqC7FioxQ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AQ1iycoRnxxc5vbTnhF4efBFHgyStKWYBtpMvYL7iFWH": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"49fAsUF3Nk8qbfpSrQND2sULKXanemwibYLGk5Jpn9bY": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4bhbE96DGkmodVjFNK1DPxpFSwHTFnR5FHd32RqhtFF3": {
+"launches_20m": 4,
+"rate_per_min": 0.2,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DR87kHASwvyZXmRgRsZ33aaVzGpMQGsU5AKohx6kh5j1": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3mntU7eNAsGxmDcpGyDtGNwXiw6F5LpBNXu3kT248JmY": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6y68KXq8HHsFZEUWGK2sz2VQCZSePssFYnzrHxKayJCs": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"By36Y4ofRr6CDPnLrmFcyGAft9a4mBK6q8BM4xMEan1": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9htZvDXWo4UywEEzo5yEq217RfSirmjMDAbmkmjsUgiS": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AnymfEmkFzLgw5fVsBPVJ8on14p43hjGKSYaECaXb2xC": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GaXsPKJe4KbY9VpvHz7XyzsRQq8J2Dptw4qWvn8k5UGe": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8YcbyX92UHTU23HZv3ccP9o13qibErQkKaUjoxqxd7SJ": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BiLSQYyj4FM8kQ4t2druzTogbVyUkGqthC28Wi4bwaYA": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AAE1LwKukpS9gS6FqYdndSsrSVHMuiks6mHA8qE7fu7Q": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7jeAYrwDtKh6NGCtudFmDiExFS2uCWaNuAvmypf93eFa": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"nbs9f7v376nVtFJRasP5c3cnyXWFcqseTZUoXSdN6MG": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3ivUZhfY8Xxc7YM8gX8Caxa2hWdn8q4SfyMgNibN6iZQ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"ARAwvgueN4exUccmXzwj39i8YgBXUZ4aQpNiK2JLxXM7": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Cw2a1cBQaohMK3nM9F89mcfAK1tdwchn4TKEzHEcDvK4": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6oV9gAwkMa5S1b5t5NzM56oW2Ss3vnn16Ve432G57zFk": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Au7ZHGboKsGsz6wQc1euc1R3Kduh4rhojrjqRjo1Met2": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Hr5eg6WFy1TNLrDUYasMgu1Y94AL2fNCUg9sWC7Qtq1N": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CuVgtsNUTBMnTk2PF6Rjz2PaqCQ2hQNtLJtx2rZgpmhT": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7eLyxBVgnzfx1mZ3obsNpNnsyEzEsnBfLniKjP8grAWR": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8RRpe6gGTEtqG8uejmFtERguzp4qvp7UwW8MyL2CQWs5": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Erdpg9ncPVM2KSDX7UBswBHJnJT4a7XYCwxpikxaHRiR": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2TitmdMX4Hqb6jpaMJPVykHzhDpsr3AjTBDZ9q3BEXuq": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"51eU8nV651MUUp6EEbC5wuT5qgH1Su5gfmovudFNocVS": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2dE3XMa3y4um1XXstv1ZUdNk96NctLW1cP5ewnLBUsRV": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CEvCzS9dQLn8jn9esaFKgkUjtbszVNZ7PRWhCMBjHjfC": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AMx6JkVUD4qdD2JB5wUZJrCJdu4hjbXrYoCTeBAnxC66": {
+"launches_20m": 6,
+"rate_per_min": 0.3,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5gxzZhVpoTq715PyPFy6G9fwVkssWcFEbWCMF5ZGtzKx": {
+"launches_20m": 4,
+"rate_per_min": 0.2,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6C7MP2B8byrQCcH9ceSaVzNoQT8MPPrA6FimN9RDU6fM": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"B9kJYdzb4gB9AC3aFChReDhJ2D5YDCaR4UrEoen2NcyC": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9bzH3nh8tjtzt2fqmNoK9B4k6Ae82WXLQgT1pXrDXpdm": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AwRbFvmc49NxqJ6HadAHzkFLAuNzDQLWCRzTR8fnCpYY": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4F6ZbYX2ZRd7zV14zmY3dciTnm14hWD9prskde3dnPSa": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"316mYmpW21wYQj3yv291QMwDdVW45HNSCUXiZ6BATsHo": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2SPT5qLEuWBfY5TSN6yLMUzhRnyphjVPSXvV9HzBZX9e": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BJScvUdwdMMJvhuUu738af3R6zBL3XJFDerfF4m9u6tj": {
+"launches_20m": 4,
+"rate_per_min": 0.2,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3wGnhVooZB3QVCJ9BEVtgo3ToPpMeJtmcMXN8wZjtqQF": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9P3DhZrJ8v5rZb9H5E9zvg5PDC4ru5BQNTB2hwYggVmm": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FvD1MkfSha2bw37wRQok3Fokcsm1ghUTh66v3nAZiBmv": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"E11BrsVdTAaKZetQjnpD1aU2AWrqw37ftDyNQhQuZdxK": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2Bonf26MDnpJPwJkocnQLfHWjdeStLD5iCtV3yC7Q6z4": {
+"launches_20m": 6,
+"rate_per_min": 0.3,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5VCC3DF95CoocbLE7eqt71mnSi43GcmwUFDQMqMeJRqo": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5wZqFAmunFK8DyUMFaq3xpa7UXnCkieRMuLjSjJ4BsGH": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CRsGPJL7U5Y88H7UuZjsPs46HQP8Di5WBqrALaosoJ6G": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GMp44UhQRx3UvzjrsLVZjGWDv53gqyBfKedKZDJVHekB": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CpjM4q2qg5kHKCPuNAof9oFQ2FEUwzJq4GgpL4YMNHAt": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"E1KKroCRXBazLzw6evRJQx95wZvSwhJWSwASyv8LbBv6": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"B4JXfczBjeSeSHdNCyJjcy6cnEhveLbvfhdKwwWEUSKy": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3HfKZXMtPcpDbT5ASWFfoaHXQobYmsGdXZHG5h9pzRog": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5CVNDYChDR1ftGkGeawyw8k3qcwCfnKfR1BQ8P1v6VEs": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6aX4czgd6MKNYskSLzrV56esKNejn3LoHWB5eLBhnnS4": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DuojVrALrNwwck6bqrLXPuiBnYVnc1ekfcjyeWDeTAdi": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2qS1f65igZ4SujJ1B7nj8vnditBrM87EKB29LwESz3GU": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DwVjLtesZazk4hS6V4JoTkPB54k85A5A9KH18Apg4Fwg": {
+"launches_20m": 4,
+"rate_per_min": 0.2,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GaGvtMuTmvdrrZ94LSxcoF6Nw2HPAu8eU1Nq8sjkXgJH": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9uhXZGReXxkhaL5tzidHaZ5SgiUCdunfhBGqRSpontot": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6RXe8msvnx8eVLCftSjZaGHkARhZTx9gsWUh9fAREJ9U": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HqNAimJcuVgfsreSXA97XgGUgndHqb6wBmnBHjSNAnrp": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"91799xbgJQB8jF2Ahhv95kXCjYtMLAD4mTzQbYEKGxLc": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FC3nyVqdufVfrgXiRJEqgST1JdJSEBEz6a9KoBfFP7c4": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5xEjkxb4oYkVDchajyfME8KdSKipoefTxdgrz3PMWDJw": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BStGrcRBhaXJbgb1GPZQodYinkFjkyt28UCDsbftCj8W": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"417xLGqLCbJqP8GETpfTYtXSUxuqUyrZ3XQpA5htuoT2": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7FVfSdnR9VPGjMtmBP1Hz9C2DFTpoNX8gVVRmnimnGt9": {
+"launches_20m": 5,
+"rate_per_min": 0.25,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5RQ1UWATaMjjXC34BW6UusEUdEoCuNRECBW8nnHPiCGH": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BGaqghiC278mAekuvv4ZkRkbz4ZkwhJ95Wn65WBqFtw9": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Dfcd5iqvd699mb5jhCthLzEUHQWAafmgzWpoT16oxDgx": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Bvq5cxXAxt5kK9stdcFNpCEiLKypKhCaYE3eBKL1fiGE": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8inTY66csRNgKNtGhqGhd4odAV2VeJBDcRVuF7UE3Eeh": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"NHadrDGUaLLjAsGLyNfKe264XexzmA3xPnra98pkFiz": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"G3eWaBWuboTjBARo2otA6o3GEg9LFkd1Pf7N3yw8sSz1": {
+"launches_20m": 18,
+"rate_per_min": 0.9,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6hpeXcBJmFYLeoSB7PESZjizRCKHHGcAiDoVUek7DEFa": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8DDrxVmD1vQ4EimvCw7nSrbWvHFBSUYTk9yc12tYobN3": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9jwfZT1V4rvG8ZRdfR8gQfu9yYKSmZeejBEhmpPgYtPv": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3z5FDHPFQTDo2GYpDZT7XCbSVY9q1ehr7T6Gzuu4UMyx": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DC99qH3jXiq5pPWQd6PjjJcCxTV593s58CLPxWGpEywt": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BzrnupaPjoijrMQoMnicaPaqxnhSWCh1XvLasuZ57fVk": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GeRjLbbT3uHdmapPBFrDvujhDXRoqD3LX7ZQiaS66kBC": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BLbAr8VL6akdTtjPPdRAwnSvBRegYjjRuuXQB494FdNW": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CALQ1EwjARtaW6FW6KQDZj4jhye9Vt4NvTzFwmg4JHqC": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Dbqj1xQSSKGVbErnduK1xMzDTptummm17XRftA7xvn9T": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6Bk9nsMJPHj3DFSHy7TiwKcTGGLydtxt2pnnyHswSMxr": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8sZCezS3SpzL4GCD9FNkYswUaJm3YkScusKSuUetBz4F": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4S8cTizFiq3UyPUELVyFjA7dsvKkbFssHZgMZXGv6FNU": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FwDLNCkgayoM47sMHra6XwFASkmGPmaZm9QvsatXvhUW": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Gvq7QELhnFdkdRamghj6KfvgEGiBUbrKn53eNmLF4exq": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BoCPYRwxqiBr5tNKgfhGcktFTn4vk4DchjadYPg4gr3": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CgSAJCRtA6knmecJtA2TPQmSG4cfQNeLspMw2T8gspEn": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7FUpaHi5QBVdR4GRx5Y4sAQ4FyqinMeeWfCNiJR8VUvW": {
+"launches_20m": 10,
+"rate_per_min": 0.5,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7od9EXevyzmqEp2sXioBiBXnavCSv5eRihkxXSrLKGhc": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7y66FVn8QvasLBYUKiPUneYMRk6G4quBR11frfLvGGsx": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"62uNWcjwNjqAWvVVPwg2HRA1hZHDqi2S9zvR9itiJvJX": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AoYEar5fCAnLzzTssgMVWH1TdDkrcnFtb8be4WTGfRTU": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4LMeHBzuNsjSWhZcNEzXwBAsGtbZdsnnpNHTSHUp1TQE": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FCnHjr6iwq2bzfbk5ts6t7mhxtN8EnVtBTieazV6hMCv": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"E3NU7csK8BRxjspupuWZsP7ihhmYDGGLzRHjJk6rRWvg": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"H8x4H3EAygX8UZGGcrnmXuN3ZhhTmkQurBUqaVyBTuFV": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"21s6NDfvy9S3drhx3h5pmW6VLSBEwyWEpZgBU5YNpZ5J": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HjfYt26NSwXUrrVGDayZz4viS3Z3vo6DavNocmuNc6qr": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5k6WE2jDHrLiYDkz3kpLfCAdwaWxrN6wmjH5AmRZqMdL": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CFhrBkf3cozS2q7LjVsfy656vmcWFYUeiXiQ6pJyEBjt": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7gxgYQCFj9Z6y8QFz7RMzZqeC7dSWHv8c4Sqoxs9ygKG": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4y9TMovhj71PCNEYQMbnhp3FxrTw3JfF2gSR87AVsppD": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"E3Syjt9Q18WyVKC7175bTVrbHVDc9bR6p9oQZGAdoXdo": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Frxh9BknEXMGttgxChZz4CWrjnQhwfJHfD6HCVX2i4Yi": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BWuoEWTFC6NZSqaabgcPTJp5TLjRk43q9cZpAQUvar4F": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"F4DfThdT1AmeuhbetV5xBMvY28dwz1RYCR3T7xmga5ST": {
+"launches_20m": 11,
+"rate_per_min": 0.55,
+"class": "deny",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7Ny3RvHiMEHBdME3yWhGV25usuXmc9pquzbkZ5fVYofc": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9epNyGHBk9j19nEtLaXZnKdPeU5fUDfXY1Mwv6r9B1qk": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9rDMVCH7mQ9N2PkyHw8KT8wraMhF8tyMz9R631yyL1df": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4DAkzNxZGbwA68krmuD7ebLT7UQvisxGSa5grNk5so3X": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7qcPyMmbq2nGee3mvpZAiuzQLzQfzDLL37b6GaqMy7wt": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DxRFZLqmWaPT1VyLeDetHms5AmYbNiPxG92k42fauXa4": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"J4RE4J72khGw9Cu5Rz1FCM6QvykD6RYa416aH2n8Nb8q": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4ZDfVhbhYtPBRBPy3o5h7eMgdhwNARG5XWT7zTg5RdKd": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9pkJqJLtefuna3GLtKZyF5DBWwEGUdxZUSGCmf5jZhA9": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"F83hPcXbvhB2QV4CEq9pLABkn1tC2kM7pC75iT4cmXd4": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"54WMf3SpFeShcaxsJoEbPTFgnojSV6botDiKoh1MhpEP": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"84GmRQns83QbVe6TKgX88oQCLpNMFRckELBAmRcEYKzA": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"46WKucJgR6hvTLebSa3ZWMoXCtGG54WVXtCVmRgakHAZ": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"JANTWH5hVnU4PCP2UkzfawJtiT45zPF59KNCimhuCBHs": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"E255tdJLCqB21e43SnyEEPCofarToQYVozsmveEZczaH": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6pscSDUGjrDxWrwj5rgGp1HwN4ftAxddFZzt1jYNNBsb": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"D34KHSuzWDRdMEGnZTEsdDY2sQz8qhgyMXPjKXEdcgZC": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8zMBGJFEkzmRWKCNZcFVj5g6S2WghEBHcUgs2WhRgWLh": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HYx7r6iswLVSWcw3T4eeTdUKX4oDZWPX76AdLoAg9nUq": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2mncRSZ7tAPBGCcYA7kfNx84spSJnz9w6zcawGxCH8K7": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8RSksRcZEJun5bPiaGCvvkp2gdgz5SyHVC3B7owRHfYb": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DnEKrRR9ThVtGsAty5r2BJtjCbVcpKdFm8SxPqThdJf7": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"65kLGrmmbwQ7yYeTwB4WvtUjdTzxUY8gBE84QsTJo81R": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7naFFwuEJWeWwWYQUkgAWHsxYKg3KctEuUj42JdAMidP": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"EFAapN6yG61meCTCFvYAjuxisBeaKzvrY5RUGf4hvdGg": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"C2ZZTXFYpXawSjkkCaZMZvRwZFzBC2KEtnWf6sm1cUG5": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4Hs8BdTxPfzPu8crw2croEu1mNreJEVVGzW95yLW74H8": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HieXn5GgdKtXKa92WR3JuJPGyuR7pSMJTZw2KszQEPtJ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FcJbdZHB2AzU9Qg4U68fdiLdFTRdtC4J5NEAsQnSgQ2a": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6RQNX3zTqZHLKuUY786HrYMHXrUUF51yN4XwdMxcybhL": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2eoAw2w1hDMQWWngansXmniqRtr7HGU1vEozhpR5So6K": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2ydHLTGoGjPE36nGbS4b7oQ3EvHqqT1xzhF2hia3uXMR": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BARThd9ndzsF4BLqwG6asUa8qfK63myqFv3Gv2fYA6Yd": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DaqdARFsUuwXvDCMvoRUECzCACYtJRmaTKm6M8QukG9n": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Ai6MQxgpCVYjkh55UstySTFjs3kU3JJ3pJQ6JyM8hPzA": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"D9JNCeiUupesbEQut89ZLZ7MRqFKimPa2Q535mdpJvio": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"gWKTLg2Q48eDyqcKpwwJnDvpWR8APjLGrGfDX5P3ZwS": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"J7mfert6r5L39pydN2tq8CjEbAgvoq66mQwmDnV2yanX": {
+"launches_20m": 8,
+"rate_per_min": 0.4,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"rdckYkxH9e3Uj5pEe7R6zUgPLtbNYace8345uqfEUeL": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4Pa6LvJAA6YGZzwRqjAv4aSS8V3Gy2cg5omDP8HD8RcU": {
+"launches_20m": 3,
+"rate_per_min": 0.15,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HDWRmvbSeHZKwjuHzX43CXzYGq5infFdEr4ACpDWstpk": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DFTRuD9mEGDZAEEpLMAAwZYfhPxYPneQgrW1AF9vCs1J": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Cb45oDAr9ysnTyTaK2QxJUHeuNh35TPBAZPpUNQdaakx": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FmgVDnGn3SiGwjcU9rSmrzZvwdXs81yR999RkSKcMSX1": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9uJBwLdbeN32jSpJoiDW7VicV4kguj1NHeBkDVUKAc5e": {
+"launches_20m": 7,
+"rate_per_min": 0.35,
+"class": "watch",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6jE3fxkB63gfHCfNuGm5Pm8V3MgAZVNnsQt2vbQciUbG": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DzQKyvZXGv85zPSqHypEtjxm7JHQessg2sVFeG4RYyxL": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4MNNisQjrCks67MdAZUjwcmdkbLxVPe6ixSC6iLWoD2r": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AVXp5grhGhnS5qigxiCEnf4eo76bwPivDDXBcNgSZEdJ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4wKaTnGJYdpa8CtCpGewMbsNYpt12qUwRxdZpFVtBExN": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FHtTes5FVxy6PKEuNXjxj3u1iJ8Hfx5pdzKnTTFuJj6L": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"B4tp4tfJU9kWBdYdMmW6yAxgHfYNPjfchaT4abCpkyJZ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"59nWY4db9TqgAuoDS7NpaTuHLHScJxNZYYDTyrWGcoer": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9mqX5ZZg4bGrKsDcypdXsFNU4FFdEHtZ2NpoAHV5Soug": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3rTEwVMb8Na1U5pndYaVyaaaJ9B1dVqfJG3YwJE69pYn": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HUN4ZAmGQoUfbkLYyzcuz8Ke4xJZc4aMeVGdSRPX5zEB": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"74PeqWBTDsBeX7czAEcuUTHGk9appKyYbF3tJHdfhUYb": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2ifQCqPRWKQTEoDdzMaPz2dr66WupixMiTxz3wyVbquu": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5eEoVcFUYU5Z6SbUEGyEGn5CPYYpmWSJ1DJvM8mfvECp": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GwsD5ct9MowToJdDpwxZurFQk71cRBDagfJwLQZw4Fcm": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2zktuAcF8RhSz9z1nZquUmDEAgynbZQEvrZxAx3CDudb": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"72Je3qk75SHc5LhHoR4rAVneag8jQLVNUNmByxhGvavs": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"eVo5DTbgdysPTQBzhgj12j9rtZWPQ6wcWseAczKGCeC": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6PsAho46qtiv22vEkV29YSbK7MVhEsRH2CqCSvseUSYC": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"A5WvN7nsfNmo5EJcofQsLdvTWvudv4c3mav1KSLTv5Lu": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"cZSoWyG7a7Si4sCYK5NBR7rdnfQMPr4N4J7ScLnHNZE": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"EApwUHpB3YFe73wiTg6rPWjwTq1yDQnU817YpR6jpYEj": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BuhvL1uWVkaRm4ise8R3c3SXr4ZFNiTndzUYM8xuBr8G": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"95F71vFHVpNWmcGDgp2kd7hyKyAu5UHHHYAGhEQJCXoC": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"JPAC9qracYpa1gpptrCoS96jFfpwYbbDapnBmB7kZdh": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AsmyQUCuigfhsrTSp4jnH43nXxJ9YRHEMq7A8e8oJpyJ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DWHEZ8JnfGtud25Gjhn3MndpTMshNEd12WMu2ciCa7ri": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"8bPckCXvq8qUWi5r3bZqoBQDwFnQ8azUWsPBt5et9KFt": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Eb4FYK7i6r3RGDT1JHB9ViTQPiaCcXZcz96rWdybN7mA": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"MCj3GCXnHZGKm6BSpnufjvnmBMMiB1FEcqV83Kt6ik9": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BzsjaDkNHv8rjp5dTyogwA8PFQ93G2sd3J6REvuJ4FpU": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AUZQFHFgsoQQWPD5PDiD4ezrHZxDa6g5qAuAGJZUGVvj": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"ECEwvSi7t4PjhXVk3N4yXuCuQsvs5DrTv36ygStrZMfA": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4i5BwMdpND3H78WsdocDHZU7JRjx8Zb9TBivEjBxSwYD": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CnL9eKJyQGVmZqFZNAVLL6t2X1KU2n9n1RNZbdkx2qJs": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"BS2fd1gseb3XGTrxdsF4rJy98GmbTWFvDtj24ciXBuer": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CYh61h2gBEJbphmUkyRnx1U76e6buRyDydziMF3GGqbk": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AxZeLnkG8UVQnbZsJTp8zjPqAaoUESKhMroHhMajUieS": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HiG5y3gu2oBRPwimRv8Pmd5ysZJfK59x8usJebzngM7v": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4n3qesogaJSofUMYCx2azwgF31E1oatMwrg3ZxCyEBFn": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GA8cKhNmWqigvXdm394yRRyLQfi27MYVqFJh4VX8KtRg": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"83uEMxovKPsuyNzZg23CJWymngpeFHhRviGZ39pXMRF4": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9CZ1KVxH4gCxJzcSLdtecmP5Lix1zabGv5vHCLUKD5rR": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4pU8Tt3hW3SGDqePB62gkU16MAKhhFBxM8d6kcxLKE7b": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GiggskUHz44kVK9Ec6Lrz7CgC4gVjKnGMsgZR76j5xNW": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9ZHNmL8NkHRMdPhEeST1467ebNpHcgWF8YzpUx6ZJhdh": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"MV3u6GVrBe7iNqdxD5his7vpnGJRZkT6RCmdjCZEnvU": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FKW3qizD89krmV4p2sfrKKe1SNhCYbtjvS6pNrDy9Fsm": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GjGXyrPd1VjHFHQ18BMv8jC4d8HJSbvYQETcH3GRJj2p": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CymDcf1ExZPzK4FhEzDdh9zi6iAVoVaXtaqDqeEoeQnr": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9tA4vmyK8GaD1proZHDbnbsMTHJLzbEFASkJcH7rpPvp": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"7gTgPSjYXeB77NZPmJ85onhx8hp7JqQNtCZjHDhNGEQw": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6N8KMFcyEn5koBWeFCpGeo1CNgz2XksFEpZyLYLWjhkL": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4ofYGxaXUaTMTagz6D3DDMVUQvpnMm2cfsTA2peN9eLQ": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"1432egxL4SL5Bfc9aXVeHLC8Xwr9g8v5snsp7Te5qb8o": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"5GzNka38EpChRDVm1L3n2dc369RFH6KHJkL6Ti1Ltx6H": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"AEEf1HhhxoZjYt9dioNCrnQiMqtibtS8W2SwNnH42S8F": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"CrVW9jpbbKssWULzncQtf31rSxvzJwPe56zg2o65sjA7": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3kEgDJ6CQuoxhj7mU6u4bjTPbdcRuTtQnZJzFMJiNidm": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Fwcn8QjugGVxXuHdvoQQvVmTJMcCPrC1TaQiSHUeqbo7": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Dkyrfp1DwzLEFDavx1hGpWuWLRK9Fcoxtw9sKcNUW5pk": {
+"launches_20m": 2,
+"rate_per_min": 0.1,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"9m5KUV7ZbxvzTLU1hM3n2LabutEAzQ6jPNhsiEQuRd8u": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"DgM4e9q3rSUnUKoDq5L43eHdKUekvGQa1HY9W3mP6neF": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4zquCruJydoUXXiLZee37s5AArhfff5jUdEnt3PsZTyF": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Skwz21i7ZvW7oLLyarVtxxN8akVjjKX3fEoCZnwhroN": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"Fxu9r2JZnGP59Kd9C8kaLA6SoGpaMvxpPnhci2qocymy": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"FCAHCvp2eVzPuMwhCNEENz8ywZq5QhSRVjkQpYbxqrZe": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"2sRsJHLjLVMSBtfTU4wCkewTzBfLx5bLgcU6XJQRwdR8": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"85qgs4hceCQitRVjSjg2xq9dQ4x8NQ7zdj8Whdztkr2a": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4K2VrgcqeuiuYP2EAXWBbm2Yrh7P7CKEpwcUNwSKQ71t": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"tK3JZskHGCdmEmyyWsQBXCURb8sZurB3n9ho18C6pfS": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"GEFRUrh1cSXMrm4uT5EP9raohj3kmUbgpRMDonkyGX6L": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"6k9VcKBtYWYiY6A71VjPuJ5dcBbEuNtqbTBX1AGYkYdq": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4nHZjd64nCskpL852vcpMkHbYU3ppQ42E4SyZTbBp427": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"HcNpzrQKxU7GWEC6zE6LbrGMPVDisfEBaUpnwCWxgPy7": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"74afMiG2nPDzgmuFpPyCHUdeNuX45NQn99WL8gQj37Wj": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"3KfHGtNDpwnkLQpkKPmQxLWgua4RVwdvoADAStwJf8Yt": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+},
+"4vDQL6RdQWH2F3jn2omShCQTbU2YMHYMVqxeFVEaJKCa": {
+"launches_20m": 1,
+"rate_per_min": 0.05,
+"class": "neutral",
+"ewma_pnl": 0.0,
+"sniped": 0,
+"rugs": 0
+}
+}

@@ -345,7 +345,12 @@ pub fn state_item(m: SubscribeUpdate, t: u64) -> Option<Item> {
 
 /// The provider's own timestamp of a message: its lag behind us goes to the feed's `provider_lag_ms` (feedhealth.jsonl)
 fn note_lag(c: &FeedCounters, created: Option<&PbTimestamp>, t: u64) {
-    if let Some(ns) = created.and_then(|c| c.ns()) { c.provider_lag(t, ns); }
+    if let Some(ns) = created.and_then(|c| c.ns()) {
+        c.provider_lag(t, ns);
+        // ARBX_LOG_LAG=1: print provider-send -> our-receive latency per message (= network + our consumption).
+        // Small => our side is fast and the ~200ms is upstream (provider gets shreds late); large => our side is slow.
+        if std::env::var("ARBX_LOG_LAG").is_ok() { eprintln!("PROVLAG_us {}", t.saturating_sub(ns) / 1_000); }
+    }
 }
 
 /// One executed transaction from a transaction stream: its exec.jsonl v2 record (src/rec/exec.rs, built and written on

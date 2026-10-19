@@ -1,0 +1,22 @@
+# snipe_engine warm-latency probe config (minimal; unknown fields ignored).
+# The ${CONSTANTK_TOKEN} is expanded from --env-file (/root/arbx/deploy/.env).
+wallet          = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
+wallet_keystore = "/root/.nexus-v2-trading-wallet.enc"
+# Full Frankfurt RPC (answers getSlot / getLatestBlockhash / getSignatureStatuses), close to the leaders so the
+# send_slot/land_slot clock is low-latency and self-consistent.
+rpc_url         = "https://rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+# THE WARM PATH: direct-to-leader over QUIC (no relay, no tip). The url is the RPC that answers the leader
+# schedule + the validators' TPU-QUIC addresses; its warm loop keeps the next leaders' connections open.
+[[send]]
+name      = "tpu-direct"
+enabled   = true
+kind      = "tpu"
+url       = "https://rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+# For comparison: the staked RPC (SWQoS) sendTransaction, no tip.
+[[send]]
+name      = "staked-rpc"
+enabled   = true
+kind      = "rpc"
+url       = "https://staked-rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"

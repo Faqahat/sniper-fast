@@ -1,0 +1,36 @@
+# snipe_engine --shadow config: the warm send paths + a pump.fun launch feed.
+# Unknown fields are ignored. ${CONSTANTK_TOKEN} is expanded from --env-file. Constant-K endpoints only.
+wallet          = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
+wallet_keystore = "/root/.nexus-v2-trading-wallet.enc"
+rpc_url         = "https://rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+# --- warm send paths (fire the trigger probe through one of these; staked-rpc landed 100% at delta 1-2) ---
+[[send]]
+name    = "tpu-direct"
+enabled = true
+kind    = "tpu"
+url     = "https://rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+[[send]]
+name    = "staked-rpc"
+enabled = true
+kind    = "rpc"
+url     = "https://staked-rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+# --- launch feed ---
+# erpc ShredStream (Constant-K-only directive: NO Haan, NO DoubleZero). A jito-entries shred stream: it carries ALL
+# txs, decoded locally, and pump_interest() filters to the pump.fun program (no account_include needed).
+[[feed]]
+name    = "erpc"
+enabled = true
+kind    = "jito-entries"
+url     = "https://shreds-fra6-1.erpc.global"
+
+# --- SECOND feed for the head-to-head race: constant-k Kaldera gRPC SubscribeDeshred (Frankfurt) ---
+[[feed]]
+name    = "kaldera"
+kind    = "yellowstone-deshred"
+url     = "https://kaldera-frankfurt.constant-k.com:8443"
+token_env = "KALDERA_TOKEN"
+token_header = "x-token"
+account_include = ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]

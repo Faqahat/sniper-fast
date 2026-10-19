@@ -47,6 +47,8 @@ pub mod runtime;
 #[cfg(test)]
 mod scenarios;
 pub mod send;
+pub mod snipe;
+pub mod snipe_build;
 pub mod store;
 pub mod store_health;
 pub mod supervisor;
