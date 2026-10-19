@@ -110,7 +110,6 @@ dependencies = [
  "dotenvy",
  "ed25519-dalek",
  "http",
- "httparse",
  "libc",
  "md-5",
  "prost",
@@ -129,7 +128,6 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tonic",
- "webpki-roots 0.26.11",
  "xxhash-rust",
  "zstd",
 ]

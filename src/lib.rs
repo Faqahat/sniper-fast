@@ -24,7 +24,6 @@ pub mod cu_table;
 pub mod engine;
 pub mod exec;
 pub mod experiments;
-pub mod fast;
 pub mod feeds;
 pub mod forks;
 pub mod lat;

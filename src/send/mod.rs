@@ -720,31 +720,6 @@ impl Path {
     /// the rate queue's waiting sends and λ (status `exec.queue_now`, `lambda_now`)
     pub fn queue_now(&self) -> Option<(usize, Option<i64>)> { self.budget.as_ref().map(|b| (b.waiting(), b.lambda())) }
 
-    /// FAST (snipe_engine --fast-send): the URL (may carry a key: never print it), headers, preflight, ping target
-    pub fn fast_url(&self) -> &str { &self.url }
-    pub fn fast_headers(&self) -> Vec<(String, String)> {
-        self.headers.iter().filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string()))).collect()
-    }
-    pub fn fast_preflight(&self) -> bool { self.preflight }
-    pub fn fast_ping(&self) -> Option<(bool, String)> {
-        match &self.ping { Ping::Get(u) => Some((true, u.clone())), Ping::Health => Some((false, self.url.clone())), _ => None }
-    }
-    /// FAST: take a rate slot now (no queue), as `send` does with a zero queue; true when the path has no limit
-    pub fn fast_budget(&self) -> bool { self.budget.as_ref().map_or(true, |b| b.try_now()) }
-    pub fn fast_udp_ok(&self) -> bool { self.udp.is_some() }
-    /// FAST: LandX UDP from the calling thread (non-blocking write, `copies` times): key + raw into `buf`
-    pub fn fast_udp(&self, raw: &[u8], buf: &mut Vec<u8>, copies: u32) -> Option<std::io::Result<()>> {
-        let (sock, key) = self.udp.as_ref()?;
-        buf.clear();
-        buf.extend_from_slice(key);
-        buf.extend_from_slice(raw);
-        let mut r = Ok(());
-        for i in 0..copies.max(1) {
-            if let Err(e) = sock.try_send(buf) { if i == 0 { r = Err(e); } }
-        }
-        Some(r)
-    }
-
     /// Check, wait for the rate budget (the queue: bands, crowding, EV), deliver. Never retried here: a late copy is
     /// worthless. `attempt` joins the bundle's results to it. The reply carries the queue wait
     pub async fn send(&self, raw: &[u8], prio: Prio, attempt: Option<u64>) -> Result<Reply, Refusal> {

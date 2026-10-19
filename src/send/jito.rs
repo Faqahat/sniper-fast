@@ -531,21 +531,6 @@ impl Jito {
         Ok(uuid)
     }
 
-    /// FAST (snipe_engine --fast-send): a bundle written outside `send_bundle` (raw HTTP/2 on our own connection): record
-    /// its id exactly as `send_bundle` does, so the result stream joins to it
-    pub fn note_bundle(&self, sig: &str, uuid: &str) {
-        let uuid = uuid.to_string();
-        let early: Vec<(u64, Outcome)> = {
-            let mut v = self.verdicts.lock().unwrap();
-            v.id_of_sig.insert(sig.to_string(), uuid.clone());
-            v.sig_of_id.insert(uuid.clone(), sig.to_string());
-            let early = v.all.get(&uuid).cloned().unwrap_or_default();
-            if early.is_empty() { v.order.push_back(uuid.clone()); v.trim(); }
-            early
-        };
-        for (k, (t, o)) in early.into_iter().enumerate() { self.ours(sig, &o, k as u32, t, None); }
-    }
-
     /// every result so far of the bundle sent with transaction `sig`, in order, with its receipt time
     pub fn verdicts(&self, sig: &str) -> Vec<(u64, Outcome)> {
         let v = self.verdicts.lock().unwrap();

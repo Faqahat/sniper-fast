@@ -128,18 +128,14 @@ struct DetLog {
     allow_legacy: bool,
     /// --no-router: do not fire on decoded router (CPI) creates (detect-only, as the paper-tested AFTER binary)
     no_router: bool,
-    /// FAST: hold the DETECT lines until after the prepare / fire (flush), instead of a stderr write per create
-    defer: bool,
-    buf: Vec<String>,
 }
 
 impl DetLog {
     fn new(names: Vec<String>) -> Self {
         DetLog { names, slot_t0: Default::default(), first: Default::default(), order: Default::default(), last_health: Instant::now(),
             dev_sized_only: has("--dev-sized-only"), allow_nonsol: has("--allow-nonsol-quote"), allow_legacy: has("--allow-legacy-create"),
-            no_router: has("--no-router"), defer: false, buf: Vec::new() }
+            no_router: has("--no-router") }
     }
-    fn flush(&mut self) { for l in self.buf.drain(..) { fastfire::log_line(l); } }
     fn name(&self, f: u16) -> &str { self.names.get(f as usize).map(|s| s.as_str()).unwrap_or("?") }
     /// every arrival: the slot-start estimate from PoH-positioned (entries feed) transactions
     fn note(&mut self, a: &arbx::feeds::Arrival) {
@@ -167,10 +163,9 @@ impl DetLog {
             (Some(&t0), Some(p)) => format!("{:.1}", (a.t_rx as f64 - t0 as f64) / 1e6 - p),
             _ => "-".into(),
         };
-        let line = format!("  DETECT feed={} first={} dt_us={dt_us} slot={} t_rx={} poh_ms={} lag_ms={lag} mint={} kind={kind} sig={} {extra}",
+        eprintln!("  DETECT feed={} first={} dt_us={dt_us} slot={} t_rx={} poh_ms={} lag_ms={lag} mint={} kind={kind} sig={} {extra}",
             self.name(a.feed), first as u8, a.slot, a.t_rx, poh.map(|p| format!("{p:.1}")).unwrap_or_else(|| "-".into()), b58(mint),
             &a.tx.sig_b58()[..16]);
-        if self.defer { self.buf.push(line); } else { eprintln!("{line}"); }
         first
     }
     /// the base filter's verdict for the log (same order as the loops' gates)
@@ -372,24 +367,6 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
     }
     // LAT: warm EVERY fan-out path before the first fire (not only the --send-path one)
     if lat::ROUTES.get().is_some() || lat::MULTI.get().is_some() { wait_until_warm_all(&paths).await; }
-    // FAST (--fast-send / --fast-bench): our own send connections, templates, the hot-thread fire
-    if has("--fast-send") || has("--fast-bench") {
-        if live && !has("--fast-send") { bail!("--fast-bench is zero-network: never with --live"); }
-        let (k2, p2, m2, junk, st2) = (key.clone(), paths.clone(), path.clone(), has("--junk-fanout"), stop.clone());
-        tokio::task::block_in_place(|| fastfire::init(&k2, user, &p2, &m2, junk, st2))?;
-        if let Some(n) = arg_u64_opt("--fast-probe") {
-            // ZERO COST: N junk fires through the fast path (synthetic launch), 1.5 s apart; needs --junk-fanout
-            if !has("--junk-fanout") || live { bail!("--fast-probe sends junk only: it needs --junk-fanout and never --live"); }
-            fastfire::probe(n as usize).await;
-            stop.store(true, Ordering::Relaxed);
-            return Ok(());
-        }
-        if let Some(n) = arg_u64_opt("--fast-bench") {
-            fastfire::bench(n as usize);
-            stop.store(true, Ordering::Relaxed);
-            return Ok(());
-        }
-    }
     if let Some(list) = arg("--sell-held") {
         if !live { bail!("--sell-held sends real sells: needs --live"); }
         run_sell_held(&key, user, &rpc, &path, &list).await?;
@@ -402,12 +379,7 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         stop.store(true, Ordering::Relaxed);
         return Ok(());
     }
-    if snipe_once && has("--busy-poll") {
-        // FAST --busy-poll: the event loop gets its own thread (it spins on the feed channel; a spinning tokio worker
-        // would starve the tasks queued behind it)
-        let h = tokio::runtime::Handle::current();
-        tokio::task::block_in_place(|| h.block_on(run_snipe_once(probe, &key, user, &rpc, &path, live, &stop)))?;
-    } else if snipe_once {
+    if snipe_once {
         run_snipe_once(probe, &key, user, &rpc, &path, live, &stop).await?;
     }
     if round_trip {
@@ -1471,12 +1443,10 @@ struct RacePend {
     sigs: std::collections::HashSet<[u8; 64]>,
 }
 
-struct RaceWatch { cfg: RaceCfg, pend: std::collections::HashMap<Pk, RacePend>, shadow: Vec<(Launch, u64)>, defer: Option<Vec<String>> }
+struct RaceWatch { cfg: RaceCfg, pend: std::collections::HashMap<Pk, RacePend>, shadow: Vec<(Launch, u64)> }
 
 impl RaceWatch {
-    fn new(cfg: RaceCfg) -> Self { RaceWatch { cfg, pend: Default::default(), shadow: Vec::new(), defer: None } }
-    /// FAST: print the held decision lines (after the fire)
-    fn flush(&mut self) { if let Some(b) = &mut self.defer { for l in b.drain(..) { fastfire::log_line(l); } } }
+    fn new(cfg: RaceCfg) -> Self { RaceWatch { cfg, pend: Default::default(), shadow: Vec::new() } }
 
     /// static (create-time) part of the gate.
     fn static_ok(&self, launch: &Launch, tx: &arbx::tx::Tx) -> bool {
@@ -1493,15 +1463,14 @@ impl RaceWatch {
     /// (gate off, or gate on with no window and the static conditions met).
     fn add(&mut self, launch: &Launch, tx: &arbx::tx::Tx, slot: u64) -> bool {
         let static_ok = self.static_ok(launch, tx);
-        if self.cfg.log { let l = format!("  RACE seen {} static_ok={static_ok}", race_feat_line(launch, tx, slot)); match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") } }
+        if self.cfg.log { eprintln!("  RACE seen {} static_ok={static_ok}", race_feat_line(launch, tx, slot)); }
         let mut cset: std::collections::HashSet<Pk> = tx.keys.iter().take(tx.num_signers as usize).copied().collect();
         cset.insert(launch.creator);
         let fire_now = !self.cfg.gate || (self.cfg.window_ms <= 0.0 && static_ok);
         self.pend.insert(launch.mint, RacePend { launch: launch.clone(), slot, t0: Instant::now(), cset, bundle_n: 0, bundle_sol: 0, out: Vec::new(),
             decided: fire_now || !self.cfg.gate || !static_ok, static_ok, pass: fire_now, sigs: Default::default() });
         if self.cfg.gate && !static_ok {
-            let l = format!("  RACE reject-static slot={slot} mint={}", b58(&launch.mint));
-            match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") }
+            eprintln!("  RACE reject-static slot={slot} mint={}", b58(&launch.mint));
             if self.cfg.track_rejects { self.shadow.push((launch.clone(), slot)); }
         }
         fire_now
@@ -1582,9 +1551,8 @@ impl RaceWatch {
                     && match self.cfg.bundle { 1 => p.bundle_n > 0, -1 => p.bundle_n == 0, _ => true };
                 p.pass = p.static_ok && bundle_ok && (!self.cfg.count_out || (n >= self.cfg.min_out && sol >= self.cfg.min_out_sol));
                 p.decided = true;
-                let line = format!("  RACE decide slot={} mint={} at_ms={:.1} out_n={n} out_sol={:.3} max_cu={maxcu} bundle_n={} pass={}",
+                eprintln!("  RACE decide slot={} mint={} at_ms={:.1} out_n={n} out_sol={:.3} max_cu={maxcu} bundle_n={} pass={}",
                     p.slot, b58(mint), el, sol as f64 / 1e9, p.bundle_n, p.pass);
-                match &mut self.defer { Some(b) => b.push(line), None => eprintln!("{line}") }
                 if p.pass { ready.push((p.launch.clone(), p.slot)); }
                 else if self.cfg.track_rejects { self.shadow.push((p.launch.clone(), p.slot)); }
             }
@@ -1598,9 +1566,8 @@ impl RaceWatch {
                 let first = p.out.first().map(|o| o.0).unwrap_or(-1.0);
                 let outs: String = p.out.iter().take(24).map(|o| format!("{:.1}:{:.3}:{}:{}", o.0, o.2 as f64 / 1e9, o.4 as u8, &b58(&o.1)[..6])).collect::<Vec<_>>().join(",");
                 if self.cfg.log {
-                    let l = format!("  RACE obs slot={} mint={} n25={n25} n50={n50} n100={n100} n200={n200} n_obs={nall} sol100={:.3} sol200={:.3} sol_obs={:.3} max_cu100={cu100} first_ms={first:.1} bundle_n={} bundle_sol={:.3} fired={} outs={}",
+                    eprintln!("  RACE obs slot={} mint={} n25={n25} n50={n50} n100={n100} n200={n200} n_obs={nall} sol100={:.3} sol200={:.3} sol_obs={:.3} max_cu100={cu100} first_ms={first:.1} bundle_n={} bundle_sol={:.3} fired={} outs={}",
                         p.slot, b58(mint), s100 as f64 / 1e9, s200 as f64 / 1e9, sall as f64 / 1e9, p.bundle_n, p.bundle_sol as f64 / 1e9, p.pass, if outs.is_empty() { "-".to_string() } else { outs });
-                    match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") }
                 }
                 done.push(*mint);
             }
@@ -1971,20 +1938,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     let handle = tokio::runtime::Handle::current();
     let _feeds = arbx::feeds::start(&probe.feeds, interest, tx, stop.clone(), &handle, &arbx::rec::Rec::off(), None).context("starting the shred feed")?;
     let (atx, mut arx) = tokio::sync::mpsc::unbounded_channel();
-    // FAST --busy-poll: no bridge thread; the loop spins on the feed's crossbeam channel itself
-    let busy = has("--busy-poll");
-    if !busy { let rx = rx.clone(); std::thread::spawn(move || { while let Ok(ev) = rx.recv() { if atx.send(ev).is_err() { break; } } }); } else { drop(atx); }
-    let fast = fastfire::get();
-    if fast.is_some() {
-        if arg_u64("--demand-window-ms", 0) > 0 { bail!("--fast-send fires at the decision: it cannot wait a --demand-window-ms"); }
-        if arg("--fill-cap").is_none() && arg_u64_opt("--min-tokens-out").is_none() { bail!("--fast-send needs --fill-cap or --min-tokens-out (min_out is computed at the create, no curve read)"); }
-        eprintln!("FAST-SEND: prepare at the create, write at the decision from the event loop{}", if busy { " (busy-poll)" } else { "" });
-    }
-    if busy { if let Some(c) = arg_u64_opt("--pin-core") { eprintln!("BUSY-POLL: event loop pinned to core {c}: {}", arbx::fast::pin_to_core(c as usize)); } }
-    let fill_cap_v = arg("--fill-cap").and_then(|s| s.parse::<f64>().ok());
-    let min_out_fixed = arg_u64_opt("--min-tokens-out");
-    let mut preps: std::collections::HashMap<Pk, fastfire::Prep> = std::collections::HashMap::new();
-    let mut ev_st = [0u64; 4];
+    std::thread::spawn(move || { while let Ok(ev) = rx.recv() { if atx.send(ev).is_err() { break; } } });
 
     let key = Arc::new(key.clone());
     let sem = Arc::new(tokio::sync::Semaphore::new(max_inflight));
@@ -2036,19 +1990,12 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     // fired in the same iteration, exactly as before.
     let mut race = RaceWatch::new(RaceCfg::from_args());
     if race.cfg.active() || race.cfg.dev_from_cap { eprintln!("RACE: {}", race.cfg.describe()); }
-    if fast.is_some() { race.defer = Some(Vec::new()); det.defer = true; }
     let mut ready: Vec<(Launch, u64)> = Vec::new();
     loop {
         if Instant::now() >= deadline || stop.load(Ordering::Relaxed) { break; }
         if spent.load(Ordering::Relaxed) + spend_per > total_cap { eprintln!("  TOTAL spend cap reached — no more fires."); break; }
         let wait = if race.cfg.active() { race.next_wait() } else { Duration::from_secs(2) };
-        let ev = if busy {
-            match fastfire::spin_recv(&rx, wait) { Ok(e) => e, Err(()) => break }
-        } else {
-            match tokio::time::timeout(wait, arx.recv()).await { Ok(Some(e)) => Some(e), Ok(None) => break, Err(_) => None }
-        };
-        let (t_deq, t_deq_real) = (arbx::fast::mono_ns(), arbx::feeds::clock::now_ns());
-        if let Some(arbx::feeds::Event::Tx(a)) = &ev { ev_st = [a.t_rx, a.t_decoded, t_deq_real, t_deq]; }
+        let ev = match tokio::time::timeout(wait, arx.recv()).await { Ok(Some(e)) => Some(e), Ok(None) => break, Err(_) => None };
         det.health(&_feeds);
         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
         if let Some(arbx::feeds::Event::Tx(a)) = ev {
@@ -2059,7 +2006,6 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             det.note(&a);
             // DET FIX: a top-level create, else pump's router create (CPI) decoded from the router's own args
             let cand = match snipe::detect_launch(&a.tx) { Some(l) => Some((l, false)), None if !det.no_router => router_launch(&a.tx).map(|l| (l, true)), None => None };
-            let t_det = arbx::fast::mono_ns();
             match cand {
                 None => {
                     if let Some(m) = snipe::detect_cpi_create(&a.tx) { det.create(&a, &m, "cpi", "verdict=cpi_not_decoded"); }
@@ -2090,25 +2036,11 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                         skipped_far += 1; break 'create;
                     }
                     rx_t.insert(launch.mint, a.t_rx); if rx_t.len() > 4096 { rx_t.clear(); }
-                    if let Some(f) = fast {
-                        // FAST: everything but the decision, now (the race gate decides on a later tx)
-                        let t_gated = arbx::fast::mono_ns();
-                        let min_out = min_out_fixed.unwrap_or_else(|| {
-                            let cap = fill_cap_v.unwrap_or(2.5);
-                            let floor_px = pump_floor_px(launch.dev_buy_lamports);
-                            (if floor_px > 0.0 { (spend_per as f64 / (cap * floor_px)).floor() as u64 } else { 1 }).max(1)
-                        });
-                        match f.prepare(&launch, a.slot, min_out, [a.t_rx, a.t_decoded, t_deq_real, t_deq, t_det, t_gated]) {
-                            Ok(p) => { preps.insert(launch.mint, p); }
-                            Err(e) => eprintln!("  FAST prepare {} failed (fires on the old path): {e:#}", b58(&launch.mint)),
-                        }
-                    }
                     if !race.cfg.active() || race.add(&launch, &a.tx, a.slot) { ready.push((launch, a.slot)); }
                 }
             }
         }
         if race.cfg.active() { ready.extend(race.due()); race.shadow.clear(); } // shadows are paper-only: never fired live
-        let t_dec = arbx::fast::mono_ns();
         for (launch, create_slot) in ready.drain(..) {
         // reserve a concurrency slot (never block the detector) and budget
         // DET: a full --max-inflight SKIPS the launch (live): count it, so the backpressure cost is visible
@@ -2116,37 +2048,6 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         let rx_age_us = rx_t.get(&launch.mint).map(|t| arbx::feeds::clock::now_ns().saturating_sub(*t) / 1000).unwrap_or(0);
         if spent.fetch_add(spend_per, Ordering::Relaxed) + spend_per > total_cap { spent.fetch_sub(spend_per, Ordering::Relaxed); break; }
         fired.fetch_add(1, Ordering::Relaxed);
-        if let Some(f) = fast {
-            if spend_per > cap_lamports { eprintln!("  REFUSED: buy spend {spend_per} lamports exceeds --max-sol cap {cap_lamports} lamports"); continue; }
-            // FAST: write every path from here, now; logging, verification and (live) the land poll + exit afterwards
-            let p = match preps.remove(&launch.mint).filter(|p| p.made.elapsed() < Duration::from_secs(2)) {
-                Some(p) => p,
-                None => {
-                    let floor_px = pump_floor_px(launch.dev_buy_lamports);
-                    let min_out = min_out_fixed.unwrap_or_else(|| (if floor_px > 0.0 { (spend_per as f64 / (fill_cap_v.unwrap_or(2.5) * floor_px)).floor() as u64 } else { 1 }).max(1));
-                    match f.prepare(&launch, create_slot, min_out, [0, 0, 0, t_dec, t_dec, t_dec]) { Ok(p) => p, Err(e) => { eprintln!("  FAST prepare failed at the fire: {e:#}"); continue; } }
-                }
-            };
-            let rec = f.fire(&p);
-            let ev = ev_st;
-            let (key2, rpc2, path2) = (key.clone(), rpc.clone(), path.clone());
-            tokio::spawn(async move {
-                let _permit = permit;
-                eprintln!("  FIRE slot={create_slot} mint={} dev_buy={} rx_to_fire_us={rx_age_us} fast=1", b58(&launch.mint), launch.dev_buy_lamports);
-                let first = rec.w.iter().filter(|x| x.4 == "written").map(|x| x.3).min().map(|t| t.saturating_sub(t_dec) as f64 / 1e3);
-                eprintln!("  FAST-FIRE tag={} slot={create_slot} mint={} {} leader={} client={} built={} tips={} bytes={} decide_to_first_write_us={} writes: {}", p.id, b58(&launch.mint),
-                    p.meta.route, p.meta.leader.chars().take(8).collect::<String>(), p.meta.client, if p.fast_built { "template" } else { "compile" }, p.meta.tips, p.meta.bytes,
-                    first.map(|x| format!("{x:.1}")).unwrap_or_else(|| "-".into()),
-                    rec.w.iter().map(|x| format!("{}={}@{:.1}us", x.0, x.4, x.3.saturating_sub(t_dec) as f64 / 1e3)).collect::<Vec<_>>().join(" "));
-                f.trace_fire(&p, &rec, ev, t_dec);
-                f.trace_prep(&p);
-                if f.junk { return; }
-                if let Err(e) = round_trip_fast(&key2, user, &rpc2, &path2, &p, cap_lamports, max_sol, land_timeout).await {
-                    eprintln!("  position {} ended: {e:#}", b58(&launch.mint));
-                }
-            });
-            continue;
-        }
         let (key2, rpc2, path2) = (key.clone(), rpc.clone(), path.clone());
         tokio::spawn(async move {
             let _permit = permit;
@@ -2160,17 +2061,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             }
         });
         } // ready.drain
-        if fast.is_some() {
-            det.flush();
-            race.flush();
-            // creates the gate dropped: trace their prep (stage timings + verification), off the hot path
-            if preps.len() > 16 || preps.values().any(|p| p.made.elapsed() > Duration::from_millis(400)) {
-                let old: Vec<Pk> = preps.iter().filter(|(_, p)| p.made.elapsed() > Duration::from_millis(400)).map(|(k, _)| *k).collect();
-                for k in old { if let (Some(p), Some(f)) = (preps.remove(&k), fast) { tokio::spawn(async move { f.trace_prep(&p) }); } }
-            }
-        }
     }
-    if let Some(f) = fast { for l in f.summary() { eprintln!("FAST: {l}"); } }
 
     if close_set.is_some() { eprintln!("CLOSE-LEADER GATE: skipped {skipped_far} far-leader launches"); }
     eprintln!("MAX-INFLIGHT: skipped {skipped_inflight} qualifying launches (all {max_inflight} slots busy)");
@@ -2256,26 +2147,6 @@ async fn round_trip_launch(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Ar
     let (buy, bal_start) = tokio::join!(send_and_poll_at(key, user, rpc, path, &buy_ixs, land_timeout, create_slot),
                                         async { native_balance(rpc, user).await.unwrap_or(0) });
     let buy = buy?;
-    round_trip_tail(key, user, rpc, path, launch, buy, bal_start, spend, fill_cap, land_timeout, create_slot).await
-}
-
-/// FAST: the buy was written by fastfire::Fast::fire; poll its land, then the same exit as round_trip_launch
-#[allow(clippy::too_many_arguments)]
-async fn round_trip_fast(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, p: &fastfire::Prep, cap_lamports: u64, max_sol: f64, land_timeout: Duration) -> Result<()> {
-    let spend = arg_u64("--spend-lamports", 2_000_000);
-    if spend > cap_lamports { bail!("REFUSED: buy spend {} lamports exceeds --max-sol cap {} lamports ({:.6} SOL)", spend, cap_lamports, max_sol); }
-    let fill_cap = arg("--fill-cap").and_then(|s| s.parse::<f64>().ok());
-    let send_slot = match send::tpu::SLOT.load(Ordering::Relaxed) { 0 => rpc.slot().await.unwrap_or(0), s => s };
-    let (buy, bal_start) = tokio::join!(poll_land(rpc, p.meta.sig.clone(), p.sig, send_slot, land_timeout), async { native_balance(rpc, user).await.unwrap_or(0) });
-    jito_results(&p.fan, &p.meta);
-    round_trip_tail(key, user, rpc, path, &p.launch, buy, bal_start, spend, fill_cap, land_timeout, Some(p.slot)).await
-}
-
-/// the shared exit after the buy's land poll: fill-cap revert check, token balance, exit ladder / hold + sell, report
-#[allow(clippy::too_many_arguments)]
-async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, launch: &Launch, buy: Landed, bal_start: u64, spend: u64,
-    fill_cap: Option<f64>, land_timeout: Duration, create_slot: Option<u64>) -> Result<()> {
-    let mint = launch.mint;
     match buy.land_slot {
         Some(land) => eprintln!("  BUY  sig={} send_slot={} land_slot={} delta={} ok={}", buy.sig, buy.send_slot, land, land as i64 - buy.send_slot as i64, buy.ok),
         None => bail!("BUY did not land within {:?} (sig {}) — aborting round-trip, no sell attempted", land_timeout, buy.sig),
@@ -2830,527 +2701,5 @@ mod lat {
         }
         for l in paths.summary() { println!("  {l}"); }
         Ok(())
-    }
-}
-
-// ================================================================================================================
-// FAST (2026-10-19): --fast-send, the sub-100 µs fire path (all default off; no flag = the LAT behaviour above).
-//  * prepare at CREATE time (before the race gate decides): route, tips, blockhash, the template-patched message,
-//    signature, and every path's framed request; the decision then only writes.
-//  * fire from the event-loop thread itself: Jito (gRPC, async) is spawned first, then LandX UDP and every HTTP path is
-//    written with one syscall on our own keep-alive connection (arbx::fast::FastConn). A path whose fast connection is
-//    down, or that has no fast form, goes through the old async send (lat::send_one) as before.
-//  * --busy-poll: the event loop runs on its own thread (block_in_place + Handle::block_on) and spins on the feed's
-//    crossbeam channel (no bridge thread, no tokio wake-up); --pin-core N pins it.
-//  * --lat-trace FILE: one JSON line per prepared create ("prep") and per fire ("fire") with monotonic ns stamps.
-//  * --fast-verify: every fast-built message is compared with the full compile (same tips, blockhash, min_out).
-//  * --fast-bench N: zero-network microbenchmark of the build stages (fast vs the old build), then exit.
-// Junk mode (--junk-fanout): the SAME path code writes the signed tx with its signature count set to 0 (undecodable as
-// a transaction: zero signatures can never pass sanitize), so the providers parse the real-sized request and reject it.
-// ================================================================================================================
-mod fastfire {
-    use super::*;
-    use arbx::config::SendKind;
-    use arbx::fast::{self, Ack, FastConn, FastH2, Template};
-    use ed25519_dalek::Signer;
-    use std::collections::HashMap;
-    use std::io::Write as _;
-    use std::sync::atomic::AtomicU64;
-    use std::sync::{Mutex, OnceLock};
-
-    pub enum Kind { Http { conn: Arc<FastConn>, json: bool }, Udp, Jito, JitoH2 { conn: Arc<FastH2>, jito: Arc<send::jito::Jito> }, Slow }
-    /// jito-h2 fires: tag -> tx signature (the result stream joins bundles by signature)
-    static TAGSIG: Mutex<Option<HashMap<u64, String>>> = Mutex::new(None);
-    pub struct Fp { pub path: Arc<send::Path>, pub kind: Kind }
-
-    pub struct Fast {
-        key: SigningKey,
-        user: Pk,
-        main: Arc<send::Path>,
-        pub fps: Vec<Fp>,
-        templates: Mutex<HashMap<Vec<u64>, Option<Arc<Template>>>>,
-        handle: tokio::runtime::Handle,
-        pub junk: bool,
-        verify: bool,
-        trace: Option<Mutex<std::io::BufWriter<std::fs::File>>>,
-        udp_copies: u32,
-        next_id: AtomicU64,
-        pub verified: AtomicU64,
-        pub mismatched: AtomicU64,
-        presign: Option<Arc<fast::Presigner>>,
-        fast_derive: bool,
-    }
-    pub static FAST: OnceLock<Fast> = OnceLock::new();
-
-    pub fn get() -> Option<&'static Fast> { FAST.get() }
-
-    /// the event loop's held log lines go to this thread (one buffered write per line), never a stderr write on the loop
-    static LOGQ: OnceLock<crossbeam_channel::Sender<String>> = OnceLock::new();
-    pub fn log_line(l: String) {
-        let q = LOGQ.get_or_init(|| {
-            let (tx, rx) = crossbeam_channel::unbounded::<String>();
-            std::thread::Builder::new().name("fast-log".into()).spawn(move || {
-                let mut e = std::io::BufWriter::with_capacity(1 << 16, std::io::stderr());
-                for l in rx.iter() { let _ = writeln!(e, "{l}"); if rx.is_empty() { let _ = e.flush(); } }
-            }).expect("log thread");
-            tx
-        });
-        if let Err(e) = q.send(l) { eprintln!("{}", e.0); }
-    }
-
-    fn json_kind(k: SendKind) -> bool {
-        matches!(k, SendKind::Helius | SendKind::Shyft | SendKind::Rpc | SendKind::Nozomi | SendKind::ZeroSlot | SendKind::Falcon | SendKind::Everstake | SendKind::JupiterTx)
-    }
-    fn bin_kind(k: SendKind) -> bool { matches!(k, SendKind::Haan | SendKind::Bolt | SendKind::Iris | SendKind::Lunar | SendKind::NodeOne | SendKind::BlockRazor | SendKind::Landx) }
-
-    pub fn init(key: &SigningKey, user: Pk, paths: &Arc<send::Paths>, main: &Arc<send::Path>, junk: bool, stop: Arc<AtomicBool>) -> Result<()> {
-        let (atx, arx) = crossbeam_channel::unbounded::<Ack>();
-        let mut fps = Vec::new();
-        for p in &paths.list {
-            let kind = if p.kind == SendKind::JitoBundle && p.jito.is_some() && has("--jito-h2") {
-                    match FastH2::start(&p.name, p.fast_url(), atx.clone(), stop.clone()) {
-                        Ok(c) => Kind::JitoH2 { conn: c, jito: p.jito.clone().unwrap() },
-                        Err(e) => { eprintln!("FAST: {} stays on tonic: {e}", p.name); Kind::Jito }
-                    }
-                }
-                else if p.kind == SendKind::JitoBundle && p.jito.is_some() { Kind::Jito }
-                else if p.kind == SendKind::Landx && p.fast_udp_ok() { Kind::Udp }
-                else if (json_kind(p.kind) || bin_kind(p.kind)) && !p.fast_preflight() {
-                    let json = json_kind(p.kind);
-                    match FastConn::start(&p.name, p.fast_url(), if json { "application/json" } else { "application/octet-stream" }, &p.fast_headers(), p.fast_ping(), atx.clone(), stop.clone()) {
-                        Ok(c) => Kind::Http { conn: c, json },
-                        Err(e) => { eprintln!("FAST: {} stays on the async send: {}", p.name, e.split(": url").next().unwrap_or("")); Kind::Slow }
-                    }
-                } else { Kind::Slow };
-            eprintln!("FAST: path {:14} -> {}", p.name, match &kind { Kind::Http { json, .. } => if *json { "own HTTP/1.1 conn (json)" } else { "own HTTP/1.1 conn (binary)" }, Kind::Udp => "UDP from the hot thread", Kind::Jito => "gRPC (spawned first)", Kind::JitoH2 { .. } => "own raw HTTP/2 gRPC conn", Kind::Slow => "async send (unchanged)" });
-            fps.push(Fp { path: p.clone(), kind });
-        }
-        // the ack logger: FAST-ACK lines + the send log
-        std::thread::Builder::new().name("fast-acks".into()).spawn(move || {
-            for a in arx {
-                let ms = a.t_ack.saturating_sub(a.t_write) as f64 / 1e6;
-                eprintln!("  FAST-ACK tag={} path={} ack_ms={ms:.3} status={:?} reply={}", a.tag, a.path, a.status, a.body.chars().take(100).collect::<String>());
-                // a jito-h2 acceptance: hand the bundle id to the Jito client (results join by signature)
-                if a.status == Some(200) {
-                    let sig = TAGSIG.lock().unwrap().as_mut().and_then(|m| m.remove(&a.tag));
-                    if let (Some(sig), Some(f)) = (sig, get()) {
-                        for x in &f.fps { if let Kind::JitoH2 { jito, conn } = &x.kind { if conn.name == a.path { jito.note_bundle(&sig, &a.body); } } }
-                    }
-                }
-                lat::log_json(serde_json::json!({ "ev": "fast_ack", "t_ns": arbx::feeds::clock::now_ns(), "tag": a.tag, "path": a.path, "ack_ms": ms, "status": a.status, "reply": a.body }));
-            }
-        })?;
-        let trace = match arg("--lat-trace") {
-            Some(f) => Some(Mutex::new(std::io::BufWriter::new(std::fs::OpenOptions::new().create(true).append(true).open(&f).with_context(|| format!("--lat-trace {f}"))?))),
-            None => None,
-        };
-        // self-check: our JSON body is byte-identical to the old serde_json body
-        {
-            use base64::Engine as _;
-            let raw: Vec<u8> = (0..1042u32).map(|i| (i * 131 + 7) as u8).collect();
-            let old = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
-                "params": [base64::engine::general_purpose::STANDARD.encode(&raw), { "encoding": "base64", "skipPreflight": true, "maxRetries": 0 }] });
-            let mut b = Vec::new();
-            fast::json_send_body(&raw, &mut b);
-            let same = serde_json::to_vec(&old).map(|o| o == b).unwrap_or(false);
-            eprintln!("FAST: JSON body byte-identical to the old serde_json body: {same}");
-            if !same { bail!("FAST: the JSON body differs from the old one"); }
-        }
-        let udp_copies = std::env::var("LANDX_UDP_COPIES").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(2).clamp(1, 4);
-        // --fast-presign: pre-computed nonces (self-test: 300 signatures, each verify_strict-ed)
-        let presign = if has("--fast-presign") {
-            let ps = fast::Presigner::new(key);
-            ps.start(300, stop.clone());
-            let vk = key.verifying_key();
-            let mut bad = 0;
-            for i in 0..300u32 {
-                let m: Vec<u8> = (0..900u32).map(|j| (j * 31 + i) as u8).collect();
-                match ps.sign(&m) { Some(sg) => if vk.verify_strict(&m, &ed25519_dalek::Signature::from_bytes(&sg)).is_err() { bad += 1; }, None => bad += 1 }
-            }
-            eprintln!("FAST: presign self-test: 300 signatures, {bad} failed verify_strict");
-            if bad > 0 { bail!("FAST: presign self-test failed"); }
-            Some(ps)
-        } else { None };
-        let f = Fast { key: key.clone(), user, main: main.clone(), fps, templates: Mutex::new(HashMap::new()), handle: tokio::runtime::Handle::current(), junk,
-            verify: has("--fast-verify"), trace, udp_copies, next_id: AtomicU64::new(1), verified: AtomicU64::new(0), mismatched: AtomicU64::new(0), presign,
-            fast_derive: if has("--fast-derive") {
-                let (bad, bad_ata) = fast::derive_selftest(200_000, 3_000);
-                eprintln!("FAST: fast-derive self-test: on-curve disagreements with dalek {bad}/200012, ATA mismatches {bad_ata}/3000");
-                if bad > 0 || bad_ata > 0 { bail!("FAST: fast-derive self-test failed"); }
-                true
-            } else { false },
-        };
-        if FAST.set(f).is_err() { bail!("fast path initialised twice"); }
-        // wait (<= 6 s) for the fast connections to come up
-        let t = Instant::now();
-        while t.elapsed() < Duration::from_secs(6) {
-            if get().unwrap().fps.iter().all(|f| match &f.kind { Kind::Http { conn, .. } => conn.up.load(Ordering::Relaxed), Kind::JitoH2 { conn, .. } => conn.up.load(Ordering::Relaxed), _ => true }) { break; }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        for l in get().unwrap().summary() { eprintln!("FAST: {l}"); }
-        Ok(())
-    }
-
-    /// one prepared buy
-    pub struct Prep {
-        pub id: u64,
-        pub launch: Launch,
-        pub slot: u64,
-        pub fan: Vec<Arc<send::Path>>,
-        pub fpi: Vec<usize>,
-        pub meta: lat::Meta,
-        pub raw: Vec<u8>,
-        pub sig: [u8; 64],
-        pub payload: Arc<Vec<u8>>,
-        /// per fan path: the framed request (HTTP: whole request; jito-h2: HEADERS+DATA and the header block length)
-        pub reqs: Vec<Option<(Vec<u8>, usize)>>,
-        pub tips: Vec<(Pk, u64)>,
-        /// jito-h2: "Bearer <access token>" at prepare time
-        pub jtok: Option<String>,
-        pub bh: [u8; 32],
-        pub min_out: u64,
-        pub fast_built: bool,
-        /// mono ns: start, routed, derived, patched (or full compile), signed, encoded
-        pub st: [u64; 6],
-        pub made: Instant,
-        /// create-side stamps: (rx realtime ns, decoded realtime ns, dequeued realtime ns, dequeued mono, detected mono, gated mono)
-        pub cr: [u64; 6],
-    }
-
-    /// one fire's writes: (path, kind, t0, t1, status)
-    pub struct FireRec { pub t_fire0: u64, pub t_end: u64, pub w: Vec<(String, &'static str, u64, u64, &'static str)> }
-
-    impl Fast {
-        fn template(&self, tips: &[(Pk, u64)]) -> Option<Arc<Template>> {
-            let k: Vec<u64> = tips.iter().map(|t| t.1).collect();
-            if let Some(t) = self.templates.lock().unwrap().get(&k) { return t.clone(); }
-            let t = self.make_template(tips).map_err(|e| eprintln!("FAST: no template for tips {k:?}: {e} (full compile for this shape)")).ok().map(Arc::new);
-            self.templates.lock().unwrap().insert(k, t.clone());
-            t
-        }
-
-        fn make_template(&self, tips: &[(Pk, u64)]) -> std::result::Result<Template, String> {
-            let user = self.user;
-            let probe = Launch { mint: fast::probe_var(0), bonding_curve: fast::probe_var(1), assoc_bonding_curve: fast::probe_var(2), creator: fast::probe_var(9),
-                dev_buy_lamports: 0, is_create_v2: true, is_mayhem: false, is_cashback: false, creator_fee_bps: 0, is_holder_reward: false, buyback_fee_recipient: fast::probe_var(5) };
-            let (mut ixs, _) = build_buy(user, &probe, None, 2_000_000, fast::PROBE_MIN_OUT);
-            let (p0, p1) = (probe.mint, probe.bonding_curve);
-            let map = [(pda::ata(&p1, &p0, &pda::TOKEN_2022), fast::probe_var(2)), (pda::ata(&p1, &snipe_build::WSOL, &pda::TOKEN_PROGRAM), fast::probe_var(3)),
-                (pda::ata(&user, &p0, &pda::TOKEN_2022), fast::probe_var(4))];
-            for ix in ixs.iter_mut() { for a in ix.accounts.iter_mut() { if let Some((_, to)) = map.iter().find(|(from, _)| *from == a.key) { a.key = *to; } } }
-            let mut v: Vec<build::Ix> = tips.iter().enumerate().map(|(i, (_, l))| build::transfer_ix(user, fast::probe_tip(i), *l)).collect();
-            v.extend(ixs);
-            if tips.len() > 2 { lat::bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 2)); }
-            let msg = build::compile_v0(user, &v, fast::PROBE_BH, &[], &[])?;
-            if 1 + 64 + msg.bytes.len() > 1232 { return Err(format!("{} bytes > 1232", 1 + 64 + msg.bytes.len())); }
-            Template::from_probe_msg(msg.bytes, tips.len())
-        }
-
-        /// the full compile of the same buy (the reference the fast build must equal byte for byte)
-        fn reference(&self, launch: &Launch, tips: &[(Pk, u64)], bh: [u8; 32], min_out: u64) -> Option<Vec<u8>> {
-            let (ixs, _) = build_buy(self.user, launch, None, 2_000_000, min_out);
-            let mut v: Vec<build::Ix> = tips.iter().map(|(t, l)| build::transfer_ix(self.user, *t, *l)).collect();
-            v.extend(ixs);
-            if tips.len() > 2 { lat::bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 2)); }
-            build::compile_v0(self.user, &v, bh, &[], &[]).ok().map(|m| m.bytes)
-        }
-
-        /// build + sign + frame everything for one launch (create time)
-        pub fn prepare(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6]) -> Result<Prep> {
-            let t0 = fast::mono_ns();
-            let (mut fan, mut meta) = lat::buy_paths(&self.main, ALSO_PATH.get(), Some(slot));
-            let mut tips = lat::tips_for(&fan);
-            let bh = BLOCKHASH_CACHE.lock().unwrap().map(|(h, _)| h).unwrap_or([0u8; 32]);
-            let t1 = fast::mono_ns();
-            let tpl = self.template(&tips);
-            let (mint, bc) = (launch.mint, launch.bonding_curve);
-            let ata = |o: &Pk, m: &Pk, t: &Pk| if self.fast_derive { fast::ata_fast(o, m, t) } else { pda::ata(o, m, t) };
-            let abc = if launch.is_create_v2 { launch.assoc_bonding_curve } else { ata(&bc, &mint, &pda::TOKEN_2022) };
-            let vars: fast::VarKeys = [mint, bc, abc, ata(&bc, &snipe_build::WSOL, &pda::TOKEN_PROGRAM), ata(&self.user, &mint, &pda::TOKEN_2022), launch.buyback_fee_recipient];
-            let t2 = fast::mono_ns();
-            let tip_keys: Vec<Pk> = tips.iter().map(|t| t.0).collect();
-            let mut msg: Vec<u8> = Vec::with_capacity(1232);
-            let fast_built = tpl.as_ref().and_then(|t| t.patch(&mut msg, &vars, &tip_keys, &bh, min_out)).is_some();
-            let (raw, sig, t3) = if fast_built {
-                let t3 = fast::mono_ns();
-                let sig = self.presign.as_ref().and_then(|ps| ps.sign(&msg)).unwrap_or_else(|| self.key.sign(&msg).to_bytes());
-                let mut raw = Vec::with_capacity(65 + msg.len());
-                raw.push(1); raw.extend_from_slice(&sig); raw.extend_from_slice(&msg);
-                (raw, sig, t3)
-            } else {
-                let (ixs, _) = build_buy(self.user, launch, None, 2_000_000, min_out);
-                let (raw, t) = lat::build_tx(&self.key, self.user, &ixs, &mut fan, bh)?;
-                tips = t;
-                let mut sig = [0u8; 64]; sig.copy_from_slice(&raw[1..65]);
-                (raw, sig, t2)
-            };
-            let t4 = fast::mono_ns();
-            let mut payload = raw.clone();
-            if self.junk { payload[0] = 0; } // zero signatures: never a valid transaction
-            let mut fpi = Vec::with_capacity(fan.len());
-            let mut reqs = Vec::with_capacity(fan.len());
-            let mut body = Vec::with_capacity(2048);
-            let mut jtok: Option<String> = None;
-            for p in &fan {
-                let i = self.fps.iter().position(|f| f.path.name == p.name).unwrap_or(usize::MAX);
-                fpi.push(i);
-                reqs.push(match self.fps.get(i).map(|f| &f.kind) {
-                    Some(Kind::Http { conn, json }) => {
-                        let mut req = Vec::with_capacity(2400);
-                        if *json { fast::json_send_body(&payload, &mut body); conn.frame(&body, &mut req); } else { conn.frame(&payload, &mut req); }
-                        Some((req, 0))
-                    }
-                    Some(Kind::JitoH2 { conn, jito }) => {
-                        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-                        let _ = conn;
-                        jito.cached_token(now_ms).map(|tok| {
-                            use prost::Message as _;
-                            let j = send::jito::SendBundleRequest { bundle: Some(send::jito::Bundle { packets: vec![send::jito::Packet { data: payload.clone(),
-                                meta: Some(send::jito::Meta { size: payload.len() as u64, addr: "0.0.0.0".into(), port: 0, sender_stake: 0 }) }] }) };
-                            jtok = Some(format!("Bearer {tok}"));
-                            (j.encode_to_vec(), 0)
-                        })
-                    }
-                    _ => None,
-                });
-            }
-            let t5 = fast::mono_ns();
-            // warm the kernel send path of every socket this fire may write (zero-length sends: nothing goes out; not in prep_ns)
-            for &i in &fpi { match self.fps.get(i).map(|f| &f.kind) { Some(Kind::Http { conn, .. }) => conn.prewarm(), Some(Kind::JitoH2 { conn, .. }) => conn.prewarm(), _ => {} } }
-            meta.sig = if self.junk { "junk".into() } else { bs58::encode(&sig).into_string() };
-            meta.bytes = raw.len();
-            meta.tips = tips.iter().map(|t| t.1).sum();
-            Ok(Prep { id: self.next_id.fetch_add(1, Ordering::Relaxed), launch: launch.clone(), slot, fan, fpi, meta, raw, sig, payload: Arc::new(payload), reqs, tips, jtok, bh, min_out,
-                fast_built, st: [t0, t1, t2, t3, t4, t5], made: Instant::now(), cr })
-        }
-
-        /// HOT PATH: write every path (the decision has been taken). Never blocks on the network.
-        pub fn fire(&self, p: &Prep) -> FireRec {
-            let t_fire0 = fast::mono_ns();
-            let mut w: Vec<(String, &'static str, u64, u64, &'static str)> = Vec::with_capacity(p.fan.len());
-            // 1. Jito first: its write happens on the runtime, so it overlaps with the writes below
-            for (i, path) in p.fan.iter().enumerate() {
-                let Some(Kind::Jito) = self.fps.get(p.fpi[i]).map(|f| &f.kind) else { continue };
-                let t = fast::mono_ns();
-                if !path.fast_budget() { w.push((path.name.clone(), "jito", t, t, "over_rate")); continue; }
-                let (path2, pl, sig, tag) = (path.clone(), p.payload.clone(), p.meta.sig.clone(), p.id);
-                self.handle.spawn(async move {
-                    let t = fast::mono_ns();
-                    let r = match &path2.jito { Some(j) => j.send_bundle(&[&pl[..]], &sig, None).await.map_err(|e| e.to_string()), None => Err("no block engine".into()) };
-                    let ms = fast::mono_ns().saturating_sub(t) as f64 / 1e6;
-                    let (ok, reply) = match &r { Ok(id) => (true, id.clone()), Err(e) => (false, e.chars().take(120).collect()) };
-                    eprintln!("  FAST-ACK tag={tag} path={} ack_ms={ms:.3} ok={ok} reply={reply}", path2.name);
-                    lat::log_json(serde_json::json!({ "ev": "fast_ack", "t_ns": arbx::feeds::clock::now_ns(), "tag": tag, "path": path2.name, "ack_ms": ms, "ok": ok, "reply": reply }));
-                });
-                w.push((path.name.clone(), "jito", t, fast::mono_ns(), "spawned"));
-            }
-            // 2. UDP + 3. our HTTP connections, written from this thread
-            let mut ubuf: Vec<u8> = Vec::with_capacity(1300);
-            for pass in 0..3 {
-                for (i, path) in p.fan.iter().enumerate() {
-                    match (pass, self.fps.get(p.fpi[i]).map(|f| &f.kind)) {
-                        (1, Some(Kind::JitoH2 { conn, .. })) => {
-                            let t = fast::mono_ns();
-                            if !path.fast_budget() { w.push((path.name.clone(), "jito-h2", t, t, "over_rate")); continue; }
-                            let r = match (&p.reqs[i], &p.jtok) { (Some((msg, _)), Some(tok)) => conn.write_call_idx("/searcher.SearcherService/SendBundle", tok, msg, p.id), _ => Err("no token".into()) };
-                            match r {
-                                Ok((a, b)) => w.push((path.name.clone(), "jito-h2", a, b, "written")),
-                                Err(_) => { self.slow(path, p); w.push((path.name.clone(), "jito-h2", t, fast::mono_ns(), "conn_down_async")); }
-                            }
-                        }
-                        (0, Some(Kind::Udp)) => {
-                            let t = fast::mono_ns();
-                            if !path.fast_budget() { w.push((path.name.clone(), "udp", t, t, "over_rate")); continue; }
-                            let r = path.fast_udp(&p.payload, &mut ubuf, 1);
-                            w.push((path.name.clone(), "udp", t, fast::mono_ns(), match r { Some(Ok(())) => "written", _ => "udp_error" }));
-                        }
-                        (2, Some(Kind::Http { conn, .. })) => {
-                            let t = fast::mono_ns();
-                            if !path.fast_budget() { w.push((path.name.clone(), "http", t, t, "over_rate")); continue; }
-                            match conn.write_req(p.reqs[i].as_ref().map(|r| &r.0[..]).unwrap_or(&[]), p.id) {
-                                Ok((a, b)) => w.push((path.name.clone(), "http", a, b, "written")),
-                                Err(_) => { self.slow(path, p); w.push((path.name.clone(), "http", t, fast::mono_ns(), "conn_down_async")); }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            // the extra LandX copies (redundancy against a dropped datagram) after every first write
-            if self.udp_copies > 1 {
-                for (i, path) in p.fan.iter().enumerate() {
-                    if let Some(Kind::Udp) = self.fps.get(p.fpi[i]).map(|f| &f.kind) { let _ = path.fast_udp(&p.payload, &mut ubuf, self.udp_copies - 1); }
-                }
-            }
-            // 4. paths without a fast form: the old async send
-            for (i, path) in p.fan.iter().enumerate() {
-                if matches!(self.fps.get(p.fpi[i]).map(|f| &f.kind), Some(Kind::Slow) | None) {
-                    let t = fast::mono_ns();
-                    self.slow(path, p);
-                    w.push((path.name.clone(), "async", t, fast::mono_ns(), "spawned"));
-                }
-            }
-            let t_end = fast::mono_ns();
-            if p.fan.iter().enumerate().any(|(i, _)| matches!(self.fps.get(p.fpi[i]).map(|f| &f.kind), Some(Kind::JitoH2 { .. }))) {
-                let mut g = TAGSIG.lock().unwrap();
-                let m = g.get_or_insert_with(HashMap::new);
-                if m.len() > 1000 { m.clear(); }
-                m.insert(p.id, p.meta.sig.clone());
-            }
-            FireRec { t_fire0, t_end, w }
-        }
-
-        fn slow(&self, path: &Arc<send::Path>, p: &Prep) {
-            let (path, pl, meta, junk, tag) = (path.clone(), p.payload.clone(), p.meta.clone(), self.junk, p.id);
-            self.handle.spawn(async move {
-                if junk {
-                    let (ms, answered, reply) = path.ack_probe().await;
-                    eprintln!("  FAST-ACK tag={tag} path={} ack_ms={ms:.3} answered={answered} reply={} (async junk)", path.name, reply.chars().take(100).collect::<String>());
-                } else {
-                    let _ = lat::send_one(&path, &pl, Instant::now(), &meta).await;
-                }
-            });
-        }
-
-        /// after the fire (or for a create that never fired): verify + trace, off the hot path
-        pub fn trace_prep(&self, p: &Prep) {
-            let ok = if self.verify && p.fast_built {
-                let r = self.reference(&p.launch, &p.tips, p.bh, p.min_out);
-                let sig_ok = self.key.verifying_key().verify_strict(&p.raw[65..], &ed25519_dalek::Signature::from_bytes(&p.sig)).is_ok();
-                let same = r.as_deref() == Some(&p.raw[65..]) && sig_ok;
-                if same { self.verified.fetch_add(1, Ordering::Relaxed); } else {
-                    self.mismatched.fetch_add(1, Ordering::Relaxed);
-                    eprintln!("  FAST-VERIFY MISMATCH mint={} (fast-built message != full compile)", b58(&p.launch.mint));
-                }
-                Some(same)
-            } else { None };
-            self.trace_line(serde_json::json!({ "ev": "prep", "id": p.id, "mint": b58(&p.launch.mint), "slot": p.slot, "route": p.meta.route, "paths": p.fan.len(),
-                "tips": p.tips.len(), "bytes": p.raw.len(), "fast_built": p.fast_built, "verify": ok,
-                "route_ns": p.st[1] - p.st[0], "derive_ns": p.st[2] - p.st[1], "patch_ns": p.st[3].saturating_sub(p.st[2]), "sign_ns": p.st[4] - p.st[3],
-                "encode_ns": p.st[5] - p.st[4], "prep_ns": p.st[5] - p.st[0],
-                "rx_to_dec_us": (p.cr[1] as i64 - p.cr[0] as i64) / 1000, "dec_to_deq_us": (p.cr[2] as i64 - p.cr[1] as i64) / 1000,
-                "deq_to_detect_ns": p.cr[4].saturating_sub(p.cr[3]), "detect_to_gated_ns": p.cr[5].saturating_sub(p.cr[4]), "gated_to_prep_ns": p.st[0].saturating_sub(p.cr[5]) }));
-        }
-
-        /// ev: the deciding event's (rx realtime, decoded realtime, dequeued realtime, dequeued mono); t_dec: decided (mono)
-        pub fn trace_fire(&self, p: &Prep, r: &FireRec, ev: [u64; 4], t_dec: u64) {
-            let first = r.w.iter().filter(|x| x.4 == "written").map(|x| x.3).min().unwrap_or(0);
-            let ws: Vec<serde_json::Value> = r.w.iter().map(|x| serde_json::json!({ "path": x.0, "kind": x.1, "start_ns": x.2.saturating_sub(r.t_fire0),
-                "done_ns": x.3.saturating_sub(r.t_fire0), "from_decide_ns": x.3.saturating_sub(t_dec), "from_create_deq_ns": x.3.saturating_sub(p.cr[3]), "status": x.4 })).collect();
-            self.trace_line(serde_json::json!({ "ev": "fire", "id": p.id, "mint": b58(&p.launch.mint), "slot": p.slot, "route": p.meta.route, "junk": self.junk,
-                "fast_built": p.fast_built, "prep_age_us": p.made.elapsed().as_micros() as u64,
-                "ev_rx_to_deq_us": (ev[2] as i64 - ev[0] as i64) / 1000, "ev_dec_to_deq_us": (ev[2] as i64 - ev[1] as i64) / 1000,
-                "ev_deq_to_decide_ns": t_dec.saturating_sub(ev[3]), "decide_to_fire_ns": r.t_fire0.saturating_sub(t_dec),
-                "decide_to_first_write_ns": if first > 0 { first.saturating_sub(t_dec) } else { 0 }, "fire_total_ns": r.t_end - r.t_fire0,
-                "create_deq_to_decide_us": t_dec.saturating_sub(p.cr[3]) / 1000, "t_fire0_mono": r.t_fire0, "t_decide_mono": t_dec, "writes": ws }));
-        }
-
-        fn trace_line(&self, v: serde_json::Value) {
-            if let Some(t) = &self.trace { if let Ok(mut f) = t.lock() { let _ = writeln!(f, "{v}"); let _ = f.flush(); } }
-        }
-
-        pub fn summary(&self) -> Vec<String> {
-            let mut v: Vec<String> = self.fps.iter().filter_map(|f| match &f.kind { Kind::Http { conn, .. } => Some(conn.summary()), Kind::JitoH2 { conn, .. } => Some(conn.summary()), _ => None }).collect();
-            v.push(format!("fast-verify: {} identical, {} MISMATCHED", self.verified.load(Ordering::Relaxed), self.mismatched.load(Ordering::Relaxed)));
-            v
-        }
-    }
-
-    /// spin on the feed channel until an event or `wait` (the --busy-poll receive). Err: the feed closed.
-    #[inline]
-    pub fn spin_recv(rx: &crossbeam_channel::Receiver<arbx::feeds::Event>, wait: Duration) -> std::result::Result<Option<arbx::feeds::Event>, ()> {
-        let dl = Instant::now() + wait;
-        let mut n = 0u32;
-        loop {
-            match rx.try_recv() {
-                Ok(e) => return Ok(Some(e)),
-                Err(crossbeam_channel::TryRecvError::Disconnected) => return Err(()),
-                Err(crossbeam_channel::TryRecvError::Empty) => {}
-            }
-            n = n.wrapping_add(1);
-            if n % 64 == 0 && Instant::now() >= dl { return Ok(None); }
-            std::hint::spin_loop();
-        }
-    }
-
-    /// --fast-probe N (with --junk-fanout): junk fires of a synthetic launch through every fast path, 1.5 s apart
-    pub async fn probe(n: usize) {
-        let f = get().unwrap();
-        for i in 0..n {
-            let mut m = [0u8; 32];
-            m[..8].copy_from_slice(&(0x9000_0000u64 + i as u64).to_le_bytes());
-            let mut l = snipe_build::launch_from_target(m, f.user);
-            l.dev_buy_lamports = 1_000_000_000;
-            let p = match f.prepare(&l, 0, 1, [0; 6]) { Ok(p) => p, Err(e) => { eprintln!("probe prepare: {e:#}"); return; } };
-            let t_dec = fast::mono_ns();
-            let rec = f.fire(&p);
-            eprintln!("  FAST-PROBE tag={} paths={} writes: {}", p.id, p.fan.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(","),
-                rec.w.iter().map(|x| format!("{}={}@{:.1}us", x.0, x.4, x.3.saturating_sub(t_dec) as f64 / 1e3)).collect::<Vec<_>>().join(" "));
-            f.trace_fire(&p, &rec, [0; 4], t_dec);
-            tokio::time::sleep(Duration::from_millis(1500)).await;
-        }
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        for l in f.summary() { eprintln!("FAST: {l}"); }
-    }
-
-    /// --fast-bench N: zero network. The build stages of the fast path vs the old build (build_buy + lat::build_tx), on
-    /// a synthetic launch per iteration (fresh mint each time: no derivation cache can help), byte-compared.
-    pub fn bench(n: usize) {
-        let f = get().unwrap();
-        let mut old_ns: Vec<u64> = Vec::new();
-        let mut st: [Vec<u64>; 6] = Default::default();
-        let (mut same, mut diff) = (0u64, 0u64);
-        for i in 0..n {
-            let mut m = [0u8; 32];
-            m[..8].copy_from_slice(&(0x5eed_0000_0000u64 + i as u64).to_le_bytes());
-            m[31] = 0x77;
-            let mut l = snipe_build::launch_from_target(m, f.user);
-            l.dev_buy_lamports = 1_000_000_000;
-            let p = match f.prepare(&l, 0, 12_345_678, [0; 6]) { Ok(p) => p, Err(e) => { eprintln!("bench prepare: {e:#}"); return; } };
-            for k in 0..5 { st[k].push(p.st[k + 1] - p.st[k]); }
-            st[5].push(p.st[5] - p.st[0]);
-            // the old path for the same launch and tips
-            let t = fast::mono_ns();
-            let (ixs, _) = build_buy(f.user, &l, None, 2_000_000, 12_345_678);
-            let mut fan = p.fan.clone();
-            let _ = lat::build_tx(&f.key, f.user, &ixs, &mut fan, p.bh);
-            old_ns.push(fast::mono_ns() - t);
-            if p.fast_built { if f.reference(&l, &p.tips, p.bh, p.min_out).as_deref() == Some(&p.raw[65..]) { same += 1 } else { diff += 1 } }
-        }
-        let q = |v: &mut Vec<u64>, x: f64| { v.sort_unstable(); v[((v.len() - 1) as f64 * x).round() as usize] as f64 / 1e3 };
-        println!("\n========== FAST-BENCH (n={n}, µs p50 / p99) ==========");
-        for (k, name) in ["route+tips+blockhash", "derive 2 ATAs", "template patch", "ed25519 sign", "encode+frame all paths", "PREPARE TOTAL"].iter().enumerate() {
-            println!("{name:24} {:8.2} / {:8.2}", q(&mut st[k], 0.5), q(&mut st[k], 0.99));
-        }
-        println!("{:24} {:8.2} / {:8.2}", "OLD build_buy+build_tx", q(&mut old_ns, 0.5), q(&mut old_ns, 0.99));
-        println!("byte check vs full compile: {same} identical, {diff} different");
-        // the derivation and the signature alone
-        let mut d: Vec<u64> = Vec::new();
-        let mut s: Vec<u64> = Vec::new();
-        let msg = vec![7u8; 900];
-        for i in 0..n {
-            let mut m = [3u8; 32]; m[..8].copy_from_slice(&(i as u64).to_le_bytes());
-            let t = fast::mono_ns(); let _ = pda::ata(&f.user, &m, &pda::TOKEN_2022); d.push(fast::mono_ns() - t);
-            let t = fast::mono_ns(); let _ = f.key.sign(&msg); s.push(fast::mono_ns() - t);
-        }
-        println!("{:24} {:8.2} / {:8.2}", "one ATA derivation", q(&mut d, 0.5), q(&mut d, 0.99));
-        let mut d2: Vec<u64> = Vec::new();
-        for i in 0..n {
-            let mut m = [3u8; 32]; m[..8].copy_from_slice(&(i as u64).to_le_bytes());
-            let t = fast::mono_ns(); let _ = fast::ata_fast(&f.user, &m, &pda::TOKEN_2022); d2.push(fast::mono_ns() - t);
-        }
-        println!("{:24} {:8.2} / {:8.2}", "one ATA derivation FAST", q(&mut d2, 0.5), q(&mut d2, 0.99));
-        println!("{:24} {:8.2} / {:8.2}", "one sign (900 B)", q(&mut s, 0.5), q(&mut s, 0.99));
-        if let Some(ps) = &f.presign {
-            let mut s2: Vec<u64> = Vec::new();
-            let vk = f.key.verifying_key();
-            let mut bad = 0;
-            for _ in 0..n {
-                while ps.pool_len() < 2 { std::thread::sleep(Duration::from_millis(1)); }
-                let t = fast::mono_ns(); let sg = ps.sign(&msg); s2.push(fast::mono_ns() - t);
-                if sg.map(|sg| vk.verify_strict(&msg, &ed25519_dalek::Signature::from_bytes(&sg)).is_err()).unwrap_or(true) { bad += 1; }
-            }
-            println!("{:24} {:8.2} / {:8.2}   ({bad} failed verify_strict)", "presign sign (900 B)", q(&mut s2, 0.5), q(&mut s2, 0.99));
-        }
     }
 }

@@ -70,6 +70,14 @@ pub fn run(s: &Socket, maxpkt: usize, mut stop: impl FnMut() -> bool, mut on_pac
     let mut iovs: Vec<libc::iovec> = bufs.iter_mut()
         .map(|b| libc::iovec { iov_base: b.as_mut_ptr() as *mut libc::c_void, iov_len: maxpkt }).collect();
     let mut hdrs: Vec<libc::mmsghdr> = vec![unsafe { std::mem::zeroed() }; BATCH];
+    // GAP (2026-10-19), opt-in: UDP_PIN_CPU=n pins this receive thread; UDP_BUSY_POLL=1 spins on a non-blocking recvmmsg
+    // instead of sleeping in the kernel (one core busy while the feed runs; measured in /root/gap/NOTES.md)
+    if let Some(cpu) = std::env::var("UDP_PIN_CPU").ok().and_then(|v| v.parse::<usize>().ok()) {
+        // SAFETY: plain sched_setaffinity on the calling thread
+        unsafe { let mut set: libc::cpu_set_t = std::mem::zeroed(); libc::CPU_SET(cpu, &mut set); libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set); }
+    }
+    let busy = std::env::var("UDP_BUSY_POLL").map(|v| v == "1").unwrap_or(false);
+    let flags = if busy { libc::MSG_DONTWAIT } else { libc::MSG_WAITFORONE };
     loop {
         if stop() { return Ok(()); }
         for i in 0..BATCH {
@@ -84,7 +92,7 @@ pub fn run(s: &Socket, maxpkt: usize, mut stop: impl FnMut() -> bool, mut on_pac
             hdrs[i].msg_len = 0;
         }
         // SAFETY: all pointers above stay valid for the call; the kernel writes at most the given lengths
-        let n = unsafe { libc::recvmmsg(fd, hdrs.as_mut_ptr(), BATCH as u32, libc::MSG_WAITFORONE, std::ptr::null_mut()) };
+        let n = unsafe { libc::recvmmsg(fd, hdrs.as_mut_ptr(), BATCH as u32, flags, std::ptr::null_mut()) };
         if n < 0 {
             let err = std::io::Error::last_os_error();
             match err.raw_os_error() {
