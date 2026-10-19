@@ -379,6 +379,57 @@ fn header(h: &mut HeaderMap, name: &'static str, value: String) -> Result<()> {
 /// How a path is kept warm (Tpu: its own loop keeps the next leaders' connections open)
 enum Ping { Get(String), Health, Tips, None }
 
+/// LAT (2026-10-19): a DNS cache for the send clients. Measured from this box (/root/lat/net_before.jsonl): a cold
+/// getaddrinfo of a provider host costs 3.5-17 ms (helius fra-sender 9.8, astralane 13.9, landx fra3 17.2) because the
+/// providers' TTLs are short and systemd-resolved misses. reqwest resolves on EVERY new connection, so a reconnect on
+/// the hot path (an HTTP/1.1 connection busy with a keep-alive, a server-side close) paid it before TCP+TLS. This
+/// resolver answers from memory at once and refreshes in the background every 60 s (the stale answer is used while it
+/// refreshes; a failed refresh keeps the old one).
+pub struct DnsCache { m: Mutex<rustc_hash::FxHashMap<String, (Vec<std::net::SocketAddr>, Instant)>> }
+
+impl DnsCache {
+    pub fn global() -> Arc<DnsCache> {
+        static G: std::sync::OnceLock<Arc<DnsCache>> = std::sync::OnceLock::new();
+        G.get_or_init(|| Arc::new(DnsCache { m: Mutex::new(Default::default()) })).clone()
+    }
+    async fn lookup(host: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
+        let v: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, 0u16)).await?.collect();
+        if v.is_empty() { return Err(std::io::Error::other("no address")); }
+        Ok(v)
+    }
+    /// resolve now and remember (start-up pre-resolution: the first send never waits on DNS)
+    pub async fn prime(&self, host: &str) -> Option<usize> {
+        let v = Self::lookup(host).await.ok()?;
+        let n = v.len();
+        self.m.lock().unwrap().insert(host.to_string(), (v, Instant::now()));
+        Some(n)
+    }
+}
+
+impl reqwest::dns::Resolve for DnsCache {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        let hit = self.m.lock().unwrap().get(&host).cloned();
+        let me = DnsCache::global();
+        Box::pin(async move {
+            match hit {
+                Some((v, at)) => {
+                    if at.elapsed() > Duration::from_secs(60) {
+                        let h = host.clone();
+                        tokio::spawn(async move { let _ = me.prime(&h).await; });
+                    }
+                    Ok(Box::new(v.into_iter()) as reqwest::dns::Addrs)
+                }
+                None => {
+                    let v = DnsCache::lookup(&host).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+                    me.m.lock().unwrap().insert(host, (v.clone(), Instant::now()));
+                    Ok(Box::new(v.into_iter()) as reqwest::dns::Addrs)
+                }
+            }
+        })
+    }
+}
+
 #[derive(Default)]
 pub struct PathStats {
     pub sent: u64,
@@ -586,8 +637,12 @@ impl Path {
         // the bundle path's queue is the send policy's ([send_policy] queue_ms; PLAN WP-05 item 5)
         let queue_ms = if c.kind == SendKind::JitoBundle { opts.queue_ms } else { c.queue_ms };
         let budget = c.max_per_sec.map(|n| Budget::new(n, Duration::from_millis(queue_ms)));
+        // LAT: the DNS cache (pre-resolved here, so neither the warm-up nor the first send waits on getaddrinfo), and TCP
+        // keepalive probes so a silently dropped connection (NAT/LB idle reap) is noticed before a send needs it
+        let dns = DnsCache::global();
+        if let Some(h) = reqwest::Url::parse(&url).ok().and_then(|u| u.host_str().map(String::from)) { let _ = dns.prime(&h).await; }
         let http = reqwest::Client::builder().tcp_nodelay(true).pool_idle_timeout(Duration::from_secs(85)).pool_max_idle_per_host(4)
-            .timeout(SEND_TIMEOUT).build()?;
+            .tcp_keepalive(Duration::from_secs(15)).dns_resolver(dns).timeout(SEND_TIMEOUT).build()?;
         let jito = if c.kind == SendKind::JitoBundle {
             if !url.starts_with("https://") && !url.starts_with("http://") { bail!("{what}: the block engine url needs a scheme (https://...)"); }
             let key = jito::load_keypair(c.auth_keypair.as_deref().unwrap_or(jito::DEFAULT_AUTH_KEYPAIR))?;
@@ -665,6 +720,31 @@ impl Path {
     /// the rate queue's waiting sends and λ (status `exec.queue_now`, `lambda_now`)
     pub fn queue_now(&self) -> Option<(usize, Option<i64>)> { self.budget.as_ref().map(|b| (b.waiting(), b.lambda())) }
 
+    /// FAST (snipe_engine --fast-send): the URL (may carry a key: never print it), headers, preflight, ping target
+    pub fn fast_url(&self) -> &str { &self.url }
+    pub fn fast_headers(&self) -> Vec<(String, String)> {
+        self.headers.iter().filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string()))).collect()
+    }
+    pub fn fast_preflight(&self) -> bool { self.preflight }
+    pub fn fast_ping(&self) -> Option<(bool, String)> {
+        match &self.ping { Ping::Get(u) => Some((true, u.clone())), Ping::Health => Some((false, self.url.clone())), _ => None }
+    }
+    /// FAST: take a rate slot now (no queue), as `send` does with a zero queue; true when the path has no limit
+    pub fn fast_budget(&self) -> bool { self.budget.as_ref().map_or(true, |b| b.try_now()) }
+    pub fn fast_udp_ok(&self) -> bool { self.udp.is_some() }
+    /// FAST: LandX UDP from the calling thread (non-blocking write, `copies` times): key + raw into `buf`
+    pub fn fast_udp(&self, raw: &[u8], buf: &mut Vec<u8>, copies: u32) -> Option<std::io::Result<()>> {
+        let (sock, key) = self.udp.as_ref()?;
+        buf.clear();
+        buf.extend_from_slice(key);
+        buf.extend_from_slice(raw);
+        let mut r = Ok(());
+        for i in 0..copies.max(1) {
+            if let Err(e) = sock.try_send(buf) { if i == 0 { r = Err(e); } }
+        }
+        Some(r)
+    }
+
     /// Check, wait for the rate budget (the queue: bands, crowding, EV), deliver. Never retried here: a late copy is
     /// worthless. `attempt` joins the bundle's results to it. The reply carries the queue wait
     pub async fn send(&self, raw: &[u8], prio: Prio, attempt: Option<u64>) -> Result<Reply, Refusal> {
@@ -732,7 +812,11 @@ impl Path {
                     p.extend_from_slice(key);
                     p.extend_from_slice(raw);
                     sock.send(&p).await.map_err(|e| refuse(None, format!("{name}: udp: {e}")))?;
-                    Ok(rep(sig.to_string(), None, None, "udp sent".into()))
+                    // LAT: UDP has no ack and no retransmit: a second copy right behind the first (same signature, so the
+                    // relay / leader dedups it) makes a single dropped datagram harmless. LANDX_UDP_COPIES (default 2).
+                    let copies = std::env::var("LANDX_UDP_COPIES").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(2).clamp(1, 4);
+                    for _ in 1..copies { let _ = sock.send(&p).await; }
+                    Ok(rep(sig.to_string(), None, None, format!("udp sent x{copies}")))
                 } else {
                     let resp = self.http.post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
                         .body(raw.to_vec()).send().await.map_err(net)?;
@@ -836,6 +920,27 @@ impl Path {
             Ok(r) => format!("accepted junk?! reply {}", r.sig),
             Err(e) => e.msg,
         }
+    }
+
+    /// LAT ACK PROBE (zero cost): the provider's REAL send handler answering an undecodable 4-byte "transaction" (nothing
+    /// can land, nothing is paid), timed over the warm pooled connection the buys use. jito-bundle: a junk one-packet
+    /// bundle over the searcher gRPC (the block engine refuses it). UDP paths: the datagram write only (no reply).
+    /// Returns (ms, answered, reply). Space calls >= 1.1 s per path: rejected requests count toward Helius' keyless
+    /// 1 req/s and Jito's 1 txn req/s (measured: /root/lat/jito_rl.txt).
+    pub async fn ack_probe(&self) -> (f64, bool, String) {
+        let t = Instant::now();
+        let (answered, msg) = match (self.kind, &self.jito) {
+            (SendKind::JitoBundle, Some(j)) => match j.send_bundle(&[&[1u8, 2, 3, 4][..]], "ackprobe", None).await {
+                Ok(id) => (true, format!("accepted junk?! {id}")),
+                Err(e) => (!matches!(e, jito::BundleError::Other(_)), short(&e.to_string())),
+            },
+            (SendKind::Tpu, _) => (false, "skipped (tpu)".into()),
+            _ => match self.deliver(&[1, 2, 3, 4], "", None).await {
+                Ok(r) => (r.status.is_some(), format!("accepted junk?! {}", short(&r.reply))),
+                Err(e) => (e.answered, short(&e.msg)),
+            },
+        };
+        (t.elapsed().as_secs_f64() * 1e3, answered, msg)
     }
 
     /// one line: counts, send and keep-alive latency (p50/p90, ms)
@@ -985,8 +1090,18 @@ impl Paths {
         }
         let me = self.clone();
         self.rt.spawn(async move {
+            let mut tick: u64 = 0;
             while !stop.load(Ordering::Relaxed) {
+                tick += 1;
                 for p in &me.list {
+                    // LAT: the jito-bundle keep-alive (GetTipAccounts) took one of the bundle path's 2/s rate tokens every
+                    // tick (budget try_now), so a buy right after it could be refused locally. The gRPC channel already sends
+                    // HTTP/2 PINGs every 10 s (feeds::grpc::channel), which is what keeps it warm; the RTT sample is enough
+                    // every 15 ticks (30 s at the 2 s cadence). JITO_KEEPALIVE_TICKS overrides.
+                    if p.kind == SendKind::JitoBundle {
+                        let every_n = std::env::var("JITO_KEEPALIVE_TICKS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(15).max(1);
+                        if tick % every_n != 1 % every_n { continue; }
+                    }
                     let (p, status, me) = (p.clone(), status.clone(), me.clone());
                     tokio::spawn(async move {
                         let t_ns = now_ns();
