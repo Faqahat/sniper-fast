@@ -332,7 +332,7 @@ impl Assembler {
                     continue;
                 }
                 if *hpt == 0 { continue; }
-                let ms = st.cum as f64 / *hpt as f64 * (crate::feeds::entries::SLOT_US.load(std::sync::atomic::Ordering::Relaxed) as f64 / 64_000.0); // DET FIX: real slot length
+                let ms = st.cum as f64 / *hpt as f64 * 6.25;
                 let p = super::entries::Poh { slot, hashes: st.cum, ticks: st.ticks as u32, hpt: *hpt };
                 for (sg, hit) in sigs {
                     let k = u64::from_be_bytes(sg);

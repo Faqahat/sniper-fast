@@ -94,21 +94,9 @@ fn ix_with_disc<'a>(tx: &'a Tx, disc: &[u8; 8]) -> Option<&'a crate::tx::Ix> {
     })
 }
 
-/// Account `pos` of `ix`, resolved over the FULL account list: static keys, then the lookup-table addresses the feed
-/// already resolved (`tx.loaded`: Yellowstone deshred sends them; raw shred/entries feeds do not). DET FIX (2026-10-18):
-/// it used to read static keys only, so a create whose bonding curve sat behind a lookup table was dropped (None) even on
-/// the feed that had resolved it.
 #[inline]
 fn acct(tx: &Tx, ix: &crate::tx::Ix, pos: usize) -> Option<Pk> {
-    key_at(tx, *ix.accounts.get(pos)? as usize)
-}
-
-#[inline]
-fn key_at(tx: &Tx, i: usize) -> Option<Pk> {
-    if let Some(k) = tx.keys.get(i) { return Some(*k); }
-    let (w, r) = tx.loaded.as_ref()?;
-    let j = i - tx.keys.len();
-    w.get(j).or_else(|| r.get(j.checked_sub(w.len())?)).copied()
+    tx.keys.get(*ix.accounts.get(pos)? as usize).copied()
 }
 
 /// Detect a pump.fun launch in a (shred-decoded) transaction. One cheap scan of `tx.ixs`.
@@ -130,9 +118,6 @@ pub fn detect_launch(tx: &Tx) -> Option<Launch> {
     let (is_mayhem, is_cashback, creator_fee_bps, is_holder_reward) = if is_v2 {
         (args.is_mayhem, args.is_cashback, args.creator_fee_bps, args.is_holder_reward)
     } else { (false, false, 0, false) };
-    // DET FIX (2026-10-18): on a SOL-quoted curve the program DROPS the creator_fee_bps arg (CreateEvent fee 0 on 19/19
-    // SOL launches that passed a fee; kept on 1176/1176 non-SOL ones). Reading it skipped those launches as creator-fee.
-    let creator_fee_bps = if create_quote_mint(tx).is_none() { 0 } else { creator_fee_bps };
 
     // DEV BUY — the single fill-robust slot-0 PROFIT signal (selection study 2026-10-14, out-of-sample + fill-stressed):
     // only a SIZED `spendable` dev buy predicts a winning flip. The spendable_* buys (v3/v2/exact_sol_in) carry the EXACT
@@ -141,14 +126,8 @@ pub fn detect_launch(tx: &Tx) -> Option<Launch> {
     // unbounded-cap buys (which I previously treated as high-conviction "always pass") are in fact the OPPOSITE — they
     // win only ~9.7%. So dev_buy_lamports = the sized spendable value ONLY; a cap/unbounded-only launch is NOT sized
     // conviction and reads 0 (it then fails the sized --min-dev-buy threshold, which is exactly what we want).
-    //
-    // DET FIX (2026-10-18): that reasoning was measured on a sample where the cap-family buys were mis-sized; on-chain
-    // (det/truth_sample, 389 creates) the dev buy is CAP-family in 69% of creates (buy_v2 u64::MAX alone 33%), and the
-    // sized-only read kept 12 of 89 launches whose TRUE dev buy is 0.5-8 SOL (13%). The cap-family token amount prices
-    // exactly on the fresh curve, so dev_buy_lamports is now the EFFECTIVE dev SOL: every top-level pump buy on THIS mint
-    // in the create tx, in order (sized = its spendable SOL, cap-family = the curve cost of its token amount, capped by a
-    // real max_sol_cost). 83/89 within 5% of the TradeEvent truth. `dev_buy_sized` keeps the old read (--dev-sized-only).
-    let dev_buy_lamports = dev_buy_effective(tx, &mint);
+    let read_u64 = |ix: &crate::tx::Ix, off: usize| ix.data.get(off..off + 8).and_then(|s| <[u8; 8]>::try_from(s).ok()).map(u64::from_le_bytes);
+    let dev_buy_lamports = DEV_BUY_SOL_AT_8.iter().filter_map(|d| ix_with_disc(tx, d).and_then(|ix| read_u64(ix, 8))).max().unwrap_or(0);
     // buyback_fee_recipient must be a member of pump's authorized global buyback POOL. In the STANDARD 17-account
     // quote-model buy, account[13] IS that pool member, so we copy it. BUT some creators (e.g. 9jwfZT1V) bundle a
     // NON-STANDARD quote-model dev buy (buy_exact_quote_in_v2 with 27 accounts) whose account[13] is the CREATOR'S
@@ -166,122 +145,9 @@ pub fn detect_launch(tx: &Tx) -> Option<Launch> {
         is_mayhem, is_cashback, creator_fee_bps, is_holder_reward })
 }
 
-/// Account index of the BASE mint in each pump buy layout: buy / buy_exact_sol_in (16 accts) [2]; the quote-model
-/// buy_v2 / buy_exact_quote_in_v2 (27) and buy_v3 / buy_exact_quote_in_v3 (17) [1] (IDL).
-fn buy_mint_pos(disc: &[u8; 8]) -> usize {
-    if *disc == BUY_DISC || *disc == BUY_EXACT_SOL_IN_DISC { 2 } else { 1 }
-}
-
-/// DET FIX: the EFFECTIVE dev buy (lamports) of a create tx: every TOP-LEVEL pump buy on `mint`, in order, priced on the
-/// fresh SOL curve (30 SOL / 1.073e15 virtual). Sized buys add their spendable SOL ([8..16]); cap-family buys add the
-/// curve cost of their token amount ([8..16]) = vq*T/(vt-T), capped by a real max_sol_cost ([16..24]). A buy whose mint
-/// account cannot be resolved still counts (a create tx's buy is on its own mint in every case seen on chain).
-/// Only meaningful for SOL-quoted curves (see `create_quote_mint`).
-pub fn dev_buy_effective(tx: &Tx, mint: &Pk) -> u64 {
-    let (mut vq, mut vt, mut total) = (CURVE_VQ0 as u128, CURVE_VT0 as u128, 0u128);
-    let k = vq * vt;
-    for ix in tx.ixs.iter() {
-        let Some(d) = pump_ix_disc(tx, ix) else { continue };
-        let sized = DEV_BUY_SOL_AT_8.contains(&d);
-        if !sized && !DEV_BUY_SOL_AT_16.contains(&d) { continue; }
-        if let Some(m) = acct(tx, ix, buy_mint_pos(&d)) { if m != *mint { continue; } }
-        let a = ix.data.get(8..16).and_then(|b| <[u8; 8]>::try_from(b).ok()).map(u64::from_le_bytes).unwrap_or(0) as u128;
-        if a == 0 { continue; }
-        if sized {
-            total += a;
-            vq += a;
-            vt = k / vq;
-        } else {
-            if a >= vt { continue; }
-            let nvt = vt - a;
-            let nvq = (vq * vt).div_ceil(nvt);
-            let mut cost = nvq - vq;
-            let cap = ix.data.get(16..24).and_then(|b| <[u8; 8]>::try_from(b).ok()).map(u64::from_le_bytes).unwrap_or(0) as u128;
-            if cap > 0 && cap < cost { cost = cap; } // the buy would revert / partial-fill at its cap: never over-read
-            total += cost;
-            vq += cost;
-            vt = k / vq;
-        }
-    }
-    total.min(u64::MAX as u128) as u64
-}
-
-/// The OLD read (pre-2026-10-18): the largest sized dev buy only (--dev-sized-only restores it for A/B).
-pub fn dev_buy_sized(tx: &Tx) -> u64 {
-    let read_u64 = |ix: &crate::tx::Ix, off: usize| ix.data.get(off..off + 8).and_then(|s| <[u8; 8]>::try_from(s).ok()).map(u64::from_le_bytes);
-    DEV_BUY_SOL_AT_8.iter().filter_map(|d| ix_with_disc(tx, d).and_then(|ix| read_u64(ix, 8))).max().unwrap_or(0)
-}
-
-/// Native SOL as a pump quote mint (the CreateEvent's quote_mint for SOL curves is the all-zero key).
-pub static SOL_QUOTE: [u8; 32] = [0u8; 32];
-pub static WSOL_MINT: LazyLock<Pk> = LazyLock::new(|| crate::tx::pk("So11111111111111111111111111111111111111112"));
-
-/// DET FIX: the quote mint of a create_v2 launch. SOL launches pass the 16 IDL accounts; NON-SOL launches (31% of creates
-/// on chain: PUMP token 19%, USDC 2%, others) append the quote mint at account [16] (+ its vault/program). None = SOL.
-/// Our buy is WSOL-quoted (buy_exact_quote_in_v3 with quote = WSOL), and every dev-buy read is in quote units, so a non-SOL
-/// launch can neither be sized in SOL nor bought: the engine skips it (--allow-nonsol-quote keeps the old behaviour).
-pub fn create_quote_mint(tx: &Tx) -> Option<Pk> {
-    let create = ix_with_disc(tx, &CREATE_V2_DISC)?;
-    let q = acct(tx, create, 16)?;
-    if q == SOL_QUOTE || q == *WSOL_MINT { None } else { Some(q) }
-}
-
-/// The pump.fun mint authority: an account of every create, including creates made by CPI from a router program.
-pub static MINT_AUTHORITY: LazyLock<Pk> = LazyLock::new(|| crate::tx::pk("TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM"));
-
-/// DET (coverage): a create made by CPI (5.4% of creates on chain, all via pump's router 6Vo3245e…
-/// `CreateCoinAndBuyBondingCurveV3` / `CreateCoinAndBuyJupiterBondingCurve`) has no top-level create ix, so
-/// `detect_launch` cannot see it in shreds. Recognised here by the mint authority in the static keys with no top-level
-/// create; the candidate mint is the second signer (the new mint keypair), the first being the fee payer. Detection
-/// only (the router's args are not decoded, so the dev buy is unknown): logged as DETECT kind=cpi, never fired.
-pub fn detect_cpi_create(tx: &Tx) -> Option<Pk> {
-    if tx.is_vote || !tx.keys.contains(&*MINT_AUTHORITY) { return None; }
-    if ix_with_disc(tx, &CREATE_V2_DISC).is_some() || ix_with_disc(tx, &CREATE_DISC).is_some() { return None; }
-    if let Some((m, ..)) = router_create(tx) { return Some(m); }
-    if tx.num_signers < 2 { return None; }
-    tx.keys.get(1).copied()
-}
-
-/// pump.fun's router program: `CreateCoinAndBuyBondingCurveV3` (dev pays USDC, the router swaps and buys on a SOL curve)
-/// and `CreateCoinAndBuyJupiterBondingCurve` (non-SOL quote curves). Its create is a CPI: no top-level create ix.
-pub static PUMP_ROUTER: LazyLock<Pk> = LazyLock::new(|| crate::tx::pk("6Vo3245eszAb5wuqEMw8mGdbfRUdKbHhDHP5LcaGuTAB"));
-pub const ROUTER_CREATE_BUY_V3_DISC: [u8; 8] = [0x7a, 0xba, 0x70, 0x89, 0x32, 0x51, 0xee, 0x63];
-
-#[inline]
-fn router_ix(tx: &Tx) -> Option<&crate::tx::Ix> {
-    tx.ixs.iter().find(|ix| tx.keys.get(ix.program as usize) == Some(&*PUMP_ROUTER) && ix.data.len() >= 8 && ix.data[0..8] == ROUTER_CREATE_BUY_V3_DISC)
-}
-
-/// DET FIX (CPI creates): decode the router's `CreateCoinAndBuyBondingCurveV3` args — name, symbol, uri (borsh strings),
-/// then creator (32), 1 byte, usdc_in u64, min_tokens_out u64, 4 bytes whose [2] is is_mayhem. Validated on all 32 such
-/// creates (32 in the first det window, 75 in the full one; /root/det/router2.py): mint = account [1] 75/75, creator = the CreateEvent creator 72/75,
-/// curve cost of min_tokens_out = 0.978-0.980 x the true dev SOL (2% default slippage), mayhem 32/32. All 32 were SOL
-/// curves. Account [2] is the quote mint (WSOL on 74/74 SOL curves, USDC on the one USDC curve): anything but WSOL
-/// returns None (detect-only). Tail byte [3] is is_holder_reward (3/3). Returns (mint, creator, min_tokens_out, is_mayhem,
-/// is_holder_reward). The Jupiter variant (non-SOL quotes) is not decoded.
-pub fn router_create(tx: &Tx) -> Option<(Pk, Pk, u64, bool, bool)> {
-    if tx.is_vote { return None; }
-    let ix = router_ix(tx)?;
-    let d = &ix.data;
-    let mut p = 8usize;
-    for _ in 0..3 {
-        let n = d.get(p..p + 4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)? as usize;
-        p = p.checked_add(4)?.checked_add(n)?;
-    }
-    let rest = d.get(p..)?;
-    if rest.len() < 52 { return None; }
-    let creator: Pk = rest[0..32].try_into().ok()?;
-    let min_tokens = u64::from_le_bytes(rest[41..49].try_into().ok()?);
-    let mayhem = rest[51] != 0;
-    let holder = rest.get(52).is_some_and(|&b| b != 0);
-    if acct(tx, ix, 2)? != *WSOL_MINT { return None; }
-    let mint = acct(tx, ix, 1)?;
-    Some((mint, creator, min_tokens, mayhem, holder))
-}
-
-/// Extract the metadata URI (3rd borsh string) from a create/create_v2 tx (or the router's create). Zero RPC.
+/// Extract the metadata URI (3rd borsh string) from a create/create_v2 tx. Zero RPC: it is in the ix data.
 pub fn launch_uri(tx: &Tx) -> Option<String> {
-    let create = match ix_with_disc(tx, &CREATE_V2_DISC) { Some(ix) => ix, None => match ix_with_disc(tx, &CREATE_DISC) { Some(ix) => ix, None => router_ix(tx)? } };
+    let create = match ix_with_disc(tx, &CREATE_V2_DISC) { Some(ix) => ix, None => ix_with_disc(tx, &CREATE_DISC)? };
     let data = &create.data;
     let mut p = 8usize;
     let mut uri = None;
@@ -339,13 +205,6 @@ fn parse_create_args(data: &[u8]) -> CreateArgs {
     // trailing flags (create_v2 only; absent on legacy create -> defaults via get())
     a.is_mayhem = data.get(p).map(|&b| b != 0).unwrap_or(false);
     a.is_cashback = data.get(p + 1).map(|&b| b != 0).unwrap_or(false);
-    // DET FIX (2026-10-18): clients send 0, 1, 2, 3, 10 or 11 trailing bytes. The 3-byte form is (mayhem, cashback,
-    // holder_reward) with NO creator fee: verified against the CreateEvent (raw 000001 -> holder=true, fee 0). The fixed
-    // layout read its holder byte as part of the fee and missed holder_reward. All other lengths match the event.
-    if data.len() == p + 3 {
-        a.is_holder_reward = data[p + 2] != 0;
-        return a;
-    }
     a.creator_fee_bps = data.get(p + 2..p + 10).and_then(|b| b.try_into().ok()).map(u64::from_le_bytes).unwrap_or(0);
     a.is_holder_reward = data.get(p + 10).map(|&b| b != 0).unwrap_or(false);
     a

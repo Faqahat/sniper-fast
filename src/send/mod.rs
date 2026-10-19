@@ -780,11 +780,7 @@ impl Path {
                 let status = resp.status().as_u16();
                 // jito-tx with ?bundleOnly=true answers with the bundle id in a header
                 let bundle = resp.headers().get("x-bundle-id").and_then(|v| v.to_str().ok()).map(String::from);
-                // DET: constant-k names the staked forwarder it used (stake study: its node has no stake of its own)
-                let route = resp.headers().get("x-ck-tx-route").and_then(|v| v.to_str().ok()).map(|s| s.chars().take(60).collect::<String>());
-                let mut r = answer(status, &resp.bytes().await.map_err(net)?, bundle);
-                if let (Ok(rep), Some(rt)) = (&mut r, route) { rep.reply = format!("{} route={rt}", rep.reply); }
-                r
+                answer(status, &resp.bytes().await.map_err(net)?, bundle)
             }
             SendKind::Haan | SendKind::Bolt | SendKind::Iris | SendKind::Lunar => {
                 let resp = self.http.post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")

@@ -49,8 +49,6 @@ static SELL_PATH: std::sync::OnceLock<Arc<send::Path>> = std::sync::OnceLock::ne
 fn sp(p: &Arc<send::Path>) -> &Arc<send::Path> { SELL_PATH.get().unwrap_or(p) }
 /// --also-send: a second path every BUY goes through too (same signed tx, both tips). Not used for sells.
 static ALSO_PATH: std::sync::OnceLock<Arc<send::Path>> = std::sync::OnceLock::new();
-/// --fallback-path: a TIPLESS path a refused send (429 / over-rate) is re-sent through (DET 2026-10-18; default off).
-static FALLBACK_PATH: std::sync::OnceLock<Arc<send::Path>> = std::sync::OnceLock::new();
 /// latest blockhash kept fresh in the background (hash, fetched-at), so a buy never waits on getLatestBlockhash.
 static BLOCKHASH_CACHE: std::sync::Mutex<Option<([u8; 32], Instant)>> = std::sync::Mutex::new(None);
 
@@ -109,100 +107,6 @@ impl MintDedup {
         if self.order.len() > self.cap { if let Some(old) = self.order.pop_front() { self.seen.remove(&old); } }
         true
     }
-}
-
-/// DET (2026-10-18): detection measurement + the detection-side gates shared by the paper and live loops.
-///  * one `DETECT` line per create arrival per feed (the duplicate copy too): feed, first/dup, dt to the first copy (µs),
-///    slot, t_rx (ns, realtime), poh_ms, lag_ms = how long after its PoH position the create reached us (slot start
-///    estimated from the entries feed: min over the slot's arrivals of t_rx - poh), dev reads, quote, verdict.
-///  * a `FEEDS` health line every 60 s (per feed: messages, forwarded, reconnects, errors, ms since the last message).
-///  * the new gates' switches: --dev-sized-only (old dev read), --allow-nonsol-quote, --allow-legacy-create.
-struct DetLog {
-    names: Vec<String>,
-    slot_t0: std::collections::BTreeMap<u64, u64>,
-    first: std::collections::HashMap<Pk, (u64, u16, Option<f64>)>,
-    order: std::collections::VecDeque<Pk>,
-    last_health: Instant,
-    dev_sized_only: bool,
-    allow_nonsol: bool,
-    allow_legacy: bool,
-    /// --no-router: do not fire on decoded router (CPI) creates (detect-only, as the paper-tested AFTER binary)
-    no_router: bool,
-}
-
-impl DetLog {
-    fn new(names: Vec<String>) -> Self {
-        DetLog { names, slot_t0: Default::default(), first: Default::default(), order: Default::default(), last_health: Instant::now(),
-            dev_sized_only: has("--dev-sized-only"), allow_nonsol: has("--allow-nonsol-quote"), allow_legacy: has("--allow-legacy-create"),
-            no_router: has("--no-router") }
-    }
-    fn name(&self, f: u16) -> &str { self.names.get(f as usize).map(|s| s.as_str()).unwrap_or("?") }
-    /// every arrival: the slot-start estimate from PoH-positioned (entries feed) transactions
-    fn note(&mut self, a: &arbx::feeds::Arrival) {
-        if let Some(ms) = a.poh.as_ref().and_then(|p| p.ms()) {
-            let t0 = a.t_rx.saturating_sub((ms * 1e6) as u64);
-            let e = self.slot_t0.entry(a.slot).or_insert(t0);
-            if t0 < *e { *e = t0; }
-            while self.slot_t0.len() > 256 { let k = *self.slot_t0.keys().next().unwrap(); self.slot_t0.remove(&k); }
-        }
-    }
-    /// log one create arrival; true = the first copy of this mint (any feed)
-    fn create(&mut self, a: &arbx::feeds::Arrival, mint: &Pk, kind: &str, extra: &str) -> bool {
-        let poh = a.poh.as_ref().and_then(|p| p.ms());
-        let (first, dt_us, poh_any) = match self.first.get(mint) {
-            Some(&(t, _, p)) => (false, (a.t_rx as i64 - t as i64) / 1000, poh.or(p)),
-            None => {
-                self.first.insert(*mint, (a.t_rx, a.feed, poh));
-                self.order.push_back(*mint);
-                if self.order.len() > 50_000 { if let Some(o) = self.order.pop_front() { self.first.remove(&o); } }
-                (true, 0, poh)
-            }
-        };
-        if !first { if let (Some(p), Some(e)) = (poh, self.first.get_mut(mint)) { if e.2.is_none() { e.2 = Some(p); } } }
-        let lag = match (self.slot_t0.get(&a.slot), poh_any) {
-            (Some(&t0), Some(p)) => format!("{:.1}", (a.t_rx as f64 - t0 as f64) / 1e6 - p),
-            _ => "-".into(),
-        };
-        eprintln!("  DETECT feed={} first={} dt_us={dt_us} slot={} t_rx={} poh_ms={} lag_ms={lag} mint={} kind={kind} sig={} {extra}",
-            self.name(a.feed), first as u8, a.slot, a.t_rx, poh.map(|p| format!("{p:.1}")).unwrap_or_else(|| "-".into()), b58(mint),
-            &a.tx.sig_b58()[..16]);
-        first
-    }
-    /// the base filter's verdict for the log (same order as the loops' gates)
-    #[allow(clippy::too_many_arguments)]
-    fn verdict(&self, l: &Launch, tx: &arbx::tx::Tx, quote: Option<Pk>, min_dev: u64, max_dev: u64, allow_nonvanilla: bool, wl: bool, bl: bool) -> &'static str {
-        if quote.is_some() && !self.allow_nonsol { return "skip_quote"; }
-        if !l.is_create_v2 && !self.allow_legacy { return "skip_legacy"; }
-        if l.dev_buy_lamports < min_dev { return "skip_dev_low"; }
-        if l.dev_buy_lamports > max_dev { return "skip_dev_high"; }
-        if !allow_nonvanilla && !l.is_snipeable() { return "skip_flags"; }
-        if wl && !snipe::trusted_launch_host(tx) { return "skip_host"; }
-        if bl && snipe::is_bot_launchpad(tx) { return "skip_host"; }
-        "pass"
-    }
-    /// one FEEDS line every 60 s
-    fn health(&mut self, feeds: &arbx::feeds::Feeds) {
-        if self.last_health.elapsed() < Duration::from_secs(60) { return; }
-        self.last_health = Instant::now();
-        let now = arbx::feeds::clock::now_ns();
-        let parts: Vec<String> = feeds.counters.iter().map(|c| format!("{}:msgs={},fwd={},rc={},err={},drops={},age_ms={},slot={}", c.name,
-            c.packets.load(Ordering::Relaxed), c.forwarded.load(Ordering::Relaxed), c.reconnects.load(Ordering::Relaxed),
-            c.errors.load(Ordering::Relaxed), c.channel_drops.load(Ordering::Relaxed),
-            now.saturating_sub(c.last_msg_ns.load(Ordering::Relaxed)) / 1_000_000, c.slot_max.load(Ordering::Relaxed))).collect();
-        eprintln!("  FEEDS t={} {}", now / 1_000_000_000, parts.join(" "));
-    }
-}
-
-/// DET FIX: a Launch for a router (CPI) create: bonding curve + ATA derived from the mint (as --round-trip does), the
-/// creator from the router args, dev = the curve cost of the router's min_tokens_out / 0.98 (its default 2% slippage;
-/// on chain the cost of min_tokens_out was 0.978-0.980 x the true dev SOL), mayhem from the args, other flags default.
-fn router_launch(tx: &arbx::tx::Tx) -> Option<Launch> {
-    let (mint, creator, min_tokens, mayhem, holder) = snipe::router_create(tx)?;
-    let mut l = snipe_build::launch_from_target(mint, creator);
-    l.dev_buy_lamports = (snipe::curve_cost(snipe::CURVE_VQ0, min_tokens) as u128 * 100 / 98) as u64;
-    l.is_mayhem = mayhem;
-    l.is_holder_reward = holder;
-    Some(l)
 }
 
 fn main() -> Result<()> {
@@ -286,13 +190,6 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         match paths.index(&an) {
             Some(i) => { let _ = ALSO_PATH.set(paths.list[i].clone()); eprintln!("snipe_engine: ALSO-SEND buys via {}", paths.list[i].name); }
             None => bail!("--also-send {an}: no such [[send]] path"),
-        }
-    }
-    if let Some(fname) = arg("--fallback-path") {
-        match paths.index(&fname) {
-            Some(i) if paths.list[i].tip(0).is_none() => { let _ = FALLBACK_PATH.set(paths.list[i].clone()); eprintln!("snipe_engine: FALLBACK path = {}", paths.list[i].name); }
-            Some(_) => bail!("--fallback-path {fname}: must be a tipless path (the signed tx would not pay its tip)"),
-            None => bail!("--fallback-path {fname}: no such [[send]] path"),
         }
     }
     eprintln!("snipe_engine: fire path = {} ({})", path.name, path.describe());
@@ -675,37 +572,6 @@ async fn run_shadow(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rp
     Ok(())
 }
 
-/// DET FIX: tell the PoH clock the cluster's real slot length (getRecentPerformanceSamples, last ~4 min).
-async fn set_slot_clock(rpc: &rpc::Rpc) {
-    if let Ok(v) = rpc.call("getRecentPerformanceSamples", serde_json::json!([4])).await {
-        let (mut slots, mut secs) = (0u64, 0u64);
-        for x in v.as_array().into_iter().flatten() { slots += x["numSlots"].as_u64().unwrap_or(0); secs += x["samplePeriodSecs"].as_u64().unwrap_or(0); }
-        if slots > 0 {
-            let us = secs * 1_000_000 / slots;
-            arbx::feeds::entries::set_slot_us(us);
-            eprintln!("POH CLOCK: {slots} slots in {secs} s -> {:.1} ms a slot (PoH ms scaled to it; was a fixed 400 ms)", us as f64 / 1000.0);
-        }
-    }
-}
-
-/// DET FIX: slot -> leader for the CURRENT and the NEXT epoch (getLeaderSchedule keys are slot indexes relative to the
-/// epoch's first slot; the next epoch's schedule is already fixed and served for any slot in it).
-async fn leader_map(rpc: &rpc::Rpc) -> std::collections::HashMap<u64, String> {
-    let mut m = std::collections::HashMap::new();
-    let Ok(ei) = rpc.call("getEpochInfo", serde_json::json!([])).await else { return m };
-    let start = ei["absoluteSlot"].as_u64().unwrap_or(0).saturating_sub(ei["slotIndex"].as_u64().unwrap_or(0));
-    let len = ei["slotsInEpoch"].as_u64().unwrap_or(432_000);
-    for (base, arg) in [(start, serde_json::Value::Null), (start + len, serde_json::json!(start + len))] {
-        if let Ok(ls) = rpc.call("getLeaderSchedule", serde_json::json!([arg])).await {
-            if let Some(obj) = ls.as_object() {
-                for (leader, slots) in obj { if let Some(arr) = slots.as_array() {
-                    for s in arr { if let Some(si) = s.as_u64() { m.insert(base + si, leader.clone()); } } } }
-            }
-        }
-    }
-    m
-}
-
 /// histogram of integer deltas as "d:count" pairs, sorted by delta.
 fn hist_line(vals: &[i64]) -> String {
     let mut h: std::collections::BTreeMap<i64, u32> = Default::default();
@@ -795,10 +661,7 @@ async fn send_and_poll(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<se
     // path's tip accounts, or Path::check refuses the send. Tipless paths (staked-rpc / tpu-direct) return None -> unchanged.
     let _tip_owned: Vec<build::Ix>;
     // --also-send: only for non-sell sends (a sell goes through SELL_PATH), and only to a different path.
-    // DET FIX: "is this a buy" is read from the instructions (the pump buy disc). The old test (path != SELL_PATH) also
-    // double-sent every SELL, paying the also-path's tip, whenever --sell-path was not given (sells then use the buy path).
-    let is_buy = ixs.iter().any(|ix| ix.data.starts_with(&snipe_build::BUY_EXACT_QUOTE_IN_V3_DISC));
-    let also = ALSO_PATH.get().filter(|a| is_buy && a.name != path.name);
+    let also = ALSO_PATH.get().filter(|a| a.name != path.name && SELL_PATH.get().map_or(true, |s| !Arc::ptr_eq(s, path)));
     let mut tips: Vec<(Pk, u64)> = Vec::new();
     if let Some((t, l)) = path.tip(0) { if l > 0 { tips.push((t, l)); } }
     if let Some(a) = also { if let Some((t, l)) = a.tip(0) { if l > 0 { tips.push((t, l)); } } }
@@ -818,20 +681,10 @@ async fn send_and_poll(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<se
     sig_bytes.copy_from_slice(&bs58::decode(&sig).into_vec()?);
     let send_slot = match send::tpu::SLOT.load(Ordering::Relaxed) { 0 => rpc.slot().await.unwrap_or(0), s => s };
     eprintln!("  SEND-PREP {:.1} ms (send_and_poll entry -> send)", t_sp.elapsed().as_secs_f64() * 1e3);
-    // DET: one SEND-ACK line per path answer: how long the endpoint took to accept, its HTTP status and reply (constant-k's
-    // x-ck-tx-route is appended by send::deliver). Zero-cost diagnostics for the send-path A/B.
-    let timed = |p: Arc<send::Path>, raw: Vec<u8>| async move {
-        let t = Instant::now();
-        let r = p.send(&raw, send::Prio { band: 0, crowd: 0, ev: 0 }, None).await;
-        match &r {
-            Ok(rep) => eprintln!("  SEND-ACK path={} ack_ms={:.2} status={:?} reply={}", p.name, t.elapsed().as_secs_f64() * 1e3, rep.status, rep.reply.chars().take(120).collect::<String>()),
-            Err(e) => eprintln!("  SEND-ACK path={} ack_ms={:.2} REFUSED status={:?} {}", p.name, t.elapsed().as_secs_f64() * 1e3, e.status, e.msg.chars().take(120).collect::<String>()),
-        }
-        r
-    };
     match also {
         Some(a) => {
-            let (r1, r2) = tokio::join!(timed(path.clone(), raw.clone()), timed(a.clone(), raw.clone()));
+            let (r1, r2) = tokio::join!(path.send(&raw, send::Prio { band: 0, crowd: 0, ev: 0 }, None),
+                                        a.send(&raw, send::Prio { band: 0, crowd: 0, ev: 0 }, None));
             match (&r1, &r2) {
                 (Err(e1), Err(e2)) => bail!("send refused: {}: {e1} / {}: {e2}", path.name, a.name),
                 (Err(e1), Ok(_)) => eprintln!("  (also-send: {} refused: {e1}; {} accepted)", path.name, a.name),
@@ -839,29 +692,12 @@ async fn send_and_poll(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<se
                 _ => {}
             }
         }
-        None => {
-            if let Err(e) = timed(path.clone(), raw.clone()).await {
-                // DET (--fallback-path, default off): a refusal (HTTP 429 from Helius' keyless 1 req/s/IP limit, or the
-                // local max_per_sec guard) re-sends the SAME signed tx through a tipless fallback path instead of
-                // losing the trade. Only tipless fallbacks (staked-rpc) are accepted at start-up: no extra tip is paid.
-                match FALLBACK_PATH.get().filter(|f| f.name != path.name) {
-                    Some(f) => {
-                        timed(f.clone(), raw.clone()).await
-                            .map_err(|e2| anyhow::anyhow!("send refused: {}: {e} / fallback {}: {e2}", path.name, f.name))?;
-                        eprintln!("  (fallback: {} refused: {e}; re-sent via {})", path.name, f.name);
-                    }
-                    None => bail!("send refused: {e}"),
-                }
-            }
-        }
+        None => { path.send(&raw, send::Prio { band: 0, crowd: 0, ev: 0 }, None).await.map_err(|e| anyhow::anyhow!("send refused: {e}"))?; }
     }
     let mut out = Landed { sig, send_slot, land_slot: None, ok: false };
     let deadline = Instant::now() + land_timeout;
-    // DET: --land-poll-ms (default 300 = unchanged). The buy's land is only noticed at the next poll, so the first
-    // sell leg (and the exit clock) starts up to one poll late; 100 ms costs ~10 getSignatureStatuses/s per open send.
-    let poll = Duration::from_millis(arg_u64("--land-poll-ms", 300).max(20));
     while Instant::now() < deadline {
-        tokio::time::sleep(poll).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         if let Ok(v) = rpc.statuses(&[sig_bytes]).await {
             if let Some(Some((land, ok))) = v.into_iter().next() { out.land_slot = Some(land); out.ok = ok; break; }
         }
@@ -1246,6 +1082,8 @@ fn sim_scalein(path: &[(f64, f64)], add_thr: f64, add_size: f64, cap_ms: f64, ri
 //   --race-obs-ms O         keep observing to O ms for the log (default max(W, 200))
 //   --race-min-bundle N     gate: creator bundle of >= N buy txs seen within --race-bundle-ms (0 = off)
 //   --race-max-name-len L   gate: token name <= L characters (0 = off)
+//   --race-min-bundle-sol F / --race-max-bundle-sol F  gate: creator bundle SOL (sum of its buys within --race-bundle-ms)
+//   --race-create-tip-prefix P  gate: the create tx's largest SOL transfer goes to an account starting with P ("moon" = Lunar)
 //   --race-track-rejects    PAPER only: price-track rejected launches too, as shadow positions (dump "fired":false,
 //                           log "PAPER shadow-done", excluded from the PAPER report). Ignored by the live loop.
 // Outside payer = payer of a tx touching the mint that is not the creator, not a create-tx signer, not creator bundle.
@@ -1271,6 +1109,11 @@ struct RaceCfg {
     min_bundle: u32,
     /// --race-max-name-len L: token name <= L chars (0 = off)
     max_name_len: usize,
+    /// --race-min-bundle-sol / --race-max-bundle-sol: creator bundle SOL bounds (lamports)
+    min_bundle_sol: u64,
+    max_bundle_sol: u64,
+    /// --race-create-tip-prefix: create tx's largest non-signer SOL transfer goes to an account with this base58 prefix
+    create_tip_prefix: Option<String>,
     pros: std::collections::HashSet<Pk>,
 }
 
@@ -1282,7 +1125,8 @@ impl RaceCfg {
         let bundle_ms = arg_f64("--race-bundle-ms", 3.0);
         // a bundle condition needs to see the first bundle_ms of the stream before deciding
         let min_bundle = arg_u64("--race-min-bundle", 0) as u32;
-        let window_ms = if bundle != 0 || min_bundle > 0 { window_cfg.max(bundle_ms) } else { window_cfg };
+        let bsol_flags = arg("--race-min-bundle-sol").is_some() || arg("--race-max-bundle-sol").is_some();
+        let window_ms = if bundle != 0 || min_bundle > 0 || bsol_flags { window_cfg.max(bundle_ms) } else { window_cfg };
         let pros = arg("--race-pros").and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
             .map(|v| v.iter().map(|s| pk(s)).collect()).unwrap_or_default();
@@ -1302,6 +1146,9 @@ impl RaceCfg {
             track_rejects: has("--race-track-rejects"),
             min_bundle,
             max_name_len: arg_u64("--race-max-name-len", 0) as usize,
+            min_bundle_sol: (arg_f64("--race-min-bundle-sol", 0.0) * 1e9) as u64,
+            max_bundle_sol: (arg_f64("--race-max-bundle-sol", 1e9) * 1e9) as u64,
+            create_tip_prefix: arg("--race-create-tip-prefix"),
             pros,
         }
     }
@@ -1324,11 +1171,12 @@ fn race_dev_fix(cfg: &RaceCfg, launch: &mut Launch, tx: &arbx::tx::Tx) {
 fn race_feat_line(launch: &Launch, tx: &arbx::tx::Tx, slot: u64) -> String {
     let ci = snipe::create_info(tx);
     let clean = |s: &str| s.chars().filter(|c| !c.is_whitespace() && *c != '=').take(24).collect::<String>();
-    format!("slot={slot} mint={} dev={} dev_sized={} dev_cap={} kind={} host={} cu_price={} cu_limit={} nsig={} nkeys={} luts={} v1={} nix={} t22={} tip={} tip_to={} creator={} name_len={} sym={} name={}",
+    format!("slot={slot} mint={} dev={} dev_sized={} dev_cap={} kind={} host={} cu_price={} cu_limit={} nsig={} nkeys={} luts={} v1={} nix={} t22={} tip={} tip_to={} creator={} name_len={} sym={} name={} uri={}",
         b58(&launch.mint), launch.dev_buy_lamports, snipe::detect_launch(tx).map(|l| l.dev_buy_lamports).unwrap_or(0), snipe::dev_buy_cap_lamports(tx),
         snipe::dev_buy_kind(tx), if ci.uri_host.is_empty() { "-".to_string() } else { ci.uri_host.clone() }, ci.cu_price, ci.cu_limit, ci.nsig, ci.nkeys,
         ci.n_lookups, ci.v1, ci.n_ixs, ci.t22, ci.tip_lamports, ci.tip_to.map(|k| b58(&k)).unwrap_or_else(|| "-".into()), b58(&launch.creator),
-        ci.name.chars().count(), clean(&ci.symbol), clean(&ci.name))
+        ci.name.chars().count(), clean(&ci.symbol), clean(&ci.name),
+        snipe::create_strings(tx).map(|(_, _, u)| u.chars().filter(|c| !c.is_whitespace()).take(200).collect::<String>()).filter(|u| !u.is_empty()).unwrap_or_else(|| "-".into()))
 }
 
 struct RacePend {
@@ -1337,6 +1185,8 @@ struct RacePend {
     t0: Instant,
     cset: std::collections::HashSet<Pk>,
     bundle_n: u32,
+    /// creator-bundle buy SOL seen within bundle_ms (sized amount, or cap-family priced on the curve)
+    bundle_sol: u64,
     /// (ms after the create, payer, sol hint lamports, cu price, is_buy)
     out: Vec<(f64, Pk, u64, u64, bool)>,
     decided: bool,
@@ -1355,7 +1205,11 @@ impl RaceWatch {
     fn static_ok(&self, launch: &Launch, tx: &arbx::tx::Tx) -> bool {
         let name_ok = self.cfg.max_name_len == 0
             || snipe::create_strings(tx).map(|(n, _, _)| n.chars().count() <= self.cfg.max_name_len).unwrap_or(false);
-        name_ok && launch.dev_buy_lamports >= self.cfg.min_dev && launch.dev_buy_lamports <= self.cfg.max_dev
+        let tip_ok = match &self.cfg.create_tip_prefix {
+            None => true,
+            Some(pf) => snipe::create_info(tx).tip_to.map(|k| b58(&k).starts_with(pf.as_str())).unwrap_or(false),
+        };
+        tip_ok && name_ok && launch.dev_buy_lamports >= self.cfg.min_dev && launch.dev_buy_lamports <= self.cfg.max_dev
     }
 
     /// a launch passed the engine's base filter: log it and start watching. Returns true when it should be fired NOW
@@ -1366,7 +1220,7 @@ impl RaceWatch {
         let mut cset: std::collections::HashSet<Pk> = tx.keys.iter().take(tx.num_signers as usize).copied().collect();
         cset.insert(launch.creator);
         let fire_now = !self.cfg.gate || (self.cfg.window_ms <= 0.0 && static_ok);
-        self.pend.insert(launch.mint, RacePend { launch: launch.clone(), slot, t0: Instant::now(), cset, bundle_n: 0, out: Vec::new(),
+        self.pend.insert(launch.mint, RacePend { launch: launch.clone(), slot, t0: Instant::now(), cset, bundle_n: 0, bundle_sol: 0, out: Vec::new(),
             decided: fire_now || !self.cfg.gate || !static_ok, static_ok, pass: fire_now, sigs: Default::default() });
         if self.cfg.gate && !static_ok {
             eprintln!("  RACE reject-static slot={slot} mint={}", b58(&launch.mint));
@@ -1389,12 +1243,18 @@ impl RaceWatch {
             if !p.sigs.insert(tx.sig) { continue; } // duplicate delivery from the second feed
             let ms = p.t0.elapsed().as_secs_f64() * 1e3;
             let signers: Vec<Pk> = tx.keys.iter().take(tx.num_signers as usize).copied().collect();
+            let bvq = snipe::CURVE_VQ0 + p.launch.dev_buy_lamports + p.bundle_sol;
+            let bsol = match touch {
+                snipe::MintTouch::Buy(s) => s,
+                snipe::MintTouch::BuyCap { tokens, max_sol } => { let est = snipe::curve_cost(bvq, tokens); if max_sol > 0 && max_sol < est { max_sol } else { est } }
+                _ => 0,
+            };
             if signers.iter().any(|s| p.cset.contains(s)) {
-                if matches!(touch, snipe::MintTouch::Buy(_) | snipe::MintTouch::BuyCap { .. }) { p.bundle_n += 1; }
+                if matches!(touch, snipe::MintTouch::Buy(_) | snipe::MintTouch::BuyCap { .. }) { p.bundle_n += 1; p.bundle_sol = p.bundle_sol.saturating_add(bsol); }
                 continue;
             }
             if ms <= bundle_ms && !is_pro {
-                if matches!(touch, snipe::MintTouch::Buy(_) | snipe::MintTouch::BuyCap { .. }) { p.bundle_n += 1; }
+                if matches!(touch, snipe::MintTouch::Buy(_) | snipe::MintTouch::BuyCap { .. }) { p.bundle_n += 1; p.bundle_sol = p.bundle_sol.saturating_add(bsol); }
                 p.cset.insert(payer);
                 continue;
             }
@@ -1434,6 +1294,7 @@ impl RaceWatch {
             if !p.decided && el >= self.cfg.window_ms {
                 let (n, sol, maxcu) = Self::counts(p, self.cfg.window_ms);
                 let bundle_ok = p.bundle_n >= self.cfg.min_bundle
+                    && p.bundle_sol >= self.cfg.min_bundle_sol && p.bundle_sol <= self.cfg.max_bundle_sol
                     && match self.cfg.bundle { 1 => p.bundle_n > 0, -1 => p.bundle_n == 0, _ => true };
                 p.pass = p.static_ok && bundle_ok && (!self.cfg.count_out || (n >= self.cfg.min_out && sol >= self.cfg.min_out_sol));
                 p.decided = true;
@@ -1452,8 +1313,8 @@ impl RaceWatch {
                 let first = p.out.first().map(|o| o.0).unwrap_or(-1.0);
                 let outs: String = p.out.iter().take(24).map(|o| format!("{:.1}:{:.3}:{}:{}", o.0, o.2 as f64 / 1e9, o.4 as u8, &b58(&o.1)[..6])).collect::<Vec<_>>().join(",");
                 if self.cfg.log {
-                    eprintln!("  RACE obs slot={} mint={} n25={n25} n50={n50} n100={n100} n200={n200} n_obs={nall} sol100={:.3} sol200={:.3} sol_obs={:.3} max_cu100={cu100} first_ms={first:.1} bundle_n={} fired={} outs={}",
-                        p.slot, b58(mint), s100 as f64 / 1e9, s200 as f64 / 1e9, sall as f64 / 1e9, p.bundle_n, p.pass, if outs.is_empty() { "-".to_string() } else { outs });
+                    eprintln!("  RACE obs slot={} mint={} n25={n25} n50={n50} n100={n100} n200={n200} n_obs={nall} sol100={:.3} sol200={:.3} sol_obs={:.3} max_cu100={cu100} first_ms={first:.1} bundle_n={} bundle_sol={:.3} fired={} outs={}",
+                        p.slot, b58(mint), s100 as f64 / 1e9, s200 as f64 / 1e9, sall as f64 / 1e9, p.bundle_n, p.bundle_sol as f64 / 1e9, p.pass, if outs.is_empty() { "-".to_string() } else { outs });
                 }
                 done.push(*mint);
             }
@@ -1533,8 +1394,6 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
     let (atx, mut arx) = tokio::sync::mpsc::unbounded_channel();
     std::thread::spawn(move || { while let Ok(ev) = rx.recv() { if atx.send(ev).is_err() { break; } } });
 
-    let mut det = DetLog::new(_feeds.names.clone());
-    set_slot_clock(rpc).await;
     let deadline = Instant::now() + Duration::from_secs(minutes * 60);
     let sink: Arc<std::sync::Mutex<Vec<PaperRec>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sem = Arc::new(tokio::sync::Semaphore::new(max_inflight));
@@ -1556,32 +1415,12 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
             Ok(None) => break,
             Err(_) => None, // timeout: re-check the deadline (and due race decisions)
         };
-        det.health(&_feeds);
-        if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
         if let Some(arbx::feeds::Event::Tx(a)) = ev {
-            det.note(&a);
-            // DET FIX: a top-level create, else pump's router create (CPI) decoded from the router's own args
-            let cand = match snipe::detect_launch(&a.tx) { Some(l) => Some((l, false)), None if !det.no_router => router_launch(&a.tx).map(|l| (l, true)), None => None };
-            match cand {
-                None => {
-                    if let Some(m) = snipe::detect_cpi_create(&a.tx) { det.create(&a, &m, "cpi", "verdict=cpi_not_decoded"); }
-                    if race.cfg.active() { race.observe(&a.tx); }
-                }
-                Some((mut launch, via_router)) => 'create: {
-                    if det.dev_sized_only && !via_router { launch.dev_buy_lamports = snipe::dev_buy_sized(&a.tx); }
+            match snipe::detect_launch(&a.tx) {
+                None => { if race.cfg.active() { race.observe(&a.tx); } }
+                Some(mut launch) => 'create: {
                     race_dev_fix(&race.cfg, &mut launch, &a.tx);
-                    let quote = snipe::create_quote_mint(&a.tx);
-                    // DET: one DETECT line per create arrival per feed (the duplicate copy too: feed race + coverage)
-                    let verdict = det.verdict(&launch, &a.tx, quote, min_dev_buy, max_dev_buy_lam, allow_nonvanilla, uri_whitelist, uri_blacklist);
-                    let first = det.create(&a, &launch.mint, if via_router { "router" } else if launch.is_create_v2 { "v2" } else { "v1" },
-                        &format!("dev={} dev_sized={} quote={} vanilla={} snipeable={} verdict={verdict}", launch.dev_buy_lamports, snipe::dev_buy_sized(&a.tx),
-                            quote.map(|q| b58(&q)[..8].to_string()).unwrap_or_else(|| "sol".into()), launch.is_vanilla(), launch.is_snipeable()));
-                    if !first { break 'create; }
                     if !dedup.first(launch.mint) { break 'create; } // same create seen on the other feed -> skip the duplicate
-                    // DET FIX: non-SOL-quoted (31% of creates) and legacy SPL `create` launches cannot be bought by our
-                    // WSOL / Token-2022 buy, and their dev read is not SOL: skip them (old behaviour behind flags).
-                    if quote.is_some() && !det.allow_nonsol { skipped_flag += 1; break 'create; }
-                    if !launch.is_create_v2 && !det.allow_legacy { skipped_flag += 1; break 'create; }
                     if launch.dev_buy_lamports < min_dev_buy { skipped_dev += 1; break 'create; }
                     if launch.dev_buy_lamports > max_dev_buy_lam { skipped_dev += 1; break 'create; } // R2 whale gate
                     if !allow_nonvanilla && !launch.is_snipeable() { skipped_flag += 1; break 'create; }
@@ -1616,10 +1455,7 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
         let (rpc2, sink2, sem2) = (rpc.clone(), sink.clone(), sem.clone());
         let dump_paths = dump_paths.clone();
         tokio::spawn(async move {
-            let t_q = Instant::now();
             let Ok(_permit) = sem2.acquire().await else { return };
-            let wait_ms = t_q.elapsed().as_secs_f64() * 1e3; // DET: a full --max-inflight delays the path start (not a skip)
-            let (mut rd_ok, mut rd_fail) = (0u32, 0u32);
             let bc = launch.bonding_curve;
             // R1 DEMAND GATE: observe the first --early-slots, then require price >= min_demand_mult x floor (buyers came
             // in and moved the price). Skips the dead rugs. We enter at the post-observe price (realistic observe-then-buy).
@@ -1667,7 +1503,7 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
             loop {
                 if Instant::now() >= pos_deadline { break; }
                 let ms = start.elapsed().as_millis() as f64;
-                let rb = match curve_price(&rpc2, &bc).await { Some(p) => { rd_ok += 1; (p / entry_base).min(max_r_cap) }, None => { rd_fail += 1; last_rb } };
+                let rb = match curve_price(&rpc2, &bc).await { Some(p) => (p / entry_base).min(max_r_cap), None => last_rb };
                 last_rb = rb;
                 path.push((ms, rb));
                 tokio::time::sleep(Duration::from_millis(250)).await;
@@ -1679,9 +1515,7 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
                 use std::io::Write;
                 let obj = serde_json::json!({ "mint": b58(&launch.mint), "dev": launch.dev_buy_lamports as f64 / 1e9,
                     "vanilla": vanilla, "peak": peak_path, "path": path, "fired": fired, "slot": create_slot });
-                // DET FIX: ONE write() per line. writeln! on an unbuffered File issues several writes, so concurrent trackers
-                // interleaved their lines (2 garbled lines in the first 30 min of the det AFTER run).
-                if let Ok(mut fh) = std::fs::OpenOptions::new().create(true).append(true).open(df) { let _ = fh.write_all(format!("{obj}\n").as_bytes()); }
+                if let Ok(mut fh) = std::fs::OpenOptions::new().create(true).append(true).open(df) { let _ = writeln!(fh, "{obj}"); }
             }
             // Score the position at every contested-fill level on this one recorded path.
             let mut nets = [0.0f64; FILLS.len()];
@@ -1713,7 +1547,6 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
             }
             eprintln!("  PAPER done mint={} entry={:.3e} fill={:.3}x peak_r={:.3} legs={} pnl_R={:+.4} pnl_NET{}{}",
                 rec.mint, rec.entry, rec.fill, rec.peak_r, rec.legs, rec.pnl_r, net_str, scale_str);
-            eprintln!("  PAPER stats mint={} rd_ok={rd_ok} rd_fail={rd_fail} wait_ms={wait_ms:.0}", rec.mint);
             sink2.lock().unwrap().push(rec);
         });
         } // batch
@@ -1851,19 +1684,24 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     let close_set: Option<std::collections::HashSet<String>> = arg("--close-leaders").map(|p|
         std::fs::read_to_string(&p).unwrap_or_default().lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
     let slot_leader: std::collections::HashMap<u64, String> = if close_set.is_some() {
-        let m = leader_map(rpc).await;
-        eprintln!("CLOSE-LEADER GATE ON: {} close leaders, {} slots mapped (current + next epoch)", close_set.as_ref().map(|s| s.len()).unwrap_or(0), m.len());
+        let mut m = std::collections::HashMap::new();
+        if let (Ok(ei), Ok(ls)) = (rpc.call("getEpochInfo", serde_json::json!([])).await,
+                                   rpc.call("getLeaderSchedule", serde_json::json!([null])).await) {
+            let epoch_start = ei["absoluteSlot"].as_u64().unwrap_or(0).saturating_sub(ei["slotIndex"].as_u64().unwrap_or(0));
+            if let Some(obj) = ls.as_object() {
+                for (leader, slots) in obj { if let Some(arr) = slots.as_array() {
+                    for s in arr { if let Some(si) = s.as_u64() { m.insert(epoch_start + si, leader.clone()); } } }
+                }
+            }
+        }
+        eprintln!("CLOSE-LEADER GATE ON: {} close leaders, {} slots mapped", close_set.as_ref().map(|s| s.len()).unwrap_or(0), m.len());
         m
     } else { std::collections::HashMap::new() };
     let mut skipped_far = 0u64;
-    let mut skipped_inflight = 0u64;
-    let mut rx_t: std::collections::HashMap<Pk, u64> = std::collections::HashMap::new();
     let uri_whitelist = has("--uri-whitelist");
     let uri_blacklist = has("--uri-blacklist");
     let mut skipped_host = 0u64;
     let mut dedup = MintDedup::new(20000); // cross-feed de-dup (erpc + Kaldera): never double-buy a mint seen on both feeds
-    let mut det = DetLog::new(_feeds.names.clone());
-    set_slot_clock(rpc).await;
 
     eprintln!("\nSNIPE-LIVE (CONCURRENT): dev_buy>={min_dev_buy}, per-buy cap {max_sol} SOL, TOTAL spend cap {max_total} SOL, loss kill-switch {max_loss} SOL, max_inflight {max_inflight}, {minutes}min. Fires every qualifying launch in parallel.");
 
@@ -1877,46 +1715,21 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         if spent.load(Ordering::Relaxed) + spend_per > total_cap { eprintln!("  TOTAL spend cap reached — no more fires."); break; }
         let wait = if race.cfg.active() { race.next_wait() } else { Duration::from_secs(2) };
         let ev = match tokio::time::timeout(wait, arx.recv()).await { Ok(Some(e)) => Some(e), Ok(None) => break, Err(_) => None };
-        det.health(&_feeds);
-        if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
         if let Some(arbx::feeds::Event::Tx(a)) = ev {
-            // DET FIX: the current slot for leader targeting / send_slot comes from the shred feed (the leader's slot as it
-            // is being produced). The 250 ms getSlot poller alone lagged the create slot by 2-3 slots (live_land_fast.log:
-            // send_slot 458515365 for a create in 458515368), so tpu-direct aimed at leaders already past.
-            send::tpu::SLOT.fetch_max(a.slot, Ordering::Relaxed);
-            det.note(&a);
-            // DET FIX: a top-level create, else pump's router create (CPI) decoded from the router's own args
-            let cand = match snipe::detect_launch(&a.tx) { Some(l) => Some((l, false)), None if !det.no_router => router_launch(&a.tx).map(|l| (l, true)), None => None };
-            match cand {
-                None => {
-                    if let Some(m) = snipe::detect_cpi_create(&a.tx) { det.create(&a, &m, "cpi", "verdict=cpi_not_decoded"); }
-                    if race.cfg.active() { race.observe(&a.tx); }
-                }
-                Some((mut launch, via_router)) => 'create: {
-                    if det.dev_sized_only && !via_router { launch.dev_buy_lamports = snipe::dev_buy_sized(&a.tx); }
+            match snipe::detect_launch(&a.tx) {
+                None => { if race.cfg.active() { race.observe(&a.tx); } }
+                Some(mut launch) => 'create: {
                     race_dev_fix(&race.cfg, &mut launch, &a.tx);
-                    let quote = snipe::create_quote_mint(&a.tx);
-                    let verdict = det.verdict(&launch, &a.tx, quote, min_dev_buy, max_dev_buy_lam, allow_nonvanilla, uri_whitelist, uri_blacklist);
-                    let first = det.create(&a, &launch.mint, if via_router { "router" } else if launch.is_create_v2 { "v2" } else { "v1" },
-                        &format!("dev={} dev_sized={} quote={} verdict={verdict}", launch.dev_buy_lamports, snipe::dev_buy_sized(&a.tx),
-                            quote.map(|q| b58(&q)[..8].to_string()).unwrap_or_else(|| "sol".into())));
-                    if !first { break 'create; }
                     if !dedup.first(launch.mint) { break 'create; } // same create seen on the other feed -> skip the duplicate
-                    // DET FIX: our buy is WSOL-quoted + Token-2022: a non-SOL or legacy-SPL launch would revert (fees lost)
-                    if quote.is_some() && !det.allow_nonsol { break 'create; }
-                    if !launch.is_create_v2 && !det.allow_legacy { break 'create; }
                     if launch.dev_buy_lamports < min_dev_buy { break 'create; }
                     if launch.dev_buy_lamports > max_dev_buy_lam { break 'create; } // whale gate: dev>8 SOL is poison (50% dump)
                     if !allow_nonvanilla && !launch.is_snipeable() { break 'create; }
                     if uri_whitelist && !snipe::trusted_launch_host(&a.tx) { skipped_host += 1; break 'create; }
                     if uri_blacklist && snipe::is_bot_launchpad(&a.tx) { skipped_host += 1; break 'create; }
                     // leader-proximity gate: only fire when the create slot's leader is close (skip far/unknown).
-                    // DET FIX: an UNKNOWN leader (slot outside the mapped epochs) no longer counts as far: it used to skip
-                    // every launch after an epoch boundary (the map held one epoch, fetched once at start).
-                    if close_set.as_ref().map(|cs| slot_leader.get(&a.slot).map(|l| !cs.contains(l)).unwrap_or(false)).unwrap_or(false) {
+                    if close_set.as_ref().map(|cs| !slot_leader.get(&a.slot).map(|l| cs.contains(l)).unwrap_or(false)).unwrap_or(false) {
                         skipped_far += 1; break 'create;
                     }
-                    rx_t.insert(launch.mint, a.t_rx); if rx_t.len() > 4096 { rx_t.clear(); }
                     if !race.cfg.active() || race.add(&launch, &a.tx, a.slot) { ready.push((launch, a.slot)); }
                 }
             }
@@ -1924,15 +1737,13 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         if race.cfg.active() { ready.extend(race.due()); race.shadow.clear(); } // shadows are paper-only: never fired live
         for (launch, create_slot) in ready.drain(..) {
         // reserve a concurrency slot (never block the detector) and budget
-        // DET: a full --max-inflight SKIPS the launch (live): count it, so the backpressure cost is visible
-        let permit = match sem.clone().try_acquire_owned() { Ok(p) => p, Err(_) => { skipped_inflight += 1; eprintln!("  SKIP-INFLIGHT slot={create_slot} mint={} (max_inflight {max_inflight} busy)", b58(&launch.mint)); continue } };
-        let rx_age_us = rx_t.get(&launch.mint).map(|t| arbx::feeds::clock::now_ns().saturating_sub(*t) / 1000).unwrap_or(0);
+        let permit = match sem.clone().try_acquire_owned() { Ok(p) => p, Err(_) => continue };
         if spent.fetch_add(spend_per, Ordering::Relaxed) + spend_per > total_cap { spent.fetch_sub(spend_per, Ordering::Relaxed); break; }
         fired.fetch_add(1, Ordering::Relaxed);
         let (key2, rpc2, path2) = (key.clone(), rpc.clone(), path.clone());
         tokio::spawn(async move {
             let _permit = permit;
-            eprintln!("  FIRE slot={create_slot} mint={} dev_buy={} rx_to_fire_us={rx_age_us}", b58(&launch.mint), launch.dev_buy_lamports);
+            eprintln!("  FIRE slot={create_slot} mint={} dev_buy={}", b58(&launch.mint), launch.dev_buy_lamports);
             if let Err(e) = round_trip_launch(&key2, user, &rpc2, &path2, &launch, cap_lamports, max_sol, land_timeout, Some(create_slot)).await {
                 eprintln!("  position {} ended: {e:#}", b58(&launch.mint));
             }
@@ -1940,8 +1751,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         } // ready.drain
     }
 
-    if close_set.is_some() { eprintln!("CLOSE-LEADER GATE: skipped {skipped_far} far-leader launches"); }
-    eprintln!("MAX-INFLIGHT: skipped {skipped_inflight} qualifying launches (all {max_inflight} slots busy)");
+    if close_set.is_some() { eprintln!("CLOSE-LEADER GATE: skipped {skipped_far} far/unknown-leader launches"); }
     if uri_whitelist { eprintln!("URI-HOST GATE: skipped {skipped_host} non-trusted-host launches"); }
     eprintln!("\nSNIPE-LIVE: window ended — draining {} in-flight positions ...", max_inflight - sem.available_permits());
     let _ = tokio::time::timeout(Duration::from_secs(30), sem.acquire_many(max_inflight as u32)).await;
@@ -2034,10 +1844,9 @@ async fn round_trip_launch(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Ar
     }
 
     // --- read our token balance (buyer ATA under TOKEN-2022) ---
-    // DET: the two post-buy reads run concurrently (was 2 sequential RPC round trips before the first sell leg)
+    let bal_after_buy = native_balance(rpc, user).await.unwrap_or(bal_start);
     let ata = pda::ata(&user, &mint, &pda::TOKEN_2022);
-    let (bal_after_buy, amount) = tokio::join!(async { native_balance(rpc, user).await.unwrap_or(bal_start) }, token_balance(rpc, &ata));
-    let amount = amount?;
+    let amount = token_balance(rpc, &ata).await?;
     eprintln!("  tokens received: {amount} (ATA {})", b58(&ata));
     if amount == 0 { bail!("no tokens in the buyer ATA after the buy landed — aborting before the sell (ATA {})", b58(&ata)); }
 
