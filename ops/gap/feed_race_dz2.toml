@@ -1,0 +1,26 @@
+env_file = "/root/arbx/deploy/.env"
+[[feed]]
+name    = "kaldera"
+kind    = "yellowstone-deshred"
+url     = "https://kaldera-frankfurt.constant-k.com:8443"
+token_env    = "KALDERA_TOKEN"
+token_header = "x-token"
+[[feed]]
+name      = "dz-merged"
+kind      = "udp-multicast"
+groups    = ["233.84.178.1", "233.84.178.12", "233.84.178.16"]   # all 3 DZ groups into ONE assembler
+port      = 7733
+interface = "doublezero1"
+rpath_sample = 50
+[[feed]]
+name      = "dz-leader"
+kind      = "udp-multicast"
+group     = "233.84.178.1"
+port      = 7733
+interface = "doublezero1"
+[[feed]]
+name      = "dz-retrans-eu"
+kind      = "udp-multicast"
+group     = "233.84.178.12"
+port      = 7733
+interface = "doublezero1"

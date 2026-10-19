@@ -31,3 +31,13 @@ program/**/target/
 
 # python bytecode
 __pycache__/
+
+# sniper: never commit secrets / runtime data
+.env
+*.pass
+*wallet*.enc
+id.json
+*searcher*.json
+*-auth.json
+ops/**/*.log
+ops/**/*.jsonl

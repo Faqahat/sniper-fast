@@ -1,0 +1,773 @@
+--- mod.rs.orig	2026-10-19 10:36:04.229604226 +0100
++++ /root/arbx-lat/src/send/mod.rs	2026-10-19 10:36:04.848459872 +0100
+@@ -379,6 +379,57 @@
+ /// How a path is kept warm (Tpu: its own loop keeps the next leaders' connections open)
+ enum Ping { Get(String), Health, Tips, None }
+ 
++/// LAT (2026-10-19): a DNS cache for the send clients. Measured from this box (/root/lat/net_before.jsonl): a cold
++/// getaddrinfo of a provider host costs 3.5-17 ms (helius fra-sender 9.8, astralane 13.9, landx fra3 17.2) because the
++/// providers' TTLs are short and systemd-resolved misses. reqwest resolves on EVERY new connection, so a reconnect on
++/// the hot path (an HTTP/1.1 connection busy with a keep-alive, a server-side close) paid it before TCP+TLS. This
++/// resolver answers from memory at once and refreshes in the background every 60 s (the stale answer is used while it
++/// refreshes; a failed refresh keeps the old one).
++pub struct DnsCache { m: Mutex<rustc_hash::FxHashMap<String, (Vec<std::net::SocketAddr>, Instant)>> }
++
++impl DnsCache {
++    pub fn global() -> Arc<DnsCache> {
++        static G: std::sync::OnceLock<Arc<DnsCache>> = std::sync::OnceLock::new();
++        G.get_or_init(|| Arc::new(DnsCache { m: Mutex::new(Default::default()) })).clone()
++    }
++    async fn lookup(host: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
++        let v: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, 0u16)).await?.collect();
++        if v.is_empty() { return Err(std::io::Error::other("no address")); }
++        Ok(v)
++    }
++    /// resolve now and remember (start-up pre-resolution: the first send never waits on DNS)
++    pub async fn prime(&self, host: &str) -> Option<usize> {
++        let v = Self::lookup(host).await.ok()?;
++        let n = v.len();
++        self.m.lock().unwrap().insert(host.to_string(), (v, Instant::now()));
++        Some(n)
++    }
++}
++
++impl reqwest::dns::Resolve for DnsCache {
++    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
++        let host = name.as_str().to_string();
++        let hit = self.m.lock().unwrap().get(&host).cloned();
++        let me = DnsCache::global();
++        Box::pin(async move {
++            match hit {
++                Some((v, at)) => {
++                    if at.elapsed() > Duration::from_secs(60) {
++                        let h = host.clone();
++                        tokio::spawn(async move { let _ = me.prime(&h).await; });
++                    }
++                    Ok(Box::new(v.into_iter()) as reqwest::dns::Addrs)
++                }
++                None => {
++                    let v = DnsCache::lookup(&host).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
++                    me.m.lock().unwrap().insert(host, (v.clone(), Instant::now()));
++                    Ok(Box::new(v.into_iter()) as reqwest::dns::Addrs)
++                }
++            }
++        })
++    }
++}
++
+ #[derive(Default)]
+ pub struct PathStats {
+     pub sent: u64,
+@@ -586,8 +637,12 @@
+         // the bundle path's queue is the send policy's ([send_policy] queue_ms; PLAN WP-05 item 5)
+         let queue_ms = if c.kind == SendKind::JitoBundle { opts.queue_ms } else { c.queue_ms };
+         let budget = c.max_per_sec.map(|n| Budget::new(n, Duration::from_millis(queue_ms)));
++        // LAT: the DNS cache (pre-resolved here, so neither the warm-up nor the first send waits on getaddrinfo), and TCP
++        // keepalive probes so a silently dropped connection (NAT/LB idle reap) is noticed before a send needs it
++        let dns = DnsCache::global();
++        if let Some(h) = reqwest::Url::parse(&url).ok().and_then(|u| u.host_str().map(String::from)) { let _ = dns.prime(&h).await; }
+         let http = reqwest::Client::builder().tcp_nodelay(true).pool_idle_timeout(Duration::from_secs(85)).pool_max_idle_per_host(4)
+-            .timeout(SEND_TIMEOUT).build()?;
++            .tcp_keepalive(Duration::from_secs(15)).dns_resolver(dns).timeout(SEND_TIMEOUT).build()?;
+         let jito = if c.kind == SendKind::JitoBundle {
+             if !url.starts_with("https://") && !url.starts_with("http://") { bail!("{what}: the block engine url needs a scheme (https://...)"); }
+             let key = jito::load_keypair(c.auth_keypair.as_deref().unwrap_or(jito::DEFAULT_AUTH_KEYPAIR))?;
+@@ -732,7 +787,11 @@
+                     p.extend_from_slice(key);
+                     p.extend_from_slice(raw);
+                     sock.send(&p).await.map_err(|e| refuse(None, format!("{name}: udp: {e}")))?;
+-                    Ok(rep(sig.to_string(), None, None, "udp sent".into()))
++                    // LAT: UDP has no ack and no retransmit: a second copy right behind the first (same signature, so the
++                    // relay / leader dedups it) makes a single dropped datagram harmless. LANDX_UDP_COPIES (default 2).
++                    let copies = std::env::var("LANDX_UDP_COPIES").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(2).clamp(1, 4);
++                    for _ in 1..copies { let _ = sock.send(&p).await; }
++                    Ok(rep(sig.to_string(), None, None, format!("udp sent x{copies}")))
+                 } else {
+                     let resp = self.http.post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
+                         .body(raw.to_vec()).send().await.map_err(net)?;
+@@ -838,6 +897,27 @@
+         }
+     }
+ 
++    /// LAT ACK PROBE (zero cost): the provider's REAL send handler answering an undecodable 4-byte "transaction" (nothing
++    /// can land, nothing is paid), timed over the warm pooled connection the buys use. jito-bundle: a junk one-packet
++    /// bundle over the searcher gRPC (the block engine refuses it). UDP paths: the datagram write only (no reply).
++    /// Returns (ms, answered, reply). Space calls >= 1.1 s per path: rejected requests count toward Helius' keyless
++    /// 1 req/s and Jito's 1 txn req/s (measured: /root/lat/jito_rl.txt).
++    pub async fn ack_probe(&self) -> (f64, bool, String) {
++        let t = Instant::now();
++        let (answered, msg) = match (self.kind, &self.jito) {
++            (SendKind::JitoBundle, Some(j)) => match j.send_bundle(&[&[1u8, 2, 3, 4][..]], "ackprobe", None).await {
++                Ok(id) => (true, format!("accepted junk?! {id}")),
++                Err(e) => (!matches!(e, jito::BundleError::Other(_)), short(&e.to_string())),
++            },
++            (SendKind::Tpu, _) => (false, "skipped (tpu)".into()),
++            _ => match self.deliver(&[1, 2, 3, 4], "", None).await {
++                Ok(r) => (r.status.is_some(), format!("accepted junk?! {}", short(&r.reply))),
++                Err(e) => (e.answered, short(&e.msg)),
++            },
++        };
++        (t.elapsed().as_secs_f64() * 1e3, answered, msg)
++    }
++
+     /// one line: counts, send and keep-alive latency (p50/p90, ms)
+     pub fn summary(&self) -> String {
+         let mut s = self.stats.lock().unwrap();
+@@ -985,8 +1065,18 @@
+         }
+         let me = self.clone();
+         self.rt.spawn(async move {
++            let mut tick: u64 = 0;
+             while !stop.load(Ordering::Relaxed) {
++                tick += 1;
+                 for p in &me.list {
++                    // LAT: the jito-bundle keep-alive (GetTipAccounts) took one of the bundle path's 2/s rate tokens every
++                    // tick (budget try_now), so a buy right after it could be refused locally. The gRPC channel already sends
++                    // HTTP/2 PINGs every 10 s (feeds::grpc::channel), which is what keeps it warm; the RTT sample is enough
++                    // every 15 ticks (30 s at the 2 s cadence). JITO_KEEPALIVE_TICKS overrides.
++                    if p.kind == SendKind::JitoBundle {
++                        let every_n = std::env::var("JITO_KEEPALIVE_TICKS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(15).max(1);
++                        if tick % every_n != 1 % every_n { continue; }
++                    }
+                     let (p, status, me) = (p.clone(), status.clone(), me.clone());
+                     tokio::spawn(async move {
+                         let t_ns = now_ns();
+--- snipe_engine.rs.orig	2026-10-19 10:36:04.233385898 +0100
++++ /root/arbx-lat/src/bin/snipe_engine.rs	2026-10-19 10:58:42.918806437 +0100
+@@ -218,7 +218,7 @@
+     let paper_trade = has("--paper-trade");
+     let unwrap = has("--unwrap");
+     let live = has("--live");
+-    if !warm_probe && !shadow && !round_trip && !snipe_once && !simulate && !paper_trade && !unwrap && !has("--sell-held") {
++    if !warm_probe && !shadow && !round_trip && !snipe_once && !simulate && !paper_trade && !unwrap && !has("--sell-held") && !has("--ack-probe") {
+         bail!("pick a mode: --warm-probe (latency), --shadow (observe launches), --round-trip (gated buy+sell on --mint), --snipe-once (gated: auto-detect a fresh launch + round-trip it), --simulate (ZERO-COST: simulateTransaction a v3 buy, no send), --paper-trade (ZERO-COST: forward paper-trade the filter+exit-ladder on live launches, no send), --unwrap (gated: close the WSOL ATA back to native SOL), optionally with --live for real txs (gated)");
+     }
+ 
+@@ -296,6 +296,34 @@
+         }
+     }
+     eprintln!("snipe_engine: fire path = {} ({})", path.name, path.describe());
++    // ---- LAT (2026-10-19): multi-path fan-out / per-leader-client routing / per-path send log (all default off)
++    if let Some(list) = arg("--multi-send") {
++        let mut v = Vec::new();
++        for n in list.split([',', '+']).map(str::trim).filter(|s| !s.is_empty()) {
++            match paths.index(n) { Some(i) => v.push(paths.list[i].clone()), None => bail!("--multi-send {n}: no such [[send]] path (or it failed to build: see the send notes)") }
++        }
++        eprintln!("snipe_engine: MULTI-SEND buys via {} (one signature, every path's tip)", v.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
++        let _ = lat::MULTI.set(v);
++    }
++    if let Some(spec) = arg("--route-by-client") {
++        let r = lat::parse_routes(&spec, &paths)?;
++        let mut ks: Vec<_> = r.keys().cloned().collect(); ks.sort();
++        for c in ks { eprintln!("snipe_engine: ROUTE {c:8} -> {}", r[&c].iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(" + ")); }
++        let _ = lat::ROUTES.set(r);
++    }
++    if lat::ROUTES.get().is_some() || has("--ack-probe") {
++        match lat::refresh(&rpc).await {
++            Ok(m) => eprintln!("  {m}"),
++            Err(e) if lat::ROUTES.get().is_some() => bail!("--route-by-client: the leader book failed: {e:#}"),
++            Err(e) => eprintln!("  leader book: {e:#}"),
++        }
++        lat::start_refresh(rpc.clone(), stop.clone());
++    }
++    if let Some(f) = arg("--send-log") {
++        let file = std::fs::OpenOptions::new().create(true).append(true).open(&f).with_context(|| format!("--send-log {f}"))?;
++        let _ = lat::SEND_LOG.set(std::sync::Mutex::new(file));
++        eprintln!("snipe_engine: per-path send log -> {f}");
++    }
+ 
+     // ---- keep the current slot fresh for the tpu leader targeting (the real engine feeds this from its state
+     // stream; here a lightweight poller feeds send::tpu::SLOT from the RPC's processed slot).
+@@ -330,6 +358,15 @@
+ 
+     // ---- WAIT until the path is demonstrably HOT before firing.
+     wait_until_warm(&path, &rpc).await?;
++    if let Some(n) = arg_u64_opt("--ack-probe") {
++        // ZERO COST: junk requests only (nothing can land); allowed without --live
++        let _ = wait_until_warm_all(&paths).await;
++        lat::ack_probe(&key, user, &rpc, &paths, &path, n).await?;
++        stop.store(true, Ordering::Relaxed);
++        return Ok(());
++    }
++    // LAT: warm EVERY fan-out path before the first fire (not only the --send-path one)
++    if lat::ROUTES.get().is_some() || lat::MULTI.get().is_some() { wait_until_warm_all(&paths).await; }
+     if let Some(list) = arg("--sell-held") {
+         if !live { bail!("--sell-held sends real sells: needs --live"); }
+         run_sell_held(&key, user, &rpc, &path, &list).await?;
+@@ -416,6 +453,22 @@
+     }
+ }
+ 
++/// LAT: one keep-alive round trip on every path at once, twice (the pool then holds a warm connection for each); prints
++/// the second round's RTT per path
++async fn wait_until_warm_all(paths: &Arc<send::Paths>) {
++    for round in 0..2 {
++        let hs: Vec<_> = paths.list.iter().map(|p| { let p = p.clone(); tokio::spawn(async move { (p.name.clone(), p.warm().await) }) }).collect();
++        let mut line = Vec::new();
++        for h in hs {
++            if let Ok((n, r)) = h.await {
++                line.push(match r { Ok(Some(d)) => format!("{n} {:.2} ms", d.as_secs_f64() * 1e3), Ok(None) => format!("{n} -"), Err(e) => format!("{n} ERR {}", format!("{e:#}").chars().take(60).collect::<String>()) });
++            }
++        }
++        if round == 1 { eprintln!("  WARM-ALL: {}", line.join(" | ")); }
++        tokio::time::sleep(Duration::from_millis(200)).await;
++    }
++}
++
+ /// Fire capped 1-lamport self-transfers through the warm path and report the send->land slot delta distribution.
+ async fn run_warm_probe(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, live: bool) -> Result<()> {
+     let max_sends = arg_u64("--max-sends", 20);
+@@ -790,71 +843,84 @@
+ /// Reusable: compile the given ixs on a FRESH recent blockhash, sign, send through the WARM path, and poll
+ /// getSignatureStatuses for the land slot. The one place the engine turns an instruction list into a landed tx.
+ async fn send_and_poll(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, ixs: &[build::Ix], land_timeout: Duration) -> Result<Landed> {
++    send_and_poll_at(key, user, rpc, path, ixs, land_timeout, None).await
++}
++
++/// `send_and_poll` for a BUY aimed at `target_slot` (the create's slot: LAT per-leader-client routing reads its leader)
++#[allow(clippy::too_many_arguments)]
++async fn send_and_poll_at(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, ixs: &[build::Ix], land_timeout: Duration, target_slot: Option<u64>) -> Result<Landed> {
+     let t_sp = Instant::now();
+     // Tipped send paths (nozomi / jito-tx / helius / 0slot ...) require a top-level System tip transfer to one of the
+     // path's tip accounts, or Path::check refuses the send. Tipless paths (staked-rpc / tpu-direct) return None -> unchanged.
+-    let _tip_owned: Vec<build::Ix>;
+     // --also-send: only for non-sell sends (a sell goes through SELL_PATH), and only to a different path.
+     // DET FIX: "is this a buy" is read from the instructions (the pump buy disc). The old test (path != SELL_PATH) also
+     // double-sent every SELL, paying the also-path's tip, whenever --sell-path was not given (sells then use the buy path).
+     let is_buy = ixs.iter().any(|ix| ix.data.starts_with(&snipe_build::BUY_EXACT_QUOTE_IN_V3_DISC));
+-    let also = ALSO_PATH.get().filter(|a| is_buy && a.name != path.name);
+-    let mut tips: Vec<(Pk, u64)> = Vec::new();
+-    if let Some((t, l)) = path.tip(0) { if l > 0 { tips.push((t, l)); } }
+-    if let Some(a) = also { if let Some((t, l)) = a.tip(0) { if l > 0 { tips.push((t, l)); } } }
+-    let ixs: &[build::Ix] = if tips.is_empty() { ixs } else {
+-        let mut v = Vec::with_capacity(ixs.len() + tips.len());
+-        for (t, l) in &tips { v.push(build::transfer_ix(user, *t, *l)); }
+-        v.extend_from_slice(ixs);
+-        _tip_owned = v;
+-        &_tip_owned
+-    };
++    // LAT: the fan-out set: --route-by-client / --multi-send for buys; else [path] (+ --also-send for buys), as before
++    let (mut fan, mut meta) = if is_buy { lat::buy_paths(path, ALSO_PATH.get(), target_slot) } else { (vec![path.clone()], lat::Meta { route: "single".into(), ..Default::default() }) };
+     let cached = BLOCKHASH_CACHE.lock().unwrap().filter(|(_, t)| t.elapsed() < Duration::from_secs(20)).map(|(h, _)| h);
+     let blockhash = match cached { Some(h) => h, None => rpc.latest_blockhash().await.context("getLatestBlockhash")?.0 };
+-    let msg = build::compile_v0(user, ixs, blockhash, &[], &[]).map_err(|e| anyhow::anyhow!(e))?;
+-    let raw = build::sign(&msg, key);
++    // one tip per tip family for every path in the fan-out, the CU limit raised for the extra transfers; a tx over the
++    // 1232-byte packet limit drops paths from the end (their tips with them) until it fits
++    let (raw, tips) = lat::build_tx(key, user, ixs, &mut fan, blockhash)?;
+     let sig = send::first_signature(&raw).context("signed tx has no signature")?;
+     let mut sig_bytes = [0u8; 64];
+     sig_bytes.copy_from_slice(&bs58::decode(&sig).into_vec()?);
+     let send_slot = match send::tpu::SLOT.load(Ordering::Relaxed) { 0 => rpc.slot().await.unwrap_or(0), s => s };
++    meta.sig = sig.clone();
++    meta.bytes = raw.len();
++    meta.tips = tips.iter().map(|t| t.1).sum();
+     eprintln!("  SEND-PREP {:.1} ms (send_and_poll entry -> send)", t_sp.elapsed().as_secs_f64() * 1e3);
+-    // DET: one SEND-ACK line per path answer: how long the endpoint took to accept, its HTTP status and reply (constant-k's
+-    // x-ck-tx-route is appended by send::deliver). Zero-cost diagnostics for the send-path A/B.
+-    let timed = |p: Arc<send::Path>, raw: Vec<u8>| async move {
+-        let t = Instant::now();
+-        let r = p.send(&raw, send::Prio { band: 0, crowd: 0, ev: 0 }, None).await;
+-        match &r {
+-            Ok(rep) => eprintln!("  SEND-ACK path={} ack_ms={:.2} status={:?} reply={}", p.name, t.elapsed().as_secs_f64() * 1e3, rep.status, rep.reply.chars().take(120).collect::<String>()),
+-            Err(e) => eprintln!("  SEND-ACK path={} ack_ms={:.2} REFUSED status={:?} {}", p.name, t.elapsed().as_secs_f64() * 1e3, e.status, e.msg.chars().take(120).collect::<String>()),
+-        }
+-        r
+-    };
+-    match also {
+-        Some(a) => {
+-            let (r1, r2) = tokio::join!(timed(path.clone(), raw.clone()), timed(a.clone(), raw.clone()));
+-            match (&r1, &r2) {
+-                (Err(e1), Err(e2)) => bail!("send refused: {}: {e1} / {}: {e2}", path.name, a.name),
+-                (Err(e1), Ok(_)) => eprintln!("  (also-send: {} refused: {e1}; {} accepted)", path.name, a.name),
+-                (Ok(_), Err(e2)) => eprintln!("  (also-send: {} refused: {e2}; {} accepted)", a.name, path.name),
+-                _ => {}
+-            }
+-        }
+-        None => {
+-            if let Err(e) = timed(path.clone(), raw.clone()).await {
+-                // DET (--fallback-path, default off): a refusal (HTTP 429 from Helius' keyless 1 req/s/IP limit, or the
+-                // local max_per_sec guard) re-sends the SAME signed tx through a tipless fallback path instead of
+-                // losing the trade. Only tipless fallbacks (staked-rpc) are accepted at start-up: no extra tip is paid.
+-                match FALLBACK_PATH.get().filter(|f| f.name != path.name) {
+-                    Some(f) => {
+-                        timed(f.clone(), raw.clone()).await
+-                            .map_err(|e2| anyhow::anyhow!("send refused: {}: {e} / fallback {}: {e2}", path.name, f.name))?;
+-                        eprintln!("  (fallback: {} refused: {e}; re-sent via {})", path.name, f.name);
+-                    }
+-                    None => bail!("send refused: {e}"),
+-                }
++    if fan.len() > 1 || lat::ROUTES.get().is_some() || lat::MULTI.get().is_some() {
++        eprintln!("  SEND-FAN sig={} {} slot={:?} leader={} client={} paths={} tips={} lamports bytes={}", &sig[..16.min(sig.len())], meta.route, target_slot,
++            meta.leader.chars().take(8).collect::<String>(), meta.client, fan.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(","), meta.tips, meta.bytes);
++    }
++    if fan.len() > 1 {
++        // LAT: every path at once, each on its own task (no path waits for another's write); the buy proceeds as soon as
++        // ONE path accepts, the rest log their SEND-ACK when they answer. All refused -> error, as before
++        let t0 = Instant::now();
++        let raw = Arc::new(raw);
++        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
++        for p in &fan {
++            let (p, raw, tx, m) = (p.clone(), raw.clone(), tx.clone(), meta.clone());
++            tokio::spawn(async move {
++                let r = lat::send_one(&p, &raw, t0, &m).await;
++                let _ = tx.send((p.name.clone(), r.err().map(|e| e.msg)));
++            });
++        }
++        drop(tx);
++        let mut errs = Vec::new();
++        let mut any_ok = false;
++        while let Some((name, e)) = rx.recv().await {
++            match e { None => { any_ok = true; break; } Some(m) => errs.push(format!("{name}: {m}")) }
++        }
++        if !any_ok { bail!("send refused on every path: {}", errs.join(" / ")); }
++        let out = poll_land(rpc, sig.clone(), sig_bytes, send_slot, land_timeout).await;
++        jito_results(&fan, &meta);
++        return Ok(out);
++    }
++    // single path (the old code path): its SEND-ACK, and the tipless --fallback-path on a refusal
++    let t0 = Instant::now();
++    if let Err(e) = lat::send_one(path, &raw, t0, &meta).await {
++        // DET (--fallback-path, default off): a refusal (HTTP 429 from Helius' keyless 1 req/s/IP limit, or the
++        // local max_per_sec guard) re-sends the SAME signed tx through a tipless fallback path instead of
++        // losing the trade. Only tipless fallbacks (staked-rpc) are accepted at start-up: no extra tip is paid.
++        match FALLBACK_PATH.get().filter(|f| f.name != path.name) {
++            Some(f) => {
++                lat::send_one(f, &raw, t0, &meta).await
++                    .map_err(|e2| anyhow::anyhow!("send refused: {}: {e} / fallback {}: {e2}", path.name, f.name))?;
++                eprintln!("  (fallback: {} refused: {e}; re-sent via {})", path.name, f.name);
+             }
++            None => bail!("send refused: {e}"),
+         }
+     }
++    let out = poll_land(rpc, sig, sig_bytes, send_slot, land_timeout).await;
++    if is_buy { jito_results(&fan, &meta); }
++    Ok(out)
++}
++
++/// poll getSignatureStatuses until the tx lands or `land_timeout`
++async fn poll_land(rpc: &rpc::Rpc, sig: String, sig_bytes: [u8; 64], send_slot: u64, land_timeout: Duration) -> Landed {
+     let mut out = Landed { sig, send_slot, land_slot: None, ok: false };
+     let deadline = Instant::now() + land_timeout;
+     // DET: --land-poll-ms (default 300 = unchanged). The buy's land is only noticed at the next poll, so the first
+@@ -866,7 +932,20 @@
+             if let Some(Some((land, ok))) = v.into_iter().next() { out.land_slot = Some(land); out.ok = ok; break; }
+         }
+     }
+-    Ok(out)
++    out
++}
++
++/// LAT: after the land poll, what each jito-bundle path's result stream said about our bundle (accepted / processed with
++/// its slot / rejected / dropped ...): which path carried the landing on Jito leaders
++fn jito_results(fan: &[Arc<send::Path>], meta: &lat::Meta) {
++    for p in fan {
++        let Some(j) = &p.jito else { continue };
++        let v = j.verdicts(&meta.sig);
++        let s = v.iter().map(|(_, o)| format!("{}{}{}", o.outcome, o.slot.map(|x| format!("@{x}")).unwrap_or_default(),
++            o.index.map(|i| format!("#{i}")).unwrap_or_default())).collect::<Vec<_>>().join(",");
++        eprintln!("  JITO-RESULT path={} sig={} {}", p.name, &meta.sig[..16.min(meta.sig.len())], if s.is_empty() { "(no result yet)".to_string() } else { s.clone() });
++        lat::log_json(serde_json::json!({ "ev": "jito_result", "t_ns": arbx::feeds::clock::now_ns(), "sig": meta.sig, "path": p.name, "results": s }));
++    }
+ }
+ 
+ /// native SOL balance of `who` (lamports, processed commitment).
+@@ -1271,6 +1350,9 @@
+     track_rejects: bool,
+     /// --race-min-bundle N: creator bundle of >= N buy txs within bundle_ms (0 = off)
+     min_bundle: u32,
++    /// LAT --race-early: decide PASS the moment the (monotone) bundle condition is met instead of waiting out the window
++    /// (same selection; the 3 ms Gate B window cost ~5 ms rx->fire with the 1 ms loop tick)
++    early: bool,
+     /// --race-max-name-len L: token name <= L chars (0 = off)
+     max_name_len: usize,
+     /// --race-min-bundle-sol / --race-max-bundle-sol: creator bundle SOL bounds (lamports)
+@@ -1309,6 +1391,7 @@
+             count_out: window_cfg > 0.0,
+             track_rejects: has("--race-track-rejects"),
+             min_bundle,
++            early: has("--race-early"),
+             max_name_len: arg_u64("--race-max-name-len", 0) as usize,
+             min_bundle_sol: (arg_f64("--race-min-bundle-sol", 0.0) * 1e9) as u64,
+             max_bundle_sol: (arg_f64("--race-max-bundle-sol", 1e9) * 1e9) as u64,
+@@ -1455,7 +1538,13 @@
+         let mut done: Vec<Pk> = Vec::new();
+         for (mint, p) in self.pend.iter_mut() {
+             let el = p.t0.elapsed().as_secs_f64() * 1e3;
+-            if !p.decided && el >= self.cfg.window_ms {
++            // LAT --race-early: pass now when the bundle condition (it only grows) already holds and nothing else waits on
++            // the window (no outsider count, no "no bundle" rule, no bundle-SOL maximum). A launch that passes early would
++            // pass at the window end too: the selection is unchanged, only the decision is earlier.
++            let early = self.cfg.early && !p.decided && p.static_ok && !self.cfg.count_out && self.cfg.bundle != -1
++                && self.cfg.max_bundle_sol >= 1_000_000_000_000_000_000 && p.bundle_n >= self.cfg.min_bundle.max(1)
++                && p.bundle_sol >= self.cfg.min_bundle_sol && el <= self.cfg.window_ms;
++            if !p.decided && (el >= self.cfg.window_ms || early) {
+                 let (n, sol, maxcu) = Self::counts(p, self.cfg.window_ms);
+                 let bundle_ok = p.bundle_n >= self.cfg.min_bundle
+                     && p.bundle_sol >= self.cfg.min_bundle_sol && p.bundle_sol <= self.cfg.max_bundle_sol
+@@ -1822,7 +1911,12 @@
+ /// runners. Hard-bounded by: --max-sol (per-buy cap), --max-total-sol (cumulative buy-spend cap), and an in-engine
+ /// balance kill-switch (--max-loss-sol). Runs for --minutes.
+ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rpc>, path: &Arc<send::Path>, live: bool, stop: &Arc<AtomicBool>) -> Result<()> {
+-    if !live { eprintln!("\nDRY: --snipe-once --concurrent needs --live --max-sol <cap> --max-total-sol <cap>."); return Ok(()); }
++    // LAT --junk-fanout: the ZERO-COST dry run of this loop: detection, gates, routing, the real tx built + signed and
++    // DISCARDED, and only junk (undecodable) bytes go to the routed paths. Never with --live.
++    let junk = has("--junk-fanout");
++    if junk && live { bail!("--junk-fanout is the zero-cost dry run: never combine it with --live"); }
++    if junk { eprintln!("\nJUNK-FANOUT (ZERO COST): real detection + routing; every fire sends only undecodable junk to its paths, nothing can land"); }
++    if !live && !junk { eprintln!("\nDRY: --snipe-once --concurrent needs --live --max-sol <cap> --max-total-sol <cap>."); return Ok(()); }
+     let max_sol = arg_f64("--max-sol", -1.0);
+     if max_sol <= 0.0 { bail!("--live requires --max-sol <cap> (per-buy cap)"); }
+     let cap_lamports = (max_sol * 1e9) as u64;
+@@ -1958,6 +2052,10 @@
+         tokio::spawn(async move {
+             let _permit = permit;
+             eprintln!("  FIRE slot={create_slot} mint={} dev_buy={} rx_to_fire_us={rx_age_us}", b58(&launch.mint), launch.dev_buy_lamports);
++            if junk {
++                if let Err(e) = lat::junk_fire(&key2, user, &path2, &launch, create_slot).await { eprintln!("  junk fire {} failed: {e:#}", b58(&launch.mint)); }
++                return;
++            }
+             if let Err(e) = round_trip_launch(&key2, user, &rpc2, &path2, &launch, cap_lamports, max_sol, land_timeout, Some(create_slot)).await {
+                 eprintln!("  position {} ended: {e:#}", b58(&launch.mint));
+             }
+@@ -2044,8 +2142,10 @@
+     eprintln!("\nROUND-TRIP (LIVE): mint={} buy spend={} lamports ({:.6} SOL) via {} ...", b58(&mint), spend, spend as f64 / 1e9, path.name);
+ 
+     eprintln!("  BUY-PREP {:.1} ms (round_trip entry -> send_and_poll)", t_rt.elapsed().as_secs_f64() * 1e3);
+-    let (bal_start, buy) = tokio::join!(async { native_balance(rpc, user).await.unwrap_or(0) },
+-                                        send_and_poll(key, user, rpc, path, &buy_ixs, land_timeout));
++    // LAT: the send future first (tokio::join! polls in order: the buy's request leaves before getBalance is built);
++    // the create slot routes the buy by its leader's client (--route-by-client)
++    let (buy, bal_start) = tokio::join!(send_and_poll_at(key, user, rpc, path, &buy_ixs, land_timeout, create_slot),
++                                        async { native_balance(rpc, user).await.unwrap_or(0) });
+     let buy = buy?;
+     match buy.land_slot {
+         Some(land) => eprintln!("  BUY  sig={} send_slot={} land_slot={} delta={} ok={}", buy.sig, buy.send_slot, land, land as i64 - buy.send_slot as i64, buy.ok),
+@@ -2279,3 +2379,327 @@
+     println!("========================================");
+     Ok(())
+ }
++
++// ================================================================================================================
++// LAT (2026-10-19, /root/lat/NOTES.md): multi-path fan-out, per-leader-client routing, per-path send log, ack probe.
++// All default OFF: without --multi-send / --route-by-client the buy goes exactly as before (path [+ --also-send]).
++//  --multi-send a,b,c        every BUY goes to all these paths at once: ONE signed tx (one signature, so it can land
++//                            once only), carrying every path's tip (one transfer per tip family: jito-bundle and
++//                            jito-tx share Jito's accounts). Sells never fan out (--sell-path).
++//  --route-by-client SPEC    per create-slot LEADER CLIENT, the paths a BUY goes to. SPEC = "class=p1+p2;class=...;
++//                            default=..." with class in bam|harmonic|jito|fd|agave|other (getClusterNodes clientId:
++//                            AgaveBam/FireBAM=bam, Harmonic*=harmonic, JitoLabs=jito, Firedancer/Frankendancer=fd).
++//                            When the create slot is its leader's last, the next leader's paths are added too.
++//  --send-log FILE           one JSON line per path per buy (route, leader, client, t_off_us, ack_ms, reply) and one
++//                            per Jito bundle result: the per-path record for the landing test.
++//  --ack-probe N             ZERO COST (no --live needed): print the routing for the coming slots, build + simulate the
++//                            multi-tip buy (--mint), then N rounds of junk (undecodable) requests to every routed path
++//                            through the warm send clients; per-path ack p50/p90. Nothing can land, nothing is paid.
++// ================================================================================================================
++mod lat {
++    use super::*;
++    use base64::Engine as _;
++    use std::collections::HashMap;
++    use std::sync::{Mutex, OnceLock, RwLock};
++
++    pub static MULTI: OnceLock<Vec<Arc<send::Path>>> = OnceLock::new();
++    pub static ROUTES: OnceLock<HashMap<String, Vec<Arc<send::Path>>>> = OnceLock::new();
++    pub static SEND_LOG: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
++    pub const CLASSES: [&str; 6] = ["bam", "harmonic", "jito", "fd", "agave", "other"];
++
++    pub struct Book { base: u64, idx: Vec<u32>, names: Vec<String>, client: HashMap<String, String> }
++    pub static BOOK: RwLock<Option<Book>> = RwLock::new(None);
++
++    pub fn class(client: &str) -> &'static str {
++        match client {
++            "AgaveBam" | "FireBAM" => "bam",
++            c if c.starts_with("Harmonic") => "harmonic",
++            "JitoLabs" => "jito",
++            "Firedancer" | "Frankendancer" => "fd",
++            "Agave" => "agave",
++            "" => "unknown",
++            _ => "other",
++        }
++    }
++
++    /// (leader, clientId) of `slot` from the cached book (no network)
++    pub fn leader_of(slot: u64) -> Option<(String, String)> {
++        let g = BOOK.read().unwrap();
++        let b = g.as_ref()?;
++        let i = *b.idx.get(slot.checked_sub(b.base)? as usize)?;
++        if i == u32::MAX { return None; }
++        let l = b.names.get(i as usize)?.clone();
++        let c = b.client.get(&l).cloned().unwrap_or_default();
++        Some((l, c))
++    }
++
++    /// leader schedule (current + next epoch, compact: one u32 per slot) + every node's clientId
++    pub async fn refresh(rpc: &rpc::Rpc) -> Result<String> {
++        let ei = rpc.call("getEpochInfo", serde_json::json!([])).await.context("getEpochInfo")?;
++        let start = ei["absoluteSlot"].as_u64().unwrap_or(0).saturating_sub(ei["slotIndex"].as_u64().unwrap_or(0));
++        let len = ei["slotsInEpoch"].as_u64().unwrap_or(432_000) as usize;
++        let mut names: Vec<String> = Vec::new();
++        let mut pos: HashMap<String, u32> = HashMap::new();
++        let mut idx = vec![u32::MAX; 2 * len];
++        for (k, a) in [(0usize, serde_json::Value::Null), (1usize, serde_json::json!(start + len as u64))] {
++            let Ok(ls) = rpc.call("getLeaderSchedule", serde_json::json!([a])).await else { continue };
++            let Some(obj) = ls.as_object() else { continue };
++            for (leader, slots) in obj {
++                let id = *pos.entry(leader.clone()).or_insert_with(|| { names.push(leader.clone()); (names.len() - 1) as u32 });
++                for s in slots.as_array().into_iter().flatten().filter_map(|x| x.as_u64()) {
++                    let j = k * len + s as usize;
++                    if j < idx.len() { idx[j] = id; }
++                }
++            }
++        }
++        let mapped = idx.iter().filter(|x| **x != u32::MAX).count();
++        if mapped == 0 { bail!("getLeaderSchedule returned nothing"); }
++        let cn = rpc.call("getClusterNodes", serde_json::json!([])).await.context("getClusterNodes")?;
++        let mut client = HashMap::new();
++        for n in cn.as_array().into_iter().flatten() {
++            if let (Some(p), Some(c)) = (n["pubkey"].as_str(), n["clientId"].as_str()) { client.insert(p.to_string(), c.to_string()); }
++        }
++        let msg = format!("LEADER-BOOK epoch_start={start} slots_mapped={mapped} leaders={} nodes_with_client={}", names.len(), client.len());
++        // keep the old client map if the new one came back empty (an RPC hiccup must not blind the router)
++        let mut g = BOOK.write().unwrap();
++        if client.is_empty() { if let Some(old) = g.as_ref() { client = old.client.clone(); } }
++        *g = Some(Book { base: start, idx, names, client });
++        Ok(msg)
++    }
++
++    pub fn start_refresh(rpc: Arc<rpc::Rpc>, stop: Arc<AtomicBool>) {
++        tokio::spawn(async move {
++            while !stop.load(Ordering::Relaxed) {
++                tokio::time::sleep(Duration::from_secs(600)).await;
++                match refresh(&rpc).await { Ok(m) => eprintln!("  {m}"), Err(e) => eprintln!("  LEADER-BOOK refresh failed (kept the old one): {e:#}") }
++            }
++        });
++    }
++
++    /// parse --route-by-client against the built paths
++    pub fn parse_routes(spec: &str, paths: &send::Paths) -> Result<HashMap<String, Vec<Arc<send::Path>>>> {
++        let mut m = HashMap::new();
++        for part in spec.split(';').map(str::trim).filter(|s| !s.is_empty()) {
++            let (c, list) = part.split_once('=').with_context(|| format!("--route-by-client: '{part}' is not class=path+path"))?;
++            let c = c.trim().to_string();
++            if c != "default" && !CLASSES.contains(&c.as_str()) { bail!("--route-by-client: unknown class '{c}' (use {} or default)", CLASSES.join("|")); }
++            let mut v = Vec::new();
++            for n in list.split(['+', ',']).map(str::trim).filter(|s| !s.is_empty()) {
++                let i = paths.index(n).with_context(|| format!("--route-by-client: no such [[send]] path '{n}' (or it failed to build: see send notes)"))?;
++                v.push(paths.list[i].clone());
++            }
++            m.insert(c, v);
++        }
++        if !m.contains_key("default") { bail!("--route-by-client needs a default=... entry"); }
++        Ok(m)
++    }
++
++    /// Route metadata for one buy (printed + logged)
++    #[derive(Clone, Default)]
++    pub struct Meta { pub route: String, pub leader: String, pub client: String, pub slot: Option<u64>, pub sig: String, pub bytes: usize, pub tips: u64 }
++
++    /// the paths a BUY goes to, and why
++    pub fn buy_paths(path: &Arc<send::Path>, also: Option<&Arc<send::Path>>, slot: Option<u64>) -> (Vec<Arc<send::Path>>, Meta) {
++        let mut meta = Meta { slot, ..Default::default() };
++        if let Some((l, c)) = slot.and_then(leader_of) { meta.leader = l; meta.client = c; }
++        if let Some(r) = ROUTES.get() {
++            let mut classes: Vec<&'static str> = Vec::new();
++            if let Some(s) = slot {
++                if !meta.client.is_empty() || !meta.leader.is_empty() { classes.push(class(&meta.client)); }
++                // the create is in its leader's LAST slot: a buy may land under the next leader, route for it too
++                if let (Some((l0, _)), Some((l1, c1))) = (leader_of(s), leader_of(s + 1)) {
++                    if l1 != l0 { let k = class(&c1); if !classes.contains(&k) { classes.push(k); } }
++                }
++            }
++            let mut v: Vec<Arc<send::Path>> = Vec::new();
++            for c in &classes {
++                for p in r.get(*c).or_else(|| r.get("default")).into_iter().flatten() {
++                    if !v.iter().any(|x| x.name == p.name) { v.push(p.clone()); }
++                }
++            }
++            if v.is_empty() { v = r.get("default").cloned().unwrap_or_else(|| vec![path.clone()]); classes.push("default"); }
++            meta.route = format!("route:{}", classes.join("+"));
++            return (v, meta);
++        }
++        if let Some(m) = MULTI.get() { meta.route = "multi".into(); return (m.clone(), meta); }
++        let mut v = vec![path.clone()];
++        if let Some(a) = also { if a.name != path.name { v.push(a.clone()); } }
++        meta.route = if v.len() > 1 { "also".into() } else { "single".into() };
++        (v, meta)
++    }
++
++    /// one tip per tip family (paths whose tip accounts overlap, e.g. jito-bundle + jito-tx, share one, at the larger
++    /// amount); each path's `check` then finds its own tip in the tx
++    pub fn tips_for(paths: &[Arc<send::Path>]) -> Vec<(Pk, u64)> {
++        let mut tips: Vec<(Pk, u64)> = Vec::new();
++        for p in paths {
++            let Some((t, l)) = p.tip(0) else { continue };
++            if l == 0 { continue; }
++            let accts = p.tip_accounts();
++            match tips.iter_mut().find(|e| accts.contains(&e.0)) { Some(e) => e.1 = e.1.max(l), None => tips.push((t, l)) }
++        }
++        tips
++    }
++
++    /// raise the SetComputeUnitLimit ix by `extra` units (each System tip transfer costs ~150 CU)
++    pub fn bump_cu_limit(ixs: &mut [build::Ix], extra: u32) {
++        for ix in ixs.iter_mut() {
++            if ix.program == arbx::tx::COMPUTE_BUDGET && ix.data.len() == 5 && ix.data[0] == 2 {
++                let cur = u32::from_le_bytes(ix.data[1..5].try_into().unwrap());
++                ix.data[1..5].copy_from_slice(&cur.saturating_add(extra).min(1_400_000).to_le_bytes());
++                return;
++            }
++        }
++    }
++
++    /// The fan-out tx: one tip per tip family for every path in `fan`, the CU limit raised for the extra transfers; a tx
++    /// over the 1232-byte packet limit drops paths from the end (their tips with them) until it fits. (raw, tips)
++    pub fn build_tx(key: &SigningKey, user: Pk, ixs: &[build::Ix], fan: &mut Vec<Arc<send::Path>>, blockhash: [u8; 32]) -> Result<(Vec<u8>, Vec<(Pk, u64)>)> {
++        loop {
++            let tips = tips_for(fan);
++            let mut v: Vec<build::Ix> = Vec::with_capacity(ixs.len() + tips.len());
++            for (t, l) in &tips { v.push(build::transfer_ix(user, *t, *l)); }
++            v.extend_from_slice(ixs);
++            if tips.len() > 2 { bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 2)); }
++            let msg = build::compile_v0(user, &v, blockhash, &[], &[]).map_err(|e| anyhow::anyhow!(e))?;
++            let raw = build::sign(&msg, key);
++            if raw.len() <= 1232 || fan.len() <= 1 { return Ok((raw, tips)); }
++            let d = fan.pop().unwrap();
++            eprintln!("  TX-SIZE {} bytes > 1232: dropped path {} from the fan-out", raw.len(), d.name);
++        }
++    }
++
++    /// --junk-fanout fire (ZERO COST): route + build + sign the real buy exactly as a live fire, DISCARD it, and send
++    /// only junk to the routed paths (Path::ack_probe never sends the tx). Logs JUNK-FAN / JUNK-ACK and the send log.
++    pub async fn junk_fire(key: &SigningKey, user: Pk, path: &Arc<send::Path>, launch: &Launch, create_slot: u64) -> Result<()> {
++        let t_b = Instant::now();
++        let (buy_ixs, _) = build_buy(user, launch, None, 2_000_000, 1);
++        let (mut fan, mut meta) = buy_paths(path, ALSO_PATH.get(), Some(create_slot));
++        let bh = BLOCKHASH_CACHE.lock().unwrap().map(|(h, _)| h).unwrap_or([0u8; 32]);
++        let (raw, tips) = build_tx(key, user, &buy_ixs, &mut fan, bh)?;
++        drop(raw); // never sent
++        meta.sig = "junk".into();
++        meta.tips = tips.iter().map(|t| t.1).sum();
++        let build_us = t_b.elapsed().as_micros();
++        eprintln!("  JUNK-FAN slot={create_slot} mint={} {} leader={} client={} paths={} tips={} build_us={build_us}", b58(&launch.mint), meta.route,
++            meta.leader.chars().take(8).collect::<String>(), meta.client, fan.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(","), meta.tips);
++        let t0 = Instant::now();
++        let hs: Vec<_> = fan.iter().map(|p| { let (p, m) = (p.clone(), meta.clone()); let mint = b58(&launch.mint); tokio::spawn(async move {
++            let off = t0.elapsed().as_micros() as u64;
++            let (ms, answered, reply) = p.ack_probe().await;
++            eprintln!("  JUNK-ACK path={} t_off_us={off} ack_ms={ms:.2} answered={answered} {}", p.name, reply.chars().take(80).collect::<String>());
++            log_json(serde_json::json!({ "ev": "junk_ack", "t_ns": arbx::feeds::clock::now_ns(), "mint": mint, "slot": m.slot, "route": m.route, "leader": m.leader,
++                "client": m.client, "path": p.name, "t_off_us": off, "ack_ms": ms, "answered": answered, "reply": reply, "build_us": build_us as u64 }));
++        }) }).collect();
++        for h in hs { let _ = h.await; }
++        Ok(())
++    }
++
++    pub fn log_json(v: serde_json::Value) {
++        if let Some(f) = SEND_LOG.get() {
++            use std::io::Write;
++            if let Ok(mut f) = f.lock() { let _ = writeln!(f, "{v}"); }
++        }
++    }
++
++    /// send through one path, print SEND-ACK (t_off_us = when this path's send started, after the fan-out began), log it
++    pub async fn send_one(p: &Arc<send::Path>, raw: &[u8], t0: Instant, meta: &Meta) -> std::result::Result<send::Reply, send::Refusal> {
++        let t_off = t0.elapsed();
++        let t = Instant::now();
++        let r = p.send(raw, send::Prio { band: 0, crowd: 0, ev: 0 }, None).await;
++        let ack = t.elapsed().as_secs_f64() * 1e3;
++        let (ok, status, reply) = match &r {
++            Ok(rep) => (true, rep.status, rep.reply.chars().take(120).collect::<String>()),
++            Err(e) => (false, e.status, e.msg.chars().take(120).collect::<String>()),
++        };
++        eprintln!("  SEND-ACK path={} t_off_us={} ack_ms={ack:.2} {}status={status:?} reply={reply}", p.name, t_off.as_micros(), if ok { "" } else { "REFUSED " });
++        log_json(serde_json::json!({ "ev": "ack", "t_ns": arbx::feeds::clock::now_ns(), "sig": meta.sig, "slot": meta.slot, "route": meta.route,
++            "leader": meta.leader, "client": meta.client, "path": p.name, "kind": format!("{:?}", p.kind), "t_off_us": t_off.as_micros() as u64,
++            "ack_ms": ack, "ok": ok, "status": status, "reply": reply, "tx_bytes": meta.bytes, "tips_lamports": meta.tips }));
++        r
++    }
++
++    /// --ack-probe N (zero cost)
++    pub async fn ack_probe(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, paths: &Arc<send::Paths>, path: &Arc<send::Path>, rounds: u64) -> Result<()> {
++        // the probe set: every routed / multi path, else every built path
++        let mut cand: Vec<Arc<send::Path>> = Vec::new();
++        if let Some(r) = ROUTES.get() { for v in r.values() { cand.extend(v.iter().cloned()); } }
++        if let Some(m) = MULTI.get() { cand.extend(m.iter().cloned()); }
++        if cand.is_empty() { cand.extend(paths.list.iter().cloned()); }
++        let mut set: Vec<Arc<send::Path>> = Vec::new();
++        for p in cand { if !set.iter().any(|x| x.name == p.name) { set.push(p); } }
++        eprintln!("\nACK-PROBE (ZERO COST): paths = {}", set.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
++
++        // 1. routing preview
++        let cur = rpc.slot().await.unwrap_or(0);
++        if BOOK.read().unwrap().is_some() && cur > 0 {
++            let mut cnt: HashMap<&'static str, u64> = HashMap::new();
++            for s in cur..cur + 20_000 { if let Some((_, c)) = leader_of(s) { *cnt.entry(class(&c)).or_default() += 1; } }
++            let tot: u64 = cnt.values().sum();
++            let mut v: Vec<_> = cnt.into_iter().collect(); v.sort_by(|a, b| b.1.cmp(&a.1));
++            eprintln!("  next 20,000 slots by leader class: {}", v.iter().map(|(k, n)| format!("{k} {:.0}%", 100.0 * *n as f64 / tot.max(1) as f64)).collect::<Vec<_>>().join(", "));
++            for s in (cur..cur + 16).step_by(4) {
++                let (pp, m) = buy_paths(path, ALSO_PATH.get(), Some(s));
++                eprintln!("  slot {s}: leader {} client {} -> {} [{}]", &m.leader.chars().take(8).collect::<String>(), m.client, m.route,
++                    pp.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(","));
++            }
++        }
++
++        // 2. the multi-tip buy: size, each path's own check, simulateTransaction (sigVerify off)
++        let launch = match arg_pk("--mint") {
++            Some(m) => snipe_build::launch_from_target(m, arg_pk("--creator").unwrap_or(m)),
++            None => snipe_build::launch_from_target(pk("So11111111111111111111111111111111111111112"), user),
++        };
++        let (buy_ixs, _) = build_buy(user, &launch, None, 2_000_000, 1);
++        let tips = tips_for(&set);
++        let mut v: Vec<build::Ix> = tips.iter().map(|(t, l)| build::transfer_ix(user, *t, *l)).collect();
++        v.extend_from_slice(&buy_ixs);
++        if tips.len() > 1 { bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 1)); }
++        let bh = rpc.latest_blockhash().await.map(|x| x.0).unwrap_or([0u8; 32]);
++        let msg = build::compile_v0(user, &v, bh, &[], &[]).map_err(|e| anyhow::anyhow!(e))?;
++        let raw = build::sign(&msg, key);
++        let tip_sum: u64 = tips.iter().map(|t| t.1).sum();
++        eprintln!("  MULTI-TIP BUY: {} tips (total {} lamports = {:.4} SOL), {} bytes (limit 1232) {}", tips.len(), tip_sum, tip_sum as f64 / 1e9, raw.len(),
++            if raw.len() <= 1232 { "OK" } else { "TOO BIG: the engine drops paths from the end until it fits" });
++        for p in &set { eprintln!("    check {:14} {}", p.name, match p.check(&raw) { Ok(_) => "OK (pays its tip)".to_string(), Err(e) => format!("REFUSED: {e:#}") }); }
++        let b64 = base64::engine::general_purpose::STANDARD.encode(&raw);
++        let opts = serde_json::json!({ "sigVerify": false, "replaceRecentBlockhash": true, "encoding": "base64", "commitment": "processed" });
++        match rpc.call("simulateTransaction", serde_json::json!([b64, opts])).await {
++            Ok(v) => {
++                let val = &v["value"];
++                let logs = val["logs"].as_array().map(|a| a.len()).unwrap_or(0);
++                eprintln!("    simulate: err={} unitsConsumed={} logs={logs} {}", val["err"], val["unitsConsumed"],
++                    if arg_pk("--mint").is_none() { "(synthetic mint: the BUY is expected to fail; the tips run first)" } else { "" });
++                if let Some(a) = val["logs"].as_array() { for l in a.iter().take(6) { eprintln!("      {}", l.as_str().unwrap_or("")); } }
++            }
++            Err(e) => eprintln!("    simulate failed: {e:#}"),
++        }
++
++        // 3. junk-request ack rounds, all paths at once (as a fan-out does), 1.5 s apart
++        let mut ms: HashMap<String, Vec<f64>> = HashMap::new();
++        let mut first: HashMap<String, String> = HashMap::new();
++        for r in 0..rounds {
++            let t0 = Instant::now();
++            let hs: Vec<_> = set.iter().map(|p| { let p = p.clone(); tokio::spawn(async move { let off = t0.elapsed().as_micros(); let (m, a, s) = p.ack_probe().await; (p.name.clone(), off, m, a, s) }) }).collect();
++            let mut line = Vec::new();
++            for h in hs {
++                if let Ok((n, off, m, a, s)) = h.await {
++                    line.push(format!("{n}={m:.2}{}", if a { "" } else { "?" }));
++                    log_json(serde_json::json!({ "ev": "ackprobe", "round": r, "path": n, "t_off_us": off as u64, "ack_ms": m, "answered": a, "reply": s }));
++                    ms.entry(n.clone()).or_default().push(m);
++                    first.entry(n).or_insert(s);
++                }
++            }
++            eprintln!("  round {r}: {}", line.join(" "));
++            tokio::time::sleep(Duration::from_millis(1500)).await;
++        }
++        println!("\n========== ACK-PROBE RESULT (junk requests, nothing can land) ==========");
++        for p in &set {
++            let mut v = ms.remove(&p.name).unwrap_or_default();
++            println!("{:14} n={:2} ack p50 {:6.2} ms  p90 {:6.2} ms  max {:6.2} ms  | {}", p.name, v.len(), pct(&mut v, 0.5), pct(&mut v, 0.9), pct(&mut v, 1.0),
++                first.get(&p.name).map(|s| s.chars().take(90).collect::<String>()).unwrap_or_default());
++        }
++        for l in paths.summary() { println!("  {l}"); }
++        Ok(())
++    }
++}

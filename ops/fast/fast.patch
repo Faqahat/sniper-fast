@@ -1,0 +1,1851 @@
+diff -ruN arbx-lat.bak_fast/src/bin/snipe_engine.rs arbx-lat/src/bin/snipe_engine.rs
+--- arbx-lat.bak_fast/src/bin/snipe_engine.rs	2026-10-19 10:58:42.918806437 +0100
++++ arbx-lat/src/bin/snipe_engine.rs	2026-10-19 12:59:37.303590765 +0100
+@@ -128,14 +128,18 @@
+     allow_legacy: bool,
+     /// --no-router: do not fire on decoded router (CPI) creates (detect-only, as the paper-tested AFTER binary)
+     no_router: bool,
++    /// FAST: hold the DETECT lines until after the prepare / fire (flush), instead of a stderr write per create
++    defer: bool,
++    buf: Vec<String>,
+ }
+ 
+ impl DetLog {
+     fn new(names: Vec<String>) -> Self {
+         DetLog { names, slot_t0: Default::default(), first: Default::default(), order: Default::default(), last_health: Instant::now(),
+             dev_sized_only: has("--dev-sized-only"), allow_nonsol: has("--allow-nonsol-quote"), allow_legacy: has("--allow-legacy-create"),
+-            no_router: has("--no-router") }
++            no_router: has("--no-router"), defer: false, buf: Vec::new() }
+     }
++    fn flush(&mut self) { for l in self.buf.drain(..) { fastfire::log_line(l); } }
+     fn name(&self, f: u16) -> &str { self.names.get(f as usize).map(|s| s.as_str()).unwrap_or("?") }
+     /// every arrival: the slot-start estimate from PoH-positioned (entries feed) transactions
+     fn note(&mut self, a: &arbx::feeds::Arrival) {
+@@ -163,9 +167,10 @@
+             (Some(&t0), Some(p)) => format!("{:.1}", (a.t_rx as f64 - t0 as f64) / 1e6 - p),
+             _ => "-".into(),
+         };
+-        eprintln!("  DETECT feed={} first={} dt_us={dt_us} slot={} t_rx={} poh_ms={} lag_ms={lag} mint={} kind={kind} sig={} {extra}",
++        let line = format!("  DETECT feed={} first={} dt_us={dt_us} slot={} t_rx={} poh_ms={} lag_ms={lag} mint={} kind={kind} sig={} {extra}",
+             self.name(a.feed), first as u8, a.slot, a.t_rx, poh.map(|p| format!("{p:.1}")).unwrap_or_else(|| "-".into()), b58(mint),
+             &a.tx.sig_b58()[..16]);
++        if self.defer { self.buf.push(line); } else { eprintln!("{line}"); }
+         first
+     }
+     /// the base filter's verdict for the log (same order as the loops' gates)
+@@ -367,6 +372,24 @@
+     }
+     // LAT: warm EVERY fan-out path before the first fire (not only the --send-path one)
+     if lat::ROUTES.get().is_some() || lat::MULTI.get().is_some() { wait_until_warm_all(&paths).await; }
++    // FAST (--fast-send / --fast-bench): our own send connections, templates, the hot-thread fire
++    if has("--fast-send") || has("--fast-bench") {
++        if live && !has("--fast-send") { bail!("--fast-bench is zero-network: never with --live"); }
++        let (k2, p2, m2, junk, st2) = (key.clone(), paths.clone(), path.clone(), has("--junk-fanout"), stop.clone());
++        tokio::task::block_in_place(|| fastfire::init(&k2, user, &p2, &m2, junk, st2))?;
++        if let Some(n) = arg_u64_opt("--fast-probe") {
++            // ZERO COST: N junk fires through the fast path (synthetic launch), 1.5 s apart; needs --junk-fanout
++            if !has("--junk-fanout") || live { bail!("--fast-probe sends junk only: it needs --junk-fanout and never --live"); }
++            fastfire::probe(n as usize).await;
++            stop.store(true, Ordering::Relaxed);
++            return Ok(());
++        }
++        if let Some(n) = arg_u64_opt("--fast-bench") {
++            fastfire::bench(n as usize);
++            stop.store(true, Ordering::Relaxed);
++            return Ok(());
++        }
++    }
+     if let Some(list) = arg("--sell-held") {
+         if !live { bail!("--sell-held sends real sells: needs --live"); }
+         run_sell_held(&key, user, &rpc, &path, &list).await?;
+@@ -379,7 +402,12 @@
+         stop.store(true, Ordering::Relaxed);
+         return Ok(());
+     }
+-    if snipe_once {
++    if snipe_once && has("--busy-poll") {
++        // FAST --busy-poll: the event loop gets its own thread (it spins on the feed channel; a spinning tokio worker
++        // would starve the tasks queued behind it)
++        let h = tokio::runtime::Handle::current();
++        tokio::task::block_in_place(|| h.block_on(run_snipe_once(probe, &key, user, &rpc, &path, live, &stop)))?;
++    } else if snipe_once {
+         run_snipe_once(probe, &key, user, &rpc, &path, live, &stop).await?;
+     }
+     if round_trip {
+@@ -1443,10 +1471,12 @@
+     sigs: std::collections::HashSet<[u8; 64]>,
+ }
+ 
+-struct RaceWatch { cfg: RaceCfg, pend: std::collections::HashMap<Pk, RacePend>, shadow: Vec<(Launch, u64)> }
++struct RaceWatch { cfg: RaceCfg, pend: std::collections::HashMap<Pk, RacePend>, shadow: Vec<(Launch, u64)>, defer: Option<Vec<String>> }
+ 
+ impl RaceWatch {
+-    fn new(cfg: RaceCfg) -> Self { RaceWatch { cfg, pend: Default::default(), shadow: Vec::new() } }
++    fn new(cfg: RaceCfg) -> Self { RaceWatch { cfg, pend: Default::default(), shadow: Vec::new(), defer: None } }
++    /// FAST: print the held decision lines (after the fire)
++    fn flush(&mut self) { if let Some(b) = &mut self.defer { for l in b.drain(..) { fastfire::log_line(l); } } }
+ 
+     /// static (create-time) part of the gate.
+     fn static_ok(&self, launch: &Launch, tx: &arbx::tx::Tx) -> bool {
+@@ -1463,14 +1493,15 @@
+     /// (gate off, or gate on with no window and the static conditions met).
+     fn add(&mut self, launch: &Launch, tx: &arbx::tx::Tx, slot: u64) -> bool {
+         let static_ok = self.static_ok(launch, tx);
+-        if self.cfg.log { eprintln!("  RACE seen {} static_ok={static_ok}", race_feat_line(launch, tx, slot)); }
++        if self.cfg.log { let l = format!("  RACE seen {} static_ok={static_ok}", race_feat_line(launch, tx, slot)); match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") } }
+         let mut cset: std::collections::HashSet<Pk> = tx.keys.iter().take(tx.num_signers as usize).copied().collect();
+         cset.insert(launch.creator);
+         let fire_now = !self.cfg.gate || (self.cfg.window_ms <= 0.0 && static_ok);
+         self.pend.insert(launch.mint, RacePend { launch: launch.clone(), slot, t0: Instant::now(), cset, bundle_n: 0, bundle_sol: 0, out: Vec::new(),
+             decided: fire_now || !self.cfg.gate || !static_ok, static_ok, pass: fire_now, sigs: Default::default() });
+         if self.cfg.gate && !static_ok {
+-            eprintln!("  RACE reject-static slot={slot} mint={}", b58(&launch.mint));
++            let l = format!("  RACE reject-static slot={slot} mint={}", b58(&launch.mint));
++            match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") }
+             if self.cfg.track_rejects { self.shadow.push((launch.clone(), slot)); }
+         }
+         fire_now
+@@ -1551,8 +1582,9 @@
+                     && match self.cfg.bundle { 1 => p.bundle_n > 0, -1 => p.bundle_n == 0, _ => true };
+                 p.pass = p.static_ok && bundle_ok && (!self.cfg.count_out || (n >= self.cfg.min_out && sol >= self.cfg.min_out_sol));
+                 p.decided = true;
+-                eprintln!("  RACE decide slot={} mint={} at_ms={:.1} out_n={n} out_sol={:.3} max_cu={maxcu} bundle_n={} pass={}",
++                let line = format!("  RACE decide slot={} mint={} at_ms={:.1} out_n={n} out_sol={:.3} max_cu={maxcu} bundle_n={} pass={}",
+                     p.slot, b58(mint), el, sol as f64 / 1e9, p.bundle_n, p.pass);
++                match &mut self.defer { Some(b) => b.push(line), None => eprintln!("{line}") }
+                 if p.pass { ready.push((p.launch.clone(), p.slot)); }
+                 else if self.cfg.track_rejects { self.shadow.push((p.launch.clone(), p.slot)); }
+             }
+@@ -1566,8 +1598,9 @@
+                 let first = p.out.first().map(|o| o.0).unwrap_or(-1.0);
+                 let outs: String = p.out.iter().take(24).map(|o| format!("{:.1}:{:.3}:{}:{}", o.0, o.2 as f64 / 1e9, o.4 as u8, &b58(&o.1)[..6])).collect::<Vec<_>>().join(",");
+                 if self.cfg.log {
+-                    eprintln!("  RACE obs slot={} mint={} n25={n25} n50={n50} n100={n100} n200={n200} n_obs={nall} sol100={:.3} sol200={:.3} sol_obs={:.3} max_cu100={cu100} first_ms={first:.1} bundle_n={} bundle_sol={:.3} fired={} outs={}",
++                    let l = format!("  RACE obs slot={} mint={} n25={n25} n50={n50} n100={n100} n200={n200} n_obs={nall} sol100={:.3} sol200={:.3} sol_obs={:.3} max_cu100={cu100} first_ms={first:.1} bundle_n={} bundle_sol={:.3} fired={} outs={}",
+                         p.slot, b58(mint), s100 as f64 / 1e9, s200 as f64 / 1e9, sall as f64 / 1e9, p.bundle_n, p.bundle_sol as f64 / 1e9, p.pass, if outs.is_empty() { "-".to_string() } else { outs });
++                    match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") }
+                 }
+                 done.push(*mint);
+             }
+@@ -1938,7 +1971,20 @@
+     let handle = tokio::runtime::Handle::current();
+     let _feeds = arbx::feeds::start(&probe.feeds, interest, tx, stop.clone(), &handle, &arbx::rec::Rec::off(), None).context("starting the shred feed")?;
+     let (atx, mut arx) = tokio::sync::mpsc::unbounded_channel();
+-    std::thread::spawn(move || { while let Ok(ev) = rx.recv() { if atx.send(ev).is_err() { break; } } });
++    // FAST --busy-poll: no bridge thread; the loop spins on the feed's crossbeam channel itself
++    let busy = has("--busy-poll");
++    if !busy { let rx = rx.clone(); std::thread::spawn(move || { while let Ok(ev) = rx.recv() { if atx.send(ev).is_err() { break; } } }); } else { drop(atx); }
++    let fast = fastfire::get();
++    if fast.is_some() {
++        if arg_u64("--demand-window-ms", 0) > 0 { bail!("--fast-send fires at the decision: it cannot wait a --demand-window-ms"); }
++        if arg("--fill-cap").is_none() && arg_u64_opt("--min-tokens-out").is_none() { bail!("--fast-send needs --fill-cap or --min-tokens-out (min_out is computed at the create, no curve read)"); }
++        eprintln!("FAST-SEND: prepare at the create, write at the decision from the event loop{}", if busy { " (busy-poll)" } else { "" });
++    }
++    if busy { if let Some(c) = arg_u64_opt("--pin-core") { eprintln!("BUSY-POLL: event loop pinned to core {c}: {}", arbx::fast::pin_to_core(c as usize)); } }
++    let fill_cap_v = arg("--fill-cap").and_then(|s| s.parse::<f64>().ok());
++    let min_out_fixed = arg_u64_opt("--min-tokens-out");
++    let mut preps: std::collections::HashMap<Pk, fastfire::Prep> = std::collections::HashMap::new();
++    let mut ev_st = [0u64; 4];
+ 
+     let key = Arc::new(key.clone());
+     let sem = Arc::new(tokio::sync::Semaphore::new(max_inflight));
+@@ -1990,12 +2036,19 @@
+     // fired in the same iteration, exactly as before.
+     let mut race = RaceWatch::new(RaceCfg::from_args());
+     if race.cfg.active() || race.cfg.dev_from_cap { eprintln!("RACE: {}", race.cfg.describe()); }
++    if fast.is_some() { race.defer = Some(Vec::new()); det.defer = true; }
+     let mut ready: Vec<(Launch, u64)> = Vec::new();
+     loop {
+         if Instant::now() >= deadline || stop.load(Ordering::Relaxed) { break; }
+         if spent.load(Ordering::Relaxed) + spend_per > total_cap { eprintln!("  TOTAL spend cap reached — no more fires."); break; }
+         let wait = if race.cfg.active() { race.next_wait() } else { Duration::from_secs(2) };
+-        let ev = match tokio::time::timeout(wait, arx.recv()).await { Ok(Some(e)) => Some(e), Ok(None) => break, Err(_) => None };
++        let ev = if busy {
++            match fastfire::spin_recv(&rx, wait) { Ok(e) => e, Err(()) => break }
++        } else {
++            match tokio::time::timeout(wait, arx.recv()).await { Ok(Some(e)) => Some(e), Ok(None) => break, Err(_) => None }
++        };
++        let (t_deq, t_deq_real) = (arbx::fast::mono_ns(), arbx::feeds::clock::now_ns());
++        if let Some(arbx::feeds::Event::Tx(a)) = &ev { ev_st = [a.t_rx, a.t_decoded, t_deq_real, t_deq]; }
+         det.health(&_feeds);
+         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
+         if let Some(arbx::feeds::Event::Tx(a)) = ev {
+@@ -2006,6 +2059,7 @@
+             det.note(&a);
+             // DET FIX: a top-level create, else pump's router create (CPI) decoded from the router's own args
+             let cand = match snipe::detect_launch(&a.tx) { Some(l) => Some((l, false)), None if !det.no_router => router_launch(&a.tx).map(|l| (l, true)), None => None };
++            let t_det = arbx::fast::mono_ns();
+             match cand {
+                 None => {
+                     if let Some(m) = snipe::detect_cpi_create(&a.tx) { det.create(&a, &m, "cpi", "verdict=cpi_not_decoded"); }
+@@ -2036,11 +2090,25 @@
+                         skipped_far += 1; break 'create;
+                     }
+                     rx_t.insert(launch.mint, a.t_rx); if rx_t.len() > 4096 { rx_t.clear(); }
++                    if let Some(f) = fast {
++                        // FAST: everything but the decision, now (the race gate decides on a later tx)
++                        let t_gated = arbx::fast::mono_ns();
++                        let min_out = min_out_fixed.unwrap_or_else(|| {
++                            let cap = fill_cap_v.unwrap_or(2.5);
++                            let floor_px = pump_floor_px(launch.dev_buy_lamports);
++                            (if floor_px > 0.0 { (spend_per as f64 / (cap * floor_px)).floor() as u64 } else { 1 }).max(1)
++                        });
++                        match f.prepare(&launch, a.slot, min_out, [a.t_rx, a.t_decoded, t_deq_real, t_deq, t_det, t_gated]) {
++                            Ok(p) => { preps.insert(launch.mint, p); }
++                            Err(e) => eprintln!("  FAST prepare {} failed (fires on the old path): {e:#}", b58(&launch.mint)),
++                        }
++                    }
+                     if !race.cfg.active() || race.add(&launch, &a.tx, a.slot) { ready.push((launch, a.slot)); }
+                 }
+             }
+         }
+         if race.cfg.active() { ready.extend(race.due()); race.shadow.clear(); } // shadows are paper-only: never fired live
++        let t_dec = arbx::fast::mono_ns();
+         for (launch, create_slot) in ready.drain(..) {
+         // reserve a concurrency slot (never block the detector) and budget
+         // DET: a full --max-inflight SKIPS the launch (live): count it, so the backpressure cost is visible
+@@ -2048,6 +2116,37 @@
+         let rx_age_us = rx_t.get(&launch.mint).map(|t| arbx::feeds::clock::now_ns().saturating_sub(*t) / 1000).unwrap_or(0);
+         if spent.fetch_add(spend_per, Ordering::Relaxed) + spend_per > total_cap { spent.fetch_sub(spend_per, Ordering::Relaxed); break; }
+         fired.fetch_add(1, Ordering::Relaxed);
++        if let Some(f) = fast {
++            if spend_per > cap_lamports { eprintln!("  REFUSED: buy spend {spend_per} lamports exceeds --max-sol cap {cap_lamports} lamports"); continue; }
++            // FAST: write every path from here, now; logging, verification and (live) the land poll + exit afterwards
++            let p = match preps.remove(&launch.mint).filter(|p| p.made.elapsed() < Duration::from_secs(2)) {
++                Some(p) => p,
++                None => {
++                    let floor_px = pump_floor_px(launch.dev_buy_lamports);
++                    let min_out = min_out_fixed.unwrap_or_else(|| (if floor_px > 0.0 { (spend_per as f64 / (fill_cap_v.unwrap_or(2.5) * floor_px)).floor() as u64 } else { 1 }).max(1));
++                    match f.prepare(&launch, create_slot, min_out, [0, 0, 0, t_dec, t_dec, t_dec]) { Ok(p) => p, Err(e) => { eprintln!("  FAST prepare failed at the fire: {e:#}"); continue; } }
++                }
++            };
++            let rec = f.fire(&p);
++            let ev = ev_st;
++            let (key2, rpc2, path2) = (key.clone(), rpc.clone(), path.clone());
++            tokio::spawn(async move {
++                let _permit = permit;
++                eprintln!("  FIRE slot={create_slot} mint={} dev_buy={} rx_to_fire_us={rx_age_us} fast=1", b58(&launch.mint), launch.dev_buy_lamports);
++                let first = rec.w.iter().filter(|x| x.4 == "written").map(|x| x.3).min().map(|t| t.saturating_sub(t_dec) as f64 / 1e3);
++                eprintln!("  FAST-FIRE tag={} slot={create_slot} mint={} {} leader={} client={} built={} tips={} bytes={} decide_to_first_write_us={} writes: {}", p.id, b58(&launch.mint),
++                    p.meta.route, p.meta.leader.chars().take(8).collect::<String>(), p.meta.client, if p.fast_built { "template" } else { "compile" }, p.meta.tips, p.meta.bytes,
++                    first.map(|x| format!("{x:.1}")).unwrap_or_else(|| "-".into()),
++                    rec.w.iter().map(|x| format!("{}={}@{:.1}us", x.0, x.4, x.3.saturating_sub(t_dec) as f64 / 1e3)).collect::<Vec<_>>().join(" "));
++                f.trace_fire(&p, &rec, ev, t_dec);
++                f.trace_prep(&p);
++                if f.junk { return; }
++                if let Err(e) = round_trip_fast(&key2, user, &rpc2, &path2, &p, cap_lamports, max_sol, land_timeout).await {
++                    eprintln!("  position {} ended: {e:#}", b58(&launch.mint));
++                }
++            });
++            continue;
++        }
+         let (key2, rpc2, path2) = (key.clone(), rpc.clone(), path.clone());
+         tokio::spawn(async move {
+             let _permit = permit;
+@@ -2061,7 +2160,17 @@
+             }
+         });
+         } // ready.drain
++        if fast.is_some() {
++            det.flush();
++            race.flush();
++            // creates the gate dropped: trace their prep (stage timings + verification), off the hot path
++            if preps.len() > 16 || preps.values().any(|p| p.made.elapsed() > Duration::from_millis(400)) {
++                let old: Vec<Pk> = preps.iter().filter(|(_, p)| p.made.elapsed() > Duration::from_millis(400)).map(|(k, _)| *k).collect();
++                for k in old { if let (Some(p), Some(f)) = (preps.remove(&k), fast) { tokio::spawn(async move { f.trace_prep(&p) }); } }
++            }
++        }
+     }
++    if let Some(f) = fast { for l in f.summary() { eprintln!("FAST: {l}"); } }
+ 
+     if close_set.is_some() { eprintln!("CLOSE-LEADER GATE: skipped {skipped_far} far-leader launches"); }
+     eprintln!("MAX-INFLIGHT: skipped {skipped_inflight} qualifying launches (all {max_inflight} slots busy)");
+@@ -2147,6 +2256,26 @@
+     let (buy, bal_start) = tokio::join!(send_and_poll_at(key, user, rpc, path, &buy_ixs, land_timeout, create_slot),
+                                         async { native_balance(rpc, user).await.unwrap_or(0) });
+     let buy = buy?;
++    round_trip_tail(key, user, rpc, path, launch, buy, bal_start, spend, fill_cap, land_timeout, create_slot).await
++}
++
++/// FAST: the buy was written by fastfire::Fast::fire; poll its land, then the same exit as round_trip_launch
++#[allow(clippy::too_many_arguments)]
++async fn round_trip_fast(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, p: &fastfire::Prep, cap_lamports: u64, max_sol: f64, land_timeout: Duration) -> Result<()> {
++    let spend = arg_u64("--spend-lamports", 2_000_000);
++    if spend > cap_lamports { bail!("REFUSED: buy spend {} lamports exceeds --max-sol cap {} lamports ({:.6} SOL)", spend, cap_lamports, max_sol); }
++    let fill_cap = arg("--fill-cap").and_then(|s| s.parse::<f64>().ok());
++    let send_slot = match send::tpu::SLOT.load(Ordering::Relaxed) { 0 => rpc.slot().await.unwrap_or(0), s => s };
++    let (buy, bal_start) = tokio::join!(poll_land(rpc, p.meta.sig.clone(), p.sig, send_slot, land_timeout), async { native_balance(rpc, user).await.unwrap_or(0) });
++    jito_results(&p.fan, &p.meta);
++    round_trip_tail(key, user, rpc, path, &p.launch, buy, bal_start, spend, fill_cap, land_timeout, Some(p.slot)).await
++}
++
++/// the shared exit after the buy's land poll: fill-cap revert check, token balance, exit ladder / hold + sell, report
++#[allow(clippy::too_many_arguments)]
++async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, launch: &Launch, buy: Landed, bal_start: u64, spend: u64,
++    fill_cap: Option<f64>, land_timeout: Duration, create_slot: Option<u64>) -> Result<()> {
++    let mint = launch.mint;
+     match buy.land_slot {
+         Some(land) => eprintln!("  BUY  sig={} send_slot={} land_slot={} delta={} ok={}", buy.sig, buy.send_slot, land, land as i64 - buy.send_slot as i64, buy.ok),
+         None => bail!("BUY did not land within {:?} (sig {}) — aborting round-trip, no sell attempted", land_timeout, buy.sig),
+@@ -2703,3 +2832,525 @@
+         Ok(())
+     }
+ }
++
++// ================================================================================================================
++// FAST (2026-10-19): --fast-send, the sub-100 µs fire path (all default off; no flag = the LAT behaviour above).
++//  * prepare at CREATE time (before the race gate decides): route, tips, blockhash, the template-patched message,
++//    signature, and every path's framed request; the decision then only writes.
++//  * fire from the event-loop thread itself: Jito (gRPC, async) is spawned first, then LandX UDP and every HTTP path is
++//    written with one syscall on our own keep-alive connection (arbx::fast::FastConn). A path whose fast connection is
++//    down, or that has no fast form, goes through the old async send (lat::send_one) as before.
++//  * --busy-poll: the event loop runs on its own thread (block_in_place + Handle::block_on) and spins on the feed's
++//    crossbeam channel (no bridge thread, no tokio wake-up); --pin-core N pins it.
++//  * --lat-trace FILE: one JSON line per prepared create ("prep") and per fire ("fire") with monotonic ns stamps.
++//  * --fast-verify: every fast-built message is compared with the full compile (same tips, blockhash, min_out).
++//  * --fast-bench N: zero-network microbenchmark of the build stages (fast vs the old build), then exit.
++// Junk mode (--junk-fanout): the SAME path code writes the signed tx with its signature count set to 0 (undecodable as
++// a transaction: zero signatures can never pass sanitize), so the providers parse the real-sized request and reject it.
++// ================================================================================================================
++mod fastfire {
++    use super::*;
++    use arbx::config::SendKind;
++    use arbx::fast::{self, Ack, FastConn, FastH2, Template};
++    use ed25519_dalek::Signer;
++    use std::collections::HashMap;
++    use std::io::Write as _;
++    use std::sync::atomic::AtomicU64;
++    use std::sync::{Mutex, OnceLock};
++
++    pub enum Kind { Http { conn: Arc<FastConn>, json: bool }, Udp, Jito, JitoH2 { conn: Arc<FastH2>, jito: Arc<send::jito::Jito> }, Slow }
++    /// jito-h2 fires: tag -> tx signature (the result stream joins bundles by signature)
++    static TAGSIG: Mutex<Option<HashMap<u64, String>>> = Mutex::new(None);
++    pub struct Fp { pub path: Arc<send::Path>, pub kind: Kind }
++
++    pub struct Fast {
++        key: SigningKey,
++        user: Pk,
++        main: Arc<send::Path>,
++        pub fps: Vec<Fp>,
++        templates: Mutex<HashMap<Vec<u64>, Option<Arc<Template>>>>,
++        handle: tokio::runtime::Handle,
++        pub junk: bool,
++        verify: bool,
++        trace: Option<Mutex<std::io::BufWriter<std::fs::File>>>,
++        udp_copies: u32,
++        next_id: AtomicU64,
++        pub verified: AtomicU64,
++        pub mismatched: AtomicU64,
++        presign: Option<Arc<fast::Presigner>>,
++        fast_derive: bool,
++    }
++    pub static FAST: OnceLock<Fast> = OnceLock::new();
++
++    pub fn get() -> Option<&'static Fast> { FAST.get() }
++
++    /// the event loop's held log lines go to this thread (one buffered write per line), never a stderr write on the loop
++    static LOGQ: OnceLock<crossbeam_channel::Sender<String>> = OnceLock::new();
++    pub fn log_line(l: String) {
++        let q = LOGQ.get_or_init(|| {
++            let (tx, rx) = crossbeam_channel::unbounded::<String>();
++            std::thread::Builder::new().name("fast-log".into()).spawn(move || {
++                let mut e = std::io::BufWriter::with_capacity(1 << 16, std::io::stderr());
++                for l in rx.iter() { let _ = writeln!(e, "{l}"); if rx.is_empty() { let _ = e.flush(); } }
++            }).expect("log thread");
++            tx
++        });
++        if let Err(e) = q.send(l) { eprintln!("{}", e.0); }
++    }
++
++    fn json_kind(k: SendKind) -> bool {
++        matches!(k, SendKind::Helius | SendKind::Shyft | SendKind::Rpc | SendKind::Nozomi | SendKind::ZeroSlot | SendKind::Falcon | SendKind::Everstake | SendKind::JupiterTx)
++    }
++    fn bin_kind(k: SendKind) -> bool { matches!(k, SendKind::Haan | SendKind::Bolt | SendKind::Iris | SendKind::Lunar | SendKind::NodeOne | SendKind::BlockRazor | SendKind::Landx) }
++
++    pub fn init(key: &SigningKey, user: Pk, paths: &Arc<send::Paths>, main: &Arc<send::Path>, junk: bool, stop: Arc<AtomicBool>) -> Result<()> {
++        let (atx, arx) = crossbeam_channel::unbounded::<Ack>();
++        let mut fps = Vec::new();
++        for p in &paths.list {
++            let kind = if p.kind == SendKind::JitoBundle && p.jito.is_some() && has("--jito-h2") {
++                    match FastH2::start(&p.name, p.fast_url(), atx.clone(), stop.clone()) {
++                        Ok(c) => Kind::JitoH2 { conn: c, jito: p.jito.clone().unwrap() },
++                        Err(e) => { eprintln!("FAST: {} stays on tonic: {e}", p.name); Kind::Jito }
++                    }
++                }
++                else if p.kind == SendKind::JitoBundle && p.jito.is_some() { Kind::Jito }
++                else if p.kind == SendKind::Landx && p.fast_udp_ok() { Kind::Udp }
++                else if (json_kind(p.kind) || bin_kind(p.kind)) && !p.fast_preflight() {
++                    let json = json_kind(p.kind);
++                    match FastConn::start(&p.name, p.fast_url(), if json { "application/json" } else { "application/octet-stream" }, &p.fast_headers(), p.fast_ping(), atx.clone(), stop.clone()) {
++                        Ok(c) => Kind::Http { conn: c, json },
++                        Err(e) => { eprintln!("FAST: {} stays on the async send: {}", p.name, e.split(": url").next().unwrap_or("")); Kind::Slow }
++                    }
++                } else { Kind::Slow };
++            eprintln!("FAST: path {:14} -> {}", p.name, match &kind { Kind::Http { json, .. } => if *json { "own HTTP/1.1 conn (json)" } else { "own HTTP/1.1 conn (binary)" }, Kind::Udp => "UDP from the hot thread", Kind::Jito => "gRPC (spawned first)", Kind::JitoH2 { .. } => "own raw HTTP/2 gRPC conn", Kind::Slow => "async send (unchanged)" });
++            fps.push(Fp { path: p.clone(), kind });
++        }
++        // the ack logger: FAST-ACK lines + the send log
++        std::thread::Builder::new().name("fast-acks".into()).spawn(move || {
++            for a in arx {
++                let ms = a.t_ack.saturating_sub(a.t_write) as f64 / 1e6;
++                eprintln!("  FAST-ACK tag={} path={} ack_ms={ms:.3} status={:?} reply={}", a.tag, a.path, a.status, a.body.chars().take(100).collect::<String>());
++                // a jito-h2 acceptance: hand the bundle id to the Jito client (results join by signature)
++                if a.status == Some(200) {
++                    let sig = TAGSIG.lock().unwrap().as_mut().and_then(|m| m.remove(&a.tag));
++                    if let (Some(sig), Some(f)) = (sig, get()) {
++                        for x in &f.fps { if let Kind::JitoH2 { jito, conn } = &x.kind { if conn.name == a.path { jito.note_bundle(&sig, &a.body); } } }
++                    }
++                }
++                lat::log_json(serde_json::json!({ "ev": "fast_ack", "t_ns": arbx::feeds::clock::now_ns(), "tag": a.tag, "path": a.path, "ack_ms": ms, "status": a.status, "reply": a.body }));
++            }
++        })?;
++        let trace = match arg("--lat-trace") {
++            Some(f) => Some(Mutex::new(std::io::BufWriter::new(std::fs::OpenOptions::new().create(true).append(true).open(&f).with_context(|| format!("--lat-trace {f}"))?))),
++            None => None,
++        };
++        // self-check: our JSON body is byte-identical to the old serde_json body
++        {
++            use base64::Engine as _;
++            let raw: Vec<u8> = (0..1042u32).map(|i| (i * 131 + 7) as u8).collect();
++            let old = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
++                "params": [base64::engine::general_purpose::STANDARD.encode(&raw), { "encoding": "base64", "skipPreflight": true, "maxRetries": 0 }] });
++            let mut b = Vec::new();
++            fast::json_send_body(&raw, &mut b);
++            let same = serde_json::to_vec(&old).map(|o| o == b).unwrap_or(false);
++            eprintln!("FAST: JSON body byte-identical to the old serde_json body: {same}");
++            if !same { bail!("FAST: the JSON body differs from the old one"); }
++        }
++        let udp_copies = std::env::var("LANDX_UDP_COPIES").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(2).clamp(1, 4);
++        // --fast-presign: pre-computed nonces (self-test: 300 signatures, each verify_strict-ed)
++        let presign = if has("--fast-presign") {
++            let ps = fast::Presigner::new(key);
++            ps.start(300, stop.clone());
++            let vk = key.verifying_key();
++            let mut bad = 0;
++            for i in 0..300u32 {
++                let m: Vec<u8> = (0..900u32).map(|j| (j * 31 + i) as u8).collect();
++                match ps.sign(&m) { Some(sg) => if vk.verify_strict(&m, &ed25519_dalek::Signature::from_bytes(&sg)).is_err() { bad += 1; }, None => bad += 1 }
++            }
++            eprintln!("FAST: presign self-test: 300 signatures, {bad} failed verify_strict");
++            if bad > 0 { bail!("FAST: presign self-test failed"); }
++            Some(ps)
++        } else { None };
++        let f = Fast { key: key.clone(), user, main: main.clone(), fps, templates: Mutex::new(HashMap::new()), handle: tokio::runtime::Handle::current(), junk,
++            verify: has("--fast-verify"), trace, udp_copies, next_id: AtomicU64::new(1), verified: AtomicU64::new(0), mismatched: AtomicU64::new(0), presign,
++            fast_derive: if has("--fast-derive") {
++                let (bad, bad_ata) = fast::derive_selftest(200_000, 3_000);
++                eprintln!("FAST: fast-derive self-test: on-curve disagreements with dalek {bad}/200012, ATA mismatches {bad_ata}/3000");
++                if bad > 0 || bad_ata > 0 { bail!("FAST: fast-derive self-test failed"); }
++                true
++            } else { false },
++        };
++        if FAST.set(f).is_err() { bail!("fast path initialised twice"); }
++        // wait (<= 6 s) for the fast connections to come up
++        let t = Instant::now();
++        while t.elapsed() < Duration::from_secs(6) {
++            if get().unwrap().fps.iter().all(|f| match &f.kind { Kind::Http { conn, .. } => conn.up.load(Ordering::Relaxed), Kind::JitoH2 { conn, .. } => conn.up.load(Ordering::Relaxed), _ => true }) { break; }
++            std::thread::sleep(Duration::from_millis(50));
++        }
++        for l in get().unwrap().summary() { eprintln!("FAST: {l}"); }
++        Ok(())
++    }
++
++    /// one prepared buy
++    pub struct Prep {
++        pub id: u64,
++        pub launch: Launch,
++        pub slot: u64,
++        pub fan: Vec<Arc<send::Path>>,
++        pub fpi: Vec<usize>,
++        pub meta: lat::Meta,
++        pub raw: Vec<u8>,
++        pub sig: [u8; 64],
++        pub payload: Arc<Vec<u8>>,
++        /// per fan path: the framed request (HTTP: whole request; jito-h2: HEADERS+DATA and the header block length)
++        pub reqs: Vec<Option<(Vec<u8>, usize)>>,
++        pub tips: Vec<(Pk, u64)>,
++        /// jito-h2: "Bearer <access token>" at prepare time
++        pub jtok: Option<String>,
++        pub bh: [u8; 32],
++        pub min_out: u64,
++        pub fast_built: bool,
++        /// mono ns: start, routed, derived, patched (or full compile), signed, encoded
++        pub st: [u64; 6],
++        pub made: Instant,
++        /// create-side stamps: (rx realtime ns, decoded realtime ns, dequeued realtime ns, dequeued mono, detected mono, gated mono)
++        pub cr: [u64; 6],
++    }
++
++    /// one fire's writes: (path, kind, t0, t1, status)
++    pub struct FireRec { pub t_fire0: u64, pub t_end: u64, pub w: Vec<(String, &'static str, u64, u64, &'static str)> }
++
++    impl Fast {
++        fn template(&self, tips: &[(Pk, u64)]) -> Option<Arc<Template>> {
++            let k: Vec<u64> = tips.iter().map(|t| t.1).collect();
++            if let Some(t) = self.templates.lock().unwrap().get(&k) { return t.clone(); }
++            let t = self.make_template(tips).map_err(|e| eprintln!("FAST: no template for tips {k:?}: {e} (full compile for this shape)")).ok().map(Arc::new);
++            self.templates.lock().unwrap().insert(k, t.clone());
++            t
++        }
++
++        fn make_template(&self, tips: &[(Pk, u64)]) -> std::result::Result<Template, String> {
++            let user = self.user;
++            let probe = Launch { mint: fast::probe_var(0), bonding_curve: fast::probe_var(1), assoc_bonding_curve: fast::probe_var(2), creator: fast::probe_var(9),
++                dev_buy_lamports: 0, is_create_v2: true, is_mayhem: false, is_cashback: false, creator_fee_bps: 0, is_holder_reward: false, buyback_fee_recipient: fast::probe_var(5) };
++            let (mut ixs, _) = build_buy(user, &probe, None, 2_000_000, fast::PROBE_MIN_OUT);
++            let (p0, p1) = (probe.mint, probe.bonding_curve);
++            let map = [(pda::ata(&p1, &p0, &pda::TOKEN_2022), fast::probe_var(2)), (pda::ata(&p1, &snipe_build::WSOL, &pda::TOKEN_PROGRAM), fast::probe_var(3)),
++                (pda::ata(&user, &p0, &pda::TOKEN_2022), fast::probe_var(4))];
++            for ix in ixs.iter_mut() { for a in ix.accounts.iter_mut() { if let Some((_, to)) = map.iter().find(|(from, _)| *from == a.key) { a.key = *to; } } }
++            let mut v: Vec<build::Ix> = tips.iter().enumerate().map(|(i, (_, l))| build::transfer_ix(user, fast::probe_tip(i), *l)).collect();
++            v.extend(ixs);
++            if tips.len() > 2 { lat::bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 2)); }
++            let msg = build::compile_v0(user, &v, fast::PROBE_BH, &[], &[])?;
++            if 1 + 64 + msg.bytes.len() > 1232 { return Err(format!("{} bytes > 1232", 1 + 64 + msg.bytes.len())); }
++            Template::from_probe_msg(msg.bytes, tips.len())
++        }
++
++        /// the full compile of the same buy (the reference the fast build must equal byte for byte)
++        fn reference(&self, launch: &Launch, tips: &[(Pk, u64)], bh: [u8; 32], min_out: u64) -> Option<Vec<u8>> {
++            let (ixs, _) = build_buy(self.user, launch, None, 2_000_000, min_out);
++            let mut v: Vec<build::Ix> = tips.iter().map(|(t, l)| build::transfer_ix(self.user, *t, *l)).collect();
++            v.extend(ixs);
++            if tips.len() > 2 { lat::bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 2)); }
++            build::compile_v0(self.user, &v, bh, &[], &[]).ok().map(|m| m.bytes)
++        }
++
++        /// build + sign + frame everything for one launch (create time)
++        pub fn prepare(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6]) -> Result<Prep> {
++            let t0 = fast::mono_ns();
++            let (mut fan, mut meta) = lat::buy_paths(&self.main, ALSO_PATH.get(), Some(slot));
++            let mut tips = lat::tips_for(&fan);
++            let bh = BLOCKHASH_CACHE.lock().unwrap().map(|(h, _)| h).unwrap_or([0u8; 32]);
++            let t1 = fast::mono_ns();
++            let tpl = self.template(&tips);
++            let (mint, bc) = (launch.mint, launch.bonding_curve);
++            let ata = |o: &Pk, m: &Pk, t: &Pk| if self.fast_derive { fast::ata_fast(o, m, t) } else { pda::ata(o, m, t) };
++            let abc = if launch.is_create_v2 { launch.assoc_bonding_curve } else { ata(&bc, &mint, &pda::TOKEN_2022) };
++            let vars: fast::VarKeys = [mint, bc, abc, ata(&bc, &snipe_build::WSOL, &pda::TOKEN_PROGRAM), ata(&self.user, &mint, &pda::TOKEN_2022), launch.buyback_fee_recipient];
++            let t2 = fast::mono_ns();
++            let tip_keys: Vec<Pk> = tips.iter().map(|t| t.0).collect();
++            let mut msg: Vec<u8> = Vec::with_capacity(1232);
++            let fast_built = tpl.as_ref().and_then(|t| t.patch(&mut msg, &vars, &tip_keys, &bh, min_out)).is_some();
++            let (raw, sig, t3) = if fast_built {
++                let t3 = fast::mono_ns();
++                let sig = self.presign.as_ref().and_then(|ps| ps.sign(&msg)).unwrap_or_else(|| self.key.sign(&msg).to_bytes());
++                let mut raw = Vec::with_capacity(65 + msg.len());
++                raw.push(1); raw.extend_from_slice(&sig); raw.extend_from_slice(&msg);
++                (raw, sig, t3)
++            } else {
++                let (ixs, _) = build_buy(self.user, launch, None, 2_000_000, min_out);
++                let (raw, t) = lat::build_tx(&self.key, self.user, &ixs, &mut fan, bh)?;
++                tips = t;
++                let mut sig = [0u8; 64]; sig.copy_from_slice(&raw[1..65]);
++                (raw, sig, t2)
++            };
++            let t4 = fast::mono_ns();
++            let mut payload = raw.clone();
++            if self.junk { payload[0] = 0; } // zero signatures: never a valid transaction
++            let mut fpi = Vec::with_capacity(fan.len());
++            let mut reqs = Vec::with_capacity(fan.len());
++            let mut body = Vec::with_capacity(2048);
++            let mut jtok: Option<String> = None;
++            for p in &fan {
++                let i = self.fps.iter().position(|f| f.path.name == p.name).unwrap_or(usize::MAX);
++                fpi.push(i);
++                reqs.push(match self.fps.get(i).map(|f| &f.kind) {
++                    Some(Kind::Http { conn, json }) => {
++                        let mut req = Vec::with_capacity(2400);
++                        if *json { fast::json_send_body(&payload, &mut body); conn.frame(&body, &mut req); } else { conn.frame(&payload, &mut req); }
++                        Some((req, 0))
++                    }
++                    Some(Kind::JitoH2 { conn, jito }) => {
++                        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
++                        let _ = conn;
++                        jito.cached_token(now_ms).map(|tok| {
++                            use prost::Message as _;
++                            let j = send::jito::SendBundleRequest { bundle: Some(send::jito::Bundle { packets: vec![send::jito::Packet { data: payload.clone(),
++                                meta: Some(send::jito::Meta { size: payload.len() as u64, addr: "0.0.0.0".into(), port: 0, sender_stake: 0 }) }] }) };
++                            jtok = Some(format!("Bearer {tok}"));
++                            (j.encode_to_vec(), 0)
++                        })
++                    }
++                    _ => None,
++                });
++            }
++            let t5 = fast::mono_ns();
++            // warm the kernel send path of every socket this fire may write (zero-length sends: nothing goes out; not in prep_ns)
++            for &i in &fpi { match self.fps.get(i).map(|f| &f.kind) { Some(Kind::Http { conn, .. }) => conn.prewarm(), Some(Kind::JitoH2 { conn, .. }) => conn.prewarm(), _ => {} } }
++            meta.sig = if self.junk { "junk".into() } else { bs58::encode(&sig).into_string() };
++            meta.bytes = raw.len();
++            meta.tips = tips.iter().map(|t| t.1).sum();
++            Ok(Prep { id: self.next_id.fetch_add(1, Ordering::Relaxed), launch: launch.clone(), slot, fan, fpi, meta, raw, sig, payload: Arc::new(payload), reqs, tips, jtok, bh, min_out,
++                fast_built, st: [t0, t1, t2, t3, t4, t5], made: Instant::now(), cr })
++        }
++
++        /// HOT PATH: write every path (the decision has been taken). Never blocks on the network.
++        pub fn fire(&self, p: &Prep) -> FireRec {
++            let t_fire0 = fast::mono_ns();
++            let mut w: Vec<(String, &'static str, u64, u64, &'static str)> = Vec::with_capacity(p.fan.len());
++            // 1. Jito first: its write happens on the runtime, so it overlaps with the writes below
++            for (i, path) in p.fan.iter().enumerate() {
++                let Some(Kind::Jito) = self.fps.get(p.fpi[i]).map(|f| &f.kind) else { continue };
++                let t = fast::mono_ns();
++                if !path.fast_budget() { w.push((path.name.clone(), "jito", t, t, "over_rate")); continue; }
++                let (path2, pl, sig, tag) = (path.clone(), p.payload.clone(), p.meta.sig.clone(), p.id);
++                self.handle.spawn(async move {
++                    let t = fast::mono_ns();
++                    let r = match &path2.jito { Some(j) => j.send_bundle(&[&pl[..]], &sig, None).await.map_err(|e| e.to_string()), None => Err("no block engine".into()) };
++                    let ms = fast::mono_ns().saturating_sub(t) as f64 / 1e6;
++                    let (ok, reply) = match &r { Ok(id) => (true, id.clone()), Err(e) => (false, e.chars().take(120).collect()) };
++                    eprintln!("  FAST-ACK tag={tag} path={} ack_ms={ms:.3} ok={ok} reply={reply}", path2.name);
++                    lat::log_json(serde_json::json!({ "ev": "fast_ack", "t_ns": arbx::feeds::clock::now_ns(), "tag": tag, "path": path2.name, "ack_ms": ms, "ok": ok, "reply": reply }));
++                });
++                w.push((path.name.clone(), "jito", t, fast::mono_ns(), "spawned"));
++            }
++            // 2. UDP + 3. our HTTP connections, written from this thread
++            let mut ubuf: Vec<u8> = Vec::with_capacity(1300);
++            for pass in 0..3 {
++                for (i, path) in p.fan.iter().enumerate() {
++                    match (pass, self.fps.get(p.fpi[i]).map(|f| &f.kind)) {
++                        (1, Some(Kind::JitoH2 { conn, .. })) => {
++                            let t = fast::mono_ns();
++                            if !path.fast_budget() { w.push((path.name.clone(), "jito-h2", t, t, "over_rate")); continue; }
++                            let r = match (&p.reqs[i], &p.jtok) { (Some((msg, _)), Some(tok)) => conn.write_call_idx("/searcher.SearcherService/SendBundle", tok, msg, p.id), _ => Err("no token".into()) };
++                            match r {
++                                Ok((a, b)) => w.push((path.name.clone(), "jito-h2", a, b, "written")),
++                                Err(_) => { self.slow(path, p); w.push((path.name.clone(), "jito-h2", t, fast::mono_ns(), "conn_down_async")); }
++                            }
++                        }
++                        (0, Some(Kind::Udp)) => {
++                            let t = fast::mono_ns();
++                            if !path.fast_budget() { w.push((path.name.clone(), "udp", t, t, "over_rate")); continue; }
++                            let r = path.fast_udp(&p.payload, &mut ubuf, 1);
++                            w.push((path.name.clone(), "udp", t, fast::mono_ns(), match r { Some(Ok(())) => "written", _ => "udp_error" }));
++                        }
++                        (2, Some(Kind::Http { conn, .. })) => {
++                            let t = fast::mono_ns();
++                            if !path.fast_budget() { w.push((path.name.clone(), "http", t, t, "over_rate")); continue; }
++                            match conn.write_req(p.reqs[i].as_ref().map(|r| &r.0[..]).unwrap_or(&[]), p.id) {
++                                Ok((a, b)) => w.push((path.name.clone(), "http", a, b, "written")),
++                                Err(_) => { self.slow(path, p); w.push((path.name.clone(), "http", t, fast::mono_ns(), "conn_down_async")); }
++                            }
++                        }
++                        _ => {}
++                    }
++                }
++            }
++            // the extra LandX copies (redundancy against a dropped datagram) after every first write
++            if self.udp_copies > 1 {
++                for (i, path) in p.fan.iter().enumerate() {
++                    if let Some(Kind::Udp) = self.fps.get(p.fpi[i]).map(|f| &f.kind) { let _ = path.fast_udp(&p.payload, &mut ubuf, self.udp_copies - 1); }
++                }
++            }
++            // 4. paths without a fast form: the old async send
++            for (i, path) in p.fan.iter().enumerate() {
++                if matches!(self.fps.get(p.fpi[i]).map(|f| &f.kind), Some(Kind::Slow) | None) {
++                    let t = fast::mono_ns();
++                    self.slow(path, p);
++                    w.push((path.name.clone(), "async", t, fast::mono_ns(), "spawned"));
++                }
++            }
++            let t_end = fast::mono_ns();
++            if p.fan.iter().enumerate().any(|(i, _)| matches!(self.fps.get(p.fpi[i]).map(|f| &f.kind), Some(Kind::JitoH2 { .. }))) {
++                let mut g = TAGSIG.lock().unwrap();
++                let m = g.get_or_insert_with(HashMap::new);
++                if m.len() > 1000 { m.clear(); }
++                m.insert(p.id, p.meta.sig.clone());
++            }
++            FireRec { t_fire0, t_end, w }
++        }
++
++        fn slow(&self, path: &Arc<send::Path>, p: &Prep) {
++            let (path, pl, meta, junk, tag) = (path.clone(), p.payload.clone(), p.meta.clone(), self.junk, p.id);
++            self.handle.spawn(async move {
++                if junk {
++                    let (ms, answered, reply) = path.ack_probe().await;
++                    eprintln!("  FAST-ACK tag={tag} path={} ack_ms={ms:.3} answered={answered} reply={} (async junk)", path.name, reply.chars().take(100).collect::<String>());
++                } else {
++                    let _ = lat::send_one(&path, &pl, Instant::now(), &meta).await;
++                }
++            });
++        }
++
++        /// after the fire (or for a create that never fired): verify + trace, off the hot path
++        pub fn trace_prep(&self, p: &Prep) {
++            let ok = if self.verify && p.fast_built {
++                let r = self.reference(&p.launch, &p.tips, p.bh, p.min_out);
++                let sig_ok = self.key.verifying_key().verify_strict(&p.raw[65..], &ed25519_dalek::Signature::from_bytes(&p.sig)).is_ok();
++                let same = r.as_deref() == Some(&p.raw[65..]) && sig_ok;
++                if same { self.verified.fetch_add(1, Ordering::Relaxed); } else {
++                    self.mismatched.fetch_add(1, Ordering::Relaxed);
++                    eprintln!("  FAST-VERIFY MISMATCH mint={} (fast-built message != full compile)", b58(&p.launch.mint));
++                }
++                Some(same)
++            } else { None };
++            self.trace_line(serde_json::json!({ "ev": "prep", "id": p.id, "mint": b58(&p.launch.mint), "slot": p.slot, "route": p.meta.route, "paths": p.fan.len(),
++                "tips": p.tips.len(), "bytes": p.raw.len(), "fast_built": p.fast_built, "verify": ok,
++                "route_ns": p.st[1] - p.st[0], "derive_ns": p.st[2] - p.st[1], "patch_ns": p.st[3].saturating_sub(p.st[2]), "sign_ns": p.st[4] - p.st[3],
++                "encode_ns": p.st[5] - p.st[4], "prep_ns": p.st[5] - p.st[0],
++                "rx_to_dec_us": (p.cr[1] as i64 - p.cr[0] as i64) / 1000, "dec_to_deq_us": (p.cr[2] as i64 - p.cr[1] as i64) / 1000,
++                "deq_to_detect_ns": p.cr[4].saturating_sub(p.cr[3]), "detect_to_gated_ns": p.cr[5].saturating_sub(p.cr[4]), "gated_to_prep_ns": p.st[0].saturating_sub(p.cr[5]) }));
++        }
++
++        /// ev: the deciding event's (rx realtime, decoded realtime, dequeued realtime, dequeued mono); t_dec: decided (mono)
++        pub fn trace_fire(&self, p: &Prep, r: &FireRec, ev: [u64; 4], t_dec: u64) {
++            let first = r.w.iter().filter(|x| x.4 == "written").map(|x| x.3).min().unwrap_or(0);
++            let ws: Vec<serde_json::Value> = r.w.iter().map(|x| serde_json::json!({ "path": x.0, "kind": x.1, "start_ns": x.2.saturating_sub(r.t_fire0),
++                "done_ns": x.3.saturating_sub(r.t_fire0), "from_decide_ns": x.3.saturating_sub(t_dec), "from_create_deq_ns": x.3.saturating_sub(p.cr[3]), "status": x.4 })).collect();
++            self.trace_line(serde_json::json!({ "ev": "fire", "id": p.id, "mint": b58(&p.launch.mint), "slot": p.slot, "route": p.meta.route, "junk": self.junk,
++                "fast_built": p.fast_built, "prep_age_us": p.made.elapsed().as_micros() as u64,
++                "ev_rx_to_deq_us": (ev[2] as i64 - ev[0] as i64) / 1000, "ev_dec_to_deq_us": (ev[2] as i64 - ev[1] as i64) / 1000,
++                "ev_deq_to_decide_ns": t_dec.saturating_sub(ev[3]), "decide_to_fire_ns": r.t_fire0.saturating_sub(t_dec),
++                "decide_to_first_write_ns": if first > 0 { first.saturating_sub(t_dec) } else { 0 }, "fire_total_ns": r.t_end - r.t_fire0,
++                "create_deq_to_decide_us": t_dec.saturating_sub(p.cr[3]) / 1000, "t_fire0_mono": r.t_fire0, "t_decide_mono": t_dec, "writes": ws }));
++        }
++
++        fn trace_line(&self, v: serde_json::Value) {
++            if let Some(t) = &self.trace { if let Ok(mut f) = t.lock() { let _ = writeln!(f, "{v}"); let _ = f.flush(); } }
++        }
++
++        pub fn summary(&self) -> Vec<String> {
++            let mut v: Vec<String> = self.fps.iter().filter_map(|f| match &f.kind { Kind::Http { conn, .. } => Some(conn.summary()), Kind::JitoH2 { conn, .. } => Some(conn.summary()), _ => None }).collect();
++            v.push(format!("fast-verify: {} identical, {} MISMATCHED", self.verified.load(Ordering::Relaxed), self.mismatched.load(Ordering::Relaxed)));
++            v
++        }
++    }
++
++    /// spin on the feed channel until an event or `wait` (the --busy-poll receive). Err: the feed closed.
++    #[inline]
++    pub fn spin_recv(rx: &crossbeam_channel::Receiver<arbx::feeds::Event>, wait: Duration) -> std::result::Result<Option<arbx::feeds::Event>, ()> {
++        let dl = Instant::now() + wait;
++        let mut n = 0u32;
++        loop {
++            match rx.try_recv() {
++                Ok(e) => return Ok(Some(e)),
++                Err(crossbeam_channel::TryRecvError::Disconnected) => return Err(()),
++                Err(crossbeam_channel::TryRecvError::Empty) => {}
++            }
++            n = n.wrapping_add(1);
++            if n % 64 == 0 && Instant::now() >= dl { return Ok(None); }
++            std::hint::spin_loop();
++        }
++    }
++
++    /// --fast-probe N (with --junk-fanout): junk fires of a synthetic launch through every fast path, 1.5 s apart
++    pub async fn probe(n: usize) {
++        let f = get().unwrap();
++        for i in 0..n {
++            let mut m = [0u8; 32];
++            m[..8].copy_from_slice(&(0x9000_0000u64 + i as u64).to_le_bytes());
++            let mut l = snipe_build::launch_from_target(m, f.user);
++            l.dev_buy_lamports = 1_000_000_000;
++            let p = match f.prepare(&l, 0, 1, [0; 6]) { Ok(p) => p, Err(e) => { eprintln!("probe prepare: {e:#}"); return; } };
++            let t_dec = fast::mono_ns();
++            let rec = f.fire(&p);
++            eprintln!("  FAST-PROBE tag={} paths={} writes: {}", p.id, p.fan.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(","),
++                rec.w.iter().map(|x| format!("{}={}@{:.1}us", x.0, x.4, x.3.saturating_sub(t_dec) as f64 / 1e3)).collect::<Vec<_>>().join(" "));
++            f.trace_fire(&p, &rec, [0; 4], t_dec);
++            tokio::time::sleep(Duration::from_millis(1500)).await;
++        }
++        tokio::time::sleep(Duration::from_secs(2)).await;
++        for l in f.summary() { eprintln!("FAST: {l}"); }
++    }
++
++    /// --fast-bench N: zero network. The build stages of the fast path vs the old build (build_buy + lat::build_tx), on
++    /// a synthetic launch per iteration (fresh mint each time: no derivation cache can help), byte-compared.
++    pub fn bench(n: usize) {
++        let f = get().unwrap();
++        let mut old_ns: Vec<u64> = Vec::new();
++        let mut st: [Vec<u64>; 6] = Default::default();
++        let (mut same, mut diff) = (0u64, 0u64);
++        for i in 0..n {
++            let mut m = [0u8; 32];
++            m[..8].copy_from_slice(&(0x5eed_0000_0000u64 + i as u64).to_le_bytes());
++            m[31] = 0x77;
++            let mut l = snipe_build::launch_from_target(m, f.user);
++            l.dev_buy_lamports = 1_000_000_000;
++            let p = match f.prepare(&l, 0, 12_345_678, [0; 6]) { Ok(p) => p, Err(e) => { eprintln!("bench prepare: {e:#}"); return; } };
++            for k in 0..5 { st[k].push(p.st[k + 1] - p.st[k]); }
++            st[5].push(p.st[5] - p.st[0]);
++            // the old path for the same launch and tips
++            let t = fast::mono_ns();
++            let (ixs, _) = build_buy(f.user, &l, None, 2_000_000, 12_345_678);
++            let mut fan = p.fan.clone();
++            let _ = lat::build_tx(&f.key, f.user, &ixs, &mut fan, p.bh);
++            old_ns.push(fast::mono_ns() - t);
++            if p.fast_built { if f.reference(&l, &p.tips, p.bh, p.min_out).as_deref() == Some(&p.raw[65..]) { same += 1 } else { diff += 1 } }
++        }
++        let q = |v: &mut Vec<u64>, x: f64| { v.sort_unstable(); v[((v.len() - 1) as f64 * x).round() as usize] as f64 / 1e3 };
++        println!("\n========== FAST-BENCH (n={n}, µs p50 / p99) ==========");
++        for (k, name) in ["route+tips+blockhash", "derive 2 ATAs", "template patch", "ed25519 sign", "encode+frame all paths", "PREPARE TOTAL"].iter().enumerate() {
++            println!("{name:24} {:8.2} / {:8.2}", q(&mut st[k], 0.5), q(&mut st[k], 0.99));
++        }
++        println!("{:24} {:8.2} / {:8.2}", "OLD build_buy+build_tx", q(&mut old_ns, 0.5), q(&mut old_ns, 0.99));
++        println!("byte check vs full compile: {same} identical, {diff} different");
++        // the derivation and the signature alone
++        let mut d: Vec<u64> = Vec::new();
++        let mut s: Vec<u64> = Vec::new();
++        let msg = vec![7u8; 900];
++        for i in 0..n {
++            let mut m = [3u8; 32]; m[..8].copy_from_slice(&(i as u64).to_le_bytes());
++            let t = fast::mono_ns(); let _ = pda::ata(&f.user, &m, &pda::TOKEN_2022); d.push(fast::mono_ns() - t);
++            let t = fast::mono_ns(); let _ = f.key.sign(&msg); s.push(fast::mono_ns() - t);
++        }
++        println!("{:24} {:8.2} / {:8.2}", "one ATA derivation", q(&mut d, 0.5), q(&mut d, 0.99));
++        let mut d2: Vec<u64> = Vec::new();
++        for i in 0..n {
++            let mut m = [3u8; 32]; m[..8].copy_from_slice(&(i as u64).to_le_bytes());
++            let t = fast::mono_ns(); let _ = fast::ata_fast(&f.user, &m, &pda::TOKEN_2022); d2.push(fast::mono_ns() - t);
++        }
++        println!("{:24} {:8.2} / {:8.2}", "one ATA derivation FAST", q(&mut d2, 0.5), q(&mut d2, 0.99));
++        println!("{:24} {:8.2} / {:8.2}", "one sign (900 B)", q(&mut s, 0.5), q(&mut s, 0.99));
++        if let Some(ps) = &f.presign {
++            let mut s2: Vec<u64> = Vec::new();
++            let vk = f.key.verifying_key();
++            let mut bad = 0;
++            for _ in 0..n {
++                while ps.pool_len() < 2 { std::thread::sleep(Duration::from_millis(1)); }
++                let t = fast::mono_ns(); let sg = ps.sign(&msg); s2.push(fast::mono_ns() - t);
++                if sg.map(|sg| vk.verify_strict(&msg, &ed25519_dalek::Signature::from_bytes(&sg)).is_err()).unwrap_or(true) { bad += 1; }
++            }
++            println!("{:24} {:8.2} / {:8.2}   ({bad} failed verify_strict)", "presign sign (900 B)", q(&mut s2, 0.5), q(&mut s2, 0.99));
++        }
++    }
++}
+diff -ruN arbx-lat.bak_fast/src/fast.rs arbx-lat/src/fast.rs
+--- arbx-lat.bak_fast/src/fast.rs	1970-01-01 01:00:00.000000000 +0100
++++ arbx-lat/src/fast.rs	2026-10-19 12:59:36.789586478 +0100
+@@ -0,0 +1,949 @@
++//! FAST (2026-10-19): the sub-100 µs fire path for the pump sniper (snipe_engine `--fast-send`).
++//!
++//! * `Template`: the buy message compiled ONCE per tip shape with probe keys; a fire copies it and patches the
++//!   mint-dependent keys, the tip accounts, the blockhash and min_tokens_out in place (no ix lists, no HashMaps, no
++//!   compile). Any key collision (which would change the account dedup) falls back to the full compile.
++//! * `FastConn`: one HTTP/1.1 keep-alive connection per HTTP send path (plain TCP or rustls), owned by us, so the hot
++//!   thread writes the pre-framed request with ONE write() syscall itself (no task hop, no reqwest/hyper dispatch).
++//!   A reader thread matches replies (FIFO) and reports acks; a keep-alive thread pings every 2 s.
++//! * `mono_ns`: CLOCK_MONOTONIC ns (== bpftrace `nsecs`, == std Instant), for the stage trace.
++use crate::tx::Pk;
++use std::collections::VecDeque;
++use std::io::{Read, Write};
++use std::net::{SocketAddr, TcpStream};
++use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
++use std::sync::{Arc, Mutex};
++use std::time::Duration;
++
++#[inline]
++pub fn mono_ns() -> u64 {
++    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
++    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
++    ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
++}
++
++/// pin the calling thread to one CPU (sched_setaffinity); false if refused
++pub fn pin_to_core(core: usize) -> bool {
++    unsafe {
++        let mut set: libc::cpu_set_t = std::mem::zeroed();
++        libc::CPU_SET(core, &mut set);
++        libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) == 0
++    }
++}
++
++// ------------------------------------------------------------------------------------------------------------------
++// message template
++// ------------------------------------------------------------------------------------------------------------------
++
++/// the mint-dependent keys of a buy, in template order
++pub const NVAR: usize = 6;
++/// [mint, bonding_curve, assoc_bonding_curve (base, T22), assoc_quote_bonding_curve (WSOL, SPL), user base ATA (T22),
++/// buyback_fee_recipient]
++pub type VarKeys = [Pk; NVAR];
++
++fn probe_key(tag: u8, i: u8) -> Pk {
++    let mut k = [0u8; 32];
++    for (j, b) in k.iter_mut().enumerate() { *b = tag ^ (j as u8).wrapping_mul(29) ^ i.wrapping_mul(101); }
++    k[0] = tag; k[1] = i; k[31] = 0xA7;
++    k
++}
++pub fn probe_var(i: usize) -> Pk { probe_key(0xD1, i as u8) }
++pub fn probe_tip(i: usize) -> Pk { probe_key(0xE3, i as u8) }
++pub const PROBE_BH: [u8; 32] = [0xC5; 32];
++pub const PROBE_MIN_OUT: u64 = 0x0F1E_2D3C_4B5A_6978;
++
++fn find_once(hay: &[u8], needle: &[u8]) -> Option<usize> {
++    let mut found = None;
++    for i in 0..=hay.len().saturating_sub(needle.len()) {
++        if &hay[i..i + needle.len()] == needle {
++            if found.is_some() { return None; }
++            found = Some(i);
++        }
++    }
++    found
++}
++
++pub struct Template {
++    pub msg: Vec<u8>,
++    var_off: [usize; NVAR],
++    tip_off: Vec<usize>,
++    bh_off: usize,
++    min_out_off: usize,
++    /// the template's static keys that are NOT patched (a patched key equal to one of these would change the dedup)
++    consts: Vec<Pk>,
++}
++
++impl Template {
++    /// `msg`: a message compiled from the probe keys (`probe_var`, `probe_tip`, `PROBE_BH`, `PROBE_MIN_OUT`), with `ntips`
++    /// tip transfers. Locates every patch site (each probe must appear exactly once).
++    pub fn from_probe_msg(msg: Vec<u8>, ntips: usize) -> Result<Template, String> {
++        let mut var_off = [0usize; NVAR];
++        for (i, o) in var_off.iter_mut().enumerate() { *o = find_once(&msg, &probe_var(i)).ok_or(format!("var probe {i} not found once"))?; }
++        let mut tip_off = Vec::with_capacity(ntips);
++        for i in 0..ntips { tip_off.push(find_once(&msg, &probe_tip(i)).ok_or(format!("tip probe {i} not found once"))?); }
++        let bh_off = find_once(&msg, &PROBE_BH).ok_or("blockhash probe not found once")?;
++        let min_out_off = find_once(&msg, &PROBE_MIN_OUT.to_le_bytes()).ok_or("min_out probe not found once")?;
++        // static keys: header(3) + compact count (1 byte while < 128 keys) + 32 * n
++        let n = msg[4] as usize;
++        if n >= 128 { return Err("too many keys for the template".into()); }
++        let mut consts = Vec::with_capacity(n);
++        for i in 0..n {
++            let o = 5 + 32 * i;
++            if var_off.contains(&o) || tip_off.contains(&o) { continue; }
++            let mut k = [0u8; 32]; k.copy_from_slice(&msg[o..o + 32]); consts.push(k);
++        }
++        // every key patch site must be inside the static key table
++        if var_off.iter().chain(tip_off.iter()).any(|o| *o < 5 || *o >= 5 + 32 * n || (*o - 5) % 32 != 0) { return Err("a key probe is outside the key table".into()); }
++        Ok(Template { msg, var_off, tip_off, bh_off, min_out_off, consts })
++    }
++
++    /// patch into `out` (reused buffer, the message only). None: a key collision (use the full compile instead).
++    #[inline]
++    pub fn patch(&self, out: &mut Vec<u8>, vars: &VarKeys, tips: &[Pk], blockhash: &[u8; 32], min_out: u64) -> Option<()> {
++        if tips.len() != self.tip_off.len() { return None; }
++        // collisions: patched keys pairwise distinct and not equal to any constant key
++        for (i, a) in vars.iter().enumerate() {
++            if vars[i + 1..].iter().any(|b| b == a) || tips.iter().any(|b| b == a) || self.consts.iter().any(|c| c == a) { return None; }
++        }
++        for (i, a) in tips.iter().enumerate() {
++            if tips[i + 1..].iter().any(|b| b == a) || self.consts.iter().any(|c| c == a) { return None; }
++        }
++        out.clear();
++        out.extend_from_slice(&self.msg);
++        for (i, k) in vars.iter().enumerate() { out[self.var_off[i]..self.var_off[i] + 32].copy_from_slice(k); }
++        for (i, k) in tips.iter().enumerate() { out[self.tip_off[i]..self.tip_off[i] + 32].copy_from_slice(k); }
++        out[self.bh_off..self.bh_off + 32].copy_from_slice(blockhash);
++        out[self.min_out_off..self.min_out_off + 8].copy_from_slice(&min_out.to_le_bytes());
++        Some(())
++    }
++}
++
++// ------------------------------------------------------------------------------------------------------------------
++// request bodies
++// ------------------------------------------------------------------------------------------------------------------
++
++/// the JSON-RPC sendTransaction body, byte-identical to serde_json's `json!` output in send::Path::deliver (keys sorted:
++/// serde_json without preserve_order), base64 into the reused buffer
++pub fn json_send_body(raw: &[u8], out: &mut Vec<u8>) {
++    use base64::Engine as _;
++    out.clear();
++    out.extend_from_slice(br#"{"id":1,"jsonrpc":"2.0","method":"sendTransaction","params":[""#);
++    let start = out.len();
++    let n = (raw.len() + 2) / 3 * 4;
++    out.resize(start + n, 0);
++    let w = base64::engine::general_purpose::STANDARD.encode_slice(raw, &mut out[start..]).unwrap_or(0);
++    out.truncate(start + w);
++    out.extend_from_slice(br#"",{"encoding":"base64","maxRetries":0,"skipPreflight":true}]}"#);
++}
++
++// ------------------------------------------------------------------------------------------------------------------
++// FastConn: our own HTTP/1.1 keep-alive connection
++// ------------------------------------------------------------------------------------------------------------------
++
++#[derive(Clone, Debug)]
++pub struct Ack { pub path: String, pub tag: u64, pub t_write: u64, pub t_ack: u64, pub status: Option<u16>, pub body: String }
++
++enum Io { Plain(TcpStream), Tls(TcpStream, Box<rustls::ClientConnection>) }
++
++impl Io {
++    fn write_all_now(&mut self, buf: &[u8]) -> std::io::Result<()> {
++        match self {
++            Io::Plain(s) => s.write_all(buf),
++            Io::Tls(s, c) => {
++                c.writer().write_all(buf)?;
++                while c.wants_write() { c.write_tls(s)?; }
++                Ok(())
++            }
++        }
++    }
++}
++
++struct Pend { tag: u64, t_write: u64, ping: bool }
++
++pub struct FastConn {
++    pub name: String,
++    host: String,
++    addr: SocketAddr,
++    tls: Option<Arc<rustls::ClientConfig>>,
++    /// "POST /path?q HTTP/1.1\r\nHost: h\r\n...Content-Length: " (the hot path appends the length and the body)
++    pub head: Vec<u8>,
++    ping_req: Option<Vec<u8>>,
++    io: Mutex<Option<Io>>,
++    pend: Mutex<VecDeque<Pend>>,
++    pub up: AtomicBool,
++    pub writes: AtomicU64,
++    pub reconnects: AtomicU64,
++    acks: crossbeam_channel::Sender<Ack>,
++}
++
++fn tls_config() -> Arc<rustls::ClientConfig> {
++    static CFG: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
++    CFG.get_or_init(|| {
++        let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
++        let mut c = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
++            .with_safe_default_protocol_versions().expect("tls versions")
++            .with_root_certificates(roots).with_no_client_auth();
++        c.alpn_protocols = vec![b"http/1.1".to_vec()];
++        Arc::new(c)
++    }).clone()
++}
++
++impl FastConn {
++    /// `url`: the path's full URL (http or https). `content_type`: of the send body. `extra`: the path's own headers
++    /// (name, value). `ping`: (GET?, url) of its keep-alive.
++    pub fn start(name: &str, url: &str, content_type: &str, extra: &[(String, String)], ping: Option<(bool, String)>, acks: crossbeam_channel::Sender<Ack>,
++        stop: Arc<AtomicBool>) -> Result<Arc<FastConn>, String> {
++        let u = reqwest::Url::parse(url).map_err(|e| format!("{name}: url: {e}"))?;
++        let tls = match u.scheme() { "https" => Some(tls_config()), "http" => None, s => return Err(format!("{name}: scheme {s} not supported by the fast path")) };
++        let host = u.host_str().ok_or(format!("{name}: no host"))?.to_string();
++        let port = u.port_or_known_default().unwrap_or(if tls.is_some() { 443 } else { 80 });
++        use std::net::ToSocketAddrs;
++        let addr = (host.as_str(), port).to_socket_addrs().map_err(|e| format!("{name}: resolve: {e}"))?.next().ok_or(format!("{name}: no address"))?;
++        let pq = |u: &reqwest::Url| match u.query() { Some(q) => format!("{}?{q}", u.path()), None => u.path().to_string() };
++        let hosthdr = match u.port() { Some(p) => format!("{host}:{p}"), None => host.clone() };
++        let mut head = format!("POST {} HTTP/1.1\r\nHost: {hosthdr}\r\nAccept: */*\r\nContent-Type: {content_type}\r\n", pq(&u));
++        for (k, v) in extra { head.push_str(&format!("{k}: {v}\r\n")); }
++        head.push_str("Content-Length: ");
++        let ping_req = ping.and_then(|(get, pu)| {
++            let p = reqwest::Url::parse(&pu).ok()?;
++            let mut r = if get { format!("GET {} HTTP/1.1\r\nHost: {hosthdr}\r\nAccept: */*\r\n", pq(&p)) } else { format!("POST {} HTTP/1.1\r\nHost: {hosthdr}\r\nAccept: */*\r\nContent-Type: application/json\r\n", pq(&p)) };
++            for (k, v) in extra { r.push_str(&format!("{k}: {v}\r\n")); }
++            if get { r.push_str("\r\n"); } else {
++                let b = r#"{"id":1,"jsonrpc":"2.0","method":"getHealth","params":[]}"#;
++                r.push_str(&format!("Content-Length: {}\r\n\r\n{b}", b.len()));
++            }
++            Some(r.into_bytes())
++        });
++        let c = Arc::new(FastConn { name: name.to_string(), host, addr, tls, head: head.into_bytes(), ping_req, io: Mutex::new(None), pend: Mutex::new(VecDeque::new()),
++            up: AtomicBool::new(false), writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), acks });
++        // reader (connects, reads, reconnects) and keep-alive threads
++        { let c = c.clone(); let stop = stop.clone(); std::thread::Builder::new().name(format!("fast-rd-{name}")).spawn(move || c.reader(stop)).map_err(|e| e.to_string())?; }
++        { let c = c.clone(); std::thread::Builder::new().name(format!("fast-ka-{name}")).spawn(move || c.keepalive(stop)).map_err(|e| e.to_string())?; }
++        Ok(c)
++    }
++
++    fn connect(&self) -> std::io::Result<(TcpStream, Io)> {
++        let s = TcpStream::connect_timeout(&self.addr, Duration::from_secs(3))?;
++        s.set_nodelay(true)?;
++        let sock = socket2::SockRef::from(&s);
++        let _ = sock.set_keepalive(true);
++        let _ = sock.set_tcp_keepalive(&socket2::TcpKeepalive::new().with_time(Duration::from_secs(15)).with_interval(Duration::from_secs(5)));
++        let rd = s.try_clone()?;
++        let io = match &self.tls {
++            None => Io::Plain(s),
++            Some(cfg) => {
++                let sn = rustls::pki_types::ServerName::try_from(self.host.clone()).map_err(|e| std::io::Error::other(e.to_string()))?;
++                let mut c = rustls::ClientConnection::new(cfg.clone(), sn).map_err(|e| std::io::Error::other(e.to_string()))?;
++                let mut s = s;
++                s.set_read_timeout(Some(Duration::from_secs(3)))?;
++                while c.is_handshaking() { c.complete_io(&mut s)?; }
++                s.set_read_timeout(None)?;
++                Io::Tls(s, Box::new(c))
++            }
++        };
++        Ok((rd, io))
++    }
++
++    /// HOT PATH: write one framed request (head + length + body) with one syscall (TLS: one encrypt + write). Returns the
++    /// (before, after) monotonic ns of the write. Err: not connected / write failed (the caller falls back).
++    #[inline]
++    pub fn write_req(&self, req: &[u8], tag: u64) -> Result<(u64, u64), String> {
++        if !self.up.load(Ordering::Acquire) { return Err("down".into()); }
++        let mut g = self.io.lock().unwrap();
++        let io = g.as_mut().ok_or("down")?;
++        let t0 = mono_ns();
++        self.pend.lock().unwrap().push_back(Pend { tag, t_write: t0, ping: false });
++        match io.write_all_now(req) {
++            Ok(()) => { let t1 = mono_ns(); self.writes.fetch_add(1, Ordering::Relaxed); Ok((t0, t1)) }
++            Err(e) => { self.up.store(false, Ordering::Release); *g = None; Err(format!("write: {e}")) }
++        }
++    }
++
++    /// frame a request into `out`: head + content length + CRLFCRLF + body
++    #[inline]
++    pub fn frame(&self, body: &[u8], out: &mut Vec<u8>) {
++        out.clear();
++        out.extend_from_slice(&self.head);
++        let mut b = [0u8; 20];
++        out.extend_from_slice(itoa(body.len(), &mut b));
++        out.extend_from_slice(b"\r\n\r\n");
++        out.extend_from_slice(body);
++    }
++
++    fn keepalive(self: Arc<Self>, stop: Arc<AtomicBool>) {
++        while !stop.load(Ordering::Relaxed) {
++            std::thread::sleep(Duration::from_secs(2));
++            let Some(req) = &self.ping_req else { continue };
++            if !self.up.load(Ordering::Acquire) { continue; }
++            let mut g = self.io.lock().unwrap();
++            if let Some(io) = g.as_mut() {
++                self.pend.lock().unwrap().push_back(Pend { tag: 0, t_write: mono_ns(), ping: true });
++                if io.write_all_now(req).is_err() { self.up.store(false, Ordering::Release); *g = None; }
++            }
++        }
++    }
++
++    fn fail_pending(&self, why: &str) {
++        let mut p = self.pend.lock().unwrap();
++        for x in p.drain(..) {
++            if !x.ping { let _ = self.acks.send(Ack { path: self.name.clone(), tag: x.tag, t_write: x.t_write, t_ack: mono_ns(), status: None, body: why.to_string() }); }
++        }
++    }
++
++    fn reader(self: Arc<Self>, stop: Arc<AtomicBool>) {
++        let mut backoff = 100u64;
++        while !stop.load(Ordering::Relaxed) {
++            let (mut rd, io) = match self.connect() {
++                Ok(x) => x,
++                Err(_) => { std::thread::sleep(Duration::from_millis(backoff)); backoff = (backoff * 2).min(5_000); continue; }
++            };
++            backoff = 100;
++            self.pend.lock().unwrap().clear();
++            *self.io.lock().unwrap() = Some(io);
++            self.up.store(true, Ordering::Release);
++            self.reconnects.fetch_add(1, Ordering::Relaxed);
++            let mut net = vec![0u8; 32 * 1024];
++            let mut plain: Vec<u8> = Vec::with_capacity(64 * 1024);
++            let mut tmp = vec![0u8; 32 * 1024];
++            let why = loop {
++                let n = match rd.read(&mut net) { Ok(0) => break "eof".to_string(), Ok(n) => n, Err(e) => break format!("read: {e}") };
++                {
++                    let mut g = self.io.lock().unwrap();
++                    match g.as_mut() {
++                        None => break "closed".into(),
++                        Some(Io::Plain(_)) => plain.extend_from_slice(&net[..n]),
++                        Some(Io::Tls(s, c)) => {
++                            let mut src = &net[..n];
++                            let mut bad = None;
++                            while !src.is_empty() {
++                                if let Err(e) = c.read_tls(&mut src) { bad = Some(format!("tls read: {e}")); break; }
++                                if let Err(e) = c.process_new_packets() { bad = Some(format!("tls: {e}")); break; }
++                            }
++                            if let Some(b) = bad { break b; }
++                            loop {
++                                match c.reader().read(&mut tmp) { Ok(0) => break, Ok(k) => plain.extend_from_slice(&tmp[..k]), Err(_) => break }
++                            }
++                            if c.wants_write() { let _ = c.write_tls(s); }
++                        }
++                    }
++                }
++                // complete responses, in order
++                loop {
++                    match parse_response(&plain) {
++                        Some((used, status, body)) => {
++                            let t_ack = mono_ns();
++                            let p = self.pend.lock().unwrap().pop_front();
++                            if let Some(p) = p {
++                                if !p.ping {
++                                    let _ = self.acks.send(Ack { path: self.name.clone(), tag: p.tag, t_write: p.t_write, t_ack, status: Some(status),
++                                        body: String::from_utf8_lossy(&body[..body.len().min(200)]).trim().to_string() });
++                                }
++                            }
++                            plain.drain(..used);
++                        }
++                        None => break,
++                    }
++                }
++            };
++            self.up.store(false, Ordering::Release);
++            *self.io.lock().unwrap() = None;
++            self.fail_pending(&format!("connection lost: {why}"));
++            std::thread::sleep(Duration::from_millis(50));
++        }
++    }
++
++    /// warm the kernel send path of this socket without sending anything (a zero-length send on TCP sends no segment)
++    pub fn prewarm(&self) {
++        use std::os::fd::AsRawFd;
++        if let Ok(g) = self.io.try_lock() {
++            let fd = match g.as_ref() { Some(Io::Plain(s)) => s.as_raw_fd(), Some(Io::Tls(s, _)) => s.as_raw_fd(), None => return };
++            unsafe { libc::send(fd, [0u8; 1].as_ptr() as *const libc::c_void, 0, libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL) };
++        }
++    }
++
++    pub fn summary(&self) -> String {
++        format!("{}: fast conn {} writes {} connects {}", self.name, if self.up.load(Ordering::Relaxed) { "up" } else { "DOWN" },
++            self.writes.load(Ordering::Relaxed), self.reconnects.load(Ordering::Relaxed))
++    }
++}
++
++/// a small stack integer formatter (no allocation)
++fn itoa(mut n: usize, b: &mut [u8; 20]) -> &[u8] {
++    let mut i = 20;
++    loop { i -= 1; b[i] = b'0' + (n % 10) as u8; n /= 10; if n == 0 { break; } }
++    &b[i..]
++}
++
++/// one complete HTTP/1.1 response at the start of `buf`: (bytes used, status, body). None: incomplete.
++fn parse_response(buf: &[u8]) -> Option<(usize, u16, Vec<u8>)> {
++    let mut hs = [httparse::EMPTY_HEADER; 48];
++    let mut r = httparse::Response::new(&mut hs);
++    let hlen = match r.parse(buf) { Ok(httparse::Status::Complete(n)) => n, _ => return None };
++    let status = r.code.unwrap_or(0);
++    let mut clen: Option<usize> = None;
++    let mut chunked = false;
++    for h in r.headers.iter() {
++        if h.name.eq_ignore_ascii_case("content-length") { clen = std::str::from_utf8(h.value).ok().and_then(|s| s.trim().parse().ok()); }
++        if h.name.eq_ignore_ascii_case("transfer-encoding") && String::from_utf8_lossy(h.value).to_ascii_lowercase().contains("chunked") { chunked = true; }
++    }
++    if (100..200).contains(&status) { return Some((hlen, status, Vec::new())); }
++    if chunked {
++        let mut p = hlen;
++        let mut body = Vec::new();
++        loop {
++            let line_end = buf[p..].windows(2).position(|w| w == b"\r\n")? + p;
++            let sz_s = std::str::from_utf8(&buf[p..line_end]).ok()?.split(';').next()?.trim().to_string();
++            let sz = usize::from_str_radix(&sz_s, 16).ok()?;
++            p = line_end + 2;
++            if sz == 0 {
++                // trailers until an empty line
++                loop {
++                    let e = buf[p..].windows(2).position(|w| w == b"\r\n")? + p;
++                    if e == p { return Some((p + 2, status, body)); }
++                    p = e + 2;
++                }
++            }
++            if buf.len() < p + sz + 2 { return None; }
++            body.extend_from_slice(&buf[p..p + sz]);
++            p += sz + 2;
++        }
++    }
++    let n = clen.unwrap_or(0);
++    if buf.len() < hlen + n { return None; }
++    Some((hlen + n, status, buf[hlen..hlen + n].to_vec()))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn json_body_matches_serde() {
++        use base64::Engine as _;
++        let raw: Vec<u8> = (0..1000u32).map(|i| (i * 7) as u8).collect();
++        let b64 = base64::engine::general_purpose::STANDARD.encode(&raw);
++        let v = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "sendTransaction", "params": [b64, { "encoding": "base64", "skipPreflight": true, "maxRetries": 0 }] });
++        let mut out = Vec::new();
++        json_send_body(&raw, &mut out);
++        assert_eq!(String::from_utf8(out).unwrap(), serde_json::to_string(&v).unwrap());
++    }
++    #[test]
++    fn responses() {
++        let a = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhelloHTTP/1.1 400 Bad\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n";
++        let (u, s, b) = parse_response(a).unwrap();
++        assert_eq!((s, b.as_slice()), (200, &b"hello"[..]));
++        let (u2, s2, b2) = parse_response(&a[u..]).unwrap();
++        assert_eq!((s2, b2.as_slice(), u + u2), (400, &b"abc"[..], a.len()));
++    }
++}
++
++// ------------------------------------------------------------------------------------------------------------------
++// FastH2: one gRPC unary call (Jito SendBundle) written as raw HTTP/2 frames on our own TLS connection (ALPN h2), so
++// the hot thread writes HEADERS + DATA with one encrypt + one write() (tonic: buffer task -> hyper -> h2 task hops).
++// HPACK: we only ENCODE (literal fields, no dynamic table, no Huffman). Replies are matched by stream id: a DATA frame
++// carries the response message (SendBundleResponse uuid, decoded here); the trailers' HPACK is not decoded, so a
++// stream that ends without DATA reads as "rejected (no message)".
++// ------------------------------------------------------------------------------------------------------------------
++
++fn hpack_int(out: &mut Vec<u8>, first: u8, prefix_bits: u8, mut v: usize) {
++    let max = (1usize << prefix_bits) - 1;
++    if v < max { out.push(first | v as u8); return; }
++    out.push(first | max as u8);
++    v -= max;
++    while v >= 128 { out.push((v % 128) as u8 | 0x80); v /= 128; }
++    out.push(v as u8);
++}
++/// literal header field without indexing, new name (0x00), no Huffman
++fn hpack_lit(out: &mut Vec<u8>, name: &str, value: &str) {
++    out.push(0x00);
++    hpack_int(out, 0, 7, name.len()); out.extend_from_slice(name.as_bytes());
++    hpack_int(out, 0, 7, value.len()); out.extend_from_slice(value.as_bytes());
++}
++/// literal without indexing, indexed name (static table index)
++fn hpack_lit_idx(out: &mut Vec<u8>, idx: usize, value: &str) {
++    hpack_int(out, 0, 4, idx);
++    hpack_int(out, 0, 7, value.len()); out.extend_from_slice(value.as_bytes());
++}
++fn frame_hdr(out: &mut Vec<u8>, len: usize, ty: u8, flags: u8, stream: u32) {
++    out.extend_from_slice(&[(len >> 16) as u8, (len >> 8) as u8, len as u8, ty, flags]);
++    out.extend_from_slice(&(stream & 0x7fff_ffff).to_be_bytes());
++}
++
++#[derive(Default)]
++struct Hpack { tab: VecDeque<(String, String)>, size: usize, off: bool, reset: bool }
++impl Hpack {
++    const MAX: usize = 4096; // the decoder's (server's) table size: the default; any other SETTINGS value turns indexing off
++    /// encode one field: indexed if in the dynamic table, else literal WITH incremental indexing (and remember it)
++    fn field(&mut self, out: &mut Vec<u8>, static_name: usize, name: &str, value: &str) {
++        if !self.off {
++            if let Some(i) = self.tab.iter().position(|(n, v)| n == name && v == value) { hpack_int(out, 0x80, 7, 62 + i); return; }
++            let sz = name.len() + value.len() + 32;
++            if sz <= Self::MAX {
++                if static_name > 0 { hpack_int(out, 0x40, 6, static_name); } else { out.push(0x40); hpack_int(out, 0, 7, name.len()); out.extend_from_slice(name.as_bytes()); }
++                hpack_int(out, 0, 7, value.len()); out.extend_from_slice(value.as_bytes());
++                self.tab.push_front((name.to_string(), value.to_string()));
++                self.size += sz;
++                while self.size > Self::MAX { if let Some((n, v)) = self.tab.pop_back() { self.size -= n.len() + v.len() + 32; } else { break; } }
++                return;
++            }
++        }
++        if static_name > 0 { hpack_lit_idx(out, static_name, value); } else { hpack_lit(out, name, value); }
++    }
++}
++#[derive(Default)]
++struct H2State { next_stream: u32, conn_window: i64, peer_init_window: i64, streams: std::collections::HashMap<u32, (u64, u64, bool)>, hp: Hpack }
++
++pub struct FastH2 {
++    pub name: String,
++    host: String,
++    addr: SocketAddr,
++    io: Mutex<Option<(TcpStream, Box<rustls::ClientConnection>)>>,
++    st: Mutex<H2State>,
++    pub up: AtomicBool,
++    pub writes: AtomicU64,
++    pub reconnects: AtomicU64,
++    /// (tag, uuid or error) per reply
++    acks: crossbeam_channel::Sender<Ack>,
++}
++
++impl FastH2 {
++    pub fn start(name: &str, url: &str, acks: crossbeam_channel::Sender<Ack>, stop: Arc<AtomicBool>) -> Result<Arc<FastH2>, String> {
++        let u = reqwest::Url::parse(url).map_err(|e| format!("{name}: url: {e}"))?;
++        if u.scheme() != "https" { return Err(format!("{name}: h2 fast path needs https")); }
++        let host = u.host_str().ok_or("no host")?.to_string();
++        use std::net::ToSocketAddrs;
++        let addr = (host.as_str(), u.port_or_known_default().unwrap_or(443)).to_socket_addrs().map_err(|e| format!("{name}: resolve: {e}"))?.next().ok_or("no address")?;
++        let c = Arc::new(FastH2 { name: name.into(), host, addr, io: Mutex::new(None), st: Mutex::new(H2State::default()), up: AtomicBool::new(false),
++            writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), acks });
++        { let c = c.clone(); let stop = stop.clone(); std::thread::Builder::new().name(format!("fast-h2-{name}")).spawn(move || c.reader(stop)).map_err(|e| e.to_string())?; }
++        { let c = c.clone(); std::thread::Builder::new().name(format!("fast-h2ka-{name}")).spawn(move || c.keepalive(stop)).map_err(|e| e.to_string())?; }
++        Ok(c)
++    }
++
++    fn tls_h2() -> Arc<rustls::ClientConfig> {
++        static CFG: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
++        CFG.get_or_init(|| {
++            let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
++            let mut c = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
++                .with_safe_default_protocol_versions().expect("tls versions").with_root_certificates(roots).with_no_client_auth();
++            c.alpn_protocols = vec![b"h2".to_vec()];
++            Arc::new(c)
++        }).clone()
++    }
++
++    fn connect(&self) -> std::io::Result<(TcpStream, (TcpStream, Box<rustls::ClientConnection>))> {
++        let mut s = TcpStream::connect_timeout(&self.addr, Duration::from_secs(3))?;
++        s.set_nodelay(true)?;
++        let sn = rustls::pki_types::ServerName::try_from(self.host.clone()).map_err(|e| std::io::Error::other(e.to_string()))?;
++        let mut c = rustls::ClientConnection::new(Self::tls_h2(), sn).map_err(|e| std::io::Error::other(e.to_string()))?;
++        s.set_read_timeout(Some(Duration::from_secs(3)))?;
++        while c.is_handshaking() { c.complete_io(&mut s)?; }
++        if c.alpn_protocol() != Some(b"h2") { return Err(std::io::Error::other("server did not negotiate h2")); }
++        // preface + SETTINGS (ENABLE_PUSH 0, INITIAL_WINDOW_SIZE 16 MiB) + connection WINDOW_UPDATE (+32 MiB)
++        let mut b = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".to_vec();
++        frame_hdr(&mut b, 12, 0x4, 0, 0);
++        b.extend_from_slice(&[0, 2, 0, 0, 0, 0]);
++        b.extend_from_slice(&[0, 4]); b.extend_from_slice(&(16u32 << 20).to_be_bytes());
++        frame_hdr(&mut b, 4, 0x8, 0, 0); b.extend_from_slice(&(32u32 << 20).to_be_bytes());
++        c.writer().write_all(&b)?;
++        while c.wants_write() { c.write_tls(&mut s)?; }
++        s.set_read_timeout(None)?;
++        let rd = s.try_clone()?;
++        Ok((rd, (s, Box::new(c))))
++    }
++
++    /// the gRPC request's HPACK header block for `path` with `bearer`
++    pub fn header_block(&self, path: &str, bearer: &str) -> Vec<u8> {
++        let mut h = Vec::with_capacity(1024);
++        h.push(0x83); // :method POST
++        h.push(0x87); // :scheme https
++        hpack_lit_idx(&mut h, 4, path);       // :path
++        hpack_lit_idx(&mut h, 1, &self.host); // :authority
++        hpack_lit(&mut h, "content-type", "application/grpc");
++        hpack_lit(&mut h, "te", "trailers");
++        hpack_lit(&mut h, "grpc-timeout", "5S");
++        hpack_lit(&mut h, "authorization", &format!("Bearer {bearer}"));
++        h
++    }
++
++    /// frame one unary call into `out`: HEADERS(END_HEADERS) + DATA(END_STREAM), stream id 0 (patched at write time)
++    pub fn frame(hblock: &[u8], msg: &[u8], out: &mut Vec<u8>) {
++        out.clear();
++        frame_hdr(out, hblock.len(), 0x1, 0x4, 0);
++        out.extend_from_slice(hblock);
++        frame_hdr(out, msg.len() + 5, 0x0, 0x1, 0);
++        out.push(0);
++        out.extend_from_slice(&(msg.len() as u32).to_be_bytes());
++        out.extend_from_slice(msg);
++    }
++
++    /// HOT PATH (HPACK-indexed): HEADERS encoded now against this connection's dynamic table (the token and the fixed
++    /// fields go in once per connection, then cost one byte each), DATA = the gRPC message; one encrypt + one write
++    pub fn write_call_idx(&self, path: &str, bearer: &str, msg: &[u8], tag: u64) -> Result<(u64, u64), String> {
++        if !self.up.load(Ordering::Acquire) { return Err("down".into()); }
++        let mut g = self.io.lock().unwrap();
++        let (s, c) = g.as_mut().ok_or("down")?;
++        let t0 = mono_ns();
++        let mut req: Vec<u8> = Vec::with_capacity(9 + 64 + 9 + 5 + msg.len() + 1024);
++        {
++            let mut st = self.st.lock().unwrap();
++            let data_len = msg.len() + 5;
++            if st.conn_window < data_len as i64 || st.peer_init_window < data_len as i64 || st.next_stream > 0x7fff_0000 { return Err("h2 window/stream ids".into()); }
++            let sid = st.next_stream; st.next_stream += 2; st.conn_window -= data_len as i64;
++            st.streams.insert(sid, (tag, t0, false));
++            req.resize(9, 0);
++            if st.hp.reset { hpack_int(&mut req, 0x20, 5, 0); st.hp.reset = false; }
++            req.push(0x83); req.push(0x87);
++            st.hp.field(&mut req, 4, ":path", path);
++            let host = self.host.clone();
++            st.hp.field(&mut req, 1, ":authority", &host);
++            st.hp.field(&mut req, 31, "content-type", "application/grpc");
++            st.hp.field(&mut req, 0, "te", "trailers");
++            st.hp.field(&mut req, 0, "grpc-timeout", "5S");
++            st.hp.field(&mut req, 23, "authorization", bearer);
++            let hl = req.len() - 9;
++            let mut fh = Vec::with_capacity(9); frame_hdr(&mut fh, hl, 0x1, 0x4, sid); req[..9].copy_from_slice(&fh);
++            frame_hdr(&mut req, data_len, 0x0, 0x1, sid);
++            req.push(0); req.extend_from_slice(&(msg.len() as u32).to_be_bytes()); req.extend_from_slice(msg);
++        }
++        let r = c.writer().write_all(&req).and_then(|_| { while c.wants_write() { c.write_tls(s)?; } Ok(()) });
++        match r {
++            Ok(()) => { self.writes.fetch_add(1, Ordering::Relaxed); Ok((t0, mono_ns())) }
++            Err(e) => { self.up.store(false, Ordering::Release); *g = None; Err(format!("write: {e}")) }
++        }
++    }
++
++    /// HOT PATH: write a framed call (from `frame`): assign the stream id, patch it into both frames, one write
++    pub fn write_call(&self, req: &mut [u8], hblock_len: usize, tag: u64) -> Result<(u64, u64), String> {
++        if !self.up.load(Ordering::Acquire) { return Err("down".into()); }
++        let mut g = self.io.lock().unwrap();
++        let (s, c) = g.as_mut().ok_or("down")?;
++        let data_len = req.len() - 9 - hblock_len - 9;
++        let t0 = mono_ns();
++        let sid = {
++            let mut st = self.st.lock().unwrap();
++            if st.conn_window < data_len as i64 || st.peer_init_window < data_len as i64 || st.next_stream > 0x7fff_0000 { return Err("h2 window/stream ids".into()); }
++            let sid = st.next_stream; st.next_stream += 2; st.conn_window -= data_len as i64;
++            st.streams.insert(sid, (tag, t0, false));
++            sid
++        };
++        req[5..9].copy_from_slice(&sid.to_be_bytes());
++        let d = 9 + hblock_len;
++        req[d + 5..d + 9].copy_from_slice(&sid.to_be_bytes());
++        let r = c.writer().write_all(req).and_then(|_| { while c.wants_write() { c.write_tls(s)?; } Ok(()) });
++        match r {
++            Ok(()) => { self.writes.fetch_add(1, Ordering::Relaxed); Ok((t0, mono_ns())) }
++            Err(e) => { self.up.store(false, Ordering::Release); *g = None; Err(format!("write: {e}")) }
++        }
++    }
++
++    fn send_raw(&self, b: &[u8]) {
++        let mut g = self.io.lock().unwrap();
++        if let Some((s, c)) = g.as_mut() {
++            if c.writer().write_all(b).and_then(|_| { while c.wants_write() { c.write_tls(s)?; } Ok(()) }).is_err() { self.up.store(false, Ordering::Release); *g = None; }
++        }
++    }
++
++    fn keepalive(self: Arc<Self>, stop: Arc<AtomicBool>) {
++        while !stop.load(Ordering::Relaxed) {
++            std::thread::sleep(Duration::from_secs(5));
++            if !self.up.load(Ordering::Acquire) { continue; }
++            let mut b = Vec::with_capacity(17);
++            frame_hdr(&mut b, 8, 0x6, 0, 0); b.extend_from_slice(&[0x66, 0x61, 0x73, 0x74, 0, 0, 0, 0]);
++            self.send_raw(&b);
++        }
++    }
++
++    fn reply(&self, sid: u32, ok: Option<String>, why: &str) {
++        let e = self.st.lock().unwrap().streams.remove(&sid);
++        if let Some((tag, t_write, _)) = e {
++            let _ = self.acks.send(Ack { path: self.name.clone(), tag, t_write, t_ack: mono_ns(), status: Some(if ok.is_some() { 200 } else { 0 }),
++                body: ok.unwrap_or_else(|| why.to_string()) });
++        }
++    }
++
++    fn reader(self: Arc<Self>, stop: Arc<AtomicBool>) {
++        let mut backoff = 200u64;
++        while !stop.load(Ordering::Relaxed) {
++            let (mut rd, io) = match self.connect() {
++                Ok(x) => x,
++                Err(_) => { std::thread::sleep(Duration::from_millis(backoff)); backoff = (backoff * 2).min(10_000); continue; }
++            };
++            backoff = 200;
++            *self.st.lock().unwrap() = H2State { next_stream: 1, conn_window: 65_535, peer_init_window: 65_535, streams: Default::default(), hp: Hpack::default() };
++            *self.io.lock().unwrap() = Some(io);
++            self.up.store(true, Ordering::Release);
++            self.reconnects.fetch_add(1, Ordering::Relaxed);
++            let mut net = vec![0u8; 64 * 1024];
++            let mut tmp = vec![0u8; 64 * 1024];
++            let mut plain: Vec<u8> = Vec::with_capacity(128 * 1024);
++            let why = loop {
++                let n = match rd.read(&mut net) { Ok(0) => break "eof".to_string(), Ok(n) => n, Err(e) => break format!("read: {e}") };
++                {
++                    let mut g = self.io.lock().unwrap();
++                    let Some((s, c)) = g.as_mut() else { break "closed".into() };
++                    let mut src = &net[..n];
++                    let mut bad = None;
++                    while !src.is_empty() {
++                        if let Err(e) = c.read_tls(&mut src) { bad = Some(format!("tls read: {e}")); break; }
++                        if let Err(e) = c.process_new_packets() { bad = Some(format!("tls: {e}")); break; }
++                    }
++                    if let Some(b) = bad { break b; }
++                    loop { match c.reader().read(&mut tmp) { Ok(0) => break, Ok(k) => plain.extend_from_slice(&tmp[..k]), Err(_) => break } }
++                    if c.wants_write() { let _ = c.write_tls(s); }
++                }
++                let mut out: Vec<u8> = Vec::new(); // frames we must send back (SETTINGS ACK, PING ACK, WINDOW_UPDATE)
++                let mut goaway = false;
++                let mut p = 0;
++                while plain.len() >= p + 9 {
++                    let len = ((plain[p] as usize) << 16) | ((plain[p + 1] as usize) << 8) | plain[p + 2] as usize;
++                    if plain.len() < p + 9 + len { break; }
++                    let (ty, fl) = (plain[p + 3], plain[p + 4]);
++                    let sid = u32::from_be_bytes(plain[p + 5..p + 9].try_into().unwrap()) & 0x7fff_ffff;
++                    let pl = &plain[p + 9..p + 9 + len];
++                    match ty {
++                        0x4 if fl & 1 == 0 => {
++                            for kv in pl.chunks_exact(6) {
++                                let id = u16::from_be_bytes([kv[0], kv[1]]);
++                                let v = u32::from_be_bytes([kv[2], kv[3], kv[4], kv[5]]) as i64;
++                                if id == 4 { self.st.lock().unwrap().peer_init_window = v; }
++                                if id == 1 && v < Hpack::MAX as i64 {
++                                    // the server's decoder table is smaller than the default: stop indexing, signal size 0 (RFC 7541 §4.2)
++                                    let mut st = self.st.lock().unwrap();
++                                    if !st.hp.off { st.hp.off = true; st.hp.reset = true; st.hp.tab.clear(); st.hp.size = 0; }
++                                }
++                            }
++                            frame_hdr(&mut out, 0, 0x4, 1, 0);
++                        }
++                        0x6 if fl & 1 == 0 => { frame_hdr(&mut out, 8, 0x6, 1, 0); out.extend_from_slice(pl); }
++                        0x8 if len == 4 && sid == 0 => { self.st.lock().unwrap().conn_window += (u32::from_be_bytes(pl.try_into().unwrap()) & 0x7fff_ffff) as i64; }
++                        0x0 => {
++                            // DATA: the response message (gRPC 5-byte prefix + protobuf; SendBundleResponse field 1 = uuid)
++                            let body = if fl & 0x8 != 0 && !pl.is_empty() { &pl[1..pl.len().saturating_sub(pl[0] as usize)] } else { pl };
++                            if body.len() > 5 {
++                                let m = &body[5..];
++                                let uuid = if m.len() > 2 && m[0] == 0x0a { let l = m[1] as usize; m.get(2..2 + l).map(|u| String::from_utf8_lossy(u).to_string()) } else { None };
++                                if let Some(e) = self.st.lock().unwrap().streams.get_mut(&sid) { e.2 = true; }
++                                self.reply(sid, Some(uuid.unwrap_or_else(|| "accepted (no uuid?)".into())), "");
++                            }
++                            if len > 0 { frame_hdr(&mut out, 4, 0x8, 0, 0); out.extend_from_slice(&(len as u32).to_be_bytes()); }
++                        }
++                        0x1 if fl & 0x1 != 0 => self.reply(sid, None, "rejected (stream ended without a message; grpc-status not decoded)"),
++                        0x3 => self.reply(sid, None, "RST_STREAM"),
++                        0x7 => goaway = true,
++                        _ => {}
++                    }
++                    p += 9 + len;
++                }
++                plain.drain(..p);
++                if !out.is_empty() { self.send_raw(&out); }
++                if goaway { break "goaway".into(); }
++            };
++            self.up.store(false, Ordering::Release);
++            *self.io.lock().unwrap() = None;
++            let sids: Vec<u32> = self.st.lock().unwrap().streams.keys().copied().collect();
++            for sid in sids { self.reply(sid, None, &format!("connection lost: {why}")); }
++            std::thread::sleep(Duration::from_millis(100));
++        }
++    }
++
++    pub fn prewarm(&self) {
++        use std::os::fd::AsRawFd;
++        if let Ok(g) = self.io.try_lock() {
++            if let Some((s, _)) = g.as_ref() { unsafe { libc::send(s.as_raw_fd(), [0u8; 1].as_ptr() as *const libc::c_void, 0, libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL) }; }
++        }
++    }
++
++    pub fn summary(&self) -> String {
++        format!("{}: fast h2 conn {} writes {} connects {}", self.name, if self.up.load(Ordering::Relaxed) { "up" } else { "DOWN" },
++            self.writes.load(Ordering::Relaxed), self.reconnects.load(Ordering::Relaxed))
++    }
++}
++
++// ------------------------------------------------------------------------------------------------------------------
++// Presigner (--fast-presign): Ed25519 with PRE-COMPUTED nonces. A signature is (R = r·B, s = r + k·a), k = H(R‖A‖M);
++// the verifier only checks s·B = R + k·A, so r may be any secret uniform scalar used ONCE (hedged/randomised Ed25519,
++// as XEdDSA). r comes from getrandom(2) (64 bytes, reduced mod L), R = r·B is computed in the background, and each pair
++// is POPPED (used exactly once; an empty pool falls back to the deterministic RFC 8032 signature). The sign on the hot
++// path is then one SHA-512 over the message + one scalar mul-add. The signature differs from the deterministic one (the
++// message bytes do not); every one is checked with verify_strict in the self-test and with --fast-verify.
++// ------------------------------------------------------------------------------------------------------------------
++use curve25519_dalek::{edwards::EdwardsPoint, scalar::Scalar};
++
++pub struct Presigner { a: Scalar, pubkey: [u8; 32], pool: Mutex<Vec<(Scalar, [u8; 32])>>, pub used: AtomicU64, pub empty: AtomicU64 }
++
++fn os_random(b: &mut [u8]) -> bool {
++    let mut got = 0usize;
++    while got < b.len() {
++        let n = unsafe { libc::getrandom(b[got..].as_mut_ptr() as *mut libc::c_void, b.len() - got, 0) };
++        if n <= 0 { return false; }
++        got += n as usize;
++    }
++    true
++}
++
++impl Presigner {
++    pub fn new(key: &ed25519_dalek::SigningKey) -> Arc<Presigner> {
++        use sha2::{Digest, Sha512};
++        let h = Sha512::digest(key.to_bytes());
++        let mut lower = [0u8; 32];
++        lower.copy_from_slice(&h[..32]);
++        lower[0] &= 0b1111_1000; lower[31] &= 0b0111_1111; lower[31] |= 0b0100_0000;
++        Arc::new(Presigner { a: Scalar::from_bytes_mod_order(lower), pubkey: key.verifying_key().to_bytes(), pool: Mutex::new(Vec::with_capacity(256)),
++            used: AtomicU64::new(0), empty: AtomicU64::new(0) })
++    }
++    fn gen() -> Option<(Scalar, [u8; 32])> {
++        let mut b = [0u8; 64];
++        if !os_random(&mut b) { return None; }
++        let r = Scalar::from_bytes_mod_order_wide(&b);
++        b.iter_mut().for_each(|x| *x = 0);
++        Some((r, EdwardsPoint::mul_base(&r).compress().to_bytes()))
++    }
++    /// keep `target` nonces ready (background thread)
++    pub fn start(self: &Arc<Self>, target: usize, stop: Arc<AtomicBool>) {
++        let me = self.clone();
++        for _ in 0..target { if let Some(x) = Self::gen() { me.pool.lock().unwrap().push(x); } }
++        std::thread::Builder::new().name("presign-pool".into()).spawn(move || {
++            while !stop.load(Ordering::Relaxed) {
++                let n = me.pool.lock().unwrap().len();
++                if n < target { if let Some(x) = Self::gen() { me.pool.lock().unwrap().push(x); } } else { std::thread::sleep(Duration::from_millis(20)); }
++            }
++        }).ok();
++    }
++    /// HOT PATH: a signature with a fresh pre-computed nonce; None: the pool is empty (sign deterministically instead)
++    #[inline]
++    pub fn sign(&self, msg: &[u8]) -> Option<[u8; 64]> {
++        use sha2::{Digest, Sha512};
++        let Some((r, rb)) = self.pool.lock().unwrap().pop() else { self.empty.fetch_add(1, Ordering::Relaxed); return None };
++        let mut h = Sha512::new();
++        h.update(rb); h.update(self.pubkey); h.update(msg);
++        let d: [u8; 64] = h.finalize().into();
++        let k = Scalar::from_bytes_mod_order_wide(&d);
++        let s = k * self.a + r;
++        let mut out = [0u8; 64];
++        out[..32].copy_from_slice(&rb);
++        out[32..].copy_from_slice(s.as_bytes());
++        self.used.fetch_add(1, Ordering::Relaxed);
++        Some(out)
++    }
++    pub fn pool_len(&self) -> usize { self.pool.lock().unwrap().len() }
++}
++
++// ------------------------------------------------------------------------------------------------------------------
++// Fast PDA / ATA derivation (--fast-derive). find_program_address = SHA-256 + "is it on the curve?" per bump; the old
++// check decompresses the point (a field exponentiation, ~5 µs here). A 32-byte y (bit 255 ignored, taken mod p) is a
++// valid compressed Edwards point iff u/v is a square, u = y²-1, v = d·y²+1 (v is never 0: -1/d is a non-square), i.e. iff
++// the Legendre symbol of u·v is 0 or 1 — computed with a binary Jacobi symbol (shifts and subtractions). Checked against
++// curve25519-dalek's decompress on random inputs at start-up (and in --fast-bench); any disagreement disables it.
++// ------------------------------------------------------------------------------------------------------------------
++type U256 = [u64; 4];
++const FP: U256 = [0xffff_ffff_ffff_ffed, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x7fff_ffff_ffff_ffff];
++const FD: U256 = [0x75eb_4dca_1359_78a3, 0x0070_0a4d_4141_d8ab, 0x8cc7_4079_7779_e898, 0x5203_6cee_2b6f_fe73];
++const ONE: U256 = [1, 0, 0, 0];
++
++#[inline] fn geq(a: &U256, b: &U256) -> bool { for i in (0..4).rev() { if a[i] != b[i] { return a[i] > b[i]; } } true }
++#[inline] fn sub_n(a: &U256, b: &U256) -> U256 {
++    let mut r = [0u64; 4]; let mut br = 0u64;
++    for i in 0..4 { let (x, b1) = a[i].overflowing_sub(b[i]); let (y, b2) = x.overflowing_sub(br); r[i] = y; br = (b1 | b2) as u64; }
++    r
++}
++#[inline] fn add_n(a: &U256, b: &U256) -> (U256, bool) {
++    let mut r = [0u64; 4]; let mut c = 0u64;
++    for i in 0..4 { let (x, c1) = a[i].overflowing_add(b[i]); let (y, c2) = x.overflowing_add(c); r[i] = y; c = (c1 | c2) as u64; }
++    (r, c != 0)
++}
++#[inline] fn canon(mut a: U256) -> U256 { while geq(&a, &FP) { a = sub_n(&a, &FP); } a }
++/// a·b mod p (inputs < 2^256), canonical
++fn mulmod(a: &U256, b: &U256) -> U256 {
++    let mut r = [0u64; 8];
++    for i in 0..4 {
++        let mut c: u128 = 0;
++        for j in 0..4 { let x = a[i] as u128 * b[j] as u128 + r[i + j] as u128 + c; r[i + j] = x as u64; c = x >> 64; }
++        r[i + 4] = c as u64;
++    }
++    // 2^256 ≡ 38 (mod p)
++    let mut o = [0u64; 4]; let mut c: u128 = 0;
++    for i in 0..4 { let x = r[i] as u128 + r[i + 4] as u128 * 38 + c; o[i] = x as u64; c = x >> 64; }
++    let mut c = c * 38;
++    while c != 0 {
++        for limb in o.iter_mut() { let x = *limb as u128 + c; *limb = x as u64; c = x >> 64; if c == 0 { break; } }
++        c *= 38;
++    }
++    canon(o)
++}
++#[inline] fn addmod(a: &U256, b: &U256) -> U256 { let (s, c) = add_n(a, b); if c { canon(add_n(&s, &[38, 0, 0, 0]).0) } else { canon(s) } }
++#[inline] fn submod(a: &U256, b: &U256) -> U256 { if geq(a, b) { sub_n(a, b) } else { sub_n(&add_n(a, &FP).0, b) } }
++#[inline] fn is_zero(a: &U256) -> bool { a.iter().all(|x| *x == 0) }
++#[inline] fn shr(a: &mut U256, z: u32) {
++    let (w, b) = ((z / 64) as usize, z % 64);
++    for i in 0..4 {
++        let lo = if i + w < 4 { a[i + w] } else { 0 };
++        let hi = if i + w + 1 < 4 { a[i + w + 1] } else { 0 };
++        a[i] = if b == 0 { lo } else { (lo >> b) | (hi << (64 - b)) };
++    }
++}
++#[inline] fn ctz(a: &U256) -> u32 { for (i, x) in a.iter().enumerate() { if *x != 0 { return i as u32 * 64 + x.trailing_zeros(); } } 256 }
++/// Jacobi symbol (a / n), n odd
++fn jacobi(mut a: U256, mut n: U256) -> i32 {
++    let mut t = 1i32;
++    loop {
++        if is_zero(&a) { return if n == ONE { t } else { 0 }; }
++        let z = ctz(&a);
++        shr(&mut a, z);
++        if z & 1 == 1 { let r = n[0] & 7; if r == 3 || r == 5 { t = -t; } }
++        if !geq(&a, &n) { std::mem::swap(&mut a, &mut n); if a[0] & 3 == 3 && n[0] & 3 == 3 { t = -t; } }
++        a = sub_n(&a, &n);
++    }
++}
++/// true iff curve25519-dalek's CompressedEdwardsY(b).decompress() is Some
++pub fn on_curve_fast(b: &[u8; 32]) -> bool {
++    let mut y = [0u64; 4];
++    for i in 0..4 { y[i] = u64::from_le_bytes(b[i * 8..i * 8 + 8].try_into().unwrap()); }
++    y[3] &= 0x7fff_ffff_ffff_ffff;
++    let y = canon(y);
++    let yy = mulmod(&y, &y);
++    let u = submod(&yy, &ONE);
++    let v = addmod(&mulmod(&FD, &yy), &ONE);
++    let w = mulmod(&u, &v);
++    is_zero(&w) || jacobi(w, FP) == 1
++}
++/// find_program_address with the fast check and no allocation (seeds total <= 128 bytes)
++pub fn find_pda_fast(seeds: &[&[u8]], program: &Pk) -> (Pk, u8) {
++    use sha2::{Digest, Sha256};
++    let mut base = Sha256::new();
++    for s in seeds { base.update(s); }
++    for bump in (0..=255u8).rev() {
++        let mut h = base.clone();
++        h.update([bump]); h.update(program); h.update(b"ProgramDerivedAddress");
++        let out: [u8; 32] = h.finalize().into();
++        if !on_curve_fast(&out) { return (out, bump); }
++    }
++    panic!("no viable bump");
++}
++pub fn ata_fast(owner: &Pk, mint: &Pk, token_program: &Pk) -> Pk { find_pda_fast(&[owner, token_program, mint], &crate::pda::ATA_PROGRAM).0 }
++
++/// start-up check: the fast test agrees with dalek on `n` pseudo-random inputs and the fast ATA with pda::ata on `m`
++pub fn derive_selftest(n: usize, m: usize) -> (usize, usize) {
++    use sha2::{Digest, Sha256};
++    let mut bad = 0;
++    let mut seed = [7u8; 32];
++    for i in 0..n {
++        seed = Sha256::digest([&seed[..], &(i as u64).to_le_bytes()].concat()).into();
++        let dalek = curve25519_dalek::edwards::CompressedEdwardsY(seed).decompress().is_some();
++        if dalek != on_curve_fast(&seed) { bad += 1; }
++    }
++    // edge cases: y = 0, 1, p-1, p, p+1, all-ones, top bit set variants
++    let mut edges: Vec<[u8; 32]> = vec![[0; 32], [0xff; 32]];
++    let mut one = [0u8; 32]; one[0] = 1; edges.push(one);
++    let mut pb = [0u8; 32]; for i in 0..4 { pb[i * 8..i * 8 + 8].copy_from_slice(&FP[i].to_le_bytes()); } edges.push(pb);
++    let mut pm1 = pb; pm1[0] -= 1; edges.push(pm1);
++    let mut pp1 = pb; pp1[0] += 1; edges.push(pp1);
++    for mut e in edges.clone() { e[31] |= 0x80; edges.push(e); }
++    for e in &edges { if curve25519_dalek::edwards::CompressedEdwardsY(*e).decompress().is_some() != on_curve_fast(e) { bad += 1; } }
++    let mut bad_ata = 0;
++    for i in 0..m {
++        let o: Pk = Sha256::digest((i as u64 * 3 + 1).to_le_bytes()).into();
++        let mi: Pk = Sha256::digest((i as u64 * 7 + 5).to_le_bytes()).into();
++        if ata_fast(&o, &mi, &crate::pda::TOKEN_2022) != crate::pda::ata(&o, &mi, &crate::pda::TOKEN_2022) { bad_ata += 1; }
++    }
++    (bad, bad_ata)
++}
+diff -ruN arbx-lat.bak_fast/src/lib.rs arbx-lat/src/lib.rs
+--- arbx-lat.bak_fast/src/lib.rs	2026-10-13 20:45:30.000000000 +0100
++++ arbx-lat/src/lib.rs	2026-10-19 12:02:40.511099477 +0100
+@@ -24,6 +24,7 @@
+ pub mod engine;
+ pub mod exec;
+ pub mod experiments;
++pub mod fast;
+ pub mod feeds;
+ pub mod forks;
+ pub mod lat;
+diff -ruN arbx-lat.bak_fast/src/send/jito.rs arbx-lat/src/send/jito.rs
+--- arbx-lat.bak_fast/src/send/jito.rs	2026-10-07 16:00:04.000000000 +0100
++++ arbx-lat/src/send/jito.rs	2026-10-19 12:08:12.335867424 +0100
+@@ -531,6 +531,21 @@
+         Ok(uuid)
+     }
+ 
++    /// FAST (snipe_engine --fast-send): a bundle written outside `send_bundle` (raw HTTP/2 on our own connection): record
++    /// its id exactly as `send_bundle` does, so the result stream joins to it
++    pub fn note_bundle(&self, sig: &str, uuid: &str) {
++        let uuid = uuid.to_string();
++        let early: Vec<(u64, Outcome)> = {
++            let mut v = self.verdicts.lock().unwrap();
++            v.id_of_sig.insert(sig.to_string(), uuid.clone());
++            v.sig_of_id.insert(uuid.clone(), sig.to_string());
++            let early = v.all.get(&uuid).cloned().unwrap_or_default();
++            if early.is_empty() { v.order.push_back(uuid.clone()); v.trim(); }
++            early
++        };
++        for (k, (t, o)) in early.into_iter().enumerate() { self.ours(sig, &o, k as u32, t, None); }
++    }
++
+     /// every result so far of the bundle sent with transaction `sig`, in order, with its receipt time
+     pub fn verdicts(&self, sig: &str) -> Vec<(u64, Outcome)> {
+         let v = self.verdicts.lock().unwrap();
+diff -ruN arbx-lat.bak_fast/src/send/mod.rs arbx-lat/src/send/mod.rs
+--- arbx-lat.bak_fast/src/send/mod.rs	2026-10-19 10:36:04.848459872 +0100
++++ arbx-lat/src/send/mod.rs	2026-10-19 12:02:40.946103106 +0100
+@@ -720,6 +720,31 @@
+     /// the rate queue's waiting sends and λ (status `exec.queue_now`, `lambda_now`)
+     pub fn queue_now(&self) -> Option<(usize, Option<i64>)> { self.budget.as_ref().map(|b| (b.waiting(), b.lambda())) }
+ 
++    /// FAST (snipe_engine --fast-send): the URL (may carry a key: never print it), headers, preflight, ping target
++    pub fn fast_url(&self) -> &str { &self.url }
++    pub fn fast_headers(&self) -> Vec<(String, String)> {
++        self.headers.iter().filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string()))).collect()
++    }
++    pub fn fast_preflight(&self) -> bool { self.preflight }
++    pub fn fast_ping(&self) -> Option<(bool, String)> {
++        match &self.ping { Ping::Get(u) => Some((true, u.clone())), Ping::Health => Some((false, self.url.clone())), _ => None }
++    }
++    /// FAST: take a rate slot now (no queue), as `send` does with a zero queue; true when the path has no limit
++    pub fn fast_budget(&self) -> bool { self.budget.as_ref().map_or(true, |b| b.try_now()) }
++    pub fn fast_udp_ok(&self) -> bool { self.udp.is_some() }
++    /// FAST: LandX UDP from the calling thread (non-blocking write, `copies` times): key + raw into `buf`
++    pub fn fast_udp(&self, raw: &[u8], buf: &mut Vec<u8>, copies: u32) -> Option<std::io::Result<()>> {
++        let (sock, key) = self.udp.as_ref()?;
++        buf.clear();
++        buf.extend_from_slice(key);
++        buf.extend_from_slice(raw);
++        let mut r = Ok(());
++        for i in 0..copies.max(1) {
++            if let Err(e) = sock.try_send(buf) { if i == 0 { r = Err(e); } }
++        }
++        Some(r)
++    }
++
+     /// Check, wait for the rate budget (the queue: bands, crowding, EV), deliver. Never retried here: a late copy is
+     /// worthless. `attempt` joins the bundle's results to it. The reply carries the queue wait
+     pub async fn send(&self, raw: &[u8], prio: Prio, attempt: Option<u64>) -> Result<Reply, Refusal> {
+--- arbx-lat.bak_fast/Cargo.toml	2026-10-07 16:00:04.000000000 +0100
++++ arbx-lat/Cargo.toml	2026-10-19 12:02:41.849110638 +0100
+@@ -25,6 +25,9 @@
+ ed25519-dalek = "2"
+ http = "1"
+ libc = "0.2"
++# FAST (--fast-send): our own HTTP/1.1 send connections (rustls roots + response parsing); both already in Cargo.lock
++webpki-roots = "0.26"
++httparse = "1"
+ # meta.json `programs[].elf_md5` (the reproducible-build hash the owner compares; sha256 is the gate)
+ md-5 = "0.10"
+ prost = "0.13"

@@ -1,0 +1,71 @@
+# feed_race.toml — feeds raced by /root/gap/feed_race.sh (zero cost: subscribe only, nothing is ever sent).
+# Tokens are read from the process env or from env_file, by NAME (token_env). They are never printed or logged.
+# Feed URLs are never logged either. Kinds: jito-entries | yellowstone-deshred | yellowstone-tx | udp-shreds
+env_file = "/root/arbx/deploy/.env"
+
+[[feed]]
+name    = "erpc"
+kind    = "jito-entries"            # ShredStream-proxy gRPC (SubscribeEntries), IP-whitelisted, no token
+url     = "https://shreds-fra6-1.erpc.global"
+
+[[feed]]
+name    = "kaldera"
+kind    = "yellowstone-deshred"     # constant-k Kaldera, pump-filtered deshred
+url     = "https://kaldera-frankfurt.constant-k.com:8443"
+token_env    = "KALDERA_TOKEN"      # exported by feed_race.sh from /root/collect_blfwd.sh
+token_header = "x-token"
+
+[[feed]]
+name    = "turbo-kaldera"
+kind    = "yellowstone-deshred"
+url     = "https://turbo-kaldera-frankfurt.constant-k.com:443"
+token_env    = "CONSTANTK_TOKEN"
+token_header = "x-token"
+
+# ---------------------------------------------------------------------------------------------------------------
+# NEW constant-k SHRED FEED (trial). Pick ONE of the two blocks below, set enabled = true, and fill the fields.
+#
+# (A) raw UDP shreds pushed to us (ShredStream-proxy / turbine style). Give constant-k: our IP 77.223.215.155 and the
+#     port below (UDP). Nothing else is needed on our side; no token. The firewall must let UDP <port> in.
+[[feed]]
+name    = "constantk"
+kind    = "udp-shreds"
+bind    = "0.0.0.0:20001"           # the UDP port constant-k sends to
+enabled = true
+rpath_sample = 50                   # receive-path timing line for every create + 1 in 50 pump txs
+# busy_poll = true                  # spin on recvmmsg (one core); cpu = 3 pins the receive thread
+
+# (B) a gRPC stream. Fill url (or url_env if the URL embeds a key) and the key's env var NAME in /root/arbx/deploy/.env.
+#     kind = "yellowstone-deshred" for a Yellowstone SubscribeDeshred endpoint (Kaldera-like),
+#     kind = "jito-entries" for a ShredStream-proxy SubscribeEntries endpoint (erpc-like),
+#     kind = "yellowstone-tx" for a normal Yellowstone Subscribe (processed txs; executed, so later by design).
+[[feed]]
+name    = "constantk-grpc"
+kind    = "yellowstone-deshred"
+url     = "https://REPLACE-ME.constant-k.com:443"
+token_env    = "CONSTANTK_SHRED_TOKEN"   # put CONSTANTK_SHRED_TOKEN=... in /root/arbx/deploy/.env
+token_header = "x-token"
+enabled = false
+
+# ---- DoubleZero Edge (multicast raw shreds over the doublezero1 GRE tunnel, UDP 7733) ----
+[[feed]]
+name      = "dz-leader"
+kind      = "udp-multicast"
+group     = "233.84.178.1"     # edge-solana-shreds: straight from publishing leaders
+port      = 7733
+interface = "doublezero1"
+rpath_sample = 50
+
+[[feed]]
+name      = "dz-root"
+kind      = "udp-multicast"
+group     = "233.84.178.16"    # edge-solana-root: the Turbine root node copy
+port      = 7733
+interface = "doublezero1"
+
+[[feed]]
+name      = "dz-retrans-eu"
+kind      = "udp-multicast"
+group     = "233.84.178.12"    # edge-solana-retrans-eu: EU retransmit
+port      = 7733
+interface = "doublezero1"

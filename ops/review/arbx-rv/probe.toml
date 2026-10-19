@@ -1,0 +1,11 @@
+wallet = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
+wallet_keystore = "/root/.nexus-v2-trading-wallet.enc"
+rpc_url = "https://api.mainnet-beta.solana.com"
+
+[[send]]
+name = "jito-bundle"
+kind = "jito-bundle"
+url = "https://frankfurt.mainnet.block-engine.jito.wtf"
+auth_keypair = "~/.nexus-v2-jito-auth.json"
+tip_lamports = 1000
+max_per_sec = 2

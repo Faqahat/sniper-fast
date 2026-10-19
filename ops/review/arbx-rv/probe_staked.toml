@@ -1,0 +1,8 @@
+wallet = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
+wallet_keystore = "/root/.nexus-v2-trading-wallet.enc"
+rpc_url = "https://api.mainnet-beta.solana.com"
+
+[[send]]
+name = "constantk-swqos"
+kind = "rpc"
+url = "https://staked-rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"

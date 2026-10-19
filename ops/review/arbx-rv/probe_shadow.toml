@@ -1,0 +1,50 @@
+# snipe_engine --shadow config: the warm send paths + a pump.fun launch feed.
+# Unknown fields are ignored. ${CONSTANTK_TOKEN} is expanded from --env-file. Constant-K endpoints only.
+wallet          = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
+wallet_keystore = "/root/.nexus-v2-trading-wallet.enc"
+rpc_url         = "https://rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+# --- warm send paths (fire the trigger probe through one of these; staked-rpc landed 100% at delta 1-2) ---
+[[send]]
+name    = "tpu-direct"
+enabled = true
+kind    = "tpu"
+url     = "https://rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+[[send]]
+name    = "staked-rpc"
+enabled = true
+kind    = "rpc"
+url     = "https://staked-rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+[[send]]
+name    = "nozomi"
+enabled = true
+kind    = "nozomi"
+url     = "https://fra2.nozomi.temporal.xyz/?c=${NOZOMI_KEY}"
+tip_lamports = 1000000
+
+[[send]]
+name    = "helius"
+enabled = true
+kind    = "helius"
+url     = "http://fra-sender.helius-rpc.com/fast"
+tip_lamports = 1000000
+
+# --- launch feeds (BOTH run in parallel; per-mint de-dup in the engine takes the first arrival -> union coverage) ---
+# erpc ShredStream (jito-entries): carries ALL txs, decoded locally, pump_interest() filters to pump.fun.
+[[feed]]
+name    = "erpc"
+enabled = true
+kind    = "jito-entries"
+url     = "https://shreds-fra6-1.erpc.global"
+
+# Kaldera deshred (yellowstone-deshred gRPC): second constant-k feed for coverage — fills erpc's gaps.
+[[feed]]
+name    = "kaldera"
+enabled = true
+kind    = "yellowstone-deshred"
+url     = "https://kaldera-frankfurt.constant-k.com:8443"
+token_env = "KALDERA_TOKEN"
+token_header = "x-token"
+account_include = ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]

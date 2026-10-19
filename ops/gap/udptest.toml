@@ -1,0 +1,4 @@
+[[feed]]
+name="udptest"
+kind="udp-shreds"
+bind="0.0.0.0:20001"

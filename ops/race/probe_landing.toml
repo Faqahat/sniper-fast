@@ -1,0 +1,119 @@
+# LANDING TEST config (2026-10-19, READ-ONLY study output; NOT run). = /root/det/probe_det.toml + the relay arms the landing study ranks.
+# Every [[send]] below references keys by env var / token_env / auth_keypair path only (no secret inline).
+# snipe_engine --shadow config: the warm send paths + a pump.fun launch feed.
+# Unknown fields are ignored. ${CONSTANTK_TOKEN} is expanded from --env-file. Constant-K endpoints only.
+wallet          = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
+wallet_keystore = "/root/.nexus-v2-trading-wallet.enc"
+rpc_url         = "https://rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+# --- warm send paths (fire the trigger probe through one of these; staked-rpc landed 100% at delta 1-2) ---
+[[send]]
+name    = "tpu-direct"
+# DET: disabled for relay-path live tests: its keep_warm loop opens QUIC connections to upcoming leaders all run long
+# (Agave limits new connections per IP per minute at shared ingress) even when it is not the fire path.
+enabled = false
+kind    = "tpu"
+url     = "https://rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+[[send]]
+name    = "staked-rpc"
+enabled = true
+kind    = "rpc"
+url     = "https://staked-rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+[[send]]
+name    = "nozomi"
+enabled = true
+kind    = "nozomi"
+url     = "https://fra2.nozomi.temporal.xyz/?c=${NOZOMI_KEY}"
+tip_lamports = 1000000
+
+[[send]]
+name    = "helius"
+enabled = true
+kind    = "helius"
+url     = "http://fra-sender.helius-rpc.com/fast"
+tip_lamports = 1000000
+# DET: keyless Sender = 1 request/s per egress IP per region, and REJECTED (429) requests count toward it (Helius docs).
+# Refuse locally instead of eating a 429 (which extends the penalty): at most 1 send per rolling second, never queued.
+max_per_sec = 1
+queue_ms = 0
+
+# --- launch feeds (BOTH run in parallel; per-mint de-dup in the engine takes the first arrival -> union coverage) ---
+# erpc ShredStream (jito-entries): carries ALL txs, decoded locally, pump_interest() filters to pump.fun.
+[[feed]]
+name    = "erpc"
+enabled = true
+kind    = "jito-entries"
+url     = "https://shreds-fra6-1.erpc.global"
+
+# Kaldera deshred (yellowstone-deshred gRPC): second constant-k feed for coverage — fills erpc's gaps.
+[[feed]]
+name    = "kaldera"
+enabled = true
+kind    = "yellowstone-deshred"
+url     = "https://kaldera-frankfurt.constant-k.com:8443"
+token_env = "KALDERA_TOKEN"
+token_header = "x-token"
+account_include = ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]
+
+# ---- extra relay arms (copied from /root/arbx/deploy/arbx-c41-normal.toml) ----
+[[send]]
+# one-transaction bundle through the searcher gRPC; auth key = the whitelisted keypair (CrQx62…EynE), never funded
+name = "jito-bundle"
+enabled = true   # LANDING TEST (2026-10-19)
+kind = "jito-bundle"
+url = "https://frankfurt.mainnet.block-engine.jito.wtf"
+region = "frankfurt"
+auth_keypair = "~/.nexus-v2-jito-auth.json"
+tip_lamports = 2000000   # landing test: 0.002 SOL bid (fast Jito-tipped buys tip ~0.002-0.003 SOL)
+max_per_sec = 2              # owner 2026-10-07: our Jito bundle send limit is 2/s (the earlier 5/s note was wrong); never send faster
+
+[[send]]
+# Jito JSON-RPC sendTransaction with our UUID (2/s). Add ?bundleOnly=true for revert protection.
+name = "jito-tx"
+enabled = true   # LANDING TEST (2026-10-19): enable only the arm under test
+kind = "jito-tx"
+url = "https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/transactions"
+token_env = "JITO_UUID"
+tip_lamports = 2000000   # landing test: 0.002 SOL bid (fast Jito-tipped buys tip ~0.002-0.003 SOL)
+max_per_sec = 2
+
+[[send]]
+# Astralane Iris (binary). The key is mandatory on every tier: the account key (same as the shred feed's) works
+# (2026-10-03 probe: no key -> 401). Free tier: 0.001 SOL minimum tip, 5 tx/s, no bundles; 10,000 lamports at VIP 3
+name = "astralane"
+enabled = true   # LANDING TEST (2026-10-19): enable only the arm under test
+kind = "iris"
+url = "http://fr.gateway.astralane.io/irisb?api-key=${ASTRALANE_KEY}&method=sendTransaction"
+tip_lamports = 1000000
+max_per_sec = 5
+
+[[send]]
+name = "landx-fra3"
+enabled = true   # LANDING TEST (2026-10-19): enable only the arm under test
+kind = "landx"
+url = "udp://fra3.landx.dev:10000"   # Cherry Servers Frankfurt, our own data centre; UDP only
+token_env = "LANDX_KEY"
+tip_lamports = 1000000   # its documented minimum, 0.001 SOL
+
+[[send]]
+name = "speedlanding"
+enabled = true   # LANDING TEST (2026-10-19): enable only the arm under test
+kind = "speed-landing"
+url = "http://fra.speedlanding.trade/sendTx?apikey=${SPEEDLANDING_KEY}"   # Frankfurt; JSON-RPC sendTransaction, port 80
+tip_lamports = 1000000   # its documented minimum, 0.001 SOL
+
+[[send]]
+name    = "helius-tip5"
+enabled = true
+kind    = "helius"
+url     = "http://fra-sender.helius-rpc.com/fast"
+tip_lamports = 5000000   # landing test: the fast Helius users tip p50 0.0048 SOL (we used 0.001)
+# DET: keyless Sender = 1 request/s per egress IP per region, and REJECTED (429) requests count toward it (Helius docs).
+# Refuse locally instead of eating a 429 (which extends the penalty): at most 1 send per rolling second, never queued.
+max_per_sec = 1
+queue_ms = 0
+
+# --- launch feeds (BOTH run in parallel; per-mint de-dup in the engine takes the first arrival -> union coverage) ---
+# erpc ShredStream (jito-entries): carries ALL txs, decoded locally, pump_interest() filters to pump.fun.

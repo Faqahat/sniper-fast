@@ -1,0 +1,362 @@
+--- orig/mod.rs	2026-10-19 14:27:21.392729583 +0100
++++ /root/arbx-final/src/feeds/mod.rs	2026-10-19 14:27:21.421755225 +0100
+@@ -242,6 +242,39 @@
+     pub fn is_empty(&self) -> bool { self.len() == 0 }
+ }
+ 
++/// GAP (2026-10-19): the order of the non-vote transactions of each slot as an entries or shred feed walked it from the
++/// slot's first entry: (sig8, forwarded to the engine). The race gate's creator-bundle rule (`--race-glued`) reads the
++/// unbroken run right after a create from it, the same "glued" definition as the on-chain labels. Off unless ORDER_ON.
++pub static ORDER_ON: AtomicBool = AtomicBool::new(false);
++pub struct SlotOrder { m: std::sync::Mutex<std::collections::HashMap<(u16, u64), Vec<(u64, bool)>>>, max_slot: AtomicU64 }
++impl SlotOrder {
++    /// append a feed's next transactions of `slot` (in walk order)
++    pub fn append(&self, feed: u16, slot: u64, items: &[(u64, bool)]) {
++        if items.is_empty() { return; }
++        let mut g = self.m.lock().unwrap_or_else(|e| e.into_inner());
++        g.entry((feed, slot)).or_default().extend_from_slice(items);
++        let prev = self.max_slot.fetch_max(slot, Ordering::Relaxed);
++        if slot > prev && g.len() > 192 { let lo = slot.saturating_sub(48); g.retain(|k, _| k.1 >= lo); }
++    }
++    /// up to `max` transactions after `sig8` in its slot, from the feed whose walk holds the most of them
++    pub fn after(&self, slot: u64, sig8: u64, max: usize) -> Option<Vec<(u64, bool)>> {
++        let g = self.m.lock().unwrap_or_else(|e| e.into_inner());
++        let mut best: Option<Vec<(u64, bool)>> = None;
++        for (k, v) in g.iter() {
++            if k.1 != slot { continue; }
++            if let Some(i) = v.iter().position(|x| x.0 == sig8) {
++                let tail = &v[i + 1..(i + 1 + max).min(v.len())];
++                if best.as_ref().map_or(true, |b| tail.len() > b.len()) { best = Some(tail.to_vec()); }
++            }
++        }
++        best
++    }
++}
++pub fn slot_order() -> &'static SlotOrder {
++    static O: std::sync::LazyLock<SlotOrder> = std::sync::LazyLock::new(|| SlotOrder { m: Default::default(), max_slot: AtomicU64::new(0) });
++    &O
++}
++
+ /// The process's PoH index
+ pub fn poh_index() -> &'static PohIndex {
+     static I: std::sync::LazyLock<PohIndex> = std::sync::LazyLock::new(PohIndex::new);
+@@ -458,11 +491,16 @@
+             let (key, table) = (|k: &Pk| interest.keys.contains(k), |k: &Pk| tables.contains(k));
+             let mut ok = true;
+             let mut positions: Vec<(u64, entries::Poh)> = Vec::new();
++            // GAP: the slot's non-vote order (only when the slot is followed from its first entry)
++            let order_on = ORDER_ON.load(Ordering::Relaxed) && first_entry.is_some();
++            let mut order: Vec<(u64, bool)> = Vec::new();
+             for r in refs {
+                 if r.is_vote { continue; }
+                 c.txs.fetch_add(1, Ordering::Relaxed);
+                 let raw = &bytes[r.start..r.end];
+-                if !tx::scan(raw, &key, &table).map_or(false, |s| s.hit) { continue; }
++                let hit = tx::scan(raw, &key, &table).map_or(false, |s| s.hit);
++                if order_on { order.push((u64::from_be_bytes(r.sig[..8].try_into().unwrap()), hit)); }
++                if !hit { continue; }
+                 let Some((tx, n)) = tx::parse_wire(raw) else { continue };
+                 c.forwarded.fetch_add(1, Ordering::Relaxed);
+                 let poh = pohs.get(r.entry as usize).copied().flatten();
+@@ -471,6 +509,7 @@
+                 if !sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded, executed: None, tx, poh, raw })).is_ok()) { ok = false; break; }
+             }
+             drop(tables);
++            if order_on { slot_order().append(id, slot, &order); }
+             poh_index().insert_many(&positions, id, t);
+             archive(bytes);
+             ok
+--- orig/shred.rs	2026-10-19 14:27:21.393097018 +0100
++++ /root/arbx-final/src/feeds/shred.rs	2026-10-19 14:27:34.429363776 +0100
+@@ -276,6 +276,13 @@
+                             // the signature follows a 1-byte count (fewer than 128 signers)
+                             if s.buf.get(start_b).is_some_and(|c| *c < 0x80) {
+                                 if let (Some(sig), Some(e)) = (s.buf.get(start_b + 1..start_b + 9), s.entries.last_mut()) { e.2.push((sig.try_into().unwrap(), sc.hit)); }
++                            } else if s.buf.get(start_b) == Some(&0x81) {
++                                // GAP: v1 (SIMD-0385) keeps its signatures at the end: the first one is the tx's signature
++                                let nsig = s.buf.get(start_b + 1).copied().unwrap_or(0) as usize;
++                                if nsig > 0 && end >= start_b + nsig * 64 {
++                                    let o = end - nsig * 64;
++                                    if let (Some(sig), Some(e)) = (s.buf.get(o..o + 8), s.entries.last_mut()) { e.2.push((sig.try_into().unwrap(), sc.hit)); }
++                                }
+                             }
+                             stats.txs += 1;
+                             if !sc.hit { continue; }
+@@ -313,9 +320,12 @@
+     /// poh.log v2 (`sig8 slot ms feed entry_idx`; the entry's index in the slot is known here, the walk starts at the
+     /// slot's first entry). A gap waits; a failed set stops the clock. Without a recorder nothing is rebuilt
+     fn poh_advance(st: &mut SlotState, slot: u64, hpt: &mut u64, rec: &crate::rec::Rec, feed: u16) {
+-        if !rec.is_on() { st.sets.clear(); return; }
++        // GAP: the walk also feeds the slot order (`--race-glued`); without a recorder or the order nothing is rebuilt
++        let order_on = super::ORDER_ON.load(std::sync::atomic::Ordering::Relaxed);
++        if !rec.is_on() && !order_on { st.sets.clear(); return; }
+         let mut lines: Vec<(u64, f64, u64)> = Vec::new();
+         let mut hits: Vec<(u64, super::entries::Poh)> = Vec::new();
++        let mut order: Vec<(u64, bool)> = Vec::new();
+         while let Some((end, ents, last)) = st.sets.remove(&st.poh_next) {
+             if st.poh_next == 0 { st.walk_started = true; }
+             if last.is_some() { st.last_hash = last; }
+@@ -331,17 +341,19 @@
+                     st.ticks += 1;
+                     continue;
+                 }
+-                if *hpt == 0 { continue; }
++                if *hpt == 0 { if order_on { for (sg, hit) in sigs { order.push((u64::from_be_bytes(sg), hit)); } } continue; }
+                 let ms = st.cum as f64 / *hpt as f64 * (crate::feeds::entries::SLOT_US.load(std::sync::atomic::Ordering::Relaxed) as f64 / 64_000.0); // DET FIX: real slot length
+                 let p = super::entries::Poh { slot, hashes: st.cum, ticks: st.ticks as u32, hpt: *hpt };
+                 for (sg, hit) in sigs {
+                     let k = u64::from_be_bytes(sg);
+-                    lines.push((k, ms, entry));
++                    if rec.is_on() { lines.push((k, ms, entry)); }
+                     if hit { hits.push((k, p)); }
++                    if order_on { order.push((k, hit)); }
+                 }
+             }
+             st.poh_next = end;
+         }
++        if order_on && st.walk_started { super::slot_order().append(feed, slot, &order); }
+         super::poh_index().insert_many(&hits, feed, st.t_last);
+         // the walk reached the slot's last shred: its slots-feed line now. A walk from the slot's first set to its last
+         // shred walked every entry, so it ended on the slot's final tick, whose hash is the slot's blockhash (the chain-fetch
+--- orig/snipe.rs	2026-10-19 14:27:21.393315090 +0100
++++ /root/arbx-final/src/snipe.rs	2026-10-19 14:29:30.781591451 +0100
+@@ -493,6 +493,65 @@
+ /// How a non-create pump tx touches a watched mint (race window): a top-level pump BUY (sized: the spendable SOL; cap-family:
+ /// token amount + max_sol_cost, priced by the caller on the curve), a SELL, or OTHER (the
+ /// mint is in the static keys but the pump call is not top-level, e.g. a sniper's own program CPI-ing pump).
++/// GAP (2026-10-19): what one tx does to `mint`, for the creator-bundle ("glued") rule: its top-level pump buy ixs in
++/// order (exact-in: (true, SOL in incl. fees, min tokens out); cap: (false, tokens, max SOL incl. fees)), a pump
++/// non-buy (sell etc.: ends the run), or Unknown (touches the mint with no top-level pump ix: a router CPI, which may
++/// be a buy whose SOL the ix data does not show)
++#[derive(Clone, Debug, PartialEq)]
++pub enum Legs { Buys(Vec<(bool, u64, u64)>), NotBuy, Unknown }
++
++pub fn bundle_legs(tx: &Tx, mint: &Pk) -> Option<Legs> {
++    if !tx.keys.contains(mint) { return None; }
++    let read = |ix: &crate::tx::Ix, off: usize| ix.data.get(off..off + 8).and_then(|s| <[u8; 8]>::try_from(s).ok()).map(u64::from_le_bytes).unwrap_or(0);
++    let (mut v, mut pump, mut other) = (Vec::new(), false, false);
++    for ix in tx.ixs.iter() {
++        let Some(d) = pump_ix_disc(tx, ix) else { continue };
++        pump = true;
++        let at8 = DEV_BUY_SOL_AT_8.contains(&d);
++        if at8 || DEV_BUY_SOL_AT_16.contains(&d) {
++            if acct(tx, ix, buy_mint_pos(&d)).map_or(true, |m| m == *mint) { v.push((at8, read(ix, 8), read(ix, 16))); }
++            continue;
++        }
++        if d != CREATE_V2_DISC && d != CREATE_DISC { other = true; }
++    }
++    Some(if !v.is_empty() && !other { Legs::Buys(v) } else if pump { Legs::NotBuy } else { Legs::Unknown })
++}
++
++/// pump's total trade fee on SOL curves (protocol + creator), bps: TradeEvent sol = SOL in x 10000 / (10000 + fee)
++/// (calibrated on 141 legs: exact, /root/gap/final/calib2.py)
++pub const PUMP_FEE_BPS: u64 = 125;
++
++/// the curve after SOL `sol` goes in at virtual SOL `vq`: tokens out
++pub fn curve_tokens_out(vq: u64, sol: u64) -> u64 {
++    let k = CURVE_VQ0 as u128 * CURVE_VT0 as u128;
++    let vq = (vq as u128).max(1);
++    let vt = k / vq;
++    let nvt = k.div_ceil(vq + sol as u128);
++    vt.saturating_sub(nvt) as u64
++}
++
++/// simulate one tx's buy legs on the curve at `vq`: Some(total curve SOL) if every leg succeeds (slippage limits), None if
++/// one would fail (the tx reverts: the run ends there)
++pub fn simulate_legs(vq: u64, legs: &[(bool, u64, u64)]) -> Option<u64> {
++    let (mut v, mut tot) = (vq, 0u64);
++    for &(exact, a, b) in legs {
++        let sol = if exact {
++            let net = (a as u128 * 10_000 / (10_000 + PUMP_FEE_BPS) as u128) as u64;
++            if b > 0 && curve_tokens_out(v, net) < b { return None; }
++            net
++        } else {
++            let k = CURVE_VQ0 as u128 * CURVE_VT0 as u128;
++            let vt = k / (v as u128).max(1);
++            if a as u128 >= vt { return None; }
++            let c = curve_cost(v, a);
++            if b > 0 && (c as u128 * (10_000 + PUMP_FEE_BPS) as u128 / 10_000) > b as u128 { return None; }
++            c
++        };
++        v = v.saturating_add(sol); tot = tot.saturating_add(sol);
++    }
++    Some(tot)
++}
++
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub enum MintTouch { Buy(u64), BuyCap { tokens: u64, max_sol: u64 }, Sell, Other }
+ 
+--- orig/snipe_engine.rs	2026-10-19 14:27:21.393478264 +0100
++++ /root/arbx-final/src/bin/snipe_engine.rs	2026-10-19 14:28:38.565854062 +0100
+@@ -1389,6 +1389,11 @@
+     /// --race-create-tip-prefix: create tx's largest non-signer SOL transfer goes to an account with this base58 prefix
+     create_tip_prefix: Option<String>,
+     pros: std::collections::HashSet<Pk>,
++    /// GAP --race-glued: the creator bundle is the on-chain labels' "glued" run: the unbroken run of buys of the mint
++    /// right after the create in the leader's order (slot order from an entries/shred feed), each leg's SOL simulated on
++    /// the curve (fee-adjusted, slippage-checked). Decided when the run is closed (first non-buy) or at run_max_ms.
++    glued: bool,
++    run_max_ms: f64,
+ }
+ 
+ impl RaceCfg {
+@@ -1425,6 +1430,8 @@
+             max_bundle_sol: (arg_f64("--race-max-bundle-sol", 1e9) * 1e9) as u64,
+             create_tip_prefix: arg("--race-create-tip-prefix"),
+             pros,
++            glued: has("--race-glued"),
++            run_max_ms: arg_f64("--race-run-max-ms", 40.0),
+         }
+     }
+     fn active(&self) -> bool { self.gate || self.log }
+@@ -1469,12 +1476,51 @@
+     pass: bool,
+     /// signatures already counted (the same tx arrives once per feed)
+     sigs: std::collections::HashSet<[u8; 64]>,
++    /// GAP --race-glued: the create's sig8, the curve's virtual SOL after the create tx, what each tx touching the mint does
++    csig8: u64,
++    vq_create: u64,
++    legs: std::collections::HashMap<u64, snipe::Legs>,
++    last_eval: Option<Instant>,
+ }
+ 
+-struct RaceWatch { cfg: RaceCfg, pend: std::collections::HashMap<Pk, RacePend>, shadow: Vec<(Launch, u64)>, defer: Option<Vec<String>> }
++struct RaceWatch { cfg: RaceCfg, pend: std::collections::HashMap<Pk, RacePend>, shadow: Vec<(Launch, u64)>, defer: Option<Vec<String>>,
++    /// GAP --race-glued: sig8 of every tx the feeds forwarded (to tell "a pump tx of another mint" from "not decoded yet")
++    seen: std::collections::HashSet<u64>, seen_q: std::collections::VecDeque<u64> }
++
++fn sig8_of(sig: &[u8; 64]) -> u64 { u64::from_be_bytes(sig[..8].try_into().unwrap()) }
+ 
+ impl RaceWatch {
+-    fn new(cfg: RaceCfg) -> Self { RaceWatch { cfg, pend: Default::default(), shadow: Vec::new(), defer: None } }
++    fn new(cfg: RaceCfg) -> Self {
++        if cfg.glued { arbx::feeds::ORDER_ON.store(true, Ordering::Relaxed); }
++        RaceWatch { cfg, pend: Default::default(), shadow: Vec::new(), defer: None, seen: Default::default(), seen_q: Default::default() }
++    }
++    /// GAP: note every forwarded tx (all feeds; duplicates are harmless)
++    fn note_hit(&mut self, tx: &arbx::tx::Tx) {
++        if !self.cfg.glued { return; }
++        let k = sig8_of(&tx.sig);
++        if self.seen.insert(k) { self.seen_q.push_back(k); if self.seen_q.len() > 400_000 { if let Some(o) = self.seen_q.pop_front() { self.seen.remove(&o); } } }
++    }
++    /// GAP --race-glued: (legs, curve SOL, unknown legs, closed, slot order found) of the run after the create
++    fn glued_eval(&self, p: &RacePend) -> (u32, u64, u32, bool, bool) {
++        let Some(tail) = arbx::feeds::slot_order().after(p.slot, p.csig8, 64) else { return (0, 0, 0, false, false) };
++        let (mut n, mut sol, mut unk, mut vq) = (0u32, 0u64, 0u32, p.vq_create);
++        for (k, hit) in tail {
++            if !hit { return (n, sol, unk, true, true); }
++            match p.legs.get(&k) {
++                Some(snipe::Legs::Buys(v)) => match snipe::simulate_legs(vq, v) {
++                    Some(s_) => { n += 1; sol = sol.saturating_add(s_); vq = vq.saturating_add(s_); }
++                    None => return (n, sol, unk, true, true), // the leg would revert: a failed tx ends the run
++                },
++                Some(snipe::Legs::Unknown) => { n += 1; unk += 1; }
++                Some(snipe::Legs::NotBuy) => return (n, sol, unk, true, true),
++                None => {
++                    if self.seen.contains(&k) { return (n, sol, unk, true, true); } // a pump tx of another mint
++                    return (n, sol, unk, false, true); // forwarded but not processed yet: wait
++                }
++            }
++        }
++        (n, sol, unk, false, true)
++    }
+     /// FAST: print the held decision lines (after the fire)
+     fn flush(&mut self) { if let Some(b) = &mut self.defer { for l in b.drain(..) { fastfire::log_line(l); } } }
+ 
+@@ -1497,8 +1543,13 @@
+         let mut cset: std::collections::HashSet<Pk> = tx.keys.iter().take(tx.num_signers as usize).copied().collect();
+         cset.insert(launch.creator);
+         let fire_now = !self.cfg.gate || (self.cfg.window_ms <= 0.0 && static_ok);
++        let vq_create = match snipe::bundle_legs(tx, &launch.mint) {
++            Some(snipe::Legs::Buys(v)) => snipe::CURVE_VQ0 + snipe::simulate_legs(snipe::CURVE_VQ0, &v).unwrap_or(0),
++            _ => snipe::CURVE_VQ0,
++        };
+         self.pend.insert(launch.mint, RacePend { launch: launch.clone(), slot, t0: Instant::now(), cset, bundle_n: 0, bundle_sol: 0, out: Vec::new(),
+-            decided: fire_now || !self.cfg.gate || !static_ok, static_ok, pass: fire_now, sigs: Default::default() });
++            decided: fire_now || !self.cfg.gate || !static_ok, static_ok, pass: fire_now, sigs: Default::default(),
++            csig8: sig8_of(&tx.sig), vq_create, legs: Default::default(), last_eval: None });
+         if self.cfg.gate && !static_ok {
+             let l = format!("  RACE reject-static slot={slot} mint={}", b58(&launch.mint));
+             match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") }
+@@ -1517,8 +1568,10 @@
+             let Some(touch) = snipe::mint_touch(tx, &mint) else { continue };
+             let bundle_ms = self.cfg.bundle_ms;
+             let is_pro = self.cfg.pros.contains(&payer);
++            let glued = self.cfg.glued;
+             let Some(p) = self.pend.get_mut(&mint) else { continue };
+             if !p.sigs.insert(tx.sig) { continue; } // duplicate delivery from the second feed
++            if glued { if let Some(l) = snipe::bundle_legs(tx, &mint) { p.legs.insert(sig8_of(&tx.sig), l); } }
+             let ms = p.t0.elapsed().as_secs_f64() * 1e3;
+             let signers: Vec<Pk> = tx.keys.iter().take(tx.num_signers as usize).copied().collect();
+             let bvq = snipe::CURVE_VQ0 + p.launch.dev_buy_lamports + p.bundle_sol;
+@@ -1575,7 +1628,53 @@
+             let early = self.cfg.early && !p.decided && p.static_ok && !self.cfg.count_out && self.cfg.bundle != -1
+                 && self.cfg.max_bundle_sol >= 1_000_000_000_000_000_000 && p.bundle_n >= self.cfg.min_bundle.max(1)
+                 && p.bundle_sol >= self.cfg.min_bundle_sol && el <= self.cfg.window_ms;
+-            if !p.decided && (el >= self.cfg.window_ms || early) {
++            if self.cfg.glued && !p.decided {
++                // GAP --race-glued: decide when the run after the create is closed (or at run_max_ms); re-evaluate at most
++                // every 0.2 ms (the slot order grows as data sets complete)
++                if p.last_eval.is_some_and(|t| t.elapsed() < Duration::from_micros(200)) && el < self.cfg.run_max_ms { continue; }
++                p.last_eval = Some(Instant::now());
++                let ord = arbx::feeds::slot_order();
++                let _ = ord;
++                let (n, gsol, unk, closed, found) = {
++                    // inline glued_eval (self is borrowed mutably by the loop)
++                    let tail = arbx::feeds::slot_order().after(p.slot, p.csig8, 64);
++                    match tail {
++                        None => (0u32, 0u64, 0u32, false, false),
++                        Some(tail) => {
++                            let (mut n, mut sol, mut unk, mut vq) = (0u32, 0u64, 0u32, p.vq_create);
++                            let mut res = None;
++                            for (k, hit) in tail {
++                                if !hit { res = Some((n, sol, unk, true, true)); break; }
++                                match p.legs.get(&k) {
++                                    Some(snipe::Legs::Buys(v)) => match snipe::simulate_legs(vq, v) {
++                                        Some(s_) => { n += 1; sol = sol.saturating_add(s_); vq = vq.saturating_add(s_); }
++                                        None => { res = Some((n, sol, unk, true, true)); break; }
++                                    },
++                                    Some(snipe::Legs::Unknown) => { n += 1; unk += 1; }
++                                    Some(snipe::Legs::NotBuy) => { res = Some((n, sol, unk, true, true)); break; }
++                                    None => { res = Some((n, sol, unk, self.seen.contains(&k), true)); break; }
++                                }
++                            }
++                            res.unwrap_or((n, sol, unk, false, true))
++                        }
++                    }
++                };
++                if closed || el >= self.cfg.run_max_ms {
++                    let (on, osol) = (p.bundle_n, p.bundle_sol);
++                    p.bundle_n = n; p.bundle_sol = gsol;
++                    let (no, solo, maxcu) = Self::counts(p, self.cfg.window_ms.max(el));
++                    let bundle_ok = closed && unk == 0 && n >= self.cfg.min_bundle && gsol >= self.cfg.min_bundle_sol && gsol <= self.cfg.max_bundle_sol
++                        && match self.cfg.bundle { 1 => n > 0, -1 => n == 0, _ => true };
++                    p.pass = p.static_ok && bundle_ok && (!self.cfg.count_out || (no >= self.cfg.min_out && solo >= self.cfg.min_out_sol));
++                    p.decided = true;
++                    let line = format!("  RACE decide slot={} mint={} at_ms={:.1} out_n={no} out_sol={:.3} max_cu={maxcu} bundle_n={n} bundle_sol={:.3} glued_closed={closed} glued_unknown={unk} order={} old_bundle_n={on} old_bundle_sol={:.3} pass={}",
++                        p.slot, b58(mint), el, solo as f64 / 1e9, gsol as f64 / 1e9, if found { "yes" } else { "none" }, osol as f64 / 1e9, p.pass);
++                    match &mut self.defer { Some(b) => b.push(line), None => eprintln!("{line}") }
++                    if p.pass { ready.push((p.launch.clone(), p.slot)); }
++                    else if self.cfg.track_rejects { self.shadow.push((p.launch.clone(), p.slot)); }
++                }
++            }
++            if !self.cfg.glued && !p.decided && (el >= self.cfg.window_ms || early) {
+                 let (n, sol, maxcu) = Self::counts(p, self.cfg.window_ms);
+                 let bundle_ok = p.bundle_n >= self.cfg.min_bundle
+                     && p.bundle_sol >= self.cfg.min_bundle_sol && p.bundle_sol <= self.cfg.max_bundle_sol
+@@ -1706,6 +1805,7 @@
+         det.health(&_feeds);
+         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
+         if let Some(arbx::feeds::Event::Tx(a)) = ev {
++            if race.cfg.glued { race.note_hit(&a.tx); }
+             det.note(&a);
+             // DET FIX: a top-level create, else pump's router create (CPI) decoded from the router's own args
+             let cand = match snipe::detect_launch(&a.tx) { Some(l) => Some((l, false)), None if !det.no_router => router_launch(&a.tx).map(|l| (l, true)), None => None };
+@@ -2052,6 +2152,7 @@
+         det.health(&_feeds);
+         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
+         if let Some(arbx::feeds::Event::Tx(a)) = ev {
++            if race.cfg.glued { race.note_hit(&a.tx); }
+             // DET FIX: the current slot for leader targeting / send_slot comes from the shred feed (the leader's slot as it
+             // is being produced). The 250 ms getSlot poller alone lagged the create slot by 2-3 slots (live_land_fast.log:
+             // send_slot 458515365 for a create in 458515368), so tpu-direct aimed at leaders already past.
