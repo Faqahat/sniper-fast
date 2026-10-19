@@ -431,6 +431,19 @@ fn with_token<T>(req: &mut tonic::Request<T>, token: Option<&str>, header: Optio
     Ok(())
 }
 
+/// DET FIX (2026-10-18): a gRPC stream that stays connected but stops delivering (HTTP/2 keep-alive still answered) used
+/// to hang `st.message()` forever: the feed looked "connected" and the engine went blind (6 watcher restarts in one
+/// overnight paper run; the 0-fire paper->live handoff). Any message (entries, transactions, pings) resets the timer; after
+/// FEED_IDLE_MS (default 15000; the entries feed sends every slot, the pump deshred filter several times a second) the
+/// stream errors and the caller reconnects. 0 disables.
+pub fn idle_timeout() -> Duration {
+    static T: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *T.get_or_init(|| {
+        let ms = std::env::var("FEED_IDLE_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(15_000);
+        if ms == 0 { Duration::from_secs(365 * 86_400) } else { Duration::from_millis(ms) }
+    })
+}
+
 /// Run a bidi Yellowstone call: send `first`, then a ping every 10 s; hand every update to `on_msg`.
 async fn bidi<Req, Resp>(
     grpc: &mut tonic::client::Grpc<Channel>, path: &'static str, first: Req, ping: Req,
@@ -450,7 +463,12 @@ where Req: prost::Message + Clone + Default + Send + 'static, Resp: prost::Messa
     let codec: ProstCodec<Req, Resp> = ProstCodec::default();
     let res = async {
         let mut st = grpc.streaming(req, http::uri::PathAndQuery::from_static(path), codec).await?.into_inner();
-        while let Some(m) = st.message().await? {
+        loop {
+            let m = match tokio::time::timeout(idle_timeout(), st.message()).await {
+                Ok(r) => r?,
+                Err(_) => bail!("stalled: no message for {:?} (stale subscription) — reconnecting", idle_timeout()),
+            };
+            let Some(m) = m else { break };
             if !on_msg(m) { return Ok(()); }
         }
         bail!("stream ended")
@@ -477,7 +495,12 @@ pub async fn feed_once(f: &Feed, sink: &(dyn Fn(Item) -> bool + Send + Sync), re
             let codec: ProstCodec<SubscribeEntriesRequest, JitoEntry> = ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/shredstream.ShredstreamProxy/SubscribeEntries");
             let mut st = grpc.server_streaming(req, path, codec).await?.into_inner();
-            while let Some(m) = st.message().await? {
+            loop {
+                let m = match tokio::time::timeout(idle_timeout(), st.message()).await {
+                    Ok(r) => r?,
+                    Err(_) => bail!("stalled: no entries for {:?} (stale subscription) — reconnecting", idle_timeout()),
+                };
+                let Some(m) = m else { break };
                 if !send(Item::Entries { slot: m.slot, bytes: m.entries, t: now_ns() }) { return Ok(()); }
             }
             bail!("stream ended")

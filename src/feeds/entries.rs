@@ -150,11 +150,19 @@ pub fn parse_entries_poh(buf: &[u8]) -> Option<(Vec<TxRef>, Vec<(u64, u64)>, Opt
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct Poh { pub slot: u64, pub hashes: u64, pub ticks: u32, pub hpt: u64 }
 
+/// DET FIX (2026-10-18): the slot length the PoH clock maps its 64 ticks onto, in µs. It was hard-coded as 400 ms
+/// (6.25 ms a tick); mainnet now runs ~213 ms slots (getRecentPerformanceSamples: 282 slots / 60 s) with 64 ticks, so
+/// every PoH "ms" was 1.88x too large (det paper run: create positions up to 394 "ms" in a 213 ms slot). Default 400 ms
+/// (unchanged behaviour and tests); a binary sets the measured value with `set_slot_us`.
+pub static SLOT_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(400_000);
+pub fn set_slot_us(us: u64) { if (50_000..=1_000_000).contains(&us) { SLOT_US.store(us, std::sync::atomic::Ordering::Relaxed); } }
+fn slot_ms() -> f64 { SLOT_US.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1000.0 }
+
 impl Poh {
     /// milliseconds since the slot began, on the leader's clock (None until a tick has fixed hashes per tick)
-    pub fn ms(&self) -> Option<f64> { (self.hpt > 0).then(|| self.hashes as f64 / self.hpt as f64 * 6.25) }
-    /// how far after `earlier` this one ran on the leaders' clocks (across slots: 400 ms a slot)
-    pub fn ms_after(&self, earlier: &Poh) -> Option<f64> { Some((self.slot as f64 - earlier.slot as f64) * 400.0 + self.ms()? - earlier.ms()?) }
+    pub fn ms(&self) -> Option<f64> { (self.hpt > 0).then(|| self.hashes as f64 / self.hpt as f64 * (slot_ms() / 64.0)) }
+    /// how far after `earlier` this one ran on the leaders' clocks (across slots: one slot length a slot)
+    pub fn ms_after(&self, earlier: &Poh) -> Option<f64> { Some((self.slot as f64 - earlier.slot as f64) * slot_ms() + self.ms()? - earlier.ms()?) }
 }
 
 /// Running PoH count per slot for one entries feed. Entries of a slot arrive in order from its first; the first slot
