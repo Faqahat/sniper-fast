@@ -276,6 +276,13 @@ impl Assembler {
                             // the signature follows a 1-byte count (fewer than 128 signers)
                             if s.buf.get(start_b).is_some_and(|c| *c < 0x80) {
                                 if let (Some(sig), Some(e)) = (s.buf.get(start_b + 1..start_b + 9), s.entries.last_mut()) { e.2.push((sig.try_into().unwrap(), sc.hit)); }
+                            } else if s.buf.get(start_b) == Some(&0x81) {
+                                // GAP: v1 (SIMD-0385) keeps its signatures at the end: the first one is the tx's signature
+                                let nsig = s.buf.get(start_b + 1).copied().unwrap_or(0) as usize;
+                                if nsig > 0 && end >= start_b + nsig * 64 {
+                                    let o = end - nsig * 64;
+                                    if let (Some(sig), Some(e)) = (s.buf.get(o..o + 8), s.entries.last_mut()) { e.2.push((sig.try_into().unwrap(), sc.hit)); }
+                                }
                             }
                             stats.txs += 1;
                             if !sc.hit { continue; }
@@ -313,9 +320,12 @@ impl Assembler {
     /// poh.log v2 (`sig8 slot ms feed entry_idx`; the entry's index in the slot is known here, the walk starts at the
     /// slot's first entry). A gap waits; a failed set stops the clock. Without a recorder nothing is rebuilt
     fn poh_advance(st: &mut SlotState, slot: u64, hpt: &mut u64, rec: &crate::rec::Rec, feed: u16) {
-        if !rec.is_on() { st.sets.clear(); return; }
+        // GAP: the walk also feeds the slot order (`--race-glued`); without a recorder or the order nothing is rebuilt
+        let order_on = super::ORDER_ON.load(std::sync::atomic::Ordering::Relaxed);
+        if !rec.is_on() && !order_on { st.sets.clear(); return; }
         let mut lines: Vec<(u64, f64, u64)> = Vec::new();
         let mut hits: Vec<(u64, super::entries::Poh)> = Vec::new();
+        let mut order: Vec<(u64, bool)> = Vec::new();
         while let Some((end, ents, last)) = st.sets.remove(&st.poh_next) {
             if st.poh_next == 0 { st.walk_started = true; }
             if last.is_some() { st.last_hash = last; }
@@ -331,17 +341,19 @@ impl Assembler {
                     st.ticks += 1;
                     continue;
                 }
-                if *hpt == 0 { continue; }
+                if *hpt == 0 { if order_on { for (sg, hit) in sigs { order.push((u64::from_be_bytes(sg), hit)); } } continue; }
                 let ms = st.cum as f64 / *hpt as f64 * (crate::feeds::entries::SLOT_US.load(std::sync::atomic::Ordering::Relaxed) as f64 / 64_000.0); // DET FIX: real slot length
                 let p = super::entries::Poh { slot, hashes: st.cum, ticks: st.ticks as u32, hpt: *hpt };
                 for (sg, hit) in sigs {
                     let k = u64::from_be_bytes(sg);
-                    lines.push((k, ms, entry));
+                    if rec.is_on() { lines.push((k, ms, entry)); }
                     if hit { hits.push((k, p)); }
+                    if order_on { order.push((k, hit)); }
                 }
             }
             st.poh_next = end;
         }
+        if order_on && st.walk_started { super::slot_order().append(feed, slot, &order); }
         super::poh_index().insert_many(&hits, feed, st.t_last);
         // the walk reached the slot's last shred: its slots-feed line now. A walk from the slot's first set to its last
         // shred walked every entry, so it ended on the slot's final tick, whose hash is the slot's blockhash (the chain-fetch

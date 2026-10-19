@@ -493,6 +493,65 @@ pub fn create_info(tx: &Tx) -> CreateInfo {
 /// How a non-create pump tx touches a watched mint (race window): a top-level pump BUY (sized: the spendable SOL; cap-family:
 /// token amount + max_sol_cost, priced by the caller on the curve), a SELL, or OTHER (the
 /// mint is in the static keys but the pump call is not top-level, e.g. a sniper's own program CPI-ing pump).
+/// GAP (2026-10-19): what one tx does to `mint`, for the creator-bundle ("glued") rule: its top-level pump buy ixs in
+/// order (exact-in: (true, SOL in incl. fees, min tokens out); cap: (false, tokens, max SOL incl. fees)), a pump
+/// non-buy (sell etc.: ends the run), or Unknown (touches the mint with no top-level pump ix: a router CPI, which may
+/// be a buy whose SOL the ix data does not show)
+#[derive(Clone, Debug, PartialEq)]
+pub enum Legs { Buys(Vec<(bool, u64, u64)>), NotBuy, Unknown }
+
+pub fn bundle_legs(tx: &Tx, mint: &Pk) -> Option<Legs> {
+    if !tx.keys.contains(mint) { return None; }
+    let read = |ix: &crate::tx::Ix, off: usize| ix.data.get(off..off + 8).and_then(|s| <[u8; 8]>::try_from(s).ok()).map(u64::from_le_bytes).unwrap_or(0);
+    let (mut v, mut pump, mut other) = (Vec::new(), false, false);
+    for ix in tx.ixs.iter() {
+        let Some(d) = pump_ix_disc(tx, ix) else { continue };
+        pump = true;
+        let at8 = DEV_BUY_SOL_AT_8.contains(&d);
+        if at8 || DEV_BUY_SOL_AT_16.contains(&d) {
+            if acct(tx, ix, buy_mint_pos(&d)).map_or(true, |m| m == *mint) { v.push((at8, read(ix, 8), read(ix, 16))); }
+            continue;
+        }
+        if d != CREATE_V2_DISC && d != CREATE_DISC { other = true; }
+    }
+    Some(if !v.is_empty() && !other { Legs::Buys(v) } else if pump { Legs::NotBuy } else { Legs::Unknown })
+}
+
+/// pump's total trade fee on SOL curves (protocol + creator), bps: TradeEvent sol = SOL in x 10000 / (10000 + fee)
+/// (calibrated on 141 legs: exact, /root/gap/final/calib2.py)
+pub const PUMP_FEE_BPS: u64 = 125;
+
+/// the curve after SOL `sol` goes in at virtual SOL `vq`: tokens out
+pub fn curve_tokens_out(vq: u64, sol: u64) -> u64 {
+    let k = CURVE_VQ0 as u128 * CURVE_VT0 as u128;
+    let vq = (vq as u128).max(1);
+    let vt = k / vq;
+    let nvt = k.div_ceil(vq + sol as u128);
+    vt.saturating_sub(nvt) as u64
+}
+
+/// simulate one tx's buy legs on the curve at `vq`: Some(total curve SOL) if every leg succeeds (slippage limits), None if
+/// one would fail (the tx reverts: the run ends there)
+pub fn simulate_legs(vq: u64, legs: &[(bool, u64, u64)]) -> Option<u64> {
+    let (mut v, mut tot) = (vq, 0u64);
+    for &(exact, a, b) in legs {
+        let sol = if exact {
+            let net = (a as u128 * 10_000 / (10_000 + PUMP_FEE_BPS) as u128) as u64;
+            if b > 0 && curve_tokens_out(v, net) < b { return None; }
+            net
+        } else {
+            let k = CURVE_VQ0 as u128 * CURVE_VT0 as u128;
+            let vt = k / (v as u128).max(1);
+            if a as u128 >= vt { return None; }
+            let c = curve_cost(v, a);
+            if b > 0 && (c as u128 * (10_000 + PUMP_FEE_BPS) as u128 / 10_000) > b as u128 { return None; }
+            c
+        };
+        v = v.saturating_add(sol); tot = tot.saturating_add(sol);
+    }
+    Some(tot)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MintTouch { Buy(u64), BuyCap { tokens: u64, max_sol: u64 }, Sell, Other }
 

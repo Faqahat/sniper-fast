@@ -242,6 +242,39 @@ impl PohIndex {
     pub fn is_empty(&self) -> bool { self.len() == 0 }
 }
 
+/// GAP (2026-10-19): the order of the non-vote transactions of each slot as an entries or shred feed walked it from the
+/// slot's first entry: (sig8, forwarded to the engine). The race gate's creator-bundle rule (`--race-glued`) reads the
+/// unbroken run right after a create from it, the same "glued" definition as the on-chain labels. Off unless ORDER_ON.
+pub static ORDER_ON: AtomicBool = AtomicBool::new(false);
+pub struct SlotOrder { m: std::sync::Mutex<std::collections::HashMap<(u16, u64), Vec<(u64, bool)>>>, max_slot: AtomicU64 }
+impl SlotOrder {
+    /// append a feed's next transactions of `slot` (in walk order)
+    pub fn append(&self, feed: u16, slot: u64, items: &[(u64, bool)]) {
+        if items.is_empty() { return; }
+        let mut g = self.m.lock().unwrap_or_else(|e| e.into_inner());
+        g.entry((feed, slot)).or_default().extend_from_slice(items);
+        let prev = self.max_slot.fetch_max(slot, Ordering::Relaxed);
+        if slot > prev && g.len() > 192 { let lo = slot.saturating_sub(48); g.retain(|k, _| k.1 >= lo); }
+    }
+    /// up to `max` transactions after `sig8` in its slot, from the feed whose walk holds the most of them
+    pub fn after(&self, slot: u64, sig8: u64, max: usize) -> Option<Vec<(u64, bool)>> {
+        let g = self.m.lock().unwrap_or_else(|e| e.into_inner());
+        let mut best: Option<Vec<(u64, bool)>> = None;
+        for (k, v) in g.iter() {
+            if k.1 != slot { continue; }
+            if let Some(i) = v.iter().position(|x| x.0 == sig8) {
+                let tail = &v[i + 1..(i + 1 + max).min(v.len())];
+                if best.as_ref().map_or(true, |b| tail.len() > b.len()) { best = Some(tail.to_vec()); }
+            }
+        }
+        best
+    }
+}
+pub fn slot_order() -> &'static SlotOrder {
+    static O: std::sync::LazyLock<SlotOrder> = std::sync::LazyLock::new(|| SlotOrder { m: Default::default(), max_slot: AtomicU64::new(0) });
+    &O
+}
+
 /// The process's PoH index
 pub fn poh_index() -> &'static PohIndex {
     static I: std::sync::LazyLock<PohIndex> = std::sync::LazyLock::new(PohIndex::new);
@@ -458,11 +491,16 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
             let (key, table) = (|k: &Pk| interest.keys.contains(k), |k: &Pk| tables.contains(k));
             let mut ok = true;
             let mut positions: Vec<(u64, entries::Poh)> = Vec::new();
+            // GAP: the slot's non-vote order (only when the slot is followed from its first entry)
+            let order_on = ORDER_ON.load(Ordering::Relaxed) && first_entry.is_some();
+            let mut order: Vec<(u64, bool)> = Vec::new();
             for r in refs {
                 if r.is_vote { continue; }
                 c.txs.fetch_add(1, Ordering::Relaxed);
                 let raw = &bytes[r.start..r.end];
-                if !tx::scan(raw, &key, &table).map_or(false, |s| s.hit) { continue; }
+                let hit = tx::scan(raw, &key, &table).map_or(false, |s| s.hit);
+                if order_on { order.push((u64::from_be_bytes(r.sig[..8].try_into().unwrap()), hit)); }
+                if !hit { continue; }
                 let Some((tx, n)) = tx::parse_wire(raw) else { continue };
                 c.forwarded.fetch_add(1, Ordering::Relaxed);
                 let poh = pohs.get(r.entry as usize).copied().flatten();
@@ -471,6 +509,7 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
                 if !sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded, executed: None, tx, poh, raw })).is_ok()) { ok = false; break; }
             }
             drop(tables);
+            if order_on { slot_order().append(id, slot, &order); }
             poh_index().insert_many(&positions, id, t);
             archive(bytes);
             ok
