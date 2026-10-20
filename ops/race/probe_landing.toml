@@ -57,7 +57,7 @@ token_env = "KALDERA_TOKEN"
 token_header = "x-token"
 account_include = ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]
 
-# ---- extra relay arms (copied from /root/arbx/deploy/arbx-c41-normal.toml) ----
+# ---- extra relay arms (copied from /root/sniper/deploy/arbx-c41-normal.toml) ----
 [[send]]
 # one-transaction bundle through the searcher gRPC; auth key = the whitelisted keypair (CrQx62…EynE), never funded
 name = "jito-bundle"

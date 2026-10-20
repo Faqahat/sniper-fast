@@ -57,7 +57,7 @@ def get_name(mint):
 
 # parse log
 launch = {}
-for ln in open("/root/arbx-fast/paper_blacklist.log"):
+for ln in open("/root/sniper-fast/paper_blacklist.log"):
     m = re.search(r"PAPER launch #\d+ slot=\d+ mint=(\w+) dev_buy=(\d+)", ln)
     if m and m.group(1) not in launch:
         launch[m.group(1)] = {"dev": int(m.group(2))}

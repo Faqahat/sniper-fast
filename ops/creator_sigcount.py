@@ -53,7 +53,7 @@ def main():
 
     # blocklist: n > THRESH (serial). exclude rpc failures (-1)
     blocked = sorted(c for c, n in counts.items() if n > THRESH)
-    with open("/root/arbx-fast/creator_blocklist.txt", "w") as f:
+    with open("/root/sniper-fast/creator_blocklist.txt", "w") as f:
         for c in blocked:
             f.write(c + "\n")
 

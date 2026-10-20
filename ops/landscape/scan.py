@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Landscape scan: pull a window of recent blocks, tally program activity, detect arb/MEV/pump archetypes."""
 import os,json,urllib.request,threading,time,collections,sys
-tok=[l.split("=",1)[1].strip() for l in open("/root/arbx/deploy/.env") if l.startswith("CONSTANTK_TOKEN")][0]
+tok=[l.split("=",1)[1].strip() for l in open("/root/sniper/deploy/.env") if l.startswith("CONSTANTK_TOKEN")][0]
 RPC=f"https://rpc-frankfurt.constant-k.com/?api-key={tok}"
 CACHE="/root/landscape/blocks"; os.makedirs(CACHE,exist_ok=True)
 def rpc(m,p,timeout=90):

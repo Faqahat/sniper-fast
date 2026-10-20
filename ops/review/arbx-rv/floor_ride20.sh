@@ -1,16 +1,16 @@
 #!/bin/bash
 # RIDE TEST: 10 trades, ~$1, staked-rpc + cu_price 5M + fill-cap 1.12 + WINNER EXIT (--exit-ladder: cut fast, ride winners, 3.2s cap).
 # Now we actually trade (not immediate-sell). KILL-SWITCH: net down > 0.08 SOL.
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 RPC="https://rpc-frankfurt.constant-k.com/?api-key=$CONSTANTK_TOKEN"
 W=FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS
-cd /root/arbx-fast
+cd /root/sniper-fast
 bal(){ curl -s "$RPC" -X POST -H "content-type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getBalance\",\"params\":[\"$W\"]}" | python3 -c "import sys,json;print(json.load(sys.stdin)[\"result\"][\"value\"])"; }
 START=$(bal); echo "RIDE20 START balance: $START ($(python3 -c "print($START/1e9)") SOL)"
 for i in $(seq 1 20); do
   echo "=== RIDE20 attempt $i ==="
   timeout 600 ./target/release/snipe_engine --snipe-once --exit-ladder --config probe_shadow.toml \
-    --env-file /root/arbx/deploy/.env --send-path staked-rpc \
+    --env-file /root/sniper/deploy/.env --send-path staked-rpc \
     --min-dev-buy 200000000 --fill-cap 1.12 --cu-price-micro 5000000 \
     --spend-lamports 9500000 --max-sol 0.011 --live < /root/.nexus-v2-trading-wallet.pass
   CUR=$(bal); DOWN=$((START - CUR))

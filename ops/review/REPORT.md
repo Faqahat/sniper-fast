@@ -1,6 +1,6 @@
 # Independent review: final sniper engine before the live landing test (2026-10-19, 14:11–15:02 UTC)
 
-Reviewed: binary /root/arbx-final/target/release/snipe_engine (md5 df3ca55b85d2…, unchanged), /root/lat/live_final.sh
+Reviewed: binary /root/sniper-final/target/release/snipe_engine (md5 df3ca55b85d2…, unchanged), /root/lat/live_final.sh
 (md5 c97136ea…, now --max-loss-sol 0.096), /root/lat/final_landing.toml.
 I never passed --live, never ran live_final.sh, and sent no valid transaction.
 Wallet FRZh63L6…: 0.310818539 SOL at 14:11 UTC and 0.310818539 SOL at 15:01 UTC.
@@ -170,6 +170,6 @@ Every script and output is in /root/review/. The patched review build lives in /
 ## Conditions for GO
 1. Stop everything listed above (the leftover until loop) and confirm top is quiet.
 2. Accept findings 1–3: a stranded position is worth about 0.001 SOL plus about 0.002 SOL ATA rent. Keep this ready, filling in mints from the log:
-   snipe_engine --sell-held <mint,…> --live --send-path staked-rpc --sell-path staked-rpc --cu-limit 90000 --sell-cu-price-micro 1500000 --config /root/lat/final_landing.toml --env-file /root/arbx/deploy/.env < /root/.nexus-v2-trading-wallet.pass
+   snipe_engine --sell-held <mint,…> --live --send-path staked-rpc --sell-path staked-rpc --cu-limit 90000 --sell-cu-price-micro 1500000 --config /root/lat/final_landing.toml --env-file /root/sniper/deploy/.env < /root/.nexus-v2-trading-wallet.pass
 3. The startup log does not print the start balance (it appears only in the final DONE line), so check right before the start that getBalance on rpc-frankfurt answers (finding 4). Also check that the banner reads "loss kill-switch 0.096 SOL".
 4. Accept up to about 0.0099 SOL per landed buy (tips plus priority fee), so up to about 0.1 SOL for the 10 buys.

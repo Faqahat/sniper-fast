@@ -8,7 +8,7 @@ def rpc(m,p):
     return None
 # parse our 14 bought mints
 mints=[]
-for ln in open("/root/arbx-fast/livetrips_dev1.log"):
+for ln in open("/root/sniper-fast/livetrips_dev1.log"):
     m=re.search(r"FIRE slot=\d+ mint=(\w+) dev_buy=(\d+)",ln)
     if m and m.group(1) not in [x[0] for x in mints]: mints.append((m.group(1),int(m.group(2))))
 def count_sigs(addr,cap=60000):

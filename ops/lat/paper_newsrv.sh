@@ -1,6 +1,6 @@
 #!/bin/bash
 # ===== LIVE — THE OWNER RUNS THIS, NOBODY ELSE. Real transactions, real SOL. NOT RUN by the fix2 agent. =====
-# FIX2 engine (2026-10-19, /root/fix2/NOTES.md): /root/arbx-final2 (= /root/arbx-final + the fix2 changes), config
+# FIX2 engine (2026-10-19, /root/fix2/NOTES.md): /root/sniper-final2 (= /root/sniper-final + the fix2 changes), config
 # /root/fix2/final2_landing.toml (= /root/lat/final_landing.toml + harmonic-bundle). Same rule (PREREG_v2 #2), same caps
 # as live_final.sh (17 buys: --max-total-sol 0.007, per-buy 0.0015, kill-switch 0.170, cu 105k, 90 min, 2 in flight). New:
 #  * gates: --close-leaders /root/fix2/close_leaders_5ms.txt (190 leaders < 5 ms RTT, 34% of slots, measured 2026-10-19
@@ -20,14 +20,14 @@
 #        and grep -E "LANDED-VIA|JITO-POLL|GATE-CREATE-MS|SELL-RETRY" /root/lat/live_land_<tag>.log
 TAG=${1:-final2}
 cd /root/lat
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 export KALDERA_TOKEN=$(grep -o 'KALDERA_TOKEN=[^ ]*' /root/collect_blfwd.sh | head -1 | cut -d= -f2)
 # harmonic-bundle stays OUT of the route until Harmonic confirms the whitelist of 8C1hako7...; then use ROUTES_HB:
 ROUTES_HB="bam=jito-bundle+landx-fra3+staked-rpc;harmonic=harmonic-bundle+jito-bundle+nozomi+staked-rpc;jito=jito-bundle+landx-fra3+staked-rpc;fd=jito-bundle+astralane+nozomi+staked-rpc;agave=helius+nozomi+staked-rpc;other=helius+nozomi+landx-fra3+staked-rpc;default=jito-bundle+landx-fra3+helius+staked-rpc"
 ROUTES="bam=jito-bundle+landx-fra3+staked-rpc;harmonic=jito-bundle+nozomi+staked-rpc;jito=jito-bundle+landx-fra3+staked-rpc;fd=jito-bundle+astralane+nozomi+staked-rpc;agave=helius+nozomi+staked-rpc;other=helius+nozomi+landx-fra3+staked-rpc;default=jito-bundle+landx-fra3+helius+staked-rpc"
 LOG=/root/lat/paper_${TAG}.log
 : > $LOG
-/root/arbx-final2/target/release/snipe_engine --paper-trade \
+/root/sniper-final2/target/release/snipe_engine --paper-trade \
   --uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8 \
   --dev-from-cap --race-gate --race-min-bundle 1 --race-min-bundle-sol 3 --race-max-bundle-sol 5 --race-create-tip-prefix moon --race-bundle-ms 3 --race-glued \
   --race-pros /root/race/pros.json --race-early \
@@ -36,7 +36,7 @@ LOG=/root/lat/paper_${TAG}.log
   --cu-price-micro 30000000 --cu-limit 105000 --sell-cu-price-micro 1500000 --land-poll-ms 100 \
   --sell-robust --sell-retries 2 --sell-retry-s 4 --strict-balance --jito-poll --landed-via \
   --send-path helius --sell-path staked-rpc --route-by-client "$ROUTES" --send-log /root/lat/sends_${TAG}.jsonl \
-  --config /root/fix2/final2_landing.toml --env-file /root/arbx/deploy/.env \
+  --config /root/fix2/final2_landing.toml --env-file /root/sniper/deploy/.env \
   --fast-send --jito-h2 --fast-presign --fast-derive --busy-poll --pin-core 1 --lat-trace /root/lat/trace_${TAG}.jsonl \
   < /root/.nexus-v2-trading-wallet.pass >> $LOG 2>&1
 echo "PAPER_DONE $TAG $(date -u)" >> $LOG

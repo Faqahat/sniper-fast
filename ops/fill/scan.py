@@ -164,7 +164,7 @@ def process(mint,cslot,devlog):
 
 def main():
     txt=""
-    for fn in ["/root/arbx-fast/paper_blacklist.log","/root/arbx-fast/paper_urihost.log"]:
+    for fn in ["/root/sniper-fast/paper_blacklist.log","/root/sniper-fast/paper_urihost.log"]:
         try: txt+=open(fn).read()
         except Exception: pass
     seen={}

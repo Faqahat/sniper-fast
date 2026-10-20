@@ -17,7 +17,7 @@ print(f"paper run started {et}s ago (epoch {int(start)})")
 # our paper tracked mints
 tracked=set()
 try:
-    for ln in open("/root/arbx-fast/paper_filter8h.log"):
+    for ln in open("/root/sniper-fast/paper_filter8h.log"):
         mo=re.search(r"PAPER launch #\d+ slot=\d+ mint=([1-9A-HJ-NP-Za-km-z]+)",ln)
         if mo: tracked.add(mo.group(1))
 except: pass

@@ -10,7 +10,7 @@ def rpc(m,p):
 m2s={}
 for lg in ["paper_collect.log","paper_newcfg.log"]:
     try:
-        for ln in open("/root/arbx-fast/"+lg):
+        for ln in open("/root/sniper-fast/"+lg):
             mo=re.search(r"slot=(\d+) mint=([1-9A-HJ-NP-Za-km-z]+)",ln)
             if mo: m2s.setdefault(mo.group(2),int(mo.group(1)))
     except: pass

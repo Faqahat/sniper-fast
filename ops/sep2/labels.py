@@ -1,6 +1,6 @@
 import re, json
 from collections import Counter
-LOG="/root/arbx-fast/paper_blacklist.log"
+LOG="/root/sniper-fast/paper_blacklist.log"
 launches={}; done={}; order=0
 for ln in open(LOG):
     m=re.search(r"PAPER launch #(\d+) slot=(\d+) mint=(\w+) dev_buy=(\d+)(?:\s+vanilla=(\w+))?", ln)

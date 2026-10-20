@@ -54,7 +54,7 @@ def lam(sig,cv):
     except:return None
 # parse FIRE mints + dev + fill from log
 cur={};T=[]
-for ln in open("/root/arbx-fast/livetrips_dev1.log"):
+for ln in open("/root/sniper-fast/livetrips_dev1.log"):
     m=re.search(r"FIRE slot=(\d+) mint=(\w+) dev_buy=(\d+)",ln)
     if m: cur={"mint":m.group(2),"dev":int(m.group(3))}
     m=re.search(r"floor_px=([0-9.eE+-]+) spend=(\d+)",ln)

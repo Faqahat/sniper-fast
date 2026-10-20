@@ -20,6 +20,6 @@ def png(pk_ip):
 res=list(ThreadPoolExecutor(80).map(png, pk_ip))
 close=[pk for pk,r in res if r is not None and r<THRESH]
 resolved=[r for pk,r in res if r is not None]
-with open("/root/arbx-fast/close_leaders.txt","w") as f:
+with open("/root/sniper-fast/close_leaders.txt","w") as f:
     f.write("\n".join(close)+"\n")
 print(f"pinged={len(res)} resolved={len(resolved)} CLOSE(<{THRESH}ms)={len(close)} -> close_leaders.txt",flush=True)

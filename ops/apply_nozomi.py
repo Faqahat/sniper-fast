@@ -1,5 +1,5 @@
 import os
-os.chdir("/root/arbx-fast")
+os.chdir("/root/sniper-fast")
 
 # 1) snipe_engine.rs: inject the path's tip transfer into send_and_poll (tipped paths only; tipless unchanged)
 f = "src/bin/snipe_engine.rs"

@@ -76,7 +76,7 @@ def main():
     # ---- population mints from broad launch logs ----
     pop_mints=[]
     seen=set()
-    for path in ("/root/arbx-fast/paths_broad.jsonl","/root/arbx-fast/paths.jsonl","/root/gs_clean/paths.jsonl"):
+    for path in ("/root/sniper-fast/paths_broad.jsonl","/root/sniper-fast/paths.jsonl","/root/gs_clean/paths.jsonl"):
         try:
             for line in open(path):
                 line=line.strip()

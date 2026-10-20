@@ -2,7 +2,7 @@
 import json, statistics as st, itertools
 B = {json.loads(l)["mint"]: json.loads(l) for l in open("/root/bsplit/out.jsonl")}
 P = {}
-for l in open("/root/arbx-fast/paths_blnight.jsonl"):
+for l in open("/root/sniper-fast/paths_blnight.jsonl"):
     d = json.loads(l)
     P[d["mint"]] = d["path"]
 L = [dict(B[m], path=P[m]) for m in P if m in B and "glued" in B[m]]

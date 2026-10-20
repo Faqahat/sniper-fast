@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os,json,urllib.request,time,threading
-tok=[l.split("=",1)[1].strip() for l in open("/root/arbx/deploy/.env") if l.startswith("CONSTANTK_TOKEN")][0]
+tok=[l.split("=",1)[1].strip() for l in open("/root/sniper/deploy/.env") if l.startswith("CONSTANTK_TOKEN")][0]
 RPC=f"https://rpc-frankfurt.constant-k.com/?api-key={tok}"
 CACHE="/root/landscape/gcache"; os.makedirs(CACHE,exist_ok=True)
 MIG="9C4nRvhhVquCKATjDCx5FKvNS9PNgNqgyWy9AcoDjYv5"

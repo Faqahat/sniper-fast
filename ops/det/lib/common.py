@@ -65,7 +65,7 @@ def load_tipmap():
     """tip account -> sender label: engine known_tip_accounts (src/send/mod.rs) first, then the catalogue."""
     m = {}
     try:
-        src = open("/root/arbx-fast/src/send/mod.rs").read()
+        src = open("/root/sniper-fast/src/send/mod.rs").read()
         i = src.find("pub fn known_tip_accounts")
         body = src[i:i + 60000]
         j = body.find("\n}\n")
@@ -82,7 +82,7 @@ def load_tipmap():
             m.setdefault(a, n.rstrip("?"))
     except Exception:
         pass
-    cat = json.load(open("/root/arbx-fast/data/sender-tip-accounts.json"))
+    cat = json.load(open("/root/sniper-fast/data/sender-tip-accounts.json"))
     for k, v in cat.items():
         if not isinstance(v, dict):
             continue

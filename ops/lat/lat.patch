@@ -1,5 +1,5 @@
 --- mod.rs.orig	2026-10-19 10:36:04.229604226 +0100
-+++ /root/arbx-lat/src/send/mod.rs	2026-10-19 10:36:04.848459872 +0100
++++ /root/sniper-lat/src/send/mod.rs	2026-10-19 10:36:04.848459872 +0100
 @@ -379,6 +379,57 @@
  /// How a path is kept warm (Tpu: its own loop keeps the next leaders' connections open)
  enum Ping { Get(String), Health, Tips, None }
@@ -133,7 +133,7 @@
                      tokio::spawn(async move {
                          let t_ns = now_ns();
 --- snipe_engine.rs.orig	2026-10-19 10:36:04.233385898 +0100
-+++ /root/arbx-lat/src/bin/snipe_engine.rs	2026-10-19 10:58:42.918806437 +0100
++++ /root/sniper-lat/src/bin/snipe_engine.rs	2026-10-19 10:58:42.918806437 +0100
 @@ -218,7 +218,7 @@
      let paper_trade = has("--paper-trade");
      let unwrap = has("--unwrap");

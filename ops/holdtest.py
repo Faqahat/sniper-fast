@@ -2,7 +2,7 @@ import json,re,statistics,os
 CACHE="/root/series_cache.json"
 cache=json.load(open(CACHE))
 dev={}
-for ln in open("/root/arbx-fast/paper_sel.log"):
+for ln in open("/root/sniper-fast/paper_sel.log"):
     m=re.search(r"mint=([1-9A-HJ-NP-Za-km-z]+) dev_buy=(\d+)",ln)
     if m: dev[m.group(1)]=int(m.group(2))
 def fp(d): return (30e9+d)**2/(30e9*1.073e15)

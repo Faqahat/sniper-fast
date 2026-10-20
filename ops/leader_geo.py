@@ -7,7 +7,7 @@ def rpc(m,p):
         try: return json.load(urllib.request.urlopen(req,timeout=25)).get("result")
         except: time.sleep(0.4)
     return None
-shots=[json.loads(l) for l in open("/root/arbx-fast/shots.jsonl") if l.strip()]
+shots=[json.loads(l) for l in open("/root/sniper-fast/shots.jsonl") if l.strip()]
 print(f"shots={len(shots)}  delta hist:", {d:sum(1 for s in shots if s['delta']==d) for d in sorted(set(s['delta'] for s in shots))})
 nodes=rpc("getClusterNodes",[]) or []
 ip_of={}

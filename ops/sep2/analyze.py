@@ -5,7 +5,7 @@ F=json.load(open("/root/sep2/features2.json"))
 rows=sorted(F.values(),key=lambda r:r["slot"])
 # ---- merge trajectory from paths ----
 paths={}
-for ln in open("/root/arbx-fast/paths_blacklist.jsonl"):
+for ln in open("/root/sniper-fast/paths_blacklist.jsonl"):
     try: j=json.loads(ln)
     except: continue
     paths[j["mint"]]=j.get("path") or []

@@ -9,19 +9,19 @@ LOSS=${LOSS:-0.200}
 EXTRA=""; [ -n "$ALSO" ] && EXTRA="--also-send $ALSO"
 TAG=${2:-helius}
 export PATH=/root/.cargo/bin:$PATH
-cd /root/arbx-fast
-set -a; . /root/arbx/deploy/.env; set +a
+cd /root/sniper-fast
+set -a; . /root/sniper/deploy/.env; set +a
 export KALDERA_TOKEN=${KALDERA_TOKEN:?set KALDERA_TOKEN in deploy/.env}
-LOG=/root/arbx-fast/live_land_${TAG}.log
+LOG=/root/sniper-fast/live_land_${TAG}.log
 : > $LOG
 ./target/release/snipe_engine --snipe-once --concurrent --live \
   --uri-blacklist \
-  --close-leaders /root/arbx-fast/close_leaders.txt \
+  --close-leaders /root/sniper-fast/close_leaders.txt \
   --spend-lamports 1000000 --fill-cap 2.5 \
   --max-sol 0.0015 --max-total-sol $TOTAL --max-loss-sol $LOSS --max-inflight 2 \
   --min-dev-buy 500000000 --max-dev-buy-sol 8 --minutes 60 \
   --cu-price-micro 100000000 --cu-limit 90000 --sell-cu-price-micro 1500000 \
   --send-path $PATHNAME --sell-path staked-rpc $EXTRA \
-  --config probe_shadow.toml --env-file /root/arbx/deploy/.env \
+  --config probe_shadow.toml --env-file /root/sniper/deploy/.env \
   < /root/.nexus-v2-trading-wallet.pass >> $LOG 2>&1
 echo "LIVE_LAND_DONE $TAG" >> $LOG

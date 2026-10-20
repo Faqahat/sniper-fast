@@ -4,7 +4,7 @@
 #  (3) bal_start read concurrently with the buy send (join), not before it
 #  (4) log the prep latency: round_trip entry -> send, and send_and_poll entry -> send
 import sys
-P = "/root/arbx-fast/src/bin/snipe_engine.rs"
+P = "/root/sniper-fast/src/bin/snipe_engine.rs"
 s = open(P).read()
 if "BLOCKHASH_CACHE" in s:
     print("already patched"); sys.exit(0)

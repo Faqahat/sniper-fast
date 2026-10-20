@@ -92,5 +92,5 @@ for r in rows.values():
     b = "noping" if x is None else ("<1" if x < 1 else "<3" if x < 3 else "<5" if x < 5 else "<12" if x < 12 else "<40" if x < 40 else ">=40")
     bk[b] += r["slots_cur"]
 print("this-epoch slot share by leader RTT (ms): " + ", ".join(f"{k} {v/tot[0]:.1%}" for k, v in sorted(bk.items())))
-old = {l.strip() for l in open("/root/arbx-final/close_leaders.txt") if l.strip()}
+old = {l.strip() for l in open("/root/sniper-final/close_leaders.txt") if l.strip()}
 print(f"old close_leaders.txt: {len(old)} keys; leaders in it {sum(1 for pk in rows if pk in old)}; old-close slot share {sum(r['slots_cur'] for pk, r in rows.items() if pk in old)/tot[0]:.1%}; overlap with new {len(old & set(close))}")

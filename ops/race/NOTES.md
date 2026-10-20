@@ -111,7 +111,7 @@ VERDICT (n>=100 fires and 90% CI of SOL/day above zero): Gate B (time 1s) under 
 
 - **Fat-tail "runner" exits** (sell 50-85% at 1 s, trail the rest, 10 s cap), fitted pre-night, are worse than a plain 1-s exit on the blind data for every rule. Example: Gate B −3.3% vs −2.0%.
 - **Medians are −3% to −5% everywhere.** All the gain is in the tail, as the owner accepts. At d <= 25 the 90% CIs of #4 and #1 exclude zero; at d100 nothing does.
-- **Merged binary** (`/root/arbx-merge`, run `mnight`, 22:02 → 04:42, 325 Gate-B fires): Gate B −2.7% at d100 (1 s), +0.3% at d <= 25. It agrees with `night`. The engine ran 0 restarts and 0 panics in either run.
+- **Merged binary** (`/root/sniper-merge`, run `mnight`, 22:02 → 04:42, 325 Gate-B fires): Gate B −2.7% at d100 (1 s), +0.3% at d <= 25. It agrees with `night`. The engine ran 0 restarts and 0 panics in either run.
 - **X/Twitter at launch time** (`tweets_fwd.txt`, 3,101 launches with metadata fetched live):
   - Latency: metadata p50 530 ms; full X data p50 776 ms, p90 2.3 s. Only 4% are done within 300 ms.
   - No lift. Tweets with >= 10 likes at launch: 13% race and −4.1%, vs 23% race and −2.4% for all launches.
@@ -306,8 +306,8 @@ VERDICT (n>=100 fires and 90% CI of SOL/day above zero): Gate B (time 1s) under 
   - 4yFAz's picks: +2.4% → +8.6% → +11.3%.
 
 ## RECOMMENDED BINARY (merged build) and EXACT paper command
-- **Binary:** `/root/arbx-merge/target/release/snipe_engine`, md5 1bb9e449…, built 21:55 UTC, BUILD_EXIT=0.
-  - It is the detection agent's AFTER_FINAL (`/root/arbx-det`, see `/root/det/NOTES.md`) plus race patches 7-8. AFTER_FINAL already contained race patches 1-6.
+- **Binary:** `/root/sniper-merge/target/release/snipe_engine`, md5 1bb9e449…, built 21:55 UTC, BUILD_EXIT=0.
+  - It is the detection agent's AFTER_FINAL (`/root/sniper-det`, see `/root/det/NOTES.md`) plus race patches 7-8. AFTER_FINAL already contained race patches 1-6.
   - From AFTER_FINAL: 99.3% create coverage, router/CPI creates, lookup-table accounts, non-SOL-quote and legacy launches skipped, dev-buy pricing for cap-family buys, holder/creator-fee misreads fixed, 215-ms PoH clock, feed-stall reconnect, atomic path dumps.
   - Race patches 7-8 add the metadata `uri=` log and `--race-min/max-bundle-sol` / `--race-create-tip-prefix`.
   - Build script: `/root/race/dobuild_merge.sh <log>`. Untouched source: `/root/race/snipe_engine.rs.arbx-det_AFTER_FINAL`.
@@ -315,20 +315,20 @@ VERDICT (n>=100 fires and 90% CI of SOL/day above zero): Gate B (time 1s) under 
 - **Additional overnight paper run on this binary:** `mnight`, 22:02 → ~04:40 UTC, frozen Gate B, fired positions only. It will be scored next to the blind run.
 - **The fallback strategy:** Gate B with a 1-s exit. The merged binary gives the same gate with the detection fixes.
 ```
-cd /root/arbx-merge && set -a && . /root/arbx/deploy/.env && set +a && \
+cd /root/sniper-merge && set -a && . /root/sniper/deploy/.env && set +a && \
 export KALDERA_TOKEN=$(grep -o "KALDERA_TOKEN=[^ ]*" /root/collect_blfwd.sh | head -1 | cut -d= -f2) && \
 ./target/release/snipe_engine --paper-trade --minutes 120 --entry-at-floor --max-r-cap 20 \
   --min-dev-buy 500000000 --max-dev-buy-sol 8 --uri-blacklist \
   --derisk-frac 0 --ladder-frac 0 --ride-mult 99 --cut-r 0 --exit-cap-ms 1000 \
   --size-sol 2.0 --dump-paths /root/race/paths_<tag>.jsonl --max-inflight 48 \
-  --config probe_shadow.toml --env-file /root/arbx/deploy/.env \
+  --config probe_shadow.toml --env-file /root/sniper/deploy/.env \
   --dev-from-cap --race-gate --race-min-dev-sol 3 --race-min-bundle 2 --race-bundle-ms 3 --race-max-name-len 12 \
   --race-pros /root/race/pros.json --race-track-rejects \
   < /root/.nexus-v2-trading-wallet.pass >> /root/race/paper_<tag>.log 2>&1
 ```
 - **Exit flags:** `--exit-cap-ms 1000` with derisk/ladder/ride/cut neutralised is a pure 1-s time exit. The live `exit_ladder` reads the same flags.
 - **Why `--entry-at-floor`:** only so the dumped paths are price/floor, which the realistic scorer expects. The engine's own PAPER-TRADE RESULT then enters at the floor and is **far too optimistic**: run 1 showed +86%/trade there against ~0% realistic. Ignore it.
-- **The same command on `/root/arbx-race/target/release/snipe_engine`** (race patches only, no detection fixes) is what the blind overnight run uses.
+- **The same command on `/root/sniper-race/target/release/snipe_engine`** (race patches only, no detection fixes) is what the blind overnight run uses.
 - **Stall-aware runners:** `/root/race/paper_race3.sh <tag> <minutes> <race flags>` (merged) and `/root/race/paper_race2.sh` (arbx-race). They add the older ladder flags; scoring is unaffected.
 - **Score any run realistically:**
   `python3 /root/race/onchain.py /root/race/<tag>_onchain.jsonl 6 /root/race/paper_<tag>.log` then `python3 /root/race/score_run.py <tag>`.
@@ -336,13 +336,13 @@ export KALDERA_TOKEN=$(grep -o "KALDERA_TOKEN=[^ ]*" /root/collect_blfwd.sh | he
 - **Checked on arbx-race at 21:10 UTC** (`run_exact_smoke.sh`, 3 min): 19 seen, 1 fired, report printed.
 
 ## Build and housekeeping
-- **`/root/arbx-race`:** a separate copy holding all the race patches, plus RACE seen logging the URI. Build with `/root/race/dobuild_race.sh <log>`.
-- **`/root/arbx-fast` was restored to its original state** at 20:15 UTC:
+- **`/root/sniper-race`:** a separate copy holding all the race patches, plus RACE seen logging the URI. Build with `/root/race/dobuild_race.sh <log>`.
+- **`/root/sniper-fast` was restored to its original state** at 20:15 UTC:
   - binary md5 fdb08b48 = the 18:18 build, from `/root/snipe_engine.bin.bak_race`;
   - sources = `/root/snipe_engine.rs.bak_race` and `/root/snipe.rs.bak_race`.
   - The patched sources from earlier today are kept as `/root/race/*.race_final_in_arbx-fast`.
 - **Flags:** see "Engine patch" below. All default off.
-- **Added tonight in `/root/arbx-race` only:**
+- **Added tonight in `/root/sniper-race` only:**
   - RACE seen logs the metadata `uri=` (patch 7).
   - `--race-min-bundle-sol F` / `--race-max-bundle-sol F`: creator-bundle SOL within `--race-bundle-ms`.
   - `--race-create-tip-prefix P`: the create tx's largest SOL transfer goes to an account starting with P; `moon` = Lunar Lander (patch 8).
@@ -353,7 +353,7 @@ export KALDERA_TOKEN=$(grep -o "KALDERA_TOKEN=[^ ]*" /root/collect_blfwd.sh | he
 ---
 # APPENDIX A — afternoon race study (2026-10-18). OLDER cost model: 1 SOL, no slip, 0.0013 SOL fees, so its PnL figures are ~3-5 points higher than the realistic ones above.
 
-Read-only research plus PAPER runs only. No `--live`, no sends. Keys and `/root/arbx/deploy/.env` untouched.
+Read-only research plus PAPER runs only. No `--live`, no sends. Keys and `/root/sniper/deploy/.env` untouched.
 Full output: `report.txt`. Scripts and caches: this folder.
 
 ## Verdict (short)

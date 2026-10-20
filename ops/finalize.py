@@ -11,7 +11,7 @@ pop_fp   = {m: c for m, c in res["pop"].items() if c}
 # union of all observed deployer wallets (picks+pop) that are serial
 all_deployers = set(picks_fp.values()) | set(pop_fp.values())
 blocked = sorted(c for c in all_deployers if counts.get(c, -1) > THRESH)
-with open("/root/arbx-fast/creator_blocklist.txt", "w") as f:
+with open("/root/sniper-fast/creator_blocklist.txt", "w") as f:
     for c in blocked:
         f.write(c + "\n")
 
@@ -34,7 +34,7 @@ pop_dep = set(pop_fp.values()); pick_dep = set(picks_fp.values())
 dist([counts.get(c,-1) for c in pop_dep], "pop deployers (lifetime sigs)")
 dist([counts.get(c,-1) for c in pick_dep], "pick deployers (lifetime sigs)")
 print(f"unique pop deployers: {len(pop_dep)}  measured: {sum(1 for c in pop_dep if counts.get(c,-1)>=0)}")
-print(f"BLOCKLIST size (serial deployers, lifetime>{THRESH}): {len(blocked)}  -> /root/arbx-fast/creator_blocklist.txt")
+print(f"BLOCKLIST size (serial deployers, lifetime>{THRESH}): {len(blocked)}  -> /root/sniper-fast/creator_blocklist.txt")
 # validation
 blockset = set(blocked)
 pick_dep_meas = [c for c in pick_dep if counts.get(c,-1)>=0]

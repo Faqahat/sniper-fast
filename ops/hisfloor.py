@@ -10,7 +10,7 @@ def rpc(m,p):
     return None
 # our tracked paths (every token) keyed by mint
 paths={}
-for ln in open("/root/arbx-fast/paths_broad.jsonl"):
+for ln in open("/root/sniper-fast/paths_broad.jsonl"):
     try: d=json.loads(ln)
     except: continue
     if isinstance(d,dict) and d.get("mint") and isinstance(d.get("path"),list) and d["path"] and d["path"][0][1]<2.0:

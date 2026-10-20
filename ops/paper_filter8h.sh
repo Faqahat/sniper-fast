@@ -10,16 +10,16 @@
 #   --ladder-frac 0.25   = ladder the runner out in ~25% clips (his 3+ leg decreasing-clip pattern)
 #   --exit-cap-ms 40000  = 40s hold cap (his p90 full-exit ~38s, never holds past ~60s); duds cut at 2s
 export PATH=/root/.cargo/bin:$PATH
-cd /root/arbx-fast
-set -a; . /root/arbx/deploy/.env; set +a
+cd /root/sniper-fast
+set -a; . /root/sniper/deploy/.env; set +a
 export KALDERA_TOKEN=${KALDERA_TOKEN:?set KALDERA_TOKEN in deploy/.env}
-: > /root/arbx-fast/paper_filter8h.log
+: > /root/sniper-fast/paper_filter8h.log
 timeout 29000 ./target/release/snipe_engine --paper-trade \
-  --config probe_shadow.toml --env-file /root/arbx/deploy/.env \
+  --config probe_shadow.toml --env-file /root/sniper/deploy/.env \
   --minutes 480 --max-r-cap 20 \
   --min-dev-buy 500000000 --max-dev-buy-sol 8 \
   --derisk-frac 0.30 --ride-mult 1.15 --trail-frac 0.95 --cut-r 0.0 --ladder-frac 0.25 \
   --demand-window-ms 2000 --demand-min-r 1.05 --exit-cap-ms 40000 \
-  --size-sol 1.0 --dump-paths /root/arbx-fast/paths_filter8h.jsonl --max-inflight 48 \
-  < /root/.nexus-v2-trading-wallet.pass >> /root/arbx-fast/paper_filter8h.log 2>&1
-echo "PAPER_FILTER8H_DONE" >> /root/arbx-fast/paper_filter8h.log
+  --size-sol 1.0 --dump-paths /root/sniper-fast/paths_filter8h.jsonl --max-inflight 48 \
+  < /root/.nexus-v2-trading-wallet.pass >> /root/sniper-fast/paper_filter8h.log 2>&1
+echo "PAPER_FILTER8H_DONE" >> /root/sniper-fast/paper_filter8h.log

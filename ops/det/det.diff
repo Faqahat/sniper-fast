@@ -110,7 +110,7 @@ diff --color -ru src_orig/bin/snipe_engine.rs src/bin/snipe_engine.rs
 +
  fn main() -> Result<()> {
      // provider secrets (e.g. CONSTANTK_TOKEN) into the process env, so a [[send]] url with ${...} expands.
-     let envf = arg("--env-file").unwrap_or_else(|| "/root/arbx/deploy/.env".to_string());
+     let envf = arg("--env-file").unwrap_or_else(|| "/root/sniper/deploy/.env".to_string());
 @@ -192,6 +288,13 @@
              None => bail!("--also-send {an}: no such [[send]] path"),
          }

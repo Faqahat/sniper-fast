@@ -42,7 +42,7 @@ except Exception as ex:
     print("fill rows:", ex)
 ours = []
 fires, vias, buysigs = {}, {}, []
-for fn in sorted(glob.glob("/root/arbx-fast/live_bl_*.log")):
+for fn in sorted(glob.glob("/root/sniper-fast/live_bl_*.log")):
     for line in open(fn).read().splitlines():
         m = re.search(r"FIRE slot=(\d+) mint=(\w+) dev_buy=(\d+)", line)
         if m:

@@ -1,7 +1,7 @@
 # Patch snipe_engine.rs: (1) --sell-path <name>: sells go through a different send path than buys (Helius 429'd sells);
 # (2) --sell-held <mint,mint,..> --live: sell our whole balance of each mint via the sell path and close the ATA.
 import re, sys
-P = "/root/arbx-fast/src/bin/snipe_engine.rs"
+P = "/root/sniper-fast/src/bin/snipe_engine.rs"
 s = open(P).read()
 if "SELL_PATH" in s:
     print("already patched"); sys.exit(0)

@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /root/arbx-fast
+cd /root/sniper-fast
 while true; do
   n=$(grep -c "PAPER launch #" paper_sel.log)
   if [ "$n" -ge 50 ]; then

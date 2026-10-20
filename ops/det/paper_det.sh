@@ -5,9 +5,9 @@
 # Only ever touches processes whose command line holds "--dump-paths /root/det/paths_<tag>.jsonl".
 TAG=$1; BIN=$2; MIN=$3; shift 3; EXTRA="$*"
 STALL=${STALL:-600}
-cd /root/arbx-det
+cd /root/sniper-det
 export PATH=/root/.cargo/bin:$PATH
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 export KALDERA_TOKEN=$(grep -o 'KALDERA_TOKEN=[^ ]*' /root/collect_blfwd.sh | head -1 | cut -d= -f2)
 LOG=/root/det/paper_$TAG.log
 PATHS=/root/det/paths_$TAG.jsonl
@@ -19,7 +19,7 @@ launch() {
     --min-dev-buy 500000000 --max-dev-buy-sol 8 --uri-blacklist \
     --derisk-frac 0.30 --ride-mult 1.15 --trail-frac 0.95 --cut-r 0.0 --ladder-frac 0.25 --exit-cap-ms 40000 \
     --size-sol 1.0 --dump-paths $PATHS --max-inflight 48 \
-    --config /root/arbx-det/probe_shadow.toml --env-file /root/arbx/deploy/.env $EXTRA \
+    --config /root/sniper-det/probe_shadow.toml --env-file /root/sniper/deploy/.env $EXTRA \
     < /root/.nexus-v2-trading-wallet.pass >> $LOG 2>&1" >/dev/null 2>&1 </dev/null &
 }
 mypids() { ps -eo pid,args | grep -- "--dump-paths $PATHS" | grep -v "bash -c\|timeout\|grep" | awk '{print $1}'; }

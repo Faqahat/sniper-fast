@@ -3,7 +3,7 @@
 cd /root/det
 {
 echo "##### det audit report — $(date -u +%FT%TZ)"
-echo; echo "##### binaries"; md5sum /root/arbx-det/snipe_engine.BEFORE /root/det/snipe_engine.BEFORE.frozen /root/arbx-det/snipe_engine.AFTER /root/arbx-det/snipe_engine.AFTER_FINAL
+echo; echo "##### binaries"; md5sum /root/sniper-det/snipe_engine.BEFORE /root/det/snipe_engine.BEFORE.frozen /root/sniper-det/snipe_engine.AFTER /root/sniper-det/snipe_engine.AFTER_FINAL
 echo; echo "##### diff stat (det.diff)"; grep "^+++" det.diff; echo "added $(grep -c '^+[^+]' det.diff) removed $(grep -c '^-[^-]' det.diff) lines"
 echo; echo "##### 1. on-chain truth sample (20 min, before the runs): truth_an.py truth_sample.jsonl"; cat an_truth_sample.txt
 echo; echo "##### drill.py (creator mismatch, quote-mint location, false keeps, failed creates)"; cat an_drill.txt
@@ -23,6 +23,6 @@ echo; echo "##### zero-cost checks: simulateTransaction of our v3 buy on two cap
 echo; echo "##### --unwrap dry run (no --live) with probe_det.toml: path build / guards / keep-alive"; cat an_dryrun.txt 2>/dev/null
 echo; echo "##### AFTER_FINAL short paper validations (router creates, PoH clock, path dump)"; cat an_final_validation.txt
 echo; echo "##### router decode validation (router2.py on the run-window truth)"; cat an_router.txt 2>/dev/null
-echo; echo "##### probe_det.toml vs probe_shadow.toml"; diff /root/arbx-det/probe_shadow.toml /root/det/probe_det.toml
+echo; echo "##### probe_det.toml vs probe_shadow.toml"; diff /root/sniper-det/probe_shadow.toml /root/det/probe_det.toml
 } > /root/det/report.txt 2>&1
 wc -l /root/det/report.txt

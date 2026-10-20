@@ -3,10 +3,10 @@
 # Fresh = forward trades after #81 (rules were chosen looking only at the first 81).
 import sys, re, json, statistics as st
 src = open("/root/bsplit/real_his.py").read().split("for slip in (1.00, 1.04):")[0]
-sys.argv = ["x", "fwd", "/root/bsplit/out_fwd.jsonl", "/root/arbx-fast/paths_blfwd.jsonl"]
+sys.argv = ["x", "fwd", "/root/bsplit/out_fwd.jsonl", "/root/sniper-fast/paths_blfwd.jsonl"]
 exec(src)
 CUT = 81
-order = [m.group(1) for m in re.finditer(r"PAPER done mint=(\w+)", open("/root/arbx-fast/paper_blfwd.log").read())]
+order = [m.group(1) for m in re.finditer(r"PAPER done mint=(\w+)", open("/root/sniper-fast/paper_blfwd.log").read())]
 fresh = set(order[CUT:])
 FR = [r for r in D if r["set"] == "fwd" and r["mint"] in fresh]
 print(f"forward done {len(order)}, fresh (after #{CUT}) {len(fresh)}, scored {len(FR)} "

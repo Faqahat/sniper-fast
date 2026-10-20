@@ -119,7 +119,7 @@ def info(mint):
 
 # collect dev~3.5 duds from paper log
 cand = {}
-for ln in open("/root/arbx-fast/paper_urihost.log"):
+for ln in open("/root/sniper-fast/paper_urihost.log"):
     m = re.search(r"PAPER launch #\d+ slot=\d+ mint=(\w+) dev_buy=(\d+)", ln)
     if m:
         cand[m.group(1)] = {"dev": int(m.group(2))}

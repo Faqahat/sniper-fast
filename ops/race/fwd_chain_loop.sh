@@ -1,6 +1,6 @@
 #!/bin/bash
 # READ-ONLY: every 10 min, fetch block S + S+1..S+8 for every new RACE seen launch of the forward paper run.
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 export NOB_RPS=5
 cd /root/race
 while true; do

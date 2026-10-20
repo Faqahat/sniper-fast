@@ -1,5 +1,5 @@
 import os
-os.chdir("/root/arbx-fast")
+os.chdir("/root/sniper-fast")
 
 # --- 1) snipe.rs: add 3 helper fns (idempotent) ---
 f = "src/snipe.rs"

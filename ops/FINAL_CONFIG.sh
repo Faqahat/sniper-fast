@@ -22,8 +22,8 @@
 # Use >= ~$5-10 (0.025-0.05 SOL) per buy so fees < 5%. Owner sets --spend-lamports / caps.
 # ============================================================================
 export PATH=/root/.cargo/bin:$PATH
-cd /root/arbx-fast
-set -a; . /root/arbx/deploy/.env; set +a
+cd /root/sniper-fast
+set -a; . /root/sniper/deploy/.env; set +a
 export KALDERA_TOKEN=${KALDERA_TOKEN:?set KALDERA_TOKEN in deploy/.env}
 
 # ---- EDIT THESE before live ----
@@ -34,11 +34,11 @@ MAXLOSS=0.3          # balance kill-switch
 MININFLIGHT=20
 
 ./target/release/snipe_engine --snipe-once --concurrent --live \
-  --close-leaders /root/arbx-fast/close_leaders.txt \
+  --close-leaders /root/sniper-fast/close_leaders.txt \
   --min-dev-buy 500000000 --max-dev-buy-sol 8 \
   --fill-cap 1.12 \
   --spend-lamports $SPEND --max-sol $MAXSOL --max-total-sol $MAXTOTAL --max-loss-sol $MAXLOSS --max-inflight $MININFLIGHT \
   --derisk-frac 0.30 --ride-mult 1.15 --trail-frac 0.95 --cut-r 0.0 --ladder-frac 0.25 --exit-cap-ms 40000 \
   --send-path staked-rpc --cu-price-micro 5000000 \
-  --config probe_shadow.toml --env-file /root/arbx/deploy/.env \
+  --config probe_shadow.toml --env-file /root/sniper/deploy/.env \
   < /root/.nexus-v2-trading-wallet.pass

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Post-graduation price path + ladder EV. Entry = first PumpSwap trade after migration (market px, lag-tolerant)."""
 import os,json,urllib.request,time,threading,statistics
-tok=[l.split("=",1)[1].strip() for l in open("/root/arbx/deploy/.env") if l.startswith("CONSTANTK_TOKEN")][0]
+tok=[l.split("=",1)[1].strip() for l in open("/root/sniper/deploy/.env") if l.startswith("CONSTANTK_TOKEN")][0]
 RPC=f"https://rpc-frankfurt.constant-k.com/?api-key={tok}"
 CACHE="/root/landscape/gcache"; os.makedirs(CACHE,exist_ok=True)
 WSOL="So11111111111111111111111111111111111111112"

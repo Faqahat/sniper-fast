@@ -3,9 +3,9 @@
 # usage: paper_race.sh <tag> <minutes> [extra engine flags ...]
 # Stall-aware: if the log stops growing for 300 s the engine is restarted (same pattern as /root/collect_blfwd.sh).
 TAG=$1; MIN=$2; shift 2; EXTRA="$*"
-cd /root/arbx-merge   # MERGED build: det AFTER_FINAL fixes + race gate (never the live /root/arbx-fast binary)
+cd /root/sniper-merge   # MERGED build: det AFTER_FINAL fixes + race gate (never the live /root/sniper-fast binary)
 export PATH=/root/.cargo/bin:$PATH
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 export KALDERA_TOKEN=$(grep -o 'KALDERA_TOKEN=[^ ]*' /root/collect_blfwd.sh | head -1 | cut -d= -f2)
 LOG=/root/race/paper_$TAG.log
 END=$(( $(date +%s) + MIN * 60 ))
@@ -16,7 +16,7 @@ launch() {
     --min-dev-buy 500000000 --max-dev-buy-sol 8 --uri-blacklist \
     --derisk-frac 0.30 --ride-mult 1.15 --trail-frac 0.95 --cut-r 0.0 --ladder-frac 0.25 --exit-cap-ms 40000 \
     --size-sol 1.0 --dump-paths /root/race/paths_$TAG.jsonl --max-inflight 48 \
-    --config probe_shadow.toml --env-file /root/arbx/deploy/.env $EXTRA \
+    --config probe_shadow.toml --env-file /root/sniper/deploy/.env $EXTRA \
     < /root/.nexus-v2-trading-wallet.pass >> $LOG 2>&1" >/dev/null 2>&1 </dev/null &
 }
 echo "PAPER_RACE start tag=$TAG minutes=$MIN flags=$EXTRA $(date -u)" >> $LOG

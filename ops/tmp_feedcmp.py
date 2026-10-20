@@ -1,6 +1,6 @@
 import re, collections, sys
 d = collections.defaultdict(dict)   # mint -> {feed_idx: earliest_trx_ns}
-for line in open('/root/arbx-fast/feedcmp.log'):
+for line in open('/root/sniper-fast/feedcmp.log'):
     m = re.search(r'FEEDCMP feed=(\d+) trx=(\d+) slot=\d+ mint=(\S+)', line)
     if not m: continue
     feed, trx, mint = int(m.group(1)), int(m.group(2)), m.group(3)

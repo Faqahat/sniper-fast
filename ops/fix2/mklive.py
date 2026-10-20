@@ -2,7 +2,7 @@ s = open("/root/lat/live_final.sh").read()
 hdr_old = s.split("TAG=${1:-final1}")[0]
 new_hdr = """#!/bin/bash
 # ===== LIVE — THE OWNER RUNS THIS, NOBODY ELSE. Real transactions, real SOL. NOT RUN by the fix2 agent. =====
-# FIX2 engine (2026-10-19, /root/fix2/NOTES.md): /root/arbx-final2 (= /root/arbx-final + the fix2 changes), config
+# FIX2 engine (2026-10-19, /root/fix2/NOTES.md): /root/sniper-final2 (= /root/sniper-final + the fix2 changes), config
 # /root/fix2/final2_landing.toml (= /root/lat/final_landing.toml + harmonic-bundle). Same rule (PREREG_v2 #2), same caps
 # as live_final.sh (17 buys: --max-total-sol 0.017, per-buy 0.0015, kill-switch 0.170, cu 105k, 90 min, 2 in flight). New:
 #  * gates: --close-leaders /root/fix2/close_leaders_5ms.txt (190 leaders < 5 ms RTT, 34% of slots, measured 2026-10-19
@@ -25,8 +25,8 @@ body = s[len(hdr_old):]
 body = body.replace("TAG=${1:-final1}", "TAG=${1:-final2}")
 old_routes = [l for l in body.splitlines() if l.startswith("ROUTES=")][0]
 body = body.replace(old_routes, 'ROUTES="bam=jito-bundle+landx-fra3+staked-rpc;harmonic=harmonic-bundle+jito-bundle+nozomi+staked-rpc;jito=jito-bundle+landx-fra3+staked-rpc;fd=jito-bundle+astralane+nozomi+staked-rpc;agave=helius+nozomi+staked-rpc;other=helius+nozomi+landx-fra3+staked-rpc;default=jito-bundle+landx-fra3+helius+staked-rpc"')
-n0 = body.count("/root/arbx-final/target/release/snipe_engine")
-body = body.replace("/root/arbx-final/target/release/snipe_engine", "/root/arbx-final2/target/release/snipe_engine")
+n0 = body.count("/root/sniper-final/target/release/snipe_engine")
+body = body.replace("/root/sniper-final/target/release/snipe_engine", "/root/sniper-final2/target/release/snipe_engine")
 a = "--race-pros /root/race/pros.json --race-early \\\n"
 assert a in body
 body = body.replace(a, a + "  --close-leaders /root/fix2/close_leaders_5ms.txt --max-create-ms 150 \\\n")

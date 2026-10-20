@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /root/arbx-fast
+cd /root/sniper-fast
 ./target/release/snipe_engine --paper-trade --config probe_shadow.toml \
-  --env-file /root/arbx/deploy/.env --minutes 600 --min-dev-buy 4000000000 \
+  --env-file /root/sniper/deploy/.env --minutes 600 --min-dev-buy 4000000000 \
   < /root/.nexus-v2-trading-wallet.pass

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Leader book for the feed race: slot -> leader identity -> client class + gossip IP (+ RTT/city when known).
-Reads CONSTANTK_TOKEN from /root/arbx/deploy/.env by name (never printed). Writes /root/gap/leaders.json.
+Reads CONSTANTK_TOKEN from /root/sniper/deploy/.env by name (never printed). Writes /root/gap/leaders.json.
 Usage: leaders.py [out.json]"""
 import json, sys, urllib.request, os
 
-ENV = "/root/arbx/deploy/.env"
+ENV = "/root/sniper/deploy/.env"
 def env(name):
     if os.environ.get(name): return os.environ[name]
     for line in open(ENV):

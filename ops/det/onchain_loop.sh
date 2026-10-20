@@ -1,6 +1,6 @@
 #!/bin/bash
 # READ-ONLY: every 10 min, fetch on-chain contest/bundle records (block S + S+1) for new fired paper launches of both runs.
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 export NOB_RPS=6
 cd /root/det
 while true; do

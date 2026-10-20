@@ -1,5 +1,5 @@
 import json, sys, itertools
-PATHS="/root/arbx-fast/paths.jsonl"
+PATHS="/root/sniper-fast/paths.jsonl"
 rows=[]
 for line in open(PATHS):
     try: d=json.loads(line)

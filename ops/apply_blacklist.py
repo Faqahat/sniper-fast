@@ -1,5 +1,5 @@
 import os
-os.chdir("/root/arbx-fast")
+os.chdir("/root/sniper-fast")
 
 # 1) snipe.rs: add is_bot_launchpad (idempotent)
 f = "src/snipe.rs"

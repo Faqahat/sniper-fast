@@ -3,11 +3,11 @@
 **Zero cost only.** `--live` was never passed, no `live_*.sh` was run, and no valid transaction was sent. The only sends were junk that providers reject, `simulateTransaction`, `--paper-trade` and `--junk-fanout`.
 - Wallet FRZh63L6…: **0.244412778 SOL before and after** (USDC 0.0001 unchanged; 22 token accounts unchanged). Files: `wallet_before.json`, `wallet_after.json`.
 - Keys and `.env` were not printed. The new Harmonic keypair is only read by the engine.
-- `/root/arbx-final`, `/root/arbx-fast` and every `live_*.sh` are untouched (`live_final.sh` md5 c5c110e6).
+- `/root/sniper-final`, `/root/sniper-fast` and every `live_*.sh` are untouched (`live_final.sh` md5 c5c110e6).
 - I killed only my own PIDs.
 
 ## What was built
-- Work copy: `/root/arbx-final2` (`cp -a /root/arbx-final`).
+- Work copy: `/root/sniper-final2` (`cp -a /root/sniper-final`).
   - Binary: `target/release/snipe_engine`, md5 `0c7eef20…`, also saved as `/root/fix2/snipe_engine.b3`. The paper run used `snipe_engine.b1`; its gate code is identical.
   - Diff: `/root/fix2/fix2.patch`. Originals are in `/root/fix2/orig/`. New file: `src/fast_huff.rs`, the HPACK Huffman table copied from the h2 crate (MIT).
 - **Every change sits behind a flag or config. Without the new flags the engine is unchanged.**

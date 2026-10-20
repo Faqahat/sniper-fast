@@ -5,8 +5,8 @@
 # (+ the forward run if present). Usage: real_his.py [extra_set_name out_jsonl paths_jsonl]
 import json, itertools, statistics as st, sys
 
-SETS = [("bl82", "/root/bsplit/out_bl82.jsonl", "/root/arbx-fast/paths_blacklist.jsonl"),
-        ("night", "/root/bsplit/out.jsonl", "/root/arbx-fast/paths_blnight.jsonl")]
+SETS = [("bl82", "/root/bsplit/out_bl82.jsonl", "/root/sniper-fast/paths_blacklist.jsonl"),
+        ("night", "/root/bsplit/out.jsonl", "/root/sniper-fast/paths_blnight.jsonl")]
 if len(sys.argv) >= 4:
     SETS.append((sys.argv[1], sys.argv[2], sys.argv[3]))
 K = 30.0 * 1.073e9

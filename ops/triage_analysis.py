@@ -1,5 +1,5 @@
 import json, statistics as st
-PATHS="/root/arbx-fast/paths.jsonl"
+PATHS="/root/sniper-fast/paths.jsonl"
 
 # ---------- load, dedupe, parse-robust ----------
 rows=[]; mints=set(); bad=0; dup=0

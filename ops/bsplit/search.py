@@ -8,9 +8,9 @@ import json, itertools, statistics as st, sys
 K = 30.0 * 1.073e9
 F = 0.0125
 SIZE, PRIO = 1.0, 0.0003
-SETS = [("bl82", "/root/bsplit/out_bl82.jsonl", "/root/arbx-fast/paths_blacklist.jsonl"),
-        ("night", "/root/bsplit/out.jsonl", "/root/arbx-fast/paths_blnight.jsonl"),
-        ("fwd", "/root/bsplit/out_fwd.jsonl", "/root/arbx-fast/paths_blfwd.jsonl")]
+SETS = [("bl82", "/root/bsplit/out_bl82.jsonl", "/root/sniper-fast/paths_blacklist.jsonl"),
+        ("night", "/root/bsplit/out.jsonl", "/root/sniper-fast/paths_blnight.jsonl"),
+        ("fwd", "/root/bsplit/out_fwd.jsonl", "/root/sniper-fast/paths_blfwd.jsonl")]
 D = []
 for name, bf, pf in SETS:
     B = {}

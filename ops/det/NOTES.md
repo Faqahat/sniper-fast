@@ -1,17 +1,17 @@
 # det audit: launch DETECTION and SEND PATHS (2026-10-18)
 
-The work copy is `/root/arbx-det`. It was copied from `/root/arbx-fast` at 19:20 BST and includes the other agent's
-race-gate source. Nothing in `/root/arbx-fast` was edited, built or killed, and AFTER was **not** copied over it.
+The work copy is `/root/sniper-det`. It was copied from `/root/sniper-fast` at 19:20 BST and includes the other agent's
+race-gate source. Nothing in `/root/sniper-fast` was edited, built or killed, and AFTER was **not** copied over it.
 
 Nothing was traded live and nothing was sent. The only network actions were keep-alive pings, `simulateTransaction`,
 an `--unwrap` dry run without `--live`, and RPC reads.
 
 | binary | md5 | what |
 |---|---|---|
-| `/root/arbx-det/snipe_engine.BEFORE` | 8f79b252… | The copied source, unmodified. This is the arbx-fast build of 19:20 BST. |
+| `/root/sniper-det/snipe_engine.BEFORE` | 8f79b252… | The copied source, unmodified. This is the arbx-fast build of 19:20 BST. |
 | `/root/det/snipe_engine.BEFORE.frozen` | 0dc4c32d… | The arbx-fast binary of 19:13 BST, frozen at the start. The other agent's paper run uses it. |
-| `/root/arbx-det/snipe_engine.AFTER` | 73d61236… | Detection fixes 1–8 below. **This is the binary in the paper comparison.** |
-| `/root/arbx-det/snipe_engine.AFTER_FINAL` | df36da0d… | AFTER plus the send-path fixes, router-create firing, the PoH clock fix, the creator-fee rule and the path-dump fix. It only had paper smoke runs: 4–12 min each, 0 panics (`an_final_validation.txt`). |
+| `/root/sniper-det/snipe_engine.AFTER` | 73d61236… | Detection fixes 1–8 below. **This is the binary in the paper comparison.** |
+| `/root/sniper-det/snipe_engine.AFTER_FINAL` | df36da0d… | AFTER plus the send-path fixes, router-create firing, the PoH clock fix, the creator-fee rule and the path-dump fix. It only had paper smoke runs: 4–12 min each, 0 panics (`an_final_validation.txt`). |
 
 - **Diff:** `/root/det/det.diff` covers 6 files: `snipe.rs`, `feeds/{grpc,entries,shred}.rs`, `send/mod.rs` and
   `bin/snipe_engine.rs`. The unmodified source is in `/root/det/src_before`.
@@ -168,7 +168,7 @@ a better landing spot is needed to turn the extra coverage into profit.
 
     Same-slot positions ranged from 38 to 407 after the create.
 
-## Fixes (lines in /root/arbx-det, final source)
+## Fixes (lines in /root/sniper-det, final source)
 
 Detection (AFTER and AFTER_FINAL):
 - **`src/snipe.rs`**
@@ -248,12 +248,12 @@ launches by leader client. Fees are capped.
 2. Run with no paper engines or builds on the box:
 
    ```
-   cd /root/arbx-det && ./snipe_engine.AFTER_FINAL --snipe-once --concurrent --live --uri-blacklist \
+   cd /root/sniper-det && ./snipe_engine.AFTER_FINAL --snipe-once --concurrent --live --uri-blacklist \
      --spend-lamports 1000000 --fill-cap 2.5 --max-sol 0.0015 --max-total-sol 0.006 --max-loss-sol 0.07 \
      --max-inflight 4 --min-dev-buy 500000000 --max-dev-buy-sol 8 --minutes 30 \
      --cu-price-micro 100000000 --cu-limit 90000 --sell-cu-price-micro 1500000 \
      --send-path helius --sell-path staked-rpc --fallback-path staked-rpc --land-poll-ms 100 \
-     --config /root/det/probe_det.toml --env-file /root/arbx/deploy/.env < /root/.nexus-v2-trading-wallet.pass
+     --config /root/det/probe_det.toml --env-file /root/sniper/deploy/.env < /root/.nexus-v2-trading-wallet.pass
    ```
 
    - It makes 6 buys of 0.001 SOL, at about 0.0105 SOL each in priority fee and tip: **≈0.065 SOL total**. The

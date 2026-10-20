@@ -1,5 +1,5 @@
 import json, statistics as st, re, glob
-PATHS="/root/arbx-fast/paths.jsonl"
+PATHS="/root/sniper-fast/paths.jsonl"
 rows=[]; mints=set()
 for i,line in enumerate(open(PATHS)):
     try: d=json.loads(line)
@@ -63,7 +63,7 @@ for lab,fn in gates.items():
 print("\n=== ENRICHMENT flags (join LAUNCH lines by mint) ===")
 pat=re.compile(r"LAUNCH slot=(\d+) poh_ms=(\S+) mint=(\w+) dev_buy=(\d+) v2=(\w+) vanilla=(\w+) \(mayhem=(\w+) fee_bps=(\d+) holder=(\w+) cashback=(\w+)\) (\w+)")
 enr={}
-for f in glob.glob("/root/arbx-fast/*.log"):
+for f in glob.glob("/root/sniper-fast/*.log"):
     try: txt=open(f,errors="ignore").read()
     except: continue
     for m in pat.finditer(txt):

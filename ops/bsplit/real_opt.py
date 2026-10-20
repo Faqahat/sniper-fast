@@ -4,8 +4,8 @@
 # OOS: fit on blnight 1st half, test on blnight 2nd half AND on bl82 (separate session).
 import json, itertools, statistics as st, sys
 
-SETS = [("bl82", "/root/bsplit/out_bl82.jsonl", "/root/arbx-fast/paths_blacklist.jsonl"),
-        ("night", "/root/bsplit/out.jsonl", "/root/arbx-fast/paths_blnight.jsonl")]
+SETS = [("bl82", "/root/bsplit/out_bl82.jsonl", "/root/sniper-fast/paths_blacklist.jsonl"),
+        ("night", "/root/bsplit/out.jsonl", "/root/sniper-fast/paths_blnight.jsonl")]
 K = 30.0 * 1.073e9          # SOL x Mtok
 F = 0.0125                  # pump fee per side
 D = []

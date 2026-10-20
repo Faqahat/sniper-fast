@@ -18,7 +18,7 @@ def rpc(method, params):
 
 
 tips = {}
-for prov, v in json.load(open("/root/arbx-fast/data/sender-tip-accounts.json")).items():
+for prov, v in json.load(open("/root/sniper-fast/data/sender-tip-accounts.json")).items():
     if not isinstance(v, dict):
         continue
     ta = v.get("tip_accounts")

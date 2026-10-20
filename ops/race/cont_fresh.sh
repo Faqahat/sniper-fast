@@ -12,7 +12,7 @@ echo "CONT: starting fresh2 for $MIN min $(date -u)"
 setsid nohup /root/race/paper_race3.sh fresh2 $MIN $FLAGS > /dev/null 2>&1 < /dev/null &
 sleep 30
 setsid nohup /root/race/chain_loop.sh fresh2 > /dev/null 2>&1 < /dev/null &
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 sleep 3600
 while true; do
   python3 forward_proof.py fresh2 > fp_fresh2.tmp 2>&1 && grep -q "^VERDICT" fp_fresh2.tmp && mv fp_fresh2.tmp fp_fresh2.txt && echo "CONT: scored $(date -u)"

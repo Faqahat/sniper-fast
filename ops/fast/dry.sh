@@ -2,7 +2,7 @@
 # ZERO-COST junk-fanout dry run (never --live) with a bpftrace write trace + fd map.  usage: dry.sh <tag> <minutes> <bin> [extra engine flags...]
 TAG=$1; MIN=$2; BIN=$3; shift 3
 cd /root/fast
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 export KALDERA_TOKEN=$(grep -o 'KALDERA_TOKEN=[^ ]*' /root/collect_blfwd.sh | head -1 | cut -d= -f2)
 ROUTES="bam=jito-bundle+landx-fra3+staked-rpc;harmonic=jito-bundle+nozomi+staked-rpc;jito=jito-bundle+landx-fra3+helius+staked-rpc;fd=jito-bundle+astralane+nozomi+staked-rpc;agave=helius+nozomi+staked-rpc;other=helius+nozomi+landx-fra3+staked-rpc;default=jito-bundle+landx-fra3+helius+staked-rpc"
 timeout $(( MIN * 60 + 120 )) $BIN --snipe-once --concurrent --junk-fanout \
@@ -11,7 +11,7 @@ timeout $(( MIN * 60 + 120 )) $BIN --snipe-once --concurrent --junk-fanout \
   --spend-lamports 1000000 --fill-cap 2.5 --max-sol 0.0015 --max-total-sol 10 --max-loss-sol 0.001 --max-inflight 8 --minutes $MIN \
   --cu-price-micro 30000000 --cu-limit 90000 --sell-cu-price-micro 1500000 \
   --send-path helius --sell-path staked-rpc --route-by-client "$ROUTES" --send-log /root/fast/sends_$TAG.jsonl \
-  --config /root/lat/lat_dry.toml --env-file /root/arbx/deploy/.env "$@" \
+  --config /root/lat/lat_dry.toml --env-file /root/sniper/deploy/.env "$@" \
   < /root/.nexus-v2-trading-wallet.pass > /root/fast/dry_$TAG.log 2>&1 &
 EPID=$!
 echo $EPID > /root/fast/dry_$TAG.pid

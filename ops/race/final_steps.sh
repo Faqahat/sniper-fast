@@ -1,7 +1,7 @@
 #!/bin/bash
 # After both overnight PAPER runs end: final on-chain labelling (fast), then every evaluation (READ-ONLY).
 cd /root/race
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 for p in $(ps -eo pid,args | grep "[c]hain_loop.sh night" | awk '{print $1}'); do kill $p; done
 export NOB_RPS=14
 python3 onchain.py /root/race/night_onchain.jsonl 8 /root/race/paper_night.log > final_onchain_night.log 2>&1

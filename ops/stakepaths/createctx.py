@@ -5,7 +5,7 @@ import json, sys, urllib.request
 RPC = sys.argv[1]
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 tips = {}
-for prov, v in json.load(open("/root/arbx-fast/data/sender-tip-accounts.json")).items():
+for prov, v in json.load(open("/root/sniper-fast/data/sender-tip-accounts.json")).items():
     if isinstance(v, dict) and isinstance(v.get("tip_accounts"), list):
         for a in v["tip_accounts"]:
             tips.setdefault(a, prov)

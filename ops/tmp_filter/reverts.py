@@ -3,7 +3,7 @@ from rpc import sigs,tx,parse_curve
 logs=["floor_test.log","floor112_test.log","floor_ride.log","floor_ride20.log","concurrent_live.log"]
 rev=set(); filled=set()
 for lg in logs:
-    lines=open("/root/arbx-fast/"+lg,errors="replace").read().splitlines()
+    lines=open("/root/sniper-fast/"+lg,errors="replace").read().splitlines()
     cur=None
     for ln in lines:
         m=re.search(r"ROUND-TRIP \(LIVE\): mint=([1-9A-HJ-NP-Za-km-z]{32,44})",ln)

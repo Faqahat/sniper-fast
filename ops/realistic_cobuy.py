@@ -52,7 +52,7 @@ for label, fp in [("entry = demand-confirm price (rank 0/no penalty)", 1.00),
                   ("entry = demand-confirm x1.10 (worse fill)", 1.10)]:
     pnls = []
     rows = []
-    for line in open("/root/arbx-fast/paths_cobuy.jsonl"):
+    for line in open("/root/sniper-fast/paths_cobuy.jsonl"):
         d = json.loads(line)
         entry, fwd = entry_and_fwd(d["path"], fp)
         p = sim(entry, fwd)
@@ -66,7 +66,7 @@ for label, fp in [("entry = demand-confirm price (rank 0/no penalty)", 1.00),
 
 # detail at the realistic x1.05
 print("\nper-token (entry=demand-confirm x1.05):")
-for line in open("/root/arbx-fast/paths_cobuy.jsonl"):
+for line in open("/root/sniper-fast/paths_cobuy.jsonl"):
     d = json.loads(line)
     entry, fwd = entry_and_fwd(d["path"], 1.05)
     p = sim(entry, fwd)

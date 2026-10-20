@@ -1,7 +1,7 @@
 # Patch snipe_engine.rs: --also-send <name>: every BUY (non-sell) send is signed once with BOTH paths' tips and sent
 # through the fire path AND <name> at the same time (e.g. helius + nozomi). Sells (via --sell-path) are unaffected.
 import sys
-P = "/root/arbx-fast/src/bin/snipe_engine.rs"
+P = "/root/sniper-fast/src/bin/snipe_engine.rs"
 s = open(P).read()
 if "ALSO_PATH" in s:
     print("already patched"); sys.exit(0)

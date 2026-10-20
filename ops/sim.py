@@ -1,6 +1,6 @@
 import json, itertools, random, statistics as st
 
-PATHS="/root/arbx-fast/paths.jsonl"
+PATHS="/root/sniper-fast/paths.jsonl"
 FEE=0.0125            # 1% pump + 0.25% slip per leg (%-fee)
 FIXED=0.000365        # fixed base+prio per leg (SOL)
 CAP=3200.0            # 3.2s cap

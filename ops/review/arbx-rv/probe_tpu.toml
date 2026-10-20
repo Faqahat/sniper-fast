@@ -1,5 +1,5 @@
 # snipe_engine warm-latency probe config (minimal; unknown fields ignored).
-# The ${CONSTANTK_TOKEN} is expanded from --env-file (/root/arbx/deploy/.env).
+# The ${CONSTANTK_TOKEN} is expanded from --env-file (/root/sniper/deploy/.env).
 wallet          = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
 wallet_keystore = "/root/.nexus-v2-trading-wallet.enc"
 # Full Frankfurt RPC (answers getSlot / getLatestBlockhash / getSignatureStatuses), close to the leaders so the

@@ -46,7 +46,7 @@ Detector = our shadow/observe fires only on pump create_v2 at create slot. Class
 - Keeping the **vanilla-only** gate (our current filter) costs ~18% of his picks (the non-vanilla ones). If we want his full coverage, relax vanilla to 'creator_fee_bps==0' only and keep dev>=0.3.
 
 ### Actual log overlap (our runs)
-- Grep of all 100 target mints vs /root/arbx-fast/*.jsonl + *.log: **1 actual-buy overlap** — `3pZnEdRwKsnVwokJwuzh8unuc5BMdebbm9GX7Djdpump` appears in rt1.log as our LIVE round-trip buy (spend 0.01 SOL). This is one of our 4 known live snipes; the target also sniped it. No other mint overlap in shadow_*.jsonl/launches.
+- Grep of all 100 target mints vs /root/sniper-fast/*.jsonl + *.log: **1 actual-buy overlap** — `3pZnEdRwKsnVwokJwuzh8unuc5BMdebbm9GX7Djdpump` appears in rt1.log as our LIVE round-trip buy (spend 0.01 SOL). This is one of our 4 known live snipes; the target also sniped it. No other mint overlap in shadow_*.jsonl/launches.
 
 ## Surprises / contradictions vs prior hypotheses
 - Dev buy is REAL and near-universal, but the dev buy uses SEVERAL pump buy discriminators, not just buy_exact_quote_in_v3/classic (b817ee6167c5d33d, 38fc74089edfcd5f seen). Measuring dev buy by the pump buy discriminator alone UNDERCOUNTS; the honest measure is the bonding-curve SOL delta in the create tx.

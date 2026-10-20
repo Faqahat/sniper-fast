@@ -1,5 +1,5 @@
 import os
-os.chdir("/root/arbx-fast")
+os.chdir("/root/sniper-fast")
 f = "src/bin/snipe_engine.rs"
 s = open(f).read()
 if "--demand-cobuy-sol" in s:

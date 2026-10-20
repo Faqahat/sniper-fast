@@ -9,7 +9,7 @@ import os, json, sys, time, urllib.request, threading
 from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0,"/root/econ_102"); import econ102 as E
 
-tok=[l.split('=',1)[1].strip().strip('"').strip("'") for l in open('/root/arbx/deploy/.env') if l.startswith('CONSTANTK_TOKEN')][0]
+tok=[l.split('=',1)[1].strip().strip('"').strip("'") for l in open('/root/sniper/deploy/.env') if l.startswith('CONSTANTK_TOKEN')][0]
 RPC=f"https://rpc-frankfurt.constant-k.com/?api-key={tok}"
 def rpc(m,p):
     body=json.dumps({"jsonrpc":"2.0","id":1,"method":m,"params":p}).encode()

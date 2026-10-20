@@ -1,4 +1,4 @@
-env_file = "/root/arbx/deploy/.env"
+env_file = "/root/sniper/deploy/.env"
 [[feed]]
 name    = "kaldera"
 kind    = "yellowstone-deshred"

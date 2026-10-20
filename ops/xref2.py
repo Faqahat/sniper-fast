@@ -11,7 +11,7 @@ try: et=int(subprocess.check_output(["bash","-c","ps -eo etimes,args | grep -E '
 except: et=0
 start=time.time()-et; eff_start=start+150
 tracked=set()
-for ln in open("/root/arbx-fast/paper_broad.log"):
+for ln in open("/root/sniper-fast/paper_broad.log"):
     mo=re.search(r"mint=([1-9A-HJ-NP-Za-km-z]+)",ln)
     if mo: tracked.add(mo.group(1))
 before=None; buys=[]

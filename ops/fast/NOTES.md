@@ -4,14 +4,14 @@ Zero cost only:
 - `--live` was never passed and no real transaction was sent.
 - Measured with junk fan-out runs (real feeds, gates and routing; the signed tx has its signature count set to 0, so it can never be a valid tx), `--fast-bench` and `--fast-probe` (synthetic launches), and a paper smoke.
 - Wallet 0.110818539 SOL at the start and end of every run.
-- Keys and `.env` untouched; `/root/arbx-fast`, `/root/arbx-merge` and `/root/race` not modified.
+- Keys and `.env` untouched; `/root/sniper-fast`, `/root/sniper-merge` and `/root/race` not modified.
 
 ## Binary and source
 
-- **Binary:** `/root/arbx-lat/target/release/snipe_engine`, md5 **9e3549272e118301ab0536e5721beb87** (build 7, 12:03 UTC). Same file as `/root/fast/snipe_engine.b7`.
-  - Old binary: `/root/arbx-lat.bak_fast/target/release/snipe_engine`, md5 36c4fadb….
+- **Binary:** `/root/sniper-lat/target/release/snipe_engine`, md5 **9e3549272e118301ab0536e5721beb87** (build 7, 12:03 UTC). Same file as `/root/fast/snipe_engine.b7`.
+  - Old binary: `/root/sniper-lat.bak_fast/target/release/snipe_engine`, md5 36c4fadb….
 - **Source:**
-  - full backup: `/root/arbx-lat.bak_fast`;
+  - full backup: `/root/sniper-lat.bak_fast`;
   - diff: `/root/fast/fast.patch`;
   - new code: `src/fast.rs`, the `mod fastfire` section of `src/bin/snipe_engine.rs`, small accessors in `src/send/mod.rs` and `src/send/jito.rs` (`note_bundle`);
   - Cargo: `webpki-roots` and `httparse` (both already in Cargo.lock).
@@ -154,7 +154,7 @@ Zero cost only:
 
 ## Incident
 
-- 11:44 UTC: while restarting my own build I killed another agent's cargo build (`/root/gap`, feed_race in `/root/arbx-feed`).
+- 11:44 UTC: while restarting my own build I killed another agent's cargo build (`/root/gap`, feed_race in `/root/sniper-feed`).
 - Its owner had already relaunched it. I left `/root/gap/NOTE_FROM_FAST_AGENT.txt`. Nothing else was touched.
 
 ## Files (`/root/fast/`)

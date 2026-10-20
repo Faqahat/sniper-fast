@@ -1,5 +1,5 @@
 import json, random, statistics as st
-PATHS="/root/arbx-fast/paths.jsonl"
+PATHS="/root/sniper-fast/paths.jsonl"
 FEE=0.0125; FIXED=0.000365; CAP=3200.0; RCAP=20.0
 kept=[]; raw=corrupt=misread=0
 for line in open(PATHS):

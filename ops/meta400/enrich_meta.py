@@ -5,7 +5,7 @@ import json, sys, os, time, re
 import requests
 
 ENV={}
-for line in open('/root/arbx/deploy/.env'):
+for line in open('/root/sniper/deploy/.env'):
     line=line.strip()
     if '=' in line and not line.startswith('#'):
         k,v=line.split('=',1); ENV[k]=v

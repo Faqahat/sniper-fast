@@ -4,7 +4,7 @@ import sys, re, json, threading, concurrent.futures as cf
 sys.path.insert(0, "/root/indep")
 from common import get_block, is_vote, events, tx_summary, load_tipmap, VSOL0
 
-LOG = "/root/arbx-fast/paper_blnight.log"
+LOG = "/root/sniper-fast/paper_blnight.log"
 tipmap = load_tipmap()
 launch = {}
 for l in open(LOG):

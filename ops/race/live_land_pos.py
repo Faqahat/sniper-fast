@@ -8,7 +8,7 @@ ME = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
 pros = frozenset(json.load(open("/root/race/pros.json")))
 arm = {}
 for f in ["live_land_fast", "live_land_dual", "live_land_staked", "live_land_helius", "live_bl_exit"]:
-    for l in open("/root/arbx-fast/%s.log" % f):
+    for l in open("/root/sniper-fast/%s.log" % f):
         m = re.search(r"FIRE slot=(\d+) mint=(\w+)", l)
         if m:
             arm.setdefault(m.group(2), f)

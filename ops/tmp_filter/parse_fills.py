@@ -2,7 +2,7 @@ import re,json,glob
 logs=["floor_test.log","floor112_test.log","floor_ride.log","floor_ride20.log","concurrent_live.log"]
 fills=[]  # mint,dev_buy,delta,log
 for lg in logs:
-    path="/root/arbx-fast/"+lg
+    path="/root/sniper-fast/"+lg
     lines=open(path,errors="replace").read().splitlines()
     cur_mint=None; cur_dev=None; cur_delta=None
     for ln in lines:

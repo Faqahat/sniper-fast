@@ -1,6 +1,6 @@
 import re, json
 
-LOG = "/root/arbx-fast/paper_urihost.log"
+LOG = "/root/sniper-fast/paper_urihost.log"
 BAND_LO, BAND_HI = 800_000_000, 3_000_000_000
 
 launches = {}   # mint -> dict(slot, dev, order)

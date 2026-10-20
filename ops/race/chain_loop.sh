@@ -1,7 +1,7 @@
 #!/bin/bash
 # READ-ONLY: every 5 min, fetch block S + S+1..S+8 for every new RACE seen launch of paper run <tag>; final pass at the end.
 TAG=$1
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 export NOB_RPS=${NOB_RPS:-8}
 cd /root/race
 while true; do

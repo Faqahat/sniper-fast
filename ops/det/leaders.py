@@ -6,7 +6,7 @@ from dlib import rpc
 ei = rpc("getEpochInfo", [])
 start = ei["absoluteSlot"] - ei["slotIndex"]
 ls = rpc("getLeaderSchedule", [None])
-close = {l.strip() for l in open("/root/arbx-fast/close_leaders.txt") if l.strip()}
+close = {l.strip() for l in open("/root/sniper-fast/close_leaders.txt") if l.strip()}
 slots = sum(len(v) for v in ls.values())
 cs = sum(len(v) for k, v in ls.items() if k in close)
 print(f"epoch {ei['epoch']} start {start} slotIndex {ei['slotIndex']} slotsInEpoch {ei['slotsInEpoch']} -> next boundary in {ei['slotsInEpoch']-ei['slotIndex']} slots (~{(ei['slotsInEpoch']-ei['slotIndex'])*0.4/3600:.1f} h)")

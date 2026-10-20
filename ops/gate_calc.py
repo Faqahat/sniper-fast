@@ -7,7 +7,7 @@ def rpc(m,p):
         try: return json.load(urllib.request.urlopen(req,timeout=20)).get("result")
         except: time.sleep(0.3)
     return None
-shots=[json.loads(l) for l in open("/root/arbx-fast/shots.jsonl") if l.strip()]
+shots=[json.loads(l) for l in open("/root/sniper-fast/shots.jsonl") if l.strip()]
 nodes=rpc("getClusterNodes",[]) or []
 ip_of={n["pubkey"]:(n.get("gossip") or n.get("tpu") or "").split(":")[0] for n in nodes}
 slots=list({s["create"] for s in shots})

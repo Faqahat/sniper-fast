@@ -1,7 +1,7 @@
 import json
 K=30e9*1.073e15
 def fp(dev): return (30e9+dev)**2/K
-# mint -> trade metadata parsed from /root/arbx-fast/live_bl_exit.log
+# mint -> trade metadata parsed from /root/sniper-fast/live_bl_exit.log
 T={
 "2pQgSF6QZ9zfxDDEvbKHauUbk6Sh5nZs2KV4CMfqpump":dict(dev=1.00e9,entry=3.890662e-5,land=458197062,cost=11384840,real=-18925919,derisk_r=0.998,ride_r=1.007,ride_slot=458197243,armed=False),
 "GzYCJrGDJzBj5Um8xzTqNPE5ViR9x5XJXmjW7Qrapump":dict(dev=3.00e9,entry=3.905973e-5,land=458197128,cost=11331093,real=-13374923,derisk_r=0.988,ride_r=0.826,ride_slot=458197308,armed=False),

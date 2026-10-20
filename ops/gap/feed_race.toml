@@ -1,7 +1,7 @@
 # feed_race.toml — feeds raced by /root/gap/feed_race.sh (zero cost: subscribe only, nothing is ever sent).
 # Tokens are read from the process env or from env_file, by NAME (token_env). They are never printed or logged.
 # Feed URLs are never logged either. Kinds: jito-entries | yellowstone-deshred | yellowstone-tx | udp-shreds
-env_file = "/root/arbx/deploy/.env"
+env_file = "/root/sniper/deploy/.env"
 
 [[feed]]
 name    = "erpc"
@@ -35,7 +35,7 @@ enabled = true
 rpath_sample = 50                   # receive-path timing line for every create + 1 in 50 pump txs
 # busy_poll = true                  # spin on recvmmsg (one core); cpu = 3 pins the receive thread
 
-# (B) a gRPC stream. Fill url (or url_env if the URL embeds a key) and the key's env var NAME in /root/arbx/deploy/.env.
+# (B) a gRPC stream. Fill url (or url_env if the URL embeds a key) and the key's env var NAME in /root/sniper/deploy/.env.
 #     kind = "yellowstone-deshred" for a Yellowstone SubscribeDeshred endpoint (Kaldera-like),
 #     kind = "jito-entries" for a ShredStream-proxy SubscribeEntries endpoint (erpc-like),
 #     kind = "yellowstone-tx" for a normal Yellowstone Subscribe (processed txs; executed, so later by design).
@@ -43,7 +43,7 @@ rpath_sample = 50                   # receive-path timing line for every create 
 name    = "constantk-grpc"
 kind    = "yellowstone-deshred"
 url     = "https://REPLACE-ME.constant-k.com:443"
-token_env    = "CONSTANTK_SHRED_TOKEN"   # put CONSTANTK_SHRED_TOKEN=... in /root/arbx/deploy/.env
+token_env    = "CONSTANTK_SHRED_TOKEN"   # put CONSTANTK_SHRED_TOKEN=... in /root/sniper/deploy/.env
 token_header = "x-token"
 enabled = false
 

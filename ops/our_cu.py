@@ -50,7 +50,7 @@ def decode_cu(sig):
 sigs = []
 for lg in ["live_bl_exit.log", "live_bl_noz.log", "live_bl_rt.log"]:
     try:
-        for ln in open(f"/root/arbx-fast/{lg}"):
+        for ln in open(f"/root/sniper-fast/{lg}"):
             m = re.search(r"BUY  sig=(\w+)", ln)
             if m:
                 sigs.append((lg.replace("live_bl_", "").replace(".log", ""), m.group(1)))

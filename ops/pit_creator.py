@@ -133,7 +133,7 @@ for m, r in pop_rows.items():
     if cr and pr >= 0:
         pop_creator_prior[cr] = max(pop_creator_prior.get(cr, -1), pr)
 blocked = sorted(c for c, pr in pop_creator_prior.items() if pr > THRESH)
-with open("/root/arbx-fast/creator_blocklist.txt","w") as f:
+with open("/root/sniper-fast/creator_blocklist.txt","w") as f:
     for c in blocked: f.write(c+"\n")
 
 # ---------- REPORT ----------
@@ -157,7 +157,7 @@ print("==== POPULATION creators (pump create ix acct[7]) prior-at-launch ====")
 dist(pop_prior_vals, "pop")
 print(f"unique pop creators measured: {len(pop_creator_prior)}")
 print(f"pop creators blocklisted (max prior > {THRESH}): {len(blocked)}")
-print(f"blocklist file: /root/arbx-fast/creator_blocklist.txt lines={len(blocked)}")
+print(f"blocklist file: /root/sniper-fast/creator_blocklist.txt lines={len(blocked)}")
 
 # validation
 pick_prior_vals = [r["prior"] for r in pick_rows.values() if r["prior"] >= 0]

@@ -1,11 +1,11 @@
 # GAP: where the create → our-buy time goes, and the feed race (2026-10-19)
 
 Zero cost only: subscribe-only feeds, pcap of our own inbound UDP, pings, RPC reads, `--paper-trade`. Nothing sent,
-never `--live`. Keys/.env untouched (tokens read by NAME only, never printed). /root/arbx-fast, /root/arbx-merge,
-/root/race, /root/arbx-lat not modified. Own copy `/root/arbx-feed` (copied 10:53 UTC with no cargo running; source
+never `--live`. Keys/.env untouched (tokens read by NAME only, never printed). /root/sniper-fast, /root/sniper-merge,
+/root/race, /root/sniper-lat not modified. Own copy `/root/sniper-feed` (copied 10:53 UTC with no cargo running; source
 backup `/root/gap/arbx-lat-src-backup.tgz`). Clock: chrony stratum 3, offset 0.16 ms, RMS 0.13 ms.
 
-## FINAL ENGINE STATUS (14:20 UTC): `/root/arbx-final` + `/root/lat/final_landing.toml` + `/root/lat/live_final.sh`
+## FINAL ENGINE STATUS (14:20 UTC): `/root/sniper-final` + `/root/lat/final_landing.toml` + `/root/lat/live_final.sh`
 (not run) validated zero-cost: rule #2 decisions match the chain 47/47, decision → first send write p50 59 µs /
 p99 181 µs, 0 RPC writes on the buy path (kernel trace). Details §8; stop list in READY.txt.
 
@@ -175,7 +175,7 @@ An absolute leader→us delay cannot be measured without a leader-side clock; on
 - Box: KVM guest, virtio_net, 1 RX queue (IRQ on cpu 2, TX on cpu 3), GRO on, net.core.busy_poll/busy_read 0,
   rmem_max 4 MB (the harness uses SO_RCVBUFFORCE 128 MB).
 
-## 5. Fixes applied (own copy /root/arbx-feed; nothing in arbx-lat touched)
+## 5. Fixes applied (own copy /root/sniper-feed; nothing in arbx-lat touched)
 - `src/bin/feed_race.rs`: the feed race harness (+ busy-poll/pin options, receive-path R lines, assembler gc).
 - `src/feeds/udp.rs` (engine UDP feed, opt-in, default unchanged): `UDP_PIN_CPU=n` pins the receive thread,
   `UDP_BUSY_POLL=1` spins on non-blocking recvmmsg. Patch `/root/gap/udp_busy.patch`.
@@ -188,9 +188,9 @@ An absolute leader→us delay cannot be measured without a leader-side clock; on
   creates; first-arrival shares of DETECT: dz-leader 40%, dz-retrans-eu 37%, Kaldera 15%, turbo-Kaldera 7%, erpc 1%;
   Kaldera median 1.5 ms behind the first, erpc 3.0 ms. dz-root never delivered a create.
 
-## 8. FINAL ENGINE for the owner's live test (/root/arbx-final) — zero-cost validation
+## 8. FINAL ENGINE for the owner's live test (/root/sniper-final) — zero-cost validation
 
-**Build:** `/root/arbx-final` = `cp -a /root/arbx-lat` (speed agent's finished build md5 9e354927, flags
+**Build:** `/root/sniper-final` = `cp -a /root/sniper-lat` (speed agent's finished build md5 9e354927, flags
 `--fast-send --jito-h2 --fast-presign --fast-derive --busy-poll --pin-core`), plus:
 - the feed-race tool (`src/bin/feed_race.rs`); DoubleZero multicast needs no engine change (`kind = "multicast"` is
   native and was paper-smoked);
@@ -341,7 +341,7 @@ Shyft https://docs.shyft.to/solana-shredstreaming/rabbitstream-overview , Triton
 | file | what |
 |---|---|
 | `READY.txt` | harness run command, what a provider must give, recommended engine feed setup |
-| `feed_race.sh`, `feed_race.toml`, `feed_race_busy.toml`, `bin/feed_race` | harness (source `/root/arbx-feed/src/bin/feed_race.rs`) |
+| `feed_race.sh`, `feed_race.toml`, `feed_race_busy.toml`, `bin/feed_race` | harness (source `/root/sniper-feed/src/bin/feed_race.rs`) |
 | `race_report.py`, `rpath.py`, `misses.py`, `handover.py`, `poh_an.py`, `pcap_fec.py`, `residual.py`, `leaders.py` | analyses |
 | `race/summary_*.txt`, `race/ck1_10min.txt`, `race/ck1_30min.txt`, `race/pcap_fec.txt`, `race/residual.txt` | results |
 | `race/ck_shreds.pcap` | 5 min of constant-k shred headers (snaplen 128) |

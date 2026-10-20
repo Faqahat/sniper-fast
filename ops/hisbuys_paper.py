@@ -3,8 +3,8 @@ TOK=os.environ["CONSTANTK_TOKEN"]; RPC=f"https://rpc-frankfurt.constant-k.com/?a
 WALLET="4yFAz7dp5WwuZs3vbWKedbRiUmSFxTVGCdsLAxfEQrG3"
 PUMP_STR="6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 NONVAN=["CreatorFee","creator_fee","Holder","holder_reward","Mayhem","mayhem","Cashback","cashback","Reward"]
-RESULTS="/root/arbx-fast/hisbuys_results.jsonl"
-LOG="/root/arbx-fast/hisbuys_paper.log"
+RESULTS="/root/sniper-fast/hisbuys_results.jsonl"
+LOG="/root/sniper-fast/hisbuys_paper.log"
 B58="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def b58dec(s):
     n=0

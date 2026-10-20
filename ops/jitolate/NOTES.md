@@ -143,7 +143,7 @@ Notes on the table:
 ## 4. Alternatives: expected landing, with the evidence for each
 | option | expected effect | evidence / caveat |
 |---|---|---|
-| **Fire only on near leaders** (`--close-leaders /root/arbx-final/close_leaders.txt`, already in the concurrent engine, 1,971 pubkeys, 10-16) | Turns ~5 of 10 S+1 losses into no-trades. Among near-leader fires, S rate ≈ 50% (2/4 here; earlier probe: in-time 84% near vs 62% far, per code comment) | Of our 10, the gate keeps 7, 16, 50, 128 (2 S, 2 S+1). About 30% of rule-#2 launches have a <5 ms leader (`win_r2.txt`), so fires drop ~3× |
+| **Fire only on near leaders** (`--close-leaders /root/sniper-final/close_leaders.txt`, already in the concurrent engine, 1,971 pubkeys, 10-16) | Turns ~5 of 10 S+1 losses into no-trades. Among near-leader fires, S rate ≈ 50% (2/4 here; earlier probe: in-time 84% near vs 62% far, per code comment) | Of our 10, the gate keeps 7, 16, 50, 128 (2 S, 2 S+1). About 30% of rule-#2 launches have a <5 ms leader (`win_r2.txt`), so fires drop ~3× |
 | **Skip creates late in the slot** (create PoH > ~150 ms; DETECT already logs `poh_ms` from erpc) | Removes no-chance fires (48 at ≈176 ms, 72 at ≈199 ms) | Needs a small gate flag (not a send-path change). PoH maps to wall time within ±25 ms. A tighter 130 ms cut would also drop 6, 50 and 110 (all S+1) but **also tag 16 (≈143 ms, landed in S)**, so use ~150 ms with the near-leader gate |
 | **Harmonic BE** `fra.be.harmonic.gg/api/v1/bundles` (public JSON-RPC, free; priority fee = tip) | Harmonic leaders: likely the best path there (streams immediately, no 50 ms tick). Expect S for near Harmonic leaders when ≥ ~40 ms are left; maybe ≤25 only if the create is seen quickly (Harmonic hold 12.2 ms) | Docs above; 4 of 5 Harmonic winners at d ≤ 25 are "no tip". **New send path: owner's OK needed** |
 | Keep jito-bundle on BAM/Jito, **drop Helius from those routes** (or keep it knowing it wins the Jito auction with its own +0.001 tip) | Clean attribution. Helius as a second route into Jito is a bid +1M above ours, so keeping it is fine for landing but breaks measurement | Bundle ids ce9fb42f and the 44 bundle; `wrapper.py` |
@@ -174,7 +174,7 @@ Notes on the table:
    - To attribute paths, a test needs a per-path variant tx: distinct signatures made mutually exclusive by a non-idempotent ATA create, so only the first one succeeds. Each losing variant costs only its base fee plus priority. The tip transfers revert in a failed tx. This changes the send path, so it needs the owner's OK.
 
 ## 6. Fix list for the next live test (exact flags and config; each send-path item needs the owner's explicit OK)
-1. **Gate to near leaders.** Add `--close-leaders /root/arbx-final/close_leaders.txt` to `live_final.sh`. The gate already exists, so this is not a send-path change.
+1. **Gate to near leaders.** Add `--close-leaders /root/sniper-final/close_leaders.txt` to `live_final.sh`. The gate already exists, so this is not a send-path change.
    - Before the run, refresh the file from current pings: keep leaders with RTT < 5 ms. 27 of 91 rule-#2 launches fall in that bucket.
    - Expected result: far-leader S+1 losses (6 of 10 here) become no-trades.
 2. **Late-create gate** (small code change, gate only): add a new `--max-create-poh-ms 150` that skips a fire when the DETECT `poh_ms` (erpc PoH) is above 150. If PoH is unknown, use DZ/Kaldera slot timing. On this run, 150 skips 48 and 72 (both no-chance); 130 would also skip tag 16, which landed in S.

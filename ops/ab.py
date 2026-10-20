@@ -1,6 +1,6 @@
 import sys, re
 # Join broad collector's launch (dev,vanilla) + done (pnl) lines by mint -> A/B several filters on the SAME tokens.
-LOG="/root/arbx-fast/paper_broad.log"
+LOG="/root/sniper-fast/paper_broad.log"
 dev={}; van={}
 for ln in open(LOG):
     m=re.search(r"PAPER launch #\d+ slot=\d+ mint=([1-9A-HJ-NP-Za-km-z]+) dev_buy=(\d+) vanilla=(\w+)",ln)

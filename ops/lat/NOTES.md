@@ -5,9 +5,9 @@
 - one `simulateTransaction`;
 - the old logs, plus on-chain data that was already collected.
 
-Keys and `.env` were untouched. `/root/arbx-fast`, `/root/arbx-merge` and `/root/race` were not modified.
+Keys and `.env` were untouched. `/root/sniper-fast`, `/root/sniper-merge` and `/root/race` were not modified.
 
-- **Working copy:** `/root/arbx-lat`.
+- **Working copy:** `/root/sniper-lat`.
   - Binary: `target/release/snipe_engine`, md5 `36c4fadb…`, built 10:03 UTC, BUILD_EXIT=0.
   - Source diff against arbx-merge: `/root/lat/lat.patch`. The original files are `mod.rs.orig` and `snipe_engine.rs.orig`.
 - **Everything else** (scripts, logs, data) is in `/root/lat/`.
@@ -49,7 +49,7 @@ Keys and `.env` were untouched. `/root/arbx-fast`, `/root/arbx-merge` and `/root
 
 ## 1. Problems found, and what was fixed
 
-| # | Problem (evidence) | Impact | Fix in `/root/arbx-lat` | Before → after (zero-cost) |
+| # | Problem (evidence) | Impact | Fix in `/root/sniper-lat` | Before → after (zero-cost) |
 |---|---|---|---|---|
 | P1 | **Single path, and the wrong one for most leaders.** Helius reaches d≤25 for 5% (BAM), 1% (Harmonic), 13% (Jito-Solana) and 5% (Firedancer) of buys. Jito-tipped buys: 38/25/19/24%. LandX 24% on BAM (§2.4) | We land d≤25 on 0 of 42 live fires | `--multi-send` and `--route-by-client` (§4) | 1 path → 3–4 paths per buy, picked by the leader's client |
 | P2 | `--also-send` handled only 2 paths, joined inside one task | No N-way fan-out, no per-path timing | Each path sends on its own task. The buy proceeds on the **first** accept; each path logs `SEND-ACK t_off_us ack_ms` and a send-log line | Paths start 0.03–0.44 ms apart (p90). A slow or dead path no longer delays the land poll |
@@ -306,7 +306,7 @@ Logs:
 bash /root/lat/live_lat.sh lat1
 ```
 
-It runs `/root/arbx-lat/target/release/snipe_engine --snipe-once --concurrent --live`:
+It runs `/root/sniper-lat/target/release/snipe_engine --snipe-once --concurrent --live`:
 - Gate B: `--uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8 --dev-from-cap --race-gate --race-min-dev-sol 3 --race-min-bundle 2 --race-bundle-ms 3 --race-max-name-len 12 --race-pros /root/race/pros.json --race-early`
 - Size and fees: `--spend-lamports 1000000` (0.001 SOL ≈ $0.10) `--fill-cap 2.5 --cu-price-micro 30000000 --cu-limit 90000 --sell-cu-price-micro 1500000 --land-poll-ms 100`
 - Caps: `--max-sol 0.0015 --max-total-sol 0.010` (= **10 buys max**, then it stops firing) `--max-loss-sol 0.075` (balance kill-switch) `--max-inflight 2 --minutes 90`

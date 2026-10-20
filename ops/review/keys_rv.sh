@@ -1,6 +1,6 @@
 #!/bin/bash
 # REVIEW: zero-cost auth discrimination: the same junk tx with our key vs a bogus key. Prints replies only, never keys.
-set -a; . /root/arbx/deploy/.env; set +a
+set -a; . /root/sniper/deploy/.env; set +a
 echo "LANDX_KEY length: ${#LANDX_KEY} chars (UDP needs exactly the 12-byte key)"
 J='{"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":["AQID",{"encoding":"base64"}]}'
 r() { curl -s -m 8 -o /tmp/rv_r.txt -w "%{http_code}" "$@"; echo " $(head -c 160 /tmp/rv_r.txt | tr '\n' ' ')"; }

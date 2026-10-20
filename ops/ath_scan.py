@@ -61,11 +61,11 @@ def curve_lamports(sig,curve):
     return None
 # load mints+dev
 dev={}
-for ln in open("/root/arbx-fast/paper_sel.log"):
+for ln in open("/root/sniper-fast/paper_sel.log"):
     m=re.search(r"mint=([1-9A-HJ-NP-Za-km-z]+) dev_buy=(\d+)",ln)
     if m: dev[m.group(1)]=int(m.group(2))
 mints=[]
-for ln in open("/root/arbx-fast/paper_sel.log"):
+for ln in open("/root/sniper-fast/paper_sel.log"):
     m=re.search(r"PAPER done mint=([1-9A-HJ-NP-Za-km-z]+) .*peak_r=([0-9.]+)",ln)
     if m and m.group(1) not in [x[0] for x in mints]: mints.append((m.group(1),float(m.group(2))))
 print(f"scanning {len(mints)} mints")
