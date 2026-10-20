@@ -140,7 +140,7 @@ async fn call2(rpc: &rpc::Rpc, method: &str, params: serde_json::Value) -> Resul
 async fn call_race(rpc: &rpc::Rpc, method: &str, params: serde_json::Value, cap: Duration, accept: impl Fn(&serde_json::Value) -> bool) -> Result<serde_json::Value> {
     if RPC_TRAP.load(Ordering::SeqCst) { panic!("RPC {method} on the no-RPC path (sell decision -> send)"); }
     // XRPC: the role's DEDICATED clients (bounded single attempts, self-healing, latency-recorded) once initialized
-    if let Some(eps) = xrpc::eps(xrpc::role_of(method)) { return race_eps(eps, method, params, cap, accept).await; }
+    if let Some(m) = xrpc::map() { if let Some(eps) = m.get(xrpc::role_of(method)) { return race_eps(eps, method, params, cap, accept).await; } }
     let p = tokio::time::timeout(cap, rpc.call(method, params.clone()));
     let Some(fb) = RPC_FB.get() else {
         return match p.await { Ok(r) => r, Err(_) => Err(anyhow::anyhow!("{method} timed out after {cap:?}")) };
@@ -175,7 +175,7 @@ async fn call_race(rpc: &rpc::Rpc, method: &str, params: serde_json::Value, cap:
 static FB_USED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// XRPC: race the role's providers in parallel (primary, fallback); the first accepted answer wins
-async fn race_eps(eps: &'static [xrpc::Ep], method: &str, params: serde_json::Value, cap: Duration, accept: impl Fn(&serde_json::Value) -> bool) -> Result<serde_json::Value> {
+async fn race_eps(eps: &[xrpc::Ep], method: &str, params: serde_json::Value, cap: Duration, accept: impl Fn(&serde_json::Value) -> bool) -> Result<serde_json::Value> {
     let wire = if method == "getAccountInfo(alt)" { "getAccountInfo" } else { method };
     if eps.len() == 1 { return eps[0].call(wire, params, cap).await; }
     let p = eps[0].call(wire, params.clone(), cap);
@@ -192,8 +192,11 @@ async fn race_eps(eps: &'static [xrpc::Ep], method: &str, params: serde_json::Va
         };
         match r {
             Ok(v) if accept(&v) => {
-                if from_fb && FB_USED.fetch_add(1, Ordering::Relaxed) == 0 {
-                    tg::raise(arbx::alerts::Level::Warning, "snipe_rpc_fallback", "rpc_fallback", "🔁", "RPC fallback in use", arbx::alerts::format::Body::new().kv("method", method).txt("the fallback RPC answered before the primary"), true);
+                if from_fb {
+                    let n = FB_USED.fetch_add(1, Ordering::Relaxed) + 1;
+                    if n == 1 || n % 500 == 0 {
+                        tg::raise(arbx::alerts::Level::Warning, "snipe_rpc_fallback", "rpc_fallback", "🔁", "RPC fallback in use", arbx::alerts::format::Body::new().kv("method", method).kv("fallback answers so far", n.to_string()), true);
+                    }
                 }
                 return Ok(v);
             }
@@ -362,19 +365,27 @@ fn ref_slots() -> (u64, u64) {
     }
 }
 
+/// XRPC: one getLatestBlockhash (confirmed) through a dedicated client: (hash, last valid height, context slot)
+async fn bh_one(e: &xrpc::Ep, cap: Duration) -> Result<([u8; 32], u64, u64)> {
+    let v = e.call("getLatestBlockhash", serde_json::json!([{ "commitment": "confirmed" }]), cap).await?;
+    let h = bs58::decode(v["value"]["blockhash"].as_str().context("no blockhash")?).into_vec()?;
+    Ok((<[u8; 32]>::try_from(h).map_err(|_| anyhow::anyhow!("bad blockhash"))?, v["value"]["lastValidBlockHeight"].as_u64().unwrap_or(0), v["context"]["slot"].as_u64().unwrap_or(0)))
+}
+
 /// the owner's M4-1: primary AND fallback queried IN PARALLEL (plus, M6-1, the fallback's getSlot into the slot
 /// reference); the accepted answer is stored with its BIRTH time (back-dated by its slot lag behind the age reference,
 /// 400 ms per slot): a cache entry's age is the blockhash's own age, never the time it was (re-)fetched. Ok(true): updated.
 async fn refresh_blockhash(rpc: &rpc::Rpc, cap: Duration) -> Result<bool> {
     if RPC_TRAP.load(Ordering::SeqCst) { panic!("RPC getLatestBlockhash on the no-RPC path (sell decision -> send)"); }
     // XRPC: the blockhash role's dedicated clients when initialized (else the given ones: tests, other modes)
-    let (a, b) = if let Some(eps) = xrpc::eps("bh") {
-        let one = |e: &'static xrpc::Ep| async move {
-            let v = e.call("getLatestBlockhash", serde_json::json!([{ "commitment": "confirmed" }]), cap).await?;
-            let h = bs58::decode(v["value"]["blockhash"].as_str().context("no blockhash")?).into_vec()?;
-            anyhow::Ok((<[u8; 32]>::try_from(h).map_err(|_| anyhow::anyhow!("bad blockhash"))?, v["value"]["lastValidBlockHeight"].as_u64().unwrap_or(0), v["context"]["slot"].as_u64().unwrap_or(0)))
-        };
-        let fb = async { match eps.get(1) { Some(e) => Some((one(e).await, e.call("getSlot", serde_json::json!([]), cap).await.ok().and_then(|v| v.as_u64()))), None => None } };
+    let xm = xrpc::map();
+    let (a, b) = if let Some(eps) = xm.as_ref().and_then(|m| m.get("bh")) {
+        let one = |e| bh_one(e, cap);
+        // L12-1 / L12-2: the fallback's blockhash and its PROCESSED getSlot in parallel
+        let fb = async { match eps.get(1) { Some(e) => {
+            let (x, s) = tokio::join!(one(e), e.call("getSlot", serde_json::json!([{ "commitment": "processed" }]), cap));
+            Some((x, s.ok().and_then(|v| v.as_u64())))
+        } None => None } };
         let (a, b) = tokio::join!(one(&eps[0]), fb);
         (a, b.map(|(x, s)| (x, Ok::<_, ()>(Ok::<u64, ()>(s.unwrap_or(0))))))
     } else {
@@ -425,6 +436,12 @@ async fn refresh_blockhash(rpc: &rpc::Rpc, cap: Duration) -> Result<bool> {
 /// L6-3 (audit 6) / L7-3: no usable blockhash (the newest older than 7 s, birth-dated) PAUSES new fires (not the permanent stop); fires resume after 10 s of
 /// usable blockhashes. Both edges are logged.
 static FIRE_PAUSE: AtomicBool = AtomicBool::new(false);
+/// M12-1 (audit 12): the kill switch cannot read the balance (>= 3 failed polls): new fires PAUSED until a poll succeeds;
+/// the run stops (BLIND) only when the failures span --ks-blind-s
+static KS_PAUSE: AtomicBool = AtomicBool::new(false);
+/// new fires paused (no usable blockhash, or the balance unreadable)
+#[inline]
+fn fires_paused() -> bool { FIRE_PAUSE.load(Ordering::SeqCst) || KS_PAUSE.load(Ordering::SeqCst) }
 
 /// the owner's M4-1: the SELL path only READS the cache (kept fresh by the background refresher every ~400 ms). None:
 /// older than `max_age` (pure: no RPC; used on the decision -> send path)
@@ -771,7 +788,8 @@ mod altc {
         let params = serde_json::json!([b58(&table), { "encoding": "base64", "commitment": "confirmed" }]);
         let one = |r: &rpc::Rpc| { let p = params.clone(); let r = r.clone(); async move { tokio::time::timeout(Duration::from_secs(2), r.call("getAccountInfo", p)).await.map_err(|_| anyhow::anyhow!("timed out"))? } };
         // XRPC: the lookup-table role's dedicated, bounded clients (primary, the fallback only on its error)
-        let v = if let Some(eps) = xrpc::eps("alt") {
+        let xm = xrpc::map();
+        let v = if let Some(eps) = xm.as_ref().and_then(|m| m.get("alt")) {
             match eps[0].call("getAccountInfo", params.clone(), Duration::from_secs(2)).await {
                 Ok(v) => v,
                 Err(e) => match eps.get(1) { Some(f) => f.call("getAccountInfo", params.clone(), Duration::from_secs(2)).await.map_err(|e2| anyhow::anyhow!("primary: {e:#} | fallback: {e2:#}"))?, None => return Err(e) },
@@ -1039,7 +1057,8 @@ mod xrpc {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock, RwLock};
 
-    pub const ROLES: [&str; 4] = ["exit", "bh", "ks", "alt"];
+    /// L12-4: "heavy" (getTransaction / getSignaturesForAddress, 3 s cap) apart from the 100 ms land polls ("exit")
+    pub const ROLES: [&str; 5] = ["exit", "bh", "ks", "alt", "heavy"];
     const XR_HEAL: u32 = 3;
 
     pub struct Ep { pub name: String, url: String, rpc: RwLock<rpc::Rpc>, errs: std::sync::atomic::AtomicU32, down: AtomicBool, pub rebuilds: std::sync::atomic::AtomicU64 }
@@ -1084,22 +1103,27 @@ mod xrpc {
         }
     }
 
-    /// role -> [primary, fallback?]
-    static EPS: OnceLock<HashMap<&'static str, Vec<Ep>>> = OnceLock::new();
+    /// role -> [primary, fallback?]; swappable (L12-6: tests install mock providers and remove them again)
+    pub type Map = Arc<HashMap<&'static str, Vec<Ep>>>;
+    static EPS: RwLock<Option<Map>> = RwLock::new(None);
     /// start-up: the dedicated clients from the primary URL and (if any) the fallback URL
-    pub fn init(primary: &str, fallback: Option<&str>) {
+    pub fn init(primary: &str, fallback: Option<&str>) { set(Some(build(primary, fallback))); }
+    pub fn build(primary: &str, fallback: Option<&str>) -> Map {
         let mut m = HashMap::new();
         for r in ROLES {
             let mut v = vec![Ep::new(format!("{r}-primary"), primary.to_string())];
             if let Some(f) = fallback { v.push(Ep::new(format!("{r}-fallback"), f.to_string())); }
             m.insert(r, v);
         }
-        let _ = EPS.set(m);
+        Arc::new(m)
     }
-    pub fn eps(role: &str) -> Option<&'static Vec<Ep>> { EPS.get().and_then(|m| m.get(role)) }
+    pub fn set(m: Option<Map>) { *EPS.write().unwrap_or_else(|e| e.into_inner()) = m; }
+    /// the current table (an Arc: held across awaits by the caller)
+    pub fn map() -> Option<Map> { EPS.read().unwrap_or_else(|e| e.into_inner()).clone() }
     /// which role a read belongs to
     pub fn role_of(method: &str) -> &'static str {
-        match method { "getBalance" => "ks", "getLatestBlockhash" | "getSlot" => "bh", "getAccountInfo(alt)" => "alt", _ => "exit" }
+        match method { "getBalance" => "ks", "getLatestBlockhash" | "getSlot" => "bh", "getAccountInfo(alt)" => "alt",
+            "getTransaction" | "getSignaturesForAddress" => "heavy", _ => "exit" }
     }
 
     // ---- latency book (60 s windows)
@@ -1343,7 +1367,7 @@ fn ks_eval(st: &mut KsState, pnl: i64, realized: i64, pending: u64, inflight: u6
 // error (incl. "could not find account" / "Invalid param" / timeouts) is Unknown.
 // =====================================================================================================================
 /// per-call cap on the reads of the exit path (the client's own timeout is 20 s)
-const RPC_READ_TIMEOUT: Duration = Duration::from_secs(3);
+// (RPC_READ_TIMEOUT removed: every exit-path read is capped by call_race / the xrpc legs, 1 s or 3 s)
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tok { Amount(u64, u64), Closed(u64), Unknown }
@@ -1680,7 +1704,11 @@ fn main() -> Result<()> {
 
     // XRPC (live edge check): 6 workers by default (the busy-poll event loop already runs off them, in block_in_place);
     // --tokio-workers N overrides
-    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(arg_u64("--tokio-workers", 6).clamp(2, 64) as usize).enable_all().build()?;
+    // L12-5 (audit 12): with --busy-poll --pin-core C, every runtime thread (workers + blocking pool) gets an affinity that
+    // EXCLUDES core C, so no tokio thread preempts the spinning event loop (which pins itself to C)
+    let excl = if has("--busy-poll") { arg_u64_opt("--pin-core").map(|c| c as usize) } else { None };
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(arg_u64("--tokio-workers", 6).clamp(2, 64) as usize)
+        .on_thread_start(move || { if let Some(c) = excl { arbx::fast::exclude_core(c); } }).enable_all().build()?;
 
     let r = rt.block_on(run(&probe, key, user, rpc, warm_probe, shadow, round_trip, snipe_once, simulate, paper_trade, live));
     if let Err(e) = &r { tg::raise(arbx::alerts::Level::Critical, "snipe_error", "error", "💥", "ENGINE STOPPED WITH AN ERROR", arbx::alerts::format::Body::new().code("error", redact(&format!("{e:#}"))), false); }
@@ -2588,7 +2616,9 @@ async fn land_check(rpc: &rpc::Rpc, sig_bytes: &[u8; 64], watch: Watch, out: &mu
         Err(e) => poll_err("getSignatureStatuses", &e),
     }
     // XRPC: a sell seen in the shred feed (registered by send_sell): a landing HINT (outcome unknown: the confirmed read decides)
-    if let Some(slot) = feed_seen(sig_bytes) {
+    // L12-3: a hinted slot more than 150 above the live reference is not trusted (it would make every confirmed read wait
+    // for a node that far ahead)
+    if let Some(slot) = feed_seen(sig_bytes).filter(|s| { let cur = send::tpu::SLOT.load(Ordering::Relaxed); cur == 0 || *s <= cur + 150 }) {
         out.land_slot = Some(slot); out.ok = true; out.t_seen = Some(Instant::now()); out.via = "feed";
         return true;
     }
@@ -3961,6 +3991,10 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                     Ok(b) => {
                         fails = 0;
                         if first_fail.take().is_some() { eprintln!("  KILL-SWITCH getBalance answering again"); }
+                        if KS_PAUSE.swap(false, Ordering::SeqCst) {
+                            eprintln!("  RESUME (kill switch): the balance is readable again — new fires allowed");
+                            tg::raise(arbx::alerts::Level::Info, "snipe_ks_resume", "ks_resume", "▶️", "Kill switch RESUME: balance readable again", arbx::alerts::format::Body::new(), false);
+                        }
                         ACCT.bal.store(b, Ordering::SeqCst);
                         if a.seq.load(Ordering::SeqCst) != seq0 { eprintln!("  KILL-SWITCH poll not evaluated: a position changed during the balance read (next poll in 2 s)"); continue; }
                         let pnl = (b + open) as i64 - start_bal as i64;
@@ -4001,6 +4035,11 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                             tg::raise(arbx::alerts::Level::Critical, "snipe_kill", "kill", "🛑", "KILL-SWITCH (realized; balance unreadable)", arbx::alerts::format::Body::new().kv("realized", sol_str(realized)), false);
                             stop2.store(true, Ordering::SeqCst);
                             break;
+                        }
+                        // M12-1: 3 failed polls pause new fires at once (the balance-based kill cannot see them)
+                        if fails >= 3 && !KS_PAUSE.swap(true, Ordering::SeqCst) {
+                            eprintln!("  !!!!! PAUSE (kill switch): {fails} getBalance polls failed — NEW FIRES PAUSED until the balance is readable (run stops at {} s) !!!!!", blind_after.as_secs());
+                            tg::raise(arbx::alerts::Level::Error, "snipe_ks_pause", "ks_pause", "⏸", "Kill switch PAUSE: balance unreadable", arbx::alerts::format::Body::new().kv("failed polls", fails.to_string()).kv("run stops after", format!("{} s", blind_after.as_secs())), false);
                         }
                         if fails >= 3 && since.elapsed() >= blind_after {
                             eprintln!("  KILL-SWITCH BLIND: getBalance failing for {:.0} s ({fails} polls) — stopping new fires (open positions finish their exit).", since.elapsed().as_secs_f64());
@@ -4167,7 +4206,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         for (launch, create_slot, vq_after) in ready.drain(..) {
         // N7: a stop (signal / kill switch / lock) set during this iteration fires nothing more; L6-3: nor a blockhash pause
         if stop.load(Ordering::SeqCst) { eprintln!("  STOP set: launch {} not fired", b58(&launch.mint)); continue; }
-        if FIRE_PAUSE.load(Ordering::SeqCst) { eprintln!("  PAUSED (no usable blockhash): launch {} not fired", b58(&launch.mint)); continue; }
+        if fires_paused() { eprintln!("  PAUSED (no usable blockhash / balance unreadable): launch {} not fired", b58(&launch.mint)); continue; }
         // FIX2 --max-create-ms: a create late in its slot cannot be beaten into that slot (next 50 ms auction tick / batch)
         if !gate.check(&launch.mint, create_slot) { continue; }
         // L4: budget (landed + reserved by unresolved fires) and --max-buys (landed + unresolved), before anything is spent
@@ -4207,7 +4246,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             let avail = a.bal.load(Ordering::SeqCst).saturating_sub(a.pending_spend.load(Ordering::SeqCst) + a.landed_since_bal.load(Ordering::SeqCst));
             let short = avail < spend_per + fee + bal_margin;
             if short && !junk { skipped_balance += 1; eprintln!("  SKIP-BALANCE slot={create_slot} mint={} available {:.6} SOL < spend + fees + margin {:.6}", b58(&launch.mint), avail as f64 / 1e9, (spend_per + fee + bal_margin) as f64 / 1e9); continue; }
-            if stop.load(Ordering::SeqCst) || FIRE_PAUSE.load(Ordering::SeqCst) { eprintln!("  STOP / PAUSE set: launch {} not fired", b58(&launch.mint)); continue; } // N7, L6-3
+            if stop.load(Ordering::SeqCst) || fires_paused() { eprintln!("  STOP / PAUSE set: launch {} not fired", b58(&launch.mint)); continue; } // N7, L6-3, M12-1
             let rec = f.fire(&p);
             // ---- everything below runs after the writes ----
             let rx_age_us = t_rx_of.map(|t| arbx::feeds::clock::now_ns().saturating_sub(t) / 1000).unwrap_or(0);
@@ -4246,7 +4285,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         if !junk && avail < spend_per + fee_guess + bal_margin {
             skipped_balance += 1; eprintln!("  SKIP-BALANCE slot={create_slot} mint={} available {:.6} SOL < spend + fees + margin {:.6}", b58(&launch.mint), avail as f64 / 1e9, (spend_per + fee_guess + bal_margin) as f64 / 1e9); continue;
         }
-        if stop.load(Ordering::SeqCst) || FIRE_PAUSE.load(Ordering::SeqCst) { eprintln!("  STOP / PAUSE set: launch {} not fired", b58(&launch.mint)); continue; } // N7, L6-3
+        if stop.load(Ordering::SeqCst) || fires_paused() { eprintln!("  STOP / PAUSE set: launch {} not fired", b58(&launch.mint)); continue; } // N7, L6-3, M12-1
         let rx_age_us = t_rx_of.map(|t| arbx::feeds::clock::now_ns().saturating_sub(t) / 1000).unwrap_or(0);
         let pos = if junk { None } else { Some(Pos::new(launch.mint, spend_per, fee_guess, "")) };
         fired.fetch_add(1, Ordering::Relaxed);
@@ -7008,6 +7047,88 @@ mod audit_tests {
         assert!(p99 < 200.0, "p99 {p99} ms");
         // the 60 s report renders these
         assert!(xrpc::report().iter().any(|l| l.contains("exit-primary-mix getSignatureStatuses")));
+    }
+
+    /// a mock JSON-RPC answering with `f(method, params)` (as `result`), recording every (method, params)
+    async fn mock_fn(f: Arc<dyn Fn(&str, &serde_json::Value) -> serde_json::Value + Send + Sync>) -> (String, Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let lst = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}", lst.local_addr().unwrap().port());
+        let s2 = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut c, _)) = lst.accept().await {
+                let (f, s3) = (f.clone(), s2.clone());
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    loop {
+                        let n = c.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 { return; }
+                        buf.extend_from_slice(&tmp[..n]);
+                        let Some(h) = buf.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                        let head = String::from_utf8_lossy(&buf[..h]).to_ascii_lowercase();
+                        let len = head.lines().find_map(|l| l.strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+                        if buf.len() < h + 4 + len { continue; }
+                        let req: serde_json::Value = serde_json::from_slice(&buf[h + 4..h + 4 + len]).unwrap_or_default();
+                        buf.drain(..h + 4 + len);
+                        let m = req["method"].as_str().unwrap_or("").to_string();
+                        s3.lock().unwrap().push((m.clone(), req["params"].clone()));
+                        let body = serde_json::json!({ "jsonrpc": "2.0", "id": req["id"].clone(), "result": f(&m, &req["params"]) }).to_string();
+                        let resp = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}", body.len());
+                        if c.write_all(resp.as_bytes()).await.is_err() { return; }
+                    }
+                });
+            }
+        });
+        (url, seen)
+    }
+
+    /// L12-6 (audit 12): the xrpc branches end to end with mock providers installed as the dedicated clients:
+    /// call_race (the fallback's ACCEPTED answer wins over the primary's not-yet-seen status), the blockhash refresher
+    /// (decoded, cached; the fallback's getSlot is PROCESSED, L12-1), the lookup-table fetch
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn xrpc_paths_end_to_end_l126() {
+        let _g = BH_GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        let real = 459_300_000u64;
+        let off = 21_000_000u64;
+        let alt_data = { let mut d = vec![0u8; 56]; d.extend([11u8; 32]); d.extend([12u8; 32]); base64::engine::general_purpose::STANDARD.encode(d) };
+        let mk = |has_status: bool, ad: String| -> Arc<dyn Fn(&str, &serde_json::Value) -> serde_json::Value + Send + Sync> {
+            Arc::new(move |m: &str, _p: &serde_json::Value| match m {
+                "getSignatureStatuses" => if has_status { serde_json::json!({ "context": { "slot": real }, "value": [{ "slot": real - 2, "err": null, "confirmationStatus": "processed" }] }) }
+                    else { serde_json::json!({ "context": { "slot": real }, "value": [null] }) },
+                "getLatestBlockhash" => serde_json::json!({ "context": { "slot": real }, "value": { "blockhash": bs58::encode([9u8; 32]).into_string(), "lastValidBlockHeight": real - off + 150 } }),
+                "getSlot" => serde_json::json!(real + 2),
+                "getAccountInfo" => serde_json::json!({ "context": { "slot": real }, "value": { "owner": "AddressLookupTab1e1111111111111111111111111", "data": [ad.clone(), "base64"], "lamports": 1, "executable": false } }),
+                _ => serde_json::Value::Null,
+            })
+        };
+        let (pu, _ps) = mock_fn(mk(false, alt_data.clone())).await;
+        let (fu, fs) = mock_fn(mk(true, alt_data.clone())).await;
+        xrpc::set(Some(xrpc::build(&pu, Some(&fu))));
+        let dummy = rpc::Rpc::new("http://127.0.0.1:1".into()); // never used while the table is installed
+        // call_race: the primary has no status yet (not accepted), the fallback has it: the fallback's answer wins
+        let v = call2(&dummy, "getSignatureStatuses", serde_json::json!([["x"], { "searchTransactionHistory": false }])).await.unwrap();
+        assert_eq!(v["value"][0]["slot"].as_u64(), Some(real - 2));
+        // the refresher through the bh clients: decoded, accepted (both agree), cached fresh
+        *BLOCKHASH_CACHE.lock().unwrap() = None;
+        *BH_STATE.lock().unwrap() = BhState::default();
+        *BH_LAST_ACCEPT.lock().unwrap() = None;
+        let r = refresh_blockhash(&dummy, Duration::from_secs(1)).await;
+        let cached = *BLOCKHASH_CACHE.lock().unwrap();
+        let slot_params: Vec<serde_json::Value> = fs.lock().unwrap().iter().filter(|x| x.0 == "getSlot").map(|x| x.1.clone()).collect();
+        // the lookup-table fetch through the alt clients
+        let n = altc::fetch(&dummy, [0xC7u8; 32]).await;
+        // restore
+        xrpc::set(None);
+        *BH_STATE.lock().unwrap() = BhState::default();
+        *BLOCKHASH_CACHE.lock().unwrap() = None;
+        send::tpu::SLOT.store(0, Ordering::Relaxed);
+        JUMP_SLOT.store(0, Ordering::Relaxed); JUMP_SRC.store(0, Ordering::Relaxed);
+        assert!(matches!(r, Ok(true)), "refresh through the xrpc clients: {r:?}");
+        assert_eq!(cached.map(|c| c.0), Some([9u8; 32]));
+        assert!(!slot_params.is_empty() && slot_params.iter().all(|p| p[0]["commitment"] == "processed"), "the fallback getSlot is processed: {slot_params:?}");
+        assert_eq!(n.unwrap(), 2, "the lookup table parsed (2 addresses)");
     }
 
     #[test]

@@ -23,6 +23,19 @@ pub fn mono_ns() -> u64 {
 }
 
 /// pin the calling thread to one CPU (sched_setaffinity); false if refused
+/// L12-5: let the calling thread run on every online CPU EXCEPT `core` (the busy-poll core); false when that leaves none
+pub fn exclude_core(core: usize) -> bool {
+    let n = std::thread::available_parallelism().map(|x| x.get()).unwrap_or(1);
+    if n < 2 { return false; }
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) != 0 { return false; }
+        libc::CPU_CLR(core, &mut set);
+        if libc::CPU_COUNT(&set) == 0 { return false; }
+        libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) == 0
+    }
+}
+
 pub fn pin_to_core(core: usize) -> bool {
     unsafe {
         let mut set: libc::cpu_set_t = std::mem::zeroed();
