@@ -417,10 +417,13 @@ fn pump_ix_disc(tx: &Tx, ix: &crate::tx::Ix) -> Option<[u8; 8]> {
 /// sequence when the create tx holds several. detect_launch reads these as 0 SOL, so every cap-family launch was
 /// skipped (e.g. GHEc1Z7L, BuyV2 unlimited, T=193593934369826 -> 6.604 SOL). Returns 0 with no cap-family buy.
 pub fn dev_buy_cap_lamports(tx: &Tx) -> u64 {
+    // L-10 (audit 3): only cap-family buys of the CREATED mint (a buy of another mint in the same tx used to be priced too)
+    let created = ix_with_disc(tx, &CREATE_V2_DISC).or_else(|| ix_with_disc(tx, &CREATE_DISC)).and_then(|c| acct(tx, c, A_MINT));
     let (mut vq, mut vt, mut total) = (CURVE_VQ0 as u128, CURVE_VT0 as u128, 0u128);
     for ix in tx.ixs.iter() {
         let Some(d) = pump_ix_disc(tx, ix) else { continue };
         if !DEV_BUY_SOL_AT_16.contains(&d) || ix.data.len() < 16 { continue; }
+        if created.is_some() && acct(tx, ix, buy_mint_pos(&d)) != created { continue; }
         let t = u64::from_le_bytes(ix.data[8..16].try_into().unwrap_or([0u8; 8])) as u128;
         if t == 0 || t >= vt { continue; }
         let nvt = vt - t;

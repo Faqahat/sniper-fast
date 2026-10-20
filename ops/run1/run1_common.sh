@@ -24,6 +24,17 @@
 #   --sell-cu-limit 120000    N4: sells have their own CU limit (sell tx measured 44-56k CU for SellV3 + ATA close,
 #                             ops/review/REPORT.md section 5); a sell that lands FAILED retries with 1.5x the limit.
 #                             Verify with cu_check.sh (zero-cost sell simulation) before the run.
+# AUDIT 3 FIXES (2026-10-20; M-3 + M-5 send-path changes approved by the owner):
+#   --buy-max-slot-delta 1    M-3: ON-CHAIN slot deadline: a Lighthouse AssertSysvarClock (slot <= create slot + 1) right
+#                             before the buy; a later landing fails on chain (no tokens, fees only). Verified by
+#                             simulation at start-up or the engine refuses to start. CU: checked by cu_check.sh.
+#   --rpc-fallback-url-env RMR_RPC_URL   H-1: the exit path's second RPC (blockhash, statuses, token reads, balance);
+#                             a sell with no fresh blockhash uses the cached one (<= 25 s); UNSOLD keeps retrying in the
+#                             background every 5 s until the exit; EXIT CHECK tries one more sell of anything held
+#   --sell-retry-s 1          M-5: re-send a sell not seen within 1 s (was 4); every sell (the first too) goes to
+#                             staked-rpc + nozomi (--sell-fallback-path) with one signature
+#   (engine, no flag: M-1 SIGHUP = stop + drain; M-2 every failed buy's real error is logged and classified, 3 non-slippage
+#    failures stop new fires; M-4 --sell-held resolves router creates; L-1 the kill logs open positions + worst case)
 #   (engine behaviour, no flag: N1 sold = CONFIRMED 0 at slot >= the sell's landing; N2 kill/lock on 2 consecutive polls;
 #    N3 late-landing watch until the buy's blockhash is dead, cap --late-land-s default 120; every fired mint re-read
 #    at exit; N5 unknown flags / bad values refuse to start)
@@ -38,7 +49,7 @@ FLAGS=(--uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8
   --close-leaders /root/fix2/close_leaders_5ms.txt --max-create-ms 150
   --spend-lamports 1500000000 --slip-cap-bps 1500 --fill-cap 1.6 --max-sol 1.6 --max-total-sol 31 --max-buys 20 --max-loss-sol 0.5 --lock-tiers 0.3:0,0.6:0.3 --max-inflight 2 --minutes 180
   --cu-price-micro 110000000 --cu-limit 95000 --sell-cu-limit 120000 --sell-cu-price-micro 5000000 --hold-slots 3 --hold-ms 450 --hold-max-ms 1500 --land-poll-ms 100 --land-timeout-ms 3000
-  --sell-robust --sell-retry-s 4 --sell-deadline-s 30 --sell-fallback-path nozomi --strict-balance --jito-poll --landed-via
+  --sell-robust --sell-retry-s 1 --sell-deadline-s 30 --sell-fallback-path nozomi --buy-max-slot-delta 1 --rpc-fallback-url-env RMR_RPC_URL --strict-balance --jito-poll --landed-via
   --send-path helius --sell-path staked-rpc --route-by-client "$ROUTES"
   --config $C --env-file /root/sniper/deploy/.env
   --fast-send --jito-h2 --fast-presign --fast-derive --fast-verify --busy-poll --pin-core 1)

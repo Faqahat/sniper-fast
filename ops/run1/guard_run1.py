@@ -5,6 +5,10 @@
 # The engine is matched EXACTLY: the given PID, whose argv[0] must be /root/sniper-run1/target/release/snipe_engine and
 # which must run --snipe-once (without a PID: every process with exactly that argv[0] and --snipe-once).
 # Exits when the done marker (RUN1_DONE / DRY_RUN1_DONE) is in the log and no fire is still being verified.
+# AUDIT 3: L-2 FAIL CLOSED: a fire that cannot be verified (block unavailable after 20 tries) also stops the engine
+# (SIGTERM, drain); the log is read incrementally (new bytes only). L-3: a FAILED leg inside the glued run no longer ends
+# the run here (the engine cannot see execution results and counts it); a bundle-range failure explained only by failed
+# legs is a WARN, not an ALERT.
 # usage: python3 guard_run1.py LOG OUT MARKER [ENGINE_PID]
 import sys, re, time, os, signal
 sys.path.insert(0, "/root/indep")
@@ -34,12 +38,15 @@ def check(slot, mint):
             continue
         dev = sum(e["sol"] for e in tr if e["mint"] == mint and e["buy"]) / 1e9
         gsol = 0.0
+        failed_legs = 0
         for t2 in txs[i + 1:]:
             m2 = t2.get("meta") or {}
             tr2, _ = events(m2.get("logMessages"))
             b = [e for e in tr2 if e["mint"] == mint and e["buy"]]
             if m2.get("err") is None and b:
                 gsol += sum(e["sol"] for e in b) / 1e9
+            elif m2.get("err") is not None and (mint in str((t2.get("transaction") or {}).get("message", {}).get("accountKeys", "")) or mint in str(m2.get("loadedAddresses", ""))):
+                failed_legs += 1  # L-3: a failed leg of this mint: the engine counted it (no execution result in shreds)
             else:
                 break
         tips = tx_summary(t, TM)[0]["tips"]
@@ -48,7 +55,10 @@ def check(slot, mint):
         v2 = any("Instruction: CreateV2" in x for x in (meta.get("logMessages") or []))
         fails = [k for k, ok in {"host": not (host in BOT or host.endswith(".trycloudflare.com")), "dev 0.5-8": 0.49 <= dev <= 8.1,
                                  "bundle 3-5 SOL": 2.95 <= gsol <= 5.05, "lunar tip": moon, "create_v2": v2}.items() if not ok]
-        return (not fails), f"dev {dev:.2f} bundle {gsol:.2f} SOL lunar {moon} host {host[:24]} " + ("" if not fails else "FAILED: " + ",".join(fails))
+        info = f"dev {dev:.2f} bundle {gsol:.2f} SOL (failed legs {failed_legs}) lunar {moon} host {host[:24]} " + ("" if not fails else "FAILED: " + ",".join(fails))
+        if fails == ["bundle 3-5 SOL"] and failed_legs > 0:
+            return "warn", info + " (explained by failed bundle legs the engine counts: WARN, not stopped)"
+        return (not fails), info
     return None, "create not in that slot"
 
 
@@ -83,11 +93,20 @@ def stop_engine():
 
 seen, pending, stopped = set(), {}, False
 say(f"GUARD start log={LOG} marker={MARKER} engine={ENGINE} pid={PID} (matches now: {engine_pids()})")
+pos, buf, done_seen = 0, "", False
 while True:
+    # L-2: read only the new bytes (complete lines)
     try:
-        txt = open(LOG, errors="replace").read()
+        with open(LOG, "rb") as f:
+            f.seek(pos)
+            chunk = f.read()
+            pos += len(chunk)
     except FileNotFoundError:
-        txt = ""
+        chunk = b""
+    buf += chunk.decode(errors="replace")
+    txt, _, buf = buf.rpartition("\n")
+    if re.search(r"^" + re.escape(MARKER) + r"\b", txt, re.M):
+        done_seen = True
     for m in re.finditer(r"^\s*FIRE slot=(\d+) mint=(\w+)", txt, re.M):
         k = (int(m.group(1)), m.group(2))
         if k not in seen:
@@ -98,17 +117,22 @@ while True:
         if ok is None:
             pending[k] += 1
             if pending[k] > 20:
-                say(f"UNVERIFIED {k[1]} slot {k[0]}: {info} (gave up after retries)")
+                # L-2: fail closed: an unverifiable fire stops the engine too
+                pids = stop_engine() if not stopped else []
+                stopped = stopped or bool(pids)
+                say(f"UNVERIFIED {k[1]} slot {k[0]}: {info} (gave up after retries) -> ENGINE SIGTERM (fail closed; pids {pids})")
                 del pending[k]
             continue
         del pending[k]
-        if ok:
+        if ok == "warn":
+            say(f"WARN {k[1]} slot {k[0]} {info}")
+        elif ok:
             say(f"OK   {k[1]} slot {k[0]} {info}")
         else:
             pids = stop_engine() if not stopped else []
             stopped = stopped or bool(pids)
             say(f"ALERT {k[1]} slot {k[0]} {info} -> ENGINE SIGTERM (pids {pids}): no new fires, open positions drain")
-    if re.search(r"^" + re.escape(MARKER) + r"\b", txt, re.M) and not pending:
+    if done_seen and not pending:
         say("GUARD done")
         break
     time.sleep(3)

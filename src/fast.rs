@@ -51,6 +51,8 @@ pub fn probe_var(i: usize) -> Pk { probe_key(0xD1, i as u8) }
 pub fn probe_tip(i: usize) -> Pk { probe_key(0xE3, i as u8) }
 pub const PROBE_BH: [u8; 32] = [0xC5; 32];
 pub const PROBE_MIN_OUT: u64 = 0x0F1E_2D3C_4B5A_6978;
+/// M-3 (audit 3): the slot-deadline guard's slot value in a probe message
+pub const PROBE_DEADLINE: u64 = 0x1D2C_3B4A_5968_7786;
 
 fn find_once(hay: &[u8], needle: &[u8]) -> Option<usize> {
     let mut found = None;
@@ -69,6 +71,8 @@ pub struct Template {
     tip_off: Vec<usize>,
     bh_off: usize,
     min_out_off: usize,
+    /// M-3: the slot-deadline guard's u64 (None: the template has no guard instruction)
+    deadline_off: Option<usize>,
     /// the template's static keys that are NOT patched (a patched key equal to one of these would change the dedup)
     consts: Vec<Pk>,
 }
@@ -76,13 +80,17 @@ pub struct Template {
 impl Template {
     /// `msg`: a message compiled from the probe keys (`probe_var`, `probe_tip`, `PROBE_BH`, `PROBE_MIN_OUT`), with `ntips`
     /// tip transfers. Locates every patch site (each probe must appear exactly once).
-    pub fn from_probe_msg(msg: Vec<u8>, ntips: usize) -> Result<Template, String> {
+    pub fn from_probe_msg(msg: Vec<u8>, ntips: usize) -> Result<Template, String> { Self::from_probe_msg_dl(msg, ntips, false) }
+
+    /// `from_probe_msg`; `deadline`: the message carries the slot-deadline guard with `PROBE_DEADLINE` (found once)
+    pub fn from_probe_msg_dl(msg: Vec<u8>, ntips: usize, deadline: bool) -> Result<Template, String> {
         let mut var_off = [0usize; NVAR];
         for (i, o) in var_off.iter_mut().enumerate() { *o = find_once(&msg, &probe_var(i)).ok_or(format!("var probe {i} not found once"))?; }
         let mut tip_off = Vec::with_capacity(ntips);
         for i in 0..ntips { tip_off.push(find_once(&msg, &probe_tip(i)).ok_or(format!("tip probe {i} not found once"))?); }
         let bh_off = find_once(&msg, &PROBE_BH).ok_or("blockhash probe not found once")?;
         let min_out_off = find_once(&msg, &PROBE_MIN_OUT.to_le_bytes()).ok_or("min_out probe not found once")?;
+        let deadline_off = if deadline { Some(find_once(&msg, &PROBE_DEADLINE.to_le_bytes()).ok_or("deadline probe not found once")?) } else { None };
         // static keys: header(3) + compact count (1 byte while < 128 keys) + 32 * n
         let n = msg[4] as usize;
         if n >= 128 { return Err("too many keys for the template".into()); }
@@ -94,13 +102,20 @@ impl Template {
         }
         // every key patch site must be inside the static key table
         if var_off.iter().chain(tip_off.iter()).any(|o| *o < 5 || *o >= 5 + 32 * n || (*o - 5) % 32 != 0) { return Err("a key probe is outside the key table".into()); }
-        Ok(Template { msg, var_off, tip_off, bh_off, min_out_off, consts })
+        Ok(Template { msg, var_off, tip_off, bh_off, min_out_off, deadline_off, consts })
     }
 
     /// patch into `out` (reused buffer, the message only). None: a key collision (use the full compile instead).
     #[inline]
     pub fn patch(&self, out: &mut Vec<u8>, vars: &VarKeys, tips: &[Pk], blockhash: &[u8; 32], min_out: u64) -> Option<()> {
+        self.patch_dl(out, vars, tips, blockhash, min_out, None)
+    }
+
+    /// `patch` + the slot deadline (required exactly when the template carries the guard)
+    #[inline]
+    pub fn patch_dl(&self, out: &mut Vec<u8>, vars: &VarKeys, tips: &[Pk], blockhash: &[u8; 32], min_out: u64, deadline: Option<u64>) -> Option<()> {
         if tips.len() != self.tip_off.len() { return None; }
+        if self.deadline_off.is_some() != deadline.is_some() { return None; }
         // collisions: patched keys pairwise distinct and not equal to any constant key
         for (i, a) in vars.iter().enumerate() {
             if vars[i + 1..].iter().any(|b| b == a) || tips.iter().any(|b| b == a) || self.consts.iter().any(|c| c == a) { return None; }
@@ -114,6 +129,7 @@ impl Template {
         for (i, k) in tips.iter().enumerate() { out[self.tip_off[i]..self.tip_off[i] + 32].copy_from_slice(k); }
         out[self.bh_off..self.bh_off + 32].copy_from_slice(blockhash);
         out[self.min_out_off..self.min_out_off + 8].copy_from_slice(&min_out.to_le_bytes());
+        if let (Some(o), Some(d)) = (self.deadline_off, deadline) { out[o..o + 8].copy_from_slice(&d.to_le_bytes()); }
         Some(())
     }
 }

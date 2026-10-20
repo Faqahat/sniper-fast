@@ -3,7 +3,14 @@
 # M1 re-signed at the decision) and DISCARDED; only junk bytes go to the paths (--junk-fanout), nothing can land.
 # The guard runs as in the live run (dry log names): a rule-#2 mismatch SIGTERMs this dry engine.
 # usage: bash /root/run1/dry_run1.sh [minutes]
-MIN=${1:-60}; cd /root/run1; . /root/run1/run1_common.sh
+# detaches itself (setsid nohup), like run1.sh
+MIN=${1:-60}
+if [ -z "$RUN1_DETACHED" ]; then
+  RUN1_DETACHED=1 setsid nohup bash "$0" "$@" > /root/run1/dry_run1.out 2>&1 < /dev/null &
+  echo "dry_run1.sh detached (setsid nohup): pid $! — output /root/run1/dry_run1.out, engine log /root/run1/dry_run1.log"
+  exit 0
+fi
+cd /root/run1; . /root/run1/run1_common.sh
 LOG=/root/run1/dry_run1.log; : > $LOG
 GLOG=/root/run1/guard_dry.log
 FL=("${FLAGS[@]}"); for i in "${!FL[@]}"; do [ "${FL[$i]}" = "--minutes" ] && FL[$((i+1))]=$MIN; done

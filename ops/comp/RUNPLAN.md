@@ -29,3 +29,19 @@ M2-M7, L1-L11. Server folders renamed: engine /root/sniper-run1/target/release/s
 Run-1 flags now: --slip-cap-bps 1500 (fill-cap 1.6 fallback), --land-timeout-ms 3000, --hold-slots 3 (fallback --hold-ms
 450), --sell-fallback-path nozomi, --max-buys 20 (budget 31 on landed buys), --fast-verify. NOT deployed, NOT run:
 next = deploy, zero-cost dry run (incl. a SIGTERM drain test), CU simulate check, then the owner's go.
+
+Status 2026-10-20 (audit 3, FIXES.md "Audit 3"): H-1 (fallback RPC RMR_RPC_URL for the exit path, cached-blockhash
+sells, UNSOLD retried in the background until exit, one more sell at EXIT CHECK), M-1 (SIGHUP = stop + drain), M-2 (real
+error of every failed buy, 3 non-slippage failures stop new fires), M-3 (owner-approved: on-chain slot deadline
+--buy-max-slot-delta 1 via a Lighthouse clock assertion, verified at start-up or no start), M-4 (--sell-held resolves
+router creates), M-5 (owner-approved: every sell to staked-rpc + nozomi, --sell-retry-s 1). NOT deployed, NOT run.
+
+**How to start Run 1: DETACHED.** `bash /root/run1/run1.sh run1` now re-executes itself under `setsid nohup` with stdin
+from /dev/null (output /root/run1/run1_run1.out, engine log /root/run1/live_run1.log), so a dropped SSH session cannot
+kill it; never start the engine binary directly from an interactive shell. Same for `dry_run1.sh`. (The engine also
+treats SIGHUP as stop + drain.)
+
+**"Run stop -0.5 SOL" means: STOP NEW FIRES at a run PnL of -0.5** (balance + open positions at cost, 2 consecutive
+polls), not a cap on the loss. Positions already open (<= 2 x 1.5 SOL with --max-inflight 2) still have to be sold:
+worst case = -0.5 minus the losses of up to 2 open positions (e.g. two -20% positions: about -1.1). When it trips, the
+engine logs `OPEN AT STOP: ... worst case (all to 0) ...` with every open position and its cost.

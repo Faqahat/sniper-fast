@@ -68,11 +68,155 @@ async fn blockhash_fresh(rpc: &rpc::Rpc, max_age: Duration) -> Result<([u8; 32],
     match cached {
         Some(x) => Ok(x),
         None => {
-            let (h, v) = rpc.latest_blockhash().await.context("getLatestBlockhash")?;
+            let (h, v) = latest_blockhash2(rpc).await?;
             *BLOCKHASH_CACHE.lock().unwrap() = Some((h, Instant::now(), v));
             Ok((h, v))
         }
     }
+}
+
+// =====================================================================================================================
+// H-1 (audit 3): the exit must survive an outage of the one RPC.
+//  * --rpc-fallback-url-env NAME: a second RPC (the URL is read from env var NAME, e.g. RMR_RPC_URL; never printed). Every
+//    read of the exit path (blockhash, signature statuses, token reads, getBalance, getBlockHeight, getTransaction) goes
+//    to the primary with a 3 s cap, then to the fallback on any error / timeout (`call2`);
+//  * a sell whose fresh blockhash cannot be fetched from either RPC uses the cached one while it is <= 25 s old
+//    (lastValidBlockHeight is ~150 blocks: ~33 s at 217 ms slots); the background refresher uses the fallback too.
+// =====================================================================================================================
+static RPC_FB: std::sync::OnceLock<rpc::Rpc> = std::sync::OnceLock::new();
+const RPC_READ_TIMEOUT_2: Duration = Duration::from_secs(3);
+
+/// never print an RPC URL (they carry keys)
+fn redact(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("http") {
+        out.push_str(&rest[..i]);
+        out.push_str("<url>");
+        let r = &rest[i..];
+        let end = r.find(|c: char| c.is_whitespace() || c == ')' || c == '"').unwrap_or(r.len());
+        rest = &r[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// H-1: `method` on the primary (3 s cap), then on the fallback RPC (3 s cap) on any error / timeout
+async fn call2(rpc: &rpc::Rpc, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    let e1 = match tokio::time::timeout(RPC_READ_TIMEOUT_2, rpc.call(method, params.clone())).await {
+        Ok(Ok(v)) => return Ok(v),
+        Ok(Err(e)) => e,
+        Err(_) => anyhow::anyhow!("{method} timed out after {:?}", RPC_READ_TIMEOUT_2),
+    };
+    let Some(fb) = RPC_FB.get() else { return Err(e1) };
+    match tokio::time::timeout(RPC_READ_TIMEOUT_2, fb.call(method, params)).await {
+        Ok(Ok(v)) => { FB_USED.fetch_add(1, Ordering::Relaxed); Ok(v) }
+        Ok(Err(e2)) => Err(anyhow::anyhow!("primary: {} | fallback: {}", redact(&format!("{e1:#}")), redact(&format!("{e2:#}")))),
+        Err(_) => Err(anyhow::anyhow!("primary: {} | fallback: timed out", redact(&format!("{e1:#}")))),
+    }
+}
+static FB_USED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// getLatestBlockhash (confirmed) through call2: (hash, lastValidBlockHeight)
+async fn latest_blockhash2(rpc: &rpc::Rpc) -> Result<([u8; 32], u64)> {
+    let r = call2(rpc, "getLatestBlockhash", serde_json::json!([{ "commitment": "confirmed" }])).await.context("getLatestBlockhash")?;
+    let h = bs58::decode(r["value"]["blockhash"].as_str().context("no blockhash")?).into_vec()?;
+    Ok((h.try_into().map_err(|_| anyhow::anyhow!("bad blockhash"))?, r["value"]["lastValidBlockHeight"].as_u64().unwrap_or(0)))
+}
+
+/// H-1: a sell's blockhash: the cache if <= 1.5 s old, else a fresh one (primary, then fallback), else the cached one while
+/// it is <= 25 s old (logged). Err only when nothing usable exists.
+async fn sell_blockhash(rpc: &rpc::Rpc) -> Result<([u8; 32], u64)> {
+    match blockhash_fresh(rpc, Duration::from_millis(1500)).await {
+        Ok(x) => Ok(x),
+        Err(e) => {
+            let c = *BLOCKHASH_CACHE.lock().unwrap();
+            match c {
+                Some((h, t, v)) if t.elapsed() <= Duration::from_secs(25) => {
+                    eprintln!("  SELL-BLOCKHASH: fresh fetch failed on every RPC ({}) — using the cached blockhash ({:.1} s old)", redact(&format!("{e:#}")).chars().take(120).collect::<String>(), t.elapsed().as_secs_f64());
+                    Ok((h, v))
+                }
+                _ => Err(e.context("no fresh blockhash and the cached one is > 25 s old")),
+            }
+        }
+    }
+}
+
+/// the run's stop flag (no new fires), for the exit path (M-2 stops the run after repeated non-slippage buy failures)
+static RUN_STOP: std::sync::OnceLock<Arc<AtomicBool>> = std::sync::OnceLock::new();
+
+// =====================================================================================================================
+// M-3 (audit 3; send-path change APPROVED by the owner): an ON-CHAIN slot deadline on every buy. A Lighthouse
+// (L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95, the open-source assertion program wallets add to transactions)
+// AssertSysvarClock instruction, placed right before the pump buy: "Clock.slot <= create_slot + N" (--buy-max-slot-delta
+// N). A buy landing later fails on chain (no tokens; the base + priority fee is paid, tip transfers revert with it; a
+// Jito bundle that fails is not landed at all). Data: [ix disc, log_level 0 (silent), assertion 0 (Slot), slot u64 LE,
+// integer operator]: 12 bytes, no accounts; adds the program key (32 B) + ~15 B to the tx.
+// FAIL CLOSED: the encoding is VERIFIED ON CHAIN at start-up by simulation (zero cost: sigVerify off, nothing sent): a
+// deadline 50 slots ahead must PASS and one 50 slots behind must FAIL, both at the guard instruction; the first candidate
+// encoding that behaves so is used. If none does (program missing, encoding unknown), the engine refuses to start.
+// =====================================================================================================================
+static LIGHTHOUSE: std::sync::LazyLock<Pk> = std::sync::LazyLock::new(|| pk("L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95"));
+
+/// a verified guard encoding (ix discriminator, integer operator, whether the program is passed as account 0)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GuardEnc { disc: u8, op: u8, acct: bool }
+static SLOT_GUARD: std::sync::OnceLock<(GuardEnc, u64)> = std::sync::OnceLock::new(); // (encoding, N = --buy-max-slot-delta)
+
+fn guard_ix_enc(g: GuardEnc, deadline: u64) -> build::Ix {
+    let mut d = vec![g.disc, 0, 0];
+    d.extend(deadline.to_le_bytes());
+    d.push(g.op);
+    build::Ix { program: *LIGHTHOUSE, accounts: if g.acct { vec![build::Meta { key: *LIGHTHOUSE, signer: false, writable: false }] } else { vec![] }, data: d }
+}
+
+/// M-3: insert the slot guard (deadline slot) right before the pump buy instruction (no-op when the guard is off)
+fn with_guard(ixs: Vec<build::Ix>, deadline: Option<u64>) -> Vec<build::Ix> {
+    match (SLOT_GUARD.get(), deadline) { (Some((g, _)), Some(dl)) => insert_guard(ixs, *g, dl), _ => ixs }
+}
+fn insert_guard(mut ixs: Vec<build::Ix>, g: GuardEnc, deadline: u64) -> Vec<build::Ix> {
+    let at = ixs.iter().position(|ix| ix.program == *snipe::PUMP).unwrap_or(ixs.len());
+    ixs.insert(at, guard_ix_enc(g, deadline));
+    ixs
+}
+/// the buy's deadline slot for a create in `create_slot` (None: guard off or the create slot unknown)
+fn buy_deadline(create_slot: Option<u64>) -> Option<u64> { SLOT_GUARD.get().and_then(|(_, n)| create_slot.map(|s| s + n)) }
+
+/// M-2/M-3: the index of the slot guard and of the pump buy instruction in a signed tx (to classify a failure)
+fn ix_roles(raw: &[u8]) -> (Option<u8>, Option<u8>) {
+    let Some((tx, _)) = arbx::tx::parse_wire(raw) else { return (None, None) };
+    let at = |p: &Pk| tx.ixs.iter().position(|ix| tx.keys.get(ix.program as usize) == Some(p)).map(|i| i as u8);
+    (at(&LIGHTHOUSE), at(&snipe::PUMP))
+}
+
+/// M-3 start-up check (fail closed): find the encoding that passes a deadline 50 slots ahead and fails one 50 behind
+async fn verify_slot_guard(rpc: &rpc::Rpc, key: &SigningKey, user: Pk) -> Result<(GuardEnc, u64)> {
+    let ai = rpc.call("getAccountInfo", serde_json::json!([b58(&LIGHTHOUSE), { "encoding": "base64", "dataSlice": { "offset": 0, "length": 0 } }])).await.context("getAccountInfo(lighthouse)")?;
+    if ai["value"].is_null() || ai["value"]["executable"].as_bool() != Some(true) { bail!("the Lighthouse program {} is not an executable account on this cluster", b58(&LIGHTHOUSE)); }
+    let sim = |ix: build::Ix| async move {
+        let bh = rpc.latest_blockhash().await.map(|x| x.0).unwrap_or([0u8; 32]);
+        let msg = build::compile_v0(user, &[build::cu_limit_ix(20_000), ix], bh, &[], &[]).map_err(|e| anyhow::anyhow!(e))?;
+        let raw = build::sign(&msg, key);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&raw);
+        let v = rpc.call("simulateTransaction", serde_json::json!([b64, { "sigVerify": false, "replaceRecentBlockhash": true, "encoding": "base64", "commitment": "processed" }])).await?;
+        anyhow::Ok((v["value"]["err"].clone(), v["value"]["unitsConsumed"].as_u64().unwrap_or(0), v["context"]["slot"].as_u64().unwrap_or(0)))
+    };
+    let s = rpc.slot().await.context("getSlot")?;
+    let mut tried = Vec::new();
+    for disc in [14u8, 15] { for op in [5u8, 4] { for acct in [false, true] {
+        let g = GuardEnc { disc, op, acct };
+        let (e_ok, cu, ctx) = sim(guard_ix_enc(g, s + 50)).await?;
+        let (e_bad, _, _) = sim(guard_ix_enc(g, s.saturating_sub(50))).await?;
+        // the late case must fail AT the guard (instruction 1, after the CU-limit ix)
+        let at_guard = e_bad.get("InstructionError").and_then(|x| x.get(0)).and_then(|x| x.as_u64()) == Some(1);
+        tried.push(format!("disc {disc} op {op} acct {acct}: ahead={} behind={}", if e_ok.is_null() { "pass".into() } else { e_ok.to_string() }, if e_bad.is_null() { "pass".into() } else { e_bad.to_string() }));
+        if e_ok.is_null() && !e_bad.is_null() && at_guard {
+            let n = arg_u64("--buy-max-slot-delta", 1);
+            eprintln!("SLOT-GUARD verified on chain (simulated at slot {ctx}): Lighthouse AssertSysvarClock disc {disc} op {op} acct {acct}; {cu} CU incl. the CU-limit ix; deadline = create slot + {n}");
+            return Ok((g, n));
+        }
+    } } }
+    bail!("--buy-max-slot-delta: no Lighthouse AssertSysvarClock encoding behaved as a slot deadline in simulation — refusing to start (fail closed). Tried: {}", tried.join("; "))
 }
 
 /// M3: RPC errors seen by the land / sell polls, logged at most once per 5 s (with the count since the last line)
@@ -83,7 +227,7 @@ fn poll_err(what: &str, e: &anyhow::Error) {
     let mut g = POLL_ERR_LAST.lock().unwrap();
     if g.is_none_or(|t| t.elapsed() >= Duration::from_secs(5)) {
         *g = Some(Instant::now());
-        eprintln!("  POLL-RPC-ERROR {what}: {} (poll errors so far: {n})", format!("{e:#}").chars().take(160).collect::<String>());
+        eprintln!("  POLL-RPC-ERROR {what}: {} (poll errors so far: {n})", redact(&format!("{e:#}")).chars().take(200).collect::<String>());
     }
 }
 
@@ -186,6 +330,10 @@ struct Acct {
     last_slot: std::sync::atomic::AtomicU64,
     fired: std::sync::Mutex<std::collections::HashMap<Pk, u64>>,
     pend_sigs: std::sync::Mutex<std::collections::HashMap<Pk, String>>,
+    /// L-1 (audit 3): open positions (mint -> cost), logged with their worst-case exposure when the kill switch trips
+    open_pos: std::sync::Mutex<std::collections::HashMap<Pk, u64>>,
+    /// H-1: the Launch of every landed buy (the exit sells of HELD-AT-EXIT mints need its accounts)
+    launches: std::sync::Mutex<std::collections::HashMap<Pk, Launch>>,
 }
 static ACCT: std::sync::LazyLock<Acct> = std::sync::LazyLock::new(Acct::default);
 fn acct_bump() { ACCT.seq.fetch_add(1, Ordering::SeqCst); }
@@ -232,6 +380,7 @@ impl Pos {
         a.budget_used.fetch_add(cost.saturating_sub(T22_ATA_RENT).max(self.spend), Ordering::SeqCst);
         a.landed_buys.fetch_add(1, Ordering::SeqCst);
         a.fired.lock().unwrap().insert(self.mint, land_slot);
+        a.open_pos.lock().unwrap().insert(self.mint, cost);
         acct_slot(land_slot);
         acct_bump();
         self.state = PosState::Open;
@@ -265,6 +414,7 @@ impl Pos {
     fn sold(&mut self, ctx: u64) {
         if self.state != PosState::Open { return; }
         ACCT.open.fetch_sub(self.cost, Ordering::SeqCst);
+        ACCT.open_pos.lock().unwrap().remove(&self.mint);
         acct_slot(ctx);
         acct_bump();
         self.state = PosState::Closed;
@@ -276,7 +426,7 @@ impl Drop for Pos {
             PosState::Pending => self.unpend(),
             // ended while still holding tokens (UNSOLD / error): no longer valued at cost (the balance shows the loss, so
             // the kill switch sees it); the mint is re-read at exit (HELD-AT-EXIT)
-            PosState::Open => { ACCT.open.fetch_sub(self.cost, Ordering::SeqCst); acct_bump(); }
+            PosState::Open => { ACCT.open.fetch_sub(self.cost, Ordering::SeqCst); ACCT.open_pos.lock().unwrap().remove(&self.mint); acct_bump(); }
             PosState::Closed => {}
         }
         if self.state != PosState::Pending && !self.realized_done && self.cost > 0 { ACCT.realized.fetch_sub(self.cost as i64, Ordering::SeqCst); }
@@ -350,10 +500,10 @@ fn tok_parse(v: &serde_json::Value, min_slot: u64) -> Tok {
 async fn tok_read(rpc: &rpc::Rpc, ata: &Pk, commitment: &str, min_slot: u64) -> Tok {
     let mut cfg = serde_json::json!({ "encoding": "base64", "commitment": commitment, "dataSlice": { "offset": 64, "length": 8 } });
     if min_slot > 0 { cfg["minContextSlot"] = serde_json::json!(min_slot); }
-    match tokio::time::timeout(RPC_READ_TIMEOUT, rpc.call("getAccountInfo", serde_json::json!([b58(ata), cfg]))).await {
-        Ok(Ok(v)) => tok_parse(&v, min_slot),
-        Ok(Err(e)) => { poll_err("getAccountInfo(token)", &e); Tok::Unknown }
-        Err(_) => { poll_err("getAccountInfo(token)", &anyhow::anyhow!("timed out after {:?}", RPC_READ_TIMEOUT)); Tok::Unknown }
+    // H-1: primary then the fallback RPC, each capped at 3 s
+    match call2(rpc, "getAccountInfo", serde_json::json!([b58(ata), cfg])).await {
+        Ok(v) => tok_parse(&v, min_slot),
+        Err(e) => { poll_err("getAccountInfo(token)", &e); Tok::Unknown }
     }
 }
 
@@ -371,7 +521,7 @@ async fn tok_read_retry(rpc: &rpc::Rpc, ata: &Pk, commitment: &str, min_slot: u6
 async fn native_balance_at(rpc: &rpc::Rpc, who: Pk, min_slot: u64) -> Result<u64> {
     let mut cfg = serde_json::json!({ "commitment": "processed" });
     if min_slot > 0 { cfg["minContextSlot"] = serde_json::json!(min_slot); }
-    let v = tokio::time::timeout(RPC_READ_TIMEOUT, rpc.call("getBalance", serde_json::json!([b58(&who), cfg]))).await.map_err(|_| anyhow::anyhow!("getBalance timed out"))?.context("getBalance")?;
+    let v = call2(rpc, "getBalance", serde_json::json!([b58(&who), cfg])).await.context("getBalance")?;
     v["value"].as_u64().context("getBalance: no value")
 }
 
@@ -665,17 +815,37 @@ fn main() -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_probe: bool, shadow: bool, round_trip: bool, snipe_once: bool, simulate: bool, paper_trade: bool, live: bool) -> Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
+    let _ = RUN_STOP.set(stop.clone());
     let infra = INFRA_STOP.clone();
+    // H-1 (audit 3): --rpc-fallback-url-env NAME: the second RPC of the exit path (the URL from env var NAME, never printed).
+    // Given but empty / missing: refuse to start (fail closed).
+    if let Some(name) = arg("--rpc-fallback-url-env") {
+        let url = std::env::var(&name).ok().filter(|u| !u.trim().is_empty()).with_context(|| format!("--rpc-fallback-url-env {name}: the env var is empty or missing — refusing to start"))?;
+        let url = config::expand(url.trim()).with_context(|| format!("--rpc-fallback-url-env {name}: names an empty env var"))?;
+        let fb = rpc::Rpc::new(url);
+        match tokio::time::timeout(Duration::from_secs(5), fb.slot()).await {
+            Ok(Ok(sl)) => eprintln!("RPC-FALLBACK: {name} answers (slot {sl}); the exit path's reads + sell blockhashes fall back to it"),
+            Ok(Err(e)) => eprintln!("RPC-FALLBACK: {name} did NOT answer getSlot at start ({}) — kept as the fallback anyway", redact(&format!("{e:#}")).chars().take(120).collect::<String>()),
+            Err(_) => eprintln!("RPC-FALLBACK: {name} did not answer getSlot within 5 s at start — kept as the fallback anyway"),
+        }
+        let _ = RPC_FB.set(fb);
+    }
+    // M-3 (audit 3): --buy-max-slot-delta N: the on-chain slot deadline, verified by simulation now or no start (fail closed)
+    if has("--buy-max-slot-delta") {
+        let g = verify_slot_guard(&rpc, &key, user).await.context("--buy-max-slot-delta")?;
+        let _ = SLOT_GUARD.set(g);
+    }
     // H1 (audit 2026-10-20): SIGTERM / SIGINT = stop new fires and DRAIN: the open positions finish their exit (the drain
     // is bounded, then every mint still held is logged HELD-AT-EXIT). A second signal changes nothing (still draining).
     // Only the snipe loop installs it (the other modes exit on their own); the guard stops the engine this way.
     if snipe_once {
         use tokio::signal::unix::{signal, SignalKind};
-        let (mut term, mut int) = (signal(SignalKind::terminate())?, signal(SignalKind::interrupt())?);
+        // M-1 (audit 3): SIGHUP too (a dropped SSH session): the same stop + drain, never the default kill
+        let (mut term, mut int, mut hup) = (signal(SignalKind::terminate())?, signal(SignalKind::interrupt())?, signal(SignalKind::hangup())?);
         let st = stop.clone();
         tokio::spawn(async move {
             loop {
-                let name = tokio::select! { _ = term.recv() => "SIGTERM", _ = int.recv() => "SIGINT" };
+                let name = tokio::select! { _ = term.recv() => "SIGTERM", _ = int.recv() => "SIGINT", _ = hup.recv() => "SIGHUP" };
                 eprintln!("  SIGNAL {name}: stopping new fires; open positions keep selling (drain), then HELD-AT-EXIT lists anything still held");
                 st.store(true, Ordering::SeqCst);
             }
@@ -794,7 +964,7 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         let (rpc, stop) = (rpc.clone(), infra.clone());
         tokio::spawn(async move {
             while !stop.load(Ordering::Relaxed) {
-                if let Ok((h, v)) = rpc.latest_blockhash().await {
+                if let Ok((h, v)) = latest_blockhash2(&rpc).await {
                     *BLOCKHASH_CACHE.lock().unwrap() = Some((h, Instant::now(), v));
                 }
                 tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1314,7 +1484,9 @@ fn build_buy(user: Pk, launch: &Launch, nonce: Option<(Pk, Pk)>, default_spend: 
 /// M3: when / how the landing was SEEN (`t_seen`; via "status" = getSignatureStatuses with its exact slot, "ata" = the
 /// token account changed: the slot is the RPC's context slot, an upper bound). L1: `last_valid` = the blockhash's last
 /// valid block height (0 unknown): past it a never-seen tx can no longer land.
-struct Landed { sig: String, send_slot: u64, land_slot: Option<u64>, ok: bool, t_seen: Option<Instant>, via: &'static str, last_valid: u64 }
+/// M-2: `err` = the on-chain error of a landed-failed tx (signature status); `roles` = (slot-guard ix, pump buy ix) indices.
+struct Landed { sig: String, send_slot: u64, land_slot: Option<u64>, ok: bool, t_seen: Option<Instant>, via: &'static str, last_valid: u64,
+    err: Option<serde_json::Value>, roles: (Option<u8>, Option<u8>) }
 
 /// M3: what else a land poll watches besides the signature status: the token account (a buy: tokens appear; a sell: the
 /// balance drops below the amount held before it / the account is closed). Landing is then seen even when every
@@ -1346,6 +1518,7 @@ async fn send_and_poll_at(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc
     // one tip per tip family for every path in the fan-out, the CU limit raised for the extra transfers; a tx over the
     // 1232-byte packet limit drops paths from the end (their tips with them) until it fits
     let (raw, tips) = lat::build_tx(key, user, ixs, &mut fan, blockhash)?;
+    let roles = ix_roles(&raw); // M-2
     let sig = send::first_signature(&raw).context("signed tx has no signature")?;
     let mut sig_bytes = [0u8; 64];
     sig_bytes.copy_from_slice(&bs58::decode(&sig).into_vec()?);
@@ -1380,7 +1553,8 @@ async fn send_and_poll_at(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc
         }
         if !any_ok { bail!("send refused on every path: {}", errs.join(" / ")); }
         fix2::spawn_jito_poll(&fan, &sig, 0);
-        let out = poll_land(rpc, sig.clone(), sig_bytes, send_slot, land_timeout, watch, last_valid).await;
+        let mut out = poll_land(rpc, sig.clone(), sig_bytes, send_slot, land_timeout, watch, last_valid).await;
+        out.roles = roles;
         jito_results(&fan, &meta);
         fix2::spawn_landed_via(&fan, &meta, out.land_slot, 0);
         return Ok(out);
@@ -1400,7 +1574,8 @@ async fn send_and_poll_at(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc
             None => bail!("send refused: {e}"),
         }
     }
-    let out = poll_land(rpc, sig, sig_bytes, send_slot, land_timeout, watch, last_valid).await;
+    let mut out = poll_land(rpc, sig, sig_bytes, send_slot, land_timeout, watch, last_valid).await;
+    out.roles = roles;
     if is_buy { jito_results(&fan, &meta); }
     Ok(out)
 }
@@ -1422,7 +1597,7 @@ fn fee_str(cu: u64, price: u64, tips: u64) -> String {
 /// poll getSignatureStatuses (and, M3, the token account of `watch` in the same round, concurrently) until the tx lands
 /// or `land_timeout`
 async fn poll_land(rpc: &rpc::Rpc, sig: String, sig_bytes: [u8; 64], send_slot: u64, land_timeout: Duration, watch: Watch, last_valid: u64) -> Landed {
-    let mut out = Landed { sig, send_slot, land_slot: None, ok: false, t_seen: None, via: "", last_valid };
+    let mut out = Landed { sig, send_slot, land_slot: None, ok: false, t_seen: None, via: "", last_valid, err: None, roles: (None, None) };
     let deadline = Instant::now() + land_timeout;
     // DET: --land-poll-ms (default 300 = unchanged). The buy's land is only noticed at the next poll, so the first
     // sell leg (and the exit clock) starts up to one poll late; 100 ms costs ~10 getSignatureStatuses/s per open send.
@@ -1443,15 +1618,16 @@ async fn land_check(rpc: &rpc::Rpc, sig_bytes: &[u8; 64], watch: Watch, out: &mu
         Watch::SellAta(a, _, min) => Some(tok_read(rpc, &a, "processed", min).await),
         Watch::None => None,
     } };
-    let sigs = [*sig_bytes];
-    let (st, tk) = tokio::join!(tokio::time::timeout(RPC_READ_TIMEOUT, rpc.statuses(&sigs)), tk);
+    // H-1 primary then fallback; M-2 the status keeps the on-chain error
+    let ss = [bs58::encode(sig_bytes).into_string()];
+    let (st, tk) = tokio::join!(call2(rpc, "getSignatureStatuses", serde_json::json!([ss, { "searchTransactionHistory": false }])), tk);
     match st {
-        Ok(Ok(v)) => if let Some(Some((land, ok))) = v.into_iter().next() {
-            out.land_slot = Some(land); out.ok = ok; out.t_seen = Some(Instant::now()); out.via = "status";
+        Ok(v) => if let Some(x) = v["value"].get(0).filter(|x| !x.is_null()) {
+            out.land_slot = Some(x["slot"].as_u64().unwrap_or(0)); out.ok = x["err"].is_null(); out.t_seen = Some(Instant::now()); out.via = "status";
+            out.err = if x["err"].is_null() { None } else { Some(x["err"].clone()) };
             return true;
         },
-        Ok(Err(e)) => poll_err("getSignatureStatuses", &e),
-        Err(_) => poll_err("getSignatureStatuses", &anyhow::anyhow!("timed out after {:?}", RPC_READ_TIMEOUT)),
+        Err(e) => poll_err("getSignatureStatuses", &e),
     }
     let (landed, ctx) = match (watch, tk) {
         (Watch::BuyAta(_), Some(Tok::Amount(a, c))) => (a > 0, c),
@@ -1480,54 +1656,64 @@ fn jito_results(fan: &[Arc<send::Path>], meta: &lat::Meta) {
 
 /// native SOL balance of `who` (lamports, processed commitment).
 async fn native_balance(rpc: &rpc::Rpc, who: Pk) -> Result<u64> {
-    let v = rpc.call("getBalance", serde_json::json!([b58(&who), { "commitment": "processed" }])).await.context("getBalance")?;
+    let v = call2(rpc, "getBalance", serde_json::json!([b58(&who), { "commitment": "processed" }])).await.context("getBalance")?;
     v["value"].as_u64().context("getBalance: no value")
 }
 
 /// --sell-held: for each mint, rebuild its Launch from the create tx (oldest signature, raw wire bytes -> the same
 /// parser as the shred feed), then sell our whole Token-2022 balance via the SELL path and close the ATA (rent back).
 async fn run_sell_held(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, list: &str) -> Result<()> {
-    let cu = sell_cu_limit();
-    let price = arg_u64("--sell-cu-price-micro", 1_500_000);
     for m in list.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()) {
         let mint = pk(m);
         let ata = pda::ata(&user, &mint, &pda::TOKEN_2022);
-        // N9: an RPC error is UNKNOWN (retried, then logged loudly), never "balance 0"; 0 = a confirmed read of 0 / closed
+        // N9: an RPC error is UNKNOWN (retried, then logged loudly), never "balance 0"; 0 = a confirmed read of 0 / closed.
+        // H-1: every read goes to the primary, then to --rpc-fallback-url-env
         let amount = match tok_read_retry(rpc, &ata, "confirmed", 0, 8).await {
             Tok::Amount(a, _) if a > 0 => a,
             Tok::Unknown => { eprintln!("  SELL-HELD {m}: TOKEN BALANCE UNREADABLE after 8 reads — NOT sold, NOT known to be 0: re-run --sell-held {m}"); continue; }
             t => { eprintln!("  SELL-HELD {m}: confirmed balance 0 ({}) — nothing to sell", t.show()); continue; }
         };
-        // oldest signature = the create
-        let mut before: Option<String> = None;
-        let mut oldest: Option<String> = None;
-        for _ in 0..40 {
-            let mut o = serde_json::json!({ "limit": 1000 });
-            if let Some(b) = &before { o["before"] = serde_json::json!(b); }
-            let v = match rpc.call("getSignaturesForAddress", serde_json::json!([m, o])).await { Ok(v) => v, Err(e) => { eprintln!("  SELL-HELD {m}: sigs failed: {e}"); break; } };
-            let arr = v.as_array().cloned().unwrap_or_default();
-            if arr.is_empty() { break; }
-            let last = arr.last().and_then(|x| x["signature"].as_str()).map(|x| x.to_string());
-            oldest = last.clone();
-            if arr.len() < 1000 { break; }
-            before = last;
-        }
-        let Some(csig) = oldest else { eprintln!("  SELL-HELD {m}: no signatures — skip"); continue; };
-        let t = match rpc.call("getTransaction", serde_json::json!([csig, { "encoding": "base64", "maxSupportedTransactionVersion": 1, "commitment": "confirmed" }])).await {
-            Ok(t) => t,
-            Err(e) => { eprintln!("  SELL-HELD {m}: getTransaction failed: {e} — skip"); continue; }
-        };
-        let raw = t["transaction"][0].as_str().and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok());
-        let Some(raw) = raw else { eprintln!("  SELL-HELD {m}: create tx not decodable — skip"); continue; };
-        let Some((tx, _)) = arbx::tx::parse_wire(&raw) else { eprintln!("  SELL-HELD {m}: parse_wire failed — skip"); continue; };
-        let Some(launch) = snipe::detect_launch(&tx) else { eprintln!("  SELL-HELD {m}: oldest tx is not a create — skip"); continue; };
-        let ixs = snipe_build::sell_message_ixs(user, &launch, amount, 0, cu, price, false);
-        match send_and_poll(key, user, rpc, sp(path), &ixs, Duration::from_secs(30)).await {
-            Ok(l) => eprintln!("  SELL-HELD {m}: qty={amount} sig={} land_slot={:?} ok={}", l.sig, l.land_slot, l.ok),
-            Err(e) => eprintln!("  SELL-HELD {m}: send failed: {e}"),
-        }
+        let (launch, how) = resolve_launch(rpc, &mint).await;
+        eprintln!("  SELL-HELD {m}: {amount} tokens; accounts from {how} (bonding curve {}, buyback {})", b58(&launch.bonding_curve), b58(&launch.buyback_fee_recipient));
+        // the live exit's loop: confirmed-zero rule, fallback path (M-5), fallback RPC + cached blockhash (H-1), CU bump
+        let o = SellOpts { read_first: false, wait: Duration::from_secs(arg_u64("--sell-retry-s", 2).max(1)), deadline: Duration::from_secs(arg_u64("--sell-deadline-s", 60).max(30)), bg: false };
+        let out = sell_until_zero(key, user, rpc, sp(path), &launch, &ata, Some(amount), amount, 0, o).await;
+        eprintln!("  SELL-HELD {m}: {} after {} attempt(s)", if out.sold_at.is_some() { "SOLD (confirmed 0)" } else { "NOT SOLD (see UNSOLD above)" }, out.attempts);
     }
     Ok(())
+}
+
+/// M-4 (audit 3): a mint's Launch for a sell outside the live flow (--sell-held, the exit sells): the SAME resolution as
+/// the live detector — the oldest transaction of the mint (its create), parsed from raw wire bytes, as a top-level
+/// create (detect_launch) or else pump's router create (router_launch, CPI). Fallback when neither works: the accounts
+/// derived from the mint (sell_v3 needs no creator; DEFAULT_BUYBACK as the buyback recipient). Reads go through call2.
+async fn resolve_launch(rpc: &rpc::Rpc, mint: &Pk) -> (Launch, &'static str) {
+    let m = b58(mint);
+    let derived = || snipe_build::launch_from_target(*mint, *mint);
+    let mut before: Option<String> = None;
+    let mut oldest: Option<String> = None;
+    for _ in 0..40 {
+        let mut o = serde_json::json!({ "limit": 1000 });
+        if let Some(b) = &before { o["before"] = serde_json::json!(b); }
+        let v = match call2(rpc, "getSignaturesForAddress", serde_json::json!([m, o])).await { Ok(v) => v, Err(e) => { eprintln!("  RESOLVE {m}: signatures failed: {}", redact(&format!("{e:#}"))); break; } };
+        let arr = v.as_array().cloned().unwrap_or_default();
+        if arr.is_empty() { break; }
+        let last = arr.last().and_then(|x| x["signature"].as_str()).map(|x| x.to_string());
+        oldest = last.clone();
+        if arr.len() < 1000 { break; }
+        before = last;
+    }
+    let Some(csig) = oldest else { return (derived(), "derived from the mint (no signatures)") };
+    let Ok(t) = call2(rpc, "getTransaction", serde_json::json!([csig, { "encoding": "base64", "maxSupportedTransactionVersion": 0, "commitment": "confirmed" }])).await else { return (derived(), "derived from the mint (create tx unreadable)") };
+    let Some(raw) = t["transaction"][0].as_str().and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok()) else { return (derived(), "derived from the mint (create tx not decodable)") };
+    let Some((mut tx, _)) = arbx::tx::parse_wire(&raw) else { return (derived(), "derived from the mint (parse failed)") };
+    // lookup-table addresses as the RPC resolved them (a router create may reference the curve through a table)
+    let la = &t["meta"]["loadedAddresses"];
+    let keys = |k: &str| -> Vec<Pk> { la[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(pk)).collect()).unwrap_or_default() };
+    if !tx.lookups.is_empty() { tx.loaded = Some((keys("writable"), keys("readonly"))); }
+    if let Some(l) = snipe::detect_launch(&tx).filter(|l| l.mint == *mint) { return (l, "its create tx (top-level create)"); }
+    if let Some(l) = router_launch(&tx).filter(|l| l.mint == *mint) { return (l, "its create tx (router create)"); }
+    (derived(), "derived from the mint (oldest tx is not a create of it)")
 }
 
 /// N4: the sells' own CU limit (--sell-cu-limit, default 120,000: the engine's sell tx measured 44-56k CU for SellV3 +
@@ -1660,6 +1846,8 @@ async fn run_simulate(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::
         let Some(launch) = snipe::detect_launch(&a.tx) else { continue };
         if !allow_nonvanilla && !launch.is_snipeable() { continue; }
         if snipe::create_quote_mint(&a.tx).is_some() || !launch.is_create_v2 || !seen.first(launch.mint) { continue; }
+        // L-12 (audit 3): --sim-cashback-only: only cashback / holder-reward launches (their sell is otherwise unverified)
+        if has("--sim-cashback-only") && !(launch.is_cashback || launch.is_holder_reward) { continue; }
         eprintln!("  DETECTED launch slot={} mint={} dev_buy={} — simulating a {} lamports buy in {} ms", a.slot, b58(&launch.mint), launch.dev_buy_lamports, spend, delay.as_millis());
         tokio::time::sleep(delay).await;
         // N4 --sim-sell: simulate the engine's SELL (as a holder of this fresh token) instead of the buy
@@ -1730,6 +1918,7 @@ async fn simulate_sell(key: &SigningKey, rpc: &rpc::Rpc, launch: &Launch) -> Res
         println!("\n========== SIMULATE SELL RESULT ==========");
         println!("mint             {}", b58(&mint));
         println!("as holder        {} (token account {}, {} tokens, {:.3} SOL)", b58(&owner), addr, amount, lam as f64 / 1e9);
+        println!("launch kind      cashback={} holder_reward={} mayhem={}", launch.is_cashback, launch.is_holder_reward, launch.is_mayhem);
         println!("err              {}", val["err"]);
         println!("unitsConsumed    {}", val["unitsConsumed"]);
         if let Some(u) = val["unitsConsumed"].as_u64() {
@@ -1763,6 +1952,10 @@ async fn simulate_buy(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, launch: &Launc
         if tips.len() > 2 { lat::bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 2)); }
         ixs = v;
     }
+    // M-3: with --buy-max-slot-delta the buy carries the on-chain slot guard, exactly as live (deadline = now + 100 here,
+    // so it passes: the CU of the guard is what this checks)
+    let guarded = SLOT_GUARD.get().is_some();
+    if guarded { let s = rpc.slot().await.unwrap_or(0); ixs = with_guard(ixs, Some(s + 100)); }
     let cu_limit = ixs.iter().find(|ix| ix.program == arbx::tx::COMPUTE_BUDGET && ix.data.len() == 5 && ix.data[0] == 2).map(|ix| u32::from_le_bytes(ix.data[1..5].try_into().unwrap())).unwrap_or(200_000);
     let bh = rpc.latest_blockhash().await.map(|x| x.0).unwrap_or([0u8; 32]); // replaced by replaceRecentBlockhash anyway
     let msg = build::compile_v0(user, &ixs, bh, &[], &[]).map_err(|e| anyhow::anyhow!(e))?;
@@ -1772,13 +1965,14 @@ async fn simulate_buy(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, launch: &Launc
     let v = rpc.call("simulateTransaction", serde_json::json!([b64, opts])).await.context("simulateTransaction")?;
     let val = &v["value"];
     println!("\n========== SIMULATE BUY RESULT ==========");
+    println!("tx bytes         {} (limit 1232){}", raw.len(), if guarded { " incl. the slot guard" } else { "" });
     println!("mint             {}", b58(&launch.mint));
     println!("spend_lamports   {} ({:.6} SOL)", spend, spend as f64 / 1e9);
     println!("err              {}", val["err"]);
     println!("unitsConsumed    {}", val["unitsConsumed"]);
     if let Some(u) = val["unitsConsumed"].as_u64() {
         let pctu = 100.0 * u as f64 / cu_limit.max(1) as f64;
-        println!("CU-CHECK         {u} of the CU limit {cu_limit} ({pctu:.1}%) with {} tip transfer(s): {}", tips.len(),
+        println!("CU-CHECK         {u} of the CU limit {cu_limit} ({pctu:.1}%) with {} tip transfer(s){}: {}", tips.len(), if guarded { " + the M-3 slot guard" } else { "" },
             if !val["err"].is_null() && val["err"].to_string().contains("ComputeBudgetExceeded") { "FAIL: ComputeBudgetExceeded — raise --cu-limit" }
             else if pctu > 90.0 { "WARN: < 10% headroom — raise --cu-limit" } else { "OK" });
     }
@@ -2770,8 +2964,14 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         tokio::spawn(async move {
             let mut st = KsState::default();
             let mut fails = 0u32;
+            let mut alpen_warned = false;
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
+                // L-7 (audit 3): a run that STRADDLES Alpenglow (2026-10-21 14:50 UTC) is warned when it crosses, not only at start
+                if !alpen_warned && std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) >= 1_792_594_200 {
+                    alpen_warned = true;
+                    eprintln!("  WARNING: Alpenglow time reached DURING the run (2026-10-21 14:50 UTC): slot timing may change — --max-create-ms, --hold-ms 450 (= 3 slots at 217 ms) and the sim were measured before it. Consider stopping the run.");
+                }
                 if stop2.load(Ordering::Relaxed) { break; }
                 // L3: landings from here on may or may not be in this read: count them against the balance until the next read
                 let since = ACCT.landed_since_bal.swap(0, Ordering::SeqCst);
@@ -2797,6 +2997,13 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                             KsVerdict::Lock => format!("PROFIT-LOCK: run PnL {:.6} SOL fell below floor {:.6}", pnl as f64 / 1e9, st.floor.unwrap_or(0) as f64 / 1e9),
                         };
                         eprintln!("  {why} — stopping new fires (open positions finish their exit).");
+                        // L-1 (audit 3): the -max-loss cap stops NEW fires; positions already open are still exposed. Log them
+                        // with the worst case (each one going to 0) so the gap is explicit.
+                        let open_list: Vec<(Pk, u64)> = ACCT.open_pos.lock().unwrap().iter().map(|(k, v)| (*k, *v)).collect();
+                        let worst: u64 = open_list.iter().map(|x| x.1).sum();
+                        eprintln!("  OPEN AT STOP: {} position(s), {:.6} SOL at cost: {} — worst case (all to 0): run PnL {:.6} SOL (the cap stops new fires, not these)",
+                            open_list.len(), worst as f64 / 1e9, open_list.iter().map(|(m, c)| format!("{}={:.4}", &b58(m)[..8], *c as f64 / 1e9)).collect::<Vec<_>>().join(" "),
+                            (pnl - worst as i64) as f64 / 1e9);
                         stop2.store(true, Ordering::SeqCst);
                         break;
                     }
@@ -3053,13 +3260,33 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     eprintln!("\nSNIPE-LIVE: window ended — draining {} in-flight positions (up to {drain_s} s) ...", max_inflight - sem.available_permits());
     let drained = tokio::time::timeout(Duration::from_secs(drain_s), sem.acquire_many(max_inflight as u32)).await.is_ok();
     if !drained { eprintln!("  DRAIN TIMEOUT after {drain_s} s: {} position(s) still running", max_inflight - sem.available_permits()); }
+    // H-1: UNSOLD positions retrying in the background get --unsold-drain-s (default 120) more, then give up
+    let ud = arg_u64("--unsold-drain-s", 120);
+    if UNSOLD_BG.load(Ordering::SeqCst) > 0 {
+        eprintln!("  DRAIN: {} UNSOLD position(s) still retrying in the background — up to {ud} s more", UNSOLD_BG.load(Ordering::SeqCst));
+        let t = Instant::now();
+        while UNSOLD_BG.load(Ordering::SeqCst) > 0 && t.elapsed() < Duration::from_secs(ud) { tokio::time::sleep(Duration::from_millis(500)).await; }
+    }
+    SELL_GIVEUP.store(true, Ordering::SeqCst);
+    let t = Instant::now();
+    while UNSOLD_BG.load(Ordering::SeqCst) > 0 && t.elapsed() < Duration::from_secs(40) { tokio::time::sleep(Duration::from_millis(250)).await; }
     // H1 + N1/N3: EVERY mint this run fired on is re-read at CONFIRMED commitment (from a node at/after its buy's landing):
     // anything not 0 is HELD-AT-EXIT, whatever the exit logic concluded; an unreadable account is listed too
     let fired_list: Vec<(Pk, u64)> = ACCT.fired.lock().unwrap().iter().map(|(k, v)| (*k, *v)).collect();
     let mut held_n = 0;
     for (m, slot) in &fired_list {
         let ata = pda::ata(&user, m, &pda::TOKEN_2022);
-        match tok_read_retry(rpc, &ata, "confirmed", *slot, 6).await {
+        let mut t = tok_read_retry(rpc, &ata, "confirmed", *slot, 6).await;
+        // H-1 step 4: anything still held gets ONE more exit sell (15 s: the fallback path, fallback RPC, cached blockhash)
+        if t.zero_at().is_none() {
+            let launch = match ACCT.launches.lock().unwrap().get(m).cloned() { Some(l) => (l, "the live create"), None => (snipe_build::launch_from_target(*m, *m), "derived") };
+            let launch = if launch.1 == "derived" { resolve_launch(rpc, m).await.0 } else { launch.0 };
+            eprintln!("  EXIT-SELL mint={} tokens={} — one last sell before the exit", b58(m), t.show());
+            let o = SellOpts { read_first: false, wait: Duration::from_secs(2), deadline: Duration::from_secs(15), bg: false };
+            let out = sell_until_zero(&key, user, rpc, path, &launch, &ata, t.amount().filter(|a| *a > 0), t.amount().unwrap_or(1).max(1), *slot, o).await;
+            if let Some(c) = out.sold_at { t = Tok::Closed(c); }
+        }
+        match t {
             t if t.zero_at().is_some() => {}
             Tok::Unknown => { held_n += 1; eprintln!("  HELD-AT-EXIT? mint={} tokens=UNREADABLE (6 confirmed reads failed) — check by hand, sell with --sell-held {}", b58(m), b58(m)); }
             t => { held_n += 1; eprintln!("  HELD-AT-EXIT mint={} tokens={} — sell by hand: --sell-held {}", b58(m), t.show(), b58(m)); }
@@ -3148,6 +3375,8 @@ async fn round_trip_launch(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Ar
         }
     };
     let (buy_ixs, spend) = build_buy(user, launch, None, 2_000_000, min_out); // default 0.002 SOL
+    // M-3: the on-chain slot deadline (create slot + N) when the guard is on and the create slot is known
+    let buy_ixs = with_guard(buy_ixs, buy_deadline(create_slot));
     if spend > cap_lamports { bail!("REFUSED: buy spend {} lamports exceeds --max-sol cap {} lamports ({:.6} SOL)", spend, cap_lamports, max_sol); }
     let fee_est = arg_u64("--cu-limit", 120_000).saturating_mul(arg_u64("--cu-price-micro", 3_000_000)).div_ceil(1_000_000) + 5000;
     let pos = pos.unwrap_or_else(|| Pos::new(mint, spend, fee_est, ""));
@@ -3160,7 +3389,7 @@ async fn round_trip_launch(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Ar
     let (buy, bal_start) = tokio::join!(send_and_poll_at(key, user, rpc, path, &buy_ixs, land_timeout, create_slot, Watch::BuyAta(ata)),
                                         async { native_balance(rpc, user).await.unwrap_or(0) });
     let buy = buy?;
-    round_trip_tail(key, user, rpc, path, launch, buy, bal_start, spend, land_timeout, create_slot, min_out, fee_est, pos).await
+    round_trip_tail(key, user, rpc, path, launch, buy, bal_start, spend, land_timeout, create_slot, min_out, fee_est, fee_est, pos).await
 }
 
 /// FAST: the buy was written by fastfire::Fast::fire; poll its land, then the same exit as round_trip_launch
@@ -3170,17 +3399,20 @@ async fn round_trip_fast(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     if spend > cap_lamports { bail!("REFUSED: buy spend {} lamports exceeds --max-sol cap {} lamports ({:.6} SOL)", spend, cap_lamports, max_sol); }
     let send_slot = match send::tpu::SLOT.load(Ordering::Relaxed) { 0 => rpc.slot().await.unwrap_or(0), s => s };
     let ata = pda::ata(&user, &p.launch.mint, &pda::TOKEN_2022);
-    let (buy, bal_start) = tokio::join!(poll_land(rpc, p.meta.sig.clone(), p.sig, send_slot, land_timeout, Watch::BuyAta(ata), p.bh_valid), async { native_balance(rpc, user).await.unwrap_or(0) });
+    let (mut buy, bal_start) = tokio::join!(poll_land(rpc, p.meta.sig.clone(), p.sig, send_slot, land_timeout, Watch::BuyAta(ata), p.bh_valid), async { native_balance(rpc, user).await.unwrap_or(0) });
+    buy.roles = p.roles;
     jito_results(&p.fan, &p.meta);
     fix2::spawn_landed_via(&p.fan, &p.meta, buy.land_slot, p.id);
-    round_trip_tail(key, user, rpc, path, &p.launch, buy, bal_start, spend, land_timeout, Some(p.slot), p.min_out, fee, pos).await
+    // L-8: a failed buy pays its fee without the tips (they revert with it)
+    let revert_fee = fee.saturating_sub(p.meta.tips);
+    round_trip_tail(key, user, rpc, path, &p.launch, buy, bal_start, spend, land_timeout, Some(p.slot), p.min_out, fee, revert_fee, pos).await
 }
 
 /// the shared exit after the buy's land poll: late-landing watch, revert check, token balance, hold, sell until the token
 /// account reads 0, report. `pos` carries the run accounting (C1: open from landing with tokens until sold).
 #[allow(clippy::too_many_arguments)]
 async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, launch: &Launch, mut buy: Landed, bal_start: u64, spend: u64,
-    land_timeout: Duration, create_slot: Option<u64>, min_out: u64, fee_est: u64, mut pos: Pos) -> Result<()> {
+    land_timeout: Duration, create_slot: Option<u64>, min_out: u64, fee_est: u64, revert_fee: u64, mut pos: Pos) -> Result<()> {
     let mint = launch.mint;
     let ata = pda::ata(&user, &mint, &pda::TOKEN_2022);
     // FIX2 --sell-robust: a buy not seen within the land poll may still land. N3 (re-audit): keep watching its signature
@@ -3207,8 +3439,8 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
             }
             if buy.last_valid > 0 && last_h.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
                 last_h = Some(Instant::now());
-                let h = tokio::time::timeout(RPC_READ_TIMEOUT, rpc.call("getBlockHeight", serde_json::json!([{ "commitment": "confirmed" }]))).await;
-                if let Ok(Ok(h)) = h.map(|r| r.map(|v| v.as_u64().unwrap_or(0))) {
+                let h = call2(rpc, "getBlockHeight", serde_json::json!([{ "commitment": "confirmed" }])).await;
+                if let Ok(h) = h.map(|v| v.as_u64().unwrap_or(0)) {
                     if h > buy.last_valid {
                         if land_check(rpc, &sb, Watch::BuyAta(ata), &mut buy).await { eprintln!("  LATE-LAND: buy seen via {} (final check)", buy.via); break; }
                         eprintln!("  BUY blockhash dead (confirmed block height {h} > last valid {}): it can no longer land — releasing its in-flight slot", buy.last_valid);
@@ -3228,12 +3460,30 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         None if unresolved => { pos.unresolved(); bail!("BUY unresolved (sig {}) — no sell; PENDING-AT-EXIT", buy.sig) }
         None => { pos.not_landed(); bail!("BUY did not land within {:?} (sig {}) — no position, no sell", land_timeout, buy.sig) }
     }
-    // Fill-cap revert: the buy landed but failed (min_tokens_out not met: fill worse than the cap). No tokens bought,
-    // cost = base + priority fee (the tip transfers revert with it). The intended "don't trade a bad fill" outcome.
+    // M-2 (audit 3): a buy that landed FAILED: its real on-chain error is logged and classified. "slippage" = the fill cap
+    // working (pump's min_tokens_out error), "slot-deadline" = the M-3 guard (landed after create slot + N, by design),
+    // "other" = anything else (layout change, compute budget, accounts ...): 3 of those in a run stop new fires.
+    // L-8: the fee booked is the buy's real CU limit (incl. the +300/tip bump) x price + base; tips revert with the tx.
     if !buy.ok {
-        let fee = arg_u64("--cu-limit", 120_000).saturating_mul(arg_u64("--cu-price-micro", 3_000_000)).div_ceil(1_000_000) + 5000;
-        pos.reverted(fee);
-        eprintln!("  FILL-CAP REVERT: buy landed but failed (min_tokens_out {min_out} not met: fill > cap) — no position, cost = fees only ({fee} lamports).");
+        pos.reverted(revert_fee);
+        let err = buy.err.clone().unwrap_or(serde_json::Value::Null);
+        let line = tx_error_line(rpc, &buy.sig, 4).await;
+        let class = classify_buy_err(&err, buy.roles, line.as_deref());
+        let late = match (buy.land_slot, create_slot) { (Some(l), Some(c)) => format!("{:+}", l as i64 - c as i64), _ => "-".into() };
+        eprintln!("  BUY FAILED sig={} land_slot={:?} slots_after_create={late} err={} class={class} error_line={} (fee {revert_fee} lamports)", buy.sig, buy.land_slot, err,
+            line.as_deref().unwrap_or("(tx logs not found)"));
+        match class {
+            "slippage" => eprintln!("  FILL-CAP REVERT: min_tokens_out {min_out} not met (fill > cap) — no position, cost = fees only."),
+            "slot-deadline" => eprintln!("  SLOT-DEADLINE: the buy landed after create slot + {} and failed on chain by design — no position, cost = fees only.", SLOT_GUARD.get().map(|g| g.1).unwrap_or(0)),
+            _ => {
+                let n = NONSLIP_FAILS.fetch_add(1, Ordering::SeqCst) + 1;
+                eprintln!("  BUY-FAILURE (not slippage, not the slot deadline) #{n} of 3 allowed in this run: err={err}");
+                if n >= 3 {
+                    if let Some(st) = RUN_STOP.get() { st.store(true, Ordering::SeqCst); }
+                    eprintln!("  !!!!! STOP: {n} non-slippage buy failures in this run — NO NEW FIRES (something systematic: check the error lines above). Open positions finish their exit. !!!!!");
+                }
+            }
+        }
         return Ok(());
     }
 
@@ -3253,6 +3503,7 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     let est = spend + fee_est + T22_ATA_RENT;
     let delta = if bal_start > 0 && bal_after_buy > 0 { bal_start.saturating_sub(bal_after_buy) } else { 0 };
     let (cost, cost_src) = if delta >= spend && delta <= est + 1_000_000 { (delta, "balance-delta") } else { (est, "estimate") };
+    ACCT.launches.lock().unwrap().insert(mint, launch.clone());
     pos.landed(cost, land);
     eprintln!("  tokens received: {} (ATA {}){}", exact.map(|a| a.to_string()).unwrap_or_else(|| "unreadable".into()), b58(&ata),
         if exact.is_none() { format!(" — selling the guaranteed min_tokens_out {min_out} first, then the remainder") } else { String::new() });
@@ -3275,8 +3526,11 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
 
     // --- SELL until the token account reads 0 (C2 / M4): send errors retry, fresh blockhash, the fallback path
     let bal_before_sell = native_balance(rpc, user).await.unwrap_or(bal_after_buy);
-    let out = sell_until_zero(key, user, rpc, path, launch, &ata, exact, min_out, land).await;
+    let out = sell_until_zero(key, user, rpc, path, launch, &ata, exact, min_out, land, SellOpts::main()).await;
     if let Some(c) = out.sold_at { pos.sold(c); }
+    // H-1: an UNSOLD position keeps retrying in the background (lower rate) until the exit; it is booked at its cost
+    // as a loss now (the Pos drops Open) and whatever those sells return is added to realized
+    else { spawn_unsold_retry(key.clone(), user, rpc.clone(), path.clone(), launch.clone(), ata, land, out.last_qty); }
     let bal_end_r = native_balance(rpc, user).await.ok();
     let bal_end = bal_end_r.unwrap_or(bal_after_buy);
     // M7: realized PnL of this position from its own transactions (payer deltas), in the background
@@ -3325,8 +3579,59 @@ async fn hold_wait(buy: &Landed) {
         if land > 0 { (cur as i64 - land as i64).to_string() } else { "-".into() }, t_obs.elapsed().as_secs_f64() * 1e3, buy.via);
 }
 
-/// one exit's sells. `sold_at`: the context slot of the CONFIRMED read that showed the token account closed / at 0
-struct SellOut { sold_at: Option<u64>, sigs: Vec<(String, bool)>, last: Option<Landed>, attempts: u32 }
+/// one exit's sells. `sold_at`: the context slot of the CONFIRMED read that showed the token account closed / at 0;
+/// `last_qty`: the last amount it tried to sell ((amount, exact))
+struct SellOut { sold_at: Option<u64>, sigs: Vec<(String, bool)>, last: Option<Landed>, attempts: u32, last_qty: (u64, bool) }
+
+/// how a sell loop runs: `read_first` (a confirmed read before the first send), `wait` (land poll per attempt = the
+/// re-send interval), `deadline`, `bg` (a background UNSOLD retry round: stops on SELL_GIVEUP, no UNSOLD line)
+#[derive(Clone, Copy)]
+struct SellOpts { read_first: bool, wait: Duration, deadline: Duration, bg: bool }
+impl SellOpts {
+    /// the live exit: --sell-retry-s (M-5: Run 1 = 1 s) re-sends, --sell-deadline-s (>= 30)
+    fn main() -> SellOpts {
+        SellOpts { read_first: false, wait: Duration::from_secs(arg_u64("--sell-retry-s", 4).max(1)), deadline: Duration::from_secs(arg_u64("--sell-deadline-s", 30).max(30)), bg: false }
+    }
+}
+
+/// H-1: UNSOLD positions keep retrying in the background (one round per --unsold-retry-s, default 5 s) until the exit
+static UNSOLD_BG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static SELL_GIVEUP: AtomicBool = AtomicBool::new(false);
+
+/// H-1: keep selling an UNSOLD position at a lower rate until the run's exit gives up (then HELD-AT-EXIT + one exit sell)
+#[allow(clippy::too_many_arguments)]
+fn spawn_unsold_retry(key: SigningKey, user: Pk, rpc: rpc::Rpc, path: Arc<send::Path>, launch: Launch, ata: Pk, land: u64, last_qty: (u64, bool)) {
+    UNSOLD_BG.fetch_add(1, Ordering::SeqCst);
+    tokio::spawn(async move {
+        let every = Duration::from_secs(arg_u64("--unsold-retry-s", 5).max(1));
+        eprintln!("  UNSOLD-RETRY mint={}: retrying in the background every {} s until the run's exit", b58(&launch.mint), every.as_secs());
+        let mut sigs = Vec::new();
+        let mut round = 0u32;
+        let mut sold = false;
+        let mut qty = last_qty;
+        while !SELL_GIVEUP.load(Ordering::SeqCst) {
+            tokio::time::sleep(every).await;
+            if SELL_GIVEUP.load(Ordering::SeqCst) { break; }
+            round += 1;
+            let o = SellOpts { read_first: true, wait: every, deadline: Duration::from_secs(30), bg: true };
+            let out = sell_until_zero(&key, user, &rpc, &path, &launch, &ata, qty.1.then_some(qty.0), qty.0, land, o).await;
+            sigs.extend(out.sigs.clone());
+            qty = out.last_qty;
+            if let Some(c) = out.sold_at {
+                sold = true;
+                acct_slot(c);
+                eprintln!("  UNSOLD-RECOVERED mint={} after {round} background round(s): token account confirmed empty at slot {c}", b58(&launch.mint));
+                break;
+            }
+        }
+        if !sold { eprintln!("  UNSOLD-RETRY mint={} stopped at the exit after {round} round(s): still held (see EXIT CHECK)", b58(&launch.mint)); }
+        // the position was booked at its full cost as a loss when it went UNSOLD: add what these sells returned
+        let mut back = 0i64;
+        for (s, seen) in &sigs { if let Some(d) = tx_payer_delta(&rpc, s, if *seen { 6 } else { 2 }).await { back += d; } }
+        if back != 0 { let run = ACCT.realized.fetch_add(back, Ordering::SeqCst) + back; eprintln!("  REALIZED (unsold retries) mint={} {:+.6} SOL run_realized={:+.6} SOL", b58(&launch.mint), back as f64 / 1e9, run as f64 / 1e9); }
+        UNSOLD_BG.fetch_sub(1, Ordering::SeqCst);
+    });
+}
 
 /// N3: the late-landing watch's safety cap (s); the watch normally ends when the buy's blockhash is dead
 fn late_land_cap_s() -> u64 { arg_u64("--late-land-s", 120).max(60) }
@@ -3337,35 +3642,67 @@ fn realized_fallback(bal_start: u64, bal_end: Option<u64>, cost: u64) -> (i64, &
     match bal_end { Some(e) if bal_start > 0 && e > 0 => (e as i64 - bal_start as i64, "balance"), _ => (-(cost as i64), "cost-as-loss (balance unread)") }
 }
 
-/// C2 + M4 (audit 2026-10-20) + N1/N4/N8 (re-audit): sell until the token account is CONFIRMED empty.
-///  * a send error (refused path, HTTP / JSON-RPC error, blockhash fetch failure) retries: fresh blockhash, backoff
-///    250 ms .. 2 s, the sell path AND --sell-fallback-path;
-///  * N1: "sold" = a read at CONFIRMED commitment, from a node at a slot >= the buy's landing and >= every landed sell
-///    (minContextSlot), that shows the account closed or at 0. A processed signature status or token change is only a
-///    hint (the next read waits for confirmation instead of re-sending); every RPC error / lagging node is UNKNOWN;
+/// M-2 / L-11: a failed transaction's program error from its logs (Anchor "Error Code: X. Error Number: N. Error Message: M"),
+/// read through call2 (up to `tries` getTransaction reads 1.5 s apart). None: not found / no Anchor error line.
+async fn tx_error_line(rpc: &rpc::Rpc, sig: &str, tries: u32) -> Option<String> {
+    for k in 0..tries {
+        if k > 0 { tokio::time::sleep(Duration::from_millis(1500)).await; }
+        let Ok(v) = call2(rpc, "getTransaction", serde_json::json!([sig, { "encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 0 }])).await else { continue };
+        if v.is_null() { continue; }
+        let logs: Vec<String> = v["meta"]["logMessages"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+        return Some(logs.iter().rev().find(|l| l.contains("Error Code:") || l.contains("Error Number:")).cloned()
+            .or_else(|| logs.iter().rev().find(|l| l.contains("failed:")).cloned()).unwrap_or_else(|| "(no error line in the logs)".into()));
+    }
+    None
+}
+
+/// M-2: classify a landed-FAILED buy: "slot-deadline" (failed at the M-3 guard: landed too late, by design), "slippage"
+/// (pump's min_tokens_out / slippage error at the buy instruction: the fill cap working) or "other" (anything else).
+/// Pure part (unit-tested): the status error, the (guard, buy) indices and the Anchor error line when known.
+fn classify_buy_err(err: &serde_json::Value, roles: (Option<u8>, Option<u8>), line: Option<&str>) -> &'static str {
+    let idx = err.get("InstructionError").and_then(|x| x.get(0)).and_then(|x| x.as_u64());
+    if idx.is_some() && idx == roles.0.map(|x| x as u64) { return "slot-deadline"; }
+    if idx.is_none() || idx != roles.1.map(|x| x as u64) { return "other"; }
+    if let Some(l) = line {
+        let ll = l.to_ascii_lowercase();
+        if ll.contains("slippage") || ll.contains("toomuchsolrequired") || ll.contains("toolittlesolreceived") || ll.contains("too few tokens") { return "slippage"; }
+        if ll.contains("error code:") { return "other"; }
+    }
+    // no decodable log line: pump's slippage codes (6002 TooMuchSolRequired, 6003 TooLittleSolReceived)
+    match build::custom_code(err) { Some(6002) | Some(6003) => "slippage", _ => "other" }
+}
+
+/// M-2: buy failures that are neither slippage nor the slot deadline; 3 in a run stop new fires
+static NONSLIP_FAILS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// C2 + M4 (audit 2026-10-20) + N1/N4/N8 (re-audit) + H-1/M-5 (audit 3): sell until the token account is CONFIRMED empty.
+///  * a send error (refused path, HTTP / JSON-RPC error, blockhash fetch failure) retries: blockhash fresh / fallback RPC /
+///    cached (H-1), backoff 250 ms .. 2 s;
+///  * M-5: EVERY sell (the first too) goes to the sell path AND --sell-fallback-path (one signature); a sell not seen
+///    within `wait` (--sell-retry-s, Run 1 = 1 s) is re-sent;
+///  * N1: "sold" = a CONFIRMED read (node slot >= the buy's landing and >= every landed sell) showing the account closed or
+///    0; a processed status / token change is only a hint (the loop waits for confirmation instead of re-sending);
 ///  * M4: after every landed sell the CONFIRMED balance is re-read and the remainder sold;
-///  * N4: sells use --sell-cu-limit; a sell that lands FAILED is retried with 1.5x the CU limit (<= 400k);
-///  * N8: every read is capped at RPC_READ_TIMEOUT, the send wait at 5 s, so the deadline holds.
-/// Runs for --sell-deadline-s (>= 30); then logs UNSOLD loudly with the confirmed balance. `known`: the exact balance read
-/// after the buy (None: unreadable -> the first sell is `guess` = the guaranteed min_tokens_out, without the ATA close).
-/// `land_slot`: the buy's landing slot (0 unknown).
+///  * N4: --sell-cu-limit, x1.5 after a sell that landed FAILED (its error line is logged: L-11 a completed curve);
+///  * N8: every read capped (3 s per RPC), the send wait at 5 s, so the deadline holds.
+/// Runs for `opts.deadline`; the live exit then logs UNSOLD and hands the position to a background retry (H-1).
 #[allow(clippy::too_many_arguments)]
-async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, launch: &Launch, ata: &Pk, known: Option<u64>, guess: u64, land_slot: u64) -> SellOut {
+async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, launch: &Launch, ata: &Pk, known: Option<u64>, guess: u64, land_slot: u64, opts: SellOpts) -> SellOut {
     let mut cu = sell_cu_limit();
     let price = arg_u64("--sell-cu-price-micro", arg_u64("--cu-price-micro", 3_000_000)); // sells: own (low) fee
-    let deadline_s = arg_u64("--sell-deadline-s", 30).max(30);
     let t0 = Instant::now();
-    let deadline = t0 + Duration::from_secs(deadline_s);
-    let wait = Duration::from_secs(arg_u64("--sell-retry-s", 4).max(1));
-    let mut out = SellOut { sold_at: None, sigs: Vec::new(), last: None, attempts: 0 };
+    let deadline = t0 + opts.deadline;
+    let wait = opts.wait;
     // (amount, exact): exact = a real balance read (sell it all + close the ATA); else a guess (no close)
     let mut qty: (u64, bool) = match known { Some(a) => (a, true), None => (guess.max(1), false) };
+    let mut out = SellOut { sold_at: None, sigs: Vec::new(), last: None, attempts: 0, last_qty: qty };
     let mut need_slot = land_slot; // a "sold" read must come from a node at least this far
     let mut backoff = Duration::from_millis(250);
     // a sell landed (hint) and its confirmation is awaited: since when
     let mut awaiting: Option<Instant> = None;
-    let mut first = true;
+    let mut first = !opts.read_first;
     loop {
+        if opts.bg && SELL_GIVEUP.load(Ordering::SeqCst) { break; }
         if !first {
             match tok_read(rpc, ata, "confirmed", need_slot).await {
                 t if t.zero_at().is_some() => { out.sold_at = t.zero_at(); break; }
@@ -3381,22 +3718,30 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         }
         first = false;
         if Instant::now() >= deadline { break; }
-        let fb = if out.attempts > 0 { SELL_FALLBACK.get() } else { None };
+        out.last_qty = qty;
+        let fb = SELL_FALLBACK.get(); // M-5: from the first sell
         let ixs = if qty.1 { snipe_build::sell_message_ixs(user, launch, qty.0, 0, cu, price, has("--wrap")) }
             else { vec![build::cu_limit_ix(cu), build::cu_price_ix(price), snipe_build::sell_ix(user, launch, qty.0, 0)] };
         out.attempts += 1;
         let watch = if qty.1 { Watch::SellAta(*ata, qty.0, need_slot) } else { Watch::None };
         match send_sell(key, user, rpc, path, fb, &ixs, wait, watch).await {
             Ok(l) => {
-                eprintln!("  SELL #{} qty={}{} cu_limit={cu} sig={} {} via={}{}", out.attempts, qty.0, if qty.1 { "" } else { " (guess, no close)" }, l.sig,
-                    match (l.land_slot, l.ok) { (Some(s), true) => format!("LANDED slot={s} delta={} (awaiting a confirmed 0)", s as i64 - l.send_slot as i64), (Some(_), false) => "landed FAILED".into(), (None, _) => format!("not seen in {wait:?}") },
-                    if l.via.is_empty() { "-" } else { l.via }, fb.map(|f| format!(" (+ fallback {})", f.name)).unwrap_or_default());
+                eprintln!("  SELL{} #{} qty={}{} cu_limit={cu} sig={} {} via={}{}", if opts.bg { "[bg]" } else { "" }, out.attempts, qty.0, if qty.1 { "" } else { " (guess, no close)" }, l.sig,
+                    match (l.land_slot, l.ok) { (Some(s), true) => format!("LANDED slot={s} delta={} (awaiting a confirmed 0)", s as i64 - l.send_slot as i64), (Some(_), false) => format!("landed FAILED err={}", l.err.as_ref().map(|e| e.to_string()).unwrap_or_default()), (None, _) => format!("not seen in {wait:?}") },
+                    if l.via.is_empty() { "-" } else { l.via }, fb.map(|f| format!(" (+ {})", f.name)).unwrap_or_default());
                 out.sigs.push((l.sig.clone(), l.land_slot.is_some()));
                 match (l.land_slot, l.ok) {
                     (Some(s), true) => { need_slot = need_slot.max(s); awaiting = Some(Instant::now()); }
                     (Some(_), false) => {
-                        // landed FAILED (each costs a fee): N4 more CU next time (a ComputeBudgetExceeded sell would repeat), back off
+                        // landed FAILED (each costs a fee): N4 more CU next time (a ComputeBudgetExceeded sell would repeat), back off;
+                        // L-11: its program error is logged in the background (a completed curve cannot be sold here)
                         cu = (cu as u64 * 3 / 2).min(400_000) as u32;
+                        let (r2, sig2, m) = (rpc.clone(), l.sig.clone(), launch.mint);
+                        tokio::spawn(async move {
+                            let line = tx_error_line(&r2, &sig2, 4).await.unwrap_or_else(|| "(tx not found)".into());
+                            let loud = if line.to_ascii_lowercase().contains("complete") { " — BONDING CURVE COMPLETE: this engine cannot sell it; sell on PumpSwap by hand" } else { "" };
+                            eprintln!("  SELL-FAILED-ERROR mint={} sig={sig2}: {line}{loud}", b58(&m));
+                        });
                         tokio::time::sleep(backoff).await; backoff = (backoff * 2).min(Duration::from_secs(2));
                     }
                     (None, _) => {}
@@ -3404,20 +3749,22 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
                 out.last = Some(l);
             }
             Err(e) => {
-                eprintln!("  SELL-SEND-ERROR #{} qty={}: {} — retrying (fresh blockhash{}, backoff {} ms)", out.attempts, qty.0,
-                    format!("{e:#}").chars().take(200).collect::<String>(), if SELL_FALLBACK.get().is_some() { " + fallback path" } else { "" }, backoff.as_millis());
+                eprintln!("  SELL-SEND-ERROR #{} qty={}: {} — retrying (backoff {} ms)", out.attempts, qty.0,
+                    redact(&format!("{e:#}")).chars().take(200).collect::<String>(), backoff.as_millis());
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(Duration::from_secs(2));
             }
         }
     }
-    if out.sold_at.is_none() {
+    if out.sold_at.is_none() && !(opts.bg && SELL_GIVEUP.load(Ordering::SeqCst)) {
         let t = tok_read_retry(rpc, ata, "confirmed", need_slot, 6).await;
         match t.zero_at() {
             Some(c) => out.sold_at = Some(c),
-            None => eprintln!("  UNSOLD mint={} tokens={} (confirmed read, node slot >= {need_slot}) after {:.0} s / {} sell attempt(s) — STILL HELD (or unknown): sell it by hand (--sell-held {})",
+            None if !opts.bg => eprintln!("  UNSOLD mint={} tokens={} (confirmed read, node slot >= {need_slot}) after {:.0} s / {} sell attempt(s) — STILL HELD (or unknown): retrying in the background; by hand: --sell-held {}",
                 b58(&launch.mint), t.show(), t0.elapsed().as_secs_f64(), out.attempts, b58(&launch.mint)),
+            None => {}
         }
+        if let Tok::Amount(a, _) = t { if a > 0 { out.last_qty = (a, true); } }
     }
     if let Some(c) = out.sold_at { eprintln!("  SOLD mint={} token account confirmed {} at slot {c}", b58(&launch.mint), if qty.1 { "closed/0" } else { "0" }); }
     out
@@ -3431,7 +3778,7 @@ async fn send_sell(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::
     let mut fan = vec![sp(path).clone()];
     if let Some(f) = fb { if f.name != fan[0].name { fan.push(f.clone()); } }
     // N8: the blockhash fetch is capped too
-    let (bh, last_valid) = tokio::time::timeout(RPC_READ_TIMEOUT, blockhash_fresh(rpc, Duration::from_millis(1500))).await.map_err(|_| anyhow::anyhow!("blockhash fetch timed out"))??;
+    let (bh, last_valid) = sell_blockhash(rpc).await?;
     let (raw, tips) = lat::build_tx(key, user, ixs, &mut fan, bh)?;
     let sig = send::first_signature(&raw).context("signed tx has no signature")?;
     let mut sig_bytes = [0u8; 64];
@@ -3481,7 +3828,7 @@ fn spawn_realized(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String, 
 async fn tx_payer_delta(rpc: &rpc::Rpc, sig: &str, tries: u32) -> Option<i64> {
     for k in 0..tries {
         if k > 0 { tokio::time::sleep(Duration::from_millis(1500)).await; }
-        if let Ok(v) = rpc.call("getTransaction", serde_json::json!([sig, { "encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 0 }])).await {
+        if let Ok(v) = call2(rpc, "getTransaction", serde_json::json!([sig, { "encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 0 }])).await {
             if v.is_null() { continue; }
             let (pre, post) = (v["meta"]["preBalances"][0].as_i64()?, v["meta"]["postBalances"][0].as_i64()?);
             return Some(post - pre);
@@ -3564,7 +3911,7 @@ async fn exit_ladder(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send
             if others_sol < min_others_sol {
                 eprintln!("  DEAD-no-demand: only dev+us in curve (others={:.4} SOL < {:.4}) — dumping immediately.", others_sol, min_others_sol);
                 let ata = pda::ata(&user, &mint, &pda::TOKEN_2022);
-                let out = sell_until_zero(key, user, rpc, path, launch, &ata, Some(amount), amount, land).await;
+                let out = sell_until_zero(key, user, rpc, path, launch, &ata, Some(amount), amount, land, SellOpts::main()).await;
                 eprintln!("  SELL[DEAD] qty={amount} sold={} attempts={}", out.sold_at.is_some(), out.attempts);
                 return Ok(());
             }
@@ -3646,7 +3993,7 @@ async fn exit_ladder(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send
     let held = tok_read_retry(rpc, &ata, "confirmed", land, 4).await;
     if held.zero_at().is_none() {
         eprintln!("  FLUSH remaining {} tokens (sell until a confirmed 0) ...", held.show());
-        let _ = sell_until_zero(key, user, rpc, path, launch, &ata, held.amount().filter(|h| *h > 0), remaining.max(1), land).await;
+        let _ = sell_until_zero(key, user, rpc, path, launch, &ata, held.amount().filter(|h| *h > 0), remaining.max(1), land, SellOpts::main()).await;
     }
 
     let bal_end = native_balance(rpc, user).await.unwrap_or(bal_after_buy);
@@ -4182,6 +4529,9 @@ mod fastfire {
         pub min_out: u64,
         /// L1: the blockhash's last valid block height
         pub bh_valid: u64,
+        /// M-3: the on-chain slot deadline in this buy (None: guard off); M-2: (guard ix, buy ix) indices
+        pub deadline: Option<u64>,
+        pub roles: (Option<u8>, Option<u8>),
         /// M1: offset of min_tokens_out in `raw` (None: not found once -> no re-sign, the prepared min_out stays)
         pub mo_off: Option<usize>,
         /// M1: where each framed request carries the tx bytes (patched in place on a re-sign)
@@ -4212,7 +4562,10 @@ mod fastfire {
             let user = self.user;
             let probe = Launch { mint: fast::probe_var(0), bonding_curve: fast::probe_var(1), assoc_bonding_curve: fast::probe_var(2), creator: fast::probe_var(9),
                 dev_buy_lamports: 0, is_create_v2: true, is_mayhem: false, is_cashback: false, creator_fee_bps: 0, is_holder_reward: false, buyback_fee_recipient: fast::probe_var(5) };
-            let (mut ixs, _) = build_buy(user, &probe, None, 2_000_000, fast::PROBE_MIN_OUT);
+            let (ixs, _) = build_buy(user, &probe, None, 2_000_000, fast::PROBE_MIN_OUT);
+            // M-3: the slot guard (when on) with the probe deadline, patched per launch
+            let guard = SLOT_GUARD.get().is_some();
+            let mut ixs = with_guard(ixs, guard.then_some(fast::PROBE_DEADLINE));
             let (p0, p1) = (probe.mint, probe.bonding_curve);
             let map = [(pda::ata(&p1, &p0, &pda::TOKEN_2022), fast::probe_var(2)), (pda::ata(&p1, &snipe_build::WSOL, &pda::TOKEN_PROGRAM), fast::probe_var(3)),
                 (pda::ata(&user, &p0, &pda::TOKEN_2022), fast::probe_var(4))];
@@ -4222,12 +4575,13 @@ mod fastfire {
             if tips.len() > 2 { lat::bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 2)); }
             let msg = build::compile_v0(user, &v, fast::PROBE_BH, &[], &[])?;
             if 1 + 64 + msg.bytes.len() > 1232 { return Err(format!("{} bytes > 1232", 1 + 64 + msg.bytes.len())); }
-            Template::from_probe_msg(msg.bytes, tips.len())
+            Template::from_probe_msg_dl(msg.bytes, tips.len(), guard)
         }
 
         /// the full compile of the same buy (the reference the fast build must equal byte for byte)
-        fn reference(&self, launch: &Launch, tips: &[(Pk, u64)], bh: [u8; 32], min_out: u64) -> Option<Vec<u8>> {
+        fn reference(&self, launch: &Launch, tips: &[(Pk, u64)], bh: [u8; 32], min_out: u64, deadline: Option<u64>) -> Option<Vec<u8>> {
             let (ixs, _) = build_buy(self.user, launch, None, 2_000_000, min_out);
+            let ixs = with_guard(ixs, deadline);
             let mut v: Vec<build::Ix> = tips.iter().map(|(t, l)| build::transfer_ix(self.user, *t, *l)).collect();
             v.extend(ixs);
             if tips.len() > 2 { lat::bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 2)); }
@@ -4253,7 +4607,9 @@ mod fastfire {
             let t2 = fast::mono_ns();
             let tip_keys: Vec<Pk> = tips.iter().map(|t| t.0).collect();
             let mut msg: Vec<u8> = Vec::with_capacity(1232);
-            let fast_built = tpl.as_ref().and_then(|t| t.patch(&mut msg, &vars, &tip_keys, &bh, min_out)).is_some();
+            // M-3: the on-chain slot deadline = the create slot + N (None: guard off)
+            let deadline = buy_deadline(Some(slot));
+            let fast_built = tpl.as_ref().and_then(|t| t.patch_dl(&mut msg, &vars, &tip_keys, &bh, min_out, deadline)).is_some();
             let (raw, sig, t3) = if fast_built {
                 let t3 = fast::mono_ns();
                 let sig = self.presign.as_ref().and_then(|ps| ps.sign(&msg)).unwrap_or_else(|| self.key.sign(&msg).to_bytes());
@@ -4262,6 +4618,7 @@ mod fastfire {
                 (raw, sig, t3)
             } else {
                 let (ixs, _) = build_buy(self.user, launch, None, 2_000_000, min_out);
+                let ixs = with_guard(ixs, deadline);
                 let (raw, t) = lat::build_tx(&self.key, self.user, &ixs, &mut fan, bh)?;
                 tips = t;
                 let mut sig = [0u8; 64]; sig.copy_from_slice(&raw[1..65]);
@@ -4308,8 +4665,9 @@ mod fastfire {
             meta.sig = if self.junk { "junk".into() } else { bs58::encode(&sig).into_string() };
             meta.bytes = raw.len();
             meta.tips = tips.iter().map(|t| t.1).sum();
+            let roles = ix_roles(&raw);
             Ok(Prep { id: self.next_id.fetch_add(1, Ordering::Relaxed), launch: launch.clone(), slot, fan, fpi, meta, raw, sig, payload: Arc::new(payload), reqs, tips, jtok, bh, min_out,
-                bh_valid, mo_off, ats, resign_ns: 0, fast_built, st: [t0, t1, t2, t3, t4, t5], made: Instant::now(), cr })
+                bh_valid, deadline, roles, mo_off, ats, resign_ns: 0, fast_built, st: [t0, t1, t2, t3, t4, t5], made: Instant::now(), cr })
         }
 
         /// M1 HOT PATH (between the decision and the first write): set min_tokens_out to `min_out` and re-sign. Patches 8
@@ -4427,7 +4785,7 @@ mod fastfire {
         /// after the fire (or for a create that never fired): verify + trace, off the hot path
         pub fn trace_prep(&self, p: &Prep) {
             let ok = if self.verify && p.fast_built {
-                let r = self.reference(&p.launch, &p.tips, p.bh, p.min_out);
+                let r = self.reference(&p.launch, &p.tips, p.bh, p.min_out, p.deadline);
                 let sig_ok = self.key.verifying_key().verify_strict(&p.raw[65..], &ed25519_dalek::Signature::from_bytes(&p.sig)).is_ok();
                 // M1: every framed request must carry exactly the (re-signed) payload
                 let reqs_ok = p.reqs.iter().zip(&p.ats).all(|(r, at)| match (r, at) {
@@ -4541,7 +4899,7 @@ mod fastfire {
             let mut fan = p.fan.clone();
             let _ = lat::build_tx(&f.key, f.user, &ixs, &mut fan, p.bh);
             old_ns.push(fast::mono_ns() - t);
-            if p.fast_built { if f.reference(&l, &p.tips, p.bh, p.min_out).as_deref() == Some(&p.raw[65..]) { same += 1 } else { diff += 1 } }
+            if p.fast_built { if f.reference(&l, &p.tips, p.bh, p.min_out, p.deadline).as_deref() == Some(&p.raw[65..]) { same += 1 } else { diff += 1 } }
         }
         let q = |v: &mut Vec<u64>, x: f64| { v.sort_unstable(); v[((v.len() - 1) as f64 * x).round() as usize] as f64 / 1e3 };
         println!("\n========== FAST-BENCH (n={n}, µs p50 / p99) ==========");
@@ -4703,13 +5061,13 @@ mod fix2 {
             let bid = v.as_array().and_then(|a| a.first()).and_then(|x| x["bundle_id"].as_str()).map(String::from);
             match (st, bid) {
                 (_, Some(bid)) => {
-                    if let Some((p, _)) = ours.iter().find(|(_, id)| *id == bid) { verdict = format!("our-jito-bundle path={p} bundle={}", &bid[..12]); break; }
+                    if let Some((p, _)) = ours.iter().find(|(_, id)| *id == bid) { verdict = format!("our-jito-bundle path={p} bundle={}", bid.get(..12).unwrap_or(&bid)); break; }
                     let (_, b) = jget(&format!("https://bundles.jito.wtf/api/v1/bundles/bundle/{bid}")).await;
                     let b0 = b.as_array().and_then(|a| a.first()).cloned().unwrap_or(serde_json::Value::Null);
                     let ntx = b0["txSignatures"].as_array().map(|a| a.len()).unwrap_or(0);
                     let tippers: Vec<String> = b0["tippers"].as_array().into_iter().flatten().filter_map(|x| x.as_str()).map(|x| x[..8.min(x.len())].to_string()).collect();
                     let kind = if ntx == 2 { "2-tx bundle (ours + a sender's tip tx: Helius Sender / another relay's wrapper)" } else if ntx == 1 { "1-tx bundle (a relay's bundleOnly copy)" } else { "other bundle" };
-                    verdict = format!("other-bundle {kind} bundle={} txs={ntx} tippers={} landed_tip={} block_index={}", &bid[..12], tippers.join("|"),
+                    verdict = format!("other-bundle {kind} bundle={} txs={ntx} tippers={} landed_tip={} block_index={}", bid.get(..12).unwrap_or(&bid), tippers.join("|"),
                         b0["landedTipLamports"], b0["blockIndex"]);
                     break;
                 }
@@ -4867,6 +5225,12 @@ mod audit_tests {
         v.extend(["--send-log", "x", "--lat-trace", "y"].map(String::from));
         check_flags(&v).unwrap();
         assert!(v.iter().any(|x| x == "--sell-cu-limit"), "Run 1 sets the sell CU limit explicitly");
+        // audit 3: the slot deadline (M-3), the fallback RPC (H-1), 1 s sell re-sends (M-5)
+        let val = |f: &str| v.iter().position(|x| x == f).and_then(|i| v.get(i + 1)).cloned();
+        assert_eq!(val("--buy-max-slot-delta").as_deref(), Some("1"));
+        assert_eq!(val("--rpc-fallback-url-env").as_deref(), Some("RMR_RPC_URL"));
+        assert_eq!(val("--sell-retry-s").as_deref(), Some("1"));
+        assert_eq!(val("--sell-fallback-path").as_deref(), Some("nozomi"));
         // the dry run and the CU checks
         let mut d = v.clone(); d[3] = "--junk-fanout".into();
         check_flags(&d).unwrap();
@@ -4874,6 +5238,97 @@ mod audit_tests {
             "--cu-price-micro", "110000000", "--sim-tips", "12000000,1000000,1000000", "--config", "c", "--env-file", "e"])).unwrap();
         check_flags(&a(&["--simulate", "--sim-sell", "--sim-count", "5", "--sim-delay-ms", "3000", "--sell-cu-limit", "120000", "--sell-cu-price-micro", "5000000",
             "--config", "c", "--env-file", "e"])).unwrap();
+        check_flags(&a(&["--simulate", "--sim-sell", "--sim-cashback-only", "--sim-count", "2", "--sim-delay-ms", "3000", "--sell-cu-limit", "120000",
+            "--sell-cu-price-micro", "5000000", "--config", "c", "--env-file", "e"])).unwrap();
+        check_flags(&a(&["--simulate", "--sim-as", "x", "--buy-max-slot-delta", "1", "--cu-limit", "95000"])).unwrap();
+        check_flags(&a(&["--sell-held", "m1,m2", "--live", "--rpc-fallback-url-env", "RMR_RPC_URL", "--unsold-retry-s", "5", "--unsold-drain-s", "120"])).unwrap();
+        assert!(check_flags(&a(&["--buy-max-slot-delta", "one"])).is_err());
+        assert!(check_flags(&a(&["--unsold-retry-s", "x"])).is_err());
+    }
+
+    /// M-2: failure classification from the status error, the (guard, buy) ix indices and the Anchor error line
+    #[test]
+    fn classify_buy_err_m2() {
+        use serde_json::json;
+        let roles = (Some(4u8), Some(5u8));
+        let at = |i: u64, code: u64| json!({ "InstructionError": [i, { "Custom": code }] });
+        assert_eq!(classify_buy_err(&at(4, 6000), roles, None), "slot-deadline");
+        assert_eq!(classify_buy_err(&at(5, 6002), roles, None), "slippage");
+        assert_eq!(classify_buy_err(&at(5, 6003), roles, None), "slippage");
+        assert_eq!(classify_buy_err(&at(5, 6040), roles, Some("Program log: AnchorError occurred. Error Code: SlippageExceeded. Error Number: 6040. Error Message: slippage: too few tokens.")), "slippage");
+        assert_eq!(classify_buy_err(&at(5, 6002), roles, Some("Program log: AnchorError occurred. Error Code: AccountNotInitialized. Error Number: 3012. Error Message: x.")), "other");
+        assert_eq!(classify_buy_err(&at(5, 6017), roles, None), "other");
+        assert_eq!(classify_buy_err(&at(2, 6002), roles, None), "other"); // not at the buy (an ATA create, a tip ...)
+        assert_eq!(classify_buy_err(&json!({ "InstructionError": [5, "ComputationalBudgetExceeded"] }), roles, None), "other");
+        assert_eq!(classify_buy_err(&json!("InsufficientFundsForFee"), roles, None), "other");
+        assert_eq!(classify_buy_err(&at(4, 1), (None, Some(5)), None), "other"); // no guard in this tx
+    }
+
+    /// M-3: the guard data layout, its place right before the pump buy, the template's deadline patch equals a full
+    /// compile, and the largest Run-1 fan-out (4 tips) still fits the 1232-byte packet with the guard
+    #[test]
+    fn slot_guard_m3() {
+        use arbx::fast;
+        let g = GuardEnc { disc: 14, op: 5, acct: false };
+        let ix = guard_ix_enc(g, 0x0102_0304_0506_0708);
+        assert_eq!(ix.program, *LIGHTHOUSE);
+        assert!(ix.accounts.is_empty());
+        assert_eq!(ix.data, vec![14, 0, 0, 8, 7, 6, 5, 4, 3, 2, 1, 5]);
+        assert_eq!(guard_ix_enc(GuardEnc { acct: true, ..g }, 1).accounts.len(), 1);
+        let user = pk("3tNPvytXB9yTZLgh5RGdjrXVxHp89vGeCiwx9juqgp7q");
+        let mint = [0x5Au8; 32]; // (not a real account: 4wTV1Ymi... would be pump's Global, a template constant)
+        let launch = snipe_build::launch_from_target(mint, pk("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"));
+        let (ixs, _) = build_buy(user, &launch, None, 1_500_000_000, 777);
+        let n = ixs.len();
+        let gi = insert_guard(ixs.clone(), g, 1234);
+        assert_eq!(gi.len(), n + 1);
+        let at = gi.iter().position(|x| x.program == *LIGHTHOUSE).unwrap();
+        assert_eq!(gi[at + 1].program, *snipe::PUMP, "the guard sits right before the buy");
+        // the template path (probe deadline, patched) == the full compile with the real deadline, for 1..=4 tips
+        for ntips in 1..=4usize {
+            let tips: Vec<(Pk, u64)> = (0..ntips).map(|i| ([60 + i as u8; 32], 1_000_000)).collect();
+            let compile = |dl: u64, ks: &[(Pk, u64)], ls: &Launch, mo: u64| {
+                let (ixs, _) = build_buy(user, ls, None, 1_500_000_000, mo);
+                let mut v: Vec<build::Ix> = ks.iter().map(|(t, l)| build::transfer_ix(user, *t, *l)).collect();
+                v.extend(insert_guard(ixs, g, dl));
+                if ks.len() > 2 { lat::bump_cu_limit(&mut v, 300 * (ks.len() as u32 - 2)); }
+                build::compile_v0(user, &v, [9u8; 32], &[], &[]).unwrap().bytes
+            };
+            let real = compile(458_000_001, &tips, &launch, 777);
+            assert!(1 + 64 + real.len() <= 1232, "{ntips} tips + guard: {} bytes > 1232", 1 + 64 + real.len());
+            eprintln!("M-3 buy tx with {ntips} tip(s) + slot guard: {} bytes (limit 1232)", 1 + 64 + real.len());
+            // probe template exactly as Fast::make_template builds it
+            let probe = Launch { mint: fast::probe_var(0), bonding_curve: fast::probe_var(1), assoc_bonding_curve: fast::probe_var(2), creator: fast::probe_var(9),
+                dev_buy_lamports: 0, is_create_v2: true, is_mayhem: false, is_cashback: false, creator_fee_bps: 0, is_holder_reward: false, buyback_fee_recipient: fast::probe_var(5) };
+            let (ixs, _) = build_buy(user, &probe, None, 1_500_000_000, fast::PROBE_MIN_OUT);
+            let mut ixs = insert_guard(ixs, g, fast::PROBE_DEADLINE);
+            let (p0, p1) = (probe.mint, probe.bonding_curve);
+            let map = [(pda::ata(&p1, &p0, &pda::TOKEN_2022), fast::probe_var(2)), (pda::ata(&p1, &snipe_build::WSOL, &pda::TOKEN_PROGRAM), fast::probe_var(3)),
+                (pda::ata(&user, &p0, &pda::TOKEN_2022), fast::probe_var(4))];
+            for ix in ixs.iter_mut() { for a in ix.accounts.iter_mut() { if let Some((_, to)) = map.iter().find(|(from, _)| *from == a.key) { a.key = *to; } } }
+            let mut v: Vec<build::Ix> = tips.iter().enumerate().map(|(i, (_, l))| build::transfer_ix(user, fast::probe_tip(i), *l)).collect();
+            v.extend(ixs);
+            if ntips > 2 { lat::bump_cu_limit(&mut v, 300 * (ntips as u32 - 2)); }
+            let pm = build::compile_v0(user, &v, fast::PROBE_BH, &[], &[]).unwrap();
+            let t = fast::Template::from_probe_msg_dl(pm.bytes, ntips, true).unwrap();
+            let (bc, abc) = (launch.bonding_curve, launch.assoc_bonding_curve);
+            let vars: fast::VarKeys = [mint, bc, abc, pda::ata(&bc, &snipe_build::WSOL, &pda::TOKEN_PROGRAM), pda::ata(&user, &mint, &pda::TOKEN_2022), launch.buyback_fee_recipient];
+            let mut out = Vec::new();
+            t.patch_dl(&mut out, &vars, &tips.iter().map(|x| x.0).collect::<Vec<_>>(), &[9u8; 32], 777, Some(458_000_001)).unwrap();
+            assert_eq!(out, real, "template + deadline patch == full compile ({ntips} tips)");
+            assert!(t.patch_dl(&mut out, &vars, &tips.iter().map(|x| x.0).collect::<Vec<_>>(), &[9u8; 32], 777, None).is_none(), "a guarded template needs a deadline");
+            // M-2 roles: guard index right before the buy
+            let mut raw = vec![1u8]; raw.extend([0u8; 64]); raw.extend(&real);
+            let (gr, br) = ix_roles(&raw);
+            assert_eq!(gr.map(|x| x + 1), br);
+        }
+    }
+
+    #[test]
+    fn redact_urls_h1() {
+        assert_eq!(redact("error sending request for url (https://rpc.example.com/?api-key=SECRET): timed out"), "error sending request for url (<url>): timed out");
+        assert_eq!(redact("no url here"), "no url here");
+        assert!(!redact("a http://x/y?k=1 b https://z").contains("k=1"));
     }
 
     #[test]
