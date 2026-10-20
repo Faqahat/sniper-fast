@@ -2,22 +2,36 @@
 # RUN 1 of the 5-run plan (ops/comp/RUNPLAN.md, sim: ops/comp/sim_ladder.py). Shared flags for live + dry.
 # Rule #2 + gates unchanged from live test 2. Changes vs live_final2.sh (all measured/simulated 2026-10-20):
 #   size 1.5 SOL (--spend-lamports), fee ~0.025 SOL/buy: CU 95k x 110M uL = 0.0105 priority + Jito tip 0.012 (toml)
-#   + relay tips 0.001; exit = sell ALL after --hold-ms 450 (sim: ~3 slots after landing is best at every landing
-#   position; ladders/longer holds lose at our landing); entry cap --fill-cap 1.6 x dev-floor ~= <=15% over the
-#   post-bundle quote for 3-5 SOL bundles; sells CU 5M; run kill -0.5 SOL (open positions at cost), profit lock
-#   0.3:0 / 0.6:0.3; 20 buys (--max-total-sol 30) or 180 min; 2 in flight.
-set -a; . /root/arbx/deploy/.env; set +a
-: "${KALDERA_TOKEN:?KALDERA_TOKEN must be set in /root/arbx/deploy/.env}"
-B=/root/arbx-run1/target/release/snipe_engine
+#   + relay tips 0.001; exit = sell ALL ~3 slots after the landing (sim: best at every landing position; ladders /
+#   longer holds lose at our landing); sells CU 5M; run kill -0.5 SOL (open positions at cost), profit lock
+#   0.3:0 / 0.6:0.3; 20 landed buys or 180 min; 2 in flight.
+# AUDIT FIXES (2026-10-20, /home/moiz/sniper-audit/FIXES.md) — new flags:
+#   --slip-cap-bps 1500       M1: min_tokens_out = 85% of the quote on the curve after dev + glued bundle (re-signed at the
+#                             decision); --fill-cap 1.6 stays as the fallback when the bundle total is not known
+#   --land-timeout-ms 3000    M3: buy land poll (signature status + token account every 100 ms), then the late-land watch
+#                             (--sell-robust) until the buy's blockhash is dead (~33 s)
+#   --hold-slots 3            M3: sell DECISION when the shred feed reaches the buy's landing slot + 3 (~3 x 217 ms after
+#   --hold-ms 450             that slot began, i.e. ~0.55-0.65 s after the real landing; the sell lands ~1 slot later, as
+#   --hold-max-ms 1500        in the sim). Landing seen only via the token account (no exact slot): 450 ms after it was
+#                             seen (~0.6-0.7 s after the real landing). Capped 1.5 s after the landing was seen.
+#   --sell-fallback-path nozomi  C2: every sell RETRY goes to staked-rpc AND nozomi (one signature, nozomi's 0.001 tip);
+#   --sell-deadline-s 30      sells retry until the token account reads 0 for >= 30 s, then UNSOLD is logged
+#   --max-buys 20             L4: 20 LANDED buys; --max-total-sol is now a budget on landed buys incl. fees
+#                             (20 x ~1.526 = 30.5 SOL, so 31 keeps --max-buys 20 the binding limit)
+#   --fast-verify             L10: every fired message (and, M1, every re-signed request) checked against the full compile
+#   (--sell-retries removed: the sell loop is bounded by --sell-deadline-s now)
+set -a; . /root/sniper/deploy/.env; set +a
+: "${KALDERA_TOKEN:?KALDERA_TOKEN must be set in /root/sniper/deploy/.env}"
+B=/root/sniper-run1/target/release/snipe_engine
 C=/root/run1/run1_landing.toml
 ROUTES="bam=jito-bundle+landx-fra3+staked-rpc;harmonic=jito-bundle+nozomi+staked-rpc;jito=jito-bundle+landx-fra3+staked-rpc;fd=jito-bundle+astralane+nozomi+staked-rpc;agave=helius+nozomi+staked-rpc;other=helius+nozomi+landx-fra3+staked-rpc;default=jito-bundle+landx-fra3+helius+staked-rpc"
 FLAGS=(--uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8
   --dev-from-cap --race-gate --race-min-bundle 1 --race-min-bundle-sol 3 --race-max-bundle-sol 5 --race-create-tip-prefix moon --race-bundle-ms 3 --race-glued
   --race-pros /root/race/pros.json --race-early
   --close-leaders /root/fix2/close_leaders_5ms.txt --max-create-ms 150
-  --spend-lamports 1500000000 --fill-cap 1.6 --max-sol 1.6 --max-total-sol 30 --max-loss-sol 0.5 --lock-tiers 0.3:0,0.6:0.3 --max-inflight 2 --minutes 180
-  --cu-price-micro 110000000 --cu-limit 95000 --sell-cu-price-micro 5000000 --hold-ms 450 --land-poll-ms 100
-  --sell-robust --sell-retries 2 --sell-retry-s 4 --strict-balance --jito-poll --landed-via
+  --spend-lamports 1500000000 --slip-cap-bps 1500 --fill-cap 1.6 --max-sol 1.6 --max-total-sol 31 --max-buys 20 --max-loss-sol 0.5 --lock-tiers 0.3:0,0.6:0.3 --max-inflight 2 --minutes 180
+  --cu-price-micro 110000000 --cu-limit 95000 --sell-cu-price-micro 5000000 --hold-slots 3 --hold-ms 450 --hold-max-ms 1500 --land-poll-ms 100 --land-timeout-ms 3000
+  --sell-robust --sell-retry-s 4 --sell-deadline-s 30 --sell-fallback-path nozomi --strict-balance --jito-poll --landed-via
   --send-path helius --sell-path staked-rpc --route-by-client "$ROUTES"
-  --config $C --env-file /root/arbx/deploy/.env
-  --fast-send --jito-h2 --fast-presign --fast-derive --busy-poll --pin-core 1)
+  --config $C --env-file /root/sniper/deploy/.env
+  --fast-send --jito-h2 --fast-presign --fast-derive --fast-verify --busy-poll --pin-core 1)

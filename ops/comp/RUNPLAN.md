@@ -22,3 +22,10 @@ Single-run noise is large (one trade swings ~+-0.25 SOL), so a run with a real e
 Status 2026-10-20: Run 1 built (host commit 0d628e0), deployed /root/run1 (run1.sh live — NOT run), zero-cost dry run
 clean (2 fires in 20 min, both rule #2 on chain, decide->send 64-70 us). Needs: wallet ~4-5 SOL (has 0.186) + owner go.
 Wallet per run: 1-2 ~4-5 SOL, 3 ~8, 5 ~10-12. Alpenglow 2026-10-21 14:50 UTC -> re-check the create-timing gate after it.
+
+Status 2026-10-20 (later): AUDIT FIXES done on the host (/home/moiz/sniper-audit/FIXES.md): C1 open-position accounting,
+C2 sell retries + fallback path, H1 SIGTERM drain + guard_run1.py, M1 slip cap re-signed at the decision (+~4 µs),
+M2-M7, L1-L11. Server folders renamed: engine /root/sniper-run1/target/release/snipe_engine, env /root/sniper/deploy/.env.
+Run-1 flags now: --slip-cap-bps 1500 (fill-cap 1.6 fallback), --land-timeout-ms 3000, --hold-slots 3 (fallback --hold-ms
+450), --sell-fallback-path nozomi, --max-buys 20 (budget 31 on landed buys), --fast-verify. NOT deployed, NOT run:
+next = deploy, zero-cost dry run (incl. a SIGTERM drain test), CU simulate check, then the owner's go.
