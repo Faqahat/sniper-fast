@@ -17,7 +17,7 @@ FL=("${FLAGS[@]}"); for i in "${!FL[@]}"; do [ "${FL[$i]}" = "--minutes" ] && FL
 $B --snipe-once --concurrent --junk-fanout "${FL[@]}" --send-log /root/run1/sends_dry.jsonl --lat-trace /root/run1/trace_dry.jsonl \
   < /root/.nexus-v2-trading-wallet.pass >> $LOG 2>&1 &
 EPID=$!
-python3 /root/run1/guard_run1.py $LOG $GLOG DRY_RUN1_DONE $EPID >> $GLOG 2>&1 &
+GUARD_ENV=${ENV_NAME:-DEV} python3 /root/run1/guard_run1.py $LOG $GLOG DRY_RUN1_DONE $EPID >> $GLOG 2>&1 &
 GPID=$!
 echo "dry engine pid $EPID, guard pid $GPID, log $LOG, guard log $GLOG"
 trap 'kill -TERM $EPID 2>/dev/null' INT TERM

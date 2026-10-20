@@ -152,7 +152,14 @@ async fn call_race(rpc: &rpc::Rpc, method: &str, params: serde_json::Value, cap:
             r = &mut f, if !fd => { fd = true; (r, true) }
         };
         match r {
-            Ok(Ok(v)) if accept(&v) => { if from_fb { FB_USED.fetch_add(1, Ordering::Relaxed); } return Ok(v); }
+            Ok(Ok(v)) if accept(&v) => {
+                if from_fb && FB_USED.fetch_add(1, Ordering::Relaxed) == 0 {
+                    // Telegram (deduplicated 10 min): the fallback RPC answered first (exit path only, never a hot path)
+                    tg::raise(arbx::alerts::Level::Warning, "snipe_rpc_fallback", "rpc_fallback", "🔁", "RPC fallback in use", arbx::alerts::format::Body::new().kv("method", method).txt("the fallback RPC answered before the primary"), true);
+                }
+                if from_fb && FB_USED.load(Ordering::Relaxed) % 500 == 0 { tg::raise(arbx::alerts::Level::Warning, "snipe_rpc_fallback", "rpc_fallback", "🔁", "RPC fallback in use", arbx::alerts::format::Body::new().kv("fallback answers so far", FB_USED.load(Ordering::Relaxed).to_string()), true); }
+                return Ok(v);
+            }
             Ok(Ok(v)) => { held.get_or_insert(v); }
             Ok(Err(e)) => errs.push(format!("{}: {}", if from_fb { "fallback" } else { "primary" }, redact(&format!("{e:#}")))),
             Err(_) => errs.push(format!("{}: timed out after {cap:?}", if from_fb { "fallback" } else { "primary" })),
@@ -168,6 +175,9 @@ async fn latest_blockhash_one(r: &rpc::Rpc, cap: Duration) -> Result<([u8; 32], 
     let h = bs58::decode(v["value"]["blockhash"].as_str().context("no blockhash")?).into_vec()?;
     Ok((h.try_into().map_err(|_| anyhow::anyhow!("bad blockhash"))?, v["value"]["lastValidBlockHeight"].as_u64().unwrap_or(0), v["context"]["slot"].as_u64().unwrap_or(0)))
 }
+
+/// SOL text for Telegram messages
+fn sol_str(l: i64) -> String { arbx::alerts::format::sol(l) }
 
 /// one getLatestBlockhash answer: hash, lastValidBlockHeight, context slot, source (0 primary, 1 fallback)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -298,7 +308,12 @@ async fn refresh_blockhash(rpc: &rpc::Rpc, cap: Duration) -> Result<bool> {
         let cached = BLOCKHASH_CACHE.lock().unwrap().map(|(h, t, v)| (h, t.elapsed(), v));
         pick_blockhash(&mut st, &cands, wr, ar, cached, since)
     };
-    for l in log { eprintln!("  {l}"); }
+    for l in log {
+        if l.contains("EXCLUDED") || l.contains("RE-ADMITTED") || l.contains("DISAGREE") || l.contains("RE-LEARNED") {
+            tg::raise(arbx::alerts::Level::Warning, "snipe_blockhash_source", &l.chars().take(40).collect::<String>(), "🧭", "Blockhash source", arbx::alerts::format::Body::new().txt(&l), false);
+        }
+        eprintln!("  {l}");
+    }
     match pick {
         Some(c) => {
             let lag = if ar > 0 { Duration::from_millis(400 * ar.saturating_sub(c.ctx).min(150)) } else { Duration::ZERO };
@@ -470,6 +485,7 @@ fn check_flags(argv: &[String]) -> Result<()> {
     let has_a = |f: &str| argv.iter().any(|x| x == f);
     if has_a("--slip-cap-bps") && val("--slip-cap-bps").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0) >= 10_000 { bail!("--slip-cap-bps must be < 10000"); }
     if has_a("--max-inflight") && val("--max-inflight").and_then(|v| v.parse::<u64>().ok()) == Some(0) { bail!("--max-inflight must be >= 1"); }
+    if has_a("--env-name") && !matches!(val("--env-name").map(|v| v.to_ascii_uppercase()).as_deref(), Some("DEV" | "PROD")) { bail!("--env-name must be DEV or PROD: refusing to start"); }
     if has_a("--race-bundle") && !matches!(val("--race-bundle").as_deref(), Some("yes" | "no")) { bail!("--race-bundle must be yes or no: refusing to start"); }
     if has_a("--max-create-ms-unknown") && !matches!(val("--max-create-ms-unknown").as_deref(), Some("pass" | "skip")) { bail!("--max-create-ms-unknown must be pass or skip: refusing to start"); }
     if has_a("--lock-tiers") {
@@ -716,6 +732,157 @@ mod altc {
                     tabs.len(), t0.elapsed().as_secs_f64(), FILE.get().map(|s| s.as_str()).unwrap_or("no --alt-cache-file"));
             }
             Err(_) => eprintln!("ALT CACHE: preload of {} table(s) timed out after 15 s ({} cached; the rest load on first relevant sight)", tabs.len(), len()),
+        }
+    }
+}
+
+// =====================================================================================================================
+// TELEGRAM (owner, 2026-10-20: "update everything to telegram, check the old arb about the telegram"). The old arb bot's
+// alert system is REUSED as is (arbx::alerts, PLAN-ADDENDUM WP-20): the bounded queue (try_send: a full queue drops and
+// counts, never waits), the one sender task (HTML sendMessage, <= 20/min, 429 retry_after, coalescing, dedup), token
+// redaction everywhere, the panic hook (a crash posts a Critical alert), the exit flush. Credentials from the env
+// (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID in /root/sniper/deploy/.env); never printed. Every message header carries the
+// --env-name label (DEV / PROD).
+// NEVER ON A HOT PATH: nothing between a buy's decision and its first write, or a sell's decision and its write, calls it:
+// the fire message is raised from the spawned task after the writes, everything else is on the exit / control paths.
+// A raise is a level check, a try-lock dedup check and a try_send (O(1), never waits). TG_TRAP (tests) panics on any raise
+// while armed. --no-telegram (or missing env vars) turns it off: every call is then a no-op.
+// =====================================================================================================================
+mod tg {
+    use super::*;
+    use arbx::alerts::format::{esc, sol, sol_signed, Body};
+    use arbx::alerts::{Alert, Alerts, AlertsCfg, Level};
+    use std::sync::OnceLock;
+
+    static TG: OnceLock<Arc<Alerts>> = OnceLock::new();
+    static ENV: OnceLock<String> = OnceLock::new();
+    /// the sender's stop (set at the very end, after the last message is queued)
+    pub static STOP: std::sync::LazyLock<Arc<AtomicBool>> = std::sync::LazyLock::new(|| Arc::new(AtomicBool::new(false)));
+    /// tests: any raise while armed panics (proves a path never touches Telegram)
+    pub static TG_TRAP: AtomicBool = AtomicBool::new(false);
+
+    pub fn env_name() -> &'static str { ENV.get().map(|s| s.as_str()).unwrap_or("DEV") }
+    pub fn on() -> bool { TG.get().is_some_and(|a| a.enabled()) }
+
+    /// the engine's [alerts] (no heartbeat / daily summary of the arb bot's: the engine sends its own)
+    pub fn cfg() -> AlertsCfg { AlertsCfg { enabled: true, heartbeat_min: 0, daily_summary: false, ..AlertsCfg::default() } }
+
+    /// start-up (inside the runtime): label, credentials, sender, panic hook. Off with --no-telegram or missing env vars
+    pub fn init(rt: &tokio::runtime::Handle) {
+        let _ = ENV.set(arg("--env-name").unwrap_or_else(|| "DEV".into()).to_ascii_uppercase());
+        // --telegram (the default: on) / --no-telegram (off; wins over --telegram)
+        let _explicit_on = has("--telegram");
+        if has("--no-telegram") { eprintln!("TELEGRAM: off (--no-telegram)"); return; }
+        let ctx = arbx::alerts::Ctx { label: format!("SNIPER {}", env_name()), started_ns: arbx::feeds::clock::real_ns(), ..Default::default() };
+        let (a, notes) = Alerts::new(&cfg(), &|k| std::env::var(k).ok(), ctx);
+        for n in notes { eprintln!("TELEGRAM: {n}"); }
+        if !a.enabled() { return; }
+        arbx::alerts::install(a.clone());
+        arbx::alerts::install_panic_hook();
+        a.start(rt, STOP.clone());
+        let _ = TG.set(a);
+    }
+
+    /// queue one message (O(1), never waits). `dedup`: repeats of `key` inside 10 min are counted, not sent
+    pub fn raise(level: Level, kind: &'static str, key: &str, icon: &'static str, title: &str, body: Body, dedup: bool) {
+        if TG_TRAP.load(Ordering::SeqCst) { panic!("Telegram raise ({kind}) on a no-Telegram path"); }
+        let Some(a) = TG.get() else { return };
+        let mut al = Alert::new(level, kind, key.to_string(), title).icon(icon).body(body);
+        if !dedup { al = al.once(); }
+        a.raise(al);
+    }
+
+    /// the end of the run: everything queued goes out (blocks the caller up to `wait`: main thread only, after the run)
+    pub fn flush(wait: Duration) { if let Some(a) = TG.get() { STOP.store(true, Ordering::SeqCst); let _ = a.flush(wait); } }
+
+    pub fn mint_link(m: &Pk) -> String { let s = b58(m); format!("<a href=\"https://solscan.io/token/{s}\">{}…{}</a>", &s[..4], &s[s.len() - 4..]) }
+    pub fn tx_link(sig: &str) -> String { if sig.len() < 16 { esc(sig) } else { format!("<a href=\"https://solscan.io/tx/{sig}\">{}…</a>", &sig[..8]) } }
+    fn pct(num: i64, den: u64) -> String { if den == 0 { "-".into() } else { format!("{:+.1}%", num as f64 * 100.0 / den as f64) } }
+
+    // -------- message bodies (pure: unit-tested)
+
+    pub struct Start { pub wallet: Pk, pub build: String, pub size: u64, pub fee_est: u64, pub max_buys: u64, pub budget_sol: f64, pub run_stop_sol: f64,
+        pub lock_tiers: String, pub minutes: u64, pub checks: Vec<(String, String)> }
+    pub fn start_body(s: &Start) -> Body {
+        let mut b = Body::new().kv("env", env_name()).kv("wallet", short(&s.wallet)).kv("build", &s.build).nl()
+            .kv("size", sol(s.size as i64)).kv("fee/buy ≈", sol(s.fee_est as i64)).nl()
+            .kv("max buys", s.max_buys.to_string()).kv("budget", format!("{} SOL", s.budget_sol)).kv("run stop", format!("-{} SOL (new fires)", s.run_stop_sol)).nl()
+            .kv("lock tiers", if s.lock_tiers.is_empty() { "off" } else { &s.lock_tiers }).kv("minutes", s.minutes.to_string()).nl();
+        for (k, v) in &s.checks { b = b.kv(k, v).nl(); }
+        b
+    }
+    pub fn fire_body(mint: &Pk, slot: u64, dev: u64, bundle: Option<u64>, client: &str, route: &str, prio: u64, tips: u64, deadline: Option<u64>) -> Body {
+        Body::new().raw(format!("mint {}", mint_link(mint))).kv("slot", slot.to_string()).nl()
+            .kv("dev", sol(dev as i64)).kv("bundle", bundle.map(|b| sol(b as i64)).unwrap_or_else(|| "-".into())).nl()
+            .kv("leader client", client).kv("route", route).nl()
+            .kv("fee", format!("{} (priority {} + tips {})", sol((prio + tips + 5000) as i64), sol(prio as i64), sol(tips as i64)))
+            .kv("deadline", deadline.map(|d| d.to_string()).unwrap_or_else(|| "none".into()))
+    }
+    pub fn landed_body(mint: &Pk, delta: Option<i64>, via: &str, tokens: Option<u64>, cost: u64, sig: &str) -> Body {
+        Body::new().raw(format!("mint {}", mint_link(mint))).raw(format!("tx {}", tx_link(sig))).nl()
+            .kv("landing", match delta { Some(0) => "SAME SLOT".to_string(), Some(d) => format!("create {d:+} slots"), None => "-".into() }).kv("seen via", via).nl()
+            .kv("tokens", tokens.map(|t| t.to_string()).unwrap_or_else(|| "(read in the background)".into())).kv("cost incl. fees", sol(cost as i64))
+    }
+    pub fn failed_body(mint: &Pk, class: &str, delta: &str, line: &str, fee: u64, sig: &str) -> Body {
+        Body::new().raw(format!("mint {}", mint_link(mint))).raw(format!("tx {}", tx_link(sig))).nl()
+            .kv("class", class).kv("slots after create", delta).kv("fee", sol(fee as i64)).nl().code("error", line)
+    }
+    pub struct Exit { pub mint: Pk, pub legs: u32, pub proceeds: i64, pub pnl: i64, pub cost: u64, pub hold_s: f64, pub dec_send_us: Option<f64>, pub run_pnl: i64, pub trades: u64, pub src: String }
+    pub fn exit_body(e: &Exit) -> Body {
+        Body::new().raw(format!("mint {}", mint_link(&e.mint))).nl()
+            .kv("trade PnL", format!("{} ({})", sol_signed(e.pnl), pct(e.pnl, e.cost))).kv("proceeds", sol(e.proceeds)).nl()
+            .kv("sell legs", e.legs.to_string()).kv("hold", format!("{:.2} s", e.hold_s)).kv("decision→send", e.dec_send_us.map(|u| format!("{u:.0} µs")).unwrap_or_else(|| "-".into())).nl()
+            .kv("run PnL", sol_signed(e.run_pnl)).kv("trades", e.trades.to_string()).kv("source", &e.src)
+    }
+    pub struct End { pub fires: u64, pub landed: u64, pub wins: u64, pub losses: u64, pub net: i64, pub usd: Option<f64>, pub best: Option<(Pk, i64)>,
+        pub worst: Option<(Pk, i64)>, pub fees: u64, pub same_slot_pct: Option<f64>, pub median_delta: Option<i64>, pub reason: String }
+    pub fn end_body(e: &End) -> Body {
+        let tr = |x: &Option<(Pk, i64)>| x.map(|(m, p)| format!("{} {}", short(&m), sol_signed(p))).unwrap_or_else(|| "-".into());
+        Body::new().kv("ended", &e.reason).nl().kv("fires", e.fires.to_string()).kv("landed", e.landed.to_string())
+            .kv("wins / losses", format!("{} / {}", e.wins, e.losses)).nl()
+            .kv("net", format!("{}{}", sol_signed(e.net), e.usd.map(|p| format!(" (${:+.2})", e.net as f64 / 1e9 * p)).unwrap_or_default()))
+            .kv("fees paid", sol(e.fees as i64)).nl().kv("best", tr(&e.best)).kv("worst", tr(&e.worst)).nl()
+            .kv("same slot", e.same_slot_pct.map(|p| format!("{p:.0}%")).unwrap_or_else(|| "-".into()))
+            .kv("median landing", e.median_delta.map(|d| format!("create {d:+} slots")).unwrap_or_else(|| "-".into()))
+    }
+    fn short(k: &Pk) -> String { let s = b58(k); format!("{}…{}", &s[..4], &s[s.len() - 4..]) }
+
+    /// /root/solprice.json {"sol_usd": ...} (None if absent / unreadable)
+    pub fn sol_usd() -> Option<f64> {
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string("/root/solprice.json").ok()?).ok()?;
+        v["sol_usd"].as_f64().or_else(|| v["sol_usd"].as_str().and_then(|s| s.parse().ok())).filter(|p| *p > 0.0)
+    }
+
+    // -------- the run's trade records (exit path only), for the end summary
+    #[derive(Default)]
+    pub struct Book { pub trades: Vec<(Pk, i64)>, pub deltas: Vec<i64>, pub fees: u64 }
+    pub static BOOK: std::sync::LazyLock<std::sync::Mutex<Book>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Book::default()));
+    pub static FEED_TXS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    pub fn end_summary(fires: u64, landed: u64, reason: &str) -> End {
+        let b = BOOK.lock().unwrap();
+        let wins = b.trades.iter().filter(|t| t.1 > 0).count() as u64;
+        let net: i64 = ACCT.realized.load(Ordering::SeqCst);
+        let mut d = b.deltas.clone();
+        d.sort_unstable();
+        End { fires, landed, wins, losses: b.trades.len() as u64 - wins, net, usd: sol_usd(), best: b.trades.iter().max_by_key(|t| t.1).copied(),
+            worst: b.trades.iter().min_by_key(|t| t.1).copied(), fees: b.fees,
+            same_slot_pct: (!d.is_empty()).then(|| d.iter().filter(|x| **x <= 0).count() as f64 * 100.0 / d.len() as f64),
+            median_delta: d.get(d.len() / 2).copied(), reason: reason.into() }
+    }
+
+    /// --telegram-test: one message, delivered now (blocking, up to 15 s), then exit
+    pub fn test_message() -> Result<()> {
+        let _ = ENV.set(arg("--env-name").unwrap_or_else(|| "DEV".into()).to_ascii_uppercase());
+        let ctx = arbx::alerts::Ctx { label: format!("SNIPER {}", env_name()), ..Default::default() };
+        let (a, notes) = Alerts::new(&cfg(), &|k| std::env::var(k).ok(), ctx);
+        for n in notes { eprintln!("TELEGRAM: {n}"); }
+        if !a.enabled() { bail!("Telegram is off: {}", a.off_why().unwrap_or("?")); }
+        let al = Alert::new(Level::Info, "snipe_test", "test", "snipe_engine Telegram test").icon("✅")
+            .body(Body::new().kv("env", env_name()).kv("host", arbx::provenance::hostname())).once();
+        match a.deliver_now(vec![al], Duration::from_secs(15)) {
+            Ok(n) => { eprintln!("TELEGRAM TEST: {n} message(s) delivered"); Ok(()) }
+            Err((n, e)) => bail!("Telegram test: {n} delivered, error: {e}"),
         }
     }
 }
@@ -1209,6 +1376,8 @@ fn main() -> Result<()> {
     let _ = dotenvy::from_filename(&envf).or_else(|_| dotenvy::dotenv());
     check_safety_flags()?;
     alpenglow_warning();
+    // --telegram-test: one message to the chat (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from the env file), then exit
+    if has("--telegram-test") { return tg::test_message(); }
 
     let warm_probe = has("--warm-probe");
     let shadow = has("--shadow");
@@ -1247,6 +1416,9 @@ fn main() -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build()?;
 
     let r = rt.block_on(run(&probe, key, user, rpc, warm_probe, shadow, round_trip, snipe_once, simulate, paper_trade, live));
+    if let Err(e) = &r { tg::raise(arbx::alerts::Level::Critical, "snipe_error", "error", "💥", "ENGINE STOPPED WITH AN ERROR", arbx::alerts::format::Body::new().code("error", redact(&format!("{e:#}"))), false); }
+    // Telegram: everything queued goes out before the process ends (<= 6 s; the runtime still runs the sender)
+    tg::flush(Duration::from_secs(6));
     INFRA_STOP.store(true, Ordering::Relaxed);
     r
 }
@@ -1255,6 +1427,8 @@ fn main() -> Result<()> {
 async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_probe: bool, shadow: bool, round_trip: bool, snipe_once: bool, simulate: bool, paper_trade: bool, live: bool) -> Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     let _ = RUN_STOP.set(stop.clone());
+    // Telegram: the old arb bot's sender on this runtime (off with --no-telegram or without the env vars)
+    tg::init(&tokio::runtime::Handle::current());
     // M5-2: the primary must be mainnet too (a wrong-cluster RPC would feed blockhashes and balances)
     match genesis_retry(&rpc).await {
         Ok(Ok(v)) if v.as_str() == Some(MAINNET_GENESIS) => {}
@@ -1303,6 +1477,7 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
             loop {
                 let name = tokio::select! { _ = term.recv() => "SIGTERM", _ = int.recv() => "SIGINT", _ = hup.recv() => "SIGHUP" };
                 eprintln!("  SIGNAL {name}: stopping new fires; open positions keep selling (drain), then HELD-AT-EXIT lists anything still held");
+                tg::raise(arbx::alerts::Level::Warning, "snipe_signal", name, "🛑", &format!("SIGNAL {name}: stopping new fires, draining"), arbx::alerts::format::Body::new().txt("open positions keep selling; HELD-AT-EXIT lists anything still held"), false);
                 st.store(true, Ordering::SeqCst);
             }
         });
@@ -1436,6 +1611,7 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
                     if !paused {
                         FIRE_PAUSE.store(true, Ordering::SeqCst);
                         eprintln!("  !!!!! PAUSE: NO USABLE BLOCKHASH: the newest is {:.1} s old (neither RPC returned a newer one) — NEW FIRES PAUSED; open positions keep trying to sell; resumes after 10 s of usable blockhashes !!!!!", age.as_secs_f64());
+                        tg::raise(arbx::alerts::Level::Error, "snipe_bh_pause", "bh_pause", "⏸", "Blockhash PAUSE: new fires paused", arbx::alerts::format::Body::new().kv("newest blockhash age", format!("{:.1} s", age.as_secs_f64())).txt("open positions keep selling; resumes after 10 s of usable blockhashes"), false);
                     }
                 } else if paused {
                     let since = *good_since.get_or_insert_with(Instant::now);
@@ -1443,6 +1619,7 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
                         FIRE_PAUSE.store(false, Ordering::SeqCst);
                         good_since = None;
                         eprintln!("  RESUME: usable blockhashes for 10 s (age {:.1} s) — new fires allowed again", age.as_secs_f64());
+                        tg::raise(arbx::alerts::Level::Info, "snipe_bh_resume", "bh_resume", "▶️", "Blockhash RESUME: new fires allowed again", arbx::alerts::format::Body::new().kv("age", format!("{:.1} s", age.as_secs_f64())), false);
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(400)).await;
@@ -3480,7 +3657,10 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                         if a.seq.load(Ordering::SeqCst) != seq0 { eprintln!("  KILL-SWITCH poll not evaluated: a position changed during the balance read (next poll in 2 s)"); continue; }
                         let pnl = (b + open) as i64 - start_bal as i64;
                         let (v, lines) = ks_eval(&mut st, pnl, realized, pending, inflight, cap, &tiers);
-                        for l in lines { eprintln!("  {l}"); }
+                        for l in lines {
+                            if l.contains("PROFIT-LOCK armed") { tg::raise(arbx::alerts::Level::Warning, "snipe_lock_armed", &l.chars().take(60).collect::<String>(), "🔒", "Profit lock ARMED", arbx::alerts::format::Body::new().txt(&l), false); }
+                            eprintln!("  {l}");
+                        }
                         let why = match v {
                             KsVerdict::Go => continue,
                             KsVerdict::Kill => format!("KILL-SWITCH: run PnL {:.6} SOL (balance {:.6} + open {:.6}) below -{:.6}", pnl as f64 / 1e9, b as f64 / 1e9, open as f64 / 1e9, cap as f64 / 1e9),
@@ -3488,6 +3668,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                             KsVerdict::Lock => format!("PROFIT-LOCK: run PnL {:.6} SOL fell below floor {:.6}", pnl as f64 / 1e9, st.floor.unwrap_or(0) as f64 / 1e9),
                         };
                         eprintln!("  {why} — stopping new fires (open positions finish their exit).");
+                        tg::raise(arbx::alerts::Level::Critical, "snipe_kill", "kill", if why.starts_with("PROFIT-LOCK") { "🔒" } else { "🛑" }, &why, arbx::alerts::format::Body::new().txt("NO NEW FIRES; open positions finish their exit"), false);
                         // L-1 (audit 3): the -max-loss cap stops NEW fires; positions already open are still exposed. Log them
                         // with the worst case (each one going to 0) so the gap is explicit.
                         let open_list: Vec<(Pk, u64)> = ACCT.open_pos.lock().unwrap().iter().map(|(k, v)| (*k, *v)).collect();
@@ -3495,6 +3676,8 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                         eprintln!("  OPEN AT STOP: {} position(s), {:.6} SOL at cost: {} — worst case (all to 0): run PnL {:.6} SOL (the cap stops new fires, not these)",
                             open_list.len(), worst as f64 / 1e9, open_list.iter().map(|(m, c)| format!("{}={:.4}", &b58(m)[..8], *c as f64 / 1e9)).collect::<Vec<_>>().join(" "),
                             (pnl - worst as i64) as f64 / 1e9);
+                        tg::raise(arbx::alerts::Level::Critical, "snipe_open_at_stop", "open_at_stop", "📉", &format!("Open at stop: {} position(s)", open_list.len()),
+                            arbx::alerts::format::Body::new().kv("at cost", sol_str(worst as i64)).kv("worst case run PnL", sol_str(pnl - worst as i64)).txt("the cap stops new fires, not these"), false);
                         stop2.store(true, Ordering::SeqCst);
                         break;
                     }
@@ -3543,6 +3726,38 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
 
     eprintln!("\nSNIPE-LIVE (CONCURRENT): dev_buy>={min_dev_buy}, per-buy cap {max_sol} SOL, budget {max_total} SOL on landed buys, max buys {}, loss kill-switch {max_loss} SOL, max_inflight {max_inflight}, {minutes}min. Fires every qualifying launch in parallel.",
         if max_buys > 0 { max_buys.to_string() } else { "off".into() });
+    // Telegram: the run's start (the startup checks passed to get here: genesis, SLOT-GUARD, ALT preload, close leaders)
+    {
+        let build = std::fs::read("/proc/self/exe").map(|b| { use sha2::Digest; let h = sha2::Sha256::digest(&b); h.iter().take(6).map(|x| format!("{x:02x}")).collect::<String>() }).unwrap_or_else(|_| "?".into());
+        let checks = vec![
+            ("RPC genesis".to_string(), format!("primary mainnet ✓, fallback {}", if RPC_FB.get().is_some() { "mainnet ✓" } else { "none" })),
+            ("SLOT-GUARD".to_string(), SLOT_GUARD.get().map(|(g, n)| format!("verified on chain (disc {} op {}), deadline create + {n}", g.disc, g.op)).unwrap_or_else(|| "off".into())),
+            ("ALT cache".to_string(), format!("{} table(s) preloaded", altc::len())),
+            ("close leaders".to_string(), close_set.as_ref().map(|c| format!("{} leaders", c.len())).unwrap_or_else(|| "off".into())),
+            ("start balance".to_string(), sol_str(start_bal as i64)),
+            ("mode".to_string(), if junk { "DRY (junk fan-out, nothing can land)".into() } else { "LIVE".into() }),
+        ];
+        let st = tg::Start { wallet: user, build, size: spend_per, fee_est: fee_guess, max_buys, budget_sol: max_total, run_stop_sol: max_loss,
+            lock_tiers: lock_tiers.iter().map(|(a, f)| format!("{}:{}", *a as f64 / 1e9, *f as f64 / 1e9)).collect::<Vec<_>>().join(","), minutes, checks };
+        tg::raise(arbx::alerts::Level::Info, "snipe_start", "start", "🚀", &format!("RUN START ({})", if junk { "dry" } else { "live" }), tg::start_body(&st), false);
+        // heartbeat every --telegram-heartbeat-min (default 30) while the run lasts
+        let every = Duration::from_secs(arg_u64("--telegram-heartbeat-min", 30).max(1) * 60);
+        tokio::spawn(async move {
+            let mut last_txs = tg::FEED_TXS.load(Ordering::Relaxed);
+            loop {
+                tokio::time::sleep(every).await;
+                if INFRA_STOP.load(Ordering::Relaxed) { break; }
+                let txs = tg::FEED_TXS.load(Ordering::Relaxed);
+                let open: Vec<u64> = ACCT.open_pos.lock().unwrap().values().copied().collect();
+                tg::raise(arbx::alerts::Level::Info, "snipe_heartbeat", "heartbeat", "💓", "Heartbeat", arbx::alerts::format::Body::new()
+                    .kv("run PnL (realized)", arbx::alerts::format::sol_signed(ACCT.realized.load(Ordering::SeqCst))).kv("trades", ACCT.landed_buys.load(Ordering::SeqCst).to_string()).nl()
+                    .kv("open", format!("{} ({})", open.len(), sol_str(open.iter().sum::<u64>() as i64))).kv("fires paused", FIRE_PAUSE.load(Ordering::SeqCst).to_string()).nl()
+                    .kv("feed txs", format!("{} in {} min", txs.saturating_sub(last_txs), every.as_secs() / 60)).kv("slot", send::tpu::SLOT.load(Ordering::Relaxed).to_string())
+                    .kv("ALT hits/misses", format!("{}/{}", altc::HITS.load(Ordering::Relaxed), altc::MISSES.load(Ordering::Relaxed))), false);
+                last_txs = txs;
+            }
+        });
+    }
 
     // RACE GATE (default off): same watch as the paper loop. With no race flag the launch goes straight to `ready` and is
     // fired in the same iteration, exactly as before.
@@ -3564,7 +3779,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             match tokio::time::timeout(wait, arx.recv()).await { Ok(Some(e)) => Some(e), Ok(None) => break, Err(_) => None }
         };
         let (t_deq, t_deq_real) = (arbx::fast::mono_ns(), arbx::feeds::clock::now_ns());
-        if let Some(arbx::feeds::Event::Tx(a)) = &ev { ev_st = [a.t_rx, a.t_decoded, t_deq_real, t_deq]; }
+        if let Some(arbx::feeds::Event::Tx(a)) = &ev { ev_st = [a.t_rx, a.t_decoded, t_deq_real, t_deq]; tg::FEED_TXS.fetch_add(1, Ordering::Relaxed); }
         det.health(&_feeds);
         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
         if let Some(arbx::feeds::Event::Tx(mut a)) = ev {
@@ -3691,6 +3906,11 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                     p.deadline.map(|d| d.to_string()).unwrap_or_else(|| "none".into()), p.meta.route, p.meta.leader.chars().take(8).collect::<String>(), p.meta.client, if p.fast_built { "template" } else { "compile" }, p.meta.tips, p.meta.bytes,
                     first.map(|x| format!("{x:.1}")).unwrap_or_else(|| "-".into()),
                     rec.w.iter().map(|x| format!("{}={}@{:.1}us", x.0, x.4, x.3.saturating_sub(t_dec) as f64 / 1e3)).collect::<Vec<_>>().join(" "));
+                // Telegram (after the writes, in this spawned task): the fire
+                let bundle = vq_after.map(|v| v.saturating_sub(snipe::CURVE_VQ0 + launch.dev_buy_lamports));
+                let prio = fee.saturating_sub(p.meta.tips + 5000);
+                tg::raise(arbx::alerts::Level::Info, "snipe_fire", &b58(&launch.mint), if junk { "🧪" } else { "🎯" }, if junk { "FIRE (dry: junk only)" } else { "FIRE" },
+                    tg::fire_body(&launch.mint, create_slot, launch.dev_buy_lamports, bundle, &p.meta.client, &p.meta.route, prio, p.meta.tips, p.deadline), false);
                 f.trace_fire(&p, &rec, ev, t_dec);
                 f.trace_prep(&p);
                 fix2::spawn_jito_poll(&p.fan, &p.meta.sig, p.id);
@@ -3714,6 +3934,8 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         tokio::spawn(async move {
             let _permit = permit;
             eprintln!("  FIRE slot={create_slot} mint={} dev_buy={} rx_to_fire_us={rx_age_us} min_out={min_out} min_out_src={mo_src}", b58(&launch.mint), launch.dev_buy_lamports);
+            tg::raise(arbx::alerts::Level::Info, "snipe_fire", &b58(&launch.mint), "🎯", "FIRE (slow path)", tg::fire_body(&launch.mint, create_slot, launch.dev_buy_lamports,
+                vq_after.map(|v| v.saturating_sub(snipe::CURVE_VQ0 + launch.dev_buy_lamports)), "-", "single", prio_fee, 0, buy_deadline(Some(create_slot))), false);
             if junk {
                 if let Err(e) = lat::junk_fire(&key2, user, &path2, &launch, create_slot).await { eprintln!("  junk fire {} failed: {e:#}", b58(&launch.mint)); }
                 return;
@@ -3785,16 +4007,23 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         }
         match t {
             t if t.zero_at().is_some() => {}
-            Tok::Unknown => { held_n += 1; eprintln!("  HELD-AT-EXIT? mint={} tokens=UNREADABLE (6 confirmed reads failed) — check by hand, sell with --sell-held {}", b58(m), b58(m)); }
-            t => { held_n += 1; eprintln!("  HELD-AT-EXIT mint={} tokens={} — sell by hand: --sell-held {}", b58(m), t.show(), b58(m)); }
+            Tok::Unknown => { held_n += 1; eprintln!("  HELD-AT-EXIT? mint={} tokens=UNREADABLE (6 confirmed reads failed) — check by hand, sell with --sell-held {}", b58(m), b58(m));
+                tg::raise(arbx::alerts::Level::Critical, "snipe_held_at_exit", &b58(m), "🚨", "HELD-AT-EXIT? (unreadable)", arbx::alerts::format::Body::new().raw(format!("mint {}", tg::mint_link(m))).code("sell by hand: --sell-held", b58(m)), false); }
+            t => { held_n += 1; eprintln!("  HELD-AT-EXIT mint={} tokens={} — sell by hand: --sell-held {}", b58(m), t.show(), b58(m));
+                tg::raise(arbx::alerts::Level::Critical, "snipe_held_at_exit", &b58(m), "🚨", "HELD-AT-EXIT", arbx::alerts::format::Body::new().raw(format!("mint {}", tg::mint_link(m))).kv("tokens", t.show()).code("sell by hand: --sell-held", b58(m)), false); }
         }
     }
     eprintln!("  EXIT CHECK: {} fired mint(s) re-read at confirmed, {held_n} held / unreadable", fired_list.len());
-    for (m, sig) in ACCT.pend_sigs.lock().unwrap().iter() { eprintln!("  PENDING-AT-EXIT mint={} buy sig={sig} (landing never resolved: check the wallet)", b58(m)); }
+    for (m, sig) in ACCT.pend_sigs.lock().unwrap().iter() {
+        eprintln!("  PENDING-AT-EXIT mint={} buy sig={sig} (landing never resolved: check the wallet)", b58(m));
+        tg::raise(arbx::alerts::Level::Critical, "snipe_pending_at_exit", &b58(m), "🚨", "PENDING-AT-EXIT", arbx::alerts::format::Body::new().raw(format!("mint {}", tg::mint_link(m))).raw(format!("buy {}", tg::tx_link(sig))).txt("landing never resolved: check the wallet"), false);
+    }
     let end_bal = native_balance(rpc, user).await.unwrap_or(start_bal);
     eprintln!("=== SNIPE-LIVE DONE === fired {} landed {} budget used {:.6} SOL realized (in-engine) {:+.6} SOL; net {} SOL (start {} end {})",
         fired.load(Ordering::Relaxed), ACCT.landed_buys.load(Ordering::SeqCst), ACCT.budget_used.load(Ordering::SeqCst) as f64 / 1e9, ACCT.realized.load(Ordering::SeqCst) as f64 / 1e9,
         (end_bal as i64 - start_bal as i64) as f64 / 1e9, start_bal as f64/1e9, end_bal as f64/1e9);
+    tg::raise(arbx::alerts::Level::Info, "snipe_end", "end", "🏁", "RUN END", tg::end_body(&tg::end_summary(fired.load(Ordering::Relaxed), ACCT.landed_buys.load(Ordering::SeqCst),
+        if stop.load(Ordering::Relaxed) { "stopped (signal / kill switch / lock / failure stop)" } else { "window ended" })), false);
     Ok(())
 }
 
@@ -3969,6 +4198,13 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         let late = match (buy.land_slot, create_slot) { (Some(l), Some(c)) => format!("{:+}", l as i64 - c as i64), _ => "-".into() };
         eprintln!("  BUY FAILED sig={} land_slot={:?} slots_after_create={late} err={} class={class} error_line={} (fee {revert_fee} lamports)", buy.sig, buy.land_slot, err,
             line.as_deref().unwrap_or("(tx logs not found)"));
+        {
+            let mut b = tg::BOOK.lock().unwrap();
+            b.fees += revert_fee;
+            if let (Some(l), Some(c)) = (buy.land_slot, create_slot) { b.deltas.push(l as i64 - c as i64); }
+        }
+        tg::raise(if class == "other" { arbx::alerts::Level::Error } else { arbx::alerts::Level::Warning }, "snipe_buy_failed", &b58(&mint), "❌", &format!("BUY FAILED ({class})"),
+            tg::failed_body(&mint, class, &late, line.as_deref().unwrap_or("(tx logs not found)"), revert_fee, &buy.sig), false);
         match class {
             "slippage" => eprintln!("  FILL-CAP REVERT: min_tokens_out {min_out} not met (fill > cap) — no position, cost = fees only."),
             "slot-deadline" => {
@@ -3979,6 +4215,7 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
                 if within {
                     if let Some(st) = RUN_STOP.get() { st.store(true, Ordering::SeqCst); }
                     eprintln!("  !!!!! STOP: SLOT-DEADLINE CONTRADICTION — the buy landed at slots_after_create={late} (<= {n}) yet failed at the slot guard: the guard or the create slot is wrong. NO NEW FIRES. !!!!!");
+                    tg::raise(arbx::alerts::Level::Critical, "snipe_fail_stop", "fail_stop", "🛑", "STOP: slot-deadline contradiction", arbx::alerts::format::Body::new().txt("NO NEW FIRES; open positions finish their exit").raw(format!("last {}", tg::tx_link(&buy.sig))), false);
                 } else {
                     eprintln!("  SLOT-DEADLINE: the buy landed after create slot + {n} and failed on chain by design — no position, cost = fees only.");
                 }
@@ -3988,6 +4225,7 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
                 if k >= 3 {
                     if let Some(st) = RUN_STOP.get() { st.store(true, Ordering::SeqCst); }
                     eprintln!("  !!!!! STOP: {k} failed buys (slot-deadline / non-slippage) in this run — NO NEW FIRES. Open positions finish their exit. !!!!!");
+                    tg::raise(arbx::alerts::Level::Critical, "snipe_fail_stop", "fail_stop", "🛑", "STOP: 3 failed buys", arbx::alerts::format::Body::new().txt("NO NEW FIRES; open positions finish their exit").raw(format!("last {}", tg::tx_link(&buy.sig))), false);
                 }
             }
             _ => {
@@ -3996,6 +4234,7 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
                 if n >= 3 {
                     if let Some(st) = RUN_STOP.get() { st.store(true, Ordering::SeqCst); }
                     eprintln!("  !!!!! STOP: {n} non-slippage buy failures in this run — NO NEW FIRES (something systematic: check the error lines above). Open positions finish their exit. !!!!!");
+                    tg::raise(arbx::alerts::Level::Critical, "snipe_fail_stop", "fail_stop", "🛑", "STOP: 3 non-slippage buy failures", arbx::alerts::format::Body::new().txt("NO NEW FIRES; open positions finish their exit").raw(format!("last {}", tg::tx_link(&buy.sig))), false);
                 }
             }
         }
@@ -4031,6 +4270,10 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         if delta >= spend && delta <= est + 1_000_000 { (delta, "balance-delta") } else { (est, "estimate") }
     };
     eprintln!("  POSITION OPEN mint={} cost={} lamports (estimate; refined from the balance in the background) open_total={:.6} SOL", b58(&mint), est, ACCT.open.load(Ordering::SeqCst) as f64 / 1e9);
+    let land_delta = create_slot.map(|c| land as i64 - c as i64);
+    { let mut b = tg::BOOK.lock().unwrap(); b.fees += fee_est; if let Some(d) = land_delta { b.deltas.push(d); } }
+    tg::raise(arbx::alerts::Level::Info, "snipe_landed", &b58(&mint), "✅", &format!("BUY LANDED{}", match land_delta { Some(0) => " — same slot".to_string(), Some(d) => format!(" — create {d:+}"), None => String::new() }),
+        tg::landed_body(&mint, land_delta, buy.via, buy.tokens, est, &buy.sig), false);
 
     // --- EXIT: price-reactive ladder (--exit-ladder) replaces the fixed hold + sell (not used by Run 1).
     if has("--exit-ladder") {
@@ -4083,7 +4326,8 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     let bal_end = bal_end_r.unwrap_or(bal_after_buy);
     // M7: realized PnL of this position from its own transactions (payer deltas), in the background
     pos.realized_done = true;
-    spawn_realized(rpc.clone(), mint, buy.sig.clone(), out.sigs.clone(), realized_fallback(bal_start, bal_end_r, cost));
+    spawn_realized_x(rpc.clone(), mint, buy.sig.clone(), out.sigs.clone(), realized_fallback(bal_start, bal_end_r, cost),
+        Some((cost, t_landing_seen.elapsed().as_secs_f64(), out.first_send_us)));
 
     // --- report ---
     let last = out.last.as_ref();
@@ -4131,7 +4375,7 @@ async fn hold_wait(buy: &Landed) {
 
 /// one exit's sells. `sold_at`: the context slot of the CONFIRMED read that showed the token account closed / at 0;
 /// `last_qty`: the last amount it tried to sell ((amount, exact))
-struct SellOut { sold_at: Option<u64>, sigs: Vec<(String, bool)>, last: Option<Landed>, attempts: u32, last_qty: (u64, bool) }
+struct SellOut { sold_at: Option<u64>, sigs: Vec<(String, bool)>, last: Option<Landed>, attempts: u32, last_qty: (u64, bool), first_send_us: Option<f64> }
 
 /// how a sell loop runs: `read_first` (a confirmed read before the first send), `wait` (land poll per attempt = the
 /// re-send interval), `deadline`, `bg` (a background UNSOLD retry round: stops on SELL_GIVEUP, no UNSOLD line)
@@ -4171,6 +4415,7 @@ fn spawn_unsold_retry(key: SigningKey, user: Pk, rpc: rpc::Rpc, path: Arc<send::
                 sold = true;
                 acct_slot(c);
                 eprintln!("  UNSOLD-RECOVERED mint={} after {round} background round(s): token account confirmed empty at slot {c}", b58(&launch.mint));
+                tg::raise(arbx::alerts::Level::Info, "snipe_unsold_recovered", &b58(&launch.mint), "✅", "UNSOLD recovered (sold)", arbx::alerts::format::Body::new().raw(format!("mint {}", tg::mint_link(&launch.mint))).kv("rounds", round.to_string()), false);
                 break;
             }
         }
@@ -4246,7 +4491,7 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     let wait = opts.wait;
     // (amount, exact): exact = a real balance read (sell it all + close the ATA); else a guess (no close)
     let mut qty: (u64, bool) = match known { Some(a) => (a, true), None => (guess.max(1), false) };
-    let mut out = SellOut { sold_at: None, sigs: Vec::new(), last: None, attempts: 0, last_qty: qty };
+    let mut out = SellOut { sold_at: None, sigs: Vec::new(), last: None, attempts: 0, last_qty: qty, first_send_us: None };
     let mut need_slot = land_slot; // a "sold" read must come from a node at least this far
     let mut backoff = Duration::from_millis(250);
     // a sell landed (hint) and its confirmation is awaited: since when
@@ -4284,6 +4529,7 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
                 out.sigs.push((l.sig.clone(), l.land_slot.is_some()));
                 // M4-1: per-sell timings from the decision (no RPC between the decision and the first write)
                 if let (Some((td, sd)), 1, Some(ts)) = (opts.t_decision, out.attempts, l.t_sent) {
+                    out.first_send_us = Some(ts.duration_since(td).as_secs_f64() * 1e6);
                     eprintln!("  SELL-TIMING mint={} decision->send_us={:.0} (cached blockhash, known amount, built + signed + handed to {} path(s); no RPC)",
                         b58(&launch.mint), ts.duration_since(td).as_secs_f64() * 1e6, if fb.is_some() { 2 } else { 1 });
                     let _ = sd;
@@ -4323,8 +4569,12 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         let t = tok_read_retry(rpc, ata, "confirmed", need_slot, 6).await;
         match t.zero_at() {
             Some(c) => out.sold_at = Some(c),
-            None if !opts.bg => eprintln!("  UNSOLD mint={} tokens={} (confirmed read, node slot >= {need_slot}) after {:.0} s / {} sell attempt(s) — STILL HELD (or unknown): retrying in the background; by hand: --sell-held {}",
-                b58(&launch.mint), t.show(), t0.elapsed().as_secs_f64(), out.attempts, b58(&launch.mint)),
+            None if !opts.bg => {
+                eprintln!("  UNSOLD mint={} tokens={} (confirmed read, node slot >= {need_slot}) after {:.0} s / {} sell attempt(s) — STILL HELD (or unknown): retrying in the background; by hand: --sell-held {}",
+                    b58(&launch.mint), t.show(), t0.elapsed().as_secs_f64(), out.attempts, b58(&launch.mint));
+                tg::raise(arbx::alerts::Level::Critical, "snipe_unsold", &b58(&launch.mint), "🚨", "UNSOLD: position still held", arbx::alerts::format::Body::new().raw(format!("mint {}", tg::mint_link(&launch.mint)))
+                    .kv("tokens", t.show()).kv("attempts", out.attempts.to_string()).txt("retrying in the background; by hand: --sell-held").code("mint", b58(&launch.mint)), false);
+            }
             None => {}
         }
         if let Tok::Amount(a, _) = t { if a > 0 { out.last_qty = (a, true); } }
@@ -4395,6 +4645,11 @@ async fn send_sell(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::
 /// M7: one position's realized PnL from its own transactions: the payer's balance delta in the buy and in every sell
 /// (getTransaction, confirmed). Fallback (buy tx not found): the wallet's balance change over the position.
 fn spawn_realized(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String, bool)>, fallback: (i64, &'static str)) {
+    spawn_realized_x(rpc, mint, buy_sig, sells, fallback, None);
+}
+/// the exit's facts for its Telegram message: (cost, hold s, decision->send us)
+type ExitInfo = (u64, f64, Option<f64>);
+fn spawn_realized_x(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String, bool)>, fallback: (i64, &'static str), info: Option<ExitInfo>) {
     tokio::spawn(async move {
         let mut total = 0i64;
         let buy = tx_payer_delta(&rpc, &buy_sig, 8).await;
@@ -4403,6 +4658,12 @@ fn spawn_realized(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String, 
         let (pnl, src) = if buy.is_some() { (total, "tx") } else { fallback };
         let run = ACCT.realized.fetch_add(pnl, Ordering::SeqCst) + pnl;
         eprintln!("  REALIZED mint={} pnl={:+.6} SOL source={src} run_realized={:+.6} SOL", b58(&mint), pnl as f64 / 1e9, run as f64 / 1e9);
+        if let Some((cost, hold_s, dec)) = info {
+            tg::BOOK.lock().unwrap().trades.push((mint, pnl));
+            let e = tg::Exit { mint, legs: sells.len() as u32, proceeds: pnl + cost as i64, pnl, cost, hold_s, dec_send_us: dec, run_pnl: run,
+                trades: ACCT.landed_buys.load(Ordering::SeqCst), src: src.to_string() };
+            tg::raise(arbx::alerts::Level::Info, "snipe_exit", &b58(&mint), if pnl >= 0 { "🟢" } else { "🔴" }, &format!("EXIT {}", sol_str(pnl).trim_end_matches(" SOL").to_string() + " SOL"), tg::exit_body(&e), false);
+        }
     });
 }
 
@@ -5807,7 +6068,7 @@ mod audit_tests {
         let body = &body[..body.find(')').unwrap()];
         let mut v: Vec<String> = vec!["snipe_engine".into(), "--snipe-once".into(), "--concurrent".into(), "--live".into()];
         for t in body.split_whitespace() {
-            v.push(match t { "$C" => "/root/run1/run1_landing.toml".into(), "\"$ROUTES\"" => "bam=jito-bundle".into(), t => t.trim_matches('"').to_string() });
+            v.push(match t { "$C" => "/root/run1/run1_landing.toml".into(), "\"$ROUTES\"" => "bam=jito-bundle".into(), "$ENV_NAME" => "DEV".into(), t => t.trim_matches('"').to_string() });
         }
         v.extend(["--send-log", "x", "--lat-trace", "y"].map(String::from));
         check_flags(&v).unwrap();
@@ -5995,6 +6256,7 @@ mod audit_tests {
         *BLOCKHASH_CACHE.lock().unwrap() = Some(([3u8; 32], Instant::now(), 1_000));
         let launch = snipe_build::launch_from_target([0x5Au8; 32], [0x6Bu8; 32]);
         RPC_TRAP.store(true, Ordering::SeqCst);
+        tg::TG_TRAP.store(true, Ordering::SeqCst); // Telegram: the same path must never touch it either
         let mut us = Vec::new();
         let mut last = None;
         for i in 0..300u64 {
@@ -6020,6 +6282,10 @@ mod audit_tests {
         *BLOCKHASH_CACHE.lock().unwrap() = Some(([3u8; 32], Instant::now().checked_sub(Duration::from_secs(30)).unwrap(), 1_000));
         let ixs = snipe_build::sell_message_ixs(user, &launch, 1, 0, 120_000, 5_000_000, false);
         assert!(matches!(sell_presend(&key, user, &p1, Some(&p2), &ixs, Duration::from_secs(20)), Err(None)));
+        // the Telegram trap is live: a raise while armed panics
+        let j = tokio::spawn(async { tg::raise(arbx::alerts::Level::Info, "x", "x", "x", "x", arbx::alerts::format::Body::new(), false) }).await;
+        assert!(j.is_err_and(|e| e.is_panic()), "a Telegram raise while the trap is armed must panic");
+        tg::TG_TRAP.store(false, Ordering::SeqCst);
         RPC_TRAP.store(false, Ordering::SeqCst);
         us.sort_unstable();
         eprintln!("M4-1 SELL decision->send pre-work (ixs + cached blockhash + build + sign, 2 paths), no RPC: p50 {:.1} us p99 {:.1} us",
@@ -6111,6 +6377,47 @@ mod audit_tests {
         // LRU: the oldest last-use go first
         let v = vec![(5, [5u8; 32]), (1, [1u8; 32]), (9, [9u8; 32]), (3, [3u8; 32])];
         assert_eq!(altc::lru_victims(v, 2), vec![[1u8; 32], [3u8; 32]]);
+    }
+
+    /// Telegram: the reused sink never blocks (a full queue drops and counts), the token never leaks, the bodies render
+    #[test]
+    fn telegram_m_tg() {
+        use arbx::alerts::{format::Body, Alert, Alerts, Level};
+        let token = "1234567890:AAFakeTokenSecretPart_abcdefghijkl";
+        let env = |k: &str| match k { "TELEGRAM_BOT_TOKEN" => Some(token.to_string()), "TELEGRAM_CHAT_ID" => Some("-1001234567890".to_string()), _ => None };
+        let (a, notes) = Alerts::new(&tg::cfg(), &env, arbx::alerts::Ctx { label: "SNIPER DEV".into(), ..Default::default() });
+        assert!(a.enabled(), "{notes:?}");
+        assert!(notes.iter().all(|n| !n.contains(token) && !n.contains("AAFakeToken")), "notes never carry the token");
+        // never blocks: no sender started, 5,000 distinct alerts into a 1,024 queue
+        let t = Instant::now();
+        let mut ok = 0;
+        for i in 0..5_000 { if a.raise(Alert::new(Level::Info, "snipe_fire", format!("k{i}"), "FIRE").once().body(Body::new().kv("i", i.to_string()))) { ok += 1; } }
+        let el = t.elapsed();
+        assert!(ok <= 1_024 && ok > 0, "queue bound: {ok}");
+        assert!(el < Duration::from_millis(500), "5,000 raises took {el:?}: the sink must never wait");
+        let st = a.status_json();
+        assert_eq!(st["dropped_total"].as_u64().unwrap() + ok, 5_000);
+        assert!(!st.to_string().contains("AAFakeToken"));
+        // token redaction (the old bot's redact, and the engine's URL redaction)
+        let err = format!("error sending request for url (https://api.telegram.org/bot{token}/sendMessage): timed out");
+        assert!(!arbx::alerts::telegram::redact(&err, token).contains("AAFakeToken"));
+        assert!(!redact(&err).contains("AAFakeToken"));
+        // bodies: links, escaping, fields
+        let m = [0x33u8; 32];
+        let f = tg::fire_body(&m, 459_000_000, 3_090_000_000, Some(3_210_000_000), "jito<agave>", "bam", 10_500_000, 13_000_000, Some(459_000_001)).html();
+        assert!(f.contains("https://solscan.io/token/") && f.contains("3.09") && f.contains("3.21") && f.contains("459000001"), "{f}");
+        assert!(f.contains("jito&lt;agave&gt;") && !f.contains("jito<agave>"), "escaped: {f}");
+        let e = tg::exit_body(&tg::Exit { mint: m, legs: 2, proceeds: 1_600_000_000, pnl: 75_000_000, cost: 1_525_000_000, hold_s: 0.8, dec_send_us: Some(61.0),
+            run_pnl: 120_000_000, trades: 3, src: "tx".into() }).html();
+        assert!(e.contains("+4.9%") && e.contains("61 µs") && e.contains("0.80 s"), "{e}");
+        let end = tg::end_body(&tg::End { fires: 5, landed: 3, wins: 2, losses: 1, net: 100_000_000, usd: Some(150.0), best: Some((m, 90_000_000)), worst: Some((m, -40_000_000)),
+            fees: 75_000_000, same_slot_pct: Some(33.3), median_delta: Some(1), reason: "window ended".into() }).html();
+        assert!(end.contains("$+15.00") && end.contains("33%") && end.contains("create +1"), "{end}");
+        // --env-name: DEV / PROD only
+        let a2 = |v: &[&str]| -> Vec<String> { std::iter::once("e").chain(v.iter().copied()).map(String::from).collect() };
+        assert!(check_flags(&a2(&["--env-name", "PROD", "--telegram"])).is_ok());
+        assert!(check_flags(&a2(&["--env-name", "STAGING"])).is_err());
+        assert!(check_flags(&a2(&["--no-telegram", "--telegram-heartbeat-min", "x"])).is_err());
     }
 
     #[test]

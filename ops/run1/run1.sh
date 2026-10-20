@@ -17,7 +17,7 @@ GLOG=/root/run1/guard_${TAG}.log
 $B --snipe-once --concurrent --live "${FLAGS[@]}" --send-log /root/run1/sends_${TAG}.jsonl --lat-trace /root/run1/trace_${TAG}.jsonl \
   < /root/.nexus-v2-trading-wallet.pass >> $LOG 2>&1 &
 EPID=$!
-python3 /root/run1/guard_run1.py $LOG $GLOG RUN1_DONE $EPID >> $GLOG 2>&1 &
+GUARD_ENV=${ENV_NAME:-DEV} python3 /root/run1/guard_run1.py $LOG $GLOG RUN1_DONE $EPID >> $GLOG 2>&1 &
 GPID=$!
 echo "engine pid $EPID, guard pid $GPID, log $LOG, guard log $GLOG"
 # a signal to this script stops the engine the same way (SIGTERM -> drain)

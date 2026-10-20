@@ -65,6 +65,26 @@ def say(s):
         f.write(time.strftime("%H:%M:%S ") + s + "\n")
 
 
+# Telegram (owner: "update everything to telegram"): ALERT / UNVERIFIED lines go to the same chat as the engine's
+# (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from the env run1.sh sources). Posted from a daemon thread (the guard never waits
+# on it); the token is never printed (an error prints only its class name). GUARD_ENV labels the message (DEV / PROD).
+def tg_post(text):
+    tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(), os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not tok or not chat:
+        return
+
+    def go():
+        import urllib.request, urllib.parse
+        try:
+            data = urllib.parse.urlencode({"chat_id": chat, "text": f"GUARD {os.environ.get('GUARD_ENV', 'DEV')}: {text}"[:3900],
+                                           "disable_web_page_preview": "true"}).encode()
+            urllib.request.urlopen(urllib.request.Request("https://api.telegram.org/bot" + tok + "/sendMessage", data=data), timeout=10).read()
+        except Exception as e:  # never the URL (it carries the token)
+            say(f"telegram post failed: {type(e).__name__}")
+    import threading
+    threading.Thread(target=go, daemon=True).start()
+
+
 def check(slot, mint):
     blk = get_block(slot)
     if not (isinstance(blk, dict) and "transactions" in blk):
@@ -165,6 +185,7 @@ while True:
                 pids = stop_engine() if not stopped else []
                 stopped = stopped or bool(pids)
                 say(f"UNVERIFIED {k[1]} slot {k[0]}: {info} (gave up after retries) -> ENGINE SIGTERM (fail closed; pids {pids})")
+                tg_post(f"UNVERIFIED {k[1]} slot {k[0]}: {info} -> ENGINE SIGTERM (fail closed)")
                 del pending[k]
             continue
         del pending[k]
@@ -176,6 +197,7 @@ while True:
             pids = stop_engine() if not stopped else []
             stopped = stopped or bool(pids)
             say(f"ALERT {k[1]} slot {k[0]} {info} -> ENGINE SIGTERM (pids {pids}): no new fires, open positions drain")
+            tg_post(f"ALERT {k[1]} slot {k[0]} {info} -> ENGINE SIGTERM: no new fires, open positions drain")
     if done_seen and not pending:
         say("GUARD done")
         break
