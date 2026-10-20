@@ -52,7 +52,7 @@ for i in "${!FL[@]}"; do
   case "${FL[$i]}" in
     --config) FL[$((i+1))]=$PC;; --spend-lamports) FL[$((i+1))]=$LAM;; --max-sol) FL[$((i+1))]=$MAXSOL;;
     --max-total-sol) FL[$((i+1))]=$BUDGET;; --max-buys) FL[$((i+1))]=$BUYS;; --max-loss-sol) FL[$((i+1))]=$LOSS;;
-    --minutes) FL[$((i+1))]=$MIN;; --lock-tiers) FL[$((i+1))]=$LOCK;;
+    --minutes) FL[$((i+1))]=$MIN;; --lock-tiers) FL[$((i+1))]=$LOCK;; --env-name) FL[$((i+1))]=PROD;;
   esac
 done
 
