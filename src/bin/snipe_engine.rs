@@ -296,6 +296,134 @@ fn alpenglow_warning() {
 }
 
 // =====================================================================================================================
+// ALT RESOLUTION (2026-10-20, server dry run of 39810395): raw shred / entries feeds do not resolve address lookup tables,
+// so a create that reaches the curve / quote mint / buy accounts through a table read as "unresolved" (M6: skip_quote)
+// although it is SOL-quoted (launchpad table HQ4G6Fjm…: a true rule-#2 launch every 3-5 min was skipped; M5 had the same
+// blind spot for bundle legs). This cache resolves them:
+//  * table pubkey -> its addresses (Arc), behind a std RwLock: the event loop only takes the READ lock (writers are the
+//    rare fetch completions) — no RPC, no contended lock on the detection / decision path;
+//  * `fill(&mut tx)`: every feed tx with lookups and no feed-resolved addresses gets `tx.loaded` from the cache, before
+//    detection. A table not cached, or an index past its cached length (the table was extended), leaves the tx
+//    unresolved — the fail-closed behaviour stays (skip / unknown leg) — and starts ONE async fetch (getAccountInfo
+//    through call2: primary, then the fallback RPC), so the next launch through that table resolves. `ALT-MISS <table>`
+//    is logged once per table, `ALT-REFRESH <table>` when an index is out of range;
+//  * preloaded at start-up: the known launchpad table(s), every table in --alt-cache-file (the last 200 tables seen, kept
+//    across runs: appended when a table is first fetched) and --alt-preload a,b,...
+// =====================================================================================================================
+mod altc {
+    use super::*;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Mutex, OnceLock, RwLock};
+
+    /// launchpad tables known to carry SOL-quoted rule-#2 creates (full keys)
+    pub const KNOWN: [&str; 1] = ["HQ4G6FjmW8yZ15XGoiQdGDvbi5C7fJKktNg6pzCzdHg4"];
+
+    static TABLES: std::sync::LazyLock<RwLock<HashMap<Pk, Arc<Vec<Pk>>>>> = std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
+    static PENDING: std::sync::LazyLock<Mutex<HashSet<Pk>>> = std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+    static MISSED: std::sync::LazyLock<Mutex<HashSet<Pk>>> = std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+    static RPC: OnceLock<Arc<rpc::Rpc>> = OnceLock::new();
+    static FILE: OnceLock<String> = OnceLock::new();
+    pub static HITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    pub static MISSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    /// the outcome of resolving one tx's lookups against a table map (pure: unit-tested)
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum Res { Done((Vec<Pk>, Vec<Pk>)), Missing(Vec<Pk>), Stale(Vec<Pk>) }
+
+    pub fn resolve_with(tx: &arbx::tx::Tx, tables: &HashMap<Pk, Arc<Vec<Pk>>>) -> Res {
+        let (mut missing, mut stale) = (Vec::new(), Vec::new());
+        for l in &tx.lookups {
+            match tables.get(&l.table) {
+                None => { if !missing.contains(&l.table) { missing.push(l.table); } }
+                Some(t) => if l.writable.iter().chain(&l.readonly).any(|&i| i as usize >= t.len()) && !stale.contains(&l.table) { stale.push(l.table); },
+            }
+        }
+        if !missing.is_empty() { return Res::Missing(missing); }
+        if !stale.is_empty() { return Res::Stale(stale); }
+        let (mut w, mut r) = (Vec::new(), Vec::new());
+        for l in &tx.lookups { let t = &tables[&l.table]; w.extend(l.writable.iter().map(|&i| t[i as usize])); }
+        for l in &tx.lookups { let t = &tables[&l.table]; r.extend(l.readonly.iter().map(|&i| t[i as usize])); }
+        Res::Done((w, r))
+    }
+
+    /// fill `tx.loaded` from the cache (read lock only). false: a table is missing / stale (a fetch was started)
+    pub fn fill(tx: &mut arbx::tx::Tx) -> bool {
+        if tx.lookups.is_empty() || tx.loaded.is_some() { return true; }
+        let res = { let g = TABLES.read().unwrap(); resolve_with(tx, &g) };
+        match res {
+            Res::Done(l) => { tx.loaded = Some(l); HITS.fetch_add(1, Ordering::Relaxed); true }
+            Res::Missing(v) => { MISSES.fetch_add(1, Ordering::Relaxed); for t in v { request(t, false); } false }
+            Res::Stale(v) => { MISSES.fetch_add(1, Ordering::Relaxed); for t in v { request(t, true); } false }
+        }
+    }
+
+    pub fn insert(table: Pk, addrs: Vec<Pk>) { TABLES.write().unwrap().insert(table, Arc::new(addrs)); }
+    pub fn len() -> usize { TABLES.read().unwrap().len() }
+
+    /// start one async fetch of `table` (deduplicated; never blocks the caller)
+    fn request(table: Pk, stale: bool) {
+        if !PENDING.lock().unwrap().insert(table) { return; }
+        if stale { eprintln!("  ALT-REFRESH {}: an index is past the cached length (the table was extended) — re-fetching", b58(&table)); }
+        else if MISSED.lock().unwrap().insert(table) { eprintln!("  ALT-MISS {}: lookup table not cached — this tx stays unresolved (fail closed); fetching it for the next ones", b58(&table)); }
+        match (RPC.get().cloned(), tokio::runtime::Handle::try_current()) {
+            (Some(rpc), Ok(h)) => { h.spawn(async move { let _ = fetch(&rpc, table).await; PENDING.lock().unwrap().remove(&table); }); }
+            _ => { PENDING.lock().unwrap().remove(&table); }
+        }
+    }
+
+    /// getAccountInfo of a lookup table (call2: primary, then fallback RPC) into the cache
+    pub async fn fetch(rpc: &rpc::Rpc, table: Pk) -> Result<usize> {
+        let v = call2(rpc, "getAccountInfo", serde_json::json!([b58(&table), { "encoding": "base64", "commitment": "confirmed" }])).await?;
+        if v["value"].is_null() { bail!("lookup table {} does not exist", b58(&table)); }
+        if v["value"]["owner"].as_str() != Some("AddressLookupTab1e1111111111111111111111111") { bail!("{} is not a lookup table", b58(&table)); }
+        let data = base64::engine::general_purpose::STANDARD.decode(v["value"]["data"][0].as_str().unwrap_or("")).context("lookup table data")?;
+        let addrs = arbx::tx::parse_alt(&data).context("lookup table layout")?;
+        let n = addrs.len();
+        let new = !TABLES.read().unwrap().contains_key(&table);
+        insert(table, addrs);
+        eprintln!("  ALT-LOADED {} ({n} addresses){}", b58(&table), if new { "" } else { " (refreshed)" });
+        if new { remember(table); }
+        Ok(n)
+    }
+
+    /// --alt-cache-file: keep the last 200 tables seen (one base58 key per line)
+    fn remember(table: Pk) {
+        let Some(path) = FILE.get() else { return };
+        let mut v: Vec<String> = std::fs::read_to_string(path).unwrap_or_default().lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        let k = b58(&table);
+        v.retain(|x| *x != k);
+        v.push(k);
+        if v.len() > 200 { v.drain(..v.len() - 200); }
+        let _ = std::fs::write(path, v.join("\n") + "\n");
+    }
+
+    /// start-up: remember the RPC, preload KNOWN + the cache file + --alt-preload (bounded wait; a failure is logged)
+    pub async fn init(rpc: Arc<rpc::Rpc>) {
+        let _ = RPC.set(rpc.clone());
+        let mut list: Vec<String> = KNOWN.iter().map(|s| s.to_string()).collect();
+        if let Some(p) = arg("--alt-cache-file") {
+            list.extend(std::fs::read_to_string(&p).unwrap_or_default().lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+            let _ = FILE.set(p);
+        }
+        if let Some(x) = arg("--alt-preload") { list.extend(x.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty())); }
+        let mut seen = HashSet::new();
+        let tabs: Vec<Pk> = list.iter().filter_map(|s| bs58::decode(s).into_vec().ok().filter(|v| v.len() == 32).map(|v| { let mut k = [0u8; 32]; k.copy_from_slice(&v); k })).filter(|k| seen.insert(*k)).collect();
+        let t0 = Instant::now();
+        let mut js = tokio::task::JoinSet::new();
+        for t in &tabs { let (rpc, t) = (rpc.clone(), *t); js.spawn(async move { (t, fetch(&rpc, t).await) }); }
+        let res = tokio::time::timeout(Duration::from_secs(15), async { let mut v = Vec::new(); while let Some(Ok(x)) = js.join_next().await { v.push(x); } v }).await;
+        match res {
+            Ok(v) => {
+                let ok = v.iter().filter(|x| x.1.is_ok()).count();
+                for (t, r) in &v { if let Err(e) = r { eprintln!("  ALT-PRELOAD {} failed: {}", b58(t), redact(&format!("{e:#}"))); } }
+                eprintln!("ALT CACHE: preloaded {ok} of {} lookup table(s) in {:.1} s (known launchpad tables + {})", tabs.len(), t0.elapsed().as_secs_f64(), FILE.get().map(|s| s.as_str()).unwrap_or("no --alt-cache-file"));
+            }
+            Err(_) => eprintln!("ALT CACHE: preload of {} table(s) timed out after 15 s ({} cached; the rest load on first sight)", tabs.len(), len()),
+        }
+    }
+}
+
+// =====================================================================================================================
 // RUN ACCOUNTING (audit 2026-10-20: C1, L3, L4, M7; re-audit N1-N3). One per process (the live loop runs once).
 //  * a position's cost counts as OPEN only from "buy landed with tokens" until "sold" (N1: a CONFIRMED read shows the
 //    token account closed or at 0, at a context slot >= the last sell's landing): a buy that never lands or reverts never
@@ -830,6 +958,8 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         }
         let _ = RPC_FB.set(fb);
     }
+    // ALT cache: the known launchpad tables + --alt-cache-file + --alt-preload, before any feed starts
+    altc::init(rpc.clone()).await;
     // M-3 (audit 3): --buy-max-slot-delta N: the on-chain slot deadline, verified by simulation now or no start (fail closed)
     if has("--buy-max-slot-delta") {
         let g = verify_slot_guard(&rpc, &key, user).await.context("--buy-max-slot-delta")?;
@@ -1296,7 +1426,8 @@ async fn run_shadow(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rp
             _ = tokio::time::sleep_until(deadline) => break,
             ev = arx.recv() => match ev { Some(e) => e, None => break },
         };
-        let arbx::feeds::Event::Tx(a) = ev else { continue };
+        let arbx::feeds::Event::Tx(mut a) = ev else { continue };
+        altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
         let Some(l) = snipe::detect_launch(&a.tx) else { continue };
         // FEED COMPARE: log every create's arrival (feed index + rx nanos) so two feeds can be raced head-to-head
         // (same mint seen on both -> whichever t_rx is smaller delivered it first). t_rx is the shared monotonic clock.
@@ -1804,7 +1935,8 @@ async fn run_simulate(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::
         loop {
             if Instant::now() >= deadline || stop.load(Ordering::Relaxed) { break; }
             let ev = match tokio::time::timeout(Duration::from_secs(2), arx.recv()).await { Ok(Some(e)) => e, Ok(None) => break, Err(_) => continue };
-            let arbx::feeds::Event::Tx(a) = ev else { continue };
+            let arbx::feeds::Event::Tx(mut a) = ev else { continue };
+        altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
             let Some(launch) = snipe::detect_launch(&a.tx) else { continue };
             if launch.dev_buy_lamports < min_dev_buy { continue; }
             if !allow_nonvanilla && !launch.is_snipeable() { continue; }
@@ -1842,7 +1974,8 @@ async fn run_simulate(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::
     loop {
         if stop.load(Ordering::Relaxed) || done >= count { break; }
         let ev = match arx.recv().await { Some(e) => e, None => bail!("feed closed before a launch was detected") };
-        let arbx::feeds::Event::Tx(a) = ev else { continue };
+        let arbx::feeds::Event::Tx(mut a) = ev else { continue };
+        altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
         let Some(launch) = snipe::detect_launch(&a.tx) else { continue };
         if !allow_nonvanilla && !launch.is_snipeable() { continue; }
         if snipe::create_quote_mint(&a.tx).is_some() || !launch.is_create_v2 || !seen.first(launch.mint) { continue; }
@@ -2032,7 +2165,8 @@ async fn run_snipe_once(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     loop {
         if stop.load(Ordering::Relaxed) { eprintln!("stopped before a launch qualified"); return Ok(()); }
         let ev = match arx.recv().await { Some(e) => e, None => bail!("feed closed before any launch was detected") };
-        let arbx::feeds::Event::Tx(a) = ev else { continue };
+        let arbx::feeds::Event::Tx(mut a) = ev else { continue };
+        altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
         let Some(launch) = snipe::detect_launch(&a.tx) else { continue };
         if launch.dev_buy_lamports < min_dev_buy {
             eprintln!("  skip launch slot={} mint={} dev_buy={} (< {})", a.slot, b58(&launch.mint), launch.dev_buy_lamports, min_dev_buy);
@@ -2616,7 +2750,8 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
         };
         det.health(&_feeds);
         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
-        if let Some(arbx::feeds::Event::Tx(a)) = ev {
+        if let Some(arbx::feeds::Event::Tx(mut a)) = ev {
+            altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
             if race.cfg.glued { race.note_hit(&a.tx); }
             det.note(&a);
             // DET FIX: a top-level create, else pump's router create (CPI) decoded from the router's own args
@@ -3076,7 +3211,8 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         if let Some(arbx::feeds::Event::Tx(a)) = &ev { ev_st = [a.t_rx, a.t_decoded, t_deq_real, t_deq]; }
         det.health(&_feeds);
         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
-        if let Some(arbx::feeds::Event::Tx(a)) = ev {
+        if let Some(arbx::feeds::Event::Tx(mut a)) = ev {
+            altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
             if race.cfg.glued { race.note_hit(&a.tx); }
             // DET FIX: the current slot for leader targeting / send_slot comes from the shred feed (the leader's slot as it
             // is being produced). The 250 ms getSlot poller alone lagged the create slot by 2-3 slots (live_land_fast.log:
@@ -3247,6 +3383,8 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     if gate.max_ms.is_some() { eprintln!("CREATE-MS GATE: passed {} skipped late {} skipped unknown {}", gate.passed, gate.late, gate.unknown); }
     eprintln!("MAX-INFLIGHT: skipped {skipped_inflight} qualifying launches (all {max_inflight} slots busy)");
     eprintln!("SKIPPED: balance {skipped_balance}, budget {skipped_budget}, max-buys {skipped_maxbuys}");
+    eprintln!("ALT CACHE: {} table(s) cached; {} tx(s) resolved from it, {} unresolved (table missing / stale at arrival: fail closed)",
+        altc::len(), altc::HITS.load(Ordering::Relaxed), altc::MISSES.load(Ordering::Relaxed));
     if uri_whitelist { eprintln!("URI-HOST GATE: skipped {skipped_host} non-trusted-host launches"); }
     // H1: the drain covers the worst-case position: land timeout + late-land watch + hold cap + the sell deadline + one
     // last sell wait + the realized-PnL lookups, plus margin
@@ -5329,6 +5467,61 @@ mod audit_tests {
         assert_eq!(redact("error sending request for url (https://rpc.example.com/?api-key=SECRET): timed out"), "error sending request for url (<url>): timed out");
         assert_eq!(redact("no url here"), "no url here");
         assert!(!redact("a http://x/y?k=1 b https://z").contains("k=1"));
+    }
+
+    /// ALT fix: the real HQ4G6Fjm create of ADkDx1… (slot 459235310, tests/fixtures/alt_hq4g, mainnet bytes): unresolved
+    /// it read as a non-SOL quote (skip); with the table cached the quote is WSOL (SOL), the launch decodes with the right
+    /// curve, the resolved addresses equal the RPC's loadedAddresses, and the 3 glued legs count as buys (~3.21 SOL)
+    #[test]
+    fn alt_hq4g_create_resolves() {
+        use std::collections::HashMap;
+        let b = |s: &str| base64::engine::general_purpose::STANDARD.decode(s.trim()).unwrap();
+        let raw = b(include_str!("../../tests/fixtures/alt_hq4g/create.b64"));
+        let table = pk("HQ4G6FjmW8yZ15XGoiQdGDvbi5C7fJKktNg6pzCzdHg4");
+        let addrs = arbx::tx::parse_alt(&b(include_str!("../../tests/fixtures/alt_hq4g/table_HQ4G6FjmW8yZ15XGoiQdGDvbi5C7fJKktNg6pzCzdHg4.b64"))).unwrap();
+        assert_eq!(addrs.len(), 44);
+        let (tx0, _) = arbx::tx::parse_wire(&raw).unwrap();
+        assert_eq!(tx0.lookups.len(), 1);
+        assert_eq!(tx0.lookups[0].table, table);
+        // as the raw-shred feed delivers it: unresolved -> the M6 skip (what the server dry run logged)
+        assert_eq!(snipe::create_quote_mint(&tx0), Some(snipe::UNRESOLVED_QUOTE));
+        // cache states: missing / stale (table shorter than an index) / done
+        let mut m: HashMap<Pk, Arc<Vec<Pk>>> = HashMap::new();
+        assert_eq!(altc::resolve_with(&tx0, &m), altc::Res::Missing(vec![table]));
+        m.insert(table, Arc::new(addrs[..20].to_vec()));
+        assert_eq!(altc::resolve_with(&tx0, &m), altc::Res::Stale(vec![table]));
+        m.insert(table, Arc::new(addrs.clone()));
+        let altc::Res::Done(loaded) = altc::resolve_with(&tx0, &m) else { panic!("resolves") };
+        // equal to what the RPC itself resolved for this transaction
+        let rl: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/alt_hq4g/create_loaded.json")).unwrap();
+        let ks = |k: &str| -> Vec<Pk> { rl[k].as_array().unwrap().iter().map(|x| pk(x.as_str().unwrap())).collect() };
+        assert_eq!(loaded, (ks("writable"), ks("readonly")));
+        let mut tx = tx0.clone();
+        tx.loaded = Some(loaded);
+        assert_eq!(snipe::create_quote_mint(&tx), None, "the quote resolves to SOL (WSOL)");
+        let mint = pk("ADkDx1QYii7DpKgFMBBxCaWg9pwjPY4GYYnz4qnrpump");
+        let l = snipe::detect_launch(&tx).expect("the create decodes");
+        assert_eq!(l.mint, mint);
+        assert!(l.is_create_v2);
+        assert_eq!(l.bonding_curve, snipe_build::bonding_curve(&mint));
+        assert_eq!(l.assoc_bonding_curve, snipe_build::assoc_bonding_curve(&l.bonding_curve, &mint));
+        assert!(l.dev_buy_lamports >= 3_000_000_000 && l.dev_buy_lamports <= 3_200_000_000, "dev ~3.09 SOL: {}", l.dev_buy_lamports);
+        // the glued bundle: block index 846-848, all buys of the mint
+        let vq = snipe::CURVE_VQ0 + l.dev_buy_lamports;
+        let mut legs = Vec::new();
+        for line in include_str!("../../tests/fixtures/alt_hq4g/legs.b64").lines().filter(|x| !x.trim().is_empty()) {
+            let (lt, _) = arbx::tx::parse_wire(&b(line)).unwrap();
+            assert!(!snipe::pump_buy_mint_unresolved(&lt));
+            match snipe::bundle_legs(&lt, &mint) { Some(snipe::Legs::Buys(v)) => legs.extend(v), x => panic!("a glued leg must be a buy of the mint: {x:?}") }
+        }
+        assert_eq!(legs.len(), 3);
+        let sol = snipe::simulate_legs(vq, &legs).unwrap() as f64 / 1e9;
+        assert!((3.0..3.5).contains(&sol), "glued bundle ~3.21 SOL: {sol}");
+        // fill() through the live cache (the event loop's call)
+        altc::insert(table, addrs);
+        let mut t2 = tx0.clone();
+        assert!(altc::fill(&mut t2));
+        assert_eq!(snipe::create_quote_mint(&t2), None);
     }
 
     #[test]

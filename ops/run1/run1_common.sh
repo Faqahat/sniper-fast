@@ -33,6 +33,9 @@
 #                             background every 5 s until the exit; EXIT CHECK tries one more sell of anything held
 #   --sell-retry-s 1          M-5: re-send a sell not seen within 1 s (was 4); every sell (the first too) goes to
 #                             staked-rpc + nozomi (--sell-fallback-path) with one signature
+#   --alt-cache-file /root/run1/alt_tables.txt   ALT fix (dry run of 39810395): lookup tables of raw-shred txs are
+#                             resolved from a cache (known launchpad table HQ4G6Fjm… + this file's last 200 tables preloaded;
+#                             a new table is fetched async on first sight, that tx stays fail-closed, ALT-MISS logged once)
 #   (engine, no flag: M-1 SIGHUP = stop + drain; M-2 every failed buy's real error is logged and classified, 3 non-slippage
 #    failures stop new fires; M-4 --sell-held resolves router creates; L-1 the kill logs open positions + worst case)
 #   (engine behaviour, no flag: N1 sold = CONFIRMED 0 at slot >= the sell's landing; N2 kill/lock on 2 consecutive polls;
@@ -49,7 +52,7 @@ FLAGS=(--uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8
   --close-leaders /root/fix2/close_leaders_5ms.txt --max-create-ms 150
   --spend-lamports 1500000000 --slip-cap-bps 1500 --fill-cap 1.6 --max-sol 1.6 --max-total-sol 31 --max-buys 20 --max-loss-sol 0.5 --lock-tiers 0.3:0,0.6:0.3 --max-inflight 2 --minutes 180
   --cu-price-micro 110000000 --cu-limit 100000 --sell-cu-limit 120000 --sell-cu-price-micro 5000000 --hold-slots 3 --hold-ms 450 --hold-max-ms 1500 --land-poll-ms 100 --land-timeout-ms 3000
-  --sell-robust --sell-retry-s 1 --sell-deadline-s 30 --sell-fallback-path nozomi --buy-max-slot-delta 1 --rpc-fallback-url-env RMR_RPC_URL --strict-balance --jito-poll --landed-via
+  --sell-robust --sell-retry-s 1 --sell-deadline-s 30 --sell-fallback-path nozomi --buy-max-slot-delta 1 --rpc-fallback-url-env RMR_RPC_URL --alt-cache-file /root/run1/alt_tables.txt --strict-balance --jito-poll --landed-via
   --send-path helius --sell-path staked-rpc --route-by-client "$ROUTES"
   --config $C --env-file /root/sniper/deploy/.env
   --fast-send --jito-h2 --fast-presign --fast-derive --fast-verify --busy-poll --pin-core 1)
