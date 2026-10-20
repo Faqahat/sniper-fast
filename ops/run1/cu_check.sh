@@ -17,7 +17,7 @@
 ACC=${1:?usage: cu_check.sh <funded system-owned pubkey> [N]}; N=${2:-5}
 cd /root/run1; . /root/run1/run1_common.sh
 echo "== BUY CU check incl. the M-3 slot guard ($N launches) =="
-$B --simulate --sim-as $ACC --sim-count $N --sim-delay-ms 1500 --spend-lamports 1500000000 --cu-limit 95000 --cu-price-micro 110000000 \
+$B --simulate --sim-as $ACC --sim-count $N --sim-delay-ms 1500 --spend-lamports 1500000000 --cu-limit 100000 --cu-price-micro 110000000 \
   --sim-tips 12000000,1000000,1000000 --buy-max-slot-delta 1 --config $C --env-file /root/sniper/deploy/.env \
   < /root/.nexus-v2-trading-wallet.pass 2>&1 | tee /root/run1/cu_check.log | grep -E "SLOT-GUARD|refusing|SIMULATE AS|DETECTED|tx bytes|^err|unitsConsumed|CU-CHECK|>>>|simulate failed"
 echo "== SELL CU check ($N launches) =="

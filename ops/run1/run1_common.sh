@@ -48,7 +48,7 @@ FLAGS=(--uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8
   --race-pros /root/race/pros.json --race-early
   --close-leaders /root/fix2/close_leaders_5ms.txt --max-create-ms 150
   --spend-lamports 1500000000 --slip-cap-bps 1500 --fill-cap 1.6 --max-sol 1.6 --max-total-sol 31 --max-buys 20 --max-loss-sol 0.5 --lock-tiers 0.3:0,0.6:0.3 --max-inflight 2 --minutes 180
-  --cu-price-micro 110000000 --cu-limit 95000 --sell-cu-limit 120000 --sell-cu-price-micro 5000000 --hold-slots 3 --hold-ms 450 --hold-max-ms 1500 --land-poll-ms 100 --land-timeout-ms 3000
+  --cu-price-micro 110000000 --cu-limit 100000 --sell-cu-limit 120000 --sell-cu-price-micro 5000000 --hold-slots 3 --hold-ms 450 --hold-max-ms 1500 --land-poll-ms 100 --land-timeout-ms 3000
   --sell-robust --sell-retry-s 1 --sell-deadline-s 30 --sell-fallback-path nozomi --buy-max-slot-delta 1 --rpc-fallback-url-env RMR_RPC_URL --strict-balance --jito-poll --landed-via
   --send-path helius --sell-path staked-rpc --route-by-client "$ROUTES"
   --config $C --env-file /root/sniper/deploy/.env
