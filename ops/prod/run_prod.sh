@@ -53,12 +53,17 @@ for i in "${!FL[@]}"; do
   esac
 done
 
-BAL=$(python3 - <<'EOF'
+read BAL WSOLBAL < <(python3 - <<'EOF'
 import sys; sys.path.insert(0, "/root/indep")
 from common import rpc
-print(rpc("getBalance", ["2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"])["value"] / 1e9)
+W = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"
+r = rpc("getTokenAccountsByOwner", [W, {"mint": "So11111111111111111111111111111111111111112"}, {"encoding": "jsonParsed"}])
+ws = sum(float(a["account"]["data"]["parsed"]["info"]["tokenAmount"]["uiAmountString"]) for a in r["value"])
+print(rpc("getBalance", [W])["value"] / 1e9, ws)
 EOF
 )
+# pump v3 buys/sells settle in NATIVE SOL: WSOL in the wallet is idle and invisible to the engine's balance checks
+awk -v w="$WSOLBAL" 'BEGIN{exit !(w>0.01)}' && echo "NOTE: the wallet also holds ${WSOLBAL} WSOL, which the engine does NOT use; run /root/prod/unwrap_prod.sh first to make it native SOL"
 NEED=$(awk -v s="$SIZE" -v l="$LOSS" 'BEGIN{printf "%.3f", 2*(s*1.0125+0.03)+l}')
 STAMP=$(date -u +%Y%m%d_%H%M); LOG=/root/prod/runs/prod_${TAG}_${STAMP}.log
 cat <<EOF
