@@ -5,7 +5,7 @@
 #
 #   tmux new -s prod                      # (or: tmux attach -t prod)
 #   sudo bash /root/prod/run_prod.sh --size 1.5 --max-buys 20 --max-loss 0.5 --minutes 180 [--tag p1] [--lock 0.3:0,0.6:0.3]
-#   detach: Ctrl-b d      stop cleanly: Ctrl-c in the tmux window (SIGINT -> stop new fires, drain, EXIT CHECK)
+#   detach: Ctrl-b d      stop cleanly: Ctrl-c in the tmux window (engine only: stop new fires, drain, EXIT CHECK; wait for PROD_DONE)
 #
 # Same engine build, rule, gates, fees and exit as Dev (/root/run1/run1_common.sh); only the wallet + caps differ.
 set -u
@@ -86,8 +86,18 @@ read -r -p "Type PROD to start (anything else aborts): " OK
   [ -n "${P:-}" ] && exec python3 /root/run1/guard_run1.py "$LOG" /root/prod/runs/guard_${TAG}_${STAMP}.log PROD_DONE "$P" ) \
   > /root/prod/runs/guard_${TAG}_${STAMP}.out 2>&1 &
 cd /root/prod
+# AUDIT6 H6-1: the engine writes STRAIGHT to the log file (no pipe a Ctrl-c could kill: a dead pipe makes its next log
+# line panic and would break the drain). The live view is a tail in its OWN session (setsid), so Ctrl-c in this window
+# reaches only the engine (-> stop new fires, drain, EXIT CHECK) and this script (trap below), never the viewer.
+: >> "$LOG"
+setsid tail -n +1 -F "$LOG" &
+TAILPID=$!
+trap 'echo; echo "(Ctrl-c -> engine: stopping new fires, draining open positions, then EXIT CHECK; wait for PROD_DONE)"' INT
 echo "the engine now asks for the keystore passphrase (hidden):"
 $B --snipe-once --concurrent --live "${FL[@]}" --send-log /root/prod/runs/sends_${TAG}_${STAMP}.jsonl \
-  --lat-trace /root/prod/runs/trace_${TAG}_${STAMP}.jsonl 2> >(tee -a "$LOG" >&2) | tee -a "$LOG"
-echo "PROD_DONE $TAG $(date -u)" | tee -a "$LOG"
+  --lat-trace /root/prod/runs/trace_${TAG}_${STAMP}.jsonl >> "$LOG" 2>&1
+RC=$?
+echo "PROD_DONE $TAG rc=$RC $(date -u)" >> "$LOG"
+sleep 1; kill $TAILPID 2>/dev/null
+trap - INT
 echo "after the run: check UNSOLD / HELD-AT-EXIT / PENDING-AT-EXIT lines above, then sweep leftovers with --sell-held"
