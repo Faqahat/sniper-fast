@@ -1,0 +1,1773 @@
+{
+ "epoch": 1063,
+ "measured_from": "84.32.100.36 (Cherry Servers, Frankfurt)",
+ "r2_total": 76,
+ "total_slots": 432000,
+ "regions": [
+  {
+   "region": "Frankfurt (DE)",
+   "slot_share": 0.33469444444444446,
+   "leaders": 195,
+   "rtt_med": 0.155,
+   "covered_share": 0.9807176252524414,
+   "r2": 32,
+   "r2_share": 0.42105263157894735,
+   "providers": [
+    [
+     "TeraSwitch Networks Inc.",
+     0.23385185185185184
+    ],
+    [
+     "Allnodes Inc",
+     0.036194444444444446
+    ],
+    [
+     "Latitude.sh",
+     0.028787037037037038
+    ],
+    [
+     "UAB Cherry Servers",
+     0.023657407407407408
+    ],
+    [
+     "OVH SAS",
+     0.007611111111111111
+    ]
+   ],
+   "cities": [
+    [
+     "Frankfurt",
+     0.23385185185185184
+    ],
+    [
+     "Frankfurt am Main",
+     0.05724074074074074
+    ],
+    [
+     "Fechenheim",
+     0.02886111111111111
+    ],
+    [
+     "R\u00f6delheim",
+     0.007333333333333333
+    ]
+   ],
+   "clients": [
+    [
+     "Harmonic",
+     0.3756051677870916
+    ],
+    [
+     "Jito",
+     0.3517857636871663
+    ],
+    [
+     "BAM",
+     0.19661382687359946
+    ],
+    [
+     "Firedancer",
+     0.061969181398179654
+    ],
+    [
+     "Rakurai",
+     0.0135557584308518
+    ]
+   ],
+   "top": [
+    {
+     "pk": "Fd7btgySsrjuo25CJCj7oE7VPMyezDhnx7pZkj2v69Nk",
+     "share": 0.03925925925925926,
+     "rtt": 0.137,
+     "client": "Harmonic",
+     "city": "Frankfurt",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "198.13.140.105"
+    },
+    {
+     "pk": "HEL1USMZKAL2odpNBj2oCjffnFGaYwmbGmyewGv1e2TU",
+     "share": 0.035694444444444445,
+     "rtt": 0.112,
+     "client": "Jito",
+     "city": "Frankfurt",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.57.134"
+    },
+    {
+     "pk": "JUPiTERrZqgf1jUyR7dSkhMx4Kn2qJyekWsg3LT1h4b",
+     "share": 0.02224074074074074,
+     "rtt": 0.125,
+     "client": "Jito",
+     "city": "Frankfurt am Main",
+     "asn": "AS213896 UAB Cherry Servers",
+     "ip": "88.216.36.133"
+    },
+    {
+     "pk": "C8Bey3LKVJHVqN6xPTeW8WJfUgFQAeGNBpT4Rp99JP1k",
+     "share": 0.021064814814814814,
+     "rtt": 0.73,
+     "client": "Jito",
+     "city": "Frankfurt am Main",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "189.1.171.13"
+    },
+    {
+     "pk": "EvnRmnMrd69kFdbLMxWkTn1icZ7DCceRhvmb2SJXqDo4",
+     "share": 0.01838888888888889,
+     "rtt": 0.331,
+     "client": "Firedancer",
+     "city": "Fechenheim",
+     "asn": "AS395201 Allnodes Inc",
+     "ip": "104.204.143.114"
+    },
+    {
+     "pk": "Awes4Tr6TX8JDzEhCZY2QVNimT6iD1zWHzf1vNyGvpLM",
+     "share": 0.015222222222222222,
+     "rtt": 0.137,
+     "client": "Harmonic",
+     "city": "Frankfurt",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "198.13.140.105"
+    }
+   ]
+  },
+  {
+   "region": "Amsterdam (NL)",
+   "slot_share": 0.22063888888888888,
+   "leaders": 117,
+   "rtt_med": 5.878,
+   "covered_share": 0.005035880649628604,
+   "r2": 13,
+   "r2_share": 0.17105263157894737,
+   "providers": [
+    [
+     "TeraSwitch Networks Inc.",
+     0.16380555555555557
+    ],
+    [
+     "Servers.com, Inc.",
+     0.04199074074074074
+    ],
+    [
+     "UAB Cherry Servers",
+     0.006666666666666667
+    ],
+    [
+     "Datacamp Limited",
+     0.005009259259259259
+    ],
+    [
+     "Latitude.sh LTDA",
+     0.0016944444444444444
+    ]
+   ],
+   "cities": [
+    [
+     "Amsterdam",
+     0.21310185185185185
+    ],
+    [
+     "Woerden",
+     0.006740740740740741
+    ],
+    [
+     "Emmen",
+     0.0007962962962962962
+    ]
+   ],
+   "clients": [
+    [
+     "BAM",
+     0.42632926266314153
+    ],
+    [
+     "Jito",
+     0.3638423769356666
+    ],
+    [
+     "Harmonic",
+     0.1770951361786059
+    ],
+    [
+     "Firedancer",
+     0.01922027781274917
+    ],
+    [
+     "Agave",
+     0.0102815896596584
+    ]
+   ],
+   "top": [
+    {
+     "pk": "E1r4Psq84tHfQ6aPTvvDka4U3u8zPVD7gEUrH25RdxHL",
+     "share": 0.024592592592592593,
+     "rtt": 5.91,
+     "client": "Jito",
+     "city": "Amsterdam",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.42.75"
+    },
+    {
+     "pk": "5pPRHniefFjkiaArbGX3Y8NUysJmQ9tMZg3FrFGwHzSm",
+     "share": 0.013370370370370371,
+     "rtt": 7.481,
+     "client": "Jito",
+     "city": "Amsterdam",
+     "asn": "AS7979 Servers.com, Inc.",
+     "ip": "188.42.129.244"
+    },
+    {
+     "pk": "GnC339vkyXRm1jRX69dt9mapPPu2LbzXfSDoxc91qta6",
+     "share": 0.010842592592592593,
+     "rtt": 6.513,
+     "client": "Jito",
+     "city": "Amsterdam",
+     "asn": "AS7979 Servers.com, Inc.",
+     "ip": "23.109.158.124"
+    },
+    {
+     "pk": "EkvdKhULbMFqjKBKotAzGi3kwMvMpYNDKJXXQQmi6C1f",
+     "share": 0.009555555555555555,
+     "rtt": 5.869,
+     "client": "Harmonic",
+     "city": "Amsterdam",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "63.254.166.232"
+    },
+    {
+     "pk": "A1vqhA2fS6K7CvHsJKX1ACcHJFEmyRg4KuR5pctHANy4",
+     "share": 0.009138888888888889,
+     "rtt": 5.862,
+     "client": "Harmonic",
+     "city": "Amsterdam",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "63.254.166.232"
+    },
+    {
+     "pk": "GBQ2GvTzmjXMu97dr7WUnLKYTNim1aoZsYS53KYXAAAA",
+     "share": 0.0071574074074074075,
+     "rtt": 5.878,
+     "client": "BAM",
+     "city": "Amsterdam",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "63.254.167.199"
+    }
+   ]
+  },
+  {
+   "region": "US East (NY/NJ/Ashburn)",
+   "slot_share": 0.10463888888888889,
+   "leaders": 83,
+   "rtt_med": 80.609,
+   "covered_share": 0.0,
+   "r2": 6,
+   "r2_share": 0.07894736842105263,
+   "providers": [
+    [
+     "TeraSwitch Networks Inc.",
+     0.07932407407407407
+    ],
+    [
+     "Galaxy Digital LP",
+     0.016287037037037037
+    ],
+    [
+     "Servers.com, Inc.",
+     0.004462962962962963
+    ],
+    [
+     "Latitude.sh",
+     0.0012777777777777779
+    ],
+    [
+     "DartPoints Operating Company, LLC",
+     0.0010185185185185184
+    ]
+   ],
+   "cities": [
+    [
+     "Ashburn",
+     0.03725
+    ],
+    [
+     "Newark",
+     0.03705555555555556
+    ],
+    [
+     "Secaucus",
+     0.016287037037037037
+    ],
+    [
+     "Pittsburgh",
+     0.005916666666666666
+    ]
+   ],
+   "clients": [
+    [
+     "BAM",
+     0.5097778957614371
+    ],
+    [
+     "Harmonic",
+     0.22661711352977612
+    ],
+    [
+     "Firedancer",
+     0.21431731705158835
+    ],
+    [
+     "Jito",
+     0.03884611981240598
+    ],
+    [
+     "Unknown(8331)",
+     0.006636580833554553
+    ]
+   ],
+   "top": [
+    {
+     "pk": "DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy",
+     "share": 0.02900925925925926,
+     "rtt": 80.609,
+     "client": "BAM",
+     "city": "Ashburn",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "208.91.105.55"
+    },
+    {
+     "pk": "JD549HsbJHeEKKUrKgg4Fj2iyv2RGjsV7NTZjZUrHybB",
+     "share": 0.015037037037037036,
+     "rtt": 81.797,
+     "client": "Firedancer",
+     "city": "Secaucus",
+     "asn": "AS400963 Galaxy Digital LP",
+     "ip": "86.54.153.246"
+    },
+    {
+     "pk": "87CcUxpyR72ZyfaZirj86mqkbk5uuU2EfnwTegVMLJL5",
+     "share": 0.008240740740740741,
+     "rtt": 75.283,
+     "client": "Harmonic",
+     "city": "Newark",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.45.196"
+    },
+    {
+     "pk": "3psxMyr7rQzywVp1MXKd1XFmFz33NjydzCoJx9t2sMQW",
+     "share": 0.00575,
+     "rtt": 75.283,
+     "client": "Harmonic",
+     "city": "Newark",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.45.196"
+    },
+    {
+     "pk": "FBbqKvwLfKGZrKrfSbPJz4ymQ7zMarhRyZtu1RBkSe89",
+     "share": 0.004462962962962963,
+     "rtt": null,
+     "client": "Firedancer",
+     "city": "Ashburn",
+     "asn": "AS7979 Servers.com, Inc.",
+     "ip": "170.23.224.5"
+    },
+    {
+     "pk": "jzDsimGW1g8esbD1Kr2oRvr9X573XS2zQd7AsYJ1to5",
+     "share": 0.003703703703703704,
+     "rtt": 75.294,
+     "client": "BAM",
+     "city": "Newark",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.51.255"
+    }
+   ]
+  },
+  {
+   "region": "London (UK)",
+   "slot_share": 0.09964814814814815,
+   "leaders": 40,
+   "rtt_med": 11.275,
+   "covered_share": 0.0031592640773090504,
+   "r2": 8,
+   "r2_share": 0.10526315789473684,
+   "providers": [
+    [
+     "TeraSwitch Networks Inc.",
+     0.07903703703703703
+    ],
+    [
+     "Galaxy Digital LP",
+     0.016194444444444445
+    ],
+    [
+     "Momentum Telecom, Inc.",
+     0.0016481481481481482
+    ],
+    [
+     "Latitude.sh",
+     0.0013148148148148149
+    ],
+    [
+     "OVH SAS",
+     0.000712962962962963
+    ]
+   ],
+   "cities": [
+    [
+     "London",
+     0.09594444444444444
+    ],
+    [
+     "City of London",
+     0.002962962962962963
+    ],
+    [
+     "Edinburgh",
+     0.0004351851851851852
+    ],
+    [
+     "Pendlebury",
+     0.0002685185185185185
+    ]
+   ],
+   "clients": [
+    [
+     "Harmonic",
+     0.6655826054636684
+    ],
+    [
+     "Firedancer",
+     0.1912283962088831
+    ],
+    [
+     "BAM",
+     0.09533543950938488
+    ],
+    [
+     "Jito",
+     0.04618100724772347
+    ],
+    [
+     "Agave",
+     0.0016725515703400855
+    ]
+   ],
+   "top": [
+    {
+     "pk": "CAo1dCGYrB6NhHh5xb1cGjUiu86iyCfMTENxgHumSve4",
+     "share": 0.022037037037037036,
+     "rtt": 11.29,
+     "client": "Harmonic",
+     "city": "London",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.46.242"
+    },
+    {
+     "pk": "9eGrDohdNTAo61DRHyfMuqKWXqYnA3i254Wiszxe8FoY",
+     "share": 0.016194444444444445,
+     "rtt": 13.341,
+     "client": "Firedancer",
+     "city": "London",
+     "asn": "AS400963 Galaxy Digital LP",
+     "ip": "86.54.152.246"
+    },
+    {
+     "pk": "Hz5aLvpKScNWoe9YZWxBLrQA3qzHJivBGtfciMekk8m5",
+     "share": 0.008907407407407407,
+     "rtt": 11.258,
+     "client": "Harmonic",
+     "city": "London",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.46.242"
+    },
+    {
+     "pk": "FBKFWadXZJahGtFitAsBvbqh5968gLY7dMBBJUoUjeNi",
+     "share": 0.008777777777777778,
+     "rtt": 11.29,
+     "client": "Harmonic",
+     "city": "London",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.46.242"
+    },
+    {
+     "pk": "BtsmiEEvnSuUnKxqXj2PZRYpPJAc7C34mGz8gtJ1DAaH",
+     "share": 0.00875,
+     "rtt": 11.29,
+     "client": "Harmonic",
+     "city": "London",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.46.242"
+    },
+    {
+     "pk": "9UM8wQ8F5oMiRcP5YdqD6Lr4krpBWCD8LtgQYoisJd9i",
+     "share": 0.00850925925925926,
+     "rtt": 11.29,
+     "client": "Harmonic",
+     "city": "London",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.46.242"
+    }
+   ]
+  },
+  {
+   "region": "Tokyo (JP)",
+   "slot_share": 0.051166666666666666,
+   "leaders": 50,
+   "rtt_med": 214.01,
+   "covered_share": 0.0,
+   "r2": 1,
+   "r2_share": 0.013157894736842105,
+   "providers": [
+    [
+     "TeraSwitch Networks Inc.",
+     0.04769444444444444
+    ],
+    [
+     "UAB Cherry Servers",
+     0.002185185185185185
+    ],
+    [
+     "Latitude.sh",
+     0.001287037037037037
+    ]
+   ],
+   "cities": [
+    [
+     "Tokyo",
+     0.051166666666666666
+    ]
+   ],
+   "clients": [
+    [
+     "BAM",
+     0.7947882736156352
+    ],
+    [
+     "Harmonic",
+     0.13192182410423453
+    ],
+    [
+     "Jito",
+     0.042707202316322836
+    ],
+    [
+     "Agave",
+     0.025153818313427435
+    ],
+    [
+     "Firedancer",
+     0.0054288816503800215
+    ]
+   ],
+   "top": [
+    {
+     "pk": "5EhGYUyQNrxgUbuYF4vbL2SZDT6RMfhq3yjeyevvULeC",
+     "share": 0.007712962962962963,
+     "rtt": 213.556,
+     "client": "BAM",
+     "city": "Tokyo",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "208.91.109.115"
+    },
+    {
+     "pk": "GQzMeEMwAR44ugoNCifTb5NdRKos1GduDUPeNh6AgV46",
+     "share": 0.0060185185185185185,
+     "rtt": 213.462,
+     "client": "BAM",
+     "city": "Tokyo",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "208.91.109.115"
+    },
+    {
+     "pk": "DUND26mEDfFeaPsVof3YvbXDRvpuQX7HMUJrLgEWzYw4",
+     "share": 0.005907407407407407,
+     "rtt": 213.323,
+     "client": "BAM",
+     "city": "Tokyo",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "208.91.109.115"
+    },
+    {
+     "pk": "2GUnfxZavKoPfS9s3VSEjaWDzB3vNf5RojUhprCS1rSx",
+     "share": 0.00587037037037037,
+     "rtt": 213.317,
+     "client": "BAM",
+     "city": "Tokyo",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "208.91.109.115"
+    },
+    {
+     "pk": "GYx8kpp7SsRwtQEEsGQjAxb4hFMMmT91kFJuDeky3YGQ",
+     "share": 0.0032962962962962963,
+     "rtt": 213.443,
+     "client": "Harmonic",
+     "city": "Tokyo",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "198.13.133.200"
+    },
+    {
+     "pk": "HSDTxfgrqY8ZK88Q5Fx2DdX7zxMDqXgxJKgErTBSLoQJ",
+     "share": 0.0030925925925925925,
+     "rtt": 214.01,
+     "client": "BAM",
+     "city": "Tokyo",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "208.91.109.115"
+    }
+   ]
+  },
+  {
+   "region": "Lithuania (\u0160iauliai)",
+   "slot_share": 0.050972222222222224,
+   "leaders": 30,
+   "rtt_med": 27.797,
+   "covered_share": 0.0,
+   "r2": 4,
+   "r2_share": 0.05263157894736842,
+   "providers": [
+    [
+     "UAB Cherry Servers",
+     0.050972222222222224
+    ]
+   ],
+   "cities": [
+    [
+     "\u0160iauliai",
+     0.050972222222222224
+    ]
+   ],
+   "clients": [
+    [
+     "BAM",
+     0.8922797456857402
+    ],
+    [
+     "Agave",
+     0.08755676657584015
+    ],
+    [
+     "Jito",
+     0.016712079927338783
+    ],
+    [
+     "Rakurai",
+     0.0034514078110808354
+    ]
+   ],
+   "top": [
+    {
+     "pk": "6y7V8dL673XFzm9QyC5vvh3itWkp7wztahBd2yDqsyrK",
+     "share": 0.006935185185185185,
+     "rtt": 27.797,
+     "client": "BAM",
+     "city": "\u0160iauliai",
+     "asn": "AS16125 UAB Cherry Servers",
+     "ip": "88.216.192.50"
+    },
+    {
+     "pk": "HpcB5Qg8Y9E73dUkot5e8HkgAJbExsYeUzniY4bCuKac",
+     "share": 0.00625,
+     "rtt": 27.797,
+     "client": "BAM",
+     "city": "\u0160iauliai",
+     "asn": "AS16125 UAB Cherry Servers",
+     "ip": "88.216.192.50"
+    },
+    {
+     "pk": "5ejbTALcBsKQ7Cj1iSuu2mY5jqbYHqh9gF5ERXLiYj1z",
+     "share": 0.005805555555555555,
+     "rtt": 27.797,
+     "client": "BAM",
+     "city": "\u0160iauliai",
+     "asn": "AS16125 UAB Cherry Servers",
+     "ip": "88.216.192.50"
+    },
+    {
+     "pk": "BSVckjdW2f8kcXPGcrPPtV9kUDBZ8w8PjrrGVnxgEdwq",
+     "share": 0.005629629629629629,
+     "rtt": 27.797,
+     "client": "BAM",
+     "city": "\u0160iauliai",
+     "asn": "AS16125 UAB Cherry Servers",
+     "ip": "88.216.192.50"
+    },
+    {
+     "pk": "7QQGNm3ptwinipDCyaCF7jY5katgmFUu1ieP2f7nwLpE",
+     "share": 0.004462962962962963,
+     "rtt": 27.815,
+     "client": "Agave",
+     "city": "\u0160iauliai",
+     "asn": "AS16125 UAB Cherry Servers",
+     "ip": "5.199.172.176"
+    },
+    {
+     "pk": "5DYpYgKgHV5aswMXBLp3UfJnbbzzFnGiJPpcxVAm56bG",
+     "share": 0.0028333333333333335,
+     "rtt": 27.797,
+     "client": "BAM",
+     "city": "\u0160iauliai",
+     "asn": "AS16125 UAB Cherry Servers",
+     "ip": "88.216.192.50"
+    }
+   ]
+  },
+  {
+   "region": "Singapore",
+   "slot_share": 0.04326851851851852,
+   "leaders": 46,
+   "rtt_med": 149.406,
+   "covered_share": 0.0,
+   "r2": 4,
+   "r2_share": 0.05263157894736842,
+   "providers": [
+    [
+     "TeraSwitch Networks Inc.",
+     0.04326851851851852
+    ]
+   ],
+   "cities": [
+    [
+     "Singapore",
+     0.04326851851851852
+    ]
+   ],
+   "clients": [
+    [
+     "BAM",
+     0.8442114273485983
+    ],
+    [
+     "Harmonic",
+     0.1523646479777445
+    ],
+    [
+     "Firedancer",
+     0.0034239246736571796
+    ]
+   ],
+   "top": [
+    {
+     "pk": "Fc6NNdS2j3EmrWbU6Uqt6wsKB5ef72NjaWfNxKYbULGD",
+     "share": 0.010231481481481482,
+     "rtt": 149.406,
+     "client": "BAM",
+     "city": "Singapore",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "198.13.130.9"
+    },
+    {
+     "pk": "HnfPZDrbJFooiP9vvgWrjx3baXVNAZCgisT58gyMCgML",
+     "share": 0.005361111111111111,
+     "rtt": 149.406,
+     "client": "BAM",
+     "city": "Singapore",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "198.13.130.9"
+    },
+    {
+     "pk": "7qGNnXKW1e3DsqEaSxwxMdBTFsrK73XtWTmkGitRyMQc",
+     "share": 0.005,
+     "rtt": 149.163,
+     "client": "BAM",
+     "city": "Singapore",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "198.13.130.9"
+    },
+    {
+     "pk": "FzQqaDStQQHs52YKeCnDovwSqvyZBCgs2kJcmvoFZwaS",
+     "share": 0.004092592592592593,
+     "rtt": 149.42,
+     "client": "Harmonic",
+     "city": "Singapore",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "198.13.130.10"
+    },
+    {
+     "pk": "PUmpKiNnSVAZ3w4KaFX6jKSjXUNHFShGkXbERo54xjb",
+     "share": 0.0022407407407407406,
+     "rtt": 149.406,
+     "client": "BAM",
+     "city": "Singapore",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "198.13.130.9"
+    },
+    {
+     "pk": "GREEDkgav1ox1jYyd9Anv6exLqKV2vYnxMw5prGwmNKc",
+     "share": 0.0011574074074074073,
+     "rtt": 149.406,
+     "client": "BAM",
+     "city": "Singapore",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "198.13.130.9"
+    }
+   ]
+  },
+  {
+   "region": "US West",
+   "slot_share": 0.03643518518518519,
+   "leaders": 23,
+   "rtt_med": 131.595,
+   "covered_share": 0.0,
+   "r2": 3,
+   "r2_share": 0.039473684210526314,
+   "providers": [
+    [
+     "TeraSwitch Networks Inc.",
+     0.020175925925925927
+    ],
+    [
+     "Latitude.sh",
+     0.013027777777777777
+    ],
+    [
+     "WebNX, Inc.",
+     0.002898148148148148
+    ],
+    [
+     "Hurricane Electric LLC",
+     0.0003333333333333333
+    ]
+   ],
+   "cities": [
+    [
+     "Los Angeles",
+     0.02275925925925926
+    ],
+    [
+     "Kent",
+     0.012925925925925926
+    ],
+    [
+     "Salt Lake City",
+     0.0004166666666666667
+    ],
+    [
+     "Fremont",
+     0.0003333333333333333
+    ]
+   ],
+   "clients": [
+    [
+     "BAM",
+     0.5537484116899619
+    ],
+    [
+     "Jito",
+     0.4371029224904701
+    ],
+    [
+     "Rakurai",
+     0.00914866581956798
+    ]
+   ],
+   "top": [
+    {
+     "pk": "5Cchr1XGEg7dbBXByV5NY2ad8jfxAM7HA3x8D56rq9Ux",
+     "share": 0.012925925925925926,
+     "rtt": 130.806,
+     "client": "BAM",
+     "city": "Kent",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "63.254.180.13"
+    },
+    {
+     "pk": "9rkJMARqK6VBkcxGfKBAwnA44gPAfGxPbPsfsggFNDSQ",
+     "share": 0.010546296296296297,
+     "rtt": 149.0,
+     "client": "Jito",
+     "city": "Los Angeles",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "152.236.11.65"
+    },
+    {
+     "pk": "6TkKqq15wXjqEjNg9zqTKADwuVATR9dW3rkNnsYme1ea",
+     "share": 0.0032962962962962963,
+     "rtt": 131.595,
+     "client": "BAM",
+     "city": "Los Angeles",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.58.123"
+    },
+    {
+     "pk": "BkoS26vBuaXnSowACdChi4WKid8UwmuPNhEJWa8KsLHd",
+     "share": 0.0024814814814814816,
+     "rtt": 149.031,
+     "client": "Jito",
+     "city": "Los Angeles",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "67.213.124.5"
+    },
+    {
+     "pk": "3cZSHGfNdaULpFAvGbWbxpVwzXB4gHdk8NFucPNR5pgA",
+     "share": 0.0015925925925925925,
+     "rtt": 163.43,
+     "client": "Jito",
+     "city": "Los Angeles",
+     "asn": "AS18450 WebNX, Inc.",
+     "ip": "216.18.201.138"
+    },
+    {
+     "pk": "mD1afZhSisoXfJLT8nYwSFANqjr1KPoDUEpYTEfFX1e",
+     "share": 0.0006666666666666666,
+     "rtt": 131.595,
+     "client": "BAM",
+     "city": "Los Angeles",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.58.123"
+    }
+   ]
+  },
+  {
+   "region": "Nordics (Stockholm\u2026)",
+   "slot_share": 0.015518518518518518,
+   "leaders": 8,
+   "rtt_med": 18.8215,
+   "covered_share": 0.0,
+   "r2": 0,
+   "r2_share": 0.0,
+   "providers": [
+    [
+     "UAB Cherry Servers",
+     0.015342592592592593
+    ],
+    [
+     "Baytems Holdings Oy",
+     0.00017592592592592592
+    ]
+   ],
+   "cities": [
+    [
+     "Stockholm",
+     0.015342592592592593
+    ],
+    [
+     "Tuusula",
+     0.00017592592592592592
+    ]
+   ],
+   "clients": [
+    [
+     "Jito",
+     0.8192124105011933
+    ],
+    [
+     "Agave",
+     0.1807875894988067
+    ]
+   ],
+   "top": [
+    {
+     "pk": "3SkE34PVeGck2ArEffFKjihrQgURsvnoTAhitsNXNzXd",
+     "share": 0.005861111111111111,
+     "rtt": 18.431,
+     "client": "Jito",
+     "city": "Stockholm",
+     "asn": "AS214159 UAB Cherry Servers",
+     "ip": "185.189.44.170"
+    },
+    {
+     "pk": "FbYX2uN573G5WsgiPdHU6fS5PNUyjdXfGfpZNkYUuT4k",
+     "share": 0.005212962962962963,
+     "rtt": 18.813,
+     "client": "Jito",
+     "city": "Stockholm",
+     "asn": "AS214159 UAB Cherry Servers",
+     "ip": "185.189.44.171"
+    },
+    {
+     "pk": "5Us18hLZPXJTS4QVuGSsUw137Dyd2tgBaem24Xsf5nBS",
+     "share": 0.0028055555555555555,
+     "rtt": 18.823,
+     "client": "Agave",
+     "city": "Stockholm",
+     "asn": "AS214159 UAB Cherry Servers",
+     "ip": "185.189.44.172"
+    },
+    {
+     "pk": "7S22CYpfBRV1p8cTqWXFD4HwfqfNx3hAhfpdj8E2bYvJ",
+     "share": 0.0006388888888888889,
+     "rtt": 18.824,
+     "client": "Jito",
+     "city": "Stockholm",
+     "asn": "AS214159 UAB Cherry Servers",
+     "ip": "84.32.49.239"
+    },
+    {
+     "pk": "9gMjDS6WPahWXBboJVoZA5DUVU4qTUdQY6acHbpQ38t6",
+     "share": 0.000462962962962963,
+     "rtt": 18.402,
+     "client": "Jito",
+     "city": "Stockholm",
+     "asn": "AS214159 UAB Cherry Servers",
+     "ip": "84.32.49.39"
+    },
+    {
+     "pk": "HnwMGBAw5PxaX56eSYc969MorEy2NzEMPLkmBkdnJmeq",
+     "share": 0.0003611111111111111,
+     "rtt": 18.82,
+     "client": "Jito",
+     "city": "Stockholm",
+     "asn": "AS214159 UAB Cherry Servers",
+     "ip": "185.189.44.198"
+    }
+   ]
+  },
+  {
+   "region": "Other Asia-Pacific",
+   "slot_share": 0.009314814814814814,
+   "leaders": 17,
+   "rtt_med": 178.055,
+   "covered_share": 0.0,
+   "r2": 0,
+   "r2_share": 0.0,
+   "providers": [
+    [
+     "Servers.com, Inc.",
+     0.005787037037037037
+    ],
+    [
+     "SK Broadband Co Ltd",
+     0.0030555555555555557
+    ],
+    [
+     "Decentra Cloud",
+     0.00047222222222222224
+    ]
+   ],
+   "cities": [
+    [
+     "Chai Wan",
+     0.005787037037037037
+    ],
+    [
+     "Pyeongtaek-si",
+     0.0030555555555555557
+    ],
+    [
+     "Tsuen Wan",
+     0.00047222222222222224
+    ]
+   ],
+   "clients": [
+    [
+     "BAM",
+     0.621272365805169
+    ],
+    [
+     "Jito",
+     0.378727634194831
+    ]
+   ],
+   "top": [
+    {
+     "pk": "bitHUmbKSQDTGoyoiW3BeqaGWdyV5sS3nYt5SduUHfb",
+     "share": 0.0030555555555555557,
+     "rtt": null,
+     "client": "Jito",
+     "city": "Pyeongtaek-si",
+     "asn": "AS9318 SK Broadband Co Ltd",
+     "ip": "116.126.141.29"
+    },
+    {
+     "pk": "WUNoB9YQXmXXRcJsjY1G8PfVag5aAfnyGmFd6YwJVwp",
+     "share": 0.0008518518518518519,
+     "rtt": 178.055,
+     "client": "BAM",
+     "city": "Chai Wan",
+     "asn": "AS7979 Servers.com, Inc.",
+     "ip": "103.70.2.236"
+    },
+    {
+     "pk": "FyrwfMaomErzqrFUXMjCJ7mA4u81DsiDdrzC3MJD6d4j",
+     "share": 0.00075,
+     "rtt": 178.055,
+     "client": "BAM",
+     "city": "Chai Wan",
+     "asn": "AS7979 Servers.com, Inc.",
+     "ip": "103.70.2.236"
+    },
+    {
+     "pk": "PRGNnb8DxVcP2WjSHfVRGgc8SkA5u6dbMwoTVV1BGKN",
+     "share": 0.0005925925925925926,
+     "rtt": 178.055,
+     "client": "BAM",
+     "city": "Chai Wan",
+     "asn": "AS7979 Servers.com, Inc.",
+     "ip": "103.70.2.236"
+    },
+    {
+     "pk": "adramSYKBv1yHoZTub4kepcmF5LybPxwyJcsz4fpfi7",
+     "share": 0.00047222222222222224,
+     "rtt": 180.247,
+     "client": "Jito",
+     "city": "Tsuen Wan",
+     "asn": "AS402479 Decentra Cloud",
+     "ip": "191.44.100.6"
+    },
+    {
+     "pk": "dcntruDNP5SEcGV4RxnsqXFURdDZGT3DTQv68Q8H7Vu",
+     "share": 0.000462962962962963,
+     "rtt": 176.89,
+     "client": "BAM",
+     "city": "Chai Wan",
+     "asn": "AS7979 Servers.com, Inc.",
+     "ip": "103.70.2.236"
+    }
+   ]
+  },
+  {
+   "region": "Dublin (IE)",
+   "slot_share": 0.008222222222222223,
+   "leaders": 3,
+   "rtt_med": 18.787,
+   "covered_share": 0.0,
+   "r2": 2,
+   "r2_share": 0.02631578947368421,
+   "providers": [
+    [
+     "TeraSwitch Networks Inc.",
+     0.008222222222222223
+    ]
+   ],
+   "cities": [
+    [
+     "Dublin",
+     0.008222222222222223
+    ]
+   ],
+   "clients": [
+    [
+     "BAM",
+     1.0
+    ]
+   ],
+   "top": [
+    {
+     "pk": "krakeNd6ednDPEXxHAmoBs1qKVM8kLg79PvWF2mhXV1",
+     "share": 0.007481481481481481,
+     "rtt": 14.781,
+     "client": "BAM",
+     "city": "Dublin",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.61.195"
+    },
+    {
+     "pk": "9FXD1NXrK6xFU8i4gLAgjj2iMEWTqJhSuQN8tQuDfm2e",
+     "share": 0.00047222222222222224,
+     "rtt": 18.787,
+     "client": "BAM",
+     "city": "Dublin",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.61.195"
+    },
+    {
+     "pk": "2uxEHizFmmnLekKG2LZJwxNabhpymEYfdVCpgDxjt87m",
+     "share": 0.0002685185185185185,
+     "rtt": 18.787,
+     "client": "BAM",
+     "city": "Dublin",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "64.130.61.195"
+    }
+   ]
+  },
+  {
+   "region": "Paris / France",
+   "slot_share": 0.007361111111111111,
+   "leaders": 6,
+   "rtt_med": 9.136,
+   "covered_share": 0.0,
+   "r2": 3,
+   "r2_share": 0.039473684210526314,
+   "providers": [
+    [
+     "The Constant Company, LLC",
+     0.0054907407407407405
+    ],
+    [
+     "OVH SAS",
+     0.0013425925925925925
+    ],
+    [
+     "velia.net Internetdienste GmbH",
+     0.0005277777777777777
+    ]
+   ],
+   "cities": [
+    [
+     "Aubervilliers",
+     0.0054907407407407405
+    ],
+    [
+     "Gravelines",
+     0.0011666666666666668
+    ],
+    [
+     "Strasbourg",
+     0.0005277777777777777
+    ],
+    [
+     "Wattrelos",
+     0.00017592592592592592
+    ]
+   ],
+   "clients": [
+    [
+     "Rakurai",
+     0.8327044025157233
+    ],
+    [
+     "Jito",
+     0.09559748427672957
+    ],
+    [
+     "Firedancer",
+     0.07169811320754717
+    ]
+   ],
+   "top": [
+    {
+     "pk": "ana2y2YvQ3ZPMwm6qhnN3nJoUSiT3qx5Pvetkq9xcfY",
+     "share": 0.005416666666666667,
+     "rtt": 9.661,
+     "client": "Rakurai",
+     "city": "Aubervilliers",
+     "asn": "AS20473 The Constant Company, LLC",
+     "ip": "45.32.145.112"
+    },
+    {
+     "pk": "gUvo3g5LfH4Pd8qnG7T6MPEFa5bPr8LhDdxDahwYqis",
+     "share": 0.000712962962962963,
+     "rtt": 9.146,
+     "client": "Rakurai",
+     "city": "Gravelines",
+     "asn": "AS16276 OVH SAS",
+     "ip": "162.19.94.48"
+    },
+    {
+     "pk": "PKdLMugp1Mf88Ji1GkdqRDBewaUh2cqg79CBEo6eJoQ",
+     "share": 0.0005277777777777777,
+     "rtt": 9.126,
+     "client": "Firedancer",
+     "city": "Strasbourg",
+     "asn": "AS29066 velia.net Internetdienste GmbH",
+     "ip": "92.42.110.111"
+    },
+    {
+     "pk": "4vcmYPfLztUckU3c3FvXDwSq8aDNDqwEpvEiqAv97LGJ",
+     "share": 0.0004537037037037037,
+     "rtt": 8.74,
+     "client": "Jito",
+     "city": "Gravelines",
+     "asn": "AS16276 OVH SAS",
+     "ip": "51.77.236.177"
+    },
+    {
+     "pk": "D1A4F2yh38JLQExKjDiCi4G2tCMwj93c3sikseSSePKe",
+     "share": 0.00017592592592592592,
+     "rtt": 9.171,
+     "client": "Jito",
+     "city": "Wattrelos",
+     "asn": "AS16276 OVH SAS",
+     "ip": "91.134.54.64"
+    },
+    {
+     "pk": "STaKesuXJH6UGRizuEVSWG1tyLu5ycKgWj3i1HUdvs5",
+     "share": 7.407407407407407e-05,
+     "rtt": 9.088,
+     "client": "Jito",
+     "city": "Aubervilliers",
+     "asn": "AS20473 The Constant Company, LLC",
+     "ip": "217.69.10.53"
+    }
+   ]
+  },
+  {
+   "region": "US Central",
+   "slot_share": 0.007287037037037037,
+   "leaders": 12,
+   "rtt_med": 107.961,
+   "covered_share": 0.0,
+   "r2": 0,
+   "r2_share": 0.0,
+   "providers": [
+    [
+     "UAB Cherry Servers",
+     0.003787037037037037
+    ],
+    [
+     "TeraSwitch Networks Inc.",
+     0.002
+    ],
+    [
+     "Latitude.sh LTDA",
+     0.001037037037037037
+    ],
+    [
+     "Latitude.sh",
+     0.0003796296296296296
+    ],
+    [
+     "The Constant Company, LLC",
+     8.333333333333333e-05
+    ]
+   ],
+   "cities": [
+    [
+     "Chicago",
+     0.004824074074074074
+    ],
+    [
+     "Dallas",
+     0.002462962962962963
+    ]
+   ],
+   "clients": [
+    [
+     "Jito",
+     0.5451080050825922
+    ],
+    [
+     "BAM",
+     0.2744599745870394
+    ],
+    [
+     "Agave",
+     0.18043202033036848
+    ]
+   ],
+   "top": [
+    {
+     "pk": "6yFGGAgYpBxgYPuHW4rv7hJmhKrUiXKyHkpVGaYtKrwE",
+     "share": 0.003787037037037037,
+     "rtt": 100.845,
+     "client": "Jito",
+     "city": "Chicago",
+     "asn": "AS204770 UAB Cherry Servers",
+     "ip": "84.32.32.206"
+    },
+    {
+     "pk": "6XKqyUVUcpe3CNucjF6gk5zonJDqNGvob6kaTy4Ps1U",
+     "share": 0.001712962962962963,
+     "rtt": 107.961,
+     "client": "BAM",
+     "city": "Dallas",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "141.98.218.181"
+    },
+    {
+     "pk": "dxa6QFqLcByyHykLCAW5tv1VYNVQFV3v6oovM2h8inH",
+     "share": 0.0005555555555555556,
+     "rtt": 98.294,
+     "client": "Agave",
+     "city": "Chicago",
+     "asn": "AS262287 Latitude.sh LTDA",
+     "ip": "67.213.119.9"
+    },
+    {
+     "pk": "9hQqNe3DQTiwhspatewA8EXhz12e6sq5UJVJ2qNRwnTf",
+     "share": 0.0003148148148148148,
+     "rtt": 98.74,
+     "client": "Agave",
+     "city": "Chicago",
+     "asn": "AS262287 Latitude.sh LTDA",
+     "ip": "177.54.155.251"
+    },
+    {
+     "pk": "mastWEbKEMjvBCd1uaUBpNjWcfSPhXMWnH9tTrgzn1g",
+     "share": 0.00017592592592592592,
+     "rtt": 107.961,
+     "client": "BAM",
+     "city": "Dallas",
+     "asn": "AS20326 TeraSwitch Networks Inc.",
+     "ip": "141.98.218.181"
+    },
+    {
+     "pk": "SANDCxXBbQhvbUqNtiLqKdFEY1uQhVo1UgUACaS4mXU",
+     "share": 0.00014814814814814815,
+     "rtt": 125.998,
+     "client": "Jito",
+     "city": "Dallas",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "185.26.8.35"
+    }
+   ]
+  },
+  {
+   "region": "Canada",
+   "slot_share": 0.004851851851851852,
+   "leaders": 6,
+   "rtt_med": 93.0625,
+   "covered_share": 0.0,
+   "r2": 0,
+   "r2_share": 0.0,
+   "providers": [
+    [
+     "OVH SAS",
+     0.004416666666666667
+    ],
+    [
+     "The Constant Company, LLC",
+     0.0004351851851851852
+    ]
+   ],
+   "cities": [
+    [
+     "Montreal",
+     0.003111111111111111
+    ],
+    [
+     "Toronto",
+     0.0017407407407407408
+    ]
+   ],
+   "clients": [
+    [
+     "Jito",
+     1.0
+    ]
+   ],
+   "top": [
+    {
+     "pk": "8tjFeSApQ85ThoQXT28acfF2KUfQr3TvTdirSkzNnYC7",
+     "share": 0.0021666666666666666,
+     "rtt": 92.636,
+     "client": "Jito",
+     "city": "Montreal",
+     "asn": "AS16276 OVH SAS",
+     "ip": "148.113.199.156"
+    },
+    {
+     "pk": "32ke3uf1qL3xLqbwzU76T2sbG2XaJrGuSCNdUnien3zm",
+     "share": 0.001101851851851852,
+     "rtt": 93.302,
+     "client": "Jito",
+     "city": "Toronto",
+     "asn": "AS16276 OVH SAS",
+     "ip": "72.251.3.57"
+    },
+    {
+     "pk": "AwcMVMvmT1aCETVYV42WE1cSMCyNp4vZqVjLsvs6dM4o",
+     "share": 0.0005740740740740741,
+     "rtt": 92.823,
+     "client": "Jito",
+     "city": "Montreal",
+     "asn": "AS16276 OVH SAS",
+     "ip": "148.113.215.144"
+    },
+    {
+     "pk": "1ggyZGbYtEo1WrV1kmXfnvhPeSPxrYAXoDBeApnszLT",
+     "share": 0.0004351851851851852,
+     "rtt": 97.183,
+     "client": "Jito",
+     "city": "Toronto",
+     "asn": "AS20473 The Constant Company, LLC",
+     "ip": "155.138.145.139"
+    },
+    {
+     "pk": "5AsoSeQtLoN8eLsf3wKrR3LwxHME4sTBGR6dpTCP1k3H",
+     "share": 0.00037037037037037035,
+     "rtt": 92.306,
+     "client": "Jito",
+     "city": "Montreal",
+     "asn": "AS16276 OVH SAS",
+     "ip": "148.113.187.125"
+    },
+    {
+     "pk": "2dxz129YxB1xtf7Mx6HUT5JspexArNNtQt84FYueWZV7",
+     "share": 0.0002037037037037037,
+     "rtt": 99.679,
+     "client": "Jito",
+     "city": "Toronto",
+     "asn": "AS16276 OVH SAS",
+     "ip": "72.251.3.65"
+    }
+   ]
+  },
+  {
+   "region": "Latin America",
+   "slot_share": 0.0036018518518518517,
+   "leaders": 13,
+   "rtt_med": 169.232,
+   "covered_share": 0.0,
+   "r2": 0,
+   "r2_share": 0.0,
+   "providers": [
+    [
+     "Latitude.sh",
+     0.0034444444444444444
+    ],
+    [
+     "Latitude.sh LTDA",
+     0.0001574074074074074
+    ]
+   ],
+   "cities": [
+    [
+     "S\u00e3o Paulo",
+     0.0032222222222222222
+    ],
+    [
+     "Buenos Aires",
+     0.0003796296296296296
+    ]
+   ],
+   "clients": [
+    [
+     "Jito",
+     1.0
+    ]
+   ],
+   "top": [
+    {
+     "pk": "Pid6HQnMCFb9izqX9i7X6ePdUPieGmjHoPxC1Jfooix",
+     "share": 0.00047222222222222224,
+     "rtt": 169.369,
+     "client": "Jito",
+     "city": "S\u00e3o Paulo",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "103.14.27.39"
+    },
+    {
+     "pk": "c3rtoMCHSbFrLRTAdw4iRowKSn4BrDtvSPbuyJwkHwx",
+     "share": 0.0004351851851851852,
+     "rtt": null,
+     "client": "Jito",
+     "city": "S\u00e3o Paulo",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "103.14.27.43"
+    },
+    {
+     "pk": "capyS1jerxhFp1RehdWRG6kbWi8bnWF3fkEG2RGLsQf",
+     "share": 0.00042592592592592595,
+     "rtt": 166.773,
+     "client": "Jito",
+     "city": "S\u00e3o Paulo",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "103.88.233.107"
+    },
+    {
+     "pk": "jagBNeXYncnn1hzwSq1JJ16XhWTgQ7DCFVqndSJZ6vT",
+     "share": 0.00038888888888888887,
+     "rtt": null,
+     "client": "Jito",
+     "city": "S\u00e3o Paulo",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "103.14.27.37"
+    },
+    {
+     "pk": "ReFiqMfGnc7tW8WQtFFcJRPZSDAWDBnAsdoFYF2QnfR",
+     "share": 0.0003796296296296296,
+     "rtt": 224.053,
+     "client": "Jito",
+     "city": "Buenos Aires",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "103.106.58.73"
+    },
+    {
+     "pk": "DefiihS7gLkj6xLjjhcr87bFuwpVVNYpeNBaBeFe56CY",
+     "share": 0.00025925925925925926,
+     "rtt": 166.849,
+     "client": "Jito",
+     "city": "S\u00e3o Paulo",
+     "asn": "AS396356 Latitude.sh",
+     "ip": "103.14.27.97"
+    }
+   ]
+  },
+  {
+   "region": "Other Europe",
+   "slot_share": 0.0016666666666666668,
+   "leaders": 6,
+   "rtt_med": 19.23,
+   "covered_share": 0.0,
+   "r2": 0,
+   "r2_share": 0.0,
+   "providers": [
+    [
+     "The Constant Company, LLC",
+     0.0006574074074074074
+    ],
+    [
+     "Comvive Servidores S.L.",
+     0.0004351851851851852
+    ],
+    [
+     "OVH SAS",
+     0.00035185185185185184
+    ],
+    [
+     "01NODE FUNDING SRL",
+     0.00018518518518518518
+    ],
+    [
+     "Versija SIA",
+     2.777777777777778e-05
+    ]
+   ],
+   "cities": [
+    [
+     "Warsaw",
+     0.0010092592592592592
+    ],
+    [
+     "Seville",
+     0.0004351851851851852
+    ],
+    [
+     "Bucharest",
+     0.00018518518518518518
+    ],
+    [
+     "Vienna",
+     2.777777777777778e-05
+    ]
+   ],
+   "clients": [
+    [
+     "Jito",
+     0.7388888888888889
+    ],
+    [
+     "Rakurai",
+     0.2611111111111111
+    ]
+   ],
+   "top": [
+    {
+     "pk": "EQhTjikb1L2jvxsCaSW2o2TuRXh4Do6HzBEWCxpeM44W",
+     "share": 0.0006574074074074074,
+     "rtt": 17.017,
+     "client": "Jito",
+     "city": "Warsaw",
+     "asn": "AS20473 The Constant Company, LLC",
+     "ip": "70.34.247.7"
+    },
+    {
+     "pk": "3B2mGaZoFwzAnWCoZ4EAKdps4FbYbDKQ48jo8u1XWynU",
+     "share": 0.0004351851851851852,
+     "rtt": 32.781,
+     "client": "Rakurai",
+     "city": "Seville",
+     "asn": "AS39020 Comvive Servidores S.L.",
+     "ip": "77.81.119.154"
+    },
+    {
+     "pk": "MARiKM3t7pDCyXtvLq24ErWDAvYu84yXqCthkR1GS33",
+     "share": 0.00035185185185185184,
+     "rtt": 21.443,
+     "client": "Jito",
+     "city": "Warsaw",
+     "asn": "AS16276 OVH SAS",
+     "ip": "57.128.210.101"
+    },
+    {
+     "pk": "3KNGMiXwhy2CAWVNpLoUt25sNngFnX1mZpaiEeVccBA6",
+     "share": 0.00018518518518518518,
+     "rtt": 26.47,
+     "client": "Jito",
+     "city": "Bucharest",
+     "asn": "AS41536 01NODE FUNDING SRL",
+     "ip": "195.14.6.38"
+    },
+    {
+     "pk": "AS4i8EXUZnPbmNT5ZXmoTEbrXQrbFoReiWwwFB43Ds5z",
+     "share": 2.777777777777778e-05,
+     "rtt": 11.706,
+     "client": "Jito",
+     "city": "Vienna",
+     "asn": "AS203866 Versija SIA",
+     "ip": "213.21.195.65"
+    },
+    {
+     "pk": "2abwQG3v2xRemFxRszVHSfnjJNe9zu5X8duKgxjyLeaK",
+     "share": 9.259259259259259e-06,
+     "rtt": 7.622,
+     "client": "Jito",
+     "city": "Zurich",
+     "asn": "AS60068 Datacamp Limited",
+     "ip": "84.17.53.104"
+    }
+   ]
+  },
+  {
+   "region": "Other / unknown",
+   "slot_share": 0.000712962962962963,
+   "leaders": 3,
+   "rtt_med": 61.5625,
+   "covered_share": 0.0,
+   "r2": 0,
+   "r2_share": 0.0,
+   "providers": [
+    [
+     "?",
+     0.0003796296296296296
+    ],
+    [
+     "Netorn LLC",
+     0.0002962962962962963
+    ],
+    [
+     "Adman LLC",
+     3.7037037037037037e-05
+    ]
+   ],
+   "cities": [
+    [
+     "?",
+     0.0003796296296296296
+    ],
+    [
+     "Moscow",
+     0.0002962962962962963
+    ],
+    [
+     "Novosibirsk",
+     3.7037037037037037e-05
+    ]
+   ],
+   "clients": [
+    [
+     "unknown",
+     0.5324675324675324
+    ],
+    [
+     "Jito",
+     0.4155844155844156
+    ],
+    [
+     "Agave",
+     0.05194805194805195
+    ]
+   ],
+   "top": [
+    {
+     "pk": "9GHvMeJ4ZWuAX6sDGscFL1TBMszx2EehnrcTVUy4MZJQ",
+     "share": 0.0003796296296296296,
+     "rtt": null,
+     "client": "unknown",
+     "city": null,
+     "asn": null,
+     "ip": null
+    },
+    {
+     "pk": "HLXxkmjb47spcmbbKi3UCfZ2qmFY29t8MN562AEmh2Qh",
+     "share": 0.0002962962962962963,
+     "rtt": 37.046,
+     "client": "Jito",
+     "city": "Moscow",
+     "asn": "AS34123 Netorn LLC",
+     "ip": "89.222.171.196"
+    },
+    {
+     "pk": "DiFeTctQSaNczJNmZ5121kYqLaBe9wDpM9sjCzTELJLE",
+     "share": 3.7037037037037037e-05,
+     "rtt": 86.079,
+     "client": "Agave",
+     "city": "Novosibirsk",
+     "asn": "AS57494 Adman LLC",
+     "ip": "109.248.222.157"
+    }
+   ]
+  }
+ ]
+}
