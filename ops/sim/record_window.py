@@ -80,6 +80,26 @@ BLK = {}
 blk_lock = threading.Lock()
 
 
+def compact(x):
+    # keep ONLY what the recorder needs from a block (pump trades/creates + the create tx's transfers); a full block is
+    # tens of MB as Python objects and caching them OOM-killed the recorder on the 4 GB server (2026-10-20)
+    rows = []; n = 0
+    for t in x["transactions"]:
+        if is_vote(t): continue
+        meta = t.get("meta") or {}
+        logs = meta.get("logMessages")
+        i = n; n += 1
+        tr = trades_of(logs)
+        cr = creates_of(logs)
+        if not tr and not cr: continue
+        row = dict(idx=i, ok=meta.get("err") is None, payer=t["transaction"]["message"]["accountKeys"][0], trades=tr, creates=cr)
+        if cr:
+            (lam, dst), any_moon, signers = largest_toplevel_transfer(t)
+            row.update(largest=(lam, dst), any_moon=any_moon, signers=signers)
+        rows.append(row)
+    return dict(blockTime=x.get("blockTime"), n_txs=n, rows=rows)
+
+
 def blk(s):
     # a failed fetch is RETRIED with back-off and never cached (a cached failure silently dropped every launch in that slot)
     with blk_lock:
@@ -88,7 +108,7 @@ def blk(s):
     for attempt in range(5):
         x = get_block(s)
         if isinstance(x, dict) and "transactions" in x:
-            b = dict(blockTime=x.get("blockTime"), txs=[t for t in x["transactions"] if not is_vote(t)])
+            b = compact(x); x = None
             break
         if isinstance(x, dict) and x.get("__err") in (-32007, -32009):   # slot skipped / missing: a real empty slot
             return None
@@ -119,23 +139,23 @@ def largest_toplevel_transfer(t):
 def scan_create(mint, S):
     b = blk(S)
     if not b: return None
-    txs = b["txs"]
-    for i, t in enumerate(txs):
-        meta = t.get("meta") or {}
-        cr = [c for c in creates_of(meta.get("logMessages")) if c["mint"] == mint]
+    rows = b["rows"]
+    for k, r in enumerate(rows):
+        cr = [c for c in r["creates"] if c["mint"] == mint]
         if not cr: continue
-        tr = [e for e in trades_of(meta.get("logMessages")) if e["mint"] == mint]
-        (lam, dst), any_moon, signers = largest_toplevel_transfer(t)
-        gl, gsol, members, j = 0, 0, set(signers) | {cr[0]["user"], cr[0]["creator"]}, i + 1
-        while j < len(txs):
-            m2 = txs[j].get("meta") or {}
-            ev = [e for e in trades_of(m2.get("logMessages")) if e["mint"] == mint and e["buy"]]
-            if not ev or m2.get("err") is not None: break
-            gl += 1; gsol += sum(e["sol"] for e in ev); members |= {e["user"] for e in ev}
-            members.add(txs[j]["transaction"]["message"]["accountKeys"][0]); j += 1
-        return dict(cidx=i, n_txs=len(txs), glued_end=j, dev=sum(e["sol"] for e in tr if e["buy"]) / 1e9, gsol=gsol / 1e9, glued=gl,
+        tr = [e for e in r["trades"] if e["mint"] == mint]
+        lam, dst = r["largest"]
+        gl, gsol, members = 0, 0, set(r["signers"]) | {cr[0]["user"], cr[0]["creator"]}
+        nxt = r["idx"] + 1; glued_end = nxt
+        for r2 in rows[k + 1:]:
+            if r2["idx"] != nxt: break            # a non-pump (or other) tx breaks the glued run
+            ev = [e for e in r2["trades"] if e["mint"] == mint and e["buy"]]
+            if not ev or not r2["ok"]: break
+            gl += 1; gsol += sum(e["sol"] for e in ev); members |= {e["user"] for e in ev}; members.add(r2["payer"])
+            nxt += 1; glued_end = nxt
+        return dict(cidx=r["idx"], n_txs=b["n_txs"], glued_end=glued_end, dev=sum(e["sol"] for e in tr if e["buy"]) / 1e9, gsol=gsol / 1e9, glued=gl,
                     bundle_members=sorted(members), largest_to=(dst or "")[:44], largest_lam=lam, largest_moon=bool(dst and dst.startswith("moon")),
-                    any_moon=any_moon, name=cr[0].get("name"), symbol=cr[0].get("symbol"), uri=cr[0].get("uri"), creator=cr[0].get("creator"),
+                    any_moon=r["any_moon"], name=cr[0].get("name"), symbol=cr[0].get("symbol"), uri=cr[0].get("uri"), creator=cr[0].get("creator"),
                     block_time=b["blockTime"])
     return None
 
@@ -144,13 +164,11 @@ def block_trades(mint, s, after_idx=-1):
     b = blk(s)
     if not b: return None
     out = []
-    for i, t in enumerate(b["txs"]):
-        if i <= after_idx: continue
-        meta = t.get("meta") or {}
-        if meta.get("err") is not None: continue
-        for e in trades_of(meta.get("logMessages")):
+    for r in b["rows"]:
+        if r["idx"] <= after_idx or not r["ok"]: continue
+        for e in r["trades"]:
             if e["mint"] == mint:
-                e = dict(e); e.update(slot=s, idx=i, payer=t["transaction"]["message"]["accountKeys"][0]); out.append(e)
+                e = dict(e); e.update(slot=s, idx=r["idx"], payer=r["payer"]); out.append(e)
     return out
 
 
