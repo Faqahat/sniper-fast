@@ -13,7 +13,7 @@
 //!    the warm path. It still transmits, so it is gated by `--live` + `--max-sol` too. Spend is capped hard:
 //!    `--max-sends N` (default 20) and a per-send cost estimate; it refuses the next send once cumulative spend
 //!    (base fee + any priority fee + the 1-lamport transfer) would exceed `--max-sol`.
-//!  * This binary NEVER touches /root/arbx (the live deploy) and runs no arb campaign.
+//!  * This binary NEVER touches /root/sniper (the live deploy dir) and runs no arb campaign.
 //!
 //! Modes:
 //!   --warm-probe   create the send path, keep its warm loop alive, WAIT until hot, then fire capped 1-lamport
@@ -23,7 +23,7 @@
 //!   --live         real buy on a filtered launch (dev_buy>0) via buy_message_ixs through the warm path. GATED.
 //!
 //! Usage (the key run):
-//!   snipe_engine --warm-probe --config probe_tpu.toml --env-file /root/arbx/deploy/.env \
+//!   snipe_engine --warm-probe --config probe_tpu.toml --env-file /root/sniper/deploy/.env \
 //!                --send-path tpu-direct --max-sends 20 --max-sol 0.003 --live  < /root/.nexus-...wallet.pass
 //!
 //! probe config (minimal; unknown fields ignored so the live schema can't break it):
