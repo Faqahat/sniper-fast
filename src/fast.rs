@@ -329,6 +329,8 @@ pub struct Ack { pub path: String, pub tag: u64, pub t_write: u64, pub t_ack: u6
 enum Io { Plain(TcpStream), Tls(TcpStream, Box<rustls::ClientConnection>) }
 
 impl Io {
+    /// SELF-HEAL: shut the socket down so the reader thread's blocking read returns and it reconnects
+    fn shut(&self) { let s = match self { Io::Plain(s) | Io::Tls(s, _) => s }; let _ = s.shutdown(std::net::Shutdown::Both); }
     fn write_all_now(&mut self, buf: &[u8]) -> std::io::Result<()> {
         match self {
             Io::Plain(s) => s.write_all(buf),
@@ -356,8 +358,17 @@ pub struct FastConn {
     pub up: AtomicBool,
     pub writes: AtomicU64,
     pub reconnects: AtomicU64,
+    /// SELF-HEAL: half-dead connections reset (the oldest request / ping unanswered for FAST_STALE)
+    pub stale_resets: AtomicU64,
     acks: crossbeam_channel::Sender<Ack>,
 }
+
+/// SELF-HEAL (server dry run of 537126d5): a connection whose oldest outstanding request or ping has had no answer for
+/// this long is half-dead: it is shut down and the reader reconnects (a fresh TCP + TLS)
+pub const FAST_STALE: Duration = Duration::from_secs(10);
+/// the FAST path's socket write timeout: a stalled peer (full send buffer) fails the write — that connection is marked
+/// down — instead of blocking the next path's write (writes are sequential on the firing thread, each a few µs)
+pub const FAST_WRITE_TIMEOUT: Duration = Duration::from_millis(20);
 
 fn tls_config() -> Arc<rustls::ClientConfig> {
     static CFG: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
@@ -398,7 +409,7 @@ impl FastConn {
             Some(r.into_bytes())
         });
         let c = Arc::new(FastConn { name: name.to_string(), host, addr, tls, head: head.into_bytes(), ping_req, io: Mutex::new(None), pend: Mutex::new(VecDeque::new()),
-            up: AtomicBool::new(false), writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), acks });
+            up: AtomicBool::new(false), writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), stale_resets: AtomicU64::new(0), acks });
         // reader (connects, reads, reconnects) and keep-alive threads
         { let c = c.clone(); let stop = stop.clone(); std::thread::Builder::new().name(format!("fast-rd-{name}")).spawn(move || c.reader(stop)).map_err(|e| e.to_string())?; }
         { let c = c.clone(); std::thread::Builder::new().name(format!("fast-ka-{name}")).spawn(move || c.keepalive(stop)).map_err(|e| e.to_string())?; }
@@ -408,6 +419,7 @@ impl FastConn {
     fn connect(&self) -> std::io::Result<(TcpStream, Io)> {
         let s = TcpStream::connect_timeout(&self.addr, Duration::from_secs(3))?;
         s.set_nodelay(true)?;
+        s.set_write_timeout(Some(FAST_WRITE_TIMEOUT))?;
         let sock = socket2::SockRef::from(&s);
         let _ = sock.set_keepalive(true);
         let _ = sock.set_tcp_keepalive(&socket2::TcpKeepalive::new().with_time(Duration::from_secs(15)).with_interval(Duration::from_secs(5)));
@@ -438,7 +450,7 @@ impl FastConn {
         self.pend.lock().unwrap().push_back(Pend { tag, t_write: t0, ping: false });
         match io.write_all_now(req) {
             Ok(()) => { let t1 = mono_ns(); self.writes.fetch_add(1, Ordering::Relaxed); Ok((t0, t1)) }
-            Err(e) => { self.up.store(false, Ordering::Release); *g = None; Err(format!("write: {e}")) }
+            Err(e) => { self.up.store(false, Ordering::Release); if let Some(io) = g.take() { io.shut(); } Err(format!("write: {e}")) }
         }
     }
 
@@ -459,9 +471,18 @@ impl FastConn {
             let Some(req) = &self.ping_req else { continue };
             if !self.up.load(Ordering::Acquire) { continue; }
             let mut g = self.io.lock().unwrap();
+            // SELF-HEAL: the oldest outstanding request / ping unanswered for FAST_STALE = a half-dead connection: reset it
+            let oldest = self.pend.lock().unwrap().front().map(|p| mono_ns().saturating_sub(p.t_write));
+            if oldest.is_some_and(|ns| ns > FAST_STALE.as_nanos() as u64) {
+                self.up.store(false, Ordering::Release);
+                if let Some(io) = g.take() { io.shut(); }
+                let k = self.stale_resets.fetch_add(1, Ordering::Relaxed) + 1;
+                crate::send::health_edge(&self.name, false, &format!("FAST connection: no answer for {} s (half-dead): reset, reconnecting (reset #{k})", FAST_STALE.as_secs()));
+                continue;
+            }
             if let Some(io) = g.as_mut() {
                 self.pend.lock().unwrap().push_back(Pend { tag: 0, t_write: mono_ns(), ping: true });
-                if io.write_all_now(req).is_err() { self.up.store(false, Ordering::Release); *g = None; }
+                if io.write_all_now(req).is_err() { self.up.store(false, Ordering::Release); if let Some(io) = g.take() { io.shut(); } }
             }
         }
     }
@@ -484,7 +505,8 @@ impl FastConn {
             self.pend.lock().unwrap().clear();
             *self.io.lock().unwrap() = Some(io);
             self.up.store(true, Ordering::Release);
-            self.reconnects.fetch_add(1, Ordering::Relaxed);
+            let k = self.reconnects.fetch_add(1, Ordering::Relaxed);
+            if k > 0 && self.stale_resets.load(Ordering::Relaxed) > 0 { crate::send::health_edge(&self.name, true, &format!("FAST connection re-established (reconnect #{k})")); }
             let mut net = vec![0u8; 32 * 1024];
             let mut plain: Vec<u8> = Vec::with_capacity(64 * 1024);
             let mut tmp = vec![0u8; 32 * 1024];
@@ -759,6 +781,9 @@ pub struct FastH2 {
     pub up: AtomicBool,
     pub writes: AtomicU64,
     pub reconnects: AtomicU64,
+    /// SELF-HEAL: an unanswered PING's send time (0: none outstanding) and the half-dead resets
+    ping_sent: AtomicU64,
+    pub stale_resets: AtomicU64,
     /// (tag, uuid or error) per reply
     acks: crossbeam_channel::Sender<Ack>,
 }
@@ -771,7 +796,7 @@ impl FastH2 {
         use std::net::ToSocketAddrs;
         let addr = (host.as_str(), u.port_or_known_default().unwrap_or(443)).to_socket_addrs().map_err(|e| format!("{name}: resolve: {e}"))?.next().ok_or("no address")?;
         let c = Arc::new(FastH2 { name: name.into(), host, addr, io: Mutex::new(None), st: Mutex::new(H2State::default()), up: AtomicBool::new(false),
-            writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), acks });
+            writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), ping_sent: AtomicU64::new(0), stale_resets: AtomicU64::new(0), acks });
         { let c = c.clone(); let stop = stop.clone(); std::thread::Builder::new().name(format!("fast-h2-{name}")).spawn(move || c.reader(stop)).map_err(|e| e.to_string())?; }
         { let c = c.clone(); std::thread::Builder::new().name(format!("fast-h2ka-{name}")).spawn(move || c.keepalive(stop)).map_err(|e| e.to_string())?; }
         Ok(c)
@@ -791,6 +816,7 @@ impl FastH2 {
     fn connect(&self) -> std::io::Result<(TcpStream, (TcpStream, Box<rustls::ClientConnection>))> {
         let mut s = TcpStream::connect_timeout(&self.addr, Duration::from_secs(3))?;
         s.set_nodelay(true)?;
+        s.set_write_timeout(Some(FAST_WRITE_TIMEOUT))?;
         let sn = rustls::pki_types::ServerName::try_from(self.host.clone()).map_err(|e| std::io::Error::other(e.to_string()))?;
         let mut c = rustls::ClientConnection::new(Self::tls_h2(), sn).map_err(|e| std::io::Error::other(e.to_string()))?;
         s.set_read_timeout(Some(Duration::from_secs(3)))?;
@@ -890,14 +916,17 @@ impl FastH2 {
         let r = c.writer().write_all(req).and_then(|_| { while c.wants_write() { c.write_tls(s)?; } Ok(()) });
         match r {
             Ok(()) => { self.writes.fetch_add(1, Ordering::Relaxed); Ok((t0, mono_ns())) }
-            Err(e) => { self.up.store(false, Ordering::Release); *g = None; Err(format!("write: {e}")) }
+            Err(e) => { self.up.store(false, Ordering::Release); if let Some((s, _)) = g.take() { let _ = s.shutdown(std::net::Shutdown::Both); } Err(format!("write: {e}")) }
         }
     }
 
     fn send_raw(&self, b: &[u8]) {
         let mut g = self.io.lock().unwrap();
         if let Some((s, c)) = g.as_mut() {
-            if c.writer().write_all(b).and_then(|_| { while c.wants_write() { c.write_tls(s)?; } Ok(()) }).is_err() { self.up.store(false, Ordering::Release); *g = None; }
+            if c.writer().write_all(b).and_then(|_| { while c.wants_write() { c.write_tls(s)?; } Ok(()) }).is_err() {
+                self.up.store(false, Ordering::Release);
+                if let Some((s, _)) = g.take() { let _ = s.shutdown(std::net::Shutdown::Both); }
+            }
         }
     }
 
@@ -905,6 +934,20 @@ impl FastH2 {
         while !stop.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_secs(5));
             if !self.up.load(Ordering::Acquire) { continue; }
+            // SELF-HEAL: an unanswered PING (or the oldest stream) older than FAST_STALE = half-dead: reset it
+            let now = mono_ns();
+            let ping = self.ping_sent.load(Ordering::Relaxed);
+            let oldest = self.st.lock().unwrap().streams.values().map(|x| x.1).min();
+            let stale = (ping > 0 && now.saturating_sub(ping) > FAST_STALE.as_nanos() as u64) || oldest.is_some_and(|t| now.saturating_sub(t) > FAST_STALE.as_nanos() as u64);
+            if stale {
+                self.up.store(false, Ordering::Release);
+                if let Some((s, _)) = self.io.lock().unwrap().take() { let _ = s.shutdown(std::net::Shutdown::Both); }
+                self.ping_sent.store(0, Ordering::Relaxed);
+                let k = self.stale_resets.fetch_add(1, Ordering::Relaxed) + 1;
+                crate::send::health_edge(&self.name, false, &format!("FAST h2 connection: no answer for {} s (half-dead): reset, reconnecting (reset #{k})", FAST_STALE.as_secs()));
+                continue;
+            }
+            if ping == 0 { self.ping_sent.store(now, Ordering::Relaxed); }
             let mut b = Vec::with_capacity(17);
             frame_hdr(&mut b, 8, 0x6, 0, 0); b.extend_from_slice(&[0x66, 0x61, 0x73, 0x74, 0, 0, 0, 0]);
             self.send_raw(&b);
@@ -929,8 +972,10 @@ impl FastH2 {
             backoff = 200;
             *self.st.lock().unwrap() = H2State { next_stream: 1, conn_window: 65_535, peer_init_window: 65_535, streams: Default::default(), hp: Hpack::default(), dec: HpackDec::new(), cont: None };
             *self.io.lock().unwrap() = Some(io);
+            self.ping_sent.store(0, Ordering::Relaxed);
             self.up.store(true, Ordering::Release);
-            self.reconnects.fetch_add(1, Ordering::Relaxed);
+            let k = self.reconnects.fetch_add(1, Ordering::Relaxed);
+            if k > 0 && self.stale_resets.load(Ordering::Relaxed) > 0 { crate::send::health_edge(&self.name, true, &format!("FAST h2 connection re-established (reconnect #{k})")); }
             let mut net = vec![0u8; 64 * 1024];
             let mut tmp = vec![0u8; 64 * 1024];
             let mut plain: Vec<u8> = Vec::with_capacity(128 * 1024);
@@ -973,6 +1018,7 @@ impl FastH2 {
                             frame_hdr(&mut out, 0, 0x4, 1, 0);
                         }
                         0x6 if fl & 1 == 0 => { frame_hdr(&mut out, 8, 0x6, 1, 0); out.extend_from_slice(pl); }
+                        0x6 => { self.ping_sent.store(0, Ordering::Relaxed); } // our PING answered (SELF-HEAL)
                         0x8 if len == 4 && sid == 0 => { self.st.lock().unwrap().conn_window += (u32::from_be_bytes(pl.try_into().unwrap()) & 0x7fff_ffff) as i64; }
                         0x0 => {
                             // DATA: the response message (gRPC 5-byte prefix + protobuf; SendBundleResponse field 1 = uuid)

@@ -377,7 +377,16 @@ pub fn harmonic_reply(name: &str, sig: &str, status: u16, body: &[u8]) -> Result
 }
 
 /// a transport error without its URL (keys live in some URLs, and errors go to the logs)
-fn net(name: &str, e: reqwest::Error) -> anyhow::Error { anyhow::anyhow!("{name}: {}", e.without_url()) }
+/// a reqwest error without its URL (keys live in some), WITH its cause chain (connect / TLS / reset / timeout: the
+/// reason "error sending request" alone hides)
+fn net(name: &str, e: reqwest::Error) -> anyhow::Error {
+    let e = e.without_url();
+    let mut msg = format!("{name}: {e}");
+    let mut src = std::error::Error::source(&e);
+    let mut k = 0;
+    while let Some(c) = src { if k >= 4 { break; } msg.push_str(&format!(": {c}")); src = c.source(); k += 1; }
+    anyhow::anyhow!(msg)
+}
 
 fn env_value(var: &str, what: &str) -> Result<String> {
     match std::env::var(var) {
@@ -412,6 +421,8 @@ impl DnsCache {
         if v.is_empty() { return Err(std::io::Error::other("no address")); }
         Ok(v)
     }
+    /// SELF-HEAL: drop a host's cached addresses (the next connect resolves afresh)
+    pub fn forget(&self, host: &str) { self.m.lock().unwrap().remove(host); }
     /// resolve now and remember (start-up pre-resolution: the first send never waits on DNS)
     pub async fn prime(&self, host: &str) -> Option<usize> {
         let v = Self::lookup(host).await.ok()?;
@@ -563,6 +574,25 @@ pub fn check_key_material(c: &SendPath, payer: &Pk) -> Result<usize> {
     Ok(n)
 }
 
+/// one path's transport health (self-heal)
+#[derive(Default)]
+pub struct PathHealth { errs: std::sync::atomic::AtomicU32, unhealthy: std::sync::atomic::AtomicBool, pub rebuilds: std::sync::atomic::AtomicU64, last_rebuild: Mutex<Option<Instant>> }
+/// consecutive transport errors that rebuild a path's client (and at most one rebuild per HEAL_MIN_GAP)
+pub const HEAL_AFTER: u32 = 3;
+const HEAL_MIN_GAP: Duration = Duration::from_secs(5);
+/// health edges: (path, healthy now, detail). Default: a stderr line; the engine sets its own (log + Telegram)
+type HealthHook = Box<dyn Fn(&str, bool, &str) + Send + Sync>;
+static HEALTH_HOOK: std::sync::OnceLock<HealthHook> = std::sync::OnceLock::new();
+pub fn set_health_hook(f: impl Fn(&str, bool, &str) + Send + Sync + 'static) { let _ = HEALTH_HOOK.set(Box::new(f)); }
+pub fn health_edge(name: &str, healthy: bool, detail: &str) {
+    match HEALTH_HOOK.get() { Some(h) => h(name, healthy, detail), None => eprintln!("  SEND-PATH {name} {}: {detail}", if healthy { "RECOVERED" } else { "UNHEALTHY" }) }
+}
+/// the paths' HTTP client (one per path; rebuilt by the self-heal with the same settings)
+fn build_http() -> Result<reqwest::Client> {
+    Ok(reqwest::Client::builder().tcp_nodelay(true).pool_idle_timeout(Duration::from_secs(85)).pool_max_idle_per_host(4)
+        .tcp_keepalive(Duration::from_secs(15)).dns_resolver(DnsCache::global()).timeout(SEND_TIMEOUT).build()?)
+}
+
 pub struct Path {
     pub name: String,
     pub kind: SendKind,
@@ -578,7 +608,12 @@ pub struct Path {
     ping: Ping,
     headers: HeaderMap,
     preflight: bool,
-    http: reqwest::Client,
+    /// SELF-HEAL (server dry run of 537126d5: staked-rpc's keep-alive failed "error sending request" 70 times in a row
+    /// while curl to the same URL answered in 35 ms — a dead pooled connection the client kept handing out): the client
+    /// is swappable; HEAL_AFTER consecutive transport errors (no HTTP answer) rebuild it: a fresh pool, the host's DNS
+    /// re-resolved. The slow send path and the keep-alive share it (the FAST path has its own connections)
+    http: std::sync::RwLock<reqwest::Client>,
+    health: PathHealth,
     pub jito: Option<Arc<jito::Jito>>,
     /// FIX2: harmonic-bundle with `auth_keypair`: the authenticated SearcherService client (role 3), when the login worked
     /// (None: not configured, or not whitelisted yet -> the public JSON-RPC)
@@ -666,8 +701,7 @@ impl Path {
         // keepalive probes so a silently dropped connection (NAT/LB idle reap) is noticed before a send needs it
         let dns = DnsCache::global();
         if let Some(h) = reqwest::Url::parse(&url).ok().and_then(|u| u.host_str().map(String::from)) { let _ = dns.prime(&h).await; }
-        let http = reqwest::Client::builder().tcp_nodelay(true).pool_idle_timeout(Duration::from_secs(85)).pool_max_idle_per_host(4)
-            .tcp_keepalive(Duration::from_secs(15)).dns_resolver(dns).timeout(SEND_TIMEOUT).build()?;
+        let http = std::sync::RwLock::new(build_http()?);
         let jito = if c.kind == SendKind::JitoBundle {
             if !url.starts_with("https://") && !url.starts_with("http://") { bail!("{what}: the block engine url needs a scheme (https://...)"); }
             let key = jito::load_keypair(c.auth_keypair.as_deref().unwrap_or(jito::DEFAULT_AUTH_KEYPAIR))?;
@@ -716,7 +750,7 @@ impl Path {
         let host = host_of(&url);
         Ok(Path { name: c.name.clone(), kind: c.kind, tips, tip_lamports: c.tip_lamports, tip_share: c.tip_share,
             tip_max: c.tip_max_lamports.unwrap_or(u64::MAX), cursor: AtomicUsize::new(0), budget, url, host, ping, headers,
-            preflight: c.preflight, http, jito, hb, tpu, udp, stats: Default::default() })
+            preflight: c.preflight, http, health: PathHealth::default(), jito, hb, tpu, udp, stats: Default::default() })
     }
 
     /// tests: a jito-bundle path on `jito` (e.g. `Jito::for_test` with an in-memory block engine), Jito's own tip
@@ -727,7 +761,7 @@ impl Path {
             tip_lamports: 1_000, tip_share: Some(0.7), tip_max: 100_000, cursor: AtomicUsize::new(0),
             budget: max_per_sec.map(|n| Budget::new(n, Duration::from_millis(queue_ms))), url: "https://127.0.0.1:9".into(), host: "127.0.0.1".into(), ping: Ping::Tips,
             headers: HeaderMap::new(),
-            preflight: false, http: reqwest::Client::new(), jito: Some(jito), hb: None, tpu: None, udp: None, stats: Default::default() }
+            preflight: false, http: std::sync::RwLock::new(reqwest::Client::new()), health: PathHealth::default(), jito: Some(jito), hb: None, tpu: None, udp: None, stats: Default::default() }
     }
 
     /// the endpoint's host (never the full URL: keys live in some); a jito-bundle path: its block engine (copies.jsonl
@@ -760,6 +794,46 @@ impl Path {
     /// System transfer (a tip account behind a lookup table does not count: Jito forbids it), and for Helius a
     /// compute-unit price. Returns the transaction's signature.
     pub fn check(&self, raw: &[u8]) -> Result<String> { verify_copy(raw, self.kind, &self.tips, &self.name) }
+
+    /// the current HTTP client (an Arc clone under a read lock: the slow send path and the keep-alive, never the FAST path)
+    fn client(&self) -> reqwest::Client { self.http.read().unwrap_or_else(|e| e.into_inner()).clone() }
+
+    /// SELF-HEAL: one send / keep-alive outcome. `transport_err`: no answer at all (connect, TLS, a reset, a timeout).
+    /// HEAL_AFTER in a row rebuild the client (fresh pool, the host's DNS re-resolved), at most once per HEAL_MIN_GAP;
+    /// the first answer after that is the recovery. Both edges go to the health hook.
+    pub fn note_transport(&self, transport_err: Option<&str>) {
+        let h = &self.health;
+        match transport_err {
+            None => {
+                h.errs.store(0, Ordering::Relaxed);
+                if h.unhealthy.swap(false, Ordering::Relaxed) { health_edge(&self.name, true, &format!("answering again (client rebuilds so far: {})", h.rebuilds.load(Ordering::Relaxed))); }
+            }
+            Some(e) => {
+                let n = h.errs.fetch_add(1, Ordering::Relaxed) + 1;
+                if n < HEAL_AFTER { return; }
+                let mut g = h.last_rebuild.lock().unwrap_or_else(|e| e.into_inner());
+                if g.is_some_and(|t| t.elapsed() < HEAL_MIN_GAP) { return; }
+                *g = Some(Instant::now());
+                drop(g);
+                h.errs.store(0, Ordering::Relaxed);
+                if self.kind == SendKind::JitoBundle || self.kind == SendKind::Tpu { if !h.unhealthy.swap(true, Ordering::Relaxed) { health_edge(&self.name, false, &format!("{n} transport errors in a row (last: {e}); its gRPC / QUIC client reconnects by itself")); } return; }
+                let host = self.host.clone();
+                DnsCache::global().forget(&host);
+                match build_http() {
+                    Ok(c) => {
+                        *self.http.write().unwrap_or_else(|e| e.into_inner()) = c;
+                        let k = h.rebuilds.fetch_add(1, Ordering::Relaxed) + 1;
+                        let first = !h.unhealthy.swap(true, Ordering::Relaxed);
+                        if first || k % 10 == 0 { health_edge(&self.name, false, &format!("{n} transport errors in a row (last: {e}): HTTP client REBUILT (fresh connections, DNS re-resolved; rebuild #{k})")); }
+                        if let Ok(rt) = tokio::runtime::Handle::try_current() { rt.spawn(async move { let _ = DnsCache::global().prime(&host).await; }); }
+                    }
+                    Err(e2) => health_edge(&self.name, false, &format!("{n} transport errors in a row (last: {e}); the client rebuild FAILED: {e2:#}")),
+                }
+            }
+        }
+    }
+    /// whether the path is currently marked unhealthy (HEAL_AFTER transport errors without an answer since)
+    pub fn unhealthy(&self) -> bool { self.health.unhealthy.load(Ordering::Relaxed) }
 
     /// arbx-fast: the path's tip accounts (the executor picks a Helius Sender copy's tip account from them)
     pub fn tip_accounts(&self) -> &[Pk] { &self.tips }
@@ -814,9 +888,13 @@ impl Path {
         let t = Instant::now();
         let mut r = self.deliver(raw, &sig, attempt).await;
         if let Ok(rep) = &mut r { rep.queue_wait_us = waited.map(|w| w.as_micros() as u64); }
-        let mut s = self.stats.lock().unwrap();
-        s.sent += 1;
-        match &r { Ok(_) => { s.ok += 1; s.send_us.push(t.elapsed().as_micros() as u64); } Err(_) => s.refused += 1 }
+        {
+            let mut s = self.stats.lock().unwrap();
+            s.sent += 1;
+            match &r { Ok(_) => { s.ok += 1; s.send_us.push(t.elapsed().as_micros() as u64); } Err(_) => s.refused += 1 }
+        }
+        // SELF-HEAL: an answer (accepted or refused with a status / by the endpoint) is health; no answer is a transport error
+        match &r { Err(e) if !e.answered && e.code.is_none() => self.note_transport(Some(&e.msg)), _ => self.note_transport(None) }
         r
     }
 
@@ -865,7 +943,7 @@ impl Path {
                     for _ in 1..copies { let _ = sock.send(&p).await; }
                     Ok(rep(sig.to_string(), None, None, format!("udp sent x{copies}")))
                 } else {
-                    let resp = self.http.post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
+                    let resp = self.client().post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
                         .body(raw.to_vec()).send().await.map_err(net)?;
                     let status = resp.status().as_u16();
                     lenient(status, &resp.bytes().await.map_err(net)?)
@@ -883,7 +961,7 @@ impl Path {
                     SendKind::Bloxroute => json!({ "transaction": { "content": b64 }, "skipPreFlight": true, "frontRunningProtection": false, "submitProtection": "SP_LOW", "useStakedRPCs": true }),
                     _ => json!({ "transaction": { "content": b64 }, "skipPreFlight": true, "frontRunningProtection": false }),
                 };
-                let resp = self.http.post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(net)?;
+                let resp = self.client().post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(net)?;
                 let status = resp.status().as_u16();
                 lenient(status, &resp.bytes().await.map_err(net)?)
             }
@@ -899,13 +977,13 @@ impl Path {
                 }
                 let b64 = base64::engine::general_purpose::STANDARD.encode(raw);
                 let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "sendBundle", "params": [[b64], { "encoding": "base64" }] });
-                let resp = self.http.post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(net)?;
+                let resp = self.client().post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(net)?;
                 let status = resp.status().as_u16();
                 let bytes = resp.bytes().await.map_err(net)?;
                 harmonic_reply(name, sig, status, &bytes)
             }
             SendKind::NodeOne | SendKind::BlockRazor => {
-                let resp = self.http.post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
+                let resp = self.client().post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
                     .body(raw.to_vec()).send().await.map_err(net)?;
                 let status = resp.status().as_u16();
                 lenient(status, &resp.bytes().await.map_err(net)?)
@@ -924,7 +1002,7 @@ impl Path {
                     _ => json!({ "encoding": "base64" }),
                 };
                 let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "sendTransaction", "params": [b64, opts] });
-                let resp = self.http.post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(net)?;
+                let resp = self.client().post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(net)?;
                 let status = resp.status().as_u16();
                 // jito-tx with ?bundleOnly=true answers with the bundle id in a header
                 let bundle = resp.headers().get("x-bundle-id").and_then(|v| v.to_str().ok()).map(String::from);
@@ -935,7 +1013,7 @@ impl Path {
                 r
             }
             SendKind::Haan | SendKind::Bolt | SendKind::Iris | SendKind::Lunar => {
-                let resp = self.http.post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
+                let resp = self.client().post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
                     .body(raw.to_vec()).send().await.map_err(net)?;
                 let status = resp.status().as_u16();
                 answer(status, &resp.bytes().await.map_err(net)?, None)
@@ -948,10 +1026,10 @@ impl Path {
         let t = Instant::now();
         let r: Result<()> = async {
             match &self.ping {
-                Ping::Get(u) => { self.http.get(u).headers(self.headers.clone()).send().await.map_err(|e| net(&self.name, e))?.bytes().await.map_err(|e| net(&self.name, e))?; }
+                Ping::Get(u) => { self.client().get(u).headers(self.headers.clone()).send().await.map_err(|e| net(&self.name, e))?.bytes().await.map_err(|e| net(&self.name, e))?; }
                 Ping::Health => {
                     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "getHealth", "params": [] });
-                    self.http.post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(|e| net(&self.name, e))?.bytes().await.map_err(|e| net(&self.name, e))?;
+                    self.client().post(&self.url).headers(self.headers.clone()).json(&body).send().await.map_err(|e| net(&self.name, e))?.bytes().await.map_err(|e| net(&self.name, e))?;
                 }
                 Ping::None => match &self.tpu {
                     Some(t) => { t.connect_next().await?; }
@@ -966,6 +1044,11 @@ impl Path {
             Ok(())
         }.await;
         let d = t.elapsed();
+        match &r {
+            Ok(()) => self.note_transport(None),
+            Err(e) if e.to_string() == "skip" => {}
+            Err(e) => self.note_transport(Some(&format!("{e:#}"))),
+        }
         let mut s = self.stats.lock().unwrap();
         match r {
             Ok(()) => { s.warm_us.push(d.as_micros() as u64); Ok(Some(d)) }
@@ -1352,6 +1435,39 @@ mod tests {
 
     /// WP-00 (F6): copies refused for the path's rate are counted, and the crowded-rank ones apart; WP-05: the refusal
     /// says why (`rate_queue_timeout`: no queue here)
+    /// SELF-HEAL (server dry run of 537126d5): HEAL_AFTER consecutive transport errors rebuild the path's client (fresh
+    /// pool, DNS re-resolved) and mark it unhealthy; the first answer marks it recovered; the error text carries its cause
+    #[tokio::test]
+    async fn send_path_self_heals() {
+        // a port nothing listens on yet
+        let port = { let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); l.local_addr().unwrap().port() };
+        let c = cfg("rpc", format!("http://127.0.0.1:{port}"));
+        let p = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
+        let mut last = String::new();
+        for _ in 0..HEAL_AFTER { last = format!("{:#}", p.warm().await.err().expect("refused")); }
+        assert!(p.unhealthy(), "{HEAL_AFTER} transport errors mark it unhealthy");
+        assert_eq!(p.health.rebuilds.load(Ordering::Relaxed), 1, "and rebuild the client once");
+        assert!(last.contains("error sending request") && last.matches(':').count() >= 3, "the cause chain is in the text: {last}");
+        // more errors inside HEAL_MIN_GAP: no rebuild storm
+        for _ in 0..HEAL_AFTER { let _ = p.warm().await; }
+        assert_eq!(p.health.rebuilds.load(Ordering::Relaxed), 1);
+        // now something answers on that port: the next keep-alive recovers the path
+        let l = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.unwrap();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            while let Ok((mut c, _)) = l.accept().await {
+                tokio::spawn(async move {
+                    let mut b = vec![0u8; 8192];
+                    let _ = c.read(&mut b).await;
+                    let body = r#"{"jsonrpc":"2.0","id":1,"result":"ok"}"#;
+                    let _ = c.write_all(format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}", body.len()).as_bytes()).await;
+                });
+            }
+        });
+        assert!(p.warm().await.is_ok());
+        assert!(!p.unhealthy(), "the first answer marks it recovered");
+    }
+
     #[tokio::test]
     async fn rate_drops_are_split_by_crowded_rank() {
         let mut c = cfg("rpc", "http://127.0.0.1:1".into());

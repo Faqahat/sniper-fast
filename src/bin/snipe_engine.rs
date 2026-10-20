@@ -843,6 +843,16 @@ mod tg {
     /// the end of the run: everything queued goes out (blocks the caller up to `wait`: main thread only, after the run)
     pub fn flush(wait: Duration) { if let Some(a) = TG.get() { STOP.store(true, Ordering::SeqCst); let _ = a.flush(wait); } }
 
+    /// the delivery counters (the run's last log line about Telegram)
+    pub fn stats_line() -> Option<String> {
+        let a = TG.get()?;
+        let v = a.status_json();
+        let g = |k: &str| v[k].as_u64().unwrap_or(0);
+        Some(format!("TELEGRAM: raised {} sent {} (in {} messages) dropped {} failed {} deduped {} still queued {}{}", g("raised_total"), g("sent_total"), g("messages_total"),
+            g("dropped_total"), g("failed_total"), g("deduped_total"), g("queued_now") + g("pending_now"),
+            v["last_error"].as_str().map(|e| format!(" last error: {e}")).unwrap_or_default()))
+    }
+
     pub fn mint_link(m: &Pk) -> String { let s = b58(m); format!("<a href=\"https://solscan.io/token/{s}\">{}…{}</a>", &s[..4], &s[s.len() - 4..]) }
     pub fn tx_link(sig: &str) -> String { if sig.len() < 16 { esc(sig) } else { format!("<a href=\"https://solscan.io/tx/{sig}\">{}…</a>", &sig[..8]) } }
     fn pct(num: i64, den: u64) -> String { if den == 0 { "-".into() } else { format!("{:+.1}%", num as f64 * 100.0 / den as f64) } }
@@ -1477,6 +1487,7 @@ fn main() -> Result<()> {
     if let Err(e) = &r { tg::raise(arbx::alerts::Level::Critical, "snipe_error", "error", "💥", "ENGINE STOPPED WITH AN ERROR", arbx::alerts::format::Body::new().code("error", redact(&format!("{e:#}"))), false); }
     // Telegram: everything queued goes out before the process ends (<= 6 s; the runtime still runs the sender)
     tg::flush(Duration::from_secs(6));
+    if let Some(l) = tg::stats_line() { eprintln!("{l}"); }
     INFRA_STOP.store(true, Ordering::Relaxed);
     r
 }
@@ -1487,6 +1498,13 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
     let _ = RUN_STOP.set(stop.clone());
     // Telegram: the old arb bot's sender on this runtime (off with --no-telegram or without the env vars)
     tg::init(&tokio::runtime::Handle::current());
+    // SELF-HEAL (every send path: the slow client and the FAST connections): one line per health edge + a Telegram
+    // alert, deduplicated (10 min) per path and edge
+    send::set_health_hook(|name, healthy, detail| {
+        eprintln!("  SEND-PATH {name} {}: {detail}", if healthy { "RECOVERED" } else { "UNHEALTHY" });
+        tg::raise(if healthy { arbx::alerts::Level::Info } else { arbx::alerts::Level::Warning }, "snipe_path_health", &format!("path:{name}:{healthy}"),
+            if healthy { "🟢" } else { "🩹" }, &format!("Send path {name} {}", if healthy { "RECOVERED" } else { "UNHEALTHY (self-heal)" }), arbx::alerts::format::Body::new().txt(detail), true);
+    });
     // M5-2: the primary must be mainnet too (a wrong-cluster RPC would feed blockhashes and balances)
     match genesis_retry(&rpc).await {
         Ok(Ok(v)) if v.as_str() == Some(MAINNET_GENESIS) => {}
