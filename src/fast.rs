@@ -13,7 +13,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[inline]
 pub fn mono_ns() -> u64 {
@@ -326,19 +326,41 @@ fn pct_decode(s: &str) -> String {
 #[derive(Clone, Debug)]
 pub struct Ack { pub path: String, pub tag: u64, pub t_write: u64, pub t_ack: u64, pub status: Option<u16>, pub body: String }
 
+/// L9-2 (audit 9): a TOTAL write budget per request (not per syscall): every write syscall gets the remaining time as
+/// its socket timeout; past the deadline the write fails (the connection is then dropped and reconnects)
+pub struct Dw<'a> { pub s: &'a mut TcpStream, pub deadline: Instant }
+impl std::io::Write for Dw<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let rem = self.deadline.saturating_duration_since(Instant::now());
+        if rem.is_zero() { return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "write budget exhausted")); }
+        self.s.set_write_timeout(Some(rem.max(Duration::from_micros(100))))?;
+        self.s.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> { self.s.flush() }
+}
+/// TLS: encrypt `buf` and write every record within `budget` in total
+pub fn tls_write_all(c: &mut rustls::ClientConnection, s: &mut TcpStream, buf: &[u8], budget: Duration) -> std::io::Result<()> {
+    let mut w = Dw { s, deadline: Instant::now() + budget };
+    c.writer().write_all(buf)?;
+    while c.wants_write() { c.write_tls(&mut w)?; }
+    Ok(())
+}
+/// M9-1 (audit 9): drop an h2 connection: take it out and SHUT the socket (the reader's blocking read returns and it
+/// reconnects); true when there was one. Every error path of FastH2 uses this (never a bare reset of the slot without the shutdown)
+fn shut_h2(g: &mut Option<(TcpStream, Box<rustls::ClientConnection>)>) -> bool {
+    match g.take() { Some((s, _)) => { let _ = s.shutdown(std::net::Shutdown::Both); true } None => false }
+}
+
 enum Io { Plain(TcpStream), Tls(TcpStream, Box<rustls::ClientConnection>) }
 
 impl Io {
     /// SELF-HEAL: shut the socket down so the reader thread's blocking read returns and it reconnects
     fn shut(&self) { let s = match self { Io::Plain(s) | Io::Tls(s, _) => s }; let _ = s.shutdown(std::net::Shutdown::Both); }
+    /// L9-2: the whole request within FAST_WRITE_TIMEOUT (a total budget, every syscall included)
     fn write_all_now(&mut self, buf: &[u8]) -> std::io::Result<()> {
         match self {
-            Io::Plain(s) => s.write_all(buf),
-            Io::Tls(s, c) => {
-                c.writer().write_all(buf)?;
-                while c.wants_write() { c.write_tls(s)?; }
-                Ok(())
-            }
+            Io::Plain(s) => Dw { s, deadline: Instant::now() + FAST_WRITE_TIMEOUT }.write_all(buf),
+            Io::Tls(s, c) => tls_write_all(c, s, buf, FAST_WRITE_TIMEOUT),
         }
     }
 }
@@ -622,6 +644,41 @@ fn parse_response(buf: &[u8]) -> Option<(usize, u16, Vec<u8>)> {
 mod tests {
     use super::*;
 
+    /// M9-1 (audit 9): no FastH2 error path drops a connection without shutting its socket; shut_h2 really shuts it
+    /// (the peer reads EOF, so a reader thread blocked in read returns and reconnects)
+    #[test]
+    fn h2_drop_shuts_the_socket_m91() {
+        let src = include_str!("fast.rs");
+        let code = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+        assert!(!code.contains("*g = None"), "a bare `*g = None` drops a connection without shutting it");
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let s = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = l.accept().unwrap();
+        let sn = rustls::pki_types::ServerName::try_from("localhost".to_string()).unwrap();
+        let c = rustls::ClientConnection::new(FastH2::tls_h2(), sn).unwrap();
+        let mut g = Some((s, Box::new(c)));
+        assert!(shut_h2(&mut g));
+        assert!(g.is_none());
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut b = [0u8; 16];
+        assert_eq!(peer.read(&mut b).unwrap(), 0, "the peer sees EOF");
+        assert!(!shut_h2(&mut g));
+    }
+
+    /// L9-2 (audit 9): the write budget is TOTAL: a peer that never reads blocks a big write only for ~the budget
+    #[test]
+    fn write_budget_is_total_l92() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut s = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (_peer, _) = l.accept().unwrap(); // never reads
+        let big = vec![7u8; 64 << 20];
+        let t = Instant::now();
+        let r = Dw { s: &mut s, deadline: Instant::now() + FAST_WRITE_TIMEOUT }.write_all(&big);
+        let el = t.elapsed();
+        assert!(r.is_err(), "64 MiB to a peer that never reads cannot finish");
+        assert!(el < FAST_WRITE_TIMEOUT * 5, "the whole write stops at ~the budget, not per syscall: {el:?}");
+    }
+
     /// M1: the in-place re-patch of a framed request equals re-framing it from scratch (JSON + binary), on every range
     #[test]
     fn repatch_equals_reframe() {
@@ -889,10 +946,11 @@ impl FastH2 {
             frame_hdr(&mut req, data_len, 0x0, 0x1, sid);
             req.push(0); req.extend_from_slice(&(msg.len() as u32).to_be_bytes()); req.extend_from_slice(msg);
         }
-        let r = c.writer().write_all(&req).and_then(|_| { while c.wants_write() { c.write_tls(s)?; } Ok(()) });
+        let r = tls_write_all(c, s, &req, FAST_WRITE_TIMEOUT);
         match r {
             Ok(()) => { self.writes.fetch_add(1, Ordering::Relaxed); Ok((t0, mono_ns())) }
-            Err(e) => { self.up.store(false, Ordering::Release); *g = None; Err(format!("write: {e}")) }
+            // M9-1: shut the socket too (it used to reset the slot only: the reader stayed blocked, no stale reset, no alert)
+            Err(e) => { self.up.store(false, Ordering::Release); shut_h2(&mut g); crate::send::health_edge(&self.name, false, &format!("FAST h2 write failed ({e}): connection dropped, reconnecting")); Err(format!("write: {e}")) }
         }
     }
 
@@ -913,19 +971,19 @@ impl FastH2 {
         req[5..9].copy_from_slice(&sid.to_be_bytes());
         let d = 9 + hblock_len;
         req[d + 5..d + 9].copy_from_slice(&sid.to_be_bytes());
-        let r = c.writer().write_all(req).and_then(|_| { while c.wants_write() { c.write_tls(s)?; } Ok(()) });
+        let r = tls_write_all(c, s, req, FAST_WRITE_TIMEOUT);
         match r {
             Ok(()) => { self.writes.fetch_add(1, Ordering::Relaxed); Ok((t0, mono_ns())) }
-            Err(e) => { self.up.store(false, Ordering::Release); if let Some((s, _)) = g.take() { let _ = s.shutdown(std::net::Shutdown::Both); } Err(format!("write: {e}")) }
+            Err(e) => { self.up.store(false, Ordering::Release); shut_h2(&mut g); crate::send::health_edge(&self.name, false, &format!("FAST h2 write failed ({e}): connection dropped, reconnecting")); Err(format!("write: {e}")) }
         }
     }
 
     fn send_raw(&self, b: &[u8]) {
         let mut g = self.io.lock().unwrap();
         if let Some((s, c)) = g.as_mut() {
-            if c.writer().write_all(b).and_then(|_| { while c.wants_write() { c.write_tls(s)?; } Ok(()) }).is_err() {
+            if tls_write_all(c, s, b, FAST_WRITE_TIMEOUT).is_err() {
                 self.up.store(false, Ordering::Release);
-                if let Some((s, _)) = g.take() { let _ = s.shutdown(std::net::Shutdown::Both); }
+                shut_h2(&mut g);
             }
         }
     }
@@ -941,7 +999,7 @@ impl FastH2 {
             let stale = (ping > 0 && now.saturating_sub(ping) > FAST_STALE.as_nanos() as u64) || oldest.is_some_and(|t| now.saturating_sub(t) > FAST_STALE.as_nanos() as u64);
             if stale {
                 self.up.store(false, Ordering::Release);
-                if let Some((s, _)) = self.io.lock().unwrap().take() { let _ = s.shutdown(std::net::Shutdown::Both); }
+                shut_h2(&mut self.io.lock().unwrap());
                 self.ping_sent.store(0, Ordering::Relaxed);
                 let k = self.stale_resets.fetch_add(1, Ordering::Relaxed) + 1;
                 crate::send::health_edge(&self.name, false, &format!("FAST h2 connection: no answer for {} s (half-dead): reset, reconnecting (reset #{k})", FAST_STALE.as_secs()));

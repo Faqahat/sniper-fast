@@ -817,8 +817,9 @@ impl Path {
                 drop(g);
                 h.errs.store(0, Ordering::Relaxed);
                 if self.kind == SendKind::JitoBundle || self.kind == SendKind::Tpu { if !h.unhealthy.swap(true, Ordering::Relaxed) { health_edge(&self.name, false, &format!("{n} transport errors in a row (last: {e}); its gRPC / QUIC client reconnects by itself")); } return; }
+                // L9-1 (audit 9): re-resolve the host in the background, KEEPING the cached address unless the lookup succeeds
+                // (prime only replaces on success): a failing resolver can never leave the path with no address
                 let host = self.host.clone();
-                DnsCache::global().forget(&host);
                 match build_http() {
                     Ok(c) => {
                         *self.http.write().unwrap_or_else(|e| e.into_inner()) = c;

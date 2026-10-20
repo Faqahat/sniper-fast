@@ -298,7 +298,8 @@ fn slot_note(src: u64, v: u64) { slot_note_on(&send::tpu::SLOT, src, v) }
 fn slot_note_on(slot: &std::sync::atomic::AtomicU64, src: u64, v: u64) {
     let cur = slot.load(Ordering::Relaxed);
     if v <= cur { return; }
-    if cur == 0 || v <= cur + SLOT_JUMP { slot.fetch_max(v, Ordering::Relaxed); return; }
+    // L9-5 (audit 9): the FIRST value (cur 0) needs a second source too, like a jump
+    if cur > 0 && v <= cur + SLOT_JUMP { slot.fetch_max(v, Ordering::Relaxed); return; }
     // a big jump: confirmed by another source?
     let (j, js) = (JUMP_SLOT.load(Ordering::Relaxed), JUMP_SRC.load(Ordering::Relaxed));
     if j > 0 && js & src == 0 && v.abs_diff(j) <= SLOT_JUMP {
@@ -904,7 +905,7 @@ mod tg {
             .kv("wins / losses", format!("{} / {}", e.wins, e.losses)).nl()
             .kv("net (trades)", format!("{}{}", sol_signed(e.net), usd(e.net)))
             .kv("net (wallet)", e.wallet_net.map(|w| format!("{}{}", sol_signed(w), usd(w))).unwrap_or_else(|| "unread".into())).nl()
-            .kv("fees paid", format!("{}{}", sol(e.fees as i64), if e.fees_est > 0 { format!(" + {} est", sol(e.fees_est as i64)) } else { String::new() }))
+            .kv("fees paid", format!("{}{}", sol(e.fees as i64), if e.fees_est > 0 { format!(" + {} est (CU limit x price + tips + base)", sol(e.fees_est as i64)) } else { String::new() }))
             .nl().kv("best", tr(&e.best)).kv("worst", tr(&e.worst)).nl()
             .kv("same slot", e.same_slot_pct.map(|p| format!("{p:.0}%")).unwrap_or_else(|| "-".into()))
             .kv("median landing", e.median_delta.map(|d| format!("create {d:+} slots")).unwrap_or_else(|| "-".into()))
@@ -2297,6 +2298,7 @@ async fn send_and_poll_at(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc
         fix2::spawn_jito_poll(&fan, &sig, 0);
         let mut out = poll_land(rpc, sig.clone(), sig_bytes, send_slot, land_timeout, watch, last_valid).await;
         out.roles = roles;
+        out.tips = meta.tips; // L9-3: the slow path's buy tips (fees paid)
         jito_results(&fan, &meta);
         fix2::spawn_landed_via(&fan, &meta, out.land_slot, 0);
         return Ok(out);
@@ -2319,6 +2321,7 @@ async fn send_and_poll_at(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc
     if is_buy { fire_note_raise(ixs, &meta); }
     let mut out = poll_land(rpc, sig, sig_bytes, send_slot, land_timeout, watch, last_valid).await;
     out.roles = roles;
+    out.tips = meta.tips; // L9-3
     if is_buy { jito_results(&fan, &meta); }
     Ok(out)
 }
@@ -4085,11 +4088,6 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     SELL_GIVEUP.store(true, Ordering::SeqCst);
     let t = Instant::now();
     while UNSOLD_BG.load(Ordering::SeqCst) > 0 && t.elapsed() < Duration::from_secs(40) { tokio::time::sleep(Duration::from_millis(250)).await; }
-    // M8-2 (audit 8): the per-trade realized-PnL lookups finish first (bounded 30 s): the RUN END summary and the last
-    // EXIT messages need them
-    let t = Instant::now();
-    if REALIZED_INFLIGHT.load(Ordering::SeqCst) > 0 { eprintln!("  DRAIN: waiting for {} realized-PnL lookup(s) (<= 30 s)", REALIZED_INFLIGHT.load(Ordering::SeqCst)); }
-    while REALIZED_INFLIGHT.load(Ordering::SeqCst) > 0 && t.elapsed() < Duration::from_secs(30) { tokio::time::sleep(Duration::from_millis(250)).await; }
     // H1 + N1/N3: EVERY mint this run fired on is re-read at CONFIRMED commitment (from a node at/after its buy's landing):
     // anything not 0 is HELD-AT-EXIT, whatever the exit logic concluded; an unreadable account is listed too
     let fired_list: Vec<(Pk, u64)> = ACCT.fired.lock().unwrap().iter().map(|(k, v)| (*k, *v)).collect();
@@ -4126,7 +4124,9 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         (end_bal as i64 - start_bal as i64) as f64 / 1e9, start_bal as f64/1e9, end_bal as f64/1e9);
     // M8-2: the realized lookups (incl. any started by the exit sells) are done or bounded-waited; wallet net next to the trades'
     let t = Instant::now();
-    while REALIZED_INFLIGHT.load(Ordering::SeqCst) > 0 && t.elapsed() < Duration::from_secs(15) { tokio::time::sleep(Duration::from_millis(200)).await; }
+    // L9-4 (audit 9): this wait comes AFTER the EXIT CHECK (whose last sells of anything still held go first); <= 30 s
+    if REALIZED_INFLIGHT.load(Ordering::SeqCst) > 0 { eprintln!("  RUN END: waiting for {} realized-PnL lookup(s) (<= 30 s)", REALIZED_INFLIGHT.load(Ordering::SeqCst)); }
+    while REALIZED_INFLIGHT.load(Ordering::SeqCst) > 0 && t.elapsed() < Duration::from_secs(30) { tokio::time::sleep(Duration::from_millis(200)).await; }
     let wallet_net = end_bal_r.filter(|_| start_bal > 0).map(|e| e as i64 - start_bal as i64);
     tg::raise(arbx::alerts::Level::Info, "snipe_end", "end", "🏁", "RUN END", tg::end_body(&tg::end_summary(fired.load(Ordering::Relaxed), ACCT.landed_buys.load(Ordering::SeqCst),
         if stop.load(Ordering::Relaxed) { "stopped (signal / kill switch / lock / failure stop)" } else { "window ended" }, wallet_net)), false);
@@ -4433,7 +4433,7 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     // M7: realized PnL of this position from its own transactions (payer deltas), in the background
     pos.realized_done = true;
     spawn_realized_x(rpc.clone(), mint, buy.sig.clone(), out.sigs.clone(), realized_fallback(bal_start, bal_end_r, cost),
-        Some((cost, t_landing_seen.elapsed().as_secs_f64(), out.first_send_us, fee_est.saturating_sub(revert_fee))));
+        Some((cost, t_landing_seen.elapsed().as_secs_f64(), out.first_send_us, fee_est.saturating_sub(revert_fee).max(buy.tips), fee_est)));
 
     // --- report ---
     let last = out.last.as_ref();
@@ -4758,8 +4758,9 @@ async fn send_sell(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::
 fn spawn_realized(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String, bool, u64)>, fallback: (i64, &'static str)) {
     spawn_realized_x(rpc, mint, buy_sig, sells, fallback, None);
 }
-/// the exit's facts for its Telegram message: (cost estimate, hold s, decision->send us, the buy's tips)
-type ExitInfo = (u64, f64, Option<f64>, u64);
+/// the exit's facts for its Telegram message: (cost estimate, hold s, decision->send us, the buy's tips, the buy's fee
+/// estimate = CU limit x price + tips + base)
+type ExitInfo = (u64, f64, Option<f64>, u64, u64);
 fn spawn_realized_x(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String, bool, u64)>, fallback: (i64, &'static str), info: Option<ExitInfo>) {
     REALIZED_INFLIGHT.fetch_add(1, Ordering::SeqCst);
     tokio::spawn(async move {
@@ -4767,20 +4768,23 @@ fn spawn_realized_x(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String
         // L8-3: the sells' own flows: proceeds = sum of their payer deltas (net of their fees + tips); fees from the txs
         let (mut sold, mut sell_fees, mut sell_tips, mut sells_found) = (0i64, 0u64, 0u64, 0usize);
         for (s, seen, tips) in &sells {
-            if let Some((d, f)) = tx_payer(&rpc, s, if *seen { 8 } else { 2 }).await { sold += d; sell_fees += f; sell_tips += tips; sells_found += 1; }
+            // L9-3: a FAILED sell's tips revert with it: only its fee is paid
+            if let Some((d, f, ok)) = tx_payer(&rpc, s, if *seen { 8 } else { 2 }).await { sold += d; sell_fees += f; if ok { sell_tips += tips; } sells_found += 1; }
         }
-        let (pnl, src) = match buy { Some((d, _)) => (d + sold, "tx"), None => fallback };
+        let (pnl, src) = match buy { Some((d, _, _)) => (d + sold, "tx"), None => fallback };
         let run = ACCT.realized.fetch_add(pnl, Ordering::SeqCst) + pnl;
         eprintln!("  REALIZED mint={} pnl={:+.6} SOL source={src} run_realized={:+.6} SOL", b58(&mint), pnl as f64 / 1e9, run as f64 / 1e9);
-        if let Some((cost_est, hold_s, dec, buy_tips)) = info {
+        if let Some((cost_est, hold_s, dec, buy_tips, fee_est)) = info {
             {
                 let mut b = tg::BOOK.lock().unwrap();
                 b.trades.push((mint, pnl));
                 // L8-3: actual fees (base + priority from the txs, + the tips we paid) where the txs were found, else estimates
-                match buy { Some((_, f)) => b.fees += f + buy_tips, None => b.fees_est += cost_est.saturating_sub(arg_u64("--spend-lamports", 0) + T22_ATA_RENT) }
+                // L9-3: the not-found estimate is the buy's fee estimate (CU limit x price + tips + base) — never derived from the
+                // cost (which holds the spend, pump's trade fee and rent)
+                match buy { Some((_, f, _)) => b.fees += f + buy_tips, None => b.fees_est += fee_est }
                 b.fees += sell_fees + sell_tips;
             }
-            let cost = buy.map(|(d, _)| (-d).max(0) as u64).unwrap_or(cost_est);
+            let cost = buy.map(|(d, _, _)| (-d).max(0) as u64).unwrap_or(cost_est);
             let e = tg::Exit { mint, legs: sells.len() as u32, proceeds: (sells_found > 0).then_some(sold), pnl, cost, hold_s, dec_send_us: dec, run_pnl: run,
                 trades: ACCT.landed_buys.load(Ordering::SeqCst), src: src.to_string() };
             let verified = src == "tx";
@@ -4794,14 +4798,14 @@ fn spawn_realized_x(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String
 /// the fee payer's lamport change in a landed transaction (None: not found after `tries` reads 1.5 s apart)
 async fn tx_payer_delta(rpc: &rpc::Rpc, sig: &str, tries: u32) -> Option<i64> { tx_payer(rpc, sig, tries).await.map(|x| x.0) }
 
-/// L8-3: (the payer's lamport change, the transaction's fee = base + priority) of a landed transaction
-async fn tx_payer(rpc: &rpc::Rpc, sig: &str, tries: u32) -> Option<(i64, u64)> {
+/// L8-3: (the payer's lamport change, the transaction's fee = base + priority, it SUCCEEDED) of a landed transaction
+async fn tx_payer(rpc: &rpc::Rpc, sig: &str, tries: u32) -> Option<(i64, u64, bool)> {
     for k in 0..tries {
         if k > 0 { tokio::time::sleep(Duration::from_millis(1500)).await; }
         if let Ok(v) = call2(rpc, "getTransaction", serde_json::json!([sig, { "encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 0 }])).await {
             if v.is_null() { continue; }
             let (pre, post) = (v["meta"]["preBalances"][0].as_i64()?, v["meta"]["postBalances"][0].as_i64()?);
-            return Some((post - pre, v["meta"]["fee"].as_u64().unwrap_or(0)));
+            return Some((post - pre, v["meta"]["fee"].as_u64().unwrap_or(0), v["meta"]["err"].is_null()));
         }
     }
     None
@@ -6568,9 +6572,16 @@ mod audit_tests {
         assert_eq!(birth_lag(0, 123), Duration::ZERO);
         assert_eq!(birth_lag(1_000, 990), Duration::from_millis(4_000));
         let a = std::sync::atomic::AtomicU64::new(0);
-        slot_note_on(&a, SLOT_SRC_PRIMARY, 459_000_000);
+        JUMP_SLOT.store(0, Ordering::Relaxed); JUMP_SRC.store(0, Ordering::Relaxed);
+        slot_note_on(&a, SLOT_SRC_PRIMARY, 459_000_000); // L9-5: the first value alone is held
+        assert_eq!(a.load(Ordering::Relaxed), 0);
+        slot_note_on(&a, SLOT_SRC_PRIMARY, 459_000_003); // the same source again: still held
+        assert_eq!(a.load(Ordering::Relaxed), 0);
+        slot_note_on(&a, SLOT_SRC_FEED, 459_000_005); // a second source confirms: applied (the lower: the held first value)
         assert_eq!(a.load(Ordering::Relaxed), 459_000_000);
-        slot_note_on(&a, SLOT_SRC_FEED, 459_000_500); // a normal advance
+        slot_note_on(&a, SLOT_SRC_PRIMARY, 459_000_003); // then normal advances
+        assert_eq!(a.load(Ordering::Relaxed), 459_000_003);
+        slot_note_on(&a, SLOT_SRC_FEED, 459_000_500); // a normal advance (one source is enough once the reference is set)
         assert_eq!(a.load(Ordering::Relaxed), 459_000_500);
         slot_note_on(&a, SLOT_SRC_FEED, 459_100_000); // a lone jump: held
         assert_eq!(a.load(Ordering::Relaxed), 459_000_500);
