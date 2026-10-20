@@ -249,7 +249,7 @@ def record(item):
 items = sorted(base.items(), key=lambda kv: kv[1])
 if LIMIT: items = items[:LIMIT]
 n_rec = 0; missing = []
-with ThreadPoolExecutor(3) as ex:
+with ThreadPoolExecutor(int(os.environ.get("REC_THREADS", "3"))) as ex:
     for mint, st in ex.map(record, items):
         if st == "create not found":
             missing.append(mint)
