@@ -28,7 +28,10 @@ awk -v l="$LOSS" 'BEGIN{exit !(l>0 && l<=2)}' || die "--max-loss must be >0 and 
 [ "$BUYS" -ge 1 ] && [ "$BUYS" -le 60 ] || die "--max-buys must be 1..60"
 [ "$MIN" -ge 1 ] && [ "$MIN" -le 300 ] || die "--minutes must be 1..300"
 
-[ -n "${TMUX:-}" ] || die "start PROD inside tmux (tmux new -s prod), so an SSH drop cannot stop it"
+# inside tmux? (sudo resets the env, so $TMUX is gone: check the process ancestry for a tmux server instead)
+in_tmux() { local p=$$; while [ "${p:-1}" -gt 1 ]; do [ "$(ps -o comm= -p "$p" 2>/dev/null)" = "tmux: server" ] && return 0
+  case "$(ps -o comm= -p "$p" 2>/dev/null)" in tmux*) return 0;; esac; p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '); done; return 1; }
+[ -n "${TMUX:-}" ] || in_tmux || die "start PROD inside tmux (tmux new -s prod), so an SSH drop cannot stop it"
 [ -t 0 ] || die "stdin must be your terminal: the engine asks for the keystore passphrase"
 pgrep -x snipe_engine >/dev/null && die "another snipe_engine is running (Dev or Prod): one engine per server"
 
@@ -82,7 +85,8 @@ read -r -p "Type PROD to start (anything else aborts): " OK
 [ "$OK" = "PROD" ] || die "not confirmed"
 
 # guard: verifies every fire on chain, stops the engine by its exact PID (SIGTERM -> drain) on a rule mismatch
-( for _ in $(seq 1 120); do P=$(pgrep -n -x snipe_engine) && break; sleep 0.5; done
+( trap '' INT   # AUDIT7 L7-2: Ctrl-c is for the engine only; the guard keeps watching through the drain
+  for _ in $(seq 1 120); do P=$(pgrep -n -x snipe_engine) && break; sleep 0.5; done
   [ -n "${P:-}" ] && exec python3 /root/run1/guard_run1.py "$LOG" /root/prod/runs/guard_${TAG}_${STAMP}.log PROD_DONE "$P" ) \
   > /root/prod/runs/guard_${TAG}_${STAMP}.out 2>&1 &
 cd /root/prod
