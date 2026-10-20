@@ -87,7 +87,7 @@ read -r -p "Type PROD to start (anything else aborts): " OK
 # guard: verifies every fire on chain, stops the engine by its exact PID (SIGTERM -> drain) on a rule mismatch
 ( trap '' INT   # AUDIT7 L7-2: Ctrl-c is for the engine only; the guard keeps watching through the drain
   for _ in $(seq 1 120); do P=$(pgrep -n -x snipe_engine) && break; sleep 0.5; done
-  [ -n "${P:-}" ] && exec python3 /root/run1/guard_run1.py "$LOG" /root/prod/runs/guard_${TAG}_${STAMP}.log PROD_DONE "$P" ) \
+  [ -n "${P:-}" ] && GUARD_ENV=PROD exec python3 /root/run1/guard_run1.py "$LOG" /root/prod/runs/guard_${TAG}_${STAMP}.log PROD_DONE "$P" ) \
   > /root/prod/runs/guard_${TAG}_${STAMP}.out 2>&1 &
 cd /root/prod
 # AUDIT6 H6-1: the engine writes STRAIGHT to the log file (no pipe a Ctrl-c could kill: a dead pipe makes its next log
