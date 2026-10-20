@@ -144,6 +144,7 @@ fn main() -> Result<()> {
             create_ata: !has("--no-ata"),
             track_volume: true,
             nonce,
+            wrap: has("--wrap"), // (build fix 2026-10-20: the field was added to BuyPlan after this cold one-shot)
         };
         let spend = p.spend_lamports;
         (snipe_build::buy_message_ixs(user, &launch, &p), Some(launch), spend)

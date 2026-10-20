@@ -254,6 +254,16 @@ mod tests {
         assert_eq!(b58(&bonding_curve(&pk("7oeUduY1zhUwQ3YdSP9CGDYF8nYzfRdhgqtc6wAbpump"))), "2HsrtwTMpLGqdXb9W2JXa6Cta6dD4y8rMjqoALaK33BJ");
     }
 
+    // L6 (audit 2026-10-20): these tests now assert the layouts the engine actually SENDS (buy_exact_quote_in_v3 with the
+    // per-launch buyback recipient at [13]; sell_v3 = 17 accounts identical to the buy, no trailing byte; buys do NOT wrap
+    // by default: v3 SOL trades settle in native SOL, --wrap is off in every run config).
+    fn layout_keys(user: Pk, l: &Launch) -> Vec<Pk> {
+        vec![*GLOBAL, l.mint, *WSOL, *pda::TOKEN_2022, *pda::TOKEN_PROGRAM, l.bonding_curve, assoc_bonding_curve(&l.bonding_curve, &l.mint),
+            pda::ata(&l.bonding_curve, &WSOL, &pda::TOKEN_PROGRAM), user, assoc_user(&user, &l.mint), assoc_quote(&user), user_volume_accumulator(&user),
+            *FEE_CONFIG, l.buyback_fee_recipient, *pda::SYSTEM_PROGRAM, *EVENT_AUTHORITY, *PUMP]
+    }
+    const LAYOUT_W: [bool; 17] = [false, false, false, false, false, true, true, true, true, true, true, true, false, true, false, false, false];
+
     #[test]
     fn buy_ix_layout_v3() {
         let user = pk("3tNPvytXB9yTZLgh5RGdjrXVxHp89vGeCiwx9juqgp7q");
@@ -267,26 +277,13 @@ mod tests {
         assert_eq!(u64::from_le_bytes(ix.data[8..16].try_into().unwrap()), 1_000_000);
         assert_eq!(u64::from_le_bytes(ix.data[16..24].try_into().unwrap()), 42);
         assert_eq!(ix.data[24], 0);
+        assert_eq!(ix.accounts.iter().map(|m| m.key).collect::<Vec<_>>(), layout_keys(user, &l));
+        // [13] is the launch's buyback recipient (copied from the create's standard buy, else the global pool default)
+        assert_eq!(ix.accounts[13].key, *crate::snipe::DEFAULT_BUYBACK);
+        let mut l2 = l.clone(); l2.buyback_fee_recipient = [5u8; 32];
+        assert_eq!(buy_ix(user, &l2, 1, 1, true).accounts[13].key, [5u8; 32]);
+        assert_eq!(ix.accounts.iter().map(|m| m.writable).collect::<Vec<_>>(), LAYOUT_W.to_vec());
         let a = &ix.accounts;
-        assert_eq!(a[0].key, *GLOBAL);
-        assert_eq!(a[1].key, l.mint);
-        assert_eq!(a[2].key, *WSOL);
-        assert_eq!(a[3].key, *pda::TOKEN_2022);
-        assert_eq!(a[4].key, *pda::TOKEN_PROGRAM);
-        assert_eq!(a[5].key, l.bonding_curve);
-        assert_eq!(a[6].key, assoc_bonding_curve(&l.bonding_curve, &l.mint));
-        assert_eq!(a[7].key, pda::ata(&l.bonding_curve, &WSOL, &pda::TOKEN_PROGRAM));
-        assert_eq!(a[8].key, user);
-        assert_eq!(a[9].key, assoc_user(&user, &l.mint));
-        assert_eq!(a[10].key, assoc_quote(&user));
-        assert_eq!(a[11].key, user_volume_accumulator(&user));
-        assert_eq!(a[12].key, *FEE_CONFIG);
-        assert_eq!(a[13].key, pda::ata(&creator_vault(&l.creator), &WSOL, &pda::TOKEN_PROGRAM));
-        assert_eq!(a[14].key, *pda::SYSTEM_PROGRAM);
-        assert_eq!(a[15].key, *EVENT_AUTHORITY);
-        assert_eq!(a[16].key, *PUMP);
-        let w: Vec<bool> = a.iter().map(|m| m.writable).collect();
-        assert_eq!(w, vec![false, false, false, false, false, true, true, true, true, true, true, true, false, true, false, false, false]);
         assert!(a[8].signer && a.iter().enumerate().all(|(i, m)| i == 8 || !m.signer), "only user signs");
     }
 
@@ -295,65 +292,72 @@ mod tests {
         let user = pk("3tNPvytXB9yTZLgh5RGdjrXVxHp89vGeCiwx9juqgp7q");
         let l = sample();
         let ix = sell_ix(user, &l, 5_000, 7);
-        assert_eq!(ix.accounts.len(), 16, "sell_exact_tokens_in_v3 takes 16 accounts (buy minus user_volume_accumulator) — UNCONFIRMED");
-        assert_eq!(ix.data[..8], SELL_EXACT_TOKENS_IN_V3_DISC);
-        assert_eq!(ix.data.len(), 8 + 8 + 8 + 1);
+        assert_eq!(ix.program, *PUMP);
+        assert_eq!(ix.accounts.len(), 17, "sell_v3 takes the buy's 17 accounts");
+        assert_eq!(ix.data[..8], SELL_V3_DISC);
+        // args: disc(8) + amount u64 + min_sol_output u64, NO trailing byte
+        assert_eq!(ix.data.len(), 8 + 8 + 8);
         assert_eq!(u64::from_le_bytes(ix.data[8..16].try_into().unwrap()), 5_000);
         assert_eq!(u64::from_le_bytes(ix.data[16..24].try_into().unwrap()), 7);
-        let a = &ix.accounts;
-        assert_eq!(a[8].key, user);
-        assert_eq!(a[10].key, assoc_quote(&user));
-        assert_eq!(a[11].key, *FEE_CONFIG);
-        assert_eq!(a[15].key, *PUMP);
-        let w: Vec<bool> = a.iter().map(|m| m.writable).collect();
-        assert_eq!(w, vec![false, false, false, false, false, true, true, true, true, true, true, false, true, false, false, false]);
+        assert_eq!(ix.accounts.iter().map(|m| m.key).collect::<Vec<_>>(), layout_keys(user, &l));
+        assert_eq!(ix.accounts.iter().map(|m| m.writable).collect::<Vec<_>>(), LAYOUT_W.to_vec());
+        assert!(ix.accounts[8].signer && ix.accounts.iter().enumerate().all(|(i, m)| i == 8 || !m.signer));
     }
 
     #[test]
-    fn buy_message_wraps_wsol() {
+    fn buy_message_layouts() {
         let user = pk("3tNPvytXB9yTZLgh5RGdjrXVxHp89vGeCiwx9juqgp7q");
         let l = sample();
-        let p = BuyPlan { spend_lamports: 1_000_000, min_tokens_out: 0, cu_limit: 120_000, cu_price_micro: 500_000, create_ata: true, track_volume: true, nonce: None, wrap: false };
+        // what the engine sends (no --wrap): cu_limit, cu_price, base ATA (T22), WSOL ATA (legacy), buy
+        let p = BuyPlan { spend_lamports: 1_000_000, min_tokens_out: 9, cu_limit: 95_000, cu_price_micro: 500_000, create_ata: true, track_volume: true, nonce: None, wrap: false };
         let ixs = buy_message_ixs(user, &l, &p);
-        // cu_limit, cu_price, base-ATA, WSOL-ATA, transfer, sync_native, buy
-        assert_eq!(ixs.len(), 7);
+        assert_eq!(ixs.len(), 5);
         assert_eq!(ixs[0].data[0], 2); // SetComputeUnitLimit
+        assert_eq!(u32::from_le_bytes(ixs[0].data[1..5].try_into().unwrap()), 95_000);
         assert_eq!(ixs[1].data[0], 3); // SetComputeUnitPrice
         assert_eq!(ixs[2].program, *pda::ATA_PROGRAM); // base ATA
+        assert_eq!(ixs[2].accounts[1].key, assoc_user(&user, &l.mint));
         assert_eq!(ixs[3].program, *pda::ATA_PROGRAM); // WSOL ATA
-        assert_eq!(ixs[4].program, *pda::SYSTEM_PROGRAM); // transfer into WSOL ATA
+        assert_eq!(ixs[3].accounts[1].key, assoc_quote(&user));
+        assert_eq!(ixs[4].data[..8], BUY_EXACT_QUOTE_IN_V3_DISC);
+        assert_eq!(u64::from_le_bytes(ixs[4].data[16..24].try_into().unwrap()), 9);
+        // --wrap: transfer + SyncNative before the buy
+        let ixs = buy_message_ixs(user, &l, &BuyPlan { wrap: true, ..p });
+        assert_eq!(ixs.len(), 7);
+        assert_eq!(ixs[4].program, *pda::SYSTEM_PROGRAM);
         assert_eq!(ixs[4].data[..4], 2u32.to_le_bytes());
         assert_eq!(u64::from_le_bytes(ixs[4].data[4..12].try_into().unwrap()), 1_000_000);
-        assert_eq!(ixs[5].program, *pda::TOKEN_PROGRAM); // SyncNative
+        assert_eq!(ixs[5].program, *pda::TOKEN_PROGRAM);
         assert_eq!(ixs[5].data, vec![17]);
         assert_eq!(ixs[6].data[..8], BUY_EXACT_QUOTE_IN_V3_DISC);
-        // durable-nonce mode prepends AdvanceNonceAccount as the first ix
+        // durable-nonce mode prepends AdvanceNonceAccount as the first ix: advance_nonce, cu_limit, WSOL-ATA, buy
         let nonce = pk("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf");
-        let p2 = BuyPlan { nonce: Some((nonce, user)), create_ata: false, cu_price_micro: 0, ..p };
-        let ixs2 = buy_message_ixs(user, &l, &p2);
-        // advance_nonce, cu_limit, WSOL-ATA, transfer, sync, buy
-        assert_eq!(ixs2.len(), 6);
+        let ixs2 = buy_message_ixs(user, &l, &BuyPlan { nonce: Some((nonce, user)), create_ata: false, cu_price_micro: 0, ..p });
+        assert_eq!(ixs2.len(), 4);
         assert_eq!(ixs2[0].program, *pda::SYSTEM_PROGRAM);
         assert_eq!(ixs2[0].data, 4u32.to_le_bytes()); // AdvanceNonceAccount
-        assert_eq!(ixs2[5].data[..8], BUY_EXACT_QUOTE_IN_V3_DISC);
+        assert_eq!(ixs2[3].data[..8], BUY_EXACT_QUOTE_IN_V3_DISC);
     }
 
     #[test]
-    fn sell_message_unwraps_wsol() {
+    fn sell_message_layouts() {
         let user = pk("3tNPvytXB9yTZLgh5RGdjrXVxHp89vGeCiwx9juqgp7q");
         let l = sample();
-        // close_wsol=true: cu_limit, sell, close-WSOL, close-base
-        let ixs = sell_message_ixs(user, &l, 5_000, 0, 120_000, 0, true);
+        // what the engine sends (no --wrap): cu_limit, cu_price, sell_v3, close base ATA (T22)
+        let ixs = sell_message_ixs(user, &l, 5_000, 0, 95_000, 5_000_000, false);
         assert_eq!(ixs.len(), 4);
         assert_eq!(ixs[0].data[0], 2);
-        assert_eq!(ixs[1].data[..8], SELL_EXACT_TOKENS_IN_V3_DISC);
-        assert_eq!(ixs[2].program, *pda::TOKEN_PROGRAM); // CloseAccount (WSOL ATA)
-        assert_eq!(ixs[2].data, vec![9]);
+        assert_eq!(ixs[1].data[0], 3);
+        assert_eq!(ixs[2].data[..8], SELL_V3_DISC);
         assert_eq!(ixs[3].program, *pda::TOKEN_2022); // CloseAccount (base ATA)
         assert_eq!(ixs[3].data, vec![9]);
-        // close_wsol=false (no-wrap default): no WSOL close, just sell + base-ATA close
-        let ixs = sell_message_ixs(user, &l, 5_000, 0, 120_000, 0, false);
-        assert_eq!(ixs.len(), 3);
-        assert_eq!(ixs[2].program, *pda::TOKEN_2022); // CloseAccount (base ATA) only
+        assert_eq!(ixs[3].accounts[0].key, assoc_user(&user, &l.mint));
+        // --wrap: also close the WSOL ATA (unwrap) before the base ATA
+        let ixs = sell_message_ixs(user, &l, 5_000, 0, 120_000, 0, true);
+        assert_eq!(ixs.len(), 4);
+        assert_eq!(ixs[1].data[..8], SELL_V3_DISC);
+        assert_eq!(ixs[2].program, *pda::TOKEN_PROGRAM);
+        assert_eq!(ixs[2].data, vec![9]);
+        assert_eq!(ixs[3].program, *pda::TOKEN_2022);
     }
 }

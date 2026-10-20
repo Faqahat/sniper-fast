@@ -222,8 +222,32 @@ pub static WSOL_MINT: LazyLock<Pk> = LazyLock::new(|| crate::tx::pk("So111111111
 /// launch can neither be sized in SOL nor bought: the engine skips it (--allow-nonsol-quote keeps the old behaviour).
 pub fn create_quote_mint(tx: &Tx) -> Option<Pk> {
     let create = ix_with_disc(tx, &CREATE_V2_DISC)?;
-    let q = acct(tx, create, 16)?;
+    // M6 (audit 2026-10-20): account [16] present but not resolvable (it sits in an address lookup table and the feed did
+    // not resolve it: raw shreds) = the quote is UNKNOWN. It used to read as SOL (bought with WSOL -> revert, fee lost):
+    // now it reads as non-SOL (UNRESOLVED_QUOTE) and the launch is skipped.
+    if create.accounts.len() <= 16 { return None; }
+    let Some(q) = acct(tx, create, 16) else { return Some(UNRESOLVED_QUOTE) };
     if q == SOL_QUOTE || q == *WSOL_MINT { None } else { Some(q) }
+}
+
+/// M6: the quote mint of a create whose account [16] is in an unresolved lookup table (treated as non-SOL: skip)
+pub const UNRESOLVED_QUOTE: Pk = [0xFFu8; 32];
+
+/// M5: `mint` among the tx's static keys or the feed-resolved lookup-table keys
+#[inline]
+pub fn tx_has_key(tx: &Tx, mint: &Pk) -> bool {
+    tx.keys.contains(mint) || tx.loaded.as_ref().is_some_and(|(w, r)| w.contains(mint) || r.contains(mint))
+}
+
+/// M5 (audit 2026-10-20): a top-level pump BUY whose mint account cannot be resolved (it is in an address lookup table the
+/// feed did not resolve: raw shreds). Such a leg may be a buy of a watched mint: the glued-bundle rule must treat it as
+/// UNKNOWN (reject), never as "a pump tx of another mint" (which closed the run early and passed a short bundle).
+pub fn pump_buy_mint_unresolved(tx: &Tx) -> bool {
+    if tx.is_vote || tx.lookups.is_empty() { return false; }
+    tx.ixs.iter().any(|ix| {
+        let Some(d) = pump_ix_disc(tx, ix) else { return false };
+        (DEV_BUY_SOL_AT_8.contains(&d) || DEV_BUY_SOL_AT_16.contains(&d)) && acct(tx, ix, buy_mint_pos(&d)).is_none()
+    })
 }
 
 /// The pump.fun mint authority: an account of every create, including creates made by CPI from a router program.
@@ -501,7 +525,7 @@ pub fn create_info(tx: &Tx) -> CreateInfo {
 pub enum Legs { Buys(Vec<(bool, u64, u64)>), NotBuy, Unknown }
 
 pub fn bundle_legs(tx: &Tx, mint: &Pk) -> Option<Legs> {
-    if !tx.keys.contains(mint) { return None; }
+    if !tx_has_key(tx, mint) { return None; }
     let read = |ix: &crate::tx::Ix, off: usize| ix.data.get(off..off + 8).and_then(|s| <[u8; 8]>::try_from(s).ok()).map(u64::from_le_bytes).unwrap_or(0);
     let (mut v, mut pump, mut other) = (Vec::new(), false, false);
     for ix in tx.ixs.iter() {
@@ -556,7 +580,7 @@ pub fn simulate_legs(vq: u64, legs: &[(bool, u64, u64)]) -> Option<u64> {
 pub enum MintTouch { Buy(u64), BuyCap { tokens: u64, max_sol: u64 }, Sell, Other }
 
 pub fn mint_touch(tx: &Tx, mint: &Pk) -> Option<MintTouch> {
-    if !tx.keys.contains(mint) { return None; }
+    if !tx_has_key(tx, mint) { return None; }
     let read = |ix: &crate::tx::Ix, off: usize| ix.data.get(off..off + 8).and_then(|s| <[u8; 8]>::try_from(s).ok()).map(u64::from_le_bytes);
     let mut sell = false;
     for ix in tx.ixs.iter() {
@@ -599,6 +623,47 @@ mod tests {
             crate::tx::b58(&l.mint), crate::tx::b58(&l.bonding_curve),
             crate::tx::b58(&l.creator), l.dev_buy_lamports
         );
+    }
+
+    /// M5/M6 (audit 2026-10-20): synthetic txs with a lookup table the feed did not resolve (raw shreds)
+    fn alt_tx(ix_data: Vec<u8>, ix_accounts: Vec<u8>) -> Tx {
+        // static keys: [payer, PUMP]; index 2+ = lookup-table addresses (unresolved: loaded None)
+        let lk = crate::tx::Lookup { table: [7u8; 32], writable: vec![0, 1, 2], readonly: vec![3; 20] };
+        Tx { keys: vec![[1u8; 32], *PUMP], lookups: vec![lk], ixs: vec![crate::tx::Ix { program: 1, accounts: ix_accounts, data: ix_data }], ..Default::default() }
+    }
+
+    #[test]
+    fn alt_buy_mint_is_unresolved_m5() {
+        let mut d = BUY_EXACT_QUOTE_IN_V3_DISC.to_vec(); d.extend(1_000_000_000u64.to_le_bytes()); d.extend(0u64.to_le_bytes()); d.push(0);
+        // the buy's mint (account [1]) is lookup index 5: unresolved
+        let tx = alt_tx(d.clone(), vec![2, 5, 3, 3, 3, 3]);
+        assert!(pump_buy_mint_unresolved(&tx), "a pump buy whose mint sits in an unresolved lookup table is UNKNOWN");
+        // the same tx with the lookup addresses resolved by the feed: resolved
+        let mut tx2 = tx.clone();
+        tx2.loaded = Some((vec![[9u8; 32]; 3], vec![[8u8; 32]; 20]));
+        assert!(!pump_buy_mint_unresolved(&tx2));
+        // a mint behind a RESOLVED lookup table is now seen by bundle_legs / mint_touch (static keys only before)
+        assert!(matches!(bundle_legs(&tx2, &[8u8; 32]), Some(Legs::Buys(_))));
+        assert!(matches!(mint_touch(&tx2, &[8u8; 32]), Some(MintTouch::Buy(1_000_000_000))));
+        // no lookup tables: never "unresolved"
+        let mut tx3 = tx.clone(); tx3.lookups.clear();
+        assert!(!pump_buy_mint_unresolved(&tx3));
+    }
+
+    #[test]
+    fn create_quote_mint_unresolved_is_non_sol_m6() {
+        let mut d = CREATE_V2_DISC.to_vec(); d.extend([0u8; 16]);
+        // 17 accounts: [16] (the quote mint) is lookup index 4: unresolved -> treated as NON-SOL
+        let mut acc: Vec<u8> = vec![0; 16]; acc.push(4);
+        let tx = alt_tx(d.clone(), acc.clone());
+        assert_eq!(create_quote_mint(&tx), Some(UNRESOLVED_QUOTE));
+        // resolved to WSOL -> SOL (None)
+        let mut tx2 = tx.clone();
+        tx2.loaded = Some((vec![[9u8; 32]; 2], vec![*WSOL_MINT, [9u8; 32]]));
+        assert_eq!(create_quote_mint(&tx2), None);
+        // 16 accounts (the SOL layout): None
+        let tx3 = alt_tx(d, vec![0; 16]);
+        assert_eq!(create_quote_mint(&tx3), None);
     }
 
     #[test]

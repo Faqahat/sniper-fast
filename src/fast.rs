@@ -150,6 +150,54 @@ pub fn json_bundle_body(raw: &[u8], out: &mut Vec<u8>) {
 }
 
 // ------------------------------------------------------------------------------------------------------------------
+// M1 (audit 2026-10-20): re-sign at the DECISION. The buy is prepared (patched, signed, framed for every path) at the
+// create; at the decision the glued bundle total is known and min_tokens_out is re-computed from the post-bundle curve.
+// Only 8 bytes of the message change: patch them, sign once, and patch the signature + those 8 bytes into the prepared
+// payload and into every framed request IN PLACE (verbatim for binary/protobuf bodies, the touched base64 groups for
+// JSON bodies). No allocation, no re-framing, no RPC between the decision and the first write.
+// ------------------------------------------------------------------------------------------------------------------
+
+/// where a prepared request carries the transaction bytes
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TxAt { None, Raw(usize), B64(usize) }
+
+fn find_first(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || hay.len() < needle.len() { return None; }
+    hay.windows(needle.len()).position(|w| w == needle)
+}
+
+/// locate `payload` in a framed request: verbatim (binary / protobuf), else as its base64 (JSON). Off the hot path.
+pub fn locate_tx(req: &[u8], payload: &[u8]) -> TxAt {
+    use base64::Engine as _;
+    if let Some(o) = find_first(req, payload) { return TxAt::Raw(o); }
+    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+    match find_first(req, b64.as_bytes()) { Some(o) => TxAt::B64(o), None => TxAt::None }
+}
+
+/// HOT PATH (M1): copy the byte ranges `ranges` ([a, b) of the transaction, already updated in `payload`) into `req`
+#[inline]
+pub fn repatch_req(req: &mut [u8], at: TxAt, payload: &[u8], ranges: &[(usize, usize)]) {
+    use base64::Engine as _;
+    match at {
+        TxAt::None => {}
+        TxAt::Raw(o) => for &(a, b) in ranges { req[o + a..o + b].copy_from_slice(&payload[a..b]); },
+        TxAt::B64(o) => for &(a, b) in ranges {
+            // base64 maps each 3-byte group to 4 chars: re-encode only the groups the range touches
+            let groups = payload.len().div_ceil(3);
+            let (g0, g1) = (a / 3, b.div_ceil(3).min(groups));
+            let src = &payload[g0 * 3..(g1 * 3).min(payload.len())];
+            let _ = base64::engine::general_purpose::STANDARD.encode_slice(src, &mut req[o + g0 * 4..o + g1 * 4]);
+        },
+    }
+}
+
+/// the offset of the pump buy's min_tokens_out in a signed transaction (`disc` + 16), when the disc appears exactly once
+pub fn min_out_offset(raw: &[u8], disc: &[u8; 8]) -> Option<usize> {
+    let o = find_once(raw, disc)?;
+    if o + 24 <= raw.len() { Some(o + 16) } else { None }
+}
+
+// ------------------------------------------------------------------------------------------------------------------
 // FIX2: a small HPACK DECODER (RFC 7541) for the server's header blocks on the jito-h2 connection, so a refused bundle
 // reports its grpc-status / grpc-message (the reason) instead of "rejected (no message)". It keeps the connection's
 // dynamic table (every server HEADERS block goes through it, in order), decodes Huffman strings with the RFC table.
@@ -535,6 +583,79 @@ fn parse_response(buf: &[u8]) -> Option<(usize, u16, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// M1: the in-place re-patch of a framed request equals re-framing it from scratch (JSON + binary), on every range
+    #[test]
+    fn repatch_equals_reframe() {
+        let head = b"POST /x HTTP/1.1\r\nhost: h\r\ncontent-length: ".to_vec();
+        for len in [1000usize, 1001, 1002, 1100, 1231] {
+            let mut payload: Vec<u8> = (0..len).map(|i| (i * 131 + 7) as u8).collect();
+            let frame = |body: &[u8]| { let mut r = head.clone(); r.extend_from_slice(body.len().to_string().as_bytes()); r.extend_from_slice(b"\r\n\r\n"); r.extend_from_slice(body); r };
+            let mut jb = Vec::new(); json_send_body(&payload, &mut jb);
+            let mut bb = Vec::new(); json_bundle_body(&payload, &mut bb);
+            let mut reqs = vec![frame(&jb), frame(&bb), frame(&payload)];
+            let ats: Vec<TxAt> = reqs.iter().map(|r| locate_tx(r, &payload)).collect();
+            assert!(matches!(ats[0], TxAt::B64(_)) && matches!(ats[1], TxAt::B64(_)) && matches!(ats[2], TxAt::Raw(_)));
+            for (a, b) in [(1usize, 65usize), (len - 8, len), (500, 508), (0, 1), (len - 1, len)] {
+                for x in &mut payload[a..b] { *x = x.wrapping_mul(31).wrapping_add(17); }
+                for (r, at) in reqs.iter_mut().zip(&ats) { repatch_req(r, *at, &payload, &[(a, b)]); }
+                let mut jb2 = Vec::new(); json_send_body(&payload, &mut jb2);
+                let mut bb2 = Vec::new(); json_bundle_body(&payload, &mut bb2);
+                assert_eq!(reqs[0], frame(&jb2), "json len={len} range {a}..{b}");
+                assert_eq!(reqs[1], frame(&bb2), "bundle len={len} range {a}..{b}");
+                assert_eq!(reqs[2], frame(&payload), "binary len={len} range {a}..{b}");
+            }
+        }
+    }
+
+    /// M1 cost (zero network): what the decision adds before the first write — patch 8 bytes, ONE signature (presigned
+    /// nonce, as --fast-presign; and the deterministic dalek sign), patch the payload and 5 framed requests (3 JSON, 1 binary,
+    /// 1 protobuf-like). Printed with --nocapture; asserts a loose bound so a regression shows up.
+    #[test]
+    fn resign_cost_bench() {
+        use ed25519_dalek::Signer;
+        let key = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        let ps = Presigner::new(&key);
+        let len = 1100usize;
+        let mut raw: Vec<u8> = (0..len).map(|i| (i * 13 + 1) as u8).collect();
+        raw[0] = 1;
+        let mo = 900usize;
+        let mut payload = raw.clone();
+        let mut b = Vec::new();
+        let mut reqs: Vec<Vec<u8>> = Vec::new();
+        for k in 0..3 { json_send_body(&payload, &mut b); let mut r = vec![b'h'; 120 + k]; r.extend_from_slice(&b); reqs.push(r); }
+        let mut r = vec![b'h'; 130]; r.extend_from_slice(&payload); reqs.push(r.clone()); r.extend_from_slice(&[0u8; 40]); reqs.push(r);
+        let ats: Vec<TxAt> = reqs.iter().map(|r| locate_tx(r, &payload)).collect();
+        let n = 3000usize;
+        for _ in 0..n + 10 { if let Some(x) = Presigner::gen() { ps.pool.lock().unwrap().push(x); } }
+        let mut run = |presign: bool| -> Vec<u64> {
+            let mut v = Vec::with_capacity(n);
+            for i in 0..n {
+                let t = mono_ns();
+                raw[mo..mo + 8].copy_from_slice(&(i as u64 + 1).to_le_bytes());
+                let sig = if presign { ps.sign(&raw[65..]).unwrap() } else { key.sign(&raw[65..]).to_bytes() };
+                raw[1..65].copy_from_slice(&sig);
+                payload[1..65].copy_from_slice(&sig);
+                payload[mo..mo + 8].copy_from_slice(&raw[mo..mo + 8]);
+                for (r, at) in reqs.iter_mut().zip(&ats) { repatch_req(r, *at, &payload, &[(1, 65), (mo, mo + 8)]); }
+                let s58 = bs58::encode(&sig).into_string();
+                v.push(mono_ns() - t);
+                std::hint::black_box(s58);
+            }
+            v.sort_unstable();
+            v
+        };
+        let p = run(true);
+        let d = run(false);
+        let q = |v: &Vec<u64>, x: f64| v[((v.len() - 1) as f64 * x) as usize] as f64 / 1e3;
+        eprintln!("M1 RESIGN COST (patch + sign + payload + 5 requests + bs58 sig), µs: presign p50 {:.2} p99 {:.2} | dalek p50 {:.2} p99 {:.2}",
+            q(&p, 0.5), q(&p, 0.99), q(&d, 0.5), q(&d, 0.99));
+        // correctness of the last iteration: every request equals a fresh frame of the final payload
+        json_send_body(&payload, &mut b);
+        assert!(reqs[0].ends_with(&b) && reqs[3].ends_with(&payload));
+        assert!(key.verifying_key().verify_strict(&raw[65..], &ed25519_dalek::Signature::from_bytes(&raw[1..65].try_into().unwrap())).is_ok());
+        assert!(q(&p, 0.5) < 200.0, "re-sign far slower than expected");
+    }
     #[test]
     fn json_body_matches_serde() {
         use base64::Engine as _;
