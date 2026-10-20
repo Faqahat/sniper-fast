@@ -18,6 +18,46 @@ LOG, OUT, MARKER = sys.argv[1], sys.argv[2], sys.argv[3]
 PID = int(sys.argv[4]) if len(sys.argv) > 4 else None
 ENGINE = "/root/sniper-run1/target/release/snipe_engine"
 BOT = {"gg.sc", "ipfs.launchblitz.ai", "pf.jake-98f.workers.dev", "storage.googleapis.com"}
+# L4-8 (audit 4): the glued run is delimited EXACTLY like the engine's snipe::bundle_legs: a following tx that references
+# the mint and whose TOP-LEVEL pump instructions are only buys (of the mint) is a leg — counted whether it executed or
+# failed (shreds carry no execution result; the guard counts its executed SOL and the failed ones separately); any other
+# top-level pump instruction (a sell, ...) closes the run (NotBuy); no top-level pump instruction (a CPI buy) is an
+# UNKNOWN leg (the engine rejects the launch); a tx not referencing the mint closes the run.
+PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+BUY_DISCS = {bytes(x) for x in ([0xe1, 0xf7, 0x50, 0x1e, 0xd5, 0xb3, 0x84, 0x88], [0xc2, 0xab, 0x1c, 0x46, 0x68, 0x4d, 0x5b, 0x2f],
+                                [0x38, 0xfc, 0x74, 0x08, 0x9e, 0xdf, 0xcd, 0x5f], [0x66, 0x06, 0x3d, 0x12, 0x01, 0xda, 0xeb, 0xea],
+                                [0xb8, 0x17, 0xee, 0x61, 0x67, 0xc5, 0xd3, 0x3d], [0x07, 0x05, 0x1d, 0xc4, 0xf5, 0x17, 0x65, 0x50])}
+CREATE_DISCS = {bytes([0xd6, 0x90, 0x4c, 0xec, 0x5f, 0x8b, 0x31, 0xb4]), bytes([0x18, 0x1e, 0xc8, 0x28, 0x05, 0x1c, 0x07, 0x77])}
+_B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def b58dec(s):
+    n = 0
+    for c in s:
+        n = n * 58 + _B58.index(c)
+    full = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
+    return b"\0" * (len(s) - len(s.lstrip("1"))) + full
+
+
+def leg_kind(t, mint):
+    """the engine's bundle_legs for one getBlock(json) tx: None (does not reference the mint), buys, notbuy or unknown"""
+    msg = (t.get("transaction") or {}).get("message") or {}
+    la = (t.get("meta") or {}).get("loadedAddresses") or {}
+    keys = list(msg.get("accountKeys") or []) + list(la.get("writable") or []) + list(la.get("readonly") or [])
+    if mint not in keys:
+        return None
+    buys = pump = other = False
+    for ix in msg.get("instructions") or []:
+        pi = ix.get("programIdIndex")
+        if pi is None or pi >= len(keys) or keys[pi] != PUMP:
+            continue
+        pump = True
+        d = b58dec(ix.get("data") or "")[:8]
+        if d in BUY_DISCS:
+            buys = True
+        elif d not in CREATE_DISCS:
+            other = True
+    return "buys" if buys and not other else ("notbuy" if pump else "unknown")
 
 
 def say(s):
@@ -38,24 +78,28 @@ def check(slot, mint):
             continue
         dev = sum(e["sol"] for e in tr if e["mint"] == mint and e["buy"]) / 1e9
         gsol = 0.0
-        failed_legs = 0
+        failed_legs = unknown_legs = 0
         for t2 in txs[i + 1:]:
             m2 = t2.get("meta") or {}
+            k = leg_kind(t2, mint)
+            if k is None or k == "notbuy":
+                break  # the engine's run ends here too
+            if k == "unknown":
+                unknown_legs += 1  # a CPI buy: the engine counts it UNKNOWN and rejects the launch
+            if m2.get("err") is not None:
+                failed_legs += 1  # counted by the engine (no execution result in shreds); no SOL went in
+                continue
             tr2, _ = events(m2.get("logMessages"))
-            b = [e for e in tr2 if e["mint"] == mint and e["buy"]]
-            if m2.get("err") is None and b:
-                gsol += sum(e["sol"] for e in b) / 1e9
-            elif m2.get("err") is not None and (mint in str((t2.get("transaction") or {}).get("message", {}).get("accountKeys", "")) or mint in str(m2.get("loadedAddresses", ""))):
-                failed_legs += 1  # L-3: a failed leg of this mint: the engine counted it (no execution result in shreds)
-            else:
-                break
+            gsol += sum(e["sol"] for e in tr2 if e["mint"] == mint and e["buy"]) / 1e9
         tips = tx_summary(t, TM)[0]["tips"]
         moon = any(str(x[2]).startswith("moon") for x in tips)
         host = c[0]["uri"].split("://")[-1].split("/")[0]
         v2 = any("Instruction: CreateV2" in x for x in (meta.get("logMessages") or []))
         fails = [k for k, ok in {"host": not (host in BOT or host.endswith(".trycloudflare.com")), "dev 0.5-8": 0.49 <= dev <= 8.1,
                                  "bundle 3-5 SOL": 2.95 <= gsol <= 5.05, "lunar tip": moon, "create_v2": v2}.items() if not ok]
-        info = f"dev {dev:.2f} bundle {gsol:.2f} SOL (failed legs {failed_legs}) lunar {moon} host {host[:24]} " + ("" if not fails else "FAILED: " + ",".join(fails))
+        if unknown_legs:
+            fails.append("unknown (CPI) leg: the engine rejects these")
+        info = f"dev {dev:.2f} bundle {gsol:.2f} SOL (failed legs {failed_legs}, unknown legs {unknown_legs}) lunar {moon} host {host[:24]} " + ("" if not fails else "FAILED: " + ",".join(fails))
         if fails == ["bundle 3-5 SOL"] and failed_legs > 0:
             return "warn", info + " (explained by failed bundle legs the engine counts: WARN, not stopped)"
         return (not fails), info

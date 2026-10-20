@@ -45,3 +45,10 @@ treats SIGHUP as stop + drain.)
 polls), not a cap on the loss. Positions already open (<= 2 x 1.5 SOL with --max-inflight 2) still have to be sold:
 worst case = -0.5 minus the losses of up to 2 open positions (e.g. two -20% positions: about -1.1). When it trips, the
 engine logs `OPEN AT STOP: ... worst case (all to 0) ...` with every open position and its cost.
+
+Status 2026-10-20 (ALT fix + audit 4 + owner's sell-speed rule; FIXES.md): lookup tables of raw-shred txs are resolved
+from a cache (HQ4G6Fjm launchpad creates were skipped as non-SOL; --alt-cache-file /root/run1/alt_tables.txt). The SELL
+path makes no RPC between the decision and the first write (cached blockhash refreshed from both RPCs every 400 ms, amount
+from the landing watch / a background read, else min_out); every exit read races both RPCs (1 s cap). Logs per sell:
+SELL-DECISION landing->decision_ms, SELL-TIMING decision->send_us and decision->first_sell_landed_ms. A slot-deadline
+failure that landed within create + 1 stops new fires at once; slot-deadline failures count toward the 3-failure stop.

@@ -423,7 +423,8 @@ pub fn dev_buy_cap_lamports(tx: &Tx) -> u64 {
     for ix in tx.ixs.iter() {
         let Some(d) = pump_ix_disc(tx, ix) else { continue };
         if !DEV_BUY_SOL_AT_16.contains(&d) || ix.data.len() < 16 { continue; }
-        if created.is_some() && acct(tx, ix, buy_mint_pos(&d)) != created { continue; }
+        // L4-4 (audit 4): an UNRESOLVED mint account (lookup table not resolved) is not excluded (as the doc above says)
+        if created.is_some() && acct(tx, ix, buy_mint_pos(&d)).is_some_and(|m| Some(m) != created) { continue; }
         let t = u64::from_le_bytes(ix.data[8..16].try_into().unwrap_or([0u8; 8])) as u128;
         if t == 0 || t >= vt { continue; }
         let nvt = vt - t;
