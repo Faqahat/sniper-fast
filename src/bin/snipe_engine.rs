@@ -2227,6 +2227,14 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     let sem = Arc::new(tokio::sync::Semaphore::new(max_inflight));
     let spent = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let fired = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // RUNS (2026-10-20): cost basis of OPEN positions. The balance kill-switch values an open position at its buy spend,
+    // so holding a 1.5 SOL position no longer reads as a 1.5 SOL loss (at 0.001 SOL test sizes this never mattered).
+    let open_cost = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // --lock-tiers "ARM:FLOOR,..." (SOL, run PnL): once run PnL >= ARM, stop new fires if PnL falls below FLOOR
+    // (e.g. "0.3:0,0.6:0.3" = break-even lock after +0.3, lock +0.3 after +0.6). Open positions finish their exit.
+    let lock_tiers: Vec<(i64, i64)> = arg("--lock-tiers").map(|t| t.split(',').filter_map(|kv| {
+        let (a, f) = kv.split_once(':')?; Some(((a.trim().parse::<f64>().ok()? * 1e9) as i64, (f.trim().parse::<f64>().ok()? * 1e9) as i64)) }).collect()).unwrap_or_default();
+    if !lock_tiers.is_empty() { eprintln!("PROFIT-LOCK tiers (arm:floor SOL): {}", lock_tiers.iter().map(|(a, f)| format!("{}:{}", *a as f64 / 1e9, *f as f64 / 1e9)).collect::<Vec<_>>().join(",")); }
     let start_bal = match native_balance(rpc, user).await {
         Ok(b) => b,
         // FIX2 --strict-balance: without a start balance the kill-switch could never trip (review finding 4)
@@ -2238,16 +2246,24 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
 
     // In-engine balance kill-switch: poll every 8s; if net loss exceeds --max-loss-sol, stop the whole run.
     {
-        let (rpc2, user2, stop2) = (rpc.clone(), user, stop.clone());
+        let (rpc2, user2, stop2, open2, tiers) = (rpc.clone(), user, stop.clone(), open_cost.clone(), lock_tiers.clone());
         tokio::spawn(async move {
+            let mut floor: Option<i64> = None;
             loop {
                 tokio::time::sleep(Duration::from_secs(8)).await;
                 if stop2.load(Ordering::Relaxed) { break; }
                 if let Ok(b) = native_balance(&rpc2, user2).await {
-                    if start_bal.saturating_sub(b) > loss_cap {
-                        eprintln!("  KILL-SWITCH: net down {} lamports > {} cap — stopping run.", start_bal.saturating_sub(b), loss_cap);
+                    let open = open2.load(Ordering::Relaxed);
+                    let pnl = (b + open) as i64 - start_bal as i64; // open positions valued at their buy spend
+                    if pnl < -(loss_cap as i64) {
+                        eprintln!("  KILL-SWITCH: run PnL {:.6} SOL (balance {:.6} + open {:.6}) below -{:.6} — stopping new fires.", pnl as f64 / 1e9, b as f64 / 1e9, open as f64 / 1e9, loss_cap as f64 / 1e9);
                         stop2.store(true, Ordering::Relaxed); break;
                     }
+                    for (arm, fl) in &tiers { if pnl >= *arm && floor.map_or(true, |f| *fl > f) { floor = Some(*fl); eprintln!("  PROFIT-LOCK armed: run PnL {:.6} SOL >= {:.6} -> floor {:.6}", pnl as f64 / 1e9, *arm as f64 / 1e9, *fl as f64 / 1e9); } }
+                    if let Some(f) = floor { if pnl < f {
+                        eprintln!("  PROFIT-LOCK: run PnL {:.6} SOL fell below floor {:.6} — stopping new fires.", pnl as f64 / 1e9, f as f64 / 1e9);
+                        stop2.store(true, Ordering::Relaxed); break;
+                    } }
                 }
             }
         });
@@ -2365,6 +2381,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         let rx_age_us = rx_t.get(&launch.mint).map(|t| arbx::feeds::clock::now_ns().saturating_sub(*t) / 1000).unwrap_or(0);
         if spent.fetch_add(spend_per, Ordering::Relaxed) + spend_per > total_cap { spent.fetch_sub(spend_per, Ordering::Relaxed); break; }
         fired.fetch_add(1, Ordering::Relaxed);
+        let open_g = OpenCost::new(open_cost.clone(), spend_per);
         if let Some(f) = fast {
             if spend_per > cap_lamports { eprintln!("  REFUSED: buy spend {spend_per} lamports exceeds --max-sol cap {cap_lamports} lamports"); continue; }
             // FAST: write every path from here, now; logging, verification and (live) the land poll + exit afterwards
@@ -2381,6 +2398,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             let (key2, rpc2, path2) = (key.clone(), rpc.clone(), path.clone());
             tokio::spawn(async move {
                 let _permit = permit;
+                let _open = open_g;
                 eprintln!("  FIRE slot={create_slot} mint={} dev_buy={} rx_to_fire_us={rx_age_us} fast=1", b58(&launch.mint), launch.dev_buy_lamports);
                 let first = rec.w.iter().filter(|x| x.4 == "written").map(|x| x.3).min().map(|t| t.saturating_sub(t_dec) as f64 / 1e3);
                 eprintln!("  FAST-FIRE tag={} slot={create_slot} mint={} {} leader={} client={} built={} tips={} bytes={} decide_to_first_write_us={} writes: {}", p.id, b58(&launch.mint),
@@ -2400,6 +2418,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         let (key2, rpc2, path2) = (key.clone(), rpc.clone(), path.clone());
         tokio::spawn(async move {
             let _permit = permit;
+            let _open = open_g;
             eprintln!("  FIRE slot={create_slot} mint={} dev_buy={} rx_to_fire_us={rx_age_us}", b58(&launch.mint), launch.dev_buy_lamports);
             if junk {
                 if let Err(e) = lat::junk_fire(&key2, user, &path2, &launch, create_slot).await { eprintln!("  junk fire {} failed: {e:#}", b58(&launch.mint)); }
@@ -2437,6 +2456,15 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     eprintln!("=== SNIPE-LIVE DONE === fired {} positions; net {} SOL (start {} end {})",
         fired.load(Ordering::Relaxed), (end_bal as i64 - start_bal as i64) as f64 / 1e9, start_bal as f64/1e9, end_bal as f64/1e9);
     Ok(())
+}
+
+/// RUNS: RAII open-position cost basis for the balance kill-switch / profit lock (released when the position task ends).
+struct OpenCost(Arc<std::sync::atomic::AtomicU64>, u64);
+impl OpenCost {
+    fn new(c: Arc<std::sync::atomic::AtomicU64>, v: u64) -> Self { c.fetch_add(v, Ordering::Relaxed); OpenCost(c, v) }
+}
+impl Drop for OpenCost {
+    fn drop(&mut self) { self.0.fetch_sub(self.1, Ordering::Relaxed); }
 }
 
 /// The shared buy -> read-balance -> sell -> report round-trip on a resolved Launch (from --mint or the feed).

@@ -1,9 +1,10 @@
 # READ-ONLY offline helpers over /root/comp/tapes_*.jsonl
-import json, collections, math
+import json, collections, math, os
+ROOT = os.environ.get("SNIPER_ROOT", "/root")
 V0, T0 = 30_000_000_000, 1_073_000_000_000_000
 K = V0 * T0
 SLOT_S = 0.4  # INFERRED: mean slot time used to convert slot deltas to seconds
-NODES = {x["pubkey"]: x.get("clientId", "?") for x in json.load(open("/root/stakepaths/clusternodes.json"))["result"]}
+NODES = {x["pubkey"]: x.get("clientId", "?") for x in json.load(open(ROOT + "/stakepaths/clusternodes.json"))["result"]}
 W4 = "4yFAz7dp5WwuZs3vbWKedbRiUmSFxTVGCdsLAxfEQrG3"
 
 def pre_state(e):
