@@ -20,6 +20,13 @@
 #                             (20 x ~1.526 = 30.5 SOL, so 31 keeps --max-buys 20 the binding limit)
 #   --fast-verify             L10: every fired message (and, M1, every re-signed request) checked against the full compile
 #   (--sell-retries removed: the sell loop is bounded by --sell-deadline-s now)
+# RE-AUDIT FIXES (2026-10-20, FIXES.md "Re-audit"):
+#   --sell-cu-limit 120000    N4: sells have their own CU limit (sell tx measured 44-56k CU for SellV3 + ATA close,
+#                             ops/review/REPORT.md section 5); a sell that lands FAILED retries with 1.5x the limit.
+#                             Verify with cu_check.sh (zero-cost sell simulation) before the run.
+#   (engine behaviour, no flag: N1 sold = CONFIRMED 0 at slot >= the sell's landing; N2 kill/lock on 2 consecutive polls;
+#    N3 late-landing watch until the buy's blockhash is dead, cap --late-land-s default 120; every fired mint re-read
+#    at exit; N5 unknown flags / bad values refuse to start)
 set -a; . /root/sniper/deploy/.env; set +a
 : "${KALDERA_TOKEN:?KALDERA_TOKEN must be set in /root/sniper/deploy/.env}"
 B=/root/sniper-run1/target/release/snipe_engine
@@ -30,7 +37,7 @@ FLAGS=(--uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8
   --race-pros /root/race/pros.json --race-early
   --close-leaders /root/fix2/close_leaders_5ms.txt --max-create-ms 150
   --spend-lamports 1500000000 --slip-cap-bps 1500 --fill-cap 1.6 --max-sol 1.6 --max-total-sol 31 --max-buys 20 --max-loss-sol 0.5 --lock-tiers 0.3:0,0.6:0.3 --max-inflight 2 --minutes 180
-  --cu-price-micro 110000000 --cu-limit 95000 --sell-cu-price-micro 5000000 --hold-slots 3 --hold-ms 450 --hold-max-ms 1500 --land-poll-ms 100 --land-timeout-ms 3000
+  --cu-price-micro 110000000 --cu-limit 95000 --sell-cu-limit 120000 --sell-cu-price-micro 5000000 --hold-slots 3 --hold-ms 450 --hold-max-ms 1500 --land-poll-ms 100 --land-timeout-ms 3000
   --sell-robust --sell-retry-s 4 --sell-deadline-s 30 --sell-fallback-path nozomi --strict-balance --jito-poll --landed-via
   --send-path helius --sell-path staked-rpc --route-by-client "$ROUTES"
   --config $C --env-file /root/sniper/deploy/.env

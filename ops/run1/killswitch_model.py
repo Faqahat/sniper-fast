@@ -1,9 +1,10 @@
 # Kill-switch / --lock-tiers model: OLD logic (commit 0d628e0, snipe_engine.rs 2232-2269 + 2384) vs NEW logic (audit fixes
 # C1 + M7, sniper/main after the fix commit: Acct/Pos/ks_eval in src/bin/snipe_engine.rs).
 # OLD: pnl = (balance + open) - start, open += spend at FIRE, -= at task END; poll 8 s; tiers armed/tripped on any poll.
-# NEW: open += actual cost when the buy is SEEN landed with tokens, -= when the token account reads 0 (sold); poll 2 s;
-#      kill if pnl < -cap, confirmed on 2 consecutive polls while a fired buy is unresolved (pending); realized < -cap
-#      kills at once; lock tiers arm/trip only with NO position in flight (fire .. exit done).
+# NEW: open += actual cost when the buy is SEEN landed with tokens, -= when a CONFIRMED read shows the token account 0
+#      (sold); poll 2 s; kill if pnl < -cap on 2 consecutive evaluated polls (re-audit N2: always, not only while a buy is
+#      pending; a poll that raced a position change is not evaluated); realized < -cap kills at once; lock tiers arm/trip
+#      only with NO position in flight (fire .. exit done), and the trip needs 2 consecutive polls below the floor.
 # Tiers "0.3:0,0.6:0.3", loss cap 0.5 SOL, size 1.5 SOL. Times in seconds.
 SOL = 1e9
 start = int(5 * SOL); spend = int(1.5 * SOL); loss_cap = int(0.5 * SOL)
@@ -27,24 +28,30 @@ def run_old(events, horizon=120):
 
 
 def ks_eval(st, pnl, realized, pending, inflight):
-    """same decision as ks_eval() in snipe_engine.rs"""
+    """same decision as ks_eval() in snipe_engine.rs (re-audit N2: KILL and LOCK need 2 consecutive evaluated polls)"""
     below = pnl < -loss_cap
-    kill = below and (pending == 0 or st["prev_below"])
-    note = "  (below cap, buy unresolved: confirm next poll)" if below and not kill else ""
+    kill = below and st["prev_below"]
+    note = "  (below cap: confirm next poll)" if below and not kill else ""
     st["prev_below"] = below
     if kill: return "KILL", note
     if realized < -loss_cap: return "KILL-REALIZED", note
-    if inflight > 0: return "GO", note + ("  (lock deferred: position in flight)" if tiers else "")
+    if inflight > 0:
+        st["prev_lock"] = False
+        return "GO", note + ("  (lock deferred: position in flight)" if tiers else "")
     for a, f in tiers:
         if pnl >= a and (st["floor"] is None or f > st["floor"]): st["floor"] = f; note += f"  PROFIT-LOCK armed -> floor {f/SOL}"
-    if st["floor"] is not None and pnl < st["floor"]: return "LOCK", note
+    under = st["floor"] is not None and pnl < st["floor"]
+    lock = under and st["prev_lock"]
+    if under and not lock: note += "  (below floor: confirm next poll)"
+    st["prev_lock"] = under
+    if lock: return "LOCK", note
     return "GO", note
 
 
 def run_new(events, horizon=120, poll0=2.0):
     """events: (t, d_balance, d_open, d_pending, d_inflight, d_realized)"""
     bal, opn, pend, infl, real = start, 0, 0, 0, 0
-    st = {"floor": None, "prev_below": False}
+    st = {"floor": None, "prev_below": False, "prev_lock": False}
     ev = sorted(events); log = []
     t = poll0
     while t <= horizon + 1e-9:
@@ -88,6 +95,11 @@ res["C"] = show("Scenario C: run PnL already -0.45; two trades lose 0.15 each (t
      [(1, -int(0.45*SOL), 0), (2, 0, +spend), (5, -int(0.15*SOL), 0), (12, -int(0.15*SOL), 0), (62, 0, -spend)],
      [(1, -int(0.45*SOL), 0, 0, 0, -int(0.45*SOL)), (2, 0, 0, +1, +1, 0), (5, -int(0.15*SOL), 0, 0, 0, 0), (12, -int(0.15*SOL), 0, 0, 0, 0),
       (38, 0, 0, -1, -1, 0)], horizon=80)
+res["D"] = show("Scenario D (re-audit N2): a +0.05 sale; one poll reads a lagging balance (proceeds missing) after the engine saw it sold",
+     [(1, 0, +spend), (1.5, -cost, 0), (3.0, cost + int(0.05*SOL), 0), (3.2, 0, -spend)],
+     [(1, 0, 0, +1, +1, 0), (1.5, -cost, 0, 0, 0, 0), (1.6, 0, +cost, -1, 0, 0), (3.0, cost + int(0.05*SOL), 0, 0, 0, 0), (3.2, 0, -cost, 0, -1, 0),
+      # the 4.0 poll's node lags: the balance still lacks the proceeds (modelled as a -proceeds blip undone at 4.1)
+      (4.0, 0, 0, 0, 0, 0), (3.9, -(cost + int(0.05*SOL)), 0, 0, 0, 0), (4.1, cost + int(0.05*SOL), 0, 0, 0, 0)], horizon=30)
 print("=" * 110)
-print("SUMMARY (expected: A no stop, B no stop, B' no stop, C KILL soon after real PnL < -0.5 at t=5)")
+print("SUMMARY (expected: A no stop, B no stop, B' no stop, C KILL soon after real PnL < -0.5 at t=5, D no stop)")
 for k, (o, n) in res.items(): print(f"  {k:3} OLD: {o:45} NEW: {n}")
