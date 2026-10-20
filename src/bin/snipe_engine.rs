@@ -81,7 +81,6 @@ async fn blockhash_fresh(rpc: &rpc::Rpc, max_age: Duration) -> Result<([u8; 32],
 static RPC_FB: std::sync::OnceLock<rpc::Rpc> = std::sync::OnceLock::new();
 /// mainnet-beta's genesis hash (M5-2: both RPCs are checked against it at start-up)
 const MAINNET_GENESIS: &str = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
-const RPC_READ_TIMEOUT_2: Duration = Duration::from_secs(3);
 
 /// never print an RPC URL (they carry keys)
 fn redact(s: &str) -> String {
@@ -157,56 +156,84 @@ async fn latest_blockhash_one(r: &rpc::Rpc, cap: Duration) -> Result<([u8; 32], 
     Ok((h.try_into().map_err(|_| anyhow::anyhow!("bad blockhash"))?, v["value"]["lastValidBlockHeight"].as_u64().unwrap_or(0), v["context"]["slot"].as_u64().unwrap_or(0)))
 }
 
-/// M5-2 (audit 5): which candidate blockhash to keep (pure: unit-tested). Candidates are (hash, lastValidBlockHeight,
-/// context slot); `feed_slot` = the shred feed's current slot (0 unknown); `cached` = (hash, age, last valid height).
-///  * a candidate whose context slot is more than 150 slots from the feed's slot is REJECTED (another cluster, a stuck or
-///    minority-fork node, a bogus value);
-///  * the best candidate = the highest last valid height among the sane ones;
-///  * it replaces the cache when its height is HIGHER (a newer blockhash), or when the cache is older than 10 s (a single
-///    bogus high answer can never freeze the cache). The SAME height never renews the timestamp (L5-1/L5-3: a stalled
-///    chain or node lets the cache age instead of looking fresh).
-fn pick_blockhash(cands: &[([u8; 32], u64, u64)], feed_slot: u64, cached: Option<([u8; 32], Duration, u64)>) -> Option<([u8; 32], u64)> {
-    let sane = |ctx: u64| feed_slot == 0 || (ctx + 150 >= feed_slot && ctx <= feed_slot + 150);
-    let best = cands.iter().filter(|c| c.1 > 0 && sane(c.2)).max_by_key(|c| c.1)?;
+/// M5-2 + AUDIT6 (M6-1, L6-1, L6-2): which candidate blockhash to keep (pure: unit-tested). Candidates are (hash,
+/// lastValidBlockHeight, context slot); `ref_slot` = the slot reference (the shred feed / primary / fallback getSlot,
+/// 0 when unknown or STALE: not advanced for 3 s, M6-1 — the window is then skipped, the genesis check already pins the
+/// cluster); `cached` = (hash, age, last valid height); `offset` = the learned (context slot - last valid height).
+///  * window: a context slot more than 150 slots from the reference is rejected (saturating arithmetic, L6-5b);
+///  * L6-2 cross-check: a candidate whose (ctx - height) differs from the learned offset by > 100 is rejected; two
+///    candidates that disagree by > 100 with no learned offset: only the LOWER height is trusted;
+///  * the best = the highest remaining height. It replaces the cache when its height is HIGHER; when the cache is older
+///    than 10 s, only a DIFFERENT hash that is itself fresh (context within 30 slots of a live reference) — L6-1: the
+///    same hash is never re-stamped and a nearly expired one is never taken as fresh.
+/// Returns (hash, height, context slot).
+fn pick_blockhash(cands: &[([u8; 32], u64, u64)], ref_slot: u64, cached: Option<([u8; 32], Duration, u64)>, offset: Option<i64>) -> Option<([u8; 32], u64, u64)> {
+    let sane = |ctx: u64| ref_slot == 0 || (ctx.saturating_add(150) >= ref_slot && ctx <= ref_slot.saturating_add(150));
+    let off = |c: &([u8; 32], u64, u64)| c.2 as i64 - c.1 as i64;
+    let mut ok: Vec<&([u8; 32], u64, u64)> = cands.iter().filter(|c| c.1 > 0 && sane(c.2) && offset.is_none_or(|o| (off(c) - o).abs() <= 100)).collect();
+    if offset.is_none() && ok.len() == 2 && (off(ok[0]) - off(ok[1])).abs() > 100 {
+        let lo = if ok[0].1 <= ok[1].1 { ok[0] } else { ok[1] };
+        ok = vec![lo];
+    }
+    let best = **ok.iter().max_by_key(|c| c.1)?;
     match cached {
-        None => Some((best.0, best.1)),
-        Some((_, age, cv)) if best.1 > cv || age > Duration::from_secs(10) => Some((best.0, best.1)),
+        None => Some(best),
+        Some((_, _, cv)) if best.1 > cv => Some(best),
+        Some((ch, age, _)) if age > Duration::from_secs(10) && best.0 != ch && (ref_slot == 0 || ref_slot.saturating_sub(best.2) <= 30) => Some(best),
         _ => None,
     }
 }
 static BH_REJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// L6-2: the learned (context slot - last valid height) of accepted blockhashes (i64::MIN = unknown)
+static BH_OFFSET: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(i64::MIN);
+/// M6-1: the slot reference's last value and when it last ADVANCED (a frozen reference is treated as unknown)
+static REF_SLOT: std::sync::Mutex<(u64, Option<Instant>)> = std::sync::Mutex::new((0, None));
+/// the slot reference for the blockhash window: send::tpu::SLOT (shred feed + primary / fallback getSlot), or 0 when it has
+/// not advanced for 3 s (M6-1: a frozen feed / primary must never block good fallback blockhashes)
+fn ref_slot() -> u64 {
+    let cur = send::tpu::SLOT.load(Ordering::Relaxed);
+    let mut g = REF_SLOT.lock().unwrap();
+    if cur != g.0 { *g = (cur, Some(Instant::now())); }
+    match g.1 { Some(t) if cur > 0 && t.elapsed() <= Duration::from_secs(3) => cur, _ => 0 }
+}
 
-/// the owner's M4-1: primary AND fallback queried IN PARALLEL; the newest answer (highest lastValidBlockHeight) is stored
-/// in BLOCKHASH_CACHE (an older answer never replaces a newer cached one). Ok(true) when the cache was updated.
+/// the owner's M4-1: primary AND fallback queried IN PARALLEL (plus, M6-1, the fallback's getSlot into the slot
+/// reference); the accepted answer is stored with its BIRTH time (back-dated by its slot lag behind the reference, 400 ms
+/// per slot): a cache entry's age is the blockhash's own age, never the time it was (re-)fetched. Ok(true): updated.
 async fn refresh_blockhash(rpc: &rpc::Rpc, cap: Duration) -> Result<bool> {
     if RPC_TRAP.load(Ordering::SeqCst) { panic!("RPC getLatestBlockhash on the no-RPC path (sell decision -> send)"); }
-    let fb = async { match RPC_FB.get() { Some(f) => Some(latest_blockhash_one(f, cap).await), None => None } };
+    let fb = async { match RPC_FB.get() { Some(f) => Some(tokio::join!(latest_blockhash_one(f, cap), tokio::time::timeout(cap, f.slot()))), None => None } };
     let (a, b) = tokio::join!(latest_blockhash_one(rpc, cap), fb);
+    let (b, fb_slot) = match b { Some((x, s)) => (Some(x), s.ok().and_then(|r| r.ok())), None => (None, None) };
+    if let Some(sl) = fb_slot { send::tpu::SLOT.fetch_max(sl, Ordering::Relaxed); }
     let cands: Vec<([u8; 32], u64, u64)> = [a.ok(), b.and_then(|x| x.ok())].into_iter().flatten().collect();
     if cands.is_empty() { bail!("getLatestBlockhash failed on every RPC"); }
-    let feed = send::tpu::SLOT.load(Ordering::Relaxed);
+    let rs = ref_slot();
+    let offset = Some(BH_OFFSET.load(Ordering::Relaxed)).filter(|o| *o != i64::MIN);
     let mut g = BLOCKHASH_CACHE.lock().unwrap();
     let cached = g.map(|(h, t, v)| (h, t.elapsed(), v));
-    match pick_blockhash(&cands, feed, cached) {
-        Some((h, v)) => { *g = Some((h, Instant::now(), v)); Ok(true) }
+    match pick_blockhash(&cands, rs, cached, offset) {
+        Some((h, v, ctx)) => {
+            let lag = if rs > 0 { Duration::from_millis(400 * rs.saturating_sub(ctx).min(150)) } else { Duration::ZERO };
+            *g = Some((h, Instant::now().checked_sub(lag).unwrap_or_else(Instant::now), v));
+            BH_OFFSET.store(ctx as i64 - v as i64, Ordering::Relaxed);
+            Ok(true)
+        }
         None => {
-            if cands.iter().all(|c| feed > 0 && !(c.2 + 150 >= feed && c.2 <= feed + 150)) {
+            if cands.iter().all(|c| rs > 0 && !(c.2.saturating_add(150) >= rs && c.2 <= rs.saturating_add(150))) {
                 let n = BH_REJECTS.fetch_add(1, Ordering::Relaxed) + 1;
                 drop(g);
-                if n == 1 || n % 100 == 0 { eprintln!("  BLOCKHASH candidate(s) REJECTED (#{n}): context slot(s) {:?} vs feed slot {feed} (> 150 apart)", cands.iter().map(|c| c.2).collect::<Vec<_>>()); }
-                bail!("every blockhash candidate was outside the feed's slot window");
+                if n == 1 || n % 100 == 0 { eprintln!("  BLOCKHASH candidate(s) REJECTED (#{n}): context slot(s) {:?} vs reference slot {rs} (> 150 apart)", cands.iter().map(|c| c.2).collect::<Vec<_>>()); }
+                bail!("every blockhash candidate was outside the reference slot window");
             }
             Ok(false)
         }
     }
 }
 
-/// getLatestBlockhash for callers that need one now (buys' slow path): the parallel refresh, then the cache
-async fn latest_blockhash2(rpc: &rpc::Rpc) -> Result<([u8; 32], u64)> {
-    // L5-1 (audit 5): a failed refresh is an error (never the stale cache passed off as new)
-    refresh_blockhash(rpc, Duration::from_secs(1)).await?;
-    cached_blockhash(Duration::from_secs(20)).context("getLatestBlockhash: no fresh blockhash from any RPC")
-}
+/// L6-3 (audit 6): no usable blockhash for > 5 s PAUSES new fires (not the permanent stop); fires resume after 10 s of
+/// usable blockhashes. Both edges are logged.
+static FIRE_PAUSE: AtomicBool = AtomicBool::new(false);
 
 /// the owner's M4-1: the SELL path only READS the cache (kept fresh by the background refresher every ~400 ms). None:
 /// older than `max_age` (pure: no RPC; used on the decision -> send path)
@@ -413,7 +440,7 @@ mod altc {
     static TABLES: std::sync::LazyLock<RwLock<HashMap<Pk, Ent>>> = std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
     /// the fetch queue (touched only on a relevant miss and by the dispatcher: never on a hit)
     #[derive(Default)]
-    struct Q { queue: VecDeque<(Pk, bool, bool)>, queued: HashSet<Pk>, backoff: HashMap<Pk, (u32, Instant)>, missed: HashSet<Pk> }
+    struct Q { queue: VecDeque<(Pk, bool, bool)>, hi: VecDeque<(Pk, bool, bool)>, queued: HashSet<Pk>, backoff: HashMap<Pk, (u32, Instant)>, missed: HashSet<Pk> }
     static QU: std::sync::LazyLock<Mutex<Q>> = std::sync::LazyLock::new(|| Mutex::new(Q::default()));
     static WATCHING: AtomicBool = AtomicBool::new(false);
     static CLOCK: AtomicU64 = AtomicU64::new(1);
@@ -494,9 +521,13 @@ mod altc {
         let mut q = QU.lock().unwrap();
         if q.queued.contains(&table) { return; }
         if q.backoff.get(&table).is_some_and(|(_, until)| Instant::now() < *until) { return; }
-        if q.queue.len() >= QUEUE_CAP { if let Some((old, ..)) = q.queue.pop_front() { q.queued.remove(&old); } }
+        // L6-5c (audit 6): creates in their own queue, served first; a full queue drops the oldest LEG table first
+        if q.queue.len() + q.hi.len() >= QUEUE_CAP {
+            let old = q.queue.pop_front().or_else(|| if create { q.hi.pop_front() } else { None });
+            match old { Some((o, ..)) => { q.queued.remove(&o); } None => return }
+        }
         q.queued.insert(table);
-        q.queue.push_back((table, create, stale));
+        if create { q.hi.push_back((table, create, stale)); } else { q.queue.push_back((table, create, stale)); }
     }
 
     /// the one dispatcher: <= RATE_PER_S fetch starts per second, <= INFLIGHT at once; logs from the fetch tasks only
@@ -506,7 +537,7 @@ mod altc {
             loop {
                 tokio::time::sleep(Duration::from_millis(1000 / RATE_PER_S)).await;
                 let Ok(permit) = sem.clone().acquire_owned().await else { break };
-                let job = QU.lock().unwrap().queue.pop_front();
+                let job = { let mut q = QU.lock().unwrap(); q.hi.pop_front().or_else(|| q.queue.pop_front()) };
                 let Some((table, create, stale)) = job else { drop(permit); continue };
                 let rpc = rpc.clone();
                 tokio::spawn(async move {
@@ -1138,8 +1169,9 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
     match tokio::time::timeout(Duration::from_secs(5), rpc.call("getGenesisHash", serde_json::json!([]))).await {
         Ok(Ok(v)) if v.as_str() == Some(MAINNET_GENESIS) => {}
         Ok(Ok(v)) => bail!("rpc_url: genesis hash {v} is NOT mainnet ({MAINNET_GENESIS}) — refusing to start"),
-        Ok(Err(e)) => eprintln!("WARNING: rpc_url getGenesisHash failed ({}) — cluster not verified", redact(&format!("{e:#}"))),
-        Err(_) => eprintln!("WARNING: rpc_url getGenesisHash timed out — cluster not verified"),
+        // L6-5a (audit 6): an unverifiable primary refuses to start too (as the fallback)
+        Ok(Err(e)) => bail!("rpc_url: getGenesisHash failed ({}) — cannot verify the cluster: refusing to start", redact(&format!("{e:#}"))),
+        Err(_) => bail!("rpc_url: getGenesisHash timed out — cannot verify the cluster: refusing to start"),
     }
     let infra = INFRA_STOP.clone();
     // H-1 (audit 3): --rpc-fallback-url-env NAME: the second RPC of the exit path (the URL from env var NAME, never printed).
@@ -1302,15 +1334,26 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
             // reads this cache)
             // M5-2: no usable blockhash for > 5 s (no newer one accepted from either RPC) = log loudly and stop NEW fires
             // (open positions keep trying: the sell path uses the cache up to 20-25 s, then the inline refresh)
+            // L6-3 (audit 6): a PAUSE of new fires that clears after 10 s of usable blockhashes (both edges logged)
             let t_start = Instant::now();
-            let mut tripped = false;
+            let mut good_since: Option<Instant> = None;
             while !stop.load(Ordering::Relaxed) {
                 let _ = refresh_blockhash(&rpc, Duration::from_secs(1)).await;
                 let age = BLOCKHASH_CACHE.lock().unwrap().map(|(_, t, _)| t.elapsed()).unwrap_or_else(|| t_start.elapsed());
-                if !tripped && age > Duration::from_secs(5) {
-                    tripped = true;
-                    if let Some(st) = RUN_STOP.get() { st.store(true, Ordering::SeqCst); }
-                    eprintln!("  !!!!! STOP: NO USABLE BLOCKHASH for {:.1} s (neither RPC returned a newer one in the feed's slot window) — NO NEW FIRES; open positions keep trying to sell !!!!!", age.as_secs_f64());
+                let paused = FIRE_PAUSE.load(Ordering::SeqCst);
+                if age > Duration::from_secs(5) {
+                    good_since = None;
+                    if !paused {
+                        FIRE_PAUSE.store(true, Ordering::SeqCst);
+                        eprintln!("  !!!!! PAUSE: NO USABLE BLOCKHASH for {:.1} s (neither RPC returned a newer one) — NEW FIRES PAUSED; open positions keep trying to sell; resumes after 10 s of usable blockhashes !!!!!", age.as_secs_f64());
+                    }
+                } else if paused {
+                    let since = *good_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= Duration::from_secs(10) {
+                        FIRE_PAUSE.store(false, Ordering::SeqCst);
+                        good_since = None;
+                        eprintln!("  RESUME: usable blockhashes for 10 s (age {:.1} s) — new fires allowed again", age.as_secs_f64());
+                    }
                 }
                 tokio::time::sleep(Duration::from_millis(400)).await;
             }
@@ -3497,8 +3540,9 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         if race.cfg.active() { ready.extend(race.due()); race.shadow.clear(); } // shadows are paper-only: never fired live
         let t_dec = arbx::fast::mono_ns();
         for (launch, create_slot, vq_after) in ready.drain(..) {
-        // N7: a stop (signal / kill switch / lock) set during this iteration fires nothing more
+        // N7: a stop (signal / kill switch / lock) set during this iteration fires nothing more; L6-3: nor a blockhash pause
         if stop.load(Ordering::SeqCst) { eprintln!("  STOP set: launch {} not fired", b58(&launch.mint)); continue; }
+        if FIRE_PAUSE.load(Ordering::SeqCst) { eprintln!("  PAUSED (no usable blockhash): launch {} not fired", b58(&launch.mint)); continue; }
         // FIX2 --max-create-ms: a create late in its slot cannot be beaten into that slot (next 50 ms auction tick / batch)
         if !gate.check(&launch.mint, create_slot) { continue; }
         // L4: budget (landed + reserved by unresolved fires) and --max-buys (landed + unresolved), before anything is spent
@@ -3538,7 +3582,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             let avail = a.bal.load(Ordering::SeqCst).saturating_sub(a.pending_spend.load(Ordering::SeqCst) + a.landed_since_bal.load(Ordering::SeqCst));
             let short = avail < spend_per + fee + bal_margin;
             if short && !junk { skipped_balance += 1; eprintln!("  SKIP-BALANCE slot={create_slot} mint={} available {:.6} SOL < spend + fees + margin {:.6}", b58(&launch.mint), avail as f64 / 1e9, (spend_per + fee + bal_margin) as f64 / 1e9); continue; }
-            if stop.load(Ordering::SeqCst) { eprintln!("  STOP set: launch {} not fired", b58(&launch.mint)); continue; } // N7
+            if stop.load(Ordering::SeqCst) || FIRE_PAUSE.load(Ordering::SeqCst) { eprintln!("  STOP / PAUSE set: launch {} not fired", b58(&launch.mint)); continue; } // N7, L6-3
             let rec = f.fire(&p);
             // ---- everything below runs after the writes ----
             let rx_age_us = t_rx_of.map(|t| arbx::feeds::clock::now_ns().saturating_sub(t) / 1000).unwrap_or(0);
@@ -3572,7 +3616,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         if !junk && avail < spend_per + fee_guess + bal_margin {
             skipped_balance += 1; eprintln!("  SKIP-BALANCE slot={create_slot} mint={} available {:.6} SOL < spend + fees + margin {:.6}", b58(&launch.mint), avail as f64 / 1e9, (spend_per + fee_guess + bal_margin) as f64 / 1e9); continue;
         }
-        if stop.load(Ordering::SeqCst) { eprintln!("  STOP set: launch {} not fired", b58(&launch.mint)); continue; } // N7
+        if stop.load(Ordering::SeqCst) || FIRE_PAUSE.load(Ordering::SeqCst) { eprintln!("  STOP / PAUSE set: launch {} not fired", b58(&launch.mint)); continue; } // N7, L6-3
         let rx_age_us = t_rx_of.map(|t| arbx::feeds::clock::now_ns().saturating_sub(t) / 1000).unwrap_or(0);
         let pos = if junk { None } else { Some(Pos::new(launch.mint, spend_per, fee_guess, "")) };
         fired.fetch_add(1, Ordering::Relaxed);
@@ -5894,20 +5938,32 @@ mod audit_tests {
         let (h1, h2, h3) = ([1u8; 32], [2u8; 32], [3u8; 32]);
         let feed = 459_000_000u64;
         let s = Duration::from_secs;
-        // empty cache: the highest sane height
-        assert_eq!(pick_blockhash(&[(h1, 100, feed), (h2, 105, feed - 2)], feed, None), Some((h2, 105)));
-        // a candidate from another cluster / a stuck node (context slot far from the feed) is rejected, even if higher
-        assert_eq!(pick_blockhash(&[(h1, 100, feed), (h3, 999_999, feed - 10_000)], feed, None), Some((h1, 100)));
-        assert_eq!(pick_blockhash(&[(h3, 999_999, feed + 10_000)], feed, None), None);
-        // a newer (higher) height replaces a young cache; the SAME height never renews it (L5-1/L5-3); lower is ignored
-        assert_eq!(pick_blockhash(&[(h2, 106, feed)], feed, Some((h1, s(1), 105))), Some((h2, 106)));
-        assert_eq!(pick_blockhash(&[(h1, 105, feed)], feed, Some((h1, s(1), 105))), None);
-        assert_eq!(pick_blockhash(&[(h1, 104, feed)], feed, Some((h1, s(1), 105))), None);
-        // a single bogus HIGH answer cannot freeze the cache: once the cache is > 10 s old, the freshest sane answer wins
-        assert_eq!(pick_blockhash(&[(h1, 200, feed)], feed, Some((h3, s(3), 900_000))), None);
-        assert_eq!(pick_blockhash(&[(h1, 200, feed)], feed, Some((h3, s(11), 900_000))), Some((h1, 200)));
-        // feed slot unknown (0): no window
-        assert_eq!(pick_blockhash(&[(h1, 7, 5)], 0, None), Some((h1, 7)));
+        let off = |ctx: u64, v: u64| ctx as i64 - v as i64;
+        // empty cache: the highest sane height (the two agree on the offset)
+        assert_eq!(pick_blockhash(&[(h1, 1_000, feed), (h2, 1_002, feed + 2)], feed, None, None), Some((h2, 1_002, feed + 2)));
+        // a candidate from another cluster / a stuck node (context slot far from the reference) is rejected, even if higher
+        assert_eq!(pick_blockhash(&[(h1, 1_000, feed), (h3, 999_999, feed - 10_000)], feed, None, None), Some((h1, 1_000, feed)));
+        assert_eq!(pick_blockhash(&[(h3, 999_999, feed + 10_000)], feed, None, None), None);
+        // L6-5b: no overflow on a bogus u64::MAX context
+        assert_eq!(pick_blockhash(&[(h3, 5, u64::MAX)], feed, None, None), None);
+        // a newer (higher) height replaces a young cache; the SAME height never renews it; lower is ignored
+        assert_eq!(pick_blockhash(&[(h2, 1_001, feed)], feed, Some((h1, s(1), 1_000)), None), Some((h2, 1_001, feed)));
+        assert_eq!(pick_blockhash(&[(h1, 1_000, feed)], feed, Some((h1, s(1), 1_000)), None), None);
+        assert_eq!(pick_blockhash(&[(h1, 999, feed)], feed, Some((h1, s(1), 1_000)), None), None);
+        // L6-1: an old cache (> 10 s): the SAME hash is never re-stamped; a different FRESH hash is taken even at a lower
+        // height (a bogus high cache cannot freeze it); a different but STALE hash (context 40 slots behind) is not
+        assert_eq!(pick_blockhash(&[(h3, 900_000, feed)], feed, Some((h3, s(30), 900_000)), None), None);
+        assert_eq!(pick_blockhash(&[(h1, 1_000, feed)], feed, Some((h3, s(11), 900_000)), None), Some((h1, 1_000, feed)));
+        assert_eq!(pick_blockhash(&[(h1, 1_000, feed - 40)], feed, Some((h3, s(11), 900_000)), None), None);
+        assert_eq!(pick_blockhash(&[(h1, 1_000, feed)], feed, Some((h3, s(3), 900_000)), None), None);
+        // M6-1: reference unknown / stale (0): no window — the fallback's good answers are taken
+        assert_eq!(pick_blockhash(&[(h1, 7, 5)], 0, None, None), Some((h1, 7, 5)));
+        assert_eq!(pick_blockhash(&[(h1, 1_000, feed - 10_000)], 0, None, None), Some((h1, 1_000, feed - 10_000)));
+        // L6-2: a bogus-high height with a sane context is rejected against the learned offset ...
+        let o = off(feed, 1_000);
+        assert_eq!(pick_blockhash(&[(h1, 1_001, feed + 1), (h3, 5_000, feed + 1)], feed, Some((h2, s(11), 900)), Some(o)), Some((h1, 1_001, feed + 1)));
+        // ... and, with no learned offset, two disagreeing candidates trust only the lower height
+        assert_eq!(pick_blockhash(&[(h1, 1_001, feed + 1), (h3, 5_000, feed + 1)], feed, None, None), Some((h1, 1_001, feed + 1)));
     }
 
     /// M5-1 (audit 5): only relevant txs queue a lookup-table fetch; the LRU evicts the least recently used
