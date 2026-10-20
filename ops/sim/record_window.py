@@ -81,15 +81,21 @@ blk_lock = threading.Lock()
 
 
 def blk(s):
+    # a failed fetch is RETRIED with back-off and never cached (a cached failure silently dropped every launch in that slot)
     with blk_lock:
         if s in BLK: return BLK[s]
-    b = get_block(s)
-    if not (isinstance(b, dict) and "transactions" in b):
-        b = None
-    else:
-        b = dict(blockTime=b.get("blockTime"), txs=[t for t in b["transactions"] if not is_vote(t)])
-    with blk_lock:
-        BLK[s] = b
+    b = None
+    for attempt in range(5):
+        x = get_block(s)
+        if isinstance(x, dict) and "transactions" in x:
+            b = dict(blockTime=x.get("blockTime"), txs=[t for t in x["transactions"] if not is_vote(t)])
+            break
+        if isinstance(x, dict) and x.get("__err") in (-32007, -32009):   # slot skipped / missing: a real empty slot
+            return None
+        time.sleep(1.5 * (attempt + 1))
+    if b is not None:
+        with blk_lock:
+            BLK[s] = b
     return b
 
 
@@ -224,11 +230,15 @@ def record(item):
 
 items = sorted(base.items(), key=lambda kv: kv[1])
 if LIMIT: items = items[:LIMIT]
-n_rec = 0
-with ThreadPoolExecutor(4) as ex:
+n_rec = 0; missing = []
+with ThreadPoolExecutor(3) as ex:
     for mint, st in ex.map(record, items):
-        if st and st != "create not found":
+        if st == "create not found":
+            missing.append(mint)
+            if mint in fires: print(f"  !!! FIRED {mint} NOT RECORDED: create block could not be read", flush=True)
+        elif st:
             n_rec += 1
             print(f"  {mint[:10]} {'FIRED ' if mint in fires else ''}{st}", flush=True)
+print(f"not recorded (create block unreadable): {len(missing)} of {len(items)}, of which fired: {sum(1 for x in missing if x in fires)}", flush=True)
 json.dump(dict(log=LOG, slot_ms=SLOT_MS, fires=fires, n_base=len(base), recorded=n_rec, t=time.time()), open(os.path.join(OUT, "_index.json"), "w"))
 print(f"DONE: recorded {n_rec} launches into {OUT}", flush=True)
