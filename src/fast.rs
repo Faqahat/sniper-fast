@@ -331,8 +331,9 @@ pub struct Ack { pub path: String, pub tag: u64, pub t_write: u64, pub t_ack: u6
 pub struct Dw<'a> { pub s: &'a mut TcpStream, pub deadline: Instant }
 impl std::io::Write for Dw<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // L10-2 (audit 10): always ATTEMPT the write (a scheduler stall that ate the budget must not fail a writable
+        // socket): at least 100 us, else the remaining budget; a socket that really blocks fails at its timeout
         let rem = self.deadline.saturating_duration_since(Instant::now());
-        if rem.is_zero() { return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "write budget exhausted")); }
         self.s.set_write_timeout(Some(rem.max(Duration::from_micros(100))))?;
         self.s.write(buf)
     }
@@ -382,6 +383,8 @@ pub struct FastConn {
     pub reconnects: AtomicU64,
     /// SELF-HEAL: half-dead connections reset (the oldest request / ping unanswered for FAST_STALE)
     pub stale_resets: AtomicU64,
+    /// L10-1: an UNHEALTHY edge was raised (a stale reset / a write error): the next reconnect raises RECOVERED, once
+    edge_down: AtomicBool,
     acks: crossbeam_channel::Sender<Ack>,
 }
 
@@ -431,7 +434,7 @@ impl FastConn {
             Some(r.into_bytes())
         });
         let c = Arc::new(FastConn { name: name.to_string(), host, addr, tls, head: head.into_bytes(), ping_req, io: Mutex::new(None), pend: Mutex::new(VecDeque::new()),
-            up: AtomicBool::new(false), writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), stale_resets: AtomicU64::new(0), acks });
+            up: AtomicBool::new(false), writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), stale_resets: AtomicU64::new(0), edge_down: AtomicBool::new(false), acks });
         // reader (connects, reads, reconnects) and keep-alive threads
         { let c = c.clone(); let stop = stop.clone(); std::thread::Builder::new().name(format!("fast-rd-{name}")).spawn(move || c.reader(stop)).map_err(|e| e.to_string())?; }
         { let c = c.clone(); std::thread::Builder::new().name(format!("fast-ka-{name}")).spawn(move || c.keepalive(stop)).map_err(|e| e.to_string())?; }
@@ -499,7 +502,7 @@ impl FastConn {
                 self.up.store(false, Ordering::Release);
                 if let Some(io) = g.take() { io.shut(); }
                 let k = self.stale_resets.fetch_add(1, Ordering::Relaxed) + 1;
-                crate::send::health_edge(&self.name, false, &format!("FAST connection: no answer for {} s (half-dead): reset, reconnecting (reset #{k})", FAST_STALE.as_secs()));
+                self.edge_down.store(true, Ordering::Relaxed); crate::send::health_edge(&self.name, false, &format!("FAST connection: no answer for {} s (half-dead): reset, reconnecting (reset #{k})", FAST_STALE.as_secs()));
                 continue;
             }
             if let Some(io) = g.as_mut() {
@@ -528,7 +531,7 @@ impl FastConn {
             *self.io.lock().unwrap() = Some(io);
             self.up.store(true, Ordering::Release);
             let k = self.reconnects.fetch_add(1, Ordering::Relaxed);
-            if k > 0 && self.stale_resets.load(Ordering::Relaxed) > 0 { crate::send::health_edge(&self.name, true, &format!("FAST connection re-established (reconnect #{k})")); }
+            if k > 0 && self.edge_down.swap(false, Ordering::Relaxed) { crate::send::health_edge(&self.name, true, &format!("FAST connection re-established (reconnect #{k})")); }
             let mut net = vec![0u8; 32 * 1024];
             let mut plain: Vec<u8> = Vec::with_capacity(64 * 1024);
             let mut tmp = vec![0u8; 32 * 1024];
@@ -841,6 +844,8 @@ pub struct FastH2 {
     /// SELF-HEAL: an unanswered PING's send time (0: none outstanding) and the half-dead resets
     ping_sent: AtomicU64,
     pub stale_resets: AtomicU64,
+    /// L10-1: an UNHEALTHY edge was raised: the next reconnect raises RECOVERED, once
+    edge_down: AtomicBool,
     /// (tag, uuid or error) per reply
     acks: crossbeam_channel::Sender<Ack>,
 }
@@ -853,7 +858,7 @@ impl FastH2 {
         use std::net::ToSocketAddrs;
         let addr = (host.as_str(), u.port_or_known_default().unwrap_or(443)).to_socket_addrs().map_err(|e| format!("{name}: resolve: {e}"))?.next().ok_or("no address")?;
         let c = Arc::new(FastH2 { name: name.into(), host, addr, io: Mutex::new(None), st: Mutex::new(H2State::default()), up: AtomicBool::new(false),
-            writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), ping_sent: AtomicU64::new(0), stale_resets: AtomicU64::new(0), acks });
+            writes: AtomicU64::new(0), reconnects: AtomicU64::new(0), ping_sent: AtomicU64::new(0), stale_resets: AtomicU64::new(0), edge_down: AtomicBool::new(false), acks });
         { let c = c.clone(); let stop = stop.clone(); std::thread::Builder::new().name(format!("fast-h2-{name}")).spawn(move || c.reader(stop)).map_err(|e| e.to_string())?; }
         { let c = c.clone(); std::thread::Builder::new().name(format!("fast-h2ka-{name}")).spawn(move || c.keepalive(stop)).map_err(|e| e.to_string())?; }
         Ok(c)
@@ -950,7 +955,7 @@ impl FastH2 {
         match r {
             Ok(()) => { self.writes.fetch_add(1, Ordering::Relaxed); Ok((t0, mono_ns())) }
             // M9-1: shut the socket too (it used to reset the slot only: the reader stayed blocked, no stale reset, no alert)
-            Err(e) => { self.up.store(false, Ordering::Release); shut_h2(&mut g); crate::send::health_edge(&self.name, false, &format!("FAST h2 write failed ({e}): connection dropped, reconnecting")); Err(format!("write: {e}")) }
+            Err(e) => { self.up.store(false, Ordering::Release); shut_h2(&mut g); self.edge_down.store(true, Ordering::Relaxed); crate::send::health_edge(&self.name, false, &format!("FAST h2 write failed ({e}): connection dropped, reconnecting")); Err(format!("write: {e}")) }
         }
     }
 
@@ -974,7 +979,7 @@ impl FastH2 {
         let r = tls_write_all(c, s, req, FAST_WRITE_TIMEOUT);
         match r {
             Ok(()) => { self.writes.fetch_add(1, Ordering::Relaxed); Ok((t0, mono_ns())) }
-            Err(e) => { self.up.store(false, Ordering::Release); shut_h2(&mut g); crate::send::health_edge(&self.name, false, &format!("FAST h2 write failed ({e}): connection dropped, reconnecting")); Err(format!("write: {e}")) }
+            Err(e) => { self.up.store(false, Ordering::Release); shut_h2(&mut g); self.edge_down.store(true, Ordering::Relaxed); crate::send::health_edge(&self.name, false, &format!("FAST h2 write failed ({e}): connection dropped, reconnecting")); Err(format!("write: {e}")) }
         }
     }
 
@@ -1002,7 +1007,7 @@ impl FastH2 {
                 shut_h2(&mut self.io.lock().unwrap());
                 self.ping_sent.store(0, Ordering::Relaxed);
                 let k = self.stale_resets.fetch_add(1, Ordering::Relaxed) + 1;
-                crate::send::health_edge(&self.name, false, &format!("FAST h2 connection: no answer for {} s (half-dead): reset, reconnecting (reset #{k})", FAST_STALE.as_secs()));
+                self.edge_down.store(true, Ordering::Relaxed); crate::send::health_edge(&self.name, false, &format!("FAST h2 connection: no answer for {} s (half-dead): reset, reconnecting (reset #{k})", FAST_STALE.as_secs()));
                 continue;
             }
             if ping == 0 { self.ping_sent.store(now, Ordering::Relaxed); }
@@ -1033,7 +1038,7 @@ impl FastH2 {
             self.ping_sent.store(0, Ordering::Relaxed);
             self.up.store(true, Ordering::Release);
             let k = self.reconnects.fetch_add(1, Ordering::Relaxed);
-            if k > 0 && self.stale_resets.load(Ordering::Relaxed) > 0 { crate::send::health_edge(&self.name, true, &format!("FAST h2 connection re-established (reconnect #{k})")); }
+            if k > 0 && self.edge_down.swap(false, Ordering::Relaxed) { crate::send::health_edge(&self.name, true, &format!("FAST h2 connection re-established (reconnect #{k})")); }
             let mut net = vec![0u8; 64 * 1024];
             let mut tmp = vec![0u8; 64 * 1024];
             let mut plain: Vec<u8> = Vec::with_capacity(128 * 1024);

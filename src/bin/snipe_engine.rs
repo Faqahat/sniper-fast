@@ -854,7 +854,12 @@ mod tg {
             v["last_error"].as_str().map(|e| format!(" last error: {e}")).unwrap_or_default()))
     }
 
-    pub fn mint_link(m: &Pk) -> String { let s = b58(m); format!("<a href=\"https://solscan.io/token/{s}\">{}…{}</a>", &s[..4], &s[s.len() - 4..]) }
+    /// a token in a message: its short name, then Solscan and GMGN links (owner, 2026-10-20). base58 is URL- and HTML-safe;
+    /// esc() is applied anyway
+    pub fn mint_link(m: &Pk) -> String {
+        let s = esc(&b58(m));
+        format!("{}…{} <a href=\"https://solscan.io/token/{s}\">Solscan</a> <a href=\"https://gmgn.ai/sol/token/{s}\">GMGN</a>", &s[..4], &s[s.len() - 4..])
+    }
     pub fn tx_link(sig: &str) -> String { if sig.len() < 16 { esc(sig) } else { format!("<a href=\"https://solscan.io/tx/{sig}\">{}…</a>", &sig[..8]) } }
     fn pct(num: i64, den: u64) -> String { if den == 0 { "-".into() } else { format!("{:+.1}%", num as f64 * 100.0 / den as f64) } }
 
@@ -898,7 +903,7 @@ mod tg {
         /// M8-2: end balance - start balance (None: a balance read failed); L8-3: estimated fees, the SOL price's age (min)
         pub wallet_net: Option<i64>, pub fees_est: u64, pub usd_age_min: Option<u64> }
     pub fn end_body(e: &End) -> Body {
-        let tr = |x: &Option<(Pk, i64)>| x.map(|(m, p)| format!("{} {}", short(&m), sol_signed(p))).unwrap_or_else(|| "-".into());
+        let tr = |x: &Option<(Pk, i64)>| x.map(|(m, p)| format!("{} {}", mint_link(&m), esc(&sol_signed(p)))).unwrap_or_else(|| "-".into());
         // L8-3: USD only from a SOL price <= 30 min old (else marked stale, no dollar figure)
         let usd = |l: i64| match (e.usd, e.usd_age_min) { (Some(p), Some(a)) if a <= 30 => format!(" (${:+.2})", l as f64 / 1e9 * p), (Some(_), Some(a)) => format!(" (SOL price stale: {a} min)"), _ => String::new() };
         Body::new().kv("ended", &e.reason).nl().kv("fires", e.fires.to_string()).kv("landed", e.landed.to_string())
@@ -906,7 +911,7 @@ mod tg {
             .kv("net (trades)", format!("{}{}", sol_signed(e.net), usd(e.net)))
             .kv("net (wallet)", e.wallet_net.map(|w| format!("{}{}", sol_signed(w), usd(w))).unwrap_or_else(|| "unread".into())).nl()
             .kv("fees paid", format!("{}{}", sol(e.fees as i64), if e.fees_est > 0 { format!(" + {} est (CU limit x price + tips + base)", sol(e.fees_est as i64)) } else { String::new() }))
-            .nl().kv("best", tr(&e.best)).kv("worst", tr(&e.worst)).nl()
+            .nl().raw(format!("best {}", tr(&e.best))).raw(format!("worst {}", tr(&e.worst))).nl()
             .kv("same slot", e.same_slot_pct.map(|p| format!("{p:.0}%")).unwrap_or_else(|| "-".into()))
             .kv("median landing", e.median_delta.map(|d| format!("create {d:+} slots")).unwrap_or_else(|| "-".into()))
     }
@@ -4433,7 +4438,9 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     // M7: realized PnL of this position from its own transactions (payer deltas), in the background
     pos.realized_done = true;
     spawn_realized_x(rpc.clone(), mint, buy.sig.clone(), out.sigs.clone(), realized_fallback(bal_start, bal_end_r, cost),
-        Some((cost, t_landing_seen.elapsed().as_secs_f64(), out.first_send_us, fee_est.saturating_sub(revert_fee).max(buy.tips), fee_est)));
+        // L10-3: the slow path's fee estimate has no tips (its fee_est == revert_fee): add the tips it paid
+        Some((cost, t_landing_seen.elapsed().as_secs_f64(), out.first_send_us, fee_est.saturating_sub(revert_fee).max(buy.tips),
+            if fee_est == revert_fee { fee_est + buy.tips } else { fee_est })));
 
     // --- report ---
     let last = out.last.as_ref();
@@ -6542,6 +6549,7 @@ mod audit_tests {
         // bodies: links, escaping, fields
         let m = [0x33u8; 32];
         let f = tg::fire_body(&m, 459_000_000, 3_090_000_000, Some(3_210_000_000), "jito<agave>", "bam", 10_500_000, 13_000_000, Some(459_000_001)).html();
+        assert!(f.contains("https://gmgn.ai/sol/token/") && f.contains(">GMGN</a>") && f.contains(">Solscan</a>"), "GMGN + Solscan links: {f}");
         assert!(f.contains("https://solscan.io/token/") && f.contains("3.09") && f.contains("3.21") && f.contains("459000001"), "{f}");
         assert!(f.contains("jito&lt;agave&gt;") && !f.contains("jito<agave>"), "escaped: {f}");
         let e = tg::exit_body(&tg::Exit { mint: m, legs: 2, proceeds: Some(1_600_000_000), pnl: 75_000_000, cost: 1_525_000_000, hold_s: 0.8, dec_send_us: Some(61.0),
@@ -6550,6 +6558,7 @@ mod audit_tests {
         let end = tg::end_body(&tg::End { fires: 5, landed: 3, wins: 2, losses: 1, net: 100_000_000, usd: Some(150.0), best: Some((m, 90_000_000)), worst: Some((m, -40_000_000)),
             fees: 75_000_000, same_slot_pct: Some(33.3), median_delta: Some(1), reason: "window ended".into(), wallet_net: Some(95_000_000), fees_est: 10_500_000, usd_age_min: Some(4) }).html();
         assert!(end.contains("$+15.00") && end.contains("33%") && end.contains("create +1"), "{end}");
+        assert!(end.matches("https://gmgn.ai/sol/token/").count() == 2, "best + worst carry GMGN links: {end}");
         // M8-2 / L8-3: wallet net next to the trades', estimated fees labelled, a stale SOL price gives no dollar figure
         assert!(end.contains("net (wallet)") && end.contains("+0.095") && end.contains("est"), "{end}");
         let stale = tg::end_body(&tg::End { fires: 1, landed: 1, wins: 1, losses: 0, net: 100_000_000, usd: Some(150.0), best: None, worst: None, fees: 0,
