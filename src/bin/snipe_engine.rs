@@ -79,6 +79,9 @@ async fn blockhash_fresh(rpc: &rpc::Rpc, max_age: Duration) -> Result<([u8; 32],
 //    (lastValidBlockHeight is ~150 blocks: ~33 s at 217 ms slots); the background refresher uses the fallback too.
 // =====================================================================================================================
 static RPC_FB: std::sync::OnceLock<rpc::Rpc> = std::sync::OnceLock::new();
+/// XRPC: the URLs the dedicated per-role clients are built from (never printed)
+static PRIMARY_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static FALLBACK_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 /// L7-5 (audit 7): getGenesisHash with 3 attempts 1 s apart (a transient error / timeout does not refuse the start; a
 /// mismatch is final at once: the caller refuses)
 async fn genesis_retry(r: &rpc::Rpc) -> std::result::Result<Result<serde_json::Value>, tokio::time::error::Elapsed> {
@@ -136,6 +139,8 @@ async fn call2(rpc: &rpc::Rpc, method: &str, params: serde_json::Value) -> Resul
 
 async fn call_race(rpc: &rpc::Rpc, method: &str, params: serde_json::Value, cap: Duration, accept: impl Fn(&serde_json::Value) -> bool) -> Result<serde_json::Value> {
     if RPC_TRAP.load(Ordering::SeqCst) { panic!("RPC {method} on the no-RPC path (sell decision -> send)"); }
+    // XRPC: the role's DEDICATED clients (bounded single attempts, self-healing, latency-recorded) once initialized
+    if let Some(eps) = xrpc::eps(xrpc::role_of(method)) { return race_eps(eps, method, params, cap, accept).await; }
     let p = tokio::time::timeout(cap, rpc.call(method, params.clone()));
     let Some(fb) = RPC_FB.get() else {
         return match p.await { Ok(r) => r, Err(_) => Err(anyhow::anyhow!("{method} timed out after {cap:?}")) };
@@ -168,6 +173,36 @@ async fn call_race(rpc: &rpc::Rpc, method: &str, params: serde_json::Value, cap:
     match held { Some(v) => Ok(v), None => Err(anyhow::anyhow!("{method}: {}", errs.join(" | "))) }
 }
 static FB_USED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// XRPC: race the role's providers in parallel (primary, fallback); the first accepted answer wins
+async fn race_eps(eps: &'static [xrpc::Ep], method: &str, params: serde_json::Value, cap: Duration, accept: impl Fn(&serde_json::Value) -> bool) -> Result<serde_json::Value> {
+    let wire = if method == "getAccountInfo(alt)" { "getAccountInfo" } else { method };
+    if eps.len() == 1 { return eps[0].call(wire, params, cap).await; }
+    let p = eps[0].call(wire, params.clone(), cap);
+    let f = eps[1].call(wire, params, cap);
+    tokio::pin!(p);
+    tokio::pin!(f);
+    let (mut pd, mut fd) = (false, false);
+    let mut held: Option<serde_json::Value> = None;
+    let mut errs: Vec<String> = Vec::new();
+    while !(pd && fd) {
+        let (r, from_fb) = tokio::select! {
+            r = &mut p, if !pd => { pd = true; (r, false) }
+            r = &mut f, if !fd => { fd = true; (r, true) }
+        };
+        match r {
+            Ok(v) if accept(&v) => {
+                if from_fb && FB_USED.fetch_add(1, Ordering::Relaxed) == 0 {
+                    tg::raise(arbx::alerts::Level::Warning, "snipe_rpc_fallback", "rpc_fallback", "🔁", "RPC fallback in use", arbx::alerts::format::Body::new().kv("method", method).txt("the fallback RPC answered before the primary"), true);
+                }
+                return Ok(v);
+            }
+            Ok(v) => { held.get_or_insert(v); }
+            Err(e) => errs.push(format!("{}: {e:#}", if from_fb { "fallback" } else { "primary" })),
+        }
+    }
+    match held { Some(v) => Ok(v), None => Err(anyhow::anyhow!("{method}: {}", errs.join(" | "))) }
+}
 
 /// getLatestBlockhash (confirmed) from one RPC: (hash, lastValidBlockHeight, context slot)
 async fn latest_blockhash_one(r: &rpc::Rpc, cap: Duration) -> Result<([u8; 32], u64, u64)> {
@@ -332,9 +367,21 @@ fn ref_slots() -> (u64, u64) {
 /// 400 ms per slot): a cache entry's age is the blockhash's own age, never the time it was (re-)fetched. Ok(true): updated.
 async fn refresh_blockhash(rpc: &rpc::Rpc, cap: Duration) -> Result<bool> {
     if RPC_TRAP.load(Ordering::SeqCst) { panic!("RPC getLatestBlockhash on the no-RPC path (sell decision -> send)"); }
-    let fb = async { match RPC_FB.get() { Some(f) => Some(tokio::join!(latest_blockhash_one(f, cap), tokio::time::timeout(cap, f.slot()))), None => None } };
-    let (a, b) = tokio::join!(latest_blockhash_one(rpc, cap), fb);
-    let (b, fb_slot) = match b { Some((x, s)) => (Some(x), s.ok().and_then(|r| r.ok())), None => (None, None) };
+    // XRPC: the blockhash role's dedicated clients when initialized (else the given ones: tests, other modes)
+    let (a, b) = if let Some(eps) = xrpc::eps("bh") {
+        let one = |e: &'static xrpc::Ep| async move {
+            let v = e.call("getLatestBlockhash", serde_json::json!([{ "commitment": "confirmed" }]), cap).await?;
+            let h = bs58::decode(v["value"]["blockhash"].as_str().context("no blockhash")?).into_vec()?;
+            anyhow::Ok((<[u8; 32]>::try_from(h).map_err(|_| anyhow::anyhow!("bad blockhash"))?, v["value"]["lastValidBlockHeight"].as_u64().unwrap_or(0), v["context"]["slot"].as_u64().unwrap_or(0)))
+        };
+        let fb = async { match eps.get(1) { Some(e) => Some((one(e).await, e.call("getSlot", serde_json::json!([]), cap).await.ok().and_then(|v| v.as_u64()))), None => None } };
+        let (a, b) = tokio::join!(one(&eps[0]), fb);
+        (a, b.map(|(x, s)| (x, Ok::<_, ()>(Ok::<u64, ()>(s.unwrap_or(0))))))
+    } else {
+        let fb = async { match RPC_FB.get() { Some(f) => Some(tokio::join!(latest_blockhash_one(f, cap), async { tokio::time::timeout(cap, f.slot()).await.map(|r| r.map_err(|_| ())).map_err(|_| ()) })), None => None } };
+        tokio::join!(latest_blockhash_one(rpc, cap), fb)
+    };
+    let (b, fb_slot) = match b { Some((x, s)) => (Some(x), s.ok().and_then(|r| r.ok()).filter(|v| *v > 0)), None => (None, None) };
     if let Some(sl) = fb_slot { slot_note(SLOT_SRC_FALLBACK, sl); }
     let cands: Vec<Cand> = [a.ok().map(|x| (x, 0usize)), b.and_then(|x| x.ok()).map(|x| (x, 1usize))].into_iter().flatten()
         .map(|((h, v, ctx), src)| Cand { h, v, ctx, src }).collect();
@@ -723,9 +770,17 @@ mod altc {
     pub async fn fetch(rpc: &rpc::Rpc, table: Pk) -> Result<usize> {
         let params = serde_json::json!([b58(&table), { "encoding": "base64", "commitment": "confirmed" }]);
         let one = |r: &rpc::Rpc| { let p = params.clone(); let r = r.clone(); async move { tokio::time::timeout(Duration::from_secs(2), r.call("getAccountInfo", p)).await.map_err(|_| anyhow::anyhow!("timed out"))? } };
-        let v = match one(rpc).await {
-            Ok(v) => v,
-            Err(e) => match RPC_FB.get() { Some(fb) => one(fb).await.map_err(|e2| anyhow::anyhow!("primary: {} | fallback: {}", redact(&format!("{e:#}")), redact(&format!("{e2:#}"))))?, None => return Err(e) },
+        // XRPC: the lookup-table role's dedicated, bounded clients (primary, the fallback only on its error)
+        let v = if let Some(eps) = xrpc::eps("alt") {
+            match eps[0].call("getAccountInfo", params.clone(), Duration::from_secs(2)).await {
+                Ok(v) => v,
+                Err(e) => match eps.get(1) { Some(f) => f.call("getAccountInfo", params.clone(), Duration::from_secs(2)).await.map_err(|e2| anyhow::anyhow!("primary: {e:#} | fallback: {e2:#}"))?, None => return Err(e) },
+            }
+        } else {
+            match one(rpc).await {
+                Ok(v) => v,
+                Err(e) => match RPC_FB.get() { Some(fb) => one(fb).await.map_err(|e2| anyhow::anyhow!("primary: {} | fallback: {}", redact(&format!("{e:#}")), redact(&format!("{e2:#}"))))?, None => return Err(e) },
+            }
         };
         if v["value"].is_null() { bail!("lookup table {} does not exist", b58(&table)); }
         if v["value"]["owner"].as_str() != Some("AddressLookupTab1e1111111111111111111111111") { bail!("{} is not a lookup table", b58(&table)); }
@@ -958,6 +1013,141 @@ mod tg {
             Ok(n) => { eprintln!("TELEGRAM TEST: {n} message(s) delivered"); Ok(()) }
             Err((n, e)) => bail!("Telegram test: {n} delivered, error: {e}"),
         }
+    }
+}
+
+// =====================================================================================================================
+// XRPC (live edge check on FRZ, build e3a486de: "getBalance failed: fallback timed out after 1s | primary timed out after
+// 1s", blockhash PAUSE, sells "not seen in 1s", while both RPCs answered in 6-48 ms from the same host). What the code
+// showed: every exit-path read — land polls (statuses + token reads every 100 ms, both RPCs), the kill-switch balance,
+// the blockhash refresher, lookup-table fetches — went through ONE pooled client per RPC (HTTP/2: one multiplexed
+// connection); the 1 s cap only dropped the CALLER's future: Rpc::call spawned per-provider tasks that kept their requests
+// open up to 20 s, so under any slowness timed-out requests piled up on the same connection (and its stream limit) and
+// every new request queued behind them — the cap measured the queue, not the network, on both providers at once.
+// Now:
+//  * dedicated clients per ROLE (exit, blockhash, kill switch, lookup tables) and per provider: own pool, own
+//    connection, own registry key — a slow role cannot queue another;
+//  * every leg is ONE bounded attempt (call_bounded: attempt timeout = the cap, in the caller's own future): a timed-out
+//    request is dropped (its stream / connection with it), never left running — no orphan pile-up;
+//  * self-heal: XR_HEAL consecutive timeouts / transport errors of one (role, provider) client rebuild it (fresh pool,
+//    connection, DNS), logged + a deduplicated Telegram alert, and its recovery;
+//  * every leg's latency is recorded per (role, provider, method); RPC-LAT lines every 60 s (p50 / p90 / p99 / max,
+//    timeouts) next to the RUNTIME scheduling lag (a 100 ms ticker), so a run tells "RPC slow" from "engine slow".
+// =====================================================================================================================
+mod xrpc {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock, RwLock};
+
+    pub const ROLES: [&str; 4] = ["exit", "bh", "ks", "alt"];
+    const XR_HEAL: u32 = 3;
+
+    pub struct Ep { pub name: String, url: String, rpc: RwLock<rpc::Rpc>, errs: std::sync::atomic::AtomicU32, down: AtomicBool, pub rebuilds: std::sync::atomic::AtomicU64 }
+    impl Ep {
+        pub fn new(name: String, url: String) -> Ep {
+            let rpc = rpc::Rpc::race(vec![rpc::Endpoint { name: name.clone(), url: url.clone(), bearer: None }]);
+            Ep { name, url, rpc: RwLock::new(rpc), errs: Default::default(), down: AtomicBool::new(false), rebuilds: Default::default() }
+        }
+        fn client(&self) -> rpc::Rpc { self.rpc.read().unwrap_or_else(|e| e.into_inner()).clone() }
+        /// one bounded attempt (dropped at `cap`: nothing left running), its latency and the self-heal
+        pub async fn call(&self, method: &str, params: serde_json::Value, cap: Duration) -> Result<serde_json::Value> {
+            let b = rpc::Bounds { deadline: cap, retries: 0, attempt_timeout: cap, backoff_first: Duration::from_millis(50), backoff_max: Duration::from_millis(50) };
+            let t = Instant::now();
+            let r = tokio::time::timeout(cap + Duration::from_millis(50), self.client().call_bounded(method, params, b)).await;
+            let us = t.elapsed().as_micros() as u64;
+            let transport = match &r {
+                Ok(Ok(_)) => false,
+                Ok(Err(f)) => matches!(f.class, rpc::ErrClass::Timeout | rpc::ErrClass::Transport | rpc::ErrClass::Body),
+                Err(_) => true,
+            };
+            note(&self.name, method, us, transport);
+            if transport {
+                let n = self.errs.fetch_add(1, Ordering::Relaxed) + 1;
+                if n >= XR_HEAL {
+                    self.errs.store(0, Ordering::Relaxed);
+                    let fresh = rpc::Rpc::race(vec![rpc::Endpoint { name: self.name.clone(), url: self.url.clone(), bearer: None }]);
+                    *self.rpc.write().unwrap_or_else(|e| e.into_inner()) = fresh;
+                    let k = self.rebuilds.fetch_add(1, Ordering::Relaxed) + 1;
+                    if !self.down.swap(true, Ordering::Relaxed) || k % 10 == 0 {
+                        send::health_edge(&format!("rpc {}", self.name), false, &format!("{n} timeouts / transport errors in a row ({method}): client REBUILT (fresh pool + connection; rebuild #{k})"));
+                    }
+                }
+            } else if r.is_ok() {
+                self.errs.store(0, Ordering::Relaxed);
+                if self.down.swap(false, Ordering::Relaxed) { send::health_edge(&format!("rpc {}", self.name), true, "answering again"); }
+            }
+            match r {
+                Ok(Ok(f)) => Ok(f.value),
+                Ok(Err(f)) => Err(anyhow::anyhow!("{}", redact(&f.msg))),
+                Err(_) => Err(anyhow::anyhow!("{method} timed out after {cap:?}")),
+            }
+        }
+    }
+
+    /// role -> [primary, fallback?]
+    static EPS: OnceLock<HashMap<&'static str, Vec<Ep>>> = OnceLock::new();
+    /// start-up: the dedicated clients from the primary URL and (if any) the fallback URL
+    pub fn init(primary: &str, fallback: Option<&str>) {
+        let mut m = HashMap::new();
+        for r in ROLES {
+            let mut v = vec![Ep::new(format!("{r}-primary"), primary.to_string())];
+            if let Some(f) = fallback { v.push(Ep::new(format!("{r}-fallback"), f.to_string())); }
+            m.insert(r, v);
+        }
+        let _ = EPS.set(m);
+    }
+    pub fn eps(role: &str) -> Option<&'static Vec<Ep>> { EPS.get().and_then(|m| m.get(role)) }
+    /// which role a read belongs to
+    pub fn role_of(method: &str) -> &'static str {
+        match method { "getBalance" => "ks", "getLatestBlockhash" | "getSlot" => "bh", "getAccountInfo(alt)" => "alt", _ => "exit" }
+    }
+
+    // ---- latency book (60 s windows)
+    #[derive(Default)]
+    struct Lat { us: Vec<u64>, timeouts: u64 }
+    static LAT: std::sync::LazyLock<Mutex<HashMap<(String, String), Lat>>> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+    static LAG: std::sync::LazyLock<Mutex<Vec<u64>>> = std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
+    fn note(ep: &str, method: &str, us: u64, timeout: bool) {
+        let mut g = LAT.lock().unwrap_or_else(|e| e.into_inner());
+        let e = g.entry((ep.to_string(), method.to_string())).or_default();
+        if e.us.len() < 20_000 { e.us.push(us); }
+        if timeout { e.timeouts += 1; }
+    }
+    fn pct(v: &mut [u64], p: f64) -> f64 { if v.is_empty() { 0.0 } else { v.sort_unstable(); v[((v.len() - 1) as f64 * p) as usize] as f64 / 1e3 } }
+    /// one RPC-LAT block (and the runtime lag) for the last window; clears the window
+    pub fn report() -> Vec<String> {
+        let mut out = Vec::new();
+        let mut g = LAT.lock().unwrap_or_else(|e| e.into_inner());
+        let mut keys: Vec<(String, String)> = g.keys().cloned().collect();
+        keys.sort();
+        for k in keys {
+            let e = g.get_mut(&k).unwrap();
+            if e.us.is_empty() && e.timeouts == 0 { continue; }
+            let n = e.us.len();
+            let (p50, p90, p99, mx) = (pct(&mut e.us, 0.5), pct(&mut e.us, 0.9), pct(&mut e.us, 0.99), pct(&mut e.us, 1.0));
+            out.push(format!("RPC-LAT 60s {} {}: n={n} p50={p50:.1}ms p90={p90:.1}ms p99={p99:.1}ms max={mx:.1}ms timeouts/transport={}", k.0, k.1, e.timeouts));
+            e.us.clear(); e.timeouts = 0;
+        }
+        let mut l = LAG.lock().unwrap_or_else(|e| e.into_inner());
+        if !l.is_empty() {
+            let n = l.len();
+            out.push(format!("RUNTIME lag 60s (a 100 ms ticker's lateness): n={n} p50={:.2}ms p99={:.2}ms max={:.2}ms — high = the ENGINE is stalled, not the RPCs", pct(&mut l, 0.5), pct(&mut l, 0.99), pct(&mut l, 1.0)));
+            l.clear();
+        }
+        out
+    }
+    /// the 100 ms runtime-lag ticker and the 60 s report (until INFRA_STOP)
+    pub fn start_monitor() {
+        tokio::spawn(async {
+            let mut last = Instant::now();
+            while !INFRA_STOP.load(Ordering::Relaxed) {
+                let t = Instant::now();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let lag = t.elapsed().saturating_sub(Duration::from_millis(100)).as_micros() as u64;
+                { let mut l = LAG.lock().unwrap_or_else(|e| e.into_inner()); if l.len() < 2_000 { l.push(lag); } }
+                if last.elapsed() >= Duration::from_secs(60) { last = Instant::now(); for line in report() { eprintln!("  {line}"); } }
+            }
+        });
     }
 }
 
@@ -1485,9 +1675,12 @@ fn main() -> Result<()> {
         .map(|u| config::expand(u).with_context(|| format!("rpc_url {u} names an env var that is empty/missing")))
         .transpose()?
         .context("the engine needs rpc_url in --config (blockhash, slot, status polling)")?;
+    let _ = PRIMARY_URL.set(rpc_url.clone());
     let rpc = Arc::new(rpc::Rpc::new(rpc_url));
 
-    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build()?;
+    // XRPC (live edge check): 6 workers by default (the busy-poll event loop already runs off them, in block_in_place);
+    // --tokio-workers N overrides
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(arg_u64("--tokio-workers", 6).clamp(2, 64) as usize).enable_all().build()?;
 
     let r = rt.block_on(run(&probe, key, user, rpc, warm_probe, shadow, round_trip, snipe_once, simulate, paper_trade, live));
     if let Err(e) = &r { tg::raise(arbx::alerts::Level::Critical, "snipe_error", "error", "💥", "ENGINE STOPPED WITH AN ERROR", arbx::alerts::format::Body::new().code("error", redact(&format!("{e:#}"))), false); }
@@ -1525,6 +1718,7 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
     if let Some(name) = arg("--rpc-fallback-url-env") {
         let url = std::env::var(&name).ok().filter(|u| !u.trim().is_empty()).with_context(|| format!("--rpc-fallback-url-env {name}: the env var is empty or missing — refusing to start"))?;
         let url = config::expand(url.trim()).with_context(|| format!("--rpc-fallback-url-env {name}: names an empty env var"))?;
+        let _ = FALLBACK_URL.set(url.clone());
         let fb = rpc::Rpc::new(url);
         // M5-2 (audit 5): the fallback must be MAINNET (genesis hash), or no start: it feeds the blockhash and every exit read
         match genesis_retry(&fb).await {
@@ -1540,6 +1734,9 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         }
         let _ = RPC_FB.set(fb);
     }
+    // XRPC: the dedicated per-role clients of the exit path (exit reads, blockhash, kill switch, lookup tables) + the
+    // 60 s RPC-LAT / RUNTIME-lag report
+    if let Some(p) = PRIMARY_URL.get() { xrpc::init(p, FALLBACK_URL.get().map(|s| s.as_str())); xrpc::start_monitor(); }
     // ALT cache: the known launchpad tables + --alt-cache-file + --alt-preload, before any feed starts
     altc::init(rpc.clone()).await;
     // M-3 (audit 3): --buy-max-slot-delta N: the on-chain slot deadline, verified by simulation now or no start (fail closed)
@@ -2389,6 +2586,11 @@ async fn land_check(rpc: &rpc::Rpc, sig_bytes: &[u8; 64], watch: Watch, out: &mu
             return true;
         },
         Err(e) => poll_err("getSignatureStatuses", &e),
+    }
+    // XRPC: a sell seen in the shred feed (registered by send_sell): a landing HINT (outcome unknown: the confirmed read decides)
+    if let Some(slot) = feed_seen(sig_bytes) {
+        out.land_slot = Some(slot); out.ok = true; out.t_seen = Some(Instant::now()); out.via = "feed";
+        return true;
     }
     let (landed, ctx) = match (watch, tk) {
         (Watch::BuyAta(_), Some(Tok::Amount(a, c))) => (a > 0, c),
@@ -3733,6 +3935,10 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         tokio::spawn(async move {
             let mut st = KsState::default();
             let mut fails = 0u32;
+            // XRPC (live edge check): BLIND needs getBalance failures SPANNING >= --ks-blind-s (30) seconds — a transient
+            // stall of a few polls no longer ends the run; meanwhile the engine's own realized PnL keeps the -cap kill live
+            let mut first_fail: Option<Instant> = None;
+            let blind_after = Duration::from_secs(arg_u64("--ks-blind-s", 30).max(6));
             let mut alpen_warned = false;
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
@@ -3754,6 +3960,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                 match r {
                     Ok(b) => {
                         fails = 0;
+                        if first_fail.take().is_some() { eprintln!("  KILL-SWITCH getBalance answering again"); }
                         ACCT.bal.store(b, Ordering::SeqCst);
                         if a.seq.load(Ordering::SeqCst) != seq0 { eprintln!("  KILL-SWITCH poll not evaluated: a position changed during the balance read (next poll in 2 s)"); continue; }
                         let pnl = (b + open) as i64 - start_bal as i64;
@@ -3784,9 +3991,20 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                     }
                     Err(e) => {
                         fails += 1;
-                        eprintln!("  KILL-SWITCH getBalance failed ({fails}/3): {}", format!("{e:#}").chars().take(120).collect::<String>());
-                        if fails >= 3 {
-                            eprintln!("  KILL-SWITCH BLIND: 3 consecutive getBalance failures — stopping new fires (open positions finish their exit).");
+                        let since = *first_fail.get_or_insert_with(Instant::now);
+                        eprintln!("  KILL-SWITCH getBalance failed (#{fails}, failing for {:.1} s of {} s allowed): {}", since.elapsed().as_secs_f64(), blind_after.as_secs(),
+                            format!("{e:#}").chars().take(160).collect::<String>());
+                        // fail-safe on the engine's own records while the balance is unreadable
+                        let realized = ACCT.realized.load(Ordering::SeqCst);
+                        if realized < -cap {
+                            eprintln!("  KILL-SWITCH (realized, balance unreadable): in-engine realized PnL {:.6} SOL below -{:.6} — stopping new fires.", realized as f64 / 1e9, cap as f64 / 1e9);
+                            tg::raise(arbx::alerts::Level::Critical, "snipe_kill", "kill", "🛑", "KILL-SWITCH (realized; balance unreadable)", arbx::alerts::format::Body::new().kv("realized", sol_str(realized)), false);
+                            stop2.store(true, Ordering::SeqCst);
+                            break;
+                        }
+                        if fails >= 3 && since.elapsed() >= blind_after {
+                            eprintln!("  KILL-SWITCH BLIND: getBalance failing for {:.0} s ({fails} polls) — stopping new fires (open positions finish their exit).", since.elapsed().as_secs_f64());
+                            tg::raise(arbx::alerts::Level::Critical, "snipe_kill", "blind", "🛑", "KILL-SWITCH BLIND: balance unreadable", arbx::alerts::format::Body::new().kv("failing for", format!("{:.0} s", since.elapsed().as_secs_f64())).txt("see the RPC-LAT / RUNTIME lag lines: RPC slow or engine stalled"), false);
                             stop2.store(true, Ordering::SeqCst);
                             break;
                         }
@@ -3885,6 +4103,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
         if let Some(arbx::feeds::Event::Tx(mut a)) = ev {
             altc::set_watching(!race.pend.is_empty()); // M5-1: unresolved pump buys are fetched only while a launch is watched
+            feed_mark(&a.tx.sig, a.slot); // XRPC: our sells seen in the shred feed
             altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
             if race.cfg.glued { race.note_hit(&a.tx); }
             // DET FIX: the current slot for leader targeting / send_slot comes from the shred feed (the leader's slot as it
@@ -4486,6 +4705,27 @@ async fn hold_wait(buy: &Landed) {
         if land > 0 { (cur as i64 - land as i64).to_string() } else { "-".into() }); });
 }
 
+/// XRPC (live edge check: every sell "not seen in 1s", re-sends paying the fallback's tip): the shred feed as a sell
+/// landing source. send_sell registers its signature; the live event loop marks the slot it sees it in (a lookup only
+/// while something is registered); land_check takes a sighting as a landing HINT (the confirmed-zero rule still decides)
+static FEED_WATCH: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<[u8; 64], u64>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+static FEED_WATCH_N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+fn feed_watch(sig: &[u8; 64], on: bool) {
+    let mut g = FEED_WATCH.lock().unwrap_or_else(|e| e.into_inner());
+    if on { g.insert(*sig, 0); } else { g.remove(sig); }
+    FEED_WATCH_N.store(g.len(), Ordering::Relaxed);
+}
+fn feed_seen(sig: &[u8; 64]) -> Option<u64> {
+    if FEED_WATCH_N.load(Ordering::Relaxed) == 0 { return None; }
+    FEED_WATCH.lock().unwrap_or_else(|e| e.into_inner()).get(sig).copied().filter(|s| *s > 0)
+}
+/// the event loop: one load while nothing is watched
+#[inline]
+fn feed_mark(sig: &[u8; 64], slot: u64) {
+    if FEED_WATCH_N.load(Ordering::Relaxed) == 0 { return; }
+    if let Some(s) = FEED_WATCH.lock().unwrap_or_else(|e| e.into_inner()).get_mut(sig) { if *s == 0 { *s = slot; } }
+}
+
 /// L8-4: the slow path's fire facts (create slot, dev, bundle) by mint, read by send_and_poll_at after the send
 static FIRE_NOTES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<Pk, (u64, u64, Option<u64>)>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
@@ -4619,7 +4859,21 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         if !first {
             match tok_read(rpc, ata, "confirmed", need_slot).await {
                 t if t.zero_at().is_some() => { out.sold_at = t.zero_at(); break; }
-                Tok::Amount(h, _) => { qty = (h, true); awaiting = None; }
+                Tok::Amount(h, _) => {
+                    // a landed hint (feed / status) but tokens still there at a node past the sell's slot: that sell FAILED
+                    // (its tips reverted): N4 more CU, L-11 its error line
+                    if awaiting.is_some() && qty.1 && h == qty.0 && out.last.as_ref().is_some_and(|l| l.via == "feed") {
+                        cu = (cu as u64 * 3 / 2).min(400_000) as u32;
+                        if let Some(l) = &out.last {
+                            let (r2, sig2, m) = (rpc.clone(), l.sig.clone(), launch.mint);
+                            tokio::spawn(async move {
+                                let line = tx_error_line(&r2, &sig2, 4).await.unwrap_or_else(|| "(tx not found)".into());
+                                eprintln!("  SELL-FAILED-ERROR mint={} sig={sig2}: {line}", b58(&m));
+                            });
+                        }
+                    }
+                    qty = (h, true); awaiting = None;
+                }
                 _ => {
                     // UNKNOWN (error / node behind need_slot). After a landed sell: wait for confirmation (up to 6 s), do
                     // not re-send blind; else re-send the last amount (a sell of tokens no longer held only fails: fee only)
@@ -4730,6 +4984,10 @@ async fn send_sell(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::
         Err(None) => { sell_blockhash(rpc).await?; sell_presend(key, user, path, fb, ixs, Duration::from_secs(25)).map_err(|e| e.unwrap_or_else(|| anyhow::anyhow!("no usable blockhash")))? }
     };
     let SellTx { raw, sig, sig_bytes, fan, meta, last_valid, send_slot } = pre;
+    feed_watch(&sig_bytes, true);
+    struct Unwatch([u8; 64]);
+    impl Drop for Unwatch { fn drop(&mut self) { feed_watch(&self.0, false); } }
+    let _unwatch = Unwatch(sig_bytes);
     let t0 = Instant::now();
     let raw = Arc::new(raw);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -6650,6 +6908,106 @@ mod audit_tests {
         assert!(age.is_some_and(|a| a < Duration::from_secs(2)), "stored FRESH, not back-dated from the frozen reference: {age:?}");
         assert!(sb.is_ok(), "the sell gets a blockhash: {sb:?}");
         *BLOCKHASH_CACHE.lock().unwrap() = None;
+    }
+
+    /// a mock JSON-RPC (HTTP/1.1 keep-alive): `hang` = hold every request this long (watching for the client to go away),
+    /// else answer after 10 ms. Returns (url, per-request "client disconnected after" times in ms)
+    async fn mock_rpc(hang: Option<Duration>) -> (String, Arc<std::sync::Mutex<Vec<u64>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let gone = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let lst = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}", lst.local_addr().unwrap().port());
+        let g2 = gone.clone();
+        tokio::spawn(async move {
+            while let Ok((mut c, _)) = lst.accept().await {
+                let g3 = g2.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    loop {
+                        let n = c.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 { return; }
+                        buf.extend_from_slice(&tmp[..n]);
+                        let Some(h) = buf.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                        let head = String::from_utf8_lossy(&buf[..h]).to_ascii_lowercase();
+                        let len = head.lines().find_map(|l| l.strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+                        if buf.len() < h + 4 + len { continue; }
+                        let req: serde_json::Value = serde_json::from_slice(&buf[h + 4..h + 4 + len]).unwrap_or_default();
+                        buf.drain(..h + 4 + len);
+                        if let Some(d) = hang {
+                            let t = Instant::now();
+                            // hold the request; a client that drops it closes the connection: EOF here
+                            match tokio::time::timeout(d, c.read(&mut tmp)).await {
+                                Ok(Ok(0)) | Ok(Err(_)) => { g3.lock().unwrap().push(t.elapsed().as_millis() as u64); return; }
+                                _ => {}
+                            }
+                        } else {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                        let body = serde_json::json!({ "jsonrpc": "2.0", "id": req["id"].clone(), "result": 1 }).to_string();
+                        let resp = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}", body.len());
+                        if c.write_all(resp.as_bytes()).await.is_err() { return; }
+                    }
+                });
+            }
+        });
+        (url, gone)
+    }
+
+    /// XRPC (live edge check) — the ORPHAN mechanism reproduced: with the old path (an outer 1 s timeout around Rpc::call,
+    /// which runs the request in a spawned task) a timed-out request stays open at the server; with the dedicated bounded
+    /// leg it is dropped at ~1 s. And the engine-like task mix against a 10 ms server: no timeouts, low runtime lag.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn xrpc_orphans_and_task_mix() {
+        // 1. old path: 10 requests to a server that holds them 4 s, each cut by an outer 1 s timeout
+        let (url, gone) = mock_rpc(Some(Duration::from_secs(4))).await;
+        let old = rpc::Rpc::new(url.clone());
+        for _ in 0..5 { let _ = tokio::time::timeout(Duration::from_secs(1), old.call("getSlot", serde_json::json!([]))).await; }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let old_dropped = gone.lock().unwrap().len();
+        // 2. the dedicated bounded leg: the same, cut at 1 s
+        let (url2, gone2) = mock_rpc(Some(Duration::from_secs(4))).await;
+        let ep = xrpc::Ep::new("exit-primary-test".into(), url2);
+        for _ in 0..5 { let _ = ep.call("getSlot", serde_json::json!([]), Duration::from_secs(1)).await; }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let new_dropped: Vec<u64> = gone2.lock().unwrap().clone();
+        eprintln!("XRPC repro: old path — {old_dropped}/5 timed-out requests released by the client within the test (the rest still OPEN at the server, up to 20 s); \
+            bounded leg — {}/5 released, after {:?} ms", new_dropped.len(), new_dropped);
+        assert!(old_dropped < 5, "the old path leaves timed-out requests open (orphans)");
+        assert_eq!(new_dropped.len(), 5, "every bounded leg is dropped at its cap");
+        assert!(new_dropped.iter().all(|ms| *ms < 1_600), "dropped at ~the 1 s cap: {new_dropped:?}");
+        assert!(ep.rebuilds.load(Ordering::Relaxed) >= 1, "3 timeouts in a row rebuild the client (self-heal)");
+        // 3. the engine-like task mix vs a 10 ms server: 40 pollers every 100 ms for 3 s + a spinning thread
+        let (url3, _) = mock_rpc(None).await;
+        let ep3: &'static xrpc::Ep = Box::leak(Box::new(xrpc::Ep::new("exit-primary-mix".into(), url3)));
+        let spin_stop = Arc::new(AtomicBool::new(false));
+        let ss = spin_stop.clone();
+        let spinner = std::thread::spawn(move || { while !ss.load(Ordering::Relaxed) { std::hint::spin_loop(); } });
+        let mut js = tokio::task::JoinSet::new();
+        for _ in 0..40 {
+            js.spawn(async move {
+                let (mut lat, mut to) = (Vec::new(), 0u32);
+                for _ in 0..30 {
+                    let t = Instant::now();
+                    if ep3.call("getSignatureStatuses", serde_json::json!([]), Duration::from_secs(1)).await.is_err() { to += 1; }
+                    lat.push(t.elapsed().as_micros() as u64);
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                (lat, to)
+            });
+        }
+        let (mut all, mut tos) = (Vec::new(), 0);
+        while let Some(Ok((l, t))) = js.join_next().await { all.extend(l); tos += t; }
+        spin_stop.store(true, Ordering::Relaxed);
+        let _ = spinner.join();
+        all.sort_unstable();
+        let p99 = all[all.len() * 99 / 100] as f64 / 1e3;
+        eprintln!("XRPC repro: task mix (40 pollers x 30 calls, a spinning thread) vs a 10 ms server: {} calls, timeouts {tos}, p50 {:.1} ms p99 {p99:.1} ms",
+            all.len(), all[all.len() / 2] as f64 / 1e3);
+        assert_eq!(tos, 0, "no timeouts against a healthy 10 ms server");
+        assert!(p99 < 200.0, "p99 {p99} ms");
+        // the 60 s report renders these
+        assert!(xrpc::report().iter().any(|l| l.contains("exit-primary-mix getSignatureStatuses")));
     }
 
     #[test]
