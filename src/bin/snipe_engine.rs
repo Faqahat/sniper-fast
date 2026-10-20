@@ -64,15 +64,10 @@ static INFRA_STOP: std::sync::LazyLock<Arc<AtomicBool>> = std::sync::LazyLock::n
 
 /// a cached blockhash younger than `max_age`, else a fresh getLatestBlockhash: (hash, lastValidBlockHeight)
 async fn blockhash_fresh(rpc: &rpc::Rpc, max_age: Duration) -> Result<([u8; 32], u64)> {
-    let cached = BLOCKHASH_CACHE.lock().unwrap().filter(|(_, t, _)| t.elapsed() < max_age).map(|(h, _, v)| (h, v));
-    match cached {
-        Some(x) => Ok(x),
-        None => {
-            let (h, v) = latest_blockhash2(rpc).await?;
-            *BLOCKHASH_CACHE.lock().unwrap() = Some((h, Instant::now(), v));
-            Ok((h, v))
-        }
-    }
+    if let Some(x) = cached_blockhash(max_age) { return Ok(x); }
+    // L5-1 (audit 5): refresh_blockhash stores what it accepts with its own timestamp; nothing is re-stamped here
+    let r = refresh_blockhash(rpc, Duration::from_secs(1)).await;
+    cached_blockhash(max_age).with_context(|| format!("no blockhash younger than {max_age:?} ({})", r.err().map(|e| redact(&format!("{e:#}"))).unwrap_or_else(|| "the RPCs returned no newer one".into())))
 }
 
 // =====================================================================================================================
@@ -84,6 +79,8 @@ async fn blockhash_fresh(rpc: &rpc::Rpc, max_age: Duration) -> Result<([u8; 32],
 //    (lastValidBlockHeight is ~150 blocks: ~33 s at 217 ms slots); the background refresher uses the fallback too.
 // =====================================================================================================================
 static RPC_FB: std::sync::OnceLock<rpc::Rpc> = std::sync::OnceLock::new();
+/// mainnet-beta's genesis hash (M5-2: both RPCs are checked against it at start-up)
+const MAINNET_GENESIS: &str = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 const RPC_READ_TIMEOUT_2: Duration = Duration::from_secs(3);
 
 /// never print an RPC URL (they carry keys)
@@ -153,12 +150,31 @@ async fn call_race(rpc: &rpc::Rpc, method: &str, params: serde_json::Value, cap:
 }
 static FB_USED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// getLatestBlockhash (confirmed) from one RPC: (hash, lastValidBlockHeight)
-async fn latest_blockhash_one(r: &rpc::Rpc, cap: Duration) -> Result<([u8; 32], u64)> {
+/// getLatestBlockhash (confirmed) from one RPC: (hash, lastValidBlockHeight, context slot)
+async fn latest_blockhash_one(r: &rpc::Rpc, cap: Duration) -> Result<([u8; 32], u64, u64)> {
     let v = tokio::time::timeout(cap, r.call("getLatestBlockhash", serde_json::json!([{ "commitment": "confirmed" }]))).await.map_err(|_| anyhow::anyhow!("getLatestBlockhash timed out"))??;
     let h = bs58::decode(v["value"]["blockhash"].as_str().context("no blockhash")?).into_vec()?;
-    Ok((h.try_into().map_err(|_| anyhow::anyhow!("bad blockhash"))?, v["value"]["lastValidBlockHeight"].as_u64().unwrap_or(0)))
+    Ok((h.try_into().map_err(|_| anyhow::anyhow!("bad blockhash"))?, v["value"]["lastValidBlockHeight"].as_u64().unwrap_or(0), v["context"]["slot"].as_u64().unwrap_or(0)))
 }
+
+/// M5-2 (audit 5): which candidate blockhash to keep (pure: unit-tested). Candidates are (hash, lastValidBlockHeight,
+/// context slot); `feed_slot` = the shred feed's current slot (0 unknown); `cached` = (hash, age, last valid height).
+///  * a candidate whose context slot is more than 150 slots from the feed's slot is REJECTED (another cluster, a stuck or
+///    minority-fork node, a bogus value);
+///  * the best candidate = the highest last valid height among the sane ones;
+///  * it replaces the cache when its height is HIGHER (a newer blockhash), or when the cache is older than 10 s (a single
+///    bogus high answer can never freeze the cache). The SAME height never renews the timestamp (L5-1/L5-3: a stalled
+///    chain or node lets the cache age instead of looking fresh).
+fn pick_blockhash(cands: &[([u8; 32], u64, u64)], feed_slot: u64, cached: Option<([u8; 32], Duration, u64)>) -> Option<([u8; 32], u64)> {
+    let sane = |ctx: u64| feed_slot == 0 || (ctx + 150 >= feed_slot && ctx <= feed_slot + 150);
+    let best = cands.iter().filter(|c| c.1 > 0 && sane(c.2)).max_by_key(|c| c.1)?;
+    match cached {
+        None => Some((best.0, best.1)),
+        Some((_, age, cv)) if best.1 > cv || age > Duration::from_secs(10) => Some((best.0, best.1)),
+        _ => None,
+    }
+}
+static BH_REJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// the owner's M4-1: primary AND fallback queried IN PARALLEL; the newest answer (highest lastValidBlockHeight) is stored
 /// in BLOCKHASH_CACHE (an older answer never replaces a newer cached one). Ok(true) when the cache was updated.
@@ -166,17 +182,30 @@ async fn refresh_blockhash(rpc: &rpc::Rpc, cap: Duration) -> Result<bool> {
     if RPC_TRAP.load(Ordering::SeqCst) { panic!("RPC getLatestBlockhash on the no-RPC path (sell decision -> send)"); }
     let fb = async { match RPC_FB.get() { Some(f) => Some(latest_blockhash_one(f, cap).await), None => None } };
     let (a, b) = tokio::join!(latest_blockhash_one(rpc, cap), fb);
-    let best = [a.ok(), b.and_then(|x| x.ok())].into_iter().flatten().max_by_key(|x| x.1);
-    let Some((h, v)) = best else { bail!("getLatestBlockhash failed on every RPC") };
+    let cands: Vec<([u8; 32], u64, u64)> = [a.ok(), b.and_then(|x| x.ok())].into_iter().flatten().collect();
+    if cands.is_empty() { bail!("getLatestBlockhash failed on every RPC"); }
+    let feed = send::tpu::SLOT.load(Ordering::Relaxed);
     let mut g = BLOCKHASH_CACHE.lock().unwrap();
-    if g.is_none_or(|(_, _, cv)| v >= cv) { *g = Some((h, Instant::now(), v)); return Ok(true); }
-    Ok(false)
+    let cached = g.map(|(h, t, v)| (h, t.elapsed(), v));
+    match pick_blockhash(&cands, feed, cached) {
+        Some((h, v)) => { *g = Some((h, Instant::now(), v)); Ok(true) }
+        None => {
+            if cands.iter().all(|c| feed > 0 && !(c.2 + 150 >= feed && c.2 <= feed + 150)) {
+                let n = BH_REJECTS.fetch_add(1, Ordering::Relaxed) + 1;
+                drop(g);
+                if n == 1 || n % 100 == 0 { eprintln!("  BLOCKHASH candidate(s) REJECTED (#{n}): context slot(s) {:?} vs feed slot {feed} (> 150 apart)", cands.iter().map(|c| c.2).collect::<Vec<_>>()); }
+                bail!("every blockhash candidate was outside the feed's slot window");
+            }
+            Ok(false)
+        }
+    }
 }
 
 /// getLatestBlockhash for callers that need one now (buys' slow path): the parallel refresh, then the cache
 async fn latest_blockhash2(rpc: &rpc::Rpc) -> Result<([u8; 32], u64)> {
-    let _ = refresh_blockhash(rpc, Duration::from_secs(1)).await;
-    BLOCKHASH_CACHE.lock().unwrap().map(|(h, _, v)| (h, v)).context("getLatestBlockhash: no blockhash from any RPC")
+    // L5-1 (audit 5): a failed refresh is an error (never the stale cache passed off as new)
+    refresh_blockhash(rpc, Duration::from_secs(1)).await?;
+    cached_blockhash(Duration::from_secs(20)).context("getLatestBlockhash: no fresh blockhash from any RPC")
 }
 
 /// the owner's M4-1: the SELL path only READS the cache (kept fresh by the background refresher every ~400 ms). None:
@@ -367,94 +396,184 @@ fn alpenglow_warning() {
 // =====================================================================================================================
 mod altc {
     use super::*;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{HashMap, HashSet, VecDeque};
+    use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::{Mutex, OnceLock, RwLock};
 
     /// launchpad tables known to carry SOL-quoted rule-#2 creates (full keys)
     pub const KNOWN: [&str; 1] = ["HQ4G6FjmW8yZ15XGoiQdGDvbi5C7fJKktNg6pzCzdHg4"];
+    /// M5-1 (audit 5): bounds. At most RATE_PER_S fetches started per second, INFLIGHT at once, QUEUE_CAP waiting (the
+    /// oldest dropped), LRU_CAP tables cached (the least recently used 10% evicted past it)
+    pub const LRU_CAP: usize = 5_000;
+    const RATE_PER_S: u64 = 5;
+    const INFLIGHT: usize = 4;
+    const QUEUE_CAP: usize = 256;
 
-    static TABLES: std::sync::LazyLock<RwLock<HashMap<Pk, Arc<Vec<Pk>>>>> = std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
-    static PENDING: std::sync::LazyLock<Mutex<HashSet<Pk>>> = std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
-    static MISSED: std::sync::LazyLock<Mutex<HashSet<Pk>>> = std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+    struct Ent { addrs: Arc<Vec<Pk>>, last: AtomicU64 }
+    static TABLES: std::sync::LazyLock<RwLock<HashMap<Pk, Ent>>> = std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
+    /// the fetch queue (touched only on a relevant miss and by the dispatcher: never on a hit)
+    #[derive(Default)]
+    struct Q { queue: VecDeque<(Pk, bool, bool)>, queued: HashSet<Pk>, backoff: HashMap<Pk, (u32, Instant)>, missed: HashSet<Pk> }
+    static QU: std::sync::LazyLock<Mutex<Q>> = std::sync::LazyLock::new(|| Mutex::new(Q::default()));
+    static WATCHING: AtomicBool = AtomicBool::new(false);
+    static CLOCK: AtomicU64 = AtomicU64::new(1);
     static RPC: OnceLock<Arc<rpc::Rpc>> = OnceLock::new();
     static FILE: OnceLock<String> = OnceLock::new();
-    pub static HITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    pub static MISSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    pub static HITS: AtomicU64 = AtomicU64::new(0);
+    pub static MISSES: AtomicU64 = AtomicU64::new(0);
+    /// misses not fetched: not a create and no watched launch (M5-1)
+    pub static IGNORED: AtomicU64 = AtomicU64::new(0);
+    pub static FETCHED: AtomicU64 = AtomicU64::new(0);
+    pub static FAILED: AtomicU64 = AtomicU64::new(0);
+    pub static EVICTED: AtomicU64 = AtomicU64::new(0);
 
-    /// the outcome of resolving one tx's lookups against a table map (pure: unit-tested)
+    /// the outcome of resolving one tx's lookups (pure: unit-tested)
     #[derive(Debug, PartialEq, Eq)]
     pub enum Res { Done((Vec<Pk>, Vec<Pk>)), Missing(Vec<Pk>), Stale(Vec<Pk>) }
 
-    pub fn resolve_with(tx: &arbx::tx::Tx, tables: &HashMap<Pk, Arc<Vec<Pk>>>) -> Res {
+    pub fn resolve_with(tx: &arbx::tx::Tx, get: impl Fn(&Pk) -> Option<Arc<Vec<Pk>>>) -> Res {
         let (mut missing, mut stale) = (Vec::new(), Vec::new());
+        let mut got: Vec<Option<Arc<Vec<Pk>>>> = Vec::with_capacity(tx.lookups.len());
         for l in &tx.lookups {
-            match tables.get(&l.table) {
+            let t = get(&l.table);
+            match &t {
                 None => { if !missing.contains(&l.table) { missing.push(l.table); } }
                 Some(t) => if l.writable.iter().chain(&l.readonly).any(|&i| i as usize >= t.len()) && !stale.contains(&l.table) { stale.push(l.table); },
             }
+            got.push(t);
         }
         if !missing.is_empty() { return Res::Missing(missing); }
         if !stale.is_empty() { return Res::Stale(stale); }
         let (mut w, mut r) = (Vec::new(), Vec::new());
-        for l in &tx.lookups { let t = &tables[&l.table]; w.extend(l.writable.iter().map(|&i| t[i as usize])); }
-        for l in &tx.lookups { let t = &tables[&l.table]; r.extend(l.readonly.iter().map(|&i| t[i as usize])); }
+        for (l, t) in tx.lookups.iter().zip(&got) { let t = t.as_ref().unwrap(); w.extend(l.writable.iter().map(|&i| t[i as usize])); }
+        for (l, t) in tx.lookups.iter().zip(&got) { let t = t.as_ref().unwrap(); r.extend(l.readonly.iter().map(|&i| t[i as usize])); }
         Res::Done((w, r))
     }
 
-    /// fill `tx.loaded` from the cache (read lock only). false: a table is missing / stale (a fetch was started)
+    /// M5-1: a launch is being watched (race pending): unresolved pump buys are then worth fetching (bundle legs)
+    pub fn set_watching(b: bool) { WATCHING.store(b, Ordering::Relaxed); }
+
+    /// fill `tx.loaded` from the cache (read lock only; no allocation beyond the result, no logging). false: a table is
+    /// missing / stale; it is QUEUED for a fetch only when the tx matters (M5-1: a pump create, or an unresolved pump buy
+    /// while a launch is watched) — never for every tx on the feed
     pub fn fill(tx: &mut arbx::tx::Tx) -> bool {
         if tx.lookups.is_empty() || tx.loaded.is_some() { return true; }
-        let res = { let g = TABLES.read().unwrap(); resolve_with(tx, &g) };
-        match res {
-            Res::Done(l) => { tx.loaded = Some(l); HITS.fetch_add(1, Ordering::Relaxed); true }
-            Res::Missing(v) => { MISSES.fetch_add(1, Ordering::Relaxed); for t in v { request(t, false); } false }
-            Res::Stale(v) => { MISSES.fetch_add(1, Ordering::Relaxed); for t in v { request(t, true); } false }
-        }
+        let now = CLOCK.fetch_add(1, Ordering::Relaxed);
+        let res = { let g = TABLES.read().unwrap(); resolve_with(tx, |k| g.get(k).map(|e| { e.last.store(now, Ordering::Relaxed); e.addrs.clone() })) };
+        let (tabs, stale) = match res {
+            Res::Done(l) => { tx.loaded = Some(l); HITS.fetch_add(1, Ordering::Relaxed); return true; }
+            Res::Missing(v) => (v, false),
+            Res::Stale(v) => (v, true),
+        };
+        MISSES.fetch_add(1, Ordering::Relaxed);
+        let create = snipe::is_create_candidate(tx);
+        if create || (WATCHING.load(Ordering::Relaxed) && snipe::pump_buy_mint_unresolved(tx)) { for t in tabs { request(t, create, stale); } }
+        else { IGNORED.fetch_add(1, Ordering::Relaxed); }
+        false
     }
 
-    pub fn insert(table: Pk, addrs: Vec<Pk>) { TABLES.write().unwrap().insert(table, Arc::new(addrs)); }
+    /// test / preload: put a table in the cache
+    pub fn insert(table: Pk, addrs: Vec<Pk>) {
+        let mut g = TABLES.write().unwrap();
+        if g.len() >= LRU_CAP && !g.contains_key(&table) {
+            // M5-1: evict the least recently used 10%
+            let v: Vec<(u64, Pk)> = g.iter().map(|(k, e)| (e.last.load(Ordering::Relaxed), *k)).collect();
+            for k in lru_victims(v, (LRU_CAP / 10).max(1)) { g.remove(&k); EVICTED.fetch_add(1, Ordering::Relaxed); }
+        }
+        g.insert(table, Ent { addrs: Arc::new(addrs), last: AtomicU64::new(CLOCK.fetch_add(1, Ordering::Relaxed)) });
+    }
     pub fn len() -> usize { TABLES.read().unwrap().len() }
+    /// the `n` least recently used of (last use, table) (pure: unit-tested)
+    pub fn lru_victims(mut v: Vec<(u64, Pk)>, n: usize) -> Vec<Pk> { v.sort_unstable(); v.into_iter().take(n).map(|x| x.1).collect() }
+    /// is `table` waiting for a fetch (tests)
+    pub fn is_queued(table: &Pk) -> bool { QU.lock().unwrap().queued.contains(table) }
 
-    /// start one async fetch of `table` (deduplicated; never blocks the caller)
-    fn request(table: Pk, stale: bool) {
-        if !PENDING.lock().unwrap().insert(table) { return; }
-        if stale { eprintln!("  ALT-REFRESH {}: an index is past the cached length (the table was extended) — re-fetching", b58(&table)); }
-        else if MISSED.lock().unwrap().insert(table) { eprintln!("  ALT-MISS {}: lookup table not cached — this tx stays unresolved (fail closed); fetching it for the next ones", b58(&table)); }
-        match (RPC.get().cloned(), tokio::runtime::Handle::try_current()) {
-            (Some(rpc), Ok(h)) => { h.spawn(async move { let _ = fetch(&rpc, table).await; PENDING.lock().unwrap().remove(&table); }); }
-            _ => { PENDING.lock().unwrap().remove(&table); }
-        }
+    /// queue one fetch (deduplicated, per-table back-off after a failure, bounded queue). No logging here: the event loop
+    /// calls it
+    fn request(table: Pk, create: bool, stale: bool) {
+        let mut q = QU.lock().unwrap();
+        if q.queued.contains(&table) { return; }
+        if q.backoff.get(&table).is_some_and(|(_, until)| Instant::now() < *until) { return; }
+        if q.queue.len() >= QUEUE_CAP { if let Some((old, ..)) = q.queue.pop_front() { q.queued.remove(&old); } }
+        q.queued.insert(table);
+        q.queue.push_back((table, create, stale));
     }
 
-    /// getAccountInfo of a lookup table (call2: primary, then fallback RPC) into the cache
+    /// the one dispatcher: <= RATE_PER_S fetch starts per second, <= INFLIGHT at once; logs from the fetch tasks only
+    fn start_dispatcher(rpc: Arc<rpc::Rpc>) {
+        let sem = Arc::new(tokio::sync::Semaphore::new(INFLIGHT));
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(1000 / RATE_PER_S)).await;
+                let Ok(permit) = sem.clone().acquire_owned().await else { break };
+                let job = QU.lock().unwrap().queue.pop_front();
+                let Some((table, create, stale)) = job else { drop(permit); continue };
+                let rpc = rpc.clone();
+                tokio::spawn(async move {
+                    let _p = permit;
+                    let r = fetch(&rpc, table).await;
+                    let mut q = QU.lock().unwrap();
+                    q.queued.remove(&table);
+                    match r {
+                        Ok(n) => {
+                            q.backoff.remove(&table);
+                            let first_miss = create && q.missed.insert(table);
+                            if q.missed.len() > 20_000 { q.missed.clear(); }
+                            drop(q);
+                            if first_miss { eprintln!("  ALT-MISS {} (a pump create): was not cached — that create stayed unresolved (fail closed); now loaded ({n} addresses)", b58(&table)); }
+                            if stale { eprintln!("  ALT-REFRESH {}: the table was extended — re-fetched ({n} addresses)", b58(&table)); }
+                            if create { remember(table); }
+                        }
+                        Err(e) => {
+                            let k = q.backoff.get(&table).map(|x| x.0).unwrap_or(0) + 1;
+                            let wait = Duration::from_secs((5u64 << (k - 1).min(5)).min(120));
+                            q.backoff.insert(table, (k, Instant::now() + wait));
+                            if q.backoff.len() > 10_000 { let now = Instant::now(); q.backoff.retain(|_, (_, u)| *u > now); }
+                            drop(q);
+                            let f = FAILED.fetch_add(1, Ordering::Relaxed) + 1;
+                            if f == 1 || f % 50 == 0 { eprintln!("  ALT-FETCH-FAIL {} (#{f} so far): {} — retry after {} s", b58(&table), redact(&format!("{e:#}")).chars().take(120).collect::<String>(), wait.as_secs()); }
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    /// getAccountInfo of one lookup table: ONE RPC per fetch (M5-1): the primary (2 s), the fallback only on its error
     pub async fn fetch(rpc: &rpc::Rpc, table: Pk) -> Result<usize> {
-        let v = call2(rpc, "getAccountInfo(alt)", serde_json::json!([b58(&table), { "encoding": "base64", "commitment": "confirmed" }])).await?;
+        let params = serde_json::json!([b58(&table), { "encoding": "base64", "commitment": "confirmed" }]);
+        let one = |r: &rpc::Rpc| { let p = params.clone(); let r = r.clone(); async move { tokio::time::timeout(Duration::from_secs(2), r.call("getAccountInfo", p)).await.map_err(|_| anyhow::anyhow!("timed out"))? } };
+        let v = match one(rpc).await {
+            Ok(v) => v,
+            Err(e) => match RPC_FB.get() { Some(fb) => one(fb).await.map_err(|e2| anyhow::anyhow!("primary: {} | fallback: {}", redact(&format!("{e:#}")), redact(&format!("{e2:#}"))))?, None => return Err(e) },
+        };
         if v["value"].is_null() { bail!("lookup table {} does not exist", b58(&table)); }
         if v["value"]["owner"].as_str() != Some("AddressLookupTab1e1111111111111111111111111") { bail!("{} is not a lookup table", b58(&table)); }
         let data = base64::engine::general_purpose::STANDARD.decode(v["value"]["data"][0].as_str().unwrap_or("")).context("lookup table data")?;
         let addrs = arbx::tx::parse_alt(&data).context("lookup table layout")?;
         let n = addrs.len();
-        let new = !TABLES.read().unwrap().contains_key(&table);
         insert(table, addrs);
-        eprintln!("  ALT-LOADED {} ({n} addresses){}", b58(&table), if new { "" } else { " (refreshed)" });
-        if new { remember(table); }
+        let k = FETCHED.fetch_add(1, Ordering::Relaxed) + 1;
+        if k % 1000 == 0 { eprintln!("  ALT CACHE: {k} fetches so far, {} cached (cap {LRU_CAP}), {} evicted, {} failed, {} misses ignored (not relevant)", len(), EVICTED.load(Ordering::Relaxed), FAILED.load(Ordering::Relaxed), IGNORED.load(Ordering::Relaxed)); }
         Ok(n)
     }
 
-    /// --alt-cache-file: keep the last 200 tables seen (one base58 key per line)
+    /// --alt-cache-file: keep the last 200 tables seen in pump creates (one base58 key per line)
     fn remember(table: Pk) {
         let Some(path) = FILE.get() else { return };
         let mut v: Vec<String> = std::fs::read_to_string(path).unwrap_or_default().lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         let k = b58(&table);
+        if v.last() == Some(&k) { return; }
         v.retain(|x| *x != k);
         v.push(k);
         if v.len() > 200 { v.drain(..v.len() - 200); }
         let _ = std::fs::write(path, v.join("\n") + "\n");
     }
 
-    /// start-up: remember the RPC, preload KNOWN + the cache file + --alt-preload (bounded wait; a failure is logged)
+    /// start-up: the dispatcher, then preload KNOWN + the cache file + --alt-preload (8 at a time, 15 s bound)
     pub async fn init(rpc: Arc<rpc::Rpc>) {
         let _ = RPC.set(rpc.clone());
+        start_dispatcher(rpc.clone());
         let mut list: Vec<String> = KNOWN.iter().map(|s| s.to_string()).collect();
         if let Some(p) = arg("--alt-cache-file") {
             list.extend(std::fs::read_to_string(&p).unwrap_or_default().lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
@@ -464,16 +583,18 @@ mod altc {
         let mut seen = HashSet::new();
         let tabs: Vec<Pk> = list.iter().filter_map(|s| bs58::decode(s).into_vec().ok().filter(|v| v.len() == 32).map(|v| { let mut k = [0u8; 32]; k.copy_from_slice(&v); k })).filter(|k| seen.insert(*k)).collect();
         let t0 = Instant::now();
+        let sem = Arc::new(tokio::sync::Semaphore::new(8));
         let mut js = tokio::task::JoinSet::new();
-        for t in &tabs { let (rpc, t) = (rpc.clone(), *t); js.spawn(async move { (t, fetch(&rpc, t).await) }); }
+        for t in &tabs { let (rpc, t, sem) = (rpc.clone(), *t, sem.clone()); js.spawn(async move { let _p = sem.acquire_owned().await; (t, fetch(&rpc, t).await) }); }
         let res = tokio::time::timeout(Duration::from_secs(15), async { let mut v = Vec::new(); while let Some(Ok(x)) = js.join_next().await { v.push(x); } v }).await;
         match res {
             Ok(v) => {
                 let ok = v.iter().filter(|x| x.1.is_ok()).count();
-                for (t, r) in &v { if let Err(e) = r { eprintln!("  ALT-PRELOAD {} failed: {}", b58(t), redact(&format!("{e:#}"))); } }
-                eprintln!("ALT CACHE: preloaded {ok} of {} lookup table(s) in {:.1} s (known launchpad tables + {})", tabs.len(), t0.elapsed().as_secs_f64(), FILE.get().map(|s| s.as_str()).unwrap_or("no --alt-cache-file"));
+                for (t, r) in v.iter().filter(|x| x.1.is_err()).take(5) { if let Err(e) = r { eprintln!("  ALT-PRELOAD {} failed: {}", b58(t), redact(&format!("{e:#}"))); } }
+                eprintln!("ALT CACHE: preloaded {ok} of {} lookup table(s) in {:.1} s (known launchpad tables + {}); fetch limits {RATE_PER_S}/s, {INFLIGHT} in flight, LRU cap {LRU_CAP}",
+                    tabs.len(), t0.elapsed().as_secs_f64(), FILE.get().map(|s| s.as_str()).unwrap_or("no --alt-cache-file"));
             }
-            Err(_) => eprintln!("ALT CACHE: preload of {} table(s) timed out after 15 s ({} cached; the rest load on first sight)", tabs.len(), len()),
+            Err(_) => eprintln!("ALT CACHE: preload of {} table(s) timed out after 15 s ({} cached; the rest load on first relevant sight)", tabs.len(), len()),
         }
     }
 }
@@ -1013,6 +1134,13 @@ fn main() -> Result<()> {
 async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_probe: bool, shadow: bool, round_trip: bool, snipe_once: bool, simulate: bool, paper_trade: bool, live: bool) -> Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     let _ = RUN_STOP.set(stop.clone());
+    // M5-2: the primary must be mainnet too (a wrong-cluster RPC would feed blockhashes and balances)
+    match tokio::time::timeout(Duration::from_secs(5), rpc.call("getGenesisHash", serde_json::json!([]))).await {
+        Ok(Ok(v)) if v.as_str() == Some(MAINNET_GENESIS) => {}
+        Ok(Ok(v)) => bail!("rpc_url: genesis hash {v} is NOT mainnet ({MAINNET_GENESIS}) — refusing to start"),
+        Ok(Err(e)) => eprintln!("WARNING: rpc_url getGenesisHash failed ({}) — cluster not verified", redact(&format!("{e:#}"))),
+        Err(_) => eprintln!("WARNING: rpc_url getGenesisHash timed out — cluster not verified"),
+    }
     let infra = INFRA_STOP.clone();
     // H-1 (audit 3): --rpc-fallback-url-env NAME: the second RPC of the exit path (the URL from env var NAME, never printed).
     // Given but empty / missing: refuse to start (fail closed).
@@ -1020,6 +1148,14 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         let url = std::env::var(&name).ok().filter(|u| !u.trim().is_empty()).with_context(|| format!("--rpc-fallback-url-env {name}: the env var is empty or missing — refusing to start"))?;
         let url = config::expand(url.trim()).with_context(|| format!("--rpc-fallback-url-env {name}: names an empty env var"))?;
         let fb = rpc::Rpc::new(url);
+        // M5-2 (audit 5): the fallback must be MAINNET (genesis hash), or no start: it feeds the blockhash and every exit read
+        let g = tokio::time::timeout(Duration::from_secs(5), fb.call("getGenesisHash", serde_json::json!([]))).await;
+        match g {
+            Ok(Ok(v)) if v.as_str() == Some(MAINNET_GENESIS) => eprintln!("RPC-FALLBACK: {name} genesis = mainnet ({}…)", &MAINNET_GENESIS[..8]),
+            Ok(Ok(v)) => bail!("--rpc-fallback-url-env {name}: genesis hash {v} is NOT mainnet ({MAINNET_GENESIS}) — refusing to start"),
+            Ok(Err(e)) => bail!("--rpc-fallback-url-env {name}: getGenesisHash failed ({}) — cannot verify the cluster: refusing to start", redact(&format!("{e:#}"))),
+            Err(_) => bail!("--rpc-fallback-url-env {name}: getGenesisHash timed out — cannot verify the cluster: refusing to start"),
+        }
         match tokio::time::timeout(Duration::from_secs(5), fb.slot()).await {
             Ok(Ok(sl)) => eprintln!("RPC-FALLBACK: {name} answers (slot {sl}); the exit path's reads + sell blockhashes fall back to it"),
             Ok(Err(e)) => eprintln!("RPC-FALLBACK: {name} did NOT answer getSlot at start ({}) — kept as the fallback anyway", redact(&format!("{e:#}")).chars().take(120).collect::<String>()),
@@ -1164,8 +1300,18 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         tokio::spawn(async move {
             // M4-1 (owner): primary AND fallback in parallel every ~400 ms, the newest blockhash kept (the sell path only
             // reads this cache)
+            // M5-2: no usable blockhash for > 5 s (no newer one accepted from either RPC) = log loudly and stop NEW fires
+            // (open positions keep trying: the sell path uses the cache up to 20-25 s, then the inline refresh)
+            let t_start = Instant::now();
+            let mut tripped = false;
             while !stop.load(Ordering::Relaxed) {
                 let _ = refresh_blockhash(&rpc, Duration::from_secs(1)).await;
+                let age = BLOCKHASH_CACHE.lock().unwrap().map(|(_, t, _)| t.elapsed()).unwrap_or_else(|| t_start.elapsed());
+                if !tripped && age > Duration::from_secs(5) {
+                    tripped = true;
+                    if let Some(st) = RUN_STOP.get() { st.store(true, Ordering::SeqCst); }
+                    eprintln!("  !!!!! STOP: NO USABLE BLOCKHASH for {:.1} s (neither RPC returned a newer one in the feed's slot window) — NO NEW FIRES; open positions keep trying to sell !!!!!", age.as_secs_f64());
+                }
                 tokio::time::sleep(Duration::from_millis(400)).await;
             }
         });
@@ -1823,6 +1969,8 @@ async fn land_check(rpc: &rpc::Rpc, sig_bytes: &[u8; 64], watch: Watch, out: &mu
     // H-1 primary then fallback; M-2 the status keeps the on-chain error
     let ss = [bs58::encode(sig_bytes).into_string()];
     let (st, tk) = tokio::join!(call2(rpc, "getSignatureStatuses", serde_json::json!([ss, { "searchTransactionHistory": false }])), tk);
+    // L5-2 (audit 5): keep the token amount the buy's account read saw, EVEN when the signature status wins this round
+    if let (Watch::BuyAta(_), Some(Tok::Amount(a, _))) = (watch, tk) { if a > 0 { out.tokens = Some(a); } }
     match st {
         Ok(v) => if let Some(x) = v["value"].get(0).filter(|x| !x.is_null()) {
             out.land_slot = Some(x["slot"].as_u64().unwrap_or(0)); out.ok = x["err"].is_null(); out.t_seen = Some(Instant::now()); out.via = "status";
@@ -1831,7 +1979,6 @@ async fn land_check(rpc: &rpc::Rpc, sig_bytes: &[u8; 64], watch: Watch, out: &mu
         },
         Err(e) => poll_err("getSignatureStatuses", &e),
     }
-    if let (Watch::BuyAta(_), Some(Tok::Amount(a, _))) = (watch, tk) { if a > 0 { out.tokens = Some(a); } }
     let (landed, ctx) = match (watch, tk) {
         (Watch::BuyAta(_), Some(Tok::Amount(a, c))) => (a > 0, c),
         (Watch::SellAta(_, before, _), Some(Tok::Amount(a, c))) => (a < before, c),
@@ -2826,6 +2973,7 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
         det.health(&_feeds);
         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
         if let Some(arbx::feeds::Event::Tx(mut a)) = ev {
+            altc::set_watching(!race.pend.is_empty()); // M5-1: unresolved pump buys are fetched only while a launch is watched
             altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
             if race.cfg.glued { race.note_hit(&a.tx); }
             det.note(&a);
@@ -3287,6 +3435,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         det.health(&_feeds);
         if let Some(arbx::feeds::Event::Status { feed, msg }) = &ev { eprintln!("  FEEDSTATUS feed={} {msg}", det.name(*feed)); }
         if let Some(arbx::feeds::Event::Tx(mut a)) = ev {
+            altc::set_watching(!race.pend.is_empty()); // M5-1: unresolved pump buys are fetched only while a launch is watched
             altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
             if race.cfg.glued { race.note_hit(&a.tx); }
             // DET FIX: the current slot for leader targeting / send_slot comes from the shred feed (the leader's slot as it
@@ -3458,8 +3607,9 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     if gate.max_ms.is_some() { eprintln!("CREATE-MS GATE: passed {} skipped late {} skipped unknown {}", gate.passed, gate.late, gate.unknown); }
     eprintln!("MAX-INFLIGHT: skipped {skipped_inflight} qualifying launches (all {max_inflight} slots busy)");
     eprintln!("SKIPPED: balance {skipped_balance}, budget {skipped_budget}, max-buys {skipped_maxbuys}");
-    eprintln!("ALT CACHE: {} table(s) cached; {} tx(s) resolved from it, {} unresolved (table missing / stale at arrival: fail closed)",
-        altc::len(), altc::HITS.load(Ordering::Relaxed), altc::MISSES.load(Ordering::Relaxed));
+    eprintln!("ALT CACHE: {} table(s) cached (cap {}); {} tx(s) resolved from it, {} unresolved at arrival (fail closed; {} not relevant: not fetched); {} fetches, {} failed, {} evicted",
+        altc::len(), altc::LRU_CAP, altc::HITS.load(Ordering::Relaxed), altc::MISSES.load(Ordering::Relaxed), altc::IGNORED.load(Ordering::Relaxed),
+        altc::FETCHED.load(Ordering::Relaxed), altc::FAILED.load(Ordering::Relaxed), altc::EVICTED.load(Ordering::Relaxed));
     if uri_whitelist { eprintln!("URI-HOST GATE: skipped {skipped_host} non-trusted-host launches"); }
     // H1: the drain covers the worst-case position: land timeout + late-land watch + hold cap + the sell deadline + one
     // last sell wait + the realized-PnL lookups, plus margin
@@ -5649,11 +5799,13 @@ mod audit_tests {
         assert_eq!(snipe::create_quote_mint(&tx0), Some(snipe::UNRESOLVED_QUOTE));
         // cache states: missing / stale (table shorter than an index) / done
         let mut m: HashMap<Pk, Arc<Vec<Pk>>> = HashMap::new();
-        assert_eq!(altc::resolve_with(&tx0, &m), altc::Res::Missing(vec![table]));
+        assert_eq!(altc::resolve_with(&tx0, |k| m.get(k).cloned()), altc::Res::Missing(vec![table]));
         m.insert(table, Arc::new(addrs[..20].to_vec()));
-        assert_eq!(altc::resolve_with(&tx0, &m), altc::Res::Stale(vec![table]));
+        assert_eq!(altc::resolve_with(&tx0, |k| m.get(k).cloned()), altc::Res::Stale(vec![table]));
         m.insert(table, Arc::new(addrs.clone()));
-        let altc::Res::Done(loaded) = altc::resolve_with(&tx0, &m) else { panic!("resolves") };
+        let altc::Res::Done(loaded) = altc::resolve_with(&tx0, |k| m.get(k).cloned()) else { panic!("resolves") };
+        // M5-1: the create is a create candidate (its fetch would be queued); its legs are not creates
+        assert!(snipe::is_create_candidate(&tx0));
         // equal to what the RPC itself resolved for this transaction
         let rl: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/alt_hq4g/create_loaded.json")).unwrap();
         let ks = |k: &str| -> Vec<Pk> { rl[k].as_array().unwrap().iter().map(|x| pk(x.as_str().unwrap())).collect() };
@@ -5734,6 +5886,51 @@ mod audit_tests {
         eprintln!("M4-1 SELL decision->send pre-work (ixs + cached blockhash + build + sign, 2 paths), no RPC: p50 {:.1} us p99 {:.1} us",
             us[us.len() / 2] as f64 / 1e3, us[us.len() * 99 / 100] as f64 / 1e3);
         assert!(us[us.len() / 2] < 5_000_000, "pre-send far slower than expected");
+    }
+
+    /// M5-2 / L5-1 / L5-3 (audit 5): the blockhash cache's acceptance rule
+    #[test]
+    fn pick_blockhash_m52() {
+        let (h1, h2, h3) = ([1u8; 32], [2u8; 32], [3u8; 32]);
+        let feed = 459_000_000u64;
+        let s = Duration::from_secs;
+        // empty cache: the highest sane height
+        assert_eq!(pick_blockhash(&[(h1, 100, feed), (h2, 105, feed - 2)], feed, None), Some((h2, 105)));
+        // a candidate from another cluster / a stuck node (context slot far from the feed) is rejected, even if higher
+        assert_eq!(pick_blockhash(&[(h1, 100, feed), (h3, 999_999, feed - 10_000)], feed, None), Some((h1, 100)));
+        assert_eq!(pick_blockhash(&[(h3, 999_999, feed + 10_000)], feed, None), None);
+        // a newer (higher) height replaces a young cache; the SAME height never renews it (L5-1/L5-3); lower is ignored
+        assert_eq!(pick_blockhash(&[(h2, 106, feed)], feed, Some((h1, s(1), 105))), Some((h2, 106)));
+        assert_eq!(pick_blockhash(&[(h1, 105, feed)], feed, Some((h1, s(1), 105))), None);
+        assert_eq!(pick_blockhash(&[(h1, 104, feed)], feed, Some((h1, s(1), 105))), None);
+        // a single bogus HIGH answer cannot freeze the cache: once the cache is > 10 s old, the freshest sane answer wins
+        assert_eq!(pick_blockhash(&[(h1, 200, feed)], feed, Some((h3, s(3), 900_000))), None);
+        assert_eq!(pick_blockhash(&[(h1, 200, feed)], feed, Some((h3, s(11), 900_000))), Some((h1, 200)));
+        // feed slot unknown (0): no window
+        assert_eq!(pick_blockhash(&[(h1, 7, 5)], 0, None), Some((h1, 7)));
+    }
+
+    /// M5-1 (audit 5): only relevant txs queue a lookup-table fetch; the LRU evicts the least recently used
+    #[tokio::test]
+    async fn alt_fetch_relevance_m51() {
+        let mk = |table: Pk, create: bool| {
+            let mut d = if create { snipe::CREATE_V2_DISC.to_vec() } else { vec![9u8; 8] };
+            d.extend([0u8; 16]);
+            arbx::tx::Tx { keys: vec![[1u8; 32], *snipe::PUMP], lookups: vec![arbx::tx::Lookup { table, writable: vec![0], readonly: vec![1] }],
+                ixs: vec![arbx::tx::Ix { program: 1, accounts: vec![0, 2], data: d }], ..Default::default() }
+        };
+        let (t_other, t_create) = ([0xA1u8; 32], [0xA2u8; 32]);
+        altc::set_watching(false);
+        // an unresolved non-create pump tx while nothing is watched: NOT fetched
+        assert!(!altc::fill(&mut mk(t_other, false)));
+        assert!(!altc::is_queued(&t_other));
+        // an unresolved create: queued (once)
+        assert!(snipe::is_create_candidate(&mk(t_create, true)));
+        assert!(!altc::fill(&mut mk(t_create, true)));
+        assert!(altc::is_queued(&t_create));
+        // LRU: the oldest last-use go first
+        let v = vec![(5, [5u8; 32]), (1, [1u8; 32]), (9, [9u8; 32]), (3, [3u8; 32])];
+        assert_eq!(altc::lru_victims(v, 2), vec![[1u8; 32], [3u8; 32]]);
     }
 
     #[test]

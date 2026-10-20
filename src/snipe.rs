@@ -266,6 +266,16 @@ pub fn detect_cpi_create(tx: &Tx) -> Option<Pk> {
     tx.keys.get(1).copied()
 }
 
+/// M5-1 (audit 5): a pump create candidate WITHOUT resolving lookup tables (top-level program ids are always static keys):
+/// a top-level pump create / create_v2 instruction, or any top-level instruction of pump's router (its creates are CPIs)
+pub fn is_create_candidate(tx: &Tx) -> bool {
+    !tx.is_vote && tx.ixs.iter().any(|ix| match tx.keys.get(ix.program as usize) {
+        Some(p) if *p == *PUMP => ix.data.len() >= 8 && (ix.data[0..8] == CREATE_V2_DISC || ix.data[0..8] == CREATE_DISC),
+        Some(p) => *p == *PUMP_ROUTER,
+        None => false,
+    })
+}
+
 /// pump.fun's router program: `CreateCoinAndBuyBondingCurveV3` (dev pays USDC, the router swaps and buys on a SOL curve)
 /// and `CreateCoinAndBuyJupiterBondingCurve` (non-SOL quote curves). Its create is a CPI: no top-level create ix.
 pub static PUMP_ROUTER: LazyLock<Pk> = LazyLock::new(|| crate::tx::pk("6Vo3245eszAb5wuqEMw8mGdbfRUdKbHhDHP5LcaGuTAB"));
