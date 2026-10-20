@@ -12,7 +12,7 @@ LOG=/root/run1/${TAG}.log; : > $LOG
 if [ "${DRY:-0}" = 1 ]; then LIVE=""; else LIVE="--live"; fi   # DRY=1: no sends at all
 setsid nohup bash -c "
   $B --shadow --warm-probe-on-trigger $LIVE --max-sol $MAXSOL --max-sends $N --duration-s ${DURATION:-3600} --max-inflight 16 \
-     --probe-paths staked-rpc,nozomi,astralane,helius,landx-fra3,jito-bundle --probe-log /root/run1/${TAG}.jsonl \
+     --probe-paths ${PATHS:-staked-rpc,nozomi,astralane,helius,landx-fra3,jito-bundle} --probe-log /root/run1/${TAG}.jsonl \
      --cu-price-micro 110000000 --probe-cu-limit 450 --min-dev-buy 1000000 --land-poll-ms 300 --land-timeout-ms 8000 \
      --close-leaders /root/fix2/close_leaders_5ms.txt --send-path staked-rpc \
      --config /root/run1/probe_routes.toml --env-file /root/sniper/deploy/.env \

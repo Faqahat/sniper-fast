@@ -49,7 +49,12 @@ set -a; . /root/sniper/deploy/.env; set +a
 B=/root/sniper-run1/target/release/snipe_engine
 ENV_NAME=${ENV_NAME:-DEV}
 C=/root/run1/run1_landing.toml
-ROUTES="bam=jito-bundle+landx-fra3+staked-rpc;harmonic=jito-bundle+nozomi+staked-rpc;jito=jito-bundle+landx-fra3+staked-rpc;fd=jito-bundle+astralane+nozomi+staked-rpc;agave=helius+nozomi+staked-rpc;other=helius+nozomi+landx-fra3+staked-rpc;default=jito-bundle+landx-fra3+helius+staked-rpc"
+# 2026-10-20 (owner OK "ok go", after the route probe + Jito-tip study): a buy that carries a Jito tip but reaches a
+# Jito-client / Harmonic leader outside a bundle lands late (median position 178th; ours 96-148 ms vs 25-32 ms for
+# tip-free probes on the same validators) and Jito bundles themselves take ~53 ms (Harmonic ~88-139). So: no jito-bundle
+# (and no Jito tip) except on BAM (bundles ~20 ms there); Astralane (new key, HTTP 401 before) everywhere; Helius on
+# Jito-client leaders (the pros that beat us on HEL1US used it). Previous: "bam=jito-bundle+landx-fra3+staked-rpc;harmonic=jito-bundle+nozomi+staked-rpc;jito=jito-bundle+landx-fra3+staked-rpc;fd=jito-bundle+astralane+nozomi+staked-rpc;agave=helius+nozomi+staked-rpc;other=helius+nozomi+landx-fra3+staked-rpc;default=jito-bundle+landx-fra3+helius+staked-rpc"
+ROUTES="bam=jito-bundle+nozomi+landx-fra3+staked-rpc+astralane;harmonic=nozomi+astralane+landx-fra3+staked-rpc;jito=nozomi+helius+astralane+landx-fra3+staked-rpc;fd=nozomi+astralane+staked-rpc;agave=nozomi+helius+astralane+staked-rpc;other=nozomi+helius+astralane+landx-fra3+staked-rpc;default=nozomi+helius+astralane+landx-fra3+staked-rpc"
 FLAGS=(--uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8
   --dev-from-cap --race-gate --race-min-bundle 1 --race-min-bundle-sol 3 --race-max-bundle-sol 5 --race-create-tip-prefix moon --race-bundle-ms 3 --race-glued
   --race-pros /root/race/pros.json --race-early
