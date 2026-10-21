@@ -4,19 +4,20 @@ Follow-up to FILTERS.md (bundle size, tip, dev buy, host, create time, leader cl
 
 ## Summary
 
-- **One strong signal: the creator's own track record (REP).** 26–42% of the launches we watch come from a creator we have already watched (in our gapped logs). If that creator's earlier launches made money on our model (sum of their S+2 PnL > 0), the next launch also tended to make money.
+- **One real signal: the creator's own track record (REP).** 26–42% of the launches we watch come from a creator we have already watched (in our gapped logs). If that creator's earlier launches made money on our model (sum of their S+2 PnL > 0), the next launch also tended to make money.
   - Per launch: **+0.112 (A, 26 launches), +0.077 (B, 38), +0.065 (C, 3), +0.045 (D, 45) SOL**. Win rate 49–67%. Positive with a 20 ms slower landing in every period, and without the best 3 launches in A, B and D (C has only 3). Positive in 10 of the 12 logs that had any.
   - Out of sample (B+C+D): **+0.060 SOL per launch, 90% interval +0.033 to +0.093** (86 launches, 32 creators; the interval resamples creators).
   - The opposite also holds: a creator whose earlier launches were net zero or negative lost **−0.026 / −0.044 / −0.011 / −0.035 per launch** (out of sample −0.040, interval −0.049 to −0.032, 209 launches). Negative in all 12 logs.
   - **Frozen-list test** (the way a cache would be used): good/bad creator lists built only from launches before 10:13 today, applied unchanged to today's D: good-list creators **36 launches, +0.062 each (+2.22 SOL)**; bad-list creators 46 launches, −0.035 each; never-seen creators 170, −0.012 each.
+  - **Fresh check after the study (period E, 12:37–13:26 UTC, 129 launches, `paper_rep.py`, nothing tuned): weaker.** REP 30 launches **+0.024 each** (13 creators; median −0.016, win 37%; −0.005 each if we land 20 ms later; negative without the best 3). Bad history 33 launches −0.019 each. The market split still held (price ≥ 1.1x at the end of S+2: REP 47%, bad history 6%), but it paid less on our fills.
   - **It is a market effect, not only a model effect (measured).** REP launches got a median 1.2–3.1 SOL of outside buys in S..S+2, against 0.1–0.3 for bad-history creators. Their price at the end of S+2 was ≥ 1.1x the post-bundle price in 31–63% of launches, against 6–13%. A model-free version of the rule (the creator's last launch rose ≥ 10% by the end of S+2) is also positive in all four periods.
 - **Inside rule #2, nothing non-bundle helps.**
   - Reputation does not split rule #2: first-time creators did as well as REP creators. Skipping bad-history creators keeps 37 of 48 out-of-sample rule #2 launches and changes the out-of-sample total from +1.98 to +1.99 SOL.
   - The create tx inside rule #2 is one tool's fingerprint: 63 of 67 rule #2 launches have identical j7tracker defaults (cu 333333/300000, 15 keys, 6 instructions, 1 lookup table, 0.0025 SOL Lunar transfer). No create-tx field can separate its winners from its losers.
   - Text (name/symbol/URI/keywords), dev-buy amount, regime and hour: no split that holds across periods.
   - Rule #2 itself was near break-even today: D 16 launches, **+0.007 SOL each** (A +0.133, B +0.058).
-- **REP adds profitable launches outside rule #2.** REP launches that rule #2 does not take: **+0.103 (A, 20), +0.082 (B, 30), +0.058 (C, 2), +0.055 (D, 37)** per launch, about 9–15 launches/h (2.4/h in the quiet C morning). Out of sample **+0.067 per launch (interval +0.038 to +0.101, n = 69)**.
-  - Rule #2 OR REP: A 39 launches +4.58 SOL, B 61 +4.25, C 3 +0.20, **D 53 +2.16 (rule #2 alone: 16, +0.11)**.
+- **REP adds profitable launches outside rule #2.** REP launches that rule #2 does not take: **+0.103 (A, 20), +0.082 (B, 30), +0.058 (C, 2), +0.055 (D, 37)** per launch, about 9–15 launches/h (2.4/h in the quiet C morning). Out of sample **+0.067 per launch (interval +0.038 to +0.101, n = 69)**. Fresh E: +0.022 per launch (27).
+  - Rule #2 OR REP: A 39 launches +4.58 SOL, B 61 +4.25, C 3 +0.20, **D 53 +2.16 (rule #2 alone: 16, +0.11)**, E 32 +0.63 (rule #2 alone: 5, +0.05).
 - **Bad history is a useful SKIP for the wider triggers.** For C7 (no-bundle Harmonic) it removed 29 launches in A, B and D with just 1 winner among them (+0.24 / +0.58 / +0.28 SOL). For C6's added launches it helped in A/B but not today (C6 added launches lost −0.035 each today either way).
 - **Leader skip list: real but small.** Five leaders chosen on A (CMPSSdrT and 3JotfSFP on BAM, CQdLgwkm and DrifTrN9 on Harmonic, EvnRmnMr "other") lose out of sample too: −0.025 (B, 64 launches) and −0.040 (D, 39) per launch. They touch only 2 rule #2 launches out of sample. C8Bey3LK is not bad on the model (+0.016 to +0.118 per launch); the model has no leader-specific latency, so this cannot settle whether it is slow for us.
 - **On-chain creator history (public RPC) adds little.** Wallet prior tx count, the creator's earlier pump.fun trading (their creator-vault PDA: trades on their earlier coins) and the wallet's first funder do not split launches consistently.
@@ -28,8 +29,9 @@ Follow-up to FILTERS.md (bundle size, tip, dev buy, host, create time, leader cl
 
 - **Paper-test REP now (zero cost), alongside rule #2.**
   - Fire on any watched launch (base filter + close leader) whose creator's earlier watched launches are net positive on the model. The creator list is a cache refreshed by the recorder after each launch settles (~1–2 min). At fire time it is one hash lookup on the creator, so there is no added latency (sketch below).
-  - Promote to live only if paper shows **≥ +0.03 SOL per REP launch over ≥ 60 REP launches** (and the +20 ms column stays positive).
-  - Confidence: **medium**. It holds in all four periods, in a frozen-list test on today's data, and on a model-free check. But n is 112 launches from 39 creators, and these launch shapes have no measured landing time.
+  - Promote to live only if paper shows **≥ +0.03 SOL per REP launch over ≥ 60 REP launches** (and the +20 ms column stays positive). `paper_rep.py` keeps this tally at zero cost from the paper_c6 loop's recordings. The first fresh 30 launches (E) are at +0.024, with the +20 ms column at −0.005, so the bar is not met yet.
+  - Confidence: **medium-low**. It held in A, B, C and D, in a frozen-list test on D, and on a model-free check. But the fresh E data are weaker, n is 112 (+30) launches from ~40 creators, a few serial launchers dominate (57jABU: 11 launches in 50 min in E), and these launch shapes have no measured landing time.
+  - If it is built, cap fires per creator (for example ≤ 3 per hour) so one serial launcher cannot dominate.
 - **Use "bad history" as a skip on any wider trigger** (C6/C7) if one is promoted. Confidence medium; it is cheap.
 - **Leave rule #2 unchanged.** No non-bundle signal improves it (confidence medium-high, but rule #2's n is small).
 - Optional: add the five-leader skip list to the wider triggers only. Low value for rule #2.
@@ -437,11 +439,28 @@ First funders: 470 distinct; 16 funded >= 3 of our creators, covering 267 launch
 | iGdFcQoy | 10 | 10 | 3, +0.188 | 4, +0.051 | 0 | 3, -0.037 |
 | ASTyfSim | 10 | 10 | 8, -0.022 | 1, -0.008 | 0 | 1, -0.034 |
 | HckQ93Xq | 7 | 18 | 3, +0.040 | 5, +0.141 | 0 | 10, -0.016 |
-| 9Aq176CZ | 6 | 6 | 2, +0.027 | 4, -0.002 | 0 | 0 |
 | AxiomRXZ | 6 | 17 | 0 | 12, -0.050 | 2, -0.051 | 3, -0.021 |
+| 9Aq176CZ | 6 | 6 | 2, +0.027 | 4, -0.002 | 0 | 0 |
 | is6MTRHE | 5 | 5 | 1, -0.053 | 0 | 1, -0.050 | 3, -0.173 |
 | 49CfXAr5 | 5 | 5 | 4, -0.054 | 1, -0.053 | 0 | 0 |
 | 5W25GRdC | 5 | 17 | 5, -0.022 | 8, -0.006 | 1, -0.019 | 3, -0.021 |
+
+### 7. Fresh check after the study (period E: live paper 12:37–13:26 UTC)
+
+Run after FILTERS2.md's numbers were fixed. Nothing was tuned on E. `paper_rep.py` reads the paper_c6 loop's recordings without touching them, prices every new watched launch on the same model, and judges each one only by its creator's launches that ended ≥ 550 slots (~2 min) earlier. The history seed is every launch in A–D.
+
+| set (E, 0.86 h) | n | /h | creators | PnL S+2 | per launch | median | win | +20 ms S+2 | w/o best 3 | price ≥ 1.1x at S+2 | median outside buys S..S+2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| all watched | 129 | 150.7 | 95 | +2.34 | +0.018 | -0.036 | 28% | -1.10 | -2.29 | 26% | 0.55 |
+| rule #2 | 5 | 5.8 | 4 | +0.05 | +0.010 | -0.048 | 40% | +0.05 | -0.11 | 40% | 0.10 |
+| REP | 30 | 35.1 | 13 | +0.73 | +0.024 | -0.016 | 37% | -0.14 | -0.13 | 47% | 1.25 |
+| REP minus rule #2 | 27 | 31.5 | 12 | +0.58 | +0.022 | -0.018 | 33% | -0.29 | -0.29 | 44% | 1.17 |
+| bad history | 33 | 38.6 | 24 | -0.63 | -0.019 | -0.033 | 24% | -0.74 | -0.87 | 6% | 0.49 |
+| first-time creator | 66 | 77.1 | 65 | +2.23 | +0.034 | -0.042 | 26% | -0.23 | -2.40 | 26% | 0.38 |
+
+- REP is still above bad history, and REP launches still get far more outside buying, but the per-launch PnL is about half of D's and does not survive a 20 ms slower landing. First-time creators' +0.034 comes from two outliers (+1.99, +2.26 SOL).
+- REP in E is concentrated: 57jABU (11 launches in 50 min, no bundle, "other tip service" transfer) and GeUnv1 (5).
+- To continue the tally: `python3 -I ops/research/paper_rep.py <paper_c6 dir> <own dir> <tipmap.json>` after each paper_c6 pass (state in `<own dir>/rep_state.json`).
 
 ## How REP could be used without adding latency (sketch, not built)
 
@@ -452,7 +471,7 @@ First funders: 470 distinct; 16 funded >= 3 of our creators, covering 267 launch
 
 ## Caveats (labelled)
 
-- **Small n (measured).** REP has 26 / 38 / 3 / 45 launches in A / B / C / D from 16 / 22 / 3 / 16 creators. 112 REP launches from 39 distinct creators over 8.2 hours of logs; the out-of-sample creator-clustered interval is above zero, but a few dozen creators is a small base.
+- **Small n (measured).** REP has 26 / 38 / 3 / 45 launches in A / B / C / D from 16 / 22 / 3 / 16 creators. 112 REP launches from 39 distinct creators over 8.2 hours of logs, plus 30 fresh ones in E; the out-of-sample creator-clustered interval for B+C+D is above zero, but a few dozen creators is a small base, and E came in at half of D.
 - **The model is the judge twice (inference).** REP uses the model's PnL of a creator's earlier launches to predict the model's PnL of the next one. If the model has a per-creator bias (for example a creator whose followers our feed misses), REP could partly predict model artefacts. Against this: the model-free market response (table 1f: outside-buy SOL in S..S+2 and price ratio) is also several times higher for REP launches, and the model-free variant of the rule also works (1e).
 - **Landing model (inference).** Most REP launches are not rule #2 shapes (no bundle, other tips, Harmonic leaders). Our landing time for them is the per-leader-type median, not a measurement on those launches. The +20 ms column stays positive in every period, but live fills have been worse than the model before (live median fill ~1.25x floor; memory note).
 - **Coverage (measured + inference).** REP needs an earlier launch by the same creator that we watched and priced. In our gapped logs 26–42% of watched launches have any history, and REP is 6–18% of them (18% today, where the paper engine ran continuously). A continuously running recorder would see more history; far-leader launches are never priced (no feed timeline), but the model-free price ratio could be computed for them from blocks.
@@ -469,6 +488,7 @@ python3 ops/research/paper_rows.py $W/f2/paper $W/run1/tipmap.json          # gr
 python3 ops/research/creator_hist.py $W/f2/creators.json $W/filt/launches2.json $W/f2/paper/launches_snapshot.json   # public RPC, 3 threads, ~15 min
 python3 ops/research/filters2.py > tables.md                                 # all tables above (f2_load.py joins everything)
 python3 ops/research/filters2.py dump ops/research/filters2_rows.json
+python3 -I ops/research/paper_rep.py $W/paper_c6 $W/f2/rep_paper $W/run1/tipmap.json   # fresh-data REP tally (section 7), zero cost
 ```
 
 Per-launch joined table: `ops/research/filters2_rows.json` (one row per launch: the FILTERS.md row fields + creator, name/symbol/uri, leader, block time, activity, creator history, market response, RPC history).

@@ -28,22 +28,27 @@ exec(compile(src, "filters.py", "exec"), ns)
 L = {(x["S"], x["mint"]): x for x in json.load(open(os.path.join(WORK, "launches_ready.json")))["launches"]}
 seed = json.load(open(os.path.join(HERE, "filters2_rows.json")))["rows"]
 SEED_MAX = max(r["S"] for r in seed)
-hist = collections.defaultdict(list)                            # creator -> [(S, p2)]
-for r in sorted(seed, key=lambda r: r["S"]): hist[r["creator"]].append((r["S"], r["p2"]))
+sys.path.insert(0, HERE)
+from f2_load import market                                      # model-free market response of a launch (S..S+2)
+hist = collections.defaultdict(list)                            # creator -> [(S, p2, price ratio at end of S+2)]
+for r in sorted(seed, key=lambda r: r["S"]): hist[r["creator"]].append((r["S"], r["p2"], r.get("mkt2", 1.0)))
 new = sorted((r for r in ns["rows"] if r["S"] > SEED_MAX), key=lambda r: r["S"])
 lun = lambda r: r["tipc"] == "lunar"
 early = lambda r: r["create_ms"] is not None and r["create_ms"] <= 150
 R2 = lambda r: lun(r) and 3 <= r["gsol"] <= 5 and early(r)
 st = json.load(open(STATE)) if os.path.exists(STATE) else {"done": [], "rep": [0, 0.0, 0.0], "rep_added": [0, 0.0, 0.0], "r2": [0, 0.0, 0.0],
-                                                           "bad": [0, 0.0, 0.0], "first": [0, 0.0, 0.0]}
+                                                           "bad": [0, 0.0, 0.0], "first": [0, 0.0, 0.0], "mf": [0, 0.0, 0.0]}
 for r in new:
     c = L[(r["S"], r["mint"])]["creator"]
-    h = [p for s, p in hist[c] if s <= r["S"] - LAG]
+    hh = [(p, m) for s, p, m in hist[c] if s <= r["S"] - LAG]
+    h = [p for p, _ in hh]
+    try: mk = market(json.load(open(os.path.join(SRC, "rec", r["mint"] + ".json")))).get("mkt2", 1.0)
+    except Exception: mk = 1.0
     k = f"{r['S']}:{r['mint']}"
     if k not in st["done"]:
         st["done"].append(k)
         cls = "first" if not h else ("rep" if sum(h) > 0 else "bad")
-        keys = [cls] + (["rep_added"] if cls == "rep" and not R2(r) else []) + (["r2"] if R2(r) else [])
+        keys = [cls] + (["rep_added"] if cls == "rep" and not R2(r) else []) + (["r2"] if R2(r) else []) + (["mf"] if hh and hh[-1][1] >= 1.1 else [])
         for key in keys:
             st[key][0] += 1; st[key][1] += r["p2"]; st[key][2] += r["pp2"]
         if cls == "rep":
@@ -51,8 +56,8 @@ for r in new:
             print(f"PAPER-REP {r['mint'][:8]} creator {c[:6]} history {len(h)} launches {sum(h):+.3f} | {'RULE#2' if R2(r) else 'ADDED '} {r['cls']:8} "
                   f"tip={r['tipc']:13} bundle {r['gsol']:.2f} {'REFUSED' if r['refused'] else 'fill %.2fx' % r['at_px']}: {r['p2']:+.3f} SOL "
                   f"(20 ms slower {r['pp2']:+.3f}) | REP {t[0]} {t[1]:+.3f} ({t[1] / t[0]:+.3f}/launch)", flush=True)
-    hist[c].append((r["S"], r["p2"]))
+    hist[c].append((r["S"], r["p2"], mk))
 json.dump(st, open(STATE, "w"))
 f = lambda key: f"{st[key][0]} launches {st[key][1]:+.3f} SOL ({(st[key][1] / st[key][0]) if st[key][0] else 0:+.3f}/launch, 20 ms slower {(st[key][2] / st[key][0]) if st[key][0] else 0:+.3f})"
 print(f"PAPER-REP-SUMMARY new launches since the seed: {len(new)} | REP {f('rep')} | REP outside rule #2 {f('rep_added')} | rule #2 {f('r2')} | "
-      f"bad history {f('bad')} | first-time {f('first')} | promote if REP >= +0.03/launch over >= 60", flush=True)
+      f"bad history {f('bad')} | first-time {f('first')} | model-free (last launch >= 1.1x) {f('mf')} | promote if REP >= +0.03/launch over >= 60", flush=True)
