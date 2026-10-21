@@ -1,0 +1,119 @@
+watched launches inside the competitors' fetched window: 1597 (rule #2 93, with our model p2 1293)
+
+rule #2: launches 93, traded by >=1 tracked competitor 50 (54%), competitor trades 99
+  competitors' real PnL: total +7.73 SOL, mean +0.0781, median +0.0051, win 52%, mean return +0.41%, median return +0.70%
+    pre-AG: n 70 total +7.99 mean ret +2.19% win 53%
+    post-AG: n 29 total -0.27 mean ret -3.90% win 48%
+  our model S+2 on these launches (n 71): total +3.81, mean +0.0536, median -0.0110, win 38%
+  launches with both (n 36): competitors' mean return +0.41% vs our model return +8.89%; corr 0.26
+  by competitor: CWiNFA:16/+1.04 7cp6zx:12/-0.79 3yrJE1:11/+1.74 9qz7cW:8/-0.64 dKMjeG:6/+7.24 AHwJSn:6/+0.09 24678Q:6/-0.63 Six5j1:5/+0.11 8ptvsh:5/-0.26 6anjqM:5/+0.10 9XPMCa:4/-0.24 DRWPSr:4/+0.33 G9sQPg:3/-0.48 8RvtT8:2/+0.05 3oN2NB:2/-0.10 D24ipY:1/+0.07 Anubis:1/+0.05 AqMoKz:1/+0.03 BXB7FF:1/+0.02
+
+rule #2 w/o create-ms: launches 72, traded by >=1 tracked competitor 27 (38%), competitor trades 41
+  competitors' real PnL: total +3.94 SOL, mean +0.0961, median -0.0159, win 37%, mean return +1.12%, median return -2.02%
+    pre-AG: n 41 total +3.94 mean ret +1.12% win 37%
+  our model S+2 on these launches (n 37): total +3.15, mean +0.0851, median -0.0295, win 30%
+  launches with both (n 16): competitors' mean return -1.83% vs our model return +15.75%; corr -0.26
+  by competitor: CWiNFA:7/+0.30 Six5j1:6/-0.17 dKMjeG:4/+3.41 AHwJSn:4/-0.02 Anubis:3/+0.37 G9sQPg:3/-0.02 3oN2NB:3/+0.05 DRWPSr:2/-0.70 AqMoKz:2/-0.02 9qz7cW:2/+0.47 D24ipY:1/+0.81 BXB7FF:1/+0.07 9XPMCa:1/+0.01 6anjqM:1/-0.01 3yrJE1:1/-0.60
+
+other watched: launches 1432, traded by >=1 tracked competitor 393 (27%), competitor trades 538
+  competitors' real PnL: total +23.37 SOL, mean +0.0434, median -0.0196, win 41%, mean return +0.94%, median return -2.74%
+    pre-AG: n 430 total +4.77 mean ret -0.27% win 40%
+    post-AG: n 108 total +18.60 mean ret +5.76% win 44%
+  our model S+2 on these launches (n 1185): total -0.60, mean -0.0005, median -0.0443, win 25%
+  launches with both (n 313): competitors' mean return -0.22% vs our model return +4.50%; corr 0.08
+  by competitor: CWiNFA:69/-0.14 9qz7cW:46/+29.62 AMDEmV:42/-0.78 AHwJSn:41/+2.79 G9sQPg:33/-0.34 dKMjeG:32/-3.12 Anubis:30/-6.03 8ptvsh:20/-1.59 7cp6zx:18/+2.86 D24ipY:18/-0.09 Six5j1:18/+0.01 AqMoKz:16/-1.15 BXB7FF:16/+0.48 8RvtT8:16/+3.63 2mqrin:16/-1.81 3oN2NB:16/+1.08 H9kuqG:15/-0.39 DsGJkP:14/-0.15 6anjqM:14/-0.11 3yrJE1:13/-0.93 54YNHF:11/-0.28 DRWPSr:11/-1.10 9XPMCa:9/+0.34 24678Q:4/+0.56
+
+rule #2 launches in the window, one line each (our model p2 | competitors: wallet size ret hold_s n_sells dslot):
+  4gauSkhH B pre  gsol 3.30 dev 3.00 p2 +0.175     | 
+  3BU5KMzj B pre  gsol 3.10 dev 1.00 p2 -0.105     | CWiNF 1.00 -5% 3s x1 d0 Six5j 0.98 -1% 0s x1 d0 D24ip 0.49 +13% 0s x1 d0 9XPMC 1.00 -3% 0s x1 d0
+  AtiTwX8T B pre  gsol 3.75 dev 3.00 p2 -0.093     | 8ptvs 0.96 -8% 1s x1 d0
+  8HTEoN8F B pre  gsol 3.60 dev 3.00 p2 +0.340     | CWiNF 1.00 +28% 2s x1 d0 Anubi 1.25 +4% 2s x1 d0 7cp6z 1.07 +7% 2s x1 d0
+  8tGydcDB B pre  gsol 3.30 dev 3.00 p2 +0.159     | 
+  E4PgK3TC B pre  gsol 4.20 dev 3.00 p2 -0.053     | 
+  2DVvz971 B pre  gsol 4.20 dev 3.00 p2 -0.053     | 
+  9BLQ94x6 B pre  gsol 3.70 dev 2.00 p2 -0.030     | 
+  2NeHcsoB B pre  gsol 3.00 dev 1.00 p2 -0.050     | 
+  Ep7xAMET B pre  gsol 3.90 dev 3.00 p2 -0.011 REF | 9XPMC 2.50 -3% 0s x1 d0
+  ARewo9fS B pre  gsol 3.60 dev 3.00 p2 +0.104     | 
+  2Zcjmv9f B pre  gsol 3.60 dev 4.00 p2 +0.008     | CWiNF 1.00 -8% 3s x1 d0
+  BcoN3Ee7 B pre  gsol 3.40 dev 4.94 p2 +0.988     | G9sQP 1.00 -26% 0s x1 d0 dKMje 8.00 +39% 18s x7 d0 DRWPS 4.00 +25% 18s x9 d0
+  BYWvKim3 B pre  gsol 5.00 dev 5.00 p2 -0.053     | 
+  Crk5y3vq B pre  gsol 4.10 dev 1.00 p2 -0.050     | 
+  H7pggTMz B pre  gsol 3.30 dev 3.00 p2 -0.011 REF | DRWPS 1.50 -23% 2s x1 d0
+  6aEDkLq5 B pre  gsol 4.00 dev 5.00 p2 -0.050     | 
+  5VTDiLDU B pre  gsol 3.30 dev 1.50 p2 -0.053     | G9sQP 0.50 -4% 2s x1 d0
+  EJTDDbuQ B pre  gsol 3.28 dev 3.00 p2 -0.011 REF | Six5j 0.90 +1% 0s x1 d0 7cp6z 0.81 -24% 5s x1 d1
+  7AdU1L7S B pre  gsol 3.60 dev 3.00 p2 +0.097     | Six5j 0.92 +7% 0s x1 d0
+  9gdnj8bg A pre  gsol 3.28 dev 3.00 p2 -0.257     | 
+  6VHGRdGj A pre  gsol 3.60 dev 3.00 p2 +0.059     | 
+  6H9crEt4 A pre  gsol 4.00 dev 5.00 p2 -0.053     | 
+  5kpYWhMH A pre  gsol 3.00 dev 3.00 p2 -0.015     | 
+  4KJQP5S3 A pre  gsol 5.00 dev 5.00 p2 +0.039     | 9XPMC 2.00 +3% 1s x1 d0 AqMoK 1.00 +3% 1s x1 d0
+  BrF9c69X A pre  gsol 3.84 dev 4.00 p2 -0.050     | 
+  GFmnoyPs A pre  gsol 4.10 dev 1.00 p2 -0.064     | 
+  6Ru7g16r A pre  gsol 4.10 dev 2.00 p2 +0.910     | G9sQP 1.00 -20% 1s x1 d0 dKMje 8.00 +6% 16s x7 d0 DRWPS 1.95 -21% 22s x3 d0
+  62GXFRLQ A pre  gsol 3.40 dev 5.00 p2 +0.271     | CWiNF 1.00 +2% 0s x1 d0 3yrJE 4.00 -8% 6s x1 d0
+  6xajnSVu A pre  gsol 3.00 dev 3.00 p2 -0.060     | 
+  9qE9oiRL A pre  gsol 3.38 dev 2.00 p2 -0.050     | 
+  FZkQfrPa A pre  gsol 3.00 dev 1.00 p2 +0.071     | 
+  AnJ72oFT A pre  gsol 3.00 dev 1.00 p2 +0.053     | 
+  7nbWNd9y A pre  gsol 4.00 dev 7.00 p2 +0.044     | CWiNF 1.00 -0% 1s x1 d0
+  5P2QdrLQ A pre  gsol 3.40 dev 3.00 p2 +1.073     | 3yrJE 4.00 +9% 5s x1 d0 dKMje 8.00 +41% 18s x9 d0
+  FShDX4yU A pre  gsol 3.40 dev 0.50 p2 +0.661     | dKMje 8.00 -7% 9s x7 d0
+  8HSxaXd3 A pre  gsol 3.00 dev 1.00 p2 -0.050     | 
+  6foQ7s6E A pre  gsol 3.40 dev 3.00 p2 -0.011 REF | 8ptvs 1.15 -7% 1s x1 d0 9XPMC 2.00 -10% 3s x2 d0
+  72K4cK98 A pre  gsol 3.40 dev 0.65 p2 -0.053     | 
+  GhSjWdV6 B pre  gsol 3.00 dev 3.00 p2 -0.011 REF | 7cp6z 1.42 -2% 1s x1 d0
+  GBLSuN4x B pre  gsol 4.00 dev 3.20 p2 -0.056     | 
+  DC9QdkiW B pre  gsol 4.34 dev 3.20 p2 +0.067     | AHwJS 0.90 -0% 2s x1 d0
+  2m1hdrPZ B pre  gsol 4.26 dev 3.50 p2 -0.042     | CWiNF 1.00 -9% 3s x1 d0 AHwJS 0.80 +6% 2s x1 d0
+  Fo2ugNyK B pre  gsol 3.00 dev 1.00 p2 -0.039     | 
+  6uXsdCEg C pre  gsol 4.26 dev 3.50 p2 +0.080     | 7cp6z 1.43 -3% 2s x1 d1
+  CsLmkyzX D pre  gsol 3.00 dev 3.00 p2 +0.105     | AHwJS 0.90 +3% 3s x1 d0 3yrJE 0.50 +13% 5s x1 d0
+  AoUKuZhq D pre  gsol 3.00 dev 3.00 p2 -0.010     | AHwJS 0.60 -5% 3s x1 d0 7cp6z 1.19 -35% 5s x1 d3
+  GrorxywS D pre  gsol 4.71 dev 1.98 p2 -0.052     | 
+  6kPdPqFj D pre  gsol 4.55 dev 3.00 p2 -0.049     | 
+  iHEwpLYn D pre  gsol 3.40 dev 5.00 p2 +0.203     | CWiNF 1.00 -9% 2s x1 d0 9qz7c 3.00 +3% 3s x2 d0 7cp6z 0.81 -29% 4s x1 d1
+  4ypfHcVX D pre  gsol 3.00 dev 3.00 p2 -0.045     | 
+  43XzWUJh D pre  gsol 3.00 dev 3.00 p2 -0.411     | 8RvtT 1.91 +0% 1s x1 d0 3yrJE 0.50 -39% 5s x1 d0
+  133dvMc2 D pre  gsol 3.40 dev 5.00 p2 -0.050     | CWiNF 1.00 -6% 2s x1 d0 AHwJS 0.60 +2% 1s x1 d0
+  6KKgVX7r D pre  gsol 4.00 dev 4.00 p2 -0.046     | 
+  ETgPDKog D pre  gsol 4.26 dev 3.50 p2 +0.310     | CWiNF 1.00 +6% 2s x1 d0 3yrJE 0.50 -11% 5s x1 d0 6anjq 0.50 +19% 3s x2 d0 7cp6z 1.18 +7% 2s x1 d2
+  AW5YDMaB D pre  gsol 3.11 dev 3.00 p2 +0.089     | Six5j 0.67 +5% 1s x1 d0 9qz7c 3.50 +3% 22s x9 d330
+  8E4L9kgP D pre  gsol 4.90 dev 3.00 p2 -0.011 REF | 3yrJE 0.50 +17% 4s x1 d0
+  HQsVVgaH D pre  gsol 4.26 dev 3.50 p2 +0.116     | CWiNF 1.00 +5% 2s x1 d0 AHwJS 0.80 +3% 1s x1 d0
+  E3wKB1pX D pre  gsol 4.00 dev 2.40 p2 -0.053     | 
+  FH5oya61 D pre  gsol 4.50 dev 3.00 p2 +0.039     | CWiNF 1.00 +18% 1s x1 d1
+  FTr2a7gM D pre  gsol 3.40 dev 7.00 p2 -0.025     | 
+  5DN1GGon E pre  gsol 3.40 dev 7.00 p2 -0.048     | 
+  47D2xhSZ E pre  gsol 5.00 dev 2.00 p2 -0.053     | 
+  CpwB89Rk E pre  gsol 3.40 dev 5.00 p2 +0.099     | CWiNF 1.00 -3% 3s x1 d0
+  GQuVCNw6 E pre  gsol 4.26 dev 5.00 p2 +0.102     | 3yrJE 0.50 -1% 5s x1 d0 6anjq 0.50 -8% 3s x1 d0 7cp6z 0.98 -8% 2s x1 d3
+  31t7UM4L E pre  gsol 4.39 dev 3.00 p2 -0.053     | 
+  Aw87A9Jd E pre  gsol 3.00 dev 3.00 p2 -0.053     | 
+  GkmcmnZM E pre  gsol 4.71 dev 1.98 p2 -0.053     | 
+  GZDe8AQN E pre  gsol 3.40 dev 5.00 p2 -0.011 REF | CWiNF 1.00 +18% 2s x1 d0 3yrJE 3.00 +47% 2s x1 d0 6anjq 0.50 +61% 14s x8 d0 7cp6z 0.61 +25% 4s x1 d1
+  L64S5QwC E pre  gsol 3.40 dev 5.00 p2 +0.009     | CWiNF 1.00 +39% 2s x1 d0 24678 0.39 +12% 4s x1 d0 7cp6z 0.83 +7% 4s x1 d1
+  7BEUZH3E E pre  gsol 3.40 dev 5.00 p2 -0.011 REF | 8ptvs 1.00 -8% 1s x1 d0 3yrJE 2.00 +1% 4s x1 d0
+  5AgeLhg8 P post gsol 4.50 dev 5.00 p2   -        | 3oN2N 0.51 -14% 3s x1 d14
+  CNtJQbaK P post gsol 3.20 dev 5.00 p2   -        | 9qz7c 1.80 +5% 9s x3 d0 8ptvs 1.05 -6% 1s x1 d0
+  531c6nJz P post gsol 3.40 dev 0.50 p2   -        | dKMje 1.80 +10% 6s x2 d0 8RvtT 1.45 +3% 40s x5 d1
+  7W1uaaDQ P post gsol 3.40 dev 7.00 p2   -        | 24678 0.52 -39% 4s x1 d0
+  CKAzTihA P post gsol 4.00 dev 5.00 p2   -        | 
+  Bv7phaPf P post gsol 4.26 dev 5.00 p2   -        | 
+  Ckp6HkbB P post gsol 3.40 dev 5.00 p2   -        | CWiNF 1.00 +15% 1s x1 d1 7cp6z 1.18 -11% 4s x1 d1 24678 0.57 +1% 3s x1 d1
+  HBckTWou P post gsol 3.40 dev 3.00 p2   -        | Six5j 0.68 +1% 0s x1 d0 24678 0.38 -12% 2s x1 d0 3oN2N 0.48 -6% 1s x1 d0
+  2biN8SVj P post gsol 3.40 dev 5.00 p2   -        | 9qz7c 4.30 -10% 17s x6 d1 8ptvs 0.88 +5% 3s x1 d1 3yrJE 2.00 +11% 5s x1 d1 DRWPS 2.00 +4% 2s x1 d1
+  AwoXsnd9 P post gsol 3.91 dev 1.00 p2   -        | 
+  GenZqv4Z P post gsol 3.40 dev 3.00 p2   -        | 9qz7c 1.80 -10% 2s x1 d0
+  RQsdaX5B P post gsol 3.40 dev 3.00 p2   -        | 6anjq 0.50 -7% 3s x1 d1 24678 0.39 -9% 2s x1 d1
+  FbtMD6ie P post gsol 3.40 dev 7.00 p2   -        | 9qz7c 3.00 +1% 0s x1 d0 24678 0.74 -53% 4s x1 d0
+  DDwpv5ed P post gsol 4.00 dev 4.00 p2   -        | 
+  AiNzos7w P post gsol 3.40 dev 3.00 p2   -        | 3yrJE 2.00 +9% 5s x1 d1 dKMje 1.80 +41% 3s x2 d1
+  3qycFGg2 P post gsol 5.00 dev 2.00 p2   -        | 
+  C8jRaiuC P post gsol 3.40 dev 3.00 p2   -        | 9qz7c 3.00 -9% 16s x6 d251
+  Bssap4tU P post gsol 4.43 dev 6.00 p2   -        | 
+  DrqXjXGH P post gsol 4.58 dev 5.00 p2   -        | CWiNF 1.00 +14% 3s x1 d0 BXB7F 1.50 +2% 1s x1 d0 9qz7c 2.00 -1% 12s x4 d245
+  GK2xADcs P post gsol 3.40 dev 3.00 p2   -        | 
+  iajwf3Yx P post gsol 4.26 dev 5.00 p2   -        | 6anjq 0.50 -44% 0s x1 d0 7cp6z 1.40 -3% 2s x1 d2
+  86JM5Di9 P post gsol 3.30 dev 3.00 p2   -        | 

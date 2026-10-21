@@ -1,0 +1,70 @@
+=== 8RvtT8189KpAq5MkXGVHFn6LdZpxq9PkvDeAvs1g5Yj4  trades 169 closed 169  span 10-20 17:39 .. 10-21 15:34 UTC
+  all closed                   n  169  PnL  +24.60  mean +0.1456  med -0.0175  win  46%  ret +6.89%  size 1.91
+  pre-Alpenglow                n  152  PnL  +21.48  mean +0.1413  med -0.0206  win  45%  ret +6.68%  size 1.91
+  post-Alpenglow               n   17  PnL   +3.12  mean +0.1837  med +0.0170  win  53%  ret +8.82%  size 1.78
+
+by UTC hour (n / PnL): 20 17h:5/+1.57 20 18h:17/+5.31 20 19h:16/+3.51 20 20h:8/+0.95 20 21h:9/+0.83 20 22h:11/+3.93 20 23h:3/-0.12 21 00h:5/+1.57 21 01h:8/-0.74 21 02h:11/-0.87 21 03h:7/+3.69 21 04h:4/-0.36 21 05h:4/+2.47 21 06h:7/+1.23 21 07h:3/+1.91 21 08h:11/+0.81 21 09h:8/-2.14 21 10h:2/-0.12 21 11h:3/-0.26 21 12h:3/+0.68 21 13h:9/-1.98 21 14h:8/+1.19 21 15h:7/+1.55
+
+size tiers:
+  most common sizes (SOL in incl. pump fee): [(1.45, 44), (2.96, 33), (2.18, 30), (1.19, 8), (2.1, 5), (4.15, 4), (1.8, 4), (1.53, 4), (1.64, 2), (1.52, 2)]
+  size 0-0.75                  n 0
+  size 0.75-1.25               n    8  PnL   -0.27  mean -0.0341  med -0.0380  win  38%  ret -2.88%  size 1.19
+  size 1.25-1.75               n   70  PnL   +7.01  mean +0.1001  med -0.0350  win  36%  ret +6.84%  size 1.45
+  size 1.75-2.5                n   44  PnL   +3.64  mean +0.0828  med +0.0104  win  55%  ret +3.94%  size 2.18
+  size 2.5-4                   n   41  PnL   +9.46  mean +0.2307  med +0.1378  win  56%  ret +7.62%  size 2.96
+  size 4-99                    n    6  PnL   +4.77  mean +0.7943  med +0.4127  win  50%  ret +16.70%  size 4.15
+
+exits:
+  hold s: median 4, p25 2, p75 25, p90 40; slots median 15
+  hold-time histogram (s): [(0, 7), (2, 75), (4, 16), (6, 7), (10, 6), (12, 1), (14, 2), (16, 7), (20, 2), (22, 3), (24, 1), (32, 2), (34, 1), (38, 1), (40, 38)]
+  first sell slots after buy: [(0, 24), (1, 15), (2, 2), (3, 1), (4, 1), (6, 2), (7, 1), (8, 2), (9, 17), (10, 40), (11, 4), (13, 1), (14, 2), (15, 9), (20, 3), (21, 1), (25, 1), (26, 1), (27, 1), (28, 2), (29, 1), (34, 1), (43, 1), (50, 36)]
+  sells per trade: [(1, 81), (2, 30), (3, 19), (4, 12), (5, 3), (6, 3), (7, 11), (8, 8), (9, 2)]
+  first leg fraction: [(0.1, 1), (0.2, 1), (0.3, 73), (0.4, 4), (0.5, 6), (0.7, 3), (1.0, 81)]
+  single sell                  n   81  PnL   -1.57  mean -0.0194  med -0.0479  win  30%  ret -1.04%  size 1.53
+  ladder 2+                    n   88  PnL  +26.17  mean +0.2974  med +0.1200  win  61%  ret +12.75%  size 2.18
+  hold 0-1 s                   n    2  PnL   +0.13  mean +0.0638  med +0.0638  win  50%  ret +2.93%  size 2.18
+  hold 1-2 s                   n    5  PnL   +1.10  mean +0.2193  med +0.0348  win  80%  ret +10.98%  size 2.18
+  hold 2-4 s                   n   75  PnL   +5.13  mean +0.0684  med -0.0316  win  41%  ret +3.37%  size 1.72
+  hold 4-8 s                   n   23  PnL   +5.85  mean +0.2545  med +0.3537  win  61%  ret +9.25%  size 2.96
+  hold 8-16 s                  n    9  PnL   +5.00  mean +0.5552  med +0.1261  win  67%  ret +18.91%  size 2.96
+  hold 16-40 s                 n   17  PnL   +4.64  mean +0.2730  med +0.1951  win  65%  ret +12.16%  size 2.18
+  hold 40-1000000 s            n   38  PnL   +2.76  mean +0.0726  med -0.0564  win  29%  ret +4.41%  size 1.45
+
+landing (create slot known from our logs/recordings):
+  n 69; slot delta: [(0, 51), (1, 17), (2, 1)]
+  dslot 0                      n   51  PnL   +3.09  mean +0.0606  med -0.0377  win  39%  ret +3.05%  size 1.51
+  dslot 1                      n   17  PnL   +1.35  mean +0.0794  med -0.0518  win  41%  ret +3.69%  size 2.18
+  dslot 2                      n    1  PnL   +0.14  mean +0.1449  med +0.1449  win 100%  ret +12.23%  size 1.19
+  on our watched launches (recordings): n 18; outsider rank med 1.0; first outsider 9; same-slot tx gap after bundle med 48; fill vs post-bundle med 1.078; our feed saw it at med 77.8 ms (n 10; p25 29.1)
+  curve SOL ahead of its buy (dev+bundle+others), median: 4.88
+
+fees / routes:
+  buy fee (base+prio) med 0.00059, tip med 0.01000, total med 0.02500 (1.72% of size); sell cost med 0.00041
+  buy routes: [('none', 47), ('landx', 33), ('helius', 24), ('nozomi', 24), ('speedlanding', 11), ('b1oom?', 11), ('0slot', 5), ('jito', 3), ('bolt', 3), ('soyas', 3)]
+  sell routes: [('speedlanding', 73), ('b1oom?', 56), ('jito', 52), ('glaive', 33), ('none', 23), ('helius', 21)]
+  durable nonce on buy: 161 / 169 ; tx version: [('legacy', 131), ('0', 38)] ; CU limit: [(55950, 8), (52950, 8), (54450, 8), (57450, 8)] ; CU used med 57282
+  buy programs: [(('Tokenz', '6EF8rr'), 85), (('3sqmVu',), 60), (('L2TExM', '3sqmVu'), 12)]
+    size 0-1.25: fee+tip med 0.0150 p90 0.0150
+    size 1.25-2.5: fee+tip med 0.0250 p90 0.0500
+    size 2.5-99: fee+tip med 0.0600 p90 0.1800
+
+engine verdicts of its mints (our DETECT logs): [(None, 100), ('pass', 38), ('skip_dev_low', 26), ('skip_dev_high', 2), ('watched', 2), ('skip_legacy', 1)]
+  on our watched launches      n   18  PnL   +3.67  mean +0.2041  med +0.0241  win  56%  ret +10.33%  size 1.82
+  on rule #2 launches          n    2  PnL   +0.05  mean +0.0241  med +0.0241  win 100%  ret +1.43%  size 1.68
+  on rule #2 w/o create-ms     n    2  PnL   +0.05  mean +0.0241  med +0.0241  win 100%  ret +1.43%  size 1.68
+  not watched                  n  151  PnL  +20.93  mean +0.1386  med -0.0237  win  45%  ret +6.51%  size 1.92
+
+selection: watched launches while it was active: 1597; it bought 18 (1.1%)
+  r2           -: 16/1504 (1%) pnl +3.63 our_p2/launch +0.002 | r2: 2/93 (2%) pnl +0.05 our_p2/launch +0.054
+  tipc         none: 2/481 (0%) pnl -0.35 our_p2/launch -0.001 | fee/other addr: 9/380 (2%) pnl +3.37 our_p2/launch +0.007 | lunar: 3/366 (1%) pnl -0.30 our_p2/launch +0.017 | non-lunar?: 4/190 (2%) pnl +0.96 our_p2/launch +nan | nozomi: 0/72 (0%) pnl +0.00 our_p2/launch -0.022 | other tip svc: 0/60 (0%) pnl +0.00 our_p2/launch +0.047 | jito: 0/48 (0%) pnl +0.00 our_p2/launch -0.022
+  gsol         0: 4/698 (1%) pnl -0.03 our_p2/launch +0.010 | 3-5: 8/373 (2%) pnl +3.95 our_p2/launch +0.022 | >5: 2/335 (1%) pnl -0.34 our_p2/launch -0.024 | 2-3: 2/103 (2%) pnl -0.05 our_p2/launch +0.010 | <2: 2/88 (2%) pnl +0.15 our_p2/launch +0.001
+  glued        0: 4/698 (1%) pnl -0.03 our_p2/launch +0.010 | 3: 6/505 (1%) pnl +1.50 our_p2/launch +0.010 | 2: 4/199 (2%) pnl -0.09 our_p2/launch -0.003 | 4: 2/113 (2%) pnl +1.49 our_p2/launch -0.023 | 1: 2/82 (2%) pnl +0.81 our_p2/launch -0.007
+  dev          2-4: 8/439 (2%) pnl +1.07 our_p2/launch +0.027 | <1: 4/427 (1%) pnl -0.16 our_p2/launch -0.005 | 1-2: 5/392 (1%) pnl +2.93 our_p2/launch -0.015 | 4-6: 1/284 (0%) pnl -0.17 our_p2/launch +0.021 | 6+: 0/55 (0%) pnl +0.00 our_p2/launch -0.015
+  cms          <=50: 6/538 (1%) pnl +0.18 our_p2/launch +0.007 | <=150: 4/516 (1%) pnl -0.45 our_p2/launch +0.008 | >150: 7/370 (2%) pnl +2.97 our_p2/launch +0.001 | ?: 1/173 (1%) pnl +0.97 our_p2/launch -0.008
+  host         ipfs.io: 2/546 (0%) pnl +0.15 our_p2/launch +0.015 | j7tracker: 4/464 (1%) pnl +0.12 our_p2/launch +0.001 | ?: 5/304 (2%) pnl +1.00 our_p2/launch +nan | other: 2/137 (1%) pnl -0.34 our_p2/launch -0.005 | uxento: 5/91 (5%) pnl +2.74 our_p2/launch -0.001 | pinata: 0/55 (0%) pnl +0.00 our_p2/launch -0.030
+  client       jito: 8/559 (1%) pnl -0.19 our_p2/launch -0.004 | harmonic: 4/467 (1%) pnl +2.71 our_p2/launch +0.028 | ?: 5/304 (2%) pnl +1.00 our_p2/launch +nan | other: 1/175 (1%) pnl +0.14 our_p2/launch -0.020 | bam: 0/92 (0%) pnl +0.00 our_p2/launch -0.013
+  creator_prev 0: 7/677 (1%) pnl +2.95 our_p2/launch +0.009 | ?: 6/544 (1%) pnl +1.15 our_p2/launch +0.007 | 1-3: 4/249 (2%) pnl -0.86 our_p2/launch -0.005 | 4+: 1/127 (1%) pnl +0.43 our_p2/launch -0.003
+
+pre vs post Alpenglow (slot >= 459,653,000):
+  pre   n  152 (7.6/h over 20.1 h)  PnL +21.48 (+1.07/h)  ret +6.68%  size 1.91  fee+tip 0.0250  hold 4.0 s (17.0 slots)  dslot0 47/58  win 45%  watched 12
+  post  n   17 (10.2/h over 1.7 h)  PnL +3.12 (+1.87/h)  ret +8.82%  size 1.78  fee+tip 0.0150  hold 2 s (10 slots)  dslot0 4/11  win 53%  watched 6
