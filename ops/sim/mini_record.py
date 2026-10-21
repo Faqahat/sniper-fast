@@ -54,11 +54,20 @@ def trades(logs, mint):
     return out
 
 
-fires = {}
+# SKIPLATE=1: instead of the fired launches, take the ones that passed the race gate but were skipped as created late in
+# their slot (GATE-CREATE-MS verdict=skip_late), with their create_ms (to test a later --max-create-ms on paper)
+SKIPLATE = os.environ.get("SKIPLATE") == "1"
+fires = {}; cms = {}; passed = set()
 for fn in sys.argv[2:]:
     for line in open(fn, errors="replace"):
-        m = re.search(r"RACE obs slot=(\d+) mint=(\w+) .* bundle_sol=([\d.]+) fired=true", line)
-        if m: fires[(int(m.group(1)), m.group(2))] = (float(m.group(3)), os.path.basename(fn))
+        m = re.search(r"GATE-CREATE-MS slot=(\d+) mint=(\w+) create_ms=([\d.]+) .*verdict=(\w+)", line)
+        if m: cms[(int(m.group(1)), m.group(2))] = (float(m.group(3)), m.group(4))
+        m = re.search(r"RACE decide slot=(\d+) mint=(\w+) .*bundle_sol=([\d.]+) .*pass=true", line)
+        if m: passed.add((int(m.group(1)), m.group(2)))
+        m = re.search(r"RACE obs slot=(\d+) mint=(\w+) .* bundle_sol=([\d.]+) fired=(true|false)", line)
+        if m and (m.group(4) == "true") != SKIPLATE: fires[(int(m.group(1)), m.group(2))] = (float(m.group(3)), os.path.basename(fn))
+if SKIPLATE:
+    fires = {k: v for k, v in fires.items() if k in passed and cms.get(k, (0, ""))[1] == "skip_late"}
 
 
 def one(item):
@@ -83,7 +92,7 @@ def one(item):
     for t in sS[1:]:
         if t["idx"] == ge + 1 and t["buy"]: ge = t["idx"]
         else: break
-    r = dict(mint=mint, S=S, slot_ms=216.6, fired=True, engine=f"fired ({src})", leader_rtt=None, rule2_largest=True, any_moon=True,
+    r = dict(mint=mint, S=S, slot_ms=217.4, fired=not SKIPLATE, engine=("skip_late" if SKIPLATE else "fired") + f" ({src})", create_ms=cms.get((S, mint), (None,))[0], leader_rtt=None, rule2_largest=True, any_moon=True,
              cidx=ci, glued_end=ge + 1, gsol=bsol, glued=ge - ci, dev=None, bundle_members=[], creator=sS[0]["user"], trades=tr, window_slots=K)
     json.dump(r, open(path, "w"))
     return f"ok {len(tr)} trades"

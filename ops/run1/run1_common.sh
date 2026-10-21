@@ -54,7 +54,10 @@ C=/root/run1/run1_landing.toml
 # tip-free probes on the same validators) and Jito bundles themselves take ~53 ms (Harmonic ~88-139). So: no jito-bundle
 # (and no Jito tip) except on BAM (bundles ~20 ms there); Astralane (new key, HTTP 401 before) everywhere; Helius on
 # Jito-client leaders (the pros that beat us on HEL1US used it). Previous: "bam=jito-bundle+landx-fra3+staked-rpc;harmonic=jito-bundle+nozomi+staked-rpc;jito=jito-bundle+landx-fra3+staked-rpc;fd=jito-bundle+astralane+nozomi+staked-rpc;agave=helius+nozomi+staked-rpc;other=helius+nozomi+landx-fra3+staked-rpc;default=jito-bundle+landx-fra3+helius+staked-rpc"
-ROUTES="bam=jito-bundle+nozomi+landx-fra3+staked-rpc+astralane;harmonic=nozomi+astralane+landx-fra3+staked-rpc;jito=nozomi+helius+astralane+landx-fra3+staked-rpc;fd=nozomi+astralane+staked-rpc;agave=nozomi+helius+astralane+staked-rpc;other=nozomi+helius+astralane+landx-fra3+staked-rpc;default=nozomi+helius+astralane+landx-fra3+staked-rpc"
+# 2026-10-21 00:46 UTC (FRZ buy-shaped probes): on Harmonic leaders a buy sent through ONE route lands in 27-34 ms
+# (nozomi 29.5/26.6, staked-rpc 33.6/31.6) but every multi-route send there took 96-148 ms (7 of 7, with or without a
+# Jito tip) -> harmonic = nozomi only. Jito-client / BAM keep their fan-out (mostly 9-52 ms / 17-23 ms measured).
+ROUTES="bam=jito-bundle+nozomi+landx-fra3+staked-rpc+astralane;harmonic=nozomi;jito=nozomi+helius+astralane+landx-fra3+staked-rpc;fd=nozomi+astralane+staked-rpc;agave=nozomi+helius+astralane+staked-rpc;other=nozomi+helius+astralane+landx-fra3+staked-rpc;default=nozomi+helius+astralane+landx-fra3+staked-rpc"
 FLAGS=(--uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8
   --dev-from-cap --race-gate --race-min-bundle 1 --race-min-bundle-sol 3 --race-max-bundle-sol 5 --race-create-tip-prefix moon --race-bundle-ms 3 --race-glued
   --race-pros /root/race/pros.json --race-early

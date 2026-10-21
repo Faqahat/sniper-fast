@@ -42,13 +42,18 @@ def run(r, T):
     pbV, pbT = (gl[-1]["vsol"], gl[-1]["vtok"]) if gl else pre(tr[0])
     # anchors: outside trades in S that our feed saw, with their feed time
     ob = outs.get((S, r["mint"]), [])
-    E = ge - 1      # our buy goes after every trade with idx <= E (E = last glued index by default)
+    key = lambda t: (t["slot"], t["idx"] if t["idx"] is not None else 10**9)
+    E = (S, ge - 1)   # our buy goes after every trade with (slot, idx) <= E (E = last glued tx by default)
+    # created late in its slot: if create_ms + T runs past the slot's end, the whole create slot is ahead of us
+    cm = r.get("create_ms")
+    if cm is not None and cm + T > r.get("slot_ms", 217.4):
+        E = max(E, (S, max([t["idx"] for t in tr if t["slot"] == S and t["idx"] is not None] or [ge - 1])))
     for ms, sol, flag, w6 in ob:
         if ms > T or flag != "1": continue
-        cand = [t for t in tr if t["slot"] == S and t["idx"] is not None and t["user"].startswith(w6) and abs(t["sol"] / 1e9 - sol) <= max(0.02, 0.02 * sol)]
-        if cand: E = max(E, min(c["idx"] for c in cand))
-    seq = [t for t in tr if not (t["slot"] == S and t["idx"] is not None and t["idx"] <= E)]
-    before = [t for t in tr if t["slot"] == S and t["idx"] is not None and t["idx"] <= E]
+        cand = [t for t in tr if t["slot"] in (S, S + 1) and t["idx"] is not None and t["user"].startswith(w6) and abs(t["sol"] / 1e9 - sol) <= max(0.02, 0.02 * sol)]
+        if cand: E = max(E, min(key(c) for c in cand))
+    seq = [t for t in tr if key(t) > E]
+    before = [t for t in tr if key(t) <= E]
     V, Tk = (before[-1]["vsol"], before[-1]["vtok"]) if before else (pbV, pbT)
     x = SIZE * 1e9 / (1 + fee)
     q_pb = pbT * x / (pbV + x)
@@ -84,6 +89,8 @@ SETS = {
     "rule2 + bundle 2-10": lambda r: r["fired"] or ("race reject" in str(r["engine"]) and 2 <= r["gsol"] <= 10),
     "near leaders 5-8 ms": lambda r: (not r["fired"]) and "far leader" in str(r["engine"]) and (r.get("leader_rtt") or 999) <= 8 and 3 <= r["gsol"] <= 5 and r["rule2_largest"],
     "lunar-not-largest": lambda r: "static reject" in str(r["engine"]) and 3 <= r["gsol"] <= 5,
+    "late create 150-180 ms": lambda r: str(r["engine"]).startswith("skip_late") and (r.get("create_ms") or 999) <= 180,
+    "late create 180-217 ms": lambda r: str(r["engine"]).startswith("skip_late") and 180 < (r.get("create_ms") or 0),
 }
 print(f"launches with feed timelines: {len(L)}; size {SIZE} SOL, prio {PRIO}, tips {TIPS} (filled only), cap {CAP / 100:.0f}%, exits {EXITS}")
 for name, sel in SETS.items():
