@@ -5534,8 +5534,13 @@ mod lat {
             let mut classes: Vec<&'static str> = Vec::new();
             if let Some(s) = slot {
                 if !meta.client.is_empty() || !meta.leader.is_empty() { classes.push(class(&meta.client)); }
-                // the create is in its leader's LAST slot: a buy may land under the next leader, route for it too
-                if let (Some((l0, _)), Some((l1, c1))) = (leader_of(s), leader_of(s + 1)) {
+                // the create is in its leader's LAST slot: a buy may land under the next leader, route for it too.
+                // --no-union-harmonic (2026-10-21): not when the create's leader is Harmonic — there a multi-route send
+                // lands in 96-148 ms vs 27-34 ms for one route (FRZ buy-shaped probes), and with create <= 150 ms the
+                // one-route buy lands inside the create slot anyway
+                static NO_UNION_HARMONIC: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| std::env::args().any(|a| a == "--no-union-harmonic"));
+                let skip_union = classes.first() == Some(&"harmonic") && *NO_UNION_HARMONIC;
+                if let (false, Some((l0, _)), Some((l1, c1))) = (skip_union, leader_of(s), leader_of(s + 1)) {
                     if l1 != l0 { let k = class(&c1); if !classes.contains(&k) { classes.push(k); } }
                 }
             }
