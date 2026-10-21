@@ -4,17 +4,20 @@
 # engine's hidden prompt; it is never stored anywhere. Caps and parameters are explicit arguments (no defaults).
 #
 #   tmux new -s prod                      # (or: tmux attach -t prod)
-#   sudo bash /root/prod/run_prod.sh --size 1.5 --max-buys 20 --max-loss 0.5 --minutes 180 [--tag p1] [--lock 0.3:0,0.6:0.3]
+#   sudo bash /root/prod/run_prod.sh --size 1.5 --max-buys 20 --max-loss 0.5 --minutes 180 [--tag p1] [--lock 0.3:0,0.6:0.3] [--no-dz]
+#   --no-dz: run on the Kaldera/erpc shred feeds only (DoubleZero Edge feeds off). Required while the doublezero1 tunnel
+#            is down (2026-10-21 00:00 UTC our Edge seat dropped to "0 feeds"); without it the launcher refuses.
 #   detach: Ctrl-b d      stop cleanly: Ctrl-c in the tmux window (engine only: stop new fires, drain, EXIT CHECK; wait for PROD_DONE)
 #
 # Same engine build, rule, gates, fees and exit as Dev (/root/run1/run1_common.sh); only the wallet + caps differ.
 set -u
 die() { echo "REFUSED: $*" >&2; exit 1; }
-SIZE= BUYS= LOSS= MIN= TAG=prod LOCK="0.3:0,0.6:0.3"
+SIZE= BUYS= LOSS= MIN= TAG=prod LOCK="0.3:0,0.6:0.3" NODZ=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --size) SIZE=$2; shift 2;; --max-buys) BUYS=$2; shift 2;; --max-loss) LOSS=$2; shift 2;;
     --minutes) MIN=$2; shift 2;; --tag) TAG=$2; shift 2;; --lock) LOCK=$2; shift 2;;
+    --no-dz) NODZ=1; shift;;
     *) die "unknown argument $1";;
   esac
 done
@@ -43,6 +46,18 @@ PC=/root/prod/prod_landing.toml
 sed -e 's#^wallet *=.*#wallet          = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"#' \
     -e "s#^wallet_keystore *=.*#wallet_keystore = \"$KS\"#" /root/run1/run1_landing.toml > $PC
 grep -q '^wallet *= *"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"' $PC && grep -q "^wallet_keystore *= *\"$KS\"" $PC || die "could not build $PC"
+# DoubleZero Edge feeds: the engine refuses to start when the doublezero1 interface is missing
+if [ "$NODZ" = 1 ]; then
+  python3 - "$PC" <<'PYEOF' || die "could not switch the DoubleZero feeds off in $PC"
+import sys
+p = sys.argv[1]; s = open(p).read(); parts = s.split("[[feed]]")
+parts = [parts[0]] + [b.replace("enabled   = true", "enabled   = false", 1) if 'kind      = "multicast"' in b else b for b in parts[1:]]
+open(p, "w").write("[[feed]]".join(parts))
+PYEOF
+  echo "NOTE: --no-dz: DoubleZero Edge feeds OFF; shreds from Kaldera / turbo-kaldera / erpc only"
+elif ! ip link show doublezero1 >/dev/null 2>&1; then
+  die "the DoubleZero tunnel (doublezero1) is down — fix DoubleZero, or add --no-dz to run on the Kaldera/erpc feeds only"
+fi
 
 LAM=$(awk -v s="$SIZE" 'BEGIN{printf "%d", s*1e9}')
 MAXSOL=$(awk -v s="$SIZE" 'BEGIN{printf "%.4f", s*1.07}')
