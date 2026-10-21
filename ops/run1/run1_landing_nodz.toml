@@ -1,0 +1,126 @@
+# NO-DZ variant of run1_landing.toml (DoubleZero Edge seat at 0 feeds since 2026-10-21 00:00 UTC); DZ feeds off.
+# FIX2 landing config (2026-10-19, /root/fix2/NOTES.md) = /root/lat/final_landing.toml + the harmonic-bundle path.
+# Routes (live_final2.sh): harmonic-bundle is built here but OFF in the live route until Harmonic confirms the whitelist
+# (ROUTES_HB in live_final2.sh puts it first on harmonic leaders: HarmonicAgave + HarmonicFiredancer); BAM and
+# Jito-Solana leaders no longer get helius (attribution: a bundle landing is then ours unambiguously).
+# LAT multi-path landing config (2026-10-19, /root/lat/NOTES.md). Keys only by env var / token_env / auth_keypair path.
+# Buys fan out per leader client (--route-by-client); sells go through staked-rpc only (--sell-path staked-rpc).
+# Changes vs /root/race/probe_landing.toml: astralane on https (the http URL carried ASTRALANE_KEY in clear text and the
+# engine REFUSES to start on that: config::cleartext_check), landx-fra3 marked no_tls_endpoint (UDP only, per its docs;
+# same refusal otherwise), speedlanding / jito-tx / helius-tip5 / tpu-direct left out (see NOTES: they add rate-limit
+# collisions or a second connection to the same host without a landing gain).
+wallet          = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
+wallet_keystore = "/root/.nexus-v2-trading-wallet.enc"
+rpc_url         = "https://rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+# ---- SELL path (tipless, h2, constant-k staked forwarder) ----
+[[send]]
+name    = "staked-rpc"
+enabled = true
+kind    = "rpc"
+url     = "https://staked-rpc-frankfurt.constant-k.com/?api-key=${CONSTANTK_TOKEN}"
+
+# ---- BUY fan-out paths ----
+[[send]]
+# one-tx bundle over the searcher gRPC (whitelisted auth key, never funded). A losing / failing bundle costs nothing.
+name = "jito-bundle"
+enabled = true
+kind = "jito-bundle"
+url = "https://frankfurt.mainnet.block-engine.jito.wtf"
+auth_keypair = "~/.nexus-v2-jito-auth.json"
+tip_lamports = 12000000  # RUN 1 (2026-10-20): 0.012 SOL Jito tip (~the mid-tier snipers that land ahead of us: 0.011-0.015)
+max_per_sec = 2          # owner 2026-10-07: our bundle limit is 2/s
+
+[[send]]
+name = "landx-fra3"
+enabled = true
+kind = "landx"
+url = "udp://fra3.landx.dev:10000"   # Cherry Servers Frankfurt (our DC), ICMP 0.67 ms; UDP only, no reply ever
+token_env = "LANDX_KEY"
+no_tls_endpoint = "LandX fra3 is UDP-only (landx-1.gitbook.io/landx-docs/region-endpoints); the 12-byte key prefixes each datagram"
+tip_lamports = 1000000   # documented minimum 0.001 SOL
+
+[[send]]
+name    = "helius"
+enabled = true
+kind    = "helius"
+url     = "http://fra-sender.helius-rpc.com/fast"   # keyless; regional Sender is HTTP only (443 refused, measured)
+tip_lamports = 1000000   # Sender Max minimum 0.001 SOL (all pathways incl. Jito + Harmonic)
+max_per_sec = 1          # keyless: 1 req/s per IP, rejected 429s count; refuse locally instead
+queue_ms = 0
+
+[[send]]
+name    = "nozomi"
+enabled = true
+kind    = "nozomi"
+url     = "https://fra2.nozomi.temporal.xyz/?c=${NOZOMI_KEY}"   # direct fra2 (not Cloudflare), h2, warm 1.0 ms
+tip_lamports = 1000000   # minimum 0.001 SOL; below it Nozomi silently drops
+max_per_sec = 5          # new keys default to 5 rps per region
+
+[[send]]
+name = "astralane"
+enabled = true
+kind = "iris"
+url = "https://fr.gateway.astralane.io/irisb?api-key=${ASTRALANE_KEY}&method=sendTransaction"   # https: key not in clear
+tip_lamports = 1000000   # free tier minimum 0.001 SOL, 5 tx/s
+max_per_sec = 5
+
+
+# ---- FIX2: Harmonic block engine, public JSON-RPC sendBundle (docs.harmonic.gg/searchers/harmonic-bundles) ----
+# no auth, no tip account: the "tip" is the compute-unit price (our buy pays 30M micro-lamports/CU). One-tx bundle,
+# revert-protected (a reverting bundle is dropped, no fee). Rate limit: not published ("stricter than authenticated").
+# MEASURED 2026-10-19: every request from this IP (and from a second IP) answers -32097 "rate limited" (HTTP 429),
+# JSON-RPC and the public gRPC BundleService alike, all regions: see /root/fix2/harmonic_poll.log. 1/s locally.
+[[send]]
+name    = "harmonic-bundle"
+enabled = true
+kind    = "harmonic-bundle"
+url     = "https://fra.be.harmonic.gg/api/v1/bundles"
+# authenticated SearcherService.SendBundle (Jito-style login, role 3) with the owner's DEDICATED Harmonic keypair
+# (pubkey 8C1hako7zHpu1hiwLvrH6TMccY1G61puvjpGVhAk32hv, whitelisting applied for 2026-10-19). Login failure (not yet
+# whitelisted) is logged at start ("HARMONIC AUTH FAILED") and the path falls back to the public JSON-RPC above.
+auth_keypair = "/root/.harmonic-searcher-auth.json"
+max_per_sec = 1
+
+# --- launch feeds (GAP 2026-10-19, /root/gap/NOTES.md): first arrival per mint wins ---
+# DoubleZero Edge multicast (doublezero1, UDP 7733): fastest measured (+1.4 ms vs Kaldera on creates)
+[[feed]]
+name      = "dz-leader"
+enabled   = false
+kind      = "multicast"
+group     = "233.84.178.1"      # edge-solana-shreds: leader-published shreds
+port      = 7733
+interface = "doublezero1"
+
+[[feed]]
+name      = "dz-retrans-eu"
+enabled   = false
+kind      = "multicast"
+group     = "233.84.178.12"     # edge-solana-retrans-eu
+port      = 7733
+interface = "doublezero1"
+
+[[feed]]
+name    = "kaldera"
+enabled = true
+kind    = "yellowstone-deshred"
+url     = "https://kaldera-frankfurt.constant-k.com:8443"
+token_env = "KALDERA_TOKEN"
+token_header = "x-token"
+account_include = ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]
+
+[[feed]]
+name    = "turbo-kaldera"
+enabled = true
+kind    = "yellowstone-deshred"
+url     = "https://turbo-kaldera-frankfurt.constant-k.com:443"
+token_env = "CONSTANTK_TOKEN"
+token_header = "x-token"
+account_include = ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]
+
+# backup only (first on <=1% of creates)
+[[feed]]
+name    = "erpc"
+enabled = true
+kind    = "jito-entries"
+url     = "https://shreds-fra6-1.erpc.global"

@@ -13,7 +13,7 @@ fi
 cd /root/run1; . /root/run1/run1_common.sh
 LOG=/root/run1/dry_run1.log; : > $LOG
 GLOG=/root/run1/guard_dry.log
-FL=("${FLAGS[@]}"); for i in "${!FL[@]}"; do [ "${FL[$i]}" = "--minutes" ] && FL[$((i+1))]=$MIN; done
+FL=("${FLAGS[@]}"); for i in "${!FL[@]}"; do [ "${FL[$i]}" = "--minutes" ] && FL[$((i+1))]=$MIN; [ "${FL[$i]}" = "--config" ] && [ -n "${CONFIG:-}" ] && FL[$((i+1))]=$CONFIG; done
 $B --snipe-once --concurrent --junk-fanout "${FL[@]}" --send-log /root/run1/sends_dry.jsonl --lat-trace /root/run1/trace_dry.jsonl \
   < /root/.nexus-v2-trading-wallet.pass >> $LOG 2>&1 &
 EPID=$!
