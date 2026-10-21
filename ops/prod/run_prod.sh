@@ -55,8 +55,9 @@ parts = [parts[0]] + [b.replace("enabled   = true", "enabled   = false", 1) if '
 open(p, "w").write("[[feed]]".join(parts))
 PYEOF
   echo "NOTE: --no-dz: DoubleZero Edge feeds OFF; shreds from Kaldera / turbo-kaldera / erpc only"
-elif ! ip link show doublezero1 >/dev/null 2>&1; then
-  die "the DoubleZero tunnel (doublezero1) is down — fix DoubleZero, or add --no-dz to run on the Kaldera/erpc feeds only"
+elif python3 -c "import sys; s=open('$PC').read(); sys.exit(0 if any('kind      = \"multicast\"' in b and 'enabled   = true' in b for b in s.split('[[feed]]')[1:]) else 1)" \
+     && ! ip link show doublezero1 >/dev/null 2>&1; then
+  die "the config enables DoubleZero feeds but the doublezero1 tunnel is down — fix DoubleZero, or add --no-dz"
 fi
 
 LAM=$(awk -v s="$SIZE" 'BEGIN{printf "%d", s*1e9}')

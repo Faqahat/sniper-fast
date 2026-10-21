@@ -1,3 +1,5 @@
+# 2026-10-21: DoubleZero Edge was a trial (seat ended 00:00 UTC, not renewed): its multicast feeds are OFF; shreds come
+# from Kaldera / turbo-kaldera / erpc (~1.4 ms slower median than DZ).
 # FIX2 landing config (2026-10-19, /root/fix2/NOTES.md) = /root/lat/final_landing.toml + the harmonic-bundle path.
 # Routes (live_final2.sh): harmonic-bundle is built here but OFF in the live route until Harmonic confirms the whitelist
 # (ROUTES_HB in live_final2.sh puts it first on harmonic leaders: HarmonicAgave + HarmonicFiredancer); BAM and
@@ -85,7 +87,7 @@ max_per_sec = 1
 # DoubleZero Edge multicast (doublezero1, UDP 7733): fastest measured (+1.4 ms vs Kaldera on creates)
 [[feed]]
 name      = "dz-leader"
-enabled   = true
+enabled   = false
 kind      = "multicast"
 group     = "233.84.178.1"      # edge-solana-shreds: leader-published shreds
 port      = 7733
@@ -93,7 +95,7 @@ interface = "doublezero1"
 
 [[feed]]
 name      = "dz-retrans-eu"
-enabled   = true
+enabled   = false
 kind      = "multicast"
 group     = "233.84.178.12"     # edge-solana-retrans-eu
 port      = 7733

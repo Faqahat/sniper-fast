@@ -58,12 +58,14 @@ C=/root/run1/run1_landing.toml
 # (nozomi 29.5/26.6, staked-rpc 33.6/31.6) but every multi-route send there took 96-148 ms (7 of 7, with or without a
 # Jito tip) -> harmonic = nozomi only. Jito-client / BAM keep their fan-out (mostly 9-52 ms / 17-23 ms measured).
 ROUTES="bam=jito-bundle+nozomi+landx-fra3+staked-rpc+astralane;harmonic=nozomi;jito=nozomi+helius+astralane+landx-fra3+staked-rpc;fd=nozomi+astralane+staked-rpc;agave=nozomi+helius+astralane+staked-rpc;other=nozomi+helius+astralane+landx-fra3+staked-rpc;default=nozomi+helius+astralane+landx-fra3+staked-rpc"
+# Run 2 (2026-10-21): --create-ms-src wall = the create-time gate on our clock (Alpenglow, 13:54 UTC, broke the PoH-tick
+# position: every create read 0-3 ms); validated on 662 creates (corr 0.83 with the block position).
 # Run 2 (2026-10-21): sell lands in S+2 (--hold-slots 2): over 31 rule-2 launches the S+2 exit beats S+1 in every landing
 # scenario (measured landing: +3.42 vs +3.23 SOL; pessimistic +1.73 vs +1.25). --hold-ms 400 = the fallback timer only.
 FLAGS=(--uri-blacklist --min-dev-buy 500000000 --max-dev-buy-sol 8
   --dev-from-cap --race-gate --race-min-bundle 1 --race-min-bundle-sol 3 --race-max-bundle-sol 5 --race-create-tip-prefix moon --race-bundle-ms 3 --race-glued
   --race-pros /root/race/pros.json --race-early
-  --close-leaders /root/fix2/close_leaders_5ms.txt --max-create-ms 150
+  --close-leaders /root/fix2/close_leaders_5ms.txt --max-create-ms 150 --create-ms-src wall
   --spend-lamports 1500000000 --slip-cap-bps 1500 --fill-cap 1.6 --max-sol 1.6 --max-total-sol 31 --max-buys 20 --max-loss-sol 0.5 --lock-tiers 0.3:0,0.6:0.3 --ks-blind-s 10 --max-inflight 2 --minutes 180
   --cu-price-micro 110000000 --cu-limit 100000 --sell-cu-limit 120000 --sell-cu-price-micro 5000000 --hold-slots 2 --hold-ms 400 --hold-max-ms 1500 --land-poll-ms 100 --land-timeout-ms 3000
   --sell-robust --sell-retry-s 1 --sell-deadline-s 30 --sell-fallback-path nozomi --buy-max-slot-delta 1 --rpc-fallback-url-env RMR_RPC_URL --alt-cache-file /root/run1/alt_tables.txt --env-name $ENV_NAME --strict-balance --jito-poll --landed-via
