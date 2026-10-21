@@ -2217,6 +2217,13 @@ async fn run_shadow(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rp
     // ROUTE PROBE: one path per probe (round-robin) with its own tip; the feed is told to deliver our own txs too, so the
     // probe's sighting is timed exactly like a buy's (ms after the create, same feeds, first arrival)
     let probe_paths: Option<Vec<Arc<send::Path>>> = lat::PROBE.get().cloned();
+    // --probe-route: the probe goes out like a real buy, to the create slot's per-leader-client route (all its paths, one
+    // signature). --probe-buy: the probe IS a real pump buy of that launch (the buy's CU limit, size and tips) with
+    // min_tokens_out = u64::MAX, so it always fails the slippage check on chain: base + priority fee only, never a token.
+    let probe_route = has("--probe-route");
+    let probe_buy = has("--probe-buy");
+    let buy_cu_limit = arg_u64("--cu-limit", 120_000);
+    let probing_mode = probe_paths.is_some() || probe_route;
     let probe_log: Option<Arc<std::sync::Mutex<std::fs::File>>> = match arg("--probe-log") {
         Some(f) => Some(Arc::new(std::sync::Mutex::new(std::fs::OpenOptions::new().create(true).append(true).open(&f).with_context(|| format!("--probe-log {f}"))?))),
         None => None,
@@ -2225,7 +2232,7 @@ async fn run_shadow(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rp
     type Seen = std::collections::HashMap<[u8; 64], (u64, u64, Option<(u64, u64)>)>;
     let inflight: Arc<std::sync::Mutex<Seen>> = Arc::new(std::sync::Mutex::new(Seen::new()));
 
-    let interest = Arc::new({ let mut it = snipe::pump_interest(); if probe_paths.is_some() { it.keys.insert(user); } it });
+    let interest = Arc::new({ let mut it = snipe::pump_interest(); if probing_mode { it.keys.insert(user); } it });
     // feeds::start delivers over a crossbeam (sync) channel; bridge it to an async receiver on a blocking thread.
     let (tx, rx) = crossbeam_channel::unbounded();
     let handle = tokio::runtime::Handle::current();
@@ -2287,7 +2294,7 @@ async fn run_shadow(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rp
         };
         let arbx::feeds::Event::Tx(mut a) = ev else { continue };
         // ROUTE PROBE: one of our probes seen in the feed (first arrival across feeds wins)
-        if probe_paths.is_some() {
+        if probing_mode {
             let mut g = inflight.lock().unwrap();
             if let Some(e) = g.get_mut(&a.tx.sig) { if e.2.is_none() { e.2 = Some((a.t_rx, a.slot)); } continue; }
         }
@@ -2314,11 +2321,21 @@ async fn run_shadow(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rp
         let is_close = close_set.as_ref().map(|cs| slot_leader.get(&create_slot).map(|l| cs.contains(l)).unwrap_or(false)).unwrap_or(false);
         // GATE: skip far/unknown leaders — UNLESS --leader-tag-only (interleaved test: fire on ALL, just tag closeness).
         if close_set.is_some() && !has("--leader-tag-only") && !is_close { skipped_farleader += 1; continue; }
-        // ROUTE PROBE: this probe's path (round-robin) and its own tip; the cap counts the tip too
+        // ROUTE PROBE: this probe's path(s) and their tips (one path round-robin, or the buy's own route); the cap counts
+        // the tips too (worst case: a tip is only paid if the probe lands without failing)
+        let route_set: Option<(Vec<Arc<send::Path>>, String)> = if probe_route {
+            let (v, m) = lat::buy_paths(&path, ALSO_PATH.get(), Some(create_slot)); Some((v, m.route))
+        } else { None };
         let pick: Arc<send::Path> = match &probe_paths { Some(v) => v[(fired as usize) % v.len()].clone(), None => path.clone() };
-        let tips: Vec<(Pk, u64)> = if probe_paths.is_some() { lat::tips_for(std::slice::from_ref(&pick)) } else { Vec::new() };
+        let send_set: Vec<Arc<send::Path>> = route_set.as_ref().map(|r| r.0.clone()).unwrap_or_else(|| vec![pick.clone()]);
+        let label: String = match &route_set {
+            Some((v, r)) => format!("{r}[{}]", v.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("+")),
+            None => pick.name.clone(),
+        };
+        let tips: Vec<(Pk, u64)> = if probing_mode { lat::tips_for(&send_set) } else { Vec::new() };
         let tip_sum: u64 = tips.iter().map(|t| t.1).sum();
-        let cost = per_send + tip_sum;
+        let buy_ixs: Option<Vec<build::Ix>> = if probe_buy { Some(build_buy(user, &l, None, 1_000_000, u64::MAX).0) } else { None };
+        let cost = if probe_buy { 5000 + cu_price_probe.saturating_mul(buy_cu_limit + 300 * tips.len() as u64) / 1_000_000 } else { per_send } + tip_sum;
         if spent + cost > cap_lamports { skipped_cap += 1; continue; }
         // backpressure: never block the detector; if max_inflight polls are outstanding, skip this fire.
         let bh = *bh_cache.lock().unwrap();
@@ -2330,16 +2347,28 @@ async fn run_shadow(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rp
         let t_recv = Instant::now();
         let t_create_ns = a.t_rx;
         let poh_ms = a.poh.as_ref().and_then(|p| p.ms()).unwrap_or(-1.0);
-        let (path, rpc, key, sink) = (pick, rpc.clone(), key.clone(), sink.clone());
-        let (inflight, probe_log, probing) = (inflight.clone(), probe_log.clone(), probe_paths.is_some());
+        let (rpc, key, sink) = (rpc.clone(), key.clone(), sink.clone());
+        let (inflight, probe_log, probing) = (inflight.clone(), probe_log.clone(), probing_mode);
         let shot_close = is_close;
         tokio::spawn(async move {
             let _permit = permit; // released when the poll finishes
             // each tip transfer costs ~150 CU (300 allowed, as the fan-out does)
-            let mut ixs = vec![build::cu_limit_ix(probe_cu_limit + 300 * tips.len() as u32)];
-            if cu_price_probe > 0 { ixs.push(build::cu_price_ix(cu_price_probe)); } // per-CU priority: same ordering a real buy gets at this cu_price
-            for (t, l) in &tips { ixs.push(build::transfer_ix(user, *t, *l)); }
-            ixs.push(build::transfer_ix(user, user, 1));
+            let ixs: Vec<build::Ix> = match buy_ixs {
+                Some(b) => {
+                    // the real buy's instructions (its own CU limit + price, ATA, buy) behind the route's tip transfers
+                    let mut v: Vec<build::Ix> = tips.iter().map(|(t, l)| build::transfer_ix(user, *t, *l)).collect();
+                    v.extend(b);
+                    lat::bump_cu_limit(&mut v, 300 * tips.len() as u32);
+                    v
+                }
+                None => {
+                    let mut v = vec![build::cu_limit_ix(probe_cu_limit + 300 * tips.len() as u32)];
+                    if cu_price_probe > 0 { v.push(build::cu_price_ix(cu_price_probe)); } // per-CU priority: same ordering a real buy gets at this cu_price
+                    for (t, l) in &tips { v.push(build::transfer_ix(user, *t, *l)); }
+                    v.push(build::transfer_ix(user, user, 1));
+                    v
+                }
+            };
             let msg = match build::compile_v0(user, &ixs, bh, &[], &[]) { Ok(m) => m, Err(_) => return };
             let raw = build::sign(&msg, &*key);
             let sig = match send::first_signature(&raw) { Some(s) => s, None => return };
@@ -2350,10 +2379,21 @@ async fn run_shadow(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rp
             let t = Instant::now();
             let t_send_ns = arbx::feeds::clock::now_ns();
             if probing { inflight.lock().unwrap().insert(sig_bytes, (t_create_ns, t_send_ns, None)); }
-            let sent = path.send(&raw, send::Prio { band: 0, crowd: 0, ev: 0 }, None).await;
+            let sent: Result<(), String> = if send_set.len() == 1 {
+                send_set[0].send(&raw, send::Prio { band: 0, crowd: 0, ev: 0 }, None).await.map(|_| ()).map_err(|e| e.to_string())
+            } else {
+                // the buy's fan-out: every routed path at once, one signature
+                let hs: Vec<_> = send_set.iter().map(|p| {
+                    let (p, raw) = (p.clone(), raw.clone());
+                    tokio::spawn(async move { let r = p.send(&raw, send::Prio { band: 0, crowd: 0, ev: 0 }, None).await.map(|_| ()).map_err(|e| e.to_string()); (p.name.clone(), r) })
+                }).collect();
+                let (mut any, mut errs) = (false, Vec::new());
+                for h in hs { match h.await { Ok((_, Ok(()))) => any = true, Ok((n, Err(e))) => errs.push(format!("{n}: {e}")), Err(e) => errs.push(e.to_string()) } }
+                if any { Ok(()) } else { Err(errs.join("; ")) }
+            };
             let ack_ms = t.elapsed().as_secs_f64() * 1e3;
             if let Err(e) = sent {
-                eprintln!("    fire refused ({}): {e}", path.name);
+                eprintln!("    fire refused ({label}): {e}");
                 if probing { inflight.lock().unwrap().remove(&sig_bytes); }
                 sink.lock().unwrap().push(Shot { send_slot, land_slot: None, ok: false, wall_ms: 0.0, to: "refused".into(), create_slot: Some(create_slot), internal_ms, poh_ms, close: shot_close });
                 return;
@@ -2374,14 +2414,14 @@ async fn run_shadow(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rp
                 let ms = |a: u64, b: u64| (b as i64 - a as i64) as f64 / 1e6;
                 let create_to_seen = seen.map(|(t, _)| ms(t_create_ns, t));
                 let send_to_seen = seen.map(|(t, _)| ms(t_send_ns, t));
-                eprintln!("  PROBE path={} client={} leader={} create_slot={create_slot} poh_ms={poh_ms:.1} internal_ms={internal_ms:.2} ack_ms={ack_ms:.2} \
+                eprintln!("  PROBE path={} buy={probe_buy} client={} leader={} create_slot={create_slot} poh_ms={poh_ms:.1} internal_ms={internal_ms:.2} ack_ms={ack_ms:.2} \
                            seen_slot={:?} create->seen_ms={} send->seen_ms={} land_slot={:?} ok={} tips={tip_sum} sig={}",
-                    path.name, client, leader.chars().take(8).collect::<String>(), seen.map(|s| s.1),
+                    label, client, leader.chars().take(8).collect::<String>(), seen.map(|s| s.1),
                     create_to_seen.map(|x| format!("{x:.1}")).unwrap_or("-".into()), send_to_seen.map(|x| format!("{x:.1}")).unwrap_or("-".into()),
                     shot.land_slot, shot.ok, &sig[..16]);
                 if let Some(f) = &probe_log {
                     use std::io::Write;
-                    let j = serde_json::json!({ "path": path.name, "client": client, "leader": leader, "create_slot": create_slot, "poh_ms": poh_ms,
+                    let j = serde_json::json!({ "path": label, "probe_buy": probe_buy, "client": client, "leader": leader, "create_slot": create_slot, "poh_ms": poh_ms,
                         "internal_ms": internal_ms, "ack_ms": ack_ms, "t_create_ns": t_create_ns, "t_send_ns": t_send_ns,
                         "seen_slot": seen.map(|s| s.1), "create_to_seen_ms": create_to_seen, "send_to_seen_ms": send_to_seen,
                         "land_slot": shot.land_slot, "ok": shot.ok, "tips_lamports": tip_sum, "sig": sig });
