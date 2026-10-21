@@ -15,7 +15,7 @@ LOG=/root/run1/live_${TAG}.log; : > $LOG
 FL=("${FLAGS[@]}")
 for i in "${!FL[@]}"; do
   case "${FL[$i]}" in
-    --config) FL[$((i+1))]=/root/run1/edge_landing.toml;; --spend-lamports) FL[$((i+1))]=$SPEND;; --max-sol) FL[$((i+1))]=$MAXSOL;;
+    --config) FL[$((i+1))]=${CONFIG:-/root/run1/edge_landing.toml};; --spend-lamports) FL[$((i+1))]=$SPEND;; --max-sol) FL[$((i+1))]=$MAXSOL;;
     --max-total-sol) FL[$((i+1))]=${MAXTOTAL:-0.06};; --max-buys) FL[$((i+1))]=${MAXBUYS:-7};; --max-loss-sol) FL[$((i+1))]=$LOSS;; --minutes) FL[$((i+1))]=${MINUTES:-90};;
     --cu-price-micro) FL[$((i+1))]=30000000;; --lock-tiers) FL[$((i+1))]=100:0;;
   esac
