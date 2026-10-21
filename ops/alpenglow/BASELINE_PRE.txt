@@ -1,0 +1,9 @@
+== PRE-ALPENGLOW paper engine 09:24-14:23 UTC: 5.02 h, slot 216.4 ms (POH CLOCK samples 1: 216.4)
+   creates seen 9989 (1988/h); first-feed verdicts {'skip_dev_low': 4591, 'skip_quote': 2965, 'pass': 1920, 'skip_flags': 234}
+   feed lag behind the first feed (ms, p50/p90): kaldera 0.21/1.94 (n 3818); erpc 1.77/2.83 (n 10195); turbo-kaldera 0.33/4.82 (n 6907)
+   create_ms in slot: n 40 p25 24.0 median 76.3 p75 154.4; >150 ms 11
+   rule-2 pipeline: RACE seen 598 (119.0/h), race decisions 105, race pass 40, FIRES 29 (5.8/h)
+   first outside buy after create (feed ms): n 511 p25 15.5 median 34.1 p75 66.9
+   RPC blockhash p50 ms median 1.6; runtime lag p99 median 1.98 ms
+   paper PnL (rule #2, measured-landing model, sell S+2): 28 trades 09:24-14:23 UTC, +0.062 SOL total (+0.002/trade); 20 ms slower -0.134
+   our landing times used (measured 10-20/21 on FRZ, pre-Alpenglow): BAM 17.6 (real buy), Jito-client 17-52 (buy-shaped), Harmonic 27-34 (one route)
