@@ -21,7 +21,7 @@ for i in "${!FL[@]}"; do
   esac
 done
 setsid nohup bash -c "
-  $B --snipe-once --concurrent --live $(printf '%q ' "${FL[@]}") --send-log /root/run1/sends_${TAG}.jsonl --lat-trace /root/run1/trace_${TAG}.jsonl \
+  $B --snipe-once --concurrent --live $(printf '%q ' "${FL[@]}") ${EXTRA:-} --send-log /root/run1/sends_${TAG}.jsonl --lat-trace /root/run1/trace_${TAG}.jsonl \
     < /root/.nexus-v2-trading-wallet.pass >> $LOG 2>&1
   echo \"RUN1_DONE ${TAG} \$(date -u)\" >> $LOG" > /dev/null 2>&1 < /dev/null &
 sleep 3
