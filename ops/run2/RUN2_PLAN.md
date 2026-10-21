@@ -63,7 +63,9 @@ Risk over a 30-launch run (resampled 20,000 times):
 - **Harmonic leader Fd7btgyS: the buy went to nozomi only**, as intended.
 - **One wrinkle.** When the create is in a Harmonic leader's **last** slot, the engine adds the next leader's routes, so we get a 5-route send with a Jito tip on a Harmonic leader (seen once: 5ZqveVff → BAM).
   - That's about a quarter of Harmonic launches, which carry little profit; the cost is mostly a refusal (about 0.011 SOL).
-  - Fix ready to review: skip the next-leader routes when the create leader is Harmonic (2 lines in `lat::buy_paths`). It needs a new PROD binary, so it isn't deployed without your OK.
+  - Fix built and dry-run tested: `--no-union-harmonic` (off unless the flag is given), build `8a9b7b55…` in `/root/sniper-run2/`.
+  - The 40-min dry run with it passed: 3 fires on Jito-client leaders (JUPiTERr, 6NDen7aD, HEL1USMZ), all routed nozomi + helius + astralane + landx + staked-rpc with 0.004 tips and no Jito tip, 1040 bytes, sent 0.1–0.2 ms after the decision; 96 presigned buys identical; the guard confirmed all 3. No Harmonic last-slot launch came up, so the flag's branch wasn't exercised.
+  - **To use it (your OK):** copy `/root/sniper-run2/snipe_engine` over the Run binary (keep a backup) and add `--no-union-harmonic` to FLAGS in `run1_common.sh`. Without it, Run 2 is fine; it just loses a little on those few launches.
 
 ## Watch-outs
 - **DoubleZero is down.**
