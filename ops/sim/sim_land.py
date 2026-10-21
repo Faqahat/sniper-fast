@@ -50,7 +50,11 @@ def run(r, T):
         E = max(E, (S, max([t["idx"] for t in tr if t["slot"] == S and t["idx"] is not None] or [ge - 1])))
     for ms, sol, flag, w6 in ob:
         if ms > T or flag != "1": continue
-        cand = [t for t in tr if t["slot"] in (S, S + 1) and t["idx"] is not None and t["user"].startswith(w6) and abs(t["sol"] / 1e9 - sol) <= max(0.02, 0.02 * sol)]
+        mine = [t for t in tr if t["slot"] in (S, S + 1) and t["idx"] is not None and t["buy"] and (t["user"].startswith(w6) or t.get("payer", "").startswith(w6))]
+        cand = [t for t in mine if abs(t["sol"] / 1e9 - sol) <= max(0.02, 0.02 * sol)]
+        # LOOSE=1 (default since 2026-10-21): the feed's SOL for some buy types is an estimate, so a strict size match drops
+        # real buyers that landed before us and prices us too early (paper trades #3/#4 looked first at 1.00x but were not)
+        if not cand and os.environ.get("LOOSE", "1") == "1": cand = mine
         if cand: E = max(E, min(key(c) for c in cand))
     seq = [t for t in tr if key(t) > E]
     before = [t for t in tr if key(t) <= E]

@@ -102,8 +102,10 @@ def one(item):
     sS = [t for t in tr if t["slot"] == S]
     if not sS: return "no trades in S"
     ci = sS[0]["idx"]; ge = ci
-    for t in sS[1:]:
-        if t["idx"] == ge + 1 and t["buy"]: ge = t["idx"]
+    # the glued bundle = consecutive TXS (not trades) right after the create that buy the mint; one tx can hold several
+    # buys (two wallets in one tx) — 2026-10-21 fix: walking trades stopped at the 2nd buy of a tx and cut the bundle short
+    for i in sorted({t["idx"] for t in sS if t["idx"] > ci}):
+        if i == ge + 1 and any(t["buy"] for t in sS if t["idx"] == i): ge = i
         else: break
     r = dict(mint=mint, S=S, slot_ms=217.4, fired=not SKIPLATE, engine=("skip_late" if SKIPLATE else "fired") + f" ({src})", create_ms=cms.get((S, mint), (None,))[0], leader_rtt=None, rule2_largest=True, any_moon=True,
              cidx=ci, glued_end=ge + 1, gsol=bsol, glued=ge - ci, dev=None, bundle_members=[], creator=sS[0]["user"], trades=tr, window_slots=K)
