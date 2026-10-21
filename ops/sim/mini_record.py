@@ -68,6 +68,19 @@ for fn in sys.argv[2:]:
         if m and (m.group(4) == "true") != SKIPLATE: fires[(int(m.group(1)), m.group(2))] = (float(m.group(3)), os.path.basename(fn))
 if SKIPLATE:
     fires = {k: v for k, v in fires.items() if k in passed and cms.get(k, (0, ""))[1] == "skip_late"}
+# FIRELINES=1 (paper trading): exactly the launches the engine FIRED on (a "  FIRE slot=" line), after every gate
+if os.environ.get("FIRELINES") == "1":
+    fl = set()
+    for fn in sys.argv[2:]:
+        for line in open(fn, errors="replace"):
+            m = re.search(r"^\s+FIRE slot=(\d+) mint=(\w+)", line)
+            if m: fl.add((int(m.group(1)), m.group(2)))
+    allobs = {}
+    for fn in sys.argv[2:]:
+        for line in open(fn, errors="replace"):
+            m = re.search(r"RACE obs slot=(\d+) mint=(\w+) .* bundle_sol=([\d.]+) fired=", line)
+            if m: allobs[(int(m.group(1)), m.group(2))] = (float(m.group(3)), os.path.basename(fn))
+    fires = {k: allobs.get(k, (0.0, "fire")) for k in fl}
 
 
 def one(item):
