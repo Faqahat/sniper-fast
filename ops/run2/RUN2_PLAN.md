@@ -35,7 +35,23 @@ Drop `--no-dz` only if DoubleZero is back (`ip link show doublezero1` shows the 
 | Jito client | 57–133 (Run 1); 9–33 and 132 (edge checks) | 17.4, 51.6 (buy-shaped, new fan-out) |
 | Harmonic | 96–148 (7 of 7) | **26.6, 29.5 (nozomi), 31.6, 33.6 (staked-rpc)** (buy-shaped, one route) |
 
-## Expected result (what-if over the 31 launches that pass Run 2's rules, ~4 h of launches)
+## CORRECTION (2026-10-21 11:00 UTC): more conservative expected numbers
+My first what-if (the table below) was too optimistic. Two bugs:
+- my block recorder cut creator bundles short when two bundle buys shared one transaction;
+- my replay ignored faster buyers whose size our feed under-reports.
+
+The research model (`ops/research/filters.py`, correct bundles and buyer matching; rule #2 rebuilt from the blocks matches 48 of 48 engine fires) gives:
+
+| Rule #2 | Launches | PnL, sell S+2 | Per launch | If we land 20 ms slower |
+|---|---|---|---|---|
+| Evening (1 h dry run + Run 1) | 19 | +2.52 SOL | **+0.13** | +0.07 |
+| Older + overnight (never used for tuning) | 31 | +1.79 SOL | **+0.06** | +0.04 |
+
+**Realistic expectation: +0.05 to +0.10 SOL per launch at 1.5 SOL.** In the evening that's about 12 launches an hour, so about +0.6 to +1.2 SOL an hour.
+
+Live paper trading this morning (same model): 5 trades, +0.074 SOL.
+
+## First what-if (superseded by the correction above; kept for reference)
 | Our landing | PnL, sell S+1 | PnL, sell S+2 |
 |---|---|---|
 | 15 ms | +4.30 SOL | +4.41 |
