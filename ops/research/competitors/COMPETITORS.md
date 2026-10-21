@@ -30,7 +30,7 @@ Read-only study. Who else snipes the launches our rule #2 fires on, how much the
 - **Verdict.** Rule #2 at 1.5 SOL with the S+2 exit is **not proven net positive.**
   - It is flat on 10-21 in our model (+0.004 SOL/launch) and −0.31 SOL on 49 paper launches. After Alpenglow the tracked snipers' own rule #2 trades turned negative too (29 trades, −3.9% per trade, ~1.7 h of data).
   - It is worth roughly **+0.03–0.05 SOL per launch (≈ +0.25–0.4 SOL/h)** only if we land in the create slot within ~30 ms and cut costs.
-  - At our older measured landing (median 78 ms) it should lose, like the slot-late sniper.
+  - At Run 1's landing (57–138 ms; a delivery problem) it would lose, like the slot-late sniper. The new routes measured 18–34 ms in overnight probes (RUN2_PLAN), the fast class — but only before Alpenglow.
   - **Run 2 should be a landing-measurement run, not a profit run.**
 
 ## 1. How the competitors were found (`discover.py`)
@@ -174,7 +174,7 @@ Launches inside the competitors' fetched window (10-20 ~15:35 → 10-21 15:35): 
 | dKMjeG (8 SOL bets, ladder, held ~79 slots) | 4 | +19.8% | +60.5% (at 1.5 SOL, S+2) | 4/4 | 79 |
 
 - dKMjeG's rule #2 launches spiked early: our model's S+2 exit at 1.5 SOL would have made +60% on them, its 8 SOL ladder made +20% (its own size moves the price ~5× more than ours).
-- **Measured:** when a sniper lands like our model assumes (create slot, first or second outside buyer), its real result on rule #2 launches matches our model (+6.5% vs +6.1%). A sniper that lands one slot late on the same launches loses about 6% where our model says +6.7%. *Inference:* our model is right **only if we really land in the 20–35 ms class**; at ~80–140 ms (our older live buys) we would be the 7cp6zx row.
+- **Measured:** when a sniper lands like our model assumes (create slot, first or second outside buyer), its real result on rule #2 launches matches our model (+6.5% vs +6.1%). A sniper that lands one slot late on the same launches loses about 6% where our model says +6.7%. *Inference:* our model is right **only if we really land in the 20–35 ms class** (the new routes probed there overnight); at Run 1's ~60–140 ms we would be the 7cp6zx row.
 - On launches our model REFUSED (price >15% over the post-bundle quote when we land), faster snipers were the first outside buyer and won: GZDe8AQN 3yrJE1 +1.40 SOL (3 SOL, fill 1.08×) and CWiNFA +0.18; 8E4L9kgP 3yrJE1 +0.08; 7BEUZH3E 3yrJE1 +0.01.
 - *Inference:* the fast snipers' buys are our exit liquidity. Our S+2 PnL tracks the outside SOL bought in S..S+2 (correlation 0.8 over 77 rule #2 launches): < 0.5 SOL of outside buying → all 25 launches lost (−0.049 each, the fee floor); 2–5 SOL → +0.051; > 5 SOL → +0.369.
 
@@ -233,7 +233,7 @@ Ranked by expected impact × confidence. "Model" = our FILTERS landing model on 
 1. **Land first — and measure it on every fire after Alpenglow.** Confidence **high** that it decides the sign; medium on how much a change of route buys.
    - Model: first outside buyer +0.089 SOL/launch (50 of 77); one ahead +0.060 (11); ≥2 ahead −0.042 (16, 7 of them refused by the cap). 20 ms slower turns the 10-21 groups negative.
    - Real: the same rule #2 launches gave +6.5% to fast snipers and −5.9% to a slot-late one (7cp6zx). Anubis (feed ~102 ms, never first, 0.1% cost) lost −28 SOL in 12 h. Create slot vs S+1: DRWPSr +20.6% vs −10.1%, 9qz7cW +20.5 vs −5.7 SOL, 8ptvsh +3.9% vs −5.7%, 3yrJE1 +11.0% vs +0.4%, AqMoKz −1.4% vs −5.9%.
-   - Our buys in the older live logs were seen at a median 78 ms (Run 1: 57–138 ms). The model needs 20–35 ms.
+   - Our buys in the older live logs were seen at a median 78 ms (Run 1: 57–138 ms, a delivery problem). The new routes measured 18–34 ms in overnight probes (RUN2_PLAN) — the fast class, before Alpenglow. The model needs 20–35 ms.
    - Concrete: log feed-seen ms, slot and block position of our own buy on every fire (Run 2's main output). Every profitable lane bot signs one tx with a **durable nonce** and sends it through 4–8 relays (nozomi, helius, astralane, flashblock, landx, stellium, jito, speedlanding, node1, soyas); only one copy can land and the rest fail for ~5,000 lamports. Our multi-path routing (arbx-lat) is the same idea. **Send-path change → needs the owner's OK.**
 2. **Cut the fixed cost per trade from ~0.015 SOL to ~0.006 SOL and make a failed/refused buy nearly free.** Confidence **medium** (it must not cost landing).
    - Model: +0.008 SOL per launch held-out (B–E +1.91 → +2.37 with prio 0.004 + tip 0.003; → +2.45 tip-only with free failures); 10-21 (C–E) +0.12 → +0.31/+0.35; it shrinks the fee floor that 31 of 77 trades end on.
@@ -263,7 +263,7 @@ Ranked by expected impact × confidence. "Model" = our FILTERS landing model on 
 | Paper loop (live engine, 10-21 09:23–15:31) | 49 rule #2 launches **−0.31 SOL** (+20 ms: −1.02); of the 48 I could split: before AG 26 +0.04, after AG 22 −0.44 | flat to negative |
 | Landing speed | model: first outside buyer +0.089/launch (50 of 77), ≥2 snipers ahead −0.042 (16; 7 refused); +20 ms turns 10-21 negative | **the deciding factor** |
 | Same launches, real snipers | fast snipers +6.5% real vs our model +6.1%; a slot-late sniper −5.9% real vs our model +6.7% | model right only if we are fast |
-| Our measured live landing (older logs) | our buys seen at 9–148 ms, median 78 ms (n 18); Run 1 57–138 ms | the slow class, unless the new routes hold after AG |
+| Our measured landing | older live logs: our buys seen at 9–148 ms, median 78 ms (n 18; Run 1 57–138 ms, a delivery problem); new routes in overnight probes (RUN2_PLAN): nozomi 25–30 ms, landx 30, helius 32, BAM real buy 17.6 ms (first outsider) | fast class on paper; unverified after AG |
 | Real copies of our design (fixed size, one quick sell, 0.6–2.2 SOL) | positive: CWiNFA +0.36 SOL/h (cost 0.6%), AHwJSn +0.23 (0.4%), BXB7FF +0.13 (1.3%, create slot 100%); flat or negative: 8ptvsh +0.07 (1.9%), 9XPMCa +0.03 (3.9%), Six5j1 −0.02 (1.5%), 54YNHF −0.06 (0.9% + failed-tx fees), AqMoKz −0.10 (1.7%); slow: Anubis −2.3 SOL/h (0.1% cost, ~102 ms) | ≈ break-even on average; the positive ones are cheaper or always first |
 | Exit | S+2 to S+4 is the best simple exit on our entries; ladders, trailing stops and ≥ S+10 holds lose (section 5) | keep S+2 (or S+3) |
 | Time of day | 5 lane bots (CWiNFA, AHwJSn, AMDEmV, 8ptvsh, 3yrJE1) positive in every 6-h block (+1.5% to +2.9%); 16–17 h and 20 h UTC negative; our model per 3-h block all ≥ 0 except 00–03 h (n 4) | one day only: no gate |
@@ -279,7 +279,7 @@ Ranked by expected impact × confidence. "Model" = our FILTERS landing model on 
 
 Under 1–3 the expected value is about **+0.03 to +0.05 SOL per rule #2 launch, ≈ +0.25–0.4 SOL/h at ~8 launches/h** — the same as the real snipers who do exactly this (+0.1 to +0.45 SOL/h). **0.5–2 SOL/h needs conviction sizing (2–8 SOL) with laddered exits on launches we cannot yet pick (2mqrin, 8RvtT8, 4yFAz, dKMjeG, 9qz7cW).**
 
-**For Run 2 (my read):** run it as a measurement run, not a profit run. The go/no-go numbers are our real feed-seen landing ms and block position after Alpenglow (target: create slot, ≤ 30 ms, first or second outside buyer on ≥ 60% of fires) and the real fill vs the model's price. If landing is in the fast class, the cost cut (lever 2) is the next change; if it is in the 60–140 ms class, rule #2 at 1.5 SOL is expected to lose (the 7cp6zx row).
+**For Run 2 (my read):** run it as a measurement run, not a profit run. The go/no-go numbers are our real feed-seen landing ms and block position after Alpenglow (target: create slot, ≤ 30 ms, first or second outside buyer on ≥ 60% of fires) and the real fill vs the model's price. If landing is in the fast class, the cost cut (lever 2) is the next change; if it is back in the 60–140 ms class (Run 1), rule #2 at 1.5 SOL is expected to lose (the 7cp6zx / Anubis rows).
 
 ## How it was measured
 
@@ -301,4 +301,4 @@ Under 1–3 the expected value is about **+0.03 to +0.05 SOL per rule #2 launch,
   - Failed-tx cost = sampled mean fee × failed count in the span.
   - "dslot" needs the create slot from our own logs, so it covers only the creates our engines saw (about half of each wallet's trades).
   - Hold-time and exit-type splits of the competitors' PnL are not causal (their exit rule decides the hold). The causal exit test is section 5, on our own model.
-  - Our model lands us 20–35 ms after the create; our real live buys in the older logs were seen at 9–148 ms (median 78 ms, n 18; Run 1 57–138 ms).
+  - Our model lands us 20–35 ms after the create; our real live buys in the older logs were seen at 9–148 ms (median 78 ms, n 18; Run 1 57–138 ms). The new routes probed at 18–34 ms overnight (RUN2_PLAN, not re-measured here, before Alpenglow).
