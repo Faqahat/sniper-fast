@@ -14,7 +14,7 @@ Drop `--no-dz` only if DoubleZero is back (`ip link show doublezero1` shows the 
   - We decide and send 2–5 ms after seeing the create, but our buys landed 57–138 ms after it.
   - The launches worth having went to wallets landing at 17–60 ms (dK, 4yFAz, 9X).
   - We filled only the 2 launches nobody else wanted.
-- **The delay was delivery, not decision.** Three causes, from 59 route probes, 11 buy-shaped probes (real pump buys that fail on purpose and never buy a token), our 17 real sends, and peers' buys in 172 launches:
+- **The delay was delivery, not decision.** Three causes, from 67 route probes, 9 buy-shaped probes (real pump buys that fail on purpose and never buy a token), our 18 real sends, and peers' buys in 172 launches:
   1. **Jito tip outside a bundle.** A buy carrying a Jito tip that reaches a Jito-client or Harmonic leader outside a bundle lands late (median position 178th). Jito bundles themselves take about 53 ms.
   2. **Multi-route sends on Harmonic.** On Harmonic leaders, every multi-route send took 96–148 ms (7 of 7). The same buy through **one** route took **27–34 ms**.
   3. **Astralane never worked.** Our key was rejected (HTTP 401). The new key works.
@@ -58,7 +58,7 @@ Risk over a 30-launch run (resampled 20,000 times):
 - **The price cap keeps losses small.** Only 2 of 31 lost more than 0.1 SOL.
 - **Most of the money is on Jito-client leaders** (13 of 31 launches, +2.4 to +3.0 SOL when we land in 35 ms or less).
 
-## Dry run of Run 2's exact setup (zero cost, 25 min, 01:48–02:13 UTC)
+## Dry run of Run 2's exact setup (zero cost, 25 min, 00:48–01:13 UTC)
 - **2 fires; the guard confirmed both against rule #2 on chain.** All 53 presigned buys were identical, with 0 mismatches.
 - **Harmonic leader Fd7btgyS: the buy went to nozomi only**, as intended.
 - **One wrinkle.** When the create is in a Harmonic leader's **last** slot, the engine adds the next leader's routes, so we get a 5-route send with a Jito tip on a Harmonic leader (seen once: 5ZqveVff → BAM).
