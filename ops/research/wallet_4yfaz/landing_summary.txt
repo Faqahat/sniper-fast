@@ -1,0 +1,15 @@
+n 96 pnl 29.95
+dslot Counter({0: 77, 1: 19})
+same-slot tx index after the glued bundle end (incl. vote/other txs): median 96 p25 44 p75 247 ==1: 2 <=5: 3 of 77
+outside txs of the mint ahead of him Counter({0: 65, 1: 20, 2: 6, 3: 5})
+fill vs post-dev floor med 1.243 p25 1.072 p75 1.386
+fill vs price just before him (own size impact) 1.062
+bundled & he is first outsider: 31 bundle push med 1.244 fill vs floor 1.339 pnl 18.97
+no bundle & first: 34 fill vs floor 1.065 pnl 7.83
+dev<0.5 (outside our base filter): 26 pnl 3.98
+BIG HdmXEM 6.72 7.14 dev 8.89 glued 1 none ipfs.io None dslot 0 out 0 creator EgJoaE naseem
+BIG 86qoUv 2.18 5.6 dev 2.47 glued 0 none ipfs.io None dslot 0 out 0 creator DYj13d Pokemon Sol-Silver
+BIG 5ocDVo 2.96 3.08 dev 0.0 glued 1 lunar j7tracker None dslot 0 out 0 creator 9i8mrZ Official Musk
+BIG EreLn2 2.96 2.84 dev 1.98 glued 2 fee/other addr uxento None dslot 0 out 0 creator 5SW7p5 Motion
+BIG BkPWAp 6.72 1.81 dev 4.94 glued 2 fee/other addr uxento None dslot 1 out 3 creator GX6mka Restore Britain
+BIG C9Cdj9 1.45 1.42 dev 3.08 glued 0 none ipfs.io None dslot 1 out 1 creator 4Nrv1s Aequa

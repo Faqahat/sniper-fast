@@ -1,0 +1,30 @@
+rows with recording 1424 of 1424
+grp A: watched 325, he bought 4 (1%); rule#2 19, he bought 1
+grp B: watched 553, he bought 5 (1%); rule#2 31, he bought 1
+grp C: watched 54, he bought 1 (2%); rule#2 1, he bought 0
+grp D: watched 252, he bought 4 (2%); rule#2 16, he bought 1
+grp E: watched 240, he bought 4 (2%); rule#2 10, he bought 1
+
+our model p2 on launches he bought: n=18 mean +0.0570 sum +1.03; not bought n=1406 mean +0.0029
+  early<=150   he bought n=12 p2 +0.0750 mkt2 1.188 | skipped n=980 p2 +0.0063 mkt2 1.079
+  rule#2       he bought n=4 p2 +0.1883 mkt2 1.332 | skipped n=73 p2 +0.0504 mkt2 1.120
+  no bundle    he bought n=7 p2 +0.0860 mkt2 1.171 | skipped n=648 p2 +0.0085 mkt2 1.083
+  bundle>0     he bought n=11 p2 +0.0385 mkt2 1.146 | skipped n=758 p2 -0.0020 mkt2 1.068
+
+his landing on our watched launches: dslot Counter({0: 15, 1: 3})
+  txs after glued bundle (same slot): [-2, -1, 12, 13, 17, 21, 27, 31, 33, 35, 49, 69, 77, 132, 290]
+  outside buys ahead of him: [(0, 15), (1, 3)]
+  his fill (x post-bundle): [0.947, 0.959, 1.031, 1.036, 1.041, 1.042, 1.047, 1.049, 1.049, 1.056, 1.076, 1.077, 1.084, 1.089, 1.094, 1.129, 1.181, 1.181]
+  his size SOL: [1.17, 1.17, 1.26, 1.43, 1.43, 1.43, 1.43, 1.51, 1.51, 1.51, 1.66, 2.15, 2.93, 2.93, 2.93, 2.93, 2.93, 2.93]
+
+rule #2 launches he bought:
+  B 73XDo27C gsol 4.90 dev 3.00 dslot 0 after_bundle 27 ahead 0 size 1.17 fill 1.0308853113292344 our p2 +0.114
+  A FShDX4yU gsol 3.40 dev 0.50 dslot 0 after_bundle 49 ahead 0 size 1.43 fill 1.0422448019962296 our p2 +0.661
+  D 8E4L9kgP gsol 4.90 dev 3.00 dslot 0 after_bundle 12 ahead 0 size 2.93 fill 1.077213276621409 our p2 -0.011
+  E 7BEUZH3E gsol 3.40 dev 5.00 dslot 0 after_bundle 33 ahead 0 size 2.93 fill 1.0762078954198595 our p2 -0.011
+
+by tip class/host/bundle among watched early launches: share he bought
+  tipc {'none': '2/378', 'fee/other addr': '3/280', 'lunar': '5/194', 'nozomi': '1/55', 'other tip svc': '1/49', 'jito': '0/36'}
+  host {'ipfs.io': '4/435', 'j7tracker': '6/341', 'other': '2/111', 'uxento': '0/64', 'pinata': '0/41'}
+  cls {'jito': '8/427', 'harmonic': '1/361', 'other': '1/135', 'bam': '2/69'}
+  bundle SOL {'0': '5/467', '>5': '0/219', '3-5': '5/188', '2-3': '0/61', '<2': '2/57'}

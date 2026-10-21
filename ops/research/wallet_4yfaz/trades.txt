@@ -1,0 +1,23 @@
+window 10-19 07:15 .. 10-21 14:35 UTC = 55.3 h; sigs 6578, ok 2204, failed 4374
+mints bought 234 (4.23/h), closed 233, open/partial 1
+size SOL: median 2.18 p10 1.43 p90 2.96 max 7.43; total in 539.0
+PnL (closed, ex failed-tx fees): total +64.29 SOL, mean +0.2759, median +0.0132, win 52%, return on SOL in +11.93%
+  without best 3: +46.45; best [3.5244537784750007, 3.648897479812501, 5.092766256600001, 5.597922444662501, 7.143610869225], worst [-1.503017591512499, -0.9982759096124998, -0.9439503268249998, -0.9135664149749997, -0.8496251873499997]
+hold: median 4 s (19 slots), p90 40 s, max 41 s; first sell median 10 slots
+sells per trade: [(1, 94), (2, 49), (3, 23), (4, 16), (5, 8), (6, 4), (7, 24), (8, 9), (9, 3), (10, 2), (16, 1)]  buys per trade: [(1, 223), (2, 10)]
+costs inside trades (tx fees + tips): 15.237 SOL; failed txs 4374 x mean fee 0.000706304054054054 = 3.089 SOL
+
+per UTC day/hour block:
+  10-20: trades 133, in 304.3, pnl +35.15, win 53%
+  10-21: trades 100, in 234.7, pnl +29.14, win 50%
+  buys per hour: 20 06:1 20 07:3 20 08:8 20 09:5 20 10:10 20 11:2 20 12:6 20 13:9 20 14:7 20 15:9 20 16:12 20 17:5 20 18:12 20 19:13 20 20:5 20 21:9 20 22:11 20 23:7 21 00:6 21 01:3 21 02:7 21 03:7 21 04:5 21 05:5 21 06:2 21 07:9 21 08:7 21 09:5 21 10:6 21 11:8 21 12:11 21 13:10 21 14:9
+last 24 h: trades 185 (7.71/h), in 413.1, pnl +50.85 (minus failed fees ~1.19), mean +0.275, win 50%
+24-48 h ago: trades 48 (2.00/h), in 125.9, pnl +13.43 (minus failed fees ~1.62), mean +0.280, win 58%
+last 6 h: trades 51 (8.50/h), in 115.4, pnl +6.67 (minus failed fees ~0.27), mean +0.131, win 47%
+
+buy tx settings: cu limit [(55950, 13), (51450, 10), (52950, 10), (57450, 9), (51550, 9), (54550, 8)]
+  cu price (uL) median 22008468.5 p90 1078053259 ; prio SOL median 0.001342 p90 0.060005
+  tip SOL median 0.0013 p90 0.06
+  routes on landed buy tx: [((), 84), (('helius',), 40), (('nozomi',), 38), (('landx',), 32), (('jito',), 8), (('speedlanding',), 8), (('soyas',), 5), (('b1oom?',), 5), (('bolt',), 5), (('nextblock',), 2), (('0slot',), 2), (('other:D1Mc6j',), 2)]
+  buy program: [(('Tokenz', '6EF8rr'), 125), (('2YAbTp',), 75), (('L2TExM', '2YAbTp'), 19), (('BehnpC',), 6), (('L2TExM', 'Tokenz', '6EF8rr'), 5)]
+  sell programs: [(('FCdY3U', 'L2TExM', 'FCdY3U'), 131), (('FCdY3U', 'L2TExM'), 94), (('L2TExM', 'FCdY3U', 'L2TExM'), 9)]
