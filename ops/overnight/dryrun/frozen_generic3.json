@@ -1,0 +1,51 @@
+{
+ "frozen_at_unix": 1792727167,
+ "frozen_at_pkt": "2026-10-23 08:46 PKT",
+ "note": "Addendum 2: 'wave stopped' exits, frozen before any forward data was examined. Forward = launches created after 08:26 PKT (frozen_generic.json).",
+ "trackA": [
+  {
+   "id": "A5_F2_IDLE3_C30",
+   "picks": "FINAL-2 live pick",
+   "size": 0.5,
+   "guard": 1.005,
+   "exit": "sell when no outside buy for 3 s (since our buy / the last outside buy), max 30 s",
+   "rp_rule": "rp.R(\"idle3.0_c30\", [(1.0, (\"idle\", 3.0)), (1.0, (\"t\", 30.0))], 31)",
+   "landings_ms": [
+    20,
+    30,
+    35,
+    45,
+    60,
+    75
+   ]
+  },
+  {
+   "id": "A6_F2_IDLE2_C15",
+   "picks": "FINAL-2 live pick",
+   "size": 0.5,
+   "guard": 1.005,
+   "exit": "sell when no outside buy for 2 s, max 15 s",
+   "rp_rule": "rp.R(\"idle2.0_c15\", [(1.0, (\"idle\", 2.0)), (1.0, (\"t\", 15.0))], 16)",
+   "landings_ms": [
+    20,
+    30,
+    35,
+    45,
+    60,
+    75
+   ]
+  }
+ ],
+ "in_sample_R2_pro_costs": {
+  "A5_75ms": {
+   "slip": 3.93,
+   "proafter_slip": 3.38,
+   "nosnip": 3.04
+  },
+  "A6_30ms": {
+   "slip": 8.42,
+   "proafter_slip": 5.93,
+   "nosnip": 4.58
+  }
+ }
+}

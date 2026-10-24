@@ -108,7 +108,7 @@ mod tests {
             let mut d = 2u32.to_le_bytes().to_vec();
             d.extend(7_000u64.to_le_bytes());
             let ixs = vec![crate::tx::Ix { program: 1, accounts: vec![0, 2], data: d }];
-            Arrival { feed: 0, slot: 100, t_rx: 1_000 + n, t_decoded: 1_000 + n, executed: None, poh: None, raw: Default::default(),
+            Arrival { feed: 0, slot: 100, t_rx: 1_000 + n, t_decoded: 1_000 + n, executed: None, poh: None, raw: Default::default(), exec: None,
                 tx: crate::tx::Tx { sig: sig(n), keys, ixs, num_signers: 1, ..Default::default() } }
         };
         let run = |one_in: u32| {

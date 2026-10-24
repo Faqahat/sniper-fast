@@ -1,0 +1,46 @@
+{
+  "frozen_at_utc": "2026-10-23 01:00",
+  "test_window_starts_utc": "2026-10-23 00:35",
+  "note": "Strategies fixed BEFORE the test window data was looked at. Chosen on 10-22 17:09 -> 10-23 00:34 forward-replay data.",
+  "size_sol": 0.5,
+  "costs": {
+    "buy_overhead_pct": 2.0,
+    "sell_fee_sol": 0.0005,
+    "fill_penalty_pct": 1.5,
+    "pump_fee": "from events"
+  },
+  "strategies": {
+    "S1_DEVLIST_FLIP": "create signer (deployer) was attempted at least once by 9Sh2fd or DGmspi before this launch (their ledgers + our collector), SOL-quoted, not mayhem; buy at our real place in line; sell all at the end of the slot after our buy (eos1)",
+    "S2_DEVLIST3_FLIP": "same, deployer list also includes D24ipY's attempts",
+    "REF_ORACLE": "reference only (not tradable): launches 9Sh2fd or DGmspi actually attempted",
+    "S3_DEVLIST_RATE_FLIP": "added 2026-10-23 01:10 UTC from development-window data only (17:09-00:34): deployer has >= 2 attempts by 9Sh2fd/DGmspi before this launch AND attempts / launches-we-saw >= 10% (filters spam deployers attempted by accident); test window for S3 starts 01:10 UTC; same entry/exit/costs as S1",
+    "S4_DEVLIST_RATE_GUARD": "added 2026-10-23 01:10 UTC from development data only (forward window 17:09-00:34 and old R1 10-21 22:07-10-22 07:00): S3 deployer list + PRICE GUARD: the buy carries a min-out so it FAILS when the price at our fill is more than 1% (S4a) / 3% (S4b) above the post-bundle price (someone bought ahead of us); a failed buy costs 0.002 SOL; exits: sell all at the end of the slot after our buy (eos1), hold 1 s, or a sell landing 500 ms after the create",
+    "S5_UNION_AHW_GUARD": "added 2026-10-23 01:21 UTC: S4 with the deployer list widened by the deployers AHwJSnFNUiAU9FfT5ewW2osqMo938WtL7KhfsJyfpaN2 (a profitable 'first-only' sniper found overnight) keeps attempting (>= 2 attempts and >= 10% of the deployer's launches, walk-forward); 1% guard; hold ~1 s; chosen on the 17:09-00:34 window; clean test from 01:35"
+  },
+  "primary_exit": "eos1",
+  "landing_ms_reported": [
+    35,
+    45,
+    60,
+    75
+  ],
+  "other_exits_logged": [
+    "eos0",
+    "eos2",
+    "tp1.1_eos2",
+    "fsell_any_c2",
+    "hold1s",
+    "hold5s",
+    "hold10s",
+    "pD_25at_slots1_3_6_10",
+    "pI_50eos0_50hold10s",
+    "twap_10pct_every2s_20s",
+    "lad_33@1.3_33@1.6_trail"
+  ],
+  "s3_frozen_at_utc": "2026-10-23 01:10",
+  "s3_test_window_starts_utc": "2026-10-23 01:10",
+  "s4_frozen_at_utc": "2026-10-23 01:10",
+  "s4_test_window_starts_utc": "2026-10-23 01:10",
+  "s5_frozen_at_utc": "2026-10-23 01:21",
+  "s5_test_window_starts_utc": "2026-10-23 01:35"
+}

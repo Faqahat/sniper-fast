@@ -1,0 +1,658 @@
+{
+ "costs_assumed": {
+  "buy_overhead_pct_of_size": 2.0,
+  "failed_guarded_buy_sol": -0.005,
+  "fill_penalty_pct": 1.5,
+  "pump_fees": "this curve's protocol + creator bps (from its trade events) both sides",
+  "sell_tx_fee_sol": 0.0005,
+  "swap_leg_pct_each_side": 0.3
+ },
+ "entry": {
+  "guard": "buy only if the curve price at our landing <= 1.005 x the post-bundle price (= we are first outside buyer)",
+  "landing_ms_primary": 45,
+  "landing_ms_tested": [
+   30,
+   45,
+   75
+  ],
+  "size_sol_eq": 0.5,
+  "swap": "SOL->quote in the same tx (or quote inventory)",
+  "when": "right after the dev's glued bundle closes (consecutive buy txs right after the create in the create slot)"
+ },
+ "evidence": {
+  "caveats": [
+   "profit depends on the best 5 trades in every t5 cell (total without top 5 < 0); medians are negative",
+   "chosen after looking at 4 cutoffs x 5 exits x 3 landings: multiple-comparison risk; top 5% / 10% / 20% cutoffs lose",
+   "R1 placement is a block-position proxy; R2 uses our engine's arrival timelines",
+   "swap cost per leg assumed 0.3%; the measured retail all-in SOL<->quote cost is 1.2-2% per leg (includes bot fees + rent noise); at 1.5%/leg the t5 totals stay positive but smaller",
+   "small samples: 22-82 fills per test period",
+   "bootstrap 90% CI of the test totals (strict t5) includes 0 in 5 of 6 cells; P(total<=0) 0.04-0.33 (robust.txt / RESULTS.md)",
+   "R1->R2 profit comes from name waves (8 'Warhound' + 3 'Michiko Malandro' launches); one pick per name: L45 -0.69 SOL",
+   "model-variant check (variants.txt): 3 of 4 other variants lose in one direction at the top 2% -> the edge is not stable",
+   "expect ~break-even forward; do NOT trade live on this; forward test only"
+  ],
+  "in_sample_refit_strict_t5": {
+   "R1": {
+    "30": {
+     "fills": 37,
+     "mean": 0.0226,
+     "med": -0.0207,
+     "n": 43,
+     "tot": 0.808,
+     "win": 0.405,
+     "wo5": -1.574
+    },
+    "45": {
+     "fills": 29,
+     "mean": 0.0347,
+     "med": -0.0207,
+     "n": 43,
+     "tot": 0.936,
+     "win": 0.379,
+     "wo5": -1.426
+    },
+    "75": {
+     "fills": 23,
+     "mean": 0.0603,
+     "med": -0.0176,
+     "n": 43,
+     "tot": 1.287,
+     "win": 0.391,
+     "wo5": -1.075
+    }
+   },
+   "R2": {
+    "30": {
+     "fills": 48,
+     "mean": 0.0552,
+     "med": 0.0329,
+     "n": 61,
+     "tot": 2.584,
+     "win": 0.542,
+     "wo5": 0.212
+    },
+    "45": {
+     "fills": 35,
+     "mean": 0.0561,
+     "med": 0.032,
+     "n": 61,
+     "tot": 1.835,
+     "win": 0.543,
+     "wo5": -0.446
+    },
+    "75": {
+     "fills": 28,
+     "mean": 0.0461,
+     "med": -0.001,
+     "n": 61,
+     "tot": 1.127,
+     "win": 0.464,
+     "wo5": -1.139
+    }
+   }
+  },
+  "out_of_sample": {
+   "logit_R1_top0.02": {
+    "L30_base_3.0": {
+     "fills": 82,
+     "mean": 0.0277,
+     "med": -0.0124,
+     "n": 101,
+     "tot": 2.18,
+     "win": 0.463,
+     "wo5": 0.177
+    },
+    "L30_base_5.0": {
+     "fills": 82,
+     "mean": 0.0293,
+     "med": -0.0042,
+     "n": 101,
+     "tot": 2.307,
+     "win": 0.476,
+     "wo5": -0.434
+    },
+    "L30_base_8.0": {
+     "fills": 82,
+     "mean": -0.0051,
+     "med": -0.0687,
+     "n": 101,
+     "tot": -0.513,
+     "win": 0.402,
+     "wo5": -4.073
+    },
+    "L30_strict_3.0": {
+     "fills": 82,
+     "mean": 0.0203,
+     "med": -0.0212,
+     "n": 101,
+     "tot": 1.569,
+     "win": 0.463,
+     "wo5": -0.378
+    },
+    "L30_strict_5.0": {
+     "fills": 82,
+     "mean": 0.0265,
+     "med": -0.0166,
+     "n": 101,
+     "tot": 2.081,
+     "win": 0.476,
+     "wo5": -0.661
+    },
+    "L30_strict_8.0": {
+     "fills": 82,
+     "mean": -0.0034,
+     "med": -0.0649,
+     "n": 101,
+     "tot": -0.376,
+     "win": 0.402,
+     "wo5": -4.024
+    },
+    "L45_base_3.0": {
+     "fills": 65,
+     "mean": 0.0311,
+     "med": -0.0113,
+     "n": 101,
+     "tot": 1.841,
+     "win": 0.477,
+     "wo5": -0.048
+    },
+    "L45_base_5.0": {
+     "fills": 65,
+     "mean": 0.0273,
+     "med": -0.0043,
+     "n": 101,
+     "tot": 1.597,
+     "win": 0.462,
+     "wo5": -1.064
+    },
+    "L45_base_8.0": {
+     "fills": 65,
+     "mean": 0.0003,
+     "med": -0.0713,
+     "n": 101,
+     "tot": -0.16,
+     "win": 0.369,
+     "wo5": -3.721
+    },
+    "L45_strict_3.0": {
+     "fills": 65,
+     "mean": 0.0245,
+     "med": -0.0134,
+     "n": 101,
+     "tot": 1.412,
+     "win": 0.492,
+     "wo5": -0.401
+    },
+    "L45_strict_5.0": {
+     "fills": 65,
+     "mean": 0.0262,
+     "med": -0.0011,
+     "n": 101,
+     "tot": 1.52,
+     "win": 0.477,
+     "wo5": -1.157
+    },
+    "L45_strict_8.0": {
+     "fills": 65,
+     "mean": 0.004,
+     "med": -0.0724,
+     "n": 101,
+     "tot": 0.082,
+     "win": 0.369,
+     "wo5": -3.566
+    },
+    "L75_base_3.0": {
+     "fills": 54,
+     "mean": 0.023,
+     "med": -0.0202,
+     "n": 101,
+     "tot": 1.008,
+     "win": 0.407,
+     "wo5": -0.881
+    },
+    "L75_base_5.0": {
+     "fills": 54,
+     "mean": 0.0209,
+     "med": -0.0448,
+     "n": 101,
+     "tot": 0.896,
+     "win": 0.407,
+     "wo5": -1.765
+    },
+    "L75_base_8.0": {
+     "fills": 54,
+     "mean": -0.0111,
+     "med": -0.1031,
+     "n": 101,
+     "tot": -0.834,
+     "win": 0.315,
+     "wo5": -4.394
+    },
+    "L75_strict_3.0": {
+     "fills": 54,
+     "mean": 0.0168,
+     "med": -0.0259,
+     "n": 101,
+     "tot": 0.672,
+     "win": 0.426,
+     "wo5": -1.141
+    },
+    "L75_strict_5.0": {
+     "fills": 54,
+     "mean": 0.0187,
+     "med": -0.0446,
+     "n": 101,
+     "tot": 0.775,
+     "win": 0.407,
+     "wo5": -1.902
+    },
+    "L75_strict_8.0": {
+     "fills": 54,
+     "mean": -0.0083,
+     "med": -0.1026,
+     "n": 101,
+     "tot": -0.683,
+     "win": 0.315,
+     "wo5": -4.331
+    }
+   },
+   "logit_R2_top0.02": {
+    "L30_base_3.0": {
+     "fills": 37,
+     "mean": 0.0346,
+     "med": 0.0203,
+     "n": 43,
+     "tot": 1.251,
+     "win": 0.541,
+     "wo5": -0.444
+    },
+    "L30_base_5.0": {
+     "fills": 37,
+     "mean": 0.0423,
+     "med": -0.0286,
+     "n": 43,
+     "tot": 1.534,
+     "win": 0.378,
+     "wo5": -1.374
+    },
+    "L30_base_8.0": {
+     "fills": 37,
+     "mean": 0.0058,
+     "med": -0.0535,
+     "n": 43,
+     "tot": 0.185,
+     "win": 0.378,
+     "wo5": -3.22
+    },
+    "L30_strict_3.0": {
+     "fills": 37,
+     "mean": 0.0306,
+     "med": 0.0187,
+     "n": 43,
+     "tot": 1.102,
+     "win": 0.514,
+     "wo5": -0.574
+    },
+    "L30_strict_5.0": {
+     "fills": 37,
+     "mean": 0.0435,
+     "med": -0.0285,
+     "n": 43,
+     "tot": 1.579,
+     "win": 0.405,
+     "wo5": -1.404
+    },
+    "L30_strict_8.0": {
+     "fills": 37,
+     "mean": 0.0081,
+     "med": -0.0535,
+     "n": 43,
+     "tot": 0.271,
+     "win": 0.378,
+     "wo5": -3.204
+    },
+    "L45_base_3.0": {
+     "fills": 28,
+     "mean": 0.0699,
+     "med": 0.0321,
+     "n": 43,
+     "tot": 1.883,
+     "win": 0.607,
+     "wo5": 0.188
+    },
+    "L45_base_5.0": {
+     "fills": 28,
+     "mean": 0.0901,
+     "med": -0.0203,
+     "n": 43,
+     "tot": 2.448,
+     "win": 0.429,
+     "wo5": -0.46
+    },
+    "L45_base_8.0": {
+     "fills": 28,
+     "mean": 0.0518,
+     "med": -0.0279,
+     "n": 43,
+     "tot": 1.374,
+     "win": 0.429,
+     "wo5": -2.031
+    },
+    "L45_strict_3.0": {
+     "fills": 28,
+     "mean": 0.0661,
+     "med": 0.0318,
+     "n": 43,
+     "tot": 1.775,
+     "win": 0.571,
+     "wo5": 0.099
+    },
+    "L45_strict_5.0": {
+     "fills": 28,
+     "mean": 0.0924,
+     "med": -0.018,
+     "n": 43,
+     "tot": 2.512,
+     "win": 0.464,
+     "wo5": -0.47
+    },
+    "L45_strict_8.0": {
+     "fills": 28,
+     "mean": 0.0537,
+     "med": -0.0279,
+     "n": 43,
+     "tot": 1.429,
+     "win": 0.429,
+     "wo5": -2.026
+    },
+    "L75_base_3.0": {
+     "fills": 22,
+     "mean": 0.0621,
+     "med": 0.0292,
+     "n": 43,
+     "tot": 1.261,
+     "win": 0.545,
+     "wo5": -0.14
+    },
+    "L75_base_5.0": {
+     "fills": 22,
+     "mean": 0.0886,
+     "med": -0.0203,
+     "n": 43,
+     "tot": 1.845,
+     "win": 0.455,
+     "wo5": -0.478
+    },
+    "L75_base_8.0": {
+     "fills": 22,
+     "mean": 0.078,
+     "med": -0.0157,
+     "n": 43,
+     "tot": 1.61,
+     "win": 0.455,
+     "wo5": -1.522
+    },
+    "L75_strict_3.0": {
+     "fills": 22,
+     "mean": 0.0581,
+     "med": 0.0318,
+     "n": 43,
+     "tot": 1.173,
+     "win": 0.545,
+     "wo5": -0.198
+    },
+    "L75_strict_5.0": {
+     "fills": 22,
+     "mean": 0.0908,
+     "med": -0.018,
+     "n": 43,
+     "tot": 1.892,
+     "win": 0.455,
+     "wo5": -0.493
+    },
+    "L75_strict_8.0": {
+     "fills": 22,
+     "mean": 0.0801,
+     "med": -0.0157,
+     "n": 43,
+     "tot": 1.657,
+     "win": 0.455,
+     "wo5": -1.519
+    }
+   }
+  }
+ },
+ "exit": {
+  "primary": "sell everything 5.0 s after our buy slot (slots of 212 ms), quote -> SOL",
+  "secondary_readouts": [
+   "t3",
+   "t8"
+  ]
+ },
+ "files": {
+  "scripts": [
+   "ns_extract.py",
+   "ns.py",
+   "ns_rates.py",
+   "ns_table.py",
+   "ns_lib.py",
+   "ns_select.py",
+   "ns_robust.py",
+   "ns_freeze.py"
+  ],
+  "table": "ops/overnight/nonsol/data/table.jsonl"
+ },
+ "frozen_at_utc": "2026-10-23 04:16:38",
+ "model": {
+  "b": -1.9291381825215768,
+  "feature_notes": {
+   "cb": "creator fee bps / 100",
+   "cr_ns_": "creator's earlier NON-SOL launches (>= 60 s old): log1p(count), log1p(mean generic 2-10 s demand), share with demand >= 3, none-yet flag",
+   "cv2": "CreateV2",
+   "dev_share": "dev tokens / 1e15",
+   "glued": "glued bundle txs (cap 5)",
+   "gw": "glued wallets (cap 5)",
+   "ldev": "log1p(dev buy SOL-eq incl. fees)",
+   "lfee": "log10(max(create tx fee lamports, 5000))",
+   "lglued": "log1p(glued buy SOL-eq)",
+   "pic": "create payer == creator",
+   "q_hist": "(q_n60 q_dem60 q_hit60) same quote token's launches in the last 60 min (>= 60 s old): log1p(count), log1p(mean demand), share >= 3",
+   "q_onehot": "quote class one-hot (q_pump q_usdc q_x q_pt q_oth): PUMP / USDC / xStock (mint starts Xs) / pump-token (mint ends pump) / other",
+   "shallow": "initial virtual quote reserves < 25 SOL-eq",
+   "t_": "the live engine's decision-time features (shadow decide record / paper table_dump names; log1p on counts as coded); NaN -> mu",
+   "tips": "create tx paid a tip"
+  },
+  "features": [
+   "q_pump",
+   "q_usdc",
+   "q_x",
+   "q_pt",
+   "q_oth",
+   "ldev",
+   "dev_share",
+   "glued",
+   "gw",
+   "lglued",
+   "cb",
+   "shallow",
+   "pic",
+   "tips",
+   "lfee",
+   "cv2",
+   "cr_ns_n",
+   "cr_ns_dem",
+   "cr_ns_new",
+   "cr_ns_hit",
+   "q_n60",
+   "q_dem60",
+   "q_hit60",
+   "t_cr_creates_window",
+   "t_cr_min_since_prev_create",
+   "t_h_cr_n",
+   "t_h_cr_wins",
+   "t_h_name_n",
+   "t_h_name_wins",
+   "t_h_bund_seen",
+   "t_h_bund_launches",
+   "t_h_bund_wins",
+   "t_heat_launches_10m",
+   "t_heat_win_rate_60m",
+   "t_wave_name_10m",
+   "t_wave_name_60m",
+   "t_wave_sym_60m",
+   "t_name_len",
+   "t_sym_len",
+   "t_name_upper",
+   "t_name_digits",
+   "t_name_nonascii",
+   "t_sym_eq_name"
+  ],
+  "label": "generic (non-insider, non-fast-sniper, non-pro) buy >= 3 SOL-eq in 2-10 s after create",
+  "mu": [
+   0.16322990942378107,
+   0.026594719599152054,
+   0.10618616303719407,
+   0.2117941799961457,
+   0.4921950279437271,
+   0.528722869731617,
+   0.038857776064752464,
+   1.3439969165542494,
+   1.3439969165542494,
+   0.7550810062371349,
+   0.98094045095399,
+   0.18731932935054924,
+   0.36384659857390633,
+   0.36307573713624974,
+   4.38239242437896,
+   0.9387165157063018,
+   0.5350128032713856,
+   0.03416422138091455,
+   0.79032568895741,
+   0.00991805499130055,
+   2.9469128399103557,
+   0.5653102073975411,
+   0.09043106971418682,
+   0.6327718713751916,
+   63.58902403706922,
+   0.5904343950450549,
+   0.09575142675967026,
+   0.5834477920298731,
+   0.28957937011202706,
+   0.5381246701956456,
+   1.4296547865395792,
+   2.258296343267808,
+   5.8148457206924125,
+   0.08961851244940665,
+   3.80574931304164,
+   0.947870999289177,
+   1.1461804185442679,
+   11.612344113295286,
+   5.430352990911013,
+   0.1688860705981822,
+   0.03804692454026633,
+   0.023673641936165717,
+   0.2887338829000211
+  ],
+  "note": "feature code: ns_select.py feats(); rate = SOL per quote unit (hourly mid of in-tx SOL<->quote conversions, ns_rates.py)",
+  "sd": [
+   0.36957530503712,
+   0.16089574415936242,
+   0.3080757403896419,
+   0.4085797416856507,
+   0.4999390786997919,
+   0.6755398081757477,
+   0.06013766250333926,
+   1.4771964550213852,
+   1.4771964550213852,
+   0.8530806585054684,
+   1.0026165431834373,
+   0.3901676539671052,
+   0.4811052392981188,
+   0.4808864171914308,
+   0.6287447211007312,
+   0.23984957545620955,
+   1.2308717887714005,
+   0.23092355920087468,
+   0.4070761529878562,
+   0.08844407981209243,
+   1.9402455613759575,
+   0.565968753561464,
+   0.11986145152262244,
+   1.245374397268709,
+   90.56873444529849,
+   1.2196950642473947,
+   1.1032306492400337,
+   1.0146453325917872,
+   1.8605910999651603,
+   0.6201819281155598,
+   1.7719408671714094,
+   5.94547658500168,
+   0.2930812433227643,
+   0.013426238102343573,
+   9.997036404357676,
+   1.1202220866789003,
+   1.2301006441791271,
+   5.7296152458976435,
+   2.2868068791537275,
+   0.35773533132106955,
+   0.18267173804893033,
+   0.1451659241005755,
+   0.4327126330152197
+  ],
+  "threshold": 1.3527994313669203,
+  "type": "L2 logistic regression (numpy, standardized, lam=1, 600 steps, lr 1.0 effective)",
+  "w": [
+   0.07638856267788442,
+   -0.10464282507499216,
+   0.062320200023761874,
+   -0.07971708778644641,
+   0.003953890213303655,
+   0.07392452324370503,
+   0.38326853621718165,
+   0.1347562778471335,
+   0.1347562778471335,
+   0.7375170016630834,
+   -0.11445010036977019,
+   -0.4180295983707715,
+   -0.19088275939313679,
+   -0.29666757869332694,
+   0.07403416987374795,
+   0.01985903827005465,
+   -0.514738932292245,
+   0.3038099734559221,
+   0.2149572206183948,
+   -0.049472930464402584,
+   0.05352482547028015,
+   0.010834174930690204,
+   0.08387199075454552,
+   -0.054089063614367654,
+   -0.036349439343492045,
+   -0.013176612906052619,
+   -0.11508698691813607,
+   0.03394236110413097,
+   0.028578230648793557,
+   0.07715261566493545,
+   -0.2961881462260926,
+   0.31811600775755744,
+   -0.06461713440254321,
+   0.010625378515815978,
+   0.03180440362945825,
+   -0.12424459952258227,
+   0.025746611048345604,
+   -0.06485597601797143,
+   -0.044635252702445866,
+   -0.09111978296721661,
+   -0.12213268173708572,
+   -0.017122397204269786,
+   0.044329653003445796
+  ]
+ },
+ "name": "NONSOL-1 (non-SOL-quoted pump curves: demand model top 2% + first-after-bundle + sell at 5 s)",
+ "status": "WEAK CANDIDATE for a forward (paper) test only - statistically fragile (see caveats); NOT validated for live",
+ "universe": {
+  "dev_buy_in_create_tx": true,
+  "mayhem": false,
+  "quote": "any non-SOL quote mint (CreateEvent quote_mint at +74 after the 4 pubkeys != all-zero)",
+  "quote_must_have_a_SOL_rate": true
+ }
+}

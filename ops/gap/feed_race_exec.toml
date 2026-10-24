@@ -1,0 +1,37 @@
+# feed_race_exec.toml: how late is an EXECUTED transaction stream (Yellowstone Subscribe, processed) behind our shred feeds?
+# Needed by the dip engine (ops/dip/ENGINE_V1.md): trade history with TradeEvents comes from an executed feed; the trigger
+# comes from shreds. ZERO COST: subscribe only, nothing is ever sent. Feed URLs and tokens are never logged.
+# Owner runs it on the server (OK needed):
+#   scp -P 1996 ops/gap/feed_race_exec.toml it@84.32.100.36:/tmp/  &&  sudo cp /tmp/feed_race_exec.toml /root/gap/
+#   sudo CFG=/root/gap/feed_race_exec.toml bash /root/gap/feed_race.sh 20 exec1
+#   python3 /root/gap/race_report.py /root/gap/race/race_exec1.log      # kaldera-tx lag vs the shred feeds, per tx
+# If kaldera-tx gets no data, the Constant-K plan may not include transaction streams (Kaldera's page says it does:
+# https://www.constant-k.com/yellowstone-grpc/); then try the plain RPC host as a gRPC endpoint, or ask Constant-K.
+env_file = "/root/sniper/deploy/.env"
+
+[[feed]]
+name    = "kaldera"
+kind    = "yellowstone-deshred"          # today's main shred feed (pump-filtered deshred)
+url     = "https://kaldera-frankfurt.constant-k.com:8443"
+token_env = "KALDERA_TOKEN"
+token_header = "x-token"
+
+[[feed]]
+name    = "turbo-kaldera"
+kind    = "yellowstone-deshred"
+url     = "https://turbo-kaldera-frankfurt.constant-k.com:443"
+token_env = "CONSTANTK_TOKEN"
+token_header = "x-token"
+
+[[feed]]
+name    = "erpc"
+kind    = "jito-entries"
+url     = "https://shreds-fra6-1.erpc.global"
+
+[[feed]]
+name    = "kaldera-tx"
+kind    = "yellowstone-tx"               # EXECUTED transactions (processed commitment) with meta + logs: the dip engine's history feed
+url     = "https://kaldera-frankfurt.constant-k.com:8443"
+token_env = "KALDERA_TOKEN"
+token_header = "x-token"
+account_include = ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]

@@ -206,6 +206,27 @@ pub fn dev_buy_effective(tx: &Tx, mint: &Pk) -> u64 {
     total.min(u64::MAX as u128) as u64
 }
 
+/// SHADOW (model, logging only): the dev buy as the TradeEvent records it — SOL into the curve NET of pump's fee.
+/// Same legs as dev_buy_effective, but a sized (exact-in) leg puts in a x 10000 / (10000 + fee), not a.
+pub fn dev_buy_net(tx: &Tx, mint: &Pk) -> u64 {
+    let (mut vq, mut vt, mut total) = (CURVE_VQ0 as u128, CURVE_VT0 as u128, 0u128);
+    let k = vq * vt;
+    for ix in tx.ixs.iter() {
+        let Some(d) = pump_ix_disc(tx, ix) else { continue };
+        let sized = DEV_BUY_SOL_AT_8.contains(&d);
+        if !sized && !DEV_BUY_SOL_AT_16.contains(&d) { continue; }
+        if let Some(m) = acct(tx, ix, buy_mint_pos(&d)) { if m != *mint { continue; } }
+        let a = ix.data.get(8..16).and_then(|b| <[u8; 8]>::try_from(b).ok()).map(u64::from_le_bytes).unwrap_or(0) as u128;
+        if a == 0 { continue; }
+        let cost = if sized { a * 10_000 / (10_000 + PUMP_FEE_BPS as u128) } else {
+            if a >= vt { continue; }
+            (vq * vt).div_ceil(vt - a) - vq
+        };
+        total += cost; vq += cost; vt = k / vq;
+    }
+    total.min(u64::MAX as u128) as u64
+}
+
 /// The OLD read (pre-2026-10-18): the largest sized dev buy only (--dev-sized-only restores it for A/B).
 pub fn dev_buy_sized(tx: &Tx) -> u64 {
     let read_u64 = |ix: &crate::tx::Ix, off: usize| ix.data.get(off..off + 8).and_then(|s| <[u8; 8]>::try_from(s).ok()).map(u64::from_le_bytes);

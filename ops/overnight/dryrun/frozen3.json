@@ -1,0 +1,14 @@
+{
+  "frozen_at_utc": "2026-10-23 02:46",
+  "test_window_starts_utc": "2026-10-23 02:46",
+  "code": {
+    "exp.py": "7949835b138623be9206338a5dec5ba242bc7246622021980590e70de21503db"
+  },
+  "strategies": {
+    "S4GM": "S4G (S4 list + quality gate) with size 1.0 SOL when the market cap right after the dev's bundle is >= 36 SOL, else 0.5 SOL",
+    "S4GSM": "S4G with size 1.0 SOL when (deployer's own history >= 3 fills averaging >= +0.02) OR (market cap after the bundle >= 36 SOL), else 0.5",
+    "S4G_BIG_ONLY": "S4G but only launches with market cap after the bundle >= 36 SOL, at 1.0 SOL (engine-friendly: one fixed size)",
+    "S4G_1SOL": "S4G (S4 list + quality gate) with every buy at 1.0 SOL (engine-friendly: one fixed size, --spend-lamports 1000000000)"
+  },
+  "chosen_on": "R1 old run + R2 replay window (both improved); learned from dKMjeGJ4's sizing (bigger size when the dev/bundle is bigger)"
+}

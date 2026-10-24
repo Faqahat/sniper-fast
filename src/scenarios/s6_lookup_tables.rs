@@ -20,7 +20,7 @@ fn alt_sell(sig: [u8; 64], signer: Pk, m: &PoolMeta, table: Pk, amount: u64, slo
         lookups: vec![crate::tx::Lookup { table, writable: vec![0, 1], readonly: vec![] }], ..Default::default() };
     let w = crate::tx::to_wire(&tx).unwrap();
     let (tx, _) = crate::tx::parse_wire(&w).unwrap();
-    Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: RawTx::Wire(w.into()) }
+    Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: RawTx::Wire(w.into()), exec: None }
 }
 
 /// answer every lookup-table fetch the engine asked for since `seen`: table `a` with `a_addrs` (once `a_ok`), `b` never

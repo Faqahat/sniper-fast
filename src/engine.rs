@@ -3877,7 +3877,7 @@ mod tests {
         let n_ro = ro.len() as u8;
         keys.extend(ro);
         let tx = Tx { sig: s, num_signers: 1, num_ro_signed: 0, num_ro_unsigned: n_ro, keys, ixs, ..Default::default() };
-        Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: Default::default() }
+        Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: Default::default(), exec: None }
     }
     fn tx_ev(e: &mut Engine, a: Arrival) { let t = a.t_rx; e.step(Event::Tx(a), t + 10_000, &mut nop()); }
     /// the state stream's task: connected (right before a connection's first message) or lost
@@ -4286,7 +4286,7 @@ mod tests {
         keys.push(program);
         let ixs = vec![crate::tx::Ix { program: (keys.len() - 1) as u8, accounts, data }];
         let tx = Tx { sig: s, num_signers: 1, num_ro_signed: 0, num_ro_unsigned: 1, keys, ixs, ..Default::default() };
-        Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: Default::default() }
+        Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: Default::default(), exec: None }
     }
 
     /// the commits.jsonl group of transaction `s` (not a late line), if it resolved

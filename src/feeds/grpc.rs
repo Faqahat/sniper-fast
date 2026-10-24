@@ -295,7 +295,7 @@ pub enum Item {
     Entries { slot: u64, bytes: Vec<u8>, t: u64 },
     /// one transaction; `executed` is Some(succeeded) for executed (processed) feeds, None for unexecuted ones; `raw`:
     /// its protobuf transaction (the input journal's TX_FIRST bytes, WP-03)
-    Tx { slot: u64, tx: Tx, t: u64, executed: Option<bool>, raw: RawTx },
+    Tx { slot: u64, tx: Tx, t: u64, executed: Option<bool>, raw: RawTx, exec: Option<Arc<crate::feeds::ExecInfo>> },
     /// one account update (pool state and the other watched accounts), with its bank when the provider sends it
     Account { slot: u64, pubkey: Pk, lamports: u64, owner: Pk, data: Vec<u8>, write_version: u64, t: u64, txn: Option<[u8; 64]>, is_startup: bool, bank_id: Option<u64> },
     /// a slot status update (0 processed, 1 confirmed, 2 finalized, 3 first-shred, 4 completed, 5 created-bank, 6
@@ -365,6 +365,14 @@ pub fn tx_stream_item(u: UpdateTx, t: u64, rec: &crate::rec::Rec, roles: Option<
         None => (true, vec![], vec![]),
     };
     let tx = tx_from_pb(&info.signature, info.is_vote, &pb, &lw, &lr);
+    // dip engine: the pump events of this executed tx, decoded from its logs exactly as the collector does
+    let exec = meta.as_ref().and_then(|m| {
+        let trades = crate::dip::trade_events(&m.log_messages);
+        let creates = crate::dip::create_events(&m.log_messages);
+        if trades.is_empty() && creates.is_empty() { return None; }
+        let mayhem = !creates.is_empty() && crate::dip::logs_have_mayhem(&m.log_messages);
+        Some(Arc::new(crate::feeds::ExecInfo { index: info.index, fee: m.fee, ok, trades, creates, mayhem }))
+    });
     if let Some(meta) = meta.filter(|_| recent.first(&info.signature, u.slot)) {
         let sig: Option<[u8; 64]> = info.signature.as_slice().try_into().ok();
         // FT-000 (S1-5): in full only when it touches a watched account; of the rest (72% of FT-000's exec.jsonl bytes:
@@ -382,7 +390,7 @@ pub fn tx_stream_item(u: UpdateTx, t: u64, rec: &crate::rec::Rec, roles: Option<
         // review WP-03b #13), and its idx is checked against the slot index
         if let Some(sig) = sig { crate::chainfetch::note_stream_tx(&sig, u.slot, info.index, ok, recorded); }
     }
-    Some(Item::Tx { slot: u.slot, tx: tx?, t, executed: Some(ok), raw: RawTx::Pb(pb) })
+    Some(Item::Tx { slot: u.slot, tx: tx?, t, executed: Some(ok), raw: RawTx::Pb(pb), exec })
 }
 
 fn to_pk(b: &[u8]) -> Option<Pk> { if b.len() == 32 { let mut k = [0u8; 32]; k.copy_from_slice(b); Some(k) } else { None } }
@@ -517,7 +525,7 @@ pub async fn feed_once(f: &Feed, sink: &(dyn Fn(Item) -> bool + Send + Sync), re
                     let Some(mut info) = d.transaction else { return true };
                     let Some(pb) = info.transaction.take().map(Arc::new) else { return true };
                     match tx_from_pb(&info.signature, info.is_vote, &pb, &info.loaded_writable_addresses, &info.loaded_readonly_addresses) {
-                        Some(tx) => send(Item::Tx { slot: d.slot, tx, t, executed: None, raw: RawTx::Pb(pb) }),
+                        Some(tx) => send(Item::Tx { slot: d.slot, tx, t, executed: None, raw: RawTx::Pb(pb), exec: None }),
                         None => true,
                     }
                 }).await

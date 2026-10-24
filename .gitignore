@@ -42,3 +42,33 @@ id.json
 ops/**/*.log
 ops/**/*.jsonl
 .venv-ops/
+
+# ---- research / run data (2026-10-24): commit code, notes and frozen models only; bulky or generated data stays local ----
+# compressed / binary / bookkeeping files anywhere
+*.gz
+*.npy
+*.npz
+*.pkl
+*.parquet
+*.sigs
+*.pid
+*.done
+*.out
+*.bak
+*.bak_*
+*.sha256
+SHA256SUMS*
+ops/**/.lock
+# generated outputs under ops/ (RPC caches, tables, reports); the models the engine / docs need are re-included below
+ops/**/*.json
+ops/**/*.txt
+ops/**/*.csv
+ops/**/*.html
+ops/**/*.css
+!ops/**/IMIT1.json
+!ops/**/cohort_train.json
+!ops/**/frozen*.json
+# the 19 MB IMIT1 parity fixture: regenerate with ops/dip/imit1/export_parity.py (the parity test skips when it is missing)
+testdata/imit1_parity.json
+# the model blueprint is documentation (its generator's data under ops/dip/blueprint/data/ stays local)
+!ops/dip/BLUEPRINT*.html

@@ -48,6 +48,23 @@ pub struct Arrival {
     pub poh: Option<entries::Poh>,
     /// its bytes as delivered (the input journal, WP-03)
     pub raw: RawTx,
+    /// executed feeds only: the tx's index in its block, fee, and the pump.fun events it emitted (dip engine)
+    pub exec: Option<Arc<ExecInfo>>,
+}
+
+/// What an executed feed (yellowstone-tx) knows about a transaction besides the transaction itself: its index in the block
+/// (votes included, as getBlock), its fee and success, and the pump.fun events it emitted, decoded from its log lines as
+/// the collector does. The dip engine's trade history and triggers (ops/dip/ENGINE_IMIT1.md). Set only when the tx
+/// emitted a pump TradeEvent or CreateEvent.
+#[derive(Clone, Debug, Default)]
+pub struct ExecInfo {
+    pub index: u64,
+    pub fee: u64,
+    pub ok: bool,
+    pub trades: Vec<crate::dip::TradeEvent>,
+    pub creates: Vec<crate::dip::CreateEvent>,
+    /// the tx ran pump's InitializeMayhemState (a mayhem launch)
+    pub mayhem: bool,
 }
 
 /// Where an account update came from (accounts.bin `src`, MEASUREMENT §4.12)
@@ -383,7 +400,7 @@ pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event
                     let t_decoded = t_now;
                     for d in done.drain(..) {
                         c.forwarded.fetch_add(1, Ordering::Relaxed);
-                        if out.send(Event::Tx(Arrival { feed: id, slot: d.slot, t_rx: d.t, t_decoded, executed: None, tx: d.tx, poh: None, raw: RawTx::Wire(d.raw) })).is_err() {
+                        if out.send(Event::Tx(Arrival { feed: id, slot: d.slot, t_rx: d.t, t_decoded, executed: None, tx: d.tx, poh: None, raw: RawTx::Wire(d.raw), exec: None })).is_err() {
                             c.channel_drops.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -506,7 +523,7 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
                 let poh = pohs.get(r.entry as usize).copied().flatten();
                 if let Some(p) = poh { positions.push((u64::from_be_bytes(r.sig[..8].try_into().unwrap()), p)); }
                 let raw = RawTx::Wire(Arc::from(&raw[..n.min(raw.len())]));
-                if !sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded, executed: None, tx, poh, raw })).is_ok()) { ok = false; break; }
+                if !sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded, executed: None, tx, poh, raw, exec: None })).is_ok()) { ok = false; break; }
             }
             drop(tables);
             if order_on { slot_order().append(id, slot, &order); }
@@ -514,13 +531,13 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
             archive(bytes);
             ok
         }
-        grpc::Item::Tx { slot, tx, t, executed, raw } => {
+        grpc::Item::Tx { slot, tx, t, executed, raw, exec } => {
             c.packets.fetch_add(1, Ordering::Relaxed);
             c.txs.fetch_add(1, Ordering::Relaxed);
             c.seen(slot, t);
-            if !interest.wants(&tx) { return true; }
+            if !interest.wants(&tx) && exec.is_none() { return true; }
             c.forwarded.fetch_add(1, Ordering::Relaxed);
-            sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded: t, executed, tx, poh: None, raw })).is_ok())
+            sent(c, out.send(Event::Tx(Arrival { feed: id, slot, t_rx: t, t_decoded: t, executed, tx, poh: None, raw, exec })).is_ok())
         }
         grpc::Item::Account { slot, pubkey, lamports, owner, data, t, txn, write_version, is_startup, bank_id } => {
             c.packets.fetch_add(1, Ordering::Relaxed);

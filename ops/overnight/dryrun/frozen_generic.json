@@ -1,0 +1,214 @@
+{
+ "frozen_at_unix": 1792725985,
+ "frozen_at_pkt": "2026-10-23 08:26 PKT",
+ "note": "Generic-flow / become-them candidates. Forward test = launches created after frozen_at; nothing here was traded.",
+ "costs": {
+  "snipe": "2% buy overhead, 0.0005 SOL per sell, 1.5% worse fill, 0.005 SOL per failed guarded buy",
+  "later": "pump fees, 0.0002 SOL per tx, entry lands 2 slots (~0.42 s) after the decision behind every trade in them"
+ },
+ "trackA": [
+  {
+   "id": "A1_F2_T10F",
+   "picks": "FINAL-2 live pick (scores_v3 final_pick)",
+   "size": 0.5,
+   "guard": 1.005,
+   "exit": "if <=1 outside buy by the end of the slot after our buy: sell then (eos1); else sell 10 s after our buy"
+  },
+  {
+   "id": "A2_F2_T10",
+   "picks": "FINAL-2 live pick",
+   "size": 0.5,
+   "guard": 1.005,
+   "exit": "sell 10 s after our buy"
+  },
+  {
+   "id": "A3_TOP2_T8",
+   "picks": "live LIVE3 score >= 0.402 (top 2% on 10-23)",
+   "size": 0.5,
+   "guard": 1.005,
+   "exit": "sell 8 s after our buy"
+  }
+ ],
+ "trackB": [
+  {
+   "id": "B1",
+   "T": 12,
+   "exit": "tp2_sl.75_c300",
+   "rule": [
+    "b_act <= 0.494",
+    "ns_a >= 7"
+   ],
+   "in_sample": {
+    "r1": 9.28,
+    "r2": 8.78,
+    "n1": 52,
+    "n2": 98
+   }
+  },
+  {
+   "id": "B2",
+   "T": 12,
+   "exit": "tp2_sl.75_c300",
+   "rule": [
+    "b_act <= 0.494",
+    "ns_w10 >= 6"
+   ],
+   "in_sample": {
+    "r1": 6.99,
+    "r2": 6.98,
+    "n1": 58,
+    "n2": 105
+   }
+  },
+  {
+   "id": "B3",
+   "T": 20,
+   "exit": "tr1.15_12_c180",
+   "rule": [
+    "mcb <= 29.36",
+    "nub_a >= 20"
+   ],
+   "in_sample": {
+    "r1": 5.87,
+    "r2": 6.4,
+    "n1": 45,
+    "n2": 56
+   }
+  },
+  {
+   "id": "B4",
+   "T": 12,
+   "exit": "h120",
+   "rule": [
+    "bs_a <= 0.489",
+    "b_snp >= 0.0938"
+   ],
+   "in_sample": {
+    "r1": 14.46,
+    "r2": 5.86,
+    "n1": 56,
+    "n2": 59
+   }
+  },
+  {
+   "id": "B5",
+   "T": 12,
+   "exit": "h120",
+   "rule": [
+    "b_act <= 0.494",
+    "nu_cas >= 8"
+   ],
+   "in_sample": {
+    "r1": 6.59,
+    "r2": 5.17,
+    "n1": 49,
+    "n2": 107
+   }
+  },
+  {
+   "id": "B6",
+   "T": 30,
+   "exit": "h120",
+   "rule": [
+    "mcb <= 34.16",
+    "s_cas >= 6.206"
+   ],
+   "in_sample": {
+    "r1": 5.16,
+    "r2": 8.2,
+    "n1": 44,
+    "n2": 52
+   }
+  },
+  {
+   "id": "B7",
+   "T": 12,
+   "exit": "h120",
+   "rule": [
+    "mcb <= 29.07",
+    "ns_w1 >= 1"
+   ],
+   "in_sample": {
+    "r1": 6.64,
+    "r2": 4.99,
+    "n1": 42,
+    "n2": 48
+   }
+  },
+  {
+   "id": "B8",
+   "T": 1,
+   "exit": "h120",
+   "rule": [
+    "mcb <= 28.42",
+    "nu_act >= 3"
+   ],
+   "in_sample": {
+    "r1": 4.78,
+    "r2": 6.93,
+    "n1": 47,
+    "n2": 48
+   }
+  },
+  {
+   "id": "B9",
+   "T": 20,
+   "exit": "tr1.15_12_c180",
+   "rule": [
+    "mcb <= 29.36",
+    "ns_a >= 13"
+   ],
+   "in_sample": {
+    "r1": 4.78,
+    "r2": 8.26,
+    "n1": 46,
+    "n2": 48
+   }
+  },
+  {
+   "id": "B10",
+   "T": 20,
+   "exit": "tr1.15_12_c180",
+   "rule": [
+    "mcb <= 29.36",
+    "ss_w10 >= 1.376"
+   ],
+   "in_sample": {
+    "r1": 4.74,
+    "r2": 5.47,
+    "n1": 56,
+    "n2": 60
+   }
+  },
+  {
+   "id": "B11",
+   "T": 20,
+   "exit": "h60",
+   "rule": [
+    "mcb <= 33.83",
+    "vs >= 43.02"
+   ],
+   "in_sample": {
+    "r1": 5.56,
+    "r2": 4.69,
+    "n1": 41,
+    "n2": 54
+   }
+  },
+  {
+   "id": "B12",
+   "T": 60,
+   "exit": "tp1.3_sl.85_c120",
+   "rule": [
+    "tips_b <= 10",
+    "bs_w1 >= 0.099"
+   ],
+   "in_sample": {
+    "r1": 4.27,
+    "r2": 4.68,
+    "n1": 42,
+    "n2": 66
+   }
+  }
+ ]
+}

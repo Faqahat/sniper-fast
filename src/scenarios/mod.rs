@@ -872,12 +872,12 @@ pub(crate) fn shred_tx(sig: [u8; 64], signer: Pk, writable: &[Pk], ro: &[Pk], ix
     let tx = Tx { sig, num_signers: 1, num_ro_signed: 0, num_ro_unsigned: ro.len() as u8, keys, ixs, ..Default::default() };
     let w = crate::tx::to_wire(&tx).expect("encodable");
     let (tx, _) = crate::tx::parse_wire(&w).expect("decodable");
-    Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: RawTx::Wire(w.into()) }
+    Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx, poh: None, raw: RawTx::Wire(w.into()), exec: None }
 }
 
 /// the same transaction from the executed stream (`ok`: it succeeded), later
 pub(crate) fn executed_copy(a: &Arrival, ok: bool, t: u64) -> Arrival {
-    Arrival { feed: 1, slot: a.slot, t_rx: t, t_decoded: t, executed: Some(ok), tx: a.tx.clone(), poh: None, raw: a.raw.clone() }
+    Arrival { feed: 1, slot: a.slot, t_rx: t, t_decoded: t, executed: Some(ok), tx: a.tx.clone(), poh: None, raw: a.raw.clone(), exec: None }
 }
 
 /// index of `k` in a transaction's (writable ++ ro) list (+1 for the signer)

@@ -15,6 +15,9 @@ REF_COST = float(os.environ.get("REF_COST", str(PRIO)))                         
 OURS6 = ("FRZh63", "2g7rYv")
 NS = int(os.environ.get("NS", "60"))
 SEL = os.environ.get("SEL", "r2nc")
+# landing-time override (ms after the create, feed clock): T_OVR="jito=75,harmonic=80" sets a class; T_ADD adds to the rest
+T_OVR = {k: float(v) for k, v in (x.split("=") for x in os.environ.get("T_OVR", "").split(",") if x)}
+T_ADD = float(os.environ.get("T_ADD", "0"))
 rows = json.load(open(F3))["rows"]
 OUTS = {}
 for f in (L2, LP):
@@ -241,7 +244,7 @@ for r in rows:
     if (rec.get("window_slots") or 2) < NS and not tape: continue
     rec = clean(dict(rec, create_ms=r["create_ms"], slot_ms=rec.get("slot_ms") or 217.0))
     tr, hz = extend(rec, tape)
-    e, fee, seq = entry(rec, tr, outs, r["T"])
+    e, fee, seq = entry(rec, tr, outs, T_OVR.get(r["cls"], r["T"] + T_ADD))
     tips = TIP_BY[r["cls"]]
     meta[r["mint"]] = dict(grp=r["grp"], r2=R2(r), p2=r["p2"], refused=e is None, cls=r["cls"], breaks=BREAKS[r["mint"]], tape=bool(tape))
     if e is None:
@@ -257,6 +260,7 @@ if os.environ.get("CLEAN"):
         for k in res: res[k].pop(m, None)
     print(f"dropped {len(bad)} launches whose tape has > {os.environ['CLEAN']} reserve-chain breaks (missing events)")
 print("tape chain breaks per launch:", sorted(collections.Counter(min(x["breaks"], 5) for x in meta.values()).items()))
+print(f"landing T: model by class, overrides {T_OVR or '-'}, +{T_ADD:.0f} ms on the rest")
 print(f"launches simulated: {len(meta)} ({SEL}; rule #2 {sum(m['r2'] for m in meta.values())}; refused {sum(m['refused'] for m in meta.values())}); "
       f"model check S+2 vs filters p2: mean |diff| {statistics.mean([abs(a-b) for a,b in chk]):.4f}, sums {sum(a for a,_ in chk):+.2f} vs {sum(b for _,b in chk):+.2f}")
 G = {"A (in-sample)": lambda m: m["grp"] == "A", "B": lambda m: m["grp"] == "B", "C-E (10-21)": lambda m: m["grp"] in ("C", "D", "E"), "held-out B-E": lambda m: m["grp"] != "A"}

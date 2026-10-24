@@ -404,7 +404,7 @@ pub fn arrival(feed: u16, slot: u64, t_rx: u64, t_decoded: u64, executed: Option
         }
         e => bail!("TX_FIRST: unknown enc {e}"),
     };
-    Ok(Arrival { feed, slot, t_rx, t_decoded, executed, tx, poh, raw })
+    Ok(Arrival { feed, slot, t_rx, t_decoded, executed, tx, poh, raw, exec: None })
 }
 
 /// A record of the boot section: the leading records written before the engine's first input, with `t_engine_ns` 0
@@ -560,7 +560,7 @@ pub fn replay(eng: &mut crate::engine::Engine, journal: &[JRec], accounts: &Hash
                 Event::Tx(arrival(*feed, *slot, *t_rx, *t_decoded, *executed, *enc, bytes, loaded, *poh)?),
             JBody::TxCopy { sig, feed, t_rx, poh, slot } => {
                 let tx = crate::tx::Tx { sig: *sig, ..Default::default() };
-                Event::Tx(Arrival { feed: *feed, slot: slot.unwrap_or(0), t_rx: *t_rx, t_decoded: *t_rx, executed: None, tx, poh: *poh, raw: RawTx::None })
+                Event::Tx(Arrival { feed: *feed, slot: slot.unwrap_or(0), t_rx: *t_rx, t_decoded: *t_rx, executed: None, tx, poh: *poh, raw: RawTx::None, exec: None })
             }
             JBody::Account { aseq, stale } => match accounts.get(aseq) {
                 Some(a) => {
@@ -714,13 +714,13 @@ mod tests {
             let raw = if n % 7 == 3 { RawTx::None } else { RawTx::Wire(raw) };
             let tr = tick();
             let te = tick();
-            e.step(Event::Tx(Arrival { feed: 0, slot, t_rx: tr, t_decoded: tr + 10, executed: None, tx: x.clone(), poh: None, raw }), te, &mut status);
+            e.step(Event::Tx(Arrival { feed: 0, slot, t_rx: tr, t_decoded: tr + 10, executed: None, tx: x.clone(), poh: None, raw, exec: None }), te, &mut status);
             let (tr, te) = (tick(), tick());
-            e.step(Event::Tx(Arrival { feed: 1, slot, t_rx: tr, t_decoded: 0, executed: Some(true), tx: x.clone(), poh: None, raw: RawTx::None }), te, &mut status);
+            e.step(Event::Tx(Arrival { feed: 1, slot, t_rx: tr, t_decoded: 0, executed: Some(true), tx: x.clone(), poh: None, raw: RawTx::None, exec: None }), te, &mut status);
             // a third copy from an unexecuted feed: timing only (TX_COPY); the executed one above is journaled in full
             // (WP-04: its status settles signer outcomes and registers W(T))
             let (tr, te) = (tick(), tick());
-            e.step(Event::Tx(Arrival { feed: 0, slot, t_rx: tr, t_decoded: tr, executed: None, tx: x, poh: None, raw: RawTx::None }), te, &mut status);
+            e.step(Event::Tx(Arrival { feed: 0, slot, t_rx: tr, t_decoded: tr, executed: None, tx: x, poh: None, raw: RawTx::None, exec: None }), te, &mut status);
             if n % 10 == 9 {
                 // a late update from an older slot (stale), slot statuses, an input, a lookup table
                 let data: Arc<[u8]> = vault(5).into();
@@ -829,7 +829,7 @@ mod tests {
             let w = crate::tx::to_wire(&x).unwrap();
             let (x, _) = crate::tx::parse_wire(&w).unwrap();
             let (tr, te) = (tick(), tick());
-            e.step(Event::Tx(Arrival { feed: 0, slot, t_rx: tr, t_decoded: tr, executed: None, tx: x, poh: None, raw: RawTx::Wire(Arc::from(&w[..])) }), te, &mut status);
+            e.step(Event::Tx(Arrival { feed: 0, slot, t_rx: tr, t_decoded: tr, executed: None, tx: x, poh: None, raw: RawTx::Wire(Arc::from(&w[..])), exec: None }), te, &mut status);
             // the fetches it asked for come back (the fetcher's answers, one ALT record each)
             let asked: Vec<Pk> = e.offline_fetches[answered..].iter().filter(|f| f.0 == "alt").flat_map(|f| f.1.clone()).collect();
             answered = e.offline_fetches.len();
@@ -989,7 +989,7 @@ mod tests {
                     send(m.vault0, vault(999_000_000_000_000 - n * 1_000_000_000).into(), slot, Some(s));
                     let (x, raw) = mk_tx(n as u8 + 100, &m);
                     let t = crate::feeds::clock::now_ns();
-                    tx.send(Event::Tx(Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx: x, poh: None, raw: RawTx::Wire(raw) })).unwrap();
+                    tx.send(Event::Tx(Arrival { feed: 0, slot, t_rx: t, t_decoded: t, executed: None, tx: x, poh: None, raw: RawTx::Wire(raw), exec: None })).unwrap();
                     tx.send(Event::Slot { slot, status: 0, t, parent: Some(slot - 1), dead_error: None, bank_id: None }).unwrap();
                     if n % 10 == 9 { tx.send(Event::Input { kind: InputKind::LeaderWindow, data: Arc::new(serde_json::json!({ "start": slot, "leaders": [] })) }).unwrap(); }
                     std::thread::sleep(std::time::Duration::from_millis(3));
@@ -1155,7 +1155,7 @@ mod tests {
                     if lookup { x.lookups = vec![crate::tx::Lookup { table: [0x73; 32], writable: vec![1], readonly: vec![] }]; }
                     let t = now();
                     let raw = if lookup { RawTx::None } else { RawTx::Wire(raw) };
-                    tx.send(Event::Tx(Arrival { feed: if executed.is_some() { 1 } else { 0 }, slot: 12, t_rx: t, t_decoded: t, executed, tx: x, poh: None, raw })).unwrap();
+                    tx.send(Event::Tx(Arrival { feed: if executed.is_some() { 1 } else { 0 }, slot: 12, t_rx: t, t_decoded: t, executed, tx: x, poh: None, raw, exec: None })).unwrap();
                 };
                 tx.send(crate::feeds::state_health(true, 1, 0, None)).unwrap();
                 send_slot(11, 1, Some(10));

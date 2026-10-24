@@ -1,0 +1,16 @@
+{
+  "frozen_at_utc": "2026-10-23 02:24",
+  "test_window_starts_utc": "2026-10-23 02:24",
+  "code": {
+    "exp.py": "7949835b138623be9206338a5dec5ba242bc7246622021980590e70de21503db",
+    "precompute_all.py": "5282033cd8b49e10c82618b516a44f4c4ef9c1f67253db52e62b73e6bbc33f09",
+    "rp.py": "ff67d7d652582533080af9d5890a33328040a5de0cfbd7821adb2e9497680336"
+  },
+  "strategies": {
+    "S4G": "S4 list (9Sh2fd+DGmspi, >=2 attempts and >=10% of the deployer's launches) AND gate: skip a deployer whose own simulated guarded flips (>=3 fills, 0.5 SOL, end-of-next-slot exit) average < 0; 0.5 SOL; 1% guard; sell at end of next slot",
+    "S4GS": "S4G with size 1.0 SOL when the deployer's own history has >= 3 fills averaging >= +0.02 SOL (per 0.5 SOL), else 0.5",
+    "MULTI_GS": "deployer list from 7 wallets (9Sh2fd, DGmspi, AHwJSnFN, dKMjeGJ4, CWiNFAEk, D24ipY, FiFawH: >=2 attempts summed and >=10% rate) AND the same gate AND the same sizing"
+  },
+  "evaluation": "walk-forward exp.py logic on launches created after test_window_starts_utc (R2 data synced later), at 45 and 75 ms, real place in line",
+  "chosen_on": "replay window 10-22 17:09-10-23 00:34 (R2) and old data 10-21 22:07-10-22 07:00 (R1)"
+}

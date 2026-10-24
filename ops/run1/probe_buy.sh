@@ -8,7 +8,7 @@
 #        PATHS=a,b,c (one path per probe, round-robin, instead of the buy's whole route)
 TAG=${1:-pbuy1}; MAXSOL=${2:-0.03}; N=${3:-8}; CUP=${CUP:-30000000}
 . /root/run1/run1_common.sh    # ROUTES (Run 2's buy routes)
-B=/root/sniper-probe/snipe_engine
+B=${B:-/root/sniper-probe/snipe_engine}    # override e.g. B=/root/sniper-f2/snipe_engine_final2 (same source, has the probe flags)
 if pgrep -x snipe_engine > /dev/null; then echo "REFUSED: a snipe_engine is running"; exit 1; fi
 LOG=/root/run1/${TAG}.log; : > $LOG
 if [ "${DRY:-0}" = 1 ]; then LIVE=""; else LIVE="--live"; fi

@@ -557,7 +557,7 @@ fn poll_err(what: &str, e: &anyhow::Error) {
 ///  * known flags = every "--flag" string literal in snipe_engine.rs;
 ///  * integer flags = every flag read with arg_u64 / arg_u64_opt; number flags = every flag read with arg_f64, plus the
 ///    ones parsed from arg() directly (--fill-cap, --max-create-ms, --race-min/max-bundle-sol).
-const ENGINE_SRC: &str = include_str!("snipe_engine.rs");
+const ENGINE_SRC: &str = concat!(include_str!("snipe_engine/dipmode.rs"), include_str!("snipe_engine.rs"));
 
 /// flag names after each occurrence of `prefix` (e.g. `arg_u64("`) in the source
 fn src_flags(prefix: &str) -> std::collections::BTreeSet<String> {
@@ -595,6 +595,8 @@ fn check_flags(argv: &[String]) -> Result<()> {
     if has_a("--env-name") && !matches!(val("--env-name").map(|v| v.to_ascii_uppercase()).as_deref(), Some("DEV" | "PROD")) { bail!("--env-name must be DEV or PROD: refusing to start"); }
     if has_a("--race-bundle") && !matches!(val("--race-bundle").as_deref(), Some("yes" | "no")) { bail!("--race-bundle must be yes or no: refusing to start"); }
     if has_a("--max-create-ms-unknown") && !matches!(val("--max-create-ms-unknown").as_deref(), Some("pass" | "skip")) { bail!("--max-create-ms-unknown must be pass or skip: refusing to start"); }
+    if has_a("--create-ms-src") && !matches!(val("--create-ms-src").as_deref(), Some("wall" | "poh")) { bail!("--create-ms-src must be wall or poh: refusing to start"); }
+    if has_a("--final2-sock") && !(has_a("--race-gate") && has_a("--race-glued")) { bail!("--final2-sock needs --race-gate --race-glued (it decides at the glued-bundle close): refusing to start"); }
     if has_a("--lock-tiers") {
         let t = val("--lock-tiers").filter(|v| !v.starts_with("--")).context("--lock-tiers needs a value: refusing to start")?;
         for kv in t.split(',') {
@@ -630,6 +632,9 @@ fn alpenglow_warning() {
 //  * preloaded at start-up: the known launchpad table(s), every table in --alt-cache-file (the last 200 tables seen, kept
 //    across runs: appended when a table is first fetched) and --alt-preload a,b,...
 // =====================================================================================================================
+#[path = "snipe_engine/dipmode.rs"]
+mod dipmode;
+
 mod altc {
     use super::*;
     use std::collections::{HashMap, HashSet, VecDeque};
@@ -1428,6 +1433,34 @@ fn arg_u64(flag: &str, default: u64) -> u64 { arg(flag).and_then(|s| s.parse().o
 fn arg_u64_opt(flag: &str) -> Option<u64> { arg(flag).and_then(|s| s.parse().ok()) }
 fn arg_f64(flag: &str, default: f64) -> f64 { arg(flag).and_then(|s| s.parse().ok()).unwrap_or(default) }
 fn arg_pk(flag: &str) -> Option<Pk> { arg(flag).map(|s| pk(&s)) }
+/// --deployer-list <file>: DEPLOYER (create-signer) ALLOWLIST (overnight study 2026-10-23, ops/overnight/). One base58
+/// pubkey per line; fire only on launches whose create tx is SIGNED by a listed wallet (the creator field is often a
+/// fresh wallet: 39% of the case-study launches). The file is maintained outside the engine (deployers the profitable
+/// dev-list snipers keep attempting) and re-read every 30 s; an empty or unreadable file keeps the last good list
+/// (empty at start = nothing fires).
+type DeployerList = Option<Arc<std::sync::RwLock<std::collections::HashSet<Pk>>>>;
+fn deployer_list() -> DeployerList {
+    let p = arg("--deployer-list")?;
+    let load = |p: &str| -> std::collections::HashSet<Pk> {
+        std::fs::read_to_string(p).unwrap_or_default().lines().filter_map(|l| arbx::poolrefresh::pk_opt(l)).collect()
+    };
+    let set = Arc::new(std::sync::RwLock::new(load(&p)));
+    eprintln!("DEPLOYER-LIST GATE ON: {} deployers from {p} (re-read every 30 s; only creates signed by a listed wallet fire)", set.read().map(|g| g.len()).unwrap_or(0));
+    let s2 = set.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(30));
+        let n = load(&p);
+        if !n.is_empty() { if let Ok(mut g) = s2.write() { *g = n; } }
+    });
+    Some(set)
+}
+#[inline]
+fn deployer_ok(dl: &DeployerList, tx: &arbx::tx::Tx) -> bool {
+    match dl {
+        None => true,
+        Some(d) => match d.read() { Ok(g) => tx.keys.iter().take(tx.num_signers as usize).any(|k| g.contains(k)), Err(_) => false },
+    }
+}
 
 /// minimal probe config — NOT the full arb schema; unknown fields are ignored on purpose.
 #[derive(Default, serde::Deserialize)]
@@ -1578,8 +1611,14 @@ struct LandGate {
     max_ms: Option<f64>,
     unknown_pass: bool,
     log_poh: bool,
-    /// mint -> (create sig8, slot, PoH ms of any arrival, create sig (b58, 16 chars), first arrival)
-    info: std::collections::HashMap<Pk, (u64, u64, Option<f64>, String, Instant)>,
+    /// mint -> (create sig8, slot, PoH ms of any arrival, create sig (b58, 16 chars), first arrival, first arrival t_rx ns)
+    info: std::collections::HashMap<Pk, (u64, u64, Option<f64>, String, Instant, u64)>,
+    /// ALPENGLOW FIX (2026-10-21): --create-ms-src wall = the create's position in its slot on OUR clock: its first arrival
+    /// minus the first arrival of ANY watched (pump) tx of that slot, across feeds. The PoH-tick position reads ~0-3 ms for
+    /// every create since the 13:54 UTC switch (slot 459,653,000), so the PoH gate passed everything.
+    wall: bool,
+    first: std::collections::HashMap<u64, u64>,
+    first_order: std::collections::VecDeque<u64>,
     order: std::collections::VecDeque<Pk>,
     pend_log: std::collections::VecDeque<Pk>,
     pub late: u64,
@@ -1593,9 +1632,21 @@ impl LandGate {
         let max_ms = arg("--max-create-ms").and_then(|s| s.parse::<f64>().ok());
         let unknown_pass = arg("--max-create-ms-unknown").map(|s| s == "pass").unwrap_or(false);
         LandGate { max_ms, unknown_pass, log_poh: has("--log-create-poh"), info: Default::default(), order: Default::default(), pend_log: Default::default(),
-            late: 0, unknown: 0, passed: 0, lines: Vec::new() }
+            late: 0, unknown: 0, passed: 0, lines: Vec::new(), wall: arg("--create-ms-src").as_deref() == Some("wall"),
+            first: Default::default(), first_order: Default::default() }
     }
     fn on(&self) -> bool { self.max_ms.is_some() || self.log_poh }
+    /// every watched tx arrival (all feeds): the earliest arrival per slot (wall-clock create position)
+    fn see(&mut self, slot: u64, t_rx: u64) {
+        if !self.wall || t_rx == 0 { return; }
+        match self.first.get_mut(&slot) {
+            Some(t) => { if t_rx < *t { *t = t_rx; } }
+            None => {
+                self.first.insert(slot, t_rx); self.first_order.push_back(slot);
+                while self.first_order.len() > 4096 { if let Some(o) = self.first_order.pop_front() { self.first.remove(&o); } }
+            }
+        }
+    }
     fn describe(&self) -> String {
         format!("LAND-GATE: max_create_ms={} (unknown -> {}) log_create_poh={}", self.max_ms.map(|x| format!("{x:.0}")).unwrap_or_else(|| "off".into()),
             if self.unknown_pass { "pass" } else { "skip" }, self.log_poh)
@@ -1605,9 +1656,9 @@ impl LandGate {
         if !self.on() { return; }
         let poh = a.poh.as_ref().and_then(|p| p.ms());
         match self.info.get_mut(mint) {
-            Some(e) => { if e.2.is_none() { e.2 = poh; } }
+            Some(e) => { if e.2.is_none() { e.2 = poh; } if a.t_rx > 0 && (e.5 == 0 || a.t_rx < e.5) { e.5 = a.t_rx; } }
             None => {
-                self.info.insert(*mint, (sig8_of(&a.tx.sig), a.slot, poh, a.tx.sig_b58()[..16].to_string(), Instant::now()));
+                self.info.insert(*mint, (sig8_of(&a.tx.sig), a.slot, poh, a.tx.sig_b58()[..16].to_string(), Instant::now(), a.t_rx));
                 self.order.push_back(*mint);
                 if self.log_poh { self.pend_log.push_back(*mint); }
                 while self.order.len() > 20_000 { if let Some(o) = self.order.pop_front() { self.info.remove(&o); } }
@@ -1617,6 +1668,12 @@ impl LandGate {
     /// the create's PoH ms into its slot and where it came from
     fn create_ms(&self, mint: &Pk) -> (Option<f64>, &'static str) {
         let Some(e) = self.info.get(mint) else { return (None, "none") };
+        if self.wall {
+            return match self.first.get(&e.1) {
+                Some(&f) if e.5 >= f => (Some((e.5 - f) as f64 / 1e6), "wall"),
+                _ => (None, "none"),
+            };
+        }
         if let Some((p, _)) = arbx::feeds::poh_index().get(e.0) { if let Some(ms) = p.ms() { return (Some(ms), "poh-index"); } }
         match e.2 { Some(ms) => (Some(ms), "arrival"), None => (None, "none") }
     }
@@ -1674,9 +1731,10 @@ fn main() -> Result<()> {
     let simulate = has("--simulate");
     let paper_trade = has("--paper-trade");
     let unwrap = has("--unwrap");
+    let transfer = has("--transfer-sol");
     let live = has("--live");
-    if !warm_probe && !shadow && !round_trip && !snipe_once && !simulate && !paper_trade && !unwrap && !has("--sell-held") && !has("--ack-probe")
-        && !has("--landed-via-probe") && !has("--jito-poll-probe") {
+    if !warm_probe && !shadow && !round_trip && !snipe_once && !simulate && !paper_trade && !unwrap && !transfer && !has("--sell-held") && !has("--ack-probe")
+        && !has("--landed-via-probe") && !has("--jito-poll-probe") && !has("--dip") {
         bail!("pick a mode: --warm-probe (latency), --shadow (observe launches), --round-trip (gated buy+sell on --mint), --snipe-once (gated: auto-detect a fresh launch + round-trip it), --simulate (ZERO-COST: simulateTransaction a v3 buy, no send), --paper-trade (ZERO-COST: forward paper-trade the filter+exit-ladder on live launches, no send), --unwrap (gated: close the WSOL ATA back to native SOL), optionally with --live for real txs (gated)");
     }
 
@@ -1993,6 +2051,16 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
 
     if has("--unwrap") {
         run_unwrap(&key, user, &rpc, &path, live).await?;
+        stop.store(true, Ordering::Relaxed);
+        return Ok(());
+    }
+    if has("--transfer-sol") {
+        run_transfer(&key, user, &rpc, &path, live).await?;
+        stop.store(true, Ordering::Relaxed);
+        return Ok(());
+    }
+    if has("--dip") {
+        dipmode::run_dip(probe, &key, user, &rpc, &path, live, &stop).await?;
         stop.store(true, Ordering::Relaxed);
         return Ok(());
     }
@@ -2534,8 +2602,13 @@ fn report_shadow(shots: &[Shot], seen: u64, passed: u64, skipped_filter: u64, fi
 /// Build a real buy for a launch (GATED; never auto-run). Uses buy_message_ixs (which prepends advance_nonce when a
 /// durable nonce is configured; None here = plain recent-blockhash). `default_spend` is the --spend-lamports default.
 fn build_buy(user: Pk, launch: &Launch, nonce: Option<(Pk, Pk)>, default_spend: u64, min_out: u64) -> (Vec<build::Ix>, u64) {
+    build_buy_spend(user, launch, nonce, arg_u64("--spend-lamports", default_spend), min_out)
+}
+
+/// `build_buy` with an explicit spend (10-24: the dip engine's per-dev size, --dip-dev-spend-lamports)
+fn build_buy_spend(user: Pk, launch: &Launch, nonce: Option<(Pk, Pk)>, spend: u64, min_out: u64) -> (Vec<build::Ix>, u64) {
     let plan = BuyPlan {
-        spend_lamports: arg_u64("--spend-lamports", default_spend),
+        spend_lamports: spend,
         min_tokens_out: min_out,
         cu_limit: arg_u64("--cu-limit", 120_000) as u32,
         // Priority fee default = 3,000,000 micro-lamports. MEASURED (2026-10-14): this lands us at ~1.02x the floor
@@ -3051,6 +3124,16 @@ async fn simulate_buy(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, launch: &Launc
         if tips.len() > 2 { lat::bump_cu_limit(&mut v, 300 * (tips.len() as u32 - 2)); }
         ixs = v;
     }
+    // --sim-roundtrip (dip, 10-24): the SELL of 90% of the tokens this buy gets, in the same simulated tx, as OUR wallet (the buy
+    // creates the position the sell needs) -> checks our buy AND sell instructions on any token kind (holder-reward /
+    // cashback) at zero cost; the base ATA stays open (dust), so the close is not part of this check
+    if has("--sim-roundtrip") {
+        let (vt, vq) = curve_reserves(rpc, &launch.bonding_curve).await.context("--sim-roundtrip: the curve reserves")?;
+        let xin = (spend as f64 / 1.0125) as u128;
+        let q = (vt as u128 * xin / (vq as u128 + xin)) as u64;
+        ixs.push(snipe_build::sell_ix(user, launch, q / 10 * 9, 0));
+        println!("SIM-ROUNDTRIP    buy {spend} lamports, then sell {} of ~{q} tokens in the same tx", q / 10 * 9);
+    }
     // M-3: with --buy-max-slot-delta the buy carries the on-chain slot guard, exactly as live (deadline = now + 100 here,
     // so it passes: the CU of the guard is what this checks)
     let guarded = SLOT_GUARD.get().is_some();
@@ -3354,6 +3437,76 @@ fn race_feat_line(launch: &Launch, tx: &arbx::tx::Tx, slot: u64) -> String {
         ci.n_lookups, ci.v1, ci.n_ixs, ci.t22, ci.tip_lamports, ci.tip_to.map(|k| b58(&k)).unwrap_or_else(|| "-".into()), b58(&launch.creator),
         ci.name.chars().count(), clean(&ci.symbol), clean(&ci.name),
         snipe::create_strings(tx).map(|(_, _, u)| u.chars().filter(|c| !c.is_whitespace()).take(200).collect::<String>()).filter(|u| !u.is_empty()).unwrap_or_else(|| "-".into()))
+        // SHADOW (model): create payer, mayhem flag, create_v2 — logging only
+        + &format!(" payer={} mayhem={} v2={}", tx.keys.first().map(|k| b58(k)).unwrap_or_else(|| "-".into()), launch.is_mayhem as u8, launch.is_create_v2 as u8)
+        + &shadow_exact_fields(launch, tx, &ci)
+}
+
+/// SHADOW (model, logging only): the create-tx fields the selection model needs EXACTLY as training computes them:
+/// holder-reward flag (pump then records a per-mint creator), exact name/symbol (base64), the raw compute-budget args
+/// (absent = "-"), every top-level SOL transfer to a non-signer (tip candidates; training sums tip accounts), the dev
+/// buy net of pump's fee (the TradeEvent amount).
+fn shadow_exact_fields(launch: &Launch, tx: &arbx::tx::Tx, ci: &snipe::CreateInfo) -> String {
+    let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s.as_bytes());
+    let system: Pk = [0u8; 32];
+    let nsig = tx.num_signers as usize;
+    let mut xf = Vec::new();
+    for ix in tx.ixs.iter() {
+        if tx.keys.get(ix.program as usize) != Some(&system) || ix.data.len() < 12 || ix.data[0..4] != [2, 0, 0, 0] { continue; }
+        let Some(&di) = ix.accounts.get(1) else { continue };
+        if (di as usize) < nsig { continue; }
+        let Some(k) = tx.keys.get(di as usize) else { continue };
+        xf.push(format!("{}:{}", b58(k), u64::from_le_bytes(ix.data[4..12].try_into().unwrap_or([0u8; 8]))));
+        if xf.len() >= 8 { break; }
+    }
+    format!(" hr={} name64={} sym64={} cup_raw={} cul_raw={} xfers={} dev_net={}", launch.is_holder_reward as u8,
+        b64(&ci.name), b64(&ci.symbol), tx.cu_price().map(|v| v.to_string()).unwrap_or_else(|| "-".into()),
+        tx.cu_limit.map(|v| v.to_string()).unwrap_or_else(|| "-".into()), if xf.is_empty() { "-".to_string() } else { xf.join(",") },
+        snipe::dev_buy_net(tx, &launch.mint))
+}
+
+/// --final2-sock <path> (2026-10-23, "become them" study, ops/overnight/BECOME_THEM.md): FINAL-2 selection at the glued-bundle
+/// decision. A launch the race gate passes is asked to the FINAL-2 scorer (ops/shadow/scorer.py, FINAL2_SOCK serve mode: the
+/// same features / model / dump veto / guards as the shadow's live picks) over a local Unix socket: one JSON line with this
+/// engine's RACE seen + RACE decide lines, one JSON line back {mint, pick, score, veto, guard, us}. Non-blocking: the question
+/// goes out at the decision, the answer is read on the next due() pass (the loop waits 100 us while one is open). FAIL CLOSED:
+/// no answer within --final2-timeout-ms (default 5), a send error or pick=false -> no buy.
+struct Final2 { s: std::os::unix::net::UnixStream, buf: Vec<u8>, replies: std::collections::HashMap<String, serde_json::Value>, timeout: Duration,
+    asked: u64, picked: u64, timeouts: u64 }
+impl Final2 {
+    fn connect() -> Option<Final2> {
+        let path = arg("--final2-sock")?;
+        let s = match std::os::unix::net::UnixStream::connect(&path) {
+            Ok(s) => s,
+            Err(e) => { eprintln!("FINAL2: cannot connect to the scorer socket {path}: {e} — refusing to start (start ops/shadow/scorer.py with FINAL2_SOCK first)"); std::process::exit(2) }
+        };
+        if s.set_nonblocking(true).is_err() { eprintln!("FINAL2: cannot set the socket non-blocking — refusing to start"); std::process::exit(2) }
+        let timeout = Duration::from_micros((arg_f64("--final2-timeout-ms", 5.0) * 1000.0) as u64);
+        eprintln!("FINAL2: selection ON via {path} (timeout {:.1} ms, fail closed)", timeout.as_secs_f64() * 1e3);
+        Some(Final2 { s, buf: Vec::new(), replies: Default::default(), timeout, asked: 0, picked: 0, timeouts: 0 })
+    }
+    fn ask(&mut self, seen: &str, decide: &str, t: f64, kind: &str) -> bool {
+        use std::io::Write;
+        let mut line = serde_json::json!({"seen": seen, "decide": decide, "t": t, "kind": kind, "quote": "sol"}).to_string(); line.push('\n');
+        let (b, t0) = (line.as_bytes(), Instant::now()); let mut off = 0;
+        while off < b.len() {
+            match self.s.write(&b[off..]) {
+                Ok(n) => off += n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { if t0.elapsed() > self.timeout { return false; } std::hint::spin_loop(); }
+                Err(_) => return false,
+            }
+        }
+        self.asked += 1; true
+    }
+    fn poll(&mut self) {
+        use std::io::Read;
+        let mut tmp = [0u8; 16384];
+        loop { match self.s.read(&mut tmp) { Ok(0) => break, Ok(n) => self.buf.extend_from_slice(&tmp[..n]), Err(_) => break } }
+        while let Some(i) = self.buf.iter().position(|&c| c == b'\n') {
+            let l: Vec<u8> = self.buf.drain(..=i).collect();
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&l) { if let Some(m) = v["mint"].as_str() { self.replies.insert(m.to_string(), v); } }
+        }
+    }
 }
 
 struct RacePend {
@@ -3375,14 +3528,20 @@ struct RacePend {
     csig8: u64,
     vq_create: u64,
     legs: std::collections::HashMap<u64, snipe::Legs>,
+    /// SHADOW (model): payer + signers of each tx touching the mint (glued-bundle wallet / payer counts)
+    leg_who: std::collections::HashMap<u64, (Pk, Vec<Pk>)>,
     last_eval: Option<Instant>,
+    /// --final2-sock: this launch's RACE seen line, wall time at detection, create kind; open question (asked at, curve after bundle)
+    seen_line: String, t_wall: f64, kind: &'static str, f2_wait: Option<(Instant, Option<u64>)>,
 }
 
 struct RaceWatch { cfg: RaceCfg, pend: std::collections::HashMap<Pk, RacePend>, shadow: Vec<(Launch, u64)>, defer: Option<Vec<String>>,
     /// GAP --race-glued: sig8 of every tx the feeds forwarded (to tell "a pump tx of another mint" from "not decoded yet")
     seen: std::collections::HashSet<u64>, seen_q: std::collections::VecDeque<u64>,
     /// M5: sig8 of pump buys whose mint sits in an unresolved lookup table (may be a leg of a watched run: UNKNOWN)
-    alt_unres: std::collections::HashSet<u64>, alt_q: std::collections::VecDeque<u64> }
+    alt_unres: std::collections::HashSet<u64>, alt_q: std::collections::VecDeque<u64>,
+    /// --final2-sock: FINAL-2 selection client (None = off)
+    f2: Option<Final2> }
 
 /// one launch the race gate passed: (launch, create slot, M1: the curve's virtual SOL after the dev buy + the glued
 /// creator bundle when that total is known (glued run closed, every leg simulated), else None)
@@ -3394,7 +3553,7 @@ impl RaceWatch {
     fn new(cfg: RaceCfg) -> Self {
         if cfg.glued { arbx::feeds::ORDER_ON.store(true, Ordering::Relaxed); }
         RaceWatch { cfg, pend: Default::default(), shadow: Vec::new(), defer: None, seen: Default::default(), seen_q: Default::default(),
-            alt_unres: Default::default(), alt_q: Default::default() }
+            alt_unres: Default::default(), alt_q: Default::default(), f2: Final2::connect() }
     }
     /// L5: --race-early decides before the window ends only when nothing can still change the verdict; with --race-glued
     /// (decided when the glued run closes) or a bundle-SOL maximum / an outsider count / --race-bundle no it never applies
@@ -3433,7 +3592,10 @@ impl RaceWatch {
     /// (gate off, or gate on with no window and the static conditions met).
     fn add(&mut self, launch: &Launch, tx: &arbx::tx::Tx, slot: u64) -> bool {
         let static_ok = self.static_ok(launch, tx);
-        if self.cfg.log { let l = format!("  RACE seen {} static_ok={static_ok}", race_feat_line(launch, tx, slot)); match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") } }
+        let seen_line = if self.cfg.log || self.f2.is_some() { format!("  RACE seen {} static_ok={static_ok}", race_feat_line(launch, tx, slot)) } else { String::new() };
+        if self.cfg.log { let l = seen_line.clone(); match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") } }
+        let kind: &'static str = if snipe::detect_launch(tx).is_none() { "router" } else if launch.is_create_v2 { "v2" } else { "v1" };
+        let t_wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
         let mut cset: std::collections::HashSet<Pk> = tx.keys.iter().take(tx.num_signers as usize).copied().collect();
         cset.insert(launch.creator);
         let fire_now = !self.cfg.gate || (self.cfg.window_ms <= 0.0 && static_ok);
@@ -3445,7 +3607,8 @@ impl RaceWatch {
         };
         self.pend.insert(launch.mint, RacePend { launch: launch.clone(), slot, t0: Instant::now(), cset, bundle_n: 0, bundle_sol: 0, out: Vec::new(),
             decided: fire_now || !self.cfg.gate || !static_ok, static_ok, pass: fire_now, sigs: Default::default(),
-            csig8: sig8_of(&tx.sig), vq_create, legs: Default::default(), last_eval: None });
+            csig8: sig8_of(&tx.sig), vq_create, legs: Default::default(), leg_who: Default::default(), last_eval: None,
+            seen_line, t_wall, kind, f2_wait: None });
         if self.cfg.gate && !static_ok {
             let l = format!("  RACE reject-static slot={slot} mint={}", b58(&launch.mint));
             match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") }
@@ -3469,7 +3632,10 @@ impl RaceWatch {
             let glued = self.cfg.glued;
             let Some(p) = self.pend.get_mut(&mint) else { continue };
             if !p.sigs.insert(tx.sig) { continue; } // duplicate delivery from the second feed
-            if glued { if let Some(l) = snipe::bundle_legs(tx, &mint) { p.legs.insert(sig8_of(&tx.sig), l); } }
+            if glued {
+                if let Some(l) = snipe::bundle_legs(tx, &mint) { p.legs.insert(sig8_of(&tx.sig), l); }
+                p.leg_who.insert(sig8_of(&tx.sig), (payer, tx.keys.iter().take(tx.num_signers as usize).copied().collect()));
+            }
             let ms = p.t0.elapsed().as_secs_f64() * 1e3;
             let signers: Vec<Pk> = tx.keys.iter().take(tx.num_signers as usize).copied().collect();
             let bvq = snipe::CURVE_VQ0 + p.launch.dev_buy_lamports + p.bundle_sol;
@@ -3518,7 +3684,28 @@ impl RaceWatch {
     fn due(&mut self) -> Vec<Ready> {
         let mut ready = Vec::new();
         let mut done: Vec<Pk> = Vec::new();
+        if let Some(f) = self.f2.as_mut() { f.poll(); }
         for (mint, p) in self.pend.iter_mut() {
+            // --final2-sock: an open question -> the answer (buy only on pick=true), or fail closed on timeout
+            if let Some((t_ask, vq)) = p.f2_wait {
+                if let Some(f) = self.f2.as_mut() {
+                    let ms = b58(mint);
+                    if let Some(v) = f.replies.remove(&ms) {
+                        p.f2_wait = None;
+                        let pick = v["pick"].as_bool().unwrap_or(false);
+                        if pick { f.picked += 1; ready.push((p.launch.clone(), p.slot, vq)); }
+                        let l = format!("  FINAL2 mint={ms} pick={} score={} veto={} guard={} srv_us={} wait_us={:.0} asked={} picked={}", pick as u8,
+                            v["score"].as_f64().map(|x| format!("{x:.3}")).unwrap_or_else(|| "-".into()), v["veto"].as_f64().map(|x| format!("{x:.3}")).unwrap_or_else(|| "-".into()),
+                            v["guard"].as_bool().map(|b| (b as u8).to_string()).unwrap_or_else(|| "-".into()), v["us"].as_u64().unwrap_or(0),
+                            t_ask.elapsed().as_secs_f64() * 1e6, f.asked, f.picked);
+                        match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") }
+                    } else if t_ask.elapsed() > f.timeout {
+                        p.f2_wait = None; f.timeouts += 1;
+                        let l = format!("  FINAL2 mint={ms} TIMEOUT after {:.1} ms -> no buy (timeouts={})", t_ask.elapsed().as_secs_f64() * 1e3, f.timeouts);
+                        match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") }
+                    }
+                }
+            }
             let el = p.t0.elapsed().as_secs_f64() * 1e3;
             // LAT --race-early: pass now when the bundle condition (it only grows) already holds and nothing else waits on
             // the window (no outsider count, no "no bundle" rule, no bundle-SOL maximum). A launch that passes early would
@@ -3533,6 +3720,7 @@ impl RaceWatch {
                 p.last_eval = Some(Instant::now());
                 let ord = arbx::feeds::slot_order();
                 let _ = ord;
+                let mut counted: Vec<u64> = Vec::new();
                 let (n, gsol, unk, closed, found) = {
                     // inline glued_eval (self is borrowed mutably by the loop)
                     let tail = arbx::feeds::slot_order().after(p.slot, p.csig8, 64);
@@ -3545,7 +3733,7 @@ impl RaceWatch {
                                 if !hit { res = Some((n, sol, unk, true, true)); break; }
                                 match p.legs.get(&k) {
                                     Some(snipe::Legs::Buys(v)) => match snipe::simulate_legs(vq, v) {
-                                        Some(s_) => { n += 1; sol = sol.saturating_add(s_); vq = vq.saturating_add(s_); }
+                                        Some(s_) => { n += 1; sol = sol.saturating_add(s_); vq = vq.saturating_add(s_); counted.push(k); }
                                         None => { res = Some((n, sol, unk, true, true)); break; }
                                     },
                                     Some(snipe::Legs::Unknown) => { n += 1; unk += 1; }
@@ -3568,10 +3756,23 @@ impl RaceWatch {
                         && match self.cfg.bundle { 1 => n > 0, -1 => n == 0, _ => true };
                     p.pass = p.static_ok && bundle_ok && (!self.cfg.count_out || (no >= self.cfg.min_out && solo >= self.cfg.min_out_sol));
                     p.decided = true;
-                    let line = format!("  RACE decide slot={} mint={} at_ms={:.1} out_n={no} out_sol={:.3} max_cu={maxcu} bundle_n={n} bundle_sol={:.3} glued_closed={closed} glued_unknown={unk} order={} old_bundle_n={on} old_bundle_sol={:.3} pass={}",
-                        p.slot, b58(mint), el, solo as f64 / 1e9, gsol as f64 / 1e9, if found { "yes" } else { "none" }, osol as f64 / 1e9, p.pass);
+                    // SHADOW (model): distinct signers / payers of the counted glued legs, a leg paid by the creator, curve after the bundle
+                    let (mut gs, mut gp) = (std::collections::HashSet::new(), std::collections::HashSet::new());
+                    for k in &counted { if let Some((py, sg)) = p.leg_who.get(k) { gp.insert(*py); for x in sg { gs.insert(*x); } } }
+                    let gpc = gp.contains(&p.launch.creator) as u8;
+                    let line = format!("  RACE decide slot={} mint={} at_ms={:.1} out_n={no} out_sol={:.3} max_cu={maxcu} bundle_n={n} bundle_sol={:.3} glued_closed={closed} glued_unknown={unk} order={} old_bundle_n={on} old_bundle_sol={:.3} pass={} g_signers={} g_payers={} g_payer_creator={gpc} vq_create={} vq_after={} g_wallets={}",
+                        p.slot, b58(mint), el, solo as f64 / 1e9, gsol as f64 / 1e9, if found { "yes" } else { "none" }, osol as f64 / 1e9, p.pass, gs.len(), gp.len(),
+                        p.vq_create, p.vq_create.saturating_add(gsol),
+                        if gs.is_empty() { "-".to_string() } else { gs.iter().take(12).map(|k| b58(k)).collect::<Vec<_>>().join(",") });
+                    let line_f2 = if self.f2.is_some() { line.clone() } else { String::new() };
                     match &mut self.defer { Some(b) => b.push(line), None => eprintln!("{line}") }
-                    if p.pass { ready.push((p.launch.clone(), p.slot, Some(p.vq_create.saturating_add(gsol)))); }
+                    if p.pass && self.f2.is_some() {
+                        // --final2-sock: ask instead of firing; the answer is read on the next pass
+                        let f = self.f2.as_mut().unwrap();
+                        if f.ask(&p.seen_line, &line_f2, p.t_wall, p.kind) { p.f2_wait = Some((Instant::now(), Some(p.vq_create.saturating_add(gsol)))); }
+                        else { let l = format!("  FINAL2 mint={} SEND-FAIL -> no buy", b58(mint)); match &mut self.defer { Some(b) => b.push(l), None => eprintln!("{l}") } }
+                    }
+                    else if p.pass { ready.push((p.launch.clone(), p.slot, Some(p.vq_create.saturating_add(gsol)))); }
                     else if self.cfg.track_rejects { self.shadow.push((p.launch.clone(), p.slot)); }
                 }
             }
@@ -3611,7 +3812,9 @@ impl RaceWatch {
 
     /// how long the event loop may block before the next decision is due.
     fn next_wait(&self) -> Duration {
-        if self.pend.is_empty() { Duration::from_secs(2) } else { Duration::from_millis(1) }
+        if self.pend.is_empty() { Duration::from_secs(2) }
+        else if self.pend.values().any(|p| p.f2_wait.is_some()) { Duration::from_micros(100) }   // --final2-sock answer pending
+        else { Duration::from_millis(1) }
     }
 }
 
@@ -3658,6 +3861,8 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
     let uri_whitelist = has("--uri-whitelist");
     let uri_blacklist = has("--uri-blacklist");
     let mut skipped_host = 0u64;
+    let deployer_list = deployer_list();
+    let mut skipped_deployer = 0u64;
 
     // ---- LIVE-FAITHFUL cost model: the exact legs a real round-trip pays, so pnl_net == what the wallet would net.
     // size_sol = notional per trade (fixed fees amortize against it). $200 ~= 1.0 SOL at ~$200/SOL; override with --size-sol.
@@ -3720,6 +3925,7 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
             altc::set_watching(!race.pend.is_empty()); // M5-1: unresolved pump buys are fetched only while a launch is watched
             altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
             if race.cfg.glued { race.note_hit(&a.tx); }
+            gate.see(a.slot, a.t_rx);
             det.note(&a);
             // DET FIX: a top-level create, else pump's router create (CPI) decoded from the router's own args
             let cand = match snipe::detect_launch(&a.tx) { Some(l) => Some((l, false)), None if !det.no_router => router_launch(&a.tx).map(|l| (l, true)), None => None };
@@ -3749,6 +3955,7 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
                     if !allow_nonvanilla && !launch.is_snipeable() { skipped_flag += 1; break 'create; }
                     if uri_whitelist && !snipe::trusted_launch_host(&a.tx) { skipped_host += 1; break 'create; }
                     if uri_blacklist && snipe::is_bot_launchpad(&a.tx) { skipped_host += 1; break 'create; }
+                    if !deployer_ok(&deployer_list, &a.tx) { skipped_deployer += 1; break 'create; }
                     // CREATOR-FRESHNESS selection gate (4yFAz's measured selector): count the creator's signatures strictly
                     // BEFORE this create slot; skip if the deployer isn't fresh. One getSignaturesForAddress; fine in paper.
                     if max_creator_sigs > 0 {
@@ -3902,6 +4109,7 @@ async fn run_paper_trade(probe: &Probe, rpc: &Arc<rpc::Rpc>, stop: &Arc<AtomicBo
     let recs = std::mem::take(&mut *sink.lock().unwrap());
     if max_creator_sigs > 0 { eprintln!("CREATOR-FRESHNESS gate (<= {max_creator_sigs} prior sigs): skipped {skipped_creator} non-fresh-deployer launches"); }
     if uri_whitelist { eprintln!("URI-HOST GATE: skipped {skipped_host} non-trusted-host launches"); }
+    if deployer_list.is_some() { eprintln!("DEPLOYER-LIST GATE: skipped {skipped_deployer} launches not signed by a listed deployer"); }
     paper_report(&recs, detected, skipped_dev, skipped_flag, min_dev_buy);
     Ok(())
 }
@@ -3949,6 +4157,31 @@ fn paper_report(recs: &[PaperRec], detected: u64, skipped_dev: u64, skipped_flag
 
 /// --unwrap (gated by --live): close the wallet's WSOL ATA, returning the wrapped SOL (+ account rent) to the native
 /// balance. Recovers funds only — no market exposure. `--account <PK>` overrides the ATA to close.
+/// --transfer-sol <SOL> --transfer-to <PUBKEY> (gated, --live): one plain SOL transfer from the wallet, e.g. the owner's
+/// proof-of-ownership transfer to our own FRZ wallet. Hard cap 0.5 SOL per run; keeps at least 0.01 SOL for fees.
+async fn run_transfer(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, live: bool) -> Result<()> {
+    let land_timeout = Duration::from_millis(arg_u64("--land-timeout-ms", 15_000));
+    let sol = arg_f64("--transfer-sol", -1.0);
+    if !(sol > 0.0 && sol <= 0.5) { bail!("--transfer-sol must be > 0 and <= 0.5 SOL (got {sol})"); }
+    let to = arg_pk("--transfer-to").ok_or_else(|| anyhow::anyhow!("--transfer-to <PUBKEY> is required"))?;
+    if to == user { bail!("--transfer-to is the wallet itself"); }
+    let lamports = (sol * 1e9).round() as u64;
+    let bal_before = native_balance(rpc, user).await.unwrap_or(0);
+    if bal_before < lamports + 10_000_000 { bail!("balance {} lamports < transfer {} + 0.01 SOL for fees", bal_before, lamports); }
+    let ixs = vec![build::cu_limit_ix(5_000), build::transfer_ix(user, to, lamports)];
+    eprintln!("\nTRANSFER: {} SOL ({} lamports) from {} to {} (native before: {} lamports)", sol, lamports, b58(&user), b58(&to), bal_before);
+    if !live { eprintln!("DRY: --transfer-sol does nothing without --live."); return Ok(()); }
+    let landed = send_and_poll(key, user, rpc, path, &ixs, land_timeout).await?;
+    match landed.land_slot {
+        Some(s) => eprintln!("  TRANSFER sig={} land_slot={} ok={}", landed.sig, s, landed.ok),
+        None => { eprintln!("  TRANSFER sig={} NOT SEEN within {:?}", landed.sig, land_timeout); return Ok(()); }
+    }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let bal_after = native_balance(rpc, user).await.unwrap_or(bal_before);
+    eprintln!("  native after: {} lamports ({:+.6} SOL)", bal_after, (bal_after as i64 - bal_before as i64) as f64 / 1e9);
+    Ok(())
+}
+
 async fn run_unwrap(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, live: bool) -> Result<()> {
     let land_timeout = Duration::from_millis(arg_u64("--land-timeout-ms", 15_000));
     let wsol_ata = arg_pk("--account").unwrap_or_else(|| pda::ata(&user, &snipe_build::WSOL, &pda::TOKEN_PROGRAM));
@@ -4177,6 +4410,8 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
     let uri_whitelist = has("--uri-whitelist");
     let uri_blacklist = has("--uri-blacklist");
     let mut skipped_host = 0u64;
+    let deployer_list = deployer_list();
+    let mut skipped_deployer = 0u64;
     let mut dedup = MintDedup::new(20000); // cross-feed de-dup (erpc + Kaldera): never double-buy a mint seen on both feeds
     let mut det = DetLog::new(_feeds.names.clone());
     set_slot_clock(rpc).await;
@@ -4245,11 +4480,13 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             altc::set_watching(!race.pend.is_empty()); // M5-1: unresolved pump buys are fetched only while a launch is watched
             feed_mark(&a.tx.sig, a.slot); // XRPC: our sells seen in the shred feed
             altc::fill(&mut a.tx); // ALT: lookup tables resolved from the cache (fail closed on a miss)
+            act_note(&a.tx, a.slot); // --hold-activity-k: txs of fired mints, in feed order
             if race.cfg.glued { race.note_hit(&a.tx); }
             // DET FIX: the current slot for leader targeting / send_slot comes from the shred feed (the leader's slot as it
             // is being produced). The 250 ms getSlot poller alone lagged the create slot by 2-3 slots (live_land_fast.log:
             // send_slot 458515365 for a create in 458515368), so tpu-direct aimed at leaders already past.
             slot_note(SLOT_SRC_FEED, a.slot); // M8-1: a jump > 1,000 slots needs a second source
+            gate.see(a.slot, a.t_rx);
             det.note(&a);
             // DET FIX: a top-level create, else pump's router create (CPI) decoded from the router's own args
             let cand = match snipe::detect_launch(&a.tx) { Some(l) => Some((l, false)), None if !det.no_router => router_launch(&a.tx).map(|l| (l, true)), None => None };
@@ -4279,6 +4516,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
                     if !allow_nonvanilla && !launch.is_snipeable() { break 'create; }
                     if uri_whitelist && !snipe::trusted_launch_host(&a.tx) { skipped_host += 1; break 'create; }
                     if uri_blacklist && snipe::is_bot_launchpad(&a.tx) { skipped_host += 1; break 'create; }
+                    if !deployer_ok(&deployer_list, &a.tx) { skipped_deployer += 1; break 'create; }
                     // leader-proximity gate: only fire when the create slot's leader is close. M2: unknown = far (skip, counted)
                     if let Some(cs) = &close_set {
                         match lat::leader_of(a.slot) {
@@ -4389,6 +4627,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         if stop.load(Ordering::SeqCst) || fires_paused() { eprintln!("  STOP / PAUSE set: launch {} not fired", b58(&launch.mint)); continue; } // N7, L6-3, M12-1
         let rx_age_us = t_rx_of.map(|t| arbx::feeds::clock::now_ns().saturating_sub(t) / 1000).unwrap_or(0);
         let pos = if junk { None } else { Some(Pos::new(launch.mint, spend_per, fee_guess, "")) };
+        if !junk && has("--hold-activity-k") { act_watch(&launch.mint, true); }
         fired.fetch_add(1, Ordering::Relaxed);
         let (key2, rpc2, path2) = (key.clone(), rpc.clone(), path.clone());
         tokio::spawn(async move {
@@ -4430,6 +4669,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
         altc::len(), altc::LRU_CAP, altc::HITS.load(Ordering::Relaxed), altc::MISSES.load(Ordering::Relaxed), altc::IGNORED.load(Ordering::Relaxed),
         altc::FETCHED.load(Ordering::Relaxed), altc::FAILED.load(Ordering::Relaxed), altc::EVICTED.load(Ordering::Relaxed));
     if uri_whitelist { eprintln!("URI-HOST GATE: skipped {skipped_host} non-trusted-host launches"); }
+    if deployer_list.is_some() { eprintln!("DEPLOYER-LIST GATE: skipped {skipped_deployer} launches not signed by a listed deployer"); }
     // H1: the drain covers the worst-case position: land timeout + late-land watch + hold cap + the sell deadline + one
     // last sell wait + the realized-PnL lookups, plus margin
     let robust = has("--sell-robust");
@@ -4762,7 +5002,7 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     }
 
     // --- HOLD from the landing as SEEN (M3): --hold-slots N (feed slot >= land slot + N), else --hold-ms
-    hold_wait(&buy).await;
+    hold_wait(&buy, &mint).await;
 
     // --- DECISION: no RPC from here to the first sell's write
     let t_decision = Instant::now();
@@ -4824,7 +5064,29 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
 /// reads). --hold-slots N (> 0, landing seen by its signature status: exact slot): sell once the shred feed's current slot
 /// reaches land_slot + N (~N x 217 ms after the landing slot began), capped at --hold-max-ms (default 1500) after the
 /// landing was seen. Otherwise (or landing seen via the token account) --hold-ms after the landing was seen.
-async fn hold_wait(buy: &Landed) {
+async fn hold_wait(buy: &Landed, mint: &Pk) {
+    // --hold-activity-k: at the end of the slot after our buy, a dead fill (<= k outside buys after ours) sells now
+    if let Some(k) = arg("--hold-activity-k").and_then(|v| v.parse::<usize>().ok()) {
+        let land = buy.land_slot.unwrap_or(0);
+        if land > 0 {
+            let cap = buy.t_seen.unwrap_or_else(Instant::now) + Duration::from_millis(arg_u64("--hold-activity-cap-ms", 800));
+            while send::tpu::SLOT.load(Ordering::Relaxed) < land + 2 && Instant::now() < cap { tokio::time::sleep(Duration::from_millis(5)).await; }
+            let (found, after) = {
+                let g = ACT.lock().unwrap_or_else(|e| e.into_inner());
+                match g.get(mint).and_then(|log| log.iter().position(|e| bs58::encode(&e.1).into_string() == buy.sig).map(|i| (log, i))) {
+                    // kind 1 = decoded pump buy leg; kind 2 (unknown routed leg) only with --hold-activity-unknown: bots that
+                    // re-send failing conditional txs every slot would otherwise read as activity (live tapes 10-23)
+                    Some((log, i)) => (true, log[i + 1..].iter().filter(|e| e.0 <= land + 1 && (e.2 == 1 || (e.2 == 2 && has("--hold-activity-unknown")))).count()),
+                    None => (false, 0),
+                }
+            };
+            act_watch(mint, false);
+            let sell_now = found && after <= k;
+            let l = format!("  HOLD-ACTIVITY mint={} land_slot={land} our_buy_in_feed={} outside_buys_after_us={after} k={k} -> {}", b58(mint), found as u8, if sell_now { "SELL NOW" } else { "normal hold" });
+            tokio::spawn(async move { eprintln!("{l}"); });
+            if sell_now { return; }
+        } else { act_watch(mint, false); }
+    }
     let hold_ms = arg_u64("--hold-ms", 0);
     let hold_slots = arg_u64("--hold-slots", 0);
     let t_obs = buy.t_seen.unwrap_or_else(Instant::now);
@@ -4864,6 +5126,28 @@ fn feed_seen(sig: &[u8; 64]) -> Option<u64> {
 fn feed_mark(sig: &[u8; 64], slot: u64) {
     if FEED_WATCH_N.load(Ordering::Relaxed) == 0 { return; }
     if let Some(s) = FEED_WATCH.lock().unwrap_or_else(|e| e.into_inner()).get_mut(sig) { if *s == 0 { *s = slot; } }
+}
+
+/// --hold-activity-k <k> (2026-10-23, "activity check" exit, ops/final2/PLAN.md A7): from the fire on, every tx touching a
+/// fired mint is logged in shred-feed order (slot, sig, kind: 1 pump buy leg, 2 unknown routed leg, 0 other). At the hold,
+/// the outside buys AFTER our buy up to the end of the slot after it decide: <= k -> sell now (dead fill), else the normal
+/// hold. Off unless the flag is set; the event loop does one atomic load while nothing is registered.
+static ACT: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<Pk, Vec<(u64, [u8; 64], u8)>>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+static ACT_N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+fn act_watch(mint: &Pk, on: bool) {
+    let mut g = ACT.lock().unwrap_or_else(|e| e.into_inner());
+    if on { if g.len() >= 16 { g.clear(); } g.entry(*mint).or_default(); } else { g.remove(mint); }
+    ACT_N.store(g.len(), Ordering::Relaxed);
+}
+#[inline]
+fn act_note(tx: &arbx::tx::Tx, slot: u64) {
+    if ACT_N.load(Ordering::Relaxed) == 0 { return; }
+    let mut g = ACT.lock().unwrap_or_else(|e| e.into_inner());
+    for (mint, log) in g.iter_mut() {
+        if !tx.keys.contains(mint) { continue; }
+        let kind = match snipe::bundle_legs(tx, mint) { Some(snipe::Legs::Buys(_)) => 1u8, Some(snipe::Legs::Unknown) => 2, _ => 0 };
+        if log.len() < 4096 { log.push((slot, tx.sig, kind)); }
+    }
 }
 
 /// L8-4: the slow path's fire facts (create slot, dev, bundle) by mint, read by send_and_poll_at after the send
@@ -5933,25 +6217,32 @@ mod fastfire {
         pub made: Instant,
         /// create-side stamps: (rx realtime ns, decoded realtime ns, dequeued realtime ns, dequeued mono, detected mono, gated mono)
         pub cr: [u64; 6],
+        /// the buy amount in this tx (lamports)
+        pub spend: u64,
     }
 
     /// one fire's writes: (path, kind, t0, t1, status)
     pub struct FireRec { pub t_fire0: u64, pub t_end: u64, pub w: Vec<(String, &'static str, u64, u64, &'static str)> }
 
     impl Fast {
-        fn template(&self, tips: &[(Pk, u64)]) -> Option<Arc<Template>> {
-            let k: Vec<u64> = tips.iter().map(|t| t.1).collect();
+        /// the buy amount of a prepare without an explicit spend (--spend-lamports)
+        pub fn default_spend() -> u64 { arg_u64("--spend-lamports", 2_000_000) }
+
+        /// one template per (tip amounts, spend): the spend is part of the buy data, so each size has its own template
+        fn template(&self, tips: &[(Pk, u64)], spend: u64) -> Option<Arc<Template>> {
+            let mut k: Vec<u64> = tips.iter().map(|t| t.1).collect();
+            k.push(spend);
             if let Some(t) = self.templates.lock().unwrap().get(&k) { return t.clone(); }
-            let t = self.make_template(tips).map_err(|e| eprintln!("FAST: no template for tips {k:?}: {e} (full compile for this shape)")).ok().map(Arc::new);
+            let t = self.make_template(tips, spend).map_err(|e| eprintln!("FAST: no template for tips + spend {k:?}: {e} (full compile for this shape)")).ok().map(Arc::new);
             self.templates.lock().unwrap().insert(k, t.clone());
             t
         }
 
-        fn make_template(&self, tips: &[(Pk, u64)]) -> std::result::Result<Template, String> {
+        fn make_template(&self, tips: &[(Pk, u64)], spend: u64) -> std::result::Result<Template, String> {
             let user = self.user;
             let probe = Launch { mint: fast::probe_var(0), bonding_curve: fast::probe_var(1), assoc_bonding_curve: fast::probe_var(2), creator: fast::probe_var(9),
                 dev_buy_lamports: 0, is_create_v2: true, is_mayhem: false, is_cashback: false, creator_fee_bps: 0, is_holder_reward: false, buyback_fee_recipient: fast::probe_var(5) };
-            let (ixs, _) = build_buy(user, &probe, None, 2_000_000, fast::PROBE_MIN_OUT);
+            let (ixs, _) = build_buy_spend(user, &probe, None, spend, fast::PROBE_MIN_OUT);
             // M-3: the slot guard (when on) with the probe deadline, patched per launch
             let guard = SLOT_GUARD.get().is_some();
             let mut ixs = with_guard(ixs, guard.then_some(fast::PROBE_DEADLINE));
@@ -5967,9 +6258,27 @@ mod fastfire {
             Template::from_probe_msg_dl(msg.bytes, tips.len(), guard)
         }
 
+        /// build the templates of every tip shape the routes can give (each route class alone and followed by any other
+        /// class, as buy_paths unions the next leader's class) for each of `spends`: no fire pays a template build. -> how many
+        pub fn warm_templates(&self, spends: &[u64]) -> usize {
+            let mut fans: Vec<Vec<Arc<send::Path>>> = Vec::new();
+            if let Some(r) = lat::ROUTES.get() {
+                let keys: Vec<&String> = r.keys().collect();
+                for a in &keys {
+                    for b in keys.iter().map(Some).chain(std::iter::once(None)) {
+                        let mut v: Vec<Arc<send::Path>> = r[*a].clone();
+                        if let Some(b) = b { for p in &r[*b] { if !v.iter().any(|x| x.name == p.name) { v.push(p.clone()); } } }
+                        fans.push(v);
+                    }
+                }
+            } else { fans.push(lat::buy_paths(&self.main, ALSO_PATH.get(), None).0); }
+            for fan in &fans { let tips = lat::tips_for(fan); for &sp in spends { let _ = self.template(&tips, sp); } }
+            self.templates.lock().unwrap().values().filter(|t| t.is_some()).count()
+        }
+
         /// the full compile of the same buy (the reference the fast build must equal byte for byte)
-        fn reference(&self, launch: &Launch, tips: &[(Pk, u64)], bh: [u8; 32], min_out: u64, deadline: Option<u64>) -> Option<Vec<u8>> {
-            let (ixs, _) = build_buy(self.user, launch, None, 2_000_000, min_out);
+        fn reference(&self, launch: &Launch, tips: &[(Pk, u64)], bh: [u8; 32], min_out: u64, deadline: Option<u64>, spend: u64) -> Option<Vec<u8>> {
+            let (ixs, _) = build_buy_spend(self.user, launch, None, spend, min_out);
             let ixs = with_guard(ixs, deadline);
             let mut v: Vec<build::Ix> = tips.iter().map(|(t, l)| build::transfer_ix(self.user, *t, *l)).collect();
             v.extend(ixs);
@@ -5978,9 +6287,19 @@ mod fastfire {
         }
 
         /// build + sign + frame everything for one launch (create time)
-        pub fn prepare(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6]) -> Result<Prep> {
+        pub fn prepare(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6]) -> Result<Prep> { self.prepare_on(launch, slot, min_out, cr, None, None) }
+
+        /// `prepare` through a FORCED set of send paths instead of the route for the leader (dip landing probes: one path per
+        /// probe, rotated, so every path is measured under the same conditions); the leader / client are still read
+        /// `spend`: the buy amount (None: --spend-lamports)
+        pub fn prepare_on(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6], force: Option<Vec<Arc<send::Path>>>, spend: Option<u64>) -> Result<Prep> {
             let t0 = fast::mono_ns();
+            let spend = spend.unwrap_or_else(Self::default_spend);
             let (mut fan, mut meta) = lat::buy_paths(&self.main, ALSO_PATH.get(), Some(slot));
+            if let Some(v) = force.filter(|v| !v.is_empty()) {
+                meta.route = format!("forced:{}", v.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("+"));
+                fan = v;
+            }
             let mut tips = lat::tips_for(&fan);
             // L2: the cached blockhash's age (refreshed every 300 ms): > 2 s is logged (refresher lagging), > 20 s or none
             // refuses the prepare (a buy on a dying blockhash cannot land; no fire, no budget used)
@@ -5993,7 +6312,7 @@ mod fastfire {
                 if g.is_none_or(|t| t.elapsed() > Duration::from_secs(30)) { *g = Some(Instant::now()); log_line(format!("  BLOCKHASH-AGE {:.1} s at prepare (mint {}): no newer blockhash accepted lately (normal: 1-2.5 s incl. the confirmation lag)", bh_age.as_secs_f64(), b58(&launch.mint))); }
             }
             let t1 = fast::mono_ns();
-            let tpl = self.template(&tips);
+            let tpl = self.template(&tips, spend);
             let (mint, bc) = (launch.mint, launch.bonding_curve);
             let ata = |o: &Pk, m: &Pk, t: &Pk| if self.fast_derive { fast::ata_fast(o, m, t) } else { pda::ata(o, m, t) };
             let abc = if launch.is_create_v2 { launch.assoc_bonding_curve } else { ata(&bc, &mint, &pda::TOKEN_2022) };
@@ -6011,7 +6330,7 @@ mod fastfire {
                 raw.push(1); raw.extend_from_slice(&sig); raw.extend_from_slice(&msg);
                 (raw, sig, t3)
             } else {
-                let (ixs, _) = build_buy(self.user, launch, None, 2_000_000, min_out);
+                let (ixs, _) = build_buy_spend(self.user, launch, None, spend, min_out);
                 let ixs = with_guard(ixs, deadline);
                 let (raw, t) = lat::build_tx(&self.key, self.user, &ixs, &mut fan, bh)?;
                 tips = t;
@@ -6061,7 +6380,7 @@ mod fastfire {
             meta.tips = tips.iter().map(|t| t.1).sum();
             let roles = ix_roles(&raw);
             Ok(Prep { id: self.next_id.fetch_add(1, Ordering::Relaxed), launch: launch.clone(), slot, fan, fpi, meta, raw, sig, payload: Arc::new(payload), reqs, tips, jtok, bh, min_out,
-                bh_valid, deadline, roles, mo_off, ats, resign_ns: 0, fast_built, st: [t0, t1, t2, t3, t4, t5], made: Instant::now(), cr })
+                bh_valid, deadline, roles, mo_off, ats, resign_ns: 0, fast_built, st: [t0, t1, t2, t3, t4, t5], made: Instant::now(), cr, spend })
         }
 
         /// M1 HOT PATH (between the decision and the first write): set min_tokens_out to `min_out` and re-sign. Patches 8
@@ -6179,7 +6498,7 @@ mod fastfire {
         /// after the fire (or for a create that never fired): verify + trace, off the hot path
         pub fn trace_prep(&self, p: &Prep) {
             let ok = if self.verify && p.fast_built {
-                let r = self.reference(&p.launch, &p.tips, p.bh, p.min_out, p.deadline);
+                let r = self.reference(&p.launch, &p.tips, p.bh, p.min_out, p.deadline, p.spend);
                 let sig_ok = self.key.verifying_key().verify_strict(&p.raw[65..], &ed25519_dalek::Signature::from_bytes(&p.sig)).is_ok();
                 // M1: every framed request must carry exactly the (re-signed) payload
                 let reqs_ok = p.reqs.iter().zip(&p.ats).all(|(r, at)| match (r, at) {
@@ -6293,7 +6612,7 @@ mod fastfire {
             let mut fan = p.fan.clone();
             let _ = lat::build_tx(&f.key, f.user, &ixs, &mut fan, p.bh);
             old_ns.push(fast::mono_ns() - t);
-            if p.fast_built { if f.reference(&l, &p.tips, p.bh, p.min_out, p.deadline).as_deref() == Some(&p.raw[65..]) { same += 1 } else { diff += 1 } }
+            if p.fast_built { if f.reference(&l, &p.tips, p.bh, p.min_out, p.deadline, p.spend).as_deref() == Some(&p.raw[65..]) { same += 1 } else { diff += 1 } }
         }
         let q = |v: &mut Vec<u64>, x: f64| { v.sort_unstable(); v[((v.len() - 1) as f64 * x).round() as usize] as f64 / 1e3 };
         println!("\n========== FAST-BENCH (n={n}, µs p50 / p99) ==========");
@@ -6303,6 +6622,21 @@ mod fastfire {
         println!("{:24} {:8.2} / {:8.2}", "OLD build_buy+build_tx", q(&mut old_ns, 0.5), q(&mut old_ns, 0.99));
         if !rs.is_empty() { println!("{:24} {:8.2} / {:8.2}   (added between the decision and the first write; {rs_fail} not re-signable)", "M1 RE-SIGN at decision", q(&mut rs, 0.5), q(&mut rs, 0.99)); }
         println!("byte check vs full compile (after the M1 re-sign): {same} identical, {diff} different");
+        // 10-24: a second buy size (the dip engine's per-dev spend): its own templates, byte-compared the same way
+        if let Some(sp) = arg_u64_opt("--dip-dev-spend-lamports") {
+            let (mut same2, mut diff2, mut has_amt) = (0u64, 0u64, 0u64);
+            for i in 0..n {
+                let mut m = [0u8; 32];
+                m[..8].copy_from_slice(&(0x5eed_1000_0000u64 + i as u64).to_le_bytes());
+                m[31] = 0x78;
+                let mut l = snipe_build::launch_from_target(m, f.user);
+                l.dev_buy_lamports = 1_000_000_000;
+                let p = match f.prepare_on(&l, 0, 12_345_678, [0; 6], None, Some(sp)) { Ok(p) => p, Err(e) => { eprintln!("bench prepare (spend {sp}): {e:#}"); return; } };
+                if p.raw.windows(8).any(|w| w == sp.to_le_bytes()) { has_amt += 1; }
+                if p.fast_built && f.reference(&l, &p.tips, p.bh, p.min_out, p.deadline, sp).as_deref() == Some(&p.raw[65..]) { same2 += 1 } else { diff2 += 1 }
+            }
+            println!("byte check at spend {sp} lamports: {same2} identical, {diff2} different; the amount is in {has_amt}/{n} txs");
+        }
         // the derivation and the signature alone
         let mut d: Vec<u64> = Vec::new();
         let mut s: Vec<u64> = Vec::new();

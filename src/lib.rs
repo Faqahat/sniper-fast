@@ -21,6 +21,8 @@ pub mod config;
 pub mod control;
 pub mod crowding;
 pub mod cu_table;
+pub mod dip;
+pub mod dip_imit;
 pub mod engine;
 pub mod exec;
 pub mod experiments;
