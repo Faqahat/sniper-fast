@@ -1,0 +1,15 @@
+#!/bin/sh
+# dipmon: the dip-run monitor at the lowest CPU and I/O priority, so it never competes with the live engine.
+#   install: sudo install -m 755 dipmon.py /root/prod/dipmon.py && sudo install -m 755 dipmon /usr/local/bin/dipmon
+#   use:     sudo dipmon | sudo dipmon --run 26 | sudo dipmon --snapshot   (dipmon --help for every option)
+PY=${DIPMON_PY:-/root/prod/dipmon.py}
+if [ ! -f "$PY" ]; then
+  here=$(dirname "$(readlink -f "$0")")
+  [ -f "$here/dipmon.py" ] && PY="$here/dipmon.py"
+fi
+[ -f "$PY" ] || { echo "dipmon: $PY not found (install dipmon.py as /root/prod/dipmon.py or set DIPMON_PY)" >&2; exit 1; }
+# sudo can drop TERM: curses needs one (dipmon.py falls back the same way)
+case "${TERM:-}" in ""|dumb|unknown) TERM=xterm-256color; export TERM;; esac
+IO=""
+if command -v ionice >/dev/null 2>&1 && ionice -c3 true >/dev/null 2>&1; then IO="ionice -c3"; fi
+exec nice -n 19 $IO python3 "$PY" "$@"

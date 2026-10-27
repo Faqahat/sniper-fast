@@ -72,3 +72,14 @@ ops/**/*.css
 testdata/imit1_parity.json
 # the model blueprint is documentation (its generator's data under ops/dip/blueprint/data/ stays local)
 !ops/dip/BLUEPRINT*.html
+
+# python bytecode
+__pycache__/
+*.pyc
+
+# Go: test binaries and vendored deps (go.mod/go.sum pin them; `go mod vendor` recreates)
+*.test
+/ops/tui-go/vendor/
+
+# built binaries copied to servers (rebuild from source; sha256 files are kept)
+/ops/preconf/shreder/dist/shreder_rec

@@ -1,0 +1,18 @@
+# /etc/sniper-rec/rec.conf (root-owned, 644, NOT secret). Secrets live in /etc/sniper-rec/env (600).
+# overlap = SHYFT only, no Constant-K, metadata+Jito enrichment, final pass deferred, stop on any limit error
+# normal  = exactly like FRA's collector today (blocks SHYFT,RMR,CK at 6/s each; getSlot/enrichment/final pass on CK)
+REC_MODE=normal
+REC_ROOT=/home/moiz/sniper-data/rec
+REC_LEGACY=/home/moiz/sniper-data/collect
+# 1 = the watchdog alerts when the recorder is down / stalled / lagging (set at the cut-over)
+REC_EXPECT_RUNNING=0
+REC_HOST_KEEP_DAYS=7
+REC_REMOTE_KEEP_DAYS=28
+REC_CACHE_CAP_GB=60
+REC_REMOTE=ftp
+FTP_TLS=auto
+# full = re-download + sha256 of every archived file (default); sample = SIZE for all + sha256 for a rotating 10%
+REC_VERIFY=full
+# collect/run_YYYYMMDD_0000 links to host days start at this PKT day (the cut-over day); empty = no links
+REC_LINK_FROM=
+REC_TG=on

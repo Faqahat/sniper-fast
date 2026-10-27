@@ -1,0 +1,12 @@
+[Unit]
+Description=sniper-rec watchdog pass (alerts: log, state/watch.json, Telegram)
+
+[Service]
+Type=oneshot
+User=moiz
+Group=moiz
+WorkingDirectory=/home/moiz
+EnvironmentFile=/etc/sniper-rec/env
+EnvironmentFile=-/etc/sniper-rec/rec.conf
+ExecStart=/usr/bin/python3 -I /home/moiz/sniper/ops/rec/watchdog.py
+TimeoutStartSec=50

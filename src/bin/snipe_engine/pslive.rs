@@ -75,8 +75,9 @@ const FLAGS: [&str; 15] = ["--presend-live-dry", "--presend-live-size-sol", "--p
 
 /// dip20 QUIET: its flags (each needs --presend-live; the history / threshold / warm-up / fbots / preload ones need
 /// --presend-live-quiet-skip on)
-const QFLAGS: [&str; 7] = ["--presend-live-quiet-stop", "--presend-live-quiet-skip", "--presend-live-quiet-hist-h", "--presend-live-quiet-fol",
-    "--presend-live-quiet-warmup-min", "--presend-live-fbots", "--presend-live-quiet-preload"];
+const QFLAGS: [&str; 10] = ["--presend-live-quiet-stop", "--presend-live-quiet-skip", "--presend-live-quiet-hist-h", "--presend-live-quiet-fol",
+    "--presend-live-quiet-warmup-min", "--presend-live-fbots", "--presend-live-quiet-preload", "--presend-live-quiet-state", "--presend-live-quiet-state-max-gap-min",
+    "--presend-live-quiet-book"];
 
 /// dip20 QUIET's parameters (all off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -89,17 +90,26 @@ pub struct QuietCfg {
     pub hist_h: f64, pub fol: f64, pub warmup_min: f64,
     /// --presend-live-fbots FILE (needed by the skip), --presend-live-quiet-preload DIR | current_run file
     pub fbots: Option<String>, pub preload: Option<String>,
+    /// dip21: --presend-live-quiet-state FILE (the whale history's journal), --presend-live-quiet-state-max-gap-min (30)
+    pub state: Option<String>, pub state_max_gap_min: f64,
+    /// dip21: --presend-live-quiet-book FILE (the host's book of the whale history, pushed to the node; read at the start)
+    pub book: Option<String>,
 }
 
 impl Default for QuietCfg {
-    fn default() -> QuietCfg { QuietCfg { stop: None, skip: false, hist_h: 24.0, fol: 2.24, warmup_min: 60.0, fbots: None, preload: None } }
+    fn default() -> QuietCfg { QuietCfg { stop: None, skip: false, hist_h: 24.0, fol: 2.24, warmup_min: 60.0, fbots: None, preload: None, state: None, state_max_gap_min: 30.0, book: None } }
 }
 
 impl QuietCfg {
     pub fn on(&self) -> bool { self.stop.is_some() || self.skip }
     pub fn json(&self) -> serde_json::Value {
-        serde_json::json!({"stop": self.stop.map(|q| format!("{}:{}", q.n, q.m)), "skip": self.skip, "hist_h": self.hist_h, "fol": self.fol, "warmup_min": self.warmup_min,
-            "fbots": self.fbots, "preload": self.preload})
+        let mut j = serde_json::json!({"stop": self.stop.map(|q| format!("{}:{}", q.n, q.m)), "skip": self.skip, "hist_h": self.hist_h, "fol": self.fol, "warmup_min": self.warmup_min,
+            "fbots": self.fbots, "preload": self.preload});
+        // dip21: only with the journal / the book (without them: dip20's record)
+        if self.state.is_some() { j["state"] = self.state.clone().into(); }
+        if self.book.is_some() { j["book"] = self.book.clone().into(); }
+        if self.state.is_some() || self.book.is_some() { j["state_max_gap_min"] = self.state_max_gap_min.into(); }
+        j
     }
 }
 
@@ -197,7 +207,15 @@ impl Cfg {
             if let Some(f) = QFLAGS[2..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-quiet-skip on"); }
         }
         let q = QuietCfg { stop, skip, hist_h: arg_f64("--presend-live-quiet-hist-h", d.hist_h), fol: arg_f64("--presend-live-quiet-fol", d.fol),
-            warmup_min: arg_f64("--presend-live-quiet-warmup-min", d.warmup_min), fbots: arg("--presend-live-fbots"), preload: arg("--presend-live-quiet-preload") };
+            warmup_min: arg_f64("--presend-live-quiet-warmup-min", d.warmup_min), fbots: arg("--presend-live-fbots"), preload: arg("--presend-live-quiet-preload"),
+            state: arg("--presend-live-quiet-state"), state_max_gap_min: arg_f64("--presend-live-quiet-state-max-gap-min", d.state_max_gap_min),
+            book: arg("--presend-live-quiet-book") };
+        if has("--presend-live-quiet-state") && q.state.as_deref().is_none_or(|p| p.starts_with("--")) { bail!("--presend-live-quiet-state needs a path"); }
+        if has("--presend-live-quiet-book") && q.book.as_deref().is_none_or(|p| p.starts_with("--")) { bail!("--presend-live-quiet-book needs a path"); }
+        if has("--presend-live-quiet-state-max-gap-min") && q.state.is_none() && q.book.is_none() {
+            bail!("--presend-live-quiet-state-max-gap-min needs --presend-live-quiet-state FILE or --presend-live-quiet-book FILE");
+        }
+        if !(q.state_max_gap_min >= 0.0 && q.state_max_gap_min <= 1440.0) { bail!("--presend-live-quiet-state-max-gap-min must be 0..1440"); }
         if q.skip && q.fbots.is_none() { bail!("--presend-live-quiet-skip on needs --presend-live-fbots FILE (the follower-bot list, e.g. /root/dip/fbots_frozen.json)"); }
         if !(q.hist_h > 0.0 && q.hist_h <= 48.0) { bail!("--presend-live-quiet-hist-h must be in (0, 48] hours"); }
         if !(q.fol > 0.0 && q.fol <= 100.0) { bail!("--presend-live-quiet-fol must be in (0, 100]"); }
@@ -535,6 +553,11 @@ struct Quiet {
     tpu_clock: bool,
     /// counters: skips, stops, triggers whose four signals held during the warm-up (not skipped), signals computed; times (µs)
     skips: u64, stops: u64, warm_would: u64, signals: u64, sig_us: Ring, merge_us: f64,
+    /// dip21 (--presend-live-quiet-state FILE): the journal writer's channel, thread and counters; the sessions the file had (the
+    /// history's coverage); what the load found; this session's first slot; the last heartbeat (data time); the loaded dumps until the
+    /// preload thread takes them
+    jtx: Option<crossbeam_channel::Sender<pq::JMsg>>, jthread: Option<std::thread::JoinHandle<()>>, jstats: Arc<Mutex<pq::JStats>>,
+    sessions: Vec<pq::Sess>, state_info: serde_json::Value, c0: u64, last_beat_t: u64, journal: Vec<pq::JDump>,
 }
 
 impl Quiet {
@@ -544,14 +567,123 @@ impl Quiet {
         Quiet { cfg: cfg.clone(), book: cfg.skip.then(|| pq::DumpBook::new((cfg.hist_h * 3.6e12) as u64)), coh, fb, start_ns, warm_ns: (cfg.warmup_min * 6e10) as u64, covered_ns: 0,
             pre_rx: None, cut: Arc::new(AtomicU64::new(0)), pre: PreSt::Off, pre_info: serde_json::Value::Null, watch: FxHashMap::default(), trigs: FxHashMap::default(),
             by_key: FxHashMap::default(), shadow_w: FxHashMap::default(), qid: 0, last_slot: 0, keep_slots: 1_500, tpu_clock, skips: 0, stops: 0, warm_would: 0, signals: 0,
-            sig_us: Ring::default(), merge_us: 0.0 }
+            sig_us: Ring::default(), merge_us: 0.0, jtx: None, jthread: None, jstats: Arc::new(Mutex::new(pq::JStats::default())), sessions: Vec::new(),
+            state_info: serde_json::Value::Null, c0: 0, last_beat_t: 0, journal: Vec::new() }
+    }
+
+    /// dip21: the whale history at the start (`now_ns`: the engine's start), from the host's BOOK (--presend-live-quiet-book, pushed
+    /// to the node) and the engine's own JOURNAL (--presend-live-quiet-state), merged by dump identity (the book's version kept): history
+    /// at once; journaling on (with the journal); the arm rule's schedule from the merged history's continuity (`pq::coverage`: the gap
+    /// between the history's end and the start is tolerated up to max-gap and not counted). Fallback order: a fresh book, the journal,
+    /// (later) the preload, the warm-up; a missing / damaged / stale source counts for what it holds and never stops the start. -> the
+    /// log line, the record, the compacted MERGED history for the journal writer (None: no journal). None: neither flag (or the skip off)
+    fn open_state(&mut self, now_ns: u64) -> Option<(String, serde_json::Value, Option<Vec<pq::JRec>>)> {
+        if self.cfg.state.is_none() && self.cfg.book.is_none() { return None; }
+        let hist = (self.cfg.hist_h * 3.6e12) as u64;
+        let gap_ns = (self.cfg.state_max_gap_min * 6e10) as u64;
+        let t0 = Instant::now();
+        let lb = self.cfg.book.as_ref().map(|p| pq::load_state(std::path::Path::new(p), now_ns, hist));
+        let lj = self.cfg.state.as_ref().map(|p| pq::load_state(std::path::Path::new(p), now_ns, hist));
+        let m = pq::merge_loaded(lb.as_ref(), lj.as_ref());
+        let dumps: Vec<pq::JDump> = m.dumps.iter().map(|x| x.0).collect();
+        let warm = self.warm_ns;
+        let b = self.book.as_mut()?;
+        b.load_finalized(&dumps);
+        if self.cfg.state.is_some() { b.journal_on(); }
+        let sellers = b.sellers();
+        self.sessions = m.sessions.clone();
+        let spans = |l: &pq::Loaded| -> Vec<(u64, u64)> { l.sessions.iter().map(|x| (x.t0, x.t1)).collect() };
+        let cov = pq::coverage(&spans(&m), now_ns, gap_ns);
+        let covb = lb.as_ref().map(|l| pq::coverage(&spans(l), now_ns, gap_ns));
+        let covj = lj.as_ref().map(|l| pq::coverage(&spans(l), now_ns, gap_ns));
+        self.covered_ns = cov.covered_ns;
+        let on = self.arm_on(now_ns);
+        let enough = |c: &Option<pq::Cov>| c.is_some_and(|c| c.covered_ns >= warm);
+        let source = if !on { "none" } else if warm == 0 { "no warm-up" } else if enough(&covb) { "book" } else if enough(&covj) { "journal" } else { "book+journal" };
+        let load_ms = t0.elapsed().as_secs_f64() * 1e3;
+        let gap_s = |c: &pq::Cov| if c.gap_ns == u64::MAX { "none".to_string() } else { format!("{:.1} min", c.gap_ns as f64 / 6e10) };
+        let desc = |name: &str, path: &str, l: &pq::Loaded, c: &pq::Cov| -> String {
+            if l.missing { return format!("{name} {path}: {}", if name == "journal" { "no file yet (a first start)" } else { "MISSING" }); }
+            if let Some(e) = &l.err { return format!("{name} {path}: UNREADABLE ({e})"); }
+            let issues = if l.bad + l.truncated_tail as u64 + l.dups > 0 || l.skipped_bytes > 0 {
+                format!(" [WARNING: skipped {} bad line(s){}{}{}]", l.bad, if l.truncated_tail { ", a truncated last line" } else { "" },
+                    if l.dups > 0 { format!(", {} duplicate(s)", l.dups) } else { String::new() }, if l.skipped_bytes > 0 { format!(", the first {} MB", l.skipped_bytes >> 20) } else { String::new() })
+            } else { String::new() };
+            format!("{name} {path}: {} dumps, {} session(s), continuous {:.2} h{}, gap {}{}{issues}", l.dumps.len(), l.sessions.len(), c.covered_ns as f64 / 3.6e12,
+                if c.to > 0 { format!(" to {}", ts_pkt(c.to)) } else { String::new() }, gap_s(c), if c.covered_ns == 0 && c.to > 0 { " (TOO OLD for the arm rule)" } else { "" })
+        };
+        let parts: Vec<String> = [lb.as_ref().zip(covb.as_ref()).zip(self.cfg.book.as_ref()).map(|((l, c), p)| desc("book", p, l, c)),
+                                  lj.as_ref().zip(covj.as_ref()).zip(self.cfg.state.as_ref()).map(|((l, c), p)| desc("journal", p, l, c))].into_iter().flatten().collect();
+        let line = format!("  QUIET history at the start: {} | merged {} dumps / {} sellers, {} session(s), continuous {:.2} h{}, gap {} ({} old, {:.0} ms) | arm rule {}",
+            parts.join(" | "), dumps.len(), sellers, self.sessions.len(), cov.covered_ns as f64 / 3.6e12, if cov.to > 0 { format!(" to {}", ts_pkt(cov.to)) } else { String::new() },
+            gap_s(&cov), m.old, load_ms,
+            if on { format!("ON now (source: {source})") } else { format!("warming up until {} (needs {} min continuous ending within {} min of the start{})", ts_pkt(self.arm_at()),
+                self.cfg.warmup_min, self.cfg.state_max_gap_min, if self.cfg.preload.is_some() { "; the preload may turn it on sooner" } else { "" }) });
+        let src_json = |l: &Option<pq::Loaded>, c: &Option<pq::Cov>, p: &Option<String>| -> serde_json::Value {
+            match (l, c, p) {
+                (Some(l), Some(c), Some(p)) => serde_json::json!({"path": p, "dumps": l.dumps.len(), "sessions": l.sessions.len(), "covered_h": c.covered_ns as f64 / 3.6e12, "to": c.to,
+                    "gap_min": if c.gap_ns == u64::MAX { serde_json::Value::Null } else { (c.gap_ns as f64 / 6e10).into() }, "missing": l.missing, "err": l.err, "bad": l.bad,
+                    "truncated_tail": l.truncated_tail, "dups": l.dups, "old": l.old, "bytes": l.bytes}),
+                _ => serde_json::Value::Null,
+            }
+        };
+        self.state_info = serde_json::json!({"dumps": dumps.len(), "sellers": sellers, "sessions": self.sessions.len(), "covered_h": cov.covered_ns as f64 / 3.6e12, "from": cov.from,
+            "to": cov.to, "gap_min": if cov.gap_ns == u64::MAX { serde_json::Value::Null } else { (cov.gap_ns as f64 / 6e10).into() }, "arm_on": on, "source": source,
+            "arm_rule_on_at": self.arm_at(), "load_ms": load_ms, "book": src_json(&lb, &covb, &self.cfg.book), "journal": src_json(&lj, &covj, &self.cfg.state)});
+        let mut rec = self.state_info.clone();
+        rec["ev"] = "presend_live_quiet_state".into();
+        rec["t"] = arbx::feeds::clock::now_ns().into();
+        let compacted = self.cfg.state.is_some().then(|| pq::compact(&m));
+        self.journal = dumps;
+        Some((line, rec, compacted))
+    }
+
+    /// dip21: the journal writer thread (lowest CPU priority, idle I/O): it first rewrites the journal compacted, then appends what the
+    /// event loop sends (never waited for); a thread that cannot start = no journal (warned)
+    fn spawn_journal(&mut self, compacted: Vec<pq::JRec>) -> Option<String> {
+        let path = self.cfg.state.clone()?;
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let st = self.jstats.clone();
+        match std::thread::Builder::new().name("ps-quiet-jrnl".into()).spawn(move || {
+            unsafe {
+                let tid = libc::syscall(libc::SYS_gettid);
+                libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, 19);
+                libc::syscall(libc::SYS_ioprio_set, 1 /* IOPRIO_WHO_PROCESS */, tid, 3 << 13 /* IOPRIO_CLASS_IDLE */);
+            }
+            pq::journal_writer(std::path::PathBuf::from(path), Some(compacted), rx, st);
+        }) {
+            Ok(h) => { self.jtx = Some(tx); self.jthread = Some(h); None }
+            Err(e) => Some(format!("  QUIET state: the journal writer did not start ({e}): NOTHING IS SAVED this run"))
+        }
+    }
+
+    /// dip21, the run's end: the journal's last dumps (windows past their 2 slots; the others dropped), the stop marker; the writer
+    /// drains, syncs and exits (waited for up to `wait`, never longer). -> (dumps saved now, dropped)
+    fn close_journal(&mut self, wait: Duration) -> (usize, u64) {
+        let Some(tx) = self.jtx.take() else { return (0, 0) };
+        let mut r = (0, 0);
+        if let Some(b) = self.book.as_mut() {
+            let (v, dropped) = b.finalize_on_shutdown();
+            r = (v.len(), dropped);
+            if !v.is_empty() { let _ = tx.send(pq::JMsg::Dumps(v)); }
+            if self.c0 != 0 { let _ = tx.send(pq::JMsg::Stop { t: b.max_t(), s: b.max_slot() }); }
+        }
+        drop(tx);
+        if let Some(h) = self.jthread.take() {
+            let t = Instant::now();
+            while !h.is_finished() && t.elapsed() < wait { std::thread::sleep(Duration::from_millis(5)); }
+            if h.is_finished() { let _ = h.join(); }
+        }
+        r
     }
     /// the preload thread (--presend-live-quiet-preload with the skip on): background, lowest CPU priority, never the event loop; its
     /// answer comes back through `pre_rx` (tick merges it); a thread that cannot start = a failed preload (the plain warm-up)
     fn spawn_preload(&mut self, timeout: Duration) {
         let (true, Some(p)) = (self.cfg.skip, self.cfg.preload.clone()) else { return };
         let (ptx, prx) = crossbeam_channel::bounded(1);
-        let pc = pq::PreloadCfg { path: std::path::PathBuf::from(&p), hist_ns: (self.cfg.hist_h * 3.6e12) as u64, start_unix_ns: self.start_ns, timeout };
+        // dip21: the journal's loaded dumps go with it (joined with the recording's by identity in that thread)
+        let pc = pq::PreloadCfg { path: std::path::PathBuf::from(&p), hist_ns: (self.cfg.hist_h * 3.6e12) as u64, start_unix_ns: self.start_ns, timeout,
+            journal: std::mem::take(&mut self.journal) };
         let cut = self.cut.clone();
         match std::thread::Builder::new().name("ps-quiet-pre".into()).spawn(move || {
             // the lowest CPU priority and the idle I/O class for this thread (and the gzip it starts: both are inherited)
@@ -880,8 +1012,15 @@ impl PsLive {
         det.idle_slots = 6 * 3600 * 1000 / 212;
         // dip20 QUIET: its state (None without its flags), the preload thread (background, lowest CPU priority; its answer is merged
         // in tick())
+        // dip21: the state journal first (its dumps are history at once and go with the preload), its writer, then the preload
+        let (mut qstate, mut qrec): (Vec<String>, Option<serde_json::Value>) = (Vec::new(), None);
         let qt = cfg.quiet.on().then(|| {
             let mut q = Quiet::new(&cfg.quiet, cohort, fbots, arbx::feeds::clock::now_ns(), true);
+            if let Some((line, rec, compacted)) = q.open_state(q.start_ns) {
+                qstate.push(line);
+                qrec = Some(rec);
+                if let Some(w) = compacted.and_then(|c| q.spawn_journal(c)) { qstate.push(w); }
+            }
             q.spawn_preload(Duration::from_secs(25 * 60));
             q
         });
@@ -893,12 +1032,15 @@ impl PsLive {
                     match q.pre { PreSt::Running => format!("; preload of {} h from {} RUNNING (the arm rule turns on when it is merged)", q.cfg.hist_h, q.cfg.preload.as_deref().unwrap_or("")),
                                   PreSt::Failed => format!("; preload FAILED to start: {}", q.pre_info), _ => String::new() }) } else { String::new() });
         }
-        Ok(PsLive { cfg, det, wins: FxHashMap::default(), armed: FxHashMap::default(), wid: 0, sh, arx, atts: FxHashMap::default(), order: VecDeque::new(), lands: Vec::new(),
+        for l in &qstate { eprintln!("{l}"); }
+        let p = PsLive { cfg, det, wins: FxHashMap::default(), armed: FxHashMap::default(), wid: 0, sh, arx, atts: FxHashMap::default(), order: VecDeque::new(), lands: Vec::new(),
             tapes: FxHashMap::default(), pos: FxHashMap::default(), free_at: FxHashMap::default(), last_deadline: FxHashMap::default(), launches: FxHashMap::default(), last_sweep: 0, checks: 0,
             par: FxHashMap::default(),
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
-            tasks: Arc::new(AtomicU64::new(0)), qt })
+            tasks: Arc::new(AtomicU64::new(0)), qt };
+        if let Some(r) = qrec { p.rec(r); }
+        Ok(p)
     }
 
     fn rec(&self, v: serde_json::Value) { let _ = self.out.send(Out::Rec(v)); }
@@ -1067,7 +1209,12 @@ impl PsLive {
             // watches count the "other" trades (a trigger's own trade never: its watch is made below, in trigger())
             if let Some(q) = self.qt.as_mut() {
                 if let Some(b) = q.book.as_mut() {
-                    if q.cut.load(Ordering::Relaxed) == 0 { q.cut.store(a.slot + 1, Ordering::SeqCst); }
+                    if q.cut.load(Ordering::Relaxed) == 0 {
+                        q.cut.store(a.slot + 1, Ordering::SeqCst);
+                        // dip21: this session's first slot (the journal's start marker: its coverage begins here)
+                        q.c0 = a.slot;
+                        if let Some(tx) = &q.jtx { let _ = tx.send(pq::JMsg::Start { t: a.t_rx, s: a.slot }); }
+                    }
                     b.ingest(e, a.slot, x.index as u32, j as i32, a.t_rx);
                 }
                 if !q.watch.is_empty() {
@@ -1731,22 +1878,43 @@ impl PsLive {
             if let Some(r) = got {
                 q.pre_rx = None;
                 match r {
-                    Ok(out) => {
+                    Ok(mut out) => {
                         let t0 = Instant::now();
-                        let live = q.book.take().unwrap_or_else(|| pq::DumpBook::new((q.cfg.hist_h * 3.6e12) as u64));
+                        let mut live = q.book.take().unwrap_or_else(|| pq::DumpBook::new((q.cfg.hist_h * 3.6e12) as u64));
                         let (cut, covered) = (out.cut, out.covered_ns);
-                        let merged = pq::merge_preload(out.book, live);
+                        // dip21: the journal's pending dumps go out first (the merged book journals from here on)
+                        if let Some(tx) = q.jtx.as_ref() { let p = live.take_finalized(); if !p.is_empty() { let _ = tx.send(pq::JMsg::Dumps(p)); } }
+                        // dip21: with the journal's dumps in the preload (ids): the base (recording + journal, by identity) takes this session's
+                        // dumps; the old book (the journal's copy) is dropped off the event loop. Without: dip20's merge
+                        let mut merged = match out.ids.take() {
+                            Some(ids) => {
+                                let (m, old) = pq::merge_base(out.book, &ids, live);
+                                let _ = std::thread::Builder::new().name("ps-quiet-drop".into()).spawn(move || drop((old, ids)));
+                                m
+                            }
+                            None => pq::merge_preload(out.book, live),
+                        };
+                        if q.jtx.is_some() { merged.journal_on(); }
                         q.merge_us = t0.elapsed().as_secs_f64() * 1e6;
-                        q.covered_ns = covered;
+                        // dip21: the coverage = the journal's sessions and the recording's span, joined (the continuity rule); dip20: the span
+                        q.covered_ns = if q.cfg.state.is_some() || q.cfg.book.is_some() {
+                            let mut spans: Vec<(u64, u64)> = q.sessions.iter().map(|x| (x.t0, x.t1)).collect();
+                            if out.bt_cut > out.bt_first { spans.push((out.bt_first.max(0) as u64 * 1_000_000_000, out.bt_cut.max(0) as u64 * 1_000_000_000)); }
+                            pq::coverage(&spans, q.start_ns, (q.cfg.state_max_gap_min * 6e10) as u64).covered_ns
+                        } else { covered };
                         q.pre = PreSt::Done;
                         q.pre_info = serde_json::json!({"ok": true, "secs": out.secs, "dumps": merged.dumps(), "sellers": merged.sellers(), "mem_mb": merged.mem_bytes() as f64 / 1e6,
                             "chunks": out.st.chunks, "gz_bytes": out.st.bytes_gz, "lines": out.st.lines, "txs": out.st.txs, "trades": out.st.trades, "bad_lines": out.st.bad_lines,
                             "partial_tails": out.st.partial_tails, "truncated": out.st.truncated.len(), "dups": out.st.dups, "cut": cut, "bt_first": out.bt_first, "bt_cut": out.bt_cut,
                             "covered_h": covered as f64 / 3.6e12, "waited_cut_s": out.waited_cut_s, "waited_tail_s": out.waited_tail_s, "merge_us": q.merge_us,
                             "dropped_at_cut": merged.st.dropped_at_cut, "arm_rule_on_at": q.arm_at()});
+                        // dip21: only with the journal / the book (dip20's record otherwise)
+                        if q.cfg.state.is_some() || q.cfg.book.is_some() { q.pre_info["journal_added"] = out.journal_added.into(); q.pre_info["journal_dup"] = out.journal_dup.into(); }
                         lines.push(format!("  QUIET preload done: {} dumps, {} sellers, {:.0} s ({} chunks {:.2} GB, {} trades, {:.1} h of history to slot {}; merged in {:.0} us; ~{:.1} MB) | arm rule on {}",
                             merged.dumps(), merged.sellers(), out.secs, out.st.chunks, out.st.bytes_gz as f64 / 1e9, out.st.trades, covered as f64 / 3.6e12, cut, q.merge_us,
-                            merged.mem_bytes() as f64 / 1e6, if q.arm_on(arbx::feeds::clock::now_ns()) { "now".to_string() } else { format!("at {}", ts_pkt(q.arm_at())) }));
+                            merged.mem_bytes() as f64 / 1e6, if q.arm_on(arbx::feeds::clock::now_ns()) {
+                                if q.cfg.state.is_some() || q.cfg.book.is_some() { format!("now (source: {})", if q.state_info["arm_on"] == true { q.state_info["source"].as_str().unwrap_or("?").to_string() } else { "preload".into() }) } else { "now".to_string() }
+                            } else { format!("at {}", ts_pkt(q.arm_at())) }));
                         q.book = Some(merged);
                     }
                     Err(e) => {
@@ -1759,6 +1927,15 @@ impl PsLive {
                 r["ev"] = "presend_live_quiet_preload".into();
                 r["t"] = arbx::feeds::clock::now_ns().into();
                 recs.push(r);
+            }
+        }
+        // dip21: the dumps finalized since the last tick go to the journal writer (one channel send; the writer formats); a heartbeat
+        // every FLUSH_S of data time (the session's coverage so far: a crash keeps it)
+        if let (Some(tx), Some(b)) = (q.jtx.as_ref(), q.book.as_mut()) {
+            if b.has_finalized() { let _ = tx.send(pq::JMsg::Dumps(b.take_finalized())); }
+            if q.c0 != 0 && b.max_t() >= q.last_beat_t.saturating_add(pq::FLUSH_S * 1_000_000_000) {
+                q.last_beat_t = b.max_t();
+                let _ = tx.send(pq::JMsg::Beat { t: b.max_t(), s: b.max_slot() });
             }
         }
         let cur = if q.tpu_clock { tpu.max(slot_now) } else { slot_now };
@@ -1956,15 +2133,26 @@ impl PsLive {
             match q.pre { PreSt::Off => String::new(), PreSt::Running => " | preload running".into(), PreSt::Done => format!(" | preload done ({:.0} s, {:.1} h)", q.pre_info["secs"].as_f64().unwrap_or(0.0), q.covered_ns as f64 / 3.6e12),
                 PreSt::Failed => " | preload FAILED (warm-up)".into() },
             q.watch.values().map(|v| v.len()).sum::<usize>())
+            // dip21: only with the book / the journal (dip20's line otherwise)
+            + &q.cfg.book.as_ref().filter(|_| q.cfg.state.is_none()).map(|_| format!(" | history: book loaded {} (source {})", q.state_info["dumps"].as_u64().unwrap_or(0),
+                q.state_info["source"].as_str().unwrap_or("?"))).unwrap_or_default()
+            + &q.cfg.state.as_ref().map(|_| {
+                let j = q.jstats.lock().unwrap_or_else(|e| e.into_inner());
+                format!(" | state: loaded {} saved {} ({} flushes){}", q.state_info["dumps"].as_u64().unwrap_or(0), j.dumps, j.flushes,
+                    if j.errors > 0 { format!(" WRITE ERRORS {} ({})", j.errors, j.first_err.clone().unwrap_or_default()) } else { String::new() })
+            }).unwrap_or_default()
     }
 
     /// dip20 QUIET's totals for run_end (None without it)
     fn quiet_json(&self) -> Option<serde_json::Value> {
         let q = self.qt.as_ref()?;
         let (s50, s99) = q.sig_us.pct();
-        Some(serde_json::json!({"cfg": q.cfg.json(), "skips": q.skips, "stops": q.stops, "warm_would": q.warm_would, "signals": q.signals, "sig_us_p50": s50, "sig_us_p99": s99,
+        let mut j = serde_json::json!({"cfg": q.cfg.json(), "skips": q.skips, "stops": q.stops, "warm_would": q.warm_would, "signals": q.signals, "sig_us_p50": s50, "sig_us_p99": s99,
             "arm_rule_on_at": q.arm_at(), "covered_ns": q.covered_ns, "preload": q.pre_info, "book": q.book.as_ref().map(|b| serde_json::json!({"dumps": b.dumps(), "sellers": b.sellers(),
-            "mem_mb": b.mem_bytes() as f64 / 1e6, "stats": format!("{:?}", b.st)})), "cohort": q.coh.len(), "fbots": q.fb.len()}))
+            "mem_mb": b.mem_bytes() as f64 / 1e6, "stats": format!("{:?}", b.st)})), "cohort": q.coh.len(), "fbots": q.fb.len()});
+        // dip21: only with the journal / the book (dip20's totals otherwise)
+        if q.cfg.state.is_some() || q.cfg.book.is_some() { j["state"] = q.state_info.clone(); }
+        Some(j)
     }
 
     /// the run's end: the sender stopped, unresolved attempts resolved as unseen, the records written; the totals (run_end)
@@ -1996,7 +2184,19 @@ impl PsLive {
             "dip19": {"after_exit": self.st.after_exit, "follow_ups": self.st.follow_ups, "orphans": self.st.orphans, "unreadable": self.st.unreadable, "ata_open": self.atas.len(),
                 "ata_closed": self.st.ata_closed, "ata_reads": self.st.ata_reads, "ata_close_fail": self.st.ata_close_fail}});
         // dip20: only with QUIET (dip19's totals otherwise)
-        if let Some(j) = self.quiet_json() { fin["quiet"] = j; }
+        // dip21: the journal's last records and stop marker; the writer drains and exits (up to 3 s: the run's end never waits longer)
+        let jr = self.qt.as_mut().filter(|q| q.jtx.is_some()).map(|q| q.close_journal(Duration::from_secs(3)));
+        if let Some(mut j) = self.quiet_json() {
+            if let (Some((saved, dropped)), Some(q)) = (jr, self.qt.as_ref()) {
+                let st = q.jstats.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                j["state"]["end"] = serde_json::json!({"saved_at_end": saved, "dropped_open_windows": dropped, "lines": st.lines, "dumps": st.dumps, "bytes": st.bytes,
+                    "flushes": st.flushes, "syncs": st.syncs, "errors": st.errors, "first_err": st.first_err, "writer_done": st.done, "compacted": st.compacted,
+                    "compact_lines": st.compact_lines, "compact_bytes_before": st.compact_bytes_before, "compact_bytes_after": st.compact_bytes_after, "compact_ms": st.compact_ms});
+                self.line(format!("  QUIET state: {} dumps saved this run ({} at the end; {} windows still open dropped), {} flushes{}", st.dumps, saved, dropped, st.flushes,
+                    if st.errors > 0 { format!(", WRITE ERRORS {}: {}", st.errors, st.first_err.unwrap_or_default()) } else { String::new() }));
+            }
+            fin["quiet"] = j;
+        }
         fin
     }
 
@@ -2148,6 +2348,11 @@ mod dip19_tests;
 #[cfg(test)]
 #[path = "dip20_tests.rs"]
 mod dip20_tests;
+
+// dip21 (10-27 PKT): the QUIET state journal (restarts without the recorder), its flags, the preload merged with it, the restarts harness
+#[cfg(test)]
+#[path = "dip21_tests.rs"]
+mod dip21_tests;
 
 #[cfg(test)]
 mod tests {

@@ -87,7 +87,7 @@ fn dip20_flags_off_and_refusals() {
         "--presend-live-quiet-warmup-min", "60", "--presend-live-fbots", "/root/dip/fbots_frozen.json", "--presend-live-quiet-preload", "/root/sniper-collect/current_run"];
     let c = cfg(&owner).unwrap().unwrap();
     assert_eq!(c.quiet, QuietCfg { stop: Some(pq::QStop { n: 6, m: 2 }), skip: true, hist_h: 24.0, fol: 2.24, warmup_min: 60.0,
-        fbots: Some("/root/dip/fbots_frozen.json".into()), preload: Some("/root/sniper-collect/current_run".into()) });
+        fbots: Some("/root/dip/fbots_frozen.json".into()), preload: Some("/root/sniper-collect/current_run".into()), state: None, state_max_gap_min: 30.0, book: None });
     assert_eq!(c.json()["quiet"]["stop"], "6:2");
     assert!(check_flags(&args(&owner)).is_ok(), "{:?}", check_flags(&args(&owner)));
     // the stop alone; the skip alone
@@ -310,7 +310,14 @@ fn tape_pass(extra: &[&str], setup: impl Fn(&mut PsLive)) -> Option<(Vec<serde_j
     drop(log);
     let shadow: Vec<serde_json::Value> = std::fs::read_to_string(&f).ok()?.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let _ = std::fs::remove_file(&f);
-    Some((recs(&orx), shadow, ns as f64 / n_tr.max(1) as f64))
+    let probe = recs(&orx);
+    // QUIET_TAPE_OUT=DIR: each pass's probe and shadow records to files (golden comparisons between builds)
+    if let Ok(dir) = std::env::var("QUIET_TAPE_OUT") {
+        let label: String = if extra.is_empty() { "off".into() } else { extra.join("_").replace(['-', '/', '.', ':'], "") };
+        let w = |name: &str, v: &[serde_json::Value]| { let _ = std::fs::write(format!("{dir}/{label}_{name}.jsonl"), v.iter().map(|x| x.to_string() + "\n").collect::<String>()); };
+        w("probe", &probe); w("shadow", &shadow);
+    }
+    Some((probe, shadow, ns as f64 / n_tr.max(1) as f64))
 }
 
 /// a record without QUIET's fields and the wall-clock ones (for the comparison)
@@ -493,19 +500,25 @@ fn dip20_recorded_parity() {
     } else {
         passes.push(("full".into(), span.0, span.1, 0, None));
         if timing { passes.push(("off".into(), span.0, span.1, 0, None)); }
+        // dip21 timing: the same pass with the state journal on (QUIET_PARITY_STATE=1; an empty journal in a temp dir)
+        if timing && std::env::var("QUIET_PARITY_STATE").is_ok() { passes.push(("state".into(), span.0, span.1, 0, None)); }
     }
     let mut out: Vec<serde_json::Value> = Vec::new();
     let mut tline = Vec::new();
     for (label, bt_lo, bt_hi, start_ns, seg) in passes {
         let off = label == "off";
-        let extra: Vec<&str> = if off { vec![] } else { vec!["--presend-live-quiet-stop", "6:2", "--presend-live-quiet-skip", "on", "--presend-live-quiet-hist-h", "24",
+        let jdir = std::env::temp_dir().join(format!("dip20_parity_state_{}", std::process::id()));
+        let jpath = jdir.join("quiet_state.jsonl").display().to_string();
+        let mut extra: Vec<&str> = if off { vec![] } else { vec!["--presend-live-quiet-stop", "6:2", "--presend-live-quiet-skip", "on", "--presend-live-quiet-hist-h", "24",
             "--presend-live-quiet-fol", "2.24", "--presend-live-quiet-warmup-min", "60", "--presend-live-fbots", "/in-test.json"] };
+        if label == "state" { let _ = std::fs::remove_dir_all(&jdir); std::fs::create_dir_all(&jdir).unwrap(); extra.extend(["--presend-live-quiet-state", jpath.as_str()]); }
         let c = Cfg::from_argv(&args(&extra), &arbx::presend::Params { whale_pct: 6.0, ..Default::default() }, true, 1_000_000_000).unwrap().unwrap();
         let (mut p, _atx, orx) = PsLive::for_test(c, own);
         if let Some(q) = p.qt.as_mut() {
             q.coh = cohort.iter().filter_map(|s| bs58::decode(s).into_vec().ok().and_then(|v| <[u8; 32]>::try_from(v).ok())).collect();
             // the engine's start and its 60-min warm-up (full: the start at 0, i.e. the rule on: the history is the whole span)
             q.fb = fb.clone(); q.start_ns = start_ns; q.warm_ns = 60 * 60_000_000_000; q.keep_slots = u64::MAX / 4;
+            if label == "state" { let (_, _, c) = q.open_state(start_ns.max(1)).unwrap(); assert!(q.spawn_journal(c.unwrap()).is_none()); }
         }
         // the study's chunk filter (span start - 400 s .. span end); a segment pass reads only the chunks around its own hours
         let ts_lo = if seg.is_some() { (bt_lo - 900).max(0) as u64 } else { (span.0 - 400).max(0) as u64 };
@@ -538,6 +551,12 @@ fn dip20_recorded_parity() {
             (rec.st.chunks, rec.st.txs, rec.st.dups, rec.st.bad_lines, rec.st.truncated.len()));
         eprintln!("{line}");
         tline.push(serde_json::json!({"pass": label, "txs": n_tx, "trades": n_tr, "ns_per_trade": per_tr, "sig_us_p50": s50, "sig_us_p99": s99, "secs": t_all.elapsed().as_secs_f64()}));
+        if label == "state" {
+            let _ = p.finish(slot_now + 1, None);
+            eprintln!("state pass: journal {} bytes", std::fs::metadata(&jpath).map(|m| m.len()).unwrap_or(0));
+            let _ = std::fs::remove_dir_all(&jdir);
+            continue;
+        }
         if off { continue; }
         let q = p.qt.as_ref().unwrap();
         for w in wins {

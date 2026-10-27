@@ -1,0 +1,25 @@
+[Unit]
+Description=sniper-rec: pump.fun raw recorder (host, one dir per PKT day)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=moiz
+Group=moiz
+WorkingDirectory=/home/moiz
+EnvironmentFile=/etc/sniper-rec/env
+EnvironmentFile=-/etc/sniper-rec/rec.conf
+ExecStart=/usr/bin/python3 -I /home/moiz/sniper/ops/rec/recorder.py
+# crash / kill -> restart after 10 s; a clean exit 0 (SIGTERM, HOLD file, limit trip) is NOT restarted;
+# exit 3 = configuration refused (e.g. Constant-K in overlap mode): do not loop
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=3
+KillSignal=SIGTERM
+TimeoutStopSec=90
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

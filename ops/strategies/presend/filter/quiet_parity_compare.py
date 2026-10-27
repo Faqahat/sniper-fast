@@ -18,6 +18,8 @@ import json, argparse, collections
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--replay", required=True); ap.add_argument("--engine", required=True); ap.add_argument("--engine-seg"); ap.add_argument("--list", action="store_true")
+    ap.add_argument("--engine-state", action="append", default=[], help="dip21 restarts harness output(s) (dip21_tests::dip21_recorded_restarts)")
+    ap.add_argument("--after", type=int, default=0, help="--engine-state: also count the windows triggered at or after this unix time (s) (a restart)")
     A = ap.parse_args()
     R = json.load(open(A.replay)); E = json.load(open(A.engine))
     eng = {(w["seg"], w["w"]): w for w in E["windows"]}
@@ -86,6 +88,38 @@ def main():
         print(f"  WITHOUT A PRELOAD (each segment from its own start, 60-min warm-up): {d['n']} windows, {d['warmup']} in the warm-up (replay skips {d['warmup_replay_skip']} of them; "
               f"all four held on {d['warmup_would']}); skip decisions differing from the replay: {d['differ']} ({d['differ_after_warmup']} after the warm-up; whale history differs on {d['wh_fol_differs']})")
         out["no_preload"] = dict(d)
+    # dip21: the state journal's restarts: each session a fresh engine whose whale history is the journal (+ its own feed)
+    for fn in A.engine_state:
+        X = json.load(open(fn)); st = {(w["seg"], w["w"]): w for w in X["windows"]}
+        for part, lo in (("all sessions", 0), (f"after {A.after}", A.after)) if A.after else (("all sessions", 0),):
+            d = collections.Counter(); bad2 = []
+            for w in R["windows"]:
+                r = w["replay"]; e = st.get((w["seg"], w["w"]))
+                if e is None or w["t"] / 1e9 < lo: continue
+                d["n"] += 1
+                if not r["found"]: d["replay_not_found"] += 1; continue
+                if not e["found"]: d["engine_no_trigger"] += 1; continue
+                a = e["arm"]; on = bool(a.get("rule_on")); eskip = bool(a["all4"]) and on
+                d["compared"] += 1
+                if not on: d["rule_off"] += 1; d["rule_off_replay_skip"] += int(r["skip"])
+                if r["skip"]: d["replay_skip"] += 1
+                if eskip: d["engine_skip"] += 1
+                sig_ok = a["since_last"] == r["since_last"] and a["coh_hold"] == r["coh_hold"] and a["fb_n"] == r["fb_n"]
+                fol_ok = abs(a["wh_fol"] - r["wh_dump_fol"]) < 1e-9
+                if not sig_ok: d["sig_abc_differs"] += 1
+                if not fol_ok: d["wh_fol_differs"] += 1
+                if eskip != r["skip"]:
+                    d["skip_mismatch"] += 1
+                    why = "rule off (warm-up)" if not on else ("whale history differs" if not fol_ok else ("token signals differ" if not sig_ok else "other"))
+                    d[f"mm_{why}"] += 1
+                    bad2.append((w["seg"], w["w"], why, dict(engine=(a["since_last"], a["coh_hold"], a["fb_n"], a["wh_fol"], a["wh_dumps"], on), replay=(r["since_last"], r["coh_hold"], r["fb_n"], r["wh_dump_fol"]))))
+            print(f"  WITH THE STATE FILE [{X['mode']}{' + 24 h prior history' if X.get('prehist') else ''}] {part}: {d['n']} windows, compared {d['compared']} (engine had no trigger there: "
+                  f"{d['engine_no_trigger']}), arm rule off at {d['rule_off']} (replay skips {d['rule_off_replay_skip']} of them) | SKIP replay {d['replay_skip']} engine {d['engine_skip']} -> "
+                  f"mismatches {d['skip_mismatch']} (rule off {d['mm_rule off (warm-up)']}, whale history {d['mm_whale history differs']}, token signals {d['mm_token signals differ']}, "
+                  f"other {d['mm_other']}) | whale history differs on {d['wh_fol_differs']}, token signals on {d['sig_abc_differs']}")
+            if A.list:
+                for x in bad2[:30]: print(f"      {x}")
+            out.setdefault("state", {})[f"{fn}|{part}"] = dict(d)
     return out
 
 

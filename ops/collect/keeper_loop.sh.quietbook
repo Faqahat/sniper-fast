@@ -1,0 +1,14 @@
+#!/bin/bash
+# runs keeper.sh every 10 min, then (dip21; ops/strategies/presend/filter/QUIET_BOOK.md) the QUIET BOOK: quiet_book extends the host's
+# 24 h whale dump history from the copies keeper.sh just made (only the new chunks), quiet_book_push.sh gives it (and a changed
+# cohort / follower-bot list) to every node in ops/collect/nodes.txt. A failed build or push leaves the previous book everywhere.
+# Start: setsid nohup bash /home/moiz/sniper/ops/collect/keeper_loop.sh > /dev/null 2>&1 &
+echo $$ > /home/moiz/sniper-data/collect/keeper_loop.pid
+QB=/home/moiz/sniper-data/quiet_book
+mkdir -p $QB
+while true; do
+  timeout 3000 bash /home/moiz/sniper/ops/collect/keeper.sh
+  timeout 1200 nice -n 10 ionice -c 3 /home/moiz/sniper-data/speed_fixes/bin/quiet_book >> $QB/build.log 2>&1
+  timeout 600 bash /home/moiz/sniper/ops/collect/quiet_book_push.sh > /dev/null 2>&1
+  sleep 600
+done

@@ -1,0 +1,15 @@
+#!/bin/bash
+# rec CLI wrapper (see rec.py for the commands). Commands that need the remote-storage credentials or the Telegram token
+# load the root-only /etc/sniper-rec/env through sudo + systemd-run and still run as moiz (secrets are never printed).
+H=/home/moiz/sniper/ops/rec
+[ -r /etc/sniper-rec/rec.conf ] && { set -a; . /etc/sniper-rec/rec.conf; set +a; }
+case "${1:-}" in
+  archive|fetch|remote-test)
+    exec sudo -n systemd-run --quiet --pipe --wait --collect --uid=moiz --gid=moiz -p WorkingDirectory=/home/moiz \
+      -p EnvironmentFile=/etc/sniper-rec/env -p EnvironmentFile=-/etc/sniper-rec/rec.conf /usr/bin/python3 -I $H/rec.py "$@" ;;
+  test-alert)
+    exec sudo -n systemd-run --quiet --pipe --wait --collect --uid=moiz --gid=moiz -p WorkingDirectory=/home/moiz \
+      -p EnvironmentFile=/etc/sniper-rec/env -p EnvironmentFile=-/etc/sniper-rec/rec.conf /usr/bin/python3 -I $H/watchdog.py --test-alert ;;
+  "" | -h | --help) python3 -I $H/rec.py --help; echo "  (also: rec test-alert)" ;;
+  *) exec python3 -I $H/rec.py "$@" ;;
+esac

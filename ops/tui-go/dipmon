@@ -1,0 +1,16 @@
+#!/bin/sh
+# dipmon: REWIND, the dip-run monitor (dipmon v3, Go), at the lowest CPU and I/O priority so it never competes with the
+# live engine.
+#   install: sudo install -m 755 dipmon-go /usr/local/bin/dipmon-go && sudo install -m 755 dipmon /usr/local/bin/dipmon
+#   use:     sudo dipmon | sudo dipmon --run 27 | sudo dipmon --snapshot      (dipmon --help for every option)
+BIN=${DIPMON_BIN:-/usr/local/bin/dipmon-go}
+if [ ! -x "$BIN" ]; then
+  here=$(dirname "$(readlink -f "$0")")
+  for c in "$here/dipmon-go" /root/prod/dipmon-go; do [ -x "$c" ] && { BIN=$c; break; }; done
+fi
+[ -x "$BIN" ] || { echo "dipmon: $BIN not found (install dipmon-go as /usr/local/bin/dipmon-go or set DIPMON_BIN)" >&2; exit 1; }
+# sudo can drop TERM
+case "${TERM:-}" in ""|dumb|unknown) TERM=xterm-256color; export TERM;; esac
+IO=""
+if command -v ionice >/dev/null 2>&1 && ionice -c3 true >/dev/null 2>&1; then IO="ionice -c3"; fi
+exec nice -n 19 $IO "$BIN" "$@"

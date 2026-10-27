@@ -1,0 +1,14 @@
+[Unit]
+Description=sniper-rec daily: catalog, slim extract, archive (host keeps 7 days), links
+
+[Service]
+Type=oneshot
+User=moiz
+Group=moiz
+WorkingDirectory=/home/moiz
+EnvironmentFile=/etc/sniper-rec/env
+EnvironmentFile=-/etc/sniper-rec/rec.conf
+ExecStart=/bin/bash /home/moiz/sniper/ops/rec/daily.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h

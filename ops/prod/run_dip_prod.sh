@@ -38,6 +38,21 @@
 #     [the path's tip] --presend-live-routes [default=helius-ps] --presend-live-max-per-sec [20] --presend-live-path-max-per-sec [10]
 #     --presend-live-create-slot on|off [off] --presend-live-one-position on|off [on]. --presend-live-dry: build + sign + log every attempt,
 #     never send (a server dry run). Every attempt path must be its OWN [[send]] entry in the base config (e.g. helius-ps).
+#   QUIET PRE-SEND FILTER (dip20; owner 10-27 ~13:30 PKT "implement QUIET in engine"; ops/strategies/presend/filter/REPORT.md):
+#     --presend-quiet (needs --presend-live) = engine dip20 with --presend-live-quiet-stop 6:2 (a window with < 2 other trades by trigger
+#     + 6 slots stops) --presend-live-quiet-skip on --presend-live-quiet-hist-h 24 --presend-live-quiet-fol 2.24
+#     --presend-live-quiet-warmup-min 60 --presend-live-fbots /root/dip/fbots_frozen.json (a trigger is not armed when all four quiet
+#     signals hold; the cohort list is the engine's --dip-cohort). When this server runs the 24/7 raw recorder
+#     (/root/sniper-collect/current_run), --presend-live-quiet-preload rebuilds the 24 h whale dump history from it in a background thread
+#     (the arm rule turns on when that is merged, minutes after the start); otherwise (or if the preload fails) the arm rule warms up
+#     60 min. The stop works from the start. Without --presend-quiet nothing changes (dip19 as before).
+#     dip21 (owner 10-27 PM: a restart must not cost the warm-up; the 24 h whale history kept on the host and given to every node):
+#     --presend-quiet also loads the HOST'S BOOK /root/dip/quiet_book.jsonl when it is there (--presend-live-quiet-book; built on the
+#     host from its copies of the raw recording after each keeper pass and pushed to every node: ops/collect/quiet_book_push.sh,
+#     ops/strategies/presend/filter/QUIET_BOOK.md), and keeps its own journal --presend-live-quiet-state /root/dip/quiet_state_<region>.jsonl
+#     (finalized dumps appended by a low-priority thread, session markers, compacted at each start). At the start the book and the
+#     journal are merged (each dump once): the arm rule is ON at once when that history is continuous >= 60 min and ends within 30 min
+#     of the start; otherwise it warms up as before (the loaded dumps still count). FRA: merged with the preload as well.
 #   SELL FAN-OUT (owner OK 10-25 ~08:05 PKT "do that Helius SWQoS thing too"): --sell-fanout NAME[,NAME] = every sell (first try and
 #     retries) also goes through these [[send]] paths beside staked-rpc: one signed tx, each tipped path's tip once (helius-swqos
 #     0.0002), paid only if the sell lands; a path over its rate is left out of that sell. Engine dip13.
@@ -94,7 +109,7 @@
 set -u
 die() { echo "REFUSED: $*" >&2; exit 1; }
 RUN= TRADES= SIZE= TIER=strict MIN=120 PRIO=5000000 OPEN=1 GUARD=1.05 TP=0.05 DEVLIST= DEVSIZE= DEVTIER=wider NEAR= REGION=fra HOLD=6 SL=0.10 NONCE= FALLBACK=RMR_RPC_URL M2= M2MODE=shadow M2MIN= M2EXTRA= PRESEND=
-PSLIVE= PSDRY= SELLFAN= PSWHALE=
+PSLIVE= PSDRY= SELLFAN= PSWHALE= PSQUIET=
 declare -A PSV=()
 declare -A D16V=(); D16RH= D16WC=
 SHRED= SHREDIDX= SHREDWIN= SHREDMARGIN= SHREDSELLER= SKIPCL= DEFER= BUSY= PINCORE= CLOCK2= FEEDLAG= PROBE= PROBEPATHS= PROBECL= PROBETIPLESS= PROBEGAP=
@@ -112,6 +127,7 @@ while [ $# -gt 0 ]; do
     --presend-whale-pct) PSWHALE=$2; shift 2;;
     --presend-live) PSLIVE=1; shift;;
     --presend-live-dry) PSDRY=1; shift;;
+    --presend-quiet) PSQUIET=1; shift;;
     --presend-live-size-sol|--presend-live-k|--presend-live-drop|--presend-live-deadline-slots|--presend-live-cu-limit|--presend-live-cu-price-micro|--presend-live-tip-lamports|\
     --presend-live-routes|--presend-live-max-per-sec|--presend-live-path-max-per-sec|--presend-live-max-fills|--presend-live-fee-budget-sol|--presend-live-create-slot|\
     --presend-live-one-position) [ $# -ge 2 ] || die "$1 needs a value"; PSV["$1"]=$2; shift 2;;
@@ -131,7 +147,7 @@ done
 [[ "$RUN" =~ ^[0-9]+$ ]] && [[ "$TRADES" =~ ^[0-9]+$ ]] && [[ "$MIN" =~ ^[0-9]+$ ]] && [[ "$PRIO" =~ ^[0-9]+$ ]] && [[ "$OPEN" =~ ^[0-9]+$ ]] || die "integers expected"
 [[ "$SIZE" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "--size: not a number"
 awk -v s="$SIZE" 'BEGIN{exit !(s>=0.05 && s<=1.0)}' || die "--size must be 0.05..1.0 SOL"
-[ "$TRADES" -ge 1 ] && [ "$TRADES" -le 500 ] || die "--trades must be 1..500 (owner 10-26: 'lift the limit to like 500, we have kill switch for bad ones')"
+[ "$TRADES" -ge 1 ] && [ "$TRADES" -le 1500 ] || die "--trades must be 1..1500 (owner 10-27: 'raise it to 1500'; 10-26: 'we have kill switch for bad ones')"
 [ "$MIN" -ge 1 ] && [ "$MIN" -le 720 ] || die "--minutes must be 1..720 (owner 10-26: 12 h runs; the kill-switch caps the loss)"
 [ "$OPEN" -ge 1 ] && [ "$OPEN" -le 3 ] || die "--open must be 1..3"
 [ "$PRIO" -le 50000000 ] || die "--prio-micro above 50M (0.005 SOL priority): refusing"
@@ -217,6 +233,26 @@ if [ -n "$PSLIVE" ]; then
   PSLDESC=" | PRE-SEND LIVE$( [ -n "$PSDRY" ] && echo ' DRY (never sends)' ): ${PSV[--presend-live-size-sol]} SOL, ${PSV[--presend-live-k]:-4}/slot, caps ${PSV[--presend-live-max-fills]} fills + ${PSV[--presend-live-fee-budget-sol]} SOL fees, routes ${PSV[--presend-live-routes]}"
 else
   [ -z "$PSDRY" ] && [ ${#PSV[@]} -eq 0 ] || die "--presend-live-* options need --presend-live"
+fi
+# QUIET (dip20): the owner's config, opt-in; the follower-bot list must be on the server; the preload only where the recorder runs
+QARGS=(); QDESC=""
+if [ -n "$PSQUIET" ]; then
+  [ -n "$PSLIVE" ] || die "--presend-quiet needs --presend-live (it filters the live pre-send windows)"
+  QFB=/root/dip/fbots_frozen.json
+  [ -f "$QFB" ] || die "--presend-quiet: missing $QFB (copy ops/strategies/presend/filter/fbots_frozen.json there first)"
+  QARGS=(--presend-live-quiet-stop 6:2 --presend-live-quiet-skip on --presend-live-quiet-hist-h 24 --presend-live-quiet-fol 2.24 --presend-live-quiet-warmup-min 60 --presend-live-fbots "$QFB")
+  # dip21: the host's book of the whale history (pushed by the host after each keeper pass), when it is there; the region's own journal
+  # (created at the first run)
+  QBOOK=/root/dip/quiet_book.jsonl; QBD=""
+  if [ -f "$QBOOK" ]; then QARGS+=(--presend-live-quiet-book "$QBOOK"); QBD="the host's book $QBOOK + "; fi
+  QSTATE=/root/dip/quiet_state_${REGION}.jsonl
+  QARGS+=(--presend-live-quiet-state "$QSTATE")
+  QPRE=/root/sniper-collect/current_run
+  if [ -f "$QPRE" ] && [ -d "/root/sniper-collect/$(cat "$QPRE")/txs" ]; then
+    QARGS+=(--presend-live-quiet-preload "$QPRE"); QDESC=" | QUIET: stop 6:2 + arm rule (24 h / 2.24; whale history from ${QBD}$QSTATE + preloaded from $(cat "$QPRE"): on at once if fresh and continuous, else when merged)"
+  else
+    QDESC=" | QUIET: stop 6:2 + arm rule (24 h / 2.24; whale history from ${QBD}$QSTATE: on at once if it is fresh and continuous, else a 60-min warm-up)"
+  fi
 fi
 SFARGS=(); SFDESC=""
 if [ -n "$SELLFAN" ]; then
@@ -365,6 +401,10 @@ if [ -n "$PSLIVE" ] || [ ${#D14ARGS[@]} -gt 0 ]; then B=/root/sniper-dip/snipe_e
 # (the guard) until every attempt is past its deadline, a late fill gets its own sell, every window is re-checked, P&L counts every buy,
 # run-end check of every pre-send mint. Pre-send LIVE runs ONLY on dip19; with pre-send live off its txs equal dip18's (golden test)
 if [ -n "$PSLIVE" ] || [ -n "$USE18" ]; then B=/root/sniper-dip/snipe_engine_dip19; fi
+# dip20 = dip19 + QUIET (the pre-send filter; every part behind its own flag, off by default: flags off = dip19's records, golden test).
+# dip21 = dip20 + the QUIET history at the start: the host's book (--presend-live-quiet-book) and the state journal (--presend-live-quiet-state);
+# without both, dip20's records (golden test). Only --presend-quiet selects it
+[ -z "$PSQUIET" ] || B=/root/sniper-dip/snipe_engine_dip21
 [ -x "$B" ] || die "missing engine $B"
 [ -f "$KS" ] || die "missing $KS (the prod keystore)"
 [ -x "$B" ] || die "missing $B"
@@ -412,7 +452,7 @@ LAM=$(awk -v s="$SIZE" 'BEGIN{printf "%d", s*1e9}')
 MAXSOL=$(awk -v s="$MAXSIZE" 'BEGIN{printf "%.4f", s*1.05}')
 BUDGET=$(awk -v s="$MAXSIZE" -v n="$TRADES" 'BEGIN{printf "%.3f", n*(s*1.02+0.02)+0.1}')
 TAG=${TAGP}${RUN}
-echo "DIP LIVE [$REGION] run $RUN (wallet $W): $TRADES trades x $SIZE SOL, tier $TIER, take-profit $( [ "$TP" = 99 ] && echo off || echo "+$TP" ), stop -$SL, hold $HOLD slots (~$(awk -v h=$HOLD 'BEGIN{printf "%.1f", h*0.212}') s), guard x$GUARD, open $OPEN at a time, $MIN min$( [ -n "$DEVLIST" ] && echo " | dev list $DEVLIST: $DEVTIER at $DEVSIZE SOL" )$( [ -n "$NEAR" ] && echo " | near leaders only: $NEAR ($(grep -c . "$NEAR") leaders)" )$( [ -n "$NONCE" ] && echo " | NONCE fan-out: $NONCE ($(grep -v '^#' "$NONCE" | grep -c '[1-9A-HJ-NP-Za-km-z]\{32,44\}') accounts)" )$M2DESC$PSDESC$PSLDESC$SFDESC$D14DESC | backup RPC $FBDESC | wallet balance $(awk -v b=$BAL 'BEGIN{printf "%.4f", b/1e9}') SOL | kill switch at -$LOSS SOL (budget left of 0.5) | priority ${PRIO} uL/CU | routes $ROUTES"
+echo "DIP LIVE [$REGION] run $RUN (wallet $W): $TRADES trades x $SIZE SOL, tier $TIER, take-profit $( [ "$TP" = 99 ] && echo off || echo "+$TP" ), stop -$SL, hold $HOLD slots (~$(awk -v h=$HOLD 'BEGIN{printf "%.1f", h*0.212}') s), guard x$GUARD, open $OPEN at a time, $MIN min$( [ -n "$DEVLIST" ] && echo " | dev list $DEVLIST: $DEVTIER at $DEVSIZE SOL" )$( [ -n "$NEAR" ] && echo " | near leaders only: $NEAR ($(grep -c . "$NEAR") leaders)" )$( [ -n "$NONCE" ] && echo " | NONCE fan-out: $NONCE ($(grep -v '^#' "$NONCE" | grep -c '[1-9A-HJ-NP-Za-km-z]\{32,44\}') accounts)" )$M2DESC$PSDESC$PSLDESC$QDESC$SFDESC$D14DESC | backup RPC $FBDESC | wallet balance $(awk -v b=$BAL 'BEGIN{printf "%.4f", b/1e9}') SOL | kill switch at -$LOSS SOL (budget left of 0.5) | priority ${PRIO} uL/CU | routes $ROUTES"
 echo "log: /root/prod/runs/$TAG.log  records: /root/prod/runs/$TAG.jsonl"
 python3 - "$RUN" "$TRADES" "$SIZE" "$BAL" "$TP" "${DEVSIZE:-0}" "$BUDGETF" "$REGION" <<'EOF'
 import sys, json, time
@@ -431,7 +471,7 @@ TAILPID=$!
 trap 'echo; echo "(Ctrl-c -> engine: no new buys; an open position finishes its exit; wait for PROD_DIP_DONE)"' INT
 echo "the engine now asks for the keystore passphrase (hidden):"
 $B --dip --live --fast-send --jito-h2 --fast-presign --fast-derive --fast-verify \
-  --dip-tier $TIER --dip-allow-holder --dip-tp $TP --dip-sl $SL --dip-hold-slots $HOLD --dip-guard $GUARD --dip-spacing-slots 5 ${DEVARGS[@]+"${DEVARGS[@]}"} ${NEARARGS[@]+"${NEARARGS[@]}"} ${NONCEARGS[@]+"${NONCEARGS[@]}"} ${M2ARGS[@]+"${M2ARGS[@]}"} ${PSARGS[@]+"${PSARGS[@]}"} ${PSLARGS[@]+"${PSLARGS[@]}"} ${SFARGS[@]+"${SFARGS[@]}"} ${D14ARGS[@]+"${D14ARGS[@]}"} \
+  --dip-tier $TIER --dip-allow-holder --dip-tp $TP --dip-sl $SL --dip-hold-slots $HOLD --dip-guard $GUARD --dip-spacing-slots 5 ${DEVARGS[@]+"${DEVARGS[@]}"} ${NEARARGS[@]+"${NEARARGS[@]}"} ${NONCEARGS[@]+"${NONCEARGS[@]}"} ${M2ARGS[@]+"${M2ARGS[@]}"} ${PSARGS[@]+"${PSARGS[@]}"} ${PSLARGS[@]+"${PSLARGS[@]}"} ${QARGS[@]+"${QARGS[@]}"} ${SFARGS[@]+"${SFARGS[@]}"} ${D14ARGS[@]+"${D14ARGS[@]}"} \
   --dip-model /root/dip/IMIT1.json --dip-cohort /root/dip/cohort_train.json --dip-log /root/prod/runs/$TAG.jsonl \
   --spend-lamports $LAM --max-sol $MAXSOL --max-total-sol $BUDGET --max-buys $TRADES --max-inflight $OPEN --max-loss-sol $LOSS --minutes $MIN \
   --cu-limit 100000 --cu-price-micro $PRIO --sell-cu-limit 120000 --sell-cu-price-micro 5000000 \
