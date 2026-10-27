@@ -62,6 +62,9 @@ fn probe_key(tag: u8, i: u8) -> Pk {
 }
 pub fn probe_var(i: usize) -> Pk { probe_key(0xD1, i as u8) }
 pub fn probe_tip(i: usize) -> Pk { probe_key(0xE3, i as u8) }
+/// NONCE (2026-10-24, --nonce-fanout): the durable-nonce account's probe key in a nonce-variant template
+/// (AdvanceNonceAccount's first account; patched per fire like the mint-dependent keys)
+pub fn probe_nonce() -> Pk { probe_key(0xB7, 0) }
 pub const PROBE_BH: [u8; 32] = [0xC5; 32];
 pub const PROBE_MIN_OUT: u64 = 0x0F1E_2D3C_4B5A_6978;
 /// M-3 (audit 3): the slot-deadline guard's slot value in a probe message
@@ -86,6 +89,9 @@ pub struct Template {
     min_out_off: usize,
     /// M-3: the slot-deadline guard's u64 (None: the template has no guard instruction)
     deadline_off: Option<usize>,
+    /// NONCE: the durable-nonce account's key (None: a recent-blockhash template; Some: a nonce variant, patched only by
+    /// `patch_nonce`, whose blockhash field carries the nonce value)
+    nonce_off: Option<usize>,
     /// the template's static keys that are NOT patched (a patched key equal to one of these would change the dedup)
     consts: Vec<Pk>,
 }
@@ -96,7 +102,13 @@ impl Template {
     pub fn from_probe_msg(msg: Vec<u8>, ntips: usize) -> Result<Template, String> { Self::from_probe_msg_dl(msg, ntips, false) }
 
     /// `from_probe_msg`; `deadline`: the message carries the slot-deadline guard with `PROBE_DEADLINE` (found once)
-    pub fn from_probe_msg_dl(msg: Vec<u8>, ntips: usize, deadline: bool) -> Result<Template, String> {
+    pub fn from_probe_msg_dl(msg: Vec<u8>, ntips: usize, deadline: bool) -> Result<Template, String> { Self::from_probe(msg, ntips, deadline, false) }
+
+    /// NONCE: `from_probe_msg_dl` for a durable-nonce variant: the message also carries `probe_nonce()` (the nonce account)
+    /// once in its key table; its blockhash field (PROBE_BH) is where the nonce value goes
+    pub fn from_probe_msg_nonce(msg: Vec<u8>, ntips: usize, deadline: bool) -> Result<Template, String> { Self::from_probe(msg, ntips, deadline, true) }
+
+    fn from_probe(msg: Vec<u8>, ntips: usize, deadline: bool, nonce: bool) -> Result<Template, String> {
         let mut var_off = [0usize; NVAR];
         for (i, o) in var_off.iter_mut().enumerate() { *o = find_once(&msg, &probe_var(i)).ok_or(format!("var probe {i} not found once"))?; }
         let mut tip_off = Vec::with_capacity(ntips);
@@ -104,19 +116,23 @@ impl Template {
         let bh_off = find_once(&msg, &PROBE_BH).ok_or("blockhash probe not found once")?;
         let min_out_off = find_once(&msg, &PROBE_MIN_OUT.to_le_bytes()).ok_or("min_out probe not found once")?;
         let deadline_off = if deadline { Some(find_once(&msg, &PROBE_DEADLINE.to_le_bytes()).ok_or("deadline probe not found once")?) } else { None };
+        let nonce_off = if nonce { Some(find_once(&msg, &probe_nonce()).ok_or("nonce probe not found once")?) } else { None };
         // static keys: header(3) + compact count (1 byte while < 128 keys) + 32 * n
         let n = msg[4] as usize;
         if n >= 128 { return Err("too many keys for the template".into()); }
         let mut consts = Vec::with_capacity(n);
         for i in 0..n {
             let o = 5 + 32 * i;
-            if var_off.contains(&o) || tip_off.contains(&o) { continue; }
+            if var_off.contains(&o) || tip_off.contains(&o) || nonce_off == Some(o) { continue; }
             let mut k = [0u8; 32]; k.copy_from_slice(&msg[o..o + 32]); consts.push(k);
         }
         // every key patch site must be inside the static key table
-        if var_off.iter().chain(tip_off.iter()).any(|o| *o < 5 || *o >= 5 + 32 * n || (*o - 5) % 32 != 0) { return Err("a key probe is outside the key table".into()); }
-        Ok(Template { msg, var_off, tip_off, bh_off, min_out_off, deadline_off, consts })
+        if var_off.iter().chain(tip_off.iter()).chain(nonce_off.iter()).any(|o| *o < 5 || *o >= 5 + 32 * n || (*o - 5) % 32 != 0) { return Err("a key probe is outside the key table".into()); }
+        Ok(Template { msg, var_off, tip_off, bh_off, min_out_off, deadline_off, nonce_off, consts })
     }
+
+    /// NONCE: this template is a durable-nonce variant (patched by `patch_nonce` only)
+    pub fn is_nonce(&self) -> bool { self.nonce_off.is_some() }
 
     /// patch into `out` (reused buffer, the message only). None: a key collision (use the full compile instead).
     #[inline]
@@ -127,6 +143,8 @@ impl Template {
     /// `patch` + the slot deadline (required exactly when the template carries the guard)
     #[inline]
     pub fn patch_dl(&self, out: &mut Vec<u8>, vars: &VarKeys, tips: &[Pk], blockhash: &[u8; 32], min_out: u64, deadline: Option<u64>) -> Option<()> {
+        // NONCE: a nonce variant's nonce account must be patched too (patch_nonce): never half-patched here
+        if self.nonce_off.is_some() { return None; }
         if tips.len() != self.tip_off.len() { return None; }
         if self.deadline_off.is_some() != deadline.is_some() { return None; }
         // collisions: patched keys pairwise distinct and not equal to any constant key
@@ -141,6 +159,33 @@ impl Template {
         for (i, k) in vars.iter().enumerate() { out[self.var_off[i]..self.var_off[i] + 32].copy_from_slice(k); }
         for (i, k) in tips.iter().enumerate() { out[self.tip_off[i]..self.tip_off[i] + 32].copy_from_slice(k); }
         out[self.bh_off..self.bh_off + 32].copy_from_slice(blockhash);
+        out[self.min_out_off..self.min_out_off + 8].copy_from_slice(&min_out.to_le_bytes());
+        if let (Some(o), Some(d)) = (self.deadline_off, deadline) { out[o..o + 8].copy_from_slice(&d.to_le_bytes()); }
+        Some(())
+    }
+
+    /// NONCE (--nonce-fanout): patch a durable-nonce variant into `out`: `patch_dl`'s keys + the nonce account, and the
+    /// nonce's stored value in the blockhash field (a nonce transaction's "recent blockhash" IS the nonce value). None: not
+    /// a nonce template, a shape mismatch, or a key collision (the caller full-compiles that variant instead)
+    #[inline]
+    pub fn patch_nonce(&self, out: &mut Vec<u8>, vars: &VarKeys, tips: &[Pk], nonce: &Pk, nonce_value: &[u8; 32], min_out: u64, deadline: Option<u64>) -> Option<()> {
+        let no = self.nonce_off?;
+        if tips.len() != self.tip_off.len() { return None; }
+        if self.deadline_off.is_some() != deadline.is_some() { return None; }
+        // collisions: patched keys pairwise distinct (the nonce account included) and not equal to any constant key
+        if vars.contains(nonce) || tips.contains(nonce) || self.consts.contains(nonce) { return None; }
+        for (i, a) in vars.iter().enumerate() {
+            if vars[i + 1..].iter().any(|b| b == a) || tips.iter().any(|b| b == a) || self.consts.iter().any(|c| c == a) { return None; }
+        }
+        for (i, a) in tips.iter().enumerate() {
+            if tips[i + 1..].iter().any(|b| b == a) || self.consts.iter().any(|c| c == a) { return None; }
+        }
+        out.clear();
+        out.extend_from_slice(&self.msg);
+        for (i, k) in vars.iter().enumerate() { out[self.var_off[i]..self.var_off[i] + 32].copy_from_slice(k); }
+        for (i, k) in tips.iter().enumerate() { out[self.tip_off[i]..self.tip_off[i] + 32].copy_from_slice(k); }
+        out[no..no + 32].copy_from_slice(nonce);
+        out[self.bh_off..self.bh_off + 32].copy_from_slice(nonce_value);
         out[self.min_out_off..self.min_out_off + 8].copy_from_slice(&min_out.to_le_bytes());
         if let (Some(o), Some(d)) = (self.deadline_off, deadline) { out[o..o + 8].copy_from_slice(&d.to_le_bytes()); }
         Some(())
@@ -336,8 +381,9 @@ fn pct_decode(s: &str) -> String {
 // FastConn: our own HTTP/1.1 keep-alive connection
 // ------------------------------------------------------------------------------------------------------------------
 
+/// `route`: dip16 C3, Constant-K's X-CK-Tx-Route answer header (only with ROUTE_HDRS on and the header present)
 #[derive(Clone, Debug)]
-pub struct Ack { pub path: String, pub tag: u64, pub t_write: u64, pub t_ack: u64, pub status: Option<u16>, pub body: String }
+pub struct Ack { pub path: String, pub tag: u64, pub t_write: u64, pub t_ack: u64, pub status: Option<u16>, pub body: String, pub route: Option<String> }
 
 /// L9-2 (audit 9): a TOTAL write budget per request (not per syscall): every write syscall gets the remaining time as
 /// its socket timeout; past the deadline the write fails (the connection is then dropped and reconnects)
@@ -528,7 +574,7 @@ impl FastConn {
     fn fail_pending(&self, why: &str) {
         let mut p = self.pend.lock().unwrap();
         for x in p.drain(..) {
-            if !x.ping { let _ = self.acks.send(Ack { path: self.name.clone(), tag: x.tag, t_write: x.t_write, t_ack: mono_ns(), status: None, body: why.to_string() }); }
+            if !x.ping { let _ = self.acks.send(Ack { path: self.name.clone(), tag: x.tag, t_write: x.t_write, t_ack: mono_ns(), status: None, body: why.to_string(), route: None }); }
         }
     }
 
@@ -572,14 +618,14 @@ impl FastConn {
                 }
                 // complete responses, in order
                 loop {
-                    match parse_response(&plain) {
-                        Some((used, status, body)) => {
+                    match parse_response_hdr(&plain, ROUTE_HDRS.load(Ordering::Relaxed)) {
+                        Some((used, status, body, route)) => {
                             let t_ack = mono_ns();
                             let p = self.pend.lock().unwrap().pop_front();
                             if let Some(p) = p {
                                 if !p.ping {
                                     let _ = self.acks.send(Ack { path: self.name.clone(), tag: p.tag, t_write: p.t_write, t_ack, status: Some(status),
-                                        body: String::from_utf8_lossy(&body[..body.len().min(200)]).trim().to_string() });
+                                        body: String::from_utf8_lossy(&body[..body.len().min(200)]).trim().to_string(), route });
                                 }
                             }
                             plain.drain(..used);
@@ -618,17 +664,35 @@ fn itoa(mut n: usize, b: &mut [u8; 20]) -> &[u8] {
 }
 
 /// one complete HTTP/1.1 response at the start of `buf`: (bytes used, status, body). None: incomplete.
-fn parse_response(buf: &[u8]) -> Option<(usize, u16, Vec<u8>)> {
+#[cfg(test)]
+fn parse_response(buf: &[u8]) -> Option<(usize, u16, Vec<u8>)> { parse_response_hdr(buf, false).map(|(u, s, b, _)| (u, s, b)) }
+
+/// dip16 C3 (--log-route-headers; ops/dip/speed/clients/CLIENTS.md §8 X2): the reader threads keep Constant-K's `X-CK-Tx-Route` answer
+/// header in the Ack (over the plan's staked sends per second CK silently sends from its own node and rebroadcasts every 420 ms: it
+/// would explain "staked-rpc lands often but late"). Read on the connection's READER thread only, after the answer arrived: the
+/// write path never waits for it. Off (default): the header is not looked at and every Ack has `route: None`, as dip15
+pub static ROUTE_HDRS: AtomicBool = AtomicBool::new(false);
+
+/// `parse_response` + (`route`) the X-CK-Tx-Route header's value (<= 60 chars). None: incomplete
+fn parse_response_hdr(buf: &[u8], route: bool) -> Option<(usize, u16, Vec<u8>, Option<String>)> {
     let mut hs = [httparse::EMPTY_HEADER; 48];
     let mut r = httparse::Response::new(&mut hs);
     let hlen = match r.parse(buf) { Ok(httparse::Status::Complete(n)) => n, _ => return None };
     let status = r.code.unwrap_or(0);
     let mut clen: Option<usize> = None;
     let mut chunked = false;
+    let mut rt: Option<String> = None;
     for h in r.headers.iter() {
         if h.name.eq_ignore_ascii_case("content-length") { clen = std::str::from_utf8(h.value).ok().and_then(|s| s.trim().parse().ok()); }
         if h.name.eq_ignore_ascii_case("transfer-encoding") && String::from_utf8_lossy(h.value).to_ascii_lowercase().contains("chunked") { chunked = true; }
+        if route && h.name.eq_ignore_ascii_case("x-ck-tx-route") { rt = Some(String::from_utf8_lossy(h.value).trim().chars().take(60).collect()); }
     }
+    let (used, status, body) = parse_body(buf, hlen, status, clen, chunked)?;
+    Some((used, status, body, rt))
+}
+
+/// the body after the headers (`hlen` bytes): (bytes used, status, body). None: incomplete
+fn parse_body(buf: &[u8], hlen: usize, status: u16, clen: Option<usize>, chunked: bool) -> Option<(usize, u16, Vec<u8>)> {
     if (100..200).contains(&status) { return Some((hlen, status, Vec::new())); }
     if chunked {
         let mut p = hlen;
@@ -767,6 +831,59 @@ mod tests {
         assert!(key.verifying_key().verify_strict(&raw[65..], &ed25519_dalek::Signature::from_bytes(&raw[1..65].try_into().unwrap())).is_ok());
         assert!(q(&p, 0.5) < 200.0, "re-sign far slower than expected");
     }
+    /// NONCE (--nonce-fanout): a nonce-variant template (AdvanceNonceAccount first, one or no tip, a guard deadline,
+    /// min_out) patched with real keys equals the full compile of the same instructions with the nonce value as the
+    /// blockhash, on 200 key sets; patch_dl refuses a nonce template, patch_nonce a recent-blockhash one, and a nonce
+    /// account equal to another key (which would change the dedup) is refused
+    #[test]
+    fn nonce_template_patch_equals_compile() {
+        use crate::build::{self, Ix, Meta};
+        let user: Pk = [9u8; 32];
+        let ixs = |nonce: Pk, tip: Option<(Pk, u64)>, vars: &VarKeys, min_out: u64, dl: u64| -> Vec<Ix> {
+            let mut v = vec![build::advance_nonce_ix(nonce, user)];
+            if let Some((t, l)) = tip { v.push(build::transfer_ix(user, t, l)); }
+            v.push(build::cu_limit_ix(100_000));
+            let mut g = vec![14u8, 0, 0]; g.extend(dl.to_le_bytes()); g.push(5);
+            v.push(Ix { program: [0x42; 32], accounts: vec![], data: g });
+            let mut d = vec![1, 2, 3, 4, 5, 6, 7, 8]; d.extend(77u64.to_le_bytes()); d.extend(min_out.to_le_bytes()); d.push(0);
+            v.push(Ix { program: [0x55; 32], accounts: vars.iter().enumerate().map(|(i, k)| Meta { key: *k, signer: false, writable: i % 2 == 0 }).collect(), data: d });
+            v
+        };
+        let probes: VarKeys = std::array::from_fn(probe_var);
+        for tip in [None, Some(1_000_000u64)] {
+            let msg = build::compile_v0(user, &ixs(probe_nonce(), tip.map(|l| (probe_tip(0), l)), &probes, PROBE_MIN_OUT, PROBE_DEADLINE), PROBE_BH, &[], &[]).unwrap();
+            let t = Template::from_probe_msg_nonce(msg.bytes.clone(), tip.is_some() as usize, true).unwrap();
+            assert!(t.is_nonce());
+            let mut out = Vec::new();
+            for s in 0..200u32 {
+                let key = |tag: u8, i: u8| -> Pk { let mut k = [0u8; 32]; k[..4].copy_from_slice(&s.to_le_bytes()); k[4] = tag; k[5] = i; k[31] = 0x5a; k };
+                let vars: VarKeys = std::array::from_fn(|i| key(1, i as u8));
+                let (nonce, tk, val) = (key(2, 0), key(3, 0), { let mut v = key(4, 0); v[30] = 0xee; v });
+                let (mo, dl) = (1_000 + s as u64 * 7_919, 400_000_000 + s as u64);
+                let tips: Vec<Pk> = tip.iter().map(|_| tk).collect();
+                t.patch_nonce(&mut out, &vars, &tips, &nonce, &val, mo, Some(dl)).expect("no collision");
+                let full = build::compile_v0(user, &ixs(nonce, tip.map(|l| (tk, l)), &vars, mo, dl), val, &[], &[]).unwrap();
+                assert_eq!(out, full.bytes, "nonce variant (tip {tip:?}) key set {s}: template patch != full compile");
+            }
+            // never half-patched / mixed up / deduplicated differently
+            let (vars, val): (VarKeys, [u8; 32]) = (std::array::from_fn(|i| [i as u8 + 100; 32]), [8u8; 32]);
+            let tips: Vec<Pk> = tip.iter().map(|_| [77u8; 32]).collect();
+            assert!(t.patch_dl(&mut out, &vars, &tips, &val, 1, Some(5)).is_none(), "patch_dl must refuse a nonce template");
+            assert!(t.patch_nonce(&mut out, &vars, &tips, &vars[3], &val, 1, Some(5)).is_none(), "nonce == a var: collision");
+            assert!(t.patch_nonce(&mut out, &vars, &tips, &user, &val, 1, Some(5)).is_none(), "nonce == the payer: collision");
+            assert!(t.patch_nonce(&mut out, &vars, &tips, &[0x42; 32], &val, 1, Some(5)).is_none(), "nonce == a constant key (the guard program): collision");
+            assert!(t.patch_nonce(&mut out, &vars, &tips, &[0x3c; 32], &val, 1, None).is_none(), "the guard's deadline is required");
+            assert!(t.patch_nonce(&mut out, &vars, &tips, &[0x3c; 32], &val, 1, Some(5)).is_some());
+        }
+        // a recent-blockhash template (no nonce probe) refuses patch_nonce; a message without the nonce probe is no nonce template
+        let mut v = ixs(probe_nonce(), None, &probes, PROBE_MIN_OUT, PROBE_DEADLINE);
+        v.remove(0);
+        let msg = build::compile_v0(user, &v, PROBE_BH, &[], &[]).unwrap();
+        assert!(Template::from_probe_msg_nonce(msg.bytes.clone(), 0, true).is_err());
+        let t = Template::from_probe_msg_dl(msg.bytes, 0, true).unwrap();
+        assert!(!t.is_nonce() && t.patch_nonce(&mut Vec::new(), &probes, &[], &[0x3c; 32], &[8u8; 32], 1, Some(5)).is_none());
+    }
+
     #[test]
     fn json_body_matches_serde() {
         use base64::Engine as _;
@@ -784,6 +901,23 @@ mod tests {
         assert_eq!((s, b.as_slice()), (200, &b"hello"[..]));
         let (u2, s2, b2) = parse_response(&a[u..]).unwrap();
         assert_eq!((s2, b2.as_slice(), u + u2), (400, &b"abc"[..], a.len()));
+    }
+    /// dip16 C3: Constant-K's X-CK-Tx-Route header is kept only when asked (any case, trimmed, <= 60 chars); the rest of the parse
+    /// (bytes used, status, body; incomplete -> None) is the same either way, chunked or not
+    #[test]
+    fn responses_ck_route_c3() {
+        let a = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nx-ck-tx-route:  staked-fra-2 \r\n\r\nhelloHTTP/1.1 429 Too Many\r\nX-CK-TX-ROUTE: fallback\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+        let (u, s, b, r) = parse_response_hdr(a, true).unwrap();
+        assert_eq!((s, b.as_slice(), r.as_deref()), (200, &b"hello"[..], Some("staked-fra-2")));
+        assert_eq!(parse_response_hdr(a, false).unwrap(), (u, s, b.clone(), None), "off: the header is not read");
+        let (u2, s2, b2, r2) = parse_response_hdr(&a[u..], true).unwrap();
+        assert_eq!((s2, b2.as_slice(), r2.as_deref()), (429, &b"abc"[..], Some("fallback")));
+        let (u3, s3, b3, r3) = parse_response_hdr(&a[u + u2..], true).unwrap();
+        assert_eq!((s3, b3.as_slice(), r3, u + u2 + u3), (200, &b"ok"[..], None, a.len()), "no header: None");
+        assert!(parse_response_hdr(&a[..u - 1], true).is_none(), "incomplete");
+        let long = format!("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nX-CK-Tx-Route: {}\r\n\r\n", "r".repeat(200));
+        assert_eq!(parse_response_hdr(long.as_bytes(), true).unwrap().3.map(|x| x.len()), Some(60));
+        assert!(!ROUTE_HDRS.load(Ordering::Relaxed), "off by default");
     }
 }
 
@@ -1034,7 +1168,7 @@ impl FastH2 {
         let e = self.st.lock().unwrap().streams.remove(&sid);
         if let Some((tag, t_write, _)) = e {
             let _ = self.acks.send(Ack { path: self.name.clone(), tag, t_write, t_ack: mono_ns(), status: Some(if ok.is_some() { 200 } else { 0 }),
-                body: ok.unwrap_or_else(|| why.to_string()) });
+                body: ok.unwrap_or_else(|| why.to_string()), route: None });
         }
     }
 

@@ -142,6 +142,17 @@ impl Budget {
         !open_waiters(&s) && take(&mut s, self.per_sec, now)
     }
 
+    /// a slot is free now and nobody waits, WITHOUT taking it (--sell-fanout: a fan-out path over its rate is left out of that sell,
+    /// and its tip with it, so a sell never waits on it; a send right after may still find it taken: then it is refused, never queued
+    /// longer than the path's queue_ms)
+    pub fn free_now(&self) -> bool {
+        let mut s = self.st.lock().unwrap();
+        let now = Instant::now();
+        forget_abandoned(&mut s, now);
+        while s.recent.front().is_some_and(|t| now.duration_since(*t) >= WINDOW) { s.recent.pop_front(); }
+        !open_waiters(&s) && s.recent.len() < self.per_sec
+    }
+
     /// sends waiting for a slot now (status `exec.queue_now`)
     pub fn waiting(&self) -> usize { self.st.lock().unwrap().waiting.iter().filter(|w| !w.done.is_closed()).count() }
 
@@ -251,6 +262,18 @@ mod tests {
         assert!(!b.try_take(t0 - S));
         assert!(!b.try_take(t0 + S));
         assert!(b.try_take(t0 + 2 * S));
+    }
+
+    /// --sell-fanout: free_now takes nothing and agrees with the next try_now
+    #[test]
+    fn budget_free_now_takes_nothing() {
+        let b = Budget::new(2, Duration::ZERO);
+        for _ in 0..5 { assert!(b.free_now()); }
+        assert!(b.try_now());
+        assert!(b.free_now(), "one of two used");
+        assert!(b.try_now());
+        assert!(!b.free_now(), "both used: over its rate");
+        assert!(!b.try_now());
     }
 
     /// review F5: peeking takes nothing, and agrees with the next take; WP-00 F5's residual: a refund gives the token

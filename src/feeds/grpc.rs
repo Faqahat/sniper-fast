@@ -365,6 +365,14 @@ pub fn tx_stream_item(u: UpdateTx, t: u64, rec: &crate::rec::Rec, roles: Option<
         None => (true, vec![], vec![]),
     };
     let tx = tx_from_pb(&info.signature, info.is_vote, &pb, &lw, &lr);
+    // PRE-SEND LIVE (off unless snipe_engine --presend-live set the watched payer): a failed tx of that wallet: its block index,
+    // fee and error, by signature (src/feeds/mod.rs own_fail_note)
+    if !ok && crate::feeds::OWN_FAIL_PAYER.get().is_some() {
+        if let Some(m) = &meta {
+            crate::feeds::own_fail_note(&info.signature, pb.message.as_ref().and_then(|x| x.account_keys.first()).map(|k| &k[..]), u.slot, info.index, m.fee,
+                m.err.as_ref().map(|e| &e.err[..]).unwrap_or(&[]));
+        }
+    }
     // dip engine: the pump events of this executed tx, decoded from its logs exactly as the collector does
     let exec = meta.as_ref().and_then(|m| {
         let trades = crate::dip::trade_events(&m.log_messages);

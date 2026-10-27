@@ -12,7 +12,8 @@ import numpy as np
 from multiprocessing import Pool
 D = "/home/moiz/sniper-data/collect"; PO = "/home/moiz/sniper-data/strategies/patterns"; TMP = f"{PO}/tmp"
 RUNS = {"R1": ("run_20261021_2207", [f"{D}/phaseA"]), "R2": ("run_20261022_1543", [f"{D}/phaseA_fwd"]),
-        "R3": ("run_20261023_1426", [f"{D}/phaseA_r3", "/home/moiz/sniper-data/strategies/phaseA_r3tail"])}
+        "R3": ("run_20261023_1426", [f"{D}/phaseA_r3", "/home/moiz/sniper-data/strategies/phaseA_r3tail"]),
+        "R5": ("run_20261024_1425", [f"{D}/phaseA_r4"])}   # 10-24 19:25 -> 10-25 PKT, forward day (after every rule was frozen)
 SMS = 212.0; GRADV = 113e9
 SS = {int(k): v for k, v in json.load(open("/home/moiz/sniper/ops/overnight/core/slotsize.json")).items()}
 SLACK = sorted(sl for _, sl, _ in json.load(open("/home/moiz/sniper/ops/overnight/verify2/work/a8_slack.json"))["rows"])

@@ -230,7 +230,12 @@ fn cmp2_rival_tips_the_old_map_left_unnamed_are_named_now() {
     let mut unknown_rows = 0;
     for (a, x) in f["accounts"].as_object().unwrap() {
         let k = pkd(a);
-        assert!(!old.contains_key(&k), "{a} was named by the old map");
+        // dip16 (10-25): Glaive became a send kind, so the code's lists name its 6 accounts now ("glaive", as the catalogue)
+        if crate::send::known_tip_accounts(crate::config::SendKind::Glaive).contains(&a.as_str()) { assert_eq!(old.get(&k).map(String::as_str), Some("glaive")); }
+        // dip17 (10-25): Soyas and Solami became send kinds too (Solami: the crate's 10 "...beam" accounts)
+        else if crate::send::known_tip_accounts(crate::config::SendKind::Soyas).contains(&a.as_str()) { assert_eq!(old.get(&k).map(String::as_str), Some("soyas")); }
+        else if crate::send::known_tip_accounts(crate::config::SendKind::Solami).contains(&a.as_str()) { assert_eq!(old.get(&k).map(String::as_str), Some("solami")); }
+        else { assert!(!old.contains_key(&k), "{a} was named by the old map"); }
         let rows = x["rows"].as_u64().unwrap();
         match tip_map().get(&k) { Some(s) => *by.entry(s.to_string()).or_default() += rows, None => unknown_rows += rows }
     }
@@ -267,7 +272,9 @@ fn the_tip_map_and_its_sources() {
     assert_eq!(tip_map().get(&pkd("SpEEdz8S1KorkMZqjMUxfxrmWwofmp6ReNP2Nx6CUmq")), Some("speedlanding"));
     assert_eq!(tip_map().get(&pkd("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5")), Some("jito"));
     assert!(tip_map().is_jito(&pkd("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5")) && !tip_map().is_jito(&pkd("GLaivinAWh21NaJMhtExtD5G2gZs1xnvaYVZmwqobWZL")));
-    assert_eq!(tip_map().len(), crate::send::code_tip_names().len() + 46, "the file adds 46 accounts the code lists do not name");
+    // 46 on 2026-10-04; dip16 (10-25) moved Glaive's 6 into the code's lists (a send kind now)
+    // dip17 (10-25): Soyas' 10 and Solami's 10 "...beam" accounts moved into the code's lists too
+    assert_eq!(tip_map().len(), crate::send::code_tip_names().len() + 20, "the file adds 20 accounts the code lists do not name");
     assert_eq!(TipMap::build(crate::send::TIP_CATALOGUE).names(), tip_map().names());
     assert!(platform_map().is_empty(), "no platform wallet is sourced yet (data/platform-fee-wallets.json)");
 }

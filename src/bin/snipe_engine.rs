@@ -54,6 +54,13 @@ static FALLBACK_PATH: std::sync::OnceLock<Arc<send::Path>> = std::sync::OnceLock
 /// latest blockhash kept fresh in the background (hash, fetched-at, lastValidBlockHeight), so a buy never waits on
 /// getLatestBlockhash. L1: the last valid block height tells when a never-seen buy can no longer land.
 static BLOCKHASH_CACHE: std::sync::Mutex<Option<([u8; 32], Instant, u64)>> = std::sync::Mutex::new(None);
+/// --sell-fanout NAME[,NAME] (owner OK 10-25 ~08:05 PKT: "do that Helius SWQoS thing too"): [[send]] paths EVERY sell (its first
+/// try and each retry) also goes through, beside the sell path: ONE signed tx (one signature: it can sell once only) carrying
+/// each tipped path's tip once (one transfer per tip family, as the buys' fan-out; paid only if the sell lands). A fan-out path
+/// over its rate at that moment is left out of that sell, its tip with it: a sell never waits on it. Without it: as before.
+static SELL_FANOUT: std::sync::OnceLock<Vec<Arc<send::Path>>> = std::sync::OnceLock::new();
+/// every built send path (PRE-SEND LIVE: --presend-live-routes names its own [[send]] entries among them)
+static ALL_PATHS: std::sync::OnceLock<Arc<send::Paths>> = std::sync::OnceLock::new();
 /// C2 --sell-fallback-path: a second sell path, used (together with the sell path, one signature) on every sell RETRY.
 /// A path that requires a tip gets its minimum tip in the retry tx (one transfer; paid only if the sell lands).
 static SELL_FALLBACK: std::sync::OnceLock<Arc<send::Path>> = std::sync::OnceLock::new();
@@ -557,7 +564,8 @@ fn poll_err(what: &str, e: &anyhow::Error) {
 ///  * known flags = every "--flag" string literal in snipe_engine.rs;
 ///  * integer flags = every flag read with arg_u64 / arg_u64_opt; number flags = every flag read with arg_f64, plus the
 ///    ones parsed from arg() directly (--fill-cap, --max-create-ms, --race-min/max-bundle-sol).
-const ENGINE_SRC: &str = concat!(include_str!("snipe_engine/dipmode.rs"), include_str!("snipe_engine.rs"));
+const ENGINE_SRC: &str = concat!(include_str!("snipe_engine/dipmode.rs"), include_str!("snipe_engine/pslive.rs"), include_str!("snipe_engine/shredfire.rs"),
+    include_str!("snipe_engine/speed16.rs"), include_str!("snipe_engine.rs"));
 
 /// flag names after each occurrence of `prefix` (e.g. `arg_u64("`) in the source
 fn src_flags(prefix: &str) -> std::collections::BTreeSet<String> {
@@ -634,6 +642,10 @@ fn alpenglow_warning() {
 // =====================================================================================================================
 #[path = "snipe_engine/dipmode.rs"]
 mod dipmode;
+// dip16 (10-25 PKT): the free landing-speed fixes of the validator-client study (C1 loaded-data limit, C3 route headers, C4 window
+// clock, B4 nonce probes, C5 lock-only probes), each OFF without its flag
+#[path = "snipe_engine/speed16.rs"]
+mod speed16;
 
 mod altc {
     use super::*;
@@ -1723,6 +1735,8 @@ fn main() -> Result<()> {
     alpenglow_warning();
     // --telegram-test: one message to the chat (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from the env file), then exit
     if has("--telegram-test") { return tg::test_message(); }
+    // dip17 --quic-check: CONNECT-ONLY check of QUIC landing lanes (no stream, no transaction, no wallet), then exit
+    if has("--quic-check") { return quic_check(); }
 
     let warm_probe = has("--warm-probe");
     let shadow = has("--shadow");
@@ -1734,7 +1748,7 @@ fn main() -> Result<()> {
     let transfer = has("--transfer-sol");
     let live = has("--live");
     if !warm_probe && !shadow && !round_trip && !snipe_once && !simulate && !paper_trade && !unwrap && !transfer && !has("--sell-held") && !has("--ack-probe")
-        && !has("--landed-via-probe") && !has("--jito-poll-probe") && !has("--dip") {
+        && !has("--landed-via-probe") && !has("--jito-poll-probe") && !has("--dip") && !has("--create-nonces") && !has("--close-nonces") {
         bail!("pick a mode: --warm-probe (latency), --shadow (observe launches), --round-trip (gated buy+sell on --mint), --snipe-once (gated: auto-detect a fresh launch + round-trip it), --simulate (ZERO-COST: simulateTransaction a v3 buy, no send), --paper-trade (ZERO-COST: forward paper-trade the filter+exit-ladder on live launches, no send), --unwrap (gated: close the WSOL ATA back to native SOL), optionally with --live for real txs (gated)");
     }
 
@@ -1764,7 +1778,7 @@ fn main() -> Result<()> {
     // --tokio-workers N overrides
     // L12-5 (audit 12): with --busy-poll --pin-core C, every runtime thread (workers + blocking pool) gets an affinity that
     // EXCLUDES core C, so no tokio thread preempts the spinning event loop (which pins itself to C)
-    let excl = if has("--busy-poll") { arg_u64_opt("--pin-core").map(|c| c as usize) } else { None };
+    let excl = if has("--busy-poll") || has("--dip-busy-poll") { arg_u64_opt("--pin-core").map(|c| c as usize) } else { None };
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(arg_u64("--tokio-workers", 6).clamp(2, 64) as usize)
         .on_thread_start(move || { if let Some(c) = excl { arbx::fast::exclude_core(c); } }).enable_all().build()?;
 
@@ -1775,6 +1789,46 @@ fn main() -> Result<()> {
     if let Some(l) = tg::stats_line() { eprintln!("{l}"); }
     INFRA_STOP.store(true, Ordering::Relaxed);
     r
+}
+
+/// dip17 CONNECT-ONLY CHECK of QUIC landing lanes (Soyas, Solami Beam). Sends NO stream, so NO transaction; needs no wallet or
+/// config. For each comma-separated `--quic-check quic://host:port`: connect with the lane's keypair as the client certificate,
+/// the 300 ms auth check (a lane that does not know the key closes the connection: its reason is printed), then hold the
+/// connection `--quic-hold-s` (default 40: past the 30 s idle timeout, so the keep-alives are tested too). The kind sets the
+/// defaults (lanes are checked one after another): `--quic-kind soyas` (SNI soyas-landing, key SOYAS_KEYPAIR) or `solami` (solami-beam, SOLAMI_KEYPAIR); override with
+/// --quic-sni, --quic-alpn (solana-tpu), --quic-identity-env, --quic-keepalive-ms, --quic-idle-ms. Keys come from --env-file
+/// (default /root/sniper/deploy/.env) and are never printed (only the public key). Exit status: Ok when every lane passed
+fn quic_check() -> Result<()> {
+    use arbx::send::quic_lane as q;
+    let urls = arg("--quic-check").filter(|u| !u.starts_with("--")).context("--quic-check needs quic://host:port[,quic://host:port...]")?;
+    let kind = arg("--quic-kind").unwrap_or_else(|| "soyas".into());
+    let (sni0, env0) = match kind.as_str() { "soyas" => ("soyas-landing", "SOYAS_KEYPAIR"), "solami" => ("solami-beam", "SOLAMI_KEYPAIR"), "none" => ("", ""),
+        k => bail!("--quic-kind {k}: soyas, solami (or none with --quic-sni and --quic-identity-env)") };
+    let sni = arg("--quic-sni").unwrap_or_else(|| sni0.into());
+    let env = arg("--quic-identity-env").unwrap_or_else(|| env0.into());
+    let alpn = arg("--quic-alpn").unwrap_or_else(|| q::DEFAULT_ALPN.into());
+    let (ka, idle) = (arg_u64("--quic-keepalive-ms", q::DEFAULT_KEEPALIVE_MS), arg_u64("--quic-idle-ms", q::DEFAULT_IDLE_MS));
+    if sni.is_empty() || env.is_empty() { bail!("--quic-check: no SNI or identity env (use --quic-kind or --quic-sni / --quic-identity-env)"); }
+    if ka == 0 || ka >= idle { bail!("--quic-keepalive-ms must be > 0 and below --quic-idle-ms"); }
+    let hold = Duration::from_secs(arg_u64("--quic-hold-s", 40));
+    let id = q::Identity::from_env(&env)?;
+    eprintln!("QUIC-CHECK (connect only, nothing is sent): kind {kind}, key {env} = {} (public)", id.pubkey_b58());
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
+    let all = rt.block_on(async {
+        // one lane at a time: a lane may allow one connection per key, so concurrent checks could close each other
+        let mut all = true;
+        for (i, u) in urls.split(',').map(str::trim).filter(|u| !u.is_empty()).enumerate() {
+            let (host, port) = q::parse_quic_url(u)?;
+            let lane = q::QuicLane::new(&format!("{kind}-{i}"), q::LaneCfg { host, port, sni: sni.clone(), alpn: alpn.clone(), keepalive_ms: ka, idle_ms: idle }, &id)?;
+            let (ok, lines) = q::connect_check(&lane, hold).await;
+            for l in lines { println!("{l}"); }
+            all &= ok;
+        }
+        Ok::<bool, anyhow::Error>(all)
+    })?;
+    if !all { bail!("QUIC-CHECK: a lane failed (see above)"); }
+    println!("QUIC-CHECK: every lane PASSED");
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1823,6 +1877,13 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
     // XRPC: the dedicated per-role clients of the exit path (exit reads, blockhash, kill switch, lookup tables) + the
     // 60 s RPC-LAT / RUNTIME-lag report
     if let Some(p) = PRIMARY_URL.get() { xrpc::init(p, FALLBACK_URL.get().map(|s| s.as_str())); xrpc::start_monitor(); }
+    // ---- NONCE tools (--create-nonces N --nonce-out FILE / --close-nonces FILE; only --live sends): the keystore was
+    // unlocked as for a run; no send path, no feed
+    if has("--create-nonces") {
+        let out = arg("--nonce-out").context("--create-nonces N needs --nonce-out FILE (the accounts file the engine then reads with --nonce-accounts)")?;
+        return noncefan::create(&key, user, &rpc, arg_u64("--create-nonces", 0), &out, live).await;
+    }
+    if let Some(f) = arg("--close-nonces") { return noncefan::close(&key, user, &rpc, &f, live).await; }
     // ALT cache: the known launchpad tables + --alt-cache-file + --alt-preload, before any feed starts
     altc::init(rpc.clone()).await;
     // M-3 (audit 3): --buy-max-slot-delta N: the on-chain slot deadline, verified by simulation now or no start (fail closed)
@@ -1830,6 +1891,10 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         let g = verify_slot_guard(&rpc, &key, user).await.context("--buy-max-slot-delta")?;
         let _ = SLOT_GUARD.set(g);
     }
+    // dip16 C1 (--loaded-data-limit BYTES): range-checked, then against the buy's fixed accounts on chain, or no start (fail closed);
+    // set before any buy template is built. C3 (--log-route-headers): the answers' X-CK-Tx-Route from the first send on
+    speed16::ll_setup(&rpc).await?;
+    speed16::route_setup();
     // H1 (audit 2026-10-20): SIGTERM / SIGINT = stop new fires and DRAIN: the open positions finish their exit (the drain
     // is bounded, then every mint still held is logged HELD-AT-EXIT). A second signal changes nothing (still draining).
     // Only the snipe loop installs it (the other modes exit on their own); the guard stops the engine this way.
@@ -1874,6 +1939,7 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
     let (paths, notes) = send::Paths::new(&probe.sends, opts, arbx::rec::Rec::off(), true).await?;
     for n in &notes { eprintln!("  send note: {n}"); }
     if paths.list.is_empty() { bail!("no usable send path was built (see notes above)"); }
+    let _ = ALL_PATHS.set(paths.clone());
 
     // which path to fire through (default tpu-direct, else the first).
     let want = arg("--send-path").unwrap_or_else(|| "tpu-direct".to_string());
@@ -1902,6 +1968,15 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
             }
             None => bail!("--sell-fallback-path {fname}: no such [[send]] path (or it failed to build: see the send notes)"),
         }
+    }
+    if let Some(list) = arg("--sell-fanout") {
+        let sell_name = SELL_PATH.get().unwrap_or(&path).name.clone();
+        let v = parse_sell_fanout(&list, &paths, &sell_name)?;
+        let tips = lat::tips_for(&v);
+        eprintln!("snipe_engine: SELL FAN-OUT every sell (first try + retries) goes to {sell_name} AND {} (one signature; their tips {} lamports in the sell tx, paid only if it lands; \
+            a fan-out path over its rate is left out of that sell, never waited for){}", v.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(" + "),
+            tips.iter().map(|t| t.1.to_string()).collect::<Vec<_>>().join(" + "), SELL_FALLBACK.get().map(|f| format!(" | + the --sell-fallback-path {}", f.name)).unwrap_or_default());
+        let _ = SELL_FANOUT.set(v);
     }
     if let Some(fname) = arg("--fallback-path") {
         match paths.index(&fname) {
@@ -2029,6 +2104,18 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         if live && !has("--fast-send") { bail!("--fast-bench is zero-network: never with --live"); }
         let (k2, p2, m2, junk, st2) = (key.clone(), paths.clone(), path.clone(), has("--junk-fanout"), stop.clone());
         tokio::task::block_in_place(|| fastfire::init(&k2, user, &p2, &m2, junk, st2))?;
+        // NONCE (--nonce-fanout --nonce-accounts FILE; the dip engine's buys): the durable-nonce pool (its accounts verified on
+        // chain) and the start-up self-test of every route fan's variants (fail closed; nothing sent). Off: exactly today
+        if has("--dip") {
+            if let Some(np) = noncefan::setup(&rpc, user, live, infra.clone()).await? {
+                let f = fastfire::get().context("FAST not initialised")?;
+                let mut sp = vec![fastfire::Fast::default_spend()];
+                if let Some(d) = arg_u64_opt("--dip-dev-spend-lamports") { if !sp.contains(&d) { sp.push(d); } }
+                let n0 = np.first_ready().context("no nonce account ready at start")?;
+                let line = tokio::task::block_in_place(|| f.nonce_selftest(n0, &sp))?;
+                eprintln!("{line}");
+            }
+        } else if has("--nonce-fanout") || has("--nonce-accounts") { eprintln!("NONCE-FANOUT OFF: only the dip engine's buys (--dip) use it"); }
         if let Some(n) = arg_u64_opt("--fast-probe") {
             // ZERO COST: N junk fires through the fast path (synthetic launch), 1.5 s apart; needs --junk-fanout
             if !has("--junk-fanout") || live { bail!("--fast-probe sends junk only: it needs --junk-fanout and never --live"); }
@@ -2041,6 +2128,8 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
             stop.store(true, Ordering::Relaxed);
             return Ok(());
         }
+    } else if has("--nonce-fanout") || has("--nonce-accounts") {
+        eprintln!("NONCE-FANOUT OFF: it fans out the FAST path's buys (--fast-send): every buy is today's tx");
     }
     if let Some(list) = arg("--sell-held") {
         if !live { bail!("--sell-held sends real sells: needs --live"); }
@@ -2060,7 +2149,14 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
         return Ok(());
     }
     if has("--dip") {
-        dipmode::run_dip(probe, &key, user, &rpc, &path, live, &stop).await?;
+        if has("--dip-busy-poll") {
+            // B2 (dip14) --dip-busy-poll: the dip event loop gets its own thread and spins on the feed channel (no bridge thread, no
+            // tokio wake-up: the 'queue' of the fire records, 58-147 µs p50 and 400-800 µs p90 in runs 10-15)
+            let h = tokio::runtime::Handle::current();
+            tokio::task::block_in_place(|| h.block_on(dipmode::run_dip(probe, &key, user, &rpc, &path, live, &stop)))?;
+        } else {
+            dipmode::run_dip(probe, &key, user, &rpc, &path, live, &stop).await?;
+        }
         stop.store(true, Ordering::Relaxed);
         return Ok(());
     }
@@ -2606,7 +2702,14 @@ fn build_buy(user: Pk, launch: &Launch, nonce: Option<(Pk, Pk)>, default_spend: 
 }
 
 /// `build_buy` with an explicit spend (10-24: the dip engine's per-dev size, --dip-dev-spend-lamports)
+/// dip16 C1: with --loaded-data-limit every buy (templates, full compiles, nonce variants, probes) ends with
+/// SetLoadedAccountsDataSizeLimit; without it, dip15's list
 fn build_buy_spend(user: Pk, launch: &Launch, nonce: Option<(Pk, Pk)>, spend: u64, min_out: u64) -> (Vec<build::Ix>, u64) {
+    build_buy_spend_ll(user, launch, nonce, spend, min_out, speed16::loaded_limit())
+}
+
+/// `build_buy_spend` with the C1 limit given (None: dip15's list; the tests build both)
+fn build_buy_spend_ll(user: Pk, launch: &Launch, nonce: Option<(Pk, Pk)>, spend: u64, min_out: u64, ll: Option<u32>) -> (Vec<build::Ix>, u64) {
     let plan = BuyPlan {
         spend_lamports: spend,
         min_tokens_out: min_out,
@@ -2621,7 +2724,10 @@ fn build_buy_spend(user: Pk, launch: &Launch, nonce: Option<(Pk, Pk)>, spend: u6
         wrap: has("--wrap"),
     };
     let spend = plan.spend_lamports;
-    (snipe_build::buy_message_ixs(user, launch, &plan), spend)
+    let mut ixs = snipe_build::buy_message_ixs(user, launch, &plan);
+    // C1 (dip16): the LAST instruction, so the guard is still inserted right before the buy and no index of dip15's moves
+    speed16::add_ll(&mut ixs, ll);
+    (ixs, spend)
 }
 
 /// One landed transaction: its signature, the slot read just before send, the land slot (None = never seen), ok.
@@ -2632,7 +2738,9 @@ fn build_buy_spend(user: Pk, launch: &Launch, nonce: Option<(Pk, Pk)>, spend: u6
 /// M4-1: `tokens` = the token amount the landing watch saw (a buy seen via its token account); `t_sent` = when a sell was
 /// handed to the send paths.
 struct Landed { sig: String, send_slot: u64, land_slot: Option<u64>, ok: bool, t_seen: Option<Instant>, via: &'static str, last_valid: u64,
-    err: Option<serde_json::Value>, roles: (Option<u8>, Option<u8>), tokens: Option<u64>, t_sent: Option<Instant>, tips: u64 }
+    err: Option<serde_json::Value>, roles: (Option<u8>, Option<u8>), tokens: Option<u64>, t_sent: Option<Instant>, tips: u64,
+    /// --sell-fanout: the paths a sell went to (empty without the flag)
+    fan: Vec<String> }
 
 /// M3: what else a land poll watches besides the signature status: the token account (a buy: tokens appear; a sell: the
 /// balance drops below the amount held before it / the account is closed). Landing is then seen even when every
@@ -2755,7 +2863,7 @@ fn fee_str(cu: u64, price: u64, tips: u64) -> String {
 /// poll getSignatureStatuses (and, M3, the token account of `watch` in the same round, concurrently) until the tx lands
 /// or `land_timeout`
 async fn poll_land(rpc: &rpc::Rpc, sig: String, sig_bytes: [u8; 64], send_slot: u64, land_timeout: Duration, watch: Watch, last_valid: u64) -> Landed {
-    let mut out = Landed { sig, send_slot, land_slot: None, ok: false, t_seen: None, via: "", last_valid, err: None, roles: (None, None), tokens: None, t_sent: None, tips: 0 };
+    let mut out = Landed { sig, send_slot, land_slot: None, ok: false, t_seen: None, via: "", last_valid, err: None, roles: (None, None), tokens: None, t_sent: None, tips: 0, fan: Vec::new() };
     let deadline = Instant::now() + land_timeout;
     // DET: --land-poll-ms (default 300 = unchanged). The buy's land is only noticed at the next poll, so the first
     // sell leg (and the exit clock) starts up to one poll late; 100 ms costs ~10 getSignatureStatuses/s per open send.
@@ -2809,6 +2917,45 @@ async fn land_check(rpc: &rpc::Rpc, sig_bytes: &[u8; 64], watch: Watch, out: &mu
     landed
 }
 
+/// NONCE (--nonce-fanout): `poll_land` for a buy sent as several durable-nonce variants (at most one can land): each round
+/// ONE getSignatureStatuses of all of them (both RPCs raced; an answer naming any of them is accepted) beside the
+/// token-account watch. `sig` of the result = the variant that landed (`via` "status"); a landing seen only on the token
+/// account (`via` "ata") keeps polling the statuses up to 5 more rounds to name it, else `sig` stays the first variant's
+async fn poll_land_any(rpc: &rpc::Rpc, sigs: Vec<(String, [u8; 64])>, send_slot: u64, land_timeout: Duration, watch: Watch) -> Landed {
+    let mut out = Landed { sig: sigs.first().map(|s| s.0.clone()).unwrap_or_default(), send_slot, land_slot: None, ok: false, t_seen: None, via: "", last_valid: 0, err: None,
+        roles: (None, None), tokens: None, t_sent: None, tips: 0, fan: Vec::new() };
+    let deadline = Instant::now() + land_timeout;
+    let poll = Duration::from_millis(arg_u64("--land-poll-ms", 300).max(20));
+    let ss: Vec<String> = sigs.iter().map(|s| s.0.clone()).collect();
+    let mut naming = 0;
+    while Instant::now() < deadline {
+        tokio::time::sleep(poll).await;
+        let tk = async { match watch { Watch::BuyAta(a) => Some(tok_read(rpc, &a, "processed", 0).await), _ => None } };
+        let params = serde_json::json!([ss, { "searchTransactionHistory": false }]);
+        let (st, tk) = tokio::join!(call_race(rpc, "getSignatureStatuses", params, race_cap("getSignatureStatuses"), |v| status_any(v).is_some()), tk);
+        if let (Watch::BuyAta(_), Some(Tok::Amount(a, _))) = (watch, tk) { if a > 0 { out.tokens = Some(a); } }
+        match st {
+            Ok(v) => if let Some((i, x)) = status_any(&v) {
+                out.sig = ss[i].clone(); out.land_slot = Some(x["slot"].as_u64().unwrap_or(0)); out.ok = x["err"].is_null(); out.t_seen = Some(Instant::now()); out.via = "status";
+                out.err = if x["err"].is_null() { None } else { Some(x["err"].clone()) };
+                return out;
+            },
+            Err(e) => poll_err("getSignatureStatuses", &e),
+        }
+        if out.via == "ata" { naming += 1; if naming >= 5 { return out; } continue; }
+        if let (Watch::BuyAta(_), Some(Tok::Amount(a, c))) = (watch, tk) {
+            // the token account moved: one variant landed successfully (a failed one moves nothing); its slot <= the context slot
+            if a > 0 { out.land_slot = Some(c); out.ok = true; out.t_seen = Some(Instant::now()); out.via = "ata"; }
+        }
+    }
+    out
+}
+
+/// NONCE: the first entry of a getSignatureStatuses answer that is not null: (its index, the status)
+fn status_any(v: &serde_json::Value) -> Option<(usize, &serde_json::Value)> {
+    v["value"].as_array()?.iter().enumerate().find(|(_, x)| !x.is_null())
+}
+
 /// LAT: after the land poll, what each jito-bundle path's result stream said about our bundle (accepted / processed with
 /// its slot / rejected / dropped ...): which path carried the landing on Jito leaders
 fn jito_results(fan: &[Arc<send::Path>], meta: &lat::Meta) {
@@ -2843,7 +2990,8 @@ async fn run_sell_held(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<se
         let (launch, how) = resolve_launch(rpc, &mint).await;
         eprintln!("  SELL-HELD {m}: {amount} tokens; accounts from {how} (bonding curve {}, buyback {})", b58(&launch.bonding_curve), b58(&launch.buyback_fee_recipient));
         // the live exit's loop: confirmed-zero rule, fallback path (M-5), fallback RPC + cached blockhash (H-1), CU bump
-        let o = SellOpts { read_first: false, wait: Duration::from_secs(arg_u64("--sell-retry-s", 2).max(1)), deadline: Duration::from_secs(arg_u64("--sell-deadline-s", 60).max(30)), bg: false, t_decision: None };
+        let o = SellOpts { read_first: false, wait: Duration::from_secs(arg_u64("--sell-retry-s", 2).max(1)), deadline: Duration::from_secs(arg_u64("--sell-deadline-s", 60).max(30)), bg: false, t_decision: None,
+            keep_ata: false };
         let out = sell_until_zero(key, user, rpc, sp(path), &launch, &ata, Some(amount), amount, 0, o).await;
         eprintln!("  SELL-HELD {m}: {} after {} attempt(s)", if out.sold_at.is_some() { "SOLD (confirmed 0)" } else { "NOT SOLD (see UNSOLD above)" }, out.attempts);
     }
@@ -3035,7 +3183,8 @@ async fn simulate_classify(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, launch: &
         spend_lamports: spend, min_tokens_out: min_out, cu_limit: arg_u64("--cu-limit", 120_000) as u32,
         cu_price_micro: arg_u64("--cu-price-micro", 3_000_000), create_ata: true, track_volume: false, nonce: None, wrap: has("--wrap"),
     };
-    let ixs = snipe_build::buy_message_ixs(user, launch, &plan);
+    let mut ixs = snipe_build::buy_message_ixs(user, launch, &plan);
+    speed16::add_ll(&mut ixs, speed16::loaded_limit()); // dip16 C1: as the live buy (nothing without the flag)
     let bh = rpc.latest_blockhash().await.map(|x| x.0).unwrap_or([0u8; 32]);
     let msg = match build::compile_v0(user, &ixs, bh, &[], &[]) { Ok(m) => m, Err(e) => return (false, format!("compile:{e}")) };
     let raw = build::sign(&msg, key);
@@ -3115,6 +3264,7 @@ async fn simulate_buy(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, launch: &Launc
         wrap: has("--wrap"),
     };
     let mut ixs = snipe_build::buy_message_ixs(user, launch, &plan);
+    speed16::add_ll(&mut ixs, speed16::loaded_limit()); // dip16 C1: as the live buy, after it (nothing without the flag)
     // L7 --sim-tips a,b,..: the route's tip transfers (lamports), first, exactly as the live fan-out tx (System transfers,
     // here to the payer itself: same CU), with the same CU-limit bump (+300 per tip beyond 2)
     let tips: Vec<u64> = arg("--sim-tips").map(|t| t.split(',').filter_map(|x| x.trim().parse().ok()).collect()).unwrap_or_default();
@@ -4586,7 +4736,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             let short = avail < spend_per + fee + bal_margin;
             if short && !junk { skipped_balance += 1; eprintln!("  SKIP-BALANCE slot={create_slot} mint={} available {:.6} SOL < spend + fees + margin {:.6}", b58(&launch.mint), avail as f64 / 1e9, (spend_per + fee + bal_margin) as f64 / 1e9); continue; }
             if stop.load(Ordering::SeqCst) || fires_paused() { eprintln!("  STOP / PAUSE set: launch {} not fired", b58(&launch.mint)); continue; } // N7, L6-3, M12-1
-            let rec = f.fire(&p);
+            let rec = f.fire(&mut p);
             // ---- everything below runs after the writes ----
             let rx_age_us = t_rx_of.map(|t| arbx::feeds::clock::now_ns().saturating_sub(t) / 1000).unwrap_or(0);
             if short { eprintln!("  SKIP-BALANCE (dry: would skip live) mint={} available {:.6} SOL < spend + fees + margin {:.6}", b58(&launch.mint), avail as f64 / 1e9, (spend_per + fee + bal_margin) as f64 / 1e9); }
@@ -4704,7 +4854,7 @@ async fn run_snipe_live(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc
             let launch = match ACCT.launches.lock().unwrap().get(m).cloned() { Some(l) => (l, "the live create"), None => (snipe_build::launch_from_target(*m, *m), "derived") };
             let launch = if launch.1 == "derived" { resolve_launch(rpc, m).await.0 } else { launch.0 };
             eprintln!("  EXIT-SELL mint={} tokens={} — one last sell before the exit", b58(m), t.show());
-            let o = SellOpts { read_first: false, wait: Duration::from_secs(2), deadline: Duration::from_secs(15), bg: false, t_decision: None };
+            let o = SellOpts { read_first: false, wait: Duration::from_secs(2), deadline: Duration::from_secs(15), bg: false, t_decision: None, keep_ata: false };
             let out = sell_until_zero(&key, user, rpc, path, &launch, &ata, t.amount().filter(|a| *a > 0), t.amount().unwrap_or(1).max(1), *slot, o).await;
             if let Some(c) = out.sold_at { t = Tok::Closed(c); }
         }
@@ -5031,7 +5181,7 @@ async fn round_trip_tail(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     if let Some(c) = out.sold_at { pos.sold(c); }
     // H-1: an UNSOLD position keeps retrying in the background (lower rate) until the exit; it is booked at its cost
     // as a loss now (the Pos drops Open) and whatever those sells return is added to realized
-    else { spawn_unsold_retry(key.clone(), user, rpc.clone(), path.clone(), launch.clone(), ata, land, out.last_qty); }
+    else { spawn_unsold_retry(key.clone(), user, rpc.clone(), path.clone(), launch.clone(), ata, land, out.last_qty, false, None); }
     let bal_end_r = native_balance(rpc, user).await.ok();
     let bal_end = bal_end_r.unwrap_or(bal_after_buy);
     // M7: realized PnL of this position from its own transactions (payer deltas), in the background
@@ -5158,23 +5308,46 @@ static FIRE_NOTES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMa
 struct SellOut { sold_at: Option<u64>, sigs: Vec<(String, bool, u64)>, last: Option<Landed>, attempts: u32, last_qty: (u64, bool), first_send_us: Option<f64> }
 
 /// how a sell loop runs: `read_first` (a confirmed read before the first send), `wait` (land poll per attempt = the
-/// re-send interval), `deadline`, `bg` (a background UNSOLD retry round: stops on SELL_GIVEUP, no UNSOLD line)
+/// re-send interval), `deadline`, `bg` (a background UNSOLD retry round: stops on SELL_GIVEUP, no UNSOLD line).
+/// dip19 `keep_ata` (the PRE-SEND sells only; false everywhere else = dip18's bytes): an exact sell sells the whole balance but
+/// leaves the (now empty) token account OPEN: it is the NON-idempotent ATA create of the pre-sent attempts still in flight, their
+/// double-fill guard (FRA run 22 w51, 10-26: the stop-loss sell closed it, an attempt of the next slot created it again and bought
+/// 11.8T tokens nobody sold); pslive closes it later, once no attempt can land
 #[derive(Clone, Copy)]
-struct SellOpts { read_first: bool, wait: Duration, deadline: Duration, bg: bool, t_decision: Option<(Instant, u64)> }
+struct SellOpts { read_first: bool, wait: Duration, deadline: Duration, bg: bool, t_decision: Option<(Instant, u64)>, keep_ata: bool }
 impl SellOpts {
     /// the live exit: --sell-retry-s (M-5: Run 1 = 1 s) re-sends, --sell-deadline-s (>= 30)
     fn main() -> SellOpts {
-        SellOpts { read_first: false, wait: Duration::from_secs(arg_u64("--sell-retry-s", 4).max(1)), deadline: Duration::from_secs(arg_u64("--sell-deadline-s", 30).max(30)), bg: false, t_decision: None }
+        SellOpts { read_first: false, wait: Duration::from_secs(arg_u64("--sell-retry-s", 4).max(1)), deadline: Duration::from_secs(arg_u64("--sell-deadline-s", 30).max(30)), bg: false, t_decision: None,
+            keep_ata: false }
     }
+}
+
+/// dip19: an EXACT sell's instructions (a real balance read: the whole amount). `keep_ata` false: snipe_build::sell_message_ixs
+/// as it is (sell + the base token account's close: dip18's bytes, every reactive / --sell-held / exit sell); true (a pre-send
+/// sell): the same instructions without that close, the last one (the account stays open, empty: the attempts' double-fill guard)
+fn sell_exact_ixs(user: Pk, launch: &Launch, qty: u64, cu: u32, price: u64, wrap: bool, keep_ata: bool) -> Vec<build::Ix> {
+    let mut v = snipe_build::sell_message_ixs(user, launch, qty, 0, cu, price, wrap);
+    if keep_ata {
+        let base = snipe_build::assoc_user(&user, &launch.mint);
+        if v.last().is_some_and(|ix| ix.program == *pda::TOKEN_2022 && ix.data == [9] && ix.accounts.first().is_some_and(|a| a.key == base)) { v.pop(); }
+    }
+    v
 }
 
 /// H-1: UNSOLD positions keep retrying in the background (one round per --unsold-retry-s, default 5 s) until the exit
 static UNSOLD_BG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static SELL_GIVEUP: AtomicBool = AtomicBool::new(false);
 
-/// H-1: keep selling an UNSOLD position at a lower rate until the run's exit gives up (then HELD-AT-EXIT + one exit sell)
+/// dip19: a background UNSOLD retry's end, told to its owner (true: sold = a confirmed empty account)
+type UnsoldDone = Box<dyn FnOnce(bool) + Send + 'static>;
+
+/// H-1: keep selling an UNSOLD position at a lower rate until the run's exit gives up (then HELD-AT-EXIT + one exit sell).
+/// dip19: `keep_ata` (a pre-send position: its sells keep the token account open, SellOpts::keep_ata), `done` (told when the retry
+/// ends); the reactive callers pass (false, None): dip18's retry
 #[allow(clippy::too_many_arguments)]
-fn spawn_unsold_retry(key: SigningKey, user: Pk, rpc: rpc::Rpc, path: Arc<send::Path>, launch: Launch, ata: Pk, land: u64, last_qty: (u64, bool)) {
+fn spawn_unsold_retry(key: SigningKey, user: Pk, rpc: rpc::Rpc, path: Arc<send::Path>, launch: Launch, ata: Pk, land: u64, last_qty: (u64, bool), keep_ata: bool,
+                      done: Option<UnsoldDone>) {
     UNSOLD_BG.fetch_add(1, Ordering::SeqCst);
     tokio::spawn(async move {
         let every = Duration::from_secs(arg_u64("--unsold-retry-s", 5).max(1));
@@ -5187,7 +5360,7 @@ fn spawn_unsold_retry(key: SigningKey, user: Pk, rpc: rpc::Rpc, path: Arc<send::
             tokio::time::sleep(every).await;
             if SELL_GIVEUP.load(Ordering::SeqCst) { break; }
             round += 1;
-            let o = SellOpts { read_first: true, wait: every, deadline: Duration::from_secs(30), bg: true, t_decision: None };
+            let o = SellOpts { read_first: true, wait: every, deadline: Duration::from_secs(30), bg: true, t_decision: None, keep_ata };
             let out = sell_until_zero(&key, user, &rpc, &path, &launch, &ata, qty.1.then_some(qty.0), qty.0, land, o).await;
             sigs.extend(out.sigs.clone());
             qty = out.last_qty;
@@ -5204,6 +5377,7 @@ fn spawn_unsold_retry(key: SigningKey, user: Pk, rpc: rpc::Rpc, path: Arc<send::
         let mut back = 0i64;
         for (s, seen, _) in &sigs { if let Some(d) = tx_payer_delta(&rpc, s, if *seen { 6 } else { 2 }).await { back += d; } }
         if back != 0 { let run = ACCT.realized.fetch_add(back, Ordering::SeqCst) + back; eprintln!("  REALIZED (unsold retries) mint={} {:+.6} SOL run_realized={:+.6} SOL", b58(&launch.mint), back as f64 / 1e9, run as f64 / 1e9); }
+        if let Some(f) = done { f(sold); }
         UNSOLD_BG.fetch_sub(1, Ordering::SeqCst);
     });
 }
@@ -5311,15 +5485,17 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         if Instant::now() >= deadline { break; }
         out.last_qty = qty;
         let fb = SELL_FALLBACK.get(); // M-5: from the first sell
-        let ixs = if qty.1 { snipe_build::sell_message_ixs(user, launch, qty.0, 0, cu, price, has("--wrap")) }
+        // dip19: an exact sell closes the base token account unless `keep_ata` (a pre-send sell: sell_exact_ixs)
+        let ixs = if qty.1 { sell_exact_ixs(user, launch, qty.0, cu, price, has("--wrap"), opts.keep_ata) }
             else { vec![build::cu_limit_ix(cu), build::cu_price_ix(price), snipe_build::sell_ix(user, launch, qty.0, 0)] };
         out.attempts += 1;
         let watch = if qty.1 { Watch::SellAta(*ata, qty.0, need_slot) } else { Watch::None };
         match send_sell(key, user, rpc, path, fb, &ixs, wait, watch).await {
             Ok(l) => {
-                eprintln!("  SELL{} #{} qty={}{} cu_limit={cu} sig={} {} via={}{}", if opts.bg { "[bg]" } else { "" }, out.attempts, qty.0, if qty.1 { "" } else { " (guess, no close)" }, l.sig,
+                eprintln!("  SELL{} #{} qty={}{} cu_limit={cu} sig={} {} via={}{}", if opts.bg { "[bg]" } else { "" }, out.attempts, qty.0,
+                    if !qty.1 { " (guess, no close)" } else if opts.keep_ata { " (pre-send: the token account kept open)" } else { "" }, l.sig,
                     match (l.land_slot, l.ok) { (Some(s), true) => format!("LANDED slot={s} delta={} (awaiting a confirmed 0)", s as i64 - l.send_slot as i64), (Some(_), false) => format!("landed FAILED err={}", l.err.as_ref().map(|e| e.to_string()).unwrap_or_default()), (None, _) => format!("not seen in {wait:?}") },
-                    if l.via.is_empty() { "-" } else { l.via }, fb.map(|f| format!(" (+ {})", f.name)).unwrap_or_default());
+                    if l.via.is_empty() { "-" } else { l.via }, if l.fan.is_empty() { fb.map(|f| format!(" (+ {})", f.name)).unwrap_or_default() } else { format!(" (fan {})", l.fan.join("+")) });
                 out.sigs.push((l.sig.clone(), l.land_slot.is_some(), l.tips));
                 // M4-1: per-sell timings from the decision (no RPC between the decision and the first write)
                 if let (Some((td, sd)), 1, Some(ts)) = (opts.t_decision, out.attempts, l.t_sent) {
@@ -5373,7 +5549,7 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         }
         if let Tok::Amount(a, _) = t { if a > 0 { out.last_qty = (a, true); } }
     }
-    if let Some(c) = out.sold_at { eprintln!("  SOLD mint={} token account confirmed {} at slot {c}", b58(&launch.mint), if qty.1 { "closed/0" } else { "0" }); }
+    if let Some(c) = out.sold_at { eprintln!("  SOLD mint={} token account confirmed {} at slot {c}", b58(&launch.mint), if qty.1 && !opts.keep_ata { "closed/0" } else if opts.keep_ata { "0 (kept open)" } else { "0" }); }
     out
 }
 
@@ -5381,16 +5557,38 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
 /// path (and `fb`, the fallback, with its minimum tip when it needs one) at once; Ok when one path accepted, then the land
 /// poll (signature status + the token account). Err: blockhash failure / build failure / every path refused.
 #[allow(clippy::too_many_arguments)]
+/// --sell-fanout NAME[,NAME]: the built paths named, in order, each once (a repeat is dropped); refused: no name, a name that is not a
+/// built [[send]] path, the sell path itself (unit-tested)
+fn parse_sell_fanout(list: &str, paths: &send::Paths, sell_path: &str) -> Result<Vec<Arc<send::Path>>> {
+    let mut v: Vec<Arc<send::Path>> = Vec::new();
+    for n in list.split([',', '+']).map(str::trim).filter(|s| !s.is_empty()) {
+        let i = paths.index(n).with_context(|| format!("--sell-fanout {n}: no such [[send]] path (or it failed to build: see the send notes)"))?;
+        if n == sell_path { bail!("--sell-fanout {n}: is the --sell-path itself (every sell goes there already)"); }
+        if !v.iter().any(|p| p.name == n) { v.push(paths.list[i].clone()); }
+    }
+    if v.is_empty() { bail!("--sell-fanout needs a [[send]] path name"); }
+    Ok(v)
+}
+
 /// a built and signed sell, ready for the send paths
 struct SellTx { raw: Vec<u8>, sig: String, sig_bytes: [u8; 64], fan: Vec<Arc<send::Path>>, meta: lat::Meta, last_valid: u64, send_slot: u64 }
 
 /// M4-1 (owner): the WHOLE pre-send work of a sell, with NO RPC (there is no Rpc argument): the blockhash from the cache
-/// (refreshed in the background every ~400 ms from both RPCs), build + sign, the fan-out (sell path + fallback path).
+/// (refreshed in the background every ~400 ms from both RPCs), build + sign, the fan-out (sell path [+ --sell-fanout] + fallback path).
 /// Err(None): the cached blockhash is older than `max_age` (the caller refreshes it, racing both RPCs, 300 ms cap).
 fn sell_presend(key: &SigningKey, user: Pk, path: &Arc<send::Path>, fb: Option<&Arc<send::Path>>, ixs: &[build::Ix], max_age: Duration) -> std::result::Result<SellTx, Option<anyhow::Error>> {
+    sell_presend_fan(key, user, path, SELL_FANOUT.get().map(|v| &v[..]).unwrap_or(&[]), fb, ixs, max_age)
+}
+
+/// `sell_presend` with the --sell-fanout paths given (unit-tested): the sell path first, then each fan-out path once when its rate
+/// budget has room now (else this sell goes without it and without its tip), then the fallback path unless already there
+#[allow(clippy::too_many_arguments)]
+fn sell_presend_fan(key: &SigningKey, user: Pk, path: &Arc<send::Path>, fanout: &[Arc<send::Path>], fb: Option<&Arc<send::Path>>, ixs: &[build::Ix], max_age: Duration)
+    -> std::result::Result<SellTx, Option<anyhow::Error>> {
     let (bh, last_valid) = cached_blockhash(max_age).ok_or(None)?;
     let mut fan = vec![sp(path).clone()];
-    if let Some(f) = fb { if f.name != fan[0].name { fan.push(f.clone()); } }
+    for f in fanout { if !fan.iter().any(|x| x.name == f.name) && f.budget_free() { fan.push(f.clone()); } }
+    if let Some(f) = fb { if !fan.iter().any(|x| x.name == f.name) { fan.push(f.clone()); } }
     let (raw, tips) = lat::build_tx(key, user, ixs, &mut fan, bh).map_err(Some)?;
     let sig = send::first_signature(&raw).context("signed tx has no signature").map_err(Some)?;
     let mut sig_bytes = [0u8; 64];
@@ -5425,10 +5623,11 @@ async fn send_sell(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::
     // No answer at all in 5 s: the tx may still be in flight, so poll for it anyway; every path refused: Err (retry)
     let mut errs = Vec::new();
     let mut any_ok = false;
+    let mut first_ok: Option<String> = None;
     let until = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
         match tokio::time::timeout_at(until, rx.recv()).await {
-            Ok(Some((_, None))) => { any_ok = true; break; }
+            Ok(Some((name, None))) => { any_ok = true; first_ok = Some(name); break; }
             Ok(Some((name, Some(m)))) => errs.push(format!("{name}: {m}")),
             Ok(None) => break,
             Err(_) => { eprintln!("  SELL send: no path answered within 5 s ({} refused) — polling for it anyway", errs.len()); any_ok = true; break; }
@@ -5436,9 +5635,21 @@ async fn send_sell(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::
     }
     if !any_ok { bail!("sell refused on every path: {}", errs.join(" / ")); }
     let tips_paid = meta.tips;
+    // --sell-fanout: the paths of this sell and the first to accept it (each path's own answer is its SEND-ACK line)
+    let fanout = SELL_FANOUT.get().is_some();
+    if fanout {
+        eprintln!("  SELL-FAN sig={} paths={} tips={} lamports first_accept={}{}", &sig[..16.min(sig.len())], fan.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("+"),
+            tips_paid, first_ok.as_deref().unwrap_or("-"), if errs.is_empty() { String::new() } else { format!(" refused_before_it=[{}]", errs.join(" / ")) });
+    }
     let mut l = poll_land(rpc, sig, sig_bytes, send_slot, wait, watch, last_valid).await;
     l.t_sent = Some(t_sent);
     l.tips = tips_paid;
+    if fanout {
+        l.fan = fan.iter().map(|p| p.name.clone()).collect();
+        // which copy landed: a one-signature fan-out carries every path's tip, so its tip accounts cannot tell; --landed-via (the buys'
+        // attribution: Jito bundle membership) separates Jito-bundle landings (Helius dual route, jito paths) from the rest
+        if l.ok && l.land_slot.is_some() { fix2::spawn_landed_via(&fan, &meta, l.land_slot, 0); }
+    }
     Ok(l)
 }
 
@@ -6057,11 +6268,12 @@ mod fastfire {
         main: Arc<send::Path>,
         pub fps: Vec<Fp>,
         templates: Mutex<HashMap<Vec<u64>, Option<Arc<Template>>>>,
+        /// NONCE (--nonce-fanout): the durable-nonce variants' templates, per (tip amount or none, spend)
+        ntemplates: Mutex<HashMap<(Option<u64>, u64), Option<Arc<Template>>>>,
         handle: tokio::runtime::Handle,
         pub junk: bool,
         verify: bool,
         trace: Option<Mutex<std::io::BufWriter<std::fs::File>>>,
-        udp_copies: u32,
         next_id: AtomicU64,
         pub verified: AtomicU64,
         pub mismatched: AtomicU64,
@@ -6086,11 +6298,78 @@ mod fastfire {
         if let Err(e) = q.send(l) { eprintln!("{}", e.0); }
     }
 
-    fn json_kind(k: SendKind) -> bool {
+    /// one FAST-ACK line. dip16 C3 (--log-route-headers): ` ck_route=<Constant-K's X-CK-Tx-Route>` before the reply; `route` can only be
+    /// Some with the flag on (arbx::fast::ROUTE_HDRS), so without it the line is dip15's
+    pub fn fast_ack_line(a: &Ack, ms: f64) -> String {
+        let ckr = a.route.as_deref().map(|r| format!(" ck_route={r}")).unwrap_or_default();
+        format!("  FAST-ACK tag={} path={} ack_ms={ms:.3} status={:?}{ckr} reply={}", a.tag, a.path, a.status, a.body.chars().take(100).collect::<String>())
+    }
+
+    pub fn json_kind(k: SendKind) -> bool {
         matches!(k, SendKind::Helius | SendKind::Shyft | SendKind::Rpc | SendKind::Nozomi | SendKind::ZeroSlot | SendKind::Falcon | SendKind::Everstake | SendKind::JupiterTx
             | SendKind::HarmonicBundle)
     }
-    fn bin_kind(k: SendKind) -> bool { matches!(k, SendKind::Haan | SendKind::Bolt | SendKind::Iris | SendKind::Lunar | SendKind::NodeOne | SendKind::BlockRazor | SendKind::Landx) }
+    /// raw-bytes kinds: our own HTTP/1.1 connection writes the signed tx as application/octet-stream (dip16: + Glaive's /binary)
+    pub fn bin_kind(k: SendKind) -> bool {
+        matches!(k, SendKind::Haan | SendKind::Bolt | SendKind::Iris | SendKind::Lunar | SendKind::NodeOne | SendKind::BlockRazor | SendKind::Landx | SendKind::Glaive)
+    }
+
+    /// NONCE (--nonce-fanout): a durable-nonce variant's instructions: AdvanceNonceAccount(nonce, wallet) FIRST (the
+    /// runtime requires it), then at most ONE tip transfer (its path's), then the buy's own list (CU limit, CU price, ATAs)
+    /// with the slot guard (`guard`: encoding, deadline) right before the pump buy. The CU limit is the buy's own: the
+    /// multi-tip tx raises it by 300 per tip beyond 2 System transfers, and a variant has at most 2 (the nonce advance +
+    /// one tip), so it is never raised (fewer tips, less extra CU)
+    pub fn nonce_variant_ixs(user: Pk, launch: &Launch, nonce: Pk, tip: Option<(Pk, u64)>, spend: u64, min_out: u64, guard: Option<(GuardEnc, u64)>) -> Vec<build::Ix> {
+        nonce_variant_ixs_ll(user, launch, nonce, tip, spend, min_out, guard, speed16::loaded_limit())
+    }
+
+    /// `nonce_variant_ixs` with dip16's C1 limit given (None: dip15's variant; the AdvanceNonceAccount stays first, the limit last)
+    #[allow(clippy::too_many_arguments)]
+    pub fn nonce_variant_ixs_ll(user: Pk, launch: &Launch, nonce: Pk, tip: Option<(Pk, u64)>, spend: u64, min_out: u64, guard: Option<(GuardEnc, u64)>,
+                                ll: Option<u32>) -> Vec<build::Ix> {
+        let (ixs, _) = build_buy_spend_ll(user, launch, Some((nonce, user)), spend, min_out, ll);
+        let mut ixs = match guard { Some((g, dl)) => insert_guard(ixs, g, dl), None => ixs };
+        if let Some((t, l)) = tip { ixs.insert(1, build::transfer_ix(user, t, l)); }
+        ixs
+    }
+
+    /// NONCE: the template of one variant shape (tip amount or none, spend), compiled from the probe keys as make_template:
+    /// probe_nonce() is the nonce account, PROBE_BH the nonce value, probe_tip(0) the tip account
+    pub fn make_nonce_template(user: Pk, tip: Option<u64>, spend: u64, guard: Option<GuardEnc>) -> std::result::Result<Template, String> {
+        make_nonce_template_ll(user, tip, spend, guard, speed16::loaded_limit())
+    }
+
+    /// `make_nonce_template` with dip16's C1 limit given (None: dip15's template)
+    pub fn make_nonce_template_ll(user: Pk, tip: Option<u64>, spend: u64, guard: Option<GuardEnc>, ll: Option<u32>) -> std::result::Result<Template, String> {
+        let probe = Launch { mint: fast::probe_var(0), bonding_curve: fast::probe_var(1), assoc_bonding_curve: fast::probe_var(2), creator: fast::probe_var(9),
+            dev_buy_lamports: 0, is_create_v2: true, is_mayhem: false, is_cashback: false, creator_fee_bps: 0, is_holder_reward: false, buyback_fee_recipient: fast::probe_var(5) };
+        let mut ixs = nonce_variant_ixs_ll(user, &probe, fast::probe_nonce(), tip.map(|l| (fast::probe_tip(0), l)), spend, fast::PROBE_MIN_OUT, guard.map(|g| (g, fast::PROBE_DEADLINE)), ll);
+        let (p0, p1) = (probe.mint, probe.bonding_curve);
+        let map = [(pda::ata(&p1, &p0, &pda::TOKEN_2022), fast::probe_var(2)), (pda::ata(&p1, &snipe_build::WSOL, &pda::TOKEN_PROGRAM), fast::probe_var(3)),
+            (pda::ata(&user, &p0, &pda::TOKEN_2022), fast::probe_var(4))];
+        for ix in ixs.iter_mut() { for a in ix.accounts.iter_mut() { if let Some((_, to)) = map.iter().find(|(from, _)| *from == a.key) { a.key = *to; } } }
+        let msg = build::compile_v0(user, &ixs, fast::PROBE_BH, &[], &[])?;
+        if 1 + 64 + msg.bytes.len() > 1232 { return Err(format!("{} bytes > 1232", 1 + 64 + msg.bytes.len())); }
+        Template::from_probe_msg_nonce(msg.bytes, tip.is_some() as usize, guard.is_some())
+    }
+
+    /// NONCE: the variants of a fan, as lat::tips_for groups tips: a tipped path joins the first group whose tip account is
+    /// one of ITS tip accounts (one tip family, e.g. jito-bundle + jito-tx; the group pays the larger amount), else opens
+    /// its own; every tipless path (no tip, or 0) shares the one tipless group. `paths`: per fan path (tip(0), its tip
+    /// accounts). -> (tip, fan indices) per group, in first-appearance order
+    pub fn tip_groups(paths: &[(Option<(Pk, u64)>, &[Pk])]) -> Vec<(Option<(Pk, u64)>, Vec<usize>)> {
+        let mut g: Vec<(Option<(Pk, u64)>, Vec<usize>)> = Vec::new();
+        for (i, (tip, accts)) in paths.iter().enumerate() {
+            match tip.filter(|t| t.1 > 0) {
+                None => match g.iter_mut().find(|x| x.0.is_none()) { Some(x) => x.1.push(i), None => g.push((None, vec![i])) },
+                Some((t, l)) => match g.iter_mut().find(|x| x.0.is_some_and(|(a, _)| accts.contains(&a))) {
+                    Some(x) => { if let Some(e) = x.0.as_mut() { e.1 = e.1.max(l); } x.1.push(i); }
+                    None => g.push((Some((t, l)), vec![i])),
+                },
+            }
+        }
+        g
+    }
 
     pub fn init(key: &SigningKey, user: Pk, paths: &Arc<send::Paths>, main: &Arc<send::Path>, junk: bool, stop: Arc<AtomicBool>) -> Result<()> {
         let (atx, arx) = crossbeam_channel::unbounded::<Ack>();
@@ -6104,6 +6383,8 @@ mod fastfire {
                 }
                 else if p.kind == SendKind::JitoBundle && p.jito.is_some() { Kind::Jito }
                 else if p.kind == SendKind::Landx && p.fast_udp_ok() { Kind::Udp }
+                // dip18: Falcon native UDP, the same hot-thread datagram write
+                else if p.kind == SendKind::FalconUdp && p.fast_udp_ok() { Kind::Udp }
                 // FIX2: harmonic-bundle with a working Harmonic login goes through its gRPC client (async send)
                 else if p.kind == SendKind::HarmonicBundle && p.hb.is_some() { Kind::Slow }
                 else if (json_kind(p.kind) || bin_kind(p.kind)) && !p.fast_preflight() {
@@ -6119,8 +6400,11 @@ mod fastfire {
         // the ack logger: FAST-ACK lines + the send log
         std::thread::Builder::new().name("fast-acks".into()).spawn(move || {
             for a in arx {
+                // PRE-SEND LIVE: an attempt's ack goes to the probe (counted per status, never printed: up to ~20 a second)
+                if a.tag & arbx::presend_live::PS_TAG != 0 { arbx::presend_live::note_ack(a.tag, a.status, a.t_ack.saturating_sub(a.t_write) as f64 / 1e6); continue; }
                 let ms = a.t_ack.saturating_sub(a.t_write) as f64 / 1e6;
-                eprintln!("  FAST-ACK tag={} path={} ack_ms={ms:.3} status={:?} reply={}", a.tag, a.path, a.status, a.body.chars().take(100).collect::<String>());
+                eprintln!("{}", fast_ack_line(&a, ms));
+                speed16::note_ack(a.tag, &a.path, a.status, ms, a.route.as_deref());
                 // a jito-h2 acceptance: hand the bundle id to the Jito client (results join by signature)
                 if a.status == Some(200) {
                     let sig = TAGSIG.lock().unwrap().as_mut().and_then(|m| m.remove(&a.tag));
@@ -6128,7 +6412,9 @@ mod fastfire {
                         for x in &f.fps { if let Kind::JitoH2 { jito, conn } = &x.kind { if conn.name == a.path { jito.note_bundle(&sig, &a.body); } } }
                     }
                 }
-                lat::log_json(serde_json::json!({ "ev": "fast_ack", "t_ns": arbx::feeds::clock::now_ns(), "tag": a.tag, "path": a.path, "ack_ms": ms, "status": a.status, "reply": a.body }));
+                let mut j = serde_json::json!({ "ev": "fast_ack", "t_ns": arbx::feeds::clock::now_ns(), "tag": a.tag, "path": a.path, "ack_ms": ms, "status": a.status, "reply": a.body });
+                if let Some(r) = &a.route { j["ck_route"] = serde_json::json!(r); }
+                lat::log_json(j);
             }
         })?;
         let trace = match arg("--lat-trace") {
@@ -6147,7 +6433,6 @@ mod fastfire {
             eprintln!("FAST: JSON body byte-identical to the old serde_json body: {same}");
             if !same { bail!("FAST: the JSON body differs from the old one"); }
         }
-        let udp_copies = std::env::var("LANDX_UDP_COPIES").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(2).clamp(1, 4);
         // --fast-presign: pre-computed nonces (self-test: 300 signatures, each verify_strict-ed)
         let presign = if has("--fast-presign") {
             let ps = fast::Presigner::new(key);
@@ -6162,8 +6447,8 @@ mod fastfire {
             if bad > 0 { bail!("FAST: presign self-test failed"); }
             Some(ps)
         } else { None };
-        let f = Fast { key: key.clone(), user, main: main.clone(), fps, templates: Mutex::new(HashMap::new()), handle: tokio::runtime::Handle::current(), junk,
-            verify: has("--fast-verify"), trace, udp_copies, next_id: AtomicU64::new(1), verified: AtomicU64::new(0), mismatched: AtomicU64::new(0), presign,
+        let f = Fast { key: key.clone(), user, main: main.clone(), fps, templates: Mutex::new(HashMap::new()), ntemplates: Mutex::new(HashMap::new()), handle: tokio::runtime::Handle::current(), junk,
+            verify: has("--fast-verify"), trace, next_id: AtomicU64::new(1), verified: AtomicU64::new(0), mismatched: AtomicU64::new(0), presign,
             fast_derive: if has("--fast-derive") {
                 let (bad, bad_ata) = fast::derive_selftest(200_000, 3_000);
                 eprintln!("FAST: fast-derive self-test: on-curve disagreements with dalek {bad}/200012, ATA mismatches {bad_ata}/3000");
@@ -6180,6 +6465,14 @@ mod fastfire {
         }
         for l in get().unwrap().summary() { eprintln!("FAST: {l}"); }
         Ok(())
+    }
+
+    /// the buy's mint-dependent keys (the template's VarKeys), as prepare derives them (unit-tested against pda::ata)
+    pub fn var_keys_of(user: Pk, fast_derive: bool, launch: &Launch) -> fast::VarKeys {
+        let (mint, bc) = (launch.mint, launch.bonding_curve);
+        let ata = |o: &Pk, m: &Pk, t: &Pk| if fast_derive { fast::ata_fast(o, m, t) } else { pda::ata(o, m, t) };
+        let abc = if launch.is_create_v2 { launch.assoc_bonding_curve } else { ata(&bc, &mint, &pda::TOKEN_2022) };
+        [mint, bc, abc, ata(&bc, &snipe_build::WSOL, &pda::TOKEN_PROGRAM), ata(&user, &mint, &pda::TOKEN_2022), launch.buyback_fee_recipient]
     }
 
     /// one prepared buy
@@ -6219,6 +6512,51 @@ mod fastfire {
         pub cr: [u64; 6],
         /// the buy amount in this tx (lamports)
         pub spend: u64,
+        /// NONCE (--nonce-fanout): the durable-nonce variants (None: today's one multi-tip tx). With them, `raw` / `sig` /
+        /// `payload` / `meta.sig` are the FIRST-written path's variant, `meta.tips` the largest single variant tip (the most
+        /// this buy can pay in tips), `tips` every variant's tip, and `reqs[i]` path i's request for its own variant
+        pub nonce: Option<NonceFan>,
+    }
+
+    /// NONCE: one durable-nonce variant of a buy: the tip it pays (None: tipless), the fan paths it goes to (indices into
+    /// Prep.fan), its message (patched at prepare) and, once signed (the first-written path's at prepare, every other one
+    /// in fire() right before its first write), its signature, wire bytes and payload
+    pub struct NVar {
+        pub tip: Option<(Pk, u64)>,
+        pub paths: Vec<usize>,
+        pub msg: Vec<u8>,
+        pub fast_built: bool,
+        pub signed: bool,
+        pub sig: [u8; 64],
+        pub sig58: String,
+        pub raw: Vec<u8>,
+        pub payload: Arc<Vec<u8>>,
+        /// ns to sign it and frame its requests (0: not signed)
+        pub sign_ns: u64,
+    }
+
+    /// NONCE: a buy's variants: every one is built on (acct, value), so at most one of them can land
+    pub struct NonceFan {
+        pub acct: Pk,
+        pub value: [u8; 32],
+        /// in the order of their first write (vars[0]: signed at prepare)
+        pub vars: Vec<NVar>,
+        /// fan path -> its variant
+        pub vi: Vec<usize>,
+    }
+
+    impl Prep {
+        /// the payload path i is written with (NONCE: its own variant's; else the one payload)
+        #[inline]
+        pub fn payload_of(&self, i: usize) -> &Arc<Vec<u8>> { match &self.nonce { Some(n) => &n.vars[n.vi[i]].payload, None => &self.payload } }
+        /// the signature path i carries (base58; "junk" in junk mode)
+        pub fn sig58_of(&self, i: usize) -> String { match &self.nonce { Some(n) => n.vars[n.vi[i]].sig58.clone(), None => self.meta.sig.clone() } }
+        /// NONCE: every SIGNED variant (only those can have been sent): (sig base58, sig, tip lamports, tip account, paths)
+        pub fn variants(&self) -> Vec<(String, [u8; 64], u64, Option<Pk>, Vec<String>)> {
+            let Some(n) = &self.nonce else { return Vec::new() };
+            n.vars.iter().filter(|v| v.signed).map(|v| (v.sig58.clone(), v.sig, v.tip.map_or(0, |t| t.1), v.tip.map(|t| t.0),
+                v.paths.iter().map(|&i| self.fan[i].name.clone()).collect())).collect()
+        }
     }
 
     /// one fire's writes: (path, kind, t0, t1, status)
@@ -6261,6 +6599,13 @@ mod fastfire {
         /// build the templates of every tip shape the routes can give (each route class alone and followed by any other
         /// class, as buy_paths unions the next leader's class) for each of `spends`: no fire pays a template build. -> how many
         pub fn warm_templates(&self, spends: &[u64]) -> usize {
+            for fan in &self.route_fans() { let tips = lat::tips_for(fan); for &sp in spends { let _ = self.template(&tips, sp); } }
+            self.templates.lock().unwrap().values().filter(|t| t.is_some()).count()
+        }
+
+        /// every fan the routes can give: each route class alone and followed by any other class (buy_paths unions the
+        /// next leader's class); without routes, the one buy_paths fan
+        fn route_fans(&self) -> Vec<Vec<Arc<send::Path>>> {
             let mut fans: Vec<Vec<Arc<send::Path>>> = Vec::new();
             if let Some(r) = lat::ROUTES.get() {
                 let keys: Vec<&String> = r.keys().collect();
@@ -6272,9 +6617,33 @@ mod fastfire {
                     }
                 }
             } else { fans.push(lat::buy_paths(&self.main, ALSO_PATH.get(), None).0); }
-            for fan in &fans { let tips = lat::tips_for(fan); for &sp in spends { let _ = self.template(&tips, sp); } }
-            self.templates.lock().unwrap().values().filter(|t| t.is_some()).count()
+            fans
         }
+
+        /// NONCE: the template of a variant shape (tip amount or none, spend), built once (None: no template, full compile)
+        fn ntemplate(&self, tip: Option<u64>, spend: u64) -> Option<Arc<Template>> {
+            let k = (tip, spend);
+            if let Some(t) = self.ntemplates.lock().unwrap().get(&k) { return t.clone(); }
+            let t = make_nonce_template(self.user, tip, spend, SLOT_GUARD.get().map(|g| g.0))
+                .map_err(|e| eprintln!("FAST: no nonce template for tip {tip:?} + spend {spend}: {e} (full compile for this shape)")).ok().map(Arc::new);
+            self.ntemplates.lock().unwrap().insert(k, t.clone());
+            t
+        }
+
+        /// NONCE: the templates of every variant shape the routes can give (each tip family's amount on every fan, and the
+        /// tipless one) for each of `spends`, as warm_templates: no fire pays a template build. -> how many
+        pub fn warm_nonce_templates(&self, spends: &[u64]) -> usize {
+            let mut amts: Vec<Option<u64>> = vec![None];
+            for fan in self.route_fans() {
+                let info: Vec<(Option<(Pk, u64)>, &[Pk])> = fan.iter().map(|p| (p.tip(0), p.tip_accounts())).collect();
+                for (t, _) in tip_groups(&info) { if !amts.contains(&t.map(|x| x.1)) { amts.push(t.map(|x| x.1)); } }
+            }
+            for a in &amts { for &sp in spends { let _ = self.ntemplate(*a, sp); } }
+            self.ntemplates.lock().unwrap().values().filter(|t| t.is_some()).count()
+        }
+
+        /// --fast-verify is on
+        pub fn verify_on(&self) -> bool { self.verify }
 
         /// the full compile of the same buy (the reference the fast build must equal byte for byte)
         fn reference(&self, launch: &Launch, tips: &[(Pk, u64)], bh: [u8; 32], min_out: u64, deadline: Option<u64>, spend: u64) -> Option<Vec<u8>> {
@@ -6293,6 +6662,13 @@ mod fastfire {
         /// probe, rotated, so every path is measured under the same conditions); the leader / client are still read
         /// `spend`: the buy amount (None: --spend-lamports)
         pub fn prepare_on(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6], force: Option<Vec<Arc<send::Path>>>, spend: Option<u64>) -> Result<Prep> {
+            self.prepare_on_x(launch, slot, min_out, cr, force, spend, false)
+        }
+
+        /// `prepare_on`; `tipless` (dip14 D3, --dip-probe-tipless: the probe's twin): the same tx WITHOUT any tip transfer (a relay that
+        /// wants a tip may refuse it: its answer is the measurement). prepare_on = prepare_on_x(.., false), unchanged
+        #[allow(clippy::too_many_arguments)]
+        pub fn prepare_on_x(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6], force: Option<Vec<Arc<send::Path>>>, spend: Option<u64>, tipless: bool) -> Result<Prep> {
             let t0 = fast::mono_ns();
             let spend = spend.unwrap_or_else(Self::default_spend);
             let (mut fan, mut meta) = lat::buy_paths(&self.main, ALSO_PATH.get(), Some(slot));
@@ -6301,6 +6677,7 @@ mod fastfire {
                 fan = v;
             }
             let mut tips = lat::tips_for(&fan);
+            if tipless { tips.clear(); meta.route.push_str(":tipless"); }
             // L2: the cached blockhash's age (refreshed every 300 ms): > 2 s is logged (refresher lagging), > 20 s or none
             // refuses the prepare (a buy on a dying blockhash cannot land; no fire, no budget used)
             let (bh, bh_age, bh_valid) = match *BLOCKHASH_CACHE.lock().unwrap() { Some((h, t, v)) => (h, t.elapsed(), v), None => bail!("no blockhash cached yet") };
@@ -6329,6 +6706,14 @@ mod fastfire {
                 let mut raw = Vec::with_capacity(65 + msg.len());
                 raw.push(1); raw.extend_from_slice(&sig); raw.extend_from_slice(&msg);
                 (raw, sig, t3)
+            } else if tipless {
+                // D3: the full compile without the fan's tips (the template path above already has none)
+                let (ixs, _) = build_buy_spend(self.user, launch, None, spend, min_out);
+                let ixs = with_guard(ixs, deadline);
+                let msg = build::compile_v0(self.user, &ixs, bh, &[], &[]).map_err(|e| anyhow::anyhow!(e))?;
+                let raw = build::sign(&msg, &self.key);
+                let mut sig = [0u8; 64]; sig.copy_from_slice(&raw[1..65]);
+                (raw, sig, t2)
             } else {
                 let (ixs, _) = build_buy_spend(self.user, launch, None, spend, min_out);
                 let ixs = with_guard(ixs, deadline);
@@ -6347,27 +6732,7 @@ mod fastfire {
             for p in &fan {
                 let i = self.fps.iter().position(|f| f.path.name == p.name).unwrap_or(usize::MAX);
                 fpi.push(i);
-                reqs.push(match self.fps.get(i).map(|f| &f.kind) {
-                    Some(Kind::Http { conn, json }) => {
-                        let mut req = Vec::with_capacity(2400);
-                        // FIX2: harmonic-bundle is JSON-RPC sendBundle ([[b64], {"encoding":"base64"}]), the rest sendTransaction
-                        if *json && p.kind == SendKind::HarmonicBundle { fast::json_bundle_body(&payload, &mut body); conn.frame(&body, &mut req); }
-                        else if *json { fast::json_send_body(&payload, &mut body); conn.frame(&body, &mut req); } else { conn.frame(&payload, &mut req); }
-                        Some((req, 0))
-                    }
-                    Some(Kind::JitoH2 { conn, jito }) => {
-                        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-                        let _ = conn;
-                        jito.cached_token(now_ms).map(|tok| {
-                            use prost::Message as _;
-                            let j = send::jito::SendBundleRequest { bundle: Some(send::jito::Bundle { packets: vec![send::jito::Packet { data: payload.clone(),
-                                meta: Some(send::jito::Meta { size: payload.len() as u64, addr: "0.0.0.0".into(), port: 0, sender_stake: 0 }) }] }) };
-                            jtok = Some(format!("Bearer {tok}"));
-                            (j.encode_to_vec(), 0)
-                        })
-                    }
-                    _ => None,
-                });
+                reqs.push(self.frame_req(p, i, &payload, &mut body, &mut jtok));
             }
             let t5 = fast::mono_ns();
             // M1: locate min_out in the tx and the tx in every framed request (off the decision path)
@@ -6380,7 +6745,243 @@ mod fastfire {
             meta.tips = tips.iter().map(|t| t.1).sum();
             let roles = ix_roles(&raw);
             Ok(Prep { id: self.next_id.fetch_add(1, Ordering::Relaxed), launch: launch.clone(), slot, fan, fpi, meta, raw, sig, payload: Arc::new(payload), reqs, tips, jtok, bh, min_out,
-                bh_valid, deadline, roles, mo_off, ats, resign_ns: 0, fast_built, st: [t0, t1, t2, t3, t4, t5], made: Instant::now(), cr, spend })
+                bh_valid, deadline, roles, mo_off, ats, resign_ns: 0, fast_built, st: [t0, t1, t2, t3, t4, t5], made: Instant::now(), cr, spend, nonce: None })
+        }
+
+        /// dip16 C5 (--dip-probe-lock-only on): a LOCK-ONLY landing probe through the route for the leader (or the forced paths): the
+        /// fan's tips (none with `tipless`: the D3 twin), CU limit `cu_limit` at the buy's CU price, the 0-lamport self-transfer that
+        /// write-locks the token's curve accounts (speed16::lock_probe_ixs). Full compile (no template), signed, every path's request
+        /// framed: fire() sends it as any prepared buy. It always succeeds: it PAYS its tips when it lands
+        pub fn prepare_lock_probe(&self, launch: &Launch, slot: u64, cr: [u64; 6], force: Option<Vec<Arc<send::Path>>>, cu_limit: u32, tipless: bool) -> Result<Prep> {
+            let t0 = fast::mono_ns();
+            let (mut fan, mut meta) = lat::buy_paths(&self.main, ALSO_PATH.get(), Some(slot));
+            if let Some(v) = force.filter(|v| !v.is_empty()) {
+                meta.route = format!("forced:{}", v.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("+"));
+                fan = v;
+            }
+            meta.route.push_str(":lock");
+            let tips = if tipless { meta.route.push_str(":tipless"); Vec::new() } else { lat::tips_for(&fan) };
+            let (bh, bh_age, bh_valid) = match *BLOCKHASH_CACHE.lock().unwrap() { Some((h, t, v)) => (h, t.elapsed(), v), None => bail!("no blockhash cached yet") };
+            if bh_age > Duration::from_secs(20) { bail!("the cached blockhash is {:.1} s old (refresher failing?): refusing to prepare", bh_age.as_secs_f64()); }
+            let t1 = fast::mono_ns();
+            let ixs = speed16::lock_probe_ixs(self.user, launch, &tips, cu_limit, arg_u64("--cu-price-micro", 3_000_000), speed16::loaded_limit());
+            let msg = build::compile_v0(self.user, &ixs, bh, &[], &[]).map_err(|e| anyhow::anyhow!(e))?;
+            let t2 = fast::mono_ns();
+            let raw = build::sign(&msg, &self.key);
+            if raw.len() > 1232 { bail!("the lock-only probe is {} bytes > 1232", raw.len()); }
+            let mut sig = [0u8; 64];
+            sig.copy_from_slice(&raw[1..65]);
+            let t3 = fast::mono_ns();
+            let mut payload = raw.clone();
+            if self.junk { payload[0] = 0; } // zero signatures: never a valid transaction
+            let mut fpi = Vec::with_capacity(fan.len());
+            let mut reqs = Vec::with_capacity(fan.len());
+            let mut body = Vec::with_capacity(2048);
+            let mut jtok: Option<String> = None;
+            for p in &fan {
+                let i = self.fps.iter().position(|f| f.path.name == p.name).unwrap_or(usize::MAX);
+                fpi.push(i);
+                reqs.push(self.frame_req(p, i, &payload, &mut body, &mut jtok));
+            }
+            let t4 = fast::mono_ns();
+            for &i in &fpi { match self.fps.get(i).map(|f| &f.kind) { Some(Kind::Http { conn, .. }) => conn.prewarm(), Some(Kind::JitoH2 { conn, .. }) => conn.prewarm(), _ => {} } }
+            meta.sig = if self.junk { "junk".into() } else { bs58::encode(&sig).into_string() };
+            meta.bytes = raw.len();
+            meta.tips = tips.iter().map(|t| t.1).sum();
+            Ok(Prep { id: self.next_id.fetch_add(1, Ordering::Relaxed), launch: launch.clone(), slot, fan, fpi, meta, raw, sig, payload: Arc::new(payload), reqs, tips, jtok, bh, min_out: 0,
+                bh_valid, deadline: None, roles: (None, None), mo_off: None, ats: Vec::new(), resign_ns: 0, fast_built: false, st: [t0, t1, t1, t2, t3, t4], made: Instant::now(), cr,
+                spend: 0, nonce: None })
+        }
+
+        /// NONCE (--nonce-fanout): `prepare_on` as a durable-nonce fan-out on `nonce` = (account, its current value). The
+        /// route for the leader as prepare_on; one variant per tip family of it (`tip_groups`: lat::tips_for's grouping;
+        /// every tipless path shares the tipless variant), each = AdvanceNonceAccount(account, wallet) first, at most ONE tip
+        /// (its family's), the same guard + buy as today's tx, blockhash field = the nonce value. Every variant is patched
+        /// here; only the variant of the path written FIRST is signed + framed (fire() signs each other one right before
+        /// its first write). Err: a variant cannot be built (nothing sent: the caller gives the account back and fires
+        /// today's multi-tip tx)
+        pub fn prepare_nonce(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6], spend: Option<u64>, nonce: (Pk, [u8; 32])) -> Result<Prep> {
+            let t0 = fast::mono_ns();
+            let (fan, meta) = lat::buy_paths(&self.main, ALSO_PATH.get(), Some(slot));
+            self.prepare_nonce_on(launch, slot, min_out, cr, spend, nonce, fan, meta, t0)
+        }
+
+        /// B2 (dip14, --dip-defer and the shred fire): `prepare_nonce` on the route the caller already computed for this slot
+        /// (lat::buy_paths: the same fan and meta prepare_nonce would compute), so the decision path looks the leader up once
+        #[allow(clippy::too_many_arguments)]
+        pub fn prepare_nonce_route(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6], spend: Option<u64>, nonce: (Pk, [u8; 32]), fan: Vec<Arc<send::Path>>,
+                                   meta: lat::Meta, keys: Option<fast::VarKeys>) -> Result<Prep> {
+            let t0 = fast::mono_ns();
+            self.prepare_nonce_keys(launch, slot, min_out, cr, spend, nonce, fan, meta, t0, keys)
+        }
+
+        /// B2 (dip14, --dip-defer): the buy's mint-dependent keys (the two ATA derivations: 24 µs p50 / 613 µs p99 in a live loop,
+        /// ops/fast/NOTES.md) derived once per token, at its create, off the decision path; prepare_nonce_route then reuses them
+        pub fn var_keys(&self, launch: &Launch) -> fast::VarKeys { var_keys_of(self.user, self.fast_derive, launch) }
+
+        /// `prepare_nonce` on a given fan (the start-up self-test runs every route fan)
+        #[allow(clippy::too_many_arguments)]
+        fn prepare_nonce_on(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6], spend: Option<u64>, nonce: (Pk, [u8; 32]), fan: Vec<Arc<send::Path>>,
+                            meta: lat::Meta, t0: u64) -> Result<Prep> {
+            self.prepare_nonce_keys(launch, slot, min_out, cr, spend, nonce, fan, meta, t0, None)
+        }
+
+        /// `prepare_nonce_on` with the token's keys already derived (`var_keys`; None: derived here, as before)
+        #[allow(clippy::too_many_arguments)]
+        fn prepare_nonce_keys(&self, launch: &Launch, slot: u64, min_out: u64, cr: [u64; 6], spend: Option<u64>, nonce: (Pk, [u8; 32]), fan: Vec<Arc<send::Path>>,
+                            mut meta: lat::Meta, t0: u64, keys: Option<fast::VarKeys>) -> Result<Prep> {
+            let spend = spend.unwrap_or_else(Self::default_spend);
+            if fan.is_empty() { bail!("no send path to fan out to"); }
+            let fpi: Vec<usize> = fan.iter().map(|p| self.fps.iter().position(|f| f.path.name == p.name).unwrap_or(usize::MAX)).collect();
+            let info: Vec<(Option<(Pk, u64)>, &[Pk])> = fan.iter().map(|p| (p.tip(0), p.tip_accounts())).collect();
+            let mut groups = tip_groups(&info);
+            // the variants in the order of their first write (stable: fan order within a pass)
+            let order = self.write_order(&fpi);
+            groups.sort_by_key(|g| g.1.iter().filter_map(|i| order.iter().position(|x| x == i)).min().unwrap_or(usize::MAX));
+            let mut vi = vec![0usize; fan.len()];
+            for (v, g) in groups.iter().enumerate() { for &i in &g.1 { vi[i] = v; } }
+            let t1 = fast::mono_ns();
+            let vars: fast::VarKeys = match keys { Some(k) if k[0] == launch.mint && k[1] == launch.bonding_curve => k, _ => self.var_keys(launch) };
+            let t2 = fast::mono_ns();
+            // M-3: the same on-chain slot deadline as today's tx (the create / dump slot + N)
+            let deadline = buy_deadline(Some(slot));
+            let guard = SLOT_GUARD.get().map(|g| g.0);
+            let mut nvars: Vec<NVar> = Vec::with_capacity(groups.len());
+            for (tip, paths) in groups {
+                let mut msg: Vec<u8> = Vec::with_capacity(1232);
+                let tk: Vec<Pk> = tip.iter().map(|t| t.0).collect();
+                let fast_built = self.ntemplate(tip.map(|t| t.1), spend).and_then(|t| t.patch_nonce(&mut msg, &vars, &tk, &nonce.0, &nonce.1, min_out, deadline)).is_some();
+                if !fast_built {
+                    let ixs = nonce_variant_ixs(self.user, launch, nonce.0, tip, spend, min_out, guard.zip(deadline));
+                    msg = build::compile_v0(self.user, &ixs, nonce.1, &[], &[]).map_err(|e| anyhow::anyhow!(e))?.bytes;
+                }
+                if 65 + msg.len() > 1232 {
+                    bail!("the nonce variant for {} is {} bytes > 1232", paths.iter().map(|&i| fan[i].name.as_str()).collect::<Vec<_>>().join("+"), 65 + msg.len());
+                }
+                nvars.push(NVar { tip, paths, msg, fast_built, signed: false, sig: [0u8; 64], sig58: String::new(), raw: Vec::new(), payload: Arc::new(Vec::new()), sign_ns: 0 });
+            }
+            let t3 = fast::mono_ns();
+            let mut nf = NonceFan { acct: nonce.0, value: nonce.1, vars: nvars, vi };
+            let mut reqs: Vec<Option<(Vec<u8>, usize)>> = vec![None; fan.len()];
+            let mut jtok: Option<String> = None;
+            // the FIRST-written path's variant now (sign + frame): the first write then waits for nothing
+            self.nv_sign(&mut nf, 0, &fan, &fpi, &mut reqs, &mut jtok);
+            let t4 = fast::mono_ns();
+            // warm the kernel send path of every socket this fire may write (as prepare_on; not in prep_ns)
+            for &i in &fpi { match self.fps.get(i).map(|f| &f.kind) { Some(Kind::Http { conn, .. }) => conn.prewarm(), Some(Kind::JitoH2 { conn, .. }) => conn.prewarm(), _ => {} } }
+            let v0 = &nf.vars[0];
+            meta.sig = v0.sig58.clone();
+            meta.bytes = v0.raw.len();
+            // the most this buy can pay in tips (one variant lands): the reservation / fee estimate
+            meta.tips = nf.vars.iter().filter_map(|v| v.tip.map(|t| t.1)).max().unwrap_or(0);
+            let tips: Vec<(Pk, u64)> = nf.vars.iter().filter_map(|v| v.tip).collect();
+            let (raw, sig, payload) = (v0.raw.clone(), v0.sig, v0.payload.clone());
+            let fast_built = nf.vars.iter().all(|v| v.fast_built);
+            let roles = ix_roles(&raw);
+            Ok(Prep { id: self.next_id.fetch_add(1, Ordering::Relaxed), launch: launch.clone(), slot, fan, fpi, meta, raw, sig, payload, reqs, tips, jtok, bh: nonce.1, min_out,
+                bh_valid: 0, deadline, roles, mo_off: None, ats: Vec::new(), resign_ns: 0, fast_built, st: [t0, t1, t2, t3, t4, t4], made: Instant::now(), cr, spend, nonce: Some(nf) })
+        }
+
+        /// NONCE: the order fire() writes a fan in (Jito gRPC spawns, UDP, jito-h2, HTTP, then the async sends; fan order
+        /// within each)
+        fn write_order(&self, fpi: &[usize]) -> Vec<usize> {
+            let k = |i: usize| -> u8 { match self.fps.get(fpi[i]).map(|f| &f.kind) { Some(Kind::Jito) => 0, Some(Kind::Udp) => 1, Some(Kind::JitoH2 { .. }) => 2, Some(Kind::Http { .. }) => 3, _ => 4 } };
+            let mut o: Vec<usize> = (0..fpi.len()).collect();
+            o.sort_by_key(|&i| k(i));
+            o
+        }
+
+        /// NONCE: the full compile of one variant (the reference its template patch must equal byte for byte)
+        fn reference_nonce(&self, launch: &Launch, tip: Option<(Pk, u64)>, nonce: (Pk, [u8; 32]), min_out: u64, deadline: Option<u64>, spend: u64) -> Option<Vec<u8>> {
+            let ixs = nonce_variant_ixs(self.user, launch, nonce.0, tip, spend, min_out, SLOT_GUARD.get().map(|g| g.0).zip(deadline));
+            build::compile_v0(self.user, &ixs, nonce.1, &[], &[]).ok().map(|m| m.bytes)
+        }
+
+        /// NONCE (off the hot path: --fast-verify, the bench, the start-up self-test): every SIGNED variant of `p` against
+        /// its full compile (message bytes), its signature (verify_strict), <= 1232 bytes, its payload and every request of
+        /// its paths (exactly that payload), the tips it pays (only its own family's tip: 0 to every other path of the fan),
+        /// and each of its paths' own tip rule (Path::check). -> (variants ok, variants bad, what was wrong)
+        pub fn nonce_verify(&self, p: &Prep) -> (u64, u64, Vec<String>) {
+            let Some(nf) = &p.nonce else { return (0, 0, Vec::new()) };
+            let (mut ok, mut bad, mut why) = (0u64, 0u64, Vec::new());
+            let vk = self.key.verifying_key();
+            for (k, v) in nf.vars.iter().enumerate().filter(|(_, v)| v.signed) {
+                let mut w: Vec<String> = Vec::new();
+                if self.reference_nonce(&p.launch, v.tip, (nf.acct, nf.value), p.min_out, p.deadline, p.spend).as_deref() != Some(&v.msg[..]) { w.push("message != its full compile".into()); }
+                if v.raw.get(65..) != Some(&v.msg[..]) || vk.verify_strict(&v.msg, &ed25519_dalek::Signature::from_bytes(&v.sig)).is_err() { w.push("signature".into()); }
+                if v.raw.len() > 1232 { w.push(format!("{} bytes > 1232", v.raw.len())); }
+                if v.payload.len() != v.raw.len() || v.payload[1..] != v.raw[1..] || (v.payload[0] == 0) != self.junk { w.push("payload".into()); }
+                match arbx::tx::parse_wire(&v.raw) {
+                    Some((tx, used)) if used == v.raw.len() => {
+                        // its own family's paths see its one tip; every other path of the fan sees nothing
+                        for path in &p.fan {
+                            let paid = send::tip_paid(&tx, path.tip_accounts());
+                            let want = match v.tip { Some((a, l)) if path.tip_accounts().contains(&a) => l, _ => 0 };
+                            if paid != want { w.push(format!("pays {paid} to {}'s tip accounts (want {want})", path.name)); }
+                        }
+                    }
+                    _ => w.push("does not parse".into()),
+                }
+                for &j in &v.paths {
+                    if let Some((q, _)) = &p.reqs[j] { if fast::locate_tx(q, &v.payload) == fast::TxAt::None { w.push(format!("{}'s request does not carry its variant", p.fan[j].name)); } }
+                    if let Err(e) = p.fan[j].check(&v.raw) { w.push(format!("{} refuses its variant: {e:#}", p.fan[j].name)); }
+                }
+                if w.is_empty() { ok += 1; } else {
+                    bad += 1;
+                    why.push(format!("variant {k} ({}; tip {:?}): {}", v.paths.iter().map(|&j| p.fan[j].name.as_str()).collect::<Vec<_>>().join("+"), v.tip.map(|t| t.1), w.join(", ")));
+                }
+            }
+            (ok, bad, why)
+        }
+
+        /// NONCE start-up self-test (fail closed): on every fan the routes can give and each of `spends`, a synthetic
+        /// launch's variants (built from the templates, signed, NEVER sent) pass nonce_verify. -> the summary line
+        pub fn nonce_selftest(&self, nonce: (Pk, [u8; 32]), spends: &[u64]) -> Result<String> {
+            let (mut n, mut fans, mut tpl) = (0u64, 0usize, 0u64);
+            for fan in self.route_fans() {
+                fans += 1;
+                for &sp in spends {
+                    let mut m = [0u8; 32];
+                    m[..8].copy_from_slice(&(0x6e6f_6e63_0000u64 + n).to_le_bytes());
+                    m[31] = 0x79;
+                    let l = snipe_build::launch_from_target(m, self.user);
+                    let names = fan.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("+");
+                    let meta = lat::Meta { route: "nonce-selftest".into(), ..Default::default() };
+                    let mut p = self.prepare_nonce_on(&l, 0, 12_345_678, [0; 6], Some(sp), nonce, fan.clone(), meta, fast::mono_ns()).with_context(|| format!("NONCE self-test: fan {names}"))?;
+                    self.nv_sign_all(&mut p);
+                    let (ok, bad, why) = self.nonce_verify(&p);
+                    if bad > 0 { bail!("NONCE self-test FAILED on fan {names} (spend {sp}): {}", why.join(" | ")); }
+                    n += ok;
+                    tpl += p.nonce.as_ref().map(|x| x.vars.iter().filter(|v| v.fast_built).count() as u64).unwrap_or(0);
+                }
+            }
+            Ok(format!("NONCE self-test: {n} variants ({tpl} from templates) on {fans} route fans x {} size(s): each = its full compile, signed, <= 1232 bytes, pays only its own path's tip, accepted by its paths' tip rules (none sent)", spends.len()))
+        }
+
+        /// one fan path's framed request for `payload` (path `p`, `i` its index in fps): HTTP = the whole request (FIX2:
+        /// harmonic-bundle is JSON-RPC sendBundle ([[b64], {"encoding":"base64"}]), the rest sendTransaction); jito-h2 = the
+        /// SendBundle message (`jtok` set to its bearer). None: no fast form (UDP / gRPC / async paths write the payload)
+        fn frame_req(&self, p: &send::Path, i: usize, payload: &[u8], body: &mut Vec<u8>, jtok: &mut Option<String>) -> Option<(Vec<u8>, usize)> {
+            match self.fps.get(i).map(|f| &f.kind) {
+                Some(Kind::Http { conn, json }) => {
+                    let mut req = Vec::with_capacity(2400);
+                    if *json && p.kind == SendKind::HarmonicBundle { fast::json_bundle_body(payload, body); conn.frame(body, &mut req); }
+                    else if *json { fast::json_send_body(payload, body); conn.frame(body, &mut req); } else { conn.frame(payload, &mut req); }
+                    Some((req, 0))
+                }
+                Some(Kind::JitoH2 { conn, jito }) => {
+                    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+                    let _ = conn;
+                    jito.cached_token(now_ms).map(|tok| {
+                        use prost::Message as _;
+                        let j = send::jito::SendBundleRequest { bundle: Some(send::jito::Bundle { packets: vec![send::jito::Packet { data: payload.to_vec(),
+                            meta: Some(send::jito::Meta { size: payload.len() as u64, addr: "0.0.0.0".into(), port: 0, sender_stake: 0 }) }] }) };
+                        *jtok = Some(format!("Bearer {tok}"));
+                        (j.encode_to_vec(), 0)
+                    })
+                }
+                _ => None,
+            }
         }
 
         /// M1 HOT PATH (between the decision and the first write): set min_tokens_out to `min_out` and re-sign. Patches 8
@@ -6388,6 +6989,8 @@ mod fastfire {
         /// into the payload and every framed request in place. No allocation but the signature's base58 for the logs.
         pub fn resign(&self, p: &mut Prep, min_out: u64) -> std::result::Result<(), &'static str> {
             let t = fast::mono_ns();
+            // NONCE: a variant fan-out is prepared at the decision (dip): never re-signed
+            if p.nonce.is_some() { return Err("a nonce fan-out is not re-signed"); }
             let mo = p.mo_off.ok_or("min_out offset unknown")?;
             let b = min_out.to_le_bytes();
             p.raw[mo..mo + 8].copy_from_slice(&b);
@@ -6408,15 +7011,19 @@ mod fastfire {
         }
 
         /// HOT PATH: write every path (the decision has been taken). Never blocks on the network.
-        pub fn fire(&self, p: &Prep) -> FireRec {
+        /// NONCE: each path is written with its OWN variant; a variant not signed at prepare is signed (and its paths'
+        /// requests framed) right before its first write, so the first write waits for one signature only
+        pub fn fire(&self, p: &mut Prep) -> FireRec {
             let t_fire0 = fast::mono_ns();
             let mut w: Vec<(String, &'static str, u64, u64, &'static str)> = Vec::with_capacity(p.fan.len());
             // 1. Jito first: its write happens on the runtime, so it overlaps with the writes below
-            for (i, path) in p.fan.iter().enumerate() {
+            for i in 0..p.fan.len() {
                 let Some(Kind::Jito) = self.fps.get(p.fpi[i]).map(|f| &f.kind) else { continue };
                 let t = fast::mono_ns();
-                if !path.fast_budget() { w.push((path.name.clone(), "jito", t, t, "over_rate")); continue; }
-                let (path2, pl, sig, tag) = (path.clone(), p.payload.clone(), p.meta.sig.clone(), p.id);
+                if !p.fan[i].fast_budget() { w.push((p.fan[i].name.clone(), "jito", t, t, "over_rate")); continue; }
+                if p.nonce.is_some() { self.nv_ready(p, i); }
+                let path = &p.fan[i];
+                let (path2, pl, sig, tag) = (path.clone(), p.payload_of(i).clone(), p.sig58_of(i), p.id);
                 self.handle.spawn(async move {
                     let t = fast::mono_ns();
                     let r = match &path2.jito { Some(j) => j.send_bundle(&[&pl[..]], &sig, None).await.map_err(|e| e.to_string()), None => Err("no block engine".into()) };
@@ -6430,74 +7037,138 @@ mod fastfire {
             // 2. UDP + 3. our HTTP connections, written from this thread
             let mut ubuf: Vec<u8> = Vec::with_capacity(1300);
             for pass in 0..3 {
-                for (i, path) in p.fan.iter().enumerate() {
+                for i in 0..p.fan.len() {
                     match (pass, self.fps.get(p.fpi[i]).map(|f| &f.kind)) {
                         (1, Some(Kind::JitoH2 { conn, .. })) => {
                             let t = fast::mono_ns();
-                            if !path.fast_budget() { w.push((path.name.clone(), "jito-h2", t, t, "over_rate")); continue; }
+                            if !p.fan[i].fast_budget() { w.push((p.fan[i].name.clone(), "jito-h2", t, t, "over_rate")); continue; }
+                            if p.nonce.is_some() { self.nv_ready(p, i); }
                             let r = match (&p.reqs[i], &p.jtok) { (Some((msg, _)), Some(tok)) => conn.write_call_idx("/searcher.SearcherService/SendBundle", tok, msg, p.id), _ => Err("no token".into()) };
                             match r {
-                                Ok((a, b)) => w.push((path.name.clone(), "jito-h2", a, b, "written")),
-                                Err(_) => { self.slow(path, p); w.push((path.name.clone(), "jito-h2", t, fast::mono_ns(), "conn_down_async")); }
+                                Ok((a, b)) => w.push((p.fan[i].name.clone(), "jito-h2", a, b, "written")),
+                                Err(_) => { self.slow(&p.fan[i], p, i); w.push((p.fan[i].name.clone(), "jito-h2", t, fast::mono_ns(), "conn_down_async")); }
                             }
                         }
                         (0, Some(Kind::Udp)) => {
                             let t = fast::mono_ns();
-                            if !path.fast_budget() { w.push((path.name.clone(), "udp", t, t, "over_rate")); continue; }
-                            let r = path.fast_udp(&p.payload, &mut ubuf, 1);
-                            w.push((path.name.clone(), "udp", t, fast::mono_ns(), match r { Some(Ok(())) => "written", _ => "udp_error" }));
+                            if !p.fan[i].fast_budget() { w.push((p.fan[i].name.clone(), "udp", t, t, "over_rate")); continue; }
+                            if p.nonce.is_some() { self.nv_ready(p, i); }
+                            let r = p.fan[i].fast_udp(p.payload_of(i), &mut ubuf, 1);
+                            w.push((p.fan[i].name.clone(), "udp", t, fast::mono_ns(), match r { Some(Ok(())) => "written", _ => "udp_error" }));
                         }
                         (2, Some(Kind::Http { conn, .. })) => {
                             let t = fast::mono_ns();
-                            if !path.fast_budget() { w.push((path.name.clone(), "http", t, t, "over_rate")); continue; }
+                            if !p.fan[i].fast_budget() { w.push((p.fan[i].name.clone(), "http", t, t, "over_rate")); continue; }
+                            if p.nonce.is_some() { self.nv_ready(p, i); }
                             match conn.write_req(p.reqs[i].as_ref().map(|r| &r.0[..]).unwrap_or(&[]), p.id) {
-                                Ok((a, b)) => w.push((path.name.clone(), "http", a, b, "written")),
-                                Err(_) => { self.slow(path, p); w.push((path.name.clone(), "http", t, fast::mono_ns(), "conn_down_async")); }
+                                Ok((a, b)) => w.push((p.fan[i].name.clone(), "http", a, b, "written")),
+                                Err(_) => { self.slow(&p.fan[i], p, i); w.push((p.fan[i].name.clone(), "http", t, fast::mono_ns(), "conn_down_async")); }
                             }
                         }
                         _ => {}
                     }
                 }
             }
-            // the extra LandX copies (redundancy against a dropped datagram) after every first write
-            if self.udp_copies > 1 {
-                for (i, path) in p.fan.iter().enumerate() {
-                    if let Some(Kind::Udp) = self.fps.get(p.fpi[i]).map(|f| &f.kind) { let _ = path.fast_udp(&p.payload, &mut ubuf, self.udp_copies - 1); }
+            // the extra LandX copies (redundancy against a dropped datagram) after every first write. dip18: per path (LandX:
+            // LANDX_UDP_COPIES, default 2, as before; falcon-udp: FALCON_UDP_COPIES, default 1 = no extra datagram)
+            for i in 0..p.fan.len() {
+                if let Some(Kind::Udp) = self.fps.get(p.fpi[i]).map(|f| &f.kind) {
+                    let copies = p.fan[i].udp_copies();
+                    if copies > 1 {
+                        if p.nonce.is_some() { self.nv_ready(p, i); }
+                        let _ = p.fan[i].fast_udp(p.payload_of(i), &mut ubuf, copies - 1);
+                    }
                 }
             }
             // 4. paths without a fast form: the old async send
-            for (i, path) in p.fan.iter().enumerate() {
+            for i in 0..p.fan.len() {
                 if matches!(self.fps.get(p.fpi[i]).map(|f| &f.kind), Some(Kind::Slow) | None) {
                     let t = fast::mono_ns();
-                    self.slow(path, p);
-                    w.push((path.name.clone(), "async", t, fast::mono_ns(), "spawned"));
+                    if p.nonce.is_some() { self.nv_ready(p, i); }
+                    self.slow(&p.fan[i], p, i);
+                    w.push((p.fan[i].name.clone(), "async", t, fast::mono_ns(), "spawned"));
                 }
             }
             let t_end = fast::mono_ns();
-            if p.fan.iter().enumerate().any(|(i, _)| matches!(self.fps.get(p.fpi[i]).map(|f| &f.kind), Some(Kind::JitoH2 { .. }))) {
+            if let Some(j) = (0..p.fan.len()).find(|&i| matches!(self.fps.get(p.fpi[i]).map(|f| &f.kind), Some(Kind::JitoH2 { .. }))) {
                 let mut g = TAGSIG.lock().unwrap();
                 let m = g.get_or_insert_with(HashMap::new);
                 if m.len() > 1000 { m.clear(); }
-                m.insert(p.id, p.meta.sig.clone());
+                m.insert(p.id, p.sig58_of(j));
             }
             FireRec { t_fire0, t_end, w }
         }
 
-        fn slow(&self, path: &Arc<send::Path>, p: &Prep) {
-            let (path, pl, meta, junk, tag) = (path.clone(), p.payload.clone(), p.meta.clone(), self.junk, p.id);
+        /// NONCE HOT PATH (fire): make path i's variant sendable if it is not yet (sign, payload, its paths' requests)
+        #[inline]
+        fn nv_ready(&self, p: &mut Prep, i: usize) {
+            let Some(nf) = p.nonce.as_mut() else { return };
+            let v = nf.vi[i];
+            if !nf.vars[v].signed { self.nv_sign(nf, v, &p.fan, &p.fpi, &mut p.reqs, &mut p.jtok); }
+        }
+
+        /// NONCE: sign variant `v` (a presigned nonce with --fast-presign), build its wire bytes and payload (junk: zero
+        /// signatures, never a valid tx) and frame the request of every path it goes to
+        fn nv_sign(&self, nf: &mut NonceFan, v: usize, fan: &[Arc<send::Path>], fpi: &[usize], reqs: &mut [Option<(Vec<u8>, usize)>], jtok: &mut Option<String>) {
+            let t = fast::mono_ns();
+            let var = &mut nf.vars[v];
+            let sig = self.presign.as_ref().and_then(|ps| ps.sign(&var.msg)).unwrap_or_else(|| self.key.sign(&var.msg).to_bytes());
+            let mut raw = Vec::with_capacity(65 + var.msg.len());
+            raw.push(1); raw.extend_from_slice(&sig); raw.extend_from_slice(&var.msg);
+            let mut payload = raw.clone();
+            if self.junk { payload[0] = 0; }
+            let mut body = Vec::with_capacity(2048);
+            for &j in &var.paths { reqs[j] = self.frame_req(&fan[j], fpi[j], &payload, &mut body, jtok); }
+            var.sig = sig;
+            var.sig58 = if self.junk { "junk".into() } else { bs58::encode(&sig).into_string() };
+            var.raw = raw;
+            var.payload = Arc::new(payload);
+            var.signed = true;
+            var.sign_ns = fast::mono_ns().saturating_sub(t);
+        }
+
+        /// NONCE (off the hot path: the bench, the start-up self-test): sign every variant not signed yet
+        pub fn nv_sign_all(&self, p: &mut Prep) {
+            let Some(nf) = p.nonce.as_mut() else { return };
+            for v in 0..nf.vars.len() { if !nf.vars[v].signed { self.nv_sign(nf, v, &p.fan, &p.fpi, &mut p.reqs, &mut p.jtok); } }
+        }
+
+        fn slow(&self, path: &Arc<send::Path>, p: &Prep, i: usize) {
+            // NONCE: path i's own variant (its signature, bytes and the one tip it pays); else the one tx
+            let meta = match &p.nonce {
+                None => p.meta.clone(),
+                Some(n) => { let v = &n.vars[n.vi[i]]; let mut m = p.meta.clone(); m.sig = v.sig58.clone(); m.bytes = v.raw.len(); m.tips = v.tip.map_or(0, |t| t.1); m }
+            };
+            let (path, pl, meta, junk, tag) = (path.clone(), p.payload_of(i).clone(), meta, self.junk, p.id);
             self.handle.spawn(async move {
                 if junk {
                     let (ms, answered, reply) = path.ack_probe().await;
                     eprintln!("  FAST-ACK tag={tag} path={} ack_ms={ms:.3} answered={answered} reply={} (async junk)", path.name, reply.chars().take(100).collect::<String>());
                 } else {
-                    let _ = lat::send_one(&path, &pl, Instant::now(), &meta).await;
+                    let t = Instant::now();
+                    let r = lat::send_one(&path, &pl, t, &meta).await;
+                    // dip16 C3: this async copy's answer for the fire's timing record (its SEND-ACK line already carries "route=")
+                    if speed16::route_on() {
+                        let ms = t.elapsed().as_secs_f64() * 1e3;
+                        match &r {
+                            Ok(rep) => speed16::note_ack(tag, &path.name, rep.status, ms, speed16::reply_route(&rep.reply)),
+                            Err(e) => speed16::note_ack(tag, &path.name, e.status, ms, None),
+                        }
+                    }
                 }
             });
         }
 
         /// after the fire (or for a create that never fired): verify + trace, off the hot path
         pub fn trace_prep(&self, p: &Prep) {
-            let ok = if self.verify && p.fast_built {
+            let ok = if self.verify && p.nonce.is_some() {
+                // NONCE: every sent variant against its own full compile, signature, payload, requests and tips
+                let (good, bad, why) = self.nonce_verify(p);
+                self.verified.fetch_add(good, Ordering::Relaxed);
+                self.mismatched.fetch_add(bad, Ordering::Relaxed);
+                for w in &why { eprintln!("  FAST-VERIFY NONCE MISMATCH mint={} {w}", b58(&p.launch.mint)); }
+                Some(bad == 0)
+            } else if self.verify && p.fast_built {
                 let r = self.reference(&p.launch, &p.tips, p.bh, p.min_out, p.deadline, p.spend);
                 let sig_ok = self.key.verifying_key().verify_strict(&p.raw[65..], &ed25519_dalek::Signature::from_bytes(&p.sig)).is_ok();
                 // M1: every framed request must carry exactly the (re-signed) payload
@@ -6515,12 +7186,16 @@ mod fastfire {
                 }
                 Some(same)
             } else { None };
-            self.trace_line(serde_json::json!({ "ev": "prep", "id": p.id, "mint": b58(&p.launch.mint), "slot": p.slot, "route": p.meta.route, "paths": p.fan.len(),
+            let mut j = serde_json::json!({ "ev": "prep", "id": p.id, "mint": b58(&p.launch.mint), "slot": p.slot, "route": p.meta.route, "paths": p.fan.len(),
                 "tips": p.tips.len(), "bytes": p.raw.len(), "fast_built": p.fast_built, "verify": ok, "min_out": p.min_out, "resign_ns": p.resign_ns,
                 "route_ns": p.st[1] - p.st[0], "derive_ns": p.st[2] - p.st[1], "patch_ns": p.st[3].saturating_sub(p.st[2]), "sign_ns": p.st[4] - p.st[3],
                 "encode_ns": p.st[5] - p.st[4], "prep_ns": p.st[5] - p.st[0],
                 "rx_to_dec_us": (p.cr[1] as i64 - p.cr[0] as i64) / 1000, "dec_to_deq_us": (p.cr[2] as i64 - p.cr[1] as i64) / 1000,
-                "deq_to_detect_ns": p.cr[4].saturating_sub(p.cr[3]), "detect_to_gated_ns": p.cr[5].saturating_sub(p.cr[4]), "gated_to_prep_ns": p.st[0].saturating_sub(p.cr[5]) }));
+                "deq_to_detect_ns": p.cr[4].saturating_sub(p.cr[3]), "detect_to_gated_ns": p.cr[5].saturating_sub(p.cr[4]), "gated_to_prep_ns": p.st[0].saturating_sub(p.cr[5]) });
+            // NONCE: the variants (sign_ns = sign + frame, each; the first one's is in sign_ns above)
+            if let Some(n) = &p.nonce { j["nonce"] = serde_json::json!({ "acct": b58(&n.acct), "variants": n.vars.len(), "signed": n.vars.iter().filter(|v| v.signed).count(),
+                "sign_ns": n.vars.iter().map(|v| v.sign_ns).collect::<Vec<_>>() }); }
+            self.trace_line(j);
         }
 
         /// ev: the deciding event's (rx realtime, decoded realtime, dequeued realtime, dequeued mono); t_dec: decided (mono)
@@ -6572,9 +7247,9 @@ mod fastfire {
             m[..8].copy_from_slice(&(0x9000_0000u64 + i as u64).to_le_bytes());
             let mut l = snipe_build::launch_from_target(m, f.user);
             l.dev_buy_lamports = 1_000_000_000;
-            let p = match f.prepare(&l, 0, 1, [0; 6]) { Ok(p) => p, Err(e) => { eprintln!("probe prepare: {e:#}"); return; } };
+            let mut p = match f.prepare(&l, 0, 1, [0; 6]) { Ok(p) => p, Err(e) => { eprintln!("probe prepare: {e:#}"); return; } };
             let t_dec = fast::mono_ns();
-            let rec = f.fire(&p);
+            let rec = f.fire(&mut p);
             eprintln!("  FAST-PROBE tag={} paths={} writes: {}", p.id, p.fan.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(","),
                 rec.w.iter().map(|x| format!("{}={}@{:.1}us", x.0, x.4, x.3.saturating_sub(t_dec) as f64 / 1e3)).collect::<Vec<_>>().join(" "));
             f.trace_fire(&p, &rec, [0; 4], t_dec);
@@ -6637,6 +7312,90 @@ mod fastfire {
             }
             println!("byte check at spend {sp} lamports: {same2} identical, {diff2} different; the amount is in {has_amt}/{n} txs");
         }
+        // NONCE (--nonce-fanout): the durable-nonce variants of launches built the same way, on the pool's accounts (each given
+        // back at once: nothing is sent). Prepare = route + derive + EVERY variant's patch + the FIRST-written variant's sign +
+        // frame; each other variant is signed + framed in fire() right before its first write. Every variant checked against
+        // its full compile (message bytes), its signature, its requests, the tips it pays and its paths' tip rules
+        if let Some(np) = noncefan::get() {
+            let mut stn: [Vec<u64>; 5] = Default::default();
+            let mut rest: Vec<u64> = Vec::new();
+            let (mut ok, mut bad, mut nv, mut tpl, mut why1) = (0u64, 0u64, 0usize, 0usize, None::<String>);
+            for i in 0..n {
+                let mut m = [0u8; 32];
+                m[..8].copy_from_slice(&(0x5eed_2000_0000u64 + i as u64).to_le_bytes());
+                m[31] = 0x7a;
+                let mut l = snipe_build::launch_from_target(m, f.user);
+                l.dev_buy_lamports = 1_000_000_000;
+                let Some(le) = np.take() else { println!("NONCE bench: no nonce account ready"); break };
+                let r = f.prepare_nonce(&l, 0, 12_345_678, [0; 6], None, (le.key, le.value));
+                np.give_back(&le);
+                let mut p = match r { Ok(p) => p, Err(e) => { println!("NONCE bench prepare: {e:#}"); break } };
+                for k in 0..4 { stn[k].push(p.st[k + 1] - p.st[k]); }
+                stn[4].push(p.st[5] - p.st[0]);
+                f.nv_sign_all(&mut p);
+                if let Some(x) = &p.nonce { nv = x.vars.len(); tpl += x.vars.iter().filter(|v| v.fast_built).count(); rest.extend(x.vars.iter().skip(1).map(|v| v.sign_ns)); }
+                let (g, b, w) = f.nonce_verify(&p);
+                ok += g; bad += b;
+                if why1.is_none() { why1 = w.into_iter().next(); }
+            }
+            println!("---------- NONCE variants (--nonce-fanout: {nv} per buy on this route) ----------");
+            for (k, name) in ["route+tips (variants)", "derive 2 ATAs", "patch every variant", "sign+frame 1st variant", "PREPARE TOTAL (nonce)"].iter().enumerate() {
+                if !stn[k].is_empty() { println!("{name:24} {:8.2} / {:8.2}", q(&mut stn[k], 0.5), q(&mut stn[k], 0.99)); }
+            }
+            if !rest.is_empty() { println!("{:24} {:8.2} / {:8.2}   (each OTHER variant: in fire(), right before its first write)", "sign+frame next variant", q(&mut rest, 0.5), q(&mut rest, 0.99)); }
+            println!("nonce check vs full compile (message bytes, signature, requests, tips paid, tip rules): {ok} variants identical, {bad} different; {tpl} built from templates{}",
+                why1.map(|w| format!(" (first problem: {w})")).unwrap_or_default());
+        }
+        // FIRE (--fast-bench-fires K; ZERO COST: needs --junk-fanout, every payload has zero signatures and can never be a valid
+        // tx): K dip-style decisions per mode (prepare AT the decision, as the dip engine, then fire) through the real send
+        // connections; decision -> FIRST and -> LAST path written (its write() returned). Today's tx, and with --nonce-fanout
+        // the nonce variants (alternating, same connections)
+        let k = arg_u64("--fast-bench-fires", 0) as usize;
+        if k > 0 && !f.junk { println!("FIRE bench: --fast-bench-fires needs --junk-fanout (junk payloads only: nothing can land)"); }
+        if k > 0 && f.junk {
+            let gap = Duration::from_millis(arg_u64("--fast-bench-gap-ms", 20));
+            let np = noncefan::get();
+            let modes: Vec<bool> = if np.is_some() { vec![false, true] } else { vec![false] };
+            let mut r: [(Vec<u64>, Vec<u64>, Vec<usize>, u64); 2] = Default::default();
+            let mut per: HashMap<(bool, String), Vec<u64>> = HashMap::new();
+            for j in 0..k {
+                for &nm in &modes {
+                    let mut m = [0u8; 32];
+                    m[..8].copy_from_slice(&(0x5eed_3000_0000u64 + (2 * j + nm as usize) as u64).to_le_bytes());
+                    m[31] = 0x7b;
+                    let mut l = snipe_build::launch_from_target(m, f.user);
+                    l.dev_buy_lamports = 1_000_000_000;
+                    let t_dec = fast::mono_ns();
+                    let le = if nm { np.and_then(|x| x.take()) } else { None };
+                    let pr = le.as_ref().and_then(|x| f.prepare_nonce(&l, 0, 1, [0; 6], None, (x.key, x.value)).ok());
+                    if nm && pr.is_none() { r[1].3 += 1; }
+                    let mut p = match pr { Some(p) => p, None => match f.prepare_on(&l, 0, 1, [0; 6], None, None) { Ok(p) => p, Err(e) => { println!("FIRE bench prepare: {e:#}"); return; } } };
+                    let rec = f.fire(&mut p);
+                    // junk: nothing that can land was sent: the account goes straight back
+                    if let (Some(x), Some(le)) = (np, le.as_ref()) { x.give_back(le); }
+                    let wr: Vec<&(String, &'static str, u64, u64, &'static str)> = rec.w.iter().filter(|x| x.4 == "written").collect();
+                    if let (Some(a), Some(b)) = (wr.iter().map(|x| x.3).min(), wr.iter().map(|x| x.3).max()) {
+                        let s = &mut r[nm as usize];
+                        s.0.push(a.saturating_sub(t_dec)); s.1.push(b.saturating_sub(t_dec)); s.2.push(wr.len());
+                        for x in &wr { per.entry((nm, x.0.clone())).or_default().push(x.3.saturating_sub(t_dec)); }
+                    }
+                    std::thread::sleep(gap);
+                }
+            }
+            println!("---------- FIRE (junk; {k} decisions per mode, {} ms apart; prepare at the decision then fire; µs p50 / p90 / p99) ----------", gap.as_millis());
+            for &nm in &modes {
+                let s = &mut r[nm as usize];
+                if s.0.is_empty() { println!("{:8} no path written", if nm { "nonce" } else { "default" }); continue; }
+                let w = s.2.iter().sum::<usize>() as f64 / s.2.len() as f64;
+                let mut spread: Vec<u64> = s.0.iter().zip(&s.1).map(|(a, b)| b - a).collect();
+                println!("{:8} decision -> FIRST write {:8.2} / {:8.2} / {:8.2}   -> LAST write {:8.2} / {:8.2} / {:8.2}   first -> last {:7.2} / {:7.2} / {:7.2}   ({w:.1} paths written per fire{})",
+                    if nm { "nonce" } else { "default" }, q(&mut s.0, 0.5), q(&mut s.0, 0.9), q(&mut s.0, 0.99), q(&mut s.1, 0.5), q(&mut s.1, 0.9), q(&mut s.1, 0.99),
+                    q(&mut spread, 0.5), q(&mut spread, 0.9), q(&mut spread, 0.99), if nm { format!(", {} fallbacks", s.3) } else { String::new() });
+                let mut names: Vec<String> = per.keys().filter(|x| x.0 == nm).map(|x| x.1.clone()).collect();
+                names.sort();
+                for pn in names { if let Some(v) = per.get_mut(&(nm, pn.clone())) { println!("    decision -> {pn:16} {:8.2} / {:8.2} / {:8.2}", q(v, 0.5), q(v, 0.9), q(v, 0.99)); } }
+            }
+        }
         // the derivation and the signature alone
         let mut d: Vec<u64> = Vec::new();
         let mut s: Vec<u64> = Vec::new();
@@ -6665,6 +7424,363 @@ mod fastfire {
             }
             println!("{:24} {:8.2} / {:8.2}   ({bad} failed verify_strict)", "presign sign (900 B)", q(&mut s2, 0.5), q(&mut s2, 0.99));
         }
+    }
+}
+
+// ================================================================================================================
+// NONCE (2026-10-24, owner OK 10-24 ~22:55 PKT "yes do that": a send-path change): a durable-nonce fan-out for the dip
+// engine's BUYS. Default off: without the flags every buy is today's one multi-tip tx, byte for byte.
+// Today a FAST buy is ONE signed tx carrying a tip for every send path of its route, written to all of them: a FILLED buy
+// pays every tip (~0.002 SOL; a failed one pays none: the tips revert with it). With --nonce-fanout each path gets its OWN
+// variant (one per tip family: fastfire::tip_groups = lat::tips_for's grouping; the tipless paths share one): AdvanceNonce
+// Account(nonce, wallet) first, at most ONE tip (its path's), the same slot guard + buy; its "recent blockhash" is the
+// nonce's stored value. Every variant of a buy is built on one nonce value, so at most one can land: one tip is paid.
+//  * --nonce-fanout --nonce-accounts FILE (one base58 pubkey per line, authority = the engine's wallet; --dip only): both
+//    are needed. Either one alone, or a FILE that cannot be read / holds no pubkey = the engine runs exactly as today
+//    (logged NONCE-FANOUT OFF). Read at start (getMultipleAccounts, confirmed): an account that is not an initialized nonce
+//    of this wallet REFUSES the start, as do --live without the slot guard (--buy-max-slot-delta: a nonce variant never
+//    expires, the guard is what makes a late one fail on chain) and a failed start-up self-test (every route fan's variants
+//    built, signed and checked against their full compile and their paths' tip rules; nothing is sent).
+//  * the pool: take() (HOT PATH: no I/O, one uncontended lock) hands out a READY (account, value), marked taken; after the
+//    fire it is FIRED: out of rotation until a confirmed read shows its value changed (a variant landed, or failed on
+//    chain: both advance the nonce) -> NONCE-ADVANCED, or, unchanged, a confirmed read at slot >= the buy's deadline + 150
+//    (no variant landed; until then a stale one could still land, fail at the guard and advance the nonce under the next
+//    buy) -> NONCE-REUSE at the same value. A refresher task reads the fired accounts (one getMultipleAccounts per 300 ms
+//    tick, both RPCs raced; every 7th tick after an account's first 5 s); an unreadable RPC keeps them out (never a guess).
+//    No ready account at a fire = that buy is today's multi-tip tx (NONCE-FALLBACK, logged after the writes).
+//  * --create-nonces N --nonce-out FILE [--live]: the wallet's N accounts at create_with_seed(wallet, "dip-nonce-<i>",
+//    System) (idempotent: existing ones are verified and kept; ~0.00145 SOL rent each, refundable), then FILE; without
+//    --live only the plan. --close-nonces FILE [--live]: WithdrawNonceAccount of each account's whole balance to the wallet
+//    (closes it: the rent comes back). Both unlock the keystore exactly as the engine does (--config's wallet_keystore).
+// Sells are unchanged (recent blockhash: "sells never wait").
+// ================================================================================================================
+mod noncefan {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, AtomicUsize};
+    use std::sync::{Mutex, OnceLock};
+
+    /// slots after a buy's deadline before an account whose value did not change goes back into rotation
+    pub const REUSE_SLOTS: u64 = 150;
+    /// --create-nonces: account i is create_with_seed(wallet, SEED + i, System)
+    pub const SEED: &str = "dip-nonce-";
+    /// the refresher: a fired account is read every tick for its first FAST_S seconds, then every SLOW_EVERY-th tick
+    const TICK: Duration = Duration::from_millis(300);
+    const FAST_S: u64 = 5;
+    const SLOW_EVERY: u64 = 7;
+
+    /// one account's state
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum St {
+        /// in rotation, at this value
+        Ready([u8; 32]),
+        /// handed out by take(), not fired yet (give_back -> Ready, fired -> Fired)
+        Taken([u8; 32]),
+        /// variants built on `value` were sent; `deadline`: the buy's slot guard (None: no guard -> never reused unchanged)
+        Fired { value: [u8; 32], deadline: Option<u64>, at: Instant },
+        /// no longer usable (closed / not a nonce of this wallet): out for the rest of the run
+        Dead,
+    }
+
+    /// a handed-out account: its index, key and the value its variants are built on
+    #[derive(Clone, Copy, Debug)]
+    pub struct Lease { pub idx: usize, pub key: Pk, pub value: [u8; 32] }
+
+    /// what a read of a fired account changed
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum Obs { Advanced { waited: Duration, ctx: u64 }, Reused { waited: Duration, ctx: u64, deadline: u64 }, Dead(String) }
+
+    pub struct Pool {
+        pub keys: Vec<Pk>,
+        st: Mutex<Vec<St>>,
+        cur: AtomicUsize,
+        pub taken: AtomicU64,
+        pub fallbacks: AtomicU64,
+        pub advanced: AtomicU64,
+        pub reused: AtomicU64,
+    }
+
+    pub static POOL: OnceLock<Arc<Pool>> = OnceLock::new();
+    /// the pool (None: --nonce-fanout off: every buy is today's tx)
+    pub fn get() -> Option<&'static Arc<Pool>> { POOL.get() }
+
+    impl Pool {
+        pub fn new(accts: &[(Pk, [u8; 32])]) -> Pool {
+            Pool { keys: accts.iter().map(|a| a.0).collect(), st: Mutex::new(accts.iter().map(|a| St::Ready(a.1)).collect()), cur: AtomicUsize::new(0),
+                taken: AtomicU64::new(0), fallbacks: AtomicU64::new(0), advanced: AtomicU64::new(0), reused: AtomicU64::new(0) }
+        }
+
+        /// HOT PATH: a READY account (round robin), marked taken; None: none ready (that buy is today's tx). No I/O.
+        pub fn take(&self) -> Option<Lease> {
+            let mut g = self.st.lock().unwrap();
+            let n = g.len();
+            if n == 0 { return None; }
+            let c = self.cur.fetch_add(1, Ordering::Relaxed);
+            for k in 0..n {
+                let i = (c + k) % n;
+                if let St::Ready(v) = g[i] {
+                    g[i] = St::Taken(v);
+                    self.taken.fetch_add(1, Ordering::Relaxed);
+                    return Some(Lease { idx: i, key: self.keys[i], value: v });
+                }
+            }
+            None
+        }
+
+        /// the lease was not fired (its prepare failed, or a junk fire: nothing that can land was sent): READY again
+        pub fn give_back(&self, l: &Lease) {
+            let mut g = self.st.lock().unwrap();
+            if g[l.idx] == St::Taken(l.value) { g[l.idx] = St::Ready(l.value); }
+        }
+
+        /// variants built on the lease were sent: out of rotation until `observe` puts it back
+        pub fn fired(&self, l: &Lease, deadline: Option<u64>) {
+            let mut g = self.st.lock().unwrap();
+            if g[l.idx] == St::Taken(l.value) { g[l.idx] = St::Fired { value: l.value, deadline, at: Instant::now() }; }
+        }
+
+        /// the fired accounts to read at refresher tick `tick` (every tick for FAST_S s after the fire, then every SLOW_EVERY-th)
+        pub fn due(&self, tick: u64) -> Vec<usize> {
+            let g = self.st.lock().unwrap();
+            (0..g.len()).filter(|&i| matches!(g[i], St::Fired { at, .. } if at.elapsed() < Duration::from_secs(FAST_S) || tick % SLOW_EVERY == 0)).collect()
+        }
+
+        /// one confirmed read of fired account i at context slot `ctx`: Ok(its value) / Err(why it is no longer usable).
+        /// Changed -> READY at the new value; unchanged at ctx >= deadline + REUSE_SLOTS -> READY at the same value; else it
+        /// stays fired. None: nothing changed
+        pub fn observe(&self, i: usize, ctx: u64, val: std::result::Result<[u8; 32], String>) -> Option<Obs> {
+            let mut g = self.st.lock().unwrap();
+            let St::Fired { value, deadline, at } = g[i] else { return None };
+            match val {
+                Ok(v) if v != value => { g[i] = St::Ready(v); self.advanced.fetch_add(1, Ordering::Relaxed); Some(Obs::Advanced { waited: at.elapsed(), ctx }) }
+                Ok(_) => match deadline {
+                    Some(d) if ctx >= d.saturating_add(REUSE_SLOTS) => {
+                        g[i] = St::Ready(value);
+                        self.reused.fetch_add(1, Ordering::Relaxed);
+                        Some(Obs::Reused { waited: at.elapsed(), ctx, deadline: d })
+                    }
+                    _ => None,
+                },
+                Err(why) => { g[i] = St::Dead; Some(Obs::Dead(why)) }
+            }
+        }
+
+        /// (ready, taken, fired, dead)
+        pub fn counts(&self) -> (usize, usize, usize, usize) {
+            let g = self.st.lock().unwrap();
+            let c = |f: fn(&St) -> bool| g.iter().filter(|s| f(s)).count();
+            (c(|s| matches!(s, St::Ready(_))), c(|s| matches!(s, St::Taken(_))), c(|s| matches!(s, St::Fired { .. })), c(|s| matches!(s, St::Dead)))
+        }
+
+        /// the status line's part
+        pub fn line(&self) -> String {
+            let (r, t, f, d) = self.counts();
+            format!("nonce: ready {r} taken {t} fired {f} dead {d} | used {} fallbacks {} advanced {} reused {}", self.taken.load(Ordering::Relaxed),
+                self.fallbacks.load(Ordering::Relaxed), self.advanced.load(Ordering::Relaxed), self.reused.load(Ordering::Relaxed))
+        }
+
+        /// account i's state (tests)
+        #[cfg(test)]
+        pub fn state(&self, i: usize) -> St { self.st.lock().unwrap()[i] }
+
+        /// a READY account's (key, value), without taking it (the start-up self-test builds variants on it, never sent)
+        pub fn first_ready(&self) -> Option<(Pk, [u8; 32])> {
+            let g = self.st.lock().unwrap();
+            g.iter().enumerate().find_map(|(i, s)| if let St::Ready(v) = s { Some((self.keys[i], *v)) } else { None })
+        }
+    }
+
+    /// a getMultipleAccounts / getAccountInfo value (base64): the stored value of an initialized, current-version nonce
+    /// account of the System program whose authority is `user`; Err: why it is not one
+    pub fn check_account(v: &serde_json::Value, user: &Pk) -> std::result::Result<[u8; 32], String> {
+        if v.is_null() { return Err("no such account".into()); }
+        if v["owner"].as_str() != Some("11111111111111111111111111111111") { return Err(format!("owner {} is not the System program", v["owner"])); }
+        let d = v["data"][0].as_str().and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok()).ok_or_else(|| "data is not base64".to_string())?;
+        if d.len() != 80 { return Err(format!("{} bytes: not a nonce account (80)", d.len())); }
+        if d[0..4] != 1u32.to_le_bytes() { return Err("not a current-version nonce account".into()); }
+        let value = build::nonce_value(&d).ok_or_else(|| "not an initialized nonce".to_string())?;
+        if d[8..40] != user[..] { let mut a = [0u8; 32]; a.copy_from_slice(&d[8..40]); return Err(format!("its authority is {}, not this wallet", b58(&a))); }
+        Ok(value)
+    }
+
+    /// --nonce-accounts FILE: one base58 pubkey per line (blank lines and # comments ignored), duplicates dropped (in
+    /// order), at most 100. Err: a line that is not a pubkey, none at all, or too many
+    pub fn parse_file(text: &str) -> std::result::Result<Vec<Pk>, String> {
+        let mut out: Vec<Pk> = Vec::new();
+        for (n, l) in text.lines().enumerate() {
+            let s = l.split('#').next().unwrap_or("").trim();
+            if s.is_empty() { continue; }
+            let k: Pk = bs58::decode(s).into_vec().ok().and_then(|v| v.try_into().ok()).ok_or_else(|| format!("line {}: '{s}' is not a base58 pubkey", n + 1))?;
+            if !out.contains(&k) { out.push(k); }
+        }
+        if out.is_empty() { return Err("no pubkey in it".into()); }
+        if out.len() > 100 { return Err(format!("{} accounts (at most 100: one getMultipleAccounts)", out.len())); }
+        Ok(out)
+    }
+
+    /// the raw account values of `keys` (getMultipleAccounts, base64, confirmed; both RPCs raced): (context slot, values)
+    async fn read_raw(rpc: &rpc::Rpc, keys: &[Pk]) -> Result<(u64, Vec<serde_json::Value>)> {
+        let ks: Vec<String> = keys.iter().map(b58).collect();
+        let v = call2(rpc, "getMultipleAccounts", serde_json::json!([ks, { "encoding": "base64", "commitment": "confirmed" }])).await?;
+        let vals = v["value"].as_array().context("getMultipleAccounts: no value")?.clone();
+        if vals.len() != keys.len() { bail!("getMultipleAccounts: {} values for {} keys", vals.len(), keys.len()); }
+        Ok((v["context"]["slot"].as_u64().unwrap_or(0), vals))
+    }
+
+    /// start-up (--dip): the pool when --nonce-fanout AND --nonce-accounts FILE are given and FILE is usable; Ok(None):
+    /// the engine runs exactly as today (logged). Err refuses the start: --live without the slot guard, accounts that
+    /// cannot be read, an account that is not an initialized nonce of `user`
+    pub async fn setup(rpc: &Arc<rpc::Rpc>, user: Pk, live: bool, stop: Arc<AtomicBool>) -> Result<Option<Arc<Pool>>> {
+        let file = match (has("--nonce-fanout"), arg("--nonce-accounts")) {
+            (false, None) => return Ok(None),
+            (true, Some(f)) => f,
+            (true, None) => { eprintln!("NONCE-FANOUT OFF: --nonce-fanout without --nonce-accounts FILE: every buy is today's multi-tip tx"); return Ok(None); }
+            (false, Some(f)) => { eprintln!("NONCE-FANOUT OFF: --nonce-accounts {f} without --nonce-fanout: every buy is today's multi-tip tx"); return Ok(None); }
+        };
+        let keys = match std::fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|t| parse_file(&t)) {
+            Ok(k) => k,
+            Err(e) => { eprintln!("NONCE-FANOUT OFF: --nonce-accounts {file}: {e}: every buy is today's multi-tip tx"); return Ok(None); }
+        };
+        if live && SLOT_GUARD.get().is_none() {
+            bail!("--nonce-fanout --live needs the on-chain slot guard (--buy-max-slot-delta N): a durable-nonce variant never expires, the guard is what makes a late one fail on chain — refusing to start");
+        }
+        let mut got = None;
+        let mut errs = Vec::new();
+        for k in 0..3 {
+            if k > 0 { tokio::time::sleep(Duration::from_secs(1)).await; }
+            match read_raw(rpc, &keys).await { Ok(x) => { got = Some(x); break; } Err(e) => errs.push(redact(&format!("{e:#}"))) }
+        }
+        let Some((slot, vals)) = got else { bail!("--nonce-accounts {file}: the accounts cannot be read ({}) — refusing to start", errs.join(" | ")) };
+        let (mut accts, mut bad) = (Vec::new(), Vec::new());
+        for (k, v) in keys.iter().zip(&vals) {
+            match check_account(v, &user) { Ok(val) => accts.push((*k, val)), Err(e) => bad.push(format!("{} ({e})", b58(k))) }
+        }
+        if !bad.is_empty() {
+            bail!("--nonce-accounts {file}: {} of {} account(s) are not initialized durable-nonce accounts of this wallet {}: {} — refusing to start (make them with --create-nonces N --nonce-out FILE)",
+                bad.len(), keys.len(), b58(&user), bad.join(", "));
+        }
+        let pool = Arc::new(Pool::new(&accts));
+        if POOL.set(pool.clone()).is_err() { bail!("the nonce pool was initialised twice"); }
+        eprintln!("NONCE-FANOUT ON: {} durable-nonce account(s) from {file} (verified at slot {slot}; authority {}): each buy = one variant per send path, one tip each; an account is reused once its value changes or {REUSE_SLOTS} slots past the buy's deadline",
+            accts.len(), b58(&user));
+        start_refresher(pool.clone(), rpc.clone(), user, stop);
+        Ok(Some(pool))
+    }
+
+    /// the reads of the FIRED accounts (one getMultipleAccounts per tick); an account comes back only on a successful read
+    fn start_refresher(pool: Arc<Pool>, rpc: Arc<rpc::Rpc>, user: Pk, stop: Arc<AtomicBool>) {
+        tokio::spawn(async move {
+            let (mut tick, mut errs, mut last_err): (u64, u64, Option<Instant>) = (0, 0, None);
+            while !stop.load(Ordering::Relaxed) {
+                tokio::time::sleep(TICK).await;
+                tick += 1;
+                let due = pool.due(tick);
+                if due.is_empty() { continue; }
+                let keys: Vec<Pk> = due.iter().map(|&i| pool.keys[i]).collect();
+                match read_raw(&rpc, &keys).await {
+                    Ok((ctx, vals)) => for (&i, v) in due.iter().zip(&vals) {
+                        let k = b58(&pool.keys[i]);
+                        match pool.observe(i, ctx, check_account(v, &user)) {
+                            Some(Obs::Advanced { waited, ctx }) => eprintln!("  NONCE-ADVANCED {k} {:.0} ms after the fire (slot {ctx}): a variant landed or failed on chain; back in rotation", waited.as_secs_f64() * 1e3),
+                            Some(Obs::Reused { waited, ctx, deadline }) => eprintln!("  NONCE-REUSE {k}: value unchanged at slot {ctx} >= deadline {deadline} + {REUSE_SLOTS} ({:.0} s after the fire): no variant landed; back in rotation at the same value (a stale variant can only fail at the slot guard)", waited.as_secs_f64()),
+                            Some(Obs::Dead(why)) => {
+                                eprintln!("  NONCE-DEAD {k}: {why}: out of rotation for this run");
+                                tg::raise(arbx::alerts::Level::Warning, "dip_nonce_dead", &k, "🧷", "Nonce account out of rotation", arbx::alerts::format::Body::new().kv("account", &k).txt(&why), false);
+                            }
+                            None => {}
+                        }
+                    },
+                    Err(e) => {
+                        errs += 1;
+                        if last_err.is_none_or(|t| t.elapsed() > Duration::from_secs(30)) {
+                            last_err = Some(Instant::now());
+                            eprintln!("  NONCE-REFRESH read failed ({}; {errs} so far): {} fired account(s) stay out of rotation until a read succeeds", redact(&format!("{e:#}")).chars().take(160).collect::<String>(), due.len());
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// one signed tx through the --config RPC with its preflight (simulation) on: the signature
+    async fn send_tx(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, ixs: &[build::Ix]) -> Result<String> {
+        let (bh, _) = rpc.latest_blockhash().await.context("getLatestBlockhash")?;
+        let msg = build::compile_v0(user, ixs, bh, &[], &[]).map_err(|e| anyhow::anyhow!(e))?;
+        let raw = build::sign(&msg, key);
+        let v = rpc.call("sendTransaction", serde_json::json!([base64::engine::general_purpose::STANDARD.encode(&raw), { "encoding": "base64", "preflightCommitment": "confirmed" }])).await
+            .map_err(|e| anyhow::anyhow!("sendTransaction (preflight): {}", redact(&format!("{e:#}"))))?;
+        Ok(v.as_str().map(String::from).unwrap_or_else(|| v.to_string()))
+    }
+
+    /// --create-nonces N --nonce-out FILE [--live]: the wallet's accounts dip-nonce-0..N-1 (existing ones verified and
+    /// kept), then FILE with all N (written whole: tmp + rename). Without --live: the plan only (FILE is written only when
+    /// every account already exists)
+    pub async fn create(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, n: u64, out: &str, live: bool) -> Result<()> {
+        if !(1..=32).contains(&n) { bail!("--create-nonces N: N must be 1..32"); }
+        let rent = rpc.call("getMinimumBalanceForRentExemption", serde_json::json!([80])).await.context("getMinimumBalanceForRentExemption")?.as_u64().context("rent: no value")?;
+        let plan: Vec<(String, Pk, Vec<build::Ix>)> = (0..n).map(|i| { let s = format!("{SEED}{i}"); let (a, ixs) = build::create_nonce_ixs(user, &s, rent); (s, a, ixs) }).collect();
+        let keys: Vec<Pk> = plan.iter().map(|p| p.1).collect();
+        let (_, vals) = read_raw(rpc, &keys).await.context("reading the accounts")?;
+        let mut todo = Vec::new();
+        for ((seed, addr, ixs), v) in plan.into_iter().zip(&vals) {
+            if v.is_null() { todo.push((seed, addr, ixs)); continue; }
+            match check_account(v, &user) {
+                Ok(_) => eprintln!("  {seed} {} exists (an initialized nonce of this wallet): kept", b58(&addr)),
+                Err(e) => bail!("{seed} {} exists but is not a usable nonce of this wallet ({e}): not touching it", b58(&addr)),
+            }
+        }
+        let bal = native_balance(rpc, user).await.context("getBalance")?;
+        let cost = todo.len() as u64 * (rent + 5_000);
+        eprintln!("NONCE ACCOUNTS of wallet {}: {n} wanted, {} exist, {} to create; rent {rent} lamports each ({:.5} SOL, back with --close-nonces), {:.5} SOL in all with the fees; balance {:.4} SOL",
+            b58(&user), n as usize - todo.len(), todo.len(), rent as f64 / 1e9, cost as f64 / 1e9, bal as f64 / 1e9);
+        if !todo.is_empty() {
+            if !live { eprintln!("DRY RUN (no --live): nothing sent, {out} not written; add --live to create them"); return Ok(()); }
+            if bal < cost + 10_000_000 { bail!("balance {:.4} SOL is below the {:.4} SOL needed + 0.01 SOL margin", bal as f64 / 1e9, cost as f64 / 1e9); }
+            for (seed, addr, ixs) in &todo {
+                let sig = send_tx(key, user, rpc, ixs).await.with_context(|| format!("{seed} {}", b58(addr)))?;
+                let mut ok = false;
+                for _ in 0..40 {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    if let Ok((_, v)) = read_raw(rpc, &[*addr]).await { if check_account(&v[0], &user).is_ok() { ok = true; break; } }
+                }
+                if !ok { bail!("{seed} {} not seen as a nonce of this wallet 20 s after {sig}: re-run the same command (it keeps what exists)", b58(addr)); }
+                eprintln!("  {seed} {} created ({sig})", b58(addr));
+            }
+        }
+        let text: String = keys.iter().map(|k| format!("{}\n", b58(k))).collect();
+        let tmp = format!("{out}.tmp");
+        std::fs::write(&tmp, &text).with_context(|| format!("writing {tmp}"))?;
+        std::fs::rename(&tmp, out).with_context(|| format!("renaming {tmp} to {out}"))?;
+        print!("{text}");
+        eprintln!("wrote {out}: {n} durable-nonce account(s) of wallet {} (authority = the wallet). Engine: --nonce-fanout --nonce-accounts {out}. Rent back later (engine stopped): --close-nonces {out} --live",
+            b58(&user));
+        Ok(())
+    }
+
+    /// --close-nonces FILE [--live]: every listed nonce account of this wallet: WithdrawNonceAccount of its whole balance to
+    /// the wallet (closes it). Run it with the engine STOPPED (a running engine may still be using them)
+    pub async fn close(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, file: &str, live: bool) -> Result<()> {
+        let keys = std::fs::read_to_string(file).map_err(|e| e.to_string()).and_then(|t| parse_file(&t)).map_err(|e| anyhow::anyhow!("--close-nonces {file}: {e}"))?;
+        let (_, vals) = read_raw(rpc, &keys).await.context("reading the accounts")?;
+        let mut todo = Vec::new();
+        for (k, v) in keys.iter().zip(&vals) {
+            if v.is_null() { eprintln!("  {} already closed", b58(k)); continue; }
+            check_account(v, &user).map_err(|e| anyhow::anyhow!("{}: {e}: not touching it", b58(k)))?;
+            todo.push((*k, v["lamports"].as_u64().context("no lamports")?));
+        }
+        let total: u64 = todo.iter().map(|t| t.1).sum();
+        eprintln!("CLOSE {} nonce account(s) of wallet {}: {:.5} SOL back to it", todo.len(), b58(&user), total as f64 / 1e9);
+        if todo.is_empty() { return Ok(()); }
+        if !live { eprintln!("DRY RUN (no --live): nothing sent; add --live to close them"); return Ok(()); }
+        for (k, lamports) in &todo {
+            let sig = send_tx(key, user, rpc, &[build::withdraw_nonce_ix(*k, user, user, *lamports)]).await.with_context(|| b58(k))?;
+            let mut gone = false;
+            for _ in 0..40 {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                if let Ok((_, v)) = read_raw(rpc, &[*k]).await { if v[0].is_null() { gone = true; break; } }
+            }
+            eprintln!("  {} {} ({sig})", b58(k), if gone { "closed" } else { "NOT seen closed after 20 s: re-run to check" });
+        }
+        Ok(())
     }
 }
 
@@ -7176,6 +8292,75 @@ mod audit_tests {
         assert!(us[us.len() / 2] < 5_000_000, "pre-send far slower than expected");
     }
 
+    /// --sell-fanout (owner OK 10-25 ~08:05 PKT): every sell also through the fan-out paths as ONE signed tx (one signature), the
+    /// sell path first; each tipped path's tip once (helius-swqos 200,000 to a Helius tip account, nozomi's 1,000,000 as the
+    /// fallback); a path never twice (a fan-out path that is also the fallback, a repeated name); a fan-out path over its rate is
+    /// left out of that sell with its tip (never waited for); refused at start: an unknown name, the sell path itself, no name;
+    /// WITHOUT the flag the fan is exactly the old one (sell path + fallback) and the tx the same bytes
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sell_fanout_layout_and_refusals() {
+        let _g = BH_GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        let key = SigningKey::from_bytes(&[7u8; 32]);
+        let user = key.verifying_key().to_bytes();
+        let cfgs: Vec<config::SendPath> = [("staked-rpc", "rpc", 0u64, ""), ("nozomi", "nozomi", 1_000_000, ""), ("helius-swqos", "helius", 200_000, "max_per_sec = 2\n")].iter()
+            .map(|(name, kind, tip, extra)| toml::from_str(&format!("name = \"{name}\"\nkind = \"{kind}\"\nurl = \"http://127.0.0.1:1/fast\"\ntip_lamports = {tip}\n{extra}")).unwrap()).collect();
+        let (paths, _) = send::Paths::new(&cfgs, send::PathsOpts::default(), arbx::rec::Rec::off(), false).await.unwrap();
+        let (staked, noz, hel) = (paths.list[0].clone(), paths.list[1].clone(), paths.list[2].clone());
+        // start-up refusals and the de-duplication
+        assert!(parse_sell_fanout("helius-swqos", &paths, "staked-rpc").is_ok());
+        assert_eq!(parse_sell_fanout("helius-swqos,helius-swqos+nozomi", &paths, "staked-rpc").unwrap().len(), 2, "a repeated name once");
+        assert!(parse_sell_fanout("helius-swqoz", &paths, "staked-rpc").err().unwrap().to_string().contains("no such"));
+        assert!(parse_sell_fanout("staked-rpc", &paths, "staked-rpc").err().unwrap().to_string().contains("--sell-path"));
+        assert!(parse_sell_fanout(" , ", &paths, "staked-rpc").is_err());
+        *BLOCKHASH_CACHE.lock().unwrap() = Some(([3u8; 32], Instant::now(), 1_000));
+        let launch = snipe_build::launch_from_target([0x5Au8; 32], [0x6Bu8; 32]);
+        let ixs = snipe_build::sell_message_ixs(user, &launch, 123_456, 0, 120_000, 5_000_000, false);
+        let names = |p: &SellTx| p.fan.iter().map(|x| x.name.clone()).collect::<Vec<_>>();
+        let helius_tips: Vec<Pk> = send::known_tip_accounts(config::SendKind::Helius).iter().map(|a| pk(a)).collect();
+        let noz_tips: Vec<Pk> = send::known_tip_accounts(config::SendKind::Nozomi).iter().map(|a| pk(a)).collect();
+        // flag off: exactly the old fan and the same bytes as sell_presend (SELL_FANOUT unset in tests)
+        let old = sell_presend(&key, user, &staked, Some(&noz), &ixs, Duration::from_secs(20)).ok().unwrap();
+        let off = sell_presend_fan(&key, user, &staked, &[], Some(&noz), &ixs, Duration::from_secs(20)).ok().unwrap();
+        assert_eq!(names(&old), vec!["staked-rpc", "nozomi"]);
+        assert_eq!(names(&off), names(&old));
+        assert_eq!(off.meta.tips, old.meta.tips);
+        // the same transaction but for the tip account (each path's tip account rotates per build)
+        let (to, tf) = (arbx::tx::parse_wire(&old.raw).unwrap().0, arbx::tx::parse_wire(&off.raw).unwrap().0);
+        assert_eq!(old.raw.len(), off.raw.len());
+        assert_eq!(to.ixs.iter().map(|ix| (to.keys[ix.program as usize], ix.data.clone())).collect::<Vec<_>>(), tf.ixs.iter().map(|ix| (tf.keys[ix.program as usize], ix.data.clone())).collect::<Vec<_>>(),
+            "the same instructions");
+        // on: staked-rpc + helius-swqos + nozomi (the fallback), one signature, each tip once
+        let on = sell_presend_fan(&key, user, &staked, &[hel.clone()], Some(&noz), &ixs, Duration::from_secs(20)).ok().unwrap();
+        assert_eq!(names(&on), vec!["staked-rpc", "helius-swqos", "nozomi"]);
+        let (tx, used) = arbx::tx::parse_wire(&on.raw).unwrap();
+        assert_eq!(used, on.raw.len());
+        assert_eq!(tx.num_signers, 1, "one signature: one sell");
+        assert_eq!(send::tip_paid(&tx, &helius_tips), 200_000);
+        assert_eq!(send::tip_paid(&tx, &noz_tips), 1_000_000);
+        assert_eq!(on.meta.tips, 1_200_000);
+        let transfers = tx.ixs.iter().filter(|ix| tx.keys[ix.program as usize] == [0u8; 32] && ix.data.len() == 12 && ix.data[..4] == [2, 0, 0, 0]).count();
+        assert_eq!(transfers, 2, "one tip transfer per tipped path");
+        assert!(tx.ixs.iter().any(|ix| ix.data.starts_with(&snipe_build::SELL_V3_DISC)), "the sell itself");
+        for p in &on.fan { assert!(p.check(&on.raw).is_ok(), "{} accepts the copy (its tip / CU price)", p.name); }
+        // the sell's CU limit: as the buys' fan-out (raised only beyond 2 tip transfers)
+        assert_eq!(tx.cu_limit, Some(120_000));
+        // a fan-out path that is also the fallback: once
+        let dup = sell_presend_fan(&key, user, &staked, &[noz.clone(), hel.clone()], Some(&noz), &ixs, Duration::from_secs(20)).ok().unwrap();
+        assert_eq!(names(&dup), vec!["staked-rpc", "nozomi", "helius-swqos"]);
+        let (txd, _) = arbx::tx::parse_wire(&dup.raw).unwrap();
+        assert_eq!(send::tip_paid(&txd, &noz_tips), 1_000_000, "nozomi's tip once");
+        // the sell path named in the fan-out: once (start-up refuses it anyway)
+        let same = sell_presend_fan(&key, user, &staked, &[staked.clone()], None, &ixs, Duration::from_secs(20)).ok().unwrap();
+        assert_eq!(names(&same), vec!["staked-rpc"]);
+        // helius-swqos over its rate (2 a second, both taken): left out of the sell, its tip with it
+        assert!(hel.fast_budget() && hel.fast_budget());
+        let full = sell_presend_fan(&key, user, &staked, &[hel.clone()], Some(&noz), &ixs, Duration::from_secs(20)).ok().unwrap();
+        assert_eq!(names(&full), vec!["staked-rpc", "nozomi"]);
+        let (txf, _) = arbx::tx::parse_wire(&full.raw).unwrap();
+        assert_eq!(send::tip_paid(&txf, &helius_tips), 0, "no Helius tip when Helius is not sent to");
+        *BLOCKHASH_CACHE.lock().unwrap() = None;
+    }
+
     /// M5-2 / L5-1 / L5-3 (audit 5): the blockhash cache's acceptance rule
     #[test]
     fn pick_blockhash_m52() {
@@ -7589,3 +8774,250 @@ mod audit_tests {
         assert!(cap_px / spot > 1.15 && cap_px / spot < 1.30, "cap {:.3}x spot", cap_px / spot);
     }
 }
+
+// =====================================================================================================================
+// NONCE (--nonce-fanout) unit tests: the variant templates vs the full compile (byte identity), the tips each variant pays
+// per path, the pool's state machine (one in flight per account, refresh, reuse, fallback), the accounts file and the
+// on-chain account check, the land poll's status pick, the flags.
+// =====================================================================================================================
+#[cfg(test)]
+mod nonce_tests {
+    use super::*;
+    use arbx::config::SendKind;
+    use arbx::fast;
+
+    const G: GuardEnc = GuardEnc { disc: 14, op: 5, acct: false };
+    fn key_of(seed: u8) -> SigningKey { SigningKey::from_bytes(&[seed; 32]) }
+    fn rnd(i: u64, tag: u8) -> Pk {
+        use sha2::Digest;
+        sha2::Sha256::digest([&i.to_le_bytes()[..], &[tag]].concat()).into()
+    }
+
+    /// every variant shape (no tip / one tip, guard on / off, two spends): the template patched with real keys == the full
+    /// compile of nonce_variant_ixs with the nonce value as the blockhash, on 300 random launches each; and each variant is
+    /// what the runtime needs: AdvanceNonceAccount(nonce, RecentBlockhashes, wallet) FIRST, the nonce value as its blockhash,
+    /// exactly its one tip (or none), the slot guard right before the buy, the buy's own CU limit (no raise), <= 1232 bytes
+    #[test]
+    fn nonce_variant_template_equals_full_compile() {
+        let key = key_of(7);
+        let user: Pk = key.verifying_key().to_bytes();
+        let rb = pk("SysvarRecentB1ockHashes11111111111111111111");
+        let mut n = 0;
+        for guard in [Some(G), None] { for tip in [None, Some(1_000_000u64), Some(200_000)] { for spend in [350_000_000u64, 750_000_000] {
+            let t = fastfire::make_nonce_template(user, tip, spend, guard).unwrap();
+            assert!(t.is_nonce());
+            let mut out = Vec::new();
+            for i in 0..300u64 {
+                let mut l = snipe_build::launch_from_target(rnd(i, 1), rnd(i, 2));
+                if i % 3 == 0 { l.buyback_fee_recipient = rnd(i, 3); }
+                let (nonce, value, tip_acct) = (rnd(i, 4), rnd(i, 5), rnd(i, 6));
+                let (mo, dl) = (1 + i * 7_919, 400_000_000 + i);
+                let vars: fast::VarKeys = [l.mint, l.bonding_curve, l.assoc_bonding_curve, pda::ata(&l.bonding_curve, &snipe_build::WSOL, &pda::TOKEN_PROGRAM),
+                    pda::ata(&user, &l.mint, &pda::TOKEN_2022), l.buyback_fee_recipient];
+                let tk: Vec<Pk> = tip.iter().map(|_| tip_acct).collect();
+                t.patch_nonce(&mut out, &vars, &tk, &nonce, &value, mo, guard.map(|_| dl)).expect("no key collision");
+                let ixs = fastfire::nonce_variant_ixs(user, &l, nonce, tip.map(|a| (tip_acct, a)), spend, mo, guard.map(|g| (g, dl)));
+                let full = build::compile_v0(user, &ixs, value, &[], &[]).unwrap();
+                assert_eq!(out, full.bytes, "guard {guard:?} tip {tip:?} spend {spend} launch {i}: template patch != full compile");
+                // the signed variant, as the runtime and the senders read it
+                let raw = build::sign(&full, &key);
+                assert!(raw.len() <= 1232, "{} bytes", raw.len());
+                let (tx, used) = arbx::tx::parse_wire(&raw).unwrap();
+                assert_eq!(used, raw.len());
+                assert_eq!(&full.bytes[5 + 32 * full.static_keys..][..32], &value[..], "the blockhash field is the nonce value");
+                let key_at = |ix: &arbx::tx::Ix, k: usize| tx.keys[ix.accounts[k] as usize];
+                let ix0 = &tx.ixs[0];
+                assert_eq!(tx.keys[ix0.program as usize], [0u8; 32], "ix 0 is the System program's");
+                assert_eq!(ix0.data, 4u32.to_le_bytes().to_vec(), "ix 0 is AdvanceNonceAccount");
+                assert_eq!((key_at(ix0, 0), key_at(ix0, 1), key_at(ix0, 2)), (nonce, rb, user));
+                let transfers: Vec<(Pk, u64)> = tx.ixs.iter().filter(|ix| tx.keys[ix.program as usize] == [0u8; 32] && ix.data.len() == 12 && ix.data[..4] == [2, 0, 0, 0])
+                    .map(|ix| (key_at(ix, 1), u64::from_le_bytes(ix.data[4..12].try_into().unwrap()))).collect();
+                assert_eq!(transfers, tip.map(|a| (tip_acct, a)).into_iter().collect::<Vec<_>>(), "exactly its one tip");
+                let pos = |p: &Pk| tx.ixs.iter().position(|ix| tx.keys[ix.program as usize] == *p);
+                match guard { Some(_) => assert_eq!(pos(&LIGHTHOUSE).map(|g| g + 1), pos(&snipe::PUMP), "the guard right before the buy"), None => assert!(pos(&LIGHTHOUSE).is_none()) }
+                assert_eq!(tx.cu_limit, Some(arg_u64("--cu-limit", 120_000) as u32), "the buy's own CU limit (<= 2 System ixs: no raise)");
+                n += 1;
+            }
+        } } }
+        assert_eq!(n, 2 * 3 * 2 * 300);
+    }
+
+    /// tip_groups = lat::tips_for's families: helius + helius-swqos share one (the larger tip), jito-bundle + jito-tx share one,
+    /// nozomi has its own, every tipless path shares the tipless variant. Each variant then pays its family's tip to ITS
+    /// paths' accounts and 0 to every other path of the fan, and every path's own tip rule (verify_copy, as Path::check)
+    /// accepts its variant
+    #[test]
+    fn nonce_variants_pay_only_their_own_tip() {
+        let acc = |k: SendKind| -> Vec<Pk> { send::known_tip_accounts(k).iter().map(|a| pk(a)).collect() };
+        let (hel, noz, jit) = (acc(SendKind::Helius), acc(SendKind::Nozomi), acc(SendKind::JitoBundle));
+        let fan: Vec<(&str, SendKind, Option<(Pk, u64)>, Vec<Pk>)> = vec![
+            ("helius", SendKind::Helius, Some((hel[0], 1_000_000)), hel.clone()),
+            ("nozomi", SendKind::Nozomi, Some((noz[3], 1_000_000)), noz.clone()),
+            ("jito-bundle", SendKind::JitoBundle, Some((jit[1], 1_000_000)), jit.clone()),
+            ("staked-rpc", SendKind::Rpc, None, vec![]),
+            ("helius-swqos", SendKind::Helius, Some((hel[4], 200_000)), hel.clone()),
+            ("jito-tx", SendKind::JitoTx, Some((jit[5], 2_000_000)), jit.clone()),
+            ("tpu-direct", SendKind::Tpu, None, vec![]),
+        ];
+        let info: Vec<(Option<(Pk, u64)>, &[Pk])> = fan.iter().map(|f| (f.2, &f.3[..])).collect();
+        let g = fastfire::tip_groups(&info);
+        assert_eq!(g.iter().map(|x| x.1.clone()).collect::<Vec<_>>(), vec![vec![0, 4], vec![1], vec![2, 5], vec![3, 6]]);
+        assert_eq!(g.iter().map(|x| x.0).collect::<Vec<_>>(), vec![Some((hel[0], 1_000_000)), Some((noz[3], 1_000_000)), Some((jit[1], 2_000_000)), None]);
+        // a 0-lamport tip is no tip: with no tipped path the fan is one tipless variant
+        assert_eq!(fastfire::tip_groups(&[(Some((hel[0], 0)), &hel[..]), (None, &[][..])]), vec![(None, vec![0, 1])]);
+        let key = key_of(8);
+        let user: Pk = key.verifying_key().to_bytes();
+        let l = snipe_build::launch_from_target(rnd(1, 1), rnd(1, 2));
+        for (tip, idx) in &g {
+            let ixs = fastfire::nonce_variant_ixs(user, &l, rnd(9, 9), *tip, 350_000_000, 1, Some((G, 400_000_001)));
+            let raw = build::sign(&build::compile_v0(user, &ixs, rnd(9, 8), &[], &[]).unwrap(), &key);
+            let (tx, _) = arbx::tx::parse_wire(&raw).unwrap();
+            for (j, f) in fan.iter().enumerate() {
+                let paid = send::tip_paid(&tx, &f.3);
+                if idx.contains(&j) {
+                    assert_eq!(paid, tip.map_or(0, |t| t.1), "{}: its own variant pays its family's tip", f.0);
+                    send::verify_copy(&raw, f.1, &f.3, f.0).unwrap_or_else(|e| panic!("{} refuses its own variant: {e:#}", f.0));
+                } else {
+                    assert_eq!(paid, 0, "{} is paid by another path's variant", f.0);
+                }
+            }
+        }
+        // a filled buy pays ONE of these (the landed variant's); today's one tx pays every family's
+        let paid_today: u64 = g.iter().filter_map(|x| x.0.map(|t| t.1)).sum();
+        let paid_max: u64 = g.iter().filter_map(|x| x.0.map(|t| t.1)).max().unwrap_or(0);
+        assert_eq!((paid_today, paid_max), (4_000_000, 2_000_000));
+    }
+
+    /// the pool: one lease per account at a time (round robin), none ready -> None (that buy is today's tx); given back ->
+    /// ready at the same value; fired -> out until a confirmed read shows a NEW value (ready at it) or, unchanged, a read at
+    /// slot >= deadline + 150 (ready at the same value); no deadline -> never reused unchanged; a bad read -> dead for good
+    #[test]
+    fn nonce_pool_lifecycle() {
+        use noncefan::{Obs, Pool, St, REUSE_SLOTS};
+        let accts: Vec<(Pk, [u8; 32])> = (0..3).map(|i| (rnd(i, 10), rnd(i, 11))).collect();
+        let p = Pool::new(&accts);
+        assert_eq!(p.counts(), (3, 0, 0, 0));
+        let ls: Vec<_> = (0..3).map(|_| p.take().expect("ready")).collect();
+        let mut idx: Vec<usize> = ls.iter().map(|l| l.idx).collect();
+        idx.sort();
+        assert_eq!(idx, vec![0, 1, 2], "each account handed out once");
+        for l in &ls { assert_eq!((l.key, l.value), accts[l.idx]); }
+        assert!(p.take().is_none(), "nothing ready: the buy falls back to today's tx");
+        assert_eq!(p.counts(), (0, 3, 0, 0));
+        // not fired: back at the same value (fired() on it afterwards changes nothing)
+        p.give_back(&ls[0]);
+        assert_eq!(p.state(ls[0].idx), St::Ready(ls[0].value));
+        p.fired(&ls[0], Some(5));
+        assert_eq!(p.state(ls[0].idx), St::Ready(ls[0].value));
+        let again = p.take().unwrap();
+        assert_eq!((again.idx, again.value), (ls[0].idx, ls[0].value));
+        // fired, value unchanged: out until a confirmed read at slot >= deadline + REUSE_SLOTS
+        p.fired(&ls[1], Some(1_000));
+        p.give_back(&ls[1]);
+        assert!(matches!(p.state(ls[1].idx), St::Fired { .. }), "a fired account is never given back");
+        assert_eq!(p.due(1), vec![ls[1].idx]);
+        assert_eq!(p.observe(ls[1].idx, 1_000 + REUSE_SLOTS - 1, Ok(ls[1].value)), None);
+        assert!(matches!(p.observe(ls[1].idx, 1_000 + REUSE_SLOTS, Ok(ls[1].value)), Some(Obs::Reused { deadline: 1_000, .. })));
+        assert_eq!(p.state(ls[1].idx), St::Ready(ls[1].value));
+        assert_eq!(p.observe(ls[1].idx, 9_999, Ok(rnd(7, 7))), None, "a ready account ignores reads");
+        // fired, value changed (a variant landed or failed): ready at the NEW value at once
+        p.fired(&ls[2], Some(2_000));
+        let newv = rnd(2, 12);
+        assert!(matches!(p.observe(ls[2].idx, 2_001, Ok(newv)), Some(Obs::Advanced { ctx: 2_001, .. })));
+        assert_eq!(p.state(ls[2].idx), St::Ready(newv));
+        let t = p.take().unwrap();
+        assert!(t.idx == ls[1].idx || t.idx == ls[2].idx);
+        let t2 = p.take().unwrap();
+        assert_ne!(t.idx, t2.idx);
+        if t2.idx == ls[2].idx { assert_eq!(t2.value, newv); } else { assert_eq!(t.value, newv); }
+        assert!(p.take().is_none());
+        // no deadline: never reused unchanged; a bad read: dead, never handed out again
+        p.fired(&t, None);
+        assert_eq!(p.observe(t.idx, u64::MAX, Ok(t.value)), None);
+        assert!(matches!(p.state(t.idx), St::Fired { deadline: None, .. }));
+        p.fired(&t2, Some(3));
+        assert!(matches!(p.observe(t2.idx, 10, Err("no such account".into())), Some(Obs::Dead(_))));
+        assert_eq!(p.state(t2.idx), St::Dead);
+        p.give_back(&again);
+        assert_eq!(p.first_ready().map(|x| x.0), Some(accts[again.idx].0));
+        assert_eq!(p.counts(), (1, 0, 1, 1));
+        for _ in 0..10 { let x = p.take().unwrap(); assert_eq!(x.idx, again.idx); p.give_back(&x); }
+        assert_eq!(p.taken.load(Ordering::Relaxed), 3 + 1 + 2 + 10);
+    }
+
+    /// --nonce-accounts FILE: pubkeys one per line (comments / blanks ignored, duplicates dropped); a bad line / none / > 100
+    /// is invalid (the engine then runs as today). The on-chain check: an initialized, current-version nonce of the System
+    /// program whose authority is the wallet -> its value; anything else -> refused with the reason
+    #[test]
+    fn nonce_accounts_file_and_check() {
+        use base64::Engine as _;
+        let (a, b) = (rnd(1, 20), rnd(2, 20));
+        let txt = format!("# dip nonces\n{}\n\n  {}  # second\n{}\n", b58(&a), b58(&b), b58(&a));
+        assert_eq!(noncefan::parse_file(&txt), Ok(vec![a, b]));
+        assert!(noncefan::parse_file("# none\n\n").is_err());
+        assert!(noncefan::parse_file(&format!("{}\nnot-a-key\n", b58(&a))).is_err());
+        assert!(noncefan::parse_file(&(0..101).map(|i| b58(&rnd(i, 21)) + "\n").collect::<String>()).is_err());
+        let user = rnd(3, 22);
+        let acct = |ver: u32, state: u32, auth: Pk, len: usize, owner: &str| -> serde_json::Value {
+            let mut d = vec![0u8; 80];
+            d[0..4].copy_from_slice(&ver.to_le_bytes()); d[4..8].copy_from_slice(&state.to_le_bytes());
+            d[8..40].copy_from_slice(&auth); d[40..72].copy_from_slice(&[0xab; 32]); d[72..80].copy_from_slice(&5000u64.to_le_bytes());
+            d.truncate(len);
+            serde_json::json!({ "owner": owner, "lamports": 1_447_680, "executable": false, "data": [base64::engine::general_purpose::STANDARD.encode(&d), "base64"] })
+        };
+        let sys = "11111111111111111111111111111111";
+        assert_eq!(noncefan::check_account(&acct(1, 1, user, 80, sys), &user), Ok([0xab; 32]));
+        assert!(noncefan::check_account(&serde_json::Value::Null, &user).is_err());
+        assert!(noncefan::check_account(&acct(1, 1, rnd(4, 22), 80, sys), &user).unwrap_err().contains("authority"));
+        assert!(noncefan::check_account(&acct(1, 0, user, 80, sys), &user).unwrap_err().contains("initialized"));
+        assert!(noncefan::check_account(&acct(0, 1, user, 80, sys), &user).unwrap_err().contains("version"));
+        assert!(noncefan::check_account(&acct(1, 1, user, 72, sys), &user).is_err());
+        assert!(noncefan::check_account(&acct(1, 1, user, 80, "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"), &user).unwrap_err().contains("System"));
+        // --create-nonces' addresses: create_with_seed(wallet, "dip-nonce-<i>", System) = sha256(wallet | seed | System)
+        use sha2::Digest;
+        let (addr, ixs) = build::create_nonce_ixs(user, &format!("{}{}", noncefan::SEED, 3), 1_447_680);
+        assert_eq!(addr, <[u8; 32]>::from(sha2::Sha256::new().chain_update(user).chain_update(b"dip-nonce-3").chain_update([0u8; 32]).finalize()));
+        assert_eq!((ixs.len(), ixs[1].data[..4].to_vec()), (2, 6u32.to_le_bytes().to_vec()), "create + InitializeNonceAccount");
+        // --close-nonces: WithdrawNonceAccount(5) of the whole balance to the wallet, the wallet signing as the authority
+        let w = build::withdraw_nonce_ix(addr, user, user, 1_447_680);
+        assert_eq!(w.data, [5u32.to_le_bytes().to_vec(), 1_447_680u64.to_le_bytes().to_vec()].concat());
+        assert_eq!(w.accounts.iter().map(|m| (m.key, m.signer, m.writable)).collect::<Vec<_>>(), vec![(addr, false, true), (user, false, true),
+            (pk("SysvarRecentB1ockHashes11111111111111111111"), false, false), (pk("SysvarRent111111111111111111111111111111111"), false, false), (user, true, true)]);
+    }
+
+    /// the nonce land poll names the variant whose status is not null (any position); none -> None
+    #[test]
+    fn nonce_status_any() {
+        let v = serde_json::json!({ "context": { "slot": 9 }, "value": [null, null, { "slot": 77, "err": null, "confirmationStatus": "processed" }, null] });
+        let (i, x) = status_any(&v).unwrap();
+        assert_eq!((i, x["slot"].as_u64()), (2, Some(77)));
+        assert!(status_any(&serde_json::json!({ "value": [null, null] })).is_none());
+        assert!(status_any(&serde_json::json!({ "error": "x" })).is_none());
+    }
+
+    /// the new flags are known (check_flags refuses unknown ones) and the integer ones must parse
+    #[test]
+    fn nonce_flags() {
+        let a = |v: &[&str]| -> Vec<String> { std::iter::once("snipe_engine").chain(v.iter().copied()).map(String::from).collect() };
+        check_flags(&a(&["--dip", "--live", "--fast-send", "--nonce-fanout", "--nonce-accounts", "/root/prod/nonce_fra.txt"])).unwrap();
+        check_flags(&a(&["--create-nonces", "8", "--nonce-out", "/root/prod/nonce_fra.txt", "--live"])).unwrap();
+        check_flags(&a(&["--close-nonces", "/root/prod/nonce_fra.txt"])).unwrap();
+        check_flags(&a(&["--dip", "--fast-bench", "200", "--junk-fanout", "--fast-bench-fires", "100", "--fast-bench-gap-ms", "20", "--nonce-fanout", "--nonce-accounts", "f"])).unwrap();
+        for bad in [&["--create-nonces", "eight"][..], &["--fast-bench-fires", "x"], &["--fast-bench-gap-ms", "-1"], &["--nonce-fanouts"]] {
+            assert!(check_flags(&a(bad)).is_err(), "{bad:?} must refuse to start");
+        }
+    }
+}
+
+// dip16 (10-25 PKT): the golden "no flag = dip15 on the wire" test, the flags' tests and the C1 measurement (read-only, by hand)
+#[cfg(test)]
+#[path = "snipe_engine/dip16_tests.rs"]
+mod dip16_tests;
+// dip17 (10-25 PKT): the QUIC landing lanes (kind soyas / solami): golden unchanged without one, config, tips, a lane path
+#[cfg(test)]
+#[path = "snipe_engine/dip17_tests.rs"]
+mod dip17_tests;
+// dip18 (10-25 PKT): the Falcon native UDP lane (kind falcon-udp): golden unchanged without one, key prefix, datagram layout
+#[cfg(test)]
+#[path = "snipe_engine/dip18_tests.rs"]
+mod dip18_tests;

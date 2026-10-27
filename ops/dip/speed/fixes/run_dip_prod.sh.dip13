@@ -1,0 +1,291 @@
+#!/bin/bash
+# ===== DIP LIVE — REAL SOL — PROD wallet 2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE =====
+# Staged proof of the dip strategy (owner 2026-10-23 23:40 PKT): run 1 = 3 trades; if all good 5, then 10, 12, ... up to 100.
+# Budget: 1.5 SOL usable; TOTAL loss across ALL dip runs <= 0.5 SOL (the first run records the wallet's start balance in
+# /root/prod/dip_budget.json; each run's kill switch = 0.5 SOL minus what is already lost since then; refused below 0.05).
+# Started MANUALLY by the owner, inside tmux, on the server; the keystore passphrase is typed at the engine's hidden prompt.
+#
+#   tmux new -s dip                        (or: tmux attach -t dip)
+#   sudo bash /root/prod/run_dip_prod.sh --run 1 --trades 3 --size 0.25
+#   multi-region (10-24 16:00 PKT, ops/region/README.md): --region fra (default: 2g wallet, Frankfurt endpoints) | ams (the
+#   Amsterdam edge server: its own wallet /root/prod/wallet-ams.enc + .address, endpoints dip_edge_ams.toml, its own budget
+#   /root/prod/dip_budget_ams.json, logs dip_ams_rN). Each server trades only its own near-leader list (no shared dumps).
+#   NONCE (owner OK 10-24 ~22:55 PKT "yes do that"; engine dip10): --nonce FILE = durable-nonce fan-out of the BUYS
+#     (--nonce-fanout --nonce-accounts FILE): each send path gets its own variant with only its own tip (none for staked-rpc);
+#     all variants share one durable nonce, so at most one lands and a filled buy pays ONE tip (~0.001 SOL instead of ~0.002-0.003).
+#     FILE = the region's accounts, made once with ops/prod/nonce_accounts.sh (fra: /root/prod/nonce_fra.txt, ams:
+#     /root/prod/nonce_ams.txt). The engine refuses to start if an account is not an initialized nonce of THIS region's wallet;
+#     no account ready at a fire = that buy is today's multi-tip tx (NONCE-FALLBACK in the log). Sells unchanged. Without
+#     --nonce the run is exactly today's.
+#   BACKUP RPC (10-25 00:25 PKT: the Helius backup RMR_RPC_URL hit its plan cap, HTTP 429 "max usage reached", so the engine
+#     refused to start on both servers): --fallback ck = Constant-K's OTHER region as the standby RPC (fra -> rpc-amsterdam,
+#     ams -> rpc-frankfurt, same CONSTANTK_TOKEN; measured 100/100 reads OK at the engine's poll rate, 0 x 429);
+#     --fallback NAME = any env var in /root/sniper/deploy/.env that holds an RPC URL (e.g. SHYFT_RPC_URL). Default
+#     RMR_RPC_URL (as before). The URL is never printed (the engine fills in the token itself).
+#   NEW DIP DETECTOR "M2" (owner GO 10-25 ~00:40 PKT: shadow 2-3 h at peak, then live if confident): --m2 FILE = the M2
+#     bundle (P&L-trained 25-feature GBDT, ops/strategies/dipdetect/PORT.md) on engine dip11. --m2-mode shadow (default):
+#     IMIT1 trades exactly as before; M2 only scores and logs (after the IMIT1 decision and any send). --m2-mode gate: M2
+#     REPLACES the IMIT1 gate (live trading on M2 — only with the owner's explicit go). --m2-min X / --m2-extra on|off pass
+#     through. Without --m2 the run uses engine dip10 exactly as before.
+#   PRE-SENT SHADOW (owner 10-25 ~02:00 PKT: "build pre-send shadow, we will add it for the next run"): --presend = log-only
+#     T2 "whale buy" pre-sent conditional buys (ops/strategies/presend/SHADOW.md) on engine dip12 (= dip11 + presend; M2 flags
+#     work the same). Never sends; logs presend_arm / fill / exit / disarm records for ps11_shadow_eval.py.
+#   PRE-SEND LIVE (owner GO 10-25 ~07:05 PKT "ok lets do the real test"; ops/strategies/presend/LIVE.md): --presend-live = a small,
+#     capped LIVE probe of the pre-sent T2 buys on engine dip13 (needs --presend: the shadow's records are the comparison). Required
+#     caps: --presend-live-max-fills N (1..100) and --presend-live-fee-budget-sol X (<= 0.1: the fees of failed attempts) and
+#     --presend-live-size-sol X (0.05..1.0). Tuning (engine defaults in brackets): --presend-live-k [4] --presend-live-drop [0.12]
+#     --presend-live-deadline-slots [1] --presend-live-cu-limit [120000] --presend-live-cu-price-micro [1000] --presend-live-tip-lamports
+#     [the path's tip] --presend-live-routes [default=helius-ps] --presend-live-max-per-sec [20] --presend-live-path-max-per-sec [10]
+#     --presend-live-create-slot on|off [off] --presend-live-one-position on|off [on]. --presend-live-dry: build + sign + log every attempt,
+#     never send (a server dry run). Every attempt path must be its OWN [[send]] entry in the base config (e.g. helius-ps).
+#   SELL FAN-OUT (owner OK 10-25 ~08:05 PKT "do that Helius SWQoS thing too"): --sell-fanout NAME[,NAME] = every sell (first try and
+#     retries) also goes through these [[send]] paths beside staked-rpc: one signed tx, each tipped path's tip once (helius-swqos
+#     0.0002), paid only if the sell lands; a path over its rate is left out of that sell. Engine dip13.
+#   exit options (owner 10-24 18:15 PKT: Frankfurt run 10 = "4s"): --hold-slots N (default 6 = ~1.3 s; 19 = ~4 s) and --sl X
+#     (default 0.10). 24 h replay with the current setup: no TP / SL -20% / 4 s +4.54 SOL vs +2.72 for SL -10% / 1.3 s (35 ms).
+#   routes v8 (owner 10-24 17:45 PKT: "we can try jito"): jito producers also get the Jito block-engine bundle path, tip 0.001
+#     (was 0.012 in the config) -> one landed Jito-producer buy pays helius 0.001 + nozomi 0.001 + jito 0.001.
+#   run 7 (owner 10-24 08:10 PKT, from the independent agents' reports ops/agents/*/REPORT.md): near leaders only + routes v7:
+#   sudo bash /root/prod/run_dip_prod.sh --run 7 --trades 60 --size 0.5 --tp off --dev-list /root/sniper-dip/dev_list.txt --dev-size 0.75 --near /root/sniper-dip/near_leaders_5ms.txt --minutes 480
+#     --near FILE: buy only when the dump slot's leader is in FILE (199 leaders with RTT < 5 ms from Frankfurt = 35.9% of slots in
+#     epochs 1066/1067); far / unknown leaders earned ~0 (+0.07 SOL on 20 far fires) and HkQ7 skips them.
+#     routes v7: jito = helius (Sender default/dual routing, 0.001) + nozomi + staked-rpc (was nozomi + helius-swqos + bolt +
+#     staked-rpc): our Jito-leader buys took 91 ms median (25% fill); rivals' Helius copies land first there.
+#   run 5 (owner 10-24 06:25 PKT: "for next run lets do 1.3 and 0.75 for this dev tier"), engine dip9:
+#   sudo bash /root/prod/run_dip_prod.sh --run 5 --trades 10 --size 0.35 --tp off --dev-list /root/sniper-dip/dev_list.txt --dev-size 0.75
+#     --tp off: no take-profit; stop-loss -10% or sold by 6 slots (~1.3 s). Live fills runs 1-4: +0.630 vs +0.356 (TP +5%).
+#     --dev-list: tokens created (signed or creator) by a listed wallet (bwamJzzt..., ops/overnight/sel/haqq_dev.py) are picked
+#     from --dev-tier (default wider) and bought at --dev-size; everything else strict at --size.
+#   routes v6 (10-24 05:40 PKT, from haqqiUUX's landed copies: Helius SWQoS-only 0.0002 wins 58% BAM / 83% Harmonic / 57% Jito,
+#   his tipless staked copy wins 85% on Firedancer): helius-swqos on bam/jito/harmonic/other, fd = nozomi + landx + staked.
+#   v5 (10-24 05:05 PKT, owner: "3rd option like haqq": Helius SWQoS-only tier 0.0002 replaces Helius, the tipless
+#   staked RPC added to every class; probe E: nozomi 35 / staked-rpc 42 / helius-swqos 58 / bolt 60 / helius 65 ms fire->seen).
+#   v4 (owner 10-24 04:20 PKT: 3 paths per leader for run 3; landing probes A-D, ops/dip/speed/probe_timing.py; D = 70 probes, nearby leaders, 7 paths): two fastest
+#   paths per leader client; base config dip_probe.toml (adds bolt / haan / tpu-direct); engine dip8 (+ timing records)
+#   optional: --tier strict|wider (strict)  --guard 1.05 (owner 10-24: 2% blocked ~all buys)  --minutes 120  --prio-micro 5000000 (priority 0.0005 SOL at 100k CU)
+#             --routes "<class=path+path;...>"  --open 1 (positions at a time)
+#   stop cleanly: Ctrl-c in the tmux window (no new buys; open positions finish their exit), then wait for "PROD_DIP_DONE"
+#
+# Strategy (frozen; ops/overnight/sel/SELECTION.md, src/dip_imit.rs parity 2097/2097): IMIT1 selector, buy right after a
+# >= 1 SOL dump, guard (min tokens = post-dump quote / --guard, default 1.05), on-chain slot deadline (dump slot + 1), exit take-profit +5% /
+# stop-loss -10% / sell by 6 slots (~1.3 s), one token at a time.
+set -u
+die() { echo "REFUSED: $*" >&2; exit 1; }
+RUN= TRADES= SIZE= TIER=strict MIN=120 PRIO=5000000 OPEN=1 GUARD=1.05 TP=0.05 DEVLIST= DEVSIZE= DEVTIER=wider NEAR= REGION=fra HOLD=6 SL=0.10 NONCE= FALLBACK=RMR_RPC_URL M2= M2MODE=shadow M2MIN= M2EXTRA= PRESEND=
+PSLIVE= PSDRY= SELLFAN=
+declare -A PSV=()
+ROUTES="bam=nozomi+helius-swqos+bolt+staked-rpc;jito=helius+nozomi+jito-bundle+staked-rpc;harmonic=nozomi+helius-swqos+landx-fra3+staked-rpc;fd=nozomi+landx-fra3+staked-rpc;agave=nozomi+helius-swqos+bolt+staked-rpc;other=nozomi+helius-swqos+bolt+staked-rpc;default=nozomi+helius-swqos+bolt+staked-rpc"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --run) RUN=$2; shift 2;; --trades) TRADES=$2; shift 2;; --size) SIZE=$2; shift 2;; --tier) TIER=$2; shift 2;;
+    --minutes) MIN=$2; shift 2;; --prio-micro) PRIO=$2; shift 2;; --routes) ROUTES=$2; shift 2;; --open) OPEN=$2; shift 2;; --guard) GUARD=$2; shift 2;;
+    --tp) TP=$2; shift 2;; --dev-list) DEVLIST=$2; shift 2;; --dev-size) DEVSIZE=$2; shift 2;; --dev-tier) DEVTIER=$2; shift 2;;
+    --near) NEAR=$2; shift 2;; --region) REGION=$2; shift 2;; --hold-slots) HOLD=$2; shift 2;; --sl) SL=$2; shift 2;;
+    --nonce) NONCE=$2; shift 2;;
+    --fallback) FALLBACK=$2; shift 2;;
+    --m2) M2=$2; shift 2;; --m2-mode) M2MODE=$2; shift 2;; --m2-min) M2MIN=$2; shift 2;; --m2-extra) M2EXTRA=$2; shift 2;;
+    --presend) PRESEND=1; shift;;
+    --presend-live) PSLIVE=1; shift;;
+    --presend-live-dry) PSDRY=1; shift;;
+    --presend-live-size-sol|--presend-live-k|--presend-live-drop|--presend-live-deadline-slots|--presend-live-cu-limit|--presend-live-cu-price-micro|--presend-live-tip-lamports|\
+    --presend-live-routes|--presend-live-max-per-sec|--presend-live-path-max-per-sec|--presend-live-max-fills|--presend-live-fee-budget-sol|--presend-live-create-slot|\
+    --presend-live-one-position) [ $# -ge 2 ] || die "$1 needs a value"; PSV["$1"]=$2; shift 2;;
+    --sell-fanout) SELLFAN=$2; shift 2;;
+    *) die "unknown argument $1";;
+  esac
+done
+[ -n "$RUN" ] && [ -n "$TRADES" ] && [ -n "$SIZE" ] || die "--run, --trades and --size are required"
+[[ "$RUN" =~ ^[0-9]+$ ]] && [[ "$TRADES" =~ ^[0-9]+$ ]] && [[ "$MIN" =~ ^[0-9]+$ ]] && [[ "$PRIO" =~ ^[0-9]+$ ]] && [[ "$OPEN" =~ ^[0-9]+$ ]] || die "integers expected"
+[[ "$SIZE" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "--size: not a number"
+awk -v s="$SIZE" 'BEGIN{exit !(s>=0.05 && s<=1.0)}' || die "--size must be 0.05..1.0 SOL"
+[ "$TRADES" -ge 1 ] && [ "$TRADES" -le 100 ] || die "--trades must be 1..100"
+[ "$MIN" -ge 1 ] && [ "$MIN" -le 600 ] || die "--minutes must be 1..600 (owner 10-24: overnight runs up to 8 h)"
+[ "$OPEN" -ge 1 ] && [ "$OPEN" -le 3 ] || die "--open must be 1..3"
+[ "$PRIO" -le 50000000 ] || die "--prio-micro above 50M (0.005 SOL priority): refusing"
+case "$TIER" in strict|wider) ;; *) die "--tier strict|wider";; esac
+awk -v g="$GUARD" 'BEGIN{exit !(g>=1.0 && g<=1.10)}' || die "--guard must be 1.00..1.10 (max price above the post-dump price)"
+[[ "$HOLD" =~ ^[0-9]+$ ]] && [ "$HOLD" -ge 3 ] && [ "$HOLD" -le 60 ] || die "--hold-slots must be 3..60 (6 = ~1.3 s, 19 = ~4 s)"
+awk -v x="$SL" 'BEGIN{exit !(x>=0.03 && x<=0.5)}' || die "--sl must be 0.03..0.5"
+case "$TP" in off) TP=99;; *) awk -v t="$TP" 'BEGIN{exit !(t>=0.01 && t<=1.0)}' || die "--tp must be off or 0.01..1.0";; esac
+DEVARGS=()
+MAXSIZE=$SIZE
+if [ -n "$DEVLIST" ]; then
+  [ -s "$DEVLIST" ] || die "--dev-list $DEVLIST: missing or empty"
+  grep -v '^#' "$DEVLIST" | grep -q '[1-9A-HJ-NP-Za-km-z]\{32,44\}' || die "--dev-list $DEVLIST: no wallet address in it"
+  [ -n "$DEVSIZE" ] || DEVSIZE=$SIZE
+  [[ "$DEVSIZE" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "--dev-size: not a number"
+  awk -v s="$DEVSIZE" 'BEGIN{exit !(s>=0.05 && s<=1.0)}' || die "--dev-size must be 0.05..1.0 SOL"
+  case "$DEVTIER" in strict|wider) ;; *) die "--dev-tier strict|wider";; esac
+  DEVARGS=(--dip-dev-list "$DEVLIST" --dip-dev-tier "$DEVTIER" --dip-dev-spend-lamports "$(awk -v s="$DEVSIZE" 'BEGIN{printf "%d", s*1e9}')")
+  MAXSIZE=$(awk -v a="$SIZE" -v b="$DEVSIZE" 'BEGIN{print (b>a)?b:a}')
+fi
+awk -v s="$MAXSIZE" -v o="$OPEN" 'BEGIN{exit !(s*o <= 1.5)}' || die "size x open positions exceeds the 1.5 SOL usable budget"
+# PRE-SEND LIVE: its size within the per-buy cap (--max-sol); with one position off it may hold one more position
+PSSIZE=${PSV[--presend-live-size-sol]:-0}
+if [ -n "$PSLIVE" ]; then
+  MAXSIZE=$(awk -v a="$MAXSIZE" -v b="$PSSIZE" 'BEGIN{print (b>a)?b:a}')
+  if [ "${PSV[--presend-live-one-position]:-on}" = off ]; then awk -v s="$MAXSIZE" -v o="$OPEN" -v p="$PSSIZE" 'BEGIN{exit !(s*o + p <= 1.5)}' || die "size x open + the pre-send size exceeds the 1.5 SOL usable budget"; fi
+fi
+NEARARGS=()
+if [ -n "$NEAR" ]; then
+  [ -s "$NEAR" ] || die "--near $NEAR: missing or empty"
+  [ "$(grep -c '[1-9A-HJ-NP-Za-km-z]\{32,44\}' "$NEAR")" -ge 20 ] || die "--near $NEAR: fewer than 20 leader identities"
+  NEARARGS=(--dip-near-leaders "$NEAR")
+fi
+NONCEARGS=()
+if [ -n "$NONCE" ]; then
+  [ -s "$NONCE" ] || die "--nonce $NONCE: missing or empty (make it with ops/prod/nonce_accounts.sh --region $REGION --count 8 --live)"
+  [ "$(grep -v '^#' "$NONCE" | grep -c '[1-9A-HJ-NP-Za-km-z]\{32,44\}')" -ge 1 ] || die "--nonce $NONCE: no account address in it"
+  NONCEARGS=(--nonce-fanout --nonce-accounts "$NONCE")
+fi
+
+in_tmux() { local p=$$; while [ "${p:-1}" -gt 1 ]; do case "$(ps -o comm= -p "$p" 2>/dev/null)" in tmux*) return 0;; esac; p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '); done; return 1; }
+[ -n "${TMUX:-}" ] || in_tmux || die "start inside tmux (tmux new -s dip), so an SSH drop cannot stop it"
+[ -t 0 ] || die "stdin must be your terminal: the engine asks for the keystore passphrase"
+pgrep -x snipe_engine >/dev/null && die "a snipe_engine is running (paper / shadow / prod): stop it first (one engine per server)"
+pgrep -f "snipe_engine_dip" >/dev/null && die "a dip engine is running: stop it first"
+
+case "$REGION" in
+  fra) W=2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE; KS=/root/prod/wallet-prod.enc; BASECFG=/root/sniper-dip/dip_probe.toml
+       BUDGETF=/root/prod/dip_budget.json; PC=/root/prod/dip_prod.toml; TAGP=dip_r; ENVNAME=PROD;;
+  ams) [ -s /root/prod/wallet-ams.address ] || die "missing /root/prod/wallet-ams.address (the Amsterdam wallet's public key)"
+       W=$(tr -d ' \n\r' < /root/prod/wallet-ams.address); KS=/root/prod/wallet-ams.enc; BASECFG=/root/sniper-dip/dip_edge_ams.toml
+       BUDGETF=/root/prod/dip_budget_ams.json; PC=/root/prod/dip_ams.toml; TAGP=dip_ams_r; ENVNAME=PROD;;   # the engine accepts only DEV | PROD
+  *) die "--region fra|ams";;
+esac
+[[ "$W" =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]] || die "wallet address for region $REGION looks wrong"
+[ -f "$BASECFG" ] || die "missing $BASECFG (region $REGION base config)"
+# a [[send]] path of the base config (its name line)
+has_path() { grep -q "^name *= *\"$1\"" "$BASECFG"; }
+num() { [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]]; }
+in_range() { awk -v x="$1" -v a="$2" -v b="$3" 'BEGIN{exit !(x>=a && x<=b)}'; }
+PSLARGS=(); PSLDESC=""
+if [ -n "$PSLIVE" ]; then
+  [ -n "$PRESEND" ] || die "--presend-live needs --presend (the shadow: its records are the comparison)"
+  for f in --presend-live-max-fills --presend-live-fee-budget-sol --presend-live-size-sol; do [ -n "${PSV[$f]:-}" ] || die "--presend-live needs $f (a required cap)"; done
+  for f in "${!PSV[@]}"; do case "$f" in --presend-live-routes|--presend-live-create-slot|--presend-live-one-position) ;; *) num "${PSV[$f]}" || die "$f: '${PSV[$f]}' is not a number";; esac; done
+  in_range "${PSV[--presend-live-max-fills]}" 1 100 || die "--presend-live-max-fills must be 1..100"
+  awk -v x="${PSV[--presend-live-fee-budget-sol]}" 'BEGIN{exit !(x>0 && x<=0.1)}' || die "--presend-live-fee-budget-sol must be in (0, 0.1] SOL"
+  in_range "${PSV[--presend-live-size-sol]}" 0.05 1.0 || die "--presend-live-size-sol must be 0.05..1.0 SOL"
+  [ -z "${PSV[--presend-live-k]:-}" ] || in_range "${PSV[--presend-live-k]}" 1 20 || die "--presend-live-k must be 1..20"
+  [ -z "${PSV[--presend-live-drop]:-}" ] || awk -v x="${PSV[--presend-live-drop]}" 'BEGIN{exit !(x>0 && x<=0.5)}' || die "--presend-live-drop must be in (0, 0.5]"
+  [ -z "${PSV[--presend-live-deadline-slots]:-}" ] || in_range "${PSV[--presend-live-deadline-slots]}" 1 8 || die "--presend-live-deadline-slots must be 1..8"
+  [ -z "${PSV[--presend-live-cu-price-micro]:-}" ] || in_range "${PSV[--presend-live-cu-price-micro]}" 0 100000 || die "--presend-live-cu-price-micro above 100000: refusing"
+  [ -z "${PSV[--presend-live-max-per-sec]:-}" ] || in_range "${PSV[--presend-live-max-per-sec]}" 1 50 || die "--presend-live-max-per-sec must be 1..50 (Helius allows 50/s per region over ALL its paths)"
+  [ -z "${PSV[--presend-live-path-max-per-sec]:-}" ] || in_range "${PSV[--presend-live-path-max-per-sec]}" 1 50 || die "--presend-live-path-max-per-sec must be 1..50"
+  for f in --presend-live-create-slot --presend-live-one-position; do [ -z "${PSV[$f]:-}" ] || [[ "${PSV[$f]}" =~ ^(on|off)$ ]] || die "$f on|off"; done
+  [ -n "${PSV[--presend-live-routes]:-}" ] || PSV[--presend-live-routes]="default=helius-ps"
+  for n in $(printf %s "${PSV[--presend-live-routes]}" | tr ';' '\n' | sed 's/^[^=]*=//' | tr '+,' '\n\n'); do
+    has_path "$n" || die "--presend-live-routes: no [[send]] path named $n in $BASECFG (add the attempt path's own block first: LIVE.md)"
+    case "$n" in staked-rpc|nozomi|helius|helius-swqos|bolt|landx-fra3|landx-ams2|jito-bundle) die "--presend-live-routes: $n is a reactive buy / sell path: give the attempts their own [[send]] entry (LIVE.md)";; esac
+  done
+  PSLARGS=(--presend-live); [ -n "$PSDRY" ] && PSLARGS+=(--presend-live-dry)
+  for f in "${!PSV[@]}"; do PSLARGS+=("$f" "${PSV[$f]}"); done
+  PSLDESC=" | PRE-SEND LIVE$( [ -n "$PSDRY" ] && echo ' DRY (never sends)' ): ${PSV[--presend-live-size-sol]} SOL, ${PSV[--presend-live-k]:-4}/slot, caps ${PSV[--presend-live-max-fills]} fills + ${PSV[--presend-live-fee-budget-sol]} SOL fees, routes ${PSV[--presend-live-routes]}"
+else
+  [ -z "$PSDRY" ] && [ ${#PSV[@]} -eq 0 ] || die "--presend-live-* options need --presend-live"
+fi
+SFARGS=(); SFDESC=""
+if [ -n "$SELLFAN" ]; then
+  for n in $(printf %s "$SELLFAN" | tr ',+' '\n\n'); do
+    has_path "$n" || die "--sell-fanout: no [[send]] path named $n in $BASECFG"
+    [ "$n" != staked-rpc ] || die "--sell-fanout staked-rpc: that is the --sell-path itself"
+  done
+  SFARGS=(--sell-fanout "$SELLFAN"); SFDESC=" | SELL FAN-OUT staked-rpc + $SELLFAN (one signature)"
+fi
+# backup RPC of the exit path (see BACKUP RPC above)
+if [ "$FALLBACK" = ck ]; then
+  case "$REGION" in fra) CKO=amsterdam;; ams) CKO=frankfurt;; esac
+  export CK_STANDBY_URL="https://rpc-$CKO.constant-k.com/?api-key=\${CONSTANTK_TOKEN}"   # literal ${...}: the engine fills it in
+  FBVAR=CK_STANDBY_URL; FBDESC="Constant-K $CKO"
+else
+  [[ "$FALLBACK" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "--fallback ck | ENV_VAR_NAME (got '$FALLBACK')"
+  FBVAR=$FALLBACK; FBDESC=$FALLBACK
+fi
+B=/root/sniper-dip/snipe_engine_dip10
+M2ARGS=(); M2DESC=""
+if [ -n "$M2" ]; then
+  [ -s "$M2" ] || die "--m2 $M2: missing or empty (the M2 bundle json)"
+  [[ "$M2MODE" =~ ^(shadow|gate)$ ]] || die "--m2-mode shadow|gate (got '$M2MODE')"
+  B=/root/sniper-dip/snipe_engine_dip11
+  M2ARGS=(--dip-m2 "$M2" --dip-m2-mode "$M2MODE")
+  if [ -n "$M2MIN" ]; then [[ "$M2MIN" =~ ^-?[0-9]*[.]?[0-9]+$ ]] || die "--m2-min: not a number"; M2ARGS+=(--dip-m2-min "$M2MIN"); fi
+  if [ -n "$M2EXTRA" ]; then [[ "$M2EXTRA" =~ ^(on|off)$ ]] || die "--m2-extra on|off"; M2ARGS+=(--dip-m2-extra "$M2EXTRA"); fi
+  M2DESC=" | M2 detector: $( [ "$M2MODE" = gate ] && echo 'GATE (M2 decides the buys)' || echo 'shadow (logs only, IMIT1 trades)' ) $M2${M2MIN:+ min $M2MIN}"
+fi
+PSARGS=(); PSDESC=""
+if [ -n "$PRESEND" ]; then B=/root/sniper-dip/snipe_engine_dip12; PSARGS=(--presend-shadow); PSDESC=" | PRE-SEND shadow (T2 whale buy, logs only)"; fi
+# dip13 = dip12 + the pre-send LIVE probe + the sell fan-out
+if [ -n "$PSLIVE" ] || [ -n "$SELLFAN" ]; then B=/root/sniper-dip/snipe_engine_dip13; fi
+[ -x "$B" ] || die "missing engine $B"
+[ -f "$KS" ] || die "missing $KS (the prod keystore)"
+[ -x "$B" ] || die "missing $B"
+[ -f /root/dip/IMIT1.json ] && [ -f /root/dip/cohort_train.json ] || die "missing /root/dip/IMIT1.json or cohort_train.json"
+mkdir -p /root/prod/runs
+sed -e "s#^wallet *=.*#wallet          = \"$W\"#" -e "s#^wallet_keystore *=.*#wallet_keystore = \"$KS\"#" "$BASECFG" > $PC
+grep -q "^wallet *= *\"$W\"" $PC && grep -q "^wallet_keystore *= *\"$KS\"" $PC && grep -q 'kind    = "yellowstone-tx"' $PC || die "could not build $PC"
+
+# budget across runs (the read-only RPC helper needs its token from the .env)
+CONSTANTK_TOKEN=$(bash -c 'set -a; . /root/sniper/deploy/.env; printf %s "${CONSTANTK_TOKEN:-}"'); export CONSTANTK_TOKEN
+read BAL REMAIN FIRST < <(python3 - "$W" "$BUDGETF" <<'EOF'
+import sys, json, os
+sys.path.insert(0, "/root/indep")
+from common import rpc
+W = sys.argv[1]; P = sys.argv[2]
+bal = rpc("getBalance", [W])["value"]
+b = json.load(open(P)) if os.path.exists(P) else {"first_start": bal, "max_total_loss": 500_000_000, "runs": []}
+if not os.path.exists(P): json.dump(b, open(P, "w"), indent=1)
+lost = max(0, b["first_start"] - bal)
+print(bal, b["max_total_loss"] - lost, b["first_start"])
+EOF
+)
+[ -n "${BAL:-}" ] || die "could not read the wallet balance"
+awk -v r="$REMAIN" 'BEGIN{exit !(r >= 50000000)}' || die "the dip budget is used up: lost $(( (FIRST-BAL)/1000000 )) mSOL of 500 since the first run"
+[ -z "$PSLIVE" ] || awk -v f="${PSV[--presend-live-fee-budget-sol]}" -v r="$REMAIN" 'BEGIN{exit !(f*1e9 <= r)}' || die "--presend-live-fee-budget-sol exceeds the dip budget left"
+awk -v b="$BAL" -v s="$MAXSIZE" 'BEGIN{exit !(b >= s*1e9 + 60000000)}' || die "balance $BAL lamports is below size + 0.06 SOL"
+LOSS=$(awk -v r="$REMAIN" 'BEGIN{printf "%.4f", r/1e9}')
+LAM=$(awk -v s="$SIZE" 'BEGIN{printf "%d", s*1e9}')
+MAXSOL=$(awk -v s="$MAXSIZE" 'BEGIN{printf "%.4f", s*1.05}')
+BUDGET=$(awk -v s="$MAXSIZE" -v n="$TRADES" 'BEGIN{printf "%.3f", n*(s*1.02+0.02)+0.1}')
+TAG=${TAGP}${RUN}
+echo "DIP LIVE [$REGION] run $RUN (wallet $W): $TRADES trades x $SIZE SOL, tier $TIER, take-profit $( [ "$TP" = 99 ] && echo off || echo "+$TP" ), stop -$SL, hold $HOLD slots (~$(awk -v h=$HOLD 'BEGIN{printf "%.1f", h*0.212}') s), guard x$GUARD, open $OPEN at a time, $MIN min$( [ -n "$DEVLIST" ] && echo " | dev list $DEVLIST: $DEVTIER at $DEVSIZE SOL" )$( [ -n "$NEAR" ] && echo " | near leaders only: $NEAR ($(grep -c . "$NEAR") leaders)" )$( [ -n "$NONCE" ] && echo " | NONCE fan-out: $NONCE ($(grep -v '^#' "$NONCE" | grep -c '[1-9A-HJ-NP-Za-km-z]\{32,44\}') accounts)" )$M2DESC$PSDESC$PSLDESC$SFDESC | backup RPC $FBDESC | wallet balance $(awk -v b=$BAL 'BEGIN{printf "%.4f", b/1e9}') SOL | kill switch at -$LOSS SOL (budget left of 0.5) | priority ${PRIO} uL/CU | routes $ROUTES"
+echo "log: /root/prod/runs/$TAG.log  records: /root/prod/runs/$TAG.jsonl"
+python3 - "$RUN" "$TRADES" "$SIZE" "$BAL" "$TP" "${DEVSIZE:-0}" "$BUDGETF" "$REGION" <<'EOF'
+import sys, json, time
+P = sys.argv[7]; b = json.load(open(P))
+b["runs"].append({"run": int(sys.argv[1]), "trades": int(sys.argv[2]), "size": float(sys.argv[3]), "start_balance": int(sys.argv[4]), "t_start": int(time.time()),
+                  "tp": float(sys.argv[5]), "dev_size": float(sys.argv[6]), "region": sys.argv[8]})
+json.dump(b, open(P, "w"), indent=1)
+EOF
+# the engine writes STRAIGHT to the log (no pipe a Ctrl-c could kill: a dead pipe makes its next log line panic and breaks
+# the exit of an open position); the live view is a tail in its OWN session, so Ctrl-c reaches only the engine (no new
+# buys, open positions finish their exit, then DIP DONE) and this script
+LOG=/root/prod/runs/$TAG.log
+: >> "$LOG"
+setsid tail -n 0 -F "$LOG" &
+TAILPID=$!
+trap 'echo; echo "(Ctrl-c -> engine: no new buys; an open position finishes its exit; wait for PROD_DIP_DONE)"' INT
+echo "the engine now asks for the keystore passphrase (hidden):"
+$B --dip --live --fast-send --jito-h2 --fast-presign --fast-derive --fast-verify \
+  --dip-tier $TIER --dip-allow-holder --dip-tp $TP --dip-sl $SL --dip-hold-slots $HOLD --dip-guard $GUARD --dip-spacing-slots 5 ${DEVARGS[@]+"${DEVARGS[@]}"} ${NEARARGS[@]+"${NEARARGS[@]}"} ${NONCEARGS[@]+"${NONCEARGS[@]}"} ${M2ARGS[@]+"${M2ARGS[@]}"} ${PSARGS[@]+"${PSARGS[@]}"} ${PSLARGS[@]+"${PSLARGS[@]}"} ${SFARGS[@]+"${SFARGS[@]}"} \
+  --dip-model /root/dip/IMIT1.json --dip-cohort /root/dip/cohort_train.json --dip-log /root/prod/runs/$TAG.jsonl \
+  --spend-lamports $LAM --max-sol $MAXSOL --max-total-sol $BUDGET --max-buys $TRADES --max-inflight $OPEN --max-loss-sol $LOSS --minutes $MIN \
+  --cu-limit 100000 --cu-price-micro $PRIO --sell-cu-limit 120000 --sell-cu-price-micro 5000000 \
+  --land-poll-ms 100 --land-timeout-ms 3000 --sell-robust --sell-retry-s 1 --sell-deadline-s 30 --sell-fallback-path nozomi \
+  --buy-max-slot-delta 1 --rpc-fallback-url-env $FBVAR --env-name $ENVNAME --strict-balance --ks-blind-s 10 \
+  --send-path helius --sell-path staked-rpc --route-by-client "$ROUTES" --no-union-harmonic \
+  --config $PC --env-file /root/sniper/deploy/.env >> "$LOG" 2>&1
+RC=$?
+sleep 1; kill $TAILPID 2>/dev/null
+trap - INT
+echo "engine exit code $RC"
+python3 - "$W" "$BUDGETF" <<'EOF'
+import sys, json, time
+sys.path.insert(0, "/root/indep")
+from common import rpc
+P = sys.argv[2]; b = json.load(open(P))
+bal = rpc("getBalance", [sys.argv[1]])["value"]
+b["runs"][-1].update(end_balance=bal, t_end=int(time.time())); json.dump(b, open(P, "w"), indent=1)
+print(f"DIP run end: balance {bal / 1e9:.4f} SOL; since the first dip run {(bal - b['first_start']) / 1e9:+.4f} SOL (budget left {(b['max_total_loss'] - max(0, b['first_start'] - bal)) / 1e9:.4f} of 0.5)")
+EOF
+echo PROD_DIP_DONE

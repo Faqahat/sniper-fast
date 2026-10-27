@@ -894,3 +894,62 @@ Labels: `dipshadow/direct_flags_prelim.json` (99.8% vs RPC truth). Totals per ~3
   - Lesson: cost per round trip. Our ~0.0035 vs bots' 0.00014–0.0004. For our dip bot, ~0.0015 (one tip per landed tx via a
     durable-nonce fan-out, as top bots do) would add ~+10% in replay terms if landing speed holds — engineering proposal, needs
     the owner's OK.
+- Post-migration (agent, 10-24 ~23:45 PKT; ops/strategies/postmig/REPORT.md): ~900 graduations/day, but only ~210 organic;
+  ~420 instant brand-farm rugs (5–6 operators, ~+9,900 SOL/day, insiders) and ~270 mayhem. PumpSwap fees ~1.25% per side
+  (not cheaper). Nearly all graduates collapse within 1 h. Outside winners are sub-ms dip scalpers paying ~0.00002/trade.
+  4,413 variants → none positive on both later days without the top 3 trades. Not worth building; frozen-rule daily replay
+  as a shadow.
+
+## Better dip detection (agent, 10-24 ~23:59 PKT) — ops/strategies/dipdetect/REPORT.md
+- GBDT trained on R2 to predict OUR P&L per dump (35 ms, guard, costs). Pooled test days R3 + R1 + R4 (39 h, both servers):
+  +43.0 / +23.9 / +5.4 SOL at 35 / 50 / 75 ms vs +8.8 / +4.5 / +2.0 for IMIT1 now. Stage A (same envelope, model ≥ 0.010,
+  0.85 s exit): +22.1 / +14.0 / +6.2. Config-only: a 0.85 s exit already gives +12.4 / +7.3.
+- Live check: the replay is not optimistic vs run 10 (fill rate 0.51 vs 0.47; per fill −0.0105 vs −0.0055).
+- Robust: bootstrap intervals > 0, still positive without the top 1%, 21/22 hours positive, cost-proof, leak-free.
+- KEY: the new picks are dips the fast bots skip (IMIT1 wallets present 26–31% vs 57–74%), so fewer guard fails.
+- Next: port the 25-feature model into the engine (after the nonce fan-out build, which touches the same files) → parity →
+  24 h shadow → probe → live A/B. Needs the owner's OKs.
+
+## Competitors (agent, 10-24 ~23:55 PKT) — ops/agents/competitors2/REPORT.md
+- Bot dump → send 2.6 ms; we lose after sending. Harmonic leaders on par (~35 ms); BAM Frankfurt +5–10 ms; Jito +20–60 ms
+  (HEL1USMZ ~90 ms; Amsterdam Jito GnC339vk / ACvL73V4 110–145 ms, 0 fills).
+- Rivals: 41Pr/6gY1 family (45 wallets, 14–22M priority, untipped winning copies), HkQ7 (most pivotal), haqq (most often
+  ahead), pre-placed conditional bots (2KtcBC, CVPz447t, …).
+- 25/25 fast reacting bots use a durable-nonce fan-out with one tip per copy; filled-buy cost 0.0003–0.0011 vs our 0.0027.
+- Fixes, ranked: Jito path probes (or skip 3 slow validators), Frankfurt BAM relay probes, nonce fan-out (building),
+  priority A/B 5M vs 15M on BAM/Harmonic, pre-send study, CU limit 85k / loaded-data limit.
+
+## Nonce fan-out built (10-25 00:12 PKT)
+- Engine dip10 (sha256 b8210182…) deployed to both servers, NOT active. Staged: run_dip_prod.sh.new (--nonce FILE), nonce_accounts.sh. Owner: create 8 nonce accounts per server (passphrase), swap the script with mv, start the next run with --nonce. First-run checks: NONCE-FANOUT ON, self-test, `| nonce … x4 variants` on fires, NONCE-ADVANCED, no FAST-VERIFY MISMATCH, close.tips = one tip.
+
+## Run 10 end + nonce ready (10-25 00:20 PKT)
+- Run 10 stopped with Ctrl+C at 00:15 PKT on both servers, no open positions.
+  - Frankfurt (4 s hold, SL 20%, 0.55 SOL): −0.0733 SOL realized, 73 fired, 29 filled.
+  - Amsterdam (1.3 s hold, SL 10%, 0.35 SOL): −0.1384 SOL realized, 56 fired, 30 filled.
+- Nonce accounts: 8 per server, verified on chain (fra authority 2g7rYv7y…, ams EgxfYgEb…). Rent ~0.0116 SOL per server,
+  refundable with `nonce_accounts.sh --close --live`; the budget counts it as spent until then.
+- Run script swapped on both servers (old kept as /root/prod/run_dip_prod.sh.dip9). New md5 39134687; adds `--nonce FILE`;
+  engine dip10. Budget left: Frankfurt 0.5 SOL, Amsterdam 0.2965 SOL.
+- Run 11 = run 10's A/B unchanged + `--nonce`, so the nonce is the only change. Compare tips per fill and fill rate with run 10.
+- 00:25 PKT: run 11 refused to start on both servers. The backup RPC (Helius, RMR_RPC_URL) hit its plan cap: HTTP 429 "max usage
+  reached". The two engines' standby polling (~4–5 reads/s each) used it up. Run script 0426bd0a adds `--fallback ck` (Constant-K's
+  other region as the standby: 100/100 reads OK, no 429s) and `--fallback NAME` (an .env RPC var; Shyft gets 2–8% 429s at our rate).
+- ~00:40 PKT owner GO on the dip-detector port. No probe. Shadow 2–3 h at peak time (not 24 h), then live if confident. The shadow
+  runs inside the live engine (IMIT1 keeps trading; the model only logs), so no second engine. Builder agent writes
+  ops/strategies/dipdetect/PORT.md.
+- ~00:55 PKT run 12 live on both (nonce + Constant-K standby). Amsterdam buys at 15M priority (owner OK; sells stay 5M), Frankfurt
+  unchanged at 5M. Test: do Amsterdam's BAM fills stop losing (before: 5 wins of 18, −0.028 SOL per fill)?
+- ~01:05 PKT Frankfurt restarted as run 13: 0.35 SOL normal and dev-list, 1.3 s hold / SL 10% (same exit as Amsterdam), 5M fee.
+- ~01:25 PKT standard run reports built (owner request): ops/dip/report/make_run_report.py + run_notes.json → ops/dip/reports/runs/ (FRA 1–11, AMS 9–11, INDEX.md, RUN_REPORTS.html). All runs together: +0.0680 SOL over 112 fills / 264 buys.
+- ~01:35 PKT M2 detector deployed to both servers, NOT active: engine snipe_engine_dip11 (sha256 540569ff…), bundle
+  /root/dip/m2_v3_reg4_top25.json, run script b4557e85 with `--m2 FILE` (shadow by default: IMIT1 keeps trading, M2 only
+  logs). Parity exact on 9,360 rows; 135/136 picks agree; ~26 µs per dump. Gate mode (M2 trades) only with the owner's go.
+- Out-of-compute buy failure on Amsterdam (GhksrL6A: 100k CU used, the token account alone took 40.5k) — the only one in ~280
+  buys. Option: buy CU limit ~120k (+0.0001 SOL per landed buy at 5M). Owner's call.
+- ~01:41 PKT shadow runs live (9 h): Frankfurt run 14 and Amsterdam run 13 with --m2 (shadow). Owner: progress update at 15 min, then every 30 min; evaluate only when asked.
+- ~01:55 PKT pre-sent conditional buys study done (ops/strategies/presend/REPORT.md): only the 'whale buy' trigger pays in replay (+5.8 SOL/24h pooled test at ≤10 ms with cheap attempts; +3.6–4.4 at 4 attempts/slot); adds to the reactive bot; needs very cheap attempts; owner decision on a T2 shadow.
+- ~02:00 PKT owner: build the pre-send (whale buy) shadow for the next run → builder agent started (flags --presend-shadow, log-only; binary dip12; SHADOW.md).
+- ~04:20 PKT pre-send shadow (dip12, --presend) deployed to both servers, not active; for the next run. Finding: create-slot 'whale' triggers (29% of T2 windows) lose every day; excluding them would raise T2 (owner decision).
+- ~05:55 PKT M2 shadow graded on 4 h: live = study (99.7% same picks). Replay: new model +2.56/+2.04/+1.25 SOL vs today's model +1.34/+0.54/+0.26 (35/50/75 ms; at 0.55 SOL); the 0.85 s exit alone explains most of the gain. Proposed A/B next run.
+- ~06:15 PKT dev-sells check: the dev sold during our hold in 40% of big losers (16/40) vs 15% of winners; replay: dips where the dev still holds pay about half per fill (still positive at 35/50 ms). Possible engine switch: half size / higher bar / skip when the dev still holds.
+- ~06:25 PKT A/B live: Frankfurt run 15 = new model (M2) trading; Amsterdam run 14 = today's model without BAM leaders; both 0.85 s exit, no stop, pre-send shadow. Swap after ~4 h.

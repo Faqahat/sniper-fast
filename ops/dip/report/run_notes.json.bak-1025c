@@ -1,0 +1,528 @@
+{
+ "_about": "Hand-written per-run context for make_run_report.py (from ops/dip/PLAN.md, the dip budget files and the 10-23/24/25 session log). Times PKT. Keys: region-run.",
+ "fra-1": {
+  "title": "First live PROD run: 3 trades × 0.25 SOL, strict tier, routes v2",
+  "engine": "dip6 (sha c6f1b40f; holder-reward tokens allowed)",
+  "verdict": "Good start: 3 of 3 fills won (+0.1249 SOL) — but 8 of 11 buys were blocked by the +5% guard because we landed ~80–95 ms after the dump while the fast bots buy at 4–36 ms.",
+  "summary": "Owner plan (10-23 23:40): prove the IMIT1 dip strategy live with 3 trades, then 5, 10, 12 … up to 100, on the 2g PROD wallet with 1.5 SOL usable and a 0.5 SOL loss cap. This run capped at 3 fills and stopped itself.",
+  "ended": "max fills reached (3 of 3)",
+  "changes": [
+   "First PROD run. Before it, FRZ plumbing tests (dip3 → dip6) proved buy → exit → sell → ATA close and fixed: the missing signal handler, the tee/Ctrl-c panic, the RPC helper's token, holder-reward tokens (verified by a simulated round trip).",
+   "Guard raised 2% → 5% (owner: strict slippage blocked every test; blocked buys were only +3..+24% above the post-dump price).",
+   "Routes v2 from the landing probes A–C: BAM = helius + astralane, Jito = helius + nozomi, Harmonic = nozomi + astralane, FD = nozomi + helius, others = helius + nozomi (2 tips on a filled buy)."
+  ],
+  "events": [
+   [
+    "02:15",
+    "trade 1 trigger: an insider (first-trade wallet in the 462 cohort) sold 2.69 SOL, a third of its 5.9 SOL launch buy, 1.3 s after 7 buyers / 9.9 SOL"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "73% of buys blocked by the guard: we executed ~80–95 ms after the dump; 6 bots typically got in first (CVPz447t 5.7 ms, 3Xti8uhq 13 ms, 9k78QZyw 14 ms, haqqiUUX 36 ms…)"
+   ]
+  ],
+  "fixes_after": [
+   "Guard what-if on 15 real blocked buys (re-bought at our exact block position): 5% −0.009, 10% −0.057, 15% −0.063 SOL → keep +5%.",
+   "Leader distance study: leaders < 50 ms away land ~75% in the dump's block; US leaders ~10% → later the near-leader gate.",
+   "Engine dip8: timing records (first sighting, feed lag, reaction, fire → our tx seen), near-leader gate flag, forced-path probes.",
+   "Probe D (70 fail-by-design buys on nearby leaders): nozomi 30 ms, landx 31, bolt 35, helius 35, astralane 46, haan 49, tpu-direct 50 → routes v3."
+  ],
+  "next": [
+   "Run 2: 5 trades (owner plan)."
+  ]
+ },
+ "fra-2": {
+  "title": "5 trades × 0.25 SOL, routes v3, engine dip8",
+  "engine": "dip8 (timing records, near-leader gate available but off)",
+  "verdict": "Good: 4 of 5 fills won (+0.1333 SOL). Runs 1+2 together +0.2582 SOL, but 72% of buys still missed.",
+  "ended": "max fills reached (5 of 5)",
+  "changes": [
+   "Engine dip6 → dip8 (timing records in every fire).",
+   "Routes v3 from probe D: BAM = nozomi + bolt, Jito = bolt + astralane, Harmonic = nozomi + helius, FD = nozomi + landx-fra3, Agave = nozomi + helius, others = nozomi + bolt.",
+   "Max fills 3 → 5 (owner plan)."
+  ],
+  "events": [
+   [
+    "03:03:35",
+    "first start ended after 8 s (an extra run-2 entry in the budget file); restarted at 03:03:46"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "GZRarp (−0.0147) landed on a far leader (Ashburn) at a BAM → Jito slot edge and paid 3 tips; DYXDDrZC bought 1.16 SOL ahead of us"
+   ],
+   [
+    "⚠️",
+    "13 of 18 buys missed (guard / 1 deadline)"
+   ]
+  ],
+  "fixes_after": [
+   "haqqiUUX check (owner: 'no failed txns?'): 11.4% of its txs fail like ours (GMGN hides them); it uses its own router, Helius with tiny tips, CU price ~1.84M.",
+   "Blueprint generated: ops/dip/BLUEPRINT_V1.html."
+  ],
+  "next": [
+   "Run 3: 10 trades at 0.35 SOL (owner)."
+  ]
+ },
+ "fra-3": {
+  "title": "10 trades × 0.35 SOL, routes v4 (3 paths)",
+  "engine": "dip8",
+  "verdict": "Small loss (−0.0396 SOL): a quiet hour, two losers (AEQKoc stop-loss −0.0563 after a single −20% trade, 4ZZ5Ke −0.0386).",
+  "changes": [
+   "Size 0.25 → 0.35 SOL (owner).",
+   "Routes v4: 3 paths per leader type instead of 2."
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "AEQKoc: the stop-loss was hit by a single −20% sell before our sell could land (−0.0563)"
+   ]
+  ],
+  "fixes_after": [
+   "Miss analysis (30 guard misses): the price crossed our guard a median 45 ms after the dump; we needed to be ~34 ms earlier (10 ms earlier → 2/30 would fill, 30 ms → 12/30).",
+   "Competitors: HkQ7hMjy fails ~70% of buy attempts too (failed attempt ~0.000135 SOL vs our 0.000505); ALL top bots use a durable nonce with one copy per relay (6–9 paths) + a no-tip copy → one tip per landed trade (built later as dip10).",
+   "haqqiUUX sizing tiers 0.25–0.75 SOL; our backtest: per-fill % barely drops from 0.35 to 0.75 SOL.",
+   "Probe E: nozomi 35 ms, staked-rpc 42 (tipless, 7/8 same slot), helius-swqos 58, bolt 60, helius 65 → routes v5 (nozomi core + helius-swqos + tipless staked-rpc everywhere)."
+  ],
+  "next": [
+   "Run 4 with routes v5."
+  ]
+ },
+ "fra-4": {
+  "title": "0.35 SOL, routes v5 (nozomi + helius-swqos + tipless staked-rpc)",
+  "engine": "dip8",
+  "verdict": "Good (+0.1198 SOL by the wallet). Misses now landed 17–48 ms after the dump on nearby leaders (runs 1–3: ~80–95 ms).",
+  "changes": [
+   "Routes v5: nozomi as the core path, helius-swqos (0.0002 tip) instead of helius, and a tipless staked-rpc copy on every leader type."
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Biiv46: a duplicate sell failed with 3012 (the first sell had landed; balance not yet confirmed 0) — harmless, fixed later"
+   ]
+  ],
+  "fixes_after": [
+   "Exit study on 17 live fills: no take-profit / sell at 1.3 s +0.630 vs TP +5% +0.356 SOL → TP off for run 5.",
+   "haqq on Helius: lands 61% of his trades through the Helius SWQoS-only tier (0.0002) → routes v6 (helius-swqos on BAM / Jito / Agave / other).",
+   "Serial dev bwamJzzt found (owner's contact: 'haqq mostly buys from this dev'): 'mostly' is false (14%), but its tokens pay +17%/fill vs +5% for others in the backtest → dev list + 0.75 SOL size for run 5 (engine dip9).",
+   "haqq's re-buy style replayed on our fills: −1.03 SOL → keep the quick exit, no re-buys."
+  ],
+  "next": [
+   "Run 5 (owner 06:25): no TP, 1.3 s, dev list at 0.75 SOL wider tier."
+  ]
+ },
+ "fra-5": {
+  "title": "No take-profit / SL −10% / 1.3 s; dev list (bwamJzzt) at 0.75 wider, others strict 0.35; engine dip9",
+  "engine": "dip9 (dev list, templates per size)",
+  "verdict": "Flat (−0.0014 SOL): 5 wins / 5 losses; one bad stop-loss (wVKcA4 −0.0766: stop at −10% but the sell landed at −20%). No dev-list token came up.",
+  "changes": [
+   "Take-profit +5% → off (exit at −10% stop or 6 slots ~1.3 s), owner 06:25 'for next run lets do 1.3 and 0.75 for this dev tier'.",
+   "Engine dip8 → dip9: --dip-dev-list / --dip-dev-tier / --dip-dev-spend-lamports.",
+   "Dev list: bwamJzzt's tokens from the wider tier at 0.75 SOL; everything else strict at 0.35."
+  ],
+  "events": [
+   [
+    "06:50",
+    "24/7 raw recording set up the same hour (owner OK: 'record all the runs raw so we can do this daily')"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "wVKcA4 (score 1.22, token 1.5 s old, 6.48 SOL dump): stop fired at −10% but the sell landed at −20% (−0.0766)"
+   ]
+  ],
+  "fixes_after": [
+   "Exits re-checked on all 26 live fills: no TP +0.70 vs TP5 +0.47 → keep no TP.",
+   "Speed: fire → seen 32 ms when the buy lands in the dump's block, ~117–160 ms when it misses (next leader) → the send → block leg is the lever."
+  ],
+  "next": [
+   "Run 6 at 0.5 SOL strict."
+  ]
+ },
+ "fra-6": {
+  "title": "0.5 SOL strict + dev 0.75 — short, stopped for run 7",
+  "engine": "dip9",
+  "verdict": "Too short to judge (2 fills: 9vWX2S −0.0677, B5TfMe +0.0613 → −0.0069 SOL).",
+  "ended": "stopped by the owner after ~11 min to start run 7 (near leaders only)",
+  "changes": [
+   "Size 0.35 → 0.5 SOL (normal picks)."
+  ],
+  "fixes_after": [
+   "Independent agents (headtohead, freshaudit): our bot reacts in ~3 ms; the send → block leg is 30–37 ms vs rivals ~25 ms; Jito leaders worst (91 ms, 25% fill); far leaders worth ~0; tips 0.0026 SOL per fill.",
+   "Near-leader list built: 199 leaders < 5 ms from Frankfurt = 35.9% of slots (/root/sniper-dip/near_leaders_5ms.txt).",
+   "Routes v7: Jito leaders = helius + nozomi + staked-rpc."
+  ],
+  "next": [
+   "Run 7: near leaders only, routes v7, 8 hours (owner 08:10: 'run 7 with all your recommendations for 8 hour')."
+  ]
+ },
+ "fra-7": {
+  "title": "8 h, near leaders only (199), routes v7, 0.5 strict + dev 0.75, no TP",
+  "engine": "dip9",
+  "verdict": "Best run so far (+0.2365 SOL, 9 fills, 6 wins). Near-only made us fast: fills ~35 ms after the dump by block position, 7 of 9 in the dump's own block. Two big winners carried it (5LnSgd +0.144, 5mXG5C +0.108).",
+  "ended": "stopped by the owner at 15:43 to start run 8 (wider tier)",
+  "changes": [
+   "Near-leader gate ON (199 leaders < 5 ms) — far leaders were worth ~0 and cost failed buys.",
+   "Routes v7 on Jito leaders: helius (0.001) + nozomi + staked-rpc (was nozomi + helius-swqos + bolt + staked-rpc)."
+  ],
+  "fixes_after": [
+   "Replay of run 7's hours: the wider tier on every token would have added ~+0.11 SOL at every speed → run 8 = run 7 + --tier wider.",
+   "Multi-region kit built (owner 16:00: Amsterdam edge VPS): one engine per region, own wallet and budget, disjoint near lists.",
+   "Cost-cut proposal for run 8 (one tipped relay per leader type, priority 2M, CU 85k) written but NOT adopted."
+  ],
+  "next": [
+   "Run 8: wider tier."
+  ]
+ },
+ "fra-8": {
+  "title": "Wider tier on every token, 0.55 SOL (owner) + dev 0.75, near leaders",
+  "engine": "dip9",
+  "verdict": "Loss (−0.0962 SOL on 3 fills): Hnkrfb (wider pick) −0.0770 on the stop at −13%, CfdREo −0.0319; one wider pick won (8DN9HV +0.0153). Too few trades to judge the wider tier.",
+  "ended": "stopped by the owner at 16:40 to fund Amsterdam and start run 9 on both servers",
+  "changes": [
+   "Tier strict → wider (score >= 0.2109) on every token (replay of run 7's hours: +0.11 SOL).",
+   "Size 0.5 → 0.55 SOL (owner typed 0.55 on purpose) — two changes at once, compare per fill as % of size."
+  ],
+  "events": [
+   [
+    "16:41",
+    "after the run: 1.5 SOL moved from 2g to the new Amsterdam wallet (transfer script, recorded in the budget)"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "Hnkrfb: both buys on this token were wider-tier picks (scores 0.48, 0.25); the filled one lost −0.0770 at the −10% stop (sold −13%)"
+   ]
+  ],
+  "fixes_after": [
+   "Transfer script: Amsterdam allowed as a destination, refuses while a run is live, caps 0.5 SOL per transfer, records the move in the budget.",
+   "Amsterdam edge server set up (2 vCPU / 2 GB, all endpoints 0.19–0.32 ms away); near lists split by distance: Frankfurt 198 leaders (35.9% of slots), Amsterdam 120 (20.5%)."
+  ],
+  "next": [
+   "Run 9 on both servers."
+  ]
+ },
+ "fra-9": {
+  "title": "First two-region run — Frankfurt: 0.55 wider + dev 0.75, own near list (198)",
+  "engine": "dip9",
+  "verdict": "Small loss (−0.0419 SOL by the wallet).",
+  "ended": "stopped by the owner at 18:15 to start the run 10 A/B",
+  "changes": [
+   "Near list: near_leaders_5ms.txt (199) → near_leaders_fra.txt (198): one leader moved to Amsterdam, which never sees Frankfurt's leaders (no shared dumps).",
+   "Wallet funded down: 1.5 SOL moved to Amsterdam after run 8 (balance 4.33 → 2.83)."
+  ],
+  "events": [
+   [
+    "17:44",
+    "routes v8 deployed for the NEXT runs (Jito tip 0.012 → 0.001 SOL; Jito leaders get helius + nozomi + jito-bundle + staked-rpc); run 9 kept its loaded settings"
+   ]
+  ],
+  "fixes_after": [
+   "Routes v8 (above) used from run 10.",
+   "Owner A/B for run 10 (18:15): Frankfurt 4 s hold / SL −20%, Amsterdam 1.3 s / SL −10%."
+  ],
+  "next": [
+   "Run 10: exit A/B between the two servers."
+  ]
+ },
+ "fra-10": {
+  "title": "Exit A/B — Frankfurt: 4 s hold / SL −20% at 0.55 + dev 0.75 (Amsterdam = 1.3 s control); routes v8",
+  "engine": "dip9",
+  "verdict": "Loss (−0.0733 SOL realized over 29 fills). The 4 s hold did better than Amsterdam's 1.3 s per SOL, but small samples. 44 guard fails (cheap, 0.0005 each). One huge dev-list win (9yJrLW +0.274).",
+  "ended": "stopped by the owner at 00:15 (Ctrl+C) to start run 11 with the nonce fan-out",
+  "changes": [
+   "Exit: 1.3 s / SL −10% → 4 s (19 slots) / SL −20% (owner A/B).",
+   "Routes v8 on Jito leaders: + jito-bundle (tip 0.001)."
+  ],
+  "events": [
+   [
+    "18:16:30",
+    "first start ended after 8 s; restarted 18:16:40"
+   ],
+   [
+    "18:50",
+    "owner upset at the red failed buys (Solscan): all are the +5% guard (pump 6042), ~0.0005 SOL each; bundle-only and smaller CU rejected (fills use up to 93k CU)"
+   ],
+   [
+    "22:55",
+    "owner OK'd the durable-nonce fan-out build (one tip per landed buy)"
+   ],
+   [
+    "~00:10",
+    "the owner created 8 nonce accounts during the run (rent ~0.0116 SOL taken from this wallet — explains part of the wallet-vs-trades gap)"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "wallet change includes ~0.0116 SOL of nonce-account rent (refundable), not a trading loss"
+   ]
+  ],
+  "fixes_after": [
+   "Engine dip10: durable-nonce fan-out (one copy per send path, each with only its own tip; one shared nonce so at most one lands).",
+   "Run script: --nonce FILE; old script kept as run_dip_prod.sh.dip9.",
+   "Studies: dip-detector agent (new P&L model +22 vs +8.8 SOL in replay, Stage A), competitors agent (we lose after sending; Jito leaders worst; BAM/Harmonic order ties by fee)."
+  ],
+  "next": [
+   "Run 11 = run 10's settings + nonce (one change)."
+  ]
+ },
+ "fra-11": {
+  "title": "Durable-nonce fan-out (dip10) + Constant-K standby RPC; run 10's A/B settings",
+  "engine": "dip10 (sha256 b8210182…)",
+  "verdict": "Short (26 min, −0.0719 SOL on 2 fills: 8Ub8f4RU +0.064, 8SytCSCS −0.134 on the −20% stop). The nonce worked: one copy landed per buy, fills paid one tip, failed buys paid none.",
+  "ended": "stopped by the owner at 00:55 to restart (Amsterdam 15M fee test; Frankfurt later as run 13 at 0.35 / 1.3 s)",
+  "changes": [
+   "Engine dip9 → dip10 with --nonce /root/prod/nonce_fra.txt (8 accounts): every buy = one copy per send path, each paying only its own path's tip.",
+   "Backup RPC: Helius (RMR_RPC_URL) → Constant-K's Amsterdam endpoint (--fallback ck). Helius had hit its plan cap (HTTP 429 'max usage reached'); the engine refuses to start without a working standby."
+  ],
+  "events": [
+   [
+    "00:21",
+    "two starts refused (00:21:13 and 00:22:02, typed with 0.35 / 0.45 SOL): 'RMR_RPC_URL getGenesisHash timed out' — Helius out of credits; nothing sent"
+   ],
+   [
+    "00:25",
+    "run script 0426bd0a deployed: --fallback ck"
+   ],
+   [
+    "00:29:48",
+    "started with 0.55 / 0.75 (run 10's sizes)"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "the standby RPC (Helius) ran out of credits: the two engines' standby polling (~4–5 reads/s each) used the plan up; fixed by moving the standby to Constant-K (no usage cap)"
+   ]
+  ],
+  "fixes_after": [
+   "--fallback ck in the run script (both servers).",
+   "Owner: Amsterdam 15M buy priority test (run 12) after the leader-type study showed Amsterdam's BAM fills losing (5 wins of 18).",
+   "Owner: Frankfurt restarted as run 13 with 0.35 SOL (normal and dev) and the 1.3 s / SL −10% exit."
+  ],
+  "next": [
+   "Frankfurt run 13 vs Amsterdam run 12 (fee 5M vs 15M)."
+  ]
+ },
+ "ams-9": {
+  "title": "First Amsterdam run: 0.35 wider + dev 0.55, own near list (120 leaders)",
+  "engine": "dip9",
+  "previous": [
+   "fra",
+   9
+  ],
+  "verdict": "Small loss (−0.0566 SOL by the wallet). Every start check passed on the new server.",
+  "ended": "stopped by the owner at 18:16 to start the run 10 A/B",
+  "changes": [
+   "New server (cyber-dock, Amsterdam), new wallet EgxfYgEb… funded with 1.5 SOL from 2g, its own 0.5 SOL loss budget.",
+   "Near list near_leaders_ams.txt: 120 leaders (20.5% of slots) that are closer to Amsterdam; none shared with Frankfurt.",
+   "Sizes 0.35 / dev 0.55 (owner's choice for a new region; Frankfurt 0.55 / 0.75)."
+  ],
+  "events": [
+   [
+    "16:58",
+    "two starts refused: '--env-name must be DEV or PROD' (my run-script label PROD-AMS); fixed in a minute, nothing sent"
+   ],
+   [
+    "16:59:12",
+    "started"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Jito validator ACvL73V4 (Amsterdam) — first buy there failed; later studies: 0 fills on ACvL73V4 / GnC339vk"
+   ]
+  ],
+  "fixes_after": [
+   "Run-script --env-name label fixed (PROD for both regions)."
+  ],
+  "next": [
+   "Run 10: Amsterdam = 1.3 s control of the exit A/B."
+  ]
+ },
+ "ams-10": {
+  "title": "Exit A/B control — Amsterdam: 1.3 s / SL −10% at 0.35 + dev 0.55; routes v8",
+  "engine": "dip9",
+  "verdict": "Loss (−0.1384 SOL realized over 30 fills). BAM leaders were the leak (most fills there, mostly losing even though they landed in the dump's block) — later traced to fee ordering inside BAM blocks (inferred).",
+  "ended": "stopped by the owner at 00:15 (Ctrl+C) to start run 11 with the nonce fan-out",
+  "changes": [
+   "Routes v8 (Jito leaders + jito-bundle at 0.001)."
+  ],
+  "events": [
+   [
+    "18:39:55",
+    "9yJrLW bought here 3.6 s after Frankfurt bought the same token on an earlier dump (different leaders, never the same dump)"
+   ],
+   [
+    "18:50",
+    "owner's Solscan screenshot of this wallet's red failed buys → failed-buy review (all +5% guard, cheap)"
+   ],
+   [
+    "~00:10",
+    "8 nonce accounts created on this wallet during the run (rent ~0.0116 SOL — part of the wallet-vs-trades gap)"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "q2rc3D: a duplicate sell (#2) failed with 3012 AccountNotInitialized — the first sell had landed; harmless"
+   ],
+   [
+    "ℹ️",
+    "wallet change includes ~0.0116 SOL nonce rent (refundable)"
+   ]
+  ],
+  "fixes_after": [
+   "Nonce fan-out (dip10) + standby RPC change (see run 11)."
+  ],
+  "next": [
+   "Run 11 = same + nonce."
+  ]
+ },
+ "ams-11": {
+  "title": "Durable-nonce fan-out (dip10) + Constant-K standby RPC; 1.3 s / SL −10% at 0.35 + dev 0.55",
+  "engine": "dip10",
+  "verdict": "Short (26 min, −0.0202 SOL: 1 fill BUQvqA1Y −0.0192 on a BAM leader, 2 guard fails). Nonce worked as designed.",
+  "ended": "stopped by the owner at 00:55 to start run 12 at 15M buy priority",
+  "changes": [
+   "Engine dip9 → dip10 with --nonce /root/prod/nonce_ams.txt (8 accounts).",
+   "Backup RPC: Helius → Constant-K's Frankfurt endpoint (--fallback ck)."
+  ],
+  "events": [
+   [
+    "00:26",
+    "first start refused: Helius standby RPC out of credits (429); nothing sent"
+   ]
+  ],
+  "fixes_after": [
+   "Owner OK'd a 15M buy-priority test on Amsterdam (run 12): leader-type study showed Amsterdam BAM fills at 5 wins of 18, −0.028 SOL per fill, despite 89% landing in the dump's block."
+  ],
+  "next": [
+   "Run 12: 15M buy priority (sells 5M)."
+  ]
+ },
+ "fra-12": {
+  "title": "Restart with run 10's A/B settings (0.55 SOL, 4 s hold / SL −20%), stopped at once",
+  "engine": "dip10",
+  "verdict": "Started and stopped within a minute (0 buys) so Frankfurt could restart at the owner's 0.35 SOL / 1.3 s request.",
+  "next": [
+   "Run 13: 0.35 SOL normal and dev, 1.3 s / SL −10% (same as Amsterdam)."
+  ]
+ },
+ "fra-13": {
+  "title": "0.35 SOL normal + dev, 1.3 s / SL −10% (same exit as Amsterdam)",
+  "engine": "dip10",
+  "verdict": "+0.0153 SOL on 5 fills of 23 buys (22% fill rate; most misses were the +5% guard).",
+  "changes": [
+   "Owner: \"start it with 0.35 size both dev and non dev and 1.3s same as ams\"."
+  ],
+  "next": [
+   "Run 14: the M2 detector in shadow (dip11) during the peak hours."
+  ]
+ },
+ "fra-14": {
+  "title": "M2 detector SHADOW (dip11) beside IMIT1 trading; 0.35 SOL, 1.3 s / SL −10%",
+  "engine": "dip11 (M2 shadow)",
+  "verdict": "+0.0475 SOL on 27 fills. The M2 shadow graded better than IMIT1 on paper: Stage A c4 +2.56 / +2.04 / +1.25 vs IMIT1 +2.22 / +1.41 / +0.90 SOL at 35 / 50 / 75 ms over 01:42–05:40, both servers. Live picks matched the study on 99.7%.",
+  "changes": [
+   "Engine dip10 → dip11: the M2 model scores every in-envelope dump after the decision (logs only)."
+  ],
+  "next": [
+   "A/B: Frankfurt trades on M2 (run 15), Amsterdam on IMIT1 without BAM leaders (run 14)."
+  ]
+ },
+ "ams-12": {
+  "title": "15M µL/CU buy priority test (sells 5M); 0.35 SOL, 1.3 s / SL −10%",
+  "engine": "dip10",
+  "verdict": "+0.022 SOL on 1 fill of 7 buys. 15M did not land faster than 5M (speed study: same-slot write → seen BAM 27 vs 21 ms, small sample).",
+  "changes": [
+   "Owner OK: buy priority 5M → 15M µL/CU on Amsterdam only."
+  ],
+  "next": [
+   "Run 13: back to 5M, M2 shadow (dip11)."
+  ]
+ },
+ "ams-13": {
+  "title": "M2 detector SHADOW (dip11) beside IMIT1 trading; 0.35 SOL, 1.3 s / SL −10%",
+  "engine": "dip11 (M2 shadow)",
+  "verdict": "−0.014 SOL on 17 fills. Same M2 shadow grading as Frankfurt run 14.",
+  "next": [
+   "A/B run 14: IMIT1 without BAM leaders, M2 and pre-send in shadow."
+  ]
+ },
+ "ams-14": {
+  "title": "A/B, IMIT1 side: no-BAM near list (54 leaders), 5-slot hold / no stop, M2 + pre-send shadows",
+  "engine": "dip12 (M2 + pre-send shadow)",
+  "verdict": "−0.056 SOL on 1 fill of 3 buys in ~2.4 h. Without the BAM leaders IMIT1 almost never fires here (65 of 71 picks were on leaders off the list); the M2 shadow would have bought ~30 on these leaders. Stopped for the pre-send probe.",
+  "changes": [
+   "Near list: Amsterdam's 120 leaders → 54 non-BAM leaders (BAM leaders lost money here: about −0.028 SOL per fill).",
+   "Exit: 6 slots / SL −10% → 5 slots / no stop (SL −50%), as Frankfurt's A/B side.",
+   "Engine dip12: pre-send shadow on (logs only)."
+  ],
+  "events": [
+   [
+    "08:34",
+    "stopped by the agent (owner chose 'Amsterdam now' for the pre-send probe); no open position"
+   ]
+  ],
+  "next": [
+   "Run 15: pre-send live DRY run (10 min), then run 16: the live pre-send probe."
+  ]
+ },
+ "ams-15": {
+  "title": "Pre-send LIVE DRY run (dip13, 10 min): builds and signs pre-sent buys, sends none",
+  "engine": "dip13 (pre-send live + sell fan-out)",
+  "verdict": "Clean: 24 triggers, 15 windows armed, 494 attempts signed (sign 0.26 ms p50), limit exactly 0.88 × price, 53 ms pacing, live triggers = shadow triggers. Normal bot: 0 buys.",
+  "changes": [
+   "First start with the Helius API key (both Helius paths keyed; caps helius 15 / helius-swqos 15 / helius-ps 20 per s).",
+   "Sell fan-out ON: every sell to staked-rpc AND Helius SWQoS in one tx (owner OK 08:05)."
+  ],
+  "next": [
+   "Run 16: the same, with real attempts."
+  ]
+ },
+ "ams-16": {
+  "title": "Pre-send LIVE probe (dip13): 0.2 SOL, 4 attempts per slot via helius-ps, caps 20 fills / 0.03 SOL fees",
+  "engine": "dip13 (pre-send live + sell fan-out)",
+  "verdict": "Pre-send: 20 fills of 118 windows (9 wins), realized +0.0119 SOL, failed-attempt fees 0.0192, NET −0.0073. Live = paper on the same windows (+0.30% vs +0.31% per SOL). Landed a median 53 ms after the price drop (not 0–10 ms). Normal bot: 0 buys (37 of 40 picks on leaders off the list).",
+  "red_flags": [
+   [
+    "ℹ️",
+    "Costs ate the margin: the price move averaged +3.8% per fill, but pump fees took ~2.5%, tips and priority ~1%, failed attempts ~0.5% (ops/strategies/presend/PROBE1_RESULTS.md)."
+   ]
+  ],
+  "next": [
+   "Instant-bot proof: dense pre-senders (26–85 attempts per slot) on creator dumps; copying that on T2 loses (INSTANT_BOTS.md).",
+   "Pre-send stays a shadow; speed fixes (dip14) first."
+  ]
+ },
+ "fra-15": {
+  "title": "A/B, M2 side: the new M2 model GATES the buys (dev-list keeps IMIT1); 0.35 SOL, 5-slot hold / no stop; M2 + pre-send shadows",
+  "engine": "dip12 (M2 gate + pre-send shadow)",
+  "verdict": "+0.148 SOL on 40 fills of 101 buys (40% fill rate) over 9 h. Best run since run 7. Most misses were the +5% guard on dumps faster bots took first. Full-day pre-send shadow (paper, 0.55 SOL): 1,586 windows, ~340–366 fills, net +2.7 to +4.2 SOL depending on landing (06:08–15:08 PKT).",
+  "changes": [
+   "Engine dip11 → dip12: M2 in GATE mode (the M2 score replaces the IMIT1 gate; dev-list tokens keep their IMIT1 tier).",
+   "Exit 6 slots / SL −10% → 5 slots / no stop (SL −50%).",
+   "Pre-send shadow on (logs only)."
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Investigation during this run (WHY_LIVE_LOSES.md): our buys land a median 58 ms after the dump; the paper model is right at our real landing. Speed after the send is lever #1."
+   ]
+  ],
+  "fixes_after": [
+   "Engine dip14 staged (speed fixes: shred fire shadow/live, defer, skip Rakurai, clock2, feed-lag, probes); Helius key + rate rebalance in the base config; sell fan-out via Helius SWQoS (dip13+)."
+  ],
+  "next": [
+   "Speed shadow run (dip14 --shred-fire shadow --clock2 --feed-lag --defer --skip-clients Rakurai), then relay probes, then the live speed A/B (ops/dip/PLAN_1025_PM.md)."
+  ]
+ }
+}

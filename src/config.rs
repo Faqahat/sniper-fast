@@ -1641,6 +1641,25 @@ pub enum SendKind {
     /// auth). No tip account: Harmonic's "tip" is the compute-unit price, so the copy must carry one. One-tx bundle
     /// (revert-protected: a reverting bundle is dropped, no fee)
     HarmonicBundle,
+    /// dip16 (10-25; owner signed up ~20:10 PKT; glaive.trade/docs): Glaive, raw bytes to `POST /binary?api-key=<UUID>` (the key in the
+    /// URL: url = "http://fra.glaive.trade/binary?api-key=${GLAIVE_KEY}"; also ams1 / ams2), application/octet-stream; tip >= 0.0001
+    /// SOL to one of its 6 receivers; GET /health keep-alive (no auth). 400 + `error`, 401 bad key, 429 over 10 TPS per key. No TLS
+    /// endpoint (10-25: port 443 refused on all three hosts): the entry needs `no_tls_endpoint`
+    Glaive,
+    /// dip17 (10-25; owner signed up): Soyas TX landing, a QUIC lane (send/quic_lane.rs): url = "quic://fra.landing.soyas.xyz:9000"
+    /// (also fra2 / ams / nyc / lon / tyo), SNI soyas-landing, ALPN solana-tpu, the whitelisted keypair in `identity_env`
+    /// (default SOYAS_KEYPAIR) as the client certificate; one uni stream per tx; tip >= 0.001 SOL to one of its 10 receivers
+    Soyas,
+    /// dip17: Solami Beam, a QUIC lane: url = "quic://fra.beam.solami.dev:11000" (ams. / nyc. / global beam.solami.dev; the solami
+    /// crate 0.1.58), SNI solami-beam, ALPN solana-tpu, keypair in `identity_env` (default SOLAMI_KEYPAIR); tip >= 0.0001 SOL to
+    /// one of its 10 "...beam" receivers (the crate's TIP_ACCOUNTS)
+    Solami,
+    /// dip18 (10-25; owner OK ~23:45 PKT): Corvus Falcon native UDP (docs.corvus-labs.io/falcon/udp, binary frame): url =
+    /// "udp://fra.falcon.wtf:9000" (also ams. / lon. / ...; UDP 9000). Every datagram = the API key as its raw 16-byte UUID
+    /// (token_env, e.g. FALCON_KEY: the 36-char UUID, hex-decoded without dashes, in order) || the raw serialized tx (1..1,232
+    /// bytes); no length prefix, no reply ever (silent drops). Tip >= 0.001 SOL to one of the Fa1con1... accounts (Falcon's list).
+    /// No rate feedback over UDP: max_per_sec at or below the key's 5 TPS. Retry = the same signed bytes (dedup by signature)
+    FalconUdp,
 }
 
 impl SendKind {
@@ -1654,10 +1673,18 @@ impl SendKind {
             SendKind::Rpcfast | SendKind::Iris => 10_000,
             SendKind::Bolt | SendKind::Lunar => 1_000_000,
             SendKind::Shyft | SendKind::Haan | SendKind::Tpu | SendKind::Rpc | SendKind::HarmonicBundle => 0,
-            SendKind::BlockRazor | SendKind::FlashBlock => 100_000,
+            SendKind::BlockRazor | SendKind::FlashBlock | SendKind::Glaive | SendKind::Solami => 100_000,
             SendKind::Nozomi | SendKind::ZeroSlot | SendKind::NodeOne | SendKind::Falcon | SendKind::Everstake | SendKind::NextBlock | SendKind::Bloxroute
-            | SendKind::JupiterTx | SendKind::Landx | SendKind::SpeedLanding => 1_000_000,
+            | SendKind::JupiterTx | SendKind::Landx | SendKind::SpeedLanding | SendKind::Soyas | SendKind::FalconUdp => 1_000_000,
         }
+    }
+
+    /// dip17: a QUIC landing lane (send/quic_lane.rs: one persistent connection, the keypair as the client certificate)
+    pub fn is_quic_lane(self) -> bool { matches!(self, SendKind::Soyas | SendKind::Solami) }
+
+    /// dip17: a QUIC lane's defaults: (SNI, identity env var)
+    pub fn quic_defaults(self) -> Option<(&'static str, &'static str)> {
+        match self { SendKind::Soyas => Some(("soyas-landing", "SOYAS_KEYPAIR")), SendKind::Solami => Some(("solami-beam", "SOLAMI_KEYPAIR")), _ => None }
     }
 }
 
@@ -1702,6 +1729,71 @@ pub struct SendPath {
     /// this says so, with the evidence (recorded: `arbx check`, run.log, meta.json `send_paths`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_tls_endpoint: Option<String>,
+    // dip17 QUIC lanes (kind soyas / solami; refused on every other kind; unset = not serialized, so a dip16 config reads and
+    // records as before)
+    /// TLS server name (default: soyas-landing / solami-beam)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sni: Option<String>,
+    /// ALPN (default solana-tpu)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpn: Option<String>,
+    /// env var with the lane's whitelisted keypair, base58 64 bytes (default SOYAS_KEYPAIR / SOLAMI_KEYPAIR); never the payer's
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_env: Option<String>,
+    /// QUIC keep-alive interval (default 25,000 ms), below `idle_ms`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive_ms: Option<u64>,
+    /// QUIC idle timeout (default 30,000 ms)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_ms: Option<u64>,
+}
+
+impl SendPath {
+    /// dip17: a QUIC lane's settings with the kind's defaults, checked: (lane, identity env var). An error for any other kind
+    pub fn quic_settings(&self) -> Result<(crate::send::quic_lane::LaneCfg, String)> {
+        use crate::send::quic_lane as q;
+        let (sni0, env0) = self.kind.quic_defaults().with_context(|| format!("send path {}: {:?} is not a QUIC lane", self.name, self.kind))?;
+        let (host, port) = q::parse_quic_url(&self.url).with_context(|| format!("send path {}", self.name))?;
+        let sni = self.sni.clone().unwrap_or_else(|| sni0.to_string());
+        let alpn = self.alpn.clone().unwrap_or_else(|| q::DEFAULT_ALPN.to_string());
+        let env = self.identity_env.clone().unwrap_or_else(|| env0.to_string());
+        let (keepalive_ms, idle_ms) = (self.keepalive_ms.unwrap_or(q::DEFAULT_KEEPALIVE_MS), self.idle_ms.unwrap_or(q::DEFAULT_IDLE_MS));
+        if sni.trim().is_empty() || alpn.trim().is_empty() || env.trim().is_empty() { bail!("send path {}: sni, alpn and identity_env must not be empty", self.name); }
+        if !(1_000..=600_000).contains(&idle_ms) { bail!("send path {}: idle_ms must be 1,000..600,000", self.name); }
+        if keepalive_ms < 100 || keepalive_ms >= idle_ms { bail!("send path {}: keepalive_ms must be >= 100 and below idle_ms ({idle_ms})", self.name); }
+        if self.token_env.is_some() || self.jito_auth_env.is_some() || self.ping_url.is_some() || self.no_tls_endpoint.is_some() || self.preflight || self.auth_keypair.is_some() {
+            bail!("send path {}: a QUIC lane takes its key from identity_env (no token_env, jito_auth_env, ping_url, no_tls_endpoint, preflight, auth_keypair)", self.name);
+        }
+        Ok((q::LaneCfg { host, port, sni, alpn, keepalive_ms, idle_ms }, env))
+    }
+
+    /// dip18: a falcon-udp path's shape: a `udp://host:port` url with no `${...}` in it (the key goes in every datagram, from
+    /// token_env, which it needs); no other kind changes
+    pub fn falcon_udp_check(&self) -> Result<()> {
+        if self.kind != SendKind::FalconUdp { return Ok(()); }
+        let u = self.url.trim();
+        let hp = u.strip_prefix("udp://").map(|x| x.trim_end_matches('/'))
+            .with_context(|| format!("send path {}: falcon-udp needs url = \"udp://<region>.falcon.wtf:9000\"", self.name))?;
+        if !crate::config::env_vars(u).is_empty() { bail!("send path {}: falcon-udp takes its key from token_env, not a ${{...}} in the url", self.name); }
+        match hp.rsplit_once(':') {
+            Some((h, p)) if !h.is_empty() && p.parse::<u16>().is_ok_and(|p| p > 0) => {}
+            _ => bail!("send path {}: falcon-udp url needs host:port (udp://<region>.falcon.wtf:9000)", self.name),
+        }
+        if self.token_env.as_deref().map_or(true, |t| t.trim().is_empty()) { bail!("send path {}: falcon-udp needs token_env (the API key UUID, e.g. FALCON_KEY)", self.name); }
+        if self.jito_auth_env.is_some() || self.ping_url.is_some() || self.preflight || self.auth_keypair.is_some() {
+            bail!("send path {}: falcon-udp takes no jito_auth_env, ping_url, preflight or auth_keypair (UDP: no reply, no keep-alive)", self.name);
+        }
+        Ok(())
+    }
+
+    /// dip17: the QUIC lane keys are a QUIC lane's only; a QUIC lane's settings must be valid
+    pub fn quic_check(&self) -> Result<()> {
+        if self.kind.is_quic_lane() { return self.quic_settings().map(|_| ()); }
+        if self.sni.is_some() || self.alpn.is_some() || self.identity_env.is_some() || self.keepalive_ms.is_some() || self.idle_ms.is_some() {
+            bail!("send path {}: sni / alpn / identity_env / keepalive_ms / idle_ms are for QUIC lanes (kind soyas, solami)", self.name);
+        }
+        Ok(())
+    }
 }
 
 impl Config {
@@ -1753,6 +1845,8 @@ impl Config {
             if !names.insert(s.name.clone()) { bail!("duplicate send path name {}", s.name); }
             let min = s.kind.min_tip();
             if s.tip_lamports < min { bail!("send path {}: {:?} needs tip_lamports >= {min}", s.name, s.kind); }
+            s.quic_check()?;
+            s.falcon_udp_check()?;
             // tip accounts default to the provider's own list (send::known_tip_accounts); a configured one must be on it
             let known = crate::send::known_tip_accounts(s.kind);
             if s.tip_lamports > 0 && known.is_empty() { bail!("send path {}: {:?} takes no tip", s.name, s.kind); }
@@ -2037,7 +2131,7 @@ pub fn env_vars(s: &str) -> Vec<String> {
     out
 }
 
-/// a URL whose scheme carries its data in clear text: `http://`, and `udp://` (LandX's key starts every packet)
+/// a URL whose scheme carries its data in clear text: `http://`, and `udp://` (LandX's / Falcon UDP's key starts every packet)
 pub fn cleartext_scheme(u: &str) -> bool {
     let l = u.trim_start().to_ascii_lowercase();
     l.starts_with("http://") || l.starts_with("udp://")
@@ -2602,6 +2696,87 @@ mod tests {
             let cfg = Config::load(&repo(f)).unwrap();
             for s in cfg.sends.iter().filter(|s| s.enabled) { cleartext_check(s).unwrap(); }
         }
+    }
+
+    /// dip16 (10-25; owner signed up ~20:10 PKT): `kind = "glaive"` parses, its tip >= 100,000 lamports to its 6 documented accounts (a
+    /// configured one must be on the list); its key in the URL (`/binary?api-key=${GLAIVE_KEY}`) over glaive.trade's plain http needs the
+    /// recorded no_tls_endpoint (I-10: port 443 refused on fra / ams1 / ams2, 10-25)
+    #[test]
+    fn glaive_send_path_parses() {
+        let g = |url: &str, extra: &str| format!("{MINIMAL}[[send]]\nname = \"glaive-fra\"\nkind = \"glaive\"\nurl = \"{url}\"\n{extra}");
+        let url = "http://fra.glaive.trade/binary?api-key=${GLAIVE_KEY}";
+        let note = "no_tls_endpoint = \"glaive.trade: port 443 refused, docs show http only (2026-10-25)\"\n";
+        let ok = Config::parse(&g(url, &format!("tip_lamports = 100000\n{note}"))).unwrap();
+        let s = &ok.sends[0];
+        assert_eq!((s.kind, s.tip_lamports, s.kind.min_tip(), crate::send::known_tip_accounts(s.kind).len()), (SendKind::Glaive, 100_000, 100_000, 6));
+        let n = cleartext_check(s).unwrap().unwrap();
+        assert!(n.contains("${GLAIVE_KEY}") && n.contains("no TLS endpoint"), "{n}");
+        assert!(err(&g(url, &format!("tip_lamports = 99999\n{note}"))).contains("needs tip_lamports >= 100000"));
+        let e = err(&g(url, "tip_lamports = 100000\n"));
+        assert!(e.contains("plain http://") && e.contains("${GLAIVE_KEY}") && e.contains("I-10"), "{e}");
+        assert!(Config::parse(&g(url, &format!("tip_lamports = 100000\ntip_accounts = [\"GLaivq5dU8qHayz9Qf13LjPfVy3SmUhbmickfGiZdmfh\"]\n{note}"))).is_ok());
+        let e = err(&g(url, &format!("tip_lamports = 100000\ntip_accounts = [\"FjmZZrFvhnqqb9ThCuMVnENaM3JGVuGWNyCAxRJcFpg9\"]\n{note}")));
+        assert!(e.contains("not one of Glaive's documented tip accounts"), "{e}");
+        for region in ["ams1", "ams2"] { assert!(Config::parse(&g(&url.replace("fra", region), &format!("tip_lamports = 100000\n{note}"))).is_ok(), "{region}"); }
+    }
+
+    /// dip17 (10-25): `kind = "soyas"` / `"solami"` (QUIC lanes) parse with their defaults (SNI, ALPN solana-tpu, identity env,
+    /// keep-alive 25 s / idle 30 s); the minimum tips (1,000,000 / 100,000) and tip lists (10 / 10) hold; quic:// is not plain text
+    /// (no no_tls_endpoint needed: the key is the TLS client certificate); the lane keys are refused on any other kind
+    #[test]
+    fn quic_lane_send_paths_parse() {
+        let q = |kind: &str, url: &str, extra: &str| format!("{MINIMAL}[[send]]\nname = \"{kind}-fra\"\nkind = \"{kind}\"\nurl = \"{url}\"\n{extra}");
+        let c = Config::parse(&q("soyas", "quic://fra.landing.soyas.xyz:9000", "tip_lamports = 1000000\nmax_per_sec = 10\n")).unwrap();
+        let s = &c.sends[0];
+        assert_eq!((s.kind, s.kind.min_tip(), crate::send::known_tip_accounts(s.kind).len(), cleartext_check(s).unwrap()), (SendKind::Soyas, 1_000_000, 10, None));
+        let (l, env) = s.quic_settings().unwrap();
+        assert_eq!((l.sni.as_str(), l.alpn.as_str(), l.keepalive_ms, l.idle_ms, env.as_str()), ("soyas-landing", "solana-tpu", 25_000, 30_000, "SOYAS_KEYPAIR"));
+        let c = Config::parse(&q("solami", "quic://ams.beam.solami.dev:11000", "tip_lamports = 100000\n")).unwrap();
+        let (l, env) = c.sends[0].quic_settings().unwrap();
+        assert_eq!((c.sends[0].kind, l.host.as_str(), l.port, l.sni.as_str(), env.as_str()), (SendKind::Solami, "ams.beam.solami.dev", 11000, "solami-beam", "SOLAMI_KEYPAIR"));
+        assert!(err(&q("soyas", "quic://fra.landing.soyas.xyz:9000", "tip_lamports = 999999\n")).contains("needs tip_lamports >= 1000000"));
+        assert!(err(&q("solami", "quic://fra.beam.solami.dev:11000", "tip_lamports = 99999\n")).contains("needs tip_lamports >= 100000"));
+        // a tip account of the other lane is refused
+        let e = err(&q("solami", "quic://fra.beam.solami.dev:11000", "tip_lamports = 100000\ntip_accounts = [\"soyas4s6L8KWZ8rsSk1mF3d1mQScoTGGAgjk98bF8nP\"]\n"));
+        assert!(e.contains("not one of Solami's documented tip accounts"), "{e}");
+        assert!(err(&q("soyas", "https://fra.landing.soyas.xyz:9000", "tip_lamports = 1000000\n")).contains("quic://"));
+        assert!(err(&q("soyas", "quic://fra.landing.soyas.xyz:9000", "tip_lamports = 1000000\nkeepalive_ms = 30000\n")).contains("below idle_ms"));
+        assert!(err(&q("soyas", "quic://fra.landing.soyas.xyz:9000", "tip_lamports = 1000000\nping_url = \"https://x\"\n")).contains("identity_env"));
+        assert!(err(&format!("{MINIMAL}[[send]]\nname = \"h\"\nkind = \"helius\"\nurl = \"https://x\"\ntip_lamports = 5000\nidentity_env = \"K\"\n")).contains("for QUIC lanes"));
+        assert!(err(&q("soyas", "quic://h:1", "tip_lamports = 1000000\nlane = \"soyas\"\n")).contains("unknown field `lane`"));
+    }
+
+    /// dip18 (10-25): `kind = "falcon-udp"` (Falcon native UDP) parses: udp://<region>.falcon.wtf:9000, token_env (the key UUID
+    /// goes in every datagram, so plain udp:// needs no_tls_endpoint, as LandX UDP), tip >= 1,000,000 to Falcon's 10 Fa1con1...
+    /// accounts (the HTTP falcon kind's list); refused: another scheme, no port, no token_env, a ${...} in the url, ping_url
+    #[test]
+    fn falcon_udp_send_paths_parse() {
+        let note = "no_tls_endpoint = \"Falcon native UDP is UDP-only (docs.corvus-labs.io/falcon/udp); the 16-byte key prefixes each datagram\"\n";
+        let f = |url: &str, extra: &str| format!("{MINIMAL}[[send]]\nname = \"falcon-udp-fra\"\nkind = \"falcon-udp\"\nurl = \"{url}\"\n{extra}");
+        for region in ["fra", "ams"] {
+            let c = Config::parse(&f(&format!("udp://{region}.falcon.wtf:9000"), &format!("token_env = \"FALCON_KEY\"\ntip_lamports = 1000000\nmax_per_sec = 5\n{note}"))).unwrap();
+            let s = &c.sends[0];
+            assert_eq!((s.kind, s.kind.min_tip(), s.max_per_sec, s.token_env.as_deref()), (SendKind::FalconUdp, 1_000_000, Some(5), Some("FALCON_KEY")));
+            assert!(cleartext_check(s).unwrap().unwrap().contains("FALCON_KEY (token_env"), "{region}");
+            assert!(!s.kind.is_quic_lane());
+            assert_eq!(serde_json::to_value(s).unwrap()["kind"], "falcon-udp");
+        }
+        assert_eq!(crate::send::known_tip_accounts(SendKind::FalconUdp), crate::send::known_tip_accounts(SendKind::Falcon));
+        assert_eq!(crate::send::known_tip_accounts(SendKind::FalconUdp).len(), 10);
+        let ok = |extra: &str| format!("token_env = \"FALCON_KEY\"\ntip_lamports = 1000000\n{note}{extra}");
+        // the key in clear text over udp:// without the recorded exception: refused (I-10)
+        let e = err(&f("udp://fra.falcon.wtf:9000", "token_env = \"FALCON_KEY\"\ntip_lamports = 1000000\n"));
+        assert!(e.contains("plain udp://") && e.contains("FALCON_KEY"), "{e}");
+        assert!(err(&f("udp://fra.falcon.wtf:9000", "token_env = \"FALCON_KEY\"\ntip_lamports = 999999\n")).contains("needs tip_lamports >= 1000000"));
+        let e = err(&f("udp://fra.falcon.wtf:9000", &ok("tip_accounts = [\"LandX1EMgYtrfi4jVJ7ryby4mDpZcef6sVH9b9U1cog\"]\n")));
+        assert!(e.contains("not one of FalconUdp's documented tip accounts"), "{e}");
+        assert!(Config::parse(&f("udp://fra.falcon.wtf:9000", &ok("tip_accounts = [\"Fa1con1QGHJK232s8yZpzZZwqPexnAKcoyKj626LNsMv\"]\n"))).is_ok());
+        assert!(err(&f("http://fra.falcon.wtf", &ok(""))).contains("udp://"));
+        assert!(err(&f("udp://fra.falcon.wtf", &ok(""))).contains("host:port"));
+        assert!(err(&f("udp://fra.falcon.wtf:9000", &format!("tip_lamports = 1000000\n"))).contains("needs token_env"));
+        assert!(err(&f("udp://fra.falcon.wtf:9000/${FALCON_KEY}", &ok(""))).contains("not a ${...} in the url"));
+        assert!(err(&f("udp://fra.falcon.wtf:9000", &ok("ping_url = \"http://fra.falcon.wtf\"\n"))).contains("no reply"));
+        assert!(err(&f("udp://fra.falcon.wtf:9000", &ok("sni = \"x\"\n"))).contains("for QUIC lanes"));
     }
 
     /// FT-000's keys: `[alts]` batch_max, calls_inflight, max_tables, max_mb; `[record] exec_unwatched_sample`;

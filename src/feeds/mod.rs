@@ -181,6 +181,10 @@ pub struct FeedCounters {
     /// gRPC feeds whose provider stamps its messages (`created_at`): receive time minus that, ns (feedhealth.jsonl
     /// `provider_lag_ms`; a provider clock ahead of ours counts as 0)
     pub provider_lag: std::sync::Mutex<Option<crate::lat::Series>>,
+    /// dip16 C4 (--window-clock): this feed's index (`Arrival::feed`, set by `start`) and the last slot it noted in the slot
+    /// first-arrival table (`slot_first`); untouched while the table is off
+    pub idx: std::sync::atomic::AtomicU16,
+    pub first_noted: AtomicU64,
 }
 
 /// A raw shred feed's assembler totals (feedhealth.jsonl `shreds`), copied from `AsmStats` every 2 s by the feed thread
@@ -205,6 +209,11 @@ impl FeedCounters {
         self.last_msg_ns.store(t, Ordering::Relaxed);
         if !self.connected.load(Ordering::Relaxed) { self.connected.store(true, Ordering::Relaxed); }
         if slot > self.slot_max.load(Ordering::Relaxed) { self.slot_max.store(slot, Ordering::Relaxed); }
+        // dip16 C4 (--window-clock): the slot's first arrival on any feed, noted when this feed's slot changes (off: one load)
+        if SLOT_FIRST_ON.load(Ordering::Relaxed) && slot > 0 && self.first_noted.load(Ordering::Relaxed) != slot {
+            self.first_noted.store(slot, Ordering::Relaxed);
+            slot_first_note(slot, t, self.idx.load(Ordering::Relaxed));
+        }
     }
 
     /// a message stamped `created` (ns) by the provider arrived at `t`
@@ -231,20 +240,30 @@ impl FeedCounters {
 /// transaction was handed over (so they never ride on the arrival and the engine's own map lacks them). Keyed by the
 /// signature's first 8 bytes (big-endian, as poh.log's `sig8`), the earliest position kept, for `POH_KEEP_NS`.
 /// Settlement (outcomes `poh`) and the `poh_trigger_pct` gauge read it ([`poh_index`]; WP-05 / WP-07 call sites)
-pub struct PohIndex { m: std::sync::Mutex<(rustc_hash::FxHashMap<u64, (entries::Poh, u16)>, std::collections::VecDeque<(u64, u64)>)> }
+pub struct PohIndex { m: std::sync::Mutex<(rustc_hash::FxHashMap<u64, (entries::Poh, u16, u64)>, std::collections::VecDeque<(u64, u64)>)>,
+    /// dip14 (D1): per slot (the newest SLOT_TOT_KEEP) the entries feeds' totals once the slot is done
+    slots: std::sync::Mutex<std::collections::VecDeque<SlotTot>> }
+
+/// dip14 (D1): one finished slot as an entries feed walked it: its PoH hash count at the last entry, ticks, entries, transactions
+/// (votes included), the arrival of its first / last message, and whether it was followed from its first entry
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct SlotTot { pub slot: u64, pub feed: u16, pub hashes: u64, pub ticks: u32, pub entries: u32, pub txs: u64, pub t_first: u64, pub t_last: u64, pub valid: bool }
+
+/// slots kept in the PoH index's slot table
+pub const SLOT_TOT_KEEP: usize = 4096;
 
 /// how long a position is kept, and at most how many (a hard cap on memory)
 pub const POH_KEEP_NS: u64 = 180_000_000_000;
 pub const POH_KEEP_MAX: usize = 1_000_000;
 
 impl PohIndex {
-    fn new() -> PohIndex { PohIndex { m: std::sync::Mutex::new(Default::default()) } }
+    fn new() -> PohIndex { PohIndex { m: std::sync::Mutex::new(Default::default()), slots: std::sync::Mutex::new(Default::default()) } }
     /// positions `(sig8, poh)` from feed `feed`, received at `t` (the first one of a signature wins)
     pub fn insert_many(&self, items: &[(u64, entries::Poh)], feed: u16, t: u64) {
         if items.is_empty() { return; }
         let mut g = self.m.lock().unwrap_or_else(|e| e.into_inner());
         let (map, order) = &mut *g;
-        for (k, p) in items { if !map.contains_key(k) { map.insert(*k, (*p, feed)); order.push_back((t, *k)); } }
+        for (k, p) in items { if !map.contains_key(k) { map.insert(*k, (*p, feed, t)); order.push_back((t, *k)); } }
         while let Some(&(t0, k)) = order.front() {
             if t.saturating_sub(t0) < POH_KEEP_NS && order.len() <= POH_KEEP_MAX { break; }
             order.pop_front();
@@ -252,11 +271,46 @@ impl PohIndex {
         }
     }
     /// the position of the transaction whose signature starts with `sig8`, and the feed that saw it
-    pub fn get(&self, sig8: u64) -> Option<(entries::Poh, u16)> { self.m.lock().unwrap_or_else(|e| e.into_inner()).0.get(&sig8).copied() }
+    pub fn get(&self, sig8: u64) -> Option<(entries::Poh, u16)> { self.m.lock().unwrap_or_else(|e| e.into_inner()).0.get(&sig8).map(|x| (x.0, x.1)) }
+    /// dip14 (D1): the same and the arrival time of the message that carried it (the entries feed's clock of the tx)
+    pub fn get_full(&self, sig8: u64) -> Option<(entries::Poh, u16, u64)> { self.m.lock().unwrap_or_else(|e| e.into_inner()).0.get(&sig8).copied() }
+    /// dip14 (D1): a finished slot's totals (the first feed to report it wins)
+    pub fn slot_note(&self, t: SlotTot) {
+        let mut g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        if g.iter().any(|x| x.slot == t.slot) { return; }
+        g.push_back(t);
+        while g.len() > SLOT_TOT_KEEP { g.pop_front(); }
+    }
+    /// dip14 (D1): the totals of `slot` once it is done
+    pub fn slot_total(&self, slot: u64) -> Option<SlotTot> { self.slots.lock().unwrap_or_else(|e| e.into_inner()).iter().rev().find(|x| x.slot == slot).copied() }
     /// the same by full signature
     pub fn get_sig(&self, sig: &[u8; 64]) -> Option<(entries::Poh, u16)> { self.get(u64::from_be_bytes(sig[..8].try_into().unwrap())) }
     pub fn len(&self) -> usize { self.m.lock().unwrap_or_else(|e| e.into_inner()).0.len() }
     pub fn is_empty(&self) -> bool { self.len() == 0 }
+}
+
+/// dip16 C4 (--window-clock, log only; ops/dip/speed/clients/CLIENTS.md §2 "Slot timing"): the first arrival of anything of a slot
+/// (a shred, an entries message, a transaction, a status) on ANY feed, kept for the newest SLOT_FIRST_N slots (ring by slot), with
+/// the feed that saw it first. Under Alpenglow block k of a leader's 4-slot window must be recorded by 200 ms x k - 56 ms after the
+/// window starts (144 / 344 / 544 / 744 ms); the window's first slot's first arrival is our clock of that start. OFF until
+/// `slot_first_on()` (then each feed takes this lock once per slot change)
+pub static SLOT_FIRST_ON: AtomicBool = AtomicBool::new(false);
+pub const SLOT_FIRST_N: usize = 1024;
+static SLOT_FIRST: std::sync::LazyLock<std::sync::Mutex<Vec<(u64, u64, u16)>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(vec![(0, 0, 0); SLOT_FIRST_N]));
+/// start the slot first-arrival table (the feeds note from their next message)
+pub fn slot_first_on() { SLOT_FIRST_ON.store(true, Ordering::Relaxed); }
+/// `slot` arrived at `t` on feed `feed`: the earliest arrival is kept
+pub fn slot_first_note(slot: u64, t: u64, feed: u16) {
+    let mut g = SLOT_FIRST.lock().unwrap_or_else(|e| e.into_inner());
+    let e = &mut g[(slot % SLOT_FIRST_N as u64) as usize];
+    // a newer slot takes the bucket; a message of a slot SLOT_FIRST_N+ older never clobbers it
+    if slot > e.0 { *e = (slot, t, feed); } else if slot == e.0 && t < e.1 { e.1 = t; e.2 = feed; }
+}
+/// the first arrival of `slot` on any feed (ns, that feed's index); None: not seen (or older than the table)
+pub fn slot_first(slot: u64) -> Option<(u64, u16)> {
+    let g = SLOT_FIRST.lock().unwrap_or_else(|e| e.into_inner());
+    let e = g[(slot % SLOT_FIRST_N as u64) as usize];
+    (e.0 == slot && slot > 0).then_some((e.1, e.2))
 }
 
 /// GAP (2026-10-19): the order of the non-vote transactions of each slot as an entries or shred feed walked it from the
@@ -291,6 +345,34 @@ pub fn slot_order() -> &'static SlotOrder {
     static O: std::sync::LazyLock<SlotOrder> = std::sync::LazyLock::new(|| SlotOrder { m: Default::default(), max_slot: AtomicU64::new(0) });
     &O
 }
+
+/// PRE-SEND LIVE (snipe_engine --presend-live, ops/strategies/presend/LIVE.md): the executed feeds' FAILED transactions paid by
+/// ONE wallet (the engine's own), by signature: their index in the block, fee and error (`rec::tx_error` text). A failed
+/// transaction emits no pump event, so its arrival carries no ExecInfo; the probe reads its pre-sent attempts' results here.
+/// OFF until `own_fail_watch(payer)` is called (then one 32-byte compare per failed executed transaction); bounded (the oldest
+/// entries go past OWN_FAIL_MAX).
+pub static OWN_FAIL_PAYER: std::sync::OnceLock<Pk> = std::sync::OnceLock::new();
+#[derive(Clone, Debug, PartialEq)]
+pub struct OwnFail { pub slot: u64, pub index: u64, pub fee: u64, pub err: String }
+type OwnFailMap = (rustc_hash::FxHashMap<[u8; 64], OwnFail>, std::collections::VecDeque<[u8; 64]>);
+static OWN_FAIL: std::sync::LazyLock<std::sync::Mutex<OwnFailMap>> = std::sync::LazyLock::new(Default::default);
+pub const OWN_FAIL_MAX: usize = 20_000;
+/// start recording the failed executed transactions paid by `payer`
+pub fn own_fail_watch(payer: Pk) { let _ = OWN_FAIL_PAYER.set(payer); }
+/// a failed executed transaction (the executed feed's thread): recorded when its fee payer is the watched wallet
+#[inline]
+pub fn own_fail_note(sig: &[u8], payer: Option<&[u8]>, slot: u64, index: u64, fee: u64, err: &[u8]) {
+    let Some(p) = OWN_FAIL_PAYER.get() else { return };
+    if payer != Some(&p[..]) { return; }
+    let Ok(s) = <[u8; 64]>::try_from(sig) else { return };
+    let e = rec::tx_error(err);
+    let mut g = OWN_FAIL.lock().unwrap_or_else(|e| e.into_inner());
+    let (m, order) = &mut *g;
+    if m.insert(s, OwnFail { slot, index, fee, err: e }).is_none() { order.push_back(s); }
+    while order.len() > OWN_FAIL_MAX { if let Some(k) = order.pop_front() { m.remove(&k); } }
+}
+/// the recorded failure of `sig` (taken: a second call gets None)
+pub fn own_fail_take(sig: &[u8; 64]) -> Option<OwnFail> { OWN_FAIL.lock().unwrap_or_else(|e| e.into_inner()).0.remove(sig) }
 
 /// The process's PoH index
 pub fn poh_index() -> &'static PohIndex {
@@ -362,6 +444,7 @@ pub fn start(feeds: &[Feed], interest: Arc<Interest>, out: UnboundedSender<Event
         let id = names.len() as u16;
         names.push(f.name.clone());
         let c = Arc::new(FeedCounters::named(&f.name, &kind_name(&f.kind)));
+        c.idx.store(id, Ordering::Relaxed); // dip16 C4: the slot first-arrival table names the feed
         counters.push(c.clone());
         if f.is_raw() {
             let sock = match f.kind {
@@ -469,6 +552,9 @@ pub fn forward(id: u16, interest: &Interest, out: &UnboundedSender<Event>, c: &F
                         r
                     };
                     if let Some(d) = done {
+                        // dip14 (D1): the slot's totals for the block-position clock
+                        poh_index().slot_note(SlotTot { slot: d.slot, feed: id, hashes: d.hashes, ticks: d.ticks, entries: d.entries, txs: d.txs, t_first: d.t_first,
+                            t_last: d.t_last, valid: d.valid });
                         // WP-03b's blockhash ring (source `entries`, PLAN WP-03b item 4): a slot followed from its first entry
                         // that ended on a tick, with whole slots' worth of ticks (64, or more for a leader whose parent is slots
                         // back), ended on its final tick, whose hash is the slot's blockhash. An entries feed does not mark a

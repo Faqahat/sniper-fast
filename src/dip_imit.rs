@@ -229,6 +229,40 @@ impl Imit {
     }
     pub fn in_envelope(&self, x: &[f64; 42]) -> bool { self.envelope.iter().all(|&(j, ge, v)| if ge { x[j] >= v } else { x[j] <= v }) }
     pub fn score(&self, x: &[f64; 42]) -> f64 { self.g.score(x) }
+
+    /// SHRED FIRE (dip14): the envelope when every feature j may be anywhere in [lo[j], hi[j]]: Some(true) = in for every value,
+    /// Some(false) = out for every value, None = it depends (each condition is a threshold, so its two ends decide)
+    pub fn envelope_bounds(&self, lo: &[f64; 42], hi: &[f64; 42]) -> Option<bool> {
+        let (mut all_in, mut any_out_for_sure) = (true, false);
+        for &(j, ge, v) in &self.envelope {
+            let (a, b) = (lo[j].min(hi[j]), lo[j].max(hi[j]));
+            let (sure_in, sure_out) = if ge { (a >= v, b < v) } else { (b <= v, a > v) };
+            if !sure_in { all_in = false; }
+            if sure_out { any_out_for_sure = true; }
+        }
+        if any_out_for_sure { Some(false) } else if all_in { Some(true) } else { None }
+    }
+
+    /// SHRED FIRE (dip14): (lowest, highest) score over the same intervals (`Gbdt::score_bounds`)
+    pub fn score_bounds(&self, lo: &[f64; 42], hi: &[f64; 42]) -> (f64, f64) { self.g.score_bounds(lo, hi) }
+}
+
+/// SHRED FIRE (dip14): the IMIT1 features that depend on the dump's tx index in its block (the only input a shred feed does not
+/// give): slotpos, prev_sell_ms and since_buy (FEATURES 30, 31, 34). Each is non-decreasing in the index.
+pub const TIME_FEATS: [usize; 3] = [30, 31, 34];
+
+/// SHRED FIRE (dip14): those three features of the dump tr[k] as if its tx index were `i` (the rest of tr[k] as it is), computed
+/// exactly as `features` does (same expressions, same rounding). Caller: tr[k] is the newest trade and i > the index of every
+/// earlier trade of its slot.
+pub fn time_feats(tr: &[T], k: usize, i: u32, ss: &dyn Fn(u64) -> Option<u64>) -> [f64; 3] {
+    let t = &tr[k];
+    let size = ss(t.s).unwrap_or(400).max(i as u64 + 1);
+    let a0 = t.s as f64 * SLOT_MS + (i as f64 / size as f64) * SLOT_MS;
+    let pre = &tr[..k];
+    let slotpos = rnd(i as f64 / size as f64, 3);
+    let prev_sell_ms = match pre.iter().rev().find(|x| !x.buy && x.sol >= MIN_SELL) { Some(p) => rnd(a0 - arr(p, ss), 1), None => 1e9 };
+    let since_buy = match pre.iter().rev().find(|x| x.buy) { Some(lb) => { let v = rnd((a0 - arr(lb, ss)) / 1000.0, 3); if v >= 0.0 { v } else { 1e9 } } None => 1e9 };
+    [slotpos, prev_sell_ms, since_buy]
 }
 
 #[cfg(test)]
@@ -310,8 +344,31 @@ pub struct TokenBook {
     window: Option<(usize, f64, f64, Vec<String>)>,
 }
 
+/// SHRED FIRE (dip14): a TokenBook's state before a speculative `push` of a newer trade (`TokenBook::checkpoint`); `rollback` puts
+/// the book back exactly (a push of the NEWEST trade only appends: an optional gap-repair trade + the trade, the dump-event state
+/// and the label window)
+#[derive(Clone, Debug)]
+pub struct BookCkpt { n: usize, busy: i64, events: usize, tgt: usize, window: Option<(usize, f64, f64, Vec<String>)> }
+
 impl TokenBook {
     pub fn new(c: LaunchInfo) -> TokenBook { TokenBook { c, tr: Vec::new(), busy: -1, events: Vec::new(), tgt_past: Vec::new(), window: None } }
+
+    /// SHRED FIRE (dip14): the chain key (slot, tx index, event index) of the newest trade
+    pub fn last_key(&self) -> Option<(u64, u32, i32)> { self.tr.last().map(|x| (x.s, x.i, x.j)) }
+
+    /// SHRED FIRE (dip14): the state a speculative push of a trade NEWER than every trade in the book can be undone to
+    pub fn checkpoint(&self) -> BookCkpt {
+        BookCkpt { n: self.tr.len(), busy: self.busy, events: self.events.len(), tgt: self.tgt_past.len(), window: self.window.clone() }
+    }
+
+    /// SHRED FIRE (dip14): undo everything since `c` (only valid when the pushes since were of newer trades: they appended)
+    pub fn rollback(&mut self, c: BookCkpt) {
+        self.tr.truncate(c.n);
+        self.busy = c.busy;
+        self.events.truncate(c.events);
+        self.tgt_past.truncate(c.tgt);
+        self.window = c.window;
+    }
 
     /// add one executed trade (in chain order per token: slot, tx index, event index). Returns the dump index when the trade
     /// is a dump event (selbuild rules) and the features can be computed. Out-of-order trades are inserted in place (the
@@ -361,6 +418,20 @@ impl TokenBook {
         if age < 1.0 || age > max_age_s || t.vsol >= 100_000_000_000 || t.s as i64 <= self.busy { return None; }
         self.busy = t.s as i64; self.events.push(k);
         self.window = Some((k, arr(t, ss), rnd(age, 2) * 1000.0, Vec::new()));
+        Some(k)
+    }
+
+    /// M2 (dip_model, --dip-m2): the newest trade's index when it is the trade `key` and a big sell that is NOT a dump event
+    /// only because an earlier big sell of the same slot already was one (these rules take the first per slot; the M2 study's
+    /// Stage A replay sees every dump). Otherwise the same rules as `push`. Read-only: the book is unchanged.
+    pub fn later_in_slot(&self, key: (u64, u32, i32), max_age_s: f64) -> Option<usize> {
+        let k = self.tr.len().checked_sub(1)?;
+        let t = &self.tr[k];
+        if (t.s, t.i, t.j) != key || t.buy || t.sol < MIN_SELL || t.syn || t.s as i64 != self.busy || self.events.last() == Some(&k) { return None; }
+        let st = structure(&self.tr, &self.c);
+        if k < st.g_end || st.g_end < 1 { return None; }
+        let age = (t.s as f64 - self.c.slot as f64) * SLOT_MS / 1000.0;
+        if age < 1.0 || age > max_age_s || t.vsol >= 100_000_000_000 { return None; }
         Some(k)
     }
 
@@ -417,5 +488,85 @@ mod book_tests {
         }
         eprintln!("live book: {n} dumps, missing {missing}, extra {extra}, score mismatches {bad} | top-4% picks {picks}; decisions flipped without block sizes: {flips_noss}");
         assert!(missing == 0 && extra == 0 && bad == 0, "the live book differs from the batch port");
+    }
+
+    /// SHRED FIRE (dip14): on the parity tapes, before every real trade the book takes a SPECULATIVE push of that trade at another
+    /// tx index and is rolled back: (1) the book is then exactly as before (every field), (2) the dumps found with the speculative
+    /// pushes interleaved are the batch ones with the same scores, (3) time_feats at index i equals the features of a push at i,
+    /// (4) the interval bounds over [i_lo, i_hi] contain the score at every probed index and equal it on a point interval
+    #[test]
+    fn spec_push_rollback_time_feats_bounds() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let Some(par) = std::fs::read_to_string(format!("{root}/testdata/imit1_parity.json")).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) else { return; };
+        let Ok(model) = Imit::load("/home/moiz/sniper/ops/overnight/sel/IMIT1.json") else { return; };
+        let cohort: HashSet<String> = par["cohort"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+        let targets: HashSet<String> = par["targets"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+        let max_age = par["max_age"].as_f64().unwrap();
+        let none = |_s: u64| None;
+        let (mut n_spec, mut n_dumps, mut n_tf, mut n_bounds) = (0usize, 0usize, 0usize, 0usize);
+        for tk in par["tokens"].as_array().unwrap() {
+            let la = &tk["launch"];
+            let c = LaunchInfo { slot: la["slot"].as_u64().unwrap(), idx: la["idx"].as_u64().map(|v| v as u32), creator: la["creator"].as_str().map(|s| s.to_string()),
+                                 signer: la["user"].as_str().map(|s| s.to_string()), sig: la["sig"].as_str().unwrap_or("").to_string(), mayhem: false };
+            let want: HashMap<usize, f64> = tk["events"].as_array().unwrap().iter().map(|e| (e["k"].as_u64().unwrap() as usize, e["score"].as_f64().unwrap())).collect();
+            let mut b = TokenBook::new(c.clone());
+            let mut reference = TokenBook::new(c.clone());
+            let mut got: HashMap<usize, f64> = HashMap::new();
+            let mut got_ref: HashMap<usize, f64> = HashMap::new();
+            for r in tk["trades"].as_array().unwrap() {
+                if r["syn"].as_bool().unwrap() { continue; }
+                let t = T { s: r["s"].as_u64().unwrap(), i: r["i"].as_u64().unwrap() as u32, j: r["j"].as_i64().unwrap() as i32, sig: r["sig"].as_str().unwrap().to_string(),
+                            user: r["user"].as_str().unwrap().to_string(), buy: r["buy"].as_bool().unwrap(), sol: r["sol"].as_u64().unwrap(), tok: r["tok"].as_u64().unwrap(),
+                            vsol: r["vsol"].as_u64().unwrap(), vtok: r["vtok"].as_u64().unwrap(), fbps: 95, cbps: 30, syn: false };
+                // the speculative push at a later index of the same slot (when newer than the book), then rollback
+                let newer = b.last_key().is_none_or(|l| l < (t.s, t.i, t.j));
+                if newer {
+                    let before = (b.tr.clone(), b.busy, b.events.clone(), b.tgt_past.clone(), b.window.clone());
+                    let ck = b.checkpoint();
+                    let alt = T { i: t.i + 37, ..t.clone() };
+                    let n0 = b.tr.len();
+                    // (a push that needs a gap-repair trade gives it the pushed trade's index: the shred path never does, it prices the
+                    // sell from the book's own newest state; the time features are checked on gap-free pushes)
+                    if let Some(k) = b.push(alt, &targets, max_age, &none).filter(|_| b.tr.len() == n0 + 1) {
+                        let d = b.dump("m", k, &model, &cohort, &none);
+                        // time_feats at the alt index = the features; at the true index = the features of a push at the true index
+                        let tf = time_feats(&b.tr, k, t.i + 37, &none);
+                        for (n, &j) in TIME_FEATS.iter().enumerate() { assert_eq!(d.feats[j], tf[n], "time feature {j}"); }
+                        let tf_true = time_feats(&b.tr, k, t.i, &none);
+                        b.rollback(ck);
+                        let ck2 = b.checkpoint();
+                        let Some(k2) = b.push(t.clone(), &targets, max_age, &none) else { panic!("the same trade at its true index is not a dump") };
+                        let d2 = b.dump("m", k2, &model, &cohort, &none);
+                        for (n, &j) in TIME_FEATS.iter().enumerate() { assert_eq!(d2.feats[j], tf_true[n], "time feature {j} at the true index"); }
+                        // every feature but the time ones is the same at both indexes
+                        for j in (0..42).filter(|j| !TIME_FEATS.contains(j)) { assert_eq!(d.feats[j].to_bits(), d2.feats[j].to_bits(), "feature {j} moved with the index"); }
+                        // bounds over [true i, true i + 37] contain both scores; a point interval is the score itself
+                        let (lo, hi) = model.score_bounds(&d2.feats, &d.feats);
+                        assert!(lo <= d2.score && d2.score <= hi && lo <= d.score && d.score <= hi, "bounds {lo}..{hi} miss {} / {}", d2.score, d.score);
+                        assert_eq!(model.score_bounds(&d2.feats, &d2.feats), (d2.score, d2.score));
+                        if let Some(e) = model.envelope_bounds(&d2.feats, &d.feats) { assert!(e == d.env_ok && e == d2.env_ok, "envelope bound {e} vs {} / {}", d.env_ok, d2.env_ok); }
+                        if d.env_ok != d2.env_ok { assert_eq!(model.envelope_bounds(&d2.feats, &d.feats), None); }
+                        n_tf += 1; n_bounds += 1;
+                        b.rollback(ck2);
+                    } else { b.rollback(ck); }
+                    let after = (b.tr.clone(), b.busy, b.events.clone(), b.tgt_past.clone(), b.window.clone());
+                    assert!(before.0 == after.0 && before.1 == after.1 && before.2 == after.2 && before.3 == after.3 && format!("{:?}", before.4) == format!("{:?}", after.4),
+                        "rollback left the book changed");
+                    n_spec += 1;
+                }
+                if let Some(k) = b.push(t.clone(), &targets, max_age, &none) { let d = b.dump("m", k, &model, &cohort, &none); got.insert(k, d.score); }
+                if let Some(k) = reference.push(t, &targets, max_age, &none) { let d = reference.dump("m", k, &model, &cohort, &none); got_ref.insert(k, d.score); }
+            }
+            assert_eq!(b.tr, reference.tr);
+            assert_eq!(got.iter().map(|(k, v)| (*k, v.to_bits())).collect::<std::collections::BTreeMap<_, _>>(),
+                       got_ref.iter().map(|(k, v)| (*k, v.to_bits())).collect::<std::collections::BTreeMap<_, _>>(), "dumps differ from the book without speculative pushes");
+            // the same dump events as the study (scores: no block sizes here, as the live engine; live_book_equals_batch checks them with)
+            let mut a: Vec<usize> = got.keys().copied().collect(); a.sort();
+            let mut w: Vec<usize> = want.keys().copied().collect(); w.sort();
+            assert_eq!(a, w, "dump events");
+            n_dumps += w.len();
+        }
+        eprintln!("spec push: {n_spec} speculative pushes rolled back exactly, {n_dumps} dumps unchanged, time features checked on {n_tf}, bounds on {n_bounds}");
+        assert!(n_spec > 10_000 && n_tf > 500);
     }
 }

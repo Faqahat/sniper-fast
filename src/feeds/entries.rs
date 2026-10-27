@@ -176,7 +176,10 @@ pub struct PohClock { slot: u64, hashes: u64, ticks: u32, last_tick: u64, hpt: u
 /// one finished slot as an entries feed delivered it (slots.log); `last_tick_hash`: the hash of its last entry when that
 /// entry was a tick (a slot ends on its final tick, whose hash is its blockhash)
 pub struct SlotRec { pub slot: u64, pub ticks: u32, pub entries: u32, pub txs: u64, pub t_first: u64, pub t_last: u64, pub valid: bool,
-    pub last_tick_hash: Option<[u8; 32]> }
+    pub last_tick_hash: Option<[u8; 32]>,
+    /// dip14 (D1): the slot's PoH hash count at its last entry (with `valid`: its total). Since Alpenglow the count tracks the
+    /// position in the block, not time (ops/dip/speed/fixes/FIXES.md): hashes / this = the fraction of the block before a tx
+    pub hashes: u64 }
 
 impl PohClock {
     /// `entries`, plus arrival bookkeeping: returns each entry's position, the previous slot's record once a newer slot
@@ -184,7 +187,7 @@ impl PohClock {
     /// v2 `entry_idx`: the entries of a slot arrive in order, so the count so far is the index)
     pub fn entries_at(&mut self, slot: u64, ents: &[(u64, u64)], t: u64) -> (Vec<Option<Poh>>, Option<SlotRec>, Option<u32>) {
         let done = (slot > self.slot && self.slot != 0).then(|| SlotRec { slot: self.slot, ticks: self.ticks, entries: self.n_entries, txs: self.n_txs,
-            t_first: self.t_first, t_last: self.t_last, valid: self.valid, last_tick_hash: self.last_hash.filter(|_| self.last_is_tick) });
+            t_first: self.t_first, t_last: self.t_last, valid: self.valid, last_tick_hash: self.last_hash.filter(|_| self.last_is_tick), hashes: self.hashes });
         let out = self.entries(slot, ents);
         let mut first = None;
         if slot == self.slot {
@@ -196,6 +199,10 @@ impl PohClock {
         }
         (out, done, first)
     }
+
+    /// dip14 (D1): the number of transactions of `slot` accounted so far (votes included, as the block index counts them); None for
+    /// another slot or one joined midway
+    pub fn txs_so_far(&self, slot: u64) -> Option<u64> { (slot == self.slot && self.valid).then_some(self.n_txs) }
 
     /// the hash of the last entry of a message of `slot` just accounted, and whether that entry is a tick (the slot's record
     /// carries it once the slot is done); a message of another slot changes nothing

@@ -23,8 +23,9 @@ const ALPN: &[u8] = b"solana-tpu";
 /// leaders a transaction goes to: the current one and the next distinct one
 const FANOUT: usize = 3;
 
+/// the server's certificate is not checked (a leader's TPU, dip17's QUIC landing lanes: send/quic_lane.rs)
 #[derive(Debug)]
-struct AcceptAny(Arc<rustls::crypto::CryptoProvider>);
+pub(crate) struct AcceptAny(pub(crate) Arc<rustls::crypto::CryptoProvider>);
 impl rustls::client::danger::ServerCertVerifier for AcceptAny {
     fn verify_server_cert(&self, _: &rustls::pki_types::CertificateDer<'_>, _: &[rustls::pki_types::CertificateDer<'_>], _: &rustls::pki_types::ServerName<'_>,
         _: &[u8], _: rustls::pki_types::UnixTime) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {

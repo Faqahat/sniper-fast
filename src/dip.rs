@@ -51,7 +51,45 @@ impl Gbdt {
         }
         f
     }
+
+    /// SHRED FIRE (dip14, --dip-shred-fire): the lowest and highest score any input can get when feature j may take ANY value in
+    /// [lo[j], hi[j]] (each feature on its own: a sound, conservative bound). A split whose bin range straddles its threshold
+    /// follows both branches; per tree the smallest / largest reachable leaf. With lo == hi the result is exactly `score` (same
+    /// sums in the same order). Bins are monotone in the value (numpy searchsorted), so a value in [lo, hi] has its bin in
+    /// [bin(lo), bin(hi)]; NaN (bin 0) is allowed at either end.
+    pub fn score_bounds(&self, lo: &[f64], hi: &[f64]) -> (f64, f64) {
+        let bin = |e: &Vec<f64>, v: f64| -> i64 { if v.is_nan() { 0 } else { e.partition_point(|&q| q <= v) as i64 + 1 } };
+        let br: Vec<(i64, i64)> = lo.iter().zip(hi.iter()).zip(self.edges.iter()).map(|((&a, &b), e)| { let (x, y) = (bin(e, a), bin(e, b)); (x.min(y), x.max(y)) }).collect();
+        fn walk(n: &Node, br: &[(i64, i64)]) -> (f64, f64) {
+            match n {
+                Node::Leaf(w) => (*w, *w),
+                Node::Split { f, b, l, r } => {
+                    let (a, z) = br[*f];
+                    if z <= *b { walk(l, br) } else if a > *b { walk(r, br) } else { let (p, q) = (walk(l, br), walk(r, br)); (p.0.min(q.0), p.1.max(q.1)) }
+                }
+            }
+        }
+        let (mut fmin, mut fmax) = (self.f0, self.f0);
+        for t in &self.trees { let (a, b) = walk(t, &br); fmin += self.lr * a; fmax += self.lr * b; }
+        (fmin, fmax)
+    }
 }
+
+/// SHRED FIRE (dip14): pump's exact sell on its bonding curve, as the program computes it. MEASURED on the 10-24 recording
+/// (run_20261024_1425, chain-continuous sells): the curve pays floor(tokens x vsol / (vtok + tokens)) lamports (the TradeEvent's
+/// `sol`, before fees) and the virtual reserves move by exactly that: vsol - sol, vtok + tokens. -> (sol, vsol after, vtok after);
+/// None on an empty / overflowing curve
+pub fn pump_sell_quote(vsol: u64, vtok: u64, tokens: u64) -> Option<(u64, u64, u64)> {
+    let d = vtok as u128 + tokens as u128;
+    if d == 0 || vsol == 0 { return None; }
+    let sol = (tokens as u128 * vsol as u128 / d) as u64;
+    let vtok2 = vtok.checked_add(tokens)?;
+    Some((sol, vsol.checked_sub(sol)?, vtok2))
+}
+
+/// pump's fee on `sol` lamports at `bps` basis points: ceil(sol x bps / 10000) (MEASURED on the recording: the TradeEvent's fee and
+/// creator fee fields, 4,523 of 4,523 chain-continuous sells)
+pub fn pump_fee(sol: u64, bps: u64) -> u64 { ((sol as u128 * bps as u128).div_ceil(10_000)) as u64 }
 
 /// one curve trade of a launch, in chain order (rp.read_bucket + repair_gaps; synthetic gap trades have user "?")
 #[derive(Clone, Debug)]
@@ -161,16 +199,23 @@ fn key_at(tx: &Tx, i: usize) -> Option<Pk> {
 pub fn direct_sells(tx: &Tx) -> Vec<DirectSell> {
     let mut out = Vec::new();
     if tx.is_vote { return out; }
-    for ix in &tx.ixs {
-        if tx.keys.get(ix.program as usize) != Some(&*crate::snipe::PUMP) || ix.data.len() < 24 { continue; }
-        let Some(&(_, mpos, spos)) = SELL_LAYOUTS.iter().find(|(d, _, _)| ix.data[..8] == d[..]) else { continue };
-        let at = |p: usize| ix.accounts.get(p).and_then(|&a| key_at(tx, a as usize));
-        let (Some(mint), Some(seller)) = (at(mpos), at(spos)) else { continue };
-        let u = |o: usize| u64::from_le_bytes(ix.data[o..o + 8].try_into().unwrap());
-        out.push(DirectSell { mint, seller, tokens: u(8), min_sol: u(16) });
-    }
+    for ix in &tx.ixs { if let Some(s) = sell_of_ix(tx, ix) { out.push(s); } }
     out
 }
+
+/// one top-level instruction as a pump sell (`direct_sells`' per-instruction decode): None when it is not a pump sell of a known
+/// layout, or its mint / seller sits behind an unresolved lookup table
+pub fn sell_of_ix(tx: &Tx, ix: &crate::tx::Ix) -> Option<DirectSell> {
+    if tx.keys.get(ix.program as usize) != Some(&*crate::snipe::PUMP) || ix.data.len() < 24 { return None; }
+    let &(_, mpos, spos) = SELL_LAYOUTS.iter().find(|(d, _, _)| ix.data[..8] == d[..])?;
+    let at = |p: usize| ix.accounts.get(p).and_then(|&a| key_at(tx, a as usize));
+    let (mint, seller) = (at(mpos)?, at(spos)?);
+    let u = |o: usize| u64::from_le_bytes(ix.data[o..o + 8].try_into().unwrap());
+    Some(DirectSell { mint, seller, tokens: u(8), min_sol: u(16) })
+}
+
+/// account `i` of a tx's full list (static keys, then the feed-resolved lookup addresses), public for the shred-fire classifier
+pub fn account_at(tx: &Tx, i: usize) -> Option<Pk> { key_at(tx, i) }
 
 /// SOL out (lamports, before pump's fee) of selling `tokens` on a constant-product curve with virtual reserves (vsol, vtok),
 /// as the replay prices the dump: vsol - vsol*vtok/(vtok+tokens)
@@ -186,6 +231,13 @@ pub fn sell_sol_out(vsol: u64, vtok: u64, tokens: u64) -> u64 {
 pub struct TradeEvent { pub mint: Pk, pub sol: u64, pub tok: u64, pub buy: bool, pub user: Pk, pub vsol: u64, pub vtok: u64, pub fbps: u64, pub cbps: u64 }
 
 pub const TRADE_EVENT_DISC: [u8; 8] = [189, 219, 127, 211, 78, 230, 97, 238];
+
+/// one TradeEvent from its raw bytes (the Anchor event: discriminator first); public for the shred-fire parity replay of the raw
+/// recording (its `ev` fields are these bytes, base64)
+pub fn trade_event_raw(raw: &[u8]) -> Option<TradeEvent> { trade_event(raw) }
+
+/// one CreateEvent from its raw bytes (as `trade_event_raw`)
+pub fn create_event_raw(raw: &[u8]) -> Option<CreateEvent> { create_event(raw) }
 
 fn trade_event(raw: &[u8]) -> Option<TradeEvent> {
     if raw.len() < 113 || raw[..8] != TRADE_EVENT_DISC { return None; }

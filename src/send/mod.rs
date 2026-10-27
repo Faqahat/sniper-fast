@@ -23,6 +23,8 @@
 //! (`check_key_material`).
 pub mod budget;
 pub mod jito;
+/// dip17: QUIC landing lanes (Soyas, Solami Beam)
+pub mod quic_lane;
 pub mod tpu;
 
 pub use budget::{Drop, Granted, Prio, TokenBucket};
@@ -78,7 +80,8 @@ pub fn code_tip_names() -> rustc_hash::FxHashMap<crate::tx::Pk, String> {
     let mut m = rustc_hash::FxHashMap::default();
     for (k, name) in [(JitoTx, "jito"), (Helius, "helius"), (Rpcfast, "rpcfast"), (Bolt, "bolt"), (Iris, "astralane"), (Lunar, "lunar"),
         (Nozomi, "nozomi"), (ZeroSlot, "0slot"), (NodeOne, "nodeone"), (Falcon, "falcon"), (Everstake, "everstake"), (BlockRazor, "blockrazor"),
-        (FlashBlock, "flashblock"), (NextBlock, "nextblock"), (Bloxroute, "bloxroute"), (JupiterTx, "jupiter"), (Landx, "landx"), (SpeedLanding, "speedlanding")] {
+        (FlashBlock, "flashblock"), (NextBlock, "nextblock"), (Bloxroute, "bloxroute"), (JupiterTx, "jupiter"), (Landx, "landx"), (SpeedLanding, "speedlanding"),
+        (Glaive, "glaive"), (Soyas, "soyas"), (Solami, "solami")] {
         for a in known_tip_accounts(k) {
             if let Some(pk) = bs58::decode(a).into_vec().ok().and_then(|v| <[u8; 32]>::try_from(v).ok()) { m.entry(pk).or_insert_with(|| name.to_string()); }
         }
@@ -267,7 +270,8 @@ pub fn known_tip_accounts(kind: SendKind) -> &'static [&'static str] {
             "node1Qm1bV4fwYnCurP8otJ9s5yrkPq7SPZ5uhj3Tsv", "node1PUber6SFmSQgvf2ECmXsHP5o3boRSGhvJyPMX1",
             "node1AyMbeqiVN6eoQzEAwCA6Pk826hrdqdAHR7cdJ3", "node1YtWCoTwwVYTFLfS19zquRQzYX332hs1HEuRBjC",
         ],
-        SendKind::Falcon => &[
+        // dip18: falcon-udp (native UDP) pays the same Fa1con1... accounts (docs.corvus-labs.io/falcon/tips)
+        SendKind::Falcon | SendKind::FalconUdp => &[
             "Fa1con11xLjPddfzRwRUB16sbFZggp2JeJkCeWREyR8X", "Fa1con11TM1RuAQzbQzYjTy4Ekfap9Lnc9fnEbQYEd6Q",
             "Fa1con113Bvi76nS5AzUiRDC2fqjfzkNMUNRLgQybMYt", "Fa1con1QGHJK232s8yZpzZZwqPexnAKcoyKj626LNsMv",
             "Fa1con1zUzb6qJVFz5tNkPq1Ahm8H1qKW7Q48252QbkQ", "Fa1con16d3MSwd3SAiwvr2LwgkpE7ot8zntbpuec8HAx",
@@ -313,6 +317,30 @@ pub fn known_tip_accounts(kind: SendKind) -> &'static [&'static str] {
             "bLxhLPgBXtUpX4b1bH3HatuMGMSKT9GnwtuCGiMSAqe", "bLxpY1mniuFW4PgkNA4JiNxoeKHFszryi6tNgyZAiAA",
             "bLxuETxd2tgWxBALNwPzAfHhsik4BzD3nrEBCiPNZQD", "bLxuL2gK5FW7xfahvwLrxLyW76vcCpNsKQY2CmnE6kV",
             "bLxv4Hnub7nDJWHs8s17o9bGU65Bnx6Yqp2fqtMgHmm",
+        ],
+        // glaive.trade/docs (dip16, 10-25; = data/sender-tip-accounts.json "glaive"): one picked per send, >= 100,000 lamports
+        SendKind::Glaive => &[
+            "GLaiv4GMRYQmthatDS98uQT4HoucgxWT8NeJz6oSwxeU", "GLaivL5uPrDpvd1wTtvat38KGqb5WLhEdqQfnmNd3oNr",
+            "GLaivinAWh21NaJMhtExtD5G2gZs1xnvaYVZmwqobWZL", "GLaivJSUL71FcocYa8tks5vpVyYzvaDMHtyrzfQF2ABr",
+            "GLaivRU6eDKrta3p3psFAWPEFLzCjeMHGpPUuQqTjtyv", "GLaivq5dU8qHayz9Qf13LjPfVy3SmUhbmickfGiZdmfh",
+        ],
+        // dip17 (10-25): Soyas' docs (owner pasted, 10-25) = data/sender-tip-accounts.json "soyas" (soyas.xyz/fast-landing, 10-04);
+        // >= 1,000,000 lamports
+        SendKind::Soyas => &[
+            "soyas4s6L8KWZ8rsSk1mF3d1mQScoTGGAgjk98bF8nP", "soyascXFW5wEEYiwfEmHy2pNwomqzvggJosGVD6TJdY",
+            "soyasDBdKjADwPz3xk82U3TNPRDKEWJj7wWLajNHZ1L", "soyasE2abjBAynmHbGWgEwk4ctBy7JMTUCNrMbjcnyH",
+            "soyasi59njacMUPvo3TM5paHjeK8pYSdovXgFi32gRt", "soyasQYhJxv8uZgWDxhg72td6piAf7XTkoyWHtSATEz",
+            "soyastP66xyYC8XADXZjdMM5BAVGD2YRvz8dwtLsqb8", "soyasvdgUJWYcUCzDxpmjUnNjH7KamXLXTzLwFvdVPE",
+            "soyasvxAunisNxaoRxkKGjNir7KmbwYnr37JmefkX9G", "soyas5doVFUwH8s5zK8gEvCL5KR5ogDmf52LsrJEZ9h",
+        ],
+        // dip17 (10-25): the solami crate 0.1.58 src/swqos.rs TIP_ACCOUNTS (the 10 "...beam" ones its beam() precheck accepts; the
+        // catalogue's solami_beam adds 5 more from api.solami.dev/onchain/tip-addresses: named in recordings, never paid); >= 100,000
+        SendKind::Solami => &[
+            "15qWd4huAkoxvhDsHMfpUn27TW1YBYMMJJ2jkAkbeam", "9XuGciSwr5wb7dLTQm91JhuBTvj3GG8WjuRDc3obeam",
+            "kiQioJNyFG7pU36ELLsRKXkeT48kFbk3b6rSgrWbeam", "kjmVhW1UzJrW2sU5bY5NtZ79jpvjSStsj37Pzmabeam",
+            "kREnjPWFpt4AHeY5pijPmyXaCrMnbatUQJo7d3Xbeam", "praRZG6N6MdbsT4EFpKgZJWReZGXQhAMFcH68oCbeam",
+            "SqoKQKU5uwBxovq3R7yEBxFwptc4z7vwoghU3M9beam", "sV72TY66T1RfmDSeHPPbwX6wwJ3bBv5hd4ehJ8tbeam",
+            "swf8MyEeLo7gtRUo27UuJj6naCASUrypU7dbteSbeam", "uiuaQsxA47JybQAVN4FTfYuoEDkMiXV1r591Aewbeam",
         ],
         SendKind::Shyft | SendKind::Haan | SendKind::Tpu | SendKind::Rpc | SendKind::HarmonicBundle => &[],
     }
@@ -521,6 +549,47 @@ fn refuse_code(code: &'static str, msg: impl Into<String>) -> Refusal { Refusal 
 /// a gRPC endpoint's refusal (no HTTP status): it answered
 fn refuse_answered(msg: impl Into<String>) -> Refusal { Refusal { status: None, msg: msg.into(), code: None, answered: true } }
 
+/// dip18: Falcon native UDP's largest transaction (docs.corvus-labs.io/falcon/udp: bytes 16..N, 1 to 1,232 bytes)
+pub const FALCON_UDP_MAX_TX: usize = 1_232;
+
+/// dip18: a UDP send lane (LandX `udp://`, falcon-udp): the connected socket, the key prefix, datagrams per tx copy, max tx
+pub struct UdpLane { sock: Arc<tokio::net::UdpSocket>, key: Vec<u8>, copies: u32, max_tx: usize }
+impl UdpLane {
+    /// the datagram: key || raw tx bytes (no length prefix, version byte, checksum or delimiter)
+    fn frame_into(&self, raw: &[u8], buf: &mut Vec<u8>) { udp_frame_into(&self.key, raw, buf) }
+}
+
+/// a UDP lane's datagram into `buf`: `key` then the raw tx bytes, nothing else
+pub fn udp_frame_into(key: &[u8], raw: &[u8], buf: &mut Vec<u8>) {
+    buf.clear();
+    buf.extend_from_slice(key);
+    buf.extend_from_slice(raw);
+}
+
+/// datagrams per tx copy from `var` (1..=4), else `default`
+fn udp_copies_env(var: &str, default: u32) -> u32 {
+    std::env::var(var).ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(default).clamp(1, 4)
+}
+
+/// dip18: Falcon native UDP's key prefix (docs.corvus-labs.io/falcon/udp, binary frame): bytes 0..16 = the API key as its
+/// raw 16-byte UUID, i.e. the 36-char UUID hex-decoded without dashes, in order (big-endian as written). Takes the canonical
+/// 8-4-4-4-12 form (or the 32 hex digits alone); the error never echoes the value
+pub fn falcon_udp_key(uuid: &str) -> Result<[u8; 16]> {
+    let t = uuid.trim();
+    let hex: String = match t.len() {
+        36 => {
+            if [8, 13, 18, 23].iter().any(|&i| t.as_bytes()[i] != b'-') { bail!("the Falcon API key is not a UUID (8-4-4-4-12 hex with dashes)"); }
+            t.chars().filter(|&c| c != '-').collect()
+        }
+        32 => t.to_string(),
+        n => bail!("the Falcon API key is not a UUID ({n} characters, want 36)"),
+    };
+    if hex.len() != 32 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) { bail!("the Falcon API key is not a UUID (non-hex characters)"); }
+    let mut out = [0u8; 16];
+    for (i, o) in out.iter_mut().enumerate() { *o = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|_| anyhow::anyhow!("the Falcon API key is not a UUID"))?; }
+    Ok(out)
+}
+
 /// What `Paths::new` needs beyond the paths: the bundle path's queue (`[send_policy] queue_ms`) and the payer, whose
 /// keypair no provider key may be (I-10)
 #[derive(Clone, Debug, Default)]
@@ -547,7 +616,9 @@ fn secret_values(c: &SendPath) -> Vec<(String, String)> {
             for seg in x.path_segments().into_iter().flatten() { out.push((format!("{what} path"), seg.to_string())); }
         }
     }
-    for (what, v) in [("token_env", c.token_env.as_deref()), ("jito_auth_env", c.jito_auth_env.as_deref())] {
+    // dip17: a QUIC lane's keypair (identity_env, else its kind's default variable)
+    let ident = c.identity_env.as_deref().or(c.kind.quic_defaults().map(|d| d.1));
+    for (what, v) in [("token_env", c.token_env.as_deref()), ("jito_auth_env", c.jito_auth_env.as_deref()), ("identity_env", ident)] {
         if let Some(x) = v.and_then(|v| std::env::var(v).ok()) { out.push((what.to_string(), x.trim().to_string())); }
     }
     out
@@ -619,14 +690,19 @@ pub struct Path {
     /// (None: not configured, or not whitelisted yet -> the public JSON-RPC)
     pub hb: Option<Arc<jito::Jito>>,
     pub tpu: Option<Arc<tpu::Tpu>>,
-    /// LandX over UDP: the connected socket and the 12-byte key every packet starts with
-    udp: Option<(Arc<tokio::net::UdpSocket>, Vec<u8>)>,
+    /// dip17: a QUIC lane's persistent connection (kind soyas / solami)
+    pub quic: Option<Arc<quic_lane::QuicLane>>,
+    /// LandX over UDP / dip18 Falcon native UDP: the connected socket, the key every datagram starts with (LandX: 12
+    /// bytes; Falcon: the UUID's 16 raw bytes), the datagrams per tx copy, the largest tx it takes
+    udp: Option<UdpLane>,
     pub stats: Mutex<PathStats>,
 }
 
 impl Path {
     async fn new(c: &SendPath, rec: &crate::rec::Rec, opts: &PathsOpts) -> Result<Path> {
         let what = format!("send path {}", c.name);
+        c.quic_check()?;
+        c.falcon_udp_check()?;
         let url = crate::config::expand(&c.url).with_context(|| format!("{what}: url {} names an environment variable that is empty or missing", c.url))?;
         // I-10 at run time too: a URL whose `${...}` expands into plain http:// (the whole URL from the environment), or a
         // plain-http URL that a header key goes to (review WP-05 #5)
@@ -651,8 +727,9 @@ impl Path {
             (SendKind::FlashBlock | SendKind::NextBlock | SendKind::Bloxroute, Some(t)) => header(&mut headers, "authorization", t)?,
             (SendKind::JupiterTx, Some(t)) => header(&mut headers, "x-api-key", t)?,
             (SendKind::JupiterTx, None) => bail!("{what}: jupiter-tx needs token_env (its portal API key, sent as x-api-key)"),
-            // LandX: over UDP the key starts every packet (token_env); over HTTP it is in the url path
-            (SendKind::Landx, _) => {}
+            // LandX: over UDP the key starts every packet (token_env); over HTTP it is in the url path. dip18 falcon-udp: the
+            // key (token_env) starts every datagram
+            (SendKind::Landx | SendKind::FalconUdp, _) => {}
             (k @ (SendKind::NodeOne | SendKind::FlashBlock | SendKind::NextBlock | SendKind::Bloxroute), None) => bail!("{what}: {k:?} needs token_env (its API key)"),
             (_, None) => {}
             (k, Some(_)) => bail!("{what}: {k:?} takes its key in the URL (url = \"...${{NAME}}...\"), not token_env"),
@@ -680,14 +757,19 @@ impl Path {
             }
             (None, SendKind::Iris) => Ping::Get(base()?.join("/gethealth")?.to_string()),
             (None, SendKind::Nozomi | SendKind::NodeOne) => Ping::Get(base()?.join("/ping")?.to_string()),
-            (None, SendKind::ZeroSlot | SendKind::BlockRazor) => Ping::Get(base()?.join("/health")?.to_string()),
+            // (Glaive: GET /health at the host, no auth: the joined URL drops the ?api-key= query)
+            (None, SendKind::ZeroSlot | SendKind::BlockRazor | SendKind::Glaive) => Ping::Get(base()?.join("/health")?.to_string()),
             (None, SendKind::FlashBlock | SendKind::NextBlock | SendKind::Bloxroute) => Ping::Get(base()?.join("/")?.to_string()),
             (None, SendKind::Falcon | SendKind::Everstake) => Ping::Health,
             (None, SendKind::Haan) => Ping::Get(url.clone()),
             (None, SendKind::JitoTx | SendKind::Shyft | SendKind::Rpcfast | SendKind::Rpc | SendKind::JupiterTx) => Ping::Health,
             (None, SendKind::Tpu) => Ping::None,
+            // dip17: the QUIC lane's keep-alives are QUIC's own; the tick reads the connection (Path::warm)
+            (None, SendKind::Soyas | SendKind::Solami) => Ping::None,
             (None, SendKind::SpeedLanding) => Ping::Get(base()?.join("/ping")?.to_string()),
             (None, SendKind::Landx) => if url.starts_with("udp://") { Ping::None } else { Ping::Get(base()?.join("/ping")?.to_string()) },
+            // dip18: native UDP never answers (as LandX UDP): no keep-alive
+            (None, SendKind::FalconUdp) => Ping::None,
             // FIX2: GET / (nginx 404, not rate limited: measured) keeps the TLS connection warm without touching /api/v1/bundles
             (None, SendKind::HarmonicBundle) => Ping::Get(base()?.join("/")?.to_string()),
         };
@@ -737,20 +819,39 @@ impl Path {
             }
         } else { None };
         let tpu = if c.kind == SendKind::Tpu { Some(tpu::Tpu::new(url.clone(), tpu_bearer.clone()).await.with_context(|| format!("{what}: leader book"))?) } else { None };
-        let udp = if c.kind == SendKind::Landx && url.starts_with("udp://") {
+        // dip17: the QUIC lane, connected and auth-checked now (a refusal or an unreachable lane is logged, not fatal: the
+        // keep-alive tick reconnects with backoff, and a send meanwhile reconnects once)
+        let quic = if c.kind.is_quic_lane() {
+            let (lane, env) = c.quic_settings()?;
+            let id = quic_lane::Identity::from_env(&env).with_context(|| format!("{what}: identity_env"))?;
+            if opts.payer.is_some_and(|p| p == id.pubkey) { bail!("{what}: the lane keypair ({env}) is the payer's (PLAN-ADDENDUM I-10)"); }
+            let q = quic_lane::QuicLane::new(&c.name, lane, &id).with_context(|| format!("{what}: quic client"))?;
+            let _ = q.warm().await;
+            Some(q)
+        } else { None };
+        let udp = if (c.kind == SendKind::Landx || c.kind == SendKind::FalconUdp) && url.starts_with("udp://") {
             let hostport = url.trim_start_matches("udp://").trim_end_matches('/').to_string();
-            let key = token.clone().ok_or_else(|| anyhow::anyhow!("{what}: landx over UDP needs token_env (its 12-byte API key)"))?;
-            if key.len() != 12 { bail!("{what}: the LandX API key must be 12 bytes (it is {})", key.len()); }
+            let (key, copies, max_tx) = if c.kind == SendKind::Landx {
+                let key = token.clone().ok_or_else(|| anyhow::anyhow!("{what}: landx over UDP needs token_env (its 12-byte API key)"))?;
+                if key.len() != 12 { bail!("{what}: the LandX API key must be 12 bytes (it is {})", key.len()); }
+                (key.into_bytes(), udp_copies_env("LANDX_UDP_COPIES", 2), usize::MAX)
+            } else {
+                // dip18: Falcon's binary frame: the UUID's 16 raw bytes (never the 36-char text); the key's value is never printed
+                let key = token.clone().ok_or_else(|| anyhow::anyhow!("{what}: falcon-udp needs token_env (its API key UUID)"))?;
+                let k = falcon_udp_key(&key).with_context(|| format!("{what}: token_env {}", c.token_env.as_deref().unwrap_or("")))?;
+                (k.to_vec(), udp_copies_env("FALCON_UDP_COPIES", 1), FALCON_UDP_MAX_TX)
+            };
             let addr = tokio::net::lookup_host(hostport.as_str()).await.with_context(|| format!("{what}: resolve {hostport}"))?
                 .next().with_context(|| format!("{what}: {hostport} has no address"))?;
             let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await.with_context(|| format!("{what}: udp bind"))?;
             sock.connect(addr).await.with_context(|| format!("{what}: udp connect {addr}"))?;
-            Some((Arc::new(sock), key.into_bytes()))
+            Some(UdpLane { sock: Arc::new(sock), key, copies, max_tx })
         } else { None };
+        if c.kind == SendKind::FalconUdp && udp.is_none() { bail!("{what}: falcon-udp needs a udp:// url"); }
         let host = host_of(&url);
         Ok(Path { name: c.name.clone(), kind: c.kind, tips, tip_lamports: c.tip_lamports, tip_share: c.tip_share,
             tip_max: c.tip_max_lamports.unwrap_or(u64::MAX), cursor: AtomicUsize::new(0), budget, url, host, ping, headers,
-            preflight: c.preflight, http, health: PathHealth::default(), jito, hb, tpu, udp, stats: Default::default() })
+            preflight: c.preflight, http, health: PathHealth::default(), jito, hb, tpu, quic, udp, stats: Default::default() })
     }
 
     /// tests: a jito-bundle path on `jito` (e.g. `Jito::for_test` with an in-memory block engine), Jito's own tip
@@ -761,7 +862,7 @@ impl Path {
             tip_lamports: 1_000, tip_share: Some(0.7), tip_max: 100_000, cursor: AtomicUsize::new(0),
             budget: max_per_sec.map(|n| Budget::new(n, Duration::from_millis(queue_ms))), url: "https://127.0.0.1:9".into(), host: "127.0.0.1".into(), ping: Ping::Tips,
             headers: HeaderMap::new(),
-            preflight: false, http: std::sync::RwLock::new(reqwest::Client::new()), health: PathHealth::default(), jito: Some(jito), hb: None, tpu: None, udp: None, stats: Default::default() }
+            preflight: false, http: std::sync::RwLock::new(reqwest::Client::new()), health: PathHealth::default(), jito: Some(jito), hb: None, tpu: None, quic: None, udp: None, stats: Default::default() }
     }
 
     /// the endpoint's host (never the full URL: keys live in some); a jito-bundle path: its block engine (copies.jsonl
@@ -816,7 +917,7 @@ impl Path {
                 *g = Some(Instant::now());
                 drop(g);
                 h.errs.store(0, Ordering::Relaxed);
-                if self.kind == SendKind::JitoBundle || self.kind == SendKind::Tpu { if !h.unhealthy.swap(true, Ordering::Relaxed) { health_edge(&self.name, false, &format!("{n} transport errors in a row (last: {e}); its gRPC / QUIC client reconnects by itself")); } return; }
+                if self.kind == SendKind::JitoBundle || self.kind == SendKind::Tpu || self.kind.is_quic_lane() { if !h.unhealthy.swap(true, Ordering::Relaxed) { health_edge(&self.name, false, &format!("{n} transport errors in a row (last: {e}); its gRPC / QUIC client reconnects by itself")); } return; }
                 // L9-1 (audit 9): re-resolve the host in the background, KEEPING the cached address unless the lookup succeeds
                 // (prime only replaces on success): a failing resolver can never leave the path with no address
                 let host = self.host.clone();
@@ -853,16 +954,21 @@ impl Path {
     }
     /// FAST: take a rate slot now (no queue), as `send` does with a zero queue; true when the path has no limit
     pub fn fast_budget(&self) -> bool { self.budget.as_ref().map_or(true, |b| b.try_now()) }
+    /// --sell-fanout: a rate slot is free now (nothing taken); true when the path has no limit
+    pub fn budget_free(&self) -> bool { self.budget.as_ref().map_or(true, |b| b.free_now()) }
     pub fn fast_udp_ok(&self) -> bool { self.udp.is_some() }
-    /// FAST: LandX UDP from the calling thread (non-blocking write, `copies` times): key + raw into `buf`
+    /// dip18: the datagrams per tx copy of a UDP path (LandX: LANDX_UDP_COPIES, default 2; falcon-udp: FALCON_UDP_COPIES,
+    /// default 1, read once at start); 0 = not a UDP path
+    pub fn udp_copies(&self) -> u32 { self.udp.as_ref().map_or(0, |u| u.copies) }
+    /// FAST: LandX / Falcon UDP from the calling thread (non-blocking write, `copies` times): key + raw into `buf`. A tx
+    /// over the lane's limit (Falcon: 1,232 bytes) is not written (InvalidInput)
     pub fn fast_udp(&self, raw: &[u8], buf: &mut Vec<u8>, copies: u32) -> Option<std::io::Result<()>> {
-        let (sock, key) = self.udp.as_ref()?;
-        buf.clear();
-        buf.extend_from_slice(key);
-        buf.extend_from_slice(raw);
+        let u = self.udp.as_ref()?;
+        if raw.len() > u.max_tx { return Some(Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("tx {} bytes > {}", raw.len(), u.max_tx)))); }
+        u.frame_into(raw, buf);
         let mut r = Ok(());
         for i in 0..copies.max(1) {
-            if let Err(e) = sock.try_send(buf) { if i == 0 { r = Err(e); } }
+            if let Err(e) = u.sock.try_send(buf) { if i == 0 { r = Err(e); } }
         }
         Some(r)
     }
@@ -932,23 +1038,32 @@ impl Path {
                 })?;
                 Ok(rep(sig.to_string(), Some(id.clone()), None, id))
             }
-            SendKind::Landx => {
-                if let Some((sock, key)) = &self.udp {
-                    let mut p = Vec::with_capacity(key.len() + raw.len());
-                    p.extend_from_slice(key);
-                    p.extend_from_slice(raw);
-                    sock.send(&p).await.map_err(|e| refuse(None, format!("{name}: udp: {e}")))?;
+            SendKind::Landx | SendKind::FalconUdp => {
+                if let Some(u) = &self.udp {
+                    if raw.len() > u.max_tx { return Err(refuse_code("bad_tx", format!("{name}: tx {} bytes > {} (not sent)", raw.len(), u.max_tx))); }
+                    let mut p = Vec::with_capacity(u.key.len() + raw.len());
+                    u.frame_into(raw, &mut p);
+                    u.sock.send(&p).await.map_err(|e| refuse(None, format!("{name}: udp: {e}")))?;
                     // LAT: UDP has no ack and no retransmit: a second copy right behind the first (same signature, so the
-                    // relay / leader dedups it) makes a single dropped datagram harmless. LANDX_UDP_COPIES (default 2).
-                    let copies = std::env::var("LANDX_UDP_COPIES").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(2).clamp(1, 4);
-                    for _ in 1..copies { let _ = sock.send(&p).await; }
+                    // relay / leader dedups it) makes a single dropped datagram harmless. LANDX_UDP_COPIES (default 2);
+                    // dip18 falcon-udp: FALCON_UDP_COPIES (default 1: the key's 5 TPS, no rate feedback over UDP)
+                    let copies = u.copies;
+                    for _ in 1..copies { let _ = u.sock.send(&p).await; }
                     Ok(rep(sig.to_string(), None, None, format!("udp sent x{copies}")))
+                } else if self.kind == SendKind::FalconUdp {
+                    Err(refuse(None, format!("{name}: falcon-udp without its socket")))
                 } else {
                     let resp = self.client().post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
                         .body(raw.to_vec()).send().await.map_err(net)?;
                     let status = resp.status().as_u16();
                     lenient(status, &resp.bytes().await.map_err(net)?)
                 }
+            }
+            // dip17: one uni stream with the wire bytes on the lane's connection; fire-and-forget (no reply to read)
+            SendKind::Soyas | SendKind::Solami => {
+                let q = self.quic.as_ref().ok_or_else(|| refuse(None, format!("{name}: QUIC lane without its client")))?;
+                let how = q.send(raw).await.map_err(|e| refuse(None, format!("{name}: {e:#}")))?;
+                Ok(rep(sig.to_string(), None, None, how.to_string()))
             }
             SendKind::Tpu => {
                 let t = self.tpu.as_ref().ok_or_else(|| refuse(None, "tpu path without its leader book"))?;
@@ -983,7 +1098,8 @@ impl Path {
                 let bytes = resp.bytes().await.map_err(net)?;
                 harmonic_reply(name, sig, status, &bytes)
             }
-            SendKind::NodeOne | SendKind::BlockRazor => {
+            // Glaive (dip16): POST /binary?api-key=<UUID>, the raw tx bytes (its fastest HTTP form, glaive.trade/docs)
+            SendKind::NodeOne | SendKind::BlockRazor | SendKind::Glaive => {
                 let resp = self.client().post(&self.url).headers(self.headers.clone()).header(CONTENT_TYPE, "application/octet-stream")
                     .body(raw.to_vec()).send().await.map_err(net)?;
                 let status = resp.status().as_u16();
@@ -1024,6 +1140,13 @@ impl Path {
 
     /// One keep-alive round trip (any reply warms the connection); None = skipped (the bundle budget was full).
     pub async fn warm(&self) -> Result<Option<Duration>> {
+        // dip17: a QUIC lane: alive = healthy (its RTT estimate recorded); dead = one reconnect + auth check (backoff: None)
+        if let Some(q) = &self.quic {
+            let r = q.warm().await;
+            match &r { Ok(Some(_)) => self.note_transport(None), Ok(None) => {}, Err(e) => self.note_transport(Some(&format!("{e:#}"))) }
+            let mut s = self.stats.lock().unwrap();
+            return match r { Ok(Some(d)) => { s.warm_us.push(d.as_micros() as u64); Ok(Some(d)) } Ok(None) => Ok(None), Err(e) => { s.warm_errors += 1; Err(e) } };
+        }
         let t = Instant::now();
         let r: Result<()> = async {
             match &self.ping {
@@ -1064,6 +1187,7 @@ impl Path {
     pub async fn probe(&self) -> String {
         if self.kind == SendKind::JitoBundle { return "skipped (the login already checked the key)".into(); }
         if self.kind == SendKind::Tpu { return "skipped (a leader sends no reply to read)".into(); }
+        if self.kind.is_quic_lane() { return "skipped (a QUIC lane sends no reply; snipe_engine --quic-check tests the connection)".into(); }
         match self.deliver(&[1, 2, 3, 4], "", None).await {
             Ok(r) => format!("accepted junk?! reply {}", r.sig),
             Err(e) => e.msg,
@@ -1083,6 +1207,8 @@ impl Path {
                 Err(e) => (!matches!(e, jito::BundleError::Other(_)), short(&e.to_string())),
             },
             (SendKind::Tpu, _) => (false, "skipped (tpu)".into()),
+            // dip17: junk bytes are never written to a QUIC lane (no reply to time; --quic-check is the zero-cost check)
+            (k, _) if k.is_quic_lane() => (false, "skipped (quic lane)".into()),
             _ => match self.deliver(&[1, 2, 3, 4], "", None).await {
                 Ok(r) => (r.status.is_some(), format!("accepted junk?! {}", short(&r.reply))),
                 Err(e) => (e.answered, short(&e.msg)),
@@ -1375,9 +1501,12 @@ mod tests {
     fn rival_tip_names_take_the_catalogue() {
         let pk = |s: &str| -> Pk { bs58::decode(s).into_vec().unwrap().try_into().unwrap() };
         let (code, all) = (code_tip_names(), tip_owner_names());
-        for (a, want) in [("GLaivinAWh21NaJMhtExtD5G2gZs1xnvaYVZmwqobWZL", "glaive"), ("soyas4s6L8KWZ8rsSk1mF3d1mQScoTGGAgjk98bF8nP", "soyas"),
-            ("HWEoBxYs7ssKuudEjzjmpfJVX7Dvi7wescFsVx2L5yoY", "bloxroute"), ("95cfoy472fcQHaw4tPGBTKpn6ZQnfEPfBgDQx6gcRmRg", "bloxroute")] {
+        for (a, want) in [("HWEoBxYs7ssKuudEjzjmpfJVX7Dvi7wescFsVx2L5yoY", "bloxroute"), ("95cfoy472fcQHaw4tPGBTKpn6ZQnfEPfBgDQx6gcRmRg", "bloxroute")] {
             assert_eq!((code.get(&pk(a)), all.get(&pk(a)).map(String::as_str)), (None, Some(want)), "{a}");
+        }
+        // dip16 (10-25): Glaive is a send kind now: the code names its 6 accounts, with the catalogue's name
+        for a in known_tip_accounts(SendKind::Glaive) {
+            assert_eq!((code.get(&pk(a)).map(String::as_str), all.get(&pk(a)).map(String::as_str)), (Some("glaive"), Some("glaive")), "{a}");
         }
         assert_eq!(all.get(&pk("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5")).map(String::as_str), Some("jito"), "the code's name first");
         let cat: Value = serde_json::from_str(TIP_CATALOGUE).unwrap();
@@ -1389,7 +1518,12 @@ mod tests {
             if own > 0 { assert!(s["sender"].is_string(), "{svc} adds {own} accounts: it needs a `sender`"); }
             added += own;
         }
-        assert_eq!((added, all.len()), (46, code.len() + 46), "the catalogue adds 46 accounts (2026-10-04)");
+        // dip17 (10-25): Soyas' 10 and Solami's 10 "...beam" accounts are send kinds' now (the catalogue still names Solami's other 5)
+        for (k, n) in [(SendKind::Soyas, "soyas"), (SendKind::Solami, "solami")] {
+            for a in known_tip_accounts(k) { assert_eq!((code.get(&pk(a)).map(String::as_str), all.get(&pk(a)).map(String::as_str)), (Some(n), Some(n)), "{a}"); }
+        }
+        assert_eq!(all.get(&pk("6993ZufwyEDNdB94kciDTGB17ANXguiNH22VmMQU1ami")).map(String::as_str), Some("solami"), "the catalogue's extra Solami account");
+        assert_eq!((added, all.len()), (20, code.len() + 20), "the catalogue adds 20 accounts (46 on 2026-10-04; Glaive's 6 the code's since dip16, Soyas' 10 and Solami's 10 since dip17)");
     }
 
     /// one-shot HTTP/1.1 server: answers `reply` (status, body) and hands back the request it got
@@ -1709,6 +1843,49 @@ mod tests {
         let head = head.to_ascii_lowercase();
         assert!(head.contains("authorization: bearer k1") && head.contains("x-jito-auth: u1") && head.contains("content-type: application/octet-stream"), "{head}");
         assert_eq!(body, raw);
+    }
+
+    /// dip16 (10-25): Glaive. The request: POST <url> with the key where `${GLAIVE_KEY}` stood (url = ".../binary?api-key=${..}"), the raw
+    /// signed bytes as application/octet-stream; the key in the URL only (token_env refused); plain http needs no_tls_endpoint (I-10:
+    /// glaive.trade has no TLS endpoint, port 443 refused on 10-25), and a refusal never shows the key; the keep-alive is GET /health at
+    /// the host WITHOUT the key; the copy must pay >= 100,000 lamports to one of its 6 documented accounts; its 400 `error` is an error
+    #[tokio::test]
+    async fn glaive_posts_raw_bytes_to_binary_with_the_key_in_the_url() {
+        let reply: &'static str = Box::leak(format!("{{\"result\":\"{}\"}}", sig58()).into_boxed_str());
+        let (base, h) = server(200, reply).await;
+        std::env::set_var("ARB_TEST_GLAIVE_KEY", "0f0e0d0c-aaaa-bbbb-cccc-123456789abc");
+        let mut c = cfg("glaive", format!("{base}/binary?api-key=${{ARB_TEST_GLAIVE_KEY}}"));
+        assert_eq!((c.kind, c.tip_lamports), (SendKind::Glaive, 100_000));
+        let e = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.err().expect("refused").to_string();
+        assert!(e.contains("plain http://") && e.contains("I-10") && !e.contains("0f0e0d0c"), "{e}");
+        c.token_env = Some("ARB_TEST_GLAIVE_KEY".into());
+        c.no_tls_endpoint = Some("glaive.trade: port 443 refused, docs show http only (2026-10-25)".into());
+        let e = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.err().expect("refused").to_string();
+        assert!(e.contains("takes its key in the URL") && !e.contains("0f0e0d0c"), "{e}");
+        c.token_env = None;
+        let p = Path::new(&c, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
+        assert!(matches!(&p.ping, Ping::Get(u) if u == &format!("{base}/health")), "the keep-alive: GET /health, no key");
+        assert_eq!(p.fast_ping(), Some((true, format!("{base}/health"))));
+        assert!(p.describe().contains("Glaive") && !p.describe().contains("0f0e0d0c"));
+        // the tip: >= 100,000 lamports to one of its accounts (each one accepted; anything else refused before sending)
+        for a in known_tip_accounts(SendKind::Glaive) { assert!(verify_copy(&tx(crate::tx::pk(a), 100_000, false), SendKind::Glaive, &p.tips, "glaive").is_ok(), "{a}"); }
+        assert!(p.check(&tx(crate::tx::pk(known_tip_accounts(SendKind::Glaive)[0]), 99_999, false)).is_err(), "under the minimum");
+        assert!(p.check(&tx(crate::tx::pk(known_tip_accounts(SendKind::BlockRazor)[0]), 100_000, false)).is_err(), "another provider's account");
+        let picked: std::collections::BTreeSet<Pk> = (0..12).map(|_| p.tip(0).unwrap().0).collect();
+        assert_eq!(picked.len(), 6, "every account is used in turn");
+        let raw = tx(crate::tx::pk(known_tip_accounts(SendKind::Glaive)[2]), 100_000, false);
+        assert_eq!(p.send(&raw, Prio::default(), None).await.unwrap().sig, sig58());
+        let (head, body) = h.await.unwrap();
+        assert!(head.starts_with("POST /binary?api-key=0f0e0d0c-aaaa-bbbb-cccc-123456789abc HTTP/1.1"), "{head}");
+        assert!(head.to_ascii_lowercase().contains("content-type: application/octet-stream"), "{head}");
+        assert_eq!(body, raw, "the body is the signed transaction's bytes");
+        // its documented error shape (400 + error) is a refusal with its words
+        let (base2, _h2) = server(400, "{\"error\":\"tip missing\"}").await;
+        let mut c2 = cfg("glaive", format!("{base2}/binary?api-key=${{ARB_TEST_GLAIVE_KEY}}"));
+        c2.no_tls_endpoint = c.no_tls_endpoint.clone();
+        let p2 = Path::new(&c2, &crate::rec::Rec::off(), &no_opts()).await.unwrap();
+        let e = p2.send(&raw, Prio::default(), None).await.unwrap_err().to_string();
+        assert!(e.contains("tip missing") && !e.contains("0f0e0d0c"), "{e}");
     }
 
     #[tokio::test]

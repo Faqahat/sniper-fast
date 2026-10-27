@@ -472,6 +472,13 @@ pub fn create_nonce_ixs(payer: Pk, seed: &str, lamports: u64) -> (Pk, Vec<Ix>) {
 pub fn advance_nonce_ix(nonce: Pk, authority: Pk) -> Ix {
     Ix { program: *SYSTEM_PROGRAM, accounts: vec![w(nonce), r(*SYSVAR_RECENT_BLOCKHASHES), s(authority)], data: 4u32.to_le_bytes().to_vec() }
 }
+/// WithdrawNonceAccount (System instruction 5): `lamports` from the nonce account to `to`, signed by its authority.
+/// Withdrawing the whole balance closes the account (snipe_engine --close-nonces: the rent comes back)
+pub fn withdraw_nonce_ix(nonce: Pk, to: Pk, authority: Pk, lamports: u64) -> Ix {
+    let mut d = 5u32.to_le_bytes().to_vec();
+    d.extend(lamports.to_le_bytes());
+    Ix { program: *SYSTEM_PROGRAM, accounts: vec![w(nonce), w(to), r(*SYSVAR_RECENT_BLOCKHASHES), r(pk("SysvarRent111111111111111111111111111111111")), s(authority)], data: d }
+}
 /// SPL Token SyncNative: a WSOL account's token amount catches up with its lamports
 pub fn sync_native_ix(account: Pk) -> Ix { Ix { program: *TOKEN_PROGRAM, accounts: vec![w(account)], data: vec![17] } }
 pub fn create_ata_idempotent_ix(payer: Pk, owner: Pk, mint: Pk, token_prog: Pk) -> Ix {
