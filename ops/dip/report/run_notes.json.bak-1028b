@@ -1,0 +1,1110 @@
+{
+ "_about": "Hand-written per-run context for make_run_report.py (from ops/dip/PLAN.md, the dip budget files and the 10-23/24/25 session log). Times PKT. Keys: region-run.",
+ "fra-1": {
+  "title": "First live PROD run: 3 trades × 0.25 SOL, strict tier, routes v2",
+  "engine": "dip6 (sha c6f1b40f; holder-reward tokens allowed)",
+  "verdict": "Good start: 3 of 3 fills won (+0.1249 SOL) — but 8 of 11 buys were blocked by the +5% guard because we landed ~80–95 ms after the dump while the fast bots buy at 4–36 ms.",
+  "summary": "Owner plan (10-23 23:40): prove the IMIT1 dip strategy live with 3 trades, then 5, 10, 12 … up to 100, on the 2g PROD wallet with 1.5 SOL usable and a 0.5 SOL loss cap. This run capped at 3 fills and stopped itself.",
+  "ended": "max fills reached (3 of 3)",
+  "changes": [
+   "First PROD run. Before it, FRZ plumbing tests (dip3 → dip6) proved buy → exit → sell → ATA close and fixed: the missing signal handler, the tee/Ctrl-c panic, the RPC helper's token, holder-reward tokens (verified by a simulated round trip).",
+   "Guard raised 2% → 5% (owner: strict slippage blocked every test; blocked buys were only +3..+24% above the post-dump price).",
+   "Routes v2 from the landing probes A–C: BAM = helius + astralane, Jito = helius + nozomi, Harmonic = nozomi + astralane, FD = nozomi + helius, others = helius + nozomi (2 tips on a filled buy)."
+  ],
+  "events": [
+   [
+    "02:15",
+    "trade 1 trigger: an insider (first-trade wallet in the 462 cohort) sold 2.69 SOL, a third of its 5.9 SOL launch buy, 1.3 s after 7 buyers / 9.9 SOL"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "73% of buys blocked by the guard: we executed ~80–95 ms after the dump; 6 bots typically got in first (CVPz447t 5.7 ms, 3Xti8uhq 13 ms, 9k78QZyw 14 ms, haqqiUUX 36 ms…)"
+   ]
+  ],
+  "fixes_after": [
+   "Guard what-if on 15 real blocked buys (re-bought at our exact block position): 5% −0.009, 10% −0.057, 15% −0.063 SOL → keep +5%.",
+   "Leader distance study: leaders < 50 ms away land ~75% in the dump's block; US leaders ~10% → later the near-leader gate.",
+   "Engine dip8: timing records (first sighting, feed lag, reaction, fire → our tx seen), near-leader gate flag, forced-path probes.",
+   "Probe D (70 fail-by-design buys on nearby leaders): nozomi 30 ms, landx 31, bolt 35, helius 35, astralane 46, haan 49, tpu-direct 50 → routes v3."
+  ],
+  "next": [
+   "Run 2: 5 trades (owner plan)."
+  ]
+ },
+ "fra-2": {
+  "title": "5 trades × 0.25 SOL, routes v3, engine dip8",
+  "engine": "dip8 (timing records, near-leader gate available but off)",
+  "verdict": "Good: 4 of 5 fills won (+0.1333 SOL). Runs 1+2 together +0.2582 SOL, but 72% of buys still missed.",
+  "ended": "max fills reached (5 of 5)",
+  "changes": [
+   "Engine dip6 → dip8 (timing records in every fire).",
+   "Routes v3 from probe D: BAM = nozomi + bolt, Jito = bolt + astralane, Harmonic = nozomi + helius, FD = nozomi + landx-fra3, Agave = nozomi + helius, others = nozomi + bolt.",
+   "Max fills 3 → 5 (owner plan)."
+  ],
+  "events": [
+   [
+    "03:03:35",
+    "first start ended after 8 s (an extra run-2 entry in the budget file); restarted at 03:03:46"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "GZRarp (−0.0147) landed on a far leader (Ashburn) at a BAM → Jito slot edge and paid 3 tips; DYXDDrZC bought 1.16 SOL ahead of us"
+   ],
+   [
+    "⚠️",
+    "13 of 18 buys missed (guard / 1 deadline)"
+   ]
+  ],
+  "fixes_after": [
+   "haqqiUUX check (owner: 'no failed txns?'): 11.4% of its txs fail like ours (GMGN hides them); it uses its own router, Helius with tiny tips, CU price ~1.84M.",
+   "Blueprint generated: ops/dip/BLUEPRINT_V1.html."
+  ],
+  "next": [
+   "Run 3: 10 trades at 0.35 SOL (owner)."
+  ]
+ },
+ "fra-3": {
+  "title": "10 trades × 0.35 SOL, routes v4 (3 paths)",
+  "engine": "dip8",
+  "verdict": "Small loss (−0.0396 SOL): a quiet hour, two losers (AEQKoc stop-loss −0.0563 after a single −20% trade, 4ZZ5Ke −0.0386).",
+  "changes": [
+   "Size 0.25 → 0.35 SOL (owner).",
+   "Routes v4: 3 paths per leader type instead of 2."
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "AEQKoc: the stop-loss was hit by a single −20% sell before our sell could land (−0.0563)"
+   ]
+  ],
+  "fixes_after": [
+   "Miss analysis (30 guard misses): the price crossed our guard a median 45 ms after the dump; we needed to be ~34 ms earlier (10 ms earlier → 2/30 would fill, 30 ms → 12/30).",
+   "Competitors: HkQ7hMjy fails ~70% of buy attempts too (failed attempt ~0.000135 SOL vs our 0.000505); ALL top bots use a durable nonce with one copy per relay (6–9 paths) + a no-tip copy → one tip per landed trade (built later as dip10).",
+   "haqqiUUX sizing tiers 0.25–0.75 SOL; our backtest: per-fill % barely drops from 0.35 to 0.75 SOL.",
+   "Probe E: nozomi 35 ms, staked-rpc 42 (tipless, 7/8 same slot), helius-swqos 58, bolt 60, helius 65 → routes v5 (nozomi core + helius-swqos + tipless staked-rpc everywhere)."
+  ],
+  "next": [
+   "Run 4 with routes v5."
+  ]
+ },
+ "fra-4": {
+  "title": "0.35 SOL, routes v5 (nozomi + helius-swqos + tipless staked-rpc)",
+  "engine": "dip8",
+  "verdict": "Good (+0.1198 SOL by the wallet). Misses now landed 17–48 ms after the dump on nearby leaders (runs 1–3: ~80–95 ms).",
+  "changes": [
+   "Routes v5: nozomi as the core path, helius-swqos (0.0002 tip) instead of helius, and a tipless staked-rpc copy on every leader type."
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Biiv46: a duplicate sell failed with 3012 (the first sell had landed; balance not yet confirmed 0) — harmless, fixed later"
+   ]
+  ],
+  "fixes_after": [
+   "Exit study on 17 live fills: no take-profit / sell at 1.3 s +0.630 vs TP +5% +0.356 SOL → TP off for run 5.",
+   "haqq on Helius: lands 61% of his trades through the Helius SWQoS-only tier (0.0002) → routes v6 (helius-swqos on BAM / Jito / Agave / other).",
+   "Serial dev bwamJzzt found (owner's contact: 'haqq mostly buys from this dev'): 'mostly' is false (14%), but its tokens pay +17%/fill vs +5% for others in the backtest → dev list + 0.75 SOL size for run 5 (engine dip9).",
+   "haqq's re-buy style replayed on our fills: −1.03 SOL → keep the quick exit, no re-buys."
+  ],
+  "next": [
+   "Run 5 (owner 06:25): no TP, 1.3 s, dev list at 0.75 SOL wider tier."
+  ]
+ },
+ "fra-5": {
+  "title": "No take-profit / SL −10% / 1.3 s; dev list (bwamJzzt) at 0.75 wider, others strict 0.35; engine dip9",
+  "engine": "dip9 (dev list, templates per size)",
+  "verdict": "Flat (−0.0014 SOL): 5 wins / 5 losses; one bad stop-loss (wVKcA4 −0.0766: stop at −10% but the sell landed at −20%). No dev-list token came up.",
+  "changes": [
+   "Take-profit +5% → off (exit at −10% stop or 6 slots ~1.3 s), owner 06:25 'for next run lets do 1.3 and 0.75 for this dev tier'.",
+   "Engine dip8 → dip9: --dip-dev-list / --dip-dev-tier / --dip-dev-spend-lamports.",
+   "Dev list: bwamJzzt's tokens from the wider tier at 0.75 SOL; everything else strict at 0.35."
+  ],
+  "events": [
+   [
+    "06:50",
+    "24/7 raw recording set up the same hour (owner OK: 'record all the runs raw so we can do this daily')"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "wVKcA4 (score 1.22, token 1.5 s old, 6.48 SOL dump): stop fired at −10% but the sell landed at −20% (−0.0766)"
+   ]
+  ],
+  "fixes_after": [
+   "Exits re-checked on all 26 live fills: no TP +0.70 vs TP5 +0.47 → keep no TP.",
+   "Speed: fire → seen 32 ms when the buy lands in the dump's block, ~117–160 ms when it misses (next leader) → the send → block leg is the lever."
+  ],
+  "next": [
+   "Run 6 at 0.5 SOL strict."
+  ]
+ },
+ "fra-6": {
+  "title": "0.5 SOL strict + dev 0.75 — short, stopped for run 7",
+  "engine": "dip9",
+  "verdict": "Too short to judge (2 fills: 9vWX2S −0.0677, B5TfMe +0.0613 → −0.0069 SOL).",
+  "ended": "stopped by the owner after ~11 min to start run 7 (near leaders only)",
+  "changes": [
+   "Size 0.35 → 0.5 SOL (normal picks)."
+  ],
+  "fixes_after": [
+   "Independent agents (headtohead, freshaudit): our bot reacts in ~3 ms; the send → block leg is 30–37 ms vs rivals ~25 ms; Jito leaders worst (91 ms, 25% fill); far leaders worth ~0; tips 0.0026 SOL per fill.",
+   "Near-leader list built: 199 leaders < 5 ms from Frankfurt = 35.9% of slots (/root/sniper-dip/near_leaders_5ms.txt).",
+   "Routes v7: Jito leaders = helius + nozomi + staked-rpc."
+  ],
+  "next": [
+   "Run 7: near leaders only, routes v7, 8 hours (owner 08:10: 'run 7 with all your recommendations for 8 hour')."
+  ]
+ },
+ "fra-7": {
+  "title": "8 h, near leaders only (199), routes v7, 0.5 strict + dev 0.75, no TP",
+  "engine": "dip9",
+  "verdict": "Best run so far (+0.2365 SOL, 9 fills, 6 wins). Near-only made us fast: fills ~35 ms after the dump by block position, 7 of 9 in the dump's own block. Two big winners carried it (5LnSgd +0.144, 5mXG5C +0.108).",
+  "ended": "stopped by the owner at 15:43 to start run 8 (wider tier)",
+  "changes": [
+   "Near-leader gate ON (199 leaders < 5 ms) — far leaders were worth ~0 and cost failed buys.",
+   "Routes v7 on Jito leaders: helius (0.001) + nozomi + staked-rpc (was nozomi + helius-swqos + bolt + staked-rpc)."
+  ],
+  "fixes_after": [
+   "Replay of run 7's hours: the wider tier on every token would have added ~+0.11 SOL at every speed → run 8 = run 7 + --tier wider.",
+   "Multi-region kit built (owner 16:00: Amsterdam edge VPS): one engine per region, own wallet and budget, disjoint near lists.",
+   "Cost-cut proposal for run 8 (one tipped relay per leader type, priority 2M, CU 85k) written but NOT adopted."
+  ],
+  "next": [
+   "Run 8: wider tier."
+  ]
+ },
+ "fra-8": {
+  "title": "Wider tier on every token, 0.55 SOL (owner) + dev 0.75, near leaders",
+  "engine": "dip9",
+  "verdict": "Loss (−0.0962 SOL on 3 fills): Hnkrfb (wider pick) −0.0770 on the stop at −13%, CfdREo −0.0319; one wider pick won (8DN9HV +0.0153). Too few trades to judge the wider tier.",
+  "ended": "stopped by the owner at 16:40 to fund Amsterdam and start run 9 on both servers",
+  "changes": [
+   "Tier strict → wider (score >= 0.2109) on every token (replay of run 7's hours: +0.11 SOL).",
+   "Size 0.5 → 0.55 SOL (owner typed 0.55 on purpose) — two changes at once, compare per fill as % of size."
+  ],
+  "events": [
+   [
+    "16:41",
+    "after the run: 1.5 SOL moved from 2g to the new Amsterdam wallet (transfer script, recorded in the budget)"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "Hnkrfb: both buys on this token were wider-tier picks (scores 0.48, 0.25); the filled one lost −0.0770 at the −10% stop (sold −13%)"
+   ]
+  ],
+  "fixes_after": [
+   "Transfer script: Amsterdam allowed as a destination, refuses while a run is live, caps 0.5 SOL per transfer, records the move in the budget.",
+   "Amsterdam edge server set up (2 vCPU / 2 GB, all endpoints 0.19–0.32 ms away); near lists split by distance: Frankfurt 198 leaders (35.9% of slots), Amsterdam 120 (20.5%)."
+  ],
+  "next": [
+   "Run 9 on both servers."
+  ]
+ },
+ "fra-9": {
+  "title": "First two-region run — Frankfurt: 0.55 wider + dev 0.75, own near list (198)",
+  "engine": "dip9",
+  "verdict": "Small loss (−0.0419 SOL by the wallet).",
+  "ended": "stopped by the owner at 18:15 to start the run 10 A/B",
+  "changes": [
+   "Near list: near_leaders_5ms.txt (199) → near_leaders_fra.txt (198): one leader moved to Amsterdam, which never sees Frankfurt's leaders (no shared dumps).",
+   "Wallet funded down: 1.5 SOL moved to Amsterdam after run 8 (balance 4.33 → 2.83)."
+  ],
+  "events": [
+   [
+    "17:44",
+    "routes v8 deployed for the NEXT runs (Jito tip 0.012 → 0.001 SOL; Jito leaders get helius + nozomi + jito-bundle + staked-rpc); run 9 kept its loaded settings"
+   ]
+  ],
+  "fixes_after": [
+   "Routes v8 (above) used from run 10.",
+   "Owner A/B for run 10 (18:15): Frankfurt 4 s hold / SL −20%, Amsterdam 1.3 s / SL −10%."
+  ],
+  "next": [
+   "Run 10: exit A/B between the two servers."
+  ]
+ },
+ "fra-10": {
+  "title": "Exit A/B — Frankfurt: 4 s hold / SL −20% at 0.55 + dev 0.75 (Amsterdam = 1.3 s control); routes v8",
+  "engine": "dip9",
+  "verdict": "Loss (−0.0733 SOL realized over 29 fills). The 4 s hold did better than Amsterdam's 1.3 s per SOL, but small samples. 44 guard fails (cheap, 0.0005 each). One huge dev-list win (9yJrLW +0.274).",
+  "ended": "stopped by the owner at 00:15 (Ctrl+C) to start run 11 with the nonce fan-out",
+  "changes": [
+   "Exit: 1.3 s / SL −10% → 4 s (19 slots) / SL −20% (owner A/B).",
+   "Routes v8 on Jito leaders: + jito-bundle (tip 0.001)."
+  ],
+  "events": [
+   [
+    "18:16:30",
+    "first start ended after 8 s; restarted 18:16:40"
+   ],
+   [
+    "18:50",
+    "owner upset at the red failed buys (Solscan): all are the +5% guard (pump 6042), ~0.0005 SOL each; bundle-only and smaller CU rejected (fills use up to 93k CU)"
+   ],
+   [
+    "22:55",
+    "owner OK'd the durable-nonce fan-out build (one tip per landed buy)"
+   ],
+   [
+    "~00:10",
+    "the owner created 8 nonce accounts during the run (rent ~0.0116 SOL taken from this wallet — explains part of the wallet-vs-trades gap)"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "wallet change includes ~0.0116 SOL of nonce-account rent (refundable), not a trading loss"
+   ]
+  ],
+  "fixes_after": [
+   "Engine dip10: durable-nonce fan-out (one copy per send path, each with only its own tip; one shared nonce so at most one lands).",
+   "Run script: --nonce FILE; old script kept as run_dip_prod.sh.dip9.",
+   "Studies: dip-detector agent (new P&L model +22 vs +8.8 SOL in replay, Stage A), competitors agent (we lose after sending; Jito leaders worst; BAM/Harmonic order ties by fee)."
+  ],
+  "next": [
+   "Run 11 = run 10's settings + nonce (one change)."
+  ]
+ },
+ "fra-11": {
+  "title": "Durable-nonce fan-out (dip10) + Constant-K standby RPC; run 10's A/B settings",
+  "engine": "dip10 (sha256 b8210182…)",
+  "verdict": "Short (26 min, −0.0719 SOL on 2 fills: 8Ub8f4RU +0.064, 8SytCSCS −0.134 on the −20% stop). The nonce worked: one copy landed per buy, fills paid one tip, failed buys paid none.",
+  "ended": "stopped by the owner at 00:55 to restart (Amsterdam 15M fee test; Frankfurt later as run 13 at 0.35 / 1.3 s)",
+  "changes": [
+   "Engine dip9 → dip10 with --nonce /root/prod/nonce_fra.txt (8 accounts): every buy = one copy per send path, each paying only its own path's tip.",
+   "Backup RPC: Helius (RMR_RPC_URL) → Constant-K's Amsterdam endpoint (--fallback ck). Helius had hit its plan cap (HTTP 429 'max usage reached'); the engine refuses to start without a working standby."
+  ],
+  "events": [
+   [
+    "00:21",
+    "two starts refused (00:21:13 and 00:22:02, typed with 0.35 / 0.45 SOL): 'RMR_RPC_URL getGenesisHash timed out' — Helius out of credits; nothing sent"
+   ],
+   [
+    "00:25",
+    "run script 0426bd0a deployed: --fallback ck"
+   ],
+   [
+    "00:29:48",
+    "started with 0.55 / 0.75 (run 10's sizes)"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "the standby RPC (Helius) ran out of credits: the two engines' standby polling (~4–5 reads/s each) used the plan up; fixed by moving the standby to Constant-K (no usage cap)"
+   ]
+  ],
+  "fixes_after": [
+   "--fallback ck in the run script (both servers).",
+   "Owner: Amsterdam 15M buy priority test (run 12) after the leader-type study showed Amsterdam's BAM fills losing (5 wins of 18).",
+   "Owner: Frankfurt restarted as run 13 with 0.35 SOL (normal and dev) and the 1.3 s / SL −10% exit."
+  ],
+  "next": [
+   "Frankfurt run 13 vs Amsterdam run 12 (fee 5M vs 15M)."
+  ]
+ },
+ "ams-9": {
+  "title": "First Amsterdam run: 0.35 wider + dev 0.55, own near list (120 leaders)",
+  "engine": "dip9",
+  "previous": [
+   "fra",
+   9
+  ],
+  "verdict": "Small loss (−0.0566 SOL by the wallet). Every start check passed on the new server.",
+  "ended": "stopped by the owner at 18:16 to start the run 10 A/B",
+  "changes": [
+   "New server (cyber-dock, Amsterdam), new wallet EgxfYgEb… funded with 1.5 SOL from 2g, its own 0.5 SOL loss budget.",
+   "Near list near_leaders_ams.txt: 120 leaders (20.5% of slots) that are closer to Amsterdam; none shared with Frankfurt.",
+   "Sizes 0.35 / dev 0.55 (owner's choice for a new region; Frankfurt 0.55 / 0.75)."
+  ],
+  "events": [
+   [
+    "16:58",
+    "two starts refused: '--env-name must be DEV or PROD' (my run-script label PROD-AMS); fixed in a minute, nothing sent"
+   ],
+   [
+    "16:59:12",
+    "started"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Jito validator ACvL73V4 (Amsterdam) — first buy there failed; later studies: 0 fills on ACvL73V4 / GnC339vk"
+   ]
+  ],
+  "fixes_after": [
+   "Run-script --env-name label fixed (PROD for both regions)."
+  ],
+  "next": [
+   "Run 10: Amsterdam = 1.3 s control of the exit A/B."
+  ]
+ },
+ "ams-10": {
+  "title": "Exit A/B control — Amsterdam: 1.3 s / SL −10% at 0.35 + dev 0.55; routes v8",
+  "engine": "dip9",
+  "verdict": "Loss (−0.1384 SOL realized over 30 fills). BAM leaders were the leak (most fills there, mostly losing even though they landed in the dump's block) — later traced to fee ordering inside BAM blocks (inferred).",
+  "ended": "stopped by the owner at 00:15 (Ctrl+C) to start run 11 with the nonce fan-out",
+  "changes": [
+   "Routes v8 (Jito leaders + jito-bundle at 0.001)."
+  ],
+  "events": [
+   [
+    "18:39:55",
+    "9yJrLW bought here 3.6 s after Frankfurt bought the same token on an earlier dump (different leaders, never the same dump)"
+   ],
+   [
+    "18:50",
+    "owner's Solscan screenshot of this wallet's red failed buys → failed-buy review (all +5% guard, cheap)"
+   ],
+   [
+    "~00:10",
+    "8 nonce accounts created on this wallet during the run (rent ~0.0116 SOL — part of the wallet-vs-trades gap)"
+   ]
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "q2rc3D: a duplicate sell (#2) failed with 3012 AccountNotInitialized — the first sell had landed; harmless"
+   ],
+   [
+    "ℹ️",
+    "wallet change includes ~0.0116 SOL nonce rent (refundable)"
+   ]
+  ],
+  "fixes_after": [
+   "Nonce fan-out (dip10) + standby RPC change (see run 11)."
+  ],
+  "next": [
+   "Run 11 = same + nonce."
+  ]
+ },
+ "ams-11": {
+  "title": "Durable-nonce fan-out (dip10) + Constant-K standby RPC; 1.3 s / SL −10% at 0.35 + dev 0.55",
+  "engine": "dip10",
+  "verdict": "Short (26 min, −0.0202 SOL: 1 fill BUQvqA1Y −0.0192 on a BAM leader, 2 guard fails). Nonce worked as designed.",
+  "ended": "stopped by the owner at 00:55 to start run 12 at 15M buy priority",
+  "changes": [
+   "Engine dip9 → dip10 with --nonce /root/prod/nonce_ams.txt (8 accounts).",
+   "Backup RPC: Helius → Constant-K's Frankfurt endpoint (--fallback ck)."
+  ],
+  "events": [
+   [
+    "00:26",
+    "first start refused: Helius standby RPC out of credits (429); nothing sent"
+   ]
+  ],
+  "fixes_after": [
+   "Owner OK'd a 15M buy-priority test on Amsterdam (run 12): leader-type study showed Amsterdam BAM fills at 5 wins of 18, −0.028 SOL per fill, despite 89% landing in the dump's block."
+  ],
+  "next": [
+   "Run 12: 15M buy priority (sells 5M)."
+  ]
+ },
+ "fra-12": {
+  "title": "Restart with run 10's A/B settings (0.55 SOL, 4 s hold / SL −20%), stopped at once",
+  "engine": "dip10",
+  "verdict": "Started and stopped within a minute (0 buys) so Frankfurt could restart at the owner's 0.35 SOL / 1.3 s request.",
+  "next": [
+   "Run 13: 0.35 SOL normal and dev, 1.3 s / SL −10% (same as Amsterdam)."
+  ]
+ },
+ "fra-13": {
+  "title": "0.35 SOL normal + dev, 1.3 s / SL −10% (same exit as Amsterdam)",
+  "engine": "dip10",
+  "verdict": "+0.0153 SOL on 5 fills of 23 buys (22% fill rate; most misses were the +5% guard).",
+  "changes": [
+   "Owner: \"start it with 0.35 size both dev and non dev and 1.3s same as ams\"."
+  ],
+  "next": [
+   "Run 14: the M2 detector in shadow (dip11) during the peak hours."
+  ]
+ },
+ "fra-14": {
+  "title": "M2 detector SHADOW (dip11) beside IMIT1 trading; 0.35 SOL, 1.3 s / SL −10%",
+  "engine": "dip11 (M2 shadow)",
+  "verdict": "+0.0475 SOL on 27 fills. The M2 shadow graded better than IMIT1 on paper: Stage A c4 +2.56 / +2.04 / +1.25 vs IMIT1 +2.22 / +1.41 / +0.90 SOL at 35 / 50 / 75 ms over 01:42–05:40, both servers. Live picks matched the study on 99.7%.",
+  "changes": [
+   "Engine dip10 → dip11: the M2 model scores every in-envelope dump after the decision (logs only)."
+  ],
+  "next": [
+   "A/B: Frankfurt trades on M2 (run 15), Amsterdam on IMIT1 without BAM leaders (run 14)."
+  ]
+ },
+ "ams-12": {
+  "title": "15M µL/CU buy priority test (sells 5M); 0.35 SOL, 1.3 s / SL −10%",
+  "engine": "dip10",
+  "verdict": "+0.022 SOL on 1 fill of 7 buys. 15M did not land faster than 5M (speed study: same-slot write → seen BAM 27 vs 21 ms, small sample).",
+  "changes": [
+   "Owner OK: buy priority 5M → 15M µL/CU on Amsterdam only."
+  ],
+  "next": [
+   "Run 13: back to 5M, M2 shadow (dip11)."
+  ]
+ },
+ "ams-13": {
+  "title": "M2 detector SHADOW (dip11) beside IMIT1 trading; 0.35 SOL, 1.3 s / SL −10%",
+  "engine": "dip11 (M2 shadow)",
+  "verdict": "−0.014 SOL on 17 fills. Same M2 shadow grading as Frankfurt run 14.",
+  "next": [
+   "A/B run 14: IMIT1 without BAM leaders, M2 and pre-send in shadow."
+  ]
+ },
+ "ams-14": {
+  "title": "A/B, IMIT1 side: no-BAM near list (54 leaders), 5-slot hold / no stop, M2 + pre-send shadows",
+  "engine": "dip12 (M2 + pre-send shadow)",
+  "verdict": "−0.056 SOL on 1 fill of 3 buys in ~2.4 h. Without the BAM leaders IMIT1 almost never fires here (65 of 71 picks were on leaders off the list); the M2 shadow would have bought ~30 on these leaders. Stopped for the pre-send probe.",
+  "changes": [
+   "Near list: Amsterdam's 120 leaders → 54 non-BAM leaders (BAM leaders lost money here: about −0.028 SOL per fill).",
+   "Exit: 6 slots / SL −10% → 5 slots / no stop (SL −50%), as Frankfurt's A/B side.",
+   "Engine dip12: pre-send shadow on (logs only)."
+  ],
+  "events": [
+   [
+    "08:34",
+    "stopped by the agent (owner chose 'Amsterdam now' for the pre-send probe); no open position"
+   ]
+  ],
+  "next": [
+   "Run 15: pre-send live DRY run (10 min), then run 16: the live pre-send probe."
+  ]
+ },
+ "ams-15": {
+  "title": "Pre-send LIVE DRY run (dip13, 10 min): builds and signs pre-sent buys, sends none",
+  "engine": "dip13 (pre-send live + sell fan-out)",
+  "verdict": "Clean: 24 triggers, 15 windows armed, 494 attempts signed (sign 0.26 ms p50), limit exactly 0.88 × price, 53 ms pacing, live triggers = shadow triggers. Normal bot: 0 buys.",
+  "changes": [
+   "First start with the Helius API key (both Helius paths keyed; caps helius 15 / helius-swqos 15 / helius-ps 20 per s).",
+   "Sell fan-out ON: every sell to staked-rpc AND Helius SWQoS in one tx (owner OK 08:05)."
+  ],
+  "next": [
+   "Run 16: the same, with real attempts."
+  ]
+ },
+ "ams-16": {
+  "title": "Pre-send LIVE probe (dip13): 0.2 SOL, 4 attempts per slot via helius-ps, caps 20 fills / 0.03 SOL fees",
+  "engine": "dip13 (pre-send live + sell fan-out)",
+  "verdict": "Pre-send: 20 fills of 118 windows (9 wins), realized +0.0119 SOL, failed-attempt fees 0.0192, NET −0.0073. Live = paper on the same windows (+0.30% vs +0.31% per SOL). Landed a median 53 ms after the price drop (not 0–10 ms). Normal bot: 0 buys (37 of 40 picks on leaders off the list).",
+  "red_flags": [
+   [
+    "ℹ️",
+    "Costs ate the margin: the price move averaged +3.8% per fill, but pump fees took ~2.5%, tips and priority ~1%, failed attempts ~0.5% (ops/strategies/presend/PROBE1_RESULTS.md)."
+   ]
+  ],
+  "next": [
+   "Instant-bot proof: dense pre-senders (26–85 attempts per slot) on creator dumps; copying that on T2 loses (INSTANT_BOTS.md).",
+   "Pre-send stays a shadow; speed fixes (dip14) first."
+  ]
+ },
+ "fra-15": {
+  "title": "A/B, M2 side: the new M2 model GATES the buys (dev-list keeps IMIT1); 0.35 SOL, 5-slot hold / no stop; M2 + pre-send shadows",
+  "engine": "dip12 (M2 gate + pre-send shadow)",
+  "verdict": "+0.148 SOL on 40 fills of 101 buys (40% fill rate) over 9 h. Best run since run 7. Most misses were the +5% guard on dumps faster bots took first. Full-day pre-send shadow (paper, 0.55 SOL): 1,586 windows, ~340–366 fills, net +2.7 to +4.2 SOL depending on landing (06:08–15:08 PKT).",
+  "changes": [
+   "Engine dip11 → dip12: M2 in GATE mode (the M2 score replaces the IMIT1 gate; dev-list tokens keep their IMIT1 tier).",
+   "Exit 6 slots / SL −10% → 5 slots / no stop (SL −50%).",
+   "Pre-send shadow on (logs only)."
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Investigation during this run (WHY_LIVE_LOSES.md): our buys land a median 58 ms after the dump; the paper model is right at our real landing. Speed after the send is lever #1."
+   ]
+  ],
+  "fixes_after": [
+   "Engine dip14 staged (speed fixes: shred fire shadow/live, defer, skip Rakurai, clock2, feed-lag, probes); Helius key + rate rebalance in the base config; sell fan-out via Helius SWQoS (dip13+)."
+  ],
+  "next": [
+   "Speed shadow run (dip14 --shred-fire shadow --clock2 --feed-lag --defer --skip-clients Rakurai), then relay probes, then the live speed A/B (ops/dip/PLAN_1025_PM.md)."
+  ]
+ },
+ "fra-16": {
+  "title": "Speed shadow run: dip14 with shred fire in SHADOW + clock2 + feed-lag + defer + skip Rakurai; M2 gate; 0.35 SOL, 5-slot hold / no stop; pre-send shadow (2 h)",
+  "engine": "dip14 (speed fixes; shred fire logs only)",
+  "verdict": "−0.193 SOL. 39 M2 picks, 13 buys sent, only 3 filled (Az6Arr7o −0.118, 3Acndka7 −0.015, 27eoQv6N −0.055); 10 reverted on the +5% guard (faster bots took the bounce). Shred fire shadow: 0 wrong decisions in 1,207 checks and every phantom (failed) dump skipped, but it covered only 7 of 39 picks (22 dumps never reached us on shreds first, 7 blocked by pending txs) and saved ~1.3 ms median. Feed lag: the executed feed is ~2.2 ms behind the first shred, flat all run; our queue 0.1 ms. Pre-send shadow (paper): 252 windows, 38–40 fills, net −0.68 / −0.39 / −0.23 SOL.",
+  "changes": [
+   "Engine dip12 → dip14: --shred-fire shadow, --clock2, --feed-lag, --defer, --skip-clients Rakurai (trading decisions unchanged).",
+   "2 h run, 15:29–17:29 PKT."
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "Fill rate 3/13 (23%): the paying dumps bounced past +5% before we landed."
+   ],
+   [
+    "⚠️",
+    "Shred feed coverage on FRA is low: 22 of 39 picks' dumps were not seen on shreds before the executed feed, so shred fire would rarely fire."
+   ],
+   [
+    "ℹ️",
+    "Biggest loss Az6Arr7o: the creator and 7 fresh launch wallets sold together during our hold (ops/dip/devsell/DEV_LINK.md). A creator/insider filter loses in the 61 h replay, so none added."
+   ]
+  ],
+  "fixes_after": [
+   "Dev-link study done (DEV_LINK.md): keep buying creator dumps; no filter.",
+   "Feed lag measured: not our engine (queue 0.1 ms); the ~2.2 ms wait is provider-side."
+  ],
+  "next": [
+   "Shred fire: find why the shred feed misses most of our dumps before any live switch.",
+   "VM1 independent verification (agent) running."
+  ]
+ },
+ "ams-17": {
+  "title": "Pre-send live probe 2: 0.35 SOL, whale >= 6%, 8 tries per slot via helius-ps, exit 2 slots / TP 10% / SL 20%; normal bot IMIT1 (M2 shadow), no-BAM near list (2 h)",
+  "engine": "dip13 (pre-send live + sell fan-out)",
+  "verdict": "−0.0186 SOL on the wallet balance. Pre-send: 71 armed windows, 13 fills (18%), 6 winners; fills' own P&L −0.001 SOL, failed-try fees 0.017 SOL (3,376 tries, 260 per fill). Fails its pre-set checks: landing after the crossing trade 45 ms median (pass ≤ 22), fill rate 18% (pass ≥ 20%), live vs paper on the same windows −5.6 mSOL per fill (pass ±5). Normal bot: 29 IMIT1 picks, 1 buy sent (failed on the +5% guard); 24 picks skipped as far leaders.",
+  "changes": [
+   "Probe 1 → probe 2: 0.2 → 0.35 SOL, whale ≥ 6%, 8 tries per slot, helius-ps path at 30/s.",
+   "2 h run, 15:30–17:30 PKT."
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "Engine did not exit at the end: the pre-send module counted 3,429 tries sent but only 3,420 resolved, and the run waits for all of them. Force-stopped (SIGKILL) at ~17:45 PKT with no positions open (13 bought / 13 sold / 0 unsold); the final run_end record is missing. Fix needed in the next build."
+   ],
+   [
+    "⚠️",
+    "Paper over-predicts each fill by ~5.6 mSOL on the same windows (matches the replay bias the VM1 check measured on 496 real fires)."
+   ],
+   [
+    "ℹ️",
+    "The normal bot barely traded: the no-BAM near list skipped 24 of 29 picks."
+   ]
+  ],
+  "fixes_after": [
+   "Bug list for the next engine build: (1) pre-send shutdown waits forever on lost tries (resolve them as unseen after a grace period); (2) an empty pre-send route class panics."
+  ],
+  "next": [
+   "Hold pre-send scaling (0.75 SOL plan) until a fix for the paper bias or a faster landing is shown; probe 2 failed its checks."
+  ],
+  "ended": "force-stopped (SIGKILL) at ~17:45 PKT: the engine was stuck at shutdown (pre-send bookkeeping), 0 positions open; the run's time limit was 17:30"
+ },
+ "ams-19": {
+  "title": "Pre-send live probe 3: 0.35 SOL, whale >= 6%, 8 tries per slot via helius-ps 30/s, exit 2 slots / TP 10% / SL 20%; normal bot IMIT1 (M2 shadow) (2 h)",
+  "engine": "dip15 (dip14 + pre-send shutdown grace + empty-route refusal)",
+  "verdict": "+0.886 SOL on the wallet balance (1.181 → 2.066). Pre-send PASSED its pre-set rule: 66 fills, 35 wins, realized +0.886, failed-try fees 0.068, net +0.818 SOL = +0.0124 per fill (pass line +0.004; 66 fills < the 80 asked). Live = 62% of the size-matched shadow (+0 ms row). The realistic replay, re-calibrated afterwards, reproduces it: +0.775 vs live +0.818 (live at the 58th percentile). Normal bot: 14 fired, 3 filled, +0.074 SOL.",
+  "changes": [
+   "Probe 2 → probe 3: same settings (0.35 SOL, k 8, helius-ps 30/s), caps 100 fills / 0.1 SOL fees, 2 h at 22:20–00:20 PKT (owner: 'market looks active').",
+   "Engine dip13 → dip15: the run now ends 20 s after the pre-send stop even if some tries never resolve (probe 2 hung); an empty pre-send route class is refused at start."
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Self-competition: on AsDx1ENs and 5qzhbf4S Amsterdam's pre-send bought first and Frankfurt run 20's reactive buy failed on the +5% guard. Owner then paused Amsterdam while Frankfurt runs pre-send."
+   ],
+   [
+    "ℹ️",
+    "6 pre-send windows still had unresolved tries at the end; dip15 exited cleanly 20 s after the stop (the probe-2 hang is fixed)."
+   ],
+   [
+    "ℹ️",
+    "Live landing: 31 of 66 fills in the send slot, 35 one slot later; send→seen median ~87 ms (AgaveBam slowest)."
+   ]
+  ],
+  "fixes_after": [
+   "Frankfurt run 21 runs pre-send live (k 4, 20/s) on engine dip18 with routes v11 (Falcon UDP added)."
+  ],
+  "next": "Amsterdam paused. 48 h size replay (SIZE_48H.md): +7.4 / +10.7 / +15.3 / +18.4 SOL at 0.35 / 0.50 / 0.75 / 1.00 (−~75% if 20% fewer later buyers); agent read: 0.50 next."
+ },
+ "fra-20": {
+  "title": "Live: M2 gate + routes v10 (falcon on BAM / Jito / Harmonic leaders) on dip16 (loaded-data limit, route headers, window clock); 0.35 SOL, 5-slot hold / no stop; pre-send shadow",
+  "engine": "dip16",
+  "verdict": "+0.148 SOL on the wallet (2.541 → 2.690). 52 buys sent, 19 filled (10 in the dump's own block, median 37 ms on our feed). Falcon landed first on 16 buys (7 same-slot; 2 of 9 on Jito leaders, 3 of 3 on BAM). Stopped by the owner to start run 21 on dip18.",
+  "changes": [
+   "Routes v8 → v10 (from the landing probes): falcon added on BAM / Jito / Harmonic, jito-tx / staked-rpc / nextblock dropped from Jito.",
+   "Engine dip15 → dip16 (+11% priority via the loaded-data limit, CK route headers, window clock)."
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Two reactive buys failed on the +5% guard right after Amsterdam's pre-send bought the same dump (AsDx1ENs, 5qzhbf4S): self-competition between servers."
+   ]
+  ],
+  "next": "Run 21: dip18 + routes v11 (Falcon UDP) + live pre-send on Frankfurt."
+ },
+ "fra-21": {
+  "title": "Live: M2 gate + live pre-send (0.35 SOL, 4 tries/slot, helius-ps 20/s) + routes v11 (Falcon UDP next to Falcon HTTP) on dip18",
+  "engine": "dip18 (dip17 + Falcon native UDP lane)",
+  "verdict": "−0.119 SOL on the wallet (2.690 → 2.570). Pre-send: 49 fills, 21 wins, realized +0.020, failed-try fees 0.024 → −0.005. Reactive: 31 fired, 14 filled, −0.114. Before Amsterdam started pre-send (01:17 PKT) Frankfurt's pre-send was +0.142 on 15 fills; after, −0.123 on 34 fills while paper (alone) stayed positive (+0.14 at +10 ms) — both servers bought the same dumps (race: FRA landed first 13 of 20).",
+  "changes": [
+   "Engine dip16 → dip18: Falcon native UDP lane (16-byte key + raw tx, udp://fra.falcon.wtf:9000). Routes v10 → v11 (falcon-udp next to falcon HTTP; same signed tx, one tip).",
+   "Pre-send LIVE moved to Frankfurt (probe 3 on Amsterdam passed): k 4, 20/s (Frankfurt's helius-ps cap).",
+   "First try was refused: wrong keystore passphrase (typo); second start clean."
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "Self-competition from 01:17 PKT: Amsterdam run 20 ran the same live pre-send; nearly every pre-send fill was bought by both servers in the same block (the second buyer ~2% worse). Doubled losses on dumps that did not bounce (FnkjEdN2 −0.105 here, −0.116 on Amsterdam)."
+   ],
+   [
+    "ℹ️",
+    "Two stop-loss fills crashed far through the −20% stop (GoJWMxo3 −0.129, FnkjEdN2 −0.105)."
+   ],
+   [
+    "ℹ️",
+    "Falcon UDP vs HTTP cannot be told apart on chain (identical signed tx); falcon landed first on 3 of 9 reactive landings."
+   ]
+  ],
+  "next": "Owner rule from the race: pre-send only on Frankfurt; Amsterdam runs without --presend-live."
+ },
+ "ams-20": {
+  "title": "Live, same config as Frankfurt run 21 (M2 gate + live pre-send 0.35 / k 4 / 20/s + routes v11 on dip18) — but regular size 0.45 SOL (owner); a head-to-head race with Frankfurt",
+  "engine": "dip18",
+  "verdict": "−0.250 SOL on the wallet (2.066 → 1.817) in 44 min. Pre-send: 34 fills, 16 wins, realized −0.161, failed-try fees 0.013. Reactive (0.45 SOL): 8 fired, 3 filled, −0.076. Race on 20 shared pre-send fills: Frankfurt landed first 13, Amsterdam 7 (the 10 shared fills before the race: Amsterdam 6–4). Paper alone over the same 44 min: +0.09 to +0.14 at 0.35 — live lost because both servers bought the same dumps.",
+  "changes": [
+   "Amsterdam idle after probe 3 → owner: 'frnk has less activity than ams, run ams alongside with same config, so we can compare'.",
+   "Deployed dip18 + falcon-udp side file (udp://ams.falcon.wtf:9000) + run script b305d2ec while idle.",
+   "Owner started it with --size 0.45 --dev-size 0.45 (pre-send 0.35)."
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "Self-competition: 34 of 34 pre-send fills came while Frankfurt pre-sent too; almost all were the same dump in the same block. Combined live pre-send after the overlap: −0.28 SOL on 68 fills vs paper +0.14 per server."
+   ]
+  ],
+  "next": "Restart Amsterdam with --presend (shadow only), no --presend-live."
+ },
+ "fra-23": {
+  "title": "Live 12 h: M2 gate (m2_v3_reg4_top25) + live pre-send (k 4, 20/s, 100-fill cap, 0.1 SOL fee budget) + routes v13 (adds 0slot, skips Rakurai) on dip19; 0.40 SOL, dev list 0.40",
+  "engine": "dip19 (dip18 + pre-send merged-fill fix: follow-up sells, accounts closed after exit)",
+  "verdict": "+0.652 SOL on the wallet (2.3385 → 2.9904). Reactive M2: 152 buys, 66 filled (50% wins), +0.796 SOL after every cost. Pre-send live: 100 fills (35 wins), realized −0.243, failed-try fees −0.052, account rent back +0.150 → ≈ −0.144; it hit its 100-fill cap ~06:58 PKT, so the last ~9 h were reactive only. Engine end line: fired 152, landed 66, realized +0.704193 (the −0.052 gap to the wallet = pre-send failed-try fees).",
+  "changes": [
+   "Engine dip18 → dip19 (pre-send merged-fill fix).",
+   "Routes v11 → v13: 0slot added on BAM / Firedancer / Harmonic / Jito leaders; Rakurai leaders skipped.",
+   "Size 0.35 → 0.40 SOL (dev list 0.40); limits 500 fills / 720 min (owner 10-26).",
+   "Pre-send LIVE on Frankfurt only (Amsterdam shadow): k 4, 20/s, 100-fill cap, 0.1 SOL failed-try fee budget."
+  ],
+  "events": [
+   [
+    "03:00",
+    "earlier start (budget file entry, 03:00–03:49, no balance change; no engine log kept for it)"
+   ],
+   [
+    "~06:58",
+    "pre-send live hit its 100-fill cap and stopped (reactive M2 kept running)"
+   ],
+   [
+    "16:08",
+    "owner stopped the run (Ctrl+C); run 24 started 16:11 with the same config"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Pre-send token-account rent refunded when the 100 pre-send accounts were closed (+0.151, from the engine's account-close records) is counted in the result since 10-27; before, it showed as a +0.150 gap between the wallet and the trades."
+   ],
+   [
+    "ℹ️",
+    "Pre-send end check: 100 fills, 100 exits, 100 closed, 0 unsold, 0 orphans; fills after an exit 0 (dip19 fix held). Attempts 10,363: 9,226 failed on 6042 (price), 754 deadline, 150 ATA exists, 133 unseen."
+   ],
+   [
+    "ℹ️",
+    "Error 6001 at instruction 6 on 2 buys (AHPJRF, AAx5si; AAx5si fired 4x, all missed): the Lighthouse guard (L2TExMFK…) assertion fails before pump runs — fee only, like a price fail. Both landed 2–3 blocks after the dump, so the failing assertion is probably the slot deadline (dump slot + 1) (inferred)."
+   ],
+   [
+    "ℹ️",
+    "The 'sell issue' line in older versions of this report was a false match (a status line with 3012 inside a bigger number); the check now needs the bare code."
+   ],
+   [
+    "ℹ️",
+    "Wallet holds only the frozen spam airdrop ByiDNcxM besides SOL (left alone). Nonces healthy at the end: 8 ready, 0 dead, 152 used, 0 fallbacks."
+   ]
+  ],
+  "next": [
+   "Run 24 (FRA) started 16:11 PKT with the same config, --minutes 330 (until ~21:45).",
+   "Pre-send live is negative again (≈ −0.144 on 100 fills) while reactive M2 is positive (+0.796): decide whether to keep pre-send live (owner)."
+  ]
+ },
+ "ams-22": {
+  "title": "Live 12 h: M2 gate + routes v13 (adds 0slot, skips Rakurai) on dip19; 0.35 SOL; pre-send SHADOW only; near list near_leaders_ams.txt (disjoint from Frankfurt)",
+  "engine": "dip19",
+  "verdict": "+0.090 SOL on the wallet (1.8156 → 1.9052), matches the engine (fired 94, landed 44, realized +0.089643). 44 fills, 48% wins. BAM (−0.146) and Firedancer (−0.111) leaders lost; Harmonic (+0.174) and Jito (+0.172) won.",
+  "changes": [
+   "Engine dip18 → dip19; routes v11 → v13 (0slot added, Rakurai leaders skipped).",
+   "Limits 500 fills / 720 min (owner 10-26); pre-send shadow only (no --presend-live, owner rule after the 10-25 race)."
+  ],
+  "events": [
+   [
+    "10:56",
+    "no buys until 12:14: 31 picks skipped as far_leader + 4 spacing — the dumps were on Frankfurt-near leaders (disjoint lists by design), not a fault"
+   ],
+   [
+    "16:08",
+    "owner stopped the run (Ctrl+C); run 23 started 16:11 with the same config"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "One 6001 at instruction 6 (BjfCpM): Lighthouse guard (L2TExMFK…) assertion failed before pump — fee only. It landed 4 blocks after the dump, so probably the slot-deadline assertion (inferred)."
+   ],
+   [
+    "ℹ️",
+    "The 'sell issue' lines in older versions of this report were false matches (status lines with 3012 inside a bigger number); the check now needs the bare code."
+   ],
+   [
+    "ℹ️",
+    "Wallet holds only the frozen spam airdrop ByiDNcxM besides SOL (left alone). Nonces healthy at the end: 8 ready, 0 dead."
+   ]
+  ],
+  "next": [
+   "Run 23 (AMS) started 16:11 PKT with the same config, --minutes 330 (until ~21:45)."
+  ]
+ },
+ "fra-24": {
+  "title": "Live 5.5 h: same config as run 23 — M2 gate + live pre-send (0.40, k 4, 20/s, 100-fill cap, 0.1 SOL fee budget) + routes v13 on dip19; 0.40 SOL, dev list 0.40",
+  "engine": "dip19 (dip18 + pre-send merged-fill fix: follow-up sells, accounts closed after exit)",
+  "verdict": "+0.524 SOL on the wallet (2.9904 → 3.5146). Pre-send live carried the run: 100 fills (53 wins), realized +0.655, rent back +0.151, failed-try fees −0.063 → +0.743; it hit its 100-fill cap at 19:49:39, so the last ~1 h 50 min were reactive only. Reactive M2: 119 buys, 35 filled (11 wins): fills −0.175, failed buys −0.042 → −0.218. Worst trade GkeCfLbd −0.243 (Jito leader; landed via falcon one block late; stop-loss slipped to −58%). Engine end line: realized +0.588144 = reactive + pre-send realized + rent back; the −0.063 to the wallet = the failed-try fees.",
+  "changes": [
+   "Same settings as run 23; time limit 330 min (owner stopped run 23 at 16:08 and restarted at 16:10)."
+  ],
+  "events": [
+   [
+    "21:40",
+    "time limit (330 min) reached; run 25 started 21:48 without pre-send live"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Pre-send 64KJsT7N (16:34, take-profit): sell #1 landed but was not seen within 1 s, so sell #2 went out and failed with pump 6023 (not enough tokens to sell) — fee only; the position was sold (realized −0.044 incl. both sells)."
+   ],
+   [
+    "ℹ️",
+    "One buy failed with 6001 at instruction 6 (6zjY8J, landed 4 blocks after the dump): the Lighthouse slot-deadline guard (inferred, as in run 23) — fee only."
+   ],
+   [
+    "ℹ️",
+    "Pre-send END CHECK clean (95 mints at confirmed: 0 sold / 0 closed / 0 held / 0 unreadable). Nonces healthy (8 ready, 0 dead, 119 used, 0 fallbacks). No tokens left in the wallet (getTokenAccountsByOwner 10-27 14:50 PKT: only an empty wSOL account)."
+   ]
+  ]
+ },
+ "fra-25": {
+  "title": "Live overnight: reactive M2 only (pre-send live off) + routes v13 on dip19; 0.40 SOL, dev list 0.40; 720 min",
+  "engine": "dip19 (dip18 + pre-send merged-fill fix: follow-up sells, accounts closed after exit)",
+  "verdict": "−0.549 SOL on the wallet (3.5146 → 2.9658). The KILL SWITCH ended it at 05:30:40 (run P&L −0.548859 below −0.5). 208 buys, 73 filled (27 wins): fills −0.481, failed buys −0.068. Jito leaders lost most: 17 fills (5 wins) −0.417, −0.444 with their failed buys; worst EVQCNPrR −0.205. 04:00–05:30 lost −0.503 of the total. Engine speed was normal all night (decision median 1.9 ms, executed-feed lag 2.5 ms, runtime-lag worst p99 2.5 ms — same as runs 23 and 24).",
+  "changes": [
+   "Pre-send live off (run 24 had it on at 0.40); reactive settings unchanged; time limit 720 min."
+  ],
+  "events": [
+   [
+    "21:50",
+    "the first start (21:48, 330 min) was stopped with Ctrl+C before any buy; the restart at 21:55 ran with 720 min. The log holds both engine sessions (two START BALANCE blocks); the report sums them."
+   ],
+   [
+    "05:30:40",
+    "kill switch: run P&L −0.548859 SOL (balance 2.965788) below −0.5 → no new buys, run ended"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "6 buys failed with 6001 at instruction 6 (each landed 2–4 blocks after the dump): the Lighthouse slot-deadline guard (inferred) — fee only."
+   ],
+   [
+    "ℹ️",
+    "Nonces healthy (8 ready, 0 dead, 208 used, 0 fallbacks); every fill sold; no tokens left in the wallet (checked on chain 10-27 14:50 PKT; SOL 2.965788 = the end balance)."
+   ]
+  ]
+ },
+ "fra-17": {
+  "title": "Relay probe P1 (Jito leaders): 8 paths, fail-by-design probe buys; no trading (cap 1 trade × 0.05 SOL, strict tier)",
+  "engine": "probe mode of dip14+ (exact build not in the log; CLOCK2 on)",
+  "verdict": "No trades, by design. −0.0323 SOL = the fees of the 64 probes that landed (78 sent in the 60 min). In the dump's block (probe_r17.json): helius-swqos 10/10 landed, 80% (feed p50 53 ms); helius Sender Max 9/9, 78% (55 ms) at five times the tip; flashblock 70%; nextblock 40%; blockrazor 5/9 landed; staked-rpc and jito-tx 20% (jito-tx p50 340 ms); speedlanding 0/10 (dead endpoint, keep-alive timeouts).",
+  "red_flags": [
+   [
+    "ℹ️",
+    "The wallet gap (−0.0323) is exactly the landed probes' fees in the jsonl."
+   ]
+  ],
+  "next": [
+   "Write-up: ops/dip/speed/landing2/PROBES_V2.md (results P1)."
+  ]
+ },
+ "fra-18": {
+  "title": "Relay probe P2 (Harmonic + BAM leaders): 7 paths incl. falcon; no trading",
+  "engine": "probe mode of dip14+ (exact build not in the log; CLOCK2 on)",
+  "verdict": "No trades, by design. −0.0404 SOL = fees of the 80 probes that landed (84 sent; the run ended after the 84th probe, 25 min). In the dump's block (probe_r18.json): astralane 12/12 (100%, feed p50 39 ms), helius-swqos 92% (41 ms), falcon 92% (42 ms), landx-fra3 83% (33 ms, the fastest p50), blockrazor 75% but only 8/12 landed, flashblock 50%, nextblock 50%.",
+  "red_flags": [
+   [
+    "ℹ️",
+    "The wallet gap (−0.0404) is exactly the landed probes' fees in the jsonl."
+   ]
+  ]
+ },
+ "fra-19": {
+  "title": "Relay probe (Jito + Harmonic leaders): glaive, falcon, helius-swqos, astralane, landx-fra3, flashblock; no trading",
+  "engine": "probe mode (exact build not in the log)",
+  "verdict": "No trades, by design. −0.0364 SOL = fees of 72 probes, all landed (the run ended after the 72nd probe, 12 min). In the dump's block, both leader types together (probe_r19.json): falcon 92% (feed p50 85 ms), glaive 83% (49 ms), landx-fra3 67% (55 ms), astralane 58% (73 ms), flashblock 42% (87 ms), helius-swqos 33% (92 ms).",
+  "red_flags": [
+   [
+    "ℹ️",
+    "The wallet gap (−0.0364) is exactly the probes' fees in the jsonl."
+   ]
+  ]
+ },
+ "fra-22": {
+  "title": "Live 1 h: routes v12 (soyas, solami, glaive, falcon, falcon-udp) + M2 gate + live pre-send 0.40 (k 4) on dip18; 0.40 SOL",
+  "engine": "dip18 (QUIC lanes soyas / solami + falcon-udp)",
+  "verdict": "Kill switch after 30 min, caused by the pre-send merged-fill bug: the wallet fell −0.561 (2.5697 → 2.0085). Window w51 on 6ESztPpq: try A filled in slot …576 and stop-lossed in the same slot (its sell closed the token account); try B landed in …577, bought again (0.395 SOL) and was logged 'FILL MERGED' into the closed position, so it was never sold and realized booked −0.084 while the curve said −0.468. The kill switch (balance-based, held tokens not counted) saw −0.561 and stopped the run at 02:48:50. The tokens were sold by hand afterwards (wallet 2.0085 → 2.3385, +0.330 incl. account rent; budget file) → the real run result ≈ −0.231. Pre-send otherwise: 22 fills in 21 positions, realized −0.151, failed-try fees −0.006; reactive: 4 buys, 3 fills, −0.002.",
+  "changes": [
+   "Routes v11 → v12: soyas + solami (QUIC) and glaive added; Jito leaders = solami + soyas + glaive + falcon + falcon-udp + helius-swqos.",
+   "Owner skipped the planned probes ('run both live with new dip senders, we will test live'): 1 h each, pre-send on Frankfurt, reactive only on Amsterdam (run 21)."
+  ],
+  "red_flags": [
+   [
+    "🔴",
+    "Merged-fill bug (see the verdict): tokens left unsold at the end of the run. Fixed in dip19 before run 23: a pre-send account is closed only after every try's deadline, a fill after a close opens a new position that gets sold, and realized sums every buy."
+   ],
+   [
+    "ℹ️",
+    "This report's −0.159 leaves out the unsold tokens: the wallet was −0.561 at the end of the run and −0.231 after the hand sell."
+   ]
+  ],
+  "fixes_after": [
+   "dip19 (10-26 ~03:55 PKT): merged-fill fix, deployed on both servers; first used in run 23."
+  ]
+ },
+ "ams-23": {
+  "title": "Live 5.5 h: reactive M2 + routes v13 on dip19; 0.35 SOL, dev list 0.35; pre-send SHADOW only",
+  "engine": "dip19",
+  "verdict": "−0.101 SOL on the wallet (1.9052 → 1.8040), matches the engine (fired 99, landed 30, realized −0.101281). 30 fills (9 wins): fills −0.066, failed buys −0.035. One trade kept it close: 4fh6MRuf +0.265 (Harmonic, 19:57); without it −0.366. BAM leaders weak: 13 fills, 3 wins, −0.210 with their failed buys; Harmonic +0.133.",
+  "changes": [
+   "Same settings as run 22; time limit 330 min (owner stopped run 22 at 16:08 and restarted at 16:10)."
+  ],
+  "events": [
+   [
+    "21:40",
+    "time limit (330 min) reached; run 24 started 21:47 with pre-send LIVE"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "One buy failed with 6001 at instruction 6 (8ybS1Dxj): the Lighthouse slot-deadline guard (inferred) — fee only."
+   ],
+   [
+    "ℹ️",
+    "Nonces healthy (8 ready, 0 dead, 99 used, 0 fallbacks); every fill sold."
+   ]
+  ]
+ },
+ "ams-24": {
+  "title": "Live: pre-send LIVE 0.34 (k 4, 20/s, 100-fill cap, 0.1 SOL fee budget) + reactive M2 0.35 + routes v13 on dip19; restarted at 00:10 to reset the cap",
+  "engine": "dip19",
+  "verdict": "+1.692 SOL on the wallet (1.8040 → 3.4964). Pre-send: 200 fills (103 wins), realized +0.978 (segment A +0.329 up to its cap at 23:30, segment B +0.648 up to its cap at 02:24), rent back +0.302, failed-try fees −0.108 → +1.171. Reactive M2: 84 buys, 37 filled (18 wins): fills +0.548, failed buys −0.024 → +0.524. Take-profits made the pre-send money: 36 TP fills +2.056 against 161 time-limit fills −0.885.",
+  "changes": [
+   "Pre-send LIVE on Amsterdam (run 23: shadow only), 0.34 SOL; reactive unchanged at 0.35; time limit 720 min."
+  ],
+  "setup_notes": [
+   "The log holds four engine sessions (four START BALANCE blocks); the report sums them. Session 1 ran pre-send at 0.40 SOL with 330 min; sessions 2–4 at 0.34 with 720 min."
+  ],
+  "events": [
+   [
+    "21:47",
+    "first start (pre-send 0.40, 330 min): 420 pre-send tries, 0 fills, −0.0021 SOL in failed-try fees; stopped with Ctrl+C at 21:51; restarted 21:53 at 0.34 (segment A)"
+   ],
+   [
+    "00:10",
+    "owner restarted to reset the 100-fill cap: a start at 00:10:26 was stopped after 8 s (no trades); the next, at 00:10:53, ran on (segment B)"
+   ],
+   [
+    "02:57",
+    "stopped with Ctrl+C; run 25 started 02:58 with the same config"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "One buy failed with 6001 at instruction 5 (B7XgchDe, landed 2 blocks after the dump): the Lighthouse slot-deadline guard (inferred) — fee only."
+   ],
+   [
+    "ℹ️",
+    "Pre-send END CHECKs clean in both capped sessions (94 and 98 mints at confirmed: 0 sold / 0 closed / 0 held / 0 unreadable). Nonces healthy; no tokens left in the wallet."
+   ]
+  ]
+ },
+ "ams-25": {
+  "title": "Live: pre-send LIVE 0.34 (k 4, 100-fill cap) + reactive M2 0.35 + routes v13 on dip19 (same as run 24)",
+  "engine": "dip19",
+  "verdict": "+1.137 SOL on the wallet (3.4964 → 4.6331). Pre-send: 95 fills (60 wins), realized +0.952, rent back +0.143, failed-try fees −0.051 → +1.044. Reactive M2: 35 buys, 13 filled (5 wins): fills +0.106, failed buys −0.011 → +0.095. The owner stopped it at 06:09 (Ctrl+C), 5 fills short of the pre-send cap.",
+  "changes": [
+   "Restarted at 02:58, right after run 24 ended."
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Pre-send END CHECK clean (93 mints at confirmed: 0 sold / 0 closed / 0 held / 0 unreadable). Nonces healthy (8 ready, 0 dead, 35 used, 0 fallbacks); no tokens left in the wallet."
+   ]
+  ],
+  "next": [
+   "Run 26 started 06:58 with pre-send 0.50, a 1000-fill cap and a 0.4 SOL fee budget."
+  ]
+ },
+ "ams-26": {
+  "title": "Live day run: pre-send LIVE 0.50 (k 4, cap 1000 fills = the new run-script limit, fee budget 0.4) + reactive M2 0.50 + dev list 0.50 + routes v13 on dip19",
+  "engine": "dip19",
+  "verdict": "+0.299 SOL on the wallet (4.6331 → 4.9324). Pre-send: 143 fills (59 wins), realized +0.134, rent back +0.216, failed-try fees −0.099 (budget 0.4) → +0.251. Reactive M2: 43 buys, 14 filled (7 wins): fills +0.064, failed buys −0.015 → +0.050. Running P&L from the engine records + chain: high +0.96 at 11:55, about +0.87 at 12:52, then −0.57 in the last ~70 min (pre-send realized −0.30 in the 13:00 hour and −0.27 on 3 fills after 14:00). The owner stopped it at 14:03 (Ctrl+C).",
+  "changes": [
+   "Sizes 0.34 / 0.35 → 0.50 (pre-send, reactive and dev list); pre-send cap 100 → 1000 fills and fee budget 0.1 → 0.4 SOL (the owner's new run-script limit)."
+  ],
+  "events": [
+   [
+    "12:52",
+    "running P&L about +0.87 SOL (high +0.96 at 11:55; engine records + chain)"
+   ],
+   [
+    "14:00:43",
+    "pre-send 5QvaPB4Q −0.182: both whales that triggered it (9PbqHYS4 10.0%, 995hnk6J 7.9% of supply) sold their whole bags (4.01 + 3.90 SOL) later in the same block as our fill → value ×0.64 → stop-loss"
+   ],
+   [
+    "14:03",
+    "owner stopped the run (Ctrl+C)"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "Biggest losses were pre-send stop-losses: 5QvaPB4Q −0.182 (same-block whale dumps, see the timeline) and 8rVtFZ3A −0.152 (08:35; sells of 2.11 + 3.23 SOL in the next block)."
+   ],
+   [
+    "ℹ️",
+    "astralane keep-alive failed all run (45 × 'connection refused'; 2 UNHEALTHY, 1 RECOVERED). astralane is in no route, so no trade impact."
+   ],
+   [
+    "ℹ️",
+    "The 243 pre-send tries never seen on our feed did land and fail on chain (the QUIET replay looks them up): 0.0012 SOL of fees the engine does not count — that is the −0.0012 wallet gap."
+   ],
+   [
+    "ℹ️",
+    "The end check skipped 37xP1usx: the reactive bot held that token (filled 07:10:44, sold) and its own sell handled the account. Otherwise the END CHECK was clean (138 mints at confirmed: 0 sold / 0 closed / 0 held / 0 unreadable). Nonces healthy; no tokens left in the wallet (checked on chain 10-27 14:50 PKT; SOL 4.932397 = the end balance)."
+   ]
+  ],
+  "next": [
+   "QUIET filter replay on this run (ops/strategies/presend/filter/apply_filter.py --config quiet, re-run 10-27 14:50 PKT on the verified copy): pre-send net +0.250 → +0.736 SOL; 116 of 143 fills kept; 24 losers skipped (−0.652), 3 winners skipped (+0.194); failed-try fees saved 0.030. QUIET in the engine (dip20) is being built."
+  ]
+ },
+ "ams-18": {
+  "title": "Relay probe P1b (Jito leaders, Amsterdam): 6 paths; no trading (cap 1 trade × 0.05 SOL, strict tier)",
+  "engine": "probe mode of dip14+ (exact build not in the log; CLOCK2 on)",
+  "verdict": "No trades, by design. −0.0212 SOL = fees of the 42 probes that landed (46 sent in the 60 min). In the dump's block (probe_ams_r18.json): falcon 8/8 (75%, feed p50 115 ms), helius-swqos 63% (116 ms), flashblock 50% (126 ms), helius Sender Max 50% (135 ms), nextblock 29% (122 ms); blockrazor landed 3 of 7 (p50 99 ms).",
+  "red_flags": [
+   [
+    "ℹ️",
+    "The wallet gap (−0.0212) is exactly the landed probes' fees in the jsonl."
+   ]
+  ]
+ },
+ "ams-21": {
+  "title": "Live 1 h: routes v12 (soyas, solami, glaive, falcon, falcon-udp) + M2 gate on dip18; 0.35 SOL; no pre-send live",
+  "engine": "dip18 (QUIC lanes soyas / solami + falcon-udp)",
+  "verdict": "−0.001 SOL (1.8166 → 1.8156): 23 picks, 2 buys, both failed on the +5% guard (fees only). 4F9ft4 landed in the dump's own block via falcon 22 ms after the dump but behind 5 rival buys; 2oAztc (dev list) landed one block late via solami (84 ms, 3 rivals ahead). 16 picks were skipped as far_leader (not on the Amsterdam near list).",
+  "events": [
+   [
+    "02:49",
+    "stopped with Ctrl+C at 02:49:43, about a minute after Frankfurt run 22's kill switch (02:48:50)"
+   ]
+  ]
+ },
+ "ams-27": {
+  "title": "Short evaluation run: pre-send LIVE 0.35 (k 4, cap 1000, fee budget 0.4) + QUIET (dip20: stop 6:2 from the start, skip rule after a 60-min warm-up) + reactive M2 0.35 + dev list 0.35 + routes v13",
+  "engine": "dip20",
+  "verdict": "+0.587 SOL on the wallet (4.9324 → 5.5198, chain). Pre-send: 49 fills (26 wins), realized +0.570, rent back +0.074, failed-try fees −0.022 → +0.622. Reactive M2: 10 buys, 4 filled (1 win) → −0.034. QUIET (MEASURED): the stop rule cut 45 windows short (their fees −0.005); the skip rule was ON from 16:27 PKT and skipped 36 triggers. In the warm-up hour, the 20 windows it would have skipped were traded live: 4 fills, net +0.0015, so skipping them would have been neutral. By phase: warm-up 15:26–16:27, 74 windows, 19 fills, +0.060; skip rule on 16:27–17:36, 103 windows, 30 fills, +0.562 (incl. 3N44sv +0.220).",
+  "changes": [
+   "Engine dip19 → dip20 with --presend-quiet (QUIET: stop a window at trigger + 6 slots if < 2 other trades; skip a trigger when all 4 quiet signals hold; 24 h whale dump history; 60-min warm-up, no preload on AMS because AMS has no raw recorder).",
+   "Sizes 0.50 → 0.35 (pre-send, reactive, dev list); 130 min (owner: a short run to evaluate QUIET)."
+  ],
+  "events": [
+   [
+    "15:26:57",
+    "start (dip20, QUIET on; the skip rule warms up until 16:26 PKT)"
+   ],
+   [
+    "15:30",
+    "falcon keep-alive refused ×2 (falcon is in the BAM / Harmonic routes of the reactive buys); quiet again until 17:30"
+   ],
+   [
+    "16:27:09",
+    "QUIET skip rule ON (first armed window with the rule on)"
+   ],
+   [
+    "17:04",
+    "pre-send 3N44sv +0.220 (best trade of the run)"
+   ],
+   [
+    "17:30:40",
+    "falcon UNHEALTHY: 3 transport errors in a row (connection refused) → HTTP client rebuilt"
+   ],
+   [
+    "17:36:57",
+    "run end (time limit); END CHECK 49 mints at confirmed: 0 held"
+   ]
+  ],
+  "red_flags": [
+   [
+    "ℹ️",
+    "falcon refused connections at 15:30 (×2) and 17:30 (3 in a row, rebuilt). It is one of 7 paths for reactive buys on BAM / Harmonic leaders; pre-send uses helius-ps only."
+   ],
+   [
+    "ℹ️",
+    "What the 45 stopped and 36 skipped windows would have made cannot be measured live; a replay on the chain recording is pending."
+   ],
+   [
+    "ℹ️",
+    "Paper shadow row c: 91 fills, net −0.046, vs live +0.622. The engine's shadow is not a forecast for this setup."
+   ],
+   [
+    "ℹ️",
+    "No tokens left in the wallet (chain 10-27 ~17:40 PKT: 5.519834 SOL, 1 empty token account)."
+   ]
+  ],
+  "next": [
+   "Replay the 36 skipped and 45 stopped windows on the chain recording to estimate what QUIET gave up and saved (ops/strategies/presend/filter/live27/).",
+   "dip21 (whale history built on the host and pushed to every node) removes the 60-min warm-up on AMS."
+  ]
+ },
+ "fra-26": {
+  "title": "12 h planned at 0.45: pre-send k8 40/s + QUIET (dip21) + M2-gated regular; stopped after 1 h 51 min on the owner's order",
+  "engine": "dip21 (QUIET + host whale book + journal)",
+  "verdict": "+0.266 SOL on chain (2.9658 → 3.2315). Pre-send +0.669 (43 fills, 25 wins; failed-try fees −0.041) carried the run; regular lost −0.403 (11 fills of 35 buys, 1 win; 24 failed the +5% guard). The owner stopped the run at 02:23 PKT to restart without regular buys (run 27). The end check read 49 mints: nothing held, nothing to sell.",
+  "changes": [
+   "Size 0.45 (owner: 'ig 0.45 size'), pre-send k8 at 40/s per path (the density study's only positive setting), QUIET on with the host whale book, fee budget 0.5.",
+   "Regular buys used the M2 gate (min 0.0101), not IMIT1 as the setup table's model line says."
+  ],
+  "red_flags": [
+   [
+    "🔴",
+    "Regular buys: 10 of 11 fills lost (−0.39), the same pattern as AMS r29–r32. While a regular position is open, pre-send pauses, so regular also cost pre-send chances (5 'reactive_position' skips)."
+   ]
+  ],
+  "fixes_after": [
+   "Run 27: regular switched off (--m2-min 999, no dev list); regular is measured in shadow from the engine's M2 scores and replayed afterwards."
+  ],
+  "next": "FRA run 27: pre-send only, 12 h, same pre-send config."
+ },
+ "fra-27": {
+  "title": "12 h pre-send only (regular off: --m2-min 999, no dev list): 0.45, k8, QUIET, dip21",
+  "engine": "dip21",
+  "verdict": "+1.551 SOL on chain (3.2315 -> 4.7822), the best FRA run so far. 200 pre-send fills, realized +1.726, failed-try fees -0.173. Low -0.087 at 03:34, then a steady climb; one -0.29 crash (G3badS, price fell 63% inside 2 slots). Wallet clean at the end (0 tokens held; the end check's 28 unreadable mints were empty).",
+  "changes": [
+   "Regular buys OFF (owner 10-28 02:23: run 26's regular lost -0.40 while pre-send made +0.67). With regular off, pre-send never pauses for a reactive position."
+  ],
+  "red_flags": [
+   [
+    "⚠️",
+    "FRA's helius-ps path cap is 20/s in dip_prod.toml, so ~42% of the k8 tries were refused although the command asked for 40/s (haqq_dissect/front addendum)."
+   ]
+  ],
+  "fixes_after": [
+   "Ready, needs owner OK: dip22 with --presend-live-exit-ms 200 (verified +5 mSOL/fill on this run's fills); helius-ps cap 20 -> 40/s."
+  ],
+  "next": "Next FRA run: pre-send only again, with dip22 + exit-ms 200 and the cap raised, if the owner OKs."
+ }
+}

@@ -577,37 +577,50 @@ func gridWidth(cells []string, rows int, sep string) int {
 	return w
 }
 
-// cfgStrip packs the config badges (the snapshot's short forms) into at most maxLines lines.
+// cfgStrip packs the config badges (the snapshot's short forms) into at most maxLines lines, grouped by block
+// (pre-send, regular, routes & sending, limits, QUIET & paper) with a thin bar between the blocks.
 func (m *Model) cfgStrip(w, maxLines int) []string {
 	t := m.th
 	v := m.view
 	var out []string
 	cur := ""
-	for _, it := range v.CfgItems {
-		switch it.Key {
-		case "kill", "planned", "skipcl":
-			continue
-		}
-		seg := ""
-		if it.State != "na" {
-			seg = t.StateDot(it.State, m.ascii) + " "
-		}
-		st := t.Val
-		if it.State == "na" {
-			st = t.Lbl
-		}
-		seg += st.Render(it.Short)
-		if cur != "" && ansi.StringWidth(cur)+2+ansi.StringWidth(seg) > w {
-			out = append(out, cur)
-			cur = ""
-			if len(out) >= maxLines {
-				return out
+	bar := t.Dim.Render(m.g("│", "|"))
+	for bi := range cfgBlockKeys {
+		first := true
+		for _, it := range v.CfgItems {
+			if blockOf(it.Key) != bi {
+				continue
 			}
+			switch it.Key {
+			case "kill", "planned", "skipcl":
+				continue
+			}
+			seg := ""
+			if it.State != "na" {
+				seg = t.StateDot(it.State, m.ascii) + " "
+			}
+			st := t.Val
+			if it.State == "na" {
+				st = t.Lbl
+			}
+			seg += st.Render(it.Short)
+			gap := "  "
+			if first && cur != "" {
+				gap = " " + bar + " "
+			}
+			first = false
+			if cur != "" && ansi.StringWidth(cur)+ansi.StringWidth(gap)+ansi.StringWidth(seg) > w {
+				out = append(out, cur)
+				cur = ""
+				if len(out) >= maxLines {
+					return out
+				}
+			}
+			if cur != "" {
+				cur += gap
+			}
+			cur += seg
 		}
-		if cur != "" {
-			cur += "  "
-		}
-		cur += seg
 	}
 	if cur != "" && len(out) < maxLines {
 		out = append(out, cur)
@@ -790,391 +803,6 @@ func (m *Model) nowSec() float64 {
 	return float64(m.now().UnixNano()) / 1e9
 }
 
-// ------------------------------------------------------------------------------------------------- config cells
-
-// cfgCell is one labeled config item in its long and short forms.
-type cfgCell struct{ long, short string }
-
-// cfgCells are the overview's config items, in reading order: Pre-send, Fills, QUIET, Regular, Paper / M2 / Dev,
-// Routes / fan-outs / gates, Kill switch / planned / engine.
-func (m *Model) cfgCells() []cfgCell {
-	return []cfgCell{
-		{m.cfgCell(0, false), m.cfgCell(0, true)}, {m.cfgCell(1, false), m.cfgCell(1, true)},
-		{m.cfgCell(2, false), m.cfgCell(2, true)}, {m.cfgCell(3, false), m.cfgCell(3, true)},
-		{m.cfgCell(4, false), m.cfgCell(4, true)}, {m.cfgCell(5, false), m.cfgCell(5, true)},
-		{m.cfgCell(6, false), m.cfgCell(6, true)},
-	}
-}
-
-func (m *Model) cfgCell(i int, short bool) string {
-	t := m.th
-	v := m.view
-	S := v.S
-	pc := v.PSCfg
-	sep := t.Dim.Render(" " + m.g("·", "|") + " ")
-	dot := func(st string) string { return t.StateDot(st, m.ascii) }
-	it := func(k string) *core.CfgItem { return v.ItemByKey(k) }
-	num := func(k string) (core.Num, bool) {
-		n, ok := pc[k].(core.Num)
-		return n, ok && n.Ok()
-	}
-	minus := m.g("−", "-")
-	tpsl := func(tp float64, tpOK bool, sl float64, slots string) string {
-		tps := "off"
-		if tpOK {
-			tps = "+" + core.F(tp, 0) + "%"
-		}
-		if short {
-			return "TP " + tps + " SL " + minus + core.F(sl, 0) + "% " + slots + "sl"
-		}
-		return "TP " + tps + " / SL " + minus + core.F(sl, 0) + "% / " + slots + " slots"
-	}
-	switch i {
-	case 0, 1:
-		ps := it("ps")
-		if ps == nil || ps.State == "off" {
-			if i == 1 {
-				return ""
-			}
-			return t.Lbl.Render("Pre-send ") + dot("off") + t.Lbl.Render(" off")
-		}
-		if i == 0 {
-			tpN, tpOK := num("tp")
-			tp := tpN.Float()
-			if tpOK && tp < 1 {
-				tp *= 100
-			}
-			slN, _ := num("sl")
-			sl := slN.Float()
-			if sl < 1 {
-				sl *= 100
-			}
-			slots, k, spend := "?", "?", "?"
-			if n, ok := num("exit_slots"); ok {
-				slots = n.Repr()
-			}
-			if n, ok := num("k"); ok {
-				k = n.Repr()
-			}
-			if n, ok := num("spend"); ok {
-				spend = core.F(n.Float()/core.LAM, 2)
-			}
-			txt := t.Val.Render(" "+spend+" SOL") + sep + t.Val.Render(k+" tries/slot") + sep + t.Val.Render("exit "+tpsl(tp, tpOK && tpN.Truthy(), sl, slots))
-			if short {
-				txt = t.Val.Render(" "+spend) + sep + t.Val.Render(k+"/slot") + sep + t.Val.Render(tpsl(tp, tpOK && tpN.Truthy(), sl, slots))
-			}
-			c := t.Lbl.Render("Pre-send ") + dot(ps.State) + txt
-			if v.PSStopped != "" {
-				c += t.Warn.Render(" · stopped: " + v.PSStopped)
-			}
-			return c
-		}
-		var sf, sfee int64
-		if S.PSRec {
-			sf, sfee = S.PSFills, S.PSFees()
-		} else {
-			sf, sfee = int64(len(S.LogPSReal)), S.LogPSFees
-		}
-		capS := "?"
-		if n, ok := num("max_fills"); ok && n.Truthy() {
-			capS = n.Repr()
-		}
-		bud := 0.0
-		if n, ok := num("fee_budget"); ok && n.Truthy() {
-			bud = n.Float()
-		}
-		fs := t.Val
-		if bud > 0 && float64(sfee) > 0.8*bud {
-			fs = t.Warn
-		}
-		return t.Lbl.Render("Fills ") + t.Val.Render(fmt.Sprintf("%d/%s", sf, capS)) + sep + t.Lbl.Render("fees ") + fs.Render(core.F(float64(sfee)/core.LAM, 2)+"/"+core.F(bud/core.LAM, 2))
-	case 2:
-		q := v.Quiet
-		if !q.Present {
-			x := " off"
-			if !short {
-				x += " (not in this engine)"
-			}
-			return t.Lbl.Render("QUIET ") + dot("off") + t.Lbl.Render(x)
-		}
-		stopOn := q.HasStop && q.Stop != "" && q.Stop != "off"
-		n, mm := "?", "?"
-		if stopOn && strings.Contains(q.Stop, ":") {
-			p := strings.SplitN(q.Stop, ":", 2)
-			n, mm = p[0], p[1]
-		}
-		skip := map[string]string{"on": "on", "warm-up": "part"}[q.State]
-		if skip == "" {
-			skip = "off"
-		}
-		st := "off"
-		if stopOn {
-			st = "on"
-		}
-		c := t.Lbl.Render("QUIET ") + dot(st)
-		if short || !stopOn {
-			c += t.Val.Render(" stop  ")
-		} else {
-			c += t.Val.Render(" stop (" + n + " slots, < " + mm + " trades)  ")
-		}
-		c += dot(skip) + t.Val.Render(" skip")
-		if q.State == "warm-up" && q.HasOnAt {
-			c += t.Warn.Render(" on " + core.T12(float64(q.OnAt), false))
-		}
-		return c
-	case 3:
-		spend := S.RS.Spend
-		if !spend.Truthy() && S.Live.HasSpend {
-			spend = core.IntNum(S.Live.Spend)
-		}
-		tp, tpOK := 0.0, false
-		if S.RS.TP.Ok() {
-			if S.RS.TP.Float() < 99 {
-				tp, tpOK = S.RS.TP.Float()*100, true
-			}
-		} else if S.Live.HasTP && S.Live.TP != "off" {
-			var f float64
-			if _, err := fmt.Sscanf(strings.Trim(S.Live.TP, "+%"), "%g", &f); err == nil {
-				tp, tpOK = f, true
-			}
-		}
-		sl := 0.0
-		if S.RS.SL.Ok() {
-			sl = S.RS.SL.Float() * 100
-		} else if S.Live.HasSL {
-			sl = S.Live.SL
-		}
-		hold := "?"
-		if S.RS.HoldSlots.Truthy() {
-			hold = S.RS.HoldSlots.Repr()
-		} else if S.Live.HasHold {
-			hold = fmt.Sprint(S.Live.Hold)
-		}
-		guard := S.RS.Guard.Float()
-		if !S.RS.Guard.Truthy() && S.Live.HasGuard {
-			guard = S.Live.Guard
-		}
-		rstate := "na"
-		switch {
-		case v.Cur.KillSet || v.Status == "STOPPING":
-			rstate = "part"
-		case v.Status == "RUNNING" || v.Status == "WAITING":
-			rstate = "on"
-		}
-		rc := t.Lbl.Render("Regular ")
-		if rstate != "na" {
-			rc += dot(rstate) + " "
-		}
-		sp := "?"
-		if spend.Ok() {
-			sp = core.F(spend.Float()/core.LAM, 2)
-		}
-		if short {
-			rc += t.Val.Render(sp) + sep + t.Val.Render(tpsl(tp, tpOK, sl, hold))
-			if guard > 0 {
-				rc += sep + t.Val.Render("+"+core.F((guard-1)*100, 0)+"%")
-			}
-			return rc
-		}
-		rc += t.Val.Render(sp+" SOL") + sep + t.Val.Render("exit "+tpsl(tp, tpOK, sl, hold))
-		if guard > 0 {
-			rc += sep + t.Val.Render("guard +"+core.F((guard-1)*100, 0)+"%")
-		}
-		return rc
-	case 4:
-		var seg []string
-		for _, kl := range [][2]string{{"paper", "Paper"}, {"m2", "M2 gate"}, {"dev", "Dev list"}} {
-			x := it(kl[0])
-			if x == nil {
-				continue
-			}
-			lab := kl[1]
-			if short {
-				lab = strings.Fields(lab)[0]
-			}
-			s := t.Lbl.Render(lab+" ") + dot(x.State)
-			if kl[0] == "dev" && x.State == "on" {
-				s += t.Val.Render(" " + strings.TrimPrefix(x.Short, "dev "))
-			}
-			if kl[0] == "m2" && x.State != "off" && !short && x.Short != "M2 gate" {
-				s += t.Val.Render(" " + strings.TrimPrefix(x.Short, "M2 "))
-			}
-			seg = append(seg, s)
-		}
-		return strings.Join(seg, "   ")
-	case 5:
-		rs := t.Lbl.Render("Routes ")
-		if x := it("routes"); x != nil {
-			rs += t.Val.Render(x.Short)
-		}
-		if x := it("sellfan"); x != nil {
-			lab := "sell fan-out "
-			if short {
-				lab = "fan "
-			}
-			rs += sep + t.Lbl.Render(lab) + dot(x.State)
-		}
-		if x := it("nonce"); x != nil {
-			rs += sep + t.Lbl.Render("nonce ") + dot(x.State)
-			if x.State == "on" {
-				rs += t.Val.Render(" " + strings.TrimPrefix(x.Short, "nonce "))
-			}
-		}
-		if x := it("near"); x != nil && x.State == "on" {
-			lab := "near leaders "
-			if short {
-				lab = "near "
-			}
-			rs += sep + t.Lbl.Render(lab) + t.Val.Render(strings.TrimPrefix(x.Short, "near "))
-		}
-		if x := it("skipcl"); x != nil {
-			rs += sep + t.Lbl.Render("skip ") + t.Val.Render(strings.ReplaceAll(x.Full, "rakurai", "Rakurai"))
-		}
-		return rs
-	}
-	ks := ""
-	if v.HasKillLevel {
-		lab := "Kill switch "
-		if short {
-			lab = "Kill "
-		}
-		ks += t.Lbl.Render(lab) + t.Val.Render(core.F(float64(v.KillLevel)/core.LAM, 3))
-	}
-	if v.Planned.Truthy() {
-		if ks != "" {
-			ks += sep + t.Lbl.Render("planned ")
-		} else {
-			ks += t.Lbl.Render("Planned ")
-		}
-		ks += t.Val.Render(core.HMS(v.Planned.Float()*60, true, false))
-	}
-	if ks != "" {
-		ks += sep + t.Lbl.Render("engine ")
-	} else {
-		ks += t.Lbl.Render("Engine ")
-	}
-	return ks + t.Val.Render(v.Build)
-}
-
-// configCols: how many columns configGrid uses at w with maxRows.
-func (m *Model) configCols(w, maxRows int) int {
-	m.configGrid(w, maxRows)
-	return m.cfgCols
-}
-
-// configGrid lays the cells out in 3, 2 or 1 columns: the most columns that fit within maxRows, each cell in its
-// long form when it fits its column, else the short one (cached until the items, the size or the theme change).
-func (m *Model) configGrid(w int, maxRows int) []string {
-	var kb strings.Builder
-	fmt.Fprintf(&kb, "%d|%d|%v|%v|%s|", w, maxRows, m.dark, m.ascii, m.view.Status)
-	for _, it := range m.view.CfgItems {
-		kb.WriteString(it.State + it.Short + "|")
-	}
-	if m.view.Quiet.HasOnAt {
-		fmt.Fprintf(&kb, "%d", m.view.Quiet.OnAt)
-	}
-	key := kb.String()
-	if c, ok := m.cfgCache[key]; ok {
-		m.cfgCols = c.cols
-		return c.lines
-	}
-	out := m.configGridRaw(w, maxRows)
-	if len(m.cfgCache) > 16 {
-		m.cfgCache = map[string]cfgCached{}
-	}
-	m.cfgCache[key] = cfgCached{out, m.cfgCols}
-	return out
-}
-
-type cfgCached struct {
-	lines []string
-	cols  int
-}
-
-func (m *Model) configGridRaw(w int, maxRows int) []string {
-	m.cfgCols = 0
-	cells := m.cfgCells()
-	orders := map[int][][]int{3: {{0, 1, 2}, {3, 4}, {5, 6}}, 2: {{0, 1, 2, 6}, {3, 4, 5}}, 1: {{0, 1, 2, 3, 4, 5, 6}}}
-	gap := 3
-	for _, nc := range []int{3, 2, 1} {
-		groups := orders[nc]
-		rows := 0
-		for _, g := range groups {
-			rows = max(rows, len(g))
-		}
-		if rows > maxRows && nc > 1 {
-			continue
-		}
-		// each column at its short or its long width: the subset that fits with the most cells in long form
-		shortW := make([]int, nc)
-		longW := make([]int, nc)
-		gain := make([]int, nc)
-		for k, g := range groups {
-			for _, i := range g {
-				shortW[k] = max(shortW[k], ansi.StringWidth(cells[i].short))
-				longW[k] = max(longW[k], ansi.StringWidth(cells[i].long))
-				if cells[i].long != cells[i].short {
-					gain[k]++
-				}
-			}
-		}
-		best, bestScore := -1, -1
-		for mask := 0; mask < 1<<nc; mask++ {
-			total, score := gap*(nc-1), 0
-			for k := 0; k < nc; k++ {
-				if mask&(1<<k) != 0 {
-					total += longW[k]
-					score += gain[k]
-				} else {
-					total += shortW[k]
-				}
-			}
-			if total <= w && score > bestScore {
-				best, bestScore = mask, score
-			}
-		}
-		if best < 0 && nc > 1 {
-			continue
-		}
-		widths := make([]int, nc)
-		total := gap * (nc - 1)
-		for k := 0; k < nc; k++ {
-			widths[k] = shortW[k]
-			if best >= 0 && best&(1<<k) != 0 {
-				widths[k] = longW[k]
-			}
-			total += widths[k]
-		}
-		if spare := w - total; nc > 1 && spare > 0 {
-			for k := 0; k < nc-1; k++ {
-				widths[k] += spare / nc
-			}
-		}
-		m.cfgCols = nc
-		var out []string
-		for r := 0; r < rows && r < maxRows; r++ {
-			var l strings.Builder
-			for k, g := range groups {
-				c := ""
-				if r < len(g) {
-					c = cells[g[r]].long
-					if ansi.StringWidth(c) > widths[k] {
-						c = cells[g[r]].short
-					}
-				}
-				if k < nc-1 {
-					l.WriteString(fitLine(c, widths[k]) + strings.Repeat(" ", gap))
-				} else {
-					l.WriteString(cut(c, max(1, w-ansi.StringWidth(l.String()))))
-				}
-			}
-			out = append(out, l.String())
-		}
-		return out
-	}
-	return nil
-}
-
 // ------------------------------------------------------------------------------------------------- overview
 
 func (m *Model) scrOverview(w, bh int) string {
@@ -1249,23 +877,18 @@ func (m *Model) overviewWide(w, bh int) string {
 	}
 	rest := bh - used
 	// the config: a panel when there is room, else under a rule
+	// the config in blocks (Pre-send / Regular / Routes & sending / Safety & limits / QUIET & paper): a panel when there
+	// is room, else the blocks' titles are the rule
 	if rest >= 24 {
-		cfg := m.configGrid(w-4, 3)
-		if len(cfg) == 3 && m.configCols(w-4, 3) == 1 {
-			cfg = m.configGrid(w-4, 4)
-		}
+		cfg := m.configBlocks(w-4, true)
 		out = append(out, m.panel("CONFIG", "", strings.Join(cfg, "\n"), w, len(cfg)+2))
 		used += len(cfg) + 2
 	} else {
-		cfg := m.configGrid(w-2, 3)
-		if m.configCols(w-2, 3) == 1 {
-			cfg = m.configGrid(w-2, 4)
-		}
-		out = append(out, m.rule("CONFIG", "", w))
+		cfg := m.configBlocks(w-1, false)
 		for _, c := range cfg {
 			out = append(out, " "+c)
 		}
-		used += 1 + len(cfg)
+		used += len(cfg)
 	}
 	rest = bh - used
 	chartH := max(7, min(14, rest*45/100))
@@ -1432,7 +1055,7 @@ func (m *Model) overviewNarrow(w, bh int) string {
 	used := len(out)
 	rest := bh - used
 	if rest >= 14 {
-		out = append(out, m.configGrid(w, 2)...)
+		out = append(out, m.cfgStrip(w, 3)...)
 		used = len(out)
 		rest = bh - used
 	}

@@ -26,6 +26,7 @@ import (
 type Options struct {
 	Interval, LoadDuty                     float64
 	NoColor, ASCII, Notify, NoAnim, Strict bool
+	NoLinks, Mouse                         bool // no OSC 8 hyperlinks; capture the mouse at start (M toggles)
 	Sound, Version                         string
 	BellLog                                string // tests: one line per bell
 	Golden                                 bool   // tests: fixed probe values (system, pid, clock) for golden screens
@@ -121,6 +122,14 @@ type Model struct {
 	uiErr      string
 	screenMode bool
 	cfgCols    int
+	sortCol    int  // Trades: index in sortKeys (o cycles, O flips)
+	sortAsc    bool // false = descending (newest / largest first)
+	mouseOn    bool // mouse capture (tab clicks, wheel); off = the terminal's own selection and link clicks work
+	flash      string
+	flashMsgAt time.Time
+	totKey     string
+	totals     map[int]int64
+	hdrX       []hdrCell
 
 	// animation
 	spring     harmonica.Spring
@@ -166,7 +175,7 @@ type Model struct {
 func New(ctx *core.Ctx, o Options) *Model {
 	m := &Model{ctx: ctx, opt: o, dark: true, ascii: o.ASCII || core.G.ASCII, interval: clampF(o.Interval, 0.5, 5),
 		scope: -1, scroll: map[string]int{}, anim: !o.NoAnim, sound: o.Sound, hl: map[int]rowHL{}, cfgCache: map[string]cfgCached{}, barCache: map[string]string{},
-		keys: newKeyMap(), helpM: help.New(), nowFn: time.Now}
+		keys: newKeyMap(), helpM: help.New(), nowFn: time.Now, mouseOn: o.Mouse}
 	if m.sound == "" {
 		m.sound = "all"
 	}
@@ -638,6 +647,36 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.detail = nil
 	case "u":
 		m.usdFirst = !m.usdFirst
+	case "o": // Trades: the next sort column (each starts descending: newest / largest first)
+		if m.tab == 3 && m.detail == nil {
+			m.sortCol = (m.sortCol + 1) % len(sortKeys)
+			m.sortAsc = false
+			m.tradeSel, m.tradeTop = 0, 0
+		}
+	case "O": // Trades: flip the order
+		if m.tab == 3 && m.detail == nil {
+			m.sortAsc = !m.sortAsc
+			m.tradeSel, m.tradeTop = 0, 0
+		}
+	case "c", "y": // copy the selected trade's mint (OSC 52: the terminal puts it on the clipboard, also over SSH)
+		var tr *core.Trade
+		if m.detail != nil {
+			tr = m.detail
+		} else if m.tab == 3 && len(m.tradeRows) > 0 {
+			tr = m.tradeRows[min(m.tradeSel, len(m.tradeRows)-1)]
+		}
+		if tr != nil && tr.Mint != "" {
+			m.flash, m.flashMsgAt = "copied "+core.Short(tr.Mint, 8)+m.g("…", "~"), m.now()
+			return tea.SetClipboard(tr.Mint)
+		}
+	case "M": // mouse capture on / off (off: select text and click links with the terminal itself)
+		m.mouseOn = !m.mouseOn
+		if m.mouseOn {
+			m.flash = "mouse on (M: off to select text)"
+		} else {
+			m.flash = "mouse off: select text / click links"
+		}
+		m.flashMsgAt = m.now()
 	case "p":
 		m.paused = !m.paused
 		if !m.paused {
@@ -823,6 +862,10 @@ func (m *Model) onClick(mm tea.Mouse) tea.Cmd {
 			}
 		}
 	}
+	if m.tab == 3 && m.detail == nil && m.tradeRowY > 0 && mm.Y == m.tradeRowY-1 {
+		m.clickHeader(mm.X)
+		return nil
+	}
 	if m.tab == 3 && m.detail == nil && m.tradeRowY > 0 && mm.Y >= m.tradeRowY {
 		i := m.tradeTop + (mm.Y - m.tradeRowY)
 		if i >= 0 && i < len(m.tradeRows) {
@@ -848,7 +891,9 @@ func (m *Model) View() tea.View {
 	content := m.safeRender(w, h)
 	v := tea.NewView(content)
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	if m.mouseOn {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	v.WindowTitle = m.windowTitle()
 	// no native progress bar (OSC 9;4): older iTerm2 builds show OSC 9 as a desktop notification
 	return v
@@ -901,10 +946,10 @@ func (m *Model) render(w, h int) string {
 	hh := lines(head)
 	tabs := m.tabBar(w)
 	m.tabY = hh
-	foot := m.footer(w)
-	bh := h - hh - 1 - lines(foot)
+	bh := h - hh - 1 - 2 // the footer: the alerts strip and the help bar
 	m.bodyY = hh + 1
 	body := m.body(w, bh)
+	foot := m.footer(w) // after the body: its scroll hint ("2/59") is this frame's
 	frame := head + "\n" + tabs + "\n" + body + "\n" + foot
 	if m.showHelp {
 		frame = m.overlayHelp(frame, w, h)
@@ -938,8 +983,8 @@ func (m *Model) bodyKey(w, bh int) string {
 		det = m.detail.ID
 	}
 	M := m.ctx.Src.Model
-	return fmt.Sprintf("%d|%d|%d|%d|%s|%d|%d|%d|%d|%d|%d|%s|%v|%v|%d|%v|%v|%d|%v|%d|%v|%v|%g|%s|%d|%d|%d|%d|%d",
-		w, bh, M.Version, M.TradeVer, v.Status, tick, arm, m.tab, det, m.tradeSel, m.tradeTop, m.query, m.logAll, m.logWrap, m.logOff,
+	return fmt.Sprintf("%d|%v|%v|%d|%d|%d|%d|%s|%d|%d|%d|%d|%d|%d|%s|%v|%v|%d|%v|%v|%d|%v|%d|%v|%v|%g|%s|%d|%d|%d|%d|%d",
+		m.sortCol, m.sortAsc, m.opt.NoLinks, w, bh, M.Version, M.TradeVer, v.Status, tick, arm, m.tab, det, m.tradeSel, m.tradeTop, m.query, m.logAll, m.logWrap, m.logOff,
 		m.usdFirst, m.todayOn, m.todayCard.Net+int64(m.todayCard.Loading)*7919+serKey(m.pnl()), m.dark, m.scope, m.ascii, m.anim, v.Price,
 		fmt.Sprint(m.scroll[m.scrollKeyName()]), m.tfilter, v.PSOpenNow, len(m.hl), m.todayCard.Buys, int64(v.PriceAge/60))
 }
@@ -1193,6 +1238,9 @@ func (m *Model) footer(w int) string {
 	}
 	rate := core.G0(m.interval) + "s"
 	ri := ""
+	if m.flash != "" && m.now().Sub(m.flashMsgAt) < 4*time.Second {
+		ri += t.Good.Render(m.flash) + "  "
+	}
 	if m.moreHint != "" {
 		ri += t.Acc.Render(m.moreHint) + "  "
 	}

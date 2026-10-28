@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
-	"time"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -20,20 +19,32 @@ type tcol struct {
 }
 
 // tradeCols: the columns that fit w. Latency (ms): d→land = dump to landing, s→seen = send to seen, blk = the block
-// it landed in (pre-send: slots after the send; regular: after the dump); phones keep the money (Enter: details).
-func tradeCols(w int) []tcol {
+// it landed in (pre-send: slots after the send; regular: after the dump); total = the run's P&L after this trade (the
+// running total, in the primary unit); phones keep the money (Enter: details). usd: size and total in USD (u).
+func tradeCols(w int, usd bool) []tcol {
+	sz, tot := 5, 10
+	if usd {
+		sz = 6
+	}
 	switch {
 	case w >= 150:
-		return []tcol{{"time", 11, true}, {"type", 4, false}, {"mint", 8, false}, {"size", 5, true}, {"P&L SOL", 10, true},
-			{"USD", 9, true}, {"%", 7, true}, {"exit", 5, false}, {"held", 5, true}, {"d→land", 6, true}, {"s→seen", 6, true},
-			{"blk", 3, true}, {"after", 5, true}, {"whale", 6, true}, {"client", 10, false}, {"path", 0, false}}
+		return []tcol{{"time", 11, true}, {"type", 4, false}, {"mint", 8, false}, {"size", sz, true}, {"P&L SOL", 10, true},
+			{"USD", 9, true}, {"%", 7, true}, {"total", tot, true}, {"exit", 5, false}, {"held", 5, true}, {"d→land", 6, true},
+			{"s→seen", 6, true}, {"blk", 3, true}, {"after", 5, true}, {"whale", 6, true}, {"client", 10, false}, {"path", 0, false}}
+	case w >= 125:
+		return []tcol{{"time", 11, true}, {"type", 4, false}, {"mint", 8, false}, {"size", sz, true}, {"P&L SOL", 10, true},
+			{"USD", 9, true}, {"%", 7, true}, {"total", tot, true}, {"exit", 5, false}, {"held", 5, true}, {"d→land", 6, true},
+			{"s→seen", 6, true}, {"blk", 3, true}, {"client", 10, false}, {"path", 0, false}}
 	case w >= 110:
-		return []tcol{{"time", 11, true}, {"type", 4, false}, {"mint", 8, false}, {"size", 5, true}, {"P&L SOL", 10, true},
-			{"USD", 9, true}, {"%", 7, true}, {"exit", 5, false}, {"held", 5, true}, {"d→land", 6, true}, {"s→seen", 6, true},
-			{"blk", 3, true}, {"client", 10, false}, {"path", 0, false}}
+		return []tcol{{"time", 11, true}, {"type", 4, false}, {"mint", 8, false}, {"size", sz, true}, {"P&L SOL", 10, true},
+			{"USD", 9, true}, {"%", 7, true}, {"total", tot, true}, {"exit", 5, false}, {"d→land", 6, true}, {"blk", 3, true},
+			{"client", 10, false}, {"path", 0, false}}
+	case w >= 90:
+		return []tcol{{"time", 11, true}, {"typ", 3, false}, {"mint", 6, false}, {"P&L SOL", 10, true}, {"USD", 8, true},
+			{"%", 7, true}, {"total", 9, true}, {"exit", 5, false}, {"d→land", 6, true}, {"blk", 3, true}, {"client", 0, false}}
 	case w >= 70:
 		return []tcol{{"time", 11, true}, {"typ", 3, false}, {"mint", 6, false}, {"P&L SOL", 10, true}, {"USD", 8, true},
-			{"%", 7, true}, {"exit", 5, false}, {"d→land", 6, true}, {"blk", 3, true}, {"client", 0, false}}
+			{"total", 9, true}, {"exit", 5, false}, {"d→land", 6, true}, {"client", 0, false}}
 	}
 	return []tcol{{"time", 11, true}, {"ty", 2, false}, {"mint", 6, false}, {"P&L SOL", 10, true}, {"USD", 7, true}, {"exit", 4, false}}
 }
@@ -124,6 +135,17 @@ func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.St
 			s = core.Short(tr.Mint, c.w)
 		case "size":
 			s, st = core.F(float64(spend)/core.LAM, 2), t.Lbl
+			if m.usdFirst && v.Price != 0 {
+				s = core.UsdAmt(spend, true, v.Price, true)
+			}
+		case "total": // the run's P&L after this trade (trades in time order), in the primary unit
+			if x, ok := m.runTotals()[tr.ID]; ok {
+				st = t.Money(x, true, false)
+				s = core.Sol(x, true, 4, true)
+				if m.usdFirst && v.Price != 0 {
+					s = core.Usd(x, true, v.Price, true, 2)
+				}
+			}
 		case "P&L SOL":
 			s, st = pS, ps
 		case "USD":
@@ -197,7 +219,7 @@ func (m *Model) hlBg(tr *core.Trade) (color.Color, float64) {
 // tradeTable renders rows with the Lip Gloss table: header, zebra rows, the selection, the fresh-trade highlight.
 func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 	t := m.th
-	cols := tradeCols(w)
+	cols := tradeCols(w, m.usdFirst && m.view.Price != 0)
 	if sel >= 0 {
 		cols = append([]tcol{{"", 1, false}}, cols...)
 	}
@@ -220,12 +242,26 @@ func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 		}
 		data[i], styles[i] = cells, sts
 	}
-	headers := make([]string, len(cols))
-	for j, c := range cols {
-		headers[j] = c.title
+	if sel >= 0 { // the header cells' x ranges (a click on a header sorts by it)
+		m.hdrX = m.hdrX[:0]
+		x := 0
+		for _, c := range cols {
+			cw := c.w + 1
+			if c.title == "" {
+				cw = 1
+			}
+			m.hdrX = append(m.hdrX, hdrCell{x, x + cw, sortKeyOf(c.title)})
+			x += cw
+		}
 	}
-	now := m.now()
-	_ = now
+	headers := make([]string, len(cols))
+	sortCol := -1
+	for j, c := range cols {
+		headers[j] = m.headerText(c, sel >= 0)
+		if sel >= 0 && sortKeyOf(c.title) == sortKeys[m.sortCol] && c.title != "" {
+			sortCol = j
+		}
+	}
 	tb := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderTop(false).BorderBottom(false).BorderLeft(false).BorderRight(false).BorderColumn(false).
@@ -243,10 +279,16 @@ func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 				base = base.Align(lipgloss.Right)
 			}
 			if row == table.HeaderRow {
+				if col == sortCol {
+					return base.Inherit(t.Acc).Bold(true)
+				}
 				return base.Inherit(t.Lbl).Bold(false)
 			}
 			st := styles[row][col]
 			s := base.Inherit(st)
+			if c.title == "mint" && m.linksOn() { // OSC 8: the mint opens GMGN (Ctrl / Cmd-click in Ghostty, iTerm2, kitty, WezTerm)
+				s = s.Hyperlink(gmgnURL(rows[row].Mint))
+			}
 			if !t.Mono && row%2 == 1 {
 				s = s.Background(t.Zebra)
 			}
@@ -348,7 +390,7 @@ func (m *Model) filteredTrades() []*core.Trade {
 		}
 		tl = out
 	}
-	return tl
+	return m.sortTrades(tl)
 }
 
 // scrTrades: every trade, newest first, a scrollable table with the selection; f filters, / searches a mint.
@@ -377,9 +419,17 @@ func (m *Model) scrTrades(w, bh int) string {
 	if m.query != "" && !m.searching {
 		left += t.Lbl.Render("  mint ") + t.Val.Render(m.query+"…") + t.Dim.Render("  esc clears")
 	}
+	if !(sortKeys[m.sortCol] == "time" && !m.sortAsc) {
+		left += t.Lbl.Render("  sort ") + t.Acc.Render(m.sortLabel())
+	}
 	right := t.Lbl.Render(fmt.Sprintf("%dW  ", wins)) + t.Money(tot, true, false).Render(core.SolS(tot))
-	if w >= 70 {
-		right += t.Dim.Render("   f filter  / find  enter details")
+	if m.usdFirst && m.view.Price != 0 {
+		right = t.Lbl.Render(fmt.Sprintf("%dW  ", wins)) + t.Money(tot, true, false).Render(core.Usd(tot, true, m.view.Price, true, 2))
+	}
+	if w >= 100 {
+		right += t.Dim.Render("   o sort  O order  f filter  / find  c copy  enter details")
+	} else if w >= 70 {
+		right += t.Dim.Render("   o sort  f filter  / find  c copy")
 	}
 	out := []string{lr(left, right, w)}
 	if m.searching {
@@ -414,5 +464,3 @@ func (m *Model) scrTrades(w, bh int) string {
 	}
 	return strings.Join(out, "\n")
 }
-
-var _ = time.Second

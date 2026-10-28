@@ -1,0 +1,16 @@
+#!/bin/sh
+# dipview: REWIND's run explorer (every run in /root/prod/runs; Enter opens one in dipmon, q there comes back), at the
+# lowest CPU and I/O priority so it never competes with the live engine. The same binary as dipmon (dipmon-go --view).
+#   install: sudo install -m 755 dipview /usr/local/bin/dipview     (needs /usr/local/bin/dipmon-go)
+#   use:     sudo dipview | sudo dipview --dir DIR | sudo dipview --list      (dipmon --help for every option)
+BIN=${DIPMON_BIN:-/usr/local/bin/dipmon-go}
+if [ ! -x "$BIN" ]; then
+  here=$(dirname "$(readlink -f "$0")")
+  for c in "$here/dipmon-go" /root/prod/dipmon-go; do [ -x "$c" ] && { BIN=$c; break; }; done
+fi
+[ -x "$BIN" ] || { echo "dipview: $BIN not found (install dipmon-go as /usr/local/bin/dipmon-go or set DIPMON_BIN)" >&2; exit 1; }
+# sudo can drop TERM
+case "${TERM:-}" in ""|dumb|unknown) TERM=xterm-256color; export TERM;; esac
+IO=""
+if command -v ionice >/dev/null 2>&1 && ionice -c3 true >/dev/null 2>&1; then IO="ionice -c3"; fi
+exec nice -n 19 $IO "$BIN" --view "$@"

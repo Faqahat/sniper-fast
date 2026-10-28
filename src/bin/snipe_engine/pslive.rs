@@ -69,9 +69,10 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 
 /// every --presend-live-* flag (a stray one without --presend-live is refused)
-const FLAGS: [&str; 15] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
+const FLAGS: [&str; 16] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
     "--presend-live-cu-limit", "--presend-live-cu-price-micro", "--presend-live-tip-lamports", "--presend-live-routes", "--presend-live-max-per-sec",
-    "--presend-live-path-max-per-sec", "--presend-live-max-fills", "--presend-live-fee-budget-sol", "--presend-live-create-slot", "--presend-live-one-position"];
+    "--presend-live-path-max-per-sec", "--presend-live-max-fills", "--presend-live-fee-budget-sol", "--presend-live-create-slot", "--presend-live-one-position",
+    "--presend-live-exit-ms"];
 
 /// dip20 QUIET: its flags (each needs --presend-live; the history / threshold / warm-up / fbots / preload ones need
 /// --presend-live-quiet-skip on)
@@ -142,6 +143,9 @@ pub struct Cfg {
     pub one_position: bool,
     /// the shadow's T2 / exit parameters (--presend-*): the same rules
     pub whale_pct: f64, pub window_slots: u64, pub live_ms: f64, pub exit_slots: u64, pub tp: f64, pub sl: f64,
+    /// dip22 (--presend-live-exit-ms N; 0 = off, the default): sell N ms after our fill is seen, before the slot limit. The "sell
+    /// earlier" exit verified on live fills (ops/strategies/haqq_dissect/verify/REPORT.md: ~200 ms after the fill beat the 2-slot exit)
+    pub exit_ms: u64,
     /// dip20 QUIET (default: all off)
     pub quiet: QuietCfg,
 }
@@ -187,6 +191,7 @@ impl Cfg {
             create_slot: onoff("--presend-live-create-slot", false)?,
             one_position: onoff("--presend-live-one-position", true)?,
             whale_pct: sh.whale_pct, window_slots: sh.window_slots, live_ms: sh.live_ms, exit_slots: sh.exit_slots, tp: sh.tp, sl: sh.sl,
+            exit_ms: arg_u64("--presend-live-exit-ms", 0),
             quiet: Cfg::quiet_from(&has, &arg, &arg_f64, &onoff)?,
         };
         c.check(live, cap)?;
@@ -238,6 +243,7 @@ impl Cfg {
         if !(1..=200).contains(&self.max_per_sec) || !(1..=200).contains(&self.path_max_per_sec) { bail!("--presend-live-max-per-sec / --presend-live-path-max-per-sec must be 1..200"); }
         if !(1..=1000).contains(&self.max_fills) { bail!("--presend-live-max-fills must be 1..1000"); }
         if self.fee_budget == 0 || self.fee_budget > 1_000_000_000 { bail!("--presend-live-fee-budget-sol must be in (0, 1]"); }
+        if self.exit_ms != 0 && !(50..=2_000).contains(&self.exit_ms) { bail!("--presend-live-exit-ms must be 0 (off) or 50..2000"); }
         Ok(())
     }
 
@@ -248,7 +254,7 @@ impl Cfg {
         let mut j = serde_json::json!({"dry": self.dry, "spend": self.spend, "k": self.k, "drop": self.drop, "deadline_slots": self.deadline_slots, "cu_limit": self.cu_limit,
             "cu_price": self.cu_price, "tip": self.tip, "routes": self.routes, "max_per_sec": self.max_per_sec, "path_max_per_sec": self.path_max_per_sec,
             "max_fills": self.max_fills, "fee_budget": self.fee_budget, "create_slot": self.create_slot, "one_position": self.one_position,
-            "whale_pct": self.whale_pct, "window_slots": self.window_slots, "live_ms": self.live_ms, "exit_slots": self.exit_slots, "tp": self.tp, "sl": self.sl,
+            "whale_pct": self.whale_pct, "window_slots": self.window_slots, "live_ms": self.live_ms, "exit_slots": self.exit_slots, "exit_ms": self.exit_ms, "tp": self.tp, "sl": self.sl,
             "fail_fee": self.fail_fee(), "margin_ms": MARGIN_MS, "whale_sell_ms": WHALE_SELL_MS});
         // dip20: only when a QUIET flag is on (flags off: dip19's record)
         if self.quiet.on() { j["quiet"] = self.quiet.json(); }
@@ -878,6 +884,15 @@ const CLOSE_CU: u32 = 20_000;
 /// its last deadline, incl. one built as its window was disarmed) for 2 slots, no window armed on it, no position open on it
 pub fn close_due(slot_now: u64, quiet: u64, armed: bool, pos_open: bool) -> bool { !armed && !pos_open && slot_now > quiet + 2 }
 
+/// dip22: a position's time exit (pure; unit-tested). `held_ms`: since our fill was seen. --presend-live-exit-ms N > 0 sells first,
+/// N ms after the fill ("time-ms"); then the slot limit (entry slot + exit_slots) and the wall-clock backstop (the feed stalled), as before
+pub fn time_exit_due(slot_now: u64, land_slot: u64, exit_slots: u64, held_ms: u64, exit_ms: u64) -> Option<&'static str> {
+    if exit_ms > 0 && held_ms >= exit_ms { return Some("time-ms"); }
+    if slot_now >= land_slot + exit_slots { return Some("time-limit"); }
+    if held_ms > exit_slots * 400 + 3_000 { return Some("time-limit-wall"); }
+    None
+}
+
 /// dip19 (fix 3): a position's realized P&L from its transactions: every buy's payer delta (its spend, fees, tips and the ATA
 /// rent), a buy whose tx is not found (or not known: a balance a read found) at minus its cost estimate, plus every sell's payer
 /// delta (a sell not found: 0, as dip18). `buys` = (tx answer, cost), `sells` = tx answers. -> (pnl, buys found, sells found)
@@ -994,10 +1009,11 @@ impl PsLive {
         let sc = SCfg { cfg: cfg.clone(), user, key: (*key).clone(), guard, routes, handle: tokio::runtime::Handle::current() };
         let fee1 = cfg.fail_fee();
         let line = format!("DIP PRESEND LIVE{} | T2 whale >= {}% -> window {} slots from +{} ms (create-slot triggers {}) | {} attempts per slot ({:.0} ms apart), {:.3} SOL, limit = latest price x {:.2}, \
-            deadline slot + {} | CU {} x {} uL (a failed attempt {} lamports) | routes {} | caps: {} fills, fees {:.4} SOL, {} attempts/s ({} per path) | one position {} | exit {} slots / TP +{:.0}% / SL -{:.0}%",
+            deadline slot + {} | CU {} x {} uL (a failed attempt {} lamports) | routes {} | caps: {} fills, fees {:.4} SOL, {} attempts/s ({} per path) | one position {} | exit {} slots{} / TP +{:.0}% / SL -{:.0}%",
             if cfg.dry { " DRY (builds + signs + logs; NEVER sends)" } else { " (REAL attempts)" }, cfg.whale_pct, cfg.window_slots, cfg.live_ms, if cfg.create_slot { "on" } else { "skipped" },
             cfg.k, slot_ns as f64 / 1e6 / cfg.k as f64, cfg.spend as f64 / 1e9, 1.0 - cfg.drop, cfg.deadline_slots, cfg.cu_limit, cfg.cu_price, fee1, desc.join(";"), cfg.max_fills,
-            cfg.fee_budget as f64 / 1e9, cfg.max_per_sec, cfg.path_max_per_sec, if cfg.one_position { "on" } else { "off" }, cfg.exit_slots, cfg.tp * 100.0, cfg.sl * 100.0);
+            cfg.fee_budget as f64 / 1e9, cfg.max_per_sec, cfg.path_max_per_sec, if cfg.one_position { "on" } else { "off" }, cfg.exit_slots,
+            if cfg.exit_ms > 0 { format!(" or {} ms after the fill (dip22, first)", cfg.exit_ms) } else { String::new() }, cfg.tp * 100.0, cfg.sl * 100.0);
         eprintln!("{line}");
         let thread = {
             let (sh, out) = (sh.clone(), out.clone());
@@ -1785,8 +1801,7 @@ impl PsLive {
         if self.qt.is_some() { self.quiet_tick(slot_now); }
         // positions: time exit at entry slot + exit_slots; the wall-clock backstop (the feed stalled)
         let due: Vec<(Pk, &'static str)> = self.pos.values().filter(|p| p.exit.is_none()).filter_map(|p| {
-            if slot_now >= p.land.0 + self.cfg.exit_slots { Some((p.mint, "time-limit")) }
-            else if p.opened.elapsed() > Duration::from_millis(self.cfg.exit_slots * 400 + 3_000) { Some((p.mint, "time-limit-wall")) } else { None }
+            time_exit_due(slot_now, p.land.0, self.cfg.exit_slots, p.opened.elapsed().as_millis() as u64, self.cfg.exit_ms).map(|w| (p.mint, w))
         }).collect();
         for (m, why) in due { self.exit(&m, why, slot_now, f64::NAN, arbx::feeds::clock::now_ns()); }
         // attempts not seen by their deadline + 3 slots (or 6 s on the wall clock: the feed may be down)
@@ -2354,6 +2369,11 @@ mod dip20_tests;
 #[path = "dip21_tests.rs"]
 mod dip21_tests;
 
+// dip22 (10-28 PKT): the pre-send "sell earlier" exit (--presend-live-exit-ms; off by default = dip21)
+#[cfg(test)]
+#[path = "dip22_tests.rs"]
+mod dip22_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2410,7 +2430,7 @@ mod tests {
     fn presend_live_flags_and_refusals() {
         let all = with(&["--presend-live-dry", "--presend-live-size-sol", "0.2", "--presend-live-k", "4", "--presend-live-drop", "0.12", "--presend-live-deadline-slots", "1",
             "--presend-live-cu-limit", "90000", "--presend-live-cu-price-micro", "1000", "--presend-live-tip-lamports", "200000", "--presend-live-max-per-sec", "20",
-            "--presend-live-path-max-per-sec", "10", "--presend-live-create-slot", "off", "--presend-live-one-position", "on"]);
+            "--presend-live-path-max-per-sec", "10", "--presend-live-create-slot", "off", "--presend-live-one-position", "on", "--presend-live-exit-ms", "200"]);
         assert!(check_flags(&all).is_ok(), "{:?}", check_flags(&all));
         for f in FLAGS { assert!(all.iter().any(|a| a == f), "{f} in the test line"); }
         let wrong = ["-", "-presend-live-kk"].concat();
@@ -2666,7 +2686,7 @@ mod tests {
                 assert_eq!(p.stopped, Some("max_fills"));
                     // their exits: at entry slot + 2 or on a +10% / -20% value (no send path in the test: "sell by hand")
                 assert_eq!(ev("presend_live_exit"), 2);
-                assert!(r.iter().filter(|x| x["ev"] == "presend_live_exit").all(|x| ["time-limit", "take-profit", "stop-loss"].contains(&x["why"].as_str().unwrap())
+                assert!(r.iter().filter(|x| x["ev"] == "presend_live_exit").all(|x| ["time-limit", "time-ms", "take-profit", "stop-loss"].contains(&x["why"].as_str().unwrap())
                     && (x["why"] != "time-limit" || x["slots_held"].as_i64().unwrap() >= 2)));
             } else {
                 assert_eq!(p.st.fills, 0);

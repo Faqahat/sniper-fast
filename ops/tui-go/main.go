@@ -26,7 +26,7 @@ import (
 	"dipmon/internal/ui"
 )
 
-const version = "3.0"
+const version = "3.1"
 
 const defaultDir = "/root/prod/runs"
 
@@ -210,6 +210,8 @@ func main() {
 	sound := fs.String("sound", "all", "terminal bell on closed trades: all | wins | big (|P&L| >= 0.03 SOL) | off")
 	notify := fs.Bool("notify", false, "also send a desktop notification (OSC 9) for big trades")
 	noAnim := fs.Bool("no-anim", false, "no animations (a toggles them)")
+	mouse := fs.Bool("mouse", false, "capture the mouse at start (tab clicks, wheel); default off so the terminal selects text and opens links (M toggles)")
+	noLinks := fs.Bool("no-links", false, "no OSC 8 hyperlinks (mints -> GMGN, signatures -> Solscan)")
 	screen := fs.String("screen", "", "render the UI once at WxH as plain text to stdout, then exit (--tab, --page)")
 	tab := fs.Int("tab", 1, "with --screen: the tab 1-7")
 	page := fs.String("page", "", "with --screen: help | detail | splash | today")
@@ -227,7 +229,13 @@ func main() {
 	cpuprof := fs.String("cpuprofile", "", "")
 	bellLog := fs.String("bell-log", "", "")
 	showVersion := fs.Bool("version", false, "print the version")
+	view := fs.Bool("view", strings.HasPrefix(filepath.Base(os.Args[0]), "dipview"), "dipview: the run explorer (every run in --dir; enter opens one in dipmon)")
+	listOnly := fs.Bool("list", false, "with --view: print the runs and their numbers as text, then exit")
 	_ = fs.Parse(os.Args[1:])
+	opts0 := func() ui.Options {
+		return ui.Options{Interval: *interval, LoadDuty: *loadDuty, NoColor: *noColor, ASCII: *ascii, Sound: *sound, Notify: *notify,
+			NoAnim: *noAnim, Strict: *strict, Mouse: *mouse, NoLinks: *noLinks, Version: version, Golden: *golden, BellLog: *bellLog}
+	}
 	if *showVersion {
 		fmt.Println("dipmon " + version)
 		return
@@ -248,44 +256,20 @@ func main() {
 	}
 	core.SetASCII(*ascii)
 
+	if *view {
+		os.Exit(runDipview(*dir, opts0(), usd, *noUSD, *listOnly, *screen, *screensColor, nowF))
+	}
 	path := findRun(*file, *dir, *region, run)
-	eng := core.NewEngine(path, true)
-	eng.Scan(true)
-	var fee int64
-	if eng.Alive() {
-		e := eng.Snapshot()
-		a, e1 := strconv.ParseInt(e.Flags["--cu-limit"], 10, 64)
-		b, e2 := strconv.ParseInt(e.Flags["--cu-price-micro"], 10, 64)
-		if e1 == nil && e2 == nil {
-			fee = 5_000 + a*b/1_000_000
-		}
-	}
-	src := core.NewSource(path, *logp, fee, 3000)
-	reg := strings.ToLower(src.Region)
-	bpath := *budget
-	if bpath == "" {
-		abs, _ := filepath.Abs(path)
-		name := "dip_budget.json"
-		if reg == "ams" {
-			name = "dip_budget_ams.json"
-		}
-		bpath = core.PyJoin(filepath.Dir(abs), "..", name)
-	}
-	if _, err := os.Stat(bpath); err != nil {
-		bpath = ""
-	}
 	price := core.NewPrice(usd.v, !*noUSD)
-	abs, _ := filepath.Abs(path)
-	sysi := core.NewSysInfo(filepath.Dir(abs), runtime.NumCPU())
-	ctx := &core.Ctx{Src: src, Engine: eng, Price: price, Sys: sysi, BudgetPath: bpath, AssumeRunning: *assume}
+	ctx := buildCtx(path, *logp, *budget, price, *assume)
+	src, eng, sysi := ctx.Src, ctx.Engine, ctx.Sys
 	if nowF.set {
 		ctx.FixedNow = nowF.v
 	}
 	if !src.Exists() {
 		die("%s not found", src.JSONL)
 	}
-	opts := ui.Options{Interval: *interval, LoadDuty: *loadDuty, NoColor: *noColor, ASCII: *ascii, Sound: *sound, Notify: *notify,
-		NoAnim: *noAnim, Strict: *strict, Version: version, Golden: *golden, BellLog: *bellLog}
+	opts := opts0()
 
 	if *snapshot || *screens != "" || *screen != "" {
 		duty := *loadDuty
@@ -358,4 +342,80 @@ func main() {
 		pprof.StopCPUProfile()
 	}
 	os.Exit(code)
+}
+
+// buildCtx: the context for one run (its source, the engine probe, the budget file, the system probe).
+func buildCtx(path, logp, budget string, price *core.Price, assume bool) *core.Ctx {
+	eng := core.NewEngine(path, true)
+	eng.Scan(true)
+	var fee int64
+	if eng.Alive() {
+		e := eng.Snapshot()
+		a, e1 := strconv.ParseInt(e.Flags["--cu-limit"], 10, 64)
+		b, e2 := strconv.ParseInt(e.Flags["--cu-price-micro"], 10, 64)
+		if e1 == nil && e2 == nil {
+			fee = 5_000 + a*b/1_000_000
+		}
+	}
+	src := core.NewSource(path, logp, fee, 3000)
+	reg := strings.ToLower(src.Region)
+	bpath := budget
+	if bpath == "" {
+		abs, _ := filepath.Abs(path)
+		name := "dip_budget.json"
+		if reg == "ams" {
+			name = "dip_budget_ams.json"
+		}
+		bpath = core.PyJoin(filepath.Dir(abs), "..", name)
+	}
+	if _, err := os.Stat(bpath); err != nil {
+		bpath = ""
+	}
+	abs, _ := filepath.Abs(path)
+	sysi := core.NewSysInfo(filepath.Dir(abs), runtime.NumCPU())
+	return &core.Ctx{Src: src, Engine: eng, Price: price, Sys: sysi, BudgetPath: bpath, AssumeRunning: assume}
+}
+
+// runDipview: the run explorer; Enter opens a run in dipmon, quitting dipmon comes back.
+func runDipview(dir string, o ui.Options, usd floatFlag, noUSD, list bool, screen string, ansiOut bool, nowF floatFlag) int {
+	if f, err := os.Open(dir); err != nil {
+		if os.IsPermission(err) {
+			die("cannot read %s (the run files are root-only: sudo dipview)", dir)
+		}
+		die("no %s here; pass --dir DIR", dir)
+	} else {
+		f.Close()
+	}
+	price := core.NewPrice(usd.v, !noUSD)
+	e := ui.NewExplorer(dir, o, price)
+	if nowF.set {
+		e.Fixed = nowF.v
+	}
+	e.Duty = o.LoadDuty // the background loads yield like dipmon's initial load (--load-duty 0: full speed)
+	if list || screen != "" {
+		e.Scan()
+		e.ComputeAll()
+		if list {
+			fmt.Print(e.ListText())
+			return 0
+		}
+		w, h, ok := parseSize(screen)
+		if !ok {
+			die("bad --screen %q (WxH)", screen)
+		}
+		fmt.Print(ui.ExplorerScreen(e, w, h, ansiOut))
+		return 0
+	}
+	price.Start()
+	for {
+		path := ui.Explore(e)
+		if path == "" {
+			return 0
+		}
+		ctx := buildCtx(path, "", "", price, false)
+		if !ctx.Src.Exists() {
+			continue
+		}
+		ui.Run(ctx, o)
+	}
 }

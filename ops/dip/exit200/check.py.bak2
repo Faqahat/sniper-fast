@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""FRA r28 (dip22, --presend-live-exit-ms 200): per-trade test of the 200 ms exit vs the OLD exit (time-limit at the end of
+slot fill+2, TP +10% / SL -20% checked on every trade before that), on the same tokens, priced on the real chain tape.
+Data: the run's records (presend_live_fill / _sell_land / _realized) and the mint's raw txs from FRA's live recorder chunks.
+Counterfactual pool: after our real sell, our tokens are added back (vsol += our sell's SOL, vtok -= our tokens), so later trades
+are valued as if we still held. cf proceeds = actual proceeds * model(cf state) / model(our real sell state) (fees cancel).
+diff = cf - actual: > 0 means the OLD exit would have made more (200 ms worse). Read-only."""
+import json, subprocess, sys, os, random
+sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+import decode as D
+RUN = sys.argv[1] if len(sys.argv) > 1 else "28"
+OUT = f"/home/moiz/sniper/ops/dip/exit200/r{RUN}"
+os.makedirs(OUT, exist_ok=True)
+ssh = ["ssh", "-p", "1996", "-o", "ConnectTimeout=10", "it@84.32.100.36"]
+recs = subprocess.run(ssh + [f"sudo grep -E '\"ev\":\"presend_live_(fill|sell_land|realized|exit)\"' /root/prod/runs/dip_r{RUN}.jsonl"], capture_output=True, text=True).stdout.splitlines()
+fills, sells, real, exits = {}, {}, {}, {}
+for l in recs:
+    d = json.loads(l); k = (d["mint"], d.get("pid", d.get("w")))
+    if d["ev"] == "presend_live_fill" and not d.get("after_exit"): fills.setdefault(d["mint"], []).append(d)
+    elif d["ev"] == "presend_live_sell_land": sells.setdefault(d["mint"], []).append(d)
+    elif d["ev"] == "presend_live_realized": real.setdefault(d["mint"], []).append(d)
+    elif d["ev"] == "presend_live_exit": exits.setdefault(d["mint"], []).append(d)
+mints = sorted(m for m in fills if m in sells)
+for dct in (fills, sells, real, exits):
+    for v in dct.values(): v.sort(key=lambda d: (d.get("slot", 0), d.get("idx", 0), d.get("t", 0)))
+if not mints: print("no closed trades yet"); sys.exit()
+open(f"{OUT}/mints.txt", "w").write("\n".join(mints) + "\n")
+subprocess.run(["scp", "-q", "-P", "1996", f"{OUT}/mints.txt", "it@84.32.100.36:/tmp/exit200_mints.txt"])
+t0 = min(f["t"] for v in fills.values() for f in v) // 10**9 - 400
+cmd = (f"R=/root/sniper-collect/$(sudo cat /root/sniper-collect/current_run)/txs; for f in $(sudo ls $R); do t=${{f#txs_}}; t=${{t%.jsonl.gz}}; "
+       f"[ \"$t\" -ge {t0} ] 2>/dev/null && sudo sh -c \"zcat $R/$f 2>/dev/null\" | grep -F -f /tmp/exit200_mints.txt; done")
+lines = subprocess.run(ssh + [cmd], capture_output=True, text=True).stdout.splitlines()
+tape = {}
+for line in lines:
+    try: d = json.loads(line)
+    except Exception: continue
+    if d.get("err") is not None: continue
+    for b in D.chunks_of(d.get("ev")):
+        if b[:8] != D.DISC: continue
+        p = D.parse_trade(b)
+        if p and p[0] in fills: tape.setdefault(p[0], {})[(d["s"], d["i"], p[1], p[2])] = dict(s=d["s"], i=d["i"], sig=d["sig"], sol=p[1], tok=p[2], buy=p[3], vsol=p[5], vtok=p[6])
+rows = []
+for m, k in [(m, k) for m in mints for k in range(min(len(fills[m]), len(sells[m])))]:
+    f = fills[m][k]; s = sells[m][k]
+    tr = sorted(tape.get(m, {}).values(), key=lambda x: (x["s"], x["i"]))
+    if not tr: continue
+    T = f["tokens"]; cost = f["sol_in"]
+    mine = [x for x in tr if x["s"] == s["slot"] and x["i"] == s["idx"]]
+    if not mine: continue
+    ms = mine[0]; pre = [x for x in tr if (x["s"], x["i"]) < (ms["s"], ms["i"])]
+    if not pre: continue
+    st0 = pre[-1]; val = lambda vs, vt: vs * T / (vt + T)
+    v_act = val(st0["vsol"], st0["vtok"])
+    cf = None; why = "time"; last = None
+    for x in tr:
+        if (x["s"], x["i"]) <= (f["slot"], f["idx"]): continue
+        if x is ms: continue
+        vs, vt = x["vsol"], x["vtok"]
+        if (x["s"], x["i"]) > (ms["s"], ms["i"]): vs, vt = vs + ms["sol"], vt - T     # our tokens back in the pool
+        if x["s"] > f["slot"] + 2: break
+        v = val(vs, vt); last = v
+        if v >= 1.10 * cost: cf = v; why = "TP"; break
+        if v <= 0.80 * cost: cf = v; why = "SL"; break
+    if cf is None:
+        cf = last if last is not None else v_act
+    sold = s["sol"]; cf_sold = sold * cf / v_act
+    ex_why = (exits.get(m, [{}] * (k + 1))[k] if len(exits.get(m, [])) > k else {}).get("why", "")
+    if ex_why != "time-ms": cf_sold = sold; why = "same (" + ex_why + ")"   # TP / SL / slot limit fired first: the old config did the same
+    rows.append(dict(mint=m, fill_slot=f["slot"], sell_slot=s["slot"], held=s["slot"] - f["slot"], actual=(sold - cost) / 1e9, old=(cf_sold - cost) / 1e9, diff=(cf_sold - sold) / 1e9, why=why,
+                     realized=(real[m][k].get("pnl", 0) if len(real.get(m, [])) > k else 0) / 1e9, k=k))
+json.dump(rows, open(f"{OUT}/rows.json", "w"))
+pend = [m[:6] for m in mints for k in range(min(len(fills[m]), len(sells[m]))) if (m, k) not in {(r["mint"], r["k"]) for r in rows}]
+if pend: print("pending (chain data not recorded yet):", " ".join(pend))
+n = len(rows); D_ = [r["diff"] for r in rows]; tot = sum(D_)
+random.seed(1); bs = sorted(sum(random.choice(D_) for _ in D_) for _ in range(2000))
+p_old_better = sum(1 for b in bs if b > 0) / len(bs)
+for r in rows[-8:]:
+    print(f"  {r['mint'][:6]} held {r['held']} slot(s): 200ms {r['actual']:+.4f} | old exit ({r['why']}) {r['old']:+.4f} | old-minus-200ms {r['diff']:+.4f}")
+print(f"TRADES {n}: 200ms curve P&L {sum(r['actual'] for r in rows):+.4f} vs old exit {sum(r['old'] for r in rows):+.4f} -> 200ms better by {-tot:+.4f} SOL "
+      f"[90%: {-bs[int(.95*len(bs))]:+.4f}, {-bs[int(.05*len(bs))]:+.4f}] | P(old better) {p_old_better:.2f} | 200ms better on {sum(1 for d in D_ if d < 0)} / worse on {sum(1 for d in D_ if d > 0)}")

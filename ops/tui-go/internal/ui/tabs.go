@@ -178,7 +178,7 @@ func (m *Model) scrPresend(w, bh int) string {
 			if why == "" {
 				why = "?"
 			}
-			A = append(A, m.kv(bw.l, 11, t.Val.Render(core.Short(x.Mint, 6)+" ")+t.Money(x.Pnl, true, false).Render(core.SolS(x.Pnl))+t.Lbl.Render("  "+why+" "+core.KindOf(x.Client)+"  "+core.T12(float64(x.T), false))))
+			A = append(A, m.kv(bw.l, 11, m.mintLink(x.Mint, core.Short(x.Mint, 6), t.Val)+" "+t.Money(x.Pnl, true, false).Render(core.SolS(x.Pnl))+t.Lbl.Render("  "+why+" "+core.KindOf(x.Client)+"  "+core.T12(float64(x.T), false))))
 		}
 	}
 	// exits
@@ -843,27 +843,36 @@ func (m *Model) scrConfig(w, bh int) string {
 	}
 	tw := max(10, inner-lw-3)
 	var out []string
-	for _, it := range v.CfgItems {
-		lab := it.Label
-		if w < 70 {
-			lab = it.SLabel
-		}
-		dot := t.StateDot(it.State, m.ascii)
-		if it.State == "na" {
-			dot = " "
-		}
-		text := to12(it.Full)
-		if it.Key == "routes" && w < 90 {
-			text = strings.SplitN(text, " ", 2)[0]
-		}
-		wl := core.WrapText(text, tw, 0)
-		out = append(out, dot+" "+t.Lbl.Render(padRight(core.RuneSlice(lab, lw), lw))+" "+t.Val.Render(wl[0]))
-		for _, l := range wl[1:] {
-			out = append(out, strings.Repeat(" ", lw+3)+t.Val.Render(l))
-		}
-		if ex := m.explain(it); ex != "" {
-			for _, l := range core.WrapText(ex, tw, 0) {
-				out = append(out, strings.Repeat(" ", lw+3)+t.Dim.Render(l))
+	for bi, title := range cfgBlockTitles { // the items grouped: pre-send, regular, routes & sending, limits, QUIET & paper
+		n0 := len(out)
+		for _, it := range blockItems(v.CfgItems, bi) {
+			if len(out) == n0 {
+				if n0 > 0 {
+					out = append(out, "")
+				}
+				out = append(out, m.subRule(title, inner))
+			}
+			lab := it.Label
+			if w < 70 {
+				lab = it.SLabel
+			}
+			dot := t.StateDot(it.State, m.ascii)
+			if it.State == "na" {
+				dot = " "
+			}
+			text := to12(it.Full)
+			if it.Key == "routes" && w < 90 {
+				text = strings.SplitN(text, " ", 2)[0]
+			}
+			wl := core.WrapText(text, tw, 0)
+			out = append(out, dot+" "+t.Lbl.Render(padRight(core.RuneSlice(lab, lw), lw))+" "+t.Val.Render(wl[0]))
+			for _, l := range wl[1:] {
+				out = append(out, strings.Repeat(" ", lw+3)+t.Val.Render(l))
+			}
+			if ex := m.explain(it); ex != "" {
+				for _, l := range core.WrapText(ex, tw, 0) {
+					out = append(out, strings.Repeat(" ", lw+3)+t.Dim.Render(l))
+				}
 			}
 		}
 	}
@@ -894,12 +903,31 @@ func (m *Model) scrConfig(w, bh int) string {
 
 // ------------------------------------------------------------------------------------------------- detail
 
-func (m *Model) link(url string) string {
-	st := m.th.Acc
-	if !m.ascii && !m.th.Mono {
+func (m *Model) link(url string) string { return m.linkText(url, url, m.th.Acc) }
+
+// linkText renders text in st as an OSC 8 hyperlink to url (plain text when links are off: --no-links, --ascii,
+// --no-color). Terminals without OSC 8 show the text alone.
+func (m *Model) linkText(url, text string, st lipgloss.Style) string {
+	if m.linksOn() && url != "" {
 		st = st.Hyperlink(url)
 	}
-	return st.Render(url)
+	return st.Render(text)
+}
+
+// mintLink: (part of) a mint, linked to its GMGN page.
+func (m *Model) mintLink(mint, text string, st lipgloss.Style) string {
+	if mint == "" || mint == "?" {
+		return st.Render(text)
+	}
+	return m.linkText(gmgnURL(mint), text, st)
+}
+
+// acctLink: an account (a leader's identity), linked to Solscan when it looks like a public key.
+func (m *Model) acctLink(acct, text string, st lipgloss.Style) string {
+	if n := len(acct); n < 32 || n > 44 || strings.ContainsAny(acct, "0OIl+/=_- ") {
+		return st.Render(text)
+	}
+	return m.linkText("https://solscan.io/account/"+acct, text, st)
 }
 
 func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
@@ -907,18 +935,21 @@ func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
 	v := m.view
 	lw := 11
 	var out []string
-	url := func(label, kind, sig string) {
-		if sig == "" {
-			return
-		}
-		u := "https://solscan.io/" + kind + "/" + sig
+	// every URL / address is an OSC 8 hyperlink (each wrapped piece links the whole URL)
+	full := func(label, u string) {
 		for i, l := range core.WrapText(u, max(10, w-lw-4), 0) {
 			lab := ""
 			if i == 0 {
 				lab = label
 			}
-			out = append(out, m.kv(lab, lw, m.link(l)))
+			out = append(out, m.kv(lab, lw, m.linkText(u, l, t.Acc)))
 		}
+	}
+	url := func(label, kind, sig string) {
+		if sig == "" {
+			return
+		}
+		full(label, "https://solscan.io/"+kind+"/"+sig)
 	}
 	ps := tr.Kind == "PS"
 	for i, l := range core.WrapText(tr.Mint, max(10, w-lw-4), 0) {
@@ -926,11 +957,17 @@ func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
 		if i == 0 {
 			lab = "mint"
 		}
-		out = append(out, m.kv(lab, lw, t.B.Render(l)))
+		out = append(out, m.kv(lab, lw, m.mintLink(tr.Mint, l, t.B)))
 	}
-	url("", "token", tr.Mint)
+	if tr.Mint != "" {
+		full("gmgn", gmgnURL(tr.Mint))
+	}
+	url("solscan", "token", tr.Mint)
 	spend := tr.Spend.Int()
 	sz := t.Val.Render(core.F(float64(spend)/core.LAM, 4) + " SOL")
+	if m.usdFirst && v.Price != 0 {
+		sz = t.Val.Render(core.UsdAmt(spend, true, v.Price, false)) + t.Lbl.Render("  ("+core.F(float64(spend)/core.LAM, 4)+" SOL)")
+	}
 	if ps && tr.SolIn.Truthy() {
 		sz += t.Lbl.Render("  (into the curve " + core.F(tr.SolIn.Float()/core.LAM, 4) + ")")
 	}
@@ -983,7 +1020,7 @@ func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
 			cl += t.Lbl.Render(" (" + client + ")")
 		}
 		if l != nil && l.Leader != "" {
-			cl += sep + t.Lbl.Render("leader ") + t.Val.Render(l.Leader)
+			cl += sep + t.Lbl.Render("leader ") + m.acctLink(l.Leader, l.Leader, t.Val)
 		}
 		out = append(out, m.kv("landed", lw, cl+sep+t.Lbl.Render("path ")+t.Val.Render(path)))
 		var win []string
@@ -1080,7 +1117,7 @@ func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
 			cl += t.Lbl.Render(" (" + tr.Client + ")")
 		}
 		if tr.Leader != "" {
-			cl += sep + t.Lbl.Render("leader ") + t.Val.Render(core.RuneSlice(tr.Leader, 8))
+			cl += sep + t.Lbl.Render("leader ") + m.acctLink(tr.Leader, core.RuneSlice(tr.Leader, 8), t.Val)
 		}
 		if r := strings.ReplaceAll(tr.Route, "route:", ""); r != "" {
 			cl += sep + t.Lbl.Render("route ") + t.Val.Render(r)
@@ -1397,6 +1434,9 @@ var helpNotes = [][2]string{
 	{"card", "profit (winning trades) − loss (losing trades) + rent − fees = the P&L; s switches this run / today"},
 	{"ATH / Low", "the highest / lowest P&L of the chart's line (the run's, or today's with s); from ATH = now − the ATH"},
 	{"latency", "d→land = ms from the dump to our landing, s→seen = from our send to seen, blk = slots after the send (regular: after the dump); green < 40 ms, yellow ≤ 120, red above"},
+	{"total", "Trades: the run's P&L after each trade (the trades' P&L + rent back in time order, minus the failed tries' fees up to that minute); SOL or USD with u, like size"},
+	{"sort", "Trades: o picks the column (time, type, mint, size, P&L, %, total, exit, held, d→land, s→seen, blk, after, whale, client, path), O flips the order; the header marks it"},
+	{"links", "mints open GMGN, signatures / accounts Solscan (OSC 8: Ctrl / Cmd-click); c copies the mint (OSC 52; tmux: set -g set-clipboard on)"},
 	{"wallet est.", "the session's START BALANCE + its P&L (no RPC: an estimate; unseen tries' fees are not in it)"},
 	{"kill sw.", "how far the wallet is above the engine's kill switch (START BALANCE − loss cap)"},
 	{"dots", "green = on, yellow = warming up / partial / stopped, red = off"},
@@ -1423,7 +1463,7 @@ func (m *Model) helpContent(w int) string {
 	}
 	out = append(out, strings.Split(hm.FullHelpView(groups), "\n")...)
 	out = append(out, "")
-	dim("mouse: click a tab, wheel scrolls, click a trade (twice: details)")
+	dim("mouse capture is off by default: select text and Ctrl / Cmd-click links (mints open GMGN) with the terminal itself; M turns it on (click a tab, wheel scrolls, click a trade, twice: details)")
 	out = append(out, "")
 	for _, n := range helpNotes {
 		wl := core.WrapText(n[1], max(10, w-15), 0)

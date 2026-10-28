@@ -3,6 +3,7 @@
 #   QUICK=1          the follow test at 200x (default 50x: ~12 min for r26 + r27)
 #   FOLLOW=0         skip the follow test;  PERF=0  skip the CPU / RSS measurement (~5 min);  PERF_PY=1  also measure Python v1
 #   DIPMON_DATA=dir  the local run copies (default /home/moiz/sniper-data/runs)
+#   DIPVIEW_DATA=dir the runs directory for the dipview tests (default: the local AMS copies)
 cd "$(dirname "$0")" || exit 1
 GO=${GO:-/home/moiz/sdk/go/bin/go}
 export GOFLAGS=-mod=vendor GOTOOLCHAIN=local GOPROXY=off GOTELEMETRY=off
@@ -21,6 +22,8 @@ step "go test -race: the tail and reader, the price goroutine, the UI"
 CGO_ENABLED=1 $GO test -count=1 -race ./internal/... || fail=1
 step "parity with the Python dipmon v1 (the oracle, pinned in tests/oracle): every local run + running copies"
 python3 tests/parity.py --text || fail=1
+step "dipview in a pty: the list, enter -> dipmon (OSC 8 links, OSC 52 copy, mouse off by default / M) -> q back -> q quits"
+python3 tests/dipview_pty.py || fail=1
 if [ "${FOLLOW:-1}" != 0 ]; then
   step "follow: r26 and r27 replayed live with a fake engine (numbers, no regressions, the bell)"
   python3 tests/follow.py || fail=1

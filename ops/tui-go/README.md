@@ -1,4 +1,12 @@
-# REWIND: dipmon v3, the live monitor for the dip-bot runs (Go)
+# REWIND: dipmon v3.1 + dipview, the live monitor and run explorer for the dip-bot runs (Go)
+
+**v3.1 (10-28):** the Trades table sorts by any column (`o` / `O`, or a click on a header with the mouse on) and has a
+running-total column (the run P&L after each trade); size and total follow `u` (SOL ↔ USD); the config is grouped in
+five blocks (Pre-send / Regular / Routes & sending / Safety & limits / QUIET & paper) on the overview and the Config tab;
+mouse capture is **off by default** so the terminal's own selection and link clicks work (`M` toggles, `--mouse` starts
+with it on); mints are OSC 8 links to GMGN, signatures / tokens / leader accounts to Solscan (the trade details, the
+Trades table, the Pre-send tab's best / worst), and `c` copies the selected mint (OSC 52); the new **dipview** run
+explorer (below).
 
 A read-only terminal UI for one pump.fun dip-bot run (the engine's `<TAG>.jsonl` records + `<TAG>.log`), opened on the
 trading node while the run is in progress, from a laptop or a phone SSH client. It replaces the Python dipmon's UI: the
@@ -11,7 +19,11 @@ Harmonica and ntcharts. A single static binary (no Python, no libc), about 10 MB
 ```sh
 sudo install -m 755 dipmon-go /usr/local/bin/dipmon-go     # the binary (from /home/moiz/sniper-data/tui/, check its .sha256)
 sudo install -m 755 dipmon    /usr/local/bin/dipmon        # the wrapper (ops/tui-go/dipmon): nice -n 19 + ionice -c3, TERM fix
+sudo install -m 755 dipview   /usr/local/bin/dipview       # the run explorer's wrapper (ops/tui-go/dipview): dipmon-go --view, same priority
 ```
+
+(On the nodes every installed file goes in as `X.new` and is then `mv`-ed over `X`, so a running copy is never
+overwritten in place.)
 
 The wrapper runs `dipmon-go` under `nice -n 19` and `ionice -c3` (idle I/O; skipped if the container refuses it) and sets
 `TERM=xterm-256color` when sudo dropped TERM; `DIPMON_BIN=...` points it at another binary. The binary also lowers its
@@ -30,6 +42,8 @@ own priority at start (nice 19 and the idle I/O class, every thread), so `sudo i
 | `dipmon --dir DIR` | another runs directory (e.g. `--dir ~/sniper-data/runs/ams/runs --run 27`) |
 | `dipmon --screen 200x35` | render the UI once as plain text (`--tab 1-7`, `--page help\|detail\|splash\|today`), then exit |
 | `dipmon --screens DIR` | text screenshots of every tab at `--sizes 200x35,160x50,...` into DIR |
+| `sudo dipview` | the run explorer: every run in `/root/prod/runs` (`dipmon-go --view`; `--dir DIR` for another) |
+| `sudo dipview --list` | the runs and their numbers as plain text, then exit |
 
 From another machine: `ssh -p 1996 it@84.32.104.202 sudo dipmon --snapshot` (needs sudo without a password prompt, or `-t`).
 
@@ -37,7 +51,36 @@ Options: `--usd 187.5` (fixed SOL/USD, no network), `--no-usd`, `--ascii` (no Un
 only), `--interval 2` (refresh 0.5–5 s, default 1), `--budget FILE` (default `<dir>/../dip_budget_ams.json` or
 `dip_budget.json`), `--load-duty X` (the initial load sleeps X × each chunk's work time; default 1 = at most ~50% of one
 core), `--sound all|wins|big|off` (default all), `--notify` (desktop notification for big trades), `--no-anim`,
-`--version`. Same as the Python dipmon's, plus the last four and `--screen`.
+`--version`, `--mouse` (capture the mouse at start), `--no-links` (no OSC 8 hyperlinks). Same as the Python
+dipmon's, plus the last six and `--screen`.
+
+## dipview: the run explorer
+
+```
+╭─ RUNS ───────────────────────────────────────────────────────────╮ ╭─ AMS r27 · dip20 ──────────────────────────────╮
+│    run     engine start → end (PKT)                       result │ │ ○ ENDED  time limit / max trades               │
+│ ▸● AMS r27 dip20  Oct 27 3:26 PM → 5:36 PM               +0.5877 │ │ time      Oct 27 3:26 PM → 5:36 PM PKT         │
+│  ● AMS r26 dip19  Oct 27 6:58 AM → 2:03 PM               +0.3005 │ │ duration  2h 10m / 2h 10m planned              │
+│  ● AMS r24 dip19  Oct 26 9:47 PM → Oct 27 2:57 AM        +1.6953 │ │ result    +0.5877 SOL  +$110.15                │
+```
+
+`sudo dipview` (or `dipmon-go --view`): left, every run of the node's runs directory (`dip_rN` / `dip_ams_rN`, a
+`.jsonl` and / or `.log`): the run, its engine, start → end (PKT, 12-hour; "→ now" while running) and its result; a
+**green dot** = an engine process is writing it (found by its `--dip-log`, like dipmon), a **grey dot** = ended. Running
+runs first, then newest first. Right, the selected run: status and how it ended, time, duration / planned, the result
+in SOL and USD (at today's SOL price), per hour, pre-send (net, fills, wins, win %) and regular (net, buys → fills,
+failed, wins), trades W / L, the wallet start → now, and the key config in the same five blocks. Phones: the list on
+top, a short overview under it.
+
+Keys: ↑ ↓ PgUp PgDn Home End select, **Enter** (or →) opens the run in dipmon (the same process; dipmon's `q` comes back
+to the list with the selection kept), `u` SOL ↔ USD, `M` mouse on / off (with it on: click selects, a double click
+opens, the wheel moves), `r` rescans now (it rescans every 5 s anyway), `q` / Esc quits.
+
+The numbers are dipmon's own (`core.BuildView`, the same accounting to the lamport), computed in the background one
+run at a time, the selected run first, with the initial load's duty (≤ ~50% of one core, nice 19 / idle I/O) and kept
+as a few numbers per run: a finished run is read once (again only if its files change); a running run is followed
+incrementally (every 5 s while selected, else every minute). While dipmon is open the background reads pause.
+Read-only like dipmon: the run files and `/proc`, nothing else.
 
 ## The screen
 
@@ -72,11 +115,18 @@ gradient progress bar. Every time is PKT in 12-hour form ("3:26 PM", "3:26:51 PM
    - **LIVE**: pre-send fills / wins / win %, average per fill, windows armed now (a spinner), tries; QUIET skips / stops /
      the arm rule (warm-up countdown → on); regular buys / fills / fails; landing (the medians of how long after the dump
      the fills / the regular buys landed); paper vs live; the open position.
-   - **CONFIG**: 2–3 columns of labeled items with dots (green on, yellow warming up / partial, red off), each in its long
-     form when the column allows it: `Pre-send ● 0.35 SOL · 4 tries/slot · exit TP +10% / SL −20% / 2 slots`,
-     `Fills 49/1000 · fees 0.02/0.40`, `QUIET ● stop (6 slots, < 2 trades) ● skip`, `Regular 0.35 SOL · exit TP off /
-     SL −50% / 5 slots · guard +5%`, `Paper ● M2 gate ● Dev list ● 0.35`, `Routes v13 · sell fan-out ● · nonce ● 8 · near
-     leaders 120 · skip Rakurai`, `Kill switch 4.432 · planned 2:10 · engine dip20`.
+   - **CONFIG** (v3.1), five blocks side by side, each under its title (the titles row is the section's rule; inside a
+     panel on tall terminals), dots green on / yellow warming up or partial / red off, the long forms where they fit:
+
+     ```
+     PRE-SEND ──────────────────────  REGULAR ───────────────────────  ROUTES & SENDING ─────────  SAFETY & LIMITS ─────────────  QUIET & PAPER ──────
+     ● 0.35 SOL · 4 tries/slot        0.35 SOL · guard +5%             routes v13 · near leaders 120  kill switch 4.432 · planned 2:10  stop ● 6 slots, < 2 trades
+     exit TP +10% / SL −20% / 2 slots exit TP off / SL −50% / 5 slots  sell fan-out ● · nonce ● 8  fills 49/1000 · fees 0.02/0.40  skip ●
+                                      M2 gate ● · Dev list ● 0.35      skip Rakurai                engine dip20                   paper ●
+     ```
+
+     At 120 columns the short forms (`TP off SL −50% 5sl`, `kill 4.432 · plan 2:10`); when even those do not fit, one block
+     a line. 70–119 columns: the badges in 1–2 lines, grouped by block with a thin bar between blocks; phones the same.
    - **Run P&L over time (SOL)** (with `s`: **Today's P&L**, from the day's first run), full width: a braille line
      (ntcharts canvas), green above zero and red below, a dotted zero line, y labels max / 0 / min, 3–5 time labels, the
      ATH and the low marked with their values (the same points as the card's), "now" and the drawdown from the ATH in the
@@ -93,21 +143,30 @@ gradient progress bar. Every time is PKT in 12-hour form ("3:26 PM", "3:26:51 PM
    fills and their dump→land, bounced and theirs (medians). On r28: fills 34 ms after the dump, bounced 307 ms.
 3. **Regular**: setup, P&L (fills / failed buys), fired → filled, failed buys by cause (6042 / 6001 / other) with their
    fees, exits, P&L by leader client, landing, the open position, the funnel.
-4. **Trades**: every trade, newest first, in a scrollable table: time, PS / REG, mint, size, P&L SOL and USD, %, exit,
+4. **Trades**: every trade, newest first (`o` / `O`: any column, see below), in a scrollable table: time, PS / REG, mint
+   (an OSC 8 link to its GMGN page), size, P&L SOL and USD, %, **total** (v3.1: the run P&L after this trade: the trades'
+   P&L + rent back in time order, minus the failed pre-send tries' fees booked up to that trade's minute; the last row
+   = the hero unless a try failed after it), exit,
    held, the latency (`d→land` ms from the dump to the landing, `s→seen` ms from the send to seen, `blk` the block:
    slots after the send, 0 = the send block; a regular buy: after the dump), `after` (a fill: slots after the trigger),
-   `whale` (the trigger dump), client, path; the latency green under 40 ms, yellow to 120, red above. 110–149 columns
-   drop after / whale, 70–109 also size / held / s→seen, phones keep the money (Enter has it all). Zebra rows, the
-   selection highlighted with `▸`; `f` cycles all / pre-send / regular / wins / losses / open, `/` finds a mint (a text
-   input), Enter opens the details: full mint, the latency, landed (client, leader, path), the window (try n of the
-   window's tries, the traders between the dump and us, the dump), the trigger, buy / sell signatures and solscan links
-   (clickable in terminals with hyperlinks); a regular buy: decision / reaction / exec lag.
+   `whale` (the trigger dump), client, path; the latency green under 40 ms, yellow to 120, red above. Size and total
+   follow `u` (`size $` / `total $` in USD). 125–149 columns drop after / whale, 110–124 also held / s→seen, 90–109 also
+   size and path, 70–89 also % and blk; phones keep time / type / mint / P&L / USD / exit (Enter has it all). Zebra rows, the selection highlighted with `▸`; **sort**: `o` cycles the column (time, type, mint,
+   size, P&L, %, total, exit, held, d→land, s→seen, blk, after, whale, client, path; each starts descending), `O` flips
+   the order, a click on a header sorts by it (a second click flips; mouse on), the sorted header is marked `▼` / `▲` in
+   the accent color and the title says `sort P&L ▲` (missing values always last, ties newest first); `f` cycles all /
+   pre-send / regular / wins / losses / open, `/` finds a mint (a text input), `c` copies the selected mint (OSC 52),
+   Enter opens the details: the full mint (a GMGN link), a **gmgn** line and a **solscan** token line, the size (USD
+   first with `u`), the latency, landed (client, leader: a Solscan account link when it is a full key, path), the window
+   (try n of the window's tries, the traders between the dump and us, the dump), the trigger, buy / sell signatures as
+   Solscan links (every wrapped piece of a long URL links the whole URL); a regular buy: decision / reaction / exec lag.
 5. **Health**: the engine process (pid, CPU, RSS, uptime, threads), log / records freshness, RUNTIME lag, POLL-RPC-ERROR
    counts, keep-alive / connection errors per send path, disk / load / memory, dipmon's own CPU / RSS, SOL/USD, RPC
    latency per name and method.
 6. **Log**: the engine log's tail in a viewport, important lines or all (`f`), wrap (`w`), End follows the tail; each
    line with its time (exact when read live, `~` = its minute in the session for lines read in the initial load).
-7. **Config**: every setting with its dot, its full text and one plain-English line, e.g. "4 tries/slot = 4 conditional
+7. **Config**: every setting, grouped under the five block titles (Pre-send / Regular / Routes & sending / Safety &
+   limits / QUIET & paper), with its dot, its full text and one plain-English line, e.g. "4 tries/slot = 4 conditional
    buys sent every slot (~0.2 s) while a window is open; each fills only on a sudden ≥ 12% drop"; the wallet; the legend.
 
 Under the tabs: the alerts strip (engine gone, kill switch near, stalled log, fees near the budget, send-path errors,
@@ -118,10 +177,13 @@ and the refresh rate. `?` shows the full help over the screen (a Lip Gloss layer
 
 | key | action |
 |---|---|
-| `1`–`7`, Tab, Shift-Tab, a click on the tab bar | tabs: Overview, Pre-send, Regular, Trades, Health, Log, Config |
-| ↑ ↓ PgUp PgDn Home End, the mouse wheel | scroll (Trades: move the selection; Log: End = follow the tail again) |
-| Enter / Esc, a click on a trade (twice: details) | Trades: details of the selected trade / back |
+| `1`–`7`, Tab, Shift-Tab, a click on the tab bar (mouse on) | tabs: Overview, Pre-send, Regular, Trades, Health, Log, Config |
+| ↑ ↓ PgUp PgDn Home End, the mouse wheel (mouse on) | scroll (Trades: move the selection; Log: End = follow the tail again) |
+| Enter / Esc, a click on a trade (twice: details; mouse on) | Trades: details of the selected trade / back |
 | `f` | Trades: all → pre-send → regular → wins → losses → open; Log: important ↔ all |
+| `o` / `O` | Trades: the next sort column / flip the order (the header shows it) |
+| `c` (or `y`) | Trades and the details: copy the selected mint to the clipboard (OSC 52; tmux needs `set -g set-clipboard on`) |
+| `M` | mouse capture on / off (default off: the terminal selects text and opens links; on: tab clicks, the wheel, row and header clicks) |
 | `/` | Trades: find a mint (Enter keeps the filter, Esc clears it) |
 | `w` | Log: wrap long lines |
 | `s` | the card's scope, with its ATH / low and the chart: this run ↔ today (all runs of the current PKT day on this node) |
@@ -133,6 +195,18 @@ and the refresh rate. `?` shows the full help over the screen (a Lip Gloss layer
 | `a` | animations on / off (`--no-anim` starts with them off) |
 | `m` | mute / unmute the bell |
 | `?` / `q` | help / quit |
+
+## Selecting, copying and links (v3.1)
+
+Mouse capture is off by default, so the terminal's own selection works (drag to select, the terminal's copy) and so do
+its link clicks: in Ghostty (and iTerm2 / kitty / WezTerm) Ctrl-click (Linux) / Cmd-click (macOS) opens an OSC 8 link
+(mints → `https://gmgn.ai/sol/token/<MINT>`, signatures → Solscan `tx`, the token → Solscan `token`, a leader's full key
+→ Solscan `account`); the details also print the full URLs, which the terminal's plain URL detection finds as well.  With
+capture off, terminals that use alternate-scroll mode turn the wheel into ↑ / ↓ (moving the selection). `M` turns capture on (tab / row / header clicks, the wheel); while it is on, Shift-drag (most Linux terminals)
+or Option-drag (iTerm2, Terminal.app) still selects. `c` writes the selected mint to the clipboard with OSC 52 (Ghostty,
+iTerm2 with "Applications in terminal may access clipboard", kitty, WezTerm, Windows Terminal; through SSH too; tmux:
+`set -g set-clipboard on`). Terminals without OSC 8 show the text without the link; `--no-links` leaves the links out
+(as do `--ascii` and `--no-color`).
 
 ## Sound
 
@@ -187,7 +261,8 @@ an even count = the mean of the middle two).
 
 ## Safety
 
-Reads only: the two run files, the budget file, the other runs of the day (Today, on `s`), `/proc` (the engine's cmdline /
+Reads only: the two run files, the budget file, the other runs of the day (Today, on `s`; dipview: every run file of
+the directory), `/proc` (the engine's cmdline /
 stat / statm, meminfo, loadavg), statfs. Never writes to them, never sends a signal, never calls an RPC, never opens `.env`,
 keystores or configs. Only a fixed list of numeric / name flags of the engine's command line is kept (never paths, URLs or
 keys); log lines are cleaned (control / wide / emoji characters, `key=` / `token=` / `user:pass@` masked) before display.
@@ -273,21 +348,30 @@ sh ops/tui-go/run_tests.sh       # everything (QUICK=1: follow at 200x; FOLLOW=0
   the pty match. First a copy whose engine dies before DIP DONE must show ENGINE GONE.
 - `tests/perf.py`: the CPU / RSS figures above.
 
-Last full run (2026-10-27, the final binary with the latency, `sh run_tests.sh`): **ALL PASS**.
+Last full run (2026-10-28, v3.1, `DIPVIEW_DATA=<real FRA + AMS run files copied read-only> sh run_tests.sh`):
 
-- build: static, reproducible (`sha256 1940436e227196b5a393064a2cb636cdac11ba49d81d99aecc84b362c0127887`, the same from
-  a clean cache); `go vet` clean; `gofmt` clean.
-- `go test ./...`: core + ui pass (golden 55 screens of r27 + 15 of r28's latency views, resize 18 sizes, the live run
-  with its bells, the card identity on 45 runs, Today, ATH / low on 45 runs × every session scope, the day's series
-  minute by minute, the latency on r27 / r28 against an independent scan (r28: fills 34 ms, bounced 307 ms after the
-  dump, as measured), `--ascii` / `--no-color` on every page and size).
-- `go test -race ./internal/...`: pass (core 472 s, ui 93 s).
-- parity: 45/45 finished runs identical (6,282 fields, r28 included) + text equal; 6 running copies JSON and text
-  byte-identical (the latency is display only: no money figure moved).
-- follow at 50x: r26 (106 trades closed live → 88 bells, min gap 2.00 s, 51 loaded trades never rang) and r27 (40 →
-  32 bells, 13 loaded); every figure equal in the Python and Go snapshots of the file, the UI's own numbers and the Go
-  snapshot; ENGINE GONE when the fake engine dies early.
-- perf: PASS (the table above).
+- build: static, reproducible (`sha256 fb9bf0fbcbb5afacd5efabf0b47a9c8e2d5a729f9591c36a3751b80324335aaf`); `go vet`
+  clean; `gofmt` clean.
+- `go test ./...`: core + ui pass: the goldens (55 + 15 screens, re-made for v3.1 and reviewed), resize + keys + mouse
+  through 18 sizes incl. `o` / `O` / `c` / `M` / `u`, and the v3.1 tests: **sort** (every column × both orders on r27:
+  rows ordered by the key's value, missing last; the default = the old newest-first order; `o` ×4 + `O` = P&L
+  ascending, shown in the header and the title; a header click), **running total** (on all 39 local runs: the last
+  trade's total + the fees booked after it = the run P&L, to the lamport), **unit switch** (size `$65.60`, total
+  `+$110.19`, `size $` / `total $` headers, back with `u`; the overview's last trades too), **config blocks** (overview +
+  Config tab at 80 / 120 / 200 columns: the five blocks, every field of the old grid, nothing wider than the terminal,
+  every config item in a block), **links / copy / mouse** (r28: the mint's GMGN OSC 8 link in the table, GMGN + Solscan
+  token + buy tx links in the details, `--no-links` none, mouse off by default and on with `M`, `c` → clipboard),
+  **dipview** (real run files of both nodes and a log-only run: every run listed, names / regions / order, each run's
+  numbers = dipmon's `BuildView`, the screens fit at 200x35 / 120x40 / 80x24 / 50x30, Enter picks the run).
+- `go test -race ./internal/...`: pass.
+- parity: identical to the Python dipmon v1 on every local run (money untouched by v3.1).
+- `tests/dipview_pty.py` (a real pty): the list, the overview, no mouse capture, Enter → dipmon, OSC 8 GMGN links in
+  Trades, OSC 52 on `c`, `M` turns capture on, `q` back to the list, `q` quits (exit 0): ALL PASS.
+- follow at 50x: r26 / r27 pass (the pty's VT helper now holds OSC strings longer than 64 bytes across reads: an OSC 8
+  link cut by a read had made its terminating BEL count as a bell).
+- perf: PASS (load 0.75 s wall / 0.25 s CPU on r24; after the load 0.12% of a core, live 0.15%, 10x 0.40%; RSS 23–26 MB).
+- on the nodes (10-28): FRA `sudo dipview --list` read all 27 runs (≈ 350 MB) in 12 s wall / 6 s CPU at nice 19
+  (r27 shown RUNNING with the green dot); AMS the same; `sudo dipmon --snapshot` unchanged.
 
 ## Build
 
@@ -300,7 +384,8 @@ v2.8.0 (each the newest stable release at least two weeks old).
 
 Layout: `main.go` (the command line), `internal/core` (tails, the model, the accounting, the view, the snapshot / JSON, the
 engine / price / system probes, the card and today), `internal/ui` (the app, the theme, the wordmark, the screens, the chart,
-the trades table), `tests/` (parity, follow, perf, the pty and VT helpers, the pinned oracle, `ans2png.py`), `screens/`
+the trades table and its sort / running total (`sort.go`), the config blocks (`cfgblocks.go`), dipview
+(`dipview.go`)), `tests/` (parity, follow, perf, the pty and VT helpers, the pinned oracle, `ans2png.py`), `screens/`
 (`sh make_screens.sh`: text screenshots of every tab of r27 ended / live / warming up, colored `.ans` copies, and `png/`
 images of a few for a phone: DejaVu Sans Mono on a dark background, roughly what a terminal shows).
 
@@ -312,8 +397,12 @@ images of a few for a phone: DejaVu Sans Mono on a dark background, roughly what
   of a core of the idle cost. `DIPMON_FPS=n` overrides it (diagnostics).
 - The palette follows the terminal's answer to the background-colour query; a terminal (or an old tmux) that does not
   answer gets the dark palette.
-- While dipmon runs the mouse is captured (tab clicks, the wheel): select text with Shift (most Linux terminals) or
-  Option (iTerm2, Terminal.app), or quit first.
+- The mouse is not captured unless `M` / `--mouse` (v3.1): without it tab / row / header clicks and the wheel's
+  scrolling are the keyboard's (the terminal may turn the wheel into arrow keys).
+- The running total subtracts the failed pre-send tries' fees by minute (they are booked per minute): within a minute the
+  first trade carries that minute's fees; a try failed after the last trade shows only in the hero.
+- dipview's USD is at today's SOL price (the price of the run's time is not recorded); its first look at a large
+  directory reads every run once in the background (FRA's 27 runs, ≈ 350 MB: ~6 s of CPU at nice 19).
 - `--notify` (OSC 9) works in iTerm2, WezTerm, kitty, Ghostty and Windows Terminal; Terminal.app ignores it; inside tmux it
   needs `set -g allow-passthrough on`.
 - Log lines read in the initial load carry only their minute (`~4:32 PM`); lines that arrive live carry the exact time.

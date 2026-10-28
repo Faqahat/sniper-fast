@@ -69,8 +69,9 @@ class Screen:
             if b == 0x1b:
                 # an escape sequence cut by the read: keep it for the next feed
                 tail = data[i:]
-                if len(tail) < 64 and (tail == b"\x1b" or (tail[1:2] == b"[" and not CSI.match(data, i)) or
-                                       (tail[1:2] in (b"]", b"P", b"_", b"^", b"X") and b"\x07" not in tail and b"\x1b\\" not in tail[1:])):
+                # (a string sequence, e.g. an OSC 8 hyperlink with its URL, can be longer than a CSI: held up to 4 KB)
+                if (len(tail) < 64 and (tail == b"\x1b" or (tail[1:2] == b"[" and not CSI.match(data, i)))) or \
+                        (len(tail) < 4096 and tail[1:2] in (b"]", b"P", b"_", b"^", b"X") and b"\x07" not in tail and b"\x1b\\" not in tail[1:]):
                     self.pend = tail
                     return
                 m = CSI.match(data, i)

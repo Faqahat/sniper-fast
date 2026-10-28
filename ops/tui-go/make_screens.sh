@@ -16,7 +16,7 @@ OUT=screens
 SIZES=200x35,160x50,80x24,50x30
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-rm -rf "$OUT/ended" "$OUT/live" "$OUT/warmup" "$OUT/png" "$OUT/r28"
+rm -rf "$OUT/ended" "$OUT/live" "$OUT/warmup" "$OUT/png" "$OUT/r28" "$OUT/dipview"
 END=$(python3 -c "import json,subprocess,sys; print(json.loads(subprocess.run(['$BIN','--file','$SRC','--snapshot','--json','--usd','187.42','--load-duty','0'],capture_output=True,text=True).stdout)['ended']/1e9)")
 "$BIN" --file "$SRC" --usd 187.42 --now "$END" --golden --screens "$OUT/ended" --sizes "$SIZES" > /dev/null
 "$BIN" --file "$SRC" --usd 187.42 --now "$END" --golden --screens "$OUT/ended" --sizes 200x35,50x30 --screens-ansi > /dev/null
@@ -38,15 +38,22 @@ if [ -f "$R28" ]; then
   mkdir -p "$OUT/r28"
   for f in "$TMP"/r28/*_02-presend.* "$TMP"/r28/*_04-trades.* "$TMP"/r28/*_09-detail.*; do cp "$f" "$OUT/r28/"; done
 fi
+# dipview: the run explorer over the local AMS copies (the selected run = the newest, r27), at the end of r27
+mkdir -p "$OUT/dipview"
+for sz in 200x35 120x40 80x24 50x30; do
+  "$BIN" --view --load-duty 0 --dir "$(dirname "$SRC")" --usd 187.42 --now "$END" --screen "$sz" > "$OUT/dipview/${sz}_runs.txt"
+done
+"$BIN" --view --load-duty 0 --dir "$(dirname "$SRC")" --usd 187.42 --now "$END" --screen 200x35 --screens-ansi > "$OUT/dipview/200x35_runs.ans"
+# v4: the Trades tab in USD (u) is not a separate page; the trades / config / detail screens above show the new columns
 if python3 -c 'import PIL' 2>/dev/null; then
   mkdir -p "$OUT/png"
   for f in ended/200x35_01-overview ended/200x35_11-today ended/200x35_10-splash ended/200x35_04-trades ended/200x35_02-presend \
-           ended/200x35_08-help ended/50x30_01-overview ended/50x30_11-today live/200x35_01-overview; do
+           ended/200x35_08-help ended/200x35_07-config ended/50x30_01-overview ended/50x30_11-today live/200x35_01-overview dipview/200x35_runs; do
     python3 tests/ans2png.py "$OUT/$f.ans" "$OUT/png/$(dirname "$f")-$(basename "$f").png"
   done
   for f in r28/200x35_02-presend r28/200x35_04-trades r28/200x35_09-detail r28/50x30_02-presend r28/50x30_04-trades r28/50x30_09-detail; do
     [ -f "$OUT/$f.ans" ] && python3 tests/ans2png.py "$OUT/$f.ans" "$OUT/png/$(dirname "$f")-$(basename "$f").png"
   done
 fi
-ls "$OUT"/ended "$OUT"/live "$OUT"/warmup "$OUT"/r28 2>/dev/null | grep -c -E '\.(txt|ans)$'
+ls "$OUT"/ended "$OUT"/live "$OUT"/warmup "$OUT"/r28 "$OUT"/dipview 2>/dev/null | grep -c -E '\.(txt|ans)$'
 du -sh "$OUT"
