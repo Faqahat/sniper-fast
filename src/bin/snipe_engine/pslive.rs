@@ -59,6 +59,20 @@
 //         less what --presend-live-quiet-preload DIR|current_run brought in (the 24/7 raw recording, read in a background thread)
 //       records: presend_live_arm / _skip / _disarm get "quiet" (the signals) and quiet_skip / quiet_stop; the shadow's presend_arm
 //         and presend_disarm get what QUIET would have decided ("quiet"); the status line and run_end get the counters
+//   * dip23 QUIET v2 (owner OK 10-28 23:35 PKT; ops/strategies/presend/filter/QUIET2.md §5.2, pure part pq::V2Ring): LOG-ONLY.
+//       --presend-live-quiet-v2-log: every pre-send live ARM and SKIP record (and the shadow's presend_arm when QUIET is on) gets
+//         "v2": {n_tr_60s, at_120s_high, maxdd_120s, skip, n_120s, ring_s} = the study's candidate rule at the trigger (trades of the
+//         token in the last 60 s, the trigger's pre-trade price within 0.1% of the 120 s high, the drawdown from that high; skip =
+//         n_tr_60s <= 6 AND at the high), computed from a per-token 120 s ring of (feed arrival time, post-trade price) fed AFTER each
+//         trade's trigger decision (causal: only trades strictly before the trigger). NEVER acted on: no arm, skip, attempt or exit
+//         changes; the status line and run_end count the arms / skips with v2.skip true / false. Without the flag: no ring, no field
+//         (dip22's records byte for byte).
+//   * dip24 LIMITS (owner 10-29 02:10 PKT "remove any hard limits on fills, run time etc. - we can afford week-long runs"):
+//       --presend-live-max-fills is optional: absent or 0 = unlimited (a given N still stops the stream at N fills, as before);
+//       --presend-live-fee-budget-sol X is optional (default 1.0) and is now a ROLLING 24 h budget of failed-attempt fees: when the fees of
+//         the last 24 h (feed clock) reach X the sender PAUSES (no new attempts; windows still arm and are recorded; a loud line and a
+//         presend_live_fee_pause record), and resumes when the rolling sum falls back under X (presend_live_fee_resume). It never stops
+//         the run (dip23 stopped the stream for good at X). Range (0, 100] SOL.
 // =====================================================================================================================
 use super::*;
 use arbx::presend_live as pl;
@@ -69,10 +83,10 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 
 /// every --presend-live-* flag (a stray one without --presend-live is refused)
-const FLAGS: [&str; 16] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
+const FLAGS: [&str; 17] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
     "--presend-live-cu-limit", "--presend-live-cu-price-micro", "--presend-live-tip-lamports", "--presend-live-routes", "--presend-live-max-per-sec",
     "--presend-live-path-max-per-sec", "--presend-live-max-fills", "--presend-live-fee-budget-sol", "--presend-live-create-slot", "--presend-live-one-position",
-    "--presend-live-exit-ms"];
+    "--presend-live-exit-ms", "--presend-live-quiet-v2-log"];
 
 /// dip20 QUIET: its flags (each needs --presend-live; the history / threshold / warm-up / fbots / preload ones need
 /// --presend-live-quiet-skip on)
@@ -148,6 +162,9 @@ pub struct Cfg {
     pub exit_ms: u64,
     /// dip20 QUIET (default: all off)
     pub quiet: QuietCfg,
+    /// dip23 (--presend-live-quiet-v2-log; off by default): the QUIET v2 candidate's features written into the arm / skip records
+    /// (log-only; a per-token 120 s price ring is kept only with it)
+    pub quiet_v2_log: bool,
 }
 
 impl Cfg {
@@ -171,9 +188,11 @@ impl Cfg {
         let dry = has("--presend-live-dry");
         if !dry && !live { bail!("--presend-live sends real attempts: it needs --live (or --presend-live-dry: build, sign and log every attempt, never send)"); }
         let onoff = |f: &str, d: bool| -> Result<bool> { match arg(f).as_deref() { None => Ok(d), Some("on") => Ok(true), Some("off") => Ok(false), Some(x) => bail!("{f} {x}: on | off") } };
-        let max_fills = arg_u64_opt("--presend-live-max-fills").context("REFUSED: --presend-live needs --presend-live-max-fills N (a cap on pre-send fills)")?;
-        let fee_sol = arg_f64("--presend-live-fee-budget-sol", -1.0);
-        if fee_sol <= 0.0 { bail!("REFUSED: --presend-live needs --presend-live-fee-budget-sol X > 0 (the fees of failed attempts; the stream stops there)"); }
+        // dip24: optional; 0 / absent = unlimited
+        let max_fills = arg_u64("--presend-live-max-fills", 0);
+        // dip24: optional (1.0); SOL of failed-attempt fees per ROLLING 24 h (the sender pauses above it, never stops)
+        let fee_sol = arg_f64("--presend-live-fee-budget-sol", 1.0);
+        if !(fee_sol > 0.0) { bail!("REFUSED: --presend-live-fee-budget-sol must be > 0 SOL (failed-attempt fees per rolling 24 h)"); }
         let c = Cfg {
             dry,
             spend: (arg_f64("--presend-live-size-sol", sh.size_sol) * 1e9).round() as u64,
@@ -193,6 +212,7 @@ impl Cfg {
             whale_pct: sh.whale_pct, window_slots: sh.window_slots, live_ms: sh.live_ms, exit_slots: sh.exit_slots, tp: sh.tp, sl: sh.sl,
             exit_ms: arg_u64("--presend-live-exit-ms", 0),
             quiet: Cfg::quiet_from(&has, &arg, &arg_f64, &onoff)?,
+            quiet_v2_log: has("--presend-live-quiet-v2-log"),
         };
         c.check(live, cap)?;
         Ok(Some(c))
@@ -241,8 +261,8 @@ impl Cfg {
         if self.cu_price > 1_000_000 { bail!("--presend-live-cu-price-micro above 1,000,000 (a failed attempt would cost > 0.0001 SOL in priority): refusing"); }
         if self.tip.is_some_and(|t| t > 10_000_000) { bail!("--presend-live-tip-lamports above 0.01 SOL: refusing"); }
         if !(1..=200).contains(&self.max_per_sec) || !(1..=200).contains(&self.path_max_per_sec) { bail!("--presend-live-max-per-sec / --presend-live-path-max-per-sec must be 1..200"); }
-        if !(1..=1000).contains(&self.max_fills) { bail!("--presend-live-max-fills must be 1..1000"); }
-        if self.fee_budget == 0 || self.fee_budget > 1_000_000_000 { bail!("--presend-live-fee-budget-sol must be in (0, 1]"); }
+        // dip24: --presend-live-max-fills any N (0 = unlimited); the fee budget is per rolling 24 h, (0, 100] SOL
+        if self.fee_budget == 0 || self.fee_budget > 100_000_000_000 { bail!("--presend-live-fee-budget-sol must be in (0, 100] SOL per rolling 24 h"); }
         if self.exit_ms != 0 && !(50..=2_000).contains(&self.exit_ms) { bail!("--presend-live-exit-ms must be 0 (off) or 50..2000"); }
         Ok(())
     }
@@ -258,6 +278,8 @@ impl Cfg {
             "fail_fee": self.fail_fee(), "margin_ms": MARGIN_MS, "whale_sell_ms": WHALE_SELL_MS});
         // dip20: only when a QUIET flag is on (flags off: dip19's record)
         if self.quiet.on() { j["quiet"] = self.quiet.json(); }
+        // dip23: only with the v2 log flag
+        if self.quiet_v2_log { j["quiet_v2_log"] = true.into(); }
         j
     }
 }
@@ -329,6 +351,8 @@ struct Shared {
     /// a reactive position is open / a pre-send position is open (one position per server)
     pause_reactive: AtomicBool,
     pause_pos: AtomicBool,
+    /// dip24: the rolling 24 h failed-attempt fee budget is spent (no new attempts until it rolls back under)
+    pause_fee: AtomicBool,
     /// the feed's newest slot (the main loop's)
     slot: AtomicU64,
     seq: AtomicU64,
@@ -356,7 +380,12 @@ pub struct Att {
 struct SCfg { cfg: Cfg, user: Pk, key: SigningKey, guard: GuardEnc, routes: FxHashMap<String, Vec<RouteP>>, handle: tokio::runtime::Handle }
 
 /// log records and terminal lines go to a writer thread (no write on the event loop)
-enum Out { Rec(serde_json::Value), Line(String) }
+pub enum Out { Rec(serde_json::Value), Line(String) }
+impl Out {
+    /// dip24 (tests): the record, if this is one
+    #[cfg(test)]
+    pub fn rec(self) -> Option<serde_json::Value> { match self { Out::Rec(v) => Some(v), Out::Line(_) => None } }
+}
 
 fn spawn_writer(log: Arc<DipLog>) -> crossbeam_channel::Sender<Out> {
     let (tx, rx) = crossbeam_channel::unbounded::<Out>();
@@ -400,6 +429,8 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let why: Option<&'static str> = if sh.stop.load(Ordering::Relaxed) || DIP_NO_FIRE.load(Ordering::Relaxed) { Some("stopped") }
                 else if sc.cfg.one_position && sh.pause_reactive.load(Ordering::Relaxed) { Some("paused_reactive_position") }
                 else if sc.cfg.one_position && sh.pause_pos.load(Ordering::Relaxed) { Some("paused_presend_position") }
+                // dip24: the rolling 24 h fee budget is spent (resumes when it rolls back under)
+                else if sh.pause_fee.load(Ordering::Relaxed) { Some("paused_fee_budget") }
                 else if fires_paused() { Some("paused_blockhash_or_balance_read") }
                 else {
                     let bal = ACCT.bal.load(Ordering::SeqCst);
@@ -535,7 +566,7 @@ struct QWatch { id: u64, whale: Pk, trig_slot: u64, others: u32, win: Option<u64
 
 /// a trigger's QUIET view, kept until the shadow's records of it passed: (trigger key, the arm signals record, the stop decision
 /// (stop, slot, others), the slot it was made in)
-struct QTrig { key: (String, String, i64), arm: serde_json::Value, stop: Option<(bool, u64, u32)>, slot: u64 }
+struct QTrig { key: (String, String, i64), arm: serde_json::Value, stop: Option<(bool, u64, u32)>, slot: u64, v2: Option<serde_json::Value> }
 
 /// the preload's state: off, running (its thread), done, failed
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -921,6 +952,8 @@ struct Stats {
     /// dip19: fills on a position whose exit had started, its follow-up sell rounds, orphans found (sold), unreadable reads (retried),
     /// kept-open accounts closed / close reads / closes failed
     after_exit: u64, follow_ups: u64, orphans: u64, unreadable: u64, ata_closed: u64, ata_reads: u64, ata_close_fail: u64,
+    /// dip23 (--presend-live-quiet-v2-log): arms / skips whose v2 candidate said skip (true) or keep (false)
+    v2_arm: [u64; 2], v2_skip: [u64; 2],
 }
 
 fn cnt_add(m: &mut FxHashMap<String, Cnt>, k: &str, i: usize) { m.entry(k.to_string()).or_default()[i] += 1; }
@@ -974,6 +1007,11 @@ pub struct PsLive {
     tasks: Arc<AtomicU64>,
     /// dip20 QUIET (None: every QUIET flag off, nothing of it runs)
     qt: Option<Quiet>,
+    /// dip23 (--presend-live-quiet-v2-log; None without it): the per-token 120 s price ring of the QUIET v2 annotation (log-only)
+    v2: Option<pq::V2Ring>,
+    /// dip24: the failed-attempt fees of the last 24 h per second of the feed clock ((unix s, lamports)), their sum, the pause state,
+    /// pauses so far, the feed's latest arrival time (the rolling window's clock)
+    fee_q: VecDeque<(u64, u64)>, fee_24h: u64, fee_paused: bool, fee_pauses: u64, last_t: u64,
 }
 
 impl PsLive {
@@ -1003,15 +1041,15 @@ impl PsLive {
         let slot_ns = arbx::feeds::entries::SLOT_US.load(Ordering::Relaxed) * 1_000;
         let out = spawn_writer(log.clone());
         let (atx, arx) = crossbeam_channel::unbounded::<Att>();
-        let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
+        let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) });
         arbx::feeds::own_fail_watch(user);
         let sc = SCfg { cfg: cfg.clone(), user, key: (*key).clone(), guard, routes, handle: tokio::runtime::Handle::current() };
         let fee1 = cfg.fail_fee();
         let line = format!("DIP PRESEND LIVE{} | T2 whale >= {}% -> window {} slots from +{} ms (create-slot triggers {}) | {} attempts per slot ({:.0} ms apart), {:.3} SOL, limit = latest price x {:.2}, \
-            deadline slot + {} | CU {} x {} uL (a failed attempt {} lamports) | routes {} | caps: {} fills, fees {:.4} SOL, {} attempts/s ({} per path) | one position {} | exit {} slots{} / TP +{:.0}% / SL -{:.0}%",
+            deadline slot + {} | CU {} x {} uL (a failed attempt {} lamports) | routes {} | caps: {} fills, fees {:.4} SOL per rolling 24 h (pause), {} attempts/s ({} per path) | one position {} | exit {} slots{} / TP +{:.0}% / SL -{:.0}%",
             if cfg.dry { " DRY (builds + signs + logs; NEVER sends)" } else { " (REAL attempts)" }, cfg.whale_pct, cfg.window_slots, cfg.live_ms, if cfg.create_slot { "on" } else { "skipped" },
-            cfg.k, slot_ns as f64 / 1e6 / cfg.k as f64, cfg.spend as f64 / 1e9, 1.0 - cfg.drop, cfg.deadline_slots, cfg.cu_limit, cfg.cu_price, fee1, desc.join(";"), cfg.max_fills,
+            cfg.k, slot_ns as f64 / 1e6 / cfg.k as f64, cfg.spend as f64 / 1e9, 1.0 - cfg.drop, cfg.deadline_slots, cfg.cu_limit, cfg.cu_price, fee1, desc.join(";"), if cfg.max_fills == 0 { "unlimited".to_string() } else { cfg.max_fills.to_string() },
             cfg.fee_budget as f64 / 1e9, cfg.max_per_sec, cfg.path_max_per_sec, if cfg.one_position { "on" } else { "off" }, cfg.exit_slots,
             if cfg.exit_ms > 0 { format!(" or {} ms after the fill (dip22, first)", cfg.exit_ms) } else { String::new() }, cfg.tp * 100.0, cfg.sl * 100.0);
         eprintln!("{line}");
@@ -1022,7 +1060,7 @@ impl PsLive {
         if !cfg.dry {
             tg::raise(arbx::alerts::Level::Info, "dip_presend_live", "start", "🧪", "PRESEND LIVE probe ON", arbx::alerts::format::Body::new()
                 .kv("size", format!("{:.3} SOL", cfg.spend as f64 / 1e9)).kv("attempts", format!("{} per slot, {} lamports each when failed", cfg.k, fee1))
-                .kv("caps", format!("{} fills, {:.4} SOL fees", cfg.max_fills, cfg.fee_budget as f64 / 1e9)), false);
+                .kv("caps", format!("{} fills, {:.4} SOL fees per rolling 24 h", if cfg.max_fills == 0 { "unlimited".to_string() } else { cfg.max_fills.to_string() }, cfg.fee_budget as f64 / 1e9)), false);
         }
         let mut det = pl::Detector::new(cfg.whale_pct);
         det.idle_slots = 6 * 3600 * 1000 / 212;
@@ -1049,12 +1087,15 @@ impl PsLive {
                                   PreSt::Failed => format!("; preload FAILED to start: {}", q.pre_info), _ => String::new() }) } else { String::new() });
         }
         for l in &qstate { eprintln!("{l}"); }
+        // dip23: the v2 annotation (log-only) and its ring
+        let v2_log = cfg.quiet_v2_log;
+        if v2_log { eprintln!("DIP PRESEND LIVE QUIET v2 LOG: every arm / skip record gets \"v2\" (trades in 60 s, at the 120 s high, drawdown, candidate skip = <= {} trades AND at the high); LOG ONLY, nothing acts on it", pq::V2_N_MAX); }
         let p = PsLive { cfg, det, wins: FxHashMap::default(), armed: FxHashMap::default(), wid: 0, sh, arx, atts: FxHashMap::default(), order: VecDeque::new(), lands: Vec::new(),
             tapes: FxHashMap::default(), pos: FxHashMap::default(), free_at: FxHashMap::default(), last_deadline: FxHashMap::default(), launches: FxHashMap::default(), last_sweep: 0, checks: 0,
             par: FxHashMap::default(),
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
-            tasks: Arc::new(AtomicU64::new(0)), qt };
+            tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0 };
         if let Some(r) = qrec { p.rec(r); }
         Ok(p)
     }
@@ -1119,6 +1160,7 @@ impl PsLive {
     /// every executed or unexecuted arrival, before its pump events: our failed attempts (no pump event, so no ExecInfo)
     pub fn on_arrival(&mut self, a: &arbx::feeds::Arrival, slot_now: u64) {
         self.sh.slot.store(slot_now, Ordering::Relaxed);
+        self.last_t = self.last_t.max(a.t_rx);
         if a.executed != Some(false) || a.tx.keys.first() != Some(&self.user) { return; }
         self.drain_atts();
         let Some((att, done)) = self.atts.get_mut(&a.tx.sig) else { return };
@@ -1131,8 +1173,47 @@ impl PsLive {
         self.st.fees += fee;
         self.resolve(&att, &res);
         self.lands.push(Land { att, res, err, fee, slot: a.slot, idx, t_rx: a.t_rx, at: Instant::now() });
-        if self.st.fees >= self.cfg.fee_budget { self.stop("fee_budget"); }
+        // dip24: the rolling 24 h budget (pauses the sender, never stops the stream)
+        self.fee_add(a.t_rx, fee);
     }
+
+    /// dip24: a failed attempt's fee into the ROLLING 24 h budget; at the budget the sender pauses (loudly) until the sum rolls back
+    /// under it; the stream is never stopped by it
+    fn fee_add(&mut self, t: u64, fee: u64) {
+        let s = t / 1_000_000_000;
+        match self.fee_q.back_mut() { Some(b) if b.0 == s => b.1 += fee, _ => self.fee_q.push_back((s, fee)) }
+        self.fee_24h += fee;
+        self.last_t = self.last_t.max(t);
+        self.fee_roll();
+        if !self.fee_paused && self.fee_24h >= self.cfg.fee_budget {
+            self.fee_paused = true;
+            self.fee_pauses += 1;
+            self.sh.pause_fee.store(true, Ordering::SeqCst);
+            self.line(format!("  PRESEND LIVE PAUSED (fee budget): failed-attempt fees of the last 24 h {:.6} SOL >= {:.6} SOL: NO NEW ATTEMPTS until they roll back under \
+                (pause #{}; the run goes on)", self.fee_24h as f64 / 1e9, self.cfg.fee_budget as f64 / 1e9, self.fee_pauses));
+            self.rec(serde_json::json!({"ev": "presend_live_fee_pause", "t": t, "fees_24h": self.fee_24h, "budget": self.cfg.fee_budget, "fees_total": self.st.fees, "n": self.fee_pauses}));
+            if !self.cfg.dry && self.q.is_none() {
+                tg::raise(arbx::alerts::Level::Warning, "dip_presend_fee_pause", "pause", "⏸️", "PRESEND LIVE paused: 24 h fee budget", arbx::alerts::format::Body::new()
+                    .kv("fees 24 h", format!("{:.4} SOL", self.fee_24h as f64 / 1e9)).kv("budget", format!("{:.4} SOL", self.cfg.fee_budget as f64 / 1e9)), false);
+            }
+        }
+    }
+
+    /// dip24: the fees older than 24 h (feed clock) leave the rolling sum; a paused sender resumes under the budget
+    fn fee_roll(&mut self) {
+        let lo = (self.last_t / 1_000_000_000).saturating_sub(24 * 3600);
+        while self.fee_q.front().is_some_and(|x| x.0 < lo) { let (_, f) = self.fee_q.pop_front().unwrap(); self.fee_24h = self.fee_24h.saturating_sub(f); }
+        if self.fee_paused && self.fee_24h < self.cfg.fee_budget {
+            self.fee_paused = false;
+            self.sh.pause_fee.store(false, Ordering::SeqCst);
+            self.line(format!("  PRESEND LIVE RESUMED (fee budget): failed-attempt fees of the last 24 h {:.6} SOL < {:.6} SOL", self.fee_24h as f64 / 1e9, self.cfg.fee_budget as f64 / 1e9));
+            self.rec(serde_json::json!({"ev": "presend_live_fee_resume", "t": self.last_t, "fees_24h": self.fee_24h, "budget": self.cfg.fee_budget}));
+        }
+    }
+
+    /// dip24 (tests): the sender is paused by the fee budget
+    #[cfg(test)]
+    pub fn fee_paused(&self) -> bool { self.fee_paused && self.sh.pause_fee.load(Ordering::SeqCst) }
 
     fn resolve(&mut self, att: &Att, res: &str) {
         if let Some(w) = self.wins.get_mut(&att.w) { w.resolved += 1; if res == "unseen" { w.unseen += 1; } }
@@ -1259,6 +1340,9 @@ impl PsLive {
                     pl::Det::Below => {}
                 }
             }
+            // dip23 v2 (log-only): the ring takes the trade AFTER its trigger decision (the features of a trigger see only the trades
+            // before it)
+            if let Some(v) = self.v2.as_mut() { v.push(&e.mint, a.t_rx, t.p()); }
             // a pre-send position's exit on this price (take-profit / stop-loss: at once)
             if e.user != self.user {
                 if let Some(p) = self.pos.get_mut(&e.mint) {
@@ -1301,6 +1385,8 @@ impl PsLive {
                     _ => None,
                 }
             };
+        // dip23 v2 (log-only): the candidate's features at this trigger (the ring holds the token's trades before it), for the records
+        let v2 = self.v2.as_mut().map(|r| r.feats(&t.mint, t.t_rx, t.p_pre()).json());
         // dip20 QUIET: the four signals (skip on; every trigger, for the records and the shadow's paper), the ARM RULE (last: only a
         // trigger that would arm can be skipped "quiet"; off during the warm-up), the trigger's stop watch (stop on)
         let (mut qj, mut qkey): (Option<serde_json::Value>, Option<u64>) = (None, None);
@@ -1330,7 +1416,7 @@ impl PsLive {
             if q.cfg.stop.is_some() { q.watch.entry(t.mint).or_default().push(QWatch { id, whale, trig_slot: t.s, others: 0, win: None }); }
             let key = (mint_s.clone(), sig_s.clone(), t.j as i64);
             q.by_key.insert(key.clone(), id);
-            q.trigs.insert(id, QTrig { key, arm: j.clone(), stop: None, slot: t.s });
+            q.trigs.insert(id, QTrig { key, arm: j.clone(), stop: None, slot: t.s, v2: v2.clone() });
             qkey = Some(id);
             qj = Some(j);
         }
@@ -1338,6 +1424,7 @@ impl PsLive {
             *self.st.skips.entry(why).or_default() += 1;
             let mut r = serde_json::json!({"ev": "presend_live_skip", "why": why, "trig": trig});
             if let Some(j) = &qj { r["quiet"] = j.clone(); r["quiet_skip"] = (why == "quiet").into(); }
+            if let Some(v) = v2 { self.st.v2_skip[if v["skip"] == true { 0 } else { 1 }] += 1; r["v2"] = v; }
             self.rec(r);
             if why == "quiet" {
                 let j = qj.as_ref().unwrap();
@@ -1368,6 +1455,7 @@ impl PsLive {
         let mut r = serde_json::json!({"ev": "presend_live_arm", "w": id, "trig": trig, "en_slot": en_slot, "k": self.cfg.k, "spend": self.cfg.spend, "drop": self.cfg.drop,
             "lim0": t.p() * (1.0 - self.cfg.drop), "dry": self.cfg.dry});
         if let Some(j) = qj { r["quiet"] = j; r["quiet_skip"] = false.into(); }
+        if let Some(v) = v2 { self.st.v2_arm[if v["skip"] == true { 0 } else { 1 }] += 1; r["v2"] = v; }
         self.rec(r);
         self.line(format!("  PRESEND LIVE ARM w{id} {} whale {} {:.1}% ({:.2} SOL) age {} slots | until slot {en_slot} | {} attempts/slot, limit {:.2}x", b58(&t.mint),
             &b58(&whale)[..8], pct, t.sol as f64 / 1e9, age_slots, self.cfg.k, 1.0 - self.cfg.drop));
@@ -1452,7 +1540,7 @@ impl PsLive {
         }
         self.line(format!("  PRESEND LIVE FILL w{} {} {:.3} SOL -> {} tokens | slot {} (+{} after the send, {:.0} ms send->seen) | path {} ({}) | fills {}/{}", att.w, b58(&t.mint),
             t.sol as f64 / 1e9, t.tok, t.s, t.s.saturating_sub(att.slot), (t.t_rx as i64 - att.t_send as i64) as f64 / 1e6, att.path, att.client, self.st.fills, self.cfg.max_fills));
-        if self.st.fills >= self.cfg.max_fills { self.stop("max_fills"); }
+        if self.cfg.max_fills > 0 && self.st.fills >= self.cfg.max_fills { self.stop("max_fills"); }
     }
 
     /// dip19 (fix 1): our token account of `mint` exists and a position (or its UNSOLD retry) holds it; a read of it must reach `slot`
@@ -1790,6 +1878,8 @@ impl PsLive {
     /// the clock: windows end, positions' time exits, attempts never seen, landing records whose tape is complete. `first`: the
     /// first sighting of a signature on any feed (sig8 -> rx ns, feed), when the caller has it
     pub fn tick(&mut self, slot_now: u64, first: Option<&FxHashMap<u64, (u64, u16)>>) {
+        // dip24: the rolling 24 h fee budget (a paused sender resumes when the old fees roll out)
+        if self.fee_paused || !self.fee_q.is_empty() { self.fee_roll(); }
         self.drain_atts();
         let now = Instant::now();
         // windows: the last slot passed / the whale sold 30 ms ago
@@ -1799,6 +1889,8 @@ impl PsLive {
         // dip20 QUIET: the preload's answer, the stop's decisions (once per slot), housekeeping. AFTER the regular ends: a window due to
         // end now (a late tick: a stalled feed) ends as it would without QUIET, the stop only acts on a window still running
         if self.qt.is_some() { self.quiet_tick(slot_now); }
+        // dip23 v2: tokens idle for 120 s leave the ring (at most once per 10 s of feed time)
+        if let Some(v) = self.v2.as_mut() { v.sweep(); }
         // positions: time exit at entry slot + exit_slots; the wall-clock backstop (the feed stalled)
         let due: Vec<(Pk, &'static str)> = self.pos.values().filter(|p| p.exit.is_none()).filter_map(|p| {
             time_exit_due(slot_now, p.land.0, self.cfg.exit_slots, p.opened.elapsed().as_millis() as u64, self.cfg.exit_ms).map(|w| (p.mint, w))
@@ -2008,6 +2100,8 @@ impl PsLive {
                     match q.by_key.get(&key).copied() {
                         Some(id) => {
                             e.rec["quiet"] = q.trigs.get(&id).map(|t| t.arm.clone()).unwrap_or(serde_json::Value::Null);
+                            // dip23: the live trigger's v2 features (only with --presend-live-quiet-v2-log)
+                            if let Some(v) = q.trigs.get(&id).and_then(|t| t.v2.clone()) { e.rec["v2"] = v; }
                             if let Some(w) = e.rec["w"].as_u64() { q.shadow_w.insert(w, (id, e.rec["slot"].as_u64().unwrap_or(0))); }
                         }
                         None => { e.rec["quiet"] = serde_json::json!({"live_trigger": false}); }
@@ -2118,7 +2212,7 @@ impl PsLive {
 
     /// the 60 s status line's part
     pub fn status(&mut self) -> String {
-        let qs = self.quiet_status();
+        let qs = self.quiet_status() + &self.v2_status() + &self.fee_status();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -2156,6 +2250,26 @@ impl PsLive {
                 format!(" | state: loaded {} saved {} ({} flushes){}", q.state_info["dumps"].as_u64().unwrap_or(0), j.dumps, j.flushes,
                     if j.errors > 0 { format!(" WRITE ERRORS {} ({})", j.errors, j.first_err.clone().unwrap_or_default()) } else { String::new() })
             }).unwrap_or_default()
+    }
+
+    /// dip24: the rolling fee budget's part of the status line
+    fn fee_status(&self) -> String {
+        format!(" | fees 24 h {:.4}/{:.4} SOL{}{}", self.fee_24h as f64 / 1e9, self.cfg.fee_budget as f64 / 1e9, if self.fee_paused { " PAUSED" } else { "" },
+            if self.fee_pauses > 0 { format!(" (pauses {})", self.fee_pauses) } else { String::new() })
+    }
+
+    /// dip23 v2's part of the status line ("" without --presend-live-quiet-v2-log)
+    fn v2_status(&self) -> String {
+        let Some(v) = self.v2.as_ref() else { return String::new() };
+        format!(" | QUIET v2 (log-only): arms skip/keep {}/{} skips skip/keep {}/{} | ring {} tokens {} trades", self.st.v2_arm[0], self.st.v2_arm[1], self.st.v2_skip[0], self.st.v2_skip[1],
+            v.tokens(), v.entries())
+    }
+
+    /// dip23 v2's totals for run_end (None without it)
+    fn v2_json(&self) -> Option<serde_json::Value> {
+        let v = self.v2.as_ref()?;
+        Some(serde_json::json!({"arm_skip": self.st.v2_arm[0], "arm_keep": self.st.v2_arm[1], "skip_skip": self.st.v2_skip[0], "skip_keep": self.st.v2_skip[1],
+            "ring_tokens": v.tokens(), "ring_trades": v.entries(), "rule": {"n_max": pq::V2_N_MAX, "high_tol": pq::V2_HIGH_TOL}}))
     }
 
     /// dip20 QUIET's totals for run_end (None without it)
@@ -2212,6 +2326,8 @@ impl PsLive {
             }
             fin["quiet"] = j;
         }
+        // dip23: only with the v2 log flag
+        if let Some(j) = self.v2_json() { fin["quiet_v2"] = j; }
         fin
     }
 
@@ -2326,10 +2442,11 @@ impl PsLive {
     /// records read back from the writer's channel
     fn for_test(cfg: Cfg, user: Pk) -> (PsLive, crossbeam_channel::Sender<Att>, crossbeam_channel::Receiver<Out>) {
         let cfg_quiet = cfg.quiet.clone();
+        let v2_log = cfg.quiet_v2_log;
         let (out, orx) = crossbeam_channel::unbounded();
         let (atx, arx) = crossbeam_channel::unbounded();
         let (mtx, _) = tokio::sync::mpsc::unbounded_channel();
-        let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
+        let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true), skips: Mutex::new(FxHashMap::default()),
             build_us: Mutex::new(Ring::default()) });
         let det = pl::Detector::new(cfg.whale_pct);
@@ -2342,11 +2459,18 @@ impl PsLive {
             tasks: Arc::new(AtomicU64::new(0)),
             // dip20: QUIET as its flags say, the arm rule on from the start (no warm-up: a test sets start_ns / warm_ns), the feed's slot
             // clock; the tests set its lists
-            qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }) }, atx, orx)
+            qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
+            v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0 }, atx, orx)
     }
 
     /// dip19 tests: the chain work queued so far (taken)
     fn take_cmds(&mut self) -> Vec<Cmd> { self.q.as_mut().map(std::mem::take).unwrap_or_default() }
+
+    /// dip24 tests (outside this module): the probe without threads (for_test) with a wallet of our own
+    pub fn test_probe(cfg: Cfg) -> (PsLive, crossbeam_channel::Sender<Att>, crossbeam_channel::Receiver<Out>) { PsLive::for_test(cfg, [0x5Au8; 32]) }
+    /// dip24 tests: a failed attempt's fee at feed time `t`; the feed clock moved to `t`
+    pub fn test_fee(&mut self, t: u64, fee: u64) { self.fee_add(t, fee); }
+    pub fn test_clock(&mut self, t: u64) { self.last_t = self.last_t.max(t); self.fee_roll(); }
 }
 
 /// dip19 tests: the tests that open pre-send positions move the process-wide ACCT counters (one asserts they come back): one at a time
@@ -2373,6 +2497,11 @@ mod dip21_tests;
 #[cfg(test)]
 #[path = "dip22_tests.rs"]
 mod dip22_tests;
+
+// dip23 (10-28 PKT): the QUIET v2 log-only annotation (--presend-live-quiet-v2-log; off by default = dip22)
+#[cfg(test)]
+#[path = "dip23_tests.rs"]
+mod dip23_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2430,7 +2559,8 @@ mod tests {
     fn presend_live_flags_and_refusals() {
         let all = with(&["--presend-live-dry", "--presend-live-size-sol", "0.2", "--presend-live-k", "4", "--presend-live-drop", "0.12", "--presend-live-deadline-slots", "1",
             "--presend-live-cu-limit", "90000", "--presend-live-cu-price-micro", "1000", "--presend-live-tip-lamports", "200000", "--presend-live-max-per-sec", "20",
-            "--presend-live-path-max-per-sec", "10", "--presend-live-create-slot", "off", "--presend-live-one-position", "on", "--presend-live-exit-ms", "200"]);
+            "--presend-live-path-max-per-sec", "10", "--presend-live-create-slot", "off", "--presend-live-one-position", "on", "--presend-live-exit-ms", "200",
+            "--presend-live-quiet-v2-log"]);
         assert!(check_flags(&all).is_ok(), "{:?}", check_flags(&all));
         for f in FLAGS { assert!(all.iter().any(|a| a == f), "{f} in the test line"); }
         let wrong = ["-", "-presend-live-kk"].concat();
@@ -2457,9 +2587,15 @@ mod tests {
         }
         // the shadow's own --presend-live-ms is not one of ours
         assert!(Cfg::from_argv(&v(&["snipe_engine", "--dip", "--presend-shadow", "--presend-live-ms", "50"]), &p, true, cap).unwrap().is_none());
-        // the required caps
-        assert!(Cfg::from_argv(&without(&["--presend-live-max-fills"]), &p, true, cap).unwrap_err().to_string().contains("--presend-live-max-fills"));
-        assert!(Cfg::from_argv(&without(&["--presend-live-fee-budget-sol"]), &p, true, cap).unwrap_err().to_string().contains("--presend-live-fee-budget-sol"));
+        // dip24 (owner 10-29 "remove any hard limits"): the fill cap and the fee budget are optional: absent = unlimited fills, 1.0 SOL
+        // of failed-attempt fees per rolling 24 h; the routes stay required
+        let c = Cfg::from_argv(&without(&["--presend-live-max-fills"]), &p, true, cap).unwrap().unwrap();
+        assert_eq!(c.max_fills, 0, "absent = unlimited");
+        let c = Cfg::from_argv(&without(&["--presend-live-fee-budget-sol"]), &p, true, cap).unwrap().unwrap();
+        assert_eq!(c.fee_budget, 1_000_000_000, "absent = 1.0 SOL per rolling 24 h");
+        assert_eq!(Cfg::from_argv(&set("--presend-live-max-fills", "0"), &p, true, cap).unwrap().unwrap().max_fills, 0);
+        assert_eq!(Cfg::from_argv(&set("--presend-live-max-fills", "20000"), &p, true, cap).unwrap().unwrap().max_fills, 20_000);
+        assert_eq!(Cfg::from_argv(&set("--presend-live-fee-budget-sol", "2"), &p, true, cap).unwrap().unwrap().fee_budget, 2_000_000_000);
         assert!(Cfg::from_argv(&without(&["--presend-live-routes"]), &p, true, cap).is_err());
         // the shadow is needed; real attempts need --live (a dry run does not)
         let mut no_sh = v(&BASE); no_sh.retain(|x| x != "--presend-shadow");
@@ -2470,8 +2606,8 @@ mod tests {
         assert!(Cfg::from_argv(&no_live, &p, false, cap).unwrap().unwrap().dry);
         // ranges
         for (f, x) in [("--presend-live-k", "0"), ("--presend-live-k", "21"), ("--presend-live-drop", "0"), ("--presend-live-drop", "0.6"), ("--presend-live-deadline-slots", "0"),
-                       ("--presend-live-deadline-slots", "9"), ("--presend-live-cu-limit", "10000"), ("--presend-live-cu-price-micro", "2000000"), ("--presend-live-max-fills", "0"),
-                       ("--presend-live-fee-budget-sol", "2"), ("--presend-live-max-per-sec", "0"), ("--presend-live-tip-lamports", "20000000"), ("--presend-live-create-slot", "yes")] {
+                       ("--presend-live-deadline-slots", "9"), ("--presend-live-cu-limit", "10000"), ("--presend-live-cu-price-micro", "2000000"),
+                       ("--presend-live-fee-budget-sol", "0"), ("--presend-live-fee-budget-sol", "101"), ("--presend-live-max-per-sec", "0"), ("--presend-live-tip-lamports", "20000000"), ("--presend-live-create-slot", "yes")] {
             assert!(Cfg::from_argv(&set(f, x), &p, true, cap).is_err(), "{f} {x} should be refused");
         }
         // the size within the per-buy cap (live)
@@ -2626,6 +2762,8 @@ mod tests {
                 presend_tx_live(&mut ps, *s, slot_now, x, sig, *s, &marks, &log, Some(&mut p));
                 // the sender's part: one attempt per armed window per tx, registered; most fail (6042), every 7th fills (scenario A)
                 let armed: Vec<(Pk, u64)> = p.armed.iter().map(|(m, w)| (*m, *w)).collect();
+                // dip24: a paused sender (the rolling fee budget) sends nothing
+                let armed = if p.sh.pause_fee.load(Ordering::Relaxed) { Vec::new() } else { armed };
                 for (m, w) in armed {
                     seq += 1;
                     let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&seq.to_be_bytes()); sg[8] = 0xA7; sg[9] = fills_on as u8;
@@ -2690,8 +2828,11 @@ mod tests {
                     && (x["why"] != "time-limit" || x["slots_held"].as_i64().unwrap() >= 2)));
             } else {
                 assert_eq!(p.st.fills, 0);
-                assert_eq!(p.stopped, Some("fee_budget"));
-                assert_eq!(n_fail, 20, "the stream stopped at the fee budget");
+                // dip24: the rolling 24 h budget PAUSES the sender at 20 failed attempts (synthetic feed clock: < 24 h, so it never rolls
+                // back under); the stream is not stopped
+                assert_eq!(p.stopped, Some("run_end"), "only the run's end stops it");
+                assert!(p.fee_paused());
+                assert_eq!(n_fail, 20, "the sender paused at the fee budget");
             }
             let whys = ["expired", "whale_sold", "filled", "stopped", "token_gone"];
             assert!(r.iter().filter(|x| x["ev"] == "presend_live_disarm").all(|x| whys.contains(&x["why"].as_str().unwrap())));

@@ -36,6 +36,8 @@ pub mod leaders;
 pub mod ledger;
 pub mod netcount;
 pub mod notify;
+/// dip24 OBSERVATORY: log-only shadow modules on their own thread (src/obs/; ops/obs/OBSERVATORY.md)
+pub mod obs;
 pub mod overlay;
 pub mod pda;
 pub mod pools;

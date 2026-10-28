@@ -21,6 +21,10 @@ mod pslive;
 // SHRED FIRE (--dip-shred-fire; dip14; ops/dip/speed/fixes/FIXES.md): fire on the first shred sighting of a dump (off without the flag)
 #[path = "shredfire.rs"]
 mod shredfire;
+// dip24 REGULAR MODE (--dip-regular live|paper|off; owner 10-29 02:05 PKT): the paper tracker of regular picks (off without --dip-regular paper)
+#[path = "regpaper.rs"]
+mod regpaper;
+use regpaper::{Paper, Regular};
 use std::collections::{HashMap, HashSet};
 use std::io::Write as _;
 
@@ -93,6 +97,32 @@ const TXC: f64 = 0.0008;    // the replay's per-tx cost (value math for TP / SL,
 /// dip15: the run ends this long after the pre-send stop even if its bookkeeping never goes idle (AMS run 17, 10-25: 9 attempts
 /// never resolved and the engine never exited); no pre-send position may be open
 const PS_END_GRACE: Duration = Duration::from_secs(20);
+
+/// dip24: why the run stopped taking new buys first (kill switch, profit lock, minutes, max buys, signal, ...), for run_end
+static DIP_STOP_WHY: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+/// dip24 PROFIT LOCK state for the status line (run PnL terms, lamports)
+static PL_ON: AtomicBool = AtomicBool::new(false);
+static PL_PEAK: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+static PL_FLOOR: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+static PL_PNL: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// dip24 PROFIT LOCK (pure; unit-tested): for the peak run PnL `peak` (lamports), the minimum give-back `m`, the fraction `f` and the kill
+/// switch's cap: give-back G = max(m, f x peak profit); floor = max(-cap, peak - G). -> (floor, `pnl` below it)
+pub fn lock_floor(peak: i64, m: i64, f: f64, cap: i64, pnl: i64) -> (i64, bool) {
+    let g = m.max((f * peak.max(0) as f64).round() as i64);
+    let floor = (peak - g).max(-cap);
+    (floor, pnl < floor)
+}
+
+/// dip24: the run's end time (--minutes; 0 = none: the run ends on a signal, the kill switch or the profit lock)
+pub fn run_deadline(minutes: u64) -> Option<Instant> { (minutes > 0).then(|| Instant::now() + Duration::from_secs(minutes.saturating_mul(60))) }
+
+/// dip24: the profit lock's status-line part ("" when off)
+fn lock_line() -> String {
+    if !PL_ON.load(Ordering::Relaxed) { return String::new(); }
+    let (p, f) = (PL_PEAK.load(Ordering::Relaxed), PL_FLOOR.load(Ordering::Relaxed));
+    format!(" | lock: peak {:+.4}, floor {:+.4} ({:.4} give-back), run PnL {:+.4}", p as f64 / 1e9, f as f64 / 1e9, (p - f) as f64 / 1e9, PL_PNL.load(Ordering::Relaxed) as f64 / 1e9)
+}
 
 pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::Rpc>, path: &Arc<send::Path>, live: bool, stop: &Arc<AtomicBool>) -> Result<()> {
     let model_p = arg("--dip-model").unwrap_or_else(|| "/root/dip/IMIT1.json".into());
@@ -225,6 +255,9 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     if !probe.feeds.iter().any(|f| f.kind == config::FeedKind::YellowstoneTx) { bail!("--dip needs an executed feed (kind = \"yellowstone-tx\") in --config"); }
     let spend = arg_u64("--spend-lamports", 2_000_000);
     let dev_spend = arg_u64("--dip-dev-spend-lamports", spend);
+    // dip24 (owner 10-29 02:10 PKT "remove any hard limits on fills, run time etc. - we can afford week-long runs"): --minutes 0 = no time
+    // limit (the run ends on a signal, the kill switch or the profit lock); --max-buys 0 = unlimited regular buys (was refused with --live).
+    // The kill switch (--max-loss-sol, required with --live) is unchanged
     let minutes = arg_u64("--minutes", 30);
     let max_buys = arg_u64("--max-buys", 0);
     let max_inflight = arg_u64("--max-inflight", 2) as usize;
@@ -233,9 +266,27 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         if max_sol <= 0.0 { bail!("--dip --live requires --max-sol <cap> (per-buy cap)"); }
         let max_loss = arg_f64("--max-loss-sol", -1.0);
         if max_loss <= 0.0 { bail!("--dip --live requires --max-loss-sol <cap> (balance kill switch)"); }
-        if max_buys == 0 { bail!("--dip --live requires --max-buys N (landed buys in this run)"); }
         ((max_sol * 1e9) as u64, (max_loss * 1e9) as u64)
     } else { (u64::MAX, u64::MAX) };
+    // dip24 PROFIT LOCK (owner 10-29 02:20 PKT; off unless --profit-lock-min-sol M is given): a trailing stop that scales with profit, on the
+    // kill switch's own balance source (balance + open positions at cost): give-back G = max(M, F x peak profit) (F = --profit-lock-frac,
+    // default 0.30); stop floor = max(the kill switch's -LOSS, peak - G); below it the run stops exactly as on the kill switch
+    let profit_lock: Option<(i64, f64)> = match has("--profit-lock-min-sol") {
+        true => {
+            let m = arg_f64("--profit-lock-min-sol", -1.0);
+            let f = arg_f64("--profit-lock-frac", 0.30);
+            if !(m > 0.0 && m <= 1_000.0) { bail!("--profit-lock-min-sol must be > 0 SOL"); }
+            if !(f > 0.0 && f <= 1.0) { bail!("--profit-lock-frac must be in (0, 1]"); }
+            if !live { bail!("--profit-lock-min-sol needs --live (it watches the wallet's balance)"); }
+            Some(((m * 1e9) as i64, f))
+        }
+        false => { if has("--profit-lock-frac") { bail!("--profit-lock-frac needs --profit-lock-min-sol M"); } None }
+    };
+    // dip24 REGULAR MODE (owner 10-29 02:05 PKT): live (default: as today) | paper (decided as live, never sent: regpaper.rs) | off
+    let regular = Regular::parse(arg("--dip-regular").as_deref())?;
+    let paper_ms = arg_u64("--dip-regular-paper-ms", 60);
+    if has("--dip-regular-paper-ms") && regular != Regular::Paper { bail!("--dip-regular-paper-ms needs --dip-regular paper"); }
+    if !(1..=2_000).contains(&paper_ms) { bail!("--dip-regular-paper-ms must be 1..2000"); }
     if live && spend > cap_lamports { bail!("REFUSED: --spend-lamports {spend} exceeds --max-sol"); }
     // PRE-SEND LIVE (--presend-live): its flags checked now (refused before any feed starts); started below
     let ps_live_cfg = pslive::Cfg::from_args(&presend.as_ref().map(|s| s.p.clone()).unwrap_or_default(), live, cap_lamports)?;
@@ -292,6 +343,54 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             if probe_nonce == speed16::ProbeNonce::Ab { format!(": blocks of {} probe(s) alternate blockhash / nonce, so every path gets both arms", probe_paths.len().max(1)) } else { String::new() });
     }
     if lock_only { eprintln!("DIP PROBE LOCK-ONLY: probes SUCCEED (a 0-lamport self-transfer write-locking the curve accounts; {lock_cu} CU): they land through revert-protected paths and PAY their tips"); }
+    // dip24 OBSERVATORY (owner 10-29 ~01:50 PKT; src/obs, ops/obs/OBSERVATORY.md): LOG-ONLY shadow modules on their own thread, each off
+    // unless its flag is given (--observatory = all of them; the watch list needs --obs-watch FILE). Nothing of it runs otherwise
+    let obs_cfg: Option<arbx::obs::Cfg> = {
+        let all = has("--observatory");
+        let (rearm, hold, migr, blink, backrun) = (all || has("--obs-rearm"), all || has("--obs-hold"), all || has("--obs-migration"), all || has("--obs-blink"), all || has("--obs-backrun"));
+        let select = all || has("--obs-select");
+        let race = all || has("--obs-feedrace");
+        let inslot = all || has("--obs-inslot");
+        let watch_file = arg("--obs-watch");
+        if has("--obs-watch") && watch_file.as_deref().is_none_or(|p| p.starts_with("--")) { bail!("--obs-watch needs a file (one wallet per line)"); }
+        let (watch, watch_names) = match &watch_file { Some(p) => arbx::obs::load_watch(p).map_err(|e| anyhow::anyhow!(e))?, None => (Vec::new(), Default::default()) };
+        if watch_file.is_some() && watch.is_empty() { bail!("--obs-watch {}: no wallet in it", watch_file.as_deref().unwrap_or("")); }
+        let any = rearm || hold || migr || blink || backrun || select || race || inslot || !watch.is_empty();
+        if !any {
+            if has("--obs-file") { bail!("--obs-file needs an observatory module (--observatory / --obs-*)"); }
+            None
+        } else {
+            let out = match (arg("--obs-file"), arg("--dip-log")) {
+                (Some(f), _) => std::path::PathBuf::from(f),
+                (None, Some(l)) => arbx::obs::obs_path_for(&l),
+                (None, None) => bail!("the observatory needs --dip-log (its file is <dip-log stem>.obs.jsonl) or --obs-file PATH"),
+            };
+            let fbots = match arg("--presend-live-fbots") { Some(p) => arbx::obs::load_pk_list(&p).unwrap_or_default(), None => Default::default() };
+            let coh: rustc_hash::FxHashSet<Pk> = cohort.iter().filter_map(|s| bs58::decode(s).into_vec().ok().and_then(|v| <[u8; 32]>::try_from(v).ok())).collect();
+            Some(arbx::obs::Cfg { rearm, hold, migr, blink, backrun, select, race, inslot, feed_names: feed_names.clone(), watch, watch_file, watch_names, out, tail: arg("--dip-log").map(std::path::PathBuf::from), user,
+                rate_cap: ps_live_cfg.as_ref().map(|c| c.max_per_sec.min(c.path_max_per_sec)).unwrap_or(40), k: ps_live_cfg.as_ref().map(|c| c.k).unwrap_or(8),
+                drop: ps_live_cfg.as_ref().map(|c| c.drop).unwrap_or(0.12), cohort: coh, fbots, quiet_book: arg("--presend-live-quiet-book").map(std::path::PathBuf::from),
+                quiet_fol: arg_f64("--presend-live-quiet-fol", 2.24), chan: 0, rotate_ns: 0, rotate_bytes: 0 })
+        }
+    };
+    // dip24: every effective limit (or none), the regular mode, the observatory
+    let limits = serde_json::json!({"minutes": if minutes == 0 { serde_json::Value::Null } else { minutes.into() }, "max_buys": if max_buys == 0 { serde_json::Value::Null } else { max_buys.into() },
+        "per_buy_cap": if live { serde_json::json!(cap_lamports) } else { serde_json::Value::Null }, "kill_switch": if live { serde_json::json!(loss_cap) } else { serde_json::Value::Null },
+        "profit_lock": profit_lock.map(|(m, f)| serde_json::json!({"min_sol": m as f64 / 1e9, "frac": f})),
+        "presend_max_fills": ps_live_cfg.as_ref().map(|c| if c.max_fills == 0 { serde_json::Value::Null } else { c.max_fills.into() }),
+        "presend_fee_budget_24h": ps_live_cfg.as_ref().map(|c| c.fee_budget)});
+    eprintln!("DIP LIMITS: time {} | regular buys {} | per-buy cap {} | kill switch {} | profit lock {} | pre-send fills {} | pre-send fee budget {}",
+        if minutes == 0 { "no time limit".to_string() } else { format!("{minutes} min") }, if max_buys == 0 { "unlimited".to_string() } else { max_buys.to_string() },
+        if live { format!("{:.3} SOL", cap_lamports as f64 / 1e9) } else { "-".into() }, if live { format!("-{:.4} SOL from the start balance", loss_cap as f64 / 1e9) } else { "-".into() },
+        profit_lock.map(|(m, f)| format!("give back max({:.3} SOL, {:.0}% of the peak profit)", m as f64 / 1e9, f * 100.0)).unwrap_or_else(|| "none".into()),
+        ps_live_cfg.as_ref().map(|c| if c.max_fills == 0 { "unlimited".to_string() } else { c.max_fills.to_string() }).unwrap_or_else(|| "-".into()),
+        ps_live_cfg.as_ref().map(|c| format!("{:.4} SOL per rolling 24 h (pauses, never stops)", c.fee_budget as f64 / 1e9)).unwrap_or_else(|| "-".into()));
+    eprintln!("DIP REGULAR {}", match regular { Regular::Live => "LIVE (as before)".to_string(), Regular::Paper => format!("PAPER: decided as live, NEVER sent; paper landing {paper_ms} ms; regular_paper_* records"),
+        Regular::Off => "OFF: no regular buys (dumps still logged; would-be picks as pick_skip regular_off)".to_string() });
+    if let Some(c) = &obs_cfg {
+        eprintln!("DIP OBSERVATORY (LOG ONLY, own thread, never sends): {} -> {}{}", c.names().join(", "), c.out.display(),
+            if has("--observatory") && c.watch.is_empty() { " | WARNING: no --obs-watch FILE: the watch list is off" } else { "" });
+    }
     let mut rs = serde_json::json!({"ev": "run_start", "t": arbx::feeds::clock::now_ns(), "live": live, "wallet": me, "model": model.g.name, "tier": tier, "thr": thr, "tp": tp, "sl": sl,
         "hold_slots": hold, "guard": guard, "allow_holder": allow_holder, "spend": spend, "max_buys": max_buys, "max_inflight": max_inflight, "loss_cap": if live { loss_cap } else { 0 }, "minutes": minutes,
         "devs": devs.iter().collect::<Vec<_>>(), "dev_tier": dev_tier, "thr_dev": thr_dev, "dev_spend": dev_spend});
@@ -301,6 +400,11 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     }
     if let Some(ps) = &presend { rs["presend"] = ps.p.json(); }
     if let Some(c) = &ps_live_cfg { rs["presend_live"] = c.json(); }
+    // dip24: the limits and the regular mode (always), the observatory (only when on)
+    rs["limits"] = limits;
+    rs["regular"] = regular.as_str().into();
+    if regular == Regular::Paper { rs["regular_paper_ms"] = paper_ms.into(); }
+    if let Some(c) = &obs_cfg { rs["obs"] = c.json(); }
     // dip14: only when on (dip13's run_start is unchanged otherwise)
     if let Some(c) = &shred_cfg { rs["shred"] = c.json(); }
     if let Some(l) = &skip_clients { rs["skip_clients"] = serde_json::json!(l); }
@@ -315,6 +419,9 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             "probe_nonce": format!("{probe_nonce:?}").to_lowercase(), "probe_lock_only": lock_only, "probe_lock_cu": if lock_only { Some(lock_cu) } else { None }});
     }
     log.w(rs);
+    // dip24 OBSERVATORY: its thread starts now (it tails --dip-log from here on); the event loop only hands it messages (never waits)
+    let mut obs: Option<arbx::obs::Obs> = match obs_cfg { Some(c) => Some(arbx::obs::Obs::start(c).map_err(|e| anyhow::anyhow!("observatory: {e}"))?), None => None };
+    let mut paper: Option<Paper> = (regular == Regular::Paper).then(|| Paper::new(paper_ms));
 
     // feeds (the executed feed is the history; unexecuted feeds are ignored by the book)
     let interest = Arc::new(snipe::pump_interest());
@@ -362,23 +469,62 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         ACCT.bal.store(start_bal, Ordering::SeqCst);
         eprintln!("START BALANCE {:.6} SOL; kill switch below {:.6} SOL", start_bal as f64 / 1e9, start_bal.saturating_sub(loss_cap) as f64 / 1e9);
         let (rpc2, stop2, cap) = (rpc.clone(), stop.clone(), loss_cap as i64);
+        if let Some((m, f)) = profit_lock {
+            PL_ON.store(true, Ordering::SeqCst);
+            PL_FLOOR.store((-m).max(-cap), Ordering::SeqCst);
+            eprintln!("PROFIT LOCK ON: give back max({:.4} SOL, {:.0}% of the peak profit); floor now {:+.4} SOL from the start (never below the kill switch's -{:.4})",
+                m as f64 / 1e9, f * 100.0, (-m).max(-cap) as f64 / 1e9, cap as f64 / 1e9);
+        }
         tokio::spawn(async move {
             let mut st = KsState::default();
+            // dip24 PROFIT LOCK: the peak run PnL (taken only on polls with nothing in flight: the kill switch's balance + open-at-cost sum is
+            // exact then) and the lock's own 2-poll confirmation (as the kill switch's); dip24: a blind (unreadable) balance is said aloud
+            let (mut peak, mut lprev, mut blind, mut blind_said) = (0i64, false, 0u32, 0u32);
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 if stop2.load(Ordering::Relaxed) || DIP_NO_FIRE.load(Ordering::Relaxed) && ACCT.inflight.load(Ordering::SeqCst) == 0 { break; }
                 let a = &*ACCT; let seq0 = a.seq.load(Ordering::SeqCst);
                 let (open, pending, inflight, realized) = (a.open.load(Ordering::SeqCst), a.pending.load(Ordering::SeqCst), a.inflight.load(Ordering::SeqCst), a.realized.load(Ordering::SeqCst));
-                let Ok(b) = native_balance_at(&rpc2, user, a.last_slot.load(Ordering::SeqCst)).await else { continue };
+                let Ok(b) = native_balance_at(&rpc2, user, a.last_slot.load(Ordering::SeqCst)).await else {
+                    blind += 1;
+                    if blind >= 15 && blind >= blind_said + 30 {
+                        blind_said = blind;
+                        eprintln!("  KILL-SWITCH BLIND: no balance read for {} s (RPC): the kill switch{} cannot act until a read succeeds", blind * 2, if profit_lock.is_some() { " and the profit lock" } else { "" });
+                        tg::raise(arbx::alerts::Level::Warning, "dip_kill_blind", "blind", "⚠️", "DIP KILL-SWITCH BLIND", arbx::alerts::format::Body::new().kv("no balance read", format!("{} s", blind * 2)), false);
+                    }
+                    continue
+                };
+                if blind >= 15 { eprintln!("  KILL-SWITCH: balance readable again after {} s", blind * 2); }
+                blind = 0; blind_said = 0;
                 ACCT.bal.store(b, Ordering::SeqCst);
                 if a.seq.load(Ordering::SeqCst) != seq0 { continue; }
                 let pnl = (b + open) as i64 - start_bal as i64;
                 let (v, _) = ks_eval(&mut st, pnl, realized, pending, inflight, cap, &[]);
-                if v == KsVerdict::Go { continue; }
-                eprintln!("  DIP KILL-SWITCH: run PnL {:.6} SOL (balance {:.6} + open {:.6}) below -{:.6}: no new buys", pnl as f64 / 1e9, b as f64 / 1e9, open as f64 / 1e9, cap as f64 / 1e9);
-                tg::raise(arbx::alerts::Level::Critical, "dip_kill", "kill", "🛑", "DIP KILL-SWITCH", arbx::alerts::format::Body::new().kv("run PnL", sol_str(pnl)).txt("no new buys; open positions finish their exit"), false);
-                DIP_NO_FIRE.store(true, Ordering::SeqCst);
-                break;
+                if v != KsVerdict::Go {
+                    eprintln!("  DIP KILL-SWITCH: run PnL {:.6} SOL (balance {:.6} + open {:.6}) below -{:.6}: no new buys", pnl as f64 / 1e9, b as f64 / 1e9, open as f64 / 1e9, cap as f64 / 1e9);
+                    tg::raise(arbx::alerts::Level::Critical, "dip_kill", "kill", "🛑", "DIP KILL-SWITCH", arbx::alerts::format::Body::new().kv("run PnL", sol_str(pnl)).txt("no new buys; open positions finish their exit"), false);
+                    let _ = DIP_STOP_WHY.set("kill_switch");
+                    DIP_NO_FIRE.store(true, Ordering::SeqCst);
+                    break;
+                }
+                // dip24 PROFIT LOCK (only with --profit-lock-min-sol): after the kill switch, never instead of it
+                if let Some((m, f)) = profit_lock {
+                    if inflight == 0 && pending == 0 { peak = peak.max(pnl); }
+                    let (floor, below) = lock_floor(peak, m, f, cap, pnl);
+                    PL_PEAK.store(peak, Ordering::SeqCst); PL_FLOOR.store(floor, Ordering::SeqCst); PL_PNL.store(pnl, Ordering::SeqCst);
+                    let trip = below && lprev;
+                    if below && !trip { eprintln!("  PROFIT LOCK pending confirmation: run PnL {:+.6} below the floor {:+.6} (peak {:+.6}; re-check next poll)", pnl as f64 / 1e9, floor as f64 / 1e9, peak as f64 / 1e9); }
+                    lprev = below;
+                    if trip {
+                        eprintln!("  PROFIT LOCK: peak {:+.6}, floor {:+.6}, balance {:.6} (run PnL {:+.6}) -> stopping: no new buys of any kind; open positions finish their exit",
+                            peak as f64 / 1e9, floor as f64 / 1e9, b as f64 / 1e9, pnl as f64 / 1e9);
+                        tg::raise(arbx::alerts::Level::Critical, "dip_profit_lock", "lock", "🔒", "DIP PROFIT LOCK", arbx::alerts::format::Body::new().kv("peak", sol_str(peak))
+                            .kv("floor", sol_str(floor)).kv("run PnL", sol_str(pnl)).txt("no new buys; open positions finish their exit"), false);
+                        let _ = DIP_STOP_WHY.set("profit_lock");
+                        DIP_NO_FIRE.store(true, Ordering::SeqCst);
+                        break;
+                    }
+                }
             }
         });
         let mut body = arbx::alerts::format::Body::new().kv("start balance", sol_str(start_bal as i64)).kv("loss cap", sol_str(loss_cap as i64)).kv("exit", format!("{tp_s} / SL -{:.0}% / {hold} slots", sl * 100.0));
@@ -386,7 +532,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         tg::raise(arbx::alerts::Level::Info, "dip_start", "start", "🚀", &format!("DIP RUN START ({tier}, {:.2} SOL, max {max_buys} buys)", spend as f64 / 1e9), body, false);
     }
 
-    let deadline = Instant::now() + Duration::from_secs(minutes * 60);
+    // dip24: --minutes 0 = no time limit
+    let deadline: Option<Instant> = run_deadline(minutes);
     let mut toks: HashMap<Pk, Tok> = HashMap::new();
     // M2 (--dip-m2): one M2 state per followed token (made at its create, as the IMIT1 book), and the counters
     let mut m2toks: HashMap<Pk, arbx::dip_model::Tok> = HashMap::new();
@@ -419,9 +566,15 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     let mut lag_by: HashMap<u16, Vec<u64>> = HashMap::new();
     let mut q_exec: Vec<u64> = Vec::new();
     loop {
-        let stopping = Instant::now() >= deadline || stop.load(Ordering::Relaxed) || DIP_NO_FIRE.load(Ordering::Relaxed)
+        let stopping = deadline.is_some_and(|d| Instant::now() >= d) || stop.load(Ordering::Relaxed) || DIP_NO_FIRE.load(Ordering::Relaxed)
             || (max_buys > 0 && ACCT.landed_buys.load(Ordering::SeqCst) >= max_buys)
             || probe_done_at.is_some_and(|t| t.elapsed() > Duration::from_secs(5));
+        // dip24: the first reason (for run_end)
+        if stopping && DIP_STOP_WHY.get().is_none() {
+            let why = if deadline.is_some_and(|d| Instant::now() >= d) { "minutes" } else if stop.load(Ordering::Relaxed) { "signal" }
+                else if max_buys > 0 && ACCT.landed_buys.load(Ordering::SeqCst) >= max_buys { "max_buys" } else if probe_done_at.is_some() { "probes_done" } else { "no_new_buys" };
+            let _ = DIP_STOP_WHY.set(why);
+        }
         // PRE-SEND LIVE: its positions finish their exit and its attempts resolve before the run ends
         if stopping && open.is_empty() && pslive.as_ref().is_none_or(|p| p.can_end(PS_END_GRACE)) {
             if let Some(p) = pslive.as_ref().filter(|p| !p.idle()) {
@@ -488,9 +641,11 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         } };
         if last_status.elapsed() > Duration::from_secs(60) {
             last_status = Instant::now();
-            eprintln!("  DIP status: tokens {} dumps {n_dumps} in-envelope {n_env} picks {n_picks} fired {n_fired} closed {n_closed} open {} slot {slot_now} skipped {:?}{}{}{}{}", toks.len(), open.len(), skipped,
+            eprintln!("  DIP status: tokens {} dumps {n_dumps} in-envelope {n_env} picks {n_picks} fired {n_fired} closed {n_closed} open {} slot {slot_now} skipped {:?}{}{}{}{}{}{}{}", toks.len(), open.len(), skipped,
                 npool.map(|np| format!(" | {}", np.line())).unwrap_or_default(), if m2.is_some() { m2st.line(m2_gate) } else { String::new() },
-                presend.as_ref().map(|p| format!("{}{}", p.line(), ps_time.line())).unwrap_or_default(), pslive.as_mut().map(|p| p.status()).unwrap_or_default());
+                presend.as_ref().map(|p| format!("{}{}", p.line(), ps_time.line())).unwrap_or_default(), pslive.as_mut().map(|p| p.status()).unwrap_or_default(),
+                // dip24 (each only when on)
+                paper.as_ref().map(|p| p.line()).unwrap_or_default(), lock_line(), obs.as_ref().map(|o| o.feeder.line()).unwrap_or_default());
             let cutoff = Duration::from_secs_f64(max_age_s + 300.0);
             toks.retain(|m, t| t.t_created.elapsed() < cutoff || open.contains_key(m));
             if m2.is_some() { m2toks.retain(|m, _| toks.contains_key(m)); }
@@ -501,6 +656,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         }
         let arbx::feeds::Event::Tx(a) = ev else { continue };
         let t_loop = arbx::feeds::clock::now_ns();     // the decision-time breakdown of a fire (lat_us in the fire record)
+        // dip24 OBSERVATORY module 9 (--obs-feedrace only): this arrival's feed and time (one try_send; nothing otherwise)
+        if let Some(o) = obs.as_ref() { o.feeder.any(&a); }
         {
             let k8 = u64::from_be_bytes(a.tx.sig[..8].try_into().unwrap());
             if let std::collections::hash_map::Entry::Vacant(v) = first_seen.entry(k8) { v.insert((a.t_rx, a.feed)); first_order.push_back((a.t_rx, k8)); }
@@ -575,7 +732,7 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
                 let (picks, decided) = sf.on_shred(&a, &mut toks, &mut m2toks, &gates);
                 for pk in picks {
                     let (what, fired, min_out_s) = shred_pick(&pk, &a, t_loop, pk.t_dec, &mut toks, &mut open, &mut pend, &mut n_fired, ShredCtx {
-                        live: sf.cfg.mode == arbx::dip_shred::Mode::Live && live, spacing, allow_holder, guard, spend, dev_spend, near: near.as_ref(),
+                        live: sf.cfg.mode == arbx::dip_shred::Mode::Live && live && regular == Regular::Live, spacing, allow_holder, guard, spend, dev_spend, near: near.as_ref(),
                         skip_clients: skip_clients.as_deref(), max_inflight, pslive: pslive.as_ref(), npool, fast, user, rpc, path, mtx: &mtx, log: &log, names: &feed_names });
                     sf.set_what(pk.sig8, what, fired, min_out_s);
                 }
@@ -583,8 +740,9 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
                 if decided { if let Some(r) = sf.dump_rec(arbx::dip_shred::sig8(&a.tx.sig), &feed_names) { log.w(r); } }
             }
         }
-        let Some(x) = a.exec.clone() else { time_exits(&mut open, slot_now, hold, &log, &key_arc, user, rpc, path, &mtx); continue };
-        if !x.ok { continue; }
+        // dip24 OBSERVATORY: a migration / pool tx or a watched wallet's failed tx (a message, never a wait; nothing without it)
+        let Some(x) = a.exec.clone() else { time_exits(&mut open, slot_now, hold, &log, &key_arc, user, rpc, path, &mtx); if let Some(o) = obs.as_ref() { o.feeder.arrival(&a); } continue };
+        if !x.ok { if let Some(o) = obs.as_ref() { o.feeder.arrival(&a); } continue; }
         let sig = bs58::encode(&a.tx.sig).into_string();
         // launches
         for c in &x.creates {
@@ -603,6 +761,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         for (j, e) in x.trades.iter().enumerate() {
             // B2 (--dip-defer): the previous trade's held records (a no-op without the flag)
             held.flush(&log);
+            // dip24 REGULAR PAPER: the paper positions take every trade (their own book; nothing without --dip-regular paper)
+            if let Some(pp) = paper.as_mut() { pp.on_trade(e, a.slot, x.index, a.t_rx, tp, sl, &log); }
             // PRE-SEND SHADOW: the dip counters before this trade (what the reactive bot did on it goes into the shadow's records)
             if presend.is_some() { ps_marks.push([n_dumps, n_env, n_picks, n_fired, m2st.picks]); }
             let user_s = b58(&e.user);
@@ -789,6 +949,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             // the launch kind (create_v2 flags) goes with every pick / skip: the run report splits results by it
             let kind = tk.launch.as_ref().map(|l| serde_json::json!({"v2": l.is_create_v2, "mayhem": l.is_mayhem, "cashback": l.is_cashback, "holder": l.is_holder_reward, "cfee_bps": l.creator_fee_bps}));
             let skip = |why: &'static str, sk: &mut HashMap<&'static str, u64>| { *sk.entry(why).or_default() += 1; held.w(&log, serde_json::json!({"ev": "pick_skip", "mint": b58(&e.mint), "sig": sig, "why": why, "kind": kind})); };
+            // dip24 REGULAR OFF: no regular pick is sent or paper-traded (the dump record above is written as before)
+            if regular == Regular::Off { skip("regular_off", &mut skipped); continue; }
             if shred_fired { skip("shred_fired", &mut skipped); continue; }
             if tk.last_pick_slot.is_some_and(|s| a.slot < s + spacing) { skip("spacing", &mut skipped); continue; }
             tk.last_pick_slot = Some(a.slot);
@@ -820,6 +982,21 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             }
             held.w(&log, pick_j);
             if !live { continue; }
+            // dip24 REGULAR PAPER: the live checks below in the same order (one position per token and --max-inflight on the PAPER book; the
+            // pre-send blocks, pauses and balance as live), then a paper position: NOTHING is prepared or sent
+            if let Some(pp) = paper.as_mut() {
+                if DIP_NO_FIRE.load(Ordering::Relaxed) { skip("no_new_buys", &mut skipped); continue; }
+                if pp.has(&e.mint) { skip("open_on_token", &mut skipped); continue; }
+                if pp.open_count() >= max_inflight { skip("max_open", &mut skipped); continue; }
+                if let Some(why) = pslive.as_ref().and_then(|p| p.blocks_reactive(&e.mint)) { skip(why, &mut skipped); continue; }
+                if KS_PAUSE.load(Ordering::Relaxed) || FIRE_PAUSE.load(Ordering::Relaxed) { skip("paused", &mut skipped); continue; }
+                let bal = ACCT.bal.load(Ordering::SeqCst);
+                if bal > 0 && bal < spend_p + 30_000_000 + ACCT.reserved.load(Ordering::SeqCst) { skip("balance", &mut skipped); continue; }
+                held.flush(&log);
+                let tips = if npool.is_some() { fan.iter().map(|p| p.tip_lamports_cfg()).max().unwrap_or(0) } else { fan.iter().map(|p| p.tip_lamports_cfg()).sum() };
+                pp.pick(e.mint, &sig, a.slot, x.index, a.t_rx, tr.vsol, tr.vtok, fr, spend_p, min_out, tips, tk.dev, d.score, &meta.route, &log);
+                continue;
+            }
             if DIP_NO_FIRE.load(Ordering::Relaxed) { skip("no_new_buys", &mut skipped); continue; }
             if open.contains_key(&e.mint) { skip("open_on_token", &mut skipped); continue; }
             if open.len() >= max_inflight { skip("max_open", &mut skipped); continue; }
@@ -828,6 +1005,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             if KS_PAUSE.load(Ordering::Relaxed) || FIRE_PAUSE.load(Ordering::Relaxed) { skip("paused", &mut skipped); continue; }
             let bal = ACCT.bal.load(Ordering::SeqCst);
             if bal > 0 && bal < spend_p + 30_000_000 + ACCT.reserved.load(Ordering::SeqCst) { skip("balance", &mut skipped); continue; }
+            // dip24: only a LIVE regular mode reaches the fire (paper / off end above; this guard makes it structural)
+            if regular != Regular::Live { skip("regular_not_live", &mut skipped); continue; }
             // FIRE
             let f = fast.expect("checked above");
             let t0 = arbx::feeds::clock::now_ns();
@@ -928,6 +1107,10 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             ps_marks.clear();
             ps_time.add(t0.elapsed().as_secs_f64() * 1e6, x.trades.len());
         }
+        // dip24 (each only when on), after every live decision, send and record of this tx: the paper positions' clock; the observatory's
+        // message (an Arc clone and a try_send into its bounded channel: a full channel drops and counts, never waits)
+        if let Some(pp) = paper.as_mut() { pp.tick(slot_now, a.t_rx, hold, &log); }
+        if let Some(o) = obs.as_ref() { o.feeder.exec(&a, &x); }
     }
     eprintln!("=== DIP DONE: dumps {n_dumps} in-envelope {n_env} picks {n_picks} fired {n_fired} closed {n_closed} landed buys {} realized {:+.6} SOL skipped {:?}",
         ACCT.landed_buys.load(Ordering::SeqCst), ACCT.realized.load(Ordering::SeqCst) as f64 / 1e9, skipped);
@@ -970,6 +1153,12 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     if let Some(ps) = &presend { let mut j = ps.stats_json(); j["timing"] = ps_time.json(); re["presend"] = j; }
     if let Some(j) = ps_live_end { re["presend_live"] = j; }
     if let Some(sf) = shred.as_ref() { re["shred"] = sf.json(); eprintln!("=== DIP SHRED:{}", sf.line()); }
+    // dip24: why the run stopped first; the paper book's totals; the observatory's last records and totals (each only when on)
+    re["stop_why"] = DIP_STOP_WHY.get().copied().unwrap_or("feeds_closed").into();
+    if let Some(pp) = paper.as_mut() { pp.finish(&log); re["regular_paper"] = pp.json(); eprintln!("=== DIP{}", pp.line()); }
+    if regular != Regular::Live { re["regular"] = regular.as_str().into(); }
+    if PL_ON.load(Ordering::Relaxed) { re["profit_lock"] = serde_json::json!({"peak": PL_PEAK.load(Ordering::Relaxed), "floor": PL_FLOOR.load(Ordering::Relaxed)}); }
+    if let Some(o) = obs.as_mut() { let j = o.finish(Duration::from_secs(15)); eprintln!("=== DIP OBSERVATORY: {j}"); re["obs"] = j; }
     log.w(re);
     feed_stop.store(true, Ordering::SeqCst);    // every position is closed: the feeds may stop now
     if live { tg::raise(arbx::alerts::Level::Info, "dip_end", "end", "🏁", "DIP RUN END", arbx::alerts::format::Body::new().kv("trades", ACCT.landed_buys.load(Ordering::SeqCst).to_string()).kv("realized", sol_str(ACCT.realized.load(Ordering::SeqCst))), false); }
@@ -1926,3 +2115,8 @@ mod defer_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+// dip24 (10-29 PKT): the observatory wiring, the limits, the regular mode's paper tracker (dip24_tests.rs)
+#[cfg(test)]
+#[path = "dip24_tests.rs"]
+mod dip24_tests;

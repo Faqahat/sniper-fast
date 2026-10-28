@@ -419,6 +419,103 @@ impl QStop {
 /// brought in); a failed / absent preload brings 0 (the plain warm-up)
 pub fn arm_on(now_ns: u64, start_ns: u64, warm_ns: u64, covered_ns: u64) -> bool { now_ns >= start_ns.saturating_add(warm_ns.saturating_sub(covered_ns)) }
 
+// ---- dip23 QUIET v2 (LOG-ONLY; ops/strategies/presend/filter/QUIET2.md §5.2, quiet2/x3_features.py arm_feats) ------------------
+// The QUIET v2 study's one surviving candidate ("trades <= 6 in the last 60 s AND the price at its 120 s high"), post hoc, to be
+// settled on >= 2 days of fresh arm / skip records. NEVER acted on: the engine only writes it into the records.
+//   * per token, a ring of the last 120 s of (time, post-trade price) and a monotonic deque of its maxima: O(1) amortized per trade
+//     (one map lookup; each entry is pushed and popped once), O(trades of the last 60 s) at a trigger (the count), memory bounded by
+//     120 s of trades per token; tokens idle for 120 s are dropped by `sweep` (the engine's tick).
+//   * the features at a trigger, CAUSAL (the ring holds only trades strictly before the trigger trade: the engine pushes a trade
+//     after its trigger decision; an earlier trade of the same tx was pushed before):
+//       n_tr_60s     = trades of the token in [t0 - 60 s, t0)        (the study: bt >= bt0 - 60 over the rows before the trigger)
+//       maxdd_120s   = (max post price of [t0 - 120 s, t0) - pre_p) / max  (the study: pre_p / max - 1, in %; sign flipped)
+//       at_120s_high = maxdd_120s <= 0.001 (within 0.1%)             (the study's cut was -0.2191 %: both can be read back from maxdd)
+//       skip         = n_tr_60s <= 6 AND at_120s_high                 (the candidate rule; LOGGED ONLY)
+//     pre_p = the trigger trade's PRE-trade price (the study's pre_p = (VS - SOL) / (VT + TOK)); no trade in 120 s: maxdd 0 (the
+//     study's 0.0), so a token with no history looks "at its high" (the reader has n_120s and ring_s to tell new from unseen).
+//   * the CLOCK: the study used the chain's block time (integer seconds); live, the feed's arrival time (t_rx, unix ns) is the only
+//     clock there is, so the windows are 60.0 / 120.0 s of arrival time (the study's integer-second windows are up to 1 s wider).
+
+/// the 60 s count window and the 120 s price window (ns)
+pub const V2_CNT_NS: u64 = 60_000_000_000;
+pub const V2_WIN_NS: u64 = 120_000_000_000;
+/// the candidate rule: <= 6 trades in 60 s, the price within 0.1% of its 120 s high
+pub const V2_N_MAX: u32 = 6;
+pub const V2_HIGH_TOL: f64 = 0.001;
+
+/// the v2 features at a trigger (the record's "v2")
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct V2Feat {
+    pub n_tr_60s: u32, pub at_120s_high: bool, pub maxdd_120s: f64, pub skip: bool,
+    /// context for the reader: trades in the 120 s window, the ring's coverage at the trigger (s since the first trade it saw)
+    pub n_120s: u32, pub ring_s: f64,
+}
+
+impl V2Feat {
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::json!({"n_tr_60s": self.n_tr_60s, "at_120s_high": self.at_120s_high, "maxdd_120s": self.maxdd_120s, "skip": self.skip,
+            "n_120s": self.n_120s, "ring_s": (self.ring_s * 10.0).round() / 10.0})
+    }
+}
+
+/// one token's ring: (t, post price) of the last 120 s oldest first; the maxima deque (a subsequence of `q`, prices decreasing)
+#[derive(Debug, Default)]
+struct V2Tok { q: VecDeque<(u64, f64)>, mx: VecDeque<(u64, f64)>, last_t: u64 }
+
+impl V2Tok {
+    /// drop what is older than the 120 s window ending at `t0` (exclusive of t0 itself: see `feats`)
+    fn expire(&mut self, t0: u64) {
+        let lo = t0.saturating_sub(V2_WIN_NS);
+        while self.q.front().is_some_and(|x| x.0 < lo) { self.q.pop_front(); }
+        while self.mx.front().is_some_and(|x| x.0 < lo) { self.mx.pop_front(); }
+    }
+    fn push(&mut self, t: u64, p: f64) {
+        self.expire(t);
+        while self.mx.back().is_some_and(|x| x.1 <= p) { self.mx.pop_back(); }
+        self.mx.push_back((t, p));
+        self.q.push_back((t, p));
+        self.last_t = self.last_t.max(t);
+    }
+}
+
+/// every token's ring
+#[derive(Debug, Default)]
+pub struct V2Ring { toks: FxHashMap<Pk, V2Tok>, first_t: u64, max_t: u64, swept_t: u64 }
+
+impl V2Ring {
+    pub fn new() -> V2Ring { V2Ring::default() }
+    pub fn tokens(&self) -> usize { self.toks.len() }
+    pub fn entries(&self) -> usize { self.toks.values().map(|t| t.q.len()).sum() }
+    /// a trade of `mint` at `t` (feed arrival, ns) with post-trade price `p`: AFTER the trigger decision on that trade
+    pub fn push(&mut self, mint: &Pk, t: u64, p: f64) {
+        if self.first_t == 0 { self.first_t = t; }
+        self.max_t = self.max_t.max(t);
+        self.toks.entry(*mint).or_default().push(t, p);
+    }
+    /// the features of a trigger at `t0` on `mint` whose pre-trade price is `pre_p`; the ring holds the trades before it
+    pub fn feats(&mut self, mint: &Pk, t0: u64, pre_p: f64) -> V2Feat {
+        let ring_s = if self.first_t == 0 { 0.0 } else { t0.saturating_sub(self.first_t) as f64 / 1e9 };
+        let Some(tk) = self.toks.get_mut(mint) else {
+            return V2Feat { n_tr_60s: 0, at_120s_high: true, maxdd_120s: 0.0, skip: true, n_120s: 0, ring_s };
+        };
+        tk.expire(t0);
+        let lo60 = t0.saturating_sub(V2_CNT_NS);
+        let n_tr_60s = tk.q.iter().rev().take_while(|x| x.0 >= lo60).count() as u32;
+        let maxdd_120s = match tk.mx.front() { Some(&(_, m)) if m > 0.0 => (m - pre_p) / m, _ => 0.0 };
+        let at_120s_high = maxdd_120s <= V2_HIGH_TOL;
+        V2Feat { n_tr_60s, at_120s_high, maxdd_120s, skip: n_tr_60s <= V2_N_MAX && at_120s_high, n_120s: tk.q.len() as u32, ring_s }
+    }
+    /// drop the tokens with no trade in the last 120 s of the ring's own clock (its latest trade); at most once per 10 s of it.
+    /// -> whether a sweep ran
+    pub fn sweep(&mut self) -> bool {
+        if self.max_t < self.swept_t.saturating_add(10_000_000_000) { return false; }
+        self.swept_t = self.max_t;
+        let lo = self.max_t.saturating_sub(V2_WIN_NS);
+        self.toks.retain(|_, t| t.last_t >= lo);
+        true
+    }
+}
+
 // ---- the raw recording (collector chunks) --------------------------------------------------------------------------------
 
 /// one recorded tx with pump trade events (chain position, block time in seconds, the trades / creates decoded as the live feed
@@ -2036,5 +2133,103 @@ mod tests {
                    book: done off the event loop); = one book over everything: {}", base_v.len(), c == d);
         assert_eq!(c.0, d.0);
         assert_eq!(c.1, d.1);
+    }
+
+    // ---- dip23 QUIET v2 ring (log-only) ----
+
+    const NS: u64 = 1_000_000_000;
+
+    #[test]
+    fn v2_ring_empty_and_unknown_token() {
+        let mut r = V2Ring::new();
+        let f = r.feats(&pk(1), 500 * NS, 1.0);
+        assert_eq!(f, V2Feat { n_tr_60s: 0, at_120s_high: true, maxdd_120s: 0.0, skip: true, n_120s: 0, ring_s: 0.0 });
+        r.push(&pk(2), 400 * NS, 2.0);
+        // a token the ring never saw: no trades, "at its high" (the study's 0.0), the ring's coverage says how much it saw
+        let f = r.feats(&pk(1), 500 * NS, 1.0);
+        assert_eq!((f.n_tr_60s, f.n_120s, f.skip, f.ring_s), (0, 0, true, 100.0));
+        assert_eq!(f.json()["ring_s"], 100.0);
+        assert_eq!(f.json()["skip"], true);
+    }
+
+    #[test]
+    fn v2_ring_window_expiry_and_count() {
+        let mut r = V2Ring::new();
+        let m = pk(7);
+        // trades at 0, 50, 59.5, 60, 100, 119.9, 120, 150 s; the trigger at t0 = 180 s
+        for (t, p) in [(0.0, 1.0), (50.0, 1.0), (59.5, 1.0), (60.0, 1.0), (100.0, 1.0), (119.9, 1.0), (120.0, 1.0), (150.0, 1.0)] {
+            r.push(&m, (t * NS as f64) as u64, p);
+        }
+        let f = r.feats(&m, 180 * NS, 1.0);
+        // [120 s, 180 s): the trades at 120 and 150 (the one at 119.9 is out; the 60 s boundary is inclusive at t0 - 60 = 120)
+        assert_eq!((f.n_tr_60s, f.n_120s), (2, 5), "{f:?}");
+        // the 120 s window [60 s, 180 s): 60, 100, 119.9, 120, 150 (the ring kept those); the one at 59.5 is out
+        let tk = r.toks.get(&m).unwrap();
+        assert_eq!(tk.q.front().unwrap().0, 60 * NS);
+        assert_eq!(tk.q.len(), 5);
+        // later: everything but the last expires
+        let f = r.feats(&m, 269 * NS, 1.0);
+        assert_eq!((f.n_tr_60s, f.n_120s), (0, 1));
+        let f = r.feats(&m, 271 * NS, 1.0);
+        assert_eq!((f.n_tr_60s, f.n_120s), (0, 0));
+        assert_eq!(f.maxdd_120s, 0.0);
+    }
+
+    #[test]
+    fn v2_ring_high_and_drawdown() {
+        let mut r = V2Ring::new();
+        let m = pk(3);
+        r.push(&m, 10 * NS, 1.00);
+        r.push(&m, 20 * NS, 1.25);   // the 120 s high
+        r.push(&m, 30 * NS, 1.10);
+        r.push(&m, 40 * NS, 0.90);
+        // the trigger at 50 s whose pre-trade price is 1.00: 20% under the high -> not at the high; the count is 4 (<= 6)
+        let f = r.feats(&m, 50 * NS, 1.00);
+        assert!((f.maxdd_120s - 0.2).abs() < 1e-12, "{f:?}");
+        assert_eq!((f.n_tr_60s, f.at_120s_high, f.skip), (4, false, false));
+        // at the high (within 0.1%): 1.249 vs 1.25 -> dd 0.0008
+        let f = r.feats(&m, 50 * NS, 1.249);
+        assert!(f.at_120s_high && f.skip, "{f:?}");
+        // above the high (a gap in the feed): negative dd, still "at the high"
+        let f = r.feats(&m, 50 * NS, 1.30);
+        assert!(f.maxdd_120s < 0.0 && f.at_120s_high);
+        // just outside the tolerance
+        let f = r.feats(&m, 50 * NS, 1.25 * (1.0 - 0.0011));
+        assert!(!f.at_120s_high && !f.skip);
+        // the high expires out of the window: at 141 s the max of [21 s, 141 s) is 1.10
+        let f = r.feats(&m, 141 * NS, 1.10);
+        assert!(f.at_120s_high && (f.maxdd_120s).abs() < 1e-12 && f.n_120s == 2, "{f:?}");
+        // ties: the newest of equal maxima is kept, so the max survives as long as its latest occurrence
+        r.push(&m, 150 * NS, 1.10);
+        let f = r.feats(&m, 260 * NS, 1.00);
+        assert!((f.maxdd_120s - (0.10 / 1.10)).abs() < 1e-12 && f.n_120s == 1, "{f:?}");
+    }
+
+    #[test]
+    fn v2_ring_rule_count_threshold_and_sweep() {
+        let mut r = V2Ring::new();
+        let m = pk(4);
+        for k in 0..6 { r.push(&m, (100 + k) * NS, 1.0); }
+        let f = r.feats(&m, 110 * NS, 1.0);
+        assert_eq!((f.n_tr_60s, f.skip), (6, true), "6 trades: still the candidate skip");
+        r.push(&m, 107 * NS, 1.0);
+        let f = r.feats(&m, 110 * NS, 1.0);
+        assert_eq!((f.n_tr_60s, f.skip), (7, false), "7 trades: kept");
+        // the sweep: a token idle for 120 s of the ring's clock is dropped; at most once per 10 s of it
+        r.push(&pk(5), 110 * NS, 1.0);
+        assert!(r.sweep());
+        assert_eq!(r.tokens(), 2);
+        r.push(&pk(5), 119 * NS, 1.0);
+        assert!(!r.sweep(), "9 s later: no sweep yet");
+        r.push(&pk(5), 231 * NS, 1.0);
+        assert!(r.sweep());
+        assert_eq!((r.tokens(), r.entries()), (1, 2), "token 4 (last trade 107 s) dropped at 231 s; token 5 kept with its 2 entries in the window (119, 231)");
+        // a push expires the ring's own old entries (bounded memory): 1000 trades over 1000 s hold <= 121 entries
+        let mut r = V2Ring::new();
+        for k in 0..1000u64 { r.push(&m, k * NS, 1.0 + (k % 7) as f64); }
+        assert!(r.entries() <= 121 && r.entries() >= 120, "{}", r.entries());
+        let f = r.feats(&m, 1000 * NS, 1.0);
+        assert_eq!((f.n_tr_60s, f.n_120s), (60, 120));
+        assert!((f.maxdd_120s - 6.0 / 7.0).abs() < 1e-12);
     }
 }

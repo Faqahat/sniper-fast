@@ -939,6 +939,8 @@ impl Path {
 
     /// arbx-fast: the path's tip accounts (the executor picks a Helius Sender copy's tip account from them)
     pub fn tip_accounts(&self) -> &[Pk] { &self.tips }
+    /// dip24 (read-only, no cursor move): the tip one copy through this path pays as configured (0: a tipless path); the paper tracker's cost
+    pub fn tip_lamports_cfg(&self) -> u64 { if self.tips.is_empty() { 0 } else { self.tip_lamports } }
 
     /// the rate queue's waiting sends and λ (status `exec.queue_now`, `lambda_now`)
     pub fn queue_now(&self) -> Option<(usize, Option<i64>)> { self.budget.as_ref().map(|b| (b.waiting(), b.lambda())) }

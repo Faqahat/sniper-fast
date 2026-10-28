@@ -77,7 +77,7 @@ for m in mints:
             cf_sold = sold * cf / v_act
             tot[tp] += (cf_sold - cost) / 1e9; diffs[tp].append((cf_sold - sold) / 1e9)
         act_tot += (sold - cost) / 1e9; n += 1
-print(f"{region} r{RUN}: {n} fills priced | actual (TP 10%, 200 ms) curve P&L {act_tot:+.3f} SOL")
+print(f"{region} r{RUN}: {n} fills priced | actual (live TP, 200 ms) curve P&L {act_tot:+.3f} SOL")
 random.seed(1)
 for tp in TPS:
     dd = diffs[tp]; bs = sorted(sum(random.choice(dd) for _ in dd) for _ in range(1000))
