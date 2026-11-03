@@ -114,8 +114,10 @@ type Timing struct {
 
 // Trade is one regular buy (Kind "REG") or one pre-send fill / position (Kind "PS").
 type Trade struct {
-	ID    int
-	Kind  string
+	ID   int
+	Kind string
+	// dip26: a pre-send position of a re-arm window (its records say "kind":"rearm")
+	Rearm bool
 	S     int
 	T     int64
 	Mint  string
@@ -195,6 +197,9 @@ type RunStart struct {
 	PSL                                            map[string]any // presend_live subset (every key present, None when missing)
 	Quiet                                          *QuietStart
 	present                                        bool
+	// dip26: presend_live.rearm (nil: none) and the tries' rate caps (global, per path)
+	Rearm            *RearmCfg
+	PSMax, PSPathMax Num
 }
 
 type M2Cfg struct {
@@ -410,6 +415,17 @@ type Sess struct {
 	Lat      LatAgg             // the pre-send tries' latency
 	LatKind  map[string]*LatAgg // by the leader's client family
 	WinTries map[int64]int64    // sent tries per window
+
+	// dip24 (log only): limits, the profit lock, the rolling fee budget, the regular mode, the observatory
+	D24 D24Log
+
+	// dip26: the re-arm (its records, the start line's setting, the engine's status part), the send-path A/B, the
+	// tries' caps from the start line (global, per path)
+	RA     RearmRec
+	RALog  *RearmCfg
+	RAEng  RearmEng
+	AB     ABSess
+	PSCaps [2]int64
 }
 
 // MinAmt is an amount booked in a unix minute.
@@ -433,7 +449,7 @@ func newSess(idx int) *Sess {
 		RealQ: map[string][]int64{}, PSFeeEach: NewOCounter(), PSRes: NewOCounter(), PSOpenSet: map[WKey]bool{},
 		PSSkips: NewOCounter(), PSDisarms: NewOCounter(), PSPos: map[psKey]*Trade{}, PSByKey: map[psKey][]*Trade{},
 		PSEndChk: NewOCounter(), QRuleOn: -1, Buckets: map[int64]int64{}, FeeBuckets: map[int64]int64{},
-		RentFree: map[int64]int64{}, Tx: newTxTally()}
+		RentFree: map[int64]int64{}, Tx: newTxTally(), RA: newRearmRec()}
 }
 
 // PSFees is the larger of the counted failed-try fees, the log's counter and presend_live_stop.fees.
@@ -595,6 +611,12 @@ type Model struct {
 	psLandPend map[string]*PSLat
 	tryLeader  map[string]string
 	tryOrder   []string
+	// the feed names the log gives ("feeds: ..." / FEEDSTATUS feed=), bounded
+	Feeds []string
+	// dip26: the send paths' SEND-PATH UNHEALTHY / RECOVERED edges (bounded)
+	PathEdges map[string]*PathEdge
+	// the Filters tab: the records its table needs (whole file, every session; filters.go)
+	Filt *FiltAcc
 }
 
 type armRec struct {
@@ -610,7 +632,7 @@ func NewModel(failBuyFee int64, logKeep int) *Model {
 	M := &Model{jsess: -1, lsess: -1, LogKeep: logKeep, LogRing: NewRing(logKeep), LogImp: NewRing(max(200, logKeep/2)),
 		RPC: map[[2]string]*RPCStat{}, PollErr: map[int]int64{}, PathErr: map[string]map[int]int64{},
 		PathKind: map[string]string{}, PathTotal: map[string]int64{}, armInfo: map[[2]int64]armRec{},
-		EvCount: map[string]int{}}
+		EvCount: map[string]int{}, Filt: newFiltAcc()}
 	M.lpend = LogCfg{}
 	if failBuyFee > 0 {
 		M.FailBuyFee, M.FailBuyFeeSrc = failBuyFee, "cmdline"
@@ -665,7 +687,7 @@ var jsonEvents = map[string]bool{"run_start": true, "run_end": true, "fire": tru
 	"presend_live_disarm": true, "presend_live_skip": true, "presend_live_fill": true, "presend_live_exit": true,
 	"presend_live_close": true, "presend_live_realized": true, "presend_live_ata_close": true, "presend_live_stop": true,
 	"presend_live_end_check": true, "presend_live_held": true, "presend_live_quiet_preload": true,
-	"presend_live_quiet_state": true}
+	"presend_live_quiet_state": true, "presend_live_rearm_defer": true}
 
 var evKey = []byte(`"ev":"`)
 
@@ -701,6 +723,7 @@ func (M *Model) feedOne(line, ev []byte) {
 			M.Bad++
 		}
 	}()
+	M.Filt.feed(ev, line) // the Filters tab (its own presend_* records, before the model ignores the shadow's)
 	switch string(ev) {
 	case "presend_live_sell_land": // v3 only: a landed pre-send sell (ignored by the Python v1)
 		M.jPSSellLand(line)
@@ -814,7 +837,7 @@ func (M *Model) jAttemptLand(line []byte) {
 		res = strings.ToValidUTF8(res, "�")
 	}
 	S.PSRes.Add(res, 1)
-	M.latLand(S, line, res)
+	rearm := M.latLand(S, line, res)
 	t := tOf(line)
 	M.setTime(S, t)
 	if res != "ok" {
@@ -833,6 +856,10 @@ func (M *Model) jAttemptLand(line []byte) {
 			mm := floorDiv(base, minuteNS)
 			S.Buckets[mm] -= fee
 			S.FeeBuckets[mm] += fee
+			if rearm { // dip26: the re-arm's part of the failed tries
+				S.RA.Fees += fee
+				S.RA.FeeN++
+			}
 		}
 	}
 }
@@ -972,6 +999,10 @@ func parseRunStart(o Obj) RunStart {
 			qs.Preload = Truthy(q["preload"])
 			rs.Quiet = qs
 		}
+		if r, ok := SubObj(pl, "rearm"); ok {
+			rs.Rearm = rearmFromRS(r)
+		}
+		rs.PSMax, rs.PSPathMax = NumKey(pl, "max_per_sec"), NumKey(pl, "path_max_per_sec")
 	}
 	return rs
 }
@@ -1320,6 +1351,20 @@ func (M *Model) ps(S *Sess, e string, o Obj) {
 	w := wkeyOf(o)
 	mint := StrOr(o, "mint", "")
 	key := psKey{w, mint}
+	// dip26: a re-arm window's records carry "kind":"rearm": its own records (arm, skip, defer, disarm) never count as
+	// T2's; its position(s) are tagged (trades table "RA") and their figures counted apart too
+	rearm := false
+	if k, _ := StrKey(o, "kind"); k == "rearm" {
+		rearm = true
+		if M.raRec(S, e, o, w) {
+			return
+		}
+		defer func() {
+			for _, x := range S.PSByKey[key] {
+				x.Rearm = true
+			}
+		}()
+	}
 	switch e {
 	case "presend_live_arm":
 		S.PSArmed++
@@ -1347,6 +1392,10 @@ func (M *Model) ps(S *Sess, e string, o Obj) {
 	case "presend_live_fill":
 		S.PSFills++
 		S.Tx.add(true, NumKey(o, "sol_in").Int(), NumKey(o, "t").Int())
+		S.abFill(StrOr(o, "path", ""))
+		if rearm {
+			S.RA.Fills++
+		}
 		if tr := S.PSPos[key]; tr != nil && tr.PClose == nil {
 			tr.NFills++ // a second attempt of the same window filled: merged into the position
 			if sig, ok := StrKey(o, "sig"); ok && sig != "" {
@@ -1365,6 +1414,9 @@ func (M *Model) ps(S *Sess, e string, o Obj) {
 		}
 		tr.Mint = mint
 		tr.Spend = psSpend(S)
+		if sp := NumKey(o, "spend"); sp.Truthy() { // dip26: a fill says its window's size (a re-arm window's own)
+			tr.Spend = sp
+		}
 		tr.SolIn = NumKey(o, "sol_in")
 		tr.Client = StrOr(o, "client", "?")
 		tr.Path = StrOr(o, "path", "")
@@ -1491,6 +1543,15 @@ func (M *Model) ps(S *Sess, e string, o Obj) {
 			tr.Src = "tx"
 		}
 		S.PSNReal++
+		if rearm {
+			S.RA.NReal++
+			if pnl.Ok() {
+				S.RA.Realized += pnl.Int()
+				if pnl.Int() > 0 {
+					S.RA.Wins++
+				}
+			}
+		}
 		if pnl.Ok() {
 			M.pushEvent(tr)
 			S.PSRealized += pnl.Int()
@@ -1533,6 +1594,9 @@ func (M *Model) ps(S *Sess, e string, o Obj) {
 		}
 		if tr != nil {
 			tr.Rent, tr.HasRent = d, true
+			if tr.Rearm { // dip26: a re-arm position's account
+				S.RA.Rent += d
+			}
 			amt := d
 			if tr.HasPnl {
 				amt += tr.Pnl

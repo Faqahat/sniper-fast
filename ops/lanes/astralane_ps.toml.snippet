@@ -1,0 +1,18 @@
+# ---- PRE-SEND LIVE attempts on Astralane (ASTRA A/B, run 38; owner 10-29 ~19:55 PKT: Astralane VIP1 trial; ops/lanes/ASTRA_PLAN.md) ----
+# Insert into /root/sniper-dip/dip_edge_ams.toml right after the helius-ps block (run_dip_prod.sh --region ams copies that base config).
+# VIP1 (astralane.gitbook.io/docs/low-latency/send-txn-fee-tiers): min tip 0.0001 SOL, 20 single-tx TPS per key, same FIFO as the
+# other tiers. Its OWN [[send]] entry: an attempt path may not be a reactive buy / sell path (the engine refuses that). Same key as
+# the "astralane" entry above (free-tier settings, no route uses it): together they must stay under the key's 20 TPS.
+# max_per_sec 19 = one under 20: our cap is a rolling 1 s window measured at send time, the gateway counts at arrival.
+# queue_ms 0: a try over the rate is skipped at once (counted "rate_path_config"), never queued.
+# tip 100000 lamports = the VIP1 minimum (code minimum for kind iris 10,000); the tip transfer reverts with a failed try (paid on fills only).
+# https (the key travels in the URL; the engine refuses a secret over plain http). FAST (--fast-send) gives it its own binary HTTP/1.1
+# connection: check the start line says "astralane-ps(fast)", else every try takes two rate slots (async send path).
+[[send]]
+name = "astralane-ps"
+enabled = true
+kind = "iris"
+url = "https://ams.gateway.astralane.io/irisb?api-key=${ASTRALANE_KEY}&method=sendTransaction"
+tip_lamports = 100000
+max_per_sec = 19
+queue_ms = 0

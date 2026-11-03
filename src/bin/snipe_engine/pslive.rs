@@ -73,6 +73,12 @@
 //         the last 24 h (feed clock) reach X the sender PAUSES (no new attempts; windows still arm and are recorded; a loud line and a
 //         presend_live_fee_pause record), and resumes when the rolling sum falls back under X (presend_live_fee_resume). It never stops
 //         the run (dip23 stopped the stream for good at X). Range (0, 100] SOL.
+//   * dip26 LIVE RE-ARM (owner 10-29 19:35 PKT "add re-arm in the engine"; psrearm.rs has the rule): --presend-live-rearm on arms a
+//       window on a followed token <= 141 slots old after a single >= 6% sell, when another wallet still holds >= 6% at the end of slot
+//       dump + 2 (the observatory's rule R0, src/obs/rearm.rs); the T2 machinery does the rest (sender, caps, fee budget, one position,
+//       exits, the dip19 account guard). --presend-live-rearm-size-sol X (default: the pre-send size; <= --max-sol),
+//       --presend-live-rearm-gap-slots G (20), --presend-live-rearm-quiet-stop N:M (6:2), --presend-live-rearm-r5-skip on|off (off; needs
+//       --presend-live-quiet-skip on). Off: nothing of it runs and every record is dip25's (golden test, dip26_tests.rs).
 // =====================================================================================================================
 use super::*;
 use arbx::presend_live as pl;
@@ -83,16 +89,48 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 
 /// every --presend-live-* flag (a stray one without --presend-live is refused)
-const FLAGS: [&str; 17] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
+const FLAGS: [&str; 22] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
     "--presend-live-cu-limit", "--presend-live-cu-price-micro", "--presend-live-tip-lamports", "--presend-live-routes", "--presend-live-max-per-sec",
     "--presend-live-path-max-per-sec", "--presend-live-max-fills", "--presend-live-fee-budget-sol", "--presend-live-create-slot", "--presend-live-one-position",
-    "--presend-live-exit-ms", "--presend-live-quiet-v2-log"];
+    "--presend-live-exit-ms", "--presend-live-quiet-v2-log", "--presend-live-min-age-slots", "--presend-live-lone-whale-slots", "--presend-live-ann",
+    "--presend-live-deep-drop", "--presend-live-holds-state"];
 
 /// dip20 QUIET: its flags (each needs --presend-live; the history / threshold / warm-up / fbots / preload ones need
 /// --presend-live-quiet-skip on)
 const QFLAGS: [&str; 10] = ["--presend-live-quiet-stop", "--presend-live-quiet-skip", "--presend-live-quiet-hist-h", "--presend-live-quiet-fol",
     "--presend-live-quiet-warmup-min", "--presend-live-fbots", "--presend-live-quiet-preload", "--presend-live-quiet-state", "--presend-live-quiet-state-max-gap-min",
     "--presend-live-quiet-book"];
+
+/// dip26 RE-ARM: its flags (each needs --presend-live; the parameters after the first need --presend-live-rearm on)
+const RFLAGS: [&str; 5] = ["--presend-live-rearm", "--presend-live-rearm-size-sol", "--presend-live-rearm-gap-slots", "--presend-live-rearm-quiet-stop",
+    "--presend-live-rearm-r5-skip"];
+
+// dip26 LIVE RE-ARM: the rule's state machine (off without --presend-live-rearm on)
+#[path = "psrearm.rs"]
+mod psrearm;
+
+/// dip26 RE-ARM's parameters (off by default)
+#[derive(Clone, Debug, PartialEq)]
+pub struct RearmCfg {
+    /// --presend-live-rearm on
+    pub on: bool,
+    /// --presend-live-rearm-size-sol (lamports; default: the pre-send size)
+    pub spend: u64,
+    /// --presend-live-rearm-gap-slots G (20): the window's last slot = dump + 3 + G
+    pub gap: u64,
+    /// --presend-live-rearm-quiet-stop N:M (6:2): at the first slot >= the arm slot + N, fewer than M trades by anyone but us
+    pub stop: pq::QStop,
+    /// --presend-live-rearm-r5-skip on: no window when all four QUIET arm signals hold for the largest remaining holder
+    pub r5_skip: bool,
+}
+
+impl RearmCfg {
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::json!({"on": self.on, "spend": self.spend, "gap": self.gap, "quiet_stop": format!("{}:{}", self.stop.n, self.stop.m), "r5_skip": self.r5_skip,
+            "big_pct": psrearm::RE_BIG as f64 / pl::SUPPLY * 100.0, "max_age_slots": psrearm::RE_MAX_AGE, "wait_slots": psrearm::RE_WAIT, "untradeable_sol": psrearm::RE_UNTRADE / 1_000_000_000,
+            "stop_ms": WHALE_SELL_MS})
+    }
+}
 
 /// dip20 QUIET's parameters (all off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -155,6 +193,28 @@ pub struct Cfg {
     pub fee_budget: u64,
     pub create_slot: bool,
     pub one_position: bool,
+    /// --presend-live-min-age-slots N (0 = off, the default): skip a trigger whose token is younger than N slots (trigger slot −
+    /// create slot < N; "young_age"). 2 = also skip age 1 (10-29 loss study: age-1 whales lose; 24-run check ops/strategies/presend/losses/verify)
+    pub min_age_slots: u64,
+    /// dip27 --presend-live-lone-whale-slots N (0 = off, the default; 1..=64): skip a trigger when the whale is the token's only buyer in
+    /// its last N slots (the trigger's slot and the N - 1 before it, the trigger's own buy counted, ours never): "lone_whale". Decided
+    /// LAST (after QUIET): only a trigger that would arm is skipped. 50 = the 10-30 loss study's rule (ops/strategies/presend/prevent:
+    /// STATE nbuyers50 <= 1, verified; ~+0.6 SOL/day, 20 of 24 runs helped)
+    pub lone_whale_slots: u64,
+    /// dip27 --presend-live-ann on (off by default): LOG-ONLY annotations ("ann") for the 10-30 loss study's leads: the trigger's
+    /// buyers in its last 50 slots and the token's creator / its holding (arm and skip records; the bad-creator list is scored
+    /// offline), each attempt's largest other holder at signing (`ob6`), and at a fill: its depth, "ctx85" (another wallet >= 6% at
+    /// signing and a drop < 15%: the deeper-limit lead's would-skip) and the holders >= 2% with their hold clocks (the sell-timer
+    /// lead). Never changes a decision
+    pub ann: bool,
+    /// dip28 --presend-live-deep-drop D (0 = off, the default; D in (drop, 0.5]): an attempt's limit drop is D instead of `drop` while,
+    /// at its signing, a wallet but the window's whale / re-arm dumper and ours holds >= DEEP_OB6 % of supply (T2 AND re-arm windows).
+    /// 0.15 = the 10-30 loss study's "deeper limit" (GUARDS ctx lead; run 37 replay with re-arm: +1.08 SOL alone, +1.29 with the
+    /// lone-whale skip; ops/strategies/presend/prevent, sniper-data/multiarm/flt_summary.json)
+    pub deep_drop: f64,
+    /// dip28 --presend-live-holds-state PATH (needs --presend-live-ann on): the hold clocks are preloaded from PATH at the start (if it
+    /// exists) and saved to it at the run's end (the next run continues them; the safe sell-timer check's log needs a long history)
+    pub holds_state: Option<String>,
     /// the shadow's T2 / exit parameters (--presend-*): the same rules
     pub whale_pct: f64, pub window_slots: u64, pub live_ms: f64, pub exit_slots: u64, pub tp: f64, pub sl: f64,
     /// dip22 (--presend-live-exit-ms N; 0 = off, the default): sell N ms after our fill is seen, before the slot limit. The "sell
@@ -165,6 +225,8 @@ pub struct Cfg {
     /// dip23 (--presend-live-quiet-v2-log; off by default): the QUIET v2 candidate's features written into the arm / skip records
     /// (log-only; a per-token 120 s price ring is kept only with it)
     pub quiet_v2_log: bool,
+    /// dip26 RE-ARM (default: off)
+    pub rearm: RearmCfg,
 }
 
 impl Cfg {
@@ -181,7 +243,7 @@ impl Cfg {
         let arg_u64_opt = |f: &str| arg(f).and_then(|s| s.parse::<u64>().ok());
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -193,9 +255,14 @@ impl Cfg {
         // dip24: optional (1.0); SOL of failed-attempt fees per ROLLING 24 h (the sender pauses above it, never stops)
         let fee_sol = arg_f64("--presend-live-fee-budget-sol", 1.0);
         if !(fee_sol > 0.0) { bail!("REFUSED: --presend-live-fee-budget-sol must be > 0 SOL (failed-attempt fees per rolling 24 h)"); }
+        let spend = (arg_f64("--presend-live-size-sol", sh.size_sol) * 1e9).round() as u64;
+        let quiet = Cfg::quiet_from(&has, &arg, &arg_f64, &onoff)?;
+        let one_position = onoff("--presend-live-one-position", true)?;
+        // dip26: the re-arm's flags (off: RearmCfg { on: false, .. }, nothing of it runs)
+        let rearm = Cfg::rearm_from(&has, &arg, &arg_u64, &arg_f64, &onoff, spend, quiet.skip, one_position)?;
         let c = Cfg {
             dry,
-            spend: (arg_f64("--presend-live-size-sol", sh.size_sol) * 1e9).round() as u64,
+            spend,
             k: arg_u64("--presend-live-k", 4),
             drop: arg_f64("--presend-live-drop", sh.drop),
             deadline_slots: arg_u64("--presend-live-deadline-slots", 1),
@@ -208,14 +275,44 @@ impl Cfg {
             max_fills,
             fee_budget: (fee_sol * 1e9).round() as u64,
             create_slot: onoff("--presend-live-create-slot", false)?,
-            one_position: onoff("--presend-live-one-position", true)?,
+            one_position,
+            min_age_slots: arg_u64("--presend-live-min-age-slots", 0),
+            lone_whale_slots: arg_u64("--presend-live-lone-whale-slots", 0),
+            ann: onoff("--presend-live-ann", false)?,
+            deep_drop: arg_f64("--presend-live-deep-drop", 0.0),
+            holds_state: arg("--presend-live-holds-state").filter(|p| !p.starts_with("--")),
             whale_pct: sh.whale_pct, window_slots: sh.window_slots, live_ms: sh.live_ms, exit_slots: sh.exit_slots, tp: sh.tp, sl: sh.sl,
             exit_ms: arg_u64("--presend-live-exit-ms", 0),
-            quiet: Cfg::quiet_from(&has, &arg, &arg_f64, &onoff)?,
+            quiet,
             quiet_v2_log: has("--presend-live-quiet-v2-log"),
+            rearm,
         };
         c.check(live, cap)?;
         Ok(Some(c))
+    }
+
+    /// dip26 RE-ARM's flags. Refused: a value missing or not a number / not on|off / not N:M, a parameter without --presend-live-rearm
+    /// on, the R5 skip without the QUIET arm rule (--presend-live-quiet-skip on: its whale history, cohort and follower-bot lists), the
+    /// re-arm with --presend-live-one-position off (never two positions at once); the ranges and the per-buy cap in check()
+    #[allow(clippy::too_many_arguments)]
+    fn rearm_from(has: &dyn Fn(&str) -> bool, arg: &dyn Fn(&str) -> Option<String>, arg_u64: &dyn Fn(&str, u64) -> u64, arg_f64: &dyn Fn(&str, f64) -> f64,
+                  onoff: &dyn Fn(&str, bool) -> Result<bool>, spend: u64, quiet_skip: bool, one_position: bool) -> Result<RearmCfg> {
+        for f in RFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
+        let on = onoff("--presend-live-rearm", false)?;
+        if !on { if let Some(f) = RFLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-rearm on"); } }
+        if let Some(v) = arg("--presend-live-rearm-size-sol") { if !v.parse::<f64>().is_ok_and(|x| x.is_finite()) { bail!("--presend-live-rearm-size-sol {v}: not a number (SOL)"); } }
+        if let Some(v) = arg("--presend-live-rearm-gap-slots") { if v.parse::<u64>().is_err() { bail!("--presend-live-rearm-gap-slots {v}: not a whole number of slots"); } }
+        let size = match arg("--presend-live-rearm-size-sol") { Some(_) => (arg_f64("--presend-live-rearm-size-sol", 0.0) * 1e9).round().max(0.0) as u64, None => spend };
+        let stop = match arg("--presend-live-rearm-quiet-stop") {
+            Some(s) => pq::QStop::parse(&s).map_err(|e| anyhow::anyhow!("--presend-live-rearm-quiet-stop {e}"))?,
+            None => pq::QStop { n: 6, m: 2 },
+        };
+        let r5_skip = onoff("--presend-live-rearm-r5-skip", false)?;
+        if on && r5_skip && !quiet_skip {
+            bail!("--presend-live-rearm-r5-skip on needs --presend-live-quiet-skip on (the QUIET arm rule's whale dump history, cohort and follower-bot lists)");
+        }
+        if on && !one_position { bail!("REFUSED: --presend-live-rearm on needs --presend-live-one-position on (never two positions at once)"); }
+        Ok(RearmCfg { on, spend: size, gap: arg_u64("--presend-live-rearm-gap-slots", 20), stop, r5_skip })
     }
 
     /// dip20 QUIET's flags (refused: a bad N:M, a skip parameter without --presend-live-quiet-skip on, the skip without its
@@ -264,6 +361,17 @@ impl Cfg {
         // dip24: --presend-live-max-fills any N (0 = unlimited); the fee budget is per rolling 24 h, (0, 100] SOL
         if self.fee_budget == 0 || self.fee_budget > 100_000_000_000 { bail!("--presend-live-fee-budget-sol must be in (0, 100] SOL per rolling 24 h"); }
         if self.exit_ms != 0 && !(50..=2_000).contains(&self.exit_ms) { bail!("--presend-live-exit-ms must be 0 (off) or 50..2000"); }
+        // dip27: the lone-whale window within the recent buys a token keeps
+        if self.lone_whale_slots > pl::RB_SLOTS { bail!("--presend-live-lone-whale-slots must be 0 (off) or 1..{}", pl::RB_SLOTS); }
+        // dip28: the deeper limit is deeper than the normal one; the holds state needs the clocks (the annotations)
+        if self.deep_drop != 0.0 && !(self.deep_drop > self.drop && self.deep_drop <= 0.5) { bail!("--presend-live-deep-drop must be 0 (off) or in ({}, 0.5] (deeper than --presend-live-drop)", self.drop); }
+        if self.holds_state.is_some() && !self.ann { bail!("--presend-live-holds-state needs --presend-live-ann on (the hold clocks are kept only with it)"); }
+        // dip26 RE-ARM: its size as the pre-send size (and within the per-buy cap), its window length
+        if self.rearm.on {
+            if self.rearm.spend == 0 || self.rearm.spend > 2_000_000_000 { bail!("--presend-live-rearm-size-sol must be in (0, 2]"); }
+            if live && self.rearm.spend > cap { bail!("REFUSED: --presend-live-rearm-size-sol {:.3} exceeds --max-sol (the per-buy cap)", self.rearm.spend as f64 / 1e9); }
+            if !(1..=60).contains(&self.rearm.gap) { bail!("--presend-live-rearm-gap-slots must be 1..60 (the window's last slot = dump + 3 + G)"); }
+        }
         Ok(())
     }
 
@@ -273,15 +381,34 @@ impl Cfg {
     pub fn json(&self) -> serde_json::Value {
         let mut j = serde_json::json!({"dry": self.dry, "spend": self.spend, "k": self.k, "drop": self.drop, "deadline_slots": self.deadline_slots, "cu_limit": self.cu_limit,
             "cu_price": self.cu_price, "tip": self.tip, "routes": self.routes, "max_per_sec": self.max_per_sec, "path_max_per_sec": self.path_max_per_sec,
-            "max_fills": self.max_fills, "fee_budget": self.fee_budget, "create_slot": self.create_slot, "one_position": self.one_position,
+            "max_fills": self.max_fills, "fee_budget": self.fee_budget, "create_slot": self.create_slot, "one_position": self.one_position, "min_age_slots": self.min_age_slots,
             "whale_pct": self.whale_pct, "window_slots": self.window_slots, "live_ms": self.live_ms, "exit_slots": self.exit_slots, "exit_ms": self.exit_ms, "tp": self.tp, "sl": self.sl,
             "fail_fee": self.fail_fee(), "margin_ms": MARGIN_MS, "whale_sell_ms": WHALE_SELL_MS});
         // dip20: only when a QUIET flag is on (flags off: dip19's record)
         if self.quiet.on() { j["quiet"] = self.quiet.json(); }
         // dip23: only with the v2 log flag
         if self.quiet_v2_log { j["quiet_v2_log"] = true.into(); }
+        // dip26: only with the re-arm on (off: dip25's record)
+        if self.rearm.on { j["rearm"] = self.rearm.json(); }
+        // dip27: only when on (off: dip26's record)
+        if self.lone_whale_slots > 0 { j["lone_whale_slots"] = self.lone_whale_slots.into(); }
+        if self.ann { j["ann"] = true.into(); }
+        // dip28: only when on (off: dip27's record)
+        if self.deep_drop > 0.0 { j["deep_drop"] = self.deep_drop.into(); j["deep_ob6"] = DEEP_OB6.into(); }
+        if let Some(p) = &self.holds_state { j["holds_state"] = p.clone().into(); }
         j
     }
+}
+
+/// dip26: the re-arm's config for the start-up line's end (none of the words the monitors parse from that line's earlier parts)
+fn rearm_desc(cfg: &Cfg) -> String {
+    let r = &cfg.rearm;
+    format!("REARM ON: after a single sell >= {:.0}% of supply on a followed token <= {} slots old (curve < {} SOL), every other wallet >= {:.0}% at the end of slot dump+{} \
+             -> window from then to slot dump+{}+{} (tries as T2, size {:.3} SOL) | ends: the next >= {:.0}% sell / no holder >= {:.0}% left (+{} ms), QUIET {}:{} since the arm, \
+             a T2 window takes over | waits while our position / token account is open on the token | R5 skip {}",
+        psrearm::RE_BIG as f64 / pl::SUPPLY * 100.0, psrearm::RE_MAX_AGE, psrearm::RE_UNTRADE / 1_000_000_000, psrearm::RE_BIG as f64 / pl::SUPPLY * 100.0, psrearm::RE_WAIT - 1,
+        psrearm::RE_WAIT, r.gap, r.spend as f64 / 1e9, psrearm::RE_BIG as f64 / pl::SUPPLY * 100.0, psrearm::RE_BIG as f64 / pl::SUPPLY * 100.0, WHALE_SELL_MS, r.stop.n, r.stop.m,
+        if r.r5_skip { "on (all 4 QUIET signals of the largest holder; not during the QUIET warm-up)" } else { "off" })
 }
 
 /// every send path a reactive buy or a sell can use (incl. --sell-fanout; an attempt path must be none of them: its own rate budget)
@@ -326,9 +453,86 @@ fn refuse_empty_classes<T>(r: &std::collections::HashMap<String, Vec<T>>) -> Res
     Ok(())
 }
 
-/// an armed window as the sender sees it
+/// an armed window as the sender sees it. dip26: `spend` = what its attempts buy with (the pre-send size; a re-arm window's own size),
+/// `rearm` = a re-arm window (its attempt records say so)
 #[derive(Clone)]
-struct SWin { id: u64, mint: Pk, launch: Launch, st_ns: u64, stop_ns: u64, en_slot: u64, vsol: u64, vtok: u64, fr: f64, pos: (u64, u32, i32), pace: pl::Pace, n: u32, done: bool }
+struct SWin { id: u64, mint: Pk, launch: Launch, st_ns: u64, stop_ns: u64, en_slot: u64, vsol: u64, vtok: u64, fr: f64, pos: (u64, u32, i32), pace: pl::Pace, n: u32, done: bool,
+              spend: u64, rearm: bool, ob6: f32, grd: Grd }
+
+/// dip28: the deeper limit's holder threshold (% of supply)
+pub const DEEP_OB6: f32 = 6.0;
+
+/// dip28: an attempt's limit drop: the deeper one while another wallet holds >= DEEP_OB6 % at signing (the window's `ob6`), else the
+/// normal one (pure: the sender's)
+fn att_drop(w: &SWin, cfg: &Cfg) -> f64 { if cfg.deep_drop > 0.0 && w.ob6 >= DEEP_OB6 { cfg.deep_drop } else { cfg.drop } }
+
+/// dip27 (log-only): the largest holding of `mint` now by a wallet but `whale` and `user` (% of supply); 0 with the annotations off
+fn ob6_pct(det: &pl::Detector, on: bool, mint: &Pk, whale: &Pk, user: &Pk) -> f32 {
+    if !on { return 0.0; }
+    det.max_other(mint, whale, user).map_or(0.0, |b| (b as f64 / pl::SUPPLY * 100.0) as f32)
+}
+
+/// dip30 LANDING GUARD (log-only; owner 10-31 ~01:05 PKT "design it, replay it and lets start with logging ... proper at landing"): the
+/// on-chain check's account set, chosen at SIGNING: the risky holders (>= 2%, >= 5 holds at risk, hz3 >= 0.3; ours never) of the
+/// token, the top GRD_K by holding, with their holdings then. At our landing the check sums their holdings (sold out / closed = 0) and
+/// fails the buy at >= GRD_PCT % (replay 20 runs: K 4 = no cap, +4.27 SOL, 15/20 runs). Copy: no allocation on the sender's path
+pub const GRD_K: usize = 4;
+pub const GRD_PCT: f64 = 6.0;
+#[derive(Clone, Copy, Default, Debug)]
+pub struct Grd { pub n: u8, pub w: [(Pk, i64); GRD_K] }
+fn grd_set(det: &pl::Detector, on: bool, mint: &Pk, user: &Pk, slot: u64) -> Grd {
+    let mut g = Grd::default();
+    if !on { return g; }
+    for h in det.holder_clocks(mint, (0.02 * pl::SUPPLY) as i64, user, slot, 12).into_iter().filter(|h| h.risk >= 5 && h.hz3 >= 0.3).take(GRD_K) {
+        g.w[g.n as usize] = (h.w, h.bal); g.n += 1;
+    }
+    g
+}
+
+/// dip27 (log-only): an arm's / a skip's annotation: the token's distinct buyers in the 50 slots up to `slot` (ours never), its
+/// creator and the creator's holding now (% of supply)
+fn ann_arm(det: &pl::Detector, user: &Pk, mint: &Pk, slot: u64) -> serde_json::Value {
+    let nb50 = det.buyers_since(mint, slot.saturating_sub(49), user);
+    let (cr, bal) = det.creator_bal(mint).map_or((None, 0), |(c, b)| (Some(b58(&c)), b));
+    serde_json::json!({"nb50": nb50, "creator": cr, "cr_pct": bal as f64 / pl::SUPPLY * 100.0})
+}
+
+/// dip28: the hold clocks' state file: {"v": 1, "slot": the save's slot, "w": {wallet: [holds, oldest first]}}. -> wallets loaded
+fn holds_load(det: &mut pl::Detector, path: &str) -> Result<usize> {
+    let txt = std::fs::read_to_string(path).with_context(|| format!("read {path}"))?;
+    let j: serde_json::Value = serde_json::from_str(&txt).with_context(|| format!("parse {path}"))?;
+    let last = j["slot"].as_u64().unwrap_or(0);
+    let mut n = 0usize;
+    for (w, v) in j["w"].as_object().context("no \"w\" object")? {
+        let Ok(pk) = bs58::decode(w).into_vec() else { continue };
+        let Ok(pk) = <[u8; 32]>::try_from(pk) else { continue };
+        let hs: Vec<u32> = v.as_array().map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x.min(u32::MAX as u64) as u32).collect()).unwrap_or_default();
+        if hs.is_empty() { continue; }
+        det.clock_preload(pk, pl::Holds::from_holds(&hs, last));
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// dip28: save every hold clock (written to PATH.tmp, then renamed). -> wallets saved
+fn holds_save(det: &pl::Detector, path: &str, slot: u64) -> Result<usize> {
+    let mut w = serde_json::Map::new();
+    for (k, h) in det.clocks_iter() { w.insert(b58(k), h.all().iter().copied().collect::<Vec<u32>>().into()); }
+    let n = w.len();
+    let tmp = format!("{path}.tmp");
+    std::fs::write(&tmp, serde_json::to_vec(&serde_json::json!({"v": 1, "slot": slot, "w": w}))?).with_context(|| format!("write {tmp}"))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("rename {tmp}"))?;
+    Ok(n)
+}
+
+/// dip26: an attempt's min tokens out and limit at its window's latest curve state, for the WINDOW's spend (the sender's; pure).
+/// None: untradeable
+fn att_limit(w: &SWin, drop: f64) -> Option<(u64, f64, u64)> { pl::limit_min_out(w.vsol, w.vtok, w.spend, w.fr, drop) }
+
+/// dip26: an attempt's instructions (presend_live::attempt_ixs) for the WINDOW's spend (the sender's; pure)
+fn att_ixs(user: Pk, w: &SWin, min_out: u64, cfg: &Cfg, guard: build::Ix, tip: Option<(Pk, u64)>) -> (Vec<build::Ix>, pl::Roles) {
+    pl::attempt_ixs(user, &w.launch, w.spend, min_out, cfg.cu_limit, cfg.cu_price, guard, tip)
+}
 
 /// the last RING samples (µs), for p50 / p99
 #[derive(Default)]
@@ -374,6 +578,10 @@ impl Shared {
 pub struct Att {
     pub w: u64, pub n: u32, pub mint: Pk, pub sig: [u8; 64], pub tag: u64, pub path: String, pub client: String, pub slot: u64, pub deadline: u64, pub lim: f64,
     pub min_out: u64, pub p_sign: f64, pub sign_pos: (u64, u32, i32), pub t_send: u64, pub roles: pl::Roles, pub tip: u64, pub wst: &'static str,
+    /// dip27 (log-only, --presend-live-ann on; else 0): the window's largest holding of a wallet but its whale and ours at signing (% of supply)
+    pub ob6: f32,
+    /// dip30 (log-only, --presend-live-ann on; else empty): the landing guard's account set at this attempt's signing
+    pub grd: Grd,
 }
 
 /// what the sender needs
@@ -425,18 +633,8 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
         }
         for w in due {
             let t0 = arbx::fast::mono_ns();
-            // why not now (each counted)
-            let why: Option<&'static str> = if sh.stop.load(Ordering::Relaxed) || DIP_NO_FIRE.load(Ordering::Relaxed) { Some("stopped") }
-                else if sc.cfg.one_position && sh.pause_reactive.load(Ordering::Relaxed) { Some("paused_reactive_position") }
-                else if sc.cfg.one_position && sh.pause_pos.load(Ordering::Relaxed) { Some("paused_presend_position") }
-                // dip24: the rolling 24 h fee budget is spent (resumes when it rolls back under)
-                else if sh.pause_fee.load(Ordering::Relaxed) { Some("paused_fee_budget") }
-                else if fires_paused() { Some("paused_blockhash_or_balance_read") }
-                else {
-                    let bal = ACCT.bal.load(Ordering::SeqCst);
-                    if bal > 0 && bal < sc.cfg.spend + 30_000_000 + ACCT.reserved.load(Ordering::SeqCst) { Some("paused_balance") } else { None }
-                };
-            if let Some(why) = why { sh.skip(why); continue; }
+            // why not now (each counted); dip26: the same gate for every window (send_gate: unit-tested), at the window's own spend
+            if let Some(why) = send_gate(&sh, sc.cfg.one_position, w.spend) { sh.skip(why); continue; }
             let deadline = (slot + sc.cfg.deadline_slots).min(w.en_slot);
             if deadline < slot { sh.skip("window_over"); continue; }
             let (leader, client) = lat::leader_of(slot).unwrap_or_default();
@@ -447,9 +645,11 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let ri = (w.n as usize + w.id as usize) % rs.len();
             let r = &mut rs[ri];
             if let Err(why) = take_rate(&mut global, &mut r.bucket, now, || r.path.fast_budget()) { sh.skip(why); continue; }
-            let Some((min_out, lim, _)) = pl::limit_min_out(w.vsol, w.vtok, sc.cfg.spend, w.fr, sc.cfg.drop) else { sh.skip("untradeable"); continue };
+            // dip28: the deeper limit while another big holder is in (off: dip27's drop)
+            let drop = att_drop(&w, &sc.cfg);
+            let Some((min_out, lim, _)) = att_limit(&w, drop) else { sh.skip("untradeable"); continue };
             let tip = r.path.tip(0).map(|(a, l)| (a, sc.cfg.tip.unwrap_or(l)));
-            let (mut ixs, roles) = pl::attempt_ixs(sc.user, &w.launch, sc.cfg.spend, min_out, sc.cfg.cu_limit, sc.cfg.cu_price, guard_ix_enc(sc.guard, deadline), tip);
+            let (mut ixs, roles) = att_ixs(sc.user, &w, min_out, &sc.cfg, guard_ix_enc(sc.guard, deadline), tip);
             // dip16 C1 (--loaded-data-limit): the limit LAST (the roles' guard / ATA / buy / tip indices stay dip15's); nothing without it
             speed16::add_ll(&mut ixs, speed16::loaded_limit());
             let Some((bh, bh_age)) = (*BLOCKHASH_CACHE.lock().unwrap()).map(|(h, t, _)| (h, t.elapsed())) else { sh.skip("no_blockhash"); continue };
@@ -463,7 +663,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let t_send = arbx::feeds::clock::now_ns();
             let t1 = arbx::fast::mono_ns();
             let mut a = Att { w: w.id, n: w.n, mint: w.mint, sig, tag, path: r.path.name.clone(), client: client.clone(), slot, deadline, lim, min_out, p_sign: w.vsol as f64 / w.vtok.max(1) as f64,
-                sign_pos: w.pos, t_send, roles, tip: tip.map_or(0, |t| t.1), wst: "dry" };
+                sign_pos: w.pos, t_send, roles, tip: tip.map_or(0, |t| t.1), wst: "dry", ob6: w.ob6, grd: w.grd };
             // registered BEFORE the write: the main loop knows the signature before its landing can arrive
             if !sc.cfg.dry {
                 let _ = atx.send(a.clone());
@@ -472,16 +672,39 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             } else { sh.dry.fetch_add(1, Ordering::Relaxed); }
             let t2 = arbx::fast::mono_ns();
             sh.build_us.lock().unwrap().add(((t1 - t0) as f64 / 1e3) as f32);
-            let _ = out.send(Out::Rec(serde_json::json!({"ev": "presend_attempt", "w": a.w, "n": a.n, "mint": b58(&a.mint), "sig": bs58::encode(&a.sig).into_string(), "tag": seq,
+            let mut rec = serde_json::json!({"ev": "presend_attempt", "w": a.w, "n": a.n, "mint": b58(&a.mint), "sig": bs58::encode(&a.sig).into_string(), "tag": seq,
                 "path": a.path, "client": a.client, "leader": leader.chars().take(8).collect::<String>(), "slot": slot, "deadline": deadline, "en_slot": w.en_slot,
-                "vsol": w.vsol, "vtok": w.vtok, "p": a.p_sign, "lim": lim, "min_out": min_out, "spend": sc.cfg.spend, "tip": a.tip, "cu": sc.cfg.cu_limit, "cu_price": sc.cfg.cu_price,
+                "vsol": w.vsol, "vtok": w.vtok, "p": a.p_sign, "lim": lim, "min_out": min_out, "spend": w.spend, "tip": a.tip, "cu": sc.cfg.cu_limit, "cu_price": sc.cfg.cu_price,
                 "pos": [w.pos.0, w.pos.1, w.pos.2], "t": t_send, "w_status": a.wst, "dry": sc.cfg.dry, "build_us": (t1 - t0) as f64 / 1e3, "write_us": (t2 - t1) as f64 / 1e3,
-                "bh_age_ms": bh_age.as_secs_f64() * 1e3, "bytes": raw.len()})));
+                "bh_age_ms": bh_age.as_secs_f64() * 1e3, "bytes": raw.len()});
+            // dip26: a re-arm window's attempt says so (T2 attempts: dip25's record)
+            if w.rearm { rec["kind"] = "rearm".into(); }
+            // dip28: the drop used, only with the deeper limit on
+            if sc.cfg.deep_drop > 0.0 { rec["drop"] = drop.into(); rec["ob6"] = (w.ob6 as f64).into(); }
+            let _ = out.send(Out::Rec(rec));
         }
         // idle: 5 ms steps; armed: 0.5 ms (the pace's resolution)
         std::thread::sleep(if any { Duration::from_micros(500) } else { Duration::from_millis(5) });
     }
     sh.exited.store(true, Ordering::SeqCst);
+}
+
+/// why the sender sends no attempt of a window now (None: it may). Every window the same (T2 and dip26 re-arm windows): the stop (caps,
+/// run end) or no new buys (kill switch, profit lock: DIP_NO_FIRE), the one-position pause (a reactive / pre-send position open), the
+/// rolling 24 h fee budget's pause (dip24), the blockhash / balance-read pause, a balance below the window's spend (dip26: its own
+/// spend: a re-arm window's size) + 0.03 SOL + what is reserved. The sender's own order (dip25's code, moved here unchanged)
+#[inline]
+fn send_gate(sh: &Shared, one_position: bool, spend: u64) -> Option<&'static str> {
+    if sh.stop.load(Ordering::Relaxed) || DIP_NO_FIRE.load(Ordering::Relaxed) { Some("stopped") }
+    else if one_position && sh.pause_reactive.load(Ordering::Relaxed) { Some("paused_reactive_position") }
+    else if one_position && sh.pause_pos.load(Ordering::Relaxed) { Some("paused_presend_position") }
+    // dip24: the rolling 24 h fee budget is spent (resumes when it rolls back under)
+    else if sh.pause_fee.load(Ordering::Relaxed) { Some("paused_fee_budget") }
+    else if fires_paused() { Some("paused_blockhash_or_balance_read") }
+    else {
+        let bal = ACCT.bal.load(Ordering::SeqCst);
+        if bal > 0 && bal < spend + 30_000_000 + ACCT.reserved.load(Ordering::SeqCst) { Some("paused_balance") } else { None }
+    }
 }
 
 /// the attempt rate caps (pure apart from `config`: the path's own [[send]] max_per_sec): this path's bucket, the global one,
@@ -557,6 +780,8 @@ struct Win {
     /// dip20 QUIET (None without it): the arm's signals (its records' "quiet"), the trigger's key (its stop watch), the "other" trades
     /// counted when the stop rule decided (None: not decided yet)
     qj: Option<serde_json::Value>, qkey: Option<u64>, q_others: Option<u32>,
+    /// dip29 (the deeper limit on): (largest other holder seen %, highest price seen, deepest drop from it) since the arm
+    dl: Option<(f32, f64, f64)>,
 }
 
 // ---- dip20 QUIET (src/presend_quiet.rs; all off without its flags) --------------------------------------------------------
@@ -784,6 +1009,8 @@ struct PPos {
     /// dip19: sell rounds started (0: no exit yet); a round's sell is under way while `selling`
     round: u32, selling: bool,
     opened: Instant, acct: PsAcct, merged: u32, late: u32, via: &'static str,
+    /// dip26: opened by a re-arm window's fill (its records carry "kind":"rearm", its lines " [rearm]")
+    rearm: bool,
 }
 
 impl PPos {
@@ -884,7 +1111,8 @@ pub enum Cmd {
     /// close our (confirmed empty) token account of `mint`: the rent back
     Close { mint: Pk },
     /// a position's realized P&L from its transactions: every buy (sig, cost estimate when not found) and every sell
-    Realized { pid: u64, w: u64, mint: Pk, buys: Vec<(String, u64)>, sells: Vec<(String, bool, u64)> },
+    /// (dip26 `rearm`: a re-arm position's: its record and line say so, its P&L goes to the re-arm side of the split)
+    Realized { pid: u64, w: u64, mint: Pk, buys: Vec<(String, u64)>, sells: Vec<(String, bool, u64)>, rearm: bool },
     /// the background UNSOLD retry of a position (its sells keep the account open; PsMsg::UnsoldDone at its end)
     Unsold { mint: Pk, launch: Launch, land_slot: u64, last_qty: (u64, bool) },
     /// a Telegram alert (the tests keep its title; a run raises it at once, never through this)
@@ -934,6 +1162,23 @@ pub fn pnl_of(buys: &[(Option<(i64, u64, bool)>, u64)], sells: &[Option<(i64, u6
     (pnl, nb, ns)
 }
 
+/// dip19 (fix 3): a position's realized record and log line from its buys' and sells' tx answers (pure: unit-tested; dip26 moved it out
+/// of the realized task unchanged). dip26 `rearm`: the record gets "kind":"rearm", the line ends with " [rearm]" (its prefix unchanged)
+#[allow(clippy::too_many_arguments)]
+pub fn realized_out(w: u64, pid: u64, mint: &Pk, pnl: i64, buys: &[(String, u64)], bs: &[(Option<(i64, u64, bool)>, u64)], nb: usize, ns: usize, n_sells: usize, rearm: bool)
+    -> (serde_json::Value, String) {
+    let src = if nb == buys.len() { "tx" } else if nb > 0 || ns > 0 { "tx+estimate" } else { "estimate" };
+    let found: Vec<(i64, u64)> = bs.iter().filter_map(|(b, _)| b.map(|x| (x.0, x.1))).collect();
+    let mut rec = serde_json::json!({"ev": "presend_live_realized", "w": w, "pid": pid, "mint": b58(mint), "pnl": pnl, "src": src,
+        "buy_delta": (!found.is_empty()).then(|| found.iter().map(|x| x.0).sum::<i64>()), "buy_fee": (!found.is_empty()).then(|| found.iter().map(|x| x.1).sum::<u64>()),
+        "buys": buys.iter().zip(bs).map(|((s, c), (b, _))| serde_json::json!({"sig": s, "delta": b.map(|x| x.0), "fee": b.map(|x| x.1), "found": b.is_some(), "cost_est": c})).collect::<Vec<_>>(),
+        "buys_found": nb, "sells_found": ns, "sells": n_sells});
+    if rearm { rec["kind"] = "rearm".into(); }
+    let line = format!("  PRESEND LIVE REALIZED {} {:+.6} SOL ({src}: {nb}/{} buy tx(s), {ns}/{} sell tx(s)){}", b58(mint), pnl as f64 / 1e9, buys.len(), n_sells,
+        if rearm { " [rearm]" } else { "" });
+    (rec, line)
+}
+
 /// dip19 (fix 4): what the run's end does with a mint after its confirmed read
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EndAct { Nothing, Sell(u64), Close, Unreadable }
@@ -954,6 +1199,14 @@ struct Stats {
     after_exit: u64, follow_ups: u64, orphans: u64, unreadable: u64, ata_closed: u64, ata_reads: u64, ata_close_fail: u64,
     /// dip23 (--presend-live-quiet-v2-log): arms / skips whose v2 candidate said skip (true) or keep (false)
     v2_arm: [u64; 2], v2_skip: [u64; 2],
+    /// dip27 (--presend-live-ann on): fills the deeper-limit lead would have skipped (log-only)
+    ann_ctx85: u64,
+    /// dip28 (--presend-live-ann on): fills the safe sell-timer check would have blocked (log-only)
+    ann_st: u64,
+    /// dip30: fills the GROUP RISK rule (log-only) would have blocked
+    ann_grp: u64,
+    /// dip30: fills the LANDING GUARD (log-only) would have failed
+    ann_guard: u64,
 }
 
 fn cnt_add(m: &mut FxHashMap<String, Cnt>, k: &str, i: usize) { m.entry(k.to_string()).or_default()[i] += 1; }
@@ -1012,6 +1265,8 @@ pub struct PsLive {
     /// dip24: the failed-attempt fees of the last 24 h per second of the feed clock ((unix s, lamports)), their sum, the pause state,
     /// pauses so far, the feed's latest arrival time (the rolling window's clock)
     fee_q: VecDeque<(u64, u64)>, fee_24h: u64, fee_paused: bool, fee_pauses: u64, last_t: u64,
+    /// dip26 LIVE RE-ARM (None: --presend-live-rearm off, nothing of it runs)
+    rm: Option<psrearm::Rearm>,
 }
 
 impl PsLive {
@@ -1047,23 +1302,45 @@ impl PsLive {
         let sc = SCfg { cfg: cfg.clone(), user, key: (*key).clone(), guard, routes, handle: tokio::runtime::Handle::current() };
         let fee1 = cfg.fail_fee();
         let line = format!("DIP PRESEND LIVE{} | T2 whale >= {}% -> window {} slots from +{} ms (create-slot triggers {}) | {} attempts per slot ({:.0} ms apart), {:.3} SOL, limit = latest price x {:.2}, \
-            deadline slot + {} | CU {} x {} uL (a failed attempt {} lamports) | routes {} | caps: {} fills, fees {:.4} SOL per rolling 24 h (pause), {} attempts/s ({} per path) | one position {} | exit {} slots{} / TP +{:.0}% / SL -{:.0}%",
+            deadline slot + {} | CU {} x {} uL (a failed attempt {} lamports) | routes {} | caps: {} fills, fees {:.4} SOL per rolling 24 h (pause), {} attempts/s ({} per path) | one position {} | exit {} slots{} / TP +{:.0}% / SL -{:.0}% | min token age {}",
             if cfg.dry { " DRY (builds + signs + logs; NEVER sends)" } else { " (REAL attempts)" }, cfg.whale_pct, cfg.window_slots, cfg.live_ms, if cfg.create_slot { "on" } else { "skipped" },
             cfg.k, slot_ns as f64 / 1e6 / cfg.k as f64, cfg.spend as f64 / 1e9, 1.0 - cfg.drop, cfg.deadline_slots, cfg.cu_limit, cfg.cu_price, fee1, desc.join(";"), if cfg.max_fills == 0 { "unlimited".to_string() } else { cfg.max_fills.to_string() },
             cfg.fee_budget as f64 / 1e9, cfg.max_per_sec, cfg.path_max_per_sec, if cfg.one_position { "on" } else { "off" }, cfg.exit_slots,
-            if cfg.exit_ms > 0 { format!(" or {} ms after the fill (dip22, first)", cfg.exit_ms) } else { String::new() }, cfg.tp * 100.0, cfg.sl * 100.0);
+            if cfg.exit_ms > 0 { format!(" or {} ms after the fill (dip22, first)", cfg.exit_ms) } else { String::new() }, cfg.tp * 100.0, cfg.sl * 100.0,
+            if cfg.min_age_slots == 0 { "off".to_string() } else { format!("{} slots (younger skipped)", cfg.min_age_slots) });
+        // dip26: the re-arm's config at the END of the start-up line, only when on (the monitors read the line's earlier parts; a line of its
+        // own starting "DIP PRESEND LIVE" would replace dipmon's parse of this one)
+        let line = if cfg.rearm.on { format!("{line} | {}", rearm_desc(&cfg)) } else { line };
+        // dip27: also at the END, only when on
+        let line = if cfg.lone_whale_slots > 0 { format!("{line} | LONE WHALE SKIP ON: a trigger whose whale is the only buyer in the last {} slots is skipped (after QUIET)", cfg.lone_whale_slots) } else { line };
+        let line = if cfg.ann { format!("{line} | ANN ON (log-only): buyers/creator at arm, other holder at signing, ctx85 + holder clocks at fills") } else { line };
+        // dip28: also at the END, only when on
+        let line = if cfg.deep_drop > 0.0 { format!("{line} | DEEP LIMIT ON: limit {:.2}x (drop {}) while another wallet holds >= {DEEP_OB6}% at signing (T2 + re-arm)", 1.0 - cfg.deep_drop, cfg.deep_drop) } else { line };
         eprintln!("{line}");
         let thread = {
             let (sh, out) = (sh.clone(), out.clone());
             std::thread::Builder::new().name("ps-send".into()).spawn(move || sender(sh, sc, out, atx)).context("ps-send thread")?
         };
         if !cfg.dry {
-            tg::raise(arbx::alerts::Level::Info, "dip_presend_live", "start", "🧪", "PRESEND LIVE probe ON", arbx::alerts::format::Body::new()
+            let mut body = arbx::alerts::format::Body::new()
                 .kv("size", format!("{:.3} SOL", cfg.spend as f64 / 1e9)).kv("attempts", format!("{} per slot, {} lamports each when failed", cfg.k, fee1))
-                .kv("caps", format!("{} fills, {:.4} SOL fees per rolling 24 h", if cfg.max_fills == 0 { "unlimited".to_string() } else { cfg.max_fills.to_string() }, cfg.fee_budget as f64 / 1e9)), false);
+                .kv("caps", format!("{} fills, {:.4} SOL fees per rolling 24 h", if cfg.max_fills == 0 { "unlimited".to_string() } else { cfg.max_fills.to_string() }, cfg.fee_budget as f64 / 1e9));
+            // dip26: only with the re-arm on
+            if cfg.rearm.on { body = body.kv("re-arm", format!("ON, {:.3} SOL, window to dump + 3 + {}, QUIET {}:{}, R5 skip {}", cfg.rearm.spend as f64 / 1e9, cfg.rearm.gap,
+                cfg.rearm.stop.n, cfg.rearm.stop.m, if cfg.rearm.r5_skip { "on" } else { "off" })); }
+            tg::raise(arbx::alerts::Level::Info, "dip_presend_live", "start", "🧪", "PRESEND LIVE probe ON", body, false);
         }
         let mut det = pl::Detector::new(cfg.whale_pct);
         det.idle_slots = 6 * 3600 * 1000 / 212;
+        // dip27: the hold clocks only with the annotations on
+        det.track = cfg.ann;
+        // dip28: the hold clocks' preload (the last run's saved state / the offline seed)
+        if let Some(p) = &cfg.holds_state {
+            match holds_load(&mut det, p) {
+                Ok(n) => eprintln!("DIP PRESEND LIVE HOLD CLOCKS: preloaded {n} wallets from {p} (saved back at the run's end)"),
+                Err(e) => eprintln!("DIP PRESEND LIVE HOLD CLOCKS: no preload from {p} ({e:#}); they start empty and are saved at the run's end"),
+            }
+        }
         // dip20 QUIET: its state (None without its flags), the preload thread (background, lowest CPU priority; its answer is merged
         // in tick())
         // dip21: the state journal first (its dumps are history at once and go with the preload), its writer, then the preload
@@ -1090,12 +1367,14 @@ impl PsLive {
         // dip23: the v2 annotation (log-only) and its ring
         let v2_log = cfg.quiet_v2_log;
         if v2_log { eprintln!("DIP PRESEND LIVE QUIET v2 LOG: every arm / skip record gets \"v2\" (trades in 60 s, at the 120 s high, drawdown, candidate skip = <= {} trades AND at the high); LOG ONLY, nothing acts on it", pq::V2_N_MAX); }
+        // dip26: the re-arm's state (None when off)
+        let rm = cfg.rearm.on.then(|| psrearm::Rearm::new(cfg.rearm.clone()));
         let p = PsLive { cfg, det, wins: FxHashMap::default(), armed: FxHashMap::default(), wid: 0, sh, arx, atts: FxHashMap::default(), order: VecDeque::new(), lands: Vec::new(),
             tapes: FxHashMap::default(), pos: FxHashMap::default(), free_at: FxHashMap::default(), last_deadline: FxHashMap::default(), launches: FxHashMap::default(), last_sweep: 0, checks: 0,
             par: FxHashMap::default(),
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
-            tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0 };
+            tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm };
         if let Some(r) = qrec { p.rec(r); }
         Ok(p)
     }
@@ -1111,6 +1390,8 @@ impl PsLive {
             let q = self.quiet.entry(a.mint).or_default(); *q = (*q).max(a.deadline);
             cnt_add(&mut self.st.per_path, &a.path, 0);
             cnt_add(&mut self.st.per_client, &a.client, 0);
+            // dip26: the re-arm's own count (nothing without it)
+            if let Some(rm) = self.rm.as_mut() { if rm.is_win(a.w) { rm.st.sent += 1; } }
             self.order.push_back((a.deadline, a.sig, Instant::now()));
             self.atts.insert(a.sig, (a, false));
         }
@@ -1171,6 +1452,8 @@ impl PsLive {
         let (idx, fee, err) = match &of { Some(f) => (Some(f.index), f.fee, f.err.clone()), None => (None, self.cfg.fail_fee(), "?".to_string()) };
         let res = if of.is_some() { pl::classify(&err, &att.roles) } else { "failed_unknown".to_string() };
         self.st.fees += fee;
+        // dip26: the re-arm's share of the failed-attempt fees (the 24 h budget below is shared)
+        if let Some(rm) = self.rm.as_mut() { if rm.is_win(att.w) { rm.st.fees += fee; } }
         self.resolve(&att, &res);
         self.lands.push(Land { att, res, err, fee, slot: a.slot, idx, t_rx: a.t_rx, at: Instant::now() });
         // dip24: the rolling 24 h budget (pauses the sender, never stops the stream)
@@ -1231,6 +1514,8 @@ impl PsLive {
         self.sh.stop.store(true, Ordering::SeqCst);
         let ids: Vec<u64> = self.wins.iter().filter(|(_, w)| w.disarmed.is_none()).map(|(k, _)| *k).collect();
         for id in ids { self.disarm(id, "stopped"); }
+        // dip26: the re-arm's candidates and waiting windows end (nothing without it)
+        self.rearm_stop_all();
         self.line(format!("  PRESEND LIVE STOPPED ({why}): no new attempts; open positions finish their exit | fills {} / {} | failed-attempt fees {:.6} / {:.6} SOL", self.st.fills, self.cfg.max_fills,
             self.st.fees as f64 / 1e9, self.cfg.fee_budget as f64 / 1e9));
         self.rec(serde_json::json!({"ev": "presend_live_stop", "why": why, "t": arbx::feeds::clock::now_ns(), "fills": self.st.fills, "fees": self.st.fees}));
@@ -1250,12 +1535,27 @@ impl PsLive {
         let q = self.quiet.entry(w.mint).or_default(); *q = (*q).max(w.quiet);
         if self.armed.get(&w.mint) == Some(&id) { self.armed.remove(&w.mint); }
         { let mut g = self.sh.wins.lock().unwrap(); g.retain(|x| x.id != id); }
-        *self.st.disarms.entry(why).or_default() += 1;
+        // dip26: a re-arm window's end goes to the re-arm's own counters and its record says so (T2 windows: dip25's)
+        let re = self.rm.as_mut().and_then(|rm| rm.end(id, why));
+        let is_re = re.is_some();
+        if !is_re { *self.st.disarms.entry(why).or_default() += 1; }
         let mut r = serde_json::json!({"ev": "presend_live_disarm", "w": id, "mint": b58(&w.mint), "why": why, "t": arbx::feeds::clock::now_ns(), "trig_slot": w.trig_slot, "en_slot": w.en_slot,
             "slot": self.sh.slot.load(Ordering::Relaxed), "armed_ms": w.armed_at.elapsed().as_secs_f64() * 1e3, "attempts": w.sent, "filled": w.filled});
+        if let Some(x) = re { r["kind"] = "rearm".into(); r["rearm"] = x; }
+        // dip29: a window that ran under the deeper limit and never filled: what the normal limit would have done (approx: the deepest
+        // drop from the highest price since the arm)
+        if self.cfg.deep_drop > 0.0 && !w.filled {
+            if let Some((m6, _, md)) = w.dl.filter(|d| d.0 >= DEEP_OB6) {
+                let would = md >= self.cfg.drop;
+                r["deep"] = serde_json::json!({"ob6_max": m6, "max_drop": md, "would_fill_088": would});
+                let line = format!("  PRESEND LIVE DEEP-LIMIT NO-FILL w{id} {} | other holder up to {:.1}% | deepest dip {:.1}% -> {}{}", b58(&w.mint), m6, md * 100.0,
+                    if would { "BLOCKED (0.88x would have filled)" } else { "no dip deep enough for 0.88x either" }, if is_re { " [rearm]" } else { "" });
+                let _ = self.out.send(Out::Line(line));
+            }
+        }
         // dip20 QUIET (only with it): the stop's verdict, the "other" trades counted (at the stop's decision, or so far when the window
-        // ended before it), the arm's signals
-        if let Some(qs) = self.qt.as_ref() {
+        // ended before it), the arm's signals. dip26: not on a re-arm window's (its own QUIET count is in "rearm")
+        if let (Some(qs), false) = (self.qt.as_ref(), is_re) {
             let others = w.q_others.or_else(|| w.qkey.and_then(|k| qs.watch.get(&w.mint).and_then(|v| v.iter().find(|x| x.id == k)).map(|x| x.others)));
             let mut j = w.qj.clone().unwrap_or_else(|| serde_json::json!({}));
             j["others"] = others.into();
@@ -1273,6 +1573,9 @@ impl PsLive {
                    reactive_open: &dyn Fn(&Pk) -> bool, first: Option<&FxHashMap<u64, (u64, u16)>>) {
         let t0 = Instant::now();
         self.sh.slot.store(slot_now, Ordering::Relaxed);
+        // dip26 RE-ARM: the executed feed's slot clock first (a new slot: the re-arm windows' stops, the candidates' holders checks), as
+        // the observatory's (nothing without it)
+        if self.rm.is_some() { self.rearm_slot(a.slot, a.t_rx, &launch_of, reactive_open); }
         for c in &x.creates { self.det.create(c.mint, a.slot, c.creator, c.user, x.mayhem); }
         let mut evs: Vec<pl::Det> = Vec::new();
         for (j, e) in x.trades.iter().enumerate() {
@@ -1286,8 +1589,9 @@ impl PsLive {
                 } else if let Some(p) = self.pos.get_mut(&e.mint) {
                     // dip19: every sell landing is kept (a round's remainder sell, a follow-up round's): the curve P&L sums them all
                     p.sell_lands.push((a.slot, x.index, a.t_rx, e.sol));
-                    let r = serde_json::json!({"ev": "presend_live_sell_land", "w": p.w, "mint": b58(&e.mint), "sig": bs58::encode(&a.tx.sig).into_string(), "slot": a.slot, "idx": x.index,
+                    let mut r = serde_json::json!({"ev": "presend_live_sell_land", "w": p.w, "mint": b58(&e.mint), "sig": bs58::encode(&a.tx.sig).into_string(), "slot": a.slot, "idx": x.index,
                         "t": a.t_rx, "sol": e.sol, "fee": x.fee, "pid": p.pid, "round": p.round});
+                    if p.rearm { r["kind"] = "rearm".into(); }
                     self.rec(r);
                 }
             }
@@ -1324,7 +1628,8 @@ impl PsLive {
                 match ev {
                     pl::Det::Trigger { whale, pct, bal, age_slots } => self.trigger(&t, whale, pct, bal, age_slots, &launch_of, reactive_open),
                     pl::Det::WhaleSell { whale } => {
-                        if let Some(&id) = self.armed.get(&e.mint) {
+                        // dip26: never a re-arm window's (its own stops: rearm_trade)
+                        if let Some(id) = self.armed.get(&e.mint).copied().filter(|id| !self.rearm_w(*id)) {
                             if let Some(w) = self.wins.get_mut(&id) {
                                 if w.whale == whale && w.stop_at.is_none() {
                                     let at = Instant::now() + Duration::from_millis(WHALE_SELL_MS);
@@ -1340,6 +1645,27 @@ impl PsLive {
                     pl::Det::Below => {}
                 }
             }
+            // dip27 (log-only) / dip28 (the deeper limit): the armed window's largest other holder after this trade (the next attempt's `ob6`)
+            if self.cfg.ann || self.cfg.deep_drop > 0.0 {
+                if let Some(&id) = self.armed.get(&e.mint) {
+                    let o6 = self.wins.get(&id).map_or(0.0, |w| ob6_pct(&self.det, true, &e.mint, &w.whale, &self.user));
+                    // dip29: the window's deeper-limit trace (its end line says what the 0.88x limit would have done)
+                    if self.cfg.deep_drop > 0.0 {
+                        if let Some(w) = self.wins.get_mut(&id) {
+                            let (m6, pm, md) = w.dl.unwrap_or((0.0, 0.0, 0.0));
+                            let pm = pm.max(t.p_pre());
+                            let dr = if pm > 0.0 { 1.0 - t.p() / pm } else { 0.0 };
+                            w.dl = Some((m6.max(o6), pm, md.max(dr)));
+                        }
+                    }
+                    let mut g = self.sh.wins.lock().unwrap();
+                    // dip30: the landing guard's set as of this trade (the next attempt signs with it)
+                    let gs = grd_set(&self.det, self.cfg.ann, &e.mint, &self.user, t.s);
+                    if let Some(w) = g.iter_mut().find(|w| w.id == id) { w.ob6 = o6; w.grd = gs; }
+                }
+            }
+            // dip26 RE-ARM: this trade for the re-arm (its windows' stops and QUIET count, a new candidate; nothing without it)
+            if self.rm.is_some() { self.rearm_trade(&t); }
             // dip23 v2 (log-only): the ring takes the trade AFTER its trigger decision (the features of a trigger see only the trades
             // before it)
             if let Some(v) = self.v2.as_mut() { v.push(&e.mint, a.t_rx, t.p()); }
@@ -1370,21 +1696,16 @@ impl PsLive {
         let launch = launch_of(&t.mint);
         let mut why: Option<&'static str> = if self.stopped.is_some() || DIP_NO_FIRE.load(Ordering::Relaxed) { Some("stopped") }
             else if age_slots == 0 && !self.cfg.create_slot { Some("create_slot") }
-            else if self.armed.contains_key(&t.mint) { Some("blocked_armed") }
+            else if age_slots < self.cfg.min_age_slots { Some("young_age") }
+            // dip26: a re-arm window armed on the token does not block a T2 trigger: the T2 window takes the token over (below)
+            else if self.armed.get(&t.mint).is_some_and(|id| !self.rearm_w(*id)) { Some("blocked_armed") }
             else if self.pos.contains_key(&t.mint) || self.free_at.get(&t.mint).is_some_and(|f| Instant::now() < *f) { Some("blocked_position") }
             // dip19: our token account of the mint is still open (sold and kept open until no attempt can land, then closed; or an
             // UNSOLD retry holds it): every attempt would fail at its ATA create
             else if self.atas.contains_key(&t.mint) { Some("blocked_ata_open") }
             else if reactive_open(&t.mint) { Some("reactive_position") }
-            else {
-                match &launch {
-                    None => Some("no_launch_accounts"),
-                    Some(l) if !l.is_create_v2 => Some("legacy_create"),
-                    Some(l) if l.is_mayhem => Some("mayhem"),
-                    Some(l) if !(l.is_vanilla() || (self.allow_holder && l.is_holder_reward && !l.is_cashback && l.creator_fee_bps == 0)) => Some("non_vanilla"),
-                    _ => None,
-                }
-            };
+            // no / legacy / mayhem / non-vanilla launch accounts (dip26: the rule shared with the re-arm, unchanged)
+            else { psrearm::launch_refusal(launch.as_ref(), self.allow_holder) };
         // dip23 v2 (log-only): the candidate's features at this trigger (the ring holds the token's trades before it), for the records
         let v2 = self.v2.as_mut().map(|r| r.feats(&t.mint, t.t_rx, t.p_pre()).json());
         // dip20 QUIET: the four signals (skip on; every trigger, for the records and the shadow's paper), the ARM RULE (last: only a
@@ -1420,12 +1741,24 @@ impl PsLive {
             qkey = Some(id);
             qj = Some(j);
         }
+        // dip27 LONE WHALE (decided LAST: only a trigger that would arm is skipped "lone_whale"; the detector took its buy already)
+        let lw = self.cfg.lone_whale_slots;
+        let nb = if lw > 0 { self.det.buyers_since(&t.mint, t.s.saturating_sub(lw - 1), &self.user) } else { None };
+        if why.is_none() && nb.is_some_and(|n| n <= 1) { why = Some("lone_whale"); }
+        // dip27 (log-only): the annotations
+        let ann = self.cfg.ann.then(|| ann_arm(&self.det, &self.user, &t.mint, t.s));
         if let Some(why) = why {
             *self.st.skips.entry(why).or_default() += 1;
             let mut r = serde_json::json!({"ev": "presend_live_skip", "why": why, "trig": trig});
             if let Some(j) = &qj { r["quiet"] = j.clone(); r["quiet_skip"] = (why == "quiet").into(); }
             if let Some(v) = v2 { self.st.v2_skip[if v["skip"] == true { 0 } else { 1 }] += 1; r["v2"] = v; }
+            if let Some(n) = nb { r["nb"] = n.into(); }
+            if let Some(a) = ann { r["ann"] = a; }
             self.rec(r);
+            if why == "lone_whale" {
+                self.line(format!("  PRESEND LIVE LONE-WHALE SKIP {} whale {} {:.1}% ({:.2} SOL) | buyers in the last {lw} slots: {}", b58(&t.mint), &b58(&whale)[..8], pct,
+                    t.sol as f64 / 1e9, nb.unwrap_or(0)));
+            }
             if why == "quiet" {
                 let j = qj.as_ref().unwrap();
                 self.line(format!("  PRESEND LIVE QUIET SKIP {} whale {} {:.1}% ({:.2} SOL) | since last trade {} slots, cohort holders {}, follower bots {}, whale's dumps drew {:.2} ({})",
@@ -1434,6 +1767,9 @@ impl PsLive {
             return;
         }
         let launch = launch.expect("checked");
+        // dip26: the T2 window takes the token over: its armed re-arm window is disarmed "superseded", its waiting ones end (nothing
+        // without the re-arm)
+        if self.rm.is_some() { self.rearm_take_over(&t.mint); }
         self.launches.insert(t.mint, launch.clone());
         self.wid += 1;
         let id = self.wid;
@@ -1441,12 +1777,14 @@ impl PsLive {
         let en_slot = ((t.a() + self.cfg.live_ms + self.cfg.window_slots as f64 * pl::SMS) / pl::SMS).floor() as u64;
         let st_ns = t_top.unwrap_or_else(arbx::fast::mono_ns) + (self.cfg.live_ms * 1e6) as u64;
         let slot_ns = arbx::feeds::entries::SLOT_US.load(Ordering::Relaxed) * 1_000;
-        let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false };
+        let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
+            spend: self.cfg.spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
+            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s) };
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
         self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0)).0.push_back(t.clone());
         self.wins.insert(id, Win { id, mint: t.mint, whale, trig_slot: t.s, en_slot, armed_at: Instant::now(), stop_at: None, sent: 0, resolved: 0, unseen: 0,
-            last_deadline: 0, disarmed: None, filled: false, checked: false, quiet: 0, qj: qj.clone(), qkey, q_others: None });
+            last_deadline: 0, disarmed: None, filled: false, checked: false, quiet: 0, qj: qj.clone(), qkey, q_others: None, dl: None });
         // dip20 QUIET: the trigger's stop watch knows its window now
         if let (Some(q), Some(k)) = (self.qt.as_mut(), qkey) {
             if let Some(w) = q.watch.get_mut(&t.mint).and_then(|v| v.iter_mut().find(|w| w.id == k)) { w.win = Some(id); }
@@ -1456,6 +1794,9 @@ impl PsLive {
             "lim0": t.p() * (1.0 - self.cfg.drop), "dry": self.cfg.dry});
         if let Some(j) = qj { r["quiet"] = j; r["quiet_skip"] = false.into(); }
         if let Some(v) = v2 { self.st.v2_arm[if v["skip"] == true { 0 } else { 1 }] += 1; r["v2"] = v; }
+        // dip27: only when on (off: dip26's record)
+        if let Some(n) = nb { r["nb"] = n.into(); }
+        if let Some(a) = ann { r["ann"] = a; }
         self.rec(r);
         self.line(format!("  PRESEND LIVE ARM w{id} {} whale {} {:.1}% ({:.2} SOL) age {} slots | until slot {en_slot} | {} attempts/slot, limit {:.2}x", b58(&t.mint),
             &b58(&whale)[..8], pct, t.sol as f64 / 1e9, age_slots, self.cfg.k, 1.0 - self.cfg.drop));
@@ -1472,20 +1813,64 @@ impl PsLive {
         self.st.fills += 1;
         self.st.fee_fills += fee;
         self.st.tips += att.tip;
+        // dip26: a re-arm window's fill (its size; its records and lines say so; the re-arm's own count)
+        let (rearm, spend) = (self.rearm_w(att.w), self.w_spend(att.w));
+        if rearm { if let Some(rm) = self.rm.as_mut() { rm.st.fills += 1; } }
         // a fill while its window was still armed, or a late one (an attempt in flight when the window ended)
         let window_open = self.wins.get(&att.w).is_some_and(|w| w.disarmed.is_none());
         if !window_open { self.st.late_fills += 1; }
         if let Some(w) = self.wins.get_mut(&att.w) { w.filled = true; }
         self.disarm(att.w, "filled");
         // every fill created our token account (its NON-idempotent create passed): the ATA rent is in its cost
-        let cost = self.cfg.spend + fee + att.tip + T22_ATA_RENT;
+        let cost = spend + fee + att.tip + T22_ATA_RENT;
         let trig_slot = self.wins.get(&att.w).map(|w| w.trig_slot).unwrap_or(0);
         // dip19 (fix 2): a fill on a position whose exit has started (w51's attempt B): never merged into the sell under way
         let after_exit = self.pos.get(&t.mint).is_some_and(|p| p.round > 0);
-        let rec = serde_json::json!({"ev": "presend_live_fill", "w": att.w, "n": att.n, "mint": b58(&t.mint), "sig": bs58::encode(&t.sig).into_string(), "slot": t.s, "idx": t.i,
+        let mut rec = serde_json::json!({"ev": "presend_live_fill", "w": att.w, "n": att.n, "mint": b58(&t.mint), "sig": bs58::encode(&t.sig).into_string(), "slot": t.s, "idx": t.i,
             "t": t.t_rx, "tokens": t.tok, "sol_in": t.sol, "fee": fee, "tip": att.tip, "path": att.path, "client": att.client, "p_sign": att.p_sign, "lim": att.lim, "min_out": att.min_out,
             "p_entry_post": t.p(), "p_entry_pre": t.p_pre(), "slots_after_trigger": t.s.saturating_sub(trig_slot), "slots_after_send": t.s.saturating_sub(att.slot),
             "ms_send_to_rx": (t.t_rx as i64 - att.t_send as i64) as f64 / 1e6, "window_open": window_open, "reactive_on_mint": reactive_on_mint, "after_exit": after_exit});
+        if rearm { rec["kind"] = "rearm".into(); rec["spend"] = spend.into(); }
+        // dip27 (log-only): the deeper-limit lead's would-skip (T2: another wallet >= 6% at signing and a drop < 15% from the signing
+        // price to the price just before our buy) and the holders >= 2% at our landing with their hold clocks (the detector has not
+        // taken our buy yet: the holders just before it)
+        // dip28: the fill's try used the deeper limit (only with it on)
+        if self.cfg.deep_drop > 0.0 { rec["deep"] = (att.ob6 >= DEEP_OB6).into(); }
+        if self.cfg.ann {
+            let depth = if att.p_sign > 0.0 { 1.0 - t.p_pre() / att.p_sign } else { 0.0 };
+            let ctx85 = !rearm && att.ob6 >= 6.0 && depth < 0.15;
+            if ctx85 { self.st.ann_ctx85 += 1; }
+            // dip30: up to 12 holders (6 cut groups of 2-6% holders short: 62 of run 40's 290 fills had 6)
+            let hc = self.det.holder_clocks(&t.mint, (0.02 * pl::SUPPLY) as i64, &self.user, t.s, 12);
+            // dip28 (log-only): the SAFE sell-timer check's would-block: a holder >= 6% (the whale too) still holding at our landing whose
+            // hold clock gives a first sell within 3 slots a hazard >= 0.3 with >= 5 holds at risk (TIMING a2 X6 t0.3)
+            let st = hc.iter().any(|h| h.bal as f64 >= 0.06 * pl::SUPPLY && h.risk >= 5 && h.hz3 >= 0.3);
+            if st { self.st.ann_st += 1; }
+            // dip30 GROUP RISK (log-only; owner 10-30 ~23:55 PKT): the safe check's per-holder test (>= 5 holds at risk, hz3 >= 0.3) on
+            // holders of ANY size (>= 2%) still holding at our landing, their holdings summed >= 6% (replay 20 runs: +4.27 SOL, 15/20 runs)
+            let grp: Vec<&pl::HolderClock> = hc.iter().filter(|h| h.risk >= 5 && h.hz3 >= 0.3).collect();
+            let grp_pct: f64 = grp.iter().map(|h| h.bal as f64 / pl::SUPPLY * 100.0).sum();
+            let grp_block = grp_pct >= 6.0;
+            if grp_block { self.st.ann_grp += 1; }
+            // dip30 LANDING GUARD (log-only): the set chosen at this fill's signing, their holdings NOW (our landing, before our buy) summed
+            let gl: Vec<(Pk, i64, i64)> = att.grd.w[..att.grd.n as usize].iter().map(|(w, b)| (*w, *b, self.det.bal(&t.mint, w))).collect();
+            let gd_pct: f64 = gl.iter().map(|(_, _, b)| *b as f64 / pl::SUPPLY * 100.0).sum();
+            let gd_block = gd_pct >= GRD_PCT;
+            if gd_block { self.st.ann_guard += 1; }
+            // dip29: one plain line per fill with what every filter / log-only rule said
+            let due: Vec<String> = hc.iter().filter(|h| h.bal as f64 >= 0.06 * pl::SUPPLY && h.risk >= 5 && h.hz3 >= 0.3).map(|h| format!("{} {:.1}% hz {:.2}", &b58(&h.w)[..8], h.bal as f64 / pl::SUPPLY * 100.0, h.hz3)).collect();
+            self.line(format!("  PRESEND LIVE FLAGS w{} {}: dip {:.1}% | other holder {:.1}% -> deeper limit {} | safe sell timer {} | group risk {} | landing guard {}{}", att.w, b58(&t.mint), depth * 100.0, att.ob6,
+                if self.cfg.deep_drop > 0.0 { if att.ob6 >= DEEP_OB6 { "USED" } else { "not needed" } } else if ctx85 { "WOULD SKIP (log)" } else { "no" },
+                if st { format!("WOULD BLOCK (log): {}", due.join(", ")) } else { "no".to_string() },
+                if grp_block { format!("WOULD BLOCK (log): {:.1}% = {}", grp_pct, grp.iter().map(|h| format!("{} {:.1}%", &b58(&h.w)[..8], h.bal as f64 / pl::SUPPLY * 100.0)).collect::<Vec<_>>().join(" + ")) }
+                else { format!("no ({grp_pct:.1}%)") },
+                if gd_block { format!("WOULD BLOCK (log): {:.1}% still held by {}", gd_pct, gl.iter().map(|(w, s, b)| format!("{} {:.1}->{:.1}%", &b58(w)[..8], *s as f64 / pl::SUPPLY * 100.0, *b as f64 / pl::SUPPLY * 100.0)).collect::<Vec<_>>().join(", ")) }
+                else { format!("no ({} wallets, {gd_pct:.1}%)", gl.len()) }, if rearm { " [rearm]" } else { "" }));
+            rec["ann"] = serde_json::json!({"ob6": att.ob6, "depth": depth, "ctx85": ctx85, "st_block": st, "grp_block": grp_block, "grp_pct": grp_pct,
+                "guard": {"block": gd_block, "pct": gd_pct, "set": gl.iter().map(|(w, s, b)| serde_json::json!({"w": b58(w), "sign_pct": *s as f64 / pl::SUPPLY * 100.0, "land_pct": *b as f64 / pl::SUPPLY * 100.0})).collect::<Vec<_>>()},
+                "holders": hc.iter().map(|h| serde_json::json!({"w": b58(&h.w),
+                "pct": h.bal as f64 / pl::SUPPLY * 100.0, "age": h.age, "n": h.n, "p25": h.p25, "p50": h.p50, "p75": h.p75, "h3": h.h3, "risk": h.risk, "hz3": h.hz3})).collect::<Vec<_>>()});
+        }
         self.rec(rec);
         let sig = bs58::encode(&t.sig).into_string();
         let buy = Buy { sig: sig.clone(), w: att.w, slot: t.s, idx: t.i as u64, t_rx: t.t_rx, tokens: t.tok, sol_in: t.sol, fee, tip: att.tip, cost, round: 0, via: "feed" };
@@ -1523,8 +1908,9 @@ impl PsLive {
                 let (launch, derived) = match self.launches.get(&t.mint).cloned() { Some(l) => (l, false), None => (snipe_build::launch_from_target(t.mint, t.mint), true) };
                 self.pid += 1;
                 let acct = PsAcct::open(t.mint, cost, t.s);
-                self.pos.insert(t.mint, PPos { pid: self.pid, w: att.w, mint: t.mint, launch, derived, buys: vec![buy], land: (t.s, t.i as u64, t.t_rx), tokens: t.tok, spend: self.cfg.spend,
-                    att: Some(att.clone()), exit: None, sell_lands: Vec::new(), sells: Vec::new(), round: 0, selling: false, opened: Instant::now(), acct, merged: 0, late: 0, via: "feed" });
+                self.pos.insert(t.mint, PPos { pid: self.pid, w: att.w, mint: t.mint, launch, derived, buys: vec![buy], land: (t.s, t.i as u64, t.t_rx), tokens: t.tok, spend,
+                    att: Some(att.clone()), exit: None, sell_lands: Vec::new(), sells: Vec::new(), round: 0, selling: false, opened: Instant::now(), acct, merged: 0, late: 0, via: "feed",
+                    rearm });
                 self.sh.pause_pos.store(true, Ordering::Relaxed);
                 self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0));
             }
@@ -1533,13 +1919,16 @@ impl PsLive {
             self.st.after_exit += 1;
             self.line(format!("  PRESEND LIVE FILL AFTER THE EXIT w{} {}: +{} tokens on a token whose sell (round {round}) is under way: NOT merged into it; {}", att.w, b58(&t.mint), t.tok,
                 if matched { "it is the balance a read found (its recovery sell covers it)".to_string() } else { format!("its own sell (round {}) when that one finishes", round + 1) }));
-            self.rec(serde_json::json!({"ev": "presend_live_late_fill", "w": att.w, "pid": pid, "round": round, "mint": b58(&t.mint), "sig": sig, "slot": t.s, "idx": t.i, "tokens": t.tok,
-                "sol_in": t.sol, "fee": fee, "tip": att.tip, "matched_read": matched}));
+            let mut r = serde_json::json!({"ev": "presend_live_late_fill", "w": att.w, "pid": pid, "round": round, "mint": b58(&t.mint), "sig": sig, "slot": t.s, "idx": t.i, "tokens": t.tok,
+                "sol_in": t.sol, "fee": fee, "tip": att.tip, "matched_read": matched});
+            if rearm { r["kind"] = "rearm".into(); }
+            self.rec(r);
             self.alert(arbx::alerts::Level::Warning, "dip_presend_late_fill", &b58(&t.mint), "⚠️", "PRESEND LIVE: a fill after the exit (its own sell next)", arbx::alerts::format::Body::new()
                 .raw(format!("mint {}", tg::mint_link(&t.mint))).kv("tokens", t.tok.to_string()).kv("window", format!("w{}", att.w)).txt("not merged into the sell under way: sold by the next round"));
         }
-        self.line(format!("  PRESEND LIVE FILL w{} {} {:.3} SOL -> {} tokens | slot {} (+{} after the send, {:.0} ms send->seen) | path {} ({}) | fills {}/{}", att.w, b58(&t.mint),
-            t.sol as f64 / 1e9, t.tok, t.s, t.s.saturating_sub(att.slot), (t.t_rx as i64 - att.t_send as i64) as f64 / 1e6, att.path, att.client, self.st.fills, self.cfg.max_fills));
+        self.line(format!("  PRESEND LIVE FILL w{} {} {:.3} SOL -> {} tokens | slot {} (+{} after the send, {:.0} ms send->seen) | path {} ({}) | fills {}/{}{}", att.w, b58(&t.mint),
+            t.sol as f64 / 1e9, t.tok, t.s, t.s.saturating_sub(att.slot), (t.t_rx as i64 - att.t_send as i64) as f64 / 1e6, att.path, att.client, self.st.fills, self.cfg.max_fills,
+            if rearm { " [rearm]" } else { "" }));
         if self.cfg.max_fills > 0 && self.st.fills >= self.cfg.max_fills { self.stop("max_fills"); }
     }
 
@@ -1557,9 +1946,12 @@ impl PsLive {
         if p.exit.is_some() { return; }
         p.exit = Some((why, slot, val, t));
         self.st.exits += 1;
-        let r = serde_json::json!({"ev": "presend_live_exit", "w": p.w, "mint": b58(mint), "why": why, "slot": slot, "value": if val.is_nan() { serde_json::Value::Null } else { serde_json::json!(val) },
+        let mut r = serde_json::json!({"ev": "presend_live_exit", "w": p.w, "mint": b58(mint), "why": why, "slot": slot, "value": if val.is_nan() { serde_json::Value::Null } else { serde_json::json!(val) },
             "t": t, "slots_held": slot as i64 - p.land.0 as i64, "pid": p.pid, "round": 1, "tokens": p.tokens});
-        let l = format!("  PRESEND LIVE EXIT {} {why} slot {slot} (held {} slots){}", b58(mint), slot as i64 - p.land.0 as i64, if val.is_nan() { String::new() } else { format!(" value x{val:.3}") });
+        // dip26: a re-arm position's exit says so (the line's end: its prefix unchanged)
+        if p.rearm { r["kind"] = "rearm".into(); }
+        let l = format!("  PRESEND LIVE EXIT {} {why} slot {slot} (held {} slots){}{}", b58(mint), slot as i64 - p.land.0 as i64, if val.is_nan() { String::new() } else { format!(" value x{val:.3}") },
+            if p.rearm { " [rearm]" } else { "" });
         self.sell_round(mint);
         self.rec(r);
         self.line(l);
@@ -1627,6 +2019,8 @@ impl PsLive {
         };
         p.selling = false;
         p.sells.extend(out.sigs.iter().cloned());
+        // dip26: a re-arm position's follow-up exit says so
+        let rearm = p.rearm;
         let mut next: Option<(u32, u64, u64, u64)> = None;
         match out.sold_at {
             Some(c) => {
@@ -1654,8 +2048,10 @@ impl PsLive {
         }
         if let Some((n, toks, c, w)) = next {
             self.st.follow_ups += 1;
-            self.rec(serde_json::json!({"ev": "presend_live_exit", "w": w, "mint": b58(&mint), "why": "follow-up", "slot": self.sh.slot.load(Ordering::Relaxed), "value": null,
-                "t": arbx::feeds::clock::now_ns(), "pid": pid, "round": round + 1, "tokens": toks, "buys": n, "after_sold_at": c}));
+            let mut r = serde_json::json!({"ev": "presend_live_exit", "w": w, "mint": b58(&mint), "why": "follow-up", "slot": self.sh.slot.load(Ordering::Relaxed), "value": null,
+                "t": arbx::feeds::clock::now_ns(), "pid": pid, "round": round + 1, "tokens": toks, "buys": n, "after_sold_at": c});
+            if rearm { r["kind"] = "rearm".into(); }
+            self.rec(r);
             self.line(format!("  PRESEND LIVE FOLLOW-UP SELL {}: round {round} sold (a confirmed 0 at slot {c}); {n} buy(s) landed after it ({toks} tokens): round {}, its own sell",
                 b58(&mint), round + 1));
             self.sell_round(&mint);
@@ -1670,6 +2066,8 @@ impl PsLive {
         let mint = p.mint;
         self.sh.pause_pos.store(!self.pos.is_empty(), Ordering::Relaxed);
         self.st.closed += 1;
+        // dip26: the re-arm's own count
+        if p.rearm { if let Some(rm) = self.rm.as_mut() { rm.st.closed += 1; } }
         let sold = out.sold_at.is_some();
         self.free_at.insert(mint, Instant::now() + Duration::from_millis(MARGIN_MS));
         // dip19 (fix 1): the account stays open (every pre-send sell keeps it): closed once no attempt can land (tick); an UNSOLD
@@ -1687,10 +2085,13 @@ impl PsLive {
             "sell_lands": p.sell_lands, "sell_sigs": p.sells, "rounds": p.round, "sol_in_curve": p.sol_in(), "sol_out_curve": (!p.sell_lands.is_empty()).then(|| p.sol_out()), "curve_pnl": feed_pnl,
             "tokens": p.tokens_all(), "fee": p.fees(), "tips": p.tips(), "spend": p.spend, "path": p.att.as_ref().map(|a| a.path.clone()), "client": p.att.as_ref().map(|a| a.client.clone()),
             "held_s": p.opened.elapsed().as_secs_f64(), "merged": p.merged, "late": p.late, "via": p.via});
+        let mut r = r;
+        if p.rearm { r["kind"] = "rearm".into(); }
         self.rec(r);
-        self.line(format!("  PRESEND LIVE CLOSED {} {} via {why}; curve PnL {}{}", b58(&mint), if sold { "sold" } else { "UNSOLD (retrying in the background)" },
+        self.line(format!("  PRESEND LIVE CLOSED {} {} via {why}; curve PnL {}{}{}", b58(&mint), if sold { "sold" } else { "UNSOLD (retrying in the background)" },
             feed_pnl.map(|v| format!("{:+.4} SOL", v as f64 / 1e9)).unwrap_or("?".into()),
-            if p.buys.len() > 1 || p.round > 1 { format!(" ({} buys, {} sell round(s), every one in the P&L)", p.buys.len(), p.round) } else { String::new() }));
+            if p.buys.len() > 1 || p.round > 1 { format!(" ({} buys, {} sell round(s), every one in the P&L)", p.buys.len(), p.round) } else { String::new() },
+            if p.rearm { " [rearm]" } else { "" }));
         if !sold { self.exec(Cmd::Unsold { mint, launch: p.launch.clone(), land_slot: last, last_qty: out.last_qty }); }
         self.realized(&p);
     }
@@ -1775,17 +2176,21 @@ impl PsLive {
         let (launch, derived) = match self.launches.get(&mint).cloned() { Some(l) => (l, false), None => (snipe_build::launch_from_target(mint, mint), true) };
         self.line(format!("  PRESEND LIVE ORPHAN {}: our token account holds {tokens} tokens with no position open ({from}{}, slot {ctx}): selling", b58(&mint),
             if w > 0 { format!(", window w{w}") } else { String::new() }));
-        self.rec(serde_json::json!({"ev": "presend_live_orphan", "w": w, "mint": b58(&mint), "tokens": tokens, "ctx_slot": ctx, "from": from, "launch": if derived { "derived" } else { "create" }}));
+        // dip26: a re-arm window's (its size, its records say so)
+        let (rearm, spend) = (self.rearm_w(w), self.w_spend(w));
+        let mut r = serde_json::json!({"ev": "presend_live_orphan", "w": w, "mint": b58(&mint), "tokens": tokens, "ctx_slot": ctx, "from": from, "launch": if derived { "derived" } else { "create" }});
+        if rearm { r["kind"] = "rearm".into(); }
+        self.rec(r);
         self.alert(arbx::alerts::Level::Critical, "dip_presend_orphan", &b58(&mint), "🚨", "PRESEND LIVE ORPHAN: selling", arbx::alerts::format::Body::new()
             .raw(format!("mint {}", tg::mint_link(&mint))).kv("tokens", tokens.to_string()).kv("found by", from).txt("a recovery position sells it now; by hand: --sell-held").code("mint", b58(&mint)));
         let e = self.ends.entry(mint).or_default(); *e = (*e).max(ctx);
         let now_ns = arbx::feeds::clock::now_ns();
         self.pid += 1;
         // its buy's tx is not known: valued at the spend (dip18's held-check), replaced by the fill if the feed shows it later
-        let acct = PsAcct::open(mint, self.cfg.spend, ctx);
-        let buy = Buy { sig: String::new(), w, slot: ctx, idx: 0, t_rx: now_ns, tokens, sol_in: self.cfg.spend, fee: 0, tip: 0, cost: self.cfg.spend, round: 0, via: "rpc_read" };
-        self.pos.insert(mint, PPos { pid: self.pid, w, mint, launch, derived, buys: vec![buy], land: (ctx, 0, now_ns), tokens, spend: self.cfg.spend, att: None, exit: None,
-            sell_lands: Vec::new(), sells: Vec::new(), round: 0, selling: false, opened: Instant::now(), acct, merged: 0, late: 0, via: "rpc_read" });
+        let acct = PsAcct::open(mint, spend, ctx);
+        let buy = Buy { sig: String::new(), w, slot: ctx, idx: 0, t_rx: now_ns, tokens, sol_in: spend, fee: 0, tip: 0, cost: spend, round: 0, via: "rpc_read" };
+        self.pos.insert(mint, PPos { pid: self.pid, w, mint, launch, derived, buys: vec![buy], land: (ctx, 0, now_ns), tokens, spend, att: None, exit: None,
+            sell_lands: Vec::new(), sells: Vec::new(), round: 0, selling: false, opened: Instant::now(), acct, merged: 0, late: 0, via: "rpc_read", rearm });
         self.ata_held(mint, ctx);
         self.sh.pause_pos.store(true, Ordering::Relaxed);
         self.tapes.entry(mint).or_insert_with(|| (VecDeque::new(), 0));
@@ -1797,7 +2202,7 @@ impl PsLive {
     /// rent) and EVERY sell's of every round, into the run's realized total (the kill switch's realized rule) and the log
     fn realized(&mut self, p: &PPos) {
         let buys: Vec<(String, u64)> = p.buys.iter().map(|b| (b.sig.clone(), b.cost)).collect();
-        self.exec(Cmd::Realized { pid: p.pid, w: p.w, mint: p.mint, buys, sells: p.sells.clone() });
+        self.exec(Cmd::Realized { pid: p.pid, w: p.w, mint: p.mint, buys, sells: p.sells.clone(), rearm: p.rearm });
     }
 
     /// dip19: a Telegram alert (the tests keep its title instead: no raise while another test traps them)
@@ -1845,8 +2250,10 @@ impl PsLive {
                     tasks.fetch_sub(1, Ordering::SeqCst);
                 });
             }
-            Cmd::Realized { pid, w, mint, buys, sells } => {
+            Cmd::Realized { pid, w, mint, buys, sells, rearm } => {
                 let (rpc, out) = ((*self.rpc).clone(), self.out.clone());
+                // dip26: the realized split by kind (only with the re-arm on)
+                let rz = self.rz();
                 REALIZED_INFLIGHT.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
                     let mut bs = Vec::with_capacity(buys.len());
@@ -1854,14 +2261,11 @@ impl PsLive {
                     let mut ss = Vec::with_capacity(sells.len());
                     for (s, seen, _) in &sells { ss.push(tx_payer(&rpc, s, if *seen { 8 } else { 2 }).await); }
                     let (pnl, nb, ns) = pnl_of(&bs, &ss);
-                    let src = if nb == buys.len() { "tx" } else if nb > 0 || ns > 0 { "tx+estimate" } else { "estimate" };
                     ACCT.realized.fetch_add(pnl, Ordering::SeqCst);
-                    let found: Vec<(i64, u64)> = bs.iter().filter_map(|(b, _)| b.map(|x| (x.0, x.1))).collect();
-                    let _ = out.send(Out::Rec(serde_json::json!({"ev": "presend_live_realized", "w": w, "pid": pid, "mint": b58(&mint), "pnl": pnl, "src": src,
-                        "buy_delta": (!found.is_empty()).then(|| found.iter().map(|x| x.0).sum::<i64>()), "buy_fee": (!found.is_empty()).then(|| found.iter().map(|x| x.1).sum::<u64>()),
-                        "buys": buys.iter().zip(&bs).map(|((s, c), (b, _))| serde_json::json!({"sig": s, "delta": b.map(|x| x.0), "fee": b.map(|x| x.1), "found": b.is_some(), "cost_est": c})).collect::<Vec<_>>(),
-                        "buys_found": nb, "sells_found": ns, "sells": sells.len()})));
-                    let _ = out.send(Out::Line(format!("  PRESEND LIVE REALIZED {} {:+.6} SOL ({src}: {nb}/{} buy tx(s), {ns}/{} sell tx(s))", b58(&mint), pnl as f64 / 1e9, buys.len(), sells.len())));
+                    if let Some(z) = &rz { z.add(rearm, pnl); }
+                    let (rec, line) = realized_out(w, pid, &mint, pnl, &buys, &bs, nb, ns, sells.len(), rearm);
+                    let _ = out.send(Out::Rec(rec));
+                    let _ = out.send(Out::Line(line));
                     REALIZED_INFLIGHT.fetch_sub(1, Ordering::SeqCst);
                 });
             }
@@ -1885,7 +2289,11 @@ impl PsLive {
         // windows: the last slot passed / the whale sold 30 ms ago
         let ends: Vec<(u64, &'static str)> = self.wins.values().filter(|w| w.disarmed.is_none())
             .filter_map(|w| if slot_now > w.en_slot { Some((w.id, "expired")) } else if w.stop_at.is_some_and(|t| now >= t) { Some((w.id, "whale_sold")) } else { None }).collect();
-        for (id, why) in ends { self.disarm(id, why); }
+        for (id, why) in ends {
+            // dip26: a re-arm window's 30 ms stop has its own reason (whale_dump / no_holder); T2 windows unchanged
+            let why = if why == "whale_sold" { self.rearm_stop_why(id).unwrap_or(why) } else { why };
+            self.disarm(id, why);
+        }
         // dip20 QUIET: the preload's answer, the stop's decisions (once per slot), housekeeping. AFTER the regular ends: a window due to
         // end now (a late tick: a stalled feed) ends as it would without QUIET, the stop only acts on a window still running
         if self.qt.is_some() { self.quiet_tick(slot_now); }
@@ -1971,6 +2379,8 @@ impl PsLive {
             let (armed, pos) = (&self.armed, &self.pos);
             self.det.retire(slot_now, |m| armed.contains_key(m) || pos.contains_key(m));
         }
+        // dip26 RE-ARM: the waiting windows whose position / token account cleared arm now (nothing without it)
+        if self.rm.is_some() { self.rearm_tick(slot_now); }
     }
 
     /// dip20 QUIET's part of the tick: (1) the preload's answer, merged into the live book (once; the arm rule's schedule moves up by
@@ -2134,6 +2544,8 @@ impl PsLive {
             "res": l.res, "err": l.err, "fee": l.fee, "send_slot": a.slot, "deadline": a.deadline, "t_send": a.t_send, "lim": a.lim, "p_sign": a.p_sign});
         if let Some((s, ms)) = pl::ack_of(a.tag) { j["ack"] = serde_json::json!(s); j["ack_ms"] = serde_json::json!(ms); }
         if let Some(f) = first_rx(&a.sig) { j["first_rx"] = serde_json::json!(f); j["ms_send_to_first_rx"] = serde_json::json!((f as i64 - a.t_send as i64) as f64 / 1e6); }
+        // dip26: a re-arm window's attempt says so (T2 attempts: dip25's record)
+        if self.rearm_w(a.w) { j["kind"] = "rearm".into(); }
         if l.res == "unseen" { return j; }
         let idx = l.idx.unwrap_or(u32::MAX as u64) as u32;
         let a_ours = arbx::dip_model::arrival(l.slot, idx.min(10_000));
@@ -2212,7 +2624,8 @@ impl PsLive {
 
     /// the 60 s status line's part
     pub fn status(&mut self) -> String {
-        let qs = self.quiet_status() + &self.v2_status() + &self.fee_status();
+        // dip26: the re-arm's part last ("" without it)
+        let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -2258,6 +2671,13 @@ impl PsLive {
             if self.fee_pauses > 0 { format!(" (pauses {})", self.fee_pauses) } else { String::new() })
     }
 
+    /// dip27's part of the status line, LAST ("" without --presend-live-ann on; the lone-whale skips are in the skips map)
+    fn ann_status(&self) -> String {
+        if !self.cfg.ann { return String::new(); }
+        format!(" | ANN (log-only): ctx85 would-skip fills {} | st-safe would-block fills {} | group-risk would-block fills {} | landing-guard would-fail fills {} | hold clocks {} wallets",
+                self.st.ann_ctx85, self.st.ann_st, self.st.ann_grp, self.st.ann_guard, self.det.clocks())
+    }
+
     /// dip23 v2's part of the status line ("" without --presend-live-quiet-v2-log)
     fn v2_status(&self) -> String {
         let Some(v) = self.v2.as_ref() else { return String::new() };
@@ -2287,6 +2707,13 @@ impl PsLive {
     /// the run's end: the sender stopped, unresolved attempts resolved as unseen, the records written; the totals (run_end)
     pub fn finish(&mut self, slot_now: u64, first: Option<&FxHashMap<u64, (u64, u16)>>) -> serde_json::Value {
         self.stop("run_end");
+        // dip28: the hold clocks for the next run (after the stop: no trade waits on it)
+        if let Some(p) = self.cfg.holds_state.clone() {
+            match holds_save(&self.det, &p, slot_now) {
+                Ok(n) => self.line(format!("  PRESEND LIVE HOLD CLOCKS: {n} wallets saved to {p}")),
+                Err(e) => self.line(format!("  PRESEND LIVE HOLD CLOCKS: NOT saved to {p}: {e:#}")),
+            }
+        }
         self.sh.stop.store(true, Ordering::SeqCst);
         // dip15: never block the run's end on the sender thread (up to 2 s for it to leave its loop, else it is not joined)
         if let Some(h) = self.thread.take() {
@@ -2328,6 +2755,8 @@ impl PsLive {
         }
         // dip23: only with the v2 log flag
         if let Some(j) = self.v2_json() { fin["quiet_v2"] = j; }
+        // dip26: only with the re-arm on (its realized split is completed in run_end once the realized lookups are in: dipmode)
+        if let Some(j) = self.rearm_json() { fin["rearm"] = j; }
         fin
     }
 
@@ -2443,13 +2872,17 @@ impl PsLive {
     fn for_test(cfg: Cfg, user: Pk) -> (PsLive, crossbeam_channel::Sender<Att>, crossbeam_channel::Receiver<Out>) {
         let cfg_quiet = cfg.quiet.clone();
         let v2_log = cfg.quiet_v2_log;
+        // dip26: the re-arm as its flags say
+        let rearm = cfg.rearm.on.then(|| psrearm::Rearm::new(cfg.rearm.clone()));
         let (out, orx) = crossbeam_channel::unbounded();
         let (atx, arx) = crossbeam_channel::unbounded();
         let (mtx, _) = tokio::sync::mpsc::unbounded_channel();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true), skips: Mutex::new(FxHashMap::default()),
             build_us: Mutex::new(Ring::default()) });
-        let det = pl::Detector::new(cfg.whale_pct);
+        let mut det = pl::Detector::new(cfg.whale_pct);
+        // dip27: the hold clocks only with the annotations on (as a run)
+        det.track = cfg.ann;
         (PsLive { cfg, det, wins: FxHashMap::default(), armed: FxHashMap::default(), wid: 0, sh, arx, atts: FxHashMap::default(), order: VecDeque::new(), lands: Vec::new(),
             tapes: FxHashMap::default(), pos: FxHashMap::default(), free_at: FxHashMap::default(), last_deadline: FxHashMap::default(), launches: FxHashMap::default(), last_sweep: 0,
             checks: 0, par: FxHashMap::default(), st: Stats::default(), out, thread: None, user, key: Arc::new(SigningKey::from_bytes(&[1u8; 32])),
@@ -2460,7 +2893,7 @@ impl PsLive {
             // dip20: QUIET as its flags say, the arm rule on from the start (no warm-up: a test sets start_ns / warm_ns), the feed's slot
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
-            v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0 }, atx, orx)
+            v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm }, atx, orx)
     }
 
     /// dip19 tests: the chain work queued so far (taken)
@@ -2503,6 +2936,11 @@ mod dip22_tests;
 #[path = "dip23_tests.rs"]
 mod dip23_tests;
 
+// dip26 (10-29 PKT): the LIVE RE-ARM (--presend-live-rearm on; off by default = dip25, golden)
+#[cfg(test)]
+#[path = "dip26_tests.rs"]
+mod dip26_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2526,7 +2964,7 @@ mod tests {
         let mut sg = [0u8; 64]; sg[0] = 0xD1; sg[1] = 0x5F;
         let roles = pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) };
         atx.send(Att { w: 999, n: 1, mint: [7u8; 32], sig: sg, tag: pl::PS_TAG | 1, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 100, deadline: 101,
-            lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (100, 0, 0), t_send: 0, roles, tip: 0, wst: "written" }).unwrap();
+            lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (100, 0, 0), t_send: 0, roles, tip: 0, wst: "written", ob6: 0.0, grd: Grd::default() }).unwrap();
         p.drain_atts();
         assert!(!p.idle(), "an unresolved attempt keeps the probe busy");
         assert!(!p.can_end(Duration::ZERO), "never before the stop");
@@ -2560,7 +2998,8 @@ mod tests {
         let all = with(&["--presend-live-dry", "--presend-live-size-sol", "0.2", "--presend-live-k", "4", "--presend-live-drop", "0.12", "--presend-live-deadline-slots", "1",
             "--presend-live-cu-limit", "90000", "--presend-live-cu-price-micro", "1000", "--presend-live-tip-lamports", "200000", "--presend-live-max-per-sec", "20",
             "--presend-live-path-max-per-sec", "10", "--presend-live-create-slot", "off", "--presend-live-one-position", "on", "--presend-live-exit-ms", "200",
-            "--presend-live-quiet-v2-log"]);
+            "--presend-live-quiet-v2-log", "--presend-live-min-age-slots", "2", "--presend-live-lone-whale-slots", "50", "--presend-live-ann", "on",
+            "--presend-live-deep-drop", "0.15", "--presend-live-holds-state", "/tmp/dip28-test-holds.json"]);
         assert!(check_flags(&all).is_ok(), "{:?}", check_flags(&all));
         for f in FLAGS { assert!(all.iter().any(|a| a == f), "{f} in the test line"); }
         let wrong = ["-", "-presend-live-kk"].concat();
@@ -2578,6 +3017,22 @@ mod tests {
         assert_eq!(c.fail_fee(), 5_000 + (CU_DEFAULT * 1_000).div_ceil(1_000_000));
         let c = Cfg::from_argv(&all, &p, true, cap).unwrap().unwrap();
         assert_eq!((c.dry, c.spend, c.tip, c.max_per_sec, c.path_max_per_sec), (true, 200_000_000, Some(200_000), 20, 10));
+        // dip27: the lone-whale window and the annotations (off by default; the window at most the recent buys kept)
+        assert_eq!((c.lone_whale_slots, c.ann), (50, true));
+        let c0 = Cfg::from_argv(&v(&BASE), &p, true, cap).unwrap().unwrap();
+        assert_eq!((c0.lone_whale_slots, c0.ann), (0, false));
+        assert!(c0.json().get("lone_whale_slots").is_none() && c0.json().get("ann").is_none(), "off: dip26's start record");
+        assert!(Cfg::from_argv(&set("--presend-live-lone-whale-slots", "65"), &p, true, cap).unwrap_err().to_string().contains("lone-whale"));
+        assert_eq!(Cfg::from_argv(&set("--presend-live-lone-whale-slots", "64"), &p, true, cap).unwrap().unwrap().lone_whale_slots, 64);
+        assert!(Cfg::from_argv(&set("--presend-live-ann", "maybe"), &p, true, cap).is_err());
+        // dip28: the deeper limit (deeper than the drop, <= 0.5) and the holds state (needs the annotations)
+        assert_eq!((c.deep_drop, c.holds_state.as_deref()), (0.15, Some("/tmp/dip28-test-holds.json")));
+        assert_eq!((c0.deep_drop, c0.holds_state.is_none()), (0.0, true));
+        assert!(c0.json().get("deep_drop").is_none() && c0.json().get("holds_state").is_none(), "off: dip27's start record");
+        for bad in ["0.10", "0.12", "0.6"] {
+            assert!(Cfg::from_argv(&set("--presend-live-deep-drop", bad), &p, true, cap).unwrap_err().to_string().contains("deep-drop"), "{bad}");
+        }
+        assert!(Cfg::from_argv(&set("--presend-live-holds-state", "/tmp/x.json"), &p, true, cap).unwrap_err().to_string().contains("needs --presend-live-ann on"));
         // flags off: None; a stray --presend-live-* flag refused
         assert!(Cfg::from_argv(&v(&["snipe_engine", "--dip", "--presend-shadow"]), &p, true, cap).unwrap().is_none());
         assert!(Cfg::from_argv(&v(&["snipe_engine", "--dip"]), &p, false, cap).unwrap().is_none());
@@ -2613,6 +3068,30 @@ mod tests {
         // the size within the per-buy cap (live)
         assert!(Cfg::from_argv(&set("--presend-live-size-sol", "0.6"), &p, true, 500_000_000).unwrap_err().to_string().contains("--max-sol"));
         assert!(Cfg::from_argv(&set("--presend-live-size-sol", "0.4"), &p, true, 500_000_000).is_ok());
+        // dip26 RE-ARM: its flags pass the start-up check (with --presend-live-rearm on); each needs --presend-live, a parameter needs
+        // --presend-live-rearm on; numbers checked at the start; its size within the per-buy cap; off by default (dip25's config)
+        let re = with(&["--presend-live-rearm", "on", "--presend-live-rearm-size-sol", "0.4", "--presend-live-rearm-gap-slots", "20", "--presend-live-rearm-quiet-stop", "6:2",
+            "--presend-live-rearm-r5-skip", "off"]);
+        assert!(check_flags(&re).is_ok(), "{:?}", check_flags(&re));
+        for f in RFLAGS { assert!(re.iter().any(|a| a == f), "{f} in the test line"); }
+        let c = Cfg::from_argv(&re, &p, true, cap).unwrap().unwrap();
+        assert_eq!((c.rearm.on, c.rearm.spend, c.rearm.gap, c.rearm.stop, c.rearm.r5_skip), (true, 400_000_000, 20, pq::QStop { n: 6, m: 2 }, false));
+        assert!(!Cfg::from_argv(&v(&BASE), &p, true, cap).unwrap().unwrap().rearm.on, "off by default");
+        for f in RFLAGS {
+            let e = Cfg::from_argv(&v(&["snipe_engine", "--dip", "--presend-shadow", f, "on"]), &p, true, cap).unwrap_err().to_string();
+            assert!(e.contains("needs --presend-live"), "{f}: {e}");
+        }
+        assert!(Cfg::from_argv(&with(&["--presend-live-rearm-gap-slots", "20"]), &p, true, cap).unwrap_err().to_string().contains("needs --presend-live-rearm on"));
+        let e = Cfg::from_argv(&with(&["--presend-live-size-sol", "0.4", "--presend-live-rearm", "on", "--presend-live-rearm-size-sol", "0.6"]), &p, true, 500_000_000).unwrap_err().to_string();
+        assert!(e.contains("REFUSED: --presend-live-rearm-size-sol 0.600 exceeds --max-sol"), "{e}");
+        for (f, x) in [("--presend-live-rearm-gap-slots", "x"), ("--presend-live-rearm-gap-slots", "1.5"), ("--presend-live-rearm-size-sol", "abc")] {
+            assert!(check_flags(&with(&["--presend-live-rearm", "on", f, x])).is_err(), "{f} {x}");
+        }
+        for (f, x) in [("--presend-live-rearm", "yes"), ("--presend-live-rearm-gap-slots", "61"), ("--presend-live-rearm-quiet-stop", "6")] {
+            let mut a = with(&["--presend-live-rearm", "on"]);
+            match a.iter().position(|y| y == f) { Some(i) => a[i + 1] = x.to_string(), None => { a.push(f.to_string()); a.push(x.to_string()); } }
+            assert!(Cfg::from_argv(&a, &p, true, cap).is_err(), "{f} {x} should be refused");
+        }
     }
 
     /// the rate caps: one window at k = 4 (~19 a second) against 10 a second per path and 20 global; two windows on two paths
@@ -2768,7 +3247,7 @@ mod tests {
                     seq += 1;
                     let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&seq.to_be_bytes()); sg[8] = 0xA7; sg[9] = fills_on as u8;
                     let att = Att { w, n: 1, mint: m, sig: sg, tag: pl::PS_TAG | seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot: *s, deadline: *s + 1, lim: 1.0,
-                        min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written" };
+                        min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default() };
                     atx.send(att).unwrap();
                     assert!(p.blocks_reactive(&m).is_some(), "an armed token is not for the reactive bot");
                     if fills_on && seq % 7 == 0 {

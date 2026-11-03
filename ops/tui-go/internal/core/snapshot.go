@@ -270,6 +270,9 @@ func SnapshotJSON(v *View, ctx *Ctx, extra *JObj) string {
 	}
 	// v3: the ATH / low of the same series (the chart's markers, the card's lines) and the drawdown from the ATH
 	athJSON(d, v.PnL())
+	d24JSON(v, d)     // dip24 runs only
+	d26JSON(v, d)     // dip26 runs only
+	filtersJSON(v, d) // dip24+ runs only
 	if extra != nil {
 		for i, k := range extra.Keys {
 			d.Set(k, extra.Vals[i])
@@ -339,6 +342,8 @@ func SnapshotText(v *View, ctx *Ctx, width int) string {
 	plan := ""
 	if v.Planned.Truthy() {
 		plan = " of " + HMS(v.Planned.Float()*60, true, false) + " planned"
+	} else if v.NoTimeLimit {
+		plan = " (no time limit)"
 	}
 	line := "started   " + Clock(float64(v.TFirst), "%Y-%m-%d %H:%M:%S") + " PKT   ran " + HMS(v.Elapsed, v.HasElapsed, false) + plan + "   sessions " + strconv.Itoa(v.NSess)
 	if v.Running && v.HasEndsAt {
@@ -370,9 +375,18 @@ func SnapshotText(v *View, ctx *Ctx, width int) string {
 		ph = m(int64(v.PerHour))
 	}
 	out = append(out, "RUN P&L   "+PadRight(m(v.Total), 32)+"  per hour "+ph)
+	if ps.Active && v.RA.On { // dip26: the T2 windows and the re-arm apart (they add up to the run's pre-send)
+		t2, ra := v.T2, v.RA
+		out = append(out, "pre-send  "+PadRight(m(t2.Net), 32)+"  T2: "+Itoa(t2.Fills)+" fills, "+Itoa(t2.Wins)+" wins | realized "+SolS(t2.Real)+
+			", rent back "+SolS(t2.Rent)+", failed tries "+SolS(-t2.Fees)+" ("+IC(t2.FeeN)+" x "+IC(v.PSFailEach)+")")
+		out = append(out, "re-arm    "+PadRight(m(ra.Net), 32)+"  "+Itoa(ra.Fills)+" fills, "+Itoa(ra.Wins)+" wins | realized "+SolS(ra.Real)+
+			", rent back "+SolS(ra.Rent)+", failed tries "+SolS(-ra.Fees)+" ("+IC(ra.FeeN)+" x "+IC(v.PSFailEach)+")")
+	}
 	if ps.Active {
-		out = append(out, "pre-send  "+PadRight(m(ps.Net), 32)+"  "+Itoa(ps.Fills)+" fills, "+Itoa(ps.Wins)+" wins | realized "+SolS(ps.Real)+
-			", rent back "+SolS(ps.Rent)+", failed tries "+SolS(-ps.Fees)+" ("+IC(ps.FeeN)+" x "+IC(v.PSFailEach)+")")
+		if !v.RA.On {
+			out = append(out, "pre-send  "+PadRight(m(ps.Net), 32)+"  "+Itoa(ps.Fills)+" fills, "+Itoa(ps.Wins)+" wins | realized "+SolS(ps.Real)+
+				", rent back "+SolS(ps.Rent)+", failed tries "+SolS(-ps.Fees)+" ("+IC(ps.FeeN)+" x "+IC(v.PSFailEach)+")")
+		}
 		if ps.AllStopped && ps.FeesEng != 0 {
 			dd := ps.FeesEng - ps.FeesCnt
 			tail := "(match)"
@@ -412,23 +426,38 @@ func SnapshotText(v *View, ctx *Ctx, width int) string {
 			out = append(out, x)
 		}
 	}
+	out = append(out, d24Text(v)...)
+	out = append(out, d26Text(v, ctx)...)
+	out = append(out, filtersText(v, ctx)...)
 	if ps.Active {
 		capS := "?"
 		if c := v.PSCfg["max_fills"]; truthyAny(c) {
 			capS = fmtAny(c)
+		} else if truthyAny(v.PSCfg["fills_unlimited"]) || (v.D24 != nil && v.D24.PSFillsUnl) {
+			capS = "no limit"
 		}
 		bud := 0.0
 		if b, ok := v.PSCfg["fee_budget"].(Num); ok && b.Truthy() {
 			bud = b.Float()
 		}
 		line = "caps      pre-send fills " + Itoa(S.PSFills) + "/" + capS + ", fee budget " + F(float64(S.PSFees())/LAM, 4) + "/" + F(bud/LAM, 4) + " SOL"
+		if d := v.D24; d != nil && d.HasBud24 { // dip24: the rolling 24 h sum
+			line = "caps      pre-send fills " + Itoa(S.PSFills) + "/" + capS + ", fees " + F(float64(S.PSFees())/LAM, 4) + " SOL this run, 24 h " + F(float64(d.Fee24)/LAM, 4) + "/" + F(float64(d.Bud24)/LAM, 4)
+			if d.FeePaused {
+				line += " PAUSED"
+			}
+		}
 		if v.PSStopped != "" {
 			line += ", stopped (" + v.PSStopped + ")"
 		}
 		line += ", windows armed now " + Itoa(v.PSOpenNow)
 		out = append(out, line)
 		if ps.Paper {
-			out = append(out, "paper     row c "+Itoa(ps.PaperFills)+" fills, gross "+FS(ps.PaperGross, 3)+", net "+FS(ps.PaperNet, 3)+" SOL  vs live "+Itoa(ps.Fills)+" fills, net "+Sol(ps.Net, true, 3, true))
+			if v.RA.On { // the shadow's rows are the T2 windows' paper
+				out = append(out, "paper     row c "+Itoa(ps.PaperFills)+" fills, gross "+FS(ps.PaperGross, 3)+", net "+FS(ps.PaperNet, 3)+" SOL  vs live T2 "+Itoa(v.T2.Fills)+" fills, net "+Sol(v.T2.Net, true, 3, true))
+			} else {
+				out = append(out, "paper     row c "+Itoa(ps.PaperFills)+" fills, gross "+FS(ps.PaperGross, 3)+", net "+FS(ps.PaperNet, 3)+" SOL  vs live "+Itoa(ps.Fills)+" fills, net "+Sol(ps.Net, true, 3, true))
+			}
 		}
 	}
 	q := v.Quiet
@@ -484,6 +513,9 @@ func SnapshotText(v *View, ctx *Ctx, width int) string {
 		kind := "REG"
 		if tr.Kind == "PS" {
 			kind = "PS "
+			if tr.Rearm {
+				kind = "RA "
+			}
 		}
 		pS := "-"
 		uS := ""
@@ -501,8 +533,13 @@ func SnapshotText(v *View, ctx *Ctx, width int) string {
 				pctS = PctS(float64(tr.Pnl)/float64(sp), true, 1, true)
 			}
 		}
-		out = append(out, "  "+Clock(float64(tr.T), "%H:%M:%S")+" "+kind+" "+Short(tr.Mint, 8)+"  "+F(float64(sp)/LAM, 2)+"  "+
-			PadLeft(pS, 9)+" "+PadLeft(uS, 9)+"  "+PadLeft(pctS, 7)+"  "+PadRight(TradeExit(tr), 5)+" "+KindOf(tr.Client))
+		line := "  " + Clock(float64(tr.T), "%H:%M:%S") + " " + kind + " " + Short(tr.Mint, 8) + "  " + F(float64(sp)/LAM, 2) + "  " +
+			PadLeft(pS, 9) + " " + PadLeft(uS, 9) + "  " + PadLeft(pctS, 7) + "  " + PadRight(TradeExit(tr), 5) + " " + KindOf(tr.Client)
+		if v.AB.On { // dip26: the filling try's path
+			line = "  " + Clock(float64(tr.T), "%H:%M:%S") + " " + kind + " " + Short(tr.Mint, 8) + "  " + F(float64(sp)/LAM, 2) + "  " +
+				PadLeft(pS, 9) + " " + PadLeft(uS, 9) + "  " + PadLeft(pctS, 7) + "  " + PadRight(TradeExit(tr), 5) + " " + PadRight(KindOf(tr.Client), 10) + " via " + PathCode(TradePath(tr))
+		}
+		out = append(out, line)
 	}
 	out = append(out, "")
 	if len(v.Alerts) > 0 {

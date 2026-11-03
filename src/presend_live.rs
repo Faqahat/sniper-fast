@@ -73,12 +73,64 @@ pub enum Det {
     Gone,
 }
 
-/// a wallet on a token: its balance, its trades (dip20 QUIET: who traded before a trigger), its trigger states
+/// a wallet on a token: its balance, its trades (dip20 QUIET: who traded before a trigger), its trigger states. dip27: `fb` = the
+/// slot of its first buy of the token (0: none), `fs` = its first sell after that buy was taken into its hold clock
 #[derive(Clone, Copy, Debug, Default)]
-struct Wal { bal: i64, n: u32, became: bool, ins: bool, trig: bool, sold: bool }
+struct Wal { bal: i64, n: u32, became: bool, ins: bool, trig: bool, sold: bool, fb: u64, fs: bool }
 
-/// `last_tr` (dip20 QUIET): the newest slot of the token's trades (0: none yet; `last_slot` starts at the create slot)
-struct DTok { s0: u64, creator: Pk, signer: Pk, n: u32, out: bool, wal: FxHashMap<Pk, Wal>, last_slot: u64, last_tr: u64 }
+/// dip27: the recent buys a token keeps (slot, buyer) cover this many slots (the lone-whale count's longest window)
+pub const RB_SLOTS: u64 = 64;
+
+/// `last_tr` (dip20 QUIET): the newest slot of the token's trades (0: none yet; `last_slot` starts at the create slot). dip27 `rb`:
+/// its buys of the last RB_SLOTS slots (slot, buyer), arrival order
+struct DTok { s0: u64, creator: Pk, signer: Pk, n: u32, out: bool, wal: FxHashMap<Pk, Wal>, last_slot: u64, last_tr: u64, rb: std::collections::VecDeque<(u64, Pk)> }
+
+/// dip27 (log-only annotations): a wallet's hold clock over every token: its last 16 holds (slots from its first buy of a token to
+/// its first sell of it after that buy), newest last; `last` = the slot of its newest hold (idle wallets are forgotten)
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Holds { v: [u32; 16], n: u8, i: u8, last: u64 }
+
+impl Holds {
+    pub fn push(&mut self, hold: u64, slot: u64) {
+        self.v[self.i as usize] = hold.min(u32::MAX as u64) as u32;
+        self.i = (self.i + 1) % 16;
+        self.n = (self.n + 1).min(16);
+        self.last = slot;
+    }
+    /// the holds kept (unordered)
+    pub fn all(&self) -> &[u32] { &self.v[..self.n as usize] }
+    /// dip28: a clock rebuilt from saved holds (oldest first; the newest 16 kept) and its last slot (the holds-state preload)
+    pub fn from_holds(holds: &[u32], last: u64) -> Holds {
+        let mut h = Holds::default();
+        for x in holds.iter().rev().take(16).rev() { h.push(*x as u64, last); }
+        h.last = last;
+        h
+    }
+    /// dip28 (the SAFE sell-timer check's log): (at risk, hazard) of a first sell within `w` slots at hold age `age`: at risk = its
+    /// holds >= age, hazard = (holds in [age, age + w] + 0.05) / (at risk + 1) (the 10-30 TIMING study's estimator, on completed
+    /// holds only: the engine has no open positions of a wallet on other mints)
+    pub fn hz(&self, age: u64, w: u64) -> (u32, f32) {
+        let risk = self.all().iter().filter(|&&h| h as u64 >= age).count() as u32;
+        let ev = self.all().iter().filter(|&&h| h as u64 >= age && h as u64 <= age + w).count() as f32;
+        (risk, (ev + 0.05) / (risk as f32 + 1.0))
+    }
+    /// (holds, p25, p50, p75, h3): the quartiles of its holds (slots) and its hazard over the next 3 slots at hold age `age` = the
+    /// share of its holds longer than `age` that ended within age + 3 (None: no hold longer than `age`). Nearest-rank quartiles
+    pub fn stats(&self, age: u64) -> (u8, u32, u32, u32, Option<f32>) {
+        let mut v: Vec<u32> = self.all().to_vec();
+        if v.is_empty() { return (0, 0, 0, 0, None); }
+        v.sort_unstable();
+        let q = |f: f64| v[((f * (v.len() - 1) as f64).round() as usize).min(v.len() - 1)];
+        let longer: Vec<u32> = v.iter().copied().filter(|&h| h as u64 > age).collect();
+        let h3 = (!longer.is_empty()).then(|| longer.iter().filter(|&&h| h as u64 <= age + 3).count() as f32 / longer.len() as f32);
+        (self.n, q(0.25), q(0.5), q(0.75), h3)
+    }
+}
+
+/// dip27 (log-only annotations): a holder's clock at a moment: its balance, its hold age on this token (slots since its first buy of
+/// it) and its hold clock over every token (`Holds::stats` at that age)
+#[derive(Clone, Debug, PartialEq)]
+pub struct HolderClock { pub w: Pk, pub bal: i64, pub age: u64, pub n: u8, pub p25: u32, pub p50: u32, pub p75: u32, pub h3: Option<f32>, pub risk: u32, pub hz3: f32 }
 
 #[derive(Clone, Debug, Default)]
 pub struct DetStats { pub creates: u64, pub mayhem: u64, pub trades: u64, pub no_hist: u64, pub excluded: u64, pub triggers: u64, pub below: u64, pub whale_sells: u64, pub retired: u64 }
@@ -94,12 +146,15 @@ pub struct Detector {
     /// dip20 QUIET: the token's newest trade slot BEFORE the trade `trade` took last (0: none; a followed token only): the trigger's
     /// "since_last" (apply_filter.quiet_signals: the previous trade of any wallet)
     pub prev_tr: u64,
+    /// dip27 (--presend-live-ann on): keep every wallet's hold clock (`holds`); off: nothing of it is kept
+    pub track: bool,
+    holds: FxHashMap<Pk, Holds>,
 }
 
 impl Detector {
     pub fn new(whale_pct: f64) -> Detector {
         let mut toks = FxHashMap::default(); toks.reserve(1 << 13);
-        Detector { whale_pct, toks, st: DetStats::default(), last_retire: 0, idle_slots: 6 * 3600 * 1000 / 212, prev_tr: 0 }
+        Detector { whale_pct, toks, st: DetStats::default(), last_retire: 0, idle_slots: 6 * 3600 * 1000 / 212, prev_tr: 0, track: false, holds: FxHashMap::default() }
     }
     pub fn tokens(&self) -> usize { self.toks.len() }
     /// followed (seen from its create, not mayhem, not excluded)
@@ -112,7 +167,7 @@ impl Detector {
         if self.toks.contains_key(&mint) { return; }
         self.st.creates += 1;
         if mayhem { self.st.mayhem += 1; return; }
-        self.toks.insert(mint, DTok { s0: slot, creator, signer, n: 0, out: false, wal: FxHashMap::default(), last_slot: slot, last_tr: 0 });
+        self.toks.insert(mint, DTok { s0: slot, creator, signer, n: 0, out: false, wal: FxHashMap::default(), last_slot: slot, last_tr: 0, rb: Default::default() });
     }
 
     /// one executed trade, in ARRIVAL order; what it means for the probe goes to `out`
@@ -135,6 +190,15 @@ impl Detector {
         w.n += 1;
         if t.buy { w.bal += t.tok as i64; } else { w.bal -= t.tok as i64; }
         if t.buy && t.s == s0 && t.user != creator && t.user != signer { w.ins = true; }
+        // dip27: the token's recent buys (the lone-whale count: every buy, the trigger's own included) and a wallet's hold clock
+        if t.buy {
+            if w.fb == 0 { w.fb = t.s.max(1); }
+            tk.rb.push_back((t.s, t.user));
+            while tk.rb.front().is_some_and(|f| f.0 + RB_SLOTS < t.s) { tk.rb.pop_front(); }
+        } else if self.track && w.fb > 0 && !w.fs {
+            w.fs = true;
+            self.holds.entry(t.user).or_default().push(t.s.saturating_sub(w.fb), t.s);
+        }
         // a triggered whale's first sell after its trigger
         if !t.buy && w.trig && !w.sold { w.sold = true; self.st.whale_sells += 1; out.push(Det::WhaleSell { whale: t.user }); }
         // the trigger (the shadow's ps4 T2 + ps6 filter): the balance AFTER this buy
@@ -167,7 +231,91 @@ impl Detector {
         Some((coh_hold, fb_n))
     }
 
-    /// forget tokens idle for `idle_slots` (call with the feed's slot; works every 2048 slots)
+    /// dip26 RE-ARM: the wallets of a followed token holding >= `min` raw tokens now (its balances since the create, arrival order), but
+    /// `not` (our wallet), largest first (equal balances by wallet: the observatory's `Tok::holders` order). None: the token is not followed
+    pub fn holders_at_least(&self, mint: &Pk, min: i64, not: &Pk) -> Option<Vec<(Pk, i64)>> {
+        let tk = self.toks.get(mint).filter(|t| !t.out)?;
+        let mut v: Vec<(Pk, i64)> = tk.wal.iter().filter(|(k, w)| w.bal >= min && *k != not).map(|(k, w)| (*k, w.bal)).collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        Some(v)
+    }
+
+    /// dip26 RE-ARM: a wallet but `not` holds >= `min` raw tokens of a followed token now (false: none, or the token is not followed)
+    pub fn any_holder(&self, mint: &Pk, min: i64, not: &Pk) -> bool {
+        self.toks.get(mint).filter(|t| !t.out).is_some_and(|t| t.wal.iter().any(|(k, w)| w.bal >= min && k != not))
+    }
+
+    /// dip26 RE-ARM (R5's since_last): the slot of the token's newest trade (None: not followed, or no trade yet)
+    pub fn last_trade_slot(&self, mint: &Pk) -> Option<u64> { self.toks.get(mint).filter(|t| !t.out && t.last_tr > 0).map(|t| t.last_tr) }
+
+    /// dip26 RE-ARM (R5): over every wallet that traded the token, (cohort wallets holding it, follower bots that traded it) = the
+    /// observatory's coh_hold / fb_n at a re-arm check (no trigger trade to take out). None: the token is not followed
+    pub fn trade_counts(&self, mint: &Pk, coh: &rustc_hash::FxHashSet<Pk>, fb: &rustc_hash::FxHashSet<Pk>) -> Option<(u32, u32)> {
+        let tk = self.toks.get(mint).filter(|t| !t.out)?;
+        let (mut coh_hold, mut fb_n) = (0u32, 0u32);
+        for (k, w) in &tk.wal {
+            if w.n == 0 { continue; }
+            if w.bal > 0 && coh.contains(k) { coh_hold += 1; }
+            if fb.contains(k) { fb_n += 1; }
+        }
+        Some((coh_hold, fb_n))
+    }
+
+    /// dip27 LONE WHALE: the distinct buyers of a followed token in slots >= `from` (its buys so far, arrival order: a trigger's own
+    /// buy counts once `trade` took it), `not` (our wallet) left out. None: the token is not followed. `from` older than RB_SLOTS
+    /// slots before its newest buy sees only the buys kept
+    pub fn buyers_since(&self, mint: &Pk, from: u64, not: &Pk) -> Option<u32> {
+        let tk = self.toks.get(mint).filter(|t| !t.out)?;
+        let mut seen: Vec<&Pk> = Vec::new();
+        for (s, u) in tk.rb.iter().rev() {
+            if *s < from { continue; }
+            if u != not && !seen.contains(&u) { seen.push(u); }
+        }
+        Some(seen.len() as u32)
+    }
+
+    /// dip27 (log-only annotations): a followed token's creator and its balance now. None: the token is not followed
+    pub fn creator_bal(&self, mint: &Pk) -> Option<(Pk, i64)> {
+        let tk = self.toks.get(mint).filter(|t| !t.out)?;
+        Some((tk.creator, tk.wal.get(&tk.creator).map_or(0, |w| w.bal)))
+    }
+
+    /// dip27 (log-only annotations): the largest balance of a followed token now over every wallet but `a` and `b` (the window's
+    /// whale, our wallet); 0: none. None: the token is not followed
+    pub fn max_other(&self, mint: &Pk, a: &Pk, b: &Pk) -> Option<i64> {
+        let tk = self.toks.get(mint).filter(|t| !t.out)?;
+        Some(tk.wal.iter().filter(|(k, _)| *k != a && *k != b).map(|(_, w)| w.bal).max().unwrap_or(0).max(0))
+    }
+
+    /// dip27 (log-only annotations): the wallets of a followed token holding >= `min` raw tokens now, but `not` (our wallet),
+    /// largest first (at most `top`), each with its hold age at `slot` and its hold clock (`Holds::stats`; n 0 = no hold seen,
+    /// or the clock is off). Empty: none, or the token is not followed
+    pub fn holder_clocks(&self, mint: &Pk, min: i64, not: &Pk, slot: u64, top: usize) -> Vec<HolderClock> {
+        let Some(tk) = self.toks.get(mint).filter(|t| !t.out) else { return Vec::new() };
+        let mut v: Vec<(&Pk, &Wal)> = tk.wal.iter().filter(|(k, w)| w.bal >= min && *k != not).collect();
+        v.sort_by(|a, b| b.1.bal.cmp(&a.1.bal).then(a.0.cmp(b.0)));
+        v.truncate(top);
+        v.into_iter().map(|(k, w)| {
+            let age = if w.fb > 0 { slot.saturating_sub(w.fb) } else { 0 };
+            let (n, p25, p50, p75, h3) = self.holds.get(k).map_or((0, 0, 0, 0, None), |h| h.stats(age));
+            let (risk, hz3) = self.holds.get(k).map_or((0, 0.0), |h| h.hz(age, 3));
+            HolderClock { w: *k, bal: w.bal, age, n, p25, p50, p75, h3, risk, hz3 }
+        }).collect()
+    }
+
+    /// dip27: a wallet's hold clock (None: no hold seen, or the clock is off)
+    pub fn holds_of(&self, w: &Pk) -> Option<&Holds> { self.holds.get(w) }
+
+    /// dip30: a wallet's holding of `mint` now (0: none, sold out or the token not followed)
+    pub fn bal(&self, mint: &Pk, w: &Pk) -> i64 { self.toks.get(mint).filter(|t| !t.out).and_then(|t| t.wal.get(w)).map_or(0, |x| x.bal) }
+    /// dip27: the wallets with a hold clock kept
+    pub fn clocks(&self) -> usize { self.holds.len() }
+    /// dip28: every hold clock (the holds-state save)
+    pub fn clocks_iter(&self) -> impl Iterator<Item = (&Pk, &Holds)> { self.holds.iter() }
+    /// dip28: a wallet's clock from the holds-state preload (a clock the run already keeps is not replaced)
+    pub fn clock_preload(&mut self, w: Pk, h: Holds) { self.holds.entry(w).or_insert(h); }
+
+    /// forget tokens idle for `idle_slots` (call with the feed's slot; works every 2048 slots); dip27: and hold clocks idle as long
     pub fn retire(&mut self, slot: u64, keep: impl Fn(&Pk) -> bool) {
         if slot < self.last_retire + 2048 { return; }
         self.last_retire = slot;
@@ -175,6 +323,7 @@ impl Detector {
         let n0 = self.toks.len();
         self.toks.retain(|m, t| keep(m) || t.last_slot + idle >= slot);
         self.st.retired += (n0 - self.toks.len()) as u64;
+        if self.track { self.holds.retain(|_, h| h.last + idle >= slot); }
     }
 }
 
@@ -475,6 +624,151 @@ mod tests {
         d.trade(&Trade { mint: [10; 32], s: 5, i: 0, j: 0, sig: [0; 64], user: [1; 32], buy: true, sol: 1, tok: 1, vsol: 20_000_000_000, vtok: 1_000_000_000_000_000, fbps: 0, cbps: 0, t_rx: 0 }, &mut out);
         assert_eq!(out, vec![Det::Gone]);
         assert!(!d.followed(&[10; 32]));
+    }
+
+    /// dip27: the lone-whale count (distinct buyers in a slot window, the trigger's own buy counted, ours left out, only the recent
+    /// buys kept), the creator's holding, the largest other holding, the hold clocks (first buy -> first sell of each wallet on each
+    /// token, kept only with `track`), the holder clocks at a moment; nothing for a token not followed
+    #[test]
+    fn detector_dip27_buyers_creator_clocks() {
+        let (mint, cre, us) = ([7u8; 32], [1u8; 32], [9u8; 32]);
+        let mut d = Detector::new(5.0);
+        d.track = true;
+        d.create(mint, 100, cre, cre, false);
+        let (mut v, mut t): (u64, u64) = (30_000_000_000, 1_073_000_000_000_000);
+        let mut n = 0u32;
+        let mut tr = |mint: Pk, s: u64, user: u8, buy: bool, amount: u64, d: &mut Detector| -> Vec<Det> {
+            let (sol, tok) = if buy { let tok = (t as u128 * amount as u128 / (v + amount) as u128) as u64; v += amount; t -= tok; (amount, tok) }
+                             else { let sol = (v as u128 * amount as u128 / (t + amount) as u128) as u64; v -= sol; t += amount; (sol, amount) };
+            n += 1;
+            let mut sig = [0u8; 64]; sig[..4].copy_from_slice(&n.to_be_bytes());
+            let mut out = Vec::new();
+            d.trade(&Trade { mint, s, i: n, j: 0, sig, user: [user; 32], buy, sol, tok, vsol: v, vtok: t, fbps: 95, cbps: 30, t_rx: 0 }, &mut out);
+            out
+        };
+        tr(mint, 100, 1, true, 3_000_000_000, &mut d);                 // the creator's dev buy (slot 100)
+        tr(mint, 110, 2, true, 500_000_000, &mut d);                   // wallet 2 buys at 110
+        tr(mint, 112, 9, true, 500_000_000, &mut d);                   // ours: never counted
+        tr(mint, 119, 2, false, 1_000_000_000_000, &mut d);            // wallet 2's first sell: a hold of 9 slots
+        assert_eq!(d.holds_of(&[2u8; 32]).map(|h| h.all().to_vec()), Some(vec![9]));
+        tr(mint, 125, 2, false, 1_000_000_000_000, &mut d);            // its second sell: not a new hold
+        assert_eq!(d.holds_of(&[2u8; 32]).map(|h| h.all().len()), Some(1));
+        assert!(d.holds_of(&cre).is_none(), "the creator has not sold");
+        // a quiet stretch, then the whale's buy at 200: the only buyer in its last 50 slots (151..=200)
+        let o = tr(mint, 200, 5, true, 5_000_000_000, &mut d);
+        assert!(matches!(o.as_slice(), [Det::Trigger { .. }]), "{o:?}");
+        assert_eq!(d.buyers_since(&mint, 200 - 49, &us), Some(1), "only the whale (its own buy counted)");
+        assert_eq!(d.buyers_since(&mint, 100, &us), Some(1), "the buys older than 64 slots before the newest are not kept");
+        tr(mint, 201, 6, true, 100_000_000, &mut d);
+        tr(mint, 202, 6, true, 100_000_000, &mut d);
+        tr(mint, 203, 9, true, 100_000_000, &mut d);
+        assert_eq!(d.buyers_since(&mint, 203 - 49, &us), Some(2), "distinct buyers, ours left out");
+        assert_eq!(d.buyers_since(&mint, 203 - 49, &[0u8; 32]), Some(3), "with ours");
+        // the creator's holding, the largest holding but the whale's and ours
+        let (c, cb) = d.creator_bal(&mint).unwrap();
+        assert!(c == cre && cb > 0);
+        let w5 = d.holders_at_least(&mint, 1, &us).unwrap().iter().find(|x| x.0 == [5u8; 32]).unwrap().1;
+        assert_eq!(d.max_other(&mint, &[5u8; 32], &us), Some(cb), "the creator's bag is the largest but the whale's");
+        assert!(d.max_other(&mint, &cre, &us).unwrap() == w5, "and the whale's is the largest but the creator's");
+        // holder clocks, largest first: the whale at age 3 (no clock yet), the creator at age 103 (none), wallet 2 (still holding after
+        // its two small sells) at age 93 with its 9-slot hold, wallet 6
+        let hc = d.holder_clocks(&mint, 1_000_000_000_000, &us, 203, 6);
+        assert_eq!(hc.iter().map(|h| h.w).collect::<Vec<_>>(), vec![[5u8; 32], cre, [2u8; 32], [6u8; 32]]);
+        assert_eq!((hc[0].age, hc[0].n, hc[1].age, hc[1].n), (3, 0, 103, 0));
+        assert_eq!((hc[2].age, hc[2].n, hc[2].p50, hc[2].h3), (93, 1, 9, None));
+        // the whale's clock from other tokens: holds of 4, 5 and 20 slots; at age 3 its hazard over the next 3 slots = 2 of 3
+        for (k, (b, sl)) in [(30u64, 34u64), (40, 45), (50, 70)].iter().enumerate() {
+            let m2 = [20 + k as u8; 32];
+            d.create(m2, *b, cre, cre, false);
+            tr(m2, *b, 5, true, 1_000_000_000, &mut d);
+            tr(m2, *sl, 5, false, 1_000_000_000_000, &mut d);
+        }
+        let hc = d.holder_clocks(&mint, 1_000_000_000_000, &us, 203, 1);
+        assert_eq!(hc.len(), 1);
+        // nearest rank on the sorted holds [4, 5, 20]: index round(q x 2) (0.5 rounds up)
+        assert_eq!((hc[0].n, hc[0].p25, hc[0].p50, hc[0].p75), (3, 5, 5, 20));
+        assert!((hc[0].h3.unwrap() - 2.0 / 3.0).abs() < 1e-6, "{:?}", hc[0].h3);
+        let (_, _, _, _, h) = d.holds_of(&[5u8; 32]).unwrap().stats(25);
+        assert!(h.is_none(), "no hold longer than 25");
+        // the clock is kept only with `track`
+        let mut d2 = Detector::new(5.0);
+        d2.create(mint, 100, cre, cre, false);
+        let mut out = Vec::new();
+        d2.trade(&Trade { mint, s: 100, i: 1, j: 0, sig: [1; 64], user: [2; 32], buy: true, sol: 1_000_000_000, tok: 30_000_000_000_000, vsol: 31_000_000_000, vtok: 1_043_000_000_000_000,
+                          fbps: 95, cbps: 30, t_rx: 0 }, &mut out);
+        d2.trade(&Trade { mint, s: 109, i: 2, j: 0, sig: [2; 64], user: [2; 32], buy: false, sol: 1_000_000_000, tok: 30_000_000_000_000, vsol: 30_000_000_000, vtok: 1_073_000_000_000_000,
+                          fbps: 95, cbps: 30, t_rx: 0 }, &mut out);
+        assert!(d2.holds_of(&[2u8; 32]).is_none() && d2.clocks() == 0);
+        // a token not followed
+        assert!(d.buyers_since(&[99; 32], 0, &us).is_none() && d.creator_bal(&[99; 32]).is_none() && d.max_other(&[99; 32], &us, &us).is_none());
+        assert!(d.holder_clocks(&[99; 32], 1, &us, 0, 6).is_empty());
+    }
+
+    /// dip28: the hazard of a first sell within w slots at hold age a (TIMING's estimator on completed holds) and the preload clock
+    #[test]
+    fn holds_hazard_and_preload() {
+        let h = Holds::from_holds(&[4, 5, 20], 77);
+        // age 3: at risk 3 (4, 5, 20), in [3, 6]: 2 -> (2 + 0.05) / (3 + 1)
+        let (r, z) = h.hz(3, 3);
+        assert_eq!(r, 3);
+        assert!((z - 2.05 / 4.0).abs() < 1e-6);
+        // age 21: none at risk -> 0.05 / 1
+        assert_eq!(h.hz(21, 3).0, 0);
+        assert!((h.hz(21, 3).1 - 0.05).abs() < 1e-6);
+        // the newest 16 of a longer list are kept
+        let long: Vec<u32> = (1..=20).collect();
+        let hl = Holds::from_holds(&long, 5);
+        let mut kept = hl.all().to_vec(); kept.sort_unstable();
+        assert_eq!(kept, (5..=20).collect::<Vec<u32>>());
+        // a preload never replaces a clock the run already keeps
+        let mut d = Detector::new(5.0);
+        d.track = true;
+        d.clock_preload([1; 32], Holds::from_holds(&[9], 1));
+        d.clock_preload([1; 32], Holds::from_holds(&[99], 2));
+        assert_eq!(d.holds_of(&[1; 32]).unwrap().all(), &[9]);
+        assert_eq!(d.clocks_iter().count(), 1);
+    }
+
+    /// dip26 RE-ARM's accessors: the holders >= a balance (ours left out, largest first, equal balances by wallet), any such holder, the
+    /// newest trade slot, R5's counts over every wallet that traded; nothing for a token not followed
+    #[test]
+    fn detector_rearm_accessors() {
+        let (mint, cre, us) = ([7u8; 32], [1u8; 32], [9u8; 32]);
+        let big = 60_000_000_000_000i64;
+        let mut d = Detector::new(5.0);
+        d.create(mint, 100, cre, cre, false);
+        let (mut v, mut t): (u64, u64) = (30_000_000_000, 1_073_000_000_000_000);
+        let mut tr = |s: u64, user: u8, buy: bool, tok: u64, d: &mut Detector| {
+            let sol = if buy { let x = (v as u128 * tok as u128).div_ceil((t - tok) as u128) as u64; v += x; t -= tok; x }
+                      else { let x = (v as u128 * tok as u128 / (t + tok) as u128) as u64; v -= x; t += tok; x };
+            d.trade(&Trade { mint, s, i: 0, j: 0, sig: [0; 64], user: [user; 32], buy, sol, tok, vsol: v, vtok: t, fbps: 95, cbps: 30, t_rx: 0 }, &mut Vec::new());
+        };
+        tr(100, 2, true, 70_000_000_000_000, &mut d);
+        tr(100, 3, true, 80_000_000_000_000, &mut d);
+        tr(100, 4, true, 80_000_000_000_000, &mut d);
+        tr(101, 9, true, 65_000_000_000_000, &mut d);
+        tr(102, 5, true, 10_000_000_000_000, &mut d);
+        let h = d.holders_at_least(&mint, big, &us).unwrap();
+        assert_eq!(h, vec![([3u8; 32], 80_000_000_000_000), ([4u8; 32], 80_000_000_000_000), ([2u8; 32], 70_000_000_000_000)], "largest first, ties by wallet, ours left out");
+        assert!(d.any_holder(&mint, big, &us));
+        assert_eq!(d.last_trade_slot(&mint), Some(102));
+        let coh: rustc_hash::FxHashSet<Pk> = [[5u8; 32], [6u8; 32]].into_iter().collect();
+        let fb: rustc_hash::FxHashSet<Pk> = [[2u8; 32], [3u8; 32], [8u8; 32]].into_iter().collect();
+        assert_eq!(d.trade_counts(&mint, &coh, &fb), Some((1, 2)), "cohort holders (5), follower bots that traded (2, 3)");
+        // every other holder below 6%: none left (ours does not count)
+        tr(103, 2, false, 70_000_000_000_000, &mut d);
+        tr(103, 3, false, 30_000_000_000_000, &mut d);
+        tr(104, 4, false, 30_000_000_000_000, &mut d);
+        assert_eq!(d.holders_at_least(&mint, big, &us).unwrap(), vec![]);
+        assert!(!d.any_holder(&mint, big, &us));
+        assert!(d.any_holder(&mint, big, &[0u8; 32]), "our 6.5% when another wallet is the one left out");
+        assert_eq!(d.trade_counts(&mint, &coh, &fb), Some((1, 2)), "a follower bot that sold out still traded it");
+        assert_eq!(d.last_trade_slot(&mint), Some(104));
+        // a token not followed (unknown, mayhem)
+        d.create([8u8; 32], 100, cre, cre, true);
+        for m in [[8u8; 32], [6u8; 32]] {
+            assert!(d.holders_at_least(&m, 1, &us).is_none() && !d.any_holder(&m, 1, &us) && d.last_trade_slot(&m).is_none() && d.trade_counts(&m, &coh, &fb).is_none());
+        }
     }
 
     /// the feed's failed-transaction side channel (src/feeds/mod.rs own_fail_*): only the watched payer's, its bincode error as

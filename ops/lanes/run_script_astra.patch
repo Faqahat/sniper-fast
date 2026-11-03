@@ -1,0 +1,55 @@
+--- /root/prod/run_dip_prod.sh
++++ /root/prod/run_dip_prod.sh
+@@ -313,6 +313,11 @@
+ [ -f "$BASECFG" ] || die "missing $BASECFG (region $REGION base config)"
+ # a [[send]] path of the base config (its name line)
+ has_path() { grep -q "^name *= *\"$1\"" "$BASECFG" || { [ -f /root/sniper-dip/paths_glaive.toml ] && grep -q "^name *= *\"$1\"" /root/sniper-dip/paths_glaive.toml; } || { [ -f /root/sniper-dip/paths_falcon_udp.toml ] && grep -q "^name *= *\"$1\"" /root/sniper-dip/paths_falcon_udp.toml; } || { [ -f /root/sniper-dip/paths_quic.toml ] && grep -q "^name *= *\"$1\"" /root/sniper-dip/paths_quic.toml; } || { [ -f /root/sniper-dip/paths_0slot.toml ] && grep -q "^name *= *\"$1\"" /root/sniper-dip/paths_0slot.toml; }; }
++# ASTRA (10-29): one field of a [[send]] block, by the block's name, from the base config or a side file ("" when absent)
++path_field() { local f; for f in "$BASECFG" /root/sniper-dip/paths_glaive.toml /root/sniper-dip/paths_falcon_udp.toml /root/sniper-dip/paths_quic.toml /root/sniper-dip/paths_0slot.toml; do
++    [ -f "$f" ] || continue
++    awk -v n="$1" -v k="$2" '/^\[\[/{inb=0} $0 ~ ("^name *= *\"" n "\"") {inb=1} inb && $0 ~ ("^" k " *=") {sub(/^[^=]*= */, ""); sub(/ *#.*/, ""); gsub(/"/, ""); print; exit}' "$f" | grep . && return 0
++  done; return 0; }
+ num() { [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]]; }
+ in_range() { awk -v x="$1" -v a="$2" -v b="$3" 'BEGIN{exit !(x>=a && x<=b)}'; }
+ PSLARGS=(); PSLDESC=""
+@@ -333,7 +338,7 @@
+   [ -z "${PSV[--presend-live-drop]:-}" ] || awk -v x="${PSV[--presend-live-drop]}" 'BEGIN{exit !(x>0 && x<=0.5)}' || die "--presend-live-drop must be in (0, 0.5]"
+   [ -z "${PSV[--presend-live-deadline-slots]:-}" ] || in_range "${PSV[--presend-live-deadline-slots]}" 1 8 || die "--presend-live-deadline-slots must be 1..8"
+   [ -z "${PSV[--presend-live-cu-price-micro]:-}" ] || in_range "${PSV[--presend-live-cu-price-micro]}" 0 100000 || die "--presend-live-cu-price-micro above 100000: refusing"
+-  [ -z "${PSV[--presend-live-max-per-sec]:-}" ] || in_range "${PSV[--presend-live-max-per-sec]}" 1 50 || die "--presend-live-max-per-sec must be 1..50 (Helius allows 50/s per region over ALL its paths)"
++  # (--presend-live-max-per-sec: checked after the routes below; ASTRA 10-29)
+   [ -z "${PSV[--presend-live-path-max-per-sec]:-}" ] || in_range "${PSV[--presend-live-path-max-per-sec]}" 1 50 || die "--presend-live-path-max-per-sec must be 1..50"
+   for f in --presend-live-create-slot --presend-live-one-position; do [ -z "${PSV[$f]:-}" ] || [[ "${PSV[$f]}" =~ ^(on|off)$ ]] || die "$f on|off"; done
+   # dip22 (10-28, verify/REPORT.md): the pre-send "sell earlier" exit, N ms after the fill (0 = off); needs engine dip22
+@@ -344,9 +349,30 @@
+     has_path "$n" || die "--presend-live-routes: no [[send]] path named $n in $BASECFG (add the attempt path's own block first: LIVE.md)"
+     case "$n" in staked-rpc|nozomi|helius|helius-swqos|bolt|landx-fra3|landx-ams2|jito-bundle) die "--presend-live-routes: $n is a reactive buy / sell path: give the attempts their own [[send]] entry (LIVE.md)";; esac
+   done
++  # ASTRA (10-29, run 38 A/B helius-ps vs astralane-ps; ops/lanes/ASTRA_PLAN.md): the global attempt cap was 1..50 because Helius allows
++  # 50/s per region over ALL its paths. It may now go up to 60 ONLY when a non-Helius path shares the attempts, and then the Helius
++  # attempt paths must still be capped at <= 50/s by themselves (each Helius route entry has its own --presend-live-path-max-per-sec
++  # bucket; a Helius path's [[send]] max_per_sec caps all its entries). A non-Helius attempt path must carry its own max_per_sec
++  # (its provider's TPS, e.g. Astralane VIP1 20/s -> 19). With Helius-only routes nothing changes (1..50).
++  RPATHS=$(printf %s "${PSV[--presend-live-routes]}" | tr ';' '\n' | sed 's/^[^=]*=//' | tr '+,' '\n\n' | grep .)
++  PMAX=${PSV[--presend-live-path-max-per-sec]:-10}; NONHEL=0; HELCAP=0
++  for n in $(printf '%s\n' "$RPATHS" | sort -u); do
++    if [ "$(path_field "$n" kind)" = helius ]; then
++      e=$(printf '%s\n' "$RPATHS" | grep -cx "$n"); c=$(path_field "$n" max_per_sec)
++      HELCAP=$(awk -v h="$HELCAP" -v e="$e" -v p="$PMAX" -v c="${c:-1000000}" 'BEGIN{x=e*p; if (c<x) x=c; print h+x}')
++    else
++      NONHEL=$((NONHEL + 1))
++      [ -n "$(path_field "$n" max_per_sec)" ] || die "--presend-live-routes: $n has no max_per_sec in its [[send]] block (a non-Helius attempt path needs its provider's TPS cap)"
++    fi
++  done
++  GMAX=50; [ "$NONHEL" -gt 0 ] && GMAX=60
++  [ -z "${PSV[--presend-live-max-per-sec]:-}" ] || in_range "${PSV[--presend-live-max-per-sec]}" 1 $GMAX || die "--presend-live-max-per-sec must be 1..$GMAX (50 with Helius paths only: Helius allows 50/s per region over ALL its paths; up to 60 when a non-Helius path shares the attempts)"
++  if awk -v g="${PSV[--presend-live-max-per-sec]:-20}" 'BEGIN{exit !(g>50)}'; then
++    awk -v h="$HELCAP" 'BEGIN{exit !(h<=50)}' || die "--presend-live-max-per-sec above 50 needs the Helius attempt paths capped at <= 50/s by themselves (now up to $HELCAP/s: lower --presend-live-path-max-per-sec or the Helius path's max_per_sec)"
++  fi
+   PSLARGS=(--presend-live); [ -n "$PSDRY" ] && PSLARGS+=(--presend-live-dry)
+   for f in "${!PSV[@]}"; do PSLARGS+=("$f" "${PSV[$f]}"); done
+-  PSLDESC=" | PRE-SEND LIVE$( [ -n "$PSDRY" ] && echo ' DRY (never sends)' ): ${PSV[--presend-live-size-sol]} SOL, ${PSV[--presend-live-k]:-4}/slot, routes ${PSV[--presend-live-routes]} (fills cap + fee budget: see LIMITS)"
++  PSLDESC=" | PRE-SEND LIVE$( [ -n "$PSDRY" ] && echo ' DRY (never sends)' ): ${PSV[--presend-live-size-sol]} SOL, ${PSV[--presend-live-k]:-4}/slot, routes ${PSV[--presend-live-routes]}, attempt caps ${PSV[--presend-live-max-per-sec]:-20}/s global, ${PMAX}/s per route entry (Helius share <= ${HELCAP}/s) (fills cap + fee budget: see LIMITS)"
+   # dip23: the QUIET v2 annotation (log-only; the records gain "v2", nothing else changes)
+   if [ -n "$PSV2" ]; then PSLARGS+=(--presend-live-quiet-v2-log); PSLDESC="$PSLDESC | QUIET v2 LOG-ONLY (\"v2\" on every arm / skip record)"; fi
+ else

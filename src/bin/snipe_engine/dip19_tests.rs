@@ -74,7 +74,7 @@ fn failed(p: &mut PsLive, slot: u64, idx: u64, sig: [u8; 64], err: &[u8]) {
 /// an attempt as the sender registers it (before its write)
 fn att(w: u64, n: u32, mint: Pk, sig: [u8; 64], slot: u64, client: &str) -> Att {
     Att { w, n, mint, sig, tag: pl::PS_TAG | (0xD19 << 8) | n as u64, path: "helius-ps".into(), client: client.into(), slot, deadline: slot + 1, lim: 0.000041, min_out: 9_524_401_719_354,
-        p_sign: 0.0000466, sign_pos: (slot, 34, 0), t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written" }
+        p_sign: 0.0000466, sign_pos: (slot, 34, 0), t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default() }
 }
 
 fn sold(c: Option<u64>, sigs: &[&str], qty: u64) -> SellOut {
@@ -498,4 +498,38 @@ fn dip19_end_list_covers_unsettled_windows_and_unanswered_reads() {
     // the answer: no account (no fill): off the list
     p.on_msg(PsMsg::Read(mint, Why::Window(1), N + 2, 1, crate::Tok::Closed(N + 6)), &|_| false);
     assert!(p.end_list().is_empty() && p.checks == 0 && p.st.orphans == 0);
+}
+
+/// 10-29 (loss study, ops/strategies/presend/losses/verify): --presend-live-min-age-slots N skips a trigger whose token is younger
+/// than N slots ("young_age"). w51's real trigger is at token age 1 (create N − 2, trigger N − 1): it arms with the flag off (0, the
+/// default) and with 1; with 2 it is skipped, nothing is armed and no attempt is built
+#[test]
+fn min_age_slots_skips_age1_trigger() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    let base = ["snipe_engine", "--dip", "--live", "--presend-shadow", "--presend-live", "--presend-live-routes", "default=helius-ps", "--presend-live-max-fills", "100",
+        "--presend-live-fee-budget-sol", "0.1", "--presend-live-size-sol", "0.4"];
+    for (min, armed) in [(None, true), (Some("1"), true), (Some("2"), false)] {
+        let mut a: Vec<String> = base.iter().map(|s| s.to_string()).collect();
+        if let Some(m) = min { a.extend(["--presend-live-min-age-slots".to_string(), m.to_string()]); }
+        assert!(check_flags(&a).is_ok(), "{:?}", check_flags(&a));
+        let cfg = Cfg::from_argv(&a, &arbx::presend::Params::default(), true, 1_000_000_000).unwrap().unwrap();
+        assert_eq!(cfg.min_age_slots, min.map_or(0, |m| m.parse().unwrap()));
+        assert_eq!(cfg.json()["min_age_slots"], cfg.min_age_slots);
+        let (mut p, _atx, _orx) = PsLive::for_test(cfg, USER);
+        let launch = snipe_build::launch_from_target(pk32(MINT), [0xC1u8; 32]);
+        let creator = [0xC1u8; 32];
+        let x = arbx::feeds::ExecInfo { index: 7, fee: 5_000, ok: true, trades: Vec::new(), mayhem: false,
+            creates: vec![arbx::dip::CreateEvent { mint: launch.mint, bonding_curve: launch.bonding_curve, user: creator, creator }] };
+        let ar = arr(N - 2, [0xC7u8; 64], creator, true, Some(x.clone()), (N - 2) * 1_000_000);
+        let l = launch.clone();
+        p.on_exec(&ar, &x, N - 2, move |m: &Pk| (*m == l.mint).then(|| l.clone()), &|_| false, None);
+        trade(&mut p, N - 1, 34, sig64(SIG_TRIG), pk32(WHALE), true, 2_666_666_666, 61_580_021_739_287, 38_692_888_509, 831_935_821_811_615, 5_000, &launch);
+        assert_eq!(p.armed.contains_key(&launch.mint), armed, "min {min:?}: {:?}", p.st.skips);
+        assert_eq!(p.st.skips.get("young_age").copied().unwrap_or(0), u64::from(!armed), "min {min:?}: {:?}", p.st.skips);
+    }
+    // a non-number is refused at start-up
+    let mut bad: Vec<String> = base.iter().map(|s| s.to_string()).collect();
+    bad.extend(["--presend-live-min-age-slots".to_string(), "x".to_string()]);
+    assert!(check_flags(&bad).is_err());
 }

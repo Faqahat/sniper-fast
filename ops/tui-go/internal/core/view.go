@@ -450,7 +450,11 @@ type Ctx struct {
 	budgetT       time.Time
 	FixedNow      float64
 	AssumeRunning bool
+	GcrSeed       string // the Filters tab's bad-creator ledger seed: "" = the defaults (GcrSeedDefaults), "none" = no seed
 }
+
+// GcrSeedPath is the seed file the Filters tab uses ("" = none).
+func (c *Ctx) GcrSeedPath() string { return ResolveGcrSeed(c.GcrSeed) }
 
 // Now is the wall clock (seconds), or --now.
 func (c *Ctx) Now() float64 {
@@ -557,6 +561,17 @@ type View struct {
 	CfgItems                   []CfgItem
 	Alerts                     []Alert
 	Model                      *Model
+	// dip24: the session's log lines, no time limit, the profit lock
+	D24         *D24Log
+	NoTimeLimit bool
+	Lock        LockView
+	// dip26: the pre-send figures of the T2 windows alone (= PS when the run has no re-arm; PS stays the run's whole
+	// pre-send, its window counters T2's), the re-arm's own, the send-path A/B
+	T2 AggPS
+	RA AggRA
+	AB ABQuick
+	// the Filters tab (filters.go): what each pre-send filter blocked and would have made
+	Filt *FiltReport
 }
 
 // NowNS is now_ns as a float.
@@ -592,6 +607,12 @@ func InferBuild(S *Sess, eng *Engine) (string, bool) {
 		if e.PID != 0 && e.Build != "" {
 			return e.Build, true
 		}
+	}
+	if inferD26(S) {
+		return "dip26", false
+	}
+	if inferD24(S) {
+		return "dip24", false
 	}
 	if S.Quiet.Line || S.RS.Quiet != nil {
 		return "dip20", false
@@ -686,7 +707,7 @@ func BuildView(ctx *Ctx, scope int) *View {
 		if cur.T0 != 0 && cur.Minutes().Truthy() {
 			plannedEnd, hasPE = float64(cur.T0)+cur.Minutes().Float()*60e9, true
 		}
-		if cur.signalTruthy() || cur.killTruthy() || (hasPE && plannedEnd != 0 && now*1e9 > plannedEnd) {
+		if cur.signalTruthy() || cur.killTruthy() || cur.D24.LockFired || (hasPE && plannedEnd != 0 && now*1e9 > plannedEnd) {
 			v.Status = "STOPPING"
 		} else {
 			v.Status = "RUNNING"
@@ -742,6 +763,8 @@ func BuildView(ctx *Ctx, scope int) *View {
 		switch {
 		case cur.killTruthy():
 			v.HowEnded = "kill switch"
+		case cur.D24.LockFired:
+			v.HowEnded = "profit lock"
 		case cur.signalTruthy():
 			if cur.Signal == "SIGINT" {
 				v.HowEnded = "Ctrl+C"
@@ -915,8 +938,11 @@ func BuildView(ctx *Ctx, scope int) *View {
 	}
 	v.Sessions = sessions
 	v.Quiet = quietState(S, M, v)
+	v.d24View(S)
+	v.d26View(sel)
 	v.CfgItems = configItems(v, S, eng)
 	v.Alerts = makeAlerts(v, ctx, M)
+	v.Filt = M.Filt.Report(ctx.GcrSeedPath()) // the whole file (every session), cached per records version
 	return v
 }
 
@@ -1131,6 +1157,8 @@ func configItems(v *View, S *Sess, eng *Engine) []CfgItem {
 		capTxt := "?"
 		if truthyAny(capV) {
 			capTxt = fmtAny(capV)
+		} else if truthyAny(pget("fills_unlimited")) {
+			capTxt = "no limit"
 		}
 		bud := 0.0
 		if bn, ok := budget.(Num); ok && bn.Truthy() {
@@ -1447,7 +1475,11 @@ func configItems(v *View, S *Sess, eng *Engine) []CfgItem {
 			full += " (ends " + Clock(v.EndsAt, "%H:%M") + " PKT)"
 		}
 		add("planned", "Planned", "na", v.Planned.Repr()+"m", full)
+	} else if v.NoTimeLimit {
+		add("planned", "Planned", "na", "time no limit", "no time limit (ends on a signal, the kill switch or the profit lock)")
 	}
+	d24Items(v, add)
+	d26Items(v, add)
 	b := v.Build
 	if b == "" {
 		b = "?"
@@ -1498,13 +1530,19 @@ func makeAlerts(v *View, ctx *Ctx, M *Model) []Alert {
 	ps := v.PS
 	pc := v.PSCfg
 	if v.Running && ps.Active {
-		if fb, ok := pc["fee_budget"].(Num); ok && fb.Truthy() && float64(ps.Fees) > 0.8*fb.Float() {
+		if d := v.D24; d != nil && d.HasBud24 && d.Bud24 > 0 { // dip24: the rolling 24 h sum, not the run's
+			if !d.FeePaused && float64(d.Fee24) > 0.8*float64(d.Bud24) {
+				A = append(A, Alert{"warn", "pre-send fees 24 h " + F(float64(d.Fee24)/float64(d.Bud24)*100, 0) + "% of budget"})
+			}
+		} else if fb, ok := pc["fee_budget"].(Num); ok && fb.Truthy() && float64(ps.Fees) > 0.8*fb.Float() {
 			A = append(A, Alert{"warn", "pre-send fees " + F(float64(ps.Fees)/fb.Float()*100, 0) + "% of budget"})
 		}
-		if mf, ok := pc["max_fills"].(Num); ok && mf.Truthy() && float64(ps.Fills) > 0.9*mf.Float() {
+		if mf, ok := pc["max_fills"].(Num); ok && mf.Truthy() && !truthyAny(pc["fills_unlimited"]) && float64(ps.Fills) > 0.9*mf.Float() {
 			A = append(A, Alert{"warn", "pre-send fills " + Itoa(ps.Fills) + "/" + mf.Repr()})
 		}
 	}
+	A = d24Alerts(v, A)
+	A = d26Alerts(v, M, A)
 	if v.PSStopped != "" && !S.Ended() {
 		A = append(A, Alert{"warn", "pre-send stopped (" + v.PSStopped + ")"})
 	}

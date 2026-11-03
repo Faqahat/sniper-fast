@@ -222,6 +222,9 @@ func (m *Model) heroLines(cw int, rows int, extra bool) []string {
 	}
 	out = append(out, m.kv("per hour", 10, m.money(ph, v.HasPerHour, 4)))
 	ps, rg := v.PS, v.Reg
+	if v.RA.On { // dip26: the T2 windows, the regular bot, then the re-arm on its own line (they add up to the hero)
+		return append(out, m.raSplit(cw, 10)...)
+	}
 	psTxt := t.Lbl.Render("off")
 	if ps.Active {
 		psTxt = t.Money(ps.Net, true, false).Render(core.SolS(ps.Net))
@@ -232,6 +235,26 @@ func (m *Model) heroLines(cw int, rows int, extra bool) []string {
 	}
 	out = append(out, split)
 	return out
+}
+
+// raSplit (dip26): "split  T2 +x  regular +y" and the re-arm's own line "re-arm  +z  6 fills 3 W", each fitted to cw.
+func (m *Model) raSplit(cw, lw int) []string {
+	t := m.th
+	v := m.view
+	rg := v.Reg
+	t2 := t.Money(v.T2.Net, true, false).Render(core.SolS(v.T2.Net))
+	reg := t.Money(rg.Total, true, false).Render(core.SolS(rg.Total))
+	split := m.kv("split", lw, t.Lbl.Render("T2 ")+t2+t.Lbl.Render("  regular ")+reg)
+	if ansi.StringWidth(split) > cw {
+		split = cut(m.kv("split", lw, t.Lbl.Render("T2 ")+t2+t.Lbl.Render("  REG ")+reg), cw)
+	}
+	ra := v.RA
+	rn := t.Money(ra.Net, true, false).Render(core.SolS(ra.Net))
+	line := m.kv("re-arm", lw, rn+t.Lbl.Render(fmt.Sprintf("  %d fills %d W", ra.Fills, ra.Wins)))
+	if ansi.StringWidth(line) > cw {
+		line = cut(m.kv("re-arm", lw, rn+t.Lbl.Render(fmt.Sprintf(" %df %dW", ra.Fills, ra.Wins))), cw)
+	}
+	return []string{split, line}
 }
 
 // ------------------------------------------------------------------------------------------------- run / wallet
@@ -263,8 +286,14 @@ func (m *Model) runLines(cw int) []string {
 		endTxt, endLbl = core.T12(float64(v.TEnd), false), "ended"
 	} else if v.HasEndsAt {
 		endTxt = core.T12(v.EndsAt, false)
+	} else if v.NoTimeLimit {
+		endTxt, endLbl = "no limit", "no time limit"
 	}
-	out = append(out, t.Val.Render(core.T12(float64(t0), false))+t.Lbl.Render(" "+m.g("→", "->")+" ")+t.Val.Render(endTxt)+t.Lbl.Render(" PKT  ("+endLbl+")"))
+	if endLbl == "no time limit" {
+		out = append(out, t.Val.Render(core.T12(float64(t0), false))+t.Lbl.Render(" PKT "+m.g("→", "->")+" ")+t.Val.Render("no time limit"))
+	} else {
+		out = append(out, t.Val.Render(core.T12(float64(t0), false))+t.Lbl.Render(" "+m.g("→", "->")+" ")+t.Val.Render(endTxt)+t.Lbl.Render(" PKT  ("+endLbl+")"))
+	}
 	el := v.Elapsed
 	elok := v.HasElapsed
 	if v.Planned.Truthy() {
@@ -311,6 +340,9 @@ func (m *Model) walletLines(cw int) []string {
 			}
 		}
 		out = append(out, line)
+	}
+	if l := m.lockLine(cw); l != "" {
+		out = append(out, l)
 	}
 	if v.HasBudget {
 		b := m.kv("budget", 10, t.Val.Render(core.F(float64(v.BudgetLeft)/core.LAM, 3)+" SOL")+
@@ -677,6 +709,9 @@ func (m *Model) liveCompact(w int) string {
 		return cut(t.Lbl.Render("regular ")+t.Val.Render(fmt.Sprintf("%d buys", g.Fires))+t.Lbl.Render(" "+m.g("→", "->")+" ")+
 			t.Val.Render(fmt.Sprintf("%d fills", g.Fills))+sep+t.Val.Render(fmt.Sprintf("%d failed", nf))+sep+t.Val.Render(fmt.Sprintf("%d W", g.Wins)), w)
 	}
+	if v.RA.On { // dip26
+		return m.raCompact(w, sep)
+	}
 	l := t.Lbl.Render("pre-send ") + t.Val.Render(fmt.Sprintf("%d fills", ps.Fills)) + sep + t.Val.Render(fmt.Sprintf("%d W", ps.Wins))
 	if ps.NReal > 0 {
 		l += t.Lbl.Render(fmt.Sprintf(" %.0f%%", float64(ps.Wins)/float64(ps.NReal)*100))
@@ -711,6 +746,11 @@ func (m *Model) liveLines(cw int, compact bool) []string {
 	sep := t.Dim.Render(" " + m.g("·", "|") + " ")
 	var out []string
 	if ps.Active {
+		label := "pre-send"
+		sent := ps.Sent
+		if v.RA.On { // dip26: the T2 windows here, the re-arm on its own line below
+			label, ps, sent = "T2", v.T2, v.T2.Sent
+		}
 		l := t.Val.Render(fmt.Sprintf("%d fills", ps.Fills)) + sep + t.Val.Render(fmt.Sprintf("%d W", ps.Wins))
 		if ps.NReal > 0 {
 			l += t.Lbl.Render(fmt.Sprintf(" %.0f%%", float64(ps.Wins)/float64(ps.NReal)*100))
@@ -719,7 +759,7 @@ func (m *Model) liveLines(cw int, compact bool) []string {
 			avg := int64(float64(ps.Real) / float64(ps.Fills))
 			l += sep + t.Lbl.Render("avg ") + t.Money(avg, true, false).Render(core.SolS(avg))
 		}
-		out = append(out, m.kv("pre-send", 10, l))
+		out = append(out, m.kv(label, 10, l))
 		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		arm := t.Val.Render(fmt.Sprint(v.PSOpenNow))
 		if v.PSOpenNow > 0 && v.Running {
@@ -729,7 +769,10 @@ func (m *Model) liveLines(cw int, compact bool) []string {
 			}
 			arm = t.Acc.Render(sp) + " " + t.B.Render(fmt.Sprint(v.PSOpenNow))
 		}
-		out = append(out, m.kv("windows", 10, arm+t.Lbl.Render(" now")+sep+t.Lbl.Render(core.IC(ps.Armed)+" armed")+sep+t.Lbl.Render(core.IC(ps.Sent)+" tries")))
+		out = append(out, m.kv("windows", 10, arm+t.Lbl.Render(" now")+sep+t.Lbl.Render(core.IC(ps.Armed)+" armed")+sep+t.Lbl.Render(core.IC(sent)+" tries")))
+		if v.RA.On {
+			out = append(out, m.raLive(cw, sep, frames))
+		}
 		if v.Quiet.Present {
 			q := v.Quiet
 			state := q.State
@@ -755,9 +798,26 @@ func (m *Model) liveLines(cw int, compact bool) []string {
 			out = append(out, pre+rule)
 		}
 	}
+	if d := v.D24; d != nil && d.FeePaused && ps.Active { // dip24: the rolling 24 h fee budget paused the sender
+		out = append(out, m.kv("fees 24 h", 10, t.Bad.Render("PAUSED")+t.Lbl.Render(" "+core.F(float64(d.Fee24)/core.LAM, 3)+"/"+core.F(float64(d.Bud24)/core.LAM, 2)+" SOL, no tries")))
+	}
 	nf := g.Guard + g.Lighthouse + g.Failed
-	out = append(out, m.kv("regular", 10, t.Val.Render(fmt.Sprintf("%d buys", g.Fires))+t.Lbl.Render(" "+m.g("→", "->")+" ")+
-		t.Val.Render(fmt.Sprintf("%d fills", g.Fills))+sep+t.Val.Render(fmt.Sprintf("%d failed", nf))+sep+t.Val.Render(fmt.Sprintf("%d W", g.Wins))))
+	switch v.RegModeOf() { // dip24: regular live | paper | off
+	case "paper":
+		x := t.Warn.Render("PAPER") + t.Lbl.Render(" ")
+		if d := v.D24; d.HasRegP {
+			x += t.Val.Render(fmt.Sprintf("%d", d.RegP.Picks)) + t.Lbl.Render(" "+m.g("→", "->")+" ") + t.Val.Render(fmt.Sprintf("%d fills", d.RegP.Fills)) +
+				sep + t.Lbl.Render("net ") + t.Money(int64(d.RegP.Net*core.LAM), true, false).Render(core.FS(d.RegP.Net, 4))
+		} else {
+			x += t.Lbl.Render("never sent")
+		}
+		out = append(out, m.kv("regular", 10, x))
+	case "off":
+		out = append(out, m.kv("regular", 10, t.StateDot("off", m.ascii)+t.Lbl.Render(" off (no regular buys)")))
+	default:
+		out = append(out, m.kv("regular", 10, t.Val.Render(fmt.Sprintf("%d buys", g.Fires))+t.Lbl.Render(" "+m.g("→", "->")+" ")+
+			t.Val.Render(fmt.Sprintf("%d fills", g.Fills))+sep+t.Val.Render(fmt.Sprintf("%d failed", nf))+sep+t.Val.Render(fmt.Sprintf("%d W", g.Wins))))
+	}
 	if compact {
 		return out
 	}
@@ -832,7 +892,11 @@ func (m *Model) overviewWide(w, bh int) string {
 	run = append(run, m.subRule("WALLET", inner))
 	run = append(run, m.walletLines(inner)...)
 	live := m.liveLines(inner, false)
-	base := max(len(run), len(hero)+2)
+	nExtra := 2
+	if m.view.RA.On { // dip26: the re-arm's own line under the split
+		nExtra = 3
+	}
+	base := max(len(run), len(hero)+nExtra)
 	if ncols == 4 {
 		base = max(base, len(live))
 	}
@@ -929,6 +993,10 @@ func (m *Model) overviewMedium(w, bh int) string {
 		ph = int64(v.PerHour)
 	}
 	ps, rg := v.PS, v.Reg
+	psLabel := "pre-send"
+	if v.RA.On { // dip26: T2 here, the re-arm on its own line
+		ps, psLabel = v.T2, "T2"
+	}
 	psTxt := t.Lbl.Render("off")
 	if ps.Active {
 		psTxt = t.Money(ps.Net, true, false).Render(core.SolS(ps.Net)) + t.Lbl.Render(fmt.Sprintf("  %d fills %dW", ps.Fills, ps.Wins))
@@ -936,9 +1004,13 @@ func (m *Model) overviewMedium(w, bh int) string {
 	side := []string{
 		t.PanelTitle.Render("RUN P&L") + "  " + m.toast(),
 		m.kv("per hour", 10, m.money(ph, v.HasPerHour, 4)),
-		m.kv("pre-send", 10, psTxt),
-		m.kv("regular", 10, t.Money(rg.Total, true, false).Render(core.SolS(rg.Total))+t.Lbl.Render(fmt.Sprintf("  %d buys %d fills", rg.Fires, rg.Fills))),
+		m.kv(psLabel, 10, psTxt),
 	}
+	if v.RA.On {
+		ra := v.RA
+		side = append(side, m.kv("re-arm", 10, t.Money(ra.Net, true, false).Render(core.SolS(ra.Net))+t.Lbl.Render(fmt.Sprintf("  %d fills %dW", ra.Fills, ra.Wins))))
+	}
+	side = append(side, m.kv("regular", 10, t.Money(rg.Total, true, false).Render(core.SolS(rg.Total))+t.Lbl.Render(fmt.Sprintf("  %d buys %d fills", rg.Fires, rg.Fills))))
 	suffix := ""
 	if m.todayOn {
 		suffix = " today"
@@ -968,6 +1040,13 @@ func (m *Model) overviewMedium(w, bh int) string {
 		x := m.kv("wallet", 8, m.bal(v.EstNow, true, 4, t.B))
 		if v.HasKillDist {
 			x += t.Lbl.Render("   kill sw. ") + t.Val.Render(core.F(float64(v.KillLevel)/core.LAM, 3)) + t.Lbl.Render(" "+m.g("·", "|")+" ") + t.Val.Render(core.F(float64(v.KillDist)/core.LAM, 3)) + t.Lbl.Render(" away")
+		}
+		if L := v.Lock; L.On { // the lock's distance (its level is in the config strip / the RUN panel at wider sizes)
+			if L.Fired {
+				x += t.Lbl.Render("   lock ") + t.Bad.Render("STOPPED")
+			} else {
+				x += t.Lbl.Render("   lock ") + t.Val.Render(core.F(float64(L.Dist)/core.LAM, 3)) + t.Lbl.Render(" away")
+			}
 		}
 		if v.HasBudget {
 			x += t.Lbl.Render("   budget ") + t.Val.Render(core.F(float64(v.BudgetLeft)/core.LAM, 3))
@@ -1034,13 +1113,20 @@ func (m *Model) overviewNarrow(w, bh int) string {
 	if ps.Active {
 		pst = t.Money(ps.Net, true, false).Render(core.SolS(ps.Net))
 	}
-	out = append(out, m.kv("split", 9, t.Lbl.Render("PS ")+pst+t.Lbl.Render("  REG ")+t.Money(rg.Total, true, false).Render(core.SolS(rg.Total))))
+	if v.RA.On { // dip26
+		out = append(out, m.raSplit(w, 9)...)
+	} else {
+		out = append(out, m.kv("split", 9, t.Lbl.Render("PS ")+pst+t.Lbl.Render("  REG ")+t.Money(rg.Total, true, false).Render(core.SolS(rg.Total))))
+	}
 	if v.HasEstNow {
 		x := t.Lbl.Render(padRight("wallet", 9)) + t.B.Render(core.F(float64(v.EstNow)/core.LAM, 4))
 		if v.HasKillDist {
 			x += t.Lbl.Render("  kill ") + t.Val.Render(core.F(float64(v.KillDist)/core.LAM, 3)) + t.Lbl.Render(" away")
 		}
 		out = append(out, cut(x, w))
+		if L := v.Lock; L.On {
+			out = append(out, cut(t.Lbl.Render(padRight("lock", 9))+m.lockState(), w))
+		}
 	}
 	ct, _ := m.cardTitle()
 	out = append(out, m.rule(ct, "", w))
@@ -1071,4 +1157,42 @@ func (m *Model) overviewNarrow(w, bh int) string {
 		out = append(out, m.tradesBlock(w, bh-used))
 	}
 	return strings.Join(out, "\n")
+}
+
+// lockState: the profit lock in a few words: "stops < -0.182 · 0.530 away" (or STOPPED).
+func (m *Model) lockState() string {
+	t := m.th
+	L := m.view.Lock
+	if L.Fired {
+		return t.Bad.Render("STOPPED") + t.Lbl.Render(" (peak "+core.Sol(L.FirePeak, true, 3, true)+")")
+	}
+	ds := t.Val
+	if L.Peak > 0 && L.Dist < int64(0.10*core.LAM) {
+		ds = t.Bad
+	}
+	return t.Lbl.Render("stops < ") + t.Val.Render(core.Sol(L.Floor, true, 3, true)) + t.Lbl.Render(" "+m.g("·", "|")+" ") + ds.Render(core.F(float64(L.Dist)/core.LAM, 3)) + t.Lbl.Render(" away")
+}
+
+// lockLine: the RUN panel's profit-lock line (dip24): its peak, the level the run stops below and the distance; "" when off.
+func (m *Model) lockLine(cw int) string {
+	t := m.th
+	L := m.view.Lock
+	if !L.On {
+		return ""
+	}
+	if L.Fired {
+		return m.kv("lock", 10, t.Bad.Render("stopped by profit lock")+t.Lbl.Render(" peak "+core.Sol(L.FirePeak, true, 3, true)))
+	}
+	pk := t.Money(L.Peak, true, false).Render(core.Sol(L.Peak, true, 3, true))
+	ds := t.Val
+	if L.Peak > 0 && L.Dist < int64(0.10*core.LAM) {
+		ds = t.Bad
+	}
+	short := t.Lbl.Render("< ") + t.Val.Render(core.Sol(L.Floor, true, 3, true)) + t.Lbl.Render(" "+m.g("·", "|")+" ") + ds.Render(core.F(float64(L.Dist)/core.LAM, 3)) + t.Lbl.Render(" away")
+	for _, c := range []string{t.Lbl.Render("peak ") + pk + t.Lbl.Render("  ") + m.lockState(), t.Lbl.Render("pk ") + pk + t.Lbl.Render(" "+m.g("→", "->")+" ") + short, short} {
+		if x := m.kv("lock", 10, c); ansi.StringWidth(x) <= cw {
+			return x
+		}
+	}
+	return m.kv("lock", 10, cut(m.lockState(), max(1, cw-10)))
 }

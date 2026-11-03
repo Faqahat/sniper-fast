@@ -37,7 +37,7 @@ func loadCtx(t testing.TB, path string, now float64) *core.Ctx {
 	src := core.NewSource(path, "", 0, 3000)
 	src.LoadAll(core.LoadChunk, 0, nil)
 	return &core.Ctx{Src: src, Engine: core.NewEngine(path, false), Price: core.NewPrice(187.42, false), Sys: core.NewSysInfo("/", 2),
-		FixedNow: now}
+		FixedNow: now, GcrSeed: "none"} // the Filters tab: no ledger seed (the screens must not depend on the machine's files)
 }
 
 var sizes = [][2]int{{200, 35}, {160, 50}, {120, 40}, {80, 24}, {50, 30}}
@@ -47,7 +47,8 @@ var pages = []struct {
 	tab  int
 	page string
 }{{"01-overview", 0, ""}, {"02-presend", 1, ""}, {"03-regular", 2, ""}, {"04-trades", 3, ""}, {"05-health", 4, ""}, {"06-log", 5, ""},
-	{"07-config", 6, ""}, {"08-help", 0, "help"}, {"09-detail", 3, "detail"}, {"10-splash", 0, "splash"}, {"11-today", 0, "today"}}
+	{"07-config", 6, ""}, {"08-help", 0, "help"}, {"09-detail", 3, "detail"}, {"10-splash", 0, "splash"}, {"11-today", 0, "today"},
+	{"12-filters", 7, ""}}
 
 var r28 = filepath.Join(func() string {
 	if d := os.Getenv("DIPMON_TUI_DATA"); d != "" {
@@ -206,7 +207,7 @@ func TestResizeAndKeys(t *testing.T) {
 	keys := []string{"1", "2", "3", "4", "5", "6", "7", "tab", "shift+tab", "u", "u", "s", "s", "S", "a", "a", "m", "m", "p", "p",
 		"?", "x", "4", "down", "down", "enter", "esc", "f", "f", "/", "3", "N", "enter", "esc", "6", "f", "w", "end", "home", "up",
 		"pgdown", "pgup", "+", "-", "r", "7", "G", "g", "4", "o", "o", "O", "c", "M", "M", "enter", "c", "esc", "o", "o", "o", "o", "o", "o", "o",
-		"o", "o", "o", "o", "o", "o", "o", "u", "u"}
+		"o", "o", "o", "o", "o", "o", "o", "u", "u", "8", "f", "n", "down", "o", "O", "enter", "esc", "c", "f", "f", "end", "n"}
 	szs := [][2]int{{200, 35}, {1, 1}, {10, 5}, {35, 9}, {36, 10}, {50, 30}, {80, 24}, {120, 40}, {160, 50}, {300, 100}, {61, 29},
 		{69, 30}, {70, 40}, {99, 40}, {100, 40}, {119, 41}, {179, 35}, {181, 39}}
 	for _, sz := range szs {
@@ -387,4 +388,91 @@ func appendLines(t *testing.T, p string, ls []string) {
 	}
 	f.WriteString(strings.Join(ls, "\n") + "\n")
 	f.Close()
+}
+
+// r36 (AMS, 10-29): the first dip24 run (no hard limits, the profit lock, the rolling 24 h fee budget, regular paper,
+// the observatory); a frozen read-only copy (both files' mtime set to 1793232970), rendered as running at +10 s.
+var r36 = filepath.Join(func() string {
+	if d := os.Getenv("DIPMON_DIP24_DATA"); d != "" {
+		return d
+	}
+	return "/home/moiz/sniper-data/tui/runs-dip24"
+}(), "ams/runs/dip_ams_r36.jsonl")
+
+const r36Now = 1793232980.0
+
+// TestGoldenDip24: r36's overview / pre-send / regular / health / config at the 5 sizes (testdata/golden/r36_*), and the
+// dip24 figures on them: no time limit, no fill cap, the lock's level, the 24 h fees, regular PAPER, the observatory.
+func TestGoldenDip24(t *testing.T) {
+	ctx := loadCtx(t, r36, r36Now)
+	ctx.AssumeRunning = true
+	o := Options{Sound: "all", Version: "test", Golden: true, Interval: 1, LoadDuty: 1}
+	dir := filepath.Join("testdata", "golden")
+	for _, sz := range sizes {
+		for _, p := range []struct {
+			name string
+			tab  int
+		}{{"01-overview", 0}, {"02-presend", 1}, {"03-regular", 2}, {"05-health", 4}, {"07-config", 6}} {
+			name := fmt.Sprintf("r36_%dx%d_%s.txt", sz[0], sz[1], p.name)
+			got := RenderScreen(ctx, o, sz[0], sz[1], p.tab, "", false)
+			lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
+			if len(lines) != sz[1] {
+				t.Errorf("%s: %d lines, want %d", name, len(lines), sz[1])
+			}
+			for i, l := range lines {
+				if w := ansi.StringWidth(l); w > sz[0] {
+					t.Errorf("%s line %d: %d cells > %d", name, i+1, w, sz[0])
+				}
+			}
+			fp := filepath.Join(dir, name)
+			if *update {
+				os.WriteFile(fp, []byte(got), 0o644)
+				continue
+			}
+			want, err := os.ReadFile(fp)
+			if err != nil {
+				t.Errorf("%s: no golden file (run with -update)", name)
+				continue
+			}
+			if string(want) != got {
+				t.Errorf("%s differs from the golden screen:\n%s", name, firstDiff(string(want), got))
+			}
+		}
+	}
+	for _, c := range []struct {
+		tab  int
+		want []string
+	}{
+		{0, []string{"dip24", "3:33 AM PKT → no time limit", "lock      pk +0.468 → < -0.182 · 0.530 away", "PAPER 6 → 0 fills", "time no limit", "profit lock 0.65 / 30% of peak", "fills 47/no limit", "24h"}},
+		{1, []string{"47 / no limit", "fees 24 h  0.036/1.00", "pauses at the budget, never stops"}},
+		{2, []string{"mode     ", "6 picks → 0 fills"}},
+		{4, []string{"OBSERVATORY", "re-arm 107 windows / 88 fills", "INSLOT 6,321", "dropped 0"}},
+		{6, []string{"Profit lock", "Fee budget 24 h", "Regular mode", "no time limit"}},
+	} {
+		got := RenderScreen(ctx, o, 200, 35, c.tab, "", false)
+		if c.tab == 6 {
+			got = RenderScreen(ctx, o, 160, 80, c.tab, "", false)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("r36 tab %d lacks %q", c.tab+1, w)
+			}
+		}
+	}
+	// --ascii: still pure ASCII with the dip24 lines
+	core.SetASCII(true)
+	defer core.SetASCII(false)
+	asc := Options{Sound: "all", Version: "test", Golden: true, Interval: 1, LoadDuty: 1, ASCII: true}
+	for _, sz := range sizes {
+		for _, tab := range []int{0, 1, 2, 4, 6} {
+			for i, l := range strings.Split(RenderScreen(ctx, asc, sz[0], sz[1], tab, "", false), "\n") {
+				for _, r := range l {
+					if r >= 0x80 {
+						t.Errorf("--ascii r36 %dx%d tab %d line %d: %q", sz[0], sz[1], tab+1, i+1, l)
+						break
+					}
+				}
+			}
+		}
+	}
 }

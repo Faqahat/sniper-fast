@@ -171,6 +171,17 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         if let Some(f) = presend_params.iter().find(|f| has(f)) { bail!("{f} needs --presend-shadow"); }
         None
     };
+    // dip30 WIDE SHADOW (--presend-wide-pct P; owner 10-30 ~20:40 PKT: "prepare a proper realistic logging for this in the next run
+    // we will test this too"): a second, LOG-ONLY pre-send shadow with the main one's parameters but whale_pct P (< the main's), fed
+    // the same executed txs. It scores the WIDER selection (a first >= 3% crossing holding P..main% at that buy) with the main
+    // shadow's own fill / exit / cost model (the model calibrated against the live fills); only its windows below the main threshold
+    // are kept, their records renamed presend_wide_* (the main shadow's records and the reports on them are unchanged)
+    let mut presend_wide: Option<WideShadow> = if has("--presend-wide-pct") {
+        let Some(main) = presend.as_ref() else { bail!("--presend-wide-pct needs --presend-shadow") };
+        let pct = arg_f64("--presend-wide-pct", 0.0);
+        if !(pct >= 1.0 && pct < main.p.whale_pct) { bail!("--presend-wide-pct must be in [1, --presend-whale-pct {})", main.p.whale_pct); }
+        Some(WideShadow::new(arbx::presend::Shadow::new(arbx::presend::Params { whale_pct: pct, ..main.p.clone() }), main.p.whale_pct))
+    } else { None };
     let mut ps_marks: Vec<[u64; 5]> = Vec::new();
     let mut ps_time = PresendTime::default();
     let tier = arg("--dip-tier").unwrap_or_else(|| "strict".into());
@@ -643,7 +654,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             last_status = Instant::now();
             eprintln!("  DIP status: tokens {} dumps {n_dumps} in-envelope {n_env} picks {n_picks} fired {n_fired} closed {n_closed} open {} slot {slot_now} skipped {:?}{}{}{}{}{}{}{}", toks.len(), open.len(), skipped,
                 npool.map(|np| format!(" | {}", np.line())).unwrap_or_default(), if m2.is_some() { m2st.line(m2_gate) } else { String::new() },
-                presend.as_ref().map(|p| format!("{}{}", p.line(), ps_time.line())).unwrap_or_default(), pslive.as_mut().map(|p| p.status()).unwrap_or_default(),
+                presend.as_ref().map(|p| format!("{}{}{}", p.line(), ps_time.line(), presend_wide.as_ref().map(|w| w.line()).unwrap_or_default())).unwrap_or_default(),
+                pslive.as_mut().map(|p| p.status()).unwrap_or_default(),
                 // dip24 (each only when on)
                 paper.as_ref().map(|p| p.line()).unwrap_or_default(), lock_line(), obs.as_ref().map(|o| o.feeder.line()).unwrap_or_default());
             let cutoff = Duration::from_secs_f64(max_age_s + 300.0);
@@ -1104,6 +1116,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             let t0 = Instant::now();
             ps_marks.push([n_dumps, n_env, n_picks, n_fired, m2st.picks]);
             presend_tx_live(ps, a.slot, slot_now, &x, &a.tx.sig, a.t_rx, &ps_marks, &log, pslive.as_mut());
+            // dip30: the wide shadow, the same tx with the same marks (log only)
+            if let Some(wd) = presend_wide.as_mut() { wd.tx(a.slot, slot_now, &x, &a.tx.sig, a.t_rx, &ps_marks, &log); }
             ps_marks.clear();
             ps_time.add(t0.elapsed().as_secs_f64() * 1e6, x.trades.len());
         }
@@ -1128,6 +1142,7 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             log.w(ev.rec);
         }
         eprintln!("=== DIP PRESEND:{}{}", ps.line(), ps_time.line());
+        if let Some(wd) = presend_wide.as_mut() { wd.finish(&log); eprintln!("=== DIP PRESEND{}", wd.line()); }
     }
     // PRE-SEND LIVE: the sender stops; unresolved attempts resolved, the records written, the totals for run_end
     let mut ps_live_end = pslive.as_mut().map(|p| p.finish(slot_now, Some(&first_seen)));
@@ -1139,6 +1154,14 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     }
     // let the realized-PnL readers finish (chain reads of the last trades)
     for _ in 0..40 { if REALIZED_INFLIGHT.load(Ordering::SeqCst) == 0 { break; } tokio::time::sleep(Duration::from_millis(500)).await; }
+    // dip26 RE-ARM: the pre-send realized P&L split into T2 and re-arm positions, now that the lookups are in (only with the re-arm on)
+    if let (Some(p), Some(j)) = (pslive.as_ref(), ps_live_end.as_mut()) {
+        if let Some(s) = p.rearm_split() {
+            eprintln!("=== DIP PRESEND LIVE REALIZED by kind: T2 {:+.6} SOL ({} positions), re-arm {:+.6} SOL ({} positions)", s["t2"]["pnl"].as_i64().unwrap_or(0) as f64 / 1e9,
+                s["t2"]["n"], s["rearm"]["pnl"].as_i64().unwrap_or(0) as f64 / 1e9, s["rearm"]["n"]);
+            j["realized_split"] = s;
+        }
+    }
     let mut re = serde_json::json!({"ev": "run_end", "t": arbx::feeds::clock::now_ns(), "dumps": n_dumps, "in_envelope": n_env, "picks": n_picks, "fired": n_fired, "closed": n_closed,
         "landed_buys": ACCT.landed_buys.load(Ordering::SeqCst), "realized": ACCT.realized.load(Ordering::SeqCst), "skipped": skipped});
     if let Some(np) = npool {
@@ -1510,6 +1533,20 @@ fn presend_tx(ps: &mut arbx::presend::Shadow, slot: u64, slot_now: u64, x: &arbx
 #[allow(clippy::too_many_arguments)]
 fn presend_tx_live(ps: &mut arbx::presend::Shadow, slot: u64, slot_now: u64, x: &arbx::feeds::ExecInfo, sig: &[u8; 64], t_rx: u64, marks: &[[u64; 5]], log: &DipLog,
                    live: Option<&mut pslive::PsLive>) {
+    presend_feed(ps, slot, slot_now, x, sig, t_rx, marks);
+    let mut evs = ps.drain();
+    if evs.is_empty() { if let Some(l) = live { l.shadow_done(ps.done_slot()); } return; }
+    // dip20 QUIET: the shadow's arm / disarm records get what QUIET would have decided (the shadow itself unchanged; nothing without it)
+    if let Some(l) = live { l.annotate_shadow(&mut evs); for e in evs.iter().filter(|e| e.rec["ev"] == "presend_arm") { l.on_shadow_arm(&e.rec); } l.shadow_done(ps.done_slot()); }
+    // one terminal write and one log flush for all of this call's records
+    let lines: String = evs.iter().filter_map(|e| e.line.as_ref()).fold(String::new(), |mut a, l| { a.push_str(l); a.push('\n'); a });
+    if !lines.is_empty() { eprint!("{lines}"); }
+    log.w_all(evs.into_iter().map(|e| e.rec));
+}
+
+/// one executed tx's creates and trades into a pre-send shadow (the reactive bot's marks on each trade as flags), then its clock
+#[allow(clippy::too_many_arguments)]
+fn presend_feed(ps: &mut arbx::presend::Shadow, slot: u64, slot_now: u64, x: &arbx::feeds::ExecInfo, sig: &[u8; 64], t_rx: u64, marks: &[[u64; 5]]) {
     use arbx::presend::{F_DUMP, F_ENV, F_FIRED, F_M2, F_PICK};
     for c in &x.creates { ps.create(c.mint, slot, c.creator, c.user, x.mayhem, t_rx); }
     let ok = marks.len() == x.trades.len() + 1;
@@ -1522,14 +1559,61 @@ fn presend_tx_live(ps: &mut arbx::presend::Shadow, slot: u64, slot_now: u64, x: 
                                     fbps: e.fbps, cbps: e.cbps, t_rx, flags });
     }
     ps.advance(slot_now);
-    let mut evs = ps.drain();
-    if evs.is_empty() { if let Some(l) = live { l.shadow_done(ps.done_slot()); } return; }
-    // dip20 QUIET: the shadow's arm / disarm records get what QUIET would have decided (the shadow itself unchanged; nothing without it)
-    if let Some(l) = live { l.annotate_shadow(&mut evs); for e in evs.iter().filter(|e| e.rec["ev"] == "presend_arm") { l.on_shadow_arm(&e.rec); } l.shadow_done(ps.done_slot()); }
-    // one terminal write and one log flush for all of this call's records
-    let lines: String = evs.iter().filter_map(|e| e.line.as_ref()).fold(String::new(), |mut a, l| { a.push_str(l); a.push('\n'); a });
-    if !lines.is_empty() { eprint!("{lines}"); }
-    log.w_all(evs.into_iter().map(|e| e.rec));
+}
+
+/// dip30 WIDE SHADOW (--presend-wide-pct): a second pre-send shadow at a lower whale_pct, LOG ONLY. Its windows whose trigger
+/// holding is >= the main shadow's whale_pct are the main shadow's own (dropped here); the rest (P..main%) are written renamed
+/// presend_wide_arm / _fill / _exit / _disarm / _skip (same fields as the main shadow's). No terminal lines; counts in the status line.
+struct WideShadow { ps: arbx::presend::Shadow, main_pct: f64, keep: rustc_hash::FxHashSet<u64>, arms: u64, fills_c: u64, exits_c: u64, net_c: f64, time: PresendTime }
+
+impl WideShadow {
+    fn new(ps: arbx::presend::Shadow, main_pct: f64) -> WideShadow {
+        WideShadow { ps, main_pct, keep: Default::default(), arms: 0, fills_c: 0, exits_c: 0, net_c: 0.0, time: PresendTime::default() }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn tx(&mut self, slot: u64, slot_now: u64, x: &arbx::feeds::ExecInfo, sig: &[u8; 64], t_rx: u64, marks: &[[u64; 5]], log: &DipLog) {
+        let t0 = Instant::now();
+        presend_feed(&mut self.ps, slot, slot_now, x, sig, t_rx, marks);
+        let evs = self.ps.drain();
+        if !evs.is_empty() { let recs = self.keep_recs(evs); if !recs.is_empty() { log.w_all(recs.into_iter()); } }
+        self.time.add(t0.elapsed().as_secs_f64() * 1e6, x.trades.len());
+    }
+
+    /// the run's end: what is buffered is processed, windows still open get the "run_end" disarm
+    fn finish(&mut self, log: &DipLog) {
+        self.ps.finish();
+        let evs = self.ps.drain();
+        let recs = self.keep_recs(evs);
+        if !recs.is_empty() { log.w_all(recs.into_iter()); }
+    }
+
+    /// the records of the windows below the main threshold, renamed presend_wide_*
+    fn keep_recs(&mut self, evs: Vec<arbx::presend::Ev>) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        for e in evs {
+            let mut rec = e.rec;
+            let ev = rec["ev"].as_str().unwrap_or("").to_string();
+            let Some(w) = rec["w"].as_u64() else { continue };
+            if ev == "presend_arm" {
+                if rec["pct"].as_f64().unwrap_or(f64::MAX) >= self.main_pct { continue; }
+                self.keep.insert(w);
+                self.arms += 1;
+            } else if !self.keep.contains(&w) { continue; }
+            if rec["row"] == "c" {
+                if ev == "presend_fill" { self.fills_c += 1; }
+                if ev == "presend_exit" { self.exits_c += 1; self.net_c += rec["net_cheap"].as_f64().or_else(|| rec["pnl"].as_f64()).unwrap_or(0.0); }
+            }
+            rec["ev"] = serde_json::json!(ev.replacen("presend_", "presend_wide_", 1));
+            out.push(rec);
+        }
+        out
+    }
+
+    fn line(&self) -> String {
+        format!(" | WIDE shadow (log only, whale {:.1}..{:.1}%): arms {} row-c fills {} exits {} net(cheap) {:+.3} SOL{}", self.ps.p.whale_pct, self.main_pct, self.arms,
+                self.fills_c, self.exits_c, self.net_c, self.time.line())
+    }
 }
 
 /// PRE-SEND SHADOW: its time per executed tx (microseconds, the last PS_US_KEEP txs), txs and trades fed
@@ -1972,6 +2056,74 @@ mod presend_tests {
         let _ = std::fs::remove_dir_all(&dir);
         eprintln!("presend wiring: {n_tok} tokens, {n_recs} records identical to the library's, {n_marked} fill records carry the reactive bot's marks");
         assert!(n_tok >= 10 && n_marked >= 10);
+    }
+
+    /// dip30 WIDE SHADOW: on the study tapes, (1) the main shadow's records are byte-identical with the wide shadow wired beside it,
+    /// (2) every wide record is presend_wide_*, (3) every wide arm's holding is in [wide pct, main pct), (4) the wide shadow's arms
+    /// are exactly a whale_pct-3 shadow's arms below 5% (same window ids, same fields) and its later records belong to kept windows only
+    #[test]
+    fn presend_wide_shadow() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let Some(par) = load(&format!("{root}/testdata/presend_parity.json")) else { eprintln!("presend_parity.json missing: skipped"); return; };
+        let dir = std::env::temp_dir().join(format!("presend_wide_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let read = |p: &std::path::Path| -> Vec<serde_json::Value> {
+            std::fs::read_to_string(p).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+        };
+        let (mut n_tok, mut n_wide_arms, mut n_wide_recs, mut n_main) = (0, 0, 0, 0);
+        for tk in par["tokens"].as_array().unwrap() {
+            if n_tok == 60 { break; }
+            n_tok += 1;
+            let (_, txs) = token_txs(tk);
+            let run = |wide: bool, p: &std::path::Path| -> Vec<serde_json::Value> {
+                let _ = std::fs::remove_file(p);
+                let log = DipLog::open(Some(p.to_string_lossy().to_string())).unwrap();
+                let mut ps = arbx::presend::Shadow::new(arbx::presend::Params::default());
+                let mut wd = wide.then(|| WideShadow::new(arbx::presend::Shadow::new(arbx::presend::Params { whale_pct: 3.0, ..Default::default() }), 5.0));
+                for (s, _, sig, x) in &txs {
+                    let marks = vec![[0u64; 5]; x.trades.len() + 1];
+                    presend_tx(&mut ps, *s, *s, x, sig, 7, &marks, &log);
+                    if let Some(w) = wd.as_mut() { w.tx(*s, *s, x, sig, 7, &marks, &log); }
+                }
+                ps.finish();
+                for ev in ps.drain() { log.w(ev.rec); }
+                if let Some(w) = wd.as_mut() { w.finish(&log); }
+                drop(log);
+                read(p)
+            };
+            let p = dir.join("dip.jsonl");
+            let off = run(false, &p);
+            let on = run(true, &p);
+            let (main_on, wide): (Vec<_>, Vec<_>) = on.into_iter().partition(|r| !r["ev"].as_str().unwrap().starts_with("presend_wide_"));
+            assert_eq!(off, main_on, "the main shadow's records changed with the wide shadow on ({})", tk["mint"]);
+            // a plain whale_pct-3 shadow on the same tape: its arms below 5% are the wide shadow's arms
+            let mut ref3 = arbx::presend::Shadow::new(arbx::presend::Params { whale_pct: 3.0, ..Default::default() });
+            for (s, _, sig, x) in &txs { presend_feed(&mut ref3, *s, *s, x, sig, 7, &vec![[0u64; 5]; x.trades.len() + 1]); }
+            ref3.finish();
+            let want: Vec<serde_json::Value> = ref3.drain().into_iter().map(|e| e.rec).filter(|r| r["ev"] == "presend_arm" && r["pct"].as_f64().unwrap() < 5.0).collect();
+            let got: Vec<serde_json::Value> = wide.iter().filter(|r| r["ev"] == "presend_wide_arm").map(|r| { let mut r = r.clone(); r["ev"] = "presend_arm".into(); r }).collect();
+            // read back from the log, serde_json's float parse can be 1 ulp off: compare the floats at 12 significant digits
+            fn norm(v: &serde_json::Value) -> serde_json::Value {
+                match v {
+                    serde_json::Value::Number(n) if n.is_f64() => serde_json::json!(format!("{:.11e}", n.as_f64().unwrap())),
+                    serde_json::Value::Object(m) => serde_json::Value::Object(m.iter().map(|(k, x)| (k.clone(), norm(x))).collect()),
+                    serde_json::Value::Array(a) => serde_json::Value::Array(a.iter().map(norm).collect()),
+                    x => x.clone(),
+                }
+            }
+            let (want, got): (Vec<_>, Vec<_>) = (want.iter().map(norm).collect(), got.iter().map(norm).collect());
+            assert_eq!(want, got, "wide arms differ from a 3% shadow's arms below 5% ({})", tk["mint"]);
+            let kept: std::collections::HashSet<u64> = got.iter().map(|r| r["w"].as_u64().unwrap()).collect();
+            for r in &wide {
+                let pct = r["pct"].as_f64();
+                if r["ev"] == "presend_wide_arm" { assert!(pct.unwrap() >= 3.0 && pct.unwrap() < 5.0, "{r}"); }
+                assert!(kept.contains(&r["w"].as_u64().unwrap()), "a wide record of a dropped window: {r}");
+            }
+            n_wide_arms += got.len(); n_wide_recs += wide.len(); n_main += main_on.len();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        eprintln!("presend wide shadow: {n_tok} tokens, main records unchanged ({n_main}), {n_wide_arms} wide arms, {n_wide_recs} wide records");
+        assert!(n_tok >= 10 && n_wide_arms >= 1);
     }
 }
 

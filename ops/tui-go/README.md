@@ -40,7 +40,8 @@ own priority at start (nice 19 and the idle I/O class, every thread), so `sudo i
 | `sudo dipmon --snapshot --json` | the same as JSON (lamports): the Python dipmon's fields exactly, plus `ath_sol` / `ath_t` / `low_sol` / `low_t` / `from_ath_sol` (times in ns); `--extra` adds the trading card and the day card (with the day's ATH / low) |
 | `dipmon --file X.jsonl` | any run file (finished runs, local copies); the `.log` next to it is read too (`--log` to override) |
 | `dipmon --dir DIR` | another runs directory (e.g. `--dir ~/sniper-data/runs/ams/runs --run 27`) |
-| `dipmon --screen 200x35` | render the UI once as plain text (`--tab 1-7`, `--page help\|detail\|splash\|today`), then exit |
+| `dipmon --screen 200x35` | render the UI once as plain text (`--tab 1-8`, `--page help\|detail\|splash\|today`), then exit |
+| `dipmon --gcr-seed FILE` | the Filters tab's bad-creator ledger seed (default `/root/dip/gcr_seed.json` if it exists; `none` = this run's fills only, the row says so) |
 | `dipmon --screens DIR` | text screenshots of every tab at `--sizes 200x35,160x50,...` into DIR |
 | `sudo dipview` | the run explorer: every run in `/root/prod/runs` (`dipmon-go --view`; `--dir DIR` for another) |
 | `sudo dipview --list` | the runs and their numbers as plain text, then exit |
@@ -88,7 +89,7 @@ Read-only like dipmon: the run files and `/proc`, nothing else.
   ams · run 27 · dip20                                          ● RUNNING  ·  4:51:07 PM PKT  ·  SOL $187.42
 ╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
 ╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
-  1 Overview   2 Pre-send   3 Regular   4 Trades   5 Health   6 Log   7 Config
+  1 Overview   2 Pre-send   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
 ```
 
 The header is the REWIND wordmark in the style of Charm's Crush: blocky half-block letters with a pink → violet →
@@ -168,20 +169,146 @@ gradient progress bar. Every time is PKT in 12-hour form ("3:26 PM", "3:26:51 PM
 7. **Config**: every setting, grouped under the five block titles (Pre-send / Regular / Routes & sending / Safety &
    limits / QUIET & paper), with its dot, its full text and one plain-English line, e.g. "4 tries/slot = 4 conditional
    buys sent every slot (~0.2 s) while a window is open; each fills only on a sudden ≥ 12% drop"; the wallet; the legend.
+8. **Filters**: what each pre-send filter blocked and what that saved or cost us (see "Filters tab" below).
 
 Under the tabs: the alerts strip (engine gone, kill switch near, stalled log, fees near the budget, send-path errors,
 END CHECK work, …, and the end banner) and a help bar generated from the key map, with the sound mode (`♪ all` / `- muted`)
 and the refresh rate. `?` shows the full help over the screen (a Lip Gloss layer).
 
+### dip24 runs (v3.2, 10-29)
+
+From the engine's dip24 lines (only when the log has them: r27–r35 render exactly as before):
+
+- **No hard limits**: `DIP LIMITS: time no time limit | regular buys unlimited | ... | pre-send fills unlimited` (and
+  `--minutes 0`) show as "no time limit" / "no limit": RUN `3:33 AM PKT → no time limit`, the limits block `time no
+  limit`, `fills 47/no limit`; the 90%-of-max-fills alert never fires without a cap.
+- **PROFIT LOCK**: the setting (`profit lock give back max(0.650 SOL, 30% of the peak profit)`, also `PROFIT LOCK ON`) in
+  SAFETY & LIMITS next to the kill switch; the RUN panel's `lock` line under `kill sw.`: the peak, the level the run stops
+  below (the engine's `lock: peak, floor, run PnL` status part; before its first status line computed from our P&L line:
+  floor = max(−loss cap, peak − max(M, F × peak))) and the distance; an alert under 0.10 SOL; when `PROFIT LOCK: ... ->
+  stopping` is logged: STOPPING / "profit lock", a red alert and `stopped by profit lock`.
+- **Rolling 24 h pre-send fee budget**: the status part `fees 24 h used/budget SOL [PAUSED] [(pauses n)]` and the
+  `PRESEND LIVE PAUSED (fee budget)` / `RESUMED` lines: Pre-send `fees 24 h` gauge + `PAUSED` / "pauses at the budget,
+  never stops", the limits block `fee 0.04/1.00 24h [PAUSED]`, LIVE `fees 24 h PAUSED`, an alert while paused; the 80%
+  warning uses the 24 h sum.
+- **Regular mode** live | paper | off (`DIP REGULAR ...`, the status part `REGULAR PAPER: picks, fills, ... net`): REGULAR
+  block `PAPER ·`, LIVE `regular PAPER 6 → 0 fills · net`, Regular tab `mode`, Config `Regular mode`.
+- **Observatory** (log only): the `DIP OBSERVATORY ... -> file` line and the status part `OBS: sent .. dropped .. | rearm
+  windows N fills N | hold | watch | mig | blink | backrun | select | race | inslot | records MB p99`: an OBSERVATORY
+  section on Health (counters, queue, file; an alert on WRITE ERRORS). The .obs.jsonl is not read. The engine logs counts
+  only (no re-arm paper P&L): that needs the .obs.jsonl.
+- **Feeds**: names from `feeds: a, b` / `FEEDSTATUS feed=x` lines on Health (r36's log names no feeds: no line there).
+- Snapshot: `limits`, `lock`, `reg mode`, `observ.` lines; `--json` a `dip24` object (dip24 runs only); build `dip24`.
+
+### dip26 runs (v3.3, 10-30)
+
+From the engine's dip26 records and lines (AMS run 38 on: live re-arm, the helius-ps / astralane-ps A/B); only when the
+run has them. r27–r37 render exactly as before (checked on every local run, the baseline binary against the new one:
+`--snapshot` text, `--json`, `--json --extra` and every tab / page at 5 sizes, finished and as running).
+
+- **Re-arm and T2 apart.** A re-arm window's records say `"kind":"rearm"` (arm, skip, rearm_defer, disarm, try, try
+  landing, fill, exit, sell, close, realized). T2's window counters (armed, armed now, skips, disarms, QUIET skips /
+  stops) no longer count them (they did). The money stays the run's pre-send total (`presend` in the JSON, the run P&L
+  unchanged) and the re-arm's part is split out, **T2 = all − re-arm**: fills, wins, realized, rent back (the account
+  close goes with its position), failed tries (each try's landing says its kind), net.
+  - RUN P&L: `split  T2 +x  regular +y` and its own line `re-arm  +z  21 fills 10 W` (medium: T2 / re-arm / regular
+    lines; phones: the same two lines). LIVE: `T2` fills / W / avg, T2's windows (now / armed / tries) and a `re-arm`
+    line (fills, W %, net, its windows now with the spinner, windows).
+  - Pre-send tab: `RESULT · T2`, `EXITS · T2`, `live T2` in PAPER vs LIVE, `armed now … T2 tries n (+m re-arm)`, and
+    a **RE-ARM** section: net, realized / rent back / failed tries, fills W / L avg, windows armed · now · after waiting
+    · deferred · tries, `skipped` and `ended` by reason (without the `rearm_` prefix: no_holder, age, untradeable, r5,
+    blocked_*; filled, expired, quiet, whale_dump, no_holder, superseded, ...), exits, best / worst (with the fill
+    path), the engine's 60 s `rearm:` counters (candidates, checks, pending, sells ≥ 6%) and the observatory's paper
+    re-arm (`paper re-arm` on Health too). The fee check stays every try's (the engine counts both kinds).
+  - Snapshot: `pre-send` = T2 (`T2: n fills ...`) with a `re-arm` money line under it (they add up with `regular` to
+    RUN P&L); `re-arm    config ... windows ... skips ... ends ... exits ... engine ... paper`; `paper ... vs live T2`;
+    `RA` trades. JSON: a `dip26` object (`t2`, `rearm` with its cfg / windows / skips / ends / engine counters, `ab`).
+  - Config: the **Re-arm** item (size, window dump+3 → dump+3+gap, its QUIET stop, R5, the candidate rule) from run_start
+    `presend_live.rearm`, else the start line's `| REARM ON: ...`: in SAFETY & LIMITS (`● re-arm 0.65 SOL · gap 20 ·
+    QUIET 6:2 · R5 off`), the Config tab (with its explanation) and the snapshot (`RA 0.65 g20 q6:2`). A re-arm fill's
+    details: `RE-ARM FILL`, its dump.
+- **The send-path A/B** (two or more pre-send paths in the routes, else seen in the tries): the Pre-send tab's **SEND
+  PATHS A/B** (first on the right; the caps `60/s · 40/s a path` in its title), per path: tries; **refused**, inferred
+  from the records: a window's tick missing between sent ticks is that path's refusal (the engine's rule path =
+  paths[(n + w) mod len]); a run of ≥ 2 missing ticks is a pause of every path, kept apart; landed (not unseen); same
+  slot (`slots_after_send` 0 of the seen); send→land p50 / p90 (`ms_send_to_rx`); acks ≠ 200 (another status, 0 = no
+  answer, or none recorded; the codes listed); fills by the filling try's path and their realized P&L. Then the
+  engine's `not-sent` (all paths), by leader client (seen, same slot, p50 for each path), the paths' SEND-PATH state.
+  Narrower terminals drop columns; phones use HL / AS with a legend. The engine's `per path sent/ok/6042/...` and `acks
+  {...}` parts are kept (JSON). On r38's first 38 minutes: astralane-ps refused 296 of its 4,695 ticks (6.3%; the
+  engine's `rate_path_config` 381), helius-ps none.
+  - Alerts (while running): `<path> refused x% of its tries in 10 min (n of m)` above 1%, `<path> acks failing: n of m
+    not 200 in 10 min` above 1%, `<path> UNHEALTHY: ...` while its last SEND-PATH edge is UNHEALTHY.
+  - Trades: a **via** column (the fill path: HL helius-ps, AS astralane-ps) before client from 80 columns (sorts as the
+    path; `type` sorts PS / RA / REG apart); the snapshot's last trades end with `via AS`.
+  - Health: `A/B paths  helius-ps ok · astralane-ps recovered (1 unhealthy / 1 recovered)`. SEND-PATH UNHEALTHY lines
+    count as the path's errors like every path's (astralane-ps's too: the table, the 3-in-10-min alert); RECOVERED
+    lines are no error and set the path's state.
+  - Config: the **Send-path A/B** item in ROUTES & SENDING (`● A/B helius-ps / astralane-ps`).
+- dipview: `T2` and `re-arm` lines; `--list` says `fills 44 (23W; re-arm 21, 10W)`. The help (`?`) has a re-arm and an
+  A/B note on dip26 runs.
+- CPU: O(1) a record (the tries and their landings still read by substring); the A/B summary (its percentiles) is rebuilt
+  at most every 5 s while the Pre-send tab shows it (0.8 ms on r38's 38 minutes); an old run's load is unchanged within
+  noise (r37, 145 MB: 0.53 → 0.55 s CPU).
+
+### Filters tab (key `8`, 10-30)
+
+The owner: "how many winners and losers we skipped live, with their reason and how much each filter +- saved us or cost
+us". A port of `ops/strategies/presend/prevent/forward/filters_report.py` (equal to it to 1e-9 SOL on run 40, tested)
+and of `loss_brief.py`'s per-fill rules (`internal/core/filters.go`, `internal/ui/filters.go`).
+
+- **Table**, one row per filter, tagged **LIVE** (it changed what the engine did) or **LOG** (log only, would-have):
+  blocked | would win n / SOL | would lose n / SOL | **net saved** = minus what the blocked would have made (green = saved
+  us money, red = cost us). LIVE rows are a **paper estimate**: QUIET / create-slot / age-1 / 10-sec skips of a T2 trigger
+  scored on the main shadow's window on the same trigger (row c `net_cheap`, scaled live size / shadow size); the
+  **deeper limit** (only when the run used it) = T2 windows that tried below 0.875x and never filled, scored the same
+  way, plus a line with its deep fills' real P&L vs their shadow paper (the gain) and its NET = blocks + gain. LOG rows
+  are scored on the **real fills** (`presend_live_realized`): bad creator (with the ledger seed; without one "this run
+  only"), safe sell timer, group risk, holder clock (approx), ctx85 (only without the deeper limit) and the **landing
+  guard** (`ann.guard.block`, dip30+; older runs show `n/a (dip30+)`).
+- **Totals are unique (10-31)**: the rows count a trigger / fill once per rule that has it, so the totals do not add the rows.
+  **LIVE total (unique triggers)** = each skipped / refused trigger once (by trigger sig; on r40 / r42 the LIVE rows turn out
+  disjoint, the dedupe guarantees it), **LOG total (unique fills)** = each real fill (w, mint) once, whatever number of LOG rules
+  flagged it (the rule rows overlap heavily: r42 has 16 flagged fills but the five-six rule rows add up to 34), and
+  **ALL total** = LIVE + LOG. The two sets are disjoint (a skipped trigger never became a fill), so ALL is their plain sum;
+  LIVE is paper, LOG is real fills, so it is an estimate. The per-row numbers are unchanged. `--snapshot` prints the three
+  lines; `--json` has `live_total`, `log_total` (now unique), `all_total`, `live_total_rowsum`, `log_total_rowsum`,
+  `live_dup`, `log_dup`. `filters_report.py` prints the same three lines last (`LIVE total (unique triggers)` ...), tested
+  against Go on r40 (fixture and full file).
+- **Trades: yellow dot and `x`**: a real position that at least one LOG rule would have blocked has a yellow `●` (`*` with
+  `--ascii`) in its own 1-cell column after the selection marker (only when the run has flags; on a table too tight for it the dot
+  replaces the last cell of the type column). `x` (Trades) shows a **BLOCKED BY** panel under the table for the selected trade: every
+  rule with its numbers, e.g. `safe sell timer (holder 5ThrZRSQ 7.5%, hz3 0.91) · group risk (11.1% = 5ThrZRSQ 7.5% +
+  85YwZaQa 3.6%) · holder clock (holder 5ThrZRSQ 7.5%, h3 0.90) · landing guard (guard set 15.5% at landing)`; an unflagged
+  trade says `no filter would have blocked this trade`. The trade's details (Enter) show the same under `blocked by`. The dot, `x`,
+  the details and the Filters list all read the same `FiltReport.Flag(w, mint)` item (one source of truth). LIVE-blocked triggers
+  are not trades: no dot.
+- **Shadow rows (`v`)**: the skip list hides the LIVE rows (scored on the shadow window) by default, with `+N shadow (v)` in its
+  header; `v` shows them. Picking a LIVE filter / `LIVE` with `f` shows them regardless. The list's W / L / SOL follow what is
+  visible; the table above always counts everything.
+- **Skip list** (newest first; `o` / `O` sort like Trades): time, LIVE / LOG, the filter, T2 / RA, the mint (GMGN link),
+  WIN / LOSE, SOL. A LOG row is one real fill with **every** rule that would have blocked it, e.g. F36E6Xcs (-0.121):
+  `safe sell timer, group risk, holder clock` (phones: `ST+GR+HC`). `f` filters by LIVE / LOG / one filter, `n` adds the
+  blocked items that would not have filled (no shadow fill), `enter` opens a LOG item's trade, `c` copies the mint.
+- Live: the table follows the .jsonl as it grows (recomputed only when a filter record came).
+- `--snapshot`: a `filters` section (the script's table, the deeper-limit gain, the totals, the latest 5 LOG blocks);
+  `--snapshot --json`: `filters` with `rows` (a not-logged rule has `na: true` and null numbers), `deep`, the totals and
+  `items` (every scored skip / block with its `rules`).
+- Tests: `internal/core/filters_test.go` (r40 trimmed to the records the table reads, `testdata/filters`, against the
+  script's rows at full precision with and without a seed; `DIPMON_R40=path` also checks a full run file; F36E6Xcs
+  appearing live; the landing guard on synthetic dip30 records), `internal/ui/filters_test.go` (golden screens, keys).
+
 ## Keys
 
 | key | action |
 |---|---|
-| `1`–`7`, Tab, Shift-Tab, a click on the tab bar (mouse on) | tabs: Overview, Pre-send, Regular, Trades, Health, Log, Config |
+| `1`–`8`, Tab, Shift-Tab, a click on the tab bar (mouse on) | tabs: Overview, Pre-send, Regular, Trades, Health, Log, Config, Filters |
+| `f` / `n` (Filters) | the skip list: all → LIVE → LOG → each filter; `n` shows / hides the blocked items that would not have filled; `v` shows / hides the shadow-window (LIVE) rows |
 | ↑ ↓ PgUp PgDn Home End, the mouse wheel (mouse on) | scroll (Trades: move the selection; Log: End = follow the tail again) |
 | Enter / Esc, a click on a trade (twice: details; mouse on) | Trades: details of the selected trade / back |
 | `f` | Trades: all → pre-send → regular → wins → losses → open; Log: important ↔ all |
 | `o` / `O` | Trades: the next sort column / flip the order (the header shows it) |
+| `x` (Trades) | which filters would have blocked the selected trade (the yellow dot ●): a BLOCKED BY panel under the table |
 | `c` (or `y`) | Trades and the details: copy the selected mint to the clipboard (OSC 52; tmux needs `set -g set-clipboard on`) |
 | `M` | mouse capture on / off (default off: the terminal selects text and opens links; on: tab clicks, the wheel, row and header clicks) |
 | `/` | Trades: find a mint (Enter keeps the filter, Esc clears it) |
@@ -335,6 +462,19 @@ sh ops/tui-go/run_tests.sh       # everything (QUICK=1: follow at 200x; FOLLOW=0
   colors on every page and size; **resize + keys + mouse** through 18 sizes down to 1x1 (no panic); **a run followed
   live** (r27 split in two): highlights, toast, pulse, hero spring, the bell (rate-limited, never in the load) and the
   final numbers.
+- dip24 (v3.2): `TestDip24Lines` / `TestDip24Variants` / `TestNoDip24OnOldLines` (core: real r36 lines + the pause /
+  resume / lock-fire lines in the engine's format; capped / lock-none / regular off; a dip20 log gets none of it) and
+  `TestGoldenDip24` (ui: r36 frozen copy in `/home/moiz/sniper-data/tui/runs-dip24`, overview / pre-send / regular /
+  health / config × 5 sizes = `testdata/golden/r36_*`, the dip24 figures on them, `--ascii` pure ASCII).
+- dip26 (v3.3): `TestDip26Lines` (real r38 start / status lines: the REARM ON setting, the caps, the `rearm:` /
+  per-path / not-sent / acks parts; SEND-PATH UNHEALTHY / RECOVERED for astralane-ps and helius-ps in the engine's
+  format), `TestDip26Slice` (80 real r38 records in `internal/core/testdata/dip26_r38_slice.jsonl`: every T2 / re-arm /
+  A/B figure, the sums, the trades' sizes and paths, items, snapshot, JSON), `TestDip26Gaps` (the refused-tick rule and
+  the 10-minute alert), `TestDip26R38` (the frozen copy of r38's first 38 minutes in
+  `/home/moiz/sniper-data/tui/runs-dip26`, md5 de03d4c9 / 8c4a4524, against an independent `encoding/json` scan: T2 /
+  re-arm money and counters, every A/B figure per path, fills and P&L by fill path), `TestNoDip26OnOldLines`,
+  `TestGoldenDip26` (overview / pre-send / trades / health / config / details × 5 sizes = `testdata/golden/r38_*`,
+  content checks, `--ascii`), `TestDip26ResizeKeysSort` (21 sizes, keys, the type / via sort, the help notes).
 - `go test -race ./internal/...`: the tail and reader, the price goroutine, the UI.
 - `tests/parity.py`: Go `--snapshot --json` == the Python dipmon v1 (pinned in `tests/oracle/`, md5-checked) on every field
   of every local run (AMS r9–r28, FRA r1–r25; r28 from `/home/moiz/sniper-data/tui/runs`), the text snapshots line by
@@ -348,7 +488,24 @@ sh ops/tui-go/run_tests.sh       # everything (QUICK=1: follow at 200x; FOLLOW=0
   the pty match. First a copy whose engine dies before DIP DONE must show ENGINE GONE.
 - `tests/perf.py`: the CPU / RSS figures above.
 
-Last full run (2026-10-28, v3.1, `DIPVIEW_DATA=<real FRA + AMS run files copied read-only> sh run_tests.sh`):
+Last full run (2026-10-30 ~02:50–03:15 PKT, v3.3, `sh run_tests.sh`, on a busy machine: load average 5–14 from other jobs):
+
+- build: static, `sha256 bdbe7ab4e6f64ceeacd898eaee03cf6c30903c023918fdd2e7d224f82580e5e8`; `go vet` clean; `gofmt` clean.
+- `go test ./...`: core + ui pass: the older goldens unchanged (r27 55, r28 15, r36 25 screens), the new r38 ones (30) and
+  the dip26 tests above. `go test -race ./internal/...`: pass.
+- parity: 50/52 runs identical; AMS r36 / r37 differ from the Python v1 oracle on dip24 fields only (the build `dip24`
+  vs `dip20`, `no limit` vs `?`, the dip24 config items and `dip24` JSON object; every money field equal): the same
+  with the previous binary (since the dip24 support, 10-29).
+- dipview in a pty: ALL PASS. follow at 50x: r26 / r27 pass.
+- perf: PASS (r24 load 0.39 s CPU, after 0.16% of a core; following 1x 0.17%, 10x 0.40%; `--snapshot` 0.24 s CPU; the
+  previous binary measured right after: 0.28 s, 0.15%, 0.18%, 0.42%, 0.52 s: machine noise either way).
+- before / after on every local run (53: AMS r9–r37, FRA r1–r28, r28 and the r36 frozen copy), the previous binary vs
+  this one: `--snapshot` text, `--json`, `--json --extra` and every tab / page at 5 sizes (+ 2 sizes as running):
+  identical but for the help's corner (`dipmon 3.1` → `dipmon 3.3`) and, on FRA r25 / r27, the order of two Health
+  send paths with equal totals (it comes from a Go map: the previous binary alone flips it between runs).
+- AMS (read-only, `/tmp/dipmon-go.new`): `sudo /tmp/dipmon-go.new --run 38 --snapshot` on the live run, 0.38 s CPU, 20 MB.
+
+Previous full run (2026-10-28, v3.1, `DIPVIEW_DATA=<real FRA + AMS run files copied read-only> sh run_tests.sh`):
 
 - build: static, reproducible (`sha256 fb9bf0fbcbb5afacd5efabf0b47a9c8e2d5a729f9591c36a3751b80324335aaf`); `go vet`
   clean; `gofmt` clean.
@@ -383,9 +540,9 @@ the same sha256 on every build. Modules: `charm.land/bubbletea/v2` v2.1.0, `char
 v2.8.0 (each the newest stable release at least two weeks old).
 
 Layout: `main.go` (the command line), `internal/core` (tails, the model, the accounting, the view, the snapshot / JSON, the
-engine / price / system probes, the card and today), `internal/ui` (the app, the theme, the wordmark, the screens, the chart,
-the trades table and its sort / running total (`sort.go`), the config blocks (`cfgblocks.go`), dipview
-(`dipview.go`)), `tests/` (parity, follow, perf, the pty and VT helpers, the pinned oracle, `ans2png.py`), `screens/`
+engine / price / system probes, the card and today; `dip24.go`, `dip26.go`: those engines' lines and records),
+`internal/ui` (the app, the theme, the wordmark, the screens, the chart, the trades table and its sort / running total
+(`sort.go`), the config blocks (`cfgblocks.go`), dipview (`dipview.go`), the re-arm / A/B sections (`dip26.go`)), `tests/` (parity, follow, perf, the pty and VT helpers, the pinned oracle, `ans2png.py`), `screens/`
 (`sh make_screens.sh`: text screenshots of every tab of r27 ended / live / warming up, colored `.ans` copies, and `png/`
 images of a few for a phone: DejaVu Sans Mono on a dark background, roughly what a terminal shows).
 

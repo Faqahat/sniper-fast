@@ -20,8 +20,23 @@ type tcol struct {
 
 // tradeCols: the columns that fit w. Latency (ms): d→land = dump to landing, s→seen = send to seen, blk = the block
 // it landed in (pre-send: slots after the send; regular: after the dump); total = the run's P&L after this trade (the
-// running total, in the primary unit); phones keep the money (Enter: details). usd: size and total in USD (u).
-func tradeCols(w int, usd bool) []tcol {
+// running total, in the primary unit); phones keep the money (Enter: details). usd: size and total in USD (u). via
+// (dip26, a run whose pre-send tries go over two or more paths): the filling try's path in two letters (HL / AS)
+// before the client, where there is room (80 columns and up).
+func tradeCols(w int, usd, via bool) []tcol {
+	cols := tradeCols0(w, usd)
+	if !via || w < 80 {
+		return cols
+	}
+	for i, c := range cols {
+		if c.title == "client" {
+			return append(cols[:i:i], append([]tcol{{"via", 3, false}}, cols[i:]...)...)
+		}
+	}
+	return cols
+}
+
+func tradeCols0(w int, usd bool) []tcol {
 	sz, tot := 5, 10
 	if usd {
 		sz = 6
@@ -118,6 +133,9 @@ func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.St
 	tyS := t.Val
 	if tr.Kind == "PS" {
 		typ, tyS = "PS", t.Acc
+		if tr.Rearm {
+			typ = "RA"
+		}
 	}
 	var cells []string
 	var sts []lipgloss.Style
@@ -130,7 +148,7 @@ func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.St
 		case "type", "typ":
 			s, st = typ, tyS
 		case "ty":
-			s, st = map[string]string{"PS": "PS", "REG": "RG"}[typ], tyS
+			s, st = map[string]string{"PS": "PS", "RA": "RA", "REG": "RG"}[typ], tyS
 		case "mint":
 			s = core.Short(tr.Mint, c.w)
 		case "size":
@@ -185,8 +203,15 @@ func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.St
 			s = core.RuneSlice(core.KindOf(tr.Client), 10)
 		case "path":
 			s, st = core.RuneSlice(core.TradePath(tr), 28), t.Lbl
+		case "via": // dip26: the filling try's path (HL helius-ps, AS astralane-ps, ...)
+			s, st = core.PathCode(core.TradePath(tr)), t.Acc
 		case "":
 			s, st = " ", t.Acc
+		case "flag":
+			s, st = " ", t.Warn
+			if m.flagged(tr) {
+				s = m.dot()
+			}
 		}
 		cells = append(cells, s)
 		sts = append(sts, st)
@@ -219,7 +244,7 @@ func (m *Model) hlBg(tr *core.Trade) (color.Color, float64) {
 // tradeTable renders rows with the Lip Gloss table: header, zebra rows, the selection, the fresh-trade highlight.
 func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 	t := m.th
-	cols := tradeCols(w, m.usdFirst && m.view.Price != 0)
+	cols := tradeCols(w, m.usdFirst && m.view.Price != 0, m.viaOn())
 	if sel >= 0 {
 		cols = append([]tcol{{"", 1, false}}, cols...)
 	}
@@ -227,6 +252,19 @@ func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 	for _, c := range cols {
 		fixed += c.w + 1
 	}
+	// the yellow dot of a trade some LOG rule would have blocked: its own 1-cell column after the marker when the table
+	// has room, else inside the type column (the narrowest existing one)
+	dotCol, dotInType := false, false
+	if sel >= 0 && m.view.Filt.NFlagged() > 0 {
+		if fixed+2 <= w-4 {
+			cols = append(cols[:1:1], append([]tcol{{"flag", 1, false}}, cols[1:]...)...)
+			fixed += 2
+			dotCol = true
+		} else {
+			dotInType = true
+		}
+	}
+	_ = dotCol
 	if last := &cols[len(cols)-1]; last.w == 0 {
 		last.w = max(4, w-fixed)
 	}
@@ -234,6 +272,18 @@ func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 	styles := make([][]lipgloss.Style, len(rows))
 	for i, tr := range rows {
 		cells, sts := m.tradeCells(tr, cols)
+		if dotInType && m.flagged(tr) {
+			for j, c := range cols {
+				if (c.title == "type" || c.title == "typ" || c.title == "ty") && c.w > 0 {
+					r := []rune(cells[j])
+					if len(r) >= c.w {
+						r = r[:c.w-1]
+					}
+					cells[j] = string(r) + m.dot()
+					sts[j] = m.th.Warn
+				}
+			}
+		}
 		if sel >= 0 && i == sel {
 			cells[0] = m.g("▸", ">")
 		}
@@ -436,7 +486,11 @@ func (m *Model) scrTrades(w, bh int) string {
 		m.search.SetWidth(max(10, w-4))
 		out = append(out, m.search.View())
 	}
-	rowsAvail := bh - len(out) - 1
+	var why []string // x: which filters would have blocked the selected trade
+	if m.tradeInfo && n > 0 {
+		why = append([]string{m.rule("BLOCKED BY", "", w)}, m.whyLines(tl[min(m.tradeSel, n-1)], w)...)
+	}
+	rowsAvail := bh - len(out) - 1 - len(why)
 	if rowsAvail < 1 {
 		rowsAvail = 1
 	}
@@ -459,8 +513,49 @@ func (m *Model) scrTrades(w, bh int) string {
 	vis := tl[m.tradeTop:min(n, m.tradeTop+rowsAvail)]
 	m.tradeRowY = m.bodyY + len(out) + 1
 	out = append(out, m.tradeTable(w, vis, m.tradeSel-m.tradeTop))
+	out = append(out, why...)
 	if n > rowsAvail {
 		m.moreHint = fmt.Sprintf("%d/%d", m.tradeSel+1, n)
 	}
 	return strings.Join(out, "\n")
+}
+
+// dot: the yellow flag mark ("*" in --ascii).
+func (m *Model) dot() string { return m.g("\u25cf", "*") }
+
+// flag: the filters that would have blocked this trade (the Filters tab's own LOG item: one source of truth).
+func (m *Model) flag(tr *core.Trade) (core.FiltItem, bool) {
+	if tr == nil || tr.Kind != "PS" || !tr.W.Ok || m.view == nil {
+		return core.FiltItem{}, false
+	}
+	return m.view.Filt.Flag(tr.W.W, tr.Mint)
+}
+
+func (m *Model) flagged(tr *core.Trade) bool {
+	_, ok := m.flag(tr)
+	return ok
+}
+
+// whyLines: the x panel / the details' "blocked by" text for one trade, wrapped to w (at most 4 lines).
+func (m *Model) whyLines(tr *core.Trade, w int) []string {
+	t := m.th
+	it, ok := m.flag(tr)
+	if !ok {
+		return []string{t.Lbl.Render("no filter would have blocked this trade")}
+	}
+	txt := "would have been blocked by: " + it.Info()
+	ls := core.WrapText(txt, max(10, w-2), 0)
+	if len(ls) > 4 {
+		ls = ls[:4]
+		ls[3] = ansi.Truncate(ls[3], max(1, w-4), "") + m.g("\u2026", "~")
+	}
+	out := make([]string, len(ls))
+	for i, l := range ls {
+		pre := "  "
+		if i == 0 {
+			pre = t.Warn.Render(m.dot()) + " "
+		}
+		out[i] = pre + t.Val.Render(l)
+	}
+	return out
 }

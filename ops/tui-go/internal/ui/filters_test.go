@@ -1,0 +1,312 @@
+package ui
+
+import (
+	"compress/gzip"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"dipmon/internal/core"
+)
+
+// r40f: AMS run 40 trimmed to the Filters table's records (internal/core/testdata/filters); its end, 10-31 01:30 PKT
+const r40fNow = 1793392200.0
+
+var r40fSeed = filepath.Join("..", "core", "testdata", "filters", "gcr_seed.json")
+
+func r40fCtx(t testing.TB, seed string) *core.Ctx {
+	f, err := os.Open(filepath.Join("..", "core", "testdata", "filters", "dip_ams_r40f.jsonl.gz"))
+	if err != nil {
+		t.Skip("no fixture")
+	}
+	defer f.Close()
+	zr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "dip_ams_r40f.jsonl")
+	out, _ := os.Create(p)
+	if _, err := io.Copy(out, zr); err != nil {
+		t.Fatal(err)
+	}
+	out.Close()
+	ctx := loadCtx(t, p, r40fNow)
+	ctx.GcrSeed = seed
+	return ctx
+}
+
+// TestGoldenFilters: the Filters tab on r40f at 4 sizes (testdata/golden/r40f_*; -update rewrites them).
+func TestGoldenFilters(t *testing.T) {
+	ctx := r40fCtx(t, r40fSeed)
+	o := Options{Sound: "all", Version: "test", Golden: true, Interval: 1, LoadDuty: 1}
+	for _, sz := range [][2]int{{200, 45}, {120, 40}, {80, 30}, {50, 30}} {
+		name := fmt.Sprintf("r40f_%dx%d_12-filters.txt", sz[0], sz[1])
+		got := RenderScreen(ctx, o, sz[0], sz[1], 7, "", false)
+		lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
+		if len(lines) != sz[1] {
+			t.Errorf("%s: %d lines", name, len(lines))
+		}
+		for i, l := range lines {
+			if w := ansi.StringWidth(l); w > sz[0] {
+				t.Errorf("%s line %d: %d cells", name, i+1, w)
+			}
+		}
+		if !strings.Contains(got, "FILTERS") || !strings.Contains(got, "SKIPPED / BLOCKED") || !strings.Contains(got, "+1.277") {
+			t.Errorf("%s: the table is missing:\n%s", name, got)
+		}
+		fp := filepath.Join("testdata", "golden", name)
+		if *update {
+			os.WriteFile(fp, []byte(got), 0o644)
+			continue
+		}
+		want, err := os.ReadFile(fp)
+		if err != nil {
+			t.Errorf("%s: no golden file (run with -update)", name)
+			continue
+		}
+		if string(want) != got {
+			t.Errorf("%s differs from the golden screen:\n%s", name, firstDiff(string(want), got))
+		}
+	}
+}
+
+// TestFiltersKeys: the tab's keys (f cycles all / LIVE / LOG / each filter, n the no-fill rows, o / O sort, enter a LOG
+// item's trade, c copy) at many sizes: no panic, the frame fills the terminal, the list follows the choices.
+func TestFiltersKeys(t *testing.T) {
+	ctx := r40fCtx(t, "none")
+	o := Options{Sound: "all", Version: "test", Golden: true, Interval: 1, LoadDuty: 1, Strict: true}
+	m := New(ctx, o)
+	m.Init()
+	drive(m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	drive(m, keyMsg("8"))
+	if m.tab != 7 {
+		t.Fatalf("8 -> tab %d", m.tab)
+	}
+	drive(m, keyMsg("v")) // the shadow-window rows are hidden by default
+	n0 := len(m.fltRows)
+	drive(m, keyMsg("n"))
+	if len(m.fltRows) <= n0 {
+		t.Errorf("n: %d rows, before %d", len(m.fltRows), n0)
+	}
+	drive(m, keyMsg("n"))
+	drive(m, keyMsg("f")) // LIVE
+	for _, it := range m.fltRows {
+		if !it.Live {
+			t.Fatal("f LIVE shows a LOG item")
+		}
+	}
+	drive(m, keyMsg("f")) // LOG
+	if len(m.fltRows) == 0 || m.fltRows[0].Live {
+		t.Fatal("f LOG")
+	}
+	drive(m, keyMsg("enter"))
+	if m.detail == nil || m.detail.Mint != m.fltRows[0].Mint {
+		t.Fatal("enter on a LOG item: no trade details")
+	}
+	drive(m, keyMsg("esc"))
+	if m.tab != 7 || m.detail != nil {
+		t.Fatal("esc: back to Filters")
+	}
+	for i := 0; i < len(fltSortKeys); i++ { // every sort column, both orders
+		drive(m, keyMsg("o"))
+		drive(m, keyMsg("O"))
+		drive(m, keyMsg("O"))
+	}
+	if m.fltSort != 0 {
+		t.Errorf("o cycle: sort %d", m.fltSort)
+	}
+	for i := 0; i < 20; i++ {
+		drive(m, keyMsg("f"))
+	}
+	keys := []string{"8", "f", "n", "down", "down", "end", "home", "pgdown", "o", "O", "c", "enter", "esc", "f", "n", "up", "o", "o", "o"}
+	for _, sz := range [][2]int{{200, 45}, {36, 10}, {50, 30}, {63, 20}, {64, 20}, {80, 24}, {99, 30}, {100, 30}, {160, 50}, {10, 5}} {
+		out := drive(m, tea.WindowSizeMsg{Width: sz[0], Height: sz[1]})
+		for _, k := range keys {
+			out = drive(m, keyMsg(k))
+			if sz[0] >= 36 && sz[1] >= 10 {
+				if n := strings.Count(out, "\n") + 1; n != sz[1] {
+					t.Fatalf("%dx%d after %q: %d lines", sz[0], sz[1], k, n)
+				}
+				for i, l := range strings.Split(out, "\n") {
+					if w := ansi.StringWidth(l); w > sz[0] {
+						t.Fatalf("%dx%d after %q line %d: %d cells", sz[0], sz[1], k, i+1, w)
+					}
+				}
+			}
+		}
+		drive(m, tea.MouseWheelMsg(tea.Mouse{X: 3, Y: 20, Button: tea.MouseWheelDown}))
+		drive(m, tea.MouseClickMsg(tea.Mouse{X: 5, Y: m.fltRowY + 1, Button: tea.MouseLeft}))
+	}
+	if m.uiErrs != 0 {
+		t.Fatalf("UI errors: %s", m.uiErr)
+	}
+}
+
+// fixtureSmall: a hand-made run (the same shape as core's smallFixture): 4 skipped triggers (one twice), 3 real fills:
+// M1 flagged by safe sell timer + group risk + holder clock, M2 by the landing guard, M3 by nothing.
+func fixtureSmall(t testing.TB) string {
+	recs := []string{
+		`{"ev":"presend_arm","sig":"s1","w":1}`, `{"ev":"presend_arm","sig":"s2","w":2}`,
+		`{"ev":"presend_fill","row":"c","w":1,"entry":{"sol_in":1000000000}}`, `{"ev":"presend_fill","row":"c","w":2,"entry":{"sol_in":1000000000}}`,
+		`{"ev":"presend_exit","row":"c","w":1,"net_cheap":0.5}`, `{"ev":"presend_exit","row":"c","w":2,"net_cheap":-0.2}`,
+		`{"ev":"presend_live_skip","why":"quiet","trig":{"sig":"s1","mint":"MA","t":1000}}`,
+		`{"ev":"presend_live_skip","why":"create_slot","trig":{"sig":"s1","mint":"MA","t":1000}}`,
+		`{"ev":"presend_live_skip","why":"young_age","trig":{"sig":"s2","mint":"MB","t":2000}}`,
+	}
+	h := `{"w":"AAAAAAAAbbbb","pct":7.5,"n":6,"h3":0.9,"risk":6,"hz3":0.91},{"w":"CCCCCCCCdddd","pct":3.6,"n":6,"h3":0.1,"risk":6,"hz3":0.5}`
+	anns := []string{
+		`{"st_block":true,"grp_block":true,"grp_pct":11.1,"holders":[` + h + `],"guard":{"block":false,"pct":0,"set":[]}}`,
+		`{"st_block":false,"grp_block":false,"holders":[],"guard":{"block":true,"pct":15.5,"set":[{"w":"EEEEEEEEffff","sign_pct":15.5,"land_pct":15.5}]}}`,
+		`{"st_block":false,"grp_block":false,"holders":[],"guard":{"block":false,"pct":0,"set":[]}}`,
+	}
+	pnl := []string{"-300000000", "100000000", "200000000"}
+	for i := 0; i < 3; i++ {
+		w, m := fmt.Sprint(10+i), []string{"M1", "M2", "M3"}[i]
+		recs = append(recs,
+			`{"ev":"presend_live_arm","w":`+w+`,"mint":"`+m+`","kind":"t2","spend":500000000,"trig":{"sig":"x`+w+`","mint":"`+m+`","t":1`+w+`}}`,
+			`{"ev":"presend_live_fill","w":`+w+`,"mint":"`+m+`","t":`+fmt.Sprint(20000+i)+`,"ann":`+anns[i]+`}`,
+			`{"ev":"presend_live_realized","w":`+w+`,"mint":"`+m+`","pnl":`+pnl[i]+`}`)
+	}
+	p := filepath.Join(t.TempDir(), "dip_ams_r99.jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(recs, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestTradesFlagDot: a trade flagged by 3 rules gets the dot and x lists all 3 with their numbers; an unflagged one has
+// neither; the details say it too; --ascii uses "*".
+func TestTradesFlagDot(t *testing.T) {
+	ctx := loadCtx(t, fixtureSmall(t), 1793392200.0)
+	ctx.GcrSeed = "none"
+	for _, ascii := range []bool{false, true} {
+		o := Options{Sound: "all", Version: "test", Golden: true, Interval: 1, LoadDuty: 1, Strict: true, ASCII: ascii}
+		m := New(ctx, o)
+		m.Init()
+		drive(m, tea.WindowSizeMsg{Width: 160, Height: 40})
+		out := drive(m, keyMsg("4"))
+		dot := map[bool]string{false: "\u25cf", true: "*"}[ascii]
+		lines := strings.Split(ansi.Strip(out), "\n")
+		got := map[string]bool{}
+		for _, l := range lines {
+			for _, mt := range []string{"M1", "M2", "M3"} {
+				if strings.Contains(l, mt) && !strings.Contains(l, "mint") {
+					got[mt] = strings.Contains(l, dot)
+				}
+			}
+		}
+		if len(got) != 3 || !got["M1"] || !got["M2"] || got["M3"] {
+			t.Fatalf("ascii=%v dots %v (want M1 M2 yes, M3 no):\n%s", ascii, got, out)
+		}
+		// select M1 (newest first: sort by mint is not needed: find it) and press x
+		sel := -1
+		for i, tr := range m.tradeRows {
+			if tr.Mint == "M1" {
+				sel = i
+			}
+		}
+		if sel < 0 {
+			t.Fatal("no M1 trade")
+		}
+		for i := 0; i < sel; i++ {
+			drive(m, keyMsg("down"))
+		}
+		out = drive(m, keyMsg("x"))
+		for _, w := range []string{"safe sell timer (holder AAAAAAAA 7.5%, hz3 0.91)", "group risk (11.1% = AAAAAAAA 7.5% + CCCCCCCC 3.6%)", "holder clock (holder AAAAAAAA 7.5%, h3 0.90)"} {
+			if !strings.Contains(strings.Join(strings.Fields(ansi.Strip(out)), " "), w) {
+				t.Errorf("ascii=%v x panel misses %q:\n%s", ascii, w, out)
+			}
+		}
+		for i, l := range strings.Split(out, "\n") {
+			if w := ansi.StringWidth(l); w > 160 {
+				t.Errorf("line %d: %d cells", i+1, w)
+			}
+		}
+		// an unflagged trade
+		for i, tr := range m.tradeRows {
+			if tr.Mint == "M3" {
+				for m.tradeSel != i {
+					drive(m, keyMsg(map[bool]string{true: "down", false: "up"}[m.tradeSel < i]))
+				}
+			}
+		}
+		out = drive(m, keyMsg("x"))
+		out = drive(m, keyMsg("x"))
+		if !strings.Contains(out, "no filter would have blocked this trade") {
+			t.Errorf("M3 x panel:\n%s", out)
+		}
+		for _, sz := range [][2]int{{36, 12}, {50, 30}, {64, 20}, {70, 20}, {80, 24}, {100, 30}, {200, 45}} { // phones: no overflow
+			out := drive(m, tea.WindowSizeMsg{Width: sz[0], Height: sz[1]})
+			for _, k := range []string{"x", "down", "x", "up"} {
+				out = drive(m, keyMsg(k))
+				for i, l := range strings.Split(out, "\n") {
+					if w := ansi.StringWidth(l); w > sz[0] {
+						t.Fatalf("%dx%d after %q line %d: %d cells", sz[0], sz[1], k, i+1, w)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestFiltersShadowToggle: the shadow-window rows are hidden by default (v shows them, with the count of hidden rows in
+// the header), a LIVE filter picked with f reveals its rows, and the overview table is the same either way.
+func TestFiltersShadowToggle(t *testing.T) {
+	ctx := loadCtx(t, fixtureSmall(t), 1793392200.0)
+	ctx.GcrSeed = "none"
+	o := Options{Sound: "all", Version: "test", Golden: true, Interval: 1, LoadDuty: 1, Strict: true}
+	m := New(ctx, o)
+	m.Init()
+	drive(m, tea.WindowSizeMsg{Width: 160, Height: 50})
+	out := drive(m, keyMsg("8"))
+	table := func(s string) string { // the lines of the overview table (up to the skip list)
+		return strings.Split(s, "SKIPPED / BLOCKED")[0]
+	}
+	t0 := table(out)
+	if len(m.fltRows) != 3 { // default: only the 3 LOG items... (2 flagged fills + none else) -> M1, M2 only
+		for _, it := range m.fltRows {
+			if it.Live {
+				t.Fatalf("default view shows a shadow row: %+v", it)
+			}
+		}
+	}
+	for _, it := range m.fltRows {
+		if it.Live {
+			t.Fatal("default shows shadow rows")
+		}
+	}
+	nLog := len(m.fltRows)
+	if !strings.Contains(out, "+3 shadow (v)") { // 3 skip entries (s1 twice)
+		t.Errorf("no hidden-count hint:\n%s", out)
+	}
+	out = drive(m, keyMsg("v"))
+	if len(m.fltRows) <= nLog || !strings.Contains(out, "with shadow (v)") {
+		t.Errorf("v: %d rows, before %d", len(m.fltRows), nLog)
+	}
+	if table(out) != t0 {
+		t.Errorf("the overview table changed with the toggle:\n%s\nvs\n%s", t0, table(out))
+	}
+	drive(m, keyMsg("v"))
+	if len(m.fltRows) != nLog {
+		t.Errorf("v off: %d rows, want %d", len(m.fltRows), nLog)
+	}
+	out = drive(m, keyMsg("f")) // LIVE: reveals the shadow rows without the toggle
+	live := 0
+	for _, it := range m.fltRows {
+		if it.Live {
+			live++
+		}
+	}
+	if live != 3 || m.fltShadow {
+		t.Errorf("f LIVE: %d live rows (toggle %v)", live, m.fltShadow)
+	}
+	if table(out) != t0 {
+		t.Error("the overview table changed with f")
+	}
+}

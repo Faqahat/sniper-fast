@@ -49,21 +49,25 @@ func (r RunEntry) Name() string { return r.Region + " r" + strconv.Itoa(r.N) }
 
 // RunSum: the few numbers the explorer shows for a run (the dipmon accounting, to the lamport).
 type RunSum struct {
-	Key                                string // size|mtime when computed (a finished run is not computed again)
-	At                                 time.Time
-	Status, HowEnded, Build            string
-	TFirst, TEnd                       int64
-	EndsAt                             float64
-	HasEndsAt                          bool
-	Elapsed                            float64
-	HasElapsed                         bool
-	PlannedMin                         float64
-	Total                              int64
-	PerHour                            float64
-	HasPerHour                         bool
-	PSActive                           bool
-	PSFills, PSWins, PSReal            int64
-	PSNet                              int64
+	Key                     string // size|mtime when computed (a finished run is not computed again)
+	At                      time.Time
+	Status, HowEnded, Build string
+	TFirst, TEnd            int64
+	EndsAt                  float64
+	HasEndsAt               bool
+	Elapsed                 float64
+	HasElapsed              bool
+	PlannedMin              float64
+	Total                   int64
+	PerHour                 float64
+	HasPerHour              bool
+	PSActive                bool
+	PSFills, PSWins, PSReal int64
+	PSNet                   int64
+	// dip26: the re-arm's own figures and T2's (the pre-send figures above stay the run's whole pre-send)
+	RAOn                               bool
+	RANet, RAFills, RAWins, RAReal     int64
+	T2Net, T2Fills, T2Wins, T2Real     int64
 	RegFires, RegFills, RegWins, RegNF int64
 	RegTotal                           int64
 	Trades, Wins, Losses               int
@@ -177,6 +181,10 @@ func Summarize(ctx *core.Ctx) *RunSum {
 		HasStartBal: v.HasRunStartBal, EstNow: v.EstNow, HasEstNow: v.HasEstNow, Price: v.Price, NSess: v.NSess}
 	if v.Planned.Truthy() {
 		s.PlannedMin = v.Planned.Float()
+	}
+	if v.RA.On {
+		s.RAOn, s.RANet, s.RAFills, s.RAWins, s.RAReal = true, v.RA.Net, v.RA.Fills, v.RA.Wins, v.RA.NReal
+		s.T2Net, s.T2Fills, s.T2Wins, s.T2Real = v.T2.Net, v.T2.Fills, v.T2.Wins, v.T2.NReal
 	}
 	s.Cfg = append([]core.CfgItem(nil), v.CfgItems...)
 	for _, tr := range v.Trades {
@@ -375,6 +383,9 @@ func (e *Explorer) ListText() string {
 			eng = s.Build
 			res = core.SolS(s.Total) + " SOL"
 			extra = fmt.Sprintf("  fills %d (%dW)  regular %d buys %d fills  trades %d", s.PSFills, s.PSWins, s.RegFires, s.RegFills, s.Trades)
+			if s.RAOn { // dip26: the re-arm's part of the fills
+				extra = fmt.Sprintf("  fills %d (%dW; re-arm %d, %dW)  regular %d buys %d fills  trades %d", s.PSFills, s.PSWins, s.RAFills, s.RAWins, s.RegFires, s.RegFills, s.Trades)
+			}
 			if s.Status != "ENDED" {
 				st += " (" + s.Status + ")"
 			}
@@ -762,14 +773,27 @@ func (x *exModel) overviewPanel(runs []RunEntry, sums map[string]*RunSum, sel, w
 	}
 	sep := t.Dim.Render(" " + c.g("·", "|") + " ")
 	ps := t.Lbl.Render("off")
+	psNet, psFills, psWins, psReal := s.PSNet, s.PSFills, s.PSWins, s.PSReal
+	psLabel := "pre-send"
+	if s.RAOn { // dip26: T2 here, the re-arm on its own line
+		psNet, psFills, psWins, psReal, psLabel = s.T2Net, s.T2Fills, s.T2Wins, s.T2Real, "T2"
+	}
 	if s.PSActive {
-		ps = t.Money(s.PSNet, true, false).Render(x.money(s.PSNet, s.Price)) + sep + t.Val.Render(fmt.Sprintf("%d fills", s.PSFills)) + sep +
-			t.Val.Render(fmt.Sprintf("%d W", s.PSWins))
-		if s.PSReal > 0 {
-			ps += t.Lbl.Render(fmt.Sprintf(" %.0f%%", float64(s.PSWins)/float64(s.PSReal)*100))
+		ps = t.Money(psNet, true, false).Render(x.money(psNet, s.Price)) + sep + t.Val.Render(fmt.Sprintf("%d fills", psFills)) + sep +
+			t.Val.Render(fmt.Sprintf("%d W", psWins))
+		if psReal > 0 {
+			ps += t.Lbl.Render(fmt.Sprintf(" %.0f%%", float64(psWins)/float64(psReal)*100))
 		}
 	}
-	ls = append(ls, c.kv("pre-send", lw, ps))
+	ls = append(ls, c.kv(psLabel, lw, ps))
+	if s.RAOn {
+		ra := t.Money(s.RANet, true, false).Render(x.money(s.RANet, s.Price)) + sep + t.Val.Render(fmt.Sprintf("%d fills", s.RAFills)) + sep +
+			t.Val.Render(fmt.Sprintf("%d W", s.RAWins))
+		if s.RAReal > 0 {
+			ra += t.Lbl.Render(fmt.Sprintf(" %.0f%%", float64(s.RAWins)/float64(s.RAReal)*100))
+		}
+		ls = append(ls, c.kv("re-arm", lw, ra))
+	}
 	ls = append(ls, c.kv("regular", lw, t.Money(s.RegTotal, true, false).Render(x.money(s.RegTotal, s.Price))+sep+
 		t.Val.Render(fmt.Sprintf("%d buys", s.RegFires))+t.Lbl.Render(" "+c.g("→", "->")+" ")+t.Val.Render(fmt.Sprintf("%d fills", s.RegFills))+sep+
 		t.Val.Render(fmt.Sprintf("%d failed", s.RegNF))+sep+t.Val.Render(fmt.Sprintf("%d W", s.RegWins))))

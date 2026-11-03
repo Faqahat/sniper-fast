@@ -21,6 +21,8 @@ func sortKeyOf(title string) string {
 		return "type"
 	case "P&L SOL", "USD":
 		return "P&L"
+	case "via": // dip26: the path in two letters sorts as the path
+		return "path"
 	case "":
 		return ""
 	}
@@ -30,6 +32,9 @@ func sortKeyOf(title string) string {
 // headerText: a column's header: the unit for size / total in USD mode, the sort arrow on the sorted column (Trades tab).
 func (m *Model) headerText(c tcol, sortable bool) string {
 	h := c.title
+	if h == "flag" {
+		return ""
+	}
 	usd := m.usdFirst && m.view != nil && m.view.Price != 0
 	if usd && (h == "size" || h == "total") {
 		h += " $"
@@ -79,8 +84,8 @@ func (m *Model) sortVal(tr *core.Trade, key string) (float64, string, bool) {
 	switch key {
 	case "time":
 		return float64(tr.T), "", true
-	case "type":
-		return 0, tr.Kind, true
+	case "type": // PS / RA (dip26 re-arm) / REG
+		return 0, kindTag(tr), true
 	case "mint":
 		return 0, strings.ToLower(tr.Mint), tr.Mint != ""
 	case "size":

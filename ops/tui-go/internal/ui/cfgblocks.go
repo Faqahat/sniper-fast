@@ -17,10 +17,10 @@ var cfgBlockShort = []string{"PRE-SEND", "REGULAR", "SENDING", "LIMITS", "QUIET"
 // cfgBlockKeys: the config items (core.CfgItem keys) of each block, in order.
 var cfgBlockKeys = [][]string{
 	{"ps"},
-	{"reg", "guard", "m2", "dev"},
-	{"routes", "sellfan", "nonce", "near", "skipcl"},
-	{"kill", "planned", "build"},
-	{"qstop", "qskip", "quiet", "paper"},
+	{"reg", "regmode", "guard", "m2", "dev"},
+	{"routes", "ab", "sellfan", "nonce", "near", "skipcl"},
+	{"kill", "lock", "planned", "limits", "fee24", "rearm", "build"},
+	{"qstop", "qskip", "quiet", "paper", "obs"},
 }
 
 // blockOf: the block of a config item (unknown items: the limits block, so nothing is ever dropped).
@@ -157,6 +157,10 @@ func (m *Model) cfgBlocks() []cfgBlock {
 			sp = core.F(spend.Float()/core.LAM, 2)
 		}
 		l1 := cfgLine{pre + t.Val.Render(sp+" SOL"), pre + t.Val.Render(sp)}
+		if x := it("regmode"); x != nil && x.State != "on" { // dip24: paper / off
+			md := t.Warn.Render(strings.ToUpper(strings.TrimPrefix(x.Short, "REG ")))
+			l1.long, l1.short = md+sep+l1.long, md+sep+l1.short
+		}
 		if guard > 0 {
 			l1.long += sep + t.Val.Render("guard +"+core.F((guard-1)*100, 0)+"%")
 			l1.short += sep + t.Val.Render("+"+core.F((guard-1)*100, 0)+"%")
@@ -224,6 +228,13 @@ func (m *Model) cfgBlocks() []cfgBlock {
 		if l2.long != "" {
 			ls = append(ls, l2)
 		}
+		if x := it("ab"); x != nil { // dip26: the pre-send tries alternate between these paths
+			var lg, sh []string
+			for _, p := range v.AB.Paths {
+				lg, sh = append(lg, p), append(sh, core.PathCode(p))
+			}
+			ls = append(ls, cfgLine{dot(x.State) + t.Lbl.Render(" A/B ") + t.Val.Render(strings.Join(lg, " / ")), dot(x.State) + t.Lbl.Render(" A/B ") + t.Val.Render(strings.Join(sh, "/"))})
+		}
 		if x := it("skipcl"); x != nil {
 			ls = append(ls, same(t.Lbl.Render("skip ")+t.Val.Render(strings.ReplaceAll(x.Full, "rakurai", "Rakurai"))))
 		}
@@ -249,9 +260,29 @@ func (m *Model) cfgBlocks() []cfgBlock {
 			}
 			l1.long += t.Lbl.Render("planned ") + p
 			l1.short += t.Lbl.Render("plan ") + p
+		} else if v.NoTimeLimit {
+			if l1.long != "" {
+				l1.long += sep
+				l1.short += sep
+			}
+			l1.long += t.Lbl.Render("time ") + t.Val.Render("no limit")
+			l1.short += t.Lbl.Render("time ") + t.Val.Render("none")
 		}
 		if l1.long != "" {
 			ls = append(ls, l1)
+		}
+		if L := v.Lock; L.On { // dip24: the profit lock's setting
+			x := "lock " + core.F(float64(L.M)/core.LAM, 2) + " / " + core.F(L.F*100, 0) + "%"
+			st := "on"
+			if L.Fired {
+				st = "off"
+			}
+			l := cfgLine{dot(st) + t.Lbl.Render(" profit lock ") + t.Val.Render(core.F(float64(L.M)/core.LAM, 2)+" / "+core.F(L.F*100, 0)+"% of peak"), dot(st) + t.Lbl.Render(" ") + t.Val.Render(x)}
+			if L.Fired {
+				l.long += t.Bad.Render(" FIRED")
+				l.short += t.Bad.Render(" FIRED")
+			}
+			ls = append(ls, l)
 		}
 		if psOn {
 			var sf, sfee int64
@@ -263,18 +294,47 @@ func (m *Model) cfgBlocks() []cfgBlock {
 			capS := "?"
 			if n, ok := num("max_fills"); ok && n.Truthy() {
 				capS = n.Repr()
+			} else if pc["fills_unlimited"] == true || (v.D24 != nil && v.D24.PSFillsUnl) {
+				capS = "no limit"
 			}
 			bud := 0.0
 			if n, ok := num("fee_budget"); ok && n.Truthy() {
 				bud = n.Float()
+			}
+			paused := false
+			if d := v.D24; d != nil && d.HasBud24 { // dip24: the rolling 24 h sum against its budget
+				sfee, bud, paused = d.Fee24, float64(d.Bud24), d.FeePaused
 			}
 			fs := t.Val
 			if bud > 0 && float64(sfee) > 0.8*bud {
 				fs = t.Warn
 			}
 			fees := fs.Render(core.F(float64(sfee)/core.LAM, 2) + "/" + core.F(bud/core.LAM, 2))
+			if v.D24 != nil && v.D24.HasBud24 {
+				fees += t.Lbl.Render(" 24h")
+			}
+			if paused {
+				fees += t.Bad.Render(" PAUSED")
+			}
 			ls = append(ls, cfgLine{t.Lbl.Render("fills ") + t.Val.Render(fmt.Sprintf("%d/%s", sf, capS)) + sep + t.Lbl.Render("fees ") + fees,
 				t.Val.Render(fmt.Sprintf("%d/%s", sf, capS)) + sep + t.Lbl.Render("fee ") + fees})
+		}
+		if x := it("rearm"); x != nil { // dip26: the re-arm's setting (size, gap, its QUIET stop, R5)
+			c := v.RA.Cfg
+			lg := dot(x.State) + t.Lbl.Render(" re-arm ") + t.Val.Render(core.F(float64(c.Spend)/core.LAM, 2)+" SOL") + sep + t.Lbl.Render("gap ") + t.Val.Render(core.Itoa(c.Gap))
+			sh := dot(x.State) + t.Lbl.Render(" RA ") + t.Val.Render(core.F(float64(c.Spend)/core.LAM, 2)) + t.Lbl.Render(" g") + t.Val.Render(core.Itoa(c.Gap))
+			if c.Quiet != "" {
+				lg += sep + t.Lbl.Render("QUIET ") + t.Val.Render(c.Quiet)
+				sh += t.Lbl.Render(" q") + t.Val.Render(c.Quiet)
+			}
+			if c.HasR5 {
+				r5 := map[bool]string{true: "on", false: "off"}[c.R5]
+				lg += sep + t.Lbl.Render("R5 ") + t.Val.Render(r5)
+				if c.R5 {
+					sh += t.Val.Render(" R5")
+				}
+			}
+			ls = append(ls, cfgLine{lg, sh})
 		}
 		ls = append(ls, same(t.Lbl.Render("engine ")+t.Val.Render(v.Build)))
 		add(3, ls...)

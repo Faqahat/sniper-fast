@@ -26,7 +26,7 @@ import (
 	"dipmon/internal/ui"
 )
 
-const version = "3.1"
+const version = "3.3"
 
 const defaultDir = "/root/prod/runs"
 
@@ -197,6 +197,7 @@ func main() {
 	fs.Var(&run, "run", "run number N: <dir>/dip_ams_rN or dip_rN")
 	region := fs.String("region", "", "with --run: ams | fra")
 	dir := fs.String("dir", defaultDir, "run files directory")
+	gcrSeed := fs.String("gcr-seed", "", "the Filters tab's bad-creator ledger seed (default /root/dip/gcr_seed.json if it exists; none = this run's fills only)")
 	budget := fs.String("budget", "", "the dip budget file (default: <dir>/../dip_budget_ams.json or dip_budget.json)")
 	snapshot := fs.Bool("snapshot", false, "print a plain-text summary and exit (no UI)")
 	jsonOut := fs.Bool("json", false, "with --snapshot: JSON instead of text (lamports)")
@@ -213,7 +214,7 @@ func main() {
 	mouse := fs.Bool("mouse", false, "capture the mouse at start (tab clicks, wheel); default off so the terminal selects text and opens links (M toggles)")
 	noLinks := fs.Bool("no-links", false, "no OSC 8 hyperlinks (mints -> GMGN, signatures -> Solscan)")
 	screen := fs.String("screen", "", "render the UI once at WxH as plain text to stdout, then exit (--tab, --page)")
-	tab := fs.Int("tab", 1, "with --screen: the tab 1-7")
+	tab := fs.Int("tab", 1, "with --screen: the tab 1-8")
 	page := fs.String("page", "", "with --screen: help | detail | splash | today")
 	screens := fs.String("screens", "", "write text screenshots of every tab to DIR and exit")
 	sizes := fs.String("sizes", "200x35,160x50,120x40,80x24,50x30", "with --screens: WxH list")
@@ -266,6 +267,7 @@ func main() {
 	if nowF.set {
 		ctx.FixedNow = nowF.v
 	}
+	ctx.GcrSeed = *gcrSeed
 	if !src.Exists() {
 		die("%s not found", src.JSONL)
 	}

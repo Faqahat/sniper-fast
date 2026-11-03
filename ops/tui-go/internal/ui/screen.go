@@ -40,10 +40,10 @@ func plain(s string, keepANSI bool) string {
 	return strings.Join(ls, "\n") + "\n"
 }
 
-// RenderScreen renders the UI once at w x h (tab 0-6, or page help | detail | splash | today) as text.
+// RenderScreen renders the UI once at w x h (tab 0-7, or page help | detail | splash | today) as text.
 func RenderScreen(ctx *core.Ctx, o Options, w, h, tab int, page string, keepANSI bool) string {
 	m := screenModel(ctx, o, w, h)
-	m.tab = max(0, min(6, tab))
+	m.tab = max(0, min(len(tabNames)-1, tab))
 	switch page {
 	case "help":
 		m.showHelp = true
@@ -109,7 +109,7 @@ func DumpScreens(ctx *core.Ctx, o Options, dir string, sizes [][2]int, tag strin
 	}
 	pages := []pg{{"01-overview", 0, ""}, {"02-presend", 1, ""}, {"03-regular", 2, ""}, {"04-trades", 3, ""}, {"05-health", 4, ""},
 		{"06-log", 5, ""}, {"07-config", 6, ""}, {"08-help", 0, "help"}, {"09-detail", 3, "detail"}, {"10-splash", 0, "splash"},
-		{"11-today", 0, "today"}}
+		{"11-today", 0, "today"}, {"12-filters", 7, ""}}
 	ext := ".txt"
 	if keepANSI {
 		ext = ".ans"

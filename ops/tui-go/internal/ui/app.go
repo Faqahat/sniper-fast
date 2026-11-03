@@ -32,8 +32,8 @@ type Options struct {
 	Golden                                 bool   // tests: fixed probe values (system, pid, clock) for golden screens
 }
 
-var tabNames = []string{"Overview", "Pre-send", "Regular", "Trades", "Health", "Log", "Config"}
-var tabShort = []string{"Ovw", "PS", "Reg", "Trd", "Hlth", "Log", "Cfg"}
+var tabNames = []string{"Overview", "Pre-send", "Regular", "Trades", "Health", "Log", "Config", "Filters"}
+var tabShort = []string{"Ovw", "PS", "Reg", "Trd", "Hlth", "Log", "Cfg", "Flt"}
 var filters = []string{"all", "pre-send", "regular", "wins", "losses", "open"}
 
 const (
@@ -125,11 +125,18 @@ type Model struct {
 	sortCol    int  // Trades: index in sortKeys (o cycles, O flips)
 	sortAsc    bool // false = descending (newest / largest first)
 	mouseOn    bool // mouse capture (tab clicks, wheel); off = the terminal's own selection and link clicks work
-	flash      string
-	flashMsgAt time.Time
-	totKey     string
-	totals     map[int]int64
-	hdrX       []hdrCell
+	// the Filters tab's skip list (filters.go): selection, top row, the f choice, the sort (o / O), the no-fill rows (n)
+	fltSel, fltTop, fltFilter, fltSort int
+	fltAsc, fltAll                     bool
+	fltShadow                          bool // Filters: show the LIVE rows scored on the shadow window (v; default hidden)
+	tradeInfo                          bool // Trades: the flagged-by panel under the table (x)
+	fltRows                            []core.FiltItem
+	fltRowY                            int
+	flash                              string
+	flashMsgAt                         time.Time
+	totKey                             string
+	totals                             map[int]int64
+	hdrX                               []hdrCell
 
 	// animation
 	spring     harmonica.Spring
@@ -167,6 +174,10 @@ type Model struct {
 	barCache map[string]string
 	latKey   string
 	latSum   *core.LatSummary
+	abKey    string // dip26: the send-path A/B summary (see abSummary)
+	abSum    *core.ABSummary
+	abVer    int
+	abAt     time.Time
 	mu       sync.Mutex
 	nowFn    func() time.Time
 }
@@ -585,6 +596,9 @@ func (m *Model) ring(now time.Time, covered int) tea.Cmd {
 
 func kindTag(tr *core.Trade) string {
 	if tr.Kind == "PS" {
+		if tr.Rearm {
+			return "RA"
+		}
 		return "PS"
 	}
 	return "REG"
@@ -636,7 +650,7 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.query = ""
 			m.search.SetValue("")
 		}
-	case "1", "2", "3", "4", "5", "6", "7":
+	case "1", "2", "3", "4", "5", "6", "7", "8":
 		m.tab = int(k[0] - '1')
 		m.detail = nil
 	case "tab":
@@ -648,12 +662,21 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "u":
 		m.usdFirst = !m.usdFirst
 	case "o": // Trades: the next sort column (each starts descending: newest / largest first)
+		if m.tab == 7 && m.detail == nil { // Filters: the skip list's
+			m.fltSort = (m.fltSort + 1) % len(fltSortKeys)
+			m.fltAsc = false
+			m.fltSel, m.fltTop = 0, 0
+		}
 		if m.tab == 3 && m.detail == nil {
 			m.sortCol = (m.sortCol + 1) % len(sortKeys)
 			m.sortAsc = false
 			m.tradeSel, m.tradeTop = 0, 0
 		}
 	case "O": // Trades: flip the order
+		if m.tab == 7 && m.detail == nil {
+			m.fltAsc = !m.fltAsc
+			m.fltSel, m.fltTop = 0, 0
+		}
 		if m.tab == 3 && m.detail == nil {
 			m.sortAsc = !m.sortAsc
 			m.tradeSel, m.tradeTop = 0, 0
@@ -664,6 +687,11 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			tr = m.detail
 		} else if m.tab == 3 && len(m.tradeRows) > 0 {
 			tr = m.tradeRows[min(m.tradeSel, len(m.tradeRows)-1)]
+		} else if m.tab == 7 && len(m.fltRows) > 0 { // Filters: the selected item's mint
+			if mint := m.fltRows[min(m.fltSel, len(m.fltRows)-1)].Mint; mint != "" {
+				m.flash, m.flashMsgAt = "copied "+core.Short(mint, 8)+m.g("…", "~"), m.now()
+				return tea.SetClipboard(mint)
+			}
 		}
 		if tr != nil && tr.Mint != "" {
 			m.flash, m.flashMsgAt = "copied "+core.Short(tr.Mint, 8)+m.g("…", "~"), m.now()
@@ -744,6 +772,23 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		} else if m.tab == 5 {
 			m.logAll = !m.logAll
 			m.logOff = 0
+		} else if m.tab == 7 && m.detail == nil { // Filters: all / LIVE / LOG / each filter
+			m.fltFilter = (m.fltFilter + 1) % len(m.fltChoices())
+			m.fltSel, m.fltTop = 0, 0
+		}
+	case "v": // Filters: the LIVE rows scored on the shadow window shown / hidden (the table always counts them)
+		if m.tab == 7 && m.detail == nil {
+			m.fltShadow = !m.fltShadow
+			m.fltSel, m.fltTop = 0, 0
+		}
+	case "x": // Trades: which filters would have blocked the selected trade (the panel under the table)
+		if m.tab == 3 && m.detail == nil {
+			m.tradeInfo = !m.tradeInfo
+		}
+	case "n": // Filters: the items whose shadow window never filled (no value) on / off
+		if m.tab == 7 && m.detail == nil {
+			m.fltAll = !m.fltAll
+			m.fltSel, m.fltTop = 0, 0
 		}
 	case "/":
 		if m.tab == 3 && m.detail == nil {
@@ -759,6 +804,11 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.tab == 3 && m.detail == nil && len(m.tradeRows) > 0 {
 			m.detail = m.tradeRows[min(m.tradeSel, len(m.tradeRows)-1)]
 			m.scroll["detail"] = 0
+		} else if m.tab == 7 && m.detail == nil && len(m.fltRows) > 0 { // Filters: a LOG item's trade
+			if tr := m.fltTrade(m.fltRows[min(m.fltSel, len(m.fltRows)-1)]); tr != nil {
+				m.detail = tr
+				m.scroll["detail"] = 0
+			}
 		}
 	default:
 		m.scrollKey(k)
@@ -799,6 +849,16 @@ func (m *Model) scrollKey(k string) {
 		default:
 			m.tradeSel = max(0, min(n-1, m.tradeSel+d))
 		}
+	case m.tab == 7 && m.detail == nil:
+		n := len(m.fltRows)
+		switch {
+		case home:
+			m.fltSel = 0
+		case end:
+			m.fltSel = max(0, n-1)
+		default:
+			m.fltSel = max(0, min(n-1, m.fltSel+d))
+		}
 	case m.tab == 5 && m.detail == nil:
 		switch {
 		case home:
@@ -829,6 +889,8 @@ func (m *Model) scrollBy(d int) {
 		m.tradeSel = max(0, min(n-1, m.tradeSel+d))
 	case m.tab == 5 && m.detail == nil && !m.showHelp:
 		m.logOff = max(0, m.logOff-d)
+	case m.tab == 7 && m.detail == nil && !m.showHelp:
+		m.fltSel = max(0, min(len(m.fltRows)-1, m.fltSel+d))
 	default:
 		key := m.scrollKeyName()
 		m.scroll[key] = max(0, m.scroll[key]+d)
@@ -864,6 +926,13 @@ func (m *Model) onClick(mm tea.Mouse) tea.Cmd {
 	}
 	if m.tab == 3 && m.detail == nil && m.tradeRowY > 0 && mm.Y == m.tradeRowY-1 {
 		m.clickHeader(mm.X)
+		return nil
+	}
+	if m.tab == 7 && m.detail == nil && m.fltRowY > 0 && mm.Y >= m.fltRowY {
+		i := m.fltTop + (mm.Y - m.fltRowY)
+		if i >= 0 && i < len(m.fltRows) {
+			m.fltSel = i
+		}
 		return nil
 	}
 	if m.tab == 3 && m.detail == nil && m.tradeRowY > 0 && mm.Y >= m.tradeRowY {
@@ -975,7 +1044,7 @@ func (m *Model) bodyKey(w, bh int) string {
 		tick = int64(now)
 	}
 	arm := 0
-	if v.Running && v.PSOpenNow > 0 {
+	if v.Running && (v.PSOpenNow > 0 || v.RA.OpenNow > 0) { // dip26: the re-arm's windows spin too
 		arm = m.armFrame
 	}
 	det := 0
@@ -983,7 +1052,12 @@ func (m *Model) bodyKey(w, bh int) string {
 		det = m.detail.ID
 	}
 	M := m.ctx.Src.Model
-	return fmt.Sprintf("%d|%v|%v|%d|%d|%d|%d|%s|%d|%d|%d|%d|%d|%d|%s|%v|%v|%d|%v|%v|%d|%v|%d|%v|%v|%g|%s|%d|%d|%d|%d|%d",
+	flt := ""
+	if m.tab == 7 {
+		flt = fmt.Sprintf("|%d|%d|%d|%d|%v|%v", m.fltSel, m.fltTop, m.fltFilter, m.fltSort, m.fltAsc, m.fltAll) + fmt.Sprintf("|%v", m.fltShadow)
+	}
+	flt += fmt.Sprintf("|x%v", m.tradeInfo)
+	return flt + fmt.Sprintf("%d|%v|%v|%d|%d|%d|%d|%s|%d|%d|%d|%d|%d|%d|%s|%v|%v|%d|%v|%v|%d|%v|%d|%v|%v|%g|%s|%d|%d|%d|%d|%d",
 		m.sortCol, m.sortAsc, m.opt.NoLinks, w, bh, M.Version, M.TradeVer, v.Status, tick, arm, m.tab, det, m.tradeSel, m.tradeTop, m.query, m.logAll, m.logWrap, m.logOff,
 		m.usdFirst, m.todayOn, m.todayCard.Net+int64(m.todayCard.Loading)*7919+serKey(m.pnl()), m.dark, m.scope, m.ascii, m.anim, v.Price,
 		fmt.Sprint(m.scroll[m.scrollKeyName()]), m.tfilter, v.PSOpenNow, len(m.hl), m.todayCard.Buys, int64(v.PriceAge/60))
@@ -1033,6 +1107,8 @@ func (m *Model) bodyRaw(w, bh int) string {
 			s = m.scrHealth(w, bh)
 		case 5:
 			s, scrolls = m.scrLog(w, bh), false
+		case 7:
+			s, scrolls = m.scrFilters(w, bh), false
 		default:
 			s = m.scrConfig(w, bh)
 		}
@@ -1144,7 +1220,7 @@ func (m *Model) tabBar(w int) string {
 	x++
 	for i, n := range names {
 		label := fmt.Sprintf(" %d %s ", i+1, n)
-		if w < 56 && i != m.tab {
+		if w < 64 && i != m.tab {
 			label = fmt.Sprintf(" %d ", i+1)
 		}
 		lw := ansi.StringWidth(label)

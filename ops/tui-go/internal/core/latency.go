@@ -240,12 +240,22 @@ func (M *Model) latAttempt(S *Sess, line []byte, dry bool) {
 	if dry {
 		return
 	}
-	// sorted keys: leader, then sig, then w
+	// sorted keys: kind, leader, then n, path, sig, t, w
 	tail := line
 	leader := ""
-	if i := bytes.Index(line, []byte(`leader":"`)); i >= 0 {
-		tail = line[i:]
+	li := bytes.Index(line, []byte(`leader":"`))
+	if li >= 0 {
+		tail = line[li:]
 		leader, _ = strAfter(tail, `leader":"`)
+	}
+	// dip26: a re-arm window's try ("kind" sorts before "leader")
+	pre := line
+	if li >= 0 {
+		pre = line[:li]
+	}
+	if bytes.Contains(pre, kindRearm) {
+		S.RA.Sent++
+		S.RA.Any = true
 	}
 	w, okw := numAfter(tail, `"w":`)
 	if !okw && len(tail) != len(line) {
@@ -257,6 +267,7 @@ func (M *Model) latAttempt(S *Sess, line []byte, dry bool) {
 		}
 		S.WinTries[w]++
 	}
+	M.abAttempt(S, line, tail, w, okw) // dip26: the send-path A/B (nothing with one pre-send path)
 	sig, ok := strAfter(tail, `"sig":"`)
 	if !ok && len(tail) != len(line) {
 		sig, ok = strAfter(line, `"sig":"`)
@@ -280,8 +291,9 @@ func (M *Model) latAttempt(S *Sess, line []byte, dry bool) {
 
 // latLand: a try's landing (presend_attempt_land), read by substring (the high-volume record, never decoded). The
 // engine writes sorted keys, so everything wanted sits after "client" (behind the long trade lists): the searches
-// start there, and look at the whole line only when a key is not found there.
-func (M *Model) latLand(S *Sess, line []byte, res string) {
+// start there, and look at the whole line only when a key is not found there. dip26: it also feeds the send-path
+// A/B; true = a re-arm window's try.
+func (M *Model) latLand(S *Sess, line []byte, res string) bool {
 	tail := line
 	client := ""
 	if i := bytes.Index(line, []byte(`client":"`)); i >= 0 { // patterns start past their quote: '"' is everywhere
@@ -304,6 +316,12 @@ func (M *Model) latLand(S *Sess, line []byte, res string) {
 	K := S.latKind(KindOf(client))
 	ss, okss := fnum(`ms_send_to_rx":`)
 	blk, okb := fnum(`slots_after_send":`)
+	rearm := bytes.Contains(tail, kindRearm) // "kind" sorts after "client"
+	if rearm {
+		S.RA.Any = true
+	}
+	path := fstr(`path":"`)
+	M.abLand(S, line, tail, path, res, client, ss, okss, blk, okb)
 	if okss {
 		S.Lat.S2R.Add(ss)
 		K.S2R.Add(ss)
@@ -325,7 +343,7 @@ func (M *Model) latLand(S *Sess, line []byte, res string) {
 		K.Fills++
 	}
 	if !okd || (res != "ok" && res != "6042") {
-		return
+		return rearm
 	}
 	dobj := objAfter(tail, `"d":{`)
 	if dobj == nil && len(tail) != len(line) {
@@ -342,7 +360,7 @@ func (M *Model) latLand(S *Sess, line []byte, res string) {
 		}
 	}
 	if res != "ok" {
-		return
+		return rearm
 	}
 	// the filling try: the fill's own figures
 	num := func(v float64, ok bool) Num {
@@ -357,7 +375,7 @@ func (M *Model) latLand(S *Sess, line []byte, res string) {
 		}
 		return num(v, ok)
 	}
-	l := &PSLat{DL: FloatNum(dl), DLSrc: src, SendSeen: num(ss, okss), Blk: inum(blk, okb), Client: client, Path: fstr(`path":"`)}
+	l := &PSLat{DL: FloatNum(dl), DLSrc: src, SendSeen: num(ss, okss), Blk: inum(blk, okb), Client: client, Path: path}
 	l.NBetween = inum(fnum(`n_between":`))
 	l.N = inum(fnum(`"n":`))
 	l.DropPct = num(floatAfter(dobj, `drop_pct":`))
@@ -369,7 +387,7 @@ func (M *Model) latLand(S *Sess, line []byte, res string) {
 			tr.Lat = l
 			M.TradeVer++
 		}
-		return
+		return rearm
 	}
 	if M.psLandPend == nil {
 		M.psLandPend = map[string]*PSLat{}
@@ -377,6 +395,7 @@ func (M *Model) latLand(S *Sess, line []byte, res string) {
 	if len(M.psLandPend) < 2000 {
 		M.psLandPend[sig] = l
 	}
+	return rearm
 }
 
 // psFillLat: a fill (presend_live_fill) with its sig: its latency when its try's landing came first; later lands find

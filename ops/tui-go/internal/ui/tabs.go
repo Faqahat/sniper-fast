@@ -101,6 +101,8 @@ func (m *Model) scrPresend(w, bh int) string {
 	if capN.Truthy() {
 		capS = capN.Repr()
 		fr = float64(sf) / capN.Float()
+	} else if pc["fills_unlimited"] == true || (v.D24 != nil && v.D24.PSFillsUnl) {
+		capS = "no limit"
 	}
 	fl := m.kv("fills", 11, t.Val.Render(padRight(fmt.Sprintf("%d / %s", sf, capS), 12)))
 	if fr >= 0 {
@@ -113,7 +115,29 @@ func (m *Model) scrPresend(w, bh int) string {
 		f := float64(sfee) / bud
 		fb += m.usageBar(f, gw) + t.Lbl.Render(fmt.Sprintf(" %.0f%% used", f*100))
 	}
-	C = append(C, fb)
+	if d := v.D24; d != nil && d.HasBud24 { // dip24: the budget is a rolling 24 h sum that pauses the sender, never stops it
+		f := 0.0
+		if d.Bud24 > 0 {
+			f = float64(d.Fee24) / float64(d.Bud24)
+		}
+		fb = m.kv("fees 24 h", 11, t.Val.Render(padRight(core.F(float64(d.Fee24)/core.LAM, 3)+"/"+core.F(float64(d.Bud24)/core.LAM, 2), 12))) +
+			m.usageBar(f, gw) + t.Lbl.Render(fmt.Sprintf(" %.0f%% used", f*100))
+		if d.FeePaused {
+			fb += t.Bad.Render("  PAUSED")
+		}
+		st := t.Lbl.Render("run ") + t.Val.Render(core.F(float64(sfee)/core.LAM, 3)+" SOL")
+		if d.FeePaused {
+			st += sep + t.Bad.Render("PAUSED: no new tries until old fees roll out")
+		} else {
+			st += sep + t.Lbl.Render("pauses at the budget, never stops")
+		}
+		if d.FeePauses > 0 {
+			st += sep + t.Lbl.Render(fmt.Sprintf("pauses %d", d.FeePauses))
+		}
+		C = append(C, fb, m.kv("fees", 11, st))
+	} else {
+		C = append(C, fb)
+	}
 	arm := t.Val.Render(fmt.Sprint(v.PSOpenNow))
 	if v.PSOpenNow > 0 {
 		arm = t.B.Render(fmt.Sprint(v.PSOpenNow))
@@ -122,7 +146,22 @@ func (m *Model) scrPresend(w, bh int) string {
 	if ps.Dry > 0 {
 		tries += t.Lbl.Render(" (+" + core.IC(ps.Dry) + " dry)")
 	}
-	C = append(C, m.kv("armed now", 11, arm+t.Lbl.Render(" window(s)")+sep+t.Lbl.Render("armed "+core.IC(ps.Armed))+sep+tries))
+	if v.RA.On { // dip26: T2's windows and tries (the re-arm's in its own section), as long a form as fits
+		inner := cw
+		if cw >= 70 {
+			inner = cw - 4
+		}
+		head := arm + t.Lbl.Render(" window(s)") + sep + t.Lbl.Render("armed "+core.IC(ps.Armed)) + sep
+		l := ""
+		for _, c := range []string{"T2 tries " + core.IC(v.T2.Sent) + " (+" + core.IC(v.RA.Sent) + " re-arm)", "T2 tries " + core.IC(v.T2.Sent), "tries " + core.IC(v.T2.Sent)} {
+			if l = m.kv("armed now", 11, head+t.Lbl.Render(c)); ansi.StringWidth(l) <= inner {
+				break
+			}
+		}
+		C = append(C, l)
+	} else {
+		C = append(C, m.kv("armed now", 11, arm+t.Lbl.Render(" window(s)")+sep+t.Lbl.Render("armed "+core.IC(ps.Armed))+sep+tries))
+	}
 	if v.PSStopped != "" {
 		C = append(C, m.kv("stopped", 11, t.Warn.Render(v.PSStopped)+t.Lbl.Render("  no new attempts this session")))
 	}
@@ -134,7 +173,11 @@ func (m *Model) scrPresend(w, bh int) string {
 	if it != nil {
 		right = t.StateDot(it.State, m.ascii) + t.Lbl.Render(" "+strings.TrimPrefix(it.Short, "PS "))
 	}
-	// result
+	// result (dip26: the T2 windows' alone; the re-arm has its own section)
+	all := ps
+	if v.RA.On {
+		ps = v.T2
+	}
 	var A []string
 	A = append(A, m.kv("net", 11, m.money(ps.Net, true, 4)))
 	A = append(A, m.kv("realized", 11, t.Money(ps.Real, true, false).Render(core.SolS(ps.Real))+t.Lbl.Render("   rent back ")+t.Money(ps.Rent, true, false).Render(core.SolS(ps.Rent))))
@@ -143,20 +186,27 @@ func (m *Model) scrPresend(w, bh int) string {
 		fs = t.Neg
 	}
 	A = append(A, m.kv("failed", 11, fs.Render(core.SolS(-ps.Fees))+t.Lbl.Render("   "+core.IC(ps.FeeN)+" tries x "+core.IC(v.PSFailEach))))
-	if ps.AllStopped && ps.FeesEng != 0 {
-		d := ps.FeesEng - ps.FeesCnt
+	if all.AllStopped && all.FeesEng != 0 { // the engine counts every try's fee (T2 + re-arm)
+		d := all.FeesEng - all.FeesCnt
 		ok := d < v.PSFailEach && -d < v.PSFailEach
 		mark := t.Good.Render(m.g("✓ match", "ok match"))
 		if !ok {
 			mark = t.Warn.Render("differs " + core.FS(float64(d)/core.LAM, 6))
 		}
-		fc := m.kv("fee check", 11, t.Lbl.Render("counted "+core.F(float64(ps.FeesCnt)/core.LAM, 6)+"  engine "+core.F(float64(ps.FeesEng)/core.LAM, 6)+"  ")+mark)
+		fc := m.kv("fee check", 11, t.Lbl.Render("counted "+core.F(float64(all.FeesCnt)/core.LAM, 6)+"  engine "+core.F(float64(all.FeesEng)/core.LAM, 6)+"  ")+mark)
 		if ok && ansi.StringWidth(fc) > m.colW(w) {
-			fc = m.kv("fee check", 11, t.Lbl.Render(core.F(float64(ps.FeesCnt)/core.LAM, 6)+" = engine ")+t.Good.Render(m.g("✓", "ok")))
+			fc = m.kv("fee check", 11, t.Lbl.Render(core.F(float64(all.FeesCnt)/core.LAM, 6)+" = engine ")+t.Good.Render(m.g("✓", "ok")))
 		}
 		A = append(A, fc)
-	} else if ps.FeesEng != 0 {
-		A = append(A, m.kv("engine", 11, t.Lbl.Render(core.F(float64(ps.FeesEng)/core.LAM, 6)+" at its last status line (60 s)")))
+	} else if all.FeesEng != 0 {
+		x := " at its last status line (60 s)"
+		if v.RA.On { // dip26: the engine counts T2's and the re-arm's failed tries together
+			x = " (T2 + re-arm) at its last status line"
+			if ansi.StringWidth(m.kv("engine", 11, core.F(float64(all.FeesEng)/core.LAM, 6)+x)) > cw {
+				x = " T2 + re-arm (60 s)"
+			}
+		}
+		A = append(A, m.kv("engine", 11, t.Lbl.Render(core.F(float64(all.FeesEng)/core.LAM, 6)+x)))
 	}
 	nl := ps.NReal - ps.Wins
 	wl := t.Val.Render(fmt.Sprintf("%d W / %d L", ps.Wins, nl))
@@ -260,7 +310,11 @@ func (m *Model) scrPresend(w, bh int) string {
 	} else {
 		P = append(P, m.kv("paper (c)", 11, t.Lbl.Render("no shadow numbers yet")))
 	}
-	P = append(P, m.kv("live", 11, t.Val.Render(fmt.Sprintf("%4d fills", ps.Fills))+t.Lbl.Render("  net ")+t.Money(ps.Net, true, false).Render(core.Sol(ps.Net, true, 3, true))))
+	liveL := "live"
+	if v.RA.On {
+		liveL = "live T2"
+	}
+	P = append(P, m.kv(liveL, 11, t.Val.Render(fmt.Sprintf("%4d fills", ps.Fills))+t.Lbl.Render("  net ")+t.Money(ps.Net, true, false).Render(core.Sol(ps.Net, true, 3, true))))
 	// windows
 	var Wn []string
 	for _, x := range []struct {
@@ -317,6 +371,9 @@ func (m *Model) scrPresend(w, bh int) string {
 			}), "\n")
 	}
 	latR := t.Lbl.Render("ms")
+	if v.RA.On || v.AB.On { // dip26: the T2 result, the re-arm's own section, the send-path A/B
+		return m.scrPresend26(w, cw, title, right, C, A, E, Wn, Q, P, Ss, latR, all)
+	}
 	left := []string{m.section(title, right, C, cw), m.section("RESULT", "", A, cw), m.section("EXITS", "", E, cw), m.section("WINDOWS", "", Wn, cw)}
 	rightCol := []string{m.section("LATENCY", latR, m.latencyLines(m.lastW(w, cw), ps), m.lastW(w, cw)), m.section("QUIET", "", Q, m.lastW(w, cw)),
 		m.section("PAPER vs LIVE", "", P, m.lastW(w, cw))}
@@ -393,6 +450,15 @@ func (m *Model) scrRegular(w, bh int) string {
 	var A []string
 	if ri != nil {
 		A = append(A, m.kv("setup", 9, t.Val.Render(ri.Short)))
+	}
+	if x := v.ItemByKey("regmode"); x != nil { // dip24: live | paper | off
+		md := t.StateDot(x.State, m.ascii) + " " + t.Val.Render(strings.TrimPrefix(x.Short, "REG "))
+		if d := v.D24; d.HasRegP {
+			p := d.RegP
+			md += sep + t.Lbl.Render(fmt.Sprintf("%d picks %s %d fills %s %d open", p.Picks, m.g("→", "->"), p.Fills, m.g("·", "|"), p.Open)) +
+				sep + t.Lbl.Render("net ") + t.Money(int64(p.Net*core.LAM), true, false).Render(core.FS(p.Net, 4))
+		}
+		A = append(A, m.kv("mode", 9, md))
 	}
 	A = append(A, m.kv("P&L", 9, m.money(g.Total, true, 4)))
 	A = append(A, m.kv("", 9, t.Lbl.Render("fills ")+t.Money(g.FillPnl, true, false).Render(core.SolS(g.FillPnl))+t.Lbl.Render("   failed buys ")+t.Money(g.FailPnl, true, false).Render(core.SolS(g.FailPnl))))
@@ -652,6 +718,22 @@ func (m *Model) scrHealth(w, bh int) string {
 			return t.Val
 		}), "\n")...)
 	}
+	if v.AB.On { // dip26: the A/B's paths: the last SEND-PATH edge (UNHEALTHY / RECOVERED) of each
+		var hp []string
+		for _, p := range v.AB.Paths {
+			st := t.Good.Render("ok")
+			if e := M.PathEdges[p]; e != nil {
+				if e.Down {
+					st = t.Bad.Render("UNHEALTHY")
+				} else {
+					st = t.Good.Render("recovered")
+				}
+				st += t.Lbl.Render(fmt.Sprintf(" (%d unhealthy / %d recovered)", e.Downs, e.Ups))
+			}
+			hp = append(hp, t.Val.Render(p+" ")+st)
+		}
+		R = append(R, cut(m.kv("A/B paths", 11, strings.Join(hp, sep)), m.colW(w)-4))
+	}
 	if len(M.Panics) > 0 {
 		R = append(R, m.kv("panics", 11, t.Bad.Render(core.RuneSlice(M.Panics[len(M.Panics)-1], w-20))))
 	}
@@ -753,13 +835,28 @@ func (m *Model) scrHealth(w, bh int) string {
 			return t.Val
 		}), "\n")...)
 	}
+	if len(M.Feeds) > 0 {
+		E = append(E, m.kv("feeds", 10, t.Val.Render(strings.Join(M.Feeds, ", "))))
+	}
 	cw := m.colW(w)
+	ow := w
+	if w >= 120 {
+		ow = cw
+	}
+	O, oRight := m.obsLines(ow)
 	if w < 120 {
-		return strings.Join([]string{m.section("ENGINE", "", E, w), m.section("ERRORS", "", R, w), m.section("SYSTEM", "", Y, w),
-			m.section("RPC LATENCY", t.Lbl.Render("latest minute, ms"), P, w)}, "\n")
+		secs := []string{m.section("ENGINE", "", E, w), m.section("ERRORS", "", R, w), m.section("SYSTEM", "", Y, w)}
+		if len(O) > 0 {
+			secs = append(secs, m.section("OBSERVATORY", oRight, O, w))
+		}
+		return strings.Join(append(secs, m.section("RPC LATENCY", t.Lbl.Render("latest minute, ms"), P, w)), "\n")
 	}
 	rw := m.lastW(w, cw)
-	l := strings.Join([]string{m.section("ENGINE", "", E, cw), m.section("SYSTEM", "", Y, cw)}, "\n")
+	ls := []string{m.section("ENGINE", "", E, cw), m.section("SYSTEM", "", Y, cw)}
+	if len(O) > 0 {
+		ls = append(ls, m.section("OBSERVATORY", oRight, O, cw))
+	}
+	l := strings.Join(ls, "\n")
 	r := strings.Join([]string{m.section("ERRORS", "", R, rw), m.section("RPC LATENCY", t.Lbl.Render("latest minute, ms"), P, rw)}, "\n")
 	return hcat(1, l, r)
 }
@@ -822,7 +919,28 @@ func (m *Model) explain(it core.CfgItem) string {
 	case "kill":
 		return "the engine stops itself when the wallet falls below this (START BALANCE − loss cap)"
 	case "planned":
+		if v.NoTimeLimit {
+			return "no time limit: the run ends on a signal (Ctrl+C), the kill switch or the profit lock"
+		}
 		return "the run stops by itself after this long"
+	case "lock":
+		return "profit lock: no new buys once the run P&L falls below its peak minus the larger of the two (open positions finish)"
+	case "fee24":
+		return "pre-send failed-try fees of the last 24 h against the budget; at the budget the sender pauses until old fees roll out"
+	case "regmode":
+		return "live = real regular buys; paper = decided as live but never sent (paper P&L only); off = no regular buys"
+	case "limits":
+		return "the run's trade caps; no limit = the engine never stops on a count"
+	case "obs":
+		if v.RA.On {
+			return "the observatory: log-only shadows (its paper re-arm, hold tape, watch wallets, migration, ...) written to the .obs.jsonl; never sends"
+		}
+		return "the observatory: log-only shadows (re-arm, hold tape, watch wallets, migration, ...) written to the .obs.jsonl; never sends"
+	case "rearm":
+		return "live re-arm: after a single " + m.g("≥", ">=") + " 6% sell, while another wallet still holds " + m.g("≥", ">=") +
+			" 6%, a pre-send window arms on the token until dump + 3 + gap slots, at its own size and with its own QUIET stop; it ends at the next big sell, when no big holder is left or when a T2 window takes the token"
+	case "ab":
+		return "the send-path A/B: a window's tries go out alternately over these paths; the Pre-send tab compares them (refused, landed, same slot, send" + m.g("→", "->") + "land, acks, fills, P&L)"
 	case "build":
 		return "the engine binary running this run"
 	}
@@ -984,6 +1102,15 @@ func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
 	} else {
 		out = append(out, m.kv("P&L", lw, t.Lbl.Render("not realized yet")))
 	}
+	if it, ok := m.flag(tr); ok { // the Filters tab's LOG rules that would have blocked it
+		for i, l := range core.WrapText(it.Info(), max(10, w-lw-4), 0) {
+			lab := ""
+			if i == 0 {
+				lab = "blocked by"
+			}
+			out = append(out, m.kv(lab, lw, t.Warn.Render(l)))
+		}
+	}
 	if ps {
 		if tr.HasRent {
 			out = append(out, m.kv("rent back", lw, t.Pos.Render(core.SolS(tr.Rent))+t.Lbl.Render("  account closed; not in the P&L above")))
@@ -1050,6 +1177,9 @@ func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
 		var bits []string
 		if tr.TrigPct.Ok() {
 			b := "whale " + core.F(tr.TrigPct.Float(), 1) + "%"
+			if tr.Rearm { // dip26: a re-arm window's trigger is its dump
+				b = "dump " + core.F(tr.TrigPct.Float(), 1) + "%"
+			}
 			if tr.TrigSol.Truthy() {
 				b += " (" + core.F(tr.TrigSol.Float()/core.LAM, 2) + " SOL)"
 			}
@@ -1189,6 +1319,9 @@ func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
 	title := "REGULAR BUY"
 	if ps {
 		title = "PRE-SEND FILL"
+		if tr.Rearm { // dip26
+			title = "RE-ARM FILL"
+		}
 	}
 	title += "  " + core.T12Date(float64(tr.T), true) + " PKT"
 	right := t.Lbl.Render(fmt.Sprintf("session %d", tr.S+1))
@@ -1436,6 +1569,7 @@ var helpNotes = [][2]string{
 	{"latency", "d→land = ms from the dump to our landing, s→seen = from our send to seen, blk = slots after the send (regular: after the dump); green < 40 ms, yellow ≤ 120, red above"},
 	{"total", "Trades: the run's P&L after each trade (the trades' P&L + rent back in time order, minus the failed tries' fees up to that minute); SOL or USD with u, like size"},
 	{"sort", "Trades: o picks the column (time, type, mint, size, P&L, %, total, exit, held, d→land, s→seen, blk, after, whale, client, path), O flips the order; the header marks it"},
+	{"Filters", "tab 8: what each pre-send filter blocked: LIVE = it changed what the engine did (skips scored on the shadow's paper at the live size: an estimate), LOG = log only, would-have (scored on the real fills); net saved green = saved us money, red = cost us; the list: a LOG row is one real fill with every rule that would have blocked it (phones: BC bad creator, ST safe sell timer, GR group risk, HC holder clock, LG landing guard); f filter, n the no-fill ones, o / O sort, enter a LOG item's trade"},
 	{"links", "mints open GMGN, signatures / accounts Solscan (OSC 8: Ctrl / Cmd-click); c copies the mint (OSC 52; tmux: set -g set-clipboard on)"},
 	{"wallet est.", "the session's START BALANCE + its P&L (no RPC: an estimate; unseen tries' fees are not in it)"},
 	{"kill sw.", "how far the wallet is above the engine's kill switch (START BALANCE − loss cap)"},
@@ -1465,7 +1599,11 @@ func (m *Model) helpContent(w int) string {
 	out = append(out, "")
 	dim("mouse capture is off by default: select text and Ctrl / Cmd-click links (mints open GMGN) with the terminal itself; M turns it on (click a tab, wheel scrolls, click a trade, twice: details)")
 	out = append(out, "")
-	for _, n := range helpNotes {
+	notes := helpNotes
+	if v := m.view; v != nil && (v.RA.On || v.AB.On) { // dip26 runs only (older runs: the help as before)
+		notes = append(append([][2]string(nil), helpNotes...), helpNotes26(v.RA.On, v.AB.On)...)
+	}
+	for _, n := range notes {
 		wl := core.WrapText(n[1], max(10, w-15), 0)
 		out = append(out, t.AccB.Render(padRight(n[0], 14))+t.Val.Render(wl[0]))
 		for _, l := range wl[1:] {
@@ -1477,4 +1615,63 @@ func (m *Model) helpContent(w int) string {
 	dim("all times PKT (UTC+5)")
 	_ = time.Second
 	return strings.Join(out, "\n")
+}
+
+// obsLines: the observatory (dip24, log only): what its 60 s status part reports; nil when the run has none.
+func (m *Model) obsLines(w int) ([]string, string) {
+	t := m.th
+	v := m.view
+	if v.D24 == nil {
+		return nil, ""
+	}
+	o := v.D24.Obs
+	if !o.On && !o.HasLine {
+		return nil, ""
+	}
+	sep := t.Dim.Render(" " + m.g("·", "|") + " ")
+	right := t.Lbl.Render("log only, never sends")
+	var out []string
+	if !o.HasLine {
+		out = append(out, m.kv("shadows", 10, t.Val.Render(strings.Join(o.Names, ", "))), t.Lbl.Render("no status line yet"))
+		return out, right
+	}
+	var row []string
+	for _, c := range o.Counts {
+		x := t.Lbl.Render(core.ObsLabel(c.K, v.RA.On)+" ") + t.Val.Render(core.IC(c.N)) // dip26: its re-arm is the paper one
+		if c.Sub != "" {
+			x += t.Lbl.Render(" " + c.Sub)
+		}
+		if c.HasFills {
+			x += t.Lbl.Render(" / ") + t.Val.Render(core.IC(c.Fills)) + t.Lbl.Render(" fills")
+		}
+		row = append(row, x)
+	}
+	// the counters, wrapped to the width
+	lw := max(20, w-14)
+	line := ""
+	for _, x := range row {
+		if line != "" && ansi.StringWidth(line)+ansi.StringWidth(x)+3 > lw {
+			out = append(out, line)
+			line = ""
+		}
+		if line != "" {
+			line += sep
+		}
+		line += x
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	q := t.Val
+	if o.Dropped > 0 {
+		q = t.Warn
+	}
+	out = append(out, m.kv("queue", 10, t.Lbl.Render("sent ")+t.Val.Render(core.IC(o.Sent))+sep+t.Lbl.Render("dropped ")+q.Render(core.IC(o.Dropped))+sep+t.Lbl.Render("queued ")+t.Val.Render(core.IC(o.Queued))))
+	if o.HasRec {
+		out = append(out, m.kv("file", 10, t.Val.Render(core.IC(o.Records))+t.Lbl.Render(" records ")+t.Val.Render(core.F(o.MB, 1)+" MB")+sep+t.Lbl.Render("p99 ")+t.Val.Render(core.F(o.P99, 1)+" us/msg")+sep+t.Lbl.Render(fmt.Sprintf("~%d MB mem", o.MemMB))))
+	}
+	if o.WriteErr > 0 {
+		out = append(out, m.kv("errors", 10, t.Bad.Render(fmt.Sprintf("WRITE ERRORS %d", o.WriteErr))))
+	}
+	return out, right
 }

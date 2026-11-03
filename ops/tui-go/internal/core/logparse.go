@@ -59,7 +59,8 @@ var (
 // important: a log line containing any of these (and not a "DIP status" line) goes to the important list.
 var important = []string{"PRESEND LIVE FILL", "PRESEND LIVE EXIT", "PRESEND LIVE REALIZED", "REALIZED mint=", "DIP FIRE",
 	"DIP BUY", "DIP EXIT", "KILL", "SIGNAL", "STOPPED", "END CHECK", "QUIET", "START BALANCE", "DIP LIVE |", "=== DIP DONE",
-	"Error", "panicked", "UNHEALTHY", "UNSOLD", "SELL-FAIL", "SELL-GIVE", "SELL-STUCK", "refused", "DIP PRESEND LIVE"}
+	"Error", "panicked", "UNHEALTHY", "UNSOLD", "SELL-FAIL", "SELL-GIVE", "SELL-STUCK", "refused", "DIP PRESEND LIVE",
+	"PROFIT LOCK", "PRESEND LIVE PAUSED", "PRESEND LIVE RESUMED", "DIP LIMITS", "DIP REGULAR", "DIP OBSERVATORY"}
 
 // pyFloat is Python's float() on a regex-matched number ("1.", ".5" ok; "." or "1.2.3" raise).
 func pyFloat(s string) (float64, bool) {
@@ -281,6 +282,11 @@ func (M *Model) logLine(s string) {
 		return
 	}
 	if c0 == 'P' {
+		if strings.HasPrefix(st, "PROFIT LOCK") || strings.HasPrefix(st, "PRESEND LIVE PAUSED") || strings.HasPrefix(st, "PRESEND LIVE RESUMED") {
+			if M.d24Line(S, st) {
+				return
+			}
+		}
 		if strings.HasPrefix(st, "PRESEND LIVE") {
 			M.psLog(S, st)
 			return
@@ -313,6 +319,9 @@ func (M *Model) logLine(s string) {
 		if strings.HasPrefix(st, "SEND-PATH") {
 			if m := rxSP.FindStringSubmatch(st); m != nil {
 				M.pathErr(m[1], "unhealthy")
+				M.pathEdge(m[1], false, st) // dip26: the edge (the A/B's paths show their state)
+			} else if m := rxSPRec.FindStringSubmatch(st); m != nil {
+				M.pathEdge(m[1], true, st)
 			}
 			return
 		}
@@ -331,12 +340,22 @@ func (M *Model) logLine(s string) {
 		}
 	}
 	if c0 == 'D' {
+		if strings.HasPrefix(st, "DIP LIMITS:") || strings.HasPrefix(st, "DIP REGULAR ") || strings.HasPrefix(st, "DIP OBSERVATORY") {
+			if M.d24Line(S, st) {
+				return
+			}
+		}
 		if strings.HasPrefix(st, "DIP PRESEND LIVE QUIET") {
 			parseQuietInto(&S.Quiet, st)
 			return
 		}
 		if strings.HasPrefix(st, "DIP PRESEND LIVE") {
 			S.PSL = parsePSL(st)
+			// dip26: the re-arm's setting ("| REARM ON: ..." at the line's end) and the tries' caps
+			S.RALog = rearmFromLine(st)
+			if m := rxPSCaps.FindStringSubmatch(st); m != nil {
+				S.PSCaps = [2]int64{i64(m[1]), i64(m[2])}
+			}
 			return
 		}
 		if strings.HasPrefix(st, "DIP KILL-SWITCH") {
@@ -467,6 +486,9 @@ func (M *Model) logLine(s string) {
 		} else if m := rxPreOn.FindStringSubmatch(st); m != nil {
 			S.Quiet.OnHHMM, S.Quiet.HasOnHHMM = [2]int{int(atoi(m[1])), int(atoi(m[2]))}, true
 		}
+		return
+	}
+	if (c0 == 'f' || c0 == 'F') && M.feedLine(st) {
 		return
 	}
 	if c0 == 'E' && strings.HasPrefix(st, "Error:") {
@@ -605,6 +627,8 @@ func (M *Model) statusLine(S *Sess, st string) {
 	}
 	d.Min = M.LogMin
 	S.Status = d
+	M.d24Status(S, st)
+	M.d26Status(S, st)
 }
 
 // parseIntDict parses the status line's skipped dict ({"x": 3, ...}) in key order; ok=false: not valid JSON.
@@ -781,10 +805,16 @@ func parsePSL(st string) map[string]any {
 		{"fail_fee", regexp.MustCompile(`a failed attempt (\d+) lamports`), intF},
 		{"routes", regexp.MustCompile(`routes (\S+)`), func(x string) (any, bool) { return rxParen.ReplaceAllString(x, ""), true }},
 		{"max_fills", regexp.MustCompile(`caps: (\d+) fills`), intF},
-		{"fee_budget", regexp.MustCompile(`caps: \d+ fills, fees ([\d.]+) SOL`), lamF},
+		{"fee_budget", regexp.MustCompile(`caps: (?:\d+|unlimited) fills, fees ([\d.]+) SOL`), lamF},
 		{"exit_slots", regexp.MustCompile(`exit (\d+) slots`), intF},
 		{"tp", regexp.MustCompile(`TP \+?([\d.]+)%`), floatF},
 		{"sl", regexp.MustCompile(`SL -?([\d.]+)%`), floatF},
+	}
+	if strings.Contains(st, "caps: unlimited fills") { // dip24
+		d["fills_unlimited"] = true
+	}
+	if strings.Contains(st, "per rolling 24 h") {
+		d["fee_rolling"] = true
 	}
 	for _, r := range rules {
 		if m := r.rx.FindStringSubmatch(st); m != nil {
