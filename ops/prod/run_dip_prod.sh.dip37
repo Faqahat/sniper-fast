@@ -26,6 +26,12 @@
 #     --presend-live-wh-loss-mode sum|mean sum (default): the sum rule; mean: sum / n <= -SOL (SOL = the per-position average loss, e.g. 2:0.01)
 #     --presend-live-whale-state FILE      the ledger preloaded (seed: ops/strategies/presend/prevent/forward/whale_seed.py) and saved back every
 #                                         ~10 min and at the end; a missing file = an empty ledger (NOTE)
+#     --presend-live-wh-learn paper|off    a T2 arm skipped "wh_loss" learns from the shadow's row c on the same trigger (a paper position at our
+#                                         size, marked paper in the state file); off (default): only real positions
+#     --presend-live-wh-split on|off       separate T2-whale / re-arm-dumper ledgers, the same rule (default off: one combined ledger)
+#     --presend-live-m2seen-log on|off     LOG ONLY (HYBRID-2): nd / m2max / h2_keep / h2_size on every arm and skip record
+#     --presend-live-m2seen-gate on|off    LIVE when on (default off): skip an arm whose mint had no M2-scored dump before the trigger
+#                                         ("m2_unseen" / "rearm_m2_unseen"); the T2 age part is --presend-live-min-age-slots
 #     --presend-fpnb-stale-hold N          LIVE (needs the FP-NOBOT live gate): with no fresh verdict, hold a send whose window's last verdict
 #                                         blocked and is <= N slots old (0 / absent = dip36's fail-open)
 #
@@ -316,7 +322,7 @@ while [ $# -gt 0 ]; do
     # dip37 the per-window fee A/B (through PSV; validated below, again by the engine)
     --presend-live-fee-ab|--presend-live-ab-cu-price-micro|--presend-live-ab-cu-limit|--presend-live-ab-tip-lamports|--presend-live-ab-clients|--presend-live-ab-split) [ $# -ge 2 ] || die "$1 needs a value"; PSV["$1"]=$2; shift 2;;
     # dip37 the whale / dumper loss ledger (LIVE) and the FP-NOBOT stale hold (through PSV)
-    --presend-live-wh-loss|--presend-live-wh-loss-mode|--presend-live-whale-state|--presend-fpnb-stale-hold) [ $# -ge 2 ] || die "$1 needs a value"; PSV["$1"]=$2; shift 2;;
+    --presend-live-wh-loss|--presend-live-wh-loss-mode|--presend-live-whale-state|--presend-fpnb-stale-hold|--presend-live-wh-learn|--presend-live-wh-split|--presend-live-m2seen-log|--presend-live-m2seen-gate) [ $# -ge 2 ] || die "$1 needs a value"; PSV["$1"]=$2; shift 2;;
     --presend-move-log) PSMOVE=1; shift;;
     --sell-fanout) SELLFAN=$2; shift 2;;
     --loaded-data-limit|--probe-nonce|--probe-lock-only|--probe-lock-cu) [ $# -ge 2 ] || die "$1 needs a value"; D16V["$1"]=$2; shift 2;;
@@ -461,7 +467,7 @@ if [ -n "$PSLIVE" ]; then
   # dip24 draft (owner 10-29 02:10 PKT): only the size is still a required cap; --presend-live-max-fills (absent or 0 = unlimited) and
   # --presend-live-fee-budget-sol (failed-try fees per ROLLING 24 h, pre-send pauses above it; engine default 1.0) are optional
   for f in --presend-live-size-sol; do [ -n "${PSV[$f]:-}" ] || die "--presend-live needs $f (a required cap)"; done
-  for f in "${!PSV[@]}"; do case "$f" in --presend-live-routes|--presend-live-create-slot|--presend-live-one-position|--presend-live-ann|--presend-live-holds-state|--presend-live-breaker|--presend-live-cr-loss|--presend-live-creator-state|--presend-live-quiet3a|--presend-live-tag-wallets|--presend-live-exact-exit|--presend-live-fam-rpc|--presend-live-cr-log|--presend-fpnb-log|--presend-fpnb-bots|--presend-fpnb-preload|--presend-live-blocklist|--presend-skip2-log|--presend-skip2-seed|--presend-fpnb-live|--presend-fpnb-control|--presend-live-fee-ab|--presend-live-ab-clients|--presend-live-ab-split|--presend-live-wh-loss|--presend-live-wh-loss-mode|--presend-live-whale-state) ;; *) num "${PSV[$f]}" || die "$f: '${PSV[$f]}' is not a number";; esac; done
+  for f in "${!PSV[@]}"; do case "$f" in --presend-live-routes|--presend-live-create-slot|--presend-live-one-position|--presend-live-ann|--presend-live-holds-state|--presend-live-breaker|--presend-live-cr-loss|--presend-live-creator-state|--presend-live-quiet3a|--presend-live-tag-wallets|--presend-live-exact-exit|--presend-live-fam-rpc|--presend-live-cr-log|--presend-fpnb-log|--presend-fpnb-bots|--presend-fpnb-preload|--presend-live-blocklist|--presend-skip2-log|--presend-skip2-seed|--presend-fpnb-live|--presend-fpnb-control|--presend-live-fee-ab|--presend-live-ab-clients|--presend-live-ab-split|--presend-live-wh-loss|--presend-live-wh-loss-mode|--presend-live-whale-state|--presend-live-wh-learn|--presend-live-wh-split|--presend-live-m2seen-log|--presend-live-m2seen-gate) ;; *) num "${PSV[$f]}" || die "$f: '${PSV[$f]}' is not a number";; esac; done
   [ -z "${PSV[--presend-live-max-fills]:-}" ] || [[ "${PSV[--presend-live-max-fills]}" =~ ^[0-9]+$ ]] || die "--presend-live-max-fills must be a whole number >= 0 (0 = unlimited)"
   [ -z "${PSV[--presend-live-fee-budget-sol]:-}" ] || awk -v x="${PSV[--presend-live-fee-budget-sol]}" 'BEGIN{exit !(x>0 && x<=100)}' || die "--presend-live-fee-budget-sol must be in (0, 100] SOL (the failed-try fees of a rolling 24 h; above it pre-send pauses)"
   PSFC=${PSV[--presend-live-max-fills]:-0}; [[ "$PSFC" =~ ^0+$ ]] && PSFC=unlimited
@@ -580,10 +586,14 @@ if [ -n "$PSLIVE" ]; then
   if [ -n "${PSV[--presend-live-wh-loss]:-}" ]; then
     [[ "${PSV[--presend-live-wh-loss]}" =~ ^[0-9]+:[0-9.]+$ ]] || die "--presend-live-wh-loss N:SOL, e.g. 2:0.05 (dip37)"
     [ -z "${PSV[--presend-live-wh-loss-mode]:-}" ] || [[ "${PSV[--presend-live-wh-loss-mode]}" =~ ^(sum|mean)$ ]] || die "--presend-live-wh-loss-mode sum|mean (dip37)"
+    [ -z "${PSV[--presend-live-wh-learn]:-}" ] || [[ "${PSV[--presend-live-wh-learn]}" =~ ^(paper|off)$ ]] || die "--presend-live-wh-learn paper|off (dip37)"
+    [ -z "${PSV[--presend-live-wh-split]:-}" ] || [[ "${PSV[--presend-live-wh-split]}" =~ ^(on|off)$ ]] || die "--presend-live-wh-split on|off (dip37)"
     [ -z "${PSV[--presend-live-whale-state]:-}" ] || [ -f "${PSV[--presend-live-whale-state]}" ] || echo "NOTE: ${PSV[--presend-live-whale-state]} does not exist yet: the whale ledger starts EMPTY (saved there during the run)" >&2
   else
-    for f in --presend-live-wh-loss-mode --presend-live-whale-state; do [ -z "${PSV[$f]:-}" ] || die "$f needs --presend-live-wh-loss N:SOL (dip37)"; done
+    for f in --presend-live-wh-loss-mode --presend-live-whale-state --presend-live-wh-learn --presend-live-wh-split; do [ -z "${PSV[$f]:-}" ] || die "$f needs --presend-live-wh-loss N:SOL (dip37)"; done
   fi
+  # dip37 HYBRID-2 (log-only nd / m2max; the m2_unseen gate LIVE when on)
+  for f in --presend-live-m2seen-log --presend-live-m2seen-gate; do [ -z "${PSV[$f]:-}" ] || [[ "${PSV[$f]}" =~ ^(on|off)$ ]] || die "$f on|off (dip37)"; done
   # dip37: the FP-NOBOT stale hold (needs the live gate)
   if [ -n "${PSV[--presend-fpnb-stale-hold]:-}" ]; then
     [[ "${PSV[--presend-fpnb-stale-hold]}" =~ ^[0-9]+$ ]] && in_range "${PSV[--presend-fpnb-stale-hold]}" 0 20 || die "--presend-fpnb-stale-hold N must be 0..20 slots (dip37)"
@@ -594,7 +604,9 @@ if [ -n "$PSLIVE" ]; then
   # dip23: the QUIET v2 annotation (log-only; the records gain "v2", nothing else changes)
   if [ -n "$PSV2" ]; then PSLARGS+=(--presend-live-quiet-v2-log); PSLDESC="$PSLDESC | QUIET v2 LOG-ONLY (\"v2\" on every arm / skip record)"; fi
   # dip37: the whale ledger (LIVE) and the stale hold
-  [ -z "${PSV[--presend-live-wh-loss]:-}" ] || PSLDESC="$PSLDESC | WHALE LEDGER LIVE ${PSV[--presend-live-wh-loss]} ${PSV[--presend-live-wh-loss-mode]:-sum} (state ${PSV[--presend-live-whale-state]:-none})"
+  [ -z "${PSV[--presend-live-wh-loss]:-}" ] || PSLDESC="$PSLDESC | WHALE LEDGER LIVE ${PSV[--presend-live-wh-loss]} ${PSV[--presend-live-wh-loss-mode]:-sum} learn ${PSV[--presend-live-wh-learn]:-off} split ${PSV[--presend-live-wh-split]:-off} (state ${PSV[--presend-live-whale-state]:-none})"
+  [ "${PSV[--presend-live-m2seen-log]:-off}" = off ] || PSLDESC="$PSLDESC | HYBRID-2 LOG (nd/m2max)"
+  [ "${PSV[--presend-live-m2seen-gate]:-off}" = off ] || PSLDESC="$PSLDESC | M2-UNSEEN GATE LIVE"
   [ "${PSV[--presend-fpnb-stale-hold]:-0}" = 0 ] || PSLDESC="$PSLDESC | FP-NOBOT STALE HOLD <= ${PSV[--presend-fpnb-stale-hold]} slots"
   # dip37: the fee A/B (LIVE: B's windows pay B's fee on its leaders)
   [ "${PSV[--presend-live-fee-ab]:-off}" = off ] || PSLDESC="$PSLDESC | FEE A/B LIVE (split ${PSV[--presend-live-ab-split]:-arm}): B = ${PSV[--presend-live-ab-cu-price-micro]} uL x ${PSV[--presend-live-ab-cu-limit]:-A's limit} CU, tip ${PSV[--presend-live-ab-tip-lamports]:-A's} on ${PSV[--presend-live-ab-clients]:-AgaveBam,HarmonicAgave,HarmonicFiredancer,Firedancer,Agave}"

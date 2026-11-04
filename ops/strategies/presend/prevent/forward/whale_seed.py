@@ -5,8 +5,9 @@ The ledger key of a live pre-send position = its ARM's wallet: the T2 trigger wh
 (dump.seller); its value = [positions realized with us, their summed realized P&L in lamports], from presend_live_arm joined with
 presend_live_realized on (w, mint) (scratchpad whaleledger2.py's rule). Runs are taken in chronological order (each run's first record's t;
 one file per region x run number: the first path in sorted order), positions within a run in record order.
-  --out FILE           the engine's state file: {"v": 1, "w": {wallet: [n, lamports]}, "built": {...}}
-  --replay N:SOL[:sum|mean] (repeatable; default 2:0.05:sum and 2:0.01:mean): the ledger replayed over the same runs from empty, the
+  --out FILE           the engine's state file: {"v": 1, "w": {wallet: [n, lamports]}, "t2": {...}, "re": {...}, "built": {...}} (w = combined,
+                       t2 / re = the --presend-live-wh-split ledgers: T2 whales / re-arm dumpers)
+  --replay N:SOL[:sum|mean][:split] (repeatable; default 2:0.05:sum and 2:0.01:mean): the ledger replayed over the same runs from empty, the
                        positions it would have blocked (n >= N and sum <= -SOL, or sum / n <= -SOL) and their P&L (saved = -their sum)
   --show WALLET        print one wallet's entry
 usage: whale_seed.py --out FILE RUN.jsonl ... [--replay 2:0.05] [--show WALLET]"""
@@ -48,11 +49,11 @@ def positions(files):
                     first = d["t"]
                 if d["ev"] == "presend_live_arm":
                     k = (d.get("w"), d.get("mint") or (d.get("trig") or {}).get("mint"))
-                    arm[k] = (d.get("trig") or {}).get("wallet") or (d.get("dump") or {}).get("seller")
+                    arm[k] = ((d.get("trig") or {}).get("wallet") or (d.get("dump") or {}).get("seller"), d.get("kind") == "rearm")
                 elif d["ev"] == "presend_live_realized":
-                    who = arm.get((d.get("w"), d.get("mint")))
+                    who, re_ = arm.get((d.get("w"), d.get("mint")), (None, False))
                     cov[(reg + str(n), bool(who))] += 1
-                    pos.append((first or 0, reg + str(n), who, int(d["pnl"]), len(pos)))
+                    pos.append((first or 0, reg + str(n), who, int(d["pnl"]), len(pos), re_))
     pos.sort(key=lambda x: (x[0], x[4]))
     return pos, cov
 
@@ -61,14 +62,15 @@ def blocks(n, s, N, loss, mean):
     return n >= max(N, 1 if mean else N) and (s <= -loss * n if mean else s <= -loss)
 
 
-def replay(pos, N, loss_sol, mean):
+def replay(pos, N, loss_sol, mean, split=False):
     loss = round(loss_sol * 1e9)
     led = collections.defaultdict(lambda: [0, 0])
     per = collections.defaultdict(lambda: [0, 0])
     blk = []
-    for _, run, w, pnl, _ in pos:
-        if not w:
+    for _, run, w0, pnl, _, re_ in pos:
+        if not w0:
             continue
+        w = (w0, re_) if split else w0
         n, s = led[w]
         if blocks(n, s, N, loss, mean):
             per[run][0] += 1
@@ -93,11 +95,14 @@ def main():
         if x[1] not in runs:
             runs.append(x[1])
     led = collections.defaultdict(lambda: [0, 0])
-    for _, _, w, pnl, _ in pos:
+    lk = {False: collections.defaultdict(lambda: [0, 0]), True: collections.defaultdict(lambda: [0, 0])}
+    for _, _, w, pnl, _, re_ in pos:
         if w:
-            led[w][0] += 1
-            led[w][1] += pnl
-    state = {"v": 1, "w": {w: v for w, v in sorted(led.items())},
+            for m in (led, lk[re_]):
+                m[w][0] += 1
+                m[w][1] += pnl
+    state = {"v": 1, "w": {w: v for w, v in sorted(led.items())}, "t2": {w: v for w, v in sorted(lk[False].items())},
+             "re": {w: v for w, v in sorted(lk[True].items())},
              "built": {"by": "whale_seed.py", "runs": runs, "positions": len(pos), "with_wallet": sum(1 for x in pos if x[2])}}
     tmp = a.out + ".tmp"
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
@@ -114,7 +119,9 @@ def main():
     for spec in a.replay or ["2:0.05:sum", "2:0.01:mean"]:
         p = spec.split(":")
         N, S, mode = int(p[0]), float(p[1]), (p[2] if len(p) > 2 else "sum")
-        blk, per = replay(pos, N, S, mode == "mean")
+        split = "split" in p[3:]
+        blk, per = replay(pos, N, S, mode == "mean", split)
+        mode += " split" if split else ""
         tot = sum(blk) / 1e9
         t5 = sum(sorted(blk, reverse=True)[:5]) / 1e9
         print(f"replay {mode} N{N} {'M' if mode == 'mean' else 'S'}{S}: blocked {len(blk)} saved {tot:+.3f} SOL, w/o top5 {tot - t5:+.3f} | runs with blocks {len(per)}, "

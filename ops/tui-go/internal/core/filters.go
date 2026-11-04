@@ -138,6 +138,10 @@ type fRec struct {
 		Sum   *float64 `json:"sum"`
 	} `json:"cr"`
 	Fam *float64 `json:"fam"`
+	// dip37 HYBRID-2 (--presend-live-m2seen-log): the arm's verdict and its inputs
+	H2Keep *bool    `json:"h2_keep"`
+	Nd     *float64 `json:"nd"`
+	M2max  *float64 `json:"m2max"`
 	Hit *bool    `json:"hit"`
 	// dip36 presend_live_fpnb (FP-NOBOT, log-only): the stage ("arm" / "send" / "fill"), its would-block, score and threshold
 	Stage *string  `json:"stage"`
@@ -178,6 +182,8 @@ type fLog35 struct {
 	skip2       bool // dip36: SKIP-2 per-send would have skipped the send that filled
 	skip2Set    bool
 	skip2Why    string
+	h2          bool // dip37: HYBRID-2's arm rule would not have kept the arm (h2_keep false)
+	h2Why       string
 }
 
 // fF3: dip32's log-only arm fields: QUIET3-A (T2 quiet token + whale with <= 3 dumps) and the fresh holders (TAIL G3 at >= 35%).
@@ -264,6 +270,7 @@ type FiltAcc struct {
 	anyFam    bool             // a presend_live_fam record (dip35)
 	anyFpnb   bool             // a presend_live_fpnb fill record (dip36)
 	anySkip2  bool             // a fill record with "skip2" (dip36)
+	anyH2     bool             // an arm record with "h2_keep" (dip37 HYBRID-2 log)
 	fpWin     []fGateWin       // dip36 live gate: windows with withheld sends
 	fpHeld    int              // dip36 live gate: presend_live_fpnb_withheld records (sends withheld)
 	moves     map[int64]*FMove // shadow w -> the window's price move (presend_disarm "move"; absent before 11-03)
@@ -397,6 +404,10 @@ func (F *FiltAcc) feed(ev, line []byte) {
 				if r.Why != nil && *r.Why == "rearm_wh_loss" && r.Dump != nil {
 					F.skips = append(F.skips, fSkip{why: "wh_loss", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
 				}
+				// dip37: the re-arm's HYBRID-2 m2_unseen gate skips
+				if r.Why != nil && *r.Why == "rearm_m2_unseen" && r.Dump != nil {
+					F.skips = append(F.skips, fSkip{why: "m2_unseen", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
+				}
 			}
 			return
 		}
@@ -421,6 +432,12 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		F.kind[k] = kd
 		if r.F3 != nil {
 			F.armF3[k] = r.F3
+		}
+		if r.H2Keep != nil { // dip37 HYBRID-2 (log only)
+			F.anyH2 = true
+			x := F.l35(k)
+			x.h2 = !*r.H2Keep
+			x.h2Why = fmt.Sprintf("HYBRID-2: %.0f M2-scored dumps before the trigger, m2max %.3f", fz(r.Nd), fz(r.M2max))
 		}
 		if r.Eqgrp != nil || r.Cr != nil {
 			x := F.l35(k)
@@ -830,7 +847,7 @@ var liveFilters = []struct{ why, name string }{{"quiet", "QUIET"}, {"create_slot
 
 // optLiveFilters: dip31/32 skips, shown only when the run made one (older runs' tables unchanged).
 var optLiveFilters = []struct{ why, name string }{{"breaker", "circuit breaker"}, {"cr_loss", "creator loss (T2)"}, {"cr_unfollowed", "creator unfollowed (T2)"}, {"quiet3_a", "QUIET3-A (live)"},
-	{"blocklist", "blocklist"}, {"wh_loss", "whale loss"}}
+	{"blocklist", "blocklist"}, {"wh_loss", "whale loss"}, {"m2_unseen", "M2 unseen"}}
 
 // Report computes the table (cached while no record came and the seed is the same).
 func (F *FiltAcc) Report(seedPath string) *FiltReport {
@@ -1167,6 +1184,10 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	// dip36 (log-only): SKIP-2 per-send at the send that decided the fill (covered, score < thr)
 	if F.anySkip2 {
 		logrule("skip2", "skip2 per-send (log)", pick35(func(x *fLog35) bool { return x.skip2 }), "real fills; SKIP-2 logistic score < thr at the deciding send")
+	}
+	// dip37 HYBRID-2 (log only): the arm rule nd >= 1 AND (re-arm OR T2 age >= 30) would not have kept it
+	if F.anyH2 {
+		logrule("h2", "HYBRID-2 gate (log)", pick35(func(x *fLog35) bool { return x.h2 }), "real fills; h2_keep false: no M2-scored dump before the trigger, or T2 age < 30")
 	}
 	// dip30 LANDING GUARD (log only): the wallets chosen at signing still hold >= the guard's % at our landing
 	if F.anyGuard {

@@ -77,6 +77,10 @@ for k, pnl in (out if "--all" in sys.argv else out[-1:]):
                      f"{'dumper' if kind == 'rearm' else 'whale'} {ww[:8]} had {wn} positions / {ws / 1e9:+.3f} SOL -> sum rule {'WOULD SKIP' if sh else 'no'}, mean rule {'WOULD SKIP' if mh else 'no'}")
         if sh: caught.append("whale ledger sum")
         elif mh: caught.append("whale ledger mean")
+    # dip37 HYBRID-2 (log only): the arm rule on the arm record (nd M2-scored dumps before the trigger, m2max, T2 age >= 30)
+    if a.get("h2_keep") is not None:
+        lines.append(f"  HYBRID-2 (log): nd {a.get('nd')} m2max {a.get('m2max', -1):.3f} -> h2_keep {a['h2_keep']} (size {a.get('h2_size')} SOL)")
+        if not a["h2_keep"]: caught.append("HYBRID-2 (log)")
     # LIVE: deeper limit
     deep = f.get("deep")
     lines.append(f"  deeper limit (live): other big holder at signing {fa.get('ob6', 0):.1f}%, dip {100*fa.get('depth', 0):.1f}% -> "

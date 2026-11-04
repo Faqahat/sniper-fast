@@ -44,3 +44,30 @@ func TestFiltersWhLoss(t *testing.T) {
 		t.Error("no whale-loss skip: no row")
 	}
 }
+
+// TestFiltersH2 (dip37): the LOG row "HYBRID-2 gate (log)" counts the real fills whose arm had h2_keep false (won / lost on their realized
+// P&L); the LIVE "m2_unseen" row counts the gate's skips (re-arm ones unscored)
+func TestFiltersH2(t *testing.T) {
+	recs := []string{
+		`{"ev":"presend_live_arm","w":1,"mint":"M1","trig":{"sig":"x1","mint":"M1","t":1000},"nd":0,"m2max":-1,"h2_keep":false,"h2_size":0.4}`,
+		`{"ev":"presend_live_fill","w":1,"mint":"M1","t":2000}`,
+		`{"ev":"presend_live_realized","w":1,"mint":"M1","pnl":-20000000}`,
+		`{"ev":"presend_live_arm","w":2,"mint":"M2","trig":{"sig":"x2","mint":"M2","t":3000},"nd":2,"m2max":0.01,"h2_keep":true,"h2_size":1.0}`,
+		`{"ev":"presend_live_fill","w":2,"mint":"M2","t":4000}`,
+		`{"ev":"presend_live_realized","w":2,"mint":"M2","pnl":30000000}`,
+		`{"ev":"presend_live_skip","kind":"rearm","why":"rearm_m2_unseen","mint":"M3","dump":{"sig":"d3","t":5000},"nd":0}`,
+	}
+	p := filepath.Join(t.TempDir(), "dip_ams_r95.jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(recs, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	R := filtView(t, p, "none").Filt
+	r, ok := R.Row("h2")
+	if !ok || r.Type != "LOG" || r.Blocked != 1 || r.LoseN != 1 || r.WinN != 0 {
+		t.Fatalf("h2 row: %+v %v", r, ok)
+	}
+	m, ok := R.Row("m2_unseen")
+	if !ok || m.Type != "LIVE" || m.Blocked != 1 || m.Name != "M2 unseen" {
+		t.Fatalf("m2_unseen row: %+v %v", m, ok)
+	}
+}

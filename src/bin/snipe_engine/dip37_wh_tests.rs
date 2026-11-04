@@ -66,7 +66,7 @@ impl Ctx {
         self.tx_sig(slot, idx, sig, [0x77; 32], trades, creates);
     }
     fn ev(&self, k: &str) -> Vec<serde_json::Value> { self.recs.iter().filter(|r| r["ev"] == k).cloned().collect() }
-    fn seed(&self, k: Pk, n: u32, sum: i64) { self.p.sh.wh.lock().unwrap().insert(k, WhHist { n, sum }); }
+    fn seed(&self, k: Pk, n: u32, sum: i64) { self.p.sh.wh.lock().unwrap().all.insert(k, WhHist { n, sum, ..Default::default() }); }
     /// T2: token 0x61 created at 1000, a small buy at 1003, the whale's 2 SOL buy at 1005 (a trigger)
     fn t2(&mut self, whale: Pk) -> Tk {
         let mut tk = Tk::new(0x61);
@@ -136,19 +136,19 @@ fn dip37_wh_flags() {
 #[test]
 fn dip37_wh_rule_boundaries() {
     let (n, l) = (2u32, 50_000_000i64);
-    assert!(WhHist { n: 2, sum: -50_000_000 }.blocks(n, l), "sum: exactly -SOL blocks");
-    assert!(!WhHist { n: 2, sum: -49_999_999 }.blocks(n, l), "one lamport above: no");
-    assert!(!WhHist { n: 1, sum: -900_000_000 }.blocks(n, l), "too few positions: no");
-    assert!(WhHist { n: 3, sum: -60_000_000 }.blocks(n, l));
-    assert!(!WhHist { n: 5, sum: -60_000_000 }.blocks(n, 0), "loss 0: off");
+    assert!(WhHist { n: 2, sum: -50_000_000, ..Default::default() }.blocks(n, l), "sum: exactly -SOL blocks");
+    assert!(!WhHist { n: 2, sum: -49_999_999, ..Default::default() }.blocks(n, l), "one lamport above: no");
+    assert!(!WhHist { n: 1, sum: -900_000_000, ..Default::default() }.blocks(n, l), "too few positions: no");
+    assert!(WhHist { n: 3, sum: -60_000_000, ..Default::default() }.blocks(n, l));
+    assert!(!WhHist { n: 5, sum: -60_000_000, ..Default::default() }.blocks(n, 0), "loss 0: off");
     // mean 2:0.01: sum / n <= -0.01
     let m = 10_000_000i64;
-    assert!(WhHist { n: 2, sum: -20_000_000 }.blocks_mean(2, m), "mean exactly -0.01 blocks");
-    assert!(!WhHist { n: 2, sum: -19_999_999 }.blocks_mean(2, m));
-    assert!(WhHist { n: 13, sum: -913_700_000 }.blocks_mean(2, m) && !WhHist { n: 1, sum: -500_000_000 }.blocks_mean(2, m));
-    assert!(!WhHist { n: 10, sum: -60_000_000 }.blocks_mean(2, m) && WhHist { n: 10, sum: -60_000_000 }.blocks(2, l), "the rules differ: sum hit, mean not");
-    assert!(WhHist { n: 2, sum: -30_000_000 }.blocks_mean(2, m) && !WhHist { n: 2, sum: -30_000_000 }.blocks(2, l), "mean hit, sum not");
-    assert!(WhHist { n: 2, sum: -20_000_000 }.blocks_mode(2, m, true) && !WhHist { n: 2, sum: -20_000_000 }.blocks_mode(2, l, false));
+    assert!(WhHist { n: 2, sum: -20_000_000, ..Default::default() }.blocks_mean(2, m), "mean exactly -0.01 blocks");
+    assert!(!WhHist { n: 2, sum: -19_999_999, ..Default::default() }.blocks_mean(2, m));
+    assert!(WhHist { n: 13, sum: -913_700_000, ..Default::default() }.blocks_mean(2, m) && !WhHist { n: 1, sum: -500_000_000, ..Default::default() }.blocks_mean(2, m));
+    assert!(!WhHist { n: 10, sum: -60_000_000, ..Default::default() }.blocks_mean(2, m) && WhHist { n: 10, sum: -60_000_000, ..Default::default() }.blocks(2, l), "the rules differ: sum hit, mean not");
+    assert!(WhHist { n: 2, sum: -30_000_000, ..Default::default() }.blocks_mean(2, m) && !WhHist { n: 2, sum: -30_000_000, ..Default::default() }.blocks(2, l), "mean hit, sum not");
+    assert!(WhHist { n: 2, sum: -20_000_000, ..Default::default() }.blocks_mode(2, m, true) && !WhHist { n: 2, sum: -20_000_000, ..Default::default() }.blocks_mode(2, l, false));
 }
 
 /// T2 keyed on the trigger WHALE: at the boundary skipped "wh_loss" (fields, line, count); one lamport above / another wallet in the ledger:
@@ -234,7 +234,7 @@ fn dip37_wh_realized_carries_the_wallet() {
         c.p.on_msg(PsMsg::Sold(tk.mint, pid, 1, sold(Some(1009), &["S37"], e.tok)), &|_| false);
         c.cmds.extend(c.p.take_cmds());
         let Some(Cmd::Realized { wh, .. }) = c.cmds.iter().find(|x| matches!(x, Cmd::Realized { .. })).cloned() else { panic!("{:?}", c.cmds) };
-        assert_eq!(wh, on.then_some(whale), "on {on}");
+        assert_eq!(wh, on.then_some((whale, false)), "on {on}");
         let end = c.p.finish(1012, None);
         assert_eq!(end.get("wh_ledger").is_some(), on);
     }
@@ -259,20 +259,22 @@ fn dip37_wh_off_records_unchanged() {
 #[test]
 fn dip37_wh_state_round_trip_and_seed() {
     let p = tmp("state");
-    let mut m = FxHashMap::default();
-    m.insert(w(1), WhHist { n: 13, sum: -913_700_000 });
-    m.insert(w(2), WhHist { n: 1, sum: 4_000_000 });
+    let mut m = WhMaps::default();
+    m.all.insert(w(1), WhHist { n: 13, sum: -913_700_000, ..Default::default() });
+    m.all.insert(w(2), WhHist { n: 2, sum: 4_000_000, pn: 1, ps: 3_000_000 });
+    m.t2.insert(w(1), WhHist { n: 12, sum: -900_000_000, ..Default::default() });
+    m.re.insert(w(2), WhHist { n: 1, sum: 1_000_000, ..Default::default() });
     assert_eq!(wh_save(&m, &p).unwrap(), 2);
     assert_eq!(wh_load(&p).unwrap(), m);
     let seed = br#"{"v": 1, "w": {"BujUx1wzxo6iPvueULzqXvn7WVrRNz9uGqvDRThb4SEY": [13, -913700000]}, "built": {"runs": ["AMS55"]}}"#;
     let s = wh_parse(seed).unwrap();
     let buj: Pk = bs58::decode("BujUx1wzxo6iPvueULzqXvn7WVrRNz9uGqvDRThb4SEY").into_vec().unwrap().try_into().unwrap();
-    assert_eq!(s[&buj], WhHist { n: 13, sum: -913_700_000 });
+    assert_eq!(s.all[&buj], WhHist { n: 13, sum: -913_700_000, ..Default::default() });
     for bad in [&b"{}"[..], br#"{"w": {"nope": [1, 2]}}"#, br#"{"w": {"BujUx1wzxo6iPvueULzqXvn7WVrRNz9uGqvDRThb4SEY": [1]}}"#, b"["] { assert!(wh_parse(bad).is_err()); }
     // the staged seed, when this machine has it
     if let Ok(b) = std::fs::read("/home/moiz/sniper-data/dip37stage/whale_state_ams.json") {
         let m = wh_parse(&b).unwrap();
-        assert!(m[&buj].n == 13 && (m[&buj].sum as f64 / 1e9 + 0.91).abs() < 0.01, "{:?}", m[&buj]);
+        assert!(m.all[&buj].n == 13 && (m.all[&buj].sum as f64 / 1e9 + 0.91).abs() < 0.01, "{:?}", m.all[&buj]);
     }
     // the probe preloads it at start through the same reader; a missing state file at start is an empty ledger
     std::fs::remove_file(&p).unwrap();
@@ -316,4 +318,89 @@ fn dip37_fpnb_stale_hold() {
     assert!(cfg(&["--presend-fpnb-log", "on", "--presend-fpnb-bots", "/x", "--presend-fpnb-live", "t2", "--presend-fpnb-stale-hold", "21"]).unwrap_err().to_string().contains("1..20"));
     let c = cfg(&["--presend-fpnb-log", "on", "--presend-fpnb-bots", "/x", "--presend-fpnb-live", "t2", "--presend-fpnb-stale-hold", "2"]).unwrap().unwrap();
     assert!(c.fpnb_stale_hold == 2 && c.json()["fpnb_stale_hold"] == 2);
+}
+
+/// --presend-live-wh-learn paper: a "wh_loss"-skipped T2 trigger, the shadow's presend_arm on the same signature, its row c fill (sol_in) and
+/// exit (net_cheap): the whale's ledger gets a PAPER position scaled to the live size (state file marks it); another row / another signature /
+/// a window without a row c fill: nothing; off: nothing
+#[test]
+fn dip37_wh_learn_paper() {
+    let whale = w(0xEE);
+    for learn in [true, false] {
+        let mut x: Vec<&str> = vec!["--presend-live-wh-loss", "2:0.05"];
+        if learn { x.extend(["--presend-live-wh-learn", "paper"]); }
+        let mut c = Ctx::new(&x);
+        c.seed(whale, 2, -60_000_000);
+        c.t2(whale);
+        let s = c.ev("presend_live_skip").pop().unwrap();
+        assert_eq!(s["why"], "wh_loss");
+        let sig = s["trig"]["sig"].as_str().unwrap().to_string();
+        // a row-a fill and an unrelated window: ignored; row c of the skipped trigger: sol_in 0.8 SOL (lamports, as the shadow writes it), net_cheap +0.06 SOL -> +0.03 at 0.4 SOL
+        for r in [serde_json::json!({"ev": "presend_arm", "w": 7, "sig": sig}), serde_json::json!({"ev": "presend_arm", "w": 8, "sig": "other"}),
+                  serde_json::json!({"ev": "presend_fill", "w": 7, "row": "a", "entry": {"sol_in": 100_000_000u64}}), serde_json::json!({"ev": "presend_fill", "w": 7, "row": "c", "entry": {"sol_in": 800_000_000u64}}),
+                  serde_json::json!({"ev": "presend_fill", "w": 8, "row": "c", "entry": {"sol_in": 800_000_000u64}}), serde_json::json!({"ev": "presend_exit", "w": 7, "row": "a", "net_cheap": 0.5}),
+                  serde_json::json!({"ev": "presend_exit", "w": 7, "row": "c", "net_cheap": 0.06}), serde_json::json!({"ev": "presend_exit", "w": 8, "row": "c", "net_cheap": 0.06})] {
+            c.p.on_shadow_rec(&r);
+        }
+        for o in c.orx.try_iter() { if let Out::Rec(v) = o { c.recs.push(v); } }
+        let h = c.p.sh.wh.lock().unwrap().all[&whale];
+        if learn {
+            assert_eq!(h, WhHist { n: 3, sum: -30_000_000, pn: 1, ps: 30_000_000 }, "a paper position at the live size");
+            assert_eq!(c.p.sh.wh.lock().unwrap().t2[&whale], WhHist { n: 1, sum: 30_000_000, pn: 1, ps: 30_000_000 }, "the T2 ledger too");
+            let r = c.ev("presend_live_wh_paper").pop().unwrap();
+            assert!(r["whale"] == b58(&whale) && r["credit"] == 0.03 && r["n"] == 3 && r["pn"] == 1 && r["blocks"] == false, "{r}");
+            assert!(c.p.status().contains("paper credits 1 (+0.030 SOL)"));
+            // the state file marks it
+            let p = tmp("paper");
+            wh_save(&c.p.sh.wh.lock().unwrap(), &p).unwrap();
+            let j: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+            assert_eq!(j["w"][b58(&whale)], serde_json::json!([3, -30_000_000, 1, 30_000_000]));
+            assert_eq!(wh_load(&p).unwrap().all[&whale], h);
+            std::fs::remove_file(&p).unwrap();
+            // the same trigger never credits twice
+            c.p.on_shadow_rec(&serde_json::json!({"ev": "presend_exit", "w": 7, "row": "c", "net_cheap": 0.06}));
+            assert_eq!(c.p.sh.wh.lock().unwrap().all[&whale].n, 3);
+        } else {
+            assert_eq!(h, WhHist { n: 2, sum: -60_000_000, ..Default::default() }, "off: nothing learned");
+            assert!(c.ev("presend_live_wh_paper").is_empty());
+        }
+    }
+    // no row c fill: the disarm drops it
+    let mut c = Ctx::new(&["--presend-live-wh-loss", "2:0.05", "--presend-live-wh-learn", "paper"]);
+    c.seed(whale, 2, -60_000_000);
+    c.t2(whale);
+    let sig = c.ev("presend_live_skip").pop().unwrap()["trig"]["sig"].as_str().unwrap().to_string();
+    c.p.on_shadow_rec(&serde_json::json!({"ev": "presend_arm", "w": 9, "sig": sig}));
+    c.p.on_shadow_rec(&serde_json::json!({"ev": "presend_disarm", "w": 9}));
+    c.p.on_shadow_rec(&serde_json::json!({"ev": "presend_exit", "w": 9, "row": "c", "net_cheap": 0.2}));
+    assert_eq!(c.p.sh.wh.lock().unwrap().all[&whale].n, 2, "no paper outcome: nothing");
+    // the flags
+    assert!(cfg(&["--presend-live-wh-learn", "paper"]).unwrap_err().to_string().contains("needs --presend-live-wh-loss"));
+    assert!(cfg(&["--presend-live-wh-loss", "2:0.05", "--presend-live-wh-learn", "on"]).unwrap_err().to_string().contains("paper | off"));
+    assert!(crate::check_flags(&args(&["--presend-live-wh-loss", "2:0.05", "--presend-live-wh-learn", "paper", "--presend-live-wh-split", "on"])).is_ok());
+}
+
+/// --presend-live-wh-split on: the gate reads the kind's ledger (a wallet's T2 losses do not block it as a re-arm dumper); every position goes
+/// into the combined ledger and its kind's
+#[test]
+fn dip37_wh_split() {
+    let mut m = WhMaps::default();
+    let k = w(5);
+    m.add(true, false, k, -60_000_000, false);
+    m.add(true, false, k, -10_000_000, false);
+    m.add(true, true, k, 5_000_000, false);
+    assert_eq!((m.get(false, true, &k).n, m.get(true, false, &k).n, m.get(true, true, &k).n), (3, 2, 1));
+    assert!(m.get(true, false, &k).blocks(2, 50_000_000) && !m.get(true, true, &k).blocks(2, 50_000_000) && !m.get(false, false, &k).blocks(2, 70_000_000));
+    // on the probe: the dumper's T2 losses: split on -> the re-arm arms (its re-arm ledger is empty); split off (combined) -> skipped
+    let (a, b) = (w(0xA1), w(0xB1));
+    for split in [true, false] {
+        let mut x = vec!["--presend-live-rearm", "on", "--presend-live-wh-loss", "2:0.05"];
+        if split { x.extend(["--presend-live-wh-split", "on"]); }
+        let mut c = Ctx::new(&x);
+        { let mut g = c.p.sh.wh.lock().unwrap(); g.add(split, false, a, -100_000_000, false); g.add(split, false, a, -100_000_000, false); }
+        c.rearm(a, b);
+        let armed = c.ev("presend_live_arm").iter().any(|r| r["kind"] == "rearm");
+        assert_eq!(armed, split, "split {split}");
+    }
+    assert!(cfg(&["--presend-live-wh-loss", "2:0.05", "--presend-live-wh-split", "on"]).unwrap().unwrap().wh_spec().contains("split"));
 }

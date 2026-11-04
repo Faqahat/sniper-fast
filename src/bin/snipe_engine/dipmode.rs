@@ -856,7 +856,7 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
                 "drop_pct": d.feats[2], "score": d.score, "thr": thr_t, "pass": pass, "launch_ok": d.launch_ok, "vsol": tr.vsol, "vtok": tr.vtok, "dev": tk.dev});
             match m2d.as_mut() {
                 Some(g) => g.record(dump_rec, d.launch_ok && d.score >= thr_t && extra_k.is_none(), d.score, d.age, d.feats[1], d.feats[2], d.launch_ok, tk.dev),
-                None => held.w(&log, dump_rec),
+                None => { pslive::psh2::note_rec(&dump_rec, None); held.w(&log, dump_rec) }
             }
             if probe_n > 0 {
                 held.flush(&log);
@@ -1762,6 +1762,8 @@ impl<'a> M2Dump<'a> {
     fn finish(&mut self, mut rec: serde_json::Value) {
         let (imit_pass, imit_score, age, sell, drop, launch_ok, dev) = self.info;
         let pick = launch_ok && self.pick();
+        // dip37 HYBRID-2: this scored dump for the pre-send arms (nothing unless the probe turned it on)
+        pslive::psh2::note_rec(&rec, self.score);
         rec["m2"] = serde_json::json!(self.score);
         rec["m2_pick"] = serde_json::json!(pick);
         rec["m2_min"] = serde_json::json!(self.min);
