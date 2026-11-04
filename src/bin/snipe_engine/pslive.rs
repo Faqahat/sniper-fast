@@ -105,8 +105,11 @@ const QFLAGS: [&str; 10] = ["--presend-live-quiet-stop", "--presend-live-quiet-s
     "--presend-live-quiet-book"];
 
 /// dip36 FP-NOBOT (log-only): its flags (each needs --presend-live; the paths need --presend-fpnb-log on)
-const FPFLAGS: [&str; 7] = ["--presend-fpnb-log", "--presend-fpnb-bots", "--presend-fpnb-preload", "--presend-skip2-log", "--presend-skip2-seed", "--presend-fpnb-live",
-    "--presend-fpnb-control"];
+const FPFLAGS: [&str; 8] = ["--presend-fpnb-log", "--presend-fpnb-bots", "--presend-fpnb-preload", "--presend-skip2-log", "--presend-skip2-seed", "--presend-fpnb-live",
+    "--presend-fpnb-control", "--presend-fpnb-stale-hold"];
+
+/// dip37 WHALE / DUMPER LOSS LEDGER: its flags (each needs --presend-live; the mode and the state need --presend-live-wh-loss; pswh.rs)
+const WHFLAGS: [&str; 3] = ["--presend-live-wh-loss", "--presend-live-wh-loss-mode", "--presend-live-whale-state"];
 
 /// dip37 FEE A/B: its flags (each needs --presend-live; the parameters after the first need --presend-live-fee-ab on; psfeeab.rs)
 const FABFLAGS: [&str; 6] = ["--presend-live-fee-ab", "--presend-live-ab-cu-price-micro", "--presend-live-ab-cu-limit", "--presend-live-ab-tip-lamports",
@@ -141,6 +144,10 @@ mod pslog36;
 // dip37 FEE A/B (a per-window priority-fee A/B on the attempts; off unless --presend-live-fee-ab on)
 #[path = "psfeeab.rs"]
 pub mod psfeeab;
+
+// dip37 LIVE whale / dumper loss ledger (arm-time skips; off unless --presend-live-wh-loss N:SOL)
+#[path = "pswh.rs"]
+pub mod pswh;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -346,9 +353,23 @@ pub struct Cfg {
     pub rearm: RearmCfg,
     /// dip37 FEE A/B (default: off; psfeeab.rs)
     pub fab: psfeeab::FeeAbCfg,
+    /// dip37 --presend-live-wh-loss N:SOL (LIVE; wh_loss 0 = off): skip an arm whose T2 whale / re-arm dumper has >= N realized positions with us
+    /// summing to <= -SOL (pswh.rs); --presend-live-wh-loss-mode mean: sum / n <= -SOL instead; --presend-live-whale-state PATH: preload + save
+    pub wh_loss_n: u32,
+    pub wh_loss: i64,
+    pub wh_mean: bool,
+    pub wh_state: Option<String>,
+    /// dip37 --presend-fpnb-stale-hold N (0 = off, the default): with no fresh FP-NOBOT verdict, a send is withheld when the window's last
+    /// verdict blocked and is <= N slots old (pslog36::gate_withhold_why); else fail open as dip36
+    pub fpnb_stale_hold: u64,
 }
 
 impl Cfg {
+    /// dip37: the whale / dumper loss ledger is on
+    pub fn wh_on(&self) -> bool { self.wh_loss > 0 }
+    /// dip37: its rule as given ("2:0.05 sum")
+    pub fn wh_spec(&self) -> String { format!("{}:{} {}", self.wh_loss_n, self.wh_loss as f64 / 1e9, if self.wh_mean { "mean" } else { "sum" }) }
+
     /// dip32: the creator gate is on (either rule)
     pub fn cr_on(&self) -> bool { self.cr_unf.is_some() || self.cr_loss > 0 }
 
@@ -365,7 +386,7 @@ impl Cfg {
         let arg_u64_opt = |f: &str| arg(f).and_then(|s| s.parse::<u64>().ok());
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -441,7 +462,19 @@ impl Cfg {
             quiet_v2_log: has("--presend-live-quiet-v2-log"),
             rearm,
             fab,
+            // dip37 the whale / dumper loss ledger (LIVE) and the FP-NOBOT stale hold
+            wh_loss_n: match arg("--presend-live-wh-loss") { Some(s) => pswh::wh_loss_parse(&s)?.0, None => 0 },
+            wh_loss: match arg("--presend-live-wh-loss") { Some(s) => pswh::wh_loss_parse(&s)?.1, None => 0 },
+            wh_mean: match arg("--presend-live-wh-loss-mode").as_deref() { None | Some("sum") => false, Some("mean") => true, Some(x) => bail!("--presend-live-wh-loss-mode {x}: sum | mean") },
+            wh_state: arg("--presend-live-whale-state").filter(|p| !p.starts_with("--")),
+            fpnb_stale_hold: arg_u64("--presend-fpnb-stale-hold", 0),
         };
+        // dip37: the ledger's flags need a value and the rule; the stale hold needs the live gate
+        for f in WHFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
+        if !c.wh_on() { if let Some(f) = WHFLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-wh-loss N:SOL"); } }
+        if has("--presend-fpnb-stale-hold") && arg("--presend-fpnb-stale-hold").is_none_or(|v| v.parse::<u64>().is_err()) { bail!("--presend-fpnb-stale-hold N: a whole number of slots (0 = off)"); }
+        if c.fpnb_stale_hold > 20 { bail!("--presend-fpnb-stale-hold must be 0 (off) or 1..20 slots"); }
+        if c.fpnb_stale_hold > 0 && c.fpnb_live == 0 && c.fpnb_control.is_none() { bail!("--presend-fpnb-stale-hold needs the FP-NOBOT live gate (--presend-fpnb-live / --presend-fpnb-control)"); }
         if has("--presend-live-fam-rpc") && c.fam_rpc.is_none() { bail!("--presend-live-fam-rpc needs a URL ({}VAR{} expanded from the environment)", "${", "}"); }
         if (has("--presend-live-fam-thr") || has("--presend-live-fam-rpc")) && !c.fam_log { bail!("--presend-live-fam-thr / --presend-live-fam-rpc need --presend-live-fam-log"); }
         // dip36: the FP-NOBOT paths need a value and the log on; the log needs the bot list
@@ -625,6 +658,8 @@ impl Cfg {
         if self.deep_drop > 0.0 { j["deep_drop"] = self.deep_drop.into(); j["deep_ob6"] = DEEP_OB6.into(); }
         if let Some(p) = &self.holds_state { j["holds_state"] = p.clone().into(); }
         // dip37: only when on (off: dip36's record)
+        if self.wh_on() { j["wh_loss"] = self.wh_spec().into(); if let Some(p) = &self.wh_state { j["whale_state"] = p.clone().into(); } }
+        if self.fpnb_stale_hold > 0 { j["fpnb_stale_hold"] = self.fpnb_stale_hold.into(); }
         if self.fab.on { j["fee_ab"] = self.fab.json(self.cu_limit, self.cu_price, self.tip); }
         j
     }
@@ -810,6 +845,8 @@ struct Shared {
     brk_trips: AtomicU64,
     /// dip32 the creator gate's histories (empty without it): filled by the realized task, read at every arm
     cr: Mutex<FxHashMap<Pk, CrHist>>,
+    /// dip37 the whale / dumper loss ledger (empty without it): filled by the realized task, read at every arm (pswh.rs)
+    wh: Mutex<FxHashMap<Pk, pswh::WhHist>>,
     /// the feed's newest slot (the main loop's)
     slot: AtomicU64,
     seq: AtomicU64,
@@ -895,10 +932,14 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             // dip36 FP-NOBOT LIVE GATE (--presend-fpnb-live / --presend-fpnb-control; off: never): this slot's verdict blocks -> withheld (one
             // atomic load; no fresh verdict -> fail open)
             if let (Some(g), Some(gs)) = (&w.fpg, &sc.fpg) {
-                if pslog36::gate_withhold(g, gs, slot, w.rearm) {
-                    sh.skip("fpnb_withheld");
-                    let _ = out.send(Out::Rec(serde_json::json!({"ev": "presend_live_fpnb_withheld", "w": w.id, "n": w.n, "mint": b58(&w.mint), "slot": slot,
-                        "kind": if w.rearm { "rearm" } else { "T2" }, "verdict_slot": g.v.load(Ordering::Relaxed) >> 2, "t": arbx::feeds::clock::now_ns()})));
+                if let Some(stale) = pslog36::gate_withhold_why(g, gs, slot, w.rearm) {
+                    sh.skip(if stale { "fpnb_withheld_stale" } else { "fpnb_withheld" });
+                    let vs = g.v.load(Ordering::Relaxed) >> 2;
+                    let mut r = serde_json::json!({"ev": "presend_live_fpnb_withheld", "w": w.id, "n": w.n, "mint": b58(&w.mint), "slot": slot,
+                        "kind": if w.rearm { "rearm" } else { "T2" }, "verdict_slot": vs, "t": arbx::feeds::clock::now_ns()});
+                    // dip37 --presend-fpnb-stale-hold: a held send on the window's last (blocking, not fresh) verdict says so
+                    if stale { r["stale"] = true.into(); r["age"] = slot.saturating_sub(vs).into(); }
+                    let _ = out.send(Out::Rec(r));
                     continue;
                 }
             }
@@ -1609,7 +1650,9 @@ pub enum Cmd {
     /// dip32 `cr`: (the token's creator, followed) when the creator gate is on
     Realized { pid: u64, w: u64, mint: Pk, buys: Vec<(String, u64)>, sells: Vec<(String, bool, u64)>, rearm: bool, cr: Option<(Pk, bool)>,
         /// dip37: the position's fee arm / group / values (None: the fee A/B off)
-        ab: Option<psfeeab::RzAb> },
+        ab: Option<psfeeab::RzAb>,
+        /// dip37: the position's window's whale / dumper for the loss ledger (None: the ledger off or unknown)
+        wh: Option<Pk> },
     /// the background UNSOLD retry of a position (its sells keep the account open; PsMsg::UnsoldDone at its end)
     Unsold { mint: Pk, launch: Launch, land_slot: u64, last_qty: (u64, bool) },
     /// a Telegram alert (the tests keep its title; a run raises it at once, never through this)
@@ -1782,6 +1825,8 @@ pub struct PsLive {
     bl: Option<psblock::Blocklist>,
     /// dip37 FEE A/B's counters (psfeeab.rs; None with it off: nothing of it runs)
     fab: Option<psfeeab::FabSt>,
+    /// dip37 the whale / dumper ledger's window wallets, save slot, skips (pswh.rs; empty with it off)
+    whs: pswh::WhSt,
 }
 
 impl PsLive {
@@ -1822,7 +1867,7 @@ impl PsLive {
         }
         let (atx, arx) = crossbeam_channel::unbounded::<Att>();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
-            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()),
+            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) });
         arbx::feeds::own_fail_watch(user);
         // dip32: the creator histories' preload (the offline seed / the last run's state)
@@ -1831,6 +1876,15 @@ impl PsLive {
                 Ok(m) => { eprintln!("DIP PRESEND LIVE CREATOR GATE: preloaded {} creators from {p} (saved back every ~10 min and at the run's end)", m.len()); *sh.cr.lock().unwrap() = m; }
                 Err(e) => eprintln!("DIP PRESEND LIVE CREATOR GATE: no preload from {p} ({e:#}); the histories start empty"),
             }
+        }
+        // dip37: the whale / dumper ledger (LIVE) and its preload (a missing file: an empty ledger)
+        if cfg.wh_on() {
+            let n = match &cfg.wh_state {
+                Some(p) if std::path::Path::new(p).exists() => { let m = pswh::wh_load(p)?; let n = m.len(); *sh.wh.lock().unwrap() = m; format!("{n} wallets preloaded from {p}") }
+                Some(p) => format!("NOTE: {p} does not exist: the ledger starts EMPTY (saved there every ~10 min and at the run's end)"),
+                None => "no state file: the ledger starts empty and is not saved".to_string(),
+            };
+            eprintln!("DIP PRESEND LIVE WHALE LEDGER (dip37, LIVE): skip an arm whose T2 whale / re-arm dumper has rule {} with us | {n}", cfg.wh_spec());
         }
         let sc = SCfg { cfg: cfg.clone(), user, key: (*key).clone(), guard, routes, handle: tokio::runtime::Handle::current(), fpg: fp.as_ref().map(|f| f.gs.clone()) };
         let fee1 = cfg.fail_fee();
@@ -1927,7 +1981,7 @@ impl PsLive {
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default) };
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default() };
         if let Some(r) = qrec { p.rec(r); }
         Ok(p)
     }
@@ -2326,6 +2380,9 @@ impl PsLive {
         // dip32 the creator gate (decided last, like the lone whale: only a trigger that would arm is skipped "cr_loss" / "cr_unfollowed")
         let (crw, crj) = if self.cfg.cr_on() { cr_gate(&self.sh, &self.cfg, self.det.creator_bal(&t.mint).map(|c| c.0), t.t_rx) } else { (None, None) };
         if why.is_none() { if let Some(w) = crw { why = Some(if w == "loss" { "cr_loss" } else { "cr_unfollowed" }); } }
+        // dip37 the whale ledger (LIVE; with the arm-time skips, right after the creator gate; None with it off)
+        let whg = pswh::wh_gate(&self.sh, &self.cfg, &whale);
+        if why.is_none() && whg.is_some_and(|g| g.0) { why = Some("wh_loss"); }
         // dip36 LIVE blocklist (with the arm-time skips: only a trigger that would arm; nothing without the flag)
         let blh = if why.is_none() && self.bl.is_some() { self.bl_hit(&t.mint, &whale, "whale", Some(bal)) } else { None };
         if blh.is_some() { why = Some("blocklist"); }
@@ -2351,6 +2408,7 @@ impl PsLive {
             if let Some(n) = nb { r["nb"] = n.into(); }
             if let Some(a) = ann { r["ann"] = a; }
             if let Some(j) = &crj { r["cr"] = j.clone(); }
+            if let Some((_, h)) = &whg { pswh::wh_fields(&mut r, &self.cfg, &whale, h); }
             if let Some(h) = &blh { PsLive::bl_fields(&mut r, h); }
             if let Some(f) = &f3 { r["f3"] = f.clone(); }
             if let Some(g) = &tags { r["tags"] = g.clone(); }
@@ -2358,6 +2416,7 @@ impl PsLive {
             self.log34(&mut r, &t.mint, &whale, t.s, t.t_rx);
             self.rec(r);
             self.seen_note(why, whale, t.t_rx, t.mint);
+            if why == "wh_loss" { if let Some((_, h)) = whg { self.wh_skip_line(&t.mint, &whale, &h, false); } }
             if why == "quiet3_a" {
                 self.line(format!("  PRESEND LIVE QUIET3-A SKIP {} whale {} {:.1}% ({:.2} SOL) | trades in 120 s {}, whale's dumps {}", b58(&t.mint), &b58(&whale)[..8], pct,
                     t.sol as f64 / 1e9, n120.unwrap_or(0), whd.unwrap_or(0)));
@@ -2423,8 +2482,10 @@ impl PsLive {
         if let Some(j) = crj { r["cr"] = j; }
         if let Some(f) = f3 { r["f3"] = f; }
         if let Some(g) = tags { r["tags"] = g; }
-        // dip37: the window's fee arm and its values (only with the A/B on)
+        // dip37: the window's fee arm and its values (only with the A/B on); the whale ledger's view (only with it on)
         self.fab_arm_rec(&mut r, fab);
+        if let Some((_, h)) = &whg { pswh::wh_fields(&mut r, &self.cfg, &whale, h); }
+        self.wh_arm(id, whale);
         // dip34 (log-only): seen / eqgrp / q4 (each only with its flag)
         self.log34(&mut r, &t.mint, &whale, t.s, t.t_rx);
         // dip36 (log-only): FP-NOBOT's copy of the arm record (only with its flag)
@@ -2885,7 +2946,9 @@ impl PsLive {
             Some((f, tip)) => Some(psfeeab::RzAb { arm: f.arm, grp: f.grp, fee: Some(f), tip }),
             None => fs.arm_of(p.w).map(|arm| psfeeab::RzAb { arm, grp: 2, fee: None, tip: 0 }),
         });
-        self.exec(Cmd::Realized { pid: p.pid, w: p.w, mint: p.mint, buys, sells: p.sells.clone(), rearm: p.rearm, cr, ab });
+        // dip37: the window's arm wallet (the ledger on)
+        let wh = self.cfg.wh_on().then(|| self.whs.win.get(&p.w).copied()).flatten();
+        self.exec(Cmd::Realized { pid: p.pid, w: p.w, mint: p.mint, buys, sells: p.sells.clone(), rearm: p.rearm, cr, ab, wh });
     }
 
     /// dip19: a Telegram alert (the tests keep its title instead: no raise while another test traps them)
@@ -2933,7 +2996,7 @@ impl PsLive {
                     tasks.fetch_sub(1, Ordering::SeqCst);
                 });
             }
-            Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab } => {
+            Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh } => {
                 let (rpc, out) = ((*self.rpc).clone(), self.out.clone());
                 // dip31: the circuit breaker sees every realized P&L (off: nothing)
                 let (sh, brk) = (self.sh.clone(), self.cfg.breaker);
@@ -2956,6 +3019,11 @@ impl PsLive {
                     let (mut rec, line) = realized_out(w, pid, &mint, pnl, &buys, &bs, nb, ns, sells.len(), rearm);
                     // dip37 (nothing with the fee A/B off)
                     if let (Some(z), Some(a)) = (&frz, &ab) { z.add(a.arm, a.grp, pnl); a.put(&mut rec); }
+                    // dip37 the whale / dumper ledger: this position into its arm wallet's history (nothing with the ledger off)
+                    if let Some(k) = wh {
+                        let h = { let mut g = sh.wh.lock().unwrap(); let h = g.entry(k).or_default(); h.add(pnl); *h };
+                        rec["wh"] = serde_json::json!({"wallet": b58(&k), "n": h.n, "sum": h.sum as f64 / 1e9});
+                    }
                     // dip32 the creator gate: this position into its creator's history (known from now on)
                     if let Some((c, fol)) = cr {
                         sh.cr.lock().unwrap().entry(c).or_default().add(arbx::feeds::clock::now_ns(), pnl, fol);
@@ -3086,6 +3154,8 @@ impl PsLive {
                 self.exec(Cmd::Read { mint: m, min_slot, why: Why::Close, n: 1 });
             }
         }
+        // dip37: the whale ledger's state, every ~10 min (nothing without it)
+        self.wh_tick(slot_now);
         // dip32: the creator state, every ~10 min (written off the event loop)
         if let Some(p) = self.cfg.cr_state.clone() {
             if slot_now >= self.cr_saved + CR_SAVE_SLOTS {
@@ -3424,7 +3494,7 @@ impl PsLive {
     /// the 60 s status line's part
     pub fn status(&mut self) -> String {
         // dip26: the re-arm's part last ("" without it)
-        let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
+        let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
@@ -3523,6 +3593,8 @@ impl PsLive {
     /// the run's end: the sender stopped, unresolved attempts resolved as unseen, the records written; the totals (run_end)
     pub fn finish(&mut self, slot_now: u64, first: Option<&FxHashMap<u64, (u64, u16)>>) -> serde_json::Value {
         self.stop("run_end");
+        // dip37: the whale ledger for the next run (and its counts for run_end)
+        let whj = self.wh_finish();
         // dip32: the creator histories for the next run
         if let Some(p) = self.cfg.cr_state.clone() {
             let m = self.sh.cr.lock().unwrap().clone();
@@ -3587,6 +3659,7 @@ impl PsLive {
         if let Some(j) = self.l35_json() { fin["dip35_log"] = j; }
         // dip36: only with the FP-NOBOT log on / the blocklist
         if let Some(f) = self.fp.as_mut() { fin["dip36_fpnb"] = f.finish(); }
+        if let Some(j) = whj { fin["wh_ledger"] = j; }
         if let Some(b) = &self.bl { fin["blocklist"] = b.json(); }
         // dip37: only with the fee A/B on (its realized part is completed in run_end once the realized lookups are in: dipmode)
         if let Some(f) = &self.fab { fin["fee_ab"] = f.json(); }
@@ -3741,7 +3814,7 @@ impl PsLive {
         let (atx, arx) = crossbeam_channel::unbounded();
         let (mtx, _) = tokio::sync::mpsc::unbounded_channel();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
-            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()),
+            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true), skips: Mutex::new(FxHashMap::default()),
             build_us: Mutex::new(Ring::default()) });
         let mut det = pl::Detector::new(cfg.whale_pct);
@@ -3758,7 +3831,7 @@ impl PsLive {
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default) }, atx, orx)
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default() }, atx, orx)
     }
 
     /// dip19 tests: the chain work queued so far (taken)
@@ -3835,6 +3908,11 @@ mod dip36_blocklist_tests;
 #[cfg(test)]
 #[path = "dip37_feeab_tests.rs"]
 mod dip37_feeab_tests;
+
+// dip37 (11-04): the LIVE whale / dumper loss ledger (pswh.rs) and the FP-NOBOT stale hold (pslog36.rs); off by default = dip36
+#[cfg(test)]
+#[path = "dip37_wh_tests.rs"]
+mod dip37_wh_tests;
 
 #[cfg(test)]
 mod tests {
@@ -3924,7 +4002,7 @@ mod tests {
         assert_eq!((h.h.len(), h.n, h.sum), (CR_KEEP, 25, -50_000_000 + 20), "sum and count over all, the last CR_KEEP kept");
         // the gate (loss first, then unfollowed), its record
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
-            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()),
+            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
             skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
         let (ca, cb, cc) = ([1u8; 32], [2u8; 32], [3u8; 32]);
@@ -3984,7 +4062,7 @@ mod tests {
         assert!(!c0.breaker.on() && c0.json().get("breaker").is_none(), "off: dip30's start record");
         assert!(Cfg::from_argv(&set("--presend-live-breaker", "2:0.2"), &p, true, 1_000_000_000).is_err());
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
-            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()),
+            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
             skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
         let m = 60_000_000_000u64;
@@ -3999,7 +4077,7 @@ mod tests {
         assert_eq!(breaker_note(&Shared { brk_until: AtomicU64::new(0), ..sh }, &Breaker::default(), -900_000_000, t0), None, "off: never");
         // the sender's gate while the pause runs (mono clock), then not after it
         let sh2 = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
-            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), cr: Mutex::new(FxHashMap::default()),
+            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
             skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
         assert!(breaker_paused(&sh2));

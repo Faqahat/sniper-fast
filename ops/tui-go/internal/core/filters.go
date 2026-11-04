@@ -393,6 +393,10 @@ func (F *FiltAcc) feed(ev, line []byte) {
 				if r.Why != nil && *r.Why == "rearm_blocklist" && r.Dump != nil {
 					F.skips = append(F.skips, fSkip{why: "blocklist", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
 				}
+				// dip37: the re-arm's whale-ledger skips (the dumper's loss history) go in the LIVE "wh_loss" row the same way
+				if r.Why != nil && *r.Why == "rearm_wh_loss" && r.Dump != nil {
+					F.skips = append(F.skips, fSkip{why: "wh_loss", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
+				}
 			}
 			return
 		}
@@ -826,7 +830,7 @@ var liveFilters = []struct{ why, name string }{{"quiet", "QUIET"}, {"create_slot
 
 // optLiveFilters: dip31/32 skips, shown only when the run made one (older runs' tables unchanged).
 var optLiveFilters = []struct{ why, name string }{{"breaker", "circuit breaker"}, {"cr_loss", "creator loss (T2)"}, {"cr_unfollowed", "creator unfollowed (T2)"}, {"quiet3_a", "QUIET3-A (live)"},
-	{"blocklist", "blocklist"}}
+	{"blocklist", "blocklist"}, {"wh_loss", "whale loss"}}
 
 // Report computes the table (cached while no record came and the seed is the same).
 func (F *FiltAcc) Report(seedPath string) *FiltReport {

@@ -77,6 +77,8 @@ func fltShort(key, name string) string {
 		return "no-bot (live)"
 	case "blocklist":
 		return "blocklist"
+	case "wh_loss":
+		return "whale loss"
 	}
 	return name
 }
@@ -287,6 +289,7 @@ var fltVerdicts = map[string]fltVerdict{
 	"skip2":         {vgLog, "LOG new", "per-send logit (dip36)"},
 	"fpnb_live":     {vgLive, "LIVE new", "no-bot gate (dip36)"},
 	"blocklist":     {vgLive, "LIVE new", "listed wallets (dip36)"},
+	"wh_loss":       {vgLive, "LIVE new", "whale/dumper ledger (dip37)"},
 	"st":            {vgDism, "DISMISSED", "within group risk"},
 	"hc":            {vgDism, "DISMISSED", "dup of group risk"},
 	"guard":         {vgDism, "DISMISSED", "flagged did better"},

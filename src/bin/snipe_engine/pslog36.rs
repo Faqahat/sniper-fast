@@ -76,7 +76,11 @@ impl Gate {
 
 /// dip36 live gate: the mode (bit 0 T2, bit 1 re-arm) and the counters [T2, re-arm]
 #[derive(Debug, Default)]
-pub struct GateShared { pub mode: AtomicU64, pub withheld: [AtomicU64; 2], pub passed: [AtomicU64; 2], pub open_stale: [AtomicU64; 2], pub open_err: AtomicU64 }
+pub struct GateShared { pub mode: AtomicU64, pub withheld: [AtomicU64; 2], pub passed: [AtomicU64; 2], pub open_stale: [AtomicU64; 2], pub open_err: AtomicU64,
+    /// dip37 --presend-fpnb-stale-hold N (0 = off): with no fresh verdict, hold a send whose window's last verdict blocked and is <= N slots old
+    pub stale_hold: AtomicU64,
+    /// dip37: the sends held that way [T2, re-arm]
+    pub withheld_stale: [AtomicU64; 2] }
 
 /// the mode of "t2,rearm" / "t2" / "rearm" / "off" (any order; "both" = t2,rearm)
 pub fn mode_parse(s: &str) -> std::result::Result<u64, String> {
@@ -91,15 +95,31 @@ pub fn mode_str(m: u64) -> &'static str { match m & 3 { 0 => "off", 1 => "t2", 2
 /// the SENDER's check for a due attempt of a window at `slot` (one atomic load): true = withhold it. A kind not live: false. A verdict for
 /// `slot` or `slot + 1` (data up to slot - 1 / slot): its block; none (the FP thread behind or dead): fail open, counted
 #[inline]
-pub fn gate_withhold(g: &Gate, gs: &GateShared, slot: u64, rearm: bool) -> bool {
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn gate_withhold(g: &Gate, gs: &GateShared, slot: u64, rearm: bool) -> bool { gate_withhold_why(g, gs, slot, rearm).is_some() }
+
+/// gate_withhold with the reason: Some(false) = withheld on a fresh blocking verdict, Some(true) = dip37's STALE HOLD (no fresh verdict,
+/// --presend-fpnb-stale-hold N > 0, the window's last verdict covered + blocked and at most N slots older than `slot`), None = sent. With
+/// N = 0 exactly dip36's rule (no previous verdict / an old pass / an older block: fail open, counted open_stale)
+#[inline]
+pub fn gate_withhold_why(g: &Gate, gs: &GateShared, slot: u64, rearm: bool) -> Option<bool> {
     let k = rearm as usize;
-    if gs.mode.load(Ordering::Relaxed) & (1 << k) == 0 { return false; }
+    if gs.mode.load(Ordering::Relaxed) & (1 << k) == 0 { return None; }
     let v = g.v.load(Ordering::Acquire);
     let vs = v >> 2;
-    if v == 0 || !(vs == slot || vs == slot + 1) { gs.open_stale[k].fetch_add(1, Ordering::Relaxed); return false; }
-    if v & 1 == 1 && v & 2 == 2 { g.withheld.fetch_add(1, Ordering::Relaxed); gs.withheld[k].fetch_add(1, Ordering::Relaxed); return true; }
+    if v == 0 || !(vs == slot || vs == slot + 1) {
+        let n = gs.stale_hold.load(Ordering::Relaxed);
+        if n > 0 && v & 3 == 3 && vs < slot && slot - vs <= n {
+            g.withheld.fetch_add(1, Ordering::Relaxed);
+            gs.withheld_stale[k].fetch_add(1, Ordering::Relaxed);
+            return Some(true);
+        }
+        gs.open_stale[k].fetch_add(1, Ordering::Relaxed);
+        return None;
+    }
+    if v & 1 == 1 && v & 2 == 2 { g.withheld.fetch_add(1, Ordering::Relaxed); gs.withheld[k].fetch_add(1, Ordering::Relaxed); return Some(false); }
     gs.passed[k].fetch_add(1, Ordering::Relaxed);
-    false
+    None
 }
 pub struct FpClose { pub w: u64, pub pid: u64, pub mint: Pk, pub first: (u64, u64), pub first_t: u64, pub end: Option<(u64, u64)>, pub sell_t: u64 }
 
@@ -510,6 +530,9 @@ impl Fp {
         let mut w = Worker::new(&path, bots, user, out.clone(), st.clone())?;
         // dip36 live gate: the start mode (the flag), then the control file (it overrides the flag; a bad file at the start: the flag's mode)
         w.gs.mode.store(cfg.fpnb_live, Ordering::SeqCst);
+        // dip37: the stale hold (0 = off: dip36's fail-open)
+        w.gs.stale_hold.store(cfg.fpnb_stale_hold, Ordering::SeqCst);
+        if cfg.fpnb_stale_hold > 0 { eprintln!("DIP PRESEND LIVE FP-NOBOT STALE HOLD (dip37): no fresh verdict -> the send is held when the window's last verdict blocked and is <= {} slots old", cfg.fpnb_stale_hold); }
         if let Some(p) = &cfg.fpnb_control { w.ctl = Some((p.clone(), None, Instant::now())); w.ctl_check(true); }
         let gs = w.gs.clone();
         eprintln!("DIP PRESEND LIVE FP-NOBOT LIVE GATE: {} (control file {}){}", mode_str(gs.mode.load(Ordering::SeqCst)), cfg.fpnb_control.as_deref().unwrap_or("none"),
@@ -587,6 +610,9 @@ impl Fp {
         let a = |x: &[AtomicU64; 2]| serde_json::json!({"t2": x[0].load(Ordering::Relaxed), "rearm": x[1].load(Ordering::Relaxed)});
         j["gate"] = serde_json::json!({"mode": mode_str(g.mode.load(Ordering::Relaxed)), "withheld": a(&g.withheld), "passed": a(&g.passed), "open_stale": a(&g.open_stale),
             "open_err": g.open_err.load(Ordering::Relaxed)});
+        // dip37: only with the stale hold on
+        let n = g.stale_hold.load(Ordering::Relaxed);
+        if n > 0 { j["gate"]["stale_hold"] = n.into(); j["gate"]["withheld_stale"] = a(&g.withheld_stale); }
         j
     }
 
@@ -613,6 +639,8 @@ impl Fp {
         format!(" | FP-NOBOT({}) arms {} (would hold {}), fills {} (would block {}), not covered {}, list n={} | gate T2/re-arm: withheld {} passed {} open(stale) {} open(err) {}",
             match mode_str(g.mode.load(Ordering::Relaxed)) { "off" => "log", m => m }, st.arms, st.arm_blocks, st.fills, st.fill_blocks, st.not_covered, st.list["n"],
             l(&g.withheld), l(&g.passed), l(&g.open_stale), g.open_err.load(Ordering::Relaxed))
+            // dip37: only with the stale hold on
+            + &if g.stale_hold.load(Ordering::Relaxed) > 0 { format!(" withheld(stale<={}) {}", g.stale_hold.load(Ordering::Relaxed), l(&g.withheld_stale)) } else { String::new() }
     }
 }
 

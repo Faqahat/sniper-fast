@@ -259,6 +259,8 @@ impl PsLive {
         let (crw, crj) = if self.cfg.cr_on() { cr_gate(&self.sh, &self.cfg, self.det.creator_bal(&mint).map(|c| c.0), t_rx) } else { (None, None) };
         // dip36 LIVE blocklist: the dumper / a holder >= the threshold listed (nothing without the flag)
         let blh = if self.bl.is_some() { self.bl_hit(&mint, &c.dump.tr.user, "dumper", None) } else { None };
+        // dip37 the whale / dumper ledger on the dumper (LIVE; None with it off)
+        let whg = pswh::wh_gate(&self.sh, &self.cfg, &c.dump.tr.user);
         let Some(rm) = self.rm.as_mut() else { return };
         rm.st.checks += 1;
         let en_slot = c.dump.tr.s + RE_WAIT + rm.cfg.gap;
@@ -275,6 +277,7 @@ impl PsLive {
             _ if lwhy.is_some() => Some("rearm_blocked_launch"),
             _ if crw == Some("loss") => Some("rearm_cr_loss"),
             _ if crw.is_some() => Some("rearm_cr_unfollowed"),
+            _ if whg.is_some_and(|g| g.0) => Some("rearm_wh_loss"),
             _ if blh.is_some() => Some("rearm_blocklist"),
             _ => None,
         };
@@ -303,6 +306,9 @@ impl PsLive {
             if w == "rearm_blocked_launch" { x["launch"] = lwhy.into(); }
             if let Some(j) = r5 { x["r5"] = j; }
             if let Some(j) = crj { x["cr"] = j; }
+            // dip37: the ledger's view of the dumper (only with it on)
+            if let Some((_, h)) = &whg { pswh::wh_fields(&mut x, &self.cfg, &c.dump.tr.user, h); }
+            if w == "rearm_wh_loss" { if let Some((_, h)) = whg { self.wh_skip_line(&mint, &c.dump.tr.user, &h, true); } }
             // dip36: the blocklist's hit
             if let Some(h) = blh.as_ref().filter(|_| w == "rearm_blocklist") {
                 PsLive::bl_fields(&mut x, h);
@@ -387,8 +393,10 @@ impl PsLive {
             r["f3"] = serde_json::json!({"fresh": fresh, "fresh_n": fresh_n});
             if let Some(g) = tags_json(&self.det, &mint, &self.cfg.tag_wallets) { r["tags"] = g; }
         }
-        // dip37: the window's fee arm and its values (only with the A/B on)
+        // dip37: the window's fee arm and its values (only with the A/B on); the ledger's view of the dumper (only with it on)
         self.fab_arm_rec(&mut r, fab);
+        if let Some((_, h)) = pswh::wh_gate(&self.sh, &self.cfg, &dump.tr.user) { pswh::wh_fields(&mut r, &self.cfg, &dump.tr.user, &h); }
+        self.wh_arm(id, dump.tr.user);
         // dip34 (log-only): seen / eqgrp / q4 keyed on the dumper (each only with its flag)
         let dumper = dump.tr.user;
         self.log34(&mut r, &mint, &dumper, chk_slot, chk_t);
