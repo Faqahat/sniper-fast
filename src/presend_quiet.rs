@@ -215,6 +215,17 @@ impl DumpBook {
         if n == 0 { (-1.0, 0) } else { (sum as f64 / n as f64, n) }
     }
 
+    /// dip34 QUIET4 (log-only, --presend-live-q4-log): the whale's LAST <= `k` dumps of the same set as `whale` (window closed before
+    /// the trigger slot: s + 2 < s0, t >= t0 - hist_ns): (count, mean followers); (0, -1) when there is none. FROZEN QUIET4-R's input
+    /// (ops/strategies/presend/filters3/quiet4/FROZEN.json: rbl10)
+    pub fn whale_last(&self, whale: &Pk, s0: u64, t0: u64, k: usize) -> (u32, f64) {
+        let Some(sl) = self.sellers.get(whale) else { return (0, -1.0) };
+        let lo = t0.saturating_sub(self.hist_ns);
+        let (mut n, mut sum) = (0u32, 0u64);
+        for d in sl.d.iter().rev().filter(|d| d.s + FOL_SLOTS < s0 && d.t >= lo).take(k) { n += 1; sum += d.nf as u64; }
+        if n == 0 { (0, -1.0) } else { (n, sum as f64 / n as f64) }
+    }
+
     /// every seller's dumps (sorted by seller), and the open windows (seller, slot, buyers so far): equality in the tests / parity
     pub fn snapshot(&self) -> (Vec<(Pk, Vec<Dump>)>, Vec<(Pk, u64, u32)>) {
         let mut v: Vec<(Pk, Vec<Dump>)> = self.sellers.iter().map(|(k, s)| (*k, s.d.iter().copied().collect())).collect();
@@ -1290,6 +1301,39 @@ mod tests {
         c.ingest(&sell(1, w, v, t, 3 * S), 499, 0, 0, t0);
         c.ingest(&sell(1, w, v, t, 3 * S), 500, 0, 0, t0);
         assert_eq!(c.dumps(), 1);
+    }
+
+    /// dip34 QUIET4 log (presend_quiet whale_last): the LAST <= k dumps with a closed window (s + 2 < s0) inside the history, their
+    /// mean followers; none = (0, -1)
+    #[test]
+    fn presend_quiet_dip34_whale_last() {
+        let h = 24 * 3600 * S;
+        let mut b = DumpBook::new(h);
+        let (v, t) = (30 * S, 1_000_000_000_000_000u64);
+        let t0 = 1_800_000_000 * S;
+        let w = 9u8;
+        assert_eq!(b.whale_last(&pk(w), 10, t0, 10), (0, -1.0));
+        // 12 dumps 20 slots apart on 12 tokens: dump k gets k % 3 followers
+        for k in 0..12u64 {
+            let (m, s, tk) = (100 + k as u8, 1000 + 20 * k, t0 + k * S);
+            b.ingest(&sell(m, w, v, t, 3 * S), s, 0, 0, tk);
+            for f in 0..(k % 3) { b.ingest(&buy(m, 40 + f as u8, v, t, S), s + 1, f as u32, 0, tk); }
+        }
+        // past every window: the last 10 = k 2..11 -> followers sum = sum(k % 3) over k 2..11 = 2+0+1+2+0+1+2+0+1+2 = 11
+        let (n, m) = b.whale_last(&pk(w), 2000, t0 + 20 * S, 10);
+        assert_eq!(n, 10);
+        assert!((m - 1.1).abs() < 1e-12, "{m}");
+        // k = 3: the last 3 (k 9, 10, 11: 0 + 1 + 2)
+        assert_eq!(b.whale_last(&pk(w), 2000, t0 + 20 * S, 3), (3, 1.0));
+        // the trigger slot right after the last dump: its window not closed -> k 1..10 (s + 2 < s0 for k <= 10)
+        let (n, m) = b.whale_last(&pk(w), 1000 + 20 * 11 + 2, t0 + 20 * S, 10);
+        assert_eq!(n, 10);
+        assert!((m - (1 + 2 + 0 + 1 + 2 + 0 + 1 + 2 + 0 + 1) as f64 / 10.0).abs() < 1e-12, "{m}");
+        // the history: 24 h after dump 5 only k 6..11 are left (6 dumps)
+        assert_eq!(b.whale_last(&pk(w), 2000, t0 + h + 6 * S, 10).0, 6);
+        // the same set as whale(): all 12 vs the last 10
+        assert_eq!(b.whale(&pk(w), 2000, t0 + 20 * S).1, 12);
+        assert_eq!(b.whale_last(&pk(8), 2000, t0, 10), (0, -1.0), "another wallet: none");
     }
 
     /// bounded memory: a day of synthetic dumps (one every 2 slots, 3 buyers each) holds only the last 24 h; O(1) work per trade

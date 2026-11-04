@@ -88,6 +88,8 @@ fn gcmd(c: &Cmd) -> String {
         Cmd::Realized { pid, w, mint, buys, sells, .. } => format!("realized pid {pid} w {w} {} buys {buys:?} sells {sells:?}", b58(mint)),
         Cmd::Unsold { mint, land_slot, last_qty, .. } => format!("unsold {} {land_slot} {last_qty:?}", b58(mint)),
         Cmd::Alert { level, title } => format!("alert {level:?} {title}"),
+        // dip35 (log-only; only with --presend-live-fam-log)
+        Cmd::Fam(q) => format!("fam w {} {} rearm {}", q.w, b58(&q.mint), q.rearm),
     }
 }
 

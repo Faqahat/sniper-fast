@@ -255,6 +255,8 @@ impl PsLive {
         let armed_re = armed.is_some_and(|id| self.rearm_w(id));
         let launch = launch_of(&mint);
         let lwhy = launch_refusal(launch.as_ref(), self.allow_holder);
+        // dip32 the creator gate (the check's own time)
+        let (crw, crj) = if self.cfg.cr_on() { cr_gate(&self.sh, &self.cfg, self.det.creator_bal(&mint).map(|c| c.0), t_rx) } else { (None, None) };
         let Some(rm) = self.rm.as_mut() else { return };
         rm.st.checks += 1;
         let en_slot = c.dump.tr.s + RE_WAIT + rm.cfg.gap;
@@ -264,9 +266,13 @@ impl PsLive {
             None => Some("rearm_gone"),
             Some(h) if h.is_empty() => Some("rearm_no_holder"),
             _ if halted => Some("rearm_blocked_stopped"),
+            // dip31 the circuit breaker's pause
+            _ if breaker_paused(&self.sh) => Some("rearm_breaker"),
             _ if armed.is_some() => Some(if armed_re { "rearm_blocked_rearm_armed" } else { "rearm_blocked_live_armed" }),
             _ if reactive_open(&mint) => Some("rearm_blocked_reactive"),
             _ if lwhy.is_some() => Some("rearm_blocked_launch"),
+            _ if crw == Some("loss") => Some("rearm_cr_loss"),
+            _ if crw.is_some() => Some("rearm_cr_unfollowed"),
             _ => None,
         };
         // R5 (the shadow's r5_skip): the QUIET arm signals of the LARGEST holder at the check; skipped only once the QUIET arm rule is on
@@ -293,7 +299,12 @@ impl PsLive {
             let mut x = serde_json::json!({"check_slot": slot, "en_slot": en_slot, "holders": hj});
             if w == "rearm_blocked_launch" { x["launch"] = lwhy.into(); }
             if let Some(j) = r5 { x["r5"] = j; }
+            if let Some(j) = crj { x["cr"] = j; }
+            // dip34 (log-only, --presend-live-ann on): the holders check's skips get "ann" too (the creator's holding: cr_hold / cr_big)
+            if self.cfg.ann { x["ann"] = ann_arm(&self.det, &self.user, &mint, slot); }
             self.rearm_skip(w, &mint, &c.dump, x);
+            // dip34 seen (log-only): a rearm_cr_loss skip's dumper into the seen book (nothing without --presend-live-seen-log)
+            self.seen_note(w, c.dump.tr.user, t_rx, mint);
             return;
         }
         let launch = launch.expect("checked: rearm_blocked_launch otherwise");
@@ -347,7 +358,7 @@ impl PsLive {
             if tp.len() > 256 { tp.pop_front(); }
         }
         self.wins.insert(id, Win { id, mint, whale: dump.tr.user, trig_slot: dump.tr.s, en_slot, armed_at: Instant::now(), stop_at: None, sent: 0, resolved: 0, unseen: 0,
-            last_deadline: 0, disarmed: None, filled: false, checked: false, quiet: 0, qj: None, qkey: None, q_others: None, dl: None });
+            last_deadline: 0, disarmed: None, filled: false, checked: false, quiet: 0, qj: None, qkey: None, q_others: None, dl: None, excl: holders.iter().map(|h| h.0).collect() });
         let lim0 = vsol as f64 / vtok.max(1) as f64 * (1.0 - drop);
         let mut r = serde_json::json!({"ev": "presend_live_arm", "kind": "rearm", "w": id, "mint": b58(&mint), "dump": dump.json(), "holders": holders_json(&holders), "gap": gap,
             "check_slot": chk_slot, "arm_slot": arm_slot, "en_slot": en_slot, "arm_ms_after_dump": (chk_t as i64 - dump.tr.t_rx as i64) as f64 / 1e6 + deferred_ms,
@@ -356,7 +367,19 @@ impl PsLive {
         if let Some(j) = r5 { r["r5"] = j; }
         // dip27 (log-only): only with the annotations on (off: dip26's record)
         if self.cfg.ann { r["ann"] = ann_arm(&self.det, &self.user, &mint, arm_slot); }
+        // dip32: only when on (off: dip31's record): the creator's history, the fresh holders (log-only)
+        if self.cfg.cr_on() { if let (_, Some(j)) = cr_gate(&self.sh, &self.cfg, self.det.creator_bal(&mint).map(|c| c.0), chk_t) { r["cr"] = j; } }
+        if self.cfg.f3_log {
+            let (fresh, fresh_n) = f3_fresh(&self.det, &mint, &self.user, &dump.tr.user, arm_slot);
+            r["f3"] = serde_json::json!({"fresh": fresh, "fresh_n": fresh_n});
+            if let Some(g) = tags_json(&self.det, &mint, &self.cfg.tag_wallets) { r["tags"] = g; }
+        }
+        // dip34 (log-only): seen / eqgrp / q4 keyed on the dumper (each only with its flag)
+        let dumper = dump.tr.user;
+        self.log34(&mut r, &mint, &dumper, chk_slot, chk_t);
         self.rec(r);
+        // dip35 (log-only): the fam holders read (nothing without its flag)
+        self.fam_arm(id, mint, true, arm_slot);
         let t = &dump.tr;
         self.line(format!("  PRESEND LIVE REARM ARM w{id} {} | dump {} {:.1}% ({:.2} SOL) slot {} age {} | holders {} | until slot {en_slot} | {k} attempts/slot, limit {:.2}x, {:.3} SOL{}",
             b58(&mint), &b58(&t.user)[..8], t.tok as f64 / pl::SUPPLY * 100.0, t.sol as f64 / 1e9, t.s, dump.age, holders_short(&holders), 1.0 - drop, spend as f64 / 1e9,

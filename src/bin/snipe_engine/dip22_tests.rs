@@ -47,3 +47,15 @@ fn time_exit_decision() {
     // the wall-clock backstop still applies
     assert_eq!(time_exit_due(100, 100, 2, 3_801, 5_000), Some("time-limit-wall"));
 }
+
+// dip34 (owner 11-03 ~21:55 PKT): the exact exit (--presend-live-exact-exit on|off, default on): the engine loop's feed wait ends
+// when the earliest open position's time-ms exit is due (PsLive::next_exit_in), not only on the next feed trade / 500 ms silence
+#[test]
+fn exact_exit_flag_on_by_default() {
+    let on = cfg(&["--presend-live-exit-ms", "125"]).unwrap().unwrap();
+    assert!(on.exact_exit && on.json()["exact_exit"] == true, "on by default, logged with the ms exit");
+    let off = cfg(&["--presend-live-exit-ms", "125", "--presend-live-exact-exit", "off"]).unwrap().unwrap();
+    assert!(!off.exact_exit && off.json()["exact_exit"] == false, "off = dip33's timing");
+    assert!(cfg(&[]).unwrap().unwrap().json().get("exact_exit").is_none(), "no ms exit: the start record is unchanged");
+    assert!(cfg(&["--presend-live-exact-exit", "maybe"]).is_err());
+}

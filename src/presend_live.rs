@@ -161,6 +161,12 @@ impl Detector {
     pub fn followed(&self, mint: &Pk) -> bool { self.toks.get(mint).is_some_and(|t| !t.out) }
     /// the token's create slot
     pub fn create_slot(&self, mint: &Pk) -> Option<u64> { self.toks.get(mint).map(|t| t.s0) }
+    /// dip35 FAM (log-only): every wallet that traded a followed token: (wallet, net on-curve tokens now, its first buy in the create
+    /// slot: the creator's create+buy included). None: the token is not followed
+    pub fn fam_book(&self, mint: &Pk) -> Option<Vec<(Pk, i64, bool)>> {
+        let tk = self.toks.get(mint).filter(|t| !t.out)?;
+        Some(tk.wal.iter().map(|(k, w)| (*k, w.bal, w.fb == tk.s0)).collect())
+    }
 
     /// a pump create (its executed tx): the token is followed from here (mayhem launches are not)
     pub fn create(&mut self, mint: Pk, slot: u64, creator: Pk, signer: Pk, mayhem: bool) {
@@ -307,6 +313,11 @@ impl Detector {
     pub fn holds_of(&self, w: &Pk) -> Option<&Holds> { self.holds.get(w) }
 
     /// dip30: a wallet's holding of `mint` now (0: none, sold out or the token not followed)
+    /// dip32 (tag log): a wallet's history on a followed token: (its trades, its balance now, its first buy slot; 0 = none). None: the
+    /// token is not followed or the wallet never traded it
+    pub fn wal_hist(&self, mint: &Pk, w: &Pk) -> Option<(u32, i64, u64)> {
+        self.toks.get(mint).filter(|t| !t.out).and_then(|t| t.wal.get(w)).map(|x| (x.n, x.bal, x.fb))
+    }
     pub fn bal(&self, mint: &Pk, w: &Pk) -> i64 { self.toks.get(mint).filter(|t| !t.out).and_then(|t| t.wal.get(w)).map_or(0, |x| x.bal) }
     /// dip27: the wallets with a hold clock kept
     pub fn clocks(&self) -> usize { self.holds.len() }

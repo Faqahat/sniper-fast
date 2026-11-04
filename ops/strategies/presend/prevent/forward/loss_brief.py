@@ -4,6 +4,8 @@ any filter"). Read-only on a local copy of the run's records. For the mint's LAS
 kind (T2 / re-arm), P&L, exit, token age, the trigger (whale or re-arm dump + holders), what the LIVE filters saw (10-sec skip buyers,
 deeper limit: drop used / other holder / depth) and what the LOG-ONLY rules say (bad creator via the ledger seed + this run's fills
 before it, the safe sell timer's would-block with each holder's hazard, the holder clock), then who sold inside our hold.
+dip34/35: the arm record's log-only fields (eqgrp, f3 fresh, q4 wh_l10) and the presend_live_fam record (fam %, hit) are printed when
+present and join the "WOULD HAVE BLOCKED IT" list as "(log)" entries (eqgrp flag, fresh >= 35%, fam hit).
 usage: loss_brief.py RUN.jsonl MINT_PREFIX [--all] [--seed gcr_seed.json]"""
 import sys, json, collections, os
 
@@ -13,7 +15,7 @@ led = collections.defaultdict(lambda: [0, 0.0])
 if os.path.exists(seed_p):
     for c, d in json.load(open(seed_p)).items(): led[c] = [d["n"], d["sum"]]
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
-arm, fill, close, tape, out = {}, {}, {}, collections.defaultdict(list), []
+arm, fill, close, tape, out, famr = {}, {}, {}, collections.defaultdict(list), [], {}
 for line in open(path, errors="replace"):
     if '"ev":"presend_live_' not in line: continue
     d = json.loads(line); e = d["ev"]
@@ -26,6 +28,7 @@ for line in open(path, errors="replace"):
     elif e == "presend_live_fill": fill.setdefault(k, d)
     elif e == "presend_live_close": close[k] = d
     elif e == "presend_live_tape": tape[mint].append(d)
+    elif e == "presend_live_fam": famr[k] = d
     elif e == "presend_live_realized":
         a = arm.get(k)
         if a and (a[0].get("ann") or {}).get("creator") and (a[0].get("ann") or {}).get("cr_pct", 0) >= 3:
@@ -70,6 +73,30 @@ for k, pnl in (out if "--all" in sys.argv else out[-1:]):
     gsum = sum(h.get("pct", 0) for h in grp)
     lines.append(f"  group risk (log): risky holders {', '.join(h['w'][:8] + ' ' + format(h['pct'], '.1f') + '%' for h in grp) or 'none'} = {gsum:.1f}% -> " + ("FLAGGED" if gsum >= 6.0 else "no"))
     if gsum >= 6.0: caught.append("group risk (log)")
+    # LOG (dip34): equal-size holder group, fresh holders (f3), QUIET4 (q4) on the arm record
+    eq = a.get("eqgrp")
+    if eq is not None:
+        lines.append(f"  equal-size group (log): {eq.get('n', 0)} holders" + (f" ~{eq.get('pct', 0):.2f}% each (sum {eq.get('sum', 0):.1f}%)" if eq.get("n") else "")
+                     + " -> " + ("FLAGGED" if eq.get("flag") else "no"))
+        if eq.get("flag"): caught.append("eqgrp flag (log)")
+    f3 = a.get("f3")
+    if f3 is not None:
+        fr = f3.get("fresh") or 0
+        lines.append(f"  fresh holders (log): {fr:.1f}% in {f3.get('fresh_n')} wallets, whale dumps {f3.get('wh_dumps')}, QUIET3-A {f3.get('q3a')} -> "
+                     + ("FLAGGED (fresh >= 35%)" if fr >= 35 else "no"))
+        if fr >= 35: caught.append("fresh>=35 (log)")
+    q4 = a.get("q4")
+    if q4 is not None:
+        lines.append(f"  QUIET4 (log): whale's last dumps wh_l10 {q4.get('wh_l10')} [n, mean followers], repeat hold-sellers {q4.get('hs_n', 0)}, whale unfollowed 1 h {q4.get('wh_unf1h')}")
+    # LOG (dip35): the bundle family (create-slot owners + transfer recipients) from the holders read at the arm
+    fm = famr.get(k)
+    if fm is not None:
+        if fm.get("err"): lines.append(f"  bundle family (log): no read ({fm['err']})")
+        else:
+            lines.append(f"  bundle family (log): fam {fm.get('fam', 0):.1f}% (create-slot {fm.get('cs_pct', 0):.1f}%, recipients {fm.get('recv_n')} / {fm.get('recv_pct', 0):.1f}%, "
+                         f"{fm.get('n_holders')} holders, hist {fm.get('hist')}, read {(fm.get('read_slot') or 0) - (fm.get('arm_slot') or 0)} slots after the arm) -> "
+                         + ("FLAGGED (>= %.1f%%)" % fm.get("thr", 26.825) if fm.get("hit") else "no"))
+            if fm.get("hit"): caught.append("fam hit (log)")
     # who sold inside our hold
     sl = (c.get("sell_land") or [None])[0]
     holders = {h["w"] for h in hs}

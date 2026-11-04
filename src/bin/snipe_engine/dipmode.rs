@@ -166,9 +166,13 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             size_sol: arg_f64("--presend-size-sol", d.size_sol), exit_slots: arg_u64("--presend-exit-slots", d.exit_slots), tp: arg_f64("--presend-tp", d.tp),
             sl: arg_f64("--presend-sl", d.sl), ..d };
         p.check().map_err(|e| anyhow::anyhow!("--presend-shadow: {e}"))?;
-        Some(arbx::presend::Shadow::new(p))
+        let mut sh = arbx::presend::Shadow::new(p);
+        // dip34 (--presend-move-log; log only, off = dip33's records): presend_disarm gets "move" (the in-window price path)
+        sh.move_log = has("--presend-move-log");
+        Some(sh)
     } else {
         if let Some(f) = presend_params.iter().find(|f| has(f)) { bail!("{f} needs --presend-shadow"); }
+        if has("--presend-move-log") { bail!("--presend-move-log needs --presend-shadow"); }
         None
     };
     // dip30 WIDE SHADOW (--presend-wide-pct P; owner 10-30 ~20:40 PKT: "prepare a proper realistic logging for this in the next run
@@ -595,7 +599,9 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         }
         if stopping && !DIP_NO_FIRE.swap(true, Ordering::SeqCst) { eprintln!("  DIP: no new buys from here (end of run reached); {} position(s) finishing", open.len()); }
         if stopping { if let Some(p) = pslive.as_mut() { p.stop("run_stopping"); } }
-        // positions + feed, whichever first
+        // positions + feed, whichever first. dip34 exact exit: the feed wait ends when the earliest pre-send time-ms exit is due (it
+        // was always the 500 ms quiet timeout, so the exit waited for the next feed trade)
+        let wait = pslive.as_ref().and_then(|p| p.next_exit_in()).map_or(Duration::from_millis(500), |d| d.min(Duration::from_millis(500)));
         let ev = if busy {
             // B2 (--dip-busy-poll): the positions' messages first, then the feed channel (spun 1 ms at a time; 500 ms quiet = the timeout)
             let t_wait = Instant::now();
@@ -604,7 +610,7 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
                 if let Ok(m) = mrx.try_recv() { msg = Some(m); break; }
                 match fastfire::spin_recv(&rx, Duration::from_millis(1)) {
                     Ok(Some(e)) => { got = Some(e); break; }
-                    Ok(None) => { if t_wait.elapsed() >= Duration::from_millis(500) { break; } }
+                    Ok(None) => { if t_wait.elapsed() >= wait { break; } }
                     Err(()) => { closed = true; break; }
                 }
             }
@@ -633,7 +639,7 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
                 }
                 continue;
             }
-            e = tokio::time::timeout(Duration::from_millis(500), arx.recv()) => match e {
+            e = tokio::time::timeout(wait, arx.recv()) => match e {
                 Ok(Some(e)) => e,
                 // every feed died: never leave a position behind; the wall-clock backstop in time_exits sells it
                 Ok(None) => {
@@ -1139,6 +1145,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         for ev in evs {
             // PRE-SEND LIVE: the shadow's last triggers for the parity
             if ev.rec["ev"] == "presend_arm" { if let Some(p) = pslive.as_mut() { p.on_shadow_arm(&ev.rec); } }
+            // dip34 CR-EARNBACK (log-only): the shadow's last exits credit too (before the state is saved)
+            if let Some(p) = pslive.as_mut() { p.on_shadow_rec(&ev.rec); }
             log.w(ev.rec);
         }
         eprintln!("=== DIP PRESEND:{}{}", ps.line(), ps_time.line());
@@ -1537,7 +1545,8 @@ fn presend_tx_live(ps: &mut arbx::presend::Shadow, slot: u64, slot_now: u64, x: 
     let mut evs = ps.drain();
     if evs.is_empty() { if let Some(l) = live { l.shadow_done(ps.done_slot()); } return; }
     // dip20 QUIET: the shadow's arm / disarm records get what QUIET would have decided (the shadow itself unchanged; nothing without it)
-    if let Some(l) = live { l.annotate_shadow(&mut evs); for e in evs.iter().filter(|e| e.rec["ev"] == "presend_arm") { l.on_shadow_arm(&e.rec); } l.shadow_done(ps.done_slot()); }
+    // dip34 CR-EARNBACK (log-only): every shadow record to the live probe (nothing without --presend-live-cr-earn-log)
+    if let Some(l) = live { l.annotate_shadow(&mut evs); for e in evs.iter().filter(|e| e.rec["ev"] == "presend_arm") { l.on_shadow_arm(&e.rec); } for e in evs.iter() { l.on_shadow_rec(&e.rec); } l.shadow_done(ps.done_slot()); }
     // one terminal write and one log flush for all of this call's records
     let lines: String = evs.iter().filter_map(|e| e.line.as_ref()).fold(String::new(), |mut a, l| { a.push_str(l); a.push('\n'); a });
     if !lines.is_empty() { eprint!("{lines}"); }

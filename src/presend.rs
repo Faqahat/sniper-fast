@@ -418,6 +418,8 @@ pub struct Shadow {
     out: Vec<Ev>,
     pub st: Stats,
     last_retire: u64,
+    /// dip34 (--presend-move-log; off by default): presend_disarm records get "move" (the price path inside the window)
+    pub move_log: bool,
 }
 
 impl Shadow {
@@ -425,7 +427,7 @@ impl Shadow {
         let mut toks = FxHashMap::default(); toks.reserve(1 << 13);
         let mut no_hist = FxHashSet::default(); no_hist.reserve(NO_HIST_MAX + 1024);
         Shadow { p, toks, pending: BTreeMap::new(), cur: None, floor: None, done: None, target: 0, open: FxHashSet::default(), no_hist, wid: 0, out: Vec::new(),
-                 st: Stats::default(), last_retire: 0 }
+                 st: Stats::default(), last_retire: 0, move_log: false }
     }
     pub fn tokens(&self) -> usize { self.toks.len() }
     /// every slot <= this is processed (PRE-SEND LIVE: its trigger parity is final up to here)
@@ -473,9 +475,11 @@ impl Shadow {
         let s = self.pending.last_key_value().map(|(&s, _)| s).unwrap_or(0).max(self.target);
         self.process_upto(s, usize::MAX); self.done = Some(s); self.target = s;
         let mints: Vec<Pk> = self.open.iter().copied().collect();
+        let ml = self.move_log;
         for m in mints {
             let Some(tk) = self.toks.get_mut(&m) else { continue };
-            for w in tk.wins.iter_mut() { if !w.disarmed { Self::disarm(tk.mint.as_str(), w, "run_end", &mut self.st, &mut self.out); } }
+            let mvs: Vec<Value> = tk.wins.iter().map(|w| Self::window_move(ml, tk, w)).collect();
+            for (w, mv) in tk.wins.iter_mut().zip(mvs) { if !w.disarmed { Self::disarm(tk.mint.as_str(), w, "run_end", mv, &mut self.st, &mut self.out); } }
             tk.wins.clear();
         }
         self.open.clear();
@@ -528,6 +532,7 @@ impl Shadow {
 
     /// one trade, in chain order
     fn trade(&mut self, t: In) {
+        let ml = self.move_log;
         let p = self.p.clone();
         let Some(tk) = self.toks.get_mut(&t.mint) else {
             self.st.no_hist_trades += 1;
@@ -547,7 +552,8 @@ impl Shadow {
         // the study's non-standard curves (p1_build: any of the first 50 trades at curve < 25 / > 200 SOL, or no virtual tokens)
         if tk.n < 50 && (t.vsol < 25_000_000_000 || t.vsol > 200_000_000_000 || t.vtok == 0) {
             tk.out = Some("launch_filter"); self.st.excluded += 1;
-            for w in tk.wins.iter_mut() { if !w.disarmed { Self::disarm(tk.mint.as_str(), w, "token_gone", &mut self.st, &mut self.out); } }
+            let mvs: Vec<Value> = tk.wins.iter().map(|w| Self::window_move(ml, tk, w)).collect();
+            for (w, mv) in tk.wins.iter_mut().zip(mvs) { if !w.disarmed { Self::disarm(tk.mint.as_str(), w, "token_gone", mv, &mut self.st, &mut self.out); } }
             tk.wins.clear(); tk.tape.clear(); tk.base = tk.n; tk.rp = None;
             self.open.remove(&t.mint);
             return;
@@ -640,12 +646,14 @@ impl Shadow {
     /// move every open window of the token as far as the known tape allows (h: every trade with arrival < h is known)
     fn step_token(&mut self, mint: &Pk, h: f64) {
         let p = self.p.clone();
+        let ml = self.move_log;
         let Some(tk) = self.toks.get_mut(mint) else { self.open.remove(mint); return };
         let mut changed = true;
         while changed {
             changed = false;
             for wi in 0..tk.wins.len() {
                 for r in 0..NR { if Self::step_row(tk, wi, r, h, &p, &mut self.st, &mut self.out) { changed = true; } }
+                let mv = Self::window_move(ml, tk, &tk.wins[wi]);
                 let w = &mut tk.wins[wi];
                 // written once every row has stopped AND the window end is final (the whale's first sell seen, or the time past it), so
                 // "en" is the study's window end even when every armed row filled (or every row was blocked) before it
@@ -653,7 +661,7 @@ impl Shadow {
                     let why = if w.rows.iter().all(|x| x.arm == Arm::Blocked) { "blocked" }
                         else if w.rows.iter().filter(|x| x.arm == Arm::Armed).all(|x| x.filled) { "filled" }
                         else if w.en() < w.en0 { "whale_sold" } else { "expired" };
-                    Self::disarm(tk.mint.as_str(), w, why, &mut self.st, &mut self.out);
+                    Self::disarm(tk.mint.as_str(), w, why, mv, &mut self.st, &mut self.out);
                 }
             }
         }
@@ -661,7 +669,22 @@ impl Shadow {
         if tk.wins.is_empty() { self.open.remove(mint); }
     }
 
-    fn disarm(mint: &str, w: &mut Win, why: &str, st: &mut Stats, out: &mut Vec<Ev>) {
+    /// dip34 (owner 11-03 "what would the skipped trades have done"): the price path inside the window: the highest and lowest price
+    /// (% vs the trigger's post price) over the token's trades after the trigger up to the window end, and their count
+    fn window_move(on: bool, tk: &Tok, w: &Win) -> Value {
+        if !on { return Value::Null; }
+        let at = |j: usize| j.checked_sub(tk.base).and_then(|k| tk.tape.get(k));
+        let Some(p0) = at(w.j).map(|r| r.p).filter(|p| *p > 0.0) else { return Value::Null };
+        let (en, mut hi, mut lo, mut n) = (w.en(), p0, p0, 0u32);
+        let mut j = w.j + 1;
+        while let Some(r) = at(j) {
+            if r.a > en { break; }
+            hi = hi.max(r.p); lo = lo.min(r.p); n += 1; j += 1;
+        }
+        json!({"max_pct": (hi / p0 - 1.0) * 100.0, "min_pct": (lo / p0 - 1.0) * 100.0, "n": n})
+    }
+
+    fn disarm(mint: &str, w: &mut Win, why: &str, mv: Value, st: &mut Stats, out: &mut Vec<Ev>) {
         w.disarmed = true;
         st.disarms += 1;
         let mut rows = serde_json::Map::new();
@@ -673,6 +696,7 @@ impl Shadow {
         }
         out.push(Ev { rec: json!({"ev": "presend_disarm", "w": w.id, "mint": mint, "why": why, "st": w.st, "en": w.en(), "en0": w.en0, "whale_sell": w.je_info,
                                   "rows": Value::Object(rows)}), line: None });
+        if !mv.is_null() { if let Some(r) = out.last_mut() { r.rec["move"] = mv; } }
     }
 
     /// one row of one window, as far as it can go; true when its state changed
