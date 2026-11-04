@@ -1170,6 +1170,13 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             j["realized_split"] = s;
         }
     }
+    // dip37 FEE A/B: the realized P&L per fee arm (x leader group), now that the lookups are in, and the per-arm summary line (only with it on)
+    if let (Some(p), Some(j)) = (pslive.as_ref(), ps_live_end.as_mut()) {
+        if let Some((rz, line)) = p.fee_ab_end() {
+            eprintln!("{line}");
+            j["fee_ab"]["realized"] = rz;
+        }
+    }
     let mut re = serde_json::json!({"ev": "run_end", "t": arbx::feeds::clock::now_ns(), "dumps": n_dumps, "in_envelope": n_env, "picks": n_picks, "fired": n_fired, "closed": n_closed,
         "landed_buys": ACCT.landed_buys.load(Ordering::SeqCst), "realized": ACCT.realized.load(Ordering::SeqCst), "skipped": skipped});
     if let Some(np) = npool {

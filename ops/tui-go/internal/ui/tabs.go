@@ -371,7 +371,7 @@ func (m *Model) scrPresend(w, bh int) string {
 			}), "\n")
 	}
 	latR := t.Lbl.Render("ms")
-	if v.RA.On || v.AB.On { // dip26: the T2 result, the re-arm's own section, the send-path A/B
+	if v.RA.On || v.AB.On || v.FAB.On { // dip26: the T2 result, the re-arm's own section, the send-path A/B; dip37: the fee A/B
 		return m.scrPresend26(w, cw, title, right, C, A, E, Wn, Q, P, Ss, latR, all)
 	}
 	left := []string{m.section(title, right, C, cw), m.section("RESULT", "", A, cw), m.section("EXITS", "", E, cw), m.section("WINDOWS", "", Wn, cw)}

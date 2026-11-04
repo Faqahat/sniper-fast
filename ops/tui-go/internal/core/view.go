@@ -570,6 +570,8 @@ type View struct {
 	T2 AggPS
 	RA AggRA
 	AB ABQuick
+	// dip37: the per-window priority-fee A/B (feeab.go; On only when the records carry fee_arm)
+	FAB FeeABSum
 	// the Filters tab (filters.go): what each pre-send filter blocked and would have made
 	Filt *FiltReport
 }

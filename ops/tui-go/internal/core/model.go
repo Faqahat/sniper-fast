@@ -177,6 +177,8 @@ type Trade struct {
 	Tip      Num
 	Late     bool
 	Lat      *PSLat // the filling try's latency (v3, display only)
+	// dip37: the filling try's fee arm ("A" / "B") and leader group ("fee" / "jito" / "other"); "" = no fee A/B
+	FeeArm, FeeGrp string
 }
 
 // Closed: a PS trade with a close record or a P&L (the Python `close is not None or pnl is not None`).
@@ -426,6 +428,9 @@ type Sess struct {
 	RAEng  RearmEng
 	AB     ABSess
 	PSCaps [2]int64
+
+	// dip37: the fee A/B's failed tries per arm x leader group (feeab.go)
+	FAB FeeABRec
 }
 
 // MinAmt is an amount booked in a unix minute.
@@ -860,6 +865,7 @@ func (M *Model) jAttemptLand(line []byte) {
 				S.RA.Fees += fee
 				S.RA.FeeN++
 			}
+			S.fabLand(line, fee) // dip37: by fee arm x leader group (nothing without the fields)
 		}
 	}
 }
@@ -1431,6 +1437,10 @@ func (M *Model) ps(S *Sess, e string, o Obj) {
 		tr.TrigPct, tr.TrigSol = pct, wsol
 		tr.Fee, tr.Tip = NumKey(o, "fee"), NumKey(o, "tip")
 		tr.Late = Truthy(o["after_exit"])
+		if a, ok := StrKey(o, "fee_arm"); ok && a != "" { // dip37: the fee A/B (nothing without the field)
+			tr.FeeArm, tr.FeeGrp = a, StrOr(o, "fee_grp", "other")
+			S.FAB.Any = true
+		}
 		S.PSPos[key] = tr
 		S.PSByKey[key] = append(S.PSByKey[key], tr)
 		S.PSList = append(S.PSList, tr)

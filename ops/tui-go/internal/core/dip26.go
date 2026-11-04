@@ -1075,6 +1075,7 @@ func PathCode(p string) string {
 func (v *View) d26View(sel []*Sess) {
 	v.T2, v.RA = splitPS(sel, v.PS, v.Running, v.S)
 	v.AB = abQuick(sel)
+	v.FAB = FeeABOf(sel) // dip37
 }
 
 // d26Items: the re-arm's and the A/B's config items (only when the run has them).

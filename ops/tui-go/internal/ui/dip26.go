@@ -462,6 +462,9 @@ func (m *Model) scrPresend26(w, cw int, title, right string, C, A, E, Wn, Q, P, 
 		if v.AB.On {
 			secs = append(secs, m.section("SEND PATHS A/B", ar, ab, w))
 		}
+		if v.FAB.On { // dip37
+			secs = append(secs, m.section("FEE A/B", "", m.fabLines(w), w))
+		}
 		secs = append(secs, m.section("LATENCY", latR, m.latencyLines(w, all), w), m.section("QUIET", "", Q, w), m.section(exT, "", E, w),
 			m.section("PAPER vs LIVE", "", P, w), m.section("WINDOWS", "", Wn, w))
 		if len(Ss) > 0 {
@@ -479,6 +482,9 @@ func (m *Model) scrPresend26(w, cw int, title, right string, C, A, E, Wn, Q, P, 
 	var rightCol []string
 	if v.AB.On {
 		rightCol = append(rightCol, m.section("SEND PATHS A/B", ar, ab, rw))
+	}
+	if v.FAB.On { // dip37
+		rightCol = append(rightCol, m.section("FEE A/B", "", m.fabLines(rw), rw))
 	}
 	rightCol = append(rightCol, m.section("LATENCY", latR, m.latencyLines(rw, all), rw), m.section("QUIET", "", Q, rw), m.section("PAPER vs LIVE", "", P, rw))
 	if len(Ss) > 0 {

@@ -360,8 +360,10 @@ impl PsLive {
         let ob6 = ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &mint, &dump.tr.user, &self.user);
         // dip36 live gate: the window's verdict cell (None without the FP-NOBOT log)
         let fpg = self.fp.as_ref().map(|_| Arc::new(pslog36::Gate::default()));
+        // dip37: the window's fee arm, once, now (None with the fee A/B off)
+        let fab = self.fab_assign(id);
         self.sh.wins.lock().unwrap().push(SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::new(st_ns, k, slot_ns), n: 0, done: false,
-            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone() });
+            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab });
         self.armed.insert(mint, id);
         {
             let tp = &mut self.tapes.entry(mint).or_insert_with(|| (VecDeque::new(), 0)).0;
@@ -385,6 +387,8 @@ impl PsLive {
             r["f3"] = serde_json::json!({"fresh": fresh, "fresh_n": fresh_n});
             if let Some(g) = tags_json(&self.det, &mint, &self.cfg.tag_wallets) { r["tags"] = g; }
         }
+        // dip37: the window's fee arm and its values (only with the A/B on)
+        self.fab_arm_rec(&mut r, fab);
         // dip34 (log-only): seen / eqgrp / q4 keyed on the dumper (each only with its flag)
         let dumper = dump.tr.user;
         self.log34(&mut r, &mint, &dumper, chk_slot, chk_t);
