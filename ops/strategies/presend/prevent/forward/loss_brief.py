@@ -6,6 +6,8 @@ deeper limit: drop used / other holder / depth) and what the LOG-ONLY rules say 
 before it, the safe sell timer's would-block with each holder's hazard, the holder clock), then who sold inside our hold.
 dip34/35: the arm record's log-only fields (eqgrp, f3 fresh, q4 wh_l10) and the presend_live_fam record (fam %, hit) are printed when
 present and join the "WOULD HAVE BLOCKED IT" list as "(log)" entries (eqgrp flag, fresh >= 35%, fam hit).
+dip36: FP-NOBOT (presend_live_fpnb): the score at the arm and at the send that decided the fill (stage "fill"), its threshold and
+would_block; a would_block at the fill joins the list as "fpnb (log)".
 usage: loss_brief.py RUN.jsonl MINT_PREFIX [--all] [--seed gcr_seed.json]"""
 import sys, json, collections, os
 
@@ -16,6 +18,7 @@ if os.path.exists(seed_p):
     for c, d in json.load(open(seed_p)).items(): led[c] = [d["n"], d["sum"]]
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 arm, fill, close, tape, out, famr = {}, {}, {}, collections.defaultdict(list), [], {}
+fpnb = collections.defaultdict(dict)   # dip36: (w, mint) -> {"arm": rec, "fill": the first fill's rec}
 for line in open(path, errors="replace"):
     if '"ev":"presend_live_' not in line: continue
     d = json.loads(line); e = d["ev"]
@@ -29,6 +32,7 @@ for line in open(path, errors="replace"):
     elif e == "presend_live_close": close[k] = d
     elif e == "presend_live_tape": tape[mint].append(d)
     elif e == "presend_live_fam": famr[k] = d
+    elif e == "presend_live_fpnb" and d.get("stage") in ("arm", "fill"): fpnb[k].setdefault(d["stage"], d)
     elif e == "presend_live_realized":
         a = arm.get(k)
         if a and (a[0].get("ann") or {}).get("creator") and (a[0].get("ann") or {}).get("cr_pct", 0) >= 3:
@@ -97,6 +101,23 @@ for k, pnl in (out if "--all" in sys.argv else out[-1:]):
                          f"{fm.get('n_holders')} holders, hist {fm.get('hist')}, read {(fm.get('read_slot') or 0) - (fm.get('arm_slot') or 0)} slots after the arm) -> "
                          + ("FLAGGED (>= %.1f%%)" % fm.get("thr", 26.825) if fm.get("hit") else "no"))
             if fm.get("hit"): caught.append("fam hit (log)")
+    # LOG (dip36): FP-NOBOT (no follower bot within 2 slots), at the arm and at the send that decided the fill
+    fp = fpnb.get(k) or {}
+    if fp:
+        def fps(r):
+            if not r or r.get("score") is None: return "n/a" + (f" ({r.get('nc')})" if r and r.get("nc") else "")
+            return (f"{r['score']:.3f} vs {r.get('thr', 0):.3f}" + ("" if r.get("covered", True) else f" [not covered: {r.get('nc')}]")
+                    + ("" if r.get("warm", True) else " [warm-up]") + (" -> WOULD BLOCK" if r.get("block") else " -> pass"))
+        fl = fp.get("fill")
+        lines.append(f"  no-bot filter FP-NOBOT (log): arm {fps(fp.get('arm'))} | deciding send (slot {fl.get('slot') if fl else '?'}) {fps(fl)}"
+                     + (f" | whale history {fl.get('hist_h')} h" if fl else "")
+                     + (f" | live gate withheld {fl['withheld']} sends of this window first" if fl and fl.get("withheld") else ""))
+        if fl and fl.get("block"): caught.append("fpnb (log)")
+        s2 = (fl or {}).get("skip2")
+        if s2:
+            lines.append(f"  skip2 per-send (log): score {s2.get('score', 0):.3f} vs {s2.get('thr', 0):.3f} (without failed txs {s2.get('score_nf', 0):.3f})"
+                         + (" -> WOULD SKIP" if s2.get("skip") else " -> pass"))
+            if s2.get("skip"): caught.append("skip2 (log)")
     # who sold inside our hold
     sl = (c.get("sell_land") or [None])[0]
     holders = {h["w"] for h in hs}

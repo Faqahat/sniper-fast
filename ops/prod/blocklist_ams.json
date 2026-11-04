@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "note": "dip36 --presend-live-blocklist seed (owner OK 11-05 PKT): an arm is skipped when the T2 whale, the re-arm dumper or a holder >= 3% is listed",
+  "wallets": [
+    {"w": "8ZN71XTdVo8yRovnGLmNgW3Tgniw6A4J3JGLvPD686FP", "why": "re-arm trigger dumper of the 9% trio, r38–r55 −0.81 SOL / 35 fills"},
+    {"w": "G3fk9NykrzmcXr4YYmToftFayrC6Y6ACiuc6WCKq3f8B", "why": "9% trio, sells into our hold"},
+    {"w": "46qjgvZNdiLxCqJ6oMBf8NoA3dZtC3xuagLpfMLYG8f9", "why": "9% trio, sells into our hold"},
+    {"w": "Cu1cXMvtXdEafDoPjtvjxgvyXHAK7Yh8AFvuKUVDy6yG", "why": "9% trio, sells into our hold"}
+  ]
+}

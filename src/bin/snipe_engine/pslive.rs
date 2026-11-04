@@ -89,20 +89,24 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 
 /// every --presend-live-* flag (a stray one without --presend-live is refused)
-const FLAGS: [&str; 38] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
+const FLAGS: [&str; 40] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
     "--presend-live-cu-limit", "--presend-live-cu-price-micro", "--presend-live-tip-lamports", "--presend-live-routes", "--presend-live-max-per-sec",
     "--presend-live-path-max-per-sec", "--presend-live-max-fills", "--presend-live-fee-budget-sol", "--presend-live-create-slot", "--presend-live-one-position",
     "--presend-live-exit-ms", "--presend-live-quiet-v2-log", "--presend-live-min-age-slots", "--presend-live-lone-whale-slots", "--presend-live-ann",
     "--presend-live-deep-drop", "--presend-live-holds-state", "--presend-live-breaker", "--presend-live-cr-unfollowed", "--presend-live-cr-loss",
     "--presend-live-creator-state", "--presend-live-f3-log", "--presend-live-tag-wallets", "--presend-live-quiet3a", "--presend-live-exact-exit",
     "--presend-live-cr-earn-log", "--presend-live-seen-log", "--presend-live-eqgrp-log", "--presend-live-q4-log", "--presend-live-fam-log",
-    "--presend-live-fam-thr", "--presend-live-fam-rpc", "--presend-live-cr-log"];
+    "--presend-live-fam-thr", "--presend-live-fam-rpc", "--presend-live-cr-log", "--presend-live-blocklist", "--presend-live-blocklist-pct"];
 
 /// dip20 QUIET: its flags (each needs --presend-live; the history / threshold / warm-up / fbots / preload ones need
 /// --presend-live-quiet-skip on)
 const QFLAGS: [&str; 10] = ["--presend-live-quiet-stop", "--presend-live-quiet-skip", "--presend-live-quiet-hist-h", "--presend-live-quiet-fol",
     "--presend-live-quiet-warmup-min", "--presend-live-fbots", "--presend-live-quiet-preload", "--presend-live-quiet-state", "--presend-live-quiet-state-max-gap-min",
     "--presend-live-quiet-book"];
+
+/// dip36 FP-NOBOT (log-only): its flags (each needs --presend-live; the paths need --presend-fpnb-log on)
+const FPFLAGS: [&str; 7] = ["--presend-fpnb-log", "--presend-fpnb-bots", "--presend-fpnb-preload", "--presend-skip2-log", "--presend-skip2-seed", "--presend-fpnb-live",
+    "--presend-fpnb-control"];
 
 /// dip26 RE-ARM: its flags (each needs --presend-live; the parameters after the first need --presend-live-rearm on)
 const RFLAGS: [&str; 5] = ["--presend-live-rearm", "--presend-live-rearm-size-sol", "--presend-live-rearm-gap-slots", "--presend-live-rearm-quiet-stop",
@@ -121,6 +125,14 @@ use pslog34::L34;
 #[path = "pslog35.rs"]
 mod pslog35;
 use pslog35::{FamReq, FamRes, L35};
+
+// dip36 LIVE wallet blocklist (arm-time skips; off unless --presend-live-blocklist PATH)
+#[path = "psblock.rs"]
+mod psblock;
+
+// dip36 LOG-ONLY FP-NOBOT (the frozen no-follower-bot filter scored at every arm / send slot / fill on its own thread; off unless its flag)
+#[path = "pslog36.rs"]
+mod pslog36;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -292,6 +304,26 @@ pub struct Cfg {
     pub fam_thr: f64,
     /// dip35 --presend-live-fam-rpc URL (`${VAR}` expanded from the environment; never printed): the read's RPC (default: rpc_url)
     pub fam_rpc: Option<String>,
+    /// dip36 --presend-live-blocklist PATH (LIVE; off when not given): skip an arm whose T2 whale / re-arm dumper / holder >= blocklist_pct %
+    ///   is a listed wallet ("blocklist" / "rearm_blocklist"); the file hot-reloads (psblock.rs)
+    pub blocklist: Option<String>,
+    /// dip36 --presend-live-blocklist-pct X (default 3.0; (0, 100]): the holder role's threshold (% of supply)
+    pub blocklist_pct: f64,
+    /// dip36 --presend-fpnb-log on|off (default off; LOG-ONLY): FP-NOBOT scored at every pre-send arm, send slot and fill on its own
+    ///   thread (pslog36.rs, src/fpnb.rs): presend_live_fpnb records; never a decision
+    pub fpnb_log: bool,
+    /// dip36 --presend-fpnb-bots FILE (needed with the log): the follower-bot list (registry engine view or cohort_full_b58.json), hot-reloaded
+    pub fpnb_bots: Option<String>,
+    /// dip36 --presend-skip2-log on|off (default off; LOG-ONLY; needs --presend-fpnb-log on): the SKIP-2 per-send logistic score on the
+    ///   FP-NOBOT records ("skip2"); --presend-skip2-seed FILE seeds its creator / whale / mint ledgers (s2_seed.py)
+    pub skip2_log: bool,
+    pub skip2_seed: Option<String>,
+    /// dip36 --presend-fpnb-live t2,rearm | t2 | rearm | off (default off; LIVE; needs --presend-fpnb-log on): the FP-NOBOT send gate's start
+    ///   mode (bit 0 T2, bit 1 re-arm); --presend-fpnb-control FILE ({"live": [...]}, re-read every ~10 s) overrides it
+    pub fpnb_live: u64,
+    pub fpnb_control: Option<String>,
+    /// dip36 --presend-fpnb-preload FILE (optional): the 24 h whale history + our earlier results (fp_preload.py); without it they warm up
+    pub fpnb_preload: Option<String>,
     /// the shadow's T2 / exit parameters (--presend-*): the same rules
     pub whale_pct: f64, pub window_slots: u64, pub live_ms: f64, pub exit_slots: u64, pub tp: f64, pub sl: f64,
     /// dip22 (--presend-live-exit-ms N; 0 = off, the default): sell N ms after our fill is seen, before the slot limit. The "sell
@@ -323,7 +355,7 @@ impl Cfg {
         let arg_u64_opt = |f: &str| arg(f).and_then(|s| s.parse::<u64>().ok());
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -380,6 +412,17 @@ impl Cfg {
             fam_log: has("--presend-live-fam-log"),
             fam_thr: arg_f64("--presend-live-fam-thr", pslog35::FAM_THR),
             fam_rpc: arg("--presend-live-fam-rpc").filter(|u| !u.starts_with("--")),
+            // dip36 LIVE blocklist
+            blocklist: arg("--presend-live-blocklist").filter(|p| !p.starts_with("--")),
+            blocklist_pct: arg_f64("--presend-live-blocklist-pct", psblock::BL_PCT),
+            // dip36 (log-only)
+            fpnb_log: onoff("--presend-fpnb-log", false)?,
+            fpnb_bots: arg("--presend-fpnb-bots").filter(|p| !p.starts_with("--")),
+            fpnb_preload: arg("--presend-fpnb-preload").filter(|p| !p.starts_with("--")),
+            skip2_log: onoff("--presend-skip2-log", false)?,
+            skip2_seed: arg("--presend-skip2-seed").filter(|p| !p.starts_with("--")),
+            fpnb_live: match arg("--presend-fpnb-live") { Some(s) => pslog36::mode_parse(&s).map_err(|e| anyhow::anyhow!("--presend-fpnb-live {e}"))?, None => 0 },
+            fpnb_control: arg("--presend-fpnb-control").filter(|p| !p.starts_with("--")),
             whale_pct: sh.whale_pct, window_slots: sh.window_slots, live_ms: sh.live_ms, exit_slots: sh.exit_slots, tp: sh.tp, sl: sh.sl,
             exit_ms: arg_u64("--presend-live-exit-ms", 0),
             quiet,
@@ -388,6 +431,21 @@ impl Cfg {
         };
         if has("--presend-live-fam-rpc") && c.fam_rpc.is_none() { bail!("--presend-live-fam-rpc needs a URL ({}VAR{} expanded from the environment)", "${", "}"); }
         if (has("--presend-live-fam-thr") || has("--presend-live-fam-rpc")) && !c.fam_log { bail!("--presend-live-fam-thr / --presend-live-fam-rpc need --presend-live-fam-log"); }
+        // dip36: the FP-NOBOT paths need a value and the log on; the log needs the bot list
+        for f in ["--presend-fpnb-bots", "--presend-fpnb-preload"] {
+            if has(f) && arg(f).is_none_or(|p| p.starts_with("--")) { bail!("{f} needs a path"); }
+            if has(f) && !c.fpnb_log { bail!("{f} needs --presend-fpnb-log on"); }
+        }
+        if has("--presend-live-blocklist") && c.blocklist.is_none() { bail!("--presend-live-blocklist needs a path"); }
+        if has("--presend-live-blocklist-pct") && c.blocklist.is_none() { bail!("--presend-live-blocklist-pct needs --presend-live-blocklist PATH"); }
+        if !(c.blocklist_pct > 0.0 && c.blocklist_pct <= 100.0) { bail!("--presend-live-blocklist-pct must be in (0, 100] (% of supply)"); }
+        if has("--presend-skip2-seed") && c.skip2_seed.is_none() { bail!("--presend-skip2-seed needs a path"); }
+        if has("--presend-fpnb-control") && c.fpnb_control.is_none() { bail!("--presend-fpnb-control needs a path"); }
+        if has("--presend-fpnb-live") && arg("--presend-fpnb-live").is_none_or(|v| v.starts_with("--")) { bail!("--presend-fpnb-live needs t2,rearm | t2 | rearm | off"); }
+        if (c.fpnb_live != 0 || c.fpnb_control.is_some()) && !c.fpnb_log { bail!("--presend-fpnb-live / --presend-fpnb-control need --presend-fpnb-log on (the scores they act on)"); }
+        if c.skip2_log && !c.fpnb_log { bail!("--presend-skip2-log on needs --presend-fpnb-log on (it reuses FP-NOBOT's per-send inputs)"); }
+        if c.skip2_seed.is_some() && !c.skip2_log { bail!("--presend-skip2-seed needs --presend-skip2-log on"); }
+        if c.fpnb_log && c.fpnb_bots.is_none() { bail!("--presend-fpnb-log on needs --presend-fpnb-bots FILE (the follower-bot list)"); }
         c.check(live, cap)?;
         Ok(Some(c))
     }
@@ -517,6 +575,11 @@ impl Cfg {
         if self.q4_log { j["q4_log"] = true.into(); }
         // dip35: only when on (off: dip34's record; the URL never)
         if self.fam_log { j["fam_log"] = serde_json::json!({"thr": self.fam_thr, "rpc": if self.fam_rpc.is_some() { "--presend-live-fam-rpc" } else { "rpc_url" }}); }
+        // dip36: only when on (off: dip35's record)
+        if let Some(p) = &self.blocklist { j["blocklist"] = serde_json::json!({"path": p, "holder_pct": self.blocklist_pct}); }
+        if self.fpnb_log { j["fpnb_log"] = serde_json::json!({"bots": self.fpnb_bots, "preload": self.fpnb_preload, "thr_t2": arbx::fpnb::THR_T2, "thr_rearm": arbx::fpnb::THR_REARM}); }
+        if self.skip2_log { j["skip2_log"] = serde_json::json!({"seed": self.skip2_seed}); }
+        if self.fpnb_live != 0 || self.fpnb_control.is_some() { j["fpnb_live"] = serde_json::json!({"mode": pslog36::mode_str(self.fpnb_live), "control": self.fpnb_control}); }
         if !self.tag_wallets.is_empty() { j["tag_wallets"] = self.tag_wallets.iter().map(b58).collect::<Vec<_>>().into(); }
         // dip28: only when on (off: dip27's record)
         if self.deep_drop > 0.0 { j["deep_drop"] = self.deep_drop.into(); j["deep_ob6"] = DEEP_OB6.into(); }
@@ -582,7 +645,9 @@ fn refuse_empty_classes<T>(r: &std::collections::HashMap<String, Vec<T>>) -> Res
 /// `rearm` = a re-arm window (its attempt records say so)
 #[derive(Clone)]
 struct SWin { id: u64, mint: Pk, launch: Launch, st_ns: u64, stop_ns: u64, en_slot: u64, vsol: u64, vtok: u64, fr: f64, pos: (u64, u32, i32), pace: pl::Pace, n: u32, done: bool,
-              spend: u64, rearm: bool, ob6: f32, grd: Grd }
+              spend: u64, rearm: bool, ob6: f32, grd: Grd,
+              /// dip36 live gate: the window's FP-NOBOT verdict (None: --presend-fpnb-log off)
+              fpg: Option<Arc<pslog36::Gate>> }
 
 /// dip28: the deeper limit's holder threshold (% of supply)
 pub const DEEP_OB6: f32 = 6.0;
@@ -721,7 +786,9 @@ pub struct Att {
 }
 
 /// what the sender needs
-struct SCfg { cfg: Cfg, user: Pk, key: SigningKey, guard: GuardEnc, routes: FxHashMap<String, Vec<RouteP>>, handle: tokio::runtime::Handle }
+struct SCfg { cfg: Cfg, user: Pk, key: SigningKey, guard: GuardEnc, routes: FxHashMap<String, Vec<RouteP>>, handle: tokio::runtime::Handle,
+    /// dip36 FP-NOBOT live gate's mode / counters (None: --presend-fpnb-log off)
+    fpg: Option<Arc<pslog36::GateShared>> }
 
 /// log records and terminal lines go to a writer thread (no write on the event loop)
 pub enum Out { Rec(serde_json::Value), Line(String) }
@@ -771,6 +838,16 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let t0 = arbx::fast::mono_ns();
             // why not now (each counted); dip26: the same gate for every window (send_gate: unit-tested), at the window's own spend
             if let Some(why) = send_gate(&sh, sc.cfg.one_position, w.spend) { sh.skip(why); continue; }
+            // dip36 FP-NOBOT LIVE GATE (--presend-fpnb-live / --presend-fpnb-control; off: never): this slot's verdict blocks -> withheld (one
+            // atomic load; no fresh verdict -> fail open)
+            if let (Some(g), Some(gs)) = (&w.fpg, &sc.fpg) {
+                if pslog36::gate_withhold(g, gs, slot, w.rearm) {
+                    sh.skip("fpnb_withheld");
+                    let _ = out.send(Out::Rec(serde_json::json!({"ev": "presend_live_fpnb_withheld", "w": w.id, "n": w.n, "mint": b58(&w.mint), "slot": slot,
+                        "kind": if w.rearm { "rearm" } else { "T2" }, "verdict_slot": g.v.load(Ordering::Relaxed) >> 2, "t": arbx::feeds::clock::now_ns()})));
+                    continue;
+                }
+            }
             let deadline = (slot + sc.cfg.deadline_slots).min(w.en_slot);
             if deadline < slot { sh.skip("window_over"); continue; }
             let (leader, client) = lat::leader_of(slot).unwrap_or_default();
@@ -1640,6 +1717,10 @@ pub struct PsLive {
     l34: L34,
     /// dip35 LOG-ONLY fam reads' state (pslog35.rs; no client with the flag off)
     l35: L35,
+    /// dip36 LOG-ONLY FP-NOBOT (pslog36.rs; None with the flag off: nothing sent, no thread)
+    fp: Option<pslog36::Fp>,
+    /// dip36 LIVE blocklist (psblock.rs; None without --presend-live-blocklist)
+    bl: Option<psblock::Blocklist>,
 }
 
 impl PsLive {
@@ -1668,6 +1749,14 @@ impl PsLive {
         desc.sort();
         let slot_ns = arbx::feeds::entries::SLOT_US.load(Ordering::Relaxed) * 1_000;
         let out = spawn_writer(log.clone());
+        // dip36 (log-only): the FP-NOBOT thread (refused here, before the sender starts, when its bot list is bad; None with the flag off)
+        let fp = pslog36::Fp::start(&cfg, user, &out, false)?;
+        // dip36 LIVE blocklist (a bad / missing file refuses the start; None without the flag)
+        let bl = cfg.blocklist.as_deref().map(psblock::Blocklist::load).transpose()?;
+        if let Some(b) = &bl {
+            eprintln!("DIP PRESEND LIVE BLOCKLIST (dip36, LIVE): {} wallets from {} (version {}); an arm is skipped when the T2 whale / re-arm dumper / a holder >= {}% is listed; re-read on change",
+                b.set.len(), b.path, b.ver, cfg.blocklist_pct);
+        }
         let (atx, arx) = crossbeam_channel::unbounded::<Att>();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()),
@@ -1680,7 +1769,7 @@ impl PsLive {
                 Err(e) => eprintln!("DIP PRESEND LIVE CREATOR GATE: no preload from {p} ({e:#}); the histories start empty"),
             }
         }
-        let sc = SCfg { cfg: cfg.clone(), user, key: (*key).clone(), guard, routes, handle: tokio::runtime::Handle::current() };
+        let sc = SCfg { cfg: cfg.clone(), user, key: (*key).clone(), guard, routes, handle: tokio::runtime::Handle::current(), fpg: fp.as_ref().map(|f| f.gs.clone()) };
         let fee1 = cfg.fail_fee();
         let line = format!("DIP PRESEND LIVE{} | T2 whale >= {}% -> window {} slots from +{} ms (create-slot triggers {}) | {} attempts per slot ({:.0} ms apart), {:.3} SOL, limit = latest price x {:.2}, \
             deadline slot + {} | CU {} x {} uL (a failed attempt {} lamports) | routes {} | caps: {} fills, fees {:.4} SOL per rolling 24 h (pause), {} attempts/s ({} per path) | one position {} | exit {} slots{} / TP +{:.0}% / SL -{:.0}% | min token age {}",
@@ -1771,12 +1860,16 @@ impl PsLive {
             par: FxHashMap::default(),
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
-            tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35 };
+            tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl };
         if let Some(r) = qrec { p.rec(r); }
         Ok(p)
     }
 
-    fn rec(&self, v: serde_json::Value) { let _ = self.out.send(Out::Rec(v)); }
+    fn rec(&self, v: serde_json::Value) {
+        // dip36 skip2 (log-only): its history sees the skips and disarms (nothing without the flag)
+        if let Some(f) = self.fp.as_ref() { f.on_rec(&v); }
+        let _ = self.out.send(Out::Rec(v));
+    }
     fn line(&self, l: String) { let _ = self.out.send(Out::Line(l)); }
 
     /// the attempts the sender registered
@@ -1789,6 +1882,8 @@ impl PsLive {
             cnt_add(&mut self.st.per_client, &a.client, 0);
             // dip26: the re-arm's own count (nothing without it)
             if let Some(rm) = self.rm.as_mut() { if rm.is_win(a.w) { rm.st.sent += 1; } }
+            // dip36 (log-only): the attempt's send slot for FP-NOBOT's per-send score (nothing without the flag)
+            if let Some(f) = self.fp.as_ref() { f.send(pslog36::FpMsg::Send { w: a.w, n: a.n, slot: a.slot }); }
             self.order.push_back((a.deadline, a.sig, Instant::now()));
             self.atts.insert(a.sig, (a, false));
         }
@@ -1974,6 +2069,13 @@ impl PsLive {
         // the observatory's (nothing without it)
         if self.rm.is_some() { self.rearm_slot(a.slot, a.t_rx, &launch_of, reactive_open); }
         for c in &x.creates { self.det.create(c.mint, a.slot, c.creator, c.user, x.mayhem); }
+        // dip36 (log-only): FP-NOBOT's chain store takes the creates, then the trades, before any trigger decision (nothing without the flag)
+        if let Some(f) = self.fp.as_ref() {
+            for c in &x.creates { f.send(pslog36::FpMsg::Create(c.mint, a.slot)); }
+            for (j, e) in x.trades.iter().enumerate() {
+                f.send(pslog36::FpMsg::Trade(e.mint, arbx::fpnb::Row { s: a.slot, i: x.index as u32, j: j as i32, buy: e.buy, user: e.user, sol: e.sol, tok: e.tok, vsol: e.vsol }));
+            }
+        }
         let mut evs: Vec<pl::Det> = Vec::new();
         // dip32 (f3 log): did this tx run program 41Pr4XqE (a static key; program ids never come from lookup tables)
         if self.cfg.f3_log { self.cur_r41 = a.tx.ixs.iter().any(|ix| a.tx.keys.get(ix.program as usize) == Some(&P41)); }
@@ -2149,6 +2251,9 @@ impl PsLive {
         // dip32 the creator gate (decided last, like the lone whale: only a trigger that would arm is skipped "cr_loss" / "cr_unfollowed")
         let (crw, crj) = if self.cfg.cr_on() { cr_gate(&self.sh, &self.cfg, self.det.creator_bal(&t.mint).map(|c| c.0), t.t_rx) } else { (None, None) };
         if why.is_none() { if let Some(w) = crw { why = Some(if w == "loss" { "cr_loss" } else { "cr_unfollowed" }); } }
+        // dip36 LIVE blocklist (with the arm-time skips: only a trigger that would arm; nothing without the flag)
+        let blh = if why.is_none() && self.bl.is_some() { self.bl_hit(&t.mint, &whale, "whale", Some(bal)) } else { None };
+        if blh.is_some() { why = Some("blocklist"); }
         // dip32/33 QUIET3-A: the 120 s ring's trades <= 15 and the whale's dumps <= 3 (QUIET's rule on); dip33: LIVE with --presend-live-quiet3a
         let n120 = v2.as_ref().and_then(|v| v["n_120s"].as_u64());
         let whd = qj.as_ref().and_then(|q| q["wh_dumps"].as_u64());
@@ -2171,6 +2276,7 @@ impl PsLive {
             if let Some(n) = nb { r["nb"] = n.into(); }
             if let Some(a) = ann { r["ann"] = a; }
             if let Some(j) = &crj { r["cr"] = j.clone(); }
+            if let Some(h) = &blh { PsLive::bl_fields(&mut r, h); }
             if let Some(f) = &f3 { r["f3"] = f.clone(); }
             if let Some(g) = &tags { r["tags"] = g.clone(); }
             // dip34 (log-only): seen / eqgrp / q4 (each only with its flag); then this skip into the seen book (cr_loss / quiet3_a)
@@ -2188,6 +2294,10 @@ impl PsLive {
             if why == "cr_loss" || why == "cr_unfollowed" {
                 self.line(format!("  PRESEND LIVE CREATOR SKIP ({why}) {} whale {} {:.1}% ({:.2} SOL) | creator {} history {}", b58(&t.mint), &b58(&whale)[..8], pct,
                     t.sol as f64 / 1e9, self.det.creator_bal(&t.mint).map(|c| b58(&c.0)[..8].to_string()).unwrap_or_default(), crj.as_ref().map(|j| j.to_string()).unwrap_or_default()));
+            }
+            if let Some(h) = blh.as_ref().filter(|_| why == "blocklist") {
+                if let Some(b) = self.bl.as_mut() { b.skips += 1; }
+                self.line(format!("  PRESEND LIVE BLOCKLIST SKIP {} whale {} {:.1}% | listed {} ({}, {:.2}%): {}", b58(&t.mint), &b58(&whale)[..8], pct, &b58(&h.0)[..8], h.1, h.2, h.3));
             }
             if why == "lone_whale" {
                 self.line(format!("  PRESEND LIVE LONE-WHALE SKIP {} whale {} {:.1}% ({:.2} SOL) | buyers in the last {lw} slots: {}", b58(&t.mint), &b58(&whale)[..8], pct,
@@ -2211,9 +2321,11 @@ impl PsLive {
         let en_slot = ((t.a() + self.cfg.live_ms + self.cfg.window_slots as f64 * pl::SMS) / pl::SMS).floor() as u64;
         let st_ns = t_top.unwrap_or_else(arbx::fast::mono_ns) + (self.cfg.live_ms * 1e6) as u64;
         let slot_ns = arbx::feeds::entries::SLOT_US.load(Ordering::Relaxed) * 1_000;
+        // dip36 live gate: the window's verdict cell (shared with the FP thread; None without the log)
+        let fpg = self.fp.as_ref().map(|_| Arc::new(pslog36::Gate::default()));
         let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
             spend: self.cfg.spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
-            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s) };
+            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone() };
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
         self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0)).0.push_back(t.clone());
@@ -2236,15 +2348,29 @@ impl PsLive {
         if let Some(g) = tags { r["tags"] = g; }
         // dip34 (log-only): seen / eqgrp / q4 (each only with its flag)
         self.log34(&mut r, &t.mint, &whale, t.s, t.t_rx);
+        // dip36 (log-only): FP-NOBOT's copy of the arm record (only with its flag)
+        let fpr = self.fp.is_some().then(|| r.clone());
         self.rec(r);
         // dip35 (log-only): the fam holders read (nothing without its flag)
         self.fam_arm(id, t.mint, false, t.s);
+        // dip36 (log-only): FP-NOBOT at the arm (its thread; nothing without the flag)
+        if let Some(r) = fpr { self.fpnb_arm(id, false, t.mint, t, whale, t.s, Vec::new(), &r, en_slot, fpg); }
         self.line(format!("  PRESEND LIVE ARM w{id} {} whale {} {:.1}% ({:.2} SOL) age {} slots | until slot {en_slot} | {} attempts/slot, limit {:.2}x", b58(&t.mint),
             &b58(&whale)[..8], pct, t.sol as f64 / 1e9, age_slots, self.cfg.k, 1.0 - self.cfg.drop));
     }
 
     /// one of our attempts filled (its buy TradeEvent)
     fn fill(&mut self, t: &pl::Trade, fee: u64, reactive_on_mint: bool) {
+        let w_fp = self.atts.get(&t.sig).map(|(a, _)| a.w);
+        self.fill_inner(t, fee, reactive_on_mint);
+        // dip36 (log-only): FP-NOBOT's decided send (t = fill slot - 1) for this fill (nothing without the flag)
+        if let (Some(w), true) = (w_fp, self.fp.is_some()) {
+            let pid = self.pos.get(&t.mint).map(|p| p.pid);
+            if let Some(f) = self.fp.as_ref() { f.send(pslog36::FpMsg::Fill { w, pid, mint: t.mint, slot: t.s }); }
+        }
+    }
+
+    fn fill_inner(&mut self, t: &pl::Trade, fee: u64, reactive_on_mint: bool) {
         let Some((att, done)) = self.atts.get_mut(&t.sig) else { return };
         let first = !*done;
         *done = true;
@@ -2560,6 +2686,8 @@ impl PsLive {
             };
             self.q4_note(arbx::feeds::clock::now_ns(), wh, fol, &sellers);
         }
+        // dip36 (log-only): the position into FP-NOBOT's own-result book (its P&L follows; nothing without the flag)
+        self.fpnb_close(&p);
         self.realized(&p, cr);
     }
 
@@ -2723,6 +2851,8 @@ impl PsLive {
                 let (sh, brk) = (self.sh.clone(), self.cfg.breaker);
                 // dip26: the realized split by kind (only with the re-arm on)
                 let rz = self.rz();
+                // dip36 (log-only): the P&L to FP-NOBOT's book (None without the flag)
+                let fpx = self.fp.as_ref().and_then(|f| f.tx.clone());
                 REALIZED_INFLIGHT.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
                     let mut bs = Vec::with_capacity(buys.len());
@@ -2730,6 +2860,7 @@ impl PsLive {
                     let mut ss = Vec::with_capacity(sells.len());
                     for (s, seen, _) in &sells { ss.push(tx_payer(&rpc, s, if *seen { 8 } else { 2 }).await); }
                     let (pnl, nb, ns) = pnl_of(&bs, &ss);
+                    if let Some(tx) = &fpx { let _ = tx.send(pslog36::FpMsg::Realized { pid, pnl, mint, w, t: arbx::feeds::clock::now_ns() }); }
                     ACCT.realized.fetch_add(pnl, Ordering::SeqCst);
                     if let Some(z) = &rz { z.add(rearm, pnl); }
                     let (mut rec, line) = realized_out(w, pid, &mint, pnl, &buys, &bs, nb, ns, sells.len(), rearm);
@@ -2781,6 +2912,11 @@ impl PsLive {
     /// the clock: windows end, positions' time exits, attempts never seen, landing records whose tape is complete. `first`: the
     /// first sighting of a signature on any feed (sig8 -> rx ns, feed), when the caller has it
     pub fn tick(&mut self, slot_now: u64, first: Option<&FxHashMap<u64, (u64, u16)>>) {
+        // dip36: the blocklist's reload check (a stat every ~10 s; nothing without the flag)
+        if let Some(r) = self.bl.as_mut().and_then(|b| b.check(false)) {
+            self.line(format!("  PRESEND LIVE BLOCKLIST {} {}", if r["ok"] == true { "reloaded:" } else { "NOT reloaded (the last good list stays):" }, r));
+            self.rec(r);
+        }
         // dip24: the rolling 24 h fee budget (a paused sender resumes when the old fees roll out)
         if self.fee_paused || !self.fee_q.is_empty() { self.fee_roll(); }
         self.drain_atts();
@@ -3121,6 +3257,8 @@ impl PsLive {
     /// to the creator's paper column (ps / pn) and writes presend_live_cr_paper; a window that ends without a row c fill is dropped.
     /// The creator gate's decision never reads the paper column
     pub fn on_shadow_rec(&mut self, rec: &serde_json::Value) {
+        // dip36 (log-only): the shadow's row c for FP-NOBOT's s_* inputs (nothing without the flag)
+        if self.fp.is_some() { self.fpnb_shadow(rec); }
         if self.cfg.cr_earn <= 0.0 { return; }
         let Some(w) = rec["w"].as_u64() else { return };
         match rec["ev"].as_str() {
@@ -3188,7 +3326,7 @@ impl PsLive {
     /// the 60 s status line's part
     pub fn status(&mut self) -> String {
         // dip26: the re-arm's part last ("" without it)
-        let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status();
+        let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -3348,6 +3486,9 @@ impl PsLive {
         if let Some(j) = self.l34_json() { fin["dip34_log"] = j; }
         // dip35: only with the fam log on
         if let Some(j) = self.l35_json() { fin["dip35_log"] = j; }
+        // dip36: only with the FP-NOBOT log on / the blocklist
+        if let Some(f) = self.fp.as_mut() { fin["dip36_fpnb"] = f.finish(); }
+        if let Some(b) = &self.bl { fin["blocklist"] = b.json(); }
         fin
     }
 
@@ -3467,6 +3608,9 @@ impl PsLive {
         let rearm = cfg.rearm.on.then(|| psrearm::Rearm::new(cfg.rearm.clone()));
         let l34 = L34::new(&cfg);
         let (out, orx) = crossbeam_channel::unbounded();
+        // dip36: FP-NOBOT inline (every message handled at once; no thread, no tap)
+        let fp = pslog36::Fp::start(&cfg, user, &out, true).unwrap();
+        let bl = cfg.blocklist.as_deref().map(|p| psblock::Blocklist::load(p).unwrap());
         let (atx, arx) = crossbeam_channel::unbounded();
         let (mtx, _) = tokio::sync::mpsc::unbounded_channel();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
@@ -3486,7 +3630,7 @@ impl PsLive {
             // dip20: QUIET as its flags say, the arm rule on from the start (no warm-up: a test sets start_ns / warm_ns), the feed's slot
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
-            v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default() }, atx, orx)
+            v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl }, atx, orx)
     }
 
     /// dip19 tests: the chain work queued so far (taken)
@@ -3548,6 +3692,16 @@ mod dip34_log_tests;
 #[cfg(test)]
 #[path = "dip35_fam_tests.rs"]
 mod dip35_fam_tests;
+
+// dip36 (11-05 PKT): the log-only FP-NOBOT (pslog36.rs, src/fpnb.rs; off by default = dip35's records, no thread)
+#[cfg(test)]
+#[path = "dip36_fpnb_tests.rs"]
+mod dip36_fpnb_tests;
+
+// dip36 (11-05 PKT): the LIVE wallet blocklist (psblock.rs; off by default)
+#[cfg(test)]
+#[path = "dip36_blocklist_tests.rs"]
+mod dip36_blocklist_tests;
 
 #[cfg(test)]
 mod tests {
@@ -3739,7 +3893,8 @@ mod tests {
             "--presend-live-cr-unfollowed", "3:24", "--presend-live-cr-loss", "2:0.05", "--presend-live-creator-state", "/tmp/dip32-test-cr.json", "--presend-live-f3-log",
             "--presend-live-tag-wallets", "9pQQc1xyqwPzYdHztDHEYkgNucYWSQsZTrzNRzdCrRdN", "--presend-live-quiet3a", "off", "--presend-live-exact-exit", "on",
             "--presend-live-cr-earn-log", "0.5", "--presend-live-seen-log", "3", "--presend-live-eqgrp-log", "--presend-live-q4-log",
-            "--presend-live-fam-log", "--presend-live-fam-thr", "26.825", "--presend-live-fam-rpc", "https://rpc.example", "--presend-live-cr-log", "off"]);
+            "--presend-live-fam-log", "--presend-live-fam-thr", "26.825", "--presend-live-fam-rpc", "https://rpc.example", "--presend-live-cr-log", "off",
+            "--presend-live-blocklist", "/root/dip/blocklist_ams.json", "--presend-live-blocklist-pct", "3"]);
         assert!(check_flags(&all).is_ok(), "{:?}", check_flags(&all));
         for f in FLAGS { assert!(all.iter().any(|a| a == f), "{f} in the test line"); }
         let wrong = ["-", "-presend-live-kk"].concat();

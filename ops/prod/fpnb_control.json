@@ -1,0 +1,1 @@
+{"live": ["t2", "rearm"], "note": "dip36 --presend-fpnb-control: re-read every ~10 s; {\"live\": []} = FP-NOBOT back to log-only without a restart"}

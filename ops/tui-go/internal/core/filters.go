@@ -120,6 +120,7 @@ type fRec struct {
 		SolIn *float64 `json:"sol_in"`
 	} `json:"entry"`
 	Trig *fTrig          `json:"trig"`
+	Dump *fTrig          `json:"dump"` // a re-arm's dump (dip36: its blocklist skips)
 	Ann  json.RawMessage `json:"ann"`
 	Deep any             `json:"deep"`
 	F3   *fF3            `json:"f3"` // dip32 (--presend-live-f3-log) on an arm
@@ -136,11 +137,33 @@ type fRec struct {
 		N     *float64 `json:"n"`
 		Sum   *float64 `json:"sum"`
 	} `json:"cr"`
-	Fam    *float64 `json:"fam"`
-	Hit    *bool    `json:"hit"`
+	Fam *float64 `json:"fam"`
+	Hit *bool    `json:"hit"`
+	// dip36 presend_live_fpnb (FP-NOBOT, log-only): the stage ("arm" / "send" / "fill"), its would-block, score and threshold
+	Stage *string  `json:"stage"`
+	Block *bool    `json:"block"`
+	Score *float64 `json:"score"`
+	Thr   *float64 `json:"thr"`
+	// dip36 live gate: presend_live_fpnb_window (withheld sends of a window, filled or not)
+	Withheld *float64 `json:"withheld"`
+	Filled   *bool    `json:"filled"`
+	Skip2    *struct {
+		Score *float64 `json:"score"`
+		Thr   *float64 `json:"thr"`
+		Skip  *bool    `json:"skip"`
+	} `json:"skip2"` // dip36 skip2 (log-only) on the FP-NOBOT records
 	RecvN  *float64 `json:"recv_n"`
 	CsPct  *float64 `json:"cs_pct"`
 	FamErr *string  `json:"err"`
+}
+
+// fGateWin: a window the dip36 no-bot gate withheld sends of (presend_live_fpnb_window)
+type fGateWin struct {
+	k        FKey
+	kind     string
+	withheld int
+	filled   bool
+	t        int64
 }
 
 // fLog35: the dip34/35 log-only verdicts of one live position (keyed like the arm)
@@ -149,6 +172,12 @@ type fLog35 struct {
 	eqWhy       string
 	crWhy       string
 	famWhy      string
+	fpnb        bool // dip36: FP-NOBOT would have blocked the send that filled (stage "fill")
+	fpnbSet     bool
+	fpnbWhy     string
+	skip2       bool // dip36: SKIP-2 per-send would have skipped the send that filled
+	skip2Set    bool
+	skip2Why    string
 }
 
 // fF3: dip32's log-only arm fields: QUIET3-A (T2 quiet token + whale with <= 3 dumps) and the fresh holders (TAIL G3 at >= 35%).
@@ -182,6 +211,7 @@ type fLedgerEv struct {
 type fSkip struct {
 	why, sig, mint string
 	t              int64
+	ra             bool // dip36: a re-arm skip (rearm_blocklist; no shadow window: unscored)
 }
 
 // FMove: the price move over a shadow window (the engine's presend_disarm "move", 11-03+): the highest / lowest price
@@ -232,6 +262,10 @@ type FiltAcc struct {
 	anyEq     bool             // an arm carried "eqgrp" (dip34 --presend-live-eqgrp-log)
 	anyCrLog  bool             // an arm carried "cr" (the creator gate's record)
 	anyFam    bool             // a presend_live_fam record (dip35)
+	anyFpnb   bool             // a presend_live_fpnb fill record (dip36)
+	anySkip2  bool             // a fill record with "skip2" (dip36)
+	fpWin     []fGateWin       // dip36 live gate: windows with withheld sends
+	fpHeld    int              // dip36 live gate: presend_live_fpnb_withheld records (sends withheld)
 	moves     map[int64]*FMove // shadow w -> the window's price move (presend_disarm "move"; absent before 11-03)
 	q3Live    bool             // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
 	cache     *FiltReport
@@ -306,7 +340,11 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		}
 		return
 	case "presend_arm", "presend_exit", "presend_fill", "presend_live_skip", "presend_live_arm", "presend_live_fill",
-		"presend_live_realized", "presend_live_fam":
+		"presend_live_realized", "presend_live_fam", "presend_live_fpnb", "presend_live_fpnb_window":
+	case "presend_live_fpnb_withheld": // dip36 live gate: one withheld send (counted only)
+		F.ver++
+		F.fpHeld++
+		return
 	default:
 		return
 	}
@@ -351,6 +389,10 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		if (r.Kind != nil && *r.Kind == "rearm") || r.Trig == nil {
 			if r.Kind != nil && *r.Kind == "rearm" {
 				F.raSkips++
+				// dip36: the re-arm's blocklist skips go in the LIVE "blocklist" row (counted; no paper outcome)
+				if r.Why != nil && *r.Why == "rearm_blocklist" && r.Dump != nil {
+					F.skips = append(F.skips, fSkip{why: "blocklist", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
+				}
 			}
 			return
 		}
@@ -421,6 +463,36 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		x := F.l35(FKey{w, r.Mint})
 		x.fam = r.Hit != nil && *r.Hit
 		x.famWhy = fmt.Sprintf("fam %.1f%% (create-slot %.1f%%, %.0f transfer-fed wallets)", fz(r.Fam), fz(r.CsPct), fz(r.RecvN))
+	case "presend_live_fpnb_window": // dip36 live gate: a window's end with its withheld sends
+		if r.Withheld != nil && *r.Withheld > 0 {
+			k := "T2"
+			if r.Kind != nil && *r.Kind == "rearm" {
+				k = "RA"
+			}
+			F.fpWin = append(F.fpWin, fGateWin{k: FKey{w, r.Mint}, kind: k, withheld: int(*r.Withheld), filled: r.Filled != nil && *r.Filled, t: rawInt(r.T)})
+		}
+	case "presend_live_fpnb": // dip36: FP-NOBOT's score at the send that decided the fill (stage "fill"; keyed like the arm)
+		if r.Stage == nil || *r.Stage != "fill" || r.Score == nil {
+			return
+		}
+		F.anyFpnb = true
+		x := F.l35(FKey{w, r.Mint})
+		if r.Skip2 != nil && r.Skip2.Score != nil && !x.skip2Set {
+			F.anySkip2 = true
+			x.skip2Set = true
+			x.skip2 = r.Skip2.Skip != nil && *r.Skip2.Skip
+			x.skip2Why = fmt.Sprintf("skip2 score %.3f vs %.3f", fz(r.Skip2.Score), fz(r.Skip2.Thr))
+		}
+		if x.fpnbSet { // a second fill of the position: the first one decided it
+			return
+		}
+		x.fpnbSet = true
+		x.fpnb = r.Block != nil && *r.Block
+		k := "?"
+		if r.Kind != nil {
+			k = *r.Kind
+		}
+		x.fpnbWhy = fmt.Sprintf("no-bot score %.3f vs %.3f (%s)", fz(r.Score), fz(r.Thr), k)
 	case "presend_live_fill":
 		F.fills[w] = true
 		k := FKey{w, r.Mint}
@@ -670,6 +742,10 @@ func LogRuleName(key string) string {
 		return "holder clock"
 	case "guard":
 		return "landing guard"
+	case "fpnb":
+		return "no-bot filter"
+	case "skip2":
+		return "skip2 per-send"
 	}
 	return key
 }
@@ -749,7 +825,8 @@ var liveFilters = []struct{ why, name string }{{"quiet", "QUIET"}, {"create_slot
 	{"lone_whale", "10-sec skip"}}
 
 // optLiveFilters: dip31/32 skips, shown only when the run made one (older runs' tables unchanged).
-var optLiveFilters = []struct{ why, name string }{{"breaker", "circuit breaker"}, {"cr_loss", "creator loss (T2)"}, {"cr_unfollowed", "creator unfollowed (T2)"}, {"quiet3_a", "QUIET3-A (live)"}}
+var optLiveFilters = []struct{ why, name string }{{"breaker", "circuit breaker"}, {"cr_loss", "creator loss (T2)"}, {"cr_unfollowed", "creator unfollowed (T2)"}, {"quiet3_a", "QUIET3-A (live)"},
+	{"blocklist", "blocklist"}}
 
 // Report computes the table (cached while no record came and the seed is the same).
 func (F *FiltAcc) Report(seedPath string) *FiltReport {
@@ -852,7 +929,11 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 			if ok {
 				mv = F.moves[w]
 			}
-			R.Items = append(R.Items, FiltItem{T: s.t, Live: true, Filter: s.why, Name: row.Name, Rules: []string{s.why}, Names: []string{row.Name}, Kind: "T2",
+			kd := "T2"
+			if s.ra {
+				kd = "RA"
+			}
+			R.Items = append(R.Items, FiltItem{T: s.t, Live: true, Filter: s.why, Name: row.Name, Rules: []string{s.why}, Names: []string{row.Name}, Kind: kd,
 				Mint: s.mint, W: noW, Scored: vok, Sol: v, Sig: s.sig, Move: mv})
 		}
 	}
@@ -863,6 +944,23 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		if byWhy[f.why].Blocked > 0 {
 			R.Rows = append(R.Rows, *byWhy[f.why])
 		}
+	}
+	// dip36 LIVE no-bot gate: windows whose sends it withheld (blocked = never filled; the ones that filled later in the note)
+	if len(F.fpWin) > 0 || F.fpHeld > 0 {
+		row := FiltRow{Key: "fpnb_live", Name: "no-bot filter", Type: "LIVE"}
+		later, laterSol := 0, 0.0
+		for _, g := range F.fpWin {
+			if g.filled {
+				later++
+				laterSol += F.real[g.k]
+				continue
+			}
+			row.Blocked++
+			R.Items = append(R.Items, FiltItem{T: g.t, Live: true, Filter: "fpnb_live", Name: row.Name, Rules: []string{"fpnb_live"}, Names: []string{row.Name},
+				Kind: g.kind, Mint: g.k.Mint, W: g.k.W, Sig: fmt.Sprintf("w%d", g.k.W)})
+		}
+		row.Note = fmt.Sprintf("%d sends withheld; %d windows never filled, %d filled later (real P&L %s)", F.fpHeld, row.Blocked, later, fmtSigned(laterSol, 3))
+		R.Rows = append(R.Rows, row)
 	}
 	// LIVE deeper limit
 	if len(F.deepW) > 0 {
@@ -941,6 +1039,10 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				return x.eqWhy
 			case "fam":
 				return x.famWhy
+			case "fpnb":
+				return x.fpnbWhy
+			case "skip2":
+				return x.skip2Why
 			}
 		}
 		x := F.armF3[k]
@@ -1053,6 +1155,14 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	}
 	if F.anyFam {
 		logrule("fam", "bundle family fam (log)", pick35(func(x *fLog35) bool { return x.fam }), "real fills; launch-slot + transfer-fed holders >= 26.8%")
+	}
+	// dip36 (log-only): FP-NOBOT at the send that decided the fill (covered, warm, score >= thr)
+	if F.anyFpnb {
+		logrule("fpnb", "no-bot filter (log)", pick35(func(x *fLog35) bool { return x.fpnb }), "real fills; FP-NOBOT no-follower score >= thr at the deciding send")
+	}
+	// dip36 (log-only): SKIP-2 per-send at the send that decided the fill (covered, score < thr)
+	if F.anySkip2 {
+		logrule("skip2", "skip2 per-send (log)", pick35(func(x *fLog35) bool { return x.skip2 }), "real fills; SKIP-2 logistic score < thr at the deciding send")
 	}
 	// dip30 LANDING GUARD (log only): the wallets chosen at signing still hold >= the guard's % at our landing
 	if F.anyGuard {
@@ -1184,7 +1294,7 @@ func logWhy(key string, f *fFill, gcrWhy string) string {
 	if key == "gcr" {
 		return gcrWhy
 	}
-	if key == "q3a" || key == "fresh" { // dip32: preformatted from the arm's "f3" (passed in gcrWhy's place)
+	if key == "q3a" || key == "fresh" || key == "fpnb" || key == "skip2" { // dip32: preformatted from the arm's "f3" (passed in gcrWhy's place); dip36 fpnb
 		return gcrWhy
 	}
 	if f == nil || f.ann == nil {

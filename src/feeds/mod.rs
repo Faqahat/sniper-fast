@@ -374,6 +374,47 @@ pub fn own_fail_note(sig: &[u8], payer: Option<&[u8]>, slot: u64, index: u64, fe
 /// the recorded failure of `sig` (taken: a second call gets None)
 pub fn own_fail_take(sig: &[u8; 64]) -> Option<OwnFail> { OWN_FAIL.lock().unwrap_or_else(|e| e.into_inner()).0.remove(sig) }
 
+/// dip36 FP-NOBOT (log-only, --presend-fpnb-log on): EVERY failed executed tx whose logs name a Buy* / Sell* instruction ("Program log:
+/// Instruction: <NAME>", the first such NAME in log order wins), any payer and any program, goes to the FP-NOBOT thread with its payer
+/// (account_keys[0]), slot, block index and account keys (static, then the loaded ones): that thread keeps it on the first mint it
+/// tracks (src/fpnb.rs Store::fail). A failed tx with neither name is dropped here. Off (the tap never set): one load per failed tx.
+/// Bounded: a full channel drops (counted in FAIL_TAP_DROPPED), never blocks the feed.
+#[derive(Clone, Debug)]
+pub struct FailTx { pub slot: u64, pub idx: u64, pub payer: Pk, pub buy: bool, pub keys: Vec<Pk> }
+pub static FAIL_TAP: std::sync::OnceLock<crossbeam_channel::Sender<FailTx>> = std::sync::OnceLock::new();
+pub static FAIL_TAP_DROPPED: AtomicU64 = AtomicU64::new(0);
+pub static FAIL_TAP_SENT: AtomicU64 = AtomicU64::new(0);
+/// the tap's channel capacity
+pub const FAIL_TAP_CAP: usize = 1 << 16;
+/// turn the tap on (once per process): the receiving end
+pub fn fail_tap_on() -> Option<crossbeam_channel::Receiver<FailTx>> {
+    let (tx, rx) = crossbeam_channel::bounded(FAIL_TAP_CAP);
+    FAIL_TAP.set(tx).ok().map(|_| rx)
+}
+/// the kind of a failed tx from its log lines: Some(true) BUY, Some(false) SELL, None neither
+#[inline]
+pub fn fail_kind(logs: &[String]) -> Option<bool> {
+    for l in logs {
+        let Some(n) = l.strip_prefix("Program log: Instruction: ") else { continue };
+        if n.starts_with("Buy") { return Some(true); }
+        if n.starts_with("Sell") { return Some(false); }
+    }
+    None
+}
+/// the feed's side of the tap (a failed executed tx): classified and sent when the tap is on
+#[inline]
+pub fn fail_tap_note(slot: u64, idx: u64, logs: &[String], keys: &[Vec<u8>], loaded: (&[Vec<u8>], &[Vec<u8>])) {
+    let Some(tx) = FAIL_TAP.get() else { return };
+    let Some(buy) = fail_kind(logs) else { return };
+    let to = |k: &Vec<u8>| -> Option<Pk> { k.as_slice().try_into().ok() };
+    let Some(payer) = keys.first().and_then(to) else { return };
+    let keys: Vec<Pk> = keys.iter().chain(loaded.0.iter()).chain(loaded.1.iter()).filter_map(to).collect();
+    match tx.try_send(FailTx { slot, idx, payer, buy, keys }) {
+        Ok(()) => { FAIL_TAP_SENT.fetch_add(1, Ordering::Relaxed); }
+        Err(_) => { FAIL_TAP_DROPPED.fetch_add(1, Ordering::Relaxed); }
+    }
+}
+
 /// The process's PoH index
 pub fn poh_index() -> &'static PohIndex {
     static I: std::sync::LazyLock<PohIndex> = std::sync::LazyLock::new(PohIndex::new);

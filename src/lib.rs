@@ -45,6 +45,8 @@ pub mod poolrefresh;
 pub mod presend;
 pub mod presend_live;
 pub mod presend_quiet;
+/// dip36 FP-NOBOT (log-only): the frozen no-follower-bot filter (models, inputs, chain store)
+pub mod fpnb;
 pub mod probe;
 pub mod proglog;
 pub mod provenance;

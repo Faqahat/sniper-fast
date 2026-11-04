@@ -643,3 +643,127 @@ func TestFiltersQ3aLiveHidesLogRow(t *testing.T) {
 		t.Errorf("QUIET3-A (live) row: %+v %v", r, ok)
 	}
 }
+
+// TestFiltersFpnb (dip36): the "no-bot filter (log)" row counts the fills whose deciding send FP-NOBOT would have blocked (stage "fill",
+// block true; the first fill of a position decides), with their realized P&L; arm / send stages and unblocked fills are not counted.
+func TestFiltersFpnb(t *testing.T) {
+	recs := []string{
+		`{"ev":"presend_live_arm","w":10,"mint":"M1","kind":"t2","spend":500000000,"trig":{"sig":"x10","mint":"M1","t":10010}}`,
+		`{"ev":"presend_live_fpnb","stage":"arm","w":10,"mint":"M1","kind":"T2","score":0.5,"thr":0.388,"block":true}`,
+		`{"ev":"presend_live_fill","w":10,"mint":"M1","t":20000}`,
+		`{"ev":"presend_live_fpnb","stage":"fill","w":10,"mint":"M1","kind":"T2","score":0.45,"thr":0.388,"block":true,"skip2":{"score":-0.5,"thr":-0.319,"skip":true}}`,
+		`{"ev":"presend_live_fpnb","stage":"fill","w":10,"mint":"M1","kind":"T2","score":0.1,"thr":0.388,"block":false}`,
+		`{"ev":"presend_live_realized","w":10,"mint":"M1","pnl":-20000000}`,
+		`{"ev":"presend_live_arm","w":11,"mint":"M2","kind":"rearm","dump":{"sig":"x11","mint":"M2","t":10020}}`,
+		`{"ev":"presend_live_fill","w":11,"mint":"M2","t":21000}`,
+		`{"ev":"presend_live_fpnb","stage":"fill","w":11,"mint":"M2","kind":"rearm","score":0.6,"thr":0.5,"block":true}`,
+		`{"ev":"presend_live_realized","w":11,"mint":"M2","pnl":50000000}`,
+		`{"ev":"presend_live_arm","w":12,"mint":"M3","kind":"t2","trig":{"sig":"x12","mint":"M3","t":10030}}`,
+		`{"ev":"presend_live_fill","w":12,"mint":"M3","t":22000}`,
+		`{"ev":"presend_live_fpnb","stage":"fill","w":12,"mint":"M3","kind":"T2","score":0.2,"thr":0.388,"block":false}`,
+		`{"ev":"presend_live_realized","w":12,"mint":"M3","pnl":-10000000}`,
+	}
+	p := filepath.Join(t.TempDir(), "dip_ams_r99.jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(recs, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	R := filtView(t, p, "none").Filt
+	r, ok := R.Row("fpnb")
+	if !ok || r.Blocked != 2 || r.Type != "LOG" || r.Name != "no-bot filter (log)" || r.WinN != 1 || r.LoseN != 1 {
+		t.Fatalf("fpnb row: %+v %v", r, ok)
+	}
+	if d := r.Net() - (0.02 - 0.05); d > 1e-9 || d < -1e-9 {
+		t.Errorf("net %v", r.Net())
+	}
+	it, ok := R.Flag(10, "M1")
+	if !ok || !it.Has("fpnb") || len(it.Why) == 0 || !strings.Contains(it.Why[0], "no-bot score 0.450") {
+		t.Errorf("M1 item: %+v", it)
+	}
+	if _, ok := R.Flag(12, "M3"); ok {
+		t.Error("M3 not blocked")
+	}
+	// dip36 skip2 on the same fill record: its own LOG row (only M1 carries it)
+	if s, ok := R.Row("skip2"); !ok || s.Blocked != 1 || s.LoseN != 1 || s.Name != "skip2 per-send (log)" {
+		t.Errorf("skip2 row: %+v %v", s, ok)
+	}
+	if it2, _ := R.Flag(10, "M1"); !it2.Has("skip2") || !it2.Has("fpnb") {
+		t.Errorf("M1 rules: %+v", it2.Rules)
+	}
+}
+
+// TestFiltersBlocklist (dip36): the LIVE "blocklist" row counts T2 "blocklist" skips (scored on the shadow's paper like the other skips) and
+// re-arm "rearm_blocklist" skips (counted, unscored); absent without one.
+func TestFiltersBlocklist(t *testing.T) {
+	recs := []string{
+		`{"ev":"presend_arm","sig":"s1","w":1}`,
+		`{"ev":"presend_fill","row":"c","w":1,"entry":{"sol_in":1000000000}}`,
+		`{"ev":"presend_exit","row":"c","w":1,"net_cheap":-0.04}`,
+		`{"ev":"presend_live_skip","why":"blocklist","trig":{"sig":"s1","mint":"MA","t":1000},"bl_wallet":"8ZN71XTd","bl_role":"whale","bl_pct":9.1}`,
+		`{"ev":"presend_live_skip","kind":"rearm","why":"rearm_blocklist","mint":"MB","dump":{"sig":"d2","t":2000},"bl_role":"dumper"}`,
+		`{"ev":"presend_live_skip","kind":"rearm","why":"rearm_cr_loss","mint":"MC","dump":{"sig":"d3","t":3000}}`,
+	}
+	p := filepath.Join(t.TempDir(), "dip_ams_r97.jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(recs, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	R := filtView(t, p, "none").Filt
+	r, ok := R.Row("blocklist")
+	if !ok || r.Type != "LIVE" || r.Blocked != 2 || r.LoseN != 1 || r.WinN != 0 {
+		t.Fatalf("blocklist row: %+v %v", r, ok)
+	}
+	kinds := map[string]string{}
+	for _, it := range R.Items {
+		if it.Filter == "blocklist" {
+			kinds[it.Mint] = it.Kind
+		}
+	}
+	if kinds["MA"] != "T2" || kinds["MB"] != "RA" || len(kinds) != 2 {
+		t.Errorf("items: %v", kinds)
+	}
+	R = filtView(t, moveFixture(t, false), "none").Filt
+	if _, ok := R.Row("blocklist"); ok {
+		t.Error("no blocklist skip: no row")
+	}
+}
+
+// TestFiltersFpnbLive (dip36): the LIVE "no-bot filter" row: windows with withheld sends that never filled are blocked; the ones that filled
+// later are in the note with their real P&L; the withheld sends counted.
+func TestFiltersFpnbLive(t *testing.T) {
+	recs := []string{
+		`{"ev":"presend_live_arm","w":20,"mint":"N1","kind":"t2","trig":{"sig":"y20","mint":"N1","t":10010}}`,
+		`{"ev":"presend_live_fpnb_withheld","w":20,"mint":"N1","slot":5,"kind":"T2"}`,
+		`{"ev":"presend_live_fpnb_withheld","w":20,"mint":"N1","slot":6,"kind":"T2"}`,
+		`{"ev":"presend_live_fpnb_window","w":20,"mint":"N1","kind":"T2","withheld":2,"filled":false,"why":"expired"}`,
+		`{"ev":"presend_live_arm","w":21,"mint":"N2","kind":"rearm","dump":{"sig":"y21","t":10020}}`,
+		`{"ev":"presend_live_fpnb_withheld","w":21,"mint":"N2","slot":9,"kind":"rearm"}`,
+		`{"ev":"presend_live_fill","w":21,"mint":"N2","t":21000}`,
+		`{"ev":"presend_live_fpnb_window","w":21,"mint":"N2","kind":"rearm","withheld":1,"filled":true,"why":"filled"}`,
+		`{"ev":"presend_live_realized","w":21,"mint":"N2","pnl":-15000000}`,
+		`{"ev":"presend_live_fpnb_window","w":22,"mint":"N3","kind":"T2","withheld":0,"filled":true}`,
+	}
+	p := filepath.Join(t.TempDir(), "dip_ams_r96.jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(recs, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	R := filtView(t, p, "none").Filt
+	r, ok := R.Row("fpnb_live")
+	if !ok || r.Type != "LIVE" || r.Blocked != 1 || !strings.Contains(r.Note, "3 sends withheld") || !strings.Contains(r.Note, "1 filled later") {
+		t.Fatalf("fpnb_live row: %+v %v", r, ok)
+	}
+	n := 0
+	for _, it := range R.Items {
+		if it.Filter == "fpnb_live" {
+			n++
+			if it.Mint != "N1" || it.Kind != "T2" {
+				t.Errorf("item %+v", it)
+			}
+		}
+	}
+	if n != 1 {
+		t.Errorf("items %d", n)
+	}
+	R = filtView(t, moveFixture(t, false), "none").Filt
+	if _, ok := R.Row("fpnb_live"); ok {
+		t.Error("no gate records: no row")
+	}
+}

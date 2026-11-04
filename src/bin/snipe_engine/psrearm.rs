@@ -257,6 +257,8 @@ impl PsLive {
         let lwhy = launch_refusal(launch.as_ref(), self.allow_holder);
         // dip32 the creator gate (the check's own time)
         let (crw, crj) = if self.cfg.cr_on() { cr_gate(&self.sh, &self.cfg, self.det.creator_bal(&mint).map(|c| c.0), t_rx) } else { (None, None) };
+        // dip36 LIVE blocklist: the dumper / a holder >= the threshold listed (nothing without the flag)
+        let blh = if self.bl.is_some() { self.bl_hit(&mint, &c.dump.tr.user, "dumper", None) } else { None };
         let Some(rm) = self.rm.as_mut() else { return };
         rm.st.checks += 1;
         let en_slot = c.dump.tr.s + RE_WAIT + rm.cfg.gap;
@@ -273,6 +275,7 @@ impl PsLive {
             _ if lwhy.is_some() => Some("rearm_blocked_launch"),
             _ if crw == Some("loss") => Some("rearm_cr_loss"),
             _ if crw.is_some() => Some("rearm_cr_unfollowed"),
+            _ if blh.is_some() => Some("rearm_blocklist"),
             _ => None,
         };
         // R5 (the shadow's r5_skip): the QUIET arm signals of the LARGEST holder at the check; skipped only once the QUIET arm rule is on
@@ -300,6 +303,12 @@ impl PsLive {
             if w == "rearm_blocked_launch" { x["launch"] = lwhy.into(); }
             if let Some(j) = r5 { x["r5"] = j; }
             if let Some(j) = crj { x["cr"] = j; }
+            // dip36: the blocklist's hit
+            if let Some(h) = blh.as_ref().filter(|_| w == "rearm_blocklist") {
+                PsLive::bl_fields(&mut x, h);
+                if let Some(b) = self.bl.as_mut() { b.skips += 1; }
+                self.line(format!("  PRESEND LIVE REARM BLOCKLIST SKIP {} | dumper {} | listed {} ({}, {:.2}%): {}", b58(&mint), &b58(&c.dump.tr.user)[..8], &b58(&h.0)[..8], h.1, h.2, h.3));
+            }
             // dip34 (log-only, --presend-live-ann on): the holders check's skips get "ann" too (the creator's holding: cr_hold / cr_big)
             if self.cfg.ann { x["ann"] = ann_arm(&self.det, &self.user, &mint, slot); }
             self.rearm_skip(w, &mint, &c.dump, x);
@@ -349,8 +358,10 @@ impl PsLive {
         self.launches.insert(mint, launch.clone());
         // dip27 (log-only): the largest holding but the dumper's and ours at the arm (0 with the annotations off)
         let ob6 = ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &mint, &dump.tr.user, &self.user);
+        // dip36 live gate: the window's verdict cell (None without the FP-NOBOT log)
+        let fpg = self.fp.as_ref().map(|_| Arc::new(pslog36::Gate::default()));
         self.sh.wins.lock().unwrap().push(SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::new(st_ns, k, slot_ns), n: 0, done: false,
-            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s) });
+            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone() });
         self.armed.insert(mint, id);
         {
             let tp = &mut self.tapes.entry(mint).or_insert_with(|| (VecDeque::new(), 0)).0;
@@ -377,9 +388,13 @@ impl PsLive {
         // dip34 (log-only): seen / eqgrp / q4 keyed on the dumper (each only with its flag)
         let dumper = dump.tr.user;
         self.log34(&mut r, &mint, &dumper, chk_slot, chk_t);
+        // dip36 (log-only): FP-NOBOT's copy of the arm record (only with its flag)
+        let fpr = self.fp.is_some().then(|| r.clone());
         self.rec(r);
         // dip35 (log-only): the fam holders read (nothing without its flag)
         self.fam_arm(id, mint, true, arm_slot);
+        // dip36 (log-only): FP-NOBOT at the re-arm's arm (the dump is the trigger row; the holders are excluded from its follower counts)
+        if let Some(r) = fpr { self.fpnb_arm(id, true, mint, &dump.tr, dump.tr.user, arm_slot, holders.iter().map(|h| h.0).collect(), &r, en_slot, fpg); }
         let t = &dump.tr;
         self.line(format!("  PRESEND LIVE REARM ARM w{id} {} | dump {} {:.1}% ({:.2} SOL) slot {} age {} | holders {} | until slot {en_slot} | {k} attempts/slot, limit {:.2}x, {:.3} SOL{}",
             b58(&mint), &b58(&t.user)[..8], t.tok as f64 / pl::SUPPLY * 100.0, t.sol as f64 / 1e9, t.s, dump.age, holders_short(&holders), 1.0 - drop, spend as f64 / 1e9,

@@ -69,6 +69,14 @@ func fltShort(key, name string) string {
 		return "equal group"
 	case "fam":
 		return "fam"
+	case "fpnb":
+		return "no-bot (log)"
+	case "skip2":
+		return "skip2 (log)"
+	case "fpnb_live":
+		return "no-bot (live)"
+	case "blocklist":
+		return "blocklist"
 	}
 	return name
 }
@@ -98,6 +106,12 @@ func fltCode(key string) string {
 		return "EQ"
 	case "fam":
 		return "FM"
+	case "fpnb":
+		return "NB"
+	case "skip2":
+		return "S2"
+	case "fpnb_live":
+		return "NL"
 	}
 	return key
 }
@@ -269,6 +283,10 @@ var fltVerdicts = map[string]fltVerdict{
 	"crlog":         {vgLog, "LOG", "ledger off: would-skips"},
 	"eqgrp":         {vgLog, "LOG", "mixed r51/r53"},
 	"fam":           {vgLog, "LOG new", "bundle rug (dip35)"},
+	"fpnb":          {vgLog, "LOG new", "no follower bot (dip36)"},
+	"skip2":         {vgLog, "LOG new", "per-send logit (dip36)"},
+	"fpnb_live":     {vgLive, "LIVE new", "no-bot gate (dip36)"},
+	"blocklist":     {vgLive, "LIVE new", "listed wallets (dip36)"},
 	"st":            {vgDism, "DISMISSED", "within group risk"},
 	"hc":            {vgDism, "DISMISSED", "dup of group risk"},
 	"guard":         {vgDism, "DISMISSED", "flagged did better"},
