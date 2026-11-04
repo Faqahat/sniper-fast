@@ -12,7 +12,7 @@ type keyMap struct {
 	Pause, Price, Faster, Slower    key.Binding
 	Anim, Mute, Help, Quit          key.Binding
 	Sort, Order, Copy, Mouse        key.Binding
-	NoFill, Shadow, Why             key.Binding
+	NoFill, Shadow, Why, Dism       key.Binding
 	tab                             int
 	detail                          bool
 }
@@ -50,9 +50,10 @@ func newKeyMap() keyMap {
 		Order:   nb(k("O"), h("O", "flip order")),
 		Copy:    nb(k("c", "y"), h("c", "copy mint")),
 		Mouse:   nb(k("M"), h("M", "mouse on/off")),
-		NoFill:  nb(k("n"), h("n", "no-fill rows")),
+		NoFill:  nb(k("n"), h("n", "no-dip rows")),
 		Shadow:  nb(k("v"), h("v", "shadow rows")),
 		Why:     nb(k("x"), h("x", "blocked by")),
+		Dism:    nb(k("d"), h("d", "dismissed filters")),
 	}
 }
 
@@ -65,7 +66,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 	case 3: // trades
 		return []key.Binding{k.Up, k.Enter, k.Sort, k.Order, k.Filter, k.Search, k.Copy, k.Why, k.Unit, k.Help, k.Quit}
 	case 7: // filters
-		return []key.Binding{k.Up, withHelp(k.Filter, "f", "filter"), k.NoFill, k.Shadow, k.Sort, k.Order, k.Copy, k.Help, k.Quit}
+		return []key.Binding{k.Up, withHelp(k.Filter, "f", "filter"), k.Dism, k.NoFill, k.Shadow, k.Sort, k.Order, k.Copy, k.Help, k.Quit}
 	case 5: // log
 		return []key.Binding{k.Up, k.End, withHelp(k.Filter, "f", "important/all"), k.Wrap, k.Help, k.Quit}
 	}
@@ -76,7 +77,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Tabs, k.Next, k.Prev, k.Up, k.Down, k.PgUp, k.PgDn, k.Home, k.End},
-		{k.Enter, k.Back, withHelp(k.Filter, "f", "filter trades / log / filters"), k.Search, k.Sort, k.Order, k.Copy, k.Wrap, k.NoFill, k.Shadow, withHelp(k.Why, "x", "filters that blocked a trade")},
+		{k.Enter, k.Back, withHelp(k.Filter, "f", "filter trades / log / filters"), k.Search, k.Sort, k.Order, k.Copy, k.Wrap, k.NoFill, k.Shadow, k.Dism, withHelp(k.Why, "x", "filters that blocked a trade")},
 		{k.Scope, k.Session, k.Unit, k.Pause, k.Price, k.Faster, k.Anim, k.Mute, k.Mouse, k.Help, k.Quit},
 	}
 }

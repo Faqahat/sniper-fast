@@ -231,7 +231,7 @@ func (m *Model) heroLines(cw int, rows int, extra bool) []string {
 	}
 	split := m.kv("split", 10, t.Lbl.Render("pre-send ")+psTxt+t.Lbl.Render("  regular ")+t.Money(rg.Total, true, false).Render(core.SolS(rg.Total)))
 	if ansi.StringWidth(split) > cw {
-		split = m.kv("split", 10, t.Lbl.Render("PS ")+psTxt+t.Lbl.Render("  REG ")+t.Money(rg.Total, true, false).Render(core.SolS(rg.Total)))
+		split = m.kv("split", 10, t.Lbl.Render("T2 ")+psTxt+t.Lbl.Render("  REG ")+t.Money(rg.Total, true, false).Render(core.SolS(rg.Total)))
 	}
 	out = append(out, split)
 	return out
@@ -826,9 +826,9 @@ func (m *Model) liveLines(cw int, compact bool) []string {
 	rm, okr := core.Med(g.LandMs)
 	psL := ""
 	if fq, ok := m.latSummary().All.FillDL.Quantile(0.5); ok {
-		psL = t.Lbl.Render("PS ") + m.latStyle(fq).Render(latMs(core.FloatNum(fq))+" ms")
+		psL = t.Lbl.Render("T2 ") + m.latStyle(fq).Render(latMs(core.FloatNum(fq))+" ms")
 	} else if lm, okl := core.Med(ps.LandMs); okl {
-		psL = t.Lbl.Render("PS send→seen ") + t.Val.Render(core.F(lm, 0)+" ms")
+		psL = t.Lbl.Render("T2 send→seen ") + t.Val.Render(core.F(lm, 0)+" ms")
 	}
 	if psL != "" || okr {
 		l := psL
@@ -1116,7 +1116,7 @@ func (m *Model) overviewNarrow(w, bh int) string {
 	if v.RA.On { // dip26
 		out = append(out, m.raSplit(w, 9)...)
 	} else {
-		out = append(out, m.kv("split", 9, t.Lbl.Render("PS ")+pst+t.Lbl.Render("  REG ")+t.Money(rg.Total, true, false).Render(core.SolS(rg.Total))))
+		out = append(out, m.kv("split", 9, t.Lbl.Render("T2 ")+pst+t.Lbl.Render("  REG ")+t.Money(rg.Total, true, false).Render(core.SolS(rg.Total))))
 	}
 	if v.HasEstNow {
 		x := t.Lbl.Render(padRight("wallet", 9)) + t.B.Render(core.F(float64(v.EstNow)/core.LAM, 4))

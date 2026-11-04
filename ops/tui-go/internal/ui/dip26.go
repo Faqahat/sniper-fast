@@ -1,6 +1,6 @@
 package ui
 
-// dip26 (10-30): the re-arm's own section and the send-path A/B on the Pre-send tab, the "via" code of the trades.
+// dip26 (10-30): the re-arm's own section and the send-path A/B on the Engine tab, the "via" code of the trades.
 // Shown only when the run has them (older runs render exactly as before).
 
 import (
@@ -435,7 +435,7 @@ func (m *Model) abLines(w int) ([]string, string) {
 // viaOn: the trades table's "via" column (the run's pre-send tries go over two or more paths).
 func (m *Model) viaOn() bool { return m.view != nil && m.view.AB.On }
 
-// scrPresend26: the Pre-send tab of a dip26 run: the caps, the T2 windows' RESULT, the RE-ARM, then the A/B (first on
+// scrPresend26: the Engine tab (2) of a dip26 run: the caps, the T2 windows' RESULT, the RE-ARM, then the A/B (first on
 // the right: what the owner watches), the latency of every try (T2 + re-arm), QUIET, exits, paper, windows.
 func (m *Model) scrPresend26(w, cw int, title, right string, C, A, E, Wn, Q, P, Ss []string, latR string, all core.AggPS) string {
 	v := m.view

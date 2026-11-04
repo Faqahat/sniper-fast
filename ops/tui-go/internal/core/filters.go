@@ -122,6 +122,42 @@ type fRec struct {
 	Trig *fTrig          `json:"trig"`
 	Ann  json.RawMessage `json:"ann"`
 	Deep any             `json:"deep"`
+	F3   *fF3            `json:"f3"` // dip32 (--presend-live-f3-log) on an arm
+	// dip34/35 log-only arm fields: the equal-size group (--presend-live-eqgrp-log), the creator gate's record (cr.would with
+	// --presend-live-cr-log on); dip35 presend_live_fam: the bundle family read
+	Eqgrp *struct {
+		Flag bool     `json:"flag"`
+		N    *float64 `json:"n"`
+		Pct  *float64 `json:"pct"`
+		Sum  *float64 `json:"sum"`
+	} `json:"eqgrp"`
+	Cr *struct {
+		Would *string  `json:"would"`
+		N     *float64 `json:"n"`
+		Sum   *float64 `json:"sum"`
+	} `json:"cr"`
+	Fam    *float64 `json:"fam"`
+	Hit    *bool    `json:"hit"`
+	RecvN  *float64 `json:"recv_n"`
+	CsPct  *float64 `json:"cs_pct"`
+	FamErr *string  `json:"err"`
+}
+
+// fLog35: the dip34/35 log-only verdicts of one live position (keyed like the arm)
+type fLog35 struct {
+	eq, cr, fam bool
+	eqWhy       string
+	crWhy       string
+	famWhy      string
+}
+
+// fF3: dip32's log-only arm fields: QUIET3-A (T2 quiet token + whale with <= 3 dumps) and the fresh holders (TAIL G3 at >= 35%).
+type fF3 struct {
+	Q3a     bool     `json:"q3a"`
+	N120    *float64 `json:"n_120s"`
+	WhDumps *float64 `json:"wh_dumps"`
+	Fresh   *float64 `json:"fresh"`
+	FreshN  *float64 `json:"fresh_n"`
 }
 
 func (r *fRec) w() int64 {
@@ -146,6 +182,14 @@ type fLedgerEv struct {
 type fSkip struct {
 	why, sig, mint string
 	t              int64
+}
+
+// FMove: the price move over a shadow window (the engine's presend_disarm "move", 11-03+): the highest / lowest price
+// (% vs the trigger's post price) over the token's trades inside the window, and how many trades.
+type FMove struct {
+	Max float64 `json:"max_pct"`
+	Min float64 `json:"min_pct"`
+	N   int     `json:"n"`
 }
 
 type fFill struct {
@@ -182,7 +226,14 @@ type FiltAcc struct {
 	liveSize  float64
 	hasSize   bool
 	anyAnn    bool
-	anyGuard  bool // a fill logged the landing guard (dip30+)
+	anyGuard  bool             // a fill logged the landing guard (dip30+)
+	armF3     map[FKey]*fF3    // dip32: an arm's log-only "f3"
+	log35     map[FKey]*fLog35 // dip34/35: eqgrp flag / cr.would / fam hit
+	anyEq     bool             // an arm carried "eqgrp" (dip34 --presend-live-eqgrp-log)
+	anyCrLog  bool             // an arm carried "cr" (the creator gate's record)
+	anyFam    bool             // a presend_live_fam record (dip35)
+	moves     map[int64]*FMove // shadow w -> the window's price move (presend_disarm "move"; absent before 11-03)
+	q3Live    bool             // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
 	cache     *FiltReport
 	cacheVer  int64
 	cacheSeed string
@@ -191,21 +242,48 @@ type FiltAcc struct {
 func newFiltAcc() *FiltAcc {
 	return &FiltAcc{shW: map[string]int64{}, shExit: map[int64]*float64{}, shSize: map[int64]float64{}, liveSig: map[int64]string{},
 		liveArm: map[int64]fArm{}, kind: map[FKey]string{}, deepW: map[int64]bool{}, fills: map[int64]bool{},
-		fillAnn: map[FKey]*fFill{}, real: map[FKey]float64{}}
+		fillAnn: map[FKey]*fFill{}, real: map[FKey]float64{}, armF3: map[FKey]*fF3{}, log35: map[FKey]*fLog35{}, moves: map[int64]*FMove{}}
 }
 
 var (
 	fDropKey  = []byte(`"drop":`)
 	fWKey     = []byte(`"w":`)
 	fEvPrefix = []byte("presend_")
+	fMoveKey  = []byte(`"move":`)
+	fQ3aKey   = []byte(`"quiet3a":`)
 )
 
 // feed takes one record (ev = its "ev"); only the presend_* records the table uses.
 func (F *FiltAcc) feed(ev, line []byte) {
 	if !bytes.HasPrefix(ev, fEvPrefix) {
+		if string(ev) == "run_start" && bytes.Contains(line, fQ3aKey) { // QUIET3-A live: its log row can never fire
+			var r struct {
+				PL *struct {
+					Q3a any `json:"quiet3a"`
+				} `json:"presend_live"`
+			}
+			if json.Unmarshal(line, &r) == nil && r.PL != nil && fTruthy(r.PL.Q3a) && !F.q3Live {
+				F.q3Live = true
+				F.ver++
+			}
+		}
 		return
 	}
 	switch string(ev) {
+	case "presend_disarm": // the shadow window's end: only its price move (11-03+), by substring first (one per window)
+		if !bytes.Contains(line, fMoveKey) {
+			return
+		}
+		var r struct {
+			W    *int64 `json:"w"`
+			Move *FMove `json:"move"`
+		}
+		if json.Unmarshal(line, &r) != nil || r.W == nil || r.Move == nil {
+			return
+		}
+		F.ver++
+		F.moves[*r.W] = r.Move
+		return
 	case "presend_attempt": // by substring (many): a T2 try at the deeper limit (drop > 0.125)
 		i := bytes.Index(line, fDropKey)
 		if i < 0 || bytes.Contains(line, kindRearm) {
@@ -228,7 +306,7 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		}
 		return
 	case "presend_arm", "presend_exit", "presend_fill", "presend_live_skip", "presend_live_arm", "presend_live_fill",
-		"presend_live_realized":
+		"presend_live_realized", "presend_live_fam":
 	default:
 		return
 	}
@@ -281,6 +359,9 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			why = *r.Why
 		}
 		F.skips = append(F.skips, fSkip{why: why, sig: r.Trig.Sig, mint: r.Trig.Mint, t: rawInt(r.Trig.T)})
+		if why == "quiet3_a" {
+			F.q3Live = true
+		}
 	case "presend_live_arm":
 		mint := r.Mint
 		if mint == "" && r.Trig != nil {
@@ -292,6 +373,22 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			kd = *r.Kind
 		}
 		F.kind[k] = kd
+		if r.F3 != nil {
+			F.armF3[k] = r.F3
+		}
+		if r.Eqgrp != nil || r.Cr != nil {
+			x := F.l35(k)
+			if r.Eqgrp != nil {
+				F.anyEq = true
+				x.eq = r.Eqgrp.Flag
+				x.eqWhy = fmt.Sprintf("%.0f equal holders ~%.2f%% each (sum %.1f%%)", fz(r.Eqgrp.N), fz(r.Eqgrp.Pct), fz(r.Eqgrp.Sum))
+			}
+			if r.Cr != nil {
+				F.anyCrLog = true
+				x.cr = r.Cr.Would != nil && *r.Cr.Would == "loss"
+				x.crWhy = fmt.Sprintf("creator's earlier positions %.0f, realized %+.3f SOL", fz(r.Cr.N), fz(r.Cr.Sum))
+			}
+		}
 		if kd == "t2" && r.Trig != nil {
 			F.liveSig[w] = r.Trig.Sig
 			F.liveArm[w] = fArm{mint: mint, t: rawInt(r.Trig.T)}
@@ -316,6 +413,14 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			}
 			F.ledger = append(F.ledger, ev)
 		}
+	case "presend_live_fam": // dip35: the bundle family read at the arm (may land after the fill: keyed like the arm)
+		if r.FamErr != nil && *r.FamErr != "" {
+			return
+		}
+		F.anyFam = true
+		x := F.l35(FKey{w, r.Mint})
+		x.fam = r.Hit != nil && *r.Hit
+		x.famWhy = fmt.Sprintf("fam %.1f%% (create-slot %.1f%%, %.0f transfer-fed wallets)", fz(r.Fam), fz(r.CsPct), fz(r.RecvN))
 	case "presend_live_fill":
 		F.fills[w] = true
 		k := FKey{w, r.Mint}
@@ -397,6 +502,25 @@ func annTruthy(r json.RawMessage) bool {
 	return s != "{}" && s != "" && s != "null"
 }
 
+func (F *FiltAcc) crLiveSkips() int {
+	n := 0
+	for _, s := range F.skips {
+		if s.why == "cr_loss" {
+			n++
+		}
+	}
+	return n
+}
+
+func (F *FiltAcc) l35(k FKey) *fLog35 {
+	x := F.log35[k]
+	if x == nil {
+		x = &fLog35{}
+		F.log35[k] = x
+	}
+	return x
+}
+
 func fz(p *float64) float64 { // Python (x or 0)
 	if p == nil {
 		return 0
@@ -466,6 +590,7 @@ type FiltItem struct {
 	Sol      float64  // would-have P&L (LIVE: paper at the live size; LOG: the real P&L)
 	Sig      string   // LIVE: the trigger's key for the unique totals (its sig; "w<N>" for a window with no logged trigger)
 	Why      []string // LOG: each rule's reason numbers, parallel to Rules ("holder 5ThrZRSQ 7.5%, hz3 0.91")
+	Move     *FMove   // LIVE: the shadow window's price move (nil = no shadow window or the record has no "move")
 }
 
 // Info is the flagged-by line: every rule that would have blocked the fill with its reason numbers, e.g. "safe sell
@@ -523,6 +648,7 @@ type FiltReport struct {
 	LiveSize         float64
 	HasLiveSize      bool
 	HasGuard         bool // the run logs the landing guard (dip30+)
+	Q3Live           bool // QUIET3-A ran live: its LOG row (q3a) is left out when it marked nothing
 }
 
 // LogRuleName: a LOG rule's name in the skip list (no "(new)" / "(approx)").
@@ -534,6 +660,10 @@ func LogRuleName(key string) string {
 		return "safe sell timer"
 	case "ctx85":
 		return "ctx85"
+	case "q3a":
+		return "QUIET3-A"
+	case "fresh":
+		return "fresh holders"
 	case "grp":
 		return "group risk"
 	case "hc":
@@ -618,6 +748,9 @@ func ResolveGcrSeed(explicit string) string {
 var liveFilters = []struct{ why, name string }{{"quiet", "QUIET"}, {"create_slot", "create-slot skip"}, {"young_age", "age-1 skip"},
 	{"lone_whale", "10-sec skip"}}
 
+// optLiveFilters: dip31/32 skips, shown only when the run made one (older runs' tables unchanged).
+var optLiveFilters = []struct{ why, name string }{{"breaker", "circuit breaker"}, {"cr_loss", "creator loss (T2)"}, {"cr_unfollowed", "creator unfollowed (T2)"}, {"quiet3_a", "QUIET3-A (live)"}}
+
 // Report computes the table (cached while no record came and the seed is the same).
 func (F *FiltAcc) Report(seedPath string) *FiltReport {
 	if F.cache != nil && F.cacheVer == F.ver && F.cacheSeed == seedPath {
@@ -700,6 +833,9 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	}
 	// LIVE skips
 	byWhy := map[string]*FiltRow{}
+	for _, f := range optLiveFilters {
+		byWhy[f.why] = &FiltRow{Key: f.why, Name: f.name, Type: "LIVE", Note: "paper; blocked = triggers skipped, W/L = the ones that would have filled"}
+	}
 	for _, f := range liveFilters {
 		byWhy[f.why] = &FiltRow{Key: f.why, Name: f.name, Type: "LIVE", Note: "paper; blocked = triggers skipped, W/L = the ones that would have filled"}
 	}
@@ -712,12 +848,21 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 			if vok {
 				tally(row, v)
 			}
+			var mv *FMove
+			if ok {
+				mv = F.moves[w]
+			}
 			R.Items = append(R.Items, FiltItem{T: s.t, Live: true, Filter: s.why, Name: row.Name, Rules: []string{s.why}, Names: []string{row.Name}, Kind: "T2",
-				Mint: s.mint, W: noW, Scored: vok, Sol: v, Sig: s.sig})
+				Mint: s.mint, W: noW, Scored: vok, Sol: v, Sig: s.sig, Move: mv})
 		}
 	}
 	for _, f := range liveFilters {
 		R.Rows = append(R.Rows, *byWhy[f.why])
+	}
+	for _, f := range optLiveFilters {
+		if byWhy[f.why].Blocked > 0 {
+			R.Rows = append(R.Rows, *byWhy[f.why])
+		}
 	}
 	// LIVE deeper limit
 	if len(F.deepW) > 0 {
@@ -733,11 +878,13 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 			sw, inSh := F.shW[sig]
 			var v float64
 			var vok bool
+			var mv *FMove
 			if has && inSh {
 				v, vok = F.paper(sw, true)
 				if vok {
 					tally(&row, v)
 				}
+				mv = F.moves[sw]
 			}
 			a := F.liveArm[w]
 			tsig := sig
@@ -745,7 +892,7 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				tsig = "w" + strconv.FormatInt(w, 10)
 			}
 			R.Items = append(R.Items, FiltItem{T: a.t, Live: true, Filter: "deeper", Name: row.Name, Rules: []string{"deeper"}, Names: []string{row.Name}, Kind: "T2",
-				Mint: a.mint, W: w, Scored: vok, Sol: v, Sig: tsig})
+				Mint: a.mint, W: w, Scored: vok, Sol: v, Sig: tsig, Move: mv})
 		}
 		var dreal float64
 		for _, k := range F.fillOrd {
@@ -782,6 +929,29 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	// LOG rules on the real fills: one row per rule; one list item per fill with every rule that caught it
 	logItem := map[FKey]int{}
 	var logItems []FiltItem
+	preWhy := func(key string, k FKey) string {
+		if key == "gcr" {
+			return gcrWhy[k]
+		}
+		if x := F.log35[k]; x != nil {
+			switch key {
+			case "crlog":
+				return x.crWhy
+			case "eqgrp":
+				return x.eqWhy
+			case "fam":
+				return x.famWhy
+			}
+		}
+		x := F.armF3[k]
+		if x == nil {
+			return ""
+		}
+		if key == "q3a" {
+			return fmt.Sprintf("token trades in 120 s %.0f, whale's dumps %.0f", fz(x.N120), fz(x.WhDumps))
+		}
+		return fmt.Sprintf("fresh holders %.1f%% (%.0f wallets)", fz(x.Fresh), fz(x.FreshN))
+	}
 	logrule := func(key, name string, keys []FKey, note string) {
 		row := FiltRow{Key: key, Name: name, Type: "LOG", Note: note}
 		for _, k := range keys {
@@ -796,7 +966,7 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				it := &logItems[i]
 				it.Rules = append(it.Rules, key)
 				it.Names = append(it.Names, short)
-				it.Why = append(it.Why, logWhy(key, F.fillAnn[k], gcrWhy[k]))
+				it.Why = append(it.Why, logWhy(key, F.fillAnn[k], preWhy(key, k)))
 				it.Name = strings.Join(it.Names, ", ")
 			} else {
 				t := int64(0)
@@ -805,7 +975,7 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				}
 				logItem[k] = len(logItems)
 				logItems = append(logItems, FiltItem{T: t, Filter: key, Name: short, Rules: []string{key}, Names: []string{short}, Kind: kindOf(k),
-					Mint: k.Mint, W: k.W, Scored: true, Sol: v, Why: []string{logWhy(key, F.fillAnn[k], gcrWhy[k])}})
+					Mint: k.Mint, W: k.W, Scored: true, Sol: v, Why: []string{logWhy(key, F.fillAnn[k], preWhy(key, k))}})
 			}
 			if key == "guard" {
 				if f := F.fillAnn[k]; f != nil {
@@ -843,6 +1013,47 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	}
 	logrule("grp", "group risk (new)", pick((*fAnn).GroupRisk), "real fills; risky holders of any size summed >= 6%")
 	logrule("hc", "holder clock (approx)", pick((*fAnn).HolderClock), "real fills")
+	// dip32 (--presend-live-f3-log): QUIET3-A and the fresh holders, from the arm's "f3", on the real fills
+	if len(F.armF3) > 0 {
+		pickF3 := func(f func(x *fF3) bool) []FKey {
+			var out []FKey
+			for _, k := range F.realOrd {
+				if x := F.armF3[k]; x != nil && f(x) {
+					out = append(out, k)
+				}
+			}
+			return out
+		}
+		logrule("q3a", "QUIET3-A (log)", pickF3(func(x *fF3) bool { return x.Q3a }), "real fills; T2 quiet token + whale with <= 3 dumps")
+		if F.q3Live { // QUIET3-A ran live (11-03): the log row can then never fire; dropped unless it marked a fill anyway
+			if r := R.Rows[len(R.Rows)-1]; r.Key == "q3a" && r.Blocked == 0 {
+				R.Rows = R.Rows[:len(R.Rows)-1]
+			}
+		}
+		logrule("fresh", "fresh holders >= 35% (log)", pickF3(func(x *fF3) bool { return fz(x.Fresh) >= 35 }), "real fills; attack guard (TAIL G3)")
+	}
+	// dip34/35 (log-only): the creator ledger with --presend-live-cr-log on, the equal-size group, the bundle family (fam)
+	pick35 := func(f func(x *fLog35) bool) []FKey {
+		var out []FKey
+		for _, k := range F.realOrd {
+			if x := F.log35[k]; x != nil && f(x) {
+				out = append(out, k)
+			}
+		}
+		return out
+	}
+	if F.anyCrLog {
+		logrule("crlog", "creator loss (log)", pick35(func(x *fLog35) bool { return x.cr }), "real fills; creator ledger verdict, nothing skipped")
+		if r := R.Rows[len(R.Rows)-1]; r.Key == "crlog" && r.Blocked == 0 && F.crLiveSkips() > 0 {
+			R.Rows = R.Rows[:len(R.Rows)-1] // the ledger ran live: its log row is empty by design
+		}
+	}
+	if F.anyEq {
+		logrule("eqgrp", "equal-size group (log)", pick35(func(x *fLog35) bool { return x.eq }), "real fills; >= 3 holders with the same bag")
+	}
+	if F.anyFam {
+		logrule("fam", "bundle family fam (log)", pick35(func(x *fLog35) bool { return x.fam }), "real fills; launch-slot + transfer-fed holders >= 26.8%")
+	}
 	// dip30 LANDING GUARD (log only): the wallets chosen at signing still hold >= the guard's % at our landing
 	if F.anyGuard {
 		logrule("guard", "landing guard (new)", pick((*fAnn).LandingGuard), "real fills; the signing-time set still holding at landing")
@@ -864,6 +1075,7 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	}
 	R.uniqueTotals(logItems)
 	R.HasGuard = F.anyGuard
+	R.Q3Live = F.q3Live
 	R.Any = len(F.skips) > 0 || len(F.deepW) > 0 || F.anyAnn
 	sort.SliceStable(R.Items, func(i, j int) bool { return R.Items[i].T > R.Items[j].T })
 	R.byFill = map[FKey]int{}
@@ -970,6 +1182,9 @@ func (h fHolder) risky() bool { return fz(h.Risk) >= 5 && fz(h.Hz3) >= 0.3 }
 // logWhy: one LOG rule's reason numbers for a fill (from its annotation; gcr's is the ledger line captured at arm time).
 func logWhy(key string, f *fFill, gcrWhy string) string {
 	if key == "gcr" {
+		return gcrWhy
+	}
+	if key == "q3a" || key == "fresh" { // dip32: preformatted from the arm's "f3" (passed in gcrWhy's place)
 		return gcrWhy
 	}
 	if f == nil || f.ann == nil {

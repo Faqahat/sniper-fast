@@ -10,6 +10,8 @@
 #                                         <= 4 at once, 3 s) -> presend_live_fam record: fam = % held by create-slot owners + plain-transfer
 #                                         recipients (bundlewal/REPORT.md); hit = fam >= 26.825 (frozen). Never acted on
 #     --presend-live-fam-thr X             LOG ONLY: the record's "hit" threshold (default 26.825)
+#     --presend-live-cr-log on|off         LOG ONLY (dip35; needs --presend-live-cr-loss): the creator ledger is kept/saved but never skips;
+#                                         its verdict goes on the arm records as cr.would (dipmon: "creator loss (log)")
 #     --presend-live-fam-rpc URL           the read's RPC (${VAR} expanded by the engine from its env; default: the config's rpc_url).
 #                                         Pass it single-quoted ('https://...?api-key=${VAR}') so the key never reaches the command line
 #
@@ -257,7 +259,7 @@ while [ $# -gt 0 ]; do
     --presend-live-routes|--presend-live-max-per-sec|--presend-live-path-max-per-sec|--presend-live-max-fills|--presend-live-fee-budget-sol|--presend-live-create-slot|\
     --presend-live-one-position|--presend-live-exit-ms|--presend-live-min-age-slots|--presend-live-lone-whale-slots|--presend-live-ann|--presend-live-deep-drop|--presend-live-holds-state|\
     --presend-live-breaker|--presend-live-cr-loss|--presend-live-creator-state|--presend-live-quiet3a|--presend-live-tag-wallets|\
-    --presend-live-exact-exit|--presend-live-cr-earn-log|--presend-live-seen-log) [ $# -ge 2 ] || die "$1 needs a value"; PSV["$1"]=$2; shift 2;;
+    --presend-live-exact-exit|--presend-live-cr-earn-log|--presend-live-seen-log|--presend-live-cr-log) [ $# -ge 2 ] || die "$1 needs a value"; PSV["$1"]=$2; shift 2;;
     --presend-live-f3-log) PSF3=1; shift;;
     # dip34 log-only switches
     --presend-live-eqgrp-log) PSEQ=1; shift;;
@@ -409,7 +411,7 @@ if [ -n "$PSLIVE" ]; then
   # dip24 draft (owner 10-29 02:10 PKT): only the size is still a required cap; --presend-live-max-fills (absent or 0 = unlimited) and
   # --presend-live-fee-budget-sol (failed-try fees per ROLLING 24 h, pre-send pauses above it; engine default 1.0) are optional
   for f in --presend-live-size-sol; do [ -n "${PSV[$f]:-}" ] || die "--presend-live needs $f (a required cap)"; done
-  for f in "${!PSV[@]}"; do case "$f" in --presend-live-routes|--presend-live-create-slot|--presend-live-one-position|--presend-live-ann|--presend-live-holds-state|--presend-live-breaker|--presend-live-cr-loss|--presend-live-creator-state|--presend-live-quiet3a|--presend-live-tag-wallets|--presend-live-exact-exit) ;; *) num "${PSV[$f]}" || die "$f: '${PSV[$f]}' is not a number";; esac; done
+  for f in "${!PSV[@]}"; do case "$f" in --presend-live-routes|--presend-live-create-slot|--presend-live-one-position|--presend-live-ann|--presend-live-holds-state|--presend-live-breaker|--presend-live-cr-loss|--presend-live-creator-state|--presend-live-quiet3a|--presend-live-tag-wallets|--presend-live-exact-exit|--presend-live-fam-rpc|--presend-live-cr-log) ;; *) num "${PSV[$f]}" || die "$f: '${PSV[$f]}' is not a number";; esac; done
   [ -z "${PSV[--presend-live-max-fills]:-}" ] || [[ "${PSV[--presend-live-max-fills]}" =~ ^[0-9]+$ ]] || die "--presend-live-max-fills must be a whole number >= 0 (0 = unlimited)"
   [ -z "${PSV[--presend-live-fee-budget-sol]:-}" ] || awk -v x="${PSV[--presend-live-fee-budget-sol]}" 'BEGIN{exit !(x>0 && x<=100)}' || die "--presend-live-fee-budget-sol must be in (0, 100] SOL (the failed-try fees of a rolling 24 h; above it pre-send pauses)"
   PSFC=${PSV[--presend-live-max-fills]:-0}; [[ "$PSFC" =~ ^0+$ ]] && PSFC=unlimited
@@ -431,6 +433,8 @@ if [ -n "$PSLIVE" ]; then
   [ -z "${PSV[--presend-live-breaker]:-}" ] || [[ "${PSV[--presend-live-breaker]}" =~ ^[0-9]+:[0-9.]+:[0-9]+:[0-9]+$ ]] || die "--presend-live-breaker N:L:W:P, e.g. 2:0.2:10:30 (dip32)"
   [ -z "${PSV[--presend-live-cr-loss]:-}" ] || [[ "${PSV[--presend-live-cr-loss]}" =~ ^[0-9]+:[0-9.]+$ ]] || die "--presend-live-cr-loss N:SOL, e.g. 2:0.05 (dip32)"
   [ -z "${PSV[--presend-live-quiet3a]:-}" ] || [[ "${PSV[--presend-live-quiet3a]}" =~ ^(on|off)$ ]] || die "--presend-live-quiet3a on|off (dip33)"
+  [ -z "${PSV[--presend-live-cr-log]:-}" ] || [[ "${PSV[--presend-live-cr-log]}" =~ ^(on|off)$ ]] || die "--presend-live-cr-log on|off (dip35)"
+  [ "${PSV[--presend-live-cr-log]:-off}" = off ] || [ -n "${PSV[--presend-live-cr-loss]:-}" ] || die "--presend-live-cr-log on needs --presend-live-cr-loss N:SOL (the rule it logs)"
   [ -z "${PSV[--presend-live-tag-wallets]:-}" ] || [[ "${PSV[--presend-live-tag-wallets]}" =~ ^[1-9A-HJ-NP-Za-km-z,]+$ ]] || die "--presend-live-tag-wallets W,W,... (dip33)"
   [ -z "${PSV[--presend-live-creator-state]:-}" ] || [ -n "${PSV[--presend-live-cr-loss]:-}" ] || die "--presend-live-creator-state needs --presend-live-cr-loss (dip32)"
   # dip34: the exact exit switch, the log-only values (the engine checks the ranges again)
@@ -475,6 +479,7 @@ if [ -n "$PSLIVE" ]; then
   [ -z "${PSV[--presend-live-cr-loss]:-}" ] || PSLDESC="$PSLDESC | BAD-CREATOR LEDGER ${PSV[--presend-live-cr-loss]} (state ${PSV[--presend-live-creator-state]:-none})"
   [ -z "${PSV[--presend-live-breaker]:-}" ] || PSLDESC="$PSLDESC | CIRCUIT BREAKER ${PSV[--presend-live-breaker]}"
   [ "${PSV[--presend-live-quiet3a]:-off}" = off ] || PSLDESC="$PSLDESC | QUIET3-A LIVE"
+  [ "${PSV[--presend-live-cr-log]:-off}" = off ] || PSLDESC="$PSLDESC | CREATOR LEDGER LOG-ONLY"
   if [ -n "$PSF3" ]; then PSLARGS+=(--presend-live-f3-log); PSLDESC="$PSLDESC | F3 LOG-ONLY (QUIET3-A, fresh holders)"; fi
   # dip34: the exact exit (engine default on) and the log-only annotations
   [ -z "${PSV[--presend-live-exit-ms]:-}" ] || [ "${PSV[--presend-live-exit-ms]}" = 0 ] || PSLDESC="$PSLDESC | EXIT ${PSV[--presend-live-exit-ms]} ms ($( [ "${PSV[--presend-live-exact-exit]:-on}" = on ] && echo 'exact clock' || echo 'feed-driven, dip33 timing'))"

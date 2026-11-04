@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -59,6 +60,13 @@ def strip_v3_json(txt):
 def strip_v3_text(txt):
     """the Go text snapshot without its v3 "ATH ..." line"""
     return "\n".join(l for l in txt.split("\n") if not l.startswith("ATH       "))
+
+
+def t2_marker(txt):
+    """dipmon v3.2 (owner 11-03): the pre-send kind is shown as T2 where the oracle (Python v1) prints PS: the text
+    snapshot's last-trades kind and the config's short form (text and JSON "short"); applied to the oracle's output"""
+    txt = txt.replace('"short": "PS ', '"short": "T2 ')
+    return re.sub(r"(?<= )PS(?= )", "T2", txt)
 
 
 def runs_available():
@@ -124,8 +132,8 @@ def midrun(binary):
             now = str(int(float(t)) / 1e9)
             f = os.path.join(d, f"dip_ams_r{run}.jsonl")
             common = ["--file", f, "--snapshot", "--usd", "100", "--load-duty", "0", "--assume-running", "--now", now]
-            pj, gj = run_cmd([sys.executable, ORACLE] + common + ["--json"]), run_cmd([binary] + common + ["--json"])
-            pt, gt = run_cmd([sys.executable, ORACLE] + common), run_cmd([binary] + common)
+            pj, gj = t2_marker(run_cmd([sys.executable, ORACLE] + common + ["--json"])), run_cmd([binary] + common + ["--json"])
+            pt, gt = t2_marker(run_cmd([sys.executable, ORACLE] + common)), run_cmd([binary] + common)
             j = json.loads(pj)
             v3 = v3_check(json.loads(gj))
             gj, gt = strip_v3_json(gj), strip_v3_text(gt)
@@ -164,7 +172,7 @@ def main():
     nfields = 0
     for region, n, p in runs:
         common = ["--file", p, "--snapshot", "--usd", "100", "--load-duty", "0"]
-        py = json.loads(run([sys.executable, ORACLE] + common + ["--json"]))
+        py = json.loads(t2_marker(run([sys.executable, ORACLE] + common + ["--json"])))
         go = json.loads(run([a.bin] + common + ["--json"]))
         out = v3_check(go)
         diff(py, go, "", out)
@@ -172,7 +180,7 @@ def main():
         nfields += nf
         tdiff = []
         if a.text:
-            pt = run([sys.executable, ORACLE] + common).splitlines()
+            pt = t2_marker(run([sys.executable, ORACLE] + common)).splitlines()
             gt0 = run([a.bin] + common)
             gt = strip_v3_text(gt0).splitlines()
             if py.get("series_hi") is not None and "\nATH       " not in gt0:

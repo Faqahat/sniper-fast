@@ -19,7 +19,7 @@ $GO vet ./... || fail=1
 step "go test: units, tail, garbage lines, card identity on every run, today, golden screens (5 sizes x 11 pages), resize + keys + mouse, live events / animations / bell"
 $GO test -count=1 ./... || fail=1
 step "go test -race: the tail and reader, the price goroutine, the UI"
-CGO_ENABLED=1 $GO test -count=1 -race ./internal/... || fail=1
+CGO_ENABLED=1 $GO test -count=1 -race -timeout 30m ./internal/... || fail=1  # -race on every local run: > 10 min since r41-r46
 step "parity with the Python dipmon v1 (the oracle, pinned in tests/oracle): every local run + running copies"
 python3 tests/parity.py --text || fail=1
 step "dipview in a pty: the list, enter -> dipmon (OSC 8 links, OSC 52 copy, mouse off by default / M) -> q back -> q quits"

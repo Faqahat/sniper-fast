@@ -132,7 +132,7 @@ func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.St
 	typ := "REG"
 	tyS := t.Val
 	if tr.Kind == "PS" {
-		typ, tyS = "PS", t.Acc
+		typ, tyS = "T2", t.Acc
 		if tr.Rearm {
 			typ = "RA"
 		}
@@ -148,7 +148,7 @@ func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.St
 		case "type", "typ":
 			s, st = typ, tyS
 		case "ty":
-			s, st = map[string]string{"PS": "PS", "RA": "RA", "REG": "RG"}[typ], tyS
+			s, st = map[string]string{"T2": "T2", "RA": "RA", "REG": "RG"}[typ], tyS
 		case "mint":
 			s = core.Short(tr.Mint, c.w)
 		case "size":
@@ -252,19 +252,21 @@ func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 	for _, c := range cols {
 		fixed += c.w + 1
 	}
-	// the yellow dot of a trade some LOG rule would have blocked: its own 1-cell column after the marker when the table
-	// has room, else inside the type column (the narrowest existing one)
-	dotCol, dotInType := false, false
-	if sel >= 0 && m.view.Filt.NFlagged() > 0 {
+	// the yellow dot of a trade some LOG rule would have blocked: its own 1-cell column after the marker (Trades) or first
+	// (the overview's last trades, no marker) when the table has room, else inside the type column (the narrowest one)
+	dotInType := false
+	if m.view.Filt.NFlagged() > 0 {
+		at := 0
+		if sel >= 0 {
+			at = 1
+		}
 		if fixed+2 <= w-4 {
-			cols = append(cols[:1:1], append([]tcol{{"flag", 1, false}}, cols[1:]...)...)
+			cols = append(cols[:at:at], append([]tcol{{"flag", 1, false}}, cols[at:]...)...)
 			fixed += 2
-			dotCol = true
 		} else {
 			dotInType = true
 		}
 	}
-	_ = dotCol
 	if last := &cols[len(cols)-1]; last.w == 0 {
 		last.w = max(4, w-fixed)
 	}
@@ -377,8 +379,8 @@ func (m *Model) tradesKey(kind string, w, h int) string {
 			return ""
 		}
 	}
-	return fmt.Sprintf("%s|%d|%d|%d|%d|%v|%v|%v|%d|%g", kind, w, h, m.ctx.Src.Model.TradeVer, len(m.view.Trades), m.dark, m.ascii,
-		m.usdFirst, m.view.Scope, m.view.Price)
+	return fmt.Sprintf("%s|%d|%d|%d|%d|%v|%v|%v|%d|%g|%d", kind, w, h, m.ctx.Src.Model.TradeVer, len(m.view.Trades), m.dark, m.ascii,
+		m.usdFirst, m.view.Scope, m.view.Price, m.view.Filt.NFlagged()) // the dots: a fill can be flagged after its trade closed
 }
 
 func (m *Model) tradesPanelRaw(w, h int) string {

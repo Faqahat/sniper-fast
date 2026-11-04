@@ -1,11 +1,21 @@
 # REWIND: dipmon v3.1 + dipview, the live monitor and run explorer for the dip-bot runs (Go)
 
+**11-03 (owner):** tab 2 is now **Engine** (short `Eng`; it was "Pre-send"); the pre-send fill kind is shown as **T2**
+everywhere it used to say `PS` (Trades / overview tables, the type sort, the split / landing lines, the config short form,
+`--snapshot`; re-arm stays `RA`, regular `REG` / `RG`; `tests/parity.py` maps the Python v1 oracle's `PS` to T2); the
+overview's LAST TRADES carry the same yellow dot as Trades; the Filters tab shows each filter's **verdict** from the
+FILTERS-3 study (11-03), leads with **net saved** and **prec**, sorts by verdict group, and folds the DISMISSED filters into
+one line (`d` expands) — see "Filters tab". Later the same day: a LIVE skip whose shadow window never filled shows
+**`no dip`** and SOL **`0.000`** (the trade would not have happened: nothing saved or lost; still behind `n`), the LIVE rows
+get a **`move`** column (the shadow window's price move from the engine's `presend_disarm` "move": max / min % vs the
+trigger's post price, e.g. `+35/-8%`; `–` on runs before it), and the `QUIET3-A (log)` row is hidden when QUIET3-A runs live.
+
 **v3.1 (10-28):** the Trades table sorts by any column (`o` / `O`, or a click on a header with the mouse on) and has a
 running-total column (the run P&L after each trade); size and total follow `u` (SOL ↔ USD); the config is grouped in
 five blocks (Pre-send / Regular / Routes & sending / Safety & limits / QUIET & paper) on the overview and the Config tab;
 mouse capture is **off by default** so the terminal's own selection and link clicks work (`M` toggles, `--mouse` starts
 with it on); mints are OSC 8 links to GMGN, signatures / tokens / leader accounts to Solscan (the trade details, the
-Trades table, the Pre-send tab's best / worst), and `c` copies the selected mint (OSC 52); the new **dipview** run
+Trades table, the Engine tab's best / worst), and `c` copies the selected mint (OSC 52); the new **dipview** run
 explorer (below).
 
 A read-only terminal UI for one pump.fun dip-bot run (the engine's `<TAG>.jsonl` records + `<TAG>.log`), opened on the
@@ -89,7 +99,7 @@ Read-only like dipmon: the run files and `/proc`, nothing else.
   ams · run 27 · dip20                                          ● RUNNING  ·  4:51:07 PM PKT  ·  SOL $187.42
 ╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
 ╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
-  1 Overview   2 Pre-send   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
 ```
 
 The header is the REWIND wordmark in the style of Charm's Crush: blocky half-block letters with a pink → violet →
@@ -134,7 +144,7 @@ gradient progress bar. Every time is PKT in 12-hour form ("3:26 PM", "3:26:51 PM
      title; the newest point pulses once after a trade closes.
    - **LAST TRADES**, filling the rest: the Trades tab's table (below); zebra rows; a trade whose P&L just became final
      gets a green / red highlight that fades over ~2 s.
-2. **Pre-send**: fills / cap and fee budget gauges (per session: the caps are per engine session), windows armed, the
+2. **Engine** (was "Pre-send"): fills / cap and fee budget gauges (per session: the caps are per engine session), windows armed, the
    result (net, realized, rent back, failed tries = count × fee, the fee check against the engine's counter, wins /
    losses, average, best / worst), exits, QUIET, paper vs live, windows skipped / disarmed / try results, sessions, and
    **LATENCY** (ms): send→seen of every seen try (p10 / p50 / p90) and the share that landed in its send block; dump→land
@@ -144,7 +154,7 @@ gradient progress bar. Every time is PKT in 12-hour form ("3:26 PM", "3:26:51 PM
    fills and their dump→land, bounced and theirs (medians). On r28: fills 34 ms after the dump, bounced 307 ms.
 3. **Regular**: setup, P&L (fills / failed buys), fired → filled, failed buys by cause (6042 / 6001 / other) with their
    fees, exits, P&L by leader client, landing, the open position, the funnel.
-4. **Trades**: every trade, newest first (`o` / `O`: any column, see below), in a scrollable table: time, PS / REG, mint
+4. **Trades**: every trade, newest first (`o` / `O`: any column, see below), in a scrollable table: time, T2 / RA / REG, mint
    (an OSC 8 link to its GMGN page), size, P&L SOL and USD, %, **total** (v3.1: the run P&L after this trade: the trades'
    P&L + rent back in time order, minus the failed pre-send tries' fees booked up to that trade's minute; the last row
    = the hero unless a try failed after it), exit,
@@ -214,7 +224,7 @@ run has them. r27–r37 render exactly as before (checked on every local run, th
   - RUN P&L: `split  T2 +x  regular +y` and its own line `re-arm  +z  21 fills 10 W` (medium: T2 / re-arm / regular
     lines; phones: the same two lines). LIVE: `T2` fills / W / avg, T2's windows (now / armed / tries) and a `re-arm`
     line (fills, W %, net, its windows now with the spinner, windows).
-  - Pre-send tab: `RESULT · T2`, `EXITS · T2`, `live T2` in PAPER vs LIVE, `armed now … T2 tries n (+m re-arm)`, and
+  - Engine tab: `RESULT · T2`, `EXITS · T2`, `live T2` in PAPER vs LIVE, `armed now … T2 tries n (+m re-arm)`, and
     a **RE-ARM** section: net, realized / rent back / failed tries, fills W / L avg, windows armed · now · after waiting
     · deferred · tries, `skipped` and `ended` by reason (without the `rearm_` prefix: no_holder, age, untradeable, r5,
     blocked_*; filled, expired, quiet, whale_dump, no_holder, superseded, ...), exits, best / worst (with the fill
@@ -227,7 +237,7 @@ run has them. r27–r37 render exactly as before (checked on every local run, th
     `presend_live.rearm`, else the start line's `| REARM ON: ...`: in SAFETY & LIMITS (`● re-arm 0.65 SOL · gap 20 ·
     QUIET 6:2 · R5 off`), the Config tab (with its explanation) and the snapshot (`RA 0.65 g20 q6:2`). A re-arm fill's
     details: `RE-ARM FILL`, its dump.
-- **The send-path A/B** (two or more pre-send paths in the routes, else seen in the tries): the Pre-send tab's **SEND
+- **The send-path A/B** (two or more pre-send paths in the routes, else seen in the tries): the Engine tab's **SEND
   PATHS A/B** (first on the right; the caps `60/s · 40/s a path` in its title), per path: tries; **refused**, inferred
   from the records: a window's tick missing between sent ticks is that path's refusal (the engine's rule path =
   paths[(n + w) mod len]); a run of ≥ 2 missing ticks is a pause of every path, kept apart; landed (not unseen); same
@@ -240,7 +250,7 @@ run has them. r27–r37 render exactly as before (checked on every local run, th
   - Alerts (while running): `<path> refused x% of its tries in 10 min (n of m)` above 1%, `<path> acks failing: n of m
     not 200 in 10 min` above 1%, `<path> UNHEALTHY: ...` while its last SEND-PATH edge is UNHEALTHY.
   - Trades: a **via** column (the fill path: HL helius-ps, AS astralane-ps) before client from 80 columns (sorts as the
-    path; `type` sorts PS / RA / REG apart); the snapshot's last trades end with `via AS`.
+    path; `type` sorts T2 / RA / REG apart); the snapshot's last trades end with `via AS`.
   - Health: `A/B paths  helius-ps ok · astralane-ps recovered (1 unhealthy / 1 recovered)`. SEND-PATH UNHEALTHY lines
     count as the path's errors like every path's (astralane-ps's too: the table, the 3-in-10-min alert); RECOVERED
     lines are no error and set the path's state.
@@ -248,7 +258,7 @@ run has them. r27–r37 render exactly as before (checked on every local run, th
 - dipview: `T2` and `re-arm` lines; `--list` says `fills 44 (23W; re-arm 21, 10W)`. The help (`?`) has a re-arm and an
   A/B note on dip26 runs.
 - CPU: O(1) a record (the tries and their landings still read by substring); the A/B summary (its percentiles) is rebuilt
-  at most every 5 s while the Pre-send tab shows it (0.8 ms on r38's 38 minutes); an old run's load is unchanged within
+  at most every 5 s while the Engine tab shows it (0.8 ms on r38's 38 minutes); an old run's load is unchanged within
   noise (r37, 145 MB: 0.53 → 0.55 s CPU).
 
 ### Filters tab (key `8`, 10-30)
@@ -258,8 +268,21 @@ us". A port of `ops/strategies/presend/prevent/forward/filters_report.py` (equal
 and of `loss_brief.py`'s per-fill rules (`internal/core/filters.go`, `internal/ui/filters.go`).
 
 - **Table**, one row per filter, tagged **LIVE** (it changed what the engine did) or **LOG** (log only, would-have):
-  blocked | would win n / SOL | would lose n / SOL | **net saved** = minus what the blocked would have made (green = saved
-  us money, red = cost us). LIVE rows are a **paper estimate**: QUIET / create-slot / age-1 / 10-sec skips of a T2 trigger
+  filter | **verdict** | **net saved** = minus what the blocked would have made (green = saved us money, red = cost us) |
+  **prec** = the losers among the marked items that have a value, % (green >= 60%, yellow >= 50% = a coin flip, red below) |
+  blocked | would win n / SOL | would lose n / SOL | why (the verdict's reason; >= 113 columns). 76–99 columns: the
+  counts without the SOL sums; phones: 4-cell verdicts (`NEW` = LIVE new, `LV32` = LIVE dip32, `DISM`). **Verdicts (11-03)**
+  come from FILTERS-3 (`ops/strategies/presend/filters3/tune/tune.json` "verdicts", `build/DIP32.md`), one table in
+  `internal/ui/filters.go` (`fltVerdicts`, key → group + label + a 3–6 word reason, easy to edit): create-slot / QUIET /
+  age-1 / 10-sec = KEEP; circuit breaker / creator loss = LIVE new; bad creator = LIVE dip32 (superseded by the live
+  creator ledger); creator unfollowed / group risk / QUIET3-A / fresh holders = LOG; safe sell timer / holder clock /
+  landing guard / ctx85 = DISMISSED; the deeper limit has none (`–`). The **`QUIET3-A (log)`** row is left out when QUIET3-A runs live (the
+  run_start's `presend_live` has `"quiet3a": true`, or the run has a `quiet3_a` skip): the log rule can then never fire
+  (it stays only if it marked a fill anyway). Rows sort by verdict group (KEEP / LIVE first, then
+  LOG, then DISMISSED) and by net saved within a group; the DISMISSED rows fold into one line (`▸ 3 DISMISSED  d show`:
+  their net, W / L summed over the rows) that `d` expands. The LIVE / LOG tag still says how this run used the filter
+  (it decides paper vs real fills and which unique total it is in). A two-line legend under the totals: net / prec /
+  verdict, then how LIVE and LOG rows are scored (and the bad-creator seed). LIVE rows are a **paper estimate**: QUIET / create-slot / age-1 / 10-sec skips of a T2 trigger
   scored on the main shadow's window on the same trigger (row c `net_cheap`, scaled live size / shadow size); the
   **deeper limit** (only when the run used it) = T2 windows that tried below 0.875x and never filled, scored the same
   way, plus a line with its deep fills' real P&L vs their shadow paper (the gain) and its NET = blocks + gain. LOG rows
@@ -276,7 +299,7 @@ and of `loss_brief.py`'s per-fill rules (`internal/core/filters.go`, `internal/u
   `live_dup`, `log_dup`. `filters_report.py` prints the same three lines last (`LIVE total (unique triggers)` ...), tested
   against Go on r40 (fixture and full file).
 - **Trades: yellow dot and `x`**: a real position that at least one LOG rule would have blocked has a yellow `●` (`*` with
-  `--ascii`) in its own 1-cell column after the selection marker (only when the run has flags; on a table too tight for it the dot
+  `--ascii`) in its own 1-cell column after the selection marker (the overview's LAST TRADES too, 11-03: first column) (only when the run has flags; on a table too tight for it the dot
   replaces the last cell of the type column). `x` (Trades) shows a **BLOCKED BY** panel under the table for the selected trade: every
   rule with its numbers, e.g. `safe sell timer (holder 5ThrZRSQ 7.5%, hz3 0.91) · group risk (11.1% = 5ThrZRSQ 7.5% +
   85YwZaQa 3.6%) · holder clock (holder 5ThrZRSQ 7.5%, h3 0.90) · landing guard (guard set 15.5% at landing)`; an unflagged
@@ -287,7 +310,13 @@ and of `loss_brief.py`'s per-fill rules (`internal/core/filters.go`, `internal/u
   header; `v` shows them. Picking a LIVE filter / `LIVE` with `f` shows them regardless. The list's W / L / SOL follow what is
   visible; the table above always counts everything.
 - **Skip list** (newest first; `o` / `O` sort like Trades): time, LIVE / LOG, the filter, T2 / RA, the mint (GMGN link),
-  WIN / LOSE, SOL. A LOG row is one real fill with **every** rule that would have blocked it, e.g. F36E6Xcs (-0.121):
+  WIN / LOSE, SOL, and for LIVE rows **move** (11-03). A LIVE skip whose shadow window never filled is **`no dip`** with SOL
+  `0.000` (dim: the trade would not have happened, nothing saved or lost; it sorts as 0 between WIN and LOSE); `n` shows /
+  hides these rows as before. **move** = the shadow window's price move from the engine's shadow `presend_disarm` record
+  (`"move": {"max_pct", "min_pct", "n"}`: the highest / lowest price, % vs the trigger's post price, over the token's
+  trades in the window), found like the score (trigger sig -> shadow w), shown rounded `+35/-8%` (`0` unsigned), `0 trades`
+  when nothing traded, `–` when the record has no "move" (runs before the engine logged it); blank on LOG rows; the column
+  is there only when the list has a LIVE row (`v`, or `f` LIVE / a LIVE filter) and the screen has >= 76 columns. A LOG row is one real fill with **every** rule that would have blocked it, e.g. F36E6Xcs (-0.121):
   `safe sell timer, group risk, holder clock` (phones: `ST+GR+HC`). `f` filters by LIVE / LOG / one filter, `n` adds the
   blocked items that would not have filled (no shadow fill), `enter` opens a LOG item's trade, `c` copies the mint.
 - Live: the table follows the .jsonl as it grows (recomputed only when a filter record came).
@@ -302,8 +331,9 @@ and of `loss_brief.py`'s per-fill rules (`internal/core/filters.go`, `internal/u
 
 | key | action |
 |---|---|
-| `1`–`8`, Tab, Shift-Tab, a click on the tab bar (mouse on) | tabs: Overview, Pre-send, Regular, Trades, Health, Log, Config, Filters |
-| `f` / `n` (Filters) | the skip list: all → LIVE → LOG → each filter; `n` shows / hides the blocked items that would not have filled; `v` shows / hides the shadow-window (LIVE) rows |
+| `1`–`8`, Tab, Shift-Tab, a click on the tab bar (mouse on) | tabs: Overview, Engine, Regular, Trades, Health, Log, Config, Filters |
+| `f` / `n` (Filters) | the skip list: all → LIVE → LOG → each filter; `n` shows / hides the LIVE skips whose shadow window never filled (`no dip`, SOL 0.000); `v` shows / hides the shadow-window (LIVE) rows |
+| `d` (Filters) | the table's DISMISSED filters: one summary line (count + their net summed) ↔ their rows |
 | ↑ ↓ PgUp PgDn Home End, the mouse wheel (mouse on) | scroll (Trades: move the selection; Log: End = follow the tail again) |
 | Enter / Esc, a click on a trade (twice: details; mouse on) | Trades: details of the selected trade / back |
 | `f` | Trades: all → pre-send → regular → wins → losses → open; Log: important ↔ all |
@@ -380,7 +410,7 @@ All sums in lamports, per engine session, then summed (the definitions are the P
 | blk | `slots_after_send` | `buy_land.slots_after_dump`; a failed buy: the timing's `clock2.buy_slot − dump_slot` |
 | details | client (the landing leader's), leader (its `presend_attempt`), path, try `n` of the window's sent tries, `n_between`, the dump's drop / price | client, leader, route, path, decision / reaction / exec lag |
 
-The Pre-send tab's summary reads every `presend_attempt_land` by substring (never decoded; 15,771 in r28): every seen
+The Engine tab's summary reads every `presend_attempt_land` by substring (never decoded; 15,771 in r28): every seen
 try's send→seen and `slots_after_send`, and for the fills (`res` ok) and the 6042 tries the dump→land when the dump in
 the record met the drop rule (`d.p_rel ≤ 1 − presend_live.drop`, 0.88 for 12%), by the leader client family. Memory
 stays bounded: sparse histograms (0.1 ms buckets below 1 s; quantiles interpolate like numpy's default, the median of
@@ -454,11 +484,11 @@ sh ops/tui-go/run_tests.sh       # everything (QUICK=1: follow at 200x; FOLLOW=0
   equals the minutes' bookings; **ATH / low** on every run and session scope: the series' first extremes = the Python
   dipmon's `series_hi` / `series_lo`, the JSON fields equal, from ATH ≤ 0; **the day's series** on every run's day:
   minute by minute equal to an independent sum of every run's bookings, ending at the day card's net; **latency** on r27
-  and r28: every figure of the Pre-send summary (all and per client family: counts, blocks, p10 / p50 / p90) and every
+  and r28: every figure of the Engine tab's summary (all and per client family: counts, blocks, p10 / p50 / p90) and every
   fill's / regular buy's own latency against an independent `encoding/json` scan of the records, r28's medians against
   the owner's measurement (fills 34 ms, bounced 307 ms after the dump); **golden screens**: 11 pages (7 tabs, help, a
   trade's details, the splash, the today card) × 5 sizes (200x35, 160x50, 120x40, 80x24, 50x30) of r27, and r28's
-  Pre-send / Trades / details, every frame exactly filling the terminal; `--ascii` pure ASCII and `--no-color` without
+  Engine / Trades / details, every frame exactly filling the terminal; `--ascii` pure ASCII and `--no-color` without
   colors on every page and size; **resize + keys + mouse** through 18 sizes down to 1x1 (no panic); **a run followed
   live** (r27 split in two): highlights, toast, pulse, hero spring, the bell (rate-limited, never in the load) and the
   final numbers.

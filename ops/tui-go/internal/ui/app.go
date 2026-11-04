@@ -32,8 +32,8 @@ type Options struct {
 	Golden                                 bool   // tests: fixed probe values (system, pid, clock) for golden screens
 }
 
-var tabNames = []string{"Overview", "Pre-send", "Regular", "Trades", "Health", "Log", "Config", "Filters"}
-var tabShort = []string{"Ovw", "PS", "Reg", "Trd", "Hlth", "Log", "Cfg", "Flt"}
+var tabNames = []string{"Overview", "Engine", "Regular", "Trades", "Health", "Log", "Config", "Filters"}
+var tabShort = []string{"Ovw", "Eng", "Reg", "Trd", "Hlth", "Log", "Cfg", "Flt"}
 var filters = []string{"all", "pre-send", "regular", "wins", "losses", "open"}
 
 const (
@@ -129,6 +129,7 @@ type Model struct {
 	fltSel, fltTop, fltFilter, fltSort int
 	fltAsc, fltAll                     bool
 	fltShadow                          bool // Filters: show the LIVE rows scored on the shadow window (v; default hidden)
+	fltDism                            bool // Filters: the DISMISSED filters' rows expanded (d; default one summary line)
 	tradeInfo                          bool // Trades: the flagged-by panel under the table (x)
 	fltRows                            []core.FiltItem
 	fltRowY                            int
@@ -599,7 +600,7 @@ func kindTag(tr *core.Trade) string {
 		if tr.Rearm {
 			return "RA"
 		}
-		return "PS"
+		return "T2"
 	}
 	return "REG"
 }
@@ -780,6 +781,10 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.tab == 7 && m.detail == nil {
 			m.fltShadow = !m.fltShadow
 			m.fltSel, m.fltTop = 0, 0
+		}
+	case "d": // Filters: the DISMISSED filters' rows expanded / one summary line
+		if m.tab == 7 && m.detail == nil {
+			m.fltDism = !m.fltDism
 		}
 	case "x": // Trades: which filters would have blocked the selected trade (the panel under the table)
 		if m.tab == 3 && m.detail == nil {
@@ -1054,7 +1059,7 @@ func (m *Model) bodyKey(w, bh int) string {
 	M := m.ctx.Src.Model
 	flt := ""
 	if m.tab == 7 {
-		flt = fmt.Sprintf("|%d|%d|%d|%d|%v|%v", m.fltSel, m.fltTop, m.fltFilter, m.fltSort, m.fltAsc, m.fltAll) + fmt.Sprintf("|%v", m.fltShadow)
+		flt = fmt.Sprintf("|%d|%d|%d|%d|%v|%v", m.fltSel, m.fltTop, m.fltFilter, m.fltSort, m.fltAsc, m.fltAll) + fmt.Sprintf("|%v|%v", m.fltShadow, m.fltDism)
 	}
 	flt += fmt.Sprintf("|x%v", m.tradeInfo)
 	return flt + fmt.Sprintf("%d|%v|%v|%d|%d|%d|%d|%s|%d|%d|%d|%d|%d|%d|%s|%v|%v|%d|%v|%v|%d|%v|%d|%v|%v|%g|%s|%d|%d|%d|%d|%d",

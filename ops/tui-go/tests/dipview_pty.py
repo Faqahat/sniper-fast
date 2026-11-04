@@ -36,7 +36,8 @@ def main():
     p = Pty(a.bin, ["--view", "--dir", a.dir, "--usd", "187.42", "--load-duty", "0"], rows=40, cols=160,
             env={"TERM": "xterm-256color"})
     check(until(p, lambda s: "RUNS" in s and "start" in s), "dipview shows the run list")
-    check(until(p, lambda s: "result " in s and "pre-send" in s), "the selected run's overview (result, pre-send)")
+    # a re-arm run (dip26+, e.g. the newest r46) labels its pre-send line "T2" (the re-arm on its own line)
+    check(until(p, lambda s: "result " in s and ("pre-send" in s or " T2 " in s)), "the selected run's overview (result, pre-send / T2)")
     raw = bytes(p.raw_tail)
     check(not any(x in raw for x in (b"\x1b[?1000h", b"\x1b[?1002h", b"\x1b[?1003h")), "no mouse capture by default")
     p.send("enter", 0.5)

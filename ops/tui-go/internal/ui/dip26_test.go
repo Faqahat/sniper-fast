@@ -107,7 +107,7 @@ func TestGoldenDip26(t *testing.T) {
 }
 
 // TestDip26ResizeKeysSort: r38 through many sizes, every tab and the sort keys (the via column sorts as the path; the
-// type sorts PS / RA / REG apart): no panic, every frame exactly fills the terminal; the help has the dip26 notes.
+// type sorts T2 / RA / REG apart): no panic, every frame exactly fills the terminal; the help has the dip26 notes.
 func TestDip26ResizeKeysSort(t *testing.T) {
 	ctx := loadCtx(t, r38, r38Now)
 	ctx.AssumeRunning = true
@@ -152,7 +152,7 @@ func TestDip26ResizeKeysSort(t *testing.T) {
 		}
 		seen[tag], last = true, tag
 	}
-	if !seen["RA"] || !seen["PS"] {
+	if !seen["RA"] || !seen["T2"] {
 		t.Fatalf("type sort: kinds %v", seen)
 	}
 	m2.sortCol, m2.sortAsc = 0, false

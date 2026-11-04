@@ -171,7 +171,7 @@ func (m *Model) scrPresend(w, bh int) string {
 	}
 	right := ""
 	if it != nil {
-		right = t.StateDot(it.State, m.ascii) + t.Lbl.Render(" "+strings.TrimPrefix(it.Short, "PS "))
+		right = t.StateDot(it.State, m.ascii) + t.Lbl.Render(" "+strings.TrimPrefix(it.Short, "T2 "))
 	}
 	// result (dip26: the T2 windows' alone; the re-arm has its own section)
 	all := ps
@@ -940,7 +940,7 @@ func (m *Model) explain(it core.CfgItem) string {
 		return "live re-arm: after a single " + m.g("≥", ">=") + " 6% sell, while another wallet still holds " + m.g("≥", ">=") +
 			" 6%, a pre-send window arms on the token until dump + 3 + gap slots, at its own size and with its own QUIET stop; it ends at the next big sell, when no big holder is left or when a T2 window takes the token"
 	case "ab":
-		return "the send-path A/B: a window's tries go out alternately over these paths; the Pre-send tab compares them (refused, landed, same slot, send" + m.g("→", "->") + "land, acks, fills, P&L)"
+		return "the send-path A/B: a window's tries go out alternately over these paths; the Engine tab compares them (refused, landed, same slot, send" + m.g("→", "->") + "land, acks, fills, P&L)"
 	case "build":
 		return "the engine binary running this run"
 	}
@@ -1569,7 +1569,8 @@ var helpNotes = [][2]string{
 	{"latency", "d→land = ms from the dump to our landing, s→seen = from our send to seen, blk = slots after the send (regular: after the dump); green < 40 ms, yellow ≤ 120, red above"},
 	{"total", "Trades: the run's P&L after each trade (the trades' P&L + rent back in time order, minus the failed tries' fees up to that minute); SOL or USD with u, like size"},
 	{"sort", "Trades: o picks the column (time, type, mint, size, P&L, %, total, exit, held, d→land, s→seen, blk, after, whale, client, path), O flips the order; the header marks it"},
-	{"Filters", "tab 8: what each pre-send filter blocked: LIVE = it changed what the engine did (skips scored on the shadow's paper at the live size: an estimate), LOG = log only, would-have (scored on the real fills); net saved green = saved us money, red = cost us; the list: a LOG row is one real fill with every rule that would have blocked it (phones: BC bad creator, ST safe sell timer, GR group risk, HC holder clock, LG landing guard); f filter, n the no-fill ones, o / O sort, enter a LOG item's trade"},
+	{"T2 / RA / REG", "the kind of a trade: T2 = a pre-send fill (the whale-dump window), RA = a re-arm fill (dip26+), REG (RG) = a regular buy; the yellow dot = some LOG filter would have blocked it (Trades and the overview's last trades; x lists them)"},
+	{"Filters", "tab 8: what each pre-send filter blocked: LIVE = it changed what the engine did (skips scored on the shadow's paper at the live size: an estimate), LOG = log only, would-have (scored on the real fills); verdict = the FILTERS-3 study (11-03): KEEP / LIVE new / LIVE dip32 first, then LOG, the DISMISSED ones folded into one line (d shows them); rows by net saved within a group; net saved green = saved us money, red = cost us; prec = the losers among the marked ones with a value (green >= 60%, yellow >= 50%, red below); the list: a LOG row is one real fill with every rule that would have blocked it (phones: BC bad creator, ST safe sell timer, GR group risk, HC holder clock, LG landing guard, Q3 QUIET3-A, FH fresh holders); f filter, n the no-dip ones (LIVE skips whose shadow window never filled: SOL 0.000), v the LIVE rows (with the window's price move), o / O sort, enter a LOG item's trade"},
 	{"links", "mints open GMGN, signatures / accounts Solscan (OSC 8: Ctrl / Cmd-click); c copies the mint (OSC 52; tmux: set -g set-clipboard on)"},
 	{"wallet est.", "the session's START BALANCE + its P&L (no RPC: an estimate; unseen tries' fees are not in it)"},
 	{"kill sw.", "how far the wallet is above the engine's kill switch (START BALANCE − loss cap)"},

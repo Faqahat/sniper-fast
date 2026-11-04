@@ -1165,7 +1165,7 @@ func configItems(v *View, S *Sess, eng *Engine) []CfgItem {
 			bud = bn.Float()
 		}
 		spendN, _ := pget("spend").(Num)
-		short := "PS " + sol2(spendN) + " k" + kTxt + " " + Itoa(sf) + "/" + capTxt + " fee " + F(float64(sfee)/LAM, 2) + "/" + F(bud/LAM, 2) + tag
+		short := "T2 " + sol2(spendN) + " k" + kTxt + " " + Itoa(sf) + "/" + capTxt + " fee " + F(float64(sfee)/LAM, 2) + "/" + F(bud/LAM, 2) + tag
 		full := sol2(spendN) + " SOL " + sep + " " + kTxt + " tries/slot"
 		if dn, ok := pget("drop").(Num); ok && dn.Truthy() {
 			full += " " + sep + " limit " + G.X + F(1-dn.Float(), 2)
@@ -1200,7 +1200,7 @@ func configItems(v *View, S *Sess, eng *Engine) []CfgItem {
 		full += tag
 		add("ps", "Pre-send live", st, short, full)
 	} else {
-		add("ps", "Pre-send live", "off", "PS off", "off")
+		add("ps", "Pre-send live", "off", "T2 off", "off")
 	}
 	// QUIET
 	q := v.Quiet

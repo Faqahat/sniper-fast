@@ -84,7 +84,7 @@ func (m *Model) sortVal(tr *core.Trade, key string) (float64, string, bool) {
 	switch key {
 	case "time":
 		return float64(tr.T), "", true
-	case "type": // PS / RA (dip26 re-arm) / REG
+	case "type": // T2 / RA (dip26 re-arm) / REG
 		return 0, kindTag(tr), true
 	case "mint":
 		return 0, strings.ToLower(tr.Mint), tr.Mint != ""

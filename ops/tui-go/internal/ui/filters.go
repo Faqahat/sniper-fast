@@ -51,6 +51,24 @@ func fltShort(key, name string) string {
 		return "holder clock"
 	case "guard":
 		return "landing guard"
+	case "breaker":
+		return "breaker"
+	case "cr_loss":
+		return "creator loss"
+	case "cr_unfollowed":
+		return "cr unfollowed"
+	case "quiet3_a":
+		return "QUIET3-A live"
+	case "q3a":
+		return "QUIET3-A"
+	case "fresh":
+		return "fresh holders"
+	case "crlog":
+		return "creator loss (log)"
+	case "eqgrp":
+		return "equal group"
+	case "fam":
+		return "fam"
 	}
 	return name
 }
@@ -70,6 +88,16 @@ func fltCode(key string) string {
 		return "HC"
 	case "guard":
 		return "LG"
+	case "q3a":
+		return "Q3"
+	case "fresh":
+		return "FH"
+	case "crlog":
+		return "CL"
+	case "eqgrp":
+		return "EQ"
+	case "fam":
+		return "FM"
 	}
 	return key
 }
@@ -148,15 +176,15 @@ func (m *Model) fltItems2() ([]core.FiltItem, int, int) {
 		case "mint":
 			return 0, strings.ToLower(it.Mint), it.Mint != ""
 		case "result":
-			if !it.Scored {
-				return 0, "", false
+			if !it.Scored { // a LIVE skip whose shadow window never filled: no dip, between WIN and LOSE
+				return 0, "", it.Live
 			}
 			if it.Sol > 0 {
 				return 1, "", true
 			}
 			return -1, "", true
 		case "SOL":
-			return it.Sol, "", it.Scored
+			return it.Sol, "", it.Scored || it.Live // no dip = 0.000 (Sol is 0)
 		}
 		return float64(it.T), "", it.T != 0
 	}
@@ -205,25 +233,215 @@ func (m *Model) solCell(x float64, n int, bold bool) string {
 	return m.th.Money(lamOf(x), n > 0 || x != 0, bold).Render(core.FS(x, 3))
 }
 
-// fltTableLines: the overview table, fitted to w.
+// invCell: what blocked trades would have made, colored from the FILTER's side (owner 11-03: "green good, red bad"): a blocked
+// winner (+) cost us (red), a blocked loser (-) saved us (green). The number itself keeps its sign.
+func (m *Model) invCell(x float64, n int, bold bool) string {
+	return m.th.Money(lamOf(-x), n > 0 || x != 0, bold).Render(core.FS(x, 3))
+}
+
+// fltVerdict: a filter's verdict from the FILTERS-3 study (11-03 PKT: ops/strategies/presend/filters3/tune/tune.json
+// "verdicts" and build/DIP32.md). group orders the table (LIVE, then LOG, then DISMISSED, folded into one line).
+type fltVerdict struct {
+	group      int    // vgLive / vgLog / vgDism
+	label, why string // the verdict (<= 10 cells) and a 3-6 word reason
+}
+
+const (
+	vgLive = iota
+	vgLog
+	vgDism
+)
+
+// fltVerdicts: the one place to edit the verdicts (key = the row's Key, core/filters.go).
+var fltVerdicts = map[string]fltVerdict{
+	"create_slot":   {vgLive, "KEEP", "strongest, + always"},
+	"quiet":         {vgLive, "KEEP", "small + everywhere"},
+	"young_age":     {vgLive, "KEEP", "no value either way"},
+	"lone_whale":    {vgLive, "KEEP", "tiny + everywhere"},
+	"breaker":       {vgLive, "LIVE new", "fires on attacks"},
+	"cr_loss":       {vgLive, "LIVE new", "+ in every period"},
+	"quiet3_a":      {vgLive, "LIVE new", "dead token + new whale; attack"},
+	"cr_unfollowed": {vgLog, "LOG", "unproven vs ledger"},
+	"gcr":           {vgLive, "LIVE dip32", "now creator loss"},
+	"grp":           {vgLog, "LOG", "weak, keep logging"},
+	"q3a":           {vgLog, "LOG", "weak on holdout"},
+	"fresh":         {vgLog, "LOG", "attack guard (G3)"},
+	"crlog":         {vgLog, "LOG", "ledger off: would-skips"},
+	"eqgrp":         {vgLog, "LOG", "mixed r51/r53"},
+	"fam":           {vgLog, "LOG new", "bundle rug (dip35)"},
+	"st":            {vgDism, "DISMISSED", "within group risk"},
+	"hc":            {vgDism, "DISMISSED", "dup of group risk"},
+	"guard":         {vgDism, "DISMISSED", "flagged did better"},
+	"ctx85":         {vgDism, "DISMISSED", "attack-only gain"},
+}
+
+// fltVerdictOf: the row's verdict; a filter the study did not judge (the deeper limit) keeps its type's group, "—".
+func fltVerdictOf(r core.FiltRow) fltVerdict {
+	if v, ok := fltVerdicts[r.Key]; ok {
+		return v
+	}
+	if r.Type == "LIVE" {
+		return fltVerdict{vgLive, core.G.Dash, "no 11-03 verdict"}
+	}
+	return fltVerdict{vgLog, core.G.Dash, "no 11-03 verdict"}
+}
+
+// fltVerdictShort: the verdict in 4 cells (phones).
+func fltVerdictShort(label string) string {
+	switch label {
+	case "LIVE new":
+		return "NEW"
+	case "LIVE dip32":
+		return "LV32"
+	case "DISMISSED":
+		return "DISM"
+	}
+	return label
+}
+
+func (m *Model) verdictStyle(v fltVerdict) lipgloss.Style {
+	t := m.th
+	switch {
+	case v.label == core.G.Dash:
+		return t.Dim
+	case v.group == vgLive:
+		return t.Good
+	case v.group == vgLog:
+		return t.Warn
+	}
+	return t.Dim
+}
+
+// fltPrec: the precision of a row: the losers among the marked items that have a value (%), ok = any.
+func fltPrec(winN, loseN int) (float64, bool) {
+	if winN+loseN == 0 {
+		return 0, false
+	}
+	return float64(loseN) / float64(winN+loseN) * 100, true
+}
+
+// precCell: the precision in n cells, green >= 60%, yellow >= 50% (a coin flip), red below.
+func (m *Model) precCell(winN, loseN, n int) string {
+	t := m.th
+	p, ok := fltPrec(winN, loseN)
+	if !ok {
+		return t.Dim.Render(padLeft(core.G.Dash, n))
+	}
+	st := t.Neg
+	switch {
+	case p >= 60:
+		st = t.Pos
+	case p >= 50:
+		st = t.Warn
+	}
+	return st.Render(padLeft(fmt.Sprintf("%.0f%%", p), n))
+}
+
+// fltSortedRows: the table's rows by verdict group (LIVE, LOG, DISMISSED), within a group by net saved (largest first;
+// a rule this run does not log last), the table's own order on ties.
+func fltSortedRows(rows []core.FiltRow) []core.FiltRow {
+	out := append([]core.FiltRow(nil), rows...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		ga, gb := fltVerdictOf(a).group, fltVerdictOf(b).group
+		if ga != gb {
+			return ga < gb
+		}
+		if a.NA != b.NA {
+			return !a.NA
+		}
+		return lamOf(a.Net()) > lamOf(b.Net())
+	})
+	return out
+}
+
+// fltTableLines: the overview table, fitted to w: tag, filter, verdict, NET SAVED, precision, then blocked and the
+// would-win / would-lose (wide), the reason; the DISMISSED filters folded into one line (d expands), the unique totals.
 func (m *Model) fltTableLines(w int) []string {
 	t := m.th
 	R := m.view.Filt
-	short := w < 76
-	nameW := min(24, w-58)
-	if short {
-		nameW = 13
+	bar := " " + m.g("│", "|") + " "
+	sep := t.Dim.Render(bar)
+	// three layouts: wide (the would-win / would-lose sums, the reason), medium (counts only), phones (4-cell verdicts)
+	mode := 2
+	switch {
+	case w >= 100:
+		mode = 0
+	case w >= 76:
+		mode = 1
 	}
-	note := w >= 110
-	sep := t.Dim.Render(m.g("│", "|"))
-	hdr := func() string {
-		if short {
-			return t.Lbl.Render(padRight("", 3) + padRight("filter", nameW) + " " + padLeft("blkd", 5) + " " + padLeft("W", 3) + " " + padLeft("L", 3) + " " + padLeft("net saved", 9))
+	var nameW, tagW, vdW, netW, precW int
+	showBlk, showWL := true, true
+	switch mode {
+	case 0:
+		tagW, vdW, netW, precW = 5, 10, 9, 5
+		nameW = min(24, w-74)
+	case 1:
+		tagW, vdW, netW, precW = 5, 10, 9, 5
+		nameW = min(24, w-52)
+	default:
+		tagW, vdW, netW, precW = 3, 4, 8, 4
+		nameW = 13
+		fixed := tagW + nameW + 1 + vdW + 1 + netW + 1 + precW // 35
+		if fixed+6+8 > w {
+			showWL = false
 		}
-		s := padRight("", 5) + padRight("filter", nameW) + " " + padLeft("blocked", 7) + " " + m.g("│", "|") + " " + padLeft("would win", 13) + " " + m.g("│", "|") + " " +
-			padLeft("would lose", 13) + " " + m.g("│", "|") + " " + padLeft("net saved", 9)
-		if note {
-			s += "   note"
+		if fixed+6 > w {
+			showBlk = false
+		}
+		if fixed > w {
+			nameW = max(4, nameW-(fixed-w))
+		}
+	}
+	whyW := 0
+	if mode == 0 {
+		whyW = w - (74 + nameW) - 3
+		if whyW < 12 {
+			whyW = 0
+		}
+	}
+	// the numbers after the name + verdict (net, prec, blocked, W / L), shared by the rows, the totals and the folded line
+	nums := func(net string, winN, loseN, blocked int, winSol, loseSol float64, bold bool) string {
+		s := " " + padLeft(net, netW) + " " + m.precCell(winN, loseN, precW)
+		blk := core.IC(int64(blocked))
+		st := t.Val
+		if bold {
+			st = t.B
+		}
+		switch mode {
+		case 0:
+			s += sep + st.Render(padLeft(blk, 7)) + sep + t.Neg.Render(padLeft(fmt.Sprint(winN), 4)) + " " + padLeft(m.invCell(winSol, winN, false), 8) + sep +
+				t.Pos.Render(padLeft(fmt.Sprint(loseN), 4)) + " " + padLeft(m.invCell(loseSol, loseN, false), 8)
+		case 1:
+			s += sep + st.Render(padLeft(blk, 7)) + " " + t.Neg.Render(padLeft(fmt.Sprint(winN), 4)) + " " + t.Pos.Render(padLeft(fmt.Sprint(loseN), 4))
+		default:
+			if showBlk {
+				s += " " + st.Render(padLeft(blk, 5))
+			}
+			if showWL {
+				s += " " + t.Neg.Render(padLeft(fmt.Sprint(winN), 3)) + " " + t.Pos.Render(padLeft(fmt.Sprint(loseN), 3))
+			}
+		}
+		return s
+	}
+	hdr := func() string {
+		s := padRight("", tagW) + padRight("filter", nameW) + " " + padRight("verdict", vdW) + " " + padLeft("net saved", netW) + " " + padLeft("prec", precW)
+		switch mode {
+		case 0:
+			s += bar + padLeft("blocked", 7) + bar + padLeft("would win", 13) + bar + padLeft("would lose", 13)
+			if whyW > 0 {
+				s += "   why"
+			}
+		case 1:
+			s += bar + padLeft("blocked", 7) + " " + padLeft("W", 4) + " " + padLeft("L", 4)
+		default:
+			s = padRight("", tagW) + padRight("filter", nameW) + " " + padRight("vrdt", vdW) + " " + padLeft("net", netW) + " " + padLeft("prec", precW)
+			if showBlk {
+				s += " " + padLeft("blkd", 5)
+			}
+			if showWL {
+				s += " " + padLeft("W", 3) + " " + padLeft("L", 3)
+			}
 		}
 		return t.Lbl.Render(s)
 	}
@@ -233,105 +451,116 @@ func (m *Model) fltTableLines(w int) []string {
 			name = fltShort(r.Key, r.Name)
 		}
 		name = cut(name, nameW)
-		if r.NA && short {
-			return m.fltTag(false, true) + " " + t.Val.Render(padRight(name, nameW)) + " " + t.Dim.Render(padLeft("n/a", 5)+" dip30+")
+		vd := fltVerdictOf(r)
+		tag := m.fltTag(r.Type == "LIVE", mode == 2)
+		lbl := vd.label
+		if mode == 2 {
+			lbl = fltVerdictShort(lbl)
 		}
-		if short {
-			return m.fltTag(r.Type == "LIVE", true) + " " + t.Val.Render(padRight(name, nameW)) + " " + t.Val.Render(padLeft(core.IC(int64(r.Blocked)), 5)) + " " +
-				t.Pos.Render(padLeft(fmt.Sprint(r.WinN), 3)) + " " + t.Neg.Render(padLeft(fmt.Sprint(r.LoseN), 3)) + " " +
-				padLeft(m.solCell(r.Net(), r.WinN+r.LoseN, true), 9)
-		}
-		tag := m.fltTag(r.Type == "LIVE", false)
+		s := tag + strings.Repeat(" ", max(0, tagW-ansi.StringWidth(tag))) + t.Val.Render(padRight(name, nameW)) + " " + m.verdictStyle(vd).Render(padRight(cut(lbl, vdW), vdW))
 		if r.NA { // a rule this run does not log (the landing guard before dip30)
-			return tag + strings.Repeat(" ", 5-ansi.StringWidth(tag)) + t.Val.Render(padRight(name, nameW)) + " " + t.Dim.Render(padLeft("n/a", 7)) + " " +
-				t.Dim.Render("(dip30+: not logged by this run)")
+			if mode == 2 {
+				return s + " " + t.Dim.Render(padLeft("n/a", netW)+" dip30+")
+			}
+			return s + " " + t.Dim.Render(padLeft("n/a", netW)) + "  " + t.Dim.Render("(dip30+: not logged by this run)")
 		}
-		s := tag + strings.Repeat(" ", 5-ansi.StringWidth(tag)) + t.Val.Render(padRight(name, nameW)) + " " + t.Val.Render(padLeft(core.IC(int64(r.Blocked)), 7)) + " " + sep + " " +
-			t.Pos.Render(padLeft(fmt.Sprint(r.WinN), 4)) + " " + padLeft(m.solCell(r.WinSol, r.WinN, false), 8) + " " + sep + " " +
-			t.Neg.Render(padLeft(fmt.Sprint(r.LoseN), 4)) + " " + padLeft(m.solCell(r.LoseSol, r.LoseN, false), 8) + " " + sep + " " +
-			padLeft(m.solCell(r.Net(), r.WinN+r.LoseN, true), 9)
-		if note {
-			n := "real fills"
-			if r.Type == "LIVE" {
-				n = "paper estimate"
-			}
+		s += nums(m.solCell(r.Net(), r.WinN+r.LoseN, true), r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, false)
+		if whyW > 0 {
+			why := vd.why
 			if r.Key == "gcr" && R.Seed == "" {
-				n = "real fills; no seed: this run only"
+				why = "no seed: this run only; " + why
 			}
-			if r.Key == "st" {
-				n = "real fills; needs the safe on-chain check"
-			}
-			if r.Key == "grp" {
-				n = "real fills; risky holders summed >= 6%"
-			}
-			if r.Key == "guard" {
-				n = "real fills; signing-time set still holding"
-			}
-			s += "   " + t.Dim.Render(n)
+			s += "   " + t.Dim.Render(cut(why, whyW))
 		}
 		return s
 	}
+	lead := tagW + nameW + 1 + vdW // the label span of a total / the folded line
 	total := func(label string, x core.FiltTotal) string {
-		if short {
-			return t.Lbl.Render(padRight(label, 3+nameW)) + " " + t.B.Render(padLeft(core.IC(int64(x.Blocked)), 5)) + " " +
-				t.Pos.Render(padLeft(fmt.Sprint(x.WinN), 3)) + " " + t.Neg.Render(padLeft(fmt.Sprint(x.LoseN), 3)) + " " + padLeft(m.solCell(x.Net, 1, true), 9)
+		return t.Lbl.Render(padRight(cut(label, lead), lead)) + nums(m.solCell(x.Net, 1, true), x.WinN, x.LoseN, x.Blocked, x.WinSol, x.LoseSol, true)
+	}
+	deepLine := func() string { // the deeper limit's deep fills (bought >= 15% down): their real P&L vs the shadow's, the NET
+		ind := strings.Repeat(" ", tagW)
+		d := t.Dim.Render(ind+m.g("└ ", "` ")) + t.Lbl.Render(fmt.Sprintf("%d deep fills: real ", R.DeepRealN)) + m.solCell(R.DeepReal, 1, false) +
+			t.Lbl.Render(" vs 0.88x paper ") + m.solCell(R.DeepPaper, 1, false) + t.Lbl.Render(" = gain ") + m.solCell(R.DeepGain, 1, false) +
+			t.Lbl.Render("  NET ") + m.solCell(R.DeepNet, 1, true)
+		if w < 84 { // phones: the gain and the NET only
+			d = t.Dim.Render(ind+m.g("└ ", "` ")) + t.Lbl.Render(fmt.Sprintf("%d deep fills gain ", R.DeepRealN)) + m.solCell(R.DeepGain, 1, false) +
+				t.Lbl.Render("  NET ") + m.solCell(R.DeepNet, 1, true)
 		}
-		return t.Lbl.Render(padRight(label, 5+nameW)) + " " + t.B.Render(padLeft(core.IC(int64(x.Blocked)), 7)) + " " + sep + " " +
-			t.Pos.Render(padLeft(fmt.Sprint(x.WinN), 4)) + " " + padLeft(m.solCell(x.WinSol, x.WinN, false), 8) + " " + sep + " " +
-			t.Neg.Render(padLeft(fmt.Sprint(x.LoseN), 4)) + " " + padLeft(m.solCell(x.LoseSol, x.LoseN, false), 8) + " " + sep + " " +
-			padLeft(m.solCell(x.Net, 1, true), 9)
+		if R.DeepRAN > 0 && w >= 120 {
+			d += t.Dim.Render(fmt.Sprintf("  (+%d re-arm deep fills ", R.DeepRAN)) + m.solCell(R.DeepRAReal, 1, false) + t.Dim.Render(", no shadow)")
+		}
+		return d
 	}
 	out := []string{hdr()}
-	var logRows []core.FiltRow
-	for _, r := range R.Rows {
-		if r.Type != "LIVE" {
-			logRows = append(logRows, r)
+	var dism []core.FiltRow
+	for _, r := range fltSortedRows(R.Rows) {
+		if fltVerdictOf(r).group == vgDism {
+			dism = append(dism, r)
 			continue
 		}
 		out = append(out, row(r))
-		if r.Key == "deeper" && R.Deep { // the deep fills (bought >= 15% down): their real P&L vs the shadow's, the NET
-			ind := strings.Repeat(" ", 5)
-			if short {
-				ind = "   "
+		if r.Key == "deeper" && R.Deep {
+			out = append(out, deepLine())
+		}
+	}
+	if len(dism) > 0 { // the DISMISSED filters: one line (count, the rows' net summed), d expands them under it
+		var net float64
+		var names []string
+		var winN, loseN, blocked int
+		var winSol, loseSol float64
+		for _, r := range dism {
+			names = append(names, fltShort(r.Key, r.Name))
+			if !r.NA {
+				net += r.Net()
+				winN, loseN, blocked = winN+r.WinN, loseN+r.LoseN, blocked+r.Blocked
+				winSol, loseSol = winSol+r.WinSol, loseSol+r.LoseSol
 			}
-			d := t.Dim.Render(ind+m.g("└ ", "` ")) + t.Lbl.Render(fmt.Sprintf("%d deep fills: real ", R.DeepRealN)) + m.solCell(R.DeepReal, 1, false) +
-				t.Lbl.Render(" vs 0.88x paper ") + m.solCell(R.DeepPaper, 1, false) + t.Lbl.Render(" = gain ") + m.solCell(R.DeepGain, 1, false) +
-				t.Lbl.Render("  NET ") + m.solCell(R.DeepNet, 1, true)
-			if w < 84 { // phones: the gain and the NET only
-				d = t.Dim.Render(ind+m.g("└ ", "` ")) + t.Lbl.Render(fmt.Sprintf("%d deep fills gain ", R.DeepRealN)) + m.solCell(R.DeepGain, 1, false) +
-					t.Lbl.Render("  NET ") + m.solCell(R.DeepNet, 1, true)
+		}
+		arrow, act := m.g("▸", ">"), "show"
+		if m.fltDism {
+			arrow, act = m.g("▾", "v"), "hide"
+		}
+		label := fmt.Sprintf("%s %d DISMISSED  d %s", arrow, len(dism), act)
+		if mode == 2 {
+			label = fmt.Sprintf("%s %d dismissed (d)", arrow, len(dism))
+		}
+		l := t.Dim.Render(padRight(cut(label, lead), lead)) + nums(m.solCell(net, winN+loseN, true), winN, loseN, blocked, winSol, loseSol, false)
+		if whyW > 0 {
+			l += "   " + t.Dim.Render(cut(strings.Join(names, ", "), whyW))
+		}
+		out = append(out, l)
+		if m.fltDism {
+			for _, r := range dism {
+				out = append(out, row(r))
 			}
-			if R.DeepRAN > 0 && w >= 120 {
-				d += t.Dim.Render(fmt.Sprintf("  (+%d re-arm deep fills ", R.DeepRAN)) + m.solCell(R.DeepRAReal, 1, false) + t.Dim.Render(", no shadow)")
-			}
-			out = append(out, d)
 		}
 	}
 	lvLabel, lgLabel, allLabel := "LIVE total (unique triggers)", "LOG total (unique fills)", "ALL total"
-	if ansi.StringWidth(lvLabel) > 5+nameW || short {
+	if ansi.StringWidth(lvLabel) > lead {
 		lvLabel, lgLabel = "LIVE unique", "LOG unique"
 	}
 	lv := total(lvLabel, R.LiveU)
-	if R.Deep && w >= 110 { // the deeper limit's deep fills earned apart from its blocks
-		lv += t.Dim.Render("   with the deep fills' gain ") + m.solCell(R.LiveU.Net+R.DeepGain, 1, true)
+	tail := func(s string) string { // a total's dim note in the reason column (wide only)
+		if whyW > 0 {
+			return "   " + t.Dim.Render(cut(s, whyW))
+		}
+		return ""
 	}
-	if R.LiveDup > 0 && w >= 100 {
-		lv += t.Dim.Render(fmt.Sprintf("   rows sum %d more: a trigger under 2+ rows", R.LiveDup))
+	addIf := func(line, x string) string { // x only when the line keeps within w
+		if ansi.StringWidth(line)+ansi.StringWidth(x) <= w {
+			return line + x
+		}
+		return line
+	}
+	if R.Deep && whyW > 0 { // the deeper limit's deep fills earned apart from its blocks
+		lv = addIf(lv, t.Dim.Render("   incl. deep ")+m.solCell(R.LiveU.Net+R.DeepGain, 1, true))
+	} else if R.LiveDup > 0 {
+		lv += tail(fmt.Sprintf("%d triggers in 2+ rows", R.LiveDup))
 	}
 	out = append(out, lv)
-	for _, r := range logRows {
-		out = append(out, row(r))
-	}
-	lt := total(lgLabel, R.LogU)
-	if w >= 100 {
-		lt += t.Dim.Render(fmt.Sprintf("   each fill once; %d fills hit 2+ rules (rows sum %d more)", R.LogMulti, R.LogDup))
-	}
-	out = append(out, lt)
-	at := total(allLabel, R.All)
-	if w >= 100 {
-		at += t.Dim.Render("   LIVE is paper, LOG is real fills; disjoint sets; estimate")
-	}
-	out = append(out, at)
+	out = append(out, total(lgLabel, R.LogU)+tail(fmt.Sprintf("%d fills in 2+ rules", R.LogMulti)))
+	out = append(out, total(allLabel, R.All)+tail("LIVE paper+LOG real"))
 	return out
 }
 
@@ -352,18 +581,29 @@ func (m *Model) scrFilters(w, bh int) string {
 	}
 	out = append(out, m.rule("FILTERS", right, w))
 	out = append(out, m.fltTableLines(w)...)
-	foot := t.Dim.Render("net saved = minus what the blocked would have made: ") + t.Pos.Render("green saved us") + t.Dim.Render(", ") + t.Neg.Render("red cost us")
+	// the legend: what net saved / prec / verdict mean (one line), then (wide) how LIVE and LOG rows are scored
+	foot := t.Dim.Render("net saved = "+m.g("−", "-")+"(what the blocked would have made): ") + t.Pos.Render("green saved") + t.Dim.Render(", ") + t.Neg.Render("red cost") + sep +
+		t.Dim.Render("prec = losers / marked") + sep + t.Dim.Render("verdict: FILTERS-3 11-03")
+	if w < 120 {
+		foot = t.Dim.Render("net saved: ") + t.Pos.Render("green saved") + t.Dim.Render(", ") + t.Neg.Render("red cost") + sep + t.Dim.Render("prec = losers / marked") + sep +
+			t.Dim.Render("verdict 11-03")
+	}
+	out = append(out, cut(foot, w))
 	if w >= 120 {
+		leg := "LIVE rows: paper; blocked = triggers skipped, W/L = the ones that would have filled · LOG rows: real fills"
 		seed := "bad creator: no ledger seed (this run's fills only)"
 		if R.Seed != "" {
 			seed = fmt.Sprintf("bad creator ledger: %d creators seeded", R.SeedN)
 		}
-		foot += t.Dim.Render("   " + seed)
+		leg += " · " + seed
 		if R.RearmSkips > 0 {
-			foot += t.Dim.Render(fmt.Sprintf("; re-arm skips %s not scored (no shadow)", core.IC(R.RearmSkips)))
+			leg += fmt.Sprintf("; re-arm skips %s not scored (no shadow)", core.IC(R.RearmSkips))
 		}
+		if m.ascii {
+			leg = strings.ReplaceAll(leg, "·", "|")
+		}
+		out = append(out, t.Dim.Render(cut(leg, w)))
 	}
-	out = append(out, foot)
 	// the skip list
 	items, hidden, shadowHid := m.fltItems2()
 	m.fltRows = items
@@ -396,18 +636,18 @@ func (m *Model) scrFilters(w, bh int) string {
 		left += t.Lbl.Render("  sort ") + t.Acc.Render(fltSortKeys[m.fltSort]+" "+arrow)
 	}
 	if hidden > 0 {
-		left += t.Dim.Render(fmt.Sprintf("  +%s no fill (n)", core.IC(int64(hidden))))
+		left += t.Dim.Render(fmt.Sprintf("  +%s no dip (n)", core.IC(int64(hidden))))
 	} else if m.fltAll {
-		left += t.Dim.Render("  with no-fill (n)")
+		left += t.Dim.Render("  with no-dip (n)")
 	}
 	if shadowHid > 0 {
 		left += t.Dim.Render(fmt.Sprintf("  +%s shadow (v)", core.IC(int64(shadowHid))))
 	} else if m.fltShadow {
 		left += t.Dim.Render("  with shadow (v)")
 	}
-	rt := t.Pos.Render(fmt.Sprintf("%dW", wins)) + t.Lbl.Render(" ") + t.Neg.Render(fmt.Sprintf("%dL", loses)) + t.Lbl.Render("  ") + m.solCell(sum, 1, false)
+	rt := t.Neg.Render(fmt.Sprintf("%dW", wins)) + t.Lbl.Render(" ") + t.Pos.Render(fmt.Sprintf("%dL", loses)) + t.Lbl.Render("  ") + m.invCell(sum, 1, false)
 	if w >= 110 {
-		rt += t.Dim.Render("   f filter  n no-fill  v shadow  o sort  O order  c copy")
+		rt += t.Dim.Render("   f filter  n no-dip  v shadow  o sort  O order  c copy")
 	}
 	out = append(out, m.rule("SKIPPED / BLOCKED", "", w))
 	out = append(out, lr(left, rt, w))
@@ -448,7 +688,26 @@ func (m *Model) scrFilters(w, bh int) string {
 	return strings.Join(out, "\n")
 }
 
-// fltList: the skip list's rows (a header, the selection, zebra rows like Trades).
+// fltMove: a LIVE row's shadow-window price move, max / min vs the trigger's post price, rounded ("+35/-8%", "+4/0%"); "–" when the
+// record has no "move" (runs before 11-03), "0 trades" when nothing traded in the window.
+func fltMove(mv *core.FMove) string {
+	if mv == nil {
+		return core.G.Dash
+	}
+	if mv.N == 0 {
+		return "0 trades"
+	}
+	r := func(x float64) string { // rounded, signed; 0 unsigned
+		if v := int(math.Round(x)); v != 0 {
+			return fmt.Sprintf("%+d", v)
+		}
+		return "0"
+	}
+	return r(mv.Max) + "/" + r(mv.Min) + "%"
+}
+
+// fltList: the skip list's rows (a header, the selection, zebra rows like Trades). The move column (a LIVE row's
+// shadow-window price move) when the list has a LIVE row and the width allows (>= 76 cells).
 func (m *Model) fltList(w int, rows []core.FiltItem, sel int) string {
 	t := m.th
 	type col struct {
@@ -460,13 +719,31 @@ func (m *Model) fltList(w int, rows []core.FiltItem, sel int) string {
 	if w >= 150 {
 		mintW = 44
 	}
+	showMove := false
+	for _, it := range m.fltRows {
+		if it.Live {
+			showMove = true
+			break
+		}
+	}
+	moveW := 0
+	if showMove {
+		moveW = 10 // 9 cells + the gap
+	}
 	var cols []col
 	switch {
 	case w >= 90: // the filter column: up to 42 cells (a LOG fill's every rule), the note keeps >= 12
-		fw := max(22, min(42, w-(1+11+4+4+mintW+6+8+9)-12))
-		cols = []col{{"", 1, false}, {"time", 11, true}, {"type", 4, false}, {"filter", fw, false}, {"kind", 4, false}, {"mint", mintW, false}, {"result", 6, false}, {"SOL", 8, true}, {"", 0, false}}
+		fw := max(22, min(42, w-(1+11+4+4+mintW+6+8+9+moveW)-12))
+		cols = []col{{"", 1, false}, {"time", 11, true}, {"type", 4, false}, {"filter", fw, false}, {"kind", 4, false}, {"mint", mintW, false}, {"result", 6, false}, {"SOL", 8, true}}
+		if showMove {
+			cols = append(cols, col{"move", 9, true})
+		}
+		cols = append(cols, col{"", 0, false})
 	case w >= 66:
 		cols = []col{{"", 1, false}, {"time", 11, true}, {"type", 4, false}, {"filter", 16, false}, {"kind", 4, false}, {"mint", 8, false}, {"result", 6, false}, {"SOL", 8, true}}
+		if showMove && w >= 76 {
+			cols = append(cols, col{"move", 9, true})
+		}
 	default:
 		cols = []col{{"", 1, false}, {"time", 11, true}, {"ty", 2, false}, {"filter", 10, false}, {"mint", 6, false}, {"res", 4, false}, {"SOL", 7, true}}
 	}
@@ -573,24 +850,33 @@ func (m *Model) fltList(w int, rows []core.FiltItem, sel int) string {
 				s = core.Short(it.Mint, c.w)
 			case "result", "res":
 				switch {
-				case !it.Scored:
-					s, st = "no fill", t.Dim
+				case !it.Scored: // a LIVE skip whose shadow window never filled: the trade would not have happened
+					s, st = "no dip", t.Dim
 					if c.w == 4 {
-						s = "—"
+						s = core.G.Dash
 					}
-				case it.Sol > 0:
-					s, st = "WIN", t.Pos
+				case it.Sol > 0: // a blocked winner: the filter cost us (red); a blocked loser: it saved us (green)
+					s, st = "WIN", t.Neg
 				default:
-					s, st = "LOSE", t.Neg
+					s, st = "LOSE", t.Pos
 				}
 			case "SOL":
 				if it.Scored {
-					s, st = core.FS(it.Sol, 4), t.Money(lamOf(it.Sol), true, false)
+					s, st = core.FS(it.Sol, 4), t.Money(lamOf(-it.Sol), true, false)
 					if c.w < 8 {
 						s = core.FS(it.Sol, 3)
 					}
+				} else if it.Live { // no dip: nothing saved or lost
+					s, st = "0.000", t.Dim
 				} else {
 					s, st = core.G.Dash, t.Dim
+				}
+			case "move": // LIVE rows only: the shadow window's price move
+				if it.Live {
+					s, st = fltMove(it.Move), t.Lbl
+					if it.Move == nil || it.Move.N == 0 {
+						st = t.Dim
+					}
 				}
 			}
 			txt := cell(s, c)

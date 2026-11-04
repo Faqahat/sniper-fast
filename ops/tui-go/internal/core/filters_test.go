@@ -561,3 +561,85 @@ func TestFiltersUniqueHand(t *testing.T) {
 		t.Errorf("flagged %d", R.NFlagged())
 	}
 }
+
+// moveFixture: shadow windows w1 (filled, with a "move"), w2 (filled, no "move": a run before 11-03), w5 (never filled,
+// with a "move"), w6 (never filled, no trades); one skipped trigger each; a real fill whose arm logged f3 with q3a false
+// (the QUIET3-A log row then marks nothing). q3live adds a run_start whose presend_live has "quiet3a": true.
+func moveFixture(t testing.TB, q3live bool) string {
+	recs := []string{
+		`{"ev":"presend_arm","sig":"s1","w":1}`, `{"ev":"presend_arm","sig":"s2","w":2}`, `{"ev":"presend_arm","sig":"s5","w":5}`, `{"ev":"presend_arm","sig":"s6","w":6}`,
+		`{"ev":"presend_fill","row":"c","w":1,"entry":{"sol_in":1000000000}}`, `{"ev":"presend_fill","row":"c","w":2,"entry":{"sol_in":1000000000}}`,
+		`{"ev":"presend_exit","row":"c","w":1,"net_cheap":0.5}`, `{"ev":"presend_exit","row":"c","w":2,"net_cheap":-0.2}`,
+		`{"ev":"presend_disarm","w":1,"why":"expired","rows":{"c":{"filled":true}},"move":{"max_pct":35.4,"min_pct":-7.6,"n":12}}`,
+		`{"ev":"presend_disarm","w":2,"why":"expired","rows":{"c":{"filled":true}}}`,
+		`{"ev":"presend_disarm","w":5,"why":"expired","rows":{"c":{"filled":false}},"move":{"max_pct":4.2,"min_pct":-0.4,"n":3}}`,
+		`{"ev":"presend_disarm","w":6,"why":"expired","rows":{"c":{"filled":false}},"move":{"max_pct":0,"min_pct":0,"n":0}}`,
+		`{"ev":"presend_live_skip","why":"quiet","trig":{"sig":"s1","mint":"MA","t":1000}}`,
+		`{"ev":"presend_live_skip","why":"young_age","trig":{"sig":"s2","mint":"MB","t":2000}}`,
+		`{"ev":"presend_live_skip","why":"create_slot","trig":{"sig":"s5","mint":"ME","t":5000}}`,
+		`{"ev":"presend_live_skip","why":"quiet","trig":{"sig":"s6","mint":"MF","t":6000}}`,
+		`{"ev":"presend_live_arm","w":10,"mint":"M1","kind":"t2","spend":500000000,"f3":{"q3a":false,"n_120s":40,"wh_dumps":5,"fresh":10,"fresh_n":2},"trig":{"sig":"x10","mint":"M1","t":10010}}`,
+		`{"ev":"presend_live_fill","w":10,"mint":"M1","t":20000,"ann":{"st_block":true,"holders":[]}}`,
+		`{"ev":"presend_live_realized","w":10,"mint":"M1","pnl":-300000000}`,
+	}
+	if q3live {
+		recs = append([]string{`{"ev":"run_start","t":1,"presend_live":{"spend":500000000,"quiet3a":true}}`}, recs...)
+	}
+	p := filepath.Join(t.TempDir(), "dip_ams_r98.jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(recs, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestFiltersMove: each LIVE skip carries its shadow window's "move" (by trigger sig -> shadow w), nil without one; a skip
+// whose window never filled is unscored (the UI's "no dip"); LOG items have no move.
+func TestFiltersMove(t *testing.T) {
+	R := filtView(t, moveFixture(t, false), "none").Filt
+	by := map[string]FiltItem{}
+	for _, it := range R.Items {
+		by[it.Mint] = it
+	}
+	if m := by["MA"].Move; m == nil || m.Max != 35.4 || m.Min != -7.6 || m.N != 12 || !by["MA"].Scored {
+		t.Errorf("MA (filled, move): %+v %+v", by["MA"], m)
+	}
+	if by["MB"].Move != nil || !by["MB"].Scored {
+		t.Errorf("MB (filled, no move): %+v", by["MB"])
+	}
+	if m := by["ME"].Move; m == nil || m.N != 3 || by["ME"].Scored || by["ME"].Sol != 0 {
+		t.Errorf("ME (no fill, move): %+v", by["ME"])
+	}
+	if m := by["MF"].Move; m == nil || m.N != 0 || by["MF"].Scored {
+		t.Errorf("MF (no fill, no trades): %+v", by["MF"])
+	}
+	if it := by["M1"]; it.Live || it.Move != nil {
+		t.Errorf("M1 (LOG): %+v", it)
+	}
+	if _, ok := R.Row("q3a"); !ok || R.Q3Live {
+		t.Errorf("QUIET3-A not live: its log row must stay (q3live %v)", R.Q3Live)
+	}
+}
+
+// TestFiltersQ3aLiveHidesLogRow: with QUIET3-A live (run_start presend_live.quiet3a, or a quiet3_a skip) the
+// "QUIET3-A (log)" row is left out (it can never fire); the other f3 row (fresh holders) stays.
+func TestFiltersQ3aLiveHidesLogRow(t *testing.T) {
+	R := filtView(t, moveFixture(t, true), "none").Filt
+	if _, ok := R.Row("q3a"); ok || !R.Q3Live {
+		t.Errorf("QUIET3-A live: the log row is still there (q3live %v)", R.Q3Live)
+	}
+	if _, ok := R.Row("fresh"); !ok {
+		t.Error("the fresh holders row went too")
+	}
+	// the same from a live quiet3_a skip alone (no run_start flag)
+	p := moveFixture(t, false)
+	b, _ := os.ReadFile(p)
+	b = append(b, []byte(`{"ev":"presend_live_skip","why":"quiet3_a","trig":{"sig":"s9","mint":"MZ","t":9000}}`+"\n")...)
+	os.WriteFile(p, b, 0o644)
+	R = filtView(t, p, "none").Filt
+	if _, ok := R.Row("q3a"); ok {
+		t.Error("a quiet3_a skip: the log row is still there")
+	}
+	if r, ok := R.Row("quiet3_a"); !ok || r.Blocked != 1 {
+		t.Errorf("QUIET3-A (live) row: %+v %v", r, ok)
+	}
+}

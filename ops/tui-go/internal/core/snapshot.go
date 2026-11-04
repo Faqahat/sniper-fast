@@ -512,7 +512,7 @@ func SnapshotText(v *View, ctx *Ctx, width int) string {
 		sp := tr.Spend.Int()
 		kind := "REG"
 		if tr.Kind == "PS" {
-			kind = "PS "
+			kind = "T2 "
 			if tr.Rearm {
 				kind = "RA "
 			}

@@ -89,14 +89,14 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 
 /// every --presend-live-* flag (a stray one without --presend-live is refused)
-const FLAGS: [&str; 37] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
+const FLAGS: [&str; 38] = ["--presend-live-dry", "--presend-live-size-sol", "--presend-live-k", "--presend-live-drop", "--presend-live-deadline-slots",
     "--presend-live-cu-limit", "--presend-live-cu-price-micro", "--presend-live-tip-lamports", "--presend-live-routes", "--presend-live-max-per-sec",
     "--presend-live-path-max-per-sec", "--presend-live-max-fills", "--presend-live-fee-budget-sol", "--presend-live-create-slot", "--presend-live-one-position",
     "--presend-live-exit-ms", "--presend-live-quiet-v2-log", "--presend-live-min-age-slots", "--presend-live-lone-whale-slots", "--presend-live-ann",
     "--presend-live-deep-drop", "--presend-live-holds-state", "--presend-live-breaker", "--presend-live-cr-unfollowed", "--presend-live-cr-loss",
     "--presend-live-creator-state", "--presend-live-f3-log", "--presend-live-tag-wallets", "--presend-live-quiet3a", "--presend-live-exact-exit",
     "--presend-live-cr-earn-log", "--presend-live-seen-log", "--presend-live-eqgrp-log", "--presend-live-q4-log", "--presend-live-fam-log",
-    "--presend-live-fam-thr", "--presend-live-fam-rpc"];
+    "--presend-live-fam-thr", "--presend-live-fam-rpc", "--presend-live-cr-log"];
 
 /// dip20 QUIET: its flags (each needs --presend-live; the history / threshold / warm-up / fbots / preload ones need
 /// --presend-live-quiet-skip on)
@@ -245,6 +245,9 @@ pub struct Cfg {
     ///   VAL w/o the attack +1.70, holdout +0.54 SOL, positive without the top 5 in all three); off by default (cr_loss 0)
     pub cr_loss_n: u32,
     pub cr_loss: i64,
+    /// dip35 --presend-live-cr-log on|off (default off; needs --presend-live-cr-loss / -cr-unfollowed): the creator gate LOG-ONLY: the
+    ///   ledger is kept and saved as live, its verdict goes on the records as cr.would ("loss" / "unfollowed"), nothing is skipped
+    pub cr_log: bool,
     /// --presend-live-creator-state FILE: the creator histories preloaded at the start (the seed / the last run's) and saved back (every
     ///   ~10 min and at the run's end)
     pub cr_state: Option<String>,
@@ -363,6 +366,7 @@ impl Cfg {
             cr_loss_n: match arg("--presend-live-cr-loss") { Some(s) => cr_loss_parse(&s)?.0, None => 0 },
             cr_loss: match arg("--presend-live-cr-loss") { Some(s) => cr_loss_parse(&s)?.1, None => 0 },
             cr_state: arg("--presend-live-creator-state").filter(|p| !p.starts_with("--")),
+            cr_log: onoff("--presend-live-cr-log", false)?,
             f3_log: has("--presend-live-f3-log"),
             tag_wallets: match arg("--presend-live-tag-wallets") { Some(s) => tag_parse(&s)?, None => Vec::new() },
             q3a_live: onoff("--presend-live-quiet3a", false)?,
@@ -465,6 +469,7 @@ impl Cfg {
         if self.q3a_live && !(self.quiet_v2_log && self.quiet.skip) { bail!("--presend-live-quiet3a on needs --presend-live-quiet-v2-log and the QUIET skip (its inputs)"); }
         if !self.tag_wallets.is_empty() && !self.f3_log { bail!("--presend-live-tag-wallets needs --presend-live-f3-log (log-only fields)"); }
         if self.cr_earn > 0.0 && self.cr_loss == 0 { bail!("--presend-live-cr-earn-log needs --presend-live-cr-loss (it credits the loss ledger's blocked creators)"); }
+        if self.cr_log && !self.cr_on() { bail!("--presend-live-cr-log on needs --presend-live-cr-loss or --presend-live-cr-unfollowed (the rule it logs)"); }
         if self.cr_state.is_some() && !self.cr_on() { bail!("--presend-live-creator-state needs --presend-live-cr-unfollowed or --presend-live-cr-loss (the histories are kept only with the gate)"); }
         if !(self.fam_thr > 0.0 && self.fam_thr <= 100.0) { bail!("--presend-live-fam-thr must be in (0, 100] (% of supply)"); }
         if self.holds_state.is_some() && !self.ann { bail!("--presend-live-holds-state needs --presend-live-ann on (the hold clocks are kept only with it)"); }
@@ -501,6 +506,7 @@ impl Cfg {
         if let Some((k, h)) = self.cr_unf { j["cr_unfollowed"] = format!("{k}:{}", h / 3_600_000_000_000).into(); }
         if self.cr_loss > 0 { j["cr_loss"] = format!("{}:{}", self.cr_loss_n, self.cr_loss as f64 / 1e9).into(); }
         if let Some(p) = &self.cr_state { j["creator_state"] = p.clone().into(); }
+        if self.cr_log { j["cr_log"] = true.into(); }
         if self.f3_log { j["f3_log"] = true.into(); }
         if self.q3a_live { j["quiet3a"] = true.into(); }
         if self.exit_ms > 0 { j["exact_exit"] = self.exact_exit.into(); }
@@ -963,6 +969,8 @@ fn cr_gate(sh: &Shared, cfg: &Cfg, creator: Option<Pk>, t0: u64) -> (Option<&'st
     j["unf3"] = h.unfollowed(t0, 3, 24 * 3_600_000_000_000).into();
     // dip34 CR-EARNBACK (log-only): the paper credits and the earn-back rule's verdict (the decision above is unchanged)
     if cfg.cr_earn > 0.0 { j["earn"] = serde_json::json!({"ps": h.ps as f64 / 1e9, "pn": h.pn, "trade": h.earn_trade(cfg.cr_loss_n, cfg.cr_loss)}); }
+    // dip35 --presend-live-cr-log: the verdict only on the records (cr.would), never a skip
+    if cfg.cr_log { if let Some(w) = why { j["would"] = w.into(); } return (None, Some(j)); }
     (why, Some(j))
 }
 
@@ -1688,7 +1696,7 @@ impl PsLive {
         let line = if cfg.lone_whale_slots > 0 { format!("{line} | LONE WHALE SKIP ON: a trigger whose whale is the only buyer in the last {} slots is skipped (after QUIET)", cfg.lone_whale_slots) } else { line };
         let line = if cfg.ann { format!("{line} | ANN ON (log-only): buyers/creator at arm, other holder at signing, ctx85 + holder clocks at fills") } else { line };
         // dip28: also at the END, only when on
-        let line = if cfg.cr_on() { format!("{line} | CREATOR GATE ON:{}{}", cfg.cr_unf.map(|(k, h)| format!(" skip when the creator's last {k} positions in {} h were all not followed;", h / 3_600_000_000_000)).unwrap_or_default(),
+        let line = if cfg.cr_on() { format!("{line} | CREATOR GATE {}:{}{}", if cfg.cr_log { "LOG ONLY (verdict as cr.would on the records, never a skip)" } else { "ON" }, cfg.cr_unf.map(|(k, h)| format!(" skip when the creator's last {k} positions in {} h were all not followed;", h / 3_600_000_000_000)).unwrap_or_default(),
             if cfg.cr_loss > 0 { format!(" skip when >= {} of our positions on its tokens realized <= -{} SOL", cfg.cr_loss_n, cfg.cr_loss as f64 / 1e9) } else { String::new() }) } else { line };
         let line = if cfg.f3_log { format!("{line} | F3 LOG (QUIET3-A, fresh holders) ON") } else { line };
         // dip34: the log-only annotations, only when on
@@ -3649,6 +3657,12 @@ mod tests {
         assert_eq!(cr_gate(&sh, &c, Some([9u8; 32]), 20), (None, None), "unknown creator");
         assert_eq!(cr_gate(&sh, &c, None, 20), (None, None));
         assert!(cr_gate(&sh, &c, Some(cb), 20).1.unwrap()["n"] == 1);
+        // dip35 --presend-live-cr-log on: the verdict as "would", never a skip; off: no "would"
+        let mut clog = c.clone(); clog.cr_log = true;
+        let (w, j) = cr_gate(&sh, &clog, Some(ca), 20);
+        assert!(w.is_none() && j.as_ref().unwrap()["would"] == "loss", "log-only: no skip, the verdict recorded");
+        assert!(cr_gate(&sh, &clog, Some(cc), 20).1.unwrap().get("would").is_none(), "no verdict: no would");
+        assert!(cr_gate(&sh, &c, Some(ca), 20).1.unwrap().get("would").is_none(), "live: no would field");
         // FOLLOWED on a tape
         let (us, whale, holder, other) = ([5u8; 32], [6u8; 32], [7u8; 32], [8u8; 32]);
         let tr = |u: Pk, buy: bool, s: u64, i: u32| pl::Trade { mint: [0; 32], s, i, j: 0, sig: [0; 64], user: u, buy, sol: 1, tok: 1, vsol: 1, vtok: 1, fbps: 0, cbps: 0, t_rx: 0 };
@@ -3725,7 +3739,7 @@ mod tests {
             "--presend-live-cr-unfollowed", "3:24", "--presend-live-cr-loss", "2:0.05", "--presend-live-creator-state", "/tmp/dip32-test-cr.json", "--presend-live-f3-log",
             "--presend-live-tag-wallets", "9pQQc1xyqwPzYdHztDHEYkgNucYWSQsZTrzNRzdCrRdN", "--presend-live-quiet3a", "off", "--presend-live-exact-exit", "on",
             "--presend-live-cr-earn-log", "0.5", "--presend-live-seen-log", "3", "--presend-live-eqgrp-log", "--presend-live-q4-log",
-            "--presend-live-fam-log", "--presend-live-fam-thr", "26.825", "--presend-live-fam-rpc", "https://rpc.example"]);
+            "--presend-live-fam-log", "--presend-live-fam-thr", "26.825", "--presend-live-fam-rpc", "https://rpc.example", "--presend-live-cr-log", "off"]);
         assert!(check_flags(&all).is_ok(), "{:?}", check_flags(&all));
         for f in FLAGS { assert!(all.iter().any(|a| a == f), "{f} in the test line"); }
         let wrong = ["-", "-presend-live-kk"].concat();
