@@ -1027,7 +1027,14 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		case "holder_loss":
 			note = mode(F.modeHl) + note + " (re-arm skips counted, no paper)"
 		}
-		byWhy[f.why] = &FiltRow{Key: f.why, Name: f.name, Type: "LIVE", Note: note}
+		name := f.name
+		switch f.why { // the ledger rows carry the control file's current mode in their name
+		case "wh_loss", "rearm_wh_loss":
+			name += map[bool]string{true: " [live]", false: " [log]"}[F.modeWh]
+		case "holder_loss":
+			name += map[bool]string{true: " [live]", false: " [log]"}[F.modeHl]
+		}
+		byWhy[f.why] = &FiltRow{Key: f.why, Name: name, Type: "LIVE", Note: note}
 	}
 	for _, s := range F.skips {
 		row := byWhy[s.why]

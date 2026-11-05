@@ -78,11 +78,11 @@ func fltShort(key, name string) string {
 	case "blocklist":
 		return "blocklist"
 	case "wh_loss":
-		return "whale loss T2"
+		return map[bool]string{true: "whale T2 log", false: "whale T2"}[strings.HasSuffix(name, "[log]")]
 	case "rearm_wh_loss":
-		return "whale loss RA"
+		return map[bool]string{true: "whale RA log", false: "whale RA"}[strings.HasSuffix(name, "[log]")]
 	case "holder_loss":
-		return "holder loss"
+		return map[bool]string{true: "holder log", false: "holder loss"}[strings.HasSuffix(name, "[log]")]
 	case "wh_other":
 		return "whale other rule"
 	case "wh_logmode":

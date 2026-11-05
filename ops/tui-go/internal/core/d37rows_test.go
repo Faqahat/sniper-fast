@@ -72,6 +72,12 @@ func TestFiltersD37AllRows(t *testing.T) {
 			t.Errorf("%s: %+v", w.key, r)
 		}
 	}
+	if r, _ := R.Row("wh_loss"); r.Name != "whale loss (T2) [log]" {
+		t.Errorf("the control file's mode in the name: %q", r.Name)
+	}
+	if r, _ := R.Row("holder_loss"); r.Name != "holder loss (T2 / re-arm) [live]" {
+		t.Errorf("%q", r.Name)
+	}
 	if r, _ := R.Row("wh_loss"); r.Net() != -0.04 {
 		t.Errorf("whale loss net (paper, live size = row c size): %v", r.Net())
 	}
