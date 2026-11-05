@@ -123,7 +123,9 @@ pub fn wh_save(m: &WhMaps, path: &str) -> Result<usize> {
 /// --presend-live-wh-learn paper: the T2 triggers skipped "wh_loss" (signature -> whale, mint, skip time ns) and the shadow windows armed on
 /// them (window id -> signature, row c sol_in once filled); credits and their lamports; full = a map at its cap took nothing
 #[derive(Debug, Default)]
-pub struct WhPaper { skipped: FxHashMap<String, (Pk, Pk, u64)>, w: FxHashMap<u64, (String, Option<f64>)>, pub credits: u64, pub credit_sum: i64, pub full: u64 }
+pub struct WhPaper { skipped: FxHashMap<String, (Pk, Pk, u64)>, w: FxHashMap<u64, (String, Option<f64>)>, pub credits: u64, pub credit_sum: i64, pub full: u64,
+    /// dip37 --presend-live-holder-learn paper: the T2 triggers skipped "holder_loss" (signature -> the arm's holder keys, mint, time)
+    hskipped: FxHashMap<String, (Vec<Pk>, Pk, u64)>, pub hcredits: u64, pub hcredit_sum: i64 }
 
 /// the probe's ledger side: every window's arm wallet (window id -> whale / dumper), the last save's slot, the skips, the paper learning
 #[derive(Debug, Default)]
@@ -141,6 +143,15 @@ impl PsLive {
     }
 
     /// --presend-live-wh-learn paper: remember a T2 trigger skipped "wh_loss" for the shadow's window on it
+    /// --presend-live-holder-learn paper: remember a T2 trigger skipped "holder_loss" (its holder keys) for the shadow's window on it
+    pub(super) fn hl_paper_note(&mut self, sig: String, keys: Vec<Pk>, mint: Pk, t: u64) {
+        if !self.cfg.hl_learn || keys.is_empty() { return; }
+        let p = &mut self.whs.paper;
+        if p.hskipped.len() >= CE_MAX { p.hskipped.retain(|_, v| v.2.saturating_add(CE_KEEP_NS) >= t); }
+        if p.hskipped.len() >= CE_MAX { p.full += 1; return; }
+        p.hskipped.insert(sig, (keys, mint, t));
+    }
+
     pub(super) fn wh_paper_note(&mut self, sig: String, whale: Pk, mint: Pk, t: u64) {
         if !self.cfg.wh_learn { return; }
         let p = &mut self.whs.paper;
@@ -153,13 +164,13 @@ impl PsLive {
     /// c fill gives sol_in; its row c exit adds net_cheap x (live size / sol_in) to the whale's ledger as a PAPER position; a window that ends
     /// without a row c fill adds nothing
     pub(super) fn wh_on_shadow(&mut self, rec: &serde_json::Value) {
-        if !self.cfg.wh_learn { return; }
+        if !self.cfg.wh_learn && !self.cfg.hl_learn { return; }
         let Some(w) = rec["w"].as_u64() else { return };
         let p = &mut self.whs.paper;
         match rec["ev"].as_str() {
             Some("presend_arm") => {
                 let Some(sig) = rec["sig"].as_str() else { return };
-                if !p.skipped.contains_key(sig) { return; }
+                if !p.skipped.contains_key(sig) && !p.hskipped.contains_key(sig) { return; }
                 if p.w.len() >= CE_MAX { p.full += 1; return; }
                 p.w.insert(w, (sig.to_string(), None));
             }
@@ -168,14 +179,25 @@ impl PsLive {
                 if let Some(e) = p.w.get_mut(&w) { if e.1.is_none() { e.1 = rec["entry"]["sol_in"].as_f64().filter(|x| *x > 0.0); } }
             }
             Some("presend_disarm") => {
-                if p.w.get(&w).is_some_and(|e| e.1.is_none()) { if let Some((sig, _)) = p.w.remove(&w) { p.skipped.remove(&sig); } }
+                if p.w.get(&w).is_some_and(|e| e.1.is_none()) { if let Some((sig, _)) = p.w.remove(&w) { p.skipped.remove(&sig); p.hskipped.remove(&sig); } }
             }
             Some("presend_exit") => {
                 if rec["row"] != "c" { return; }
                 let Some((sig, sol_in)) = p.w.remove(&w) else { return };
+                let net = rec["net_cheap"].as_f64().or_else(|| rec["pnl"].as_f64()).unwrap_or(0.0);
+                // dip37 holder ledger: a holder_loss-skipped trigger's paper position into each of its holder keys
+                if let Some((keys, mint, _)) = p.hskipped.remove(&sig) {
+                    let Some(sol_in) = sol_in else { return };
+                    let credit = (net * self.cfg.spend as f64 / sol_in * 1e9).round() as i64;
+                    p.hcredits += 1;
+                    p.hcredit_sum += credit;
+                    { let mut g = self.sh.hl.lock().unwrap(); for k in &keys { g.entry(*k).or_default().add(credit, true); } }
+                    self.rec(serde_json::json!({"ev": "presend_live_hl_paper", "holders": keys.iter().map(b58).collect::<Vec<_>>(), "mint": b58(&mint), "sig": sig, "w": w,
+                        "net_cheap": net, "sol_in": sol_in, "credit": credit as f64 / 1e9}));
+                    return;
+                }
                 let Some((whale, mint, _)) = p.skipped.remove(&sig) else { return };
                 let Some(sol_in) = sol_in else { return };
-                let net = rec["net_cheap"].as_f64().or_else(|| rec["pnl"].as_f64()).unwrap_or(0.0);
                 let credit = (net * self.cfg.spend as f64 / sol_in * 1e9).round() as i64;
                 p.credits += 1;
                 p.credit_sum += credit;

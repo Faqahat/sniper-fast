@@ -77,6 +77,17 @@ for k, pnl in (out if "--all" in sys.argv else out[-1:]):
                      f"{'dumper' if kind == 'rearm' else 'whale'} {ww[:8]} had {wn} positions / {ws / 1e9:+.3f} SOL -> sum rule {'WOULD SKIP' if sh else 'no'}, mean rule {'WOULD SKIP' if mh else 'no'}")
         if sh: caught.append("whale ledger sum")
         elif mh: caught.append("whale ledger mean")
+    # dip37 holder ledger (live / log mode): the arm record's first blocking holder (only present when one blocked: hl_would = log mode)
+    if a.get("hl_wallet") is not None:
+        lines.append(f"  holder ledger: holder {a['hl_wallet'][:8]} {a.get('hl_pct', 0):.1f}% had {a.get('hl_n')} positions / {a.get('hl_sum', 0):+.3f} SOL, no win -> "
+                     + ("WOULD SKIP (log mode)" if a.get("hl_would") else "skip"))
+        caught.append("holder ledger (log mode)")
+    elif kind in ("t2", "rearm") and any(k in a for k in ("wh_n", "nd")):
+        lines.append("  holder ledger: no blocking holder at the arm (or the ledger off)")
+    # dip37 creator ledger at the arm (cr on the arm record)
+    if a.get("cr"):
+        cr = a["cr"]
+        lines.append(f"  creator ledger: {cr.get('n')} positions / {cr.get('sum', 0):+.3f} SOL" + (f" -> would {cr['would']} (log)" if cr.get("would") else ""))
     # dip37 HYBRID-2 (log only): the arm rule on the arm record (nd M2-scored dumps before the trigger, m2max, T2 age >= 30)
     if a.get("h2_keep") is not None:
         lines.append(f"  HYBRID-2 (log): nd {a.get('nd')} m2max {a.get('m2max', -1):.3f} -> h2_keep {a['h2_keep']} (size {a.get('h2_size')} SOL)")

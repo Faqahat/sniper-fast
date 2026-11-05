@@ -78,7 +78,17 @@ func fltShort(key, name string) string {
 	case "blocklist":
 		return "blocklist"
 	case "wh_loss":
-		return "whale loss"
+		return "whale loss T2"
+	case "rearm_wh_loss":
+		return "whale loss RA"
+	case "holder_loss":
+		return "holder loss"
+	case "wh_other":
+		return "whale other rule"
+	case "wh_logmode":
+		return "whale (log mode)"
+	case "hl_logmode":
+		return "holder (log mode)"
 	case "m2_unseen":
 		return "M2 unseen"
 	case "h2":
@@ -118,6 +128,14 @@ func fltCode(key string) string {
 		return "S2"
 	case "fpnb_live":
 		return "NL"
+	case "h2":
+		return "H2"
+	case "wh_other":
+		return "WO"
+	case "wh_logmode":
+		return "WL"
+	case "hl_logmode":
+		return "HL"
 	}
 	return key
 }
@@ -293,7 +311,12 @@ var fltVerdicts = map[string]fltVerdict{
 	"skip2":         {vgLog, "LOG new", "per-send logit (dip36)"},
 	"fpnb_live":     {vgLive, "LIVE new", "no-bot gate (dip36)"},
 	"blocklist":     {vgLive, "LIVE new", "listed wallets (dip36)"},
-	"wh_loss":       {vgLive, "LIVE new", "whale/dumper ledger (dip37)"},
+	"wh_loss":       {vgLive, "LIVE new", "whale ledger T2 (dip37)"},
+	"rearm_wh_loss": {vgLive, "LIVE new", "dumper ledger (dip37)"},
+	"holder_loss":   {vgLive, "LIVE new", "holder ledger (dip37)"},
+	"wh_other":      {vgLog, "LOG new", "whale ledger other rule"},
+	"wh_logmode":    {vgLog, "LOG", "whale ledger in log mode"},
+	"hl_logmode":    {vgLog, "LOG", "holder ledger in log mode"},
 	"m2_unseen":     {vgLive, "LIVE new", "no M2 dump before (dip37)"},
 	"h2":            {vgLog, "LOG new", "HYBRID-2 arm rule (dip37)"},
 	"st":            {vgDism, "DISMISSED", "within group risk"},

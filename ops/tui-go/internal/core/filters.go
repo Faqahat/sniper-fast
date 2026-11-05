@@ -138,11 +138,16 @@ type fRec struct {
 		Sum   *float64 `json:"sum"`
 	} `json:"cr"`
 	Fam *float64 `json:"fam"`
+	// dip37 the whale / holder ledgers' verdicts on an arm record (both rules; the log-mode would-skips)
+	WhSumHit  *bool `json:"wh_sum_hit"`
+	WhMeanHit *bool `json:"wh_mean_hit"`
+	WhWould   *bool `json:"wh_would"`
+	HlWould   *bool `json:"hl_would"`
 	// dip37 HYBRID-2 (--presend-live-m2seen-log): the arm's verdict and its inputs
 	H2Keep *bool    `json:"h2_keep"`
 	Nd     *float64 `json:"nd"`
 	M2max  *float64 `json:"m2max"`
-	Hit *bool    `json:"hit"`
+	Hit    *bool    `json:"hit"`
 	// dip36 presend_live_fpnb (FP-NOBOT, log-only): the stage ("arm" / "send" / "fill"), its would-block, score and threshold
 	Stage *string  `json:"stage"`
 	Block *bool    `json:"block"`
@@ -184,6 +189,9 @@ type fLog35 struct {
 	skip2Why    string
 	h2          bool // dip37: HYBRID-2's arm rule would not have kept the arm (h2_keep false)
 	h2Why       string
+	whOther     bool // dip37: the whale ledger's OTHER rule (mean when sum is live, sum when mean is) would have skipped the arm
+	whWould     bool // dip37: the whale / holder ledger in "log" mode would have skipped the arm
+	hlWould     bool
 }
 
 // fF3: dip32's log-only arm fields: QUIET3-A (T2 quiet token + whale with <= 3 dumps) and the fresh holders (TAIL G3 at >= 35%).
@@ -242,42 +250,47 @@ type fArm struct {
 
 // FiltAcc gathers the records the filters table needs.
 type FiltAcc struct {
-	ver       int64
-	shW       map[string]int64   // shadow: trigger sig -> w
-	shExit    map[int64]*float64 // shadow w -> row c P&L (SOL; nil = no value)
-	shSize    map[int64]float64  // shadow w -> row c size (SOL; the first fill)
-	skips     []fSkip
-	raSkips   int64
-	liveSig   map[int64]string // live T2 w -> its trigger sig
-	liveArm   map[int64]fArm   // live T2 w -> mint, time (the latest arm)
-	kind      map[FKey]string
-	ledger    []fLedgerEv
-	deepW     map[int64]bool
-	deepOrd   []int64
-	fills     map[int64]bool
-	fillAnn   map[FKey]*fFill
-	fillOrd   []FKey
-	real      map[FKey]float64
-	realOrd   []FKey
-	liveSize  float64
-	hasSize   bool
-	anyAnn    bool
-	anyGuard  bool             // a fill logged the landing guard (dip30+)
-	armF3     map[FKey]*fF3    // dip32: an arm's log-only "f3"
-	log35     map[FKey]*fLog35 // dip34/35: eqgrp flag / cr.would / fam hit
-	anyEq     bool             // an arm carried "eqgrp" (dip34 --presend-live-eqgrp-log)
-	anyCrLog  bool             // an arm carried "cr" (the creator gate's record)
-	anyFam    bool             // a presend_live_fam record (dip35)
-	anyFpnb   bool             // a presend_live_fpnb fill record (dip36)
-	anySkip2  bool             // a fill record with "skip2" (dip36)
-	anyH2     bool             // an arm record with "h2_keep" (dip37 HYBRID-2 log)
-	fpWin     []fGateWin       // dip36 live gate: windows with withheld sends
-	fpHeld    int              // dip36 live gate: presend_live_fpnb_withheld records (sends withheld)
-	moves     map[int64]*FMove // shadow w -> the window's price move (presend_disarm "move"; absent before 11-03)
-	q3Live    bool             // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
-	cache     *FiltReport
-	cacheVer  int64
-	cacheSeed string
+	ver      int64
+	shW      map[string]int64   // shadow: trigger sig -> w
+	shExit   map[int64]*float64 // shadow w -> row c P&L (SOL; nil = no value)
+	shSize   map[int64]float64  // shadow w -> row c size (SOL; the first fill)
+	skips    []fSkip
+	raSkips  int64
+	liveSig  map[int64]string // live T2 w -> its trigger sig
+	liveArm  map[int64]fArm   // live T2 w -> mint, time (the latest arm)
+	kind     map[FKey]string
+	ledger   []fLedgerEv
+	deepW    map[int64]bool
+	deepOrd  []int64
+	fills    map[int64]bool
+	fillAnn  map[FKey]*fFill
+	fillOrd  []FKey
+	real     map[FKey]float64
+	realOrd  []FKey
+	liveSize float64
+	hasSize  bool
+	anyAnn   bool
+	anyGuard bool             // a fill logged the landing guard (dip30+)
+	armF3    map[FKey]*fF3    // dip32: an arm's log-only "f3"
+	log35    map[FKey]*fLog35 // dip34/35: eqgrp flag / cr.would / fam hit
+	anyEq    bool             // an arm carried "eqgrp" (dip34 --presend-live-eqgrp-log)
+	anyCrLog bool             // an arm carried "cr" (the creator gate's record)
+	anyFam   bool             // a presend_live_fam record (dip35)
+	anyFpnb  bool             // a presend_live_fpnb fill record (dip36)
+	anySkip2 bool             // a fill record with "skip2" (dip36)
+	anyH2    bool             // an arm record with "h2_keep" (dip37 HYBRID-2 log)
+	// dip37: the run is a dip37 run with a ledger / A/B / HYBRID-2 flag (its rows show from the start, at 0 too); the ledgers on, the
+	// whale rule's live mode (mean), the control file's modes (live = true), the stale-hold withheld sends
+	d37, whOn, hlOn, whMean bool
+	modeWh, modeHl          bool
+	fpStale                 int
+	fpWin                   []fGateWin       // dip36 live gate: windows with withheld sends
+	fpHeld                  int              // dip36 live gate: presend_live_fpnb_withheld records (sends withheld)
+	moves                   map[int64]*FMove // shadow w -> the window's price move (presend_disarm "move"; absent before 11-03)
+	q3Live                  bool             // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
+	cache                   *FiltReport
+	cacheVer                int64
+	cacheSeed               string
 }
 
 func newFiltAcc() *FiltAcc {
@@ -297,6 +310,27 @@ var (
 // feed takes one record (ev = its "ev"); only the presend_* records the table uses.
 func (F *FiltAcc) feed(ev, line []byte) {
 	if !bytes.HasPrefix(ev, fEvPrefix) {
+		if string(ev) == "run_start" { // dip37: the run's ledger / A/B / HYBRID-2 flags (its rows from the start)
+			var r struct {
+				PL *struct {
+					Wh  *string `json:"wh_loss"`
+					Hl  *string `json:"holder_loss"`
+					Fab any     `json:"fee_ab"`
+					M2  any     `json:"m2seen"`
+					Ctl *string `json:"ledger_control"`
+					Sh  any     `json:"fpnb_stale_hold"`
+				} `json:"presend_live"`
+			}
+			if json.Unmarshal(line, &r) == nil && r.PL != nil {
+				pl := r.PL
+				F.whOn, F.hlOn = pl.Wh != nil, pl.Hl != nil
+				F.whMean = pl.Wh != nil && strings.Contains(*pl.Wh, "mean")
+				if F.whOn || F.hlOn || pl.Fab != nil || pl.M2 != nil || pl.Ctl != nil || pl.Sh != nil {
+					F.d37, F.modeWh, F.modeHl = true, true, true
+					F.ver++
+				}
+			}
+		}
 		if string(ev) == "run_start" && bytes.Contains(line, fQ3aKey) { // QUIET3-A live: its log row can never fire
 			var r struct {
 				PL *struct {
@@ -351,6 +385,20 @@ func (F *FiltAcc) feed(ev, line []byte) {
 	case "presend_live_fpnb_withheld": // dip36 live gate: one withheld send (counted only)
 		F.ver++
 		F.fpHeld++
+		if bytes.Contains(line, []byte(`"stale":true`)) { // dip37 --presend-fpnb-stale-hold
+			F.fpStale++
+		}
+		return
+	case "presend_live_ledger_mode": // dip37: the control file's modes (a good read only)
+		var r struct {
+			Ok bool   `json:"ok"`
+			Wh string `json:"whale"`
+			Hl string `json:"holder"`
+		}
+		if json.Unmarshal(line, &r) == nil && r.Ok {
+			F.modeWh, F.modeHl = r.Wh != "log", r.Hl != "log"
+			F.ver++
+		}
 		return
 	default:
 		return
@@ -400,9 +448,13 @@ func (F *FiltAcc) feed(ev, line []byte) {
 				if r.Why != nil && *r.Why == "rearm_blocklist" && r.Dump != nil {
 					F.skips = append(F.skips, fSkip{why: "blocklist", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
 				}
-				// dip37: the re-arm's whale-ledger skips (the dumper's loss history) go in the LIVE "wh_loss" row the same way
+				// dip37: the re-arm's whale-ledger skips (the dumper's loss history): their own LIVE row; the holder ledger's re-arm skips go in
+				// the "holder_loss" row (counted; no shadow window)
 				if r.Why != nil && *r.Why == "rearm_wh_loss" && r.Dump != nil {
-					F.skips = append(F.skips, fSkip{why: "wh_loss", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
+					F.skips = append(F.skips, fSkip{why: "rearm_wh_loss", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
+				}
+				if r.Why != nil && *r.Why == "rearm_holder_loss" && r.Dump != nil {
+					F.skips = append(F.skips, fSkip{why: "holder_loss", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
 				}
 				// dip37: the re-arm's HYBRID-2 m2_unseen gate skips
 				if r.Why != nil && *r.Why == "rearm_m2_unseen" && r.Dump != nil {
@@ -432,6 +484,16 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		F.kind[k] = kd
 		if r.F3 != nil {
 			F.armF3[k] = r.F3
+		}
+		if r.WhSumHit != nil || r.WhWould != nil || r.HlWould != nil { // dip37 the ledgers' verdicts on the arm
+			x := F.l35(k)
+			if F.whMean {
+				x.whOther = r.WhSumHit != nil && *r.WhSumHit
+			} else {
+				x.whOther = r.WhMeanHit != nil && *r.WhMeanHit
+			}
+			x.whWould = r.WhWould != nil && *r.WhWould
+			x.hlWould = r.HlWould != nil && *r.HlWould
 		}
 		if r.H2Keep != nil { // dip37 HYBRID-2 (log only)
 			F.anyH2 = true
@@ -767,6 +829,14 @@ func LogRuleName(key string) string {
 		return "no-bot filter"
 	case "skip2":
 		return "skip2 per-send"
+	case "h2":
+		return "HYBRID-2"
+	case "wh_other":
+		return "whale other rule"
+	case "wh_logmode":
+		return "whale loss (log)"
+	case "hl_logmode":
+		return "holder loss (log)"
 	}
 	return key
 }
@@ -847,7 +917,11 @@ var liveFilters = []struct{ why, name string }{{"quiet", "QUIET"}, {"create_slot
 
 // optLiveFilters: dip31/32 skips, shown only when the run made one (older runs' tables unchanged).
 var optLiveFilters = []struct{ why, name string }{{"breaker", "circuit breaker"}, {"cr_loss", "creator loss (T2)"}, {"cr_unfollowed", "creator unfollowed (T2)"}, {"quiet3_a", "QUIET3-A (live)"},
-	{"blocklist", "blocklist"}, {"wh_loss", "whale loss"}, {"m2_unseen", "M2 unseen"}}
+	{"blocklist", "blocklist"}}
+
+// d37LiveFilters: dip37's LIVE skips (shown with the others from the start in a dip37 run, else only when one fired)
+var d37LiveFilters = []struct{ why, name string }{{"wh_loss", "whale loss (T2)"}, {"rearm_wh_loss", "whale loss (re-arm)"}, {"holder_loss", "holder loss (T2 / re-arm)"},
+	{"m2_unseen", "M2 unseen"}}
 
 // Report computes the table (cached while no record came and the seed is the same).
 func (F *FiltAcc) Report(seedPath string) *FiltReport {
@@ -937,6 +1011,24 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	for _, f := range liveFilters {
 		byWhy[f.why] = &FiltRow{Key: f.why, Name: f.name, Type: "LIVE", Note: "paper; blocked = triggers skipped, W/L = the ones that would have filled"}
 	}
+	mode := func(live bool) string {
+		if live {
+			return "mode live; "
+		}
+		return "mode LOG (skips nothing now); "
+	}
+	for _, f := range d37LiveFilters {
+		note := "paper; blocked = triggers skipped, W/L = the ones that would have filled"
+		switch f.why {
+		case "wh_loss":
+			note = mode(F.modeWh) + note
+		case "rearm_wh_loss":
+			note = mode(F.modeWh) + "counted; a re-arm has no shadow window (no paper outcome)"
+		case "holder_loss":
+			note = mode(F.modeHl) + note + " (re-arm skips counted, no paper)"
+		}
+		byWhy[f.why] = &FiltRow{Key: f.why, Name: f.name, Type: "LIVE", Note: note}
+	}
 	for _, s := range F.skips {
 		row := byWhy[s.why]
 		w, ok := F.shW[s.sig]
@@ -962,12 +1054,17 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		R.Rows = append(R.Rows, *byWhy[f.why])
 	}
 	for _, f := range optLiveFilters {
-		if byWhy[f.why].Blocked > 0 {
+		if byWhy[f.why].Blocked > 0 || F.d37 {
+			R.Rows = append(R.Rows, *byWhy[f.why])
+		}
+	}
+	for _, f := range d37LiveFilters {
+		if byWhy[f.why].Blocked > 0 || F.d37 {
 			R.Rows = append(R.Rows, *byWhy[f.why])
 		}
 	}
 	// dip36 LIVE no-bot gate: windows whose sends it withheld (blocked = never filled; the ones that filled later in the note)
-	if len(F.fpWin) > 0 || F.fpHeld > 0 {
+	if len(F.fpWin) > 0 || F.fpHeld > 0 || F.d37 {
 		row := FiltRow{Key: "fpnb_live", Name: "no-bot filter", Type: "LIVE"}
 		later, laterSol := 0, 0.0
 		for _, g := range F.fpWin {
@@ -981,6 +1078,9 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				Kind: g.kind, Mint: g.k.Mint, W: g.k.W, Sig: fmt.Sprintf("w%d", g.k.W)})
 		}
 		row.Note = fmt.Sprintf("%d sends withheld; %d windows never filled, %d filled later (real P&L %s)", F.fpHeld, row.Blocked, later, fmtSigned(laterSol, 3))
+		if F.d37 { // dip37: the stale hold's share of the withheld sends
+			row.Note += fmt.Sprintf("; stale-hold withheld %d", F.fpStale)
+		}
 		R.Rows = append(R.Rows, row)
 	}
 	// LIVE deeper limit
@@ -1178,15 +1278,27 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		logrule("fam", "bundle family fam (log)", pick35(func(x *fLog35) bool { return x.fam }), "real fills; launch-slot + transfer-fed holders >= 26.8%")
 	}
 	// dip36 (log-only): FP-NOBOT at the send that decided the fill (covered, warm, score >= thr)
-	if F.anyFpnb {
+	if F.anyFpnb || F.d37 {
 		logrule("fpnb", "no-bot filter (log)", pick35(func(x *fLog35) bool { return x.fpnb }), "real fills; FP-NOBOT no-follower score >= thr at the deciding send")
 	}
 	// dip36 (log-only): SKIP-2 per-send at the send that decided the fill (covered, score < thr)
-	if F.anySkip2 {
+	if F.anySkip2 || F.d37 {
 		logrule("skip2", "skip2 per-send (log)", pick35(func(x *fLog35) bool { return x.skip2 }), "real fills; SKIP-2 logistic score < thr at the deciding send")
 	}
+	// dip37 the whale ledger's other rule (mean when sum is live and back) and the ledgers' log-mode would-skips, on the real fills
+	if F.whOn {
+		other := "mean"
+		if F.whMean {
+			other = "sum"
+		}
+		logrule("wh_other", "whale ledger "+other+" rule (log)", pick35(func(x *fLog35) bool { return x.whOther }), "real fills; the whale ledger's other rule ("+other+") would have skipped")
+		logrule("wh_logmode", "whale loss (log mode)", pick35(func(x *fLog35) bool { return x.whWould }), "real fills armed while the whale ledger ran in log mode")
+	}
+	if F.hlOn {
+		logrule("hl_logmode", "holder loss (log mode)", pick35(func(x *fLog35) bool { return x.hlWould }), "real fills armed while the holder ledger ran in log mode")
+	}
 	// dip37 HYBRID-2 (log only): the arm rule nd >= 1 AND (re-arm OR T2 age >= 30) would not have kept it
-	if F.anyH2 {
+	if F.anyH2 || F.d37 {
 		logrule("h2", "HYBRID-2 gate (log)", pick35(func(x *fLog35) bool { return x.h2 }), "real fills; h2_keep false: no M2-scored dump before the trigger, or T2 age < 30")
 	}
 	// dip30 LANDING GUARD (log only): the wallets chosen at signing still hold >= the guard's % at our landing

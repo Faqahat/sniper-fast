@@ -404,3 +404,179 @@ fn dip37_wh_split() {
     }
     assert!(cfg(&["--presend-live-wh-loss", "2:0.05", "--presend-live-wh-split", "on"]).unwrap().unwrap().wh_spec().contains("split"));
 }
+
+// ---- dip37 HOLDER LEDGER (pshl.rs) and the ledgers' control file ----------------------------------------------------------------------
+
+impl Ctx {
+    /// T2 on token 0x64: created at 1000, holder `h` buys `h_tok` raw at 1001, the whale's 2 SOL buy at 1005
+    fn t2h(&mut self, h: Pk, h_tok: u64, whale: Pk) -> Tk {
+        let mut tk = Tk::new(0x64);
+        self.launches.push(tk.launch.clone());
+        let dev = tk.buy(CREATOR, S / 2);
+        self.tx(1000, 1, vec![dev], vec![tk.create()]);
+        let e = tk.buy_tok(h, h_tok);
+        self.tx(1001, 2, vec![e], vec![]);
+        let e = tk.buy(whale, 2 * S);
+        self.tx(1005, 50, vec![e], vec![]);
+        tk
+    }
+    fn hseed(&self, k: Pk, n: u32, sum: i64, best: i64) { self.p.sh.hl.lock().unwrap().insert(k, pshl::HlHist { n, sum, best, pn: 0, ps: 0 }); }
+}
+
+const HL: [&str; 2] = ["--presend-live-holder-loss", "2:0.10:0.05"];
+
+#[test]
+fn dip37_hl_flags_and_rule() {
+    let c0 = cfg(&[]).unwrap().unwrap();
+    assert!(!c0.hl_on() && c0.ledger_ctl.is_none() && c0.json().get("holder_loss").is_none());
+    let c = cfg(&["--presend-live-holder-loss", "2:0.10:0.05", "--presend-live-holder-state", "/tmp/h.json", "--presend-live-holder-learn", "paper"]).unwrap().unwrap();
+    assert!(c.hl_on() && (c.hl_pct, c.hl_loss, c.hl_win) == (2.0, 100_000_000, 50_000_000) && c.hl_learn && c.json()["holder_loss"] == "2:0.1:0.05");
+    for (a, needle) in [(&["--presend-live-holder-loss", "2:0.1"][..], "PCT:SOL:WIN"), (&["--presend-live-holder-loss", "0:0.1:0.05"][..], "PCT:SOL:WIN"),
+        (&["--presend-live-holder-state", "/x"][..], "needs --presend-live-holder-loss"), (&["--presend-live-holder-learn", "paper"][..], "needs --presend-live-holder-loss"),
+        (&["--presend-live-holder-loss", "2:0.1:0.05", "--presend-live-holder-learn", "yes"][..], "paper | off"),
+        (&["--presend-live-ledger-control", "/x"][..], "needs --presend-live-wh-loss or --presend-live-holder-loss")] {
+        let e = cfg(a).unwrap_err().to_string();
+        assert!(e.contains(needle), "{a:?}: {e}");
+    }
+    assert!(crate::check_flags(&args(&["--presend-live-holder-loss", "2:0.10:0.05", "--presend-live-holder-state", "/x", "--presend-live-holder-learn", "paper",
+        "--presend-live-ledger-control", "/y"])).is_ok());
+    // the rule's boundary: >= 1 position, sum <= -SOL, best < WIN
+    let h = |n, sum, best| pshl::HlHist { n, sum, best, pn: 0, ps: 0 };
+    assert!(h(1, -100_000_000, -100_000_000).blocks(100_000_000, 50_000_000), "exactly -0.10 blocks");
+    assert!(!h(1, -99_999_999, -99_999_999).blocks(100_000_000, 50_000_000));
+    assert!(!h(3, -300_000_000, 50_000_000).blocks(100_000_000, 50_000_000), "a +0.05 win protects");
+    assert!(h(3, -300_000_000, 49_999_999).blocks(100_000_000, 50_000_000));
+    assert!(!h(0, 0, i64::MIN).blocks(100_000_000, 50_000_000) && !pshl::HlHist::default().blocks(100_000_000, 50_000_000));
+}
+
+/// T2: a holder >= 2% in the ledger -> "holder_loss" (hl_wallet / hl_pct / hl_sum); under 2% / the whale itself / protected: armed; off = dip36
+#[test]
+fn dip37_hl_t2_skip() {
+    let (h, whale) = (w(0x41), w(0xEE));
+    let mut c = Ctx::new(&HL);
+    c.hseed(h, 1, -150_000_000, -150_000_000);
+    c.t2h(h, pct(3.0), whale);
+    let s = c.ev("presend_live_skip").pop().expect("skipped");
+    assert!(s["why"] == "holder_loss" && s["hl_wallet"] == b58(&h) && s["hl_pct"] == 3.0 && s["hl_sum"] == -0.15 && s.get("hl_would").is_none(), "{s}");
+    assert!(c.p.status().contains(" | HOLDER LEDGER 1: skips T2 1 re-arm 0") && c.p.status().contains("LEDGER MODES whale live holder live"), "{}", c.p.status());
+    // just under 2%: armed
+    let mut c = Ctx::new(&HL);
+    c.hseed(h, 1, -150_000_000, -150_000_000);
+    c.t2h(h, pct(2.0) - 1, whale);
+    assert!(c.ev("presend_live_arm").len() == 1 && c.ev("presend_live_skip").is_empty());
+    // the whale in the holder ledger: never its own holder
+    let mut c = Ctx::new(&HL);
+    c.hseed(whale, 5, -900_000_000, -100_000_000);
+    c.t2h(h, pct(3.0), whale);
+    assert_eq!(c.ev("presend_live_arm").len(), 1);
+    // protected by a win
+    let mut c = Ctx::new(&HL);
+    c.hseed(h, 4, -400_000_000, 60_000_000);
+    c.t2h(h, pct(3.0), whale);
+    assert_eq!(c.ev("presend_live_arm").len(), 1);
+    // off: the same records as on with nobody in the ledger
+    let mut c0 = Ctx::new(&[]);
+    c0.t2h(h, pct(3.0), whale);
+    let mut c1 = Ctx::new(&HL);
+    c1.t2h(h, pct(3.0), whale);
+    assert_eq!(strip(&c0.recs), strip(&c1.recs));
+    assert!(c0.p.hls.keys.is_empty() && c1.p.hls.keys.values().next().is_some_and(|k| k == &vec![h]), "the window's keys: the holder");
+}
+
+/// re-arm: the remaining 8% holder (b) in the ledger -> "rearm_holder_loss"; the dumper (a) in the ledger: not a holder
+#[test]
+fn dip37_hl_rearm() {
+    let (a, b) = (w(0xA1), w(0xB1));
+    let run = |k: Pk| { let mut c = Ctx::new(&["--presend-live-rearm", "on", "--presend-live-holder-loss", "2:0.10:0.05"]); c.hseed(k, 1, -200_000_000, -200_000_000); c.rearm(a, b); c };
+    let c = run(b);
+    let s = c.ev("presend_live_skip").into_iter().find(|r| r["why"] == "rearm_holder_loss").expect("skipped");
+    assert!(s["kind"] == "rearm" && s["hl_wallet"] == b58(&b) && s["hl_pct"] == 8.0, "{s}");
+    assert_eq!(c.p.hls.skips, [0, 1]);
+    let c = run(a);
+    assert!(c.ev("presend_live_arm").iter().any(|r| r["kind"] == "rearm"), "the dumper sold out and is excluded");
+}
+
+/// the control file: log mode = the verdict logged (hl_would / wh_would), nothing skipped; a change is re-read and logged; a bad file keeps
+/// the last good modes
+#[test]
+fn dip37_ledger_control() {
+    let (h, whale) = (w(0x41), w(0xEE));
+    let p = tmp("ctl");
+    std::fs::write(&p, r#"{"whale": "log", "holder": "log"}"#).unwrap();
+    let mut c = Ctx::new(&["--presend-live-holder-loss", "2:0.10:0.05", "--presend-live-wh-loss", "2:0.05", "--presend-live-ledger-control", &p]);
+    c.p.ledger_ctl_open();
+    assert_eq!(c.p.hls.live, [false, false]);
+    c.hseed(h, 1, -150_000_000, -150_000_000);
+    c.seed(whale, 2, -60_000_000);
+    c.t2h(h, pct(3.0), whale);
+    let a = c.ev("presend_live_arm").pop().expect("log mode: armed");
+    assert!(a["hl_would"] == true && a["wh_would"] == true && a["hl_wallet"] == b58(&h) && a["wh_sum_hit"] == true, "{a}");
+    assert_eq!(c.p.hls.would, [1, 0]);
+    let m = c.ev("presend_live_ledger_mode");
+    assert!(m.len() == 1 && m[0]["whale"] == "log" && m[0]["holder"] == "log" && m[0]["was"]["holder"] == "live", "{m:?}");
+    // to live (forced re-read): the next trigger is skipped
+    std::fs::write(&p, r#"{"whale": "log", "holder": "live"}"#).unwrap();
+    c.p.ledger_ctl_check(true);
+    assert_eq!(c.p.hls.live, [false, true]);
+    // a bad file: the modes stay, an error record
+    std::fs::write(&p, r#"{"holder": "maybe"}"#).unwrap();
+    c.p.ledger_ctl_check(true);
+    assert_eq!(c.p.hls.live, [false, true]);
+    for o in c.orx.try_iter() { if let Out::Rec(v) = o { c.recs.push(v); } }
+    assert!(c.ev("presend_live_ledger_mode").iter().any(|r| r["ok"] == false));
+    std::fs::remove_file(&p).unwrap();
+    c.p.ledger_ctl_check(true);
+    assert_eq!(c.p.hls.live, [false, true], "a missing file keeps them");
+    assert!(pshl::ctl_parse(br#"{"whale": "live"}"#).unwrap() == [true, true] && pshl::ctl_parse(b"[]").is_err());
+}
+
+/// learning: the realized lookup carries the window's holder keys; the state round trip; the holder paper learning
+#[test]
+fn dip37_hl_learn_state_paper() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    let (h, whale) = (w(0x41), w(0xEE));
+    let mut c = Ctx::new(&HL);
+    let mut tk = c.t2h(h, pct(3.0), whale);
+    let id = *c.p.armed.get(&tk.mint).unwrap();
+    let mut sg = [0u8; 64]; sg[0] = 0xD3; sg[1] = 0x78;
+    c.atx.send(Att { w: id, n: 1, mint: tk.mint, sig: sg, tag: pl::PS_TAG | 0xD378, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 1006, deadline: 1007,
+        lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (1006, 0, 0), t_send: 1_006_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
+        tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None }).unwrap();
+    c.p.drain_atts();
+    let h2 = w(0x42);
+    let e = tk.buy_tok(h2, pct(2.5)); c.tx(1006, 3, vec![e], vec![]);          // a new 2.5% holder before our landing
+    let e = tk.buy(USER, 396_000_000);
+    c.tx_sig(1007, 4, sg, USER, vec![e.clone()], vec![]);
+    assert_eq!(c.p.hls.keys[&id], vec![h, h2], "the arm's holder and the one at our landing");
+    let mut z = Tk::new(0x7E);
+    c.launches.push(z.launch.clone());
+    let dz = z.buy(CREATOR, S / 2);
+    c.tx(1007, 900, vec![dz], vec![z.create()]);
+    for s in 1008..=1009 { let e = z.buy([0x2F; 32], 1_000_000); c.tx(s, 900, vec![e], vec![]); }
+    let Some(Cmd::Sell { pid, .. }) = c.cmds.iter().find(|x| matches!(x, Cmd::Sell { .. })).cloned() else { panic!("{:?}", c.cmds) };
+    let es = tk.sell_tok(USER, e.tok);
+    c.tx_sig(1009, 9, { let mut s = [0u8; 64]; s[0] = 0x5E; s[1] = 0x38; s }, USER, vec![es], vec![]);
+    c.p.on_msg(PsMsg::Sold(tk.mint, pid, 1, sold(Some(1009), &["S38"], e.tok)), &|_| false);
+    c.cmds.extend(c.p.take_cmds());
+    let Some(Cmd::Realized { hl, .. }) = c.cmds.iter().find(|x| matches!(x, Cmd::Realized { .. })).cloned() else { panic!("{:?}", c.cmds) };
+    assert_eq!(hl, vec![h, h2]);
+    // the state round trip (paper marked)
+    let p = tmp("hstate");
+    let mut m = FxHashMap::default();
+    m.insert(h, pshl::HlHist { n: 2, sum: -120_000_000, best: -20_000_000, pn: 1, ps: -20_000_000 });
+    m.insert(h2, pshl::HlHist { n: 1, sum: 70_000_000, best: 70_000_000, pn: 0, ps: 0 });
+    assert_eq!(pshl::hl_save(&m, &p).unwrap(), 2);
+    assert_eq!(pshl::hl_load(&p).unwrap(), m);
+    std::fs::remove_file(&p).unwrap();
+    if let Ok(b) = std::fs::read("/home/moiz/sniper-data/dip37stage/holder_state_ams.json") { assert!(pshl::hl_parse_state(&b).unwrap().len() > 1000, "the staged seed parses"); }
+    // paper: a holder_loss-skipped trigger's row c into the holder's ledger
+    let mut c = Ctx::new(&["--presend-live-holder-loss", "2:0.10:0.05", "--presend-live-holder-learn", "paper"]);
+    c.hseed(h, 1, -150_000_000, -150_000_000);
+    c.t2h(h, pct(3.0), whale);
+    let sig = c.ev("presend_live_skip").pop().unwrap()["trig"]["sig"].as_str().unwrap().to_string();
+    for r in [serde_json::json!({"ev": "presend_arm", "w": 5, "sig": sig}), serde_json::json!({"ev": "presend_fill", "w": 5, "row": "c", "entry": {"sol_in": 400_000_000u64}}),
+              serde_json::json!({"ev": "presend_exit", "w": 5, "row": "c", "net_cheap": 0.2})] { c.p.on_shadow_rec(&r); }
+    let g = c.p.sh.hl.lock().unwrap()[&h];
+    assert_eq!(g, pshl::HlHist { n: 2, sum: 50_000_000, best: 200_000_000, pn: 1, ps: 200_000_000 }, "the paper win protects it now");
+}

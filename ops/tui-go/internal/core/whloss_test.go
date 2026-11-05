@@ -24,12 +24,16 @@ func TestFiltersWhLoss(t *testing.T) {
 	}
 	R := filtView(t, p, "none").Filt
 	r, ok := R.Row("wh_loss")
-	if !ok || r.Type != "LIVE" || r.Name != "whale loss" || r.Blocked != 2 || r.WinN != 1 || r.LoseN != 0 {
+	if !ok || r.Type != "LIVE" || r.Name != "whale loss (T2)" || r.Blocked != 1 || r.WinN != 1 || r.LoseN != 0 {
 		t.Fatalf("wh_loss row: %+v %v", r, ok)
+	}
+	ra, ok := R.Row("rearm_wh_loss")
+	if !ok || ra.Blocked != 1 || ra.WinN+ra.LoseN != 0 || ra.Name != "whale loss (re-arm)" {
+		t.Fatalf("rearm_wh_loss row: %+v %v", ra, ok)
 	}
 	kinds := map[string]string{}
 	for _, it := range R.Items {
-		if it.Filter == "wh_loss" {
+		if it.Filter == "wh_loss" || it.Filter == "rearm_wh_loss" {
 			kinds[it.Mint] = it.Kind
 		}
 	}
