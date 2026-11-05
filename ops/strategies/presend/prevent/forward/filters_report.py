@@ -24,6 +24,8 @@ if os.path.exists(seed_p):
 sh_w, sh_exit, sh_size = {}, {}, {}           # shadow: trigger sig -> shadow w; w -> row c P&L (SOL); w -> row c size (SOL)
 skips = []                                     # (why, trigger sig)
 live_arm_sig, kind, arm_ann, gcr_flag = {}, {}, {}, {}
+arm_f3 = {}                                    # dip32 (--presend-live-f3-log): (w, mint) -> the arm's "f3" (QUIET3-A, fresh holders)
+rearm_skips = collections.Counter()            # dip32: re-arm skips by why (no re-arm shadow: counted only)
 deep_w, fills, fill_ann, real = set(), set(), {}, {}
 live_size = None
 for line in open(path, errors="replace"):
@@ -33,7 +35,8 @@ for line in open(path, errors="replace"):
     elif e == "presend_exit" and d.get("row") == "c": sh_exit[d["w"]] = d.get("net_cheap", d.get("pnl", 0.0))
     elif e == "presend_fill" and d.get("row", "c") == "c" and "entry" in d: sh_size.setdefault(d.get("w"), d["entry"].get("sol_in", 0) / 1e9)
     elif e == "presend_live_skip":
-        if d.get("kind") == "rearm" or "trig" not in d: continue
+        if d.get("kind") == "rearm" or "trig" not in d:
+            rearm_skips[d.get("why") or "?"] += 1; continue
         skips.append((d.get("why") or "?", d["trig"]["sig"]))
     elif e == "presend_live_arm":
         mint = d.get("mint") or (d.get("trig") or {}).get("mint"); k = (d.get("w"), mint)
@@ -41,6 +44,7 @@ for line in open(path, errors="replace"):
         if kind[k] == "t2":
             live_arm_sig[d["w"]] = d["trig"]["sig"]
             if live_size is None: live_size = d.get("spend", 0) / 1e9 or None
+        if d.get("f3") is not None: arm_f3[k] = d["f3"]
         a = d.get("ann")
         if a is not None:
             arm_ann[k] = a
@@ -65,9 +69,11 @@ agg = collections.defaultdict(list)
 for why, sig in skips:
     w = sh_w.get(sig); v = paper(w) if w is not None else None
     agg[why].append(v)
-for why in ("quiet", "create_slot", "young_age", "lone_whale"):
+for why in ("quiet", "create_slot", "young_age", "lone_whale", "breaker", "cr_loss", "cr_unfollowed", "quiet3_a"):
     vs = agg.get(why, []); f = [x for x in vs if x is not None]
-    rows.append((why.replace("young_age", "age-1 skip").replace("lone_whale", "10-sec skip").replace("create_slot", "create-slot skip").replace("quiet", "QUIET"),
+    if (why.startswith("cr_") or why in ("breaker", "quiet3_a")) and not vs: continue   # dip31/32 rows only when they skipped something (dipmon parity)
+    rows.append(("QUIET3-A (live)" if why == "quiet3_a" else why.replace("young_age", "age-1 skip").replace("lone_whale", "10-sec skip").replace("create_slot", "create-slot skip").replace("quiet", "QUIET").replace("breaker", "circuit breaker")
+                 .replace("cr_loss", "creator loss (T2)").replace("cr_unfollowed", "creator unfollowed (T2)").replace("quiet3_a", "QUIET3-A (live)"),
                  "LIVE", len(vs), sum(1 for x in f if x > 0), sum(x for x in f if x > 0), sum(1 for x in f if x <= 0), sum(x for x in f if x <= 0), "paper; blocked = triggers skipped, W/L = the ones that would have filled"))
 if deep_w:
     blocked = [w for w in deep_w if w not in fills]
@@ -88,6 +94,11 @@ def group_risk(a):
     if "grp_block" in a: return bool(a["grp_block"])            # dip30 logs the rule itself (12 holders)
     return sum(h.get("pct", 0) for h in a.get("holders", []) if (h.get("risk") or 0) >= 5 and (h.get("hz3") or 0) >= 0.3) >= 6.0
 logrule("group risk (new)", [k for k, (a, dp) in fill_ann.items() if group_risk(a)], "real fills; risky holders of any size summed >= 6%")
+# dip32 (--presend-live-f3-log): QUIET3-A (T2: the 120 s ring's trades <= 15 and the whale's dumps <= 3) and TAIL G3 (fresh holders, <= 1
+# hold on record, >= 35% at the arm; the verified study scored it at signing), on the real fills of the windows that logged them
+if arm_f3:
+    logrule("QUIET3-A (log)", [k for k in real if (arm_f3.get(k) or {}).get("q3a")], "real fills; T2 quiet token + whale with <= 3 dumps")
+    logrule("fresh holders >= 35% (log)", [k for k in real if ((arm_f3.get(k) or {}).get("fresh") or 0) >= 35.0], "real fills; attack guard (TAIL G3)")
 logrule("holder clock (approx)", [k for k, (a, dp) in fill_ann.items() if any(h.get("pct", 0) >= 6 and h.get("n", 0) >= 5 and (h.get("h3") or 0) >= 0.3 for h in a.get("holders", []))], "real fills")
 
 print(f"FILTERS {os.path.basename(path)}: {len(real)} positions realized {sum(real.values()):+.3f} SOL")
@@ -107,7 +118,7 @@ def _put(key, v):
     if _lv.get(key) is None: _lv[key] = v
     else: _lv.setdefault(key, v)
 for why, sig in skips:
-    if why not in ("quiet", "create_slot", "young_age", "lone_whale"): continue
+    if why not in ("quiet", "create_slot", "young_age", "lone_whale", "cr_loss", "cr_unfollowed", "quiet3_a"): continue
     w = sh_w.get(sig); _put(sig, paper(w) if w is not None else None)
 if deep_w:
     for w in deep_w:
@@ -121,6 +132,7 @@ for k, (a, dp) in fill_ann.items():
        or (not deep_w and a.get("ctx85")) or (a.get("guard") or {}).get("block"):
         _lg.add(k)
 _lg |= {k for k in real if gcr_flag.get(k)}
+_lg |= {k for k in real if (arm_f3.get(k) or {}).get("q3a") or ((arm_f3.get(k) or {}).get("fresh") or 0) >= 35.0}
 LIVE_U = _tot([x for x in _lv.values() if x is not None]); LIVE_U = (len(_lv),) + LIVE_U[1:]
 LOG_U = _tot([real[k] for k in _lg])
 ALL_U = tuple(a + b for a, b in zip(LIVE_U, LOG_U))
@@ -130,3 +142,5 @@ def _line(name, t):
 _line("LIVE total (unique triggers)", LIVE_U)
 _line("LOG total (unique fills)", LOG_U)
 _line("ALL total", ALL_U)
+if any(w.startswith("rearm_cr_") for w in rearm_skips):
+    print("re-arm creator skips (no re-arm shadow, counted only): " + ", ".join(f"{w} {n}" for w, n in rearm_skips.items() if w.startswith("rearm_cr_")))
