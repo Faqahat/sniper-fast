@@ -368,3 +368,113 @@ fn dip36_fpnb_gate_live_and_control_file() {
     assert!(win["filled"] == true && win["withheld"] == fill["withheld"] && win["kind"] == "T2", "{win}");
     assert!(p.fp.as_ref().unwrap().status().contains("gate T2/re-arm: withheld"));
 }
+
+// ---- dip37b the SKIP-2 LIVE GATE (--presend-skip2-live; the ledger control file's "skip2") ----------------------------------------------
+
+/// the sender's check on the skip2 verdict: per kind, a fresh covered "skip" withheld, a pass / not covered / no verdict never, the stale hold
+#[test]
+fn dip37b_skip2_gate_check() {
+    let (g, gs) = (Gate::default(), GateShared::default());
+    g.set2(1000, true, true);
+    assert_eq!(skip2_withhold_why(&g, &gs, 1000, false), None, "off: never");
+    assert_eq!(gs.s2_open[0].load(Ordering::Relaxed), 0, "off: nothing counted");
+    gs.s2_mode.store(1, Ordering::SeqCst);
+    assert_eq!((skip2_withhold_why(&g, &gs, 1000, false), skip2_withhold_why(&g, &gs, 999, false)), (Some(false), Some(false)), "T2 live: slot / slot + 1");
+    assert_eq!(skip2_withhold_why(&g, &gs, 1000, true), None, "re-arm not live");
+    assert_eq!(skip2_withhold_why(&g, &gs, 1001, false), None, "no fresh verdict: fail open");
+    assert_eq!(skip2_withhold_why(&Gate::default(), &gs, 1000, false), None, "no verdict at all: fail open");
+    g.set2(1000, false, true);
+    assert_eq!(skip2_withhold_why(&g, &gs, 1000, false), None, "not covered: never");
+    g.set2(1000, true, false);
+    assert_eq!(skip2_withhold_why(&g, &gs, 1000, false), None, "a pass");
+    assert_eq!((gs.s2_withheld[0].load(Ordering::Relaxed), gs.s2_open[0].load(Ordering::Relaxed), g.withheld2.load(Ordering::Relaxed)), (2, 2, 2));
+    // the stale hold (--presend-fpnb-stale-hold): a recent skip held, an older one / an old pass / not covered open
+    gs.s2_mode.store(3, Ordering::SeqCst);
+    gs.stale_hold.store(2, Ordering::SeqCst);
+    g.set2(1000, true, true);
+    assert_eq!((skip2_withhold_why(&g, &gs, 1001, true), skip2_withhold_why(&g, &gs, 1002, false), skip2_withhold_why(&g, &gs, 1003, false)), (Some(true), Some(true), None));
+    g.set2(1000, true, false);
+    assert_eq!(skip2_withhold_why(&g, &gs, 1001, false), None);
+    g.set2(1000, false, true);
+    assert_eq!(skip2_withhold_why(&g, &gs, 1001, false), None);
+    assert_eq!((gs.s2_stale[0].load(Ordering::Relaxed), gs.s2_stale[1].load(Ordering::Relaxed)), (1, 1));
+    // the FP-NOBOT gate never reads the skip2 verdict
+    assert!(!gate_withhold(&g, &gs, 1000, false));
+}
+
+/// the flag; the probe end to end: the verdict published at the arm, withheld while live, the control file's "skip2" flips it (log / live),
+/// a key absent keeps the mode; off = no skip2 verdict published, no withheld record, the window record unchanged
+#[test]
+fn dip37b_skip2_live_probe_and_control() {
+    let _g = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let bots = tmp("s2gate.json", &list_of(&[w(0xB0)]));
+    for (a, needle) in [(&["--presend-skip2-live", "t2"][..], "needs --presend-skip2-log on"),
+        (&["--presend-fpnb-log", "on", "--presend-fpnb-bots", &bots, "--presend-skip2-live", "t2"][..], "needs --presend-skip2-log on"),
+        (&["--presend-fpnb-log", "on", "--presend-fpnb-bots", &bots, "--presend-skip2-log", "on", "--presend-skip2-live", "x"][..], "t2 | rearm")] {
+        let e = cfg(a).unwrap_err().to_string();
+        assert!(e.contains(needle), "{a:?}: {e}");
+    }
+    assert!(crate::check_flags(&args(&["--presend-fpnb-log", "on", "--presend-fpnb-bots", "/b", "--presend-skip2-log", "on", "--presend-skip2-live", "t2,rearm"])).is_ok());
+    let base = ["--presend-fpnb-log", "on", "--presend-fpnb-bots", &bots, "--presend-skip2-log", "on"];
+    let run = |extra: &[&str]| {
+        let mut x: Vec<&str> = base.to_vec(); x.extend_from_slice(extra);
+        let c = cfg(&x).unwrap().unwrap();
+        let (mut p, _atx, orx) = PsLive::for_test(c, USER);
+        p.ledger_ctl_open();
+        { let f = p.fp.as_ref().unwrap(); let mut wk = f.inline.as_ref().unwrap().lock().unwrap(); wk.test_force(Some(2.0)); wk.test_s2_thr(Some(1e9)); }
+        let mut tk = Tk::new(0x3B);
+        let l = tk.launch.clone();
+        let dev = tk.buy(CREATOR, S / 2);
+        tx(&mut p, 1000, 3, None, CREATOR, vec![dev], vec![tk.create()], &l);
+        let o1 = tk.buy(w(0xA1), S / 5);
+        tx(&mut p, 1003, 2, None, w(0xA1), vec![o1], vec![], &l);
+        let wh = tk.buy(w(0xEE), 2 * S);
+        tx(&mut p, 1005, 50, None, w(0xEE), vec![wh], vec![], &l);
+        let g = p.sh.wins.lock().unwrap().iter().find(|s| s.id == 1).unwrap().fpg.clone().expect("the window's gate");
+        (p, orx, g, tk, l)
+    };
+    // live (T2) from the flag: the arm's verdict for 1006 says skip -> withheld; a pass on FP-NOBOT (thr 2.0) does not matter
+    let c = cfg(&[&base[..], &["--presend-skip2-live", "t2"][..]].concat()).unwrap().unwrap();
+    assert!(c.skip2_live == 1 && c.json()["skip2_live"] == "t2");
+    let (mut p, _orx, g, mut tk, l) = run(&["--presend-skip2-live", "t2"]);
+    let gs = p.fp.as_ref().unwrap().gs.clone();
+    assert_eq!(g.v2.load(Ordering::SeqCst) >> 2, 1006);
+    assert_eq!(skip2_withhold_why(&g, &gs, 1006, false), Some(false));
+    assert!(!gate_withhold(&g, &gs, 1006, false), "FP-NOBOT itself passes");
+    // a new slot re-scores (the window stays armed); the threshold back to "never skip" -> sent
+    p.fp.as_ref().unwrap().inline.as_ref().unwrap().lock().unwrap().test_s2_thr(Some(-1e9));
+    let o2 = tk.buy(w(0xA2), S / 5);
+    tx(&mut p, 1006, 4, None, w(0xA2), vec![o2], vec![], &l);
+    assert_eq!(skip2_withhold_why(&g, &gs, 1007, false), None);
+    assert!(p.status().contains("SKIP-2 gate(t2) T2/re-arm: withheld 1/0"), "{}", p.status());
+    // the control file: "skip2": "log" turns it off, "live" back on (the flag's kinds); no key keeps it
+    let ctl = tmp("s2ctl.json", r#"{"whale": "live", "holder": "live", "skip2": "log"}"#);
+    let (mut p, orx, g, _tk, _l) = run(&["--presend-skip2-live", "t2", "--presend-live-wh-loss", "2:0.05", "--presend-live-ledger-control", &ctl]);
+    let gs = p.fp.as_ref().unwrap().gs.clone();
+    assert_eq!(gs.s2_mode.load(Ordering::SeqCst), 0, "the control file at the start: log");
+    assert_eq!(skip2_withhold_why(&g, &gs, 1006, false), None);
+    let m = recs(&orx).into_iter().find(|r| r["ev"] == "presend_live_ledger_mode").expect("the change logged");
+    assert!(m["skip2"] == "off" && m["was"]["skip2"] == "t2", "{m}");
+    std::fs::write(&ctl, r#"{"whale": "live", "holder": "live", "skip2": "live"}"#).unwrap();
+    p.ledger_ctl_check(true);
+    assert_eq!(gs.s2_mode.load(Ordering::SeqCst), 1, "live = the flag's kinds");
+    std::fs::write(&ctl, r#"{"whale": "live", "holder": "live"}"#).unwrap();
+    p.ledger_ctl_check(true);
+    assert_eq!(gs.s2_mode.load(Ordering::SeqCst), 1, "no key: unchanged");
+    std::fs::write(&ctl, r#"{"skip2": "maybe"}"#).unwrap();
+    p.ledger_ctl_check(true);
+    assert_eq!(gs.s2_mode.load(Ordering::SeqCst), 1, "a bad value keeps it");
+    // the flag off + "skip2": "live" in the file: both kinds
+    let ctl2 = tmp("s2ctl2.json", r#"{"skip2": "live"}"#);
+    let (p2, _o, _g, _t, _l) = run(&["--presend-live-wh-loss", "2:0.05", "--presend-live-ledger-control", &ctl2]);
+    assert_eq!(p2.fp.as_ref().unwrap().gs.s2_mode.load(Ordering::SeqCst), 3);
+    // OFF (no flag, no key): no skip2 verdict is published, nothing withheld, no gate record
+    let (mut p, orx, g, _tk, _l) = run(&[]);
+    let gs = p.fp.as_ref().unwrap().gs.clone();
+    assert_eq!((gs.s2_mode.load(Ordering::SeqCst), g.v2.load(Ordering::SeqCst)), (0, 0));
+    assert_eq!(skip2_withhold_why(&g, &gs, 1006, false), None);
+    assert!(!p.status().contains("SKIP-2 gate"));
+    let end = p.finish(1010, None);
+    assert!(end["dip36_fpnb"].get("skip2_gate").is_none());
+    assert!(recs(&orx).iter().all(|r| r["ev"] != "presend_live_skip2_withheld" && r.get("s2_withheld").is_none()));
+}

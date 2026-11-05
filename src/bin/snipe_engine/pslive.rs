@@ -105,8 +105,8 @@ const QFLAGS: [&str; 10] = ["--presend-live-quiet-stop", "--presend-live-quiet-s
     "--presend-live-quiet-book"];
 
 /// dip36 FP-NOBOT (log-only): its flags (each needs --presend-live; the paths need --presend-fpnb-log on)
-const FPFLAGS: [&str; 8] = ["--presend-fpnb-log", "--presend-fpnb-bots", "--presend-fpnb-preload", "--presend-skip2-log", "--presend-skip2-seed", "--presend-fpnb-live",
-    "--presend-fpnb-control", "--presend-fpnb-stale-hold"];
+const FPFLAGS: [&str; 9] = ["--presend-fpnb-log", "--presend-fpnb-bots", "--presend-fpnb-preload", "--presend-skip2-log", "--presend-skip2-seed", "--presend-fpnb-live",
+    "--presend-fpnb-control", "--presend-fpnb-stale-hold", "--presend-skip2-live"];
 
 /// dip37 WHALE / DUMPER LOSS LEDGER: its flags (each needs --presend-live; the mode and the state need --presend-live-wh-loss; pswh.rs)
 const WHFLAGS: [&str; 5] = ["--presend-live-wh-loss", "--presend-live-wh-loss-mode", "--presend-live-whale-state", "--presend-live-wh-learn", "--presend-live-wh-split"];
@@ -346,6 +346,9 @@ pub struct Cfg {
     /// dip36 --presend-skip2-log on|off (default off; LOG-ONLY; needs --presend-fpnb-log on): the SKIP-2 per-send logistic score on the
     ///   FP-NOBOT records ("skip2"); --presend-skip2-seed FILE seeds its creator / whale / mint ledgers (s2_seed.py)
     pub skip2_log: bool,
+    /// dip37b --presend-skip2-live t2,rearm | t2 | rearm | off (default off; LIVE; needs --presend-skip2-log on): the SKIP-2 per-send gate's start
+    /// mode (a send whose skip2 verdict says skip is withheld, FP-NOBOT's way); the ledger control file's "skip2" key overrides it
+    pub skip2_live: u64,
     pub skip2_seed: Option<String>,
     /// dip36 --presend-fpnb-live t2,rearm | t2 | rearm | off (default off; LIVE; needs --presend-fpnb-log on): the FP-NOBOT send gate's start
     ///   mode (bit 0 T2, bit 1 re-arm); --presend-fpnb-control FILE ({"live": [...]}, re-read every ~10 s) overrides it
@@ -489,6 +492,7 @@ impl Cfg {
             fpnb_bots: arg("--presend-fpnb-bots").filter(|p| !p.starts_with("--")),
             fpnb_preload: arg("--presend-fpnb-preload").filter(|p| !p.starts_with("--")),
             skip2_log: onoff("--presend-skip2-log", false)?,
+            skip2_live: match arg("--presend-skip2-live") { Some(s) => pslog36::mode_parse(&s).map_err(|e| anyhow::anyhow!("--presend-skip2-live {e}"))?, None => 0 },
             skip2_seed: arg("--presend-skip2-seed").filter(|p| !p.starts_with("--")),
             fpnb_live: match arg("--presend-fpnb-live") { Some(s) => pslog36::mode_parse(&s).map_err(|e| anyhow::anyhow!("--presend-fpnb-live {e}"))?, None => 0 },
             fpnb_control: arg("--presend-fpnb-control").filter(|p| !p.starts_with("--")),
@@ -540,6 +544,8 @@ impl Cfg {
         if (c.fpnb_live != 0 || c.fpnb_control.is_some()) && !c.fpnb_log { bail!("--presend-fpnb-live / --presend-fpnb-control need --presend-fpnb-log on (the scores they act on)"); }
         if c.skip2_log && !c.fpnb_log { bail!("--presend-skip2-log on needs --presend-fpnb-log on (it reuses FP-NOBOT's per-send inputs)"); }
         if c.skip2_seed.is_some() && !c.skip2_log { bail!("--presend-skip2-seed needs --presend-skip2-log on"); }
+        if has("--presend-skip2-live") && arg("--presend-skip2-live").is_none_or(|v| v.starts_with("--")) { bail!("--presend-skip2-live needs t2,rearm | t2 | rearm | off"); }
+        if c.skip2_live != 0 && !c.skip2_log { bail!("--presend-skip2-live needs --presend-skip2-log on (the verdict it acts on)"); }
         if c.fpnb_log && c.fpnb_bots.is_none() { bail!("--presend-fpnb-log on needs --presend-fpnb-bots FILE (the follower-bot list)"); }
         c.check(live, cap)?;
         Ok(Some(c))
@@ -711,6 +717,7 @@ impl Cfg {
         if self.fpnb_stale_hold > 0 { j["fpnb_stale_hold"] = self.fpnb_stale_hold.into(); }
         if self.hl_on() { j["holder_loss"] = format!("{}:{}:{}", self.hl_pct, self.hl_loss as f64 / 1e9, self.hl_win as f64 / 1e9).into(); j["holder_state"] = self.hl_state.clone().into(); j["holder_learn"] = self.hl_learn.into(); }
         if let Some(p) = &self.ledger_ctl { j["ledger_control"] = p.clone().into(); }
+        if self.skip2_live != 0 { j["skip2_live"] = pslog36::mode_str(self.skip2_live).into(); }
         if self.m2seen_on() { j["m2seen"] = serde_json::json!({"log": self.m2seen_log, "gate": self.m2seen_gate, "age": psh2::H2_AGE, "m2": psh2::H2_M2}); }
         if self.fab.on { j["fee_ab"] = self.fab.json(self.cu_limit, self.cu_price, self.tip); }
         j
@@ -992,6 +999,16 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
                     let mut r = serde_json::json!({"ev": "presend_live_fpnb_withheld", "w": w.id, "n": w.n, "mint": b58(&w.mint), "slot": slot,
                         "kind": if w.rearm { "rearm" } else { "T2" }, "verdict_slot": vs, "t": arbx::feeds::clock::now_ns()});
                     // dip37 --presend-fpnb-stale-hold: a held send on the window's last (blocking, not fresh) verdict says so
+                    if stale { r["stale"] = true.into(); r["age"] = slot.saturating_sub(vs).into(); }
+                    let _ = out.send(Out::Rec(r));
+                    continue;
+                }
+                // dip37b SKIP-2 LIVE GATE (--presend-skip2-live / the ledger control file's "skip2"; off: never): the same rule on the skip2 verdict
+                if let Some(stale) = pslog36::skip2_withhold_why(g, gs, slot, w.rearm) {
+                    sh.skip(if stale { "skip2_withheld_stale" } else { "skip2_withheld" });
+                    let vs = g.v2.load(Ordering::Relaxed) >> 2;
+                    let mut r = serde_json::json!({"ev": "presend_live_skip2_withheld", "w": w.id, "n": w.n, "mint": b58(&w.mint), "slot": slot,
+                        "kind": if w.rearm { "rearm" } else { "T2" }, "verdict_slot": vs, "t": arbx::feeds::clock::now_ns()});
                     if stale { r["stale"] = true.into(); r["age"] = slot.saturating_sub(vs).into(); }
                     let _ = out.send(Out::Rec(r));
                     continue;

@@ -360,7 +360,7 @@ func TestFiltersVerdicts(t *testing.T) {
 	known := map[string]bool{"quiet": true, "create_slot": true, "young_age": true, "lone_whale": true, "breaker": true, "cr_loss": true,
 		"cr_unfollowed": true, "gcr": true, "st": true, "ctx85": true, "grp": true, "hc": true, "guard": true, "q3a": true, "fresh": true, "quiet3_a": true, "crlog": true, "eqgrp": true, "fam": true, "fpnb": true, "blocklist": true, "skip2": true, "fpnb_live": true,
 		// dip37
-		"wh_loss": true, "rearm_wh_loss": true, "holder_loss": true, "m2_unseen": true, "wh_other": true, "wh_logmode": true, "hl_logmode": true, "h2": true}
+		"wh_loss": true, "rearm_wh_loss": true, "holder_loss": true, "m2_unseen": true, "wh_other": true, "wh_logmode": true, "hl_logmode": true, "h2": true, "skip2_live": true}
 	for k, v := range fltVerdicts {
 		if !known[k] || v.label == "" || v.why == "" || len(v.label) > 10 {
 			t.Errorf("verdict %q: %+v", k, v)

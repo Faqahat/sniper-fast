@@ -85,6 +85,8 @@ func fltShort(key, name string) string {
 		return map[bool]string{true: "holder log", false: "holder loss"}[strings.HasSuffix(name, "[log]")]
 	case "wh_other":
 		return "whale other rule"
+	case "skip2_live":
+		return "skip2 live"
 	case "wh_logmode":
 		return "whale (log mode)"
 	case "hl_logmode":
@@ -130,6 +132,8 @@ func fltCode(key string) string {
 		return "NL"
 	case "h2":
 		return "H2"
+	case "skip2_live":
+		return "SL"
 	case "wh_other":
 		return "WO"
 	case "wh_logmode":
@@ -315,6 +319,7 @@ var fltVerdicts = map[string]fltVerdict{
 	"rearm_wh_loss": {vgLive, "LIVE new", "dumper ledger (dip37)"},
 	"holder_loss":   {vgLive, "LIVE new", "holder ledger (dip37)"},
 	"wh_other":      {vgLog, "LOG new", "whale ledger other rule"},
+	"skip2_live":    {vgLive, "LIVE new", "per-send logit gate (dip37b)"},
 	"wh_logmode":    {vgLog, "LOG", "whale ledger in log mode"},
 	"hl_logmode":    {vgLog, "LOG", "holder ledger in log mode"},
 	"m2_unseen":     {vgLive, "LIVE new", "no M2 dump before (dip37)"},

@@ -118,3 +118,42 @@ func TestFiltersD37LedgerModes(t *testing.T) {
 		t.Fatalf("flipped live: LIVE row %v, LOG row %v", live, lok)
 	}
 }
+
+// TestFiltersSkip2Live (dip37b): with the SKIP-2 gate live the skip2 row is a LIVE row: withheld sends (stale-hold apart), windows never
+// filled with the shadow's paper, windows filled later with their real P&L; off it stays the LOG row
+func TestFiltersSkip2Live(t *testing.T) {
+	view := func(ls ...string) *FiltReport {
+		p := filepath.Join(t.TempDir(), "dip_ams_r91.jsonl")
+		if err := os.WriteFile(p, []byte(strings.Join(ls, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return filtView(t, p, "none").Filt
+	}
+	recs := []string{`{"ev":"run_start","t":1,"presend_live":{"spend":500000000,"skip2_live":"t2"}}`,
+		`{"ev":"presend_arm","sig":"s1","w":1}`, `{"ev":"presend_fill","row":"c","w":1,"entry":{"sol_in":500000000}}`, `{"ev":"presend_exit","row":"c","w":1,"net_cheap":-0.03}`,
+		`{"ev":"presend_live_arm","w":1,"mint":"MA","trig":{"sig":"s1","mint":"MA","t":1000}}`,
+		`{"ev":"presend_live_skip2_withheld","w":1,"mint":"MA","slot":5,"kind":"T2"}`,
+		`{"ev":"presend_live_skip2_withheld","w":1,"mint":"MA","slot":6,"kind":"T2","stale":true,"age":1}`,
+		`{"ev":"presend_live_fpnb_window","w":1,"mint":"MA","kind":"T2","withheld":0,"filled":false,"s2_withheld":2}`,
+		`{"ev":"presend_live_arm","w":2,"mint":"MB","trig":{"sig":"s2","mint":"MB","t":2000}}`,
+		`{"ev":"presend_live_skip2_withheld","w":2,"mint":"MB","slot":9,"kind":"T2"}`,
+		`{"ev":"presend_live_fill","w":2,"mint":"MB","t":2100}`, `{"ev":"presend_live_realized","w":2,"mint":"MB","pnl":20000000}`,
+		`{"ev":"presend_live_fpnb_window","w":2,"mint":"MB","kind":"T2","withheld":0,"filled":true,"s2_withheld":1}`,
+	}
+	R := view(recs...)
+	r, ok := R.Row("skip2_live")
+	if !ok || r.Type != "LIVE" || r.Blocked != 1 || r.LoseN != 1 || !strings.Contains(r.Note, "3 sends withheld (stale-hold 1)") || !strings.Contains(r.Note, "1 filled later (real P&L +0.020)") {
+		t.Fatalf("skip2 live row: %+v %v", r, ok)
+	}
+	if _, ok := R.Row("skip2"); ok {
+		t.Error("live: no LOG skip2 row")
+	}
+	// the control file turns it off (log): the LOG row again
+	R = view(`{"ev":"run_start","t":1,"presend_live":{"spend":500000000,"skip2_live":"t2"}}`, `{"ev":"presend_live_ledger_mode","ok":true,"whale":"live","holder":"live","skip2":"off"}`)
+	if _, ok := R.Row("skip2_live"); ok {
+		t.Error("skip2 off: no LIVE row")
+	}
+	if _, ok := R.Row("skip2"); !ok {
+		t.Error("skip2 off: the LOG row")
+	}
+}

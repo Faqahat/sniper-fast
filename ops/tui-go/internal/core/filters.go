@@ -155,8 +155,10 @@ type fRec struct {
 	Thr   *float64 `json:"thr"`
 	// dip36 live gate: presend_live_fpnb_window (withheld sends of a window, filled or not)
 	Withheld *float64 `json:"withheld"`
-	Filled   *bool    `json:"filled"`
-	Skip2    *struct {
+	// dip37b: a window's SKIP-2 gate withheld sends (presend_live_fpnb_window)
+	S2Withheld *float64 `json:"s2_withheld"`
+	Filled     *bool    `json:"filled"`
+	Skip2      *struct {
 		Score *float64 `json:"score"`
 		Thr   *float64 `json:"thr"`
 		Skip  *bool    `json:"skip"`
@@ -284,13 +286,17 @@ type FiltAcc struct {
 	d37, whOn, hlOn, whMean bool
 	modeWh, modeHl          bool
 	fpStale                 int
-	fpWin                   []fGateWin       // dip36 live gate: windows with withheld sends
-	fpHeld                  int              // dip36 live gate: presend_live_fpnb_withheld records (sends withheld)
-	moves                   map[int64]*FMove // shadow w -> the window's price move (presend_disarm "move"; absent before 11-03)
-	q3Live                  bool             // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
-	cache                   *FiltReport
-	cacheVer                int64
-	cacheSeed               string
+	// dip37b the SKIP-2 live gate: live (a flag / the control file / a withheld record), its withheld / stale sends, its windows
+	s2Live          bool
+	s2Held, s2Stale int
+	s2Win           []fGateWin
+	fpWin           []fGateWin       // dip36 live gate: windows with withheld sends
+	fpHeld          int              // dip36 live gate: presend_live_fpnb_withheld records (sends withheld)
+	moves           map[int64]*FMove // shadow w -> the window's price move (presend_disarm "move"; absent before 11-03)
+	q3Live          bool             // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
+	cache           *FiltReport
+	cacheVer        int64
+	cacheSeed       string
 }
 
 func newFiltAcc() *FiltAcc {
@@ -319,13 +325,17 @@ func (F *FiltAcc) feed(ev, line []byte) {
 					M2  any     `json:"m2seen"`
 					Ctl *string `json:"ledger_control"`
 					Sh  any     `json:"fpnb_stale_hold"`
+					S2  *string `json:"skip2_live"`
 				} `json:"presend_live"`
 			}
 			if json.Unmarshal(line, &r) == nil && r.PL != nil {
 				pl := r.PL
 				F.whOn, F.hlOn = pl.Wh != nil, pl.Hl != nil
 				F.whMean = pl.Wh != nil && strings.Contains(*pl.Wh, "mean")
-				if F.whOn || F.hlOn || pl.Fab != nil || pl.M2 != nil || pl.Ctl != nil || pl.Sh != nil {
+				if pl.S2 != nil && *pl.S2 != "off" {
+					F.s2Live = true
+				}
+				if F.whOn || F.hlOn || pl.Fab != nil || pl.M2 != nil || pl.Ctl != nil || pl.Sh != nil || pl.S2 != nil {
 					F.d37, F.modeWh, F.modeHl = true, true, true
 					F.ver++
 				}
@@ -389,15 +399,27 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			F.fpStale++
 		}
 		return
-	case "presend_live_ledger_mode": // dip37: the control file's modes (a good read only)
+	case "presend_live_ledger_mode": // dip37: the control file's modes (a good read only); dip37b: the SKIP-2 gate's
 		var r struct {
-			Ok bool   `json:"ok"`
-			Wh string `json:"whale"`
-			Hl string `json:"holder"`
+			Ok bool    `json:"ok"`
+			Wh string  `json:"whale"`
+			Hl string  `json:"holder"`
+			S2 *string `json:"skip2"`
 		}
 		if json.Unmarshal(line, &r) == nil && r.Ok {
 			F.modeWh, F.modeHl = r.Wh != "log", r.Hl != "log"
+			if r.S2 != nil {
+				F.s2Live = *r.S2 != "off"
+			}
 			F.ver++
+		}
+		return
+	case "presend_live_skip2_withheld": // dip37b the SKIP-2 live gate: one withheld send (counted only)
+		F.ver++
+		F.s2Live = true
+		F.s2Held++
+		if bytes.Contains(line, []byte(`"stale":true`)) {
+			F.s2Stale++
 		}
 		return
 	default:
@@ -553,6 +575,13 @@ func (F *FiltAcc) feed(ev, line []byte) {
 				k = "RA"
 			}
 			F.fpWin = append(F.fpWin, fGateWin{k: FKey{w, r.Mint}, kind: k, withheld: int(*r.Withheld), filled: r.Filled != nil && *r.Filled, t: rawInt(r.T)})
+		}
+		if r.S2Withheld != nil && *r.S2Withheld > 0 { // dip37b: the SKIP-2 gate's windows
+			k := "T2"
+			if r.Kind != nil && *r.Kind == "rearm" {
+				k = "RA"
+			}
+			F.s2Win = append(F.s2Win, fGateWin{k: FKey{w, r.Mint}, kind: k, withheld: int(*r.S2Withheld), filled: r.Filled != nil && *r.Filled, t: rawInt(r.T)})
 		}
 	case "presend_live_fpnb": // dip36: FP-NOBOT's score at the send that decided the fill (stage "fill"; keyed like the arm)
 		if r.Stage == nil || *r.Stage != "fill" || r.Score == nil {
@@ -1098,6 +1127,35 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		}
 		R.Rows = append(R.Rows, row)
 	}
+	// dip37b LIVE SKIP-2 gate: windows whose sends it withheld (blocked = never filled, with the shadow's paper where a T2 window has one; the
+	// ones that filled later in the note with their real P&L)
+	if F.s2Live || len(F.s2Win) > 0 {
+		row := FiltRow{Key: "skip2_live", Name: "skip2 per-send", Type: "LIVE"}
+		later, laterSol := 0, 0.0
+		for _, g := range F.s2Win {
+			if g.filled {
+				later++
+				laterSol += F.real[g.k]
+				continue
+			}
+			row.Blocked++
+			sig, has := F.liveSig[g.k.W]
+			sw, inSh := F.shW[sig]
+			v, vok := F.paper(sw, has && inSh && g.kind == "T2")
+			if vok {
+				tally(&row, v)
+			}
+			tsig := sig
+			if !has {
+				tsig = fmt.Sprintf("w%d", g.k.W)
+			}
+			R.Items = append(R.Items, FiltItem{T: g.t, Live: true, Filter: "skip2_live", Name: row.Name, Rules: []string{"skip2_live"}, Names: []string{row.Name},
+				Kind: g.kind, Mint: g.k.Mint, W: g.k.W, Scored: vok, Sol: v, Sig: tsig})
+		}
+		row.Note = fmt.Sprintf("%d sends withheld (stale-hold %d); %d windows never filled (paper where the shadow has one), %d filled later (real P&L %s)",
+			F.s2Held, F.s2Stale, row.Blocked, later, fmtSigned(laterSol, 3))
+		R.Rows = append(R.Rows, row)
+	}
 	// LIVE deeper limit
 	if len(F.deepW) > 0 {
 		R.Deep = true
@@ -1297,7 +1355,7 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		logrule("fpnb", "no-bot filter (log)", pick35(func(x *fLog35) bool { return x.fpnb }), "real fills; FP-NOBOT no-follower score >= thr at the deciding send")
 	}
 	// dip36 (log-only): SKIP-2 per-send at the send that decided the fill (covered, score < thr)
-	if F.anySkip2 || F.d37 {
+	if (F.anySkip2 || F.d37) && !F.s2Live { // dip37b: a LIVE row instead while its gate is live
 		logrule("skip2", "skip2 per-send (log)", pick35(func(x *fLog35) bool { return x.skip2 }), "real fills; SKIP-2 logistic score < thr at the deciding send")
 	}
 	// dip37 the whale ledger's other rule (mean when sum is live and back) and the ledgers' log-mode would-skips, on the real fills

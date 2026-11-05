@@ -74,6 +74,13 @@ pub fn ctl_parse(b: &[u8]) -> std::result::Result<[bool; 2], String> {
     Ok(out)
 }
 
+/// dip37b: the control file's "skip2" key: Some(live) / None (absent: the start flag's mode stays)
+pub fn ctl_parse_s2(b: &[u8]) -> std::result::Result<Option<bool>, String> {
+    let v: serde_json::Value = serde_json::from_slice(b).map_err(|e| format!("bad JSON: {e}"))?;
+    match v["skip2"].as_str() { None if v.get("skip2").is_none_or(|x| x.is_null()) => Ok(None), Some("live") => Ok(Some(true)), Some("log") => Ok(Some(false)),
+        _ => Err(format!("skip2: '{}' (live | log)", v["skip2"])) }
+}
+
 /// the probe's holder-ledger side and the control file
 #[derive(Debug)]
 pub struct HlSt {
@@ -140,16 +147,28 @@ impl PsLive {
         if let Some(c) = self.hls.ctl.as_mut() { c.2 = Instant::now(); }
         if !force && mt == mt0 { return; }
         if let Some(c) = self.hls.ctl.as_mut() { c.1 = mt; }
-        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| ctl_parse(&b)) {
-            Ok(m) => {
+        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| Ok((ctl_parse(&b)?, ctl_parse_s2(&b)?))) {
+            Ok((m, s2)) => {
                 let old = self.hls.live;
-                if old == m { return; }
+                // dip37b "skip2": live = the start flag's kinds (both when the flag is off), log = off; it needs --presend-skip2-log on (else ignored)
+                let gs = self.fp.as_ref().filter(|_| self.cfg.skip2_log).map(|f| f.gs.clone());
+                let s2_old = gs.as_ref().map(|g| g.s2_mode.load(Ordering::SeqCst));
+                let s2_new = match (s2, &gs) {
+                    (Some(live), Some(_)) => Some(if live { if self.cfg.skip2_live != 0 { self.cfg.skip2_live } else { 3 } } else { 0 }),
+                    _ => s2_old,
+                };
+                if old == m && s2_new == s2_old { return; }
                 self.hls.live = m;
+                if let (Some(g), Some(n)) = (&gs, s2_new) { g.s2_mode.store(n, Ordering::SeqCst); }
                 self.hls.ctl_changes += 1;
                 let s = |x: bool| if x { "live" } else { "log" };
-                self.rec(serde_json::json!({"ev": "presend_live_ledger_mode", "ok": true, "whale": s(m[0]), "holder": s(m[1]), "was": {"whale": s(old[0]), "holder": s(old[1])},
-                    "path": path, "t": arbx::feeds::clock::now_ns()}));
-                self.line(format!("  PRESEND LIVE LEDGER MODES: whale {} -> {}, holder {} -> {} ({path})", s(old[0]), s(m[0]), s(old[1]), s(m[1])));
+                let mut r = serde_json::json!({"ev": "presend_live_ledger_mode", "ok": true, "whale": s(m[0]), "holder": s(m[1]), "was": {"whale": s(old[0]), "holder": s(old[1])},
+                    "path": path, "t": arbx::feeds::clock::now_ns()});
+                if let (Some(o), Some(n)) = (s2_old, s2_new) { r["skip2"] = pslog36::mode_str(n).into(); r["was"]["skip2"] = pslog36::mode_str(o).into(); }
+                if s2.is_some() && gs.is_none() { r["skip2_ignored"] = "needs --presend-skip2-log on".into(); }
+                self.rec(r);
+                self.line(format!("  PRESEND LIVE LEDGER MODES: whale {} -> {}, holder {} -> {}{} ({path})", s(old[0]), s(m[0]), s(old[1]), s(m[1]),
+                    match (s2_old, s2_new) { (Some(o), Some(n)) => format!(", skip2 gate {} -> {}", pslog36::mode_str(o), pslog36::mode_str(n)), _ => String::new() }));
             }
             Err(e) => {
                 self.hls.ctl_errors += 1;
