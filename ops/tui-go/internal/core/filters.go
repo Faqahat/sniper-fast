@@ -1066,7 +1066,15 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		}
 	}
 	for _, f := range d37LiveFilters {
-		if byWhy[f.why].Blocked > 0 || F.d37 {
+		show := byWhy[f.why].Blocked > 0 || F.d37
+		// a ledger in log mode (the control file) is a LOG row ("... (log mode)" below), not a LIVE one, unless it skipped while live
+		switch f.why {
+		case "wh_loss", "rearm_wh_loss":
+			show = show && (F.modeWh || byWhy[f.why].Blocked > 0)
+		case "holder_loss":
+			show = show && (F.modeHl || byWhy[f.why].Blocked > 0)
+		}
+		if show {
 			R.Rows = append(R.Rows, *byWhy[f.why])
 		}
 	}
@@ -1299,10 +1307,15 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 			other = "sum"
 		}
 		logrule("wh_other", "whale ledger "+other+" rule (log)", pick35(func(x *fLog35) bool { return x.whOther }), "real fills; the whale ledger's other rule ("+other+") would have skipped")
-		logrule("wh_logmode", "whale loss (log mode)", pick35(func(x *fLog35) bool { return x.whWould }), "real fills armed while the whale ledger ran in log mode")
+		// the ledger as a LOG row while the control file has it in log mode (or when it would-skipped fills earlier in log mode)
+		if ks := pick35(func(x *fLog35) bool { return x.whWould }); !F.modeWh || len(ks) > 0 {
+			logrule("wh_logmode", "whale loss (log mode)", ks, "real fills armed while the whale ledger ran in log mode")
+		}
 	}
 	if F.hlOn {
-		logrule("hl_logmode", "holder loss (log mode)", pick35(func(x *fLog35) bool { return x.hlWould }), "real fills armed while the holder ledger ran in log mode")
+		if ks := pick35(func(x *fLog35) bool { return x.hlWould }); !F.modeHl || len(ks) > 0 {
+			logrule("hl_logmode", "holder loss (log mode)", ks, "real fills armed while the holder ledger ran in log mode")
+		}
 	}
 	// dip37 HYBRID-2 (log only): the arm rule nd >= 1 AND (re-arm OR T2 age >= 30) would not have kept it
 	if F.anyH2 || F.d37 {

@@ -528,6 +528,9 @@ fn dip37_ledger_control() {
     c.p.ledger_ctl_check(true);
     assert_eq!(c.p.hls.live, [false, true], "a missing file keeps them");
     assert!(pshl::ctl_parse(br#"{"whale": "live"}"#).unwrap() == [true, true] && pshl::ctl_parse(b"[]").is_err());
+    // the shipped r57 control file: whale LOG, holder LIVE
+    let shipped = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/ops/prod/ledger_control.json")).unwrap();
+    assert_eq!(pshl::ctl_parse(&shipped).unwrap(), [false, true]);
 }
 
 /// learning: the realized lookup carries the window's holder keys; the state round trip; the holder paper learning

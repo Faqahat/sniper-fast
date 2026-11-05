@@ -89,3 +89,32 @@ func TestFiltersD37AllRows(t *testing.T) {
 		}
 	}
 }
+
+// TestFiltersD37LedgerModes (dip37): the whale ledger in log mode from the start (the control file at the run's start) is a LOG row ("whale
+// loss (log mode)") and no LIVE row; flipped live it is a LIVE row again; the holder ledger live stays a LIVE row
+func TestFiltersD37LedgerModes(t *testing.T) {
+	start := `{"ev":"run_start","t":1,"presend_live":{"spend":500000000,"wh_loss":"2:0.05 sum","holder_loss":"2:0.1:0.05","ledger_control":"/x"}}`
+	logm := `{"ev":"presend_live_ledger_mode","ok":true,"whale":"log","holder":"live"}`
+	livem := `{"ev":"presend_live_ledger_mode","ok":true,"whale":"live","holder":"live"}`
+	view := func(ls ...string) *FiltReport {
+		p := filepath.Join(t.TempDir(), "dip_ams_r92.jsonl")
+		if err := os.WriteFile(p, []byte(strings.Join(ls, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return filtView(t, p, "none").Filt
+	}
+	R := view(start, logm)
+	_, live := R.Row("wh_loss")
+	_, ra := R.Row("rearm_wh_loss")
+	lg, lok := R.Row("wh_logmode")
+	_, hl := R.Row("holder_loss")
+	if live || ra || !lok || lg.Type != "LOG" || !hl {
+		t.Fatalf("log mode: LIVE whale rows %v/%v, LOG row %v %+v, holder LIVE %v", live, ra, lok, lg, hl)
+	}
+	R = view(start, logm, livem)
+	_, live = R.Row("wh_loss")
+	_, lok = R.Row("wh_logmode")
+	if !live || lok {
+		t.Fatalf("flipped live: LIVE row %v, LOG row %v", live, lok)
+	}
+}
