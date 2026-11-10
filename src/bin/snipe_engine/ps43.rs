@@ -427,6 +427,11 @@ impl PsLive {
         }
     }
     pub fn stall_live43(&self) -> bool { self.d43.stall_live }
+    /// A3 for Builder C (ps43_guard.rs holders_for_floor): the true-balance book (None: --presend-live-tbal off). Use
+    /// `tbook()?.top_holders(mint, n)` / `tbook()?.true_balance(mint, wallet)`
+    pub fn tbook(&self) -> Option<&arbx::ps43_book::TBook> { self.d43.book.as_ref() }
+    /// A12: is the mint armed / held by the probe now (the react-watch record's overlap)
+    pub fn overlap43(&self, m: &Pk) -> (bool, bool) { (self.armed.contains_key(m), self.pos.contains_key(m)) }
     /// open positions / tries in flight (the FEED-STALL line)
     pub fn inflight43(&self) -> (usize, usize, usize) { (self.armed.len(), self.pos.len(), self.atts.values().filter(|x| !x.1).count()) }
 
@@ -764,6 +769,7 @@ impl PsLive {
     // ---- A7 / A10 at the fill, the exit, the close ----------------------------------------------------------------------
     /// the fill record's dip43 fields and the shadows' start (each only with its flag)
     pub(super) fn fill43(&mut self, rec: &mut serde_json::Value, att: &Att, t: &pl::Trade) {
+        if !self.cfg.c43.any() { return; }
         let c = self.cfg.c43.clone();
         if c.cascade {
             if let Some(j) = self.cascade_sig43(&att.sig, &t.mint) {
@@ -775,6 +781,7 @@ impl PsLive {
         }
         if let Some(v) = self.ml_view43(&t.mint) { rec["mint_ledger"] = PsLive::ml_json43(v); }
         if let Some(j) = self.fan_json43(&t.mint, Some(att.w)) { rec["fanout"] = j; }
+        if !(c.shadows || c.shx) { return; }
         let holders = self.det.holders_at_least(&t.mint, (0.02 * pl::SUPPLY) as i64, &self.user).unwrap_or_default();
         let top_pct = holders.iter().map(|h| h.1).max().unwrap_or(0) as f64 / pl::SUPPLY * 100.0;
         if c.shadows {

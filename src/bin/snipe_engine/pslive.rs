@@ -231,6 +231,9 @@ pub mod psq1;
 pub mod ps43_stall;
 #[path = "ps43.rs"]
 pub mod ps43;
+// dip43 A12: the react-watch recorder (LOG ONLY; off unless --react-watch FILE)
+#[path = "ps43_react.rs"]
+pub mod ps43_react;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]

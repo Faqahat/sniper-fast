@@ -567,6 +567,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     let mut stall43 = pslive::ps43_stall::Watch::new(pslive.as_ref().map_or_else(Default::default, |p| p.cfg.c43.stall));
     let mut stall43_at = 0u64;
     if pslive.is_none() { eprintln!("DIP43 A1 {}", stall43.cfg.desc()); }
+    // dip43 A12 REACT-WATCH (LOG ONLY; off unless --react-watch FILE): its own thread; the loop does one lookup per arrival
+    let react43 = match arg("--react-watch").filter(|v| !v.starts_with("--")) { Some(p) => Some(pslive::ps43_react::ReactTap::start(p, feed_names.clone(), log.clone())?), None => None };
     let ss = |_s: u64| -> Option<u64> { None };           // block sizes are unknown live (parity: 1 of 55 picks flips)
     // ---- dip14 state (all idle without the flags)
     let mut shred = shred_cfg.map(shredfire::ShredFire::new);
@@ -681,6 +683,7 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         let arbx::feeds::Event::Tx(a) = ev else { continue };
         // dip43 A1: the executed feed's clock / our txs first seen on an unexecuted feed (one compare per arrival)
         stall43.on_arrival(a.executed.is_some(), a.slot, arbx::fast::mono_ns(), (a.executed.is_none() && pslive.is_some() && a.tx.keys.first() == Some(&user)).then_some(&a.tx.sig));
+        if let Some(r) = react43.as_ref() { r.note(&a, |m| pslive.as_ref().map_or((false, false), |p| p.overlap43(m))); }
         let t_loop = arbx::feeds::clock::now_ns();     // the decision-time breakdown of a fire (lat_us in the fire record)
         // dip24 OBSERVATORY module 9 (--obs-feedrace only): this arrival's feed and time (one try_send; nothing otherwise)
         if let Some(o) = obs.as_ref() { o.feeder.any(&a); }
