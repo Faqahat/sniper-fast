@@ -127,4 +127,4 @@ stored bump): a look-alike account is refused (LiteSVM tests).
 The public devnet faucet was closed (`requestAirdrop`: "The RPC faucet is closed on this cluster"; `solana airdrop`: rate limited), so
 the full flow was rehearsed on a local `solana-test-validator` (agave 4.4.0, SBPF v3 active) with throwaway keys
 (`~/sniper-data/plan1110/builder_c/`): deploy → hand-over to the cold key → verify → smoke → allowlist init / add / list / remove.
-Log: `ops/guard/rehearsal_localnet.log`. A devnet run needs only a funded devnet payer: the same commands with `--cluster devnet`.
+Script `ops/guard/rehearse_localnet.sh`, transcript `ops/guard/rehearsal_localnet.txt` (REHEARSAL PASS). A devnet run needs only a funded devnet payer: the same commands with `--cluster devnet`.
