@@ -3,7 +3,7 @@
 # durable nonce, lookup tables, loaded-data limit, CU limit vs used, cost units, tips written in the message (also visible in
 # FAILED txs, where the transfer reverted), the instruction pattern, example signatures. Out: shapes.json + printed table.
 import json, collections, statistics
-D2 = "/home/moiz/sniper-data/competitors2"
+D2 = "/home/it/sniper-data/competitors2"
 T = [json.loads(l) for l in open(f"{D2}/txshape.jsonl")]
 T = list({t["sig"]: t for t in T if "size" in t}.values())
 by = collections.defaultdict(list)

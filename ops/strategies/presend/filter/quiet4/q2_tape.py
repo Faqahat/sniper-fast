@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """QUIET4 step 2 [MEASURED, read-only]: the chain tape of every r37 window's mint (armed AND virtual), trigger slot - 3 .. + 120,
 plus the per-slot max tx index (block-position clock), from the fresh decode of the recorder chunks 10-29 07:11 -> 10-30 01:20 PKT
-(/home/moiz/sniper-data/presend_quiet4/tab37, built by ops/strategies/presend/real/decode.py + build.py). Same format as
+(/home/it/sniper-data/presend_quiet4/tab37, built by ops/strategies/presend/real/decode.py + build.py). Same format as
 custom37/c2_tape.py: rows = (slot, idx, j, buy, sol, tok, vsol, vtok, user).
-Out: /home/moiz/sniper-data/presend_quiet4/tape_r37.pkl"""
+Out: /home/it/sniper-data/presend_quiet4/tape_r37.pkl"""
 import json, pickle, numpy as np
-OUT = "/home/moiz/sniper-data/presend_quiet4"; TAB = f"{OUT}/tab37"
+OUT = "/home/it/sniper-data/presend_quiet4"; TAB = f"{OUT}/tab37"
 LO, HI = 3, 120
 
 

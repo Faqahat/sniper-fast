@@ -4,9 +4,9 @@ of y1 positives that day) and precision at the top 0.5 % of sells, for MKT and e
 MINTS (resample mints, recompute both on the same resample). Out: select/s11.txt"""
 import sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 from s4_wf import load_scores
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 
 
 def prec_top(s, y, k):

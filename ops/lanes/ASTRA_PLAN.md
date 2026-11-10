@@ -31,11 +31,11 @@
 ## Hourly check (README)
 Copy the files read-only to the host, then run the tool on the host. Never write on the server.
 ```
-ssh -p 1996 it@84.32.104.202 'sudo cat /root/prod/runs/dip_ams_r38.jsonl' > /home/moiz/sniper-data/lanes/r38.jsonl
-ssh -p 1996 it@84.32.104.202 'sudo cat /root/prod/runs/dip_ams_r38.log'   > /home/moiz/sniper-data/lanes/r38.log
-python3 /home/moiz/sniper/ops/lanes/astra_ab.py /home/moiz/sniper-data/lanes/r38.jsonl --log /home/moiz/sniper-data/lanes/r38.log --sol off             # ~5 s
-python3 /home/moiz/sniper/ops/lanes/astra_ab.py /home/moiz/sniper-data/lanes/r38.jsonl --log /home/moiz/sniper-data/lanes/r38.log --last-hours 1 --sol off   # last hour only
-python3 /home/moiz/sniper/ops/lanes/astra_ab.py /home/moiz/sniper-data/lanes/r38.jsonl --sol-boot 100 --json /home/moiz/sniper-data/lanes/r38_ab.json   # with SOL, ~2 min
+ssh -p 1996 it@cyberams 'sudo cat /root/prod/runs/dip_ams_r38.jsonl' > /home/it/sniper-data/lanes/r38.jsonl
+ssh -p 1996 it@cyberams 'sudo cat /root/prod/runs/dip_ams_r38.log'   > /home/it/sniper-data/lanes/r38.log
+python3 /home/it/sniper/ops/lanes/astra_ab.py /home/it/sniper-data/lanes/r38.jsonl --log /home/it/sniper-data/lanes/r38.log --sol off             # ~5 s
+python3 /home/it/sniper/ops/lanes/astra_ab.py /home/it/sniper-data/lanes/r38.jsonl --log /home/it/sniper-data/lanes/r38.log --last-hours 1 --sol off   # last hour only
+python3 /home/it/sniper/ops/lanes/astra_ab.py /home/it/sniper-data/lanes/r38.jsonl --sol-boot 100 --json /home/it/sniper-data/lanes/r38_ab.json   # with SOL, ~2 min
 ```
 Read the SUMMARY block at the end first.
 - `alternation check` must say `0 differ`, and the tries must split about 50/50.
@@ -44,8 +44,8 @@ Read the SUMMARY block at the end first.
 - Look at "first to land after each dump" (section 3) and the fill race (section 2).
 - Trust P&L by fill path (section 4) last. Token luck dominates it: the fake split showed a false +21 mSOL difference with p = 0.04.
 - At the end of the run, the SOL number on the run's own windows needs the recorder tape:
-  `astra_ab.py --build-tab r38.jsonl /home/moiz/sniper-data/lanes/tab_r38`, then
-  `astra_ab.py r38.jsonl --sol own --tab /home/moiz/sniper-data/lanes/tab_r38/tab --sol-boot 100`.
+  `astra_ab.py --build-tab r38.jsonl /home/it/sniper-data/lanes/tab_r38`, then
+  `astra_ab.py r38.jsonl --sol own --tab /home/it/sniper-data/lanes/tab_r38/tab --sol-boot 100`.
 
 ## What the tool reports
 1. **Per path, and per path x leader client** (MEASURED):
@@ -164,4 +164,4 @@ Only landed txs can be classified: failed txs (67% of lines) roll their tips bac
 - No server was written to. The patch and snippet are not applied.
 
 Files: `ops/lanes/astra_ab.py`, `astra_rate.py`, `astra_census.py`, `astralane_ps.toml.snippet`, `run_script_astra.patch`;
-data in `/home/moiz/sniper-data/lanes/` (r37 validation outputs, `rate_r37.*`, `census/`).
+data in `/home/it/sniper-data/lanes/` (r37 validation outputs, `rate_r37.*`, `census/`).

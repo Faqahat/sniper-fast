@@ -856,7 +856,7 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
                 "drop_pct": d.feats[2], "score": d.score, "thr": thr_t, "pass": pass, "launch_ok": d.launch_ok, "vsol": tr.vsol, "vtok": tr.vtok, "dev": tk.dev});
             match m2d.as_mut() {
                 Some(g) => g.record(dump_rec, d.launch_ok && d.score >= thr_t && extra_k.is_none(), d.score, d.age, d.feats[1], d.feats[2], d.launch_ok, tk.dev),
-                None => { pslive::psh2::note_rec(&dump_rec, None); held.w(&log, dump_rec) }
+                None => held.w(&log, dump_rec),
             }
             if probe_n > 0 {
                 held.flush(&log);
@@ -1168,13 +1168,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             eprintln!("=== DIP PRESEND LIVE REALIZED by kind: T2 {:+.6} SOL ({} positions), re-arm {:+.6} SOL ({} positions)", s["t2"]["pnl"].as_i64().unwrap_or(0) as f64 / 1e9,
                 s["t2"]["n"], s["rearm"]["pnl"].as_i64().unwrap_or(0) as f64 / 1e9, s["rearm"]["n"]);
             j["realized_split"] = s;
-        }
-    }
-    // dip37 FEE A/B: the realized P&L per fee arm (x leader group), now that the lookups are in, and the per-arm summary line (only with it on)
-    if let (Some(p), Some(j)) = (pslive.as_ref(), ps_live_end.as_mut()) {
-        if let Some((rz, line)) = p.fee_ab_end() {
-            eprintln!("{line}");
-            j["fee_ab"]["realized"] = rz;
         }
     }
     let mut re = serde_json::json!({"ev": "run_end", "t": arbx::feeds::clock::now_ns(), "dumps": n_dumps, "in_envelope": n_env, "picks": n_picks, "fired": n_fired, "closed": n_closed,
@@ -1762,8 +1755,6 @@ impl<'a> M2Dump<'a> {
     fn finish(&mut self, mut rec: serde_json::Value) {
         let (imit_pass, imit_score, age, sell, drop, launch_ok, dev) = self.info;
         let pick = launch_ok && self.pick();
-        // dip37 HYBRID-2: this scored dump for the pre-send arms (nothing unless the probe turned it on)
-        pslive::psh2::note_rec(&rec, self.score);
         rec["m2"] = serde_json::json!(self.score);
         rec["m2_pick"] = serde_json::json!(pick);
         rec["m2_min"] = serde_json::json!(self.min);

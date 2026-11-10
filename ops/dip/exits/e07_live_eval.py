@@ -2,7 +2,7 @@
 # e07: exits on our REAL live buys at their exact chain landing (e06 paths_live), 0.35 SOL, corrected replay, FIX 0.0045.
 # No landing model, no engine (the fires are what the engine really did). Per fill P&L by exit, TRAIN-hours vs TEST-hours fires,
 # crowded vs quiet, with a paired bootstrap vs today's exit.
-# usage: nice python3 -I e07_live_eval.py [learned model pkl tags, comma] -> /home/moiz/sniper-data/exits/e07_live.txt
+# usage: nice python3 -I e07_live_eval.py [learned model pkl tags, comma] -> /home/it/sniper-data/exits/e07_live.txt
 import sys, os, json
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

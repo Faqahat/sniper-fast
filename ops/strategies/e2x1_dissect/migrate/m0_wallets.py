@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """migrate agent, step 0: per-wallet trip history from grad's tape (curve trades of every near-graduation token + all PumpSwap
 events), so that buyer-quality features can be looked up CAUSALLY (only trips that ENDED before time t count).
-Trip = (user, mint). Output /home/moiz/sniper-data/e2x1_dissect/migrate/wallets.npz sorted by (user, t_end):
+Trip = (user, mint). Output /home/it/sniper-data/e2x1_dissect/migrate/wallets.npz sorted by (user, t_end):
   user, t_end (bt of the last trade), t_first, pnl (SOL out - SOL in, curve+pool, open bags = 0), sol_in, grad (token completed),
   neargrad (bought on the curve at vsol>=80), poolopen (bought in the pool at migration slot +0/+1), completer (its buy completed
   the curve), compslot (bought in the completion slot), ntr (trades)."""

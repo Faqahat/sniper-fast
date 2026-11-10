@@ -7,7 +7,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rlib, sim, variants
 
-OUT = "/home/moiz/sniper-data/presend_real"
+OUT = "/home/it/sniper-data/presend_real"
 SPANS = {"P1": ("10-25 08:49", "10-25 09:50"), "P2": ("10-25 15:30", "10-25 17:30")}
 
 if __name__ == "__main__":

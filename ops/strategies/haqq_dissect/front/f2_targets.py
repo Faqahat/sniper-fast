@@ -6,7 +6,7 @@ front value < 0 or not valued) the dump tx and the first 3 buys.
 Out: scratch hd_front/pat/<run>__<chunk>.pat, sniper-data/haqq_dissect/front/f2_sets.pkl (indices of S and control in f1.pkl)"""
 import pickle, json, os, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 SCR = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/hd_front/pat"
 os.makedirs(SCR, exist_ok=True)
 R = pickle.load(open(f"{OUT}/f1.pkl", "rb"))
@@ -21,7 +21,7 @@ for i in S:
 for i in C:
     r = R[i]; tg.add((r["ds"], r["di"]))
     for f in r["front"][:3]: tg.add((f["slot"], f["idx"]))
-F = json.load(open("/home/moiz/sniper-data/dv8/tab/files.json"))
+F = json.load(open("/home/it/sniper-data/dv8/tab/files.json"))
 F = [f for f in F if f["slot_hi"] >= 460541261 - 100]
 lo = np.array([f["slot_lo"] for f in F]); hi = np.array([f["slot_hi"] for f in F])
 o = np.argsort(lo); F = [F[k] for k in o]; lo = lo[o]; hi = hi[o]

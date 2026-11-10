@@ -7,7 +7,7 @@ import sys, os, re, gzip, json, glob, collections, time
 from multiprocessing import Pool
 import flatlib as FL
 
-REC = "/home/moiz/sniper-data/collect"
+REC = "/data/tapes/collect"
 HEAD = re.compile(r'\{"s":\s*(\d+),\s*"i":\s*(\d+),\s*"bt":\s*(\d+)')
 G = {}
 

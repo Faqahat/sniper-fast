@@ -6,11 +6,11 @@ import json, gzip, glob, pickle, sys, os, hashlib
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from r3_decomp import parse, chunks, DISC
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 MINTS = set(open(f"{OUT}/mints.txt").read().split())
 TIP = json.load(open(f"{OUT}/tipmap.json"))
 CREATE_EV = hashlib.sha256(b"event:CreateEvent").digest()[:8]
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 from decode import parse_create
 def one(fn):
     T = []; C = []; trunc = False

@@ -4,12 +4,12 @@ and the same for the sibling Grozoe. P&L per wallet per day = sum over his mints
 for trades inside [his buy, his close + 60 s] windows; positions still open at the window end are marked at the last curve price."""
 import pickle, collections, numpy as np, sys
 sys.argv = [sys.argv[0], "0"]
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/ourspeed")
-R = "/home/moiz/sniper-data/e2x1_dissect/recon"
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/ourspeed")
+R = "/home/it/sniper-data/e2x1_dissect/recon"
 Z = pickle.load(open(f"{R}/tape.pkl", "rb"))
 L = [l for l in pickle.load(open(f"{R}/lots.pkl", "rb")) if l["day"] in ("D0", "D1")]
 import numpy as np
-B = np.load("/home/moiz/sniper-data/e2x1_dissect/ourspeed/blocks.npy"); s_lo = int(B["slot"][0]); NB = np.zeros(int(B["slot"][-1]) - s_lo + 2); NB[B["slot"].astype(np.int64) - s_lo] = B["maxi"] + 1.0
+B = np.load("/home/it/sniper-data/e2x1_dissect/ourspeed/blocks.npy"); s_lo = int(B["slot"][0]); NB = np.zeros(int(B["slot"][-1]) - s_lo + 2); NB[B["slot"].astype(np.int64) - s_lo] = B["maxi"] + 1.0
 clk = lambda s, i: s + min(i / max(NB[s - s_lo], 1), 0.999999)
 users = collections.Counter()
 for m, tr in Z["trades"].items():
@@ -62,4 +62,4 @@ for p, w in W.items():
         if nb == 0: P(f"| {w[:8]} | {day} | 0 |"); continue
         dl = np.array(dl) if dl else np.array([np.nan])
         P(f"| {w[:8]}… | {day} | {n_l} | {nb} | {sb:.1f} | {pnl:+.2f} | {pnl / nb * 1e3:+.1f} | {pnl / sb:+.1%} | {same / nb:.0%} / {np.nanmedian(dl):.0f} ({np.nanpercentile(dl, 25):.0f}-{np.nanpercentile(dl, 75):.0f}) | {before} | {np.median(sdl) if sdl else float('nan'):.0f} |")
-open("/home/moiz/sniper-data/e2x1_dissect/ourspeed/o4_followers.md", "w").write("\n".join(out) + "\n")
+open("/home/it/sniper-data/e2x1_dissect/ourspeed/o4_followers.md", "w").write("\n".join(out) + "\n")

@@ -6,8 +6,8 @@ import sys, os, json, itertools
 HERE = os.path.dirname(os.path.abspath(__file__)); C = os.path.join(HERE, "..", "research", "competitors")
 SP = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad"
 os.environ["SIZE"] = "0.5"; os.environ["SEL"] = "r2"; os.environ["T_OVR"] = "jito=75,harmonic=80"
-sys.argv = ["exit_sim.py", os.path.join(C, "..", "filters3_rows.json"), "/home/moiz/sniper-data/research/competitors/tapes", f"{SP}/filt/launches2.json",
-            f"{SP}/f3/paper/launches_ready.json", "/home/moiz/sniper-data/research/rec", f"{SP}/f2/paper/rec", f"{SP}/f3/paper/rec"]
+sys.argv = ["exit_sim.py", os.path.join(C, "..", "filters3_rows.json"), "/home/it/sniper-data/research/competitors/tapes", f"{SP}/filt/launches2.json",
+            f"{SP}/f3/paper/launches_ready.json", "/home/it/sniper-data/research/rec", f"{SP}/f2/paper/rec", f"{SP}/f3/paper/rec"]
 src = open(os.path.join(C, "exit_sim.py")).read()
 exec(src[:src.index("def simulate(")], globals())                     # loaders + pre/clean/chain_order/extend/entry, unchanged
 CRE = {}

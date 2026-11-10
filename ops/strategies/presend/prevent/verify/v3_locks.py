@@ -4,7 +4,7 @@ Event series: trade value at its sell landing + 2 s (lock polls every 2 s, 2-pol
 Lock (engine dipmode.rs): floor = max(-0.5, peak - max(G, 0.3 x peak)); stop when the P&L is below the floor; peak = running max.
 Variants: G in 0.65 / 0.8 / 1.0 / 1.5; series: real SOL, scaled 0.696 with the CORRECT fixed costs (mine) and with REGIME's formula."""
 import pickle, collections, datetime as dt, json, sys
-OUT = "/home/moiz/sniper-data/prevent/verify"
+OUT = "/home/it/sniper-data/prevent/verify"
 T = pickle.load(open(f"{OUT}/tables.pkl", "rb"))
 PKT = dt.timezone(dt.timedelta(hours=5))
 def pk(t): return dt.datetime.fromtimestamp(t, PKT).strftime("%m-%d %H:%M")

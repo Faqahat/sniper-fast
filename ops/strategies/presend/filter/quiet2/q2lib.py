@@ -3,7 +3,7 @@
 rent back, the QUIET signals, the skips; times in PKT. Read-only."""
 import json, gzip, collections, datetime
 
-D = "/home/moiz/sniper-data/presend_filter/quiet2"
+D = "/home/it/sniper-data/presend_filter/quiet2"
 AMS = "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"
 FRA = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"
 OURS = {AMS, FRA}
@@ -14,8 +14,8 @@ RUNS = collections.OrderedDict([
     ("a31", dict(file=f"{D}/ams_r31.jsonl.gz", wallet=AMS, name="AMS r31", role="train")),
     ("a32", dict(file=f"{D}/ams_r32.jsonl.gz", wallet=AMS, name="AMS r32", role="train")),
     ("a33", dict(file=f"{D}/ams_r33.jsonl.gz", wallet=AMS, name="AMS r33", role="train")),
-    ("f27", dict(file="/home/moiz/sniper-data/runs/fra/runs/dip_r27.jsonl", wallet=FRA, name="FRA r27", role="train")),
-    ("f28", dict(file="/home/moiz/sniper-data/runs/fra/runs/dip_r28.jsonl", wallet=FRA, name="FRA r28", role="test")),
+    ("f27", dict(file="/home/it/sniper-data/runs/fra/runs/dip_r27.jsonl", wallet=FRA, name="FRA r27", role="train")),
+    ("f28", dict(file="/home/it/sniper-data/runs/fra/runs/dip_r28.jsonl", wallet=FRA, name="FRA r28", role="test")),
     ("a34", dict(file=f"{D}/ams_r34.jsonl.gz", wallet=AMS, name="AMS r34", role="test")),
 ])
 

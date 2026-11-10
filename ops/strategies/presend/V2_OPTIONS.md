@@ -339,10 +339,10 @@ sudo bash /root/prod/run_dip_prod.sh --run N --trades T --size S <today's usual 
 
 **How to check it (local, read-only, after the collector is 30 min past the probe's end):**
 ```bash
-cd /home/moiz/sniper/ops/strategies/presend
+cd /home/it/sniper/ops/strategies/presend
 python3 ps13_live_eval.py --jsonl LOG.jsonl                       # fills, costs, landing (as probe 1)
 python3 v2/c2_thin.py LOG.jsonl                                   # criterion 1: the "keep 1 of 1" row
-bash v2/r5_fresh.sh /home/moiz/sniper-data/collect/run_<date>_<time> "MM-DD HH:MM"   # tape + replay of those hours
+bash v2/r5_fresh.sh /data/tapes/collect/run_<date>_<time> "MM-DD HH:MM"   # tape + replay of those hours
 python3 v2/c4_probecal.py --jsonl LOG.jsonl --day R5 --size 0.55 --rows c,L8,L8x --out c4_probe2   # criteria 2-3
 ```
 
@@ -407,7 +407,7 @@ python3 v2/c4_probecal.py --jsonl LOG.jsonl --day R5 --size 0.55 --rows c,L8,L8x
   - other checks: `c5_interact.py` (dip bot), `c6_client.py`, `c7_tool.py`, `c8_shadowparity.py`, `c9_tables.py`, `c10_hours.py`,
     `c11_densify.py`, `c12_sizecheck.py`, `c13_splits.py`, `c14_hold.py`, `c15_nocw.py` + `c16_control.py` (cohort test);
   - fresh hours: `r5_fresh.sh` + `r5_eval.py`.
-- **Data:** `/home/moiz/sniper-data/presend_v2/`
+- **Data:** `/home/it/sniper-data/presend_v2/`
   - `tape_R4/` (0.47 GB), `c3_model.json`, `v2_R*.npz` (+ `_lref100`, `_nocw`, `_norand` variants), `summary.json`;
   - text outputs: `v2run.txt` (option tables), `v2final*.txt` (finalists), `c4_probecal.txt` (calibration), and each `c*.txt`.
 

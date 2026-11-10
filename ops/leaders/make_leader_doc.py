@@ -141,7 +141,7 @@ ul.caveats {{ margin: 0; padding-left: 18px; display: grid; gap: 6px; max-width:
   <h1>Solana Leader Regions</h1>
   <p class="lede">Where the block leaders sit, which hosting providers run them, and which ones our Frankfurt sniper skips today. Use it to pick the next server location.</p>
   <div class="facts">
-    <span>Measured from <b>84.32.100.36</b> (Cherry Servers, Frankfurt)</span>
+    <span>Measured from <b>cyberfra</b> (Cherry Servers, Frankfurt)</span>
     <span>Leaders <b>{sum(r['leaders'] for r in R)}</b></span>
     <span>Rule-#2 launches attributed <b>{D['r2_total']}</b></span>
     <span>Date <b>2026-10-20</b></span>

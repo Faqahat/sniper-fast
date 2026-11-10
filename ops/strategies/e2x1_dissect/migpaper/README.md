@@ -13,7 +13,7 @@ Live table: **RUNNING.md** (PKT, rebuilt after every 2-h window). Source: migrat
 | `mp_validate.py` | the scorer (val models) on 10-28 vs the replay rows (sim_pre_2.0.pkl / sim_react_2.0.pkl), row by row. |
 | `loop.sh` | every 2 h from 10-29 00:00 PKT for 72 h: score the next window once its look-ahead is recorded (≥ 25 min after the window end), rebuild RUNNING.md, prune caches older than the 3-h look-back. Stop: `touch STOP` here. Pid `out/loop.pid`, log `out/loop.log`. Disk: no scoring < 15 GB free, no server fetch < 20 GB free. |
 
-## Data (`/home/moiz/sniper-data/e2x1_dissect/migpaper/`)
+## Data (`/home/it/sniper-data/e2x1_dissect/migpaper/`)
 `models/` (p30/p120/cont + val_* + dly.json, 2.6 MB), `wstore.npz` (59 MB, grows ~10 MB/day), `cstore.npz` (3.5 MB), `cache/` (≤ ~160 MB, pruned), `out/`, `val/` (validation outputs; its cache is deleted). Footprint < 300 MB.
 
 ## Validation (10-28, see VALIDATION.md)

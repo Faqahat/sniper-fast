@@ -15,7 +15,7 @@ Inputs (everything optional except one recorder dir):
 Outputs (<run-dir>/analysis/): report.md, summary.json, leaders.csv, engine_events.csv, never_landed_<m>.csv,
 whatif_events.json; a short summary on stdout. All times PKT (UTC+5). Numbers are labelled MEASURED / MODELLED / INFERRED.
 Run (right after the hour):
-  python3 analyze.py --run-dir /home/moiz/sniper-data/preconf/<YYYYMMDD> [--engine-host fra|ams] [--leaders-rpc]
+  python3 analyze.py --run-dir /home/it/sniper-data/preconf/<YYYYMMDD> [--engine-host fra|ams] [--leaders-rpc]
      [--engine FILE] [--from HH:MM --to HH:MM --date YYYY-MM-DD] [--streams pre,bin|fpre,fbin] [--quick] [--no-dataset]
 Test: test_analyze.sh (make_synth.py builds a synthetic run with known injected values and checks recovery)."""
 import argparse, base64, binascii, bisect, collections, datetime, glob, gzip, json, math, os, re, statistics, struct, sys, time, zlib
@@ -485,7 +485,7 @@ def main():
     ap.add_argument("--run-dir", required=True)
     ap.add_argument("--engine", default=None)
     ap.add_argument("--engine-host", default="ams", choices=["ams", "fra"])
-    ap.add_argument("--collect-root", default="/home/moiz/sniper-data/collect")
+    ap.add_argument("--collect-root", default="/data/tapes/collect")
     ap.add_argument("--streams", default="pre,bin", help="preconf,binary stream names (pre,bin or fpre,fbin)")
     ap.add_argument("--from", dest="t_from", default=None, help="HH:MM PKT")
     ap.add_argument("--to", dest="t_to", default=None, help="HH:MM PKT")

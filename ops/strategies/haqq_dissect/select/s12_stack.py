@@ -13,13 +13,13 @@ within slots s..s+2, return per SOL of their tokens marked (exact sell) at +2 s 
 Out: select/s12.txt, s12_scores.npz"""
 import sys, json, gzip, time, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 import dd_gbdt as G
 import dv8lib as L
 from s4_wf import load, CRE, SEL, STR, TIM, HQMEM
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 RNEG = 0.15
 
 
@@ -91,7 +91,7 @@ def main():
     k_env = em * 10**13 + (es - 459000000) * 10**5 + ei
     o = np.argsort(k_env); k_sorted = k_env[o]
     F = collections.defaultdict(list)
-    for line in gzip.open("/home/moiz/sniper-data/haqq_dissect/bots/labels.jsonl.gz", "rt"):
+    for line in gzip.open("/home/it/sniper-data/haqq_dissect/bots/labels.jsonl.gz", "rt"):
         r = json.loads(line)
         if r.get("score247_broad") is None or r.get("score248_broad") is None: continue
         m = idm.get(r["mint"])

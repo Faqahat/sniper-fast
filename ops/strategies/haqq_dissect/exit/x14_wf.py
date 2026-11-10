@@ -6,7 +6,7 @@ gain vs CUR. Also the fixed RIDE(150,150,700) / MS200 vs CUR per day and per ser
 Out: haqq_dissect/exit/x14.txt"""
 import pickle, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays

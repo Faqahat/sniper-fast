@@ -1,6 +1,6 @@
 # how the pre-positioned spammers spam: per mint, txs per slot, duration, start/stop relative to their fill & the dump
 import json, gzip, collections, sys, statistics
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 W = [l.strip() for l in open(B + sys.argv[1]) if l.strip()]
 rows = collections.defaultdict(lambda: collections.defaultdict(list))
 for line in gzip.open(B + "txrows.jsonl.gz", "rt"):

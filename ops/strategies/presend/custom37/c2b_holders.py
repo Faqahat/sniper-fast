@@ -3,9 +3,9 @@
 the mint before the trigger trade; our wallets and the whale kept apart). Features: n_big2 (other wallets holding >= 2% of supply),
 other1 (% of supply held by other wallets with >= 1%), top_other (largest other holder %), n_hold (wallets holding > 0), hist_ok
 (the chain covers the mint's first trade: its create slot + 2 is in the table).
-Out: /home/moiz/sniper-data/custom37/holders_<run>.pkl {(ses, w): feats}"""
+Out: /home/it/sniper-data/custom37/holders_<run>.pkl {(ses, w): feats}"""
 import sys, json, pickle, numpy as np
-OUT = "/home/moiz/sniper-data/custom37"; SC = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/custom37"
+OUT = "/home/it/sniper-data/custom37"; SC = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/custom37"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 SUP = 1e15
 
@@ -59,7 +59,7 @@ def from_chain(X, srcs):
 if __name__ == "__main__":
     for run in sys.argv[1:]:
         X = pickle.load(open(f"{OUT}/win_{run}.pkl", "rb"))
-        H = from_tab(X, f"{OUT}/tab37") if run == "r37" else from_chain(X, [("/home/moiz/sniper-data/presend_quiet3/chain.npz", "/home/moiz/sniper-data/presend_quiet3/ids.json"),
-                                                                         ("/home/moiz/sniper-data/presend_young/ext/chain.npz", "/home/moiz/sniper-data/presend_young/ext/ids.json")])
+        H = from_tab(X, f"{OUT}/tab37") if run == "r37" else from_chain(X, [("/home/it/sniper-data/presend_quiet3/chain.npz", "/home/it/sniper-data/presend_quiet3/ids.json"),
+                                                                         ("/home/it/sniper-data/presend_young/ext/chain.npz", "/home/it/sniper-data/presend_young/ext/ids.json")])
         pickle.dump(H, open(f"{OUT}/holders_{run}.pkl", "wb"))
         print(run, "windows", len(X["wins"]), "with holder feats", len(H), "hist_ok", sum(1 for v in H.values() if v["hist_ok"]), flush=True)

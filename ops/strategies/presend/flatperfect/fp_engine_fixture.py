@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """dip36 FP-NOBOT level-2 parity fixture (read-only): the raw inputs the Rust store needs to rebuild the parity file's x for a cluster of
-r55 positions -> /home/moiz/sniper-data/flatperfect/engine_fixture_r55.bin, read by src/fpnb_tests.rs (fpnb_parity_chain_inputs; the test
+r55 positions -> /home/it/sniper-data/flatperfect/engine_fixture_r55.bin, read by src/fpnb_tests.rs (fpnb_parity_chain_inputs; the test
 skips when the file is absent).
 Picks the densest ~SPAN-slot cluster of parity positions (both kinds), then writes:
   line 1: JSON header {positions, bots (u64), core (u64), ours (u64), span_lo, feed_lo, own, shadow, shadow_arms, rows, fails, wh}
@@ -12,8 +12,8 @@ Ids are the chain's u64 prefixes (the test makes pubkeys of them). usage: fp_eng
 import sys, json, pickle, struct, collections
 import numpy as np
 
-D = "/home/moiz/sniper-data/flatperfect"
-FS = "/home/moiz/sniper-data/flatsig"
+D = "/home/it/sniper-data/flatperfect"
+FS = "/home/it/sniper-data/flatsig"
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 B58I = {c: i for i, c in enumerate(B58)}
 NAMED = {"haqq6qnVBCZt97amh9VUFZRFCkD6NJxoYifacCuqqqq": "haqq", "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq": "haqq",

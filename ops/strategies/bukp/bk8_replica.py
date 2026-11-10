@@ -5,12 +5,12 @@
 # limits, our costs. All thresholds scored in one pass per day (rows batched). -> bukp/exit_replica.json
 import sys, json, zlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/bukp")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper-data/overnight/sel"); sys.path.insert(0, "/home/it/sniper/ops/strategies/bukp")
 import p4_eval as E
 import gbdt_np as G
 import bk7_exit as B7
 from multiprocessing import get_context
-OUT = "/home/moiz/sniper-data/strategies/bukp"; UID = B7.UID
+OUT = "/home/it/sniper-data/strategies/bukp"; UID = B7.UID
 MD = json.load(open(f"{OUT}/exit_model_trees.json")); EDGES = [np.array(e) for e in MD["edges"]]; THR = {float(k): v for k, v in MD["thr"].items()}
 FIX, FAIL, GUARD, GRADV, TOUT = B7.FIX, B7.FAIL, B7.GUARD, B7.GRADV, B7.TOUT
 

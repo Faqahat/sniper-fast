@@ -1,7 +1,7 @@
 """market-tape access for 8yYMhu (mtape.npy sorted by mint/slot/idx/j, from the haqqml fresh tape; ids -> names via mints/users.json)"""
 import json, functools
 import numpy as np
-D = "/home/moiz/sniper-data/rivals/8yYMhu"; TP = "/home/moiz/sniper-data/haqqml/fresh/tape"
+D = "/home/it/sniper-data/rivals/8yYMhu"; TP = "/home/it/sniper-data/haqqml/fresh/tape"
 @functools.lru_cache(None)
 def tape():
     M = np.load(f"{D}/mtape.npy", mmap_mode="r"); sp = np.load(f"{D}/mspan.npz")

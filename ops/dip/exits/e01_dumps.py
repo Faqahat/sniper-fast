@@ -2,12 +2,12 @@
 # e01: the dump table for the 24 h window (10-24 09:45 -> 10-25 09:45 PKT) from the two builds (A = run_20261023_1426 tokens
 # created before the NEW run started 19:25:11 PKT; B = run_20261024_1425). Envelope, M2 score (engine bundle), IMIT1 top4 flag,
 # slot leader client group and near flags (FRA / AMS / AMS no-BAM), from the epoch schedules 1066 + 1067.
-# -> /home/moiz/sniper-data/exits/dumps.npz
+# -> /home/it/sniper-data/exits/dumps.npz
 import sys, os, json
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import exit_lib as E
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_lib as DL
 
 W0, W1 = E.pk("10-24 09:45"), E.pk("10-25 09:45")

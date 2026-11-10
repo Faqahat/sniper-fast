@@ -4,14 +4,14 @@ and of the candidate trigger (the outside trade right before his sell; signature
 Out: sellid/s10_examples.json, s10.txt"""
 import pickle, json, glob, os, gzip, subprocess, time
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 HQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 pkt = lambda t: time.strftime("%m-%d %H:%M:%S", time.gmtime(int(t) + 18000))
 Z = pickle.load(open(f"{OUT}/s1.pkl", "rb")); LOTS = Z["lots"]; SELLS = {(s["mint"], s["k"]): s for s in Z["sells"]}
-ids = json.load(open("/home/moiz/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
-sigs = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/bots/hsigs.pkl", "rb"))
+ids = json.load(open("/home/it/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
+sigs = pickle.load(open("/home/it/sniper-data/haqq_dissect/bots/hsigs.pkl", "rb"))
 FILES = []
-for f in glob.glob("/home/moiz/sniper-data/collect/run_*/txs/txs_*.jsonl.gz"):
+for f in glob.glob("/data/tapes/collect/run_*/txs/txs_*.jsonl.gz"):
     try: FILES.append((int(os.path.basename(f)[4:-9]), f))
     except ValueError: pass
 FILES.sort()

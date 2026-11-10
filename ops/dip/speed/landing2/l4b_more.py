@@ -3,7 +3,7 @@
 # the feed clock per client for rivals, our write->seen per (path x client), and the lowest send->seen floors.
 import json, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import io, contextlib
 with contextlib.redirect_stdout(io.StringIO()):      # l4_tables prints its own tables on import
     from l4_tables import R, L, grp, quart, first_react, best_pro, P, pct, PROS, COHORT, INSTANT
@@ -57,7 +57,7 @@ print("\n### X5. Floors: the fastest write -> seen we ever measured (ms), per cl
 for g in cl:
     v = sorted(r["W"]["send_to_seen"] for r in L if grp(r) == g and r["W"]["send_to_seen"] is not None)
     print(f"- {g}: lowest {', '.join(f'{x:.1f}' for x in v[:5])} | p10 {np.percentile(v, 10):.1f}")
-pr = json.load(open("/home/moiz/sniper-data/landing2/presend_rows.json"))
+pr = json.load(open("/home/it/sniper-data/landing2/presend_rows.json"))
 for g in ("bam", "harmonic", "jito", "fd"):
     v = sorted(r["s2seen"] for r in pr if r["cls"] == g and r["s2seen"] is not None)
     print(f"- pre-sent {g}: lowest {', '.join(f'{x:.1f}' for x in v[:5])} | p5 {np.percentile(v, 5):.1f} | p10 {np.percentile(v, 10):.1f}")

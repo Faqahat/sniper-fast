@@ -3,7 +3,7 @@
 Offline replay study on the recordings. Haiku not used ($0). MEASURED = replay or chain data; INFERRED = reading.
 Scripts: ops/strategies/dipdetect/ (dd1_build.py dataset, dd_lib.py replay, dd5_model.py models, dd8/dd11 tables,
 dd3/dd10 skipped-dump analysis, dd12_livecal.py live check).
-Outputs (5.4 GB): /home/moiz/sniper-data/strategies/dipdetect/ (model_v3_reg4_nof1.json = chosen model,
+Outputs (5.4 GB): /home/it/sniper-data/strategies/dipdetect/ (model_v3_reg4_nof1.json = chosen model,
 dd5_registry.jsonl = every variant, dd14_summary.txt = main tables).
 
 ## Bottom line

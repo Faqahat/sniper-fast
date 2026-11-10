@@ -4,7 +4,7 @@ import json, collections, sys
 from multiprocessing import Pool
 import b1_scan as B
 B.RUNS = {**B.RUNS, "R4": ["phaseA_r4"]}
-E = json.load(open("/home/moiz/sniper-data/strategies/baitflip/who_trips.json"))
+E = json.load(open("/home/it/sniper-data/strategies/baitflip/who_trips.json"))
 TOP = sys.argv[1].split(",")
 EV = collections.defaultdict(list)
 for e in E:

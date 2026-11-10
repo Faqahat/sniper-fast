@@ -9,7 +9,7 @@
 import sys, os, json, gzip, glob, zlib
 import numpy as np
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"; OUT = "/home/moiz/sniper-data/modelcheck/raw"
+D = "/data/tapes/collect"; OUT = "/home/it/sniper-data/modelcheck/raw"
 RUNS = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"; WSOL = "So11111111111111111111111111111111111111112"
 HERE = os.path.dirname(os.path.abspath(__file__))

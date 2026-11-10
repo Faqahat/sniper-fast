@@ -3,7 +3,7 @@
 # usage: raw_extract.py <wallets.txt> <outdir> [procs]
 import os, sys, gzip, glob, zlib, json
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"
+D = "/data/tapes/collect"
 WL = set(l.strip() for l in open(sys.argv[1]) if l.strip()); OUT = sys.argv[2]
 PROCS = int(sys.argv[3]) if len(sys.argv) > 3 else 4
 WLB = {w.encode() for w in WL}

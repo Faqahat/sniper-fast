@@ -5,7 +5,7 @@ own return (lot attribution = his average realised sell px on the token; adds sh
 right before it (outside buy into which he sells? cluster/copier buy? a big sell?), and whether it closes the position."""
 import sys, collections, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 from tl import cols, tab, bucket
 D = load(); w = int(D["wid"]); MN, US = names(); uid = {u: i for i, u in enumerate(US)}

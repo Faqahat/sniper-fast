@@ -10,7 +10,7 @@ Single-feature AUC for 'kept' and 'added', and tables by bins. Then the causal r
 Out: haqq_dissect/exit/x16.txt"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 out = []
 def P(*a):

@@ -8,7 +8,7 @@
 #  (b) REPLAY: Stage A (M2 >= min inside the study envelope, exit c4) with the OFFLINE scores and with the engine's own live
 #      picks, vs IMIT1 top4 (the live IMIT1 scores) with exits c4 and c6_tpnone_sl10, dd_lib.sim at 35 / 50 / 75 ms, FRA + AMS
 #      near leaders (both servers, one position each, all costs) -- results per landing-latency row.
-# usage: python3 dd20_shadow_eval.py --jsonl dip_rN.jsonl [dip_ams_rN.jsonl ...] --run /home/moiz/sniper-data/collect/run_<date>_<time>
+# usage: python3 dd20_shadow_eval.py --jsonl dip_rN.jsonl [dip_ams_rN.jsonl ...] --run /data/tapes/collect/run_<date>_<time>
 #          [--from "MM-DD HH:MM" --to "MM-DD HH:MM"]  (PKT; default = the span of the dump records)
 #          [--work DIR] [--procs 4] [--schedule FILE ...] (leader schedules beyond epoch 1066, schedule_cur.json format)
 #          [--bundle FILE] [--fill-m2-from-offline] (TEST ONLY: records without m2 fields get the offline values: plumbing check)
@@ -20,8 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import dd_lib as L
 import dd_gbdt as GT
-PATTERNS = "/home/moiz/sniper/ops/strategies/patterns"; SELECT = "/home/moiz/sniper/ops/select"
-COLLECT = "/home/moiz/sniper-data/collect"
+PATTERNS = "/home/it/sniper/ops/strategies/patterns"; SELECT = "/home/it/sniper/ops/select"
+COLLECT = "/data/tapes/collect"
 TAG = "SH"
 E4 = L.EXI["c4_tpnone_slnone"]; E6 = L.EXI["c6_tpnone_sl10"]
 LOG = []
@@ -81,8 +81,8 @@ def load_dd1(path, t0, t1):
 
 def near_from_schedules(d, files):
     """near_f / near_a recomputed from leader schedules (schedule_cur.json format) where dd1_build's map had no leader"""
-    fra = {l.strip() for l in open("/home/moiz/sniper/ops/region/near_leaders_fra.txt") if l.strip()}
-    ams = {l.strip() for l in open("/home/moiz/sniper/ops/region/near_leaders_ams.txt") if l.strip()}
+    fra = {l.strip() for l in open("/home/it/sniper/ops/region/near_leaders_fra.txt") if l.strip()}
+    ams = {l.strip() for l in open("/home/it/sniper/ops/region/near_leaders_ams.txt") if l.strip()}
     known = d["lead"] >= 0; n_new = 0
     for fp in files:
         sc = json.load(open(fp)); st = sc["start"]; sl = sc["slot_leader"]; ids = sc["ids"]
@@ -270,7 +270,7 @@ if __name__ == "__main__":
     res["replay"] = rep
     # ---- self-check against the study's own rows (when the window lies inside a study day)
     if a.check_study:
-        ddir = L.OUT if a.check_study == "R4" else "/home/moiz/sniper-data/strategies/patterns"
+        ddir = L.OUT if a.check_study == "R4" else "/home/it/sniper-data/strategies/patterns"
         zs = np.load(f"{L.OUT}/dd1_{a.check_study}.npz"); ms = json.load(open(f"{ddir}/day_{a.check_study}_meta.json"))["meta"]
         dzs = np.load(f"{ddir}/day_{a.check_study}.npz")
         Xs = np.concatenate([zs["F"], zs["X"], zs["f1"][:, None]], 1).astype(np.float32)

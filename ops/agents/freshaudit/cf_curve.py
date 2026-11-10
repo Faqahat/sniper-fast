@@ -2,9 +2,9 @@
 # speed curve: P&L / fill rate if our buy always landed dIdx block positions after the dump (same slot; overflow -> next slot idx 10)
 import sys, json, glob, gzip, collections
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from sim import *
-A = "/home/moiz/sniper/ops/agents/freshaudit"
+A = "/home/it/sniper/ops/agents/freshaudit"
 TP = load_tapes(f"{A}/out/tapes_live.json.gz")
 SL = {}
 for f in sorted(glob.glob(f"{A}/x/r3/*.jsonl.gz"))[-75:]:

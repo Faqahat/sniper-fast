@@ -164,14 +164,14 @@ as `no_history`.
   - `lasthour.py`: tape loader with our live txs removed, run-22 settings, both streams, live and shadow extraction.
   - `lhreport.py`: all the tables.
   - It reuses `sim.py`, `rlib.py`, `s48lib.py`, `variants.py`, `decode.py` and `build.py` unchanged.
-- Data (`/home/moiz/sniper-data/presend_real/lh/`):
+- Data (`/home/it/sniper-data/presend_real/lh/`):
   - `dec/`: 100 chunks hard-linked from `s48/dec` plus the new decodes.
   - `tab/`: the tape.
   - `lasthour_{main,cut20}.pkl` and `lasthour_{main,cut20}_report.txt`.
 - Re-run (about 1 min):
   ```
-  python3 decode.py /home/moiz/sniper-data/presend_real/lh/dec /home/moiz/sniper-data/collect/run_20261025_1420 --min-age 30
-  python3 build.py /home/moiz/sniper-data/presend_real/lh/dec /home/moiz/sniper-data/presend_real/lh/tab
+  python3 decode.py /home/it/sniper-data/presend_real/lh/dec /data/tapes/collect/run_20261025_1420 --min-age 30
+  python3 build.py /home/it/sniper-data/presend_real/lh/dec /home/it/sniper-data/presend_real/lh/tab
   python3 lasthour.py --draws 300 --end "10-26 04:14" && python3 lasthour.py --draws 300 --cut 0.2 --tag cut20 --end "10-26 04:14"
   python3 lhreport.py main; python3 lhreport.py cut20
   ```

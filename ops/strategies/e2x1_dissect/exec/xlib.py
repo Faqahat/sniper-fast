@@ -4,7 +4,7 @@ Chain clock = dv8 convention: slot*212 ms + idx/blocksize*212, blocksize = max p
 1070 (exec/schedule_1070.json, getLeaderSchedule 10-28); client ids from getClusterNodes 10-28 (exec/cn.json)."""
 import json, pickle, time, functools, collections
 import numpy as np
-R = "/home/moiz/sniper-data/e2x1_dissect/recon"; X = "/home/moiz/sniper-data/e2x1_dissect/exec"
+R = "/home/it/sniper-data/e2x1_dissect/recon"; X = "/home/it/sniper-data/e2x1_dissect/exec"
 WAL = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
 SIB = "Grozoe2Lk9yu7kWPcCMuWEbrnuBYseBExkYAuHPRJUdJ"
 SMS = 212.0
@@ -23,7 +23,7 @@ def tape():
 
 @functools.lru_cache(None)
 def slot_sizes():
-    a = np.load("/home/moiz/sniper-data/haqqml/fresh/tape/slots.npy")
+    a = np.load("/home/it/sniper-data/haqqml/fresh/tape/slots.npy")
     try:
         b = np.load(f"{X}/slots_tail.npy"); a = np.concatenate([a, b[b["slot"] > a["slot"].max()]])
     except FileNotFoundError:
@@ -45,10 +45,10 @@ def frac(s, i):
 @functools.lru_cache(None)
 def _sched():
     out = {}
-    for f in ("/home/moiz/sniper-data/haqq_sel/schedule_1068.json", "/home/moiz/sniper-data/haqq_sel/schedule_1069.json", f"{X}/schedule_1070.json"):
+    for f in ("/home/it/sniper-data/haqq_sel/schedule_1068.json", "/home/it/sniper-data/haqq_sel/schedule_1069.json", f"{X}/schedule_1070.json"):
         d = json.load(open(f)); out[int(d["start"])] = (d["ids"], d["slot_leader"])
     cl = {n["pubkey"]: n.get("clientId") or "" for n in json.load(open(f"{X}/cn.json"))["result"]}
-    old = json.load(open("/home/moiz/sniper/ops/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
+    old = json.load(open("/home/it/sniper-data/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
     for k, v in old.items(): cl.setdefault(k, v.get("clientId") or "")
     return out, cl
 

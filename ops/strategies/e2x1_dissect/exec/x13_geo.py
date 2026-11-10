@@ -2,9 +2,9 @@
 """Q1: landing by leader location (leader_geo.json IP geo, epoch-1063 measurement; MEASURED geo, slightly stale). His tiered buys
 (T -> buy) and [t7] dump buys vs our pre-send fills. Out: x13.txt"""
 import sys, json, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
-G = {r["pk"]: r.get("cc") for r in json.load(open("/home/moiz/sniper-data/leader_geo.json"))["rows"]}
+G = {r["pk"]: r.get("cc") for r in json.load(open("/home/it/sniper-data/leader_geo.json"))["rows"]}
 EU = set("DE NL GB IE FR BE CH AT PL LT CZ FI SE IT ES LU DK NO RO BG UA HU PT LV EE".split())
 def area(slot):
     ld, _ = X.leader(slot); cc = G.get(ld)

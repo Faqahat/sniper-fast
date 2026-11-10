@@ -5,7 +5,7 @@ ME = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"
 TS = set(TOP) | {ME}
 st = {w: dict(n=0, ds=collections.Counter(), rank=collections.Counter(), didx=[], ratio=[], pre=[], first=0, sol=[], gap_rank=collections.Counter()) for w in TS}
 firsts = collections.Counter(); nr = 0; nr_with_buy = 0
-for line in gzip.open("/home/moiz/sniper/ops/agents/topearners/work/races.jsonl.gz", "rt"):
+for line in gzip.open("/home/it/sniper/ops/agents/topearners/work/races.jsonl.gz", "rt"):
     r = json.loads(line); nr += 1
     B = r["buys"]
     if not B: continue

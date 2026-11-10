@@ -4,7 +4,7 @@
 # separate the entry from it (speed), the price move over the last ~1 s and ~10 s, token age, and the exit.
 import json, pickle, collections, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/postmig"
+OUT = "/home/it/sniper-data/strategies/postmig"
 SMS = 212.0
 
 def profile(run, wallets):

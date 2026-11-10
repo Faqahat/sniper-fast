@@ -5,8 +5,8 @@ Out: haqq_dissect/pos/codes.pkl = {(slot, idx): (code, cost_sol, cup, err, kind,
 import json, glob, os, pickle
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 out = {}
-files = [f for f in glob.glob("/home/moiz/sniper-data/haqq_dissect/exec/ext/*.jsonl") if os.path.exists(f + ".done")]
-files.append("/home/moiz/sniper-data/haqq_strat/haqq_raw.jsonl")
+files = [f for f in glob.glob("/home/it/sniper-data/haqq_dissect/exec/ext/*.jsonl") if os.path.exists(f + ".done")]
+files.append("/home/it/sniper-data/haqq_strat/haqq_raw.jsonl")
 for f in files:
     for l in open(f):
         if H not in l: continue
@@ -18,7 +18,7 @@ for f in files:
         tips = d.get("tips") or []
         out[(d["s"], d["i"]) if d["err"] is None else ("F", d["sig"])] = ((d.get("cup") or 0) % 1000, (d["fee"] + sum(v for a, v in tips)) / 1e9,
                                                                         d.get("cup"), d["err"] is not None, kind, tuple(a for a, v in tips), d["bt"])
-pickle.dump(out, open("/home/moiz/sniper-data/haqq_dissect/pos/codes.pkl", "wb"))
+pickle.dump(out, open("/home/it/sniper-data/haqq_dissect/pos/codes.pkl", "wb"))
 import collections
 print(len(files), "files;", len(out), "haqq txs; failed", sum(1 for v in out.values() if v[3]))
 bt = [v[6] for v in out.values()]

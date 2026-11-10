@@ -19,7 +19,7 @@ def ylab(d, lat, e):
     return np.where(st == 0, d["pnl"][:, lat, e] - L.FIX, np.where(st == 1, -L.FAIL, np.nan))
 
 VARIANTS = {
-    "v3_reg4_top25": (("pnl", 0, "c4_tpnone_slnone"), "l2", "list:/home/moiz/sniper-data/strategies/dipdetect/top25_v3_reg4_nof1.json", {"seeds": 3}),
+    "v3_reg4_top25": (("pnl", 0, "c4_tpnone_slnone"), "l2", "list:/home/it/sniper-data/strategies/dipdetect/top25_v3_reg4_nof1.json", {"seeds": 3}),
     "v3_reg13":      (("pnl", 0, "c6_tpnone_sl10"), "l2", "all", {"seeds": 3}),
     "v3_reg13_nof1": (("pnl", 0, "c6_tpnone_sl10"), "l2", "nof1", {"seeds": 3}),
     "v3_reg4_nof1":  (("pnl", 0, "c4_tpnone_slnone"), "l2", "nof1", {"seeds": 3}),

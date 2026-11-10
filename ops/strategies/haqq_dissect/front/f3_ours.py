@@ -4,8 +4,8 @@ Per run: time span; per dump the engine logged: gate result; regular pick/skip(w
 arm windows (mint, arm slot, disarm slot, why) and skips (why); every pre-send try (send slot, landed slot/idx, result, path).
 Out: sniper-data/haqq_dissect/front/f3_ours.pkl"""
 import json, glob, os, hashlib, collections, pickle, time
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
-D = "/home/moiz/sniper-data"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
+D = "/home/it/sniper-data"
 
 
 def sigh(sig): return int.from_bytes(hashlib.blake2b(sig.encode(), digest_size=8).digest(), "little")

@@ -1,8 +1,8 @@
 # copypaper — FROZEN strategy (10-28 23:10 PKT, before any forward scoring)
 
 PAPER ONLY (owner OK 10-28 ~23:00 PKT). No live sends, no server writes, no engine changes. Local only.
-Code: `/home/moiz/sniper/ops/strategies/e2x1_dissect/copypaper/` (cp_decode.py, cplib.py, cp_score.py, cp_table.py, loop.sh).
-Data: `/home/moiz/sniper-data/e2x1_dissect/copypaper/` (cache/ decoded chunks, out/results.jsonl, out/trades.jsonl, out/state.json, out/loop.log, val/ = D0/D1 validation).
+Code: `/home/it/sniper/ops/strategies/e2x1_dissect/copypaper/` (cp_decode.py, cplib.py, cp_score.py, cp_table.py, loop.sh).
+Data: `/home/it/sniper-data/e2x1_dissect/copypaper/` (cache/ decoded chunks, out/results.jsonl, out/trades.jsonl, out/state.json, out/loop.log, val/ = D0/D1 validation).
 
 ## Signal
 - A successful pump.fun curve **BUY** by `E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb` or `Grozoe2Lk9yu7kWPcCMuWEbrnuBYseBExkYAuHPRJUdJ` (TradeEvent user).

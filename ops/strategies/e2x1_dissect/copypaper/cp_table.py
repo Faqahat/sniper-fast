@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """copypaper: RUNNING.md (human table, PKT) from out/results.jsonl + out/trades.jsonl. Usage: cp_table.py [results] [trades] [out.md]"""
 import sys, json, os, datetime as dt
-D = "/home/moiz/sniper-data/e2x1_dissect/copypaper/out"
+D = "/home/it/sniper-data/e2x1_dissect/copypaper/out"
 res_f = sys.argv[1] if len(sys.argv) > 1 else f"{D}/results.jsonl"
 tr_f = sys.argv[2] if len(sys.argv) > 2 else f"{D}/trades.jsonl"
 out_f = sys.argv[3] if len(sys.argv) > 3 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "RUNNING.md")

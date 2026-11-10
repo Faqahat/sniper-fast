@@ -6,12 +6,12 @@ lower (slot, tx index) executed before our buy) and at the filled try's SIGNING 
   who moved the price between signing and landing (sells, the biggest seller, whether it was the whale / a sign-time holder),
   what happened after our buy until our sell landed (sells by the whale / sign-time holders / anyone, SOL),
   whether the token's tape covers its history (first trade within 2 slots of the create).
-Out: /home/moiz/sniper-data/prevent/guards/feats.pkl
+Out: /home/it/sniper-data/prevent/guards/feats.pkl
 usage: g2_feats.py"""
 import pickle, sys, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/guards")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/guards")
 import glib as G
-OUT = "/home/moiz/sniper-data/prevent/guards"
+OUT = "/home/it/sniper-data/prevent/guards"
 F = pickle.load(open(f"{OUT}/fills.pkl", "rb"))
 tapes = G.load_tapes({f["mint"] for f in F})
 print("mints", len({f['mint'] for f in F}), "with tape", len(tapes), flush=True)

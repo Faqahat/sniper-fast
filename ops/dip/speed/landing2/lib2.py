@@ -2,7 +2,7 @@
 # Shared helpers for the HOW_PROS_LAND study: tip map, leader map (slot -> leader -> client / Jito front / location),
 # the block clock (INFERRED ms), and loading of reactions.json.gz.
 import json, gzip, collections
-D = "/home/moiz/sniper-data/landing2"
+D = "/home/it/sniper-data/landing2"
 # ---------- tip map: engine registry + sourced catalogue (fetched 2026-10-03/04) + live doc checks 2026-10-25 ----------
 NORM = {"temporal_nozomi": "nozomi", "helius_sender": "helius", "astralane_iris": "astralane", "bloxroute_trader_api": "bloxroute",
         "bloxroute_legacy": "bloxroute", "falcon_corvus": "falcon", "hellomoon_lunar_lander": "lunar", "raiden_bolt": "bolt",
@@ -11,9 +11,9 @@ NORM = {"temporal_nozomi": "nozomi", "helius_sender": "helius", "astralane_iris"
         "rpcfast_beam": "rpcfast", "quicknode_fastlane?": "quicknode_fastlane", "p2p_syncro_sender": "p2p_syncro", "quicknode_lil_jit": "quicknode_liljit"}
 def norm(s): return NORM.get(s, s)
 TIPS = {}
-for a, s in json.load(open("/home/moiz/sniper-data/work/tipmap.json")).items(): TIPS[a] = norm(s)
-for a, s in json.load(open("/home/moiz/sniper/ops/dip/speed/night/tipmap.json")).items(): TIPS.setdefault(a, norm(s))
-_cat = json.load(open("/home/moiz/sniper/data/sender-tip-accounts.json"))
+for a, s in json.load(open("/home/it/sniper-data/work/tipmap.json")).items(): TIPS[a] = norm(s)
+for a, s in json.load(open("/home/it/sniper/ops/dip/speed/night/tipmap.json")).items(): TIPS.setdefault(a, norm(s))
+_cat = json.load(open("/home/it/sniper/data/sender-tip-accounts.json"))
 for svc, v in _cat.items():
     if isinstance(v, dict):
         for a in v.get("tip_accounts") or []: TIPS.setdefault(a, norm(svc))
@@ -26,15 +26,15 @@ _LS = None
 def leaders():
     global _LS
     if _LS is None:
-        L = {int(k): v for k, v in json.load(open("/home/moiz/sniper/ops/dip/speed/night/leaders_by_slot.json")).items()}
+        L = {int(k): v for k, v in json.load(open("/home/it/sniper/ops/dip/speed/night/leaders_by_slot.json")).items()}
         for k, v in json.load(open(f"{D}/leaders_prev_epoch.json")).items(): L.setdefault(int(k), v)
         _LS = L
     return _LS
 _NODES = {n["pubkey"]: n for n in json.load(open(f"{D}/cluster_nodes_1025.json"))}
-_INFO = json.load(open("/home/moiz/sniper/ops/dip/speed/night/leader_info.json"))["client"]
-_BF = json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
-_BA = json.load(open("/home/moiz/sniper/ops/region/leader_rtt_ams.json"))["leaders"]
-_GEO = {r["pk"]: r for r in json.load(open("/home/moiz/sniper-data/leader_geo.json"))["rows"]}
+_INFO = json.load(open("/home/it/sniper/ops/dip/speed/night/leader_info.json"))["client"]
+_BF = json.load(open("/home/it/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
+_BA = json.load(open("/home/it/sniper/ops/region/leader_rtt_ams.json"))["leaders"]
+_GEO = {r["pk"]: r for r in json.load(open("/home/it/sniper-data/leader_geo.json"))["rows"]}
 def client_raw(pk):
     n = _NODES.get(pk) or {}
     return n.get("clientId") or _INFO.get(pk) or (_BF.get(pk) or {}).get("client") or "?"

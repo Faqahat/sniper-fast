@@ -4,7 +4,7 @@ Question: can E2x1's exit timing be decoded from on-chain data (price/flow/walle
 P&L that the ourspeed agent attributes to HIS EXIT? **Verdict: NO — fails the pass bar by a wide margin.** The best on-chain rule
 recovers 5–26 % of the gap between a fixed hold and his real exit (bar: ≥ 70 %), and fires within ±1 slot of his real sell in 22 % of trips.
 
-Code: this folder (e1–e6). Data: /home/moiz/sniper-data/e2x1_dissect/exit2/ (610 MB; e3.txt, e4_66.txt, e5.txt, e6.md are the raw outputs quoted here).
+Code: this folder (e1–e6). Data: /home/it/sniper-data/e2x1_dissect/exit2/ (610 MB; e3.txt, e4_66.txt, e5.txt, e6.md are the raw outputs quoted here).
 Times PKT. SOL figures pre tx-costs unless stated.
 
 ## Data (MEASURED)

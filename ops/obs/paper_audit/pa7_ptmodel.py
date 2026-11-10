@@ -11,7 +11,7 @@ trigger anchor) offset; custom37's nearest-window anchor is kept as a check.
 usage: pa7_ptmodel.py C37DIR OUT.pkl [REPS]"""
 import sys, pickle, collections, statistics
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as L
 
 REPS = 8

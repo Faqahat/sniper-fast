@@ -5,7 +5,7 @@
 import json, glob, gzip, collections, statistics, os
 from multiprocessing import Pool
 T = json.load(open("latest/timeline.json"))
-RUNS = {"R3": "/home/moiz/sniper-data/collect/run_20261023_1426/txs", "R4": "/home/moiz/sniper-data/collect/run_20261024_1425/txs"}
+RUNS = {"R3": "/data/tapes/collect/run_20261023_1426/txs", "R4": "/data/tapes/collect/run_20261024_1425/txs"}
 files = []
 for d in RUNS.values():
     for f in sorted(glob.glob(d + "/*.jsonl.gz")): files.append((int(os.path.basename(f)[4:14]), f))

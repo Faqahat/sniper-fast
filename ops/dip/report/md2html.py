@@ -4,7 +4,7 @@
 # bullet lists, blockquotes, bold / italic / code / links. No external libraries.
 import os, re, html, glob, datetime as dt
 
-D = "/home/moiz/sniper/ops/dip/reports/runs"
+D = "/home/it/sniper/ops/dip/reports/runs"
 
 def inline(s):
     s = html.escape(s, quote=False)

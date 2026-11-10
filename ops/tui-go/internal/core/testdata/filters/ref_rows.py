@@ -1,7 +1,7 @@
 """Reference: run filters_report.py (unchanged) via runpy and dump its rows at full precision (JSON, repr floats).
 usage: python3 -I ref_rows.py RUN.jsonl [--seed PATH] > out.json"""
 import sys, json, runpy, io, contextlib
-SCRIPT = "/home/moiz/sniper/ops/strategies/presend/prevent/forward/filters_report.py"
+SCRIPT = "/home/it/sniper/ops/strategies/presend/prevent/forward/filters_report.py"
 sys.argv = [SCRIPT] + sys.argv[1:]
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):

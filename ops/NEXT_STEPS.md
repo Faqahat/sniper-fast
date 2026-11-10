@@ -12,7 +12,7 @@ Summary page: `ops/overnight/report/DECISION.html`. Dip plan: `ops/dip/PLAN.md` 
 ## 1. Speed probe (≤0.25 SOL; buys that fail by design, base + priority fee only)
 On the host:
 
-    scp -P 1996 ops/final2/probe_speed.sh ops/final2/probe_to_pnl.py ops/run1/probe_buy.sh it@84.32.100.36:/tmp/
+    scp -P 1996 ops/final2/probe_speed.sh ops/final2/probe_to_pnl.py ops/run1/probe_buy.sh it@cyberfra:/tmp/
 
 On the server:
 

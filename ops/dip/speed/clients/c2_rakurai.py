@@ -3,11 +3,11 @@
 For each Rakurai attempt: the dump's block, txs on the same mint after the dump (same slot and next slot), their paths (tip labels),
 CU price / limit, and where our buy landed."""
 import csv, json, collections, sys
-A = "/home/moiz/sniper-data/speed_truth/attempts.csv"
+A = "/home/it/sniper-data/speed_truth/attempts.csv"
 want = sys.argv[1] if len(sys.argv) > 1 else "Rakurai"
 rows = [r for r in csv.DictReader(open(A)) if r["client"] == want]
-C = json.load(open("/home/moiz/sniper-data/speed_truth/chain_txs.json"))
-SS = json.load(open("/home/moiz/sniper-data/speed_truth/slot_stats.json"))
+C = json.load(open("/home/it/sniper-data/speed_truth/chain_txs.json"))
+SS = json.load(open("/home/it/sniper-data/speed_truth/slot_stats.json"))
 by_slot = collections.defaultdict(list)
 for t in C: by_slot[t["s"]].append(t)
 for r in rows:

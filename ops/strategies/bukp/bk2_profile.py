@@ -3,7 +3,7 @@
 # exit multiple vs peak, what preceded each sell), concurrency, P&L split. -> printed + bukp/profile.json
 import json, collections, statistics, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/bukp"
+OUT = "/home/it/sniper-data/strategies/bukp"
 runs = sys.argv[1:] or ["R1", "R2", "R3", "R4"]
 T = {r: json.load(open(f"{OUT}/trips_{r}.json")) for r in runs}
 def pct(x, ps=(10, 25, 50, 75, 90)):

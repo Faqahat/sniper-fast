@@ -3,7 +3,7 @@
 (another bot already holds). Context MEASURED from the tape before each buy (p1). Code-matched P&L. Out: p7.txt"""
 import collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 from plib import *
 P = Out(f"{OUT}/p7.txt")
 B, LO, T = load()

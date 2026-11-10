@@ -8,24 +8,15 @@ dip34/35: the arm record's log-only fields (eqgrp, f3 fresh, q4 wh_l10) and the 
 present and join the "WOULD HAVE BLOCKED IT" list as "(log)" entries (eqgrp flag, fresh >= 35%, fam hit).
 dip36: FP-NOBOT (presend_live_fpnb): the score at the arm and at the send that decided the fill (stage "fill"), its threshold and
 would_block; a would_block at the fill joins the list as "fpnb (log)".
-dip37: the WHALE / DUMPER LOSS LEDGER verdict at the arm (the arm wallet's [n, sum] before this position): the engine's own wh_n / wh_sum /
-wh_sum_hit / wh_mean_hit on the arm record when the ledger ran live, else replayed here from --whale-seed (a state file built BEFORE this run;
-default none) plus this run's earlier positions, under --wh N:SOL (default 2:0.05; sum and mean both shown).
-usage: loss_brief.py RUN.jsonl MINT_PREFIX [--all] [--seed gcr_seed.json] [--whale-seed whale_state.json] [--wh 2:0.05]"""
+usage: loss_brief.py RUN.jsonl MINT_PREFIX [--all] [--seed gcr_seed.json]"""
 import sys, json, collections, os
 
 path, pre = sys.argv[1], sys.argv[2]
-seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/moiz/sniper-data/prevent/forward/gcr_seed.json"
+seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/it/sniper-data/prevent/forward/gcr_seed.json"
 led = collections.defaultdict(lambda: [0, 0.0])
 if os.path.exists(seed_p):
     for c, d in json.load(open(seed_p)).items(): led[c] = [d["n"], d["sum"]]
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
-# dip37 the whale / dumper ledger (wallet -> [n, sum lamports]) and its rule
-wled = collections.defaultdict(lambda: [0, 0])
-if "--whale-seed" in sys.argv:
-    for w, v in json.load(open(sys.argv[sys.argv.index("--whale-seed") + 1]))["w"].items(): wled[w] = [v[0], v[1]]
-WH_N, WH_S = (lambda x: (int(x[0]), float(x[1])))((sys.argv[sys.argv.index("--wh") + 1] if "--wh" in sys.argv else "2:0.05").split(":"))
-warm = {}   # (w, mint) -> (wallet, n, sum lamports) before the position
 arm, fill, close, tape, out, famr = {}, {}, {}, collections.defaultdict(list), [], {}
 fpnb = collections.defaultdict(dict)   # dip36: (w, mint) -> {"arm": rec, "fill": the first fill's rec}
 for line in open(path, errors="replace"):
@@ -37,8 +28,6 @@ for line in open(path, errors="replace"):
         a = d.get("ann") or {}; c = a.get("creator")
         n, s = led[c] if c else (0, 0.0)
         arm[k] = (d, bool(c and a.get("cr_pct", 0) >= 3 and n >= 2 and s <= -0.05), (n, s))
-        ww = (d.get("trig") or {}).get("wallet") or (d.get("dump") or {}).get("seller")
-        if ww: warm[k] = (ww, *wled[ww])
     elif e == "presend_live_fill": fill.setdefault(k, d)
     elif e == "presend_live_close": close[k] = d
     elif e == "presend_live_tape": tape[mint].append(d)
@@ -48,7 +37,6 @@ for line in open(path, errors="replace"):
         a = arm.get(k)
         if a and (a[0].get("ann") or {}).get("creator") and (a[0].get("ann") or {}).get("cr_pct", 0) >= 3:
             c = a[0]["ann"]["creator"]; led[c][0] += 1; led[c][1] += d["pnl"] / 1e9
-        if k in warm: wled[warm[k][0]][0] += 1; wled[warm[k][0]][1] += d["pnl"]
         if mint.startswith(pre): out.append((k, d["pnl"] / 1e9))
 if not out: sys.exit(f"no realized position on {pre}")
 for k, pnl in (out if "--all" in sys.argv else out[-1:]):
@@ -65,33 +53,6 @@ for k, pnl in (out if "--all" in sys.argv else out[-1:]):
         age = t.get("age_slots")
     lines = [f"{k[1]} ({kind}) {pnl:+.4f} SOL, exit {c.get('exit_why')}, {trig}"]
     caught = []
-    # dip37 LIVE: the whale / dumper loss ledger at the arm (the engine's own view when it ran, else replayed here)
-    if a.get("wh_n") is not None:
-        lines.append(f"  whale ledger (live): {'dumper' if kind == 'rearm' else 'whale'} {str(a.get('wh_wallet'))[:8]} had {a['wh_n']} positions / {a.get('wh_sum', 0):+.3f} SOL "
-                     f"-> sum rule {'HIT' if a.get('wh_sum_hit') else 'no'}, mean rule {'HIT' if a.get('wh_mean_hit') else 'no'} (armed: the live rule did not block)")
-        if a.get("wh_sum_hit") or a.get("wh_mean_hit"): caught.append("whale ledger (other rule)")
-    elif k in warm:
-        ww, wn, ws = warm[k]
-        sh, mh = wn >= WH_N and ws <= -WH_S * 1e9, wn >= max(WH_N, 1) and ws <= -WH_S * 1e9 * wn
-        lines.append(f"  whale ledger (replayed {WH_N}:{WH_S}{', seed ' + os.path.basename(sys.argv[sys.argv.index('--whale-seed') + 1]) if '--whale-seed' in sys.argv else ', this run only'}): "
-                     f"{'dumper' if kind == 'rearm' else 'whale'} {ww[:8]} had {wn} positions / {ws / 1e9:+.3f} SOL -> sum rule {'WOULD SKIP' if sh else 'no'}, mean rule {'WOULD SKIP' if mh else 'no'}")
-        if sh: caught.append("whale ledger sum")
-        elif mh: caught.append("whale ledger mean")
-    # dip37 holder ledger (live / log mode): the arm record's first blocking holder (only present when one blocked: hl_would = log mode)
-    if a.get("hl_wallet") is not None:
-        lines.append(f"  holder ledger: holder {a['hl_wallet'][:8]} {a.get('hl_pct', 0):.1f}% had {a.get('hl_n')} positions / {a.get('hl_sum', 0):+.3f} SOL, no win -> "
-                     + ("WOULD SKIP (log mode)" if a.get("hl_would") else "skip"))
-        caught.append("holder ledger (log mode)")
-    elif kind in ("t2", "rearm") and any(k in a for k in ("wh_n", "nd")):
-        lines.append("  holder ledger: no blocking holder at the arm (or the ledger off)")
-    # dip37 creator ledger at the arm (cr on the arm record)
-    if a.get("cr"):
-        cr = a["cr"]
-        lines.append(f"  creator ledger: {cr.get('n')} positions / {cr.get('sum', 0):+.3f} SOL" + (f" -> would {cr['would']} (log)" if cr.get("would") else ""))
-    # dip37 HYBRID-2 (log only): the arm rule on the arm record (nd M2-scored dumps before the trigger, m2max, T2 age >= 30)
-    if a.get("h2_keep") is not None:
-        lines.append(f"  HYBRID-2 (log): nd {a.get('nd')} m2max {a.get('m2max', -1):.3f} -> h2_keep {a['h2_keep']} (size {a.get('h2_size')} SOL)")
-        if not a["h2_keep"]: caught.append("HYBRID-2 (log)")
     # LIVE: deeper limit
     deep = f.get("deep")
     lines.append(f"  deeper limit (live): other big holder at signing {fa.get('ob6', 0):.1f}%, dip {100*fa.get('depth', 0):.1f}% -> "

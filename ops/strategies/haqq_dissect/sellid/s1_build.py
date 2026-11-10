@@ -8,12 +8,12 @@ Per lot: buy row, cost, tokens, every sell of the same code that took tokens fro
          chain-clock ms after the buy, slot offset, idx, user id, buy flag, SOL, tokens; plus haqq's OTHER-code rows in that span.
 Per sell of 247/248: the outside rows in the 0..3 slots before it (user, side, SOL, slot gap, idx gap, ms gap) and haqq other-code
          rows there (as pseudo-wallets 'HQ<code>').
-Out: /home/moiz/sniper-data/haqq_dissect/sellid/s1.pkl"""
+Out: /home/it/sniper-data/haqq_dissect/sellid/s1.pkl"""
 import pickle, sys, time, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 CODES = (247, 248)
 HZ = 300
 
@@ -22,7 +22,7 @@ def main():
     t0 = time.time()
     R, MI, span, CC = X.tape()
     H = MI["who"]["haqq"]; OURS = (MI["who"]["FRA"], MI["who"]["AMS"])
-    CO = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/pos/codes.pkl", "rb"))
+    CO = pickle.load(open("/home/it/sniper-data/haqq_dissect/pos/codes.pkl", "rb"))
     code = {k: v[0] for k, v in CO.items() if k[0] != "F"}
     hrow = np.flatnonzero(R["user"] == H)
     hk = [(int(s), int(i)) for s, i in zip(R["slot"][hrow], R["idx"][hrow])]

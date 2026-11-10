@@ -3,7 +3,7 @@
 # "timing" records), same-slot share, fire -> our tx seen back on a feed; plus the trigger feed lag and our reaction.
 # Block-position ms (our_speed.py scale) as a cross-check. usage: python3 -I probe_timing.py <probe.jsonl> [...]
 import sys, json, statistics, collections, importlib.util
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 med = lambda v: statistics.median(v) if v else float("nan")
 rows = []
 for f in sys.argv[1:]:

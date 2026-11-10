@@ -1,6 +1,6 @@
 # haqq-style token selector (agent, 10-28 ~00:00 PKT)
 
-Saved by the main session from the agent's reply (the harness blocked the agent's report write). All numbers are also in /home/moiz/sniper-data/haqq_model/.
+Saved by the main session from the agent's reply (the harness blocked the agent's report write). All numbers are also in /home/it/sniper-data/haqq_model/.
 
 ## Setup
 - Tape 10-23 → 10-27 (154k tokens; haqq traded 8.4%). Split by create time: train / validate / held out = the last 24 h (39,657 tokens, haqq 2,960).

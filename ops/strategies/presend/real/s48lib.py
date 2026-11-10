@@ -9,11 +9,11 @@ import sys, os, json, hashlib, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rlib, sim, probes as PR
 
-BASE = "/home/moiz/sniper-data/presend_real"
+BASE = "/home/it/sniper-data/presend_real"
 S48 = f"{BASE}/s48"
 TAB48 = f"{S48}/tab"
 R19 = f"{S48}/live/dip_ams_r19.jsonl"
-LIVE_FILES = ("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r17.jsonl", R19)
+LIVE_FILES = ("/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl", "/home/it/sniper-data/runs/ams/runs/dip_ams_r17.jsonl", R19)
 PR.PROBES["P3"] = R19
 
 def use_tab48():

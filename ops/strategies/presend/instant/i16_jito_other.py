@@ -4,7 +4,7 @@
 # tipped it (seller / buyer / a third account = relay or bundler)? -> the share of near-dump buys that are bundled with the dump.
 # usage: python3 -I i16_jito_other.py CLASSES.json OUT.json
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/instant")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/instant")
 import jito_api as J
 C = json.load(open(sys.argv[1])); outp = sys.argv[2]
 def rot(r): return r["cup"] == 500 and r["cul"] == 200000 and not r["tsv"]

@@ -2,7 +2,7 @@
 # Value model across DAYS: train on 10-23 (7 h), validate on the first 15% of 10-24, TEST on the rest of 10-24 (~6 h, never seen).
 # Same features / replay as hqmodel.py (entry +OFF txs after the dump, hold 6, 0.3 SOL, +5% guard, 20% follower cut).
 import json, collections, bisect, numpy as np, sys
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/dip"); import gbdt_np as G
+sys.path.insert(0, "/home/it/sniper-data/overnight/dip"); import gbdt_np as G
 S = 0.3e9; FEE = 0.0125
 def load(fn):
     rows = json.load(open(fn)); T = collections.defaultdict(list)

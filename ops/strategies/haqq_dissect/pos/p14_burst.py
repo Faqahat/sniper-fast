@@ -15,7 +15,7 @@ BEFORE the decision slot (causal; the engine sees completed slots).
 Out: p14.txt"""
 import sys, json, pickle, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import p6_rules as R6
 import dv8lib as L
 from plib import Out, OUT, day_name, load, boot_sum

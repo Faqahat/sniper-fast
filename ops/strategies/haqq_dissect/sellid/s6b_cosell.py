@@ -5,19 +5,19 @@ MEASURED delays), else timer at cap; WSW(list) = the earlier of that and the wav
 RIDE(150,300,2000)); on his lots also vs RIDE(424,1000,20000). Same replay as s6. Out: sellid/s6b.txt"""
 import pickle, sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev as ev12
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/sellid")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/sellid")
 from s6_rules import ride_time
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 DAYS = (2, 3, 4, 5, 6)
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s, flush=True); out.append(s)
-ids = json.load(open("/home/moiz/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
+ids = json.load(open("/home/it/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
 L4 = json.load(open(f"{OUT}/s4_lists.json"))
 LST = {(c, N, d): set(idm[w] for w in L4.get(f"SELLS_{c}_{d}_{N}", []) if w in idm) for c in (0, 247, 248) for N in (25, 50, 100) for d in DAYS}
 DR, DT, _ = delays()

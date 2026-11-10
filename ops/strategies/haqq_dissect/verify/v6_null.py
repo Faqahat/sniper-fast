@@ -5,7 +5,7 @@ fwd2 (mean of 3 draws). (b) my re-implementation: D2-D5 seed-averaged windows vs
 import pickle, collections, sys, numpy as np
 FWD = sys.argv[1] if len(sys.argv) > 1 else "fwd2"; MA = sys.argv[2] if len(sys.argv) > 2 else "v2b_fresh2"; MF = sys.argv[3] if len(sys.argv) > 3 else "v2b_fresh2fra"
 COST = 5120 + 200_000 + 605_000 + 1_200_000 + 5020; FAIL = 5120
-R = "/home/moiz/sniper-data/haqq_dissect/rearm"; D = "/home/moiz/sniper-data/haqq_dissect/verify"
+R = "/home/it/sniper-data/haqq_dissect/rearm"; D = "/home/it/sniper-data/haqq_dissect/verify"
 name = "any:20:30:8:2"; rng = np.random.default_rng(11)
 def rewin(rows):
     out = []

@@ -2,12 +2,12 @@
 # EVIDENCE CARDS (read-only): one text card + one feature JSON per selected consistent winner (s2_rank.py winners.json).
 # Entry-trigger profile vs BASE RATES (all clean trips of all wallets), exit profile, speed, fees/tips, hours (PKT),
 # and ~10 example trips with the tape around entry and exit (phase-A trade rows).
-# -> /home/moiz/sniper-data/strategies/cards/{wallet}.txt, cards.json, base.json
+# -> /home/it/sniper-data/strategies/cards/{wallet}.txt, cards.json, base.json
 import sys, os, json, gzip, glob, collections, statistics, random, zlib
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies")
+sys.path.insert(0, "/home/it/sniper/ops/strategies")
 import s1_trips as S1
 from multiprocessing import Pool
-OUT = "/home/moiz/sniper-data/strategies"; CD = f"{OUT}/cards"
+OUT = "/home/it/sniper-data/strategies"; CD = f"{OUT}/cards"
 F = json.load(open(f"{OUT}/trips/FIELDS.json")); X = {k: i for i, k in enumerate(F)}
 NSEL = int(os.environ.get("NSEL", "300"))
 SLOT = 0.212

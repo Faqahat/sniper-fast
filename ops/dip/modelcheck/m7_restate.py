@@ -8,7 +8,7 @@
 import sys, os, json, pickle, time
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import mc_lib as M, mc_corr as MC
 OUT = M.OUT; LATS = (35, 50, 75); SIZE = 0.35
 VARS = {

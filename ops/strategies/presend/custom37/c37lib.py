@@ -28,7 +28,7 @@ FIX = FIX_REAL - REFUND             # cash fixed cost per round trip
 FAIL = 5120                         # a landed failed try (5000 + 120k CU x 1000 uL)
 UNTRADE_V = 100_000_000_000
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
-D = "/home/moiz/sniper-data/custom37"
+D = "/home/it/sniper-data/custom37"
 
 BASE = dict(drop=0.12, quote=None, size=0.696, k=8, win=10, dl=1, exit_ms=200, exit_slots=2, tp=0.20, sl=0.20, flat=None, qstop=(5, 2),
             cut=0.0, seed=0)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """VERIFY step 9: RESULTS.txt / RESULTS.json (verdicts + the tables of steps 3, 4, 7, 8)."""
 import json, subprocess
-OUT = "/home/moiz/sniper-data/prevent/verify"
+OUT = "/home/it/sniper-data/prevent/verify"
 L = json.load(open(f"{OUT}/locks.json")); S = json.load(open(f"{OUT}/score.json"))
 V = {
  "1_regime_lock": dict(verdict="CONFIRMED (scaled = INFERRED)", agent=dict(pick_cost_065=-6.36, trips=["F27", "F28", "A24", "A26"]),
@@ -22,7 +22,7 @@ V = {
    note="2 creators (dtrzJPj7 +0.53, 9wRuFPJZ +0.31) carry it; PICK -0.12 (w/o1 -0.21); CI lower ~0.00"),
 }
 json.dump(V, open(f"{OUT}/RESULTS.json", "w"), indent=1, default=str)
-txt = ["VERIFY results (prevent program verifier, 10-30 PKT). Code /home/moiz/sniper/ops/strategies/presend/prevent/verify (v1..v9). Own extraction + own tape.",
+txt = ["VERIFY results (prevent program verifier, 10-30 PKT). Code /home/it/sniper/ops/strategies/presend/prevent/verify (v1..v9). Own extraction + own tape.",
        "Verdicts: 1 REGIME lock CONFIRMED (scaled, INFERRED) | 2 STATE nbuyers50 CONFIRMED (small) | 3 GUARDS ctx 0.85 PLAUSIBLE/LEAD | 4 WHO G-cr PLAUSIBLE (post-hoc)", ""]
 for f in ("locks.txt", "score.txt", "combined.txt"):
     txt.append(f"######## {f}"); txt.append(open(f"{OUT}/{f}").read())

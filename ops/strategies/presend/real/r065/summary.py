@@ -3,7 +3,7 @@
 worst trades, swings, running drawdown vs the 0.5 SOL kill switch). Writes summary.json."""
 import sys, json, pickle, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core
 B = core.BASE
 R = json.load(open(f"{B}/results.json")); W = json.load(open(f"{B}/wallet.json"))

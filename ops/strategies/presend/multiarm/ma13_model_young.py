@@ -5,7 +5,7 @@ age bucket (per rep), and who sold into the model's hold (between our model buy'
 usage: ma13_model_young.py RUNDIR CTX.pkl OUT.json [--variant R0]"""
 import sys, glob, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import ma_lib as M
 from ma11_young import bucket
 

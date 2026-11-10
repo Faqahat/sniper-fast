@@ -7,7 +7,7 @@ mid 25-80, slow >80, unknown). Fitted on live regular fires (MEASURED positions)
 Out: dv8/c3.txt, dv8/hazard.json, dv8/wspeed.npy (wallet id -> class)"""
 import json, pickle, collections, sys, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
 out = []
 def P(*a):

@@ -5,7 +5,7 @@
 # the slot after it (who was trying to buy, and how).
 # usage: python3 -I i2_probe_map.py PROBE.jsonl X_DIR OUT.json
 import sys, json, glob, gzip, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq")
+sys.path.insert(0, "/home/it/sniper/ops/haqq")
 import h_lib
 probe, xdir, outp = sys.argv[1], sys.argv[2], sys.argv[3]
 recs = [json.loads(l) for l in open(probe) if '"presend_attempt_land"' in l]

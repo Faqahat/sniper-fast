@@ -10,7 +10,7 @@ charged as (window end slot - fill slot) x k tries x the run's mean failed fee p
 import json, pickle, collections
 import numpy as np
 
-B = "/home/moiz/sniper-data/presend_filter"
+B = "/home/it/sniper-data/presend_filter"
 _cache = {}
 
 

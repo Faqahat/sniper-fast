@@ -15,14 +15,14 @@ Out: gap/g10_res.pkl (per event x model-draw x fol x policy curve P&L), consumed
 import pickle, sys, collections, json, time
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 SIZE = 0.40; HZ = 16; FOLS = (1.0, 0.9, 0.8); NPS = 3
 PL = [("T", 5), ("T", 2), ("MS", 100), ("MS", 200), ("MS", 300), ("MS", 400)]
 PL += [("RIDE", t1, s, t) for t1 in (150, 200) for s in (100, 150, 300) for t in (400, 700, 1000, 2000)]

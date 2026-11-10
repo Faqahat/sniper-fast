@@ -7,9 +7,9 @@ Also flags the dumps we fired on (dv8 fires: same mint + dump slot/idx) and join
 Out: data/lim/hrep.pkl"""
 import pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 HS = [2, 5, 10, 15, 30]
 
 

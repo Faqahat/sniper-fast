@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """PRESEND FILTER, step 2: consolidate g1 chunks into one chain-ordered table with interned ids (read-only on the recording).
-  /home/moiz/sniper-data/presend_filter/chain.npz : trades sorted by (slot, idx, j), duplicates of the overlapping recording runs removed
-  /home/moiz/sniper-data/presend_filter/ids.json  : id -> string tables (mint, wallet, prog, ixn)
+  /home/it/sniper-data/presend_filter/chain.npz : trades sorted by (slot, idx, j), duplicates of the overlapping recording runs removed
+  /home/it/sniper-data/presend_filter/ids.json  : id -> string tables (mint, wallet, prog, ixn)
   (failed txs: g2b_fails.py)
-  /home/moiz/sniper-data/presend_filter/creates.json : pump creates (launches.jsonl of each recording run, bt < CAP)
-  /home/moiz/sniper-data/presend_filter/failsigners.json : failed pump txs per signer (all mints, whole span)"""
+  /home/it/sniper-data/presend_filter/creates.json : pump creates (launches.jsonl of each recording run, bt < CAP)
+  /home/it/sniper-data/presend_filter/failsigners.json : failed pump txs per signer (all mints, whole span)"""
 import glob, json, os, time, collections
 import numpy as np
 
-B = "/home/moiz/sniper-data/presend_filter"
+B = "/home/it/sniper-data/presend_filter"
 CAP = 1793064600
 t0 = time.time()
 ids = {k: {} for k in ("w", "m", "p", "x")}
@@ -41,7 +41,7 @@ json.dump({k: list(d.keys()) for k, d in ids.items()}, open(f"{B}/ids.json", "w"
 json.dump(dict(fsig), open(f"{B}/failsigners.json", "w"))
 cr = {}
 for run in ("run_20261024_1425", "run_20261025_1420", "run_20261026_1415"):
-    for line in open(f"/home/moiz/sniper-data/collect/{run}/launches.jsonl"):
+    for line in open(f"/data/tapes/collect/{run}/launches.jsonl"):
         try: r = json.loads(line)
         except Exception: continue
         if r.get("bt", 0) >= CAP or r.get("err") is not None: continue

@@ -4,7 +4,7 @@
 # and the probe's per-attempt results by client (6042 / deadline / unseen).
 import json, collections
 import numpy as np
-F = "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
+F = "/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
 att = {}; land = {}
 for l in open(F):
     if '"presend_attempt' not in l: continue
@@ -35,4 +35,4 @@ for s, a in att.items():
     l = land.get(s); rc[a.get("client") or "?"][(l or {}).get("res", "none")] += 1
 for cl, c in sorted(rc.items(), key=lambda kv: -sum(kv[1].values())):
     n = sum(c.values()); print(f"  attempts {cl:20s} {n:5d}: deadline {100 * c['deadline'] / n:4.1f}% unseen {100 * c['unseen'] / n:4.1f}%")
-json.dump(out, open("/home/moiz/sniper-data/presend_v2/c6_client.json", "w"))
+json.dump(out, open("/home/it/sniper-data/presend_v2/c6_client.json", "w"))

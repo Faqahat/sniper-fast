@@ -3,7 +3,7 @@
 every payout / unwrap / inbound transfer with Solscan links and destinations. Out: recon/r8.txt"""
 import json, pickle, collections, sys, os, random, time
 W0, W1 = 1793038500, 1793124900
-OUT = "/home/moiz/sniper-data/haqq_dissect/recon"
+OUT = "/home/it/sniper-data/haqq_dissect/recon"
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 LOTS = pickle.load(open(f"{OUT}/lots.pkl", "rb"))["lots"]
 Z = pickle.load(open(f"{OUT}/r6.pkl", "rb"))

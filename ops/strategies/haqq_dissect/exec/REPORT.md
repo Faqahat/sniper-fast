@@ -1,5 +1,5 @@
 # Analyst D (execution): how haqq sends, and what to copy (10-28 ~02:50 PKT)
-Saved by the main session from the agent's reply. Scripts: this folder. Tables: /home/moiz/sniper-data/haqq_dissect/exec/ (read t0_summary.txt first, then t3–t9). Router binary: haqq_router_haqqqMGN.so.
+Saved by the main session from the agent's reply. Scripts: this folder. Tables: /home/it/sniper-data/haqq_dissect/exec/ (read t0_summary.txt first, then t3–t9). Router binary: haqq_router_haqqqMGN.so.
 
 ## Short answers (M = measured, I = inferred)
 1. **He lands almost everything because of WHAT he sends.**

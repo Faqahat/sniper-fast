@@ -3,7 +3,7 @@
 # dip_speed.py: (slot diff + index/size diff) x 212 ms), per leader client and route. READ-ONLY RPC.
 # usage: python3 -I probe_speed.py <label>=<probe.jsonl> [<label>=<probe.jsonl> ...]
 import sys, json, statistics, collections, importlib.util
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 allrows = []
 for arg in sys.argv[1:]:
     label, path = arg.split("=", 1)
@@ -23,7 +23,7 @@ for arg in sys.argv[1:]:
             if pb and pd:
                 row["ms"] = round((slot - p["slot"]) * S.SLOT_MS + (pb[0] / pb[1] - pd[0] / pd[1]) * S.SLOT_MS, 1); row["dslot"] = slot - p["slot"]
         allrows.append(row)
-json.dump(allrows, open("/home/moiz/sniper/ops/dip/speed/probe_speed.json", "w"), indent=1)
+json.dump(allrows, open("/home/it/sniper/ops/dip/speed/probe_speed.json", "w"), indent=1)
 by = collections.defaultdict(list)
 for r in allrows: by[(r["client"], r["label"], r["paths"])].append(r)
 print(f"{'leader':20s} {'session':8s} {'paths':22s}  n  landed  same-slot  median ms   all ms")

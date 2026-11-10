@@ -3,7 +3,7 @@
 # frozen bait rules unchanged, plus the same rules restricted to FRESH baiters (w_first == 1: the wallet's first trade
 # of the day), which is how rotated bait wallets would look. All four days shown.
 import sys, json, copy
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
 reg = json.load(open(f"{E.PO}/registry.json"))["rules"]
 IDS = [336, 291, 370, 353]

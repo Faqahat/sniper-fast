@@ -12,12 +12,12 @@ Dump context = the biggest single-trade price drop by an outside SELL in the las
   (IMIT1.json envelope: sell >= 1.08 SOL, drop >= 4.65 %, age <= 343.67 s; dump_events: age >= 1 s, curve < 100 SOL,
   first >= 1 SOL sell of its slot; since_buy <= 3.869 s), launch filter (mayhem / curve < 25 SOL / early curve > 200 SOL).
 Type (haqq_strat hs_lib.etype): ADD / DEAD / DIP / LAUNCH / DIP_LATE / MOMO / OTHER; probe = size <= 0.05 SOL.
-Out: /home/moiz/sniper-data/haqq_dissect/gap/g1_lots.pkl"""
+Out: /home/it/sniper-data/haqq_dissect/gap/g1_lots.pkl"""
 import json, time, collections, pickle, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 SUP = 1e15; DEAD_V = 30.52
 
 
@@ -39,7 +39,7 @@ def main():
         if w in idm: WHO[idm[w]] = nm
     # ---- tx costs per (slot, idx)
     cost = {}; hq_n = 0; hq_sum = 0.0; hq_fail = collections.Counter(); hq_failfee = collections.Counter(); hq_land = collections.Counter()
-    for l in open("/home/moiz/sniper-data/haqq_strat/haqq_raw.jsonl"):
+    for l in open("/home/it/sniper-data/haqq_strat/haqq_raw.jsonl"):
         d = json.loads(l)
         if not d["signers"] or d["signers"][0] != L.HAQQ: continue
         tip = sum(v for a, v in (d.get("tips") or []))

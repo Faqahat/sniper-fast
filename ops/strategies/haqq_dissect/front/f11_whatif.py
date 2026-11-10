@@ -6,9 +6,9 @@ later than t; faster buyers stay ahead). Value per capture calibrated like dv8: 
 Also: capture rate by leader region on attempted dumps. Out: sniper-data/haqq_dissect/front/f11.txt"""
 import pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 R = pickle.load(open(f"{OUT}/f8_rows.pkl", "rb")); R1 = pickle.load(open(f"{OUT}/f1.pkl", "rb"))
 FULL = (2, 3, 4, 5); out = []
 def P(*a):

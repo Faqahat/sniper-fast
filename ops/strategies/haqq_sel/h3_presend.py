@@ -16,15 +16,15 @@ Our two wallets' trades are removed from the tape. Out: DATA/presend_<stream>.pk
 import sys, os, json, pickle, time, collections, math, argparse
 import numpy as np
 from multiprocessing import Pool
-LIVE28 = "/home/moiz/sniper/ops/strategies/presend/filter/live28"; REAL = "/home/moiz/sniper/ops/strategies/presend/real"
+LIVE28 = "/home/it/sniper/ops/strategies/presend/filter/live28"; REAL = "/home/it/sniper/ops/strategies/presend/real"
 sys.path.insert(0, LIVE28); sys.path.insert(0, REAL)
 import lib28, sim28                       # lib28 points rlib.TAB at run 28's tape on import; reset below
 import rlib, sim, s48lib, variants
-DATA = "/home/moiz/sniper-data/haqq_sel"; TAB = f"{DATA}/tab"; rlib.TAB = TAB
+DATA = "/home/it/sniper-data/haqq_sel"; TAB = f"{DATA}/tab"; rlib.TAB = TAB
 SMS = rlib.SMS
 W0 = 1793038500; W1 = 1793124900
-COH = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
-FB = set(json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
+COH = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
+FB = set(json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
 G = {}
 
 

@@ -5,10 +5,10 @@
   nbuy50     = number of buy trades in that range; oth50 = distinct buyers other than the whale; nbuyers20 / 100 variants
   cre_pct    = creator's (create record) balance % at the cutoff; oth6_arm = a non-whale non-ours wallet >= 6% at the cutoff
 per live fill: oth6_sign = such a wallet at the filled try's signing position (attempt 'pos'), depth = 1 - p_pre / p_sign.
-Out: /home/moiz/sniper-data/prevent/verify/feats.pkl {(run, w): {...}}"""
+Out: /home/it/sniper-data/prevent/verify/feats.pkl {(run, w): {...}}"""
 import pickle, collections, bisect
 import numpy as np
-OUT = "/home/moiz/sniper-data/prevent/verify"
+OUT = "/home/it/sniper-data/prevent/verify"
 T = pickle.load(open(f"{OUT}/tables.pkl", "rb")); TP = pickle.load(open(f"{OUT}/tape.pkl", "rb")); L = pickle.load(open(f"{OUT}/live.pkl", "rb"))
 M, USERS, CR = TP["mints"], TP["users"], TP["creates"]
 uid = {u: k for k, u in enumerate(USERS)}

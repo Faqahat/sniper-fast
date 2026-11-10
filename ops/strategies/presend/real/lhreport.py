@@ -6,7 +6,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rlib
 
-LH = "/home/moiz/sniper-data/presend_real/lh"
+LH = "/home/it/sniper-data/presend_real/lh"
 tag = sys.argv[1] if len(sys.argv) > 1 else "main"
 P = pickle.load(open(f"{LH}/lasthour_{tag}.pkl", "rb"))
 R = P["R"]; bins = P["bins"]; LV = P["live"]

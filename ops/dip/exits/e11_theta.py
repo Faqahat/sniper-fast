@@ -2,7 +2,7 @@
 # e11: how sensitive is the learned exit to its decision threshold? Every final e04b model (seeds / horizons) and their ensemble
 # (mean prediction of the three h1248 seeds), at theta = -2 .. +2 mSOL, TRAIN (in-sample for the model) and TEST (out of sample),
 # M2 and IMIT1, engine SOL/day at our measured landing; plus our real live fills (test hours).
-# -> /home/moiz/sniper-data/exits/e11_theta.txt
+# -> /home/it/sniper-data/exits/e11_theta.txt
 import sys, os, json, pickle
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -5,7 +5,7 @@
 # A small depth-3 tree (my own code, gini, min leaf 300) is fit on the FIRST half of his life and scored on the second half.
 # Writes sel.npz: base event indices, features, his flag, tree score (take rate of the leaf, fit on half 1).
 import sys, json, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/vm1")
+sys.path.insert(0, "/home/it/sniper/ops/dip/vm1")
 import rlib, core
 D = rlib.load(); T = D.T; n = len(T)
 sol = T["sol"] / 1e9; ages = D.age * core.SLOT_SEC

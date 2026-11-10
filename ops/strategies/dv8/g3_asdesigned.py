@@ -6,7 +6,7 @@ walk-forward like g1 (gate trained on days < D-1; threshold = the score that giv
 Also the old gate target (VALUE regression on ms-landing vshift P&L of fills, s8) vs our target; both scored the same way.
 Out: dv8/g3.txt"""
 import sys, json, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_gbdt as G
 import dv8lib as L
 from g1_walkforward import load, Rep, calib_boot, COST

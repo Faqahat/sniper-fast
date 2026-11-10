@@ -6,9 +6,9 @@ Our styles: pre-send exit = sell decided 0.40 s after the fill (our p50 hold), r
 hold already includes our sell landing. Costs per fill (mSOL): NOW ps 2.54 / reg 4.38 (MEASURED v4 sec 6), S2 1.86 (analyst D/F), 248 0.54."""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/vs248")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/vs248")
 from v5_extra import M, sim
-OUT = "/home/moiz/sniper-data/haqq_dissect/vs248"
+OUT = "/home/it/sniper-data/haqq_dissect/vs248"
 SCR = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/hd_vs248"
 DAYS = (2, 3, 4, 5)
 Z = pickle.load(open(f"{OUT}/v2.pkl", "rb")); H = Z["H"]

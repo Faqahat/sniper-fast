@@ -355,7 +355,7 @@ This came from the AUC analysis above, after the holdout test, so it is not vali
 - MEASURED tables: `m1`–`m5`.
 - Post-hoc gate: `p1_gate.py`.
 
-**Data:** `/home/moiz/sniper-data/presend_flat/` (975 MB)
+**Data:** `/home/it/sniper-data/presend_flat/` (975 MB)
 - `chain_p1.npz`, `chain_p2.npz`;
 - `base_r24.pkl` … `base_r28.pkl`;
 - `a_*.json`, `b_dev.json`, `v_*.json`;

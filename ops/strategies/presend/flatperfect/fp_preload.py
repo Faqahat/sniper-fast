@@ -4,7 +4,7 @@
 positions and the shadow's row-c results from the previous run's jsonl (o_* / s_* inputs).
 
 Whale history = every landed pump.fun TradeEvent of the last HOURS (default 24) in the 24/7 raw recordings
-(/home/moiz/sniper-data/collect/run_*/txs/txs_<unix>.jsonl.gz; overlapping recordings de-duplicated on (slot, idx, j)), per wallet:
+(/data/tapes/collect/run_*/txs/txs_<unix>.jsonl.gz; overlapping recordings de-duplicated on (slot, idx, j)), per wallet:
 (mint id = first 8 bytes of the mint, big-endian; slot; buy; big = a buy of >= 6% of supply).
 
 File (src/fpnb.rs preload_parse): line 1 = JSON header {"fpnb_preload": 1, from_slot, to_slot, from_t, to_t, wallets N, rows M, own [...],
@@ -13,7 +13,7 @@ shadow [[known_ns, net_cheap]], shadow_arms [t_ns], src}, then little-endian bin
 The engine counts the preloaded history as contiguous when its last slot is within 30 min of the feed's first slot: build it right
 before the start (the inputs stay missing until the history covers 24 h).
 
-usage: fp_preload.py --out /root/dip/fpnb_preload.bin [--collect /home/moiz/sniper-data/collect] [--hours 25] [--end UNIX_S]
+usage: fp_preload.py --out /root/dip/fpnb_preload.bin [--collect /data/tapes/collect] [--hours 25] [--end UNIX_S]
                      [--prev-run /root/prod/runs/dip_ams_r55.jsonl ...] [--nw 12]"""
 import argparse, base64, glob, gzip, json, os, struct, sys, time, collections
 from multiprocessing import Pool
@@ -104,7 +104,7 @@ def own_from_run(fn):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
-    ap.add_argument("--collect", default="/home/moiz/sniper-data/collect")
+    ap.add_argument("--collect", default="/data/tapes/collect")
     ap.add_argument("--hours", type=float, default=25.0, help="look-back (the engine needs >= 403,000 slots ~ 24 h; 25 h leaves a margin)")
     ap.add_argument("--end", type=float, default=None, help="unix seconds (default: the newest chunk's end)")
     ap.add_argument("--prev-run", nargs="*", default=[])

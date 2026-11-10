@@ -5,11 +5,11 @@ the buy: the trigger = the latest envelope sell on that mint within 0..2 slots b
 Out: select/s9.txt"""
 import sys, pickle, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from plib import load, boot_sum
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 
 
 def main():

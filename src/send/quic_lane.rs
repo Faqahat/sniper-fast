@@ -12,7 +12,7 @@
 //!             (Paths::start, every 2 s) reads the connection: alive = healthy (its RTT recorded), dead = reconnect (backoff
 //!             2 s .. 60 s while the lane keeps refusing)
 //! Sources: Soyas' docs (owner, 10-25; the catalogue's soyas entry); Solami: the `solami` crate 0.1.58 source (src/swqos.rs,
-//! src/config.rs; read, not built: /home/moiz/sniper-data/solami_src/): beam `{fra.|ams.|nyc.|}beam.solami.dev:11000`, SNI
+//! src/config.rs; read, not built: /home/it/sniper-data/solami_src/): beam `{fra.|ams.|nyc.|}beam.solami.dev:11000`, SNI
 //! "solami-beam", ALPN "solana-tpu", the same dummy certificate, bincode bytes on one uni stream, keep-alive 25 s.
 use anyhow::{bail, Context, Result};
 use std::net::SocketAddr;

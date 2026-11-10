@@ -2,13 +2,13 @@
 # H2H step 3 (read-only, local): (e) costs, (f) selection, (g) scale - haqq vs us in the SAME hours (our live run windows, FRA/AMS runs
 # 9-14), plus the exit split on the contested dumps (we failed, haqq filled).
 import sys, json, glob, pickle, zlib, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 import importlib.util
 R = json.load(open(f"{H.OUT}/h2h_fires.json")); lots = json.load(open(f"{H.OUT}/lots.json")); led = json.load(open(f"{H.OUT}/ledger.json"))
 _a = np.polyfit([r["s"] for r in led], [r["bt"] for r in led], 1); bt_of = lambda s: float(np.polyval(_a, s))
 # our run windows (union of FRA and AMS runs 9-14)
 win = []
-for f in sorted(glob.glob("/home/moiz/sniper-data/runs/fra/runs/dip_r*.jsonl") + glob.glob("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r*.jsonl")):
+for f in sorted(glob.glob("/home/it/sniper-data/runs/fra/runs/dip_r*.jsonl") + glob.glob("/home/it/sniper-data/runs/ams/runs/dip_ams_r*.jsonl")):
     run = int(f.split("_r")[-1].split(".")[0])
     if not 9 <= run <= 14: continue
     ts = []

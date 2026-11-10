@@ -4,7 +4,7 @@ Nothing is chosen on test. Prints universe stats, train grid, test per-day table
 import pickle, collections, sys
 import numpy as np
 
-G = "/home/moiz/sniper-data/e2x1_dissect/grad"
+G = "/home/it/sniper-data/e2x1_dissect/grad"
 D = pickle.load(open(G + "/sim.pkl", "rb")); R = D["R"]; EX = D["EXITS"]
 TRAIN = ["10-24", "10-25", "10-26"]; TEST = ["10-27", "10-28"]
 ename = lambda e: f"mig+{e[0]} | SL {'none' if e[1] is None else f'-{int(e[1] * 100)}%'} | TO {e[2]}s"

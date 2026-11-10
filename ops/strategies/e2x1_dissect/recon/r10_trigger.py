@@ -5,7 +5,7 @@ capped at 1.000 SOL. T = the latest trade (within 60 trades / 5 slots before his
 Out: trig.pkl {lot_id: dict(tier, trig_*)}; prints tier counts and the chance rate (same test with off-grid f = tier +- 0.0003)."""
 import pickle, collections, numpy as np
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 TIERS = [0.007, 0.010, 0.013, 0.015]
 L = pickle.load(open(f"{OUT}/lots.pkl", "rb")); Z = pickle.load(open(f"{OUT}/tape.pkl", "rb"))
 def match(l, t, k, fs):

@@ -25,7 +25,7 @@
 
 - **Verified for each pool:** the owner and layout (Raydium PoolState 1,544 bytes, Orca Whirlpool 653), the mints the scan saw, liquidity at the price, swaps enabled and open (Raydium status bit 4, open time), a WSOL side of at least 2 SOL (median 49 SOL), Raydium's AmmConfig, and no Token-2022 mint the engine refuses (a transfer fee, a transfer hook, paused, default frozen). 9 picked pools failed and were left out (7 transfer fees, 2 below 2 SOL).
 - **Booted by the engine:** `arbx pools` on the whole list (public RPC) puts all 242 into SOL pairs: 92 pairs hold one, 77 of them with pools of the older venues. Its other drops (115, `transfer_fee`) are the 2026-10-06 list's own.
-- Built by a read-only script (/home/moiz/arbx-offload/wp21/seeds/build_seeds.py, `verify.json` beside it: every pool with its checks). Candidates came from the part-1 scans of all SOL-paired Raydium CLMM (1,208) and Orca Whirlpool (1,492) pools, read at 2026-10-06 ~15:20 UTC.
+- Built by a read-only script (/home/it/other/arbx-offload/wp21/seeds/build_seeds.py, `verify.json` beside it: every pool with its checks). Candidates came from the part-1 scans of all SOL-paired Raydium CLMM (1,208) and Orca Whirlpool (1,492) pools, read at 2026-10-06 ~15:20 UTC.
 
 ## Part 1: shadow, ≥ 2 h (`arbx campaign --name ft009-shadow --mode shadow --hours 2 --segment-min 30`)
 
@@ -66,7 +66,7 @@ As FT-002, restricted to bundles with a CLMM or Whirlpool leg:
 - **Run:** `arbx campaign --name ft009-shadow --mode shadow --hours 2 --segment-min 30` on Cherry, 4 segments: p1 02:19:36–02:50:02, p2 –03:20:28, p3 –03:50:52, p4 –04:20:00 (28.7 min, the campaign's time left). Every segment stopped `deadline`, exit 0, class natural; the campaign ended "time up".
 - **Build:** bin/arbx-221a2d8, frozen by the campaign as `runs/ft009-shadow/arbx-d0bec83b` (git 221a2d8e, clean, release; sha256 `d0bec83bb49115c5…`).
 - **Config and data:** `deploy/arbx-wp21-shadow.toml` (sha256 `3464fe4ae8e716a8…`; the frozen copy is byte-identical to the repo's), seed list `data/seed-pools-wp21-shadow.csv` (sha256 `58bf65e0e81e785e…`), registry.json `7d4d05c8…`.
-- **Records:** `/root/arbx/runs/ft009-shadow/` (1.4–1.7 GB a segment). Read-only copies were pulled to `/home/moiz/arbx-offload/ft009/`: the small streams, decisions, accounts.bin, commits and rivals of all 4 segments, and the journal of p4 for the replay. The big streams were deleted after the analysis.
+- **Records:** `/root/arbx/runs/ft009-shadow/` (1.4–1.7 GB a segment). Read-only copies were pulled to `/home/it/other/arbx-offload/ft009/`: the small streams, decisions, accounts.bin, commits and rivals of all 4 segments, and the journal of p4 for the replay. The big streams were deleted after the analysis.
 - **Health:**
   - the state stream was connected in every status line (180 / 181 / 181 / 173), with 0 reconnects; the boot re-read took 14.1–14.7 s;
   - the recorder had 0 drops and 0 records lost at close;

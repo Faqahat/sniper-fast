@@ -3,7 +3,7 @@
 # installs as .new then mv (a running recorder keeps its old inode).
 set -euo pipefail
 H=$(dirname "$(readlink -f "$0")")
-FRA_HOST=it@84.32.100.36
+FRA_HOST=it@cyberfra
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -p 1996 "$FRA_HOST")
 want=$(cut -d' ' -f1 "$H/dist/shreder_rec.sha256")
 [ "$(sha256sum "$H/dist/shreder_rec" | cut -d' ' -f1)" = "$want" ] || { echo "dist binary sha mismatch"; exit 1; }

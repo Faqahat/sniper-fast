@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """DF7e replay: shared helpers (read-only). Uses the VM1 data model (ops/dip/vm1/core.py) on the 48 h table
-/home/moiz/sniper-data/df7e_replay (run_20261023_1426 + run_20261024_1425, 10-23 19:26 -> 10-25 ~19:47 PKT).
+/home/it/sniper-data/df7e_replay (run_20261023_1426 + run_20261024_1425, 10-23 19:26 -> 10-25 ~19:47 PKT).
 Per-trade features at the trigger event k (only information up to and including k):
   pre/post price, drop, age (slots since the token's first trade = creation), gap (slots since the previous trade),
   post-trade real SOL in the curve (vsol - 30)."""
 import sys, json, hashlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/vm1")
+sys.path.insert(0, "/home/it/sniper/ops/dip/vm1")
 import core
-DD = "/home/moiz/sniper-data/df7e_replay"
+DD = "/home/it/sniper-data/df7e_replay"
 W = "DF7eRXHnvRQ9QeVCrdfS56a7RpBD6se6mgPvzApHPNr9"
 SIB = ["EprLoV21"]   # prefix of his sibling wallet (for info only)
 def sigh(sig): return int.from_bytes(hashlib.blake2b(sig.encode(), digest_size=8).digest(), "little")

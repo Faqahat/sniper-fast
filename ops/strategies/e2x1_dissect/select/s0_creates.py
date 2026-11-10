@@ -3,9 +3,9 @@
 (the dv8 creates.json ends 10-28 01:12 PKT); with arg "all": every run_2026102* chunk incl. name/symbol/uri -> creates_all.json. Out: sniper-data/e2x1_dissect/select/creates_new.json"""
 import sys, gzip, json, glob, os
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import decode as DC
-OUT = "/home/moiz/sniper-data/e2x1_dissect/select"
+OUT = "/home/it/sniper-data/e2x1_dissect/select"
 def one(fn):
     out = []
     try:
@@ -28,7 +28,7 @@ def one(fn):
     return out
 if __name__ == "__main__":
     ALL = len(sys.argv) > 1 and sys.argv[1] == "all"
-    fs = sorted(glob.glob("/home/moiz/sniper-data/collect/run_2026102*/txs/*.jsonl.gz"))
+    fs = sorted(glob.glob("/data/tapes/collect/run_2026102*/txs/*.jsonl.gz"))
     if not ALL: fs = [f for f in fs if "run_20261027_1410" in f and int(os.path.basename(f)[4:14]) >= 1793131000]
     with Pool(10) as p: res = p.map(one, fs, chunksize=1)
     C = {}

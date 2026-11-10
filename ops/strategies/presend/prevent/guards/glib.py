@@ -11,7 +11,7 @@ import json, bisect, collections
 import numpy as np
 SUP = 1e15
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 CHAINS = [(f"{D}/presend_quiet3/chain.npz", f"{D}/presend_quiet3/ids.json"), (f"{D}/presend_young/ext/chain.npz", f"{D}/presend_young/ext/ids.json")]
 TABS = [f"{D}/presend_quiet4/tab37", f"{D}/prevent/guards/tab_tail", f"{D}/multiarm/tab38", f"{D}/prevent/guards/tab_t38"]
 

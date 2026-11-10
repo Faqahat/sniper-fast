@@ -1,5 +1,5 @@
 # E2X1 recon — facts, lots, exact reconciliation, bot split (agent "recon", 10-28 ~21:30 PKT)
-Wallet E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb. Code: this folder (r0…r14). Data + shared tables: /home/moiz/sniper-data/e2x1_dissect/recon/
+Wallet E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb. Code: this folder (r0…r14). Data + shared tables: /home/it/sniper-data/e2x1_dissect/recon/
 (lots.pkl v2 + README.md). Days in PKT: **D0** = 10-26 20:00 → 10-27 20:00, **D1** = 10-27 20:00 → 10-28 20:00. Everything MEASURED unless marked INFERRED.
 
 ## 1. Every signature (MEASURED)

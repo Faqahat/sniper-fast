@@ -67,7 +67,7 @@ Prepared 2026-10-23 (PKT). Nothing here is deployed or run. Every step marked *(
 
   - **Default:** decoded buys only, k = 1.
 
-## What is built (host, `/home/moiz/sniper`, uncommitted)
+## What is built (host, `/home/it/sniper`, uncommitted)
 - **Engine flag `--final2-sock <path>`** (`src/bin/snipe_engine.rs`, struct `Final2`), with `--final2-timeout-ms` (default 5).
   - At the glued-bundle decision, the engine sends its RACE seen and RACE decide lines to the scorer over a Unix socket. It buys only on `pick=true`.
   - Non-blocking: the answer is read on the next loop pass, and the loop waits 100 µs while a question is open.

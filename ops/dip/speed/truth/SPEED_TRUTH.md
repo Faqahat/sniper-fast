@@ -442,7 +442,7 @@ Recommendations only. Any send-path or engine change needs the owner's OK. All g
 | a8_tables | report tables |
 | run_all.sh | runs everything |
 
-**Data** (`/home/moiz/sniper-data/speed_truth/`):
+**Data** (`/home/it/sniper-data/speed_truth/`):
 
 | file | contains |
 |---|---|

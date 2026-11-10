@@ -180,7 +180,7 @@ def cmd_status(a):
         age = time.time() - (s.get("now") or 0)
         P(f"   last slot {s.get('last_slot')} (block time {R.pkt_str(s.get('last_block_time'))}); lag {s.get('lag_slots')} slots / {(s.get('lag_s') or 0):.0f} s; status age {age:.0f} s")
         P(f"   tracked mints {s.get('tracked_mints')}; enrich queue {s.get('enrich_queue')}; calls/s (10 min) {s.get('rates_10m')}")
-    du = shutil.disk_usage("/home/moiz"); P(f"== disk: {du.used / du.total * 100:.1f}% used, {du.free / 1e9:.0f} GB free")
+    du = shutil.disk_usage("/home/it"); P(f"== disk: {du.used / du.total * 100:.1f}% used, {du.free / 1e9:.0f} GB free")
     c = R.cat_load(); days = c["days"]
     host = [d for d, e in days.items() if "host" in (e.get("where") or []) and e.get("kind") == "rec"]
     rem = [d for d, e in days.items() if "remote" in (e.get("where") or [])]

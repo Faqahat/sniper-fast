@@ -252,7 +252,7 @@ The key windows hold across all four variants:
 - **The bootstrap** treats windows as exchangeable within each group and does not include model error. Model error on the run total is +0.70 here, mostly phantom winners; on the QUIET windows it works in QUIET's favour, as above.
 
 ## 8. Files
-- **Code** (`/home/moiz/sniper/ops/strategies/presend/filter/live28/`): run 27's scripts adapted.
+- **Code** (`/home/it/sniper/ops/strategies/presend/filter/live28/`): run 27's scripts adapted.
   - `lib28.py`: the final snapshot, no cut (`LIVE28_CUT` only for trial runs), hour blocks.
   - `prep28.py`: donors and the coverage check, new.
   - `qcheck28.py`, `setup28.py`, `sim28.py` and `replay28.py`: w572 handling added.
@@ -261,7 +261,7 @@ The key windows hold across all four variants:
   - `tables28.py`.
   - `top28.py`: per-window misses and saves, with twins counted per token, new.
   - `samefill28.py`: P&L at the live fill slot and the tails, new.
-- **Data** (`/home/moiz/sniper-data/presend_filter/live28/`):
+- **Data** (`/home/it/sniper-data/presend_filter/live28/`):
   - `dip_ams_r28.{jsonl,log}`: final, md5 as above.
   - `dec/` and `tab/`: the tape.
   - `donors28.pkl`, `qcheck.json` and `coverage.json`.
@@ -270,7 +270,7 @@ The key windows hold across all four variants:
   - The superseded mid-run (21:23 cut) pass is in `mid2123/`.
 - **Re-run** (about 10 min):
   ```
-  cd /home/moiz/sniper/ops/strategies/presend/filter/live28
+  cd /home/it/sniper/ops/strategies/presend/filter/live28
   python3 prep28.py && python3 qcheck28.py
   python3 replay28.py --pool P3 --draws 400 && python3 replay28.py --pool R28 --draws 400
   python3 replay28.py --pool P3 --lag 15 --tag lag15 && python3 replay28.py --pool P3 --cut 0.2 --tag cut20

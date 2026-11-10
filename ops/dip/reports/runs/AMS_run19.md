@@ -12,7 +12,7 @@
 | Ended (PKT) | 2026-10-26 00:20:54 — time limit / max trades |
 | Ran for | 2 h 00 min of 120 min planned |
 | First / last buy (PKT) | 22:48:31 / 00:12:33 |
-| Server / wallet | cyber-dock (84.32.104.202) / `EgxfYgEb…` |
+| Server / wallet | cyber-dock (cyberams) / `EgxfYgEb…` |
 | Buys sent | 14 → **3 filled**, 11 failed on the +5% guard |
 | Fill rate | 21% |
 | Wins / losses (fills) | 1 / 2 (win rate 33%) |
@@ -365,7 +365,7 @@ Checks passed: every reactive fill was sold; every pre-send fill was closed by a
 - Amsterdam paused. 48 h size replay (SIZE_48H.md): +7.4 / +10.7 / +15.3 / +18.4 SOL at 0.35 / 0.50 / 0.75 / 1.00 (−~75% if 20% fewer later buyers); agent read: 0.50 next.
 
 ## 14. Data and how this report was made
-- Engine records: `/root/prod/runs/dip_ams_r19.jsonl`, log `.log` on cyber-dock (84.32.104.202) (local copy `/home/moiz/sniper-data/runs/ams/runs/dip_ams_r19.*`).
+- Engine records: `/root/prod/runs/dip_ams_r19.jsonl`, log `.log` on cyber-dock (cyberams) (local copy `/home/it/sniper-data/runs/ams/runs/dip_ams_r19.*`).
 - P&L: the engine's REALIZED lines (computed from the chain transactions) for fills; failed buys from getTransaction; costs split from the chain tx fees, the engine's tip records and the curve amounts (sell pump fee = the remainder).
 - Pre-send (section 4b): the jsonl presend_live_* records (fills, closes, REALIZED, account closes, stops, end checks) and presend_attempt_land (try results, failed-try fees); the log's PRESEND LIVE lines when a run has no such records.
 - Engine sessions in this run: 1; refused starts: 0.

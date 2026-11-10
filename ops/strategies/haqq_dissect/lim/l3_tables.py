@@ -6,9 +6,9 @@ distribution (pos.pkl, 10-23..10-27, from his buy; snapped to the grid, >65 -> 6
 Out: data/lim/l3.txt"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_strat")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_strat")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 CF, CX = 3.52e-3, 0.53e-3
 G = [("+5% (live)", 0.05), ("+10%", 0.10), ("+15%", 0.15), ("+20%", 0.20), ("+30%", 0.30), ("none", 9.0)]
 out = []
@@ -18,7 +18,7 @@ def P(*a):
 
 def his_weights(HG):
     import hs_lib as H
-    Pz = pickle.load(open("/home/moiz/sniper-data/haqq_strat/pos.pkl", "rb"))
+    Pz = pickle.load(open("/home/it/sniper-data/haqq_strat/pos.pkl", "rb"))
     B, Lt = Pz["buys"], Pz["lots"]
     h = [Lt[b["lot_ix"]]["close_slot"] - b["slot"] for b in B if b["w"] == "haqq" and H.etype(b) == "DIP" and Lt[b["lot_ix"]]["close_slot"] is not None]
     g = np.array(HG); w = collections.Counter()

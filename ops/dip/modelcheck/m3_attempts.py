@@ -6,14 +6,14 @@
 # (routed) and the payer holds none of the token at that point (else it may be a sell -> left out).
 # One row per (dump, wallet): first attempt (slot, idx, block-position delay, price before it / post-dump price), outcome
 # (any buy landed), SOL bought, number of failed txs, their main error code, the ratio at the landed buy, wallet held before.
-# -> /home/moiz/sniper-data/modelcheck/att_<day>.npz         usage: nice python3 -I m3_attempts.py R2
+# -> /home/it/sniper-data/modelcheck/att_<day>.npz         usage: nice python3 -I m3_attempts.py R2
 import sys, os, json, glob, zlib, time, collections
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import mc_lib as M
 RUN = {"R1": "R1", "R2": "R2", "R3": "R3", "R4": "R4"}
 TGS = {zlib.crc32(l.strip().encode()) for l in open(os.path.join(HERE, "targets.txt")) if l.strip()}
-SS = {int(k): v for k, v in json.load(open("/home/moiz/sniper/ops/overnight/core/slotsize.json")).items()}
+SS = {int(k): v for k, v in json.load(open("/home/it/sniper-data/overnight/core/slotsize.json")).items()}
 def arrival(s, i): return s * M.SMS + i / max(SS.get(s, 400), i + 1) * M.SMS
 
 def main(day):

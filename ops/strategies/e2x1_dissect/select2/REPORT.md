@@ -4,7 +4,7 @@ Wallet **E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb** ([GMGN](https://gmgn.ai/
 Working hypothesis (owner): his selection is built from on-chain data with patterns and filters. This pass adds the five feature
 families the first pass did not use (trigger wallet, trigger tx shape, token participants, creator/launch, timing) and tests them
 the same way: train days 1–5, TEST = day 6 (**10-27 18:41 → 10-28 18:41 PKT**, nothing chosen on it).
-Code: this folder (t1–t10). Data: /home/moiz/sniper-data/e2x1_dissect/select2/ (U2.npz features, sim_66.npz, t6_*.json, t7.json, t9.json, t10.json, examples.md).
+Code: this folder (t1–t10). Data: /home/it/sniper-data/e2x1_dissect/select2/ (U2.npz features, sim_66.npz, t6_*.json, t7.json, t9.json, t10.json, examples.md).
 
 ## Verdict (short)
 - **No rule or model from any on-chain family reproduces his selection.** Best model: test AUC 0.90, but at 60 % recall of his

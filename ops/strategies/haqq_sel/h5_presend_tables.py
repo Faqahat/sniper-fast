@@ -10,7 +10,7 @@ Ranges: 5-95% of 4000 bootstrap resamples of the windows (with a fresh landing d
 usage: h5_presend_tables.py [R28|P3]"""
 import sys, pickle, json, time
 import numpy as np
-DATA = "/home/moiz/sniper-data/haqq_sel"
+DATA = "/home/it/sniper-data/haqq_sel"
 pool = sys.argv[1] if len(sys.argv) > 1 else "R28"
 Z = pickle.load(open(f"{DATA}/presend_{pool}.pkl", "rb"))
 TOKS = {x["mint"]: x for x in json.load(open(f"{DATA}/tokens.json"))["tokens"]}

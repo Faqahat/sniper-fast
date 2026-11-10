@@ -9,10 +9,10 @@
 # -> bukp/exit_model.json, bukp/exit_replica.json
 import sys, json, zlib, math
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper-data/overnight/sel")
 import p4_eval as E
 import gbdt_np as G
-OUT = "/home/moiz/sniper-data/strategies/bukp"
+OUT = "/home/it/sniper-data/strategies/bukp"
 UID = zlib.crc32(b"BUkpShoEWRiPckdFs3kzYGjBPfUhL6G39ufo84QeogPP")
 TF = ["ev_buy", "sol", "move", "wt", "age", "curve", "ath_r", "ret1", "ret3", "ret10", "ret30", "nb3", "ns3", "bsol3", "ssol3", "net3", "nw3", "bigs3", "maxs3", "dd3",
       "nb10", "ns10", "net10", "bigs10", "dd10", "fam_s10", "dev_s30", "ins_s30", "nbot_hold", "fam_hold", "hour"]

@@ -4,7 +4,7 @@
 # P&L per trip and per SOL, size, hold, speed (tx-index distance after the trigger, same-slot share), CROWDING (how many
 # wallets start a trip in the same token in the same slot), fees/tips. -> families.json, families.txt
 import json, gzip, glob, collections, statistics, os
-OUT = "/home/moiz/sniper-data/strategies"
+OUT = "/home/it/sniper-data/strategies"
 F = json.load(open(f"{OUT}/trips/FIELDS.json")); X = {k: i for i, k in enumerate(F)}
 C = json.load(open(f"{OUT}/cards.json"))
 LAB = {}

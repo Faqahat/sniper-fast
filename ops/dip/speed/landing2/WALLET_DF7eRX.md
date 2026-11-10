@@ -218,7 +218,7 @@ Example dump [3KWKtPMG…](https://solscan.io/tx/3KWKtPMGjA9GN4NNPZ5tRSRZbb4kebb
 
 ## Method and limits
 
-**Scripts:** `ops/dip/speed/landing2/df7e/`. Data is in `/home/moiz/sniper-data/landing2/df7e/`.
+**Scripts:** `ops/dip/speed/landing2/df7e/`. Data is in `/home/it/sniper-data/landing2/df7e/`.
 - `d1_extract.py`: his txs (failed too) and every curve trade on his 2,606 tokens, from the x1 compact files of R3 + R4.
 - `raw_scan.sh` → `raw_sd.json`: exact SOL deltas per tx from the raw recorder (runs 10-23, 10-24, 10-25).
 - `d3_trades.py`: one row per buy: trigger context, curve size, age, paired sell, hold.

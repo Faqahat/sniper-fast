@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # counterfactuals on our 69 fires: validation (actual fills), guard widths, earlier landing
 import sys, json, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from sim import *
-TP = load_tapes("/home/moiz/sniper/ops/agents/freshaudit/out/tapes_live.json.gz")
-FC = json.load(open("/home/moiz/sniper/ops/agents/freshaudit/out/fire_chain.json"))
-TT = {r["mint"] + str(r.get("di")): r for r in json.load(open("/home/moiz/sniper/ops/agents/freshaudit/out/tape_timing.json"))}
+TP = load_tapes("/home/it/sniper/ops/agents/freshaudit/out/tapes_live.json.gz")
+FC = json.load(open("/home/it/sniper/ops/agents/freshaudit/out/fire_chain.json"))
+TT = {r["mint"] + str(r.get("di")): r for r in json.load(open("/home/it/sniper/ops/agents/freshaudit/out/tape_timing.json"))}
 res = []
 for f in FC:
     if "ours" not in f or "dump" not in f: continue
@@ -42,7 +42,7 @@ for f in FC:
         r = simulate(tr, pos, dst, B, guard=1.05, exit_mode=("tpsl", 5, 100, 100), fr=fr, tip=tip)
         rec[f"{nm}_tpsl"] = r and (r["fill"], round(r["pnl_net"], 5))
     res.append(rec)
-json.dump(res, open("/home/moiz/sniper/ops/agents/freshaudit/out/cf_fires.json", "w"))
+json.dump(res, open("/home/it/sniper/ops/agents/freshaudit/out/cf_fires.json", "w"))
 print("validation (sim curve pnl vs actual curve pnl, SOL):")
 for r in res:
     if r["val"]: print(f"  {r['mint'][:6]} sim={r['val'][0]:+.5f} act={r['val'][1]:+.5f} diff={r['val'][0]-r['val'][1]:+.5f}")

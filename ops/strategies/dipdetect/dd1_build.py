@@ -12,14 +12,14 @@
 #    Exit grid from ONE replayed path (selexit2.rt_path semantics): time limit `cap` slots after the entry slot, take-profit /
 #    stop-loss on the position value after each applied trade; a TP/SL trigger in slot S sells in slot S+1, a time-limit sell in
 #    slot s_in+cap, both SELL_LAT = 75 ms into the slot (trades before that are applied first).
-# -> /home/moiz/sniper-data/strategies/dipdetect/dd1_<day>.npz + dd1_meta.json
+# -> /home/it/sniper-data/strategies/dipdetect/dd1_<day>.npz + dd1_meta.json
 # usage: python3 dd1_build.py R2 [procs]
 import sys, os, json, gzip, glob, zlib, time
 import numpy as np
 from multiprocessing import get_context
 
-PO = "/home/moiz/sniper-data/strategies/patterns"; OUT = "/home/moiz/sniper-data/strategies/dipdetect"
-SEL = "/home/moiz/sniper/ops/overnight/sel"; SPD = "/home/moiz/sniper/ops/dip/speed"
+PO = "/home/it/sniper-data/strategies/patterns"; OUT = "/home/it/sniper-data/strategies/dipdetect"
+SEL = "/home/it/sniper-data/overnight/sel"; SPD = "/home/it/sniper/ops/dip/speed"
 DAYS = {"R1": PO, "R2": PO, "R3": PO, "R4": OUT}
 RUNDIR = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
 IMIT2 = {"R1": ["r1"], "R2": ["r2"], "R3": ["r3", "g", "r7f", "t2"], "R4": []}
@@ -37,21 +37,21 @@ XF = ["since_buy_s", "since_big_s", "n_big", "slotpos_c", "s_frac", "s_pnl", "s_
 XI = {k: i for i, k in enumerate(XF)}
 DEV = {"bwamJzztZsepfkteWRChggmXuiiCQvpLqPietdNfSXa"}
 T3 = ["HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ", "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw", "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"]
-TOP10 = [l.strip() for l in open("/home/moiz/sniper/ops/agents/topearners/work/top10.txt") if l.strip()]
+TOP10 = [l.strip() for l in open("/home/it/sniper/ops/agents/topearners/work/top10.txt") if l.strip()]
 COH = json.load(open(f"{SEL}/cohort_train.json"))
 U3 = {zlib.crc32(u.encode()) for u in T3}; UT = {zlib.crc32(u.encode()) for u in TOP10}; UC = {zlib.crc32(u.encode()) for u in COH}
 UPRO = U3 | UC          # 'pro' = the 3 IMIT1 wallets + the TRAIN-hours cohort; the top-10 list (built on data up to 10-24 06:27) is NOT used in features
 G = {}
 
 def leader_map():
-    lb = json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json"))["leaders"]
+    lb = json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json"))["leaders"]
     sc = json.load(open(f"{SPD}/leaders/schedule_cur.json"))
     LS0 = 459648000; ids = sorted(set(lb.values()) | set(sc["ids"])); ix = {u: i for i, u in enumerate(ids)}
     lead = np.full(sc["start"] + len(sc["slot_leader"]) - LS0, -1, np.int32)
     for s, u in lb.items(): lead[int(s) - LS0] = ix[u]
     lead[sc["start"] - LS0:] = [ix[sc["ids"][i]] for i in sc["slot_leader"]]
-    fra = {l.strip() for l in open("/home/moiz/sniper/ops/region/near_leaders_fra.txt") if l.strip()}
-    ams = {l.strip() for l in open("/home/moiz/sniper/ops/region/near_leaders_ams.txt") if l.strip()}
+    fra = {l.strip() for l in open("/home/it/sniper/ops/region/near_leaders_fra.txt") if l.strip()}
+    ams = {l.strip() for l in open("/home/it/sniper/ops/region/near_leaders_ams.txt") if l.strip()}
     nf = np.array([u in fra for u in ids]); na = np.array([u in ams for u in ids])
     return LS0, lead, ids, nf, na
 
@@ -221,7 +221,7 @@ def main(day, procs):
     mints = {meta[t]["m"] for t in cand}
     # dev tokens (create signer / creator / payer on the dev list)
     devm = set()
-    for l in open(f"/home/moiz/sniper-data/collect/{RUNDIR[day]}/launches.jsonl"):
+    for l in open(f"/data/tapes/collect/{RUNDIR[day]}/launches.jsonl"):
         try: c = json.loads(l)
         except Exception: continue
         if DEV & {c.get("user"), c.get("creator"), c.get("payer")}: devm.add(c.get("mint"))

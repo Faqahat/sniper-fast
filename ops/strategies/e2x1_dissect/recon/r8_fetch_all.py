@@ -4,7 +4,7 @@ fields the recorder does not keep: durable-nonce account, instruction data (slip
 import json, pickle, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rpc
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 W0 = 1793113200; W1 = W0 + 86400; WA = W0 - 86400
 rows = pickle.load(open(f"{OUT}/tx.pkl", "rb"))
 # public RPC is ~0.15 tx/s here (shared IP) -> a stratified SAMPLE: 70 D1 lots per age band (A <30 s, B 30-120 s, C >120 s), buy + all sells

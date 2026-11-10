@@ -5,14 +5,14 @@
 import json, collections, sys
 import numpy as np
 
-OUT = "/home/moiz/sniper-data/landing2"
+OUT = "/home/it/sniper-data/landing2"
 R = json.load(open(f"{OUT}/timeline.json"))
 PROS = {"HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ": "HkQ7hMjy", "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq": "haqqiUUX",
         "8PgC4ngpx6zUG3KFQAQHqSeePDFA7kGyEaA2yMoZ4HUk": "8PgC4ngp", "6n2cCJrrEAi4SZbBquj9mffUGAFXhDBmFeQEi3maSRcx": "6n2cCJrr",
         "9k78QZywYyqUZvZrk1tDuE9qPUbZAz2aFbjUneihdgFX": "9k78QZyw", "G9G3dCBGjM1chfZJHvb722zzzm9FQfZi4KbLVGncGeTy": "G9G3dCBG",
         "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw": "DYXDDrZC", "CZ77onJzkSCwZC51Gg7H8oEUUJhqcx8LLKqnsNXWZSBx": "CZ77onJz",
         "6VzXcLk9rCLDHgRBmUGKK8HY2KvhHmR4pZPCxi4tA1kx": "6VzXcLk9", "5w8xtjc649Z628jVvJkwQE5p9aMhV2cUSWr8RVV9BieU": "5w8xtjc6"}
-COHORT = set(json.load(open("/home/moiz/sniper/ops/overnight/dip/cohort_R1.json")))
+COHORT = set(json.load(open("/home/it/sniper-data/overnight/dip/cohort_R1.json")))
 INSTANT = 3
 
 

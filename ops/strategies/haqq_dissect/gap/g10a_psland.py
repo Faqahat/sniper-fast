@@ -8,13 +8,13 @@
 Out: gap/g10a.json, g10a.txt"""
 import json, pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 R, MI, span, CC = X.tape()
 ours = [MI["who"]["FRA"], MI["who"]["AMS"]]
 cul = {}
-for l in open("/home/moiz/sniper-data/dv8/tab/ours.jsonl"):
+for l in open("/home/it/sniper-data/dv8/tab/ours.jsonl"):
     d = json.loads(l)
     if d["err"] is None: cul[(d["s"], d["i"])] = d.get("cul")
 ks = []; ms = []; same = []; nod = 0

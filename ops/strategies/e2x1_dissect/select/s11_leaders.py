@@ -5,7 +5,7 @@ he did not touch at that time. Lift per wallet = his-window rate / baseline-wind
 newest 6 h), tested on TEST: share of his first buys preceded by a leader buy, and the take rate / forward of leader-buy moments."""
 import sys, collections, pickle, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"]); MN, US = names()
 sl = D["slot"].astype(np.int64); us = D["user"].astype(np.int64); bu = D["buy"].astype(bool); so = D["sol"] / 1e9; mi = D["mint"]; bt = D["bt"].astype(np.int64)

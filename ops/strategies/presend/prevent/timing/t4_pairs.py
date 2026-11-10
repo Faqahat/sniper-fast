@@ -6,10 +6,10 @@ Features: n past, hold-slot quantiles, timer tightness, empirical timer hazard P
 (h = slots this holder has held this mint), sell-multiple quantiles (exec price at first sell / avg buy price), current multiple
 (price just before our buy / its avg buy price), share of full first sells, creator flag + creator timer (create -> first sell) history.
 Labels: sold inside our hold (our buy landing -> our sell landing), sold within 3 slots after our buy.
-Out: /home/moiz/sniper-data/prevent/timing/pairs.pkl"""
+Out: /home/it/sniper-data/prevent/timing/pairs.pkl"""
 import json, pickle, bisect
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/timing"
+D = "/home/it/sniper-data/prevent/timing"
 FC = pickle.load(open(f"{D}/fillctx.pkl", "rb"))
 I = json.load(open(f"{D}/hist_ids.json")); Ui = {x: k for k, x in enumerate(I["user"])}; Mi = {x: k for k, x in enumerate(I["mint"])}
 P = np.load(f"{D}/pos.npy")

@@ -21,8 +21,8 @@ marked MEASURED:
 Decisions (arm / skip / try / fill / exit / disarm) are logged per window when log=True."""
 import math, heapq, collections, hashlib, copy, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/density")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/density")
 import sim, rlib, dsim
 from sim import Win, SMS
 

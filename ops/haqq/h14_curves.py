@@ -4,7 +4,7 @@
 # lot's net value (pump fees, one sell tx cost) if its sell landed at time t = (ref slot + d) x 212 ms + L, for d = 1..210 and
 # L = 0 / 35 / 50 / 75 ms (block-position time proxy). -> sniper-data/haqq/curves.pkl {li: dict(ref, bslot, v0, v35, v50, v75)}
 import sys, json, pickle, zlib, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 from multiprocessing import Pool
 DM = 210; LATS = (0, 35, 50, 75); SELL_TX = 0.000325e9           # haqq's median sell tx cost (fee 125k + 0.0002 tip)
 SS = {}

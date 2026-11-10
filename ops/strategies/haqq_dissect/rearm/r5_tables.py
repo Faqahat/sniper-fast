@@ -11,10 +11,10 @@ ADDED = (base + re-arm) - base over every window (common random numbers): includ
 usage: r5_tables.py TAG [--days 0,1,2,3,4,5,6] [--fixed cfg,cfg] [--out name]"""
 import sys, os, pickle, argparse, collections, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 COST = {"NOW": 5120 + 200_000 + 605_000 + 1_200_000 + 5020, "S2": 5120 + 200_000 + 300_000 + 5020}
 SHIFT = {"model": 0.0, "cal": 1.49e6, "cons": 4.18e6}
 FAIL = 5120

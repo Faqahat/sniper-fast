@@ -5,9 +5,9 @@ Per <dir>: tar every file (data + code) into <scratch>/<remote_name>.tar, sha256
 re-download through sha256 and compare. Only on a match: delete the local DATA files (> 2 MB) under <dir>; small files
 (code, reports, configs) stay. Writes <dir>/ARCHIVED.txt with the remote path, sha256, size and the list of removed files."""
 import os, sys, tarfile, hashlib, time
-sys.path.insert(0, "/home/moiz/sniper/ops/rec"); import backends as B
+sys.path.insert(0, "/home/it/sniper/ops/rec"); import backends as B
 d, name = sys.argv[1].rstrip("/"), sys.argv[2]
-scratch = "/home/moiz/sniper-data/rec/tmp_archive"; os.makedirs(scratch, exist_ok=True)
+scratch = "/home/it/sniper-data/rec/tmp_archive"; os.makedirs(scratch, exist_ok=True)
 tar = f"{scratch}/{name}.tar"
 big = []
 with tarfile.open(tar, "w") as t:

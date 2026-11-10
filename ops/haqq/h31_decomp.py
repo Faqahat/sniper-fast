@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # H2H step 2 (read-only, local): decomposition of the gap between haqq and us on the SAME dumps (h2h_fires.json) and in the same hours.
 import sys, json, pickle, zlib, collections, numpy as np, glob
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 R = json.load(open(f"{H.OUT}/h2h_fires.json")); lots = json.load(open(f"{H.OUT}/lots.json"))
 SS = {}
 for run in ("R1", "R2", "R3", "R4"):

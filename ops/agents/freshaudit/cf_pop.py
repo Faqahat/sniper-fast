@@ -2,9 +2,9 @@
 # counterfactual over EVERY dump our live bot scored (dump events of r1..r5): first-in-line vs our measured landing kernel
 import sys, json, glob, gzip, collections
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from sim import *
-A = "/home/moiz/sniper/ops/agents/freshaudit"
+A = "/home/it/sniper/ops/agents/freshaudit"
 TP = load_tapes(f"{A}/out/tapes_live.json.gz")
 K = json.load(open(f"{A}/out/kernel.json"))
 SL = {}
@@ -13,7 +13,7 @@ for f in sorted(glob.glob(f"{A}/x/r3/*.jsonl.gz"))[-75:]:
         if l.startswith('["SLOTS'): SL.update({int(a): b for a, b in json.loads(l)[1].items()})
 D = []
 for n in range(1, 6):
-    for l in open(f"/home/moiz/sniper/ops/dip/speed/dip_r{n}.jsonl"):
+    for l in open(f"/home/it/sniper/ops/dip/speed/dip_r{n}.jsonl"):
         e = json.loads(l)
         if e["ev"] == "dump": D.append(dict(run=n, mint=e["mint"], slot=e["slot"], idx=e["idx"], sig=e["sig"], score=e["score"], ps=e["pass"], sell=e["sell"], age=e.get("age"), drop=e.get("drop_pct"), dev=e.get("dev")))
 B = 0.35; TIP = 3_000_000

@@ -5,13 +5,13 @@
 # leader type are, not how well we land there (live landing differs by type).
 import sys, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_lib as L
 CL = json.load(open(sys.argv[1]))
 KIND = lambda c: {"AgaveBam": "bam", "FireBAM": "bam", "JitoLabs": "jito", "HarmonicAgave": "harmonic", "HarmonicFiredancer": "harmonic",
                   "Firedancer": "firedancer", "Frankendancer": "firedancer", "Agave": "agave", "Rakurai": "rakurai"}.get(c, "other")
-lb = {int(k): v for k, v in json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json"))["leaders"].items()}
-sc = json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/schedule_cur.json"))
+lb = {int(k): v for k, v in json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json"))["leaders"].items()}
+sc = json.load(open("/home/it/sniper/ops/dip/speed/leaders/schedule_cur.json"))
 def leader(s):
     if s in lb: return lb[s]
     i = s - sc["start"]

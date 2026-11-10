@@ -427,7 +427,7 @@ How SOL/day was converted (INFERRED, use it to rank, not as a forecast):
 | `l7_rank.py` | what-ifs, ranking |
 | `n1_targets.py`, `n2_probe.py`, `n3_analyze.py` | network |
 
-**Data** (`/home/moiz/sniper-data/landing2/`):
+**Data** (`/home/it/sniper-data/landing2/`):
 
 | File | Contains |
 |---|---|

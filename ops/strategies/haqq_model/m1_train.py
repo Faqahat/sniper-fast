@@ -7,9 +7,9 @@ Model: numpy GBDT (dipdetect/dd_gbdt.py, logistic loss). Threshold = highest sco
 Out: DATA/model_n<n>.pkl (model, edges, scores, threshold), DATA/eval.json, printed tables."""
 import sys, json, pickle, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_gbdt as G
-DATA = "/home/moiz/sniper-data/haqq_model"
+DATA = "/home/it/sniper-data/haqq_model"
 W0 = 1793038500
 TR0, TR1, VA1, TE1 = W0 - 229500, W0 - 64800, W0, W0 + 86400 - 600
 NS = [int(x) for x in sys.argv[1:]] or [0, 5, 14, 24, 47]

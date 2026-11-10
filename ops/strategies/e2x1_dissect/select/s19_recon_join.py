@@ -4,10 +4,10 @@ pnl = all costs incl. tx fees/tips, open lots marked) by (slot, idx). Exact per-
 recon's EXACT trigger (size equation): slot gap and chain-clock ms (slot*212 + idx/blocksize*212)."""
 import sys, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 from tl import cols
-L = pickle.load(open("/home/moiz/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
+L = pickle.load(open("/home/it/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
 X = cols(pickle.load(open(f"{OUT}/buys.pkl", "rb"))); fam = np.load(f"{OUT}/family.npy")
 key = {(int(s), int(i)): k for k, (s, i) in enumerate(zip(X["slot"], X["idx"]))}
 S = np.load(f"{TP}/slots.npy"); s0 = int(S["slot"].min())

@@ -4,7 +4,7 @@
 # URL from ~/.config/sniper/ck_rpc_url (never printed). Output: OUT/block_sizes.json {slot: n_txs or null}
 import json, os, time, urllib.request
 
-OUT = "/home/moiz/sniper-data/landing2"
+OUT = "/home/it/sniper-data/landing2"
 URL = open(os.path.expanduser("~/.config/sniper/ck_rpc_url")).read().strip()
 
 

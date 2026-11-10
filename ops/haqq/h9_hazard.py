@@ -2,7 +2,7 @@
 # haqq SELL study, step 9: sell hazard per lot-size profile. P(this lot's first sell lands in slot d | not sold before), d = slots
 # after the reference (trigger) slot, by the lot's return at the end of slot d-1 (known before slot d). Prints per profile.
 import sys, json, pickle, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 lots = json.load(open(f"{H.OUT}/lots.json")); P = pickle.load(open(f"{H.OUT}/lotpaths.pkl", "rb"))
 prof = lambda sz: {0.25: "A.25", 0.27: "B.27", 0.3: "C.30", 0.4: "D.40", 0.49: "E.49", 0.01: "P.01"}.get(round(sz, 2), "BIG" if sz >= 0.6 else "other")
 VB = [(-9, -0.10, "<-10%"), (-0.10, -0.03, "-10..-3"), (-0.03, 0.0, "-3..0"), (0.0, 0.03, "0..3"), (0.03, 0.10, "3..10"), (0.10, 0.25, "10..25"), (0.25, 99, ">25%")]

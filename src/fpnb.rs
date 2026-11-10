@@ -1,5 +1,5 @@
 //! dip36 FP-NOBOT (LOG-ONLY; owner OK 11-05 PKT): the frozen "no follower bot within 2 slots after our pre-sent fill" filter of the
-//! flatperfect study (ops/strategies/presend/flatperfect/REPORT.md, FROZEN_FLAT.json; spec /home/moiz/sniper-data/flatperfect/ENGINE_SPEC.txt).
+//! flatperfect study (ops/strategies/presend/flatperfect/REPORT.md, FROZEN_FLAT.json; spec /home/it/sniper-data/flatperfect/ENGINE_SPEC.txt).
 //! The pure part: the 6 frozen LightGBM models (embedded, sha256-checked), the 153 inputs in the frozen order, the chain store they are
 //! computed from (per-mint trade rows and failed txs, the 30-min regime rings, the 24 h per-wallet whale history), our own results and
 //! the shadow's row-c book, the hot-reloaded bot list and the preload file. The engine's glue (its own thread, the records) is
@@ -837,7 +837,7 @@ pub fn preload_parse(b: &[u8]) -> Result<Preload, String> {
 }
 
 // =====================================================================================================================
-// dip36 SKIP-2 PER-SEND (LOG-ONLY; owner 11-05 PKT; spec /home/moiz/sniper-data/skip2/ENGINE_SPEC_PERSEND.txt, reference s2_table.py): a
+// dip36 SKIP-2 PER-SEND (LOG-ONLY; owner 11-05 PKT; spec /home/it/sniper-data/skip2/ENGINE_SPEC_PERSEND.txt, reference s2_table.py): a
 // frozen logistic score (72 inputs, standardised, b + w.z; log-odds of P&L > 0). Inputs 1-34 from the arm record + the arm clock, 35-55
 // from our own history / ledgers (S2Hist: the records emitted before the arm; the creator / whale / mint ledgers seeded from a file),
 // 56-72 = FP-NOBOT's pf_* (the same store). would_skip = covered && score < thr[kind]. Also scored with the 4 failed-tx inputs missing.

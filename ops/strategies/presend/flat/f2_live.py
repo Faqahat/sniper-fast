@@ -4,12 +4,12 @@ Per window (seg, w): the trigger, the arm's QUIET record (dip20+), the disarm, e
 the fill(s), the exit(s), our sell landing(s), the close, the realized P&L, the token-account rent back (ATA close), and the
 position's tape (presend_live_tape: every trade the engine received on the token while the position was open, with its
 receive time). Also the regular (reactive) fires' decision times and the run's segments (live size per segment).
-Writes /home/moiz/sniper-data/presend_flat/live_<run>.pkl
+Writes /home/it/sniper-data/presend_flat/live_<run>.pkl
 usage: f2_live.py r24 [r25 ...] [--file PATH (for r28's snapshot)]"""
 import sys, json, pickle, collections, argparse
 
-RUNS = "/home/moiz/sniper-data/runs/ams/runs"
-OUT = "/home/moiz/sniper-data/presend_flat"
+RUNS = "/home/it/sniper-data/runs/ams/runs"
+OUT = "/home/it/sniper-data/presend_flat"
 WALLET = "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"
 EVS = ("presend_live_", "presend_attempt", "run_start", "run_end", '"ev":"fire"')
 

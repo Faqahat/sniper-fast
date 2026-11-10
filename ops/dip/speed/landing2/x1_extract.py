@@ -10,8 +10,8 @@
 import sys, os, json, glob, gzip, base64, subprocess, time, collections
 from multiprocessing import Pool
 TD = bytes([189, 219, 127, 211, 78, 230, 97, 238])
-TIP = json.load(open("/home/moiz/sniper/ops/dip/speed/night/tipmap.json"))
-WAL = json.load(open("/home/moiz/sniper-data/landing2/wallets.json"))
+TIP = json.load(open("/home/it/sniper/ops/dip/speed/night/tipmap.json"))
+WAL = json.load(open("/home/it/sniper-data/landing2/wallets.json"))
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def b58enc(b):
     n = int.from_bytes(b, "big"); o = []

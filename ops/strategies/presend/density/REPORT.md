@@ -1,6 +1,6 @@
 # Pre-send: tries per block, send paths, 2 positions (agent, 10-27 ~23:55 PKT)
 
-Saved by the main session from the agent's reply (the harness blocks subagent report writes). Full tables are in /home/moiz/sniper-data/presend_density/tables_main.txt.
+Saved by the main session from the agent's reply (the harness blocks subagent report writes). Full tables are in /home/it/sniper-data/presend_density/tables_main.txt.
 
 ## Short answer
 - **Probe k = 8 with 40 tries/s of send capacity**, one position, everything else as live.

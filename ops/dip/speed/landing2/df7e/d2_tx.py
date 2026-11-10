@@ -2,7 +2,7 @@
 # DF7eRXHn study: read-only tx anatomy via getTransaction (rpc_ro, cached, <= 4 req/s). Prints one block per sig.
 # usage: python3 -I d2_tx.py SIG [SIG ...]   (or -j to print json summary lines)
 import sys, json, base64, os
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
 from rpc_ro import get_tx, rpc
 SYS = "11111111111111111111111111111111"; CB = "ComputeBudget111111111111111111111111111111"; PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
@@ -16,7 +16,7 @@ def dec(s):
     for c in s: n = n * 58 + BI[c]
     b = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
     return b"\0" * (len(s) - len(s.lstrip("1"))) + b
-SZ = "/home/moiz/sniper-data/landing2/txcache_size.json"
+SZ = "/home/it/sniper-data/landing2/txcache_size.json"
 SIZES = json.load(open(SZ)) if os.path.exists(SZ) else {}
 def size(sig):
     if sig in SIZES: return SIZES[sig]

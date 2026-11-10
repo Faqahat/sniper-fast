@@ -5,8 +5,8 @@
 # priority fee, tip relays, extra programs and recurring fee receivers (trading terminals leave these). READ-ONLY, local data.
 import json, gzip, os, sys, collections, statistics, datetime
 from multiprocessing import Pool
-DIRS = ["/home/moiz/sniper-data/collect/run_20261023_1426/txs", "/home/moiz/sniper-data/collect/run_20261024_1425/txs"]
-TIP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+DIRS = ["/data/tapes/collect/run_20261023_1426/txs", "/data/tapes/collect/run_20261024_1425/txs"]
+TIP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 COMMON = {"11111111111111111111111111111111", "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", "ComputeBudget111111111111111111111111111111",
           "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
           "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ", "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95"}
@@ -50,7 +50,7 @@ if __name__ == "__main__":
                       gaps_h=[round(g / 3600, 1) for g in gaps[:3]], hours=dict(sorted(hours.items())),
                       prio_med=statistics.median(cup) if cup else 0, relays=dict(rel.most_common(4)), progs=dict(progs.most_common(5)),
                       recv=dict(recv.most_common(4)), cu_lim=statistics.median([int(r.get("cul") or 0) for r in txs]))
-    json.dump(res, open("/home/moiz/sniper-data/strategies/who_baits.json", "w"), indent=1)
+    json.dump(res, open("/home/it/sniper-data/strategies/who_baits.json", "w"), indent=1)
     for w, v in sorted(res.items(), key=lambda kv: -kv[1]["n"]):
         print(f"\n{w}\n  txs {v['n']} (ok {v['ok']}, buys {v['buys']}) over {v['span_h']} h = {v['per_h']}/h; first {v['first']} last {v['last']}; longest idle gaps {v['gaps_h']} h")
         print(f"  hours active (PKT): {v['hours']}")

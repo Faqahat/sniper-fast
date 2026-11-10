@@ -5,22 +5,22 @@
 #  - pump.fun bonding-curve TradeEvents                  -> bc table (pre-migration context)
 #  - migrations (CreatePoolEvent + CompletePumpAmmMigrationEvent) -> mig list
 #  - per slot: max tx index seen (block-size estimate) and block time
-# Output: /home/moiz/sniper-data/strategies/postmig/tmp/<RUN>/<chunk>.pkl  (numpy columns + local string table)
+# Output: /home/it/sniper-data/strategies/postmig/tmp/<RUN>/<chunk>.pkl  (numpy columns + local string table)
 # Usage: pm1_extract.py [RUN ...]   (default R2 R3 R4); 3 worker processes.
 import sys, os, json, glob, struct, base64, hashlib, pickle, subprocess, time, zlib
 from array import array
 from multiprocessing import Pool
 import numpy as np
 
-COL = "/home/moiz/sniper-data/collect"
-OUT = "/home/moiz/sniper-data/strategies/postmig/tmp"
+COL = "/data/tapes/collect"
+OUT = "/home/it/sniper-data/strategies/postmig/tmp"
 RUNS = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
 D = lambda n: hashlib.sha256(("event:" + n).encode()).digest()[:8]
 BUY, SELL, CPE, MIG, TRADE = D("BuyEvent"), D("SellEvent"), D("CreatePoolEvent"), D("CompletePumpAmmMigrationEvent"), D("TradeEvent")
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 IXC = {b"buy_exact_quote_in": 1, b"buy": 2, b"buy_exact_quote_in_v2": 3, b"buy_v2": 4, b"multi_hop_swap": 5}
 BIG = (1 << 63) - 1
-TIPMAP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+TIPMAP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 
 def b58(bs):
     n = int.from_bytes(bs, "big"); s = ""

@@ -4,13 +4,13 @@
 #  (5c) every tx touching a paying dump's mint in [dump-2, dump+1] -> sniper-data/haqq_dissect/front/win/<chunk>.jsonl.gz
 PAT=/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/hd_front/pat
 W=/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/hd_front/win
-O1=/home/moiz/sniper-data/haqq_dissect/front/raw
-O2=/home/moiz/sniper-data/haqq_dissect/front/win
-FLT=/home/moiz/sniper/ops/strategies/haqq_dissect/front/f5_filter.py
+O1=/home/it/sniper-data/haqq_dissect/front/raw
+O2=/home/it/sniper-data/haqq_dissect/front/win
+FLT=/home/it/sniper/ops/strategies/haqq_dissect/front/f5_filter.py
 mkdir -p "$O1" "$O2"
 one() {
   b="$1"; run=${b%%__*}; ch=${b#*__}
-  f=/home/moiz/sniper-data/collect/$run/txs/$ch.jsonl.gz
+  f=/data/tapes/collect/$run/txs/$ch.jsonl.gz
   [ -f "$f" ] || { echo "missing $f"; return 0; }
   need1=0; need2=0
   [ -f "$PAT/$b.pat" ] && [ ! -s "$O1/$b.jsonl" ] && need1=1

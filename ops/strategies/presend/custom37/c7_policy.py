@@ -6,9 +6,9 @@ the finalists are re-simulated exactly (one-position knock-on with mixed configs
 Per segment a config other than base is taken only when on TRAIN it is: > 0 in that segment, > 0 without the segment's top 3
 windows, > 0 at -20% followers, and not negative in more than 2 of the 6 TRAIN runs. Policies are ranked by TRAIN gain.
 Families: L = limit / quote / exit / tries menu (size fixed 0.696), S = L + size, K = S + skip (no arm).
-Out: stdout + /home/moiz/sniper-data/custom37/policies.json"""
+Out: stdout + /home/it/sniper-data/custom37/policies.json"""
 import sys, pickle, json, itertools, datetime, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as L
 
 G = pickle.load(open(f"{L.D}/grid.pkl", "rb"))

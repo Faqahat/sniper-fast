@@ -69,24 +69,14 @@ pub struct FpArm { pub w: u64, pub rearm: bool, pub mint: Pk, pub s: u64, pub i:
 
 /// dip36 live gate: a window's verdict, written by the FP thread, read by the sender: (slot << 2) | (covered << 1) | block; 0 = none yet
 #[derive(Debug, Default)]
-pub struct Gate { pub v: AtomicU64, pub withheld: AtomicU64,
-    /// dip37b the SKIP-2 gate's verdict (the same layout: slot, covered, skip) and its withheld sends
-    pub v2: AtomicU64, pub withheld2: AtomicU64 }
+pub struct Gate { pub v: AtomicU64, pub withheld: AtomicU64 }
 impl Gate {
     pub fn set(&self, slot: u64, covered: bool, block: bool) { self.v.store((slot << 2) | ((covered as u64) << 1) | block as u64, Ordering::Release); }
-    pub fn set2(&self, slot: u64, covered: bool, skip: bool) { self.v2.store((slot << 2) | ((covered as u64) << 1) | skip as u64, Ordering::Release); }
 }
 
 /// dip36 live gate: the mode (bit 0 T2, bit 1 re-arm) and the counters [T2, re-arm]
 #[derive(Debug, Default)]
-pub struct GateShared { pub mode: AtomicU64, pub withheld: [AtomicU64; 2], pub passed: [AtomicU64; 2], pub open_stale: [AtomicU64; 2], pub open_err: AtomicU64,
-    /// dip37 --presend-fpnb-stale-hold N (0 = off): with no fresh verdict, hold a send whose window's last verdict blocked and is <= N slots old
-    pub stale_hold: AtomicU64,
-    /// dip37: the sends held that way [T2, re-arm]
-    pub withheld_stale: [AtomicU64; 2],
-    /// dip37b --presend-skip2-live: the SKIP-2 gate's mode (bit 0 T2, bit 1 re-arm) and its counters [T2, re-arm]: withheld on a fresh verdict,
-    /// held on a stale one (the stale hold), sent with no fresh verdict (fail open)
-    pub s2_mode: AtomicU64, pub s2_withheld: [AtomicU64; 2], pub s2_stale: [AtomicU64; 2], pub s2_open: [AtomicU64; 2] }
+pub struct GateShared { pub mode: AtomicU64, pub withheld: [AtomicU64; 2], pub passed: [AtomicU64; 2], pub open_stale: [AtomicU64; 2], pub open_err: AtomicU64 }
 
 /// the mode of "t2,rearm" / "t2" / "rearm" / "off" (any order; "both" = t2,rearm)
 pub fn mode_parse(s: &str) -> std::result::Result<u64, String> {
@@ -101,54 +91,15 @@ pub fn mode_str(m: u64) -> &'static str { match m & 3 { 0 => "off", 1 => "t2", 2
 /// the SENDER's check for a due attempt of a window at `slot` (one atomic load): true = withhold it. A kind not live: false. A verdict for
 /// `slot` or `slot + 1` (data up to slot - 1 / slot): its block; none (the FP thread behind or dead): fail open, counted
 #[inline]
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn gate_withhold(g: &Gate, gs: &GateShared, slot: u64, rearm: bool) -> bool { gate_withhold_why(g, gs, slot, rearm).is_some() }
-
-/// dip37b the SKIP-2 gate (FP-NOBOT's rule on the skip2 verdict): Some(false) = withheld on a fresh "skip" verdict (slot or slot + 1), Some(true)
-/// = the stale hold (--presend-fpnb-stale-hold N: the window's last verdict covered + skip and <= N slots old), None = sent (a kind not live, no
-/// fresh verdict: fail open; not covered: never)
-#[inline]
-pub fn skip2_withhold_why(g: &Gate, gs: &GateShared, slot: u64, rearm: bool) -> Option<bool> {
+pub fn gate_withhold(g: &Gate, gs: &GateShared, slot: u64, rearm: bool) -> bool {
     let k = rearm as usize;
-    if gs.s2_mode.load(Ordering::Relaxed) & (1 << k) == 0 { return None; }
-    let v = g.v2.load(Ordering::Acquire);
-    let vs = v >> 2;
-    if v == 0 || !(vs == slot || vs == slot + 1) {
-        let n = gs.stale_hold.load(Ordering::Relaxed);
-        if n > 0 && v & 3 == 3 && vs < slot && slot - vs <= n {
-            g.withheld2.fetch_add(1, Ordering::Relaxed);
-            gs.s2_stale[k].fetch_add(1, Ordering::Relaxed);
-            return Some(true);
-        }
-        gs.s2_open[k].fetch_add(1, Ordering::Relaxed);
-        return None;
-    }
-    if v & 3 == 3 { g.withheld2.fetch_add(1, Ordering::Relaxed); gs.s2_withheld[k].fetch_add(1, Ordering::Relaxed); return Some(false); }
-    None
-}
-
-/// gate_withhold with the reason: Some(false) = withheld on a fresh blocking verdict, Some(true) = dip37's STALE HOLD (no fresh verdict,
-/// --presend-fpnb-stale-hold N > 0, the window's last verdict covered + blocked and at most N slots older than `slot`), None = sent. With
-/// N = 0 exactly dip36's rule (no previous verdict / an old pass / an older block: fail open, counted open_stale)
-#[inline]
-pub fn gate_withhold_why(g: &Gate, gs: &GateShared, slot: u64, rearm: bool) -> Option<bool> {
-    let k = rearm as usize;
-    if gs.mode.load(Ordering::Relaxed) & (1 << k) == 0 { return None; }
+    if gs.mode.load(Ordering::Relaxed) & (1 << k) == 0 { return false; }
     let v = g.v.load(Ordering::Acquire);
     let vs = v >> 2;
-    if v == 0 || !(vs == slot || vs == slot + 1) {
-        let n = gs.stale_hold.load(Ordering::Relaxed);
-        if n > 0 && v & 3 == 3 && vs < slot && slot - vs <= n {
-            g.withheld.fetch_add(1, Ordering::Relaxed);
-            gs.withheld_stale[k].fetch_add(1, Ordering::Relaxed);
-            return Some(true);
-        }
-        gs.open_stale[k].fetch_add(1, Ordering::Relaxed);
-        return None;
-    }
-    if v & 1 == 1 && v & 2 == 2 { g.withheld.fetch_add(1, Ordering::Relaxed); gs.withheld[k].fetch_add(1, Ordering::Relaxed); return Some(false); }
+    if v == 0 || !(vs == slot || vs == slot + 1) { gs.open_stale[k].fetch_add(1, Ordering::Relaxed); return false; }
+    if v & 1 == 1 && v & 2 == 2 { g.withheld.fetch_add(1, Ordering::Relaxed); gs.withheld[k].fetch_add(1, Ordering::Relaxed); return true; }
     gs.passed[k].fetch_add(1, Ordering::Relaxed);
-    None
+    false
 }
 pub struct FpClose { pub w: u64, pub pid: u64, pub mint: Pk, pub first: (u64, u64), pub first_t: u64, pub end: Option<(u64, u64)>, pub sell_t: u64 }
 
@@ -188,9 +139,6 @@ pub struct Worker {
     /// tests: a threshold instead of the frozen one (the gate's tests force a block)
     #[cfg(test)]
     pub thr_test: Option<f64>,
-    /// dip37b tests: the SKIP-2 threshold override (both kinds)
-    #[cfg(test)]
-    pub s2_thr_test: Option<f64>,
 }
 
 fn kind(t2: bool) -> &'static str { if t2 { "T2" } else { "rearm" } }
@@ -206,9 +154,7 @@ impl Worker {
             bots_checked: Instant::now(), stale_logged: None, book: fp::Book::default(), wins: FxHashMap::default(), worder: VecDeque::new(), pend: Vec::new(),
             closes: FxHashMap::default(), sh: FxHashMap::default(), sh_arm_t: FxHashMap::default(), out, st, user, s2: None, gs: Arc::new(GateShared::default()), ctl: None,
             #[cfg(test)]
-            thr_test: None,
-            #[cfg(test)]
-            s2_thr_test: None })
+            thr_test: None })
     }
     fn rec(&self, v: serde_json::Value) { let _ = self.out.send(Out::Rec(v)); }
     fn line(&self, l: String) { let _ = self.out.send(Out::Line(l)); }
@@ -365,8 +311,8 @@ impl Worker {
         while self.worder.len() > WINS_CAP { if let Some(o) = self.worder.pop_front() { self.wins.remove(&o); } }
     }
 
-    /// dip36 live gate: any live kind (dip37b: of FP-NOBOT or SKIP-2)
-    fn gate_on(&self) -> bool { self.gs.mode.load(Ordering::Relaxed) != 0 || self.gs.s2_mode.load(Ordering::Relaxed) != 0 }
+    /// dip36 live gate: any live kind
+    fn gate_on(&self) -> bool { self.gs.mode.load(Ordering::Relaxed) != 0 }
 
     /// the frozen threshold (tests: an override)
     fn thr(&self, s: &fp::Score) -> f64 {
@@ -393,12 +339,6 @@ impl Worker {
         let covered = nc.is_none();
         let block = covered && c.ctx.warm && s.score >= thr;
         let s_ok = s.score.is_finite();
-        // dip37b the SKIP-2 gate's verdict for the same send (the logged verdict's inputs; nothing unless skip2 runs and its gate is live)
-        if self.gs.s2_mode.load(Ordering::Relaxed) != 0 {
-            if let Some(j) = c.x2.as_ref().map(|x2| self.s2_json(c.ctx.t2, x2, &x, covered)) {
-                g.set2(t, covered, j["skip"] == true);
-            }
-        }
         if !s_ok { self.gs.open_err.fetch_add(1, Ordering::Relaxed); g.set(t, false, false); return; }
         g.set(t, covered, block);
         let prev = c.last_pub;
@@ -419,14 +359,9 @@ impl Worker {
         let Some(g) = c.gate.clone() else { return };
         let (mint, t2) = (c.ctx.mint, c.ctx.t2);
         g.v.store(0, Ordering::Release);
-        g.v2.store(0, Ordering::Release);
         let n = g.withheld.load(Ordering::Relaxed);
-        let mut r = serde_json::json!({"ev": "presend_live_fpnb_window", "w": w, "mint": b58(&mint), "kind": kind(t2), "withheld": n, "filled": filled, "why": why,
-            "mode": mode_str(self.gs.mode.load(Ordering::Relaxed))});
-        // dip37b: the SKIP-2 gate's withheld sends of the window (only when it held one)
-        let n2 = g.withheld2.load(Ordering::Relaxed);
-        if n2 > 0 { r["s2_withheld"] = n2.into(); r["s2_mode"] = mode_str(self.gs.s2_mode.load(Ordering::Relaxed)).into(); }
-        self.rec(r);
+        self.rec(serde_json::json!({"ev": "presend_live_fpnb_window", "w": w, "mint": b58(&mint), "kind": kind(t2), "withheld": n, "filled": filled, "why": why,
+            "mode": mode_str(self.gs.mode.load(Ordering::Relaxed))}));
     }
 
     /// dip36 live gate: the control file (every ~10 s; `force`: now): {"live": ["t2", "rearm"]}; a bad file keeps the mode
@@ -464,10 +399,7 @@ impl Worker {
     fn s2_json(&self, t2: bool, x2: &[f64], x: &fp::X, covered: bool) -> serde_json::Value {
         let Some((m, _)) = self.s2.as_ref() else { return serde_json::Value::Null };
         let full = m.full(x2, x);
-        #[allow(unused_mut)]
-        let (sc, nf, mut thr) = (m.score(&full), m.score_nf(&full), m.thr(t2));
-        #[cfg(test)]
-        if let Some(t) = self.s2_thr_test { thr = t; }
+        let (sc, nf, thr) = (m.score(&full), m.score_nf(&full), m.thr(t2));
         serde_json::json!({"score": r9(sc), "score_nf": r9(nf), "thr": thr, "skip": covered && sc < thr, "skip_nf": covered && nf < thr})
     }
 
@@ -549,9 +481,6 @@ impl Worker {
     /// tests: no warm-up and a forced threshold (the gate's tests need a block / a pass at will)
     #[cfg(test)]
     pub fn test_force(&mut self, thr: Option<f64>) { self.store.warm_slots = 0; self.thr_test = thr; }
-    /// dip37b tests: the SKIP-2 threshold (Some(1e9): every covered send says skip)
-    #[cfg(test)]
-    pub fn test_s2_thr(&mut self, thr: Option<f64>) { self.s2_thr_test = thr; }
     #[cfg(test)]
     pub fn set_ctl_for_test(&mut self, path: &str) { self.ctl = Some((path.to_string(), None, Instant::now())); }
 
@@ -581,12 +510,6 @@ impl Fp {
         let mut w = Worker::new(&path, bots, user, out.clone(), st.clone())?;
         // dip36 live gate: the start mode (the flag), then the control file (it overrides the flag; a bad file at the start: the flag's mode)
         w.gs.mode.store(cfg.fpnb_live, Ordering::SeqCst);
-        // dip37: the stale hold (0 = off: dip36's fail-open)
-        w.gs.stale_hold.store(cfg.fpnb_stale_hold, Ordering::SeqCst);
-        // dip37b the SKIP-2 gate's start mode (the ledger control file's "skip2" key overrides it)
-        w.gs.s2_mode.store(cfg.skip2_live, Ordering::SeqCst);
-        if cfg.skip2_live != 0 { eprintln!("DIP PRESEND LIVE SKIP-2 GATE (dip37b): {} LIVE: a send whose skip2 verdict says skip is WITHHELD (fail open without a fresh verdict)", mode_str(cfg.skip2_live)); }
-        if cfg.fpnb_stale_hold > 0 { eprintln!("DIP PRESEND LIVE FP-NOBOT STALE HOLD (dip37): no fresh verdict -> the send is held when the window's last verdict blocked and is <= {} slots old", cfg.fpnb_stale_hold); }
         if let Some(p) = &cfg.fpnb_control { w.ctl = Some((p.clone(), None, Instant::now())); w.ctl_check(true); }
         let gs = w.gs.clone();
         eprintln!("DIP PRESEND LIVE FP-NOBOT LIVE GATE: {} (control file {}){}", mode_str(gs.mode.load(Ordering::SeqCst)), cfg.fpnb_control.as_deref().unwrap_or("none"),
@@ -664,13 +587,6 @@ impl Fp {
         let a = |x: &[AtomicU64; 2]| serde_json::json!({"t2": x[0].load(Ordering::Relaxed), "rearm": x[1].load(Ordering::Relaxed)});
         j["gate"] = serde_json::json!({"mode": mode_str(g.mode.load(Ordering::Relaxed)), "withheld": a(&g.withheld), "passed": a(&g.passed), "open_stale": a(&g.open_stale),
             "open_err": g.open_err.load(Ordering::Relaxed)});
-        // dip37: only with the stale hold on
-        let n = g.stale_hold.load(Ordering::Relaxed);
-        if n > 0 { j["gate"]["stale_hold"] = n.into(); j["gate"]["withheld_stale"] = a(&g.withheld_stale); }
-        // dip37b: only when the SKIP-2 gate ran
-        if g.s2_mode.load(Ordering::Relaxed) != 0 || (0..2).any(|k| g.s2_withheld[k].load(Ordering::Relaxed) + g.s2_stale[k].load(Ordering::Relaxed) > 0) {
-            j["skip2_gate"] = serde_json::json!({"mode": mode_str(g.s2_mode.load(Ordering::Relaxed)), "withheld": a(&g.s2_withheld), "stale": a(&g.s2_stale), "open": a(&g.s2_open)});
-        }
         j
     }
 
@@ -697,12 +613,6 @@ impl Fp {
         format!(" | FP-NOBOT({}) arms {} (would hold {}), fills {} (would block {}), not covered {}, list n={} | gate T2/re-arm: withheld {} passed {} open(stale) {} open(err) {}",
             match mode_str(g.mode.load(Ordering::Relaxed)) { "off" => "log", m => m }, st.arms, st.arm_blocks, st.fills, st.fill_blocks, st.not_covered, st.list["n"],
             l(&g.withheld), l(&g.passed), l(&g.open_stale), g.open_err.load(Ordering::Relaxed))
-            // dip37: only with the stale hold on
-            + &if g.stale_hold.load(Ordering::Relaxed) > 0 { format!(" withheld(stale<={}) {}", g.stale_hold.load(Ordering::Relaxed), l(&g.withheld_stale)) } else { String::new() }
-            // dip37b: only when the SKIP-2 gate is (or was) live
-            + &if g.s2_mode.load(Ordering::Relaxed) != 0 || (0..2).any(|k| g.s2_withheld[k].load(Ordering::Relaxed) + g.s2_stale[k].load(Ordering::Relaxed) > 0) {
-                format!(" | SKIP-2 gate({}) T2/re-arm: withheld {} stale {} open {}", mode_str(g.s2_mode.load(Ordering::Relaxed)), l(&g.s2_withheld), l(&g.s2_stale), l(&g.s2_open))
-            } else { String::new() }
     }
 }
 

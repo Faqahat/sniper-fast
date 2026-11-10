@@ -1,6 +1,6 @@
 # haqq's strategy and DV8 (agent, 10-28 ~01:00 PKT)
 
-Saved by the main session from the agent's reply (the harness blocked the agent's report write). Window: 10-26 23:15 → 10-27 23:15 PKT. Tables are in /home/moiz/sniper-data/haqq_strat/s*.txt.
+Saved by the main session from the agent's reply (the harness blocked the agent's report write). Window: 10-26 23:15 → 10-27 23:15 PKT. Tables are in /home/it/sniper-data/haqq_strat/s*.txt.
 
 ## haqq (MEASURED)
 - +28.1 SOL/24 h net, from ~5,700 lots of ~0.4 SOL each.

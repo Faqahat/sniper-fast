@@ -215,7 +215,7 @@ all were time exits, and there are none among the regular fills. Engine P&L basi
   - `calib065.py`: live exit triggers and delays;
   - `run065.py`: all sizes and stress tests;
   - `failcheck.py`, `wallet.py`, `paper.py`, `paperrun.py`, `notrade.py`, `summary.py`.
-- **Data** (`/home/moiz/sniper-data/replay065/`):
+- **Data** (`/home/it/sniper-data/replay065/`):
   - `live/`: run files, md5 = server;
   - `tape.pkl`, `args_hold.jsonl`;
   - `results.json`: per trade, every size;

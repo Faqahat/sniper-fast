@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # every dump our engine logged in runs 1-5 -> race summary with all buy attempts in [S, S+5] (read-only)
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/headtohead/work")
+sys.path.insert(0, "/home/it/sniper/ops/agents/headtohead/work")
 from race import *
 from fires_analysis_lib import kind, txinfo
 R = json.load(open(W + "/runs.json"))

@@ -3,11 +3,11 @@
 # (send path from tip recipients, priority, CU limit / used, own router program?, Lighthouse guard?) and the wallet's last 1000
 # txs (fail rate, and how many of its successful buys are pump buys via its own program vs direct).
 import json, collections, importlib.util, statistics
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 KNOWN = {"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": "pump", "ComputeBudget111111111111111111111111111111": "cb", "11111111111111111111111111111111": "system",
          "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL": "ata", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": "token22", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": "token",
          "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95": "lighthouse", "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr": "memo"}
-rows = [r for r in json.load(open("/home/moiz/sniper/ops/dip/speed/miss_analysis.json")) if r.get("cross_sig")]
+rows = [r for r in json.load(open("/home/it/sniper/ops/dip/speed/miss_analysis.json")) if r.get("cross_sig")]
 wallets = {}
 for r in rows:
     t = S.rpc("getTransaction", [r["cross_sig"], {"encoding": "json", "maxSupportedTransactionVersion": 0}])

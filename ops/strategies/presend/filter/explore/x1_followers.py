@@ -3,12 +3,12 @@
 Uses the exact replay's data (replay065: pos_cal.pkl, tape.pkl). Prints tables only."""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core
 D = core.Data()
 PS, RG, RF = pickle.load(open(f"{core.BASE}/pos_cal.pkl", "rb"))
-coh = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
-cw = set(json.load(open("/home/moiz/sniper/ops/overnight/dip/drop_cw.json")))
+coh = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
+cw = set(json.load(open("/home/it/sniper-data/overnight/dip/drop_cw.json")))
 OUR = "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"; FRA = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"
 RENT = 1_508_820
 rows = []
@@ -45,4 +45,4 @@ print("repeat whales:", [(w, c, round(sum(r['net'] for r in rows if r['whale'] =
 nets = np.array([r["net"] for r in rows])
 print("net pcts", np.percentile(nets, [5, 10, 25, 50, 75, 90, 95]).round(4), "wins", (nets > 0).sum(), "of", len(nets))
 print("n between: no-trade", sum(1 for r in rows if r['nb'] == 0), " |net|<0.004 & traded", sum(1 for r in rows if r['nb'] > 0 and abs(r['net']) < 0.004))
-json.dump(rows, open("/home/moiz/sniper-data/presend_filter/x1_rows.json", "w"))
+json.dump(rows, open("/home/it/sniper-data/presend_filter/x1_rows.json", "w"))

@@ -4,7 +4,7 @@
 # follow in one, is it the SAME bundle (= dump + buy executed as one bundle), the bundle's size / tipper / tip.
 # usage: python3 -I i10_jito_sample.py CLASSES.json OUT.json [seed]
 import sys, json, random, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/instant")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/instant")
 import jito_api as J
 C = json.load(open(sys.argv[1])); outp = sys.argv[2]; random.seed(int(sys.argv[3]) if len(sys.argv) > 3 else 7)
 def fam969(r): return r["cup"] == 500 and r["cul"] == 200000 and not r["tsv"]

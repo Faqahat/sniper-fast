@@ -128,7 +128,7 @@ SOL per band (not per day), TEST bands, today → learned:
 - Otherwise sell at slot s_in + 4 (today, hold 5).
 - Uses only our own trade feed for the token. Same decisions as the study rule on 99.95% of paths (the rest: our buy at index 0 of its slot).
 
-**Learned exit (shadow only):** bundle `/home/moiz/sniper-data/exits/exit_learned_ens3.json`.
+**Learned exit (shadow only):** bundle `/home/it/sniper-data/exits/exit_learned_ens3.json`.
 - Contents: 53 features with definitions, 3 × ~275 depth-3 trees, bin edges as exact floats.
 - At each slot k = 1–19 after our buy: score = mean of the 3 models = predicted SOL gain from holding. SELL if ≤ 0.0005 SOL. Forced sell at slot 20.
 - Features, all from our own feed (no RPC):
@@ -175,12 +175,12 @@ SOL per band (not per day), TEST bands, today → learned:
 - **Decisions once per slot:** trade-by-trade triggers were only tried as TP / SL / trailing stops (all ≈ or worse than today).
 
 ## Files
-- **Code:** `/home/moiz/sniper/ops/dip/exits/` (`run_all.sh` rebuilds models and tables).
+- **Code:** `/home/it/sniper/ops/dip/exits/` (`run_all.sh` rebuilds models and tables).
   - e00 build + selftest, e01 dumps, e02 paths, e03 baselines, e04 / e04b / e04c learned models, e05 report;
   - e06 / e07 live fills, e08 crowd-hold rules, e09 trees, e10 hold-rule choice, e11 thresholds;
   - e12 +crowd, e13 halves, e14 cut choice, e15 reversed fold, e16 final tables, e17 export;
   - libraries: `exit_lib.py`, `e_eval.py`, `e_apply.py`, `e_gbdt.py`, `gbdt_np.py`, `e04b_learn_labels.py`.
-- **Data:** `/home/moiz/sniper-data/exits/`
+- **Data:** `/home/it/sniper-data/exits/`
   - tapes A/ and B/, dumps.npz; paths/ (paths2.npz, paths2_crowd.npz, paths_live.npz);
   - models: e04b_*_model.pkl, e04b_ENS3_model.pkl, exit_learned_ens3.json;
   - printouts: e16_final.txt (the tables above), e05_report.txt, e07_live.txt, e11_theta.txt, e13_split.txt, e15_reverse.txt, e03_baselines.txt, e08_rules.txt, e09_h1248.txt, e10_select.txt, e12_crowd.txt, e14_cut.txt.

@@ -1,5 +1,5 @@
 import json, collections, random, datetime as dt
-D = "/home/moiz/sniper-data/presend_filter/daily"
+D = "/home/it/sniper-data/presend_filter/daily"
 W = json.load(open(f"{D}/pw8.json")) + json.load(open(f"{D}/pw26.json"))
 H = 3600e9; PKT = 5 * 3600e9
 for w in W:

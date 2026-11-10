@@ -11,7 +11,7 @@
 - Size is not chosen: every size is shown on TEST.
 
 Analyst task. Offline replay only: nothing sent, nothing written on a server, no engine or existing file changed. MEASURED = live records, engine code or the chain recording. INFERRED = replay output. Times PKT.
-Code + every table: /home/moiz/sniper/ops/strategies/presend/rearm2/ (tables.md = full output; wsim2.py = rsim + the changes below; run.py = day runs; rep*.py = tables). Working data: scratchpad rearm2/ (tapes, results).
+Code + every table: /home/it/sniper/ops/strategies/presend/rearm2/ (tables.md = full output; wsim2.py = rsim + the changes below; run.py = day runs; rep*.py = tables). Working data: scratchpad rearm2/ (tapes, results).
 
 ## Verdict: FAIL on the pre-registered bar (narrowly). Do not build it on this evidence.
 | Bar | R0 (owner's rule) | R2 (TRAIN-best: 10-slot window) |

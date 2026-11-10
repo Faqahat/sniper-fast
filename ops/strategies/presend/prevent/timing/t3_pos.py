@@ -3,10 +3,10 @@
 first buy (slot, bt), buys before the first sell (n, tokens, SOL cost), the FIRST SELL after it (slot, bt, tokens, SOL, fraction of the
 balance, exec-price multiple vs the average buy price, curve SOL before the sell), number of sells, last trade slot, creator flag,
 the mint's create slot.  hold = first sell slot - first buy slot (slots).  Also every sell of the position (for ladders): dt, frac, mult.
-Out: /home/moiz/sniper-data/prevent/timing/pos.npz + sells.npz"""
+Out: /home/it/sniper-data/prevent/timing/pos.npz + sells.npz"""
 import json, pickle
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/timing"
+D = "/home/it/sniper-data/prevent/timing"
 A = dict(np.load(f"{D}/hist.npz")); I = json.load(open(f"{D}/hist_ids.json")); MN = I["mint"]; UN = I["user"]
 CR = pickle.load(open(f"{D}/creates_all.pkl", "rb"))
 o = np.lexsort((A["j"], A["idx"], A["slot"], A["mint"], A["user"]))

@@ -3,7 +3,7 @@
 # dump = sell >= 1 SOL on a token <= 10 min old; race metrics with a 0.35 SOL +5% reference buy.
 import os, sys, json, gzip, glob, zlib, collections
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"
+D = "/data/tapes/collect"
 SETS = [("run_20261022_1543", "phaseA_selfwd"), ("run_20261023_1426", "phaseA_r3day")]
 SOL_IN = 345679011
 def tok_out(V, T, x): return T - (V * T + (V + x) - 1) // (V + x)

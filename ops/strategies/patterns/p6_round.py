@@ -5,10 +5,10 @@
 #   python3 p6_round.py eval            -> registry.json (+ train results)
 #   python3 p6_round.py prompt r2 [n]   -> llm/req_r2.jsonl (submit with p3_llm.py submit r2)
 import sys, os, json, glob, random, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
 import p3_llm as L3
-PO = "/home/moiz/sniper-data/strategies/patterns"; WK = f"{PO}/llm"
+PO = "/home/it/sniper-data/strategies/patterns"; WK = f"{PO}/llm"
 REG = f"{PO}/registry.json"
 
 def registry():

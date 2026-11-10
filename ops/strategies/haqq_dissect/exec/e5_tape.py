@@ -5,9 +5,9 @@
      after his buy = he was in before the dump: pre-send-like); same for our fills.
 Out: sniper-data/haqq_dissect/exec/t5_tape.txt"""
 import sys, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-D = "/home/moiz/sniper-data/haqq_dissect/exec"
+D = "/home/it/sniper-data/haqq_dissect/exec"
 T = np.load(f"{L.TAB}/trades.npy", mmap_mode="r")
 sl = np.asarray(T["slot"], np.int64); ix = np.asarray(T["idx"], np.int64); mint = np.asarray(T["mint"]); sg = np.asarray(T["signer"]); us = np.asarray(T["user"])
 buy = np.asarray(T["buy"]); sol = np.asarray(T["sol"], np.float64) / 1e9; bt = np.asarray(T["bt"], np.int64)

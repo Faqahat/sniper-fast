@@ -8,12 +8,12 @@ The first try (in arrival time) after the sell is the landing; each try keeps it
 (coordinate c = slot*SMS + idx share of the slot, SMS 213 ms MEASURED) moved earlier by the ms it saves; the dump's position is exact.
 Check row 'time1' (factor 1) must equal 'cur'.
 Sells: decision t -> land rx scaled by the same factor; new landing slot/pos from the same clock.
-Out: /home/moiz/sniper-data/speed35/scen.pkl {run: {setting: {"scen": [((doff, idx), w)], "mix": [(h, pos, w)], ...}}}"""
+Out: /home/it/sniper-data/speed35/scen.pkl {run: {setting: {"scen": [((doff, idx), w)], "mix": [(h, pos, w)], ...}}}"""
 import json, pickle, collections, numpy as np
-D = "/home/moiz/sniper-data/speed35"; SMS = 213.0
+D = "/home/it/sniper-data/speed35"; SMS = 213.0
 B = pickle.load(open(f"{D}/rows.pkl", "rb")); TAPES = B["tapes"]; MAXI = B["maxi"]
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
-RUNS = {"r36": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r36.jsonl", "r37": f"{D}/dip_ams_r37.jsonl"}
+RUNS = {"r36": "/home/it/sniper-data/runs/ams/runs/dip_ams_r36.jsonl", "r37": f"{D}/dip_ams_r37.jsonl"}
 def mx(s): return MAXI.get(s, 400)
 def cc(s, i): return s * SMS + (i + 0.5) / (mx(s) + 1.0) * SMS
 def pos_of(c):

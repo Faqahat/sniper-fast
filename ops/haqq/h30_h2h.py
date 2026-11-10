@@ -6,18 +6,18 @@
 # attempt within 400 ms and before the next outside sell >= 1 SOL; delay, order vs ours, price ratio, its lot P&L with its real exit).
 # Output: sniper-data/haqq/h2h_fires.json
 import sys, json, glob, pickle, zlib, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 SS = {}
 for run in ("R1", "R2", "R3", "R4"):
     for k, v in json.load(open(f"{H.OUT}/slotmax_{run}.json")).items(): SS[int(k)] = max(SS.get(int(k), 0), v + 1)
 def A(s, i): return s * H.SMS + i / max(SS.get(int(s), 400), int(i) + 1) * H.SMS
 WAL = {"FRA": "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "AMS": "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
-COH = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
+COH = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
 DYX = "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw"
 lots = json.load(open(f"{H.OUT}/lots.json"))
 LOTIX = {(l["m"], l["buy"]["s"], l["buy"]["i"]): li for li, l in enumerate(lots)}
 fires = []
-for srv, pat in (("FRA", "/home/moiz/sniper-data/runs/fra/runs/dip_r{}.jsonl"), ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r{}.jsonl")):
+for srv, pat in (("FRA", "/home/it/sniper-data/runs/fra/runs/dip_r{}.jsonl"), ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r{}.jsonl")):
     for run in range(9, 15):
         f = pat.format(run)
         try: fh = open(f)

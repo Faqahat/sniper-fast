@@ -7,7 +7,7 @@
 Out: sellid/s11.txt"""
 import pickle, json, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 SMS = 212.0
 out = []
 def P(*a):
@@ -49,9 +49,9 @@ def main():
               f"{R[m, 4].mean():.3f} / {R[m, 6].mean():.3f} ({R[m, 4].mean() / R[m, 6].mean():.2f} [{lo2:.2f}..{hi2:.2f}]) |")
     # (b)
     U = dict(np.load(f"{OUT}/s2_units.npz"))
-    ids = json.load(open("/home/moiz/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
-    fb = np.array(sorted(idm[w] for w in json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm))
-    co = np.array(sorted(idm[w] for w in json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")) if w in idm))
+    ids = json.load(open("/home/it/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
+    fb = np.array(sorted(idm[w] for w in json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm))
+    co = np.array(sorted(idm[w] for w in json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")) if w in idm))
     y = (U["gap"] <= 212).astype(float)
     strat = ((U["code"] - 247).astype(np.int64) * 2 + U["bu"]) * 100 + U["tb"].astype(np.int64) * 10 + U["sb"]
     _, inv = np.unique(strat, return_inverse=True); E = (np.bincount(inv, y) / np.bincount(inv))[inv]

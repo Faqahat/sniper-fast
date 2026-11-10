@@ -4,9 +4,9 @@
 tape). Both exits are re-simulated from our real landing position on the same curve walk (outside trades only, our own buy/sell
 removed), so the comparison is paired and model-consistent. The wave sell lands after the SAME fill's measured decision->land delay
 (real sell land - fill slot+2 boundary). Follower stress: each outside buy after our fill dropped w.p. cut (20 seeds).
-Out: /home/moiz/sniper-data/omen3/wave_real.json (per fill) + summary on stdout."""
+Out: /home/it/sniper-data/omen3/wave_real.json (per fill) + summary on stdout."""
 import json, glob, sys, numpy as np
-TP = "/home/moiz/sniper-data/wave37/tab"; AR = "/home/moiz/sniper-data/wave37"
+TP = "/home/it/sniper-data/wave37/tab"; AR = "/home/it/sniper-data/wave37"
 SMS = 212.5
 T = np.load(TP + "/trades.npy", mmap_mode="r"); MI = {m: i for i, m in enumerate(json.load(open(TP + "/mints.json")))}
 SL = np.load(TP + "/slots.npy", mmap_mode="r"); SLs = np.asarray(SL["slot"]); SLm = np.asarray(SL["maxi"])
@@ -83,7 +83,7 @@ for fn in sorted(glob.glob(AR + "/*_r*.jsonl")):
         dump = max([float(t["sol"][q]) for q in pre], default=0) / 1e9
         rows.append(dict(dump=dump, bt=int(t["bt"][kb]), tpw=sims[0.0][2] / 1e9, tpw20=sims[0.2][2] / 1e9, run=run, m=m, pnl=r["pnl"] / 1e9, why=c["exit_why"], held=ex[0] - s0, sout=float(c["sol_out_curve"]) * (1 - f) / 1e9,
                          base=sims[0.0][0] / 1e9, wave=sims[0.0][1] / 1e9, base20=sims[0.2][0] / 1e9, wave20=sims[0.2][1] / 1e9, dl=dl, sin=sin / 1e9))
-json.dump(rows, open("/home/moiz/sniper-data/wave37/wave37.json", "w"))
+json.dump(rows, open("/home/it/sniper-data/wave37/wave37.json", "w"))
 A = {k: np.array([r[k] for r in rows]) for k in ("base", "wave", "base20", "wave20", "sout", "pnl")}
 n = len(rows); print("fills", n, "model err base vs real sout mSOL med/p90abs", np.median(A["base"] - A["sout"]) * 1e3, np.percentile(abs(A["base"] - A["sout"]), 90) * 1e3)
 for lab, a, b in (("0%", "base", "wave"), ("-20%", "base20", "wave20")):

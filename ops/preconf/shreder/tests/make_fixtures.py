@@ -14,7 +14,7 @@ def rpc(method, params):
     except Exception as e:
         print("rpc error:", type(e).__name__); return None
 
-runs = sorted(glob.glob("/home/moiz/sniper-data/collect/run_*/txs/*.jsonl.gz"))
+runs = sorted(glob.glob("/data/tapes/collect/run_*/txs/*.jsonl.gz"))
 cands = []
 with gzip.open(runs[-2], "rt") as f:
     for line in f:

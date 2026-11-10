@@ -1,9 +1,9 @@
 """pos helpers (read-only)."""
 import pickle, sys, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/pos"
+OUT = "/home/it/sniper-data/haqq_dissect/pos"
 DAYS = list(range(0, 7))
 
 

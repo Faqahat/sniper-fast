@@ -23,7 +23,7 @@ NS = [0, 2, 5, 20, 100]; STOPS = [None, 0.10, 0.20, "pd0.3", "pd0.5"]; TOS = [30
 EXITS = [(n, s, to) for n in NS for s in STOPS for to in TOS]
 CKS = [10, 20, 30, 60, 120]
 
-lc = json.load(open("/home/moiz/sniper-data/dipml/livecal.json"))
+lc = json.load(open("/home/it/sniper-data/dipml/livecal.json"))
 d = np.array(lc["deltas"], float); d = d * (MED_MS / (np.median(d) * 212.07))
 DLY = np.quantile(d, (np.arange(10) + 0.5) / 10); PAIR = [(j, (3 * j + 1) % 10) for j in range(10)]
 T = Tape()

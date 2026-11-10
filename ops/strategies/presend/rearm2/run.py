@@ -5,7 +5,7 @@ usage: run.py DAY --draws N [--scen base,R0,...] [--primary 0.65:0.2] [--procs 1
 import sys, os, pickle, time, argparse, collections, math
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/density")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/density")
 import rlib, sim, dsim, drun, s48lib, wsim2
 from multiprocessing import Pool
 W = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/rearm2"

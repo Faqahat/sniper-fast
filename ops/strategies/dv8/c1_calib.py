@@ -12,7 +12,7 @@ Calibration per fill = realized - A_tm (what the universe replay misses after en
 Out: dv8/c1.txt, dv8/c1_rows.pkl"""
 import json, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
 out = []
 def P(*a):

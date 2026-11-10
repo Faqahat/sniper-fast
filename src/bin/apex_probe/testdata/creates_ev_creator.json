@@ -1,0 +1,511 @@
+{
+"note": "real create_v2 txs (getTransaction) + the collector's launches.jsonl record (CreateEvent user/creator); run_20261103_1245",
+"creates": [
+{
+"kind": "holder_reward",
+"rec": {
+"name": "pairless",
+"symbol": "pairless",
+"uri": "https://metadata.j7tracker.io/metadata/c1c05e7f517d41c9.json",
+"mint": "67n7iCWu3iXTPhK9m9GHK81weRc4w6JtAyXMnqVwpump",
+"bonding_curve": "DHqrBgVnRquCprkf9YV1kVp1SrAdGaw2T2A98ZfZZwXd",
+"user": "75HPJgTte5iynyTUhAJwLKoBYE6AfAo57yjU3S5mAVtR",
+"creator": "5rKx6eaPfo2VBuD7bWXiTsnSPEfR1A5TbkgqkfZbVYN4",
+"slot": 464996702,
+"idx": 381,
+"bt": 1793729902,
+"sig": "2UFoWstcqq9YhVsVaCbA4xfs6oUmisAU8kTTxoZ4qF2Gw82TAQHZmmiHbgptxgAFeRs5F6TkSjgJRmzcNGbvQvYc",
+"payer": "75HPJgTte5iynyTUhAJwLKoBYE6AfAo57yjU3S5mAVtR",
+"err": null,
+"fee": 110000,
+"ixn": [
+"CreateV2",
+"InitializeMint2",
+"GetAccountDataSize",
+"InitializeImmutableOwner",
+"InitializeAccount3",
+"MintTo",
+"SetAuthority",
+"GetAccountDataSize",
+"InitializeImmutableOwner",
+"InitializeAccount3",
+"BuyV3",
+"TransferChecked"
+]
+},
+"tx": {
+"sig": "2UFoWstcqq9YhVsVaCbA4xfs6oUmisAU8kTTxoZ4qF2Gw82TAQHZmmiHbgptxgAFeRs5F6TkSjgJRmzcNGbvQvYc",
+"keys": [
+"75HPJgTte5iynyTUhAJwLKoBYE6AfAo57yjU3S5mAVtR",
+"67n7iCWu3iXTPhK9m9GHK81weRc4w6JtAyXMnqVwpump",
+"MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e",
+"moonBtH9HvLHjLqi9ivyrMVKgFUsSfrz9BwQ9khhn1u",
+"nozAPxA4nBPVj8qg7Cx5Y3vVtoizLWrVLqaTZqVyV2j",
+"33NU7YtLoazLZEg1p1HdzPJEn9Jjag8GfHVnndPp4hVo",
+"A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+"AEtB3CEpSXNJMWj21u4HjZpRMP2yyXuUp1JSBtyYogaH",
+"AYtWqSM6NSJsQeFU11QjH5W3oorpbBngGspRvnijswd5",
+"BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s",
+"C8dMyA3kExTv2Z6e7QvbDHrkmiWjrgmFGMw3i7TXM7WV",
+"DHqrBgVnRquCprkf9YV1kVp1SrAdGaw2T2A98ZfZZwXd",
+"Dg6stCqP59kP2uN4pU283BWKuW5XE8u8R77PBGdzzm7f",
+"FqXe2cEikKiP2fcnL38K85oxm5nbnUsxzWeTf9ABGQ6K",
+"Gu1j3ZRm38Jrfcxv2rREWWhJtUSLS3rkXiLhY3x9Aw52",
+"11111111111111111111111111111111",
+"13ec7XdrjF3h3YcqBTFDSReRcUFwbCnJaAQspM4j6DDJ",
+"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+"So11111111111111111111111111111111111111112",
+"SysvarRent111111111111111111111111111111111",
+"TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM",
+"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+"TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+"4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+"8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+"ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+"Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1"
+],
+"lw": [],
+"lr": [],
+"hdr": [
+2,
+0,
+12
+],
+"ixs": [
+[
+17,
+[
+1,
+20,
+11,
+5,
+23,
+0,
+15,
+22,
+25,
+2,
+16,
+9,
+10,
+8,
+26,
+17
+],
+"1pBM7F+LMbQIAAAAcGFpcmxlc3MIAAAAcGFpcmxlc3M8AAAAaHR0cHM6Ly9tZXRhZGF0YS5qN3RyYWNrZXIuaW8vbWV0YWRhdGEvYzFjMDVlN2Y1MTdkNDFjOS5qc29uWj74i79tQq2ypskYQi8QF7lb5P72LyIbd4RtmGkQ/H4AAAAAAAAAAAAAAQ=="
+],
+[
+25,
+[
+0,
+7,
+0,
+1,
+15,
+22,
+19
+],
+"AQ=="
+],
+[
+17,
+[
+23,
+1,
+18,
+22,
+21,
+11,
+5,
+14,
+0,
+7,
+12,
+13,
+24,
+6,
+15,
+26,
+17
+],
+"BwUdxPUXZVCSlIycaYsAAABX00cBAAAA"
+],
+[
+15,
+[
+0,
+4
+],
+"AgAAAFAMSwMAAAAA"
+],
+[
+15,
+[
+0,
+3
+],
+"AgAAAKAlJgAAAAAA"
+]
+]
+}
+},
+{
+"kind": "args_creator_not_signer",
+"rec": {
+"name": "TGG \u30a8\u30df\u30ea\u30fc STRATEGY",
+"symbol": "T\u30a8SC",
+"uri": "https://ipfs.io/ipfs/bafkreigorbjuunjac3dxqzlflphzcgveuud5qkgaabdhal6crhyn4awtku",
+"mint": "ftvyznsAawBZoavat2a8idpPrKFq2pkAqFAmbF3pump",
+"bonding_curve": "AiutREDsZYuMEAZbuBfDZNjrNeQLvtAPm5eux8dViR6q",
+"user": "3kiJg27NFPUkq5dUcXVX3DHkrQkpsi2eJBQXk5hiZFLf",
+"creator": "GLxVpAcrucgvpfmSPNsxdurdyxNNsXqGayqT548g4BpB",
+"slot": 464904617,
+"idx": 339,
+"bt": 1793710124,
+"sig": "4xnwVTvRKiQwe7AmWdzkPXceVttiTZVMk8oo9eY8SnE58mWy9aX8niLqFWJNy7okvTMPJKJ8nhYEapDBR7meC8gm",
+"payer": "3kiJg27NFPUkq5dUcXVX3DHkrQkpsi2eJBQXk5hiZFLf",
+"err": null,
+"fee": 15000,
+"ixn": [
+"CreateV2",
+"InitializeMint2",
+"GetAccountDataSize",
+"InitializeImmutableOwner",
+"InitializeAccount3",
+"MintTo",
+"SetAuthority",
+"GetAccountDataSize",
+"InitializeImmutableOwner",
+"InitializeAccount3",
+"BuyV2",
+"GetFeesWithQuoteMint"
+]
+},
+"tx": {
+"sig": "4xnwVTvRKiQwe7AmWdzkPXceVttiTZVMk8oo9eY8SnE58mWy9aX8niLqFWJNy7okvTMPJKJ8nhYEapDBR7meC8gm",
+"keys": [
+"3kiJg27NFPUkq5dUcXVX3DHkrQkpsi2eJBQXk5hiZFLf",
+"ftvyznsAawBZoavat2a8idpPrKFq2pkAqFAmbF3pump",
+"KfHbT5Jrr5SV3CDkQVCLiSNWyVv5DmuVaCzbAHrzMFQ",
+"u8kwSjdusWwhDGtteHjswHgiuDYZfWotaNetwQSnGt9",
+"4ACfpUFoaSD9bfPdeu6DBt89gB6ENTeHBXCAi87NhDEE",
+"6sEZ3WkmRwbHUrG964JLqKfNKBsnsEWKMzRZf6QrRsri",
+"8C7FvcWnoDcLzAVGdknCevGvnYJHTN2axBbREnDhDcK8",
+"8dMY3Dq9XTSxfDwqU8ABCJcM3Zw4gNB7peLD6AQj4ykm",
+"9BE95DiHpd1v2wBJSAVjfTr7xhVCYYSKG6LZGcqGZc18",
+"9Da4VM2TRJv4BCph9WXhBESfTpYnTrckQYG74EwpnFZC",
+"A2QnxasBPc93FiFWYfw6WhNU8fKFMsRrHJ6A5qrpGYm7",
+"A5dYD3VPjFGf7FtZBDVTWBU6QejP4GrxdamZjJkUMSGN",
+"AiutREDsZYuMEAZbuBfDZNjrNeQLvtAPm5eux8dViR6q",
+"BKU3HhtayU2SrR2gEZWENMRkLr2TqxXgTQ8yQ4JeR3wM",
+"HsXJmTTcGfSb9HsNzjXBQhYivyU2QHw2AcZBjMgznhnE",
+"11111111111111111111111111111111",
+"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+"ComputeBudget111111111111111111111111111111",
+"7iPRsAzbRVwxA94tVt6X56Ktst1BtGe8KgnxxiJXjS64",
+"ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+],
+"lw": [
+"9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+"MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e",
+"BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s",
+"CGEWR6pxwgQvYKeX4pZDqpZtWYPvyTjiAsw86SNzJtGy",
+"CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM",
+"GAFuhgcd328SkkBYHpfadzmef9hTGAFRCi9QoCnsZQug"
+],
+"lr": [
+"13ec7XdrjF3h3YcqBTFDSReRcUFwbCnJaAQspM4j6DDJ",
+"So11111111111111111111111111111111111111112",
+"TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM",
+"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+"TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+"jitodontfront111111111111111111nopainnogain",
+"pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+"4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+"8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+"Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+"Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y"
+],
+"hdr": [
+2,
+0,
+5
+],
+"ixs": [
+[
+17,
+[
+31
+],
+"AiChBwA="
+],
+[
+17,
+[],
+"AxAnAAAAAAAA"
+],
+[
+15,
+[
+0,
+2
+],
+"AgAAADcvAAAAAAAA"
+],
+[
+16,
+[
+1,
+28,
+12,
+11,
+33,
+0,
+15,
+30,
+19,
+21,
+26,
+22,
+9,
+3,
+35,
+16
+],
+"1pBM7F+LMbQZAAAAVEdHIOOCqOODn+ODquODvCBTVFJBVEVHWQYAAABU44KoU0NQAAAAaHR0cHM6Ly9pcGZzLmlvL2lwZnMvYmFma3JlaWdvcmJqdXVuamFjM2R4cXpsZmxwaHpjZ3ZldXVkNXFrZ2FhYmRoYWw2Y3JoeW40YXd0a3Xj/Bb1BRnDEG3yYR+D4hUn50C+83kzoqPNpGfXpdYgIAAAAAAAAAAAAAAA"
+],
+[
+19,
+[
+0,
+8,
+0,
+1,
+15,
+30
+],
+"AQ=="
+],
+[
+16,
+[
+33,
+1,
+27,
+30,
+29,
+19,
+24,
+23,
+20,
+25,
+12,
+11,
+13,
+0,
+8,
+5,
+14,
+7,
+18,
+36,
+10,
+6,
+34,
+32,
+15,
+35,
+16
+],
+"uBfuYWfF0z3D39zKEwAAAP//////////"
+],
+[
+15,
+[
+0,
+4
+],
+"AgAAABAnAAAAAAAA"
+]
+]
+}
+},
+{
+"kind": "plain",
+"rec": {
+"name": "WINTER IS LOADING",
+"symbol": "Frost",
+"uri": "https://ipfs.io/ipfs/QmUTts1pDFbZeNDY31uHr6Ls7CaW6KXqzkMcxLZ1HDGgrj",
+"mint": "Dqfo4hH2h8jm6w7pVtgDFDBYiXyNWaCfYA7TKC4bpump",
+"bonding_curve": "5eTtm2bWizWGq6jyrMYQzwA1rcbhb1MXe8329gQoKACD",
+"user": "DHvDE4oWxWFbEWyCSZ9BkYbjCmoL5dF71BuVyJqkBeL5",
+"creator": "DHvDE4oWxWFbEWyCSZ9BkYbjCmoL5dF71BuVyJqkBeL5",
+"slot": 464903594,
+"idx": 105,
+"bt": 1793709905,
+"sig": "24XcQCP36vnkHaZC8GJjW8MTamLSmMMKxQposHsjVAtJop3ZBZxtE9tY3fzyRuXPcW2SokTxkrqvkgzqgvV27qzV",
+"payer": "DHvDE4oWxWFbEWyCSZ9BkYbjCmoL5dF71BuVyJqkBeL5",
+"err": null,
+"fee": 15000,
+"ixn": [
+"CreateV2",
+"InitializeMint2",
+"GetAccountDataSize",
+"InitializeImmutableOwner",
+"InitializeAccount3",
+"InitializeMayhemState",
+"GetAccountDataSize",
+"InitializeImmutableOwner",
+"InitializeAccount3",
+"MintTo",
+"MintTo",
+"SetAuthority"
+]
+},
+"tx": {
+"sig": "24XcQCP36vnkHaZC8GJjW8MTamLSmMMKxQposHsjVAtJop3ZBZxtE9tY3fzyRuXPcW2SokTxkrqvkgzqgvV27qzV",
+"keys": [
+"DHvDE4oWxWFbEWyCSZ9BkYbjCmoL5dF71BuVyJqkBeL5",
+"Dqfo4hH2h8jm6w7pVtgDFDBYiXyNWaCfYA7TKC4bpump",
+"KfHbT5Jrr5SV3CDkQVCLiSNWyVv5DmuVaCzbAHrzMFQ",
+"MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e",
+"MecNDG7dY1BoxAEzdSAMbXDjQv5G9N3FcCqJrnFwdRD",
+"rKkJ2yVetRA6WNcciwkmiyWMK7tUGaJnB2Spspwwxdt",
+"4vieeGHPYPG2MmyPRcYjdiDmmhN3ww7hsFNap8pVN3Ey",
+"5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+"5eTtm2bWizWGq6jyrMYQzwA1rcbhb1MXe8329gQoKACD",
+"5mgvGc92o8sTT4FTkeY5vuUUNfjReQkvXjb11cmsBqwC",
+"6MGZrJArpDyDnbrDQqxURuxA2QLXn6HJ8M7uo9TLsX6X",
+"6UEkMCbKBzAKyx5ceBJQekVFB9LLLoHWTFUzLsEYtcDK",
+"8QtGUYBXekeGrarg2ZmjbWCCnsxyUA2mQ2waw5YXFKR4",
+"8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR",
+"8pqjMBggEAhuGE2iBy1JwTas2xiPvJZRLTt4sQctx6dp",
+"9mLFBpFiRB7EyikPnhctWk7RCfrqHKgyu5HyR4Ara1LE",
+"9tvBjCQ4m3954ESgxW9PnBPvW8afHEjKpkNEAdfN2D8U",
+"ABFbZvcCnZ9kXyqHjx8rNGpH3ET4LmsvkBoCJqqUumu8",
+"AMLvTdCd5P2ueVwLptuqiacNMe2boXdXHbpgBxMFv6hq",
+"BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s",
+"DS56bTejibG4gQ9GbQBGkUEEstGFRWMzVEdcL1MDhY92",
+"GYH1Gae1wJytMSvMvw8JVcv7nuAbxi8i9erNVbERnzXd",
+"11111111111111111111111111111111",
+"13ec7XdrjF3h3YcqBTFDSReRcUFwbCnJaAQspM4j6DDJ",
+"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+"So11111111111111111111111111111111111111112",
+"TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM",
+"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+"TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+"pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+"4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+"7jkJcFMp4fM49Hx3yGcZcfaWLZjzyUBSwotePkxnwwVw",
+"8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+"ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+"AewzNcBELeSfJ2TqC4jEDnQDwz2sceoPvAss4Y8Rv8nv",
+"Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+"Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+"jitodontfront111111111111111111nopainnogain"
+],
+"lw": [],
+"lr": [],
+"hdr": [
+2,
+0,
+16
+],
+"ixs": [
+[
+22,
+[
+0,
+10,
+31
+],
+"AgAAAANkAQAAAAAA"
+],
+[
+22,
+[
+0,
+2
+],
+"AgAAAFpRAgAAAAAA"
+],
+[
+24,
+[
+1,
+26,
+8,
+9,
+30,
+0,
+22,
+28,
+33,
+3,
+23,
+19,
+14,
+15,
+35,
+24
+],
+"1pBM7F+LMbQRAAAAV0lOVEVSIElTIExPQURJTkcFAAAARnJvc3RDAAAAaHR0cHM6Ly9pcGZzLmlvL2lwZnMvUW1VVHRzMXBERmJaZU5EWTMxdUhyNkxzN0NhVzZLWHF6a01jeExaMUhER2dyarahs6F6zirT1TlJZLYiMBPUk9sX1VVDKVqU7fFnHpIGAQAAAAAAAAAAAAA="
+],
+[
+33,
+[
+0,
+17,
+0,
+1,
+22,
+28
+],
+"AQ=="
+],
+[
+24,
+[
+30,
+1,
+25,
+28,
+27,
+33,
+13,
+16,
+7,
+21,
+8,
+9,
+4,
+0,
+17,
+20,
+12,
+11,
+34,
+36,
+18,
+5,
+32,
+29,
+22,
+35,
+24
+],
+"uBfuYWfF0z21DM/G6wEAAP//////////"
+],
+[
+22,
+[
+0,
+6
+],
+"AgAAAEBCDwAAAAAA"
+]
+]
+}
+}
+]
+}

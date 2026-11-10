@@ -1,7 +1,7 @@
 # join focus-wallet lots (phaseA, with trigger) + raw tx rows (relays, cup, tips) + race rank + leader of the slots
 import json, gzip, collections
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
-LB = json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json"))
+B = "/home/it/sniper/ops/agents/topearners/work/"
+LB = json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json"))
 LEAD = LB["leaders"]; NODES = LB["nodes"]
 tx = {}
 for line in gzip.open(B + "txrows.jsonl.gz", "rt"):

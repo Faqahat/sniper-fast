@@ -4,9 +4,9 @@
 # (epoch-1067 schedule) and keeps a dump only on the server whose near list holds that leader (where it could be traded),
 # then counts: M2 would-buys, IMIT1 picks, overlap, real fills and P&L, M2 timing. Usage: m2_progress.py [fra_run ams_run]
 import json, subprocess, sys, time, statistics as st, collections
-RUNS = {"fra": ("84.32.100.36", f"dip_r{sys.argv[1] if len(sys.argv) > 1 else 14}"), "ams": ("84.32.104.202", f"dip_ams_r{sys.argv[2] if len(sys.argv) > 2 else 13}")}
-SCH = json.load(open("/home/moiz/sniper-data/competitors2/schedule_1067.json"))
-NEAR = {r: {l.strip() for l in open(f"/home/moiz/sniper/ops/region/near_leaders_{r}.txt") if l.strip()} for r in ("fra", "ams")}
+RUNS = {"fra": ("cyberfra", f"dip_r{sys.argv[1] if len(sys.argv) > 1 else 14}"), "ams": ("cyberams", f"dip_ams_r{sys.argv[2] if len(sys.argv) > 2 else 13}")}
+SCH = json.load(open("/home/it/sniper-data/competitors2/schedule_1067.json"))
+NEAR = {r: {l.strip() for l in open(f"/home/it/sniper/ops/region/near_leaders_{r}.txt") if l.strip()} for r in ("fra", "ams")}
 def leader(s):
     i = s - SCH["start"]
     return SCH["ids"][SCH["slot_leader"][i]] if 0 <= i < len(SCH["slot_leader"]) else None

@@ -7,7 +7,7 @@
 Out: f7.txt"""
 import sys, time, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/follow")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/follow")
 import flib as FL
 import dv8lib as L
 from f4_wf import load, account, CI_FIT
@@ -39,7 +39,7 @@ def main():
     cvm = np.asarray(R["mint"])[CV["row"]].astype(np.int64); cvs = np.asarray(R["slot"])[CV["row"]].astype(np.int64)
     by = collections.defaultdict(list)
     for i, m in enumerate(cvm.tolist()): by[m].append(i)
-    Gd = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/gap/g2_engine.pkl", "rb"))
+    Gd = pickle.load(open("/home/it/sniper-data/haqq_dissect/gap/g2_engine.pkl", "rb"))
     vf, vm = [], []
     for run, Xr in Gd.items():
         if not Xr.get("ps_live"): continue

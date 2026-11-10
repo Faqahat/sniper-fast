@@ -16,9 +16,9 @@ our side: every wallet tx of FRA 2g7r / AMS Egxf (dv8/tab/ours.jsonl, SOL delta 
 Out: gap/g3_rows.pkl (per lot + per episode), gap/g3_*.txt"""
 import json, pickle, collections, sys, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 REG_MAP = {"far_leader": "near-only (far leader)", "spacing": "cooldown/fee budget", "paused": "cooldown/fee budget", "balance": "cooldown/fee budget",
            "open_on_token": "one-position busy", "max_open": "one-position busy", "presend_armed": "one-position busy",
            "presend_position": "one-position busy", "presend_position_open": "one-position busy"}

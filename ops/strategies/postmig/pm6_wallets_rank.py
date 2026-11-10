@@ -6,8 +6,8 @@
 # Output: wallets.json (per wallet per run stats) + printed shortlist of consistent winners.
 import json, pickle, collections, sys, os
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/postmig"
-COL = "/home/moiz/sniper-data/collect"
+OUT = "/home/it/sniper-data/strategies/postmig"
+COL = "/data/tapes/collect"
 RUNDIRS = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
 SMS = 212.0
 FARM = {"6tzAKfHtQA4zLwgaXn97kU5C1dYsKcRy8XZhZUWmWU23", "4G9JAzftaydKjB2558MLnkYw175KMN6NGGgyxkeRuwwA"}

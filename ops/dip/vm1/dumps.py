@@ -2,7 +2,7 @@
 """VM1 independent check, step 3: the dump table. Every envelope sell (>= 1 SOL, normal SOL curve, post-dump vsol
 25..200 SOL) with: window label (T1/T2 = VM1 training, U1..U4 = unseen, GB = 10-min guard band), hole flag,
 full-history flag, leader + near flags, my features (model semantics and plain reading) and VM1 scores.
-Writes /home/moiz/sniper-data/vm1/dumps.npz"""
+Writes /home/it/sniper-data/vm1/dumps.npz"""
 import json, numpy as np
 import core
 
@@ -38,11 +38,11 @@ if __name__ == "__main__":
     hole |= (slot - 300 < D.slot_lo) | (slot + 40 > D.slot_hi)
     full = D.full_hist[T["mint"][k]]
     ld = D.leader(slot)
-    fra = near_set("/home/moiz/sniper/ops/region/near_leaders_fra.txt", D.leader_ids)
-    ams = near_set("/home/moiz/sniper/ops/region/near_leaders_ams_nobam.txt", D.leader_ids)
+    fra = near_set("/home/it/sniper/ops/region/near_leaders_fra.txt", D.leader_ids)
+    ams = near_set("/home/it/sniper/ops/region/near_leaders_ams_nobam.txt", D.leader_ids)
     Xm = core.features(D, k, "model"); Xp = core.features(D, k, "plain")
     sm = M.score(Xm); sp = M.score(Xp)
-    np.savez("/home/moiz/sniper-data/vm1/dumps.npz", k=k, slot=slot, idx=T["idx"][k], mint=T["mint"][k], lab=lab, hole=hole, full=full,
+    np.savez("/home/it/sniper-data/vm1/dumps.npz", k=k, slot=slot, idx=T["idx"][k], mint=T["mint"][k], lab=lab, hole=hole, full=full,
              leader=ld, near_fra=fra[ld], near_ams=ams[ld], Xm=Xm, Xp=Xp, sm=sm, sp=sp, chain_ok=D.chain_ok[k],
              fee=(T["fee_bps"][k].astype(int) + T["cfee_bps"][k].astype(int)))
     import collections

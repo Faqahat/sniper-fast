@@ -4,9 +4,9 @@ the mint in [dump-2, dump) that did not trade (failed, OR succeeded without a pu
 extraction (front/win). MEASURED. Out: sniper-data/haqq_dissect/front/f10.txt + f10.pkl (i -> flags)"""
 import json, glob, gzip, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 R = pickle.load(open(f"{OUT}/f8_rows.pkl", "rb")); ids, _ = L.ids_map()
 want = collections.defaultdict(list)
 for r in R:

@@ -6,7 +6,7 @@ left, filled or not, the exit and the cash (slip basis, mSOL); extra = not in th
 usage: ma8_examples.py RUNDIR TAB OUT.md VARIANT [VARIANT ...] [--base R0]"""
 import sys, json, pickle, collections, datetime
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import ma_lib as M
 
 

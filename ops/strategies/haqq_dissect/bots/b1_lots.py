@@ -4,14 +4,14 @@ mod 1000) with its decision-time context, joined to the dv8 dump universe (uni.n
 curve > 30.52, age <= 30 min) by the dump's (mint, slot, idx).
 MEASURED: lot P&L (code-matched, after pump fees + his measured tx costs), hold, his position after the dump (outside trades
 between the dump and his buy, our two wallets removed), his price paid vs the post-dump price.
-Out: /home/moiz/sniper-data/haqq_dissect/bots/b1.pkl, b1.txt"""
+Out: /home/it/sniper-data/haqq_dissect/bots/b1.pkl, b1.txt"""
 import sys, pickle, collections, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from plib import load, boot_sum, Out
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 CODES = (247, 248, 244, 226)
 
 

@@ -3,7 +3,7 @@
 # logistic loss, row + feature subsampling, early stopping on a held-out (later-in-time) slice. Bins = quantiles of the FIT rows.
 import sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel")
+sys.path.insert(0, "/home/it/sniper-data/overnight/sel")
 import gbdt_np as GB
 
 def edges_of(X, fit, nb=32):

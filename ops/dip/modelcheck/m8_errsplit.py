@@ -10,7 +10,7 @@ import sys, os, json, zlib, collections
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import m2_analyze as A2, mc_corr as MC
-OUT = "/home/moiz/sniper-data/modelcheck"
+OUT = "/home/it/sniper-data/modelcheck"
 
 def main():
     R = A2.load(tx=True); cl = A2.clients(); CV = MC.Curves(f"{OUT}/curves_all.json")

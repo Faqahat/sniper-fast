@@ -3,11 +3,11 @@
 #   big win (>= +0.05 SOL) Hero · win Glass · fee-only (about -0.016) Tink · loss Basso · big loss (<= -0.05) Sosumi.
 # It reads the run's log over SSH (read-only) and plays the sounds locally with afplay. Ctrl-C stops it.
 # Use:      bash rewind-sounds.sh                 (Amsterdam)
-#           NODE=84.32.100.36 bash rewind-sounds.sh   (Frankfurt)
+#           NODE=cyberfra bash rewind-sounds.sh   (Frankfurt)
 # Options (environment): NODE PORT SSHUSER VOL (0.0-1.0, default 0.6) WIN LOSS BIGWIN BIGLOSS FLAT (sound files) BIG (0.05)
 # Any sound in /System/Library/Sounds works: Basso Blow Bottle Frog Funk Glass Hero Morse Ping Pop Purr Sosumi Submarine Tink.
 # Mute the bell in dipmon with `m` if you use this instead.
-NODE=${NODE:-84.32.104.202}; PORT=${PORT:-1996}; SSHUSER=${SSHUSER:-it}; VOL=${VOL:-0.6}; BIG=${BIG:-0.05}
+NODE=${NODE:-cyberams}; PORT=${PORT:-1996}; SSHUSER=${SSHUSER:-it}; VOL=${VOL:-0.6}; BIG=${BIG:-0.05}
 S=/System/Library/Sounds
 WIN=${WIN:-$S/Glass.aiff}; LOSS=${LOSS:-$S/Basso.aiff}; BIGWIN=${BIGWIN:-$S/Hero.aiff}; BIGLOSS=${BIGLOSS:-$S/Sosumi.aiff}; FLAT=${FLAT:-$S/Tink.aiff}
 command -v afplay >/dev/null 2>&1 || { echo "afplay not found: run this on your Mac"; exit 1; }

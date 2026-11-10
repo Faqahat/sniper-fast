@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Where does post-migration money go? P&L of all post-migration round trips by token type and entry delay (MEASURED).
 import json, numpy as np, collections, pickle, sys
-OUT="/home/moiz/sniper-data/strategies/postmig"
+OUT="/home/it/sniper-data/strategies/postmig"
 SMS=212.0
 def typ(t):
     if t["mayhem"]: return "mayhem"

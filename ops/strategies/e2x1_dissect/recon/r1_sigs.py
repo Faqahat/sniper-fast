@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rpc
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
 W0 = 1793113200; STOP = W0 - 86400 - 1800
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 allsigs = []; before = None; page = 0
 while True:
     p = {"limit": 1000, "commitment": "finalized"}

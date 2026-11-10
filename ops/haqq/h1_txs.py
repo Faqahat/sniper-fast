@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # haqq SELL study, pass 1 (read-only, local recording only): every tx signed by haqqiUUX in the 4 collector runs -> one gz
-# jsonl per run (raw records, failed txs included) in /home/moiz/sniper-data/haqq/. usage: nice python3 -I h1_txs.py [procs]
+# jsonl per run (raw records, failed txs included) in /home/it/sniper-data/haqq/. usage: nice python3 -I h1_txs.py [procs]
 import sys, os, json, gzip, glob, zlib
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"; OUT = "/home/moiz/sniper-data/haqq"
+D = "/data/tapes/collect"; OUT = "/home/it/sniper-data/haqq"
 RUNS = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
 W = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 def work(a):

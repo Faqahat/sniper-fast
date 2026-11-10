@@ -1,7 +1,7 @@
 import json, gzip, collections, sys
 TOP = [l.strip() for l in open(sys.argv[1]) if l.strip()]
 rows = collections.defaultdict(list)
-for line in gzip.open((sys.argv[2] if len(sys.argv) > 2 else "/home/moiz/sniper/ops/agents/topearners/work/txrows.jsonl.gz"), "rt"):
+for line in gzip.open((sys.argv[2] if len(sys.argv) > 2 else "/home/it/sniper/ops/agents/topearners/work/txrows.jsonl.gz"), "rt"):
     x = json.loads(line)
     if x["w"] in TOP: rows[x["w"]].append(x)
 def q(v, ps=(10, 50, 90)):

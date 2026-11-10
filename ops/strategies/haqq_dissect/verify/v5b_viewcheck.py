@@ -3,7 +3,7 @@
 of the given runs on the tape: model lim vs the live lim; and model fill vs live result. usage: v5b_viewcheck.py TAB RUN..."""
 import sys, collections, bisect
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/verify")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/verify")
 import vlib as V
 tab = sys.argv[1]; R = V.load_runs(sys.argv[2:])
 tries = [r for r in R if r.get("ev") == "presend_attempt_land" and r.get("res") in ("ok", "6042") and r.get("slot") and r.get("idx") is not None]

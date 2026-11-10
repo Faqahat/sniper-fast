@@ -3,10 +3,10 @@
 trigger slot - 3 to trigger slot + 120, with the per-slot max tx index (block-position clock).
 Sources: r37 = fresh decode of the recorder chunks 10-29 07:21 -> 18:21 PKT (custom37/tab37, built by real/decode.py + build.py);
 earlier runs = presend_quiet3/chain.npz (10-24 19:10 -> 10-29 07:16 PKT) + presend_young/ext/chain.npz (07:16 -> 09:11 PKT).
-Out: /home/moiz/sniper-data/custom37/tape_<run>.pkl {"tapes": {(ses, w): rows}, "maxi": {slot: max idx}, "end_slot": last slot}
+Out: /home/it/sniper-data/custom37/tape_<run>.pkl {"tapes": {(ses, w): rows}, "maxi": {slot: max idx}, "end_slot": last slot}
 rows = list of (slot, idx, j, buy, sol, tok, vsol, vtok, user)"""
 import sys, json, pickle, numpy as np
-OUT = "/home/moiz/sniper-data/custom37"
+OUT = "/home/it/sniper-data/custom37"
 SC = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/custom37"
 LO, HI = 3, 120
 
@@ -62,8 +62,8 @@ if __name__ == "__main__":
     for run in sys.argv[1:]:
         X = pickle.load(open(f"{OUT}/win_{run}.pkl", "rb"))
         if run == "r37": tapes, maxi, end = from_tab(X, f"{OUT}/tab37")
-        else: tapes, maxi, end = from_chain(X, [("/home/moiz/sniper-data/presend_quiet3/chain.npz", "/home/moiz/sniper-data/presend_quiet3/ids.json"),
-                                                ("/home/moiz/sniper-data/presend_young/ext/chain.npz", "/home/moiz/sniper-data/presend_young/ext/ids.json")])
+        else: tapes, maxi, end = from_chain(X, [("/home/it/sniper-data/presend_quiet3/chain.npz", "/home/it/sniper-data/presend_quiet3/ids.json"),
+                                                ("/home/it/sniper-data/presend_young/ext/chain.npz", "/home/it/sniper-data/presend_young/ext/ids.json")])
         pickle.dump({"tapes": tapes, "maxi": maxi, "end_slot": end}, open(f"{OUT}/tape_{run}.pkl", "wb"))
         n = len(X["wins"]); nt = sum(1 for W in X["wins"] if tapes.get((W["ses"], W["w"])))
         print(run, "windows", n, "with tape", nt, "end slot", end, "trades", sum(len(v) for v in tapes.values()), flush=True)

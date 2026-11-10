@@ -70,10 +70,10 @@ G_ = {}
 def near_map():
     """P3 (AMS run 19) tries: sig -> leader prefix (MEASURED, presend_attempt.leader); near = ops/region/near_leaders_ams.txt"""
     m = {}
-    for l in open("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r19.jsonl", errors="ignore"):
+    for l in open("/home/it/sniper-data/runs/ams/runs/dip_ams_r19.jsonl", errors="ignore"):
         if '"ev":"presend_attempt"' not in l: continue
         x = json.loads(l); m[x["sig"]] = (x.get("leader") or "")[:8]
-    m["__set__"] = set(l.split()[0][:8] for l in open("/home/moiz/sniper/ops/region/near_leaders_ams.txt") if l.strip() and not l.startswith("#"))
+    m["__set__"] = set(l.split()[0][:8] for l in open("/home/it/sniper/ops/region/near_leaders_ams.txt") if l.strip() and not l.startswith("#"))
     return m
 
 

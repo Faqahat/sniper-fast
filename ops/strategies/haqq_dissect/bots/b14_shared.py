@@ -5,15 +5,15 @@ no limit / +5 % guard and each exit, vs the rank model on the same fires, vs his
 Also our real k distribution on his picks (for weighting the b8b proxy). Out: bots/b14.txt"""
 import pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 from plib import boot_mean, Out
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 P = Out(f"{OUT}/b14.txt")
 Z = pickle.load(open(f"{OUT}/b4_res.pkl", "rb")); meta, res, PL = Z["meta"], Z["res"], [str(p) for p in Z["PL"]]
 lot_by_d = collections.defaultdict(list)
 for i, m in meta.items():
     if m["kind"] == "lot" and res.get(i): lot_by_d[(m["mint"], m["dslot"], m["didx"])].append(i)
-F = pickle.load(open("/home/moiz/sniper-data/dv8/fires_tape.pkl", "rb"))
+F = pickle.load(open("/home/it/sniper-data/dv8/fires_tape.pkl", "rb"))
 fid = {(meta[i]["run"], meta[i]["t"]): i for i, m in meta.items() if m["kind"] == "fire"}
 rows = []
 for f in F:

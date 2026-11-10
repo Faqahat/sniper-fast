@@ -3,9 +3,9 @@
 skipped triggers, scaled to 0.696 / the shadow's sol_in, failed tries not counted) against the calibrated replay model (virtual windows,
 phantom tries, one-position pauses, stop 5:2, failed tries counted; also at -20% followers). Also row c against LIVE on the armed
 windows (how far the paper is off where the truth is known). saved = minus the skipped windows' P&L. Per PKT hour and total.
-Out: /home/moiz/sniper-data/presend_quiet4/rowc.json + stdout (markdown)"""
+Out: /home/it/sniper-data/presend_quiet4/rowc.json + stdout (markdown)"""
 import json, pickle, collections, datetime
-D4 = "/home/moiz/sniper-data/presend_quiet4"
+D4 = "/home/it/sniper-data/presend_quiet4"
 FN = f"{D4}/runs/dip_ams_r37.jsonl"; LIVE = 0.696
 
 

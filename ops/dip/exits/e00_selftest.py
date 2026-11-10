@@ -6,7 +6,7 @@ import sys, os, zlib, random
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import exit_lib as E
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/modelcheck")
+sys.path.insert(0, "/home/it/sniper/ops/dip/modelcheck")
 import mc_lib as M, mc_corr as MC
 
 class _T: pass

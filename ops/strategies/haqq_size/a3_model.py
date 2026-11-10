@@ -7,9 +7,9 @@ Models: (a) one-threshold rule on curve SOL; (b) a depth-3 regression tree (exha
 (upper bound). Out: OUT/model.json, OUT/buyfeat.pkl"""
 import sys, pickle, json, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_gbdt as G
-OUT = "/home/moiz/sniper-data/haqq_size"
+OUT = "/home/it/sniper-data/haqq_size"
 W0 = 1793038500; TR1 = W0 - 86400; TE1 = W0 + 86400 - 600
 Z = pickle.load(open(f"{OUT}/buys.pkl", "rb")); B = Z["buys"]; LOTS = Z["lots"]; TRIPS = Z["trips"]
 FEAT = ["age", "vsol_pre", "nd_early", "nd_before", "sell_before", "dev_buy", "dev_sold", "bundle_n", "bundle_sol", "n_trades", "n_traders",

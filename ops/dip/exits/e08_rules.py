@@ -6,7 +6,7 @@
 #   - crowd >= c (crowded): from tick kmin, sell at the first tick whose last m slots had no outside buy >= b SOL (b = 0: no buy at all)
 #   - forced sell at tick cap
 # Selection: engine SOL/day on TRAIN, M2 + IMIT1 picks, our measured landing; ties broken by the simpler rule.
-# -> /home/moiz/sniper-data/exits/e08_rules.json/.txt
+# -> /home/it/sniper-data/exits/e08_rules.json/.txt
 import sys, os, json, time, itertools
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

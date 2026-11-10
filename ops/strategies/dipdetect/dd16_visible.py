@@ -8,8 +8,8 @@ import json
 import numpy as np
 import dd_lib as L
 DAYS = ("R2", "R3", "R1", "R4")
-DAYDIR = {"R1": "/home/moiz/sniper-data/strategies/patterns", "R2": "/home/moiz/sniper-data/strategies/patterns",
-          "R3": "/home/moiz/sniper-data/strategies/patterns", "R4": L.OUT}
+DAYDIR = {"R1": "/home/it/sniper-data/strategies/patterns", "R2": "/home/it/sniper-data/strategies/patterns",
+          "R3": "/home/it/sniper-data/strategies/patterns", "R4": L.OUT}
 E4 = L.EXI["c4_tpnone_slnone"]
 
 def visible(day, d):

@@ -4,7 +4,7 @@ of the same block and at the block's end vs the pre-dump price (a pre-sent try s
 <= 0.88x its signing price). usage: in11_rebuy.py TAB CENSUS.pkl X"""
 import sys, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import ma_lib as M
 tape = M.Tape(sys.argv[1]); X = float(sys.argv[3])
 R = [r for r in pickle.load(open(sys.argv[2], "rb")) if r["class"] == "insider" and r["pct"] >= X and r["age"] == 0 and r["paper"] is not None]

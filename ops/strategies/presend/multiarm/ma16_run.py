@@ -5,7 +5,7 @@ One compact pickle per (combo, rep) in OUTDIR (ma6_run's row format, so ma7_tabl
 usage: ma16_run.py CTX.pkl OUTDIR [--reps 8] [--procs 8] [--only a,b]"""
 import sys, os, json, pickle, time, argparse
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 from ma6_run import KEEP
 
 _W = None; _H = None

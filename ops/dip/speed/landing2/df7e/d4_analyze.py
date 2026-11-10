@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # DF7eRXHn study, pass 4 (read-only, local): entry triggers, size, exits, P&L (exact wallet SOL deltas from the raw recorder), routes, fees.
 import sys, json, collections, gzip, bisect, statistics as st, datetime
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
-D = "/home/moiz/sniper-data/landing2/df7e"; W = "DF7eRXHnvRQ9QeVCrdfS56a7RpBD6se6mgPvzApHPNr9"
+D = "/home/it/sniper-data/landing2/df7e"; W = "DF7eRXHnvRQ9QeVCrdfS56a7RpBD6se6mgPvzApHPNr9"
 AMM = {a["sig"]: a for a in json.load(open(f"{D}/amm_exits.json"))}
 R = json.load(open(f"{D}/buys.json")); SD = json.load(open(f"{D}/raw_sd.json"))
 TR = collections.defaultdict(list)

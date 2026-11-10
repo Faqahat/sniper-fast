@@ -2,7 +2,7 @@
 # sniper-rec daily maintenance (sniper-rec-daily.timer, 01:30 PKT): catalog (rec days + old FRA runs), slim extract of
 # yesterday, archive (only when the remote is configured), compat links. Log: $REC_ROOT/logs/daily.log
 set -u
-H=/home/moiz/sniper/ops/rec; L=${REC_ROOT:-/home/moiz/sniper-data/rec}/logs/daily.log
+H=/home/it/sniper/ops/rec; L=${REC_ROOT:-/home/it/sniper-data/rec}/logs/daily.log
 exec >> "$L" 2>&1
 echo "== $(TZ=Asia/Karachi date '+%F %T PKT') daily"
 y=$(TZ=Asia/Karachi date -d yesterday +%F)

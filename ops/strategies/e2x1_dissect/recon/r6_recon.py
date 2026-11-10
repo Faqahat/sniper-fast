@@ -5,7 +5,7 @@ getSignaturesForAddress; per-tx wallet delta from the recordings (sd, exact) or 
 Out: r6.txt, r6.pkl"""
 import json, pickle, collections, sys, os, time
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 W0 = 1793113200; W1 = W0 + 86400; WA = W0 - 86400
 S = json.load(open(f"{OUT}/sigs.json"))
 R = {r["sig"]: r for r in pickle.load(open(f"{OUT}/tx.pkl", "rb"))}

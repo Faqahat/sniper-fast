@@ -562,8 +562,8 @@ W=<work dir>; mkdir -p $W/logs   # copy the engine logs (sudo cat over ssh), the
 python3 ops/research/parse_logs.py $W/launches.json dry1h=$W/logs/dry_1h.log run1=$W/logs/prod_p1.log ...   # labels as in filters.py GROUPS
 python3 ops/research/leaders.py $W/launches.json $W/leaders.json
 python3 ops/run1/tipsize.py --dump-tipmap $W/tipmap.json
-python3 ops/research/rec_launches.py $W/launches.json /home/moiz/sniper-data/research/rec /home/moiz/sniper-data/research/blk --reuse /home/moiz/sniper-data/sim/rec_dry1h
-python3 ops/research/filters.py $W/launches.json /home/moiz/sniper-data/research/rec $W/leaders.json $W/tipmap.json $W/full --yday-map /home/moiz/sniper-data/sim/rec_dry1h
+python3 ops/research/rec_launches.py $W/launches.json /home/it/sniper-data/research/rec /home/it/sniper-data/research/blk --reuse /home/it/sniper-data/sim/rec_dry1h
+python3 ops/research/filters.py $W/launches.json /home/it/sniper-data/research/rec $W/leaders.json $W/tipmap.json $W/full --yday-map /home/it/sniper-data/sim/rec_dry1h
 python3 ops/research/report.py $W/full_rows.json [--overview | --combos]
 ```
 

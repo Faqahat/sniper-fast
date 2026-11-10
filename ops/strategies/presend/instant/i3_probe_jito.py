@@ -3,7 +3,7 @@
 # instant buy landed in a Jito bundle, and whether they share ONE bundle (= a bundle/backrun with the dump).
 # usage: python3 -I i3_probe_jito.py probe_map.json OUT.json
 import sys, json
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/instant")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/instant")
 import jito_api as J
 out = json.load(open(sys.argv[1])); res = []
 for x in out:

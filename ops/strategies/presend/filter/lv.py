@@ -6,7 +6,7 @@ rent is already inside realized). Window / attempt ids restart at each engine st
 HOLDOUT GUARD: refuses any file name with r26."""
 import json, collections, re, os
 
-LIVE = "/home/moiz/sniper-data/presend_filter/live"
+LIVE = "/home/it/sniper-data/presend_filter/live"
 WALLET = {"ams": "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "fra": "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 RUNFILES = {"ams:r19": "dip_ams_r19", "ams:r20": "dip_ams_r20", "ams:r24": "dip_ams_r24", "ams:r25": "dip_ams_r25",
             "fra:r21": "fra_dip_r21", "fra:r22": "fra_dip_r22", "fra:r23": "fra_dip_r23", "fra:r24": "fra_dip_r24"}

@@ -7,10 +7,10 @@ features as the live windows (feat.py) and a PROXY outcome (INFERRED) of a pre-s
   else sell in slot fill + 2 after its trades at block index < 200 (~110 ms, the live median time-exit delay);
   net = sell after pump fees - SIZE - 0.00143 SOL (live per-fill tips + tx fees + rent not returned).
   labels also: y_nf = distinct other buyers in the fill slot (after it) and the next 2 slots; y_fb = follower-bot buyers among them.
-Writes /home/moiz/sniper-data/presend_filter/chain_events.json"""
+Writes /home/it/sniper-data/presend_filter/chain_events.json"""
 import sys, json, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import pmath as PM
 from chainlib import Chain, B
 import feat

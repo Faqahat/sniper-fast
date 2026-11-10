@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write <run-dir>/catalog.json describing the Shreder trial dataset (streams, filters, time span, counts, sizes,
 rx-clock notes, what each file holds, how to read it). Fast: uses the per-member .idx.jsonl files, not the data.
-usage: make_catalog.py /home/moiz/sniper-data/preconf/<YYYYMMDD>
+usage: make_catalog.py /home/it/sniper-data/preconf/<YYYYMMDD>
 """
 import glob, json, os, sys, time
 
@@ -98,7 +98,7 @@ def main():
     cat = {
         "dataset": "Shreder trial recording: preconf (pre-shred, connected leaders) + Binary (shred-reconstructed) transaction streams",
         "run_dir": rd,
-        "recorded_on": "FRA 84.32.100.36 (Frankfurt), the only allowlisted IP; endpoint id (fingerprint, not the URL): " + str(start.get("endpoint_id")),
+        "recorded_on": "FRA cyberfra (Frankfurt), the only allowlisted IP; endpoint id (fingerprint, not the URL): " + str(start.get("endpoint_id")),
         "recorder": {"binary": "shreder_rec 0.2", "sha256": (open(os.path.join(fra, "binary.sha256")).read().split()[0] if os.path.exists(os.path.join(fra, "binary.sha256")) else None),
                      "streams_requested": start.get("streams"), "auth": start.get("auth"), "started": pkt(start.get("t")),
                      "done": final[-1] if final else None},
@@ -125,8 +125,8 @@ def main():
         "view_layout": ("{q: seq, t: rx_ns, ca: created_at ns, s: slot, sig: first sig base58, pf: preconf flag, c: connection epoch, v: -1 legacy / 0 v0, "
                         "pe: 1 if unparsable, p: [[kind, mint|null, user|null, a1, a2], ...] top-level pump instructions (kinds: buy/sell/bxs/bq3/sell3/sellx3/bq2/buy2/buy3/create/create_v2/amm_*/other:<disc>), "
                         "x: base64 raw tx (only with --jsonl-raw)}"),
-        "how_to_read": ("python3 /home/moiz/sniper/ops/preconf/shreder/read_rec.py <run>/fra --stream bin --summary | --tsv ; in Python: "
-                        "sys.path.insert(0,'/home/moiz/sniper/ops/preconf/shreder'); import read_rec; for r in read_rec.iter_stream('<run>/fra','pre'): ... "
+        "how_to_read": ("python3 /home/it/sniper/ops/preconf/shreder/read_rec.py <run>/fra --stream bin --summary | --tsv ; in Python: "
+                        "sys.path.insert(0,'/home/it/sniper/ops/preconf/shreder'); import read_rec; for r in read_rec.iter_stream('<run>/fra','pre'): ... "
                         "(r.seq, r.rx_ns, r.ca_ns, r.slot, r.flags, r.sig, r.tx); read_rec.parse_tx(r.tx) for keys/instructions. Address lookup tables are NOT resolved."),
         "caveats": ["Preconf covers only leaders connected to Shreder's preconf ingest; absent txs in other slots are expected.",
                     "Filters: 'all' = no account filter; if the server refused it, the recorder fell back to the broad program list (see streams.*.filter_fallback).",

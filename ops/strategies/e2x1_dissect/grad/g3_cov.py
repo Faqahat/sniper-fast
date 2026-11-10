@@ -3,20 +3,20 @@
 For ~10 graduated tokens: every successful tx touching the pool in the first 2 minutes after the migration tx
 (getSignaturesForAddress on the pool, public RPC) vs the recorder's PumpSwap Buy/Sell events for that pool.
 Misses are checked: is the tx in the raw recording at all? does it really contain a PumpSwap trade on that pool (getTransaction)?
-Writes /home/moiz/sniper-data/e2x1_dissect/grad/cov.json"""
+Writes /home/it/sniper-data/e2x1_dissect/grad/cov.json"""
 import sys, os, json, pickle, glob, gzip, hashlib, random, base64, struct
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/recon")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/recon")
 import rpc
 
-G = "/home/moiz/sniper-data/e2x1_dissect/grad"
+G = "/home/it/sniper-data/e2x1_dissect/grad"
 WIN = 566                       # 2 min of slots (0.212 s/slot)
 BUYE = bytes.fromhex("67f4521f2cf57777"); SELLE = bytes.fromhex("3e2f370aa503dc2a")
 def sigh(s): return int.from_bytes(hashlib.blake2b(s.encode(), digest_size=8).digest(), "little")
 
 Z = np.load(G + "/tape.npz"); M = pickle.load(open(G + "/meta.pkl", "rb"))
 PS = Z["ps"]; pools = M["pools"]; pid = {p: k for k, p in enumerate(pools)}
-lots = pickle.load(open("/home/moiz/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
+lots = pickle.load(open("/home/it/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
 gm = [l["mint"] for l in lots if l.get("swap_sell") and l["day"] == "D1"]
 mig_by_mint = {d["mint"]: d for d in M["mig"]}
 pick = [mig_by_mint[m] for m in gm if m in mig_by_mint][:6]
@@ -24,7 +24,7 @@ random.seed(7)
 others = [d for d in M["mig"] if d["quote"].startswith("So111") and 1793113200 <= d["bt"] <= 1793196000 and d["mint"] not in gm]
 pick += random.sample(others, 5)
 
-chunks = sorted(glob.glob("/home/moiz/sniper-data/collect/run_202610*_14*/txs/*.jsonl.gz"))
+chunks = sorted(glob.glob("/data/tapes/collect/run_202610*_14*/txs/*.jsonl.gz"))
 cstart = [(int(os.path.basename(c)[4:14]), c) for c in chunks]
 def raw_lines(pool, bt0, bt1):
     """recorded raw lines mentioning the pool between block times bt0..bt1 (chunks overlapping)"""

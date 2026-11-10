@@ -1,7 +1,7 @@
 # WAVE sell vs live 200 ms timer — AMS run 37 (10-29, PKT)
 
 Code: wave37.py (copy of sniper-omen3/w1_wave_real.py; paths, `time-ms` exit name, TP20/SL50 wave variant, dump size added), an37.py.
-Data: /home/moiz/sniper-data/wave37 (tape `tab/` from local recorder chunks 10-29 07:25 -> 16:11 PKT, last chunk partial; r37 records copied 16:16 PKT; wave37.json per fill; an37.out).
+Data: /home/it/sniper-data/wave37 (tape `tab/` from local recorder chunks 10-29 07:25 -> 16:11 PKT, last chunk partial; r37 records copied 16:16 PKT; wave37.json per fill; an37.out).
 
 - Coverage: ALL 138 r37 fills (07:32 -> 15:56 PKT), size 0.687 SOL on curve. Live realized +3.05 SOL (+22.1 mSOL/fill).
 - Timer leg check: model vs real curve sell, mean abs error 0.0000005 mSOL (max 0.000001). Exact.

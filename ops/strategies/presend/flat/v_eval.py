@@ -4,13 +4,13 @@
   B   : the frozen skip / stop rule; B1_info, B2single_info: the best try-time stop and best single-feature skip (information)
   A+B : B first, then A on the positions B keeps (side cost against B's kept tries)
 Unit = one live window (gain = variant score - baseline score; 0 for untouched windows). Bootstrap: 10,000 resamples of the
-windows of each run (stratified by run), 5-95%. Writes /home/moiz/sniper-data/presend_flat/v_<tag>.json
+windows of each run (stratified by run), 5-95%. Writes /home/it/sniper-data/presend_flat/v_<tag>.json
 usage: v_eval.py --runs r27 --tag val [--mode primary|asrun]"""
 import sys, json, argparse, collections
 import numpy as np
 import flatlib as FL, evalcore as EC, a_core as AC, a_eval as AE
 
-HERE = "/home/moiz/sniper/ops/strategies/presend/flat"
+HERE = "/home/it/sniper/ops/strategies/presend/flat"
 
 
 def skip_fn(spec):

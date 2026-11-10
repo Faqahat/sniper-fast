@@ -9,11 +9,11 @@
 #   python3 ss7_cards.py prep <tag> [n_entry n_exit] | submit <tag> | status <tag> | fetch <tag>
 import sys, os, json, zlib, random
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/sssss")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper-data/overnight/sel"); sys.path.insert(0, "/home/it/sniper/ops/strategies/sssss")
 import p4_eval as E
 import gbdt_np as G
 import llm as L
-OUT = "/home/moiz/sniper-data/strategies/sssss"; WK = f"{OUT}/llm"
+OUT = "/home/it/sniper-data/strategies/sssss"; WK = f"{OUT}/llm"
 W = "sssssDdMNAWKingjpEojkTNdVuZrBe7FsJLaGtexe7d"; UID = zlib.crc32(W.encode())
 SIBS = ["ssssswdk4RR8HqkE3uwUWzDbd6mXFTTPjcXBKNzQ57E", "sssssCUP5wgSW3sxjtQNa7u88ytE4st2Z7goX5kKNwi", "sssssyv2q57u9sJrL1BB7Ep71X6YBY71iYt7CtHB5zJ"]
 FLEET = np.array([UID] + [zlib.crc32(s.encode()) for s in SIBS], np.int64)

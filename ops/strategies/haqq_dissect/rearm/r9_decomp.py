@@ -9,7 +9,7 @@ P&L = gross (live exit) - NOW costs, model, mSOL per fill [90 % bootstrap]; wave
 usage: r9_decomp.py TAGS CFG[,CFG] DAYS [--out file]"""
 import sys, pickle, collections, os
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 COST = 2_015_140
 
 

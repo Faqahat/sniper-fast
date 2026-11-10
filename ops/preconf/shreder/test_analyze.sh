@@ -5,9 +5,9 @@
 # usage: test_analyze.sh [OUT_DIR]   env: MINUTES (default 20), ENGINE (engine log), FROM (HH:MM PKT, default 20:45), DATE
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
-OUT=${1:-/home/moiz/sniper-data/preconf/synth_test}
+OUT=${1:-/home/it/sniper-data/preconf/synth_test}
 MIN=${MINUTES:-20}; FROM=${FROM:-20:45}; DATE=${DATE:-2026-10-27}
-ENGINE=${ENGINE:-/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl}
+ENGINE=${ENGINE:-/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl}
 ts() { date +%s.%N; }
 T0=$(ts)
 mkdir -p "$OUT"

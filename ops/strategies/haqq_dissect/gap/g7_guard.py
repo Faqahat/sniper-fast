@@ -8,10 +8,10 @@ No landing model is involved (real positions) -> no calibration applied. INFERRE
 Out: gap/g7_guard.txt"""
 import pickle, collections, sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 from dv8sim import pnl_exact
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 SIZE = 0.40
 
 

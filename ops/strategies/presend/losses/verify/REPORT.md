@@ -1,6 +1,6 @@
 # Verify: skip arm at trigger age 1 slot (2026-10-29, independent)
 
-Code: verify.py (extract) + analyze.py (tables). Data: /home/moiz/sniper-data/presend_losses/verify/ (fills.json, analyze_out.txt, raw/ = read-only copies of AMS r28-r33, r36).
+Code: verify.py (extract) + analyze.py (tables). Data: /home/it/sniper-data/presend_losses/verify/ (fills.json, analyze_out.txt, raw/ = read-only copies of AMS r28-r33, r36).
 
 Rule as the engine applies it: age_slots = trigger trade slot - create slot (presend_live.rs:149); engine skips `age_slots == 0` (pslive.rs:1372). Change = `< 2`. I read age_slots straight from each arm record, so no off-by-one risk. Age-0 fills: 0 in all runs (correct).
 P&L = sum of presend_live_realized.pnl per position (buy+sell wallet deltas, rent back included). Failed tries NOT included (reported apart).

@@ -3,9 +3,9 @@
 amount at the curve state D ms later on the chain clock (all outside trades in the mint up to our landing time + D applied), net of the
 1.25% pump fee. Also the same for haqq's sells. Out: sniper-data/haqq_dissect/exec/t8_selldelay.txt"""
 import sys, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-D = "/home/moiz/sniper-data/haqq_dissect/exec"
+D = "/home/it/sniper-data/haqq_dissect/exec"
 T = np.load(f"{L.TAB}/trades.npy", mmap_mode="r")
 sl = np.asarray(T["slot"], np.int64); ix = np.asarray(T["idx"], np.int64); mint = np.asarray(T["mint"]); sg = np.asarray(T["signer"]); us = np.asarray(T["user"])
 buy = np.asarray(T["buy"]); tok = np.asarray(T["tok"], np.float64); vs = np.asarray(T["vsol"], np.float64); vt = np.asarray(T["vtok"], np.float64)

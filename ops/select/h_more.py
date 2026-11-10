@@ -20,9 +20,9 @@ for k in ("uri_host", "create_variant", "fp", "created_on"):
         m = np.array([(r.get(k) or "") == v for r in R])
         print(line(f"{k} == {v!r}"[:70], r1, m))
 print("\n=== (2) FOLLOW KNOWN PRO SNIPERS (66 wallets from ops/snipers/CANDIDATES.md, found on 10-21 data = before this run) ===")
-pros = set(re.findall(r"`([1-9A-HJ-NP-Za-km-z]{32,44})`", open("/home/moiz/sniper/ops/snipers/CANDIDATES.md").read()))
+pros = set(re.findall(r"`([1-9A-HJ-NP-Za-km-z]{32,44})`", open("/home/it/sniper/ops/snipers/CANDIDATES.md").read()))
 EB = {}
-for f in glob.glob("/home/moiz/sniper-data/collect/phaseB/*.jsonl.gz"):
+for f in glob.glob("/data/tapes/collect/phaseB/*.jsonl.gz"):
     for l in gzip.open(f, "rt"):
         x = json.loads(l); EB[x["mint"]] = x.get("early_buyers") or []
 first_pro = np.array([bool(EB.get(r["mint"])) and EB[r["mint"]][0][0] in pros for r in R])

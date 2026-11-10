@@ -5,8 +5,8 @@ Rows = positives + the 4 % hash sample of negatives (uniform -> AUC unbiased). G
 Reports AUC, precision/recall at top-k, lift, importance; saves OOS scores for the test part."""
 import sys, json, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
-OUT = "/home/moiz/sniper-data/e2x1_dissect/select"
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
+OUT = "/home/it/sniper-data/e2x1_dissect/select"
 U = dict(np.load(f"{OUT}/U.npz"))
 MKT = ["age_s", "vsol", "is_buy", "sol", "imp", "by_creator", "ret_1s", "ret_5s", "ret_30s", "ret_120s", "dd_peak", "mult", "peak_mult",
        "nb_cur", "ns_cur", "solin_cur", "solout_cur", "nb_1s", "ns_1s", "solin_1s", "solout_1s", "nb_5s", "ns_5s", "solin_5s", "solout_5s",

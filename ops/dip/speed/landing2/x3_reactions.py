@@ -3,9 +3,9 @@
 #   1. dumps   = successful bonding-curve sells >= 0.5 SOL (drop = 1 - (vsol_after / vsol_before)^2, constant product)
 #   2. followers = every successful buy on the same mint within 3 slots after the latest dump (seller excluded), first 40
 #   3. landings  = every tx of a target wallet (wallets.json; failed txs too) on a mint with a dump <= 3 slots before it
-# Output: /home/moiz/sniper-data/landing2/reactions.json.gz  {dumps: {key: [...]}, followers: {key: [...]}, landings: [...], blk: {...}}
+# Output: /home/it/sniper-data/landing2/reactions.json.gz  {dumps: {key: [...]}, followers: {key: [...]}, landings: [...], blk: {...}}
 import json, gzip, glob, bisect, collections, os, time
-D = "/home/moiz/sniper-data/landing2"
+D = "/home/it/sniper-data/landing2"
 WAL = json.load(open(f"{D}/wallets.json"))
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 t0 = time.time()

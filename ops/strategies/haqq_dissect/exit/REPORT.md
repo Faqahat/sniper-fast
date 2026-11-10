@@ -1,5 +1,5 @@
 # Analyst C (exits) — his edge = riding the follower wave; for us, a faster "wave exit" (10-28 ~03:20 PKT)
-Saved by the main session from the agent's reply. Code: this folder (x0–x18, xlib.py, xsim.py). Tables: /home/moiz/sniper-data/haqq_dissect/exit/. Read x3, x8, x13, x14, x15, x16 and x18 first.
+Saved by the main session from the agent's reply. Code: this folder (x0–x18, xlib.py, xsim.py). Tables: /home/it/sniper-data/haqq_dissect/exit/. Read x3, x8, x13, x14, x15, x16 and x18 first.
 
 ## His sells (MEASURED, 6 days, 20,344 non-DEAD positions)
 - **Lot by lot:** 89.6% of sells close exactly one lot; 6.9% are 50% partials, and those lose. Never before 2 slots.

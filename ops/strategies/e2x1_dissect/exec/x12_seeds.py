@@ -3,7 +3,7 @@
 sha256(base || seed || owner). Brute-force seeds 'fbn-<region>-<nn>' over region names to map every sampled nonce account to its
 region tag (which send region uses it). Out: x12.txt"""
 import sys, hashlib, pickle, itertools, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import xlib as X
 A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def b58d(s):
@@ -42,7 +42,7 @@ for k, n in sorted(c.items(), key=lambda kv: -kv[1]): P(f"   {n:4} {k}")
 open(f"{X.X}/x12.txt", "w").write("\n".join(out) + "\n")
 # region engine vs the buy slot's leader location (leader_geo.json, epoch 1063 IP geo; MEASURED geo, INFERRED routing)
 import json
-G = {r["pk"]: (r.get("cc"), r.get("city")) for r in json.load(open("/home/moiz/sniper-data/leader_geo.json"))["rows"]}
+G = {r["pk"]: (r.get("cc"), r.get("city")) for r in json.load(open("/home/it/sniper-data/leader_geo.json"))["rows"]}
 def area(cc, city):
     if cc is None: return "?"
     if cc in ("US", "CA"): return "N.America"

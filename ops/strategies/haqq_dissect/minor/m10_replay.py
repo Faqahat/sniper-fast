@@ -11,12 +11,12 @@ follower stress; calibration live = a x model + b per fire, dv8 c2). INFERRED fo
 Out: minor/m10.txt, minor/m10.json"""
 import json, pickle, sys, collections, heapq
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 from g1_walkforward import load, calib_boot
 from plib import Out
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/minor"
+OUT = "/home/it/sniper-data/haqq_dissect/minor"
 COST = {"NOW": (0.00175, 0.00177, 0.00053), "S2": (0.00175, 0.00028, 0.00053), "CHEAP": (0.00033, 0.00033, 0.00004)}
 HIS = {226: dict(size=0.494, exit=0, band=(0.895, 1.087)), 231: dict(size=0.247, exit=1, band=(0.895, 1.087)),
        244: dict(size=0.247, exit=3, band=None), 251: dict(size=0.30, exit=2, band=None)}

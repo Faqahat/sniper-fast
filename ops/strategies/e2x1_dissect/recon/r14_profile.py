@@ -2,7 +2,7 @@
 """recon step 14 (read-only): per-bot profile for the report (D1 lots unless stated) + example links. Out: r14.txt"""
 import pickle, collections, time
 import numpy as np
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 L = pickle.load(open(f"{OUT}/lots.pkl", "rb"))
 pk = lambda t: time.strftime("%m-%d %H:%M:%S", time.gmtime(t + 18000))
 Lines = []

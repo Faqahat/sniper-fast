@@ -2,7 +2,7 @@
 """WHO step 2 [MEASURED, read-only]: one market tape for 10-23 22:00 -> 10-30 03:55 PKT from the decoded tabs other studies built
 (haqq_dissect D2-D6, omen3 D6/D7, paper_audit/tab, multiarm/tab38) + my decode of the two holes (tab_gap: 10-30 01:13-01:50 and
 03:25-03:55). Each tab is used on a disjoint slot range.
-Out (/home/moiz/sniper-data/prevent/who):
+Out (/home/it/sniper-data/prevent/who):
   mints.pkl   {mint: list of (slot, idx, j, buy, sol, tok, vsol, vtok, user)}  all trades of every window mint (live + paper)
   dumps.pkl   market-wide big sells (tok >= 3% supply): dict of arrays slot, bt, user(str), mint(str), tok, sol, drop, vsol
   creates.pkl {mint: (creator, slot, bt, mayhem)} every create
@@ -11,7 +11,7 @@ Out (/home/moiz/sniper-data/prevent/who):
 import json, pickle, sys, gc
 import numpy as np
 
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 OUT = f"{D}/prevent/who"
 SRC = [  # (kind, path, lo, hi_exclusive)
     ("chain", f"{D}/presend_quiet3", 460883340, 462709231),

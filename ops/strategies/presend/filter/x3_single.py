@@ -4,7 +4,7 @@ and (b) the dev live windows (MEASURED, sim.py). Validation is NOT read here. Ev
 import json, sys
 import numpy as np
 import sim
-B = "/home/moiz/sniper-data/presend_filter"
+B = "/home/it/sniper-data/presend_filter"
 T_VAL0, T_VAL1 = 1792948200, 1793033220
 E = [e for e in json.load(open(f"{B}/chain_events.json")) if not (T_VAL0 <= e["bt"] < T_VAL1)]
 UNF = 0.000164          # dev: mean failed-try fees of an armed window that did not fill (MEASURED)

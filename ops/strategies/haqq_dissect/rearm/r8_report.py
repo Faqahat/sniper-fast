@@ -14,10 +14,10 @@ ADDED = (base + re-arm) - base over every window, same draw (common random numbe
 usage: r8_report.py TAGS [--days 0..6] [--out r8.txt]"""
 import sys, os, pickle, argparse, collections, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 COST = {"NOW": 5120 + 200_000 + 605_000 + 1_200_000 + 5020, "S2": 5120 + 200_000 + 300_000 + 5020}
 FAIL = 5120
 FAC = {"cal": 0.81, "cons": 0.46}

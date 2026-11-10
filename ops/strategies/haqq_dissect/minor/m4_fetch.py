@@ -3,11 +3,11 @@
 (filled and failed, recent days first) to decode his router's trade_v3 arguments (amount_in, min_out, expected_out).
 Out: minor/rpc/<sig>.json"""
 import json, os, pickle, random, time, urllib.request
-OUT = "/home/moiz/sniper-data/haqq_dissect/minor/rpc"
+OUT = "/home/it/sniper-data/haqq_dissect/minor/rpc"
 os.makedirs(OUT, exist_ok=True)
 URL = "https://api.mainnet-beta.solana.com"
 random.seed(3)
-X = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/exec/txs.pkl", "rb"))
+X = pickle.load(open("/home/it/sniper-data/haqq_dissect/exec/txs.pkl", "rb"))
 H = [r for r in X if r["w"] == "haqq" and r["kind"] == "buy"]
 want = {(226, True): 8, (226, False): 8, (231, True): 6, (231, False): 6, (234, True): 6, (234, False): 6, (244, True): 4,
         (249, True): 3, (251, True): 3, (252, True): 3}

@@ -6,7 +6,7 @@ median hour. Days are 24 h windows ending 23:15 PKT (same boundary as the earlie
 Out: dv8/c0_coverage.txt, dv8/hours.json"""
 import json, time, collections
 import numpy as np
-D = "/home/moiz/sniper-data/dv8"; TAB = f"{D}/tab"
+D = "/home/it/sniper-data/dv8"; TAB = f"{D}/tab"
 pkt = lambda t: time.strftime("%m-%d %H:%M", time.gmtime(int(t) + 18000))
 DAY0 = 1793038500 - 5 * 86400        # 10-21 23:15 PKT
 

@@ -3,7 +3,7 @@
 its slots recorded, minus the probe hours (10-25 08:38-10:28 and 15:20-17:40 PKT), minus the first 30 min of each recording
 (tokens created before a recording starts have no history, as after an engine start), minus the newest 40 min (the
 recording's tail may still be copying). Halves: the test bins in time order, split at half the total hours.
-Writes /home/moiz/sniper-data/presend_real/hours.json"""
+Writes /home/it/sniper-data/presend_real/hours.json"""
 import sys, os, json, glob
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -16,7 +16,7 @@ def main():
     S = np.load(f"{rlib.TAB}/slots.npy")
     slot = S["slot"].astype(np.int64); bt = S["bt"].astype(np.int64)
     # slot -> time: a linear fit per recording region on block times (bt has 1 s resolution)
-    starts = [json.load(open(f"/home/moiz/sniper-data/collect/{r}/run.json"))["start_time"] for r in REC]
+    starts = [json.load(open(f"/data/tapes/collect/{r}/run.json"))["start_time"] for r in REC]
     t_lo = int(bt[bt > 0].min()); t_hi = int(bt[bt > 0].max())
     B = 600
     b0 = t_lo // B * B
@@ -45,7 +45,7 @@ def main():
     half = len(test) // 2
     for i, x in enumerate(test): x["half"] = 1 if i < half else 2
     J = dict(bins=out, test=test, hours=tot, half_split=rlib.pkt(test[half]["t0"]))
-    json.dump(J, open("/home/moiz/sniper-data/presend_real/hours.json", "w"))
+    json.dump(J, open("/home/it/sniper-data/presend_real/hours.json", "w"))
     from collections import Counter
     print("bins", len(out), "excluded", Counter(x["why"] for x in out if x["why"]), "test hours %.1f" % tot,
           "from", rlib.pkt(test[0]["t0"]), "to", rlib.pkt(test[-1]["t1"]), "| half 2 starts", J["half_split"])

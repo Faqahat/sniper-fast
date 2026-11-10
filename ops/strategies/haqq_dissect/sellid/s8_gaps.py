@@ -5,13 +5,13 @@ SELLS precede 248's sells (s2/s4 'co-sellers'): same slot or earlier slot, and d
 Out: sellid/s8.txt"""
 import pickle, json, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s, flush=True); out.append(s)
 Z = pickle.load(open(f"{OUT}/s1.pkl", "rb")); S = Z["sells"]; LOTS = Z["lots"]
-ids = json.load(open("/home/moiz/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
-B1 = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/bots/b1.pkl", "rb"))
+ids = json.load(open("/home/it/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
+B1 = pickle.load(open("/home/it/sniper-data/haqq_dissect/bots/b1.pkl", "rb"))
 bins = [1, 2, 3, 6, 11, 21, 51, 101, 201, 10 ** 6]
 def hist(v):
     h = np.histogram(v, bins)[0]; return " ".join(f"{a}-{b - 1}:{x / max(len(v), 1):.3f}" for a, b, x in zip(bins[:-1], bins[1:], h))

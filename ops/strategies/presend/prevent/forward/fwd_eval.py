@@ -11,7 +11,7 @@
 usage: fwd_eval.py RUN.jsonl [--seed gcr_seed.json] [--since-pkt HH:MM]"""
 import sys, json, collections, subprocess, datetime as dt, os
 path = sys.argv[1]
-seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/moiz/sniper-data/prevent/forward/gcr_seed.json"
+seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/it/sniper-data/prevent/forward/gcr_seed.json"
 led = collections.defaultdict(lambda: [0, 0.0])
 for c, d in (json.load(open(seed_p)).items() if os.path.exists(seed_p) else []): led[c] = [d["n"], d["sum"]]
 arm_ann, fill_ann, kind_of, real, gcr_w = {}, {}, {}, {}, {}
@@ -47,7 +47,7 @@ due = [k for k, a in fill_ann.items() if any(h.get("pct", 0) >= 6 and h.get("n",
 fills = len(real); tot = sum(real.values())
 print(f"FORWARD (dip27) {os.path.basename(path)}: {fills} realized positions, {tot:+.3f} SOL realized | annotated fills {len(fill_ann)}, arms {len(arm_ann)}")
 print(f"  lone_whale (LIVE skip): {skips.get('lone_whale', 0)} triggers skipped")
-fs = "/home/moiz/sniper/ops/obs/filter_savings.py"
+fs = "/home/it/sniper/ops/obs/filter_savings.py"
 if skips.get("lone_whale") and os.path.exists(fs):
     out = subprocess.run(["python3", fs, path], capture_output=True, text=True).stdout
     for l in out.splitlines():

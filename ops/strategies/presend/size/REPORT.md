@@ -85,5 +85,5 @@ r24 and r25 ran live at 0.34: +1.168 and +1.042 (MEASURED).
 - **Coverage:** AMS only. FRA r23 and r24 appear only in the live hour table.
 
 ## Files
-- Code (`/home/moiz/sniper/ops/strategies/presend/size/`): s1_live.py, s2_extract.py, s3_tape.py, s4_sigs.py, s4b_sigs2425.py, sizelib.py, s5_run.py, s6_fails.py, s7_hours.py, s8_tables.py, s9_sens.py.
-- Data (`/home/moiz/sniper-data/presend_size/`): live/ (r28 copy), tape.pkl, args_hold.jsonl, args_2425.jsonl, results.json (per trade, every size), fails.json, hours.json, sens.json, summary.json.
+- Code (`/home/it/sniper/ops/strategies/presend/size/`): s1_live.py, s2_extract.py, s3_tape.py, s4_sigs.py, s4b_sigs2425.py, sizelib.py, s5_run.py, s6_fails.py, s7_hours.py, s8_tables.py, s9_sens.py.
+- Data (`/home/it/sniper-data/presend_size/`): live/ (r28 copy), tape.pkl, args_hold.jsonl, args_2425.jsonl, results.json (per trade, every size), fails.json, hours.json, sens.json, summary.json.

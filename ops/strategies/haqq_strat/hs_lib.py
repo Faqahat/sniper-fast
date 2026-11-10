@@ -2,10 +2,10 @@
 """Shared helpers for HAQQ_STRAT (read-only)."""
 import json, pickle, time, collections
 import numpy as np
-D = "/home/moiz/sniper-data/haqq_strat"
+D = "/home/it/sniper-data/haqq_strat"
 W0 = 1793038500; W1 = W0 + 86400             # last 24 h: 10-26 23:15 -> 10-27 23:15 PKT
 pkt = lambda t: time.strftime("%m-%d %H:%M", time.gmtime(int(t) + 18000))
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 DEAD_V = 30.52
 
 
@@ -20,14 +20,14 @@ def _ld():
     if _L: return
     sch = {}
     for e in (1067, 1068, 1069):
-        for f in (f"/home/moiz/sniper-data/haqq_sel/schedule_{e}.json", f"/home/moiz/sniper-data/competitors2/schedule_{e}.json"):
+        for f in (f"/home/it/sniper-data/haqq_sel/schedule_{e}.json", f"/home/it/sniper-data/competitors2/schedule_{e}.json"):
             try: d = json.load(open(f))
             except FileNotFoundError: continue
             sch[d["start"]] = (d["ids"], d["slot_leader"]); break
     _L["sch"] = sch
-    nodes = json.load(open("/home/moiz/sniper/ops/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
+    nodes = json.load(open("/home/it/sniper-data/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
     cl = {k: v.get("clientId") or "" for k, v in nodes.items()}
-    rt = json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
+    rt = json.load(open("/home/it/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
     for k, v in rt.items():
         if v.get("client"): cl.setdefault(k, v["client"])
     _L["cl"] = cl

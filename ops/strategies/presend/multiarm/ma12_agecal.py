@@ -5,7 +5,7 @@ outcome; summed per age bucket (<= 5, 6-10, 11-20, 21-40, > 40 slots; age = dump
 usage: ma12_agecal.py CTX.pkl OUT.json [REPS]"""
 import sys, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import ma4_sim as S, ma5_calib as C5, ma_lib as M
 from ma3_ctx import prep_live
 from ma11_young import bucket

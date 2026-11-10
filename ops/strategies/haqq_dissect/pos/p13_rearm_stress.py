@@ -4,7 +4,7 @@ Our position k after the dump = round(m x q x N_w), q drawn from the p8c pre-sen
 REACTIVE rank model (uni rank draws, our M2 landing) for comparison. Fill if entry price <= 0.88 x pre-dump. 2-slot exit. Out: p13.txt"""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import p6_rules as R6
 import dv8lib as L
 from plib import Out, OUT

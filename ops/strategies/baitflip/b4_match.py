@@ -9,7 +9,7 @@ def cell(r):
     return (b(r['age'], [150, 600]), b(r['vsol'], [40, 55, 75]), b(r['n20'], [4, 11, 26, 50]),
             b(r['b20'], [0.5, 2, 5, 12]), b(r['r20'], [0.9, 1.0, 1.15, 1.4]))
 rest = collections.defaultdict(list); base = collections.defaultdict(list); dump = []
-for f in glob.glob('/home/moiz/sniper-data/strategies/baitflip2/*.jsonl.gz'):
+for f in glob.glob('/home/it/sniper-data/strategies/baitflip2/*.jsonl.gz'):
     for l in gzip.open(f, 'rt'):
         r = json.loads(l)
         if r['age'] < 15 or r['age'] > 2000 or not (28 <= r['vsol'] <= 100): continue

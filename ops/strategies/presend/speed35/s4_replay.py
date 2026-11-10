@@ -2,11 +2,11 @@
 """SPEED35 step 4: engine-faithful pre-send replay of every LIVE-armed window of AMS r36 + r37 where ONLY our landing timing
 changes (s3 scenarios). Fill/exit rules = YOUNG sim (limit x0.88 re-read per slot, window trigger+10, whale-stop, QUIET stop),
 run's own TP/SL (r36 20/20, r37 15/20), size 0.696, 3.52 mSOL per round trip; failed-try fees left out (same sends in every row).
-Out: /home/moiz/sniper-data/speed35/replay.pkl + stdout tables."""
+Out: /home/it/sniper-data/speed35/replay.pkl + stdout tables."""
 import pickle, datetime, collections, numpy as np
 from multiprocessing import Pool
 from s_sim import sim, LIVE_MIX, SCEN as YSCEN
-D = "/home/moiz/sniper-data/speed35"
+D = "/home/it/sniper-data/speed35"
 B = pickle.load(open(f"{D}/rows.pkl", "rb")); SC = pickle.load(open(f"{D}/scen.pkl", "rb"))
 TPSL = {"r36": (0.20, 0.20), "r37": (0.15, 0.20)}
 SIZE = 0.696; COST = 0.00352; SEEDS = 5

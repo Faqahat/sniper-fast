@@ -6,7 +6,7 @@ blocksize = max idx seen in the recorder + 1). Also: what his lot would have ret
 INFERRED fill = no own impact)."""
 import sys, pickle, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"])
 S = np.load(f"{TP}/slots.npy"); s0 = int(S["slot"].min())

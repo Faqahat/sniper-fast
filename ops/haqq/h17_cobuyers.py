@@ -3,7 +3,7 @@
 # bought between the dump and 1 slot after haqq's buy. Per open slot d of each dip lot: did a co-buyer sell in the previous 2 slots
 # (x), and did haqq's first sell land in slot d (y)? Core profiles, d <= 70, stratified by size and slot. Also: share of co-buyers already out at haqq's sell vs at a random open slot.
 import sys, json, pickle, zlib, collections, random, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 from multiprocessing import Pool
 LOTS = None
 def work(b):

@@ -14,13 +14,13 @@
 import argparse, json, os, re, sys, time, statistics as st, collections, urllib.request, datetime as dt
 from concurrent.futures import ThreadPoolExecutor
 
-DATA = "/home/moiz/sniper-data/runs"
-OUT = "/home/moiz/sniper/ops/dip/reports/runs"
-NOTES = "/home/moiz/sniper/ops/dip/report/run_notes.json"
-COHORT = "/home/moiz/sniper/ops/overnight/sel/cohort_train.json"
-REG = {"fra": dict(name="Frankfurt", short="FRA", server="cybershock (84.32.100.36)", tag="dip_r", budget="dip_budget.json",
+DATA = "/home/it/sniper-data/runs"
+OUT = "/home/it/sniper/ops/dip/reports/runs"
+NOTES = "/home/it/sniper/ops/dip/report/run_notes.json"
+COHORT = "/home/it/sniper-data/overnight/sel/cohort_train.json"
+REG = {"fra": dict(name="Frankfurt", short="FRA", server="cybershock (cyberfra)", tag="dip_r", budget="dip_budget.json",
                    wallet="2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"),
-       "ams": dict(name="Amsterdam", short="AMS", server="cyber-dock (84.32.104.202)", tag="dip_ams_r", budget="dip_budget_ams.json",
+       "ams": dict(name="Amsterdam", short="AMS", server="cyber-dock (cyberams)", tag="dip_ams_r", budget="dip_budget_ams.json",
                    wallet="EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR")}
 KIND = {"JitoLabs": "Jito", "AgaveBam": "BAM", "FireBAM": "BAM", "HarmonicAgave": "Harmonic", "HarmonicFiredancer": "Harmonic",
         "Firedancer": "Firedancer", "Frankendancer": "Firedancer", "Agave": "Agave", "Rakurai": "Rakurai"}

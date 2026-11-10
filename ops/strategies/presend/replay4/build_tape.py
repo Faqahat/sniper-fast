@@ -6,18 +6,18 @@ The event's own reserve fields do not match the curve, so reserves are NOT taken
 Each trade also carries the curve's own token reserve, taken from the tx's post token balance:
 vtok = (the mint's largest post balance in `tb`) + VOFF, an offset MEASURED as exactly 73e12 against 515 engine ptape rows.
 That makes every row's reserve independent, so a trade the collector missed cannot corrupt the rows after it.
-Out: /home/moiz/sniper-data/replay4/tape_<run>.pkl {"trades": {mint: [(slot, idx, buy, sol, tok, user, vtok)]}, "maxi": {slot: max idx}}
+Out: /home/it/sniper-data/replay4/tape_<run>.pkl {"trades": {mint: [(slot, idx, buy, sol, tok, user, vtok)]}, "maxi": {slot: max idx}}
 usage: build_tape.py r38 r39 r40
 """
 import json, gzip, glob, sys, os, pickle, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ev import decode
 
-OUT = "/home/moiz/sniper-data/replay4"
-RUNS = {"r38": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r38.jsonl",
-        "r39": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r39.jsonl",
-        "r40": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r40.jsonl"}
-COLLECT = "/home/moiz/sniper-data/collect/run_20261029_1400/txs"
+OUT = "/home/it/sniper-data/replay4"
+RUNS = {"r38": "/home/it/sniper-data/runs/ams/runs/dip_ams_r38.jsonl",
+        "r39": "/home/it/sniper-data/runs/ams/runs/dip_ams_r39.jsonl",
+        "r40": "/home/it/sniper-data/runs/ams/runs/dip_ams_r40.jsonl"}
+COLLECT = "/data/tapes/collect/run_20261029_1400/txs"
 VOFF = 73_000_000_000_000      # virtual - real token reserve (MEASURED, constant)
 
 os.makedirs(OUT, exist_ok=True)

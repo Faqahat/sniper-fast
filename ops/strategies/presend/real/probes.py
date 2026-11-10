@@ -4,7 +4,7 @@ Probe 1 = AMS run 16 (10-25 08:48-10:18 PKT, 0.2 SOL, whale >= 5%, k 4, 20/s cap
 Probe 2 = AMS run 17 (10-25 15:30-17:30 PKT, 0.35 SOL, whale >= 6%, k 8, 30/s caps).
 Every number here is MEASURED from the engine's own records (presend_live_* / presend_attempt*)."""
 import json, collections, os
-RUNS = "/home/moiz/sniper-data/runs/ams/runs"
+RUNS = "/home/it/sniper-data/runs/ams/runs"
 PROBES = {"P1": f"{RUNS}/dip_ams_r16.jsonl", "P2": f"{RUNS}/dip_ams_r17.jsonl"}
 WALLET = "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"     # AMS live wallet (public key, not a secret)
 SMS = 212.0

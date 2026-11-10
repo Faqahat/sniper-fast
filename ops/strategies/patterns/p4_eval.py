@@ -16,7 +16,7 @@
 #  - ONE OPEN POSITION AT A TIME per rule (greedy in landing order across all tokens) + an unconstrained sample.
 import sys, os, json, math, re, collections
 import numpy as np
-PO = "/home/moiz/sniper-data/strategies/patterns"
+PO = "/home/it/sniper-data/strategies/patterns"
 SMS = 212.0; FIX = 0.0035; FAIL = 0.0005; GUARD = 1.05; GRADV = 113e9
 WTC = {"creator": 1, "insider": 2, "new": 3, "fresh": 3, "bot": 4, "other": 0, "w": 0, **{f"F{k}": 10 + k for k in range(1, 11)}}
 EXIT_EV = re.compile(r"^(dev_sell|big_sell|big_buy|fam_sell|bot_buy:\d+|bot_sell:\d+)$")

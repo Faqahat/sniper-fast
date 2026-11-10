@@ -259,14 +259,6 @@ impl PsLive {
         let (crw, crj) = if self.cfg.cr_on() { cr_gate(&self.sh, &self.cfg, self.det.creator_bal(&mint).map(|c| c.0), t_rx) } else { (None, None) };
         // dip36 LIVE blocklist: the dumper / a holder >= the threshold listed (nothing without the flag)
         let blh = if self.bl.is_some() { self.bl_hit(&mint, &c.dump.tr.user, "dumper", None) } else { None };
-        // dip37 the whale / dumper ledger on the dumper (LIVE; None with it off)
-        let whg = pswh::wh_gate(&self.sh, &self.cfg, &c.dump.tr.user, true);
-        // dip37 the holder ledger on the remaining holders (the dumper excluded); the control file's modes ("log": logged, never a skip)
-        let hlg = self.hl_gate(&mint, &c.dump.tr.user);
-        let (wh_live, hl_live) = (self.hls.live[0], self.hls.live[1]);
-        // dip37 HYBRID-2: the mint's scored dumps strictly before the dump (its own never counted); the m2_unseen gate (LIVE with its flag)
-        let h2v = self.h2.as_ref().map(|h| h.view(&mint, c.dump.tr.s, c.dump.tr.i));
-        let h2skip = self.cfg.m2seen_gate && h2v.is_some_and(|v| v.0 == 0);
         let Some(rm) = self.rm.as_mut() else { return };
         rm.st.checks += 1;
         let en_slot = c.dump.tr.s + RE_WAIT + rm.cfg.gap;
@@ -283,9 +275,6 @@ impl PsLive {
             _ if lwhy.is_some() => Some("rearm_blocked_launch"),
             _ if crw == Some("loss") => Some("rearm_cr_loss"),
             _ if crw.is_some() => Some("rearm_cr_unfollowed"),
-            _ if whg.is_some_and(|g| g.0) && wh_live => Some("rearm_wh_loss"),
-            _ if hlg.is_some() && hl_live => Some("rearm_holder_loss"),
-            _ if h2skip => Some("rearm_m2_unseen"),
             _ if blh.is_some() => Some("rearm_blocklist"),
             _ => None,
         };
@@ -314,13 +303,6 @@ impl PsLive {
             if w == "rearm_blocked_launch" { x["launch"] = lwhy.into(); }
             if let Some(j) = r5 { x["r5"] = j; }
             if let Some(j) = crj { x["cr"] = j; }
-            // dip37: the ledger's view of the dumper (only with it on)
-            if let Some((_, h)) = &whg { pswh::wh_fields(&mut x, &self.cfg, &c.dump.tr.user, h); }
-            if let Some((nd, mx)) = h2v { psh2::fields(&mut x, nd, mx, true, 0, self.cfg.rearm.spend); }
-            if w == "rearm_wh_loss" { if let Some((_, h)) = whg { self.wh_skip_line(&mint, &c.dump.tr.user, &h, true); } }
-            if whg.is_some_and(|g| g.0) && !wh_live { x["wh_would"] = true.into(); }
-            if let Some(h) = &hlg { PsLive::hl_fields(&mut x, h); if !hl_live { x["hl_would"] = true.into(); } }
-            if w == "rearm_holder_loss" { if let Some(h) = &hlg { self.hl_note(&mint, h, true, true); } }
             // dip36: the blocklist's hit
             if let Some(h) = blh.as_ref().filter(|_| w == "rearm_blocklist") {
                 PsLive::bl_fields(&mut x, h);
@@ -378,10 +360,8 @@ impl PsLive {
         let ob6 = ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &mint, &dump.tr.user, &self.user);
         // dip36 live gate: the window's verdict cell (None without the FP-NOBOT log)
         let fpg = self.fp.as_ref().map(|_| Arc::new(pslog36::Gate::default()));
-        // dip37: the window's fee arm, once, now (None with the fee A/B off)
-        let fab = self.fab_assign(id);
         self.sh.wins.lock().unwrap().push(SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::new(st_ns, k, slot_ns), n: 0, done: false,
-            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab });
+            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone() });
         self.armed.insert(mint, id);
         {
             let tp = &mut self.tapes.entry(mint).or_insert_with(|| (VecDeque::new(), 0)).0;
@@ -405,16 +385,6 @@ impl PsLive {
             r["f3"] = serde_json::json!({"fresh": fresh, "fresh_n": fresh_n});
             if let Some(g) = tags_json(&self.det, &mint, &self.cfg.tag_wallets) { r["tags"] = g; }
         }
-        // dip37: the window's fee arm and its values (only with the A/B on); the ledger's view of the dumper (only with it on)
-        self.fab_arm_rec(&mut r, fab);
-        if let Some((_, h)) = pswh::wh_gate(&self.sh, &self.cfg, &dump.tr.user, true) { pswh::wh_fields(&mut r, &self.cfg, &dump.tr.user, &h); }
-        self.wh_arm(id, dump.tr.user);
-        // dip37 the holder ledger: the window's keys; in "log" mode the would-skip on the arm record
-        self.hl_arm(id, &mint, &dump.tr.user);
-        if let Some((_, h)) = pswh::wh_gate(&self.sh, &self.cfg, &dump.tr.user, true).filter(|g| g.0 && !self.hls.live[0]) { let _ = h; r["wh_would"] = true.into(); }
-        if let Some(h) = self.hl_gate(&mint, &dump.tr.user) { PsLive::hl_fields(&mut r, &h); r["hl_would"] = true.into(); self.hl_note(&mint, &h, true, false); }
-        // dip37 HYBRID-2 (log only): the scored dumps strictly before this window's dump
-        if let Some((nd, mx)) = self.h2.as_ref().map(|h| h.view(&mint, dump.tr.s, dump.tr.i)) { psh2::fields(&mut r, nd, mx, true, 0, spend); }
         // dip34 (log-only): seen / eqgrp / q4 keyed on the dumper (each only with its flag)
         let dumper = dump.tr.user;
         self.log34(&mut r, &mint, &dumper, chk_slot, chk_t);

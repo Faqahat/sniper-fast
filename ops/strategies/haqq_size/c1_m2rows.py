@@ -6,10 +6,10 @@ guard-blocked buy). For each size: the engine's tried rows and their P&L at 35 /
 usage: c1_m2rows.py <npz> <size>  -> OUT/m2/rows_s<size>.pkl"""
 import sys, json, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_lib as L
 import dd20_shadow_eval as D20
-OUT = "/home/moiz/sniper-data/haqq_size"; HQS = "/home/moiz/sniper-data/haqq_sel"; HM = "/home/moiz/sniper-data/haqq_model"
+OUT = "/home/it/sniper-data/haqq_size"; HQS = "/home/it/sniper-data/haqq_sel"; HM = "/home/it/sniper-data/haqq_model"
 W0 = 1793038500; W1 = 1793124900
 E4 = L.EXI["c4_tpnone_slnone"]
 BUNDLE = f"{L.OUT}/m2_v3_reg4_top25.json"

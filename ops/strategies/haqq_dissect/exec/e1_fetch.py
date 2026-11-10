@@ -3,10 +3,10 @@
 Saves raw responses to sniper-data/haqq_dissect/exec/rpc/<sig>.json. Usage: e1_fetch.py N_PER_CLASS"""
 import json, random, collections, time, urllib.request, os, sys
 random.seed(7)
-D = "/home/moiz/sniper-data/haqq_dissect/exec/rpc"; H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+D = "/home/it/sniper-data/haqq_dissect/exec/rpc"; H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 URL = "https://api.mainnet-beta.solana.com"
-rows = [json.loads(l) for l in open("/home/moiz/sniper-data/haqq_strat/haqq_raw.jsonl")]
+rows = [json.loads(l) for l in open("/home/it/sniper-data/haqq_strat/haqq_raw.jsonl")]
 rows = [r for r in rows if r["signers"][0] == H]
 def path(r):
     if not r["tips"]: return "notip"

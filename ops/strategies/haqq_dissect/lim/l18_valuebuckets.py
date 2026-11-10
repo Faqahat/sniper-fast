@@ -8,7 +8,7 @@ Regular: same per fire (the dump = the trigger; our first landed copy).
 Out: data/lim/l18.txt"""
 import pickle, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 ED = [(-1e9, -10), (-10, 0), (0, 10), (10, 30), (30, 60), (60, 1e9)]
 out = []
 def P(*a):

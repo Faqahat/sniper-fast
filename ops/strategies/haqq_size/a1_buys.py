@@ -5,13 +5,13 @@ with features knowable at his buy, plus FIFO lot accounting of his realized P&L.
   lots   = each buy is a lot; his sells consume lots FIFO by tokens; a lot's P&L = its share of sell proceeds (net of pump fees)
            minus its gross cost. Tx fees / tips are NOT on the tape (P&L is gross of them).
   trip   = a run of his trades on one mint from a zero token balance back to (near) zero.
-Out: /home/moiz/sniper-data/haqq_size/buys.pkl (list of dicts) and lots/trips."""
+Out: /home/it/sniper-data/haqq_size/buys.pkl (list of dicts) and lots/trips."""
 import json, time, collections, pickle, bisect
 import numpy as np
-TAB = "/home/moiz/sniper-data/haqq_model/tab"; OUT = "/home/moiz/sniper-data/haqq_size"; HM = "/home/moiz/sniper-data/haqq_model"
+TAB = "/home/it/sniper-data/haqq_model/tab"; OUT = "/home/it/sniper-data/haqq_size"; HM = "/home/it/sniper-data/haqq_model"
 HAQQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
-FB = set(json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
-COH = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
+FB = set(json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
+COH = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
 pkt = lambda t: time.strftime("%m-%d %H:%M", time.gmtime(int(t) + 18000))
 
 

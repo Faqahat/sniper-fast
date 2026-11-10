@@ -1,7 +1,7 @@
 # read-only helpers for the head-to-head analysis
 import os, json, gzip, glob, base64, collections
-W = "/home/moiz/sniper/ops/agents/headtohead/work"
-TIPMAP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+W = "/home/it/sniper/ops/agents/headtohead/work"
+TIPMAP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 OURS = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 TRADE = bytes([189, 219, 127, 211, 78, 230, 97, 238])

@@ -3,7 +3,7 @@
 All rows are successful pump.fun trades (TradeEvent), chain order (slot, idx, j). MEASURED."""
 import json, numpy as np
 
-B = "/home/moiz/sniper-data/presend_filter"
+B = "/home/it/sniper-data/presend_filter"
 SUPPLY = 1e15
 
 

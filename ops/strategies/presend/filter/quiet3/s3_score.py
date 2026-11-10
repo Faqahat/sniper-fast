@@ -5,9 +5,9 @@ test FROZEN on the later runs. Censoring: in QUIET-on runs the arms QUIET skippe
 (skip = current QUIET OR extra): its gain = sum(-v) over windows where extra is true and current QUIET is false (all runs).
 Loosening (skipping fewer than current QUIET) is only measurable on the QUIET-off runs. Read-only."""
 import json, collections, random, itertools, sys, datetime
-D="/home/moiz/sniper-data/presend_quiet3"
+D="/home/it/sniper-data/presend_quiet3"
 J=json.load(open(f"{D}/windows_feats.json"))
-rows={r['run']+r['reg']:r for r in json.load(open('/home/moiz/sniper-data/presend_losses/verify/fills.json'))['rows']}
+rows={r['run']+r['reg']:r for r in json.load(open('/home/it/sniper-data/presend_losses/verify/fills.json'))['rows']}
 fpa_all=[r['fees']/r['att_all'] for r in rows.values() if r['fees']]; FPA0=sum(fpa_all)/len(fpa_all)
 SPLIT=1793127600*10**9   # 10-28 00:00 PKT
 PKT=5*3600; SIZE=0.696

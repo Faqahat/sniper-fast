@@ -4,8 +4,8 @@
 position with his exit. Isolates entry from exit. Exact replay (b4 machinery), 0.40 SOL for both. Out: bots/b16.txt"""
 import sys, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/bots")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/bots")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 import b4_replay as B4
 from plib import boot_mean, Out
 import dv8lib as L
@@ -14,7 +14,7 @@ import dv8lib as L
 def main():
     P = Out(f"{B4.OUT}/b16.txt")
     Z = pickle.load(open(f"{B4.OUT}/b4_res.pkl", "rb")); meta = Z["meta"]; PL = [str(p) for p in B4.PL]
-    F = pickle.load(open("/home/moiz/sniper-data/dv8/fires_tape.pkl", "rb"))
+    F = pickle.load(open("/home/it/sniper-data/dv8/fires_tape.pkl", "rb"))
     rows = pickle.load(open(f"{B4.OUT}/b1.pkl", "rb")); byli = {r["li"]: r for r in rows}
     lots = collections.defaultdict(list)
     for i, m in meta.items():

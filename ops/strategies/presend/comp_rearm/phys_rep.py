@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """physics table from comp_buys_*.pkl (MEASURED on tape)"""
 import pickle, collections, numpy as np
-D = "/home/moiz/sniper-data/comp_rearm"
+D = "/home/it/sniper-data/comp_rearm"
 R = [r for t in ("D2", "D3", "D4", "D5", "N", "r37") for r in pickle.load(open(f"{D}/comp_buys_{t}.pkl", "rb"))]
 def q(a, p): return float(np.percentile(a, p)) if len(a) else float("nan")
 print("| bot | buys | buy SOL p50 | curve SOL p50 | own sell found | sell delay ms p10/p50/p90 | same slot | sell SOL p50 | own sell drop p50/p90 | own sell alone >=12% | any 1-slot drop >=12% in 10 slots |")

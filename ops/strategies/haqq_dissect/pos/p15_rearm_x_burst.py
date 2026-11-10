@@ -3,7 +3,7 @@
 gap 3-52 slots, age <= 120 s) split by prior burst slots / repeat burst wallets (p14). Pre-send-style values from p8c. Out: p15.txt"""
 import sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 from plib import Out, OUT
 P = Out(f"{OUT}/p15.txt")

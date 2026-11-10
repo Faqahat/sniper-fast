@@ -4,7 +4,7 @@
 # whether a successful tx actually traded (pump TradeEvent) or was a no-op, and Jito-bundle markers.
 # usage: python3 -I haqq_path.py <wallet> [sample]
 import sys, json, collections, base64, importlib.util
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 W = sys.argv[1]; NS = int(sys.argv[2]) if len(sys.argv) > 2 else 40
 sigs = S.rpc("getSignaturesForAddress", [W, {"limit": 1000}]) or []
 fail = [s for s in sigs if s.get("err")]

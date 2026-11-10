@@ -6,7 +6,7 @@
 Ranges = 5-95% bootstrap over lots."""
 import pickle, json, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_size"
+OUT = "/home/it/sniper-data/haqq_size"
 W0 = 1793038500
 Z = pickle.load(open(f"{OUT}/buys.pkl", "rb")); B = Z["buys"]; LOTS = Z["lots"]
 rng = np.random.default_rng(4)

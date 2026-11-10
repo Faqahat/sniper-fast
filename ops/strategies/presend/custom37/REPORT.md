@@ -326,7 +326,7 @@ r37 1st half +0.330, 2nd half +0.643. Per run: r37 +0.973, r34 -0.064, r35 +0.04
 - One test run (r37, 10.8 h daytime PKT). TRAIN is mostly night PKT plus FRA.
 
 ## Files
-Code /home/moiz/sniper/ops/strategies/presend/custom37/: c1_extract (windows + real tries), c2_tape (chain tapes), c2b_holders /
+Code /home/it/sniper/ops/strategies/presend/custom37/: c1_extract (windows + real tries), c2_tape (chain tapes), c2b_holders /
 c2c_leaders (arm-time features), c37lib (replay), c3_calib, c4_grid (knobs), c5_tables, c6_losses, c7_policy, c8_final, c9_tables_md,
-c10_report. Data /home/moiz/sniper-data/custom37/ (runs/ r37 copy + cut time, win_*/tape_* pickles, tab37 r37 tape, grid.pkl,
+c10_report. Data /home/it/sniper-data/custom37/ (runs/ r37 copy + cut time, win_*/tape_* pickles, tab37 r37 tape, grid.pkl,
 knobs.txt/json, losses.md/json, policies.json, final.txt/json, tables.md, calib_*.json).

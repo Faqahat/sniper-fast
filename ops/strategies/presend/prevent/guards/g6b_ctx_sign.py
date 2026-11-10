@@ -5,8 +5,8 @@ Same replay / config / rows as g4 (base vs variant, -20% followers).
 usage: g6b_ctx_sign.py RUN D REPS OUT.json"""
 import sys, json, bisect
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/guards")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/guards")
 import c37lib as L
 import glib as G
 run, Dp, reps, outp = sys.argv[1], float(sys.argv[2]), int(sys.argv[3]), sys.argv[4]

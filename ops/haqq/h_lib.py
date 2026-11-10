@@ -2,14 +2,14 @@
 # Shared helpers for the haqq study (read-only, local files only).
 import json, os, time, glob, pickle, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq"
+OUT = "/home/it/sniper-data/haqq"
 W = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 FRA = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"; AMS = "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"; US = {FRA, AMS}
 HK = "HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ"
 SMS = 212.0
 pkt = lambda t: time.strftime("%m-%d %H:%M", time.gmtime(int(t) + 18000))
 pkth = lambda t: time.gmtime(int(t) + 18000).tm_hour
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 def svc_of(acc):
     if acc in TIP: return TIP[acc]
     if acc.startswith("noz"): return "nozomi"
@@ -18,18 +18,18 @@ def svc_of(acc):
 _LEAD = {}
 def _load_leaders():
     if _LEAD: return
-    L = json.load(open("/home/moiz/sniper/ops/overnight/landing/work/rpc/leaders.json"))
+    L = json.load(open("/home/it/sniper-data/overnight/landing/work/rpc/leaders.json"))
     _LEAD["map"] = {int(k): v for k, v in L.items()}
     _LEAD["ep"] = {}
-    for f in ("/home/moiz/sniper-data/haqq/schedule_1065.json", "/home/moiz/sniper/ops/dip/speed/leaders/schedule_cur.json", "/home/moiz/sniper-data/competitors2/schedule_1067.json"):
+    for f in ("/home/it/sniper-data/haqq/schedule_1065.json", "/home/it/sniper/ops/dip/speed/leaders/schedule_cur.json", "/home/it/sniper-data/competitors2/schedule_1067.json"):
         d = json.load(open(f)); _LEAD["ep"][d["start"]] = (d["ids"], d["slot_leader"])
-    nodes = json.load(open("/home/moiz/sniper/ops/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
+    nodes = json.load(open("/home/it/sniper-data/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
     _LEAD["client"] = {k: v.get("clientId") or "" for k, v in nodes.items()}
-    rt = json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
+    rt = json.load(open("/home/it/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
     for k, v in rt.items():
         if v.get("client"): _LEAD["client"].setdefault(k, v["client"])
     _LEAD["rtt"] = {k: v.get("rtt") for k, v in rt.items()}
-    geo = json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/leader_geo.json"))["rows"]
+    geo = json.load(open("/home/it/sniper/ops/dip/speed/leaders/leader_geo.json"))["rows"]
     _LEAD["geo"] = {r["pk"]: (r.get("cc"), r.get("city"), r.get("rtt")) for r in geo}
     for k, v in _LEAD["geo"].items():
         if v[2] is not None: _LEAD["rtt"].setdefault(k, v[2])
@@ -58,7 +58,7 @@ def leader_info(slot):
 _SS = {}
 def slot_size(slot):
     if not _SS:
-        for f in ("/home/moiz/sniper/ops/overnight/core/slotsize2.json",):
+        for f in ("/home/it/sniper-data/overnight/core/slotsize2.json",):
             _SS.update({int(k): v for k, v in json.load(open(f)).items()})
         for f in glob.glob(f"{OUT}/slotmax_R*.json"):
             for k, v in json.load(open(f)).items():

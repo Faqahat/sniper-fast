@@ -1,18 +1,18 @@
 #!/bin/bash
 # Container side of the raw recording (owner OK 10-24 06:50 PKT: record everything raw, daily replays while tuning).
 # One pass (keeper_loop.sh runs it every 10 min):
-#  (a) COPY every server collector run (/root/sniper-collect/run_*) to /home/moiz/sniper-data/collect/<run>/: every file whose
+#  (a) COPY every server collector run (/root/sniper-collect/run_*) to /data/tapes/collect/<run>/: every file whose
 #      size differs (new chunks, the chunk being written, launches / enrich / run / status / final / gaps), size-checked;
 #  (b) PRUNE a server run once it is not the current run, its collector says DONE (or it is > 12 h past its tail), its tail
 #      ended > 2 h ago, and EVERY server file is
 #      here with the same size (server disk 77 GB, ~17 GB per day). Never deletes anything in the container.
-# Stops copying when the container has < 30 GB free (logged). Log: /home/moiz/sniper-data/collect/keeper.log
+# Stops copying when the container has < 30 GB free (logged). Log: /data/tapes/collect/keeper.log
 set -u
-D=/home/moiz/sniper-data/collect; SRV=/root/sniper-collect
-ssh_() { ssh -p 1996 -o ConnectTimeout=20 -o ServerAliveInterval=15 it@84.32.100.36 "$@"; }
+D=/data/tapes/collect; SRV=/root/sniper-collect
+ssh_() { ssh -p 1996 -o ConnectTimeout=20 -o ServerAliveInterval=15 it@cyberfra "$@"; }
 log() { echo "$(date -u +%FT%TZ) $*" >> $D/keeper.log; }
-free=$(df --output=avail -B1G /home/moiz | tail -1 | tr -d ' ')
-used=$(df --output=pcent /home/moiz | tail -1 | tr -dc '0-9')
+free=$(df --output=avail -B1G /home/it | tail -1 | tr -d ' ')
+used=$(df --output=pcent /home/it | tail -1 | tr -dc '0-9')
 # owner 10-26: cap at 95% used (was: < 30 GB free); the recordings then wait on the server (nothing is lost, nothing pruned)
 if [ "$used" -ge 95 ]; then log "container disk ${used}% used (${free} GB free): not copying (and so not pruning the server)"; exit 1; fi
 info=$(ssh_ "sudo bash -c 'cd $SRV && echo CUR=\$(cat current_run) && find . -maxdepth 1 -type d -name \"run_*\" -printf \"%f\n\"'") || { log "ssh failed"; exit 1; }

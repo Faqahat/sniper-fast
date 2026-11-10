@@ -1,6 +1,6 @@
 # Meteora DLMM (LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo): port spec
 
-Extracted 2026-10-03 from the current bot (`/home/moiz/arbed/arbed`, read-only) by a code-map agent. Items marked
+Extracted 2026-10-03 from the current bot (`/home/it/other/arbed/arbed`, read-only) by a code-map agent. Items marked
 **[UPSTREAM]** come from Meteora's lb_clmm source, not the repo; check them against the program.
 
 **Biggest gap:** the current bot quotes DLMM in float64 (`Math.pow(1+binStep/1e4, bin)`), not the program's Q64.64

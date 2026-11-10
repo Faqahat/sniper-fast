@@ -5,7 +5,7 @@ Cash = SOL back after pump's fee - size - fixed costs (2.015 mSOL: tip, fees, se
 usage: pa8_pt_tables.py PT.pkl X.pkl OUT.json"""
 import sys, json, pickle, collections, statistics
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as C37
 
 FAIL = C37.FAIL / 1e9

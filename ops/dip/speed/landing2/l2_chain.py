@@ -5,11 +5,11 @@
 import json, gzip, base64, re, sys, os, collections, glob
 from multiprocessing import Pool
 
-OUT = "/home/moiz/sniper-data/landing2"
-COLLECT = "/home/moiz/sniper-data/collect"
+OUT = "/home/it/sniper-data/landing2"
+COLLECT = "/data/tapes/collect"
 DISC = bytes([189, 219, 127, 211, 78, 230, 97, 238])
 A58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 HEAD = re.compile(r'^\{"s":(\d+),"i":(\d+)')
 LO, HI = 3, 8
 OURS = ("2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR")

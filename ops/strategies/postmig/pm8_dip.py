@@ -10,7 +10,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 import pmsim
 from pmsim import Run, SMS, one_at_a_time, stats
-OUT = "/home/moiz/sniper-data/strategies/postmig"
+OUT = "/home/it/sniper-data/strategies/postmig"
 HOURS = {"R2": 21.8, "R3": 25.0, "R4": None}
 
 def typ(t):

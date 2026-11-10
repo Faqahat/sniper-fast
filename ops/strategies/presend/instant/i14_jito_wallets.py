@@ -4,7 +4,7 @@
 # relay's tip account), and the bundle size.
 # usage: python3 -I i14_jito_wallets.py CLASSES.json OUT.json MAXGAP PREFIX [PREFIX ...]
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/instant")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/instant")
 import jito_api as J
 C = json.load(open(sys.argv[1])); outp = sys.argv[2]; G = int(sys.argv[3]); P = sys.argv[4:]
 res = []

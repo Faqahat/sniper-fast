@@ -3,11 +3,11 @@
 # did the lot's first sell land within 0-150 ms after it (block-position proxy), and does that depend on the trade (side, size,
 # wallet type) and the profile? Baseline = all outside trades while open.
 import sys, json, pickle, zlib, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 from multiprocessing import Pool
 PROF = {0.25: "A.25", 0.27: "B.27", 0.3: "C.30", 0.4: "D.40", 0.49: "E.49", 0.01: "P.01"}
 prof = lambda sz: PROF.get(round(sz, 2), "BIG" if sz >= 0.6 else "other")
-COH = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
+COH = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
 SS = {}
 def init():
     for run in ("R1", "R2", "R3", "R4"):
@@ -46,7 +46,7 @@ if __name__ == "__main__":
     lots = json.load(open(f"{H.OUT}/lots.json"))
     LAUNCH = {}
     for run in ("run_20261021_2207", "run_20261022_1543", "run_20261023_1426", "run_20261024_1425"):
-        for line in open(f"/home/moiz/sniper-data/collect/{run}/launches.jsonl"):
+        for line in open(f"/data/tapes/collect/{run}/launches.jsonl"):
             try: c = json.loads(line)
             except Exception: continue
             LAUNCH.setdefault(c["mint"], (c["slot"], c.get("creator"), c.get("user")))

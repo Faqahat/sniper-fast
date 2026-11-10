@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """SIZE study step 1 (read-only, offline): parse AMS r26, r27, r28 records with REPLAY_065's live.py (same parser as r24/r25).
-Inputs: /home/moiz/sniper-data/presend_size/live/dip_ams_r{26,27,28}.{jsonl,log} (r26/r27 = local copies, r28 = sudo cat 10-27 22:17 PKT,
-md5 = server). Writes /home/moiz/sniper-data/presend_size/live.pkl. MEASURED."""
+Inputs: /home/it/sniper-data/presend_size/live/dip_ams_r{26,27,28}.{jsonl,log} (r26/r27 = local copies, r28 = sudo cat 10-27 22:17 PKT,
+md5 = server). Writes /home/it/sniper-data/presend_size/live.pkl. MEASURED."""
 import sys, pickle
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import live as L
-L.LIVE = "/home/moiz/sniper-data/presend_size/live"
-OUT = "/home/moiz/sniper-data/presend_size/live.pkl"
+L.LIVE = "/home/it/sniper-data/presend_size/live"
+OUT = "/home/it/sniper-data/presend_size/live.pkl"
 RUNS = ("r26", "r27", "r28")
 if __name__ == "__main__":
     D = {}

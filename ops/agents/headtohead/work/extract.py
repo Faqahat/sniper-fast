@@ -3,8 +3,8 @@
 # out: work/ext/<chunk>.jsonl.gz
 import sys, os, gzip, glob, json, zlib, bisect
 from multiprocessing import Pool
-W = "/home/moiz/sniper/ops/agents/headtohead/work"
-RUN = "/home/moiz/sniper-data/collect/run_20261023_1426/txs"
+W = "/home/it/sniper/ops/agents/headtohead/work"
+RUN = "/data/tapes/collect/run_20261023_1426/txs"
 R = json.load(open(W + "/runs.json"))
 WIN = {}
 for d in R["dumps"]:

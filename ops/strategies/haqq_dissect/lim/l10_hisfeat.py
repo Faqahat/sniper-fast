@@ -5,10 +5,10 @@ trades in the dump's slot before the dump (nsame), trades / buy SOL in the 10 sl
 Out: data/lim/hfeat.pkl"""
 import json, pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
-FB = set(json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
+FB = set(json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
 H = [r for r in pickle.load(open(f"{OUT}/hrep.pkl", "rb")) if r.get("rep")]
 ids, idm = L.ids_map(); fbid = {idm[w] for w in FB if w in idm}
 T = np.load(f"{L.TAB}/trades.npy", mmap_mode="r")

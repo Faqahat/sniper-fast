@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # haqq SEND PATHS, part 4 (local): fee tier of every landed / failed haqq tx (priority fee = fee - 5000 lamports) by path, size, kind.
 import sys, json, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 R = json.load(open(f"{H.OUT}/paths1.json"))
 tier = lambda f: "low (~17k)" if f < 50000 else "high (~125k)"
 print("kind x fee tier:")

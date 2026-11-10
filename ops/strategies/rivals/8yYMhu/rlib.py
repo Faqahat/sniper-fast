@@ -3,9 +3,9 @@ tx index seen in the slot + 1 (haqqml/fresh slots.npy, through 10-29 00:55 PKT).
 getClusterNodes (e2x1 exec cn.json + landing clusternodes); leader location = leader_geo.json (IP geo, epoch 1063, slightly stale)."""
 import json, pickle, time, functools, collections
 import numpy as np
-D = "/home/moiz/sniper-data/rivals/8yYMhu"
+D = "/home/it/sniper-data/rivals/8yYMhu"
 W = "8yYMhuYo1LzgCmeeg3vRkhRtJ8xFC7v7S4ufABtQXjS3"
-TP = "/home/moiz/sniper-data/haqqml/fresh/tape"
+TP = "/home/it/sniper-data/haqqml/fresh/tape"
 SMS = 212.0
 W0 = 1793113200; W1 = W0 + 86400            # 24 h window 10-27 20:00 -> 10-28 20:00 PKT
 pkt = lambda t: time.strftime("%m-%d %H:%M:%S", time.gmtime(int(t) + 18000))
@@ -32,13 +32,13 @@ def frac(s, i):
 @functools.lru_cache(None)
 def _sched():
     out = {}
-    for f in ("/home/moiz/sniper-data/competitors2/schedule_1067.json", "/home/moiz/sniper-data/haqq_sel/schedule_1068.json",
-              "/home/moiz/sniper-data/haqq_sel/schedule_1069.json", "/home/moiz/sniper-data/e2x1_dissect/exec/schedule_1070.json"):
+    for f in ("/home/it/sniper-data/competitors2/schedule_1067.json", "/home/it/sniper-data/haqq_sel/schedule_1068.json",
+              "/home/it/sniper-data/haqq_sel/schedule_1069.json", "/home/it/sniper-data/e2x1_dissect/exec/schedule_1070.json"):
         d = json.load(open(f)); out[int(d["start"])] = (d["ids"], d["slot_leader"])
-    cl = {n["pubkey"]: n.get("clientId") or "" for n in json.load(open("/home/moiz/sniper-data/e2x1_dissect/exec/cn.json"))["result"]}
-    old = json.load(open("/home/moiz/sniper/ops/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
+    cl = {n["pubkey"]: n.get("clientId") or "" for n in json.load(open("/home/it/sniper-data/e2x1_dissect/exec/cn.json"))["result"]}
+    old = json.load(open("/home/it/sniper-data/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
     for k, v in old.items(): cl.setdefault(k, v.get("clientId") or "")
-    geo = {r["pk"]: r.get("cc") for r in json.load(open("/home/moiz/sniper-data/leader_geo.json"))["rows"]}
+    geo = {r["pk"]: r.get("cc") for r in json.load(open("/home/it/sniper-data/leader_geo.json"))["rows"]}
     return out, cl, geo
 
 def leader(slot):

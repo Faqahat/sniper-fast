@@ -1,5 +1,5 @@
 import sys, json
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/filter")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/filter")
 import sim, rules
 W = sim.load()
 out = []

@@ -1,7 +1,7 @@
 import json, collections
-J = json.load(open("/home/moiz/sniper/ops/agents/topearners/work/our_join.json"))
+J = json.load(open("/home/it/sniper/ops/agents/topearners/work/our_join.json"))
 fires, mine, races, ev = J["fires"], J["mine"], J["races"], J["ev"]
-TOP = {l.strip()[:10] for l in open("/home/moiz/sniper/ops/agents/topearners/work/top10.txt") if l.strip()}
+TOP = {l.strip()[:10] for l in open("/home/it/sniper/ops/agents/topearners/work/top10.txt") if l.strip()}
 rows = []
 for f in fires:
     x = mine.get(f["buy_sig"]); r = races.get(f["dump_sig"])
@@ -22,6 +22,6 @@ for f in fires:
         # first buyer in this race
         row["first"] = (r["buys"][0][0][:6], r["buys"][0][1], r["buys"][0][2] - r["i"] if r["buys"][0][1] == 0 else None) if r["buys"] else None
     rows.append(row)
-json.dump(rows, open("/home/moiz/sniper/ops/agents/topearners/work/our_fires_rows.json", "w"))
+json.dump(rows, open("/home/it/sniper/ops/agents/topearners/work/our_fires_rows.json", "w"))
 for r in rows:
     print(f"r{r['run']} ok={int(r['ok'])} ec={r['ec']} ds={r.get('ds')} di={r.get('di')} ahead={r.get('n_ahead')} ({r.get('sol_ahead')} SOL, top={r.get('top_ahead')}) px={r.get('px_before_us')} client={r['client'][:10]} paths={','.join(p[:6] for p in r['paths'])} tipacc={r['tipacc']} react={r['react'] and round(r['react'],1)} f2s={r['f2s'] and round(r['f2s'],1)} first={r.get('first')}")

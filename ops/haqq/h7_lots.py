@@ -2,7 +2,7 @@
 # haqq SELL study, step 7: haqq trades LOTS. Each buy is its own lot; each sell exactly equals one lot's remaining tokens (full)
 # or half a lot (two-piece exit). Match every sell to its lot (exact token amounts, +-2 raw units) -> lots.json
 import sys, json, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H, h_load
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H, h_load
 eps = h_load.load(with_ticks=False)
 lots = []; unmatched = 0; cnt = collections.Counter()
 for ei, e in enumerate(eps):

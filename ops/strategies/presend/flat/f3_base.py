@@ -4,7 +4,7 @@ Per window: the score (realized + rent back - failed-try fees), every try (send 
 row on the chain; per fill: our buy and sell rows, the other wallets' trades strictly between them on chain (FLAT = none), the
 engine's view at its time exit (other trades it had received since our buy before the exit decision; presend_live_tape).
 Failed-try fee: the landing record's fee when its result is an error (5,120 if no fee logged); a try logged 'unseen' is priced
-from our own failed tx on chain (0 if it never landed). Writes /home/moiz/sniper-data/presend_flat/base_<run>.pkl
+from our own failed tx on chain (0 if it never landed). Writes /home/it/sniper-data/presend_flat/base_<run>.pkl
 usage: f3_base.py r24 r25 r26 r27"""
 import sys, json, pickle, collections
 import numpy as np

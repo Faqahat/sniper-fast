@@ -14,9 +14,9 @@ Out (data folder): tape.npy (sorted rows), rowx.npz (bal_before, bal_after, px, 
 bookdumps.npz"""
 import json, sys, time, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/follow"
+OUT = "/home/it/sniper-data/haqq_dissect/follow"
 W6 = 6e13; UNTRADE = 100e9; DROP = 0.12; REF_MS = 50.0; SIZE = 0.40; FEE = 0.0125
 
 

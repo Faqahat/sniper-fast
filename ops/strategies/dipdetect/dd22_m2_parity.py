@@ -15,13 +15,13 @@ import numpy as np
 from multiprocessing import Pool
 import dd_lib as L
 import dd_gbdt as GT
-OUT = L.OUT; REPO = "/home/moiz/sniper"
+OUT = L.OUT; REPO = "/home/it/sniper"
 NAME = "v3_reg4_top25"
 BUNDLE = f"{OUT}/m2_{NAME}.json"
-DAYDIR = {"R3": "/home/moiz/sniper-data/strategies/patterns", "R4": OUT}
+DAYDIR = {"R3": "/home/it/sniper-data/strategies/patterns", "R4": OUT}
 RUN = {"R3": "run_20261023_1426", "R4": "run_20261024_1425"}
-PHA = {"R3": ["/home/moiz/sniper-data/collect/phaseA_r3", "/home/moiz/sniper-data/strategies/phaseA_r3tail"],
-       "R4": ["/home/moiz/sniper-data/strategies/bukp/phaseA_r4", f"{OUT}/phaseA_r4b"]}
+PHA = {"R3": ["/data/tapes/collect/phaseA_r3", "/home/it/sniper-data/strategies/phaseA_r3tail"],
+       "R4": ["/home/it/sniper-data/strategies/bukp/phaseA_r4", f"{OUT}/phaseA_r4b"]}
 NBK = {"R3": 14, "R4": 48}          # buckets read per day
 MAXTR = 2500
 NTOK = int(sys.argv[1]) if len(sys.argv) > 1 else 130
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     lau = {}
     for day in plan:
         want = {plan[day][0][t]["m"] for t in plan[day][4]}
-        for l in open(f"/home/moiz/sniper-data/collect/{RUN[day]}/launches.jsonl"):
+        for l in open(f"/data/tapes/collect/{RUN[day]}/launches.jsonl"):
             try: c = json.loads(l)
             except Exception: continue
             if c.get("mint") in want and not c.get("err"): lau[(day, c["mint"])] = c

@@ -13,15 +13,15 @@ import os, sys, json, zlib, bisect, time, calendar
 import numpy as np
 
 SMS = 212.0; GRADV = 110e9; KMAX = 40
-DATA = "/home/moiz/sniper-data/exits"
+DATA = "/home/it/sniper-data/exits"
 WAL = {"FRA": "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "AMS": "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 WAL_UID = {zlib.crc32(w.encode()) for w in WAL.values()}
-TARGETS = [l.strip() for l in open("/home/moiz/sniper/ops/dip/modelcheck/targets.txt") if l.strip()]
-COHORT = json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json"))
+TARGETS = [l.strip() for l in open("/home/it/sniper/ops/dip/modelcheck/targets.txt") if l.strip()]
+COHORT = json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json"))
 U_TGT = {zlib.crc32(u.encode()) for u in TARGETS}
 U_COH = {zlib.crc32(u.encode()) for u in COHORT} - U_TGT
-CURVES = "/home/moiz/sniper-data/modelcheck/curves_all.json"
-M2_BUNDLE = "/home/moiz/sniper-data/strategies/dipdetect/m2_v3_reg4_top25.json"
+CURVES = "/home/it/sniper-data/modelcheck/curves_all.json"
+M2_BUNDLE = "/home/it/sniper-data/strategies/dipdetect/m2_v3_reg4_top25.json"
 M2_THR = 0.010095262901162569
 IMIT_THR4 = 0.21088520504965255
 FIX = 0.0045          # our real all-in tx cost per round trip (owner: ~0.0045; nonce era measured 0.0027-0.0047)
@@ -49,7 +49,7 @@ def deciles(a):
 
 
 def landing_tables():
-    F = json.load(open("/home/moiz/sniper-data/recon/work/fires.json"))
+    F = json.load(open("/home/it/sniper-data/recon/work/fires.json"))
     by = {}
     allL = []
     for r in F["rows"]:
@@ -62,14 +62,14 @@ def landing_tables():
 
 def sell_latency_tables():
     """MEASURED sell landing: time-limit sells (ms after the start of the intended slot) and stop-loss sells (ms after the trigger)"""
-    P = json.load(open("/home/moiz/sniper-data/recon/work/pertrade.json")); F = json.load(open("/home/moiz/sniper-data/recon/work/fires.json"))
+    P = json.load(open("/home/it/sniper-data/recon/work/pertrade.json")); F = json.load(open("/home/it/sniper-data/recon/work/fires.json"))
     cfg = {(r["srv"], r["run"]): r["cfg"] for r in F["runs"]}
     tl = []
     for o in P:
         if not o["live_fill"] or o.get("sell_slot") is None or o.get("exit_why_live") == "stop-loss": continue
         h = cfg[(o["srv"], o["run"])]["hold_slots"]; tgt = o["land_slot"] + h - 1
         tl.append((o["sell_slot"] - tgt) * SMS + o["sell_idx"] / max(400, o["sell_idx"] + 1) * SMS)
-    sl = json.load(open("/home/moiz/sniper-data/recon/work/sell_latency.json"))["sl_lat"]
+    sl = json.load(open("/home/it/sniper-data/recon/work/sell_latency.json"))["sl_lat"]
     sl = [x for x in sl if x >= 1.0]        # 3 of 20 landed < 0.2 ms after the "trigger": the real trigger was an earlier trade (not a latency)
     return deciles(tl), deciles(sl), len(tl), len(sl)
 
@@ -77,15 +77,15 @@ def sell_latency_tables():
 # ---- leaders: slot -> leader id -> client group, near flags
 class Leaders:
     def __init__(self):
-        lb = json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json"))
+        lb = json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json"))
         self.nodes = lb["nodes"]
         self.sc = []
-        for f in ("/home/moiz/sniper/ops/dip/speed/leaders/schedule_cur.json", "/home/moiz/sniper-data/competitors2/schedule_1067.json"):
+        for f in ("/home/it/sniper/ops/dip/speed/leaders/schedule_cur.json", "/home/it/sniper-data/competitors2/schedule_1067.json"):
             s = json.load(open(f)); self.sc.append((s["start"], s["slot_leader"], s["ids"]))
         self.lb_leaders = lb["leaders"]
         rd = lambda p: {l.strip() for l in open(p) if l.strip()}
-        self.near = {"FRA": rd("/home/moiz/sniper/ops/region/near_leaders_fra.txt"), "AMS": rd("/home/moiz/sniper/ops/region/near_leaders_ams.txt"),
-                     "AMS_NOBAM": rd("/home/moiz/sniper/ops/region/near_leaders_ams_nobam.txt")}
+        self.near = {"FRA": rd("/home/it/sniper/ops/region/near_leaders_fra.txt"), "AMS": rd("/home/it/sniper/ops/region/near_leaders_ams.txt"),
+                     "AMS_NOBAM": rd("/home/it/sniper/ops/region/near_leaders_ams_nobam.txt")}
 
     def leader(self, slot):
         for st, sl, ids in self.sc:
@@ -361,7 +361,7 @@ def pre_holders(tp, j0, res):
 
 # ---- the M2 score of dd1 rows (the engine's bundle, scored the study's way)
 def m2_scores(Xall):
-    sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+    sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
     import dd20_shadow_eval as SH, dd_lib as DL
     B0 = json.load(open(M2_BUNDLE)); cols = [DL.FNI[f] for f in B0["fn"]]
     P, _ = SH.bundle_scores(M2_BUNDLE, Xall[:, cols])

@@ -3,13 +3,13 @@
 # by the corrected replay (mc_corr.replay_corr, all 200 exits): measured per-wallet price tolerance for the 75 fast dip bots
 # behind us (conditional on a competing buyer ahead), non-target followers kept (their success does not fall for pushes < ~10%),
 # no phantom sells of dropped followers, our sell 93 ms into the exit slot (real median). Optional crowd-out: env MC_CROWD (0.4).
-# Writes to /home/moiz/sniper-data/modelcheck/dd1corr/ (same file names as dd1_build). mx6/mn6 are left at the entry value.
+# Writes to /home/it/sniper-data/modelcheck/dd1corr/ (same file names as dd1_build). mx6/mn6 are left at the entry value.
 # usage: nice python3 -I dd1_corr_build.py R4 [procs]
 import sys, os, zlib
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import mc_lib as M, mc_corr as MC
 import dd1_build as D
-D.OUT = "/home/moiz/sniper-data/modelcheck/dd1corr"; os.makedirs(D.OUT, exist_ok=True)
+D.OUT = "/home/it/sniper-data/modelcheck/dd1corr"; os.makedirs(D.OUT, exist_ok=True)
 CV = MC.Curves(f"{M.OUT}/curves_all.json"); CROWD = float(os.environ.get("MC_CROWD", "0"))
 class _T: pass
 def path_corr(Sl, Al, Bl, SOLl, TKl, Vl, Tl, FRl, SKl, UIDl, n, j0, L):

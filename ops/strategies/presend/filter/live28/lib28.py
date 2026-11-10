@@ -10,15 +10,15 @@ Nothing here sends, starts or stops anything."""
 import sys, os, json, pickle, collections, hashlib
 import numpy as np
 
-REAL = "/home/moiz/sniper/ops/strategies/presend/real"
+REAL = "/home/it/sniper/ops/strategies/presend/real"
 sys.path.insert(0, REAL)
 import rlib
-DATA = "/home/moiz/sniper-data/presend_filter/live28"
+DATA = "/home/it/sniper-data/presend_filter/live28"
 TAB = f"{DATA}/tab"
 rlib.TAB = TAB                    # donors.build / variants read rlib.TAB
 import sim, s48lib, donors as DN
 
-R28 = "/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"     # FINAL snapshot (sudo cat) after the run ended 22:03:02 PKT; md5 e7cacd3d96d3e08491a28d64cf199c02 (= server)
+R28 = "/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"     # FINAL snapshot (sudo cat) after the run ended 22:03:02 PKT; md5 e7cacd3d96d3e08491a28d64cf199c02 (= server)
 CUT_NS = (int(os.environ['LIVE28_CUT']) * 10**9) if os.environ.get('LIVE28_CUT') else None   # trial runs only; final: no cut: the tape covers the whole run (the mid-run 21:23 cut version is in DATA/mid2123/)
 WALLET = "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"          # AMS live wallet (public key)
 RULE_ON_NS = None                                                   # filled by load_run (first armed window with rule_on)

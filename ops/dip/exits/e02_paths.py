@@ -5,7 +5,7 @@
 # For every fill: tick values (sell decided at the start of slot s_in + k, k = 1..30, landing rows: MEASURED time-limit sells /
 # 35 / 50 / 75 ms), causal tick features, and the post-entry event stream with the value of a sell triggered by each event
 # (landing rows: MEASURED stop-loss sells / 35 / 50 / 75 ms after the trigger).
-# -> /home/moiz/sniper-data/exits/paths/part_*.npz  (then e03 concatenates)
+# -> /home/it/sniper-data/exits/paths/part_*.npz  (then e03 concatenates)
 import sys, os, json, zlib, bisect, time
 import numpy as np
 from multiprocessing import get_context

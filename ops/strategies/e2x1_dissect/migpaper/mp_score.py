@@ -13,9 +13,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mplib
 from mplib import D, V, THETA, EXITS, MODES, pkt, pday, SLOT_S
 
-LOCAL = ["/home/moiz/sniper-data/collect"]
+LOCAL = ["/data/tapes/collect"]
 SCRATCH = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/e2x1_migpaper/fetch"
-SSH = ["ssh", "-p", "1996", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "it@84.32.100.36"]
+SSH = ["ssh", "-p", "1996", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "it@cyberfra"]
 CHUNK_S = 300
 
 def local_chunks(lo, hi, dirs):

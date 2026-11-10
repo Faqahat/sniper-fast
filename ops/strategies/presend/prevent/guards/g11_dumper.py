@@ -4,13 +4,13 @@ our landing position must be < Z% of supply. Re-arm = r38 only (no other live re
 create record is on a local decoded table (r37 / r38 era tables).
 usage: g11_dumper.py"""
 import pickle, json, collections, sys
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/guards")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/guards")
 import glib as G
-OUT = "/home/moiz/sniper-data/prevent/guards"
+OUT = "/home/it/sniper-data/prevent/guards"
 R = pickle.load(open(f"{OUT}/feats.pkl", "rb"))
 tapes = pickle.load(open(f"{OUT}/tapes_fills.pkl", "rb"))
 cre = {}
-for tab in ("/home/moiz/sniper-data/presend_quiet4/tab37", "/home/moiz/sniper-data/prevent/guards/tab_tail", "/home/moiz/sniper-data/multiarm/tab38", "/home/moiz/sniper-data/prevent/guards/tab_t38"):
+for tab in ("/home/it/sniper-data/presend_quiet4/tab37", "/home/it/sniper-data/prevent/guards/tab_tail", "/home/it/sniper-data/multiarm/tab38", "/home/it/sniper-data/prevent/guards/tab_t38"):
     for m, c in json.load(open(f"{tab}/creates.json")).items(): cre[m] = c.get("creator")
 FIXC = 0.003524
 def sc(o): return (o["pnl"] + FIXC) * 0.696 / (o["spend"] / 1e9) - FIXC

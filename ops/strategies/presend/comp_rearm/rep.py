@@ -2,7 +2,7 @@
 """tables from res_*.pkl (INFERRED). net per window = gross(0.696 SOL, TP20, SL50, cut) - trip cost per fill - 5,120 lamports per landed
 failed try. delta = scenario - base, same draws. SOL/day = per usable hour x 24. 90% CI: resample hours (and draws)."""
 import pickle, collections, sys, time, numpy as np
-D = "/home/moiz/sniper-data/comp_rearm"
+D = "/home/it/sniper-data/comp_rearm"
 TRIP = float(sys.argv[1]) if len(sys.argv) > 1 else 2.9e-3
 TRAIN = ("D2", "D3", "D4", "D5"); TEST = ("D6", "D7", "D7b")
 LBL = {"D2": "10-24", "D3": "10-25", "D4": "10-26", "D5": "10-27", "D6": "10-28", "D7": "10-29 00-01h", "D7b": "10-29 r37 08-16h"}

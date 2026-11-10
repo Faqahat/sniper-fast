@@ -3,27 +3,27 @@
 Per run (split by run_start = engine session): presend_live_arm / _disarm / _skip, every presend_attempt joined with its
 presend_attempt_land (send time, send slot, deadline, signing curve state, limit, min_out, landing slot/idx/coordinate, result),
 fills, exits, sell landings, closes, realized P&L, the position tape (presend_live_tape) and the shadow presend_arm rows.
-Out: /home/moiz/sniper-data/custom37/win_<run>.pkl  {"meta", "wins", "skips", "cfg"}
+Out: /home/it/sniper-data/custom37/win_<run>.pkl  {"meta", "wins", "skips", "cfg"}
 Usage: c1_extract.py [run ...]   (default: all in RUNS)"""
 import json, sys, pickle, collections
-OUT = "/home/moiz/sniper-data/custom37"
+OUT = "/home/it/sniper-data/custom37"
 RUNS = {
-    "r40": ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r40.jsonl"),
-    "r39": ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r39.jsonl"),
-    "r38": ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r38.jsonl"),
+    "r40": ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r40.jsonl"),
+    "r39": ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r39.jsonl"),
+    "r38": ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r38.jsonl"),
     "r37": ("AMS", f"{OUT}/runs/dip_ams_r37.jsonl"),
-    "r36": ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r36.jsonl"),
-    "r35": ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r35.jsonl"),
-    "r34": ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r34.jsonl"),
-    "f28": ("FRA", "/home/moiz/sniper-data/runs/fra/runs/dip_r28.jsonl"),
-    "f27": ("FRA", "/home/moiz/sniper-data/runs/fra/runs/dip_r27.jsonl"),
-    "f26": ("FRA", "/home/moiz/sniper-data/runs/fra/runs/dip_r26.jsonl"),
+    "r36": ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r36.jsonl"),
+    "r35": ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r35.jsonl"),
+    "r34": ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r34.jsonl"),
+    "f28": ("FRA", "/home/it/sniper-data/runs/fra/runs/dip_r28.jsonl"),
+    "f27": ("FRA", "/home/it/sniper-data/runs/fra/runs/dip_r27.jsonl"),
+    "f26": ("FRA", "/home/it/sniper-data/runs/fra/runs/dip_r26.jsonl"),
     # k=4 runs (extra robustness set)
-    "r26": ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r26.jsonl"),
-    "r25": ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r25.jsonl"),
-    "r24": ("AMS", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r24.jsonl"),
-    "f24": ("FRA", "/home/moiz/sniper-data/runs/fra/runs/dip_r24.jsonl"),
-    "f23": ("FRA", "/home/moiz/sniper-data/runs/fra/runs/dip_r23.jsonl"),
+    "r26": ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r26.jsonl"),
+    "r25": ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r25.jsonl"),
+    "r24": ("AMS", "/home/it/sniper-data/runs/ams/runs/dip_ams_r24.jsonl"),
+    "f24": ("FRA", "/home/it/sniper-data/runs/fra/runs/dip_r24.jsonl"),
+    "f23": ("FRA", "/home/it/sniper-data/runs/fra/runs/dip_r23.jsonl"),
 }
 KEEP_ATT = ("n", "sig", "t", "slot", "deadline", "en_slot", "vsol", "vtok", "p", "lim", "min_out", "spend", "pos", "client", "leader", "tip")
 KEEP_LAND = ("res", "err", "slot", "idx", "a", "first_rx", "fee", "ms_send_to_first_rx", "slots_after_send")

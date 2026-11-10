@@ -5,11 +5,11 @@ TradeEvent; PumpSwap: wallet delta + txfee + tips - rent recovered) and its txfe
 Rent: the buy's created token account (rent_c) is a lot cost; rent recovered on the closing sell (rent_x) is split like proceeds.
 Buy 'curve_extend' (other lamports paid to the curve beyond the TradeEvent, 650,240 = 128 B rent) is a lot cost.
 Failed txs: fee attached to the lot that is open on that mint at that time (else the next lot on the mint within 120 s, else 'orphan').
-Out: /home/moiz/sniper-data/e2x1_dissect/recon/lots.pkl (list of dicts, one per lot; no pandas on this host) + fails.pkl"""
+Out: /home/it/sniper-data/e2x1_dissect/recon/lots.pkl (list of dicts, one per lot; no pandas on this host) + fails.pkl"""
 import pickle, collections, os, sys, json
 import numpy as np
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 W0 = 1793113200; W1 = W0 + 86400; WA = W0 - 86400
 rows = pickle.load(open(f"{OUT}/tx.pkl", "rb"))
 if os.path.exists(f"{OUT}/rpc_tx.pkl"):

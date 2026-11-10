@@ -2,7 +2,7 @@
 # Same route, same leader client: our landed copy vs the pros' landed copy (same-slot landings, dumps in Q1-Q3 of their block).
 # If the same relay lands later for us than for a pro, the gap is upstream of the relay (seeing the dump + deciding + our hop to it).
 import sys, json, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
 rows = json.load(open(f"{lib2.D}/pro_rows_1.0_0.04.json"))
 WAL = json.load(open(f"{lib2.D}/wallets.json"))

@@ -164,7 +164,7 @@ windows, 15 C5 neighbours).
   - `apply_filter.py`, `rules.py`, `sim.py`, `score.py`, `lv.py`, `feat.py`, `chainlib.py`;
   - pipeline: `g1`, `g2`, `g2b`, `e1`, `f1`–`f3`;
   - analysis: `a1`–`a3`, `x2`–`x9`, `v1`–`v4`, `check_time.py`, `final_table.py`, `fbots_frozen.json`.
-- **Data:** `/home/moiz/sniper-data/presend_filter/`, 2.2 GB. The 35 GB of intermediate chunks were deleted.
+- **Data:** `/home/it/sniper-data/presend_filter/`, 2.2 GB. The 35 GB of intermediate chunks were deleted.
 - **Holdout test command:** `python3 apply_filter.py --run ams:r26 --list`, run by the main session.
 
 ## 6. Main session's own test (10-27 ~08:15 PKT, `apply_filter.py --list`, MEASURED at each run's live size)
@@ -184,7 +184,7 @@ Reproduced the dev numbers exactly, then ran the holdout AMS r26 (06:59 → ~08:
 ## 7. Daily estimate with QUIET, 24/7 on one server (main session, 10-27 ~15:30 PKT)
 Basis: every live pre-send window of the 9 runs AMS r19, r20, r24, r25, r26 and FRA r21–r24 (10-25 22:22 → 10-27 14:03 PKT;
 25.3 active pre-send hours, 808 fills). Net = realized + rent back − failed-try fees, at each run's live size (0.34–0.50, average
-about 0.40). Code `daily/` (perwin8.py, perwin26.py, daily.py), data `/home/moiz/sniper-data/presend_filter/daily/`.
+about 0.40). Code `daily/` (perwin8.py, perwin26.py, daily.py), data `/home/it/sniper-data/presend_filter/daily/`.
 
 | | Without QUIET (MEASURED live) | With QUIET (exact replay of the same live fills) |
 |---|---|---|

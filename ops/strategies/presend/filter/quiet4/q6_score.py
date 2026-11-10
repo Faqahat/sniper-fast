@@ -4,10 +4,10 @@ min age 2) on the 24 earlier runs (PICK, real outcomes; frozen) and on r37 (TEST
 value(rule) - value(current), SOL at 0.696. Tightening on r37 = exact live P&L; loosening on r37 = the calibrated phantom model.
 Grid: fol 2.24 / 3 / 4 / 5 / 6 x k-of-4 (4 / 3 / 2) x follower bots (none / frozen list) x hist 24 / 12 / 6 h x stop (3..8):2, (4..8):3
 x min age 1 / 2 / 3 x v2 (off / 5th condition). Pre-registered pick: best PICK SOL/day with PICK w/o top 5 > 0 and >= 15 changed fills.
-Out: /home/moiz/sniper-data/presend_quiet4/score.json, score_out.md"""
+Out: /home/it/sniper-data/presend_quiet4/score.json, score_out.md"""
 import sys, json, itertools, collections, random
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/filter/quiet4")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/filter/quiet4")
 import q6data as Q6
 
 D4 = Q6.D4

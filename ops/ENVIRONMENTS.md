@@ -3,7 +3,7 @@
 | | DEV | PROD |
 |---|---|---|
 | Wallet | FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS | 2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE |
-| Keystore on the server | /root/.nexus-v2-trading-wallet.enc | /root/prod/wallet-prod.enc (copy of the host's `~/arbed/wallets/trading-v3.enc`, the old arb bot's keystore) |
+| Keystore on the server | /root/.nexus-v2-trading-wallet.enc | /root/prod/wallet-prod.enc (copy of the host's `~/other/arbed/wallets/trading-v3.enc`, the old arb bot's keystore) |
 | Passphrase | /root/.nexus-v2-trading-wallet.pass (scripts run unattended) | typed by the owner at the engine's hidden prompt; never stored |
 | Who starts it | Claude (only zero-cost dry runs / tests without the owner's explicit go) | the owner, manually, inside tmux |
 | Scripts | /root/run1/run1.sh (live), dry_run1.sh (zero cost), cu_check.sh | /root/prod/run_prod.sh, unlock_test.sh, unwrap_prod.sh |
@@ -15,7 +15,7 @@ deadline (run1_common.sh); PROD only swaps the wallet + caps. One engine per ser
 otherwise). PROD refuses to start outside tmux, without a terminal, below the needed balance, or without typing PROD.
 
 PROD start:
-    ssh -p 1996 it@84.32.100.36
+    ssh -p 1996 it@cyberfra
     tmux new -s prod            # or: tmux attach -t prod
     sudo bash /root/prod/run_prod.sh --size 1.5 --max-buys 20 --max-loss 0.5 --minutes 180 --tag p1
     (type PROD, then the keystore passphrase)   detach: Ctrl-b d   clean stop: Ctrl-c

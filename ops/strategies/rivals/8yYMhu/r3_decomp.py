@@ -7,8 +7,8 @@ Out: DATA/tx.pkl (list of dicts sorted by slot, idx), DATA/r3.txt"""
 import json, pickle, base64, struct, collections, glob, os, sys
 import numpy as np
 W = "8yYMhuYo1LzgCmeeg3vRkhRtJ8xFC7v7S4ufABtQXjS3"
-D = "/home/moiz/sniper-data/rivals/8yYMhu"
-TIP = json.load(open("/home/moiz/sniper-data/e2x1_dissect/recon/tipmap.json"))
+D = "/home/it/sniper-data/rivals/8yYMhu"
+TIP = json.load(open("/home/it/sniper-data/e2x1_dissect/recon/tipmap.json"))
 RENTS = {2039280: "spl165", 1488440: "spl165b", 1513840: "t22_170", 2074080: "t22_170b"}
 DISC = bytes.fromhex("bddb7fd34ee661ee"); CPI = bytes.fromhex("e445a52e51cb9a1d")
 A58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"

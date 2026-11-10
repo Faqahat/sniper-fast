@@ -10,8 +10,8 @@ same reps (worlds); also the -20% followers row (cfg cut 0.2).
 usage: g4_replay.py RUN VARIANT TRT REPS OUT.json"""
 import sys, json, math, bisect, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/guards")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/guards")
 import c37lib as L
 import glib as G
 PCLOSE = 0.39

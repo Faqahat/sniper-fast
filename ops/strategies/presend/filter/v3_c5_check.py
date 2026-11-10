@@ -25,7 +25,7 @@ for w in W:
     print(f"   {w['run']} {pk(w['t'])} {w['mint'][:8]} net {w['net'] / 1e9:+.4f} nb_after {w.get('y_nb')} | fill try sent at trig+{t[0] - w['trig_slot']} slots, "
           f"knew pos {t[7][0] - w['trig_slot']:+d} slots; others seen {rules.oth_since(w, k)}; first other trade on chain at trig+{first_oth}")
 # (b) dev at 0.50
-R = json.load(open("/home/moiz/sniper-data/replay065/results.json"))
+R = json.load(open("/home/it/sniper-data/replay065/results.json"))
 T = {(t["run"], t["mint"], t["buy_pos"][0], t["buy_pos"][1]): t for t in R["trades"] if t["kind"] == "ps"}
 print("\n(b) DEV at 0.50 SOL (fills: exact replay; fees / rent back as live):")
 for run in ("ams:r24", "ams:r25"):

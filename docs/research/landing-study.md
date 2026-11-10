@@ -2,7 +2,7 @@
 
 - **Question (owner):** why do about 97% of our sent bundles not land, and what would raise the land rate on the venues we already trade? No new venues.
 - **Data:** every sent bundle of FT-006, FT-007, FT-008, FT-010, FT-013 (parts A and B) and FT-012b segment 1 on the frz wallet: **22 segments, 15.11 h, 10,361 sends, 284 landed (2.74%), +1,176,328 lamports net (77,825 lamports/h)**. FT-012b segments 2+ were still running and are not included.
-- **Method:** read-only. Core streams (attempts, copies, outcomes, ledger, status) were local; the other streams were pulled from Cherry with rate-limited scp, reduced to what touches our pools, and deleted. Nothing was written to Cherry. 150 public-RPC calls checked a sample. Scripts and extracts: `/home/moiz/arbx-offload/landing-study/` (list at the end).
+- **Method:** read-only. Core streams (attempts, copies, outcomes, ledger, status) were local; the other streams were pulled from Cherry with rate-limited scp, reduced to what touches our pools, and deleted. Nothing was written to Cherry. 150 public-RPC calls checked a sample. Scripts and extracts: `/home/it/other/arbx-offload/landing-study/` (list at the end).
 - **Status:** analysis only; nothing committed, no config changed.
 
 ## The answer in five numbers
@@ -488,7 +488,7 @@ Together, items 1–4 are worth roughly +20% to +35% net/h on this data, about 9
 - **Blockhash cost** is measured on 5 of 22 segments.
 - **FT-012b segments 2 onward**, still running, are not included.
 
-## Appendix: data and scripts (`/home/moiz/arbx-offload/landing-study/`)
+## Appendix: data and scripts (`/home/it/other/arbx-offload/landing-study/`)
 
 **Scripts** (`scripts/`):
 - `core.py` → `out/attempts_all.jsonl`: one row per sent attempt.

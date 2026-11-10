@@ -6,7 +6,7 @@ Split by recording run (fixed before any result): TRAIN = runs 10-21..10-24 (slo
 (<= 461,701,096), TEST = runs 10-26 + closed chunks of 10-27. Dumps within 60 slots before a boundary are dropped.
 Features: the 16 VM1 'plain' features (core.features) + extras below, all from trades strictly before the dump
 (the dump row itself included: its own size/price are known when we see it). Follower-bot list is learned on TRAIN only.
-Writes /home/moiz/sniper-data/dipml/dumps.npz"""
+Writes /home/it/sniper-data/dipml/dumps.npz"""
 import json, numpy as np, collections
 import core
 
@@ -60,7 +60,7 @@ def main():
         w60 = (sl >= s - 282) & ~by
         f[11] = (so[w60] > T["sol"][kk]).sum()
     X = np.hstack([X0, X1])
-    np.savez("/home/moiz/sniper-data/dipml/dumps.npz", k=k, slot=slot, split=split, X=X, names=np.array(core.FEATS + EXTRA),
+    np.savez("/home/it/sniper-data/dipml/dumps.npz", k=k, slot=slot, split=split, X=X, names=np.array(core.FEATS + EXTRA),
              mint=T["mint"][k], fb=np.where(fb)[0])
     print("saved", X.shape)
 

@@ -510,7 +510,7 @@ mod tests {
 
     fn bundle() -> Option<Bundle> {
         let root = env!("CARGO_MANIFEST_DIR");
-        for p in [format!("{root}/testdata/dip_m2_bundle.json"), "/home/moiz/sniper-data/strategies/dipdetect/m2_v3_reg4_top25.json".to_string()] {
+        for p in [format!("{root}/testdata/dip_m2_bundle.json"), "/home/it/sniper-data/strategies/dipdetect/m2_v3_reg4_top25.json".to_string()] {
             if let Ok(b) = Bundle::load(&p) { return Some(b); }
         }
         None
@@ -633,9 +633,9 @@ mod tests {
         let root = env!("CARGO_MANIFEST_DIR");
         let Some(par) = load_json(&format!("{root}/testdata/dip_m2_parity.json")) else { eprintln!("dip_m2_parity.json missing: skipped"); return; };
         let Some(b) = bundle() else { eprintln!("M2 bundle missing: skipped"); return; };
-        let imit = Imit::load(&format!("{root}/ops/overnight/sel/IMIT1.json")).or_else(|_| Imit::load("/home/moiz/sniper/ops/overnight/sel/IMIT1.json"));
+        let imit = Imit::load(&format!("{root}/ops/overnight/sel/IMIT1.json")).or_else(|_| Imit::load("/home/it/sniper-data/overnight/sel/IMIT1.json"));
         let Ok(imit) = imit else { eprintln!("IMIT1.json missing: skipped"); return; };
-        let cohort: HashSet<String> = load_json(&format!("{root}/ops/overnight/sel/cohort_train.json")).or_else(|| load_json("/home/moiz/sniper/ops/overnight/sel/cohort_train.json"))
+        let cohort: HashSet<String> = load_json(&format!("{root}/ops/overnight/sel/cohort_train.json")).or_else(|| load_json("/home/it/sniper-data/overnight/sel/cohort_train.json"))
             .and_then(|v| v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())).unwrap_or_default();
         let targets: HashSet<String> = di::TARGETS.iter().map(|s| s.to_string()).collect();
         assert_eq!(par["bundle_sha256"].as_str().unwrap_or(""), b.sha256, "parity file was made with another bundle");

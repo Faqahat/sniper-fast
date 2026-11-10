@@ -4,10 +4,10 @@
 # in 48 h) reacting within a few slots = a mechanical reaction a newcomer could trigger too; slow fresh wallets = informed /
 # coordinated buying (not reproducible). Also splits the replay P&L by the trigger buyer's type.
 import sys, os, json, gzip, glob, zlib, collections, statistics
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies")
+sys.path.insert(0, "/home/it/sniper/ops/strategies")
 import s1_trips as S1
 from multiprocessing import Pool
-OUT = "/home/moiz/sniper-data/strategies"
+OUT = "/home/it/sniper-data/strategies"
 F = json.load(open(f"{OUT}/trips/FIELDS.json")); X = {k: i for i, k in enumerate(F)}
 def load():
     ev = []

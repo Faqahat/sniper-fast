@@ -5,8 +5,8 @@
 //! one line per final dump), so the engine reads it with the loader it uses for its own journal (--presend-live-quiet-book).
 //!
 //!   quiet_book [--rec DIR] [--out FILE] [--hist-h 24] [--full] [--until UNIX_S] [--now UNIX_S] [--summary FILE]
-//!     --rec      the recording copies (default /home/moiz/sniper-data/collect: every run_*/txs)
-//!     --out      the book (default /home/moiz/sniper-data/quiet_book/quiet_book.jsonl); a pass EXTENDS it (reads only the chunks
+//!     --rec      the recording copies (default /data/tapes/collect: every run_*/txs)
+//!     --out      the book (default /home/it/sniper-data/quiet_book/quiet_book.jsonl); a pass EXTENDS it (reads only the chunks
 //!                from its end on); --full rebuilds it from the last --hist-h hours
 //!     --until    only the recording up to this block time (a book "as of" then); --now: the clock for the 24 h window (tests)
 //!     --summary  also write the pass's numbers as JSON
@@ -21,8 +21,8 @@ fn main() {
     for a in args.iter().skip(1).filter(|a| a.starts_with("--")) {
         if !["--rec", "--out", "--hist-h", "--full", "--until", "--now", "--summary"].contains(&a.as_str()) { println!("quiet_book: unknown flag {a}"); std::process::exit(1); }
     }
-    let rec = arg("--rec").unwrap_or_else(|| "/home/moiz/sniper-data/collect".into());
-    let out = arg("--out").unwrap_or_else(|| "/home/moiz/sniper-data/quiet_book/quiet_book.jsonl".into());
+    let rec = arg("--rec").unwrap_or_else(|| "/data/tapes/collect".into());
+    let out = arg("--out").unwrap_or_else(|| "/home/it/sniper-data/quiet_book/quiet_book.jsonl".into());
     let hist_h: f64 = arg("--hist-h").and_then(|x| x.parse().ok()).unwrap_or(24.0);
     if !(hist_h > 0.0 && hist_h <= 48.0) { println!("quiet_book: --hist-h must be in (0, 48]"); std::process::exit(1); }
     let hist_ns = (hist_h * 3.6e12) as u64;

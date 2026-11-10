@@ -3,7 +3,7 @@ fill search, the post-fill path with the follower-drop model, the 2-slot exit) r
 can be re-scored (a) exactly as the engine did (validation against its presend_fill / presend_exit records), (b) without our own
 live trades in the tape, (c) at another size, (d) at another landing delay D, (e) with another exit.
 
-Tape: /home/moiz/sniper-data/paper_audit/tab (pa_decode.py + real/build.py over the recorder chunks of the run; per trade the sha256
+Tape: /home/it/sniper-data/paper_audit/tab (pa_decode.py + real/build.py over the recorder chunks of the run; per trade the sha256
 key `sh` of the follower-slack table). Clock = the engine's block-position clock: a = slot x 212 + idx / max(400, idx + 1) x 212 ms.
 """
 import json, math, re, bisect
@@ -19,11 +19,11 @@ HMAX = 40
 ROWS = {"a": 0.0, "b": 5.0, "c": 10.0}
 OURS = ("EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE")
 import os
-TAB = os.environ.get("PA_TAB", "/home/moiz/sniper-data/paper_audit/tab")   # PA_TAB = another run's tape
+TAB = os.environ.get("PA_TAB", "/home/it/sniper-data/paper_audit/tab")   # PA_TAB = another run's tape
 
 
 def _slack_table():
-    src = open("/home/moiz/sniper/src/presend.rs").read()
+    src = open("/home/it/sniper/src/presend.rs").read()
     body = src[src.index("const SLACK: [f64; 711] = [") + len("const SLACK: [f64; 711] = ["):]
     body = body[:body.index("];")]
     v = [float(x) for x in re.findall(r"[-+]?\d[\d.e+-]*", body)]

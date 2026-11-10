@@ -8,7 +8,7 @@
  Costs not subtracted (per fill: NOW 3.52 mSOL, CHEAP 0.66). Out: p8b.txt"""
 import sys, json, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import p6_rules as R6
 import dv8lib as L
 from plib import Out, OUT, day_name, boot_sum

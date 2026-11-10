@@ -12,7 +12,7 @@
 | Ended (PKT) | 2026-10-26 02:48:50 — kill switch (run loss cap reached) |
 | Ran for | 0 h 30 min of 60 min planned |
 | First / last buy (PKT) | 02:24:55 / 02:47:16 |
-| Server / wallet | cybershock (84.32.100.36) / `2g7rYv7y…` |
+| Server / wallet | cybershock (cyberfra) / `2g7rYv7y…` |
 | Buys sent | 4 → **3 filled**, 0 failed on the +5% guard, 1 failed (other) |
 | Fill rate | 75% |
 | Wins / losses (fills) | 2 / 1 (win rate 67%) |
@@ -286,7 +286,7 @@ Checks passed: every reactive fill was sold; fast-verify: 0 identical, 0 MISMATC
 - dip19 (10-26 ~03:55 PKT): merged-fill fix, deployed on both servers; first used in run 23.
 
 ## 14. Data and how this report was made
-- Engine records: `/root/prod/runs/dip_r22.jsonl`, log `.log` on cybershock (84.32.100.36) (local copy `/home/moiz/sniper-data/runs/fra/runs/dip_r22.*`).
+- Engine records: `/root/prod/runs/dip_r22.jsonl`, log `.log` on cybershock (cyberfra) (local copy `/home/it/sniper-data/runs/fra/runs/dip_r22.*`).
 - P&L: the engine's REALIZED lines (computed from the chain transactions) for fills; failed buys from getTransaction; costs split from the chain tx fees, the engine's tip records and the curve amounts (sell pump fee = the remainder).
 - Pre-send (section 4b): the jsonl presend_live_* records (fills, closes, REALIZED, account closes, stops, end checks) and presend_attempt_land (try results, failed-try fees); the log's PRESEND LIVE lines when a run has no such records.
 - Engine sessions in this run: 1; refused starts: 0.

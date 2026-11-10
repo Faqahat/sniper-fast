@@ -6,9 +6,9 @@ position, no landing model -> no calibration). Plus the MEASURED shared-dump tes
 Out: bots/b13.txt"""
 import sys, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/bots")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/bots")
 from b6_wf import calibration, COST
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 lines = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s, flush=True); lines.append(s)

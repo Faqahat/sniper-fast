@@ -8,7 +8,7 @@
 import os, sys, json, gzip, glob, time, subprocess, threading, http.server, socketserver, shutil, calendar, signal
 HERE = os.path.dirname(os.path.abspath(__file__)); REC = os.path.dirname(HERE)
 RAWDIR = sys.argv[1]; N = int(sys.argv[2]) if len(sys.argv) > 2 else 120
-WORK = os.environ.get("TEST_WORK", "/home/moiz/sniper-data/rec/test/normal" + ("_fallback" if os.environ.get("TEST_FALLBACK") == "1" else "")); shutil.rmtree(WORK, ignore_errors=True); os.makedirs(WORK)
+WORK = os.environ.get("TEST_WORK", "/home/it/sniper-data/rec/test/normal" + ("_fallback" if os.environ.get("TEST_FALLBACK") == "1" else "")); shutil.rmtree(WORK, ignore_errors=True); os.makedirs(WORK)
 S0 = 600_000_000; LAG = 3; PKT = 5 * 3600; FAILS = []
 FALLBACK = os.environ.get("TEST_FALLBACK") == "1"      # primaries = the dead endpoint only, the good one only as REC_*_FALLBACK
 def check(c, w):

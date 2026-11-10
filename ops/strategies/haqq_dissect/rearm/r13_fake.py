@@ -14,11 +14,11 @@ Out: r13.txt"""
 import sys, os, json, pickle, collections
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import rlib
 from r1_tapes import RUNS
 from r3_events import our_sighs
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 WHALE = 60_000_000_000_000
 Lo = []
 def P(s=""): print(s, flush=True); Lo.append(s)

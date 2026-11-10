@@ -61,6 +61,6 @@ def check(tape, limit=None):
 
 if __name__ == "__main__":
     import pickle
-    TP = pickle.load(open("/home/moiz/sniper-data/replay065/tape.pkl", "rb"))
+    TP = pickle.load(open("/home/it/sniper-data/replay065/tape.pkl", "rb"))
     c, bad = check(TP["tape"])
     print(dict(c)); print(bad)

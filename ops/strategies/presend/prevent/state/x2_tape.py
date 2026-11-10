@@ -4,11 +4,11 @@ shadow-only runs, observatory re-arm windows), from
   presend_quiet3/chain.npz   block time < 1793240200 (10-29 07:16:40 PKT; quiet3 recorder decode)
   presend_quiet4/tab37       1793240200 .. 1793305231 (to 10-30 01:20 PKT)
   prevent/state/tab38b       1793305232 .. 1793313901 (r37 tail + run 38, my decode)
-Out: /home/moiz/sniper-data/prevent/state/tape.npz (sorted by mint, slot, idx, j) + tape_ids.json {mints, users}"""
+Out: /home/it/sniper-data/prevent/state/tape.npz (sorted by mint, slot, idx, j) + tape_ids.json {mints, users}"""
 import json, pickle, time
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/state"
-Q3 = "/home/moiz/sniper-data/presend_quiet3"; T37 = "/home/moiz/sniper-data/presend_quiet4/tab37"; T38 = "/home/moiz/sniper-data/prevent/state/tab38b"   # my decode of run_20261029_1400 chunks 1793304940..1793313650 (r37 tail + all of r38)
+D = "/home/it/sniper-data/prevent/state"
+Q3 = "/home/it/sniper-data/presend_quiet3"; T37 = "/home/it/sniper-data/presend_quiet4/tab37"; T38 = "/home/it/sniper-data/prevent/state/tab38b"   # my decode of run_20261029_1400 chunks 1793304940..1793313650 (r37 tail + all of r38)
 CUT_BT = 1793240200
 CUT37 = 1793305232            # tab37 last block time 1793305231; tab38b from here
 t0 = time.time()

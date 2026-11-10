@@ -4,8 +4,8 @@ feature-distribution comparison. (2) Do the copier wallets filter? For each E2x1
 the mint within 2 slots after him; model 'copier followed' from the event features (AUC ~0.5 => no filter)."""
 import sys, json, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
 t0 = time.time()
 U = dict(np.load(f"{OUT}/U2.npz")); MN, US = names()
 tmax = int(U["bt"].max()); TCUT = tmax - 86400; VCUT = TCUT - 12 * 3600

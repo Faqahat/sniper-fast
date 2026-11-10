@@ -10,8 +10,8 @@
 usage: ma3_ctx.py X.pkl TAB VAL.json OUT.pkl"""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import c37lib as L
 import ma_lib as M
 
@@ -101,10 +101,10 @@ def main(xp, tab, valp, outp):
     # re-arm use the saved r38 sample (ata_clear.json)
     acl = ata_clear_samples(X)
     import os
-    if os.environ.get("MA_ATA_POOLED"): acl = json.load(open("/home/moiz/sniper-data/multiarm/ata_clear.json"))["ms"]
-    elif len(acl) >= 10: json.dump({"run": X["meta"]["run"], "ms": acl}, open("/home/moiz/sniper-data/multiarm/ata_clear.json", "w"))
+    if os.environ.get("MA_ATA_POOLED"): acl = json.load(open("/home/it/sniper-data/multiarm/ata_clear.json"))["ms"]
+    elif len(acl) >= 10: json.dump({"run": X["meta"]["run"], "ms": acl}, open("/home/it/sniper-data/multiarm/ata_clear.json", "w"))
     else:
-        try: acl = json.load(open("/home/moiz/sniper-data/multiarm/ata_clear.json"))["ms"]
+        try: acl = json.load(open("/home/it/sniper-data/multiarm/ata_clear.json"))["ms"]
         except FileNotFoundError: acl = [2320.0]
     # port calibration (live - port): arm time, ends by reason
     end_dt = {k: v[1] for k, v in (val.get("ends_dt_ms") or {}).items()}

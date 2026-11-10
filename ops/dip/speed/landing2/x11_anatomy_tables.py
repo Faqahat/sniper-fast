@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Summarise anatomy.json (x8): per wallet tx shape. All MEASURED (getTransaction).
 import sys, json, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
 A = json.load(open(f"{lib2.D}/anatomy.json"))
 med = lambda v: round(st.median(v)) if v else None

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # Read-only JSON-RPC helper for this study: CK URL from ~/.config/sniper/ck_rpc_url (never printed), <= 4 req/s, retries,
-# on-disk cache for getTransaction (/home/moiz/sniper-data/landing2/txcache/<sig>.json).
+# on-disk cache for getTransaction (/home/it/sniper-data/landing2/txcache/<sig>.json).
 import os, json, time, urllib.request, threading
 EP = open(os.path.expanduser("~/.config/sniper/ck_rpc_url")).read().strip()
-CACHE = "/home/moiz/sniper-data/landing2/txcache"; os.makedirs(CACHE, exist_ok=True)
+CACHE = "/home/it/sniper-data/landing2/txcache"; os.makedirs(CACHE, exist_ok=True)
 _lock = threading.Lock(); _last = [0.0]; MIN_GAP = 0.25
 def _pace():
     with _lock:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """YOUNG step 4: one row per UNIQUE trigger (dedup by trigger sig across FRA/AMS) with arm-time features and the expected
 outcome of many recipes (ysim.esim, size 0.696, TP 20 / SL 50 unless the recipe changes it, fixed cost 3.52 mSOL per fill,
-failed tries 5,120 lamports x tries). Out: /home/moiz/sniper-data/presend_young/table.pkl"""
+failed tries 5,120 lamports x tries). Out: /home/it/sniper-data/presend_young/table.pkl"""
 import pickle, collections, sys
 from multiprocessing import Pool
 from ylib import *

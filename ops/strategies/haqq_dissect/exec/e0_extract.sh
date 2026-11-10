@@ -1,9 +1,9 @@
 #!/bin/bash
 # Extract haqq + our wallets' txs (landed AND failed) from every raw-recording chunk. Read-only. One output file per chunk.
 # Usage: e0_extract.sh  (3 parallel zcat|grep)
-OUT=/home/moiz/sniper-data/haqq_dissect/exec/ext
+OUT=/home/it/sniper-data/haqq_dissect/exec/ext
 now=$(date +%s)
-for r in /home/moiz/sniper-data/collect/run_2026*/; do
+for r in /data/tapes/collect/run_2026*/; do
   [ -d "$r/txs" ] || continue
   rn=$(basename $r)
   for f in $r/txs/txs_*.jsonl.gz; do

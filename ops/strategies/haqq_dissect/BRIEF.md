@@ -43,7 +43,7 @@ GMGN screenshots from the owner (10-28 ~01:40 PKT, last ~25 min of haqq tokens):
 
 - **DIP lots by position after the dump:** first buyer after the dump +5.9 SOL (594 lots); 1+ buyers ahead +9.6 (1,564 lots). So he profits even when NOT first.
 - **His limits are loose:** about 57% of his buys have no effective price limit (guard-sweep study, 10-25).
-- **Data:** ops/strategies/haqq_strat/ (s1–s9, hs_lib.py), data /home/moiz/sniper-data/haqq_strat/ (lots24.pkl, pos.pkl, haqq_raw.jsonl = his raw txs 24 h, s3.txt dissection).
+- **Data:** ops/strategies/haqq_strat/ (s1–s9, hs_lib.py), data /home/it/sniper-data/haqq_strat/ (lots24.pkl, pos.pkl, haqq_raw.jsonl = his raw txs 24 h, s3.txt dissection).
 
 **Speed (MEASURED)**
 - His DIP buys land a median 77–80 ms after the dump (52% in the same slot).
@@ -75,20 +75,20 @@ GMGN screenshots from the owner (10-28 ~01:40 PKT, last ~25 min of haqq tokens):
   - calibration live ≈ 0.61 × model − 1.17 mSOL/fire;
   - coverage per hour (c0_coverage.txt);
   - mayhem tokens must be EXCLUDED (their curve is not standard; the replay invents fake profit on them).
-- **Tape:** /home/moiz/sniper-data/dv8/tab/ (trades.npy 21.9 M pump.fun trades with signer, 10-22 03:07 → 10-28 01:12 PKT; ids.json; creates.json with mayhem flags; ours.jsonl = our txs).
-- **Raw recordings with full txs (incl. failed):** /home/moiz/sniper-data/collect/run_*/txs/*.jsonl.gz. More arrive every ~30 min (keeper). Decoders: ops/strategies/presend/real/decode.py, build.py.
+- **Tape:** /home/it/sniper-data/dv8/tab/ (trades.npy 21.9 M pump.fun trades with signer, 10-22 03:07 → 10-28 01:12 PKT; ids.json; creates.json with mayhem flags; ours.jsonl = our txs).
+- **Raw recordings with full txs (incl. failed):** /data/tapes/collect/run_*/txs/*.jsonl.gz. More arrive every ~30 min (keeper). Decoders: ops/strategies/presend/real/decode.py, build.py.
 - **Live run records:**
-  - AMS: /home/moiz/sniper-data/runs/ams/runs/, presend_filter/live28/, haqq_strat/live/;
-  - FRA: /home/moiz/sniper-data/runs/fra/runs/, dv8/live/ (FRA r26 copy).
+  - AMS: /home/it/sniper-data/runs/ams/runs/, presend_filter/live28/, haqq_strat/live/;
+  - FRA: /home/it/sniper-data/runs/fra/runs/, dv8/live/ (FRA r26 copy).
 
 **A finding the owner rejects as incomplete:** DV8 (buy many dumps with our +5% guard, one buy per token, fixed exit) loses at our landing. It never modelled adds/multi-buys, loose limits, or haqq's exit logic. Those are exactly what you must now study.
 
 ## Rules (strict)
-- **Read-only research.** Nothing is sent. No engine, config or server change. Live engine FRA r26 is running: servers read-only via `ssh -p 1996 it@84.32.100.36 'sudo cat …'` only if you must.
+- **Read-only research.** Nothing is sent. No engine, config or server change. Live engine FRA r26 is running: servers read-only via `ssh -p 1996 it@cyberfra 'sudo cat …'` only if you must.
 - **No Constant-K RPC key** (live engines use it). If you need chain reads, prefer the recordings. Public RPC only, rate-limited, short.
 - **Your own folders only:**
-  - code: /home/moiz/sniper/ops/strategies/haqq_dissect/<your_tag>/
-  - data: /home/moiz/sniper-data/haqq_dissect/<your_tag>/
+  - code: /home/it/sniper/ops/strategies/haqq_dissect/<your_tag>/
+  - data: /home/it/sniper-data/haqq_dissect/<your_tag>/
   - scratch: /tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/hd_<your_tag>/
 
   NEVER bulk-delete anything outside them. The scratchpad is shared with other agents.

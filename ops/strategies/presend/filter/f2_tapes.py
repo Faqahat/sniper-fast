@@ -5,7 +5,7 @@
          the chain position of the latest trade of the token the engine had seen when it signed it (the attempt record's 'pos': what
          the engine knew of the token at that moment; a DURING rule may use the token's trades up to pos only)
   tape : the token's trades from 300 slots before the trigger to the window end + 3 slots (slot, idx, j, wallet id, buy, sol, vsol, vtok)
-Writes /home/moiz/sniper-data/presend_filter/tapes.pkl  {(run, seg, w): dict(tries=[...], tape=np.ndarray, k_trig=index of the trigger)}"""
+Writes /home/it/sniper-data/presend_filter/tapes.pkl  {(run, seg, w): dict(tries=[...], tape=np.ndarray, k_trig=index of the trigger)}"""
 import json, pickle, time
 import numpy as np
 from chainlib import Chain, B

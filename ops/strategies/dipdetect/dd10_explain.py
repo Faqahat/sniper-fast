@@ -7,7 +7,7 @@ import sys
 import numpy as np
 import dd_lib as L
 import dd_gbdt as GT
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel")
+sys.path.insert(0, "/home/it/sniper-data/overnight/sel")
 import gbdt_np as GB
 DAYS = ("R2", "R3", "R1", "R4")
 def preds(name):

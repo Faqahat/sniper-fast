@@ -10,7 +10,7 @@ Lots here use CODE-MATCHED accounting (exact per bot). MEASURED unless marked.
 Out: p4.txt"""
 import collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 from plib import *
 
 P = Out(f"{OUT}/p4.txt")

@@ -2,9 +2,9 @@
 """VERIFY v10b: the windows only rsim fills on the fresh tape - when (slots after the dump) and why my model never fills them."""
 import sys, pickle, collections, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/verify")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/verify")
 import vlib as V, v2b_reimpl as M
-D = "/home/moiz/sniper-data/haqq_dissect/verify"
+D = "/home/it/sniper-data/haqq_dissect/verify"
 A = pickle.load(open(f"{D}/fwdF_res.pkl", "rb")); name = A["cfg"]["name"]; B = pickle.load(open(f"{D}/v2b_freshF.pkl", "rb"))
 COST = M.COST
 mine_f = collections.Counter((r["mint"], r["s"]) for r in B["rows"] if r["fill"] is not None)

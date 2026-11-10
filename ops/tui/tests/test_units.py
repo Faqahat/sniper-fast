@@ -254,7 +254,7 @@ def t_fuzz():
     print("fuzz (mutated real lines):")
     import random
     rnd = random.Random(1027)
-    src = "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r26"
+    src = "/home/it/sniper-data/runs/ams/runs/dip_ams_r26"
     if not os.path.exists(src + ".jsonl"):
         print("  (no local r26 copy: skipped)")
         return

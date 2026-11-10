@@ -3,8 +3,8 @@
 Own extraction + own tape (same decoded sources as v5)."""
 import json, pickle, collections, sys, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/verify")
-D = "/home/moiz/sniper-data"; OUT = f"{D}/prevent/verify"
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/verify")
+D = "/home/it/sniper-data"; OUT = f"{D}/prevent/verify"
 RUNS = {f"A{r}": f"{D}/runs/ams/runs/dip_ams_r{r}.jsonl" for r in (14, 15, 21, 22, 23)}
 RUNS.update({f"F{r}": f"{D}/runs/fra/runs/dip_r{r}.jsonl" for r in (15, 16, 20, 25)})
 SRC = [("chain", f"{D}/presend_quiet3", 0, 462709231), ("chain", f"{D}/presend_young/ext", 462709231, 462710488),

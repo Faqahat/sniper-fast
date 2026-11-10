@@ -8,10 +8,10 @@
 Out: rules_posthoc.pkl (same format as rules.pkl)"""
 import pickle, json, bisect, collections, itertools, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/who")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/who")
 from w5_rules import load, prep, Online, LAG
 
-D = "/home/moiz/sniper-data/prevent/who"
+D = "/home/it/sniper-data/prevent/who"
 
 
 def main():

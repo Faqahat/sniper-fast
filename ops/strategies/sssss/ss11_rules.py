@@ -8,11 +8,11 @@
 # Writes sssss/llm/rules_<tag>.json (scores per rule) and sssss/llm/exits.jsonl (valid exit rules for the replica).
 import sys, json, zlib, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/sssss")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies/sssss")
 import p4_eval as E
 import ss8_sim as S
 from ss4_select import holding_mask
-OUT = "/home/moiz/sniper-data/strategies/sssss"
+OUT = "/home/it/sniper-data/strategies/sssss"
 UID = zlib.crc32(b"sssssDdMNAWKingjpEojkTNdVuZrBe7FsJLaGtexe7d")
 SIBS = ["ssssswdk4RR8HqkE3uwUWzDbd6mXFTTPjcXBKNzQ57E", "sssssCUP5wgSW3sxjtQNa7u88ytE4st2Z7goX5kKNwi", "sssssyv2q57u9sJrL1BB7Ep71X6YBY71iYt7CtHB5zJ"]
 FLEET = np.array([UID] + [zlib.crc32(s.encode()) for s in SIBS], np.int64)

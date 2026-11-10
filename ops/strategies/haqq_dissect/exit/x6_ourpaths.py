@@ -6,7 +6,7 @@ our actual first sell as the number of outside rows before it; realized curve P&
 Out: haqq_dissect/exit/ourpaths.pkl"""
 import pickle, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 HZ = 300
 

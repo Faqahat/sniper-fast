@@ -5,9 +5,9 @@
 #  C) rivals that beat us: tips, CU price, CU limit, pre-sends (failed attempts by the same signer on the same token in the 5 slots before)
 import json, collections, statistics, glob
 T = json.load(open("latest/timeline.json")); C = json.load(open("latest/chain_rows.json"))
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 OURS = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
-SS = {int(k): v for k, v in json.load(open("/home/moiz/sniper/ops/overnight/core/slotsize2.json")).items()}
+SS = {int(k): v for k, v in json.load(open("/home/it/sniper-data/overnight/core/slotsize2.json")).items()}
 dumpsig = {}
 for fn in glob.glob("dip_r*.jsonl") + glob.glob("dip_ams_r*.jsonl") + glob.glob("latest/*.jsonl"):
     for l in open(fn):

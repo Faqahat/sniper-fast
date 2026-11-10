@@ -264,7 +264,7 @@ Per window, mean over draws (INFERRED; the per-fill number is the P&L when the r
   - `effects27.py`: tasks 2–4 and the bootstrap.
   - `tables27.py`: tasks 2, 3 and 5.
   - `eval_live.py`: unchanged.
-- Data (`/home/moiz/sniper-data/presend_filter/live27/`):
+- Data (`/home/it/sniper-data/presend_filter/live27/`):
   - `dec/` and `tab/`: the tape.
   - `donors27.pkl`.
   - `qcheck.json`.
@@ -272,7 +272,7 @@ Per window, mean over draws (INFERRED; the per-fill number is the P&L when the r
   - `calib27_*.txt`, `effects27_*.{txt,json}` and `tables27_P3_main.txt`.
 - Re-run (about 2 min):
   ```
-  cd /home/moiz/sniper/ops/strategies/presend/filter/live27
+  cd /home/it/sniper/ops/strategies/presend/filter/live27
   python3 qcheck.py                          # needs donors27.pkl (lib27.build_donors) and tab/
   python3 replay27.py --pool P3 --draws 400 && python3 replay27.py --pool R27 --draws 400
   python3 replay27.py --pool P3 --lag 15 --tag lag15 && python3 replay27.py --pool P3 --cut 0.2 --tag cut20

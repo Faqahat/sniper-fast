@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """SPEED35 step 2: trigger rows + chain tapes for AMS r36 and r37 (r37 = fresh read-only copy, tape from the recorder chunks
-decoded into /home/moiz/sniper-data/speed35/tab). r36 rows/tapes reused from the YOUNG study (trig.json, tapes.pkl).
-Rows use YOUNG's extraction (y1_extract.run). Out: /home/moiz/sniper-data/speed35/rows.pkl {rows, tapes, maxi(slot->max idx)}"""
+decoded into /home/it/sniper-data/speed35/tab). r36 rows/tapes reused from the YOUNG study (trig.json, tapes.pkl).
+Rows use YOUNG's extraction (y1_extract.run). Out: /home/it/sniper-data/speed35/rows.pkl {rows, tapes, maxi(slot->max idx)}"""
 import sys, json, pickle, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/young")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/young")
 import y1_extract
-D = "/home/moiz/sniper-data/speed35"; Y = "/home/moiz/sniper-data/presend_young"
+D = "/home/it/sniper-data/speed35"; Y = "/home/it/sniper-data/presend_young"
 T = json.load(open(f"{Y}/trig.json"))["rows"]; TP = pickle.load(open(f"{Y}/tapes.pkl", "rb"))
 rows = [r for r in T if r["reg"] == "AMS" and r["run"] == "r36"]
 tapes = {r["sig"]: TP.get(r["sig"]) for r in rows}
@@ -24,7 +24,7 @@ for r in r37:
     keep.append(r)
 rows += keep
 maxi = {}
-z = np.load("/home/moiz/sniper-data/presend_quiet3/chain.npz")
+z = np.load("/home/it/sniper-data/presend_quiet3/chain.npz")
 for s, i, bt in z["blocks"].tolist(): maxi[s] = i
 z = np.load(f"{Y}/ext/chain.npz")
 for s, i, bt in z["blocks"].tolist(): maxi[s] = max(i, maxi.get(s, 0))

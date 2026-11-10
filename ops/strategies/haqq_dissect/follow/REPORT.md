@@ -1,5 +1,5 @@
 # Analyst H (follow): a "will this whale dump be followed" selector; KEY correction: live fills are adverse (10-28 ~03:45 PKT)
-Saved by the main session from the agent's reply. Code: this folder (f1–f10, flib). Tables: /home/moiz/sniper-data/haqq_dissect/follow/ (f2b live vs model fill, f9 fill by value, f10 / f5_f10 final, f4 / f5 superseded, f6 haqq-follow target, f7, f8). Decision log: decisions.jsonl (429,109 lines).
+Saved by the main session from the agent's reply. Code: this folder (f1–f10, flib). Tables: /home/it/sniper-data/haqq_dissect/follow/ (f2b live vs model fill, f9 fill by value, f10 / f5_f10 final, f4 / f5 superseded, f6 haqq-follow target, f7, f8). Decision log: decisions.jsonl (429,109 lines).
 
 ## Universe (MEASURED)
 - **Episodes:** 136,658 whale episodes (a wallet reaching ≥6% of supply, until its next sell), 18–27k per day; 75% are creation-slot whales.

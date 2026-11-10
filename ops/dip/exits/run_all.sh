@@ -1,8 +1,8 @@
 #!/bin/bash
-# full rebuild of the exit study after the e02 fix (models + every table); logs in /home/moiz/sniper-data/exits/
+# full rebuild of the exit study after the e02 fix (models + every table); logs in /home/it/sniper-data/exits/
 set -e
-cd /home/moiz/sniper/ops/dip/exits
-X=/home/moiz/sniper-data/exits
+cd /home/it/sniper/ops/dip/exits
+X=/home/it/sniper-data/exits
 P="nice -n 10 python3 -I"
 ( $P e04b_learn.py h1248 1,2,4,8 3 1000 20 U 1 > $X/e04b_h1248.log 2>&1; $P e04b_learn.py h1248s3 1,2,4,8 3 1000 20 U 3 > $X/e04b_h1248s3.log 2>&1; $P e04b_learn.py h24816 2,4,8,16 3 1000 20 U 1 > $X/e04b_h24816.log 2>&1 ) &
 ( $P e04b_learn.py h1248s2 1,2,4,8 3 1000 20 U 2 > $X/e04b_h1248s2.log 2>&1; $P e04b_learn.py h12 1,2 3 1000 20 U 1 > $X/e04b_h12.log 2>&1 ) &

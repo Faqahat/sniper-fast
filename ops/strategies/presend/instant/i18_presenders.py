@@ -2,9 +2,9 @@
 # INSTANT-BOTS study, step 18 (read-only): pre-sender table per run: fills, attempts (failed + no-op) per fill, attempts per slot while
 # streaming (max in one slot before the dump, median over fills), share of fills <= 5 / <= 10 positions after the dump, fee per attempt
 # (median / mean from the recorded fees), attempt fees per fill, net SOL (fee payer's SOL delta over all its recorded txs).
-# usage: python3 -I i18_presenders.py TAG   (uses /home/moiz/sniper-data/presend_instant/<TAG>_*)
+# usage: python3 -I i18_presenders.py TAG   (uses /home/it/sniper-data/presend_instant/<TAG>_*)
 import sys, json, gzip, collections, statistics
-D = "/home/moiz/sniper-data/presend_instant"; tag = sys.argv[1]
+D = "/home/it/sniper-data/presend_instant"; tag = sys.argv[1]
 C = json.load(open(f"{D}/{tag}_classes.json")); P = json.load(open(f"{D}/{tag}_profiles.json"))
 KEY = ["9K5QgBKa", "CZ77onJz", "FNuoWSQc", "Dk2jdQ93", "FUru6V3L", "5ZKd8DNB", "8g1w4PNC", "2KtcBCfh", "CVPz447t", "5k2Ckkiu", "2XyiEK56", "7VrFNnRw"]
 full = {w[:8]: w for w in P}

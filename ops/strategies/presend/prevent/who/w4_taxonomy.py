@@ -4,7 +4,7 @@ Out: taxonomy.json + printed tables"""
 import pickle, json, collections
 import numpy as np
 
-D = "/home/moiz/sniper-data/prevent/who"
+D = "/home/it/sniper-data/prevent/who"
 ROLES = ["trigger", "creator", "holder6", "holder3", "bundle", "holder<3", "new_window", "new_hold"]
 
 

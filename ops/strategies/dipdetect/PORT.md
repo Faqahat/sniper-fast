@@ -15,13 +15,13 @@ MEASURED means a replay or a test result. INFERRED means my reading of it. Repla
 - **Found while porting:** the engine never looked at ~20% of Stage A's picks. They are a second big sell in the same slot,
   and the IMIT1 rules take only the first big sell per slot. Fixed by "extra dumps" (on with `--dip-m2`). IMIT1 never
   picks them.
-- **Binary (not deployed):** `/home/moiz/sniper-data/strategies/dipdetect/bin/snipe_engine_dip10_m2`, 77,418,536 bytes,
+- **Binary (not deployed):** `/home/it/sniper-data/strategies/dipdetect/bin/snipe_engine_dip10_m2`, 77,418,536 bytes,
   sha256 `540569ff60066aea9c59441229adb677c8ae3ca9bbe042a257a7c7d129f37f71`.
   - Built from today's uncommitted dip10 tree plus M2.
-  - The same file is at `/home/moiz/sniper/target/release/snipe_engine` until the next build.
+  - The same file is at `/home/it/sniper/target/release/snipe_engine` until the next build.
 - **Bundle (model + wallet lists, one file):** `m2_v3_reg4_top25.json`, sha256
   `5bf40a8288f7652c2a7db8aa7a68b2e8f93fa4290e728425b043c052b899bab0`.
-  - Next to the binary, and in `/home/moiz/sniper-data/strategies/dipdetect/`.
+  - Next to the binary, and in `/home/it/sniper-data/strategies/dipdetect/`.
 
 ## 1. Model and threshold (Phase 0, `dd15_stageA.py`)
 - **Row alignment:** both prediction files match predictions recomputed from the model JSONs exactly (max diff 0 on all
@@ -170,10 +170,10 @@ Copy the binary and the bundle to the server, e.g. bundle → `/root/dip/m2_v3_r
 
 **After the shadow, evaluate parity + replay:**
 ```
-cd /home/moiz/sniper/ops/strategies/dipdetect
+cd /home/it/sniper/ops/strategies/dipdetect
 python3 dd20_shadow_eval.py --jsonl <dip_rN.jsonl> <dip_ams_rN.jsonl> \
-  --run /home/moiz/sniper-data/collect/run_<date>_<time> --from "10-25 01:30" --to "10-25 04:30" \
-  --schedule /home/moiz/sniper-data/competitors2/schedule_1067.json --procs 4
+  --run /data/tapes/collect/run_<date>_<time> --from "10-25 01:30" --to "10-25 04:30" \
+  --schedule /home/it/sniper-data/competitors2/schedule_1067.json --procs 4
 ```
 - The leader schedule for epoch 1067 covers 10-24 22:57 → 10-26 00:12 PKT.
 - Tested on R4 hours with run 10's records in plumbing mode (`--fill-m2-from-offline`), because run 10 had no M2.
@@ -191,7 +191,7 @@ python3 dd20_shadow_eval.py --jsonl <dip_rN.jsonl> <dip_ams_rN.jsonl> \
 - **Test data:** new `testdata/dip_m2_parity.json` (17.3 MB) and `testdata/dip_m2_bundle.json` (1.1 MB).
 - **Scripts (ops/strategies/dipdetect):** `dd15_stageA.py`, `dd16_visible.py`, `dd20_shadow_eval.py`, `dd21_m2_bundle.py`,
   `dd22_m2_parity.py`, `dd23_port_tables.py`, this file.
-- **Data (`/home/moiz/sniper-data/strategies/dipdetect/`):** `m2_v3_reg4_top25.json`, `dd15_stageA.{txt,json}`,
+- **Data (`/home/it/sniper-data/strategies/dipdetect/`):** `m2_v3_reg4_top25.json`, `dd15_stageA.{txt,json}`,
   `dd16_visible.json`, `dd23_port_tables.json`, `bin/`, `shadow/test_r4/`.
 
 ## 9. Open risks

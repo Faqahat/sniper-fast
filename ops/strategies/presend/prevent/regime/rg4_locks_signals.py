@@ -1,11 +1,11 @@
 """REGIME step 4: task 4 (profit-lock variants) and task 3 (market-wide regime signals) on the live runs (+ PAPER for signals).
 usage: rg4_locks_signals.py"""
 import sys, pickle, json, collections, bisect, heapq, random
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/regime")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/regime")
 import rg_lib as G
 import rg2_core as C
 
-OUT = "/home/moiz/sniper-data/prevent/regime"
+OUT = "/home/it/sniper-data/prevent/regime"
 D = pickle.load(open(f"{OUT}/runs.pkl", "rb"))
 live, paper = D["live"], D["paper"]
 PICK, TEST, R38, ALL = G.PICK, G.TEST, ["dip_ams_r38"], G.LIVE_ORDER

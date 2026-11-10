@@ -1,7 +1,7 @@
 import sys, os, re, glob, json
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/filter")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/filter")
 import apply_filter as af
-fn = "/home/moiz/sniper-data/presend_filter/live/fetched/ams_dip_ams_r26.jsonl"
+fn = "/home/it/sniper-data/presend_filter/live/fetched/ams_dip_ams_r26.jsonl"
 cohort = set(json.load(open(af.COHORT))); fbots = set(json.load(open(af.FBOTS)))
 recs = [d for d in sorted(glob.glob(f"{af.COLLECT}/run_*")) if os.path.isdir(f"{d}/txs")]
 tmin = tmax = None

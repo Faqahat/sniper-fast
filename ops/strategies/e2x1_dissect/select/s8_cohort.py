@@ -8,7 +8,7 @@ Cohort C (chosen on TRAIN only = before the newest 6 h): wallets that bought wit
 Also the copy lag (slots / block idx after his row)."""
 import sys, collections, json, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"]); MN, US = names()
 sl = D["slot"].astype(np.int64); ix = D["idx"].astype(np.int64); us = D["user"].astype(np.int64); bu = D["buy"].astype(bool); so = D["sol"] / 1e9

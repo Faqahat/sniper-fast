@@ -11,7 +11,7 @@ SMS = 212.0
 SELL_LAT = 75.0
 GRADV = 110e9
 HMAX = 40
-SLACK = [float(np.float32(min(r[1], 1e6))) for r in sorted(json.load(open("/home/moiz/sniper/ops/overnight/verify2/work/a8_slack.json"))["rows"], key=lambda r: r[1])]
+SLACK = [float(np.float32(min(r[1], 1e6))) for r in sorted(json.load(open("/home/it/sniper-data/overnight/verify2/work/a8_slack.json"))["rows"], key=lambda r: r[1])]
 
 
 def slack_of_sig(sig):

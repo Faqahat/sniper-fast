@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import rpc
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 W0, W1 = 1793038500, 1793124900
-OUT = "/home/moiz/sniper-data/haqq_dissect/recon"
+OUT = "/home/it/sniper-data/haqq_dissect/recon"
 rec = pickle.load(open(f"{OUT}/rec.pkl", "rb"))
 after = sorted((d["s"], d["i"], d["sig"]) for d in rec.values() if d["bt"] >= W1 + 120 and d["err"] is None)
 before = after[0][2]

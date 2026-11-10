@@ -2,9 +2,9 @@
 # Every FRZ pump BUY attempt (successful tiny buys AND fail-by-design probes, which still land in blocks): landing delay
 # after the token's create on the replay's block-position scale, fee, tips / routes, leader client. READ-ONLY RPC.
 import sys, json, time, statistics
-sys.path.insert(0, "/home/moiz/sniper/ops/speedcheck")
+sys.path.insert(0, "/home/it/sniper/ops/speedcheck")
 import importlib.util
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 W = sys.argv[1]; LABEL = sys.argv[2]
 BUY_MINT_POS = {"66063d1201daebea": 2, "38fc74089edfcd5f": 2, "e1f7501ed5b38488": 1, "07051dc4f5176550": 1, "c2ab1c46684d5b2f": 1, "b817ee6167c5d33d": 1}
 page = S.rpc("getSignaturesForAddress", [W, {"limit": 1000}]) or []
@@ -38,7 +38,7 @@ for p in page:
                      mint=mint, dslot=t["slot"] - c["slot"], ms=round(ms, 1), idx=pb[0], size=pb[1], fee=t["meta"]["fee"], tips=tips,
                      prio=(cu_price or 0) * (cu_limit or 0) / 1e15, client=S.leader_client(t["slot"])))
 rows.sort(key=lambda r: r["when"])
-json.dump(rows, open(f"/home/moiz/sniper/ops/speedcheck/{LABEL}_all_buys.json", "w"), indent=1)
+json.dump(rows, open(f"/home/it/sniper/ops/speedcheck/{LABEL}_all_buys.json", "w"), indent=1)
 for r in rows:
     tips = ", ".join(f"{s} {x / 1e9:.4f}" for s, x in r["tips"]) or "none"
     print(f"{r['when']} {'buy  ' if r['ok'] else 'PROBE'} {r['mint'][:6]} | +{r['dslot']} slot {r['ms']:6.1f} ms | idx {r['idx']}/{r['size']} | fee {r['fee'] / 1e9:.5f} | tips [{tips}] | leader {r['client']}")

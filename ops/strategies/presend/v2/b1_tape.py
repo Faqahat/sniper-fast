@@ -2,7 +2,7 @@
 # PRE-SEND V2 (agent 10-25 PKT). Build the study's tape (day arrays) for a span of a raw collector run, with the study's own
 # code, unchanged: ops/select/a_extract.py (phase A) -> ops/strategies/patterns/p1_build.py (stage a / b / concat), exactly as
 # ps11_shadow_eval.py does (its stage_extract / stage_days are imported). Read-only on the recording; writes only to --work.
-# usage: nice python3 b1_tape.py --run /home/moiz/sniper-data/collect/run_20261024_1425 --work /home/moiz/sniper-data/presend_v2/tape_R4
+# usage: nice python3 b1_tape.py --run /data/tapes/collect/run_20261024_1425 --work /home/it/sniper-data/presend_v2/tape_R4
 #            [--from "MM-DD HH:MM"] [--to "MM-DD HH:MM"] [--procs 5] [--min-age 180]
 import sys, os, glob, time, argparse, shutil
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))

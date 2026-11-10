@@ -3,7 +3,7 @@
 # after the trigger tx (here the DUMP, there the create): (slot diff + index/size diff) x 400 ms. READ-ONLY RPC (getBlock).
 # usage: python3 -I dip_speed.py <run.jsonl> [more.jsonl ...]
 import sys, json, statistics, importlib.util
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 rows = []
 for run in sys.argv[1:]:
     ev = [json.loads(l) for l in open(run)]
@@ -26,4 +26,4 @@ for r in rows:
     print(f"{r['run']} {r['mint']} {r['client']:20s} via {r['route']:14s} +{r['dslot']} slot | block-position {r['ms']:6.1f} ms (dump {r['didx']}, ours {r['idx']}) | feed {r['feed']} ms | {r['why']}")
 ms = [r["ms"] for r in rows]
 print(f"{len(rows)} dip buys: block-position median {statistics.median(ms):.1f} ms, same slot as the dump {sum(1 for r in rows if r['dslot'] == 0)}/{len(rows)}")
-json.dump(rows, open("/home/moiz/sniper/ops/dip/speed/dip_speed.json", "w"), indent=1)
+json.dump(rows, open("/home/it/sniper/ops/dip/speed/dip_speed.json", "w"), indent=1)

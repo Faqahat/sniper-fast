@@ -6,7 +6,7 @@
 # -> presend/raw/<day>_<chunk>.jsonl.gz (rows of candidate wallets) + presend/raw/<day>_<chunk>.census.json
 import sys, os, json, glob, gzip, base64, subprocess, zlib, collections, time, re
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"; OUT = os.environ.get("PS2_OUT", "/home/moiz/sniper-data/strategies/presend/raw")
+D = "/data/tapes/collect"; OUT = os.environ.get("PS2_OUT", "/home/it/sniper-data/strategies/presend/raw")
 RUNS = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
 PUMP = b"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 TRADE_DISC = bytes([189, 219, 127, 211, 78, 230, 97, 238])

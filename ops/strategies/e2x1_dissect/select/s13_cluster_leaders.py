@@ -4,7 +4,7 @@ Anchor = the cluster's FIRST buy on each token E2x1 traded. Who buys (outside th
 baseline moments (as s11). If the cluster copies an outside wallet list, those wallets show huge lift and high coverage."""
 import sys, collections, pickle, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"]); MN, US = names(); uid = {u: i for i, u in enumerate(US)}
 sl = D["slot"].astype(np.int64); ix = D["idx"].astype(np.int64); us = D["user"].astype(np.int64); bu = D["buy"].astype(bool); mi = D["mint"]; bt = D["bt"].astype(np.int64)

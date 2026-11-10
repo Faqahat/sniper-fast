@@ -21,8 +21,8 @@ for a in A:
     if a["out"] == "landed":
         took[k][1] += 1; l = lot.get(a["lot"])
         if l is not None: took[k][2] = (took[k][2] or 0) + l["pnl_cash"]
-CR = json.load(open("/home/moiz/sniper-data/dv8/tab/creates.json"))
-CR.update(json.load(open("/home/moiz/sniper-data/e2x1_dissect/select/creates_new.json")))
+CR = json.load(open("/home/it/sniper-data/dv8/tab/creates.json"))
+CR.update(json.load(open("/home/it/sniper-data/e2x1_dissect/select/creates_new.json")))
 mid = T.mid(); uidm = T.uid()
 cr_slot = {}; cr_user = {}; mayhem = {}
 for m, v in CR.items():

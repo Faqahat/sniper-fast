@@ -5,7 +5,7 @@
 # (p1_build.py: sold tokens / bought tokens so far, 0 when nothing bought or nothing sold), and test skipping "bag still held".
 import sys, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_lib as L
 import dd20_shadow_eval as D20
 DAYS = sys.argv[1:] or ["R1", "R2", "R3", "R4"]
