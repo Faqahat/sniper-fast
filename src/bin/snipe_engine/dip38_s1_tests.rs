@@ -167,7 +167,7 @@ fn recs_wo_s1(v: &[serde_json::Value]) -> Vec<String> {
 }
 fn cmds_wo_s1(v: &[Cmd]) -> Vec<String> {
     v.iter().map(|c| match c.clone() {
-        Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38, .. } => format!("{:?}", Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38, s1: None, wd: None }),
+        Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38, .. } => format!("{:?}", Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38, s1: None, wd: None, f2: None }),
         x => format!("{x:?}"),
     }).collect()
 }

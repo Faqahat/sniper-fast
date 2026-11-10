@@ -190,6 +190,8 @@ impl PsLive {
         let mut r = serde_json::json!({"ev": "presend_live_skip", "kind": "rearm", "why": why, "mint": b58(mint), "dump": dump.json()});
         // dip39 (only with the gate on): the depth now
         if let Some(j) = self.bd_json(mint, self.sh.slot.load(Ordering::Relaxed)) { r["botdepth"] = j; }
+        // dip42 (log-only; only with the flag on): the 2NUM family on the token now
+        if let Some(j) = self.f2_json(true, mint, self.sh.slot.load(Ordering::Relaxed)) { r["fam2"] = j; }
         if let (Some(o), serde_json::Value::Object(x)) = (r.as_object_mut(), extra) { for (k, v) in x { o.insert(k, v); } }
         self.rec(r);
     }
@@ -435,6 +437,8 @@ impl PsLive {
         if let Some(v) = s1 { r["s1"] = v.json(self.cfg.s1_parts, self.s1_live(true), spend, dump.tr.vsol, dump.tr.p()); self.s1_arm(id, v); }
         // dip39 (only with the gate on): the depth at the arm's slot (the first attempts' view)
         if let Some(j) = self.bd_json(&mint, arm_slot) { r["botdepth"] = j; }
+        // dip42 (log-only; only with the flag on): the 2NUM family on the token at the arm's slot
+        if let Some(j) = self.f2_json(false, &mint, arm_slot) { r["fam2"] = j; }
         // dip34 (log-only): seen / eqgrp / q4 keyed on the dumper (each only with its flag)
         let dumper = dump.tr.user;
         self.log34(&mut r, &mint, &dumper, chk_slot, chk_t);

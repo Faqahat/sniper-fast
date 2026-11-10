@@ -141,6 +141,15 @@ const BDFLAGS: [&str; 6] = ["--presend-live-botdepth", "--presend-live-botdepth-
 const DLFLAGS: [&str; 8] = ["--presend-live-dumper-ledger", "--presend-live-dumper-state", "--presend-live-wide-dumper", "--presend-live-wide-dumper-mode",
     "--presend-live-wide-size-sol", "--presend-live-qf2", "--presend-live-qf2-filters", "--presend-live-qf2-mode"];
 
+/// dip42 FAM2 (the 2NUM family's presence on our windows; LOG ONLY): its flags (each needs --presend-live; the wallets / slots need
+/// --presend-live-fam2 on; psfam2.rs)
+const F2FLAGS: [&str; 3] = ["--presend-live-fam2", "--presend-live-fam2-wallets", "--presend-live-fam2-slots"];
+
+/// dip42 Q1 (the quiet-token fresh-wallet big-buy shadow; LOG ONLY): its flags (each needs --presend-live: the probe's feed hook; the
+/// others need --q1-log on; psq1.rs)
+const Q1FLAGS: [&str; 11] = ["--q1-log", "--q1-bots", "--q1-fresh-state", "--q1-min-sol", "--q1-age-slots", "--q1-bot-slots", "--q1-dip-slots", "--q1-fresh-max",
+    "--q1-gap-slots", "--q1-size-sol", "--q1-fresh-hours"];
+
 const RFLAGS: [&str; 5] = ["--presend-live-rearm", "--presend-live-rearm-size-sol", "--presend-live-rearm-gap-slots", "--presend-live-rearm-quiet-stop",
     "--presend-live-rearm-r5-skip"];
 
@@ -203,6 +212,14 @@ pub mod psbd;
 // in log mode by default: nothing sent)
 #[path = "psdl.rs"]
 pub mod psdl;
+
+// dip42 FAM2: the 2NUM family's presence on the pre-send windows' records (LOG ONLY; off unless --presend-live-fam2 on)
+#[path = "psfam2.rs"]
+pub mod psfam2;
+
+// dip42 Q1: the quiet-token fresh-wallet big-buy reactive trigger as a shadow log (LOG ONLY, its own thread; off unless --q1-log on)
+#[path = "psq1.rs"]
+pub mod psq1;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -482,6 +499,11 @@ pub struct Cfg {
     pub qf: Option<psdl::QfCfg>,
     pub qf_filt: psdl::QfFilt,
     pub qf_live: bool,
+    /// dip42 FAM2 (LOG ONLY; None = off): --presend-live-fam2 on, --presend-live-fam2-wallets W1,W2,.. (default the 2NUM family's 4),
+    /// --presend-live-fam2-slots N (300): "fam2" on every arm / skip / fill / realized record (psfam2.rs)
+    pub f2: Option<psfam2::F2Cfg>,
+    /// dip42 Q1 (LOG ONLY; None = off): --q1-log on, --q1-bots FILE, --q1-fresh-state FILE and the rule's thresholds (psq1.rs)
+    pub q1: Option<psq1::Q1Cfg>,
 }
 
 impl Cfg {
@@ -513,7 +535,7 @@ impl Cfg {
         let arg_u64_opt = |f: &str| arg(f).and_then(|s| s.parse::<u64>().ok());
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -640,7 +662,39 @@ impl Cfg {
                 }
                 _ => spend,
             },
+            // dip42 (LOG ONLY; set below)
+            f2: None,
+            q1: None,
         };
+        // dip42 FAM2 + Q1 (both LOG ONLY; off unless their switch): every value given; the parameters need their switch
+        for f in F2FLAGS.iter().chain(Q1FLAGS.iter()) { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
+        let f2_on = onoff("--presend-live-fam2", false)?;
+        if !f2_on { if let Some(f) = F2FLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-fam2 on"); } }
+        let f2_wallets = match arg("--presend-live-fam2-wallets") { Some(s) => psfam2::wallets_parse(&s)?, None => psfam2::default_wallets() };
+        if f2_on {
+            if has("--presend-live-fam2-slots") && arg_u64_opt("--presend-live-fam2-slots").is_none() { bail!("--presend-live-fam2-slots N: a whole number of slots"); }
+            let slots = arg_u64("--presend-live-fam2-slots", psfam2::F2_SLOTS);
+            if !(1..=psfam2::F2_SLOTS_MAX).contains(&slots) { bail!("--presend-live-fam2-slots must be 1..{} slots", psfam2::F2_SLOTS_MAX); }
+            c.f2 = Some(psfam2::F2Cfg { wallets: f2_wallets.clone(), slots });
+        }
+        let q1_on = onoff("--q1-log", false)?;
+        if !q1_on { if let Some(f) = Q1FLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --q1-log on"); } }
+        if q1_on {
+            let bots = arg("--q1-bots").context("--q1-log on needs --q1-bots FILE (the bot registry / a list of bot wallets: \"quiet\" = none of them on the token)")?;
+            for f in ["--q1-bot-slots", "--q1-dip-slots", "--q1-fresh-max", "--q1-gap-slots"] { if has(f) && arg_u64_opt(f).is_none() { bail!("{f}: a whole number"); } }
+            for f in ["--q1-min-sol", "--q1-size-sol", "--q1-fresh-hours"] { if has(f) && !arg(f).is_some_and(|v| v.parse::<f64>().is_ok_and(|x| x.is_finite())) { bail!("{f}: a number"); } }
+            let (min_sol, size, hours) = (arg_f64("--q1-min-sol", 0.5), arg_f64("--q1-size-sol", 0.5), arg_f64("--q1-fresh-hours", 48.0));
+            let age = match arg("--q1-age-slots") { Some(s) => psq1::age_parse(&s)?, None => (3, 80) };
+            let (bot_slots, dip_slots, fresh_max, gap) = (arg_u64("--q1-bot-slots", 100), arg_u64("--q1-dip-slots", 200), arg_u64("--q1-fresh-max", 2), arg_u64("--q1-gap-slots", 30));
+            if !(min_sol >= 0.01 && min_sol <= 100.0) { bail!("--q1-min-sol must be 0.01..100 SOL"); }
+            if !(size >= 0.01 && size <= 10.0) { bail!("--q1-size-sol must be 0.01..10 SOL (the paper trade's size)"); }
+            if !(hours >= 1.0 && hours <= 240.0) { bail!("--q1-fresh-hours must be 1..240 hours (a wallet idle that long is forgotten)"); }
+            if !(1..=psq1::Q1_FREQ_AGE).contains(&bot_slots) || !(1..=psq1::Q1_FREQ_AGE).contains(&dip_slots) { bail!("--q1-bot-slots / --q1-dip-slots must be 1..{} slots", psq1::Q1_FREQ_AGE); }
+            if fresh_max as usize > psq1::Q1_K - 2 { bail!("--q1-fresh-max must be 0..{} earlier tokens", psq1::Q1_K - 2); }
+            if gap > 100_000 { bail!("--q1-gap-slots must be 0..100000 slots"); }
+            c.q1 = Some(psq1::Q1Cfg { min_sol: (min_sol * 1e9).round() as u64, age, bot_slots, dip_slots, fresh_max: fresh_max as u32, gap, size: (size * 1e9).round() as u64,
+                fresh_ns: (hours * 3.6e12).round() as u64, bots, state: arg("--q1-fresh-state"), fam: f2_wallets });
+        }
         // dip41: every value given; the state / the tier's flags need the ledger
         for f in DLFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         if !c.dl_on { if let Some(f) = DLFLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-dumper-ledger on"); } }
@@ -903,6 +957,9 @@ impl Cfg {
                 j["widedumper"]["qf2"] = serde_json::json!({"n": q.n, "score": q.score, "win": q.win, "filters": self.qf_filt.spec(), "mode": psdl::mode_str(self.qf_live)});
             }
         }
+        // dip42: only when on (off: dip41's record)
+        if let Some(f) = &self.f2 { j["fam2"] = f.json(); }
+        if let Some(q) = &self.q1 { j["q1"] = q.json(); }
         j
     }
 }
@@ -1969,7 +2026,9 @@ pub enum Cmd {
         /// dip38 (log-only): the window's PSM12-S1 verdict ({keep, why, ...}) for the realized record (None: the log off / unknown)
         s1: Option<serde_json::Value>,
         /// dip41: a WIDE-DUMPER / QF2 window's position: (kind, field, the whale's ledger values) for the realized record (None: neither)
-        wd: Option<(&'static str, &'static str, serde_json::Value)> },
+        wd: Option<(&'static str, &'static str, serde_json::Value)>,
+        /// dip42 (log-only): the position's fill "fam2" object for the realized record (None: the flag off / no fill kept)
+        f2: Option<serde_json::Value> },
     /// the background UNSOLD retry of a position (its sells keep the account open; PsMsg::UnsoldDone at its end)
     Unsold { mint: Pk, launch: Launch, land_slot: u64, last_qty: (u64, bool) },
     /// a Telegram alert (the tests keep its title; a run raises it at once, never through this)
@@ -2156,6 +2215,10 @@ pub struct PsLive {
     bd: Option<psbd::Bd>,
     /// dip41 the dumper ledger + the WIDE-DUMPER tier (None = off, the default; psdl.rs)
     wd: Option<psdl::Wd>,
+    /// dip42 FAM2 (LOG ONLY): the family's trades per mint (None = off, the default; psfam2.rs)
+    f2: Option<psfam2::Fam2>,
+    /// dip42 Q1 (LOG ONLY): the handle of its thread (None = off, the default; psq1.rs)
+    q1: Option<psq1::Q1Tap>,
 }
 
 impl PsLive {
@@ -2227,6 +2290,13 @@ impl PsLive {
                     if cfg.qf_live { "a T2-path window (kind \"qf2\")" } else { "logged (presend_live_qf2), nothing sent" }, cfg.whale_pct);
             }
         }
+        // dip42 FAM2 + Q1 (both LOG ONLY; None with them off): FAM2's book; Q1's own thread (its lists read, its start record)
+        let f2 = cfg.f2.clone().map(psfam2::Fam2::new);
+        if let Some(f) = &f2 {
+            eprintln!("DIP PRESEND LIVE FAM2 (dip42, LOG ONLY): \"fam2\" on every arm / skip / fill / realized record = the 2NUM family's wallets ({}) that traded the token in the last {} slots; nothing is withheld",
+                f.cfg.wallets.iter().map(|w| b58(w)[..8].to_string()).collect::<Vec<_>>().join(", "), f.cfg.slots);
+        }
+        let q1 = cfg.q1.clone().map(|c| psq1::Q1Tap::start(c, user, &out, false));
         arbx::feeds::own_fail_watch(user);
         // dip32: the creator histories' preload (the offline seed / the last run's state)
         if let Some(p) = &cfg.cr_state {
@@ -2378,7 +2448,7 @@ impl PsLive {
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd };
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1 };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
@@ -2386,6 +2456,8 @@ impl PsLive {
         p.bd_start();
         // dip41: the dumper ledger's start record (after the control file; nothing with it off)
         p.wd_start();
+        // dip42: FAM2's start record (nothing with it off)
+        p.f2_start();
         Ok(p)
     }
 
@@ -2607,6 +2679,8 @@ impl PsLive {
         // the observatory's (nothing without it)
         if self.rm.is_some() { self.rearm_slot(a.slot, a.t_rx, &launch_of, reactive_open); }
         for c in &x.creates { self.det.create(c.mint, a.slot, c.creator, c.user, x.mayhem); }
+        // dip42 Q1 (log-only): the creates to its thread (nothing with it off)
+        if let Some(q) = self.q1.as_mut() { for c in &x.creates { q.create(c.mint, a.slot, x.mayhem); } }
         // dip38: the launchers (the create tx's fee payer; nothing with the blocklist's launcher match and the logs off)
         if !x.creates.is_empty() && self.l38_launch_on() { self.l38_creates(&x.creates, a.tx.keys.first().copied(), a.slot); }
         // dip36 (log-only): FP-NOBOT's chain store takes the creates, then the trades, before any trigger decision (nothing without the flag)
@@ -2667,6 +2741,13 @@ impl PsLive {
             if self.bd.is_some() { self.bd_trade(&e.mint, &e.user, e.buy, e.sol, e.tok, a.slot, a.t_rx); }
             // dip41 the dumper ledger: every trade (before the detector: a trigger's lookup sees the buys resolved by its slot; nothing with it off)
             if self.wd.is_some() { self.wd_trade(e, a.slot, a.t_rx); }
+            // dip42 (log-only; nothing with them off): a family wallet's trade into FAM2's book (before any record of this trade); every
+            // trade to Q1's thread
+            if self.f2.is_some() { self.f2_trade(&e.mint, &e.user, a.slot); }
+            if let Some(q) = self.q1.as_mut() {
+                q.trade(psq1::Q1Trade { mint: e.mint, user: e.user, buy: e.buy, sol: e.sol, tok: e.tok, vsol: e.vsol, vtok: e.vtok, slot: a.slot, idx: x.index as u32, j: j as i32,
+                    sig: a.tx.sig, t: a.t_rx });
+            }
             evs.clear();
             self.det.trade(&t, &mut evs);
             // dip37c: the per-send blocklist's cached listed holder (a listed wallet's trade only; nothing without the flag)
@@ -2865,6 +2946,8 @@ impl PsLive {
             if let Some(v) = &s1v { r["s1"] = v.json(self.cfg.s1_parts, self.s1_live(false), self.cfg.spend, t.vsol, t.p()); }
             // dip39 (only with the gate on): the depth at the trigger's slot
             if let Some(j) = self.bd_json(&t.mint, t.s) { r["botdepth"] = j; }
+            // dip42 (log-only; only with the flag on): the 2NUM family on the token at the trigger's slot
+            if let Some(j) = self.f2_json(true, &t.mint, t.s) { r["fam2"] = j; }
             if let Some(f) = &f3 { r["f3"] = f.clone(); }
             if let Some(g) = &tags { r["tags"] = g.clone(); }
             // dip34 (log-only): seen / eqgrp / q4 (each only with its flag); then this skip into the seen book (cr_loss / quiet3_a)
@@ -2966,6 +3049,8 @@ impl PsLive {
         if let Some(v) = s1v { r["s1"] = v.json(self.cfg.s1_parts, self.s1_live(false), self.cfg.spend, t.vsol, t.p()); self.s1_arm(id, v); }
         // dip39 (only with the gate on): the depth at the trigger's slot (the first attempts' view)
         if let Some(j) = self.bd_json(&t.mint, t.s) { r["botdepth"] = j; }
+        // dip42 (log-only; only with the flag on): the 2NUM family on the token at the trigger's slot
+        if let Some(j) = self.f2_json(false, &t.mint, t.s) { r["fam2"] = j; }
         self.wh_arm(id, whale);
         self.hl_arm(id, &t.mint, &whale);
         if let Some(h) = &hlg { self.hl_note(&t.mint, h, false, false); }
@@ -3036,6 +3121,8 @@ impl PsLive {
         if let Some(j) = self.s1_fill(att.w, true) { rec["s1"] = j; }
         // dip39 (only with the gate on): the filling attempt's verdict at its send, the depth at the fill's slot
         if let Some(j) = self.bd_fill_json(att.bd, &t.mint, t.s) { rec["botdepth"] = j; }
+        // dip42 (log-only; only with the flag on): the 2NUM family on the token before our fill (kept for the realized record)
+        if let Some(j) = self.f2_fill_json(att.w, t) { rec["fam2"] = j; }
         // dip37: the filling attempt's fee arm and values (only with the A/B on)
         if let Some(f) = &att.fa { f.put(&mut rec, att.tip); }
         // dip27 (log-only): the deeper-limit lead's would-skip (T2: another wallet >= 6% at signing and a drop < 15% from the signing
@@ -3453,7 +3540,9 @@ impl PsLive {
         let s1 = self.s1_fill(p.w, false);
         // dip41: a wide window's position (its record says so; the values kept until now are let go)
         let wd = self.wd.as_mut().and_then(|d| d.wins.remove(&p.w)).map(|(k, v)| (k.key(), k.field(), v.json(k)));
-        self.exec(Cmd::Realized { pid: p.pid, w: p.w, mint: p.mint, buys, sells: p.sells.clone(), rearm: p.rearm, cr, ab, wh, hl, l38, s1, wd });
+        // dip42 (log-only): the fill's family view (None with the flag off)
+        let f2 = self.f2_realized(p.w);
+        self.exec(Cmd::Realized { pid: p.pid, w: p.w, mint: p.mint, buys, sells: p.sells.clone(), rearm: p.rearm, cr, ab, wh, hl, l38, s1, wd, f2 });
     }
 
     /// dip19: a Telegram alert (the tests keep its title instead: no raise while another test traps them)
@@ -3501,7 +3590,7 @@ impl PsLive {
                     tasks.fetch_sub(1, Ordering::SeqCst);
                 });
             }
-            Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38, s1, wd } => {
+            Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38, s1, wd, f2 } => {
                 let (rpc, out) = ((*self.rpc).clone(), self.out.clone());
                 // dip31: the circuit breaker sees every realized P&L (off: nothing)
                 let (sh, brk) = (self.sh.clone(), self.cfg.breaker);
@@ -3527,6 +3616,8 @@ impl PsLive {
                     if let Some(j) = s1 { rec["s1"] = j; }
                     // dip41: a wide window's position
                     if let Some((k, f, j)) = wd { rec["kind"] = k.into(); rec[f] = j; }
+                    // dip42 (log-only): the fill's family view
+                    if let Some(j) = f2 { rec["fam2"] = j; }
                     // dip37 (nothing with the fee A/B off)
                     if let (Some(z), Some(a)) = (&frz, &ab) { z.add(a.arm, a.grp, pnl); a.put(&mut rec); }
                     // dip37 the whale / dumper ledger: this position into its arm wallet's history (nothing with the ledger off)
@@ -3593,6 +3684,8 @@ impl PsLive {
         if self.bd.is_some() { self.bd_tick(slot_now); }
         // dip41: the dumper ledger's prunes and its state (nothing with it off)
         if self.wd.is_some() { self.wd_tick(slot_now); }
+        // dip42: FAM2's prune (nothing with it off)
+        if self.f2.is_some() { self.f2_tick(slot_now); }
         // dip36: the blocklist's reload check (a stat every ~10 s; nothing without the flag)
         if let Some(r) = self.bl.as_mut().and_then(|b| b.check(false)) {
             self.line(format!("  PRESEND LIVE BLOCKLIST {} {}", if r["ok"] == true { "reloaded:" } else { "NOT reloaded (the last good list stays):" }, r));
@@ -4025,7 +4118,8 @@ impl PsLive {
     pub fn status(&mut self) -> String {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
-            + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status();
+            + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status()
+            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -4207,6 +4301,9 @@ impl PsLive {
         if let Some(j) = self.s1_finish() { fin["s1"] = j; }
         if let Some(j) = self.bd_finish() { fin["botdepth"] = j; }
         if let Some(j) = self.wd_finish() { fin["widedumper"] = j; }
+        // dip42: only with them on (Q1: its thread saves the wallet history and answers)
+        if let Some(j) = self.f2_finish() { fin["fam2"] = j; }
+        if let Some(j) = self.q1.as_mut().and_then(|q| q.finish()) { fin["q1"] = j; }
         fin
     }
 
@@ -4360,6 +4457,9 @@ impl PsLive {
         let bd = cfg.bd.map(|g| psbd::Bd::open(g, cfg.bd_list.as_deref(), cfg.bd_state.as_deref(), &user));
         // dip41: the dumper ledger + the WIDE-DUMPER tier (as a run)
         let wd = cfg.dl_on.then(|| psdl::Wd::open(cfg.wd, cfg.wd_live, cfg.qf, cfg.qf_filt, cfg.qf_live, cfg.wd_size, cfg.dl_state.as_deref()));
+        // dip42: FAM2's book; Q1 inline (every message handled at once; no thread)
+        let f2 = cfg.f2.clone().map(psfam2::Fam2::new);
+        let q1 = cfg.q1.clone().map(|c| psq1::Q1Tap::start(c, user, &out, true));
         // dip38: the anti-bait log with the tests' queue (no task, no RPC)
         let l38 = pslog38::L38::new(&cfg, None).unwrap();
         let (atx, arx) = crossbeam_channel::unbounded();
@@ -4384,7 +4484,7 @@ impl PsLive {
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd }, atx, orx)
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1 }, atx, orx)
     }
 
     /// dip19 tests: the chain work queued so far (taken)
@@ -4489,6 +4589,11 @@ mod dip39_bd_tests;
 #[cfg(test)]
 #[path = "dip41_wd_tests.rs"]
 mod dip41_wd_tests;
+
+// dip42 (11-06 PKT): FAM2 (the 2NUM family on our windows' records) and the Q1 shadow log; both LOG ONLY, off by default = dip41
+#[cfg(test)]
+#[path = "dip42_tests.rs"]
+mod dip42_tests;
 
 #[cfg(test)]
 mod tests {

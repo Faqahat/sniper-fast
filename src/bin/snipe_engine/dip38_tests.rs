@@ -133,7 +133,7 @@ impl Ctx {
 /// a run's Cmds with the dip38 part taken out of Realized
 fn cmds_wo38(v: &[Cmd]) -> Vec<String> {
     v.iter().map(|c| match c.clone() {
-        Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, s1, .. } => format!("{:?}", Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38: None, s1, wd: None }),
+        Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, s1, .. } => format!("{:?}", Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38: None, s1, wd: None, f2: None }),
         x => format!("{x:?}"),
     }).collect()
 }
