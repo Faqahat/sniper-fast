@@ -124,6 +124,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "signal-hook",
+ "snipe-guard",
  "socket2 0.5.10",
  "tokio",
  "tokio-stream",
@@ -1649,6 +1650,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 
 [[package]]
+name = "snipe-guard"
+version = "0.2.0"
+dependencies = [
+ "solana-define-syscall",
+]
+
+[[package]]
 name = "socket2"
 version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1667,6 +1675,12 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "solana-define-syscall"
+version = "5.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8506988b0997022c4f2801985d9c4dccfb18c16e6a38f30390a47d54efeca805"
 
 [[package]]
 name = "spki"
