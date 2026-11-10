@@ -22,7 +22,7 @@ All development happens on the host (`rewind`); servers only receive built binar
 |---|---|
 | `src/` | The engine. Main binary `snipe_engine` (`src/bin/snipe_engine.rs` + `src/bin/snipe_engine/`), plus `snipe_fire`, `snipe_shadow`, `feed_race`, `quiet_book`, `obs_soak`, `apex_probe` |
 | `program/` | On-chain program and venue test harness |
-| `tests/`, `testdata/` | Tests and fixtures. Some fixtures (`tests/fixtures/*.b64`, `apex_probe/testdata`) were lost, so `cargo check --all-targets` fails; `cargo check` / `cargo build` pass |
+| `tests/`, `testdata/` | Tests and fixtures (fixtures lost in the 11-09 backup were restored from dip37b). Only `apex_probe`'s two sample `.jsonl` files are gone, so `cargo check --all-targets` fails on that one old probe binary; the engine and its tests check clean |
 | `ops/` | Server-side scripts, launchers, configs and research notes (same relative paths as `/root` on the servers). Key folders: `ops/prod/` (launchers `run_dip_prod.sh.*`, edge configs), `ops/dip/` (dip reports, speed studies), `ops/strategies/presend/` (filters, FP-NOBOT preload `flatperfect/fp_preload.py`, briefs `prevent/forward/`), `ops/collect/` (tape recorder and backfill) |
 | `deploy/` | Deploy configs (secrets live in `deploy/.env` on each server, never committed) |
 | `config/` | Old engine/feed/probe configs. `probe.toml`, `probe_shadow.toml`, `probe_tpu.toml` stay at the root because `src/` refers to them |
