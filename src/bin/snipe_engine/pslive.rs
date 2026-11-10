@@ -150,6 +150,11 @@ const F2FLAGS: [&str; 3] = ["--presend-live-fam2", "--presend-live-fam2-wallets"
 const Q1FLAGS: [&str; 11] = ["--q1-log", "--q1-bots", "--q1-fresh-state", "--q1-min-sol", "--q1-age-slots", "--q1-bot-slots", "--q1-dip-slots", "--q1-fresh-max",
     "--q1-gap-slots", "--q1-size-sol", "--q1-fresh-hours"];
 
+/// dip43 BUILDER B (send path + exits; ps43_b.rs): its flags (each needs --presend-live; every one OFF by default = dip42)
+const B43FLAGS: [&str; 11] = ["--presend-live-reroute", "--presend-live-single-token", "--presend-live-skip-clients", "--presend-live-fee-tier", "--presend-live-start-ms",
+    "--presend-live-exit-lots", "--presend-live-exit-lots-ab", "--presend-live-exit-lots-kinds", "--presend-live-lot2-cu-price-micro", "--presend-live-timer-sell-cu-price-micro",
+    "--presend-live-timer-sell-ab"];
+
 const RFLAGS: [&str; 5] = ["--presend-live-rearm", "--presend-live-rearm-size-sol", "--presend-live-rearm-gap-slots", "--presend-live-rearm-quiet-stop",
     "--presend-live-rearm-r5-skip"];
 
@@ -220,6 +225,11 @@ pub mod psfam2;
 // dip42 Q1: the quiet-token fresh-wallet big-buy reactive trigger as a shadow log (LOG ONLY, its own thread; off unless --q1-log on)
 #[path = "psq1.rs"]
 pub mod psq1;
+
+// dip43 BUILDER B: cap / re-route / single token / skip clients (B1), fee tier (B2), two-lot exit (B3), cheap timer sells (B4), window
+// start (B5); every item OFF by default (= dip42)
+#[path = "ps43_b.rs"]
+pub mod ps43_b;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -504,6 +514,8 @@ pub struct Cfg {
     pub f2: Option<psfam2::F2Cfg>,
     /// dip42 Q1 (LOG ONLY; None = off): --q1-log on, --q1-bots FILE, --q1-fresh-state FILE and the rule's thresholds (psq1.rs)
     pub q1: Option<psq1::Q1Cfg>,
+    /// dip43 BUILDER B's items (ps43_b.rs; Default = all off = dip42)
+    pub b43: ps43_b::B43Cfg,
 }
 
 impl Cfg {
@@ -534,6 +546,8 @@ impl Cfg {
         let arg_u64 = |f: &str, d: u64| arg(f).and_then(|s| s.parse::<u64>().ok()).unwrap_or(d);
         let arg_u64_opt = |f: &str| arg(f).and_then(|s| s.parse::<u64>().ok());
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
+        // dip43 B: its flags need --presend-live too
+        ps43_b::needs_presend_live(argv)?;
         if !has("--presend-live") {
             if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
@@ -665,6 +679,8 @@ impl Cfg {
             // dip42 (LOG ONLY; set below)
             f2: None,
             q1: None,
+            // dip43 B (every item off unless its flag)
+            b43: ps43_b::B43Cfg::from_argv(argv)?,
         };
         // dip42 FAM2 + Q1 (both LOG ONLY; off unless their switch): every value given; the parameters need their switch
         for f in F2FLAGS.iter().chain(Q1FLAGS.iter()) { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
@@ -960,6 +976,8 @@ impl Cfg {
         // dip42: only when on (off: dip41's record)
         if let Some(f) = &self.f2 { j["fam2"] = f.json(); }
         if let Some(q) = &self.q1 { j["q1"] = q.json(); }
+        // dip43 B: only when an item is on (off: dip42's record)
+        if self.b43.any_on() { j["b43"] = self.b43.json(); }
         j
     }
 }
@@ -1219,6 +1237,8 @@ fn spawn_writer(log: Arc<DipLog>) -> crossbeam_channel::Sender<Out> {
 /// THE SENDER (its own thread): the armed windows' attempts, k per slot, evenly spaced
 fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, atx: crossbeam_channel::Sender<Att>) {
     let mut global = send::TokenBucket::new(sc.cfg.max_per_sec as f64, (sc.cfg.max_per_sec as u32 / 4).max(1));
+    // dip43 B2: the fee tier's per window-slot try counter (unused with the tier off)
+    let mut tctr = ps43_b::TierCtr::default();
     let (mut body, mut req) = (Vec::with_capacity(2048), Vec::with_capacity(2400));
     let mut warned: FxHashMap<String, u64> = FxHashMap::default();
     // dip39 the bot depth gate's record limiter (window -> the slot of its last withheld record)
@@ -1297,18 +1317,25 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let deadline = (slot + sc.cfg.deadline_slots).min(w.en_slot);
             if deadline < slot { sh.skip("window_over"); continue; }
             let (leader, client) = lat::leader_of(slot).unwrap_or_default();
+            // dip43 B1: no pre-send try for a listed leader client (empty list: never)
+            if sc.cfg.b43.skip_client(&client) { sh.skip("skip_client"); continue; }
             let class = lat::class(&client);
             let rkey = if sc.routes.contains_key(class) { class } else { "default" };
             let Some(rs) = sc.routes.get_mut(rkey) else { sh.skip("no_route"); continue };
             if rs.is_empty() { sh.skip("no_route"); continue; }            // parse_routes refuses empty classes; never a modulo by zero
-            let ri = (w.n as usize + w.id as usize) % rs.len();
+            let ri0 = (w.n as usize + w.id as usize) % rs.len();
+            // dip43 B1: re-route OFF = exactly take_rate on the planned lane (dip42); ON: a lane-refused try takes the class's next lane with room
+            let ri = match ps43_b::pick_route(rs.len(), ri0, sc.cfg.b43.reroute, |j| { let r = &mut rs[j]; take_rate(&mut global, &mut r.bucket, now, || r.path.fast_budget()) }) {
+                Ok((i, _)) => i, Err(why) => { sh.skip(why); continue; } };
+            let path0 = (ri != ri0).then(|| rs[ri0].path.name.clone());
             let r = &mut rs[ri];
-            if let Err(why) = take_rate(&mut global, &mut r.bucket, now, || r.path.fast_budget()) { sh.skip(why); continue; }
             // dip28: the deeper limit while another big holder is in (off: dip27's drop)
             let drop = att_drop(&w, &sc.cfg);
             let Some((min_out, lim, _)) = att_limit(&w, drop) else { sh.skip("untradeable"); continue };
             // dip37: this attempt's CU limit / price / tip: its window's fee arm, the client rule on this attempt's leader (off: the run's own)
             let (cu_limit, cu_price, tip, fa) = psfeeab::att_fee(&sc.cfg, w.fab, &client, r.path.tip(0));
+            // dip43 B2: the fee tier (off: the values above unchanged)
+            let (cu_price, fa, tier) = ps43_b::tier_apply(&sc.cfg.b43, &mut tctr, w.id, slot, &client, cu_price, fa);
             let (mut ixs, roles) = att_ixs_fee(sc.user, &w, min_out, cu_limit, cu_price, guard_ix_enc(sc.guard, deadline), tip);
             // dip16 C1 (--loaded-data-limit): the limit LAST (the roles' guard / ATA / buy / tip indices stay dip15's); nothing without it
             speed16::add_ll(&mut ixs, speed16::loaded_limit());
@@ -1325,9 +1352,12 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let mut a = Att { w: w.id, n: w.n, mint: w.mint, sig, tag, path: r.path.name.clone(), client: client.clone(), slot, deadline, lim, min_out, p_sign: w.vsol as f64 / w.vtok.max(1) as f64,
                 sign_pos: w.pos, t_send, roles, tip: tip.map_or(0, |t| t.1), wst: "dry", ob6: w.ob6, grd: w.grd, fa, bd: bdv };
             // registered BEFORE the write: the main loop knows the signature before its landing can arrive
+            // dip43 B2: a tiered try's failed fee for the main loop's fallback (nothing with the tier off)
+            if tier.is_some_and(|t| t.on) { ps43_b::tier_fee_note(&sig, psfeeab::fail_fee(cu_limit, cu_price)); }
             if !sc.cfg.dry {
                 let _ = atx.send(a.clone());
-                a.wst = send_one(r, &raw, tag, &sc.handle, &mut body, &mut req);
+                // dip43 B1 --presend-live-single-token on: the async send takes no second rate token (off: dip42's send_one)
+                a.wst = if sc.cfg.b43.single_token { ps43_b::send_one_prepaid(r, &raw, tag, &sc.handle, &mut body, &mut req) } else { send_one(r, &raw, tag, &sc.handle, &mut body, &mut req) };
                 sh.sent.fetch_add(1, Ordering::Relaxed);
             } else { sh.dry.fetch_add(1, Ordering::Relaxed); }
             let t2 = arbx::fast::mono_ns();
@@ -1345,6 +1375,9 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             if let Some(f) = &a.fa { f.put(&mut rec, a.tip); }
             // dip39: the bot depth verdict (only with the gate on; "ok": false = no list, sent)
             if let (Some(v), Some(g)) = (bdv, sc.cfg.bd.as_ref()) { rec["botdepth"] = v.json(g); }
+            // dip43 B1 / B2: only when re-routed / with the tier on
+            if let Some(p0) = path0 { rec["path_orig"] = p0.into(); }
+            if let Some(t) = tier { rec["tier"] = t.json(); }
             let _ = out.send(Out::Rec(rec));
         }
         // idle: 5 ms steps; armed: 0.5 ms (the pace's resolution)
@@ -2006,7 +2039,9 @@ pub enum Cmd {
     /// sell round `round` of position `pid`: `known` exact tokens (else a `guess`), confirmed reads from `land_slot` on;
     /// `keep_ata`: the account stays open (every pre-send sell); `read_first`: a confirmed read before the first send (never set by
     /// the probe: its sells go out at once, M4-1); `derived`: the launch's accounts are resolved from the create tx first
-    Sell { mint: Pk, pid: u64, round: u32, launch: Launch, derived: bool, known: Option<u64>, guess: u64, land_slot: u64, read_first: bool, keep_ata: bool },
+    Sell { mint: Pk, pid: u64, round: u32, launch: Launch, derived: bool, known: Option<u64>, guess: u64, land_slot: u64, read_first: bool, keep_ata: bool,
+        /// dip43 B3 / B4: a lot's part / an exit's own CU price (None: dip42's sell)
+        x43: Option<SellX> },
     /// a CONFIRMED read of our token account of `mint` from a node at slot >= `min_slot`; `n` = reads of it so far
     Read { mint: Pk, min_slot: u64, why: Why, n: u32 },
     /// close our (confirmed empty) token account of `mint`: the rent back
@@ -2219,6 +2254,8 @@ pub struct PsLive {
     f2: Option<psfam2::Fam2>,
     /// dip42 Q1 (LOG ONLY): the handle of its thread (None = off, the default; psq1.rs)
     q1: Option<psq1::Q1Tap>,
+    /// dip43 B: the lots exits under way, the lots mode, counters (empty with its flags off)
+    b43: ps43_b::B43St,
 }
 
 impl PsLive {
@@ -2368,6 +2405,8 @@ impl PsLive {
             if cfg.shape_log { format!("{}SHAPE LEDGER {}h <= -{} SOL", if cfg.insider_log { "; " } else { "" }, pslog38::SH_WIN_NS / 3_600_000_000_000, pslog38::SH_LOSS as f64 / 1e9) } else { String::new() }) } else { line };
         // dip39: also at the END, only when on
         let line = match &cfg.bd { Some(g) => format!("{line} | BOT DEPTH {} {}", if cfg.bd_live { "LIVE" } else { "LOG" }, g.desc()), None => line };
+        // dip43 B: one line per item (on or off), before the main line
+        for l in cfg.b43.desc_lines(cfg.max_per_sec, cfg.path_max_per_sec, cfg.live_ms) { eprintln!("{l}"); }
         eprintln!("{line}");
         let thread = {
             let (sh, out) = (sh.clone(), out.clone());
@@ -2448,7 +2487,8 @@ impl PsLive {
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1 };
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1,
+            b43: ps43_b::B43St::default() };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
@@ -2458,6 +2498,8 @@ impl PsLive {
         p.wd_start();
         // dip42: FAM2's start record (nothing with it off)
         p.f2_start();
+        // dip43 B: the control file's "exit_lots", its start record (nothing with its items off)
+        p.b43_start();
         Ok(p)
     }
 
@@ -2542,7 +2584,8 @@ impl PsLive {
         let att = att.clone();
         let of = arbx::feeds::own_fail_take(&a.tx.sig);
         // dip37: an attempt signed with arm B's values is charged on them (off: the run's own, dip36's)
-        let ff = att.fa.as_ref().map_or_else(|| self.cfg.fail_fee(), |f| f.fail_fee());
+        // dip43 B2: a tiered try (the fee A/B off) on its signed price (nothing noted with the tier off)
+        let ff = att.fa.as_ref().map_or_else(|| ps43_b::tier_fail_fee(&att.sig).unwrap_or_else(|| self.cfg.fail_fee()), |f| f.fail_fee());
         let (idx, fee, err) = match &of { Some(f) => (Some(f.index), f.fee, f.err.clone()), None => (None, ff, "?".to_string()) };
         let res = if of.is_some() { pl::classify(&err, &att.roles) } else { "failed_unknown".to_string() };
         self.st.fees += fee;
@@ -2707,6 +2750,8 @@ impl PsLive {
                     let mut r = serde_json::json!({"ev": "presend_live_sell_land", "w": p.w, "mint": b58(&e.mint), "sig": bs58::encode(&a.tx.sig).into_string(), "slot": a.slot, "idx": x.index,
                         "t": a.t_rx, "sol": e.sol, "fee": x.fee, "pid": p.pid, "round": p.round});
                     if p.rearm { r["kind"] = "rearm".into(); }
+                    // dip43 B3: which lot (only a lots exit's position)
+                    if !self.b43.lots.is_empty() { if let Some(l) = self.b43_land_lot(&e.mint, e.tok) { r["lot"] = l.into(); } }
                     self.rec(r);
                 }
             }
@@ -2813,6 +2858,8 @@ impl PsLive {
                         if let Some(why) = why { let m = e.mint; self.exit(&m, why, a.slot, v, a.t_rx); }
                     }
                 }
+                // dip43 B3: a stop-loss value while lot 2 waits sells lot 2 at once (nothing without a lots exit under way)
+                if !self.b43.lots.is_empty() { self.b43_lot2_stop(&e.mint, e.vsol, e.vtok, t.fr(), a.slot); }
             }
         }
         self.tick(slot_now, first);
@@ -3008,7 +3055,8 @@ impl PsLive {
         let id = self.wid;
         // the window's last slot on the block-position clock (the shadow's en0 = trigger + live_ms + W slots)
         let en_slot = ((t.a() + self.cfg.live_ms + self.cfg.window_slots as f64 * pl::SMS) / pl::SMS).floor() as u64;
-        let st_ns = t_top.unwrap_or_else(arbx::fast::mono_ns) + (self.cfg.live_ms * 1e6) as u64;
+        // dip43 B5 --presend-live-start-ms: the first try's offset (off: --presend-live-ms, dip42); the end slot above unchanged
+        let st_ns = t_top.unwrap_or_else(arbx::fast::mono_ns) + (self.cfg.b43.start_ms.unwrap_or(self.cfg.live_ms) * 1e6) as u64;
         let slot_ns = arbx::feeds::entries::SLOT_US.load(Ordering::Relaxed) * 1_000;
         // dip36 live gate: the window's verdict cell (shared with the FP thread; None without the log)
         let fpg = self.fp.as_ref().map(|_| Arc::new(pslog36::Gate::default()));
@@ -3251,7 +3299,8 @@ impl PsLive {
         if p.rearm { r["kind"] = "rearm".into(); }
         let l = format!("  PRESEND LIVE EXIT {} {why} slot {slot} (held {} slots){}{}", b58(mint), slot as i64 - p.land.0 as i64, if val.is_nan() { String::new() } else { format!(" value x{val:.3}") },
             if p.rearm { " [rearm]" } else { "" });
-        self.sell_round(mint);
+        // dip43 B3 / B4: lot 1 of a two-lot exit / a cheap timer sell (false with their flags off: dip42's sell_round)
+        if !self.b43_exit(mint, why, slot, &mut r) { self.sell_round(mint); }
         self.rec(r);
         self.line(l);
     }
@@ -3260,7 +3309,10 @@ impl PsLive {
     /// the latest of their landings), the token account KEPT OPEN (the attempts' guard). Every round sends at once from its decision
     /// (no RPC first: M4-1): a buy left for a follow-up round landed after the previous round's last confirmed read, so that round
     /// never saw (nor sold) its tokens
-    fn sell_round(&mut self, mint: &Pk) {
+    fn sell_round(&mut self, mint: &Pk) { self.sell_round_x(mint, None) }
+
+    /// `sell_round` with dip43's per-exit sell options (`x` None: dip42's round)
+    fn sell_round_x(&mut self, mint: &Pk, x: Option<SellX>) {
         let Some(p) = self.pos.get_mut(mint) else { return };
         p.round += 1;
         let round = p.round;
@@ -3268,7 +3320,7 @@ impl PsLive {
         for b in p.buys.iter_mut().filter(|b| b.round == 0) { b.round = round; tokens += b.tokens; land = land.max(b.slot); }
         p.selling = true;
         let c = Cmd::Sell { mint: *mint, pid: p.pid, round, launch: p.launch.clone(), derived: p.derived, known: (tokens > 0).then_some(tokens), guess: tokens, land_slot: land,
-            read_first: false, keep_ata: true };
+            read_first: false, keep_ata: true, x43: x };
         self.exec(c);
     }
 
@@ -3313,6 +3365,8 @@ impl PsLive {
 
     /// dip19 (fix 2): a sell round of position `pid` finished
     fn on_sold(&mut self, mint: Pk, pid: u64, round: u32, out: SellOut) {
+        // dip43 B3: a lots exit's answers (lot 1's / lot 2's while lot 1's loop runs) are taken there; nothing without a lots exit under way
+        let (round, out) = if self.b43.lots.is_empty() { (round, out) } else { match self.b43_sold(mint, pid, round, out) { Some(x) => x, None => return } };
         let Some(p) = self.pos.get_mut(&mint).filter(|p| p.pid == pid && p.round == round && p.selling) else {
             // never expected (one sell per position at a time, rounds in order): recorded, nothing changes
             self.rec(serde_json::json!({"ev": "presend_live_sold_stale", "mint": b58(&mint), "pid": pid, "round": round, "sold_at": out.sold_at, "sell_sigs": out.sigs}));
@@ -3556,7 +3610,7 @@ impl PsLive {
         if let Some(q) = self.q.as_mut() { q.push(c); return; }
         let (user, tasks) = (self.user, self.tasks.clone());
         match c {
-            Cmd::Sell { mint, pid, round, launch, derived, known, guess, land_slot, read_first, keep_ata } => {
+            Cmd::Sell { mint, pid, round, launch, derived, known, guess, land_slot, read_first, keep_ata, x43 } => {
                 let Some(path) = self.path.clone() else { self.line(format!("  PRESEND LIVE {}: NO SEND PATH: sell by hand (--sell-held {})", b58(&mint), b58(&mint))); return };
                 let (key, rpc, mtx) = (self.key.clone(), self.rpc.clone(), self.mtx.clone());
                 tasks.fetch_add(1, Ordering::SeqCst);
@@ -3566,7 +3620,7 @@ impl PsLive {
                     let mut o = SellOpts::main();
                     o.read_first = read_first;
                     o.keep_ata = keep_ata;
-                    let out = sell_until_zero(&key, user, &rpc, &path, &launch, &ata, known, guess, land_slot, o).await;
+                    let out = sell_until_zero_x(&key, user, &rpc, &path, &launch, &ata, known, guess, land_slot, o, x43).await;
                     let _ = mtx.send(Msg::Ps(PsMsg::Sold(mint, pid, round, out)));
                     tasks.fetch_sub(1, Ordering::SeqCst);
                 });
@@ -3716,6 +3770,8 @@ impl PsLive {
             time_exit_due(slot_now, p.land.0, self.cfg.exit_slots, p.opened.elapsed().as_millis() as u64, self.cfg.exit_ms).map(|w| (p.mint, w))
         }).collect();
         for (m, why) in due { self.exit(&m, why, slot_now, f64::NAN, arbx::feeds::clock::now_ns()); }
+        // dip43 B3: lot 2 of the lots exits whose slot came; the control file's "exit_lots" (nothing without --presend-live-exit-lots)
+        if self.cfg.b43.lots.is_some() { self.b43_tick(slot_now); }
         // attempts not seen by their deadline + 3 slots (or 6 s on the wall clock: the feed may be down)
         while let Some(&(dl, sig, at)) = self.order.front() {
             if !(slot_now > dl + 3 || at.elapsed() > Duration::from_secs(6)) { break; }
@@ -4119,7 +4175,7 @@ impl PsLive {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status()
-            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default();
+            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.b43_status();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -4304,6 +4360,8 @@ impl PsLive {
         // dip42: only with them on (Q1: its thread saves the wallet history and answers)
         if let Some(j) = self.f2_finish() { fin["fam2"] = j; }
         if let Some(j) = self.q1.as_mut().and_then(|q| q.finish()) { fin["q1"] = j; }
+        // dip43 B: only with an item on
+        if let Some(j) = self.b43_finish() { fin["b43"] = j; }
         fin
     }
 
@@ -4484,7 +4542,8 @@ impl PsLive {
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1 }, atx, orx)
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1,
+            b43: ps43_b::B43St::default() }, atx, orx)
     }
 
     /// dip19 tests: the chain work queued so far (taken)
@@ -4594,6 +4653,12 @@ mod dip41_wd_tests;
 #[cfg(test)]
 #[path = "dip42_tests.rs"]
 mod dip42_tests;
+
+// dip43 BUILDER B (11-10): cap / re-route / single token / skip clients, fee tier, two-lot exit, cheap timer sells, window start
+// (ps43_b.rs); off by default = dip42
+#[cfg(test)]
+#[path = "dip43_b_tests.rs"]
+mod dip43_b_tests;
 
 #[cfg(test)]
 mod tests {
