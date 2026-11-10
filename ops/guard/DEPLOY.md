@@ -145,3 +145,13 @@ The public devnet faucet was closed (`requestAirdrop`: "The RPC faucet is closed
 the full flow was rehearsed on a local `solana-test-validator` (agave 4.4.0, SBPF v3 active) with throwaway keys
 (`~/sniper-data/plan1110/builder_c/`): deploy → hand-over to the cold key → verify → smoke → allowlist init / add / list / remove.
 Script `ops/guard/rehearse_localnet.sh`, transcript `ops/guard/rehearsal_localnet.txt` (REHEARSAL PASS). A devnet run needs only a funded devnet payer: the same commands with `--cluster devnet`.
+
+## MAINNET DEPLOYMENT (11-10 ~20:05 PKT)
+- Program id **CYBERjpcrxMLkZyuvP3D3aEKpvuTKHiwwU8cvT5TudiZ** (owner's vanity key); programdata ABmSK92cvRyZf69FJGRFssGNqiRzJTLbGfwyB46y78D9,
+  deployed slot 467762257, tx 5s9SD7PW9kLxqHVjYTtW6P4a5tobD7edALZDSgNZ4E4edJKZTM3W6MhpR5HoJtZED4R9Na5xF3jFZpuecp5wFfe4.
+- .so sha256 eb08c504a51b865f8590fa4aaf097ce8be01d496105f0f3b74134866913e4266 (15,776 bytes): VERIFY PASS (on-chain bytes = build).
+- Upgrade authority **7RbmHNNHMvByKUyzJAy8xSpo4Getk7iUDm4RW7H6Ln9T** (= the payer; owner's choice; the owner removes the key files from rewind after
+  the deploy, so it is cold from then on). Payer balance after: 0.118 SOL (0.0810 locked in programdata + 0.0008 program account; no buffer left).
+- SMOKE PASS (simulation) for AMS EgxfYgEb…, FRA 2g7rYv7y…, FRZ FRZh63L6…: pass ~850 CU; deadline / floors / other signer / not signing abort
+  with their opaque codes, decoded.
+- Engine flag: `--presend-live-guard-program CYBERjpcrxMLkZyuvP3D3aEKpvuTKHiwwU8cvT5TudiZ`.

@@ -1,6 +1,6 @@
 # r76: snipe-guard flags (dip43 C2) — the owner's choice is open
 
-Prerequisites: the program is deployed on mainnet, `sg_ops verify` and `sg_ops smoke` PASS (ops/guard/DEPLOY.md), and `<PROGRAM_ID>` is the
+Prerequisites: the program is deployed on mainnet, `sg_ops verify` and `sg_ops smoke` PASS (ops/guard/DEPLOY.md), and `CYBERjpcrxMLkZyuvP3D3aEKpvuTKHiwwU8cvT5TudiZ` is the
 id the deploy printed. The engine accepts the id ONLY from the flag. Without any of these flags the run is dip42's (Lighthouse deadline,
 byte for byte). Rollback = drop the flags (or `--presend-live-guard off`) and restart.
 
@@ -12,7 +12,7 @@ add it to the allowlist PDA and append `--presend-live-guard-allowlist <PDA>` (e
 Append to the r76 command:
 
 ```
---presend-live-guard deadline --presend-live-guard-program <PROGRAM_ID> --presend-live-guard-ab on
+--presend-live-guard deadline --presend-live-guard-program CYBERjpcrxMLkZyuvP3D3aEKpvuTKHiwwU8cvT5TudiZ --presend-live-guard-ab on
 ```
 
 - Odd windows: snipe-guard with the same slot deadline only; even windows: Lighthouse (dip42). Fills, fees, exits unchanged.
@@ -27,7 +27,7 @@ Append to the r76 command:
 Append to the r76 command:
 
 ```
---presend-live-guard holders --presend-live-guard-program <PROGRAM_ID> --presend-live-guard-holders 6:0.9:1:1.0 --presend-live-guard-max-age-ms 2000
+--presend-live-guard holders --presend-live-guard-program CYBERjpcrxMLkZyuvP3D3aEKpvuTKHiwwU8cvT5TudiZ --presend-live-guard-holders 6:0.9:1:1.0 --presend-live-guard-max-age-ms 5000
 ```
 
 (`6:0.9:1:1.0` and `2000` are the defaults; written out so the command shows them. Add `--presend-live-guard-ab on` to keep a
@@ -53,3 +53,7 @@ The engine refuses to start unless: the program account is executable; a try wit
 one 50 behind fails at the guard with the decoded deadline code (holders: two empty floors fail with the floors code); the wallet is
 compiled in or the allowlist flag is given. Look for `GUARD verified on chain (simulated): …` and the banner line
 `GUARD (dip43 snipe-guard) …` in the start log (with no flag the banner says `GUARD (dip43 snipe-guard) off …`).
+
+## 11-10 update
+- Deployed: id CYBERjpcrxMLkZyuvP3D3aEKpvuTKHiwwU8cvT5TudiZ (see DEPLOY.md).
+- attack75 study: use max-age **5000** ms for holders mode (2000 would have missed the r75 Gt5xJCmX rug: snapshot 3.2 s old).
