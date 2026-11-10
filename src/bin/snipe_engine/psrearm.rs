@@ -184,6 +184,8 @@ impl PsLive {
     fn rearm_skip(&mut self, why: &'static str, mint: &Pk, dump: &RDump, extra: serde_json::Value) {
         if let Some(rm) = self.rm.as_mut() { *rm.st.skips.entry(why).or_default() += 1; }
         let mut r = serde_json::json!({"ev": "presend_live_skip", "kind": "rearm", "why": why, "mint": b58(mint), "dump": dump.json()});
+        // dip39 (only with the gate on): the depth now
+        if let Some(j) = self.bd_json(mint, self.sh.slot.load(Ordering::Relaxed)) { r["botdepth"] = j; }
         if let (Some(o), serde_json::Value::Object(x)) = (r.as_object_mut(), extra) { for (k, v) in x { o.insert(k, v); } }
         self.rec(r);
     }
@@ -391,7 +393,7 @@ impl PsLive {
         // dip37: the window's fee arm, once, now (None with the fee A/B off)
         let fab = self.fab_assign(id);
         self.sh.wins.lock().unwrap().push(SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::new(st_ns, k, slot_ns), n: 0, done: false,
-            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&mint) });
+            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&mint), bd: self.bd_snap(&mint) });
         self.armed.insert(mint, id);
         {
             let tp = &mut self.tapes.entry(mint).or_insert_with(|| (VecDeque::new(), 0)).0;
@@ -427,6 +429,8 @@ impl PsLive {
         if let Some((nd, mx)) = self.h2.as_ref().map(|h| h.view(&mint, dump.tr.s, dump.tr.i)) { psh2::fields(&mut r, nd, mx, true, 0, spend); }
         // dip38 PSM12-S1 (log only): the holders check's verdict on the arm; the window keeps it for its fill / realize
         if let Some(v) = s1 { r["s1"] = v.json(self.cfg.s1_parts, self.s1_live(true), spend, dump.tr.vsol, dump.tr.p()); self.s1_arm(id, v); }
+        // dip39 (only with the gate on): the depth at the arm's slot (the first attempts' view)
+        if let Some(j) = self.bd_json(&mint, arm_slot) { r["botdepth"] = j; }
         // dip34 (log-only): seen / eqgrp / q4 keyed on the dumper (each only with its flag)
         let dumper = dump.tr.user;
         self.log34(&mut r, &mint, &dumper, chk_slot, chk_t);

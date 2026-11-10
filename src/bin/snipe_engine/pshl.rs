@@ -12,7 +12,7 @@
 //                                            (the whale ledger's mechanism: the arm's holder keys each get the paper position)
 //   LEARNING: a position's keys = the holders >= PCT% at its arm and at its fill (the whale / dumper and we excluded; the replay's arm holders +
 //     landing holders); its realized P&L is added to every key ([n, sum], best = the largest single position)
-//   --presend-live-ledger-control PATH        {"whale": "live"|"log", "holder": "live"|"log"} re-read every ~10 s (the fpnb_control pattern): in
+//   --presend-live-ledger-control PATH        {"whale": "live"|"log", "holder": "live"|"log"} re-read every ~10 s (dip39: + "botdepth") (the fpnb_control pattern): in
 //                                            "log" the verdict is still computed and logged (wh_would / hl_would on the arm record), nothing is
 //                                            skipped; a bad / missing file keeps the last good modes; every change is a presend_live_ledger_mode
 //                                            record and a line. Without the file both ledgers are live (as their flags say)
@@ -161,8 +161,8 @@ impl PsLive {
         if let Some(c) = self.hls.ctl.as_mut() { c.2 = Instant::now(); }
         if !force && mt == mt0 { return; }
         if let Some(c) = self.hls.ctl.as_mut() { c.1 = mt; }
-        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| Ok((ctl_parse(&b)?, ctl_parse_s2(&b)?, ctl_parse_bls(&b)?, ctl_parse_s1(&b)?))) {
-            Ok((m, s2, bls, s1)) => {
+        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| Ok((ctl_parse(&b)?, ctl_parse_s2(&b)?, ctl_parse_bls(&b)?, ctl_parse_s1(&b)?, psbd::ctl_parse_bd(&b)?))) {
+            Ok((m, s2, bls, s1, bd)) => {
                 // dip37c "blocklist_send": the per-send blocklist live / log (only with the blocklist's per-send check)
                 let bl_old = self.sh.bl_send_live.load(Ordering::SeqCst);
                 let bl_new = match bls { Some(x) if self.cfg.blocklist_send => x, _ => bl_old };
@@ -177,7 +177,11 @@ impl PsLive {
                 // dip38 "s1": PSM12-S1's gate live = the start flag's kinds (both when the flag is off), log = off; it needs --presend-live-s1-log on
                 let s1_old = self.s1.mode;
                 let s1_new = match s1 { Some(live) if self.cfg.s1_log => if live { if self.cfg.s1_live != 0 { self.cfg.s1_live } else { 3 } } else { 0 }, _ => s1_old };
-                if old == m && s2_new == s2_old && bl_new == bl_old && s1_new == s1_old { return; }
+                // dip39 "botdepth": the bot depth gate live / log (only with the gate on; else ignored)
+                let bd_old = self.sh.bd.live.load(Ordering::SeqCst);
+                let bd_new = match bd { Some(x) if self.cfg.bd.is_some() => x, _ => bd_old };
+                if old == m && s2_new == s2_old && bl_new == bl_old && s1_new == s1_old && bd_new == bd_old { return; }
+                self.sh.bd.live.store(bd_new, Ordering::SeqCst);
                 self.hls.live = m;
                 if s1_new != s1_old { self.s1.mode = s1_new; self.s1.ctl_changes += 1; }
                 self.sh.bl_send_live.store(bl_new, Ordering::SeqCst);
@@ -191,10 +195,13 @@ impl PsLive {
                 if self.cfg.blocklist_send { r["blocklist_send"] = s(bl_new).into(); r["was"]["blocklist_send"] = s(bl_old).into(); }
                 if self.cfg.s1_log { r["s1"] = pslog36::mode_str(s1_new).into(); r["was"]["s1"] = pslog36::mode_str(s1_old).into(); }
                 if s1.is_some() && !self.cfg.s1_log { r["s1_ignored"] = "needs --presend-live-s1-log on".into(); }
+                if self.cfg.bd.is_some() { r["botdepth"] = s(bd_new).into(); r["was"]["botdepth"] = s(bd_old).into(); }
+                if bd.is_some() && self.cfg.bd.is_none() { r["botdepth_ignored"] = "needs --presend-live-botdepth".into(); }
                 self.rec(r);
                 self.line(format!("  PRESEND LIVE LEDGER MODES: whale {} -> {}, holder {} -> {}{}{} ({path})", s(old[0]), s(m[0]), s(old[1]), s(m[1]),
                     match (s2_old, s2_new) { (Some(o), Some(n)) => format!(", skip2 gate {} -> {}", pslog36::mode_str(o), pslog36::mode_str(n)), _ => String::new() },
-                    if self.cfg.blocklist_send { format!(", blocklist per-send {} -> {}", s(bl_old), s(bl_new)) } else { String::new() }) + &if self.cfg.s1_log { format!(", S1 gate {} -> {}", pslog36::mode_str(s1_old), pslog36::mode_str(s1_new)) } else { String::new() });
+                    if self.cfg.blocklist_send { format!(", blocklist per-send {} -> {}", s(bl_old), s(bl_new)) } else { String::new() }) + &if self.cfg.s1_log { format!(", S1 gate {} -> {}", pslog36::mode_str(s1_old), pslog36::mode_str(s1_new)) } else { String::new() }
+                    + &if self.cfg.bd.is_some() { format!(", bot depth {} -> {}", s(bd_old), s(bd_new)) } else { String::new() });
             }
             Err(e) => {
                 self.hls.ctl_errors += 1;

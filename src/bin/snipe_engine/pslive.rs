@@ -133,6 +133,10 @@ const D38FLAGS: [&str; 8] = ["--presend-live-blocklist-launcher", "--presend-liv
 /// dip38 PSM12-S1: its flags (each needs --presend-live; the live gate and the parts need --presend-live-s1-log on; pss1.rs)
 const S1FLAGS: [&str; 3] = ["--presend-live-s1-log", "--presend-live-s1", "--presend-live-s1-parts"];
 
+/// dip39 BOT DEPTH: its flags (each needs --presend-live; the list and the mode need --presend-live-botdepth; psbd.rs)
+const BDFLAGS: [&str; 6] = ["--presend-live-botdepth", "--presend-live-botdepth-list", "--presend-live-botdepth-mode", "--presend-live-botdepth-source",
+    "--presend-live-botdepth-organic", "--presend-live-botdepth-state"];
+
 const RFLAGS: [&str; 5] = ["--presend-live-rearm", "--presend-live-rearm-size-sol", "--presend-live-rearm-gap-slots", "--presend-live-rearm-quiet-stop",
     "--presend-live-rearm-r5-skip"];
 
@@ -185,6 +189,11 @@ pub mod pslog38;
 // dip38 PSM12-S1 arm filter: LOG ONLY (--presend-live-s1-log on); its live gate built, off unless --presend-live-s1 / the control file's "s1"
 #[path = "pss1.rs"]
 pub mod pss1;
+
+// dip39 BOT DEPTH pre-send gate (withholds an attempt with < MIN listed bot wallets trading the mint in the last SLOTS slots; off unless
+// --presend-live-botdepth MIN:SLOTS; log mode by default)
+#[path = "psbd.rs"]
+pub mod psbd;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -442,6 +451,14 @@ pub struct Cfg {
     pub s1_live: u64,
     /// dip38 --presend-live-s1-parts nd,age,whale,cold (default all): the parts the live gate acts on
     pub s1_parts: u8,
+    /// dip39 the BOT DEPTH gate (None = off, the default; psbd.rs): --presend-live-botdepth-source list (default: --presend-live-botdepth
+    /// MIN:SLOTS + --presend-live-botdepth-list PATH) | organic (--presend-live-botdepth-organic DMIN:QMIN[:TRIPS[:HOURS]], default 2:2:10:2;
+    /// --presend-live-botdepth-state PATH optional); --presend-live-botdepth-mode log|live (default log: nothing withheld); the control
+    /// file's "botdepth" overrides the mode
+    pub bd: Option<psbd::Gate>,
+    pub bd_list: Option<String>,
+    pub bd_live: bool,
+    pub bd_state: Option<String>,
 }
 
 impl Cfg {
@@ -473,7 +490,7 @@ impl Cfg {
         let arg_u64_opt = |f: &str| arg(f).and_then(|s| s.parse::<u64>().ok());
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -492,7 +509,7 @@ impl Cfg {
         let rearm = Cfg::rearm_from(&has, &arg, &arg_u64, &arg_f64, &onoff, spend, quiet.skip, one_position)?;
         // dip37: the fee A/B's flags (off: FeeAbCfg::default(), nothing of it runs)
         let fab = Cfg::fab_from(&has, &arg, &arg_u64_opt, &onoff)?;
-        let c = Cfg {
+        let mut c = Cfg {
             dry,
             spend,
             k: arg_u64("--presend-live-k", 4),
@@ -580,7 +597,28 @@ impl Cfg {
             s1_log: onoff("--presend-live-s1-log", false)?,
             s1_live: match arg("--presend-live-s1") { Some(s) if !s.starts_with("--") => pslog36::mode_parse(&s).map_err(|e| anyhow::anyhow!("--presend-live-s1 {e}"))?, _ => 0 },
             s1_parts: match arg("--presend-live-s1-parts") { Some(s) if !s.starts_with("--") => pss1::parts_parse(&s)?, _ => pss1::P_ALL },
+            // dip39 BOT DEPTH (off unless its flag; log mode by default)
+            bd: None,
+            bd_list: arg("--presend-live-botdepth-list").filter(|p| !p.starts_with("--")),
+            bd_live: match arg("--presend-live-botdepth-mode") { Some(s) if !s.starts_with("--") => psbd::mode_parse(&s)?, _ => false },
+            bd_state: arg("--presend-live-botdepth-state").filter(|p| !p.starts_with("--")),
         };
+        // dip39 BOT DEPTH: every value given; the list source needs MIN:SLOTS and the list, the organic one refuses them; each source's flags
+        // need it; the mode needs a gate
+        for f in BDFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
+        let organic = match arg("--presend-live-botdepth-source").as_deref() { None | Some("list") => false, Some("organic") => true,
+            Some(x) => bail!("--presend-live-botdepth-source {x}: list | organic") };
+        if organic {
+            if let Some(f) = ["--presend-live-botdepth", "--presend-live-botdepth-list"].iter().find(|f| has(f)) {
+                bail!("{f} is the list source's: --presend-live-botdepth-source organic uses --presend-live-botdepth-organic DMIN:QMIN");
+            }
+            c.bd = Some(psbd::Gate::Org(match arg("--presend-live-botdepth-organic") { Some(s) => psbd::org_parse(&s)?, None => psbd::OrgCfg::default() }));
+        } else {
+            if let Some(f) = ["--presend-live-botdepth-organic", "--presend-live-botdepth-state"].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-botdepth-source organic"); }
+            if let Some(s) = arg("--presend-live-botdepth") { let (min, slots) = psbd::spec_parse(&s)?; c.bd = Some(psbd::Gate::List { min, slots }); }
+            if c.bd.is_none() { if let Some(f) = ["--presend-live-botdepth-list", "--presend-live-botdepth-mode"].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-botdepth MIN:SLOTS"); } }
+            if c.bd.is_some() && c.bd_list.is_none() { bail!("--presend-live-botdepth needs --presend-live-botdepth-list FILE (the listed bot wallets)"); }
+        }
         // dip38 PSM12-S1: every value given; the live gate and the parts need the log; the log needs the whale ledger (its history)
         for f in S1FLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         if c.s1_live != 0 && !c.s1_log { bail!("--presend-live-s1 needs --presend-live-s1-log on (the verdict it acts on)"); }
@@ -594,7 +632,7 @@ impl Cfg {
         if let Some(v) = arg("--presend-live-fund-rps") { if !v.parse::<f64>().is_ok_and(|x| x > 0.0 && x <= 50.0) { bail!("--presend-live-fund-rps must be in (0, 50] calls per second"); } }
         for f in HLFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         if !c.hl_on() { if let Some(f) = HLFLAGS[1..3].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-holder-loss PCT:SOL:WIN"); } }
-        if c.ledger_ctl.is_some() && !c.hl_on() && !c.wh_on() { bail!("--presend-live-ledger-control needs --presend-live-wh-loss or --presend-live-holder-loss (the ledgers it switches)"); }
+        if c.ledger_ctl.is_some() && !c.hl_on() && !c.wh_on() && c.bd.is_none() { bail!("--presend-live-ledger-control needs --presend-live-wh-loss, --presend-live-holder-loss or --presend-live-botdepth (what it switches)"); }
         // dip37: the ledger's flags need a value and the rule; the stale hold needs the live gate
         for f in WHFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         if !c.wh_on() { if let Some(f) = WHFLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-wh-loss N:SOL"); } }
@@ -803,6 +841,13 @@ impl Cfg {
         if self.s1_log { j["s1"] = serde_json::json!({"log": true, "live": pslog36::mode_str(self.s1_live), "parts": pss1::parts_str(self.s1_parts), "nd": pss1::S1_ND,
             "age": pss1::S1_AGE, "wh_loss": pss1::S1_WH_LOSS as f64 / 1e9, "cold_nd": pss1::S1_COLD_ND, "spec": "PSM12-S1"}); }
         if self.shape_log { j["shape_log"] = serde_json::json!({"shape_state": self.shape_state, "sh": [pslog38::SH_WIN_NS / 3_600_000_000_000, pslog38::SH_LOSS, pslog38::SH_WIN]}); }
+        // dip39: only when on (off: dip38's record)
+        match self.bd {
+            Some(psbd::Gate::List { min, slots }) => { j["botdepth"] = serde_json::json!({"src": "list", "min": min, "slots": slots, "list": self.bd_list, "mode": psbd::mode_str(self.bd_live)}); }
+            Some(psbd::Gate::Org(o)) => { j["botdepth"] = serde_json::json!({"src": "organic", "dmin": o.dmin, "qmin": o.qmin, "trips": o.trips, "hours": o.hours(),
+                "state": self.bd_state, "mode": psbd::mode_str(self.bd_live)}); }
+            None => {}
+        }
         j
     }
 }
@@ -870,7 +915,9 @@ struct SWin { id: u64, mint: Pk, launch: Launch, st_ns: u64, stop_ns: u64, en_sl
               /// dip37 the window's fee arm (0 A, 1 B; None: the fee A/B off)
               fab: Option<u8>,
               /// dip37c the window's largest listed holder >= the blocklist threshold now (wallet, %), kept by the main loop; None: none / off
-              blk: Option<(Pk, f32)> }
+              blk: Option<(Pk, f32)>,
+              /// dip39 the window's copy of its mint's listed traders, kept by the main loop (None: the bot depth gate off / no good list)
+              bd: Option<psbd::Snap> }
 
 /// dip28: the deeper limit's holder threshold (% of supply)
 pub const DEEP_OB6: f32 = 6.0;
@@ -989,6 +1036,8 @@ struct Shared {
     brk_trips: AtomicU64,
     /// dip37c the per-send blocklist: live (true) or log (the control file's "blocklist_send"); its withheld / would-withhold sends [T2, re-arm]
     bl_send_live: AtomicBool, bl_withheld: [AtomicU64; 2], bl_would: [AtomicU64; 2],
+    /// dip39 the bot depth gate's mode and counts (psbd.rs; idle without it)
+    bd: psbd::BdShared,
     /// dip32 the creator gate's histories (empty without it): filled by the realized task, read at every arm
     cr: Mutex<FxHashMap<Pk, CrHist>>,
     /// dip37 the whale / dumper loss ledger (empty without it): filled by the realized task, read at every arm (pswh.rs)
@@ -1022,6 +1071,8 @@ pub struct Att {
     pub grd: Grd,
     /// dip37 the attempt's fee arm, leader group and signed CU values (None: the fee A/B off)
     pub fa: Option<psfeeab::AttFee>,
+    /// dip39 the bot depth gate's verdict at this attempt; None: the gate off
+    pub bd: Option<psbd::BdV>,
 }
 
 /// what the sender needs
@@ -1058,6 +1109,8 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
     let mut global = send::TokenBucket::new(sc.cfg.max_per_sec as f64, (sc.cfg.max_per_sec as u32 / 4).max(1));
     let (mut body, mut req) = (Vec::with_capacity(2048), Vec::with_capacity(2400));
     let mut warned: FxHashMap<String, u64> = FxHashMap::default();
+    // dip39 the bot depth gate's record limiter (window -> the slot of its last withheld record)
+    let mut bd_last: FxHashMap<u64, u64> = FxHashMap::default();
     loop {
         if sh.stop.load(Ordering::Relaxed) && sh.wins.lock().unwrap().is_empty() { break; }
         let now = arbx::fast::mono_ns();
@@ -1110,6 +1163,25 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
                 let _ = out.send(Out::Rec(r));
                 if live { sh.skip("blocklist_withheld"); continue; }
             }
+            // dip39 BOT DEPTH: fewer than MIN listed bot wallets traded the mint in the last SLOTS slots (the window's copy, kept by the main
+            // loop: a count over <= 16 slots here) -> withheld (live) or counted (log); no good list: fail open (counted). Nothing with it off
+            let bdv = sc.cfg.bd.as_ref().map(|g| psbd::check(&sh.bd, g, w.bd.as_ref(), slot, w.rearm));
+            if let Some(v) = bdv.filter(|v| v.ok && v.block) {
+                let first = psbd::rec_due(&mut bd_last, w.id, slot);
+                if first == Some(true) { let c = if v.live { &sh.bd.wins_held } else { &sh.bd.wins_would }; c.fetch_add(1, Ordering::Relaxed); }
+                if v.withhold() {
+                    sh.skip("botdepth_withheld");
+                    if first.is_some() {
+                        let mut r = serde_json::json!({"ev": "presend_live_botdepth_withheld", "w": w.id, "n": w.n, "mint": b58(&w.mint), "slot": slot,
+                            "kind": if w.rearm { "rearm" } else { "T2" }, "first": first == Some(true), "t": arbx::feeds::clock::now_ns()});
+                        match sc.cfg.bd { Some(psbd::Gate::List { min, slots }) => { r["depth"] = v.n.into(); r["min"] = min.into(); r["slots"] = slots.into(); }
+                            Some(psbd::Gate::Org(o)) => { r["src"] = "organic".into(); r["dipb"] = v.n.into(); r["qt"] = v.q.into(); r["dmin"] = o.dmin.into(); r["qmin"] = o.qmin.into(); }
+                            None => {} }
+                        let _ = out.send(Out::Rec(r));
+                    }
+                    continue;
+                }
+            }
             let deadline = (slot + sc.cfg.deadline_slots).min(w.en_slot);
             if deadline < slot { sh.skip("window_over"); continue; }
             let (leader, client) = lat::leader_of(slot).unwrap_or_default();
@@ -1139,7 +1211,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let t_send = arbx::feeds::clock::now_ns();
             let t1 = arbx::fast::mono_ns();
             let mut a = Att { w: w.id, n: w.n, mint: w.mint, sig, tag, path: r.path.name.clone(), client: client.clone(), slot, deadline, lim, min_out, p_sign: w.vsol as f64 / w.vtok.max(1) as f64,
-                sign_pos: w.pos, t_send, roles, tip: tip.map_or(0, |t| t.1), wst: "dry", ob6: w.ob6, grd: w.grd, fa };
+                sign_pos: w.pos, t_send, roles, tip: tip.map_or(0, |t| t.1), wst: "dry", ob6: w.ob6, grd: w.grd, fa, bd: bdv };
             // registered BEFORE the write: the main loop knows the signature before its landing can arrive
             if !sc.cfg.dry {
                 let _ = atx.send(a.clone());
@@ -1159,6 +1231,8 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             if sc.cfg.deep_drop > 0.0 { rec["drop"] = drop.into(); rec["ob6"] = (w.ob6 as f64).into(); }
             // dip37: only with the fee A/B on
             if let Some(f) = &a.fa { f.put(&mut rec, a.tip); }
+            // dip39: the bot depth verdict (only with the gate on; "ok": false = no list, sent)
+            if let (Some(v), Some(g)) = (bdv, sc.cfg.bd.as_ref()) { rec["botdepth"] = v.json(g); }
             let _ = out.send(Out::Rec(rec));
         }
         // idle: 5 ms steps; armed: 0.5 ms (the pace's resolution)
@@ -2021,6 +2095,8 @@ pub struct PsLive {
     l38: pslog38::L38,
     /// dip38 PSM12-S1's live mode, armed windows' verdicts, counts (pss1.rs; idle with its log off)
     s1: pss1::S1St,
+    /// dip39 the bot depth gate's list and book (psbd.rs; None with it off)
+    bd: Option<psbd::Bd>,
 }
 
 impl PsLive {
@@ -2061,8 +2137,21 @@ impl PsLive {
         }
         let (atx, arx) = crossbeam_channel::unbounded::<Att>();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
-            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) });
+        // dip39 BOT DEPTH: the start mode and the list (a bad / missing list: FAIL OPEN, a warning; None with it off)
+        sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
+        let bd = cfg.bd.map(|g| psbd::Bd::open(g, cfg.bd_list.as_deref(), cfg.bd_state.as_deref(), &user));
+        if let Some(b) = &bd {
+            let src = match (&b.gate, &b.org) {
+                (psbd::Gate::List { .. }, _) => format!("list {}: {}", b.path, match &b.err { None => format!("{} wallets (re-read on change)", b.n_list()),
+                    Some(e) => format!("NOT LOADED ({e}): FAIL OPEN, nothing withheld until a good list is read") }),
+                (_, _) => format!("organic warm-up: FAIL OPEN until the quick-trip history covers the hours | state {}", match (&cfg.bd_state, &b.err) {
+                    (None, _) => "none".to_string(), (Some(p), None) => format!("{p} (used if saved <= 30 min before the first trade)"), (Some(p), Some(e)) => format!("{p} NOT read: {e}") }),
+            };
+            eprintln!("DIP PRESEND LIVE BOT DEPTH (dip39, {}): a pre-send attempt (T2 + re-arm) failing {} is {} | {src} | the control file's \"botdepth\": live|log flips it",
+                if cfg.bd_live { "LIVE" } else { "LOG ONLY" }, b.gate.desc(), if cfg.bd_live { "WITHHELD (the window stays armed)" } else { "logged (never withheld)" });
+        }
         arbx::feeds::own_fail_watch(user);
         // dip32: the creator histories' preload (the offline seed / the last run's state)
         if let Some(p) = &cfg.cr_state {
@@ -2132,6 +2221,8 @@ impl PsLive {
         let line = if cfg.insider_log || cfg.shape_log { format!("{line} | DIP38 ANTI-BAIT LOG ({}{})", if cfg.insider_log { format!("launcher + funding resolver {} rps{} + INSIDER / FAMILY / FAMILY LEDGER {}h <= -{} SOL",
             cfg.fund_rps, if cfg.fund_rpc.is_some() { " via --presend-live-fund-rpc" } else { " via public RPC" }, pslog38::FL_WIN_NS / 3_600_000_000_000, pslog38::FL_LOSS as f64 / 1e9) } else { String::new() },
             if cfg.shape_log { format!("{}SHAPE LEDGER {}h <= -{} SOL", if cfg.insider_log { "; " } else { "" }, pslog38::SH_WIN_NS / 3_600_000_000_000, pslog38::SH_LOSS as f64 / 1e9) } else { String::new() }) } else { line };
+        // dip39: also at the END, only when on
+        let line = match &cfg.bd { Some(g) => format!("{line} | BOT DEPTH {} {}", if cfg.bd_live { "LIVE" } else { "LOG" }, g.desc()), None => line };
         eprintln!("{line}");
         let thread = {
             let (sh, out) = (sh.clone(), out.clone());
@@ -2212,10 +2303,12 @@ impl PsLive {
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1 };
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
+        // dip39: the bot depth gate's start record (after the control file: its mode is the start mode; nothing with it off)
+        p.bd_start();
         Ok(p)
     }
 
@@ -2491,6 +2584,8 @@ impl PsLive {
                     if let Some(v) = q.watch.get_mut(&e.mint) { for w in v.iter_mut() { if pq::QStop::other(&e.user, &w.whale, &self.user) { w.others += 1; } } }
                 }
             }
+            // dip39 BOT DEPTH: a listed wallet's trade into the book and the armed window's copy, before any trigger of it (nothing with it off)
+            if self.bd.is_some() { self.bd_trade(&e.mint, &e.user, e.buy, e.sol, e.tok, a.slot, a.t_rx); }
             evs.clear();
             self.det.trade(&t, &mut evs);
             // dip37c: the per-send blocklist's cached listed holder (a listed wallet's trade only; nothing without the flag)
@@ -2669,6 +2764,8 @@ impl PsLive {
             if let Some((nd, mx)) = h2v { psh2::fields(&mut r, nd, mx, false, age_slots, self.cfg.spend); }
             if let Some(h) = &blh { PsLive::bl_fields(&mut r, h); }
             if let Some(v) = &s1v { r["s1"] = v.json(self.cfg.s1_parts, self.s1_live(false), self.cfg.spend, t.vsol, t.p()); }
+            // dip39 (only with the gate on): the depth at the trigger's slot
+            if let Some(j) = self.bd_json(&t.mint, t.s) { r["botdepth"] = j; }
             if let Some(f) = &f3 { r["f3"] = f.clone(); }
             if let Some(g) = &tags { r["tags"] = g.clone(); }
             // dip34 (log-only): seen / eqgrp / q4 (each only with its flag); then this skip into the seen book (cr_loss / quiet3_a)
@@ -2731,7 +2828,7 @@ impl PsLive {
         let fab = self.fab_assign(id);
         let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
             spend: self.cfg.spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
-            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint) };
+            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint) };
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
         self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0)).0.push_back(t.clone());
@@ -2760,6 +2857,8 @@ impl PsLive {
         if let Some((nd, mx)) = h2v { psh2::fields(&mut r, nd, mx, false, age_slots, self.cfg.spend); }
         // dip38 PSM12-S1 (log only): the verdict on the arm; the window keeps it for its fill / realize
         if let Some(v) = s1v { r["s1"] = v.json(self.cfg.s1_parts, self.s1_live(false), self.cfg.spend, t.vsol, t.p()); self.s1_arm(id, v); }
+        // dip39 (only with the gate on): the depth at the trigger's slot (the first attempts' view)
+        if let Some(j) = self.bd_json(&t.mint, t.s) { r["botdepth"] = j; }
         self.wh_arm(id, whale);
         self.hl_arm(id, &t.mint, &whale);
         if let Some(h) = &hlg { self.hl_note(&t.mint, h, false, false); }
@@ -2825,6 +2924,8 @@ impl PsLive {
         if rearm { rec["kind"] = "rearm".into(); rec["spend"] = spend.into(); }
         // dip38 PSM12-S1 (log only): the window's verdict at its arm (nothing with the log off)
         if let Some(j) = self.s1_fill(att.w, true) { rec["s1"] = j; }
+        // dip39 (only with the gate on): the filling attempt's verdict at its send, the depth at the fill's slot
+        if let Some(j) = self.bd_fill_json(att.bd, &t.mint, t.s) { rec["botdepth"] = j; }
         // dip37: the filling attempt's fee arm and values (only with the A/B on)
         if let Some(f) = &att.fa { f.put(&mut rec, att.tip); }
         // dip27 (log-only): the deeper-limit lead's would-skip (T2: another wallet >= 6% at signing and a drop < 15% from the signing
@@ -3374,6 +3475,8 @@ impl PsLive {
     /// the clock: windows end, positions' time exits, attempts never seen, landing records whose tape is complete. `first`: the
     /// first sighting of a signature on any feed (sig8 -> rx ns, feed), when the caller has it
     pub fn tick(&mut self, slot_now: u64, first: Option<&FxHashMap<u64, (u64, u16)>>) {
+        // dip39: the bot depth book's prune and its list's reload check (nothing with it off)
+        if self.bd.is_some() { self.bd_tick(slot_now); }
         // dip36: the blocklist's reload check (a stat every ~10 s; nothing without the flag)
         if let Some(r) = self.bl.as_mut().and_then(|b| b.check(false)) {
             self.line(format!("  PRESEND LIVE BLOCKLIST {} {}", if r["ok"] == true { "reloaded:" } else { "NOT reloaded (the last good list stays):" }, r));
@@ -3806,7 +3909,7 @@ impl PsLive {
     pub fn status(&mut self) -> String {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
-            + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status();
+            + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -3986,6 +4089,7 @@ impl PsLive {
         // dip38: only with its logs on (the chains / ledgers saved)
         if let Some(j) = self.l38_finish() { fin["dip38_log"] = j; }
         if let Some(j) = self.s1_finish() { fin["s1"] = j; }
+        if let Some(j) = self.bd_finish() { fin["botdepth"] = j; }
         fin
     }
 
@@ -4135,14 +4239,17 @@ impl PsLive {
         // dip36: FP-NOBOT inline (every message handled at once; no thread, no tap)
         let fp = pslog36::Fp::start(&cfg, user, &out, true).unwrap();
         let bl = cfg.blocklist.as_deref().map(|p| psblock::Blocklist::load(p).unwrap());
+        // dip39: the bot depth gate's list (fail open on a bad one, as a run)
+        let bd = cfg.bd.map(|g| psbd::Bd::open(g, cfg.bd_list.as_deref(), cfg.bd_state.as_deref(), &user));
         // dip38: the anti-bait log with the tests' queue (no task, no RPC)
         let l38 = pslog38::L38::new(&cfg, None).unwrap();
         let (atx, arx) = crossbeam_channel::unbounded();
         let (mtx, _) = tokio::sync::mpsc::unbounded_channel();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
-            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true), skips: Mutex::new(FxHashMap::default()),
             build_us: Mutex::new(Ring::default()) });
+        sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
         let mut det = pl::Detector::new(cfg.whale_pct);
         // dip27: the hold clocks only with the annotations on (as a run)
         det.track = cfg.ann;
@@ -4158,7 +4265,7 @@ impl PsLive {
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1 }, atx, orx)
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd }, atx, orx)
     }
 
     /// dip19 tests: the chain work queued so far (taken)
@@ -4254,6 +4361,10 @@ mod dip38_tests;
 #[cfg(test)]
 #[path = "dip38_s1_tests.rs"]
 mod dip38_s1_tests;
+// dip39 (11-05): the BOT DEPTH pre-send gate (psbd.rs); off by default = dip38
+#[cfg(test)]
+#[path = "dip39_bd_tests.rs"]
+mod dip39_bd_tests;
 
 #[cfg(test)]
 mod tests {
@@ -4278,7 +4389,7 @@ mod tests {
         let mut sg = [0u8; 64]; sg[0] = 0xD1; sg[1] = 0x5F;
         let roles = pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) };
         atx.send(Att { w: 999, n: 1, mint: [7u8; 32], sig: sg, tag: pl::PS_TAG | 1, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 100, deadline: 101,
-            lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (100, 0, 0), t_send: 0, roles, tip: 0, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None }).unwrap();
+            lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (100, 0, 0), t_send: 0, roles, tip: 0, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None }).unwrap();
         p.drain_atts();
         assert!(!p.idle(), "an unresolved attempt keeps the probe busy");
         assert!(!p.can_end(Duration::ZERO), "never before the stop");
@@ -4343,7 +4454,7 @@ mod tests {
         assert_eq!((h.h.len(), h.n, h.sum), (CR_KEEP, 25, -50_000_000 + 20), "sum and count over all, the last CR_KEEP kept");
         // the gate (loss first, then unfollowed), its record
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
-            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
             skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
         let (ca, cb, cc) = ([1u8; 32], [2u8; 32], [3u8; 32]);
@@ -4403,7 +4514,7 @@ mod tests {
         assert!(!c0.breaker.on() && c0.json().get("breaker").is_none(), "off: dip30's start record");
         assert!(Cfg::from_argv(&set("--presend-live-breaker", "2:0.2"), &p, true, 1_000_000_000).is_err());
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
-            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
             skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
         let m = 60_000_000_000u64;
@@ -4418,7 +4529,7 @@ mod tests {
         assert_eq!(breaker_note(&Shared { brk_until: AtomicU64::new(0), ..sh }, &Breaker::default(), -900_000_000, t0), None, "off: never");
         // the sender's gate while the pause runs (mono clock), then not after it
         let sh2 = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
-            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
             skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
         assert!(breaker_paused(&sh2));
@@ -4694,7 +4805,7 @@ mod tests {
                     seq += 1;
                     let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&seq.to_be_bytes()); sg[8] = 0xA7; sg[9] = fills_on as u8;
                     let att = Att { w, n: 1, mint: m, sig: sg, tag: pl::PS_TAG | seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot: *s, deadline: *s + 1, lim: 1.0,
-                        min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None };
+                        min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None };
                     atx.send(att).unwrap();
                     assert!(p.blocks_reactive(&m).is_some(), "an armed token is not for the reactive bot");
                     if fills_on && seq % 7 == 0 {

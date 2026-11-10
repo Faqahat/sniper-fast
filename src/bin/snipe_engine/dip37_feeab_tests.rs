@@ -86,7 +86,7 @@ impl Ctx {
         let (_, _, tip, fa) = att_fee(&self.p.cfg, self.swin(w).fab, client, Some((helius()[0], 200_000)));
         self.atx.send(Att { w, n: self.seq as u32, mint, sig: sg, tag: pl::PS_TAG | (0xD37A << 32) | self.seq, path: "helius-ps".into(), client: client.into(), slot, deadline: slot + 1,
             lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (slot, 0, 0), t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-            tip: tip.map_or(0, |t| t.1), wst: "written", ob6: 0.0, grd: Grd::default(), fa }).unwrap();
+            tip: tip.map_or(0, |t| t.1), wst: "written", ob6: 0.0, grd: Grd::default(), fa, bd: None }).unwrap();
         self.p.drain_atts();
         (sg, fa)
     }
@@ -258,7 +258,7 @@ fn dip37_arm_parity_client_rule_and_built_values() {
     let user = pk("2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE");
     let l = snipe_build::launch_from_target(pk("7oeUduY1zhUwQ3YdSP9CGDYF8nYzfRdhgqtc6wAbpump"), pk("3tNPvytXB9yTZLgh5RGdjrXVxHp89vGeCiwx9juqgp7q"));
     let sw = SWin { id: 1, mint: l.mint, launch: l.clone(), st_ns: 0, stop_ns: u64::MAX, en_slot: 10, vsol: 40 * S, vtok: 800_000_000_000_000, fr: 0.0125, pos: (1, 0, 0),
-                    pace: pl::Pace::new(0, 4, 400_000_000), n: 0, done: false, spend: 400_000_000, rearm: false, ob6: 0.0, grd: Grd::default(), fpg: None, fab: Some(1), blk: None };
+                    pace: pl::Pace::new(0, 4, 400_000_000), n: 0, done: false, spend: 400_000_000, rearm: false, ob6: 0.0, grd: Grd::default(), fpg: None, fab: Some(1), blk: None, bd: None };
     let guard = guard_ix_enc(GuardEnc { disc: 15, op: 4, acct: true }, 461_000_123);
     for (client, want) in [("HarmonicAgave", (90_000u32, 20_000u64, 300_000u64)), ("JitoLabs", (CU_DEFAULT as u32, 1_000, 200_000))] {
         let (lim, price, tip, _) = att_fee(&c, sw.fab, client, pt);

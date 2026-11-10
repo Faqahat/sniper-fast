@@ -58,8 +58,15 @@ def strip_v3_json(txt):
 
 
 def strip_v3_text(txt):
-    """the Go text snapshot without its v3 "ATH ..." line"""
-    return "\n".join(l for l in txt.split("\n") if not l.startswith("ATH       "))
+    """the Go text snapshot without its v3 "ATH ..." line and its "paper" line (strip_paper)"""
+    return strip_paper("\n".join(l for l in txt.split("\n") if not l.startswith("ATH       ")))
+
+
+def strip_paper(txt):
+    """dipmon v3 (owner 11-05): the "paper     " line is the like-for-like split (the shadow's row c on the T2 triggers live
+    sent vs skipped / withheld, then live), not v1's all-trigger total vs live; dropped from both sides (the JSON keeps
+    v1's paper_fills / paper_net and is still compared)"""
+    return "\n".join(l for l in txt.split("\n") if not l.startswith("paper     "))
 
 
 def t2_marker(txt):
@@ -133,7 +140,7 @@ def midrun(binary):
             f = os.path.join(d, f"dip_ams_r{run}.jsonl")
             common = ["--file", f, "--snapshot", "--usd", "100", "--load-duty", "0", "--assume-running", "--now", now]
             pj, gj = t2_marker(run_cmd([sys.executable, ORACLE] + common + ["--json"])), run_cmd([binary] + common + ["--json"])
-            pt, gt = t2_marker(run_cmd([sys.executable, ORACLE] + common)), run_cmd([binary] + common)
+            pt, gt = strip_paper(t2_marker(run_cmd([sys.executable, ORACLE] + common))), run_cmd([binary] + common)
             j = json.loads(pj)
             v3 = v3_check(json.loads(gj))
             gj, gt = strip_v3_json(gj), strip_v3_text(gt)
@@ -180,7 +187,7 @@ def main():
         nfields += nf
         tdiff = []
         if a.text:
-            pt = t2_marker(run([sys.executable, ORACLE] + common)).splitlines()
+            pt = strip_paper(t2_marker(run([sys.executable, ORACLE] + common))).splitlines()
             gt0 = run([a.bin] + common)
             gt = strip_v3_text(gt0).splitlines()
             if py.get("series_hi") is not None and "\nATH       " not in gt0:

@@ -219,7 +219,7 @@ fn dip37_wh_realized_carries_the_wallet() {
         let mut sg = [0u8; 64]; sg[0] = 0xD3; sg[1] = 0x77;
         c.atx.send(Att { w: id, n: 1, mint: tk.mint, sig: sg, tag: pl::PS_TAG | 0xD377, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 1006, deadline: 1007,
             lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (1006, 0, 0), t_send: 1_006_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-            tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None }).unwrap();
+            tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None }).unwrap();
         c.p.drain_atts();
         let e = tk.buy(USER, 396_000_000);
         c.tx_sig(1007, 4, sg, USER, vec![e.clone()], vec![]);
@@ -434,7 +434,7 @@ fn dip37_hl_flags_and_rule() {
     for (a, needle) in [(&["--presend-live-holder-loss", "2:0.1"][..], "PCT:SOL:WIN"), (&["--presend-live-holder-loss", "0:0.1:0.05"][..], "PCT:SOL:WIN"),
         (&["--presend-live-holder-state", "/x"][..], "needs --presend-live-holder-loss"), (&["--presend-live-holder-learn", "paper"][..], "needs --presend-live-holder-loss"),
         (&["--presend-live-holder-loss", "2:0.1:0.05", "--presend-live-holder-learn", "yes"][..], "paper | off"),
-        (&["--presend-live-ledger-control", "/x"][..], "needs --presend-live-wh-loss or --presend-live-holder-loss")] {
+        (&["--presend-live-ledger-control", "/x"][..], "needs --presend-live-wh-loss, --presend-live-holder-loss or --presend-live-botdepth")] {
         let e = cfg(a).unwrap_err().to_string();
         assert!(e.contains(needle), "{a:?}: {e}");
     }
@@ -545,7 +545,7 @@ fn dip37_hl_learn_state_paper() {
     let mut sg = [0u8; 64]; sg[0] = 0xD3; sg[1] = 0x78;
     c.atx.send(Att { w: id, n: 1, mint: tk.mint, sig: sg, tag: pl::PS_TAG | 0xD378, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 1006, deadline: 1007,
         lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (1006, 0, 0), t_send: 1_006_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-        tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None }).unwrap();
+        tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None }).unwrap();
     c.p.drain_atts();
     let h2 = w(0x42);
     let e = tk.buy_tok(h2, pct(2.5)); c.tx(1006, 3, vec![e], vec![]);          // a new 2.5% holder before our landing
