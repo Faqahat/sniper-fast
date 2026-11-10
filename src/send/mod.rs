@@ -977,13 +977,19 @@ impl Path {
 
     /// Check, wait for the rate budget (the queue: bands, crowding, EV), deliver. Never retried here: a late copy is
     /// worthless. `attempt` joins the bundle's results to it. The reply carries the queue wait
-    pub async fn send(&self, raw: &[u8], prio: Prio, attempt: Option<u64>) -> Result<Reply, Refusal> {
+    pub async fn send(&self, raw: &[u8], prio: Prio, attempt: Option<u64>) -> Result<Reply, Refusal> { self.send_b(raw, prio, attempt, true).await }
+
+    /// dip43 B1 (--presend-live-single-token on): `send` WITHOUT taking a rate slot: the caller already took this send's slot (the pre-send
+    /// sender's `fast_budget()` at its rate check), so a pre-sent attempt on an async path is charged ONE token, not two
+    pub async fn send_prepaid(&self, raw: &[u8], attempt: Option<u64>) -> Result<Reply, Refusal> { self.send_b(raw, Prio::default(), attempt, false).await }
+
+    async fn send_b(&self, raw: &[u8], prio: Prio, attempt: Option<u64>, take_budget: bool) -> Result<Reply, Refusal> {
         let sig = match self.check(raw) {
             Ok(s) => s,
             Err(e) => { self.stats.lock().unwrap().bad_tx += 1; return Err(refuse_code("bad_tx", format!("{}: refused before sending: {e}", self.name))); }
         };
         let mut waited = None;
-        if let Some(b) = &self.budget {
+        if let Some(b) = self.budget.as_ref().filter(|_| take_budget) {
             match b.acquire(prio).await {
                 Ok(g) => waited = Some(g.waited),
                 Err(d) => {

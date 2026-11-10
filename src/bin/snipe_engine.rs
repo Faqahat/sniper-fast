@@ -5438,13 +5438,43 @@ static NONSLIP_FAILS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 /// Runs for `opts.deadline`; the live exit then logs UNSOLD and hands the position to a background retry (H-1).
 #[allow(clippy::too_many_arguments)]
 async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, launch: &Launch, ata: &Pk, known: Option<u64>, guess: u64, land_slot: u64, opts: SellOpts) -> SellOut {
+    sell_until_zero_x(key, user, rpc, path, launch, ata, known, guess, land_slot, opts, None).await
+}
+
+/// dip43 B3 / B4 (pslive's two-lot exit and cheap timer sells; None everywhere else = dip42's sell loop exactly): `keep` = the tokens
+/// this sell must LEAVE in the account (lot 1 of a two-lot exit: it sells `known - keep` and is done once a CONFIRMED read shows at most
+/// `keep`, never selling the remainder: that is lot 2's own sell); `cu_price` = this exit's CU price (None: --sell-cu-price-micro);
+/// `lot` = 1 / 2 (log lines only; 0 = not a lot)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SellX { pub keep: u64, pub cu_price: Option<u64>, pub lot: u8 }
+
+/// dip43 B3: a sell loop's "done" answer (pure: unit-tested): the context slot of a CONFIRMED read showing the account closed or holding at
+/// most `keep` tokens. keep 0 = Tok::zero_at (dip42)
+fn sell_done_at(t: Tok, keep: u64) -> Option<u64> {
+    match t { Tok::Closed(c) => Some(c), Tok::Amount(h, c) if h <= keep => Some(c), _ => None }
+}
+
+/// dip43 B3: what the loop sells next after a confirmed read of `h` tokens (pure: unit-tested): everything above `keep` (keep 0 = dip42's
+/// "the remainder": h)
+fn sell_next_qty(h: u64, keep: u64) -> u64 { h.saturating_sub(keep) }
+
+/// `sell_until_zero` with dip43's per-exit options (`x` None: dip42's loop byte for byte)
+#[allow(clippy::too_many_arguments)]
+async fn sell_until_zero_x(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<send::Path>, launch: &Launch, ata: &Pk, known: Option<u64>, guess: u64, land_slot: u64, opts: SellOpts,
+                           x: Option<SellX>) -> SellOut {
     let mut cu = sell_cu_limit();
-    let price = arg_u64("--sell-cu-price-micro", arg_u64("--cu-price-micro", 3_000_000)); // sells: own (low) fee
+    // dip43 B4: an exit's own CU price (cheap timer sells, lot 2); None: the run's sell price
+    let price = match x.and_then(|x| x.cu_price) { Some(p) => p, None => arg_u64("--sell-cu-price-micro", arg_u64("--cu-price-micro", 3_000_000)) }; // sells: own (low) fee
+    // dip43 B3: the tokens to leave (lot 1 only; only with a known amount: a guess never sells a part)
+    let keep = if known.is_some() { x.map_or(0, |x| x.keep) } else { 0 };
+    let mut opts = opts;
+    // a part sell never closes the account (the close of a non-empty account would fail the sell)
+    if keep > 0 { opts.keep_ata = true; }
     let t0 = Instant::now();
     let deadline = t0 + opts.deadline;
     let wait = opts.wait;
     // (amount, exact): exact = a real balance read (sell it all + close the ATA); else a guess (no close)
-    let mut qty: (u64, bool) = match known { Some(a) => (a, true), None => (guess.max(1), false) };
+    let mut qty: (u64, bool) = match known { Some(a) => (sell_next_qty(a, keep), true), None => (guess.max(1), false) };
     let mut out = SellOut { sold_at: None, sigs: Vec::new(), last: None, attempts: 0, last_qty: qty, first_send_us: None };
     let mut need_slot = land_slot; // a "sold" read must come from a node at least this far
     let mut backoff = Duration::from_millis(250);
@@ -5456,11 +5486,11 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         if opts.bg && SELL_GIVEUP.load(Ordering::SeqCst) { break; }
         if !first {
             match tok_read(rpc, ata, "confirmed", need_slot).await {
-                t if t.zero_at().is_some() => { out.sold_at = t.zero_at(); break; }
+                t if sell_done_at(t, keep).is_some() => { out.sold_at = sell_done_at(t, keep); break; }
                 Tok::Amount(h, _) => {
                     // a landed hint (feed / status) but tokens still there at a node past the sell's slot: that sell FAILED
                     // (its tips reverted): N4 more CU, L-11 its error line
-                    if awaiting.is_some() && qty.1 && h == qty.0 && out.last.as_ref().is_some_and(|l| l.via == "feed") {
+                    if awaiting.is_some() && qty.1 && sell_next_qty(h, keep) == qty.0 && out.last.as_ref().is_some_and(|l| l.via == "feed") {
                         cu = (cu as u64 * 3 / 2).min(400_000) as u32;
                         if let Some(l) = &out.last {
                             let (r2, sig2, m) = (rpc.clone(), l.sig.clone(), launch.mint);
@@ -5470,7 +5500,7 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
                             });
                         }
                     }
-                    qty = (h, true); awaiting = None;
+                    qty = (sell_next_qty(h, keep), true); awaiting = None;
                 }
                 _ => {
                     // UNKNOWN (error / node behind need_slot). After a landed sell: wait for confirmation (up to 6 s), do
@@ -5489,10 +5519,10 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         let ixs = if qty.1 { sell_exact_ixs(user, launch, qty.0, cu, price, has("--wrap"), opts.keep_ata) }
             else { vec![build::cu_limit_ix(cu), build::cu_price_ix(price), snipe_build::sell_ix(user, launch, qty.0, 0)] };
         out.attempts += 1;
-        let watch = if qty.1 { Watch::SellAta(*ata, qty.0, need_slot) } else { Watch::None };
+        let watch = if qty.1 { Watch::SellAta(*ata, qty.0 + keep, need_slot) } else { Watch::None };
         match send_sell(key, user, rpc, path, fb, &ixs, wait, watch).await {
             Ok(l) => {
-                eprintln!("  SELL{} #{} qty={}{} cu_limit={cu} sig={} {} via={}{}", if opts.bg { "[bg]" } else { "" }, out.attempts, qty.0,
+                eprintln!("  SELL{}{} #{} qty={}{} cu_limit={cu} sig={} {} via={}{}", if opts.bg { "[bg]" } else { "" }, match x.map_or(0, |x| x.lot) { 0 => String::new(), l => format!("[lot {l}]") }, out.attempts, qty.0,
                     if !qty.1 { " (guess, no close)" } else if opts.keep_ata { " (pre-send: the token account kept open)" } else { "" }, l.sig,
                     match (l.land_slot, l.ok) { (Some(s), true) => format!("LANDED slot={s} delta={} (awaiting a confirmed 0)", s as i64 - l.send_slot as i64), (Some(_), false) => format!("landed FAILED err={}", l.err.as_ref().map(|e| e.to_string()).unwrap_or_default()), (None, _) => format!("not seen in {wait:?}") },
                     if l.via.is_empty() { "-" } else { l.via }, if l.fan.is_empty() { fb.map(|f| format!(" (+ {})", f.name)).unwrap_or_default() } else { format!(" (fan {})", l.fan.join("+")) });
@@ -5537,8 +5567,10 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
     }
     if out.sold_at.is_none() && !(opts.bg && SELL_GIVEUP.load(Ordering::SeqCst)) {
         let t = tok_read_retry(rpc, ata, "confirmed", need_slot, 6).await;
-        match t.zero_at() {
+        match sell_done_at(t, keep) {
             Some(c) => out.sold_at = Some(c),
+            // dip43 B3: lot 1 not confirmed: lot 2's own sell (until zero) sells what is left; no UNSOLD alert for a part
+            None if keep > 0 => eprintln!("  SELL[lot 1] mint={} NOT confirmed down to {keep} tokens ({}): lot 2's sell (until 0) covers the rest", b58(&launch.mint), t.show()),
             None if !opts.bg => {
                 eprintln!("  UNSOLD mint={} tokens={} (confirmed read, node slot >= {need_slot}) after {:.0} s / {} sell attempt(s) — STILL HELD (or unknown): retrying in the background; by hand: --sell-held {}",
                     b58(&launch.mint), t.show(), t0.elapsed().as_secs_f64(), out.attempts, b58(&launch.mint));
@@ -5549,7 +5581,10 @@ async fn sell_until_zero(key: &SigningKey, user: Pk, rpc: &rpc::Rpc, path: &Arc<
         }
         if let Tok::Amount(a, _) = t { if a > 0 { out.last_qty = (a, true); } }
     }
-    if let Some(c) = out.sold_at { eprintln!("  SOLD mint={} token account confirmed {} at slot {c}", b58(&launch.mint), if qty.1 && !opts.keep_ata { "closed/0" } else if opts.keep_ata { "0 (kept open)" } else { "0" }); }
+    if let Some(c) = out.sold_at {
+        if keep > 0 { eprintln!("  SOLD[lot 1] mint={} token account confirmed <= {keep} tokens (the rest is lot 2's) at slot {c}", b58(&launch.mint)); }
+        else { eprintln!("  SOLD mint={} token account confirmed {} at slot {c}", b58(&launch.mint), if qty.1 && !opts.keep_ata { "closed/0" } else if opts.keep_ata { "0 (kept open)" } else { "0" }); }
+    }
     out
 }
 
