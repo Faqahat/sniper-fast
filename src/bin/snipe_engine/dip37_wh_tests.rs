@@ -434,7 +434,7 @@ fn dip37_hl_flags_and_rule() {
     for (a, needle) in [(&["--presend-live-holder-loss", "2:0.1"][..], "PCT:SOL:WIN"), (&["--presend-live-holder-loss", "0:0.1:0.05"][..], "PCT:SOL:WIN"),
         (&["--presend-live-holder-state", "/x"][..], "needs --presend-live-holder-loss"), (&["--presend-live-holder-learn", "paper"][..], "needs --presend-live-holder-loss"),
         (&["--presend-live-holder-loss", "2:0.1:0.05", "--presend-live-holder-learn", "yes"][..], "paper | off"),
-        (&["--presend-live-ledger-control", "/x"][..], "needs --presend-live-wh-loss, --presend-live-holder-loss or --presend-live-botdepth")] {
+        (&["--presend-live-ledger-control", "/x"][..], "needs --presend-live-wh-loss, --presend-live-holder-loss, --presend-live-botdepth or --presend-live-dumper-ledger")] {
         let e = cfg(a).unwrap_err().to_string();
         assert!(e.contains(needle), "{a:?}: {e}");
     }

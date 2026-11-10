@@ -65,8 +65,9 @@ pub enum Det {
     /// a T2 trigger (the shadow's `presend_arm`): `pct` = the holding at this buy (float32-rounded, as the study); `age_slots` 0 =
     /// in the create slot (the create's signer buying in its own create tx: the study code counts it; it lost on R1-R4)
     Trigger { whale: Pk, pct: f64, bal: i64, age_slots: u64 },
-    /// a wallet's first >= 3% crossing that left it below whale_pct (it never triggers later)
-    Below,
+    /// a wallet's first >= 3% crossing that left it below whale_pct (it never triggers later). dip41: the crossing's whale, holding (%,
+    /// float32-rounded as Trigger's), balance and age carried for the WIDE-DUMPER tier (the same trigger shape, the 3..whale_pct band)
+    Below { whale: Pk, pct: f64, bal: i64, age_slots: u64 },
     /// the first sell, after its trigger, of a wallet that triggered on this token (its window ends 30 ms later)
     WhaleSell { whale: Pk },
     /// the token is no longer followed (the study's non-standard curves: one of its first 50 trades at curve < 25 / > 200 SOL)
@@ -217,7 +218,7 @@ impl Detector {
                     w.trig = true;
                     self.st.triggers += 1;
                     out.push(Det::Trigger { whale: t.user, pct, bal: w.bal, age_slots: t.s.saturating_sub(s0) });
-                } else { self.st.below += 1; out.push(Det::Below); }
+                } else { self.st.below += 1; out.push(Det::Below { whale: t.user, pct, bal: w.bal, age_slots: t.s.saturating_sub(s0) }); }
             }
         }
     }
@@ -613,7 +614,8 @@ mod tests {
         };
         assert!(tr(100, 1, true, 3_000_000_000, &mut d).is_empty(), "the creator's dev buy: ht 1, never a trigger");
         assert!(tr(100, 3, true, 2_000_000_000, &mut d).is_empty(), "a create-slot insider");
-        assert_eq!(tr(103, 4, true, 1_400_000_000, &mut d), vec![Det::Below], "3..5% on its first big buy");
+        let o = tr(103, 4, true, 1_400_000_000, &mut d);
+        assert!(matches!(o.as_slice(), [Det::Below { whale, pct, age_slots: 3, .. }] if *whale == [4u8; 32] && *pct >= 3.0 && *pct < 5.0), "3..5% on its first big buy: {o:?}");
         assert!(tr(104, 4, true, 1_000_000_000, &mut d).is_empty(), "a below-5% wallet never triggers later");
         let o = tr(106, 5, true, 3_000_000_000, &mut d);
         assert!(matches!(o.as_slice(), [Det::Trigger { whale, pct, age_slots: 6, .. }] if *whale == [5u8; 32] && *pct >= 5.0), "{o:?}");

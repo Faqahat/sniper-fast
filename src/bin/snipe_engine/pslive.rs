@@ -137,6 +137,10 @@ const S1FLAGS: [&str; 3] = ["--presend-live-s1-log", "--presend-live-s1", "--pre
 const BDFLAGS: [&str; 6] = ["--presend-live-botdepth", "--presend-live-botdepth-list", "--presend-live-botdepth-mode", "--presend-live-botdepth-source",
     "--presend-live-botdepth-organic", "--presend-live-botdepth-state"];
 
+/// dip41 DUMPER LEDGER + WIDE-DUMPER tier: its flags (each needs --presend-live; the others need --presend-live-dumper-ledger on; psdl.rs)
+const DLFLAGS: [&str; 8] = ["--presend-live-dumper-ledger", "--presend-live-dumper-state", "--presend-live-wide-dumper", "--presend-live-wide-dumper-mode",
+    "--presend-live-wide-size-sol", "--presend-live-qf2", "--presend-live-qf2-filters", "--presend-live-qf2-mode"];
+
 const RFLAGS: [&str; 5] = ["--presend-live-rearm", "--presend-live-rearm-size-sol", "--presend-live-rearm-gap-slots", "--presend-live-rearm-quiet-stop",
     "--presend-live-rearm-r5-skip"];
 
@@ -194,6 +198,11 @@ pub mod pss1;
 // --presend-live-botdepth MIN:SLOTS; log mode by default)
 #[path = "psbd.rs"]
 pub mod psbd;
+
+// dip41 WHALE FAST-DUMP LEDGER + WIDE-DUMPER arming tier (3..6% whales that dump fast; off unless --presend-live-dumper-ledger on; the tier
+// in log mode by default: nothing sent)
+#[path = "psdl.rs"]
+pub mod psdl;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -459,6 +468,20 @@ pub struct Cfg {
     pub bd_list: Option<String>,
     pub bd_live: bool,
     pub bd_state: Option<String>,
+    /// dip41 the whale FAST-DUMP LEDGER (--presend-live-dumper-ledger on|off, default off; psdl.rs) and its state file
+    /// (--presend-live-dumper-state PATH); the WIDE-DUMPER tier with it: --presend-live-wide-dumper N:SCORE (default 3:0.8),
+    /// --presend-live-wide-dumper-mode log|live (default log: records only), --presend-live-wide-size-sol X (default the T2 size); the control
+    /// file's "widedumper" flips the mode
+    pub dl_on: bool,
+    pub dl_state: Option<String>,
+    pub wd: psdl::WdCfg,
+    pub wd_live: bool,
+    pub wd_size: u64,
+    /// dip41 QF2 (with the ledger; None = off): --presend-live-qf2 N:SCORE[:WIN], --presend-live-qf2-filters SOLMIN:SOLMAX:CURVEMIN:CURVEMAX:AGEMAX
+    /// (default 2:8:36:70:300), --presend-live-qf2-mode log|live (default log); the control file's "qf2" flips the mode
+    pub qf: Option<psdl::QfCfg>,
+    pub qf_filt: psdl::QfFilt,
+    pub qf_live: bool,
 }
 
 impl Cfg {
@@ -490,7 +513,7 @@ impl Cfg {
         let arg_u64_opt = |f: &str| arg(f).and_then(|s| s.parse::<u64>().ok());
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -602,7 +625,26 @@ impl Cfg {
             bd_list: arg("--presend-live-botdepth-list").filter(|p| !p.starts_with("--")),
             bd_live: match arg("--presend-live-botdepth-mode") { Some(s) if !s.starts_with("--") => psbd::mode_parse(&s)?, _ => false },
             bd_state: arg("--presend-live-botdepth-state").filter(|p| !p.starts_with("--")),
+            // dip41 the dumper ledger + the WIDE-DUMPER tier (off unless --presend-live-dumper-ledger on; the tier's mode log by default)
+            dl_on: onoff("--presend-live-dumper-ledger", false)?,
+            dl_state: arg("--presend-live-dumper-state").filter(|p| !p.starts_with("--")),
+            wd: match arg("--presend-live-wide-dumper") { Some(s) if !s.starts_with("--") => psdl::wd_parse(&s)?, _ => psdl::WdCfg::default() },
+            wd_live: match arg("--presend-live-wide-dumper-mode") { Some(s) if !s.starts_with("--") => psdl::mode_parse("--presend-live-wide-dumper-mode", &s)?, _ => false },
+            qf: match arg("--presend-live-qf2") { Some(s) if !s.starts_with("--") => Some(psdl::qf_parse(&s)?), _ => None },
+            qf_filt: match arg("--presend-live-qf2-filters") { Some(s) if !s.starts_with("--") => psdl::qf_filt_parse(&s)?, _ => psdl::QfFilt::default() },
+            qf_live: match arg("--presend-live-qf2-mode") { Some(s) if !s.starts_with("--") => psdl::mode_parse("--presend-live-qf2-mode", &s)?, _ => false },
+            wd_size: match arg("--presend-live-wide-size-sol") {
+                Some(v) if !v.starts_with("--") => {
+                    let x: f64 = v.parse().ok().filter(|x: &f64| x.is_finite()).with_context(|| format!("--presend-live-wide-size-sol {v}: not a number (SOL)"))?;
+                    (x * 1e9).round().max(0.0) as u64
+                }
+                _ => spend,
+            },
         };
+        // dip41: every value given; the state / the tier's flags need the ledger
+        for f in DLFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
+        if !c.dl_on { if let Some(f) = DLFLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-dumper-ledger on"); } }
+        if c.qf.is_none() { if let Some(f) = DLFLAGS[6..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-qf2 N:SCORE[:WIN]"); } }
         // dip39 BOT DEPTH: every value given; the list source needs MIN:SLOTS and the list, the organic one refuses them; each source's flags
         // need it; the mode needs a gate
         for f in BDFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
@@ -632,7 +674,7 @@ impl Cfg {
         if let Some(v) = arg("--presend-live-fund-rps") { if !v.parse::<f64>().is_ok_and(|x| x > 0.0 && x <= 50.0) { bail!("--presend-live-fund-rps must be in (0, 50] calls per second"); } }
         for f in HLFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         if !c.hl_on() { if let Some(f) = HLFLAGS[1..3].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-holder-loss PCT:SOL:WIN"); } }
-        if c.ledger_ctl.is_some() && !c.hl_on() && !c.wh_on() && c.bd.is_none() { bail!("--presend-live-ledger-control needs --presend-live-wh-loss, --presend-live-holder-loss or --presend-live-botdepth (what it switches)"); }
+        if c.ledger_ctl.is_some() && !c.hl_on() && !c.wh_on() && c.bd.is_none() && !c.dl_on { bail!("--presend-live-ledger-control needs --presend-live-wh-loss, --presend-live-holder-loss, --presend-live-botdepth or --presend-live-dumper-ledger (what it switches)"); }
         // dip37: the ledger's flags need a value and the rule; the stale hold needs the live gate
         for f in WHFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         if !c.wh_on() { if let Some(f) = WHFLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-wh-loss N:SOL"); } }
@@ -771,6 +813,11 @@ impl Cfg {
         if self.cr_state.is_some() && !self.cr_on() { bail!("--presend-live-creator-state needs --presend-live-cr-unfollowed or --presend-live-cr-loss (the histories are kept only with the gate)"); }
         if !(self.fam_thr > 0.0 && self.fam_thr <= 100.0) { bail!("--presend-live-fam-thr must be in (0, 100] (% of supply)"); }
         if self.holds_state.is_some() && !self.ann { bail!("--presend-live-holds-state needs --presend-live-ann on (the hold clocks are kept only with it)"); }
+        // dip41: the wide windows' size as the pre-send size (and within the per-buy cap)
+        if self.dl_on {
+            if self.wd_size == 0 || self.wd_size > 2_000_000_000 { bail!("--presend-live-wide-size-sol must be in (0, 2]"); }
+            if live && self.wd_size > cap { bail!("REFUSED: --presend-live-wide-size-sol {:.3} exceeds --max-sol (the per-buy cap)", self.wd_size as f64 / 1e9); }
+        }
         // dip26 RE-ARM: its size as the pre-send size (and within the per-buy cap), its window length
         if self.rearm.on {
             if self.rearm.spend == 0 || self.rearm.spend > 2_000_000_000 { bail!("--presend-live-rearm-size-sol must be in (0, 2]"); }
@@ -847,6 +894,14 @@ impl Cfg {
             Some(psbd::Gate::Org(o)) => { j["botdepth"] = serde_json::json!({"src": "organic", "dmin": o.dmin, "qmin": o.qmin, "trips": o.trips, "hours": o.hours(),
                 "state": self.bd_state, "mode": psbd::mode_str(self.bd_live)}); }
             None => {}
+        }
+        // dip41: only when on (off: dip39's record)
+        if self.dl_on {
+            j["widedumper"] = serde_json::json!({"ledger": true, "state": self.dl_state, "n": self.wd.n, "score": self.wd.score, "win": self.wd.win, "frac": self.wd.frac,
+                "mode": psdl::mode_str(self.wd_live), "size": self.wd_size});
+            if let Some(q) = self.qf {
+                j["widedumper"]["qf2"] = serde_json::json!({"n": q.n, "score": q.score, "win": q.win, "filters": self.qf_filt.spec(), "mode": psdl::mode_str(self.qf_live)});
+            }
         }
         j
     }
@@ -1912,7 +1967,9 @@ pub enum Cmd {
         /// dip38 (log-only): the position's anti-bait view (the family / shape ledgers learn its P&L; None: the logs off)
         l38: Option<Box<pslog38::Rz38>>,
         /// dip38 (log-only): the window's PSM12-S1 verdict ({keep, why, ...}) for the realized record (None: the log off / unknown)
-        s1: Option<serde_json::Value> },
+        s1: Option<serde_json::Value>,
+        /// dip41: a WIDE-DUMPER / QF2 window's position: (kind, field, the whale's ledger values) for the realized record (None: neither)
+        wd: Option<(&'static str, &'static str, serde_json::Value)> },
     /// the background UNSOLD retry of a position (its sells keep the account open; PsMsg::UnsoldDone at its end)
     Unsold { mint: Pk, launch: Launch, land_slot: u64, last_qty: (u64, bool) },
     /// a Telegram alert (the tests keep its title; a run raises it at once, never through this)
@@ -2097,6 +2154,8 @@ pub struct PsLive {
     s1: pss1::S1St,
     /// dip39 the bot depth gate's list and book (psbd.rs; None with it off)
     bd: Option<psbd::Bd>,
+    /// dip41 the dumper ledger + the WIDE-DUMPER tier (None = off, the default; psdl.rs)
+    wd: Option<psdl::Wd>,
 }
 
 impl PsLive {
@@ -2151,6 +2210,22 @@ impl PsLive {
             };
             eprintln!("DIP PRESEND LIVE BOT DEPTH (dip39, {}): a pre-send attempt (T2 + re-arm) failing {} is {} | {src} | the control file's \"botdepth\": live|log flips it",
                 if cfg.bd_live { "LIVE" } else { "LOG ONLY" }, b.gate.desc(), if cfg.bd_live { "WITHHELD (the window stays armed)" } else { "logged (never withheld)" });
+        }
+        // dip41 the dumper ledger + the WIDE-DUMPER tier (its state preloaded; None with it off)
+        let wd = cfg.dl_on.then(|| psdl::Wd::open(cfg.wd, cfg.wd_live, cfg.qf, cfg.qf_filt, cfg.qf_live, cfg.wd_size, cfg.dl_state.as_deref()));
+        if let Some(w) = &wd {
+            eprintln!("DIP PRESEND LIVE WIDE DUMPER (dip41, {}): fast-dump ledger of every >= 3% buy (dumped = >= 30% sold within {} slots, counted after {} slots, last {} per wallet) | \
+                a whale's first crossing into [3%, {}%) at age >= {} slot(s) whose whale has >= {} resolved buys and >= {:.0}% dumped, one window per token: {} | size {:.3} SOL | state {} | the control file's \"widedumper\": live|log flips it",
+                if cfg.wd_live { "LIVE" } else { "LOG ONLY" }, cfg.wd.win, psdl::DL_RESOLVE_SLOTS, psdl::DL_KEEP, cfg.whale_pct, cfg.min_age_slots.max(1), cfg.wd.n, cfg.wd.score * 100.0,
+                if cfg.wd_live { "a T2-path window (every live filter, kind \"wide\")" } else { "logged (presend_live_widedumper), nothing sent" }, cfg.wd_size as f64 / 1e9,
+                match (&cfg.dl_state, &w.err, w.loaded) { (None, _, _) => "none (empty ledger)".to_string(), (Some(p), Some(e), _) => format!("{p} NOT read ({e}): EMPTY ledger"),
+                    (Some(p), None, Some(0)) => format!("{p} (not there yet: empty ledger)"), (Some(p), None, n) => format!("{p}: {} wallets preloaded", n.unwrap_or(0)) });
+            if let Some(q) = cfg.qf {
+                eprintln!("DIP PRESEND LIVE QF2 (dip41, {}): a whale's first >= 3% crossing whose whale has >= {} resolved >= 3% buys and sold within {} slots on >= {:.0}% of them, \
+                    filters {} (SOL in, curve vSOL after, age slots): 3..{}% -> {} ; >= {}% (T2) -> annotated only | the control file's \"qf2\": live|log flips it",
+                    if cfg.qf_live { "LIVE" } else { "LOG ONLY" }, q.n, q.win, q.score * 100.0, cfg.qf_filt.spec(), cfg.whale_pct,
+                    if cfg.qf_live { "a T2-path window (kind \"qf2\")" } else { "logged (presend_live_qf2), nothing sent" }, cfg.whale_pct);
+            }
         }
         arbx::feeds::own_fail_watch(user);
         // dip32: the creator histories' preload (the offline seed / the last run's state)
@@ -2303,12 +2378,14 @@ impl PsLive {
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd };
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
         // dip39: the bot depth gate's start record (after the control file: its mode is the start mode; nothing with it off)
         p.bd_start();
+        // dip41: the dumper ledger's start record (after the control file; nothing with it off)
+        p.wd_start();
         Ok(p)
     }
 
@@ -2491,6 +2568,8 @@ impl PsLive {
         let mut r = serde_json::json!({"ev": "presend_live_disarm", "w": id, "mint": b58(&w.mint), "why": why, "t": arbx::feeds::clock::now_ns(), "trig_slot": w.trig_slot, "en_slot": w.en_slot,
             "slot": self.sh.slot.load(Ordering::Relaxed), "armed_ms": w.armed_at.elapsed().as_secs_f64() * 1e3, "attempts": w.sent, "filled": w.filled});
         if let Some(x) = re { r["kind"] = "rearm".into(); r["rearm"] = x; }
+        // dip41: a wide window's end
+        if let Some((k, v)) = self.wd.as_ref().and_then(|d| d.wins.get(&id)) { r["kind"] = k.key().into(); r[k.field()] = v.json(*k); }
         // dip29: a window that ran under the deeper limit and never filled: what the normal limit would have done (approx: the deepest
         // drop from the highest price since the arm)
         if self.cfg.deep_drop > 0.0 && !w.filled {
@@ -2586,6 +2665,8 @@ impl PsLive {
             }
             // dip39 BOT DEPTH: a listed wallet's trade into the book and the armed window's copy, before any trigger of it (nothing with it off)
             if self.bd.is_some() { self.bd_trade(&e.mint, &e.user, e.buy, e.sol, e.tok, a.slot, a.t_rx); }
+            // dip41 the dumper ledger: every trade (before the detector: a trigger's lookup sees the buys resolved by its slot; nothing with it off)
+            if self.wd.is_some() { self.wd_trade(e, a.slot, a.t_rx); }
             evs.clear();
             self.det.trade(&t, &mut evs);
             // dip37c: the per-send blocklist's cached listed holder (a listed wallet's trade only; nothing without the flag)
@@ -2594,7 +2675,11 @@ impl PsLive {
             if self.l38_launch_on() { self.l38_trade(&t); }
             for ev in evs.drain(..) {
                 match ev {
-                    pl::Det::Trigger { whale, pct, bal, age_slots } => self.trigger(&t, whale, pct, bal, age_slots, &launch_of, reactive_open),
+                    pl::Det::Trigger { whale, pct, bal, age_slots } => {
+                        // dip41 QF2: a T2 trigger's annotation record (nothing with QF2 off)
+                        if self.wd.is_some() { self.wd_t2(&t, whale, pct, bal, age_slots); }
+                        self.trigger(&t, whale, pct, bal, age_slots, &launch_of, reactive_open)
+                    }
                     pl::Det::WhaleSell { whale } => {
                         // dip26: never a re-arm window's (its own stops: rearm_trade)
                         if let Some(id) = self.armed.get(&e.mint).copied().filter(|id| !self.rearm_w(*id)) {
@@ -2610,7 +2695,8 @@ impl PsLive {
                         }
                     }
                     pl::Det::Gone => { if let Some(&id) = self.armed.get(&e.mint) { self.disarm(id, "token_gone"); } }
-                    pl::Det::Below => {}
+                    // dip41 the WIDE-DUMPER tier (nothing with the ledger off)
+                    pl::Det::Below { whale, pct, bal, age_slots } => if self.wd.is_some() { self.wd_below(&t, whale, pct, bal, age_slots, &launch_of, reactive_open) },
                 }
             }
             // dip27 (log-only) / dip28 (the deeper limit): the armed window's largest other holder after this trade (the next attempt's `ob6`)
@@ -2654,13 +2740,24 @@ impl PsLive {
 
     #[allow(clippy::too_many_arguments)]
     fn trigger(&mut self, t: &pl::Trade, whale: Pk, pct: f64, bal: i64, age_slots: u64, launch_of: &impl Fn(&Pk) -> Option<Launch>, reactive_open: &dyn Fn(&Pk) -> bool) {
+        self.trigger_kind(t, whale, pct, bal, age_slots, launch_of, reactive_open, None)
+    }
+
+    /// a T2 trigger (`wide` None) or dip41 a WIDE-DUMPER tier's live window (`wide`: the whale's ledger values): the same path, the same live
+    /// filters; a wide one's records say "kind": "wide" + "widedumper", its size is --presend-live-wide-size-sol, it is not in T2's counts
+    /// nor in the shadow parity (the main shadow never arms a 3..6% whale)
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn trigger_kind(&mut self, t: &pl::Trade, whale: Pk, pct: f64, bal: i64, age_slots: u64, launch_of: &impl Fn(&Pk) -> Option<Launch>, reactive_open: &dyn Fn(&Pk) -> bool,
+                               wide: Option<(psdl::Kind, psdl::WdV)>) {
         // dip20 QUIET: the window's start is taken BEFORE the QUIET work, so it never moves an attempt (without QUIET: dip19's moment)
         let t_top = self.qt.as_ref().map(|_| arbx::fast::mono_ns());
-        self.st.triggers += 1;
+        if wide.is_none() { self.st.triggers += 1; }
         let (mint_s, sig_s) = (b58(&t.mint), bs58::encode(&t.sig).into_string());
         let trig = serde_json::json!({"mint": mint_s, "wallet": b58(&whale), "pct": pct, "bal": bal, "sig": sig_s, "slot": t.s, "idx": t.i, "j": t.j, "t": t.t_rx, "a": t.a(),
             "age_slots": age_slots, "sol": t.sol, "tok": t.tok, "vsol": t.vsol, "vtok": t.vtok});
-        self.par.insert((mint_s.clone(), sig_s.clone(), t.j as i64), (t.s, trig.clone()));
+        if wide.is_none() { self.par.insert((mint_s.clone(), sig_s.clone(), t.j as i64), (t.s, trig.clone())); }
+        // dip41: the wide window's size (T2: the pre-send size)
+        let spend = if wide.is_some() { self.wd.as_ref().map_or(self.cfg.spend, |w| w.size) } else { self.cfg.spend };
         let launch = launch_of(&t.mint);
         let mut why: Option<&'static str> = if self.stopped.is_some() || DIP_NO_FIRE.load(Ordering::Relaxed) { Some("stopped") }
             else if age_slots == 0 && !self.cfg.create_slot { Some("create_slot") }
@@ -2751,8 +2848,10 @@ impl PsLive {
         // dip27 (log-only): the annotations
         let ann = self.cfg.ann.then(|| ann_arm(&self.det, &self.user, &t.mint, t.s));
         if let Some(why) = why {
-            *self.st.skips.entry(why).or_default() += 1;
+            if wide.is_none() { *self.st.skips.entry(why).or_default() += 1; }
             let mut r = serde_json::json!({"ev": "presend_live_skip", "why": why, "trig": trig});
+            // dip41: a wide window's skip says so; a T2 skip carries the whale's dumper ledger values (each only with the ledger on)
+            if let Some((k, v)) = wide { r["kind"] = k.key().into(); r[k.field()] = v.json(k); } else { self.wd_t2_fields(&mut r, &whale, t, age_slots); }
             if let Some(j) = &qj { r["quiet"] = j.clone(); r["quiet_skip"] = (why == "quiet").into(); }
             if let Some(v) = v2 { self.st.v2_skip[if v["skip"] == true { 0 } else { 1 }] += 1; r["v2"] = v; }
             if let Some(n) = nb { r["nb"] = n.into(); }
@@ -2771,6 +2870,12 @@ impl PsLive {
             // dip34 (log-only): seen / eqgrp / q4 (each only with its flag); then this skip into the seen book (cr_loss / quiet3_a)
             self.log34(&mut r, &t.mint, &whale, t.s, t.t_rx);
             self.rec(r);
+            // dip41: a wide window withheld by a live filter: counted and a line; none of the T2 skip's ledger / paper notes (no shadow row)
+            if let Some((k, _)) = wide {
+                self.wd_skipped(k, why);
+                self.line(format!("  PRESEND LIVE {} SKIP ({why}) {} whale {} {:.1}%", k.name(), b58(&t.mint), &b58(&whale)[..8], pct));
+                return;
+            }
             self.seen_note(why, whale, t.t_rx, t.mint);
             if why == "wh_loss" {
                 if let Some((_, h)) = whg { self.wh_skip_line(&t.mint, &whale, &h, false); }
@@ -2827,7 +2932,7 @@ impl PsLive {
         // dip37: the window's fee arm, once, now (None with the A/B off)
         let fab = self.fab_assign(id);
         let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
-            spend: self.cfg.spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
+            spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
             grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint) };
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
@@ -2838,9 +2943,11 @@ impl PsLive {
         if let (Some(q), Some(k)) = (self.qt.as_mut(), qkey) {
             if let Some(w) = q.watch.get_mut(&t.mint).and_then(|v| v.iter_mut().find(|w| w.id == k)) { w.win = Some(id); }
         }
-        self.st.armed += 1;
-        let mut r = serde_json::json!({"ev": "presend_live_arm", "w": id, "trig": trig, "en_slot": en_slot, "k": self.cfg.k, "spend": self.cfg.spend, "drop": self.cfg.drop,
+        if wide.is_none() { self.st.armed += 1; }
+        let mut r = serde_json::json!({"ev": "presend_live_arm", "w": id, "trig": trig, "en_slot": en_slot, "k": self.cfg.k, "spend": spend, "drop": self.cfg.drop,
             "lim0": t.p() * (1.0 - self.cfg.drop), "dry": self.cfg.dry});
+        // dip41: a wide window says so (its values kept for its fill / realized); a T2 arm carries the whale's dumper ledger values
+        if let Some((k, v)) = wide { r["kind"] = k.key().into(); r[k.field()] = v.json(k); self.wd_armed(id, k, v); } else { self.wd_t2_fields(&mut r, &whale, t, age_slots); }
         if let Some(j) = qj { r["quiet"] = j; r["quiet_skip"] = false.into(); }
         if let Some(v) = v2 { self.st.v2_arm[if v["skip"] == true { 0 } else { 1 }] += 1; r["v2"] = v; }
         // dip27: only when on (off: dip26's record)
@@ -2873,8 +2980,9 @@ impl PsLive {
         self.l38_arm(id, t.mint, whale, false, t.s, t.t_rx);
         // dip36 (log-only): FP-NOBOT at the arm (its thread; nothing without the flag)
         if let Some(r) = fpr { self.fpnb_arm(id, false, t.mint, t, whale, t.s, Vec::new(), &r, en_slot, fpg); }
-        self.line(format!("  PRESEND LIVE ARM w{id} {} whale {} {:.1}% ({:.2} SOL) age {} slots | until slot {en_slot} | {} attempts/slot, limit {:.2}x", b58(&t.mint),
-            &b58(&whale)[..8], pct, t.sol as f64 / 1e9, age_slots, self.cfg.k, 1.0 - self.cfg.drop));
+        self.line(format!("  PRESEND LIVE ARM w{id} {} whale {} {:.1}% ({:.2} SOL) age {} slots | until slot {en_slot} | {} attempts/slot, limit {:.2}x{}", b58(&t.mint),
+            &b58(&whale)[..8], pct, t.sol as f64 / 1e9, age_slots, self.cfg.k, 1.0 - self.cfg.drop,
+            wide.map(|(k, v)| format!(" [{}: {}/{} {}, {:.3} SOL]", k.key(), v.hits(k), v.n, if k == psdl::Kind::Wide { "dumped" } else { "sold fast" }, spend as f64 / 1e9)).unwrap_or_default()));
     }
 
     /// one of our attempts filled (its buy TradeEvent)
@@ -2922,6 +3030,8 @@ impl PsLive {
             "p_entry_post": t.p(), "p_entry_pre": t.p_pre(), "slots_after_trigger": t.s.saturating_sub(trig_slot), "slots_after_send": t.s.saturating_sub(att.slot),
             "ms_send_to_rx": (t.t_rx as i64 - att.t_send as i64) as f64 / 1e6, "window_open": window_open, "reactive_on_mint": reactive_on_mint, "after_exit": after_exit});
         if rearm { rec["kind"] = "rearm".into(); rec["spend"] = spend.into(); }
+        // dip41: a wide window's fill (its size, the whale's ledger values at the arm)
+        if let Some((k, v)) = self.wd_win(att.w) { rec["kind"] = k.key().into(); rec["spend"] = spend.into(); rec[k.field()] = v.json(k); }
         // dip38 PSM12-S1 (log only): the window's verdict at its arm (nothing with the log off)
         if let Some(j) = self.s1_fill(att.w, true) { rec["s1"] = j; }
         // dip39 (only with the gate on): the filling attempt's verdict at its send, the depth at the fill's slot
@@ -3341,7 +3451,9 @@ impl PsLive {
         let l38 = self.l38_realize(p.w, p.pid, p.rearm);
         // dip38 PSM12-S1 (log only): the window's verdict on the realized record (None with the log off)
         let s1 = self.s1_fill(p.w, false);
-        self.exec(Cmd::Realized { pid: p.pid, w: p.w, mint: p.mint, buys, sells: p.sells.clone(), rearm: p.rearm, cr, ab, wh, hl, l38, s1 });
+        // dip41: a wide window's position (its record says so; the values kept until now are let go)
+        let wd = self.wd.as_mut().and_then(|d| d.wins.remove(&p.w)).map(|(k, v)| (k.key(), k.field(), v.json(k)));
+        self.exec(Cmd::Realized { pid: p.pid, w: p.w, mint: p.mint, buys, sells: p.sells.clone(), rearm: p.rearm, cr, ab, wh, hl, l38, s1, wd });
     }
 
     /// dip19: a Telegram alert (the tests keep its title instead: no raise while another test traps them)
@@ -3389,7 +3501,7 @@ impl PsLive {
                     tasks.fetch_sub(1, Ordering::SeqCst);
                 });
             }
-            Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38, s1 } => {
+            Cmd::Realized { pid, w, mint, buys, sells, rearm, cr, ab, wh, hl, l38, s1, wd } => {
                 let (rpc, out) = ((*self.rpc).clone(), self.out.clone());
                 // dip31: the circuit breaker sees every realized P&L (off: nothing)
                 let (sh, brk) = (self.sh.clone(), self.cfg.breaker);
@@ -3413,6 +3525,8 @@ impl PsLive {
                     let (mut rec, line) = realized_out(w, pid, &mint, pnl, &buys, &bs, nb, ns, sells.len(), rearm);
                     // dip38 PSM12-S1 (log only): the window's verdict
                     if let Some(j) = s1 { rec["s1"] = j; }
+                    // dip41: a wide window's position
+                    if let Some((k, f, j)) = wd { rec["kind"] = k.into(); rec[f] = j; }
                     // dip37 (nothing with the fee A/B off)
                     if let (Some(z), Some(a)) = (&frz, &ab) { z.add(a.arm, a.grp, pnl); a.put(&mut rec); }
                     // dip37 the whale / dumper ledger: this position into its arm wallet's history (nothing with the ledger off)
@@ -3477,6 +3591,8 @@ impl PsLive {
     pub fn tick(&mut self, slot_now: u64, first: Option<&FxHashMap<u64, (u64, u16)>>) {
         // dip39: the bot depth book's prune and its list's reload check (nothing with it off)
         if self.bd.is_some() { self.bd_tick(slot_now); }
+        // dip41: the dumper ledger's prunes and its state (nothing with it off)
+        if self.wd.is_some() { self.wd_tick(slot_now); }
         // dip36: the blocklist's reload check (a stat every ~10 s; nothing without the flag)
         if let Some(r) = self.bl.as_mut().and_then(|b| b.check(false)) {
             self.line(format!("  PRESEND LIVE BLOCKLIST {} {}", if r["ok"] == true { "reloaded:" } else { "NOT reloaded (the last good list stays):" }, r));
@@ -3909,7 +4025,7 @@ impl PsLive {
     pub fn status(&mut self) -> String {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
-            + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status();
+            + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -4090,6 +4206,7 @@ impl PsLive {
         if let Some(j) = self.l38_finish() { fin["dip38_log"] = j; }
         if let Some(j) = self.s1_finish() { fin["s1"] = j; }
         if let Some(j) = self.bd_finish() { fin["botdepth"] = j; }
+        if let Some(j) = self.wd_finish() { fin["widedumper"] = j; }
         fin
     }
 
@@ -4241,6 +4358,8 @@ impl PsLive {
         let bl = cfg.blocklist.as_deref().map(|p| psblock::Blocklist::load(p).unwrap());
         // dip39: the bot depth gate's list (fail open on a bad one, as a run)
         let bd = cfg.bd.map(|g| psbd::Bd::open(g, cfg.bd_list.as_deref(), cfg.bd_state.as_deref(), &user));
+        // dip41: the dumper ledger + the WIDE-DUMPER tier (as a run)
+        let wd = cfg.dl_on.then(|| psdl::Wd::open(cfg.wd, cfg.wd_live, cfg.qf, cfg.qf_filt, cfg.qf_live, cfg.wd_size, cfg.dl_state.as_deref()));
         // dip38: the anti-bait log with the tests' queue (no task, no RPC)
         let l38 = pslog38::L38::new(&cfg, None).unwrap();
         let (atx, arx) = crossbeam_channel::unbounded();
@@ -4265,7 +4384,7 @@ impl PsLive {
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd }, atx, orx)
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd }, atx, orx)
     }
 
     /// dip19 tests: the chain work queued so far (taken)
@@ -4365,6 +4484,11 @@ mod dip38_s1_tests;
 #[cfg(test)]
 #[path = "dip39_bd_tests.rs"]
 mod dip39_bd_tests;
+
+// dip41 (11-06 PKT): the whale fast-dump ledger + the WIDE-DUMPER tier (--presend-live-dumper-ledger on; off by default = dip39)
+#[cfg(test)]
+#[path = "dip41_wd_tests.rs"]
+mod dip41_wd_tests;
 
 #[cfg(test)]
 mod tests {

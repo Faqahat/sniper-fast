@@ -25,12 +25,6 @@ mod shredfire;
 #[path = "regpaper.rs"]
 mod regpaper;
 use regpaper::{Paper, Regular};
-// dip40 REACT R1 (--react-r1 log|live; owner 11-05 build + FRA probe): the frozen haqq7 R1 reactive lane (off without the flag)
-#[path = "react_r1.rs"]
-mod react_r1;
-#[cfg(test)]
-#[path = "dip40_r1_tests.rs"]
-mod dip40_r1_tests;
 use std::collections::{HashMap, HashSet};
 use std::io::Write as _;
 
@@ -69,13 +63,7 @@ struct LivePos {
     /// NONCE (--nonce-fanout): the buy's sent variants (empty: today's one tx). Until one is seen landed `buy_sig` /
     /// `buy_sig_b` are the first-written one and `tips` the largest; then the landed one's (`adopt`)
     vars: Vec<Var>,
-    /// dip40 REACT R1: this position's own exit (None: a regular / shred buy, the run's --dip-hold-slots / --dip-tp / --dip-sl as before)
-    xr: Option<Xr>,
 }
-
-/// dip40 REACT R1: a lane position's exit (slots after its entry; TP / SL fractions, f64::INFINITY = off)
-#[derive(Clone, Copy, Debug)]
-struct Xr { hold: u64, tp: f64, sl: f64 }
 
 /// NONCE: one sent durable-nonce variant of a buy: its signature, the one tip it pays (0: tipless), its send paths
 #[derive(Clone)]
@@ -318,22 +306,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     // PRE-SEND LIVE (--presend-live): its flags checked now (refused before any feed starts); started below
     let ps_live_cfg = pslive::Cfg::from_args(&presend.as_ref().map(|s| s.p.clone()).unwrap_or_default(), live, cap_lamports)?;
     if live && dev_spend > cap_lamports { bail!("REFUSED: --dip-dev-spend-lamports {dev_spend} exceeds --max-sol"); }
-    // dip40 REACT R1 (--react-r1 log|live): its flags checked now (refused before any feed starts); off without the flag
-    let r1_cfg = react_r1::Cfg::from_args(live, &user)?;
-    if let Some(c) = &r1_cfg {
-        if probe_n > 0 { bail!("--react-r1 with --dip-probe: the landing probe is its own experiment (run them separately)"); }
-        if c.mode == react_r1::Mode::Live {
-            // the lane buys in the dump's slot only: the on-chain slot guard with N = 0, which is the run's (--buy-max-slot-delta) for every
-            // prepared buy; the regular lane's deadline would change with it, so a live R1 runs with the regular lane paper or off
-            if regular == Regular::Live { bail!("--react-r1 live needs --buy-max-slot-delta 0 (the dump's slot only), which would change the regular lane's deadline: run it with --dip-regular paper|off"); }
-            match SLOT_GUARD.get() {
-                Some((_, 0)) => {}
-                Some((_, n)) => bail!("--react-r1 live buys in the dump's slot only: --buy-max-slot-delta must be 0 (got {n})"),
-                None => bail!("--react-r1 live needs the on-chain slot guard: --buy-max-slot-delta 0"),
-            }
-            if c.size > cap_lamports { bail!("REFUSED: --react-r1-size-sol {} exceeds --max-sol", c.size as f64 / 1e9); }
-        }
-    }
     let fast = fastfire::get();
     if live && fast.is_none() { bail!("--dip --live fires through the FAST path: add --fast-send"); }
     // every buy template (tip shape x size) built now, not at a fire
@@ -350,13 +322,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         let t0 = Instant::now();
         let n = f.warm_nonce_templates(&sp);
         eprintln!("DIP NONCE variant templates ready: {n} (sizes {:?} lamports) in {:.1} ms | {}", sp, t0.elapsed().as_secs_f64() * 1e3, np.line());
-    }
-    // dip40 REACT R1 live: its size's buy templates too (nothing without it)
-    if let (Some(c), Some(f)) = (r1_cfg.as_ref().filter(|c| c.mode == react_r1::Mode::Live), fast) {
-        let t0 = Instant::now();
-        let n = f.warm_templates(&[c.size]);
-        let m = if npool.is_some() { f.warm_nonce_templates(&[c.size]) } else { 0 };
-        eprintln!("DIP R1 templates ready: {n} + nonce variant {m} (size {} lamports) in {:.1} ms", c.size, t0.elapsed().as_secs_f64() * 1e3);
     }
     let me = b58(&user);
     eprintln!("\nDIP {} | model {} tier {tier} (score >= {thr:.4}) | exit {tp_s} / SL -{:.0}% / {hold} slots | guard x{guard} | spend {:.3} SOL | max buys {max_buys} | max open {max_inflight} | loss cap {} | {minutes} min",
@@ -437,7 +402,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         ps_live_cfg.as_ref().map(|c| format!("{:.4} SOL per rolling 24 h (pauses, never stops)", c.fee_budget as f64 / 1e9)).unwrap_or_else(|| "-".into()));
     eprintln!("DIP REGULAR {}", match regular { Regular::Live => "LIVE (as before)".to_string(), Regular::Paper => format!("PAPER: decided as live, NEVER sent; paper landing {paper_ms} ms; regular_paper_* records"),
         Regular::Off => "OFF: no regular buys (dumps still logged; would-be picks as pick_skip regular_off)".to_string() });
-    if let Some(c) = &r1_cfg { eprintln!("{}", c.banner()); }
     if let Some(c) = &obs_cfg {
         eprintln!("DIP OBSERVATORY (LOG ONLY, own thread, never sends): {} -> {}{}", c.names().join(", "), c.out.display(),
             if has("--observatory") && c.watch.is_empty() { " | WARNING: no --obs-watch FILE: the watch list is off" } else { "" });
@@ -455,8 +419,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     rs["limits"] = limits;
     rs["regular"] = regular.as_str().into();
     if regular == Regular::Paper { rs["regular_paper_ms"] = paper_ms.into(); }
-    // dip40: only when on
-    if let Some(c) = &r1_cfg { rs["react_r1"] = c.json(); }
     if let Some(c) = &obs_cfg { rs["obs"] = c.json(); }
     // dip14: only when on (dip13's run_start is unchanged otherwise)
     if let Some(c) = &shred_cfg { rs["shred"] = c.json(); }
@@ -592,8 +554,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     let mut m2toks: HashMap<Pk, arbx::dip_model::Tok> = HashMap::new();
     let mut m2st = M2Stats::default();
     let mut open: HashMap<Pk, LivePos> = HashMap::new();
-    // dip40 REACT R1: the lane's book and counters (None: off)
-    let mut r1: Option<react_r1::R1> = r1_cfg.map(|c| react_r1::R1::new(c, user));
     let (mut n_dumps, mut n_env, mut n_picks, mut n_fired, mut n_closed, mut skipped) = (0u64, 0u64, 0u64, 0u64, 0u64, HashMap::<&'static str, u64>::new());
     let mut last_status = Instant::now();
     let mut slot_now = 0u64;
@@ -704,8 +664,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
                 pslive.as_mut().map(|p| p.status()).unwrap_or_default(),
                 // dip24 (each only when on)
                 paper.as_ref().map(|p| p.line()).unwrap_or_default(), lock_line(), obs.as_ref().map(|o| o.feeder.line()).unwrap_or_default());
-            // dip40 REACT R1 (only when on): its own status line
-            if let Some(r) = r1.as_ref() { eprintln!("  DIP R1 status:{} | book {} token(s)", r.st.line(r.cfg.mode, open.values().filter(|p| p.xr.is_some()).count()), r.book.m.len()); }
             let cutoff = Duration::from_secs_f64(max_age_s + 300.0);
             toks.retain(|m, t| t.t_created.elapsed() < cutoff || open.contains_key(m));
             if m2.is_some() { m2toks.retain(|m, _| toks.contains_key(m)); }
@@ -816,8 +774,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             let keys = match (defer, launch.as_ref(), fast) { (true, Some(l), Some(f)) => Some(f.var_keys(l)), _ => None };
             toks.insert(mint, Tok { book: TokenBook::new(li), launch, t_created: Instant::now(), last_pick_slot: None, dev, keys });
             if m2.is_some() { m2toks.insert(mint, arbx::dip_model::Tok::new(a.slot)); }
-            // dip40 REACT R1: the token is followed from its create
-            if let Some(r) = r1.as_mut() { r.book.create(mint, a.slot, x.mayhem); }
         }
         // trades
         for (j, e) in x.trades.iter().enumerate() {
@@ -840,11 +796,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
                         log.w(with_var(serde_json::json!({"ev": "buy_land", "mint": b58(&e.mint), "sig": sig, "slot": a.slot, "idx": x.index, "t": a.t_rx, "tokens": e.tok, "sol": e.sol,
                             "fee": x.fee, "slots_after_dump": a.slot as i64 - p.dump_slot as i64, "rx_ms_after_dump": (a.t_rx as i64 - p.t_dump_rx as i64) as f64 / 1e6,
                             "vsol": e.vsol, "vtok": e.vtok}), var));
-                        // dip40 REACT R1: the lane's fill record (price, block index, place after the dump)
-                        if let (Some(r), true) = (r1.as_ref(), p.xr.is_some()) {
-                            react_r1::FILLED.fetch_add(1, Ordering::Relaxed);
-                            log.w(r1_fill_rec(r, p, &sig, a.slot, x.index, a.t_rx, e));
-                        }
                     } else if !e.buy {
                         p.sell_land = Some((a.slot, x.index, a.t_rx, e.sol));
                         log.w(serde_json::json!({"ev": "sell_land", "mint": b58(&e.mint), "sig": sig, "slot": a.slot, "idx": x.index, "t": a.t_rx, "sol": e.sol, "fee": x.fee}));
@@ -855,13 +806,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             if open.contains_key(&e.mint) {
                 log.w(serde_json::json!({"ev": "tape", "mint": b58(&e.mint), "sig": sig, "slot": a.slot, "idx": x.index, "j": j, "t": a.t_rx, "user": b58(&e.user),
                     "buy": e.buy, "sol": e.sol, "tok": e.tok, "vsol": e.vsol, "vtok": e.vtok}));
-            }
-            // dip40 REACT R1: the lane's decision on this trade (a candidate is decided on the trades seen before it, then the trade enters
-            // its book; a pick fires here, live); nothing without --react-r1
-            if let Some(r) = r1.as_mut() {
-                r1_trade(r, e, &a, &x, j, &sig, t_loop, &toks, &mut open, &mut pend, R1Ctx { allow_holder, skip_clients: skip_clients.as_deref(), pslive: pslive.as_ref(),
-                    npool, fast, user, mtx: &mtx, log: &log, names: &feed_names, net: Some((rpc, path)) });
-                r.book.prune(slot_now, |m| open.contains_key(m));
             }
             let Some(tk) = toks.get_mut(&e.mint) else { continue };
             let t = T { s: a.slot, i: x.index as u32, j: j as i32, sig: sig.clone(), user: user_s, buy: e.buy, sol: e.sol, tok: e.tok, vsol: e.vsol, vtok: e.vtok,
@@ -875,8 +819,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
                     let fr = (e.fbps + e.cbps).max(1) as f64 / 1e4;
                     let so = di_sell_out(e.vsol, e.vtok, p.tokens) as f64 * (1.0 - fr) / 1e9;
                     let val = (so - TXC) / (p.spend as f64 / 1e9 + TXC);
-                    // dip40 REACT R1: a lane position's own TP / SL (off = never); None: the run's --dip-tp / --dip-sl, as before
-                    let (tp, sl) = p.xr.map_or((tp, sl), |x| (x.tp, x.sl));
                     let why = if val >= 1.0 + tp { Some("take-profit") } else if val <= 1.0 - sl { Some("stop-loss") } else { None };
                     if let Some(why) = why { trigger_exit(p, why, a.slot, val, a.t_rx, &log, &key_arc, user, rpc, path, &mtx); }
                 }
@@ -1161,7 +1103,7 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             open.insert(e.mint, LivePos { mint: e.mint, launch, dump_sig: sig.clone(), dump_slot: a.slot, dump_idx: x.index, t_dump_rx: a.t_rx, dump_vsol: tr.vsol, dump_vtok: tr.vtok,
                 score: d.score, t_fire_ns: t_fire, buy_sig: prep.meta.sig.clone(), buy_sig_b: prep.sig, route: prep.meta.route.clone(), leader: prep.meta.leader.clone(),
                 client: prep.meta.client.clone(), tips: prep.meta.tips, spend: spend_p, min_out, send_slot: a.slot, land: None, tokens: 0, sol_in: 0, buy_ok: None,
-                exit: None, sell_land: None, pos: Some(pos), fired_at: Instant::now(), vars, xr: None });
+                exit: None, sell_land: None, pos: Some(pos), fired_at: Instant::now(), vars });
             // NONCE --fast-verify (off the hot path): every sent variant vs its own full compile, signature, requests and tips
             if prep.nonce.is_some() && f.verify_on() { tokio::spawn(async move { f.trace_prep(&prep) }); }
         }
@@ -1249,8 +1191,6 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     if let Some(ps) = &presend { let mut j = ps.stats_json(); j["timing"] = ps_time.json(); re["presend"] = j; }
     if let Some(j) = ps_live_end { re["presend_live"] = j; }
     if let Some(sf) = shred.as_ref() { re["shred"] = sf.json(); eprintln!("=== DIP SHRED:{}", sf.line()); }
-    // dip40 REACT R1 (only when on): the lane's totals (its realized lookups are in: waited for above)
-    if let Some(r) = r1.as_ref() { re["react_r1"] = r.st.json(); eprintln!("=== DIP R1:{}", r.st.line(r.cfg.mode, 0)); }
     // dip24: why the run stopped first; the paper book's totals; the observatory's last records and totals (each only when on)
     re["stop_why"] = DIP_STOP_WHY.get().copied().unwrap_or("feeds_closed").into();
     if let Some(pp) = paper.as_mut() { pp.finish(&log); re["regular_paper"] = pp.json(); eprintln!("=== DIP{}", pp.line()); }
@@ -1496,180 +1436,9 @@ fn shred_pick(pk: &shredfire::Pick, a: &arbx::feeds::Arrival, t_loop: u64, t_dec
     open.insert(pk.mint, LivePos { mint: pk.mint, launch, dump_sig: tr.sig.clone(), dump_slot: a.slot, dump_idx: u64::MAX, t_dump_rx: a.t_rx, dump_vsol: tr.vsol, dump_vtok: tr.vtok,
         score: pk.d.score, t_fire_ns: t_fire, buy_sig: prep.meta.sig.clone(), buy_sig_b: prep.sig, route: prep.meta.route.clone(), leader: prep.meta.leader.clone(),
         client: prep.meta.client.clone(), tips: prep.meta.tips, spend: spend_p, min_out, send_slot: a.slot, land: None, tokens: 0, sol_in: 0, buy_ok: None,
-        exit: None, sell_land: None, pos: Some(pos), fired_at: Instant::now(), vars, xr: None });
+        exit: None, sell_land: None, pos: Some(pos), fired_at: Instant::now(), vars });
     if prep.nonce.is_some() && f.verify_on() { tokio::spawn(async move { f.trace_prep(&prep) }); }
     ("fired".into(), Some((t_fire, buy_sig)), Some(min_out))
-}
-
-/// dip40 REACT R1: what the lane's checks + fire need besides its own state
-struct R1Ctx<'a> {
-    allow_holder: bool, skip_clients: Option<&'a [String]>, pslive: Option<&'a pslive::PsLive>, npool: Option<&'static Arc<noncefan::Pool>>,
-    fast: Option<&'static fastfire::Fast>, user: Pk, mtx: &'a tokio::sync::mpsc::UnboundedSender<Msg>, log: &'a DipLog, names: &'a [String],
-    /// the RPC + main send path (the route for the leader, the land poll); None only in the unit tests (log mode)
-    net: Option<(&'a Arc<rpc::Rpc>, &'a Arc<send::Path>)>,
-}
-
-/// dip40 REACT R1: one executed trade for the lane. A candidate sell (another wallet's, >= 1% of supply, on a token whose create was
-/// seen) is decided on the trades seen BEFORE it (react_r1::Book::features: no look-ahead), then the trade enters the book. A rule
-/// pass goes through the execution checks and, live, the regular path's FIRE (prepare, writes, nonce, position, land poll) with the
-/// lane's price guard, size and exit; its react_r1_decision record is written after any send
-#[allow(clippy::too_many_arguments)]
-fn r1_trade(r1: &mut react_r1::R1, e: &arbx::dip::TradeEvent, a: &arbx::feeds::Arrival, x: &arbx::feeds::ExecInfo, j: usize, sig: &str, t_loop: u64,
-            toks: &HashMap<Pk, Tok>, open: &mut HashMap<Pk, LivePos>, pend: &mut Vec<Pend>, c: R1Ctx) {
-    let cand = react_r1::is_candidate(e.buy, &e.user, &c.user, e.tok);
-    let feat = if cand { r1.book.features(&e.mint, a.slot, e.sol, e.tok, &r1.cfg.bots) } else { None };
-    // the trade enters the book only now (its own features never see it)
-    r1.book.push(&e.mint, e.user, e.buy, e.sol, e.tok, a.slot, x.index);
-    let Some(f) = feat else { return };
-    r1.st.cand += 1;
-    let t_dec = arbx::feeds::clock::now_ns();
-    let fails = f.fails();
-    let mut fire_j: Option<serde_json::Value> = None;
-    let act: String = if !f.pass() {
-        for w in &fails { *r1.st.fails.entry(w).or_default() += 1; }
-        "rule_fail".into()
-    } else {
-        r1.st.pass += 1;
-        match r1_act(r1, &f, e, a, x, sig, t_loop, t_dec, toks, open, pend, &c) {
-            Ok(fj) => { fire_j = fj; if fire_j.is_some() { "fired".into() } else { "log".into() } }
-            Err(why) => { *r1.st.skips.entry(why).or_default() += 1; format!("skip:{why}") }
-        }
-    };
-    let mut d = serde_json::json!({"ev": "react_r1_decision", "mode": r1.cfg.mode.as_str(), "mint": b58(&e.mint), "sig": sig, "slot": a.slot, "idx": x.index, "j": j, "t": a.t_rx,
-        "seller": b58(&e.user), "vsol": e.vsol, "vtok": e.vtok, "feat": f.json(), "rule_pass": fails.is_empty(), "fails": fails, "act": act,
-        "dec_us": (t_dec as i64 - a.t_rx as i64) as f64 / 1e3});
-    if let Some(fj) = fire_j { d["fire"] = fj; }
-    c.log.w(d);
-}
-
-/// dip40 REACT R1: a rule pass -> Ok(Some(the fire's summary)) when fired, Ok(None) when logged (log mode: would fire), Err(skip reason)
-#[allow(clippy::too_many_arguments)]
-fn r1_act(r1: &mut react_r1::R1, f: &react_r1::Feat, e: &arbx::dip::TradeEvent, a: &arbx::feeds::Arrival, x: &arbx::feeds::ExecInfo, sig: &str, t_loop: u64, t_dec: u64,
-          toks: &HashMap<Pk, Tok>, open: &mut HashMap<Pk, LivePos>, pend: &mut Vec<Pend>, c: &R1Ctx) -> std::result::Result<Option<serde_json::Value>, &'static str> {
-    // never on a mint we hold / have pending, nor one the pre-send lane holds or has armed (the study's ours_ov exclusion)
-    if open.contains_key(&e.mint) { return Err("open_on_token"); }
-    if let Some(why) = c.pslive.and_then(|p| p.blocks_reactive(&e.mint)) { return Err(why); }
-    // ev.py block: one pick per token until its exit slot + 1
-    let h = r1.cfg.exit_slots;
-    let Some(mb) = r1.book.m.get_mut(&e.mint) else { return Err("no_book") };
-    if react_r1::blocked(mb.last_pick, a.slot, h) { return Err("token_blocked"); }
-    mb.last_pick = Some(a.slot);
-    if f.mayhem { return Err("mayhem"); }
-    if e.vtok <= react_r1::GRAD_VTOK { return Err("graduated"); }
-    let Some(launch) = toks.get(&e.mint).and_then(|t| t.launch.clone()) else { return Err("no_launch_accounts") };
-    if launch.is_mayhem { return Err("mayhem"); }
-    if !launch.is_create_v2 { return Err("legacy_create"); }
-    let holder_ok = c.allow_holder && launch.is_holder_reward && !launch.is_mayhem && !launch.is_cashback && launch.creator_fee_bps == 0;
-    if !launch.is_vanilla() && !holder_ok { return Err("non_vanilla"); }
-    let spend = r1.cfg.size;
-    let fr = (e.fbps + e.cbps).max(1) as f64 / 1e4;
-    let min_out = react_r1::min_out_price(spend, fr, e.vsol, e.vtok, r1.cfg.max_price);
-    let route = c.net.map(|(_, p)| lat::buy_paths(p, ALSO_PATH.get(), Some(a.slot)));
-    if let (Some(l), Some((_, meta))) = (c.skip_clients, route.as_ref()) { if shredfire::client_in(l, &meta.client) { return Err("skip_client"); } }
-    if r1.cfg.mode == react_r1::Mode::Log {
-        r1.st.logged += 1;
-        return Ok(None);
-    }
-    // LIVE: the run's state, the lane's caps
-    if DIP_NO_FIRE.load(Ordering::Relaxed) { return Err("no_new_buys"); }
-    if open.values().filter(|p| p.xr.is_some()).count() >= r1.cfg.max_open { return Err("max_open"); }
-    if !r1.rate_ok(Instant::now()) { return Err("max_per_min"); }
-    if KS_PAUSE.load(Ordering::Relaxed) || FIRE_PAUSE.load(Ordering::Relaxed) { return Err("paused"); }
-    let bal = ACCT.bal.load(Ordering::SeqCst);
-    if bal > 0 && bal < spend + 30_000_000 + ACCT.reserved.load(Ordering::SeqCst) { return Err("balance"); }
-    let Some(fp) = c.fast else { return Err("no_fast_path") };
-    let (Some((rpc, _)), Some((fan, meta))) = (c.net, route) else { return Err("no_send_path") };
-    // FIRE (the regular path's code: nonce variant when one is ready, else today's multi-tip tx; deadline = this slot + --buy-max-slot-delta 0)
-    let t0 = arbx::feeds::clock::now_ns();
-    let cr = [a.t_rx, a.t_decoded, t0, t0, t0, t0];
-    let keys = toks.get(&e.mint).and_then(|t| t.keys);
-    let lease = c.npool.and_then(|np| np.take());
-    let mut nonce_fb: Option<String> = if c.npool.is_some() && lease.is_none() { Some("no nonce account ready".into()) } else { None };
-    let nprep = match &lease {
-        Some(l) => match fp.prepare_nonce_route(&launch, a.slot, min_out, cr, Some(spend), (l.key, l.value), fan.clone(), meta.clone(), keys) {
-            Ok(p) => Some(p), Err(err) => { nonce_fb = Some(format!("{err:#}")); None }
-        },
-        None => None,
-    };
-    if nprep.is_none() { if let (Some(np), Some(l)) = (c.npool, lease.as_ref()) { np.give_back(l); } }
-    let mut prep = match nprep {
-        Some(p) => p,
-        None => match fp.prepare_on(&launch, a.slot, min_out, cr, None, Some(spend)) { Ok(p) => p, Err(err) => { eprintln!("  DIP R1 prepare {} failed: {err:#}", b58(&e.mint)); return Err("prepare_failed"); } },
-    };
-    let t_p1 = arbx::feeds::clock::now_ns();
-    let rec = fp.fire(&mut prep);
-    // ---- everything below runs after the writes ----
-    if let (Some(np), Some(l)) = (c.npool, lease.as_ref()) { if prep.nonce.is_some() { np.fired(l, prep.deadline); } }
-    r1.st.fired += 1;
-    r1.fires.push_back(Instant::now());
-    let pos = Pos::new(e.mint, spend, 5_000 + prep.meta.tips + arg_u64("--cu-limit", 120_000) * arg_u64("--cu-price-micro", 3_000_000) / 1_000_000, &prep.meta.sig);
-    let t_fire = arbx::feeds::clock::now_ns();
-    let vars: Vec<Var> = prep.variants().into_iter().map(|(sig, sig_b, tip, tip_acct, paths)| Var { sig, sig_b, tip, tip_acct, paths }).collect();
-    let win = speed16::window_on().then(|| speed16::window_json(a.slot, None, a.t_rx, Some(t0), speed16::first_write_rt(&rec.w), c.names));
-    let tag = if speed16::route_on() { prep.id } else { 0 };
-    pend.push(Pend { kind: "fire", mint: b58(&e.mint), buy_sig: prep.meta.sig.clone(), dump_sig_b: a.tx.sig, buy_sig_b: prep.sig, t_dump_rx: a.t_rx, t_fire,
-                     due: Instant::now() + Duration::from_secs(3), more: vars.iter().skip(1).map(|v| v.sig_b).collect(), via: "r1", win: win.clone(), tag });
-    // the regular "fire" record (the run reports / dipmon / probe_report read it), labeled "via": "r1"
-    let mut fj = serde_json::json!({"ev": "fire", "via": "r1", "mint": b58(&e.mint), "dump_sig": sig, "buy_sig": prep.meta.sig, "slot": a.slot, "t_dump_rx": a.t_rx, "t_fire": t_fire,
-        "decision_us": (t_fire as i64 - a.t_rx as i64) as f64 / 1e3,
-        "lat_us": {"queue": (t_loop as i64 - a.t_rx as i64) as f64 / 1e3, "rule": (t_dec as i64 - t_loop as i64) as f64 / 1e3, "checks_logs": (t0 as i64 - t_dec as i64) as f64 / 1e3,
-                   "prepare": (t_p1 as i64 - t0 as i64) as f64 / 1e3, "fire": (t_fire as i64 - t_p1 as i64) as f64 / 1e3},
-        "route": prep.meta.route, "leader": prep.meta.leader, "client": prep.meta.client, "tips": prep.meta.tips, "min_out": min_out, "spend": spend, "dev": false,
-        "deadline": prep.deadline, "writes": rec.w.iter().map(|(n, k, a0, a1, st)| serde_json::json!({"path": n, "kind": k, "t0": a0, "t1": a1, "st": st})).collect::<Vec<_>>()});
-    if let Some(n) = &prep.nonce {
-        fj["nonce"] = serde_json::json!({"acct": b58(&n.acct), "value": b58(&n.value), "variants": vars.iter().map(var_json).collect::<Vec<_>>(),
-            "per_path": prep.fan.iter().enumerate().map(|(i, pth)| { let v = &n.vars[n.vi[i]];
-                serde_json::json!({"path": pth.name, "sig": if v.signed { Some(v.sig58.clone()) } else { None }, "tip": v.tip.map_or(0, |t| t.1)}) }).collect::<Vec<_>>()});
-    }
-    if let Some(why) = &nonce_fb { fj["nonce_fallback"] = serde_json::json!(why); }
-    if let Some(w) = win { fj["win"] = w; }
-    if tag != 0 { fj["tag"] = serde_json::json!(tag); }
-    c.log.w(fj);
-    let summary = serde_json::json!({"buy_sig": prep.meta.sig, "min_out": min_out, "spend": spend, "deadline": prep.deadline, "route": prep.meta.route, "leader": prep.meta.leader,
-        "client": prep.meta.client, "tips": prep.meta.tips, "decision_us": (t_fire as i64 - a.t_rx as i64) as f64 / 1e3, "nonce": prep.nonce.as_ref().map(|n| b58(&n.acct))});
-    c.log.w(serde_json::json!({"ev": "react_r1_fire", "mint": b58(&e.mint), "dump_sig": sig, "slot": a.slot, "idx": x.index, "t_dump_rx": a.t_rx, "t_fire": t_fire,
-        "seller": b58(&e.user), "post_vsol": e.vsol, "post_vtok": e.vtok, "max_price": r1.cfg.max_price, "exit_slots": h, "feat": f.json(), "fire": summary.clone()}));
-    let nnote = match (&prep.nonce, &nonce_fb) { (Some(n), _) => format!(" | nonce {} x{} variants", &b58(&n.acct)[..8], vars.len()), (None, Some(_)) => " | NONCE-FALLBACK".into(), _ => String::new() };
-    eprintln!("  DIP FIRE (R1) {} age {} slots sell {:.2} SOL {:.2}% | prior {} dipb {} bots {} | {:.3} SOL max x{:.2} | route {} leader {} ({}) | buy {}{nnote}", b58(&e.mint), f.age,
-        e.sol as f64 / 1e9, f.pct(), f.prior1, f.dipb, f.bots, spend as f64 / 1e9, r1.cfg.max_price, prep.meta.route, &prep.meta.leader[..8.min(prep.meta.leader.len())],
-        prep.meta.client, prep.meta.sig);
-    if let (Some(np), Some(why)) = (c.npool, nonce_fb.as_ref()) {
-        np.fallbacks.fetch_add(1, Ordering::Relaxed);
-        eprintln!("  NONCE-FALLBACK {}: {why}: this buy went as today's multi-tip tx ({})", b58(&e.mint), np.line());
-    }
-    {
-        let (rpc2, mtx2, sigs, sigb, slot, bhv, mint) = (rpc.clone(), c.mtx.clone(), prep.meta.sig.clone(), prep.sig, a.slot, prep.bh_valid, e.mint);
-        let all: Vec<(String, [u8; 64])> = vars.iter().map(|v| (v.sig.clone(), v.sig_b)).collect();
-        let ata = pda::ata(&c.user, &mint, &pda::TOKEN_2022);
-        tokio::spawn(async move {
-            let to = Duration::from_millis(arg_u64("--land-timeout-ms", 8_000));
-            let l = if all.is_empty() { poll_land(&rpc2, sigs, sigb, slot, to, Watch::BuyAta(ata), bhv).await } else { poll_land_any(&rpc2, all, slot, to, Watch::BuyAta(ata)).await };
-            let _ = mtx2.send(Msg::Land(mint, l));
-        });
-    }
-    open.insert(e.mint, LivePos { mint: e.mint, launch, dump_sig: sig.to_string(), dump_slot: a.slot, dump_idx: x.index, t_dump_rx: a.t_rx, dump_vsol: e.vsol, dump_vtok: e.vtok,
-        score: f64::NAN, t_fire_ns: t_fire, buy_sig: prep.meta.sig.clone(), buy_sig_b: prep.sig, route: prep.meta.route.clone(), leader: prep.meta.leader.clone(),
-        client: prep.meta.client.clone(), tips: prep.meta.tips, spend, min_out, send_slot: a.slot, land: None, tokens: 0, sol_in: 0, buy_ok: None,
-        exit: None, sell_land: None, pos: Some(pos), fired_at: Instant::now(), vars, xr: Some(Xr { hold: h, tp: r1.cfg.tp, sl: r1.cfg.sl }) });
-    if prep.nonce.is_some() && fp.verify_on() { tokio::spawn(async move { fp.trace_prep(&prep) }); }
-    Ok(Some(summary))
-}
-
-/// dip40 REACT R1: the lane's fill record from the executed feed's TradeEvent of our buy (price, block index, place after the dump)
-fn r1_fill_rec(r1: &react_r1::R1, p: &LivePos, sig: &str, slot: u64, idx: u64, t: u64, e: &arbx::dip::TradeEvent) -> serde_json::Value {
-    let px = |sol: f64, tok: f64| if tok > 0.0 { sol / tok } else { f64::NAN };
-    let dump_px = px(p.dump_vsol as f64, p.dump_vtok as f64);
-    // the curve right before our buy (the event's reserves are after it)
-    let pre_px = px(e.vsol.saturating_sub(e.sol) as f64, (e.vtok + e.tok) as f64);
-    let fill_px = px(e.sol as f64, e.tok as f64);
-    let r = |x: f64| if x.is_finite() { serde_json::json!((x * 1e5).round() / 1e5) } else { serde_json::Value::Null };
-    let btw = r1.book.between(&p.mint, (p.dump_slot, p.dump_idx), (slot, idx));
-    serde_json::json!({"ev": "react_r1_fill", "mint": b58(&p.mint), "buy_sig": sig, "slot": slot, "idx": idx, "t": t, "sol": e.sol, "tokens": e.tok,
-        "price_sol_per_tok": if fill_px.is_finite() { serde_json::json!(fill_px * 1e-3) } else { serde_json::Value::Null }, "fill_vs_dump_px": r(fill_px / dump_px), "pre_vs_dump_px": r(pre_px / dump_px), "max_price": r1.cfg.max_price,
-        "dump_sig": p.dump_sig, "dump_slot": p.dump_slot, "dump_idx": p.dump_idx, "slots_after_dump": slot as i64 - p.dump_slot as i64,
-        "idx_after_dump": if slot == p.dump_slot { serde_json::json!(idx as i64 - p.dump_idx as i64) } else { serde_json::Value::Null },
-        "rx_ms_after_dump": (t as i64 - p.t_dump_rx as i64) as f64 / 1e6,
-        "trades_between": btw.map(|b| b.0), "buys_between": btw.map(|b| b.1), "first_buyer": btw.map(|b| b.1 == 0)})
 }
 
 /// no new buys (kill switch, end of run)
@@ -1683,8 +1452,6 @@ fn time_exits(open: &mut HashMap<Pk, LivePos>, slot_now: u64, hold: u64, log: &A
               mtx: &tokio::sync::mpsc::UnboundedSender<Msg>) {
     for p in open.values_mut() {
         if p.exit.is_some() { continue; }
-        // dip40 REACT R1: a lane position's own exit slots (None: the run's --dip-hold-slots, as before)
-        let hold = p.xr.map_or(hold, |x| x.hold);
         if let Some((ls, _, _)) = p.land {
             // backstop: the feed's slot stopped moving (stall / feed down) -> sell on the wall clock (hold x 400 ms + 3 s after the fire)
             let wall = p.fired_at.elapsed() > Duration::from_millis(hold * 400 + 3_000);
@@ -1705,12 +1472,6 @@ fn trigger_exit(p: &mut LivePos, why: &'static str, slot: u64, val: f64, t: u64,
     log.w(serde_json::json!({"ev": "exit", "mint": b58(&p.mint), "why": why, "slot": slot, "value": if val.is_nan() { serde_json::Value::Null } else { serde_json::json!(val) }, "t": t,
         "slots_held": p.land.map(|(ls, _, _)| slot as i64 - ls as i64)}));
     eprintln!("  DIP EXIT {} {why} slot {slot}{}", b58(&p.mint), if val.is_nan() { String::new() } else { format!(" value x{val:.3}") });
-    // dip40 REACT R1: the lane's own exit record
-    if let Some(x) = p.xr {
-        log.w(serde_json::json!({"ev": "react_r1_exit", "mint": b58(&p.mint), "why": why, "slot": slot, "t": t, "buy_sig": p.buy_sig, "dump_sig": p.dump_sig, "dump_slot": p.dump_slot,
-            "land_slot": p.land.map(|l| l.0), "slots_held": p.land.map(|(ls, _, _)| slot as i64 - ls as i64), "slots_after_dump": slot as i64 - p.dump_slot as i64, "exit_slots": x.hold,
-            "value": if val.is_nan() { serde_json::Value::Null } else { serde_json::json!(val) }}));
-    }
     let (key, rpc, path, mtx, launch, mint, tokens, land_slot) = (key.clone(), rpc.clone(), path.clone(), mtx.clone(), p.launch.clone(), p.mint, p.tokens, p.land.map(|l| l.0).unwrap_or(slot));
     tokio::spawn(async move {
         let ata = pda::ata(&user, &mint, &pda::TOKEN_2022);
@@ -1737,27 +1498,13 @@ fn on_msg(m: Msg, open: &mut HashMap<Pk, LivePos>, log: &Arc<DipLog>, n_closed: 
                 p.tokens = l.tokens.unwrap_or(p.min_out);
                 if let Some(pos) = p.pos.as_mut() { pos.landed(p.spend + 5_000 + p.tips, ls); }
                 log.w(with_var(serde_json::json!({"ev": "buy_land", "mint": b58(&mint), "sig": p.buy_sig, "slot": ls, "via": "rpc_poll", "tokens": p.tokens}), var));
-                // dip40 REACT R1: the lane's fill record (the executed feed missed our TradeEvent: no index / price)
-                if p.xr.is_some() {
-                    react_r1::FILLED.fetch_add(1, Ordering::Relaxed);
-                    log.w(serde_json::json!({"ev": "react_r1_fill", "mint": b58(&mint), "buy_sig": p.buy_sig, "slot": ls, "idx": null, "via": "rpc_poll", "tokens": p.tokens,
-                        "dump_sig": p.dump_sig, "dump_slot": p.dump_slot, "dump_idx": p.dump_idx, "slots_after_dump": ls as i64 - p.dump_slot as i64}));
-                }
             } else {
                 // failed (guard / deadline) or never landed: release and close the record
                 if let Some(mut pos) = p.pos.take() { if l.land_slot.is_some() { pos.reverted(5_000 + arg_u64("--cu-limit", 120_000) * arg_u64("--cu-price-micro", 3_000_000) / 1_000_000); } else { pos.not_landed(); } }
                 let p = open.remove(&mint).unwrap();
                 *n_closed += 1;
-                let mut cj = serde_json::json!({"ev": "close", "mint": b58(&mint), "result": if l.land_slot.is_some() { "buy_failed" } else { "buy_not_landed" }, "buy_sig": p.buy_sig,
-                    "dump_sig": p.dump_sig, "err": l.err, "route": p.route, "leader": p.leader, "client": p.client, "score": p.score});
-                // dip40 REACT R1: the lane's positions are marked (records of the other buys unchanged) + its no-fill record
-                if p.xr.is_some() {
-                    cj["via"] = "r1".into();
-                    react_r1::NOFILL.fetch_add(1, Ordering::Relaxed);
-                    log.w(serde_json::json!({"ev": "react_r1_nofill", "mint": b58(&mint), "buy_sig": p.buy_sig, "dump_sig": p.dump_sig, "dump_slot": p.dump_slot,
-                        "result": if l.land_slot.is_some() { "buy_failed" } else { "buy_not_landed" }, "land_slot": l.land_slot, "err": l.err.clone(), "route": p.route, "client": p.client}));
-                }
-                log.w(with_var(cj, var));
+                log.w(with_var(serde_json::json!({"ev": "close", "mint": b58(&mint), "result": if l.land_slot.is_some() { "buy_failed" } else { "buy_not_landed" }, "buy_sig": p.buy_sig,
+                    "dump_sig": p.dump_sig, "err": l.err, "route": p.route, "leader": p.leader, "client": p.client, "score": p.score}), var));
                 eprintln!("  DIP BUY {} {} ({})", b58(&mint), if l.land_slot.is_some() { "FAILED on chain" } else { "did not land" }, l.err.map(|e| e.to_string()).unwrap_or_default());
             }
         }
@@ -1769,26 +1516,18 @@ fn on_msg(m: Msg, open: &mut HashMap<Pk, LivePos>, log: &Arc<DipLog>, n_closed: 
                 if sold { pos.sold(out.sold_at.unwrap()); }
                 pos.realized_done = true;
                 let est = p.sell_land.map(|s| s.3 as i64).unwrap_or(0) - p.spend as i64;
-                // dip40 REACT R1: the lane's realized record from the same lookup (other buys: spawn_realized_x as before)
-                let cb: Option<RealizedCb> = p.xr.map(|_| {
-                    let (lg, bs, sp) = (log.clone(), p.buy_sig.clone(), p.spend);
-                    Box::new(move |pnl: i64, src: &'static str, bd: Option<i64>| lg.w(react_r1::realized_rec(&mint, &bs, pnl, src, bd, sp))) as RealizedCb
-                });
-                spawn_realized_cb((**rpc).clone(), mint, p.buy_sig.clone(), out.sigs.clone(), (est, "feed"), Some((p.spend, p.fired_at.elapsed().as_secs_f64(), None, p.tips, 5_000)), cb);
+                spawn_realized_x((**rpc).clone(), mint, p.buy_sig.clone(), out.sigs.clone(), (est, "feed"), Some((p.spend, p.fired_at.elapsed().as_secs_f64(), None, p.tips, 5_000)));
                 drop(pos);
             }
             let (why, xslot, xval, _) = p.exit.unwrap_or(("?", 0, f64::NAN, 0));
             let feed_pnl = p.sell_land.map(|s| s.3 as i64 - p.sol_in as i64);
             // NONCE: the variant that landed ("tips" = its one tip: the only one paid)
             let var = p.vars.iter().find(|v| v.sig_b == p.buy_sig_b).map(var_json);
-            let cj = with_var(serde_json::json!({"ev": "close", "mint": b58(&mint), "result": if sold { "sold" } else { "UNSOLD" }, "buy_sig": p.buy_sig, "dump_sig": p.dump_sig,
+            log.w(with_var(serde_json::json!({"ev": "close", "mint": b58(&mint), "result": if sold { "sold" } else { "UNSOLD" }, "buy_sig": p.buy_sig, "dump_sig": p.dump_sig,
                 "dump_slot": p.dump_slot, "dump_idx": p.dump_idx, "land": p.land, "exit_why": why, "exit_slot": xslot, "exit_value": if xval.is_nan() { serde_json::Value::Null } else { serde_json::json!(xval) },
                 "sell_land": p.sell_land, "sell_sigs": out.sigs, "sol_in_curve": p.sol_in, "sol_out_curve": p.sell_land.map(|s| s.3), "curve_pnl": feed_pnl,
                 "route": p.route, "leader": p.leader, "client": p.client, "tips": p.tips, "spend": p.spend, "score": p.score, "min_out": p.min_out,
-                "dump_vsol": p.dump_vsol, "dump_vtok": p.dump_vtok, "held_s": p.fired_at.elapsed().as_secs_f64()}), var);
-            // dip40 REACT R1: the lane's positions are marked (records of the other buys unchanged)
-            let cj = if p.xr.is_some() { let mut c = cj; c["via"] = "r1".into(); c } else { cj };
-            log.w(cj);
+                "dump_vsol": p.dump_vsol, "dump_vtok": p.dump_vtok, "held_s": p.fired_at.elapsed().as_secs_f64()}), var));
             eprintln!("  DIP CLOSED {} {} via {why}; curve PnL {}", b58(&mint), if sold { "sold" } else { "UNSOLD" }, feed_pnl.map(|v| format!("{:+.4} SOL", v as f64 / 1e9)).unwrap_or("?".into()));
         }
     }

@@ -565,7 +565,7 @@ fn poll_err(what: &str, e: &anyhow::Error) {
 ///  * integer flags = every flag read with arg_u64 / arg_u64_opt; number flags = every flag read with arg_f64, plus the
 ///    ones parsed from arg() directly (--fill-cap, --max-create-ms, --race-min/max-bundle-sol).
 const ENGINE_SRC: &str = concat!(include_str!("snipe_engine/dipmode.rs"), include_str!("snipe_engine/pslive.rs"), include_str!("snipe_engine/shredfire.rs"),
-    include_str!("snipe_engine/speed16.rs"), include_str!("snipe_engine/react_r1.rs"), include_str!("snipe_engine.rs"));
+    include_str!("snipe_engine/speed16.rs"), include_str!("snipe_engine.rs"));
 
 /// flag names after each occurrence of `prefix` (e.g. `arg_u64("`) in the source
 fn src_flags(prefix: &str) -> std::collections::BTreeSet<String> {
@@ -5662,13 +5662,6 @@ fn spawn_realized(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String, 
 /// estimate = CU limit x price + tips + base)
 type ExitInfo = (u64, f64, Option<f64>, u64, u64);
 fn spawn_realized_x(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String, bool, u64)>, fallback: (i64, &'static str), info: Option<ExitInfo>) {
-    spawn_realized_cb(rpc, mint, buy_sig, sells, fallback, info, None);
-}
-/// dip40: what a realized lookup hands its caller (the position's P&L, its source "tx" / the fallback's, the buy's payer delta when found)
-type RealizedCb = Box<dyn FnOnce(i64, &'static str, Option<i64>) + Send>;
-/// `spawn_realized_x` + an optional callback with the result, called once right after the REALIZED line (dip40 REACT R1: its
-/// react_r1_realized record). None = spawn_realized_x exactly
-fn spawn_realized_cb(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(String, bool, u64)>, fallback: (i64, &'static str), info: Option<ExitInfo>, cb: Option<RealizedCb>) {
     REALIZED_INFLIGHT.fetch_add(1, Ordering::SeqCst);
     tokio::spawn(async move {
         let buy = tx_payer(&rpc, &buy_sig, 8).await;
@@ -5681,7 +5674,6 @@ fn spawn_realized_cb(rpc: rpc::Rpc, mint: Pk, buy_sig: String, sells: Vec<(Strin
         let (pnl, src) = match buy { Some((d, _, _)) => (d + sold, "tx"), None => fallback };
         let run = ACCT.realized.fetch_add(pnl, Ordering::SeqCst) + pnl;
         eprintln!("  REALIZED mint={} pnl={:+.6} SOL source={src} run_realized={:+.6} SOL", b58(&mint), pnl as f64 / 1e9, run as f64 / 1e9);
-        if let Some(cb) = cb { cb(pnl, src, buy.map(|b| b.0)); }
         if let Some((cost_est, hold_s, dec, buy_tips, fee_est)) = info {
             {
                 let mut b = tg::BOOK.lock().unwrap();

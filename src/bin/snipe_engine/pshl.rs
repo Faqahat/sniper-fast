@@ -161,8 +161,8 @@ impl PsLive {
         if let Some(c) = self.hls.ctl.as_mut() { c.2 = Instant::now(); }
         if !force && mt == mt0 { return; }
         if let Some(c) = self.hls.ctl.as_mut() { c.1 = mt; }
-        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| Ok((ctl_parse(&b)?, ctl_parse_s2(&b)?, ctl_parse_bls(&b)?, ctl_parse_s1(&b)?, psbd::ctl_parse_bd(&b)?))) {
-            Ok((m, s2, bls, s1, bd)) => {
+        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| Ok((ctl_parse(&b)?, ctl_parse_s2(&b)?, ctl_parse_bls(&b)?, ctl_parse_s1(&b)?, psbd::ctl_parse_bd(&b)?, psdl::ctl_parse_wd(&b)?, psdl::ctl_parse_qf(&b)?))) {
+            Ok((m, s2, bls, s1, bd, wdk, qfk)) => {
                 // dip37c "blocklist_send": the per-send blocklist live / log (only with the blocklist's per-send check)
                 let bl_old = self.sh.bl_send_live.load(Ordering::SeqCst);
                 let bl_new = match bls { Some(x) if self.cfg.blocklist_send => x, _ => bl_old };
@@ -180,8 +180,16 @@ impl PsLive {
                 // dip39 "botdepth": the bot depth gate live / log (only with the gate on; else ignored)
                 let bd_old = self.sh.bd.live.load(Ordering::SeqCst);
                 let bd_new = match bd { Some(x) if self.cfg.bd.is_some() => x, _ => bd_old };
-                if old == m && s2_new == s2_old && bl_new == bl_old && s1_new == s1_old && bd_new == bd_old { return; }
+                // dip41 "widedumper": the WIDE-DUMPER tier live / log (only with the dumper ledger on; else ignored)
+                let wd_old = self.wd.as_ref().map(|w| w.wide.live);
+                let wd_new = match (wdk, wd_old) { (Some(x), Some(_)) => Some(x), _ => wd_old };
+                // dip41 "qf2": the QF2 variant live / log (only with --presend-live-qf2; else ignored)
+                let qf_old = self.wd.as_ref().and_then(|w| w.qf.as_ref()).map(|q| q.live);
+                let qf_new = match (qfk, qf_old) { (Some(x), Some(_)) => Some(x), _ => qf_old };
+                if old == m && s2_new == s2_old && bl_new == bl_old && s1_new == s1_old && bd_new == bd_old && wd_new == wd_old && qf_new == qf_old { return; }
                 self.sh.bd.live.store(bd_new, Ordering::SeqCst);
+                if let (Some(w), Some(x)) = (self.wd.as_mut(), wd_new) { w.wide.live = x; }
+                if let (Some(q), Some(x)) = (self.wd.as_mut().and_then(|w| w.qf.as_mut()), qf_new) { q.live = x; }
                 self.hls.live = m;
                 if s1_new != s1_old { self.s1.mode = s1_new; self.s1.ctl_changes += 1; }
                 self.sh.bl_send_live.store(bl_new, Ordering::SeqCst);
@@ -197,11 +205,17 @@ impl PsLive {
                 if s1.is_some() && !self.cfg.s1_log { r["s1_ignored"] = "needs --presend-live-s1-log on".into(); }
                 if self.cfg.bd.is_some() { r["botdepth"] = s(bd_new).into(); r["was"]["botdepth"] = s(bd_old).into(); }
                 if bd.is_some() && self.cfg.bd.is_none() { r["botdepth_ignored"] = "needs --presend-live-botdepth".into(); }
+                if let (Some(o), Some(n)) = (wd_old, wd_new) { r["widedumper"] = s(n).into(); r["was"]["widedumper"] = s(o).into(); }
+                if wdk.is_some() && wd_old.is_none() { r["widedumper_ignored"] = "needs --presend-live-dumper-ledger on".into(); }
+                if let (Some(o), Some(n)) = (qf_old, qf_new) { r["qf2"] = s(n).into(); r["was"]["qf2"] = s(o).into(); }
+                if qfk.is_some() && qf_old.is_none() { r["qf2_ignored"] = "needs --presend-live-qf2".into(); }
                 self.rec(r);
                 self.line(format!("  PRESEND LIVE LEDGER MODES: whale {} -> {}, holder {} -> {}{}{} ({path})", s(old[0]), s(m[0]), s(old[1]), s(m[1]),
                     match (s2_old, s2_new) { (Some(o), Some(n)) => format!(", skip2 gate {} -> {}", pslog36::mode_str(o), pslog36::mode_str(n)), _ => String::new() },
                     if self.cfg.blocklist_send { format!(", blocklist per-send {} -> {}", s(bl_old), s(bl_new)) } else { String::new() }) + &if self.cfg.s1_log { format!(", S1 gate {} -> {}", pslog36::mode_str(s1_old), pslog36::mode_str(s1_new)) } else { String::new() }
-                    + &if self.cfg.bd.is_some() { format!(", bot depth {} -> {}", s(bd_old), s(bd_new)) } else { String::new() });
+                    + &if self.cfg.bd.is_some() { format!(", bot depth {} -> {}", s(bd_old), s(bd_new)) } else { String::new() }
+                    + &match (wd_old, wd_new) { (Some(o), Some(n)) => format!(", wide dumper {} -> {}", s(o), s(n)), _ => String::new() }
+                    + &match (qf_old, qf_new) { (Some(o), Some(n)) => format!(", qf2 {} -> {}", s(o), s(n)), _ => String::new() });
             }
             Err(e) => {
                 self.hls.ctl_errors += 1;

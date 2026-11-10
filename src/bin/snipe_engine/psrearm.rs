@@ -164,7 +164,11 @@ impl PsLive {
     /// dip26: window `w` is a re-arm window
     pub(super) fn rearm_w(&self, w: u64) -> bool { self.rm.as_ref().is_some_and(|r| r.is_win(w)) }
     /// dip26: what an attempt of window `w` spends (the pre-send size; a re-arm window's own size)
-    pub(super) fn w_spend(&self, w: u64) -> u64 { self.rm.as_ref().and_then(|r| r.ids.get(&w).copied()).unwrap_or(self.cfg.spend) }
+    pub(super) fn w_spend(&self, w: u64) -> u64 {
+        // dip41: a wide window's size (the WIDE-DUMPER tier live)
+        if let Some(d) = self.wd.as_ref().filter(|d| d.wins.contains_key(&w)) { return d.size; }
+        self.rm.as_ref().and_then(|r| r.ids.get(&w).copied()).unwrap_or(self.cfg.spend)
+    }
     /// dip26: an armed re-arm window's 30 ms stop reason (whale_dump / no_holder)
     pub(super) fn rearm_stop_why(&self, id: u64) -> Option<&'static str> { self.rm.as_ref().and_then(|r| r.wins.get(&id)).and_then(|w| w.stop) }
     /// no new window may arm: the probe stopped (caps, run end) or the engine takes no new buys (kill switch, profit lock, run end)
