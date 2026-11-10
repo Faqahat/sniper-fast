@@ -131,3 +131,13 @@ start check line `GUARD verified on chain (simulated): …`.
 
 Evidence (band42, all runs): D 0.42 on every try: taped r65–r79 +1.03 (three deep rugs +1.06); untaped r40–r71 block-only −0.76; total +0.27,
 without the three attacks −0.79 (current regime ≈ −0.25). Insurance against deep rugs; misses shallow (r42) and BujUx-type attacks.
+
+## dip43e: dump-exit shadow + whale-ledger kinds (owner 11-11 "next run with same size and anti bait")
+
+| Flag / key | Values | Default | What it does |
+|---|---|---|---|
+| `--presend-live-dump-exit` | `S:C:X` (S, C in [0, 50] SOL, not both 0; X in [0, 0.5]) | off | Per open position: a single sell into our hold of at least S SOL, or the sells into the hold summing to at least C SOL (0 = that leg off), while the position's value is at most 1 − X of cost, fires a dump exit (exit reason `dump-exit`, sold at once). **LOG ONLY by default**: record `presend_live_dump_exit` (mode `log`, `would: true`) once per position, nothing sold. |
+| control key `dump_exit` | `live` \| `log` | `log` | Hot switch in the ledger control file. `live` makes the dump exit sell. The 11-11 dumpexit study found no early-exit rule that pays (price bounces after dumps; crash losses fire on the same trade as the stop), so keep `log`. |
+| `--presend-live-wh-kinds` | `all` \| `t2` \| `rearm` | `all` | Needs `--presend-live-wh-loss`. Which window kinds the whale ledger may block: `t2` = the T2 trigger whale only, `rearm` = the re-arm dumper only. The 11-11 grid: re-arm blocking loses at every threshold; T2-only `2:0.3` (sum) blocks 9 fills over r40–r80, +0.52 (wins lost 0.116 vs losses saved 0.637). |
+
+Banner lines: `DIP43E DUMP EXIT: …` and `DIP43E WHALE LEDGER KINDS: …`.

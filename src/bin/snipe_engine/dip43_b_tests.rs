@@ -602,3 +602,73 @@ fn dip43b_exit_timer_ab() {
     let x = exits(&recs(&orx));
     assert_eq!((x[0]["why"].as_str(), x[0]["exit_ab"]["arm"].as_str()), (Some("time-limit"), Some("base")));
 }
+
+// ---- dip43e: the dump exit ---------------------------------------------------------------------------------------------------------
+/// a sell >= S SOL by another wallet into an open position sells it at once ("dump-exit"); a smaller sell does not; a buy never does
+#[test]
+fn dip43e_dump_exit_single_sell() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut p, _atx, orx, mint, launch) = open(&["--presend-live-dump-exit", "1.0:0:0"]);
+    let _ = p.take_cmds();
+    let _ = p.ctl43_apply(&ps43::ctl43_parse(br#"{"dump_exit": "live"}"#).unwrap());
+    // a 0.5 SOL sell: no exit
+    trade(&mut p, N, 240, [0x71; 64], [0x71; 32], false, 500_000_000, 12_000_000_000_000, 35_700_000_000, 901_000_000_000_000, &launch);
+    assert!(p.pos[&mint].exit.is_none());
+    // a 1.5 SOL buy: no exit
+    trade(&mut p, N, 241, [0x72; 64], [0x72; 32], true, 1_500_000_000, 36_000_000_000_000, 37_200_000_000, 865_000_000_000_000, &launch);
+    assert!(p.pos[&mint].exit.is_none());
+    // a 1.5 SOL sell (value ~x0.92, above the -20% stop): dump-exit
+    trade(&mut p, N, 242, [0x73; 64], [0x73; 32], false, 1_500_000_000, 40_000_000_000_000, 35_700_000_000, 905_000_000_000_000, &launch);
+    assert_eq!(p.pos[&mint].exit.map(|x| x.0), Some("dump-exit"));
+    let r = recs(&orx);
+    let d: Vec<_> = r.iter().filter(|x| x["ev"] == "presend_live_dump_exit").collect();
+    assert_eq!(d.len(), 1);
+    assert_eq!((d[0]["mode"].as_str(), d[0]["sell_sol"].as_f64()), (Some("live"), Some(1.5)));
+    assert!(sells(&p.take_cmds()).len() == 1, "sold");
+}
+
+/// cumulative sells into the hold; the value gate X; the control key's log mode records once and keeps holding
+#[test]
+fn dip43e_dump_exit_cum_gate_and_log() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    // C = 1.0: two 0.6 SOL sells
+    let (mut p, _atx, _orx, mint, launch) = open(&["--presend-live-dump-exit", "0:1.0:0"]);
+    let _ = p.take_cmds();
+    let _ = p.ctl43_apply(&ps43::ctl43_parse(br#"{"dump_exit": "live"}"#).unwrap());
+    trade(&mut p, N, 240, [0x74; 64], [0x74; 32], false, 600_000_000, 15_000_000_000_000, 35_600_000_000, 904_000_000_000_000, &launch);
+    assert!(p.pos[&mint].exit.is_none());
+    trade(&mut p, N, 241, [0x75; 64], [0x75; 32], false, 600_000_000, 15_500_000_000_000, 35_000_000_000, 919_500_000_000_000, &launch);
+    assert_eq!(p.pos[&mint].exit.map(|x| x.0), Some("dump-exit"));
+    // X = 0.5: a 1.5 SOL sell at value ~x0.92 does not fire (not down 50%)
+    let (mut p, _atx, _orx, mint, launch) = open(&["--presend-live-dump-exit", "1.0:0:0.5"]);
+    let _ = p.take_cmds();
+    let _ = p.ctl43_apply(&ps43::ctl43_parse(br#"{"dump_exit": "live"}"#).unwrap());
+    trade(&mut p, N, 242, [0x76; 64], [0x76; 32], false, 1_500_000_000, 40_000_000_000_000, 35_700_000_000, 905_000_000_000_000, &launch);
+    assert!(p.pos[&mint].exit.is_none());
+    // log mode (the default; also by the control key after live): recorded once, no exit
+    let (mut p, _atx, orx, mint, launch) = open(&["--presend-live-dump-exit", "1.0:0:0"]);
+    let _ = p.take_cmds();
+    let ch = p.ctl43_apply(&ps43::ctl43_parse(br#"{"dump_exit": "live"}"#).unwrap());
+    assert!(ch.iter().any(|c| c.0 == "dump_exit"));
+    let ch = p.ctl43_apply(&ps43::ctl43_parse(br#"{"dump_exit": "log"}"#).unwrap());
+    assert!(ch.iter().any(|c| c.0 == "dump_exit"));
+    trade(&mut p, N, 242, [0x77; 64], [0x77; 32], false, 1_500_000_000, 40_000_000_000_000, 35_700_000_000, 905_000_000_000_000, &launch);
+    trade(&mut p, N, 243, [0x78; 64], [0x78; 32], false, 1_500_000_000, 40_000_000_000_000, 34_300_000_000, 945_000_000_000_000, &launch);
+    assert!(p.pos[&mint].exit.is_none() || p.pos[&mint].exit.map(|x| x.0) == Some("stop-loss"));
+    let r = recs(&orx);
+    let d: Vec<_> = r.iter().filter(|x| x["ev"] == "presend_live_dump_exit").collect();
+    assert_eq!(d.len(), 1, "once per position");
+    assert_eq!(d[0]["would"].as_bool(), Some(true));
+}
+
+/// flags: parse ranges; whale-ledger kinds
+#[test]
+fn dip43e_flags() {
+    assert_eq!(dump_exit_parse("1.0:0:0").unwrap(), (1_000_000_000, 0, 0.0));
+    assert_eq!(dump_exit_parse("0:2.5:0.1").unwrap(), (0, 2_500_000_000, 0.1));
+    for bad in ["0:0:0", "1:1", "x:1:0", "1:1:0.9", "60:0:0"] { assert!(dump_exit_parse(bad).is_err(), "{bad}"); }
+    let (p, ..) = open(&[]);
+    assert!(p.cfg.dump_exit.is_none() && p.cfg.wh_kinds == 3, "off / all by default");
+    let (p, ..) = open(&["--presend-live-wh-loss", "2:0.3", "--presend-live-wh-kinds", "t2"]);
+    assert!(p.cfg.wh_kind_ok(false) && !p.cfg.wh_kind_ok(true));
+}

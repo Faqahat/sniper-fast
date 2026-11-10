@@ -109,7 +109,8 @@ const FPFLAGS: [&str; 9] = ["--presend-fpnb-log", "--presend-fpnb-bots", "--pres
     "--presend-fpnb-control", "--presend-fpnb-stale-hold", "--presend-skip2-live"];
 
 /// dip37 WHALE / DUMPER LOSS LEDGER: its flags (each needs --presend-live; the mode and the state need --presend-live-wh-loss; pswh.rs)
-const WHFLAGS: [&str; 5] = ["--presend-live-wh-loss", "--presend-live-wh-loss-mode", "--presend-live-whale-state", "--presend-live-wh-learn", "--presend-live-wh-split"];
+const WHFLAGS: [&str; 6] = ["--presend-live-wh-loss", "--presend-live-wh-loss-mode", "--presend-live-whale-state", "--presend-live-wh-learn", "--presend-live-wh-split",
+    "--presend-live-wh-kinds"];
 
 /// dip37 HOLDER LEDGER + the ledgers' control file: its flags (each needs --presend-live; pshl.rs)
 const HLFLAGS: [&str; 4] = ["--presend-live-holder-loss", "--presend-live-holder-state", "--presend-live-holder-learn", "--presend-live-ledger-control"];
@@ -155,7 +156,7 @@ const Q1FLAGS: [&str; 11] = ["--q1-log", "--q1-bots", "--q1-fresh-state", "--q1-
     "--q1-gap-slots", "--q1-size-sol", "--q1-fresh-hours"];
 
 /// dip43 Builder A (ps43.rs, ps43_stall.rs): its flags (each needs --presend-live; all off / log by default)
-const A43FLAGS: [&str; 16] = ["--presend-live-tbal-src", "--presend-live-stall-mode", "--presend-live-stall", "--presend-live-deadman", "--presend-live-deadman-ms", "--presend-live-tbal",
+const A43FLAGS: [&str; 17] = ["--presend-live-dump-exit", "--presend-live-tbal-src", "--presend-live-stall-mode", "--presend-live-stall", "--presend-live-deadman", "--presend-live-deadman-ms", "--presend-live-tbal",
     "--presend-live-cascade", "--presend-live-fanout", "--presend-live-fanout-mode", "--presend-live-mint-ledger", "--presend-live-mint-ledger-mode",
     "--presend-live-shadow-exit", "--presend-live-acct", "--presend-live-botdepth-allow-log", "--presend-live-shadows43", "--presend-live-fpnb-strict"];
 /// dip43 BUILDER B (send path + exits; ps43_b.rs): its flags (each needs --presend-live; every one OFF by default = dip42)
@@ -466,6 +467,13 @@ pub struct Cfg {
     pub wh_loss_n: u32,
     pub wh_loss: i64,
     pub wh_mean: bool,
+    /// dip43e --presend-live-wh-kinds t2|rearm|all (all): which arms the whale ledger's LIVE rule may block (11-11 replay: re-arm dumpers
+    /// lose at every threshold, T2 whales with >= 2 positions summing <= -0.30 pay); the verdict fields are recorded on every arm either way
+    pub wh_kinds: u8,
+    /// dip43e --presend-live-dump-exit S:C:X (off): an open pre-send position is sold at once when another wallet sells >= S SOL in one trade
+    /// (S 0 = off), or the sells into the hold sum >= C SOL (C 0 = off), in both cases only when the position's value is <= 1 - X (X 0 = any);
+    /// hot control key "dump_exit" live | log; LOG by default (11-11 replay: no early exit pays), the would-exit recorded once per position
+    pub dump_exit: Option<(u64, u64, f64)>,
     pub wh_state: Option<String>,
     /// dip37 --presend-live-wh-learn paper: a "wh_loss"-skipped T2 trigger's shadow row c is added to the whale's ledger (paper position)
     pub wh_learn: bool,
@@ -542,6 +550,18 @@ pub struct Cfg {
     pub g43: Option<ps43_guard::G43>,
 }
 
+/// dip43e --presend-live-dump-exit S:C:X -> (S lamports, C lamports, X fraction): S, C in [0, 50] SOL (0 = that trigger off, not both 0),
+/// X in [0, 0.5]
+pub fn dump_exit_parse(s: &str) -> Result<(u64, u64, f64)> {
+    let bad = || anyhow::anyhow!("--presend-live-dump-exit S:C:X (S = one sell >= S SOL, C = sells into the hold >= C SOL, 0 = off; X = only when the position is down >= X, 0..0.5), e.g. 1.0:0:0.05; got '{s}'");
+    let v: Vec<&str> = s.split(':').collect();
+    if v.len() != 3 { return Err(bad()); }
+    let f = |x: &str| x.trim().parse::<f64>().ok().filter(|y| y.is_finite() && *y >= 0.0);
+    let (a, b, c) = (f(v[0]).ok_or_else(bad)?, f(v[1]).ok_or_else(bad)?, f(v[2]).ok_or_else(bad)?);
+    if a > 50.0 || b > 50.0 || c > 0.5 || (a == 0.0 && b == 0.0) { return Err(bad()); }
+    Ok(((a * 1e9).round() as u64, (b * 1e9).round() as u64, c))
+}
+
 impl Cfg {
     /// dip37: the holder ledger is on
     pub fn hl_on(&self) -> bool { self.hl_loss > 0 }
@@ -549,6 +569,8 @@ impl Cfg {
     pub fn m2seen_on(&self) -> bool { self.m2seen_log || self.m2seen_gate || self.s1_log }
     /// dip37: the whale / dumper loss ledger is on
     pub fn wh_on(&self) -> bool { self.wh_loss > 0 }
+    /// dip43e: may the whale ledger's live rule block this arm kind?
+    pub fn wh_kind_ok(&self, rearm: bool) -> bool { self.wh_kinds & if rearm { 2 } else { 1 } != 0 }
     /// dip37: its rule as given ("2:0.05 sum")
     pub fn wh_spec(&self) -> String {
         format!("{}:{} {}{}{}", self.wh_loss_n, self.wh_loss as f64 / 1e9, if self.wh_mean { "mean" } else { "sum" }, if self.wh_split { " split" } else { "" },
@@ -655,6 +677,8 @@ impl Cfg {
             wh_loss_n: match arg("--presend-live-wh-loss") { Some(s) => pswh::wh_loss_parse(&s)?.0, None => 0 },
             wh_loss: match arg("--presend-live-wh-loss") { Some(s) => pswh::wh_loss_parse(&s)?.1, None => 0 },
             wh_mean: match arg("--presend-live-wh-loss-mode").as_deref() { None | Some("sum") => false, Some("mean") => true, Some(x) => bail!("--presend-live-wh-loss-mode {x}: sum | mean") },
+            wh_kinds: match arg("--presend-live-wh-kinds").as_deref() { None | Some("all") => 3, Some("t2") => 1, Some("rearm") => 2, Some(x) => bail!("--presend-live-wh-kinds {x}: t2 | rearm | all") },
+            dump_exit: match arg("--presend-live-dump-exit") { None => None, Some(s) => Some(dump_exit_parse(&s)?) },
             wh_state: arg("--presend-live-whale-state").filter(|p| !p.starts_with("--")),
             wh_learn: match arg("--presend-live-wh-learn").as_deref() { None | Some("off") => false, Some("paper") => true, Some(x) => bail!("--presend-live-wh-learn {x}: paper | off") },
             wh_split: onoff("--presend-live-wh-split", false)?,
@@ -2498,6 +2522,10 @@ impl PsLive {
         eprintln!("{line}");
         // dip43: one line per Builder A feature (lines of their own, after the start-up line: the monitors parse that one)
         for l in cfg.c43.banner(cfg.fpnb_log) { eprintln!("{l}"); }
+        // dip43e: the dump exit and the whale ledger's kinds (lines of their own)
+        eprintln!("DIP43E DUMP EXIT: {}", match cfg.dump_exit { Some((s, c, x)) => format!("ON, LOG ONLY unless the control key dump_exit = live: would sell at once when another wallet sells >= {:.2} SOL in one trade{} into an open position{}",
+            s as f64 / 1e9, if c > 0 { format!(" or the sells into the hold sum >= {:.2} SOL", c as f64 / 1e9) } else { String::new() }, if x > 0.0 { format!(", only when the position is down >= {:.0}%", x * 100.0) } else { String::new() }), None => "off".into() });
+        if cfg.wh_on() { eprintln!("DIP43E WHALE LEDGER KINDS: the live rule blocks {}", match cfg.wh_kinds { 1 => "T2 whales only", 2 => "re-arm dumpers only", _ => "T2 whales and re-arm dumpers" }); }
         // dip43 C2: its own line (never starting "DIP PRESEND LIVE"): the guard's mode and settings, "off" by default
         eprintln!("{}", cfg.g43.as_ref().map_or_else(|| "GUARD (dip43 snipe-guard) off: every try carries the Lighthouse slot deadline (dip42)".to_string(), |g| g.desc()));
         let thread = {
@@ -2963,6 +2991,8 @@ impl PsLive {
                     if p.exit.is_none() && p.tokens > 0 {
                         let v = pl::value(e.vsol, e.vtok, p.tokens, t.fr(), p.spend);
                         let why = if self.cfg.tp > 0.0 && v >= 1.0 + self.cfg.tp { Some("take-profit") } else if self.cfg.sl > 0.0 && v <= 1.0 - self.cfg.sl { Some("stop-loss") } else { None };
+                        // dip43e: a sell into the hold (nothing without --presend-live-dump-exit)
+                        let why = why.or_else(|| self.dump_exit_check(&e.mint, &t, v, a.slot));
                         if let Some(why) = why { let m = e.mint; self.exit(&m, why, a.slot, v, a.t_rx); }
                     }
                 }

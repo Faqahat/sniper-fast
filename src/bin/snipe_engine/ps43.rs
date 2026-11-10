@@ -235,6 +235,8 @@ impl G43 {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ctl43 { pub g: [Option<bool>; 10], pub mint_ledger: Option<bool>, pub stall: Option<bool>, pub deadman: Option<bool>, pub fpnb_t2: Option<bool>,
     pub fpnb_rearm: Option<bool>, pub fpnb_strict: Option<bool>, pub qf2_size: Option<f64>, pub qf2_min_age: Option<u64>, pub fanout: Option<bool>,
+    /// dip43e: the dump exit live | log
+    pub dump_exit: Option<bool>,
     /// dip43d: the CURVE band live | log
     pub curve_deep: Option<bool> }
 
@@ -247,7 +249,7 @@ pub fn ctl43_parse(b: &[u8]) -> std::result::Result<Ctl43, String> {
     let mut c = Ctl43::default();
     for (i, k) in G43::KEYS.iter().enumerate() { c.g[i] = key(k)?; }
     c.mint_ledger = key("mint_ledger")?; c.stall = key("stall")?; c.deadman = key("deadman")?; c.fpnb_t2 = key("fpnb_t2")?; c.fpnb_rearm = key("fpnb_rearm")?;
-    c.fpnb_strict = key("fpnb_strict")?; c.fanout = key("fanout")?; c.curve_deep = key("curve_deep")?;
+    c.fpnb_strict = key("fpnb_strict")?; c.fanout = key("fanout")?; c.curve_deep = key("curve_deep")?; c.dump_exit = key("dump_exit")?;
     c.qf2_size = match v.get("qf2_size") { None | Some(serde_json::Value::Null) => None,
         Some(x) => Some(x.as_f64().filter(|s| s.is_finite() && *s > 0.0 && *s <= 2.0).ok_or_else(|| format!("qf2_size: '{x}' (SOL in (0, 2])"))?) };
     c.qf2_min_age = match v.get("qf2_min_age") { None | Some(serde_json::Value::Null) => None,
@@ -275,6 +277,12 @@ pub struct ShX { pub pid: u64, pub w: u64, pub mint: Pk, pub land: (u64, u64), p
 #[derive(Default)]
 pub struct D43 {
     pub g: G43,
+    /// dip43e dump exit: LOG by default (the 11-11 replay: no early exit pays); "live" only by the control key "dump_exit";
+    /// per position (pid, sells into the hold, lamports); would-exits logged once per position
+    pub dx_live: bool,
+    pub dx: FxHashMap<Pk, (u64, u64)>,
+    pub dx_would: FxHashSet<u64>,
+    pub dx_exits: u64,
     pub stall_live: bool,
     pub deadman_live: bool,
     /// A1/A2: the episode under way (its start, mono ns); 10 s after its end stale triggers are still skipped (live)
@@ -373,6 +381,11 @@ impl PsLive {
         }
         self.sh.g43.brk_log.store(!self.d43.g.breaker, Ordering::SeqCst);
         if let Some(v) = k.stall { if v != self.d43.stall_live { ch.push(("stall".into(), s(self.d43.stall_live), s(v))); self.d43.stall_live = v; if !v { self.sh.g43.pause_stall.store(false, Ordering::SeqCst); } } }
+        // dip43e: the dump exit (only with --presend-live-dump-exit)
+        if let Some(v) = k.dump_exit {
+            if self.cfg.dump_exit.is_none() { ch.push(("dump_exit_ignored".into(), serde_json::Value::Null, "needs --presend-live-dump-exit S:C:X".into())); }
+            else if v != self.d43.dx_live { ch.push(("dump_exit".into(), s(self.d43.dx_live), s(v))); self.d43.dx_live = v; }
+        }
         // dip43d: the CURVE band (only with --presend-live-guard-curve-deep D)
         if let Some(v) = k.curve_deep {
             if self.cfg.g43.as_ref().and_then(|g| g.curve_deep).is_none() { ch.push(("curve_deep_ignored".into(), serde_json::Value::Null, "needs --presend-live-guard-curve-deep D".into())); }
@@ -992,5 +1005,34 @@ impl PsLive {
             }
         }
         self.rec(rec);
+    }
+}
+
+// ---- dip43e: the dump exit (a sell into an open pre-send position's hold) ---------------------------------------------------------------
+impl PsLive {
+    /// a trade of another wallet on a held mint: the dump exit's verdict ("dump-exit" = sell now; None = keep holding). Log mode: the would-exit
+    /// is recorded once per position and None returned. Nothing without --presend-live-dump-exit.
+    pub(super) fn dump_exit_check(&mut self, mint: &Pk, t: &pl::Trade, v: f64, slot: u64) -> Option<&'static str> {
+        let (s_min, c_min, x) = self.cfg.dump_exit?;
+        if t.buy { return None; }
+        let pid = self.pos.get(mint)?.pid;
+        let e = self.d43.dx.entry(*mint).or_insert((pid, 0));
+        if e.0 != pid { *e = (pid, 0); }
+        e.1 = e.1.saturating_add(t.sol);
+        let cum = e.1;
+        if self.d43.dx.len() > 4_096 { let keep: FxHashSet<Pk> = self.pos.keys().copied().collect(); self.d43.dx.retain(|m, _| keep.contains(m)); }
+        let hit = (s_min > 0 && t.sol >= s_min) || (c_min > 0 && cum >= c_min);
+        if !hit || (x > 0.0 && v > 1.0 - x) { return None; }
+        let mut r = serde_json::json!({"ev": "presend_live_dump_exit", "mint": b58(mint), "pid": pid, "slot": slot, "seller": b58(&t.user),
+            "sell_sol": t.sol as f64 / 1e9, "into_hold_sol": cum as f64 / 1e9, "value": v, "mode": if self.d43.dx_live { "live" } else { "log" }});
+        if !self.d43.dx_live {
+            if !self.d43.dx_would.insert(pid) { return None; }
+            r["would"] = true.into();
+            self.rec(r);
+            return None;
+        }
+        self.d43.dx_exits += 1;
+        self.rec(r);
+        Some("dump-exit")
     }
 }

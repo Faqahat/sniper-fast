@@ -72,7 +72,8 @@ pub fn wh_loss_parse(s: &str) -> Result<(u32, i64)> {
 pub(super) fn wh_gate(sh: &Shared, cfg: &Cfg, w: &Pk, rearm: bool) -> Option<(bool, WhHist)> {
     if !cfg.wh_on() { return None; }
     let h = sh.wh.lock().unwrap().get(cfg.wh_split, rearm, w);
-    Some((h.blocks_mode(cfg.wh_loss_n, cfg.wh_loss, cfg.wh_mean), h))
+    // dip43e: --presend-live-wh-kinds: the live rule blocks only the listed kinds (the verdict fields are recorded on every arm)
+    Some((cfg.wh_kind_ok(rearm) && h.blocks_mode(cfg.wh_loss_n, cfg.wh_loss, cfg.wh_mean), h))
 }
 
 /// an arm / skip record's fields (sum in SOL, as the creator ledger's "cr".sum): the wallet, its history, both rules' verdicts
