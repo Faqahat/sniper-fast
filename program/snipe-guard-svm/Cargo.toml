@@ -1,0 +1,31 @@
+[package]
+name = "snipe-guard-svm"
+version = "0.2.0"
+edition = "2021"
+description = "SVM tests of the BUILT snipe-guard program (LiteSVM 0.17, mainnet feature set): AUTH, allowlist, every check's opaque code, CU, syscall audit, strings scan"
+publish = false
+
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+# the versions program/arbx-exec uses (litesvm 0.17 = agave 4.3); the runtime crates build the syscall registry for the ELF audit
+snipe-guard = { path = "../snipe-guard" }
+litesvm = "0.17"
+agave-feature-set = "4.3"
+solana-program-runtime = "4.3"
+solana-sbpf = "0.23"
+solana-syscalls = "4.3"
+solana-account = "4"
+solana-address = { version = "2.7", features = ["curve25519"] }
+solana-instruction = "3.5"
+solana-instruction-error = "2.5"
+solana-keypair = "3.1"
+solana-message = "4"
+solana-signer = "3"
+solana-transaction = "4"
+solana-transaction-error = "3.4"

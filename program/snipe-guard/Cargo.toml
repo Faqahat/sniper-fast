@@ -1,0 +1,34 @@
+[package]
+name = "snipe-guard"
+version = "0.2.0"
+edition = "2021"
+description = "sniper on-chain guard (dip43): one assert-only instruction placed before the pump.fun buy of the same transaction (private; see ops/guard)."
+publish = false
+
+# Its own workspace root: built from here (host tests, cargo-build-sbf) and used by the engine (~/sniper) as a path dependency for
+# the instruction encoder and the private error-code decoder (both host-only: they are not compiled into the .so).
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+
+# The program has no Solana crate but the syscall declarations (no_std, no strings). On the host nothing is pulled.
+[target.'cfg(target_os = "solana")'.dependencies]
+solana-define-syscall = "=5.4.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+# arithmetic is explicit (wrapping / checked / saturating): no "attempt to add with overflow" strings in the ELF
+overflow-checks = false
+panic = "abort"
+strip = true
+debug = false
+incremental = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
