@@ -5,7 +5,7 @@
 Per feature: proxy net per fill-like event by quintile, and the share of 'dead' fills (no other buyer within 2 slots)."""
 import json, sys
 import numpy as np
-B = "/home/moiz/sniper-data/presend_filter"
+B = "/home/it/sniper-data/presend_filter"
 T_VAL0, T_VAL1 = 1792948200, 1793033220   # 10-25 22:00 PKT, 10-26 21:47 PKT
 E = [e for e in json.load(open(f"{B}/chain_events.json")) if not (T_VAL0 <= e["bt"] < T_VAL1)]
 F = [e for e in E if e["fill"]]

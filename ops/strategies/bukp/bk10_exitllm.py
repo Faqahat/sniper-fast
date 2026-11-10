@@ -5,11 +5,11 @@
 # replays on R2 / R3 / R1. Sync calls (small); spend kind "bukp_exit".
 import sys, json, zlib, random
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/bukp"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies/bukp"); sys.path.insert(0, "/home/it/sniper/ops/strategies")
 import p4_eval as E
 import bk8_replica as B8
 import bk4_cards as B4
-OUT = "/home/moiz/sniper-data/strategies/bukp"; WK = f"{OUT}/llm"
+OUT = "/home/it/sniper-data/strategies/bukp"; WK = f"{OUT}/llm"
 SYS = """You reverse-engineer one pump.fun bot's EXIT rule. Each card is one of its trades: the token state at entry, then the
 price path while it held (10-slot buckets; 1 slot = 0.212 s): price vs its entry, other wallets' buy and sell SOL, how many
 known bots sold, then the bucket where it sold and the price it got, compared with what a simple 'timer/take-profit' exit

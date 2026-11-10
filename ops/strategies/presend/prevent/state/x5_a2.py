@@ -6,8 +6,8 @@ measured outcome + stop gain; ops/strategies/presend/filter/quiet4/q6data.py, re
 Same search, criteria, K = 5 as PREREG family A. Also writes the per-run table (20 live runs + AMS r28-r33, r38) and the PAPER check."""
 import sys, pickle, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/state")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/filter/quiet4")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/state")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/filter/quiet4")
 import x4_score as X
 import q6data as Q6
 D = X.D

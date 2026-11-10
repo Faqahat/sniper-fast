@@ -14,7 +14,7 @@ usable hours, mayhem EXCLUDED. Exit = 5-slot timer (our M2), exact follower mode
 Out: p5.txt, p5.npz (per-candidate arrays reused by p6)"""
 import json, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from plib import *
 import pickle
 

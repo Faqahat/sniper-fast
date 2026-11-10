@@ -15,7 +15,7 @@ needed to replay a run at a SMALLER size than it ran:
 Everything else is REPLAY_065 unchanged (follower limits fixed/requote rule, cascade, 6003 sell retries, exits, costs).
 Replay outputs are INFERRED; the tape, records and decoded limits are MEASURED."""
 import sys, re, json, math, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import numpy as np
 import core, pmath as PM
 

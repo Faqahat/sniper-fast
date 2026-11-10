@@ -7,10 +7,10 @@ our first landed try.
 Out: sniper-data/haqq_dissect/front/f7.pkl"""
 import json, glob, gzip, pickle, collections, sys, os
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, os.path.dirname(__file__))
 import dv8lib as L
 from f6_shape import shape
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 OURS = set(L.WAL.values())
 
 

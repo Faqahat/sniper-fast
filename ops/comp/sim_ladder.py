@@ -2,7 +2,7 @@
 # rule-#2 tapes, with our buy inserted at several landing positions, all costs included:
 #   pump fee per side (from events), buy landing fee (priority + tips), per-sell-leg fee, own price impact on every leg,
 #   entry cap (--slip-bps: min_tokens_out vs the decision-time quote at the post-bundle curve -> revert, pay fail cost).
-# usage: SNIPER_ROOT=/home/moiz/sniper-data python3 sim_ladder.py [tapes] [out.json]
+# usage: SNIPER_ROOT=/home/it/sniper-data python3 sim_ladder.py [tapes] [out.json]
 import sys, os, json, math, itertools, statistics as st
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

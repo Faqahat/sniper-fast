@@ -6,9 +6,9 @@ Re-does the cause split (T6) and the landing what-if (f11) with the reachable fr
 Out: sniper-data/haqq_dissect/front/f13.txt"""
 import pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 R = pickle.load(open(f"{OUT}/f8_rows.pkl", "rb")); R1 = pickle.load(open(f"{OUT}/f1.pkl", "rb")); W = pickle.load(open(f"{OUT}/f7.pkl", "rb"))
 F10 = pickle.load(open(f"{OUT}/f10.pkl", "rb"))
 FULL = (2, 3, 4, 5); nd = 4; out = []

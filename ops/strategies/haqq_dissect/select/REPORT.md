@@ -1,5 +1,5 @@
 # Analyst L (select): no hidden on-chain selection signal; seller memory adds a little (10-28 ~04:25 PKT)
-Saved by the main session from the agent's reply. Code: this folder (s0–s15). Data: /home/moiz/sniper-data/haqq_dissect/select/ (s4_*, s6, s7, s8, s9, s11–s15 .txt; examples.json with 24 examples).
+Saved by the main session from the agent's reply. Code: this folder (s0–s15). Data: /home/it/sniper-data/haqq_dissect/select/ (s4_*, s6, s7, s8, s9, s11–s15 .txt; examples.json with 24 examples).
 
 ## F's score vs F's score + new features (walk-forward)
 **Rate-matched precision, D2–D6:**

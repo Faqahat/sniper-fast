@@ -4,10 +4,10 @@ drop of that sell alone), and the deepest single-slot drop (vs the price at the 
 buy. Out: comp_buys_<tag>.pkl (one row per competitor buy) used by the trigger builder.  usage: phys.py TAG TAB [D]"""
 import sys, pickle, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/comp_rearm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/comp_rearm")
 import rlib
 from comps import COMP
-OUT = "/home/moiz/sniper-data/comp_rearm"
+OUT = "/home/it/sniper-data/comp_rearm"
 OUR = ("EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE")
 tag, tab = sys.argv[1], sys.argv[2]
 tp = rlib.Tape(tab=tab, with_ours=False); ck = tp.clock()

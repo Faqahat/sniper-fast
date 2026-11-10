@@ -2,7 +2,7 @@
 """INSIDER step 2: census tables (paper, zero latency, no costs) per run and class; insider splits."""
 import sys, pickle, collections, datetime
 import numpy as np
-D = "/home/moiz/sniper-data/insider"
+D = "/home/it/sniper-data/insider"
 def pkt(t): return datetime.datetime.utcfromtimestamp(t / 1e9 + 5 * 3600)
 def summ(rows):
     f = [r for r in rows if r["paper"] is not None]

@@ -7,11 +7,11 @@
 Out: gap/g8_summary.txt"""
 import pickle, collections, json, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/gap")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/gap")
 from g3_ledger import grp, classify
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 DAYS = (2, 3, 4, 5)
 
 

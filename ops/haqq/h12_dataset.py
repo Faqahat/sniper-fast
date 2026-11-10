@@ -4,7 +4,7 @@
 # -> sniper-data/haqq/ds.npz (X, y, lot index, d, run, profile) + ds_meta.json
 # usage: h12_dataset.py [eval]  -- 'eval' keeps rows past the real exit up to exit+12 slots (for honest exit-slot match rates) -> ds_eval.npz
 import sys, json, pickle, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 lots = json.load(open(f"{H.OUT}/lots.json")); P = pickle.load(open(f"{H.OUT}/lotpaths.pkl", "rb"))
 _led = json.load(open(f"{H.OUT}/ledger.json")); _a = np.polyfit([r["s"] for r in _led], [r["bt"] for r in _led], 1)
 def bt_of(slot): return float(np.polyval(_a, slot))

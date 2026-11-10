@@ -5,7 +5,7 @@
 # sell SOL and counts, biggest trades, haqq's own other trades, and where this lot's sell(s) landed.
 # Output: sniper-data/haqq/lotpaths.pkl  (list of dicts with numpy arrays)
 import sys, json, pickle, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H, h5_episodes as E5
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H, h5_episodes as E5
 from multiprocessing import Pool
 DMAX = 420
 LOTS = None

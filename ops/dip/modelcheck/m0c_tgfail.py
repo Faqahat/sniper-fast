@@ -5,7 +5,7 @@
 import sys, os, json, gzip, glob, zlib
 import numpy as np
 from multiprocessing import Pool
-OUT = "/home/moiz/sniper-data/modelcheck"; WSOL = "So11111111111111111111111111111111111111112"
+OUT = "/home/it/sniper-data/modelcheck"; WSOL = "So11111111111111111111111111111111111111112"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from m0_raw import code_of, kind_of
 def work(f):

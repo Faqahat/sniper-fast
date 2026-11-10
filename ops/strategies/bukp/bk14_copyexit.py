@@ -5,9 +5,9 @@
 # for every later buy (its own included); our costs. Split by graduation-bound vs other tokens. -> bukp/copy_exit.json
 import sys, json, zlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-OUT = "/home/moiz/sniper-data/strategies/bukp"
+OUT = "/home/it/sniper-data/strategies/bukp"
 UID = zlib.crc32(b"BUkpShoEWRiPckdFs3kzYGjBPfUhL6G39ufo84QeogPP")
 FIX = 0.0035; FAIL = 0.0005; GUARD = 1.05; GRADV = 113e9
 

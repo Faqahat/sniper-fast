@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """grad agent, step 2: reduce the per-chunk decode (g1) into one compact tape.
-Out (in /home/moiz/sniper-data/e2x1_dissect/grad/):
+Out (in /home/it/sniper-data/e2x1_dissect/grad/):
   tape.npz : tr (curve trades, vsol>=45 SOL, mints whose max vsol >= 75 SOL; sorted mint, slot, idx, j; dedup by tx+event)
              ps (PumpSwap events of migrated pools, migration slot .. +12000 slots; sorted pool, slot, idx, j)
              slots (slot, bt, maxi) union over chunks
@@ -9,8 +9,8 @@ Out (in /home/moiz/sniper-data/e2x1_dissect/grad/):
 import glob, json, os, pickle, sys
 import numpy as np
 
-DEC = "/home/moiz/sniper-data/e2x1_dissect/grad/dec"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/grad"
+DEC = "/home/it/sniper-data/e2x1_dissect/grad/dec"
+OUT = "/home/it/sniper-data/e2x1_dissect/grad"
 files = sorted(glob.glob(DEC + "/*.npz"), key=lambda f: (os.path.basename(f).split("__")[0], os.path.basename(f).split("__")[1]))
 print(len(files), "chunks", flush=True)
 

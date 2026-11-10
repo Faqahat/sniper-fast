@@ -7,7 +7,7 @@
 #   ORACLE    best single exit slot in 1..210 (upper bound)
 # exit skill = REAL - SHUFFLE; entry value = SHUFFLE. Per run and per profile.
 import sys, json, pickle, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 lots = json.load(open(f"{H.OUT}/lots.json")); C = pickle.load(open(f"{H.OUT}/curves.pkl", "rb"))
 PROF = {0.25: "A.25", 0.27: "B.27", 0.3: "C.30", 0.4: "D.40", 0.49: "E.49", 0.01: "P.01"}
 prof = lambda sz: PROF.get(round(sz, 2), "BIG" if sz >= 0.6 else "other")

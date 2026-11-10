@@ -8,9 +8,9 @@ age, bought247 / bought248 (MEASURED: that bot bought within 0..2 slots after th
 dv8-universe TAPE-model scores (b3, walk-forward OOS) where the sell is a dv8 candidate. Out: bots/labels.jsonl.gz"""
 import sys, json, gzip
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 ST = ("dev", "creation_slot_buyer", "early_buyer", "other")
 
 

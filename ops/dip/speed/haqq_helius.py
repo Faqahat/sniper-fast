@@ -2,9 +2,9 @@
 # READ-ONLY: which relay landed each of haqqiUUX's txs (one tip per copy under a durable nonce -> the landed copy's tip names the
 # winning relay), by the slot leader's client and distance from Frankfurt; tip amounts; CU price. "no tip" = its staked / tipless copy.
 import sys, json, collections, statistics, importlib.util
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 W = sys.argv[1] if len(sys.argv) > 1 else "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"; N = int(sys.argv[2]) if len(sys.argv) > 2 else 150
-R = json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
+R = json.load(open("/home/it/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
 sigs = [s for s in (S.rpc("getSignaturesForAddress", [W, {"limit": 1000}]) or []) if not s.get("err")][:N]
 rows = []
 for s in sigs:

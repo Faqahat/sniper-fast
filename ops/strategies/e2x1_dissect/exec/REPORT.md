@@ -1,4 +1,4 @@
-I couldn't save the report: the harness blocks agents from writing `.md` report files. The full text is below for you to save as `/home/moiz/sniper/ops/strategies/e2x1_dissect/exec/REPORT.md`. Every number comes from the tables in `/home/moiz/sniper-data/e2x1_dissect/exec/`. One correction to the brief: recon's "every tx on a durable nonce" is not quite true; the Helius copy with the 0.001 tip has no nonce.
+I couldn't save the report: the harness blocks agents from writing `.md` report files. The full text is below for you to save as `/home/it/sniper/ops/strategies/e2x1_dissect/exec/REPORT.md`. Every number comes from the tables in `/home/it/sniper-data/e2x1_dissect/exec/`. One correction to the brief: recon's "every tx on a durable nonce" is not quite true; the Helius copy with the 0.001 tip has no nonce.
 
 ## 12-line summary
 1. **Speed:** he is not faster than us. On our dump definition he lands 44 ms after the dump (72 % same slot); haqq does 45 ms, our pre-send fills 20 ms (97 %), our older reactive fills 25–35 ms.
@@ -19,7 +19,7 @@ I couldn't save the report: the harness blocks agents from writing `.md` report 
 # E2X1 exec: landing, failed copies, exits, cost, sibling and copiers (agent "exec", 10-28 ~21:00 PKT)
 Wallet E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb. D1 = 10-27 20:00 → 10-28 20:00 PKT; D0 is the check day. M = measured, I = inferred.
 
-Code is in this folder (x0–x13, xlib.py). Tables are in `/home/moiz/sniper-data/e2x1_dissect/exec/` (x1.txt … x13.txt, funding.json, nonce_origin.json).
+Code is in this folder (x0–x13, xlib.py). Tables are in `/home/it/sniper-data/e2x1_dissect/exec/` (x1.txt … x13.txt, funding.json, nonce_origin.json).
 
 Clock: "ms" is the chain clock used in the haqq exec study (t7), so his, haqq's and our numbers compare 1:1. One slot = 212 ms. Position inside a slot = tx index divided by the block size (largest pump tx index in the slot + 1).
 
@@ -302,6 +302,6 @@ The rare very close ones (≤25 txs after T) are listed in x11.txt section C, e.
 
 ## Files
 Everything is in the folders the brief assigned to "exec":
-- **Code:** `/home/moiz/sniper/ops/strategies/e2x1_dissect/exec/` (x0–x13, xlib.py)
-- **Tables:** `/home/moiz/sniper-data/e2x1_dissect/exec/`, about 99 MB. Start with x1.txt, x3.txt, x6.txt, x8.txt, x10.txt and x12.txt; examples are in x11.txt.
+- **Code:** `/home/it/sniper/ops/strategies/e2x1_dissect/exec/` (x0–x13, xlib.py)
+- **Tables:** `/home/it/sniper-data/e2x1_dissect/exec/`, about 99 MB. Start with x1.txt, x3.txt, x6.txt, x8.txt, x10.txt and x12.txt; examples are in x11.txt.
 - **Added there:** a fresh leader schedule for epoch 1070 (schedule_1070.json) and the validator client list (cn.json).

@@ -10,7 +10,7 @@ set -u
 PUSH=$(dirname "$(readlink -f "$0")")/quiet_book_push.sh
 T=${1:-$(mktemp -d)}; KEEP=${1:+1}
 mkdir -p "$T"/lists "$T"/bad && : > "$T"/bad/tmp   # the bad node: its stage dir cannot be made (tmp is a file)
-cp /home/moiz/sniper/ops/overnight/sel/cohort_train.json /home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json "$T"/lists/
+cp /home/it/sniper-data/overnight/sel/cohort_train.json /home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json "$T"/lists/
 printf 'n1 h 1 u\nn2 h 1 u\nbad h 1 u\n' > "$T"/nodes3.txt; printf '# two good nodes\nn1 h 1 u\nn2 h 1 u\n' > "$T"/nodes.txt
 export QB_LOCAL=1 QB_SUDO= QB_BOOK="$T"/book.jsonl QB_LOG="$T"/push.log QB_WORK="$T"/work QB_COHORT="$T"/lists/cohort_train.json QB_FBOTS="$T"/lists/fbots_frozen.json \
        QB_DEST="$T/{node}/root/dip" QB_STAGE="$T/{node}/tmp/quiet_book" QB_NODES="$T"/nodes.txt

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """REARM step 10 (read-only; G2): hand-checkable examples of re-arm fills ON the next whale dump (the trade the rule is for), with the
 real signatures of the paid dump that armed the window and of the whale dump we buy, looked up in the raw recordings
-(/home/moiz/sniper-data/collect/run_*/txs/txs_<unix>.jsonl.gz, line head {"s":slot,"i":idx,...,"sig":...}). Our own fill is a
+(/data/tapes/collect/run_*/txs/txs_<unix>.jsonl.gz, line head {"s":slot,"i":idx,...,"sig":...}). Our own fill is a
 REPLAY fill (INFERRED: slot and fractional tx index from the landing model); the dumps, the curve and haqq's buys are MEASURED tape.
 GMGN: https://gmgn.ai/sol/token/<MINT>; Solscan: https://solscan.io/tx/<SIG>.
 usage: r10_examples.py TAG CFG DAYS [--n 8] [--out examples.txt]"""
 import sys, os, glob, gzip, pickle, re, subprocess, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import rlib
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 COST = 2_015_140
 HAQQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
-FILES = sorted((int(re.search(r"txs_(\d+)", f).group(1)), f) for f in glob.glob("/home/moiz/sniper-data/collect/run_2026*/txs/txs_*.jsonl.gz"))
+FILES = sorted((int(re.search(r"txs_(\d+)", f).group(1)), f) for f in glob.glob("/data/tapes/collect/run_2026*/txs/txs_*.jsonl.gz"))
 
 
 def find_sig(slot, idx, bt):

@@ -8,7 +8,7 @@ events that were complete before T).
     0.88); then the distinct other buyers in that slot (after it) and the next 2 slots, and the price 2 slots later / the fill price.
   dumps: every sell that by itself drops the price >= 8%, >= 0.3 SOL, curve < 100 SOL; the distinct other wallets buying after it in
     its slot and the next 2 slots (follow-buys).
-Writes /home/moiz/sniper-data/presend_filter/events.npz"""
+Writes /home/it/sniper-data/presend_filter/events.npz"""
 import json, time, collections
 import numpy as np
 from chainlib import Chain, B

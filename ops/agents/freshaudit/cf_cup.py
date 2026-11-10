@@ -2,10 +2,10 @@
 # BAM/Harmonic blocks order each arrival batch by priority fee (cup). Batch of our tx = run of recorded txs (any mint)
 # ending at our tx in which cup is non-increasing; with a cup above X we would move ahead of every tx in that run with cup < X.
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from load import *
 from sim import *
-A = "/home/moiz/sniper/ops/agents/freshaudit"
+A = "/home/it/sniper/ops/agents/freshaudit"
 FC = [x for x in json.load(open(f"{A}/out/fire_chain.json")) if "dump" in x and "ours" in x]
 fires = json.load(open(f"{A}/out/fires.json"))
 TP = load_tapes(f"{A}/out/tapes_live.json.gz")

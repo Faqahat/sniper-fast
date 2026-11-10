@@ -17,10 +17,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ORACLE = os.path.join(HERE, "oracle", "dipmon_v1.py")
 ORACLE_MD5 = "9165793fed33a27f63accf4579af2712"
-DATA = os.environ.get("DIPMON_DATA", "/home/moiz/sniper-data/runs")
+DATA = os.environ.get("DIPMON_DATA", "/home/it/sniper-data/runs")
 # run copies kept for dipmon's own tests (r28: the latency run); used for the runs DATA does not have
-TUI_DATA = os.environ.get("DIPMON_TUI_DATA", "/home/moiz/sniper-data/tui/runs")
-BIN = os.environ.get("DIPMON_BIN", "/home/moiz/sniper-data/tui/dipmon-go")
+TUI_DATA = os.environ.get("DIPMON_TUI_DATA", "/home/it/sniper-data/tui/runs")
+BIN = os.environ.get("DIPMON_BIN", "/home/it/sniper-data/tui/dipmon-go")
 
 
 # v3-only figures (not in the Python dipmon v1): checked against the oracle's own series_hi / series_lo (the same series'

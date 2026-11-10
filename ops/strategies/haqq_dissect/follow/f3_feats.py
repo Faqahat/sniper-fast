@@ -12,9 +12,9 @@ Out: feats.npz"""
 import sys, time, json, pickle, collections
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/follow"
+OUT = "/home/it/sniper-data/haqq_dissect/follow"
 SMS = 212.0; NS = (0, 2, 5, 10, 20, 40, 80, 160); CAPS = (10, 25, 50, 100, 200, 400); W6 = 6e13
 DIPB = ("HkQ7hMjy", "CZ77onJz", "6VzXcLk9", "DYXDDrZC")
 FEATS = ["N", "kind", "w_pct", "w_sol_in", "w_nbuys", "w_first_rel", "w_cs", "w_dev", "w_unreal", "w_nsells_tok",
@@ -140,8 +140,8 @@ def main():
     st = {int(m): int(a) for m, a in zip(MI["um"], MI["st"])}; en = {int(m): int(b) for m, b in zip(MI["um"], MI["en"])}
     E = dict(np.load(f"{OUT}/episodes.npz")); B = dict(np.load(f"{OUT}/bookdumps.npz")); CV = dict(np.load(f"{OUT}/cross_val.npz"))
     ids, idm = L.ids_map()
-    FB = np.array(sorted(idm[w] for w in json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm))
-    COH = np.array(sorted(idm[w] for w in json.load(open("/home/moiz/sniper/ops/overnight/dip/cohort_R1.json")) if w in idm))
+    FB = np.array(sorted(idm[w] for w in json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm))
+    COH = np.array(sorted(idm[w] for w in json.load(open("/home/it/sniper-data/overnight/dip/cohort_R1.json")) if w in idm))
     DIP = np.array(sorted(i for i, w in enumerate(ids) if w[:8] in DIPB))
     print(f"lists: fbots {len(FB)}, cohort {len(COH)}, dip bots {len(DIP)} ({time.time() - t0:.0f}s)", flush=True)
     hrs = json.load(open(f"{L.D}/hours.json")); good = np.array(sorted({r["h"] for r in hrs["rows"] if r["usable"]}))

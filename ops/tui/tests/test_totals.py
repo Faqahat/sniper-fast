@@ -13,8 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import dipmon  # noqa: E402
 
-DATA = os.environ.get("DIPMON_DATA", "/home/moiz/sniper-data/runs")
-REPORTS = os.environ.get("DIPMON_REPORTS", "/home/moiz/sniper/ops/dip/reports/runs")
+DATA = os.environ.get("DIPMON_DATA", "/home/it/sniper-data/runs")
+REPORTS = os.environ.get("DIPMON_REPORTS", "/home/it/sniper/ops/dip/reports/runs")
 RUNS = [("ams", 24), ("ams", 25), ("ams", 26), ("fra", 24), ("fra", 25), ("ams", 23)]
 TOL = 0.0005
 

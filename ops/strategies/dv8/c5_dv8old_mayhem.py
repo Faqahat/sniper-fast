@@ -3,11 +3,11 @@
 test day 10-26 23:15 -> 10-27 23:15 = +31.8 SOL) with s8's exact code path, then split its test P&L by mayhem tokens.
 Out: dv8/c5.txt"""
 import sys, json, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_gbdt as G
-D = "/home/moiz/sniper-data/haqq_strat"; W0 = 1793038500; W1 = W0 + 86400
+D = "/home/it/sniper-data/haqq_strat"; W0 = 1793038500; W1 = W0 + 86400
 Z = np.load(f"{D}/uni.npz"); X = Z["X"].astype(np.float64); O = Z["O"].astype(np.float64); M = Z["M"]; LS = list(Z["LS"]); HS = list(Z["HS"])
-ids = json.load(open("/home/moiz/sniper-data/haqq_model/tab/ids.json")); CR = json.load(open("/home/moiz/sniper-data/haqq_model/tab/creates.json"))
+ids = json.load(open("/home/it/sniper-data/haqq_model/tab/ids.json")); CR = json.load(open("/home/it/sniper-data/haqq_model/tab/creates.json"))
 may = np.array([bool(CR.get(ids[int(m)], {}).get("mayhem")) for m in M["mint"]])
 bt = M["bt"].astype(np.int64); tr = bt < W0 - 86400; va = (bt >= W0 - 86400) & (bt < W0); te = (bt >= W0) & (bt < W1)
 li = LS.index("real"); col = 2 + 2 * HS.index(8)
@@ -27,4 +27,4 @@ th = best[1]; r = pnl((s >= th) & te)
 L = [f"# earlier DV8 reproduced: VAL best {best[0]:+.2f} at th {th:.4f}; TEST {np.nansum(r):+.2f} SOL on {np.isfinite(r).sum()} trades",
      f"- mayhem picks {int((np.isfinite(r) & may).sum())}: {np.nansum(r[may]):+.2f} SOL; normal picks {int((np.isfinite(r) & ~may).sum())}: {np.nansum(r[~may]):+.2f} SOL",
      f"- share of picks on mayhem {100 * (np.isfinite(r) & may).sum() / np.isfinite(r).sum():.0f}% vs {100 * may[te].mean():.0f}% of all test candidates"]
-print("\n".join(L)); open("/home/moiz/sniper-data/dv8/c5.txt", "w").write("\n".join(L) + "\n")
+print("\n".join(L)); open("/home/it/sniper-data/dv8/c5.txt", "w").write("\n".join(L) + "\n")

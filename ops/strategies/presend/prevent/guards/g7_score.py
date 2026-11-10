@@ -4,7 +4,7 @@ Per window: delta = variant - base (SOL at 0.696, mean over reps). Blocks = (run
 usage: g7_score.py"""
 import json, glob, collections, os
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/guards"
+D = "/home/it/sniper-data/prevent/guards"
 PICK = ["f26", "f27", "f28", "r34", "r35", "r36"]; TEST = "r37"
 HOURS = {"r34": 3.2, "r35": 4.2, "r36": 3.9, "f26": 1.9, "f27": 12.0, "f28": 5.5, "r37": 10.8}
 rng = np.random.default_rng(7)

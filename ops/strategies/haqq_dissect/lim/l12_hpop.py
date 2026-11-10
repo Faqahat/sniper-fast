@@ -7,9 +7,9 @@ DIP = first buy within 2 slots of a >=5% sell (l5). Also: P&L of DIP lots by lat
 Out: data/lim/l12.txt"""
 import pickle, sys, collections, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); out.append(s)

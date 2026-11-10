@@ -10,9 +10,9 @@ Rows: model ('ours', uncalibrated), calibrated, conservative; followers -10 / -2
 Out: bots/b6.txt, b6.json, b6_picks.pkl"""
 import sys, json, pickle, heapq, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 COST = {"NOW": (0.00352, 0.00053), "S2": (0.00186, 0.00036), "CHEAP": (0.00079, 0.00004)}
 THR = (0.02, 0.03, 0.05, 0.08, 0.12, 0.17, 0.25, 0.35, 0.5, 0.65)
 BUSY = {"('T', 5)": 5 * 212 + 300, "('RIDE', 150, 300, 2000)": 2300, "('RIDE', 150, 150, 1000)": 1300, "('MS', 200)": 500, "('MS', 1000)": 1300,

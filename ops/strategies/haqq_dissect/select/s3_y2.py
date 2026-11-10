@@ -12,14 +12,14 @@ Out: select/y2.npz: idx (into env.npz), w, ps[fol, pol] (mean over draws, unfill
 import sys, json, time, collections
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 SIZE = 0.40; HZ = 16; FOLS = (1.0, 0.9); FRAC = 0.30; FAR_MS = 30.0
 PPS = [("RIDE", 150, 150, 1000), ("T", 2)]
 PRG = [("RIDE", 150, 300, 2000), ("T", 5)]
@@ -101,7 +101,7 @@ def main():
     rk = json.load(open(f"{L.D}/rank_model.json"))
     G.update(S=S_, span={int(m): (int(a), int(b)) for m, a, b in zip(um, st, en)}, cc=L.cc(S_["slot"], S_["idx"]), ours=ours, hq=idm[L.HAQQ],
              edges=np.array(rk["edges"]), rq={int(k): np.array(v) for k, v in rk["q"].items()},
-             kpool=np.array(json.load(open("/home/moiz/sniper-data/haqq_dissect/gap/g10a.json"))["k"]))
+             kpool=np.array(json.load(open("/home/it/sniper-data/haqq_dissect/gap/g10a.json"))["k"]))
     DR, DT, _ = delays(); G.update(DR=DR, DT=DT)
     print(f"tape rows {len(S_):,} ({time.time() - t0:.0f}s)", flush=True)
     N = len(A["m"])

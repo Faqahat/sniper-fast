@@ -8,13 +8,13 @@
 #   python3 ss15_refine.py prep <tag> <prev_tag> | submit <tag> | status <tag> | fetch <tag>
 import sys, os, json, zlib, random
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/sssss")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies/sssss")
 import p4_eval as E
 import ss8_sim as S
 import llm as L
 from ss7_cards import KNOWN, SYS_ENTRY, SYS_EXIT, entry_taken, entry_tried, entry_skipped, state_line, fmt, who, P, first_idx, WK, MAXTOK
 from ss11_rules import day_ctx
-OUT = "/home/moiz/sniper-data/strategies/sssss"
+OUT = "/home/it/sniper-data/strategies/sssss"
 UID = zlib.crc32(b"sssssDdMNAWKingjpEojkTNdVuZrBe7FsJLaGtexe7d")
 
 def hazard_text():

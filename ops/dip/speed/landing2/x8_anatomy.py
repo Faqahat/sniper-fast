@@ -3,7 +3,7 @@
 # durable nonce (+ nonce account), compute-budget ixs (limit, price, loaded-data limit), tips (count, where vs the buy),
 # Lighthouse/guard programs, cost units. Sample: per wallet up to PER landings per leader client (pro_rows + our fires).
 import sys, json, collections, random, statistics as st, base64
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
 from rpc_ro import get_tx
 PER = int(sys.argv[1]) if len(sys.argv) > 1 else 5

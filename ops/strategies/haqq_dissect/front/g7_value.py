@@ -3,7 +3,7 @@
 converted to SOL (INFERRED: calibrated 0.61 x front value - 1.17 - 2.01 mSOL per capture). Out: sniper-data/haqq_dissect/front/g7.txt"""
 import pickle, collections, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); out.append(s)

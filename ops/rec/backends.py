@@ -254,7 +254,7 @@ def from_env(log=print):
         return FTPBackend(os.environ.get("FTP_HOST", ""), os.environ.get("FTP_USER", ""), os.environ.get("FTP_PASS", ""),
                           os.environ.get("FTP_DIR", "/sniper-rec"), os.environ.get("FTP_PORT", "21"),
                           tls=os.environ.get("FTP_TLS", "auto"), log=log,
-                          mode_file=os.path.join(os.environ.get("REC_ROOT", "/home/moiz/sniper-data/rec"), "state", "ftp_mode.json"))
+                          mode_file=os.path.join(os.environ.get("REC_ROOT", "/home/it/sniper-data/rec"), "state", "ftp_mode.json"))
     if kind == "mount": return MountBackend(os.environ.get("REC_REMOTE_PATH", ""), log=log)
     if kind == "rsync": return RsyncBackend(os.environ.get("REC_REMOTE_PATH", ""), os.environ.get("REC_REMOTE_SSH", ""), os.environ.get("REC_REMOTE_SSH_PORT", "22"), log=log)
     raise BackendError(f"unknown REC_REMOTE={kind} (ftp | mount | rsync; s3 not built yet)")

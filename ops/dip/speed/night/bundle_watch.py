@@ -2,7 +2,7 @@
 # READ-ONLY night watcher: new jito-bundle ids in the LIVE engines' logs (ssh tail, read-only) -> Jito's public
 # getInflightBundleStatuses (from THIS host's IP, no auth: nothing the live engine uses) -> bundle_watch.jsonl. Every 30 s.
 import json, subprocess, re, time, urllib.request
-HOSTS = {"fra": "84.32.100.36", "ams": "84.32.104.202"}
+HOSTS = {"fra": "cyberfra", "ams": "cyberams"}
 EP = "https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/getInflightBundleStatuses"
 seen = {}; out = open("bundle_watch.jsonl", "a")
 def q(ids):

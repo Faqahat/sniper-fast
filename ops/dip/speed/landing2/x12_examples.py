@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Solscan-checkable examples: same dump, our landed copy vs the first reactive bot ahead of us (h2h.json), per situation.
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
 H = json.load(open(f"{lib2.D}/h2h.json")); WAL = json.load(open(f"{lib2.D}/wallets.json"))
 NONREACT = {w for w, v in WAL.items() if v["grp"] == "instant"} | {w for w in WAL if WAL[w]["name"] in (

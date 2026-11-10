@@ -7,9 +7,9 @@
   blocked = presend_live_skip why=blocked_armed (a window was armed on the mint; arms only if that window is skipped)
 Every row keeps the engine's own arm-time signals: quiet{since_last, coh_hold, fb_n, wh_fol, wh_dumps, q, all4} and v2{...}.
 Value of an armed window (SOL) = presend_live_realized - 5120 lamports x landed failed tries (6042 / deadline / ata_exists / 6005).
-Out: /home/moiz/sniper-data/presend_quiet4/win_r37.pkl  (custom37 format + "kind", "blocker")"""
+Out: /home/it/sniper-data/presend_quiet4/win_r37.pkl  (custom37 format + "kind", "blocker")"""
 import json, pickle, collections, sys
-OUT = "/home/moiz/sniper-data/presend_quiet4"
+OUT = "/home/it/sniper-data/presend_quiet4"
 FN = f"{OUT}/runs/dip_ams_r37.jsonl"
 KEEP_ATT = ("n", "sig", "t", "slot", "deadline", "en_slot", "vsol", "vtok", "p", "lim", "min_out", "spend", "pos", "client", "leader", "tip")
 KEEP_LAND = ("res", "err", "slot", "idx", "a", "first_rx", "fee", "ms_send_to_first_rx", "slots_after_send")

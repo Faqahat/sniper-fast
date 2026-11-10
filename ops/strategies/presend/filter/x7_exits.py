@@ -4,7 +4,7 @@ TP / SL thresholds and the time exit (entry slot + T). Same mechanics as positio
 only the exit parameters change. Rows exist up to max(live sell slot, fill + 4) + 1, so T <= 3 is fully covered.
 Prints the per-run P&L (engine basis, + rent back is unchanged) at 0.34 (live size) and 0.50."""
 import sys, json, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import numpy as np
 import core, positions as PO, pmath as PM
 

@@ -4,17 +4,17 @@ min tokens out / 6002 too much SOL) strictly between our pre-send buy and our se
 Per failed buy: its decoded limit (getTransaction), how far it missed on the live state (MEASURED: the chain state at its
 position), and whether it would pass if our buy had been smaller (INFERRED: the same chain sequence with our buy at 0.35 / 0.25,
 every other trade replayed with its own limit, no revivals = only our size changes).
-Writes /home/moiz/sniper-data/presend_size/fails.json"""
+Writes /home/it/sniper-data/presend_size/fails.json"""
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/size")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/size")
 import numpy as np
 import core
 import sizelib as SL
 
-OUT = "/home/moiz/sniper-data/presend_size"
-GROUPS = [("A", "/home/moiz/sniper-data/replay065", ("r24", "r25"), [f"{OUT}/args_2425.jsonl"]),
-          ("B", "/home/moiz/sniper-data/presend_size", ("r26", "r27", "r28"), [])]
+OUT = "/home/it/sniper-data/presend_size"
+GROUPS = [("A", "/home/it/sniper-data/replay065", ("r24", "r25"), [f"{OUT}/args_2425.jsonl"]),
+          ("B", "/home/it/sniper-data/presend_size", ("r26", "r27", "r28"), [])]
 TEST = [250_000_000, 350_000_000, 500_000_000]
 
 

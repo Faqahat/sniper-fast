@@ -6,17 +6,17 @@
 # creator and insider sold fractions, totals, PKT hour, launch labels (Haiku launch labels file).
 # Wallet types: creator / create-slot insider / family F1..F10 and bot from R2-ONLY lists (p0_lists.py) / fresh = first
 # seen in the day's data < 10 min before / other.  Stage A parses phase-A rows per bucket and collects first-seen;
-# stage B computes features. -> /home/moiz/sniper-data/strategies/patterns/day_{R1,R2,R3}.npz (+ _meta.json)
+# stage B computes features. -> /home/it/sniper-data/strategies/patterns/day_{R1,R2,R3}.npz (+ _meta.json)
 import sys, os, json, gzip, glob, zlib, pickle, hashlib, collections, bisect
 import numpy as np
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"; PO = "/home/moiz/sniper-data/strategies/patterns"; TMP = f"{PO}/tmp"
+D = "/data/tapes/collect"; PO = "/home/it/sniper-data/strategies/patterns"; TMP = f"{PO}/tmp"
 RUNS = {"R1": ("run_20261021_2207", [f"{D}/phaseA"]), "R2": ("run_20261022_1543", [f"{D}/phaseA_fwd"]),
-        "R3": ("run_20261023_1426", [f"{D}/phaseA_r3", "/home/moiz/sniper-data/strategies/phaseA_r3tail"]),
+        "R3": ("run_20261023_1426", [f"{D}/phaseA_r3", "/home/it/sniper-data/strategies/phaseA_r3tail"]),
         "R5": ("run_20261024_1425", [f"{D}/phaseA_r4"])}   # 10-24 19:25 -> 10-25 PKT, forward day (after every rule was frozen)
 SMS = 212.0; GRADV = 113e9
-SS = {int(k): v for k, v in json.load(open("/home/moiz/sniper/ops/overnight/core/slotsize.json")).items()}
-SLACK = sorted(sl for _, sl, _ in json.load(open("/home/moiz/sniper/ops/overnight/verify2/work/a8_slack.json"))["rows"])
+SS = {int(k): v for k, v in json.load(open("/home/it/sniper-data/overnight/core/slotsize.json")).items()}
+SLACK = sorted(sl for _, sl, _ in json.load(open("/home/it/sniper-data/overnight/verify2/work/a8_slack.json"))["rows"])
 def slack(sig):
     h = int(hashlib.sha256(("dip" + sig).encode()).hexdigest()[:8], 16) / 2 ** 32
     return min(SLACK[min(len(SLACK) - 1, int(h * len(SLACK)))], 1e6)
@@ -76,7 +76,7 @@ def init_b(run):
     G["first"] = pickle.load(open(f"{TMP}/{run}_first.pkl", "rb"))
     G["lists"] = json.load(open(f"{PO}/lists_r2.json"))
     lab = {}
-    for l in open("/home/moiz/sniper-data/llm/launch_labels/labels.jsonl"):
+    for l in open("/home/it/sniper-data/llm/launch_labels/labels.jsonl"):
         o = json.loads(l); lab[o["mint"]] = o
     G["lab"] = lab
     G["bids"] = {u: (v[0], v[1]) for u, v in json.load(open(f"{PO}/botids.json")).items()}

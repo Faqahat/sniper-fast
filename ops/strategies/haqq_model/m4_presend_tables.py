@@ -11,7 +11,7 @@ Ranges: 5-95% of 4000 bootstrap resamples of the windows (with a fresh landing d
 usage: h5_presend_tables.py [R28|P3]"""
 import sys, pickle, json, time
 import numpy as np
-DATA = "/home/moiz/sniper-data/haqq_model"
+DATA = "/home/it/sniper-data/haqq_model"
 pool = "R28"
 Z = pickle.load(open(f"{DATA}/presend.pkl", "rb"))
 W = {tuple(x["key"]): x for x in Z["wins"]}

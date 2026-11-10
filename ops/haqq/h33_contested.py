@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # H2H step 4 (read-only, local): the CONTESTED dumps (we failed the +5% guard, haqq filled): entry spot x exit, 0.35 SOL, our tx costs.
 import sys, json, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 import importlib.util
-spec = importlib.util.spec_from_file_location("h31", "/home/moiz/sniper/ops/haqq/h31_decomp.py")
-src = open("/home/moiz/sniper/ops/haqq/h31_decomp.py").read().split("# ---------- 4. P&L accounting, ours")[0]
+spec = importlib.util.spec_from_file_location("h31", "/home/it/sniper/ops/haqq/h31_decomp.py")
+src = open("/home/it/sniper/ops/haqq/h31_decomp.py").read().split("# ---------- 4. P&L accounting, ours")[0]
 src = src.replace('print(', '(lambda *a, **k: None)(')                 # reuse the helpers (sim, tape) silently
 exec(compile(src, "h31_helpers", "exec"))
 R = json.load(open(f"{H.OUT}/h2h_fires.json"))

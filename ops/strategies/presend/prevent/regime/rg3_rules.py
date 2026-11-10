@@ -1,11 +1,11 @@
 """REGIME step 3: task 1 (clustering + conditional P&L) and task 2 (59 cooldown rules) on the live runs, PAPER on shadow-only runs.
 Writes rules.json + prints tables. usage: rg3_rules.py"""
 import sys, pickle, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/regime")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/regime")
 import rg_lib as G
 import rg2_core as C
 
-OUT = "/home/moiz/sniper-data/prevent/regime"
+OUT = "/home/it/sniper-data/prevent/regime"
 D = pickle.load(open(f"{OUT}/runs.pkl", "rb"))
 live, paper = D["live"], D["paper"]
 PICK, TEST, R38 = G.PICK, G.TEST, ["dip_ams_r38"]

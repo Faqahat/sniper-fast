@@ -4,10 +4,10 @@ chain clock and the same 't7' definition as his buys (previous outside trade = s
 Our per-fill costs: buy fee+tip, failed tries (presend_attempt_land non-ok fees), sell fee+tip, ATA close.
 Out: sniper-data/e2x1_dissect/exec/x2.txt, x2.pkl"""
 import sys, json, collections, pickle
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
-RUNS = {"FRA27": "/home/moiz/sniper-data/runs/fra/runs/dip_r27.jsonl", "FRA28": "/home/moiz/sniper-data/runs/fra/runs/dip_r28.jsonl",
-        "AMS28": "/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"}
+RUNS = {"FRA27": "/home/it/sniper-data/runs/fra/runs/dip_r27.jsonl", "FRA28": "/home/it/sniper-data/runs/fra/runs/dip_r28.jsonl",
+        "AMS28": "/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"}
 OURS = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 fills = []; cost = collections.defaultdict(lambda: collections.Counter())
 for run, f in RUNS.items():
@@ -38,9 +38,9 @@ for run, f in RUNS.items():
     cost[run]["t0"] = tmin; cost[run]["t1"] = tmax
 # tape: recon tape for his mints, haqqml/fresh tape for the rest
 RT = X.tape()["trades"]
-FT = np.load("/home/moiz/sniper-data/haqqml/fresh/tape/trades.npy", mmap_mode="r")
-mids = {m: k for k, m in enumerate(json.load(open("/home/moiz/sniper-data/haqqml/fresh/tape/mints.json")))}
-users = json.load(open("/home/moiz/sniper-data/haqqml/fresh/tape/users.json")); ourid = {k for k, u in enumerate(users) if u in OURS}
+FT = np.load("/home/it/sniper-data/haqqml/fresh/tape/trades.npy", mmap_mode="r")
+mids = {m: k for k, m in enumerate(json.load(open("/home/it/sniper-data/haqqml/fresh/tape/mints.json")))}
+users = json.load(open("/home/it/sniper-data/haqqml/fresh/tape/users.json")); ourid = {k for k, u in enumerate(users) if u in OURS}
 need = np.array([mids[f["mint"]] for f in fills if f["mint"] not in RT and f["mint"] in mids], np.uint32)
 fm = np.asarray(FT["mint"]); sel = np.nonzero(np.isin(fm, need))[0]
 sub = np.asarray(FT[sel]); bym = collections.defaultdict(list)

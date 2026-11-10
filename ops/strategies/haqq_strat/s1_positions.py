@@ -13,13 +13,13 @@ Chain clock (same as presend/real/rlib.py): cc(s, i) = s*212 + i / n_s * 212, n_
 Lots: each buy is a lot; sells consume lots FIFO by tokens. Lot P&L = share of sell proceeds (net of pump fees) - gross cost.
 Costs: tx fee + tips of each landed tx, joined from the raw recording by (slot, idx) (haqq: haqq_raw.jsonl, 10-25 14:20 ->;
 ours: tab/ours.jsonl). Failed txs are counted separately (s2).
-Out: /home/moiz/sniper-data/haqq_strat/pos.pkl"""
+Out: /home/it/sniper-data/haqq_strat/pos.pkl"""
 import json, time, collections, pickle, sys
 import numpy as np
-TAB = "/home/moiz/sniper-data/haqq_model/tab"; OUT = "/home/moiz/sniper-data/haqq_strat"
+TAB = "/home/it/sniper-data/haqq_model/tab"; OUT = "/home/it/sniper-data/haqq_strat"
 HAQQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 OURS = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE": "FRA", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR": "AMS"}
-FB = set(json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
+FB = set(json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
 SMS = 212.0; SUP = 1e15
 
 

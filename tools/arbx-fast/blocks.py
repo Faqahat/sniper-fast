@@ -1,11 +1,11 @@
 import json, sys, collections, statistics as st, concurrent.futures as cf
 sys.path.insert(0,'.'); from rpc import rpc
 exec(open("an.py").read().split("txs=json.load")[0])   # b58d
-S=json.load(open("/home/moiz/arbed/arbx-fast/data/sender-tip-accounts.json"))
+S=json.load(open("/home/it/other/arbed/arbx-fast/data/sender-tip-accounts.json"))
 tipsvc={}
 for svc,v in S.items():
     for a in (v.get("tip_accounts") or []) if isinstance(v,dict) else []: tipsvc[a]="jito" if svc=="quicknode_lil_jit" else svc
-VM=json.load(open("/home/moiz/arbed/arbx-fast/data/validators-meta.json"))["validators"]
+VM=json.load(open("/home/it/other/arbed/arbx-fast/data/validators-meta.json"))["validators"]
 VOTE="Vote111111111111111111111111111111111111111"; CB="ComputeBudget111111111111111111111111111111"
 L=json.load(open("landed.json"))
 def keys(t):

@@ -16,12 +16,12 @@ our wallet per day = every FRA/AMS tx's SOL delta (ours.jsonl sd; fees, tips, re
 Out: vs248/v2.pkl"""
 import json, pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/gap")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/gap")
 import dv8lib as L
 from g3_ledger import classify, grp
-OUT = "/home/moiz/sniper-data/haqq_dissect/vs248"
-G = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/vs248"
+G = "/home/it/sniper-data/haqq_dissect/gap"
 
 
 def main():

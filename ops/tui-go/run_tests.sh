@@ -2,13 +2,13 @@
 # dipmon v3 (Go) tests, one command:  sh ops/tui-go/run_tests.sh
 #   QUICK=1          the follow test at 200x (default 50x: ~12 min for r26 + r27)
 #   FOLLOW=0         skip the follow test;  PERF=0  skip the CPU / RSS measurement (~5 min);  PERF_PY=1  also measure Python v1
-#   DIPMON_DATA=dir  the local run copies (default /home/moiz/sniper-data/runs)
+#   DIPMON_DATA=dir  the local run copies (default /home/it/sniper-data/runs)
 #   DIPVIEW_DATA=dir the runs directory for the dipview tests (default: the local AMS copies)
 cd "$(dirname "$0")" || exit 1
-GO=${GO:-/home/moiz/sdk/go/bin/go}
+GO=${GO:-/home/it/tools/sdk/go/bin/go}
 export GOFLAGS=-mod=vendor GOTOOLCHAIN=local GOPROXY=off GOTELEMETRY=off
-export GOCACHE=${GOCACHE:-/home/moiz/sniper-data/tui/.gocache}
-export DIPMON_BIN=${DIPMON_BIN:-/home/moiz/sniper-data/tui/dipmon-go}
+export GOCACHE=${GOCACHE:-/home/it/sniper-data/tui/.gocache}
+export DIPMON_BIN=${DIPMON_BIN:-/home/it/sniper-data/tui/dipmon-go}
 export PYTHONDONTWRITEBYTECODE=1
 fail=0
 step() { echo; echo "=== $*"; }

@@ -87,6 +87,10 @@ impl Blocklist {
         holders.iter().filter(|(_, b)| *b >= min).find_map(|(k, b)| self.set.get(k).map(|why| (*k, "holder", pct(*b), why.clone())))
     }
 
+    /// tests: the next check() reads the file
+    #[cfg(test)]
+    pub fn mtime_reset_for_test(&mut self) { self.mtime = None; self.checked = Instant::now().checked_sub(Duration::from_secs(60)).unwrap_or_else(Instant::now); }
+
     pub fn json(&self) -> serde_json::Value {
         serde_json::json!({"path": self.path, "n": self.set.len(), "version": self.ver, "reloads": self.reloads, "reload_fails": self.fails, "skips": self.skips})
     }
@@ -102,7 +106,47 @@ impl PsLive {
         let min = bl_min(self.cfg.blocklist_pct);
         let holders = self.det.holders_at_least(mint, min, &self.user).unwrap_or_default();
         let wb = who_bal.unwrap_or_else(|| self.det.bal(mint, who));
-        b.hit((who, role, wb), &holders, min)
+        // dip38: the token's launcher (its create tx's fee payer) last: a whale / dumper / holder hit keeps dip37c's record
+        b.hit((who, role, wb), &holders, min).or_else(|| self.bl_launcher(mint).map(|(k, p, why)| (k, "launcher", p, why)))
+    }
+
+    /// dip38 --presend-live-blocklist-launcher (LIVE, default on with the blocklist): the token's launcher is listed -> (launcher, its holding
+    /// now (% of supply), the list's reason); None: off, not listed, or the create was not seen
+    pub(super) fn bl_launcher(&self, mint: &Pk) -> Option<(Pk, f64, String)> {
+        if !self.cfg.blocklist_launcher { return None; }
+        let b = self.bl.as_ref()?;
+        let l = self.l38.launch.get(mint)?;
+        let why = b.set.get(&l.payer)?;
+        Some((l.payer, self.det.bal(mint, &l.payer) as f64 / pl::SUPPLY * 100.0, why.clone()))
+    }
+
+    /// dip37c PER-SEND blocklist: the largest listed holder >= the threshold of `mint` now (the whale / dumper included: a listed one never
+    /// arms), None: none / the flag off. Main loop only (on a listed wallet's trade of an armed mint, at the arm, after a reload)
+    pub(super) fn bl_send_hit(&self, mint: &Pk) -> Option<(Pk, f32)> {
+        let b = self.bl.as_ref().filter(|_| self.cfg.blocklist_send)?;
+        let min = bl_min(self.cfg.blocklist_pct);
+        self.det.holders_at_least(mint, min, &self.user).unwrap_or_default().into_iter().find(|(k, _)| b.set.contains_key(k)).map(|(k, v)| (k, (v as f64 / pl::SUPPLY * 100.0) as f32))
+            // dip38: a listed launcher (after a reload: a listed one never arms) withholds too (its holding as the %)
+            .or_else(|| self.bl_launcher(mint).map(|(k, p, _)| (k, p as f32)))
+    }
+
+    /// dip37c: the armed window of `mint`'s cached listed holder (the sender reads it with the window); `force`: whatever traded
+    pub(super) fn bl_send_refresh(&mut self, mint: &Pk, trader: Option<&Pk>) {
+        if !self.cfg.blocklist_send { return; }
+        let Some(&id) = self.armed.get(mint) else { return };
+        // only a listed wallet's trade can change a listed holding (O(1) for every other trade)
+        if let Some(u) = trader { if !self.bl.as_ref().is_some_and(|b| b.set.contains_key(u)) { return; } }
+        let h = self.bl_send_hit(mint);
+        let mut g = self.sh.wins.lock().unwrap();
+        if let Some(w) = g.iter_mut().find(|w| w.id == id) { w.blk = h; }
+    }
+
+    /// dip37c: the per-send blocklist's status part ("" without it)
+    pub(super) fn bl_send_status(&self) -> String {
+        if !self.cfg.blocklist_send { return String::new(); }
+        let l = |a: &[AtomicU64; 2]| format!("{}/{}", a[0].load(Ordering::Relaxed), a[1].load(Ordering::Relaxed));
+        format!(" | BLOCKLIST PER-SEND {} T2/re-arm: withheld {} would (log) {}", if self.sh.bl_send_live.load(Ordering::Relaxed) { "live" } else { "LOG" },
+            l(&self.sh.bl_withheld), l(&self.sh.bl_would))
     }
 
     /// dip36: the skip record's fields

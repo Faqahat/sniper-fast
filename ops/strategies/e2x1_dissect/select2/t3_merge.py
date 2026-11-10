@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """select2 t3: merge the per-file tx-shape scans -> SCR/shape.npz (records sorted by sigh, global route ids), SCR/blocks.npy."""
 import sys, os, glob, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
 files = sorted(glob.glob(f"{SCR}/shape/*.npz")); print(len(files))
 A = []; R = {}; B = {}
 for f in files:

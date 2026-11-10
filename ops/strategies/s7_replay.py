@@ -15,12 +15,12 @@
 # simulated as sequential partial sells. Followers keep their SOL amounts (they get fewer tokens after our buy);
 # follower slippage failures are NOT modeled (optimistic for big sizes).
 import sys, os, json, gzip, glob, zlib, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies")
+sys.path.insert(0, "/home/it/sniper/ops/strategies")
 import s1_trips as S1
 from multiprocessing import Pool
-OUT = "/home/moiz/sniper-data/strategies/replay"
+OUT = "/home/it/sniper-data/strategies/replay"
 SMS = 212.0
-SS = {int(k): v for k, v in json.load(open("/home/moiz/sniper/ops/overnight/core/slotsize.json")).items()}
+SS = {int(k): v for k, v in json.load(open("/home/it/sniper-data/overnight/core/slotsize.json")).items()}
 FIX = 0.0035; FAIL = 0.0005; GUARD = 1.05; GRADV = 113e9
 LATS = (35, 50)
 TIMERS = {"Q": (20, 50, 100, 200, 400, 800), "M": (4, 10, 20, 45, 70), "D": (4, 6, 10, 20, 45, 70, 141)}

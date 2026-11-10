@@ -5,7 +5,7 @@
 # +4.9 / +6.4 / +8.7 / +9.3 / +10.7; first in line +13.2), scaled by the share of fires a fix touches.
 import json, sys, io, contextlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 with contextlib.redirect_stdout(io.StringIO()):
     from l4_tables import L, grp, quart, first_react, best_pro, P, pct
 

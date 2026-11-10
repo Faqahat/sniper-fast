@@ -17,7 +17,7 @@ Position policies:
 Out: p6.txt, p6.json"""
 import json, sys, time, heapq, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 import g1_walkforward as GW
 import dd_gbdt as G
 import dv8lib as L

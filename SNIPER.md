@@ -9,7 +9,7 @@ Remote servers are disposable and replicable: they only receive built binaries +
   `ops/lat/` live scripts + guard, `ops/fix2/` landing config + notes, `ops/race/`, `ops/comp/` competitor research,
   `ops/indep/common.py` chain helpers, etc. Tokens are read from `deploy/.env` (never committed).
 - Build: `cargo build --release --bin snipe_engine` here; deploy the binary to `<server>:/root/<engine-dir>/target/release/`.
-- Current server: `ssh -p 1996 it@84.32.100.36` (sudo; files under /root). Secrets on the server only:
+- Current server: `ssh -p 1996 it@cyberfra` (sudo; files under /root). Secrets on the server only:
   /root/sniper/deploy/.env, /root/.nexus-v2-trading-wallet.{enc,pass}, /root/.config/doublezero/id.json,
   /root/.harmonic-searcher-auth.json, /root/.nexus-v2-jito-auth.json, /root/.flowra-searcher.json.
 - `ops/overnight/` — 2026-10-23 strategy study (read-only research): replay engine `core/rp.py` (validated, `core/val_*.py`),

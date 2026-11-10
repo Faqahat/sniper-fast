@@ -10,8 +10,8 @@ import json, pickle, collections, sys, os
 import numpy as np
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 W0, W1 = 1793038500, 1793124900
-OUT = "/home/moiz/sniper-data/haqq_dissect/recon"
-TAB = "/home/moiz/sniper-data/dv8/tab"
+OUT = "/home/it/sniper-data/haqq_dissect/recon"
+TAB = "/home/it/sniper-data/dv8/tab"
 rows = pickle.load(open(f"{OUT}/table_all.pkl", "rb"))
 trades = [r for r in rows if r["cls"] in ("buy", "sell", "swap_sell") and r["ev"]]
 bym = collections.defaultdict(list)

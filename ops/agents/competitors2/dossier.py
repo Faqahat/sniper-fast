@@ -3,9 +3,9 @@
 # reaction stats, relays of LANDED (ok) txs by leader kind with tip sizes, priority / CU limit vs used, error codes,
 # copies per dump, pre-positioning, own programs, leaders where it is first most often; joined with the RPC tx shapes
 # (txshape.jsonl: size, nonce, ALT, loaded-data limit, cost units) and the feed timing (timing_wallets.json).
-# usage: python3 -I dossier.py  -> /home/moiz/sniper-data/competitors2/dossier.json + dossier.txt
+# usage: python3 -I dossier.py  -> /home/it/sniper-data/competitors2/dossier.json + dossier.txt
 import json, gzip, collections, statistics, os
-D2 = "/home/moiz/sniper-data/competitors2"
+D2 = "/home/it/sniper-data/competitors2"
 US = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE": "US-FRA", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR": "US-AMS"}
 F = json.load(open(f"{D2}/fires.json"))
 # wallet list: everyone ahead of us >= 3 times or crossing us >= 2, plus the universe's top first-buyers

@@ -7,7 +7,7 @@
 # usage: python3 ps8_compare.py KEY [KEY ...]   (keys from ps6_select.json, e.g. T3|c)  -> presend/ps8_compare.json + stdout
 import sys, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_lib as L
 import ps5_lib as E, ps7_test as T
 DAYS = ("R2", "R3", "R4", "R1")

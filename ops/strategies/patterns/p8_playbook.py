@@ -5,9 +5,9 @@
 # buy within 1 slot) and follower SOL. -> patterns/playbook_bait.json
 import sys, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-PO = "/home/moiz/sniper-data/strategies/patterns"
+PO = "/home/it/sniper-data/strategies/patterns"
 BANDS = [(0.1, 0.35), (0.35, 0.75), (0.75, 1.2), (1.2, 2.1), (2.1, 3.0)]
 def bait_mask(d, lo, hi):
     F = d["F"]; FI = d["FI"]

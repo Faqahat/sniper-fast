@@ -4,9 +4,9 @@ we fired / did not fire (engine on) / engine off, (c) his tier rule and his size
 Out: data/lim/l15.txt"""
 import pickle, json, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from runs import run_files
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 CF, CX = 3.52e-3, 0.53e-3
 out = []
 def P(*a):

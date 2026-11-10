@@ -3,7 +3,7 @@
 PICK = f26 f27 f28 r34 r35 r36, TEST = r37.  Pass-bar stats + the -20% followers row.  Out: replay.json"""
 import json, collections, sys
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/timing/rp"
+D = "/home/it/sniper-data/prevent/timing/rp"
 RUNS = ["f26", "f27", "f28", "r34", "r35", "r36", "r37"]
 data = {r: json.load(open(f"{D}/rp_{r}.json")) for r in RUNS}
 VARS = data["r37"]["vars"]
@@ -46,4 +46,4 @@ for v in VARS:
 print("\nper run gain (replay, mean of 3 worlds):")
 print("run  " + " ".join(f"{v:>11s}" for v in VARS))
 for r in RUNS: print(f"{r:4s} " + " ".join(f"{res[v]['per'][r]:+11.3f}" for v in VARS))
-json.dump(res, open("/home/moiz/sniper-data/prevent/timing/replay.json", "w"), indent=1)
+json.dump(res, open("/home/it/sniper-data/prevent/timing/replay.json", "w"), indent=1)

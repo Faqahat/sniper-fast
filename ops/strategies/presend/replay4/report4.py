@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """REPLAY4 step 4: every knob alone vs the live config, over r37 (recorder tape) and r38/r39/r40 (collector tape).
 Per run: the paired delta (refused fills AND the fills the knob creates), at 0% and -20% followers, without the top 5
-windows, and SOL/day. Out: stdout + /home/moiz/sniper-data/replay4/knobs4.txt"""
+windows, and SOL/day. Out: stdout + /home/it/sniper-data/replay4/knobs4.txt"""
 import sys, pickle, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as L
 
 RUNS = ["r37", "r38", "r39", "r40"]
@@ -52,4 +52,4 @@ p("-" * 110)
 for n, r, tot, nt5, c20, npos, perday in rows:
     p(f"{n:<22} {r['r37'][0]:>+8.3f} {r['r38'][0]:>+8.3f} {r['r39'][0]:>+8.3f} {r['r40'][0]:>+8.3f} | "
       f"{tot:>+8.3f} {nt5:>+8.3f} {c20:>+8.3f} {npos:>4}/4 {perday:>+8.2f}")
-open("/home/moiz/sniper-data/replay4/knobs4.txt", "w").write("\n".join(OUT) + "\n")
+open("/home/it/sniper-data/replay4/knobs4.txt", "w").write("\n".join(OUT) + "\n")

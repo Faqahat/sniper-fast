@@ -6,10 +6,10 @@ GBDT regression (squared loss, y clipped to +-50 mSOL), 400 rounds, depth 4, lr 
 Calibration penalty (frozen from PRE-TEST live fires only, calib.json): mSOL per attempt, scaled by size / 0.35.
 Selection on VAL: score cut (top q of VAL dumps, q grid) x size (0.35/0.5/0.75/1.0) maximising PENALISED VAL SOL/day
 after position limits (2 wallets = 2 open positions, never the same token; a position is busy 8 slots).
-Then TEST is scored ONCE with the frozen (model, cut, size) per row. Writes /home/moiz/sniper-data/dipml/frozen_L*.json,
+Then TEST is scored ONCE with the frozen (model, cut, size) per row. Writes /home/it/sniper-data/dipml/frozen_L*.json,
 results.json; prints the tables."""
 import sys, json, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/dip")
+sys.path.insert(0, "/home/it/sniper-data/overnight/dip")
 import gbdt_np as gb
 import core
 

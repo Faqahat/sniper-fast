@@ -10,11 +10,11 @@ TP x / SL x (first time value >= 1+x / <= 1-x, cap = his own exit); SIB (sell wh
 Out: minor/m6.txt, minor/m6.pkl"""
 import pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 import xlib as X
 from plib import Out
-OUT = "/home/moiz/sniper-data/haqq_dissect/minor"
+OUT = "/home/it/sniper-data/haqq_dissect/minor"
 CODES = (226, 231, 244, 251, 252, 249, 234)
 SMS = 212.0; RD = 60.0; TD = 100.0
 
@@ -25,7 +25,7 @@ def main():
     lots = pickle.load(open(f"{OUT}/m2_lots.pkl", "rb"))
     R, MI, span, CC = X.tape(); H = MI["who"]["haqq"]; ours = [MI["who"]["FRA"], MI["who"]["AMS"]]
     # haqq sells per mint with code
-    TX = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/exec/txs.pkl", "rb"))
+    TX = pickle.load(open("/home/it/sniper-data/haqq_dissect/exec/txs.pkl", "rb"))
     code = {(r["s"], r["i"]): (r["cup"] or 0) % 1000 for r in TX if r["w"] == "haqq" and r["ok"]}
     del TX
     bym = collections.defaultdict(list)

@@ -2,7 +2,7 @@
 import json, pickle, datetime as dt
 import numpy as np
 
-G = "/home/moiz/sniper-data/e2x1_dissect/grad"
+G = "/home/it/sniper-data/e2x1_dissect/grad"
 SLOT_MS = 212.07
 PKT = dt.timezone(dt.timedelta(hours=5))
 E2X1 = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"

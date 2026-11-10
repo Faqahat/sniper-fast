@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # DF7eRXHn study, pass 3 (read-only, local). One row per buy attempt of the wallet (landed ok + landed failed) with:
 #   trigger context on the same mint (prior trades), curve size, token age, position after the trigger, his size, the paired sell, P&L (curve SOL).
-# Output: /home/moiz/sniper-data/landing2/df7e/buys.json
+# Output: /home/it/sniper-data/landing2/df7e/buys.json
 import sys, json, gzip, glob, collections, bisect
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
-D = "/home/moiz/sniper-data/landing2/df7e"; W = "DF7eRXHnvRQ9QeVCrdfS56a7RpBD6se6mgPvzApHPNr9"
+D = "/home/it/sniper-data/landing2/df7e"; W = "DF7eRXHnvRQ9QeVCrdfS56a7RpBD6se6mgPvzApHPNr9"
 BLK = {}
 for f in sorted(glob.glob(f"{lib2.D}/x_r3/B_*") + glob.glob(f"{lib2.D}/x_r4/B_*")):
     for k, v in json.load(open(f)).items():

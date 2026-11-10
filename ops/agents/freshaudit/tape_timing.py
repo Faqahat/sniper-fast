@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # per fire: our feed's receipt times of every trade on the mint after the dump (tape events) vs our fire / our buy seen
 import json, collections, statistics as st
-D = "/home/moiz/sniper/ops/dip/speed"
+D = "/home/it/sniper/ops/dip/speed"
 rt = json.load(open(f"{D}/leaders/leader_rtt_new.json"))["leaders"]
-FC = {r["buy_sig"]: r for r in json.load(open("/home/moiz/sniper/ops/agents/freshaudit/out/fire_chain.json"))}
+FC = {r["buy_sig"]: r for r in json.load(open("/home/it/sniper/ops/agents/freshaudit/out/fire_chain.json"))}
 rows = []
 for n in range(1, 6):
     ev = [json.loads(l) for l in open(f"{D}/dip_r{n}.jsonl")]
@@ -26,7 +26,7 @@ for n in range(1, 6):
         rows.append(dict(run=n, mint=f["mint"], res=fc.get("result"), client=f.get("client"), rtt=rt.get(f.get("leader"), {}).get("rtt"),
                          fire_ms=(f["t_fire"] - t0) / 1e6, seen_ms=((tm.get("buy_first_rx") or 0) - t0) / 1e6, exec_lag=tm.get("exec_lag_ms"),
                          ds=o.get("s", 0) - d.get("s", 0), oi=o.get("i"), di=d.get("i"), comp=comp, pre=fc.get("pre_ratio")))
-json.dump(rows, open("/home/moiz/sniper/ops/agents/freshaudit/out/tape_timing.json", "w"))
+json.dump(rows, open("/home/it/sniper/ops/agents/freshaudit/out/tape_timing.json", "w"))
 print("fires with timing", len(rows))
 # first competitor BUY seen (any wallet) vs ours
 W = collections.defaultdict(list)

@@ -1,5 +1,5 @@
 # Analyst F (bots): 247 "Launch-Dump Sniper" and 248 "Big-Dump Rebounder"; can we be them? Not yet (10-28 ~04:15 PKT)
-Saved by the main session from the agent's reply. Code: this folder (b0–b16). Tables: /home/moiz/sniper-data/haqq_dissect/bots/*.txt (b2, b2b, b3, b6, b7, b8b_size, b12, b13, b14, b16).
+Saved by the main session from the agent's reply. Code: this folder (b0–b16). Tables: /home/it/sniper-data/haqq_dissect/bots/*.txt (b2, b2b, b3, b6, b7, b8b_size, b12, b13, b14, b16).
 - examples.json and b9.txt: 12 claims × 6 examples with GMGN and Solscan links;
 - decisions.jsonl: 3,802 lines;
 - labels.jsonl.gz: 1.08 M envelope sells with bought / score.

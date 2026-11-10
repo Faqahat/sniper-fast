@@ -35,9 +35,9 @@ def pkb(s):  # base58 pubkey -> 32 bytes
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="/home/moiz/sniper-data/preconf/synth_test")
-    ap.add_argument("--collect-root", default="/home/moiz/sniper-data/collect")
-    ap.add_argument("--engine", default="/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl")
+    ap.add_argument("--out", default="/home/it/sniper-data/preconf/synth_test")
+    ap.add_argument("--collect-root", default="/data/tapes/collect")
+    ap.add_argument("--engine", default="/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl")
     ap.add_argument("--date", default="2026-10-27"); ap.add_argument("--from", dest="t_from", default="20:45")
     ap.add_argument("--minutes", type=float, default=20)
     ap.add_argument("--seed", type=int, default=7)

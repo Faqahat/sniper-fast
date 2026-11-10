@@ -2,7 +2,7 @@
 # Head to head: on the dumps where WE fired (live dip runs), where did each pro / fast bot land vs us?
 # Our landing = the landed variant of our fire (chain position from the recording). ms = block clock (INFERRED), positions MEASURED.
 import sys, json, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
 R = lib2.load(); LS = lib2.leaders(); WAL = json.load(open(f"{lib2.D}/wallets.json"))
 DU = R["dumps"]; FOL = R["followers"]

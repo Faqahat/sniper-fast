@@ -15,7 +15,7 @@ exit, follower and cost models) is sim.py's, imported unchanged. INFERRED output
 import math, heapq, collections, hashlib, json, bisect
 import numpy as np
 import sys
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import sim, rlib
 from sim import Win, exit_path, SMS
 
@@ -32,7 +32,7 @@ def wkey(x):
 
 class PathModel:
     """send -> seen quantile functions (ms) per path x client x near/far (MEASURED inputs, see d1_paths.py)"""
-    def __init__(self, path="/home/moiz/sniper-data/presend_density/paths.json", min_n=15, min_share=0.25):
+    def __init__(self, path="/home/it/sniper-data/presend_density/paths.json", min_n=15, min_share=0.25):
         J = json.load(open(path))
         self.hps = {}
         for k, v in J["ps"].items():

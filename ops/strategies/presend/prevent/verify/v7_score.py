@@ -3,7 +3,7 @@
 Window value (scaled to 0.696, verifier fixed costs; re-arm at real 0.65): v = -failed-try fees + trade value if filled.
 Skip saving = -sum(v of skipped windows). CI = block bootstrap over (run, PKT hour) blocks, 5000 draws, 90%."""
 import pickle, collections, json, random, datetime as dt, sys
-OUT = "/home/moiz/sniper-data/prevent/verify"
+OUT = "/home/it/sniper-data/prevent/verify"
 T = pickle.load(open(f"{OUT}/tables.pkl", "rb")); F = pickle.load(open(f"{OUT}/feats.pkl", "rb"))
 PKT = dt.timezone(dt.timedelta(hours=5))
 R20 = ["F21", "F22", "F23", "F24", "F26", "F27", "F28", "A16", "A17", "A19", "A20", "A24", "A25", "A26", "A27", "A34", "A35", "A36", "A37", "A38"]

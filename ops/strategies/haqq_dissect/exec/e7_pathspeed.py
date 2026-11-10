@@ -3,9 +3,9 @@
 fills (MEASURED, chain clock dump -> own buy; dump = previous outside trade is a sell >= 0.5 SOL within 2 slots).
 Out: sniper-data/haqq_dissect/exec/t7_pathspeed.txt"""
 import sys, pickle, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-D = "/home/moiz/sniper-data/haqq_dissect/exec"
+D = "/home/it/sniper-data/haqq_dissect/exec"
 rows = pickle.load(open(f"{D}/txs.pkl", "rb"))
 info = {(r["s"], r["i"]): r for r in rows if r["kind"] == "buy" and r["ok"]}
 T = np.load(f"{L.TAB}/trades.npy", mmap_mode="r")

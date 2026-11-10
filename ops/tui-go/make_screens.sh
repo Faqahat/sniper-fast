@@ -12,8 +12,8 @@
 #            terminal shows; for a phone), when Python has PIL
 set -e
 cd "$(dirname "$0")"
-BIN=${DIPMON_BIN:-/home/moiz/sniper-data/tui/dipmon-go}
-SRC=${SRC:-/home/moiz/sniper-data/runs/ams/runs/dip_ams_r27.jsonl}
+BIN=${DIPMON_BIN:-/home/it/sniper-data/tui/dipmon-go}
+SRC=${SRC:-/home/it/sniper-data/runs/ams/runs/dip_ams_r27.jsonl}
 OUT=screens
 SIZES=200x35,160x50,80x24,50x30
 TMP=$(mktemp -d)
@@ -32,7 +32,7 @@ T=$(python3 tests/replay.py "$SRC" "$TMP/warm" --until-frac 0.10 --quiet | sed -
 NOW=$(python3 -c "print(int(float('$T'))/1e9)")
 "$BIN" --file "$TMP/warm/dip_ams_r27.jsonl" --usd 187.42 --assume-running --now "$NOW" --golden --screens "$OUT/warmup" --sizes 200x35,50x30 > /dev/null
 find "$OUT/warmup" -type f ! -name '*overview*' ! -name '*presend*' ! -name '*config*' -delete
-R28=${R28:-/home/moiz/sniper-data/tui/runs/ams/runs/dip_ams_r28.jsonl}
+R28=${R28:-/home/it/sniper-data/tui/runs/ams/runs/dip_ams_r28.jsonl}
 if [ -f "$R28" ]; then
   END28=$(python3 -c "import json,subprocess,sys; print(json.loads(subprocess.run(['$BIN','--file','$R28','--snapshot','--json','--usd','187.42','--load-duty','0'],capture_output=True,text=True).stdout)['ended']/1e9)")
   "$BIN" --file "$R28" --usd 187.42 --now "$END28" --golden --screens "$TMP/r28" --sizes 200x35,50x30 > /dev/null

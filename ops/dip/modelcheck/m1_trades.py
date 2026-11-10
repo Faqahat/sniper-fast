@@ -12,11 +12,11 @@
 #   X_grid : EXTRA buyer: ours inserted right before the bot's buy, the bot kept (the paper's situation for a buyer ahead of a
 #            bot), model follower rule (random slack); flags whether the model dropped the bot's buy
 #  + the model's own row for that dump (dd1 at 0.35 SOL, guard 1.05 via ratio, 35/50/75 ms, c4/c6), pick flags (IMIT1 top4, M2).
-# -> /home/moiz/sniper-data/modelcheck/trades_<day>.jsonl.gz       usage: nice python3 -I m1_trades.py R2
+# -> /home/it/sniper-data/modelcheck/trades_<day>.jsonl.gz       usage: nice python3 -I m1_trades.py R2
 import sys, os, json, gzip, zlib, time, collections
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import mc_lib as M
 WIN_MS = 400.0; MIN_DUMP = 1e9
 TG = [l.strip() for l in open(os.path.join(HERE, "targets.txt")) if l.strip()]

@@ -4,13 +4,13 @@ his buy and his closing sell (signatures looked up in the raw recorder chunks by
 Out: examples.md, examples.json"""
 import sys, pickle, json, glob, os, gzip, re, bisect
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 from tl import cols
 D = load(); w = int(D["wid"]); MN, US = names()
 X = cols(pickle.load(open(f"{OUT}/buys.pkl", "rb"))); S = pickle.load(open(f"{OUT}/speed.pkl", "rb")); fam = np.load(f"{OUT}/family.npy")
 NM = json.load(open(f"{OUT}/creates_all.json"))
-files = sorted(glob.glob("/home/moiz/sniper-data/collect/run_2026102*/txs/txs_*.jsonl.gz"), key=lambda f: int(os.path.basename(f)[4:14]))
+files = sorted(glob.glob("/data/tapes/collect/run_2026102*/txs/txs_*.jsonl.gz"), key=lambda f: int(os.path.basename(f)[4:14]))
 starts = [int(os.path.basename(f)[4:14]) for f in files]
 def sig_of(row):
     s, i, t = int(D["slot"][row]), int(D["idx"][row]), int(D["bt"][row])

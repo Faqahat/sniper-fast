@@ -5,9 +5,9 @@ recall >= 50 % of his picks. Then TEST (newest 6 h, untouched): recall, precisio
 market px, no fees) of rule picks that are NOT his vs his picks."""
 import sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from s4_model import MKT
-OUT = "/home/moiz/sniper-data/e2x1_dissect/select"
+OUT = "/home/it/sniper-data/e2x1_dissect/select"
 U = dict(np.load(f"{OUT}/U.npz"))
 tmax = U["bt"].max(); TE = U["bt"] >= tmax - 6 * 3600
 y = U["y3"].astype(bool) & (U["my_buys"] == 0); ok = (U["my_buys"] == 0) & (U["samp"] | y); wt = np.where(y, 1.0, 25.0)

@@ -6,14 +6,14 @@ vf (0.40 SOL right after the dump, wave exit, as f1) and our first landed try af
 Out: sniper-data/haqq_dissect/front/g3_r27_rows.pkl (same fields as g2_rows), g3_trades.npz"""
 import json, glob, pickle, collections, sys, base64, struct, os
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import dv8lib as L, dv8sim as S
 from decode import parse_trade, DISC
 from xsim import Pos
 from x12_wave import ev as wave_ev
 from x7_ourexits import delays
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"; RD = f"{OUT}/r27"
+OUT = "/home/it/sniper-data/haqq_dissect/front"; RD = f"{OUT}/r27"
 OURS = set(L.WAL.values()); SIZE = 0.40; WAVE = ("RIDE", 150, 150, 700); HZ = 8
 
 

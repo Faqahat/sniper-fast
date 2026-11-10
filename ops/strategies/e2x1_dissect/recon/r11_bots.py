@@ -12,7 +12,7 @@ Out: lots.pkl rewritten (v2: + bot, tier, age_s, age_slots, trig_*, feat_*), bot
 import pickle, collections, json, time
 import numpy as np
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 W0 = 1793113200; W1 = W0 + 86400; WA = W0 - 86400
 DAYS = (("D0", WA, W0), ("D1", W0, W1))
 L = pickle.load(open(f"{OUT}/lots.pkl", "rb")); F = pickle.load(open(f"{OUT}/feat.pkl", "rb")); R = pickle.load(open(f"{OUT}/trig.pkl", "rb"))

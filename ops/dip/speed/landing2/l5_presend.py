@@ -6,13 +6,13 @@
 import json, collections, sys
 import numpy as np
 
-OUT = "/home/moiz/sniper-data/landing2"
-RUNS = "/home/moiz/sniper-data/runs/ams/runs"
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+OUT = "/home/it/sniper-data/landing2"
+RUNS = "/home/it/sniper-data/runs/ams/runs"
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 from l3_timeline import client_class, front
 
 tg = json.load(open(f"{OUT}/targets.json"))["leaders"]
-sch = json.load(open("/home/moiz/sniper-data/competitors2/schedule_1067.json"))
+sch = json.load(open("/home/it/sniper-data/competitors2/schedule_1067.json"))
 ids, sl0, sl = sch["ids"], sch["start"], sch["slot_leader"]
 lead = lambda s: ids[sl[s - sl0]] if 0 <= s - sl0 < len(sl) and sl[s - sl0] is not None else None
 

@@ -411,7 +411,7 @@ How this was checked (details at the end):
 - **The diff:** `git diff fd0ce85..cbeb4db`, read whole. It does not touch the engine or the venues.
   - `Engine::probe_routes` / `refresh_route` / `route_accounts` predate it.
 - **Binaries:**
-  - master eda4c31 in `/home/moiz/arbx-offload/wp19-review/master` (detached worktree), with `CARGO_TARGET_DIR=targets/wp19-review`;
+  - master eda4c31 in `/home/it/other/arbx-offload/wp19-review/master` (detached worktree), with `CARGO_TARGET_DIR=targets/wp19-review`;
   - the lane at cbeb4db, `targets/wp19` (rebuilt 14:20).
   - Copies are in `wp19-review/check/arbx-{master,lane}`.
 - **`arbx check` identity** (`wp19-review/check/run-check.sh`):

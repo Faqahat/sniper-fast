@@ -7,7 +7,7 @@ Tapes: custom37's c2_tape.from_tab on the paper-audit tape (pa_decode + build: t
 Out: OUTDIR/win_r37f.pkl, OUTDIR/tape_r37f.pkl  (c37lib reads them with c37lib.D = OUTDIR)
 usage: pa6_ptbuild.py RUN.jsonl TAB OUTDIR [--rearm OBS.jsonl ...]"""
 import sys, json, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c1_extract as E
 import c2_tape as T
 

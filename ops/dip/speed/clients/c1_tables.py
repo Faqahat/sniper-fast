@@ -2,7 +2,7 @@
 """CLIENTS study (10-25, read-only): per-client tables from speed_truth/attempts.csv.
 MEASURED tables: by client x turn slot, by client x landed path, block position of our buy vs the dump."""
 import csv, collections, statistics as st
-A = "/home/moiz/sniper-data/speed_truth/attempts.csv"
+A = "/home/it/sniper-data/speed_truth/attempts.csv"
 rows = list(csv.DictReader(open(A)))
 def cls(c):
     if "Harmonic" in c: return "harmonic" if c == "HarmonicAgave" else "harmonicFD"

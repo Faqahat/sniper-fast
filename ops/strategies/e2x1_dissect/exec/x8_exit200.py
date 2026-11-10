@@ -4,7 +4,7 @@ tokens at the curve state after the last trade with cc <= t (+ his own sell's SO
 Our live rule = sell 200 ms after the fill (lands ~+2 slots: r27 example). P&L_cf = pnl - his real curve proceeds + cf proceeds (all
 other costs kept). Graduated (PumpSwap) and open lots excluded. Out: x8.txt"""
 import sys, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
 R = pickle.load(open(f"{X.X}/x4.pkl", "rb")); LL = {l["lot_id"]: l for l in X.lots()}
 K = 30.0 * 1073000000000000

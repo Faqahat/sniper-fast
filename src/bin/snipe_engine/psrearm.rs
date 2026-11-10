@@ -70,7 +70,9 @@ pub(super) struct RCand { pub mint: Pk, pub dump: RDump }
 
 /// a checked window waiting for our position / token account on its token to clear (its stops run meanwhile)
 pub(super) struct RDef { pub mint: Pk, pub dump: RDump, pub holders: Vec<(Pk, i64)>, pub launch: Launch, pub chk_slot: u64, pub chk_t: u64, pub at: Instant, pub why: &'static str,
-    pub r5: Option<serde_json::Value>, pub en_slot: u64 }
+    pub r5: Option<serde_json::Value>, pub en_slot: u64,
+    /// dip38 PSM12-S1's view at the holders check (None with its log off)
+    pub s1: Option<super::pss1::S1V> }
 
 /// an armed re-arm window's own state (the probe's Win / SWin hold the rest)
 pub(super) struct RWin { pub mint: Pk, pub dump_slot: u64, pub arm_slot: u64, pub en_slot: u64, pub others: u32, pub qdec: Option<bool>, pub stop: Option<&'static str>,
@@ -267,6 +269,8 @@ impl PsLive {
         // dip37 HYBRID-2: the mint's scored dumps strictly before the dump (its own never counted); the m2_unseen gate (LIVE with its flag)
         let h2v = self.h2.as_ref().map(|h| h.view(&mint, c.dump.tr.s, c.dump.tr.i));
         let h2skip = self.cfg.m2seen_gate && h2v.is_some_and(|v| v.0 == 0);
+        // dip38 PSM12-S1 on the dumper at the check (None with its log off); a LIVE skip only after every other check (below)
+        let s1v = self.s1_view(true, h2v.map(|v| v.0), c.dump.age, &c.dump.tr.user);
         let Some(rm) = self.rm.as_mut() else { return };
         rm.st.checks += 1;
         let en_slot = c.dump.tr.s + RE_WAIT + rm.cfg.gap;
@@ -308,6 +312,8 @@ impl PsLive {
                 r5 = Some(j);
             }
         }
+        // dip38 PSM12-S1 LIVE (only with its gate on for re-arms): decided last, on a check that would arm
+        if why.is_none() { if let Some(w) = s1v.as_ref().and_then(|v| self.s1_skip_why(v)) { why = Some(w); } }
         let hj = holders_json(&hv);
         if let Some(w) = why {
             let mut x = serde_json::json!({"check_slot": slot, "en_slot": en_slot, "holders": hj});
@@ -317,6 +323,10 @@ impl PsLive {
             // dip37: the ledger's view of the dumper (only with it on)
             if let Some((_, h)) = &whg { pswh::wh_fields(&mut x, &self.cfg, &c.dump.tr.user, h); }
             if let Some((nd, mx)) = h2v { psh2::fields(&mut x, nd, mx, true, 0, self.cfg.rearm.spend); }
+            if let (Some(v), true) = (&s1v, w.starts_with("rearm_s1_")) {
+                x["s1"] = v.json(self.cfg.s1_parts, self.s1_live(true), self.cfg.rearm.spend, c.dump.tr.vsol, c.dump.tr.p());
+                self.s1_skip_note(&mint, &c.dump.tr.user, v);
+            }
             if w == "rearm_wh_loss" { if let Some((_, h)) = whg { self.wh_skip_line(&mint, &c.dump.tr.user, &h, true); } }
             if whg.is_some_and(|g| g.0) && !wh_live { x["wh_would"] = true.into(); }
             if let Some(h) = &hlg { PsLive::hl_fields(&mut x, h); if !hl_live { x["hl_would"] = true.into(); } }
@@ -343,18 +353,18 @@ impl PsLive {
             self.rec(r);
             if let Some(rm) = self.rm.as_mut() {
                 rm.st.deferred += 1;
-                rm.defer.push(RDef { mint, dump: c.dump, holders: hv, launch, chk_slot: slot, chk_t: t_rx, at: Instant::now(), why: b, r5, en_slot });
+                rm.defer.push(RDef { mint, dump: c.dump, holders: hv, launch, chk_slot: slot, chk_t: t_rx, at: Instant::now(), why: b, r5, en_slot, s1: s1v });
             }
             return;
         }
-        self.rearm_arm(mint, c.dump, hv, launch, slot, t_rx, None, r5);
+        self.rearm_arm(mint, c.dump, hv, launch, slot, t_rx, None, r5, s1v);
     }
 
     /// ARM a re-arm window now (at the check, or when its wait ended): the sender's window (the re-arm size), the probe's window, the
     /// record and the line. `deferred`: (ms waited, on what)
     #[allow(clippy::too_many_arguments)]
     fn rearm_arm(&mut self, mint: Pk, dump: RDump, holders: Vec<(Pk, i64)>, launch: Launch, chk_slot: u64, chk_t: u64, deferred: Option<(f64, &'static str)>,
-                 r5: Option<serde_json::Value>) {
+                 r5: Option<serde_json::Value>, s1: Option<super::pss1::S1V>) {
         let (k, drop, dry) = (self.cfg.k, self.cfg.drop, self.cfg.dry);
         // the holders when a waiting window arms (the record's "holders" are the check's: the paper's)
         let holders_arm = deferred.map(|_| self.det.holders_at_least(&mint, RE_BIG, &self.user).unwrap_or_default());
@@ -381,7 +391,7 @@ impl PsLive {
         // dip37: the window's fee arm, once, now (None with the fee A/B off)
         let fab = self.fab_assign(id);
         self.sh.wins.lock().unwrap().push(SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::new(st_ns, k, slot_ns), n: 0, done: false,
-            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab });
+            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&mint) });
         self.armed.insert(mint, id);
         {
             let tp = &mut self.tapes.entry(mint).or_insert_with(|| (VecDeque::new(), 0)).0;
@@ -415,6 +425,8 @@ impl PsLive {
         if let Some(h) = self.hl_gate(&mint, &dump.tr.user) { PsLive::hl_fields(&mut r, &h); r["hl_would"] = true.into(); self.hl_note(&mint, &h, true, false); }
         // dip37 HYBRID-2 (log only): the scored dumps strictly before this window's dump
         if let Some((nd, mx)) = self.h2.as_ref().map(|h| h.view(&mint, dump.tr.s, dump.tr.i)) { psh2::fields(&mut r, nd, mx, true, 0, spend); }
+        // dip38 PSM12-S1 (log only): the holders check's verdict on the arm; the window keeps it for its fill / realize
+        if let Some(v) = s1 { r["s1"] = v.json(self.cfg.s1_parts, self.s1_live(true), spend, dump.tr.vsol, dump.tr.p()); self.s1_arm(id, v); }
         // dip34 (log-only): seen / eqgrp / q4 keyed on the dumper (each only with its flag)
         let dumper = dump.tr.user;
         self.log34(&mut r, &mint, &dumper, chk_slot, chk_t);
@@ -423,6 +435,8 @@ impl PsLive {
         self.rec(r);
         // dip35 (log-only): the fam holders read (nothing without its flag)
         self.fam_arm(id, mint, true, arm_slot);
+        // dip38 (log-only): the anti-bait stage "arm" keyed on the dumper (nothing without its flags)
+        self.l38_arm(id, mint, dumper, true, arm_slot, chk_t);
         // dip36 (log-only): FP-NOBOT at the re-arm's arm (the dump is the trigger row; the holders are excluded from its follower counts)
         if let Some(r) = fpr { self.fpnb_arm(id, true, mint, &dump.tr, dump.tr.user, arm_slot, holders.iter().map(|h| h.0).collect(), &r, en_slot, fpg); }
         let t = &dump.tr;
@@ -510,7 +524,7 @@ impl PsLive {
                 continue;
             }
             let ms = d.at.elapsed().as_secs_f64() * 1e3;
-            self.rearm_arm(d.mint, d.dump, d.holders, d.launch, d.chk_slot, d.chk_t, Some((ms, d.why)), d.r5);
+            self.rearm_arm(d.mint, d.dump, d.holders, d.launch, d.chk_slot, d.chk_t, Some((ms, d.why)), d.r5, d.s1);
         }
     }
 

@@ -1,7 +1,7 @@
 """Independent check of 'skip arm when trigger age_slots<2' (+ whale>=6 SOL, +Firedancer) on live pre-send runs.
 P&L = presend_live_realized.pnl (wallet deltas of buy+sell txs, rent back included; failed tries NOT included)."""
 import json, glob, os, random, sys, collections
-L='/home/moiz/sniper-data/runs'; V='/home/moiz/sniper-data/presend_losses/verify/raw'
+L='/home/it/sniper-data/runs'; V='/home/it/sniper-data/presend_losses/verify/raw'
 runs=[('FRA',f'r{n}',f'{L}/fra/runs/dip_r{n}.jsonl') for n in (21,22,23,24,26,27,28)]
 runs+=[('AMS',f'r{n}',f'{L}/ams/runs/dip_ams_r{n}.jsonl') for n in (16,17,19,20,24,25,26,27,34,35)]
 runs+=[('AMS',f'r{n}',f'{V}/dip_ams_r{n}.jsonl') for n in (28,29,30,31,32,33,36)]
@@ -31,5 +31,5 @@ for reg,r,p in runs:
     tot_att=sum(d.get('attempts',0) for d in disarm.values())
     rows.append(dict(reg=reg,run=r,t0=min(ts),t1=max(ts),size=spend/1e9,fees=(stop or {}).get('fees'),skip0=un['skip0'],
         att_un_age1=ua[1],att_all=tot_att,arms_age1=sum(1 for x in arm.values() if x['trig']['age_slots']==1)))
-json.dump(dict(rows=rows,fills=fills),open('/home/moiz/sniper-data/presend_losses/verify/fills.json','w'))
+json.dump(dict(rows=rows,fills=fills),open('/home/it/sniper-data/presend_losses/verify/fills.json','w'))
 print(len(fills))

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """FOLLOW step 5 (read-only): the walk-forward TEST days with the cap / threshold chosen on the previous day (f4), every variant, the
 overlap with today's pre-send (only NEW fills count as added value), bootstrap ranges, feature importance, the haqq aux target, and
-the decision log /home/moiz/sniper-data/haqq_dissect/follow/decisions.jsonl (every decision of the base config, all test days).
+the decision log /home/it/sniper-data/haqq_dissect/follow/decisions.jsonl (every decision of the base config, all test days).
 Base config: k = 4 tries/slot, <= 5 tokens armed at once (Helius 50/s at k = 4 on ~400 ms slots), wave exit, full followers,
 calibrated, NOW costs. Variants: model (uncalibrated), S2 costs, followers x0.9 / x0.8, 2-slot exit, k = 8 (<= 2 tokens), no cap.
 Out: f5.txt, decisions.jsonl"""
 import sys, json, time, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/follow")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/follow")
 import flib as FL
 import dv8lib as L
 from f4_wf import load, account, boot_mint

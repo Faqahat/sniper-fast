@@ -5,8 +5,8 @@
 import json, collections, sys
 import numpy as np
 
-OUT = "/home/moiz/sniper-data/landing2"
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+OUT = "/home/it/sniper-data/landing2"
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 from l3_timeline import client_class, front
 
 T = json.load(open(f"{OUT}/targets.json"))

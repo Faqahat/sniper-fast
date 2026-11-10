@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """base replay (D7b, r37 hours) vs live AMS r37 (MEASURED records) on the same usable hours"""
 import json, pickle, numpy as np, collections
-R = pickle.load(open("/home/moiz/sniper-data/comp_rearm/res_D7b.pkl", "rb")); hs = set(h // 3600 for h in R["meta"]["hours"])
-L = [json.loads(l) for l in open("/home/moiz/sniper-data/wave37/dip_ams_r37.jsonl") if l.startswith("{")]
+R = pickle.load(open("/home/it/sniper-data/comp_rearm/res_D7b.pkl", "rb")); hs = set(h // 3600 for h in R["meta"]["hours"])
+L = [json.loads(l) for l in open("/home/it/sniper-data/wave37/dip_ams_r37.jsonl") if l.startswith("{")]
 fill_t = {r["mint"]: r["t"] for r in L if r.get("ev") == "presend_live_fill"}
 arms = [r for r in L if r.get("ev") == "presend_live_arm"]
 real = [r for r in L if r.get("ev") == "presend_live_realized"]

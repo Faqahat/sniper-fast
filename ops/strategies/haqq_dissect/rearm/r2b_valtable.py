@@ -5,7 +5,7 @@ mean of the draws, 5-95%): fills, share of 'dump windows' (the tape fell >= 12% 
 agreement, and the live/replay ratio. Out: val.txt"""
 import pickle, os, sys, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 RENT = 5020
 runs = sys.argv[1].split(",") if len(sys.argv) > 1 else ["a24", "a25", "a26", "a27", "a28", "a29", "a30", "a31", "a32", "a33", "f26"]
 L = []

@@ -4,7 +4,7 @@
 # max_tokens >= 8000 (thinking counts as output). Every response's real usage goes into sssss/spend.json; HARD CAP $20
 # (checked against the worst case before every submit).
 import json, os, time, urllib.request, urllib.error
-OUT = "/home/moiz/sniper-data/strategies/sssss"
+OUT = "/home/it/sniper-data/strategies/sssss"
 MODEL = "claude-haiku-5-5"
 PRICE_IN, PRICE_OUT = 0.10, 0.50          # $/MTok normal; batch = half
 CAP = 20.0

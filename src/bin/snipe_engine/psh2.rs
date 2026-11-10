@@ -1,5 +1,5 @@
 // =====================================================================================================================
-// dip37 HYBRID-2 inputs (owner approved; proposal /home/moiz/sniper-hybrid2/FROZEN.md, verification sniper-data/hybrid2_verify):
+// dip37 HYBRID-2 inputs (owner approved; proposal /home/it/sniper-studies/sniper-hybrid2/FROZEN.md, verification sniper-data/hybrid2_verify):
 //   --presend-live-m2seen-log on|off (off)   LOG ONLY: per mint, the dumps dipmode's M2 path scored (every "dump" record: the IMIT1-envelope
 //                                            dumps, M2 score or none) -> on every presend_live_arm and its skip records (T2: every skip;
 //                                            re-arm: the holders check's skips):

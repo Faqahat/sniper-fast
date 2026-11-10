@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""REARM step 1 (read-only): cut the dv8 chain tape (/home/moiz/sniper-data/dv8/tab, built by presend/real/decode.py + build.py from
+"""REARM step 1 (read-only): cut the dv8 chain tape (/home/it/sniper-data/dv8/tab, built by presend/real/decode.py + build.py from
 the 24/7 recording, 10-22 03:07 -> 10-28 01:12 PKT) into sub-tabs the presend/real replay (rlib.Tape) can load:
   * one per test day D0..D6 (dv8 days, 23:15 PKT boundaries), slots from day start - 60 min to day end + 10 min;
   * one per live pre-send run used for validation (its run_start - 60 min .. its last record + 10 min).
 Each sub-tab: trades.npy (the rows of that slot range, chain order kept), slots.npy, ids.json (symlink to the full id list: the
 ids stay global), creates.json (creates inside the sub-tab's range only: a token created before the range is not followed, as the
-live engine follows only tokens it saw created). Out: /home/moiz/sniper-data/haqq_dissect/rearm/tab_<name>/"""
+live engine follows only tokens it saw created). Out: /home/it/sniper-data/haqq_dissect/rearm/tab_<name>/"""
 import os, sys, json, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 RUNS = {
-    "a24": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r24.jsonl", "a25": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r25.jsonl",
-    "a26": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r26.jsonl", "a27": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r27.jsonl",
-    "a28": "/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl",
-    "a29": "/home/moiz/sniper-data/haqq_strat/live/dip_ams_r29.jsonl", "a30": "/home/moiz/sniper-data/haqq_strat/live/dip_ams_r30.jsonl",
-    "a31": "/home/moiz/sniper-data/haqq_strat/live/dip_ams_r31.jsonl", "a32": "/home/moiz/sniper-data/haqq_strat/live/dip_ams_r32.jsonl",
-    "a33": "/home/moiz/sniper-data/haqq_strat/live/dip_ams_r33.jsonl", "f26": "/home/moiz/sniper-data/runs/fra/runs/dip_r26.jsonl",
-    "f24": "/home/moiz/sniper-data/runs/fra/runs/dip_r24.jsonl", "f23": "/home/moiz/sniper-data/runs/fra/runs/dip_r23.jsonl",
+    "a24": "/home/it/sniper-data/runs/ams/runs/dip_ams_r24.jsonl", "a25": "/home/it/sniper-data/runs/ams/runs/dip_ams_r25.jsonl",
+    "a26": "/home/it/sniper-data/runs/ams/runs/dip_ams_r26.jsonl", "a27": "/home/it/sniper-data/runs/ams/runs/dip_ams_r27.jsonl",
+    "a28": "/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl",
+    "a29": "/home/it/sniper-data/haqq_strat/live/dip_ams_r29.jsonl", "a30": "/home/it/sniper-data/haqq_strat/live/dip_ams_r30.jsonl",
+    "a31": "/home/it/sniper-data/haqq_strat/live/dip_ams_r31.jsonl", "a32": "/home/it/sniper-data/haqq_strat/live/dip_ams_r32.jsonl",
+    "a33": "/home/it/sniper-data/haqq_strat/live/dip_ams_r33.jsonl", "f26": "/home/it/sniper-data/runs/fra/runs/dip_r26.jsonl",
+    "f24": "/home/it/sniper-data/runs/fra/runs/dip_r24.jsonl", "f23": "/home/it/sniper-data/runs/fra/runs/dip_r23.jsonl",
 }
 
 

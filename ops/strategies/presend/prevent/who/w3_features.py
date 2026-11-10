@@ -3,20 +3,20 @@
 the trades between arm and our fill, and (live fills) every wallet that sold inside our hold with its ROLE at arm time.
 Arm cut: T2 = trades up to and including the trigger trade (slot, idx); re-arm = trades in slots < arm slot (dump + 3).
 In-hold sellers: market tape trades after our buy (fill slot, idx) and before our sell land (slot, idx), not ours.
-Out: /home/moiz/sniper-data/prevent/who/feats.pkl  (list, same order as windows.pkl) + bots.json"""
+Out: /home/it/sniper-data/prevent/who/feats.pkl  (list, same order as windows.pkl) + bots.json"""
 import json, pickle, re, bisect, collections
 import numpy as np
 
-D = "/home/moiz/sniper-data/prevent/who"
+D = "/home/it/sniper-data/prevent/who"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 SUP = 1e15
 RIVAL_PFX = ["8yYMhuYo", "dKMjeGJ4", "haqqiUUX", "HkQ7hMjy", "DYXDDrZC", "CvHEVC7S", "6VzXcLk9", "CZ77onJz"]
 
 
 def bots(users):
-    coh = json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json"))
+    coh = json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json"))
     coh = {c if isinstance(c, str) else (c.get("wallet") or c.get("w")) for c in coh}
-    cand = set(re.findall(r"gmgn\.ai/sol/address/([1-9A-HJ-NP-Za-km-z]{32,44})", open("/home/moiz/sniper/ops/snipers/CANDIDATES.md").read()))
+    cand = set(re.findall(r"gmgn\.ai/sol/address/([1-9A-HJ-NP-Za-km-z]{32,44})", open("/home/it/sniper/ops/snipers/CANDIDATES.md").read()))
     riv = {}
     cnt = collections.Counter(users)
     for p in RIVAL_PFX:

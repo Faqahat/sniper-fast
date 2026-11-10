@@ -7,9 +7,9 @@
      (b) MIXED: random halves of the armed windows virtual while the other half keeps its real tries, one-position knock-on
          on (run_sim in trigger order) - the setting of a looser rule (skipped windows virtual among real ones).
      Compared with live per window group (QUIET signals, age, hour, wh_fol bin, since_last) so the bias is known per segment.
-Out: /home/moiz/sniper-data/presend_quiet4/calib.json + stdout"""
+Out: /home/it/sniper-data/presend_quiet4/calib.json + stdout"""
 import sys, json, collections, datetime, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/filter/quiet4")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/filter/quiet4")
 import q3lib as Q
 L = Q.L
 REPS = 8

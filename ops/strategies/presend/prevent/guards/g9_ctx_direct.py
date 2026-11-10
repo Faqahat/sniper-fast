@@ -4,7 +4,7 @@ a T2 fill is removed if at its signing at least one wallet other than the whale 
 the signing price to the price just before our buy) was < 15%. Gain = minus the realized P&L (scaled to 0.696) of the removed fills.
 usage: g9_ctx_direct.py"""
 import pickle, collections, json
-OUT = "/home/moiz/sniper-data/prevent/guards"
+OUT = "/home/it/sniper-data/prevent/guards"
 R = pickle.load(open(f"{OUT}/feats.pkl", "rb"))
 ORDER = ["F21", "F22", "F23", "F24", "F26", "F27", "F28", "A16", "A17", "A19", "A20", "A24", "A25", "A26", "A27", "A34", "A35", "A36", "A37", "A38"]
 FIXC = 0.003524

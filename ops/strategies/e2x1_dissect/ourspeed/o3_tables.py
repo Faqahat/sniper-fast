@@ -3,7 +3,7 @@
 Calibrated = phi-0 net - gap(S) per attempt, gap(S) = max(0, -4.4 + 28.1 S) mSOL (PAPER_VS_LIVE.md straight-line fit:
 ~15 mSOL/SOL at 0.35, ~24 at 1.0). Calibration and phi overlap -> never stack them."""
 import pickle, sys, numpy as np
-O = "/home/moiz/sniper-data/e2x1_dissect/ourspeed"
+O = "/home/it/sniper-data/e2x1_dissect/ourspeed"
 R = pickle.load(open(f"{O}/sim_rows.pkl", "rb"))
 C, RV = 0.0029, 0.0003
 gap = lambda S: max(0.0, -4.4 + 28.1 * S) / 1000
@@ -103,4 +103,4 @@ for mode, ex in (("A", "his"), ("A2", "his"), ("B", "copy")):
                 c.append(f"{r0['tot']:+.1f}/{rc['tot']:+.1f}")
             cells.append(" \\| ".join(c))
         P(f"| {mode}-{ex} | {b} | " + " | ".join(cells) + " |")
-open("/home/moiz/sniper-data/e2x1_dissect/ourspeed/o3_tables.md", "w").write("\n".join(out) + "\n")
+open("/home/it/sniper-data/e2x1_dissect/ourspeed/o3_tables.md", "w").write("\n".join(out) + "\n")

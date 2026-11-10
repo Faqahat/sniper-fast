@@ -1,4 +1,4 @@
-//! Read-only copies of the engine's venue maths (/home/moiz/arbed/arbx/src/venues/{cp,dlmm,dammv2}.rs) and the
+//! Read-only copies of the engine's venue maths (/home/it/other/arbed/arbx/src/venues/{cp,dlmm,dammv2}.rs) and the
 //! helpers they import from src/venues/mod.rs, for the differential tests (DESIGN.md §6.2). The arbx crate itself
 //! is not a dependency.
 #![allow(dead_code)]

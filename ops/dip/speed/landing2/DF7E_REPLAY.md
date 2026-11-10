@@ -166,7 +166,7 @@ All on the tape with his own trades removed, at 0.3 SOL.
   - `r4_report.py`: the main tables.
   - `r5_select.py`: the selection tree.
   - `r6_sel_replay.py` and `r7_report.py`: SEL and copy.
-- **Data:** `/home/moiz/sniper-data/df7e_replay/` (trades table 7.58 M trades, `runs/`, logs `r3.log`, `r4.txt`, `r7.txt`).
+- **Data:** `/home/it/sniper-data/df7e_replay/` (trades table 7.58 M trades, `runs/`, logs `r3.log`, `r4.txt`, `r7.txt`).
 - **Simulator:** the VM1 model (`ops/dip/vm1/core.py`).
   - Block clock and spill into the next block.
   - Entry on the reserves just before our position, so bots ahead of us, including him, are priced in.

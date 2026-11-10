@@ -3,9 +3,9 @@
 Out: sniper-data/haqq_dissect/front/f12_examples.txt"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 R = pickle.load(open(f"{OUT}/f8_rows.pkl", "rb")); W = pickle.load(open(f"{OUT}/f7.pkl", "rb")); F10 = pickle.load(open(f"{OUT}/f10.pkl", "rb"))
 ids, _ = L.ids_map()
 out = []

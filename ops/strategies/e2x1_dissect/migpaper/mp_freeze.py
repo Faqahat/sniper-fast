@@ -93,10 +93,10 @@ npm = NPModel(fn); d2 = np.abs(npm.proba(np.array(XX)) - cm.predict_proba(np.arr
 log(f"FROZEN cont: {len(XX)} checkpoints n_iter {cm.n_iter_} | numpy export max diff {d2:.2e} | sha256 {sha256(fn)}")
 SHA.append(("cont.json", sha256(fn), f"continuation model (pd stop), {len(XX)} checkpoints, {cm.n_iter_} iterations"))
 # ---- (4) landing quantiles ----------------------------------------------------------------------------------------------
-lc = json.load(open("/home/moiz/sniper-data/dipml/livecal.json"))
+lc = json.load(open("/home/it/sniper-data/dipml/livecal.json"))
 d = np.array(lc["deltas"], float); d = d * (66.0 / (np.median(d) * mplib.SLOT_MS))
 DLY = np.quantile(d, (np.arange(10) + 0.5) / 10)
-json.dump(dict(dly_slots=DLY.tolist(), dly_ms=(DLY * mplib.SLOT_MS).tolist(), source="/home/moiz/sniper-data/dipml/livecal.json deltas, rescaled to median 66 ms (m3)"), open(f"{MD}/dly.json", "w"))
+json.dump(dict(dly_slots=DLY.tolist(), dly_ms=(DLY * mplib.SLOT_MS).tolist(), source="/home/it/sniper-data/dipml/livecal.json deltas, rescaled to median 66 ms (m3)"), open(f"{MD}/dly.json", "w"))
 SHA.append(("dly.json", sha256(f"{MD}/dly.json"), "landing delays (slots): " + ", ".join(f"{x:.4f}" for x in DLY)))
 # ---- stores -------------------------------------------------------------------------------------------------------------
 M = T.M; users = M["users"]; mints = M["mints"]

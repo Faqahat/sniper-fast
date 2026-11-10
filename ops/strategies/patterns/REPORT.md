@@ -1,7 +1,7 @@
 # Haiku pattern search on trading data + bot playbook (10-24, ~20:40 PKT)
 
 Read-only study, nothing traded. MEASURED = counted from chain data; INFERRED = reading.
-Scripts: ops/strategies/patterns/p0–p8. Results: /home/moiz/sniper-data/strategies/patterns/ (final.txt / final.json =
+Scripts: ops/strategies/patterns/p0–p8. Results: /home/it/sniper-data/strategies/patterns/ (final.txt / final.json =
 survivors with the R1 check, registry.json = all 428 rules with results, bots_verified.json, playbook_bait.json,
 stories_R2/R3.jsonl, llm/ = prompts, answers and the spend ledger).
 

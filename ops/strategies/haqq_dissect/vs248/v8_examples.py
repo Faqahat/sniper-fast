@@ -2,9 +2,9 @@
 """vs248 step 8 (read-only): example events per difference with GMGN (maker = haqq) and Solscan links. Out: vs248/examples.json"""
 import pickle, sys, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/vs248"
+OUT = "/home/it/sniper-data/haqq_dissect/vs248"
 HQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 
 

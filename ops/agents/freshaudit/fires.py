@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # build one row per fire from our live run logs (dip_r1..r5.jsonl) -> out/fires.json
 import json, glob, os, datetime, collections
-D = "/home/moiz/sniper/ops/dip/speed"
+D = "/home/it/sniper/ops/dip/speed"
 rows = []
 for n in range(1, 6):
     f = f"{D}/dip_r{n}.jsonl"
@@ -37,7 +37,7 @@ for n in range(1, 6):
                          dump_poh=tm.get("dump_poh"), buy_poh=tm.get("buy_poh"), land_ms_poh=tm.get("land_ms_poh"), slot_ms=tm.get("slot_ms"),
                          dump_first_feed=tm.get("dump_first_feed"), buy_first_feed=tm.get("buy_first_feed"),
                          poll_slot=po.get("land_slot"), poll_err=json.dumps(po.get("err")) if po.get("err") else None))
-json.dump(rows, open("/home/moiz/sniper/ops/agents/freshaudit/out/fires.json", "w"), indent=0)
+json.dump(rows, open("/home/it/sniper/ops/agents/freshaudit/out/fires.json", "w"), indent=0)
 print(len(rows))
 c = collections.Counter((r["result"], r["err"]) for r in rows); print(c)
 for r in rows:

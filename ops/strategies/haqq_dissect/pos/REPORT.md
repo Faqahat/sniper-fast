@@ -1,5 +1,5 @@
 # Analyst A (positions): haqq = ~7 bots in one wallet; multi-buys = several bots; NEW rule = re-arm pre-send after a paid whale dump (10-28 ~02:57 PKT)
-Saved by the main session from the agent's reply. Code: this folder (p1_build, p1b_codes, p2–p15, plib). Tables: /home/moiz/sniper-data/haqq_dissect/pos/ (rules p10.txt, stress p13.txt, bot codes codes.pkl + p4.txt). p6 (reactive rule walk-forward D5–D6) was still running when saved.
+Saved by the main session from the agent's reply. Code: this folder (p1_build, p1b_codes, p2–p15, plib). Tables: /home/it/sniper-data/haqq_dissect/pos/ (rules p10.txt, stress p13.txt, bot codes codes.pkl + p4.txt). p6 (reactive rule walk-forward D5–D6) was still running when saved.
 
 ## 1. haqq is ~7 bots in one wallet (MEASURED)
 The last 3 digits of the CU price are a bot code. Each buy and the sells of that lot share it (99.97% of sold tokens).

@@ -4,7 +4,7 @@
 # Match rates TRAIN / TEST / FWD, splits (size profile, token age, PKT hour band), and the P&L of the simulated exits vs its real
 # exits on the same lots (impact-free replay curves, one sell tx 0.000325 SOL).
 import sys, json, pickle, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H, h_gbdt as G
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H, h_gbdt as G
 MOD = pickle.load(open(f"{H.OUT}/h13b_models.pkl", "rb")); F = json.load(open(f"{H.OUT}/ds_meta.json"))["feats"]; FI = {k: i for i, k in enumerate(F)}
 E = np.load(f"{H.OUT}/ds_eval.npz"); XE, yE, LE, DE, RUNE = E["X"], E["y"], E["L"], E["d"], E["run"]
 lots = json.load(open(f"{H.OUT}/lots.json")); C = pickle.load(open(f"{H.OUT}/curves.pkl", "rb"))

@@ -2,15 +2,15 @@
 """exit2 step 6: example TEST trips with links (GMGN token, solscan buy/sell tx from recon lots.pkl matched by (slot, idx)),
 the event that fired the rule (who / side / size / slot vs his sell) and the simulated P&L per exit. Out: e6.md"""
 import sys, json, pickle, time, numpy as np
-OUT = "/home/moiz/sniper-data/e2x1_dissect/exit2"; L = int(sys.argv[1]) if len(sys.argv) > 1 else 66
+OUT = "/home/it/sniper-data/e2x1_dissect/exit2"; L = int(sys.argv[1]) if len(sys.argv) > 1 else 66
 pkt = lambda t: time.strftime("%m-%d %H:%M:%S", time.gmtime(int(t) + 18000))
 Z = np.load(f"{OUT}/tape_his.npz"); slot = Z["slot"].astype(np.int64); idx = Z["idx"].astype(np.int64); user = Z["user"]; buy = Z["buy"].astype(bool); sol = Z["sol"] / 1e9; bt = Z["bt"]
-users = json.load(open("/home/moiz/sniper-data/haqqml/fresh/tape/users.json")); mints = json.load(open("/home/moiz/sniper-data/haqqml/fresh/tape/mints.json"))
-names = json.load(open("/home/moiz/sniper-data/e2x1_dissect/select/names.json"))
+users = json.load(open("/home/it/sniper-data/haqqml/fresh/tape/users.json")); mints = json.load(open("/home/it/sniper-data/haqqml/fresh/tape/mints.json"))
+names = json.load(open("/home/it/sniper-data/e2x1_dissect/select/names.json"))
 TR = pickle.load(open(f"{OUT}/trips.pkl", "rb")); rows = pickle.load(open(f"{OUT}/e4_rows_{L}.pkl", "rb"))
 EV = np.load(f"{OUT}/ev.npz"); META = EV["meta"]; X = EV["X"]; F = list(EV["feats"]); FI = {f: k for k, f in enumerate(F)}
 E = np.load(f"{OUT}/e3_scores.npz"); p = E["p"]; THR = float(E["thr"])
-lots = pickle.load(open("/home/moiz/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
+lots = pickle.load(open("/home/it/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
 bysi = {(l["s"], l["i"]): l for l in lots}
 def links(t):
     l = bysi.get((int(slot[t["entry"]]), int(idx[t["entry"]])))

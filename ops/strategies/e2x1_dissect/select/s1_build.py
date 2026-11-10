@@ -3,7 +3,7 @@
 recorder by the haqqml agent) by mint/slot/idx; attach create info (dv8 creates.json + s0 creates_new.json).
 Out: sniper-data/e2x1_dissect/select/tape.npz, names.json"""
 import json, time, numpy as np
-TP = "/home/moiz/sniper-data/haqqml/fresh/tape"; OUT = "/home/moiz/sniper-data/e2x1_dissect/select"
+TP = "/home/it/sniper-data/haqqml/fresh/tape"; OUT = "/home/it/sniper-data/e2x1_dissect/select"
 W = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
 t0 = time.time()
 mints = json.load(open(f"{TP}/mints.json")); users = json.load(open(f"{TP}/users.json"))
@@ -13,7 +13,7 @@ c = {k: np.asarray(T[k]) for k in ("slot", "idx", "j", "mint", "user", "buy", "s
 o = np.lexsort((c["j"], c["idx"], c["slot"], c["mint"]))
 c = {k: v[o] for k, v in c.items()}
 print("sorted", time.time() - t0, flush=True)
-CR = json.load(open("/home/moiz/sniper-data/dv8/tab/creates.json"))
+CR = json.load(open("/home/it/sniper-data/dv8/tab/creates.json"))
 CR.update(json.load(open(f"{OUT}/creates_new.json")))
 n = len(mints)
 cr_slot = np.full(n, -1, np.int64); cr_user = np.full(n, -1, np.int64); may = np.zeros(n, bool); cr_bt = np.zeros(n, np.int64); solq = np.ones(n, bool)

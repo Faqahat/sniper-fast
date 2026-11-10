@@ -568,7 +568,7 @@ mod tests {
 /// from the book (pump's integer sell on the token amount), guess its fee pair, decide (eval) with the index known (the plumbing
 /// must give the executed decision exactly) and with the index unknown (the deployable rule: the decision must hold for every
 /// index the dump can have). Run by hand (reads ~8 GB of gzip through `zcat`):
-///   SHRED_PARITY_DIR=/home/moiz/sniper-data/collect/run_20261024_1425 [SHRED_PARITY_FILES=N] [SHRED_PARITY_OUT=file.json] \
+///   SHRED_PARITY_DIR=/data/tapes/collect/run_20261024_1425 [SHRED_PARITY_FILES=N] [SHRED_PARITY_OUT=file.json] \
 ///   cargo test --release --lib shred_parity_on_recording -- --ignored --nocapture
 #[cfg(test)]
 mod parity {
@@ -631,12 +631,12 @@ mod parity {
         use base64::Engine as _;
         let Ok(dir) = std::env::var("SHRED_PARITY_DIR") else { eprintln!("SHRED_PARITY_DIR not set: skipped"); return; };
         let nfiles: usize = std::env::var("SHRED_PARITY_FILES").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX);
-        let model = Imit::load("/home/moiz/sniper/ops/overnight/sel/IMIT1.json").expect("IMIT1.json");
-        let cohort: HashSet<String> = serde_json::from_str::<Vec<String>>(&std::fs::read_to_string("/home/moiz/sniper/ops/overnight/sel/cohort_train.json").unwrap()).unwrap().into_iter().collect();
+        let model = Imit::load("/home/it/sniper-data/overnight/sel/IMIT1.json").expect("IMIT1.json");
+        let cohort: HashSet<String> = serde_json::from_str::<Vec<String>>(&std::fs::read_to_string("/home/it/sniper-data/overnight/sel/cohort_train.json").unwrap()).unwrap().into_iter().collect();
         let targets: HashSet<String> = di::TARGETS.iter().map(|s| s.to_string()).collect();
-        let bundle = dm::Bundle::load("/home/moiz/sniper/testdata/dip_m2_bundle.json").expect("M2 bundle");
+        let bundle = dm::Bundle::load("/home/it/sniper/testdata/dip_m2_bundle.json").expect("M2 bundle");
         // the live runs' dev list (FRA run 15's run_start)
-        let devs: HashSet<String> = std::fs::read_to_string("/home/moiz/sniper-data/recon/live/dip_r15.jsonl").ok()
+        let devs: HashSet<String> = std::fs::read_to_string("/home/it/sniper-data/recon/live/dip_r15.jsonl").ok()
             .and_then(|t| t.lines().next().and_then(|l| serde_json::from_str::<serde_json::Value>(l).ok()))
             .and_then(|v| v["devs"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())).unwrap_or_default();
         let thr = model.thresholds["top4"];

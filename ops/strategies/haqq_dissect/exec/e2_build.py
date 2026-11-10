@@ -9,7 +9,7 @@ def b58(b):
     while n: n, r = divmod(n, 58); s = A58[r] + s
     return "1" * (len(b) - len(b.lstrip(b"\0"))) + s
 W = {"haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq": "haqq", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE": "FRA", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR": "AMS"}
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 DISC = bytes.fromhex("bddb7fd34ee661ee")
 def trade(evs, user):
     out = []
@@ -23,7 +23,7 @@ def trade(evs, user):
             if u == user: out.append((mint, sol, tok, buy, vsol, vtok))
     return out
 seen = set(); rows = []
-for f in sorted(glob.glob("/home/moiz/sniper-data/haqq_dissect/exec/ext/*.jsonl")):
+for f in sorted(glob.glob("/home/it/sniper-data/haqq_dissect/exec/ext/*.jsonl")):
     run = f.split("/")[-1].split("__")[0]
     for l in open(f):
         try: r = json.loads(l)
@@ -50,7 +50,7 @@ for f in sorted(glob.glob("/home/moiz/sniper-data/haqq_dissect/exec/ext/*.jsonl"
                          tip=sum(d for k, d in tips), ntip=len(tips), path="+".join(sorted(set(paths))) if paths else "notip", sd_self=sd.get(s0, 0),
                          nsig=len(r["signers"])))
 for r in rows: r["day"] = time.strftime("%m-%d", time.gmtime(r["bt"] + 5 * 3600))
-pickle.dump(rows, open("/home/moiz/sniper-data/haqq_dissect/exec/txs.pkl", "wb"))
+pickle.dump(rows, open("/home/it/sniper-data/haqq_dissect/exec/txs.pkl", "wb"))
 c = collections.Counter((r["w"], r["day"]) for r in rows)
 for k in sorted(c): print(k, c[k])
 c = collections.Counter((r["w"], r["kind"], r["ok"]) for r in rows)

@@ -2,7 +2,7 @@
 """8yYMhu t1 (read-only): market tape subset from the haqqml fresh tape (all pump.fun curve trades built from the recorder),
 rows with block time >= 10-24 20:00 PKT, sorted by (mint, slot, idx, j). Out: DATA/mtape.npy (+ mspan.npz: mint -> row span)."""
 import numpy as np, time
-TP = "/home/moiz/sniper-data/haqqml/fresh/tape"; D = "/home/moiz/sniper-data/rivals/8yYMhu"
+TP = "/home/it/sniper-data/haqqml/fresh/tape"; D = "/home/it/sniper-data/rivals/8yYMhu"
 t0 = time.time()
 T = np.load(f"{TP}/trades.npy", mmap_mode="r")
 bt = np.asarray(T["bt"]); sel = np.nonzero(bt >= 1792854000)[0]; del bt

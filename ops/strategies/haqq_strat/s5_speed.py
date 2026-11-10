@@ -10,9 +10,9 @@ Skips: every haqq DIP / DIP_LATE first buy while one of our engines was live -> 
 Out: haqq_strat/s5.txt, s5.json, h2h.pkl"""
 import json, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_strat")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_strat")
 from hs_lib import *
-TAB = "/home/moiz/sniper-data/haqq_model/tab"
+TAB = "/home/it/sniper-data/haqq_model/tab"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); out.append(s)

@@ -5,11 +5,11 @@
 (exact replay) - NOTE AMS r24/r25 were QUIET's dev set, so only r26 is a clean holdout for 'after'.
 Active hours = arm-time segments split on gaps > 20 min (+2 min tail), as filter/daily/daily.py."""
 import json, collections
-D = "/home/moiz/sniper-data/presend_filter/daily"
+D = "/home/it/sniper-data/presend_filter/daily"
 W = json.load(open(f"{D}/pw8.json")) + json.load(open(f"{D}/pw26.json"))
 T0 = 1793025600e9 if False else None
 import numpy as np
-S = np.load("/home/moiz/sniper-data/dipml/slots.npy"); i = np.searchsorted(S["slot"], 461_701_097); T0 = int(S["bt"][i]) * 1e9
+S = np.load("/home/it/sniper-data/dipml/slots.npy"); i = np.searchsorted(S["slot"], 461_701_097); T0 = int(S["bt"][i]) * 1e9
 H = 3600e9
 def summarize(ws, label):
     by = collections.defaultdict(list)
@@ -32,4 +32,4 @@ def summarize(ws, label):
 res = {"test": summarize([w for w in W if w["t"] >= T0], "TEST (10-26 19:40 PKT ->)"),
        "pre_test": summarize([w for w in W if w["t"] < T0], "pre-TEST"),
        "holdout_r26": summarize([w for w in W if w["run"] == "ams:r26"], "AMS r26 only (QUIET holdout)")}
-json.dump(res, open("/home/moiz/sniper-data/dipml/presend_test.json", "w"), indent=1, default=float)
+json.dump(res, open("/home/it/sniper-data/dipml/presend_test.json", "w"), indent=1, default=float)

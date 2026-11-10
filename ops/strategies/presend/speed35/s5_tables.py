@@ -2,7 +2,7 @@
 """SPEED35 step 5: calibration (sim 'cur' vs live) and the extra-SOL tables (paired per window vs 'cur'), bootstrap 90% CI,
 without the top 5 windows, peak/off-peak (PKT hours with above-median armed windows per hour). Out: stdout + speed35/tables.txt"""
 import pickle, datetime, collections, numpy as np
-D = "/home/moiz/sniper-data/speed35"
+D = "/home/it/sniper-data/speed35"
 R = pickle.load(open(f"{D}/replay.pkl", "rb"))
 pkt = lambda t: datetime.datetime.fromtimestamp(t / 1e9, datetime.UTC) + datetime.timedelta(hours=5)
 H = {}

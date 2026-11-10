@@ -7,12 +7,12 @@ are valued as if we still held. cf proceeds = actual proceeds * model(cf state) 
 Old TP/SL: valued at the end of the slot where it triggers (no same-slot reaction; fixed 10-28 17:58 after the AaXkyT rug).
 diff = cf - actual: > 0 means the OLD exit would have made more (200 ms worse). Read-only."""
 import json, subprocess, sys, os, random
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import decode as D
 RUN = sys.argv[1] if len(sys.argv) > 1 else "28"
-OUT = f"/home/moiz/sniper/ops/dip/exit200/r{RUN}"
+OUT = f"/home/it/sniper/ops/dip/exit200/r{RUN}"
 os.makedirs(OUT, exist_ok=True)
-ssh = ["ssh", "-p", "1996", "-o", "ConnectTimeout=10", "it@84.32.100.36"]
+ssh = ["ssh", "-p", "1996", "-o", "ConnectTimeout=10", "it@cyberfra"]
 recs = subprocess.run(ssh + [f"sudo grep -E '\"ev\":\"presend_live_(fill|sell_land|realized|exit)\"' /root/prod/runs/dip_r{RUN}.jsonl"], capture_output=True, text=True).stdout.splitlines()
 fills, sells, real, exits = {}, {}, {}, {}
 for l in recs:
@@ -26,7 +26,7 @@ for dct in (fills, sells, real, exits):
     for v in dct.values(): v.sort(key=lambda d: (d.get("slot", 0), d.get("idx", 0), d.get("t", 0)))
 if not mints: print("no closed trades yet"); sys.exit()
 open(f"{OUT}/mints.txt", "w").write("\n".join(mints) + "\n")
-subprocess.run(["scp", "-q", "-P", "1996", f"{OUT}/mints.txt", "it@84.32.100.36:/tmp/exit200_mints.txt"])
+subprocess.run(["scp", "-q", "-P", "1996", f"{OUT}/mints.txt", "it@cyberfra:/tmp/exit200_mints.txt"])
 t0 = min(f["t"] for v in fills.values() for f in v) // 10**9 - 400
 cmd = (f"for R in $(sudo sh -c 'ls -d /root/sniper-collect/run_*/txs' | tail -2); do for f in $(sudo ls $R); do t=${{f#txs_}}; t=${{t%.jsonl.gz}}; "
        f"[ \"$t\" -ge {t0} ] 2>/dev/null && sudo sh -c \"zcat $R/$f 2>/dev/null\" | grep -F -f /tmp/exit200_mints.txt; done; done")   # recorder rotates daily: read the last 2 run folders

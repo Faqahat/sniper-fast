@@ -2,9 +2,9 @@
 """FRONT addendum step 1 (read-only): every live pre-send run's tries, arms, realized P&L and rate-cap refusals (run_end not_sent),
 AMS16-33 + FRA21-26 + FRA27 (live copy pulled read-only into scratch). Out: sniper-data/haqq_dissect/front/g1_runs.pkl"""
 import json, glob, os, pickle, sys, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/front")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/front")
 from f3_ours import files
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 R27 = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/hd_front/dip_r27.jsonl"
 
 

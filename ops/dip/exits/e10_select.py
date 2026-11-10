@@ -4,7 +4,7 @@
 # last X ms (block clock) and the position is up less than R; otherwise SELL. Forced sell at tick cap.
 # Criterion (maximin): the WORST improvement over today's exit (c4) across 6 TRAIN cells = {M2, IMIT1} x {09:45-15:00, 15:00-21:00,
 # 21:00-01:00} (engine SOL/day, our measured landing). The chosen rule is then reported on TEST once (e05 / e07).
-# -> /home/moiz/sniper-data/exits/e10_select.json/.txt
+# -> /home/it/sniper-data/exits/e10_select.json/.txt
 import sys, os, json, time, itertools
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -3,7 +3,7 @@
 the first lot's own P&L? Buckets of features measured before the buy (p1). Code-matched P&L. Out: p9.txt"""
 import sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 from plib import *
 P = Out(f"{OUT}/p9.txt")
 B, LO, T = load()

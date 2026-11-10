@@ -10,10 +10,10 @@ MKT OOS probabilities (D2-D6).
 Out: select/s7.txt"""
 import sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 from s4_wf import load_scores
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 
 
 def main():

@@ -4,7 +4,7 @@
 usage: ma6_run.py CTX.pkl VARIANTS.json OUTDIR [--reps 8] [--procs 8] [--only NAME,NAME]"""
 import sys, os, json, pickle, time, argparse
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 
 KEEP = ("key", "kind", "mint", "t_arm", "end_why", "ticks", "sent", "refused", "paused", "fails", "filled", "nth", "chained", "dump_age", "n_hold",
         "fs", "fi", "t_fill", "t_close", "c_sell", "why", "p_entry", "gross_naive", "d_slip", "d_cut", "cash_naive", "cash", "cash_cut", "followers", "dropped")

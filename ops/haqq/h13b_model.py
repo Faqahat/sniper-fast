@@ -4,7 +4,7 @@
 # Training rows stop at the real exit; evaluation rows continue to exit+12 slots, so a rule that never fires is a miss.
 # Models: TIMER (slot count / profile / size), FULL (+ price, flow, entry). Baselines: fixed hold, TP/SL/time, stall, checkpoint rule.
 import sys, json, pickle, collections, itertools, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H, h_gbdt as G
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H, h_gbdt as G
 M = json.load(open(f"{H.OUT}/ds_meta.json")); F = M["feats"]; FI = {k: i for i, k in enumerate(F)}
 Z = np.load(f"{H.OUT}/ds.npz"); X, y, L, RUN = Z["X"], Z["y"].astype(float), Z["L"], Z["run"]
 E = np.load(f"{H.OUT}/ds_eval.npz"); XE, yE, LE, DE, RUNE = E["X"], E["y"], E["L"], E["d"], E["run"]

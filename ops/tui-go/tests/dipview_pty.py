@@ -23,8 +23,8 @@ def until(p, pred, timeout=20.0):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bin", default=os.environ.get("DIPMON_BIN", "/home/moiz/sniper-data/tui/dipmon-go"))
-    ap.add_argument("--dir", default=os.environ.get("DIPVIEW_DATA", "/home/moiz/sniper-data/runs/ams/runs"))
+    ap.add_argument("--bin", default=os.environ.get("DIPMON_BIN", "/home/it/sniper-data/tui/dipmon-go"))
+    ap.add_argument("--dir", default=os.environ.get("DIPVIEW_DATA", "/home/it/sniper-data/runs/ams/runs"))
     a = ap.parse_args()
     fails = []
 

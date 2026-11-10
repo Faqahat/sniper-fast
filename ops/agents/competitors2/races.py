@@ -2,11 +2,11 @@
 # competitors2/races.py -- READ-ONLY. Merge the per-chunk rows (extract.py) into one race record per dump:
 # the dump tx, every tx on that mint after it (rest of slot S, S+1, S+2) and before it (S-2 .. S), the leader of S (epoch
 # 1066 / 1067 schedules) with its client kind and RTT from FRA / AMS, and our fire (if any) with its outcome.
-# Out: /home/moiz/sniper-data/competitors2/races.jsonl.gz
+# Out: /home/it/sniper-data/competitors2/races.jsonl.gz
 import json, os, glob, gzip, collections, sys
-ROWS = "/home/moiz/sniper-data/competitors2/rows"; RUNS = "/home/moiz/sniper-data/competitors2/runs"
-OUT = "/home/moiz/sniper-data/competitors2/races.jsonl.gz"
-LD = "/home/moiz/sniper/ops/dip/speed/leaders"
+ROWS = "/home/it/sniper-data/competitors2/rows"; RUNS = "/home/it/sniper-data/competitors2/runs"
+OUT = "/home/it/sniper-data/competitors2/races.jsonl.gz"
+LD = "/home/it/sniper/ops/dip/speed/leaders"
 US = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE": "FRA", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR": "AMS"}
 STD = {"11111111111111111111111111111111", "ComputeBudget111111111111111111111111111111", "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -16,7 +16,7 @@ KIND = {"JitoLabs": "jito", "AgaveBam": "bam", "FireBAM": "bam", "HarmonicAgave"
 
 def schedules():
     S = []
-    for f in (f"{LD}/schedule_cur.json", "/home/moiz/sniper-data/competitors2/schedule_1067.json"):
+    for f in (f"{LD}/schedule_cur.json", "/home/it/sniper-data/competitors2/schedule_1067.json"):
         d = json.load(open(f)); S.append((d["start"], d["ids"], d["slot_leader"]))
     def lead(s):
         for st, ids, sl in S:
@@ -26,10 +26,10 @@ def schedules():
 
 def leader_info():
     fra = json.load(open(f"{LD}/leader_rtt_new.json"))["leaders"]
-    ams = json.load(open("/home/moiz/sniper/ops/region/leader_rtt_ams.json"))["leaders"]
+    ams = json.load(open("/home/it/sniper/ops/region/leader_rtt_ams.json"))["leaders"]
     geo = {r["pk"]: r for r in json.load(open(f"{LD}/leader_geo.json"))["rows"]}
-    nf = set(open("/home/moiz/sniper/ops/region/near_leaders_fra.txt").read().split())
-    na = set(open("/home/moiz/sniper/ops/region/near_leaders_ams.txt").read().split())
+    nf = set(open("/home/it/sniper/ops/region/near_leaders_fra.txt").read().split())
+    na = set(open("/home/it/sniper/ops/region/near_leaders_ams.txt").read().split())
     client = {}
     for f in glob.glob(f"{RUNS}/*.jsonl"):
         for l in open(f):

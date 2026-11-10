@@ -3,11 +3,11 @@
 # Runs: FRA r11-r16, AMS r11-r14 + r17 (AMS r15/r16 had pre-send attempts only; those are in l5_presend.py).
 # Joins fire + timing (+clock2 on r16) + pick + buy_land / buy_failed + close + land_poll + tape (the executed feed's trades on
 # the token, our feed clock for rivals) + the .log FAST-ACK lines (per-path relay ack + HTTP status).
-# Output: /home/moiz/sniper-data/landing2/fires_engine.json
+# Output: /home/it/sniper-data/landing2/fires_engine.json
 import json, re, collections, sys, os
 
-RUNS_DIR = "/home/moiz/sniper-data/runs"
-OUT = "/home/moiz/sniper-data/landing2"
+RUNS_DIR = "/home/it/sniper-data/runs"
+OUT = "/home/it/sniper-data/landing2"
 RUNS = [("FRA", n, f"fra/runs/dip_r{n}") for n in (11, 13, 14, 15, 16)] + [("AMS", n, f"ams/runs/dip_ams_r{n}") for n in (11, 12, 13, 14, 17)]
 ACK = re.compile(r"FAST-ACK tag=(\d+) path=([\w-]+) ack_ms=([\d.]+) status=(\S+) reply=(.*)")
 SIG = re.compile(r'"(?:result|signature)"\s*:\s*"([1-9A-HJ-NP-Za-km-z]{30,90})')

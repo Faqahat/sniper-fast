@@ -86,7 +86,7 @@ Reading:
 - **Predictor-drop stop (issue C)**: the checkpoint features take every trade up to the end of slot `s2 = slot_k + int(sec/0.212)`, but the decision clock is `ck + sec/0.212`, which can fall inside s2.
   On the headline rows, 10 of 85 checkpoints (11.8 %) use 1–2 trades after the decision (median 1). The continuation model's train rows are also in-sample. This affects pd0.3 rows only.
 - Dropped rows: 2 of 293 headline rows are graduated without a recorded migration and are excluded from the sim. The `edge` filter removes rows within 35 min of a recording tail end; it is censoring, not a signal.
-  Note: `edge` reads the live `/home/moiz/sniper-data/collect/run_*/run.json` set, so rerunning m1 today flags 175 different rows (reproducibility only).
+  Note: `edge` reads the live `/data/tapes/collect/run_*/run.json` set, so rerunning m1 today flags 175 different rows (reproducibility only).
   No candidate is lost to the non-SOL migration filter (0 of 3,643).
 
 ## 6. First-crossing definition and the p30 label (check 5)

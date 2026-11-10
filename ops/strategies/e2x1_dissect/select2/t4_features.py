@@ -8,7 +8,7 @@ within 1 slot after e (next E2x1 row). ysib: same for Grozoe2L. Keep all y|ysib 
 Out: OUT/U2.npz (features float32 + keys)."""
 import sys, json, time, hashlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
 t0 = time.time()
 def log(*a): print(f"[{time.time()-t0:7.1f}s]", *a, flush=True)
 D = load(); w = int(D["wid"]); sib = int(D["sibid"]); MN, US = names(); uid = {u: i for i, u in enumerate(US)}
@@ -132,9 +132,9 @@ del u_pnl_full, u_cost_full, u_wins_full, u_solin_full, u_nbuy_full, hs, tp, tc,
 # cohorts (lists built 10-23 from earlier runs; INFERRED-causal for the test day)
 def wl(path):
     d = json.load(open(path)); return d if isinstance(d, list) else [x["u"] if isinstance(x, dict) else x for x in d]
-cw = set(wl("/home/moiz/sniper/ops/overnight/dip/drop_cw.json")); pros = set(wl("/home/moiz/sniper/ops/overnight/dipshadow/pros53.json"))
-snip = {x["w"] for x in json.load(open("/home/moiz/sniper/ops/snipers/candidates.json"))}
-cen = {x["u"]: x for x in json.load(open("/home/moiz/sniper/ops/overnight/census/wallets.json"))}
+cw = set(wl("/home/it/sniper-data/overnight/dip/drop_cw.json")); pros = set(wl("/home/it/sniper-data/overnight/dipshadow/pros53.json"))
+snip = {x["w"] for x in json.load(open("/home/it/sniper/ops/snipers/candidates.json"))}
+cen = {x["u"]: x for x in json.load(open("/home/it/sniper-data/overnight/census/wallets.json"))}
 def uflag(S):
     f = np.zeros(NU, bool)
     for u in S:

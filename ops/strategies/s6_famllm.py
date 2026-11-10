@@ -4,9 +4,9 @@
 # (under the 50-request batch threshold); usage goes into the same spend ledger (cap $15). Key never printed.
 import json, sys, os
 from concurrent.futures import ThreadPoolExecutor
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies")
+sys.path.insert(0, "/home/it/sniper/ops/strategies")
 import s4_llm as S
-OUT = "/home/moiz/sniper-data/strategies"
+OUT = "/home/it/sniper-data/strategies"
 J = json.load(open(f"{OUT}/families.json")); LAB = {}
 for l in open(f"{OUT}/llm/labels_cards.jsonl"):
     o = json.loads(l); LAB[o["id"]] = o

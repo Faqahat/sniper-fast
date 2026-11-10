@@ -17,7 +17,7 @@ Chain clock (dv8lib.cc): slot*212 + idx / block size * 212 ms.
 Out: haqq_dissect/exit/haqq.pkl = dict(lots, sells, pos); lots closed by MATCHED sells (see the sell loop), else FIFO"""
 import pickle, time, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 DEAD_V = 30.52
 

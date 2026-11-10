@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # QUIET BOOK PUSH (dip21; owner 10-27 PM: "keep the 24 h whale dump history on the host and give it to every node at engine start").
 # Runs after each keeper pass and book build (ops/collect/keeper_loop.sh.quietbook). For every node in ops/collect/nodes.txt:
-#   the book   /home/moiz/sniper-data/quiet_book/quiet_book.jsonl (built by quiet_book) -> /root/dip/quiet_book.jsonl:
+#   the book   /home/it/sniper-data/quiet_book/quiet_book.jsonl (built by quiet_book) -> /root/dip/quiet_book.jsonl:
 #              rsync (delta + compressed: only the new lines travel) to a private stage dir on the node (/tmp/quiet_book), its
 #              sha256 checked there, then `sudo install -m 644` to /root/dip/quiet_book.jsonl.new and `sudo mv -f` over the book
 #              (a rename: an engine starting at that moment reads the old book or the new one, never a mix); skipped when the
@@ -15,16 +15,16 @@
 # Overrides (tests): QB_BOOK QB_NODES QB_LOG QB_COHORT QB_FBOTS QB_DEST QB_STAGE QB_STALE_MIN QB_WORK, QB_LOCAL=1 (no ssh: each
 # node is this machine; {node} in QB_DEST / QB_STAGE is its name), QB_SUDO (default sudo; "" in a local test).
 set -u
-ROOT=/home/moiz/sniper
-BOOK=${QB_BOOK:-/home/moiz/sniper-data/quiet_book/quiet_book.jsonl}
+ROOT=/home/it/sniper
+BOOK=${QB_BOOK:-/home/it/sniper-data/quiet_book/quiet_book.jsonl}
 NODES=${QB_NODES:-$ROOT/ops/collect/nodes.txt}
-LOG=${QB_LOG:-/home/moiz/sniper-data/quiet_book/push.log}
+LOG=${QB_LOG:-/home/it/sniper-data/quiet_book/push.log}
 COHORT=${QB_COHORT:-$ROOT/ops/overnight/sel/cohort_train.json}
 FBOTS=${QB_FBOTS:-$ROOT/ops/strategies/presend/filter/fbots_frozen.json}
 DEST=${QB_DEST:-/root/dip}
 STAGE=${QB_STAGE:-/tmp/quiet_book}
 STALE_MIN=${QB_STALE_MIN:-30}
-WORK=${QB_WORK:-/home/moiz/sniper-data/quiet_book/push_work}
+WORK=${QB_WORK:-/home/it/sniper-data/quiet_book/push_work}
 LOCAL=${QB_LOCAL:-}
 SUDO=${QB_SUDO-sudo}
 SSHO=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15)

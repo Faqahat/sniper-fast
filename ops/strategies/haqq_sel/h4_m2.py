@@ -7,10 +7,10 @@ c4_tpnone_slnone (hold ~5 slots, no stop: SL -50% practically never fires inside
 haqq's trades are used ONLY for the token list (tokens.json). Out: DATA/m2_rows.pkl"""
 import sys, os, json, pickle
 import numpy as np
-DIPD = "/home/moiz/sniper/ops/strategies/dipdetect"; sys.path.insert(0, DIPD)
+DIPD = "/home/it/sniper/ops/strategies/dipdetect"; sys.path.insert(0, DIPD)
 import dd_lib as L
 import dd20_shadow_eval as D20
-DATA = "/home/moiz/sniper-data/haqq_sel"; WORK = f"{DATA}/m2/work"
+DATA = "/home/it/sniper-data/haqq_sel"; WORK = f"{DATA}/m2/work"
 W0 = 1793038500; W1 = 1793124900
 E4 = L.EXI["c4_tpnone_slnone"]
 BUNDLE = f"{L.OUT}/m2_v3_reg4_top25.json"

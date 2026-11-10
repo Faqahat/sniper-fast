@@ -8,12 +8,12 @@ Out: DATA/fwd_res.pkl (per draw: base and cfg rows + per-window hour) and a prin
 usage: v1_rsim_fwd.py TAB [--draws 3] [--cfg any:20:30:8:2]"""
 import sys, os, json, pickle, time, glob, hashlib, collections, argparse
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/rearm")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/density")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/rearm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/density")
 import rlib, sim, dsim, drun, s48lib, rsim
 import r4_days as R4
 
-DATA = "/home/moiz/sniper-data/haqq_dissect/verify"
+DATA = "/home/it/sniper-data/haqq_dissect/verify"
 FRESH0 = 1793131823            # last block time on the dv8 tape (10-28 01:10:23 PKT)
 WHALE = 60_000_000_000_000
 SIZE = 400_000_000
@@ -25,8 +25,8 @@ def sh(s): return int.from_bytes(hashlib.blake2b(s.encode(), digest_size=8).dige
 def our_sighs():
     fn = f"{DATA}/our_sighs.pkl"
     if os.path.exists(fn): return pickle.load(open(fn, "rb"))
-    files = glob.glob("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r*.jsonl") + glob.glob("/home/moiz/sniper-data/runs/fra/runs/dip_r*.jsonl") + \
-        glob.glob("/home/moiz/sniper-data/haqq_strat/live/dip_ams_r*.jsonl") + ["/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"] + \
+    files = glob.glob("/home/it/sniper-data/runs/ams/runs/dip_ams_r*.jsonl") + glob.glob("/home/it/sniper-data/runs/fra/runs/dip_r*.jsonl") + \
+        glob.glob("/home/it/sniper-data/haqq_strat/live/dip_ams_r*.jsonl") + ["/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"] + \
         glob.glob(f"{DATA}/live/dip_r*.jsonl")
     out = set()
     for f in files:

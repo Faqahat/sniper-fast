@@ -10,7 +10,7 @@ its value under each stop rule (and at -20% followers where a replay exists). Us
 import json, pickle, datetime, collections
 import numpy as np
 
-D4 = "/home/moiz/sniper-data/presend_quiet4"
+D4 = "/home/it/sniper-data/presend_quiet4"
 SIZE = 0.696; FAIL = 5120e-9
 STOPS = [(3, 2), (4, 2), (5, 2), (6, 2), (7, 2), (8, 2), (4, 3), (5, 3), (6, 3), (7, 3), (8, 3)]
 CUR = dict(F=4.0, k=4, fb=False, H=24, S=(5, 2), A=2, v2=None)

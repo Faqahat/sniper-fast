@@ -7,12 +7,12 @@
 # -> sssss/att_<run>.json (list of dicts) ; prints the slippage-failure curve and trigger mix
 import sys, json, zlib, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-OUT = "/home/moiz/sniper-data/strategies/sssss"
+OUT = "/home/it/sniper-data/strategies/sssss"
 W = "sssssDdMNAWKingjpEojkTNdVuZrBe7FsJLaGtexe7d"; UID = zlib.crc32(W.encode())
 SIBS = ["ssssswdk4RR8HqkE3uwUWzDbd6mXFTTPjcXBKNzQ57E", "sssssCUP5wgSW3sxjtQNa7u88ytE4st2Z7goX5kKNwi", "sssssyv2q57u9sJrL1BB7Ep71X6YBY71iYt7CtHB5zJ"]
-SS = {int(k): v for k, v in json.load(open("/home/moiz/sniper/ops/overnight/core/slotsize.json")).items()}
+SS = {int(k): v for k, v in json.load(open("/home/it/sniper-data/overnight/core/slotsize.json")).items()}
 FLEET = np.array([UID] + [zlib.crc32(s.encode()) for s in SIBS], np.int64)
 WDK = zlib.crc32(SIBS[0].encode())
 

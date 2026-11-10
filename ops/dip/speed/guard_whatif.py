@@ -10,11 +10,11 @@
 import os, sys, json, importlib.util
 os.environ.setdefault("RP_PHASEA_R3", "phaseA_r3guard")
 os.environ.update(RP_PHASEA_R2="phaseA_selfwd", SELL_LAT="75", SLIPIMP="1", DIP_REAL_SLIP="1", SEL_SLIP="1", DIP_LATS="35,50,75", DIP_B="0.25")
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel")
+sys.path.insert(0, "/home/it/sniper-data/overnight/sel")
 import numpy as np
 import selexit2 as X
 import live_exits as LE
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 EXI = [e for e in LE.EXITS if e[0] == "tp5_sl10_1.3s"][0]
 GUARDS = (1.05, 1.10, 1.15, 1.20); EXTRA = 0.0025; FAIL = 0.0005
 def pnl_at(tr, k, ke, s_land):

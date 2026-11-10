@@ -11,11 +11,20 @@ would_block; a would_block at the fill joins the list as "fpnb (log)".
 dip37: the WHALE / DUMPER LOSS LEDGER verdict at the arm (the arm wallet's [n, sum] before this position): the engine's own wh_n / wh_sum /
 wh_sum_hit / wh_mean_hit on the arm record when the ledger ran live, else replayed here from --whale-seed (a state file built BEFORE this run;
 default none) plus this run's earlier positions, under --wh N:SOL (default 2:0.05; sum and mean both shown).
+dip38 (log-only anti-bait, presend_live_insider / presend_live_shape): the launcher (create-tx payer, its holding / sold %), INSIDER (a >= 3% holder
+or the whale funded by the launcher / creator: wallet, hop, chain walk), FAMILY (its chain holds a blocklisted wallet), the FAMILY LEDGER (the
+launcher's INSIDER fills over 24 h) at the arm and at the fill (the deciding view), INSIDER again with the chains known at the realize, and the
+SHAPE ledger (exact holder sizes); the fill's would-blocks join the list as "family ledger (log)", "insider flag (log)", "family chain (log)",
+"shape ledger (log)".
+dip38 PSM12-S1 (--presend-live-s1-log): the arm record's "s1" verdict (nd M2-scored dumps before the trigger, T2 age, the whale's / dumper's
+REAL positions with us, cold = none) -> keep or WOULD SKIP (first failing reason: nd < 2, T2 age < 50, whale n >= 1 and sum <= -0.02, cold
+n == 0 and nd < 8); an older run without "s1" is replayed from the arm's nd / age / wh_n / wh_sum (labelled "replayed"). A would-skip joins
+the list as "S1 <reason> (log)" ("S1 <reason> (LIVE)" when the gate was live: then the arm was not skipped by the live parts).
 usage: loss_brief.py RUN.jsonl MINT_PREFIX [--all] [--seed gcr_seed.json] [--whale-seed whale_state.json] [--wh 2:0.05]"""
 import sys, json, collections, os
 
 path, pre = sys.argv[1], sys.argv[2]
-seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/moiz/sniper-data/prevent/forward/gcr_seed.json"
+seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/it/sniper-data/prevent/forward/gcr_seed.json"
 led = collections.defaultdict(lambda: [0, 0.0])
 if os.path.exists(seed_p):
     for c, d in json.load(open(seed_p)).items(): led[c] = [d["n"], d["sum"]]
@@ -28,6 +37,8 @@ WH_N, WH_S = (lambda x: (int(x[0]), float(x[1])))((sys.argv[sys.argv.index("--wh
 warm = {}   # (w, mint) -> (wallet, n, sum lamports) before the position
 arm, fill, close, tape, out, famr = {}, {}, {}, collections.defaultdict(list), [], {}
 fpnb = collections.defaultdict(dict)   # dip36: (w, mint) -> {"arm": rec, "fill": the first fill's rec}
+ins38 = collections.defaultdict(dict)  # dip38: (w, mint) -> {"arm" / "fill": the first rec, "realize": the last, "send_flags": n sends flagged}
+shp38 = collections.defaultdict(dict)
 for line in open(path, errors="replace"):
     if '"ev":"presend_live_' not in line: continue
     d = json.loads(line); e = d["ev"]
@@ -44,6 +55,14 @@ for line in open(path, errors="replace"):
     elif e == "presend_live_tape": tape[mint].append(d)
     elif e == "presend_live_fam": famr[k] = d
     elif e == "presend_live_fpnb" and d.get("stage") in ("arm", "fill"): fpnb[k].setdefault(d["stage"], d)
+    elif e in ("presend_live_insider", "presend_live_shape"):
+        m38 = ins38 if e == "presend_live_insider" else shp38
+        st = d.get("stage")
+        if st in ("arm", "fill"): m38[k].setdefault(st, d)
+        elif st == "realize": m38[k]["realize"] = d
+        elif st == "send":
+            m38[k]["sends"] = m38[k].get("sends", 0) + 1
+            if d.get("insider") or d.get("would"): m38[k]["send_flags"] = m38[k].get("send_flags", 0) + 1
     elif e == "presend_live_realized":
         a = arm.get(k)
         if a and (a[0].get("ann") or {}).get("creator") and (a[0].get("ann") or {}).get("cr_pct", 0) >= 3:
@@ -92,6 +111,17 @@ for k, pnl in (out if "--all" in sys.argv else out[-1:]):
     if a.get("h2_keep") is not None:
         lines.append(f"  HYBRID-2 (log): nd {a.get('nd')} m2max {a.get('m2max', -1):.3f} -> h2_keep {a['h2_keep']} (size {a.get('h2_size')} SOL)")
         if not a["h2_keep"]: caught.append("HYBRID-2 (log)")
+    # dip38 PSM12-S1 (log only unless its gate was live): the engine's verdict on the arm, else replayed from the arm's nd / age / wh_n / wh_sum
+    s1 = a.get("s1")
+    if s1 is None and a.get("nd") is not None and a.get("wh_n") is not None:
+        nd_, age_, wn_, ws_ = a["nd"], (age or 0), a["wh_n"] - a.get("wh_pn", 0), a.get("wh_sum", 0) - a.get("wh_ps", 0)
+        why_ = ("nd" if nd_ < 2 else "age" if kind != "rearm" and age_ < 50 else "whale" if wn_ >= 1 and ws_ <= -0.02 + 1e-12 else "cold" if wn_ == 0 and nd_ < 8 else None)
+        s1 = {"nd": nd_, "age": age_, "wh_n": wn_, "wh_s": ws_, "cold": wn_ == 0, "keep": why_ is None, "why": why_, "replayed": True}
+    if s1:
+        lines.append(f"  S1 gate PSM12-S1 ({'replayed from the arm' if s1.get('replayed') else 'LIVE' if s1.get('live') else 'log'}): nd {s1.get('nd')}, age {s1.get('age')}, "
+                     f"{'dumper' if kind == 'rearm' else 'whale'} {s1.get('wh_n')} positions {s1.get('wh_s', 0):+.3f} SOL{' (cold)' if s1.get('cold') else ''} -> "
+                     + ("keep" if s1.get("keep") else f"WOULD SKIP ({s1.get('why')})") + (f" | live parts {s1['parts']}: {s1.get('pwhy') or 'keep'}" if s1.get("parts") else ""))
+        if not s1.get("keep"): caught.append(f"S1 {s1.get('why')} ({'LIVE' if s1.get('live') else 'log'})")
     # LIVE: deeper limit
     deep = f.get("deep")
     lines.append(f"  deeper limit (live): other big holder at signing {fa.get('ob6', 0):.1f}%, dip {100*fa.get('depth', 0):.1f}% -> "
@@ -157,6 +187,36 @@ for k, pnl in (out if "--all" in sys.argv else out[-1:]):
             lines.append(f"  skip2 per-send (log): score {s2.get('score', 0):.3f} vs {s2.get('thr', 0):.3f} (without failed txs {s2.get('score_nf', 0):.3f})"
                          + (" -> WOULD SKIP" if s2.get("skip") else " -> pass"))
             if s2.get("skip"): caught.append("skip2 (log)")
+    # LOG (dip38): launcher, INSIDER / FAMILY / FAMILY LEDGER at the arm and the fill, INSIDER with the chains known at the realize; SHAPE
+    i38 = ins38.get(k) or {}
+    if i38:
+        def ins_s(r):
+            if not r: return "n/a"
+            cv = r.get("cov") or {}
+            s_ = (f"INSIDER {r['ins']['role']} {r['ins']['wallet'][:8]} {r['ins'].get('pct', 0):.1f}% funded by the {r['ins']['via']} ({r['ins']['hops']} hop: {r['ins']['chain']})"
+                  if r.get("insider") else f"insider no (chains ok {cv.get('ok', 0)} / deep {cv.get('deep', 0)} / pending {cv.get('pending', 0)} / fail {cv.get('fail', 0)} of {r.get('cands')})")
+            if r.get("family"): s_ += f"; FAMILY {r['fam']['wallet'][:8]} chain has listed {r['fam']['link'][:8]}"
+            fl_ = r.get("fl")
+            if fl_ is not None: s_ += f"; family ledger {fl_.get('n')} fills {fl_.get('sum', 0):+.3f}" + (" -> WOULD BLOCK" if r.get("would") else "")
+            return s_
+        a38, f38, z38 = i38.get("arm"), i38.get("fill"), i38.get("realize")
+        r0 = f38 or a38 or {}
+        lines.append(f"  launcher (dip38): {str(r0.get('launcher'))[:8]}" + (" (pays the create; creator field " + str(r0.get('creator'))[:8] + ")" if r0.get("payer_ne_creator") else "")
+                     + f", holds {r0.get('launcher_pct') or 0:.1f}% at the fill, sold {r0.get('launcher_sold_pct') or 0:.1f}% so far")
+        lines.append(f"  insider / family (log): arm {ins_s(a38)} | fill {ins_s(f38)}" + (f" | {i38['send_flags']} of {i38.get('sends', 0)} sends flagged" if i38.get("send_flags") else ""))
+        if z38:
+            lines.append(f"  insider at the realize (late chains, log): " + (f"INSIDER {z38['late']['wallet'][:8]} ({z38['late']['chain']})" if z38.get("insider_late") else "no")
+                         + (f" | learned into the launcher's ledger -> {z38['fl_after'].get('n')} fills {z38['fl_after'].get('sum', 0):+.3f}" if z38.get("learned") and z38.get("fl_after") else ""))
+        if f38 and f38.get("would"): caught.append("family ledger (log)")
+        if f38 and f38.get("insider"): caught.append("insider flag (log)")
+        if f38 and f38.get("family"): caught.append("family chain (log)")
+    s38 = shp38.get(k) or {}
+    if s38:
+        fs = s38.get("fill") or s38.get("arm") or {}
+        h_ = fs.get("hit")
+        lines.append(f"  shape ledger (log): holder sizes {', '.join(format(x, '.3f') + '%' for x in fs.get('els') or []) or 'none'}"
+                     + (f" -> {h_['el']:.3f}% had {h_['n']} fills {h_['sum']:+.3f} in 6 h, no win: WOULD BLOCK" if h_ else " -> no"))
+        if (s38.get("fill") or {}).get("would"): caught.append("shape ledger (log)")
     # who sold inside our hold
     sl = (c.get("sell_land") or [None])[0]
     holders = {h["w"] for h in hs}

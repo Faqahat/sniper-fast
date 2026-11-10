@@ -3,7 +3,7 @@
 and whose price at any later point reaches 2x the moment's px: his picks vs skipped vs the GBDT's rate-matched TEST picks (MKT model)."""
 import sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load()
 vs = D["vsol"] / 1e9; vt = D["vtok"].astype(np.float64); px = vs / np.maximum(vt, 1)

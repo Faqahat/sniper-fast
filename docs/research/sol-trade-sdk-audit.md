@@ -62,7 +62,7 @@
 - never build or run it, including `test_latency.sh`, which places a mainnet trade when `PAYER_KEYPAIR` is set;
 - never paste any key into anything from it or from its partners.
 
-**Our exposure:** nothing references it under /home/moiz/arbed or ~/.cargo, so nothing needs rotating. The Cherry server and the owner's personal machines were not checked.
+**Our exposure:** nothing references it under /home/it/other/arbed or ~/.cargo, so nothing needs rotating. The Cherry server and the owner's personal machines were not checked.
 
 ## 2. The person and the contact
 

@@ -6,9 +6,9 @@ the tape, landing at our MEASURED chain-clock ms after the dump, guard ignored (
 Gap = realized - replay per fill = the calibration. MEASURED."""
 import json, pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_strat")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_strat")
 from hs_lib import D, W0, W1
-TAB = "/home/moiz/sniper-data/haqq_model/tab"
+TAB = "/home/it/sniper-data/haqq_model/tab"
 FEE = 0.0125; SMS = 212.0
 OURS = ("2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR")
 

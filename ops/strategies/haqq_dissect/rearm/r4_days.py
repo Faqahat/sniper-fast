@@ -13,11 +13,11 @@ usage: r4_days.py DAY --cfgs X:G:A:K:H,... [--draws 2] [--tag t] [--log] [--k 8]
 import sys, os, json, pickle, time, argparse, collections
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/density")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/density")
 import rlib, sim, dsim, drun, s48lib, rsim
 from r3_events import our_sighs
 
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 
 
 def parse_cfg(s):

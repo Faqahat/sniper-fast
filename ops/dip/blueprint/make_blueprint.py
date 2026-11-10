@@ -248,7 +248,7 @@ S.append(table(["control", "how"], [
  ["one engine per server", "scripts refuse while any snipe_engine runs; the 24 h paper engine of the other strategy is stopped for live runs"],
  ["who starts PROD", "the owner, inside tmux, typing the keystore passphrase; the agent drives only the FRZ test wallet"],
  ["records", "/root/prod/runs/dip_rN.log + .jsonl; report: <code>python3 -I ops/dip/report_run.py dip_rN.jsonl 2g7r…</code>"]]))
-S.append('<pre>ssh -p 1996 it@84.32.100.36\ntmux new -s dip\nsudo bash /root/prod/run_dip_prod.sh --run N --trades K --size 0.25    # + optional --guard 1.05 --tier strict --minutes 120</pre>')
+S.append('<pre>ssh -p 1996 it@cyberfra\ntmux new -s dip\nsudo bash /root/prod/run_dip_prod.sh --run N --trades K --size 0.25    # + optional --guard 1.05 --tier strict --minutes 120</pre>')
 
 # 8
 h2("Live results", 8)
@@ -335,12 +335,12 @@ ul([f"<b>Our fail ratio is far above our competitors'.</b> PROD: {our_miss} of {
 
 # 13
 h2("Recreate it", 13)
-S.append('''<pre># host (development only here): /home/moiz/sniper
+S.append('''<pre># host (development only here): /home/it/sniper
 cargo build --release --bin snipe_engine                       # engine incl. --dip (src/bin/snipe_engine/dipmode.rs)
 # model + cohort -> server
-scp -P 1996 ops/overnight/sel/IMIT1.json ops/overnight/sel/cohort_train.json  it@84.32.100.36:/tmp/   # then sudo mv to /root/dip/
+scp -P 1996 ops/overnight/sel/IMIT1.json ops/overnight/sel/cohort_train.json  it@cyberfra:/tmp/   # then sudo mv to /root/dip/
 # engine -> server (never pipe-deploy and launch in one ssh)
-ssh -p 1996 it@84.32.100.36 'sudo tee /root/sniper-dip/snipe_engine_dipN > /dev/null' < target/release/snipe_engine
+ssh -p 1996 it@cyberfra 'sudo tee /root/sniper-dip/snipe_engine_dipN > /dev/null' < target/release/snipe_engine
 # config: /root/sniper-dip/dip_probe.toml = dip_shadow.toml (feeds incl. [[feed]] kaldera-tx kind="yellowstone-tx",
 #         token_env KALDERA_TOKEN, header x-token; [[send]] staked-rpc, helius, nozomi, astralane, landx-fra3, jito-bundle,
 #         harmonic-bundle) + bolt + haan + tpu-direct; tokens only in /root/sniper/deploy/.env
@@ -368,7 +368,7 @@ S.append(table(["where", "what"], [
  ["ops/prod/run_dip_prod.sh, run_dip_frz.sh, run_dip_probe.sh, transfer_prod.sh", "run scripts (copies on the server under /root/prod and /root/sniper-dip)"], ["ops/dip/report_run.py", "per-run report with chain P&L"],
  ["ops/dip/speed/*.py", "landing studies: dip_speed, probe_speed, probe_timing, fast_bots_paths, guard_whatif, haqq_path"], ["ops/overnight/sel/", "selection study: IMIT1.json, cohort_train.json, SELECTION.md, realat*.py, live_sim.py"],
  ["ops/dip/PLAN.md", "chronological log of the build and every decision"], ["/root/prod/runs/dip_rN.{log,jsonl}", "PROD run records"], ["/root/prod/dip_budget.json", "loss budget across runs"],
- ["server", "Cherry Servers, Frankfurt — ssh -p 1996 it@84.32.100.36"], ["wallets", f"PROD {gmw(PROD, PROD)} · test {gmw(FRZ, FRZ)}"]]))
+ ["server", "Cherry Servers, Frankfurt — ssh -p 1996 it@cyberfra"], ["wallets", f"PROD {gmw(PROD, PROD)} · test {gmw(FRZ, FRZ)}"]]))
 
 CSS = """*{box-sizing:border-box}body{background:#fff;color:#000;font:15px/1.5 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;margin:0 auto;padding:16px;max-width:1180px}
 h1{font-size:24px;border:4px solid #000;padding:12px 14px;margin:0 0 12px;letter-spacing:.5px}

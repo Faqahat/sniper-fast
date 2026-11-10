@@ -1,9 +1,9 @@
 # what starts a spammer's window on a mint? look at the tape just before its first tx on the mint
 import os, sys, json, gzip, collections, statistics
 os.environ["RP_PHASEA_R2"] = "phaseA_selfwd"; os.environ["RP_PHASEA_R3"] = "phaseA_r3day"
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/core")
+sys.path.insert(0, "/home/it/sniper-data/overnight/core")
 import rp
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 W = sys.argv[1]
 L = collections.defaultdict(list)
 for line in gzip.open(B + "txrows.jsonl.gz", "rt"):

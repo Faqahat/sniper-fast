@@ -9,7 +9,7 @@
    20 % of other wallets' buy SOL landing in the first 10 slots after our entry (fast followers)
 Out: OUT/sim.npz aligned with U2.npz rows"""
 import sys, json, time, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
 t0 = time.time()
 L_MS = float(sys.argv[1]) if len(sys.argv) > 1 else 66.0
 D = load(); w = int(D["wid"]); sib = int(D["sibid"])
@@ -44,7 +44,7 @@ def before(m, s, i):
     """index of the last tape row on mint m strictly before chain position (s, i); -1 if none"""
     k = (m << 40) | (np.maximum(s - S0, 0) << 16) | np.minimum(np.maximum(i, 0), 65535)
     return np.searchsorted(KEYS, k, side="left") - 1
-dq = json.load(open("/home/moiz/sniper-data/e2x1_dissect/ourspeed/delay_q.json")); Q = np.array(dq["q_pre"])[::3]; QMED = dq["med_pre"]
+dq = json.load(open("/home/it/sniper-data/e2x1_dissect/ourspeed/delay_q.json")); Q = np.array(dq["q_pre"])[::3]; QMED = dq["med_pre"]
 dd = Q * (L_MS / QMED) / SMS; dd2 = dd[::-1]
 U = np.load(f"{OUT}/U2.npz"); rows = U["row"]; n = len(rows); print("rows", n, "delays(slots)", dd.round(3))
 e_s = sl[rows]; e_i = ix[rows]; e_m = mi[rows]; age = U["age_s"]

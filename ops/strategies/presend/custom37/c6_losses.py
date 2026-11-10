@@ -5,9 +5,9 @@ a loss bucket, and what each knob would have done to that window (the grid's pai
 Buckets (first match): FLAT (no outside trade of >= 0.01 SOL between our fill and our sell), CASCADE (outside sells in our hold >= 1 SOL and net
 selling >= 0.5 SOL: 'whale 2nd leg' if the whale sold in our hold, else 'second dumper'), SHALLOW ENTRY (dump depth at our fill
 < 15% and our entry >= 5% above the dip's low in the next 2 s), DRIFT (the rest: small sells / no rebound).
-Out: stdout + /home/moiz/sniper-data/custom37/losses.json + losses.md"""
+Out: stdout + /home/it/sniper-data/custom37/losses.json + losses.md"""
 import sys, json, pickle, datetime, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as L
 
 pkt = lambda t_ms: datetime.datetime.fromtimestamp(t_ms / 1e3, datetime.UTC) + datetime.timedelta(hours=5)

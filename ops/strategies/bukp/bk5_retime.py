@@ -8,9 +8,9 @@
 # -> bukp/retime_<run>.json + printed P&L splits
 import sys, json, zlib, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-OUT = "/home/moiz/sniper-data/strategies/bukp"
+OUT = "/home/it/sniper-data/strategies/bukp"
 W = "BUkpShoEWRiPckdFs3kzYGjBPfUhL6G39ufo84QeogPP"; UID = zlib.crc32(W.encode())
 FIX = 0.0035; FAIL = 0.0005; GUARD = 1.05; GRADV = 113e9
 

@@ -1,4 +1,4 @@
-//! OBSERVATORY module 5: the BLINK causal launch-dump trigger (ported from /home/moiz/sniper-blink/src/blink.rs, parity-checked
+//! OBSERVATORY module 5: the BLINK causal launch-dump trigger (ported from /home/it/sniper-studies/sniper-blink/src/blink.rs, parity-checked
 //! and causal there; BLINK_PORT.md). NO model (BLINK failed on honest features): every trigger is logged with its 22 features so
 //! we can measure how late we see sub-second launch dumps. LOG ONLY.
 //! Books: one per token from its CreateEvent (the create slot included, no age / size gate). The token's clock, dev and seller

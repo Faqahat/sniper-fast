@@ -2,9 +2,9 @@
 # Our dip fires from the live run logs (FRA dip_r*.jsonl, AMS dip_ams_r*.jsonl): dump sig, mint, leader, client, paths,
 # per-path sigs, result, landed sig/path, engine timing. Output: our_fires.json
 import json, glob, os, collections
-D = "/home/moiz/sniper-data/landing2"
+D = "/home/it/sniper-data/landing2"
 F = {}
-fs = sorted(glob.glob("/home/moiz/sniper-data/runs/fra/runs/dip_r*.jsonl")) + sorted(glob.glob("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r*.jsonl"))
+fs = sorted(glob.glob("/home/it/sniper-data/runs/fra/runs/dip_r*.jsonl")) + sorted(glob.glob("/home/it/sniper-data/runs/ams/runs/dip_ams_r*.jsonl"))
 for f in fs:
     srv = "AMS" if "/ams/" in f else "FRA"; run = os.path.basename(f).split(".")[0]
     for line in open(f):

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # team's probe buys (tiny real buys, often one forced send path): landing time + block position by path / leader
 import sys, json, collections, statistics as st, glob, gzip
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from load import *
-SP = "/home/moiz/sniper/ops/dip/speed"
+SP = "/home/it/sniper/ops/dip/speed"
 rt = json.load(open(f"{SP}/leaders/leader_rtt_new.json"))["leaders"]
 P = []
 for f in ["probeA", "probeB", "probeC", "probeD", "probeE"]:
@@ -29,7 +29,7 @@ for p in P:
         # buys ahead between dump and probe
         seq = [r for r in M.get(p["mint"], []) if (d["s"], d["i"]) < (r["s"], r["i"]) < (tx["s"], tx["i"])]
         p["chain"]["ahead_ok_buys"] = sum(1 for r in seq if not r["err"] and any(e[0] == p["mint"] and e[1] == 1 for e in r["ev"]))
-json.dump(P, open("/home/moiz/sniper/ops/agents/freshaudit/out/probes.json", "w"))
+json.dump(P, open("/home/it/sniper/ops/agents/freshaudit/out/probes.json", "w"))
 print("probes", len(P), "with chain position", sum(1 for p in P if p["chain"]))
 def cat(p):
     if p["route"].startswith("forced:"): return p["route"]

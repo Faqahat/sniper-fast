@@ -7,8 +7,8 @@
 # Outputs: <RUN>_rows.npz (amm rows sorted by mint,s,i,k + Qv, p_pre, p_post, arr, F) and <RUN>_tokens.jsonl
 import sys, os, json, pickle, collections, time, datetime
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/postmig"
-COL = "/home/moiz/sniper-data/collect"
+OUT = "/home/it/sniper-data/strategies/postmig"
+COL = "/data/tapes/collect"
 RUNS = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
 SMS = 212.0
 W = {"slot0": 0, "1s": 5, "10s": 47, "1m": 283, "10m": 2830, "1h": 16981}
@@ -26,7 +26,7 @@ def load(run):
 
 def labels():
     L = {}
-    for l in open("/home/moiz/sniper-data/llm/launch_labels/labels.jsonl"):
+    for l in open("/home/it/sniper-data/llm/launch_labels/labels.jsonl"):
         try: d = json.loads(l); L[d["mint"]] = d
         except Exception: pass
     return L

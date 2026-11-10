@@ -16,7 +16,7 @@
   - **[J]** Jupiter's public program-id-to-label map;
   - **[IDL]** on-chain Anchor IDLs;
   - **[SRC]** the Whirlpool clone in scratch-wp21.
-- **Cost:** 772 public-RPC requests (retries included), one label GET and one scp. Files are in /home/moiz/arbx-offload/venue-census/ (64 MB).
+- **Cost:** 772 public-RPC requests (retries included), one label GET and one scp. Files are in /home/it/other/arbx-offload/venue-census/ (64 MB).
 
 **Method:**
 - **Arbitrage:** a successful transaction with two or more swap legs that closes in one hub (SOL/WSOL, USDC or USDT) with gross ≥ 0.

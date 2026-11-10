@@ -3,7 +3,7 @@
 # instant-event slots -> the average leader time per block position (slot ~212 ms / block size), to translate a block gap into ms.
 # usage: python3 -I i17_blocks.py probe_map.json OUT.json
 import sys, json
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/instant")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/instant")
 import rpc_ro as R
 pm = json.load(open(sys.argv[1])); out = []
 for x in pm:

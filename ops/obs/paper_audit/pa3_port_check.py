@@ -4,7 +4,7 @@ For every shadow window of the run: the armed rows (presend_disarm) re-run with 
 crossing x, last trade ahead m, landing a_land, entry slot s_in, exit pnl (follower-drop model) and pnl_naive at 0.55 SOL.
 usage: pa3_port_check.py X.pkl OUT.json"""
 import sys, json, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/obs/paper_audit")
+sys.path.insert(0, "/home/it/sniper/ops/obs/paper_audit")
 import pa_lib as L
 
 

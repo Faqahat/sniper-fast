@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """HAQQ_SEL step 0 (read-only, public RPC, 1 call per epoch): leader schedules for epochs 1068 and 1069 in the schedule_cur.json
-format (start, ids, slot_leader) -> /home/moiz/sniper-data/haqq_sel/schedule_<epoch>.json (needed by the M2 replay's near-leader flags)."""
+format (start, ids, slot_leader) -> /home/it/sniper-data/haqq_sel/schedule_<epoch>.json (needed by the M2 replay's near-leader flags)."""
 import json, urllib.request, time
 URL = "https://api.mainnet-beta.solana.com"
 def rpc(m, p):
@@ -16,5 +16,5 @@ for ep in (1068, 1069):
     for k, v in sch.items():
         for o in v: sl[o] = idx[k]
     print(ep, "leaders", len(ids), "missing", sum(1 for x in sl if x < 0))
-    json.dump(dict(epoch=ep, start=START, ids=ids, slot_leader=sl), open(f"/home/moiz/sniper-data/haqq_sel/schedule_{ep}.json", "w"))
+    json.dump(dict(epoch=ep, start=START, ids=ids, slot_leader=sl), open(f"/home/it/sniper-data/haqq_sel/schedule_{ep}.json", "w"))
     time.sleep(1)

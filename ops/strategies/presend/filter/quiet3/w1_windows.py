@@ -2,11 +2,11 @@
 """QUIET3 step 2: every live pre-send ARM of the 24 verified runs -> one window (signals if logged, attempts, fill, realized P&L),
 plus the QUIET skips (censored arms). Read-only on the run records. Output windows.json."""
 import json, collections
-L='/home/moiz/sniper-data/runs'; V='/home/moiz/sniper-data/presend_losses/verify/raw'
+L='/home/it/sniper-data/runs'; V='/home/it/sniper-data/presend_losses/verify/raw'
 runs=[('FRA',f'r{n}',f'{L}/fra/runs/dip_r{n}.jsonl') for n in (21,22,23,24,26,27,28)]
 runs+=[('AMS',f'r{n}',f'{L}/ams/runs/dip_ams_r{n}.jsonl') for n in (16,17,19,20,24,25,26,27,34,35)]
 runs+=[('AMS',f'r{n}',f'{V}/dip_ams_r{n}.jsonl') for n in (28,29,30,31,32,33,36)]
-OUT='/home/moiz/sniper-data/presend_quiet3/windows.json'
+OUT='/home/it/sniper-data/presend_quiet3/windows.json'
 W=[];SK=[];meta={}
 for reg,r,p in runs:
     seg=0;win={};qcfg=None;stopfees=None;nsk=collections.Counter()

@@ -10,9 +10,9 @@ Cash = realized + ATA rent back (1.50882 mSOL per fill) - 5,120 lamports per lan
 usage: ma5_calib.py CTX.pkl OUT.json [REPS]"""
 import sys, json, pickle, collections, math
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
-sys.path.insert(0, "/home/moiz/sniper/ops/obs/paper_audit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/obs/paper_audit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import c37lib as L
 import pa_lib as PA
 import ma_lib as M

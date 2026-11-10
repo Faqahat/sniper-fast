@@ -2,11 +2,11 @@
 """SIZE study step 4: the signatures whose slippage limits we need (read-only, offline): for every live position of r26-r28
 (pre-send + regular), every other wallet's trade after our buy up to the position's end slot, and every other wallet's FAILED
 pump tx on the token in the same span with a slippage error (6002 too much SOL / 6042 below min tokens out / 6003 too little SOL).
-Writes /home/moiz/sniper-data/presend_size/sigs_hold.json ([[sig, mint], ...]) for r065's fetch.py (read-only RPC)."""
+Writes /home/it/sniper-data/presend_size/sigs_hold.json ([[sig, mint], ...]) for r065's fetch.py (read-only RPC)."""
 import sys, json, collections, re
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core
-BASE = "/home/moiz/sniper-data/presend_size"
+BASE = "/home/it/sniper-data/presend_size"
 core.BASE = BASE
 import positions as PO
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}

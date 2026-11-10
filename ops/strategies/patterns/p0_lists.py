@@ -3,11 +3,11 @@
 #  - family F1..F10: R2-only consistent winners (>=30 clean trips in R2, P&L > 0, >=60% of active 6-h blocks positive,
 #    open share <= 30%, closed P&L > 0), profiled with s3_cards.profile and assigned with the s5_families rules
 #  - bot: >= 50 clean round trips in R2
-# -> /home/moiz/sniper-data/strategies/patterns/lists_r2.json  {wallet: "F2" | "bot"}
+# -> /home/it/sniper-data/strategies/patterns/lists_r2.json  {wallet: "F2" | "bot"}
 import sys, json, gzip, glob, collections, statistics
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies")
+sys.path.insert(0, "/home/it/sniper/ops/strategies")
 import s3_cards as S3
-OUT = "/home/moiz/sniper-data/strategies"
+OUT = "/home/it/sniper-data/strategies"
 F = json.load(open(f"{OUT}/trips/FIELDS.json")); X = {k: i for i, k in enumerate(F)}
 W = collections.defaultdict(list)
 for f in sorted(glob.glob(f"{OUT}/trips/R2_*.jsonl.gz")):

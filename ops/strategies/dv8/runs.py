@@ -1,6 +1,6 @@
 """DV8 shared: list of all live run record files (read-only)."""
 import glob, os, re
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 def run_files():
     R = {}
     for f in glob.glob(f"{D}/runs/ams/runs/dip_ams_r*.jsonl") + [f"{D}/presend_filter/live28/dip_ams_r28.jsonl"] + glob.glob(f"{D}/haqq_strat/live/dip_ams_r*.jsonl"):

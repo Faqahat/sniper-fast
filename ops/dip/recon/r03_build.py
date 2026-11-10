@@ -4,7 +4,7 @@
 # i.e. exactly how the earlier paper numbers were made). Our own trades are removed later, in the replay (r05).
 # usage: python3 r03_build.py <tag NEW|OLD> <recording dir> <from unix> <to unix> [procs]
 import sys, os, glob, json, time, shutil
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd20_shadow_eval as SH
 import rlib as R
 

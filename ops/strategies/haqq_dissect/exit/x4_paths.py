@@ -7,7 +7,7 @@ Also his own exit (the sell that closed the lot; lots are closed by a matched se
 Out: haqq_dissect/exit/paths.npz  (concatenated rows + per-lot offsets; lot order = haqq.pkl lots)"""
 import pickle, time, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 HZ = 300
 

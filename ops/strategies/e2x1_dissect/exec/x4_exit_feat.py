@@ -4,7 +4,7 @@
 just before his sell (who, side, size: sibling Grozoe / the trigger wallet / the creator / other), outside buy/sell flow since entry,
 time since the last outside buy. Also a per-slot path for rule fitting (x5). Out: sniper-data/e2x1_dissect/exec/x4.pkl"""
 import sys, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
 L = [l for l in X.lots() if l["day"] in ("D0", "D1")]
 T = X.tape()["trades"]; C = X.tape()["creates"]

@@ -5,7 +5,7 @@
 # instructions and the router instruction shape. <= 5 requests/s. The RPC URL is read from the config file and never printed.
 # usage: python3 -I p3_rpc_sample.py N_FAIL N_BUY N_SELL
 import sys, os, json, time, random, urllib.request, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 EP = open(os.path.expanduser("~/.config/sniper/ck_rpc_url")).read().strip()
 SYS = "11111111111111111111111111111111"; CB = "ComputeBudget111111111111111111111111111111"
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"; B58I = {c: i for i, c in enumerate(B58)}

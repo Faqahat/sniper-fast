@@ -2,7 +2,7 @@
 """STATE step 6: per-run tables for the A2 survivors (current-config universe on PICK runs, live r37, live r38) and the r38 six-loss state table."""
 import sys, pickle, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/state"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/filter/quiet4")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/state"); sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/filter/quiet4")
 import x4_score as X, q6data as Q6
 D = X.D
 R = pickle.load(open(f"{D}/windows.pkl", "rb")); F = pickle.load(open(f"{D}/feats.pkl", "rb"))

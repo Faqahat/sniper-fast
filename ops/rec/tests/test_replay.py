@@ -12,7 +12,7 @@
 import os, sys, json, gzip, glob, time, signal, subprocess, threading, http.server, socketserver, shutil, importlib.util, calendar, zlib
 HERE = os.path.dirname(os.path.abspath(__file__)); REC = os.path.dirname(HERE)
 RAWDIR = sys.argv[1]; N = int(sys.argv[2]) if len(sys.argv) > 2 else 240
-WORK = os.environ.get("TEST_WORK", "/home/moiz/sniper-data/rec/test/replay")
+WORK = os.environ.get("TEST_WORK", "/home/it/sniper-data/rec/test/replay")
 PKT = 5 * 3600; S0 = 400_000_000; LAG = 3
 FAILS = []
 def check(cond, what):

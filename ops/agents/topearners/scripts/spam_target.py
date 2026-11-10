@@ -2,9 +2,9 @@
 # of the dump the spammer filled after.
 import os, sys, json, gzip, collections
 os.environ["RP_PHASEA_R2"] = "phaseA_selfwd"; os.environ["RP_PHASEA_R3"] = "phaseA_r3day"
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/core")
+sys.path.insert(0, "/home/it/sniper-data/overnight/core")
 import rp
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 W = sys.argv[1]
 L = collections.defaultdict(list)
 for f in (B + "txrows.jsonl.gz", B + "txrows2.jsonl.gz"):

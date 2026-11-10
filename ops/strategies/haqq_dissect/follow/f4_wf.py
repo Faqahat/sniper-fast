@@ -9,7 +9,7 @@ union; fills thinned to the MEASURED live fill rate (PF 0.52); a fill blocks the
 Out: f4.txt, f4.pkl (models, choices, per-day results)"""
 import sys, time, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/follow")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/follow")
 import flib as FL
 import dv8lib as L
 OUT = FL.OUT

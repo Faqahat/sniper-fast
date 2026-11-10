@@ -384,8 +384,8 @@ Owner's ask (10-25 ~19:15 PKT): "explore our realistic options to reduce our lan
 ## 6. Location and hosting
 
 **Where our servers are** [78][71]
-- 84.32.100.36 = Cherry Servers DE (AS213896), Frankfurt; Cherry says Equinix FR13.
-- 84.32.104.202 = Cherry Servers NL (AS59642), Amsterdam; Equinix AM4.
+- cyberfra = Cherry Servers DE (AS213896), Frankfurt; Cherry says Equinix FR13.
+- cyberams = Cherry Servers NL (AS59642), Amsterdam; Equinix AM4.
 - VPS or bare metal is not visible publicly.
 
 **Where the relays are** (DNS + ipinfo lookups [89])
@@ -575,7 +575,7 @@ Hosting and location:
 75. https://www.validators.app/data-centers?network=mainnet
 76. https://latency.glassnode.com/solana/about
 77. https://wondernetwork.com/pings/Frankfurt/Amsterdam
-78. https://rdap.db.ripe.net/ip/84.32.100.36 · https://ipinfo.io/84.32.100.36 · https://rdap.db.ripe.net/ip/84.32.104.202 · https://ipinfo.io/84.32.104.202
+78. https://rdap.db.ripe.net/ip/cyberfra · https://ipinfo.io/cyberfra · https://rdap.db.ripe.net/ip/cyberams · https://ipinfo.io/cyberams
 
 Stake and SWQoS:
 

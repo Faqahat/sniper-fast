@@ -2,7 +2,7 @@
 """Where our execution money goes per PKT day (MEASURED counts and fees from chain) and what each recipe step would save
 (unit costs MEASURED where we have them; INFERRED parts named). Out: sniper-data/haqq_dissect/exec/t9_savings.txt"""
 import pickle, collections
-D = "/home/moiz/sniper-data/haqq_dissect/exec"
+D = "/home/it/sniper-data/haqq_dissect/exec"
 rows = pickle.load(open(f"{D}/txs.pkl", "rb"))
 out = []
 def P(*a): out.append(" ".join(str(x) for x in a))

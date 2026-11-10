@@ -7,9 +7,9 @@ Policy on test day D (our fires): guard +15% if the fire is in ANY 'loosen' buck
 Out: data/lim/l11.txt"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 CF, CX = 3.52e-3, 0.53e-3
 MAP = {"dj_drop": "drop", "d_sol": "dsol", "v_post": "vpost", "age": "age", "n10": "n10", "nsame": "nsame", "b10": "b10"}
 out = []

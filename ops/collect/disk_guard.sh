@@ -4,9 +4,9 @@
 # exit 2 = a server could not be read. The 95% cap itself is enforced by
 # ops/collect/keeper.sh (it pauses recording copies); this only reports.
 set -u
-u=$(df --output=pcent /home/moiz | tail -1 | tr -dc '0-9')
-f=$(ssh -p 1996 -o ConnectTimeout=10 -o BatchMode=yes it@84.32.100.36 "df --output=pcent / | tail -1 | tr -dc '0-9'" 2>/dev/null)
-a=$(ssh -p 1996 -o ConnectTimeout=10 -o BatchMode=yes it@84.32.104.202 "df --output=pcent / | tail -1 | tr -dc '0-9'" 2>/dev/null)
+u=$(df --output=pcent /home/it | tail -1 | tr -dc '0-9')
+f=$(ssh -p 1996 -o ConnectTimeout=10 -o BatchMode=yes it@cyberfra "df --output=pcent / | tail -1 | tr -dc '0-9'" 2>/dev/null)
+a=$(ssh -p 1996 -o ConnectTimeout=10 -o BatchMode=yes it@cyberams "df --output=pcent / | tail -1 | tr -dc '0-9'" 2>/dev/null)
 line="container ${u:-?}% | FRA ${f:-?}% | AMS ${a:-?}%"
 rc=0
 for v in "$u" "$f" "$a"; do

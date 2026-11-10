@@ -2,11 +2,11 @@
 """TIMING step 2 [MEASURED, read-only]: every pump.fun curve trade of the wallet set W (t1 wallets.json: holders >= 2% at our fills /
 signing / trigger, in-hold sellers >= 0.05 SOL, whales, creators of fill mints) across ALL tokens, 10-24 19:25 -> 10-30 03:55 PKT,
 from the decoded tapes on disjoint slot ranges (WHO's list):
-Out: /home/moiz/sniper-data/prevent/timing/hist.npz (slot, idx, j, bt, mint, user, buy, sol, tok, vsol, vtok; sorted user, slot, idx, j)
+Out: /home/it/sniper-data/prevent/timing/hist.npz (slot, idx, j, bt, mint, user, buy, sol, tok, vsol, vtok; sorted user, slot, idx, j)
      + hist_ids.json (mint names, user names) + creates_all.pkl {mint: (creator, slot, bt, mayhem)}"""
 import json, pickle, gc
 import numpy as np
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 OUT = f"{D}/prevent/timing"
 # (haqq_dissect D0-D2 ids.json point to the archived dv8/tab -> not decodable by name: history starts 10-24 19:25 PKT)
 SRC = [("chain", f"{D}/presend_quiet3", 460883340, 462709231),

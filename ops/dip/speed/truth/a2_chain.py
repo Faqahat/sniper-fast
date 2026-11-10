@@ -9,7 +9,7 @@ import tl
 
 DISC = bytes([189, 219, 127, 211, 78, 230, 97, 238])
 A58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 HEAD = re.compile(r'^\{"s":(\d+),"i":(\d+)')
 LO, HI = 3, 8        # window: dump slot - LO .. dump slot + HI
 

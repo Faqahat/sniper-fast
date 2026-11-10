@@ -5,7 +5,7 @@ Follower value: constant-product curve state depends only on net SOL in the curv
 minus sells out of curve) that sits in the curve at his sell gives the counterfactual curve vSOL -> his counterfactual proceeds.
 Out: sniper-data/e2x1_dissect/exec/x6.txt, x6.pkl"""
 import sys, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
 R = pickle.load(open(f"{X.X}/x4.pkl", "rb"))
 out = []

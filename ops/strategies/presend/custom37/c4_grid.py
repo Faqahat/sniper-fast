@@ -3,13 +3,13 @@
 one-position knock-on, REPS possible worlds each (phantom tries, sell-latency draws for new fills, follower cut seeds), at 0% and
 -20% followers. TRAIN windows are restricted to what the r37 config would arm (token age >= 2 slots, QUIET all-4 skip recomputed
 with fol 4.0 / no follower-bot list).
-Out: /home/moiz/sniper-data/custom37/grid.pkl {"cfgs": {name: cfg}, "runs": {run: {"wins": [meta], "res": {name: {cut: array}}}}}
+Out: /home/it/sniper-data/custom37/grid.pkl {"cfgs": {name: cfg}, "runs": {run: {"wins": [meta], "res": {name: {cut: array}}}}}
 array columns (means over reps): filled, pos_pnl (position P&L, cash, without failed-try fees), fees (failed tries, <= 0),
 pos_pos (positive part), pos_neg (negative part), live_try (fill = the live fill try), phantom (fill by a phantom try),
 fails (count), nph (phantom tries made)"""
 import sys, pickle, time, numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as L
 
 RUNS_TRAIN = ["r34", "r35", "r36", "f26", "f27", "f28"]

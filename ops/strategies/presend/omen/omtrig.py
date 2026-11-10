@@ -5,7 +5,7 @@ and the CAUSAL habit features of that wallet (hab.pkl: only positions whose firs
 Usable hours as rearm2 ev_D<k>.pkl. usage: omtrig.py D TAB -> trig_D<k>.pkl"""
 import sys, os, json, pickle, time, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 sys.path.insert(0, "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/rearm2/code")
 import rlib, ev, rep
 from rlib import UNTRADE_V, SUPPLY, float32

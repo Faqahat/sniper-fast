@@ -2,17 +2,17 @@
 """YOUNG step 1: per-trigger table from run .jsonl (read-only copies).
 One row per shadow presend_arm (every trigger the engine saw, incl. age-0 skips), joined with the live arm/skip,
 live attempts (landing positions), live fill, live sell, live realized P&L and the shadow row-a fill/exit.
-Out: /home/moiz/sniper-data/presend_young/trig.json"""
+Out: /home/it/sniper-data/presend_young/trig.json"""
 import json, glob, os, sys, collections
-OUT = "/home/moiz/sniper-data/presend_young"
+OUT = "/home/it/sniper-data/presend_young"
 RUNS = []
-for f in sorted(glob.glob("/home/moiz/sniper-data/runs/fra/runs/dip_r*.jsonl")):
+for f in sorted(glob.glob("/home/it/sniper-data/runs/fra/runs/dip_r*.jsonl")):
     n = int(os.path.basename(f)[5:-6])
     if 21 <= n <= 28: RUNS.append(("FRA", f"r{n}", f))
-amsdir = "/home/moiz/sniper-data/runs/ams/runs"
+amsdir = "/home/it/sniper-data/runs/ams/runs"
 for n in range(16, 38):
     f = f"{amsdir}/dip_ams_r{n}.jsonl"
-    for alt in (f"/home/moiz/sniper-data/presend_losses/verify/raw/dip_ams_r{n}.jsonl", f"{OUT}/dip_ams_r{n}.jsonl"):
+    for alt in (f"/home/it/sniper-data/presend_losses/verify/raw/dip_ams_r{n}.jsonl", f"{OUT}/dip_ams_r{n}.jsonl"):
         if not os.path.exists(f) and os.path.exists(alt): f = alt
     if os.path.exists(f): RUNS.append(("AMS", f"r{n}", f))
 

@@ -5,10 +5,10 @@ flat 0.45, top-K picks per day by each score set (K chosen on the previous day b
 Money as s5 (INFERRED replay, WAVE_PS exit). Out: select/s14.txt"""
 import sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 from s4_wf import load_scores
 from s5_pnl import money
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 KS = [25, 50, 100, 200, 400, 800, 1600]
 
 

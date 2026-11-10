@@ -10,7 +10,7 @@ split by whether the PREVIOUS whale dump's 2-slot ideal result was >= +5% (paid;
 Out: p8.txt"""
 import sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import p6_rules as R6
 import dv8lib as L
 from plib import Out, OUT, day_name, boot_sum

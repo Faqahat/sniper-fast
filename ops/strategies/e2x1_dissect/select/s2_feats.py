@@ -3,7 +3,7 @@
 Outcome: lot P&L by TRIP (flat -> flat on the mint): each buy gets tokens * (that trip's avg sell px) - sol; tokens sold beyond
 bought are not credited; a trip never closed in the tape values its unsold tokens at 0 (flag unsold)."""
 import sys, json, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"])
 sl = D["slot"].astype(np.int64); ix = D["idx"].astype(np.int64); bu = D["buy"].astype(bool); so = D["sol"] / 1e9

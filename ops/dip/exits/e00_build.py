@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # EXIT STUDY e00: tape + dump rows for one recording window, with the study's own pipeline imported UNCHANGED
 # (dd20_shadow_eval.stage_extract -> stage_days -> dd1_build.main), exactly as recon/r03_build.py does, but into
-# /home/moiz/sniper-data/exits/<TAG>. Read-only on every input.
+# /home/it/sniper-data/exits/<TAG>. Read-only on every input.
 #   - day_<TAG>.npz (+meta): every trade of the window's standard launches, chain order, causal features (p1_build)
 #   - dd1_<TAG>.npz: every >= 2% dump row (features X, IMIT1 score f1 where known, paper replay at 0.55 SOL; we only use the rows,
 #     features and scores here; P&L is recomputed by the exit study's own corrected replay at 0.35 SOL)
 # IMIT1 scores: imit2 replay rows (R3 windows, to 10-24 16:27 PKT) + every local copy of the live engines' dump records.
 # usage: nice python3 -I e00_build.py <TAG> <recording dir> "<from MM-DD HH:MM PKT>" "<to MM-DD HH:MM PKT>" [procs] [imit2 wins, comma]
 import sys, os, glob, time, shutil, calendar
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd20_shadow_eval as SH
 
-OUT = "/home/moiz/sniper-data/exits"
-LIVE_DIRS = ["/home/moiz/sniper-data/recon/live"]          # freshest copies (FRA r10-r15, AMS r9-r14); speed/ copies are read by dd1_build itself
+OUT = "/home/it/sniper-data/exits"
+LIVE_DIRS = ["/home/it/sniper-data/recon/live"]          # freshest copies (FRA r10-r15, AMS r9-r14); speed/ copies are read by dd1_build itself
 
 
 def pk(s):

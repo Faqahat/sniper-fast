@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # per fire: the dump tx, our buy tx (on chain), every tx on that mint between the dump and our landing (and up to dump+2)
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from load import *
-fires = json.load(open("/home/moiz/sniper/ops/agents/freshaudit/out/fires.json"))
+fires = json.load(open("/home/it/sniper/ops/agents/freshaudit/out/fires.json"))
 t0 = int(min(f["t"] for f in fires)) - 400; t1 = int(max(f["t"] for f in fires)) + 60
 L = load("r3", t0, t1)
 F = L["F"]; M = by_mint(F)
@@ -41,7 +41,7 @@ for f in fires:
     rec["sol_ahead_buys"] = sum(r["sol"] or 0 for r in rows if (r["s"], r["i"]) < (ob["s"], ob["i"]) and r["buy"] and not r["err"])
     rec["sol_ahead_sells"] = sum(r["sol"] or 0 for r in rows if (r["s"], r["i"]) < (ob["s"], ob["i"]) and r["buy"] is False and not r["err"])
     out.append(rec)
-json.dump(out, open("/home/moiz/sniper/ops/agents/freshaudit/out/fire_chain.json", "w"))
+json.dump(out, open("/home/it/sniper/ops/agents/freshaudit/out/fire_chain.json", "w"))
 for r in out:
     if "ours" not in r: continue
     o = r["ours"]; d = r["dump"]

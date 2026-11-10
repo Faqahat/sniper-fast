@@ -11,9 +11,9 @@ Net SOL = exact replay at the measured position, run's own exit, minus costs (fi
 Out: data/lim/l9.txt"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 CF, CX = 3.52e-3, 0.53e-3
 GR = [0.0, 0.01, 0.02, 0.03, 0.035, 0.04, 0.05, 0.06, 0.075, 0.10, 0.15, 0.20, 9.0]
 FEATS = ["drop", "dsol", "vpost", "age", "n10", "b10", "nsame", "stype", "dclient", "spend"]

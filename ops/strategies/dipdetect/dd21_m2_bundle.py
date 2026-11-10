@@ -13,8 +13,8 @@ import dd_gbdt as GT
 OUT = L.OUT
 NAME = sys.argv[1] if len(sys.argv) > 1 else "v3_reg4_top25"
 THR = float(sys.argv[2]) if len(sys.argv) > 2 else json.load(open(f"{OUT}/dd15_stageA.json"))["thr_top25"]
-SRC = {"model": f"{OUT}/model_{NAME}.json", "botids": "/home/moiz/sniper-data/strategies/patterns/botids.json",
-       "cohort": "/home/moiz/sniper/ops/overnight/sel/cohort_train.json"}
+SRC = {"model": f"{OUT}/model_{NAME}.json", "botids": "/home/it/sniper-data/strategies/patterns/botids.json",
+       "cohort": "/home/it/sniper-data/overnight/sel/cohort_train.json"}
 T3 = ["HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ", "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw", "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"]
 DAYS = ("R2", "R3", "R1", "R4")
 sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()

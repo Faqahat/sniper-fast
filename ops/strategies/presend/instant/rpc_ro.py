@@ -3,7 +3,7 @@
 # cached on disk (never asked twice). getTransaction / getBlock / getSignaturesForAddress only.
 import os, json, time, urllib.request, threading, hashlib
 EP = open(os.path.expanduser("~/.config/sniper/ck_rpc_url")).read().strip()
-CACHE_DIR = "/home/moiz/sniper-data/presend_instant/rpc_cache"; os.makedirs(CACHE_DIR, exist_ok=True)
+CACHE_DIR = "/home/it/sniper-data/presend_instant/rpc_cache"; os.makedirs(CACHE_DIR, exist_ok=True)
 _lk = threading.Lock(); _last = [0.0]; _n = [0]
 def rpc(m, p, tries=5):
     key = hashlib.sha1(json.dumps([m, p], sort_keys=True).encode()).hexdigest()
@@ -33,7 +33,7 @@ def b58dec(s):
     b = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
     return b"\0" * (len(s) - len(s.lstrip("1"))) + b
 SYS = "11111111111111111111111111111111"; CB = "ComputeBudget111111111111111111111111111111"
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 SHORT = {SYS: "System", CB: "CB", "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": "pump", "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL": "ATA",
          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": "Token", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": "Token22",
          "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95": "Lighthouse", "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr": "Memo",

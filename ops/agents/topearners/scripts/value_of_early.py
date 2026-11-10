@@ -2,9 +2,9 @@
 # exit at the curve state at the end of dump slot + 6 (our exit rule ~1.3 s), pump fees 1.25%/side + fixed send costs.
 import os, sys, json, collections
 os.environ["RP_PHASEA_R2"] = "phaseA_selfwd"; os.environ["RP_PHASEA_R3"] = "phaseA_r3day"
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/core")
+sys.path.insert(0, "/home/it/sniper-data/overnight/core")
 import rp
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 J = json.load(open(B + "our_join.json")); mine = J["mine"]; races = J["races"]
 SOL = 0.35e9; FR = 0.0125; G = float(os.environ.get("GUARD", "1.05"))
 FIX_US = 0.0035e9; FIX_PRO = 0.0005e9        # our round-trip tips+prio (~3.5 mSOL) vs a pro's (~0.5 mSOL)

@@ -9,7 +9,7 @@ after the engine sees the 'nobig' trade (like the whale-sell stop). Out: evh_D<k
 import sys, os, pickle, time, collections
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import rlib
 from r3_events import our_sighs, OUT, WHALE
 

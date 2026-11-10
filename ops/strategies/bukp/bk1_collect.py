@@ -3,12 +3,12 @@
 # state BEFORE each buy, the most likely trigger (largest other-wallet trade in the same slot before it / the previous
 # 3 slots), speed (slot / tx-index delay after the trigger), and what preceded each sell. Uses the pattern-search day
 # arrays (patterns/day_R*.npz: causal features per trade, wallet types, bot IDs, uid = crc32(wallet)).
-# -> /home/moiz/sniper-data/strategies/bukp/trips_<run>.json
+# -> /home/it/sniper-data/strategies/bukp/trips_<run>.json
 import sys, os, json, zlib, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-OUT = "/home/moiz/sniper-data/strategies/bukp"
+OUT = "/home/it/sniper-data/strategies/bukp"
 W = "BUkpShoEWRiPckdFs3kzYGjBPfUhL6G39ufo84QeogPP"; UID = zlib.crc32(W.encode())
 WTN = {0: "other", 1: "creator", 2: "insider", 3: "new", 4: "bot", **{10 + k: f"F{k}" for k in range(1, 11)}}
 

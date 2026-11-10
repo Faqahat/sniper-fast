@@ -15,7 +15,7 @@ Costs per landed buy / sell / failed (guard) attempt, SOL: NOW 0.00151 / 0.00160
 Concurrency: chronological greedy, one position per mint, at most K open (K = 1 today)."""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_strat")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect"); sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_strat")
 import dd_gbdt as G
 from hs_lib import pkt, W0, W1, D
 out = []

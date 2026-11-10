@@ -7,9 +7,9 @@
 Out: sniper-data/haqq_dissect/front/g4.txt"""
 import pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); out.append(s)

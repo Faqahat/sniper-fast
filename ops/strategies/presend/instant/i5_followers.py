@@ -7,7 +7,7 @@
 # (follow size / dump size), tips / landing services, CU price, and the leader client of the slots.
 # usage: python3 -I i5_followers.py PREFIX [min_drop_pct] [min_dump_sol] [gap]   (PREFIX = i4's OUT_PREFIX)
 import sys, json, gzip, collections, statistics
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq")
+sys.path.insert(0, "/home/it/sniper/ops/haqq")
 import h_lib
 pre = sys.argv[1]; MIN_DROP = float(sys.argv[2]) / 100 if len(sys.argv) > 2 else 0.04
 MIN_SOL = float(sys.argv[3]) if len(sys.argv) > 3 else 0.3; GAP = int(sys.argv[4]) if len(sys.argv) > 4 else 40

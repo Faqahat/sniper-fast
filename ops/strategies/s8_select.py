@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # OUT-OF-SAMPLE check of the replayed families: every filter combination x exit is scored on R2 (day 1); the best R2 rules
 # (min events) are then reported on R3 (day 2) unchanged. Our costs are already in the replay P&L (s7_replay.py).
-# -> /home/moiz/sniper-data/strategies/replay_select.json + printed table
+# -> /home/it/sniper-data/strategies/replay_select.json + printed table
 import json, gzip, glob, itertools, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies"
+OUT = "/home/it/sniper-data/strategies"
 rows = []
 for f in sorted(glob.glob(f"{OUT}/replay/*.jsonl.gz")):
     for l in gzip.open(f, "rt"): rows.append(json.loads(l))

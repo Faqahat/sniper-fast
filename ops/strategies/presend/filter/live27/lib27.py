@@ -10,15 +10,15 @@ Nothing here sends, starts or stops anything."""
 import sys, os, json, pickle, collections, hashlib
 import numpy as np
 
-REAL = "/home/moiz/sniper/ops/strategies/presend/real"
+REAL = "/home/it/sniper/ops/strategies/presend/real"
 sys.path.insert(0, REAL)
 import rlib
-DATA = "/home/moiz/sniper-data/presend_filter/live27"
+DATA = "/home/it/sniper-data/presend_filter/live27"
 TAB = f"{DATA}/tab"
 rlib.TAB = TAB                    # donors.build / variants read rlib.TAB
 import sim, s48lib, donors as DN
 
-R27 = "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r27.jsonl"
+R27 = "/home/it/sniper-data/runs/ams/runs/dip_ams_r27.jsonl"
 WALLET = "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"          # AMS live wallet (public key)
 RULE_ON_NS = None                                                   # filled by load_run (first armed window with rule_on)
 PKT = 18000

@@ -8,7 +8,7 @@ to graduate included). Entry lands d_e after the crossing trade (live landing-de
   A fallback sell that lands after the curve completed fails -> held into the pool (GRAD exit).
 Costs: 2.9 mSOL per filled round trip, 0.5 mSOL per reverted/failed buy (assumption).
 Expected value over 10 stratified landing-delay samples (entry j, exit (3j+1) mod 10).
-Out: /home/moiz/sniper-data/e2x1_dissect/grad/sim.pkl"""
+Out: /home/it/sniper-data/e2x1_dissect/grad/sim.pkl"""
 import json, pickle, sys
 import numpy as np
 from glib import Tape, last_before, pool_state_after, pool_fee, pday, G
@@ -21,14 +21,14 @@ TOS = [30, 120, 600, 1800]
 RT_COST = 0.0029; FAIL_COST = 0.0005; GUARD = 1.05
 SLOT_S = 0.21207
 
-lc = json.load(open("/home/moiz/sniper-data/dipml/livecal.json"))
+lc = json.load(open("/home/it/sniper-data/dipml/livecal.json"))
 d = np.array(lc["deltas"], float); d = d * (66.0 / (np.median(d) * 212.07))         # live landing shape, median 66 ms
 DLY = np.quantile(d, (np.arange(10) + 0.5) / 10)
 PAIR = [(j, (3 * j + 1) % 10) for j in range(10)]
 
 T = Tape()
 import glob as _g
-TAIL = [json.load(open(r))["tail_end_time"] for r in _g.glob("/home/moiz/sniper-data/collect/run_202610*_14*/run.json")]
+TAIL = [json.load(open(r))["tail_end_time"] for r in _g.glob("/data/tapes/collect/run_202610*_14*/run.json")]
 TAIL = [t for t in TAIL if t < T.bt_of(T.shi)] + [T.bt_of(T.shi)]
 EXITS = [(n, sl, to) for n in NS for sl in SLS for to in TOS]
 

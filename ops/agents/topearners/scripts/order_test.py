@@ -1,7 +1,7 @@
 # does in-block order among same-slot backrunners follow priority fee (cup), total fee, or tips? pairwise test per leader client
 import json, gzip, collections
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
-LB = json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json"))
+B = "/home/it/sniper/ops/agents/topearners/work/"
+LB = json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json"))
 LEAD = LB["leaders"]; NODES = LB["nodes"]
 res = collections.defaultdict(lambda: collections.Counter())
 gapstat = collections.defaultdict(list)

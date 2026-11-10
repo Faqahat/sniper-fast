@@ -5,9 +5,9 @@ the run's real landed tries; its stops (expiry, whale sold, QUIET N:M) modelled;
 `virtualize(P)` turns an ARMED window into its virtual twin (live tries, stop, fill, exit, arrival map and clock anchors removed;
 the anchors re-taken from its own trigger, as a skipped window gets them) for the calibration."""
 import sys, copy, bisect, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as L
-L.D = "/home/moiz/sniper-data/presend_quiet4"
+L.D = "/home/it/sniper-data/presend_quiet4"
 FAIL = L.FAIL
 REALEQ = L.FIX_REAL - L.FIX      # pnl (cash, incl. the ATA refund) -> realized-equivalent
 
@@ -26,8 +26,8 @@ def trigger_anchor(P, R):
 
 
 def load(run="r37"):
-    if run != "r37": L.D = "/home/moiz/sniper-data/custom37"      # the earlier runs' pickles (custom37, read-only)
-    else: L.D = "/home/moiz/sniper-data/presend_quiet4"
+    if run != "r37": L.D = "/home/it/sniper-data/custom37"      # the earlier runs' pickles (custom37, read-only)
+    else: L.D = "/home/it/sniper-data/presend_quiet4"
     X, wins, R = L.load(run)
     trigger_anchor_fit(wins, R)
     # windows without landed tries (virtual ones, armed ones whose tries never landed): anchors from their own trigger

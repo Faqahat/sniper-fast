@@ -15,7 +15,7 @@ class Ctx:
         c = C.c
         self.E = E = np.load(f"{B}/events.npz")
         self.cr = json.load(open(f"{B}/creates.json"))
-        coh = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
+        coh = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
         self.cohid = {C.wid[w] for w in coh if w in C.wid}
         fw, fm, fbt = E["fo_w"], E["fo_m"], E["fo_bt"]
         m = fbt < FROZEN

@@ -1,5 +1,5 @@
 // =====================================================================================================================
-// dip37 LIVE HOLDER LEDGER (owner approved for run 57; ideas_a HOLD X2 n1 s0.1 wp0.05, /home/moiz/sniper-ideas-a REPORT.txt / ideas.py / replay2.py)
+// dip37 LIVE HOLDER LEDGER (owner approved for run 57; ideas_a HOLD X2 n1 s0.1 wp0.05, /home/it/sniper-studies/sniper-ideas-a REPORT.txt / ideas.py / replay2.py)
 // and the LEDGERS' HOT CONTROL FILE.
 //   --presend-live-holder-loss PCT:SOL:WIN   at an arm (T2 and re-arm): skip ("holder_loss" / "rearm_holder_loss", hl_wallet / hl_pct / hl_sum)
 //                                            when a holder >= PCT% of the mint now (the detector's book; the T2 whale / re-arm dumper and we
@@ -81,6 +81,20 @@ pub fn ctl_parse_s2(b: &[u8]) -> std::result::Result<Option<bool>, String> {
         _ => Err(format!("skip2: '{}' (live | log)", v["skip2"])) }
 }
 
+/// dip37c: the control file's "blocklist_send" key: Some(live) / None (absent)
+pub fn ctl_parse_bls(b: &[u8]) -> std::result::Result<Option<bool>, String> {
+    let v: serde_json::Value = serde_json::from_slice(b).map_err(|e| format!("bad JSON: {e}"))?;
+    match v["blocklist_send"].as_str() { None if v.get("blocklist_send").is_none_or(|x| x.is_null()) => Ok(None), Some("live") => Ok(Some(true)),
+        Some("log") => Ok(Some(false)), _ => Err(format!("blocklist_send: '{}' (live | log)", v["blocklist_send"])) }
+}
+
+/// dip38: the control file's "s1" key (PSM12-S1's gate): Some(live) / None (absent: the start flag's mode stays)
+pub fn ctl_parse_s1(b: &[u8]) -> std::result::Result<Option<bool>, String> {
+    let v: serde_json::Value = serde_json::from_slice(b).map_err(|e| format!("bad JSON: {e}"))?;
+    match v["s1"].as_str() { None if v.get("s1").is_none_or(|x| x.is_null()) => Ok(None), Some("live") => Ok(Some(true)), Some("log") => Ok(Some(false)),
+        _ => Err(format!("s1: '{}' (live | log)", v["s1"])) }
+}
+
 /// the probe's holder-ledger side and the control file
 #[derive(Debug)]
 pub struct HlSt {
@@ -147,8 +161,11 @@ impl PsLive {
         if let Some(c) = self.hls.ctl.as_mut() { c.2 = Instant::now(); }
         if !force && mt == mt0 { return; }
         if let Some(c) = self.hls.ctl.as_mut() { c.1 = mt; }
-        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| Ok((ctl_parse(&b)?, ctl_parse_s2(&b)?))) {
-            Ok((m, s2)) => {
+        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| Ok((ctl_parse(&b)?, ctl_parse_s2(&b)?, ctl_parse_bls(&b)?, ctl_parse_s1(&b)?))) {
+            Ok((m, s2, bls, s1)) => {
+                // dip37c "blocklist_send": the per-send blocklist live / log (only with the blocklist's per-send check)
+                let bl_old = self.sh.bl_send_live.load(Ordering::SeqCst);
+                let bl_new = match bls { Some(x) if self.cfg.blocklist_send => x, _ => bl_old };
                 let old = self.hls.live;
                 // dip37b "skip2": live = the start flag's kinds (both when the flag is off), log = off; it needs --presend-skip2-log on (else ignored)
                 let gs = self.fp.as_ref().filter(|_| self.cfg.skip2_log).map(|f| f.gs.clone());
@@ -157,8 +174,13 @@ impl PsLive {
                     (Some(live), Some(_)) => Some(if live { if self.cfg.skip2_live != 0 { self.cfg.skip2_live } else { 3 } } else { 0 }),
                     _ => s2_old,
                 };
-                if old == m && s2_new == s2_old { return; }
+                // dip38 "s1": PSM12-S1's gate live = the start flag's kinds (both when the flag is off), log = off; it needs --presend-live-s1-log on
+                let s1_old = self.s1.mode;
+                let s1_new = match s1 { Some(live) if self.cfg.s1_log => if live { if self.cfg.s1_live != 0 { self.cfg.s1_live } else { 3 } } else { 0 }, _ => s1_old };
+                if old == m && s2_new == s2_old && bl_new == bl_old && s1_new == s1_old { return; }
                 self.hls.live = m;
+                if s1_new != s1_old { self.s1.mode = s1_new; self.s1.ctl_changes += 1; }
+                self.sh.bl_send_live.store(bl_new, Ordering::SeqCst);
                 if let (Some(g), Some(n)) = (&gs, s2_new) { g.s2_mode.store(n, Ordering::SeqCst); }
                 self.hls.ctl_changes += 1;
                 let s = |x: bool| if x { "live" } else { "log" };
@@ -166,9 +188,13 @@ impl PsLive {
                     "path": path, "t": arbx::feeds::clock::now_ns()});
                 if let (Some(o), Some(n)) = (s2_old, s2_new) { r["skip2"] = pslog36::mode_str(n).into(); r["was"]["skip2"] = pslog36::mode_str(o).into(); }
                 if s2.is_some() && gs.is_none() { r["skip2_ignored"] = "needs --presend-skip2-log on".into(); }
+                if self.cfg.blocklist_send { r["blocklist_send"] = s(bl_new).into(); r["was"]["blocklist_send"] = s(bl_old).into(); }
+                if self.cfg.s1_log { r["s1"] = pslog36::mode_str(s1_new).into(); r["was"]["s1"] = pslog36::mode_str(s1_old).into(); }
+                if s1.is_some() && !self.cfg.s1_log { r["s1_ignored"] = "needs --presend-live-s1-log on".into(); }
                 self.rec(r);
-                self.line(format!("  PRESEND LIVE LEDGER MODES: whale {} -> {}, holder {} -> {}{} ({path})", s(old[0]), s(m[0]), s(old[1]), s(m[1]),
-                    match (s2_old, s2_new) { (Some(o), Some(n)) => format!(", skip2 gate {} -> {}", pslog36::mode_str(o), pslog36::mode_str(n)), _ => String::new() }));
+                self.line(format!("  PRESEND LIVE LEDGER MODES: whale {} -> {}, holder {} -> {}{}{} ({path})", s(old[0]), s(m[0]), s(old[1]), s(m[1]),
+                    match (s2_old, s2_new) { (Some(o), Some(n)) => format!(", skip2 gate {} -> {}", pslog36::mode_str(o), pslog36::mode_str(n)), _ => String::new() },
+                    if self.cfg.blocklist_send { format!(", blocklist per-send {} -> {}", s(bl_old), s(bl_new)) } else { String::new() }) + &if self.cfg.s1_log { format!(", S1 gate {} -> {}", pslog36::mode_str(s1_old), pslog36::mode_str(s1_new)) } else { String::new() });
             }
             Err(e) => {
                 self.hls.ctl_errors += 1;

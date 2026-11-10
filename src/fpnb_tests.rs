@@ -1,5 +1,5 @@
 // dip36 FP-NOBOT unit tests (src/fpnb.rs): the frozen models (sha256, parse), the PARITY with the study's fixture (scores from the given
-// inputs; the chain inputs rebuilt from the raw chain when /home/moiz/sniper-data/flatperfect/engine_fixture_r55.bin exists), missing
+// inputs; the chain inputs rebuilt from the raw chain when /home/it/sniper-data/flatperfect/engine_fixture_r55.bin exists), missing
 // data, the bot list's shapes.
 use super::*;
 
@@ -111,7 +111,7 @@ fn fpnb_bot_list_shapes() {
     assert!(l.n == 1 && l.ops[&pk(x).unwrap()] == "3qvu", "seed operator");
     for bad in ["{}", "[]", r#"{"engine_view": ["notakey!"]}"#, "{nope"] { assert!(BotList::parse(bad.as_bytes(), &ours).is_err(), "{bad}"); }
     // the real v0 file, when present
-    if let Ok(b) = std::fs::read("/home/moiz/sniper-data/flatperfect/cohort_full_b58.json") {
+    if let Ok(b) = std::fs::read("/home/it/sniper-data/flatperfect/cohort_full_b58.json") {
         let l = BotList::parse(&b, &ours).unwrap();
         assert_eq!((l.n, l.core.len()), (111, 5));
     }
@@ -157,7 +157,7 @@ fn fpnb_store_basics() {
 /// shadow / arm-record inputs from the run's records, against the parity file's x, then the score
 #[test]
 fn fpnb_parity_chain_inputs() {
-    let Ok(b) = std::fs::read("/home/moiz/sniper-data/flatperfect/engine_fixture_r55.bin") else {
+    let Ok(b) = std::fs::read("/home/it/sniper-data/flatperfect/engine_fixture_r55.bin") else {
         eprintln!("fpnb_parity_chain_inputs: no engine_fixture_r55.bin (run ops/strategies/presend/flatperfect/fp_engine_fixture.py): skipped");
         return;
     };

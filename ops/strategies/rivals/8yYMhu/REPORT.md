@@ -4,7 +4,7 @@ Wallet **8yYMhuYo1LzgCmeeg3vRkhRtJ8xFC7v7S4ufABtQXjS3** ([GMGN](https://gmgn.ai/
 
 Offline and read-only: no sends, no server writes, no engine changes. Times are PKT. M = MEASURED, I = INFERRED.
 
-Code: `/home/moiz/sniper/ops/strategies/rivals/8yYMhu/` (`run_all.sh` rebuilds every table). Data: `/home/moiz/sniper-data/rivals/8yYMhu/`.
+Code: `/home/it/sniper/ops/strategies/rivals/8yYMhu/` (`run_all.sh` rebuilds every table). Data: `/home/it/sniper-data/rivals/8yYMhu/`.
 
 Sources:
 - **Signatures:** all 33,361 of the wallet's (public RPC; first tx 10-25 11:28 PKT).

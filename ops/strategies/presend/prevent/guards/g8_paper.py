@@ -7,10 +7,10 @@ decoded tapes. DIRECT effect only (paper P&L of the blocked paper fills; no repl
 Also the LEAD lim085 (context limit 0.85 when another >= 6% holder is there): paper fills it would remove.
 usage: g8_paper.py"""
 import json, pickle, collections, sys, bisect
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/guards")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/guards")
 import glib as G
-OUT = "/home/moiz/sniper-data/prevent/guards"
-A = "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r{}.jsonl"; F = "/home/moiz/sniper-data/runs/fra/runs/dip_r{}.jsonl"
+OUT = "/home/it/sniper-data/prevent/guards"
+A = "/home/it/sniper-data/runs/ams/runs/dip_ams_r{}.jsonl"; F = "/home/it/sniper-data/runs/fra/runs/dip_r{}.jsonl"
 RUNS = [("A" + str(r), A.format(r)) for r in (14, 15, 21, 22, 23)] + [("F" + str(r), F.format(r)) for r in (15, 16, 20, 25)]
 fills = []
 for name, fn in RUNS:

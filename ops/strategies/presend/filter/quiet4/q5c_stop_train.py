@@ -3,10 +3,10 @@
 FRA r26-r28; read-only), at each run's OWN live config (live stop 6:2), real tries, all windows together (knock-on), REPS worlds;
 a looser stop than live adds phantom tries after the live stop (INFERRED). Per window: value(S, cut) - value(live 6:2, 0%) (SOL at the
 run's size). quiet3's stopgain shortcut disagrees with this replay on r37 (3:2: -0.04 vs +0.32 SOL), so these runs use the replay.
-Out: /home/moiz/sniper-data/presend_quiet4/stop_train.pkl {run+reg: {"mint:slot": {(S, cut): delta}}}"""
+Out: /home/it/sniper-data/presend_quiet4/stop_train.pkl {run+reg: {"mint:slot": {(S, cut): delta}}}"""
 import sys, pickle, collections, numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/filter/quiet4")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/filter/quiet4")
 import q3lib as Q
 L = Q.L
 REPS = 6
@@ -41,7 +41,7 @@ def main():
         for key, res, tot, size in pool.imap_unordered(one, list(RUNS)):
             out[key] = res
             print(key, "size", size, " ".join(f"{S[0]}:{S[1]} {tot[(S, 0.0)]:+.3f}" for S in STOPS), flush=True)
-    pickle.dump(out, open("/home/moiz/sniper-data/presend_quiet4/stop_train.pkl", "wb"))
+    pickle.dump(out, open("/home/it/sniper-data/presend_quiet4/stop_train.pkl", "wb"))
 
 
 if __name__ == "__main__":

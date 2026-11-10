@@ -3,10 +3,10 @@
 between windows of different configs is simulated), paired with the current config on the same 8 worlds, 0% and -20% followers.
 Tables: TRAIN (r34 r35 r36 f26 f27 f28) and TEST (r37), r37 halves, bootstrap 90% CI (windows resampled in (run, PKT hour) blocks),
 without the top 5 windows, per run, SOL/day at 0.696, fills added / lost, delta loss / winners / failed-try fees, INFERRED share.
-Out: stdout + /home/moiz/sniper-data/custom37/final.txt + final.json"""
+Out: stdout + /home/it/sniper-data/custom37/final.txt + final.json"""
 import sys, pickle, json, datetime, numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as L
 from c4_grid import grid, armable
 

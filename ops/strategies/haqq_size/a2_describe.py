@@ -3,7 +3,7 @@
 realized P&L) and his realized P&L per lot by size tier (did bigger pay for him?). Out: OUT/describe.json + printed tables."""
 import pickle, collections, json, time
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_size"
+OUT = "/home/it/sniper-data/haqq_size"
 W0 = 1793038500                       # 10-26 23:15 PKT (held-out day start)
 pkt = lambda t: time.strftime("%m-%d %H:%M", time.gmtime(int(t) + 18000))
 Z = pickle.load(open(f"{OUT}/buys.pkl", "rb")); B = Z["buys"]; LOTS = Z["lots"]; TR = Z["trips"]

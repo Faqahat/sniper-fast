@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Builds the owner's HTML playbook from the analysts' audited example files + hand-written verified text.
-Out: /home/moiz/sniper/ops/strategies/haqq_dissect/doc/haqq_playbook.html"""
+Out: /home/it/sniper/ops/strategies/haqq_dissect/doc/haqq_playbook.html"""
 import json, html, os
-D = "/home/moiz/sniper-data/haqq_dissect"
+D = "/home/it/sniper-data/haqq_dissect"
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 esc = html.escape
 def link(url, text): return f'<a href="{esc(url)}" target="_blank" rel="noopener">{esc(text)}</a>'
@@ -50,7 +50,7 @@ bots = json.load(open(f"{D}/bots/examples.json"))
 minor = json.load(open(f"{D}/minor/examples.json"))
 vs = json.load(open(f"{D}/vs248/examples.json"))
 sel = json.load(open(f"{D}/select/examples.json"))
-acc = json.load(open("/home/moiz/sniper-data/accept_owner/summary.json"))
+acc = json.load(open("/home/it/sniper-data/accept_owner/summary.json"))
 
 BOT_META = {  # 24 h exact (recon, 10-26 23:15 -> 10-27 23:15) and 6-day (pos p4) figures
     247: ("Launch-Dump Sniper", 1045, "+8.907", "+89.9", "0.40", "4.1 s", "Buys 0–1 slot after the dev or a launch bundler sells ≥5%, on tokens under ~5 s old. No price limit. Sells within 2 s into the buy wave when it bounces, otherwise on a 15–30 slot timer."),

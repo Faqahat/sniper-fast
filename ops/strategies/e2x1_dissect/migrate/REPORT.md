@@ -17,7 +17,7 @@
 
 # MIGRATE: our own near-graduation strategy (agent migrate, 10-28 ~17:30 PKT)
 
-Code: `/home/moiz/sniper/ops/strategies/e2x1_dissect/migrate/` (`m0_wallets.py` wallet history, `m1_features.py`, `m2_model.py` predictor, `m3_sim.py` replay, `m4_report.py` variant grid, `m5_ev.py` mechanics/EV, `m6_examples.py`, `mlib.py`). Data/logs: `/home/moiz/sniper-data/e2x1_dissect/migrate/` (feat.pkl, feat_p.pkl, wallets.npz, sim_*.pkl, m2/m4/m5/m6/m7_family/m8_headline logs; 355 MB). Reuses grad's decoded tape (all curve trades of every token that reached 78 vSOL + all PumpSwap events; pool reserve derived from trade amounts). Train = 10-24..10-26 PKT, TEST = 10-27/10-28; nothing chosen on test except where stated. M = measured on the tape, I = inferred/modelled. **Variants tried: 79,200** (6 entry modes×sizes × 6 V × 2 re-entry × 13 selection thresholds × 75 exits) plus one 35 ms landing sensitivity replay.
+Code: `/home/it/sniper/ops/strategies/e2x1_dissect/migrate/` (`m0_wallets.py` wallet history, `m1_features.py`, `m2_model.py` predictor, `m3_sim.py` replay, `m4_report.py` variant grid, `m5_ev.py` mechanics/EV, `m6_examples.py`, `mlib.py`). Data/logs: `/home/it/sniper-data/e2x1_dissect/migrate/` (feat.pkl, feat_p.pkl, wallets.npz, sim_*.pkl, m2/m4/m5/m6/m7_family/m8_headline logs; 355 MB). Reuses grad's decoded tape (all curve trades of every token that reached 78 vSOL + all PumpSwap events; pool reserve derived from trade amounts). Train = 10-24..10-26 PKT, TEST = 10-27/10-28; nothing chosen on test except where stated. M = measured on the tape, I = inferred/modelled. **Variants tried: 79,200** (6 entry modes×sizes × 6 V × 2 re-entry × 13 selection thresholds × 75 exits) plus one 35 ms landing sensitivity replay.
 
 ## 0. Result in one paragraph
 

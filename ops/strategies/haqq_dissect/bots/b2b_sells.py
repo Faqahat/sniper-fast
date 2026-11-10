@@ -10,9 +10,9 @@ Labels: bot 247 / 248 (and 244, 226) BOUGHT within 0..2 slots after the sell (ne
 Out: bots/b2b.npz (envelope rows: features, labels, keys), b2b.txt (trigger attribution of every 247/248 buy + buy rates)"""
 import sys, json, pickle, time, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 lines = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s, flush=True); lines.append(s)

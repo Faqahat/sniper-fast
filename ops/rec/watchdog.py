@@ -115,7 +115,7 @@ def one_pass():
             elif ph.startswith("final") and now - (yst.get("now") or now) > 3600:
                 alert("finalize", f"day {yday} final pass stuck at {ph} for {(now - yst['now']) / 60:.0f} min")
     # disk
-    du = shutil.disk_usage("/home/moiz"); pct = du.used / du.total * 100; info.update(disk_pct=round(pct, 1), disk_free_gb=round(du.free / 1e9))
+    du = shutil.disk_usage("/home/it"); pct = du.used / du.total * 100; info.update(disk_pct=round(pct, 1), disk_free_gb=round(du.free / 1e9))
     if pct >= DISK: alert("disk", f"DISK {pct:.0f}% used ({du.free / 1e9:.0f} GB free)")
     # archive
     arch = R.jload(os.path.join(R.STATE, "archive.json")) or {}

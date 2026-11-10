@@ -4,7 +4,7 @@
 # been met (= that group alone cost us the fill). Groups: pre-positioned streams (wallet had >= 2 txs on the mint in S-1..dump),
 # each top rival alone, and "everyone ahead of us by >= X positions" (speed what-if). Also the SOL bought ahead by class.
 import json, gzip, collections, statistics
-D2 = "/home/moiz/sniper-data/competitors2"
+D2 = "/home/it/sniper-data/competitors2"
 US = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 fires = {f["buy_sig"]: f for f in json.load(open(f"{D2}/fires.json"))}
 def out_tokens(x, v, t): return t - v * t // (v + x)

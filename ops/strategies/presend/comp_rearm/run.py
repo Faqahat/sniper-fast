@@ -7,11 +7,11 @@ usage: run.py DAYTAG --draws N --scen base,A0,...  (DAYTAG = D2..D6, D7 (tabN 1.
 import sys, os, pickle, time, argparse, collections, json
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-for p in ("real", "density", "rearm2"): sys.path.insert(0, f"/home/moiz/sniper/ops/strategies/presend/{p}")
+for p in ("real", "density", "rearm2"): sys.path.insert(0, f"/home/it/sniper/ops/strategies/presend/{p}")
 import rlib, sim, dsim, drun, s48lib, wsim2
 from multiprocessing import Pool
 from comps import COMP
-D = "/home/moiz/sniper-data/comp_rearm"
+D = "/home/it/sniper-data/comp_rearm"
 RW = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/rearm2"
 OUR = ("EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE")
 HI = {"8yYMhu", "haqq", "HkQ7", "CZ77", "6VzX", "A2ka"}          # bots with the highest 10-slot >=12% drop rate after their buy (phys.md, all days)
@@ -26,7 +26,7 @@ def f_B1(r, c): return c["after_t2"] and r["who"] in HI
 def f_C1(r, c): return c["swarm"]                                 # >= 2 different competitors bought in the last 2 slots
 def f_C2(r, c): return r["who"] in HI and r["n_comp"] <= 2 and r["sol"] >= 0.5e9 and not r["prev_big_sell"]   # bot buys WITHOUT a dump just before
 SC = {k[2:]: v for k, v in globals().items() if k.startswith("f_")}
-TAB = {"D6": f"{RW}/tabN", "D7": f"{RW}/tabN", "D7b": "/home/moiz/sniper-data/wave37/tab"}
+TAB = {"D6": f"{RW}/tabN", "D7": f"{RW}/tabN", "D7b": "/home/it/sniper-data/wave37/tab"}
 G = {}
 
 
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     land = dsim.LandingX(D3, pm, nm, probes=("P3",)); model = s48lib.ModelN(D3, drun.s48_clock(), ("P1", "P2", "P3")); view = sim.View()
 
     import importlib.util
-    spec = importlib.util.spec_from_file_location("r2run", "/home/moiz/sniper/ops/strategies/presend/rearm2/run.py"); r2 = importlib.util.module_from_spec(spec); spec.loader.exec_module(r2)
+    spec = importlib.util.spec_from_file_location("r2run", "/home/it/sniper/ops/strategies/presend/rearm2/run.py"); r2 = importlib.util.module_from_spec(spec); spec.loader.exec_module(r2)
     cfg = r2.make_cfg(A.size, 0.20); cfg.sl = 0.50; cfg.cost = sim.Cost(fail_fee=5120)
     SD = pickle.load(open(f"{RW}/sell_delta.pkl", "rb"))
     dsell = [x for r in ("f28", "a34", "a35") for x in SD[r].get("time-ms", [])]

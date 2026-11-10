@@ -365,7 +365,7 @@ Our real fires, chain truth, tape without our own trades.
   - expect.py: per-dump expected values.
   - h2h_picks.py: M2/IMIT1 picks.
   - report.py: all tables.
-- **Data** (`/home/moiz/sniper-data/vm1/`):
+- **Data** (`/home/it/sniper-data/vm1/`):
   - trades.npy, dumps.npz, live_fires.json, livecal.json, expect_0.3.npz, expect_1.0.npz, h2h_picks.npz,
     report_v1.txt.
   - Leader schedules from getLeaderSchedule, epochs 1064–1067.

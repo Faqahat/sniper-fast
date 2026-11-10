@@ -4,7 +4,7 @@
 # usage: pass2_races.py <focus_wallets.txt> <out_races.jsonl.gz> <out_lots.jsonl.gz> [procs]
 import os, sys, json, gzip, glob, zlib, collections
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"
+D = "/data/tapes/collect"
 RUNS = [("R2", "phaseA_selfwd"), ("R3", "phaseA_r3day")]
 DSLOT = 5; BIG = 1_000_000_000
 FOCUS = set(l.strip() for l in open(sys.argv[1]) if l.strip())

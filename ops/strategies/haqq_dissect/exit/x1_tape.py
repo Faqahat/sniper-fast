@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """EXIT step 1 (read-only): cut the dv8 tape (10-22 03:07 -> 10-28 01:12 PKT, 21.9 M pump.fun trades) down to every mint haqq or
 one of our two live wallets traded, sorted in chain order (mint, slot, idx, j). Adds per-mint create info (slot, creator, mayhem).
-Out: /home/moiz/sniper-data/haqq_dissect/exit/tape.npy, mints.pkl"""
+Out: /home/it/sniper-data/haqq_dissect/exit/tape.npy, mints.pkl"""
 import json, pickle, time
 import numpy as np
-TAB = "/home/moiz/sniper-data/dv8/tab"; OUT = "/home/moiz/sniper-data/haqq_dissect/exit"
+TAB = "/home/it/sniper-data/dv8/tab"; OUT = "/home/it/sniper-data/haqq_dissect/exit"
 HAQQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 OURS = ("2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR")
 

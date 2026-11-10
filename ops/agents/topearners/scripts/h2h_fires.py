@@ -1,6 +1,6 @@
 # per our fire: each focus wallet's EARLIEST attempt (ok or failed) after the same dump vs our tx position
 import json, gzip, collections
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 ME = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"
 J = json.load(open(B + "our_join.json")); mine = J["mine"]; races = J["races"]
 fires = [f for f in J["fires"] if f["buy_sig"] in mine and f["dump_sig"] in races]

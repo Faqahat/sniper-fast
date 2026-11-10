@@ -4,7 +4,7 @@
 # Jito-style bundle or not, block-position ms after the dump, and the leader client -> what fast bots pay / use per leader.
 # usage: python3 -I fast_bots_paths.py run1.jsonl [run2.jsonl ...]
 import sys, json, statistics, collections, importlib.util
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 W = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
 rows = []
 for run in sys.argv[1:]:
@@ -39,7 +39,7 @@ for run in sys.argv[1:]:
             rows.append(dict(client=S.leader_client(t["slot"]), user=e["user"][:8], ms=round(ms, 1), dslot=t["slot"] - f["slot"], ahead=e["t"] < t_us,
                              prio_sol=cu_price * (cu_limit or 200000) / 1e15, cu_price=cu_price, cu_limit=cu_limit,
                              tips=tips, tip_sol=sum(x for _, x in tips) / 1e9, cu_used=t["meta"].get("computeUnitsConsumed"), sol=e["sol"] / 1e9))
-json.dump(rows, open("/home/moiz/sniper/ops/dip/speed/fast_bots_paths.json", "w"), indent=1)
+json.dump(rows, open("/home/it/sniper/ops/dip/speed/fast_bots_paths.json", "w"), indent=1)
 for r in sorted(rows, key=lambda r: (r["client"], r["ms"])):
     tp = ", ".join(f"{s} {x / 1e9:.4f}" for s, x in r["tips"]) or "no tip"
     print(f"{r['client']:9s} {'AHEAD' if r['ahead'] else 'after'} {r['user']} {r['ms']:6.1f} ms +{r['dslot']} | prio {r['prio_sol']:.5f} SOL (price {r['cu_price']:,} uL x {r['cu_limit']:,} CU, used {r['cu_used']}) | {tp} | buy {r['sol']:.2f}")

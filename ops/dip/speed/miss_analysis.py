@@ -5,7 +5,7 @@
 # cross_ms -> "how much faster we had to be". Plus run 2's timing records (feed lag, decision, send -> seen). READ-ONLY RPC.
 # usage: python3 -I miss_analysis.py <label>=<run.jsonl>:<guard> ...
 import sys, json, statistics, collections, importlib.util
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 OURS = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"}
 TGT = {"HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ": "HkQ7hMjy", "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw": "DYXDDrZC", "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq": "haqqiUUX"}
 size_cache = {}
@@ -50,7 +50,7 @@ for arg in sys.argv[1:]:
                          n_ahead=len(ahead), sol_ahead=sum(e["sol"] for e in ahead if e["buy"]) / 1e9, dump_sol=dmp.get("sell", 0) if False else (pk.get("feats") or [0, 0])[1],
                          decision_us=f["decision_us"], exec_lag=t.get("exec_lag_ms"), react=t.get("reaction_ms"), seen=t.get("fire_to_seen_ms"),
                          paths="+".join(w["path"] for w in f["writes"])))
-json.dump(rows, open("/home/moiz/sniper/ops/dip/speed/miss_analysis.json", "w"), indent=1)
+json.dump(rows, open("/home/it/sniper/ops/dip/speed/miss_analysis.json", "w"), indent=1)
 print(f"{'run':6s} {'token':7s} {'result':8s} {'leader':18s} {'paths':16s} {'we landed':>10s} {'+5% crossed':>12s} {'late by':>8s} {'price at us':>11s} {'first buyer':>11s} ahead (SOL)  who crossed")
 for r in rows:
     late = (r["our_ms"] - r["cross_ms"]) if r["cross_ms"] is not None else None

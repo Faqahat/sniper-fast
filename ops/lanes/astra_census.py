@@ -20,7 +20,7 @@ import argparse, base64, collections, csv, datetime, glob, gzip, hashlib, io, js
 from array import array
 from multiprocessing import Pool
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))      # /home/moiz/sniper
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))      # /home/it/sniper
 DISC = bytes.fromhex("bddb7fd34ee661ee")          # pump.fun TradeEvent (as ops/strategies/presend/real/decode.py)
 CPI = bytes.fromhex("e445a52e51cb9a1d")           # anchor event-CPI prefix, stripped
 B64KEY = "vdt/007mY"                              # base64 of the TradeEvent discriminator: fast line filter
@@ -304,8 +304,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--hours", type=float, default=12.0)
     ap.add_argument("--procs", type=int, default=5)
-    ap.add_argument("--out", default="/home/moiz/sniper-data/lanes/census")
-    ap.add_argument("--collect", default="/home/moiz/sniper-data/collect")
+    ap.add_argument("--out", default="/home/it/sniper-data/lanes/census")
+    ap.add_argument("--collect", default="/data/tapes/collect")
     ap.add_argument("--min-age", type=int, default=240)
     ap.add_argument("--dump-sol", type=float, default=1.0)
     ap.add_argument("--top", type=int, default=15)

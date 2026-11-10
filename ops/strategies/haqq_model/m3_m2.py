@@ -7,11 +7,11 @@ Then the scenario tables (haqq_sel/h6_m2_tables.py logic: 35 ms row = ideal, 50%
 Out: DATA/m2_rows.pkl, DATA/m2_tables.json"""
 import sys, os, json, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_model")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect"); sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_model")
 import dd_lib as L
 import dd20_shadow_eval as D20
 from m2_presend import picks
-DATA = "/home/moiz/sniper-data/haqq_model"; HQS = "/home/moiz/sniper-data/haqq_sel"
+DATA = "/home/it/sniper-data/haqq_model"; HQS = "/home/it/sniper-data/haqq_sel"
 W0 = 1793038500; W1 = 1793124900
 E4 = L.EXI["c4_tpnone_slnone"]
 BUNDLE = f"{L.OUT}/m2_v3_reg4_top25.json"

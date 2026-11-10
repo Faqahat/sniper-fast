@@ -4,13 +4,13 @@ c37lib.prep_window needs rows (slot, idx, j, buy, sol, tok, vsol, vtok, user) an
 vtok comes from each tx's own post token balance (+ the measured 73e12 offset), so every row is independent; where the
 collector has no balance for a tx the reserve is rolled from the previous row. vsol = k_curve / vtok with k_curve = V0 * T0.
 Agreement with the engine's presend_live_tape rows (ground truth) is printed, not assumed.
-Out: /home/moiz/sniper-data/custom37/tape_<run>.pkl {"tapes": {(ses, w): rows}, "maxi": {...}, "end_slot": int}
+Out: /home/it/sniper-data/custom37/tape_<run>.pkl {"tapes": {(ses, w): rows}, "maxi": {...}, "end_slot": int}
 usage: adapt_tape.py r38 r39 r40
 """
 import sys, pickle, collections
 
-SRC = "/home/moiz/sniper-data/replay4"
-D = "/home/moiz/sniper-data/custom37"
+SRC = "/home/it/sniper-data/replay4"
+D = "/home/it/sniper-data/custom37"
 LO, HI = 3, 120            # trigger slot - LO .. + HI, as c2_tape
 
 

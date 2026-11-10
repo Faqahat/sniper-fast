@@ -12,7 +12,7 @@
 | Ended (PKT) | 2026-10-30 01:56:32 — stopped with Ctrl+C (SIGINT) |
 | Ran for | 18 h 25 min |
 | First / last buy (PKT) | no buys |
-| Server / wallet | cyber-dock (84.32.104.202) / `EgxfYgEb…` |
+| Server / wallet | cyber-dock (cyberams) / `EgxfYgEb…` |
 | Buys sent | 0 → **0 filled**, 0 failed on the +5% guard |
 | Fill rate | – |
 | Wins / losses (fills) | 0 / 0 |
@@ -552,7 +552,7 @@ Checks passed: every pre-send fill was closed by a sell; fast-verify: 0 identica
 - none recorded
 
 ## 14. Data and how this report was made
-- Engine records: `/root/prod/runs/dip_ams_r37.jsonl`, log `.log` on cyber-dock (84.32.104.202) (local copy `/home/moiz/sniper-data/runs/ams/runs/dip_ams_r37.*`).
+- Engine records: `/root/prod/runs/dip_ams_r37.jsonl`, log `.log` on cyber-dock (cyberams) (local copy `/home/it/sniper-data/runs/ams/runs/dip_ams_r37.*`).
 - P&L: the engine's REALIZED lines (computed from the chain transactions) for fills; failed buys from getTransaction; costs split from the chain tx fees, the engine's tip records and the curve amounts (sell pump fee = the remainder).
 - Pre-send (section 4b): the jsonl presend_live_* records (fills, closes, REALIZED, account closes, stops, end checks) and presend_attempt_land (try results, failed-try fees); the log's PRESEND LIVE lines when a run has no such records.
 - Engine sessions in this run: 2 (restarts appended to the same log, each with its own START BALANCE; every section sums them); refused starts: 0.

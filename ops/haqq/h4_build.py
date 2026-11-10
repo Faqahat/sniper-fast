@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# haqq SELL study, step 4: compact per-mint tapes from pass-2 rows. Per bucket -> /home/moiz/sniper-data/haqq/tp/b{bb}.pkl:
+# haqq SELL study, step 4: compact per-mint tapes from pass-2 rows. Per bucket -> /home/it/sniper-data/haqq/tp/b{bb}.pkl:
 #   {mint: dict(W=[wallets], T=np.array (trades, chain order), F=np.array (failed txs), X=[non-trade tx rows])}
 # T columns: s i j bt payer user buy sol tok vsol vtok pfee cfee fbps cbps txfee cup cul cu tips router(id)  (+ sigs list)
 # Trades kept from the token's first recorded trade to the last haqq / our trade + 600 slots (~2 min).
 import sys, os, json, gzip, glob, zlib, pickle, re
 import numpy as np
 from multiprocessing import Pool
-OUT = "/home/moiz/sniper-data/haqq"; W = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
+OUT = "/home/it/sniper-data/haqq"; W = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 US = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 TC = ["s", "i", "j", "bt", "payer", "user", "buy", "sol", "tok", "vsol", "vtok", "pfee", "cfee", "fbps", "cbps", "txfee", "cup", "cul", "cu", "tips", "router"]
 FC = ["s", "i", "bt", "payer", "kind", "code", "txfee", "cup", "tips", "router"]

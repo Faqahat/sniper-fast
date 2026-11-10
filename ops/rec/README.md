@@ -4,7 +4,7 @@ Records every pump.fun create and every later transaction that touches one of th
 same as FRA's collector (`ops/collect/collect.py`). Output is one directory per PKT day. There is a remote archive
 tier, an on-demand fetch, and 24/7 supervision with Telegram alerts.
 
-It is independent of the engines: code in `ops/rec/` (stdlib Python + bash), data in `/home/moiz/sniper-data/rec/`,
+It is independent of the engines: code in `ops/rec/` (stdlib Python + bash), data in `/home/it/sniper-data/rec/`,
 its own systemd units. Read-only: no wallet, no sends.
 
 All times below are PKT (UTC+5). Server and container clocks are UTC.
@@ -23,7 +23,7 @@ All times below are PKT (UTC+5). Server and container clocks are UTC.
 - Settings live in `/etc/sniper-rec/rec.conf` (not secret; template: `rec.conf.example`).
 - systemd loads both files and runs everything as `moiz`. The `rec` wrapper does the same for commands that need
   secrets (`sudo systemd-run ... EnvironmentFile=...`).
-- **HOLD file** `/home/moiz/sniper-data/rec/HOLD` (JSON: reason, by, time). While it exists the recorder will not
+- **HOLD file** `/home/it/sniper-data/rec/HOLD` (JSON: reason, by, time). While it exists the recorder will not
   start (exit 0, so systemd does not restart it). The recorder writes it itself on a rate-limit trip,
   `REC_STOP_AT` or `REC_STOP_SLOT`. The overlap guard writes it when it stops a test. Remove it to start again.
 - Crash safety:
@@ -78,7 +78,7 @@ REC_RPC_FALLBACK=CK
 ## 2. Day layout
 
 ```
-/home/moiz/sniper-data/rec/
+/home/it/sniper-data/rec/
   days/YYYY-MM-DD/            one PKT day (00:00 PKT = 19:00 UTC the day before)
     txs/txs_<unix>.jsonl.gz   records, 5-min gzip chunks, same format as FRA (keys s,i,bt,sig,err,fee,cu,cup,cul,signers,mints,progs,ixn,ev,tb,sd,tips)
     launches.jsonl            creates of this day          enrich.jsonl   metadata/Jito (+ creator history in normal mode)
@@ -115,7 +115,7 @@ crash on this, but they drop those txs unless you load both days' launches.
 
 ## 3. Catalog and the `rec` CLI
 
-`/home/moiz/sniper-data/rec/catalog.json`, rebuilt incrementally by `rec catalog [--all]` (daily, and after each day
+`/home/it/sniper-data/rec/catalog.json`, rebuilt incrementally by `rec catalog [--all]` (daily, and after each day
 is finalized).
 - **Each day records:**
   - `where`: host / remote / cache, or a combination;

@@ -9,7 +9,7 @@
 # Output: <RUN>_trips.npz (one row per round trip) and <RUN>_dumps.npz (curve-holder sells), plus wallet string table.
 import sys, os, json, pickle, collections, time
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/postmig"
+OUT = "/home/it/sniper-data/strategies/postmig"
 
 def main(run):
     t0 = time.time()

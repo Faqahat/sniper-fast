@@ -3,7 +3,7 @@
 only the decoded instruction data of his router (haqqqMGN...) and of the pump.fun buy CPI, plus pump error log lines.
 Out: data/lim/rpc_args.jsonl"""
 import json, os, sys, time, urllib.request
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 EP = "https://api.mainnet-beta.solana.com"
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"; ROUTER = "haqqqMGN35ehCftXca3KWxJFXTBcWTWeNHNtUHLGQdh"
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"

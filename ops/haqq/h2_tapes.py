@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # haqq SELL study, pass 2 (read-only, local recording only): full trade tapes (every pump TradeEvent, chain order) + failed txs
 # for every mint haqqiUUX traded (htx_R*.jsonl.gz) and every mint our live runs fired on (our_mints.json). Also per-slot max
-# block index seen (intra-slot timing proxy). Output: /home/moiz/sniper-data/haqq/tape/b{00..63}_{run}.jsonl.gz + slotmax_{run}.json
+# block index seen (intra-slot timing proxy). Output: /home/it/sniper-data/haqq/tape/b{00..63}_{run}.jsonl.gz + slotmax_{run}.json
 # Workers write their own per-bucket files (b{bb}_{run}_p{pid}.jsonl.gz); readers glob b{bb}_*.
 # usage: nice python3 -I h2_tapes.py [procs]
 import sys, os, json, gzip, glob, zlib, base64
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"; OUT = "/home/moiz/sniper-data/haqq"
+D = "/data/tapes/collect"; OUT = "/home/it/sniper-data/haqq"
 RUNS = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
 TD = bytes([189, 219, 127, 211, 78, 230, 97, 238])
 STD = {"11111111111111111111111111111111", "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", "ComputeBudget111111111111111111111111111111",

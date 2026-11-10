@@ -16,12 +16,12 @@ from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import s48lib, rlib, sim, variants
 
-LH = "/home/moiz/sniper-data/presend_real/lh"
+LH = "/home/it/sniper-data/presend_real/lh"
 TAB = f"{LH}/tab"
 rlib.TAB = TAB
-R22 = "/home/moiz/sniper-data/runs/fra/runs/dip_r22.jsonl"
-LIVE_FILES = list(s48lib.LIVE_FILES) + ["/home/moiz/sniper-data/runs/fra/runs/dip_r21.jsonl", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r20.jsonl",
-                                        R22, "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r21.jsonl"]
+R22 = "/home/it/sniper-data/runs/fra/runs/dip_r22.jsonl"
+LIVE_FILES = list(s48lib.LIVE_FILES) + ["/home/it/sniper-data/runs/fra/runs/dip_r21.jsonl", "/home/it/sniper-data/runs/ams/runs/dip_ams_r20.jsonl",
+                                        R22, "/home/it/sniper-data/runs/ams/runs/dip_ams_r21.jsonl"]
 BIN = 300                      # coverage bins (s); a bin is used when >= 95% of its slots are recorded
 G = {}
 

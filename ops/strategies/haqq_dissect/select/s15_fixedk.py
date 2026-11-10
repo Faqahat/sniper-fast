@@ -4,10 +4,10 @@ WAVE_PS, NOW costs), full test days D3-D5: SOL/day per selector at K = 400 / 800
 differences with a 90 % bootstrap over picked dumps (resampling each set's picks). INFERRED replay. Out: select/s15.txt"""
 import sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 from s4_wf import load_scores
 from s5_pnl import money
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 
 
 def main():

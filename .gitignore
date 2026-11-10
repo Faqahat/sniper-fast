@@ -83,3 +83,10 @@ __pycache__/
 
 # built binaries copied to servers (rebuild from source; sha256 files are kept)
 /ops/preconf/shreder/dist/shreder_rec
+
+# 11-10 reorg: study data lives in ~/sniper-data/overnight; data caches stay untracked
+ops/overnight/
+ops/snipers/ledger/
+ops/trend/out*/
+*.enc
+*.pyc

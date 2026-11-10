@@ -1,6 +1,6 @@
 """shared helpers for YOUNG."""
 import json, pickle, datetime
-D = "/home/moiz/sniper-data/presend_young"
+D = "/home/it/sniper-data/presend_young"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 FEE = 0.0125
 def load():

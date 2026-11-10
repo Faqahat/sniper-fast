@@ -3,9 +3,9 @@
 # 10-24 06:50 -> 23:34 PKT): per wallet, its FIRST buy attempt after each dump (slot S or S+1; ok or failed), position,
 # same-slot rate, first-buyer rate, relay / priority / CU by leader kind, and whether it already had txs on that mint just
 # before the dump (pre-positioned). Two universes: ALL dumps and PICKS (dumps our selector passed = the trades we want).
-# Out: /home/moiz/sniper-data/competitors2/universe_wallets.json + printed tables.
+# Out: /home/it/sniper-data/competitors2/universe_wallets.json + printed tables.
 import json, gzip, collections, statistics, sys
-RACES = "/home/moiz/sniper-data/competitors2/races.jsonl.gz"
+RACES = "/home/it/sniper-data/competitors2/races.jsonl.gz"
 US = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 def relay(r): return "+".join(sorted({t[0] for t in r["tips"]})) or "none"
 def med(x): return statistics.median(x) if x else None
@@ -77,4 +77,4 @@ for k, c in sorted(first_by_kind.items(), key=lambda x: -sum(x[1].values())):
     n = sum(c.values())
     print(f"  {k:9s} n={n:5d}  wallets: " + ", ".join(f"{(w or '?')[:8]} {100 * v / n:.0f}%" for w, v in c.most_common(8)))
     print(f"  {'':9s}          relays : " + ", ".join(f"{r} {100 * v / n:.0f}%" for r, v in firstrel_by_kind[k].most_common(8)))
-json.dump(out, open("/home/moiz/sniper-data/competitors2/universe_wallets.json", "w"))
+json.dump(out, open("/home/it/sniper-data/competitors2/universe_wallets.json", "w"))

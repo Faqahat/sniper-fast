@@ -116,10 +116,12 @@ fn dip36_blocklist_flags() {
     }
     assert!(crate::check_flags(&args(&["--presend-live-blocklist", "/root/dip/blocklist_ams.json", "--presend-live-blocklist-pct", "3"])).is_ok());
     assert!(crate::check_flags(&args(&["--presend-live-blocklist", "/x", "--presend-live-blocklist-pct", "abc"])).is_err(), "a number");
-    // the seed file parses: 4 full keys
+    // the seed file parses: full keys (v4 11-05: 32 wallets, + dtrzJPj7 and its 21 helpers)
     let seed = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/ops/prod/blocklist_ams.json")).unwrap();
     let (m, v) = bl_parse(&seed).unwrap();
-    assert!(m.len() == 4 && v == 1 && m.contains_key(&<Pk>::try_from(&bs58::decode("8ZN71XTdVo8yRovnGLmNgW3Tgniw6A4J3JGLvPD686FP").into_vec().unwrap()[..]).unwrap()));
+    let k = |s: &str| <Pk>::try_from(&bs58::decode(s).into_vec().unwrap()[..]).unwrap();
+    assert!(m.len() >= 4 && v.as_u64() >= Some(1) && m.contains_key(&k("8ZN71XTdVo8yRovnGLmNgW3Tgniw6A4J3JGLvPD686FP")), "{} {v}", m.len());
+    assert!(m.contains_key(&k("dtrzJPj7yDdvm6eRqBAgxsK2sMJeD9HhBEBB3XMedXy")), "v4: the dtrz launcher");
 }
 
 #[test]
@@ -203,4 +205,90 @@ fn dip36_blocklist_rearm_roles() {
     let c = run(&["--presend-live-blocklist", &pn]);
     let strip = |v: &Vec<serde_json::Value>| -> Vec<String> { v.iter().map(|r| r.to_string()).collect() };
     assert_eq!(strip(&c.recs), strip(&c0.recs), "not listed: no change");
+}
+
+// ---- dip37c the PER-SEND blocklist (--presend-live-blocklist-send; control key "blocklist_send") ----------------------------------------
+
+impl Ctx {
+    fn blk(&self, mint: &Pk) -> Option<(Pk, f32)> {
+        let id = self.p.armed[mint];
+        self.p.sh.wins.lock().unwrap().iter().find(|w| w.id == id).unwrap().blk
+    }
+    fn swin(&self, mint: &Pk) -> SWin { let id = self.p.armed[mint]; self.p.sh.wins.lock().unwrap().iter().find(|w| w.id == id).cloned().unwrap() }
+}
+
+/// a listed wallet buys >= 3% AFTER the arm: every send withheld (the window stays armed); it sells under 3%: the sends resume; the exact
+/// threshold; a wallet not listed: nothing; the flag off / no blocklist: never
+#[test]
+fn dip37c_blocklist_per_send() {
+    let (h, whale, bad, other) = (w(0x41), w(0xEE), w(0x51), w(0x52));
+    let p = list("send", &[bad]);
+    let mut c = Ctx::new(&["--presend-live-blocklist", &p]);
+    assert!(c.p.cfg.blocklist_send, "on by default with the blocklist");
+    let mut tk = c.t2(h, pct(1.0), whale);
+    assert_eq!(c.ev("presend_live_arm").len(), 1);
+    assert_eq!(c.blk(&tk.mint), None, "nothing listed at the arm");
+    // a wallet not listed buys 5%: nothing
+    let e = tk.buy_tok(other, pct(5.0)); c.tx(1006, 2, vec![e], vec![]);
+    assert_eq!(c.blk(&tk.mint), None);
+    // the listed wallet buys just under 3%: nothing; to exactly 3.0%: withheld
+    let e = tk.buy_tok(bad, pct(3.0) - 1); c.tx(1006, 3, vec![e], vec![]);
+    assert_eq!(c.blk(&tk.mint), None, "under the threshold");
+    let e = tk.buy_tok(bad, 1); c.tx(1006, 4, vec![e], vec![]);
+    let b = c.blk(&tk.mint).expect("exactly 3.0%: a hit");
+    assert!(b.0 == bad && (b.1 - 3.0).abs() < 1e-4, "{b:?}");
+    let sw = c.swin(&tk.mint);
+    assert_eq!(bl_send_check(&c.p.sh, &sw), Some((bad, b.1, true)), "live: withheld");
+    assert!(c.p.armed.contains_key(&tk.mint), "the window stays armed");
+    assert!(c.p.status().contains("BLOCKLIST PER-SEND live T2/re-arm: withheld 1/0"), "{}", c.p.status());
+    // it sells under 3%: the sends resume
+    let e = tk.sell_tok(bad, pct(1.0)); c.tx(1007, 2, vec![e], vec![]);
+    assert_eq!(c.blk(&tk.mint), None);
+    assert_eq!(bl_send_check(&c.p.sh, &c.swin(&tk.mint)), None);
+    // the run's end counts
+    let end = c.p.finish(1010, None);
+    assert!(end["blocklist"]["send"]["withheld"]["t2"] == 1 && end["blocklist"]["send"]["live"] == true, "{}", end["blocklist"]);
+    // the flag off: never cached; no blocklist: the flag is refused and nothing runs
+    let mut c = Ctx::new(&["--presend-live-blocklist", &p, "--presend-live-blocklist-send", "off"]);
+    let mut tk = c.t2(h, pct(1.0), whale);
+    let e = tk.buy_tok(bad, pct(4.0)); c.tx(1006, 3, vec![e], vec![]);
+    assert_eq!(c.blk(&tk.mint), None);
+    assert!(!c.p.status().contains("PER-SEND"));
+    assert!(cfg(&["--presend-live-blocklist-send", "on"]).unwrap_err().to_string().contains("needs --presend-live-blocklist"));
+    let c0 = cfg(&[]).unwrap().unwrap();
+    assert!(!c0.blocklist_send && c0.json().get("blocklist").is_none());
+    assert!(crate::check_flags(&args(&["--presend-live-blocklist", "/x", "--presend-live-blocklist-send", "off"])).is_ok());
+}
+
+/// a reload that lists a holder of an armed window: its sends are withheld from then on; the control file's "blocklist_send" flips live / log
+/// (log: counted, sent); a bad value keeps the mode
+#[test]
+fn dip37c_blocklist_per_send_reload_and_control() {
+    let (h, whale, bad) = (w(0x41), w(0xEE), w(0x53));
+    let p = list("ctl", &[w(0x99)]);
+    let ctl = std::env::temp_dir().join(format!("dip37c-ctl-{}.json", std::process::id())).to_string_lossy().to_string();
+    std::fs::write(&ctl, r#"{"blocklist_send": "log"}"#).unwrap();
+    let mut c = Ctx::new(&["--presend-live-blocklist", &p, "--presend-live-wh-loss", "2:0.05", "--presend-live-ledger-control", &ctl]);
+    c.p.ledger_ctl_open();
+    assert!(!c.p.sh.bl_send_live.load(Ordering::SeqCst), "the control file at the start: log");
+    let mut tk = c.t2(h, pct(1.0), whale);
+    let e = tk.buy_tok(bad, pct(4.0)); c.tx(1006, 3, vec![e], vec![]);
+    assert_eq!(c.blk(&tk.mint), None, "not listed yet");
+    // the list now names it: the reload refreshes the armed windows
+    std::fs::write(&p, serde_json::json!({"version": 9, "wallets": [{"w": b58(&bad), "why": "r58 7dLhDovf"}]}).to_string()).unwrap();
+    c.p.bl.as_mut().unwrap().mtime_reset_for_test();
+    c.p.tick(1006, None);
+    assert_eq!(c.blk(&tk.mint).map(|b| b.0), Some(bad));
+    assert_eq!(bl_send_check(&c.p.sh, &c.swin(&tk.mint)).map(|x| x.2), Some(false), "log mode: counted, sent");
+    // flip to live
+    std::fs::write(&ctl, r#"{"blocklist_send": "live"}"#).unwrap();
+    c.p.ledger_ctl_check(true);
+    assert!(c.p.sh.bl_send_live.load(Ordering::SeqCst));
+    assert_eq!(bl_send_check(&c.p.sh, &c.swin(&tk.mint)).map(|x| x.2), Some(true));
+    std::fs::write(&ctl, r#"{"blocklist_send": "maybe"}"#).unwrap();
+    c.p.ledger_ctl_check(true);
+    assert!(c.p.sh.bl_send_live.load(Ordering::SeqCst), "a bad value keeps it");
+    for o in c.orx.try_iter() { if let Out::Rec(v) = o { c.recs.push(v); } }
+    assert!(c.ev("presend_live_ledger_mode").iter().any(|r| r["blocklist_send"] == "live" && r["was"]["blocklist_send"] == "log"));
+    std::fs::remove_file(&ctl).unwrap();
 }

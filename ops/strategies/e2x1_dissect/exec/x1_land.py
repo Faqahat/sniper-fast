@@ -4,7 +4,7 @@ by leader client of his slot and by landed copy. Same-slot probability vs T's po
 Apples-to-apples with haqq exec t7 / ours: 'dump' = previous outside trade is a sell >= 0.5 SOL within 2 slots.
 Out: sniper-data/e2x1_dissect/exec/x1.txt + x1.pkl (per-lot rows)"""
 import sys, collections, pickle
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
 L = X.lots(); T = X.tape()["trades"]
 out = []

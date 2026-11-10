@@ -200,7 +200,7 @@ Routes on the buy txs that landed (the tip account in the landed copy):
 
 ## How it was measured
 
-- Scripts are in this folder. Data are in `/home/moiz/sniper-data/research/wallet_4yfaz/` (not committed). Only public RPC (publicnode, then api.mainnet-beta for older data), at most 3 threads. Nothing was sent, and nothing on the server was started or stopped. The server was used only for one light grep of `DETECT … first=1` lines from the two current paper logs.
+- Scripts are in this folder. Data are in `/home/it/sniper-data/research/wallet_4yfaz/` (not committed). Only public RPC (publicnode, then api.mainnet-beta for older data), at most 3 threads. Nothing was sent, and nothing on the server was started or stopped. The server was used only for one light grep of `DETECT … first=1` lines from the two current paper logs.
 - `sigs.py`: the wallet's signatures for 55 h.
 - `txs.py`: every successful tx (pump TradeEvents, fees, CU, tips, programs, block tx index). Its `--failed` mode samples failed txs.
 - `trades.py`: round trips and PnL.

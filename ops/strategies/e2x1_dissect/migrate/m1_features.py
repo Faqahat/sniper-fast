@@ -2,7 +2,7 @@
 """migrate agent, step 1: every ENTRABLE moment = a curve buy that takes vSOL to >= V (V in VS) without completing the curve
 (first crossing and re-crossings after a dip below V-3), with CAUSAL features at that trade and labels
 (curve completes within 30 s / 2 min / 10 min / ever). Non-entrable crossings (the crossing trade completes the curve) are kept
-with ent=0 for the counting tables. Out: /home/moiz/sniper-data/e2x1_dissect/migrate/feat.pkl (dict: X (n x f), names, meta rows)."""
+with ent=0 for the counting tables. Out: /home/it/sniper-data/e2x1_dissect/migrate/feat.pkl (dict: X (n x f), names, meta rows)."""
 import numpy as np, pickle, time, collections, glob, json, datetime as dt
 from mlib import Tape, D, pday, pkt, SLOT_S
 
@@ -11,7 +11,7 @@ WIN = [(1, 5), (5, 24), (10, 47), (30, 141), (120, 566)]          # (seconds, sl
 t0 = time.time()
 T = Tape(); TR = T.T
 nm = len(T.mints)
-TAIL = [json.load(open(r))["tail_end_time"] for r in glob.glob("/home/moiz/sniper-data/collect/run_202610*_14*/run.json")]
+TAIL = [json.load(open(r))["tail_end_time"] for r in glob.glob("/data/tapes/collect/run_202610*_14*/run.json")]
 TAIL = [t for t in TAIL if t < T.bt_of(T.shi)] + [T.bt_of(T.shi)]
 
 # ---- wallet history (causal lookups)

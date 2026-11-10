@@ -3,7 +3,7 @@
 costs, and our hold (fill landing -> sell landing). usage: in7_gap.py CTX.pkl RUNDIR CENSUS.pkl VARIANT"""
 import sys, pickle, glob, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import ma_lib as M
 ctxp, rundir, cenp, v = sys.argv[1:5]
 ctx = pickle.load(open(ctxp, "rb")); tape = M.Tape(ctx["tab"])

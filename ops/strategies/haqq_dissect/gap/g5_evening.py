@@ -4,11 +4,11 @@ AMS r28 engine (18:21-22:03, 0.50 SOL pre-send, QUIET on) by hour: dumps logged,
 Out: gap/g5_evening.txt"""
 import pickle, collections, sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/gap")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/gap")
 from g3_ledger import grp
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 T0 = 1793106000; T1 = T0 + 4 * 3600          # 10-27 18:00 -> 22:00 PKT (13:00 -> 17:00 UTC)
 out = []
 def P(*a):

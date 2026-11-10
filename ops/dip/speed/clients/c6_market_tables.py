@@ -6,7 +6,7 @@ C. block order vs CU price (share of descending adjacent pairs among pump txs th
 D. Jito leaders: relayer-fronted (TPU :11228 or other host) vs own TPU
 usage: c6_market_tables.py market.json"""
 import json, sys, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/truth")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/truth")
 import tl
 
 M = json.load(open(sys.argv[1]))
@@ -97,7 +97,7 @@ for k in ORDER:
 
 print("\n== D. Jito leaders by TPU front (gossip snapshot): first reacting buy after a dump (dump in first 75% of block)")
 L = {}
-for bk in ["/home/moiz/sniper/ops/dip/speed/leaders/leader_rtt_new.json", "/home/moiz/sniper/ops/region/leader_rtt_ams.json"]:
+for bk in ["/home/it/sniper/ops/dip/speed/leaders/leader_rtt_new.json", "/home/it/sniper/ops/region/leader_rtt_ams.json"]:
     for pk, r in json.load(open(bk))["leaders"].items(): L.setdefault(pk, r)
 def kind(pk):
     r = L.get(pk)

@@ -12,14 +12,14 @@ Out: bots/b5.npz  PN[u, draw, size, fol, policy] curve P&L SOL (float32), K, PR,
 import sys, json, time
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 SIZES = (0.30, 0.40); FOLS = (1.0, 0.9, 0.8); HZ = 55
 PL = [("T", 5), ("RIDE", 150, 300, 2000), ("RIDE", 150, 150, 1000), ("MS", 200), ("MS", 1000), ("MS", 2000), ("MS", 4000), ("RIDE", 424, 1000, 10000)]
 G = {}

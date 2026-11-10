@@ -4,7 +4,7 @@ Owner OK 10-25 ~08:45 PKT: "yes do the fixes". Built and tested on this machine 
 nothing sent, nothing committed. MEASURED = a test, a replay, a log count or a build. INFERRED = my reading.
 
 ## Bottom line
-- **Binary (not deployed):** `/home/moiz/sniper-data/speed_fixes/bin/snipe_engine_dip14`
+- **Binary (not deployed):** `/home/it/sniper-data/speed_fixes/bin/snipe_engine_dip14`
   - 83,130,408 bytes, sha256 `e349fb362782a5f9b451ae59113409005e0222a4a4ba7abd8c037c25a099dd01`.
   - = dip13 + the flags below. Every flag is off by default; without them it behaves as dip13 (all old tests pass).
 - **B1 shred fire works on 14.8 h of real chain data (MEASURED, 10-24 19:25 → 10-25 10:11 PKT):**
@@ -74,7 +74,7 @@ the tipless twin without one path per probe, client filters without the leader b
 | `run_end.shred` | the totals (also in the 60 s status line) |
 
 **Parity on the raw recording** (MEASURED; `cargo test --release --lib shred_parity_on_recording -- --ignored`;
-`/home/moiz/sniper-data/speed_fixes/shred_parity_full.json`). 172 files, 36.2 M rows, 28,271 tokens created in the window,
+`/home/it/sniper-data/speed_fixes/shred_parity_full.json`). 172 files, 36.2 M rows, 28,271 tokens created in the window,
 2.35 M trades on them, every one through the engine's own books:
 
 | check | result |
@@ -268,4 +268,4 @@ bam=nozomi+helius-swqos+staked-rpc;jito=helius-swqos+helius+nozomi+staked-rpc;ha
   shred_eval.py, run_dip_prod.sh.dip13}`.
 - Changed, additive / flag-gated: `src/lib.rs`, `src/dip.rs`, `src/dip_imit.rs`, `src/dip_model.rs`, `src/feeds/entries.rs`,
   `src/feeds/mod.rs`, `src/bin/snipe_engine.rs`, `src/bin/snipe_engine/dipmode.rs`, `ops/prod/run_dip_prod.sh.new`.
-- Data: `/home/moiz/sniper-data/speed_fixes/` (binary, parity json + log).
+- Data: `/home/it/sniper-data/speed_fixes/` (binary, parity json + log).

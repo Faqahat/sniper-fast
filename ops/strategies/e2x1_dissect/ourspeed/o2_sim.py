@@ -8,7 +8,7 @@ A ORACLE-PICKS : his lots, his trigger trade T (trig_*; OLD lots: the last other
                         'band' = entry + 18 / 34 / 83 s (FRESH / MINUTE / OLD).
 B COPY-TRADE   : real tape (he and every follower stay in), our buy lands d after HIS buy, guard +5% over the post-his-buy
                  price; 'copy' exit = his first sell + d'; also '200ms' and 'band' exits from our entry.
-Curve maths = /home/moiz/sniper-haqqml/sim.py (constant product, our SOL kept in the curve until we sell, fee f on in/out).
+Curve maths = /home/it/sniper-studies/sniper-haqqml/sim.py (constant product, our SOL kept in the curve until we sell, fee f on in/out).
 Followers phi: remove phi x other wallets' buy SOL landing between our entry and min(exit, entry + 10 slots) ("fast followers");
                'full' variant removes phi x buy SOL over the whole hold (harsh for long holds).
 Output: per-lot expected values (npz) for every (mode, exit, L, phi) -> o3_tables.py builds the report tables.
@@ -16,8 +16,8 @@ Output: per-lot expected values (npz) for every (mode, exit, L, phi) -> o3_table
 import pickle, json, sys, collections
 import numpy as np
 
-R = "/home/moiz/sniper-data/e2x1_dissect/recon"
-O = "/home/moiz/sniper-data/e2x1_dissect/ourspeed"
+R = "/home/it/sniper-data/e2x1_dissect/recon"
+O = "/home/it/sniper-data/e2x1_dissect/ourspeed"
 ME = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
 SIB = "Grozoe2Lk9yu7kWPcCMuWEbrnuBYseBExkYAuHPRJUdJ"
 SLOT_MS = 212.07

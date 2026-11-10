@@ -2,7 +2,7 @@
 # POST-MIGRATION STUDY: descriptive statistics for the report (MEASURED from the recorded chain data).
 import json, pickle, collections, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/postmig"
+OUT = "/home/it/sniper-data/strategies/postmig"
 SMS = 212.0
 HOURS = {"R2": 21.8, "R3": 25.0, "R4": 3.7}
 

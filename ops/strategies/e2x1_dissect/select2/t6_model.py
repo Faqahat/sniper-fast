@@ -7,8 +7,8 @@ Evaluation on TEST: recall, precision, forward returns g24/g94/g160 (market, ent
 (i) rule & his, (ii) rule & NOT his (acid test), (iii) his & NOT rule. Usage: t6_model.py [label: y|ysib] [tag]"""
 import sys, json, time, os
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
 LAB = sys.argv[1] if len(sys.argv) > 1 else "y"; TAG = sys.argv[2] if len(sys.argv) > 2 else LAB
 NOSIB = os.environ.get("NOSIB")        # drop the Grozoe-is-trigger feature and Grozoe rows as triggers
 t0 = time.time()

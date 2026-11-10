@@ -10,7 +10,7 @@ Clocks (ms):
 import os, json, time, calendar
 import numpy as np
 
-TAB = "/home/moiz/sniper-data/presend_real/tab"
+TAB = "/home/it/sniper-data/presend_real/tab"
 SMS = 212.0
 SUPPLY = 1e15
 HX = 30_000_000_000_000
@@ -64,7 +64,7 @@ class Tape:
         if with_ours:
             import hashlib
             sh = lambda s: int.from_bytes(hashlib.blake2b(s.encode(), digest_size=8).digest(), "little")
-            for fn in ("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r17.jsonl"):
+            for fn in ("/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl", "/home/it/sniper-data/runs/ams/runs/dip_ams_r17.jsonl"):
                 for l in open(fn):
                     if '"presend_live_fill"' in l or '"presend_live_sell_land"' in l:
                         r = json.loads(l); self.skip_sigh.add(sh(r["sig"]))

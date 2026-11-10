@@ -2,7 +2,7 @@
 """select2 t9: one-feature rules (human-readable) on TEST: for each feature and threshold, recall of his picks, precision, and the
 66 ms sim P&L (34 s exit, phi 0.2 and 0) + g94 of rule-only picks (not his) vs his. Universe rows: samp|y, Grozoe-trigger rows dropped."""
 import sys, json, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
 U = dict(np.load(f"{OUT}/U2.npz")); S = dict(np.load(f"{OUT}/sim_66.npz"))
 y = U["y"].astype(bool); samp = U["samp"].astype(bool); rows = (samp | y) & (U["u_is_sib"] == 0); wt = np.where(y, 1.0, 25.0)
 TE = (U["bt"] >= U["bt"].max() - 86400) & rows; TR = rows & ~TE

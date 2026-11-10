@@ -13,10 +13,10 @@ Rows: model ('ours', uncalibrated), calibrated, conservative; followers -10 / -2
 Out: bots/b6.txt, b6.json, b6_picks.pkl"""
 import sys, json, pickle, heapq, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
-MY = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
+MY = "/home/it/sniper-data/haqq_dissect/select"
 VAR = sys.argv[1] if len(sys.argv) > 1 else "F+NEW"
 COST = {"NOW": (0.00352, 0.00053), "S2": (0.00186, 0.00036), "CHEAP": (0.00079, 0.00004)}
 THR = (0.02, 0.03, 0.05, 0.08, 0.12, 0.17, 0.25, 0.35, 0.5, 0.65)
@@ -52,7 +52,7 @@ def main():
     B5 = np.load(f"{OUT}/b5.npz"); PN = B5["PN"]; F5 = B5["F5"]; sel = B5["sel"]; PLs = [str(x) for x in B5["PL"]]
     E = np.load(f"{MY}/env.npz")
     if VAR.startswith("s4:"):          # union-label score from s4 (my envelope), same score used as the gate for both bots
-        sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+        sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
         from s4_wf import load_scores
         sv = load_scores()[VAR[3:]]; uu = np.arange(len(sv)); Z12 = {"247|" + VAR: sv, "248|" + VAR: sv}
     else:

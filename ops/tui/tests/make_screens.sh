@@ -5,7 +5,7 @@
 #   quiet/  QUIET demo: r26's records + synthetic dip20 QUIET lines (the engine's formats), 10% into the run = warm-up
 set -e
 cd "$(dirname "$0")/.."
-SRC=${SRC:-/home/moiz/sniper-data/runs/ams/runs/dip_ams_r26.jsonl}
+SRC=${SRC:-/home/it/sniper-data/runs/ams/runs/dip_ams_r26.jsonl}
 OUT=screens
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

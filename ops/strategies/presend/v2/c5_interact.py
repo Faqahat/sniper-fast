@@ -7,9 +7,9 @@
 #  - time the server would be blocked by each side (one position per server).
 import sys, json, collections, os
 import numpy as np
-FILES = ["/home/moiz/sniper-data/recon/live/dip_r15.jsonl", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r14.jsonl",
-         "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"]
-OUT = "/home/moiz/sniper-data/presend_v2/c5_interact"
+FILES = ["/home/it/sniper-data/recon/live/dip_r15.jsonl", "/home/it/sniper-data/runs/ams/runs/dip_ams_r14.jsonl",
+         "/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"]
+OUT = "/home/it/sniper-data/presend_v2/c5_interact"
 LOG = []
 def say(*a):
     s = " ".join(str(x) for x in a); print(s, flush=True); LOG.append(s)

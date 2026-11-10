@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """hybrid step 3: tables for REPORT.txt (reads sim.pkl)."""
 import pickle, collections, time, numpy as np
-OUT = "/home/moiz/sniper-data/e2x1_dissect/hybrid"; RP = "/home/moiz/sniper/ops/strategies/e2x1_dissect/hybrid"
+OUT = "/home/it/sniper-data/e2x1_dissect/hybrid"; RP = "/home/it/sniper/ops/strategies/e2x1_dissect/hybrid"
 Z = pickle.load(open(f"{OUT}/sim.pkl", "rb")); VARS = Z["VARS"]
 E = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"; G = "Grozoe2Lk9yu7kWPcCMuWEbrnuBYseBExkYAuHPRJUdJ"
 W0, W1 = 1793118600, 1793205000

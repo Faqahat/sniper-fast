@@ -3,7 +3,7 @@
 landed-vs-failed copy pairs, slot gap between the landed copy and the failed copy. Also: which copy lands, by leader client.
 Out: sniper-data/e2x1_dissect/exec/x3.txt"""
 import sys, collections, pickle
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
 TX = pickle.load(open(f"{X.R}/tx.pkl", "rb")); F = pickle.load(open(f"{X.R}/fails.pkl", "rb"))
 L = {l["lot_id"]: l for l in X.lots()}

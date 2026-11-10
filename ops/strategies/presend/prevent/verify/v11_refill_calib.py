@@ -2,7 +2,7 @@
 """VERIFY step 11: calibration of GUARDS' replay on the windows its guard changes: replay base P&L vs the LIVE realized P&L (scaled, mine)
 of the same windows; hybrid estimate = -(live P&L of changed fills) + (replay guard P&L of those windows)."""
 import json, pickle, collections
-D = "/home/moiz/sniper-data/prevent/guards"; OUT = "/home/moiz/sniper-data/prevent/verify"
+D = "/home/it/sniper-data/prevent/guards"; OUT = "/home/it/sniper-data/prevent/verify"
 T = pickle.load(open(f"{OUT}/tables.pkl", "rb"))
 RM = {"f26": "F26", "f27": "F27", "f28": "F28", "r34": "A34", "r35": "A35", "r36": "A36", "r37": "A37"}
 tw = {(x["run"], x["w"]): x for x in T["trades"]}

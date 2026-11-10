@@ -5,11 +5,11 @@
 #   signed before we first saw the dump (server clock) AND not a deadline failure (landing slot <= its deadline).
 # D = its landing - the dump on the block clock (the replay's clock). Also the share of dumps with no such attempt.
 # Then fits D ~ U(0, g) * s + e (g = 212 / k) per quantile to see if the bulk scales with the attempt gap.
-# -> /home/moiz/sniper-data/presend_v2/c2_thin.json (+ .txt)
+# -> /home/it/sniper-data/presend_v2/c2_thin.json (+ .txt)
 import sys, json, collections
 import numpy as np
-F = sys.argv[1] if len(sys.argv) > 1 else "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
-OUT = "/home/moiz/sniper-data/presend_v2/c2_thin"
+F = sys.argv[1] if len(sys.argv) > 1 else "/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
+OUT = "/home/it/sniper-data/presend_v2/c2_thin"
 LOG = []
 def say(*a):
     s = " ".join(str(x) for x in a); print(s, flush=True); LOG.append(s)

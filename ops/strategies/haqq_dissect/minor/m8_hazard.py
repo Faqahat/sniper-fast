@@ -7,11 +7,11 @@ Hazard tables per feature bucket show what precedes his sells (timer vs wave vs 
 Out: minor/m8.txt"""
 import pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 import xlib as X
 from plib import Out
-OUT = "/home/moiz/sniper-data/haqq_dissect/minor"
+OUT = "/home/it/sniper-data/haqq_dissect/minor"
 CODES = {226: 30, 231: 30, 251: 30, 252: 30, 244: 140}
 
 

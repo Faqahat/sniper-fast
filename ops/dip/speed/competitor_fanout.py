@@ -3,7 +3,7 @@
 # = paths the SAME signed tx was sent to), durable nonce (first ix System AdvanceNonceAccount = one copy per path, only one can
 # land), and bursts = several txs of the wallet on the same token within 2 slots (spray: more copies / retries per trade).
 import sys, json, collections, statistics, importlib.util
-spec = importlib.util.spec_from_file_location("osp", "/home/moiz/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+spec = importlib.util.spec_from_file_location("osp", "/home/it/sniper/ops/speedcheck/our_speed.py"); S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 W = {"HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ": "HkQ7hMjy", "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq": "haqqiUUX", "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw": "DYXDDrZC"}
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 60
 extra = sys.argv[2:]                                   # more wallets (full addresses)

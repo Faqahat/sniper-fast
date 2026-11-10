@@ -11,9 +11,9 @@ C_OR(t) = either. Walk-forward: the C variant / t / g (and g for ORACLE / HSEL) 
 Out: data/lim/l17.txt"""
 import pickle, sys, collections, itertools
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 COST = {"NOW": {"reg": (3.52e-3, 0.53e-3), "ps": (2.01e-3, 0.0)}, "S2": {"reg": (2.03e-3, 0.53e-3), "ps": (0.49e-3, 0.0)}}
 GS = [0.05, 0.10, 0.20, 9.0]
 out = []

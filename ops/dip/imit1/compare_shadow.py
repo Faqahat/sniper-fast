@@ -4,7 +4,7 @@
 # copied from the server first).   usage: python3 -I compare_shadow.py shadow.jsonl [paper live_trades.jsonl]
 import sys, json, time, collections
 S = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
-P = [json.loads(l) for l in open(sys.argv[2] if len(sys.argv) > 2 else "/home/moiz/sniper/ops/overnight/sel/live_trades.jsonl")]
+P = [json.loads(l) for l in open(sys.argv[2] if len(sys.argv) > 2 else "/home/it/sniper-data/overnight/sel/live_trades.jsonl")]
 start = next(r["t"] for r in S if r["ev"] == "run_start") / 1e9
 picks = [r for r in S if r["ev"] == "pick"]; dumps = [r for r in S if r["ev"] == "dump"]
 t_last = max([r["t"] / 1e9 for r in dumps] or [start])

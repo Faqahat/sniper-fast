@@ -6,7 +6,7 @@
 # the pump fees inside the replay), FAIL per blocked buy.
 import json, time, calendar
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/dipdetect"
+OUT = "/home/it/sniper-data/strategies/dipdetect"
 FIX = 0.0051          # = replay tx model 0.0016 + 0.0035 "real costs" of the baseline replays (measured live ~0.0043)
 FAIL = 0.0005
 SMS = 212.0

@@ -2,7 +2,7 @@
 # Win / loss vs us on the dumps we fired: the first REACTIVE bot that landed ahead of us (pre-senders and seller tools excluded).
 # What did it use that we did not? Split: leader client, late-in-block dumps (Q4), window slot 1, our spills (we missed the dump's block).
 import sys, json, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
 H = json.load(open(f"{lib2.D}/h2h.json"))
 WAL = json.load(open(f"{lib2.D}/wallets.json"))

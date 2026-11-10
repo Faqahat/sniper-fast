@@ -9,12 +9,12 @@
 Out: sellid/s9.txt"""
 import pickle, sys, itertools
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev as ev12
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s, flush=True); out.append(s)

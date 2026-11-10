@@ -5,7 +5,7 @@
 # fee, CU used. Also the dumps of the rotation / same-program families.
 # usage: python3 -I i11_anatomy.py CLASSES.json WTX.jsonl.gz OUT.json
 import sys, json, gzip, collections, random
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/instant")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/instant")
 import rpc_ro as R
 C = json.load(open(sys.argv[1])); wtx = sys.argv[2]; outp = sys.argv[3]; random.seed(11)
 KEY = ["Dk2jdQ93", "CZ77onJz", "9K5QgBKa", "FUru6V3L", "5k2Ckkiu", "2KtcBCfh", "5ZKd8DNB", "CVPz447t", "2XyiEK56", "7VrFNnRw", "FNuoWSQc",

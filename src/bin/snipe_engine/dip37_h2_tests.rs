@@ -11,7 +11,7 @@ const USER: Pk = [0x5Au8; 32];
 const CREATOR: Pk = [0xC1u8; 32];
 const S: u64 = 1_000_000_000;
 /// the tests that run a probe with the counter on (its on_exec drains the process-wide note queue) and the hook's test: one at a time
-static H2_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(super) static H2_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn args(extra: &[&str]) -> Vec<String> {
     let mut a: Vec<String> = ["snipe_engine", "--dip", "--live", "--presend-shadow", "--presend-live", "--presend-live-routes", "default=helius-ps", "--presend-live-max-fills", "100",

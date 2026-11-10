@@ -3,10 +3,10 @@
 live pre-send ARM (signals if logged, landed failed tries, fill, realized P&L) and per censored QUIET skip. Same as quiet3/w1_windows.py
 plus: failed tries counted per window from presend_attempt_land (unique signatures; 6042 / deadline / ata_exists / 6005 = landed
 failed, 5120 lamports each), the v2 annotation when logged, the run's session spans (hours).
-Out: /home/moiz/sniper-data/presend_quiet4/windows24.json"""
+Out: /home/it/sniper-data/presend_quiet4/windows24.json"""
 import json, collections, re
-L = '/home/moiz/sniper-data/runs'; V = '/home/moiz/sniper-data/presend_losses/verify/raw'
-OUT = '/home/moiz/sniper-data/presend_quiet4/windows24.json'
+L = '/home/it/sniper-data/runs'; V = '/home/it/sniper-data/presend_losses/verify/raw'
+OUT = '/home/it/sniper-data/presend_quiet4/windows24.json'
 runs = [('FRA', f'r{n}', f'{L}/fra/runs/dip_r{n}.jsonl') for n in (21, 22, 23, 24, 26, 27, 28)]
 runs += [('AMS', f'r{n}', f'{L}/ams/runs/dip_ams_r{n}.jsonl') for n in (16, 17, 19, 20, 24, 25, 26, 27, 34, 35, 36)]
 runs += [('AMS', f'r{n}', f'{V}/dip_ams_r{n}.jsonl') for n in (28, 29, 30, 31, 32, 33)]

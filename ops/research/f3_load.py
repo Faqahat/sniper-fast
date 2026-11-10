@@ -8,7 +8,7 @@ import os, json, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
 SP = os.environ.get("F3_WORK", "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad")
 F3 = os.path.join(SP, "f3")
-REC_DIRS = ["/home/moiz/sniper-data/research/rec", os.path.join(SP, "f2", "paper", "rec"), os.path.join(F3, "paper", "rec")]
+REC_DIRS = ["/home/it/sniper-data/research/rec", os.path.join(SP, "f2", "paper", "rec"), os.path.join(F3, "paper", "rec")]
 LAG = 550
 PROS = {"dKMjeG": "dKMjeG", "4yFAz7": "4yFAz7", "9XPMCa": "9XPMCa", "3yrJE1": "3yrJE1", "AHwJSn": "AHwJSn", "2EsRia": "2EsRia", "9qz7cW": "9qz7cW"}
 OURS6 = ("FRZh63", "2g7rYv")

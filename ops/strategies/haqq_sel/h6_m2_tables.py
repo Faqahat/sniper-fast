@@ -6,7 +6,7 @@
 Ranges: 5-95% of 4000 bootstrap resamples of the engine's attempts. Main = AMS (one engine, the live regular setup); FRA+AMS aside."""
 import pickle, json
 import numpy as np
-DATA = "/home/moiz/sniper-data/haqq_sel"
+DATA = "/home/it/sniper-data/haqq_sel"
 Z = pickle.load(open(f"{DATA}/m2_rows.pkl", "rb"))
 FAIL = 0.0005
 rng = np.random.default_rng(5)

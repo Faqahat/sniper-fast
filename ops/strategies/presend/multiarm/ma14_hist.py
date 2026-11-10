@@ -6,10 +6,10 @@ History = every pump.fun curve trade of those wallets, 10-24 19:25 PKT -> the r3
   presend_quiet3 chain [460883340, 462709231) | presend_young/ext [462709231, 462710488) | paper_audit/tab [462710488, 463011691)
   multiarm/tabgapA [463011691, 463021093) | tab38f [463021093, 463053837) | tabgapB [463053837, 463081489) | tab39 [463081489, ...)
 Positions (TIMING t3_pos): per (wallet, mint) the first buy slot b0 and the first sell slot after it s1 (-1: none yet).
-Out: /home/moiz/sniper-data/multiarm/hz_pos.npz (u, m, b0, s1 sorted by u, b0) + hz_ids.json (users, mints)"""
+Out: /home/it/sniper-data/multiarm/hz_pos.npz (u, m, b0, s1 sorted by u, b0) + hz_ids.json (users, mints)"""
 import json, gc
 import numpy as np
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 OURS = ("EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE")
 RUN_TABS = [f"{D}/paper_audit/tab", f"{D}/multiarm/tab38f", f"{D}/multiarm/tab39f"]
 SRC = [("chain", f"{D}/presend_quiet3", 460883340, 462709231), ("chain", f"{D}/presend_young/ext", 462709231, 462710488),

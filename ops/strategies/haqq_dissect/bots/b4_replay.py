@@ -17,14 +17,14 @@ Out: bots/b4_res.pkl"""
 import pickle, sys, json, time, collections
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 FOLS = (1.0, 0.9, 0.8)
 PL = [("HIS",), ("T", 5), ("RIDE", 150, 300, 2000), ("RIDE", 150, 150, 1000), ("MS", 200), ("MS", 1000), ("MS", 2000), ("MS", 4000), ("RIDE", 424, 1000, 10000)]
 KEEP = len(sys.argv) > 1 and sys.argv[1] == "keep"     # variant: his lot stays in the tape (he is then a competitor right behind / ahead of us)
@@ -150,7 +150,7 @@ def prep():
     """events + supplementary tape for fire mints absent from the exit tape; haqq row codes"""
     t0 = time.time()
     ids, idm = L.ids_map()
-    C = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/pos/codes.pkl", "rb"))
+    C = pickle.load(open("/home/it/sniper-data/haqq_dissect/pos/codes.pkl", "rb"))
     pickle.dump({k: v[0] for k, v in C.items() if k[0] != "F"}, open(f"{OUT}/hcodes.pkl", "wb"))
     R, MI, span, _ = X.tape()
     F = pickle.load(open(f"{L.D}/fires_tape.pkl", "rb"))

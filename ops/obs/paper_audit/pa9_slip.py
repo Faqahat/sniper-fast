@@ -7,7 +7,7 @@ Check: the port's naive value vs the model's own gross (they walk the same trade
 usage: pa9_slip.py PT.pkl OUT.pkl"""
 import sys, pickle, collections, statistics
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/obs/paper_audit")
+sys.path.insert(0, "/home/it/sniper/ops/obs/paper_audit")
 import pa_lib as L
 
 

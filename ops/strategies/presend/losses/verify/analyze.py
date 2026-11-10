@@ -1,5 +1,5 @@
 import json, random, datetime, collections
-D=json.load(open('/home/moiz/sniper-data/presend_losses/verify/fills.json'))
+D=json.load(open('/home/it/sniper-data/presend_losses/verify/fills.json'))
 R=D['rows']; F=D['fills']; CUR=0.696
 pkt=lambda ns: datetime.datetime.utcfromtimestamp(ns/1e9+5*3600).strftime('%m-%d %H:%M')
 rules={'age1':lambda f:f['age']==1,'w6':lambda f:f['wsol']>=6,'w6fd':lambda f:f['wsol']>=6 and (f['client'] or '').lower().startswith('fire'),

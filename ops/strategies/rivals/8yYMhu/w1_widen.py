@@ -13,7 +13,7 @@ U = dict(np.load(f"{X.D}/uni2.npz"))
 ukey = {(int(m), int(s), int(i)): q for q, (m, s, i) in enumerate(zip(U["mint"], U["slot"], U["idx"]))}
 TA, TB = 1792915200, 1793220600; days = (TB - TA) / 86400
 THR = (6, 4, 3, 2, 1); ARM_COST = 0.000153
-CR = json.load(open("/home/moiz/sniper-data/dv8/tab/creates.json")); CR.update(json.load(open("/home/moiz/sniper-data/e2x1_dissect/select/creates_new.json")))
+CR = json.load(open("/home/it/sniper-data/dv8/tab/creates.json")); CR.update(json.load(open("/home/it/sniper-data/e2x1_dissect/select/creates_new.json")))
 mid = T.mid(); cslot = {mid[m]: int(v["slot"]) for m, v in CR.items() if m in mid and v.get("slot")}
 arms = collections.Counter(); fills = collections.defaultdict(list); DL = (0.05, 0.08, 0.12)
 for p in range(len(um)):

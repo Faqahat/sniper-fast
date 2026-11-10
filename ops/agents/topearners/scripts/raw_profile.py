@@ -4,7 +4,7 @@
 import os, sys, json, gzip, glob, collections, base64
 from multiprocessing import Pool
 W = set(l.strip() for l in open(sys.argv[1]) if l.strip())
-TIP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+TIP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 STD = {"11111111111111111111111111111111", "ComputeBudget111111111111111111111111111111", "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
        "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ", "MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e"}

@@ -2,9 +2,9 @@
 # DF7eRXHn study: buys with no curve sell = tokens that graduated; the exit is a PumpSwap (pAMM) sell paid in WSOL.
 # Reads those sells via read-only getTransaction and adds WSOL proceeds -> amm_exits.json
 import sys, json
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 from rpc_ro import get_tx
-D = "/home/moiz/sniper-data/landing2/df7e"; W = "DF7eRXHnvRQ9QeVCrdfS56a7RpBD6se6mgPvzApHPNr9"; WSOL = "So11111111111111111111111111111111111111112"
+D = "/home/it/sniper-data/landing2/df7e"; W = "DF7eRXHnvRQ9QeVCrdfS56a7RpBD6se6mgPvzApHPNr9"; WSOL = "So11111111111111111111111111111111111111112"
 R = json.load(open(f"{D}/buys2.json")); SD = json.load(open(f"{D}/raw_sd.json"))
 bym = {}
 for sig, v in SD.items():

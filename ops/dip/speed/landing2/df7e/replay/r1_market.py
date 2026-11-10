@@ -3,7 +3,7 @@
 import json, collections, numpy as np, sys
 import rlib, core
 D = rlib.load(); T = D.T
-B = json.load(open("/home/moiz/sniper-data/landing2/df7e/buys2.json"))
+B = json.load(open("/home/it/sniper-data/landing2/df7e/buys2.json"))
 H = np.load if False else None
 key = {}
 sh = T["sigh"]

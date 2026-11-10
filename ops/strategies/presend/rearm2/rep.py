@@ -19,7 +19,7 @@ def gap_msol(s):
 
 
 def day_hours(D):
-    hj = "/home/moiz/sniper-data/dv8/hours.json" if D <= 5 else f"{W}/hoursN.json"
+    hj = "/home/it/sniper-data/dv8/hours.json" if D <= 5 else f"{W}/hoursN.json"
     good = {r["h"] for r in json.load(open(hj))["rows"] if r["usable"]}
     a = DAY0 + D * 86400; b = min(a + 86400, END)
     hrs = {}

@@ -254,7 +254,7 @@ Result: corrected replay at our measured landing −0.44 vs live −0.37. Per-bu
 
 ## Method
 
-- **Live records (read-only):** /home/moiz/sniper-data/recon/live (FRA dip_r10–r15, AMS dip_ams_r9–r14). Fires are linked to land / exit / sell / close records and to REALIZED lines.
+- **Live records (read-only):** /home/it/sniper-data/recon/live (FRA dip_r10–r15, AMS dip_ams_r9–r14). Fires are linked to land / exit / sell / close records and to REALIZED lines.
 - **Chain:** raw recordings run_20261024_1425 (19:25→07:56) and run_20261023_1426 (to 20:26), grepped for our two wallets.
   - Every fire's landed copy was found, through nonce per-path signatures or the buy signature: 309 of 309.
   - Live P&L = our wallet's SOL change in those txs. It equals the REALIZED lines (−0.2599 vs −0.2600 on fills).
@@ -291,7 +291,7 @@ Result: corrected replay at our measured landing −0.44 vs live −0.37. Per-bu
 | r25 | tables |
 | r26 | offline picks vs engine picks (feed gaps) |
 
-- **Data:** /home/moiz/sniper-data/recon/work (pertrade.json, pertrade_table.csv, price.json, …).
+- **Data:** /home/it/sniper-data/recon/work (pertrade.json, pertrade_table.csv, price.json, …).
 - **Limits:**
   - One night and morning. FRA r15 and AMS r14 are partial.
   - The block clock assumes 400 txs per block.
@@ -306,7 +306,7 @@ Columns:
 - **Model@ours:** corrected replay at our exact landing.
 - **@35 / @50:** replay (old model) if we had landed 35 / 50 ms after the dump. "fail" means the guard would have blocked the buy.
 
-Times are PKT. Full CSV: /home/moiz/sniper-data/recon/work/pertrade_table.csv.
+Times are PKT. Full CSV: /home/it/sniper-data/recon/work/pertrade_table.csv.
 
 | # | Time | Srv r | Token | SOL | Leader | Land ms (blk / feed) | Ahead | Live | Live P&L | Model@ours | @35 | @50 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """WHO step 10: RESULTS.json / RESULTS.txt -- per-run tables of the leads, r38 six-loss flags, counts."""
 import json, sys
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/who")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/who")
 from w6_score import ALL_LIVE, SIX
 from w5_rules import PAPER_RUNS
-D = "/home/moiz/sniper-data/prevent/who"
+D = "/home/it/sniper-data/prevent/who"
 A = json.load(open(f"{D}/score.json")); B = json.load(open(f"{D}/score_rules_posthoc.json"))
 R = dict(A["rules"]); R.update(B["rules"])
 post = set(B["rules"])

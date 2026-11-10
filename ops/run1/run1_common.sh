@@ -5,7 +5,7 @@
 #   + relay tips 0.001; exit = sell ALL ~3 slots after the landing (sim: best at every landing position; ladders /
 #   longer holds lose at our landing); sells CU 5M; run kill -0.5 SOL (open positions at cost), profit lock
 #   0.3:0 / 0.6:0.3; 20 landed buys or 180 min; 2 in flight.
-# AUDIT FIXES (2026-10-20, /home/moiz/sniper-audit/FIXES.md) — new flags:
+# AUDIT FIXES (2026-10-20, /home/it/sniper-studies/sniper-audit/FIXES.md) — new flags:
 #   --slip-cap-bps 1500       M1: min_tokens_out = 85% of the quote on the curve after dev + glued bundle (re-signed at the
 #                             decision); --fill-cap 1.6 stays as the fallback when the bundle total is not known
 #   --land-timeout-ms 3000    M3: buy land poll (signature status + token account every 100 ms), then the late-land watch

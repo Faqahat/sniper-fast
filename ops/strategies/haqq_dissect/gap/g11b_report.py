@@ -8,9 +8,9 @@ reg entry: calibrated 0.61 x curve - 1.17 mSOL/fire, NOW costs.
 Out: gap/g11_tables.txt"""
 import pickle, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from g1_walkforward import calib_boot
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 PSF = 0.45; FILLC = 0.00251; XC = 0.000198; ARM = 4 * 5120 / 1e9
 
 

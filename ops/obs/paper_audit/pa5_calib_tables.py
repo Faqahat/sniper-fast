@@ -3,7 +3,7 @@
 usage: pa5_calib_tables.py CALIB.pkl X.pkl OUT.json"""
 import sys, json, pickle, collections, statistics
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/obs/paper_audit")
+sys.path.insert(0, "/home/it/sniper/ops/obs/paper_audit")
 
 SIZE = 0.696
 FR = 0.012500000186264515

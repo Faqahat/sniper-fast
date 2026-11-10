@@ -10,9 +10,9 @@ Label y1 = 247 or 248 bought within 2 slots (MEASURED). Metrics per test day: AU
 Out: select/s4_scores.npz (OOS scores per set), s4.txt"""
 import sys, time, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_gbdt as G
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 MKT = ["drop", "dd10", "sell_sol", "sell_pct", "vpost", "age_s", "n_tr", "n_wal", "sel_dev", "sel_cs", "sel_early", "sel_bal", "sel_frac", "sel_arm",
        "ch10", "ch30", "devsold", "devb", "b3", "s3", "b10s", "s10s", "b30s", "s30s", "b10", "s10", "b30r", "ntr10", "ath_dd", "vs_launch",
        "last_dump_s", "n_dumps", "bundle_sol", "nd_buy"]

@@ -8,7 +8,7 @@ import sys, os, gzip, json, glob, time, hashlib, importlib.util
 import numpy as np
 from multiprocessing import Pool
 
-_spec = importlib.util.spec_from_file_location("ps_real_decode", "/home/moiz/sniper/ops/strategies/presend/real/decode.py")
+_spec = importlib.util.spec_from_file_location("ps_real_decode", "/home/it/sniper/ops/strategies/presend/real/decode.py")
 D = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(D)
 TDT = np.dtype(D.TDT.descr + [("sh", "u4")])
 

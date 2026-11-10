@@ -2,7 +2,7 @@
 """WHO step 9: who drives the post-hoc G-cr (creator fair-list) result: skipped fills per creator, w/o the top creator, listing times, r38 six."""
 import pickle, json, collections, sys, datetime
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/who"
+D = "/home/it/sniper-data/prevent/who"
 X = pickle.load(open(f"{D}/rules_posthoc.pkl", "rb")); meta, res = X["meta"], X["res"]
 S = json.load(open(f"{D}/score_rules_posthoc.json"))["rules"]
 PKT = lambda t: datetime.datetime.utcfromtimestamp(t + 5 * 3600).strftime("%m-%d %H:%M")

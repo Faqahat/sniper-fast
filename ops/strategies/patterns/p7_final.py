@@ -5,9 +5,9 @@
 # stays positive on R3 vs an R2-negative one. -> patterns/final.json + printed table
 import sys, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-PO = "/home/moiz/sniper-data/strategies/patterns"
+PO = "/home/it/sniper-data/strategies/patterns"
 reg = json.load(open(f"{PO}/registry.json")); rules = reg["rules"]
 todo = [R for R in rules if "R3_35" not in R.get("res", {})]
 if todo:

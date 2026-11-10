@@ -17,7 +17,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from ptyrun import Pty  # noqa: E402
 
-DATA = os.environ.get("DIPMON_DATA", "/home/moiz/sniper-data/runs")
+DATA = os.environ.get("DIPMON_DATA", "/home/it/sniper-data/runs")
 HZ = os.sysconf("SC_CLK_TCK")
 SECS = float(os.environ.get("PERF_SECS", "60"))
 

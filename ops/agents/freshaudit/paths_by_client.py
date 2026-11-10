@@ -2,8 +2,8 @@
 # r2 (leader schedule known): for OK follower buys after >=1 SOL dumps in the SAME slot, which paid-tip path (relay) shows up
 # early (dIdx<40) vs late, per leader client; excludes known limit-spam wallets (fail rate > 80%)
 import json, gzip, collections, statistics as st
-A = "/home/moiz/sniper/ops/agents/freshaudit"
-LB = json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json"))
+A = "/home/it/sniper/ops/agents/freshaudit"
+LB = json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json"))
 LS = LB["leaders"]; NODES = LB["nodes"]
 FOL = json.load(open(f"{A}/out/followers_r2.json"))
 spam = {w[:10] for w, v in FOL.items() if v["n"] >= 50 and v["fail"] / v["n"] > 0.8}

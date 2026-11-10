@@ -7,7 +7,7 @@
 # Only the probe's first sighting clock is available for the synthetic copies; the probe's real D is shown on the same clock.
 import json, collections
 import numpy as np
-F = "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
+F = "/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
 att = {}; land = {}
 for l in open(F):
     if '"presend_attempt' not in l: continue
@@ -40,4 +40,4 @@ for m in (1, 2, 3, 5):
     out[m] = dict(k=k, none=none / len(dumps), q=[float(np.percentile(Ds, p)) for p in (10, 25, 50, 75, 90)])
     print(f"k {k:5.2f} (fully correlated copies): no attempt could fill {100 * none / len(dumps):4.1f}% | D on the first sighting clock p10/p25/p50/p75/p90 "
           + " / ".join(f"{x:5.1f}" for x in out[m]["q"]))
-json.dump(out, open("/home/moiz/sniper-data/presend_v2/c11_densify.json", "w"))
+json.dump(out, open("/home/it/sniper-data/presend_v2/c11_densify.json", "w"))

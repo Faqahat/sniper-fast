@@ -3,14 +3,14 @@
 is there a wallet identity behind those whales? [MEASURED from the tapes; P&L @0.696]"""
 import pickle, json, bisect, collections
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/who"
+D = "/home/it/sniper-data/prevent/who"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 W = pickle.load(open(f"{D}/windows.pkl", "rb")); F = pickle.load(open(f"{D}/feats.pkl", "rb")); M = pickle.load(open(f"{D}/mints.pkl", "rb"))
 X = pickle.load(open(f"{D}/rules.pkl", "rb")); c1 = {(m["mint"], round(m["t"], 3)): m["C1"] for m in X["meta"]}
 bots = json.load(open(f"{D}/bots.json"))
 import re
-coh = {c if isinstance(c, str) else c.get("wallet") for c in json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json"))}
-cand = set(re.findall(r"gmgn\.ai/sol/address/([1-9A-HJ-NP-Za-km-z]{32,44})", open("/home/moiz/sniper/ops/snipers/CANDIDATES.md").read()))
+coh = {c if isinstance(c, str) else c.get("wallet") for c in json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json"))}
+cand = set(re.findall(r"gmgn\.ai/sol/address/([1-9A-HJ-NP-Za-km-z]{32,44})", open("/home/it/sniper/ops/snipers/CANDIDATES.md").read()))
 botset = coh | cand | set(bots["rivals"].values())
 rows = []
 for w, f in zip(W, F):

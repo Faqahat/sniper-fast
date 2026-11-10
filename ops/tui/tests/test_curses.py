@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import dipmon  # noqa: E402
 from ptyrun import Pty  # noqa: E402
 
-DATA = os.environ.get("DIPMON_DATA", "/home/moiz/sniper-data/runs")
+DATA = os.environ.get("DIPMON_DATA", "/home/it/sniper-data/runs")
 RUNS = [os.path.join(DATA, "ams/runs/dip_ams_r26.jsonl"), os.path.join(DATA, "ams/runs/dip_ams_r24.jsonl")]
 SIZES = [(30, 50), (24, 80), (50, 160)]
 VARIANTS = [("TERM unset", {"TERM": None}, []), ("--ascii LANG=C", {"LANG": "C", "LC_ALL": "C", "TERM": "xterm"}, ["--ascii"]),

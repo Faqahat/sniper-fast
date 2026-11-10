@@ -4,13 +4,13 @@
 same fresh tape, mean over draws. usage: v8_live_hours.py RSIMPKL"""
 import sys, json, pickle, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/verify")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/verify")
 import v1b_report as B
-DATA = "/home/moiz/sniper-data/haqq_dissect/verify"; FRESH0 = 1793131823
+DATA = "/home/it/sniper-data/haqq_dissect/verify"; FRESH0 = 1793131823
 def hr(t): return (int(t) + 18000) // 3600 * 3600 - 18000
 H = collections.defaultdict(lambda: collections.defaultdict(float)); fill_t = {}
 BTE = int(np.load(f"{DATA}/tab/slots.npy")["bt"].max()) - 90
-for rn, fn in (("r26", "/home/moiz/sniper-data/runs/fra/runs/dip_r26.jsonl"), ("r27", f"{DATA}/live/dip_r27.jsonl")):
+for rn, fn in (("r26", "/home/it/sniper-data/runs/fra/runs/dip_r26.jsonl"), ("r27", f"{DATA}/live/dip_r27.jsonl")):
     for l in open(fn, errors="ignore"):
         if '"presend_' not in l: continue
         try: r = json.loads(l)

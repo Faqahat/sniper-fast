@@ -9,7 +9,7 @@ Out: recon/r7.txt"""
 import json, pickle, collections, sys, os, random, time
 import numpy as np
 W0, W1 = 1793038500, 1793124900
-OUT = "/home/moiz/sniper-data/haqq_dissect/recon"
+OUT = "/home/it/sniper-data/haqq_dissect/recon"
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 rows = pickle.load(open(f"{OUT}/table.pkl", "rb"))["rows"]
 LZ = pickle.load(open(f"{OUT}/lots.pkl", "rb")); LOTS, UNM = LZ["lots"], LZ["unm"]
@@ -60,7 +60,7 @@ for c in codes:
 P(f"| ALL | {T['lots']:,} | {T['cost']:.3f} | {T['bl']:+.4f} | {T['nf']:,} | {T['ff']:.4f} | **{T['bb']:+.4f}** | {1000 * T['bb'] / T['lots']:+.2f} | {T['win'] / T['lots']:.0%} | {T['open']} | **{T['a']:+.4f}** | {T['after']:+.4f} | {T['pre']:+.4f} | {T['um']:+.4f} | {T['reb']:+.4f} | {T['a'] - T['reb']:+.2e} |")
 # compare with the earlier per-code D5 table (pos/p1.pkl, tape-based code-matched lots, cnet)
 try:
-    sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+    sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
     import plib
     Bp, LOp, Tp = plib.load()
     old = collections.Counter(); oldn = collections.Counter()

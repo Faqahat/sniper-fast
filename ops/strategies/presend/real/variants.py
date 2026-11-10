@@ -8,7 +8,7 @@ from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rlib, sim
 
-OUT = "/home/moiz/sniper-data/presend_real"
+OUT = "/home/it/sniper-data/presend_real"
 G = {}
 
 # ---------------------------------------------------------------------------------------------------------------------------

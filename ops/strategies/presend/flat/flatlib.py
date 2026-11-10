@@ -5,18 +5,18 @@ f3_base.py. Nothing here sends or changes anything."""
 import sys, json, pickle, collections
 import numpy as np
 
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import pmath as PM          # noqa: E402  (buy_tok, sell_sol, fees, cost_exact_tok, net_of_budget)
 
-D = "/home/moiz/sniper-data/presend_flat"
+D = "/home/it/sniper-data/presend_flat"
 AMS = "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"
 FRA = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"
 SMS = 212.0                 # ms per slot (the chain clock of real/r065)
 PKT = 18000
-COHORT = "/home/moiz/sniper/ops/overnight/sel/cohort_train.json"
-FBOTS = "/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json"
-AMS_RUNS = "/home/moiz/sniper-data/runs/ams/runs"
-PF_LIVE = "/home/moiz/sniper-data/presend_filter/live"
+COHORT = "/home/it/sniper-data/overnight/sel/cohort_train.json"
+FBOTS = "/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json"
+AMS_RUNS = "/home/it/sniper-data/runs/ams/runs"
+PF_LIVE = "/home/it/sniper-data/presend_filter/live"
 # every live pre-send run: its records, its OWN wallet (the engine's rule: "others" = not the whale, not this wallet), chain phases
 RUNS = {
     "a19": dict(file=f"{AMS_RUNS}/dip_ams_r19.jsonl", wallet=AMS, phases=(0, 1), name="AMS r19"),

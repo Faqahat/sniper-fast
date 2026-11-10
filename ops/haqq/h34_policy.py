@@ -3,8 +3,8 @@
 # Fill price above +5% (contested; today these fail the guard): accept up to guard G and hold H slots after the dump (haqq-like timer).
 # 0.35 SOL, our tx costs, our own trades removed from the curve; all at our REAL landing spot (no speed change).
 import sys, json, numpy as np, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
-src = open("/home/moiz/sniper/ops/haqq/h31_decomp.py").read().split("# ---------- 4. P&L accounting, ours")[0].replace('print(', '(lambda *a, **k: None)(')
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
+src = open("/home/it/sniper/ops/haqq/h31_decomp.py").read().split("# ---------- 4. P&L accounting, ours")[0].replace('print(', '(lambda *a, **k: None)(')
 exec(compile(src, "h31_helpers", "exec"))
 R = json.load(open(f"{H.OUT}/h2h_fires.json")); fills = [r for r in R if r["status"] == "fill"]; fails = [r for r in R if r["status"] == "fail"]
 base_fill = [sim(r, (r["our_s"], r["our_i"])) for r in fills]; bf = sum(x for x in base_fill if isinstance(x, float))

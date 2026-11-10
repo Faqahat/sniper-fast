@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """VERIFY step 1 [MEASURED]: own extraction of every live pre-send window / try / fill / realized P&L from the live run jsonl files.
-Independent of the agents' code. Out: /home/moiz/sniper-data/prevent/verify/live.pkl
+Independent of the agents' code. Out: /home/it/sniper-data/prevent/verify/live.pkl
  per run: cfg (run_start), arms {w: arm rec}, disarm {w: rec}, fills [rec], closes [rec], realized [rec], ata [rec], att_land fee per w,
  attempts per w (send slot, n, lim, p, pos, t), skips counter, stop rec, start/end t."""
 import json, sys, os, pickle, collections, glob
 from multiprocessing import Pool
-OUT = "/home/moiz/sniper-data/prevent/verify"
+OUT = "/home/it/sniper-data/prevent/verify"
 RUNS = {}
 for r in (16, 17, 19, 20, 24, 25, 26, 27, 34, 35, 36, 37, 38):
-    RUNS[f"A{r}"] = f"/home/moiz/sniper-data/runs/ams/runs/dip_ams_r{r}.jsonl"
+    RUNS[f"A{r}"] = f"/home/it/sniper-data/runs/ams/runs/dip_ams_r{r}.jsonl"
 for r in (21, 22, 23, 24, 26, 27, 28):
-    RUNS[f"F{r}"] = f"/home/moiz/sniper-data/runs/fra/runs/dip_r{r}.jsonl"
-EXTRA = {"A28": "/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"}
+    RUNS[f"F{r}"] = f"/home/it/sniper-data/runs/fra/runs/dip_r{r}.jsonl"
+EXTRA = {"A28": "/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"}
 for r in (29, 30, 31, 32, 33):
-    for p in (f"/home/moiz/sniper-data/haqq_strat/live/dip_ams_r{r}.jsonl",):
+    for p in (f"/home/it/sniper-data/haqq_strat/live/dip_ams_r{r}.jsonl",):
         if os.path.exists(p): EXTRA[f"A{r}"] = p
 KEEP = (b'"ev":"run_start"', b'"ev":"run_end"', b'"ev":"presend_live_arm"', b'"ev":"presend_live_disarm"', b'"ev":"presend_live_fill"',
         b'"ev":"presend_live_close"', b'"ev":"presend_live_realized"', b'"ev":"presend_live_ata_close"', b'"ev":"presend_live_exit"',

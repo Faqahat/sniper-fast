@@ -5,16 +5,16 @@
 # Compares the measured success curve with what the model assumes (random slack from a8_slack.json: a buy is dropped only if
 # the extra push from our buy exceeds its slack). Also the natural experiment: success at the same price ratio with / without
 # another target bot landing a buy ahead (does it matter WHO moved the price?), and the bought SOL vs the push.
-# usage: nice python3 -I m4_tolerance.py [days]   -> /home/moiz/sniper-data/modelcheck/tolerance.json + printout
+# usage: nice python3 -I m4_tolerance.py [days]   -> /home/it/sniper-data/modelcheck/tolerance.json + printout
 import sys, os, json, zlib, collections
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-OUT = "/home/moiz/sniper-data/modelcheck"
+OUT = "/home/it/sniper-data/modelcheck"
 TG = [l.strip() for l in open(os.path.join(HERE, "targets.txt")) if l.strip()]
 TGU = {zlib.crc32(w.encode()): w for w in TG}
 BINS = [0, 1.002, 1.01, 1.02, 1.03, 1.05, 1.10, 1.20, 99]
 BL = ["<1.002", "1.002-1.01", "1.01-1.02", "1.02-1.03", "1.03-1.05", "1.05-1.10", "1.10-1.20", ">1.20"]
-SLACK = np.array(sorted(r[1] for r in json.load(open("/home/moiz/sniper/ops/overnight/verify2/work/a8_slack.json"))["rows"]))
+SLACK = np.array(sorted(r[1] for r in json.load(open("/home/it/sniper-data/overnight/verify2/work/a8_slack.json"))["rows"]))
 
 def load(days):
     A = collections.defaultdict(list)

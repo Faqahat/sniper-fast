@@ -3,7 +3,7 @@
 CODE (agave core/src/block_creation_loop.rs block_timeout): block k of the window ends at 200*(k+1) - 56 ms after the window start,
 so block 1 lasts <= 144 ms and blocks 2-4 200 ms. Model the time left after the dump as (1 - idx/n) x block length."""
 import csv, collections
-rows = list(csv.DictReader(open("/home/moiz/sniper-data/speed_truth/attempts.csv")))
+rows = list(csv.DictReader(open("/home/it/sniper-data/speed_truth/attempts.csv")))
 def blen(r): return 144.0 if int(r["dump_slot"]) % 4 == 0 else 200.0
 agave_family = {"JitoLabs", "AgaveBam", "HarmonicAgave", "Rakurai", "Agave"}
 for fam, sel in (("Agave-family", lambda r: r["client"] in agave_family and r["client"] != "Rakurai"),

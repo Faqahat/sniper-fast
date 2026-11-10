@@ -10,11 +10,11 @@ Shared (f) decomposition per episode (his linked f lots vs our episode):
 Out: gap/g4_ours.txt, gap/g4_waterfall.txt, gap/g4.json"""
 import pickle, collections, json, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/gap")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/gap")
 from g3_ledger import grp
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 
 
 def boot_sum(v, n=2000, seed=7):

@@ -6,7 +6,7 @@ usage: g10_rearm_score.py"""
 import pickle, glob, collections, json
 import numpy as np
 S = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/prevent/guards/ma"
-OUT = "/home/moiz/sniper-data/prevent/guards"
+OUT = "/home/it/sniper-data/prevent/guards"
 res = {}; lines = []
 rng = np.random.default_rng(3)
 for run in ("r37", "r38"):

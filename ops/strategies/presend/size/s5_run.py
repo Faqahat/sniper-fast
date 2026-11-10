@@ -6,17 +6,17 @@ other sizes with REPLAY_065's exact method + revived failed buys (sizelib.py).
   sizes      : 0.25, 0.35, 0.40, 0.50, 0.65 SOL for every run (pre-send and regular)
   variants   : main (fail_buy revival on) | literal (revival off = REPLAY_065 as it was)
   stress     : 20 % of later buyers (incl. revived ones) dropped at random, N paired draws (same draws at every size)
-Writes /home/moiz/sniper-data/presend_size/results.json (per trade, every size) + calib per group. Replay = INFERRED, live = MEASURED."""
+Writes /home/it/sniper-data/presend_size/results.json (per trade, every size) + calib per group. Replay = INFERRED, live = MEASURED."""
 import sys, json, pickle, collections, time
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/size")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/size")
 import numpy as np
 import core
 import sizelib as SL
 
-OUT = "/home/moiz/sniper-data/presend_size"
-GROUPS = [("A", "/home/moiz/sniper-data/replay065", ("r24", "r25"), [f"{OUT}/args_2425.jsonl"]),
-          ("B", "/home/moiz/sniper-data/presend_size", ("r26", "r27", "r28"), [])]
+OUT = "/home/it/sniper-data/presend_size"
+GROUPS = [("A", "/home/it/sniper-data/replay065", ("r24", "r25"), [f"{OUT}/args_2425.jsonl"]),
+          ("B", "/home/it/sniper-data/presend_size", ("r26", "r27", "r28"), [])]
 SIZES = [250_000_000, 350_000_000, 400_000_000, 500_000_000, 650_000_000]
 RENT_BACK = 1_508_820
 

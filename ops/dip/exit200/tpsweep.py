@@ -5,13 +5,13 @@ Model: exit = the earlier of (a) the first trade in slots <= fill+1 whose value 
 else the end of slot fill+1 with our tokens still in the pool. SL 20% kept (end of its slot). Trades after our real sell are
 valued with our tokens put back into the pool. Read-only. usage: tpsweep.py fra 28 | ams 34"""
 import json, subprocess, sys, os, random
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real"); import decode as D
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real"); import decode as D
 region, RUN = sys.argv[1], sys.argv[2]
 ssh = ["ssh", "-p", "1996", "-o", "ConnectTimeout=10"]
 if region == "fra":
-    recs = open(f"/home/moiz/sniper-data/runs/fra/runs/dip_r{RUN}.jsonl").read().splitlines()
+    recs = open(f"/home/it/sniper-data/runs/fra/runs/dip_r{RUN}.jsonl").read().splitlines()
 else:
-    recs = subprocess.run(ssh + ["it@84.32.104.202", f"sudo grep -E '\"ev\":\"presend_live_(fill|sell_land|realized|exit)\"' /root/prod/runs/dip_ams_r{RUN}.jsonl"], capture_output=True, text=True).stdout.splitlines()
+    recs = subprocess.run(ssh + ["it@cyberams", f"sudo grep -E '\"ev\":\"presend_live_(fill|sell_land|realized|exit)\"' /root/prod/runs/dip_ams_r{RUN}.jsonl"], capture_output=True, text=True).stdout.splitlines()
 fills, sells, real, exits = {}, {}, {}, {}
 for l in recs:
     if '"presend_live_' not in l: continue
@@ -24,11 +24,11 @@ for dct in (fills, sells, real, exits):
     for v in dct.values(): v.sort(key=lambda d: (d.get("slot", 0), d.get("idx", 0), d.get("t", 0)))
 mints = sorted(m for m in fills if m in sells)
 tmp = f"/tmp/tpsweep_{region}{RUN}.txt"; open(tmp, "w").write("\n".join(mints) + "\n")
-subprocess.run(["scp", "-q", "-P", "1996", tmp, "it@84.32.100.36:" + tmp])
+subprocess.run(["scp", "-q", "-P", "1996", tmp, "it@cyberfra:" + tmp])
 t0 = min(f["t"] for v in fills.values() for f in v) // 10**9 - 400
 cmd = (f"for R in $(sudo sh -c 'ls -d /root/sniper-collect/run_*/txs' | tail -3); do for f in $(sudo ls $R); do t=${{f#txs_}}; t=${{t%.jsonl.gz}}; "
        f"[ \"$t\" -ge {t0} ] 2>/dev/null && sudo sh -c \"zcat $R/$f 2>/dev/null\" | grep -F -f {tmp}; done; done")
-lines = subprocess.run(ssh + ["it@84.32.100.36", cmd], capture_output=True, text=True).stdout.splitlines()
+lines = subprocess.run(ssh + ["it@cyberfra", cmd], capture_output=True, text=True).stdout.splitlines()
 tape = {}
 for line in lines:
     try: d = json.loads(line)

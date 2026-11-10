@@ -40,7 +40,7 @@ if __name__ == "__main__":
         del d
     known = {C.crc(w): w for w in C.PRE}
     try:
-        for w in json.load(open("/home/moiz/sniper-data/competitors2/dossier.json")): known.setdefault(C.crc(w), w)
+        for w in json.load(open("/home/it/sniper-data/competitors2/dossier.json")): known.setdefault(C.crc(w), w)
     except Exception: pass
     rows = []
     for uid, a in agg.items():

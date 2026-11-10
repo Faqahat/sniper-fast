@@ -272,7 +272,7 @@ fn dip37_wh_state_round_trip_and_seed() {
     assert_eq!(s.all[&buj], WhHist { n: 13, sum: -913_700_000, ..Default::default() });
     for bad in [&b"{}"[..], br#"{"w": {"nope": [1, 2]}}"#, br#"{"w": {"BujUx1wzxo6iPvueULzqXvn7WVrRNz9uGqvDRThb4SEY": [1]}}"#, b"["] { assert!(wh_parse(bad).is_err()); }
     // the staged seed, when this machine has it
-    if let Ok(b) = std::fs::read("/home/moiz/sniper-data/dip37stage/whale_state_ams.json") {
+    if let Ok(b) = std::fs::read("/home/it/sniper-data/dip37stage/whale_state_ams.json") {
         let m = wh_parse(&b).unwrap();
         assert!(m.all[&buj].n == 13 && (m.all[&buj].sum as f64 / 1e9 + 0.91).abs() < 0.01, "{:?}", m.all[&buj]);
     }
@@ -572,7 +572,7 @@ fn dip37_hl_learn_state_paper() {
     assert_eq!(pshl::hl_save(&m, &p).unwrap(), 2);
     assert_eq!(pshl::hl_load(&p).unwrap(), m);
     std::fs::remove_file(&p).unwrap();
-    if let Ok(b) = std::fs::read("/home/moiz/sniper-data/dip37stage/holder_state_ams.json") { assert!(pshl::hl_parse_state(&b).unwrap().len() > 1000, "the staged seed parses"); }
+    if let Ok(b) = std::fs::read("/home/it/sniper-data/dip37stage/holder_state_ams.json") { assert!(pshl::hl_parse_state(&b).unwrap().len() > 1000, "the staged seed parses"); }
     // paper: a holder_loss-skipped trigger's row c into the holder's ledger
     let mut c = Ctx::new(&["--presend-live-holder-loss", "2:0.10:0.05", "--presend-live-holder-learn", "paper"]);
     c.hseed(h, 1, -150_000_000, -150_000_000);

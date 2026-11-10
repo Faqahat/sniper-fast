@@ -12,7 +12,7 @@
 import sys, os, json, collections
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import rlib as R, rsim as S
 from r08_forecast import engine, paper_exit, load_dumps, FIX, FAIL
 

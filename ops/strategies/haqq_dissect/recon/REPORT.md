@@ -1,5 +1,5 @@
 # Analyst K (recon): exact 24 h reconciliation of haqq's bots to his wallet: residual 0 lamports (10-28 ~03:50 PKT)
-Saved by the main session from the agent's reply. Window 10-26 23:15 → 10-27 23:15 PKT. Code: this folder. Data: /home/moiz/sniper-data/haqq_dissect/recon/:
+Saved by the main session from the agent's reply. Window 10-26 23:15 → 10-27 23:15 PKT. Code: this folder. Data: /home/it/sniper-data/haqq_dissect/recon/:
 - r6.txt: reconciliation and per-bot cash;
 - r7.txt: the two P&L views and the bridge;
 - r7b_boot.txt: bootstrap ranges;

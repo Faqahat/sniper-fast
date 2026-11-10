@@ -1,6 +1,6 @@
 # Byte-exact spec: Raydium AMM v4, Raydium CPMM and PumpSwap in arbed
 
-Repo: `/home/moiz/arbed/arbed`. Nothing was modified. All paths below are under `/home/moiz/arbed/arbed/`.
+Repo: `/home/it/other/arbed/arbed`. Nothing was modified. All paths below are under `/home/it/other/arbed/arbed/`.
 
 Path correction: the fee file is `src/venues/quote/fees.ts`. There is no `src/quote/`.
 

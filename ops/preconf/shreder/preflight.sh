@@ -3,7 +3,7 @@
 # collector lag, load. usage: preflight.sh [RUN] [MIN]
 H=$(dirname "$(readlink -f "$0")")
 RUN=${1:-trial_$(TZ=Asia/Karachi date +%Y%m%d)}; MIN=${2:-75}
-SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -p 1996 it@84.32.100.36)
+SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -p 1996 it@cyberfra)
 want=$(cut -d' ' -f1 "$H/dist/shreder_rec.sha256")
 echo "== $(TZ=Asia/Karachi date +%H:%M:%S) PKT preflight (run $RUN, $MIN min)"
 "${SSH[@]}" "uptime | sed 's/.*load average/load average/'

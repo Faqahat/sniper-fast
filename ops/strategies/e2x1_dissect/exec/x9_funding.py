@@ -3,10 +3,10 @@
 fetch 2 recent buys + 2 sells (jsonParsed) -> nonce account + nonce authority, tip accounts, fee payer, CU price.
 Out: sniper-data/e2x1_dissect/exec/funding.json (raw) ; printed summary in x9.log"""
 import sys, json, time
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/recon")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/recon")
 import rpc
 rpc.MIN_GAP = 2.0
-O = "/home/moiz/sniper-data/e2x1_dissect/exec"
+O = "/home/it/sniper-data/e2x1_dissect/exec"
 S = json.load(open(f"{O}/sample_sigs.json"))
 out = {}
 try: out = json.load(open(f"{O}/funding.json"))

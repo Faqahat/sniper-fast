@@ -4,9 +4,9 @@
 Out: data/lim/l13.txt"""
 import pickle, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 CF, CX = 3.52e-3, 0.53e-3
 net = lambda r, g, fo=1.0: (r["pn"][(r["hold"], fo)] - CF) if r["need"] <= 1 + g + 1e-9 else -CX
 R = [r for r in pickle.load(open(f"{OUT}/fires_cf.pkl", "rb")) if not r["mayhem"]]

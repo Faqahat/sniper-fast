@@ -1,11 +1,11 @@
 #!/bin/bash
-# DV8 study, full re-run (read-only on recordings/run records). ~20 min on the container. Outputs in /home/moiz/sniper-data/dv8.
+# DV8 study, full re-run (read-only on recordings/run records). ~20 min on the container. Outputs in /home/it/sniper-data/dv8.
 set -e
-S=/home/moiz/sniper/ops/strategies/dv8; O=/home/moiz/sniper-data/dv8; cd $O
+S=/home/it/sniper/ops/strategies/dv8; O=/home/it/sniper-data/dv8; cd $O
 # 0. tape: decoded chunks (dec/ = symlinks to presend_real/dec + haqq_model/dec + own decodes of run_20261027_1410 and the 8 re-decoded
 #    chunks that were truncated when first decoded), merged with build.py
-# python3 /home/moiz/sniper/ops/strategies/presend/real/decode.py $O/dec /home/moiz/sniper-data/collect/run_20261027_1410 --procs 6
-# python3 /home/moiz/sniper/ops/strategies/presend/real/build.py $O/dec $O/tab
+# python3 /home/it/sniper/ops/strategies/presend/real/decode.py $O/dec /data/tapes/collect/run_20261027_1410 --procs 6
+# python3 /home/it/sniper/ops/strategies/presend/real/build.py $O/dec $O/tab
 python3 $S/c0_coverage.py       # coverage per hour / day
 python3 $S/l1_live.py           # live run records -> fires / pre-send attempts (FRA r26 copy in $O/live via read-only sudo cat)
 python3 $S/l2_landing.py        # landing model (MEASURED) + far-leader shift (INFERRED)

@@ -5,9 +5,9 @@
 # failed ones > L: the fail rate vs ratio shows the limit. -> printed
 import sys, json, zlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-OUT = "/home/moiz/sniper-data/strategies/sssss"
+OUT = "/home/it/sniper-data/strategies/sssss"
 run = sys.argv[1] if len(sys.argv) > 1 else "R2"
 E.load([run]); d = E.DAYS[run]
 att = json.load(open(f"{OUT}/att_{run}.json"))

@@ -274,7 +274,7 @@ mod tests {
     fn imit1_parity_with_python() {
         let root = env!("CARGO_MANIFEST_DIR");
         let Some(par) = load_json(&format!("{root}/testdata/imit1_parity.json")) else { eprintln!("imit1_parity.json missing: skipped"); return; };
-        let model = Imit::load(&format!("{root}/ops/overnight/sel/IMIT1.json")).or_else(|_| Imit::load("/home/moiz/sniper/ops/overnight/sel/IMIT1.json"));
+        let model = Imit::load(&format!("{root}/ops/overnight/sel/IMIT1.json")).or_else(|_| Imit::load("/home/it/sniper-data/overnight/sel/IMIT1.json"));
         let Ok(model) = model else { eprintln!("IMIT1.json missing: skipped"); return; };
         let cohort: HashSet<String> = par["cohort"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
         let targets: HashSet<String> = par["targets"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
@@ -454,7 +454,7 @@ mod book_tests {
     fn live_book_equals_batch() {
         let root = env!("CARGO_MANIFEST_DIR");
         let Some(par) = std::fs::read_to_string(format!("{root}/testdata/imit1_parity.json")).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) else { return; };
-        let Ok(model) = Imit::load("/home/moiz/sniper/ops/overnight/sel/IMIT1.json") else { return; };
+        let Ok(model) = Imit::load("/home/it/sniper-data/overnight/sel/IMIT1.json") else { return; };
         let cohort: HashSet<String> = par["cohort"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
         let targets: HashSet<String> = par["targets"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
         let max_age = par["max_age"].as_f64().unwrap();
@@ -498,7 +498,7 @@ mod book_tests {
     fn spec_push_rollback_time_feats_bounds() {
         let root = env!("CARGO_MANIFEST_DIR");
         let Some(par) = std::fs::read_to_string(format!("{root}/testdata/imit1_parity.json")).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) else { return; };
-        let Ok(model) = Imit::load("/home/moiz/sniper/ops/overnight/sel/IMIT1.json") else { return; };
+        let Ok(model) = Imit::load("/home/it/sniper-data/overnight/sel/IMIT1.json") else { return; };
         let cohort: HashSet<String> = par["cohort"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
         let targets: HashSet<String> = par["targets"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
         let max_age = par["max_age"].as_f64().unwrap();

@@ -11,11 +11,11 @@ Curve P&L only (tx costs excluded; both exits are one sell). Our realized wallet
 usage: v4_wave_live.py"""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/verify")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/verify")
 import vlib as V
 
-DATA = "/home/moiz/sniper-data/haqq_dissect/verify"
-RUNS = {"r26": "/home/moiz/sniper-data/runs/fra/runs/dip_r26.jsonl", "r27": f"{DATA}/live/dip_r27.jsonl"}
+DATA = "/home/it/sniper-data/haqq_dissect/verify"
+RUNS = {"r26": "/home/it/sniper-data/runs/fra/runs/dip_r26.jsonl", "r27": f"{DATA}/live/dip_r27.jsonl"}
 FRESH0 = 1793131823
 LAND = 59.0
 
@@ -31,7 +31,7 @@ if __name__ == "__main__":
             if ev == "presend_live_fill": kinds[V.sh(r["sig"])] = "presend"; mints.add(r["mint"]); run_of[V.sh(r["sig"])] = rn
             elif ev == "buy_land": kinds[V.sh(r["sig"])] = "regular"; mints.add(r["mint"]); run_of[V.sh(r["sig"])] = rn
             elif ev == "presend_live_realized": realized[(rn, "presend")] += r.get("pnl", 0) / 1e9
-    tapes = {"dv8": V.Tape("/home/moiz/sniper-data/dv8/tab", mints), "fresh": V.Tape(f"{DATA}/tab", mints)}
+    tapes = {"dv8": V.Tape("/home/it/sniper-data/dv8/tab", mints), "fresh": V.Tape(f"{DATA}/tab", mints)}
     split = 462199500
     out = []
     for name, tp in tapes.items():

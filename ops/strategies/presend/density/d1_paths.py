@@ -4,13 +4,13 @@
     client at send, the copy that landed (buy_land / buy_failed variant paths), send -> seen on our feed (timing.fire_to_seen_ms)
     and slots after send (landing slot - fire slot);
   pre-send tries (one path, helius-ps): per try the client, send -> seen (ms_send_to_rx), slots after send.
-Writes /home/moiz/sniper-data/presend_density/paths.json"""
+Writes /home/it/sniper-data/presend_density/paths.json"""
 import json, collections, sys
 import numpy as np
 
-RUNS = {r: f"/home/moiz/sniper-data/runs/ams/runs/dip_ams_r{r}.jsonl" for r in (22, 23, 24, 25, 26, 27)}
-RUNS[28] = "/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"
-OUT = "/home/moiz/sniper-data/presend_density/paths.json"
+RUNS = {r: f"/home/it/sniper-data/runs/ams/runs/dip_ams_r{r}.jsonl" for r in (22, 23, 24, 25, 26, 27)}
+RUNS[28] = "/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"
+OUT = "/home/it/sniper-data/presend_density/paths.json"
 
 
 def q(a):
@@ -20,7 +20,7 @@ def q(a):
                 p75=float(np.percentile(a, 75)), p90=float(np.percentile(a, 90)), grid=[float(np.percentile(a, x)) for x in range(0, 101, 5)])
 
 
-NEAR = set(l.split()[0] for l in open("/home/moiz/sniper/ops/region/near_leaders_ams.txt") if l.strip() and not l.startswith("#"))
+NEAR = set(l.split()[0] for l in open("/home/it/sniper/ops/region/near_leaders_ams.txt") if l.strip() and not l.startswith("#"))
 NEAR8 = set(k[:8] for k in NEAR)
 reg = []; ps = collections.defaultdict(list); ps_sas = collections.defaultdict(list)
 for r, fn in RUNS.items():

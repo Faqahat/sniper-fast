@@ -9,7 +9,7 @@ same share at 10 matched random moments per lot (uniform in [slot buy+2, sell)) 
 Out: sellid/s4.txt, s4_lists.json (the learned lists per test day)"""
 import pickle, json, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 SMS = 212.0
 out = []
 def P(*a):
@@ -19,7 +19,7 @@ def P(*a):
 def main():
     U = dict(np.load(f"{OUT}/s2_units.npz"))
     Z = pickle.load(open(f"{OUT}/s1.pkl", "rb")); LOTS = Z["lots"]
-    ids = json.load(open("/home/moiz/sniper-data/dv8/tab/ids.json"))
+    ids = json.load(open("/home/it/sniper-data/dv8/tab/ids.json"))
     y = (U["gap"] <= 212).astype(np.float64)
     strat = ((U["code"] - 247).astype(np.int64) * 2 + U["bu"]) * 100 + U["tb"].astype(np.int64) * 10 + U["sb"]
     _, inv = np.unique(strat, return_inverse=True)

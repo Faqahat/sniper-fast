@@ -6,7 +6,7 @@ Label y1 = he sells in this slot or the next (0 <= sell_slot - slot <= 1); y3 = 
 All features use the event row and rows before it only (causal). Out: sniper-data/e2x1_dissect/exit2/ev.npz, trips.pkl"""
 import json, pickle, time, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/e2x1_dissect/exit2"
+OUT = "/home/it/sniper-data/e2x1_dissect/exit2"
 Z = np.load(f"{OUT}/tape_his.npz"); wid = int(Z["wid"]); sid = int(Z["sid"])
 slot = Z["slot"].astype(np.int64); idx = Z["idx"].astype(np.int64); mint = Z["mint"]; user = Z["user"]; buy = Z["buy"].astype(bool)
 sol = Z["sol"].astype(np.float64) / 1e9; tok = Z["tok"].astype(np.float64); vsol = Z["vsol"].astype(np.float64) / 1e9; vtok = Z["vtok"].astype(np.float64)
@@ -16,8 +16,8 @@ N = len(slot)
 nU = int(max(Z["act_user"].max(), user.max())) + 1
 act_mints = np.zeros(nU, np.int32); act_mints[Z["act_mint_user"]] = Z["act_mints"]
 act_trades = np.zeros(nU, np.int32); act_trades[Z["act_user"]] = Z["act_trades"]
-users = json.load(open("/home/moiz/sniper-data/haqqml/fresh/tape/users.json")); uid = {u: i for i, u in enumerate(users)}
-mints_l = json.load(open("/home/moiz/sniper-data/haqqml/fresh/tape/mints.json"))
+users = json.load(open("/home/it/sniper-data/haqqml/fresh/tape/users.json")); uid = {u: i for i, u in enumerate(users)}
+mints_l = json.load(open("/home/it/sniper-data/haqqml/fresh/tape/mints.json"))
 COPIERS = """3iawEZGfWF3H7q6HLxHjSfeZHjCvPr8U9xjXpMgtobDN Hj4uACn8Jp2QvbMFhkhWWCdHPzC2SEXg7fhpZayYVcyL FiYZPbS4wi7CSEBerzvyHEAzQkT7qj1apB2mZob3R3zj
 4HgMCR7abFKHDPgYfMrtjvKniPXj4zHwuSNNRVx7QEzQ AZ45pUnDKayDSsqxASohrqTaAWSLRwwfTzTpdNoqAQSx 8VqKttXDgU2t3hxtP1sgcHBNc6jv1iDnbDyVzcBxGHsM
 7yY786SNiCsRpMSZS8vKAKHNHeh2bumPsjBCsYRBSwN5 5174QiRmFgQKkQYBp7aKZsYdP1tSXJMi2RY4Yh2eysKn GLsnURrAT7WyuDU6mXX1jW9V1N6o1EoEryet6K5noQJj
@@ -29,13 +29,13 @@ copier = np.zeros(nU, bool)
 for w in COPIERS:
     if w in uid: copier[uid[w]] = True
 lead = np.zeros(nU, bool)
-for w in json.load(open("/home/moiz/sniper-data/e2x1_dissect/select/s11_leaders.json")).get("leaders", []):
+for w in json.load(open("/home/it/sniper-data/e2x1_dissect/select/s11_leaders.json")).get("leaders", []):
     if w in uid: lead[uid[w]] = True
 lead[sid] = False
 # creates (age, creator)
-CR = json.load(open("/home/moiz/sniper-data/e2x1_dissect/select/creates_all.json"))
+CR = json.load(open("/home/it/sniper-data/e2x1_dissect/select/creates_all.json"))
 # block clock
-S = np.load("/home/moiz/sniper-data/haqqml/fresh/tape/slots.npy"); s0 = int(S["slot"].min())
+S = np.load("/home/it/sniper-data/haqqml/fresh/tape/slots.npy"); s0 = int(S["slot"].min())
 bsz = np.zeros(int(S["slot"].max()) - s0 + 2); bsz[S["slot"].astype(np.int64) - s0] = S["maxi"].astype(np.int64) + 1
 def cc(s, i):
     k = s - s0; n = bsz[k] if 0 <= k < len(bsz) else 0.0

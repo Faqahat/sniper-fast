@@ -2,7 +2,7 @@
 # Needed by the dip engine (ops/dip/ENGINE_V1.md): trade history with TradeEvents comes from an executed feed; the trigger
 # comes from shreds. ZERO COST: subscribe only, nothing is ever sent. Feed URLs and tokens are never logged.
 # Owner runs it on the server (OK needed):
-#   scp -P 1996 ops/gap/feed_race_exec.toml it@84.32.100.36:/tmp/  &&  sudo cp /tmp/feed_race_exec.toml /root/gap/
+#   scp -P 1996 ops/gap/feed_race_exec.toml it@cyberfra:/tmp/  &&  sudo cp /tmp/feed_race_exec.toml /root/gap/
 #   sudo CFG=/root/gap/feed_race_exec.toml bash /root/gap/feed_race.sh 20 exec1
 #   python3 /root/gap/race_report.py /root/gap/race/race_exec1.log      # kaldera-tx lag vs the shred feeds, per tx
 # If kaldera-tx gets no data, the Constant-K plan may not include transaction streams (Kaldera's page says it does:

@@ -8,9 +8,9 @@
 # dip bots' relay use per leader kind and their rank. -> relay_race.json + printed tables.  READ-ONLY, local data only.
 import json, gzip, os, collections, statistics
 from multiprocessing import Pool
-TX = "/home/moiz/sniper-data/collect/run_20261023_1426/txs"
-SEL = "/home/moiz/sniper/ops/overnight/sel"; SP = "/home/moiz/sniper/ops/dip/speed"
-TIP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+TX = "/data/tapes/collect/run_20261023_1426/txs"
+SEL = "/home/it/sniper-data/overnight/sel"; SP = "/home/it/sniper/ops/dip/speed"
+TIP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 US = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 sc = json.load(open(f"{SP}/leaders/schedule_cur.json"))
 def lead(s):
@@ -18,7 +18,7 @@ def lead(s):
 KIND = {"JitoLabs": "jito", "AgaveBam": "bam", "FireBAM": "bam", "HarmonicAgave": "harmonic", "HarmonicFiredancer": "harmonic",
         "Firedancer": "firedancer", "Frankendancer": "firedancer", "Agave": "agave"}
 kind = {v: ("bam" if f.get("bam") else "jito" if f.get("jito") else "agave/other")
-        for v, f in json.load(open("/home/moiz/sniper/data/validators-meta.json"))["validators"].items()}
+        for v, f in json.load(open("/home/it/sniper/data/validators-meta.json"))["validators"].items()}
 for fn in os.listdir(SP):
     if fn.startswith("dip_") and fn.endswith(".jsonl"):
         for l in open(f"{SP}/{fn}"):

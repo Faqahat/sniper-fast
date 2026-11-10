@@ -23,5 +23,5 @@ L.append(f"- Reading: B6 {'held up' if b6.get('pnl', 0) > 0 else 'did NOT hold u
          f"({b6.get('per24', 0):+.1f}/24h vs +7.8 on test), and A6 {'held up' if a6.get('pnl', 0) > 0 else 'did NOT hold up'} "
          f"({a6.get('per24', 0):+.1f}/24h vs +5.4).")
 L.append("  - Only a few hours, and test hours were negative 13–20% of the time, so this is a sanity check, not proof.")
-open("/home/moiz/sniper/ops/strategies/presend/V2_OPTIONS.md", "a").write("\n".join(L) + "\n")
+open("/home/it/sniper/ops/strategies/presend/V2_OPTIONS.md", "a").write("\n".join(L) + "\n")
 print("\n".join(L))

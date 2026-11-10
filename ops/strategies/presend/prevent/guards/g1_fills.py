@@ -3,13 +3,13 @@
 the window's trigger (T2: the whale = trigger wallet, its balance at the trigger; re-arm: the dump seller + the holders the engine saw),
 the filled try's SIGNING position (presend_attempt "pos" = the newest trade the engine had seen when it signed) and its LANDING
 position (presend_live_fill slot, idx), the realized wallet P&L (presend_live_realized), the exit and the sell landing.
-Out: /home/moiz/sniper-data/prevent/guards/fills.pkl  (list of dicts) + per-run window counts.
+Out: /home/it/sniper-data/prevent/guards/fills.pkl  (list of dicts) + per-run window counts.
 usage: g1_fills.py"""
 import json, pickle, collections, os
-A = "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r{}.jsonl"
-F = "/home/moiz/sniper-data/runs/fra/runs/dip_r{}.jsonl"
+A = "/home/it/sniper-data/runs/ams/runs/dip_ams_r{}.jsonl"
+F = "/home/it/sniper-data/runs/fra/runs/dip_r{}.jsonl"
 RUNS = [("AMS", r, A.format(r)) for r in (16, 17, 19, 20, 24, 25, 26, 27, 34, 35, 36, 37, 38)] + [("FRA", r, F.format(r)) for r in (21, 22, 23, 24, 26, 27, 28)]
-OUT = "/home/moiz/sniper-data/prevent/guards"
+OUT = "/home/it/sniper-data/prevent/guards"
 
 
 def scan(reg, run, fn):

@@ -11,10 +11,10 @@ Per family: base rate, his picks vs skipped; GBDT (train = before newest 6 h, va
 forward return of the model's rate-matched picks on TEST. Out: s9.txt, s9_scores.npz.  META=1 env: + create-time metadata features (s16) -> s9_scores1.npz"""
 import sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from s4_model import MKT, auc
-OUT = "/home/moiz/sniper-data/e2x1_dissect/select"
+OUT = "/home/it/sniper-data/e2x1_dissect/select"
 U = dict(np.load(f"{OUT}/U.npz"))
 import os
 META = ["host_rate", "name_len", "sym_len", "sym_upper", "name_nonascii", "name_words", "vanity_pump"]

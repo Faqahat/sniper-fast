@@ -252,7 +252,7 @@ Results written 10-25 ~20:40 PKT.
 - Code (`ops/strategies/presend/real/`): `decode.py` + `build.py` (tape), `rlib.py` (clock, detector), `probes.py` +
   `donors.py` (live tries, view speed), `sim.py` (the replay), `calib.py`, `hours.py`, `variants.py`, `vreport.py`,
   `mktables.py`, `probehours.py`, `run_after.sh`.
-- Data (`/home/moiz/sniper-data/presend_real/`): `tab/` (merged tape), `donors.pkl`, `view_cdf.json`, `hours.json`,
+- Data (`/home/it/sniper-data/presend_real/`): `tab/` (merged tape), `donors.pkl`, `view_cdf.json`, `hours.json`,
   `calib_final.txt/json` (+ `_corr_final`, `_lag15`, and the earlier `smoke*` runs), `variants_<tag>_raw.pkl/.json/.log`
   for tags main, explo, explo055, size055, size075, corr, cut20, cut30, lag15, smoke_noours.
 - Re-run: `python3 calib.py --draws 400 --tag final`; `python3 variants.py --draws 4 --nulls 20 --tag main`;

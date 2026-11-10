@@ -2,8 +2,8 @@
 # read-only: per slot max tx index seen in raw chunks (lower bound of block size; pump-related txs only)
 import os, gzip, glob, json, zlib
 from multiprocessing import Pool
-W = "/home/moiz/sniper/ops/agents/headtohead/work"
-RUN = "/home/moiz/sniper-data/collect/run_20261023_1426/txs"
+W = "/home/it/sniper/ops/agents/headtohead/work"
+RUN = "/data/tapes/collect/run_20261023_1426/txs"
 def work(p):
     mx = {}
     try:

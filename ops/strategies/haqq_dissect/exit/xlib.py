@@ -1,9 +1,9 @@
-"""EXIT analyst shared helpers (read-only). Tape cut = /home/moiz/sniper-data/haqq_dissect/exit/tape.npy (x1_tape.py)."""
+"""EXIT analyst shared helpers (read-only). Tape cut = /home/it/sniper-data/haqq_dissect/exit/tape.npy (x1_tape.py)."""
 import pickle, sys, time, functools
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/exit"
+OUT = "/home/it/sniper-data/haqq_dissect/exit"
 SMS = 212.0
 DAY0 = L.DAY0
 pkt = L.pkt

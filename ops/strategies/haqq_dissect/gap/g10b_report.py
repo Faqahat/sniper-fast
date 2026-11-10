@@ -10,10 +10,10 @@ Walk-forward: policy for test day D = best calibrated-NOW total over ALL events 
 Out: gap/g10_tables.txt"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 from g1_walkforward import calib_boot
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 PSF = 0.45; PS_FILL_NOW = 0.00251; PS_FILL_CHEAP = 0.00066; PS_X = 0.000198
 COST = {"NOW": (0.00352, 0.00053), "CHEAP": (0.00066, 0.00004)}
 WREG = ("RIDE", 150, 300, 2000); WPS = ("RIDE", 150, 150, 1000)

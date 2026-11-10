@@ -4,7 +4,7 @@ Owner 10-28 23:00 PKT: "we need to improve QUIET". The AMS r34 screenshot shows 
 pump fees + tip + rent, price unchanged), held 1 slot, landed 17–19 ms after the dump, nobody bought after us.
 Offline replay only. Nothing sent, nothing deployed, no server written (only read-only `sudo grep` of the AMS records).
 MEASURED = live records + the raw chain recording. INFERRED = a proxy or a model. Times PKT.
-Code: `ops/strategies/presend/filter/quiet2/` (x1–x7 + their outputs x4–x7.txt). Data: `/home/moiz/sniper-data/presend_filter/quiet2/` (352 MB).
+Code: `ops/strategies/presend/filter/quiet2/` (x1–x7 + their outputs x4–x7.txt). Data: `/home/it/sniper-data/presend_filter/quiet2/` (352 MB).
 
 ## Short answer (phone)
 

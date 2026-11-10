@@ -1,7 +1,7 @@
 """Arm-time chain features (only trades up to and including the whale's trigger trade)."""
 import json, gzip, collections
 from feat import *
-CH = json.load(gzip.open("/home/moiz/sniper-data/presend_losses/chain_trades.json.gz", "rt"))
+CH = json.load(gzip.open("/home/it/sniper-data/presend_losses/chain_trades.json.gz", "rt"))
 SUP = 1e15
 def cfeats(r):
     a = r["arm"]; tr = CH.get(r["mint"])

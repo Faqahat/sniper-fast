@@ -5,9 +5,9 @@
 # -> printed per day
 import sys, json, zlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-OUT = "/home/moiz/sniper-data/strategies/sssss"
+OUT = "/home/it/sniper-data/strategies/sssss"
 FIX = 0.0035; FAIL = 0.0005; GUARD = 1.05; GRADV = 113e9
 def copy(d, t, lat):
     k0 = t["k0"]; ks = t["sells"][-1]["k"]; end = int(d["tend"][k0]); fr = float(d["fr"][k0])

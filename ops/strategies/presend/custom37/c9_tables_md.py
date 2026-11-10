@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CUSTOM37 step 9: the report's markdown tables from knobs.json (each knob alone) and final.json (policies). Out: stdout"""
 import json
-D = "/home/moiz/sniper-data/custom37"
+D = "/home/it/sniper-data/custom37"
 K = json.load(open(f"{D}/knobs.json")); F = json.load(open(f"{D}/final.json"))
 HTR, HTE = 30.7, 10.8
 ROWS = [("Limit depth", ["drop0.08", "drop0.10", "drop0.15", "drop0.18", "drop0.20", "drop0.25"]),

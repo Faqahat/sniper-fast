@@ -2,7 +2,7 @@
 """VERIFY step 10: read GUARDS' replay outputs (rp_*_sign0.15_open.json; data, not code) and split the guard's per-window change into
 (a) removed fill, no refill, (b) refill (guard filled, different P&L), (c) new fill where base had none; mean over reps."""
 import json, collections
-D = "/home/moiz/sniper-data/prevent/guards"
+D = "/home/it/sniper-data/prevent/guards"
 tot = collections.Counter()
 for run in ("f26", "f27", "f28", "r34", "r35", "r36", "r37"):
     d = json.load(open(f"{D}/rp_{run}_sign0.15_open.json")); reps = d["reps"]

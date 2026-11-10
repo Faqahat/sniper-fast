@@ -2,7 +2,7 @@
 
 Offline replay on the recorded tapes. Read-only, $0, no servers touched, nothing traded.
 MEASURED = chain data, tapes, and replays on them. INFERRED = my reading.
-Scripts: ops/strategies/presend/ (ps1–ps10). Data (0.7 GB): /home/moiz/sniper-data/strategies/presend/.
+Scripts: ops/strategies/presend/ (ps1–ps10). Data (0.7 GB): /home/it/sniper-data/strategies/presend/.
 (Saved by the main session: the study agent could not write this file itself.)
 
 ## Verdict

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Fetch the epoch-1067 leader schedule (read-only public RPC) into the same format as leaders/schedule_cur.json
-# (start, ids, slot_leader index list). Out: /home/moiz/sniper-data/competitors2/schedule_1067.json
+# (start, ids, slot_leader index list). Out: /home/it/sniper-data/competitors2/schedule_1067.json
 import json, urllib.request
 URL = "https://api.mainnet-beta.solana.com"
 def rpc(m, p):
@@ -14,5 +14,5 @@ sl = [-1] * LEN
 for k, v in sch.items():
     for o in v: sl[o] = idx[k]
 assert min(sl) >= 0
-json.dump(dict(epoch=1067, start=START, ids=ids, slot_leader=sl), open("/home/moiz/sniper-data/competitors2/schedule_1067.json", "w"))
+json.dump(dict(epoch=1067, start=START, ids=ids, slot_leader=sl), open("/home/it/sniper-data/competitors2/schedule_1067.json", "w"))
 print("ok", len(ids), "leaders")

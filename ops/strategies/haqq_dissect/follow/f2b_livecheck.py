@@ -6,11 +6,11 @@ Per window: crossings on the tape (our rows removed) in slots [trigger, end]; mo
 MEASURED live fill vs INFERRED model fill, by whether the window saw a crossing. Out: f2b.txt"""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/follow")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/follow")
 import dv8lib as L
 from f2_cross import landing_model, bk
-OUT = "/home/moiz/sniper-data/haqq_dissect/follow"
+OUT = "/home/it/sniper-data/haqq_dissect/follow"
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
     for i, m in enumerate(crm.tolist()): by[m].append(i)
     q_by = landing_model(R, (st, en))
     ids, idm = L.ids_map()
-    Gd = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/gap/g2_engine.pkl", "rb"))
+    Gd = pickle.load(open("/home/it/sniper-data/haqq_dissect/gap/g2_engine.pkl", "rb"))
     rng = np.random.default_rng(3)
     rows = []
     for run, Xr in Gd.items():

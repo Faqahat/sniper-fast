@@ -4,7 +4,7 @@ first-buy gap (slots, + = they buy after him), who is first, their buy size, the
 Same operator / same signal source / copier is INFERRED from these patterns (no funding data in the recordings)."""
 import sys, collections, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"]); MN, US = names(); uid = {u: i for i, u in enumerate(US)}
 sl = D["slot"].astype(np.int64); ix = D["idx"].astype(np.int64); us = D["user"].astype(np.int64); bu = D["buy"].astype(bool); so = D["sol"] / 1e9; mi = D["mint"]

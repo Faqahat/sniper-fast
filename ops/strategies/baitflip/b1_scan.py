@@ -2,12 +2,12 @@
 # BAIT-FLIP pass 1 (read-only, offline). Owner strategy: hold a position -> SELL + BUY in the same bundle (fake dump) ->
 # dip bots buy the "dump" -> sell into them. Find every real instance in R1-R3 (same wallet sells then buys the same mint
 # in the same slot, tx-index gap <= 2 or same tx) plus plain-sell controls, and record what outside traders do next.
-# -> /home/moiz/sniper-data/strategies/baitflip/{run}_bNNN.jsonl.gz, one JSON dict per event
+# -> /home/it/sniper-data/strategies/baitflip/{run}_bNNN.jsonl.gz, one JSON dict per event
 import os, json, gzip, glob, zlib, collections, sys
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"
-OUT = "/home/moiz/sniper-data/strategies/baitflip"
-RUNS = {"R1": ["phaseA"], "R2": ["phaseA_fwd"], "R3": ["phaseA_r3", "/home/moiz/sniper-data/strategies/phaseA_r3tail"]}
+D = "/data/tapes/collect"
+OUT = "/home/it/sniper-data/strategies/baitflip"
+RUNS = {"R1": ["phaseA"], "R2": ["phaseA_fwd"], "R3": ["phaseA_r3", "/home/it/sniper-data/strategies/phaseA_r3tail"]}
 GRADV = 113e9
 WIN = [0, 1, 2, 4, 8, 16]          # slots after the event slot (0 = rest of the event slot)
 MINSOL = 0.2e9

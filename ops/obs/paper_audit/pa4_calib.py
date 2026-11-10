@@ -8,7 +8,7 @@ Gross = SOL back after pump's fee - spend (the shadow's pnl definition). Live re
 usage: pa4_calib.py X.pkl OUT.pkl"""
 import sys, json, pickle, collections, statistics
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/obs/paper_audit")
+sys.path.insert(0, "/home/it/sniper/ops/obs/paper_audit")
 import pa_lib as L
 
 DS = (0.0, 2.0, 5.0, 10.0, 20.0, 40.0)

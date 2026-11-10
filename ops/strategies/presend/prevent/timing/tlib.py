@@ -1,7 +1,7 @@
 """TIMING library: online per-wallet timer hazard from the position table (t3 pos.npy) + the scoring helpers (pass bar)."""
 import json, pickle
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/timing"
+D = "/home/it/sniper-data/prevent/timing"
 I = json.load(open(f"{D}/hist_ids.json")); Ui = {x: k for k, x in enumerate(I["user"])}; Mi = {x: k for k, x in enumerate(I["mint"])}
 P = np.load(f"{D}/pos.npy"); P = P[np.lexsort((P["b0"], P["u"]))]
 UB = np.searchsorted(P["u"], np.arange(len(I["user"]) + 1))

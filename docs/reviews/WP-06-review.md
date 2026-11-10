@@ -376,7 +376,7 @@ Method:
 
 ## Mutants (tests that pass with the bug present)
 
-Each mutant was applied in the master tree, tested under `flock /home/moiz/arbx-offload/build.lock` with `CARGO_BUILD_JOBS=3` on the tree's own `target/`, and reverted from a byte copy. The sha256 of `src/exec.rs`, `src/build.rs`, `src/tip.rs` and `src/engine.rs` was re-checked after each one.
+Each mutant was applied in the master tree, tested under `flock /home/it/other/arbx-offload/build.lock` with `CARGO_BUILD_JOBS=3` on the tree's own `target/`, and reverted from a byte copy. The sha256 of `src/exec.rs`, `src/build.rs`, `src/tip.rs` and `src/engine.rs` was re-checked after each one.
 
 | # | Mutant | Tests run | Result |
 |---|---|---|---|
@@ -389,7 +389,7 @@ Each mutant was applied in the master tree, tested under `flock /home/moiz/arbx-
 
 ## Builds and tests run
 
-All runs held the global lock (`flock /home/moiz/arbx-offload/build.lock`) with `CARGO_BUILD_JOBS=3`. No other target directory was created; the harness used `CARGO_TARGET_DIR=/home/moiz/arbx-offload/targets/venue-harness`. Logs are in `scratchpad/r4/wp06-review/`.
+All runs held the global lock (`flock /home/it/other/arbx-offload/build.lock`) with `CARGO_BUILD_JOBS=3`. No other target directory was created; the harness used `CARGO_TARGET_DIR=/home/it/other/arbx-offload/targets/venue-harness`. Logs are in `scratchpad/r4/wp06-review/`.
 
 1. `cargo test --release` (master tree, clean snapshot): **445 passed, 0 failed, 5 ignored**. Only the 2 pre-existing warnings.
 2. `program/venue-harness`: `cargo test --release --test arbx_bundle -- --nocapture`: **1 passed**.
@@ -406,7 +406,7 @@ All runs held the global lock (`flock /home/moiz/arbx-offload/build.lock`) with 
 
 ## Disposition (2026-10-06, the fix in the master tree, committed as WP-06)
 
-**Where.** The fixes are in the uncommitted WP-06 work of the master tree (HEAD `20f6812`) and are committed with it as the WP-06 commit. Built with the tree's own `target/` under the global lock (`flock /home/moiz/arbx-offload/build.lock`, `CARGO_BUILD_JOBS=3`); the venue harness with `CARGO_TARGET_DIR=/home/moiz/arbx-offload/targets/venue-harness`. No new target directory. Nothing of lane/wp-07, lane/wp-20, the FT-000 fixes or integ/stage0 is merged here (their items are listed below, "For the merge with integ/stage0").
+**Where.** The fixes are in the uncommitted WP-06 work of the master tree (HEAD `20f6812`) and are committed with it as the WP-06 commit. Built with the tree's own `target/` under the global lock (`flock /home/it/other/arbx-offload/build.lock`, `CARGO_BUILD_JOBS=3`); the venue harness with `CARGO_TARGET_DIR=/home/it/other/arbx-offload/targets/venue-harness`. No new target directory. Nothing of lane/wp-07, lane/wp-20, the FT-000 fixes or integ/stage0 is merged here (their items are listed below, "For the merge with integ/stage0").
 
 **Results.**
 - `cargo build --release`: the 2 pre-existing warnings only (`main.rs:551`, `:559`, irrefutable `if let`).

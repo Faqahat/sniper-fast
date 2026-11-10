@@ -1,9 +1,9 @@
 # REGIME step 1: compact per-run extract of live pre-send trades, windows, try fees, shadow rows and market-wide dump events.
-# usage: rg1_extract.py OUT_DIR  (reads /home/moiz/sniper-data/runs/{ams,fra}/runs/*.jsonl read-only)
+# usage: rg1_extract.py OUT_DIR  (reads /home/it/sniper-data/runs/{ams,fra}/runs/*.jsonl read-only)
 import json, sys, os, pickle, collections
 from multiprocessing import Pool
 
-R = "/home/moiz/sniper-data/runs"
+R = "/home/it/sniper-data/runs"
 LIVE = [("ams", f"dip_ams_r{n}") for n in (16, 17, 19, 20, 24, 25, 26, 27, 34, 35, 36, 37, 38)] + \
        [("fra", f"dip_r{n}") for n in (21, 22, 23, 24, 26, 27, 28)]
 SHADOW = [("ams", f"dip_ams_r{n}") for n in (14, 15, 21, 22, 23)] + [("fra", f"dip_r{n}") for n in (15, 16, 20, 25)]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """HAQQ_SEL step 2 (read-only, offline): the regular-dip (M2) study rows for the 24 h window, built with the study's own code,
 unchanged (ops/select/a_extract.py -> patterns/p1_build.py -> dipdetect/dd1_build.py; the same three stages dd20_shadow_eval.py
-runs), at 0.50 SOL (DD_SIZE), into /home/moiz/sniper-data/haqq_sel/m2/work. Only paths are redirected:
+runs), at 0.50 SOL (DD_SIZE), into /home/it/sniper-data/haqq_sel/m2/work. Only paths are redirected:
   * the recording = a merged folder (symlinks) of run_20261026_1415 + run_20261027_1410 chunks covering the window -16/+11 min,
     and both runs' launches.jsonl concatenated;
   * the slot leaders (near-leader flags FRA / AMS) from the epoch 1068 / 1069 schedules (h0_schedule.py), since the study's
@@ -11,9 +11,9 @@ import os, sys, glob, json, time, pickle, shutil
 os.environ["DD_SIZE"] = "0.5"
 import numpy as np
 from multiprocessing import Pool
-DIPD = "/home/moiz/sniper/ops/strategies/dipdetect"; PATTERNS = "/home/moiz/sniper/ops/strategies/patterns"; SELECT = "/home/moiz/sniper/ops/select"
+DIPD = "/home/it/sniper/ops/strategies/dipdetect"; PATTERNS = "/home/it/sniper/ops/strategies/patterns"; SELECT = "/home/it/sniper/ops/select"
 sys.path.insert(0, DIPD)
-DATA = "/home/moiz/sniper-data/haqq_sel"; M2 = f"{DATA}/m2"; RUN = f"{M2}/run_HQ"; WORK = f"{M2}/work"; TAG = "HQ"
+DATA = "/home/it/sniper-data/haqq_sel"; M2 = f"{DATA}/m2"; RUN = f"{M2}/run_HQ"; WORK = f"{M2}/work"; TAG = "HQ"
 W0 = 1793038500; W1 = 1793124900
 PROCS = 10
 
@@ -21,7 +21,7 @@ PROCS = 10
 def setup_run():
     os.makedirs(f"{RUN}/txs", exist_ok=True); n = 0
     for r in ("run_20261026_1415", "run_20261027_1410"):
-        for f in sorted(glob.glob(f"/home/moiz/sniper-data/collect/{r}/txs/txs_*.jsonl.gz")):
+        for f in sorted(glob.glob(f"/data/tapes/collect/{r}/txs/txs_*.jsonl.gz")):
             ts = int(os.path.basename(f).split("_")[1].split(".")[0])
             if W0 - 16 * 60 <= ts <= W1 + 11 * 60:
                 dst = f"{RUN}/txs/{os.path.basename(f)}"
@@ -30,7 +30,7 @@ def setup_run():
     if not os.path.exists(f"{RUN}/launches.jsonl"):
         with open(f"{RUN}/launches.jsonl", "w") as o:
             for r in ("run_20261026_1415", "run_20261027_1410"):
-                for l in open(f"/home/moiz/sniper-data/collect/{r}/launches.jsonl"): o.write(l if l.endswith("\n") else l + "\n")
+                for l in open(f"/data/tapes/collect/{r}/launches.jsonl"): o.write(l if l.endswith("\n") else l + "\n")
     return sorted(glob.glob(f"{RUN}/txs/*.jsonl.gz"))
 
 
@@ -41,8 +41,8 @@ def leader_map():
     lead = np.full(2 * 432000, -1, np.int32)
     for s in scs:
         lead[s["start"] - LS0:s["start"] - LS0 + len(s["slot_leader"])] = [ix[s["ids"][i]] for i in s["slot_leader"]]
-    fra = {l.strip() for l in open("/home/moiz/sniper/ops/region/near_leaders_fra.txt") if l.strip()}
-    ams = {l.strip() for l in open("/home/moiz/sniper/ops/region/near_leaders_ams.txt") if l.strip()}
+    fra = {l.strip() for l in open("/home/it/sniper/ops/region/near_leaders_fra.txt") if l.strip()}
+    ams = {l.strip() for l in open("/home/it/sniper/ops/region/near_leaders_ams.txt") if l.strip()}
     nf = np.array([u in fra for u in ids]); na = np.array([u in ams for u in ids])
     return LS0, lead, ids, nf, na
 

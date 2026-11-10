@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """STATE step 1b [MEASURED engine paper, read-only]: the observatory re-arm windows (rule R0, dip24/dip25/dip26 obs log) of AMS r36, r37 (4 parts)
 and r38, with the engine's paper fill per row (a/b/c) and its paper P&L (% of size) per exit variant; plus the obs rearm_cand rejects.
-Out: /home/moiz/sniper-data/prevent/state/obs_rearm.pkl"""
+Out: /home/it/sniper-data/prevent/state/obs_rearm.pkl"""
 import json, pickle, glob
-OUT = "/home/moiz/sniper-data/prevent/state"
-R = "/home/moiz/sniper-data/runs/ams/runs"
+OUT = "/home/it/sniper-data/prevent/state"
+R = "/home/it/sniper-data/runs/ams/runs"
 FILES = {"r36": [f"{R}/dip_ams_r36.obs.jsonl"],
-         "r37": [f"{R}/dip_ams_r37.obs.jsonl.1", f"{R}/dip_ams_r37.obs.jsonl.2", "/home/moiz/sniper-data/multiarm/raw/r37.obs.jsonl.3", f"{R}/dip_ams_r37.obs.jsonl"],
+         "r37": [f"{R}/dip_ams_r37.obs.jsonl.1", f"{R}/dip_ams_r37.obs.jsonl.2", "/home/it/sniper-data/multiarm/raw/r37.obs.jsonl.3", f"{R}/dip_ams_r37.obs.jsonl"],
          "r38": [f"{R}/dip_ams_r38.obs.jsonl"]}
 
 

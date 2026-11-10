@@ -5,7 +5,7 @@ H = 296.5 ms after the fill on the real block clock), with the follower-drop mod
 fixed cost net of the ATA refund). Failed-try fees are added from the try-level model (pa11) in the report.
 usage: pa15_skips_port.py X.pkl OUT.json [H_ms]"""
 import sys, json, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/obs/paper_audit")
+sys.path.insert(0, "/home/it/sniper/ops/obs/paper_audit")
 import pa_lib as L
 
 FIX_CASH = (3523961 - 1508820) / 1e9

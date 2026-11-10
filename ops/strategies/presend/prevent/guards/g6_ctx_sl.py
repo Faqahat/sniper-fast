@@ -12,8 +12,8 @@ Variants (holders = wallets but ours and the whale with >= 6% of supply at the t
 usage: g6_ctx_sl.py RUN REPS OUT.json"""
 import sys, json, inspect, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/guards")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/guards")
 import c37lib as L
 import glib as G
 run, reps, outp = sys.argv[1], int(sys.argv[2]), sys.argv[3]

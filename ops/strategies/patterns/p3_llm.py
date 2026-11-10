@@ -5,9 +5,9 @@
 # the shared ledger (kinds "pat_*"); this task's cap is $40 (checked before every submit with a worst-case bound).
 #   python3 p3_llm.py prep r1 | submit r1 | status r1 | fetch r1        (round 2/3 prompts are written by p6_round.py)
 import sys, os, json, time, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies")
+sys.path.insert(0, "/home/it/sniper/ops/strategies")
 import s4_llm as S
-PO = "/home/moiz/sniper-data/strategies/patterns"; WK = f"{PO}/llm"
+PO = "/home/it/sniper-data/strategies/patterns"; WK = f"{PO}/llm"
 CAP = 40.0; PER = int(os.environ.get("PER", "20")); MAXTOK = 16000
 FEATDOC = """FEATURES (all measured at the trigger trade, using only trades up to and including it; no look-ahead):
  trigger trade: ev_buy (1 buy / 0 sell), sol (SOL size), move (% price change caused by this trade, + for buys),

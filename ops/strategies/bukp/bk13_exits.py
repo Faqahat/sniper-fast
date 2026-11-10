@@ -10,11 +10,11 @@
 # -> bukp/exit_families.json
 import sys, json, zlib, itertools
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/bukp")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies/bukp")
 import p4_eval as E
 import bk8_replica as B8
 from multiprocessing import get_context
-OUT = "/home/moiz/sniper-data/strategies/bukp"; UID = B8.UID
+OUT = "/home/it/sniper-data/strategies/bukp"; UID = B8.UID
 CAPS = {"60s": 283, "120s": 566, "180s": 849, "300s": 1417}
 FAMS = []
 for T in (0.03, 0.05, 0.08, 0.10, 0.12, 0.15, 0.20):

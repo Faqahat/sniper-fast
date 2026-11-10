@@ -4,7 +4,7 @@ window's arm slot; tries SENT in the 2 slots up to the dump; tries that landed B
 Out: sniper-data/haqq_dissect/front/g6.txt"""
 import pickle, collections, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); out.append(s)

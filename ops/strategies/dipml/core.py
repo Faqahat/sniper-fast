@@ -8,7 +8,7 @@ history is in the recording. Chain order = (slot, tx index, event index).
 import json, os
 import numpy as np
 
-D = "/home/moiz/sniper-data/dipml"
+D = "/home/it/sniper-data/dipml"
 SLOT_SEC = 0.21207            # measured: block time vs slot over the 3.3 days recorded (fit 0.21207 s/slot)
 K0 = 30e9 * 1.073e15          # pump.fun constant product (lamports x token units)
 S0 = 459_700_000              # slot origin for packed keys
@@ -151,7 +151,7 @@ def features(D, kidx, mode="model"):
 
 # ---- the frozen model: my own evaluator of its json (edges + trees) -------------------------------------------
 class Model:
-    def __init__(self, path="/home/moiz/sniper-landfix/ops/landfix/vm1.json"):
+    def __init__(self, path="/home/it/sniper-studies/sniper-landfix/ops/landfix/vm1.json"):
         j = json.load(open(path))
         assert j["features"] == FEATS, "feature order differs"
         self.edges = [np.array(e, float) for e in j["edges"]]; self.F0 = j["F0"]; self.lr = j["lr"]; self.cut = j["cut"]

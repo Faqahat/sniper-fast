@@ -8,9 +8,9 @@ slots, trades so far.
 Out: bots/b11.npz (envelope mask + OOS scores), b11.txt"""
 import sys, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_gbdt as G
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 
 
 def auc(s, y):

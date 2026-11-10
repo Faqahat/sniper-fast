@@ -11,8 +11,8 @@
 # landing rows L2 / L4 / L8 / L12 / L20; deadline +2 = attempts fail only when they land >= 3 slots after their send slot).
 import sys, json, collections
 import numpy as np
-F = sys.argv[1] if len(sys.argv) > 1 else "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
-OUT = "/home/moiz/sniper-data/presend_v2/c3_model"
+F = sys.argv[1] if len(sys.argv) > 1 else "/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
+OUT = "/home/it/sniper-data/presend_v2/c3_model"
 LOG = []
 def say(*a):
     s = " ".join(str(x) for x in a); print(s, flush=True); LOG.append(s)

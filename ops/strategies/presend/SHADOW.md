@@ -13,10 +13,10 @@ Nothing was deployed. No server was touched. Nothing was committed.
   line, which gets an extra part that is empty when the flag is off.
 - **Cost (MEASURED on this machine):** 0.36 µs per trade on average, including its records. It runs after the IMIT1
   decision, any send and the exits of each tx, so it never delays a send.
-- **Binary (not deployed):** `/home/moiz/sniper-data/strategies/presend/bin/snipe_engine_dip12_presend`, 78,224,608 bytes,
+- **Binary (not deployed):** `/home/it/sniper-data/strategies/presend/bin/snipe_engine_dip12_presend`, 78,224,608 bytes,
   sha256 `4f3fac863cd2788e8d6ff69e2197a6c611662f7b086fac3658281336b20fa6e7`.
   - Built from today's uncommitted tree (dip10 nonce fan-out + M2 shadow) plus this shadow. The M2 flags work as before.
-  - Same file as `/home/moiz/sniper/target/release/snipe_engine` until the next build.
+  - Same file as `/home/it/sniper/target/release/snipe_engine` until the next build.
 - **Found while porting (MEASURED replay, study code):** 29% of T2 windows (R4) are not "whale buys". They are the create's
   signer buying in its own create tx (see below). They lose money on all 4 study days. The shadow keeps them, because the
   study code has them. The evaluator splits them out.
@@ -118,7 +118,7 @@ In `--dip-log` (one JSON line each):
 1. Engine: use the new binary and add `--presend-shadow` to the `--dip` command (defaults = the study config). The prod
    script `ops/prod/run_dip_prod.sh` was NOT changed (rule); it needs a pass-through like `--m2` and the binary path.
 2. After the run, on this machine:
-   `python3 ops/strategies/presend/ps11_shadow_eval.py --jsonl dip_rN.jsonl dip_ams_rN.jsonl --run /home/moiz/sniper-data/collect/run_<…> [--from "MM-DD HH:MM" --to "MM-DD HH:MM"] [--work DIR] [--procs 4]`
+   `python3 ops/strategies/presend/ps11_shadow_eval.py --jsonl dip_rN.jsonl dip_ams_rN.jsonl --run /data/tapes/collect/run_<…> [--from "MM-DD HH:MM" --to "MM-DD HH:MM"] [--work DIR] [--procs 4]`
    - It rebuilds the tape from the raw recording with the study's code (a_extract → p1_build), re-detects T2 with ps4 `work`
      + ps5, and compares every live record (parity). Unmatched windows are explained (no history, engine not running, the
      study's tape rules).

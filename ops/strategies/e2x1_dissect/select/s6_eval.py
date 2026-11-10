@@ -3,7 +3,7 @@
 that slot on the mint; label = he bought within 1 slot of any event of the moment. Forward = market px change from the moment's
 last event px to +2/+5/+24/+141 slots (f*) and from one slot later (g*). Negatives are a 4 % sample (weight 25)."""
 import numpy as np, json
-OUT = "/home/moiz/sniper-data/e2x1_dissect/select"
+OUT = "/home/it/sniper-data/e2x1_dissect/select"
 U = np.load(f"{OUT}/U.npz"); Sc = np.load(f"{OUT}/s4_scores.npz")
 rows = Sc["rows"]; te = Sc["te"]; s = Sc["s"]
 r = rows[te]; s = s[te]

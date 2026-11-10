@@ -11,7 +11,7 @@ import sys, os, glob, json, pickle, time
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 from pm1_extract import load_chunk, OUT as TMP
-OUT = "/home/moiz/sniper-data/strategies/postmig"
+OUT = "/home/it/sniper-data/strategies/postmig"
 SIGWIN = 3000; FAILWIN = 3000
 WSOL = "So11111111111111111111111111111111111111112"
 

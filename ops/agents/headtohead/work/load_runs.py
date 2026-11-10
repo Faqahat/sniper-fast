@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # read-only loader for our run records -> work/runs.json (dumps, fires, outcomes per fire)
 import json, collections
-SP = "/home/moiz/sniper/ops/dip/speed"
+SP = "/home/it/sniper/ops/dip/speed"
 dumps = {}; fires = []
 for r in range(1, 6):
     rows = []
@@ -36,7 +36,7 @@ for r in range(1, 6):
             t = o["timing"]; f["timing"] = {k: t.get(k) for k in ("reaction_ms", "fire_to_seen_ms", "exec_lag_ms", "land_ms_poh", "dump_poh", "buy_poh", "dump_first_feed", "buy_first_feed", "dump_first_rx", "dump_exec_rx", "buy_first_rx", "slot_ms")}
         f["result"] = o.get("close", {}).get("result")
         fires.append(f)
-json.dump(dict(dumps=list(dumps.values()), fires=fires), open("/home/moiz/sniper/ops/agents/headtohead/work/runs.json", "w"))
+json.dump(dict(dumps=list(dumps.values()), fires=fires), open("/home/it/sniper/ops/agents/headtohead/work/runs.json", "w"))
 print(len(dumps), "dumps", len(fires), "fires")
 print(collections.Counter(f["result"] for f in fires))
 miss = [f["dump_sig"][:8] for f in fires if f["dump_sig"] not in dumps]

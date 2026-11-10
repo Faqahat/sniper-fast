@@ -2,7 +2,7 @@
 # e17: export the learned exit (3-seed GBDT ensemble) as one JSON bundle an engine port can read (same idea as the M2 bundle):
 # feature list with definitions, per-model bin edges (exact floats as strings), trees (feature index, bin threshold, leaves),
 # decision rule. Self-check: re-scoring the study rows from the JSON reproduces the study's predictions exactly.
-# -> /home/moiz/sniper-data/exits/exit_learned_ens3.json
+# -> /home/it/sniper-data/exits/exit_learned_ens3.json
 import sys, os, json, pickle, hashlib
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

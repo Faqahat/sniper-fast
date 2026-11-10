@@ -7,9 +7,9 @@ import os, sys, json, time, calendar, zlib, collections
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); PS = os.path.dirname(HERE)
 sys.path.insert(0, PS)
-OUT = "/home/moiz/sniper-data/presend_v2"
-TAPE = {"R1": "/home/moiz/sniper-data/strategies/patterns/day_R1", "R2": "/home/moiz/sniper-data/strategies/patterns/day_R2",
-        "R3": "/home/moiz/sniper-data/strategies/patterns/day_R3", "R4": f"{OUT}/tape_R4/day_PS",
+OUT = "/home/it/sniper-data/presend_v2"
+TAPE = {"R1": "/home/it/sniper-data/strategies/patterns/day_R1", "R2": "/home/it/sniper-data/strategies/patterns/day_R2",
+        "R3": "/home/it/sniper-data/strategies/patterns/day_R3", "R4": f"{OUT}/tape_R4/day_PS",
         "R5": f"{OUT}/tape_R5/day_PS"}      # R5 = fresh hours after the analysis (same recording, rebuilt from 10-24 19:25 so tokens keep history)
 COLS = ("tok", "s", "i", "arr", "buy", "sol", "tokn", "vsol", "vtok", "fr", "slack", "wt", "bt", "uid")
 pk = lambda s: calendar.timegm(time.strptime("2026-" + s, "%Y-%m-%d %H:%M")) - 18000
@@ -49,10 +49,10 @@ def hours(day):
 CLS = ["unk", "bam", "jito", "harmonic", "fd", "agave", "rakurai"]
 CMAP = {"AgaveBam": "bam", "FireBAM": "bam", "JitoLabs": "jito", "HarmonicAgave": "harmonic", "HarmonicFiredancer": "harmonic",
         "Firedancer": "fd", "Frankendancer": "fd", "Agave": "agave", "Rakurai": "rakurai"}
-SCHED = ["/home/moiz/sniper-data/haqq/schedule_1065.json", "/home/moiz/sniper/ops/dip/speed/leaders/schedule_cur.json",
-         "/home/moiz/sniper-data/competitors2/schedule_1067.json"]
-GEO = "/home/moiz/sniper/ops/dip/speed/leaders/leader_geo.json"
-PROBE = "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
+SCHED = ["/home/it/sniper-data/haqq/schedule_1065.json", "/home/it/sniper/ops/dip/speed/leaders/schedule_cur.json",
+         "/home/it/sniper-data/competitors2/schedule_1067.json"]
+GEO = "/home/it/sniper/ops/dip/speed/leaders/leader_geo.json"
+PROBE = "/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"
 _LC = {}
 def leader_classes():
     """-> (s0, cls array int8 over slots s0 .. s0 + n - 1, raw client names per validator id) ; cached"""

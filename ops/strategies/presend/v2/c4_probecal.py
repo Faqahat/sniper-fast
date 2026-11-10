@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import v2data as V
 import v2eng as E
 ap = argparse.ArgumentParser()
-ap.add_argument("--jsonl", default="/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"); ap.add_argument("--day", default="R4")
+ap.add_argument("--jsonl", default="/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"); ap.add_argument("--day", default="R4")
 ap.add_argument("--size", type=float, default=0.2); ap.add_argument("--rows", default="c,r4,P,L4,L4x,L8,L8x,L20")
 ap.add_argument("--W", type=int, default=10); ap.add_argument("--ex", default="c2_tp10_sl20"); ap.add_argument("--y", type=float, default=0.12)
 ap.add_argument("--out", default="c4_probecal")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """HOLDER LEDGER seed + replay (engine dip37 --presend-live-holder-loss PCT:SOL:WIN, --presend-live-holder-state FILE) [MEASURED, read-only].
 
-The rule (ideas_a HOLD X2 n1 s0.1 wp0.05 age1, /home/moiz/sniper-ideas-a/ideas.py + sim.py + load.py, frozen): a position's KEYS are its holders
+The rule (ideas_a HOLD X2 n1 s0.1 wp0.05 age1, /home/it/sniper-studies/sniper-ideas-a/ideas.py + sim.py + load.py, frozen): a position's KEYS are its holders
 >= PCT% known at the decision (the re-arm arm record's "holders" + the fill's ann.holders at landing), the T2 whale / re-arm dumper excluded
 (ours are never in those lists). Every realized position adds [1, its P&L] to each key and keeps each key's best single position (the win
 protection). A decision is BLOCKED when one of its keys (landing holders only with age >= 1 slot) has >= 1 position, a summed P&L <= -SOL

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PRESEND FILTER, step 4: one row per armed live window of every studied run (never r26): its measured value, labels and
-DECISION-TIME features. Writes /home/moiz/sniper-data/presend_filter/windows.json
+DECISION-TIME features. Writes /home/it/sniper-data/presend_filter/windows.json
 
 KNOWABLE-WHEN (the rule for every feature; checked in check_time.py):
   ARM features use only chain rows strictly before the trigger tx in chain order (slot, idx, j), plus the trigger itself (it is the
@@ -26,7 +26,7 @@ def main():
     cr = json.load(open(f"{B}/creates.json"))
     E = np.load(f"{B}/events.npz")
     our_fail = {k: v[2] for k, v in json.load(open(f"{B}/our_fails.json")).items()}
-    coh = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
+    coh = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
     cohid = {C.wid[w] for w in coh if w in C.wid}
     # follower-bot list FROZEN before every studied run: follow-buys with bt < 10-25 22:00 PKT (1792948200)
     FROZEN = 1792948200

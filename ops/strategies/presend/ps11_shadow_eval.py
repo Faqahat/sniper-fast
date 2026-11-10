@@ -16,7 +16,7 @@
 #  (c) per server (each --jsonl file is one server: "ams" in the file name = AMS, else FRA) and both servers pooled (2 servers).
 # Pre-sent orders need no near leader: every window counts on every server (the study). The reactive bot's overlap is read from
 # the fill records' "imit" marks (the IMIT1 / M2 decision on the crossing trade).
-# usage: python3 ps11_shadow_eval.py --jsonl dip_rN.jsonl [dip_ams_rN.jsonl] --run /home/moiz/sniper-data/collect/run_<date>_<time>
+# usage: python3 ps11_shadow_eval.py --jsonl dip_rN.jsonl [dip_ams_rN.jsonl] --run /data/tapes/collect/run_<date>_<time>
 #          [--from "MM-DD HH:MM" --to "MM-DD HH:MM"] (PKT; default = the live records' span) [--work DIR] [--procs 4]
 #        TESTS: --day R4 (use the study's own day array instead of building one from --run)
 #               --make-synthetic OUT.jsonl (write live-format records from the OFFLINE detection, then exit)
@@ -28,8 +28,8 @@ sys.path.insert(0, HERE)
 import ps_common as C
 import ps4_replay as P4
 import ps5_lib as E
-PATTERNS = "/home/moiz/sniper/ops/strategies/patterns"; SELECT = "/home/moiz/sniper/ops/select"
-COLLECT = "/home/moiz/sniper-data/collect"
+PATTERNS = "/home/it/sniper/ops/strategies/patterns"; SELECT = "/home/it/sniper/ops/select"
+COLLECT = "/data/tapes/collect"
 TAG = "PS"
 CFG = dict(W=10, y=0.12, size=0.55, ex="c2_tp10_sl20", htype=3, hpct_min=5.0)
 LIVE_ROWS = ("a", "b", "c"); ALL_ROWS = ("a", "b", "c", "r20", "r4", "r1")

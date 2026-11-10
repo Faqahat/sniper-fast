@@ -14,7 +14,7 @@ Costs per landed buy / sell / failed buy, SOL: NOW 0.00175 / 0.00177 / 0.00053 (
 Out: dv8/g1.txt, dv8/g1.json, dv8/g1_picks.pkl"""
 import json, pickle, heapq, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_gbdt as G
 import dv8lib as L
 out = []

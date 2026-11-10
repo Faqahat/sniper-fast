@@ -2,9 +2,9 @@
 # read-only: raw chunks -> txs touching probe mints within [S-2, S+8] of the probe dump. out: work/extp/<chunk>.jsonl.gz
 import sys, os, gzip, glob, json, zlib, bisect
 from multiprocessing import Pool
-W = "/home/moiz/sniper/ops/agents/headtohead/work"
-RUN = "/home/moiz/sniper-data/collect/run_20261023_1426/txs"
-SP = "/home/moiz/sniper/ops/dip/speed"
+W = "/home/it/sniper/ops/agents/headtohead/work"
+RUN = "/data/tapes/collect/run_20261023_1426/txs"
+SP = "/home/it/sniper/ops/dip/speed"
 WIN = {}; probes = []
 for p in "ABCDE":
     for l in open(f"{SP}/probe{p}.jsonl"):

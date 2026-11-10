@@ -1,14 +1,14 @@
 """REGIME step 5: per-run tables (20 live + 9 PAPER) for the key rules, r38 from 03:24, and the after-drop base rate (INFERRED r38
 continuation). usage: rg5_tables.py"""
 import sys, pickle, json, collections, datetime as dt
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/regime")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/regime")
 import rg_lib as G
 import rg2_core as C
 import importlib.util
-OUT = "/home/moiz/sniper-data/prevent/regime"
+OUT = "/home/it/sniper-data/prevent/regime"
 D = pickle.load(open(f"{OUT}/runs.pkl", "rb"))
 live, paper = D["live"], D["paper"]
-spec = importlib.util.spec_from_file_location("L4", "/home/moiz/sniper/ops/strategies/presend/prevent/regime/rg4_locks_signals.py")
+spec = importlib.util.spec_from_file_location("L4", "/home/it/sniper/ops/strategies/presend/prevent/regime/rg4_locks_signals.py")
 import io, contextlib
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):

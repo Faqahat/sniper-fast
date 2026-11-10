@@ -5,8 +5,8 @@
 # idx), SOL transfers in/out (funding). -> sssss/raw_profile.json + sssss/attempts.jsonl (failed buys/sells of sssssDdM)
 import json, glob, os, collections, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/sssss"
-TIP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+OUT = "/home/it/sniper-data/strategies/sssss"
+TIP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 FLEET = {"sssssDdMNAWKingjpEojkTNdVuZrBe7FsJLaGtexe7d": "DdM", "ssssswdk4RR8HqkE3uwUWzDbd6mXFTTPjcXBKNzQ57E": "wdk",
          "sssssCUP5wgSW3sxjtQNa7u88ytE4st2Z7goX5kKNwi": "CUP", "sssssyv2q57u9sJrL1BB7Ep71X6YBY71iYt7CtHB5zJ": "yv2"}
 RUNTAG = {"run_20261021_2207": "R1", "run_20261022_1543": "R2", "run_20261023_1426": "R3", "run_20261024_1425": "R4"}

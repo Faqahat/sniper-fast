@@ -4,7 +4,7 @@ entry, our two wallets removed after the entry, 300 slots), PLUS the user id of 
 Out: sellid/ourpaths_us.pkl"""
 import pickle, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 HZ = 300
 
@@ -30,7 +30,7 @@ def main():
                  timer_slots=r.get("timer_slots"), spend=r["spend"])
         p["sells"] = [(int(np.searchsorted(js, kk)), float(M.tk[kk])) for kk in r["sk"]]
         out.append(p)
-    pickle.dump(out, open("/home/moiz/sniper-data/haqq_dissect/sellid/ourpaths_us.pkl", "wb"))
+    pickle.dump(out, open("/home/it/sniper-data/haqq_dissect/sellid/ourpaths_us.pkl", "wb"))
     print("positions", len(out))
 
 

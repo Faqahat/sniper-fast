@@ -727,7 +727,7 @@ def main():
     ap.add_argument("--engine", nargs="*")
     ap.add_argument("--engine-host", default="auto", choices=["auto", "fra", "ams"])
     ap.add_argument("--race", nargs="*")
-    ap.add_argument("--collect-root", default="/home/moiz/sniper-data/collect")
+    ap.add_argument("--collect-root", default="/data/tapes/collect")
     ap.add_argument("--from", dest="t_from")
     ap.add_argument("--to", dest="t_to")
     ap.add_argument("--whale-pct", type=float, default=None)

@@ -3,12 +3,12 @@
 Chain = quiet3 chain.npz (to 10-29 07:16 PKT) + young ext (to ~09:11 PKT). Out: tapes.pkl {sig: list of tuples}
 tuple = (slot, idx, j, buy, sol, tok, vsol, vtok, user_str)"""
 import json, pickle, numpy as np
-D = "/home/moiz/sniper-data/presend_young"
+D = "/home/it/sniper-data/presend_young"
 T = json.load(open(f"{D}/trig.json"))["rows"]
 want = {}
 for r in T: want.setdefault(r["mint"], []).append(r)
 out = {}
-for npz, ids in (("/home/moiz/sniper-data/presend_quiet3/chain.npz", "/home/moiz/sniper-data/presend_quiet3/ids.json"),
+for npz, ids in (("/home/it/sniper-data/presend_quiet3/chain.npz", "/home/it/sniper-data/presend_quiet3/ids.json"),
                  (f"{D}/ext/chain.npz", f"{D}/ext/ids.json")):
     I = json.load(open(ids)); ml = I["mint"]; ul = I["user"]
     mid = {m: k for k, m in enumerate(ml) if m in want}

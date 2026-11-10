@@ -10,7 +10,7 @@
 # usage: python3 replay_seller_type.py [days...]
 import sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import json
 import dd_lib as L
 import dd20_shadow_eval as D20

@@ -11,7 +11,7 @@ Same-slot / idx gap of the trade right before the sell.
 Out: sellid/s3.txt"""
 import pickle, sys, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 SMS = 212.0
 out = []
 def P(*a):

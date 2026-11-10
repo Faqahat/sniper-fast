@@ -1,7 +1,7 @@
 # E2X1 — SELECTION (agent "select", 10-28 PKT)
 
 Wallet **E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb** ([GMGN](https://gmgn.ai/sol/address/E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb)).
-Code: this folder (s0–s22). Data: /home/moiz/sniper-data/e2x1_dissect/select/ (s*.txt are the raw outputs quoted here).
+Code: this folder (s0–s22). Data: /home/it/sniper-data/e2x1_dissect/select/ (s*.txt are the raw outputs quoted here).
 
 ## Data
 - **Tape:** every pump.fun trade, 10-22 03:13 → 10-28 18:41 PKT (**6.64 days**).

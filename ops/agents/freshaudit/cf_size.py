@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # size sensitivity: replay our 68 fires at their actual landing positions (and first-in-line) with different buy sizes
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from sim import *
-A = "/home/moiz/sniper/ops/agents/freshaudit"
+A = "/home/it/sniper/ops/agents/freshaudit"
 TP = load_tapes(f"{A}/out/tapes_live.json.gz")
 FC = [x for x in json.load(open(f"{A}/out/fire_chain.json")) if "dump" in x and "ours" in x]
 SIZES = [0.1, 0.25, 0.35, 0.5, 0.75, 1.0, 1.5, 2.0]

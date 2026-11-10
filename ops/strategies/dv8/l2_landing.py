@@ -9,7 +9,7 @@ regular-fire delay for far leaders (INFERRED).
 Out: dv8/l2.txt, dv8/landing_model.json, dv8/fires_tape.pkl (fires + tape-derived fields)"""
 import json, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 out = []
 def P(*a):

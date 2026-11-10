@@ -1,9 +1,9 @@
 """select2 shared helpers (read-only on other agents' data)."""
 import numpy as np, json, time, functools
-OUT = "/home/moiz/sniper-data/e2x1_dissect/select2"
+OUT = "/home/it/sniper-data/e2x1_dissect/select2"
 SCR = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/e2x1_select2"
-SEL = "/home/moiz/sniper-data/e2x1_dissect/select"
-TP = "/home/moiz/sniper-data/haqqml/fresh/tape"
+SEL = "/home/it/sniper-data/e2x1_dissect/select"
+TP = "/home/it/sniper-data/haqqml/fresh/tape"
 W = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
 SIB = "Grozoe2Lk9yu7kWPcCMuWEbrnuBYseBExkYAuHPRJUdJ"
 COPIERS = ["4mYySb7Z74EK9c6AzSmRRbsd5NjRKeU2yjMF6nfz8ctD", "Hj4uACn8Jp2QvbMFhkhWWCdHPzC2SEXg7fhpZayYVcyL",

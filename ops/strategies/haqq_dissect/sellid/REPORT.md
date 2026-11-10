@@ -1,5 +1,5 @@
 # Analyst N (sellid): his sells react to PAUSES, not to specific wallets (10-28 ~04:35 PKT)
-Saved by the main session from the agent's reply. Code: this folder (s1–s12). Data: /home/moiz/sniper-data/haqq_dissect/sellid/ (s11, s2, s3, s4, s6, s6b, s7, s8, s9 .txt; s12_presell.tsv.gz; s10_examples.json).
+Saved by the main session from the agent's reply. Code: this folder (s1–s12). Data: /home/it/sniper-data/haqq_dissect/sellid/ (s11, s2, s3, s4, s6, s6b, s7, s8, s9 .txt; s12_presell.tsv.gz; s10_examples.json).
 
 ## Verdict (MEASURED, 10-22 → 10-28)
 - **The wallet-trigger hypothesis is rejected.** Sell vs random moments in the same lots:

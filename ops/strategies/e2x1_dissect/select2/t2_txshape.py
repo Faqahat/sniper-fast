@@ -5,8 +5,8 @@ route (sorted set of non-standard program ids, dictionary id), ixh (hash of the 
 Also per-slot block size (max tx index of ANY recorded line + 1) for the chain clock. Output: SCR/shape/<file>.npz, merged in t3."""
 import sys, os, re, json, hashlib, subprocess, numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
-TIP = json.load(open("/home/moiz/sniper-data/e2x1_dissect/recon/tipmap.json"))
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+TIP = json.load(open("/home/it/sniper-data/e2x1_dissect/recon/tipmap.json"))
 RELAYS = sorted(set(TIP.values())); RID = {r: i + 1 for i, r in enumerate(RELAYS)}
 STD = {"11111111111111111111111111111111", "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
        "ComputeBudget111111111111111111111111111111", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",

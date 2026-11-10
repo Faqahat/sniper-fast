@@ -428,7 +428,7 @@ Fill gains use the SPEED_TRUTH guard curve: landing 10 ms → 85–93% pass, 20 
 
 ## 9. Sources
 
-**Code** (shallow, read-only, `/home/moiz/sniper-data/clients_src/`, ~650 MB; nothing built or run):
+**Code** (shallow, read-only, `/home/it/sniper-data/clients_src/`, ~650 MB; nothing built or run):
 
 | folder | repo @ version |
 |---|---|
@@ -468,7 +468,7 @@ Fill gains use the SPEED_TRUTH guard curve: landing 10 ms → 85–93% pass, 20 
   - Others: astralane.gitbook.io, 0slot.trade/docs.html, glaive.trade/docs, speedlanding.trade/docs.html, bolttx.io/en/docs
 - Third-party (LOW TRUST): github.com/EvgeniuGlinsky/inside-the-block (10-22 probes: sent 30 ms apart → arrival decides on every client; sent together on a shared account → fee decides).
 
-**Our analysis** (scripts in `ops/dip/speed/clients/`, output in `/home/moiz/sniper-data/clients_study/`)
+**Our analysis** (scripts in `ops/dip/speed/clients/`, output in `/home/it/sniper-data/clients_study/`)
 
 | script | what it does |
 |---|---|
@@ -480,7 +480,7 @@ Fill gains use the SPEED_TRUTH guard curve: landing 10 ms → 85–93% pass, 20 
 | c8/c10/c13 | order vs CU price |
 | c9, c11 | next-slot index, time-left model |
 
-**Our data:** `/home/moiz/sniper-data/speed_truth/attempts.csv` (309 live attempts) and `chain_txs.json`; leader books `ops/dip/speed/leaders/leader_rtt_new.json` and `ops/region/leader_rtt_ams.json` (gossip snapshot 10-23).
+**Our data:** `/home/it/sniper-data/speed_truth/attempts.csv` (309 live attempts) and `chain_txs.json`; leader books `ops/dip/speed/leaders/leader_rtt_new.json` and `ops/region/leader_rtt_ams.json` (gossip snapshot 10-23).
 
 **Caveats**
 - Leader client and TPU front come from one gossip snapshot (10-23). Labels can change; AgaveBam shows only while BAM is connected.

@@ -3,8 +3,8 @@
 # Tapes: patterns/day_R1..R3.npz, dipdetect/day_R4.npz (p1_build.py columns). Only successful trades are in the tapes.
 import json, time, calendar, zlib
 import numpy as np
-PO = "/home/moiz/sniper-data/strategies/patterns"; DD = "/home/moiz/sniper-data/strategies/dipdetect"
-OUT = "/home/moiz/sniper-data/strategies/presend"
+PO = "/home/it/sniper-data/strategies/patterns"; DD = "/home/it/sniper-data/strategies/dipdetect"
+OUT = "/home/it/sniper-data/strategies/presend"
 DAYS = {"R1": PO, "R2": PO, "R3": PO, "R4": DD}
 RUNDIR = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
 SMS = 212.0

@@ -2,14 +2,14 @@
 """WHO step 1 [MEASURED, read-only]: every LIVE pre-send window (T2 + re-arm) of the 20 live runs, and every SHADOW (paper) window of
 the 9 shadow-only runs, with arm info, fill, realized P&L, failed-try fees, and the live tape (trades on the mint from our buy until
 after our sell).
-Out: /home/moiz/sniper-data/prevent/who/windows.pkl  (list of dicts)"""
+Out: /home/it/sniper-data/prevent/who/windows.pkl  (list of dicts)"""
 import json, glob, pickle, collections, sys
 from multiprocessing import Pool
 
-OUT = "/home/moiz/sniper-data/prevent/who/windows.pkl"
+OUT = "/home/it/sniper-data/prevent/who/windows.pkl"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
-A = "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r%s.jsonl"
-F = "/home/moiz/sniper-data/runs/fra/runs/dip_r%s.jsonl"
+A = "/home/it/sniper-data/runs/ams/runs/dip_ams_r%s.jsonl"
+F = "/home/it/sniper-data/runs/fra/runs/dip_r%s.jsonl"
 LIVE = [("FRA", r, F % r) for r in (21, 22, 23, 24, 26, 27, 28)] + [("AMS", r, A % r) for r in (16, 17, 19, 20, 24, 25, 26, 27, 34, 35, 36, 37, 38)]
 PAPER = [("AMS", r, A % r) for r in (14, 15, 21, 22, 23)] + [("FRA", r, F % r) for r in (15, 16, 20, 25)]
 

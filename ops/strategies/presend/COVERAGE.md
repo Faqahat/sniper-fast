@@ -3,7 +3,7 @@
 Run 28 started 10-28 14:31:56 PKT. This audit covers the run up to ~19:47 PKT (5.26 h) and was read-only.
 Inputs:
 - the run's records (`/root/prod/runs/dip_r28.jsonl`, presend_* / dump / attempt lines only);
-- the FRA recorder chunks, read from the container copies in `/home/moiz/sniper-data/collect/run_20261027_1410` and `run_20261028_1405`, decoded with `real/decode.py`;
+- the FRA recorder chunks, read from the container copies in `/data/tapes/collect/run_20261027_1410` and `run_20261028_1405`, decoded with `real/decode.py`;
 - the engine source (`src/presend.rs`, `src/bin/snipe_engine/dipmode.rs`, `src/bin/snipe_engine/pslive.rs`).
 
 Scripts and outputs: `/tmp/claude-1000/-home-moiz/b89fe85a-.../scratchpad/ps_cov/` (replay.py, replay2.py, cmp.py, skips.py).

@@ -11,8 +11,8 @@ Also: the trade immediately before each first sell (same slot? idx gap) by walle
 Out: sellid/s2.txt, s2_units.npz (units for the walk-forward)"""
 import pickle, sys, json, collections, time
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 TB = np.array([0, 1, 2, 3, 4, 5, 8, 15, 30, 10 ** 6])            # slot buckets since entry
 SB = np.array([0, 0.05, 0.1, 0.3, 0.6, 1.0, 2.0, 4.0, 1e9])        # SOL buckets
@@ -24,8 +24,8 @@ def P(*a):
 
 
 def lists(ids, idm):
-    fb = set(idm[w] for w in json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm)
-    co = set(idm[w] for w in json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")) if w in idm)
+    fb = set(idm[w] for w in json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm)
+    co = set(idm[w] for w in json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")) if w in idm)
     named = {}
     for i, w in enumerate(ids):
         p = w[:6]
@@ -36,7 +36,7 @@ def lists(ids, idm):
 def main():
     t0 = time.time()
     Z = pickle.load(open(f"{OUT}/s1.pkl", "rb")); LOTS = Z["lots"]; OURS = set(Z["OURS"])
-    ids = json.load(open("/home/moiz/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
+    ids = json.load(open("/home/it/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
     fb, co, named = lists(ids, idm)
     P(f"# Bot 247/248 sells vs specific outside wallets (hazard, MEASURED), lots {len(LOTS):,}; fbots {len(fb)}, cohort {len(co)}, named dip bots found {sorted(set(named.values()))}")
     rows = collections.defaultdict(list)

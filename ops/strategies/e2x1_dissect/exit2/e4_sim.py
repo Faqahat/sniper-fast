@@ -11,7 +11,7 @@ Exits (clock): HIS = his real first sell (+ d' for O); COPY (O only) = his sell 
   1800 s timeout when nothing fires. Out: e4.txt, e4_rows.pkl"""
 import sys, json, pickle, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/e2x1_dissect/exit2"; OS = "/home/moiz/sniper-data/e2x1_dissect/ourspeed"
+OUT = "/home/it/sniper-data/e2x1_dissect/exit2"; OS = "/home/it/sniper-data/e2x1_dissect/ourspeed"
 SLOT_MS = 212.0; LMED = float(sys.argv[1]) if len(sys.argv) > 1 else 66.0
 TEST0 = 1793113200 - 79 * 60; TEST1 = TEST0 + 86400
 BAND = {0: 18.0, 1: 34.0, 2: 83.0}; TIMEOUT = 1800.0
@@ -21,7 +21,7 @@ slot = Z["slot"].astype(np.int64); idx = Z["idx"].astype(np.int64); mint = Z["mi
 sol = Z["sol"].astype(np.float64); tok = Z["tok"].astype(np.float64); vsol = Z["vsol"].astype(np.float64); vtok = Z["vtok"].astype(np.float64)
 fee = (Z["fee_bps"].astype(np.float64) + Z["cfee_bps"].astype(np.float64)) / 1e4; bt = Z["bt"].astype(np.int64)
 um, st = np.unique(mint, return_index=True); en = np.append(st[1:], len(mint)); span = {int(m): (int(a), int(b)) for m, a, b in zip(um, st, en)}
-S = np.load("/home/moiz/sniper-data/haqqml/fresh/tape/slots.npy"); s_lo = int(S["slot"].min())
+S = np.load("/home/it/sniper-data/haqqml/fresh/tape/slots.npy"); s_lo = int(S["slot"].min())
 NB = np.zeros(int(S["slot"].max()) - s_lo + 2, np.int64); NB[S["slot"].astype(np.int64) - s_lo] = S["maxi"].astype(np.int64) + 1
 def bsize(s):
     k = np.clip(np.asarray(s, np.int64) - s_lo, 0, len(NB) - 1); return NB[k]

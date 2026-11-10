@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # print example lots with the tape from the trigger to the exit (who traded, sizes, the lot's return)
 import sys, json, pickle, zlib, random, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 lots = json.load(open(f"{H.OUT}/lots.json"))
 pf_sz = float(sys.argv[1]); n = int(sys.argv[2]) if len(sys.argv) > 2 else 3; seed = int(sys.argv[3]) if len(sys.argv) > 3 else 1
-COH = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
+COH = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
 sel = [l for l in lots if round(l["buy"]["sol"], 2) == pf_sz and l["closed"] and not l["censored"] and not l["brk"] and l["nlots"] == 1]
 random.seed(seed); ex = random.sample(sel, n)
 for l in ex:

@@ -2,7 +2,7 @@
 """grad agent, step 9: robustness of the train-chosen rules — every day (10-23 evening .. 10-28), neighbours in V / flow / exit,
 cost +2 mSOL, concentration (without the top-5 trades), pool-open whale share."""
 import pickle, numpy as np
-G = "/home/moiz/sniper-data/e2x1_dissect/grad"
+G = "/home/it/sniper-data/e2x1_dissect/grad"
 D = pickle.load(open(G + "/sim.pkl", "rb")); R = D["R"]; EX = D["EXITS"]
 po = {r["mint"]: r for r in pickle.load(open(G + "/pool_open.pkl", "rb"))}
 ok = [r for r in R if r.get("res") is not None and not r["edge"] and not (r["grad"] and not r["has_mig"])]

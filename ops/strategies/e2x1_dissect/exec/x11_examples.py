@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Example trades (D1) for every claim in REPORT.md: GMGN token links + solscan tx links. Out: x11.txt"""
 import sys, pickle, random
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
 random.seed(7)
 LL = {l["lot_id"]: l for l in X.lots()}

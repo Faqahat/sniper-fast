@@ -1,5 +1,5 @@
 import json, numpy as np, datetime as D
-R = json.load(open("/home/moiz/sniper-data/wave37/wave37.json")); n = len(R)
+R = json.load(open("/home/it/sniper-data/wave37/wave37.json")); n = len(R)
 A = lambda k: np.array([r[k] for r in R])
 pk = lambda t: (D.datetime.utcfromtimestamp(t) + D.timedelta(hours=5))
 bt = A("bt"); print("fills", n, "PKT", pk(bt.min()), "->", pk(bt.max()))

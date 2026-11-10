@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """CLIENTS study: block size proxy by slot-in-window for Jito leaders split by TPU front, and for other clients (MEASURED)."""
 import json, sys, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/truth")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/truth")
 import tl
 M = json.load(open(sys.argv[1]))
 L = {}
-for bk in ["/home/moiz/sniper/ops/dip/speed/leaders/leader_rtt_new.json", "/home/moiz/sniper/ops/region/leader_rtt_ams.json"]:
+for bk in ["/home/it/sniper/ops/dip/speed/leaders/leader_rtt_new.json", "/home/it/sniper/ops/region/leader_rtt_ams.json"]:
     for pk, r in json.load(open(bk))["leaders"].items(): L.setdefault(pk, r)
 def kind(pk):
     r = L.get(pk)

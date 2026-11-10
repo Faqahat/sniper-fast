@@ -1,8 +1,8 @@
 # GRAD: "buy near graduation, hold through it, sell N slots after migration" (agent grad, 10-28 ~23:30 PKT)
 
-Code is in `/home/moiz/sniper/ops/strategies/e2x1_dissect/grad/` (`g1_decode.py`, `g2_build.py`, `g2b_full.py`, `g3_cov.py`, `g4_sim.py`, `g5_his.py`, `g6_eval.py`, `g7_pool.py`, `g8_cont.py`, `g9_robust.py`, `glib.py`).
+Code is in `/home/it/sniper/ops/strategies/e2x1_dissect/grad/` (`g1_decode.py`, `g2_build.py`, `g2b_full.py`, `g3_cov.py`, `g4_sim.py`, `g5_his.py`, `g6_eval.py`, `g7_pool.py`, `g8_cont.py`, `g9_robust.py`, `glib.py`).
 
-Data is in `/home/moiz/sniper-data/e2x1_dissect/grad/` (1.1 GB). Results files there: `cov.log`/`cov.json`, `cont.txt`, `his.txt`, `eval.txt`, `robust.txt`, `pool_open.txt`, `curve_math.txt`.
+Data is in `/home/it/sniper-data/e2x1_dissect/grad/` (1.1 GB). Results files there: `cov.log`/`cov.json`, `cont.txt`, `his.txt`, `eval.txt`, `robust.txt`, `pool_open.txt`, `curve_math.txt`.
 
 Times are PKT. M = measured, I = inferred.
 

@@ -2,7 +2,7 @@
 # Shallow-fetch public client repos into their own new folders (READ-ONLY study; never build or run anything from them).
 # usage: fetch_src.sh NAME URL REF [sparse dirs...]
 set -u
-BASE=/home/moiz/sniper-data/clients_src
+BASE=/home/it/sniper-data/clients_src
 name=$1; url=$2; ref=$3; shift 3
 dst=$BASE/$name
 if [ -e "$dst" ]; then echo "exists: $dst"; exit 0; fi
