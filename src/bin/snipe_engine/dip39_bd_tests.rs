@@ -291,7 +291,8 @@ fn dip39_bd_fail_open_reload_control() {
     let _ = std::fs::remove_file(&l);
     let ctl = tmp("ctl.json");
     std::fs::write(&ctl, r#"{"botdepth": "live"}"#).unwrap();
-    let mut c = Ctx::new(&["--presend-live-botdepth", "2:100", "--presend-live-botdepth-list", &l, "--presend-live-ledger-control", &ctl]);
+    // dip43 A9: the control file may set "botdepth": "log" only with --presend-live-botdepth-allow-log (dip43a_botdepth_locked_live: refused without)
+    let mut c = Ctx::new(&["--presend-live-botdepth", "2:100", "--presend-live-botdepth-list", &l, "--presend-live-ledger-control", &ctl, "--presend-live-botdepth-allow-log"]);
     c.p.ledger_ctl_open();
     assert!(c.p.sh.bd.live.load(Ordering::SeqCst), "the control file at the start: live");
     c.p.bd_start();
