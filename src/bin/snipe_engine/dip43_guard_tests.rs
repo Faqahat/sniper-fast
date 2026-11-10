@@ -57,7 +57,7 @@ fn snap(n: usize, age: Option<u64>) -> Snap {
     let mut h: Vec<(Pk, u64)> = (0..n).map(|i| ([0x40 + i as u8; 32], (40 - 5 * i as u64).max(11) * 1_000_000_000_000)).collect();
     h.push((ams(), 90_000_000_000_000));
     h.push(([0x3F; 32], 9_000_000_000_000)); // 0.9%: below MINPCT 1.0
-    Snap { holders: h, age_ms: age }
+    Snap { holders: h, age_ms: age, accts: vec![] }
 }
 
 #[test]
@@ -329,4 +329,30 @@ fn dip43_guard_golden_bytes() {
     let gix = guard_ix(prog(), &snipe_guard::client::Guard { deadline: Some(467_582_218), floors: vec![([2; 32], 36_000_000), ([3; 32], 27_000_000), ([4; 32], 9_000)], max_viol: 1, ..Default::default() }, user, None);
     assert_eq!(hex(&gix.data), "54050abdde1b000000000301".to_owned() + "00512502" + "c0fc9b01" + "28230000");
     assert_eq!(gix.accounts.iter().map(|m| (m.key, m.signer, m.writable)).collect::<Vec<_>>(), vec![(user, true, false), ([2; 32], false, false), ([3; 32], false, false), ([4; 32], false, false)]);
+}
+
+/// dip43c: holders mode floors go on the holder's REAL token account when the book knows it (else its ATA)
+#[test]
+fn dip43c_floor_on_real_account() {
+    let g = g43(&["--presend-live-guard", "holders"]);
+    let (user, mint) = (ams(), launch().mint);
+    let now = 10_000_000_000u64;
+    let mut s = snap(6, Some(5));
+    let real = [77u8; 32];
+    s.accts = vec![(s.holders[0].0, real)];
+    let h = g.hset(&s, &user, &mint, now);
+    assert!(h.n >= 2);
+    let first = h.f[..h.n as usize].iter().find(|f| f.2 == s.holders[0].0).unwrap();
+    assert_eq!(first.0, real, "floor on the real account");
+    let other = h.f[..h.n as usize].iter().find(|f| f.2 != s.holders[0].0).unwrap();
+    assert_eq!(other.0, arbx::pda::ata(&other.2, &mint, &arbx::pda::TOKEN_2022), "unknown: the ATA");
+}
+
+/// dip43c: --presend-live-tbal-src largest needs the book; bad values refused; off by default
+#[test]
+fn dip43c_tbal_src_flag() {
+    assert!(!cfg(&[]).unwrap().unwrap().c43.tbal_largest);
+    assert!(cfg(&["--presend-live-tbal-src", "largest"]).is_err(), "needs the book");
+    assert!(cfg(&["--presend-live-tbal", "on", "--presend-live-fam-log", "--presend-live-tbal-src", "largest"]).unwrap().unwrap().c43.tbal_largest);
+    assert!(cfg(&["--presend-live-tbal", "on", "--presend-live-fam-log", "--presend-live-tbal-src", "maybe"]).is_err());
 }

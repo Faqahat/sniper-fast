@@ -86,6 +86,28 @@ impl TBook {
             t.upd.insert(o, slot);
         }
     }
+    /// dip43c: a PARTIAL snapshot (getTokenLargestAccounts + getMultipleAccounts: the top token accounts at `slot`, (owner, account, amount)):
+    /// each listed owner not updated after `slot` takes the listed accounts' amounts (its other real accounts kept, the pseudo snapshot entry
+    /// dropped); owners NOT listed are left as they are (a partial read says nothing about them). The curve is never a holder.
+    pub fn snapshot_top(&mut self, mint: Pk, curve: Pk, hold: &[(Pk, Pk, u64)], slot: u64, now_ns: u64) {
+        let t = self.toks.entry(mint).or_insert_with(|| TTok { s0: 0, curve, own: FxHashMap::default(), last: slot, upd: FxHashMap::default(), snap: None });
+        if t.snap.is_some_and(|s| s.0 > slot) { return; }
+        t.snap = Some((slot, now_ns));
+        t.last = t.last.max(slot);
+        for (o, a, amt) in hold {
+            if *o == t.curve || t.upd.get(o).is_some_and(|u| *u > slot) { continue; }
+            let v = t.own.entry(*o).or_default();
+            v.retain(|x| x.0 != SNAP_ACCT);
+            match v.iter_mut().find(|x| x.0 == *a) { Some(x) => x.1 = *amt, None => v.push((*a, *amt)) }
+            t.upd.insert(*o, slot);
+        }
+    }
+
+    /// dip43c: the owner's largest REAL token account of `mint` (None: unknown, or only the RPC pseudo entry): the guard's floor goes on it
+    pub fn acct_of(&self, mint: &Pk, owner: &Pk) -> Option<Pk> {
+        self.toks.get(mint)?.own.get(owner)?.iter().filter(|x| x.0 != SNAP_ACCT && x.0 != [0u8; 32]).max_by_key(|x| x.1).map(|x| x.0)
+    }
+
     /// the newest snapshot of `mint`: (slot, arrival mono ns)
     pub fn snap(&self, mint: &Pk) -> Option<(u64, u64)> { self.toks.get(mint)?.snap }
 
@@ -132,6 +154,28 @@ impl TBook {
 
 #[cfg(test)]
 mod tests {
+    /// dip43c: a partial (top-holders) snapshot updates the listed owners with their REAL accounts, keeps the unlisted, skips owners
+    /// updated by a newer post, never lists the curve; an older full snapshot after it is ignored
+    #[test]
+    fn snapshot_top_partial() {
+        let (m, c) = ([5u8; 32], [9u8; 32]);
+        let (a, b, x, newer) = ([1u8; 32], [2u8; 32], [3u8; 32], [4u8; 32]);
+        let mut bk = TBook::new();
+        bk.create(m, 100, c);
+        bk.post(&TokBal { mint: m, owner: x, acct: [33u8; 32], amount: 50 }, 101);       // a small holder seen on the feed
+        bk.post(&TokBal { mint: m, owner: newer, acct: [44u8; 32], amount: 7 }, 120);    // updated after the read below
+        bk.snapshot_top(m, c, &[(c, [99u8; 32], 900), (a, [11u8; 32], 300), (b, [22u8; 32], 200), (newer, [44u8; 32], 999)], 110, 5);
+        assert_eq!(bk.true_balance(&m, &a), Some(300));
+        assert_eq!(bk.acct_of(&m, &a), Some([11u8; 32]), "the real account");
+        assert_eq!(bk.true_balance(&m, &x), Some(50), "an unlisted owner is kept");
+        assert_eq!(bk.true_balance(&m, &newer), Some(7), "a newer post wins");
+        assert_eq!(bk.true_balance(&m, &c), None, "the curve is never a holder");
+        assert_eq!(bk.top_holders(&m, 2), vec![(a, 300), (b, 200)]);
+        assert_eq!(bk.snap(&m), Some((110, 5)));
+        bk.snapshot(m, c, &[(a, 1)], 105, 6);                                              // an older full read: ignored
+        assert_eq!(bk.true_balance(&m, &a), Some(300));
+    }
+
     use super::*;
     fn pk(b: u8) -> Pk { [b; 32] }
     fn tb(mint: u8, owner: u8, acct: u8, amount: u64) -> TokBal { TokBal { mint: pk(mint), owner: pk(owner), acct: pk(acct), amount } }

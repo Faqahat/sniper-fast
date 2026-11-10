@@ -30,6 +30,10 @@ pub use super::ps43_stall as st;
 pub struct Cfg43 {
     pub stall: st::StallCfg,
     pub tbal: bool,
+    /// 11-10 (dip43c) --presend-live-tbal-src fam|largest (fam): where the book's arm snapshot comes from. fam = dip35's mint-wide
+    /// getProgramAccounts (on --presend-live-fam-rpc; Constant-K refuses mint-scoped token scans). largest = getTokenLargestAccounts +
+    /// getMultipleAccounts on the PRIMARY rpc (the top 20 token accounts, closed ones never listed): a partial snapshot of the top holders
+    pub tbal_largest: bool,
     pub cascade: bool,
     /// A4: the recipients that flag a mint (None = off) and the mode
     pub fanout: Option<u32>,
@@ -77,13 +81,19 @@ impl Cfg43 {
         }
         // the cascade shadow reads the true balances
         if c.cascade { c.tbal = true; }
+        // dip43c: the snapshot source (needs the book)
+        match need("--presend-live-tbal-src")?.as_deref() {
+            None | Some("fam") => {}
+            Some("largest") => { if !c.tbal { bail!("--presend-live-tbal-src largest needs --presend-live-tbal on (or --presend-live-cascade on)"); } c.tbal_largest = true; }
+            Some(x) => bail!("--presend-live-tbal-src {x}: fam | largest"),
+        }
         Ok(c)
     }
 
     /// the start banner's dip43 lines (one per feature; the watchdog's always)
     pub fn banner(&self, fpnb_log: bool) -> Vec<String> {
         let mut v = vec![format!("DIP43 A1/A2 {}", self.stall.desc())];
-        v.push(format!("DIP43 A3 TRUE-BALANCE BOOK: {}", if self.tbal { "ON (post_token_balances decoded on the executed feed's thread)" } else { "off" }));
+        v.push(format!("DIP43 A3 TRUE-BALANCE BOOK: {}", if self.tbal { if self.tbal_largest { "ON (post + closed accounts decoded on the executed feed's thread; arm snapshot = getTokenLargestAccounts + getMultipleAccounts on the primary rpc, top 20)" } else { "ON (post_token_balances decoded on the executed feed's thread)" } } else { "off" }));
         v.push(format!("DIP43 A4 FANOUT: {}", match self.fanout { Some(n) => format!("ON {} (the arm's fam read: >= {n} plain-transfer recipients flag the mint)", if self.fanout_live { "LIVE: disarm + skip" } else { "LOG ONLY" }), None => "off".into() }));
         v.push(format!("DIP43 A5 CASCADE SHADOW: {}", if self.cascade { "ON (LOG ONLY): top 8 holders by true balance at signing vs just before our buy; G-A 6:0.9:2 >= 1%, guards top-5 non-trigger >= 0.5%" } else { "off" }));
         v.push(format!("DIP43 A6 MINT-LEDGER: {}", match self.ml { Some(l) => format!("ON {} (block a mint after a landing <= -{} SOL; real fills + one paper landing per T2 trigger)", if self.ml_live { "LIVE" } else { "LOG ONLY" }, l as f64 / 1e9), None => "off".into() }));
@@ -906,5 +916,72 @@ pub fn stall_round(w: &mut st::Watch, p: Option<&mut PsLive>, log: &DipLog, now_
                 "t": arbx::feeds::clock::now_ns()}));
             if let Some(p) = p.as_mut() { p.stall43(false, now_ns); }
         }
+    }
+}
+
+// ---- dip43c: the book's arm snapshot from getTokenLargestAccounts + getMultipleAccounts (the primary rpc) ---------------------------------
+/// a largest-accounts read at an arm (--presend-live-tbal-src largest; answer: PsMsg::Largest)
+#[derive(Clone, Debug)]
+pub struct LargestReq { pub w: u64, pub mint: Pk, pub curve: Pk, pub at: Instant }
+/// its answer: (context slot of the accounts read, (owner, token account, amount) per listed account) or the error
+#[derive(Clone, Debug)]
+pub struct LargestRes { pub req: LargestReq, pub read: std::result::Result<(u64, Vec<(Pk, Pk, u64)>), String>, pub ms: f64 }
+/// reads in flight (each one its own task; a busy arm writes a record and is skipped, never queued)
+pub static LARGEST_INFLIGHT: AtomicU64 = AtomicU64::new(0);
+pub const LARGEST_MAX: u64 = 6;
+pub const LARGEST_TIMEOUT: Duration = Duration::from_millis(2500);
+
+/// the read: the mint's 20 largest token accounts, then their owner + amount in one getMultipleAccounts (closed ones: absent / null)
+pub async fn largest_read(rpc: &rpc::Rpc, mint: &Pk) -> std::result::Result<(u64, Vec<(Pk, Pk, u64)>), String> {
+    let run = async {
+        let b = rpc::Bounds::fetch(LARGEST_TIMEOUT, 1);
+        let v = rpc.call_bounded("getTokenLargestAccounts", serde_json::json!([b58(mint), {"commitment": "processed"}]), b).await.map_err(|e| rpc::scrub(&e.msg))?.value;
+        let list = v["value"].as_array().ok_or("largest: no value list")?;
+        let accs: Vec<String> = list.iter().filter_map(|a| a["address"].as_str().map(String::from)).collect();
+        if accs.is_empty() { return Ok((v["context"]["slot"].as_u64().unwrap_or(0), vec![])); }
+        let b = rpc::Bounds::fetch(LARGEST_TIMEOUT, 1);
+        let m = rpc.call_bounded("getMultipleAccounts", serde_json::json!([accs, {"encoding": "base64", "commitment": "processed", "dataSlice": {"offset": 32, "length": 40}}]), b)
+            .await.map_err(|e| rpc::scrub(&e.msg))?.value;
+        let slot = m["context"]["slot"].as_u64().ok_or("multiple: no context slot")?;
+        let vals = m["value"].as_array().ok_or("multiple: no value list")?;
+        let mut out = Vec::with_capacity(vals.len());
+        for (addr, x) in accs.iter().zip(vals) {
+            let Some(acct) = bs58::decode(addr).into_vec().ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok()) else { continue };
+            if x.is_null() { continue; }   // closed between the two calls: its owner's post balance (closed = 0) covers it
+            let Some(s) = x["data"][0].as_str() else { continue };
+            let Ok(d) = base64::engine::general_purpose::STANDARD.decode(s) else { continue };
+            if let Some((owner, amount)) = pslog35::acct_parse(&d, true) { out.push((owner, acct, amount)); }
+        }
+        Ok((slot, out))
+    };
+    match tokio::time::timeout(LARGEST_TIMEOUT, run).await { Ok(r) => r, Err(_) => Err(format!("timeout {} ms", LARGEST_TIMEOUT.as_millis())) }
+}
+
+impl PsLive {
+    /// dip43c: an arm (T2 or re-arm) asks for the largest-accounts read (nothing unless --presend-live-tbal-src largest)
+    pub(super) fn largest_arm(&mut self, w: u64, mint: Pk) {
+        if !self.cfg.c43.tbal_largest || self.d43.book.is_none() { return; }
+        if LARGEST_INFLIGHT.load(Ordering::SeqCst) >= LARGEST_MAX {
+            self.rec(serde_json::json!({"ev": "presend_live_tbal_snap", "w": w, "mint": b58(&mint), "err": "busy"}));
+            return;
+        }
+        let curve = self.launches.get(&mint).map_or([0u8; 32], |l| l.bonding_curve);
+        self.exec(Cmd::Largest(Box::new(LargestReq { w, mint, curve, at: Instant::now() })));
+    }
+    /// dip43c: the answer -> a partial snapshot into the book, then the armed window's floors / cascade set at once
+    pub(super) fn largest_done(&mut self, r: LargestRes) {
+        let q = &r.req;
+        let mut rec = serde_json::json!({"ev": "presend_live_tbal_snap", "w": q.w, "mint": b58(&q.mint), "ms": (r.ms * 10.0).round() / 10.0});
+        match &r.read {
+            Err(e) => { rec["err"] = e.clone().into(); }
+            Ok((slot, hold)) => {
+                rec["slot"] = (*slot).into();
+                rec["n"] = hold.len().into();
+                if let Some(b) = self.d43.book.as_mut() { b.snapshot_top(q.mint, q.curve, hold, *slot, arbx::fast::mono_ns()); }
+                if self.cfg.c43.cascade { if let Some(&id) = self.armed.get(&q.mint) { self.wset43(id, &q.mint); } }
+                self.g43_refresh(&q.mint);
+            }
+        }
+        self.rec(rec);
     }
 }

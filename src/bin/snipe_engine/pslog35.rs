@@ -142,6 +142,8 @@ impl L35 {
 impl PsLive {
     /// dip35 (--presend-live-fam-log): a presend_live_arm (T2 or re-arm) asks for the holders read (nothing without the flag; busy: skipped)
     pub(super) fn fam_arm(&mut self, w: u64, mint: Pk, rearm: bool, arm_slot: u64) {
+        // dip43c: the book's top-holder snapshot on the primary rpc (nothing unless --presend-live-tbal-src largest)
+        self.largest_arm(w, mint);
         if !self.cfg.fam_log { return; }
         if self.l35.inflight.load(Ordering::SeqCst) >= FAM_INFLIGHT {
             self.l35.busy += 1;

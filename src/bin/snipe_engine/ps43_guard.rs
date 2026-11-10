@@ -150,7 +150,7 @@ impl G43 {
         v.truncate(self.n.min(MAXN));
         for (w, b) in v {
             let floor = ((b as f64 * self.theta) / sgl::UNIT as f64).floor().min(u32::MAX as f64) as u32;
-            h.f[h.n as usize] = (ata_cached(&w, mint), floor, w);
+            h.f[h.n as usize] = (snap.acct_of(&w).unwrap_or_else(|| ata_cached(&w, mint)), floor, w);
             h.n += 1;
         }
         h.t_snap = now.saturating_sub(age.saturating_mul(1_000_000));
@@ -249,7 +249,10 @@ impl HSet {
 
 /// a true-balance snapshot of a mint: (wallet, token balance raw) and its age (None: no true-balance snapshot)
 #[derive(Clone, Debug, Default)]
-pub struct Snap { pub holders: Vec<(Pk, u64)>, pub age_ms: Option<u64> }
+pub struct Snap { pub holders: Vec<(Pk, u64)>, pub age_ms: Option<u64>,
+    /// dip43c: holder -> its largest REAL token account (from the book; absent: the floor goes on the holder's ATA)
+    pub accts: Vec<(Pk, Pk)> }
+impl Snap { fn acct_of(&self, w: &Pk) -> Option<Pk> { self.accts.iter().find(|x| x.0 == *w).map(|x| x.1) } }
 
 /// The holder provider for the floors (dip43 merge, 11-10): Builder A's true-balance book (A3, `--presend-live-tbal on`): the RPC read of
 /// ALL the mint's token accounts at the arm (dip35's fam read), kept current by the pump trades' post balances; the bonding curve is never
@@ -259,7 +262,9 @@ pub struct Snap { pub holders: Vec<(Pk, u64)>, pub age_ms: Option<u64> }
 pub fn holders_for_floor(book: Option<&arbx::ps43_book::TBook>, mint: &Pk, now: u64) -> Snap {
     let Some(b) = book else { return Snap::default() };
     let Some((_, t)) = b.snap(mint) else { return Snap::default() };
-    Snap { holders: b.top_holders(mint, 4 * MAXN), age_ms: Some(now.saturating_sub(t) / 1_000_000) }
+    let holders = b.top_holders(mint, 4 * MAXN);
+    let accts = holders.iter().filter_map(|(w, _)| b.acct_of(mint, w).map(|a| (*w, a))).collect();
+    Snap { holders, age_ms: Some(now.saturating_sub(t) / 1_000_000), accts }
 }
 
 thread_local! {

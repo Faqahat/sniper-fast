@@ -92,6 +92,7 @@ fn gcmd(c: &Cmd) -> String {
         Cmd::Fam(q) => format!("fam w {} {} rearm {}", q.w, b58(&q.mint), q.rearm),
         // dip43 A2 (only with --presend-live-deadman live)
         Cmd::Status(q) => format!("status {} w {}", bs58::encode(&q.sig).into_string(), q.w),
+        Cmd::Largest(q) => format!("largest w {} {}", q.w, b58(&q.mint)),
     }
 }
 

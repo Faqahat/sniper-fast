@@ -155,7 +155,7 @@ const Q1FLAGS: [&str; 11] = ["--q1-log", "--q1-bots", "--q1-fresh-state", "--q1-
     "--q1-gap-slots", "--q1-size-sol", "--q1-fresh-hours"];
 
 /// dip43 Builder A (ps43.rs, ps43_stall.rs): its flags (each needs --presend-live; all off / log by default)
-const A43FLAGS: [&str; 15] = ["--presend-live-stall-mode", "--presend-live-stall", "--presend-live-deadman", "--presend-live-deadman-ms", "--presend-live-tbal",
+const A43FLAGS: [&str; 16] = ["--presend-live-tbal-src", "--presend-live-stall-mode", "--presend-live-stall", "--presend-live-deadman", "--presend-live-deadman-ms", "--presend-live-tbal",
     "--presend-live-cascade", "--presend-live-fanout", "--presend-live-fanout-mode", "--presend-live-mint-ledger", "--presend-live-mint-ledger-mode",
     "--presend-live-shadow-exit", "--presend-live-acct", "--presend-live-botdepth-allow-log", "--presend-live-shadows43", "--presend-live-fpnb-strict"];
 /// dip43 BUILDER B (send path + exits; ps43_b.rs): its flags (each needs --presend-live; every one OFF by default = dip42)
@@ -2084,6 +2084,8 @@ pub enum PsMsg {
     Fund(Box<psfund::FundOut>),
     /// dip43 A2: a blind try's status read answered
     Status(Box<ps43::StatusRes>),
+    /// dip43c: a largest-accounts read answered
+    Largest(Box<ps43::LargestRes>),
 }
 
 /// dip19: what a token-account read is for
@@ -2136,6 +2138,8 @@ pub enum Cmd {
     Fam(Box<FamReq>),
     /// dip43 A2 (--presend-live-deadman live): a blind try's getSignatureStatuses + our token account at processed (the answer: PsMsg::Status)
     Status(Box<ps43::StatusReq>),
+    /// dip43c (--presend-live-tbal-src largest): the arm's largest-accounts read on the primary rpc (the answer: PsMsg::Largest)
+    Largest(Box<ps43::LargestReq>),
 }
 
 /// dip19 (fix 1): our token account of a mint, from the fill that created it until a read shows it closed
@@ -3478,6 +3482,7 @@ impl PsLive {
             }
             PsMsg::Closed(mint, sig, slot, err) => self.on_closed(mint, sig, slot, err),
             PsMsg::Fam(r) => self.fam_done(*r),
+            PsMsg::Largest(r) => self.largest_done(*r),
             PsMsg::Fund(o) => self.l38_fund(*o),
             PsMsg::Status(r) => self.on_status43(*r),
             PsMsg::UnsoldDone(mint, sold) => {
@@ -3847,6 +3852,17 @@ impl PsLive {
                     let st = match st { Ok(v) => v["value"].get(0).filter(|x| !x.is_null()).map(|x| (x["slot"].as_u64().unwrap_or(0), x["err"].is_null())), Err(_) => None };
                     let tokens = match tk { crate::Tok::Amount(a, _) => Some(a), crate::Tok::Closed(_) => Some(0), crate::Tok::Unknown => None };
                     let _ = mtx.send(Msg::Ps(PsMsg::Status(Box::new(ps43::StatusRes { req: *req, st, tokens, ms: t0.elapsed().as_secs_f64() * 1e3 }))));
+                });
+            }
+            // dip43c: the largest-accounts read on the primary rpc; its own in-flight count, never `tasks`
+            Cmd::Largest(req) => {
+                let (rpc, mtx) = (self.rpc.clone(), self.mtx.clone());
+                ps43::LARGEST_INFLIGHT.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let read = ps43::largest_read(&rpc, &req.mint).await;
+                    let ms = req.at.elapsed().as_secs_f64() * 1e3;
+                    let _ = mtx.send(Msg::Ps(PsMsg::Largest(Box::new(ps43::LargestRes { req: *req, read, ms }))));
+                    ps43::LARGEST_INFLIGHT.fetch_sub(1, Ordering::SeqCst);
                 });
             }
             // dip35 (log-only): the holders read on the runtime; its own in-flight count (FAM_INFLIGHT), never `tasks`
