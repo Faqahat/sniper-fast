@@ -268,7 +268,8 @@ fn run() -> Result<()> {
         }
         "smoke" => {
             let cx = cx()?;
-            smoke(&cx, pk(&need("--program-id")?)?, pk(&arg("--wallet").unwrap_or_else(|| AMS.into()))?, arg("--payer").map(|s| pk(&s)).transpose()?, arg("--allowlist").map(|s| pk(&s)).transpose()?)?;
+            smoke(&cx, pk(&need("--program-id")?)?, pk(&arg("--wallet").unwrap_or_else(|| AMS.into()))?, arg("--payer").map(|s| pk(&s)).transpose()?, arg("--allowlist").map(|s| pk(&s)).transpose()?,
+                arg("--curve-mint").map(|s| pk(&s)).transpose()?)?;
         }
         "allow-list" => {
             let cx = cx()?;
@@ -350,19 +351,31 @@ fn verify(cx: &Cx, p: &Pk, so: &[u8], expect_auth: Option<Pk>) -> Result<()> {
 /// post-deploy SMOKE: simulateTransaction only (sigVerify off, nothing sent, no key): one guarded try that passes and several that abort,
 /// each with its expected decoded code. `wallet` = our trading wallet (default AMS, compiled in); `payer` = the fee payer (default the wallet).
 /// CU printed = the guard + the CU-limit instruction (~150).
-fn smoke(cx: &Cx, p: Pk, wallet: Pk, payer: Option<Pk>, list: Option<Pk>) -> Result<()> {
+fn smoke(cx: &Cx, p: Pk, wallet: Pk, payer: Option<Pk>, list: Option<Pk>, curve_mint: Option<Pk>) -> Result<()> {
     let payer = payer.unwrap_or(wallet);
     let s = cx.slot()?;
     let gone = |b: u8| -> Pk { let mut k = [0u8; 32]; k[0] = 0x5e; k[1] = b; k[31] = 1; k };
     let other = { let mut k = [7u8; 32]; k[0] = 0x11; k };
     struct Case { name: &'static str, g: sgc::Guard, wallet: Pk, signs: bool, want: Option<(u8, u8)> }
-    let cases = vec![
+    let mut cases = vec![
         Case { name: "PASS deadline +50, 2 floors of 0 on empty accounts, echo", g: sgc::Guard { deadline: Some(s + 50), floors: vec![(gone(1), 0), (gone(2), 0)], max_viol: 1, echo: true, ..Default::default() }, wallet, signs: true, want: None },
         Case { name: "ABORT deadline -50", g: sgc::Guard { deadline: Some(s.saturating_sub(50)), ..Default::default() }, wallet, signs: true, want: Some((sgl::K_DEADLINE, 0)) },
         Case { name: "ABORT 2 of 2 holders gone (G-A: more than 1 below)", g: sgc::Guard { deadline: Some(s + 50), floors: vec![(gone(1), 1), (gone(2), 1)], max_viol: 1, ..Default::default() }, wallet, signs: true, want: Some((sgl::K_FLOORS, 0)) },
         Case { name: "ABORT another signer", g: sgc::Guard { deadline: Some(s + 50), ..Default::default() }, wallet: other, signs: true, want: Some((sgl::K_AUTH, sgl::A_NO_LIST)) },
         Case { name: "ABORT our wallet not signing", g: sgc::Guard { deadline: Some(s + 50), ..Default::default() }, wallet, signs: false, want: Some((sgl::K_AUTH, sgl::A_NOT_SIGNER)) },
     ];
+    // dip43d: the CURVE band on a real pump curve (--curve-mint MINT, a live bonding-curve token): its largest token account is the curve's;
+    // a bound above today's balance passes (as the engine's 42% bound at the signing price does), one token below it aborts "curve_deep"
+    if let Some(m) = curve_mint {
+        let v = cx.call("getTokenLargestAccounts", serde_json::json!([b58(&m), {"commitment": "confirmed"}]))?;
+        let a = &v["value"][0];
+        let acct = pk(a["address"].as_str().context("no largest account")?)?;
+        let t: u64 = a["amount"].as_str().context("no amount")?.parse()?;
+        let hi42 = (((t + 73_000_000_000_000) as f64 / (1.0f64 - 0.42).sqrt()).floor() as u64).saturating_sub(73_000_000_000_000);
+        println!("  curve: mint {} account {} holds {t} (engine 42% bound at today's price: {hi42})", b58(&m), b58(&acct));
+        cases.push(Case { name: "PASS curve band at the engine's 42% bound", g: sgc::Guard { deadline: Some(s + 50), curve: Some((acct, 0, hi42)), ..Default::default() }, wallet, signs: true, want: None });
+        cases.push(Case { name: "ABORT curve band one unit under today's balance", g: sgc::Guard { deadline: Some(s + 50), curve: Some((acct, 0, t.saturating_sub(1))), ..Default::default() }, wallet, signs: true, want: Some((sgl::K_CURVE_DEEP, 0)) });
+    }
     println!("SMOKE {} on {} (simulation only; wallet {}, payer {}, slot {s})", b58(&p), cx.cluster, b58(&wallet), b58(&payer));
     let mut bad = 0;
     for c in cases {
@@ -377,7 +390,7 @@ fn smoke(cx: &Cx, p: Pk, wallet: Pk, payer: Option<Pk>, list: Option<Pk>) -> Res
             .and_then(|c| sgc::decode(c as u32).map(|f| (f, c as u32)));
         let ok = match (c.want, &got) {
             (None, _) => err.is_null(),
-            (Some((k, i)), Some((f, _))) => f.kind == k && (k == sgl::K_DEADLINE || k == sgl::K_FLOORS || f.idx == i),
+            (Some((k, i)), Some((f, _))) => f.kind == k && (k == sgl::K_DEADLINE || k == sgl::K_FLOORS || k == sgl::K_CURVE_DEEP || f.idx == i),
             _ => false,
         };
         let ret = v["returnData"]["data"][0].as_str().and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok()).map(|b| format!(" echo {b:?}")).unwrap_or_default();
