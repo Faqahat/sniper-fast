@@ -1,0 +1,157 @@
+dipmon snapshot  AMS run 79  (dip43c)  ENDED 02:02 PKT (Ctrl+C)
+started   2026-11-11 00:00:47 PKT   ran 2:01 (no time limit)   sessions 1
+SOL/USD   $150.00 (fixed)
+
+RUN P&L   -0.1132 SOL  -$16.98              per hour -0.0558 SOL  -$8.36
+pre-send  -0.1027 SOL  -$15.40              T2: 23 fills, 10 wins | realized -0.0710, rent back +0.0347, failed tries -0.0664 (7,255 x 10,500)
+re-arm    -0.0105 SOL  -$1.57               5 fills, 3 wins | realized +0.0455, rent back +0.0075, failed tries -0.0636 (7,033 x 10,500)
+          failed-try fees: counted 0.129957, engine at the end 0.129957 (match)
+regular   +0.0000 SOL  +$0.00               0 buys, 0 fills, 0 wins | fills +0.0000, failed buys +0.0000 (0: 6042 0, 6001 0, other 0)
+wallet    start 16.9781  now 16.8649 est.  kill switch below 16.4781 (0.387 SOL away)
+P&L line  hi +0.031 00:05  lo -0.151 01:34  now -0.113
+ATH       +0.031 SOL  $4.67 · 12:05 AM PKT   low -0.151 SOL  -$22.62 · 1:34 AM   from ATH -0.144
+limits    time no limit, regular buys no limit, pre-send fills no limit, fee budget 24 h 0.1300/2.0000 SOL
+lock      give back max(1.000 SOL, 30% of the peak); peak +0.0312, stops below -0.5000, run P&L -0.1153 (0.385 SOL away)
+reg mode  paper: picks 12, fills 3 (no-fill 9), exits 3, paper P&L +0.0022 gross / -0.0086 net, open 0
+observ.   log only: paper re-arm 153 windows / 119 fills, hold 28, watch 6,794, migration 211, blink 1,871, backrun 7,301, select 4,090, feed race 181,618, INSLOT 7,318; 210,015 records 62.6 MB, p99 35.6 us/msg
+re-arm    config 0.250 SOL · window dump+3 → dump+3+20 slots · QUIET stop 6:2 · R5 skip on · after a single sell ≥ 6% while another wallet holds ≥ 6% (token ≤ 141 slots, curve < 100 SOL); windows 74, armed after waiting 4, deferred 7, tries 7,173
+          skips: no_holder 264 · age 181 · r5 40 · blocked_live_armed 26 · holder_loss 20 · blocklist 11 · blocked_rearm_armed 4 · blocked_position 2 · blocked_inflight 1 · blocked_launch 1 | ends: whale_dump 21 · quiet 16 · expired 15 · no_holder 14 · filled 5 · superseded 3
+          exits: time-limit 4 (+0.0084), take-profit 1 (+0.0371)
+          engine: candidates 443, checks 443, pending 0, sells >= 6% 622, realized +0.0455 | paper (observatory, log only) 153 windows / 119 fills
+A/B       routes default=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;bam=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;harmonic=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;jito=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps (the tries alternate), caps 60/s, 40/s a path
+          helius-ps        6,711 tries, refused 2,204 (24.7%), landed 98%, same slot 43%, send->land p50 / p90 86 / 202 ms, acks not 200: 0, fills 12, P&L -0.0483 (12 positions, 5 W)
+          flashblock-ps    3,614 tries, refused 1,307 (26.6%), landed 98%, same slot 41%, send->land p50 / p90 88 / 222 ms, acks not 200: 0, fills 7, P&L -0.0127 (7 positions, 3 W)
+          astralane-ps     3,592 tries, refused 1,353 (27.4%), landed 99%, same slot 42%, send->land p50 / p90 88 / 202 ms, acks not 200: 0, fills 9, P&L +0.0356 (9 positions, 5 W)
+          speedlanding-ps  658 tries, refused 307 (31.8%), landed 99%, same slot 43%, send->land p50 / p90 87 / 199 ms, acks not 200: 0, fills 0, P&L +0.0000
+          not sent (engine, all paths): botdepth_withheld 5,351 · rate_global 5,259 · fpnb_withheld 3,211 · fpnb_withheld_stale 716 · paused_presend_position 492 · rate_path_config 288; acks (engine): 200 14,575; refused = inferred from the windows' missing ticks
+filters   dip_ams_r79.jsonl: 28 positions realized -0.025 SOL; LIVE = changed what the engine did (paper estimate), LOG = log only, would-have (real fills); bad creator: no ledger seed, this run's fills only
+          filter                     type blocked |        would win |       would lose | net saved
+          QUIET                      LIVE      57 |    1     +0.112 |   10     -0.152 |    +0.040   (paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 11/57 (no value: 0 re-arm = no shadow, 46 T2 shadow never filled))
+          create-slot skip           LIVE     163 |   10     +0.226 |   13     -0.225 |    -0.002   (paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 23/163 (no value: 0 re-arm = no shadow, 140 T2 shadow never filled))
+          age-1 skip                 LIVE      27 |    6     +0.236 |    2     -0.032 |    -0.204   (paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 8/27 (no value: 0 re-arm = no shadow, 19 T2 shadow never filled))
+          10-sec skip                LIVE      19 |    2     +0.017 |    0     +0.000 |    -0.017   (paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 2/19 (no value: 0 re-arm = no shadow, 17 T2 shadow never filled))
+          circuit breaker            LIVE       0 |    0     +0.000 |    0     +0.000 |    +0.000   (paper; blocked = triggers skipped, W/L = the ones that would have filled)
+          creator loss (T2)          LIVE       0 |    0     +0.000 |    0     +0.000 |    +0.000   (paper; blocked = triggers skipped, W/L = the ones that would have filled)
+          creator unfollowed (T2)    LIVE       0 |    0     +0.000 |    0     +0.000 |    +0.000   (paper; blocked = triggers skipped, W/L = the ones that would have filled)
+          QUIET3-A (live)            LIVE       0 |    0     +0.000 |    0     +0.000 |    +0.000   (paper; blocked = triggers skipped, W/L = the ones that would have filled)
+          blocklist                  LIVE      31 |    2     +0.102 |    3     -0.084 |    -0.018   (paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 5/31 (no value: 11 re-arm = no shadow, 15 T2 shadow never filled))
+          holder loss (T2 / re-arm) [live] LIVE      37 |    2     +0.020 |    4     -0.086 |    +0.066   (mode live; paper; blocked = triggers skipped, W/L = the ones that would have filled (re-arm skips counted, no paper); paper-scored 6/37 (no value: 20 re-arm = no shadow, 11 T2 shadow never filled))
+          M2 unseen                  LIVE       0 |    0     +0.000 |    0     +0.000 |    +0.000   (paper; blocked = triggers skipped, W/L = the ones that would have filled)
+          no-bot filter              LIVE      51 |    2     +0.125 |    4     -0.032 |    -0.093   (paper; 3927 sends withheld; 51 windows never filled, 5 filled later (real P&L +0.018); stale-hold withheld 716; paper-scored 6/51 (no value: 20 re-arm = no shadow, 25 T2 shadow never filled))
+          bot depth (live)           LIVE      67 |    6     +0.162 |    4     -0.036 |    -0.127   (paper; 324 sends withheld; 67 windows never filled, 3 filled later (real P&L +0.019); paper-scored 10/67 (no value: 25 re-arm = no shadow, 32 T2 shadow never filled))
+          bad creator (run only)     LOG        0 |    0     +0.000 |    0     +0.000 |    +0.000   (real fills; no ledger seed: this run's own fills only)
+          safe sell timer            LOG        1 |    1     +0.066 |    0     +0.000 |    -0.066   (real fills (needs the safe on-chain check to be real))
+          ctx85 (deeper limit, log)  LOG        3 |    2     +0.067 |    1     -0.024 |    -0.042   (real fills)
+          group risk (new)           LOG        1 |    1     +0.066 |    0     +0.000 |    -0.066   (real fills; risky holders of any size summed >= 6%)
+          holder clock (approx)      LOG        1 |    1     +0.066 |    0     +0.000 |    -0.066   (real fills)
+          QUIET3-A (log)             LOG        2 |    1     +0.040 |    1     -0.021 |    -0.019   (real fills; T2 quiet token + whale with <= 3 dumps)
+          fresh holders >= 35% (log) LOG        0 |    0     +0.000 |    0     +0.000 |    +0.000   (real fills; attack guard (TAIL G3))
+          creator loss (log)         LOG        3 |    2     +0.054 |    1     -0.003 |    -0.051   (real fills; creator ledger verdict, nothing skipped)
+          equal-size group (log)     LOG        1 |    1     +0.011 |    0     +0.000 |    -0.011   (real fills; >= 3 holders with the same bag)
+          bundle family fam (log)    LOG        2 |    1     +0.016 |    1     -0.017 |    +0.001   (real fills; launch-slot + transfer-fed holders >= 26.8%)
+          no-bot filter (log)        LOG        1 |    0     +0.000 |    1     -0.014 |    +0.014   (real fills; FP-NOBOT no-follower score >= thr at the deciding send)
+          skip2 per-send (log)       LOG        9 |    3     +0.146 |    6     -0.062 |    -0.084   (real fills; SKIP-2 logistic score < thr at the deciding send)
+          whale ledger mean rule (log) LOG        2 |    2     +0.041 |    0     +0.000 |    -0.041   (real fills; the whale ledger's other rule (mean) would have skipped)
+          whale loss (log mode)      LOG        3 |    3     +0.042 |    0     +0.000 |    -0.042   (real fills armed while the whale ledger ran in log mode)
+          HYBRID-2 gate (log)        LOG       16 |    7     +0.172 |    9     -0.157 |    -0.014   (real fills; h2_keep false: no M2-scored dump before the trigger, or T2 age < 30)
+          G-A holder floors (log)    LOG        2 |    1     +0.040 |    1     -0.002 |    -0.038   (real fills; CASCADE G-A: >= 2 of the top-6 holders (>= 1%) below 90% of their signing balance just before our buy (the snipe-guard's floors would have aborted it))
+          guards top-5 (log)         LOG        1 |    1     +0.040 |    0     +0.000 |    -0.040   (real fills; CASCADE guards: >= 2 of the top-5 non-trigger holders (>= 0.5%) below 90% just before our buy)
+          mint ledger (log)          LOG        0 |    0     +0.000 |    0     +0.000 |    +0.000   (real fills; MINT-LEDGER: an earlier landing on the mint at or below the ledger's loss (would have skipped the trigger))
+          fan-out (log)              LOG        0 |    0     +0.000 |    0     +0.000 |    +0.000   (real fills; FANOUT: the arm's fam read found >= N plain-transfer recipients (would have disarmed))
+          FP strict (log)            LOG       10 |    5     +0.140 |    5     -0.086 |    -0.055   (real fills; FP-NOBOT strict: the window had a T2 slot the strict threshold blocked (the frozen one passed))
+          landing guard (new)        LOG        1 |    1     +0.066 |    0     +0.000 |    -0.066   (real fills; the signing-time set still holding at landing)
+          LIVE total (unique triggers): 428 blocked, would win 30 +0.999, would lose 39 -0.630, net saved -0.369 (rows sum 24 more: a trigger under 2+ LIVE rows)
+          LOG total (unique fills):     26 blocked, would win 13 +0.341, would lose 13 -0.239, net saved -0.102 (rows sum 33 more: a fill flagged by 2+ rules; 17 fills)
+          ALL total:                    454 blocked, would win 43 +1.340, would lose 52 -0.869, net saved -0.471 (LIVE is paper, LOG is real fills; the sets are disjoint; estimate)
+          re-arm skips: 550 (no shadow window: not scored)
+          ADDED WINDOWS (dip41; net = what they made): wide dumper log 3:0.8 | qf2 log 5:0.3
+          wide dumper (log)          LOG      112 |    3     +0.045 |    5     -0.109 |    -0.064   (paper (the wide shadow's row c at 0.250 SOL); would-arm 112, scored 8, no wide shadow window 0)
+          qf2 (log)                  LOG       57 |    2     +0.179 |    4     -0.066 |    +0.114   (paper (the wide shadow's row c at 0.250 SOL); would-arm 57, scored 6, no wide shadow window 0)
+          qf2 on T2 (log)            LOG       37 |    4     +0.114 |    5     -0.103 |    +0.011   (real T2 positions; flagged arms 37, realized 9; unflagged realized 14 -0.082)
+          Q1 (log)                   LOG       64 | +4:  42W/ 22L    +1.664 | +9:  41W/ 23L    +2.155   (paper 0.50 SOL, nothing sent; triggers in the warm-up 0; outcomes 64 / 64)
+          family present / absent    REAL present    5     +0.069 | absent   23     -0.094   (real positions by the 2NUM family on the token in the 300 slots before the dump; fam2 log)
+          latest LOG blocks (would have been blocked by):
+            1:48:42 AM  RA  9FH3EfNw6SLsK1kPtUe9N2nhJkk7o4tBU4pRPDdLpump  WIN  +0.0371  skip2 per-send, HYBRID-2
+            1:46:43 AM  T2  5iYMVFq7ryZca8UAfRFMSL6XJ2zhmbSg6Qq5VBJXoxSj  LOSE -0.0239  FP strict
+            1:44:28 AM  T2  vetx2gCuPvfw5P6GVhTRTg8BGvLovqHVs5PHEBhBG4M  LOSE -0.0265  HYBRID-2
+            1:39:46 AM  T2  DXG5YhzasTtDv4C1fgxMka3oYcksqV6kWyy888T4pump  LOSE -0.0031  crlog, skip2 per-send, HYBRID-2
+            1:39:14 AM  T2  DBNTjWU1qubyZ8xaFJZG26mEEBYjbqmmXEZcTTtgpump  WIN  +0.0400  QUIET3-A, crlog, HYBRID-2, G-A floors, guards top-5, FP strict
+dip43     GUARD (snipe-guard A/B)
+          guard     mode holders 6:0.9:1:1 (top N : floor : max leavers : min %) · A/B by window parity: odd G snipe-guard, even L Lighthouse
+          G snipe-guard   tries 8,196, fills 13 (1.6 / 1k tries), realized -0.0382 (13, 4 W), deadline 5.8%, unseen 1.6%, guard_abort 6.3%, failed fees -0.073822
+          L Lighthouse    tries 6,379, fills 15 (2.4 / 1k tries), realized +0.0128 (15, 9 W), deadline 6.2%, unseen 1.8%, guard_abort 0.0%, failed fees -0.056135
+          aborts by kind: floors 520 (below 2: 379, 3: 7, 5: 134; gap 0: 481, 1: 3, 3: 36) · deadline 475 (below 0: 475; gap 1: 410, 2: 43, 3: 22)
+          floors per G try (holders mode): 0: 1.3%, 2: 3.0%, 3: 1.1%, 4: 3.1%, 5: 8.0%, 6: 83.5% · no floors: few_holders 68 · stale 31 · no_snapshot 11 · snapshot age p50 / p90 1184 / 3103 ms
+dip43     TRUE BALANCES (dip43 A3)
+          tbal      arm snapshots 199, errors 0 · read ms p50 / p90 4.3 / 9.5 · holders p50 20
+          fam reads 199, errors 0 · lag ms p50 / p90 14 / 79 · read slot - arm slot p50 -2 (min -33, max -2; 199 before the arm)
+          CASCADE G-A on 28 fills: would abort 2 (realized +0.0383), pass 26 (realized -0.0637) · log only
+dip43     FEE TIER / SEND (dip43 B1 B2 A8)
+          B1 CAP + ROUTES: global cap 60/s, per lane entry 40/s | re-route a lane-refused try off | one rate token per async try off | pre-send skip clients none
+          B2 FEE TIER: ON: every 1th try of a window-slot at CU price 50000 uL (never lower than its own) on leaders AgaveBam,HarmonicAgave,HarmonicFiredancer,Firedancer,Agave,FireBAM
+          B5 WINDOW START: off: +50 ms after the trigger (--presend-live-ms)
+          fee tier: tries at the tier price 10,807, at their own 3,768 (on a tier client's slot 10,807)
+          CU price    1,000 uL: tries 3,768, landed 3,765, fills 4, failed fees -0.019025
+          CU price   50,000 uL: tries 10,807, landed 10,798, fills 24, failed fees -0.110933
+          send accounting (A8, 199 windows): due 29,892, sent 14,574 (48.8%); not sent: other 9,278 · rate_global 5,259 · paused_position 492 · rate_path 288
+          unseen tries 247, their fees est. -0.001262 (the records book them at 0: NOT in the run P&L above)
+dip43     EXIT A/B (dip43 B3 B4 B6)
+          B4 CHEAP TIMER SELLS: ON: time-limit / time-ms sells at 500000 uL on positions with (pid >> 1) even (A/B; others the run's price) (TP / SL / wall / orphan sells unchanged)
+          cheap timer sells (B4)   base 13 exits, realized -0.0465 (13, 5 W) | cheap 9 exits, realized -0.0193 (9, 4 W)
+dip43     DIP43 SHADOWS (log only)
+          feed stall episodes 0 (none), longest 0 ms
+          mint ledger entries 101 (73 paper) · would-block: none
+          fan-out flags: none · fam read acts: none 199
+          FP strict would-blocks 77 in 38 windows
+          fill shadows: FP would-hold 0, big-holder short 7, T2 arm-slot send 2
+          exit shadow records 28 (realized est. +0.2385) · stop shadows 6
+          react-watch records 13,384
+dip43     fills (arm, floors, band, landing depth, CASCADE G-A, flags):
+          T2 4Nw4GTEL arm L depth 12.1% G-A pass (1/6 below) · timer cheap · +0.0349
+          T2 E7Ps1cAc arm L depth 13.4% G-A pass (1/6 below) · timer base · -0.0244
+          T2 3nfoFXA1 arm G floors 3 depth 12.1% G-A pass (1/4 below) · timer base · -0.0170
+          RA 8y81v3KS arm G floors 6 depth 15.7% G-A pass (1/6 below) · bh-short, timer cheap · +0.0157
+          T2 3gCQQZag arm L depth 44.4% G-A pass (1/6 below) · -0.1015
+          T2 EnL5MUwv arm G floors 6 depth 16.1% G-A pass (1/6 below) · bh-short, timer base · +0.0140
+          T2 3drjo39N arm L depth 29.0% G-A pass (1/6 below) · +0.0431
+          T2 7no69LYa arm G floors 4 depth 15.6% G-A pass (1/4 below) · timer cheap · -0.0072
+          T2 KH7GoqWB arm L depth 12.7% G-A pass (1/6 below) · bh-short · +0.0659
+          RA KH7GoqWB arm L depth 15.2% G-A pass (1/6 below) · timer base · +0.0111
+          RA 14tgA7SY arm G floors 2 depth 14.3% G-A pass (1/2 below) · bh-short, timer base · -0.0167
+          T2 5AW6jCUh arm L depth 13.5% G-A pass (1/6 below) · bh-short, timer cheap · +0.0009
+          T2 H6oyQyDf arm G floors 6 depth 37.2% G-A pass (1/6 below) · timer cheap · -0.0195
+          T2 9PC8iSKS arm L depth 13.4% G-A pass (1/6 below) · timer base · +0.0073
+          T2 3URAxamp arm L depth 24.4% G-A pass (1/6 below) · timer base · +0.0210
+          T2 3Zsd7Au2 arm G floors 6 depth 12.2% G-A pass (1/6 below) · timer cheap · -0.0214
+          T2 2pLvjw8u arm G floors 6 depth 16.2% G-A pass (1/6 below) · timer cheap · -0.0261
+          T2 37ZP9m5m arm G floors 6 depth 21.2% G-A pass (1/6 below) · timer base · -0.0140
+          RA HGrVJ5B1 arm L depth 15.1% G-A abort (2/4 below) · timer base · -0.0017
+          T2 23g1y4wf arm L depth 17.5% G-A pass (1/6 below) · bh-short · -0.0443
+          T2 Femt3BRe arm L depth 15.3% G-A pass (1/5 below) · timer cheap · +0.0065
+          T2 9xVtoouV arm G floors 6 depth 14.3% G-A pass (1/6 below) · timer base · +0.0435
+          T2 AoePB98R arm L depth 13.8% G-A pass (1/5 below) · timer base · -0.0193
+          T2 DBNTjWU1 arm G floors 6 depth 28.1% G-A abort (2/6 below) · bh-short · +0.0400
+          T2 DXG5Yhza arm G floors 6 depth 16.6% G-A pass (1/6 below) · timer cheap · -0.0031
+          T2 vetx2gCu arm G floors 6 depth 21.8% G-A pass (1/6 below) · timer base · -0.0265
+          T2 5iYMVFq7 arm L depth 15.4% G-A pass (1/6 below) · timer base · -0.0239
+          RA 9FH3EfNw arm L depth 18.9% G-A pass (1/6 below) · +0.0371
+caps      pre-send fills 28/no limit, fees 0.1300 SOL this run, 24 h 0.1300/2.0000, windows armed now 0
+paper     engine estimate (shadow row c, net incl. its tries) on the same T2 triggers: live armed + sent 26 fills, net +0.299 | live skipped/withheld 64 fills, net +0.168 (skipped 56, armed nothing sent 8) | vs live T2 23 fills, net -0.103 | all triggers 90 fills, net +0.467 (not comparable)
+QUIET     stop 5:2, skip rule: on (all 4 quiet signals skip a trigger); skips 57, stops 12, would-skip 0
+config    + T2 0.25 k20 28/? fee 0.13/2.00  + stop 5:2  + skip on  + paper  + M2 gate  - dev off  0.25 TP off
+          SL 50% 5sl  ×1.05  v13  + sell-fan  + nonce 8  + near 120  skip rakurai  kill 16.478  time no limit
+          + lock 1.00/30%  + fee24 0.13/2.00  ~ REG paper  limits none  + obs  + RA 0.25 g20 q6:2 R5  + A/B
+          HL/FL/AS/SL  + sg holders A/B  dip43c
+          (+ on, ~ partial / warming up, - off)
+
+last trades (PKT, newest first; P&L = realized, ~ = feed estimate):
+  01:48:42 RA  9FH3EfNw  0.25   +0.0371     +$5.56   +14.8%  TP    BAM        via FL
+  01:46:43 T2  5iYMVFq7  0.25   -0.0239     -$3.58    -9.5%  time  BAM        via FL
+  01:44:28 T2  vetx2gCu  0.25   -0.0265     -$3.97   -10.6%  time  BAM        via HL
+  01:39:46 T2  DXG5Yhza  0.25   -0.0031     -$0.46    -1.2%  time  Harmonic   via HL
+  01:39:14 T2  DBNTjWU1  0.25   +0.0400     +$6.00   +16.0%  TP    BAM        via HL
+  01:36:52 T2  AoePB98R  0.25   -0.0193     -$2.89    -7.7%  time  Rakurai    via HL
+  01:36:39 T2  9xVtoouV  0.25   +0.0435     +$6.53   +17.4%  time  Jito       via HL
+  01:35:57 T2  Femt3BRe  0.25   +0.0065     +$0.98    +2.6%  time  BAM        via FL
+
+note      RUN ENDED 02:02 (Ctrl+C) -0.1132 SOL · END CHECK 32 read: 0 sold, 0 closed, 0 held ✓

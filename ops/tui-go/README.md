@@ -1,4 +1,84 @@
-# REWIND: dipmon v3.1 + dipview, the live monitor and run explorer for the dip-bot runs (Go)
+# REWIND: dipmon v4 + dipview, the live monitor and run explorer for the dip-bot runs (Go)
+
+## v4 (11-11)
+
+**Why:** the 11-09 drive loss took the newest dipmon source (dip39-dip42, "dipmon 3.3"); every tag dip38..dip43d had the
+dip37-era code. Only the binary survived (`/home/it/sniper-data/tui/oracle/dipmon-go.dip42`). v4 rebuilds that source against
+the binary (the oracle) and adds what the engine got on 11-10/11 (dip43 .. dip43d, and dip43e's dump exit).
+
+**Recovered (parity with the dip42 binary, checked on every local run: AMS r9-r80, 65 runs, `--snapshot`, `--snapshot --json
+--extra`, all tabs at 200x60 and 5 tabs x 3 pages at 160/120/80/50 columns on r24 r40 r56 r63 r64 r72 r79 r80; dipview `--list`):**
+
+- the engine build from the log's `ENGINE BUILD: snipe_engine_dip43c sha256 ...` line (dip39+); runs before it are inferred from
+  their records: `dip27+` (lone-whale), `dip30+` (wide shadow / landing guard), `dip32+` (creator ledger), `dip35+` (fam),
+  `dip36+` (FP-NOBOT / blocklist), `dip37+` (ledgers), `dip37c+` (SKIP-2 live);
+- Filters: the **bot depth (live)** row (dip39: windows whose sends the gate withheld, scored on the shadow's paper; the ones
+  that filled later in the note) and **bot depth (log)** (fills the gate in log mode would have withheld); the **no-bot filter**
+  row scored on paper; the **blocklist** per-send windows (`presend_live_blocklist_withheld`) in its row; every LIVE row says
+  `paper-scored N/M (no value: A re-arm = no shadow, B T2 shadow never filled)`; the unique LIVE total dedupes by trigger sig
+  (`N triggers in 2+ rows`); the Filters tab folds the rows with no blocks into one line (`7 with no blocks yet: ...`);
+- **ADDED WINDOWS** (dip41/42, log only; snapshot and the Filters tab): wide dumper and QF2 scored on the wide shadow's row c
+  at the logged size, QF2's flag on the real T2 positions, Q1 (paper at its +4 / +9 horizons), the 2NUM family present /
+  absent on the real positions;
+- the **paper line** / the Engine tab's PAPER vs LIVE: the shadow's net (incl. its tries) split by what live did with each T2
+  trigger: armed + sent, skipped, armed with nothing sent (each shadow exit / disarm bound to the latest arm of its window
+  id: an engine restart reuses them);
+- the lost test fixtures rebuilt (`internal/core/testdata/dip26_r38_slice.jsonl` by `make_slice38.py`, the r40f filters
+  fixture cut at the 335th realized record) and **force-added to git** with the goldens (they were gitignored: that is how
+  they were lost).
+
+Mismatches left: none on the outputs above. Not recoverable: the r36 / r38 golden screens and `TestDip26R38` were rendered
+from frozen partial copies of those runs (lost); they fail on the full run files with the old source too and skip by
+default (no `/home/moiz/...` data).
+
+**Added (dip43 .. dip43e; only on runs with a dip43 record or banner, older runs' output unchanged):**
+
+- **Engine tab, on top** (two columns from 120 wide; the same text in `--snapshot` as `dip43 ...` lines and in the JSON as
+  `"dip43": {...}`):
+  - **GUARD (snipe-guard A/B)**: mode / holders spec / A/B from the `GUARD (dip43 snipe-guard)` banner; per arm (G snipe-guard,
+    L Lighthouse; by the try's `guard.arm`): tries, fills, fills per 1k tries, realized (positions, wins), deadline %,
+    unseen %, guard_abort %, failed fees; guard aborts by kind (`guard_abort.kind`: floors, curve_deep, deadline, auth, ...)
+    with the holders-below count and gap buckets; floors carried per G try (`guard.n_floors`), tries signed without floors by
+    reason (no_snapshot / stale / few_holders), snapshot age p50 / p90;
+  - **CURVE BAND (dip43d)**: LIVE / LOG now (the banner's start state, then every `curve_deep` hot switch in
+    `presend_live_ledger_mode`), D, tries carrying `guard.curve_hi` vs the log-only `curve_would_hi`, curve_deep aborts
+    (count, windows, mints, fees), each fill's price just before our buy vs its try's signing price against the band;
+  - **TRUE BALANCES (A3)**: `presend_live_tbal_snap` (snapshots, errors, ms p50 / p90, holders), the fam reads (errors, lag,
+    read slot - arm slot), the CASCADE G-A verdict over the fills (would abort / pass, their realized P&L);
+  - **FEE TIER / SEND (B1 B2 B5 A8)**: the B1 / B2 / B5 banner lines (cap, per lane, re-route, single token, skip clients;
+    the tier), tries at the tier price vs their own, per CU-price class: tries, landed, fills, failed fees; re-routed tries;
+    the send accounting (`not_sent` on `presend_live_disarm`: due, sent, by reason); the unseen tries' fee estimate
+    (`presend_live_unseen_fee`; shown apart: **not** added to the run P&L, which stays the dip42 accounting);
+  - **EXIT A/B (B3 B4 B6)**: per A/B (cheap timer sells, two-lot exit, exit timer) and arm: exits, realized, wins; lot 2 exits;
+  - **DIP43 SHADOWS**: FEED-STALL episodes, dead-man / blind would-records, mint ledger entries and would-blocks (arm / skip /
+    fill), fan-out flags and the fam read's acts, FP strict would-blocks, the fills' FP would-hold / big-holder short / T2
+    arm-slot, exit shadow and stop shadow records, react-watch records, dip43e's dump exit (would-fires, those positions' P&L).
+- **Filters**: a LOG rule registry (`internal/core/logrules.go`): **G-A holder floors (log)** (CASCADE G-A abort on the fill),
+  **guards top-5 (log)**, **mint ledger (log)**, **fan-out (log)**, **FP strict (log)**: LOG rows scored on the real fills
+  (verdict "LOG new"), in each flagged fill's item (the Trades dot, `x`, the details' "blocked by"). One entry adds a rule:
+  the dip44 farm floor (`presend_live_farm`) goes in there (the comment at the top shows the shape); the Engine sections are
+  `core.D43Sections` (one func per section).
+- **Trades**: an `arm` column (G / L, the filling try's arm; from 110 columns, dip43 runs only); the details and the `x`
+  panel carry each fill's dip43 line: arm, floors carried, band on / log, landing depth, CASCADE G-A (below / of), mint
+  ledger / fan-out / FP-hold flags, the exit A/B arms, its P&L.
+- **Config**: a DIP43 panel with the start banners as printed (GUARD, DIP43-B B1-B6, DIP43 A1-A12, DIP43E).
+- `DIPMON_V3=1` turns every v4 addition off (the oracle parity check); `dipmon --version` = 4.0.
+
+**Tests (v4):** `go test ./...` (with `DIPMON_DATA=/home/it/sniper-data/runs` for the run-file tests): `TestD43Report` /
+`TestD43Registry` (a synthetic dip43d run), `TestD43Golden` (r76-r80 snapshot text + JSON, `internal/core/testdata/golden43`,
+`-update43`), `TestGoldenDip43` (r80: Engine, Trades, details, Config, Filters at 200x60 / 120x40 / 80x30), and
+`tests/parity_oracle.sh` (every local run against the dip42 binary, in `DIPMON_V3=1`).
+
+**Install (AMS; the orchestrator does it):** every file goes in as `X.new`, then `mv` over `X` (never overwrite a running
+binary in place):
+
+```sh
+scp -P 1996 /home/it/sniper-data/tui/v4/dipmon-go it@cyberams:/tmp/dipmon-go.new      # check its .sha256 first
+ssh -p 1996 it@cyberams 'cd /tmp && sha256sum dipmon-go.new && sudo install -m 755 dipmon-go.new /usr/local/bin/dipmon-go.new && sudo mv /usr/local/bin/dipmon-go.new /usr/local/bin/dipmon-go && dipmon-go --version'
+```
+
+The wrapper (`/usr/local/bin/dipmon`) and `dipview` are unchanged. A running dipmon keeps the old binary until it is restarted.
+
 
 **11-03 (owner):** tab 2 is now **Engine** (short `Eng`; it was "Pre-send"); the pre-send fill kind is shown as **T2**
 everywhere it used to say `PS` (Trades / overview tables, the type sort, the split / landing lines, the config short form,

@@ -1,0 +1,40 @@
+    ams · run 80 · dip43d                                                    ○ ENDED  ·  2:40:53 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+GUARD (snipe-guard A/B) ──────────────────────────────────  CURVE BAND (dip43d) ───────────────────────────────────────
+guard     mode holders 6:0.9:1:1 (top N : floor : max       band      LIVE now (start LIVE) · abort when the price is
+  leavers : min %) · A/B by window parity: odd G              >= 42% under the try's signing price · tries with the
+  snipe-guard, even L Lighthouse                              band 1,704, log-only bound 0
+  G snipe-guard   tries 776, fills 2 (2.6 / 1k tries),        curve_deep aborts 2 in 1 windows, 1 mints, their fees
+    realized -0.0667 (2, 0 W), deadline 4.4%, unseen 0.4%,      -0.000021 (5qtMq8on)
+    guard_abort 0.5%, failed fees -0.007104                   fills: the price just before our buy vs the filling try's
+  L Lighthouse    tries 928, fills 5 (5.4 / 1k tries),          signing price: J8bfMv 24.0%, 5qtMq8 39.1%, 5X1xhw
+    realized -0.4333 (5, 1 W), deadline 2.7%, unseen 0.0%,      14.4%, 8MeLMY 16.9%, CJBMfF 13.4%, 6qSqHR 12.2%, 89GTMq
+    guard_abort 0.2%, failed fees -0.008220                     15.9% under (band 42%)
+  aborts by kind: deadline 59 (below 0: 59; gap 1: 58, 2:   FEE TIER / SEND (dip43 B1 B2 A8) ──────────────────────────
+    1) · floors 4 (below 2: 4; gap 3: 4) · curve_deep 2       B1 CAP + ROUTES: global cap 60/s, per lane entry 40/s |
+    (below 0: 2; gap 5: 2)                                      re-route a lane-refused try off | one rate token per
+  floors per G try (holders mode): 0: 0.4%, 3: 5.8%, 4:         async try off | pre-send skip clients none
+    9.3%, 6: 84.5% · no floors: no_snapshot 3 · snapshot      B2 FEE TIER: ON: every 1th try of a window-slot at CU
+    age p50 / p90 646 / 1896 ms                                 price 50000 uL (never lower than its own) on leaders
+TRUE BALANCES (dip43 A3) ─────────────────────────────────      AgaveBam,HarmonicAgave,HarmonicFiredancer,Firedancer,Ag
+tbal      arm snapshots 29, errors 0 · read ms p50 / p90        ave,FireBAM
+  3.8 / 9.1 · holders p50 20                                  B5 WINDOW START: off: +50 ms after the trigger
+  fam reads 29, errors 0 · lag ms p50 / p90 82 / 93 · read      (--presend-live-ms)
+    slot - arm slot p50 -2 (min -6, max -1; 29 before the     fee tier: tries at the tier price 1,243, at their own 461
+    arm)                                                        (on a tier client's slot 1,243)
+  CASCADE G-A on 7 fills: would abort 2 (realized             CU price    1,000 uL: tries 461, landed 461, fills 1,
+    -0.2205), pass 5 (realized -0.2795) · log only              failed fees -0.002335
+EXIT A/B (dip43 B3 B4 B6) ────────────────────────────────    CU price   50,000 uL: tries 1,243, landed 1,243, fills 6,
+  B4 CHEAP TIMER SELLS: ON: time-limit / time-ms sells at       failed fees -0.012989
+    500000 uL on positions with (pid >> 1) even (A/B;         send accounting (A8, 29 windows): due 3,829, sent 1,704
+    others the run's price) (TP / SL / wall / orphan sells      (44.5%); not sent: other 1,542 · rate_global 580 ·
+    unchanged)                                                  rate_path 3
+  cheap timer sells (B4)   base 2 exits, realized -0.2087     unseen tries 3, their fees est. -0.000015 (the records
+    (2, 0 W) | cheap 2 exits, realized -0.0660 (2, 0 W)         book them at 0: NOT in the run P&L above)
+                                                            DIP43 SHADOWS (log only) ──────────────────────────────────
+                                                            feed stall episodes 0 (none), longest 0 ms
+ ▲ KILL SWITCH fired (run P&L -0.5047)  +1
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                             ▼ 47 more  ♪ all  1s

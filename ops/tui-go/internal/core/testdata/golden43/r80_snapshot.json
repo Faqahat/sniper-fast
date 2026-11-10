@@ -1,0 +1,1406 @@
+{
+ "region": "AMS",
+ "run": 80,
+ "file": "DATA/ams_r80/dip_ams_r80.jsonl",
+ "status": "ENDED",
+ "how_ended": "kill switch",
+ "build": "dip43d",
+ "sessions": 1,
+ "started": 1794344687790087404,
+ "ended": 1794346253577151118,
+ "elapsed_s": 1565.787063714,
+ "planned_min": 0,
+ "sol_usd": 150.0,
+ "total_lamports": -504726240,
+ "total_sol": -0.50472624,
+ "per_hour_sol": -1.1604479983951945,
+ "presend": {
+  "active": true,
+  "fills": 7,
+  "wins": 1,
+  "realized": -499963980,
+  "rent": 10561740,
+  "fees": 15324000,
+  "fees_counted": 15323770,
+  "fees_engine": 15324000,
+  "failed_tries": 1694,
+  "net": -504726240,
+  "sent": 1704,
+  "results": {
+   "6042": 1579,
+   "deadline": 59,
+   "unseen": 3,
+   "ok": 7,
+   "ata_exists": 50,
+   "guard_abort": 6
+  },
+  "armed": 24,
+  "skips": {
+   "quiet": 10,
+   "create_slot": 30,
+   "young_age": 3,
+   "lone_whale": 1,
+   "blocked_armed": 3
+  },
+  "disarms": {
+   "whale_sold": 5,
+   "expired": 11,
+   "quiet": 4,
+   "filled": 4
+  },
+  "exits": {
+   "take-profit": {
+    "n": 1,
+    "wins": 1,
+    "pnl": 164629687
+   },
+   "stop-loss": {
+    "n": 2,
+    "wins": 0,
+    "pnl": -389851141
+   },
+   "time-limit": {
+    "n": 4,
+    "wins": 0,
+    "pnl": -274742526
+   }
+  },
+  "quiet_skips": 10,
+  "quiet_stops": 4,
+  "quiet_would": 0,
+  "paper_fills": 10,
+  "paper_net": -0.321,
+  "stopped": null,
+  "open_windows": 0
+ },
+ "regular": {
+  "fires": 0,
+  "fills": 0,
+  "wins": 0,
+  "guard_6042": 0,
+  "lighthouse_6001": 0,
+  "failed_other": 0,
+  "open": 0,
+  "fill_pnl": 0,
+  "failed_pnl": 0,
+  "total": 0,
+  "estimated": 0,
+  "exits": {},
+  "by_client": {}
+ },
+ "wallet": {
+  "start": 16862716000,
+  "est_now": 16357989760,
+  "kill_level": 16362716000,
+  "kill_distance": -4726240,
+  "budget_left": null
+ },
+ "quiet": {
+  "present": true,
+  "stop": "5:2",
+  "skip": true,
+  "state": "on",
+  "on_at": 1794344640000000000,
+  "preload": null,
+  "preload_h": null
+ },
+ "config": {
+  "ps": {
+   "state": "on",
+   "short": "T2 1.00 k20 7/? fee 0.02/2.00"
+  },
+  "qstop": {
+   "state": "on",
+   "short": "stop 5:2"
+  },
+  "qskip": {
+   "state": "on",
+   "short": "skip on"
+  },
+  "paper": {
+   "state": "on",
+   "short": "paper"
+  },
+  "m2": {
+   "state": "on",
+   "short": "M2 gate"
+  },
+  "dev": {
+   "state": "off",
+   "short": "dev off"
+  },
+  "reg": {
+   "state": "na",
+   "short": "1.00 TP off SL 50% 5sl"
+  },
+  "guard": {
+   "state": "na",
+   "short": "\u00d71.05"
+  },
+  "routes": {
+   "state": "na",
+   "short": "v13"
+  },
+  "sellfan": {
+   "state": "on",
+   "short": "sell-fan"
+  },
+  "nonce": {
+   "state": "on",
+   "short": "nonce 8"
+  },
+  "near": {
+   "state": "on",
+   "short": "near 120"
+  },
+  "skipcl": {
+   "state": "na",
+   "short": "skip rakurai"
+  },
+  "kill": {
+   "state": "na",
+   "short": "kill 16.363"
+  },
+  "planned": {
+   "state": "na",
+   "short": "time no limit"
+  },
+  "lock": {
+   "state": "on",
+   "short": "lock 1.00/30%"
+  },
+  "fee24": {
+   "state": "on",
+   "short": "fee24 0.01/2.00"
+  },
+  "regmode": {
+   "state": "part",
+   "short": "REG paper"
+  },
+  "limits": {
+   "state": "na",
+   "short": "limits none"
+  },
+  "obs": {
+   "state": "on",
+   "short": "obs"
+  },
+  "rearm": {
+   "state": "on",
+   "short": "RA 0.80 g20 q6:2 R5"
+  },
+  "ab": {
+   "state": "on",
+   "short": "A/B HL/FL/AS/SL"
+  },
+  "sguard": {
+   "state": "on",
+   "short": "sg holders A/B band 42% LIVE"
+  },
+  "build": {
+   "state": "na",
+   "short": "dip43d"
+  }
+ },
+ "alerts": [
+  {
+   "level": "bad",
+   "text": "KILL SWITCH fired (run P&L -0.5047)"
+  },
+  {
+   "level": "end",
+   "text": "RUN ENDED 02:30 (kill switch) -0.5047 SOL \u00b7 END CHECK 7 read: 0 sold, 0 closed, 0 held \u2713"
+  }
+ ],
+ "per_session": [
+  {
+   "n": 1,
+   "start": 1794344687790087404,
+   "end": 1794346253577151118,
+   "start_balance": 16862716000,
+   "ps_fills": 7,
+   "ps_wins": 1,
+   "ps_real": -499963980,
+   "ps_rent": 10561740,
+   "ps_fees": 15324000,
+   "ps_fees_counted": 15323770,
+   "ps_net": -504726240,
+   "ps_sent": 1704,
+   "reg_fires": 0,
+   "reg_fills": 0,
+   "reg_wins": 0,
+   "reg_guard": 0,
+   "reg_lighthouse": 0,
+   "reg_other": 0,
+   "reg_fill_pnl": 0,
+   "reg_fail_pnl": 0,
+   "reg_total": 0,
+   "total": -504726240,
+   "est": 0
+  }
+ ],
+ "series_hi": [
+  160819417,
+  1.79434506e+18
+ ],
+ "series_lo": [
+  -504726010,
+  1.7943462e+18
+ ],
+ "ath_sol": 0.160819417,
+ "ath_t": 1794345060000000000,
+ "low_sol": -0.50472601,
+ "low_t": 1794346200000000000,
+ "from_ath_sol": -0.665545427,
+ "dip24": {
+  "no_time_limit": true,
+  "regular_buys_unlimited": true,
+  "presend_fills_unlimited": true,
+  "profit_lock": {
+   "min_lamports": 1000000000,
+   "frac": 0.3,
+   "peak_lamports": 160800000,
+   "floor_lamports": -500000000,
+   "pnl_lamports": -325500000,
+   "distance_lamports": 174500000,
+   "from_engine": true,
+   "fired": false
+  },
+  "fee_budget_24h": {
+   "fees_lamports": 14700000,
+   "budget_lamports": 2000000000,
+   "paused": false,
+   "pauses": 0
+  },
+  "regular_mode": "paper",
+  "observatory": {
+   "rearm": 13,
+   "hold": 6,
+   "watch": 1223,
+   "mig": 28,
+   "blink": 288,
+   "backrun": 1204,
+   "select": 568,
+   "race": 24317,
+   "inslot": 1200,
+   "records": 28939,
+   "dropped": 0
+  }
+ },
+ "dip26": {
+  "t2": {
+   "fills": 4,
+   "wins": 0,
+   "realized": -473996260,
+   "rent": 6035280,
+   "fees": 12562500,
+   "failed_tries": 1431,
+   "net": -480523480,
+   "sent": 1438,
+   "armed": 24
+  },
+  "rearm": {
+   "fills": 3,
+   "wins": 1,
+   "realized": -25967720,
+   "rent": 4526460,
+   "fees": 2761500,
+   "failed_tries": 263,
+   "net": -24202760,
+   "sent": 266,
+   "windows": 5,
+   "open_windows": 0,
+   "armed_after_waiting": 1,
+   "deferred": 2,
+   "skips": {
+    "rearm_no_holder": 42,
+    "rearm_r5": 6,
+    "rearm_age": 27,
+    "rearm_blocked_position": 1,
+    "rearm_blocked_live_armed": 3,
+    "rearm_blocked_rearm_armed": 1,
+    "rearm_holder_loss": 1
+   },
+   "ends": {
+    "quiet": 1,
+    "filled": 3,
+    "stopped": 1
+   },
+   "cfg": {
+    "on": true,
+    "source": "run_start",
+    "spend": 800000000,
+    "gap": 20,
+    "quiet_stop": "6:2",
+    "r5_skip": true
+   },
+   "engine": {
+    "windows": 4,
+    "armed_now": 0,
+    "fills": 3,
+    "realized": 154000000,
+    "candidates": 58,
+    "checks": 58,
+    "pending": 0,
+    "attempts": 211,
+    "fees_failed": 2184000
+   }
+  },
+  "ab": {
+   "routes": "default=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;bam=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;harmonic=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;jito=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps",
+   "refusals_inferred": true,
+   "paths": {
+    "helius-ps": {
+     "sent": 763,
+     "refused": 260,
+     "paused_ticks": 50,
+     "resolved": 763,
+     "landed": 760,
+     "seen": 760,
+     "same_slot": 393,
+     "results": {
+      "ok": 6,
+      "6042": 700,
+      "deadline": 31,
+      "ata": 20,
+      "other": 3,
+      "unseen": 3
+     },
+     "send_to_land_p50_ms": 64.8,
+     "send_to_land_p90_ms": 154.16,
+     "acks_200": 763,
+     "acks_other": 0,
+     "acks_none": 0,
+     "fills": 6,
+     "positions": 6,
+     "pnl": -489352960
+    },
+    "flashblock-ps": {
+     "sent": 432,
+     "refused": 141,
+     "paused_ticks": 28,
+     "resolved": 432,
+     "landed": 432,
+     "seen": 432,
+     "same_slot": 216,
+     "results": {
+      "ok": 0,
+      "6042": 403,
+      "deadline": 13,
+      "ata": 15,
+      "other": 1,
+      "unseen": 0
+     },
+     "send_to_land_p50_ms": 64.69999999999999,
+     "send_to_land_p90_ms": 141.63000000000002,
+     "acks_200": 432,
+     "acks_other": 0,
+     "acks_none": 0,
+     "fills": 0,
+     "positions": 0,
+     "pnl": 0
+    },
+    "astralane-ps": {
+     "sent": 424,
+     "refused": 144,
+     "paused_ticks": 26,
+     "resolved": 424,
+     "landed": 424,
+     "seen": 424,
+     "same_slot": 207,
+     "results": {
+      "ok": 1,
+      "6042": 400,
+      "deadline": 10,
+      "ata": 12,
+      "other": 1,
+      "unseen": 0
+     },
+     "send_to_land_p50_ms": 63.4,
+     "send_to_land_p90_ms": 146.42,
+     "acks_200": 424,
+     "acks_other": 0,
+     "acks_none": 0,
+     "fills": 1,
+     "positions": 1,
+     "pnl": -10611020
+    },
+    "speedlanding-ps": {
+     "sent": 85,
+     "refused": 31,
+     "paused_ticks": 5,
+     "resolved": 85,
+     "landed": 85,
+     "seen": 85,
+     "same_slot": 30,
+     "results": {
+      "ok": 0,
+      "6042": 76,
+      "deadline": 5,
+      "ata": 3,
+      "other": 1,
+      "unseen": 0
+     },
+     "send_to_land_p50_ms": 67.75,
+     "send_to_land_p90_ms": 150.39000000000001,
+     "acks_200": 85,
+     "acks_other": 0,
+     "acks_none": 0,
+     "fills": 0,
+     "positions": 0,
+     "pnl": 0
+    }
+   },
+   "not_sent": {
+    "botdepth_withheld": 1541,
+    "rate_global": 570,
+    "rate_path_config": 3
+   },
+   "acks": {
+    "200": 1649
+   }
+  }
+ },
+ "filters": {
+  "seed": null,
+  "seed_creators": 0,
+  "positions": 7,
+  "realized_sol": -0.49996398,
+  "rows": [
+   {
+    "key": "quiet",
+    "name": "QUIET",
+    "type": "LIVE",
+    "blocked": 10,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 2,
+    "lose_sol": -0.06018902770834389,
+    "net_saved_sol": 0.06018902770834389,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 2/10 (no value: 0 re-arm = no shadow, 8 T2 shadow never filled)",
+    "na": false
+   },
+   {
+    "key": "create_slot",
+    "name": "create-slot skip",
+    "type": "LIVE",
+    "blocked": 30,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 2,
+    "lose_sol": -0.14850231644013154,
+    "net_saved_sol": 0.14850231644013154,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 2/30 (no value: 0 re-arm = no shadow, 28 T2 shadow never filled)",
+    "na": false
+   },
+   {
+    "key": "young_age",
+    "name": "age-1 skip",
+    "type": "LIVE",
+    "blocked": 3,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 0/3 (no value: 0 re-arm = no shadow, 3 T2 shadow never filled)",
+    "na": false
+   },
+   {
+    "key": "lone_whale",
+    "name": "10-sec skip",
+    "type": "LIVE",
+    "blocked": 1,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 0/1 (no value: 0 re-arm = no shadow, 1 T2 shadow never filled)",
+    "na": false
+   },
+   {
+    "key": "breaker",
+    "name": "circuit breaker",
+    "type": "LIVE",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled",
+    "na": false
+   },
+   {
+    "key": "cr_loss",
+    "name": "creator loss (T2)",
+    "type": "LIVE",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled",
+    "na": false
+   },
+   {
+    "key": "cr_unfollowed",
+    "name": "creator unfollowed (T2)",
+    "type": "LIVE",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled",
+    "na": false
+   },
+   {
+    "key": "quiet3_a",
+    "name": "QUIET3-A (live)",
+    "type": "LIVE",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled",
+    "na": false
+   },
+   {
+    "key": "blocklist",
+    "name": "blocklist",
+    "type": "LIVE",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled",
+    "na": false
+   },
+   {
+    "key": "holder_loss",
+    "name": "holder loss (T2 / re-arm) [live]",
+    "type": "LIVE",
+    "blocked": 1,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "mode live; paper; blocked = triggers skipped, W/L = the ones that would have filled (re-arm skips counted, no paper); paper-scored 0/1 (no value: 1 re-arm = no shadow, 0 T2 shadow never filled)",
+    "na": false
+   },
+   {
+    "key": "m2_unseen",
+    "name": "M2 unseen",
+    "type": "LIVE",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled",
+    "na": false
+   },
+   {
+    "key": "fpnb_live",
+    "name": "no-bot filter",
+    "type": "LIVE",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "paper; 0 sends withheld; 0 windows never filled, 0 filled later (real P&L +0.000); stale-hold withheld 0",
+    "na": false
+   },
+   {
+    "key": "botdepth_live",
+    "name": "bot depth (live)",
+    "type": "LIVE",
+    "blocked": 11,
+    "win_n": 2,
+    "win_sol": 0.22302136203803286,
+    "lose_n": 1,
+    "lose_sol": -0.00808492385365426,
+    "net_saved_sol": -0.2149364381843786,
+    "note": "paper; 84 sends withheld; 11 windows never filled, 2 filled later (real P&L -0.407); paper-scored 3/11 (no value: 1 re-arm = no shadow, 7 T2 shadow never filled)",
+    "na": false
+   },
+   {
+    "key": "gcr",
+    "name": "bad creator (run only)",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills; no ledger seed: this run's own fills only",
+    "na": false
+   },
+   {
+    "key": "st",
+    "name": "safe sell timer",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills (needs the safe on-chain check to be real)",
+    "na": false
+   },
+   {
+    "key": "ctx85",
+    "name": "ctx85 (deeper limit, log)",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills",
+    "na": false
+   },
+   {
+    "key": "grp",
+    "name": "group risk (new)",
+    "type": "LOG",
+    "blocked": 1,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 1,
+    "lose_sol": -0.055395594,
+    "net_saved_sol": 0.055395594,
+    "note": "real fills; risky holders of any size summed >= 6%",
+    "na": false
+   },
+   {
+    "key": "hc",
+    "name": "holder clock (approx)",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills",
+    "na": false
+   },
+   {
+    "key": "q3a",
+    "name": "QUIET3-A (log)",
+    "type": "LOG",
+    "blocked": 2,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 2,
+    "lose_sol": -0.407295088,
+    "net_saved_sol": 0.407295088,
+    "note": "real fills; T2 quiet token + whale with <= 3 dumps",
+    "na": false
+   },
+   {
+    "key": "fresh",
+    "name": "fresh holders >= 35% (log)",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills; attack guard (TAIL G3)",
+    "na": false
+   },
+   {
+    "key": "crlog",
+    "name": "creator loss (log)",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills; creator ledger verdict, nothing skipped",
+    "na": false
+   },
+   {
+    "key": "eqgrp",
+    "name": "equal-size group (log)",
+    "type": "LOG",
+    "blocked": 1,
+    "win_n": 1,
+    "win_sol": 0.164629687,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": -0.164629687,
+    "note": "real fills; >= 3 holders with the same bag",
+    "na": false
+   },
+   {
+    "key": "fam",
+    "name": "bundle family fam (log)",
+    "type": "LOG",
+    "blocked": 2,
+    "win_n": 1,
+    "win_sol": 0.164629687,
+    "lose_n": 1,
+    "lose_sol": -0.209864754,
+    "net_saved_sol": 0.04523506699999999,
+    "note": "real fills; launch-slot + transfer-fed holders >= 26.8%",
+    "na": false
+   },
+   {
+    "key": "fpnb",
+    "name": "no-bot filter (log)",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills; FP-NOBOT no-follower score >= thr at the deciding send",
+    "na": false
+   },
+   {
+    "key": "skip2",
+    "name": "skip2 per-send (log)",
+    "type": "LOG",
+    "blocked": 1,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 1,
+    "lose_sol": -0.179986387,
+    "net_saved_sol": 0.179986387,
+    "note": "real fills; SKIP-2 logistic score < thr at the deciding send",
+    "na": false
+   },
+   {
+    "key": "wh_other",
+    "name": "whale ledger mean rule (log)",
+    "type": "LOG",
+    "blocked": 1,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 1,
+    "lose_sol": -0.179986387,
+    "net_saved_sol": 0.179986387,
+    "note": "real fills; the whale ledger's other rule (mean) would have skipped",
+    "na": false
+   },
+   {
+    "key": "wh_logmode",
+    "name": "whale loss (log mode)",
+    "type": "LOG",
+    "blocked": 1,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 1,
+    "lose_sol": -0.179986387,
+    "net_saved_sol": 0.179986387,
+    "note": "real fills armed while the whale ledger ran in log mode",
+    "na": false
+   },
+   {
+    "key": "h2",
+    "name": "HYBRID-2 gate (log)",
+    "type": "LOG",
+    "blocked": 4,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 4,
+    "lose_sol": -0.473301702,
+    "net_saved_sol": 0.473301702,
+    "note": "real fills; h2_keep false: no M2-scored dump before the trigger, or T2 age < 30",
+    "na": false
+   },
+   {
+    "key": "ga",
+    "name": "G-A holder floors (log)",
+    "type": "LOG",
+    "blocked": 2,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 2,
+    "lose_sol": -0.22047577399999999,
+    "net_saved_sol": 0.22047577399999999,
+    "note": "real fills; CASCADE G-A: >= 2 of the top-6 holders (>= 1%) below 90% of their signing balance just before our buy (the snipe-guard's floors would have aborted it)",
+    "na": false
+   },
+   {
+    "key": "gd",
+    "name": "guards top-5 (log)",
+    "type": "LOG",
+    "blocked": 2,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 2,
+    "lose_sol": -0.22047577399999999,
+    "net_saved_sol": 0.22047577399999999,
+    "note": "real fills; CASCADE guards: >= 2 of the top-5 non-trigger holders (>= 0.5%) below 90% just before our buy",
+    "na": false
+   },
+   {
+    "key": "mintled",
+    "name": "mint ledger (log)",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills; MINT-LEDGER: an earlier landing on the mint at or below the ledger's loss (would have skipped the trigger)",
+    "na": false
+   },
+   {
+    "key": "fanout",
+    "name": "fan-out (log)",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills; FANOUT: the arm's fam read found >= N plain-transfer recipients (would have disarmed)",
+    "na": false
+   },
+   {
+    "key": "guard",
+    "name": "landing guard (new)",
+    "type": "LOG",
+    "blocked": 0,
+    "win_n": 0,
+    "win_sol": 0.0,
+    "lose_n": 0,
+    "lose_sol": 0.0,
+    "net_saved_sol": 0.0,
+    "note": "real fills; the signing-time set still holding at landing",
+    "na": false
+   }
+  ],
+  "deep": null,
+  "items": [
+   {
+    "t": 1794346248.1863246,
+    "type": "LOG",
+    "rules": [
+     "skip2",
+     "wh_other",
+     "wh_logmode"
+    ],
+    "name": "skip2 per-send, whale other rule, whale loss (log)",
+    "kind": "RA",
+    "mint": "89GTMqUPRQwsg4CKQP58eaKMjMwTZmkJwhFfbTsepump",
+    "w": 28,
+    "sol": -0.179986387
+   },
+   {
+    "t": 1794346227.532637,
+    "type": "LOG",
+    "rules": [
+     "q3a",
+     "h2"
+    ],
+    "name": "QUIET3-A, HYBRID-2",
+    "kind": "T2",
+    "mint": "6qSqHRFxx8tniT5nAMFzTKQdnbnVDtA4wRnWk3Twpump",
+    "w": 26,
+    "sol": -0.197430334
+   },
+   {
+    "t": 1794346173.6683693,
+    "type": "LIVE",
+    "rules": [
+     "create_slot"
+    ],
+    "name": "create-slot skip",
+    "kind": "T2",
+    "mint": "Eb2qDY6m5T2dUk9h91p9nQ9XgnDCBaFFhpWeJuDgC3HG",
+    "w": null,
+    "sol": -0.09875277908311489
+   },
+   {
+    "t": 1794346084.1919508,
+    "type": "LIVE",
+    "rules": [
+     "create_slot"
+    ],
+    "name": "create-slot skip",
+    "kind": "T2",
+    "mint": "DMFPsnwkPY8WJvFAZqXTHL8Uk7c71sWabAKJNfKBpump",
+    "w": null,
+    "sol": -0.04974953735701665
+   },
+   {
+    "t": 1794346058.060057,
+    "type": "LOG",
+    "rules": [
+     "grp",
+     "h2"
+    ],
+    "name": "group risk, HYBRID-2",
+    "kind": "T2",
+    "mint": "CJBMfFDauuK3iUh1hvCgdDQC85wbTJ9ms46RCbxepump",
+    "w": 23,
+    "sol": -0.055395594
+   },
+   {
+    "t": 1794345771.4427524,
+    "type": "LOG",
+    "rules": [
+     "h2",
+     "ga",
+     "gd"
+    ],
+    "name": "HYBRID-2, G-A floors, guards top-5",
+    "kind": "RA",
+    "mint": "8MeLMYyAhnEajvbcbmHbLq1U6aSsoAueDbgvDnsnitch",
+    "w": 16,
+    "sol": -0.01061102
+   },
+   {
+    "t": 1794345718.534528,
+    "type": "LIVE",
+    "rules": [
+     "quiet"
+    ],
+    "name": "QUIET",
+    "kind": "T2",
+    "mint": "3RS87emHPV5RwiWSowQiiRJsoEpx2w5UAZSKt8wNpump",
+    "w": null,
+    "sol": -0.0345410177233293
+   },
+   {
+    "t": 1794345703.7929118,
+    "type": "LIVE",
+    "rules": [
+     "quiet"
+    ],
+    "name": "QUIET",
+    "kind": "T2",
+    "mint": "J8EFo9DUrPwkbpQPbMaFhCAY5rHeKDYYCBdB8hkipump",
+    "w": null,
+    "sol": -0.02564800998501459
+   },
+   {
+    "t": 1794345387.2531369,
+    "type": "LOG",
+    "rules": [
+     "q3a",
+     "fam",
+     "h2",
+     "ga",
+     "gd"
+    ],
+    "name": "QUIET3-A, fam, HYBRID-2, G-A floors, guards top-5",
+    "kind": "T2",
+    "mint": "5qtMq8onqj64aua1MQgXjn1PowH1UMzo5zvRZWM2pump",
+    "w": 12,
+    "sol": -0.209864754
+   },
+   {
+    "t": 1794345319.0689218,
+    "type": "LIVE",
+    "rules": [
+     "botdepth_live"
+    ],
+    "name": "bot depth (live)",
+    "kind": "T2",
+    "mint": "DJMjiYd6ZCNJjRtCf3qDr4hrQSRGYyJmG9RVQDwTpump",
+    "w": 11,
+    "sol": -0.00808492385365426
+   },
+   {
+    "t": 1794345082.2494807,
+    "type": "LOG",
+    "rules": [
+     "eqgrp",
+     "fam"
+    ],
+    "name": "eqgrp, fam",
+    "kind": "RA",
+    "mint": "J8bfMvYiA1CjKkECgbfDWcoKQoPheBRamEbGeZT5pump",
+    "w": 8,
+    "sol": 0.164629687
+   },
+   {
+    "t": 1794344963.0678313,
+    "type": "LIVE",
+    "rules": [
+     "botdepth_live"
+    ],
+    "name": "bot depth (live)",
+    "kind": "T2",
+    "mint": "81YRpA2CLqCgxtXbV32QjLZvcCYPBph3i67QKQDcpump",
+    "w": 2,
+    "sol": 0.06680045047544654
+   },
+   {
+    "t": 1794344959.9713078,
+    "type": "LIVE",
+    "rules": [
+     "botdepth_live"
+    ],
+    "name": "bot depth (live)",
+    "kind": "T2",
+    "mint": "BJN6STTMa1mYM5twFDD21CiCw4ZfMfC5C75XC5H5pump",
+    "w": 1,
+    "sol": 0.15622091156258633
+   }
+  ],
+  "guard_logged": true,
+  "live_total": {
+   "blocked": 56,
+   "win_n": 2,
+   "win_sol": 0.22302136203803286,
+   "lose_n": 5,
+   "lose_sol": -0.21677626800212968,
+   "net_saved_sol": -0.006245094035903176
+  },
+  "log_total": {
+   "blocked": 6,
+   "win_n": 1,
+   "win_sol": 0.164629687,
+   "lose_n": 5,
+   "lose_sol": -0.653288089,
+   "net_saved_sol": 0.488658402
+  },
+  "all_total": {
+   "blocked": 62,
+   "win_n": 3,
+   "win_sol": 0.3876510490380328,
+   "lose_n": 10,
+   "lose_sol": -0.8700643570021297,
+   "net_saved_sol": 0.48241330796409687
+  },
+  "live_total_rowsum": {
+   "blocked": 56,
+   "win_n": 2,
+   "win_sol": 0.22302136203803286,
+   "lose_n": 5,
+   "lose_sol": -0.21677626800212968,
+   "net_saved_sol": -0.006245094035903176
+  },
+  "log_total_rowsum": {
+   "blocked": 17,
+   "win_n": 2,
+   "win_sol": 0.329259374,
+   "lose_n": 15,
+   "lose_sol": -2.126767847,
+   "net_saved_sol": 1.7975084730000002
+  },
+  "live_dup": 0,
+  "log_dup": 11,
+  "rearm_skips": 81
+ },
+ "dip43": {
+  "guard": {
+   "mode": "holders",
+   "spec": "6:0.9:1:1",
+   "ab": true,
+   "arms": {
+    "G": {
+     "tries": 776,
+     "landed": 776,
+     "fills": 2,
+     "fills_per_1k": 2.577319587628866,
+     "realized": -66701172,
+     "realized_n": 2,
+     "wins": 0,
+     "failed_fees": 7103740,
+     "results": {
+      "6042": 717,
+      "ata_exists": 16,
+      "deadline": 34,
+      "guard_abort": 4,
+      "ok": 2,
+      "unseen": 3
+     }
+    },
+    "L": {
+     "tries": 928,
+     "landed": 928,
+     "fills": 5,
+     "fills_per_1k": 5.387931034482759,
+     "realized": -433262808,
+     "realized_n": 5,
+     "wins": 1,
+     "failed_fees": 8220030,
+     "results": {
+      "6042": 862,
+      "ata_exists": 34,
+      "deadline": 25,
+      "guard_abort": 2,
+      "ok": 5
+     }
+    }
+   },
+   "aborts": {
+    "deadline": {
+     "n": 59,
+     "fees": 549430
+    },
+    "floors": {
+     "n": 4,
+     "fees": 42000
+    },
+    "curve_deep": {
+     "n": 2,
+     "fees": 21000
+    }
+   },
+   "floors": {
+    "0": 3,
+    "3": 45,
+    "4": 72,
+    "6": 656
+   },
+   "no_floors": {
+    "no_snapshot": 3
+   }
+  },
+  "band": {
+   "live": true,
+   "start_live": true,
+   "d_pct": 42.0,
+   "tries_band": 1704,
+   "tries_log_bound": 0,
+   "aborts": 2,
+   "abort_windows": 1,
+   "abort_fees": 21000,
+   "abort_mints": [
+    "5qtMq8onqj64aua1MQgXjn1PowH1UMzo5zvRZWM2pump"
+   ],
+   "changes": []
+  },
+  "tbal": {
+   "snapshots": 29,
+   "snapshot_errors": 0,
+   "snapshot_ms_p50": 3.8,
+   "snapshot_ms_p90": 9.1,
+   "fam_reads": 29,
+   "fam_errors": 0,
+   "fam_lag_ms_p50": 82.2,
+   "fam_lag_ms_p90": 93.3,
+   "ga_fills": 7,
+   "ga_abort": 2,
+   "ga_abort_realized": -220475774,
+   "ga_pass": 5,
+   "ga_pass_realized": -279488206
+  },
+  "send": {
+   "tier_on": 1243,
+   "tier_off": 461,
+   "tier_client": 1243,
+   "cu_price": {
+    "1000": {
+     "tries": 461,
+     "landed": 461,
+     "fills": 1,
+     "failed_fees": 2335270
+    },
+    "50000": {
+     "tries": 1243,
+     "landed": 1243,
+     "fills": 6,
+     "failed_fees": 12988500
+    }
+   },
+   "not_sent": {
+    "due": 3829,
+    "other": 1542,
+    "paused_position": 0,
+    "paused_stall": 0,
+    "rate_global": 580,
+    "rate_path": 3,
+    "sent": 1704
+   },
+   "unseen": 3,
+   "unseen_fee_est": 15330
+  },
+  "exits": {
+   "timer_sell": {
+    "base": {
+     "exits": 2,
+     "realized": -208735912,
+     "realized_n": 2,
+     "wins": 0
+    },
+    "cheap": {
+     "exits": 2,
+     "realized": -66006614,
+     "realized_n": 2,
+     "wins": 0
+    }
+   }
+  },
+  "shadows": {
+   "feed_stalls": 0,
+   "feed_stall_max_ms": 0.0,
+   "mint_ledger_entries": 16,
+   "shadow_exits": 7,
+   "react_watch": 2811
+  },
+  "fills": [
+   {
+    "w": 8,
+    "mint": "J8bfMvYiA1CjKkECgbfDWcoKQoPheBRamEbGeZT5pump",
+    "kind": "RA",
+    "arm": "L",
+    "floors": -1,
+    "floor_reason": "",
+    "curve_hi": 643196730874136.0,
+    "band_log": false,
+    "depth_pct": 24.002718333006424,
+    "ga": "pass",
+    "gd": "pass",
+    "mint_ledger": false,
+    "fanout": false,
+    "would_hold": "",
+    "timer_sell": "",
+    "lots": "",
+    "exit_ab": "",
+    "pnl": 164629687
+   },
+   {
+    "w": 12,
+    "mint": "5qtMq8onqj64aua1MQgXjn1PowH1UMzo5zvRZWM2pump",
+    "kind": "T2",
+    "arm": "L",
+    "floors": -1,
+    "floor_reason": "",
+    "curve_hi": 823771634667439.0,
+    "band_log": false,
+    "depth_pct": 39.13596703171831,
+    "ga": "abort",
+    "gd": "abort",
+    "mint_ledger": false,
+    "fanout": false,
+    "would_hold": "",
+    "timer_sell": "",
+    "lots": "",
+    "exit_ab": "",
+    "pnl": -209864754
+   },
+   {
+    "w": 15,
+    "mint": "5X1xhwFR1om5zGV4Xh6KKG5A54fvNMzKkvDSne6Zpump",
+    "kind": "T2",
+    "arm": "G",
+    "floors": 3,
+    "floor_reason": "",
+    "curve_hi": 1117744095918528.0,
+    "band_log": false,
+    "depth_pct": 14.442520917868663,
+    "ga": "pass",
+    "gd": "pass",
+    "mint_ledger": false,
+    "fanout": false,
+    "would_hold": "",
+    "timer_sell": "base",
+    "lots": "",
+    "exit_ab": "",
+    "pnl": -11305578
+   },
+   {
+    "w": 16,
+    "mint": "8MeLMYyAhnEajvbcbmHbLq1U6aSsoAueDbgvDnsnitch",
+    "kind": "RA",
+    "arm": "L",
+    "floors": -1,
+    "floor_reason": "",
+    "curve_hi": 863998548244347.0,
+    "band_log": false,
+    "depth_pct": 16.911365710449434,
+    "ga": "abort",
+    "gd": "abort",
+    "mint_ledger": false,
+    "fanout": false,
+    "would_hold": "",
+    "timer_sell": "cheap",
+    "lots": "",
+    "exit_ab": "",
+    "pnl": -10611020
+   },
+   {
+    "w": 23,
+    "mint": "CJBMfFDauuK3iUh1hvCgdDQC85wbTJ9ms46RCbxepump",
+    "kind": "T2",
+    "arm": "G",
+    "floors": 6,
+    "floor_reason": "",
+    "curve_hi": 918044427765448.0,
+    "band_log": false,
+    "depth_pct": 13.377443879619067,
+    "ga": "pass",
+    "gd": "pass",
+    "mint_ledger": false,
+    "fanout": false,
+    "would_hold": "",
+    "timer_sell": "cheap",
+    "lots": "",
+    "exit_ab": "",
+    "pnl": -55395594
+   },
+   {
+    "w": 26,
+    "mint": "6qSqHRFxx8tniT5nAMFzTKQdnbnVDtA4wRnWk3Twpump",
+    "kind": "T2",
+    "arm": "L",
+    "floors": -1,
+    "floor_reason": "",
+    "curve_hi": 1025970889283705.0,
+    "band_log": false,
+    "depth_pct": 12.225008971264796,
+    "ga": "pass",
+    "gd": "pass",
+    "mint_ledger": false,
+    "fanout": false,
+    "would_hold": "",
+    "timer_sell": "base",
+    "lots": "",
+    "exit_ab": "",
+    "pnl": -197430334
+   },
+   {
+    "w": 28,
+    "mint": "89GTMqUPRQwsg4CKQP58eaKMjMwTZmkJwhFfbTsepump",
+    "kind": "RA",
+    "arm": "L",
+    "floors": -1,
+    "floor_reason": "",
+    "curve_hi": 611306801122139.0,
+    "band_log": false,
+    "depth_pct": 15.921011995610435,
+    "ga": "pass",
+    "gd": "pass",
+    "mint_ledger": false,
+    "fanout": false,
+    "would_hold": "",
+    "timer_sell": "",
+    "lots": "",
+    "exit_ab": "",
+    "pnl": -179986387
+   }
+  ]
+ }
+}

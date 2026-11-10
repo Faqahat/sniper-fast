@@ -1,0 +1,30 @@
+    ams · run 80 · dip43d            ○ ENDED  ·  2:40:53 AM PKT  ·  SOL $187.42
+╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+╭─ RE-ARM FILL  Nov 11, 2:30:48 AM PKT ──────────────────────────── session 1 ─╮
+│ mint       89GTMqUPRQwsg4CKQP58eaKMjMwTZmkJwhFfbTsepump                      │
+│ gmgn       https://gmgn.ai/sol/token/89GTMqUPRQwsg4CKQP58eaKMjMwTZmkJwhFfbTs │
+│            epump                                                             │
+│ solscan    https://solscan.io/token/89GTMqUPRQwsg4CKQP58eaKMjMwTZmkJwhFfbTse │
+│            pump                                                              │
+│ size       0.8000 SOL  (into the curve 0.7901)                               │
+│ P&L        -0.1800 SOL  -$33.73  -22.5%                                      │
+│ dip43      RA 89GTMqUP arm L band on depth 15.9% G-A pass (0/6 below) ·      │
+│            -0.1800                                                           │
+│ blocked by skip2 per-send (skip2 score -0.427 vs -0.375) · whale other rule  │
+│            · whale loss (log)                                                │
+│ rent back  +0.0015  account closed; not in the P&L above                     │
+│ exit       stop-loss  after 5 slot(s)  held 1.60 s  value x0.779             │
+│ latency    dump→land 33 ms · send→seen 50 ms · block +0 (the send block)     │
+│ landed     Harmonic (HarmonicAgave) · leader 9UM8wQ8F · path helius-ps       │
+│ window     try 79 of 67 · 2 traders between the dump and us · the dump -     │
+│            6.4%, price x0.936                                                │
+│ trigger    dump 6.2% (5.20 SOL) · +7 slots after the trigger                 │
+│ buy        https://solscan.io/tx/2AGabHQFtWbpTeLRCe4fMpfV9WnACy87GSSf7GYkvsT │
+│            NStnio1mzkKYTGkN4ULYwS8jHV1zEjR9Zm2R3n9iAVzc1                     │
+│ sell       https://solscan.io/tx/3RFkbiLhxVcWmDbBcLJzTSFmAZArDf7kTEQkuf5mxzp │
+│            7shge7e1oXj3nMi193L3jJytGEa1aM2xCu4sZHa3FdDdv                     │
+│                                                                              │
+ ▲ KILL SWITCH fired (run P&L -0.5047)  +1
+ esc back · c copy mint · u $/SOL · q quit                  ▼ 2 more  ♪ all  1s

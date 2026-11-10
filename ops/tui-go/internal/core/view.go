@@ -955,12 +955,12 @@ func BuildView(ctx *Ctx, scope int) *View {
 	v.Quiet = quietState(S, M, v)
 	v.d24View(S)
 	v.d26View(sel)
+	v.D43 = M.D43.Report() // before the config items (the snipe-guard's)
 	v.CfgItems = configItems(v, S, eng)
 	v.Alerts = makeAlerts(v, ctx, M)
 	v.Filt = M.Filt.Report(ctx.GcrSeedPath()) // the whole file (every session), cached per records version
 	v.Paper = M.Filt.Paper()
 	v.Added = M.Add.Lines()
-	v.D43 = M.D43.Report()
 	return v
 }
 
@@ -1134,7 +1134,7 @@ func configItems(v *View, S *Sess, eng *Engine) []CfgItem {
 	}
 	SL := map[string]string{"ps": "Pre-send", "qstop": "QUIET stop", "qskip": "QUIET skip", "quiet": "QUIET", "paper": "Paper",
 		"m2": "M2 gate", "dev": "Dev list", "reg": "Regular", "guard": "Guard", "routes": "Routes", "sellfan": "Sell fan",
-		"nonce": "Nonce", "near": "Near gate", "skipcl": "Skip cl.", "kill": "Kill sw.", "planned": "Planned", "build": "Engine"}
+		"nonce": "Nonce", "near": "Near gate", "skipcl": "Skip cl.", "kill": "Kill sw.", "planned": "Planned", "build": "Engine", "sguard": "S-guard"}
 	add := func(key, label, state, short, full string) {
 		sl, ok := SL[key]
 		if !ok {
@@ -1508,6 +1508,11 @@ func configItems(v *View, S *Sess, eng *Engine) []CfgItem {
 	}
 	if es.PID != 0 {
 		full += " " + sep + " pid " + strconv.Itoa(es.PID)
+	}
+	if R := v.D43; R != nil { // v4: the dip43 snipe-guard / CURVE band, one item (routes & sending)
+		if sh, fl := R.GuardItem(); sh != "" {
+			add("sguard", "Snipe-guard", "on", sh, fl)
+		}
 	}
 	add("build", "Engine", "na", b, full)
 	return items

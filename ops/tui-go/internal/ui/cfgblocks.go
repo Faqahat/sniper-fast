@@ -18,7 +18,7 @@ var cfgBlockShort = []string{"PRE-SEND", "REGULAR", "SENDING", "LIMITS", "QUIET"
 var cfgBlockKeys = [][]string{
 	{"ps"},
 	{"reg", "regmode", "guard", "m2", "dev"},
-	{"routes", "ab", "sellfan", "nonce", "near", "skipcl"},
+	{"routes", "ab", "sellfan", "nonce", "near", "skipcl", "sguard"},
 	{"kill", "lock", "planned", "limits", "fee24", "rearm", "build"},
 	{"qstop", "qskip", "quiet", "paper", "obs"},
 }
@@ -237,6 +237,9 @@ func (m *Model) cfgBlocks() []cfgBlock {
 		}
 		if x := it("skipcl"); x != nil {
 			ls = append(ls, same(t.Lbl.Render("skip ")+t.Val.Render(strings.ReplaceAll(x.Full, "rakurai", "Rakurai"))))
+		}
+		if x := it("sguard"); x != nil { // v4 (dip43): the snipe-guard and the CURVE band
+			ls = append(ls, cfgLine{dot(x.State) + t.Lbl.Render(" ") + t.Val.Render(x.Full), dot(x.State) + t.Lbl.Render(" ") + t.Val.Render(x.Short)})
 		}
 		if len(ls) == 0 {
 			ls = append(ls, same(t.Lbl.Render(core.G.Dash)))

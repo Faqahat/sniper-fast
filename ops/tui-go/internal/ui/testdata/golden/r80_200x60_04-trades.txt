@@ -1,0 +1,60 @@
+    ams · run 80 · dip43d                                                                                                                                    ○ ENDED  ·  2:40:53 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+TRADES all  (7)                                                                                                                   1W  -0.5000   o sort  O order  f filter  / find  c copy  enter details
+         ▼time type mint      size    P&L SOL       USD       %      total exit   held d→land s→seen blk after  whale via arm client     path
+▸●  2:30:48 AM RA   89GTMqUP  0.80   -0.1800    -$33.73  -22.5%    -0.5047 SL      5sl     33     50   0    +7   6.2% HL  L   Harmonic   helius-ps
+ ●  2:30:27 AM T2   6qSqHRFx  1.00   -0.1974    -$37.00  -19.7%    -0.3262 time    6sl     42     32   0    +3   6.8% HL  L   BAM        helius-ps
+ ●  2:27:38 AM T2   CJBMfFDa  1.00   -0.0554    -$10.38   -5.5%    -0.1277 time    6sl     18     60   0    +2  12.8% HL  G   Harmonic   helius-ps
+ ●  2:22:51 AM RA   8MeLMYyA  0.80   -0.0106     -$1.99   -1.3%    -0.0698 time    6sl    223    199   1    +7   7.8% AS  L   Firedancer astralane-ps
+    2:22:26 AM T2   5X1xhwFR  1.00   -0.0113     -$2.12   -1.1%    -0.0607 time    6sl      5    129   1    +3   7.4% HL  G   Jito       helius-ps
+ ●  2:16:27 AM T2   5qtMq8on  1.00   -0.2099    -$39.33  -21.0%    -0.0487 SL      0sl     13     57   0    +2   6.7% HL  L   Harmonic   helius-ps
+ ●  2:11:22 AM RA   J8bfMvYi  0.80   +0.1646    +$30.85  +20.6%    +0.1608 TP      4sl      7     96   1    +7   6.9% HL  L   Harmonic   helius-ps
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ▲ KILL SWITCH fired (run P&L -0.5047)   ◆ RUN ENDED 2:30 AM (kill switch) -0.5047 SOL · END CHECK 7 read: 0 sold, 0 closed, 0 held ✓
+ ↑/k up · enter details · o sort column · O flip order · f filter · / find mint · c copy mint · x blocked by · u $/SOL · ? help · q quit                                                      ♪ all  1s

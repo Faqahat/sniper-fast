@@ -1,0 +1,30 @@
+    ams · run 80 · dip43d            ○ ENDED  ·  2:40:53 AM PKT  ·  SOL $187.42
+╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+╭─ GUARD (snipe-guard A/B) ────────────────────────────────────────────────────╮
+│ guard     mode holders 6:0.9:1:1 (top N : floor : max leavers : min %) ·     │
+│   A/B by window parity: odd G snipe-guard, even L Lighthouse                 │
+│   G snipe-guard   tries 776, fills 2 (2.6 / 1k tries), realized -0.0667 (2,  │
+│     0 W), deadline 4.4%, unseen 0.4%, guard_abort 0.5%, failed fees          │
+│     -0.007104                                                                │
+│   L Lighthouse    tries 928, fills 5 (5.4 / 1k tries), realized -0.4333 (5,  │
+│     1 W), deadline 2.7%, unseen 0.0%, guard_abort 0.2%, failed fees          │
+│     -0.008220                                                                │
+│   aborts by kind: deadline 59 (below 0: 59; gap 1: 58, 2: 1) · floors 4      │
+│     (below 2: 4; gap 3: 4) · curve_deep 2 (below 0: 2; gap 5: 2)             │
+│   floors per G try (holders mode): 0: 0.4%, 3: 5.8%, 4: 9.3%, 6: 84.5% · no  │
+│     floors: no_snapshot 3 · snapshot age p50 / p90 646 / 1896 ms             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ CURVE BAND (dip43d) ────────────────────────────────────────────────────────╮
+│ band      LIVE now (start LIVE) · abort when the price is >= 42% under the   │
+│   try's signing price · tries with the band 1,704, log-only bound 0          │
+│   curve_deep aborts 2 in 1 windows, 1 mints, their fees -0.000021            │
+│     (5qtMq8on)                                                               │
+│   fills: the price just before our buy vs the filling try's signing price:   │
+│     J8bfMv 24.0%, 5qtMq8 39.1%, 5X1xhw 14.4%, 8MeLMY 16.9%, CJBMfF 13.4%,    │
+│     6qSqHR 12.2%, 89GTMq 15.9% under (band 42%)                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ TRUE BALANCES (dip43 A3) ───────────────────────────────────────────────────╮
+ ▲ KILL SWITCH fired (run P&L -0.5047)  +1
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute …    ▼ 125 more  ♪ all  1s

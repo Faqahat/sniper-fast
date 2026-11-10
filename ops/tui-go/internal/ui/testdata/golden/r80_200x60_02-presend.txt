@@ -1,0 +1,60 @@
+    ams · run 80 · dip43d                                                                                                                                    ○ ENDED  ·  2:40:53 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ GUARD (snipe-guard A/B) ───────────────────────────────────────────────────────────────────────╮ ╭─ CURVE BAND (dip43d) ────────────────────────────────────────────────────────────────────────────╮
+│ guard     mode holders 6:0.9:1:1 (top N : floor : max leavers : min %) · A/B by window parity:  │ │ band      LIVE now (start LIVE) · abort when the price is >= 42% under the try's signing price   │
+│   odd G snipe-guard, even L Lighthouse                                                          │ │   · tries with the band 1,704, log-only bound 0                                                  │
+│   G snipe-guard   tries 776, fills 2 (2.6 / 1k tries), realized -0.0667 (2, 0 W), deadline      │ │   curve_deep aborts 2 in 1 windows, 1 mints, their fees -0.000021 (5qtMq8on)                     │
+│     4.4%, unseen 0.4%, guard_abort 0.5%, failed fees -0.007104                                  │ │   fills: the price just before our buy vs the filling try's signing price: J8bfMv 24.0%, 5qtMq8  │
+│   L Lighthouse    tries 928, fills 5 (5.4 / 1k tries), realized -0.4333 (5, 1 W), deadline      │ │     39.1%, 5X1xhw 14.4%, 8MeLMY 16.9%, CJBMfF 13.4%, 6qSqHR 12.2%, 89GTMq 15.9% under (band      │
+│     2.7%, unseen 0.0%, guard_abort 0.2%, failed fees -0.008220                                  │ │     42%)                                                                                         │
+│   aborts by kind: deadline 59 (below 0: 59; gap 1: 58, 2: 1) · floors 4 (below 2: 4; gap 3: 4)  │ ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+│     · curve_deep 2 (below 0: 2; gap 5: 2)                                                       │ ╭─ FEE TIER / SEND (dip43 B1 B2 A8) ───────────────────────────────────────────────────────────────╮
+│   floors per G try (holders mode): 0: 0.4%, 3: 5.8%, 4: 9.3%, 6: 84.5% · no floors:             │ │   B1 CAP + ROUTES: global cap 60/s, per lane entry 40/s | re-route a lane-refused try off | one  │
+│     no_snapshot 3 · snapshot age p50 / p90 646 / 1896 ms                                        │ │     rate token per async try off | pre-send skip clients none                                    │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │   B2 FEE TIER: ON: every 1th try of a window-slot at CU price 50000 uL (never lower than its     │
+╭─ TRUE BALANCES (dip43 A3) ──────────────────────────────────────────────────────────────────────╮ │     own) on leaders AgaveBam,HarmonicAgave,HarmonicFiredancer,Firedancer,Agave,FireBAM           │
+│ tbal      arm snapshots 29, errors 0 · read ms p50 / p90 3.8 / 9.1 · holders p50 20             │ │   B5 WINDOW START: off: +50 ms after the trigger (--presend-live-ms)                             │
+│   fam reads 29, errors 0 · lag ms p50 / p90 82 / 93 · read slot - arm slot p50 -2 (min -6, max  │ │   fee tier: tries at the tier price 1,243, at their own 461 (on a tier client's slot 1,243)      │
+│     -1; 29 before the arm)                                                                      │ │   CU price    1,000 uL: tries 461, landed 461, fills 1, failed fees -0.002335                    │
+│   CASCADE G-A on 7 fills: would abort 2 (realized -0.2205), pass 5 (realized -0.2795) · log     │ │   CU price   50,000 uL: tries 1,243, landed 1,243, fills 6, failed fees -0.012989                │
+│     only                                                                                        │ │   send accounting (A8, 29 windows): due 3,829, sent 1,704 (44.5%); not sent: other 1,542 ·       │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │     rate_global 580 · rate_path 3                                                                │
+╭─ EXIT A/B (dip43 B3 B4 B6) ─────────────────────────────────────────────────────────────────────╮ │   unseen tries 3, their fees est. -0.000015 (the records book them at 0: NOT in the run P&L      │
+│   B4 CHEAP TIMER SELLS: ON: time-limit / time-ms sells at 500000 uL on positions with (pid >>   │ │     above)                                                                                       │
+│     1) even (A/B; others the run's price) (TP / SL / wall / orphan sells unchanged)             │ ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+│   cheap timer sells (B4)   base 2 exits, realized -0.2087 (2, 0 W) | cheap 2 exits, realized    │ ╭─ DIP43 SHADOWS (log only) ───────────────────────────────────────────────────────────────────────╮
+│     -0.0660 (2, 0 W)                                                                            │ │ feed stall episodes 0 (none), longest 0 ms                                                       │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │ mint ledger entries 16 (9 paper) · would-block: none                                             │
+                                                                                                    │ fan-out flags: none · fam read acts: none 28 · would_disarm 1                                    │
+                                                                                                    │ exit shadow records 7 (realized est. -0.3238) · stop shadows 3                                   │
+                                                                                                    │ react-watch records 2,811                                                                        │
+                                                                                                    ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ PRE-SEND LIVE ────────────────────────────────────────────────── ● 1.00 k20 7/? fee 0.02/2.00 ─╮ ╭─ SEND PATHS A/B ─────────────────────────────────────────────────────── caps 60/s · 40/s a path ─╮
+│ fills      7 / no limit                                                                         │ │ path            tries    refused  landed  same  p50/p90  ack≠200  fills  P&L SOL                 │
+│ fees 24 h  0.015/2.00  ──────────────────────────────────────── 1% used                         │ │ ──────────────────────────────────────────────────────────────────────────────────               │
+│ fees       run 0.015 SOL · pauses at the budget, never stops                                    │ │ helius-ps         763  260 25.4%    100%   52%   65/154        0      6  -0.4894                 │
+│ armed now  0 window(s) · armed 24 · T2 tries 1,438 (+266 re-arm)                                │ │ flashblock-ps     432  141 24.6%    100%   50%   65/142        0      0  +0.0000                 │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │ astralane-ps      424  144 25.4%    100%   49%   63/146        0      1  -0.0106                 │
+╭─ RESULT · T2 ───────────────────────────────────────────────────────────────────────────────────╮ │ speedlanding-p     85   31 26.7%    100%   35%   68/150        0      0  +0.0000                 │
+│ net        -0.4805 SOL  -$90.06                                                                 │ │ refused = a path's own try skipped between sent ones (inferred); landed = not unseen; same = in  │
+│ realized   -0.4740   rent back +0.0060                                                          │ │ the send slot; p50/p90 = send→land ms                                                            │
+│ failed     -0.0126   1,431 tries x 10,500                                                       │ │ not sent   botdepth_withheld 1,541 · rate_global 570 · rate_path_config 3 (engine, all paths)    │
+│ fee check  counted 0.015324  engine 0.015324  ✓ match                                           │ ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+│ wins       0 W / 4 L  (0%)   avg/fill -0.1185                                                   │ ╭─ LATENCY ─────────────────────────────────────────────────────────────────────────────────── ms ─╮
+│ best       5X1xhw -0.0113  time Jito  2:22 AM                                                   │ │ send→seen  p10 28 · p50 65 · p90 149   same block 50% of 1,701 tries                             │
+│ worst      5qtMq8 -0.2099  SL Harmonic  2:16 AM                                                 │ │ fills      dump→land p10 6 · p50 15 · p90 133  (6)                                               │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │ bounced    dump→land p10 113 · p50 306 · p90 510  (54)                                           │
+╭─ RE-ARM ────────────────────────────────────────────── ● 0.80 SOL · gap 20 · QUIET 6:2 · R5 on ─╮ │            after a dump of ≥ 12%; bounced = failed 6042, the price was back                      │
+│ net        -0.0242 SOL  -$4.54                                                                  │ │ fills      send→seen median 60  (7)                                                              │
+│ realized   -0.0260   rent back +0.0045   failed -0.0028 263 tries                               │ │            after the trigger median +3 slots   +2:2 +3:2 +5+:3                                   │
+│ wins       3 fills · 1 W / 2 L (33%) · avg/fill -0.0087                                         │ │ client      tries  same blk  send→seen  fills  d→land  bounced  d→land                           │
+│ windows    5 armed · 0 now · 1 after waiting · 2 deferred · 266 tries                           │ │ ────────────────────────────────────────────────────────────────────────                         │
+│ skipped    no_holder 42 · age 27 · r5 6 · blocked_live_armed 3 · blocked_position 1             │ │ Harmonic      608       48%         63      3      13       46     328                           │
+│            blocked_rearm_armed 1 · holder_loss 1                                                │ │ BAM           508       55%         45      1      42        0       –                           │
+│ ended      filled 3 · quiet 1 · stopped 1                                                       │ │ Jito          322       46%         68      1       5        0       –                           │
+│ exits      take-profit 1 +0.1646 · time-limit 1 -0.0106 · stop-loss 1 -0.1800                   │ │ Firedancer    127       35%        117      1     223        8      86                           │
+ ▲ KILL SWITCH fired (run P&L -0.5047)   ◆ RUN ENDED 2:30 AM (kill switch) -0.5047 SOL · END CHECK 7 read: 0 sold, 0 closed, 0 held ✓
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                                                                                             ▼ 16 more  ♪ all  1s

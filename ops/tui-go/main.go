@@ -26,7 +26,7 @@ import (
 	"dipmon/internal/ui"
 )
 
-const version = "3.3"
+const version = "4.0"
 
 const defaultDir = "/root/prod/runs"
 

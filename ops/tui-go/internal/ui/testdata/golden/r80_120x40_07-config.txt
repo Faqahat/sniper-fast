@@ -1,0 +1,40 @@
+    ams · run 80 · dip43d                                                    ○ ENDED  ·  2:40:53 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ CONFIG ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ PRE-SEND ─────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│ ● Pre-send live       1.00 SOL · 20 tries/slot · limit ×0.88 · deadline +1 · route                                   │
+│                       default=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+he │
+│                       lius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps │
+│                       +astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;bam=helius-ps+flashblock-ps+astra │
+│                       lane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+fla │
+│                       shblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps │
+│                       +astralane-ps+helius-ps;harmonic=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flas │
+│                       hblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-p │
+│                       s+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;jito=hel │
+│                       ius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+spe │
+│                       edlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane- │
+│                       ps+helius-ps+flashblock-ps+astralane-ps+helius-ps · exit 6 slots / TP +20% / SL 20%            │
+│                       20 tries/slot = 20 conditional buys sent every slot (~0.2 s) while a window is open; each      │
+│                       fills only on a sudden ≥ 12% drop; it is sold at TP / SL or after 6 slots                      │
+│                                                                                                                      │
+│ REGULAR ──────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│   Regular buy         1.00 SOL · model IMIT1 wider · exit TP off / SL 50% / 5 slots (~1.1 s)                         │
+│                       after a big dump the regular bot buys this size and sells at TP / SL or after the hold slots   │
+│ ● Regular mode        paper: decided as live, never sent · paper 1 picks, 0 fills, net -0.0005                       │
+│                       live = real regular buys; paper = decided as live but never sent (paper P&L only); off = no    │
+│                       regular buys                                                                                   │
+│   Price guard         ×1.05 over the post-dump price (pump error 6042 above it)                                      │
+│                       the buy fails on chain (pump error 6042, costs only the tx fee) when the price is above this   │
+│                       multiple of the post-dump price                                                                │
+│ ● M2 gate             gate · model v3_reg4_top25 · score ≥ 0.0101                                                    │
+│                       the regular bot buys only when the M2 model's score reaches the threshold (gate); shadow =     │
+│                       scored, not enforced                                                                           │
+│ ● Dev list            off                                                                                            │
+│                       buys new tokens of the listed developer wallets at this size                                   │
+│                                                                                                                      │
+│ ROUTES & SENDING ─────────────────────────────────────────────────────────────────────────────────────────────────── │
+ ▲ KILL SWITCH fired (run P&L -0.5047)  +1
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                            ▼ 106 more  ♪ all  1s

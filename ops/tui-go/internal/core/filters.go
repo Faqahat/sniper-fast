@@ -339,9 +339,11 @@ type FiltAcc struct {
 	liveSigA  map[string]int // live T2 trigger sig -> its arm (index in liveSent)
 	shSize0   float64        // the first row c fill's size (SOL)
 	hasSh0    bool
-	q3Live    bool            // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
-	anyWide   bool            // v4: a wide shadow record (dip30+)
-	plKeys    map[string]bool // v4: the latest run_start's presend_live keys (the build inference of runs before "ENGINE BUILD:")
+	q3Live    bool                    // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
+	anyWide   bool                    // v4: a wide shadow record (dip30+)
+	rs        *RuleState              // v4: the LOG rule registry's own records (logrules.go)
+	fillObj   map[FKey]map[string]any // v4: each position's first fill record, decoded (the registry's verdicts)
+	plKeys    map[string]bool         // v4: the latest run_start's presend_live keys (the build inference of runs before "ENGINE BUILD:")
 	cache     *FiltReport
 	cacheVer  int64
 	cacheSeed string
@@ -375,7 +377,7 @@ func newFiltAcc() *FiltAcc {
 		liveArm: map[int64]fArm{}, kind: map[FKey]string{}, deepW: map[int64]bool{}, fills: map[int64]bool{},
 		fillAnn: map[FKey]*fFill{}, real: map[FKey]float64{}, armF3: map[FKey]*fF3{}, log35: map[FKey]*fLog35{}, moves: map[int64]*FMove{},
 		bdWin: map[FKey]*fWithWin{}, shCur: map[int64]int{}, blWin: map[FKey]*fWithWin{}, skipSig: map[string]bool{},
-		liveCur: map[int64]int{}, liveSigA: map[string]int{}}
+		liveCur: map[int64]int{}, liveSigA: map[string]int{}, rs: newRuleState(), fillObj: map[FKey]map[string]any{}}
 }
 
 var (
@@ -389,6 +391,16 @@ var (
 
 // feed takes one record (ev = its "ev"); only the presend_* records the table uses.
 func (F *FiltAcc) feed(ev, line []byte) {
+	if ix, ok := ruleEvs[string(ev)]; ok { // v4: a registry rule's own records
+		var o map[string]any
+		if json.Unmarshal(line, &o) == nil {
+			F.ver++
+			for _, i := range ix {
+				LogRules[i].Feed(F.rs, string(ev), o)
+			}
+		}
+		return
+	}
 	if !bytes.HasPrefix(ev, fEvPrefix) {
 		if string(ev) == "run_start" { // dip37: the run's ledger / A/B / HYBRID-2 flags (its rows from the start)
 			var keys struct {
@@ -772,6 +784,10 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			}
 			F.fillAnn[k] = &fFill{k: k, ann: a, deep: fTruthy(r.Deep), t: rawInt(r.T)}
 			F.fillOrd = append(F.fillOrd, k)
+			var fo map[string]any
+			if json.Unmarshal(line, &fo) == nil {
+				F.fillObj[k] = fo
+			}
 			if b := r.Botdepth; b != nil && b.Mode != nil && *b.Mode == "log" { // dip39: the gate in log mode at the filling attempt
 				F.anyBdLg = true
 				x := F.l35(k)
@@ -1026,6 +1042,9 @@ func LogRuleName(key string) string {
 		return "holder loss (log)"
 	case "botdepth":
 		return "bot depth"
+	}
+	if r := LogRuleOf(key); r != nil {
+		return r.Short
 	}
 	return key
 }
@@ -1494,6 +1513,10 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				return x.bdWhy
 			}
 		}
+		if r := LogRuleOf(key); r != nil {
+			_, why := r.Flag(F.rs, F.fillObj[k])
+			return why
+		}
 		x := F.armF3[k]
 		if x == nil {
 			return ""
@@ -1638,6 +1661,29 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	if F.anyBdLg {
 		logrule("botdepth", "bot depth (log)", pick35(func(x *fLog35) bool { return x.bd }), "real fills; too few bots trading the token at the filling attempt (would have withheld it)")
 	}
+	// v4: the LOG rule registry (dip43+ verdicts on the fill records; logrules.go), each once a fill carries its field
+	if !NoV4 {
+		for i := range LogRules {
+			r := &LogRules[i]
+			present := false
+			var ks []FKey
+			for _, k := range F.fillOrd {
+				fo := F.fillObj[k]
+				if fo == nil {
+					continue
+				}
+				if r.Present(F.rs, fo) {
+					present = true
+				}
+				if ok, _ := r.Flag(F.rs, fo); ok {
+					ks = append(ks, k)
+				}
+			}
+			if present {
+				logrule(r.Key, r.Name, ks, r.Note)
+			}
+		}
+	}
 	// dip30 LANDING GUARD (log only): the wallets chosen at signing still hold >= the guard's % at our landing
 	if F.anyGuard {
 		logrule("guard", "landing guard (new)", pick((*fAnn).LandingGuard), "real fills; the signing-time set still holding at landing")
@@ -1768,7 +1814,7 @@ func logWhy(key string, f *fFill, gcrWhy string) string {
 	if key == "gcr" {
 		return gcrWhy
 	}
-	if key == "q3a" || key == "fresh" || key == "fpnb" || key == "skip2" || key == "botdepth" { // dip32: preformatted from the arm's "f3" (passed in gcrWhy's place); dip36 fpnb
+	if key == "q3a" || key == "fresh" || key == "fpnb" || key == "skip2" || key == "botdepth" || LogRuleOf(key) != nil { // dip32: preformatted from the arm's "f3" (passed in gcrWhy's place); dip36 fpnb
 		return gcrWhy
 	}
 	if f == nil || f.ann == nil {

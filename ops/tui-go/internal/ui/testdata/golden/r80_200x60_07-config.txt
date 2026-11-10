@@ -1,0 +1,60 @@
+    ams · run 80 · dip43d                                                                                                                                    ○ ENDED  ·  2:40:53 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ CONFIG ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ PRE-SEND ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│ ● Pre-send live       1.00 SOL · 20 tries/slot · limit ×0.88 · deadline +1 · route                                                                                                                   │
+│                       default=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashbloc │
+│                       k-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;bam=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+s │
+│                       peedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;harmonic=helius-ps+flashbloc │
+│                       k-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps │
+│                       +helius-ps+flashblock-ps+astralane-ps+helius-ps;jito=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+f │
+│                       lashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps · exit 6 slots / TP +20% / SL 20%                      │
+│                       20 tries/slot = 20 conditional buys sent every slot (~0.2 s) while a window is open; each fills only on a sudden ≥ 12% drop; it is sold at TP / SL or after 6 slots            │
+│                                                                                                                                                                                                      │
+│ REGULAR ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│   Regular buy         1.00 SOL · model IMIT1 wider · exit TP off / SL 50% / 5 slots (~1.1 s)                                                                                                         │
+│                       after a big dump the regular bot buys this size and sells at TP / SL or after the hold slots                                                                                   │
+│ ● Regular mode        paper: decided as live, never sent · paper 1 picks, 0 fills, net -0.0005                                                                                                       │
+│                       live = real regular buys; paper = decided as live but never sent (paper P&L only); off = no regular buys                                                                       │
+│   Price guard         ×1.05 over the post-dump price (pump error 6042 above it)                                                                                                                      │
+│                       the buy fails on chain (pump error 6042, costs only the tx fee) when the price is above this multiple of the post-dump price                                                   │
+│ ● M2 gate             gate · model v3_reg4_top25 · score ≥ 0.0101                                                                                                                                    │
+│                       the regular bot buys only when the M2 model's score reaches the threshold (gate); shadow = scored, not enforced                                                                │
+│ ● Dev list            off                                                                                                                                                                            │
+│                       buys new tokens of the listed developer wallets at this size                                                                                                                   │
+│                                                                                                                                                                                                      │
+│ ROUTES & SENDING ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│   Routes              v13 agave: nozomi+helius-swqos+bolt+staked-rpc; bam: nozomi+helius-swqos+bolt+falcon+falcon-udp+soyas+solami+0slot; default: nozomi+helius-swqos+bolt+staked-rpc; fd:          │
+│                       0slot+nozomi+landx-fra3+staked-rpc+soyas+solami; harmonic: nozomi+landx-fra3+falcon+falcon-udp+glaive+soyas+solami+0slot; jito:                                                │
+│                       solami+soyas+glaive+falcon+falcon-udp+helius-swqos+0slot; other: nozomi+helius-swqos+bolt+staked-rpc                                                                           │
+│                       which send paths each leader client gets (a preset of the run script)                                                                                                          │
+│ ● Send-path A/B       helius-ps / flashblock-ps / astralane-ps / speedlanding-ps: the tries alternate (try n of window w on path (n + w) mod 4) · routes                                             │
+│                       default=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashbloc │
+│                       k-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;bam=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+s │
+│                       peedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps;harmonic=helius-ps+flashbloc │
+│                       k-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps │
+│                       +helius-ps+flashblock-ps+astralane-ps+helius-ps;jito=helius-ps+flashblock-ps+astralane-ps+helius-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps+speedlanding-ps+helius-ps+f │
+│                       lashblock-ps+astralane-ps+helius-ps+flashblock-ps+helius-ps+astralane-ps+helius-ps+flashblock-ps+astralane-ps+helius-ps                                                        │
+│                       the send-path A/B: a window's tries go out alternately over these paths; the Engine tab compares them (refused, landed, same slot, send→land, acks, fills, P&L)                │
+│ ● Sell fan-out        staked-rpc + helius-swqos                                                                                                                                                      │
+│                       each sell goes out through staked RPC and a second path, for speed                                                                                                             │
+│ ● Nonce fan-out       8 durable-nonce accounts (one tip per landed buy)                                                                                                                              │
+│                       one buy goes out as several durable-nonce copies; only one can land, so one tip is paid                                                                                        │
+│ ● Near-leader gate    120 leaders                                                                                                                                                                    │
+│                       the regular bot fires only when one of these nearest leaders makes the next blocks                                                                                             │
+│   Skip clients        rakurai                                                                                                                                                                        │
+│                       no regular buys while the leader runs these clients                                                                                                                            │
+│ ● Snipe-guard         snipe-guard holders 6:0.9:1:1, A/B G (odd windows) / L Lighthouse (even); CURVE band 42% LIVE (control key curve_deep)                                                         │
+│                                                                                                                                                                                                      │
+│ SAFETY & LIMITS ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│   Kill switch         below 16.3627 SOL (loss cap 0.500)                                                                                                                                             │
+│                       the engine stops itself when the wallet falls below this (START BALANCE − loss cap)                                                                                            │
+│ ● Profit lock         give back max(1.000 SOL, 30% of the peak) · peak +0.1608 · stops below -0.5000                                                                                                 │
+│                       profit lock: no new buys once the run P&L falls below its peak minus the larger of the two (open positions finish)                                                             │
+│   Planned             no time limit (ends on a signal, the kill switch or the profit lock)                                                                                                           │
+│                       no time limit: the run ends on a signal (Ctrl+C), the kill switch or the profit lock                                                                                           │
+ ▲ KILL SWITCH fired (run P&L -0.5047)   ◆ RUN ENDED 2:30 AM (kill switch) -0.5047 SOL · END CHECK 7 read: 0 sold, 0 closed, 0 held ✓
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                                                                                             ▼ 49 more  ♪ all  1s

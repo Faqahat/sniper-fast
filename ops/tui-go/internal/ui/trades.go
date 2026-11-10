@@ -23,17 +23,43 @@ type tcol struct {
 // running total, in the primary unit); phones keep the money (Enter: details). usd: size and total in USD (u). via
 // (dip26, a run whose pre-send tries go over two or more paths): the filling try's path in two letters (HL / AS)
 // before the client, where there is room (80 columns and up).
-func tradeCols(w int, usd, via bool) []tcol {
+func tradeCols(w int, usd, via bool, arm ...bool) []tcol {
 	cols := tradeCols0(w, usd)
 	if !via || w < 80 {
 		return cols
 	}
+	add := []tcol{{"via", 3, false}}
+	if len(arm) > 0 && arm[0] && w >= 110 { // v4 (dip43 snipe-guard A/B): the filling try's arm, G snipe-guard / L Lighthouse
+		add = append(add, tcol{"arm", 3, false})
+	}
 	for i, c := range cols {
 		if c.title == "client" {
-			return append(cols[:i:i], append([]tcol{{"via", 3, false}}, cols[i:]...)...)
+			return append(cols[:i:i], append(add, cols[i:]...)...)
 		}
 	}
 	return cols
+}
+
+// armOn: the run's tries carry the snipe-guard A/B (dip43): the Trades table gets the arm column.
+func (m *Model) armOn() bool {
+	R := m.view.D43
+	if R == nil {
+		return false
+	}
+	for _, f := range R.Fills {
+		if f.Arm != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// d43Of: a trade's dip43 view (nil = none).
+func (m *Model) d43Of(tr *core.Trade) *core.D43Fill {
+	if tr == nil || tr.Kind != "PS" || !tr.W.Ok || m.view == nil {
+		return nil
+	}
+	return m.view.D43.Fill(tr.W.W, tr.Mint)
 }
 
 func tradeCols0(w int, usd bool) []tcol {
@@ -205,6 +231,10 @@ func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.St
 			s, st = core.RuneSlice(core.TradePath(tr), 28), t.Lbl
 		case "via": // dip26: the filling try's path (HL helius-ps, AS astralane-ps, ...)
 			s, st = core.PathCode(core.TradePath(tr)), t.Acc
+		case "arm": // dip43: the filling try's guard arm
+			if f := m.d43Of(tr); f != nil {
+				s, st = f.Arm, t.Acc
+			}
 		case "":
 			s, st = " ", t.Acc
 		case "flag":
@@ -244,7 +274,7 @@ func (m *Model) hlBg(tr *core.Trade) (color.Color, float64) {
 // tradeTable renders rows with the Lip Gloss table: header, zebra rows, the selection, the fresh-trade highlight.
 func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 	t := m.th
-	cols := tradeCols(w, m.usdFirst && m.view.Price != 0, m.viaOn())
+	cols := tradeCols(w, m.usdFirst && m.view.Price != 0, m.viaOn(), m.armOn())
 	if sel >= 0 {
 		cols = append([]tcol{{"", 1, false}}, cols...)
 	}
@@ -543,9 +573,18 @@ func (m *Model) whyLines(tr *core.Trade, w int) []string {
 	t := m.th
 	it, ok := m.flag(tr)
 	if !ok {
-		return []string{t.Lbl.Render("no filter would have blocked this trade")}
+		ls := []string{t.Lbl.Render("no filter would have blocked this trade")}
+		if f := m.d43Of(tr); f != nil {
+			for _, l := range core.WrapText("dip43: "+f.Brief(), max(10, w-2), 0) {
+				ls = append(ls, t.Lbl.Render(l))
+			}
+		}
+		return ls
 	}
 	txt := "would have been blocked by: " + it.Info()
+	if f := m.d43Of(tr); f != nil { // v4: the fill's dip43 brief (arm, floors, band, landing depth, CASCADE G-A)
+		txt += " · dip43: " + f.Brief()
+	}
 	ls := core.WrapText(txt, max(10, w-2), 0)
 	if len(ls) > 4 {
 		ls = ls[:4]

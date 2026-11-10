@@ -1,0 +1,30 @@
+    ams · run 80 · dip43d            ○ ENDED  ·  2:40:53 AM PKT  ·  SOL $187.42
+╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+TRADES all  (7)                   1W  -0.5000   o sort  f filter  / find  c copy
+         ▼time typ mint      P&L SOL      USD     total exit  d→land via clien
+▸●  2:30:48 AM RA  89GTMq   -0.1800   -$33.73   -0.5047 SL        33 HL  Harm…
+ ●  2:30:27 AM T2  6qSqHR   -0.1974   -$37.00   -0.3262 time      42 HL  BAM
+ ●  2:27:38 AM T2  CJBMfF   -0.0554   -$10.38   -0.1277 time      18 HL  Harm…
+ ●  2:22:51 AM RA  8MeLMY   -0.0106    -$1.99   -0.0698 time     223 AS  Fire…
+    2:22:26 AM T2  5X1xhw   -0.0113    -$2.12   -0.0607 time       5 HL  Jito
+ ●  2:16:27 AM T2  5qtMq8   -0.2099   -$39.33   -0.0487 SL        13 HL  Harm…
+ ●  2:11:22 AM RA  J8bfMv   +0.1646   +$30.85   +0.1608 TP         7 HL  Harm…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ▲ KILL SWITCH fired (run P&L -0.5047)  +1
+ ↑/k up · enter details · o sort column · O flip order · f filter · … ♪ all  1s

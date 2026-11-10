@@ -1,0 +1,30 @@
+    ams · run 80 · dip43d            ○ ENDED  ·  2:40:53 AM PKT  ·  SOL $187.42
+╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+FILTERS ────────────────────────────────────────────── LIVE live · LOG log only
+     filter                   verdict    net saved  prec │ blocked    W    L
+LIVE create-slot skip         KEEP          +0.149  100% │      30    0    2
+LIVE QUIET                    KEEP          +0.060  100% │      10    0    2
+LIVE age-1 skip               KEEP          +0.000     – │       3    0    0
+LIVE 10-sec skip              KEEP          +0.000     – │       1    0    0
+LIVE holder loss              LIVE new      +0.000     – │       1    0    0
+LIVE bot depth (live)         –             -0.215   33% │      11    2    1
+LOG  HYBRID-2 gate (log)      LOG new       +0.473  100% │       4    0    4
+LOG  QUIET3-A (log)           LOG           +0.407  100% │       2    0    2
+LOG  G-A holder floors (log)  LOG new       +0.220  100% │       2    0    2
+LOG  guards top-5 (log)       LOG new       +0.220  100% │       2    0    2
+LOG  skip2 per-send (log)     LOG new       +0.180  100% │       1    0    1
+LOG  whale other rule         LOG new       +0.180  100% │       1    0    1
+LOG  whale loss (log mode)    LOG           +0.180  100% │       1    0    1
+LOG  group risk (new)         LOG           +0.055  100% │       1    0    1
+LOG  bundle family fam (log)  LOG new       +0.045   50% │       2    1    1
+LOG  equal-size group (log)   LOG           -0.165    0% │       1    1    0
+13 with no blocks yet: circuit breaker, creator loss (T2), QUIET3-A (live), blo…
+SKIPPED / BLOCKED ─────────────────────────────────────────────────────────────
+all  (6)  +56 shadow (v)                                           1W 5L  -0.489
+        ▼time type filter           kind mint     result      SOL
+▸  2:30:48 AM LOG  skip2 (log) +2   RA   89GTMqUP LOSE    -0.1800
+   2:30:27 AM LOG  QUIET3-A +1      T2   6qSqHRFx LOSE    -0.1974
+ ▲ KILL SWITCH fired (run P&L -0.5047)  +1
+ ↑/k up · f filter · d dismissed filters …                       1/6  ♪ all  1s

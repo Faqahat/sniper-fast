@@ -141,6 +141,9 @@ func fltCode(key string) string {
 	case "hl_logmode":
 		return "HL"
 	}
+	if x := core.LogRuleOf(key); x != nil && x.Code != "" {
+		return x.Code
+	}
 	return key
 }
 
@@ -334,6 +337,9 @@ var fltVerdicts = map[string]fltVerdict{
 func fltVerdictOf(r core.FiltRow) fltVerdict {
 	if v, ok := fltVerdicts[r.Key]; ok {
 		return v
+	}
+	if x := core.LogRuleOf(r.Key); x != nil { // v4: the LOG rule registry (dip43+)
+		return fltVerdict{vgLog, x.Verdict, x.Why}
 	}
 	if r.Type == "LIVE" {
 		return fltVerdict{vgLive, core.G.Dash, "no 11-03 verdict"}

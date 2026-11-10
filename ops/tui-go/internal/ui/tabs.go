@@ -73,6 +73,64 @@ func (m *Model) kvTable(headers []string, rows [][]string, right map[int]bool, c
 // ------------------------------------------------------------------------------------------------- 2 pre-send
 
 func (m *Model) scrPresend(w, bh int) string {
+	if top := m.d43Panels(w); top != "" { // v4: the dip43 sections first (the guard A/B, the CURVE band, ...), then the tab as before
+		return top + "\n" + m.scrPresend0(w, bh)
+	}
+	return m.scrPresend0(w, bh)
+}
+
+// d43Panels: the dip43 report's sections as panels (two columns on wide terminals), "" when the run has none.
+func (m *Model) d43Panels(w int) string {
+	R := m.view.D43
+	if R == nil || len(R.Sections) == 0 {
+		return ""
+	}
+	t := m.th
+	panel := func(s *core.D43Section, pw int) string {
+		inner := pw
+		if pw >= 70 {
+			inner = pw - 4
+		}
+		var ls []string
+		for _, l := range s.Lines {
+			sub := strings.HasPrefix(l, "  ") // a sub-line: indented 2, its continuation 4
+			ind, ww := 2, max(10, inner-1)
+			if sub {
+				l, ind, ww = strings.TrimLeft(l, " "), 2, max(10, inner-3)
+			}
+			for i, x := range core.WrapText(l, ww, ind) {
+				st := t.Val
+				if sub {
+					x = "  " + x
+					if i == 0 {
+						st = t.Lbl
+					}
+				}
+				ls = append(ls, st.Render(x))
+			}
+		}
+		return m.section(s.Title, "", ls, pw)
+	}
+	if w < 120 {
+		var out []string
+		for _, s := range R.Sections {
+			out = append(out, panel(s, w))
+		}
+		return strings.Join(out, "\n")
+	}
+	cw := m.colW(w)
+	var left, right []string
+	for i, s := range R.Sections {
+		if i%2 == 0 {
+			left = append(left, panel(s, cw))
+		} else {
+			right = append(right, panel(s, w-cw-1))
+		}
+	}
+	return m.twoCols(w, left, right)
+}
+
+func (m *Model) scrPresend0(w, bh int) string {
 	t := m.th
 	v := m.view
 	ps, pc, S := v.PS, v.PSCfg, v.S
@@ -1031,6 +1089,21 @@ func (m *Model) scrConfig(w, bh int) string {
 	}
 	legend := t.StateDot("on", m.ascii) + t.Lbl.Render(" on   ") + t.StateDot("part", m.ascii) + t.Lbl.Render(" warming up / partial / stopped   ") + t.StateDot("off", m.ascii) + t.Lbl.Render(" off")
 	parts := []string{m.section("CONFIG", right, out, w)}
+	if R := v.D43; R != nil { // v4: the dip43 start banners (the guard, B1-B6 send / exits, A1-A12 shadows), as the engine printed them
+		var B []string
+		for _, l := range R.Banners() {
+			for i, x := range core.WrapText(l, max(10, inner-1), 4) {
+				st := t.Val
+				if i > 0 {
+					st = t.Lbl
+				}
+				B = append(B, st.Render(x))
+			}
+		}
+		if len(B) > 0 {
+			parts = append(parts, m.section("DIP43 (start banners)", "", B, w))
+		}
+	}
 	if len(W) > 0 {
 		parts = append(parts, m.section("WALLET", "", W, w))
 	}
@@ -1120,6 +1193,15 @@ func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
 		out = append(out, m.kv("P&L", lw, p))
 	} else {
 		out = append(out, m.kv("P&L", lw, t.Lbl.Render("not realized yet")))
+	}
+	if f := m.d43Of(tr); f != nil { // v4: the dip43 view of the fill (guard arm, floors, band, landing depth, CASCADE, A/Bs)
+		for i, l := range core.WrapText(f.Brief(), max(10, w-lw-4), 0) {
+			lab := ""
+			if i == 0 {
+				lab = "dip43"
+			}
+			out = append(out, m.kv(lab, lw, t.Val.Render(l)))
+		}
 	}
 	if it, ok := m.flag(tr); ok { // the Filters tab's LOG rules that would have blocked it
 		for i, l := range core.WrapText(it.Info(), max(10, w-lw-4), 0) {
