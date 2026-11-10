@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r27               +0.5877 SOL
+  1 Ovw   2   3   4   5   6   7   8
+○ ╭─ REWIND · help ──── ↓ scroll  dipmon test ─╮
+ ▄│ 1-8       tabs                             │
+▀█│ tab       next tab                         │
+  │ shift+tab previous tab                     │
+ ▄│ ↑/k       up                               │
+▀█│ ↓/j       down                             │
+  │ pgup      page up                          │
+pe│ pgdn      page down                        │
+sp│ home      top                              │
+wa│ end       bottom / follow                  │
+TH│ enter     details                          │─
+pr│ esc       back                             │
+bu│ f         filter trades / log / filters    │
+AT│ /         find mint                        │
+Lo│ o         sort column                      │
+fr│ O         flip order                       │
+pr│ c         copy mint                        │
+P&│ w         wrap                             │8
+  │ n         no-dip rows                      │⠉⠉
+  │ v         shadow rows                      │
+  │ d         dismissed filters                │┈┈
+  │ x         filters that blocked a trade     │PM
+LA│ s         run/today                        │─
+  │ S         session                          │
+ 5│ u         $/SOL                            │
+ 5╰────────────────────────────────────────────╯
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u $/SOL · p … ♪ all  1s

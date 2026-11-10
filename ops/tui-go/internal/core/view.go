@@ -574,6 +574,10 @@ type View struct {
 	FAB FeeABSum
 	// the Filters tab (filters.go): what each pre-send filter blocked and would have made
 	Filt *FiltReport
+	// v4: the shadow's paper split by what live did with each trigger (the snapshot's "paper" line, the Engine tab)
+	Paper PaperSplit
+	Added []string   // v4: the ADDED WINDOWS lines (dip41 / dip42 log-only windows; nil when none)
+	D43   *D43Report // v4: the dip43 sections (nil when the run has no dip43 record)
 }
 
 // NowNS is now_ns as a float.
@@ -602,12 +606,21 @@ func (v *View) ItemByKey(k string) *CfgItem {
 	return nil
 }
 
-// InferBuild: the engine's build (dip20 ...) from its process, else inferred from the records.
-func InferBuild(S *Sess, eng *Engine) (string, bool) {
+// InferBuild: the engine's build (dip20 ...) from its process, else the log's "ENGINE BUILD:" line (dip39+), else inferred from
+// the records (dip27+ .. dip37c+: the newest feature the run's records show).
+func InferBuild(M *Model, S *Sess, eng *Engine) (string, bool) {
 	if eng != nil {
 		e := eng.Snapshot()
 		if e.PID != 0 && e.Build != "" {
 			return e.Build, true
+		}
+	}
+	if M != nil {
+		if M.EngBuild != "" {
+			return M.EngBuild, false
+		}
+		if b := M.Filt.inferPlus(); b != "" {
+			return b, false
 		}
 	}
 	if inferD26(S) {
@@ -670,7 +683,7 @@ func BuildView(ctx *Ctx, scope int) *View {
 	}
 	v.Run, v.HasRun = ctx.Src.Run, ctx.Src.HasRun
 	eng := ctx.Engine
-	v.Build, v.BuildLive = InferBuild(v.Cur, eng)
+	v.Build, v.BuildLive = InferBuild(M, v.Cur, eng)
 	if ctx.Price != nil {
 		v.Price, v.PriceSrc, v.PriceAge, v.PriceAgeOK, _, _ = ctx.Price.Get()
 	}
@@ -945,6 +958,9 @@ func BuildView(ctx *Ctx, scope int) *View {
 	v.CfgItems = configItems(v, S, eng)
 	v.Alerts = makeAlerts(v, ctx, M)
 	v.Filt = M.Filt.Report(ctx.GcrSeedPath()) // the whole file (every session), cached per records version
+	v.Paper = M.Filt.Paper()
+	v.Added = M.Add.Lines()
+	v.D43 = M.D43.Report()
 	return v
 }
 

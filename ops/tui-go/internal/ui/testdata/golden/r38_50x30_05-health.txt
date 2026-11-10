@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ● AMS r38               +0.5624 SOL
+  1   2   3   4   5 Hlth   6   7   8
+ENGINE ──────────────────────────────────────────
+process   no engine process with this --dip-log
+log       0.4 MB  written 10s ago  1,785 lines
+records   20.0 MB  written 10s ago  22,985 lines
+runtime   lag p50 1.08  p99 2.61  max 6.8 ms
+ERRORS ──────────────────────────────────────────
+poll errs  0 this min · 8 in 10 min · 38 total
+send path   kind     10 min  total
+────────────────────────────────────
+falcon      refused       0      8
+tpu-direct  timeout       0      3
+A/B paths  helius-ps ok · astralane-ps ok
+SYSTEM ──────────────────────────────────────────
+disk      42%  load 0.50 0.40 0.30 (2 cpu)
+memory    1.07 / 2.15 GB  (50% used)
+dipmon    cpu 0.1%  rss 31 MB  pid 4242
+SOL/USD   $187.42  fixed
+OBSERVATORY ─────────────── log only, never sends
+paper re-arm 86 windows / 101 fills
+hold 43 · watch 1,997 · migration 75
+blink 1,297 · backrun 3,368
+select 2,336 · feed race 98,253
+INSLOT 3,359
+queue     sent 7,419,470 · dropped 0 · queued 0
+file      111,178 records 34.8 MB · p99 22.7 us/m…
+RPC LATENCY ─────────────────── latest minute, ms
+ ▲ astralane-ps refused 2.0% of its tries in 10 …
+ 1-8 tabs · s run/today · u… ▼ 13 more  ♪ all  1s

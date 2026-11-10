@@ -1,0 +1,40 @@
+    ams · run 27 · dip20                                                     ○ ENDED  ·  5:36:57 PM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀╭─ REWIND · help ────────────────────────────────────────────────────── ↓ scroll  dipmon test ─╮╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview│ 1-8       tabs               enter details                          s   run/today            │
+╭─ RUN P&L ─│ tab       next tab           esc   back                             S   session              │───────────╮
+│  ▄  █▀█   │ shift+tab previous tab       f     filter trades / log / filters    u   $/SOL                │trades     │
+│ ▀█▀ █ █   │ ↑/k       up                 /     find mint                        p   pause                │ded)       │
+│     ▀▀▀ ▀ │ ↓/j       down               o     sort column                      r   price                │━━━━ 100%  │
+│  ▄  ▄█  ▄█│ pgup      page up            O     flip order                       +/- rate                 │─────────  │
+│ ▀█▀  █   █│ pgdn      page down          c     copy mint                        a   animations           │34.6       │
+│     ▀▀▀ ▀▀│ home      top                w     wrap                             m   mute                 │.4         │
+│ per hour  │ end       bottom / follow    n     no-dip rows                      M   mouse on/off         │ay         │
+│ split     │                              v     shadow rows                      ?   help                 │           │
+╰───────────│                              d     dismissed filters                q   quit                 │───────────╯
+╭─ LIVE ────│                              x     filters that blocked a trade                              │───────────╮
+│ pre-send  │                                                                                              │           │
+│ windows   │ mouse capture is off by default: select text and Ctrl / Cmd-click links (mints open GMGN)    │           │
+╰───────────│ with the terminal itself; M turns it on (click a tab, wheel scrolls, click a trade, twice:   │───────────╯
+ PRE-SEND ──│ details)                                                                                     │ & PAPER ───
+ ● 0.35 SOL │                                                                                              │● 6:2
+ exit TP +10│ RUN P&L       pre-send net + regular, after every fee; the same accounting as the run        │●
+            │               reports                                                                        │ ●
+╭─ Run P&L o│ pre-send net  realized (chain txs of each buy + sell) + token-account rent back −            │ow +0.588 ─╮
+│   +0.61┤  │               failed-attempt fees                                                            │⠔⠒⠒⠊⠉⠉⠉⠉⠉⠉ │
+│        │  │ regular       the engine's REALIZED P&L of each fill + each failed buy at its tx fee (~ =    │           │
+│        │  │               feed estimate until REALIZED)                                                  │           │
+│       0┼⣀⡠│ card          profit (winning trades) − loss (losing trades) + rent − fees = the P&L; s      │┈┈┈┈┈┈┈┈┈┈ │
+│         3:│               switches this run / today                                                      │   5:36 PM │
+╰───────────│ ATH / Low     the highest / lowest P&L of the chart's line (the run's, or today's with s);   │───────────╯
+╭─ LAST TRAD│               from ATH = now − the ATH                                                       │0 regular ─╮
+│        tim│ latency       d→land = ms from the dump to our landing, s→seen = from our send to seen, blk  │           │
+│  5:34:51 P│               = slots after the send (regular: after the dump); green < 40 ms, yellow ≤      │           │
+│  5:29:51 P│               120, red above                                                                 │-ps        │
+│  5:29:51 P│ total         Trades: the run's P&L after each trade (the trades' P&L + rent back in time    │-ps        │
+│  5:25:44 P│               order, minus the failed tries' fees up to that minute); SOL or USD with u,     │-ps        │
+│  5:25:37 P╰──────────────────────────────────────────────────────────────────────────────────────────────╯-ps        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                        ♪ all  1s

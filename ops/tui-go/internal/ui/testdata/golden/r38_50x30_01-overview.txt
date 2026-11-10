@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ● AMS r38               +0.5624 SOL
+  1 Ovw   2   3   4   5   6   7   8
+● RUNNING  1:59 AM PKT → no time limit
+ ▄  █▀█   █▀▀ █▀▀ ▀▀█
+▀█▀ █ █   ▀▀█ █▀█ █▀▀
+    ▀▀▀ ▀ ▀▀▀ ▀▀▀ ▀▀▀  SOL
+ ▄  ▄█  █▀█ █▀▀   █ █ ▄█
+▀█▀  █  █ █ ▀▀█   ▀▀█  █
+    ▀▀▀ ▀▀▀ ▀▀▀ ▀   ▀ ▀▀▀  USD
+per hour +0.8713 SOL  +$163.29
+split    T2 +0.3266  regular +0.0000
+re-arm   +0.2358  21 fills 10 W
+wallet   14.5436  kill 1.062 away
+lock     stops < +0.134 · 0.520 away
+THIS RUN · AMS r38 ──────────────────────────────
+profit +1.1233  loss -0.5842
+buy 44 / sell 44  net +0.5624
+ATH      +0.731 SOL  $137.08 · 2:31 AM
+Low      -0.027 SOL  -$5.09 · 2:00 AM
+from ATH -0.169 SOL  -$31.67
+T2        23 fills · 13 W 57% · avg +0.0135
+LAST TRADES ─────────────────────────────────────
+       time ty mint      P&L SOL     USD exit
+ 2:38:10 AM RA 2zNr4C   -0.0945  -$17.72 time
+ 2:37:31 AM RA D9oc9e   +0.0110   +$2.06 time
+ 2:37:25 AM T2 D9oc9e   -0.0206   -$3.86 time
+ 2:35:37 AM RA 81P9cg   -0.0195   -$3.65 time
+ 2:34:55 AM RA BK7EFe   -0.0246   -$4.62 time
+ ▲ astralane-ps refused 2.0% of its tries in 10 …
+ 1-8 tabs · s run/today · u $/SOL · p … ♪ all  1s

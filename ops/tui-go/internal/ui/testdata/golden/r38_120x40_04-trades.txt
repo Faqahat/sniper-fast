@@ -1,0 +1,40 @@
+    ams · run 38 · dip26                                                   ● RUNNING  ·  2:38:26 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+TRADES all  (44)                                 23W  +0.5391   o sort  O order  f filter  / find  c copy  enter details
+       ▼time type mint      size    P&L SOL       USD       %      total exit  d→land blk via client     path
+▸ 2:38:10 AM RA   2zNr4CFv  0.65   -0.0945    -$17.72  -14.5%    +0.5624 time-      6   0 AS  Jito       astralane-ps
+  2:37:31 AM RA   D9oc9ex5  0.65   +0.0110     +$2.06   +1.7%    +0.6563 time-     17   0 AS  Harmonic   astralane-ps
+  2:37:25 AM T2   D9oc9ex5  0.70   -0.0206     -$3.86   -3.0%    +0.6438 time-     59   1 AS  Harmonic   astralane-ps
+  2:35:37 AM RA   81P9cgmw  0.65   -0.0195     -$3.65   -3.0%    +0.6646 time-      7   1 AS  Harmonic   astralane-ps
+  2:34:55 AM RA   BK7EFeuj  0.65   -0.0246     -$4.62   -3.8%    +0.6833 time-    105   1 HL  Rakurai    helius-ps
+  2:33:43 AM RA   AEFuDFLN  0.65   -0.0794    -$14.88  -12.2%    +0.7070 time-     37   0 AS  BAM        astralane-ps
+  2:33:38 AM T2   DruU9dGp  0.70   +0.0541    +$10.14   +7.8%    +0.7849 time-     <1   0 AS  Jito       astralane-ps
+  2:31:26 AM T2   4hPCNSPS  0.70   +0.0765    +$14.33  +11.0%    +0.7314 time-     25   0 HL  Jito       helius-ps
+  2:30:31 AM RA   FgdbvgK8  0.65   -0.0462     -$8.67   -7.1%    +0.6536 time-     29   0 HL  BAM        helius-ps
+  2:30:16 AM T2   257yaViG  0.70   -0.0023     -$0.44   -0.3%    +0.6983 time-     48   1 HL  Harmonic   helius-ps
+  2:27:31 AM T2   DaQYoWTe  0.70   -0.0062     -$1.16   -0.9%    +0.7036 time-     23   0 HL  Firedancer helius-ps
+  2:26:55 AM T2   49xLcNoQ  0.70   +0.0250     +$4.68   +3.6%    +0.7086 time-     24   1 AS  Firedancer astralane-ps
+  2:26:16 AM T2   5ixzNp3x  0.70   -0.0345     -$6.47   -5.0%    +0.6821 time-      3   0 AS  Harmonic   astralane-ps
+  2:26:07 AM RA   3C6iuVvy  0.65   +0.0290     +$5.43   +4.5%    +0.7152 time-     37   0 AS  Harmonic   astralane-ps
+  2:23:14 AM T2   F6ZU8DFh  0.70   -0.0052     -$0.98   -0.7%    +0.6861 time-     <1   0 HL  Jito       helius-ps
+  2:23:08 AM RA   5Qp2L2TS  0.65   -0.0195     -$3.65   -3.0%    +0.6898 time-     <1   0 AS  Harmonic   astralane-ps
+  2:23:01 AM T2   ATxt8A4E  0.70   +0.0197     +$3.69   +2.8%    +0.7078 time-     39   1 AS  Harmonic   astralane-ps
+  2:19:36 AM RA   FK7NQU7c  0.65   -0.0195     -$3.65   -3.0%    +0.6906 time-     <1   0 AS  Harmonic   astralane-ps
+  2:19:27 AM T2   An1wXFfW  0.70   +0.0062     +$1.17   +0.9%    +0.7086 time-     <1   0 HL  Harmonic   helius-ps
+  2:19:06 AM T2   2D7LmLZj  0.70   +0.0044     +$0.82   +0.6%    +0.7008 time-     82   0 AS  BAM        astralane-ps
+  2:19:02 AM RA   3sRtfn2E  0.65   +0.0044     +$0.82   +0.7%    +0.6949 time-      3   0 HL  Jito       helius-ps
+  2:18:28 AM T2   4A3W3hmD  0.70   +0.1332    +$24.96  +19.1%    +0.6913 time-     67   1 AS  Harmonic   astralane-ps
+  2:18:25 AM RA   99wRFr6w  0.65   -0.0341     -$6.39   -5.2%    +0.5566 time-     32   1 AS  Jito       astralane-ps
+  2:18:11 AM RA   3pqmYQqX  0.65   +0.0166     +$3.12   +2.6%    +0.5892 time-     17   0 HL  Jito       helius-ps
+  2:18:03 AM RA   3pqmYQqX  0.65   +0.0178     +$3.34   +2.7%    +0.5710 time-    212   1 HL  Jito       helius-ps
+  2:17:58 AM T2   Bf5t3csN  0.70   +0.0461     +$8.65   +6.6%    +0.5528 time-     58   1 AS  Jito       astralane-ps
+  2:17:32 AM T2   DpmdVyid  0.70   -0.0349     -$6.53   -5.0%    +0.5052 time-     <1   0 HL  BAM        helius-ps
+  2:16:21 AM T2   DN9EZQxk  0.70   -0.0410     -$7.68   -5.9%    +0.5401 time-     <1   1 HL  BAM        helius-ps
+  2:15:46 AM T2   BpF2QZak  0.70   -0.0207     -$3.88   -3.0%    +0.5805 time-    155   1 HL  BAM        helius-ps
+  2:15:31 AM T2   5dpTgA1y  0.70   -0.0206     -$3.86   -3.0%    +0.5997 time-     <1   0 AS  Harmonic   astralane-ps
+  2:14:48 AM T2   DHN7zmc7  0.70   +0.0698    +$13.08  +10.0%    +0.6210 time-     22   1 AS  BAM        astralane-ps
+ ▲ astralane-ps refused 2.0% of its tries in 10 min (19 of 972)
+ ↑/k up · enter details · o sort column · O flip order · f filter · / find mint · c copy mint · x bloc… 1/44  ♪ all  1s

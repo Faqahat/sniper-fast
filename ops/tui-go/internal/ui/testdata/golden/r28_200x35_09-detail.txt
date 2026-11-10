@@ -1,0 +1,35 @@
+    ams · run 28 · dip20                                                                                                                                    ○ ENDED  ·  10:03:02 PM PKT  ·  SOL $187.42
+╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ PRE-SEND FILL  Oct 27, 10:01:56 PM PKT ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── session 1 ─╮
+│ mint       A7dL66DAw4cinMwna1eiKG84dHojuNGUc5yBbjeB6cx7                                                                                                                                              │
+│ gmgn       https://gmgn.ai/sol/token/A7dL66DAw4cinMwna1eiKG84dHojuNGUc5yBbjeB6cx7                                                                                                                    │
+│ solscan    https://solscan.io/token/A7dL66DAw4cinMwna1eiKG84dHojuNGUc5yBbjeB6cx7                                                                                                                     │
+│ size       0.5000 SOL  (into the curve 0.4938)                                                                                                                                                       │
+│ P&L        -0.0171 SOL  -$3.20  -3.4%                                                                                                                                                                │
+│ rent back  +0.0015  account closed; not in the P&L above                                                                                                                                             │
+│ exit       time-limit  after 2 slot(s)  held 0.84 s                                                                                                                                                  │
+│ latency    dump→land 15 ms · send→seen 82 ms · block +1 slot after the send                                                                                                                          │
+│ landed     BAM (AgaveBam) · leader 6TkKqq15 · path helius-ps                                                                                                                                         │
+│ window     try 8 of 9 · 0 traders between the dump and us · the dump -18.1%, price x0.819                                                                                                            │
+│ trigger    whale 8.1% (3.46 SOL) · +2 slots after the trigger                                                                                                                                        │
+│ buy        https://solscan.io/tx/Q6okUgjkSJRDEDNQ5aMFUBaTFB8LkVWHMmZYycVZtnL8b68eGv5ZHv6JWVuRgu4jq1NJpZz2oNiHHetAYAafF1r                                                                             │
+│ sell       https://solscan.io/tx/3Qi2LFtseL3HABsbXABZBxEtDhRqwWYKDsEtKnxY2jKZdMS3s1meNZjwh7ZNkHZWZ8tksPS4vVo2jFLieTF8QsAo                                                                            │
+│                                                                                                                                                                                                      │
+│ esc back                                                                                                                                                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+ ◆ RUN ENDED 10:03 PM (Ctrl+C) +0.3148 SOL · END CHECK 147 read: 0 sold, 0 closed, 0 held ✓
+ esc back · c copy mint · u $/SOL · q quit                                                                                                                                                    ♪ all  1s

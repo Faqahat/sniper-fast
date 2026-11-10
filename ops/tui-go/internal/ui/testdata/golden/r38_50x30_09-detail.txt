@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ● AMS r38               +0.5624 SOL
+  1   2   3   4 Trd   5   6   7   8
+RE-ARM FILL  Oct 30, 2:38:10 AM PKT ─── session 1
+mint       2zNr4CFvCgMjgU6N5eVH9B9GKRx5mX9iPhK
+           8Wiyppump
+gmgn       https://gmgn.ai/sol/token/2zNr4CFvC
+           gMjgU6N5eVH9B9GKRx5mX9iPhK8Wiyppump
+solscan    https://solscan.io/token/2zNr4CFvCg
+           MjgU6N5eVH9B9GKRx5mX9iPhK8Wiyppump
+size       0.6500 SOL  (into the curve 0.6420)
+P&L        -0.0945 SOL  -$17.72  -14.5%
+rent back  +0.0015  account closed; not in the P&L
+           above
+exit       time-ms  after 2 slot(s)  held 0.67 s
+latency    dump→land 5.9 ms · send→seen 114 ms ·
+           block +0 (the send block)
+landed     Jito (JitoLabs) · leader 1ggyZGbY ·
+           path astralane-ps
+window     try 107 of 111 · 2 traders between the
+           dump and us · the dump -6.0%, price
+           x0.940
+trigger    dump 6.3% (4.05 SOL) · +16 slots after
+           the trigger
+buy        https://solscan.io/tx/2N9x72HxzDrmY
+           S4VVbkezTFMfEKqQGdpwFxMDTtXm5RhaEME
+           PVv9H3b6f8SuU1FxuL13V2o5pRDKRsaEDRn
+           4CvRU
+sell       https://solscan.io/tx/yyYE7Dzz9SSQR
+ ▲ astralane-ps refused 2.0% of its tries in 10 …
+ esc back · c copy mint · u … ▼ 5 more  ♪ all  1s

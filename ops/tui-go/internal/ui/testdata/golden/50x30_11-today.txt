@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r27               +0.5877 SOL
+  1 Ovw   2   3   4   5   6   7   8         today
+○ ENDED  3:26 PM → 5:36 PM PKT  (ended)
+ ▄  █▀█   █▀▀ █▀█ █▀█
+▀█▀ █ █   ▀▀█ █▀█ █▀█
+    ▀▀▀ ▀ ▀▀▀ ▀▀▀ ▀▀▀  SOL
+ ▄  ▄█  ▄█  █▀█   ▄█  █▀▀
+▀█▀  █   █  █ █    █  ▀▀█
+    ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀▀▀ ▀▀▀  USD
+per hour +0.2713 SOL  +$50.84
+split    T2 +0.6221  REG -0.0344
+wallet   5.5201  kill 1.088 away
+TODAY · Tue Oct 27 ──────────────────────────────
+profit +7.5260  loss -4.6978
+buy 432 / sell 432  net +3.1465
+ATH      +3.217 SOL  $602.87 · 11:55 AM
+Low      -0.013 SOL  -$2.41 · 12:09 AM
+from ATH -0.070 SOL  -$13.15
+pre-send  49 fills · 26 W 53% · avg +0.0116
+Today P&L (SOL) ────────────────────────── +3.146
+  +3.22┤              ⣀⣀⣀⣤⣀⡤⣤⠤⠦⠖⠒⠲⠚⠉⠉⠙⠉⠑⠒⠦⠤⠤⠤⠤⠤⠤⠖⠋
+       │     ⢀⣀⣀⣠⠴⠖⠒⠒⠋⠁
+      0┼⣀⠤⠤⠴⠋⠉┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
+        12:00 AM          9:01 AM          5:36 PM
+LAST TRADES ─────────────────────────────────────
+       time ty mint      P&L SOL     USD exit
+ 5:34:51 PM RG CKTeAG   -0.0175   -$3.29 time
+ 5:29:51 PM T2 EG7Kus   +0.0599  +$11.23 TP
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u $/SOL · p … ♪ all  1s

@@ -1,0 +1,50 @@
+    ams · run 38 · dip26                                                                                           ● RUNNING  ·  2:38:26 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ ENGINE ────────────────────────────────────────────────────────────────────╮ ╭─ ERRORS ─────────────────────────────────────────────────────────────────────╮
+│ process   no engine process with this --dip-log                             │ │ poll errs  0 this min · 8 in 10 min · 38 total                               │
+│ log       0.4 MB  written 10s ago  1,785 lines                              │ │ send path   kind     10 min  total                                           │
+│ records   20.0 MB  written 10s ago  22,985 lines  bad 0                     │ │ ────────────────────────────────────                                         │
+│ runtime   lag p50 1.08  p99 2.61  max 6.8 ms  worst p99 3.4                 │ │ falcon      refused       0      8                                           │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ tpu-direct  timeout       0      3                                           │
+╭─ SYSTEM ────────────────────────────────────────────────────────────────────╮ │ A/B paths  helius-ps ok · astralane-ps ok                                    │
+│ disk      42%  load 0.50 0.40 0.30 (2 cpu)                                  │ ╰──────────────────────────────────────────────────────────────────────────────╯
+│ memory    1.07 / 2.15 GB  (50% used)                                        │ ╭─ RPC LATENCY ──────────────────────────────────────────── latest minute, ms ─╮
+│ dipmon    cpu 0.1%  rss 31 MB  pid 4242                                     │ │ name            method                 p50    p99    n  to                   │
+│ SOL/USD   $187.42  fixed                                                    │ │ ────────────────────────────────────────────────────────────                 │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ bh-fallback     getLatestBlockhash     8.4   50.6  144   0                   │
+╭─ OBSERVATORY ─────────────────────────────────────── log only, never sends ─╮ │ bh-fallback     getSlot                8.4  110.3  144   0                   │
+│ paper re-arm 86 windows / 101 fills · hold 43 · watch 1,997                 │ │ bh-primary      getLatestBlockhash     0.9   75.7  144   0                   │
+│ migration 75 · blink 1,297 · backrun 3,368 · select 2,336                   │ │ exit-fallback   getAccountInfo        11.2   11.2    2   0                   │
+│ feed race 98,253 · INSLOT 3,359                                             │ │ exit-fallback   getSignatureStatuses   9.2   10.1    6   0                   │
+│ queue     sent 7,419,470 · dropped 0 · queued 0                             │ │ exit-primary    getAccountInfo         1.0    2.4   15   0                   │
+│ file      111,178 records 34.8 MB · p99 22.7 us/msg · ~18 MB mem            │ │ exit-primary    getSignatureStatuses   1.9    3.3   10   0                   │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ heavy-fallback  getTransaction         8.7   10.8    4   0                   │
+                                                                                │ heavy-primary   getTransaction         1.7    2.8    6   0                   │
+                                                                                │ ks-fallback     getBalance             8.8    8.8    3   0                   │
+                                                                                │ ks-primary      getBalance             0.8    8.6   27   0                   │
+                                                                                ╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ▲ astralane-ps refused 2.0% of its tries in 10 min (19 of 972)
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                                                                ♪ all  1s

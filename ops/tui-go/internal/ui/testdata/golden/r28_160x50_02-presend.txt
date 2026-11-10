@@ -1,0 +1,50 @@
+    ams · run 28 · dip20                                                                                            ○ ENDED  ·  10:03:02 PM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ PRE-SEND LIVE ────────────────────────── ● 0.50 k4 150/1000 fee 0.08/0.40 ─╮ ╭─ LATENCY ─────────────────────────────────────────────────────────────── ms ─╮
+│ fills      150 / 1000  ━━━━━━────────────────────────────────── 15%         │ │ send→seen  p10 35 · p50 84 · p90 219   same block 40% of 15,362 tries        │
+│ fee budget 0.078/0.40  ━━━━━━━━──────────────────────────────── 19% used    │ │ fills      dump→land p10 <1 · p50 34 · p90 109  (143)                        │
+│ armed now  0 window(s) · armed 609 · tries 15,771                           │ │ bounced    dump→land p10 85 · p50 307 · p90 534  (348)                       │
+╰─────────────────────────────────────────────────────────────────────────────╯ │            after a dump of ≥ 12%; bounced = failed 6042, the price was back  │
+╭─ RESULT ────────────────────────────────────────────────────────────────────╮ │ fills      send→seen median 92  (150)                                        │
+│ net        +0.2726 SOL  +$51.09                                             │ │            after the trigger median +3 slots                                 │
+│ realized   +0.1242   rent back +0.2263                                      │ │ client      tries  same blk  send→seen  fills  d→land  bounced  d→land       │
+│ failed     -0.0779   15,212 tries x 5,120                                   │ │ ────────────────────────────────────────────────────────────────────────     │
+│ fee check  counted 0.077885  engine 0.077885  ✓ match                       │ │ Harmonic    5,187       45%         76     51      36       98     273       │
+│ wins       66 W / 84 L  (44%)   avg/fill +0.0008                            │ │ BAM         5,257       34%         95     41      28      120     324       │
+│ best       HKknYN +0.1937  time BAM  7:40 PM                                │ │ Jito        3,593       41%        103     35      36       99     315       │
+│ worst      85Z21c -0.1025  SL Harmonic  8:39 PM                             │ │ Firedancer    999       39%         93     13      59       20     296       │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ Agave         192       45%         60      2      65        7     212       │
+╭─ EXITS ─────────────────────────────────────────────────────────────────────╮ │ other         134       34%         97      1      <1        4      93       │
+│ exit           n   W  P&L SOL  per fill                                     │ │ medians; fills / bounced after the drop rule; same blk = landed in the send… │
+│ ─────────────────────────────────────────                                   │ ╰──────────────────────────────────────────────────────────────────────────────╯
+│ time-limit   121  41  -1.0164   -0.0084                                     │ ╭─ QUIET ──────────────────────────────────────────────────────────────────────╮
+│ take-profit   25  25  +1.5079   +0.0603                                     │ │ stop rule  ● 6:2   stops 97                                                  │
+│ stop-loss      4   0  -0.3673   -0.0918                                     │ │ skip rule  ● on (all 4 quiet signals skip a trigger)                         │
+╰─────────────────────────────────────────────────────────────────────────────╯ │            skips 119   would-skip in the warm-up 0                           │
+╭─ WINDOWS ───────────────────────────────────────────────────────────────────╮ ╰──────────────────────────────────────────────────────────────────────────────╯
+│ skipped    create_slot 507 · quiet 119 · blocked_armed 97 ·                 │ ╭─ PAPER vs LIVE ──────────────────────────────────────────────────────────────╮
+│            no_launch_accounts 7 · blocked_position 3 · reactive_position    │ │ paper, live sent      171 fills  net +2.269                                  │
+│            3 · legacy_create 1 · blocked_ata_open 1                         │ │ paper, skip/withheld  111 fills  net -0.848                                  │
+│ disarmed   expired 235 · whale_sold 152 · filled 125 · quiet 97             │ │ live                  150 fills  net +0.273                                  │
+│ results    6042 13,420 · deadline 1,455 · unseen 409 · ata_exists 251 ·     │ │ paper = the engine's estimate (shadow row c at 0.54 SOL, net incl. its       │
+│            ok 150 · buy_6005 86                                             │ │ tries) on the same T2 triggers; skip/withheld = 106 skipped + 5 armed,       │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ nothing sent (what the filters avoided); engine paper all triggers 282       │
+                                                                                │ fills net +1.421 (not comparable)                                            │
+                                                                                ╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+ ◆ RUN ENDED 10:03 PM (Ctrl+C) +0.3148 SOL · END CHECK 147 read: 0 sold, 0 closed, 0 held ✓
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                                                                ♪ all  1s

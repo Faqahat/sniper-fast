@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ○ AMS r27                         ENDED  ·  +0.5877 SOL  +$110.15
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+ ▄╭─ REWIND · help ────────────────────────────────── ↓ scroll  dipmon test ─╮
+▀█│ 1-8       tabs               enter details                       …       │
+  │ tab       next tab           esc   back                                  │
+ ▄│ shift+tab previous tab       f     filter trades / log / filters         │
+▀█│ ↑/k       up                 /     find mint                             │
+  │ ↓/j       down               o     sort column                           │
+○ │ pgup      page up            O     flip order                            │
+wa│ pgdn      page down          c     copy mint                             │
+TH│ home      top                w     wrap                                  │
+bu│ end       bottom / follow    n     no-dip rows                           │
+pr│                              v     shadow rows                           │
+● │                              d     dismissed filters                     │
+Ru│                              x     filters that blocked a trade          │8
+  │                                                                          │⠉⠉
+  │ mouse capture is off by default: select text and Ctrl / Cmd-click links  │┈┈
+  │ (mints open GMGN) with the terminal itself; M turns it on (click a tab,  │PM
+LA│ wheel scrolls, click a trade, twice: details)                            │─
+  │                                                                          │
+ 5│ RUN P&L       pre-send net + regular, after every fee; the same          │
+ 5╰──────────────────────────────────────────────────────────────────────────╯
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute …                ♪ all  1s

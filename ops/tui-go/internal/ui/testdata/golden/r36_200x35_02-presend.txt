@@ -1,0 +1,35 @@
+    ams · run 36 · dip24                                                                                                                                   ● RUNNING  ·  5:16:20 AM PKT  ·  SOL $187.42
+╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ PRE-SEND LIVE ─────────────────────────────────────────── ● 0.70 k8 47/no limit fee 0.04/1.00 ─╮ ╭─ LATENCY ─────────────────────────────────────────────────────────────────────────────────── ms ─╮
+│ fills      47 / no limit                                                                        │ │ send→seen  p10 36 · p50 81 · p90 217   same block 42% of 7,182 tries                             │
+│ fees 24 h  0.036/1.00  ━─────────────────────────────────────── 4% used                         │ │ fills      dump→land p10 4 · p50 16 · p90 58  (40)                                               │
+│ fees       run 0.037 SOL · pauses at the budget, never stops                                    │ │ bounced    dump→land p10 43 · p50 222 · p90 477  (110)                                           │
+│ armed now  0 window(s) · armed 151 · tries 7,534                                                │ │            after a dump of ≥ 12%; bounced = failed 6042, the price was back                      │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │ fills      send→seen median 93  (47)                                                             │
+╭─ RESULT ────────────────────────────────────────────────────────────────────────────────────────╮ │            after the trigger median +3 slots   +0:2 +1:4 +2:6 +3:22 +4:4 +5+:9                   │
+│ net        +0.3487 SOL  +$65.35                                                                 │ │ client      tries  same blk  send→seen  fills  d→land  bounced  d→land                           │
+│ realized   +0.3143   rent back +0.0709                                                          │ │ ────────────────────────────────────────────────────────────────────────                         │
+│ failed     -0.0365   7,135 tries x 5,120                                                        │ │ Harmonic    2,459       49%         72     11      12       73     288                           │
+│ engine     0.036531 at its last status line (60 s)                                              │ │ BAM         2,305       38%         82     11      14        8     117                           │
+│ wins       27 W / 20 L  (57%)   avg/fill +0.0067                                                │ │ Jito        1,655       37%        116     13      18       29     147                           │
+│ best       52DyG8 +0.0937  time-ms Jito  3:51 AM                                                │ │ Firedancer    625       41%         91      5      13        0       –                           │
+│ worst      XsMuqM -0.2293  SL Harmonic  3:45 AM                                                 │ │ Agave          74       64%         50      0       –        0       –                           │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │ other          64       59%         73      0       –        0       –                           │
+╭─ EXITS ─────────────────────────────────────────────────────────────────────────────────────────╮ │ medians; fills / bounced after the drop rule; same blk = landed in the send block                │
+│ exit        n   W  P&L SOL  per fill                                                            │ ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+│ ──────────────────────────────────────                                                          │ ╭─ QUIET ──────────────────────────────────────────────────────────────────────────────────────────╮
+│ time-ms    46  27  +0.5436   +0.0118                                                            │ │ stop rule  ● 6:2   stops 17                                                                      │
+│ stop-loss   1   0  -0.2293   -0.2293                                                            │ │ skip rule  ● on (all 4 quiet signals skip a trigger)                                             │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │            skips 34   would-skip in the warm-up 0                                                │
+╭─ WINDOWS ───────────────────────────────────────────────────────────────────────────────────────╮ ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+│ skipped    create_slot 143 · quiet 34 · blocked_armed 27 · no_launch_accounts 3 ·               │ ╭─ PAPER vs LIVE ──────────────────────────────────────────────────────────────────────────────────╮
+│            legacy_create 1                                                                      │ │ paper, live sent       39 fills  net +0.227                                                      │
+│ disarmed   expired 54 · filled 44 · whale_sold 36 · quiet 17                                    │ │ paper, skip/withheld   51 fills  net -0.137                                                      │
+│ results    6042 6,449 · deadline 504 · unseen 284 · ata_exists 182 · ok 47                      │ │ live                   47 fills  net +0.349                                                      │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │ paper = the engine's estimate (shadow row c at 0.54 SOL, net incl. its tries) on the same T2     │
+                                                                                                    │ triggers; skip/withheld = 51 skipped + 0 armed, nothing sent (what the filters avoided); engine  │
+                                                                                                    │ paper all triggers 90 fills net +0.091 (not comparable)                                          │
+ ✓ all clear
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                                                                                              ▼ 1 more  ♪ all  1s

@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ○ AMS r27                         ENDED  ·  +0.5877 SOL  +$110.15
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+╭─ CONFIG ─────────────────────────────────────────────────────────────────────╮
+│ PRE-SEND ─────────────────────────────────────────────────────────────────── │
+│ ● Pre-send live       0.35 SOL · 4 tries/slot · limit ×0.88 · deadline +1 ·  │
+│                       route default=helius-ps · exit 2 slots / TP +10% / SL  │
+│                       20%                                                    │
+│                       4 tries/slot = 4 conditional buys sent every slot      │
+│                       (~0.2 s) while a window is open; each fills only on a  │
+│                       sudden ≥ 12% drop; it is sold at TP / SL or after 2    │
+│                       slots                                                  │
+│                                                                              │
+│ REGULAR ──────────────────────────────────────────────────────────────────── │
+│   Regular buy         0.35 SOL · model IMIT1 wider · exit TP off / SL 50% /  │
+│                       5 slots (~1.1 s)                                       │
+│                       after a big dump the regular bot buys this size and    │
+│                       sells at TP / SL or after the hold slots               │
+│   Price guard         ×1.05 over the post-dump price (pump error 6042 above  │
+│                       it)                                                    │
+│                       the buy fails on chain (pump error 6042, costs only    │
+│                       the tx fee) when the price is above this multiple of   │
+│                       the post-dump price                                    │
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute …     ▼ 51 more  ♪ all  1s

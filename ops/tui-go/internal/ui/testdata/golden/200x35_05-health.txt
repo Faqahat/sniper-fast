@@ -1,0 +1,35 @@
+    ams · run 27 · dip20                                                                                                                                     ○ ENDED  ·  5:36:57 PM PKT  ·  SOL $187.42
+╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ ENGINE ────────────────────────────────────────────────────────────────────────────────────────╮ ╭─ ERRORS ─────────────────────────────────────────────────────────────────────────────────────────╮
+│ process   no engine process with this --dip-log                                                 │ │ poll errs  0 this min · 2 in 10 min · 52 total                                                   │
+│ log       0.6 MB  written 0s ago  3,116 lines                                                   │ │ send path   kind     10 min  total                                                               │
+│ records   11.9 MB  written 0s ago  15,607 lines  bad 0                                          │ │ ────────────────────────────────────                                                             │
+│ runtime   lag p50 1.06  p99 2.00  max 4.1 ms  worst p99 2.0                                     │ │ falcon      refused       4     10                                                               │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │ tpu-direct  timeout       0      3                                                               │
+╭─ SYSTEM ────────────────────────────────────────────────────────────────────────────────────────╮ │ refused    Error: keystore: wrong passphrase or damaged file                                     │
+│ disk      42%  load 0.50 0.40 0.30 (2 cpu)                                                      │ ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+│ memory    1.07 / 2.15 GB  (50% used)                                                            │ ╭─ RPC LATENCY ──────────────────────────────────────────────────────────────── latest minute, ms ─╮
+│ dipmon    cpu 0.1%  rss 31 MB  pid 4242                                                         │ │ name            method                 p50    p99    n  to                                       │
+│ SOL/USD   $187.42  fixed                                                                        │ │ ────────────────────────────────────────────────────────────                                     │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯ │ bh-fallback     getLatestBlockhash     8.2   29.0  143   3                                       │
+                                                                                                    │ bh-fallback     getSlot                8.2  106.6  143   3                                       │
+                                                                                                    │ bh-primary      getLatestBlockhash     0.9    3.0  143   0                                       │
+                                                                                                    │ exit-primary    getAccountInfo         0.9    0.9    1   0                                       │
+                                                                                                    │ ks-primary      getBalance             0.8    2.5   30   0                                       │
+                                                                                                    │ exit-fallback   getAccountInfo         9.5    9.5    1   0                                       │
+                                                                                                    │ exit-fallback   getSignatureStatuses   8.5    8.5    2   0                                       │
+                                                                                                    │ exit-primary    getMultipleAccounts    0.6    0.6    2   0                                       │
+                                                                                                    │ exit-primary    getSignatureStatuses   1.7    2.4    4   0                                       │
+                                                                                                    │ heavy-primary   getTransaction         1.9    1.9    2   0                                       │
+                                                                                                    │ heavy-fallback  getTransaction        26.2   26.2    2   0                                       │
+                                                                                                    │ ks-fallback     getBalance             8.3    8.3    2   0                                       │
+                                                                                                    ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+ ▲ falcon refused 4/10m   ◆ RUN ENDED 5:36 PM (time limit / max trades) +0.5877 SOL · END CHECK 49 read: 0 sold, 0 closed, 0 held ✓
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                                                                                                        ♪ all  1s

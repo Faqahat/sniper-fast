@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r27               +0.5877 SOL
+  1   2   3 Reg   4   5   6   7   8
+REGULAR BUYS ────────────────────────── ● M2 gate
+setup    0.35 TP off SL 50% 5sl
+P&L      -0.0344 SOL  -$6.45
+         fills -0.0314   failed buys -0.0030
+buys     10 fired → 4 filled (40%) · 6 failed
+wins     1 W / 3 L   avg/fill -0.0078
+best     GFcPyQ +0.0090   worst CKTeAG -0.0175
+FAILED BUYS ─────────────────────────────────────
+price 6042       5  -0.0025
+lighthouse 6001  1  -0.0005
+other            0  +0.0000
+each costs its tx fee 0.000505 SOL; tips revert
+EXITS ───────────────────────────────────────────
+exit        n  W  P&L SOL
+───────────────────────────
+time-limit  4  1  -0.0314
+BY LEADER CLIENT ────────────────────────────────
+client    buys  fills  W  P&L SOL
+───────────────────────────────────
+Harmonic     7      3  1  -0.0231
+Jito         2      0  0  -0.0010
+BAM          1      1  0  -0.0104
+LANDING ─────────────────────────────────────────
+fills    median 36 ms after the dump
+         3 of 4 in the dump's own block
+fails    median 83 ms after the dump (seen)
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u … ▼ 6 more  ♪ all  1s

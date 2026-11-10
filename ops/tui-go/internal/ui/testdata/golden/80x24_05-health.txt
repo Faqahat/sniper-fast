@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ○ AMS r27                         ENDED  ·  +0.5877 SOL  +$110.15
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+╭─ ENGINE ─────────────────────────────────────────────────────────────────────╮
+│ process   no engine process with this --dip-log                              │
+│ log       0.6 MB  written 0s ago  3,116 lines                                │
+│ records   11.9 MB  written 0s ago  15,607 lines  bad 0                       │
+│ runtime   lag p50 1.06  p99 2.00  max 4.1 ms  worst p99 2.0                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ ERRORS ─────────────────────────────────────────────────────────────────────╮
+│ poll errs  0 this min · 2 in 10 min · 52 total                               │
+│ send path   kind     10 min  total                                           │
+│ ────────────────────────────────────                                         │
+│ falcon      refused       4     10                                           │
+│ tpu-direct  timeout       0      3                                           │
+│ refused    Error: keystore: wrong passphrase or damaged file                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ SYSTEM ─────────────────────────────────────────────────────────────────────╮
+│ disk      42%  load 0.50 0.40 0.30 (2 cpu)                                   │
+│ memory    1.07 / 2.15 GB  (50% used)                                         │
+│ dipmon    cpu 0.1%  rss 31 MB  pid 4242                                      │
+│ SOL/USD   $187.42  fixed                                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute …     ▼ 16 more  ♪ all  1s

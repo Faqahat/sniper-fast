@@ -166,6 +166,14 @@ type fRec struct {
 	RecvN  *float64 `json:"recv_n"`
 	CsPct  *float64 `json:"cs_pct"`
 	FamErr *string  `json:"err"`
+	// dip39 bot depth on a fill (the gate's verdict at the filling attempt; mode "log" = would have withheld when block)
+	Botdepth *struct {
+		Mode  *string  `json:"mode"`
+		Block *bool    `json:"block"`
+		N     *float64 `json:"n"`
+		Min   *float64 `json:"min"`
+		Slots *float64 `json:"slots"`
+	} `json:"botdepth"`
 }
 
 // fGateWin: a window the dip36 no-bot gate withheld sends of (presend_live_fpnb_window)
@@ -175,6 +183,23 @@ type fGateWin struct {
 	withheld int
 	filled   bool
 	t        int64
+}
+
+// fShArm: a shadow window (presend_arm), with its row c exit (net_cheap) and armed slots bound in record order (an engine
+// restart reuses the window ids: each exit / disarm belongs to the latest arm with its w)
+type fShArm struct {
+	sig      string
+	w        int64
+	exit     *float64
+	slots    int64
+	hasSlots bool
+}
+
+// fWithWin: a live window a per-send gate withheld sends of (bot depth, blocklist per-send): its first withheld record
+type fWithWin struct {
+	kind string // "T2" | "RA"
+	n    int
+	t    int64
 }
 
 // fLog35: the dip34/35 log-only verdicts of one live position (keyed like the arm)
@@ -194,6 +219,8 @@ type fLog35 struct {
 	whOther     bool // dip37: the whale ledger's OTHER rule (mean when sum is live, sum when mean is) would have skipped the arm
 	whWould     bool // dip37: the whale / holder ledger in "log" mode would have skipped the arm
 	hlWould     bool
+	bd          bool // dip39: bot depth in log mode would have withheld the filling attempt
+	bdWhy       string
 }
 
 // fF3: dip32's log-only arm fields: QUIET3-A (T2 quiet token + whale with <= 3 dumps) and the fresh holders (TAIL G3 at >= 35%).
@@ -293,16 +320,62 @@ type FiltAcc struct {
 	fpWin           []fGateWin       // dip36 live gate: windows with withheld sends
 	fpHeld          int              // dip36 live gate: presend_live_fpnb_withheld records (sends withheld)
 	moves           map[int64]*FMove // shadow w -> the window's price move (presend_disarm "move"; absent before 11-03)
-	q3Live          bool             // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
-	cache           *FiltReport
-	cacheVer        int64
-	cacheSeed       string
+	// dip39 bot depth (LIVE gate): its withheld sends grouped by window (w, mint: first record's time, kind); the fills that ran it
+	// in log mode (botdepth.block on a fill = would have withheld it)
+	bdWin   map[FKey]*fWithWin
+	bdOrd   []FKey
+	bdHeld  int
+	anyBdLg bool
+	// dip36 blocklist per-send check (presend_live_blocklist_withheld): withheld sends by window
+	blWin  map[FKey]*fWithWin
+	blOrd  []FKey
+	blHeld int
+	// v4: the paper partition (snapshot "paper" line): shadow w -> row c armed slots, live T2 trigger sig -> w, attempts per w
+	shArms    []fShArm      // the shadow's windows in arm order
+	shCur     map[int64]int // shadow w -> its latest arm (index in shArms)
+	skipSig   map[string]bool
+	liveCur   map[int64]int  // live w -> its latest arm (index in liveSent)
+	liveSent  []int          // per live arm: real (not dry) tries sent
+	liveSigA  map[string]int // live T2 trigger sig -> its arm (index in liveSent)
+	shSize0   float64        // the first row c fill's size (SOL)
+	hasSh0    bool
+	q3Live    bool            // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
+	anyWide   bool            // v4: a wide shadow record (dip30+)
+	plKeys    map[string]bool // v4: the latest run_start's presend_live keys (the build inference of runs before "ENGINE BUILD:")
+	cache     *FiltReport
+	cacheVer  int64
+	cacheSeed string
+}
+
+// inferPlus: the build of a run whose log has no "ENGINE BUILD:" line, from the newest feature its records show ("" = none of
+// these: the dip26 / dip24 / ... inference).
+func (F *FiltAcc) inferPlus() string {
+	k := F.plKeys
+	switch {
+	case k["skip2_live"]:
+		return "dip37c+"
+	case k["wh_loss"] || k["holder_loss"] || k["ledger_control"] || k["m2seen"]:
+		return "dip37+"
+	case k["fpnb_log"] || k["fpnb_live"] || k["blocklist"] || k["skip2_log"]:
+		return "dip36+"
+	case k["fam_log"]:
+		return "dip35+"
+	case k["cr_loss"] || k["creator_state"]:
+		return "dip32+"
+	case F.anyGuard || F.anyWide:
+		return "dip30+"
+	case k["lone_whale_slots"]:
+		return "dip27+"
+	}
+	return ""
 }
 
 func newFiltAcc() *FiltAcc {
 	return &FiltAcc{shW: map[string]int64{}, shExit: map[int64]*float64{}, shSize: map[int64]float64{}, liveSig: map[int64]string{},
 		liveArm: map[int64]fArm{}, kind: map[FKey]string{}, deepW: map[int64]bool{}, fills: map[int64]bool{},
-		fillAnn: map[FKey]*fFill{}, real: map[FKey]float64{}, armF3: map[FKey]*fF3{}, log35: map[FKey]*fLog35{}, moves: map[int64]*FMove{}}
+		fillAnn: map[FKey]*fFill{}, real: map[FKey]float64{}, armF3: map[FKey]*fF3{}, log35: map[FKey]*fLog35{}, moves: map[int64]*FMove{},
+		bdWin: map[FKey]*fWithWin{}, shCur: map[int64]int{}, blWin: map[FKey]*fWithWin{}, skipSig: map[string]bool{},
+		liveCur: map[int64]int{}, liveSigA: map[string]int{}}
 }
 
 var (
@@ -311,12 +384,23 @@ var (
 	fEvPrefix = []byte("presend_")
 	fMoveKey  = []byte(`"move":`)
 	fQ3aKey   = []byte(`"quiet3a":`)
+	dryTrue   = []byte(`"dry":true`)
 )
 
 // feed takes one record (ev = its "ev"); only the presend_* records the table uses.
 func (F *FiltAcc) feed(ev, line []byte) {
 	if !bytes.HasPrefix(ev, fEvPrefix) {
 		if string(ev) == "run_start" { // dip37: the run's ledger / A/B / HYBRID-2 flags (its rows from the start)
+			var keys struct {
+				PL map[string]json.RawMessage `json:"presend_live"`
+			}
+			if json.Unmarshal(line, &keys) == nil && keys.PL != nil {
+				F.plKeys = map[string]bool{}
+				for k := range keys.PL {
+					F.plKeys[k] = true
+				}
+				F.ver++
+			}
 			var r struct {
 				PL *struct {
 					Wh  *string `json:"wh_loss"`
@@ -355,21 +439,82 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		return
 	}
 	switch string(ev) {
-	case "presend_disarm": // the shadow window's end: only its price move (11-03+), by substring first (one per window)
-		if !bytes.Contains(line, fMoveKey) {
-			return
-		}
+	case "presend_disarm": // the shadow window's end: its price move (11-03+) and row c's armed slots (the paper partition's try cost)
 		var r struct {
 			W    *int64 `json:"w"`
 			Move *FMove `json:"move"`
+			Rows *struct {
+				C *struct {
+					Armed bool    `json:"armed"`
+					Slots float64 `json:"slots"`
+				} `json:"c"`
+			} `json:"rows"`
 		}
-		if json.Unmarshal(line, &r) != nil || r.W == nil || r.Move == nil {
+		if json.Unmarshal(line, &r) != nil || r.W == nil {
 			return
 		}
 		F.ver++
-		F.moves[*r.W] = r.Move
+		if r.Move != nil {
+			F.moves[*r.W] = r.Move
+		}
+		if r.Rows != nil && r.Rows.C != nil && r.Rows.C.Armed {
+			if i, ok := F.shCur[*r.W]; ok {
+				F.shArms[i].slots, F.shArms[i].hasSlots = int64(r.Rows.C.Slots), true
+			}
+		}
 		return
-	case "presend_attempt": // by substring (many): a T2 try at the deeper limit (drop > 0.125)
+	case "presend_wide_arm": // dip30+: the wide shadow (the build inference)
+		if !F.anyWide {
+			F.anyWide = true
+			F.ver++
+		}
+		return
+	case "presend_live_botdepth_withheld", "presend_live_blocklist_withheld": // dip39 / dip36: one withheld send, grouped by window
+		var r struct {
+			W    *int64          `json:"w"`
+			Mint string          `json:"mint"`
+			Kind string          `json:"kind"`
+			T    json.RawMessage `json:"t"`
+		}
+		if json.Unmarshal(line, &r) != nil {
+			return
+		}
+		F.ver++
+		w := noW
+		if r.W != nil {
+			w = *r.W
+		}
+		k := FKey{w, r.Mint}
+		win, ord, held := F.bdWin, &F.bdOrd, &F.bdHeld
+		if string(ev) == "presend_live_blocklist_withheld" {
+			win, ord, held = F.blWin, &F.blOrd, &F.blHeld
+		}
+		*held++
+		x := win[k]
+		if x == nil {
+			kd := "T2"
+			if r.Kind == "rearm" || r.Kind == "RA" {
+				kd = "RA"
+			}
+			x = &fWithWin{kind: kd, t: rawInt(r.T)}
+			win[k] = x
+			*ord = append(*ord, k)
+		}
+		x.n++
+		return
+	case "presend_attempt": // by substring (many): the tries per window (v4 paper partition); a T2 try at the deeper limit (drop > 0.125)
+		w := noW
+		if j := bytes.LastIndex(line, fWKey); j >= 0 {
+			if x, ok := numAfter(line[j:], `"w":`); ok {
+				w = x
+			}
+		}
+		F.ver++
+		if !bytes.Contains(line, dryTrue) {
+			if i, ok := F.liveCur[w]; ok { // the latest live arm with this w (window ids restart with the engine)
+				F.liveSent[i]++
+			}
+		}
 		i := bytes.Index(line, fDropKey)
 		if i < 0 || bytes.Contains(line, kindRearm) {
 			return
@@ -378,13 +523,6 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		if !ok || !(d > 0.125) {
 			return
 		}
-		w := noW
-		if j := bytes.Index(line, fWKey); j >= 0 {
-			if x, ok := numAfter(line[j:], `"w":`); ok {
-				w = x
-			}
-		}
-		F.ver++
 		if !F.deepW[w] {
 			F.deepW[w] = true
 			F.deepOrd = append(F.deepOrd, w)
@@ -436,6 +574,8 @@ func (F *FiltAcc) feed(ev, line []byte) {
 	w := r.w()
 	switch r.Ev {
 	case "presend_arm":
+		F.shCur[w] = len(F.shArms)
+		F.shArms = append(F.shArms, fShArm{sig: r.Sig, w: w})
 		F.shW[r.Sig] = w
 	case "presend_exit":
 		if r.Row != nil && *r.Row == "c" {
@@ -451,6 +591,9 @@ func (F *FiltAcc) feed(ev, line []byte) {
 				p = &z
 			}
 			F.shExit[w] = p
+			if i, ok := F.shCur[w]; ok {
+				F.shArms[i].exit = p
+			}
 		}
 	case "presend_fill":
 		if (r.Row == nil || *r.Row == "c") && r.Entry != nil {
@@ -460,6 +603,9 @@ func (F *FiltAcc) feed(ev, line []byte) {
 					s = *r.Entry.SolIn / 1e9
 				}
 				F.shSize[w] = s
+				if !F.hasSh0 {
+					F.shSize0, F.hasSh0 = s, true
+				}
 			}
 		}
 	case "presend_live_skip":
@@ -490,6 +636,7 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			why = *r.Why
 		}
 		F.skips = append(F.skips, fSkip{why: why, sig: r.Trig.Sig, mint: r.Trig.Mint, t: rawInt(r.Trig.T)})
+		F.skipSig[r.Trig.Sig] = true
 		if why == "quiet3_a" {
 			F.q3Live = true
 		}
@@ -504,6 +651,11 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			kd = *r.Kind
 		}
 		F.kind[k] = kd
+		F.liveCur[w] = len(F.liveSent)
+		F.liveSent = append(F.liveSent, 0)
+		if kd == "t2" && r.Trig != nil {
+			F.liveSigA[r.Trig.Sig] = F.liveCur[w]
+		}
 		if r.F3 != nil {
 			F.armF3[k] = r.F3
 		}
@@ -620,6 +772,12 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			}
 			F.fillAnn[k] = &fFill{k: k, ann: a, deep: fTruthy(r.Deep), t: rawInt(r.T)}
 			F.fillOrd = append(F.fillOrd, k)
+			if b := r.Botdepth; b != nil && b.Mode != nil && *b.Mode == "log" { // dip39: the gate in log mode at the filling attempt
+				F.anyBdLg = true
+				x := F.l35(k)
+				x.bd = b.Block != nil && *b.Block
+				x.bdWhy = fmt.Sprintf("bot depth %.0f listed bots in %.0f slots (min %.0f)", fz(b.N), fz(b.Slots), fz(b.Min))
+			}
 		}
 	case "presend_live_realized":
 		k := FKey{w, r.Mint}
@@ -866,6 +1024,8 @@ func LogRuleName(key string) string {
 		return "whale loss (log)"
 	case "hl_logmode":
 		return "holder loss (log)"
+	case "botdepth":
+		return "bot depth"
 	}
 	return key
 }
@@ -978,6 +1138,25 @@ func (F *FiltAcc) paper(w int64, ok bool) (float64, bool) {
 	return *p, true
 }
 
+// winPaper: a live window's paper value (a T2 window: its trigger's shadow row c at the live size; a re-arm window: none), the
+// trigger's key for the unique totals (its sig; "w<N>" without one) and the shadow window's price move.
+func (F *FiltAcc) winPaper(w int64, kind string) (float64, bool, string, *FMove) {
+	sig, has := F.liveSig[w]
+	tsig := sig
+	if !has {
+		tsig = fmt.Sprintf("w%d", w)
+	}
+	if kind != "T2" || !has {
+		return 0, false, tsig, nil
+	}
+	sw, inSh := F.shW[sig]
+	if !inSh {
+		return 0, false, tsig, nil
+	}
+	v, ok := F.paper(sw, true)
+	return v, ok, tsig, F.moves[sw]
+}
+
 func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	R := &FiltReport{RearmSkips: F.raSkips, LiveSize: F.liveSize, HasLiveSize: F.hasSize}
 	// the bad-creator ledger, replayed in record order from the seed
@@ -1086,6 +1265,31 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				Mint: s.mint, W: noW, Scored: vok, Sol: v, Sig: s.sig, Move: mv})
 		}
 	}
+	// dip36 blocklist per-send (presend_live_blocklist_withheld): its windows join the LIVE blocklist row
+	if len(F.blOrd) > 0 {
+		if row := byWhy["blocklist"]; row != nil {
+			armSkips := row.Blocked
+			later, laterSol, never := 0, 0.0, 0
+			for _, k := range F.blOrd {
+				g := F.blWin[k]
+				if F.fills[k.W] {
+					later++
+					laterSol += F.real[k]
+					continue
+				}
+				never++
+				row.Blocked++
+				v, vok, tsig, mv := F.winPaper(k.W, g.kind)
+				if vok {
+					tally(row, v)
+				}
+				R.Items = append(R.Items, FiltItem{T: g.t, Live: true, Filter: "blocklist", Name: row.Name, Rules: []string{"blocklist"}, Names: []string{row.Name},
+					Kind: g.kind, Mint: k.Mint, W: k.W, Scored: vok, Sol: v, Sig: tsig, Move: mv})
+			}
+			row.Note = fmt.Sprintf("paper; %d arm skips + per-send: %d sends withheld, %d windows never filled, %d filled later (real P&L %s)", armSkips, F.blHeld, never, later,
+				fmtSigned(laterSol, 3))
+		}
+	}
 	for _, f := range liveFilters {
 		R.Rows = append(R.Rows, *byWhy[f.why])
 	}
@@ -1118,10 +1322,14 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				continue
 			}
 			row.Blocked++
+			v, vok, tsig, mv := F.winPaper(g.k.W, g.kind)
+			if vok {
+				tally(&row, v)
+			}
 			R.Items = append(R.Items, FiltItem{T: g.t, Live: true, Filter: "fpnb_live", Name: row.Name, Rules: []string{"fpnb_live"}, Names: []string{row.Name},
-				Kind: g.kind, Mint: g.k.Mint, W: g.k.W, Sig: fmt.Sprintf("w%d", g.k.W)})
+				Kind: g.kind, Mint: g.k.Mint, W: g.k.W, Scored: vok, Sol: v, Sig: tsig, Move: mv})
 		}
-		row.Note = fmt.Sprintf("%d sends withheld; %d windows never filled, %d filled later (real P&L %s)", F.fpHeld, row.Blocked, later, fmtSigned(laterSol, 3))
+		row.Note = fmt.Sprintf("paper; %d sends withheld; %d windows never filled, %d filled later (real P&L %s)", F.fpHeld, row.Blocked, later, fmtSigned(laterSol, 3))
 		if F.d37 { // dip37: the stale hold's share of the withheld sends
 			row.Note += fmt.Sprintf("; stale-hold withheld %d", F.fpStale)
 		}
@@ -1154,6 +1362,29 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		}
 		row.Note = fmt.Sprintf("%d sends withheld (stale-hold %d); %d windows never filled (paper where the shadow has one), %d filled later (real P&L %s)",
 			F.s2Held, F.s2Stale, row.Blocked, later, fmtSigned(laterSol, 3))
+		R.Rows = append(R.Rows, row)
+	}
+	// dip39 LIVE bot depth gate: windows whose sends it withheld (blocked = never filled, with the shadow's paper where a T2 window
+	// has one; the ones that filled later in the note with their real P&L)
+	if len(F.bdOrd) > 0 {
+		row := FiltRow{Key: "botdepth_live", Name: "bot depth (live)", Type: "LIVE"}
+		later, laterSol := 0, 0.0
+		for _, k := range F.bdOrd {
+			g := F.bdWin[k]
+			if F.fills[k.W] {
+				later++
+				laterSol += F.real[k]
+				continue
+			}
+			row.Blocked++
+			v, vok, tsig, mv := F.winPaper(k.W, g.kind)
+			if vok {
+				tally(&row, v)
+			}
+			R.Items = append(R.Items, FiltItem{T: g.t, Live: true, Filter: "botdepth_live", Name: row.Name, Rules: []string{"botdepth_live"}, Names: []string{row.Name},
+				Kind: g.kind, Mint: k.Mint, W: k.W, Scored: vok, Sol: v, Sig: tsig, Move: mv})
+		}
+		row.Note = fmt.Sprintf("paper; %d sends withheld; %d windows never filled, %d filled later (real P&L %s)", F.bdHeld, row.Blocked, later, fmtSigned(laterSol, 3))
 		R.Rows = append(R.Rows, row)
 	}
 	// LIVE deeper limit
@@ -1218,6 +1449,28 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		R.DeepNet = row.Net() + R.DeepGain
 		R.Rows = append(R.Rows, row)
 	}
+	// v4 (dip38+ dipmon): every LIVE row that blocked says how much of it the paper could score
+	for i := range R.Rows {
+		row := &R.Rows[i]
+		if row.Type != "LIVE" || row.Blocked == 0 {
+			continue
+		}
+		sc, ra, nf := 0, 0, 0
+		for _, it := range R.Items {
+			if !it.Live || it.Filter != row.Key {
+				continue
+			}
+			switch {
+			case it.Scored:
+				sc++
+			case it.Kind == "RA":
+				ra++
+			default:
+				nf++
+			}
+		}
+		row.Note += fmt.Sprintf("; paper-scored %d/%d (no value: %d re-arm = no shadow, %d T2 shadow never filled)", sc, row.Blocked, ra, nf)
+	}
 	// LOG rules on the real fills: one row per rule; one list item per fill with every rule that caught it
 	logItem := map[FKey]int{}
 	var logItems []FiltItem
@@ -1237,6 +1490,8 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				return x.fpnbWhy
 			case "skip2":
 				return x.skip2Why
+			case "botdepth":
+				return x.bdWhy
 			}
 		}
 		x := F.armF3[k]
@@ -1379,6 +1634,10 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	if F.anyH2 || F.d37 {
 		logrule("h2", "HYBRID-2 gate (log)", pick35(func(x *fLog35) bool { return x.h2 }), "real fills; h2_keep false: no M2-scored dump before the trigger, or T2 age < 30")
 	}
+	// dip39 bot depth in log mode (the control file): the fills whose filling attempt it would have withheld
+	if F.anyBdLg {
+		logrule("botdepth", "bot depth (log)", pick35(func(x *fLog35) bool { return x.bd }), "real fills; too few bots trading the token at the filling attempt (would have withheld it)")
+	}
 	// dip30 LANDING GUARD (log only): the wallets chosen at signing still hold >= the guard's % at our landing
 	if F.anyGuard {
 		logrule("guard", "landing guard (new)", pick((*fAnn).LandingGuard), "real fills; the signing-time set still holding at landing")
@@ -1509,7 +1768,7 @@ func logWhy(key string, f *fFill, gcrWhy string) string {
 	if key == "gcr" {
 		return gcrWhy
 	}
-	if key == "q3a" || key == "fresh" || key == "fpnb" || key == "skip2" { // dip32: preformatted from the arm's "f3" (passed in gcrWhy's place); dip36 fpnb
+	if key == "q3a" || key == "fresh" || key == "fpnb" || key == "skip2" || key == "botdepth" { // dip32: preformatted from the arm's "f3" (passed in gcrWhy's place); dip36 fpnb
 		return gcrWhy
 	}
 	if f == nil || f.ann == nil {
@@ -1652,6 +1911,9 @@ func filtersText(v *View, ctx *Ctx) []string {
 	out = append(out, "          ALL total:                    "+tl(R.All)+" (LIVE is paper, LOG is real fills; the sets are disjoint; estimate)")
 	if R.RearmSkips > 0 {
 		out = append(out, "          re-arm skips: "+IC(R.RearmSkips)+" (no shadow window: not scored)")
+	}
+	for _, l := range v.Added {
+		out = append(out, "          "+l)
 	}
 	// the latest LOG blocks: a real fill and every log rule that would have blocked it
 	n := 0

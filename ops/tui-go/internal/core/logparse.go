@@ -190,6 +190,8 @@ func Clean(s string) string {
 	return b.String()
 }
 
+var rxEngBuild = regexp.MustCompile(`^ENGINE BUILD: (\S+)(?: sha256 ([0-9a-f]{8,64}))?`)
+
 func (M *Model) logLine(s string) {
 	st := PyStrip(s)
 	if st == "" {
@@ -206,6 +208,11 @@ func (M *Model) logLine(s string) {
 		}
 	}
 	c0, _ := utf8.DecodeRuneInString(st)
+	if c0 == 'E' && strings.HasPrefix(st, "ENGINE BUILD: ") { // dip39+: the engine binary's name (snipe_engine_dip43c) and sha256
+		if m := rxEngBuild.FindStringSubmatch(st); m != nil {
+			M.EngBuild, M.EngSHA = strings.TrimPrefix(m[1], "snipe_engine_"), m[2]
+		}
+	}
 	// ---- engine start / session boundaries
 	if strings.HasPrefix(st, "WARNING: date >=") || (strings.HasPrefix(st, "snipe_engine: payer") && !M.recentStart) {
 		M.EngineStarts++

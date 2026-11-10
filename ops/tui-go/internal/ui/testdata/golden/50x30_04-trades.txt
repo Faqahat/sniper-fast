@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r27               +0.5877 SOL
+  1   2   3   4 Trd   5   6   7   8
+TRADES all  (59)                      27W  +0.5359
+       ▼time ty mint      P&L SOL     USD exit
+▸ 5:34:51 PM RG CKTeAG   -0.0175   -$3.29 time
+  5:29:51 PM T2 EG7Kus   +0.0599  +$11.23 TP
+  5:29:51 PM T2 59T8Fs   -0.0293   -$5.49 time
+  5:25:44 PM T2 A4afZK   +0.0605  +$11.34 TP
+  5:25:37 PM T2 HprsR2   -0.0164   -$3.08 time
+  5:25:18 PM RG GFcPyQ   +0.0090   +$1.69 time
+  5:21:15 PM RG 4nGvvk   -0.0125   -$2.34 time
+  5:18:46 PM T2 7u8p3e   +0.0488   +$9.14 TP
+  5:16:38 PM T2 HNY2cV   +0.0561  +$10.51 TP
+  5:16:24 PM T2 CuJmx6   +0.0242   +$4.53 time
+  5:13:47 PM T2 ii5pvj   -0.0255   -$4.77 time
+  5:11:37 PM T2 4Jo73V   +0.0328   +$6.14 TP
+  5:11:22 PM T2 GM6KZ7   -0.0173   -$3.24 time
+  5:11:04 PM T2 HTSH1F   +0.0073   +$1.37 time
+  5:10:45 PM T2 DCDVhZ   -0.0122   -$2.28 time
+  5:10:37 PM T2 5mz2yw   -0.0122   -$2.28 time
+  5:10:03 PM T2 4Bi8Xk   +0.0190   +$3.57 time
+  5:09:21 PM T2 HNjk91   +0.0460   +$8.63 TP
+  5:08:04 PM T2 FGKfYR   -0.0122   -$2.28 time
+  5:07:32 PM T2 B7jwy1   -0.0377   -$7.06 time
+  5:04:47 PM T2 GhNrZ7   +0.0002   +$0.04 time
+  5:02:21 PM T2 3N44sv   +0.2203  +$41.29 TP
+  5:01:35 PM T2 Aj4g9M   -0.0086   -$1.61 time
+  4:56:26 PM T2 FNKkGM   -0.0171   -$3.20 time
+ ▲ falcon refused 4/10m  +1
+ ↑/k up · enter details · o sort… 1/59  ♪ all  1s

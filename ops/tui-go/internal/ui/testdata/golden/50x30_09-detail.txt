@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r27               +0.5877 SOL
+  1   2   3   4 Trd   5   6   7   8
+PRE-SEND FILL  Oct 27, 5:29:51 PM PKT ─ session 1
+mint       EG7Kus8vqNotMgC9Wy6RqTLovDCi2v7TGPg
+           QhLfopump
+gmgn       https://gmgn.ai/sol/token/EG7Kus8vq
+           NotMgC9Wy6RqTLovDCi2v7TGPgQhLfopump
+solscan    https://solscan.io/token/EG7Kus8vqN
+           otMgC9Wy6RqTLovDCi2v7TGPgQhLfopump
+size       0.3500 SOL  (into the curve 0.3457)
+P&L        +0.0599 SOL  +$11.23  +17.1%
+rent back  +0.0015  account closed; not in the P&L
+           above
+exit       take-profit  after 0 slot(s)  held
+           0.78 s  value x1.121
+latency    dump→land 24 ms · send→seen 247 ms ·
+           block +1 slot after the send
+landed     Firedancer · leader BbCQMWnf · path
+           helius-ps
+window     try 5 of 5 · 1 trader between the dump
+           and us · the dump -29.8%, price x0.702
+trigger    whale 16.6% (6.78 SOL) · +2 slots after
+           the trigger
+buy        https://solscan.io/tx/3d6cPgkb8rEAB
+           S6fKPzsQGCY2vwm4BM6jhbs3E2SoMvMTaPZ
+           r2VXRvBp8DsP14zj3cFgjDTwYuKKTLbH4VP
+           JtnsJ
+sell       https://solscan.io/tx/269HJ1zkU65nM
+ ▲ falcon refused 4/10m  +1
+ esc back · c copy mint · u … ▼ 5 more  ♪ all  1s

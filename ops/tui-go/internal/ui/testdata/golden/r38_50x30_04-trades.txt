@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ● AMS r38               +0.5624 SOL
+  1   2   3   4 Trd   5   6   7   8
+TRADES all  (44)                      23W  +0.5391
+       ▼time ty mint      P&L SOL     USD exit
+▸ 2:38:10 AM RA 2zNr4C   -0.0945  -$17.72 time
+  2:37:31 AM RA D9oc9e   +0.0110   +$2.06 time
+  2:37:25 AM T2 D9oc9e   -0.0206   -$3.86 time
+  2:35:37 AM RA 81P9cg   -0.0195   -$3.65 time
+  2:34:55 AM RA BK7EFe   -0.0246   -$4.62 time
+  2:33:43 AM RA AEFuDF   -0.0794  -$14.88 time
+  2:33:38 AM T2 DruU9d   +0.0541  +$10.14 time
+  2:31:26 AM T2 4hPCNS   +0.0765  +$14.33 time
+  2:30:31 AM RA Fgdbvg   -0.0462   -$8.67 time
+  2:30:16 AM T2 257yaV   -0.0023   -$0.44 time
+  2:27:31 AM T2 DaQYoW   -0.0062   -$1.16 time
+  2:26:55 AM T2 49xLcN   +0.0250   +$4.68 time
+  2:26:16 AM T2 5ixzNp   -0.0345   -$6.47 time
+  2:26:07 AM RA 3C6iuV   +0.0290   +$5.43 time
+  2:23:14 AM T2 F6ZU8D   -0.0052   -$0.98 time
+  2:23:08 AM RA 5Qp2L2   -0.0195   -$3.65 time
+  2:23:01 AM T2 ATxt8A   +0.0197   +$3.69 time
+  2:19:36 AM RA FK7NQU   -0.0195   -$3.65 time
+  2:19:27 AM T2 An1wXF   +0.0062   +$1.17 time
+  2:19:06 AM T2 2D7LmL   +0.0044   +$0.82 time
+  2:19:02 AM RA 3sRtfn   +0.0044   +$0.82 time
+  2:18:28 AM T2 4A3W3h   +0.1332  +$24.96 time
+  2:18:25 AM RA 99wRFr   -0.0341   -$6.39 time
+  2:18:11 AM RA 3pqmYQ   +0.0166   +$3.12 time
+ ▲ astralane-ps refused 2.0% of its tries in 10 …
+ ↑/k up · enter details · o sort… 1/44  ♪ all  1s

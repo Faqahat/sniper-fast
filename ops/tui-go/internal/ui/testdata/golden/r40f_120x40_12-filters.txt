@@ -1,0 +1,40 @@
+    pump.fun dip bot · dip27+                                          ● ENGINE GONE  ·  1:30:00 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+FILTERS ────────────────────────────── LIVE changed what the engine did (paper) · LOG log only, would-have (real fills)
+     filter                   verdict    net saved  prec │ blocked │     would win │    would lose   why
+LIVE create-slot skip         KEEP          +1.277   62% │   1,036 │   68   +3.931 │  113   -5.208   strongest, + always
+LIVE age-1 skip               KEEP          +0.833   68% │     137 │   12   +0.392 │   26   -1.225   no value either way
+LIVE QUIET                    KEEP          +0.373   65% │     254 │    9   +0.417 │   17   -0.790   small + everywhere
+LIVE 10-sec skip              KEEP          +0.115   67% │      92 │    1   +0.044 │    2   -0.159   tiny + everywhere
+LOG  bad creator              LIVE dip32    -0.300   57% │      21 │    9   +0.646 │   12   -0.346   now creator loss
+LIVE deeper limit             –             -0.914   43% │     348 │   33   +1.946 │   25   -1.032   no 11-03 verdict
+     └ 77 deep fills: real +0.133 vs 0.88x paper -0.958 = gain +1.092  NET +0.177  (+69 re-arm deep fills +1.805, no sh…
+LOG  group risk (new)         LOG           +0.721   64% │      22 │    8   +0.284 │   14   -1.004   weak, keep logging
+▸ 3 DISMISSED  d show                       +1.011   61% │      44 │   17   +0.639 │   27   -1.650   holder clock, safe…
+LIVE total (unique triggers)                +1.684   60% │   1,867 │  123   +6.730 │  183   -8.414   incl. deep +2.776
+LOG total (unique fills)                    +0.640   60% │      48 │   19   +0.969 │   29   -1.608   19 fills in 2+ rul…
+ALL total                                   +2.324   60% │   1,915 │  142   +7.699 │  212  -10.022   LIVE paper+LOG real
+net saved = −(what the blocked would have made): green saved, red cost · prec = losers / marked · verdict: FILTERS-3 11…
+LIVE rows: paper; blocked = triggers skipped, W/L = the ones that would have filled · LOG rows: real fills · bad creato…
+SKIPPED / BLOCKED ─────────────────────────────────────────────────────────────────────────────────────────────────────
+all  (48)  +1,867 shadow (v)                     19W 29L  -0.640   f filter  n no-dip  v shadow  o sort  O order  c copy
+        ▼time type filter                                     kind mint     result      SOL
+▸  1:29:41 AM LOG  safe sell timer, group risk, holder clock  T2   F36E6Xcs LOSE    -0.1208 real fill
+   1:01:48 AM LOG  bad creator                                T2   7BD66fjA LOSE    -0.0135 real fill
+   1:01:41 AM LOG  group risk                                 T2   APMC9uzN LOSE    -0.2332 real fill
+  12:45:12 AM LOG  safe sell timer, group risk, holder clock  T2   4sneNyF5 WIN     +0.1411 real fill
+  12:33:21 AM LOG  bad creator                                T2   99hmVC2Z LOSE    -0.0191 real fill
+  12:29:24 AM LOG  bad creator                                T2   FkaMPDYA WIN     +0.2849 real fill
+  12:24:43 AM LOG  bad creator +3                             T2   B6YgbiGM WIN     +0.0402 real fill
+  12:24:23 AM LOG  safe sell timer, group risk, holder clock  T2   52VFaAQz LOSE    -0.0019 real fill
+  12:10:04 AM LOG  bad creator                                RA   EDzEBWzj LOSE    -0.0206 real fill
+  12:10:01 AM LOG  holder clock                               T2   EDzEBWzj LOSE    -0.1309 real fill
+  12:05:07 AM LOG  bad creator +3                             T2   E9YjGTCd WIN     +0.0269 real fill
+  12:03:55 AM LOG  safe sell timer, group risk                T2   GeVmRyh3 WIN     +0.0342 real fill
+  11:53:52 PM LOG  bad creator                                T2   6FuRbZby LOSE    -0.0438 real fill
+  11:49:27 PM LOG  holder clock                               T2   FNqe3oL5 LOSE    -0.0442 real fill
+ ▲ engine gone without DIP DONE
+ ↑/k up · f filter · d dismissed filters · n no-dip rows · v shadow rows · o sort column …              1/48  ♪ all  1s

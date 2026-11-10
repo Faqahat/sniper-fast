@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r27               +0.5877 SOL
+  1   2 Eng   3   4   5   6   7   8
+PRE-SEND LIVE ─── ● 0.35 k4 49/1000 fee 0.02/0.40
+fills      49 / 1000   ━──────────────── 5%
+fee budget 0.022/0.40  ━──────────────── 6% used
+armed now  0 window(s) · armed 177 · tries 4,419
+RESULT ──────────────────────────────────────────
+net        +0.6221 SOL  +$116.60
+realized   +0.5703   rent back +0.0739
+failed     -0.0221   4,312 tries x 5,120
+fee check  0.022077 = engine ✓
+wins       26 W / 23 L  (53%)   avg/fill +0.0116
+best       3N44sv +0.2203  TP BAM  5:02 PM
+worst      B7jwy1 -0.0377  time BAM  5:07 PM
+LATENCY ────────────────────────────────────── ms
+send→seen  p10 38 · p50 87 · p90 215
+           same block 38% of 4,361 tries
+fills      dump→land p10 5 · p50 20 · p90 71  (48)
+bounced    dump→land p50 236 · p90 512  (84)
+           after a dump of ≥ 12%; bounced = failed
+           6042, the price was back
+fills      send→seen median 91  (49)
+           after the trigger median +4 slots
+client      tries  s→seen  d→land  bnc d→l
+────────────────────────────────────────────
+Harmonic    1,480      77      15      236
+BAM         1,587      94      19      243
+Jito          895     114      23       67
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u… ▼ 34 more  ♪ all  1s

@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r28               +0.3148 SOL
+  1   2   3   4 Trd   5   6   7   8
+TRADES all  (199)                     75W  +0.1664
+       ▼time ty mint      P&L SOL     USD exit
+▸10:01:56 PM T2 A7dL66   -0.0171   -$3.20 time
+ 10:00:51 PM T2 2cd2GU   +0.0380   +$7.12 TP
+ 10:00:01 PM T2 2MdWkd   -0.0525   -$9.84 time
+  9:59:00 PM T2 BvGXhL   -0.0141   -$2.65 time
+  9:58:38 PM T2 Dt6pqW   +0.0004   +$0.08 time
+  9:58:35 PM T2 DTCyqc   -0.0159   -$2.97 time
+  9:55:10 PM T2 8aR1t7   -0.0003   -$0.06 time
+  9:54:41 PM T2 H9hqYi   -0.0159   -$2.97 time
+  9:54:16 PM T2 6yPdEK   -0.0155   -$2.90 time
+  9:54:10 PM T2 CYgWe6   +0.0557  +$10.44 TP
+  9:54:04 PM T2 CUmbya   -0.0054   -$1.01 time
+  9:52:54 PM T2 4hynaA   +0.0342   +$6.42 time
+  9:50:42 PM T2 AxNeT8   -0.0610  -$11.44 time
+  9:49:02 PM T2 G4uwgJ   +0.0753  +$14.12 TP
+  9:46:44 PM T2 7EWpUn   -0.0159   -$2.97 time
+  9:45:08 PM RG 7EWpUn   -0.0005   -$0.09 6042
+  9:45:07 PM T2 7EWpUn   -0.0237   -$4.45 time
+  9:45:02 PM T2 7WjxMj   -0.0295   -$5.54 time
+  9:44:40 PM T2 8bLYSn   -0.0016   -$0.30 time
+  9:42:04 PM RG 84AZx4   +0.0030   +$0.56 time
+  9:40:23 PM RG Cq9FxD   -0.0005   -$0.09 6042
+  9:39:57 PM T2 4Ggk2X   -0.0062   -$1.16 time
+  9:37:57 PM T2 5nWY6G   -0.0381   -$7.14 time
+  9:37:39 PM T2 8MSvUo   +0.0192   +$3.59 time
+ ◆ RUN ENDED 10:03 PM (Ctrl+C) +0.3148 SOL · END…
+ ↑/k up · enter details · o sor… 1/199  ♪ all  1s

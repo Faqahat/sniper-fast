@@ -1,0 +1,50 @@
+    ams · run 36 · dip24                                                                                           ● RUNNING  ·  5:16:20 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ ENGINE ────────────────────────────────────────────────────────────────────╮ ╭─ ERRORS ─────────────────────────────────────────────────────────────────────╮
+│ process   no engine process with this --dip-log                             │ │ poll errs  0 this min · 5 in 10 min · 46 total                               │
+│ log       0.6 MB  written 10s ago  2,620 lines                              │ │ send path   kind     10 min  total                                           │
+│ records   16.7 MB  written 10s ago  20,778 lines  bad 0                     │ │ ────────────────────────────────────                                         │
+│ runtime   lag p50 1.08  p99 2.07  max 4.5 ms  worst p99 2.6                 │ │ tpu-direct  timeout       0      2                                           │
+╰─────────────────────────────────────────────────────────────────────────────╯ ╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ SYSTEM ────────────────────────────────────────────────────────────────────╮ ╭─ RPC LATENCY ──────────────────────────────────────────── latest minute, ms ─╮
+│ disk      42%  load 0.50 0.40 0.30 (2 cpu)                                  │ │ name            method                p50   p99    n  to                     │
+│ memory    1.07 / 2.15 GB  (50% used)                                        │ │ ──────────────────────────────────────────────────────────                   │
+│ dipmon    cpu 0.1%  rss 31 MB  pid 4242                                     │ │ bh-fallback     getLatestBlockhash    8.3  39.8  146  14                     │
+│ SOL/USD   $187.42  fixed                                                    │ │ bh-fallback     getSlot               8.3  47.8  146  14                     │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ bh-primary      getLatestBlockhash    0.9   9.6  146   0                     │
+╭─ OBSERVATORY ─────────────────────────────────────── log only, never sends ─╮ │ ks-fallback     getBalance            9.6   9.6    3   0                     │
+│ re-arm 107 windows / 88 fills · hold 47 · watch 4,092                       │ │ ks-primary      getBalance            0.8   1.5   26   0                     │
+│ migration 110 · blink 1,453 · backrun 6,304 · select 3,132                  │ │ exit-fallback   getAccountInfo        8.5   8.5    1   0                     │
+│ feed race 85,859 · INSLOT 6,321                                             │ │ exit-primary    getAccountInfo        0.9   0.9    2   0                     │
+│ queue     sent 6,223,589 · dropped 0 · queued 0                             │ │ exit-fallback   getSignatureStatuses  9.4   9.6    4   0                     │
+│ file      107,929 records 41.0 MB · p99 29.1 us/msg · ~17 MB mem            │ │ exit-primary    getSignatureStatuses  1.4   2.3    6   0                     │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ heavy-fallback  getTransaction        8.7   8.7    1   0                     │
+                                                                                │ heavy-primary   getTransaction        1.8   2.2    4   0                     │
+                                                                                ╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ✓ all clear
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                                                                ♪ all  1s

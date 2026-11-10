@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ● AMS r36                        RUNNING  ·  +0.3487 SOL  +$65.35
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+╭─ ENGINE ─────────────────────────────────────────────────────────────────────╮
+│ process   no engine process with this --dip-log                              │
+│ log       0.6 MB  written 10s ago  2,620 lines                               │
+│ records   16.7 MB  written 10s ago  20,778 lines  bad 0                      │
+│ runtime   lag p50 1.08  p99 2.07  max 4.5 ms  worst p99 2.6                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ ERRORS ─────────────────────────────────────────────────────────────────────╮
+│ poll errs  0 this min · 5 in 10 min · 46 total                               │
+│ send path   kind     10 min  total                                           │
+│ ────────────────────────────────────                                         │
+│ tpu-direct  timeout       0      2                                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ SYSTEM ─────────────────────────────────────────────────────────────────────╮
+│ disk      42%  load 0.50 0.40 0.30 (2 cpu)                                   │
+│ memory    1.07 / 2.15 GB  (50% used)                                         │
+│ dipmon    cpu 0.1%  rss 31 MB  pid 4242                                      │
+│ SOL/USD   $187.42  fixed                                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ OBSERVATORY ──────────────────────────────────────── log only, never sends ─╮
+│ re-arm 107 windows / 88 fills · hold 47 · watch 4,092                        │
+ ✓ all clear
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute …     ▼ 20 more  ♪ all  1s

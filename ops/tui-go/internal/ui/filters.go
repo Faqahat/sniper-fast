@@ -549,15 +549,23 @@ func (m *Model) fltTableLines(w int) []string {
 	}
 	out := []string{hdr()}
 	var dism []core.FiltRow
+	var idle []string // dipmon 3.3: the rows with no blocks yet, folded into one line by name
 	for _, r := range fltSortedRows(R.Rows) {
 		if fltVerdictOf(r).group == vgDism {
 			dism = append(dism, r)
+			continue
+		}
+		if r.Blocked == 0 && !r.NA {
+			idle = append(idle, r.Name)
 			continue
 		}
 		out = append(out, row(r))
 		if r.Key == "deeper" && R.Deep {
 			out = append(out, deepLine())
 		}
+	}
+	if len(idle) > 0 {
+		out = append(out, t.Dim.Render(cut(fmt.Sprintf("%d with no blocks yet: %s", len(idle), strings.Join(idle, ", ")), w)))
 	}
 	if len(dism) > 0 { // the DISMISSED filters: one line (count, the rows' net summed), d expands them under it
 		var net float64
@@ -616,6 +624,9 @@ func (m *Model) fltTableLines(w int) []string {
 	out = append(out, lv)
 	out = append(out, total(lgLabel, R.LogU)+tail(fmt.Sprintf("%d fills in 2+ rules", R.LogMulti)))
 	out = append(out, total(allLabel, R.All)+tail("LIVE paper+LOG real"))
+	for _, l := range m.view.Added { // dip41 / dip42: the log-only windows' rows (the snapshot's ADDED WINDOWS lines)
+		out = append(out, t.Val.Render(cut(l, w)))
+	}
 	return out
 }
 

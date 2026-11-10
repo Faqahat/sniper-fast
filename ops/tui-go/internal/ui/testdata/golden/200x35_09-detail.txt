@@ -1,0 +1,35 @@
+    ams · run 27 · dip20                                                                                                                                     ○ ENDED  ·  5:36:57 PM PKT  ·  SOL $187.42
+╱╱╱ █▀█ █▀▀ █ █ █ █ █▄ █ █▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▄ ██▄ ▀▄▀▄▀ █ █ ▀█ █▄▀ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ PRE-SEND FILL  Oct 27, 5:29:51 PM PKT ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── session 1 ─╮
+│ mint       EG7Kus8vqNotMgC9Wy6RqTLovDCi2v7TGPgQhLfopump                                                                                                                                              │
+│ gmgn       https://gmgn.ai/sol/token/EG7Kus8vqNotMgC9Wy6RqTLovDCi2v7TGPgQhLfopump                                                                                                                    │
+│ solscan    https://solscan.io/token/EG7Kus8vqNotMgC9Wy6RqTLovDCi2v7TGPgQhLfopump                                                                                                                     │
+│ size       0.3500 SOL  (into the curve 0.3457)                                                                                                                                                       │
+│ P&L        +0.0599 SOL  +$11.23  +17.1%                                                                                                                                                              │
+│ rent back  +0.0015  account closed; not in the P&L above                                                                                                                                             │
+│ exit       take-profit  after 0 slot(s)  held 0.78 s  value x1.121                                                                                                                                   │
+│ latency    dump→land 24 ms · send→seen 247 ms · block +1 slot after the send                                                                                                                         │
+│ landed     Firedancer · leader BbCQMWnf · path helius-ps                                                                                                                                             │
+│ window     try 5 of 5 · 1 trader between the dump and us · the dump -29.8%, price x0.702                                                                                                             │
+│ trigger    whale 16.6% (6.78 SOL) · +2 slots after the trigger                                                                                                                                       │
+│ buy        https://solscan.io/tx/3d6cPgkb8rEABS6fKPzsQGCY2vwm4BM6jhbs3E2SoMvMTaPZr2VXRvBp8DsP14zj3cFgjDTwYuKKTLbH4VPJtnsJ                                                                            │
+│ sell       https://solscan.io/tx/269HJ1zkU65nM1SZ7Bd3128Xne8n6hXw2ikfiJeXQh8rkYsMBqukgNHsDqJ8TMYzmhSYiLXdZRDij8MBidHJ4gxA                                                                            │
+│                                                                                                                                                                                                      │
+│ esc back                                                                                                                                                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+ ▲ falcon refused 4/10m   ◆ RUN ENDED 5:36 PM (time limit / max trades) +0.5877 SOL · END CHECK 49 read: 0 sold, 0 closed, 0 held ✓
+ esc back · c copy mint · u $/SOL · q quit                                                                                                                                                    ♪ all  1s

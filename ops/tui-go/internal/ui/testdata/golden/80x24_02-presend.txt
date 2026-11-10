@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ○ AMS r27                         ENDED  ·  +0.5877 SOL  +$110.15
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+╭─ PRE-SEND LIVE ──────────────────────────── ● 0.35 k4 49/1000 fee 0.02/0.40 ─╮
+│ fills      49 / 1000   ━━────────────────────────────────────── 5%           │
+│ fee budget 0.022/0.40  ━━────────────────────────────────────── 6% used      │
+│ armed now  0 window(s) · armed 177 · tries 4,419                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ RESULT ─────────────────────────────────────────────────────────────────────╮
+│ net        +0.6221 SOL  +$116.60                                             │
+│ realized   +0.5703   rent back +0.0739                                       │
+│ failed     -0.0221   4,312 tries x 5,120                                     │
+│ fee check  counted 0.022077  engine 0.022077  ✓ match                        │
+│ wins       26 W / 23 L  (53%)   avg/fill +0.0116                             │
+│ best       3N44sv +0.2203  TP BAM  5:02 PM                                   │
+│ worst      B7jwy1 -0.0377  time BAM  5:07 PM                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ LATENCY ─────────────────────────────────────────────────────────────── ms ─╮
+│ send→seen  p10 38 · p50 87 · p90 215   same block 38% of 4,361 tries         │
+│ fills      dump→land p10 5 · p50 20 · p90 71  (48)                           │
+│ bounced    dump→land p10 30 · p50 236 · p90 512  (84)                        │
+│            after a dump of ≥ 12%; bounced = failed 6042, the price was back  │
+│ fills      send→seen median 91  (49)                                         │
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute …     ▼ 38 more  ♪ all  1s

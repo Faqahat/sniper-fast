@@ -1,0 +1,106 @@
+{
+ "positions": 335,
+ "realized": 5.495408176,
+ "rows": [
+  {
+   "name": "QUIET",
+   "type": "LIVE",
+   "blocked": 254,
+   "win_n": 9,
+   "win_sol": 0.4169708888085203,
+   "lose_n": 17,
+   "lose_sol": -0.7903622127012412,
+   "net": 0.3733913238927209,
+   "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled"
+  },
+  {
+   "name": "create-slot skip",
+   "type": "LIVE",
+   "blocked": 1036,
+   "win_n": 68,
+   "win_sol": 3.93053027733215,
+   "lose_n": 113,
+   "lose_sol": -5.20792765395025,
+   "net": 1.2773973766181,
+   "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled"
+  },
+  {
+   "name": "age-1 skip",
+   "type": "LIVE",
+   "blocked": 137,
+   "win_n": 12,
+   "win_sol": 0.3923662608587469,
+   "lose_n": 26,
+   "lose_sol": -1.2250896549247676,
+   "net": 0.8327233940660208,
+   "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled"
+  },
+  {
+   "name": "10-sec skip",
+   "type": "LIVE",
+   "blocked": 92,
+   "win_n": 1,
+   "win_sol": 0.04363916033126948,
+   "lose_n": 2,
+   "lose_sol": -0.15862288450170087,
+   "net": 0.11498372417043139,
+   "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled"
+  },
+  {
+   "name": "deeper limit",
+   "type": "LIVE",
+   "blocked": 348,
+   "win_n": 33,
+   "win_sol": 1.9463435580838444,
+   "lose_n": 25,
+   "lose_sol": -1.031963292519485,
+   "net": -0.9143802655643594,
+   "note": "paper estimate, T2; 432 windows ran deep, 146 still filled deeper (real P&L +1.938)"
+  },
+  {
+   "name": "bad creator",
+   "type": "LOG",
+   "blocked": 21,
+   "win_n": 9,
+   "win_sol": 0.645725946,
+   "lose_n": 12,
+   "lose_sol": -0.34621627,
+   "net": -0.299509676,
+   "note": "real fills"
+  },
+  {
+   "name": "safe sell timer",
+   "type": "LOG",
+   "blocked": 18,
+   "win_n": 7,
+   "win_sol": 0.283547897,
+   "lose_n": 11,
+   "lose_sol": -0.638791299,
+   "net": 0.355243402,
+   "note": "real fills (needs the safe on-chain check to be real)"
+  },
+  {
+   "name": "group risk (new)",
+   "type": "LOG",
+   "blocked": 22,
+   "win_n": 8,
+   "win_sol": 0.283791801,
+   "lose_n": 14,
+   "lose_sol": -1.004458359,
+   "net": 0.720666558,
+   "note": "real fills; risky holders of any size summed >= 6%"
+  },
+  {
+   "name": "holder clock (approx)",
+   "type": "LOG",
+   "blocked": 26,
+   "win_n": 10,
+   "win_sol": 0.35561993999999997,
+   "lose_n": 16,
+   "lose_sol": -1.0114797549999999,
+   "net": 0.6558598149999999,
+   "note": "real fills"
+  }
+ ],
+ "text": "FILTERS dip_ams_r40f.jsonl: 335 positions realized +5.495 SOL\nfilter                     type blocked |        would win |       would lose | net saved\nQUIET                      LIVE     254 |    9     +0.417 |   17     -0.790 |    +0.373   (paper; blocked = triggers skipped, W/L = the ones that would have filled)\ncreate-slot skip           LIVE    1036 |   68     +3.931 |  113     -5.208 |    +1.277   (paper; blocked = triggers skipped, W/L = the ones that would have filled)\nage-1 skip                 LIVE     137 |   12     +0.392 |   26     -1.225 |    +0.833   (paper; blocked = triggers skipped, W/L = the ones that would have filled)\n10-sec skip                LIVE      92 |    1     +0.044 |    2     -0.159 |    +0.115   (paper; blocked = triggers skipped, W/L = the ones that would have filled)\ndeeper limit               LIVE     348 |   33     +1.946 |   25     -1.032 |    -0.914   (paper estimate, T2; 432 windows ran deep, 146 still filled deeper (real P&L +1.938))\nbad creator                LOG       21 |    9     +0.646 |   12     -0.346 |    -0.300   (real fills)\nsafe sell timer            LOG       18 |    7     +0.284 |   11     -0.639 |    +0.355   (real fills (needs the safe on-chain check to be real))\ngroup risk (new)           LOG       22 |    8     +0.284 |   14     -1.004 |    +0.721   (real fills; risky holders of any size summed >= 6%)\nholder clock (approx)      LOG       26 |   10     +0.356 |   16     -1.011 |    +0.656   (real fills)\n"
+}

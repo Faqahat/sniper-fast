@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r27               +0.5877 SOL
+  1   2   3   4   5 Hlth   6   7   8
+ENGINE ──────────────────────────────────────────
+process   no engine process with this --dip-log
+log       0.6 MB  written 0s ago  3,116 lines
+records   11.9 MB  written 0s ago  15,607 lines
+runtime   lag p50 1.06  p99 2.00  max 4.1 ms
+ERRORS ──────────────────────────────────────────
+poll errs  0 this min · 2 in 10 min · 52 total
+send path   kind     10 min  total
+────────────────────────────────────
+falcon      refused       4     10
+tpu-direct  timeout       0      3
+refused    Error: keystore: wrong passphr
+SYSTEM ──────────────────────────────────────────
+disk      42%  load 0.50 0.40 0.30 (2 cpu)
+memory    1.07 / 2.15 GB  (50% used)
+dipmon    cpu 0.1%  rss 31 MB  pid 4242
+SOL/USD   $187.42  fixed
+RPC LATENCY ─────────────────── latest minute, ms
+name           method               p50    p99
+────────────────────────────────────────────────
+bh-fallback    getLatestBlockhash   8.2   29.0
+bh-fallback    getSlot              8.2  106.6
+bh-primary     getLatestBlockhash   0.9    3.0
+exit-primary   getAccountInfo       0.9    0.9
+ks-primary     getBalance           0.8    2.5
+exit-fallback  getAccountInfo       9.5    9.5
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u … ▼ 6 more  ♪ all  1s

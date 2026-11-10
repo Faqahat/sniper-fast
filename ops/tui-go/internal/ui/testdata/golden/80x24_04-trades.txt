@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ○ AMS r27                         ENDED  ·  +0.5877 SOL  +$110.15
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+TRADES all  (59)                 27W  +0.5359   o sort  f filter  / find  c copy
+       ▼time typ mint      P&L SOL      USD     total exit  d→land client
+▸ 5:34:51 PM REG CKTeAG   -0.0175    -$3.29   +0.5879 time      32 Harmonic
+  5:29:51 PM T2  EG7Kus   +0.0599   +$11.23   +0.6057 TP        24 Firedancer
+  5:29:51 PM T2  59T8Fs   -0.0293    -$5.49   +0.5442 time      69 Firedancer
+  5:25:44 PM T2  A4afZK   +0.0605   +$11.34   +0.5728 TP         8 BAM
+  5:25:37 PM T2  HprsR2   -0.0164    -$3.08   +0.5108 time      44 Harmonic
+  5:25:18 PM REG GFcPyQ   +0.0090    +$1.69   +0.5257 time      39 Harmonic
+  5:21:15 PM REG 4nGvvk   -0.0125    -$2.34   +0.5174 time      16 Harmonic
+  5:18:46 PM T2  7u8p3e   +0.0488    +$9.14   +0.5304 TP        13 BAM
+  5:16:38 PM T2  HNY2cV   +0.0561   +$10.51   +0.4803 TP         7 BAM
+  5:16:24 PM T2  CuJmx6   +0.0242    +$4.53   +0.4228 time      30 Harmonic
+  5:13:47 PM T2  ii5pvj   -0.0255    -$4.77   +0.3980 time      28 Harmonic
+  5:11:37 PM T2  4Jo73V   +0.0328    +$6.14   +0.4224 TP        23 Harmonic
+  5:11:22 PM T2  GM6KZ7   -0.0173    -$3.24   +0.3882 time      10 BAM
+  5:11:04 PM T2  HTSH1F   +0.0073    +$1.37   +0.4040 time      <1 BAM
+  5:10:45 PM T2  DCDVhZ   -0.0122    -$2.28   +0.3954 time     205 BAM
+  5:10:37 PM T2  5mz2yw   -0.0122    -$2.28   +0.4060 time     228 Jito
+  5:10:03 PM T2  4Bi8Xk   +0.0190    +$3.57   +0.4167 time      24 BAM
+  5:09:21 PM T2  HNjk91   +0.0460    +$8.63   +0.3968 TP        74 Jito
+ ▲ falcon refused 4/10m  +1
+ ↑/k up · enter details · o sort column · O flip order · f fil… 1/59  ♪ all  1s

@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ○ AMS r27                         ENDED  ·  +0.5877 SOL  +$110.15
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+LOG important  (277)             following   f all/important  w wrap  end follow
+   ~5:28 PM PRESEND LIVE EXIT 59T8FsaQaV3tWAsWMHJnrbeB4S9hKFsmCArihQ6CS1Ep time-
+   ~5:28 PM PRESEND LIVE REALIZED EG7Kus8vqNotMgC9Wy6RqTLovDCi2v7TGPgQhLfopump +
+   ~5:28 PM PRESEND LIVE REALIZED 59T8FsaQaV3tWAsWMHJnrbeB4S9hKFsmCArihQ6CS1Ep -
+   ~5:29 PM PRESEND LIVE QUIET SKIP GfPaTBBnYoNBpyXU7ULRaftUdETFmMZSMh956YABpump
+   ~5:29 PM PRESEND LIVE QUIET SKIP GfPaTBBnYoNBpyXU7ULRaftUdETFmMZSMh956YABpump
+   ~5:29 PM keepalive: falcon keep-alive: falcon: error sending request: client
+   ~5:29 PM keepalive: falcon keep-alive: falcon: error sending request: client
+   ~5:29 PM SEND-PATH falcon UNHEALTHY: 3 transport errors in a row (last: falco
+   ~5:29 PM keepalive: falcon keep-alive: falcon: error sending request: client
+   ~5:29 PM PRESEND LIVE QUIET STOP w175 4pMCrTScTnFUDBQgBNbfdnay5k7L5cWT9P5bdDu
+   ~5:33 PM PRESEND LIVE QUIET SKIP Y5c52wyNVXuUo3fT2irrGsWdxNikHhgNmYd3cWQpUmP
+   ~5:33 PM DIP FIRE CKTeAGpoLT5koBkMxKPRa71XJ3LRRFySU1HfkyW9pump score -0.840 a
+   ~5:33 PM DIP EXIT CKTeAGpoLT5koBkMxKPRa71XJ3LRRFySU1HfkyW9pump time-limit slo
+   ~5:33 PM REALIZED mint=CKTeAGpoLT5koBkMxKPRa71XJ3LRRFySU1HfkyW9pump pnl=-0.01
+   ~5:36 PM === DIP DONE: dumps 7847 in-envelope 3535 picks 67 fired 10 closed 1
+   ~5:36 PM PRESEND LIVE STOPPED (run_end): no new attempts; open positions fini
+   ~5:36 PM === DIP PRESEND LIVE: | PRESEND LIVE STOPPED (run_end): triggers 420
+   ~5:36 PM PRESEND LIVE END CHECK: 49 mint(s) (filled / found holding / left op
+   ~5:36 PM PRESEND LIVE END CHECK: 49 mint(s) read at confirmed: 0 sold now, 0
+ ▲ falcon refused 4/10m  +1
+ ↑/k up · end bottom / follow · f important/all …                     ♪ all  1s

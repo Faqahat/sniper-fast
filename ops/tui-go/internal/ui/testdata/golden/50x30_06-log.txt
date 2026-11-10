@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r27               +0.5877 SOL
+  1   2   3   4   5   6 Log   7   8
+LOG important  (277)                     following
+   ~5:25 PM PRESEND LIVE QUIET SKIP 9ncwy21bHEbCic
+   ~5:26 PM PRESEND LIVE QUIET SKIP UjqtDoALkbKxar
+   ~5:28 PM PRESEND LIVE QUIET SKIP GfPaTBBnYoNBpy
+   ~5:28 PM PRESEND LIVE FILL w173 59T8FsaQaV3tWAs
+   ~5:28 PM PRESEND LIVE FILL w174 EG7Kus8vqNotMgC
+   ~5:28 PM PRESEND LIVE EXIT EG7Kus8vqNotMgC9Wy6R
+   ~5:28 PM PRESEND LIVE EXIT 59T8FsaQaV3tWAsWMHJn
+   ~5:28 PM PRESEND LIVE REALIZED EG7Kus8vqNotMgC9
+   ~5:28 PM PRESEND LIVE REALIZED 59T8FsaQaV3tWAsW
+   ~5:29 PM PRESEND LIVE QUIET SKIP GfPaTBBnYoNBpy
+   ~5:29 PM PRESEND LIVE QUIET SKIP GfPaTBBnYoNBpy
+   ~5:29 PM keepalive: falcon keep-alive: falcon:
+   ~5:29 PM keepalive: falcon keep-alive: falcon:
+   ~5:29 PM SEND-PATH falcon UNHEALTHY: 3 transpor
+   ~5:29 PM keepalive: falcon keep-alive: falcon:
+   ~5:29 PM PRESEND LIVE QUIET STOP w175 4pMCrTScT
+   ~5:33 PM PRESEND LIVE QUIET SKIP Y5c52wyNVXuUo3
+   ~5:33 PM DIP FIRE CKTeAGpoLT5koBkMxKPRa71XJ3LRR
+   ~5:33 PM DIP EXIT CKTeAGpoLT5koBkMxKPRa71XJ3LRR
+   ~5:33 PM REALIZED mint=CKTeAGpoLT5koBkMxKPRa71X
+   ~5:36 PM === DIP DONE: dumps 7847 in-envelope 3
+   ~5:36 PM PRESEND LIVE STOPPED (run_end): no new
+   ~5:36 PM === DIP PRESEND LIVE: | PRESEND LIVE S
+   ~5:36 PM PRESEND LIVE END CHECK: 49 mint(s) (fi
+   ~5:36 PM PRESEND LIVE END CHECK: 49 mint(s) rea
+ ▲ falcon refused 4/10m  +1
+ ↑/k up …                               ♪ all  1s

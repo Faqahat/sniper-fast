@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -70,6 +71,11 @@ func fixtureR40(t testing.TB) string {
 	return dst
 }
 
+// stripScored: a row's note without dipmon 3.3's "; paper-scored N/M (no value: ...)" (filters_report.py predates it)
+func stripScored(s string) string { return rxScored.ReplaceAllString(s, "") }
+
+var rxScored = regexp.MustCompile(`; paper-scored \d+/\d+ \(no value: \d+ re-arm = no shadow, \d+ T2 shadow never filled\)`)
+
 func loadRef(t testing.TB, name string) refRep {
 	b, err := os.ReadFile(filepath.Join("testdata", "filters", name))
 	if err != nil {
@@ -130,7 +136,7 @@ func checkFilt(t *testing.T, R *FiltReport, ref refRep) {
 			t.Errorf("row %s: win %.12f lose %.12f net %.12f, want %.12f %.12f %.12f", g.Name, g.WinSol, g.LoseSol, g.Net(), w.WinSol, w.LoseSol, w.Net)
 		}
 		if g.Type == "LIVE" || name == w.Name {
-			if g.Note != w.Note && !(strings.HasPrefix(g.Note, "real fills; no ledger seed")) {
+			if stripScored(g.Note) != w.Note && !(strings.HasPrefix(g.Note, "real fills; no ledger seed")) {
 				t.Errorf("row %s note %q, want %q", g.Name, g.Note, w.Note)
 			}
 		}
@@ -146,7 +152,7 @@ func checkFilt(t *testing.T, R *FiltReport, ref refRep) {
 	var gl []string
 	for _, l := range R.TableLines() {
 		if !strings.HasPrefix(l, "landing guard") {
-			gl = append(gl, l)
+			gl = append(gl, stripScored(l))
 		}
 	}
 	if R.Seed != "" {

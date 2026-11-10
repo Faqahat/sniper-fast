@@ -1,0 +1,50 @@
+    ams · run 38 · dip26                                                                                           ● RUNNING  ·  2:38:26 AM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+╭─ PRE-SEND LIVE ─────────────────────── ● 0.70 k8 44/no limit fee 0.04/1.00 ─╮ ╭─ SEND PATHS A/B ─────────────────────────────────── caps 60/s · 40/s a path ─╮
+│ fills      44 / no limit                                                    │ │ path          tries  refused  same  p50  fills  P&L SOL                      │
+│ fees 24 h  0.042/1.00  ━━────────────────────────────────────── 4% used     │ │ ─────────────────────────────────────────────────────────                    │
+│ fees       run 0.043 SOL · pauses at the budget, never stops                │ │ helius-ps     4,694     0.0%   39%  102     16  -0.0710                      │
+│ armed now  0 window(s) · armed 81 · T2 tries 4,025 (+5,068 re-arm)          │ │ astralane-ps  4,399     6.3%   36%  107     28  +0.6101                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ refused = a path's own try skipped between sent ones (inferred); same = in   │
+╭─ RESULT · T2 ───────────────────────────────────────────────────────────────╮ │ the send slot; p50 = send→land ms                                            │
+│ net        +0.3266 SOL  +$61.21                                             │ │ not sent   rate_path_config 381                                              │
+│ realized   +0.3113   rent back +0.0347                                      │ │            paused_presend_position 156 (engine, all paths)                   │
+│ failed     -0.0194   3,789 tries x 5,120                                    │ │ client       HL n  same  p50   AS n  same  p50                               │
+│ engine     0.042240 (T2 + re-arm) at its last status line                   │ │ ────────────────────────────────────────────────                             │
+│ wins       13 W / 10 L  (57%)   avg/fill +0.0135                            │ │ Harmonic    1,641   41%   91  1,541   39%   91                               │
+│ best       4A3W3h +0.1332  time-ms Harmonic  2:18 AM                        │ │ BAM         1,195   32%  117  1,161   30%  119                               │
+│ worst      DN9EZQ -0.0410  time-ms BAM  2:16 AM                             │ │ Jito        1,037   40%  114    977   34%  119                               │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ Firedancer    397   51%   72    402   51%   68                               │
+╭─ RE-ARM ───────────────────────── ● 0.65 SOL · gap 20 · QUIET 6:2 · R5 off ─╮ │ Agave          31   35%  225     31   32%  222                               │
+│ net        +0.2358 SOL  +$44.19                                             │ │ other          18    6%  414     24    0%  557                               │
+│ realized   +0.2278   rent back +0.0317   failed -0.0237 4,622 tries         │ │ by leader client: n = tries seen, same slot, p50 send→land ms                │
+│ wins       21 fills · 10 W / 11 L (48%) · avg/fill +0.0108                  │ ╰──────────────────────────────────────────────────────────────────────────────╯
+│ windows    74 armed · 1 now · 9 after waiting · 16 deferred · 5,068 tries   │ ╭─ LATENCY ─────────────────────────────────────────────────────────────── ms ─╮
+│ skipped    no_holder 185 · age 90 · blocked_live_armed 12                   │ │ send→seen  p10 38 · p50 105 · p90 326   same block 38% of 8,455 tries        │
+│            blocked_rearm_armed 5 · blocked_position 4 · blocked_ata_open 3  │ │ fills      dump→land p10 <1 · p50 22 · p90 130  (40)                         │
+│            blocked_launch 2                                                 │ │ bounced    dump→land p10 7 · p50 330 · p90 542  (197)                        │
+│ ended      filled 21 · expired 16 · quiet 13 · whale_dump 11 · no_holder 10 │ │            after a dump of ≥ 12%; bounced = failed 6042, the price was back  │
+│            superseded 2                                                     │ │ fills      send→seen median 88  (44)                                         │
+│ exits      time-ms 18 -0.2789 · take-profit 3 +0.5067                       │ │            after the trigger median +4 slots   +1:1 +2:5 +3:10 +4:9 +5+:19   │
+│ best       2DPJ6F +0.3120  TP Harmonic AS  2:06 AM                          │ │ client      tries  same blk  send→seen  fills  d→land  bounced  d→land       │
+│ worst      2zNr4C -0.0945  time-ms Jito AS  2:38 AM                         │ │ ────────────────────────────────────────────────────────────────────────     │
+│ engine     candidates 281 · checks 281 · pending 0 · sells ≥ 6% 370         │ │ Harmonic    3,182       40%         91     18       7       69     330       │
+│ paper      observatory 86 windows / 101 fills  (log only)                   │ │ BAM         2,356       31%        118      8      55       65     134       │
+╰─────────────────────────────────────────────────────────────────────────────╯ │ Jito        2,014       37%        116      9      25       35     297       │
+╭─ EXITS · T2 ────────────────────────────────────────────────────────────────╮ │ Firedancer    799       51%         69      4      12       28     383       │
+│ exit      n   W  P&L SOL  per fill                                          │ │ Agave          62       34%        224      0       –        0       –       │
+│ ────────────────────────────────────                                        │ │ other          42        2%        503      1     105        0       –       │
+│ time-ms  23  13  +0.3113   +0.0135                                          │ │ medians; fills / bounced after the drop rule; same blk = landed in the send… │
+╰─────────────────────────────────────────────────────────────────────────────╯ ╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ WINDOWS ───────────────────────────────────────────────────────────────────╮ ╭─ QUIET ──────────────────────────────────────────────────────────────────────╮
+│ skipped    create_slot 97 · quiet 29 · blocked_armed 8 ·                    │ │ stop rule  ● 5:2   stops 12                                                  │
+│            no_launch_accounts 3 · young_age 2 · blocked_ata_open 1          │ │ skip rule  ● on (all 4 quiet signals skip a trigger)                         │
+│ disarmed   expired 33 · filled 22 · whale_sold 14 · quiet 12                │ │            skips 29   would-skip in the warm-up 0                            │
+│ results    6042 6,943 · deadline 1,323 · unseen 623 · ata_exists 145 · ok   │ ╰──────────────────────────────────────────────────────────────────────────────╯
+│            44                                                               │ ╭─ PAPER vs LIVE ──────────────────────────────────────────────────────────────╮
+╰─────────────────────────────────────────────────────────────────────────────╯ │ paper, live sent       21 fills  net +0.317                                  │
+ ▲ astralane-ps refused 2.0% of its tries in 10 min (19 of 972)
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                                                      ▼ 7 more  ♪ all  1s

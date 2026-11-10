@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ● AMS r36               +0.3487 SOL
+  1   2   3 Reg   4   5   6   7   8
+REGULAR BUYS ────────────────────────── ● M2 gate
+setup    0.70 TP off SL 50% 5sl
+mode     ● paper · 6 picks → 0 fills · 0 open · n…
+P&L      +0.0000 SOL  +$0.00
+         fills +0.0000   failed buys +0.0000
+buys     0 fired → 0 filled · 0 failed
+wins     0 W / 0 L
+FAILED BUYS ─────────────────────────────────────
+price 6042       0  +0.0000
+lighthouse 6001  0  +0.0000
+other            0  +0.0000
+each costs its tx fee 0.000505 SOL; tips revert
+EXITS ───────────────────────────────────────────
+no sold fills yet
+BY LEADER CLIENT ────────────────────────────────
+no buys yet
+LANDING ─────────────────────────────────────────
+fills    –
+         0 of 0 in the dump's own block
+OPEN NOW ────────────────────────────────────────
+no open position
+FUNNEL ──────────────────────────────────────────
+dumps    2,930   picks 9
+skipped  far_leader 55 · spacing 10 ·
+         presend_armed 3
+
+ ✓ all clear
+ 1-8 tabs · s run/today · u $/SOL · p … ♪ all  1s

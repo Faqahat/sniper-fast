@@ -1,0 +1,40 @@
+    ams · run 27 · dip20                                                     ○ ENDED  ·  5:36:57 PM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+TRADES all  (59)                                 27W  +0.5359   o sort  O order  f filter  / find  c copy  enter details
+       ▼time type mint      size    P&L SOL       USD       %      total exit  d→land blk client     path
+▸ 5:34:51 PM REG  CKTeAGpo  0.35   -0.0175     -$3.29   -5.0%    +0.5879 time      32   0 Harmonic   nozomi
+  5:29:51 PM T2   EG7Kus8v  0.35   +0.0599    +$11.23  +17.1%    +0.6057 TP        24   1 Firedancer helius-ps
+  5:29:51 PM T2   59T8FsaQ  0.35   -0.0293     -$5.49   -8.4%    +0.5442 time      69   1 Firedancer helius-ps
+  5:25:44 PM T2   A4afZKwa  0.35   +0.0605    +$11.34  +17.3%    +0.5728 TP         8   1 BAM        helius-ps
+  5:25:37 PM T2   HprsR2nk  0.35   -0.0164     -$3.08   -4.7%    +0.5108 time      44   0 Harmonic   helius-ps
+  5:25:18 PM REG  GFcPyQBJ  0.35   +0.0090     +$1.69   +2.6%    +0.5257 time      39   1 Harmonic   nozomi
+  5:21:15 PM REG  4nGvvkcF  0.35   -0.0125     -$2.34   -3.6%    +0.5174 time      16   0 Harmonic   falcon+falcon-udp
+  5:18:46 PM T2   7u8p3eym  0.35   +0.0488     +$9.14  +13.9%    +0.5304 TP        13   1 BAM        helius-ps
+  5:16:38 PM T2   HNY2cViY  0.35   +0.0561    +$10.51  +16.0%    +0.4803 TP         7   0 BAM        helius-ps
+  5:16:24 PM T2   CuJmx6oN  0.35   +0.0242     +$4.53   +6.9%    +0.4228 time      30   1 Harmonic   helius-ps
+  5:13:47 PM T2   ii5pvjaC  0.35   -0.0255     -$4.77   -7.3%    +0.3980 time      28   1 Harmonic   helius-ps
+  5:11:37 PM T2   4Jo73VXg  0.35   +0.0328     +$6.14   +9.4%    +0.4224 TP        23   1 Harmonic   helius-ps
+  5:11:22 PM T2   GM6KZ7vf  0.35   -0.0173     -$3.24   -4.9%    +0.3882 time      10   1 BAM        helius-ps
+  5:11:04 PM T2   HTSH1FBQ  0.35   +0.0073     +$1.37   +2.1%    +0.4040 time      <1   0 BAM        helius-ps
+  5:10:45 PM T2   DCDVhZPg  0.35   -0.0122     -$2.28   -3.5%    +0.3954 time     205   1 BAM        helius-ps
+  5:10:37 PM T2   5mz2ywJq  0.35   -0.0122     -$2.28   -3.5%    +0.4060 time     228   1 Jito       helius-ps
+  5:10:03 PM T2   4Bi8Xkq6  0.35   +0.0190     +$3.57   +5.4%    +0.4167 time      24   1 BAM        helius-ps
+  5:09:21 PM T2   HNjk91B1  0.35   +0.0460     +$8.63  +13.2%    +0.3968 TP        74   1 Jito       helius-ps
+  5:08:04 PM T2   FGKfYRZH  0.35   -0.0122     -$2.28   -3.5%    +0.3493 time      67   0 Harmonic   helius-ps
+  5:07:32 PM T2   B7jwy1MN  0.35   -0.0377     -$7.06  -10.8%    +0.3600 time      36   0 BAM        helius-ps
+  5:04:47 PM T2   GhNrZ7YC  0.35   +0.0002     +$0.04   +0.1%    +0.3968 time      19   0 BAM        helius-ps
+  5:02:21 PM T2   3N44sv2M  0.35   +0.2203    +$41.29  +63.0%    +0.3959 TP       435   1 BAM        helius-ps
+  5:01:35 PM T2   Aj4g9Mp3  0.35   -0.0086     -$1.61   -2.5%    +0.1745 time     111   1 Jito       helius-ps
+  4:56:26 PM T2   FNKkGM5b  0.35   -0.0171     -$3.20   -4.9%    +0.1829 time      16   0 Firedancer helius-ps
+  4:50:46 PM REG  GmVGgAVN  0.35   -0.0005     -$0.09   -0.1%    +0.1994 6042      37   0 Harmonic   soyas
+  4:50:44 PM T2   GmVGgAVN  0.35   -0.0034     -$0.64   -1.0%    +0.1999 time      20   0 Jito       helius-ps
+  4:49:10 PM T2   Hk5apY9V  0.35   +0.0317     +$5.95   +9.1%    +0.2019 TP        13   1 BAM        helius-ps
+  4:47:29 PM T2   DukPMY4Q  0.35   -0.0270     -$5.06   -7.7%    +0.1693 time      22   1 BAM        helius-ps
+  4:46:55 PM T2   C7qWCu6Y  0.35   +0.0475     +$8.91  +13.6%    +0.1950 TP         2   1 Harmonic   helius-ps
+  4:45:45 PM REG  F21dyEot  0.35   -0.0005     -$0.09   -0.1%    +0.1462 6042      44   0 Harmonic   solami
+  4:41:36 PM T2   EQxb1NT3  0.35   +0.0097     +$1.83   +2.8%    +0.1472 time       7   1 Harmonic   helius-ps
+ ▲ falcon refused 4/10m  +1
+ ↑/k up · enter details · o sort column · O flip order · f filter · / find mint · c copy mint · x bloc… 1/59  ♪ all  1s

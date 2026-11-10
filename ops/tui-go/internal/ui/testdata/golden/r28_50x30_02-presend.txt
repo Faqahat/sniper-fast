@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ○ AMS r28               +0.3148 SOL
+  1   2 Eng   3   4   5   6   7   8
+PRE-SEND LIVE ── ● 0.50 k4 150/1000 fee 0.08/0.40
+fills      150 / 1000  ━━━────────────── 15%
+fee budget 0.078/0.40  ━━━────────────── 19% used
+armed now  0 window(s) · armed 609 · tries 15,771
+RESULT ──────────────────────────────────────────
+net        +0.2726 SOL  +$51.09
+realized   +0.1242   rent back +0.2263
+failed     -0.0779   15,212 tries x 5,120
+fee check  0.077885 = engine ✓
+wins       66 W / 84 L  (44%)   avg/fill +0.0008
+best       HKknYN +0.1937  time BAM  7:40 PM
+worst      85Z21c -0.1025  SL Harmonic  8:39 PM
+LATENCY ────────────────────────────────────── ms
+send→seen  p10 35 · p50 84 · p90 219
+           same block 40% of 15,362 tries
+fills      dump→land p50 34 · p90 109  (143)
+bounced    dump→land p50 307 · p90 534  (348)
+           after a dump of ≥ 12%; bounced = failed
+           6042, the price was back
+fills      send→seen median 92  (150)
+           after the trigger median +3 slots
+client      tries  s→seen  d→land  bnc d→l
+────────────────────────────────────────────
+Harmonic    5,187      76      36      273
+BAM         5,257      95      28      324
+Jito        3,593     103      36      315
+ ◆ RUN ENDED 10:03 PM (Ctrl+C) +0.3148 SOL · END…
+ 1-8 tabs · s run/today · u… ▼ 38 more  ♪ all  1s

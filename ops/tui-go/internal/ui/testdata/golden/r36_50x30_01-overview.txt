@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ● AMS r36               +0.3487 SOL
+  1 Ovw   2   3   4   5   6   7   8
+● RUNNING  3:33 AM PKT → no time limit
+ ▄  █▀█   ▀▀█ █ █ █▀█
+▀█▀ █ █   ▀▀█ ▀▀█ ▀▀█
+    ▀▀▀ ▀ ▀▀▀   ▀ ▀▀▀  SOL
+ ▄  █▀▀ █▀▀   ▀▀█ █▀▀
+▀█▀ █▀█ ▀▀█   ▀▀█ ▀▀█
+    ▀▀▀ ▀▀▀ ▀ ▀▀▀ ▀▀▀  USD
+per hour +0.2042 SOL  +$38.27
+split    T2 +0.3487  REG +0.0000
+wallet   8.5208  kill 0.849 away
+lock     stops < -0.182 · 0.530 away
+THIS RUN · AMS r36 ──────────────────────────────
+profit +1.0702  loss -0.7559
+buy 47 / sell 47  net +0.3487
+ATH      +0.468 SOL  $87.69 · 4:58 AM
+Low      -0.275 SOL  -$51.54 · 3:47 AM
+from ATH -0.119 SOL  -$22.34
+pre-send  47 fills · 27 W 57% · avg +0.0067
+LAST TRADES ─────────────────────────────────────
+       time ty mint      P&L SOL     USD exit
+ 5:12:19 AM T2 Dr9J5N   -0.0137   -$2.56 time
+ 5:11:44 AM T2 AyidEK   -0.0207   -$3.88 time
+ 5:08:44 AM T2 7yTH8r   -0.0777  -$14.57 time
+ 5:07:27 AM T2 7trV1V   +0.0137   +$2.57 time
+ 5:06:34 AM T2 7gpu39   -0.0207   -$3.88 time
+ 4:58:42 AM T2 2Vt8ia   +0.0517   +$9.69 time
+ ✓ all clear
+ 1-8 tabs · s run/today · u $/SOL · p … ♪ all  1s

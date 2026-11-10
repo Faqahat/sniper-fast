@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ● AMS r36                        RUNNING  ·  +0.3487 SOL  +$65.35
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+╭─ CONFIG ─────────────────────────────────────────────────────────────────────╮
+│ PRE-SEND ─────────────────────────────────────────────────────────────────── │
+│ ● Pre-send live       0.70 SOL · 8 tries/slot · limit ×0.88 · deadline +1 ·  │
+│                       route default=helius-ps · exit 2 slots / TP +20% / SL  │
+│                       20%                                                    │
+│                       8 tries/slot = 8 conditional buys sent every slot      │
+│                       (~0.2 s) while a window is open; each fills only on a  │
+│                       sudden ≥ 12% drop; it is sold at TP / SL or after 2    │
+│                       slots                                                  │
+│                                                                              │
+│ REGULAR ──────────────────────────────────────────────────────────────────── │
+│   Regular buy         0.70 SOL · model IMIT1 wider · exit TP off / SL 50% /  │
+│                       5 slots (~1.1 s)                                       │
+│                       after a big dump the regular bot buys this size and    │
+│                       sells at TP / SL or after the hold slots               │
+│ ● Regular mode        paper: decided as live, never sent · paper 6 picks, 0  │
+│                       fills, net -0.0030                                     │
+│                       live = real regular buys; paper = decided as live but  │
+│                       never sent (paper P&L only); off = no regular buys     │
+│   Price guard         ×1.05 over the post-dump price (pump error 6042 above  │
+ ✓ all clear
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute …     ▼ 75 more  ♪ all  1s

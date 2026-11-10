@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ○ AMS r28                          ENDED  ·  +0.3148 SOL  +$59.00
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+TRADES all  (199)                75W  +0.1664   o sort  f filter  / find  c copy
+       ▼time typ mint      P&L SOL      USD     total exit  d→land client
+▸10:01:56 PM T2  A7dL66   -0.0171    -$3.20   +0.3153 time      15 BAM
+ 10:00:51 PM T2  2cd2GU   +0.0380    +$7.12   +0.3317 TP        <1 Harmonic
+ 10:00:01 PM T2  2MdWkd   -0.0525    -$9.84   +0.2922 time      <1 BAM
+  9:59:00 PM T2  BvGXhL   -0.0141    -$2.65   +0.3435 time     128 Harmonic
+  9:58:38 PM T2  Dt6pqW   +0.0004    +$0.08   +0.3565 time      36 Harmonic
+  9:58:35 PM T2  DTCyqc   -0.0159    -$2.97   +0.3546 time      <1 BAM
+  9:55:10 PM T2  8aR1t7   -0.0003    -$0.06   +0.3702 time      66 BAM
+  9:54:41 PM T2  H9hqYi   -0.0159    -$2.97   +0.3692 time      34 Jito
+  9:54:16 PM T2  6yPdEK   -0.0155    -$2.90   +0.3835 time      89 BAM
+  9:54:10 PM T2  CYgWe6   +0.0557   +$10.44   +0.3975 TP        40 BAM
+  9:54:04 PM T2  CUmbya   -0.0054    -$1.01   +0.3403 time      33 Agave
+  9:52:54 PM T2  4hynaA   +0.0342    +$6.42   +0.3448 time       7 Jito
+  9:50:42 PM T2  AxNeT8   -0.0610   -$11.44   +0.3107 time      16 BAM
+  9:49:02 PM T2  G4uwgJ   +0.0753   +$14.12   +0.3706 TP        39 Harmonic
+  9:46:44 PM T2  7EWpUn   -0.0159    -$2.97   +0.2947 time      66 Harmonic
+  9:45:08 PM REG 7EWpUn   -0.0005    -$0.09   +0.3093 6042      32 BAM
+  9:45:07 PM T2  7EWpUn   -0.0237    -$4.45   +0.3098 time      42 Jito
+  9:45:02 PM T2  7WjxMj   -0.0295    -$5.54   +0.3320 time      53 Jito
+ ◆ RUN ENDED 10:03 PM (Ctrl+C) +0.3148 SOL · END CHECK 147 read: 0 sold, 0 clo…
+ ↑/k up · enter details · o sort column · O flip order · f fi… 1/199  ♪ all  1s

@@ -1,0 +1,40 @@
+    ams · run 27 · dip20                                                     ○ ENDED  ·  5:36:57 PM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+LOG important  (277)                                                     following   f all/important  w wrap  end follow
+   ~5:24 PM REALIZED mint=GFcPyQBJD4R5eikQeHjx88tQgxgwvCXxgSjtysLa4cBw pnl=+0.009004 SOL source=tx run_realized=+0.54663
+   ~5:24 PM PRESEND LIVE FILL w165 HprsR2nkA574sukFETo6ejjsFfuvAvXa3NbKPejRpump 0.346 SOL -> 7237648104253 tokens | slot
+   ~5:24 PM PRESEND LIVE EXIT HprsR2nkA574sukFETo6ejjsFfuvAvXa3NbKPejRpump time-limit slot 462069751 (held 2 slots)
+   ~5:24 PM PRESEND LIVE REALIZED HprsR2nkA574sukFETo6ejjsFfuvAvXa3NbKPejRpump -0.016445 SOL (tx: 1/1 buy tx(s), 1/1 sel
+   ~5:24 PM PRESEND LIVE FILL w166 A4afZKwaAF337AViUwaCSTbUageJHBxMxby2iNJapump 0.346 SOL -> 10563551801054 tokens | slo
+   ~5:24 PM PRESEND LIVE EXIT A4afZKwaAF337AViUwaCSTbUageJHBxMxby2iNJapump take-profit slot 462069786 (held 0 slots) val
+   ~5:24 PM PRESEND LIVE REALIZED A4afZKwaAF337AViUwaCSTbUageJHBxMxby2iNJapump +0.060518 SOL (tx: 1/1 buy tx(s), 1/1 sel
+   ~5:25 PM PRESEND LIVE QUIET SKIP 9ncwy21bHEbCicZu7P3dHuVUQhohJAWoatGuTh7M1rQ7 whale 2VL4wYj7 12.5% (3.95 SOL) | since
+   ~5:26 PM PRESEND LIVE QUIET SKIP UjqtDoALkbKxarkfyWteJCyGyegdHrsEd2hfJkApump whale 7ZBgJAWu 8.5% (2.95 SOL) | since l
+   ~5:28 PM PRESEND LIVE QUIET SKIP GfPaTBBnYoNBpyXU7ULRaftUdETFmMZSMh956YABpump whale FhDeKvrr 9.4% (3.19 SOL) | since
+   ~5:28 PM PRESEND LIVE FILL w173 59T8FsaQaV3tWAsWMHJnrbeB4S9hKFsmCArihQ6CS1Ep 0.346 SOL -> 4599684229059 tokens | slot
+   ~5:28 PM PRESEND LIVE FILL w174 EG7Kus8vqNotMgC9Wy6RqTLovDCi2v7TGPgQhLfopump 0.346 SOL -> 8959501611521 tokens | slot
+   ~5:28 PM PRESEND LIVE EXIT EG7Kus8vqNotMgC9Wy6RqTLovDCi2v7TGPgQhLfopump take-profit slot 462070943 (held 0 slots) val
+   ~5:28 PM PRESEND LIVE EXIT 59T8FsaQaV3tWAsWMHJnrbeB4S9hKFsmCArihQ6CS1Ep time-limit slot 462070944 (held 2 slots)
+   ~5:28 PM PRESEND LIVE REALIZED EG7Kus8vqNotMgC9Wy6RqTLovDCi2v7TGPgQhLfopump +0.059913 SOL (tx: 1/1 buy tx(s), 1/1 sel
+   ~5:28 PM PRESEND LIVE REALIZED 59T8FsaQaV3tWAsWMHJnrbeB4S9hKFsmCArihQ6CS1Ep -0.029307 SOL (tx: 1/1 buy tx(s), 1/1 sel
+   ~5:29 PM PRESEND LIVE QUIET SKIP GfPaTBBnYoNBpyXU7ULRaftUdETFmMZSMh956YABpump whale 7fWzKYkC 7.3% (2.95 SOL) | since
+   ~5:29 PM PRESEND LIVE QUIET SKIP GfPaTBBnYoNBpyXU7ULRaftUdETFmMZSMh956YABpump whale BVk3AeRv 8.0% (3.90 SOL) | since
+   ~5:29 PM keepalive: falcon keep-alive: falcon: error sending request: client error (Connect): tcp connect error: Conn
+   ~5:29 PM keepalive: falcon keep-alive: falcon: error sending request: client error (Connect): tcp connect error: Conn
+   ~5:29 PM SEND-PATH falcon UNHEALTHY: 3 transport errors in a row (last: falcon: error sending request: client error (
+   ~5:29 PM keepalive: falcon keep-alive: falcon: error sending request: client error (Connect): tcp connect error: Conn
+   ~5:29 PM PRESEND LIVE QUIET STOP w175 4pMCrTScTnFUDBQgBNbfdnay5k7L5cWT9P5bdDuepump: 0 other trade(s) since the trigge
+   ~5:33 PM PRESEND LIVE QUIET SKIP Y5c52wyNVXuUo3fT2irrGsWdxNikHhgNmYd3cWQpUmP whale 54FwbznR 14.9% (5.93 SOL) | since
+   ~5:33 PM DIP FIRE CKTeAGpoLT5koBkMxKPRa71XJ3LRRFySU1HfkyW9pump score -0.840 age 10.4s dump 3.05 SOL -17.4% | 0.35 SOL
+   ~5:33 PM DIP EXIT CKTeAGpoLT5koBkMxKPRa71XJ3LRRFySU1HfkyW9pump time-limit slot 462072359
+   ~5:33 PM REALIZED mint=CKTeAGpoLT5koBkMxKPRa71XJ3LRRFySU1HfkyW9pump pnl=-0.017543 SOL source=tx run_realized=+0.60980
+   ~5:36 PM === DIP DONE: dumps 7847 in-envelope 3535 picks 67 fired 10 closed 10 landed buys 4 realized +0.609806 SOL s
+   ~5:36 PM PRESEND LIVE STOPPED (run_end): no new attempts; open positions finish their exit | fills 49 / 1000 | failed
+   ~5:36 PM === DIP PRESEND LIVE: | PRESEND LIVE STOPPED (run_end): triggers 420 armed 177 (now 0) skips {"blocked_posit
+   ~5:36 PM PRESEND LIVE END CHECK: 49 mint(s) (filled / found holding / left open / unread): a confirmed read each, a b
+   ~5:36 PM PRESEND LIVE END CHECK: 49 mint(s) read at confirmed: 0 sold now, 0 empty account(s) closed, 0 held / 0 unre
+ ▲ falcon refused 4/10m  +1
+ ↑/k up · end bottom / follow · f important/all · w wrap · ? help · q quit                                    ♪ all  1s

@@ -1,0 +1,24 @@
+╱╱ REWIND ╱╱  ● AMS r38                       RUNNING  ·  +0.5624 SOL  +$105.41
+  1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
+╭─ PRE-SEND LIVE ──────────────────────── ● 0.70 k8 44/no limit fee 0.04/1.00 ─╮
+│ fills      44 / no limit                                                     │
+│ fees 24 h  0.042/1.00  ━━────────────────────────────────────── 4% used      │
+│ fees       run 0.043 SOL · pauses at the budget, never stops                 │
+│ armed now  0 window(s) · armed 81 · T2 tries 4,025 (+5,068 re-arm)           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ RESULT · T2 ────────────────────────────────────────────────────────────────╮
+│ net        +0.3266 SOL  +$61.21                                              │
+│ realized   +0.3113   rent back +0.0347                                       │
+│ failed     -0.0194   3,789 tries x 5,120                                     │
+│ engine     0.042240 (T2 + re-arm) at its last status line                    │
+│ wins       13 W / 10 L  (57%)   avg/fill +0.0135                             │
+│ best       4A3W3h +0.1332  time-ms Harmonic  2:18 AM                         │
+│ worst      DN9EZQ -0.0410  time-ms BAM  2:16 AM                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ RE-ARM ────────────────────────── ● 0.65 SOL · gap 20 · QUIET 6:2 · R5 off ─╮
+│ net        +0.2358 SOL  +$44.19                                              │
+│ realized   +0.2278   rent back +0.0317   failed -0.0237 4,622 tries          │
+│ wins       21 fills · 10 W / 11 L (48%) · avg/fill +0.0108                   │
+│ windows    74 armed · 1 now · 9 after waiting · 16 deferred · 5,068 tries    │
+ ▲ astralane-ps refused 2.0% of its tries in 10 min (19 of 972)
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute …     ▼ 73 more  ♪ all  1s

@@ -452,7 +452,16 @@ func SnapshotText(v *View, ctx *Ctx, width int) string {
 		}
 		line += ", windows armed now " + Itoa(v.PSOpenNow)
 		out = append(out, line)
-		if ps.Paper {
+		if P := v.Paper; ps.Paper && P.Any { // v4: the shadow split by what live did with each trigger
+			vs := "vs live " + Itoa(ps.Fills) + " fills, net " + Sol(ps.Net, true, 3, true)
+			if v.RA.On {
+				vs = "vs live T2 " + Itoa(v.T2.Fills) + " fills, net " + Sol(v.T2.Net, true, 3, true)
+			}
+			out = append(out, "paper     engine estimate (shadow row c, net incl. its tries) on the same T2 triggers: live armed + sent "+Itoa(int64(P.SentN+P.OtherN))+
+				" fills, net "+FS(P.SentNet+P.OtherNet, 3)+" | live skipped/withheld "+Itoa(int64(P.SkipN+P.NoneN))+" fills, net "+FS(P.SkipNet+P.NoneNet, 3)+
+				" (skipped "+Itoa(int64(P.SkipN))+", armed nothing sent "+Itoa(int64(P.NoneN))+") | "+vs+" | all triggers "+Itoa(int64(P.SentN+P.OtherN+P.SkipN+P.NoneN))+" fills, net "+
+				FS(P.SentNet+P.OtherNet+P.SkipNet+P.NoneNet, 3)+" (not comparable)")
+		} else if ps.Paper {
 			if v.RA.On { // the shadow's rows are the T2 windows' paper
 				out = append(out, "paper     row c "+Itoa(ps.PaperFills)+" fills, gross "+FS(ps.PaperGross, 3)+", net "+FS(ps.PaperNet, 3)+" SOL  vs live T2 "+Itoa(v.T2.Fills)+" fills, net "+Sol(v.T2.Net, true, 3, true))
 			} else {

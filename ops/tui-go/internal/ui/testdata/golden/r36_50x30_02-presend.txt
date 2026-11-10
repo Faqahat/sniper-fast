@@ -1,0 +1,30 @@
+╱╱ REWIND ╱╱  ● AMS r36               +0.3487 SOL
+  1   2 Eng   3   4   5   6   7   8
+PRE-SEND LIVE ● 0.70 k8 47/no limit fee 0.04/1.00
+fills      47 / no limit
+fees 24 h  0.036/1.00  ━──────────────── 4% used
+fees       run 0.037 SOL · pauses at the budget, …
+armed now  0 window(s) · armed 151 · tries 7,534
+RESULT ──────────────────────────────────────────
+net        +0.3487 SOL  +$65.35
+realized   +0.3143   rent back +0.0709
+failed     -0.0365   7,135 tries x 5,120
+engine     0.036531 at its last status line (60 s)
+wins       27 W / 20 L  (57%)   avg/fill +0.0067
+best       52DyG8 +0.0937  time-ms Jito  3:51 AM
+worst      XsMuqM -0.2293  SL Harmonic  3:45 AM
+LATENCY ────────────────────────────────────── ms
+send→seen  p10 36 · p50 81 · p90 217
+           same block 42% of 7,182 tries
+fills      dump→land p10 4 · p50 16 · p90 58  (40)
+bounced    dump→land p50 222 · p90 477  (110)
+           after a dump of ≥ 12%; bounced = failed
+           6042, the price was back
+fills      send→seen median 93  (47)
+           after the trigger median +3 slots
+client      tries  s→seen  d→land  bnc d→l
+────────────────────────────────────────────
+Harmonic    2,459      72      12      288
+BAM         2,305      82      14      117
+ ✓ all clear
+ 1-8 tabs · s run/today · u… ▼ 35 more  ♪ all  1s

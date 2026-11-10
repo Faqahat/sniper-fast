@@ -1,0 +1,40 @@
+    ams · run 27 · dip20                                                     ○ ENDED  ·  5:36:57 PM PKT  ·  SOL $187.42
+╱╱╱ █▀▀▀▄ █▀▀▀▀ █   █ ▀█▀ █▄  █ █▀▀▀▄ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+  1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
+REGULAR BUYS ─────────────────────────────────── ● M2 gate  BY LEADER CLIENT ──────────────────────────────────────────
+setup    0.35 TP off SL 50% 5sl                             client    buys  fills  W  P&L SOL
+P&L      -0.0344 SOL  -$6.45                                ───────────────────────────────────
+         fills -0.0314   failed buys -0.0030                Harmonic     7      3  1  -0.0231
+buys     10 fired → 4 filled (40%) · 6 failed               Jito         2      0  0  -0.0010
+wins     1 W / 3 L   avg/fill -0.0078                       BAM          1      1  0  -0.0104
+best     GFcPyQ +0.0090   worst CKTeAG -0.0175              LANDING ───────────────────────────────────────────────────
+FAILED BUYS ──────────────────────────────────────────────  fills    median 36 ms after the dump
+price 6042       5  -0.0025                                          3 of 4 in the dump's own block
+lighthouse 6001  1  -0.0005                                 fails    median 83 ms after the dump (seen)
+other            0  +0.0000                                 OPEN NOW ──────────────────────────────────────────────────
+each costs its tx fee 0.000505 SOL; tips revert             no open position
+EXITS ────────────────────────────────────────────────────  FUNNEL ────────────────────────────────────────────────────
+exit        n  W  P&L SOL                                   dumps    3,535   picks 13
+───────────────────────────                                 skipped  far_leader 49 · spacing 5 · presend_armed 3
+time-limit  4  1  -0.0314
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ▲ falcon refused 4/10m  +1
+ 1-8 tabs · s run/today · u $/SOL · p pause · m mute · ? help · q quit                                        ♪ all  1s

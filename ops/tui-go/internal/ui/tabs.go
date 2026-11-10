@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -304,17 +305,35 @@ func (m *Model) scrPresend(w, bh int) string {
 	}
 	// paper vs live
 	var P []string
-	if ps.Paper {
+	liveL := "live"
+	if v.RA.On {
+		liveL = "live T2"
+	}
+	if pp := v.Paper; ps.Paper && pp.Any { // v4: the shadow split by what live did with each trigger (the snapshot's "paper" line)
+		inner := max(10, m.lastW(w, cw)-5) // the note's wrap width (dipmon 3.3: the panel's inner width - 1, also as a rule)
+		money := func(x float64) string {
+			return t.Money(int64(math.Round(x*core.LAM)), true, false).Render(core.FS(x, 3))
+		}
+		P = append(P, m.kv("paper, live sent", 21, t.Val.Render(fmt.Sprintf("%4d fills", pp.SentN+pp.OtherN))+t.Lbl.Render("  net ")+money(pp.SentNet+pp.OtherNet)))
+		P = append(P, m.kv("paper, skip/withheld", 21, t.Val.Render(fmt.Sprintf("%4d fills", pp.SkipN+pp.NoneN))+t.Lbl.Render("  net ")+money(pp.SkipNet+pp.NoneNet)))
+		fills, net := ps.Fills, ps.Net
+		if v.RA.On {
+			fills, net = v.T2.Fills, v.T2.Net
+		}
+		P = append(P, m.kv(liveL, 21, t.Val.Render(fmt.Sprintf("%4d fills", fills))+t.Lbl.Render("  net ")+t.Money(net, true, false).Render(core.Sol(net, true, 3, true))))
+		note := fmt.Sprintf("paper = the engine's estimate (shadow row c at %.2f SOL, net incl. its tries) on the same T2 triggers; skip/withheld = %d skipped + %d armed, "+
+			"nothing sent (what the filters avoided); engine paper all triggers %d fills net %s (not comparable)", pp.Size, pp.SkipN, pp.NoneN,
+			pp.SentN+pp.OtherN+pp.SkipN+pp.NoneN, core.FS(pp.SentNet+pp.OtherNet+pp.SkipNet+pp.NoneNet, 3))
+		P = append(P, m.wrapKV("", 0, note, inner, t.Dim)...)
+	} else if ps.Paper {
 		P = append(P, m.kv("paper (c)", 11, t.Val.Render(fmt.Sprintf("%4d fills", ps.PaperFills))+t.Lbl.Render("  gross "+core.FS(ps.PaperGross, 3)+"  net ")+
 			t.Money(int64(ps.PaperNet*core.LAM), true, false).Render(core.FS(ps.PaperNet, 3))))
 	} else {
 		P = append(P, m.kv("paper (c)", 11, t.Lbl.Render("no shadow numbers yet")))
 	}
-	liveL := "live"
-	if v.RA.On {
-		liveL = "live T2"
+	if !(ps.Paper && v.Paper.Any) {
+		P = append(P, m.kv(liveL, 11, t.Val.Render(fmt.Sprintf("%4d fills", ps.Fills))+t.Lbl.Render("  net ")+t.Money(ps.Net, true, false).Render(core.Sol(ps.Net, true, 3, true))))
 	}
-	P = append(P, m.kv(liveL, 11, t.Val.Render(fmt.Sprintf("%4d fills", ps.Fills))+t.Lbl.Render("  net ")+t.Money(ps.Net, true, false).Render(core.Sol(ps.Net, true, 3, true))))
 	// windows
 	var Wn []string
 	for _, x := range []struct {
