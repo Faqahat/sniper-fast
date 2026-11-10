@@ -166,7 +166,7 @@ impl PsLive {
     /// dip26: what an attempt of window `w` spends (the pre-send size; a re-arm window's own size)
     pub(super) fn w_spend(&self, w: u64) -> u64 {
         // dip41: a wide window's size (the WIDE-DUMPER tier live)
-        if let Some(d) = self.wd.as_ref().filter(|d| d.wins.contains_key(&w)) { return d.size; }
+        if let Some((d, k)) = self.wd.as_ref().and_then(|d| d.wins.get(&w).map(|x| (d, x.0))) { return d.size_of(k); }
         self.rm.as_ref().and_then(|r| r.ids.get(&w).copied()).unwrap_or(self.cfg.spend)
     }
     /// dip26: an armed re-arm window's 30 ms stop reason (whale_dump / no_holder)
@@ -279,6 +279,8 @@ impl PsLive {
         let h2skip = self.cfg.m2seen_gate && h2v.is_some_and(|v| v.0 == 0);
         // dip38 PSM12-S1 on the dumper at the check (None with its log off); a LIVE skip only after every other check (below)
         let s1v = self.s1_view(true, h2v.map(|v| v.0), c.dump.age, &c.dump.tr.user);
+        // dip43 A9 "rearm_r5" / "rearm": "log" keeps the verdicts on the records (rearm: a check that would arm is skipped "rearm_log43")
+        let (r5_live, re_live) = (self.d43.g.rearm_r5, self.d43.g.rearm);
         let Some(rm) = self.rm.as_mut() else { return };
         rm.st.checks += 1;
         let en_slot = c.dump.tr.s + RE_WAIT + rm.cfg.gap;
@@ -315,13 +317,14 @@ impl PsLive {
                 let mut j = serde_json::json!({"holder": b58(&h0), "since_last": since_last, "coh_hold": coh_hold, "fb_n": fb_n, "wh_fol": wh_fol, "wh_dumps": wh_dumps,
                     "fol": q.cfg.fol, "q": flags, "all4": all4, "rule_on": on});
                 if all4 {
-                    if on { why = Some("rearm_r5"); } else { j["would_skip"] = true.into(); rm.st.r5_would += 1; }
+                    if on && r5_live { why = Some("rearm_r5"); } else { j["would_skip"] = true.into(); rm.st.r5_would += 1; }
                 }
                 r5 = Some(j);
             }
         }
         // dip38 PSM12-S1 LIVE (only with its gate on for re-arms): decided last, on a check that would arm
         if why.is_none() { if let Some(w) = s1v.as_ref().and_then(|v| self.s1_skip_why(v)) { why = Some(w); } }
+        if why.is_none() && !re_live { why = Some("rearm_log43"); }
         let hj = holders_json(&hv);
         if let Some(w) = why {
             let mut x = serde_json::json!({"check_slot": slot, "en_slot": en_slot, "holders": hj});

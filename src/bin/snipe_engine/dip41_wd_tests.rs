@@ -541,7 +541,7 @@ fn dip41_qf2_flags() {
     assert!(c.qf == Some(QfCfg { n: 5, score: 0.3, win: 10 }) && c.qf_filt == QfFilt::default() && !c.qf_live);
     assert_eq!(c.json()["widedumper"]["qf2"], serde_json::json!({"n": 5, "score": 0.3, "win": 10, "filters": "2:8:36:70:300", "mode": "log"}));
     let c = cfg(&with_qf(&["--presend-live-qf2-filters", "1:9:30:80:200", "--presend-live-qf2-mode", "live"]).iter().map(|s| s.as_str()).collect::<Vec<_>>()).unwrap().unwrap();
-    assert!(c.qf_live && c.qf_filt == QfFilt { sol: (1.0, 9.0), curve: (30.0, 80.0), age_max: 200 });
+    assert!(c.qf_live && c.qf_filt == QfFilt { sol: (1.0, 9.0), curve: (30.0, 80.0), age_max: 200, age_min: 0 });
     for (a, want) in [(&["--presend-live-qf2", "5:0.3"][..], "needs --presend-live-dumper-ledger on"),
                       (&["--presend-live-dumper-ledger", "on", "--presend-live-qf2-filters", "2:8:36:70:300"][..], "needs --presend-live-qf2"),
                       (&["--presend-live-dumper-ledger", "on", "--presend-live-qf2-mode", "live"][..], "needs --presend-live-qf2"),

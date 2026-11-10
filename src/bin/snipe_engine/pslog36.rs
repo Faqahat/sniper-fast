@@ -71,9 +71,14 @@ pub struct FpArm { pub w: u64, pub rearm: bool, pub mint: Pk, pub s: u64, pub i:
 #[derive(Debug, Default)]
 pub struct Gate { pub v: AtomicU64, pub withheld: AtomicU64,
     /// dip37b the SKIP-2 gate's verdict (the same layout: slot, covered, skip) and its withheld sends
-    pub v2: AtomicU64, pub withheld2: AtomicU64 }
+    pub v2: AtomicU64, pub withheld2: AtomicU64,
+    /// dip43 A10 (log only): the slot of the window's last covered blocking verdict (0 = none): the "sticky block" shadow
+    pub last_block: AtomicU64 }
 impl Gate {
-    pub fn set(&self, slot: u64, covered: bool, block: bool) { self.v.store((slot << 2) | ((covered as u64) << 1) | block as u64, Ordering::Release); }
+    pub fn set(&self, slot: u64, covered: bool, block: bool) {
+        if covered && block { self.last_block.store(slot, Ordering::Release); }
+        self.v.store((slot << 2) | ((covered as u64) << 1) | block as u64, Ordering::Release);
+    }
     pub fn set2(&self, slot: u64, covered: bool, skip: bool) { self.v2.store((slot << 2) | ((covered as u64) << 1) | skip as u64, Ordering::Release); }
 }
 
@@ -86,7 +91,10 @@ pub struct GateShared { pub mode: AtomicU64, pub withheld: [AtomicU64; 2], pub p
     pub withheld_stale: [AtomicU64; 2],
     /// dip37b --presend-skip2-live: the SKIP-2 gate's mode (bit 0 T2, bit 1 re-arm) and its counters [T2, re-arm]: withheld on a fresh verdict,
     /// held on a stale one (the stale hold), sent with no fresh verdict (fail open)
-    pub s2_mode: AtomicU64, pub s2_withheld: [AtomicU64; 2], pub s2_stale: [AtomicU64; 2], pub s2_open: [AtomicU64; 2] }
+    pub s2_mode: AtomicU64, pub s2_withheld: [AtomicU64; 2], pub s2_stale: [AtomicU64; 2], pub s2_open: [AtomicU64; 2],
+    /// dip43 A10 FP strict on T2 (--presend-live-fpnb-strict X: the threshold's f64 bits, 0 = off): logged; strict_live (the control file's
+    /// "fpnb_strict": "live") makes it block T2 sends as the frozen threshold does; its would-blocks [counted]
+    pub strict: AtomicU64, pub strict_live: AtomicBool, pub strict_would: AtomicU64 }
 
 /// the mode of "t2,rearm" / "t2" / "rearm" / "off" (any order; "both" = t2,rearm)
 pub fn mode_parse(s: &str) -> std::result::Result<u64, String> {
@@ -391,7 +399,11 @@ impl Worker {
         let Some(g) = c.gate.clone() else { return };
         let thr = self.thr(&s);
         let covered = nc.is_none();
-        let block = covered && c.ctx.warm && s.score >= thr;
+        let block0 = covered && c.ctx.warm && s.score >= thr;
+        // dip43 A10 FP strict on T2 (off: 0 bits, block = dip42's): the strict verdict logged; live (control key) it blocks too
+        let sx = f64::from_bits(self.gs.strict.load(Ordering::Relaxed));
+        let strict = sx > 0.0 && c.ctx.t2 && covered && c.ctx.warm && s.score.is_finite() && s.score >= sx && !block0;
+        let block = block0 || (strict && self.gs.strict_live.load(Ordering::Relaxed));
         let s_ok = s.score.is_finite();
         // dip37b the SKIP-2 gate's verdict for the same send (the logged verdict's inputs; nothing unless skip2 runs and its gate is live)
         if self.gs.s2_mode.load(Ordering::Relaxed) != 0 {
@@ -404,6 +416,11 @@ impl Worker {
         let prev = c.last_pub;
         let (mint, t2) = (c.ctx.mint, c.ctx.t2);
         if let Some(c) = self.wins.get_mut(&w) { c.last_pub = (t, block); }
+        if strict && prev.0 != t {
+            self.gs.strict_would.fetch_add(1, Ordering::Relaxed);
+            self.rec(serde_json::json!({"ev": "presend_live_fpnb_strict", "w": w, "mint": b58(&mint), "slot": t, "score": r9(s.score), "thr": sx, "frozen_thr": thr,
+                "live": self.gs.strict_live.load(Ordering::Relaxed)}));
+        }
         // a record when a slot's verdict blocks (or flips): its score and the 20 send inputs
         if (block && prev.0 != t) || prev.1 != block {
             self.rec(serde_json::json!({"ev": "presend_live_fpnb", "stage": "gate", "w": w, "mint": b58(&mint), "kind": kind(t2), "slot": t, "score": r9(s.score), "thr": thr,

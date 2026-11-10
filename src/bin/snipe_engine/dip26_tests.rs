@@ -19,7 +19,7 @@ const USER: Pk = [0x5Au8; 32];
 // ---- GOLDEN -------------------------------------------------------------------------------------------------------------
 
 /// the digest of golden_digest() on the dip25 tree (10-29 ~20:30 PKT, before any dip26 change)
-const DIP25_GOLDEN: &str = "380c2a18cd138f0aec33c86c976abe548849e2e731bf00dd1959a2b4f873c1c4";
+pub(super) const DIP25_GOLDEN: &str = "380c2a18cd138f0aec33c86c976abe548849e2e731bf00dd1959a2b4f873c1c4";
 
 /// the parity tapes' executed txs in chain order and their launches (the loader of pslive's own tests, duplicated: those stay as they are)
 fn gtapes(n: usize) -> Option<(Vec<(u64, u64, [u8; 64], arbx::feeds::ExecInfo)>, HashMap<Pk, Launch>)> {
@@ -90,6 +90,8 @@ fn gcmd(c: &Cmd) -> String {
         Cmd::Alert { level, title } => format!("alert {level:?} {title}"),
         // dip35 (log-only; only with --presend-live-fam-log)
         Cmd::Fam(q) => format!("fam w {} {} rearm {}", q.w, b58(&q.mint), q.rearm),
+        // dip43 A2 (only with --presend-live-deadman live)
+        Cmd::Status(q) => format!("status {} w {}", bs58::encode(&q.sig).into_string(), q.w),
     }
 }
 
@@ -98,7 +100,7 @@ fn gcmd(c: &Cmd) -> String {
 /// window's latest curve state), the others a 6042 through the failed-tx side channel. After the tape: every queued sell answered
 /// (sold), the reads answered (0), the closes answered (landed), then the run's end. -> the probe's records (wall clock removed), its
 /// lines, the chain work, the shadow's records, the totals: one text line each
-fn golden_pass(tag: u8, extra: &[&str], ps: arbx::presend::Params, fill_every: u64) -> Option<Vec<String>> {
+pub(super) fn golden_pass(tag: u8, extra: &[&str], ps: arbx::presend::Params, fill_every: u64) -> Option<Vec<String>> {
     let (txs, launches) = gtapes(312)?;
     let cfg = Cfg::from_argv(&gargs(extra), &ps, true, 1_000_000_000).unwrap().unwrap();
     let fail_fee = cfg.fail_fee();

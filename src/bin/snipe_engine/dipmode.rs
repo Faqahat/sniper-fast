@@ -563,6 +563,10 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         Some(c) => Some(pslive::PsLive::start(c, key_arc.clone(), user, rpc, path, &log, mtx.clone(), allow_holder, &cohort)?),
         None => None,
     };
+    // dip43 A1 FEED-STALL WATCHDOG (ON by default as a line + record; its pre-send pause / dead-man only with their flags: pslive::ps43*)
+    let mut stall43 = pslive::ps43_stall::Watch::new(pslive.as_ref().map_or_else(Default::default, |p| p.cfg.c43.stall));
+    let mut stall43_at = 0u64;
+    if pslive.is_none() { eprintln!("DIP43 A1 {}", stall43.cfg.desc()); }
     let ss = |_s: u64| -> Option<u64> { None };           // block sizes are unknown live (parity: 1 of 55 picks flips)
     // ---- dip14 state (all idle without the flags)
     let mut shred = shred_cfg.map(shredfire::ShredFire::new);
@@ -601,6 +605,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
         if stopping { if let Some(p) = pslive.as_mut() { p.stop("run_stopping"); } }
         // positions + feed, whichever first. dip34 exact exit: the feed wait ends when the earliest pre-send time-ms exit is due (it
         // was always the 500 ms quiet timeout, so the exit waited for the next feed trade)
+        // dip43 A1/A2: the watchdog's round (every 20 ms at most; a line / record only at an episode's start / end)
+        { let n = arbx::fast::mono_ns(); if n >= stall43_at + 20_000_000 { stall43_at = n; pslive::ps43::stall_round(&mut stall43, pslive.as_mut(), &log, n); } }
         let wait = pslive.as_ref().and_then(|p| p.next_exit_in()).map_or(Duration::from_millis(500), |d| d.min(Duration::from_millis(500)));
         let ev = if busy {
             // B2 (--dip-busy-poll): the positions' messages first, then the feed channel (spun 1 ms at a time; 500 ms quiet = the timeout)
@@ -673,6 +679,8 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
             if feed_lag { log.w(feed_lag_rec(&mut lag_all, &mut lag_by, &mut q_exec, &feed_names, &_feeds)); }
         }
         let arbx::feeds::Event::Tx(a) = ev else { continue };
+        // dip43 A1: the executed feed's clock / our txs first seen on an unexecuted feed (one compare per arrival)
+        stall43.on_arrival(a.executed.is_some(), a.slot, arbx::fast::mono_ns(), (a.executed.is_none() && pslive.is_some() && a.tx.keys.first() == Some(&user)).then_some(&a.tx.sig));
         let t_loop = arbx::feeds::clock::now_ns();     // the decision-time breakdown of a fire (lat_us in the fire record)
         // dip24 OBSERVATORY module 9 (--obs-feedrace only): this arrival's feed and time (one try_send; nothing otherwise)
         if let Some(o) = obs.as_ref() { o.feeder.any(&a); }

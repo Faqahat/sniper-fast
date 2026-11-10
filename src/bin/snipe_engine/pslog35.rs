@@ -177,6 +177,8 @@ impl PsLive {
                 let r2 = |x: f64| (x * 100.0).round() / 100.0;
                 for (k, v) in [("fam", r2(f.fam)), ("cs_pct", r2(f.cs_pct)), ("recv_pct", r2(f.recv_pct))] { rec[k] = v.into(); }
                 rec["recv_n"] = f.recv_n.into();
+                // dip43 A3 / A4 (nothing with --presend-live-tbal / --presend-live-fanout off): the snapshot into the true-balance book, the fan-out verdict
+                if let Some(j) = self.fam43(q, *slot, hold, f.recv_n) { rec["fanout"] = j; }
                 rec["n_holders"] = f.n_holders.into();
                 rec["hist"] = hist.into();
                 rec["read_slot"] = (*slot).into();

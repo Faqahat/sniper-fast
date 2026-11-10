@@ -150,6 +150,11 @@ const F2FLAGS: [&str; 3] = ["--presend-live-fam2", "--presend-live-fam2-wallets"
 const Q1FLAGS: [&str; 11] = ["--q1-log", "--q1-bots", "--q1-fresh-state", "--q1-min-sol", "--q1-age-slots", "--q1-bot-slots", "--q1-dip-slots", "--q1-fresh-max",
     "--q1-gap-slots", "--q1-size-sol", "--q1-fresh-hours"];
 
+/// dip43 Builder A (ps43.rs, ps43_stall.rs): its flags (each needs --presend-live; all off / log by default)
+const A43FLAGS: [&str; 15] = ["--presend-live-stall-mode", "--presend-live-stall", "--presend-live-deadman", "--presend-live-deadman-ms", "--presend-live-tbal",
+    "--presend-live-cascade", "--presend-live-fanout", "--presend-live-fanout-mode", "--presend-live-mint-ledger", "--presend-live-mint-ledger-mode",
+    "--presend-live-shadow-exit", "--presend-live-acct", "--presend-live-botdepth-allow-log", "--presend-live-shadows43", "--presend-live-fpnb-strict"];
+
 const RFLAGS: [&str; 5] = ["--presend-live-rearm", "--presend-live-rearm-size-sol", "--presend-live-rearm-gap-slots", "--presend-live-rearm-quiet-stop",
     "--presend-live-rearm-r5-skip"];
 
@@ -220,6 +225,12 @@ pub mod psfam2;
 // dip42 Q1: the quiet-token fresh-wallet big-buy reactive trigger as a shadow log (LOG ONLY, its own thread; off unless --q1-log on)
 #[path = "psq1.rs"]
 pub mod psq1;
+
+// dip43 Builder A: the feed-stall watchdog / dead-man (ps43_stall.rs) and the safety / control / shadow items (ps43.rs); off / log by default
+#[path = "ps43_stall.rs"]
+pub mod ps43_stall;
+#[path = "ps43.rs"]
+pub mod ps43;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -504,6 +515,8 @@ pub struct Cfg {
     pub f2: Option<psfam2::F2Cfg>,
     /// dip42 Q1 (LOG ONLY; None = off): --q1-log on, --q1-bots FILE, --q1-fresh-state FILE and the rule's thresholds (psq1.rs)
     pub q1: Option<psq1::Q1Cfg>,
+    /// dip43 Builder A's options (ps43.rs; all off / log by default)
+    pub c43: ps43::Cfg43,
 }
 
 impl Cfg {
@@ -535,7 +548,7 @@ impl Cfg {
         let arg_u64_opt = |f: &str| arg(f).and_then(|s| s.parse::<u64>().ok());
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -665,7 +678,12 @@ impl Cfg {
             // dip42 (LOG ONLY; set below)
             f2: None,
             q1: None,
+            // dip43 (ps43.rs)
+            c43: ps43::Cfg43::parse(argv)?,
         };
+        // dip43: the true balances and the fan-out come from dip35's fam read at the arm (verifier 11-10: the feeds carry no plain transfers)
+        if (c.c43.tbal || c.c43.fanout.is_some()) && !c.fam_log { bail!("--presend-live-tbal / --presend-live-cascade / --presend-live-fanout need --presend-live-fam-log (its RPC read at the arm is their source)"); }
+        if c.c43.fp_strict.is_some() && !c.fpnb_log { bail!("--presend-live-fpnb-strict needs --presend-fpnb-log on (the score it thresholds)"); }
         // dip42 FAM2 + Q1 (both LOG ONLY; off unless their switch): every value given; the parameters need their switch
         for f in F2FLAGS.iter().chain(Q1FLAGS.iter()) { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         let f2_on = onoff("--presend-live-fam2", false)?;
@@ -960,6 +978,8 @@ impl Cfg {
         // dip42: only when on (off: dip41's record)
         if let Some(f) = &self.f2 { j["fam2"] = f.json(); }
         if let Some(q) = &self.q1 { j["q1"] = q.json(); }
+        // dip43: only when an option is given (off: dip42's record)
+        if self.c43.any() { j["dip43"] = self.c43.json(); }
         j
     }
 }
@@ -1165,10 +1185,12 @@ struct Shared {
     exited: AtomicBool,
     skips: Mutex<FxHashMap<&'static str, u64>>,
     build_us: Mutex<Ring>,
+    /// dip43 Builder A's main loop <-> sender state (ps43.rs; idle by default)
+    g43: ps43::Sh43,
 }
 
 impl Shared {
-    fn skip(&self, why: &'static str) { *self.skips.lock().unwrap().entry(why).or_default() += 1; }
+    fn skip(&self, why: &'static str) { *self.skips.lock().unwrap().entry(why).or_default() += 1; ps43::acct_skip(&self.g43, why); }
     fn cur_slot(&self) -> u64 { self.slot.load(Ordering::Relaxed).max(send::tpu::SLOT.load(Ordering::Relaxed)) }
 }
 
@@ -1240,10 +1262,13 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
         }
         for w in due {
             let t0 = arbx::fast::mono_ns();
+            // dip43 A8 (--presend-live-acct on; nothing otherwise): this window's due try (its refusals are charged by Shared::skip)
+            ps43::cur_set(&sh.g43, w.id, slot);
             // why not now (each counted); dip26: the same gate for every window (send_gate: unit-tested), at the window's own spend
             if let Some(why) = send_gate(&sh, sc.cfg.one_position, w.spend) { sh.skip(why); continue; }
             // dip36 FP-NOBOT LIVE GATE (--presend-fpnb-live / --presend-fpnb-control; off: never): this slot's verdict blocks -> withheld (one
             // atomic load; no fresh verdict -> fail open)
+            let mut leak43: Option<&'static str> = None;
             if let (Some(g), Some(gs)) = (&w.fpg, &sc.fpg) {
                 if let Some(stale) = pslog36::gate_withhold_why(g, gs, slot, w.rearm) {
                     sh.skip(if stale { "fpnb_withheld_stale" } else { "fpnb_withheld" });
@@ -1255,6 +1280,8 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
                     let _ = out.send(Out::Rec(r));
                     continue;
                 }
+                // dip43 A10 (log only; --presend-live-shadows43 on): the FP-NOBOT leak fix's / sticky block's would-hold, kept for the fill record
+                leak43 = ps43::leak_why(&sh.g43, g, gs, slot, w.rearm);
                 // dip37b SKIP-2 LIVE GATE (--presend-skip2-live / the ledger control file's "skip2"; off: never): the same rule on the skip2 verdict
                 if let Some(stale) = pslog36::skip2_withhold_why(g, gs, slot, w.rearm) {
                     sh.skip(if stale { "skip2_withheld_stale" } else { "skip2_withheld" });
@@ -1330,6 +1357,9 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
                 a.wst = send_one(r, &raw, tag, &sc.handle, &mut body, &mut req);
                 sh.sent.fetch_add(1, Ordering::Relaxed);
             } else { sh.dry.fetch_add(1, Ordering::Relaxed); }
+            // dip43 (nothing with their flags off): A8 the window's try went out; A10 its would-hold
+            ps43::acct_sent(&sh.g43);
+            if let Some(why) = leak43 { ps43::leak_note(&sh.g43, &a.sig, why); }
             let t2 = arbx::fast::mono_ns();
             sh.build_us.lock().unwrap().add(((t1 - t0) as f64 / 1e3) as f32);
             let mut rec = serde_json::json!({"ev": "presend_attempt", "w": a.w, "n": a.n, "mint": b58(&a.mint), "sig": bs58::encode(&a.sig).into_string(), "tag": seq,
@@ -1386,7 +1416,7 @@ impl Breaker {
 
 /// dip31: no new buys now (the breaker's pause runs)
 #[inline]
-fn breaker_paused(sh: &Shared) -> bool { arbx::fast::mono_ns() < sh.brk_until.load(Ordering::Relaxed) }
+fn breaker_paused(sh: &Shared) -> bool { arbx::fast::mono_ns() < sh.brk_until.load(Ordering::Relaxed) && !sh.g43.brk_log.load(Ordering::Relaxed) }
 
 /// dip31: a realized P&L (lamports) into the breaker at `now` (mono ns): Some(losses in the window) when it trips now (the pause
 /// then runs to now + pause; the window starts empty again)
@@ -1595,6 +1625,8 @@ fn send_gate(sh: &Shared, one_position: bool, spend: u64) -> Option<&'static str
     else if sh.pause_fee.load(Ordering::Relaxed) { Some("paused_fee_budget") }
     // dip31: the circuit breaker's pause (0 = never set)
     else if breaker_paused(sh) { Some("paused_breaker") }
+    // dip43 A1: the executed feed is blind (only with --presend-live-stall-mode live / the control file's "stall": "live")
+    else if sh.g43.pause_stall.load(Ordering::Relaxed) { Some("paused_stall") }
     else if fires_paused() { Some("paused_blockhash_or_balance_read") }
     else {
         let bal = ACCT.bal.load(Ordering::SeqCst);
@@ -1988,6 +2020,8 @@ pub enum PsMsg {
     Fam(Box<FamRes>),
     /// dip38 (log-only): the funding resolver's answer
     Fund(Box<psfund::FundOut>),
+    /// dip43 A2: a blind try's status read answered
+    Status(Box<ps43::StatusRes>),
 }
 
 /// dip19: what a token-account read is for
@@ -2036,6 +2070,8 @@ pub enum Cmd {
     Alert { level: arbx::alerts::Level, title: String },
     /// dip35 (log-only): a fam holders read (the answer: PsMsg::Fam; not a task the run's end waits for)
     Fam(Box<FamReq>),
+    /// dip43 A2 (--presend-live-deadman live): a blind try's getSignatureStatuses + our token account at processed (the answer: PsMsg::Status)
+    Status(Box<ps43::StatusReq>),
 }
 
 /// dip19 (fix 1): our token account of a mint, from the fill that created it until a read shows it closed
@@ -2064,9 +2100,14 @@ pub fn close_due(slot_now: u64, quiet: u64, armed: bool, pos_open: bool) -> bool
 /// dip22: a position's time exit (pure; unit-tested). `held_ms`: since our fill was seen. --presend-live-exit-ms N > 0 sells first,
 /// N ms after the fill ("time-ms"); then the slot limit (entry slot + exit_slots) and the wall-clock backstop (the feed stalled), as before
 pub fn time_exit_due(slot_now: u64, land_slot: u64, exit_slots: u64, held_ms: u64, exit_ms: u64) -> Option<&'static str> {
+    time_exit_due_w(slot_now, land_slot, exit_slots, held_ms, exit_ms, exit_slots * 400 + 3_000)
+}
+
+/// dip43 A2: the same with the wall-clock backstop given (ms; dip42's exit_slots x 400 + 3000 unless --presend-live-deadman live)
+pub fn time_exit_due_w(slot_now: u64, land_slot: u64, exit_slots: u64, held_ms: u64, exit_ms: u64, wall_ms: u64) -> Option<&'static str> {
     if exit_ms > 0 && held_ms >= exit_ms { return Some("time-ms"); }
     if slot_now >= land_slot + exit_slots { return Some("time-limit"); }
-    if held_ms > exit_slots * 400 + 3_000 { return Some("time-limit-wall"); }
+    if held_ms > wall_ms { return Some("time-limit-wall"); }
     None
 }
 
@@ -2219,6 +2260,8 @@ pub struct PsLive {
     f2: Option<psfam2::Fam2>,
     /// dip42 Q1 (LOG ONLY): the handle of its thread (None = off, the default; psq1.rs)
     q1: Option<psq1::Q1Tap>,
+    /// dip43 Builder A's state (ps43.rs; idle by default)
+    d43: ps43::D43,
 }
 
 impl PsLive {
@@ -2260,7 +2303,7 @@ impl PsLive {
         let (atx, arx) = crossbeam_channel::unbounded::<Att>();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
-            slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) });
+            slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default() });
         // dip39 BOT DEPTH: the start mode and the list (a bad / missing list: FAIL OPEN, a warning; None with it off)
         sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
         let bd = cfg.bd.map(|g| psbd::Bd::open(g, cfg.bd_list.as_deref(), cfg.bd_state.as_deref(), &user));
@@ -2369,6 +2412,8 @@ impl PsLive {
         // dip39: also at the END, only when on
         let line = match &cfg.bd { Some(g) => format!("{line} | BOT DEPTH {} {}", if cfg.bd_live { "LIVE" } else { "LOG" }, g.desc()), None => line };
         eprintln!("{line}");
+        // dip43: one line per Builder A feature (lines of their own, after the start-up line: the monitors parse that one)
+        for l in cfg.c43.banner(cfg.fpnb_log) { eprintln!("{l}"); }
         let thread = {
             let (sh, out) = (sh.clone(), out.clone());
             std::thread::Builder::new().name("ps-send".into()).spawn(move || sender(sh, sc, out, atx)).context("ps-send thread")?
@@ -2448,7 +2493,8 @@ impl PsLive {
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1 };
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1,
+            d43: Default::default() };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
@@ -2458,6 +2504,8 @@ impl PsLive {
         p.wd_start();
         // dip42: FAM2's start record (nothing with it off)
         p.f2_start();
+        // dip43: the modes, the book, the taps, the control file's dip43 keys (a record only when an option is given)
+        p.d43_start();
         Ok(p)
     }
 
@@ -2485,6 +2533,8 @@ impl PsLive {
             // dip38 (log-only): the window slot's first attempt = its stage "send" (nothing without its flags)
             if self.l38_on() { self.l38_send(a.w, a.slot); }
             self.order.push_back((a.deadline, a.sig, Instant::now()));
+            // dip43 A5 (--presend-live-cascade on): the try's holder set at its signing
+            if self.cfg.c43.cascade { self.sign43(&a); }
             self.atts.insert(a.sig, (a, false));
         }
     }
@@ -2545,6 +2595,8 @@ impl PsLive {
         let ff = att.fa.as_ref().map_or_else(|| self.cfg.fail_fee(), |f| f.fail_fee());
         let (idx, fee, err) = match &of { Some(f) => (Some(f.index), f.fee, f.err.clone()), None => (None, ff, "?".to_string()) };
         let res = if of.is_some() { pl::classify(&err, &att.roles) } else { "failed_unknown".to_string() };
+        // dip43 A5 (cascade on): a later try failing ata_exists gets its own set's verdict at its position
+        self.land_note43(&a.tx.sig, &att.mint, &res);
         self.st.fees += fee;
         // dip37: the fee A/B's share (nothing with it off)
         if let (Some(fs), Some(f)) = (self.fab.as_mut(), att.fa.as_ref()) { let c = fs.cell(f); c.fail += 1; c.fail_fee += fee; }
@@ -2663,6 +2715,8 @@ impl PsLive {
             r["quiet"] = j;
             r["quiet_stop"] = (why == "quiet").into();
         }
+        // dip43 A8 (--presend-live-acct on): the window's tries not sent, by reason
+        self.acct_disarm43(&mut r, id);
         self.rec(r);
     }
 
@@ -2708,8 +2762,12 @@ impl PsLive {
                         "t": a.t_rx, "sol": e.sol, "fee": x.fee, "pid": p.pid, "round": p.round});
                     if p.rearm { r["kind"] = "rearm".into(); }
                     self.rec(r);
+                    // dip43 A7 (shadow exit on): the flow after our sell
+                    self.sell_land43(&e.mint, a.slot, a.t_rx);
                 }
             }
+            // dip43 A6 / A7 (their flags on): the paper landings and the exit shadows see every trade
+            self.trade43(&t);
             // the tape of tokens with a window / attempts / a position
             if let Some((tp, _)) = self.tapes.get_mut(&e.mint) { tp.push_back(t.clone()); if tp.len() > 256 { tp.pop_front(); } }
             if self.pos.contains_key(&e.mint) {
@@ -2815,6 +2873,8 @@ impl PsLive {
                 }
             }
         }
+        // dip43 A3 (--presend-live-tbal on): this tx's creates and post balances into the book (after its trades: a fill saw the state before it)
+        if self.d43.book.is_some() { self.book43(a, x); }
         self.tick(slot_now, first);
         self.st.us.add((t0.elapsed().as_secs_f64() * 1e6) as f32);
     }
@@ -2838,11 +2898,16 @@ impl PsLive {
             "age_slots": age_slots, "sol": t.sol, "tok": t.tok, "vsol": t.vsol, "vtok": t.vtok});
         if wide.is_none() { self.par.insert((mint_s.clone(), sig_s.clone(), t.j as i64), (t.s, trig.clone())); }
         // dip41: the wide window's size (T2: the pre-send size)
-        let spend = if wide.is_some() { self.wd.as_ref().map_or(self.cfg.spend, |w| w.size) } else { self.cfg.spend };
+        let spend = match wide { Some((k, _)) => self.wd.as_ref().map_or(self.cfg.spend, |w| w.size_of(k)), None => self.cfg.spend };
         let launch = launch_of(&t.mint);
+        // dip43 A9: the create-slot / young-age gates' control keys ("log": the verdict is kept in would43, the trigger goes on; live: dip42)
+        let (cs_hit, ya_hit) = (age_slots == 0 && !self.cfg.create_slot, age_slots < self.cfg.min_age_slots);
+        let mut would43: Vec<&'static str> = Vec::new();
+        if cs_hit && !self.d43.g.create_slot { would43.push("create_slot"); }
+        if ya_hit && !self.d43.g.young_age { would43.push("young_age"); }
         let mut why: Option<&'static str> = if self.stopped.is_some() || DIP_NO_FIRE.load(Ordering::Relaxed) { Some("stopped") }
-            else if age_slots == 0 && !self.cfg.create_slot { Some("create_slot") }
-            else if age_slots < self.cfg.min_age_slots { Some("young_age") }
+            else if cs_hit && self.d43.g.create_slot { Some("create_slot") }
+            else if ya_hit && self.d43.g.young_age { Some("young_age") }
             // dip26: a re-arm window armed on the token does not block a T2 trigger: the T2 window takes the token over (below)
             else if self.armed.get(&t.mint).is_some_and(|id| !self.rearm_w(*id)) { Some("blocked_armed") }
             else if self.pos.contains_key(&t.mint) || self.free_at.get(&t.mint).is_some_and(|f| Instant::now() < *f) { Some("blocked_position") }
@@ -2871,7 +2936,9 @@ impl PsLive {
                         j = sg.json(q.cfg.fol);
                         j["rule_on"] = on.into();
                         if why.is_none() && sg.quiet(q.cfg.fol) {
-                            if on { why = Some("quiet"); q.skips += 1; } else { q.warm_would += 1; j["would_skip"] = true.into(); }
+                            // dip43 A9 "quiet": "log" keeps the verdict in would43
+                            if on && !self.d43.g.quiet { would43.push("quiet"); }
+                            else if on { why = Some("quiet"); q.skips += 1; } else { q.warm_would += 1; j["would_skip"] = true.into(); }
                         }
                     }
                     None => { j["err"] = "token not followed".into(); }
@@ -2890,12 +2957,12 @@ impl PsLive {
         // dip27 LONE WHALE (decided LAST: only a trigger that would arm is skipped "lone_whale"; the detector took its buy already)
         let lw = self.cfg.lone_whale_slots;
         let nb = if lw > 0 { self.det.buyers_since(&t.mint, t.s.saturating_sub(lw - 1), &self.user) } else { None };
-        if why.is_none() && nb.is_some_and(|n| n <= 1) { why = Some("lone_whale"); }
+        if why.is_none() && nb.is_some_and(|n| n <= 1) { if self.d43.g.lone_whale { why = Some("lone_whale"); } else { would43.push("lone_whale"); } }
         // dip31 the circuit breaker's pause (decided last, like the lone whale: only a trigger that would arm is skipped "breaker")
         if why.is_none() && breaker_paused(&self.sh) { why = Some("breaker"); }
         // dip32 the creator gate (decided last, like the lone whale: only a trigger that would arm is skipped "cr_loss" / "cr_unfollowed")
         let (crw, crj) = if self.cfg.cr_on() { cr_gate(&self.sh, &self.cfg, self.det.creator_bal(&t.mint).map(|c| c.0), t.t_rx) } else { (None, None) };
-        if why.is_none() { if let Some(w) = crw { why = Some(if w == "loss" { "cr_loss" } else { "cr_unfollowed" }); } }
+        if why.is_none() { if let Some(w) = crw { if self.d43.g.cr_loss { why = Some(if w == "loss" { "cr_loss" } else { "cr_unfollowed" }); } else { would43.push(if w == "loss" { "cr_loss" } else { "cr_unfollowed" }); } } }
         // dip37 the whale ledger (LIVE; with the arm-time skips, right after the creator gate; None with it off)
         let whg = pswh::wh_gate(&self.sh, &self.cfg, &whale, false);
         // dip37 the control file: in "log" mode the whale verdict is logged (wh_would), never a skip
@@ -2910,13 +2977,20 @@ impl PsLive {
         if why.is_none() && self.cfg.m2seen_gate && h2v.is_some_and(|v| v.0 == 0) { why = Some("m2_unseen"); }
         // dip36 LIVE blocklist (with the arm-time skips: only a trigger that would arm; nothing without the flag)
         let blh = if why.is_none() && self.bl.is_some() { self.bl_hit(&t.mint, &whale, "whale", Some(bal)) } else { None };
+        let blh = if blh.is_some() && !self.d43.g.blocklist_arm { would43.push("blocklist"); None } else { blh };
         if blh.is_some() { why = Some("blocklist"); }
         // dip32/33 QUIET3-A: the 120 s ring's trades <= 15 and the whale's dumps <= 3 (QUIET's rule on); dip33: LIVE with --presend-live-quiet3a
         let n120 = v2.as_ref().and_then(|v| v["n_120s"].as_u64());
         let whd = qj.as_ref().and_then(|q| q["wh_dumps"].as_u64());
         let q_on = qj.as_ref().is_none_or(|q| q["rule_on"] != false);
         let q3a = q_on && n120.is_some_and(|n| n <= F3_N120) && whd.is_some_and(|d| d <= F3_WHD);
-        if why.is_none() && self.cfg.q3a_live && q3a { why = Some("quiet3_a"); }
+        if why.is_none() && self.cfg.q3a_live && q3a { if self.d43.g.quiet3a { why = Some("quiet3_a"); } else { would43.push("quiet3_a"); } }
+        // dip43 (each nothing with its flag off): A1 live a stale trigger after a blind feed; A4 a fan-out mint; A6 the mint ledger
+        if why.is_none() && self.stale43(t.s) { why = Some("stale_trigger"); }
+        if why.is_none() && self.fan_skip43(&t.mint) { why = Some("fanout"); }
+        let mlv = self.ml_view43(&t.mint);
+        if why.is_none() && mlv.is_some_and(|v| v.2) { if self.cfg.c43.ml_live { self.d43.ml_skips += 1; why = Some("mint_ledger"); } else { self.d43.ml_would += 1; } }
+        if wide.is_none() { self.paper43(t, why, spend); }
         // dip38 PSM12-S1 (log only; LIVE only with its gate on for T2): decided LAST, on a trigger that would arm (None with the log off)
         let s1v = if why.is_none() { self.s1_view(false, h2v.map(|v| v.0), age_slots, &whale) } else { None };
         if let Some(w) = s1v.as_ref().and_then(|v| self.s1_skip_why(v)) { why = Some(w); }
@@ -2948,6 +3022,10 @@ impl PsLive {
             if let Some(j) = self.bd_json(&t.mint, t.s) { r["botdepth"] = j; }
             // dip42 (log-only; only with the flag on): the 2NUM family on the token at the trigger's slot
             if let Some(j) = self.f2_json(true, &t.mint, t.s) { r["fam2"] = j; }
+            // dip43 (only with their flags / keys): the mint ledger, the fan-out flag, the gates in log mode
+            if let Some(v) = mlv { r["mint_ledger"] = PsLive::ml_json43(v); }
+            if let Some(j) = self.fan_json43(&t.mint, None) { r["fanout"] = j; }
+            if !would43.is_empty() { r["would43"] = would43.clone().into(); }
             if let Some(f) = &f3 { r["f3"] = f.clone(); }
             if let Some(g) = &tags { r["tags"] = g.clone(); }
             // dip34 (log-only): seen / eqgrp / q4 (each only with its flag); then this skip into the seen book (cr_loss / quiet3_a)
@@ -3051,6 +3129,11 @@ impl PsLive {
         if let Some(j) = self.bd_json(&t.mint, t.s) { r["botdepth"] = j; }
         // dip42 (log-only; only with the flag on): the 2NUM family on the token at the trigger's slot
         if let Some(j) = self.f2_json(false, &t.mint, t.s) { r["fam2"] = j; }
+        // dip43 (only with their flags / keys): the mint ledger, the fan-out flag, the gates in log mode; A5 the window's first holder set
+        if let Some(v) = mlv { r["mint_ledger"] = PsLive::ml_json43(v); }
+        if let Some(j) = self.fan_json43(&t.mint, None) { r["fanout"] = j; }
+        if !would43.is_empty() { r["would43"] = would43.into(); }
+        if self.cfg.c43.cascade { self.wset43(id, &t.mint); }
         self.wh_arm(id, whale);
         self.hl_arm(id, &t.mint, &whale);
         if let Some(h) = &hlg { self.hl_note(&t.mint, h, false, false); }
@@ -3084,6 +3167,8 @@ impl PsLive {
     }
 
     fn fill_inner(&mut self, t: &pl::Trade, fee: u64, reactive_on_mint: bool) {
+        // dip43 A2: a fill a status read opened already (the feed was blind): its buy gets the feed's values, never a second open
+        if self.fill_dedupe43(t, fee) { return; }
         let Some((att, done)) = self.atts.get_mut(&t.sig) else { return };
         let first = !*done;
         *done = true;
@@ -3170,6 +3255,8 @@ impl PsLive {
             let wh = self.wins.get(&att.w).map_or(self.user, |w| w.whale);
             self.eqgrp_fill(&mut rec, &t.mint, &wh);
         }
+        // dip43 (each only with its flag): A5 cascade, A6 mint ledger, A4 fan-out, A10 shadows, A7 the exit shadow's start
+        self.fill43(&mut rec, &att, t);
         self.rec(rec);
         let sig = bs58::encode(&t.sig).into_string();
         let buy = Buy { sig: sig.clone(), w: att.w, slot: t.s, idx: t.i as u64, t_rx: t.t_rx, tokens: t.tok, sol_in: t.sol, fee, tip: att.tip, cost, round: 0, via: "feed" };
@@ -3249,11 +3336,14 @@ impl PsLive {
             "t": t, "slots_held": slot as i64 - p.land.0 as i64, "pid": p.pid, "round": 1, "tokens": p.tokens});
         // dip26: a re-arm position's exit says so (the line's end: its prefix unchanged)
         if p.rearm { r["kind"] = "rearm".into(); }
+        let pid = p.pid;
         let l = format!("  PRESEND LIVE EXIT {} {why} slot {slot} (held {} slots){}{}", b58(mint), slot as i64 - p.land.0 as i64, if val.is_nan() { String::new() } else { format!(" value x{val:.3}") },
             if p.rearm { " [rearm]" } else { "" });
         self.sell_round(mint);
         self.rec(r);
         self.line(l);
+        // dip43 A7 (shadow exit on): the real exit and the stop shadow
+        self.exit43(mint, why, slot, val, t, pid);
     }
 
     /// dip19 (fix 1/2): the position's next sell round: every buy no round covers yet, sold as one (exact tokens; confirmed reads from
@@ -3303,6 +3393,7 @@ impl PsLive {
             PsMsg::Closed(mint, sig, slot, err) => self.on_closed(mint, sig, slot, err),
             PsMsg::Fam(r) => self.fam_done(*r),
             PsMsg::Fund(o) => self.l38_fund(*o),
+            PsMsg::Status(r) => self.on_status43(*r),
             PsMsg::UnsoldDone(mint, sold) => {
                 // the background retry ended: sold = an empty account (closed later, as any), else (given up at the run's end) left to the end check
                 if self.pos.contains_key(&mint) { return; }
@@ -3414,6 +3505,8 @@ impl PsLive {
             };
             self.q4_note(arbx::feeds::clock::now_ns(), wh, fol, &sellers);
         }
+        // dip43 A6 / A7 (their flags on): the landing's result into the mint ledger, the exit shadow may finish
+        self.close43(p.pid, mint, feed_pnl, p.fees(), p.tips());
         // dip36 (log-only): the position into FP-NOBOT's own-result book (its P&L follows; nothing without the flag)
         self.fpnb_close(&p);
         self.realized(&p, cr);
@@ -3655,6 +3748,19 @@ impl PsLive {
                 spawn_unsold_retry((*self.key).clone(), user, (*self.rpc).clone(), sp(path).clone(), launch, pda::ata(&user, &mint, &pda::TOKEN_2022), land_slot, last_qty, true, Some(done));
             }
             Cmd::Alert { .. } => {}
+            // dip43 A2: the blind try's status + our token account (processed), off the event loop; a sell after it never waits on it
+            Cmd::Status(req) => {
+                let (rpc, mtx) = (self.rpc.clone(), self.mtx.clone());
+                tokio::spawn(async move {
+                    let t0 = Instant::now();
+                    let ss = [bs58::encode(&req.sig).into_string()];
+                    let ata = pda::ata(&user, &req.mint, &pda::TOKEN_2022);
+                    let (st, tk) = tokio::join!(call2(&rpc, "getSignatureStatuses", serde_json::json!([ss, { "searchTransactionHistory": false }])), tok_read(&rpc, &ata, "processed", 0));
+                    let st = match st { Ok(v) => v["value"].get(0).filter(|x| !x.is_null()).map(|x| (x["slot"].as_u64().unwrap_or(0), x["err"].is_null())), Err(_) => None };
+                    let tokens = match tk { crate::Tok::Amount(a, _) => Some(a), crate::Tok::Closed(_) => Some(0), crate::Tok::Unknown => None };
+                    let _ = mtx.send(Msg::Ps(PsMsg::Status(Box::new(ps43::StatusRes { req: *req, st, tokens, ms: t0.elapsed().as_secs_f64() * 1e3 }))));
+                });
+            }
             // dip35 (log-only): the holders read on the runtime; its own in-flight count (FAM_INFLIGHT), never `tasks`
             Cmd::Fam(req) => {
                 let Some(rpc) = self.l35.rpc.clone() else { return };
@@ -3712,10 +3818,18 @@ impl PsLive {
         // dip23 v2: tokens idle for 120 s leave the ring (at most once per 10 s of feed time)
         if let Some(v) = self.v2.as_mut() { v.sweep(); }
         // positions: time exit at entry slot + exit_slots; the wall-clock backstop (the feed stalled)
+        // dip43 A2: the backstop is dip42's (exit_slots x 400 + 3000 ms) unless the dead-man is live (x 215 + 600); the dead-man sell during a
+        // long blind episode (live) / its would-records (log)
+        let wall = self.wall43();
         let due: Vec<(Pk, &'static str)> = self.pos.values().filter(|p| p.exit.is_none()).filter_map(|p| {
-            time_exit_due(slot_now, p.land.0, self.cfg.exit_slots, p.opened.elapsed().as_millis() as u64, self.cfg.exit_ms).map(|w| (p.mint, w))
+            time_exit_due_w(slot_now, p.land.0, self.cfg.exit_slots, p.opened.elapsed().as_millis() as u64, self.cfg.exit_ms, wall).map(|w| (p.mint, w))
         }).collect();
         for (m, why) in due { self.exit(&m, why, slot_now, f64::NAN, arbx::feeds::clock::now_ns()); }
+        if self.d43.blind.is_some() { self.deadman43(slot_now); }
+        if !self.pos.is_empty() && !self.d43.deadman_live && self.d43.blind.is_some() {
+            let w: Vec<(u64, Pk, u64)> = self.pos.values().filter(|p| p.exit.is_none()).map(|p| (p.pid, p.mint, p.opened.elapsed().as_millis() as u64)).collect();
+            for (pid, m, ms) in w { self.wall_would43(pid, &m, ms); }
+        }
         // attempts not seen by their deadline + 3 slots (or 6 s on the wall clock: the feed may be down)
         while let Some(&(dl, sig, at)) = self.order.front() {
             if !(slot_now > dl + 3 || at.elapsed() > Duration::from_secs(6)) { break; }
@@ -3725,13 +3839,15 @@ impl PsLive {
             *done = true;
             let att = att.clone();
             self.resolve(&att, "unseen");
+            // dip43 A8 (--presend-live-acct on): its fee booked as a failed try's (the run's own records keep fee 0)
+            self.acct_unseen43(&att);
             self.lands.push(Land { att, res: "unseen".into(), err: String::new(), fee: 0, slot: 0, idx: None, t_rx: 0, at: now });
         }
         // landing records once the tape around them is complete (2 slots later, or 2 s)
         if !self.lands.is_empty() {
             let mut keep = Vec::new();
             for l in std::mem::take(&mut self.lands) {
-                if l.res == "unseen" || slot_now >= l.slot + 2 || l.at.elapsed() > Duration::from_secs(2) { let r = self.land_rec(&l, first); self.rec(r); } else { keep.push(l); }
+                if l.res == "unseen" || slot_now >= l.slot + 2 || l.at.elapsed() > Duration::from_secs(2) { let mut r = self.land_rec(&l, first); self.land_rec43(&mut r, &l.att.sig); self.rec(r); } else { keep.push(l); }
             }
             self.lands = keep;
         }
@@ -3789,7 +3905,7 @@ impl PsLive {
         }
         // forget finished windows, old attempts, idle tapes
         let done: Vec<u64> = self.wins.values().filter(|w| w.disarmed.is_some() && w.checked && w.resolved >= w.sent).map(|w| w.id).collect();
-        for id in done { self.wins.remove(&id); }
+        for id in done { self.wins.remove(&id); self.acct_forget43(id); }
         if self.atts.len() > 4096 { self.atts.retain(|_, (a, d)| !*d || a.deadline + 300 > slot_now); }
         if slot_now >= self.last_sweep + 4 {
             self.last_sweep = slot_now;
@@ -3809,6 +3925,8 @@ impl PsLive {
         }
         // dip26 RE-ARM: the waiting windows whose position / token account cleared arm now (nothing without it)
         if self.rm.is_some() { self.rearm_tick(slot_now); }
+        // dip43: papers, shadows, the book's retire, the control file's dip43 keys (each nothing with its flag off)
+        self.tick43(slot_now);
     }
 
     /// dip20 QUIET's part of the tick: (1) the preload's answer, merged into the live book (once; the arm rule's schedule moves up by
@@ -4119,7 +4237,7 @@ impl PsLive {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status()
-            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default();
+            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.status43();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -4304,6 +4422,8 @@ impl PsLive {
         // dip42: only with them on (Q1: its thread saves the wallet history and answers)
         if let Some(j) = self.f2_finish() { fin["fam2"] = j; }
         if let Some(j) = self.q1.as_mut().and_then(|q| q.finish()) { fin["q1"] = j; }
+        // dip43: only when an option is given / something happened (the exit shadows still open are written)
+        if let Some(j) = self.finish43() { fin["dip43"] = j; }
         fin
     }
 
@@ -4467,7 +4587,7 @@ impl PsLive {
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true), skips: Mutex::new(FxHashMap::default()),
-            build_us: Mutex::new(Ring::default()) });
+            build_us: Mutex::new(Ring::default()), g43: Default::default() });
         sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
         let mut det = pl::Detector::new(cfg.whale_pct);
         // dip27: the hold clocks only with the annotations on (as a run)
@@ -4484,7 +4604,7 @@ impl PsLive {
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1 }, atx, orx)
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, d43: Default::default() }, atx, orx)
     }
 
     /// dip19 tests: the chain work queued so far (taken)
@@ -4594,6 +4714,11 @@ mod dip41_wd_tests;
 #[cfg(test)]
 #[path = "dip42_tests.rs"]
 mod dip42_tests;
+// dip43 Builder A (11-10 PKT): the feed-stall watchdog, blind-fill recovery / dead-man, control keys, accounting and shadows; off / log by
+// default = dip42 (golden)
+#[cfg(test)]
+#[path = "dip43a_tests.rs"]
+mod dip43a_tests;
 
 #[cfg(test)]
 mod tests {
@@ -4685,7 +4810,7 @@ mod tests {
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default() };
         let (ca, cb, cc) = ([1u8; 32], [2u8; 32], [3u8; 32]);
         {
             let mut g = sh.cr.lock().unwrap();
@@ -4745,7 +4870,7 @@ mod tests {
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default() };
         let m = 60_000_000_000u64;
         let t0 = 1_000 * m;
         assert_eq!(breaker_note(&sh, &b, -300_000_000, t0), None, "one big loss: not yet");
@@ -4760,7 +4885,7 @@ mod tests {
         let sh2 = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default() };
         assert!(breaker_paused(&sh2));
         sh2.brk_until.store(arbx::fast::mono_ns().saturating_sub(1), Ordering::SeqCst);
         assert!(!breaker_paused(&sh2));
