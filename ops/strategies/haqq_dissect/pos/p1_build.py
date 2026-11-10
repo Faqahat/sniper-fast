@@ -14,12 +14,12 @@ Context per buy (only rows BEFORE the buy in chain order -> causal):
   and since his previous buy, distinct outside wallets since his previous buy, price vs his previous buy / vs avg cost of the open
   position, the open position's unrealized return (exact curve sell of his open tokens at the pre-buy state, net of fee),
   price vs 10-slot high, price change over the last 10 slots, age, curve SOL, mayhem flag (create).
-Out: /home/moiz/sniper-data/haqq_dissect/pos/p1.pkl"""
+Out: /home/it/sniper-data/haqq_dissect/pos/p1.pkl"""
 import json, time, collections, pickle, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/pos"
+OUT = "/home/it/sniper-data/haqq_dissect/pos"
 TXC_DEF = 0.000396; FAILSH = 0.088 * 0.000042
 
 

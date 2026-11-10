@@ -5,14 +5,14 @@ Out: scratch hd_front/win/<chunk>.mints (grep -F patterns) and <chunk>.json (min
 import pickle, json, os, collections
 import numpy as np
 import sys
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 SCR = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/hd_front/win"
 os.makedirs(SCR, exist_ok=True)
 R = pickle.load(open(f"{OUT}/f1.pkl", "rb")); SE = pickle.load(open(f"{OUT}/f2_sets.pkl", "rb"))
 ids, _ = L.ids_map()
-F = json.load(open("/home/moiz/sniper-data/dv8/tab/files.json"))
+F = json.load(open("/home/it/sniper-data/dv8/tab/files.json"))
 F = [f for f in F if f["slot_hi"] >= 460541261 - 100]
 lo = np.array([f["slot_lo"] for f in F]); hi = np.array([f["slot_hi"] for f in F])
 o = np.argsort(lo); F = [F[k] for k in o]; lo = lo[o]; hi = hi[o]

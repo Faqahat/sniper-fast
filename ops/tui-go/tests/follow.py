@@ -20,8 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from ptygo import Pty  # noqa: E402
 
-DATA = os.environ.get("DIPMON_DATA", "/home/moiz/sniper-data/runs")
-BIN = os.environ.get("DIPMON_BIN", "/home/moiz/sniper-data/tui/dipmon-go")
+DATA = os.environ.get("DIPMON_DATA", "/home/it/sniper-data/runs")
+BIN = os.environ.get("DIPMON_BIN", "/home/it/sniper-data/tui/dipmon-go")
 ORACLE = os.path.join(HERE, "oracle", "dipmon_v1.py")
 SPEED = float(os.environ.get("FOLLOW_SPEED", "200" if os.environ.get("QUICK") else "50"))
 RUNS = [x for x in os.environ.get("FOLLOW_RUNS", "26,27").split(",") if x]

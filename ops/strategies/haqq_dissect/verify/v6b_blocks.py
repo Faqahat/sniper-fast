@@ -5,8 +5,8 @@ usage: v6b_blocks.py FRESH_ADDED N_HOURS"""
 import sys, pickle, collections
 import numpy as np
 COST = 5120 + 200_000 + 605_000 + 1_200_000 + 5020; FAIL = 5120
-R = "/home/moiz/sniper-data/haqq_dissect/rearm"; name = "any:20:30:8:2"
-S = np.load("/home/moiz/sniper-data/dv8/tab/slots.npy"); sl = S["slot"].astype(np.int64); bt = S["bt"].astype(np.int64)
+R = "/home/it/sniper-data/haqq_dissect/rearm"; name = "any:20:30:8:2"
+S = np.load("/home/it/sniper-data/dv8/tab/slots.npy"); sl = S["slot"].astype(np.int64); bt = S["bt"].astype(np.int64)
 def hof(slot): return (int(bt[min(int(np.searchsorted(sl, slot)), len(sl) - 1)]) + 18000) // 3600 * 3600 - 18000
 fresh = float(sys.argv[1]); N = float(sys.argv[2])
 H = collections.defaultdict(float); nd = None

@@ -6,7 +6,7 @@ Bootstrap = resampling fills (paired: the same fills at both sizes), 5-95 %. Str
 import json, collections, time
 import numpy as np
 
-D = "/home/moiz/sniper-data/presend_size"
+D = "/home/it/sniper-data/presend_size"
 R = json.load(open(f"{D}/results.json"))
 T = R["trades"]
 R["cut"] = {g: {k: np.array(v) / 1e9 for k, v in c.items()} for g, c in R["cut"].items()}   # lamports -> SOL

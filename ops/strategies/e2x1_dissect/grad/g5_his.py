@@ -8,7 +8,7 @@ from glib import Tape, last_before, pool_state_after, pool_fee, pkt
 
 def sigh(s): return int.from_bytes(hashlib.blake2b(s.encode(), digest_size=8).digest(), "little")
 T = Tape()
-L = pickle.load(open("/home/moiz/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
+L = pickle.load(open("/home/it/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
 G = sorted([l for l in L if l.get("swap_sell")], key=lambda l: l["s"])
 NS = [2, 5, 10, 20, 48, 100, 200]
 rows = []
@@ -48,7 +48,7 @@ for l in G:
     rows.append(r)
     f = lambda v, p=3: "  -  " if v is None else f"{v:.{p}f}"
     print(f"{r['day']:4} {r['t']} {m[:8]} {r['bot']:6} {r['cost']:.3f} {r['vsol']:6.1f} {r['age']:6} {str(r['buy_to_cmp']):>8} {str(r['cmp_to_mig']):>8} {str(r['mig_to_sell']):>9} {str(r['last_to_sell']):>10}  {f(his_out)}  {f(pm)}  {r['proceeds']:.3f}  {r['pnl']:+.3f} | " + " ".join(f"{a:+.2f}" for a in alt))
-pickle.dump(rows, open("/home/moiz/sniper-data/e2x1_dissect/grad/his.pkl", "wb"))
+pickle.dump(rows, open("/home/it/sniper-data/e2x1_dissect/grad/his.pkl", "wb"))
 for d in ("D0", "D1"):
     R = [r for r in rows if r["day"] == d]
     if not R: continue

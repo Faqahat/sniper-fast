@@ -6,7 +6,7 @@
 Out: haqq_dissect/exit/x13.txt"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 QS = (5, 15, 25, 35, 45, 55, 65, 75, 85, 95)
 out = []

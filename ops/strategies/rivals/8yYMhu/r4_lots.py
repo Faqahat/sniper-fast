@@ -9,7 +9,7 @@ Out: DATA/lots.pkl, DATA/fails.pkl"""
 import pickle, collections, os, json
 import numpy as np
 W = "8yYMhuYo1LzgCmeeg3vRkhRtJ8xFC7v7S4ufABtQXjS3"
-D = "/home/moiz/sniper-data/rivals/8yYMhu"
+D = "/home/it/sniper-data/rivals/8yYMhu"
 rows = pickle.load(open(f"{D}/tx.pkl", "rb"))
 if os.path.exists(f"{D}/rpc_tx.pkl"):
     RP = {r["sig"]: r for r in pickle.load(open(f"{D}/rpc_tx.pkl", "rb"))}

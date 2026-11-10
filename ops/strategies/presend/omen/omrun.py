@@ -7,7 +7,7 @@ import sys, os, pickle, time, argparse, collections, math, json
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 sys.path.insert(0, "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/rearm2/code")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/density")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/density")
 import rlib, sim, dsim, drun, s48lib, omsim
 from run import make_cfg, OUR
 from multiprocessing import Pool

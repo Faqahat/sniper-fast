@@ -5,7 +5,7 @@ Each of our filled buys (tape signer = our wallet), the value of exactly those t
 Value = vsol*tok/(vtok+tok) * (1 - (fee_bps+cfee_bps)/1e4). P&L = value - buy SOL (from the buy's trade event + its fees).
 Pre-send vs regular by the buy tx's CU limit (pre-send 120000, regular 100000) from tab/ours.jsonl."""
 import json, numpy as np, collections, time
-TAB = "/home/moiz/sniper-data/dv8/tab"; SMS = 212.3
+TAB = "/home/it/sniper-data/dv8/tab"; SMS = 212.3
 T = np.load(f"{TAB}/trades.npy", mmap_mode="r")
 OURS = (313621, 372603)
 cul = {}

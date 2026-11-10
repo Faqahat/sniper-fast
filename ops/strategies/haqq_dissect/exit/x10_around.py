@@ -5,7 +5,7 @@ sells landing just after his exit vs after the random time. MEASURED on the tape
 Out: haqq_dissect/exit/x10.txt"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 out = []
 def P(*a):

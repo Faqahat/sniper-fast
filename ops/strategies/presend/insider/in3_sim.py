@@ -9,9 +9,9 @@ sender's caps, the one-position pause, the 1 SOL / 24 h failed-try budget, exits
 (INFERRED: phantom tries on the real tape; inputs MEASURED per run.)"""
 import sys, json, pickle, math, heapq, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
-sys.path.insert(0, "/home/moiz/sniper/ops/obs/paper_audit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/obs/paper_audit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import c37lib as L
 import pa_lib as PA
 import ma_lib as M

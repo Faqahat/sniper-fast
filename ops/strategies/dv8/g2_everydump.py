@@ -8,7 +8,7 @@ NOW costs, timer 30 (the old VAL choice) and timer 8, K=1 and no cap, on the ful
   e  d calibrated to live (a x curve P&L + b per fire)
 Out: dv8/g2.txt"""
 import sys, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 from g1_walkforward import load, Rep, calib_boot, COST
 out = []

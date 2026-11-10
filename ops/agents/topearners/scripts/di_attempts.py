@@ -1,8 +1,8 @@
 # index gap (dump -> attempt) for ALL same-slot buy attempts (ok + failed), per wallet; R2 also by leader client.
 import json, gzip, collections, sys, bisect
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 TOP = [l.strip() for l in open(B + sys.argv[1]) if l.strip()] + ["2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"]
-LB = json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json")); LEAD = LB["leaders"]; NODES = LB["nodes"]
+LB = json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json")); LEAD = LB["leaders"]; NODES = LB["nodes"]
 dumps = collections.defaultdict(list)
 for line in gzip.open(B + "races.jsonl.gz", "rt"):
     r = json.loads(line); dumps[r["m"]].append((r["s"], r["i"], r["user"], r["sol"]))

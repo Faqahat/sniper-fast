@@ -6,7 +6,7 @@ Open lots at the tape end are marked at the last price x 0.9875. ATA rent is lef
 Out: haqq_strat/s3.txt + s3.json + lots24.pkl (per-lot rows reused later)."""
 import json, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_strat")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_strat")
 from hs_lib import *
 
 out = []

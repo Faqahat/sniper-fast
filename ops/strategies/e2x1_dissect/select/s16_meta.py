@@ -4,7 +4,7 @@ uri host take-rate (target-encoded on TRAIN tokens only = created before the new
 non-ascii name, word count, 'pump' vanity suffix. Out: meta.npz (arrays indexed by tape mint id)."""
 import sys, json, re, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"]); MN, US = names(); mid = {m: i for i, m in enumerate(MN)}
 CA = json.load(open(f"{OUT}/creates_all.json"))

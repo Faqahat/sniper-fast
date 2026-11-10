@@ -6,9 +6,9 @@ slot, outside buys ahead, result); regular: did the engine log the dump, gate re
 Out: sniper-data/haqq_dissect/front/f4.pkl (list of dicts aligned with f2_sets S then C)"""
 import sys, pickle, json, collections, math, bisect
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 SCR = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/main"
 exec(open(f"{SCR}/regions.py").read().split("# our pre-send stats")[0])   # HUBS, hub(), geo
 REG = {"Amsterdam": "EU", "Frankfurt": "EU", "London": "EU", "Paris": "EU", "Warsaw/East EU": "EU", "New York/NJ": "US-East", "Ashburn VA": "US-East",

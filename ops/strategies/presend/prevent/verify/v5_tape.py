@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """VERIFY step 5 [MEASURED, read-only]: own per-mint trade tape for every live window mint (26 runs), from the decoded recorder tabs on
 disjoint slot ranges (quiet3 chain, young ext, paper_audit tab, who tab_gap, multiarm tab38, tab_gap) + creates (creator per mint).
-Out: /home/moiz/sniper-data/prevent/verify/tape.pkl {mints: {mint: dict of arrays}, users: [..], creates: {mint: (creator, slot)}}"""
+Out: /home/it/sniper-data/prevent/verify/tape.pkl {mints: {mint: dict of arrays}, users: [..], creates: {mint: (creator, slot)}}"""
 import json, pickle, time, glob, os
 import numpy as np
-D = "/home/moiz/sniper-data"; OUT = f"{D}/prevent/verify"
+D = "/home/it/sniper-data"; OUT = f"{D}/prevent/verify"
 SRC = [("chain", f"{D}/presend_quiet3", 0, 462709231), ("chain", f"{D}/presend_young/ext", 462709231, 462710488),
        ("tab", f"{D}/paper_audit/tab", 462710488, 463010350), ("tab", f"{D}/prevent/who/tab_gap", 463010350, 463021093),
        ("tab", f"{D}/multiarm/tab38", 463021093, 463049836), ("tab", f"{D}/prevent/who/tab_gap", 463049836, 1 << 40)]

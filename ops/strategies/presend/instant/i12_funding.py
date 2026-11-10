@@ -4,7 +4,7 @@
 # seller or a shared funder. Only for wallets with a short history (fresh rotation wallets): at most MAXPAGES pages of 1000 sigs.
 # usage: python3 -I i12_funding.py PAIRS.json OUT.json      (PAIRS = [[label, seller, buyer], ...])
 import sys, json
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/instant")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/instant")
 import rpc_ro as R
 MAXPAGES = 3
 def oldest(w):

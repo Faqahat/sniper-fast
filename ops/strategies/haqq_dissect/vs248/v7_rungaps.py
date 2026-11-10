@@ -3,10 +3,10 @@
 excluded), D2-D5, and our wallet P&L per running hour (MEASURED) -> INFERRED value of closing the run gaps at our current rate."""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-R = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/gap/g2_engine.pkl", "rb"))
-W = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/vs248/v2.pkl", "rb"))["wal"]
+R = pickle.load(open("/home/it/sniper-data/haqq_dissect/gap/g2_engine.pkl", "rb"))
+W = pickle.load(open("/home/it/sniper-data/haqq_dissect/vs248/v2.pkl", "rb"))["wal"]
 iv = sorted((X["start"], X["end"]) for X in R.values() if X["start"] and not X["probe_run"])
 m = []
 for a, b in iv:

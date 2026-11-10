@@ -9,7 +9,7 @@ Both are scored on the live fires: fill rate and curve P&L vs live; M_rank fitte
 AMS->FRA, early->late, late->early). Out: dv8/c2.txt, dv8/rank_model.json"""
 import json, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
 out = []
 def P(*a):

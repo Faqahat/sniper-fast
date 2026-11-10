@@ -3,11 +3,11 @@
 Inputs: local copies of /root/prod/runs/dip_ams_r{24,25}.{log,jsonl} (pulled with sudo cat, md5 checked).
 Every number here is MEASURED (the engine's own records). Window / attempt ids restart at each engine start, so every
 key carries the segment number (one segment = one run_start).
-Writes /home/moiz/sniper-data/replay065/live.pkl"""
+Writes /home/it/sniper-data/replay065/live.pkl"""
 import json, re, collections, pickle, sys
 
-LIVE = "/home/moiz/sniper-data/replay065/live"
-OUT = "/home/moiz/sniper-data/replay065/live.pkl"
+LIVE = "/home/it/sniper-data/replay065/live"
+OUT = "/home/it/sniper-data/replay065/live.pkl"
 RUNS = ("r24", "r25")
 
 

@@ -11,13 +11,13 @@ Exit   = timer H slots after the entry slot (state after the last trade of slot 
          sold at the state at the end of the next slot). Our buy is put into the curve (constant product); later trades keep their SOL.
          'f20' = the same with 20% of the outside buy SOL between entry and exit removed (fewer followers).
 P&L gross of tx costs, at SIZE SOL, pump fee 1.25% each side.
-Out: /home/moiz/sniper-data/haqq_strat/uni.npz"""
+Out: /home/it/sniper-data/haqq_strat/uni.npz"""
 import json, time, pickle, sys
 import numpy as np
-TAB = "/home/moiz/sniper-data/haqq_model/tab"; D = "/home/moiz/sniper-data/haqq_strat"
+TAB = "/home/it/sniper-data/haqq_model/tab"; D = "/home/it/sniper-data/haqq_strat"
 HAQQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 OURS = ("2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR")
-FB = set(json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
+FB = set(json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
 SIZE = 0.4; FEE = 0.0125; SMS = 212.0
 LS = ("ideal", "l30", "l50", "l75", "l100", "real")
 HS = (2, 3, 5, 8, 12, 20, 30)

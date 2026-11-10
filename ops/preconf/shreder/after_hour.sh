@@ -4,9 +4,9 @@
 # env:   ENGINE_HOST=ams|fra  ENGINE_LOG=<path on that host>   (passed to fetch.sh; default: the newest /root/prod/runs/dip_<host>_r*.jsonl on that host)
 set -uo pipefail
 H=$(dirname "$(readlink -f "$0")")
-RUN=$(cat /home/moiz/sniper-data/preconf/CURRENT_RUN 2>/dev/null); ONLY=0
+RUN=$(cat /home/it/sniper-data/preconf/CURRENT_RUN 2>/dev/null); ONLY=0
 for a in "$@"; do case "$a" in --analyze-only) ONLY=1;; *) RUN=$a;; esac; done
-DATE=${RUN#trial_}; HD=/home/moiz/sniper-data/preconf/$DATE
+DATE=${RUN#trial_}; HD=/home/it/sniper-data/preconf/$DATE
 echo "== $(TZ=Asia/Karachi date +%H:%M:%S) PKT after-hour pipeline for $RUN -> $HD"
 [ "$ONLY" = 1 ] || bash "$H/fetch.sh" "$RUN" || echo "!! fetch reported a problem (see above); continuing with what is on the host"
 # chain-recording coverage (FRA collector copies arrive every ~10 min)
@@ -14,7 +14,7 @@ python3 -I - "$HD" <<'PY'
 import glob, json, os, re, sys, time
 hd = sys.argv[1]
 last = 0
-for p in glob.glob("/home/moiz/sniper-data/collect/run_*/txs/txs_*.jsonl.gz"):
+for p in glob.glob("/data/tapes/collect/run_*/txs/txs_*.jsonl.gz"):
     m = re.search(r"txs_(\d+)\.jsonl\.gz$", p)
     if m: last = max(last, int(m.group(1)))
 end = 0

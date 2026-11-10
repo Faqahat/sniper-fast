@@ -10,7 +10,7 @@
 #   exit (main) "trail": min hold 9 slots, then first others' trade >= 10% below the peak since entry, or 5 quiet slots; max 1500 slots
 import sys, json, os, time, numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/vm1")
+sys.path.insert(0, "/home/it/sniper/ops/dip/vm1")
 import rlib, core, livecal, sim2
 OUT = rlib.DD + "/runs"; os.makedirs(OUT, exist_ok=True)
 D = rlib.load(); T = D.T
@@ -23,7 +23,7 @@ CLS = {"D": base & (T["buy"] == 0) & (sol >= 1) & (D.drop >= 0.06) & (ages > 10)
 cls = np.full(len(T), -1, np.int8)
 for j, (c, m) in enumerate(CLS.items()): cls[m & (cls < 0)] = j
 CAND = np.where(cls >= 0)[0]
-LAND = {"ours": np.array(json.load(open("/home/moiz/sniper-data/vm1/livecal.json"))["deltas"])}
+LAND = {"ours": np.array(json.load(open("/home/it/sniper-data/vm1/livecal.json"))["deltas"])}
 MS = 1 / (core.SLOT_SEC * 1000)
 for f in (16, 25, 35): LAND[f"ours-{f}ms"] = np.maximum(LAND["ours"] - f * MS, 2 * MS)
 LAND["his_raw"] = np.load(rlib.DD + "/his_land.npy")

@@ -7,10 +7,10 @@
      (one-position), modelled stops; "M1" mode. Calibrated in the same mode on the armed windows' virtual twins (other windows' live
      positions as pauses) -> calib_m1 rows below.
 Value = realized-equivalent P&L - 5120 lamports per landed failed try (SOL). REPS worlds each, means.
-Out: /home/moiz/sniper-data/presend_quiet4/values_r37.pkl {"stops": [...], "cuts": [...], "armed": {key: {(stop, cut): (v, f)}}, "virt": {...}, "calib_m1": {...}}"""
+Out: /home/it/sniper-data/presend_quiet4/values_r37.pkl {"stops": [...], "cuts": [...], "armed": {key: {(stop, cut): (v, f)}}, "virt": {...}, "calib_m1": {...}}"""
 import sys, pickle, collections, time, numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/filter/quiet4")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/filter/quiet4")
 import q3lib as Q
 L = Q.L
 REPS = 8

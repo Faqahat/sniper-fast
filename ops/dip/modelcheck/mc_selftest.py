@@ -2,7 +2,7 @@
 # self-test: mc_lib.replay (default mode) must reproduce the stored dd1 outputs (status, ratio, s_in, P&L of all 200 exits, exit offsets)
 # on random dump rows of the given day, for dd1_<day>.npz (0.55 SOL, guard 1.05) and dd1_<day>_s0.35_g1000.npz (0.35, no guard).
 import sys, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/modelcheck")
+sys.path.insert(0, "/home/it/sniper/ops/dip/modelcheck")
 import mc_lib as M
 day = sys.argv[1] if len(sys.argv) > 1 else "R4"; N = int(sys.argv[2]) if len(sys.argv) > 2 else 400
 d = M.load_day(day); rng = np.random.default_rng(1)

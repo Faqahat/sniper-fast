@@ -16,12 +16,12 @@ His lots: precision / recall of the WL trigger vs his real first sell (trigger l
 Out: sellid/s6.txt, s6_grid.pkl"""
 import pickle, sys, json, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev as ev12
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 DAYS = (2, 3, 4, 5, 6)
 out = []
 def P(*a):
@@ -39,7 +39,7 @@ def ride_time(S, t1, s, tmax):
 
 def lists(LOTS, ids, idm, H):
     L4 = json.load(open(f"{OUT}/s4_lists.json"))
-    fb = set(idm[w] for w in json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm)
+    fb = set(idm[w] for w in json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm)
     OUTL = {}
     for d in DAYS:
         for N in (25, 50, 100):
@@ -101,7 +101,7 @@ def evaluate(S, pol, DR, DT, kind, LST, d, act_q=None):
 def main():
     t0 = time.time()
     Z = pickle.load(open(f"{OUT}/s1.pkl", "rb")); LOTS = Z["lots"]; H = Z["H"]
-    ids = json.load(open("/home/moiz/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
+    ids = json.load(open("/home/it/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
     LST = lists(LOTS, ids, idm, H)
     print(f"lists built ({time.time() - t0:.0f}s)", flush=True)
     DR, DT, nd = delays()

@@ -2,7 +2,7 @@
 # Compare price/flow after: restored dumps (bait proxy) vs plain dumps vs ordinary moments (hold, no bait).
 import gzip, json, glob, collections, statistics as st, sys
 R = collections.defaultdict(list)
-for f in glob.glob('/home/moiz/sniper-data/strategies/baitflip2/*.jsonl.gz'):
+for f in glob.glob('/home/it/sniper-data/strategies/baitflip2/*.jsonl.gz'):
     for l in gzip.open(f, 'rt'):
         r = json.loads(l)
         if r['age'] < 15 or r['age'] > 2000: continue       # skip launch-bundle phase and very old tokens

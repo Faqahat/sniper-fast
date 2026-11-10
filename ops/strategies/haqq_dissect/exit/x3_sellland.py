@@ -9,7 +9,7 @@ Per live position: our buy rows and sell rows on the tape (wallet, slot, idx), c
 Out: haqq_dissect/exit/sellland.pkl (per position rows), x3.txt"""
 import pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 import dv8lib as L
 out = []

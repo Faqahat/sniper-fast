@@ -21,12 +21,12 @@ our landing slot minus the dump slot / outside rows between the dump and us.
 Out: data/lim/sel_events.pkl"""
 import json, pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import dv8lib as L, dv8sim as S
 from xsim import Pos
 from x12_wave import ev as wave_ev
 from x7_ourexits import delays
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"; HD = "/home/moiz/sniper-data/haqq_dissect"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"; HD = "/home/it/sniper-data/haqq_dissect"
 FOLS = (1.0, 0.9, 0.8); WAVE = ("RIDE", 150, 150, 700); HZ = 40
 
 

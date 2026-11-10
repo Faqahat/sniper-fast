@@ -8,7 +8,7 @@
 # -> patterns/stories_{R2,R3}.jsonl  {id, m, strata, focus_bot, text}
 import sys, json, random, collections, time
 import numpy as np
-PO = "/home/moiz/sniper-data/strategies/patterns"
+PO = "/home/it/sniper-data/strategies/patterns"
 WTN = {0: "w", 1: "creator", 2: "insider", 3: "new", 4: "bot", **{10 + k: f"F{k}" for k in range(1, 11)}}
 BOT = {v[0]: v[1] for v in json.load(open(f"{PO}/botids.json")).values()}
 EDGES = [0, 1, 5, 15, 30, 60, 120, 180, 240, 300, 420, 600, 900, 1200, 1800, 2700, 4200, 6000, 9000, 14000, 20000, 10 ** 9]

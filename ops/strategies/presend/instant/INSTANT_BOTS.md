@@ -126,7 +126,7 @@ Jito explorer links, reactive bots, and all 19 probe instant buys).
 - **Wallet profiles (i6/i7/i18):** every recorded tx of 109 wallets: failed, trades, and successful txs without a trade.
 - **Bundles (i3/i10/i14/i16):** public Jito explorer API (`transaction/<sig>` → bundle; `bundle/<id>` → txs, tippers, tip).
 - **Anatomy (i11), funding (i12), block sizes (i17):** read-only RPC.
-- Scripts: `ops/strategies/presend/instant/` (run_pipeline.sh runs i1→i9 for one run). Data: `/home/moiz/sniper-data/presend_instant/`.
+- Scripts: `ops/strategies/presend/instant/` (run_pipeline.sh runs i1→i9 for one run). Data: `/home/it/sniper-data/presend_instant/`.
 
 ## Limits
 - No PoH / entry timing in the AMS records (poh null). Leader-time ms are block-size averages (INFERRED).

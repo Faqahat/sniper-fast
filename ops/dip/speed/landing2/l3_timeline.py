@@ -7,7 +7,7 @@
 # Output: OUT/timeline.json
 import json, collections, sys, os
 
-OUT = "/home/moiz/sniper-data/landing2"
+OUT = "/home/it/sniper-data/landing2"
 SMS = 212.0
 OURS = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 PROS = {"HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ": "HkQ7hMjy", "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq": "haqqiUUX",
@@ -15,7 +15,7 @@ PROS = {"HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ": "HkQ7hMjy", "haqqiUUXB5g
         "6n2cCJrrEAi4SZbBquj9mffUGAFXhDBmFeQEi3maSRcx": "6n2cCJrr", "8PgC4ngpx6zUG3KFQAQHqSeePDFA7kGyEaA2yMoZ4HUk": "8PgC4ngp",
         "9k78QZywYyqUZvZrk1tDuE9qPUbZAz2aFbjUneihdgFX": "9k78QZyw", "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw": "DYXDDrZC",
         "CZ77onJzkSCwZC51Gg7H8oEUUJhqcx8LLKqnsNXWZSBx": "CZ77onJz", "6VzXcLk9rCLDHgRBmUGKK8HY2KvhHmR4pZPCxi4tA1kx": "6VzXcLk9"}
-COHORT = set(json.load(open("/home/moiz/sniper/ops/overnight/dip/cohort_R1.json")))
+COHORT = set(json.load(open("/home/it/sniper-data/overnight/dip/cohort_R1.json")))
 BUYIX = {"Buy", "BuyExactSolIn", "BuyExactQuoteIn", "BuyExactQuoteInV2", "BuyV2", "BuyV3"}
 INSTANT_IDX = 3
 
@@ -53,7 +53,7 @@ def main():
     sstat = {int(k): v for k, v in json.load(open(f"{OUT}/slot_stats.json")).items()}
     bsz = {int(k): v for k, v in json.load(open(f"{OUT}/block_sizes.json")).items() if isinstance(v, int)}
     tg = json.load(open(f"{OUT}/targets.json"))["leaders"]
-    sch = json.load(open("/home/moiz/sniper-data/competitors2/schedule_1067.json"))
+    sch = json.load(open("/home/it/sniper-data/competitors2/schedule_1067.json"))
     ids, sl0, sl = sch["ids"], sch["start"], sch["slot_leader"]
     lead = lambda s: ids[sl[s - sl0]] if 0 <= s - sl0 < len(sl) and sl[s - sl0] is not None else None
 

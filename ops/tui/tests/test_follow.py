@@ -21,7 +21,7 @@ sys.path.insert(0, ROOT)
 import dipmon  # noqa: E402
 from ptyrun import Pty  # noqa: E402
 
-DATA = os.environ.get("DIPMON_DATA", "/home/moiz/sniper-data/runs")
+DATA = os.environ.get("DIPMON_DATA", "/home/it/sniper-data/runs")
 SRC = os.path.join(DATA, "ams/runs/dip_ams_r26.jsonl")
 SPEED = float(os.environ.get("FOLLOW_SPEED", "200" if os.environ.get("QUICK") else "50"))
 FIELDS = [("total_lamports", None), ("fills", "presend"), ("wins", "presend"), ("realized", "presend"), ("rent", "presend"),

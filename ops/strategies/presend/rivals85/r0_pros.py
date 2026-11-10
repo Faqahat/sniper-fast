@@ -10,12 +10,12 @@ Sources (non-overlapping slot segments):
   multiarm/tab38f           463021093 .. 463053837 (r38)
   multiarm/tab39            463081489 .. 463111634 (r39)
   rivals85/tab39x           463111635 .. 463117245 (r39, decoded here from the recorder chunks)
-Out: /home/moiz/sniper-data/rivals85/pros.json
+Out: /home/it/sniper-data/rivals85/pros.json
 usage: r0_pros.py"""
 import json, collections
 import numpy as np
 
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 OUT = f"{D}/rivals85"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 RUNS = {"A34": (462520928, 462574692), "A35": (462574968, 462646113), "A36": (462646721, 462712887),

@@ -2,9 +2,9 @@
 the armed-window replay (token level, draws, blocking, concurrency cap), costs, today's pre-send baseline windows."""
 import sys, json, pickle, collections, heapq
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/follow"
+OUT = "/home/it/sniper-data/haqq_dissect/follow"
 SMS = 212.0
 PF = 0.52            # MEASURED (f2b): live fill 0.439 vs model 0.841 on 2,097 live windows that saw a crossing -> fill thinning
 FILL_NOW = 2.01e-3   # MEASURED (exec D): pre-send fill tx 0.205 + sell 1.805 mSOL

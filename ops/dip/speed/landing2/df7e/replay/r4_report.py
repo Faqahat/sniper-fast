@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # DF7e replay step 4: tables from runs/*.npy (mean over Monte-Carlo seeds). Read-only.
 import sys, glob, json, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/vm1")
+sys.path.insert(0, "/home/it/sniper/ops/dip/vm1")
 import rlib, core, sim2
 R = rlib.DD + "/runs"
 S0, S1 = 460476411, 461295954

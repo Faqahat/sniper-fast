@@ -75,7 +75,7 @@ with ProcessPoolExecutor(8) as ex:
 os.environ.setdefault("CONSTANTK_TOKEN", "dummy"); os.environ.setdefault("TIPMAP", os.path.join(HERE, "tipmap.json"))
 mods = {}
 for R in RUNS:
-    os.environ["OUT"] = os.path.join(os.environ.get("CMP_TMP", "/home/moiz/sniper-data/rec/test/cmp_tmp"), os.path.basename(R))
+    os.environ["OUT"] = os.path.join(os.environ.get("CMP_TMP", "/home/it/sniper-data/rec/test/cmp_tmp"), os.path.basename(R))
     spec = importlib.util.spec_from_file_location("C_" + os.path.basename(R), os.path.join(HERE, "..", "collect", "collect.py"))
     C = importlib.util.module_from_spec(spec); spec.loader.exec_module(C)
     buf = []; C.chunk_write = buf.append; C.jlog = lambda *a, **k: None; C.EQ = type("Q", (), {"put": lambda self, x: None})()

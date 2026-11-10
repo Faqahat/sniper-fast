@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """HAQQ_STRAT step 2 (read-only): our live engine records in the haqq window, trimmed to what the speed / skip study needs.
 Runs: AMS r24-r33 (EgxfYgEb), FRA r23-r25 (2g7rYv7y). Copies of r29-r33 were read with `sudo cat` from the AMS edge.
-Out: /home/moiz/sniper-data/haqq_strat/live.pkl  {run: {"start","end","regular":[...],"presend":[...],"dumps":{sig:..},
+Out: /home/it/sniper-data/haqq_strat/live.pkl  {run: {"start","end","regular":[...],"presend":[...],"dumps":{sig:..},
       "picks":{sig:..}, "pick_skip":{sig:why}, "arms":[...], "arm_skips":[...]}}"""
 import json, pickle, glob, os
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 RUNS = {f"AMS{n}": f"{D}/runs/ams/runs/dip_ams_r{n}.jsonl" for n in (24, 25, 26, 27)}
 RUNS["AMS28"] = f"{D}/presend_filter/live28/dip_ams_r28.jsonl"
 RUNS.update({f"AMS{n}": f"{D}/haqq_strat/live/dip_ams_r{n}.jsonl" for n in (29, 30, 31, 32, 33)})

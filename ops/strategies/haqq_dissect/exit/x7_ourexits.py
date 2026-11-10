@@ -16,7 +16,7 @@ same for every policy and are NOT included (curve P&L, as the dv8 calibration ro
 Out: haqq_dissect/exit/x7.txt, x7_grid.pkl"""
 import pickle, sys, itertools, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 from xsim import Pos, QS
 SELL_TX = 0.0018

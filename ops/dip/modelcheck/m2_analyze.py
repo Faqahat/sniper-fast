@@ -5,16 +5,16 @@
 import sys, os, json, gzip, zlib, collections
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-OUT = "/home/moiz/sniper-data/modelcheck"
+OUT = "/home/it/sniper-data/modelcheck"
 BANDS = [(0, 10), (10, 35), (35, 50), (50, 75), (75, 401)]
 BN = ["0-10", "10-35", "35-50", "50-75", "75+"]
 FOCUS = ["HkQ7hMjy", "haqqiUUX", "DYXDDrZC", "ETwEAQPL", "sssssDdM", "ssssswdk", "EMKY7r6U", "9pQQc1xy", "BUkpShoE", "3MHgGwdL", "5mWe9kLZ", "CZ77onJz",
          "omegoMAe", "E2x1ewwX", "6VzXcLk9", "5k2Ckkiu"]
 
 def clients():
-    lb = json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json"))["leaders"]
-    sc = json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/schedule_cur.json"))
-    pk = {r["pk"]: r["client"] for r in json.load(open("/home/moiz/sniper-data/leader_geo.json"))["rows"]}
+    lb = json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json"))["leaders"]
+    sc = json.load(open("/home/it/sniper/ops/dip/speed/leaders/schedule_cur.json"))
+    pk = {r["pk"]: r["client"] for r in json.load(open("/home/it/sniper-data/leader_geo.json"))["rows"]}
     def f(s):
         u = lb.get(str(s))
         if u is None and sc["start"] <= s < sc["start"] + len(sc["slot_leader"]): u = sc["ids"][sc["slot_leader"][s - sc["start"]]]

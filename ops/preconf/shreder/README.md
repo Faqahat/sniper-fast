@@ -5,7 +5,7 @@ Read-only measurement. Nothing here signs or sends a transaction, and nothing to
 ## The trial
 
 - Shreder gives a one-hour trial of **preconfs** (pre-shred transactions from connected leaders) and its normal **Binary** stream (shred-reconstructed).
-- Access is an IP allowlist with one IPv4, FRA 84.32.100.36, so everything Shreder runs on FRA. There is no token. AMS has no access.
+- Access is an IP allowlist with one IPv4, FRA cyberfra, so everything Shreder runs on FRA. There is no token. AMS has no access.
 - The endpoint defaults to `http://fra-allnodes.binary.shreder.xyz:9991`, the docs' preconf example. An optional access file `/root/shreder.key` overrides it, with `endpoint = ...`, `token = ...` and `header = x-token` (or bare lines).
 - The endpoint and token are never printed. Logs show only an endpoint id (an FNV hash).
 
@@ -54,7 +54,7 @@ Read-only measurement. Nothing here signs or sends a transaction, and nothing to
 - Keys: KALDERA_TOKEN equals CONSTANTK_TOKEN (one key). The race adds 2 deshred + 1 Subscribe streams in Frankfurt, far under the per-key per-region limits (15/25 and 75/200). **Start order: engine (if it moves to FRA) first, then `start_all.sh`.**
 - `ck_status.sh` should show all 3 feeds connected within about 30 s of the start.
 
-## Commands (host, from `/home/moiz/sniper/ops/preconf/shreder`)
+## Commands (host, from `/home/it/sniper/ops/preconf/shreder`)
 
 ```bash
 ./preflight.sh                  # read-only: binary sha, disk, mem, endpoint TCP reachability, collector lag
@@ -73,11 +73,11 @@ Variants:
 - To restart with other settings: `./stop_all.sh`, then start again (same RUN: files are appended, seq restarts at 1, a new `start` event marks it).
 - `NO_CK=1 ...`: run without the CK race.
 - `ENGINE_HOST=fra ./after_hour.sh`: use this if the engine ran on FRA for the hour. By default `fetch.sh` snapshots (read-only `sudo cat`) the NEWEST `/root/prod/runs/dip_<host>_r*.jsonl` (+ its `.log`) on that host. AMS r28 ended at 22:03 PKT 10-27 and r30 was live at 22:21, so pass `ENGINE_LOG=<path>` if another run starts after the hour.
-- Analysis alone: `python3 analyze.py --run-dir /home/moiz/sniper-data/preconf/<yyyymmdd> --engine-host ams|fra --leaders-rpc [--from 00:30 --to 01:30 --date 2026-10-28]` and `python3 ck_compare.py --run-dir ...`.
+- Analysis alone: `python3 analyze.py --run-dir /home/it/sniper-data/preconf/<yyyymmdd> --engine-host ams|fra --leaders-rpc [--from 00:30 --to 01:30 --date 2026-10-28]` and `python3 ck_compare.py --run-dir ...`.
 
-Server-side equivalents: `sudo /root/shreder/run_rec.sh RUN MIN`, `sudo /root/shreder/stop_rec.sh RUN` and `sudo /root/shreder/rec_status.sh RUN`. The RUN default is `trial_<PKT yyyymmdd>`, stored in `/home/moiz/sniper-data/preconf/CURRENT_RUN`.
+Server-side equivalents: `sudo /root/shreder/run_rec.sh RUN MIN`, `sudo /root/shreder/stop_rec.sh RUN` and `sudo /root/shreder/rec_status.sh RUN`. The RUN default is `trial_<PKT yyyymmdd>`, stored in `/home/it/sniper-data/preconf/CURRENT_RUN`.
 
-Host data lands in `/home/moiz/sniper-data/preconf/<yyyymmdd>/`:
+Host data lands in `/home/it/sniper-data/preconf/<yyyymmdd>/`:
 - `fra/`: recorder files, `MANIFEST.sha256`, and `clock_start.json`/`clock_end.json`;
 - `ck/`: the feed race;
 - `engine/`: the engine log snapshot;

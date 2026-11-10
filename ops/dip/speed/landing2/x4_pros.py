@@ -3,7 +3,7 @@
 # ms on the block clock INFERRED), same-slot rate, landed route (tip service of the landed tx), CU price, tip, copies landed,
 # split by leader client, dump quartile in its block, the dump's window slot, leader location.
 import sys, json, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
 MIN_SOL = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
 MIN_DROP = float(sys.argv[2]) if len(sys.argv) > 2 else 0.04

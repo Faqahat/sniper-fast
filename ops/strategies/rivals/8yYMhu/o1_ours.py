@@ -5,8 +5,8 @@ Out: DATA/ours.pkl"""
 import json, pickle, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rlib as X
-RUNS = {"FRA_r27": "/home/moiz/sniper-data/runs/fra/runs/dip_r27.jsonl", "FRA_r28": "/home/moiz/sniper-data/runs/fra/runs/dip_r28.jsonl",
-        "AMS_r34": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r34.jsonl", "AMS_r35": f"{X.D}/ours/ams_r35_events.jsonl"}
+RUNS = {"FRA_r27": "/home/it/sniper-data/runs/fra/runs/dip_r27.jsonl", "FRA_r28": "/home/it/sniper-data/runs/fra/runs/dip_r28.jsonl",
+        "AMS_r34": "/home/it/sniper-data/runs/ams/runs/dip_ams_r34.jsonl", "AMS_r35": f"{X.D}/ours/ams_r35_events.jsonl"}
 rows = []
 for run, f in RUNS.items():
     close = {}; real = {}; arm = {}

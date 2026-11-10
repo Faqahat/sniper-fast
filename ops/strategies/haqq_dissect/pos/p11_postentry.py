@@ -11,7 +11,7 @@ right after the decision (1 trade later) and sell both at H; FLOW(f,H): hold whe
 Out: p11.txt"""
 import sys, pickle, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import p6_rules as R6
 import dv8lib as L
 from plib import Out, OUT, day_name

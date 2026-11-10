@@ -12,9 +12,9 @@ Costs: fill = measured mean buy cost of live pre-send fills (fee+tips) + 1.77 mS
 Out: data/lim/l8.txt, data/lim/presend_cf.pkl"""
 import json, pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 GS = [0.0, 0.05, 0.10, 0.15, 0.20, 9.0]
 out = []
 def P(*a):

@@ -4,7 +4,7 @@ SOL routed into the SOL->USDC swap, USDC received per owner (token-balance delta
 import json, glob, collections, time
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"; USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 W0, W1 = 1793038500, 1793124900
-OUT = "/home/moiz/sniper-data/haqq_dissect/recon"
+OUT = "/home/it/sniper-data/haqq_dissect/recon"
 WSOL_ACC = "3aoEhd6mTk7q6beUTVYHFoF79tFrQdoXcqXP5wiHxSQy"
 G = {}
 for fx in sorted(glob.glob(f"{OUT}/gettx*.jsonl")):

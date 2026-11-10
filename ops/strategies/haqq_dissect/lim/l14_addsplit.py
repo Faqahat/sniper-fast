@@ -5,9 +5,9 @@ timer exits h2/h5/h15/h30) - per price-paid bucket and per day.
 Out: data/lim/l14.txt"""
 import pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); out.append(s)

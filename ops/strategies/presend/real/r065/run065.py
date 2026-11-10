@@ -4,10 +4,10 @@
   main       : 0.65 SOL (both types), 0.50 as a midpoint
   effects    : own price impact only (followers forced to fill, live exits) -> + followers' own limits -> + the engine's exit rule
   stress     : 20% of later buys dropped at random (N draws, both sizes); CPI followers never fail
-Outputs /home/moiz/sniper-data/replay065/results.json (+ per-trade rows). Replay numbers are INFERRED; live ones MEASURED."""
+Outputs /home/it/sniper-data/replay065/results.json (+ per-trade rows). Replay numbers are INFERRED; live ones MEASURED."""
 import sys, json, pickle, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core, positions as PO, pmath as PM
 
 BASE = core.BASE

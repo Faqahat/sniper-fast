@@ -2,13 +2,13 @@
 # haqq SEND PATHS, part 5 (local): OUR fires/fills (FRA 2g7rYv7y, AMS EgxfYgEb; runs 9+) with the same block-position delay proxy
 # as haqq's dip buys: landed path, leader client, delay after the dump, same-slot share, guard / 6042 failures, fees.
 import sys, json, glob, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 SS = {}
 for run in ("R1", "R2", "R3", "R4"):
     for k, v in json.load(open(f"{H.OUT}/slotmax_{run}.json")).items(): SS[int(k)] = max(SS.get(int(k), 0), v + 1)
 def A(s, i): return s * H.SMS + i / max(SS.get(s, 400), i + 1) * H.SMS
 rows = []
-for f in sorted(glob.glob("/home/moiz/sniper-data/runs/fra/runs/dip_r*.jsonl") + glob.glob("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r*.jsonl")):
+for f in sorted(glob.glob("/home/it/sniper-data/runs/fra/runs/dip_r*.jsonl") + glob.glob("/home/it/sniper-data/runs/ams/runs/dip_ams_r*.jsonl")):
     srv = "AMS" if "ams" in f else "FRA"; run = int(f.split("_r")[-1].split(".")[0])
     if run < 9: continue
     fires = {}; lands = {}; fails = {}; closes = {}

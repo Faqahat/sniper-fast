@@ -161,13 +161,13 @@ SOL at 35 / 50 / 75 ms:
 - **`mc_corr.py`, `replay_corr()`:** the `path()` replay with the corrections as switches.
   - With them all off it reproduces the stored dd1 output exactly (0 mismatches).
 - **`dd1_corr_build.py`:** runs `dd1_build.py` unchanged, with `path()` swapped for the corrected one.
-  - Output goes to `/home/moiz/sniper-data/modelcheck/dd1corr/`.
+  - Output goes to `/home/it/sniper-data/modelcheck/dd1corr/`.
   - Tested on R4. IMIT1 top4 c4 at 0.55 SOL: +1.03 / +0.64 / +0.37 now → +1.12 / +0.60 / +0.39.
 - **Curves:** `curves_all.json` (and `curves_r12.json` for the out-of-sample check).
 
 ## What this means
 - **The replay is right at a given landing spot, for bots and for us.**
-  - The haqq agent replayed our own 116 live fills at their real spots: +0.311 SOL, vs +0.244 real before tx costs (`/home/moiz/sniper-data/haqq/h31.txt`). That is +0.6 mSOL per fill. MEASURED (their file).
+  - The haqq agent replayed our own 116 live fills at their real spots: +0.311 SOL, vs +0.244 real before tx costs (`/home/it/sniper-data/haqq/h31.txt`). That is +0.6 mSOL per fill. MEASURED (their file).
 - **The paper's optimism is in WHERE it assumes we land.** It assumes a fixed 35 / 50 / 75 ms on every dump.
   - Live, our landing varies (all attempts p25 / 50 / 75 = 33 / 52 / 90 ms, haqq agent).
   - We fail on the contested dumps that pay (instant landing there would give +37 mSOL each) and fill the quiet ones (+1.7 even at instant landing).
@@ -182,13 +182,13 @@ SOL at 35 / 50 / 75 ms:
 - **The bots' trades are the dumps bots chose.** Dumps no bot buys are only in the paper rows, not in the real-trade checks.
 
 ## Files
-- **Code** (`/home/moiz/sniper/ops/dip/modelcheck/`):
+- **Code** (`/home/it/sniper/ops/dip/modelcheck/`):
   - Extraction: `m0_raw.py`, `m0b_txcost.py`, `m0c_tgfail.py`.
   - Real trades and replays: `m1_trades.py`.
   - Analysis: `m2_analyze.py`, `m3_attempts.py`, `m4_tolerance.py`, `m5_natural.py`, `m6_curves.py`, `m8_errsplit.py`.
   - Restated picks: `m7_restate.py`.
   - Library and checks: `mc_lib.py` (exact `path()` mirror; `mc_selftest.py` 0 mismatches), `mc_corr.py`, `dd1_corr_build.py`, `targets.txt`.
-- **Data** (`/home/moiz/sniper-data/modelcheck/`):
+- **Data** (`/home/it/sniper-data/modelcheck/`):
   - `trades_R*.jsonl.gz`, `att_R*.npz`, `txc_R*.npz`, `curves_*.json`, `m7_R*.pkl`.
   - Printouts: `m2_tx.txt`, `m4_tolerance.txt`, `m5_natural.txt`, `m5b_strat.txt`, `m7_summary.txt`, `m7_byday.txt`, `m7_holdout.txt`, `m8_errsplit.txt`, `m9_validate.txt`, `m10_spots.txt` (its last line multiplied by 3.5 instead of 0.35: read +14.7 mSOL gross, +9.6 net).
   - `dd1corr/`: corrected dd1 arrays for R4 (from `dd1_corr_build.py`).

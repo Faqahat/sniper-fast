@@ -15,7 +15,7 @@ for run in RUNS:
         x = dict(feats(r), run=run, mint=r["mint"]); c = cfeats(r) or {}; x.update(c); x["type"] = typ(x)
         x["bigsell1_delta"] = replay(r, big_sell(1.0))[0]
         allx.append(x)
-json.dump(allx, open("/home/moiz/sniper-data/presend_losses/all_fills_features.json", "w"))
+json.dump(allx, open("/home/it/sniper-data/presend_losses/all_fills_features.json", "w"))
 L = sorted([x for x in allx if x["pnl"] < 0], key=lambda x: x["pnl"])
 top = L[:40]
 print("TOP 40 losers:", round(sum(x["pnl"] for x in top), 3), "| all losers", len(L), round(sum(x["pnl"] for x in L), 3))

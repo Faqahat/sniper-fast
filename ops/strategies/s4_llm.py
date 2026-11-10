@@ -6,7 +6,7 @@
 #   python3 s4_llm.py submit <kind>              -> batch (refused if ledger + estimate > cap)
 #   python3 s4_llm.py status <kind> | fetch <kind>
 import json, os, sys, time, urllib.request, urllib.error, glob
-OUT = "/home/moiz/sniper-data/strategies"; WORK = f"{OUT}/llm"
+OUT = "/home/it/sniper-data/strategies"; WORK = f"{OUT}/llm"
 MODEL = "claude-haiku-5-5"
 PRICE_IN, PRICE_OUT = 0.10, 0.50          # $/MTok normal; batch = half
 CAP = 15.0

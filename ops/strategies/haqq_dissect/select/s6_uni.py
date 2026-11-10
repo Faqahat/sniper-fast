@@ -5,11 +5,11 @@ expected (sum y1 / sum p_MKT on the OOS days: > 1 = the signal adds information 
 Out: select/s6.txt"""
 import sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 from s4_wf import load_scores
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 from s4_wf import load
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 
 SPECS = [
     ("sel_ncreates", [0, 1, 2, 5, 20, 1e9]), ("sel_prev_env", [0, 1, 3, 10, 50, 1e9]), ("sel_prev_y", [0, 1, 2, 5, 20, 1e9]),

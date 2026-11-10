@@ -6,7 +6,7 @@ test d. Same output format as f4 (f10.pkl, f10_scores.npz) so f5 can replay it a
 Out: f10.txt, f10.pkl, f10_scores.npz"""
 import sys, time, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/follow")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/follow")
 import flib as FL
 from f4_wf import load, account, QS
 from f9_adverse import pf_bucket

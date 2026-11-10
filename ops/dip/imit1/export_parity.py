@@ -5,12 +5,12 @@
 # and the frozen IMIT1 score. -> testdata/imit1_parity.json   usage: python3 -I export_parity.py [N tokens]
 import os, sys, json, random, collections
 os.environ.update(RP_PHASEA_R2="phaseA_sel", SELL_LAT="75", SLIPIMP="1", DIP_REAL_SLIP="1", SEL_SLIP="1", DIP_LATS="35", DIP_B="0.5", DIP_HS="4",
-                  DIP_BUSY="0", DIP_HLAG="0", DIP_MAX_AGE="1800", DIP_COHORT_FILE="/home/moiz/sniper/ops/overnight/sel/cohort_train.json")
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel")
+                  DIP_BUSY="0", DIP_HLAG="0", DIP_MAX_AGE="1800", DIP_COHORT_FILE="/home/it/sniper-data/overnight/sel/cohort_train.json")
+sys.path.insert(0, "/home/it/sniper-data/overnight/sel")
 import selexit2 as X
 import numpy as np
 import gbdt_np as G
-M = json.load(open("/home/moiz/sniper/ops/overnight/sel/IMIT1.json")); FE = M["features"]
+M = json.load(open("/home/it/sniper-data/overnight/sel/IMIT1.json")); FE = M["features"]
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 300
 random.seed(7)
 r2 = [m for m, c in X.L.items() if c["run"] == "R2"]
@@ -58,5 +58,5 @@ for key in sorted(byb):
                          ss={str(s): X.SS.get(s) for s in slots if X.SS.get(s)}, events=out_ev))
         if len(toks) >= N: break
 out = dict(model="IMIT1", features=FE, cohort=sorted(X.COH), targets=list(X.TARGETS), min_sell=X.MIN_SELL, max_age=X.MAX_AGE, tokens=toks)
-json.dump(out, open("/home/moiz/sniper/testdata/imit1_parity.json", "w"))
+json.dump(out, open("/home/it/sniper/testdata/imit1_parity.json", "w"))
 print(f"tokens {len(toks)}, events {sum(len(t['events']) for t in toks)}, trades {sum(len(t['trades']) for t in toks)}")

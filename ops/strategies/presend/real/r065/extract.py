@@ -4,15 +4,15 @@ the two runs touched, in the slot ranges that matter, from the 24/7 raw recordin
   ranges per mint: every live pre-send window (trigger - 40 .. window end / sell + 60 slots), every regular fire (dump - 40 ..
   sell + 60), every paper (shadow) window (arm - 40 .. exit + 60)
   also: the per-slot block table (max tx index seen + 1, records, block time) for every slot in the span (the chain clock)
-Writes /home/moiz/sniper-data/replay065/raw/{tx.pkl, slots.npy, ranges.json}. Nothing is sent; the recording is only read.
+Writes /home/it/sniper-data/replay065/raw/{tx.pkl, slots.npy, ranges.json}. Nothing is sent; the recording is only read.
 usage: extract.py [--procs 14]"""
 import sys, os, re, gzip, json, glob, pickle, collections, time
 import numpy as np
 from multiprocessing import Pool
 
-REC = "/home/moiz/sniper-data/collect/run_20261026_1415/txs"
-OUT = "/home/moiz/sniper-data/replay065/raw"
-LIVE = "/home/moiz/sniper-data/replay065/live.pkl"
+REC = "/data/tapes/collect/run_20261026_1415/txs"
+OUT = "/home/it/sniper-data/replay065/raw"
+LIVE = "/home/it/sniper-data/replay065/live.pkl"
 HEAD = re.compile(r'\{"s":\s*(\d+),\s*"i":\s*(\d+),\s*"bt":\s*(\d+)')
 MINTS = re.compile(r'"mints":\s*\[([^\]]*)\]')
 T_LO, T_HI = 1793032800 - 600, 1793063700          # 10-26 21:30 .. 10-27 06:15 PKT (unix s)

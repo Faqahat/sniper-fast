@@ -1,7 +1,7 @@
 # Other bots' winning strategies on pump.fun (last ~46 h)
 
 10-24 ~20:30 PKT. Read-only study: no trades, no server touched. MEASURED = counted from chain data; INFERRED = my reading.
-Scripts: ops/strategies/s1_trips.py … s9_qcheck.py. Outputs: /home/moiz/sniper-data/strategies/ (rank.txt, families.txt,
+Scripts: ops/strategies/s1_trips.py … s9_qcheck.py. Outputs: /home/it/sniper-data/strategies/ (rank.txt, families.txt,
 cards/, llm/labels_cards.jsonl, llm/families_llm.json, replay_select.txt, qcheck.txt).
 
 ## Bottom line

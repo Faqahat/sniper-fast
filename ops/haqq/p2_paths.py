@@ -2,7 +2,7 @@
 # haqq SEND PATHS, part 2 (local): speed of its dip buys by landed path and leader client. Delay = block-position ms proxy from the
 # >= 1 SOL dump to its buy (same metric for our fills); same-slot share; buyers ahead of it; 6042 failures in the dump's slot window.
 import sys, json, collections, numpy as np, pickle, zlib, glob
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H, h_load
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H, h_load
 P1 = {(r["s"], r["i"]): r for r in json.load(open(f"{H.OUT}/paths1.json"))}
 eps = h_load.load(with_ticks=False)
 rows = []

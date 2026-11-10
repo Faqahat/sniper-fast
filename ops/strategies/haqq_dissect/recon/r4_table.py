@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import txparse as TP
 H = TP.H; RENT = TP.RENT
 W0, W1 = 1793038500, 1793124900
-OUT = "/home/moiz/sniper-data/haqq_dissect/recon"
+OUT = "/home/it/sniper-data/haqq_dissect/recon"
 WSOL_ACC = "3aoEhd6mTk7q6beUTVYHFoF79tFrQdoXcqXP5wiHxSQy"     # haqq's WSOL account (token balance owner = haqq, mint So111..; MEASURED in getTransaction)
 S = json.load(open(f"{OUT}/sigs.json"))
 chain = {s["signature"]: s for s in S}

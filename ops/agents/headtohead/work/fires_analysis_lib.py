@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/headtohead/work")
+sys.path.insert(0, "/home/it/sniper/ops/agents/headtohead/work")
 from race import *
 def kind(r, mint):
     trs = [t for t in r["tr"] if t["mint"] == mint]

@@ -228,7 +228,7 @@ fees.
   - `p3check.py`: section 2.
   - `size48.py`: section 3.
   - `size48report.py`, `size48split.py`: tables.
-- Data (`/home/moiz/sniper-data/presend_real/s48/`):
+- Data (`/home/it/sniper-data/presend_real/s48/`):
   - `dec/`, `tab/`: the new tape.
   - `live/dip_ams_r19.{log,jsonl}`: final copies, pulled 00:21 PKT.
   - `donors123.pkl`, `hours48.json`, `trig_6.pkl`.

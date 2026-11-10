@@ -5,7 +5,7 @@
 # usage: bash ops/region/deploy_edge.sh <user@edge-host> [ssh port, 22] [region, ams]
 set -eu
 EDGE=${1:?usage: deploy_edge.sh user@host [port] [region]}; PORT=${2:-22}; REGION=${3:-ams}
-FRA=it@84.32.100.36; FPORT=1996; R=/home/moiz/sniper
+FRA=it@cyberfra; FPORT=1996; R=/home/it/sniper
 E() { ssh -p "$PORT" -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new "$EDGE" "$@"; }
 F() { ssh -p "$FPORT" -o ConnectTimeout=20 "$FRA" "$@"; }
 say() { echo "== $*"; }

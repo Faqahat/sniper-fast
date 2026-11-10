@@ -4,7 +4,7 @@
 # wallets (>= 50 round trips ~ >= 100 trades in R2+R3). Ranked: carded families first, then by activity. Cap 500 (300 carded + 200 most active others).
 # Family label: 48-h family if carded, else R2-only family, else "bot". -> patterns/botids.json {wallet: [id, label]}
 import json, gzip, glob, collections
-OUT = "/home/moiz/sniper-data/strategies"
+OUT = "/home/it/sniper-data/strategies"
 fam48 = json.load(open(f"{OUT}/families.json"))["fam_of"]
 lr2 = json.load(open(f"{OUT}/patterns/lists_r2.json"))
 cnt = collections.Counter()

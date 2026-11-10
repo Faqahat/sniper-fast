@@ -5,9 +5,9 @@ import sys, os, json, glob, hashlib, collections, datetime as dt
 import numpy as np
 
 C = os.path.dirname(os.path.abspath(__file__))
-D = "/home/moiz/sniper-data/e2x1_dissect/migpaper"
-GRAD = "/home/moiz/sniper/ops/strategies/e2x1_dissect/grad"
-MIG = "/home/moiz/sniper-data/e2x1_dissect/migrate"
+D = "/home/it/sniper-data/e2x1_dissect/migpaper"
+GRAD = "/home/it/sniper/ops/strategies/e2x1_dissect/grad"
+MIG = "/home/it/sniper-data/e2x1_dissect/migrate"
 sys.path.insert(0, GRAD)
 import g1_decode                                                     # noqa: E402
 from glib import last_before, pool_state_after, pool_fee, pkt, pday, SLOT_MS, PKT   # noqa: E402,F401

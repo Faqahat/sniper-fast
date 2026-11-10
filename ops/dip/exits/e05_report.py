@@ -2,7 +2,7 @@
 # e05: full comparison of the candidate exits (today c4, runs 10-14, the best baselines chosen on TRAIN, the learned exits, the oracle)
 # on TRAIN and TEST: engine SOL/day for both servers at our MEASURED landing and at 35 / 50 / 75 ms, sell-latency rows, paired
 # bootstrap CIs vs today's exit (30-min time blocks, and per dump), PKT hour bands, crowded vs quiet dumps, per server, AMS no-BAM.
-# usage: nice python3 -I e05_report.py [learned tags, comma separated, e.g. gbU,rule1]  -> /home/moiz/sniper-data/exits/e05_report.txt/.json
+# usage: nice python3 -I e05_report.py [learned tags, comma separated, e.g. gbU,rule1]  -> /home/it/sniper-data/exits/e05_report.txt/.json
 import sys, os, json, time
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

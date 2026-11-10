@@ -13,9 +13,9 @@ used for tok_* ratios, which barely depend on size).
 Out: data/lim/hctx.pkl"""
 import json, pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 
 
 def main():

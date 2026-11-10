@@ -6,8 +6,8 @@ insider inside our hold (our fill -> our sell's landing) = the cascade; joined w
 usage: in6_explain.py CTX.pkl RUNDIR CENSUS.pkl VARIANT[,VARIANT] OUT.json"""
 import sys, json, pickle, glob, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/insider")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/insider")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import ma_lib as M
 
 ctxp, rundir, cenp, vs, outp = sys.argv[1:6]

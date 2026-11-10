@@ -3,9 +3,9 @@
 Out: vs248/v4_tables.txt, vs248/v4.json (numbers for the bridge)"""
 import pickle, sys, collections, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/vs248"
+OUT = "/home/it/sniper-data/haqq_dissect/vs248"
 DAYS = (2, 3, 4, 5)
 ND = len(DAYS)
 

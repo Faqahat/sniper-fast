@@ -6,9 +6,9 @@ Lot P&L = FIFO lot (net of pump fees, before tx costs; his tx cost ~0.78 mSOL/lo
 Out: data/lim/l5.txt"""
 import pickle, sys, collections, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); out.append(s)

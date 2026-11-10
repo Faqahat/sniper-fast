@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FLAT study, IDEA A (MEASURED inputs): (1) the live TP / SL reaction delay on DEV (trigger trade -> our sell landing, chain ms);
 (2) the live time-exit delay of each position; (3) the replay's identity check: replaying the live exit (N = 2) on the chain tape
-must give back every live sell's SOL exactly. Writes /home/moiz/sniper-data/presend_flat/a_delays.json
+must give back every live sell's SOL exactly. Writes /home/it/sniper-data/presend_flat/a_delays.json
 usage: a_measure.py r24 r25 r26"""
 import sys, json, collections
 import numpy as np

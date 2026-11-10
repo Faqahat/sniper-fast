@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # MODEL CHECK step 0b: compact table of every target-wallet tx (raw/<run>/*.tx.jsonl.gz from m0_raw.py):
 # s, i, signer crc32 (first target signer), ok, fee, tips, wallet SOL delta (sd), number of pump trade events, err code
-# -> /home/moiz/sniper-data/modelcheck/txc_<run>.npz         usage: nice python3 -I m0b_txcost.py [procs]
+# -> /home/it/sniper-data/modelcheck/txc_<run>.npz         usage: nice python3 -I m0b_txcost.py [procs]
 import sys, os, json, gzip, glob, zlib
 import numpy as np
 from multiprocessing import Pool
-OUT = "/home/moiz/sniper-data/modelcheck"; HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = "/home/it/sniper-data/modelcheck"; HERE = os.path.dirname(os.path.abspath(__file__))
 W = [l.strip() for l in open(os.path.join(HERE, "targets.txt")) if l.strip()]; WS = set(W)
 def code_of(e):
     if e is None: return 0

@@ -2,7 +2,7 @@
 """INSIDER step 12: RESULTS.json / RESULTS.txt (data folder)."""
 import json, pickle, glob, collections
 import numpy as np
-D = "/home/moiz/sniper-data/insider"
+D = "/home/it/sniper-data/insider"
 T = json.load(open(f"{D}/tables_all.json"))
 E = json.load(open(f"{D}/explain_r37.json"))
 # census rebuild: all 4 r37 parts vs the 3 parts the first count used (part 2 = multiarm/raw/r37.obs.jsonl.3)
@@ -18,7 +18,7 @@ for run in ("r36", "r37", "r38", "r39"):
     cen[run] = c
 # base calibration: replay T2 / R0 cash vs live realized (x_*.pkl meta)
 cal = {}
-for run, rd, xp in (("r37", f"{D}/runs/r37", "/home/moiz/sniper-data/multiarm/x_r37.pkl"), ("r38", f"{D}/runs/r38", "/home/moiz/sniper-data/multiarm/x_r38.pkl"),
+for run, rd, xp in (("r37", f"{D}/runs/r37", "/home/it/sniper-data/multiarm/x_r37.pkl"), ("r38", f"{D}/runs/r38", "/home/it/sniper-data/multiarm/x_r38.pkl"),
                     ("r36", f"{D}/runs/r36", f"{D}/x_r36.pkl"), ("r39", f"{D}/runs/r39", f"{D}/x_r39.pkl")):
     reps = [pickle.load(open(f, "rb")) for f in sorted(glob.glob(f"{rd}/BASE__*.pkl"))]
     t2 = np.mean([sum(r["cash"] for r in d["rows"] if r["kind"] == "t2") for d in reps]); re = np.mean([sum(r["cash"] for r in d["rows"] if r["kind"] == "rearm") for d in reps])

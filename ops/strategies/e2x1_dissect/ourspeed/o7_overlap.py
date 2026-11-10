@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ourspeed step 7 (MEASURED): our FRA r27/r28 pre-send fills on E2x1's tokens vs his lot on the same token/time."""
 import json, pickle, collections, numpy as np, time
-R = "/home/moiz/sniper-data/e2x1_dissect/recon"; O = "/home/moiz/sniper-data/e2x1_dissect/ourspeed"
+R = "/home/it/sniper-data/e2x1_dissect/recon"; O = "/home/it/sniper-data/e2x1_dissect/ourspeed"
 ME = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"; SIB = "Grozoe2Lk9yu7kWPcCMuWEbrnuBYseBExkYAuHPRJUdJ"
 Lots = [l for l in pickle.load(open(f"{R}/lots.pkl", "rb")) if l["day"] in ("D0", "D1", "post")]
 bym = collections.defaultdict(list)
@@ -13,7 +13,7 @@ pk = lambda t: time.strftime("%m-%d %H:%M:%S", time.gmtime(t + 18000))
 rows = []
 for run in ("r27", "r28"):
     arms = collections.defaultdict(list); fills = {}; close = {}; real = {}
-    for ln in open(f"/home/moiz/sniper-data/runs/fra/runs/dip_{run}.jsonl"):
+    for ln in open(f"/home/it/sniper-data/runs/fra/runs/dip_{run}.jsonl"):
         if '"presend_live_' not in ln: continue
         d = json.loads(ln); e = d["ev"]
         if e == "presend_live_arm" and d.get("trig"): arms[d["trig"]["mint"]].append(d)

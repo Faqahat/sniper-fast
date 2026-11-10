@@ -123,7 +123,7 @@ Models trained directly for the behind-1/2/3 and after-slot entries did not vali
 
 ### Forward paper test (started 2026-10-22 15:43 UTC)
 - **Collection:** a new 24 h run on the server, `run_20261022_1543`.
-- **Frozen strategies:** both models (fsell_30s_eos and h5s, trained only on run 1) and filters F3/F4/F5. Files: `/home/moiz/sniper-data/collect/paper/frozen_*.json`.
+- **Frozen strategies:** both models (fsell_30s_eos and h5s, trained only on run 1) and filters F3/F4/F5. Files: `/data/tapes/collect/paper/frozen_*.json`.
 - **Scoring:** `ops/select/paper_cycle.sh` copies the new data, rebuilds and scores every new launch at entries E_bundle / E_k1 / E_k2 / E_slot. It runs every 2 h; results go to `paper/forward.txt`.
 - No money is involved.
 

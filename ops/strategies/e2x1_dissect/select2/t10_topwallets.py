@@ -2,7 +2,7 @@
 """select2 t10: the wallets that trigger him most. Per wallet (whole tape, universe rows samp|y): his follow count, the wallet's
 universe trades (weighted), his take rate, sim P&L (66 ms, 34 s, phi 0.2) of taken vs not-taken trades. Out: t10.json"""
 import sys, json, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
 U = dict(np.load(f"{OUT}/U2.npz")); S = dict(np.load(f"{OUT}/sim_66.npz")); MN, US = names()
 y = U["y"].astype(bool); samp = U["samp"].astype(bool); rows = samp | y; wt = np.where(y, 1.0, 25.0); u = U["user"]
 TE = U["bt"] >= U["bt"].max() - 86400

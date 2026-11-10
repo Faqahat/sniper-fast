@@ -25,7 +25,7 @@ import numpy as np
 import rlib
 
 SMS = rlib.SMS
-SLACK = np.array(sorted(r[1] for r in json.load(open("/home/moiz/sniper/ops/overnight/verify2/work/a8_slack.json"))["rows"]), float)
+SLACK = np.array(sorted(r[1] for r in json.load(open("/home/it/sniper-data/overnight/verify2/work/a8_slack.json"))["rows"]), float)
 
 def slack_of(sigh):
     u = (int(sigh) & ((1 << 64) - 1)) / 18446744073709551616.0
@@ -152,7 +152,7 @@ class View:
     tries and nearby trades, P(the try's limit already reflected trade x) vs u = send ms - (x's chain clock - trigger chain
     clock), by x's slot distance from the trigger 0, 1, 2, 3, 4+). A window has one view speed q (its quantile on every
     curve); trade x is seen at (x chain clock - trigger chain clock) + F_b^-1(q), never before an earlier trade."""
-    def __init__(self, path="/home/moiz/sniper-data/presend_real/view_cdf.json"):
+    def __init__(self, path="/home/it/sniper-data/presend_real/view_cdf.json"):
         J = json.load(open(path)); self.inv = {}
         for b, F in J.items():
             u = np.array([g for g, p, n in F if p is not None], float); p = np.array([p for g, p, n in F if p is not None], float)

@@ -5,7 +5,7 @@
   regular : every fired buy that failed on price (6042 at the buy): the guard's min out at S vs pump's tokens out there
 Inputs MEASURED (records + chain); the answer at another size is INFERRED (pure math, no landing change)."""
 import sys, json, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core, pmath as PM
 
 def state_before(trades, s, i):

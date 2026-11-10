@@ -3,7 +3,7 @@
 # CU price / limit, by buy / sell, leader client, leader distance (RTT from Frankfurt), size, block position; failed (6042) rate
 # by leader client. Output: sniper-data/haqq/paths1.json + printed tables.
 import json, collections, statistics as st, sys
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq")
+sys.path.insert(0, "/home/it/sniper/ops/haqq")
 import h_lib as H
 R = json.load(open(f"{H.OUT}/ledger.json"))
 rows = []

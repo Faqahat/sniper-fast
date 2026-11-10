@@ -1,8 +1,8 @@
-"""DV8 shared helpers (read-only). Tape = /home/moiz/sniper-data/dv8/tab (built by presend/real/decode.py + build.py from
+"""DV8 shared helpers (read-only). Tape = /home/it/sniper-data/dv8/tab (built by presend/real/decode.py + build.py from
 collect/run_* 10-22 03:07 -> 10-28 01:12 PKT)."""
 import json, time, functools
 import numpy as np
-D = "/home/moiz/sniper-data/dv8"; TAB = f"{D}/tab"
+D = "/home/it/sniper-data/dv8"; TAB = f"{D}/tab"
 SMS = 212.0                       # ms per slot (chain clock, same as haqq_strat)
 DAY0 = 1793038500 - 5 * 86400     # 10-21 23:15 PKT; day k = [DAY0 + k*86400, +86400)
 pkt = lambda t: time.strftime("%m-%d %H:%M", time.gmtime(int(t) + 18000))
@@ -34,16 +34,16 @@ def cc(sl, ix):
 @functools.lru_cache(None)
 def _sched():
     out = {}
-    for f in ("/home/moiz/sniper-data/haqq/schedule_1065.json", "/home/moiz/sniper/ops/dip/speed/leaders/schedule_cur.json",
-              "/home/moiz/sniper-data/competitors2/schedule_1067.json", "/home/moiz/sniper-data/haqq_sel/schedule_1068.json",
-              "/home/moiz/sniper-data/haqq_sel/schedule_1069.json"):
+    for f in ("/home/it/sniper-data/haqq/schedule_1065.json", "/home/it/sniper/ops/dip/speed/leaders/schedule_cur.json",
+              "/home/it/sniper-data/competitors2/schedule_1067.json", "/home/it/sniper-data/haqq_sel/schedule_1068.json",
+              "/home/it/sniper-data/haqq_sel/schedule_1069.json"):
         d = json.load(open(f)); out[int(d["start"])] = (d["ids"], d["slot_leader"])
-    nodes = json.load(open("/home/moiz/sniper/ops/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
+    nodes = json.load(open("/home/it/sniper-data/overnight/landing/work/rpc/clusternodes_now.json"))["nodes"]
     cl = {k: v.get("clientId") or "" for k, v in nodes.items()}
-    rt = json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
+    rt = json.load(open("/home/it/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
     for k, v in rt.items():
         if v.get("client"): cl.setdefault(k, v["client"])
-    near = {r: set(l.strip() for l in open(f"/home/moiz/sniper/ops/region/near_leaders_{r.lower()}.txt") if l.strip()) for r in ("FRA", "AMS")}
+    near = {r: set(l.strip() for l in open(f"/home/it/sniper/ops/region/near_leaders_{r.lower()}.txt") if l.strip()) for r in ("FRA", "AMS")}
     return out, cl, near
 
 

@@ -11,18 +11,18 @@ Nothing here sends, starts or stops anything."""
 import sys, os, json, collections, hashlib, math
 import numpy as np
 
-REAL = "/home/moiz/sniper/ops/strategies/presend/real"
+REAL = "/home/it/sniper/ops/strategies/presend/real"
 sys.path.insert(0, REAL)
 import rlib, sim, variants, donors as DN
 
-DATA = "/home/moiz/sniper-data/presend_density"
+DATA = "/home/it/sniper-data/presend_density"
 WALLET = "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"          # AMS live wallet (public key)
 RUNS = {
-    24: dict(rec="/home/moiz/sniper-data/runs/ams/runs/dip_ams_r24.jsonl", tab=f"{DATA}/tab_r24"),
-    25: dict(rec="/home/moiz/sniper-data/runs/ams/runs/dip_ams_r25.jsonl", tab=f"{DATA}/tab_r25"),
-    26: dict(rec="/home/moiz/sniper-data/runs/ams/runs/dip_ams_r26.jsonl", tab=f"{DATA}/tab_r26"),
-    27: dict(rec="/home/moiz/sniper-data/runs/ams/runs/dip_ams_r27.jsonl", tab="/home/moiz/sniper-data/presend_filter/live27/tab"),
-    28: dict(rec="/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl", tab="/home/moiz/sniper-data/presend_filter/live28/tab"),
+    24: dict(rec="/home/it/sniper-data/runs/ams/runs/dip_ams_r24.jsonl", tab=f"{DATA}/tab_r24"),
+    25: dict(rec="/home/it/sniper-data/runs/ams/runs/dip_ams_r25.jsonl", tab=f"{DATA}/tab_r25"),
+    26: dict(rec="/home/it/sniper-data/runs/ams/runs/dip_ams_r26.jsonl", tab=f"{DATA}/tab_r26"),
+    27: dict(rec="/home/it/sniper-data/runs/ams/runs/dip_ams_r27.jsonl", tab="/home/it/sniper-data/presend_filter/live27/tab"),
+    28: dict(rec="/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl", tab="/home/it/sniper-data/presend_filter/live28/tab"),
 }
 PKT = 18000
 

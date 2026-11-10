@@ -13,11 +13,11 @@ Our live pre-send fills / sells / landed tries (every AMS and FRA run) are remov
 Usable hours (dv8 hours.json, recording coverage) only. Out: ev_D<k>.pkl"""
 import sys, os, json, pickle, time, hashlib, glob, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import rlib
 import dv8lib as L
 
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 WHALE = 60_000_000_000_000
 SIZE = 400_000_000
 
@@ -28,8 +28,8 @@ def sh(s): return int.from_bytes(hashlib.blake2b(s.encode(), digest_size=8).dige
 def our_sighs():
     fn = f"{OUT}/our_sighs.pkl"
     if os.path.exists(fn): return pickle.load(open(fn, "rb"))
-    files = glob.glob("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r*.jsonl") + glob.glob("/home/moiz/sniper-data/runs/fra/runs/dip_r*.jsonl") + \
-        glob.glob("/home/moiz/sniper-data/haqq_strat/live/dip_ams_r*.jsonl") + ["/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"]
+    files = glob.glob("/home/it/sniper-data/runs/ams/runs/dip_ams_r*.jsonl") + glob.glob("/home/it/sniper-data/runs/fra/runs/dip_r*.jsonl") + \
+        glob.glob("/home/it/sniper-data/haqq_strat/live/dip_ams_r*.jsonl") + ["/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"]
     out = set()
     for f in files:
         for l in open(f, errors="ignore"):

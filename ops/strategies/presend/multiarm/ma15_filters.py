@@ -19,7 +19,7 @@ import json, pickle, bisect, collections
 import numpy as np
 
 SUP = 1e15
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 RUN_ORDER = ["F21", "F22", "F23", "F24", "F26", "F27", "F28", "A16", "A17", "A19", "A20", "A24", "A25", "A26", "A27", "A28", "A29", "A30", "A31", "A32",
              "A33", "A34", "A35", "A36", "A37", "A38"]
 VERIFY_LABEL = {"r37": "A37", "r38f": "A38", "r38": "A38", "r39": "A39"}

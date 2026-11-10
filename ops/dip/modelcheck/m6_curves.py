@@ -2,11 +2,11 @@
 # MODEL CHECK step 6: per-wallet success curves S_w(p) = P(a buy lands | first landed tx at price ratio p vs the post-dump price),
 # isotonic (non-increasing) fits on fresh attempts (att_<day>.npz). Target wallets with >= 300 attempts get their own curve; the
 # other targets share the pooled target curve; non-target wallets get the pooled "others" curve.
-# -> /home/moiz/sniper-data/modelcheck/curves_<tag>.json   (tag all = R1..R4, r12 = R1+R2 only, for an out-of-sample check)
+# -> /home/it/sniper-data/modelcheck/curves_<tag>.json   (tag all = R1..R4, r12 = R1+R2 only, for an out-of-sample check)
 import sys, os, json, zlib, collections
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-OUT = "/home/moiz/sniper-data/modelcheck"
+OUT = "/home/it/sniper-data/modelcheck"
 TG = [l.strip() for l in open(os.path.join(HERE, "targets.txt")) if l.strip()]
 TGU = {zlib.crc32(w.encode()): w for w in TG}
 

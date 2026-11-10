@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # per-fire head-to-head reconstruction (read-only). Writes work/fires_h2h.json and prints a compact table.
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/headtohead/work")
+sys.path.insert(0, "/home/it/sniper/ops/agents/headtohead/work")
 from race import *
 R = json.load(open(W + "/runs.json"))
 E = load_ext()
 # tape rx times from run records (sig -> rx ns), per run
 TAPE = {}
 for r in range(1, 6):
-    for l in open(f"/home/moiz/sniper/ops/dip/speed/dip_r{r}.jsonl"):
+    for l in open(f"/home/it/sniper/ops/dip/speed/dip_r{r}.jsonl"):
         d = json.loads(l)
         if d["ev"] == "tape": TAPE.setdefault(d["sig"], d["t"])
 def kind(r, mint):

@@ -3,7 +3,7 @@
 # TEST = R3 (10-23 19:28 -> 10-24 20:20 PKT), FORWARD = R4 (10-24 20:20 -> 10-25 06:15 PKT; R4 lots before R3's end excluded).
 # Models: TIMER (slot / profile / size only) vs FULL (+ price, flow, entry). Match rates of the predicted exit slot.
 import sys, json, collections, numpy as np, pickle
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H, h_gbdt as G
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H, h_gbdt as G
 Z = np.load(f"{H.OUT}/ds.npz"); X, y, L, D, RUN = Z["X"], Z["y"].astype(float), Z["L"], Z["d"], Z["run"]
 M = json.load(open(f"{H.OUT}/ds_meta.json")); F = M["feats"]; FI = {k: i for i, k in enumerate(F)}
 lots = json.load(open(f"{H.OUT}/lots.json"))

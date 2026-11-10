@@ -15,7 +15,7 @@ usage: loss_brief.py RUN.jsonl MINT_PREFIX [--all] [--seed gcr_seed.json] [--wha
 import sys, json, collections, os
 
 path, pre = sys.argv[1], sys.argv[2]
-seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/moiz/sniper-data/prevent/forward/gcr_seed.json"
+seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/it/sniper-data/prevent/forward/gcr_seed.json"
 led = collections.defaultdict(lambda: [0, 0.0])
 if os.path.exists(seed_p):
     for c, d in json.load(open(seed_p)).items(): led[c] = [d["n"], d["sum"]]

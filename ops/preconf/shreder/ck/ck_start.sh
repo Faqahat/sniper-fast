@@ -7,7 +7,7 @@
 # Deploy = scp to /tmp, then the new ck_remote.sh installs itself (.new + mv; never while a race runs); start = a SEPARATE ssh.
 set -euo pipefail
 H=$(cd "$(dirname "$0")" && pwd)
-FRA=${FRA:-it@84.32.100.36}; P=${FRA_PORT:-1996}
+FRA=${FRA:-it@cyberfra}; P=${FRA_PORT:-1996}
 MIN=${1:-75}; TAG=${2:-$(date -u +%Y%m%d_%H%M)}
 SSH=(ssh -p "$P" -o ConnectTimeout=10 -o BatchMode=yes "$FRA")
 TMP=/tmp/ck_deploy_$$_$(date +%s)

@@ -7,7 +7,7 @@ Out: tx.pkl (list of dicts, all recorded txs incl. third-party ones touching his
 import json, pickle, base64, struct, collections
 import numpy as np
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 TIP = json.load(open(f"{OUT}/tipmap.json"))
 RENTS = {1488440: "spl165", 1513840: "t22_170"}   # MEASURED rent of a 165-byte SPL / 170-byte Token-2022 account (5080 lamports/byte incl. 128 overhead)
 DISC = bytes.fromhex("bddb7fd34ee661ee"); CPI = bytes.fromhex("e445a52e51cb9a1d")

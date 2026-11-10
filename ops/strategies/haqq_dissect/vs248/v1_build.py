@@ -14,9 +14,9 @@ Seller class: dev (creator) / bundler (bought in the create slot) / whale (held 
 Out: vs248/v1.pkl (lots, our failed attempts, sig maps) and scratch tape subset (mints touched by 248 or us)."""
 import json, pickle, sys, time, collections, glob, os
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/vs248"
+OUT = "/home/it/sniper-data/haqq_dissect/vs248"
 SCR = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/hd_vs248"
 SUP = 1e15; TXC_DEF = 0.000396
 BOT = 248
@@ -26,13 +26,13 @@ def main():
     t0 = time.time()
     ids, idm = L.ids_map()
     H = idm[L.HAQQ]; OURW = {idm[w]: n for n, w in L.WAL.items()}
-    CODES = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/pos/codes.pkl", "rb"))
+    CODES = pickle.load(open("/home/it/sniper-data/haqq_dissect/pos/codes.pkl", "rb"))
     hcode = {k: v[0] for k, v in CODES.items() if k[0] != "F"}
     hcost = {k: v[1] for k, v in CODES.items() if k[0] != "F"}
     # haqq sigs (landed + failed) from the exec extraction + haqq_raw
     hsig = {}; hfail = []
-    files = [f for f in glob.glob("/home/moiz/sniper-data/haqq_dissect/exec/ext/*.jsonl") if os.path.exists(f + ".done")]
-    files.append("/home/moiz/sniper-data/haqq_strat/haqq_raw.jsonl")
+    files = [f for f in glob.glob("/home/it/sniper-data/haqq_dissect/exec/ext/*.jsonl") if os.path.exists(f + ".done")]
+    files.append("/home/it/sniper-data/haqq_strat/haqq_raw.jsonl")
     for f in files:
         for l in open(f):
             if "haqqiUUXB5gp7" not in l: continue

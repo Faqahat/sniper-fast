@@ -82,7 +82,7 @@
 #   /root/arbx/runs/<name>; BUDGET.md's row: /root/arbx/runs/<name>/spend.json `budget_md_row`
 # WP-01: the config format (required; arb-lab's v1 files do not load, and every unknown key is an error)
 config_version = 2
-out_dir = "/home/moiz/arbed/arbx-fast/runs"
+out_dir = "/home/it/other/arbed/arbx-fast/runs"
 mode = "shadow"   # a canary is `--canary` with [canary] enabled (a plain run records only); "live" is the later $500 stage
 # the production wallet frz (owner, 2026-10-05): the owner's existing keystore on Cherry, used in place
 wallet = "FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS"
@@ -92,13 +92,13 @@ wallet_keystore = ""
 [pools]
 # OD-4 (owner confirms the seed list): the live w5h3 campaign's list (exp3 list + fresh discovery, 2026-10-03 evening),
 # copied from Cherry into arbx/data (commit c777f26). The fallback named by PLAN.md WP-00 is data/seed-pools-merged.csv
-seed_csv = "/home/moiz/arbed/arbx-fast/data/seed-pools-fast.csv"   # FT-012 (owner 2026-10-07): + 242 vetted Raydium CLMM / Orca Whirlpool SOL pools
+seed_csv = "/home/it/other/arbed/arbx-fast/data/seed-pools-fast.csv"   # FT-012 (owner 2026-10-07): + 242 vetted Raydium CLMM / Orca Whirlpool SOL pools
 # WP-21: live sends through both venues (FT-009 passed; FT-013 traded them live: 12 CLMM wins, 0 failed fees)
 rayclmm = "send"
 whirlpool = "send"
-registry_json = "/home/moiz/arbed/arbx-fast/data/registry.json"
+registry_json = "/home/it/other/arbed/arbx-fast/data/registry.json"
 registry_all = true
-templates_json = "/home/moiz/arbed/arbx-fast/data/templates.json"
+templates_json = "/home/it/other/arbed/arbx-fast/data/templates.json"
 
 # Every RPC call is raced across all providers below; the first good answer is used and each one is timed.
 # Providers whose environment variables are missing are skipped (listed in run.log).
@@ -183,14 +183,14 @@ max_accounts = 1    # the provider's limit (an include list longer than this ref
 # WP-03 item 10: the LeaderBook's leader kinds (jito / bam / other) and the dated fallback
 [leaders]
 validator_lists = ["https://kobe.mainnet.jito.network/api/v1/validators"]   # Cherry's address may be refused (403): then the fallback
-static_fallback = "/home/moiz/arbed/arbx-fast/data/validators-meta.json"
+static_fallback = "/home/it/other/arbed/arbx-fast/data/validators-meta.json"
 refresh_min = 60
 # WP-08: host -> leader TPU-QUIC RTT (a QUIC handshake, no data) to the endpoints the leaders of the next 64 slots
 # announce, once per endpoint (BAM / Harmonic ingress nodes serve many validators), at most 2 a second; a validator whose
 # endpoint refuses takes the median of its endpoint region's (region_bucket). Places (city, metro region) from the table
 rtt_probe = true
 rtt_per_sec = 2
-geo_table = "/home/moiz/arbed/arbx-fast/data/ip-geo.csv"
+geo_table = "/home/it/other/arbed/arbx-fast/data/ip-geo.csv"
 
 # WP-03b: chain fetch (our wallet's transactions, the watched-transaction backfill, the slot index, the blockhash ring)
 # and every RPC provider's request budget. A provider's max_rps is a token bucket for the whole process: the boot, the
@@ -465,7 +465,7 @@ big_band_max_per_sec = 0   # landing study 2026-10-07: bands 3-4 (>= 1M edge) to
 # of 1,214 under 100k did: those still go). Owner: 0 here = rank only
 crowding_window_h = 6
 crowding_buckets = [20, 150]
-crowded_pools_file = "/home/moiz/arbed/arbx-fast/data/crowded-pools.json"
+crowded_pools_file = "/home/it/other/arbed/arbx-fast/data/crowded-pools.json"
 crowded_skip_min_expected_lamports = 100000
 # on-chain min_profit = tip + base fee + margin, margin = max(floor, share x expected net): Stage 0 keeps today's floor
 # (F23); R §3.9's 2,000 / 2% is a WP-11 arm or OD-5
@@ -521,7 +521,7 @@ create_close = true   # false: trade held tokens only (mid_not_held), the held-o
 held_max = 0   # the size budget's held-ATA fallback (create, no close: the account's rent stays locked) is OFF: nothing stays locked (review WP-06 #1)
 allow_uva_create = false   # a PumpSwap buy without the wallet's volume accumulator would create it (1,346,200 lamports, never recovered): refused (uva_missing); frz has it
 loaded_data_limit = "auto" # the transaction's accounts and programs at their measured sizes, +25% +256 KiB (FT-002's dry run simulates it: [dry_run] below)
-cu_table = "/home/moiz/arbed/arbx-fast/data/cu-table.json"   # absolute (review WP-06 #11): a run without the file refuses to start; upload it with the other data files
+cu_table = "/home/it/other/arbed/arbx-fast/data/cu-table.json"   # absolute (review WP-06 #11): a run without the file refuses to start; upload it with the other data files
 cu_min_samples = 30
 alt_index = true   # over 1,232 bytes: lookup tables learned from decoded transactions that name the route's pools, at most max_alts
 max_alts = 4
@@ -767,7 +767,7 @@ daily_summary = true    # at 00:00 UTC, the day before: win ratio (wins / bundle
 [watchdog]
 # WP-20: `arbx watchdog --config deploy/arbx-canary-frz.toml`, a separate long-running process
 # (docs/field-tests/README.md)
-runs_dir = "/home/moiz/arbed/arbx-fast/runs"
+runs_dir = "/home/it/other/arbed/arbx-fast/runs"
 grace_s = 120           # no segment process for longer than this is "not running" (covers the gap between two segments)
 status_min = 60         # "running" every hour, and a reminder every hour while it is down
 

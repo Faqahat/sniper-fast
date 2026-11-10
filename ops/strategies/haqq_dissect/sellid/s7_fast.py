@@ -10,12 +10,12 @@ his exit, MS(400/800/1000), wave RIDE(424,1000,20000), with our measured delays.
 Out: sellid/s7.txt"""
 import pickle, sys, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev as ev12
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s, flush=True); out.append(s)
@@ -23,9 +23,9 @@ def P(*a):
 
 def main():
     Z = pickle.load(open(f"{OUT}/s1.pkl", "rb")); LOTS = Z["lots"]; H = Z["H"]
-    ids = json.load(open("/home/moiz/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
-    fb = set(idm[w] for w in json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm)
-    B1 = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/bots/b1.pkl", "rb"))
+    ids = json.load(open("/home/it/sniper-data/dv8/tab/ids.json")); idm = {k: i for i, k in enumerate(ids)}
+    fb = set(idm[w] for w in json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")) if w in idm)
+    B1 = pickle.load(open("/home/it/sniper-data/haqq_dissect/bots/b1.pkl", "rb"))
     ctx = {(r["mi"], r["slot"], r["idx"]): r for r in B1}
     # walk-forward FOL50 per day (same definition as s6)
     FOL = {}

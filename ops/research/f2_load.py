@@ -10,7 +10,7 @@ import os, re, json, glob, bisect, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
 SP = os.environ.get("F2_WORK", "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad")
 FILT = os.path.join(SP, "filt"); F2 = os.path.join(SP, "f2"); PAP = os.path.join(F2, "paper")
-REC_DIRS = ["/home/moiz/sniper-data/research/rec", os.path.join(PAP, "rec")]
+REC_DIRS = ["/home/it/sniper-data/research/rec", os.path.join(PAP, "rec")]
 LOGS = {"cov": "dry_cov.log", "alt": "dry_alt.log", "cad": "dry_cad.log", "edge1": "live_edge1.log", "latest": "dry_latest.log",
         "edge2": "live_edge2.log", "dry1h": "dry_1h.log", "run1": "prod_p1.log", "edge3": "live_edge3.log", "edge5": "live_edge5.log",
         "night": "dry_run1.prev-20261021.log", "morning": "dry_run1.log"}

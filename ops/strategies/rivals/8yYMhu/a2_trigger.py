@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np, rlib as X, tlib as T
 L = pickle.load(open(f"{X.D}/lots.pkl", "rb"))
 mints, users = T.names(); wid = T.uid()[X.W]
-CR = json.load(open("/home/moiz/sniper-data/dv8/tab/creates.json"))
-CR.update(json.load(open("/home/moiz/sniper-data/e2x1_dissect/select/creates_new.json")))
+CR = json.load(open("/home/it/sniper-data/dv8/tab/creates.json"))
+CR.update(json.load(open("/home/it/sniper-data/e2x1_dissect/select/creates_new.json")))
 out = {}
 bym = collections.defaultdict(list)
 for l in L: bym[l["mint"]].append(l)

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """RIVALS85 step 2: flagged vs not-flagged tables from r1_fills.py's fills.pkl (competitor participation, competitor outcome, our outcome),
 the 2x2 split (other >= 6% holder at signing x depth < 15%), per run, the competitors most present in flagged fills, cluster-bootstrap CIs.
-Out: /home/moiz/sniper-data/rivals85/RESULTS.txt + RESULTS.json
+Out: /home/it/sniper-data/rivals85/RESULTS.txt + RESULTS.json
 usage: r2_report.py"""
 import pickle, json, collections, statistics as st, random
 import numpy as np
 
-OUT = "/home/moiz/sniper-data/rivals85"
+OUT = "/home/it/sniper-data/rivals85"
 X = pickle.load(open(f"{OUT}/fills.pkl", "rb")); R = [o for o in X["fills"] if o.get("dump")]
 RUNS = ["A34", "A35", "A36", "A37", "A38", "A39"]
 SLOT_S = 0.2135

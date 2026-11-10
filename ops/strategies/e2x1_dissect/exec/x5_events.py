@@ -5,7 +5,7 @@ Features after the event: side, SOL, price ratio vs entry r, vs peak dd, slots s
 slots since last outside buy, whether the trader is the sibling / trigger wallet / creator, whether the trader bought before in our hold.
 Out: sniper-data/e2x1_dissect/exec/x5_ev.npz + printed hazard tables (x5.txt)"""
 import sys, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
 R = pickle.load(open(f"{X.X}/x4.pkl", "rb"))
 E = collections.defaultdict(list)

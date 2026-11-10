@@ -2,9 +2,9 @@
 # competitors2/fires.py -- READ-ONLY. Our fires (runs r5..r10 FRA + ams_r9/r10) against the chain: for every fire, all txs on
 # the mint between the dump and our buy, the curve replayed from the dump's post-trade reserves with OUR min_out to find the
 # tx that pushed the price past our +5% guard ("crosser"), and every rival that landed ahead of us.
-# Out: /home/moiz/sniper-data/competitors2/fires.json + printed per-wallet table.
+# Out: /home/it/sniper-data/competitors2/fires.json + printed per-wallet table.
 import json, gzip, collections, statistics, sys, datetime
-RACES = "/home/moiz/sniper-data/competitors2/races.jsonl.gz"
+RACES = "/home/it/sniper-data/competitors2/races.jsonl.gz"
 US = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 pk = lambda ns: datetime.datetime.fromtimestamp(ns / 1e9 + 5 * 3600, datetime.UTC).strftime("%m-%d %H:%M:%S")
 def ok(r): return r["err"] is None
@@ -44,7 +44,7 @@ for l in gzip.open(RACES, "rt"):
                            side=a["side"], relay=relay(a), cup=a["cup"]) for a in attempts],
             us_cup=us["cup"], us_cul=us["cul"], us_cu=us["cu"], us_tip=tipsum(us), us_relay=relay(us), sell=R.get("sell"), dump_sig=R["sig"],
             buy_sig=f["buy_sig"], tape=f["tape"], t_dump_rx=f["t_dump_rx"], buy_first_rx=f["buy_first_rx"]))
-json.dump(fires, open("/home/moiz/sniper-data/competitors2/fires.json", "w"))
+json.dump(fires, open("/home/it/sniper-data/competitors2/fires.json", "w"))
 
 F = [f for f in fires if not f["fill"]]; G = [f for f in fires if f["fill"]]
 print(f"fires with chain rows: {len(fires)}  failed {len(F)}  filled {len(G)}")

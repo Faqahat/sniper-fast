@@ -1,5 +1,5 @@
 # Analyst E (gap ledger): where his ~31 SOL/day gap comes from (10-28 ~02:50 PKT)
-Saved by the main session from the agent's reply. Code: this folder (g0–g8). Tables: /home/moiz/sniper-data/haqq_dissect/gap/ (g3_haqq, g4_ours, g4_waterfall, g5_evening, g6_capture, g6b_bucket_means, g7_guard, g8_summary, g9_compact, g0_runs .txt; rows g3_rows.pkl).
+Saved by the main session from the agent's reply. Code: this folder (g0–g8). Tables: /home/it/sniper-data/haqq_dissect/gap/ (g3_haqq, g4_ours, g4_waterfall, g5_evening, g6_capture, g6b_bucket_means, g7_guard, g8_summary, g9_compact, g0_runs .txt; rows g3_rows.pkl).
 
 ## How it was built (MEASURED)
 - Every haqq lot on the tape (36,778 lots, 10-22 → 10-28), each in exactly one bucket.

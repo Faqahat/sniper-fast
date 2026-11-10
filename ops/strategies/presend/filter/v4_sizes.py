@@ -10,7 +10,7 @@ import sim, rules
 
 FIXED = 1_430_000
 W = sim.load()
-R = json.load(open("/home/moiz/sniper-data/replay065/results.json"))
+R = json.load(open("/home/it/sniper-data/replay065/results.json"))
 T = {(t["run"], t["mint"], t["buy_pos"][0], t["buy_pos"][1]): t for t in R["trades"] if t["kind"] == "ps"}
 C = {c[0].split()[0]: c for c in rules.CANDIDATES}
 

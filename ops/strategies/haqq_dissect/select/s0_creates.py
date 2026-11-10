@@ -6,10 +6,10 @@ No URL is fetched: the uri is only parsed as a string (host / path pattern).
 Usage: s0_creates.py [--procs 2]. Out: sniper-data/haqq_dissect/select/cr/<chunk>.jsonl (+ .done), merged by s1."""
 import sys, os, glob, json, base64, hashlib, subprocess, struct, time
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import decode as D
-OUT = "/home/moiz/sniper-data/haqq_dissect/select/cr"
-REC = "/home/moiz/sniper-data/collect"
+OUT = "/home/it/sniper-data/haqq_dissect/select/cr"
+REC = "/data/tapes/collect"
 
 
 def strings_of(raw):

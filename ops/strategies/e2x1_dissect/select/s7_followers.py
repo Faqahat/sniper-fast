@@ -4,7 +4,7 @@ his buys relative to their total activity. Also: SOL these followers put in afte
 depends on followers. Out: s7.txt"""
 import sys, collections, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"]); MN, US = names()
 sl = D["slot"].astype(np.int64); us = D["user"].astype(np.int64); bu = D["buy"].astype(bool); so = D["sol"] / 1e9; mi = D["mint"]

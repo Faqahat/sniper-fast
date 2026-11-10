@@ -6,7 +6,7 @@ tx fees / tips NOT included -> recon's lamport reconciliation is the authority).
   RE-ENTRY: buy after a closed trip on the same token (split by px vs his previous fill);  ADD: buy while still holding."""
 import sys, pickle, collections, time, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 from tl import cols
 D = load(); w = int(D["wid"])

@@ -5,11 +5,11 @@
 #   python3 bk4_cards.py prep r1 | submit r1 | status r1 | fetch r1
 import sys, os, json, zlib, random, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies"); sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies"); sys.path.insert(0, "/home/it/sniper-data/overnight/sel")
 import p4_eval as E
 import s4_llm as S
 import gbdt_np as G
-OUT = "/home/moiz/sniper-data/strategies/bukp"; WK = f"{OUT}/llm"
+OUT = "/home/it/sniper-data/strategies/bukp"; WK = f"{OUT}/llm"
 W = "BUkpShoEWRiPckdFs3kzYGjBPfUhL6G39ufo84QeogPP"; UID = zlib.crc32(W.encode())
 CAP = 20.0; MAXTOK = 16000
 WTN = {0: "other", 1: "creator", 2: "insider", 3: "new", 4: "bot", **{10 + k: f"F{k}" for k in range(1, 11)}}

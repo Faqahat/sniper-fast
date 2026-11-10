@@ -2,7 +2,7 @@
 # haqq SELL study, step 6: descriptive tables (ledger P&L, entries, sell structure, what precedes sells).
 import sys, json, collections, statistics as st
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H, h_load
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H, h_load
 eps = h_load.load(with_ticks=False)
 WTN = {0: "other", 1: "creator", 2: "bundle", 3: "sniper", 4: "cohort", 5: "hk", 6: "dyx", 7: "ours", 8: "haqq"}
 def q(v, ps=(10, 25, 50, 75, 90)):

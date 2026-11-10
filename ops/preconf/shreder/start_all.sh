@@ -10,10 +10,10 @@
 set -uo pipefail
 H=$(dirname "$(readlink -f "$0")")
 MIN=${1:-75}; RUN=${2:-trial_$(TZ=Asia/Karachi date +%Y%m%d)}
-DATE=${RUN#trial_}; HD=/home/moiz/sniper-data/preconf/$DATE
+DATE=${RUN#trial_}; HD=/home/it/sniper-data/preconf/$DATE
 mkdir -p "$HD/fra" "$HD/ck" "$HD/engine"
-echo "$RUN" > /home/moiz/sniper-data/preconf/CURRENT_RUN
-SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -p 1996 it@84.32.100.36)
+echo "$RUN" > /home/it/sniper-data/preconf/CURRENT_RUN
+SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -p 1996 it@cyberfra)
 want=$(cut -d' ' -f1 "$H/dist/shreder_rec.sha256")
 bash "$H/preflight.sh" "$RUN" "$MIN"
 echo "== start Shreder recorder"

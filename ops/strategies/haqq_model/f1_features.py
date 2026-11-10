@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """HAQQ_MODEL step 1 (read-only, offline): per-token causal features at fixed decision times after create.
-Tape: /home/moiz/sniper-data/haqq_model/tab, multi-day (10-23 19:26 to 10-27 23:20 PKT), real/decode.py + build.py over the host's
+Tape: /home/it/sniper-data/haqq_model/tab, multi-day (10-23 19:26 to 10-27 23:20 PKT), real/decode.py + build.py over the host's
 recording copies. Metadata: collect/run_*/launches.jsonl (name, symbol, uri, create tx fee, ixn).
 Unit: one create. Decision slot D = create slot + n, with n in NS. Label y: haqq (user or signer) traded the mint anywhere on the tape.
 Causality:
@@ -11,14 +11,14 @@ Causality:
 Out: DATA/feat_n<n>.npz (X, names, y, meta arrays)."""
 import json, time, collections, glob, re, math, sys
 import numpy as np
-DATA = "/home/moiz/sniper-data/haqq_model"; TAB = f"{DATA}/tab"
+DATA = "/home/it/sniper-data/haqq_model"; TAB = f"{DATA}/tab"
 HAQQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 NS = (0, 5, 14, 24, 47)
 HIST_SLOTS = 47                         # a history token's "early traders" = traders in its first 47 slots (~10 s)
 SPS = 0.2118
 pkt = lambda t: time.strftime("%m-%d %H:%M", time.gmtime(int(t) + 18000))
-FB = set(json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
-COH = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
+FB = set(json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
+COH = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
 
 
 def main():
@@ -34,7 +34,7 @@ def main():
     # creates
     CR = json.load(open(f"{TAB}/creates.json"))
     meta = {}
-    for f in sorted(glob.glob("/home/moiz/sniper-data/collect/run_2026102[34567]_*/launches.jsonl")):
+    for f in sorted(glob.glob("/data/tapes/collect/run_2026102[34567]_*/launches.jsonl")):
         for l in open(f):
             try: c = json.loads(l)
             except Exception: continue

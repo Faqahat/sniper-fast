@@ -2,14 +2,14 @@
 # test_ck.sh — synthetic end-to-end test of ck_compare.py (real race log + real engine snapshot + real chain truth + fake
 # Shreder recorder files with KNOWN injected leads). Prints PASS/FAIL per check and exits 1 on any FAIL.
 #   bash test_ck.sh [RACE_LOG] [ENGINE_JSONL] [T0_UNIX T1_UNIX]
-# Defaults: the inputs kept in /home/moiz/sniper-data/preconf/ck_test/inputs/ (FRA /root/gap/race/race_exec1.log, a
+# Defaults: the inputs kept in /home/it/sniper-data/preconf/ck_test/inputs/ (FRA /root/gap/race/race_exec1.log, a
 # read-only snapshot of AMS run 28), engine window 2026-10-27 16:15-16:30 UTC (9 fires: per-feed timing records).
 set -u
 H=$(cd "$(dirname "$0")" && pwd)
-D=/home/moiz/sniper-data/preconf/ck_test
+D=/home/it/sniper-data/preconf/ck_test
 IN=$D/inputs
 RACE=${1:-$IN/race_exec1.log}; ENG=${2:-$IN/dip_ams_r28.snap1.jsonl}; T0=${3:-1793117700}; T1=${4:-1793118600}
-COL=${COLLECT_ROOT:-/home/moiz/sniper-data/collect}
+COL=${COLLECT_ROOT:-/data/tapes/collect}
 for f in "$RACE" "$ENG"; do [ -s "$f" ] || { echo "FAIL: missing input $f"; exit 1; }; done
 rm -rf "$D/A" "$D/B" "$D/expect.json"
 python3 "$H/make_test_ck.py" "$D" "$RACE" "$ENG" "$T0" "$T1" || { echo "FAIL: make_test_ck.py"; exit 1; }

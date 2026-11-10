@@ -8,7 +8,7 @@ P&L = gross (live exit) - NOW costs, model level, mSOL per fill; 90 % bootstrap 
 usage: r6_decomp.py TAG CFG DAY[,DAY]"""
 import sys, pickle, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 COST = 2_015_140
 
 

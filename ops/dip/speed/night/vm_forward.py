@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # FORWARD test of the frozen value model on raw data recorded AFTER it was frozen (slots > trained_until_slot). Pure offline.
 import pickle, numpy as np, json, glob, os, subprocess, sys
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/dip"); import gbdt_np as G
+sys.path.insert(0, "/home/it/sniper-data/overnight/dip"); import gbdt_np as G
 from hq2 import load, dataset
 d = pickle.load(open("vm_frozen.pkl", "rb"))
 os.makedirs("rawfwd", exist_ok=True)
-for f in sorted(glob.glob("/home/moiz/sniper-data/collect/run_20261024_1425/txs/txs_*.jsonl.gz")):
+for f in sorted(glob.glob("/data/tapes/collect/run_20261024_1425/txs/txs_*.jsonl.gz")):
     b = os.path.basename(f)
     if int(b[4:14]) >= 1792877000 and not os.path.exists("rawfwd/" + b): os.symlink(f, "rawfwd/" + b)
 subprocess.run(["python3", "race_extract.py", "rawfwd", "rows_fwd.json"], check=True)

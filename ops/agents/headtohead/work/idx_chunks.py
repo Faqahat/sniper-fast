@@ -2,7 +2,7 @@
 # read-only: per raw chunk -> (min slot, max slot, n lines). Output json to work/chunk_index.json
 import sys, os, gzip, glob, json, zlib
 from multiprocessing import Pool
-RUN = "/home/moiz/sniper-data/collect/run_20261023_1426/txs"
+RUN = "/data/tapes/collect/run_20261023_1426/txs"
 T0 = float(sys.argv[1]) if len(sys.argv) > 1 else 0
 def work(p):
     lo = hi = None; n = 0
@@ -22,5 +22,5 @@ if __name__ == "__main__":
     with Pool(4) as pool:
         for name, lo, hi, n in pool.imap_unordered(work, files):
             out[name] = [lo, hi, n]
-    json.dump(out, open("/home/moiz/sniper/ops/agents/headtohead/work/chunk_index.json", "w"), indent=0, sort_keys=True)
+    json.dump(out, open("/home/it/sniper/ops/agents/headtohead/work/chunk_index.json", "w"), indent=0, sort_keys=True)
     print(len(out))

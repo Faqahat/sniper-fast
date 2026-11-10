@@ -10,7 +10,7 @@
 Out: haqq_dissect/exit/x12.txt"""
 import pickle, sys, itertools
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays, evaluate as ev7

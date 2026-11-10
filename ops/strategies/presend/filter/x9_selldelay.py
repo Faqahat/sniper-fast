@@ -2,7 +2,7 @@
 """EXPLORATION (DEV ONLY, exact replay): what a slower TIME-EXIT sell costs. Time exits keep the live decision; the sell lands at the
 median live delay + EXTRA ms (chain clock) instead of its live spot. TP / SL exits unchanged (live spots). Live size."""
 import sys, json, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import numpy as np
 import core, positions as PO, pmath as PM
 D = core.Data()

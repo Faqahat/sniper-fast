@@ -5,7 +5,7 @@
   U3 (10-24 day): the dipdetect study rows of R3 (M2 = model_v3_reg4_top25 predictions >= 0.010095 inside today's
       envelope, i.e. Stage A = the live gate; IMIT1 = f1 >= 0.21089 inside the envelope), mapped to my dumps by
       (mint, slot, tx index). Coverage = R3's window (ends 10-24 16:27 PKT).
-Writes /home/moiz/sniper-data/vm1/h2h_picks.npz with per-dump flags aligned to dumps.npz (m2, imit, cov_m2imit)."""
+Writes /home/it/sniper-data/vm1/h2h_picks.npz with per-dump flags aligned to dumps.npz (m2, imit, cov_m2imit)."""
 import json, glob, re, os, sys, hashlib
 import numpy as np
 import core
@@ -20,8 +20,8 @@ if __name__ == "__main__":
     # ---- U4: engine dump records
     key_sig = D.T["sigh"][kd]; order = np.argsort(key_sig); ks = key_sig[order]
     spans = []; nrec = 0; nmatch = 0; seen = set()
-    files = [(f, int(re.search(r"_r(\d+)\.jsonl", f).group(1))) for f in glob.glob("/home/moiz/sniper-data/runs/fra/runs/dip_r*.jsonl")]
-    files = [(f, r) for f, r in files if r >= 14] + [(f, int(re.search(r"_r(\d+)\.jsonl", f).group(1))) for f in glob.glob("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r*.jsonl")
+    files = [(f, int(re.search(r"_r(\d+)\.jsonl", f).group(1))) for f in glob.glob("/home/it/sniper-data/runs/fra/runs/dip_r*.jsonl")]
+    files = [(f, r) for f, r in files if r >= 14] + [(f, int(re.search(r"_r(\d+)\.jsonl", f).group(1))) for f in glob.glob("/home/it/sniper-data/runs/ams/runs/dip_ams_r*.jsonl")
                                                    if int(re.search(r"_r(\d+)\.jsonl", f).group(1)) >= 13]
     for fn, r in sorted(files):
         smin, smax = None, None
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     for a, b in spans: cov |= (z["slot"] >= a) & (z["slot"] <= b) & (z["lab"] == "U4")
     print(f"U4 engine dump records {nrec}, matched to my dumps {nmatch}; spans {len(spans)}")
     # ---- U3: dipdetect R3 rows
-    sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+    sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
     import dd_lib as L
     DAYS = ("R2", "R3", "R1", "R4")
     lens = {d: len(L.load(d)["k"]) for d in DAYS}
@@ -50,8 +50,8 @@ if __name__ == "__main__":
         off += lens[d]
     assert off == len(P)
     d3 = L.load("R3")
-    day = np.load("/home/moiz/sniper-data/strategies/patterns/day_R3.npz")
-    meta = json.load(open("/home/moiz/sniper-data/strategies/patterns/day_R3_meta.json"))
+    day = np.load("/home/it/sniper-data/strategies/patterns/day_R3.npz")
+    meta = json.load(open("/home/it/sniper-data/strategies/patterns/day_R3_meta.json"))
     meta = meta["meta"] if isinstance(meta, dict) and "meta" in meta else meta
     mints = [x["m"] for x in meta]
     mid = {m: q for q, m in enumerate(D.mints)}

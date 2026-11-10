@@ -4,7 +4,7 @@
 # -> printed + sssss/profile.json      (adapted from bukp/bk2_profile.py)
 import json, collections, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/sssss"
+OUT = "/home/it/sniper-data/strategies/sssss"
 runs = sys.argv[1:] or ["R1", "R2", "R3", "R4"]
 T = {r: json.load(open(f"{OUT}/trips_{r}.json")) for r in runs}
 def pct(x, ps=(10, 25, 50, 75, 90)):

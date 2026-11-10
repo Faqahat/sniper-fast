@@ -4,7 +4,7 @@ import json, gzip, collections, sys
 TOP = [l.strip() for l in open(sys.argv[1]) if l.strip()]
 GAP = int(sys.argv[2]) if len(sys.argv) > 2 else 2
 rows = collections.defaultdict(list)
-for line in gzip.open("/home/moiz/sniper/ops/agents/topearners/work/txrows.jsonl.gz", "rt"):
+for line in gzip.open("/home/it/sniper/ops/agents/topearners/work/txrows.jsonl.gz", "rt"):
     x = json.loads(line)
     if x["w"] in TOP and x["kind"] in ("buy", "unk") and x["mints"]: rows[x["w"]].append(x)
 for w in TOP:

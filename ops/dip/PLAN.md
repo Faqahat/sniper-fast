@@ -736,7 +736,7 @@ Labels: `dipshadow/direct_flags_prelim.json` (99.8% vs RPC truth). Totals per ~3
   collector 6 min before the current window ends (overlap, no gap; TAIL_MIN 20) and restarts one if none runs. Timezone-free
   (server clock is Europe/Vilnius with DST). Off: touch /root/sniper-collect/ROTATE_OFF. Log: rotate.log.
 - Container: ops/collect/keeper.sh every 10 min (keeper_loop.sh): copies every server run to
-  /home/moiz/sniper-data/collect/<run>/ (size-checked) and deletes a SERVER run only when it is not current, its tail ended
+  /data/tapes/collect/<run>/ (size-checked) and deletes a SERVER run only when it is not current, its tail ended
   > 2 h ago and every file is here with the same size. Never deletes in the container; pauses below 30 GB free. First pass
   10-24 06:44 PKT: run_20261021_2207 (9.9 GB) and run_20261022_1543 (14.7 GB) verified here and removed from the server
   (server 29 → 52 GB free). ~17 GB/day; the container (165 GB free) holds ~9 days → retention rule to agree later.
@@ -806,7 +806,7 @@ Labels: `dipshadow/direct_flags_prelim.json` (99.8% vs RPC truth). Totals per ~3
   (region-neutral RTT), split_near.py, run_dip_prod.sh `--region fra|ams` (md5 05a443de deployed; fra unchanged).
 - Needs from the owner: the VPS (glibc ≥ 2.34; check inbound traffic cap), the container's SSH key added, the edge wallet
   (`arbx keystore-encrypt --generate --show-backup` on the edge) + funding.
-- 10-24 16:35 PKT Amsterdam edge set up (it@84.32.104.202:1996, Ubuntu 26.04, 2 vCPU / 2 GB): deploy_edge.sh all files sha-ok;
+- 10-24 16:35 PKT Amsterdam edge set up (it@cyberams:1996, Ubuntu 26.04, 2 vCPU / 2 GB): deploy_edge.sh all files sha-ok;
   edge .env KALDERA_TOKEN + CONSTANTK_TOKEN = the Amsterdam key, common.py → rpc-amsterdam (getSlot OK); endpoints 0.19–0.32 ms
   from the box (Frankfurt kaldera 7.5 ms); LandX ams1 (0.24 ms) chosen over ams2 (0.29). Measured split (split_near.py, each
   leader on the closer server, < 5 ms): Frankfurt 198 leaders 35.9% of slots (/root/sniper-dip/near_leaders_fra.txt; one
@@ -880,7 +880,7 @@ Labels: `dipshadow/direct_flags_prelim.json` (99.8% vs RPC truth). Totals per ~3
   lands ~15 ms after the burst. The profit is ~45 "runners"/day (top 1%) held 1.5–2.5 min. Its edge is landing first plus exit
   timing, not selection. Can't copy it: everything buildable loses; copy-trading −160 to −214 SOL/day. Same lesson as
   BUkpShoE: the money is in the runner exits.
-- 6tzAKfHt (owner screenshot: GMGN 97% win, +$22K/7 d; data /home/moiz/sniper-data/strategies/w6tz/): an insider of a brand-name
+- 6tzAKfHt (owner screenshot: GMGN 97% win, +$22K/7 d; data /home/it/sniper-data/strategies/w6tz/): an insider of a brand-name
   token farm. 63 tokens in ~2.5 days (ChatGPT 16, Google Gemini 10, Grok 9, MrBeast 8, SpaceX, NVIDIA, YouTube…), each from a
   fresh creator wallet and graduated in its first slot. In that same slot it buys ~1 SOL on PumpSwap, always in a tx
   co-signed with 4G9JAzft…, which buys exactly 132,479,379 tokens every time. Sells 1–90 min later, then sweeps the SOL out.

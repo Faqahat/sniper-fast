@@ -5,12 +5,12 @@
   fails : every FAILED tx that names the mint (slot, index, signature, error, signer, programs, instruction names)
   clock : per slot the block size seen (max tx index + 1) and block time (the chain clock of the replay, as rlib.Clock)
 Checks (MEASURED): reserve chaining per mint (pre-state of each trade = post-state of the previous one).
-Writes /home/moiz/sniper-data/replay065/tape.pkl"""
+Writes /home/it/sniper-data/replay065/tape.pkl"""
 import sys, os, json, pickle, base64, struct, collections, time
 import numpy as np
 
-RAW = "/home/moiz/sniper-data/replay065/raw"
-OUT = "/home/moiz/sniper-data/replay065/tape.pkl"
+RAW = "/home/it/sniper-data/replay065/raw"
+OUT = "/home/it/sniper-data/replay065/tape.pkl"
 DISC = bytes.fromhex("bddb7fd34ee661ee")
 CPI = bytes.fromhex("e445a52e51cb9a1d")
 A58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"

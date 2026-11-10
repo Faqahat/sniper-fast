@@ -5,7 +5,7 @@ optimistic: assumes landing before the next trade). Every rule also has his 1800
  TRAIL z (sell when price <= peak*(1-z)); ACT a TRAIL z (trail only after price >= entry*a); TP x; SL y; FLOW k (k slots with no outside buy);
  SELLAFTER s (first outside sell >= s SOL after >= m slots); combinations. Out: x7.txt"""
 import sys, pickle, itertools
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
 R = [r for r in pickle.load(open(f"{X.X}/x4.pkl", "rb")) if r["sells"] and not r["swap"] and not r["is_open"]]
 K = 30.0 * 1073000000000000

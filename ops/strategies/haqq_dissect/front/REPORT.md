@@ -1,5 +1,5 @@
 # Analyst M (front): who lands first on paying dumps, and how we could (10-28 ~04:20 PKT)
-Saved by the main session from the agent's reply. Code: this folder (f1–f14). Tables: /home/moiz/sniper-data/haqq_dissect/front/ (f13, f8_tables, f9_blockpos, f10, f11, f6_shape, f12_examples, f14_perday .txt). MEASURED unless marked.
+Saved by the main session from the agent's reply. Code: this folder (f1–f14). Tables: /home/it/sniper-data/haqq_dissect/front/ (f13, f8_tables, f9_blockpos, f10, f11, f6_shape, f12_examples, f14_perday .txt). MEASURED unless marked.
 
 ## Short answer
 - **Paying dumps** (the first buyer lands in the dump's own slot and a 0.40 SOL buy just before it is worth ≥ +30 mSOL, wave exit): 19,789 dumps, ~4,800/day.

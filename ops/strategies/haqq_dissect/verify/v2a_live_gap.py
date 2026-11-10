@@ -9,10 +9,10 @@ Out: DATA/v2a_<tag>.pkl rows (run, mint, slot, idx, res, lim, p_before, pred, G,
 usage: v2a_live_gap.py TAB TAG RUNFILE [RUNFILE ...]"""
 import sys, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/verify")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/verify")
 import vlib as V
 
-DATA = "/home/moiz/sniper-data/haqq_dissect/verify"
+DATA = "/home/it/sniper-data/haqq_dissect/verify"
 
 if __name__ == "__main__":
     tab, tag = sys.argv[1], sys.argv[2]; files = sys.argv[3:]

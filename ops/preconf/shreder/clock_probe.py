@@ -14,8 +14,8 @@ usage: clock_probe.py OUT.json [--n 40]
 """
 import json, re, shlex, subprocess, sys, time
 
-FRA = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-p", "1996", "it@84.32.100.36"]
-AMS = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-p", "1996", "it@84.32.104.202"]
+FRA = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-p", "1996", "it@cyberfra"]
+AMS = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-p", "1996", "it@cyberams"]
 RESP = "import sys,time\nfor l in sys.stdin:\n    sys.stdout.write(str(time.time_ns())+'\\n'); sys.stdout.flush()\n"
 
 
@@ -72,7 +72,7 @@ def bracket(host, n):
 
 def ping():
     try:
-        out = subprocess.run(FRA + ["ping -q -c 20 -i 0.2 -W 1 84.32.104.202"], capture_output=True, text=True, timeout=30).stdout
+        out = subprocess.run(FRA + ["ping -q -c 20 -i 0.2 -W 1 cyberams"], capture_output=True, text=True, timeout=30).stdout
     except Exception as e:
         return {"error": type(e).__name__}
     m = re.search(r"= ([\d.]+)/([\d.]+)/([\d.]+)", out)

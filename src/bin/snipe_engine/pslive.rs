@@ -118,6 +118,9 @@ const HLFLAGS: [&str; 4] = ["--presend-live-holder-loss", "--presend-live-holder
 const H2FLAGS: [&str; 2] = ["--presend-live-m2seen-log", "--presend-live-m2seen-gate"];
 
 /// dip37 FEE A/B: its flags (each needs --presend-live; the parameters after the first need --presend-live-fee-ab on; psfeeab.rs)
+/// dip37c: the per-send blocklist's flag (needs --presend-live-blocklist)
+const BLSFLAGS: [&str; 1] = ["--presend-live-blocklist-send"];
+
 const FABFLAGS: [&str; 6] = ["--presend-live-fee-ab", "--presend-live-ab-cu-price-micro", "--presend-live-ab-cu-limit", "--presend-live-ab-tip-lamports",
     "--presend-live-ab-clients", "--presend-live-ab-split"];
 
@@ -338,6 +341,9 @@ pub struct Cfg {
     pub blocklist: Option<String>,
     /// dip36 --presend-live-blocklist-pct X (default 3.0; (0, 100]): the holder role's threshold (% of supply)
     pub blocklist_pct: f64,
+    /// dip37c --presend-live-blocklist-send on|off (default on with the blocklist): every send of an armed window is withheld while a listed wallet
+    /// holds >= blocklist_pct % of the mint (the window stays armed); the ledger control file's "blocklist_send": "live"|"log" flips it
+    pub blocklist_send: bool,
     /// dip36 --presend-fpnb-log on|off (default off; LOG-ONLY): FP-NOBOT scored at every pre-send arm, send slot and fill on its own
     ///   thread (pslog36.rs, src/fpnb.rs): presend_live_fpnb records; never a decision
     pub fpnb_log: bool,
@@ -425,7 +431,7 @@ impl Cfg {
         let arg_u64_opt = |f: &str| arg(f).and_then(|s| s.parse::<u64>().ok());
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -487,6 +493,7 @@ impl Cfg {
             // dip36 LIVE blocklist
             blocklist: arg("--presend-live-blocklist").filter(|p| !p.starts_with("--")),
             blocklist_pct: arg_f64("--presend-live-blocklist-pct", psblock::BL_PCT),
+            blocklist_send: onoff("--presend-live-blocklist-send", true)? && arg("--presend-live-blocklist").is_some(),
             // dip36 (log-only)
             fpnb_log: onoff("--presend-fpnb-log", false)?,
             fpnb_bots: arg("--presend-fpnb-bots").filter(|p| !p.starts_with("--")),
@@ -537,6 +544,7 @@ impl Cfg {
         }
         if has("--presend-live-blocklist") && c.blocklist.is_none() { bail!("--presend-live-blocklist needs a path"); }
         if has("--presend-live-blocklist-pct") && c.blocklist.is_none() { bail!("--presend-live-blocklist-pct needs --presend-live-blocklist PATH"); }
+        if has("--presend-live-blocklist-send") && c.blocklist.is_none() { bail!("--presend-live-blocklist-send needs --presend-live-blocklist PATH"); }
         if !(c.blocklist_pct > 0.0 && c.blocklist_pct <= 100.0) { bail!("--presend-live-blocklist-pct must be in (0, 100] (% of supply)"); }
         if has("--presend-skip2-seed") && c.skip2_seed.is_none() { bail!("--presend-skip2-seed needs a path"); }
         if has("--presend-fpnb-control") && c.fpnb_control.is_none() { bail!("--presend-fpnb-control needs a path"); }
@@ -705,6 +713,8 @@ impl Cfg {
         if self.fam_log { j["fam_log"] = serde_json::json!({"thr": self.fam_thr, "rpc": if self.fam_rpc.is_some() { "--presend-live-fam-rpc" } else { "rpc_url" }}); }
         // dip36: only when on (off: dip35's record)
         if let Some(p) = &self.blocklist { j["blocklist"] = serde_json::json!({"path": p, "holder_pct": self.blocklist_pct}); }
+        // dip37c: the per-send check (only with the blocklist; dip36's record otherwise)
+        if self.blocklist.is_some() { j["blocklist"]["send"] = self.blocklist_send.into(); }
         if self.fpnb_log { j["fpnb_log"] = serde_json::json!({"bots": self.fpnb_bots, "preload": self.fpnb_preload, "thr_t2": arbx::fpnb::THR_T2, "thr_rearm": arbx::fpnb::THR_REARM}); }
         if self.skip2_log { j["skip2_log"] = serde_json::json!({"seed": self.skip2_seed}); }
         if self.fpnb_live != 0 || self.fpnb_control.is_some() { j["fpnb_live"] = serde_json::json!({"mode": pslog36::mode_str(self.fpnb_live), "control": self.fpnb_control}); }
@@ -785,7 +795,9 @@ struct SWin { id: u64, mint: Pk, launch: Launch, st_ns: u64, stop_ns: u64, en_sl
               /// dip36 live gate: the window's FP-NOBOT verdict (None: --presend-fpnb-log off)
               fpg: Option<Arc<pslog36::Gate>>,
               /// dip37 the window's fee arm (0 A, 1 B; None: the fee A/B off)
-              fab: Option<u8> }
+              fab: Option<u8>,
+              /// dip37c the window's largest listed holder >= the blocklist threshold now (wallet, %), kept by the main loop; None: none / off
+              blk: Option<(Pk, f32)> }
 
 /// dip28: the deeper limit's holder threshold (% of supply)
 pub const DEEP_OB6: f32 = 6.0;
@@ -902,6 +914,8 @@ struct Shared {
     brk_until: AtomicU64,
     brk_losses: Mutex<VecDeque<u64>>,
     brk_trips: AtomicU64,
+    /// dip37c the per-send blocklist: live (true) or log (the control file's "blocklist_send"); its withheld / would-withhold sends [T2, re-arm]
+    bl_send_live: AtomicBool, bl_withheld: [AtomicU64; 2], bl_would: [AtomicU64; 2],
     /// dip32 the creator gate's histories (empty without it): filled by the realized task, read at every arm
     cr: Mutex<FxHashMap<Pk, CrHist>>,
     /// dip37 the whale / dumper loss ledger (empty without it): filled by the realized task, read at every arm (pswh.rs)
@@ -1014,6 +1028,15 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
                     continue;
                 }
             }
+            // dip37c PER-SEND BLOCKLIST: a listed wallet holds >= the threshold now (the main loop's cache: no work here) -> withheld (live) or
+            // counted (log); the window stays armed (nothing without the blocklist)
+            if let Some((bw, bp, live)) = bl_send_check(&sh, &w) {
+                let mut r = serde_json::json!({"ev": "presend_live_blocklist_withheld", "w": w.id, "n": w.n, "mint": b58(&w.mint), "slot": slot,
+                    "kind": if w.rearm { "rearm" } else { "T2" }, "wallet": b58(&bw), "pct": ((bp as f64) * 1000.0).round() / 1000.0, "t": arbx::feeds::clock::now_ns()});
+                if !live { r["log"] = true.into(); }
+                let _ = out.send(Out::Rec(r));
+                if live { sh.skip("blocklist_withheld"); continue; }
+            }
             let deadline = (slot + sc.cfg.deadline_slots).min(w.en_slot);
             if deadline < slot { sh.skip("window_over"); continue; }
             let (leader, client) = lat::leader_of(slot).unwrap_or_default();
@@ -1069,6 +1092,17 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
         std::thread::sleep(if any { Duration::from_micros(500) } else { Duration::from_millis(5) });
     }
     sh.exited.store(true, Ordering::SeqCst);
+}
+
+/// dip37c the per-send blocklist's check of a due send (the window's cached listed holder; counted): Some((wallet, %, live)) = withhold when
+/// live, log only otherwise; None = no listed holder (or the blocklist / its per-send check off)
+#[inline]
+fn bl_send_check(sh: &Shared, w: &SWin) -> Option<(Pk, f32, bool)> {
+    let (bw, bp) = w.blk?;
+    let live = sh.bl_send_live.load(Ordering::Relaxed);
+    let k = w.rearm as usize;
+    if live { sh.bl_withheld[k].fetch_add(1, Ordering::Relaxed); } else { sh.bl_would[k].fetch_add(1, Ordering::Relaxed); }
+    Some((bw, bp, live))
 }
 
 /// dip31 the circuit breaker's setting (see Cfg::breaker): `n` losses of at least `loss` lamports within `win_ns`, then `pause_ns` without
@@ -1944,7 +1978,7 @@ impl PsLive {
         }
         let (atx, arx) = crossbeam_channel::unbounded::<Att>();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
-            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) });
         arbx::feeds::own_fail_watch(user);
         // dip32: the creator histories' preload (the offline seed / the last run's state)
@@ -2358,6 +2392,8 @@ impl PsLive {
             }
             evs.clear();
             self.det.trade(&t, &mut evs);
+            // dip37c: the per-send blocklist's cached listed holder (a listed wallet's trade only; nothing without the flag)
+            if self.cfg.blocklist_send { self.bl_send_refresh(&e.mint, Some(&e.user)); }
             for ev in evs.drain(..) {
                 match ev {
                     pl::Det::Trigger { whale, pct, bal, age_slots } => self.trigger(&t, whale, pct, bal, age_slots, &launch_of, reactive_open),
@@ -2587,7 +2623,7 @@ impl PsLive {
         let fab = self.fab_assign(id);
         let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
             spend: self.cfg.spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
-            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab };
+            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint) };
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
         self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0)).0.push_back(t.clone());
@@ -3217,6 +3253,9 @@ impl PsLive {
         if let Some(r) = self.bl.as_mut().and_then(|b| b.check(false)) {
             self.line(format!("  PRESEND LIVE BLOCKLIST {} {}", if r["ok"] == true { "reloaded:" } else { "NOT reloaded (the last good list stays):" }, r));
             self.rec(r);
+            // dip37c: a new list -> every armed window's listed holder again
+            let ms: Vec<Pk> = self.armed.keys().copied().collect();
+            for m in ms { self.bl_send_refresh(&m, None); }
         }
         // dip24: the rolling 24 h fee budget (a paused sender resumes when the old fees roll out)
         if self.fee_paused || !self.fee_q.is_empty() { self.fee_roll(); }
@@ -3639,7 +3678,7 @@ impl PsLive {
     /// the 60 s status line's part
     pub fn status(&mut self) -> String {
         // dip26: the re-arm's part last ("" without it)
-        let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
+        let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
@@ -3807,7 +3846,14 @@ impl PsLive {
         if let Some(f) = self.fp.as_mut() { fin["dip36_fpnb"] = f.finish(); }
         if let Some(j) = whj { fin["wh_ledger"] = j; }
         if let Some(j) = hlj { fin["hl_ledger"] = j; }
-        if let Some(b) = &self.bl { fin["blocklist"] = b.json(); }
+        if let Some(b) = &self.bl {
+            fin["blocklist"] = b.json();
+            // dip37c: the per-send check's counts (only with it)
+            if self.cfg.blocklist_send {
+                let a = |x: &[AtomicU64; 2]| serde_json::json!({"t2": x[0].load(Ordering::Relaxed), "rearm": x[1].load(Ordering::Relaxed)});
+                fin["blocklist"]["send"] = serde_json::json!({"live": self.sh.bl_send_live.load(Ordering::Relaxed), "withheld": a(&self.sh.bl_withheld), "would": a(&self.sh.bl_would)});
+            }
+        }
         // dip37: only with the fee A/B on (its realized part is completed in run_end once the realized lookups are in: dipmode)
         if let Some(f) = &self.fab { fin["fee_ab"] = f.json(); }
         fin
@@ -3962,7 +4008,7 @@ impl PsLive {
         let (atx, arx) = crossbeam_channel::unbounded();
         let (mtx, _) = tokio::sync::mpsc::unbounded_channel();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
-            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true), skips: Mutex::new(FxHashMap::default()),
             build_us: Mutex::new(Ring::default()) });
         let mut det = pl::Detector::new(cfg.whale_pct);
@@ -4155,7 +4201,7 @@ mod tests {
         assert_eq!((h.h.len(), h.n, h.sum), (CR_KEEP, 25, -50_000_000 + 20), "sum and count over all, the last CR_KEEP kept");
         // the gate (loss first, then unfollowed), its record
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
-            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
             skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
         let (ca, cb, cc) = ([1u8; 32], [2u8; 32], [3u8; 32]);
@@ -4215,7 +4261,7 @@ mod tests {
         assert!(!c0.breaker.on() && c0.json().get("breaker").is_none(), "off: dip30's start record");
         assert!(Cfg::from_argv(&set("--presend-live-breaker", "2:0.2"), &p, true, 1_000_000_000).is_err());
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
-            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
             skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
         let m = 60_000_000_000u64;
@@ -4230,7 +4276,7 @@ mod tests {
         assert_eq!(breaker_note(&Shared { brk_until: AtomicU64::new(0), ..sh }, &Breaker::default(), -900_000_000, t0), None, "off: never");
         // the sender's gate while the pause runs (mono clock), then not after it
         let sh2 = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
-            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
+            pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
             skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()) };
         assert!(breaker_paused(&sh2));

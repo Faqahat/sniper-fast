@@ -6,7 +6,7 @@
 ## What was reviewed
 
 - **The implementation.** The finished work is the implementer's patch `scratchpad/wp03.patch`, 30 files. It is byte-identical to `scratchpad/clone` and `scratchpad/w`: I compared every changed file. I applied it to a clean export of HEAD 1ff3102, and `git apply --check` also passes on the current HEAD 6349694, whose commit touches only docs.
-- **The repository working tree** (`/home/moiz/arbed/arbx`) holds an older, partial state. 13 files differ from the patch: see finding 1.
+- **The repository working tree** (`/home/it/other/arbed/arbx`) holds an older, partial state. 13 files differ from the patch: see finding 1.
 - **Build and tests.** I ran them myself on a copy of the patched tree (`CARGO_TARGET_DIR` on tmpfs, `CARGO_BUILD_JOBS=8`):
   - `cargo build --release` passes with 3 warnings, all present at HEAD: the `Check` dead fields and two irrefutable `if let` in `nonces`.
   - `cargo test --release`: **178 passed, 0 failed, 2 ignored**. That is lib 155 (+1 ignored), bin 9, legacy_fixtures 4, meta_config_hash 1, runtime_isolation 2 (+1 ignored), stop_path 6, supervisor 1.
@@ -56,7 +56,7 @@ Severity: **Blocker**: fix before commit. **Major**: fix before the owner's fiel
 
 ### 1. Blocker (process): the repository working tree is not the reviewed implementation, and its tests fail
 
-- **Location:** `/home/moiz/arbed/arbx` working tree.
+- **Location:** `/home/it/other/arbed/arbx` working tree.
 - **Problem:** these 13 files differ from the patch: `deploy/arb.toml`, `deploy/arbx-stage0.toml`, `docs/MEASUREMENT.md`, `src/config.rs`, `src/engine.rs`, `src/feeds/mod.rs`, `src/main.rs`, `src/rec/health.rs`, `src/send/jito.rs`, `src/tx.rs`, `src/leaders.rs`, `src/rec/journal.rs`, and `testdata/grpc/stream.bin`, which is missing. An untracked `tools/__pycache__/` is also present.
 - **Proof:**
   - `cargo test --release` on a copy of the tree gives `test result: FAILED. 150 passed; 2 failed` (`grpc_stream_fixture_through_forward`, `to_wire_round_trips`).

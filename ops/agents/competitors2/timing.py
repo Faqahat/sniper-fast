@@ -3,7 +3,7 @@
 # the engine's tape (all trades on a token from our fire until we close; executed feed, same clock as t_dump_rx) vs our own
 # buy (first sighting, buy_first_rx). Per wallet, per leader kind, per region (FRA / AMS engine). Positions vs ms.
 import json, collections, statistics
-F = json.load(open("/home/moiz/sniper-data/competitors2/fires.json"))
+F = json.load(open("/home/it/sniper-data/competitors2/fires.json"))
 US = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 def q(x, p): x = sorted(x); return x[min(len(x) - 1, int(p * len(x)))] if x else None
 def fmt(x): return f"{q(x, .25):5.1f} {statistics.median(x):5.1f} {q(x, .75):5.1f}" if x else "    -     -     -"
@@ -34,4 +34,4 @@ print("\nblock positions per ms after the dump (same slot), by leader kind: medi
 for k, P in pairs.items():
     r = [di / dt for di, dt in P if dt > 3]
     if r: print(f"  {k:9s} n={len(r):4d} positions/ms median {statistics.median(r):.2f} (p25 {q(r, .25):.2f}, p75 {q(r, .75):.2f})")
-json.dump({w: {k: v for k, v in d.items()} for w, d in W.items()}, open("/home/moiz/sniper-data/competitors2/timing_wallets.json", "w"))
+json.dump({w: {k: v for k, v in d.items()} for w, d in W.items()}, open("/home/it/sniper-data/competitors2/timing_wallets.json", "w"))

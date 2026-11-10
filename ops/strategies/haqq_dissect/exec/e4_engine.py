@@ -2,9 +2,9 @@
 """Our engine's own records (AMS r20-r33, FRA r20-r26): copies per regular fire, which path lands fills vs failures, landing ms by path,
 sell latency (exit decision -> sell landed on our feed), pre-send tries. MEASURED. Out: sniper-data/haqq_dissect/exec/t4_engine.txt"""
 import json, glob, collections, statistics as st
-D = "/home/moiz/sniper-data/haqq_dissect/exec"
-files = sorted(glob.glob("/home/moiz/sniper-data/runs/fra/runs/dip_r2[0-6].jsonl")) + sorted(glob.glob("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r2[0-7].jsonl")) + \
-        ["/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"] + sorted(glob.glob("/home/moiz/sniper-data/haqq_strat/live/dip_ams_r*.jsonl"))
+D = "/home/it/sniper-data/haqq_dissect/exec"
+files = sorted(glob.glob("/home/it/sniper-data/runs/fra/runs/dip_r2[0-6].jsonl")) + sorted(glob.glob("/home/it/sniper-data/runs/ams/runs/dip_ams_r2[0-7].jsonl")) + \
+        ["/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"] + sorted(glob.glob("/home/it/sniper-data/haqq_strat/live/dip_ams_r*.jsonl"))
 out = []
 def P(*a): out.append(" ".join(str(x) for x in a))
 def med(x): return round(st.median(x), 1) if x else None

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """QUIET3 step 1 (copy of quiet2/x1_chain.py, OUT changed) (read-only on the local raw recording copies): a compact chain table of every successful pump.fun trade
 (TradeEvent, chain order) with block time in [LO, HI), plus our two wallets' failed txs. Output one npz + ids.json in
-/home/moiz/sniper-data/presend_filter/quiet2/. Parsing copied from ops/strategies/presend/flat/f1_extract.py (MEASURED decoder)."""
+/home/it/sniper-data/presend_filter/quiet2/. Parsing copied from ops/strategies/presend/flat/f1_extract.py (MEASURED decoder)."""
 import sys, os, re, gzip, json, glob, base64, struct, time, collections
 import numpy as np
 from multiprocessing import Pool
 
-REC = "/home/moiz/sniper-data/collect"
+REC = "/data/tapes/collect"
 OUT = sys.argv[4]
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 DISC = bytes.fromhex("bddb7fd34ee661ee"); CPI = bytes.fromhex("e445a52e51cb9a1d")

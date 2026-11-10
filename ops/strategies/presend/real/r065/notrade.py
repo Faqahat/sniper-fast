@@ -2,10 +2,10 @@
 """REPLAY_065, HINDSIGHT: fills where no other wallet traded the token between our buy and our sell (chain tape, strictly between
 the two positions). Their P&L live (MEASURED) and at 0.65 (INFERRED), and each run's total without them. Then one cheap check of
 an at-entry signal: the token's trade count in the 10 slots before the trigger (pre-send) / before the dump (regular).
-Writes /home/moiz/sniper-data/replay065/notrade.json"""
+Writes /home/it/sniper-data/replay065/notrade.json"""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core
 
 RENT_BACK = 1_508_820 / 1e9

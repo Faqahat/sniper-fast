@@ -11,8 +11,8 @@ import json, pickle, struct, collections, sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from r3_decomp import parse as parse_ev, b58, DISC, CPI, RENTS, kind_of
 W = "8yYMhuYo1LzgCmeeg3vRkhRtJ8xFC7v7S4ufABtQXjS3"
-D = "/home/moiz/sniper-data/rivals/8yYMhu"
-TIP = json.load(open("/home/moiz/sniper-data/e2x1_dissect/recon/tipmap.json"))
+D = "/home/it/sniper-data/rivals/8yYMhu"
+TIP = json.load(open("/home/it/sniper-data/e2x1_dissect/recon/tipmap.json"))
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"; CB = "ComputeBudget111111111111111111111111111111"; LH = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95"
 A58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def b58d(s):

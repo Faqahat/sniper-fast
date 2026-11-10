@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """CUSTOM37 step 5: per-knob tables (each knob alone vs the current r37 config), TRAIN (r34 r35 r36 f26 f27 f28) vs TEST (r37),
 r37 first / second half, bootstrap 90% CI (windows resampled in (run, PKT hour) blocks), without the top 5 windows, -20% followers,
-per-run help / hurt, SOL/day at 0.696. Out: stdout + /home/moiz/sniper-data/custom37/knobs.txt + knobs.json"""
+per-run help / hurt, SOL/day at 0.696. Out: stdout + /home/it/sniper-data/custom37/knobs.txt + knobs.json"""
 import sys, pickle, json, datetime, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as L
 
 G = pickle.load(open(f"{L.D}/grid.pkl", "rb"))

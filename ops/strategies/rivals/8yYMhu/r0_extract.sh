@@ -2,10 +2,10 @@
 # 8yYMhu step 0 (read-only on recordings): every recorded line mentioning the wallet, one output file per input file (resumable).
 # Usage: r0_extract.sh [parallel=3]
 W=8yYMhuYo1LzgCmeeg3vRkhRtJ8xFC7v7S4ufABtQXjS3
-OUT=/home/moiz/sniper-data/rivals/8yYMhu/ext
+OUT=/home/it/sniper-data/rivals/8yYMhu/ext
 mkdir -p $OUT
 P=${1:-3}
-ls /home/moiz/sniper-data/collect/run_202610{24,25,26,27,28}_*/txs/*.jsonl.gz | while read f; do
+ls /data/tapes/collect/run_202610{24,25,26,27,28}_*/txs/*.jsonl.gz | while read f; do
   r=$(basename $(dirname $(dirname $f))); b=$(basename $f .jsonl.gz)
   [ -e $OUT/${r}__${b}.done ] || echo "$f"
 done | xargs -P $P -I{} bash -c '

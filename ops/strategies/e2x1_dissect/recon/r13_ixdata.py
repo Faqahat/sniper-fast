@@ -6,7 +6,7 @@ import json, pickle, struct, collections, random, glob
 import numpy as np
 from r5_rpc import b58d
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"; PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 L = pickle.load(open(f"{OUT}/lots.pkl", "rb")); s2l = {}
 for l in L:
     s2l[l["buy_sig"]] = (l, "buy")

@@ -9,8 +9,8 @@ sys.path.insert(0, "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af
 import q2lib as Q
 
 D = Q.D
-COHORT = "/home/moiz/sniper/ops/overnight/sel/cohort_train.json"
-FBOTS = "/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json"
+COHORT = "/home/it/sniper-data/overnight/sel/cohort_train.json"
+FBOTS = "/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json"
 SUPPLY = 10 ** 15
 t0 = time.time()
 C = np.load(f"{D}/chain.npz"); I = json.load(open(f"{D}/ids.json"))

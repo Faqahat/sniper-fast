@@ -3,7 +3,7 @@
 (rank landing out-of-sample by server, exact followers) raw and calibrated (a x modelled + b per fire, c2 OLS). Tx costs excluded on
 both sides. Out: dv8/c6.txt"""
 import sys, pickle, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 from g1_walkforward import calib_boot
 (a, b), _ = calib_boot()

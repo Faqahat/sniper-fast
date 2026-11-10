@@ -5,10 +5,10 @@ price, fee, CU limit, durable nonce (AdvanceNonce/ValidateNonce ix), router prog
 Out: sniper-data/haqq_dissect/front/f6.pkl (per dump: dump shape + front shapes) and f6_shape.txt (tables)"""
 import json, glob, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+OUT = "/home/it/sniper-data/haqq_dissect/front"
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 STD = {"11111111111111111111111111111111", "ComputeBudget111111111111111111111111111111", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
        "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ", "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo",

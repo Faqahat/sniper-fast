@@ -7,7 +7,7 @@ Base and 20%-fewer-followers stress. Paired differences vs FLAT: the same window
 of 4000 bootstrap resamples of the windows. Also the realized mean size per realistic fill. Out: OUT/presend_tables.json"""
 import pickle, json
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_size"
+OUT = "/home/it/sniper-data/haqq_size"
 Z = pickle.load(open(f"{OUT}/presend.pkl", "rb"))
 W = {tuple(x["key"]): x for x in Z["wins"]}
 rng = np.random.default_rng(11); NB = 4000

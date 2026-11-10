@@ -8,11 +8,11 @@ curve state 2 s and 4 s after their buy. No landing model (their position and fi
 Out: bots/b8b.txt"""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 import dv8lib as L
 from plib import boot_mean, Out
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 KB = [(0, 0), (1, 1), (2, 3), (4, 7), (8, 12)]
 SZ = (0.2, 0.6) if len(sys.argv) > 1 and sys.argv[1] == "size" else None      # variant: only buyers of 0.2-0.6 SOL (our size class)
 

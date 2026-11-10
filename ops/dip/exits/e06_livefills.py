@@ -2,7 +2,7 @@
 # e06: the SAME exits on our REAL live buys (recon pertrade.json: FRA r10-r15, AMS r9-r14, 10-24 16:59 -> 10-25 07:50 PKT) at their
 # EXACT chain landing position (no landing model at all: this removes the "independent landing draw" optimism), 0.35 SOL, the
 # corrected replay with our own trades removed. Output in the e02 format (li = 0) so every policy and model applies unchanged.
-# -> /home/moiz/sniper-data/exits/paths/paths_live.npz (+ live_index.json: did, live fill flag, server, run)
+# -> /home/it/sniper-data/exits/paths/paths_live.npz (+ live_index.json: did, live fill flag, server, run)
 import sys, os, json, zlib, bisect, time
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -11,7 +11,7 @@ import e02_paths as P2
 
 if __name__ == "__main__":
     T0 = time.time()
-    PT = json.load(open("/home/moiz/sniper-data/recon/work/pertrade.json"))
+    PT = json.load(open("/home/it/sniper-data/recon/work/pertrade.json"))
     D = dict(np.load(f"{E.DATA}/dumps.npz"))
     TP = {"A": E.Tape("A"), "B": E.Tape("B")}
     m2t = {tag: {m["m"]: t for t, m in enumerate(TP[tag].meta)} for tag in TP}

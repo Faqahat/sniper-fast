@@ -7,10 +7,10 @@
             start to its presend_live_stop)
   live    : realized + rent back per fill (MEASURED); 0.65 = the chain replay (run065 results, INFERRED)
   (a) all paper fills vs all live fills; (b) windows both filled, per fill
-Writes /home/moiz/sniper-data/replay065/paper.json"""
+Writes /home/it/sniper-data/replay065/paper.json"""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core, paper
 
 COST = (5120 + 200_000 + 605_000 + 1_200_000 + 5020) / 1e9

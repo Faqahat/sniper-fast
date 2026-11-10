@@ -38,4 +38,4 @@ All tokens, same engine: ideal +32.8, 50% +16.1, 30% +9.4, measured +8.4 (calibr
 
 ## Files
 - Code: this folder (h0–h6 scripts).
-- Data: /home/moiz/sniper-data/haqq_sel/ (tokens.json, presend_tables_*, m2_tables.txt, tab/).
+- Data: /home/it/sniper-data/haqq_sel/ (tokens.json, presend_tables_*, m2_tables.txt, tab/).

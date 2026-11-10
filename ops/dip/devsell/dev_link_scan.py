@@ -7,7 +7,7 @@
 # out: out/scan1.json (per token), out/scan2.json (per wallet)
 import json, gzip, base64, os, sys, glob
 from multiprocessing import Pool
-REC = "/home/moiz/sniper-data/collect/run_20261024_1425"
+REC = "/data/tapes/collect/run_20261024_1425"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 TD = bytes.fromhex("bddb7fd34ee661ee")          # pump.fun TradeEvent
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"

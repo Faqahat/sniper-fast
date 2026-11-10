@@ -8,7 +8,7 @@ Also: the clock anchors (feed-arrival A, landing B) and their spread.
 usage: ma2_validate.py X.pkl TAB OUT.json"""
 import sys, json, pickle, hashlib, collections, statistics
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import ma_lib as M
 
 

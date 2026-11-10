@@ -1,5 +1,5 @@
 # Analyst J (vs248): bot 248, the bot closest to ours, vs our engine; an exact bridge (10-28 ~03:35 PKT)
-Saved by the main session from the agent's reply. Code: this folder (v1–v9). Data: /home/moiz/sniper-data/haqq_dissect/vs248/ (examples.json, v4_tables, v5, v6_bridge, v7_rungaps, v9_refused .txt). The bridge leaves exactly 0.000000 on every day.
+Saved by the main session from the agent's reply. Code: this folder (v1–v9). Data: /home/it/sniper-data/haqq_dissect/vs248/ (examples.json, v4_tables, v5, v6_bridge, v7_rungaps, v9_refused .txt). The bridge leaves exactly 0.000000 on every day.
 
 ## Short answer (D2–D5 = 10-24..10-27; M = measured, I = inferred)
 - **On shared dumps WE beat 248:** 263 events, ours +24.9 mSOL vs 248's +4.0, gap +20.9 [+11.3..+30.5], every day. We land first 81%; 248 pays a median 5.2% more.

@@ -5,8 +5,8 @@
 # CU), tips (relay via tipmap), ok / error; the dump and OUR tx marked. Then the buys that landed between the dump and us, vs us.
 # usage: python3 -I failed_blocks.py dip_r9.jsonl [more.jsonl ...]
 import json, gzip, os, sys, collections, statistics
-TX = "/home/moiz/sniper-data/collect/run_20261023_1426/txs"
-TIP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+TX = "/data/tapes/collect/run_20261023_1426/txs"
+TIP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 US = {"2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 chunks = sorted(int(f.split("_")[1].split(".")[0]) for f in os.listdir(TX))
 def lines_for(t):

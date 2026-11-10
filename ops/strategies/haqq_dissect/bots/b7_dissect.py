@@ -9,11 +9,11 @@
 Out: bots/b7.txt"""
 import sys, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 import xlib as X
 from plib import boot_sum, Out
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 
 
 def main():

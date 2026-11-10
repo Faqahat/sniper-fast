@@ -6,9 +6,9 @@ Reports: AUC, importance, the tree, match (fire within +-1 / +-3 slots of his re
 Out: e3.txt, e3_scores.npz (per event score), e3_model.pkl"""
 import sys, pickle, time, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel"); import gbdt_np as GB
-OUT = "/home/moiz/sniper-data/e2x1_dissect/exit2"
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect"); import dd_gbdt as G
+sys.path.insert(0, "/home/it/sniper-data/overnight/sel"); import gbdt_np as GB
+OUT = "/home/it/sniper-data/e2x1_dissect/exit2"
 TEST0 = 1793113200 - 79 * 60; TEST1 = TEST0 + 86400   # 10-27 18:41 -> 10-28 18:41 PKT
 Z = np.load(f"{OUT}/ev.npz"); X = Z["X"].astype(np.float64); y = Z["y1"].astype(np.float64); y3 = Z["y3"]; M = Z["meta"]; F = list(Z["feats"]); FI = {f: k for k, f in enumerate(F)}
 TR = pickle.load(open(f"{OUT}/trips.pkl", "rb"))

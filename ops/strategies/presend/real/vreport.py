@@ -6,7 +6,7 @@ import sys, os, pickle, json, collections
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rlib
-OUT = "/home/moiz/sniper-data/presend_real"
+OUT = "/home/it/sniper-data/presend_real"
 
 def day_hours():
     H = json.load(open(f"{OUT}/hours.json"))

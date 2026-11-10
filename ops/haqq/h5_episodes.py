@@ -4,14 +4,14 @@
 # Per buy: entry type (dip = outside sell >= 1 SOL within 300 ms and <= 5 trades before), trigger, delay.
 # Per tick (every trade on the token while haqq holds, incl. its own): features computable in real time from the trade feed.
 # Costs: pump fee + creator fee from the events, tx fee + tips from the recording (rent excluded: reclaimed later in batches).
-# Output: /home/moiz/sniper-data/haqq/ep/b{bb}.pkl = dict(eps=[...], X=float32 ticks x feats, meta arrays)
+# Output: /home/it/sniper-data/haqq/ep/b{bb}.pkl = dict(eps=[...], X=float32 ticks x feats, meta arrays)
 import sys, os, json, glob, pickle, collections, bisect, math
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"; OUT = H.OUT
+D = "/data/tapes/collect"; OUT = H.OUT
 RUNS = {"R1": "run_20261021_2207", "R2": "run_20261022_1543", "R3": "run_20261023_1426", "R4": "run_20261024_1425"}
-COH = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
+COH = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
 DYX = "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw"
 WT = dict(other=0, creator=1, bundle=2, sniper=3, cohort=4, hk=5, dyx=6, ours=7, haqq=8)
 FEATS = ["hold_ms", "hold_slots", "since_lastbuy_ms", "since_lastsell_ms", "nbuys", "nsells", "pos_frac", "ret", "ret_peak", "dd",

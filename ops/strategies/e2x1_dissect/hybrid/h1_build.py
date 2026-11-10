@@ -4,11 +4,11 @@ plus every pump.fun trade on those mints from the haqqml fresh tape (10-22 03:07
 extended for late AMS r34 fills with the local raw recorder chunks (run_20261028_1405, decoded).
 Out: sniper-data/e2x1_dissect/hybrid/fills.pkl, tape.npz"""
 import json, glob, gzip, pickle, sys, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import decode as D
-OUT = "/home/moiz/sniper-data/e2x1_dissect/hybrid"; TP = "/home/moiz/sniper-data/haqqml/fresh/tape"
-RUNS = [(f"FRA r{r}", f"/home/moiz/sniper-data/runs/fra/runs/dip_r{r}.jsonl") for r in (23, 24, 26, 27, 28)]
-RUNS += [(f"AMS r{r}", f"/home/moiz/sniper-data/runs/ams/runs/dip_ams_r{r}.jsonl") for r in (16, 17, 19, 20, 24, 25, 26, 27)]
+OUT = "/home/it/sniper-data/e2x1_dissect/hybrid"; TP = "/home/it/sniper-data/haqqml/fresh/tape"
+RUNS = [(f"FRA r{r}", f"/home/it/sniper-data/runs/fra/runs/dip_r{r}.jsonl") for r in (23, 24, 26, 27, 28)]
+RUNS += [(f"AMS r{r}", f"/home/it/sniper-data/runs/ams/runs/dip_ams_r{r}.jsonl") for r in (16, 17, 19, 20, 24, 25, 26, 27)]
 RUNS += [(f"AMS r{r}", f"{OUT}/ams_r{r}.jsonl") for r in range(28, 35)]
 fills = []; shadow = []
 W0, W1 = 1793118600, 1793205000   # last 24 h: 10-27 21:30 -> 10-28 21:30 PKT
@@ -54,12 +54,12 @@ ext = []
 if late:
     import subprocess
     open(f"{OUT}/late_mints.txt", "w").write("\n".join(sorted(late)) + "\n")
-    loc = sorted(glob.glob("/home/moiz/sniper-data/collect/run_20261028_1405/txs/*.jsonl.gz"))
+    loc = sorted(glob.glob("/data/tapes/collect/run_20261028_1405/txs/*.jsonl.gz"))
     lastloc = max(int(x.split("_")[-1].split(".")[0]) for x in loc); loc = loc[:-1]   # last local chunk may still be syncing: read it on the server
-    subprocess.run(["scp", "-q", "-P", "1996", f"{OUT}/late_mints.txt", "it@84.32.100.36:/tmp/hybrid_late_mints.txt"])
+    subprocess.run(["scp", "-q", "-P", "1996", f"{OUT}/late_mints.txt", "it@cyberfra:/tmp/hybrid_late_mints.txt"])
     cmd = (f"cd /root/sniper-collect/run_20261028_1405/txs 2>/dev/null; for f in $(sudo ls /root/sniper-collect/run_20261028_1405/txs/); do t=${{f#txs_}}; t=${{t%.jsonl.gz}}; "
            f"[ $t -ge {lastloc} ] && sudo sh -c \"zcat /root/sniper-collect/run_20261028_1405/txs/$f 2>/dev/null\" | grep -F -f /tmp/hybrid_late_mints.txt; done")
-    rem = subprocess.run(["ssh", "-p", "1996", "it@84.32.100.36", cmd], capture_output=True, text=True).stdout.splitlines()
+    rem = subprocess.run(["ssh", "-p", "1996", "it@cyberfra", cmd], capture_output=True, text=True).stdout.splitlines()
     print("server ext lines", len(rem))
     def lines():
         for fn in loc:

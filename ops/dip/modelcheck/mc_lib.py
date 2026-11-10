@@ -9,7 +9,7 @@
 #   - a pluggable follower rule (default = the model's: drop a buy if its tokens < real tokens / (1 + slack)).
 import os, json, zlib
 import numpy as np
-PO = "/home/moiz/sniper-data/strategies/patterns"; DDD = "/home/moiz/sniper-data/strategies/dipdetect"
+PO = "/home/it/sniper-data/strategies/patterns"; DDD = "/home/it/sniper-data/strategies/dipdetect"
 DAYS = {"R1": PO, "R2": PO, "R3": PO, "R4": DDD}
 SMS = 212.0; SELL_LAT = 75.0; HMAX = 40; GRADV = 110e9
 CAPS = (2, 4, 6, 9, 12, 19, 28, 38); TPS = (None, 0.05, 0.10, 0.20, 0.40); SLS = (None, 0.05, 0.10, 0.20, 0.30)
@@ -17,9 +17,9 @@ EXITS = [(c, tp, sl) for c in CAPS for tp in TPS for sl in SLS]
 EXN = [f"c{c}_tp{'none' if tp is None else round(tp * 100)}_sl{'none' if sl is None else round(sl * 100)}" for c, tp, sl in EXITS]
 EXI = {k: i for i, k in enumerate(EXN)}
 E4 = EXI["c4_tpnone_slnone"]; E6 = EXI["c6_tpnone_sl10"]
-OUT = "/home/moiz/sniper-data/modelcheck"
+OUT = "/home/it/sniper-data/modelcheck"
 T3 = ["HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ", "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw", "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"]
-SEL = "/home/moiz/sniper/ops/overnight/sel"
+SEL = "/home/it/sniper-data/overnight/sel"
 COH = json.load(open(f"{SEL}/cohort_train.json"))
 UPRO = {zlib.crc32(u.encode()) for u in T3} | {zlib.crc32(u.encode()) for u in COH}
 

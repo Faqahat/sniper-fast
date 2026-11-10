@@ -7,7 +7,7 @@ RUN, WIN, OUTP = sys.argv[1], sys.argv[2], sys.argv[3]
 PROCS = int(sys.argv[4]) if len(sys.argv) > 4 else 4
 TRADE = bytes([189, 219, 127, 211, 78, 230, 97, 238])
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-TIPMAP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+TIPMAP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 def b58(b):
     n = int.from_bytes(b, "big"); o = []
     while n: n, r = divmod(n, 58); o.append(B58[r])

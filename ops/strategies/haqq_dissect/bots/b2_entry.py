@@ -8,11 +8,11 @@ its return and seconds since it closed.
 Out: bots/b2.npz (features, labels, per-candidate meta), b2.txt (univariate selection tables)"""
 import sys, pickle, collections, json, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from plib import load, Out
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 BOTS = (247, 248)
 
 

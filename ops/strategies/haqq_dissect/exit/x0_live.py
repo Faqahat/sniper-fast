@@ -3,12 +3,12 @@
 (why, slot, local rx time) and every sell landing (slot, idx, rx time, SOL). Runs: AMS r9-r33, FRA r1-r26 (dv8/runs.py).
 Regular: fire -> buy_land -> exit -> sell_land -> close.   Pre-send: presend_live_fill -> presend_live_exit -> presend_live_sell_land
 -> presend_live_close (buys list = every attempt that landed into the position).
-Out: /home/moiz/sniper-data/haqq_dissect/exit/ours_pos.pkl  [dict(kind, run, srv, mint, buys=[(slot, idx, t_rx, sol_in, tokens|None)],
+Out: /home/it/sniper-data/haqq_dissect/exit/ours_pos.pkl  [dict(kind, run, srv, mint, buys=[(slot, idx, t_rx, sol_in, tokens|None)],
      exit=(why, slot, t, value), sells=[(slot, idx, t_rx, sol)], hold_cfg, tp, sl, spend, curve_pnl)]"""
 import json, pickle, sys, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from runs import run_files
-OUT = "/home/moiz/sniper-data/haqq_dissect/exit"
+OUT = "/home/it/sniper-data/haqq_dissect/exit"
 
 
 def tsec(t): return t / 1e9 if t and t > 1e15 else t

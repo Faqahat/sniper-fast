@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """print the tape around an E2x1 row: show.py ROW [before] [after]"""
 import sys, json
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"]); MN, US = names()
 def show(R, nb=15, na=8):

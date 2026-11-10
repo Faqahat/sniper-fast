@@ -1,7 +1,7 @@
 # Token-selection search on the 15-hour raw dataset (round 1), 2026-10-22
 
 ## Data
-Collected on the server 2026-10-21 22:07 → 2026-10-22 13:00 UTC; dataset at `/home/moiz/sniper-data/collect/run_20261021_2207`.
+Collected on the server 2026-10-21 22:07 → 2026-10-22 13:00 UTC; dataset at `/data/tapes/collect/run_20261021_2207`.
 
 - **Launches:** 24,889 real creates (604 failed creates excluded).
   - 20,301 are SOL-quoted with sane reserves; these are the universe.

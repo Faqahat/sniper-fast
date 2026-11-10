@@ -8,9 +8,9 @@
 # usage: python3 loss_causes.py dip_r15 dip_r16 dip_ams_r16 dip_ams_r17
 import json, os, re, sys, glob, collections, urllib.request
 from concurrent.futures import ThreadPoolExecutor
-R = "/home/moiz/sniper-data/runs"
+R = "/home/it/sniper-data/runs"
 DEV = {}
-for d in sorted(glob.glob("/home/moiz/sniper-data/collect/run_2026102*/launches.jsonl")):
+for d in sorted(glob.glob("/data/tapes/collect/run_2026102*/launches.jsonl")):
     for l in open(d):
         try: c = json.loads(l)
         except Exception: continue

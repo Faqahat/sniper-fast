@@ -28,7 +28,7 @@ refuses it), and sets `TERM=xterm-256color` when sudo dropped TERM. `DIPMON_PY=.
 Other options: `--usd 100.5` (fixed SOL/USD, no network), `--no-usd`, `--ascii` (no Unicode), `--no-color`,
 `--interval 2` (refresh 0.5–5 s, default 1), `--budget FILE` (default `<dir>/../dip_budget_ams.json` or `dip_budget.json`),
 `--load-duty X` (initial load sleeps X × each chunk's work time; default 1 = at most ~50% of one core).
-From another machine: `ssh -p 1996 it@84.32.104.202 sudo dipmon --snapshot` (needs sudo without a password prompt, or `-t`).
+From another machine: `ssh -p 1996 it@cyberams sudo dipmon --snapshot` (needs sudo without a password prompt, or `-t`).
 
 ## Keys
 
@@ -159,7 +159,7 @@ sh ops/tui/tests/make_screens.sh         # text screenshots into ops/tui/screens
 
 `tests/replay.py` re-writes a finished run into a directory the way the engine does (time-scaled, records split before their
 newline now and then, an optional fake engine process carrying `--dip-log`, optional synthetic dip20 QUIET lines in the
-engine's formats). Test data: `/home/moiz/sniper-data/runs` (`DIPMON_DATA` overrides).
+engine's formats). Test data: `/home/it/sniper-data/runs` (`DIPMON_DATA` overrides).
 
 ## Known gaps
 

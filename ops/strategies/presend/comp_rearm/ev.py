@@ -6,16 +6,16 @@ Our two wallets' trades are removed from the tape. Usable hours only. Read-only.
 usage: ev.py DAYK TAB HOURS_JSON [END_BT]"""
 import sys, os, json, pickle, time, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import rlib
-W = "/home/moiz/sniper-data/comp_rearm"
+W = "/home/it/sniper-data/comp_rearm"
 QBW = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/rearm2"
 SUF = os.environ.get("EVSUF", "")
 DAY0 = 1793038500 - 5 * 86400
 WHALE = 60_000_000_000_000
 OUR = ("EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE")
-COH = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
-FB = set(json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
+COH = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
+FB = set(json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
 QB = None
 
 

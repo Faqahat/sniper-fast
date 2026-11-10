@@ -2,7 +2,7 @@
 """Q4 execution cost per lot (MEASURED): his buy fee+tip, sell fee+tip, failed copies, rent net; vs ours per fill (FRA r27/r28, AMS r28 records).
 Out: x10.txt"""
 import sys, pickle
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/exec")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/exec")
 import numpy as np, xlib as X
 out = []
 def P(*a): out.append(" ".join(str(x) for x in a)); print(out[-1], flush=True)

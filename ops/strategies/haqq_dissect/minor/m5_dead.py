@@ -10,13 +10,13 @@ Rule = greedy <= 4-threshold conjunction maximising F1 on D0-D2; held-out test D
 Out: minor/m5.txt, minor/m5.npz"""
 import json, pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/minor")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/minor")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from plib import Out
 from m3_entry import search, f1
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/minor"
+OUT = "/home/it/sniper-data/haqq_dissect/minor"
 FLOOR = 30.6e9
 
 

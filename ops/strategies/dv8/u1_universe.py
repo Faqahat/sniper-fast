@@ -16,12 +16,12 @@ Exit: timer H slots after the entry slot (state after the last trade of slot ent
 later sells keep tokens; c1: matches realized fills +0.02 mSOL/fill); fol = share of outside buy SOL kept (1, .95, .90, .80).
 A token with no trade after our entry exits at the state right after our buy (round-trip fees), not dropped (s7 dropped them).
 P&L gross of tx costs at SIZE SOL, pump fee 1.25% per side.
-Out: /home/moiz/sniper-data/dv8/uni.npz"""
+Out: /home/it/sniper-data/dv8/uni.npz"""
 import json, time, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
-FB = set(json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
+FB = set(json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
 SIZE = 0.4; FEE = 0.0125; SMS = 212.0; DRAWS = 4; FAR_MS = 30.0
 HS = (5, 8, 12, 30)
 FOLS = (1.0, 0.95, 0.90, 0.80)

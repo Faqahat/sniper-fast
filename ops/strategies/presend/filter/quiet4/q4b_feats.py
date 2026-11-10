@@ -6,11 +6,11 @@ earlier runs and every r37 trigger (armed + virtual), logic = quiet3/f2_feats.py
   * the v2 annotation recomputed (n_tr_60s, maxdd_120s, at_120s_high; block-time windows) for runs that did not log it;
   * oth[o] = other wallets' trades (not the whale, not ours) after the trigger through slot s0 + o, o = 0..12 (stop rule N:M input).
 Chain = presend_quiet3/chain.npz (block time < 1793240200 = 10-29 07:16:40 PKT) + presend_quiet4/tab37 (from there to 10-30 01:20 PKT).
-Out: /home/moiz/sniper-data/presend_quiet4/feats.json {"w24": [c per windows24 window], "s24": [c per windows24 skip], "r37": {"ses:w": c}}"""
+Out: /home/it/sniper-data/presend_quiet4/feats.json {"w24": [c per windows24 window], "s24": [c per windows24 skip], "r37": {"ses:w": c}}"""
 import json, collections, time, pickle
 import numpy as np
-D3 = "/home/moiz/sniper-data/presend_quiet3"; D4 = "/home/moiz/sniper-data/presend_quiet4"
-COHORT = "/home/moiz/sniper/ops/overnight/sel/cohort_train.json"; FBOTS = "/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json"
+D3 = "/home/it/sniper-data/presend_quiet3"; D4 = "/home/it/sniper-data/presend_quiet4"
+COHORT = "/home/it/sniper-data/overnight/sel/cohort_train.json"; FBOTS = "/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 CUT_BT = 1793240200
 t0 = time.time()

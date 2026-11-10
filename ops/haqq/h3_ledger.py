@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # haqq SELL study, step 3: haqq's own ledger from the recording (htx_R*.jsonl.gz). One row per haqq tx (trade, failed attempt,
 # close-account, other) with the exact wallet SOL delta (sd), tx fee, tips, rent, token balance before/after (tb).
-# Overlapping runs (R3/R4) deduped by signature. Output: /home/moiz/sniper-data/haqq/ledger.json
+# Overlapping runs (R3/R4) deduped by signature. Output: /home/it/sniper-data/haqq/ledger.json
 import json, gzip, base64, collections, time
-W = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"; TD = bytes([189, 219, 127, 211, 78, 230, 97, 238]); OUT = "/home/moiz/sniper-data/haqq"
+W = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"; TD = bytes([189, 219, 127, 211, 78, 230, 97, 238]); OUT = "/home/it/sniper-data/haqq"
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def b58(b):
     n = int.from_bytes(b, "big"); o = []

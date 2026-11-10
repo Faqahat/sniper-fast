@@ -6,7 +6,7 @@
 #   PRE-SENT    = the buyer (or a sibling wallet with its exact program set) had failed / no-op attempts on the token just before;
 #   OTHER       = neither. Split into "chance" vs "excess" with the mirror test: the same wallets' buys at the same distance BEFORE
 #                 dumps (a buy that was going to land anyway is as likely just before a dump as just after it).
-# usage: python3 -I i15_summary.py PREFIX OUT.json [X_DIR]   (PREFIX = /home/moiz/sniper-data/presend_instant/r4; X_DIR = pass-1 extracts)
+# usage: python3 -I i15_summary.py PREFIX OUT.json [X_DIR]   (PREFIX = /home/it/sniper-data/presend_instant/r4; X_DIR = pass-1 extracts)
 import sys, json, gzip, glob, collections
 pre, outp = sys.argv[1], sys.argv[2]
 C = json.load(open(pre + "_classes.json"))

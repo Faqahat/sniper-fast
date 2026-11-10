@@ -6,10 +6,10 @@
   - every outside sell between our buy landing and our (last) sell landing = the in-hold sellers (wallet, SOL, tokens)
   - label per holder: sold inside our hold (and how much)
 Big loss = P&L scaled to 0.696 SOL <= -0.05 (WHO/GUARDS definition: pnl x 0.696 / fill spend).
-Out: /home/moiz/sniper-data/prevent/timing/fillctx.pkl  + wallets.json (the wallet set W to profile)"""
+Out: /home/it/sniper-data/prevent/timing/fillctx.pkl  + wallets.json (the wallet set W to profile)"""
 import pickle, json, collections, bisect
 import numpy as np
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 OUT = f"{D}/prevent/timing"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 SUP = 1e15

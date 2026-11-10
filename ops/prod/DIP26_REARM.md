@@ -14,7 +14,7 @@ Nothing was deployed, nothing written on a server, nothing sent, no git commit. 
 | `src/bin/snipe_engine/dip26_tests.rs` (new) | Golden, 13 unit / wiring tests, 1 by-hand recorded-hour live-vs-paper test. |
 | `ops/prod/run_dip_prod.sh.dip26-draft` (new) | The run script draft (section 6). |
 
-Binary: `/home/moiz/sniper-data/speed_fixes/bin/snipe_engine_dip26`
+Binary: `/home/it/sniper-data/speed_fixes/bin/snipe_engine_dip26`
 sha256 **459d4201debba31b443c8d41738cbd983ed43c1b5e6058d7cf9a5e455667d934** (also in `snipe_engine_dip26.sha256`).
 The dip25 binary refuses every re-arm flag ("unknown flag"), so a script pointing at the wrong engine cannot start with re-arm.
 

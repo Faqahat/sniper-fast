@@ -9,7 +9,7 @@ Pre-send attempt row: run, t, mint, send slot, leader (8-char prefix -> full via
 Out: dv8/live_fires.pkl, dv8/live_presend.pkl"""
 import json, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from runs import run_files
 import dv8lib as L
 

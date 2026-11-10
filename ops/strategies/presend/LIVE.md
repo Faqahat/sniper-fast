@@ -5,7 +5,7 @@ Built and tested on this machine only. Nothing deployed, no server touched, noth
 MEASURED = a test, a simulation or a build. INFERRED = my reading.
 
 ## Bottom line
-- **Binary (not deployed):** `/home/moiz/sniper-data/strategies/presend/bin/snipe_engine_dip13_presend_live`
+- **Binary (not deployed):** `/home/it/sniper-data/strategies/presend/bin/snipe_engine_dip13_presend_live`
   - 81,378,688 bytes, sha256 `500c5f8d573ac3aa94a2a02b0e213f8941efa24d35aca1b8a018a85733e14723`.
   - = dip12 (M2, nonce fan-out, pre-send shadow) + `--presend-live` + `--sell-fanout`.
   - Without the new flags it behaves as dip12: every change is additive or behind a new flag (MEASURED: all old tests pass).

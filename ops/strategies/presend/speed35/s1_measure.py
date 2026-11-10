@@ -3,7 +3,7 @@
 (a) every landed pre-send try: send -> first feed rx (ms), same slot as send; per path.
 (b) every live fill: the outside dump just before it (presend_live_tape, same feed clock) -> our fill rx (ms), block-index gap, same slot.
 (c) every live sell: exit decision (presend_live_exit t) -> sell land rx (ms), slots.
-Usage: s1_measure.py RUN.jsonl  -> prints; writes /home/moiz/sniper-data/speed35/s1_measure.json"""
+Usage: s1_measure.py RUN.jsonl  -> prints; writes /home/it/sniper-data/speed35/s1_measure.json"""
 import json, sys, collections, numpy as np
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 fn = sys.argv[1]
@@ -31,7 +31,7 @@ for a in att:
 for p, v in sorted(byp.items(), key=lambda x: -len(x[1])): print(f"    path {p:12s} n {len(v):6d} ms q10/25/50/75/90 {q(v)}")
 out["try_ms"] = ms
 # cadence: gap between consecutive sends per mint window
-TB = "/home/moiz/sniper-data/speed35/tab"
+TB = "/home/it/sniper-data/speed35/tab"
 T = np.load(TB + "/trades.npy", mmap_mode="r"); IDS = json.load(open(TB + "/ids.json")); GID = {k: i for i, k in enumerate(IDS)}
 OG = {GID[o] for o in OURS if o in GID}
 Tm = np.asarray(T["mint"]); F = []
@@ -60,4 +60,4 @@ for s in sells:
 print(f"(c) sells {len(sells)} matched {len(S)}: decision -> sell land rx ms q10/25/50/75/90 {q([x['ms'] for x in S])}; slots after decision slot "
       f"{dict(collections.Counter(x['slots'] for x in S))}")
 out["sell"] = S
-json.dump(out, open("/home/moiz/sniper-data/speed35/s1_measure.json", "w"))
+json.dump(out, open("/home/it/sniper-data/speed35/s1_measure.json", "w"))

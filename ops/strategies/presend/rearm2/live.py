@@ -2,7 +2,7 @@
 """MEASURED live pre-send per run: windows (arm / skip / disarm), fills with realized P&L, rent back, exit kind, sell landing,
 failed landed tries (fee). Out: live_<name>.pkl"""
 import sys, json, pickle, collections
-RUNS = {"f28": "/home/moiz/sniper-data/runs/fra/runs/dip_r28.jsonl", "a34": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r34.jsonl",
+RUNS = {"f28": "/home/it/sniper-data/runs/fra/runs/dip_r28.jsonl", "a34": "/home/it/sniper-data/runs/ams/runs/dip_ams_r34.jsonl",
         "a35": "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/rearm2/live/dip_ams_r35.jsonl"}
 EVS = ("run_start", "presend_live_arm", "presend_live_skip", "presend_live_disarm", "presend_live_fill", "presend_live_realized",
        "presend_live_close", "presend_live_ata_close", "presend_attempt_land", "run_end")

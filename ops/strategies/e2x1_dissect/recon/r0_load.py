@@ -2,7 +2,7 @@
 """recon step 0 (read-only): every recorded line mentioning E2x1 (local ext/ + server tail), deduped by sig -> rec.pkl {sig: rec}"""
 import json, glob, pickle, collections
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 rec = {}
 for f in sorted(glob.glob(f"{OUT}/ext/*.jsonl")) + [f"{OUT}/server_tail.jsonl"]:
     for l in open(f):

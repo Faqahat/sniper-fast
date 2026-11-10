@@ -5,7 +5,7 @@ test d), same features, GBDT on the 0/1 label. Tells whether imitating his selec
 Out: f6.txt"""
 import sys, time, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/follow")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/follow")
 import flib as FL
 from f4_wf import load, account, boot_mint, CI_FIT, QS
 OUT = FL.OUT

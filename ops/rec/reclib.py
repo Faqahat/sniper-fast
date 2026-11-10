@@ -1,8 +1,8 @@
 # sniper-rec shared helpers (stdlib only): paths, PKT time, catalog IO, chunk indexing, locking.
 import os, json, time, calendar, gzip, zlib, hashlib, re, fcntl, glob, contextlib
 
-ROOT = os.environ.get("REC_ROOT", "/home/moiz/sniper-data/rec")
-LEGACY = os.environ.get("REC_LEGACY", "/home/moiz/sniper-data/collect")       # FRA runs copied by the keeper (run_*)
+ROOT = os.environ.get("REC_ROOT", "/home/it/sniper-data/rec")
+LEGACY = os.environ.get("REC_LEGACY", "/data/tapes/collect")       # FRA runs copied by the keeper (run_*)
 DAYS = os.path.join(ROOT, "days"); CACHE = os.path.join(ROOT, "cache"); STATE = os.path.join(ROOT, "state")
 LOGS = os.path.join(ROOT, "logs"); SLIM = os.path.join(ROOT, "slim"); INDEX = os.path.join(STATE, "index")
 CATALOG = os.path.join(ROOT, "catalog.json")

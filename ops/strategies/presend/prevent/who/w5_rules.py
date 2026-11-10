@@ -6,7 +6,7 @@ Out: rules.pkl (per-rule per-window skip vectors + summary), printed summary."""
 import pickle, json, bisect, collections, itertools, sys, math
 import numpy as np
 
-D = "/home/moiz/sniper-data/prevent/who"
+D = "/home/it/sniper-data/prevent/who"
 SCALE = 0.696
 PICK_RUNS = ["FRA21", "FRA22", "FRA23", "FRA24", "FRA26", "FRA27", "FRA28", "AMS16", "AMS17", "AMS19", "AMS20", "AMS24", "AMS25", "AMS26", "AMS27", "AMS34", "AMS35", "AMS36"]
 TEST_RUNS = ["AMS37"]
@@ -114,9 +114,9 @@ def main():
         if not ts: return 0
         return bisect.bisect_left(ts, t - 1) - bisect.bisect_left(ts, t - N * 3600)
     botset = None
-    coh = {c if isinstance(c, str) else (c.get("wallet") or c.get("w")) for c in json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json"))}
+    coh = {c if isinstance(c, str) else (c.get("wallet") or c.get("w")) for c in json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json"))}
     import re
-    cand = set(re.findall(r"gmgn\.ai/sol/address/([1-9A-HJ-NP-Za-km-z]{32,44})", open("/home/moiz/sniper/ops/snipers/CANDIDATES.md").read()))
+    cand = set(re.findall(r"gmgn\.ai/sol/address/([1-9A-HJ-NP-Za-km-z]{32,44})", open("/home/it/sniper/ops/snipers/CANDIDATES.md").read()))
     botset = coh | cand | set(bots["rivals"].values())
 
     # ---------- per-window precompute ----------

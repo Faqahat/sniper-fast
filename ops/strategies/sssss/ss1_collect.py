@@ -4,12 +4,12 @@
 # sell in the same slot and previous 3 slots), speed (slot / tx-index / modelled arrival-ms after the trigger), what
 # preceded each sell, the peak during the hold, and FLEET context: the operator runs 4 vanity "sssss" wallets
 # (sssssDdM, ssssswdk, sssssCUP, sssssyv2) - did a sibling trade this token right before / while it held?
-# Adapted from bukp/bk1_collect.py (not modified).  -> /home/moiz/sniper-data/strategies/sssss/trips_<run>.json
+# Adapted from bukp/bk1_collect.py (not modified).  -> /home/it/sniper-data/strategies/sssss/trips_<run>.json
 import sys, os, json, zlib, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-OUT = "/home/moiz/sniper-data/strategies/sssss"
+OUT = "/home/it/sniper-data/strategies/sssss"
 W = "sssssDdMNAWKingjpEojkTNdVuZrBe7FsJLaGtexe7d"; UID = zlib.crc32(W.encode())
 SIBS = {"wdk": "ssssswdk4RR8HqkE3uwUWzDbd6mXFTTPjcXBKNzQ57E", "CUP": "sssssCUP5wgSW3sxjtQNa7u88ytE4st2Z7goX5kKNwi", "yv2": "sssssyv2q57u9sJrL1BB7Ep71X6YBY71iYt7CtHB5zJ"}
 SUID = {zlib.crc32(v.encode()): k for k, v in SIBS.items()}

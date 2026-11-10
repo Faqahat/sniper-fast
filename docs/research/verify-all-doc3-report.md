@@ -406,4 +406,4 @@ Verdicts: **Confirmed / Partly / Wrong / Unverifiable** for facts; **Supported /
 - Program 1 and Program 2 samples are partly non-uniform caches.
 - The Program 2 rate across our window was not time-averaged.
 - No ledger-wide re-run of the sizing model; pool state was not reconstructed.
-- No write operations anywhere under /home/moiz.
+- No write operations anywhere under /home/it.

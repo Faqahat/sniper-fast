@@ -4,12 +4,12 @@ For every fire in FRA dip_r1..r16 and AMS dip_ams_r9..r17:
   dump position (slot, idx) from my decoded trades (by signature), our buy tx (any fan-out variant) and its chain
   position + result, our sell tx(s), chain-measured SOL P&L of our wallet (all fees, tips, curve SOL), the log's
   REALIZED number, the engine's own dump record (M2 score / IMIT1 pass) and the run's settings.
-Writes /home/moiz/sniper-data/vm1/live_fires.json"""
+Writes /home/it/sniper-data/vm1/live_fires.json"""
 import json, glob, os, re, hashlib, collections
 import numpy as np
 import core
 
-RUNS = "/home/moiz/sniper-data/runs"
+RUNS = "/home/it/sniper-data/runs"
 W = {"fra": "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "ams": "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 
 def sigh(sig):

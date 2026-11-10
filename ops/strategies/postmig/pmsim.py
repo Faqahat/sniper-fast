@@ -12,7 +12,7 @@
 #  - costs: +0.0035 SOL per round trip (tips + priority), failed buy 0.0005.
 import os, json, pickle
 import numpy as np
-OUT = "/home/moiz/sniper-data/strategies/postmig"
+OUT = "/home/it/sniper-data/strategies/postmig"
 SMS = 212.0; FIX = 0.0035; FAIL = 0.0005
 RUNS = ("R2", "R3", "R4")
 

@@ -5,7 +5,7 @@
 import sys, json, zlib
 import numpy as np
 import dd_lib as L
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd1_build as B1
 def main(day):
     d = B1.load(day); z = np.load(f"{L.OUT}/dd1_{day}.npz"); K = z["k"]

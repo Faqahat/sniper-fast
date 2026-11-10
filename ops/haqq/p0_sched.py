@@ -8,5 +8,5 @@ sched = r["result"]; ids = sorted(sched); idx = {k: n for n, k in enumerate(ids)
 sl = [None] * 432000
 for k, v in sched.items():
     for o in v: sl[o] = idx[k]
-json.dump(dict(epoch=1065, start=460080000, ids=ids, slot_leader=sl), open("/home/moiz/sniper-data/haqq/schedule_1065.json", "w"))
+json.dump(dict(epoch=1065, start=460080000, ids=ids, slot_leader=sl), open("/home/it/sniper-data/haqq/schedule_1065.json", "w"))
 print("ok", len(ids), sum(1 for x in sl if x is None))

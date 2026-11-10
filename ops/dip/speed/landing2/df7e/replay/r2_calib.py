@@ -4,10 +4,10 @@
 #  C2 exits: his actual entries, exit by my rules (timer from his hold distribution / trail grid / fixed 10) vs C1
 #  also: his landing delays (block clock, trigger -> his landed buy, filled + failed) -> his_land.npy; his holds -> his_holds.npy
 import json, sys, numpy as np, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/vm1")
+sys.path.insert(0, "/home/it/sniper/ops/dip/vm1")
 import rlib, core, livecal, sim2
 D = rlib.load(); T = D.T
-B = json.load(open("/home/moiz/sniper-data/landing2/df7e/buys2.json"))
+B = json.load(open("/home/it/sniper-data/landing2/df7e/buys2.json"))
 TRG = {r[3] * 100000 + r[4]: r for r in json.load(open(rlib.DD + "/his_triggers.json"))}
 sh = T["sigh"]; o = np.argsort(sh); shs = sh[o]
 def find(sig):
@@ -25,7 +25,7 @@ for x in B:
     if 0 < d < 5: land.append(d)
 land = np.array(land); np.save(rlib.DD + "/his_land.npy", land)
 print(f"his landing: n={len(land)} median {np.median(land) * 212.07:.1f} ms, p25 {np.percentile(land, 25) * 212.07:.1f}, p75 {np.percentile(land, 75) * 212.07:.1f}, p90 {np.percentile(land, 90) * 212.07:.1f}; next slot {np.mean(land >= 1):.2f}")
-ours_land = np.array(json.load(open("/home/moiz/sniper-data/vm1/livecal.json"))["deltas"])
+ours_land = np.array(json.load(open("/home/it/sniper-data/vm1/livecal.json"))["deltas"])
 print(f"our landing: n={len(ours_land)} median {np.median(ours_land) * 212.07:.1f} ms")
 holds = np.array([x["hold_slots"] for x in B if x["ok"] and x.get("hold_slots") is not None and x["hold_slots"] >= 0])
 np.save(rlib.DD + "/his_holds.npy", holds)

@@ -3,7 +3,7 @@
 (same slot / previous slots), and whether his buy shares a slot with the trigger. Out: feat.pkl {lot_id: dict}"""
 import pickle, collections, numpy as np
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 Z = pickle.load(open(f"{OUT}/tape.pkl", "rb")); TR, CR = Z["trades"], Z["creates"]
 LOTS = pickle.load(open(f"{OUT}/lots.pkl", "rb"))
 F = {}

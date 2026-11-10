@@ -2,9 +2,9 @@
 """FRONT step 14 (read-only): per-day robustness of the key numbers (MEASURED). Out: sniper-data/haqq_dissect/front/f14_perday.txt"""
 import pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-exec(open("/home/moiz/sniper/ops/strategies/haqq_dissect/front/f13_bundle.py").read().split("P(f\"# Bundle-aware")[0])
+exec(open("/home/it/sniper/ops/strategies/haqq_dissect/front/f13_bundle.py").read().split("P(f\"# Bundle-aware")[0])
 out2 = []
 def Q(*a):
     s = " ".join(str(x) for x in a); print(s); out2.append(s)

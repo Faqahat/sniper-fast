@@ -1,4 +1,4 @@
-//! READ-ONLY COPY of /home/moiz/arbed/arbx/src/venues/cp.rs (2026-10-04) for the differential tests.
+//! READ-ONLY COPY of /home/it/other/arbed/arbx/src/venues/cp.rs (2026-10-04) for the differential tests.
 //! Adapted only where the crate context is missing: imports point at `super` (tests/reference/mod.rs), the
 //! third-party-swap decoders (which need the engine's PendingSwap/PoolMeta) and the in-file tests are dropped.
 //! The maths is byte-for-byte the engine's.

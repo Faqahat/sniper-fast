@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """select2 t1: rebuild the sorted tape (same as select/s1_build.py, + sigh) into the scratchpad (regenerable)."""
 import json, time, sys, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
 t0 = time.time()
 import shutil
 for f in ("mints.json", "users.json"): shutil.copy(f"{TP}/{f}", f"{SCR}/{f}")

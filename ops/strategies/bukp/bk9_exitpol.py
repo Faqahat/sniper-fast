@@ -4,10 +4,10 @@
 # lands 35 ms after the burst trade. Size 0.6 SOL; curve < 50 entries (where its money is) and all. Chosen on R2.
 import sys, json, zlib, itertools
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/bukp")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies/bukp")
 import p4_eval as E
 import bk8_replica as B8
-OUT = "/home/moiz/sniper-data/strategies/bukp"
+OUT = "/home/it/sniper-data/strategies/bukp"
 POL = [dict(H=h, X=x, need_up=u) for h in (0, 50, 100, 160, 300) for x in (0.5, 1.0, 2.0) for u in (False, True)]
 def run(run_, lat=35, size_mode="0.6"):
     d = E.DAYS[run_]; T = [t for t in json.load(open(f"{OUT}/trips_{run_}.json")) if t["closed"] and t["sells"]]

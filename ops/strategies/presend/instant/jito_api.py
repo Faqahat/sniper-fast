@@ -3,7 +3,7 @@
 # tx (404 = not in a Jito bundle the explorer knows); bundle/<id> -> slot, validator, tippers, landed tip, block index, all tx
 # signatures of the bundle. Paced to <= 2 calls/s; every answer is cached on disk (never asked twice).
 import json, os, time, urllib.request, urllib.error, threading
-CACHE = "/home/moiz/sniper-data/presend_instant/jito_cache.json"
+CACHE = "/home/it/sniper-data/presend_instant/jito_cache.json"
 _C = json.load(open(CACHE)) if os.path.exists(CACHE) else {}
 _lk = threading.Lock(); _last = [0.0]; _n = [0]
 def _get(path):

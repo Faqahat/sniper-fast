@@ -2,10 +2,10 @@
 # DF7eRXHn study: decode his buy args (own program 41Pr4X: [SOL in u64][min tokens out u64][flag u8]) on the RPC sample and
 # compare min-out with the tokens the curve would give at (a) the state right before his buy, (b) the trigger trade's state.
 import json, gzip, bisect, collections, sys, statistics as st
-sys.path.insert(0, '/home/moiz/sniper/ops/dip/speed/landing2'); sys.path.insert(0, '/home/moiz/sniper/ops/dip/speed/landing2/df7e')
+sys.path.insert(0, '/home/it/sniper/ops/dip/speed/landing2'); sys.path.insert(0, '/home/it/sniper/ops/dip/speed/landing2/df7e')
 from rpc_ro import get_tx
 from d2_tx import dec
-D = '/home/moiz/sniper-data/landing2/df7e'
+D = '/home/it/sniper-data/landing2/df7e'
 R = {x['sig']: x for x in json.load(open(f'{D}/buys2.json'))}
 sigs = [l.split()[1] for l in open(sys.argv[1])]
 sigs = [s for s in sigs if s in R]

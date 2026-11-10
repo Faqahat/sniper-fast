@@ -5,13 +5,13 @@ y2 (our pre-send-style WAVE P&L, NOW costs, INFERRED) and the ALL / MKT OOS prob
 Usage: s8_examples.py  -> select/examples.json + s8.txt"""
 import sys, json, glob
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 from s4_wf import load_scores
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 import dv8lib as L
 from s5_pnl import money
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 GM = "https://gmgn.ai/sol/token/{}?maker=haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 
 

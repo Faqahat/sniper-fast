@@ -5,11 +5,11 @@
 #    (epoch schedule file already on disk), each with its gossip IP (the validator itself) and its TPU-QUIC IP (the front:
 #    own TPU, Jito relayer, BAM node or Harmonic relay)
 #  - send endpoints / feeds / Jito + Harmonic block engines by hostname (resolved on each server at probe time)
-# Output: /home/moiz/sniper-data/landing2/targets.json (no secrets)
+# Output: /home/it/sniper-data/landing2/targets.json (no secrets)
 import json, os, time, urllib.request, collections, glob
 
-OUT = "/home/moiz/sniper-data/landing2"
-RUNS = "/home/moiz/sniper-data/runs"
+OUT = "/home/it/sniper-data/landing2"
+RUNS = "/home/it/sniper-data/runs"
 URL = open(os.path.expanduser("~/.config/sniper/ck_rpc_url")).read().strip()
 
 
@@ -24,7 +24,7 @@ def rpc(m, p=None):
 ei = rpc("getEpochInfo")
 nodes = {n["pubkey"]: n for n in rpc("getClusterNodes")}
 print("epoch", ei["epoch"], "slot", ei["absoluteSlot"], "cluster nodes", len(nodes))
-sch = json.load(open("/home/moiz/sniper-data/competitors2/schedule_1067.json"))
+sch = json.load(open("/home/it/sniper-data/competitors2/schedule_1067.json"))
 assert sch["epoch"] == ei["epoch"], "schedule file is for another epoch"
 ids, sl = sch["ids"], sch["slot_leader"]
 cur = ei["absoluteSlot"]

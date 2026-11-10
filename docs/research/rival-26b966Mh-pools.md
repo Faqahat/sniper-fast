@@ -10,7 +10,7 @@
 - **[M]** pump.fun's migration account `39azUYFW…`: 1,000 signatures, 40 decoded.
 - **[DS]** DexScreener; its `pairCreatedAt` matched the on-chain pool creation in 14/14 checks. **[J]** Jito's bundle explorer.
 
-*Inference* marks what is not measured directly. Cost: 662 public-RPC requests (54 of them 429 retries), ≈175 DexScreener and 12 Jito lookups. Working files (28 MB) are in `/home/moiz/arbx-offload/rival-26b9/`.
+*Inference* marks what is not measured directly. Cost: 662 public-RPC requests (54 of them 429 retries), ≈175 DexScreener and 12 Jito lookups. Working files (28 MB) are in `/home/it/other/arbx-offload/rival-26b9/`.
 
 ## 1. Bottom line
 

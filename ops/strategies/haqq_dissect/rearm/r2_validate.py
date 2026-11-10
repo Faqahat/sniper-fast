@@ -9,11 +9,11 @@ usage: r2_validate.py RUN[,RUN..] [--draws 40] [--procs 3]   (RUN = a24..a33, f2
 import sys, os, json, pickle, argparse, time, collections
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/density")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/density")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import dlib, dsim, drun, sim, s48lib
 
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from r1_tapes import RUNS as RECS
 TAPE_END = 1793131823          # dv8 tape: last block time (10-28 01:12 PKT)

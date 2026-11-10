@@ -6,7 +6,7 @@ P&L changes; failed-try fees, rent back and close fees are as live).
              including the ones the engine logged as unseen but the recording shows on chain)
   regular  : realized (log REALIZED lines) - failed-buy fees (chain: the landed failed variant's fee)"""
 import sys, json, pickle, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core
 
 END_BAL = 4.633077414

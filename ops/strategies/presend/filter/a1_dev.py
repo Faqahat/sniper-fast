@@ -3,7 +3,7 @@
 Prints; touches no validation outcome."""
 import json, sys, collections
 import numpy as np
-B = "/home/moiz/sniper-data/presend_filter"
+B = "/home/it/sniper-data/presend_filter"
 W = [w for w in json.load(open(f"{B}/windows.json")) if w["run"] in ("ams:r24", "ams:r25")]
 
 

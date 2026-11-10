@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # per-minute deltas of FRA collector counters from state/fra_poll.jsonl (read-only poller samples)
 import json, time, sys
-rows = [json.loads(l) for l in open(sys.argv[1] if len(sys.argv) > 1 else "/home/moiz/sniper-data/rec/state/fra_poll.jsonl")]
+rows = [json.loads(l) for l in open(sys.argv[1] if len(sys.argv) > 1 else "/home/it/sniper-data/rec/state/fra_poll.jsonl")]
 prev = None
 for r in rows:
     t = time.strftime("%H:%M", time.gmtime(r["t"] + 18000)); out = []

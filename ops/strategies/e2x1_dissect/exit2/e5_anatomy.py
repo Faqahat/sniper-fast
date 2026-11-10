@@ -3,7 +3,7 @@
 (a) the last outside trade before his sell: gap, side, who; (b) sibling (Grozoe) co-exits: same slot? who is first by index?
 (c) univariate comparison: feature medians at exit events (y1=1) vs other open moments. Out: e5.txt"""
 import pickle, collections, numpy as np
-OUT = "/home/moiz/sniper-data/e2x1_dissect/exit2"
+OUT = "/home/it/sniper-data/e2x1_dissect/exit2"
 Z = np.load(f"{OUT}/tape_his.npz"); wid = int(Z["wid"]); sid = int(Z["sid"])
 slot = Z["slot"].astype(np.int64); idx = Z["idx"].astype(np.int64); user = Z["user"]; buy = Z["buy"].astype(bool); sol = Z["sol"].astype(np.float64) / 1e9; bt = Z["bt"].astype(np.int64)
 mint = Z["mint"]; um, st = np.unique(mint, return_index=True); en = np.append(st[1:], len(mint)); span = {int(m): (int(a), int(b)) for m, a, b in zip(um, st, en)}

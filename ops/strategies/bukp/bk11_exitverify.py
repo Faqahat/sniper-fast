@@ -3,10 +3,10 @@
 # all entries and curve<50, plus how close the rule's exit lands to ITS exit (median |slot difference|).
 import sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/bukp")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies/bukp")
 import p4_eval as E
 import bk8_replica as B8
-OUT = "/home/moiz/sniper-data/strategies/bukp"
+OUT = "/home/it/sniper-data/strategies/bukp"
 OPS = {">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b, ">": lambda a, b: a > b, "<": lambda a, b: a < b, "==": lambda a, b: a == b, "!=": lambda a, b: a != b}
 WIN = ("bsol3", "ssol3", "nb3", "ns3", "maxs3", "maxb3", "net3", "net10", "ret1", "ret3", "ret10", "curve", "nbot_hold", "fam_hold", "sol", "wt")
 def run(day, rules, lat=35):

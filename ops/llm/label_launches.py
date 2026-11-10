@@ -9,7 +9,7 @@
 #   python3 label_launches.py submit [--max-usd X]          -> Message Batches API (half price), batch ids saved
 #   python3 label_launches.py status | fetch                -> poll; download results -> WORK/labels.jsonl + usage totals
 import json, os, re, sys, time, urllib.request, urllib.error
-WORK = os.environ.get("LLM_WORK", "/home/moiz/sniper-data/llm/launch_labels")
+WORK = os.environ.get("LLM_WORK", "/home/it/sniper-data/llm/launch_labels")
 MODEL = os.environ.get("LLM_MODEL", "claude-haiku-5-5")
 PER = int(os.environ.get("LLM_PER", "25"))                     # launches per request
 PRICE = {"claude-haiku-5-5": (0.10, 0.50), "claude-sonnet-5-5": (2.0, 10.0), "claude-opus-5-5": (4.0, 20.0)}  # $/MTok in, out (normal API; batch = half)

@@ -11,11 +11,11 @@ Entries and money per picked dump (mSOL, per the gap analyst's g11b conventions)
 Out: select/s5.txt"""
 import sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 from s4_wf import load_scores
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 PSF = 0.45; XC = 0.000198; ARM = 4 * 5120 / 1e9
 FILL_PS = dict(NOW=0.00251, S2=0.00251 - 0.001529, CHEAP=0.00079)
 FILL_RG = dict(NOW=(0.00352, 0.00053), S2=(0.00186, 0.00036), CHEAP=(0.00079, 0.00004))

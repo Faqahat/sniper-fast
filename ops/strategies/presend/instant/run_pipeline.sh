@@ -1,8 +1,8 @@
 #!/bin/bash
 # INSTANT-BOTS study: the whole read-only pipeline for one collector run (local files only).
-# usage: bash run_pipeline.sh RUN_DIR TAG     (outputs /home/moiz/sniper-data/presend_instant/<TAG>_*)
+# usage: bash run_pipeline.sh RUN_DIR TAG     (outputs /home/it/sniper-data/presend_instant/<TAG>_*)
 set -e
-RUN=$1; TAG=$2; D=/home/moiz/sniper-data/presend_instant; S=/home/moiz/sniper/ops/strategies/presend/instant
+RUN=$1; TAG=$2; D=/home/it/sniper-data/presend_instant; S=/home/it/sniper/ops/strategies/presend/instant
 cd $S
 nice -n 15 python3 -I i1_extract.py $RUN $D/x_$TAG 5 | tail -1
 nice -n 15 python3 -I i4_census.py $D/x_$TAG $D/$TAG 3

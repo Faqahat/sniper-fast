@@ -16,9 +16,9 @@ Features, all from rows/txs BEFORE the sell (or the create): groups
 Out: sniper-data/haqq_dissect/select/env.npz"""
 import json, pickle, time, sys, glob, os, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 H = L.HAQQ
 SL_AGE = int(1800 / 0.212) + 1
 
@@ -46,9 +46,9 @@ def main():
     hq = idm[H]; ours = [idm[w] for w in L.WAL.values() if w in idm]
     CR = json.load(open(f"{L.TAB}/creates.json"))
     # ---- haqq lots (code-matched) and failed attempts
-    Z = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/pos/p1.pkl", "rb")); B = Z["buys"]; LO = Z["lots"]
+    Z = pickle.load(open("/home/it/sniper-data/haqq_dissect/pos/p1.pkl", "rb")); B = Z["buys"]; LO = Z["lots"]
     hl = collections.defaultdict(list)          # mint id -> [(slot, idx, code, cc, close_cc, net)]
-    sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+    sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
     from plib import load
     _, LO2, _ = load()
     lots = []
@@ -61,7 +61,7 @@ def main():
     LT = LT[np.lexsort((LT["i"], LT["s"], LT["m"]))]
     print(f"haqq lots {len(LT):,} ({time.time() - t0:.0f}s)", flush=True)
     fails = []
-    for f in glob.glob("/home/moiz/sniper-data/haqq_dissect/exec/ext/*.jsonl"):
+    for f in glob.glob("/home/it/sniper-data/haqq_dissect/exec/ext/*.jsonl"):
         for line in open(f):
             if H not in line or '"err":null' in line: continue
             try: d = json.loads(line)

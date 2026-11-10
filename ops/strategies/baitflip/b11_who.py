@@ -43,7 +43,7 @@ if __name__ == "__main__":
     E = []
     with Pool(12) as p:
         for e in p.imap_unordered(job, [(r, b) for r in B.RUNS for b in range(256)]): E += e
-    json.dump(E, open("/home/moiz/sniper-data/strategies/baitflip/who_trips.json", "w"))
+    json.dump(E, open("/home/it/sniper-data/strategies/baitflip/who_trips.json", "w"))
     W = collections.defaultdict(list)
     for e in E: W[e[1]].append(e)
     rows = []

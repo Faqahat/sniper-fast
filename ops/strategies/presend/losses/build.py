@@ -2,11 +2,11 @@
 """Per-fill table from the live run records (read-only). One row per closed position (mint, pid).
 Uses presend_live_{arm,fill,exit,sell_land,close,realized,tape} and the engine's dump records. Output fills_<run>.json."""
 import json, sys, collections
-RUNS = {"r28": "/home/moiz/sniper-data/runs/fra/runs/dip_r28.jsonl",
-        "r34": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r34.jsonl",
-        "r35": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r35.jsonl",
-        "r36": "/home/moiz/sniper-data/presend_losses/raw/ams_r36.jsonl"}
-OUT = "/home/moiz/sniper-data/presend_losses"
+RUNS = {"r28": "/home/it/sniper-data/runs/fra/runs/dip_r28.jsonl",
+        "r34": "/home/it/sniper-data/runs/ams/runs/dip_ams_r34.jsonl",
+        "r35": "/home/it/sniper-data/runs/ams/runs/dip_ams_r35.jsonl",
+        "r36": "/home/it/sniper-data/presend_losses/raw/ams_r36.jsonl"}
+OUT = "/home/it/sniper-data/presend_losses"
 for run, path in RUNS.items():
     arms, fills, exits, sells, closes, real = {}, collections.defaultdict(list), {}, collections.defaultdict(list), {}, {}
     tape, dumps, start = collections.defaultdict(list), collections.defaultdict(list), None

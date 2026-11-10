@@ -4,7 +4,7 @@
 usage: in4_run.py CTX.pkl OUTDIR [--reps 4] [--procs 5] [--only NAME,NAME]"""
 import sys, os, json, pickle, time, argparse
 from multiprocessing import get_context
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/insider")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/insider")
 import in3_sim as I
 import ma_lib as M
 

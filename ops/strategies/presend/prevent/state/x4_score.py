@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""STATE step 4: PICK/TEST search per PREREG.txt (/home/moiz/sniper-data/prevent/state/PREREG.txt).
+"""STATE step 4: PICK/TEST search per PREREG.txt (/home/it/sniper-data/prevent/state/PREREG.txt).
 Families: A = T2 arm-time skip, B = T2 in-window stop, C = re-arm arm-time skip. Writes RESULTS.json / RESULTS.txt."""
 import pickle, json, collections, math, sys, datetime
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/state"
+D = "/home/it/sniper-data/prevent/state"
 SIZE = 0.696; FAIL = 5120e-9
 PICK = ["FRA21", "FRA22", "FRA23", "FRA24", "FRA26", "FRA27", "FRA28", "AMS16", "AMS17", "AMS19", "AMS20", "AMS24", "AMS25", "AMS26", "AMS27",
         "AMS28", "AMS29", "AMS30", "AMS31", "AMS32", "AMS33", "AMS34", "AMS35", "AMS36"]
@@ -235,7 +235,7 @@ def rearm_rows(O, F, R, allrows):
     """re-arm decisions: r36 obs paper (PICK), r37 obs + multiarm replay (TEST), r38 live (MEASURED) + r38 obs paper"""
     import glob
     rep = collections.defaultdict(list)
-    for p in sorted(glob.glob("/home/moiz/sniper-data/multiarm/runs/r37/R0__*.pkl")):
+    for p in sorted(glob.glob("/home/it/sniper-data/multiarm/runs/r37/R0__*.pkl")):
         d = pickle.load(open(p, "rb"))
         for r in d["rows"]:
             if r["kind"] == "rearm": rep[tuple(r["key"])].append(r["cash"])

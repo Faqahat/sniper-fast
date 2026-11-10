@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # who buys right after >=1 SOL dumps (all dumps, r3), how fast (block index gap), through which paths, how often they fail
 import sys, json, gzip, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from load import load
-A = "/home/moiz/sniper/ops/agents/freshaudit"
+A = "/home/it/sniper/ops/agents/freshaudit"
 run = sys.argv[1] if len(sys.argv) > 1 else "r3"
 W = collections.defaultdict(lambda: dict(n=0, ok=0, fail=0, ss=0, didx=[], sol=0.0, rel=collections.Counter(), tip=[], cup=[], errs=collections.Counter(), first=0, dumps=set()))
 nd = 0; nd_any = 0; first_ss = collections.Counter(); first_didx = []

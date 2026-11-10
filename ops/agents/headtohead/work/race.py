@@ -1,5 +1,5 @@
 # race reconstruction around a dump (read-only)
-import sys; sys.path.insert(0, "/home/moiz/sniper/ops/agents/headtohead/work")
+import sys; sys.path.insert(0, "/home/it/sniper/ops/agents/headtohead/work")
 from lib import *
 STD_PROGS = {"11111111111111111111111111111111", "ComputeBudget111111111111111111111111111111", "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
              "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", PUMP}

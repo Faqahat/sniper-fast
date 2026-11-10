@@ -1,10 +1,134 @@
 {
-  "version": 1,
-  "note": "dip36 --presend-live-blocklist seed (owner OK 11-05 PKT): an arm is skipped when the T2 whale, the re-arm dumper or a holder >= 3% is listed",
-  "wallets": [
-    {"w": "8ZN71XTdVo8yRovnGLmNgW3Tgniw6A4J3JGLvPD686FP", "why": "re-arm trigger dumper of the 9% trio, r38–r55 −0.81 SOL / 35 fills"},
-    {"w": "G3fk9NykrzmcXr4YYmToftFayrC6Y6ACiuc6WCKq3f8B", "why": "9% trio, sells into our hold"},
-    {"w": "46qjgvZNdiLxCqJ6oMBf8NoA3dZtC3xuagLpfMLYG8f9", "why": "9% trio, sells into our hold"},
-    {"w": "Cu1cXMvtXdEafDoPjtvjxgvyXHAK7Yh8AFvuKUVDy6yG", "why": "9% trio, sells into our hold"}
-  ]
+ "version": 4,
+ "note": "dip36 --presend-live-blocklist seed (owner OK 11-05 PKT): an arm is skipped when the T2 whale, the re-arm dumper or a holder >= 3% is listed | v4 (owner OK 11-05 PKT): + dtrzJPj7 launcher and its 21 funded helpers (antibait study; 2maW7x2X NOT added = victim sniper)",
+ "wallets": [
+  {
+   "w": "8ZN71XTdVo8yRovnGLmNgW3Tgniw6A4J3JGLvPD686FP",
+   "why": "re-arm trigger dumper of the 9% trio, r38–r55 −0.81 SOL / 35 fills"
+  },
+  {
+   "w": "G3fk9NykrzmcXr4YYmToftFayrC6Y6ACiuc6WCKq3f8B",
+   "why": "9% trio, sells into our hold"
+  },
+  {
+   "w": "46qjgvZNdiLxCqJ6oMBf8NoA3dZtC3xuagLpfMLYG8f9",
+   "why": "9% trio, sells into our hold"
+  },
+  {
+   "w": "Cu1cXMvtXdEafDoPjtvjxgvyXHAK7Yh8AFvuKUVDy6yG",
+   "why": "9% trio, sells into our hold"
+  },
+  {
+   "w": "BujUx1wzxo6iPvueULzqXvn7WVrRNz9uGqvDRThb4SEY",
+   "why": "bait whale: buys big then dumps; r55-r57 14 fills -0.99 SOL"
+  },
+  {
+   "w": "2H6DwrqAsETL1PjrT5KAX3MAELx71FuDkKVZj18PaeJf",
+   "why": "whale: 17 fills -0.715 SOL, 3 wins (r16-r58)"
+  },
+  {
+   "w": "Cwy9fbuShN2aKQZrwzzwnSyPG4jZUxttcYBfqY761aBU",
+   "why": "whale: 10 fills -0.686 SOL, 2 wins"
+  },
+  {
+   "w": "5KhMUK6yK6FtDkXVmS5Tdy3Jnkd8yuRuUKWQKmGua1WV",
+   "why": "whale: 11 fills -0.437 SOL, 1 win"
+  },
+  {
+   "w": "5u1ZsCanJL1xFZZEtoHXQ7LdgD8nGc8M4RdjbNwVWqB4",
+   "why": "whale: 5 fills -0.435 SOL, 2 wins"
+  },
+  {
+   "w": "851cCNpu4HnQgsQshVYYqKEhweXuincaedTLjcVZp1Fm",
+   "why": "whale: 5 fills -0.400 SOL, 1 win (also r42 attack -0.225)"
+  },
+  {
+   "w": "dtrzJPj7yDdvm6eRqBAgxsK2sMJeD9HhBEBB3XMedXy",
+   "why": "r59 bait launcher (11-05): keeps ~26% of fresh tokens, funds helper wallets; r59 5 traps -0.773 SOL; dumped 11.54 SOL into us on z3L4DHnB"
+  },
+  {
+   "w": "4pQkZ9j3wQzrbn2TtfB5jgGZFJnhqSMsxG8d8ToyX4QJ",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "MdbbRmVQuwH62kmT3hzrK1sSCx6TgocWzeGF93er2Qx",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "Fpidi5xA7i4t8jARarwKJzUXYLKenghEQW3teoJKhkoK",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "DAPkbBvsfji1uUWmUykKujyYkAc7GyRYdpC8QJ4d7Xvq",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "7uxq7AX11Tpo4MsUU1AKySGUfLUtBo1KnCdASYWfVMdV",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "EWVvTK6nB4JiDxfRsuFTuuV8kU9iwAWw98t4gK73k8on",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "Emcucv1fdYpN5YxsBDMJiXnrktniVdqDuZ3n2vMgCWij",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "8Qv8M8tmbR6MLnDDLruaSQ58wmt9rxxYr2ZHbfCHjk7a",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "HYP3m7kwo8gJVdQ2SM2xT2bDGrJ5ePzr9mh4a7SFiGG8",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "AG9E49eux4V4BdPUAvDJTeeVnb951Sreg9mF3yaRFnWB",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "CLbgzbXTHMpy9oLeSeHEnVBj1dQh68tGmDrup5QkZFpe",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "GZAaRRybaeCKQv5unEuaweYun4L5CT1NLAzNenVqERNz",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "EAhvuBdNn7i5q8Rns1CZJ5b7rFXfcra3eHLUeZQiGNzb",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "FEoJDC1A9p6b7xzbgfy9AWAgXAge2z2Hwse3UNTg9xqC",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "CwG4WsHeH4eQ1awX4nKV2Vk65YyoUxNgdaVQNSkDJFEf",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "G2nRYuJGffw59YSK13jUpFKjeRLx47WKwqhK61D3dhNb",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "3vccSJVvo765upcpdb3ogjnjnpzFGauAwZd14FihjEjm",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "5yokueRzLkFnPkS18GnQuxut2PoFekMCDoxgzHETFzN2",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "2SUy2hPKXkPMPi9f1wfcdRXWHvxguVs55QdDYK7tpAwf",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "CZpmkEc76e5FNUMitGXJ9bpk1Lk1DyL3qa25BgTpaYvn",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  },
+  {
+   "w": "zFxVT1MUG4onferPyiHY5ewLL8zMia1qiSTqxGQCRpm",
+   "why": "dtrzJPj7 helper (funded by dtrzJPj7 via pass-through, 10-31..11-04); ~5.6% holder in r59 bait tokens"
+  }
+ ]
 }

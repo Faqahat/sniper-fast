@@ -5,7 +5,7 @@
   phase 2 (holdout r28)     : block time in [10-27 18:07, --hi]              <- run ONLY after FROZEN.json exists
 Chunks that start at/after the phase's upper bound are never opened (holdout guard). Interest mints (every mint the live
 pre-send detector armed or skipped in the studied runs) keep their trades' signatures and instruction names.
-Output: /home/moiz/sniper-data/presend_flat/chain_p{1,2}.npz, ids_p{1,2}.json, ourfail_p{1,2}.json, blocks_p{1,2}.npz, creates.json
+Output: /home/it/sniper-data/presend_flat/chain_p{1,2}.npz, ids_p{1,2}.json, ourfail_p{1,2}.json, blocks_p{1,2}.npz, creates.json
   phase 0 (older runs AMS r19/r20, FRA r21-r24, added 10-27 ~21:30 PKT): block time in [10-24 22:00, 10-25 21:30 PKT) (24 h history)
   phase 3 (r28 after the 20:58 PKT cut): [--lo (default 20:49 PKT), --hi]
 usage: f1_extract.py 0|1 | f1_extract.py 2|3 --hi UNIX_S   [--procs 14]"""
@@ -13,9 +13,9 @@ import sys, os, re, gzip, json, glob, base64, struct, time, argparse, collection
 import numpy as np
 from multiprocessing import Pool
 
-REC = "/home/moiz/sniper-data/collect"
-OUT = "/home/moiz/sniper-data/presend_flat"
-RUNS_LIVE = "/home/moiz/sniper-data/runs/ams/runs"
+REC = "/data/tapes/collect"
+OUT = "/home/it/sniper-data/presend_flat"
+RUNS_LIVE = "/home/it/sniper-data/runs/ams/runs"
 LO1, HI1 = 1792945800, 1793106420           # 10-25 21:30 PKT, 10-27 18:07 PKT
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}   # AMS, FRA
 DISC = bytes.fromhex("bddb7fd34ee661ee"); CPI = bytes.fromhex("e445a52e51cb9a1d")
@@ -130,13 +130,13 @@ def main():
         lo, hi = 1792861200, LO1; runs_rec = ["run_20261024_1425", "run_20261025_1420"]; live = ["a19", "a20", "f21", "f22", "f23", "f24"]
     elif A.phase == 3:
         # r28 after the holdout cut (20:58 PKT): 10 min of overlap with phase 2 (late-written blocks), duplicates removed on load
-        if not os.path.exists("/home/moiz/sniper/ops/strategies/presend/flat/FROZEN.json"):
+        if not os.path.exists("/home/it/sniper/ops/strategies/presend/flat/FROZEN.json"):
             sys.exit("holdout guard: FROZEN.json missing; phase 3 refused")
         lo, hi = (A.lo or 1793116740 - 600), A.hi; runs_rec = ["run_20261027_1410"]; live = ["r28"]
     elif A.phase == 1:
         lo, hi = LO1, HI1; runs_rec = ["run_20261025_1420", "run_20261026_1415"]; live = ["r24", "r25", "r26", "r27"]
     else:
-        if not os.path.exists("/home/moiz/sniper/ops/strategies/presend/flat/FROZEN.json"):
+        if not os.path.exists("/home/it/sniper/ops/strategies/presend/flat/FROZEN.json"):
             sys.exit("holdout guard: FROZEN.json missing; phase 2 refused")
         lo, hi = HI1, A.hi; runs_rec = ["run_20261026_1415", "run_20261027_1410"]; live = ["r24", "r25", "r26", "r27", "r28"]
     G["span"] = (lo, hi); G["want"] = interest(live)

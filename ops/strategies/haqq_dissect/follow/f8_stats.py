@@ -4,7 +4,7 @@ creation-slot whales, gap whale start -> its next sell (slots), the N = 0 label 
 (= 'followed' base rate in money terms), haqq-follow base rate. Out: f8.txt"""
 import sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/follow")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/follow")
 import flib as FL
 from f4_wf import load
 OUT = FL.OUT

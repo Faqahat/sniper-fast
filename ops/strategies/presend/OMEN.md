@@ -4,7 +4,7 @@ Analyst task. Offline replay only: nothing sent, no server writes, no engine or 
 - MEASURED = chain recording or live records.
 - INFERRED = replay output.
 - Times are PKT. Days run 23:15 → 23:15.
-- Code + full tables: /home/moiz/sniper/ops/strategies/presend/omen/ (tables.md). Working data: scratchpad omen/.
+- Code + full tables: /home/it/sniper/ops/strategies/presend/omen/ (tables.md). Working data: scratchpad omen/.
 
 ## Verdict: the claim does not hold up. Do not build OMEN as proposed.
 - **"Up to 2× fills":** no. Adding habit-predicted windows on 2–6% holders adds +29% to +46% fills on the TEST days (696 → 901 / 990 / 1,013 fills/day for X = 4 / 3 / 2). Using OMEN to skip today's arms (the full proposal) gives *fewer* fills (696 → 399–729).

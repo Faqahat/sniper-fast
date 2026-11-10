@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """Landing-study campaigns (FT-006..FT-013b, 284 landed Jito bundles, all sent to the Frankfurt block engine):
 send -> first seen in our shred feeds, split by leader kind x leader RTT from Frankfurt, client, landed slot vs trigger
-slot. Read-only over /home/moiz/arbx-offload (local copies). Joins attempts_all.jsonl (leader meta) with outcomes."""
+slot. Read-only over /home/it/other/arbx-offload (local copies). Joins attempts_all.jsonl (leader meta) with outcomes."""
 import sys, json, statistics, collections
-sys.path.insert(0, '/home/moiz/arbx-offload/landing-study/scripts')
+sys.path.insert(0, '/home/it/other/arbx-offload/landing-study/scripts')
 from rd import segments, stream  # noqa
 
-segs = list(segments()) + [("ft012b", "ft012b-p1", "/home/moiz/arbx-offload/landing-study/raw/ft012b/ft012b-p1")]
+segs = list(segments()) + [("ft012b", "ft012b-p1", "/home/it/other/arbx-offload/landing-study/raw/ft012b/ft012b-p1")]
 seen = {}
 for camp, seg, d in segs:
     for o in stream(d, "outcomes"):
         if o.get("final") == "landed_ok" and o.get("send_to_seen_ms") is not None:
             seen[(seg, o["attempt"])] = o
 att = {}
-for l in open('/home/moiz/arbx-offload/landing-study/out/attempts_all.jsonl'):
+for l in open('/home/it/other/arbx-offload/landing-study/out/attempts_all.jsonl'):
     x = json.loads(l)
     att[(x['seg'], x['attempt'])] = x
 

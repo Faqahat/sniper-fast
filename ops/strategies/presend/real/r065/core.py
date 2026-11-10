@@ -24,7 +24,7 @@ import json, math, pickle, collections
 import numpy as np
 import pmath as PM
 
-BASE = "/home/moiz/sniper-data/replay065"
+BASE = "/home/it/sniper-data/replay065"
 SMS = 212.0
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
 SUPPLY = 1e15

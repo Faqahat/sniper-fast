@@ -4,9 +4,9 @@ links, PKT time, size, hold, P&L, trigger), recent days first; plus the per-day 
 Out: minor/examples.json, minor/m11.txt"""
 import json, pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 from plib import Out
-OUT = "/home/moiz/sniper-data/haqq_dissect/minor"
+OUT = "/home/it/sniper-data/haqq_dissect/minor"
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 pkt = lambda t: time.strftime("%m-%d %H:%M:%S", time.gmtime(int(t) + 18000))
 NAMES = {244: "Binary-Timer Dipper (0.25 SOL, no limit, 8/16/32/64-slot timers, 50% partials, 0.01 shadow tier)",

@@ -2,8 +2,8 @@
 # copypaper paper loop (PAPER ONLY, local only). Every 2 h: score the next 2-h window once its 1800 s look-ahead is recorded,
 # append out/results.jsonl + out/trades.jsonl, rebuild RUNNING.md, prune decoded chunk caches no longer needed.
 # Stop: touch STOP (same folder). Runs 48 h from START. Log: out/loop.log. Pid: out/loop.pid.
-C=/home/moiz/sniper/ops/strategies/e2x1_dissect/copypaper
-D=/home/moiz/sniper-data/e2x1_dissect/copypaper
+C=/home/it/sniper/ops/strategies/e2x1_dissect/copypaper
+D=/home/it/sniper-data/e2x1_dissect/copypaper
 START=${START:-1793210400}          # 10-28 23:00 PKT
 HOURS=${HOURS:-48}
 END=$((START + HOURS * 3600))
@@ -23,7 +23,7 @@ while :; do
   if [ "$now" -lt $((ns + W + LOOK)) ]; then
     sleep 300; continue
   fi
-  free=$(df --output=avail -B1G /home/moiz | tail -1 | tr -d ' ')
+  free=$(df --output=avail -B1G /home/it | tail -1 | tr -d ' ')
   if [ "$free" -lt 15 ]; then log "disk guard: ${free} GB free < 15, not scoring (keeper territory); sleeping"; sleep 1800; continue; fi
   fetch=""
   [ "$free" -lt 20 ] && { fetch="--no-fetch"; log "disk ${free} GB free < 20: lean mode (no server fetch, local keeper copies only)"; }

@@ -6,14 +6,14 @@ P&L: model (draw 0, delay-averaged exact replay, = b5), model mean over the 4 dr
 usage: b10_export.py BOT COST   -> bots/decisions.jsonl"""
 import sys, json, pickle, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 SIZES = (0.30, 0.40); HZ = 55
 
 

@@ -6,7 +6,7 @@ writes the verdict block at the top of RESULTS.txt.
 usage: r3_named_groups.py   (after r2_report.py)"""
 import pickle, json, math, collections, statistics as st
 
-OUT = "/home/moiz/sniper-data/rivals85"
+OUT = "/home/it/sniper-data/rivals85"
 X = pickle.load(open(f"{OUT}/fills.pkl", "rb")); R = [o for o in X["fills"] if o.get("dump")]
 SEL = ["DF7eRXHn", "AEgTuy8L", "EprLoV21", "8PgC4ngp", "GKd5EMzR", "9pQQc1xy"]
 

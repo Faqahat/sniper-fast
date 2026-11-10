@@ -1,5 +1,5 @@
 import json, gzip, collections, sys
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 TOP = [l.strip() for l in open(B + sys.argv[1]) if l.strip()]
 by = collections.defaultdict(list)
 for line in gzip.open(B + "buys.jsonl.gz", "rt"):

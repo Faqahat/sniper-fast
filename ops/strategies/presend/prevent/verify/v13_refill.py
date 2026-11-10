@@ -9,7 +9,7 @@ landing); fee 1.25% of volume, fixed 2.01 mSOL + ATA net 0. Extra failed tries: 
 Calibration: the same exit model on the LIVE fills vs their realized P&L. Size 0.696."""
 import pickle, collections, json
 import numpy as np
-OUT = "/home/moiz/sniper-data/prevent/verify"
+OUT = "/home/it/sniper-data/prevent/verify"
 T = pickle.load(open(f"{OUT}/tables.pkl", "rb")); F = pickle.load(open(f"{OUT}/feats.pkl", "rb")); TP = pickle.load(open(f"{OUT}/tape.pkl", "rb"))
 M, USERS = TP["mints"], TP["users"]; uid = {u: k for k, u in enumerate(USERS)}
 OURS = {uid[u] for u in ("EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE") if u in uid}

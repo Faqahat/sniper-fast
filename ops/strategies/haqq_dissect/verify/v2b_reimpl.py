@@ -21,10 +21,10 @@ Not modelled: rate caps (G2: 4-5% of tries), the knock-on on T2 windows via one 
 usage: v2b_reimpl.py TAB TAG --days 2,3,4,5 | --fresh  [--seeds 3]"""
 import sys, os, json, pickle, collections, argparse, time, bisect, hashlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/verify")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/verify")
 import vlib as V
 
-DATA = "/home/moiz/sniper-data/haqq_dissect/verify"
+DATA = "/home/it/sniper-data/haqq_dissect/verify"
 SMS = V.SMS
 WH = V.WHALE; HX = 30_000_000_000_000
 SIZE = 400_000_000
@@ -32,11 +32,11 @@ COST = 5120 + 200_000 + 605_000 + 1_200_000 + 5020
 FAIL = 5120
 DAY0 = 1793038500 - 5 * 86400
 FRESH0 = 1793131823
-SLACK = np.array(sorted(r[1] for r in json.load(open("/home/moiz/sniper/ops/overnight/verify2/work/a8_slack.json"))["rows"]), float)
-LIVE_RUNS = ["/home/moiz/sniper-data/runs/ams/runs/dip_ams_r24.jsonl", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r25.jsonl",
-             "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r26.jsonl", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r27.jsonl",
-             "/home/moiz/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"] + \
-            [f"/home/moiz/sniper-data/haqq_strat/live/dip_ams_r{k}.jsonl" for k in range(29, 34)] + ["/home/moiz/sniper-data/runs/fra/runs/dip_r26.jsonl"]
+SLACK = np.array(sorted(r[1] for r in json.load(open("/home/it/sniper-data/overnight/verify2/work/a8_slack.json"))["rows"]), float)
+LIVE_RUNS = ["/home/it/sniper-data/runs/ams/runs/dip_ams_r24.jsonl", "/home/it/sniper-data/runs/ams/runs/dip_ams_r25.jsonl",
+             "/home/it/sniper-data/runs/ams/runs/dip_ams_r26.jsonl", "/home/it/sniper-data/runs/ams/runs/dip_ams_r27.jsonl",
+             "/home/it/sniper-data/presend_filter/live28/dip_ams_r28.jsonl"] + \
+            [f"/home/it/sniper-data/haqq_strat/live/dip_ams_r{k}.jsonl" for k in range(29, 34)] + ["/home/it/sniper-data/runs/fra/runs/dip_r26.jsonl"]
 
 
 def slack(sigh):
@@ -254,9 +254,9 @@ if __name__ == "__main__":
     A = ap.parse_args()
     t0 = time.time()
     if A.donors == "fra":
-        lander = Lander(donor_streams(f"{DATA}/tab", ["/home/moiz/sniper-data/runs/fra/runs/dip_r26.jsonl", f"{DATA}/live/dip_r27.jsonl"], "_fra"))
+        lander = Lander(donor_streams(f"{DATA}/tab", ["/home/it/sniper-data/runs/fra/runs/dip_r26.jsonl", f"{DATA}/live/dip_r27.jsonl"], "_fra"))
     else:
-        lander = Lander(donor_streams("/home/moiz/sniper-data/dv8/tab"))
+        lander = Lander(donor_streams("/home/it/sniper-data/dv8/tab"))
     print(f"donor streams {len(lander.S)}, landed tries/s while armed {1000 * lander.rate:.1f} ({time.time() - t0:.0f} s)", flush=True)
     if A.fresh:
         S = np.load(f"{A.tab}/slots.npy"); bt = S["bt"].astype(np.int64); sl = S["slot"].astype(np.int64)
@@ -268,7 +268,7 @@ if __name__ == "__main__":
         ok_bt = lambda b: FRESH0 < b < BTE and ((b + 18000) // 3600 * 3600 - 18000) in good
     else:
         days = [int(x) for x in A.days.split(",")]
-        hj = json.load(open("/home/moiz/sniper-data/dv8/hours.json")); good = {r["h"] for r in hj["rows"] if r["usable"]}
+        hj = json.load(open("/home/it/sniper-data/dv8/hours.json")); good = {r["h"] for r in hj["rows"] if r["usable"]}
         ok_bt = lambda b: int((b - DAY0) // 86400) in days and ((b + 18000) // 3600 * 3600 - 18000) in good
     # candidate mints: a >= 6% single sell anywhere
     T = np.load(f"{A.tab}/trades.npy", mmap_mode="r")

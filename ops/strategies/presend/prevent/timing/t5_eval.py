@@ -3,7 +3,7 @@
 AUC / precision / recall of each exit-rule signal for y = 'this holder sold inside our hold'; profile tables; big-loss main sellers."""
 import pickle, collections, json
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/timing"
+D = "/home/it/sniper-data/prevent/timing"
 R = pickle.load(open(f"{D}/pairs.pkl", "rb"))
 FC = pickle.load(open(f"{D}/fillctx.pkl", "rb"))
 

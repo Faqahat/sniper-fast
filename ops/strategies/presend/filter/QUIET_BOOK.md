@@ -9,9 +9,9 @@ copies of FRA's recording.
 
 ```
 FRA raw recorder (/root/sniper-collect/run_*/txs, 5-min gzip chunks)
-   │  keeper.sh (host, every 10 min): copies new and grown chunks to /home/moiz/sniper-data/collect/run_*/txs
+   │  keeper.sh (host, every 10 min): copies new and grown chunks to /data/tapes/collect/run_*/txs
    ▼
-quiet_book (host): extends /home/moiz/sniper-data/quiet_book/quiet_book.jsonl: it reads only the chunks after the book's end
+quiet_book (host): extends /home/it/sniper-data/quiet_book/quiet_book.jsonl: it reads only the chunks after the book's end
    │  (the engine's own code: the recording reader and DumpBook::ingest, so the book holds the dumps the live engine would hold)
    ▼
 quiet_book_push.sh (host): per node in ops/collect/nodes.txt: rsync delta to /tmp/quiet_book/ on the node, sha256 check,
@@ -42,29 +42,29 @@ engine start (run_dip_prod.sh --presend-quiet passes --presend-live-quiet-book /
 ## Commands (host)
 
 ```
-# build or extend the book (default: --rec /home/moiz/sniper-data/collect --out /home/moiz/sniper-data/quiet_book/quiet_book.jsonl)
-/home/moiz/sniper-data/speed_fixes/bin/quiet_book            # one pass (incremental when a book exists); one status line
-/home/moiz/sniper-data/speed_fixes/bin/quiet_book --full     # rebuild the last 24 h
-# push to every node in ops/collect/nodes.txt; one status line (also in /home/moiz/sniper-data/quiet_book/push.log)
-bash /home/moiz/sniper/ops/collect/quiet_book_push.sh        # exit 0 ok | 1 stale / no book / bad list | 2 a node failed
+# build or extend the book (default: --rec /data/tapes/collect --out /home/it/sniper-data/quiet_book/quiet_book.jsonl)
+/home/it/sniper-data/speed_fixes/bin/quiet_book            # one pass (incremental when a book exists); one status line
+/home/it/sniper-data/speed_fixes/bin/quiet_book --full     # rebuild the last 24 h
+# push to every node in ops/collect/nodes.txt; one status line (also in /home/it/sniper-data/quiet_book/push.log)
+bash /home/it/sniper/ops/collect/quiet_book_push.sh        # exit 0 ok | 1 stale / no book / bad list | 2 a node failed
 # local test of the push (no ssh)
-bash /home/moiz/sniper/ops/collect/quiet_book_push_test.sh
+bash /home/it/sniper/ops/collect/quiet_book_push_test.sh
 ```
 
 Hook it into the keeper loop (proposal: `ops/collect/keeper_loop.sh.quietbook` = keeper.sh, then quiet_book, then the push). The
 running loop must not be edited in place:
 
 ```
-kill $(cat /home/moiz/sniper-data/collect/keeper_loop.pid)     # the loop only; a keeper.sh pass already running finishes by itself
-cd /home/moiz/sniper/ops/collect && cp keeper_loop.sh.quietbook keeper_loop.sh.new && mv -f keeper_loop.sh.new keeper_loop.sh
-setsid nohup bash /home/moiz/sniper/ops/collect/keeper_loop.sh > /dev/null 2>&1 &
+kill $(cat /data/tapes/collect/keeper_loop.pid)     # the loop only; a keeper.sh pass already running finishes by itself
+cd /home/it/sniper/ops/collect && cp keeper_loop.sh.quietbook keeper_loop.sh.new && mv -f keeper_loop.sh.new keeper_loop.sh
+setsid nohup bash /home/it/sniper/ops/collect/keeper_loop.sh > /dev/null 2>&1 &
 ```
 
 ## Add a node
 
 1. Add one line to `ops/collect/nodes.txt`: `name host port user`. The user needs passwordless sudo, rsync and sha256sum on the node.
    `/root/dip` is created if missing.
-2. Run the push once by hand: `bash /home/moiz/sniper/ops/collect/quiet_book_push.sh`. The node's part of the line must say
+2. Run the push once by hand: `bash /home/it/sniper/ops/collect/quiet_book_push.sh`. The node's part of the line must say
    `book pushed` (and the lists pushed on its first push).
 3. Check it: `ssh -p PORT USER@HOST 'sudo ls -la /root/dip/quiet_book.jsonl; sudo tail -n 1 /root/dip/quiet_book.jsonl'`.
 4. From then on every keeper pass updates it. `run_dip_prod.sh --presend-quiet` picks the book up when the file exists. The engine's
@@ -110,6 +110,6 @@ AMS warmed up 60 min at every start.
 ## Live since 10-27 ~18:10 PKT (main session)
 - dip21 is on both nodes: /root/sniper-dip/snipe_engine_dip21 (sha256 b406ebc3…), run script fcea4d1b.
 - First full book: 47,165 dumps, 9,212 sellers, 23.85 h, 5.60 MB, 156 s.
-- **Schedule:** systemd `sniper-quietbook.timer` (every 10 min at :05) runs `sniper-quietbook.service` = `quiet_book` (incremental, ~3 s; log `/home/moiz/sniper-data/quiet_book/build.log`), then `quiet_book_push.sh` (log `push.log`, ~28 KB per node per pass). It is used instead of the keeper_loop hook, so it doesn't depend on the keeper (which goes away when the recorder moves to the host).
+- **Schedule:** systemd `sniper-quietbook.timer` (every 10 min at :05) runs `sniper-quietbook.service` = `quiet_book` (incremental, ~3 s; log `/home/it/sniper-data/quiet_book/build.log`), then `quiet_book_push.sh` (log `push.log`, ~28 KB per node per pass). It is used instead of the keeper_loop hook, so it doesn't depend on the keeper (which goes away when the recorder moves to the host).
 - **Fix 10-27:** the push loop read nodes.txt on stdin, and ssh ate the remaining lines (only the first node was updated). The loop now reads fd 3, and ssh / rsync get /dev/null.
-- **Check:** `systemctl list-timers sniper-quietbook.timer`; `tail -3 /home/moiz/sniper-data/quiet_book/push.log`.
+- **Check:** `systemctl list-timers sniper-quietbook.timer`; `tail -3 /home/it/sniper-data/quiet_book/push.log`.

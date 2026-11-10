@@ -3,11 +3,11 @@
 its 'his' direction (feature higher among his picks than among negatives => top quintile, else bottom), with GMGN token links,
 trigger wallet, time (PKT), feature value, sim P&L. Out: OUT/examples.md (pasted into REPORT.md)"""
 import sys, json, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select2"); from lib import *
 U = dict(np.load(f"{OUT}/U2.npz")); SIM = dict(np.load(f"{OUT}/sim_66.npz")); MN, US = names()
 R = json.load(open(f"{OUT}/t6_main.json")); imp = R["models"]["ALL"]["imp"][:10]
 y = U["y"].astype(bool); samp = U["samp"].astype(bool); TE = U["bt"] >= R["TCUT"]
-DESC = json.load(open(f"/home/moiz/sniper/ops/strategies/e2x1_dissect/select2/feature_desc.json"))
+DESC = json.load(open(f"/home/it/sniper/ops/strategies/e2x1_dissect/select2/feature_desc.json"))
 lines = []
 rng = np.random.default_rng(0)
 for f, g in imp:

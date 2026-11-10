@@ -5,7 +5,7 @@ where did the bots land relative to our failed try / fire, and what did their lo
 Out: data/lim/l19.txt"""
 import pickle, collections
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"; HD = "/home/moiz/sniper-data/haqq_dissect"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"; HD = "/home/it/sniper-data/haqq_dissect"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); out.append(s)
@@ -35,7 +35,7 @@ for kind in ("ps", "reg"):
     P(f"- our no-limit fill at our position: wave gross mean {1000*np.mean([c['val'][('wv',1.0)] for c, b in rows]):+.1f} mSOL; our try need p50 {np.median([c['need'] for c, b in rows]):.3f}; rows ahead p50 {np.median([c['nahead'] for c, b in rows]):.0f}")
 open(f"{OUT}/l19.txt", "w").write("\n".join(out) + "\n")
 # exact (slot, idx) order on our failed REGULAR fires (dv8 fires_tape 'us' = our first landed copy)
-FT = pickle.load(open("/home/moiz/sniper-data/dv8/fires_tape.pkl", "rb"))
+FT = pickle.load(open("/home/it/sniper-data/dv8/fires_tape.pkl", "rb"))
 BB = collections.defaultdict(list)
 for b, lt in zip(P1["buys"], P1["lots"]):
     if lt.get("code") in (247, 248): BB[b["mint"]].append((b["slot"], b["idx"], float(lt["out"]) - float(lt["cost"]), float(lt["cost"])))

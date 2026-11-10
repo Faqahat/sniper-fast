@@ -2,7 +2,7 @@
 """migpaper: RUNNING.md (PKT) from out/results.jsonl + out/trades.jsonl. Usage: mp_table.py [results] [trades] [out.md] [--title S]"""
 import sys, json, os, datetime as dt, collections
 import numpy as np
-D = "/home/moiz/sniper-data/e2x1_dissect/migpaper/out"
+D = "/home/it/sniper-data/e2x1_dissect/migpaper/out"
 args = [x for x in sys.argv[1:] if not x.startswith("--")]
 title = "migpaper RUNNING — paper forward test of the near-graduation rule (FROZEN.md)"
 if "--title" in sys.argv: title = sys.argv[sys.argv.index("--title") + 1]

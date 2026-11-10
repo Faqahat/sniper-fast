@@ -5,10 +5,10 @@
 # Unconstrained (every trigger). sssssDdM's own trades removed from the tape. -> printed
 import sys, json, zlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/sssss")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies/sssss")
 import p4_eval as E
 import ss8_sim as S
-OUT = "/home/moiz/sniper-data/strategies/sssss"
+OUT = "/home/it/sniper-data/strategies/sssss"
 UID = zlib.crc32(b"sssssDdMNAWKingjpEojkTNdVuZrBe7FsJLaGtexe7d")
 EX = {"t30": {"max_slots": 30}, "t100": {"max_slots": 100}, "t300": {"max_slots": 300}, "dump5": {"any_of": [[["ret1", "<=", -5]]], "max_slots": 6000}}
 for run in sys.argv[1:] or ["R2", "R3"]:

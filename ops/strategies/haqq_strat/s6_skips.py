@@ -5,7 +5,7 @@ Reason order: we landed a tx > pre-send armed on the mint (window covers the dum
 M2 no / pick skipped (engine's why) / picked not fired; else outside our envelope (sell < 1.08 SOL, drop < 4.66%, age > 344 s)."""
 import json, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_strat")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_strat")
 from hs_lib import *
 out = []
 def P(*a):

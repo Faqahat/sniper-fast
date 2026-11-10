@@ -4,7 +4,7 @@ buys, SOL in, gross curve P&L (sells - buys, curve SOL), est. pump fees (fee_bps
 not included), share of their tokens that E2x1 also bought, entry relative to him, and P&L on tokens where they entered AFTER him."""
 import sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 D = load(); w = int(D["wid"]); MN, US = names(); uid = {u: i for i, u in enumerate(US)}
 us = D["user"].astype(np.int64); bu = D["buy"].astype(bool); so = D["sol"] / 1e9; mi = D["mint"]; sl = D["slot"].astype(np.int64); ix = D["idx"].astype(np.int64)

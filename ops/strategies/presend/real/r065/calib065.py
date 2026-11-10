@@ -2,10 +2,10 @@
 """REPLAY_065 step 5: tie each live exit to the chain (MEASURED) and measure the sell delays the replay uses when an exit moves.
   * live TP / SL exits: the trade whose post-trade state gives the engine's logged exit value (at the live size) = the trigger
   * delays (chain clock ms): TP / SL -> sell landing; time limit -> sell landing after the slot (entry + 2 | buy + hold) starts
-Builds the positions (positions.py) and writes /home/moiz/sniper-data/replay065/pos_cal.pkl (positions + live trigger rows) and delays.json."""
+Builds the positions (positions.py) and writes /home/it/sniper-data/replay065/pos_cal.pkl (positions + live trigger rows) and delays.json."""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core, positions as PO, pmath as PM
 
 def main():

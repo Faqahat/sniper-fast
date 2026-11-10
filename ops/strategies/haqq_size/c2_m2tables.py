@@ -10,7 +10,7 @@ is NOT modeled for M2 (dd1_build has no follower cut); it is reported for pre-se
 Paired bootstrap over rows (4000). Out: OUT/m2_tables.json"""
 import pickle, json, glob
 import numpy as np
-OUT = "/home/moiz/sniper-data/haqq_size"
+OUT = "/home/it/sniper-data/haqq_size"
 rng = np.random.default_rng(12); NB = 4000; HOURS = 23.75
 R = {}
 for f in glob.glob(f"{OUT}/m2/rows_s*.pkl"):

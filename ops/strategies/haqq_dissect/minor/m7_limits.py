@@ -6,13 +6,13 @@ Ratios min_out / tokens_x show which state his limit is anchored to and how wide
 Out: minor/m7.txt"""
 import json, glob, pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import xlib as X
 from plib import Out
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/minor"
+OUT = "/home/it/sniper-data/haqq_dissect/minor"
 ROUTER = "haqqqMGN35ehCftXca3KWxJFXTBcWTWeNHNtUHLGQdh"
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 

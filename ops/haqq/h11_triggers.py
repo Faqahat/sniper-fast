@@ -3,13 +3,13 @@
 # For every lot's FIRST sell: the last 3 outside trades before it (side, size, wallet type, ms before), the lot return just before
 # the sell, and whether the sell slot is one of the profile's checkpoints. Baseline: the same stats at random tape points while held.
 import sys, json, pickle, zlib, collections, random, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H
 from multiprocessing import Pool
 WTN = {0: "other", 1: "creator", 2: "bundle", 3: "sniper", 4: "cohort", 5: "hk", 6: "dyx", 7: "ours", 8: "haqq"}
 CPS = {"A.25": {9, 17, 25, 33, 41, 49, 57, 65}, "C.30": {9, 17, 25, 33, 41, 49, 57, 65}, "P.01": {9, 17, 25, 33, 41, 49, 57, 65, 201},
        "B.27": {10, 12, 15, 20, 25, 30, 40, 50, 60, 65, 201}, "D.40": {10, 12, 15, 20, 25, 30, 40, 50, 60, 65, 201}, "E.49": {20}}
 prof = lambda sz: {0.25: "A.25", 0.27: "B.27", 0.3: "C.30", 0.4: "D.40", 0.49: "E.49", 0.01: "P.01"}.get(round(sz, 2), "BIG" if sz >= 0.6 else "other")
-COH = set(json.load(open("/home/moiz/sniper/ops/overnight/sel/cohort_train.json")))
+COH = set(json.load(open("/home/it/sniper-data/overnight/sel/cohort_train.json")))
 DYX = "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw"
 SS = {}
 def init():

@@ -3,7 +3,7 @@
 reached 78 vSOL (from the KEEP-mode decode in decfull/). Needed so stop-losses / timeouts see crashes below 45 vSOL."""
 import glob, os, pickle
 import numpy as np
-G = "/home/moiz/sniper-data/e2x1_dissect/grad"
+G = "/home/it/sniper-data/e2x1_dissect/grad"
 M = pickle.load(open(G + "/meta.pkl", "rb")); Z = np.load(G + "/tape.npz")
 keep = {m for m, v in M["mx"].items() if v >= 78e9 and m in M["cr"] and not M["cr"][m].get("mayhem")}
 gm = {m: k for k, m in enumerate(M["mints"])}; gml = list(M["mints"])

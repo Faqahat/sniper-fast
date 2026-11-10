@@ -7,11 +7,11 @@ Per run: window, mode (regular live / pre-send live / probe-only), and
   pskips  [(mint, whale, trig slot, why, t)]                                    (pre-send LIVE skips)
   patt    [(sig, mint, slot, idx, res, d_slot, d_idx, d_user8, t)]              (pre-send attempts that landed / resolved)
   sigs_reg / sigs_ps: our tx signatures by path (buys, sells, ATA closes) to split our wallet txs.
-Out: /home/moiz/sniper-data/haqq_dissect/gap/g2_engine.pkl"""
+Out: /home/it/sniper-data/haqq_dissect/gap/g2_engine.pkl"""
 import json, pickle, sys, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from runs import run_files
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 
 
 def tsec(t): return t / 1e9 if t and t > 1e15 else t

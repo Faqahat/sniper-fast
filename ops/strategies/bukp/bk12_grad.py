@@ -7,10 +7,10 @@
 # -> bukp/grad_model_N{2,5,10}.json, bukp/grad.json
 import sys, json, zlib
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/overnight/sel")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper-data/overnight/sel")
 import p4_eval as E
 import gbdt_np as G
-OUT = "/home/moiz/sniper-data/strategies/bukp"
+OUT = "/home/it/sniper-data/strategies/bukp"
 UID = zlib.crc32(b"BUkpShoEWRiPckdFs3kzYGjBPfUhL6G39ufo84QeogPP")
 DROP = {"bid", "w_first", "wt", "hour"}
 NS = {2: 566, 5: 1415, 10: 2830}

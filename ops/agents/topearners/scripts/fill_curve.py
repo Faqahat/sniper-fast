@@ -1,7 +1,7 @@
 # fill-ability vs landing position: would a B-SOL buy with a +5% max-price guard (min_out from the post-dump state) fill
 # if it landed at same-slot index gap d (or next slot)?  Uses the curve state after the last other buy before that position.
 import json, gzip, collections, sys
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 SOL = 0.35e9; G = 1.05
 def tokens_out(V, T, x, fr=0.0125):
     X = x / (1 + fr); return T * X / (V + X)

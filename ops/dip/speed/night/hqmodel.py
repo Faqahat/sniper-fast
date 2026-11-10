@@ -3,7 +3,7 @@
 # within 10 slots, (2) value = our replayed trade at +80 txs, hold 6, 0.3 SOL (20% follower cut, +5% guard). Time split:
 # train first 50%, validation next 15%, TEST last 35% (never seen). Pick the top dumps by each model on TEST.
 import json, collections, bisect, pickle, sys, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/dip"); import gbdt_np as G
+sys.path.insert(0, "/home/it/sniper-data/overnight/dip"); import gbdt_np as G
 exec(open("replay_hq.py").read().split("hours = ")[0])
 W = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 X, Y, V, TS, KEY = [], [], [], [], []

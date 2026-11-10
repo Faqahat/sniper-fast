@@ -6,7 +6,7 @@ Reports the held-out AUC (win vs not) and the held-out P&L of skipping the lowes
 import json
 import numpy as np
 import sim
-B = "/home/moiz/sniper-data/presend_filter"
+B = "/home/it/sniper-data/presend_filter"
 FEATS = ["age", "n_tr", "n_users", "vol", "n_tr_10", "n_tr_50", "cre_prev", "dev_hold", "wh_nf", "wh_dump_fol", "wh_n", "wh_tokens_before", "coh_n", "coh_hold",
          "fb_n", "fb_hold", "n_big", "top10", "pct", "whale_sol", "vsol", "tok_dumps", "since_last", "p_ret_20", "dd_peak", "trig_tip"]
 LOG = {"age", "n_tr", "n_users", "vol", "n_tr_10", "n_tr_50", "cre_prev", "wh_n", "wh_tokens_before", "coh_n", "fb_n", "tok_dumps", "since_last", "trig_tip"}

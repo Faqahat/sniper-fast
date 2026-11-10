@@ -6,14 +6,14 @@
 # usage: ma0_refresh_r38.sh VARIANTS.json [REPS]
 set -euo pipefail
 V=${1:?variants json}; REPS=${2:-8}
-H=/home/moiz/sniper/ops/strategies/presend/multiarm
-D=/home/moiz/sniper-data/multiarm
+H=/home/it/sniper/ops/strategies/presend/multiarm
+D=/home/it/sniper-data/multiarm
 S=/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/multiarm
-REC=/home/moiz/sniper-data/collect/run_20261029_1400/txs
+REC=/data/tapes/collect/run_20261029_1400/txs
 cd "$D/raw"
 date -u +"%F %T UTC" > cut_r38.txt
 for f in jsonl log obs.jsonl; do
-  timeout 300 ssh -p 1996 -o BatchMode=yes it@84.32.104.202 "sudo cat /root/prod/runs/dip_ams_r38.$f" > "r38.$f.tmp" && mv "r38.$f.tmp" "r38.$f"
+  timeout 300 ssh -p 1996 -o BatchMode=yes it@cyberams "sudo cat /root/prod/runs/dip_ams_r38.$f" > "r38.$f.tmp" && mv "r38.$f.tmp" "r38.$f"
 done
 # chunks: from the run start, complete ones only (the newest file may still be copying: skip the last one)
 mkdir -p "$S/rec38/run_20261029_1400/txs" "$S/dec38"
@@ -22,8 +22,8 @@ for f in $(ls "$REC" | awk -F'[_.]' '$2>=1793307042' | sort); do
   [ "$f" = "$LAST" ] && continue
   ln -sf "$REC/$f" "$S/rec38/run_20261029_1400/txs/$f"
 done
-python3 /home/moiz/sniper/ops/obs/paper_audit/pa_decode.py "$S/dec38" "$S/rec38/run_20261029_1400" --procs 6 | tail -2
-rm -rf "$D/tab38.new" && python3 /home/moiz/sniper/ops/strategies/presend/real/build.py "$S/dec38" "$D/tab38.new" && rm -rf "$D/tab38" && mv "$D/tab38.new" "$D/tab38"
+python3 /home/it/sniper/ops/obs/paper_audit/pa_decode.py "$S/dec38" "$S/rec38/run_20261029_1400" --procs 6 | tail -2
+rm -rf "$D/tab38.new" && python3 /home/it/sniper/ops/strategies/presend/real/build.py "$S/dec38" "$D/tab38.new" && rm -rf "$D/tab38" && mv "$D/tab38.new" "$D/tab38"
 cd "$H"
 python3 ma1_extract.py "$D/raw/r38.jsonl" "$D/x_r38.pkl" --name r38 --obs "$D/raw/r38.obs.jsonl" | tail -2
 python3 ma2_validate.py "$D/x_r38.pkl" "$D/tab38" "$D/val_r38.json" > /dev/null

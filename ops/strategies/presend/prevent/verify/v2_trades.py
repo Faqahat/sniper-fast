@@ -4,9 +4,9 @@ Trade P&L components (fit on the live records, all runs): realized pnl = curve p
 when the run creates+closes the ATA (2.010 fees/tips + 1.514 rent), 2.010 mSOL on runs without ATA close; ATA close refunds 1.509 mSOL.
 unit (real) = pnl + rent refund; failed-try fees per window (landed failed tries, res != ok).
 scaled to 0.696: s = (pnl + FIXED) * 0.696 / spend - FIXED + refund   (re-arm at 0.65 in r38 is left at its real size unless asked).
-Out: /home/moiz/sniper-data/prevent/verify/tables.pkl"""
+Out: /home/it/sniper-data/prevent/verify/tables.pkl"""
 import pickle, collections
-OUT = "/home/moiz/sniper-data/prevent/verify"
+OUT = "/home/it/sniper-data/prevent/verify"
 L = pickle.load(open(f"{OUT}/live.pkl", "rb"))
 SIZE = 0.696
 FIX_ATA = 0.003524; FIX_NOATA = 0.002010

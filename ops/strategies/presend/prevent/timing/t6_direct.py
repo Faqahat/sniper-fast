@@ -3,11 +3,11 @@
 gain = - realized P&L@0.696 of every live fill the rule blocks (winners and losers).  Out: direct.json + printed tables."""
 import sys, pickle, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/timing")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/timing")
 import tlib as T
-D = "/home/moiz/sniper-data/prevent/timing"
+D = "/home/it/sniper-data/prevent/timing"
 FC = pickle.load(open(f"{D}/fillctx.pkl", "rb"))
-G = {(f["run"], f["ses"], f["kind"], f["w"]): f for f in pickle.load(open("/home/moiz/sniper-data/prevent/guards/fills.pkl", "rb"))}
+G = {(f["run"], f["ses"], f["kind"], f["w"]): f for f in pickle.load(open("/home/it/sniper-data/prevent/guards/fills.pkl", "rb"))}
 SUP = 1e15
 ORDER = ["F21", "F22", "F23", "F24", "F26", "F27", "F28", "A16", "A17", "A19", "A20", "A24", "A25", "A26", "A27", "A34", "A35", "A36", "A37", "A38"]
 

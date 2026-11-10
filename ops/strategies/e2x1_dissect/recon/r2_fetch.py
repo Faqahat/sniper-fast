@@ -6,7 +6,7 @@ import json, pickle, os, sys, random, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rpc
 W0 = 1793113200; W1 = W0 + 86400; WA = W0 - 86400
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 S = json.load(open(f"{OUT}/sigs.json")); rec = pickle.load(open(f"{OUT}/rec.pkl", "rb"))
 want = []
 S_sorted = sorted(S, key=lambda s: (s["slot"], s["signature"]))      # oldest first (index within slot unknown: fix with tx index later)

@@ -284,7 +284,7 @@ Under 1–3 the expected value is about **+0.03 to +0.05 SOL per rule #2 launch,
 ## How it was measured
 
 - **Read-only.** Public RPC on the host only (publicnode first, api.mainnet-beta when publicnode has no data), at most 3 requests in flight in total, paced with retries. Nothing was sent; nothing on the server was touched; the paper loop's files were copied (`cp`) and only the copies were read. The server was not used.
-- **Data** (not committed): `/home/moiz/sniper-data/research/competitors/` — `launches.json`/`cand.json` (discovery), `w/<wallet>.sigs.json` + `w/<wallet>.txs.jsonl` (wallet histories), `tapes/<mint>.tape.json` (rule #2 launch tapes to S+15 or S+30), `paper_c6_copy/` (read-only copy of the paper loop's recordings, log and output), `comp_rows.json`/`comp_summary.json` (per-trade rows and per-wallet results).
+- **Data** (not committed): `/home/it/sniper-data/research/competitors/` — `launches.json`/`cand.json` (discovery), `w/<wallet>.sigs.json` + `w/<wallet>.txs.jsonl` (wallet histories), `tapes/<mint>.tape.json` (rule #2 launch tapes to S+15 or S+30), `paper_c6_copy/` (read-only copy of the paper loop's recordings, log and output), `comp_rows.json`/`comp_summary.json` (per-trade rows and per-wallet results).
 - **Scripts** (this folder):
   - `discover.py` — candidate wallets from every block recording + the engines' `RACE obs` feed timelines.
   - `sigs_multi.py`, `txs_multi.py` — signatures, then every successful tx + 40 sampled failed ones (handles the new v1 transactions, whose priority fee sits in `transactionConfig`).

@@ -8,7 +8,7 @@ bps); tx cost 0.78 mSOL per buy lot (haqq_strat s3) subtracted as INFERRED.
 Out: dv8/a1.txt, dv8/a1.json"""
 import json, pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 out = []
 def P(*a):

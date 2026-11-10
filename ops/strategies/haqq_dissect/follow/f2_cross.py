@@ -14,13 +14,13 @@ Out: cross_val.npz"""
 import sys, time, pickle, json, collections
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/follow"
+OUT = "/home/it/sniper-data/haqq_dissect/follow"
 SIZE = 0.40; HZ = 16; FOLS = (1.0, 0.9, 0.8); ND = 4; SMS = 212.0; FEE = 0.0125; OPEN_CAP = 400
 PL = [("RIDE", 150, 150, 1000), ("T", 2), ("RIDE", 150, 300, 2000)]
 EDG = (0, 1, 2, 3, 5, 8, 13, 10 ** 6)

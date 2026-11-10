@@ -11,7 +11,7 @@ the share of fills where a creator / insider / holder / the dumper sold into our
 usage: ma11_young.py OUT.json RUN:X.pkl:TAB [RUN:X.pkl:TAB ...]"""
 import sys, json, pickle, collections, datetime
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import ma_lib as M
 
 BUCKETS = ((0, 5, "<=5"), (6, 10, "6-10"), (11, 20, "11-20"), (21, 40, "21-40"), (41, 10 ** 9, ">40"))

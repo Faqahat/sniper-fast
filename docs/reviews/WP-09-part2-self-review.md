@@ -137,9 +137,9 @@ it, arbx-sizing reproduces the chain to the unit.
   machine, so the I-10 key check covered the URL and header values only).
 - `python3 tools/secret-scan.py`: the commit's 44 files scanned in a scratch repository before the commit (0 findings),
   then all refs of this repository after it.
-- Builds: the master tree's `target/` only, under `/home/moiz/arbx-offload/build.lock`, `CARGO_BUILD_JOBS=3`; no new
+- Builds: the master tree's `target/` only, under `/home/it/other/arbx-offload/build.lock`, `CARGO_BUILD_JOBS=3`; no new
   target directory; scratch in `scratchpad/r4/wp09p2/` (the mutation script and its logs) and
-  `/home/moiz/arbx-offload/scratch-wp09p2/` (the S16 exploration's transactions, test logs).
+  `/home/it/other/arbx-offload/scratch-wp09p2/` (the S16 exploration's transactions, test logs).
 
 ## 7. Deviations and open items
 

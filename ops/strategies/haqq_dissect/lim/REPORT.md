@@ -1,5 +1,5 @@
 # Analyst B (limits): is our +5% guard throwing money away? — NO (10-28 ~02:45 PKT)
-Saved by the main session from the agent's reply. Code: this folder (l1–l15). Tables: /home/moiz/sniper-data/haqq_dissect/lim/ (l3, l5, l6, l6b, l8, l9, l11–l15 .txt).
+Saved by the main session from the agent's reply. Code: this folder (l1–l15). Tables: /home/it/sniper-data/haqq_dissect/lim/ (l3, l5, l6, l6b, l8, l9, l11–l15 .txt).
 
 ## 1. haqq's limits (MEASURED, 10-22 03:08 → 10-28 00:41)
 - **Failures:** 40,798 buy txs, 35,015 filled, 5,783 failed. 99.8% of failures are 6042 ("would buy less tokens than min_tokens_out").

@@ -10,10 +10,10 @@
 import sys, json, zlib
 import numpy as np
 from multiprocessing import get_context
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/sssss")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies/sssss")
 import p4_eval as E
 import ss8_sim as S
-OUT = "/home/moiz/sniper-data/strategies/gkd5"
+OUT = "/home/it/sniper-data/strategies/gkd5"
 W = "GKd5EMzRhbprZXZfsbJczo4SrfF99XZWQA82bazaQr14"; UID = zlib.crc32(W.encode())
 EXITS = {"sell after 1 s": {"max_slots": 5}, "sell after 2 s": {"max_slots": 10}, "sell after 6 s": {"max_slots": 30}, "sell after 13 s": {"max_slots": 60},
          "TP +3% / SL -3% / 6 s": {"tp": 1.03, "sl": 0.97, "max_slots": 30}, "TP +5% / SL -5% / 13 s": {"tp": 1.05, "sl": 0.95, "max_slots": 60}}

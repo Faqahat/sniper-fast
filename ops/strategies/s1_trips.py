@@ -7,13 +7,13 @@
 #                  liquidation value at the final state (status O)
 #   graduated    = still holding when the curve completed (AMM after that, no price here): status G, P&L excluded later
 # Standard SOL curves only (vsol 25..200 SOL in the first 50 trades: removes mayhem / odd reserves).
-# -> /home/moiz/sniper-data/strategies/trips/{R2,R3}_bNNN.jsonl.gz, one JSON list per trip (FIELDS below)
+# -> /home/it/sniper-data/strategies/trips/{R2,R3}_bNNN.jsonl.gz, one JSON list per trip (FIELDS below)
 import sys, os, json, gzip, glob, zlib, collections
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"
-OUT = "/home/moiz/sniper-data/strategies/trips"
+D = "/data/tapes/collect"
+OUT = "/home/it/sniper-data/strategies/trips"
 RUNS = {"R2": ("run_20261022_1543", [f"{D}/phaseA_fwd"]),
-        "R3": ("run_20261023_1426", [f"{D}/phaseA_r3", "/home/moiz/sniper-data/strategies/phaseA_r3tail"])}
+        "R3": ("run_20261023_1426", [f"{D}/phaseA_r3", "/home/it/sniper-data/strategies/phaseA_r3tail"])}
 GRADV = 113e9
 FIELDS = ["u", "m", "run", "bt", "s0", "i0", "age", "nb", "ns", "spent", "got", "cost", "pnl", "st", "hold", "sx", "b1",
           "vsol", "ins", "cslot", "pay_ne", "fee0", "tip0", "cu0",

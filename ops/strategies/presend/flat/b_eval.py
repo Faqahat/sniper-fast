@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FLAT study, IDEA B (read-only, offline): the try-time stop grid (B1) and the arm-time single-feature / pair skip grid (B2) of
 prereg.py on the DEV runs, against the primary baseline (dev with QUIET replayed). Selection exactly as pre-registered.
-Writes /home/moiz/sniper-data/presend_flat/b_dev.json (every config) and prints the table + the selected config.
+Writes /home/it/sniper-data/presend_flat/b_dev.json (every config) and prints the table + the selected config.
 usage: b_eval.py"""
 import sys, json, collections
 import numpy as np

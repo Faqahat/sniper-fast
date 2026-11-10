@@ -10,18 +10,18 @@ Shadow pricing: our buy is inserted into the tape at the shadow fill (vsol += s_
 baseline = sell decided 200 ms after the fill; P&L = v*(1-1.25%) - sol_in*(1+1.25%) - 2.9 mSOL.
 Out: sniper-data/e2x1_dissect/hybrid/sim.pkl"""
 import json, pickle, bisect, collections, numpy as np
-OUT = "/home/moiz/sniper-data/e2x1_dissect/hybrid"; TP = "/home/moiz/sniper-data/haqqml/fresh/tape"
+OUT = "/home/it/sniper-data/e2x1_dissect/hybrid"; TP = "/home/it/sniper-data/haqqml/fresh/tape"
 E = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"; G = "Grozoe2Lk9yu7kWPcCMuWEbrnuBYseBExkYAuHPRJUdJ"
 B = pickle.load(open(f"{OUT}/build.pkl", "rb")); C = B["tape"]; TEND = B["tape_end_slot"]
 S = np.load(f"{TP}/slots.npy", mmap_mode="r"); s_lo = int(S["slot"][0])
 NB = np.full(TEND - s_lo + 2, 1000.0); NB[np.asarray(S["slot"]).astype(np.int64) - s_lo] = np.asarray(S["maxi"]) + 1.0
 SLOT_MS = (int(S["bt"][-1]) - int(S["bt"][0])) * 1000.0 / (int(S["slot"][-1]) - int(S["slot"][0]))
 clk = lambda s, i: s + min(i / NB[s - s_lo], 0.999999)
-dq = json.load(open("/home/moiz/sniper-data/e2x1_dissect/ourspeed/delay_q.json"))
+dq = json.load(open("/home/it/sniper-data/e2x1_dissect/ourspeed/delay_q.json"))
 Q = np.array(dq["q_fra"]) * 66.0 / dq["med_fra"]          # landing delay, median 66 ms
 FR = 0.0125; TRIP = 0.0029; GRAD_VTOK = 280.0e12
 # lots.pkl (recon, RPC-completed) for E2x1 events where it covers the time
-LOTS = pickle.load(open("/home/moiz/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
+LOTS = pickle.load(open("/home/it/sniper-data/e2x1_dissect/recon/lots.pkl", "rb"))
 LOT_LO = min(l["bt"] for l in LOTS)
 lot_ev = collections.defaultdict(list)
 for l in LOTS:

@@ -15,7 +15,7 @@ Costs: 2.9 mSOL per trip, 5,120 lamports per landed failed try. One position, QU
 | CZ77 | 619 | 1.98 | 45 | 426 / 579 / 679 | 2.06 | 8.9% / 10.9% | 3.6% | 43.0% |
 | A2kcamqs | 130 | 0.81 | 37 | 517 / 604 / 739 | 0.84 | 4.1% / 7.4% | 0.0% | 22.3% |
 | ssss / GKd5 / omego | 177k | 0.28-0.69 | 50 | 1.1-15.6 s median | | 1-3% | 0.0% | 2-6% |
-Full table: /home/moiz/sniper-data/comp_rearm/phys.md
+Full table: /home/it/sniper-data/comp_rearm/phys.md
 - A 12% drop needs a sell of about 6% of the curve SOL: ~2.5-3 SOL on a 40-50 SOL curve. Competitor sells are 0.3-0.8 SOL (2-4% drop). **Their own sells almost never make the 12% drop** (0.0%; CZ77 3.6%).
 - Their sell is never in the buy's slot (0-3%). Median hold 0.6 s (CZ77, A2kcamqs) to 1.5-15 s (others). Most exits come after our 10-slot (2.1 s) window.
 - So the 12% drops near competitor buys come from **other big sellers**, not the competitor. Most are the same whale dumps the base T2 rule already arms on.
@@ -67,4 +67,4 @@ Why it fails (TEST, all followers): competitor windows fill only 5-11% of the ti
 - QUIET book for the r37 hours is from 10-29 01h (slightly stale).
 - Window = 10 slots, as the base. Their exits are later (median 1.5-15 s), so a longer window would cost more failed tries for drops that their sells do not make.
 
-Files: code /home/moiz/sniper/ops/strategies/presend/comp_rearm/ (phys.py, phys_rep.py, mapids.py, ev.py, run.py, rep.py, calib.py, comps.py); data and tables /home/moiz/sniper-data/comp_rearm/ (phys.md, tables.md, res_*.pkl, comp_buys_*.pkl).
+Files: code /home/it/sniper/ops/strategies/presend/comp_rearm/ (phys.py, phys_rep.py, mapids.py, ev.py, run.py, rep.py, calib.py, comps.py); data and tables /home/it/sniper-data/comp_rearm/ (phys.md, tables.md, res_*.pkl, comp_buys_*.pkl).

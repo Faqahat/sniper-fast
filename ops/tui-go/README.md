@@ -27,7 +27,7 @@ Harmonica and ntcharts. A single static binary (no Python, no libc), about 10 MB
 ## Install (on a node)
 
 ```sh
-sudo install -m 755 dipmon-go /usr/local/bin/dipmon-go     # the binary (from /home/moiz/sniper-data/tui/, check its .sha256)
+sudo install -m 755 dipmon-go /usr/local/bin/dipmon-go     # the binary (from /home/it/sniper-data/tui/, check its .sha256)
 sudo install -m 755 dipmon    /usr/local/bin/dipmon        # the wrapper (ops/tui-go/dipmon): nice -n 19 + ionice -c3, TERM fix
 sudo install -m 755 dipview   /usr/local/bin/dipview       # the run explorer's wrapper (ops/tui-go/dipview): dipmon-go --view, same priority
 ```
@@ -56,7 +56,7 @@ own priority at start (nice 19 and the idle I/O class, every thread), so `sudo i
 | `sudo dipview` | the run explorer: every run in `/root/prod/runs` (`dipmon-go --view`; `--dir DIR` for another) |
 | `sudo dipview --list` | the runs and their numbers as plain text, then exit |
 
-From another machine: `ssh -p 1996 it@84.32.104.202 sudo dipmon --snapshot` (needs sudo without a password prompt, or `-t`).
+From another machine: `ssh -p 1996 it@cyberams sudo dipmon --snapshot` (needs sudo without a password prompt, or `-t`).
 
 Options: `--usd 187.5` (fixed SOL/USD, no network), `--no-usd`, `--ascii` (no Unicode), `--no-color` (bold / faint
 only), `--interval 2` (refresh 0.5–5 s, default 1), `--budget FILE` (default `<dir>/../dip_budget_ams.json` or
@@ -494,20 +494,20 @@ sh ops/tui-go/run_tests.sh       # everything (QUICK=1: follow at 200x; FOLLOW=0
   final numbers.
 - dip24 (v3.2): `TestDip24Lines` / `TestDip24Variants` / `TestNoDip24OnOldLines` (core: real r36 lines + the pause /
   resume / lock-fire lines in the engine's format; capped / lock-none / regular off; a dip20 log gets none of it) and
-  `TestGoldenDip24` (ui: r36 frozen copy in `/home/moiz/sniper-data/tui/runs-dip24`, overview / pre-send / regular /
+  `TestGoldenDip24` (ui: r36 frozen copy in `/home/it/sniper-data/tui/runs-dip24`, overview / pre-send / regular /
   health / config × 5 sizes = `testdata/golden/r36_*`, the dip24 figures on them, `--ascii` pure ASCII).
 - dip26 (v3.3): `TestDip26Lines` (real r38 start / status lines: the REARM ON setting, the caps, the `rearm:` /
   per-path / not-sent / acks parts; SEND-PATH UNHEALTHY / RECOVERED for astralane-ps and helius-ps in the engine's
   format), `TestDip26Slice` (80 real r38 records in `internal/core/testdata/dip26_r38_slice.jsonl`: every T2 / re-arm /
   A/B figure, the sums, the trades' sizes and paths, items, snapshot, JSON), `TestDip26Gaps` (the refused-tick rule and
   the 10-minute alert), `TestDip26R38` (the frozen copy of r38's first 38 minutes in
-  `/home/moiz/sniper-data/tui/runs-dip26`, md5 de03d4c9 / 8c4a4524, against an independent `encoding/json` scan: T2 /
+  `/home/it/sniper-data/tui/runs-dip26`, md5 de03d4c9 / 8c4a4524, against an independent `encoding/json` scan: T2 /
   re-arm money and counters, every A/B figure per path, fills and P&L by fill path), `TestNoDip26OnOldLines`,
   `TestGoldenDip26` (overview / pre-send / trades / health / config / details × 5 sizes = `testdata/golden/r38_*`,
   content checks, `--ascii`), `TestDip26ResizeKeysSort` (21 sizes, keys, the type / via sort, the help notes).
 - `go test -race ./internal/...`: the tail and reader, the price goroutine, the UI.
 - `tests/parity.py`: Go `--snapshot --json` == the Python dipmon v1 (pinned in `tests/oracle/`, md5-checked) on every field
-  of every local run (AMS r9–r28, FRA r1–r25; r28 from `/home/moiz/sniper-data/tui/runs`), the text snapshots line by
+  of every local run (AMS r9–r28, FRA r1–r25; r28 from `/home/it/sniper-data/tui/runs`), the text snapshots line by
   line, and running copies (`--assume-running --now`, incl. the dip20 QUIET lines) byte for byte; the v3-only ATH / low fields and text line are checked against the
   oracle's own `series_hi` / `series_lo` and then left out of the comparison.
 - `tests/follow.py`: AMS r26 and r27 replayed at 50x into a temp dir with a fake engine process (dipmon finds it by its
@@ -562,8 +562,8 @@ Previous full run (2026-10-28, v3.1, `DIPVIEW_DATA=<real FRA + AMS run files cop
 
 ## Build
 
-`sh ops/tui-go/build.sh` → `/home/moiz/sniper-data/tui/dipmon-go` + `.sha256`: Go 1.27.2 (user-local in
-`/home/moiz/sdk/go`, the official tarball, its sha256 checked against go.dev's), `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`,
+`sh ops/tui-go/build.sh` → `/home/it/sniper-data/tui/dipmon-go` + `.sha256`: Go 1.27.2 (user-local in
+`/home/it/tools/sdk/go`, the official tarball, its sha256 checked against go.dev's), `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`,
 `-trimpath -ldflags "-s -w -buildid="`, `-mod=vendor` (`vendor/` holds every module, pinned in `go.mod`), `GOPROXY=off`:
 the same sha256 on every build. Modules: `charm.land/bubbletea/v2` v2.1.0, `charm.land/lipgloss/v2` v2.0.6,
 `charm.land/bubbles/v2` v2.2.1, `github.com/charmbracelet/harmonica` v0.2.0, `github.com/NimbleMarkets/ntcharts/v2`

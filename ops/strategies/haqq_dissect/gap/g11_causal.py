@@ -11,14 +11,14 @@ Out: gap/g11_res.pkl"""
 import pickle, sys, json, time, collections
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import xlib as X
 from xsim import Pos
 from x7_ourexits import delays
 from x12_wave import ev
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 SIZE = 0.40; HZ = 16; FOLS = (1.0, 0.9, 0.8); FRAC = 0.30
 PL = [("T", 2), ("T", 5), ("MS", 200), ("RIDE", 150, 150, 1000), ("RIDE", 150, 300, 2000), ("RIDE", 200, 300, 2000)]
 G = {}

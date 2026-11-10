@@ -2,7 +2,7 @@
 # Unit tests (stdlib unittest) for the host recorder's pure pieces. Run: python3 -I tests/test_unit.py
 import os, sys, json, gzip, time, shutil, tempfile, unittest, threading, array, calendar
 HERE = os.path.dirname(os.path.abspath(__file__)); REC = os.path.dirname(HERE); sys.path.insert(0, REC)
-TMP = tempfile.mkdtemp(prefix="rec_unit_", dir=os.environ.get("TEST_WORK", "/home/moiz/sniper-data/rec/test"))
+TMP = tempfile.mkdtemp(prefix="rec_unit_", dir=os.environ.get("TEST_WORK", "/home/it/sniper-data/rec/test"))
 for k in list(os.environ):
     if k.startswith(("REC_", "SHYFT", "RMR", "CONSTANTK", "TELEGRAM", "FTP_")): os.environ.pop(k)
 os.environ.update(REC_ROOT=TMP, REC_MODE="overlap", FAKE_URL="http://127.0.0.1:9/", REC_BLOCK_EPS="FAKE_URL", REC_RPC_EP="FAKE_URL")

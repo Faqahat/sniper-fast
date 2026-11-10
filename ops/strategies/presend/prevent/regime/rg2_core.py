@@ -1,13 +1,13 @@
 """REGIME step 2: clustering tests, cooldown rules, regime signals and lock variants on the 20 live runs' real trade sequences
-(+ PAPER on 9 shadow-only runs). Read-only. Writes /home/moiz/sniper-data/prevent/regime/core.pkl (all per-rule per-run numbers).
+(+ PAPER on 9 shadow-only runs). Read-only. Writes /home/it/sniper-data/prevent/regime/core.pkl (all per-rule per-run numbers).
 usage: rg2_core.py"""
 import sys, collections, bisect, random, pickle, math, json
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/regime")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/regime")
 import rg_lib as G
 
 KNOW = 2.0          # a trade's outcome is known 2 s after its sell lands
 BIGF = -0.072       # big loss: pnl / spend < -7.2%
-OUT = "/home/moiz/sniper-data/prevent/regime"
+OUT = "/home/it/sniper-data/prevent/regime"
 rng = random.Random(7)
 
 

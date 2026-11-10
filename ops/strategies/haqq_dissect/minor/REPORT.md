@@ -1,5 +1,5 @@
 # Analyst I (minor bots): footprints proven, picks not reproducible, none worth copying (10-28 ~03:30 PKT)
-Saved by the main session from the agent's reply. Code: this folder (m1–m11). Tables: /home/moiz/sniper-data/haqq_dissect/minor/ (m2–m11 .txt). **Examples: examples.json** (6 per claim, GMGN + Solscan links).
+Saved by the main session from the agent's reply. Code: this folder (m1–m11). Tables: /home/it/sniper-data/haqq_dissect/minor/ (m2–m11 .txt). **Examples: examples.json** (6 per claim, GMGN + Solscan links).
 
 ## The bots (MEASURED, code-matched lots, 10-22 03:07 → 10-28 01:12)
 

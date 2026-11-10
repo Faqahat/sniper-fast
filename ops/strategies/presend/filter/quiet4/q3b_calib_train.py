@@ -4,9 +4,9 @@ flags (since_last >= 1, no cohort holder, whale's mean followers < 4.0 or none):
 fol 2.24 AND < 2 follower bots) ARMED many of them (fol 2.24..4, or >= 2 follower bots), with real tries and real P&L. custom37's
 pickles of AMS r34 / r35 / r36 and FRA r26 / r27 / r28 (read-only) are replayed here: every window virtual alone and in mixed halves
 (knock-on on), compared with live, split by "current QUIET would skip" (Q3) vs not, and by age (min-age 3 check).
-Out: /home/moiz/sniper-data/presend_quiet4/calib_train.json + stdout"""
+Out: /home/it/sniper-data/presend_quiet4/calib_train.json + stdout"""
 import sys, json, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/filter/quiet4")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/filter/quiet4")
 import q3lib as Q
 L = Q.L
 REPS = 6
@@ -29,7 +29,7 @@ def main():
     res = {}
     tot = collections.defaultdict(lambda: np.zeros(7))
     for run in RUNS:
-        L.D = "/home/moiz/sniper-data/custom37"
+        L.D = "/home/it/sniper-data/custom37"
         X, wins, R = Q.load(run)
         lc = X["cfg"][-1]["presend_live"]; q = (lc.get("quiet") or {}).get("stop")
         cfg = dict(L.BASE, drop=lc["drop"], size=lc["spend"] / 1e9, k=lc["k"], win=lc["window_slots"], dl=lc["deadline_slots"], exit_ms=lc.get("exit_ms") or 10 ** 9,
@@ -73,7 +73,7 @@ def main():
     for key in sorted(tot, key=str):
         a = tot[key]
         print(f"| {' / '.join(key)} | {a[0]:.0f} | {a[1]:.0f} | {a[2]:.1f} / {a[5]:.1f} | {a[3]:+.3f} | {a[4]:+.3f} | {a[6]:+.3f} |")
-    json.dump({"runs": res, "total": {" / ".join(k): v.tolist() for k, v in tot.items()}}, open("/home/moiz/sniper-data/presend_quiet4/calib_train.json", "w"))
+    json.dump({"runs": res, "total": {" / ".join(k): v.tolist() for k, v in tot.items()}}, open("/home/it/sniper-data/presend_quiet4/calib_train.json", "w"))
 
 
 if __name__ == "__main__":

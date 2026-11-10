@@ -15,15 +15,15 @@ import numpy as np
 from multiprocessing import Pool
 import ps_common as C
 import ps5_lib as E
-REPO = "/home/moiz/sniper"
-PHA = {"R3": ["/home/moiz/sniper-data/collect/phaseA_r3", "/home/moiz/sniper-data/strategies/phaseA_r3tail"],
-       "R4": ["/home/moiz/sniper-data/strategies/bukp/phaseA_r4", "/home/moiz/sniper-data/strategies/dipdetect/phaseA_r4b"]}
+REPO = "/home/it/sniper"
+PHA = {"R3": ["/data/tapes/collect/phaseA_r3", "/home/it/sniper-data/strategies/phaseA_r3tail"],
+       "R4": ["/home/it/sniper-data/strategies/bukp/phaseA_r4", "/home/it/sniper-data/strategies/dipdetect/phaseA_r4b"]}
 NBK = {"R3": 40, "R4": 96}                      # buckets read per day (bounded reading of phase A)
 MAXTR = 1500
 CFG = dict(W=10, y=0.12, size=0.55, ex="c2_tp10_sl20", htype=3, hpct_min=5.0)
 ROWS = ("a", "b", "c"); DFIX = {"a": 0.0, "b": 5.0, "c": 10.0}
 SMS = 212.0; MARGIN = 300.0
-SLACK = sorted(sl for _, sl, _ in json.load(open("/home/moiz/sniper/ops/overnight/verify2/work/a8_slack.json"))["rows"])
+SLACK = sorted(sl for _, sl, _ in json.load(open("/home/it/sniper-data/overnight/verify2/work/a8_slack.json"))["rows"])
 def slack(sig):
     h = int(hashlib.sha256(("dip" + sig).encode()).hexdigest()[:8], 16) / 2 ** 32
     return min(SLACK[min(len(SLACK) - 1, int(h * len(SLACK)))], 1e6)
@@ -147,7 +147,7 @@ if __name__ == "__main__":
         D, d, sel, st, en, R, by_tok, ht3_tok = study_events(day)
         Mt = d["meta"]; s_end = int(d["s"].max()); s_ends[day] = s_end
         lau = {}
-        for l in open(f"/home/moiz/sniper-data/collect/{C.RUNDIR[day]}/launches.jsonl"):
+        for l in open(f"/data/tapes/collect/{C.RUNDIR[day]}/launches.jsonl"):
             try: c = json.loads(l)
             except Exception: continue
             if not c.get("err") and c.get("mint"): lau[c["mint"]] = c

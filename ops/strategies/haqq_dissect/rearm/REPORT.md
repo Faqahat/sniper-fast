@@ -3,7 +3,7 @@ Saved by the main session from the agent's reply. Code: this folder:
 - r1–r14, rsim.py (rsim.run_x);
 - new in G2: r3b_holders, r8_report, r9_decomp, r10_examples, r11_stress, r12_vd, r13_fake, r14_guard.
 
-Data: /home/moiz/sniper-data/haqq_dissect/rearm/:
+Data: /home/it/sniper-data/haqq_dissect/rearm/:
 - r8.txt main;
 - r9, r11, r12, r13, r14, val.txt;
 - examples.txt, decisions.jsonl (469,213 records), r8_chosen.json.

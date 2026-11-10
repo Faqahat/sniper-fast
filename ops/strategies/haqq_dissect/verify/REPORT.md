@@ -6,7 +6,7 @@ Saved by the main session from the agent's reply. Code: this folder:
 - v5_validate.py; v6b_blocks.py;
 - v9_final.sh re-runs all forward tests in ~25 s.
 
-Data: /home/moiz/sniper-data/haqq_dissect/verify/ (final_*.txt, insample_*.txt, tab/ = fresh tape, live/dip_r27.jsonl).
+Data: /home/it/sniper-data/haqq_dissect/verify/ (final_*.txt, insample_*.txt, tab/ = fresh tape, live/dip_r27.jsonl).
 
 **Fresh data:** 10-28 01:10–05:45 PKT, 4.51 usable hours (one night).
 

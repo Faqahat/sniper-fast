@@ -2,11 +2,11 @@
 """GUARDS step 3 [MEASURED: live fills + chain tapes; the 0.39 close probability is MEASURED on 4,020 big sells of 10 recorder chunks]:
 (1) precursor classification of every live fill; (2) DIRECT effect of every guard variant (the live fills it would have blocked at
 their real landing position and their realized P&L), per run.  No replacement fills here (that is g4, the replay).
-Out: direct.json, direct.txt, classes.txt in /home/moiz/sniper-data/prevent/guards
+Out: direct.json, direct.txt, classes.txt in /home/it/sniper-data/prevent/guards
 usage: g3_direct.py"""
 import pickle, json, collections, math, sys
 import numpy as np
-OUT = "/home/moiz/sniper-data/prevent/guards"
+OUT = "/home/it/sniper-data/prevent/guards"
 SUP = 1e15; PCLOSE = 0.39; FIXC = 0.003524
 R = pickle.load(open(f"{OUT}/feats.pkl", "rb"))
 ORDER = ["F21", "F22", "F23", "F24", "F26", "F27", "F28", "A16", "A17", "A19", "A20", "A24", "A25", "A26", "A27", "A34", "A35", "A36", "A37", "A38"]

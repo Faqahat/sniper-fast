@@ -4,7 +4,7 @@ fill rate of the extra windows, mean cash per extra fill (slip / -20% / raw, mSO
 usage: ma10_perfill.py RUNDIR OUT.json [--base R0]"""
 import sys, json, glob, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 from ma7_tables import load, key_of
 
 

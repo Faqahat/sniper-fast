@@ -7,16 +7,16 @@ to the live 0.45 SOL. Compared with the live fills and the wallet-realized P&L (
 usage: v5_validate.py [--seeds 10]"""
 import sys, json, pickle, collections, argparse
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/verify")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/verify")
 import vlib as V
 import v2b_reimpl as M
 
-DATA = "/home/moiz/sniper-data/haqq_dissect/verify"
+DATA = "/home/it/sniper-data/haqq_dissect/verify"
 SMS = V.SMS
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--seeds", type=int, default=10); A = ap.parse_args()
-    runs = {"r26": "/home/moiz/sniper-data/runs/fra/runs/dip_r26.jsonl", "r27": f"{DATA}/live/dip_r27.jsonl"}
+    runs = {"r26": "/home/it/sniper-data/runs/fra/runs/dip_r26.jsonl", "r27": f"{DATA}/live/dip_r27.jsonl"}
     W = []; real = {}; fills = {}
     for rn, fn in runs.items():
         cur = {}
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     mints = {w["trig"]["mint"] for w in W}
     tp = V.Tape(f"{DATA}/tab", mints)
     S = np.load(f"{DATA}/tab/slots.npy"); BTE = int(S["bt"].max()) - 90
-    lander = M.Lander(M.donor_streams("/home/moiz/sniper-data/dv8/tab"))
+    lander = M.Lander(M.donor_streams("/home/it/sniper-data/dv8/tab"))
     rows = []
     for w in W:
         t = w["trig"]; s = int(t["slot"])

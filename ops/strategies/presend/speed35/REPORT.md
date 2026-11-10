@@ -59,5 +59,5 @@ P&L within about 0.3 SOL. Fills under-counted by 17% (sim misses some live fills
 - How the speed-up happens: if only the median moves and the slow tail stays, gain is about 0 (constant-cut row).
 - Only 12.8 h, 2 runs, AMS only.
 
-Files: code /home/moiz/sniper/ops/strategies/presend/speed35/ (s1_measure, s2_build, s3_scen, s4_replay, s5_tables, s_sim = YOUNG
-sim + follower cut); data /home/moiz/sniper-data/speed35/ (tables.txt, scen.pkl, replay.pkl, s1_measure.json, tab/ = r37 tape to 16:33 PKT).
+Files: code /home/it/sniper/ops/strategies/presend/speed35/ (s1_measure, s2_build, s3_scen, s4_replay, s5_tables, s_sim = YOUNG
+sim + follower cut); data /home/it/sniper-data/speed35/ (tables.txt, scen.pkl, replay.pkl, s1_measure.json, tab/ = r37 tape to 16:33 PKT).

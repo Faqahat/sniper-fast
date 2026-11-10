@@ -3,7 +3,7 @@ shadow row exits (PAPER) and market-wide dump events. Times are unix seconds; P&
 Scaling to 0.696 SOL (the current T2 size): scaled = (pnl + FIX) * 0.696 / spend - FIX, FIX = 2.0 mSOL of per-trade fixed costs
 (buy fee + tip + sell fee + sell tips; MEASURED ~2.0 mSOL r37), rent (ATA close refund) and failed-try fees are not scaled."""
 import pickle, glob, collections, datetime as dt
-X = "/home/moiz/sniper-data/prevent/regime/x"
+X = "/home/it/sniper-data/prevent/regime/x"
 PKT = dt.timezone(dt.timedelta(hours=5))
 FIX = 0.0020
 SIZE = 0.696

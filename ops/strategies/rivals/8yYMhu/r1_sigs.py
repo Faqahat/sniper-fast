@@ -5,7 +5,7 @@ import json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rpc
 W = "8yYMhuYo1LzgCmeeg3vRkhRtJ8xFC7v7S4ufABtQXjS3"
-D = "/home/moiz/sniper-data/rivals/8yYMhu"
+D = "/home/it/sniper-data/rivals/8yYMhu"
 STOP = 1792800000          # 10-24 ~13:00 PKT: before the wallet's first tx (10-25 11:28 PKT per devsell/fund.json)
 fn = f"{D}/sigs_pages.jsonl"
 allsigs = []

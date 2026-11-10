@@ -2,7 +2,7 @@
 
 Read-only replay study by agent; Haiku not used ($0). MEASURED = counted from recorded chain data; INFERRED = reading.
 Scripts: ops/strategies/postmig/pm1_extract.py … pm12_dumpdone.py, replay engine pmsim.py.
-Outputs (9.3 GB): /home/moiz/sniper-data/strategies/postmig/.
+Outputs (9.3 GB): /home/it/sniper-data/strategies/postmig/.
 
 ## Short answer
 1. **About 900 graduations a day, but only about 210 are organic.** About 420 a day come from scripted rug farms and about

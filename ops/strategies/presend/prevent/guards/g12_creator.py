@@ -5,14 +5,14 @@ STATE agent - the creator's remaining balance at our landing must be < Z% of sup
 NOT pre-registered (added after PREREG; r37 was looked at first via g11) -> at best a LEAD.
 usage: g12_creator.py"""
 import pickle, json, collections, sys
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/guards")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/guards")
 import glib as G
-OUT = "/home/moiz/sniper-data/prevent/guards"
+OUT = "/home/it/sniper-data/prevent/guards"
 R = pickle.load(open(f"{OUT}/feats.pkl", "rb"))
 tapes = pickle.load(open(f"{OUT}/tapes_fills.pkl", "rb"))
 cre = {}
-for tab in ("/home/moiz/sniper-data/presend_quiet4/tab37", "/home/moiz/sniper-data/prevent/guards/tab_tail", "/home/moiz/sniper-data/multiarm/tab38", "/home/moiz/sniper-data/prevent/guards/tab_t38",
-            "/home/moiz/sniper-data/paper_audit/tab36", "/home/moiz/sniper-data/paper_audit/tab"):
+for tab in ("/home/it/sniper-data/presend_quiet4/tab37", "/home/it/sniper-data/prevent/guards/tab_tail", "/home/it/sniper-data/multiarm/tab38", "/home/it/sniper-data/prevent/guards/tab_t38",
+            "/home/it/sniper-data/paper_audit/tab36", "/home/it/sniper-data/paper_audit/tab"):
     try:
         for m, c in json.load(open(f"{tab}/creates.json")).items(): cre[m] = c.get("creator")
     except Exception as e: print("skip", tab, e)

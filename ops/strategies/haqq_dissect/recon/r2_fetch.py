@@ -8,7 +8,7 @@ import json, pickle, os, sys, random, collections
 sys.path.insert(0, os.path.dirname(__file__))
 import rpc
 W0, W1 = 1793038500, 1793124900
-OUT = "/home/moiz/sniper-data/haqq_dissect/recon"
+OUT = "/home/it/sniper-data/haqq_dissect/recon"
 S = json.load(open(f"{OUT}/sigs.json"))
 rec = pickle.load(open(f"{OUT}/rec.pkl", "rb"))
 inw = [s for s in S if W0 <= s["blockTime"] < W1]

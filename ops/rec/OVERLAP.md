@@ -153,13 +153,13 @@ from section 4 to `rec.conf` in step 3.
 
 1. **Stop FRA's collector** (FRA):
    ```
-   ssh -p 1996 it@84.32.100.36
+   ssh -p 1996 it@cyberfra
    sudo touch /root/sniper-collect/ROTATE_OFF                 # rotate.sh (cron */5) will not start a new collector
    R=$(sudo cat /root/sniper-collect/current_run); echo $R
    sudo pkill -TERM -f '^python3 -I collect.py$'               # no final pass; its last chunk ends without a gzip trailer (readable up to the last line)
    sudo python3 -c "import json; print(json.load(open('/root/sniper-collect/$R/status.json'))['last_slot'])"   # = L
    ```
-2. **Final keeper copy** (host): `bash /home/moiz/sniper/ops/collect/keeper.sh`. The stopped run stays on FRA, because
+2. **Final keeper copy** (host): `bash /home/it/sniper/ops/collect/keeper.sh`. The stopped run stays on FRA, because
    it is still `current_run` and the keeper never prunes that.
 3. **Start the host on CK + SHYFT like FRA** (host):
    - It starts 300 slots before L, so the slots in between are fetched from RPC history and recorded by both: no gap.
@@ -167,21 +167,21 @@ from section 4 to `rec.conf` in step 3.
    ```
    L=<from step 1>; R=<from step 1>; TODAY=$(TZ=Asia/Karachi date +%F)
    sudo sed -i -e 's/^REC_MODE=.*/REC_MODE=normal/' -e 's/^REC_EXPECT_RUNNING=.*/REC_EXPECT_RUNNING=1/' -e "s/^REC_LINK_FROM=.*/REC_LINK_FROM=$TODAY/" /etc/sniper-rec/rec.conf
-   printf 'REC_START_SLOT=%s\nREC_SEED_LAUNCHES=/home/moiz/sniper-data/collect/%s/launches.jsonl\n' $((L - 300)) $R | sudo tee -a /etc/sniper-rec/rec.conf
-   rm /home/moiz/sniper-data/rec/HOLD
+   printf 'REC_START_SLOT=%s\nREC_SEED_LAUNCHES=/data/tapes/collect/%s/launches.jsonl\n' $((L - 300)) $R | sudo tee -a /etc/sniper-rec/rec.conf
+   rm /home/it/sniper-data/rec/HOLD
    sudo systemctl enable --now sniper-rec.service
    ```
 4. **Watch** (first 30 min):
    - `rec status` shows the lag falling to about 7 s. It catches up from history at up to 18 getBlock/s.
-   - `tail -f /home/moiz/sniper-data/rec/logs/recorder.log` shows "FRESH START ... at slot L-300" and "seeded N mints".
+   - `tail -f /home/it/sniper-data/rec/logs/recorder.log` shows "FRESH START ... at slot L-300" and "seeded N mints".
    - `rec check $TODAY` reports `slots.tsv` as contiguous.
    - The watchdog is quiet (Telegram).
    - The first host day is partial (from L-300). Its first ~1–1.5 min are also in FRA's last run.
 5. **Then turn the keeper's copying off** (host):
    ```
-   bash /home/moiz/sniper/ops/collect/keeper.sh && kill $(cat /home/moiz/sniper-data/collect/keeper_loop.pid)
+   bash /home/it/sniper/ops/collect/keeper.sh && kill $(cat /data/tapes/collect/keeper_loop.pid)
    sudo sed -i '/^REC_START_SLOT=/d; /^REC_SEED_LAUNCHES=/d' /etc/sniper-rec/rec.conf    # only used on a fresh start; tidy
-   python3 -I /home/moiz/sniper/ops/rec/rec.py link                                     # collect/run_YYYYMMDD_0000 -> today's host day
+   python3 -I /home/it/sniper/ops/rec/rec.py link                                     # collect/run_YYYYMMDD_0000 -> today's host day
    ```
    - FRA's stopped run (about 13 GB on FRA) can be deleted later, by the owner.
    - Its final pass did not run. It is optional, and slow on CK.
@@ -191,21 +191,21 @@ from section 4 to `rec.conf` in step 3.
 1. **Host, stop and hold:**
    ```
    sudo systemctl stop sniper-rec.service
-   python3 -c "import json,time; json.dump(dict(reason='rollback to FRA', by='owner', t=time.time()), open('/home/moiz/sniper-data/rec/HOLD','w'))"
+   python3 -c "import json,time; json.dump(dict(reason='rollback to FRA', by='owner', t=time.time()), open('/home/it/sniper-data/rec/HOLD','w'))"
    sudo sed -i 's/^REC_EXPECT_RUNNING=.*/REC_EXPECT_RUNNING=0/' /etc/sniper-rec/rec.conf
    ```
 2. **FRA, start the collector again.** It starts a new 24 h run now, at the tip. Note its `start_slot` = S.
    ```
    sudo rm /root/sniper-collect/ROTATE_OFF && sudo /root/sniper-collect/rotate.sh
    ```
-3. **Host, keeper copying back on:** `setsid nohup bash /home/moiz/sniper/ops/collect/keeper_loop.sh > /dev/null 2>&1 &`
+3. **Host, keeper copying back on:** `setsid nohup bash /home/it/sniper/ops/collect/keeper_loop.sh > /dev/null 2>&1 &`
 4. **Backfill the gap** from the host's last slot to S−1, from RPC history.
    - SHYFT only at ≤ 0.95 req/s; no CK, since FRA runs again. This is the load proven safe in E.
    - The recorder resumes at its last slot + 1 and stops cleanly at S−1. A 10 min gap takes about 50 min.
    ```
    sudo sed -i 's/^REC_MODE=.*/REC_MODE=overlap/' /etc/sniper-rec/rec.conf
    printf 'REC_STOP_SLOT=%s\nREC_RESUME_MAX_H=48\nREC_EP_TOTAL_RPS=0.95\nREC_BLOCK_RPS=0.95\nREC_RPC_RPS=0.95\n' $((S - 1)) | sudo tee -a /etc/sniper-rec/rec.conf
-   rm /home/moiz/sniper-data/rec/HOLD && sudo systemctl start sniper-rec.service     # ends with a HOLD "REC_STOP_SLOT reached"
+   rm /home/it/sniper-data/rec/HOLD && sudo systemctl start sniper-rec.service     # ends with a HOLD "REC_STOP_SLOT reached"
    sudo sed -i '/^REC_STOP_SLOT=/d; /^REC_RESUME_MAX_H=/d; /^REC_EP_TOTAL_RPS=/d; /^REC_BLOCK_RPS=/d; /^REC_RPC_RPS=/d' /etc/sniper-rec/rec.conf
    ```
 
@@ -213,6 +213,6 @@ from section 4 to `rec.conf` in step 3.
 
 | What | Where |
 |---|---|
-| E data | `/home/moiz/sniper-data/rec/overlap/E1/` (days/, raw/ = 4.1 GB raw sampled blocks, logs/guard.log, compare_final.json). A test artifact, kept until the owner says it can go. |
-| FRA counter polls | `/home/moiz/sniper-data/rec/state/fra_poll.jsonl`; report with `ops/rec/fra_poll_report.py` |
-| Test outputs | `/home/moiz/sniper-data/rec/test/` (replay_run6.txt, final_suite.txt, archive_run4.txt) |
+| E data | `/home/it/sniper-data/rec/overlap/E1/` (days/, raw/ = 4.1 GB raw sampled blocks, logs/guard.log, compare_final.json). A test artifact, kept until the owner says it can go. |
+| FRA counter polls | `/home/it/sniper-data/rec/state/fra_poll.jsonl`; report with `ops/rec/fra_poll_report.py` |
+| Test outputs | `/home/it/sniper-data/rec/test/` (replay_run6.txt, final_suite.txt, archive_run4.txt) |

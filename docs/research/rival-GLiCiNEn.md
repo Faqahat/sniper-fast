@@ -5,7 +5,7 @@
 **Sources:**
 - **[R]** public-RPC `getTransaction` on two even samples of its 4,152 signatures from 11:53–14:32 UTC, none failed. A = every 20th of the first 3,000 (150 txs); B = 100 spread over all 4,152. Together: 218 arbitrage txs and 32 lookup-table (ALT) txs.
 - **[RPC]** other public-RPC reads; **[J]** the Jito bundle explorer.
-- **[FT4]/[FT5]** arbx records pulled to `/home/moiz/arbx-offload/rival-glici/`: FT-004 p1+p2, and FT-005 p1 to 14:26.
+- **[FT4]/[FT5]** arbx records pulled to `/home/it/other/arbx-offload/rival-glici/`: FT-004 p1+p2, and FT-005 p1 to 14:26.
 - **[RS3]** the 2026-10-03 rival-study outputs.
 
 USDC is valued at 120.4 USDC/SOL, the median of 15 sampled WSOL→USDC legs. *Inference* marks what is not measured directly.

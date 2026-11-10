@@ -5,16 +5,16 @@
   (2) our own FAILED pre-send tries (on chain, error 6042 = below min tokens out) re-checked at smaller sizes: the try's own signing
       state and the engine's limit_min_out x0.88 at size S, pump's buy on the chain state just before the failed tx. A try that would
       pass at S but failed live = a fill the smaller size would have gained (window never filled live) or an earlier fill.
-Prints only; writes /home/moiz/sniper-data/presend_size/sens.json"""
+Prints only; writes /home/it/sniper-data/presend_size/sens.json"""
 import sys, json, collections, re
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/size")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/size")
 import numpy as np
 import core, pmath as PM
 import sizelib as SL
 import s5_run as RUN
 
-OUT = "/home/moiz/sniper-data/presend_size"
+OUT = "/home/it/sniper-data/presend_size"
 SIZES = [250_000_000, 350_000_000, 500_000_000, 650_000_000]
 res = {}
 for name, base, runs, extra in RUN.GROUPS:

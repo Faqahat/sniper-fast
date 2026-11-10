@@ -2,8 +2,8 @@
 # migpaper paper loop (PAPER ONLY, local only). Every 2 h: score the next 2-h window once its look-ahead is recorded,
 # append out/results.jsonl + out/trades.jsonl, rebuild RUNNING.md, prune decoded chunk caches older than the look-back.
 # Stop: touch STOP (same folder). Runs HOURS from START. Log: out/loop.log. Pid: out/loop.pid.
-C=/home/moiz/sniper/ops/strategies/e2x1_dissect/migpaper
-D=/home/moiz/sniper-data/e2x1_dissect/migpaper
+C=/home/it/sniper/ops/strategies/e2x1_dissect/migpaper
+D=/home/it/sniper-data/e2x1_dissect/migpaper
 START=${START:-1793214000}          # 10-29 00:00 PKT
 HOURS=${HOURS:-72}
 END=$((START + HOURS * 3600))
@@ -22,7 +22,7 @@ while :; do
   [ "$ns" -ge "$END" ] && { log "done: scored through $ns"; break; }
   now=$(date +%s)
   if [ "$now" -lt $((ns + W + LOOK)) ]; then sleep 300; continue; fi
-  free=$(df --output=avail -B1G /home/moiz | tail -1 | tr -d ' ')
+  free=$(df --output=avail -B1G /home/it | tail -1 | tr -d ' ')
   if [ "$free" -lt 15 ]; then log "disk guard: ${free} GB free < 15, not scoring; sleeping 30 min"; sleep 1800; continue; fi
   fetch=""
   [ "$free" -lt 20 ] && { fetch="--no-fetch"; log "disk ${free} GB free < 20: no server fetch (local keeper copies only)"; }

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # "if our buy executed D ms earlier": place it before every chain trade our feed saw after (our_seen - D)
 import sys, json, collections
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from sim import *
-TP = load_tapes("/home/moiz/sniper/ops/agents/freshaudit/out/tapes_live.json.gz")
-FC = [x for x in json.load(open("/home/moiz/sniper/ops/agents/freshaudit/out/fire_chain.json")) if "dump" in x and "ours" in x]
-TT = json.load(open("/home/moiz/sniper/ops/agents/freshaudit/out/tape_timing.json"))
+TP = load_tapes("/home/it/sniper/ops/agents/freshaudit/out/tapes_live.json.gz")
+FC = [x for x in json.load(open("/home/it/sniper/ops/agents/freshaudit/out/fire_chain.json")) if "dump" in x and "ours" in x]
+TT = json.load(open("/home/it/sniper/ops/agents/freshaudit/out/tape_timing.json"))
 out = collections.defaultdict(lambda: [0, 0, 0.0, 0.0])
 rows = []
 for r in TT:
@@ -36,4 +36,4 @@ print("fires with feed timing:", len(rows))
 print("D_ms  fires  fills(g5%)  net_SOL(g5%)  net_SOL(g15%)")
 for D, v in sorted(out.items()):
     print(f"{D:>4} {v[0]:>6} {v[1]:>8} {v[2]:>+12.4f} {v[3]:>+12.4f}")
-json.dump(rows, open("/home/moiz/sniper/ops/agents/freshaudit/out/cf_speed.json", "w"))
+json.dump(rows, open("/home/it/sniper/ops/agents/freshaudit/out/cf_speed.json", "w"))

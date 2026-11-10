@@ -4,8 +4,8 @@
 after the trigger per slot offset) and alternative whale-history values (6 h / 24 h / all-span, distinct vs total). Read-only."""
 import json, collections, time
 import numpy as np
-D="/home/moiz/sniper-data/presend_quiet3"
-COHORT="/home/moiz/sniper/ops/overnight/sel/cohort_train.json"; FBOTS="/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json"
+D="/home/it/sniper-data/presend_quiet3"
+COHORT="/home/it/sniper-data/overnight/sel/cohort_train.json"; FBOTS="/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json"
 OURS={"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR","2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 t0=time.time()
 C=np.load(f"{D}/chain.npz"); I=json.load(open(f"{D}/ids.json"))

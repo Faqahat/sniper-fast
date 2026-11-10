@@ -311,11 +311,11 @@ Usage = pump.fun txs that paid the service in the 47.6 h recording (from SOL bal
 Notes:
 - The recorder's `tips` field only knows listed accounts. The unknown ones were found in its SOL-balance changes.
 - "none" routes can still hide services we don't know.
-- Catalogue = `/home/moiz/sniper/data/sender-tip-accounts.json` (sourced, fetched 10-03/04). Map used here: `lib2.py`.
+- Catalogue = `/home/it/sniper/data/sender-tip-accounts.json` (sourced, fetched 10-03/04). Map used here: `lib2.py`.
 
 ## Method and limits
 
-**Pipeline** (`ops/dip/speed/landing2/`, data in `/home/moiz/sniper-data/landing2/`):
+**Pipeline** (`ops/dip/speed/landing2/`, data in `/home/it/sniper-data/landing2/`):
 1. `x1_extract.py`: compact trades, target-wallet txs (failed too), block sizes, SOL recipients.
 2. `x2_unknown_tips.py`: unknown tip accounts.
 3. `x3_reactions.py`: dumps, followers, landings.

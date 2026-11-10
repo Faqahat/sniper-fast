@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # STRATEGY CENSUS pass 2: rank wallets by REALIZED P&L on their round trips (s1_trips.py), split insiders / create-slot
 # entries off, keep consistent winners (>=30 clean trips, positive on R2 AND R3, positive in most active 6-h PKT blocks).
-# -> /home/moiz/sniper-data/strategies/{wallets.json, winners.json, insiders.json, sel_trips.jsonl.gz, base.json}
+# -> /home/it/sniper-data/strategies/{wallets.json, winners.json, insiders.json, sel_trips.jsonl.gz, base.json}
 import json, gzip, glob, collections, statistics, os, sys
-OUT = "/home/moiz/sniper-data/strategies"
+OUT = "/home/it/sniper-data/strategies"
 F = json.load(open(f"{OUT}/trips/FIELDS.json")); X = {k: i for i, k in enumerate(F)}
 NSEL = int(os.environ.get("NSEL", "300"))
 PKT = 5 * 3600
@@ -18,7 +18,7 @@ print("wallets", len(W))
 iP, iSt, iC, iIns, iRun, iBt, iSp, iHold, iAge = X["pnl"], X["st"], X["cslot"], X["ins"], X["run"], X["bt"], X["spent"], X["hold"], X["age"]
 creators = set(); MAY = set()
 for run in ("run_20261021_2207", "run_20261022_1543", "run_20261023_1426"):
-    for l in open(f"/home/moiz/sniper-data/collect/{run}/launches.jsonl"):
+    for l in open(f"/data/tapes/collect/{run}/launches.jsonl"):
         try:
             c = json.loads(l); creators.add(c.get("creator")); creators.add(c.get("user"))
             if "InitializeMayhemState" in (c.get("ixn") or []): MAY.add(c["mint"])

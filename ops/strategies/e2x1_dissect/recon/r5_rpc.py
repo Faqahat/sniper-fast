@@ -5,7 +5,7 @@ import json, pickle, struct, collections, sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from r3_decomp import parse as parse_ev, b58, DISC, CPI, RENTS
 H = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 TIP = json.load(open(f"{OUT}/tipmap.json"))
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"; CB = "ComputeBudget111111111111111111111111111111"
 A58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"

@@ -5,10 +5,10 @@ Also one example of the 4-wallet buy cluster (2fg5QD1e/suqh5sHt/7NAd2EpY/FxN3VZ4
 Out: sellid/s12_presell.tsv.gz, s12_cluster_example.json"""
 import pickle, json, gzip, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/sellid")
-OUT = "/home/moiz/sniper-data/haqq_dissect/sellid"
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/sellid")
+OUT = "/home/it/sniper-data/haqq_dissect/sellid"
 Z = pickle.load(open(f"{OUT}/s1.pkl", "rb")); LOTS = Z["lots"]; SELLS = {(s["mint"], s["k"]): s for s in Z["sells"]}
-ids = json.load(open("/home/moiz/sniper-data/dv8/tab/ids.json"))
+ids = json.load(open("/home/it/sniper-data/dv8/tab/ids.json"))
 n = 0
 with gzip.open(f"{OUT}/s12_presell.tsv.gz", "wt") as f:
     f.write("bot\tmint\tlot_buy_slot\tlot_buy_idx\tsell_slot\tsell_idx\thold_ms\tlot_pnl_msol\twallet\tside\tsol\tslot_gap\tidx_gap_same_slot\tms_before_sell\n")

@@ -5,7 +5,7 @@ import sys, os, json, collections
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import v2data as V, v2eng as E, v2run as R
-FILES = ["/home/moiz/sniper-data/recon/live/dip_r15.jsonl", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r14.jsonl", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"]
+FILES = ["/home/it/sniper-data/recon/live/dip_r15.jsonl", "/home/it/sniper-data/runs/ams/runs/dip_ams_r14.jsonl", "/home/it/sniper-data/runs/ams/runs/dip_ams_r16.jsonl"]
 D = E.load("R4")
 m = R.fmask(D, dict(fam="T2"))
 for f in FILES:

@@ -3,8 +3,8 @@
 For each client: among same-mint txs within +-6 index of ours that set a CU price, share of those BEFORE us that paid MORE than us
 and share of those AFTER us that paid LESS. Price-sorted rounds (BAM) -> both high; arrival order -> both ~ the base rate."""
 import json, csv, collections
-C = json.load(open("/home/moiz/sniper-data/speed_truth/chain_txs.json"))
-A = {r["our_sig"]: r for r in csv.DictReader(open("/home/moiz/sniper-data/speed_truth/attempts.csv"))}
+C = json.load(open("/home/it/sniper-data/speed_truth/chain_txs.json"))
+A = {r["our_sig"]: r for r in csv.DictReader(open("/home/it/sniper-data/speed_truth/attempts.csv"))}
 by = collections.defaultdict(list)
 for t in C: by[t["s"]].append(t)
 agg = collections.defaultdict(lambda: [0, 0, 0, 0])

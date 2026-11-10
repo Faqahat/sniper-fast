@@ -3,9 +3,9 @@
 import os, sys, json, glob, time, re, zlib, gzip, base64, calendar
 import numpy as np
 
-LIVE = "/home/moiz/sniper-data/recon/live"
-WORK = "/home/moiz/sniper-data/recon/work"
-COLLECT = "/home/moiz/sniper-data/collect"
+LIVE = "/home/it/sniper-data/recon/live"
+WORK = "/home/it/sniper-data/recon/work"
+COLLECT = "/data/tapes/collect"
 NEW_REC = f"{COLLECT}/run_20261024_1425"
 OLD_REC = f"{COLLECT}/run_20261023_1426"
 WAL = {"FRA": "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE", "AMS": "EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR"}
@@ -140,10 +140,10 @@ def our_delta(r):
 
 
 # ---- slot leaders (epoch schedules) and the near-leader lists the servers used
-SCHED_FILES = ["/home/moiz/sniper-data/haqq/schedule_1065.json", "/home/moiz/sniper/ops/dip/speed/leaders/schedule_cur.json",
-               "/home/moiz/sniper-data/competitors2/schedule_1067.json"]
-NEAR_FILES = {"FRA": "/home/moiz/sniper/ops/region/near_leaders_fra.txt", "AMS": "/home/moiz/sniper/ops/region/near_leaders_ams.txt",
-              "AMS_NOBAM": "/home/moiz/sniper/ops/region/near_leaders_ams_nobam.txt"}
+SCHED_FILES = ["/home/it/sniper-data/haqq/schedule_1065.json", "/home/it/sniper/ops/dip/speed/leaders/schedule_cur.json",
+               "/home/it/sniper-data/competitors2/schedule_1067.json"]
+NEAR_FILES = {"FRA": "/home/it/sniper/ops/region/near_leaders_fra.txt", "AMS": "/home/it/sniper/ops/region/near_leaders_ams.txt",
+              "AMS_NOBAM": "/home/it/sniper/ops/region/near_leaders_ams_nobam.txt"}
 _SC = None
 
 

@@ -21,7 +21,7 @@ import numpy as np
 import flatlib as FL
 from flatlib import PM
 
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real/r065")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real/r065")
 import core as R065          # noqa: E402  fee_rate_ps, eng_sell_out (the engine's own value formula)
 
 SMS = FL.SMS

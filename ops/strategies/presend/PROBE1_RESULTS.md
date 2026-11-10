@@ -5,7 +5,7 @@ Engine dip13, `--presend-live`. Settings:
 - Route: helius-ps (keyed Helius SWQoS) only.
 - Caps: 20 fills, 0.03 SOL of failed-attempt fees. The normal dip bot (IMIT1, no-BAM list) ran alongside.
 
-The probe stopped at the 20-fill cap. Evaluator: `ps13_live_eval.py`; full output in `/home/moiz/sniper-data/presend_live/eval_final.txt`. All numbers MEASURED.
+The probe stopped at the 20-fill cap. Evaluator: `ps13_live_eval.py`; full output in `/home/it/sniper-data/presend_live/eval_final.txt`. All numbers MEASURED.
 
 ## Verdict
 - **Live matches paper.**

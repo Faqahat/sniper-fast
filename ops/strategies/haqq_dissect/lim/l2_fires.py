@@ -11,13 +11,13 @@ Send-time features: dump drop %, dump SOL, curve SOL after the dump, token age, 
 Out: data/lim/fires_cf.pkl"""
 import json, pickle, sys, collections, time, os
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 HG = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 65]
 FOL = [1.0, 0.9, 0.8]
 SIZE = float(os.environ.get("LIM_SIZE", "0"))     # 0 = each fire's live spend; else a fixed size (e.g. haqq's 0.30)
-FB = set(json.load(open("/home/moiz/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
+FB = set(json.load(open("/home/it/sniper/ops/strategies/presend/filter/fbots_frozen.json")))
 
 
 def main():

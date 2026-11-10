@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # classify every fire + latency gap to the crossing (read-only)
 import sys, json, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/headtohead/work")
-W = "/home/moiz/sniper/ops/agents/headtohead/work"
+sys.path.insert(0, "/home/it/sniper/ops/agents/headtohead/work")
+W = "/home/it/sniper/ops/agents/headtohead/work"
 o = json.load(open(W + "/fires_h2h.json"))
-L = json.load(open('/home/moiz/sniper/ops/dip/speed/leaders/leader_rtt_new.json'))['leaders']
+L = json.load(open('/home/it/sniper/ops/dip/speed/leaders/leader_rtt_new.json'))['leaders']
 TAPE = collections.defaultdict(list)
 for r in range(1, 6):
-    for l in open(f"/home/moiz/sniper/ops/dip/speed/dip_r{r}.jsonl"):
+    for l in open(f"/home/it/sniper/ops/dip/speed/dip_r{r}.jsonl"):
         d = json.loads(l)
         if d["ev"] == "tape": TAPE[(d["mint"], d["slot"])].append((d["idx"], d["t"]))
 def interp_rx(mint, s, i, t0):

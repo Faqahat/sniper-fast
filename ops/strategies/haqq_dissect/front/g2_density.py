@@ -8,9 +8,9 @@
 FRA27 (after the tape) is added by g3_r27.py. Out: sniper-data/haqq_dissect/front/g2.txt, g2_rows.pkl"""
 import pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 GROUP = {"AMS17": "k8 cap30", "AMS19": "k8 cap30", "AMS32": "k8 cap30", "AMS33": "k8 cli40/cfg30", "FRA26": "k8 cli40/cfg20", "FRA27": "k8 cli40/cfg20"}
 def grp(run): return GROUP.get(run, "k4 cap20")
 GORD = ["k4 cap20", "k8 cap30", "k8 cli40/cfg30", "k8 cli40/cfg20"]

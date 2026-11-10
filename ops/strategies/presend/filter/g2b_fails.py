@@ -4,7 +4,7 @@ Interned with ids.json (extended in place: new wallets / mints appended). The si
 (the tries the engine logged as unseen). Columns: s, i, bt, signer, mint, err (id into ids['e']), fee, cup, cul, prog, sig (ours only)."""
 import glob, json, os, time
 import numpy as np
-B = "/home/moiz/sniper-data/presend_filter"
+B = "/home/it/sniper-data/presend_filter"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 t0 = time.time()
 I = json.load(open(f"{B}/ids.json"))

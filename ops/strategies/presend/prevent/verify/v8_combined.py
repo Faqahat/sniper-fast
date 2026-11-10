@@ -2,7 +2,7 @@
 """VERIFY step 8: (a) is the ctx-limit effect the holder condition or just 'shallow fills'? (b) the r37 skipped fills of nbuyers50;
 (c) COMBINED rules on all runs (skip sets, overlaps); (d) r38: the six losses vs each rule, and the lock path with the rules on."""
 import pickle, collections, datetime as dt, json
-OUT = "/home/moiz/sniper-data/prevent/verify"
+OUT = "/home/it/sniper-data/prevent/verify"
 T = pickle.load(open(f"{OUT}/tables.pkl", "rb")); F = pickle.load(open(f"{OUT}/feats.pkl", "rb"))
 PKT = dt.timezone(dt.timedelta(hours=5))
 def pk(t): return dt.datetime.fromtimestamp(t, PKT).strftime("%H:%M:%S")

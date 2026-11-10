@@ -9,7 +9,7 @@
 #   R  "no visible attempt, not the seller's tool": reaction (H5) or a bundle/backrun by an unrelated sender (H2/H3), or chance.
 # usage: python3 -I i9_classify.py FOLLOWERS.json WIN.jsonl.gz OUT.json
 import sys, json, gzip, collections, statistics
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq")
+sys.path.insert(0, "/home/it/sniper/ops/haqq")
 folp, winp, outp = sys.argv[1], sys.argv[2], sys.argv[3]
 F = json.load(open(folp))
 W = collections.defaultdict(list)

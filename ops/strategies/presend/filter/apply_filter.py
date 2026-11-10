@@ -4,7 +4,7 @@
   python3 apply_filter.py --run ams:r26                 # records: local copy, else fetched read-only from the server (sudo cat)
   python3 apply_filter.py --run ams:r24 --run ams:r25   # several runs, one table each
   options: --live PATH (a dip_*.jsonl to use instead)   --rec DIR [DIR ...] (collector run dirs; default: every run_* under
-           /home/moiz/sniper-data/collect)               --config quiet|c5|c5a|all (default all)   --list (print every removed fill)
+           /data/tapes/collect)               --config quiet|c5|c5a|all (default all)   --list (print every removed fill)
            --procs N (raw-recording readers, default 12)
 
 What it measures (all MEASURED from the engine records + chain, at the run's own size):
@@ -28,11 +28,11 @@ import numpy as np
 from multiprocessing import Pool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOCAL = "/home/moiz/sniper-data/presend_filter/live"
-COLLECT = "/home/moiz/sniper-data/collect"
-COHORT = "/home/moiz/sniper/ops/overnight/sel/cohort_train.json"
+LOCAL = "/home/it/sniper-data/presend_filter/live"
+COLLECT = "/data/tapes/collect"
+COHORT = "/home/it/sniper-data/overnight/sel/cohort_train.json"
 FBOTS = f"{HERE}/fbots_frozen.json"
-SERVERS = {"ams": "it@84.32.104.202", "fra": "it@84.32.100.36"}
+SERVERS = {"ams": "it@cyberams", "fra": "it@cyberfra"}
 WALLETS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}   # AMS, FRA
 DISC = bytes.fromhex("bddb7fd34ee661ee"); CPI = bytes.fromhex("e445a52e51cb9a1d")
 A58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"

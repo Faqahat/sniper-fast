@@ -3,7 +3,7 @@
 custom37 paired replay incl. replacement fills, 7 runs) + RESULTS.json / RESULTS.txt assembly.
 usage: g13_tables.py"""
 import json, pickle, os
-D = "/home/moiz/sniper-data/prevent/guards"
+D = "/home/it/sniper-data/prevent/guards"
 ORDER = ["F21", "F22", "F23", "F24", "F26", "F27", "F28", "A16", "A17", "A19", "A20", "A24", "A25", "A26", "A27", "A34", "A35", "A36", "A37", "A38"]
 RP = {"F26": "f26", "F27": "f27", "F28": "f28", "A34": "r34", "A35": "r35", "A36": "r36", "A37": "r37"}
 R = pickle.load(open(f"{D}/feats.pkl", "rb"))

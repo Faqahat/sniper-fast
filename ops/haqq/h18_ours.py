@@ -7,7 +7,7 @@
 #   HAQQ-H      fixed holds 15 / 20 / 30 slots after the dump slot (its common timer values)
 #   HAQQ-model  its FULL hazard model, causal: sell at the first slot whose hazard >= tau (as a 0.40 lot), features from our tape
 import sys, json, glob, pickle, zlib, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/haqq"); import h_lib as H, h_gbdt as G
+sys.path.insert(0, "/home/it/sniper/ops/haqq"); import h_lib as H, h_gbdt as G
 SS = {}
 for run in ("R1", "R2", "R3", "R4"):
     for k, v in json.load(open(f"{H.OUT}/slotmax_{run}.json")).items(): SS[int(k)] = max(SS.get(int(k), 0), v + 1)
@@ -22,7 +22,7 @@ for pf in ("C.30", "D.40"):
     if len(a) < 300: a = [min(r["act"], DM) for r in pnl_rows if r["pf"] == pf and r["dip"]]
     h = np.bincount(np.clip(a, 0, DM), minlength=DM + 1).astype(float); HD[pf] = h / h.sum()
 fills = []
-for f in sorted(glob.glob("/home/moiz/sniper-data/runs/fra/runs/dip_r*.jsonl") + glob.glob("/home/moiz/sniper-data/runs/ams/runs/dip_ams_r*.jsonl")):
+for f in sorted(glob.glob("/home/it/sniper-data/runs/fra/runs/dip_r*.jsonl") + glob.glob("/home/it/sniper-data/runs/ams/runs/dip_ams_r*.jsonl")):
     srv = "AMS" if "ams" in f else "FRA"; run = int(f.split("_r")[-1].split(".")[0])
     if run < 9: continue
     lands = {}; closes = []

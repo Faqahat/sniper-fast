@@ -1,8 +1,8 @@
 # migpaper — FROZEN rule (written 10-28 23:35 PKT, before any scoring)
 
 PAPER ONLY, LOCAL ONLY. No live sends, no server writes, no engine changes. Agent "migpaper".
-Code: `/home/moiz/sniper/ops/strategies/e2x1_dissect/migpaper/` (mplib.py, mp_freeze.py, mp_score.py, mp_table.py, loop.sh).
-Data: `/home/moiz/sniper-data/e2x1_dissect/migpaper/` (models/, wstore.npz, cstore.npz, cache/, out/results.jsonl, out/trades.jsonl, out/loop.log, val/).
+Code: `/home/it/sniper/ops/strategies/e2x1_dissect/migpaper/` (mplib.py, mp_freeze.py, mp_score.py, mp_table.py, loop.sh).
+Data: `/home/it/sniper-data/e2x1_dissect/migpaper/` (models/, wstore.npz, cstore.npz, cache/, out/results.jsonl, out/trades.jsonl, out/loop.log, val/).
 Source rule: migrate/REPORT.md §7 (headline cell of §5). Nothing not written here is part of the test.
 
 ## Rule (exactly as REPORT.md §7)

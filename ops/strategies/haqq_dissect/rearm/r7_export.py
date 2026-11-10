@@ -21,7 +21,7 @@ re-arm changed (it lost / gained / changed its fill), with both P&Ls (model, NOW
 Prices are curve prices in lamports per raw token unit (x 1e-3 = SOL per token). t = the replay's chain clock in ms.
 usage: r7_export.py TAG DAY:CFG[,DAY:CFG..] [--out decisions.jsonl] [--append]"""
 import sys, json, pickle, argparse
-OUT = "/home/moiz/sniper-data/haqq_dissect/rearm"
+OUT = "/home/it/sniper-data/haqq_dissect/rearm"
 COST = 2_015_140; COST_S2 = 510_140
 
 

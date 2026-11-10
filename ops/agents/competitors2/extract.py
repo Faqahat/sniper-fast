@@ -4,14 +4,14 @@
 # S-2 .. S+2 from the collector's raw chunks (R3 run_20261023_1426 + R4 run_20261024_1425, failed txs included),
 # as compact rows. One output file per chunk (merge happens in races.py).
 # usage: python3 -I extract.py [--workers 3] [--only-new]
-# Out: /home/moiz/sniper-data/competitors2/rows/<run>_<chunk>.jsonl.gz  (one line per mint: {"m":mint,"rows":[...]})
+# Out: /home/it/sniper-data/competitors2/rows/<run>_<chunk>.jsonl.gz  (one line per mint: {"m":mint,"rows":[...]})
 import json, os, sys, glob, gzip, base64, subprocess, collections, time
 from multiprocessing import Pool
-RUNS = "/home/moiz/sniper-data/competitors2/runs"
-OUT = "/home/moiz/sniper-data/competitors2/rows"
-R3 = "/home/moiz/sniper-data/collect/run_20261023_1426/txs"; R3_END = 1792855576 + 120   # tail end of R3 (+ slack)
-R4 = "/home/moiz/sniper-data/collect/run_20261024_1425/txs"; R4_START = 1792851902 - 60
-TIP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+RUNS = "/home/it/sniper-data/competitors2/runs"
+OUT = "/home/it/sniper-data/competitors2/rows"
+R3 = "/data/tapes/collect/run_20261023_1426/txs"; R3_END = 1792855576 + 120   # tail end of R3 (+ slack)
+R4 = "/data/tapes/collect/run_20261024_1425/txs"; R4_START = 1792851902 - 60
+TIP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 TRADE_DISC = bytes([189, 219, 127, 211, 78, 230, 97, 238])
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def b58enc(b):

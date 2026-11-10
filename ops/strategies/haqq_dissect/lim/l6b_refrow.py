@@ -6,9 +6,9 @@ relative to the dump and to his tx (trades ahead of him he had NOT seen = his re
 Out: data/lim/l6b.txt"""
 import json, pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
-OUT = "/home/moiz/sniper-data/haqq_dissect/lim"
+OUT = "/home/it/sniper-data/haqq_dissect/lim"
 out = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); out.append(s)

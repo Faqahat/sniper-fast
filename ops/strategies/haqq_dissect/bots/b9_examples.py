@@ -5,11 +5,11 @@ Recent trades first (D6 = 10-27 23:15 -> 10-28 01:12, then D5 = 10-26 23:15 -> 1
 Out: bots/examples.json, bots/b9.txt"""
 import sys, json, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import xlib as X
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 HQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 NAMES = {247: "Launch-Dump Sniper", 248: "Big-Dump Rebounder"}
 

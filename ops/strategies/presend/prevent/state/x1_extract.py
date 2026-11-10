@@ -5,10 +5,10 @@ of the shadow-only runs, from the run jsonl files.
   value (SOL at 0.696) = realized x 0.696 / window spend  -  5120 lamports x landed failed tries   [size scaling INFERRED, linear]
   paper (shadow-only runs) = presend_arm + presend_exit rows a/b/c (pnl per row, the engine's own paper; scaled to 0.696 by the run's
   shadow spend if logged, else as logged)  [PAPER]
-Out: /home/moiz/sniper-data/prevent/state/windows.pkl"""
+Out: /home/it/sniper-data/prevent/state/windows.pkl"""
 import json, pickle, collections, sys, os, time
-OUT = "/home/moiz/sniper-data/prevent/state"
-L = "/home/moiz/sniper-data/runs"; V = "/home/moiz/sniper-data/presend_losses/verify/raw"
+OUT = "/home/it/sniper-data/prevent/state"
+L = "/home/it/sniper-data/runs"; V = "/home/it/sniper-data/presend_losses/verify/raw"
 LIVE = [("FRA", n, f"{L}/fra/runs/dip_r{n}.jsonl") for n in (21, 22, 23, 24, 26, 27, 28)]
 LIVE += [("AMS", n, f"{L}/ams/runs/dip_ams_r{n}.jsonl") for n in (16, 17, 19, 20, 24, 25, 26, 27, 34, 35, 36, 37, 38)]
 LIVE += [("AMS", n, f"{V}/dip_ams_r{n}.jsonl") for n in (28, 29, 30, 31, 32, 33)]          # live too (QUIET4's 24-run set)

@@ -6,13 +6,13 @@ Per live window: the trigger's chain clock (recorded block sizes), and per try:
   g    = trigger chain clock + d - (send slot + 0.5) x 212 (how far the engine's slot view lags the chain clock)
   res  = ok / 6042 / deadline / ata_exists / drop (never on chain)
 Unseen tries (the engine's feed missed them) are looked up in the chain recording: most did land.
-Writes /home/moiz/sniper-data/presend_real/donors.pkl"""
+Writes /home/it/sniper-data/presend_real/donors.pkl"""
 import sys, os, json, pickle, collections
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rlib, probes as PR
 
-OUT = "/home/moiz/sniper-data/presend_real/donors.pkl"
+OUT = "/home/it/sniper-data/presend_real/donors.pkl"
 
 def classify(err):
     """our attempt's error in the recording (InstructionError index) -> result class (roles: guard 2, ata 3, buy 5)"""

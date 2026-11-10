@@ -32,7 +32,7 @@
     - exit codes;
     - concurrent runs with the default `--out`.
   - **Fixture provenance.** One read-only `getMultipleAccounts` call to the public mainnet endpoint (slot 453,422,981).
-- **WP-05 context.** I read the uncommitted WP-05 work in the master working tree (`/home/moiz/arbed/arbx`) for the integration section (§6), and did not modify it.
+- **WP-05 context.** I read the uncommitted WP-05 work in the master working tree (`/home/it/other/arbed/arbx`) for the integration section (§6), and did not modify it.
 
 ## 2. Verdict
 

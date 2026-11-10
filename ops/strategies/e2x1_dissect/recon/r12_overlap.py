@@ -3,7 +3,7 @@
 (haqq trades on E2x1's mints from the tape). Out: r12.txt"""
 import json, pickle, collections, time
 import numpy as np
-OUT = "/home/moiz/sniper-data/e2x1_dissect/recon"
+OUT = "/home/it/sniper-data/e2x1_dissect/recon"
 HQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 L = [l for l in pickle.load(open(f"{OUT}/lots.pkl", "rb")) if l["day"] in ("D0", "D1")]
 Z = pickle.load(open(f"{OUT}/tape.pkl", "rb"))
@@ -13,9 +13,9 @@ pk = lambda t: time.strftime("%m-%d %H:%M", time.gmtime(t + 18000))
 Lines = []
 def P(*a):
     s = " ".join(str(x) for x in a); print(s); Lines.append(s)
-runs = [("FRA r27", "/home/moiz/sniper-data/runs/fra/runs/dip_r27.jsonl"), ("FRA r28", "/home/moiz/sniper-data/runs/fra/runs/dip_r28.jsonl"),
-        ("AMS r25", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r25.jsonl"), ("AMS r26", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r26.jsonl"),
-        ("AMS r27", "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r27.jsonl")]
+runs = [("FRA r27", "/home/it/sniper-data/runs/fra/runs/dip_r27.jsonl"), ("FRA r28", "/home/it/sniper-data/runs/fra/runs/dip_r28.jsonl"),
+        ("AMS r25", "/home/it/sniper-data/runs/ams/runs/dip_ams_r25.jsonl"), ("AMS r26", "/home/it/sniper-data/runs/ams/runs/dip_ams_r26.jsonl"),
+        ("AMS r27", "/home/it/sniper-data/runs/ams/runs/dip_ams_r27.jsonl")]
 P("## Overlap with our live runs (MEASURED; our fills = presend_live_fill, arms = presend_live_arm)")
 P("| run | window PKT | our fills | fill mints he traded (D0/D1) | fills where he held / bought within +-60 s | our armed mints | armed mints he traded |")
 P("|---|---|---|---|---|---|---|")

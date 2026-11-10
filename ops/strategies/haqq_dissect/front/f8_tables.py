@@ -5,10 +5,10 @@ upper bound, MEASURED tape). Days: D2..D5 full (10-23 23:15 -> 10-27 23:15 PKT),
 Out: sniper-data/haqq_dissect/front/f8_tables.txt, f8_rows.pkl"""
 import pickle, collections, sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/front")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/front")
 import dv8lib as L
 from f4_join import region_of
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 rng = np.random.default_rng(11)
 out = []
 def P(*a):
@@ -29,7 +29,7 @@ def main():
     F6 = {x["i"]: x for x in pickle.load(open(f"{OUT}/f6.pkl", "rb")) if x["set"] == "S"}
     W = pickle.load(open(f"{OUT}/f7.pkl", "rb"))
     ids, _ = L.ids_map()
-    OT = {(x["s"], x["i"]): x for x in pickle.load(open("/home/moiz/sniper-data/haqq_dissect/exec/txs.pkl", "rb")) if x["w"] in ("FRA", "AMS")}
+    OT = {(x["s"], x["i"]): x for x in pickle.load(open("/home/it/sniper-data/haqq_dissect/exec/txs.pkl", "rb")) if x["w"] in ("FRA", "AMS")}
     rows = []
     for i in SE["S"]:
         r = R[i]; x = F4[i]; f6 = F6.get(i); w = W.get(i)

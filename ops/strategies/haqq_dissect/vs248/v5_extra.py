@@ -8,9 +8,9 @@
 Out: vs248/v5.txt, v5.pkl"""
 import pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/vs248"
+OUT = "/home/it/sniper-data/haqq_dissect/vs248"
 SCR = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/hd_vs248"
 DAYS = (2, 3, 4, 5)
 

@@ -1,7 +1,7 @@
 # Wallet BUkpShoE: his exact strategy, and can we run it? (10-24 ~21:35 PKT)
 
 Wallet BUkpShoEWRiPckdFs3kzYGjBPfUhL6G39ufo84QeogPP. Read-only study, agent + Haiku 5.5 ($0.046).
-MEASURED = counted from chain data; INFERRED = reading. Results: /home/moiz/sniper-data/strategies/bukp/.
+MEASURED = counted from chain data; INFERRED = reading. Results: /home/it/sniper-data/strategies/bukp/.
 
 | Day | Window (PKT) | Trips | Curve P&L before tx fees |
 |---|---|---|---|
@@ -83,7 +83,7 @@ Realized after his own fees: +23 SOL on R2 and +37 SOL on R3.
 # Follow-up: is his edge picking graduating tokens? (10-24 ~22:10 PKT)
 
 Owner: "if we knew his exact exit moments, why can't we?" Read-only; Haiku not needed ($0).
-Results: /home/moiz/sniper-data/strategies/bukp/ (grad.json, exit_families.json, copy_exit.json, grad_gate.json).
+Results: /home/it/sniper-data/strategies/bukp/ (grad.json, exit_families.json, copy_exit.json, grad_gate.json).
 
 1. **The split is real, but it isn't his skill.**
    - On tokens that later graduate, his trips made +30.4 / +43.3 / +50.3 SOL (R1 / R2 / R3). All his other trips: +2.2 / −14.3 / −10.4.

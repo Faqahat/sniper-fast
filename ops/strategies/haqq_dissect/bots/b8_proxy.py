@@ -8,11 +8,11 @@ Compared with: the exact replay at our rank-model landing with MS4000 / HIS exit
 Out: bots/b8.txt"""
 import sys, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 import xlib as X
 from plib import boot_mean, Out
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 KB = [(0, 0), (1, 1), (2, 3), (4, 7), (8, 12)]
 
 

@@ -9,7 +9,7 @@ import sys, os, json, time, base64, collections, statistics, urllib.request, con
 EP = open(os.path.expanduser("~/.config/sniper/ck_rpc_url")).read().strip()
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"; SYS = "11111111111111111111111111111111"; CB = "ComputeBudget111111111111111111111111111111"
 TD = bytes([189, 219, 127, 211, 78, 230, 97, 238]); SLOT_MS = 212.0
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"; B58I = {c: i for i, c in enumerate(B58)}
 def b58dec(s):
     n = 0
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     allr = []
     for a in sys.argv[1:]:
         w, label, n = a.split(":"); allr += run(w, label, int(n))
-    json.dump(allr, open("/home/moiz/sniper/ops/speedcheck/our_speed.json", "w"), indent=1)
+    json.dump(allr, open("/home/it/sniper/ops/speedcheck/our_speed.json", "w"), indent=1)
     for label in dict.fromkeys(r["label"] for r in allr):
         v = [r for r in allr if r["label"] == label]
         print(f"\n== {label}: {len(v)} buys")

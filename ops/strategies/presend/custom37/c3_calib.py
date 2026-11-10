@@ -3,9 +3,9 @@
 fill vs no fill (same try), curve P&L per fill (model vs the real sell), realized per fill, failed-try fees.
 Also the PHANTOM check (INFERRED part): every real try replaced by phantom tries (same window clock, same stop rules), expected fills
 and P&L vs live, so the phantom model's bias is known before it is used for k / window / deeper-limit continuation.
-Out: stdout + /home/moiz/sniper-data/custom37/calib_<run>.json"""
+Out: stdout + /home/it/sniper-data/custom37/calib_<run>.json"""
 import sys, json, collections, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
 import c37lib as L
 
 

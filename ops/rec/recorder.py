@@ -37,7 +37,7 @@ DEF = dict(
                  REC_EP_TOTAL_RPS="5.8", REC_ENRICH_RPC="0", REC_FINAL_PASS="defer", REC_TRIP_ON_LIMIT="1",
                  REC_SLOT_EVERY="4", REC_FETCH_THREADS="6", REC_FORBID_CK="1"))[MODE]
 def cfg(k, d=None): return os.environ.get(k) or DEF.get(k) or d
-ROOT = cfg("REC_ROOT", "/home/moiz/sniper-data/rec")
+ROOT = cfg("REC_ROOT", "/home/it/sniper-data/rec")
 DAYS = os.path.join(ROOT, "days"); STATE = os.path.join(ROOT, "state"); REPAIR = os.path.join(ROOT, "repair")
 LAG = int(cfg("REC_LAG", "32")); AHEAD = int(cfg("REC_AHEAD", "40")); FETCH_THREADS = int(cfg("REC_FETCH_THREADS"))
 FOLLOW_S = float(cfg("REC_FOLLOW_H", "24.333")) * 3600

@@ -7,12 +7,12 @@ Money per day: NOW / S2 / CHEAP / NOW -10 % followers / NOW without haqq's rows 
 selection's REGULAR-landing value (calibrated). Out: select/s10.txt"""
 import sys, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/select")
 import dd_gbdt as G
 from s4_wf import load, MKT, CRE, SEL, STR, TIM, HQMEM, DUMP_ONLY
 from s5_pnl import money
-OUT = "/home/moiz/sniper-data/haqq_dissect/select"
+OUT = "/home/it/sniper-data/haqq_dissect/select"
 TS = [-0.002, 0.0, 0.001, 0.002, 0.004, 0.006, 0.01, 0.015, 0.02]
 
 

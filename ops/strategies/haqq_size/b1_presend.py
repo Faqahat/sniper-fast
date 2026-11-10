@@ -16,10 +16,10 @@ Out: OUT/presend.pkl"""
 import sys, os, json, pickle, time, collections, copy
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_sel")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_sel")
 import h3_presend as H3
 import lib28, sim28, rlib, sim, s48lib, variants
-OUT = "/home/moiz/sniper-data/haqq_size"; HQS = "/home/moiz/sniper-data/haqq_sel"; HM = "/home/moiz/sniper-data/haqq_model"
+OUT = "/home/it/sniper-data/haqq_size"; HQS = "/home/it/sniper-data/haqq_sel"; HM = "/home/it/sniper-data/haqq_model"
 W0, W1 = H3.W0, H3.W1
 CUR = [None]
 _exit0 = sim.exit_path

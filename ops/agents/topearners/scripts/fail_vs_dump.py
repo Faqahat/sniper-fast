@@ -1,7 +1,7 @@
 # where do each wallet's FAILED buy-intent txs land relative to the nearest >=1 SOL sell on the same mint?
 # (failed BEFORE the dump in the same slot = the tx was sent before the dump executed -> pre-positioned / predictive)
 import json, gzip, collections, sys, bisect
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 TOP = [l.strip() for l in open(B + sys.argv[1]) if l.strip()]
 dumps = collections.defaultdict(list)
 for line in gzip.open(B + "races.jsonl.gz", "rt"):

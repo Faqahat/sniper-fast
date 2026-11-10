@@ -5,8 +5,8 @@ fees are not in this table (they do not depend on size). Bootstrap 5-95 % over f
 import json, collections, time
 import numpy as np
 
-AMS = "/home/moiz/sniper-data/presend_size/live"
-FRA = "/home/moiz/sniper-data/presend_filter/live"
+AMS = "/home/it/sniper-data/presend_size/live"
+FRA = "/home/it/sniper-data/presend_filter/live"
 RUNS = [("AMS r24", f"{AMS}/dip_ams_r24.jsonl"), ("AMS r25", f"{AMS}/dip_ams_r25.jsonl"), ("AMS r26", f"{AMS}/dip_ams_r26.jsonl"),
         ("AMS r27", f"{AMS}/dip_ams_r27.jsonl"), ("AMS r28", f"{AMS}/dip_ams_r28.jsonl"),
         ("FRA r23", f"{FRA}/fra_dip_r23.jsonl"), ("FRA r24", f"{FRA}/fra_dip_r24.jsonl")]
@@ -61,4 +61,4 @@ if __name__ == "__main__":
         tab.append(dict(hour=h, size=s, n=len(v), pct=float(np.mean(v)), lo=lo, hi=hi,
                         runs=sorted({r["run"] for r in rows if r["hour"] == h and ("0.50" if r["size"] >= 0.45 else "0.40" if r["size"] >= 0.38 else "0.34-0.35") == s})))
     for c in tab: print(f"  {c['hour']:02d}h {c['size']:>9} n={c['n']:3d} {c['pct']:+6.2f}% [{c['lo']:+.2f}, {c['hi']:+.2f}] {','.join(c['runs'])}")
-    json.dump(dict(rows=rows, table=tab), open("/home/moiz/sniper-data/presend_size/hours.json", "w"))
+    json.dump(dict(rows=rows, table=tab), open("/home/it/sniper-data/presend_size/hours.json", "w"))

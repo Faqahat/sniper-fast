@@ -3,7 +3,7 @@
 whale; fill limit 0.88 vs 0.92 / 0.85 sensitivity is NOT recomputed here (values are p8c's 0.88). Out: p12.txt"""
 import sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos"); sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 from plib import Out, OUT
 P = Out(f"{OUT}/p12.txt")

@@ -4,9 +4,9 @@ Decision cluster = haqq buy txs (landed or failed) on the same mint within 2 slo
 Losing copies that share the durable nonce never reach the chain, so on-chain txs per cluster = separate decisions (separate nonces).
 Out: sniper-data/haqq_dissect/exec/t6_copies.txt"""
 import pickle, collections, sys
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-D = "/home/moiz/sniper-data/haqq_dissect/exec"
+D = "/home/it/sniper-data/haqq_dissect/exec"
 rows = pickle.load(open(f"{D}/txs.pkl", "rb"))
 out = []
 def P(*a): out.append(" ".join(str(x) for x in a))

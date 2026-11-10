@@ -5,7 +5,7 @@ A pre-sent try (min-out 0.88x of its signing price) can fill only if post-dump p
 usage: in8_spike.py TAB CENSUS.pkl"""
 import sys, pickle
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/multiarm")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/multiarm")
 import ma_lib as M
 tape = M.Tape(sys.argv[1])
 R = [r for r in pickle.load(open(sys.argv[2], "rb")) if r["class"] == "insider" and r["pct"] >= 10 and r["age"] == 0 and r["paper"] is not None]

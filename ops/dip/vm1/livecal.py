@@ -5,7 +5,7 @@
       trades (counterfactual: our net SOL removed from the curve), vs the realized chain P&L
   (c) the copy's paper rule (+80 txs, never spilling, end of dump slot + 6, 0.6/2 mSOL) on the same dumps vs realized
   (d) VM1 score of each fired dump (my features on the real tape) and realized P&L by VM1 pick / no pick
-Writes /home/moiz/sniper-data/vm1/livecal.json and prints the tables."""
+Writes /home/it/sniper-data/vm1/livecal.json and prints the tables."""
 import json, copy, sys, collections
 import numpy as np
 import core, sim

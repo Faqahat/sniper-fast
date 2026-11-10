@@ -2,10 +2,10 @@
 """Q5: who created the nonce accounts (public RPC). For 3 E2x1 nonce accounts + the 2 Grozoe nonce accounts: oldest signature ->
 getTransaction -> createAccount 'source' (funder) and nonce authority. Out: nonce_origin.json"""
 import sys, json, time
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/recon")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/recon")
 import rpc
 rpc.MIN_GAP = 2.0
-O = "/home/moiz/sniper-data/e2x1_dissect/exec"
+O = "/home/it/sniper-data/e2x1_dissect/exec"
 ACC = {"E2x1": ["BFt8cy5qb8RvdukY7q8GyRmXUH5qNfrViza9zF5xLdxX", "4gnz1exRSWFd2U9pmndq1TLkRUG4hELtyURsKVarZcbe", "HUAorniMLfX9WRVqc8AV22hC1shruUCu9Sw4ZeGPYbg1"],
        "Grozoe": ["4KBJQ6yDQPHTWGLVEp8aikUyJA2xCiJKVFBRu4kk5YSP", "8yzgfZptfHPffRh4jKyYapUdBHmAfmWTM7n3ABFNgytk"]}
 out = {}

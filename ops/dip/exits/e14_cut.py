@@ -3,7 +3,7 @@
 # CUT(X, kmin, cap): keep today's timer (sell at tick `cap`), but at the start of each slot k >= kmin before that, SELL EARLY if no
 # outside buy has landed for >= X ms (block clock; the engine sees this on its own trade feed). Never holds longer than today.
 # Then: TEST (M2 / IMIT1, landing rows, CIs), our real live fills, the +crowd stress.
-# -> /home/moiz/sniper-data/exits/e14_cut.txt/.json
+# -> /home/it/sniper-data/exits/e14_cut.txt/.json
 import sys, os, json, time, itertools
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

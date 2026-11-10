@@ -10,17 +10,17 @@ usage: c3_market.py OUT.json [files_step]
 """
 import gzip, json, os, sys, collections, glob, base64
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/truth")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/truth")
 import tl  # read-only helpers: leader(), leader_client(), client_class()
 
-RUNS = ["/home/moiz/sniper-data/collect/run_20261023_1426/txs", "/home/moiz/sniper-data/collect/run_20261024_1425/txs"]
+RUNS = ["/data/tapes/collect/run_20261023_1426/txs", "/data/tapes/collect/run_20261024_1425/txs"]
 SMS = 212.0
 DUMP_MIN = 1_000_000_000
 
 
 DISC = bytes([189, 219, 127, 211, 78, 230, 97, 238])   # pump TradeEvent (same parser as speed/truth/a2_chain.py)
 A58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 
 
 def b58(b):

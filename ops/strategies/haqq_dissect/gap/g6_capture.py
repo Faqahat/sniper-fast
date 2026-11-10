@@ -10,12 +10,12 @@ Also: our engine hours per day (union of trading runs) and our MEASURED P&L per 
 Out: gap/g6_capture.txt, gap/g6.json"""
 import pickle, collections, json, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
 from g1_walkforward import calib_boot, COST
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/gap")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/gap")
 from g3_ledger import grp
-OUT = "/home/moiz/sniper-data/haqq_dissect/gap"
+OUT = "/home/it/sniper-data/haqq_dissect/gap"
 
 
 def main():

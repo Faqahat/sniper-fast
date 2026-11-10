@@ -1,7 +1,7 @@
 """Shared features (decision-time only, labelled) for each position row."""
 import json
 RUNS = ["r28", "r34", "r35", "r36"]
-D = "/home/moiz/sniper-data/presend_losses"
+D = "/home/it/sniper-data/presend_losses"
 def load(run): return json.load(open(f"{D}/fills_{run}.json"))
 def feats(r):
     f, ex, tp = r["fill"], r["exit"], r["tape"]

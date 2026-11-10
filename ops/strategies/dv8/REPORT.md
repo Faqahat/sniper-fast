@@ -2,7 +2,7 @@
 
 Written by the main session from the agent's text; the harness blocks subagent report writes. Read-only: nothing was sent and no engine or config was touched. FRA r26 was copied once with a read-only `sudo cat`.
 - Code: this folder; `run_all.sh` re-runs everything in about 20 min.
-- Data and tables: `/home/moiz/sniper-data/dv8/` (2.3 GB). Every table below is a `*.txt` there: c0_coverage, l2, c1–c6, g1–g3, a1.
+- Data and tables: `/home/it/sniper-data/dv8/` (2.3 GB). Every table below is a `*.txt` there: c0_coverage, l2, c1–c6, g1–g3, a1.
 
 ## Verdict
 **DV8 as designed loses on every test day.**

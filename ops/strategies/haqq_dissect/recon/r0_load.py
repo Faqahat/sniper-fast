@@ -4,9 +4,9 @@ Keeps the full record (s, i, bt, sig, err, fee, cup, signers, ixn, ev, tb, sd, t
 import json, glob, os, pickle, collections
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 W0, W1 = 1793038500, 1793124900
-OUT = "/home/moiz/sniper-data/haqq_dissect/recon"
+OUT = "/home/it/sniper-data/haqq_dissect/recon"
 rec = {}; nl = 0
-files = sorted(f for f in glob.glob("/home/moiz/sniper-data/haqq_dissect/exec/ext/*.jsonl") if os.path.exists(f + ".done"))
+files = sorted(f for f in glob.glob("/home/it/sniper-data/haqq_dissect/exec/ext/*.jsonl") if os.path.exists(f + ".done"))
 for f in files:
     try: ts = int(f.rsplit("_", 1)[1].split(".")[0])
     except ValueError: continue

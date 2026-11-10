@@ -3,7 +3,7 @@
 buys (count and SOL) in the 1 s after our modelled landing, and the fill's P&L; grouped by PKT hour-of-day band. usage: v7 TAB PKL [TAB PKL]"""
 import sys, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/verify")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/verify")
 import vlib as V
 COST = 5120 + 200_000 + 605_000 + 1_200_000 + 5020
 for tab, pkl in zip(sys.argv[1::2], sys.argv[2::2]):

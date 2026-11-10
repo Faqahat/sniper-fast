@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """HAQQ_SEL step 1 (read-only): the token list. haqqiUUX's pump.fun trades (as trade user or tx signer) on the 24 h chain tape
-(our recording, decoded with real/decode.py + build.py into /home/moiz/sniper-data/haqq_sel/tab). Only mints and each mint's
+(our recording, decoded with real/decode.py + build.py into /home/it/sniper-data/haqq_sel/tab). Only mints and each mint's
 active span are kept (first / last haqq trade); his sizes, prices and P&L are NOT used anywhere. MEASURED.
 Out: DATA/tokens.json"""
 import json, time, collections
 import numpy as np
-DATA = "/home/moiz/sniper-data/haqq_sel"; TAB = f"{DATA}/tab"
+DATA = "/home/it/sniper-data/haqq_sel"; TAB = f"{DATA}/tab"
 HAQQ = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 W0 = 1793038500; W1 = 1793124900          # 10-26 23:15 -> 10-27 23:15 PKT (24 h)
 pkt = lambda t: time.strftime("%m-%d %H:%M:%S", time.gmtime(int(t) + 18000))

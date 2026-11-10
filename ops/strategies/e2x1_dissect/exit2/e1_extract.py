@@ -3,7 +3,7 @@
 (all pump.fun trades 10-22 03:07 -> 10-28 18:41 PKT), sorted by mint/slot/idx/j.
 Out: sniper-data/e2x1_dissect/exit2/tape_his.npz (+ ids.json with the user ids of E2x1 / Grozoe)."""
 import json, time, numpy as np
-TP = "/home/moiz/sniper-data/haqqml/fresh/tape"; OUT = "/home/moiz/sniper-data/e2x1_dissect/exit2"
+TP = "/home/it/sniper-data/haqqml/fresh/tape"; OUT = "/home/it/sniper-data/e2x1_dissect/exit2"
 W = "E2x1ewwXUwxABtFcssgxQLY6PrcRQuhLJRWPCR3WyeJb"; SIB = "Grozoe2Lk9yu7kWPcCMuWEbrnuBYseBExkYAuHPRJUdJ"
 t0 = time.time()
 users = json.load(open(f"{TP}/users.json")); uid = {u: i for i, u in enumerate(users)}

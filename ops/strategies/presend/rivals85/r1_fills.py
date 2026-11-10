@@ -6,12 +6,12 @@
   every competitor buy after that dump in the dump's slot or the next slot (competitor = the named list (prefix match) or an auto-detected
   pro of r0_pros.py, never us / the dump seller / the T2 whale), before or after our buy (block position),
   and each competitor's outcome = its first sell of that token after its buy: hold, price ratio net of the pump fee (1.25% each way).
-Out: /home/moiz/sniper-data/rivals85/fills.pkl
+Out: /home/it/sniper-data/rivals85/fills.pkl
 usage: r1_fills.py"""
 import json, pickle, sys, bisect, collections, importlib.util
 import numpy as np
 
-D = "/home/moiz/sniper-data"
+D = "/home/it/sniper-data"
 OUT = f"{D}/rivals85"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 NAMED = ["8yYMhuYo", "haqqiUUX", "HkQ7hMjy", "DYXDDrZC", "77shyvx7", "ssssswdk", "sssssDdM", "GKd5EMzR", "DF7eRXHn", "omegoMAe",
@@ -24,7 +24,7 @@ def key(s, i, j=0): return s * 16777216 + i * 64 + j
 
 
 def load_r39():
-    spec = importlib.util.spec_from_file_location("g1", "/home/moiz/sniper/ops/strategies/presend/prevent/guards/g1_fills.py")
+    spec = importlib.util.spec_from_file_location("g1", "/home/it/sniper/ops/strategies/presend/prevent/guards/g1_fills.py")
     g1 = importlib.util.module_from_spec(spec); spec.loader.exec_module(g1)
     fills, _, _ = g1.scan("AMS", 39, f"{OUT}/r39.jsonl")
     ann = {}

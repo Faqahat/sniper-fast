@@ -3,7 +3,7 @@
 E2x1's buy (copy-style) -> its real curve P&L per SOL (before its tx costs, MEASURED) vs our sim B-copy per SOL on the same lots at
 L = 50/66/90/120 (raw, phi 0, before tx costs; INFERRED model)."""
 import pickle, collections, numpy as np
-R = "/home/moiz/sniper-data/e2x1_dissect/recon"; O = "/home/moiz/sniper-data/e2x1_dissect/ourspeed"
+R = "/home/it/sniper-data/e2x1_dissect/recon"; O = "/home/it/sniper-data/e2x1_dissect/ourspeed"
 Z = pickle.load(open(f"{R}/tape.pkl", "rb"))
 L = {l["lot_id"]: l for l in pickle.load(open(f"{R}/lots.pkl", "rb")) if l["day"] in ("D0", "D1")}
 S = {r["lot_id"]: r for r in pickle.load(open(f"{O}/sim_rows.pkl", "rb"))}

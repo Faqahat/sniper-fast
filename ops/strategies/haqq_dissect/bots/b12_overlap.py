@@ -5,16 +5,16 @@ on the same mint within 2 slots of his buy (live_presend landed fills). MEASURED
 Out: bots/b12.txt"""
 import json, pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
 from plib import Out
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 P = Out(f"{OUT}/b12.txt")
 rows = pickle.load(open(f"{OUT}/b1.pkl", "rb"))
-G = json.load(open("/home/moiz/sniper-data/haqq_dissect/gap/g0_runs.json"))
+G = json.load(open("/home/it/sniper-data/haqq_dissect/gap/g0_runs.json"))
 win = sorted((v["start"], v["end"]) for v in G.values())
-F = pickle.load(open("/home/moiz/sniper-data/dv8/fires_tape.pkl", "rb"))
+F = pickle.load(open("/home/it/sniper-data/dv8/fires_tape.pkl", "rb"))
 fires = {(f["mint"], f["ds"], f["di"]): f for f in F}
-PS = pickle.load(open("/home/moiz/sniper-data/dv8/live_presend.pkl", "rb"))
+PS = pickle.load(open("/home/it/sniper-data/dv8/live_presend.pkl", "rb"))
 psf = collections.defaultdict(list)
 for p in PS:
     if p.get("landed") and not p.get("dry") and p.get("pos"): psf[p["mint"]].append(p["pos"][0])

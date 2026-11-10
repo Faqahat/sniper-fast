@@ -16,7 +16,7 @@ usage: filters_report.py RUN.jsonl [--seed gcr_seed.json]"""
 import sys, json, collections, os
 
 path = sys.argv[1]
-seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/moiz/sniper-data/prevent/forward/gcr_seed.json"
+seed_p = sys.argv[sys.argv.index("--seed") + 1] if "--seed" in sys.argv else "/home/it/sniper-data/prevent/forward/gcr_seed.json"
 led = collections.defaultdict(lambda: [0, 0.0])
 if os.path.exists(seed_p):
     for c, d in json.load(open(seed_p)).items(): led[c] = [d["n"], d["sum"]]

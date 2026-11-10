@@ -12,12 +12,12 @@ Prefilter: the exact wave value is computed only when the best curve price withi
 Out: sniper-data/haqq_dissect/front/f1.pkl"""
 import sys, time, pickle, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8"); sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
 import dv8lib as L, dv8sim as S
 from xsim import Pos
 from x12_wave import ev as wave_ev
 from x7_ourexits import delays
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 SIZE = 0.40; WAVE = ("RIDE", 150, 150, 700); HZ = 8; NF = 6
 D2 = 460541261
 

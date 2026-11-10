@@ -29,7 +29,7 @@ At our measured 75 ms landing:
 
 1. **Binary:** host build `~/sniper-data/work/s4/snipe_engine_s4`. It is the current engine plus `--deployer-list`, off unless the flag is set. Copy it to `/root/sniper-s4/` on the server.
 2. **List:** `ops/overnight/dryrun/deployer_list_gated.txt`, rebuilt every 15 min on the host by the dry-run loop. Copy it to `/root/sniper-s4/deployer_list.txt`. The engine re-reads the file every 30 s.
-   - A list frozen for 10–29 h still made about 85% as much in the replay, so refreshing it every hour or two during the test is enough. For example, from the host: `scp -P 1996 ~/sniper/ops/overnight/dryrun/deployer_list_gated.txt it@84.32.100.36:/tmp/dl.txt`, then on the server move it into place with sudo.
+   - A list frozen for 10–29 h still made about 85% as much in the replay, so refreshing it every hour or two during the test is enough. For example, from the host: `scp -P 1996 ~/sniper-data/overnight/dryrun/deployer_list_gated.txt it@cyberfra:/tmp/dl.txt`, then on the server move it into place with sudo.
    - Keep creates that land late in their slot; do **not** use `--max-create-ms`. In the replay, late creates were S4's best group (+1.9 SOL replay / +0.9 old on about 100 launches each), because fast snipers miss the slot.
 3. **Flags:**
    - `ops/s4/s4_flags.sh` (S4_FLAGS);

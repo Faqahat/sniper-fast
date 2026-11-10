@@ -4,9 +4,9 @@ and on ALL our live pre-send fills (dv8 live_presend). MEASURED.
 Out: sniper-data/haqq_dissect/front/f9_blockpos.txt"""
 import pickle, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/front"
+OUT = "/home/it/sniper-data/haqq_dissect/front"
 s0, bsz = L.slot_sizes()
 out = []
 def P(*a):

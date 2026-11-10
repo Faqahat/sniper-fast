@@ -9,7 +9,7 @@
 import os, sys, json, time, shutil, socket, subprocess, hashlib, threading, glob
 HERE = os.path.dirname(os.path.abspath(__file__)); REC = os.path.dirname(HERE); sys.path.insert(0, REC)
 PYLIB, CERT, KEY, SRCDAY = sys.argv[1:5]
-WORK = os.environ.get("TEST_WORK", "/home/moiz/sniper-data/rec/test/archive")
+WORK = os.environ.get("TEST_WORK", "/home/it/sniper-data/rec/test/archive")
 shutil.rmtree(WORK, ignore_errors=True); os.makedirs(WORK)
 import backends as B
 FAILS = []; LOG = []

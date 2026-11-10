@@ -89,10 +89,10 @@ fn vm(key: &str) -> u64 {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let arg = |f: &str| args.iter().position(|x| x == f).and_then(|i| args.get(i + 1)).cloned();
-    let run = PathBuf::from(arg("--run").unwrap_or_else(|| "/home/moiz/sniper-data/collect/run_20261027_1410".into()));
+    let run = PathBuf::from(arg("--run").unwrap_or_else(|| "/data/tapes/collect/run_20261027_1410".into()));
     let hours: f64 = arg("--hours").and_then(|x| x.parse().ok()).unwrap_or(24.0);
     let out_dir = PathBuf::from(arg("--out").unwrap_or_else(|| std::env::temp_dir().join("obs_soak").display().to_string()));
-    let watch_f = arg("--watch").unwrap_or_else(|| "/home/moiz/sniper/ops/obs/watch_default.txt".into());
+    let watch_f = arg("--watch").unwrap_or_else(|| "/home/it/sniper/ops/obs/watch_default.txt".into());
     let workers: usize = arg("--workers").and_then(|x| x.parse().ok()).unwrap_or(6);
     let pace = arg("--pace").unwrap_or_else(|| "block".into());
     let rt_x: Option<f64> = pace.strip_prefix("realtime:").and_then(|x| x.parse().ok());

@@ -3,7 +3,7 @@
 # usage: comp.py <run tag r2|r3> <run dir> <out jsonl.gz>
 import sys, os, json, gzip, glob, collections
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/agents/freshaudit")
+sys.path.insert(0, "/home/it/sniper/ops/agents/freshaudit")
 from load import chunks, relays, tipsum, trade_of, is_buy_attempt, OURS
 RUN, RUNDIR, OUTP = sys.argv[1], sys.argv[2], sys.argv[3]
 LAUNCH = {}

@@ -16,11 +16,11 @@ if __name__ == "__main__":
                     print(f"  {tier} {(35, 50)[lat]}ms {exn:10s} FRA: {L.fmt(fra, h)} | FRA+AMS: {L.fmt(both, h)}")
     # replay cross-check vs imit2 rows (R3 r3 window): same dumps, P&L at 35 ms, exit no TP / SL -10% / 1.3 s
     d = L.load("R3", window=False); key = {}
-    meta = json.load(open("/home/moiz/sniper-data/strategies/patterns/day_R3_meta.json"))["meta"]
+    meta = json.load(open("/home/it/sniper-data/strategies/patterns/day_R3_meta.json"))["meta"]
     for i in range(len(d["k"])):
         if np.isfinite(d["f1"][i]): key[(meta[d["tok"][i]]["m"], int(d["s"][i]), round(float(d["F"][i, L.FNI["sol"]]), 3))] = i
     a = []; b = []; fa = []; fb = []
-    for l in gzip.open("/home/moiz/sniper/ops/overnight/sel/imit2_rows_r3.jsonl.gz", "rt"):
+    for l in gzip.open("/home/it/sniper-data/overnight/sel/imit2_rows_r3.jsonl.gz", "rt"):
         o = json.loads(l); i = key.get((o["m"], o["s"], o["sell"]))
         if i is None or o["ours"].get("35") is None: continue
         r = o["ours"]["35"]; mine_ok = d["st"][i, 0] == 0; theirs_ok = r["ratio"] <= 1.05

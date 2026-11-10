@@ -2,7 +2,7 @@
 # Tables for HOW_PROS_LAND.md from pro_rows_<sol>_<drop>.json (x4_pros.py): per wallet / leader client / dump quartile /
 # window slot / leader location / landed route. ms = block clock (INFERRED), positions = MEASURED.
 import sys, json, collections, statistics as st
-sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/landing2")
+sys.path.insert(0, "/home/it/sniper/ops/dip/speed/landing2")
 import lib2
 rows = json.load(open(f"{lib2.D}/pro_rows_1.0_0.04.json"))
 WAL = json.load(open(f"{lib2.D}/wallets.json"))

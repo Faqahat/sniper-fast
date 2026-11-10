@@ -5,7 +5,7 @@ import sys, os, json, zlib, collections, random
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import v2data as V
-coh = {zlib.crc32(w.encode()) for w in json.load(open("/home/moiz/sniper/ops/overnight/dip/drop_cw.json"))}
+coh = {zlib.crc32(w.encode()) for w in json.load(open("/home/it/sniper-data/overnight/dip/drop_cw.json"))}
 cnt = collections.Counter()
 for d in V.DAYS:
     t = V.load_day(d, cols=("tok", "buy", "uid", "s", "sol", "tokn", "vsol", "vtok"))

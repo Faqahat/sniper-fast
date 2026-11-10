@@ -3,11 +3,11 @@
 (every fill where the wallet held at arm, not only fills it sold into), whale dump-history distribution, per-run tables of key rules."""
 import pickle, json, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/who")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/who")
 from w6_score import SIX, ALL_LIVE
 from w5_rules import PAPER_RUNS
 
-D = "/home/moiz/sniper-data/prevent/who"
+D = "/home/it/sniper-data/prevent/who"
 NAMED = ["dtrzJPj7", "dKMjeGJ4", "8NMLaLAQ", "AMDEmVoc", "CHDbebWQ", "4zT7uCnA", "CvHEVC7S", "9wRuFPJZ", "2H6DwrqA", "bwamJzzt", "FfW5e8gK", "pfVKXXhG", "7WdiCkB7", "774XnM9x", "2Bonf26M", "85YwZaQa"]
 
 

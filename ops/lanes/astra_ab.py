@@ -23,9 +23,9 @@ Usage (read-only on the run files; never touches a server):
   astra_ab.py --make-fake IN.jsonl OUT.jsonl [--fake-name fake-ps]   # test file: alternate tries of a one-path run relabelled
   astra_ab.py --build-tab RUN.jsonl OUTDIR [--procs 4]                # decode the recorder chunks of the run's span for --tab
 Hourly check (owner's checks; copy the live file read-only first, never write on the server):
-  ssh -p 1996 it@84.32.104.202 'sudo cat /root/prod/runs/dip_ams_r38.jsonl' > /home/moiz/sniper-data/lanes/r38.jsonl
-  ssh -p 1996 it@84.32.104.202 'sudo cat /root/prod/runs/dip_ams_r38.log' > /home/moiz/sniper-data/lanes/r38.log
-  python3 /home/moiz/sniper/ops/lanes/astra_ab.py /home/moiz/sniper-data/lanes/r38.jsonl --log /home/moiz/sniper-data/lanes/r38.log
+  ssh -p 1996 it@cyberams 'sudo cat /root/prod/runs/dip_ams_r38.jsonl' > /home/it/sniper-data/lanes/r38.jsonl
+  ssh -p 1996 it@cyberams 'sudo cat /root/prod/runs/dip_ams_r38.log' > /home/it/sniper-data/lanes/r38.log
+  python3 /home/it/sniper/ops/lanes/astra_ab.py /home/it/sniper-data/lanes/r38.jsonl --log /home/it/sniper-data/lanes/r38.log
   (add --last-hours 1 for the last hour only; --sol off for a 10-second read)"""
 import sys, os, json, re, argparse, collections, datetime, math, pickle, subprocess, glob, time
 import numpy as np
@@ -34,14 +34,14 @@ SMS = 213.0                       # ms per slot on the replay's chain clock (spe
 SMS_A = 212.0                     # dip_model::arrival's slot length (block-position clock of the land records)
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 OURS8 = {o[:8] for o in OURS}
-SPEED35 = "/home/moiz/sniper/ops/strategies/presend/speed35"
-YOUNG = "/home/moiz/sniper/ops/strategies/presend/young"
-REALD = "/home/moiz/sniper/ops/strategies/presend/real"
-S35 = "/home/moiz/sniper-data/speed35"
-BASE_RUNS = {"r36": "/home/moiz/sniper-data/runs/ams/runs/dip_ams_r36.jsonl", "r37": f"{S35}/dip_ams_r37.jsonl"}
+SPEED35 = "/home/it/sniper/ops/strategies/presend/speed35"
+YOUNG = "/home/it/sniper/ops/strategies/presend/young"
+REALD = "/home/it/sniper/ops/strategies/presend/real"
+S35 = "/home/it/sniper-data/speed35"
+BASE_RUNS = {"r36": "/home/it/sniper-data/runs/ams/runs/dip_ams_r36.jsonl", "r37": f"{S35}/dip_ams_r37.jsonl"}
 BASE_TPSL = {"r36": (0.20, 0.20), "r37": (0.15, 0.20)}   # speed35 s4_replay's values (kept so 'cur' equals its calibration)
 SIZE = 0.696; COST_RT = 0.00352; SEEDS = 5
-COLLECT = "/home/moiz/sniper-data/collect"
+COLLECT = "/data/tapes/collect"
 RES_ORDER = ["ok", "6042", "deadline", "ata_exists", "other", "unseen"]
 
 

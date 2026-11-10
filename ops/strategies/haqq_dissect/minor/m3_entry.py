@@ -10,11 +10,11 @@ Also: his real P&L on rule hits vs misses (MEASURED, code-matched lots).
 Out: minor/m3.txt, minor/m3.pkl (labels + rule masks)"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 from plib import Out
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/minor"
+OUT = "/home/it/sniper-data/haqq_dissect/minor"
 BOTS = {226: 5, 231: 5, 244: 3, 251: 3, 249: 3, 252: 3}
 TRAIN = (0, 1, 2); TEST = (3, 4, 5)
 
@@ -56,7 +56,7 @@ def search(X, y, names, allowed, tr, maxk=4):
 
 def main():
     P = Out(f"{OUT}/m3.txt")
-    Z = np.load("/home/moiz/sniper-data/haqq_dissect/bots/b2.npz")
+    Z = np.load("/home/it/sniper-data/haqq_dissect/bots/b2.npz")
     XF = Z["XF"].astype(np.float64); names = [str(x) for x in Z["fnames"]]; use = Z["use"]; day = Z["day"]
     U = np.load(f"{L.D}/uni.npz"); M = U["M"]
     key = {(int(m), int(s), int(i)): k for k, (m, s, i) in enumerate(zip(M["mint"], M["slot"], M["idx"]))}

@@ -4,7 +4,7 @@ fills nobody follows). Each point = one quiet signal at the trigger. Shown on ch
 import json
 import numpy as np
 import sim
-B = "/home/moiz/sniper-data/presend_filter"
+B = "/home/it/sniper-data/presend_filter"
 T_VAL0, T_VAL1 = 1792948200, 1793033220
 E = [e for e in json.load(open(f"{B}/chain_events.json")) if not (T_VAL0 <= e["bt"] < T_VAL1)]
 SIG = {

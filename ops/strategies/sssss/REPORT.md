@@ -1,7 +1,7 @@
 # sssssDdM: what it does, and can we copy it (10-24 ~21:55 PKT)
 
 Wallet sssssDdMNAWKingjpEojkTNdVuZrBe7FsJLaGtexe7d. Read-only study, agent + Haiku 5.5 ($0.09). MEASURED unless marked.
-Outputs: /home/moiz/sniper-data/strategies/sssss/.
+Outputs: /home/it/sniper-data/strategies/sssss/.
 
 ## Bottom line
 - **What it is:** a buy-burst momentum scalper on busy curves, one of a fleet of 4 "sssss…" wallets. About +75–90 SOL a day

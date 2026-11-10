@@ -1,5 +1,5 @@
 #!/bin/bash
-# HOST: copy the trial data from FRA (+ the engine log snapshot) into /home/moiz/sniper-data/preconf/<YYYYMMDD>/ with
+# HOST: copy the trial data from FRA (+ the engine log snapshot) into /home/it/sniper-data/preconf/<YYYYMMDD>/ with
 # sha256 verification, then write catalog.json. NEVER deletes anything on any server (server copies stay until the
 # coordinator OKs a cleanup).
 # usage: fetch.sh [RUN]
@@ -7,11 +7,11 @@
 #        ENGINE_HOST=ams|fra (default ams)  ENGINE_LOG=<path on that host> (default: newest /root/prod/runs/dip_<host>_r*.jsonl)
 set -uo pipefail
 H=$(dirname "$(readlink -f "$0")")
-RUN=${1:-$(cat /home/moiz/sniper-data/preconf/CURRENT_RUN 2>/dev/null)}
+RUN=${1:-$(cat /home/it/sniper-data/preconf/CURRENT_RUN 2>/dev/null)}
 [ -n "$RUN" ] || { echo "no RUN"; exit 1; }
-DATE=${RUN#trial_}; HD=/home/moiz/sniper-data/preconf/$DATE
+DATE=${RUN#trial_}; HD=/home/it/sniper-data/preconf/$DATE
 mkdir -p "$HD/fra" "$HD/ck" "$HD/engine"
-FRA=it@84.32.100.36; AMS=it@84.32.104.202
+FRA=it@cyberfra; AMS=it@cyberams
 SSHO=(-o BatchMode=yes -o ConnectTimeout=10 -p 1996)
 if ssh "${SSHO[@]}" $FRA "pgrep -f '[s]hreder_rec --out /root/shreder/data/$RUN ' >/dev/null"; then
   [ "${FORCE:-0}" = 1 ] || { echo "recorder still running -> wait for it, or FORCE=1 for a partial copy"; exit 1; }

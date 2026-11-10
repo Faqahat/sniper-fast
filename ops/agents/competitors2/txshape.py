@@ -2,12 +2,12 @@
 # competitors2/txshape.py -- READ-ONLY. Fetch raw transactions (getTransaction, base64) from the PUBLIC mainnet RPC and decode
 # their shape: size in bytes, legacy / v0, address lookup tables, durable nonce (AdvanceNonceAccount first), the top-level
 # instruction list (program + kind), compute-budget values, tip transfers (relay via tipmap), signer count, recent blockhash.
-# usage: python3 -I txshape.py sigs.txt   (one signature per line; cached in /home/moiz/sniper-data/competitors2/txshape.jsonl)
+# usage: python3 -I txshape.py sigs.txt   (one signature per line; cached in /home/it/sniper-data/competitors2/txshape.jsonl)
 import json, sys, os, time, base64, urllib.request, urllib.error
 URLS = os.environ.get("PUB_RPC", "https://solana-rpc.publicnode.com,https://api.mainnet-beta.solana.com").split(",")
 _rr = [0]
-CACHE = "/home/moiz/sniper-data/competitors2/txshape.jsonl"
-TIP = json.load(open("/home/moiz/sniper/ops/agents/tipmap.json"))
+CACHE = "/home/it/sniper-data/competitors2/txshape.jsonl"
+TIP = json.load(open("/home/it/sniper/ops/agents/tipmap.json"))
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def b58enc(b):
     n = int.from_bytes(b, "big"); o = []

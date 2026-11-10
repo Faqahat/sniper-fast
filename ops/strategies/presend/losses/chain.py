@@ -1,6 +1,6 @@
 """Decode the recorder lines (grep of our fill mints) into per-mint trade lists with the tx signer. Read-only."""
 import json, glob, sys, collections, gzip
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/real")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/real")
 import decode as D
 G = "/tmp/claude-1000/-home-moiz/b89fe85a-a34a-424b-a07d-ff4f59af6472/scratchpad/losses/grep/*.jsonl"
 out = collections.defaultdict(dict)
@@ -16,5 +16,5 @@ for fn in sorted(glob.glob(G)):
             if not p: continue
             out[p[0]][(d["s"], d["i"], j)] = [d["s"], d["i"], j, p[4], signer, p[3], p[1], p[2], p[5], p[6], d["bt"]]
 res = {m: sorted(v.values()) for m, v in out.items()}
-json.dump(res, gzip.open("/home/moiz/sniper-data/presend_losses/chain_trades.json.gz", "wt"))
+json.dump(res, gzip.open("/home/it/sniper-data/presend_losses/chain_trades.json.gz", "wt"))
 print(len(res), sum(len(v) for v in res.values()))

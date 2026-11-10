@@ -10,12 +10,12 @@ Out: DATA/presend.pkl"""
 import sys, os, json, pickle, time, collections
 import numpy as np
 from multiprocessing import Pool
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_sel")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_sel")
 import h3_presend as H3
 import lib28, sim28, rlib, sim, s48lib, variants
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_model")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_model")
 from m1_train import thr_for_recall, TR1, VA1
-DATA = "/home/moiz/sniper-data/haqq_model"; HQS = "/home/moiz/sniper-data/haqq_sel"
+DATA = "/home/it/sniper-data/haqq_model"; HQS = "/home/it/sniper-data/haqq_sel"
 W0, W1 = H3.W0, H3.W1
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CUSTOM37: builds REPORT.md from the hand-written text below + the generated tables (losses.md, tables.md)."""
-D = "/home/moiz/sniper-data/custom37"
-OUT = "/home/moiz/sniper/ops/strategies/presend/custom37/REPORT.md"
+D = "/home/it/sniper-data/custom37"
+OUT = "/home/it/sniper/ops/strategies/presend/custom37/REPORT.md"
 LM = open(f"{D}/losses.md").read().split("\n")
 TM = open(f"{D}/tables.md").read()
 
@@ -158,9 +158,9 @@ and is not negative in more than 2 of the 6 TRAIN runs. 5,763 policies per famil
 - One test run (r37, 10.8 h daytime PKT). TRAIN is mostly night PKT plus FRA.
 
 ## Files
-Code /home/moiz/sniper/ops/strategies/presend/custom37/: c1_extract (windows + real tries), c2_tape (chain tapes), c2b_holders /
+Code /home/it/sniper/ops/strategies/presend/custom37/: c1_extract (windows + real tries), c2_tape (chain tapes), c2b_holders /
 c2c_leaders (arm-time features), c37lib (replay), c3_calib, c4_grid (knobs), c5_tables, c6_losses, c7_policy, c8_final, c9_tables_md,
-c10_report. Data /home/moiz/sniper-data/custom37/ (runs/ r37 copy + cut time, win_*/tape_* pickles, tab37 r37 tape, grid.pkl,
+c10_report. Data /home/it/sniper-data/custom37/ (runs/ r37 copy + cut time, win_*/tape_* pickles, tab37 r37 tape, grid.pkl,
 knobs.txt/json, losses.md/json, policies.json, final.txt/json, tables.md, calib_*.json).
 """
 open(OUT, "w").write(TXT)

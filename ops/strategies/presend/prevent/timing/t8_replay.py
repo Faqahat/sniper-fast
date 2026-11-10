@@ -8,9 +8,9 @@ Blocked tries keep their landed fee (conservative). Rows per rep: base, base_cut
 usage: t8_replay.py RUN REPS OUT.json VARIANT [VARIANT ...]"""
 import sys, json, bisect
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/custom37")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/guards")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/timing")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/custom37")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/guards")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/timing")
 import c37lib as L
 import glib as G
 import tlib as T

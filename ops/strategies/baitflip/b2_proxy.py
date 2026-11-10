@@ -9,7 +9,7 @@
 import os, json, gzip, collections
 from multiprocessing import Pool
 import b1_scan as B
-OUT = "/home/moiz/sniper-data/strategies/baitflip2"
+OUT = "/home/it/sniper-data/strategies/baitflip2"
 PFX = ("haqqiUUX", "HkQ7hMjy", "DYXDDrZC", "E6JasdE8", "7PedQZm", "CZ77onJz", "6VzXcLk9", "ETwEAQPL", "sssssDdM", "ssssswdk", "9pQQc1xy")
 WIN = [0, 1, 2, 3, 4, 6, 8, 12]
 

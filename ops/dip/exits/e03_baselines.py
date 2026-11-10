@@ -4,7 +4,7 @@
 # engine really sold; c6 + SL10 = the replay's name c6_tpnone_sl10), TP/SL grid, trailing stops, "hold while outside buying
 # continues" stall rules, haqq-like timers from the dump slot, and the look-ahead oracle (upper bound).
 # Every rule is chosen on TRAIN (10-24 09:45 -> 10-25 01:00 PKT) and reported on TEST (01:00 -> 09:45) as well.
-# -> /home/moiz/sniper-data/exits/e03_baselines.json + .txt
+# -> /home/it/sniper-data/exits/e03_baselines.json + .txt
 import sys, os, json, time, itertools
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -4,10 +4,10 @@ pick one finalist per family on PICK only (best PICK saving among rules with PIC
 Out: score.json, score.txt (stdout)"""
 import pickle, json, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/who")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/who")
 from w5_rules import PICK_RUNS, TEST_RUNS, R38, PAPER_RUNS
 
-D = "/home/moiz/sniper-data/prevent/who"
+D = "/home/it/sniper-data/prevent/who"
 ALL_LIVE = ["FRA21", "FRA22", "FRA23", "FRA24", "FRA26", "FRA27", "FRA28", "AMS16", "AMS17", "AMS19", "AMS20", "AMS24", "AMS25", "AMS26", "AMS27", "AMS34", "AMS35", "AMS36", "AMS37", "AMS38"]
 SIX = [("AMS38", "9wU2PpxtTbEMb3XjuhhHUTF7Sv6rBYiUDCiwzVfrpump", "rearm"), ("AMS38", "HDnCHWDiQZgT5GX3bSZ1Dxg6fRZt4noU2t9SK6BwURGu", "t2"),
        ("AMS38", "7fNXHMXVed5Av9AbHQ6QfGLs59CCtFxS2C5L6RMovAQ4", "t2"), ("AMS38", "7fNXHMXVed5Av9AbHQ6QfGLs59CCtFxS2C5L6RMovAQ4", "rearm"),

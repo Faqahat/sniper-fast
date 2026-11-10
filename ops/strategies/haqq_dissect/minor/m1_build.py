@@ -6,21 +6,21 @@ code-matched FIFO accounting (code = CU price mod 1000, from exec/txs.pkl, else 
   - the latest earlier haqq buy on the mint by another code (code, ms / slots before) and by the same code,
   - buy sig and first-sell sig (for Solscan links).
 Joined to pos/p1.pkl buys by (mint, slot, idx) for the decision-time context (dump, age, curve) and the pos analyst's code-matched P&L.
-Out: /home/moiz/sniper-data/haqq_dissect/minor/m1.pkl"""
+Out: /home/it/sniper-data/haqq_dissect/minor/m1.pkl"""
 import pickle, sys, collections, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/exit")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/pos")
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/exit")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/pos")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import xlib as X
 from plib import load
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/minor"
+OUT = "/home/it/sniper-data/haqq_dissect/minor"
 
 
 def main():
     t0 = time.time()
-    TX = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/exec/txs.pkl", "rb"))
+    TX = pickle.load(open("/home/it/sniper-data/haqq_dissect/exec/txs.pkl", "rb"))
     hx = {}; fails = []
     for r in TX:
         if r["w"] != "haqq": continue
@@ -28,7 +28,7 @@ def main():
         else: fails.append(dict(code=(r["cup"] or 0) % 1000, s=r["s"], bt=r["bt"], kind=r["kind"], ecode=r["ecode"], mint=r["mint"], sig=r["sig"],
                                 cul=r["cul"], cup=r["cup"], fee=r["fee"], tip=r["tip"], path=r["path"]))
     del TX
-    CODES = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/pos/codes.pkl", "rb"))
+    CODES = pickle.load(open("/home/it/sniper-data/haqq_dissect/pos/codes.pkl", "rb"))
     B, LO, T = load()
     bkey = {(b["mint"], b["slot"], b["idx"]): i for i, b in enumerate(B)}
     lot_of_b = {l["b"]: li for li, l in enumerate(LO)}

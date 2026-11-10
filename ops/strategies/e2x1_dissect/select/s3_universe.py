@@ -8,7 +8,7 @@ Keeps: all positives + every row of the mints he ever touched (for take-vs-skip 
 negatives (weight 25). Out: sniper-data/e2x1_dissect/select/U.npz"""
 import sys, json, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/e2x1_dissect/select")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/e2x1_dissect/select")
 from lib import *
 t0 = time.time()
 D = load(); w = int(D["wid"])

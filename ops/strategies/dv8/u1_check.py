@@ -2,7 +2,7 @@
 """DV8 step 3a check (read-only): recompute 400 random filled (candidate, landing model, exit, fol) outcomes of uni.npz with the
 scalar dv8sim.pnl_exact on the mint's own rows -> max abs difference. Also: share of candidates whose exit had no later trade."""
 import sys, numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L, dv8sim as S
 Z = np.load(f"{L.D}/uni.npz"); M = Z["M"]; R = Z["R"]; ES = Z["ES"]; PN = Z["PN"]; FILL = Z["FILL"]; HS = list(Z["HS"]); FOLS = list(Z["FOLS"])
 ids, idm = L.ids_map(); our = [idm[w] for w in L.WAL.values()]

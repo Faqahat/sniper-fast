@@ -6,11 +6,11 @@
 # filled round trip, exit = curve 6 slots later, gains cut 20% (followers our buy prices out). At most 3 open positions (12 slots each).
 # Ledger: vm_paper.jsonl (one line per paper trade), summary: python3 vm_paper.py --report
 import json, glob, os, sys, time, pickle, gzip, collections, bisect, numpy as np, subprocess
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/dip"); sys.path.insert(0, "/home/moiz/sniper/ops/dip/speed/night")
+sys.path.insert(0, "/home/it/sniper-data/overnight/dip"); sys.path.insert(0, "/home/it/sniper/ops/dip/speed/night")
 import gbdt_np as G
 from hq2 import vm_feats
 D = os.path.dirname(os.path.abspath(__file__)); LED = f"{D}/vm_paper.jsonl"; ST = f"{D}/state.json"
-M = pickle.load(open("/home/moiz/sniper/ops/dip/speed/night/vm_frozen.pkl", "rb"))
+M = pickle.load(open("/home/it/sniper/ops/dip/speed/night/vm_frozen.pkl", "rb"))
 S = 0.3e9; FEE = 0.0125; COST = 0.0006; OFF = 80; HOLD = 6; MAXOPEN = 3
 def score(x):
     B = np.zeros((1, len(x)), np.int16)
@@ -32,7 +32,7 @@ def report():
 if "--report" in sys.argv: report(); sys.exit()
 st = json.load(open(ST)) if os.path.exists(ST) else {"done": [], "open_until": [], "start": time.time()}
 while True:
-    runs = sorted(glob.glob("/home/moiz/sniper-data/collect/run_*/txs"))
+    runs = sorted(glob.glob("/data/tapes/collect/run_*/txs"))
     files = sorted(f for r in runs[-2:] for f in glob.glob(f"{r}/txs_*.jsonl.gz"))
     new = [f for f in files if f not in st["done"] and int(os.path.basename(f)[4:14]) >= 1792900000]    # from 10-25 ~05:40 PKT on
     if len(new) >= 2:

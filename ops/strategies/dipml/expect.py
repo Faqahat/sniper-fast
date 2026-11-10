@@ -5,7 +5,7 @@ Entry landing: the MEASURED live delay distribution (block clock, dump -> our la
 (dump slot <= B_VAL), scaled so its median = the row's latency (35/50/58/75 ms); 61 quantiles; spill into the next
 block happens naturally. Exit: live sell landings (hold 5/6) of the same pre-TEST fires. Guard 1.05 (live).
 phi: share of other wallets' buy SOL between our entry and exit removed (20% fewer followers).
-Writes /home/moiz/sniper-data/dipml/expect.npz: for each key 'L{ms}_S{size}_F{phi}': pf (fill prob), ev (mean pnl pre-cost)."""
+Writes /home/it/sniper-data/dipml/expect.npz: for each key 'L{ms}_S{size}_F{phi}': pf (fill prob), ev (mean pnl pre-cost)."""
 import json, sys, numpy as np
 from multiprocessing import Pool
 import core, sim, livecal

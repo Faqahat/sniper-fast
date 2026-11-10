@@ -6,7 +6,7 @@ import json, glob, re, os, collections, urllib.request, sys
 from concurrent.futures import ThreadPoolExecutor
 DEV = {}
 for d in ("run_20261023_1426", "run_20261024_1425"):
-    for l in open(f"/home/moiz/sniper-data/collect/{d}/launches.jsonl"):
+    for l in open(f"/data/tapes/collect/{d}/launches.jsonl"):
         try: c = json.loads(l)
         except Exception: continue
         DEV[c["mint"]] = {x for x in (c.get("user"), c.get("creator"), c.get("payer")) if x}
@@ -18,7 +18,7 @@ def signer(sig):
         return t["transaction"]["message"]["accountKeys"][0] if t else None
     except Exception: return None
 rows = []
-for f in sorted(glob.glob("/home/moiz/sniper-data/runs/*/runs/dip_*r*.jsonl")):
+for f in sorted(glob.glob("/home/it/sniper-data/runs/*/runs/dip_*r*.jsonl")):
     run = os.path.basename(f)[:-6]
     pnl = collections.defaultdict(list)
     for l in open(f[:-6] + ".log", errors="ignore"):

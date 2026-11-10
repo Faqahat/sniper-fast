@@ -9,9 +9,9 @@ Metrics per test day: AUC; precision / recall at the threshold that flags as man
 Out: bots/b3_scores.npz (OOS scores D1-D6 per bot and set), b3.txt"""
 import sys, time
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dipdetect")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dipdetect")
 import dd_gbdt as G
-OUT = "/home/moiz/sniper-data/haqq_dissect/bots"
+OUT = "/home/it/sniper-data/haqq_dissect/bots"
 HQF = ("hq_prev", "hq_open", "open247", "open248", "open244", "open_other", "prev247_ret", "prev247_s", "prev248_ret", "prev248_s")
 
 

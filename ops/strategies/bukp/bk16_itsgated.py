@@ -5,12 +5,12 @@
 # out-of-sample for the model (R2 is in-sample and only shown for reference). -> bukp/its_gated.json
 import sys, json
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/moiz/sniper/ops/strategies/bukp")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns"); sys.path.insert(0, "/home/it/sniper/ops/strategies/bukp")
 import p4_eval as E
 import bk8_replica as B8
 import bk13_exits as B13
 import bk12_grad as B12
-OUT = "/home/moiz/sniper-data/strategies/bukp"
+OUT = "/home/it/sniper-data/strategies/bukp"
 EXN = ["to_grad_300s", "timer_120s", "ts_sell20_300s_mh15", "ts_sell10_120s_mh15", "ladder_1.2_1.5_300s"]
 FAM = {F["name"]: F for F in B13.FAMS}
 if __name__ == "__main__":

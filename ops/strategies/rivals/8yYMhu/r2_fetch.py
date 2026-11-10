@@ -5,7 +5,7 @@ Resumable; safe to re-run while new want files are added (it re-scans the want f
 import json, os, sys, glob, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rpc
-D = "/home/moiz/sniper-data/rivals/8yYMhu"
+D = "/home/it/sniper-data/rivals/8yYMhu"
 fn = f"{D}/gettx.jsonl"
 done = set()
 if os.path.exists(fn):

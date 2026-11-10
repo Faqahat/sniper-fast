@@ -1,7 +1,7 @@
 # Who beats our dip buys, and how (agent study, 10-24 ~23:55 PKT)
 
 Read-only; 1,174 rival transactions decoded from raw bytes. MEASURED unless marked.
-Data: /home/moiz/sniper-data/competitors2/ (summary.json first; dossier.txt, timing.txt, shapes.txt, counterfactual.txt,
+Data: /home/it/sniper-data/competitors2/ (summary.json first; dossier.txt, timing.txt, shapes.txt, counterfactual.txt,
 examples.json).
 
 ## Summary

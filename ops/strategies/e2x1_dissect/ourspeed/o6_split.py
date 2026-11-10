@@ -2,7 +2,7 @@
 """ourspeed step 6: how much of the oracle-pick P&L comes from lots where his own buy landed later than our L after the trigger
 (then the same-latency exit also lands BEFORE his sell + his sibling's same-slot sell). Split by his trigger->buy gap g."""
 import pickle, numpy as np
-R = "/home/moiz/sniper-data/e2x1_dissect/recon"; O = "/home/moiz/sniper-data/e2x1_dissect/ourspeed"
+R = "/home/it/sniper-data/e2x1_dissect/recon"; O = "/home/it/sniper-data/e2x1_dissect/ourspeed"
 L = {l["lot_id"]: l for l in pickle.load(open(f"{R}/lots.pkl", "rb"))}
 S = pickle.load(open(f"{O}/sim_rows.pkl", "rb"))
 Z = pickle.load(open(f"{R}/tape.pkl", "rb"))

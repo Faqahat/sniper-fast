@@ -6,9 +6,9 @@ residuals R1, R2 = replay vs measured (both ~0). Any day-boundary mismatch of a 
 Out: vs248/v6_bridge.txt"""
 import pickle, sys, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/dv8")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/dv8")
 import dv8lib as L
-OUT = "/home/moiz/sniper-data/haqq_dissect/vs248"
+OUT = "/home/it/sniper-data/haqq_dissect/vs248"
 DAYS = (2, 3, 4, 5)
 
 

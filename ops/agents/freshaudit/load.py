@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # helpers: load extracted rows (x/<run>/*.jsonl.gz) into memory
 import os, gzip, json, glob, collections
-X = "/home/moiz/sniper/ops/agents/freshaudit/x"
+X = "/home/it/sniper/ops/agents/freshaudit/x"
 OURS = "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"
 def chunks(run, t0=0, t1=10**12):
     fs = sorted(glob.glob(os.path.join(X, run, "txs_*.jsonl.gz")))

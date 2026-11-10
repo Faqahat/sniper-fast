@@ -6,7 +6,7 @@
 # usage: pass1_wallets.py <out.json> [procs]
 import os, sys, json, gzip, glob, zlib, collections
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/collect"
+D = "/data/tapes/collect"
 RUNS = [("R2", "phaseA_selfwd"), ("R3", "phaseA_r3day")]
 DSLOT = 5; BIG = 1_000_000_000
 PKT = 5 * 3600

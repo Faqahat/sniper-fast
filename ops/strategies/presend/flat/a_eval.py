@@ -5,7 +5,7 @@ decided while the engine had seen no other wallet's trade (eng_flat) get the var
 is unchanged. Side cost of a longer hold (one_position): the live tries of other kept windows sent inside the extra hold are not
 sent (fees saved; a fill among them is lost with its live net); a kept window on the same token armed inside the extra hold
 (+300 ms margin) is blocked (its whole score lost); reactive fires inside it are counted (blocked).
-Per position gain = (variant score - live score) + its side cost. Results: /home/moiz/sniper-data/presend_flat/a_<tag>.json
+Per position gain = (variant score - live score) + its side cost. Results: /home/it/sniper-data/presend_flat/a_<tag>.json
 usage: a_eval.py --runs r24 r25 r26 [--mode primary|asrun] [--variants all|frozen] [--lims FILE] [--tag dev]"""
 import sys, json, argparse, collections, pickle
 import numpy as np
@@ -89,7 +89,7 @@ def main():
     if A.variants == "all":
         variants = [(vname(k, p), dict(p)) for k, p in PR.GRID_A]
     else:
-        F = json.load(open("/home/moiz/sniper/ops/strategies/presend/flat/FROZEN.json"))
+        F = json.load(open("/home/it/sniper/ops/strategies/presend/flat/FROZEN.json"))
         variants = [(F["A"]["name"], F["A"]["rule"])]
     for _, rule in variants:
         rule.setdefault("K", None); rule.setdefault("X", None)

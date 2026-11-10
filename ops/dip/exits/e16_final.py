@@ -4,7 +4,7 @@
 # B) TEST difference vs today's exit with the 90% CI (30-min blocks) and per dump.
 # C) our real live fills at their exact landing (train hours / test hours).
 # D) per fill by crowd on TEST (quiet 0-1 / 2 / crowded 3+ fast bots in the dump slot .. +3).
-# -> /home/moiz/sniper-data/exits/e16_final.txt + .json
+# -> /home/it/sniper-data/exits/e16_final.txt + .json
 import sys, os, json
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

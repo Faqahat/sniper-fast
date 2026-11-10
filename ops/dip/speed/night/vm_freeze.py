@@ -2,7 +2,7 @@
 # FREEZE the value model (night 10-25 ~04:25 PKT): trained on 10-23 (7 h) + 10-24 (7 h, up to slot 461001668). Saves bin edges + trees +
 # the score cutoff that gives ~52 picks/h on the training data -> vm_frozen.pkl. The morning forward test scores only data AFTER this.
 import pickle, numpy as np, sys
-sys.path.insert(0, "/home/moiz/sniper/ops/overnight/dip"); import gbdt_np as G
+sys.path.insert(0, "/home/it/sniper-data/overnight/dip"); import gbdt_np as G
 from hq2 import load, dataset
 A = load("rows_d23.json"); B = load("race_rows.json")
 Xa, Va, Ta = dataset(A, 80, 0.002); Xb, Vb, Tb = dataset(B, 80, 0.002)

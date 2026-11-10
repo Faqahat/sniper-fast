@@ -7,11 +7,11 @@ Decision points:
   shadow T2 arm (paper) as live T2 (shadow-only runs)
   obs re-arm window     as live re-arm (r36/r37/r38 observatory)
 No identity features (no wallet lists) except the generic follower cohort count (ops/overnight/sel/cohort_train.json), as QUIET.
-Out: /home/moiz/sniper-data/prevent/state/feats.pkl  {key: {feat...}, ...} with keys ("L", run, seg, w) / ("S", run, seg, w) / ("O", run, i)"""
+Out: /home/it/sniper-data/prevent/state/feats.pkl  {key: {feat...}, ...} with keys ("L", run, seg, w) / ("S", run, seg, w) / ("O", run, i)"""
 import json, pickle, time, collections, sys
 import numpy as np
-D = "/home/moiz/sniper-data/prevent/state"
-COHORT = "/home/moiz/sniper/ops/overnight/sel/cohort_train.json"
+D = "/home/it/sniper-data/prevent/state"
+COHORT = "/home/it/sniper-data/overnight/sel/cohort_train.json"
 OURS = {"EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR", "2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE"}
 SUP = 1e15; P0 = 30e9 / 1.073e15
 t0 = time.time()

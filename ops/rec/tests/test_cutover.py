@@ -7,7 +7,7 @@
 import os, sys, json, gzip, glob, time, subprocess, threading, http.server, socketserver, shutil, importlib.util
 HERE = os.path.dirname(os.path.abspath(__file__)); REC = os.path.dirname(HERE)
 RAWDIR = sys.argv[1]; N = int(sys.argv[2]) if len(sys.argv) > 2 else 150
-WORK = os.environ.get("TEST_WORK", "/home/moiz/sniper-data/rec/test/cutover"); shutil.rmtree(WORK, ignore_errors=True); os.makedirs(WORK)
+WORK = os.environ.get("TEST_WORK", "/home/it/sniper-data/rec/test/cutover"); shutil.rmtree(WORK, ignore_errors=True); os.makedirs(WORK)
 S0 = 500_000_000; LAG = 3; START = S0 + 80; STOP1 = S0 + 115; FAILS = []
 def check(c, w):
     print(("PASS " if c else "FAIL ") + w, flush=True)

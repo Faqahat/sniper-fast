@@ -1,8 +1,8 @@
 # do top wallets route by leader client? relay share per leader client (R2 slots, successful buys); and failed-sell timing
 import json, gzip, collections, sys
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 TOP = [l.strip() for l in open(B + sys.argv[1]) if l.strip()]
-LB = json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json")); LEAD = LB["leaders"]; NODES = LB["nodes"]
+LB = json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json")); LEAD = LB["leaders"]; NODES = LB["nodes"]
 ct = {w: collections.defaultdict(collections.Counter) for w in TOP}
 cupc = {w: collections.defaultdict(list) for w in TOP}
 own = collections.defaultdict(lambda: collections.defaultdict(list))

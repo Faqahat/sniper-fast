@@ -1,6 +1,6 @@
 # Our 240 fired buy txs from chain: number of tip transfers (hot write-locked accounts), writable accounts, CU limit/price, size -> vs fire->seen
 import json, os, urllib.request, time, collections, statistics, concurrent.futures as cf, base64
-EP = open(os.path.expanduser("~/.config/sniper/ck_rpc_url")).read().strip(); TIP = json.load(open("/home/moiz/sniper-data/work/tipmap.json"))
+EP = open(os.path.expanduser("~/.config/sniper/ck_rpc_url")).read().strip(); TIP = json.load(open("/home/it/sniper-data/work/tipmap.json"))
 def rpc(m, p):
     for i in range(6):
         try:

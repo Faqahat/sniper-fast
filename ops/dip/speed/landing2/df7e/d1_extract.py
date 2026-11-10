@@ -5,7 +5,7 @@
 # usage: python3 -I d1_extract.py OUT_DIR [wallet] [workers]
 import sys, os, json, glob, gzip
 from multiprocessing import Pool
-D = "/home/moiz/sniper-data/landing2"
+D = "/home/it/sniper-data/landing2"
 OUT = sys.argv[1]; W = sys.argv[2] if len(sys.argv) > 2 else "DF7eRXHnvRQ9QeVCrdfS56a7RpBD6se6mgPvzApHPNr9"
 P = int(sys.argv[3]) if len(sys.argv) > 3 else 4
 def files(kind): return sorted(glob.glob(f"{D}/x_r3/{kind}_*") + glob.glob(f"{D}/x_r4/{kind}_*"))

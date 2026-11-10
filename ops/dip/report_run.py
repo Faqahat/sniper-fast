@@ -5,7 +5,7 @@
 # usage: python3 -I report_run.py <run.jsonl> <wallet> [cohort.json]       (RPC from ~/.config/sniper/ck_rpc_url; never printed)
 import sys, os, json, time, urllib.request, datetime as dt
 RUN, W = sys.argv[1], sys.argv[2]
-COH = set(json.load(open(sys.argv[3] if len(sys.argv) > 3 else os.path.expanduser("~/sniper/ops/overnight/sel/cohort_train.json"))))
+COH = set(json.load(open(sys.argv[3] if len(sys.argv) > 3 else os.path.expanduser("~/sniper-data/overnight/sel/cohort_train.json"))))
 CK = open(os.path.expanduser(os.environ.get("RPC_URL_FILE", "~/.config/sniper/ck_rpc_url"))).read().strip()
 TGT = {a: a[:8] for a in ["HkQ7hMjyoJeaAE1u9dbXMTkqrpXuZPpmtkc2g7QkNExQ", "DYXDDrZCLZVeak72eoPg7DgjYz1sW7tMaLY8PusDymQw",
                           "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"]}       # src/dip_imit.rs TARGETS

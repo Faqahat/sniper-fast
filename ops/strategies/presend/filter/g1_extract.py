@@ -3,7 +3,7 @@
 failed txs that touch a mint of interest (any mint the pre-send detector armed / skipped / shadow-armed in any studied run), plus a
 per-signer count of failed pump txs (all mints). Recording: collector runs 10-24 -> 10-27 (24/7 raw recording, keeper copy).
 HOLDOUT GUARD: nothing at or after block time CAP (10-27 06:20 PKT) is read: AMS run 26 starts 06:59 PKT and is never touched.
-Output per raw chunk: /home/moiz/sniper-data/presend_filter/g1/<run>__<chunk>.npz (+ .json with the failed-signer counts).
+Output per raw chunk: /home/it/sniper-data/presend_filter/g1/<run>__<chunk>.npz (+ .json with the failed-signer counts).
 usage: g1_extract.py [procs]
 DISK: writes ~35 GB of per-chunk npz files (unicode arrays); run g2_build.py + g2b_fails.py right after, then delete g1/ (done 10-27)."""
 import sys, os, re, gzip, json, glob, base64, struct, time, collections
@@ -12,9 +12,9 @@ from multiprocessing import Pool
 
 CAP = 1793064600            # 10-27 06:20 PKT (unix s). AMS r26 = 06:59 PKT onward: never read.
 RUNS = ["run_20261024_1425", "run_20261025_1420", "run_20261026_1415"]
-REC = "/home/moiz/sniper-data/collect"
-OUT = "/home/moiz/sniper-data/presend_filter/g1"
-LIVE = "/home/moiz/sniper-data/presend_filter/live"
+REC = "/data/tapes/collect"
+OUT = "/home/it/sniper-data/presend_filter/g1"
+LIVE = "/home/it/sniper-data/presend_filter/live"
 DISC = bytes.fromhex("bddb7fd34ee661ee"); CPI = bytes.fromhex("e445a52e51cb9a1d")
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 STD = {"11111111111111111111111111111111", "ComputeBudget111111111111111111111111111111", PUMP, "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",

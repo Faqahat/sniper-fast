@@ -6,7 +6,7 @@ FRA r1-r26; first valued crossing per window). The f4 selector (same chosen cap 
 Also a full re-selection: thresholds re-chosen on d-1 under PF_b (models unchanged). Out: f9.txt"""
 import sys, time, pickle, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/haqq_dissect/follow")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/haqq_dissect/follow")
 import flib as FL
 import dv8lib as L
 from f4_wf import load, account, boot_mint, CI_FIT, QS
@@ -26,7 +26,7 @@ def live_rows(CV):
     cvm = np.asarray(R["mint"])[CV["row"]].astype(np.int64); cvs = np.asarray(R["slot"])[CV["row"]].astype(np.int64)
     by = collections.defaultdict(list)
     for i, m in enumerate(cvm.tolist()): by[m].append(i)
-    Gd = pickle.load(open("/home/moiz/sniper-data/haqq_dissect/gap/g2_engine.pkl", "rb"))
+    Gd = pickle.load(open("/home/it/sniper-data/haqq_dissect/gap/g2_engine.pkl", "rb"))
     rows = []
     for run, Xr in Gd.items():
         if not Xr.get("ps_live"): continue

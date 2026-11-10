@@ -1,11 +1,11 @@
 # same-slot landing share of each wallet's buy attempts (ok + failed) by the dump-slot leader's location / client.
 # attempts = buy-intent txs (ok buys + failed buy/unk txs) landing <= 5 slots after a >=1 SOL sell by another wallet.
 import json, gzip, collections, sys, bisect
-B = "/home/moiz/sniper/ops/agents/topearners/work/"
+B = "/home/it/sniper/ops/agents/topearners/work/"
 TOP = [l.strip() for l in open(B + sys.argv[1]) if l.strip()]
-LB = json.load(open("/home/moiz/sniper/ops/overnight/dipshadow/leaders_book.json")); LEAD = LB["leaders"]; NODES = LB["nodes"]
-geo = {r["pk"]: r for r in json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/leader_geo.json"))["rows"]}
-rtt2 = json.load(open("/home/moiz/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
+LB = json.load(open("/home/it/sniper-data/overnight/dipshadow/leaders_book.json")); LEAD = LB["leaders"]; NODES = LB["nodes"]
+geo = {r["pk"]: r for r in json.load(open("/home/it/sniper/ops/dip/speed/leaders/leader_geo.json"))["rows"]}
+rtt2 = json.load(open("/home/it/sniper/ops/dip/speed/leaders/leader_rtt_new.json"))["leaders"]
 def region(pk):
     g = geo.get(pk)
     if not g: return "?"

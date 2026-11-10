@@ -4,7 +4,7 @@ Control: the same test with codes shuffled within each mint."""
 import json, glob, collections, random
 H = "haqqiUUXB5gp7gDbSjpEkw3phAjQb25r86uXJsZQgWq"
 ev = collections.defaultdict(list)
-for f in glob.glob("/home/moiz/sniper-data/haqq_dissect/exec/ext/*.jsonl"):
+for f in glob.glob("/home/it/sniper-data/haqq_dissect/exec/ext/*.jsonl"):
     for l in open(f):
         if H not in l: continue
         try: d = json.loads(l)

@@ -10,9 +10,9 @@
 # -> patterns/bots_verified.json
 import sys, json, collections
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/patterns")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/patterns")
 import p4_eval as E
-PO = "/home/moiz/sniper-data/strategies/patterns"
+PO = "/home/it/sniper-data/strategies/patterns"
 ONLINE_MS = 900_000
 
 def prep(d):

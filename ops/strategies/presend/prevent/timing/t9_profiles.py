@@ -6,9 +6,9 @@ Groups: main in-hold seller of the 146 big losses; every visible holder (>= 2%) 
 Also: the r38 six losses with the online flags (signing-time hazard, landing-time hazard) of each seller."""
 import pickle, json, collections, sys
 import numpy as np
-sys.path.insert(0, "/home/moiz/sniper/ops/strategies/presend/prevent/timing")
+sys.path.insert(0, "/home/it/sniper/ops/strategies/presend/prevent/timing")
 import tlib as T
-D = "/home/moiz/sniper-data/prevent/timing"
+D = "/home/it/sniper-data/prevent/timing"
 FC = pickle.load(open(f"{D}/fillctx.pkl", "rb")); R = pickle.load(open(f"{D}/pairs.pkl", "rb"))
 P = T.P; Sx = np.load(f"{D}/sells.npy")
 o = np.argsort(Sx["u"], kind="stable"); Sx = Sx[o]; SB = np.searchsorted(Sx["u"], np.arange(len(T.I["user"]) + 1))

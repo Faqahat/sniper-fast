@@ -2,7 +2,7 @@
 """VM1 independent check, step 6: per-dump expected trade values for every landing row (all eligible dumps, 0.3 SOL).
 Rows: L-live (block-clock delays of our live buys r10+, paired with live hold-5/6 sell landings), F40/F80/F150
 (fixed txs after the dump, spill-aware, live sell landings), CLAIM (the copy's rule: +80 txs never leaving the dump's
-slot, exit at the end of dump slot + 6; one deterministic sample). Writes /home/moiz/sniper-data/vm1/expect.npz"""
+slot, exit at the end of dump slot + 6; one deterministic sample). Writes /home/it/sniper-data/vm1/expect.npz"""
 import json, sys, time
 import numpy as np
 import core, sim
