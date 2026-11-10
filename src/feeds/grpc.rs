@@ -367,6 +367,14 @@ pub fn tok_bals(m: &PbMeta, pb: &PbTransaction, lw: &[Vec<u8>], lr: &[Vec<u8>]) 
         let Some(amount) = b.ui_token_amount.as_ref().and_then(|u| u.amount.parse::<u64>().ok()) else { continue };
         v.push(crate::feeds::TokBal { mint, owner, acct: key(b.account_index as usize), amount });
     }
+    // 11-10 fix (r76): an account CLOSED in the tx (a full sell + close) is in pre_token_balances but not in post_token_balances: without this
+    // the book kept the seller's old balance, so the guard put a floor on a wallet that had already sold out and every guarded try aborted
+    // ("0% held"). Such an account is booked at 0.
+    for b in &m.pre_token_balances {
+        if b.mint == WSOL || m.post_token_balances.iter().any(|p| p.account_index == b.account_index) { continue; }
+        let (Some(mint), Some(owner)) = (hash32(&b.mint), hash32(&b.owner)) else { continue };
+        v.push(crate::feeds::TokBal { mint, owner, acct: key(b.account_index as usize), amount: 0 });
+    }
     v
 }
 
@@ -672,6 +680,21 @@ pub async fn accounts_once(url: &str, token: Option<&str>, mut list: tokio::sync
 
 #[cfg(test)]
 mod tests {
+    /// 11-10 fix (r76): an account closed in the tx (pre balance, no post balance) is booked at 0; accounts still open keep their post amount
+    #[test]
+    fn tok_bals_books_closed_accounts_at_zero() {
+        let mint = bs58::encode([5u8; 32]).into_string();
+        let (o1, o2) = (bs58::encode([1u8; 32]).into_string(), bs58::encode([2u8; 32]).into_string());
+        let tb = |i: u32, o: &str, a: &str| PbTokenBalance { account_index: i, mint: mint.clone(), owner: o.into(),
+            ui_token_amount: Some(PbUiAmount { decimals: 6, amount: a.into() }), program_id: String::new() };
+        let m = PbMeta { pre_token_balances: vec![tb(1, &o1, "900"), tb(2, &o2, "500")], post_token_balances: vec![tb(2, &o2, "700")], ..Default::default() };
+        let pb = PbTransaction { signatures: vec![], message: Some(PbMessage { account_keys: vec![vec![9u8; 32], vec![11u8; 32], vec![12u8; 32]], ..Default::default() }) };
+        let v = tok_bals(&m, &pb, &[], &[]);
+        assert_eq!(v.len(), 2);
+        assert!(v.iter().any(|b| b.owner == [2u8; 32] && b.amount == 700 && b.acct == [12u8; 32]), "open account: its post amount");
+        assert!(v.iter().any(|b| b.owner == [1u8; 32] && b.amount == 0 && b.acct == [11u8; 32]), "closed account: booked at 0");
+    }
+
     use super::*;
     use crate::feeds::fixture::{self, first_field, k, sig, Proto};
     use prost::Message as _;
