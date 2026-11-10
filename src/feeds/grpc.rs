@@ -353,6 +353,23 @@ fn note_lag(c: &FeedCounters, created: Option<&PbTimestamp>, t: u64) {
     }
 }
 
+/// dip43 A3: a tx's post_token_balances as (mint, owner, account, raw amount); WSOL entries and unparsable ones left out; the account from
+/// the tx's keys (static, then the loaded writable and readonly ones; unknown: all zero)
+pub fn tok_bals(m: &PbMeta, pb: &PbTransaction, lw: &[Vec<u8>], lr: &[Vec<u8>]) -> Vec<crate::feeds::TokBal> {
+    const WSOL: &str = "So11111111111111111111111111111111111111112";
+    let keys: &[Vec<u8>] = pb.message.as_ref().map_or(&[], |x| &x.account_keys[..]);
+    let key = |i: usize| -> Pk { keys.get(i).or_else(|| lw.get(i.wrapping_sub(keys.len()))).or_else(|| lr.get(i.wrapping_sub(keys.len() + lw.len())))
+        .and_then(|k| <[u8; 32]>::try_from(k.as_slice()).ok()).unwrap_or_default() };
+    let mut v = Vec::with_capacity(m.post_token_balances.len());
+    for b in &m.post_token_balances {
+        if b.mint == WSOL { continue; }
+        let (Some(mint), Some(owner)) = (hash32(&b.mint), hash32(&b.owner)) else { continue };
+        let Some(amount) = b.ui_token_amount.as_ref().and_then(|u| u.amount.parse::<u64>().ok()) else { continue };
+        v.push(crate::feeds::TokBal { mint, owner, acct: key(b.account_index as usize), amount });
+    }
+    v
+}
+
 /// One executed transaction from a transaction stream: its exec.jsonl v2 record (src/rec/exec.rs, built and written on
 /// the recorder's chain writer; once per (signature, slot): `recent`) and the item to forward. `roles`: the watched
 /// accounts (exec `watched`, `pools`)
@@ -386,6 +403,8 @@ pub fn tx_stream_item(u: UpdateTx, t: u64, rec: &crate::rec::Rec, roles: Option<
         let creates = crate::dip::create_events(&m.log_messages);
         if trades.is_empty() && creates.is_empty() { return None; }
         let mayhem = !creates.is_empty() && crate::dip::logs_have_mayhem(&m.log_messages);
+        // dip43 A3 (off unless snipe_engine --presend-live-tbal on): the tx's post token balances for the true-balance book (side channel)
+        if crate::feeds::TBAL_ON.get().is_some() { crate::feeds::tbal_note(&info.signature, tok_bals(m, &pb, &lw, &lr)); }
         Some(Arc::new(crate::feeds::ExecInfo { index: info.index, fee: m.fee, ok, trades, creates, mayhem }))
     });
     if let Some(meta) = meta.filter(|_| recent.first(&info.signature, u.slot)) {

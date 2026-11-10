@@ -98,16 +98,20 @@ impl Default for WdCfg { fn default() -> WdCfg { WdCfg { n: 3, score: 0.8, win: 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct QfCfg { pub n: u32, pub score: f64, pub win: u64 }
 
-/// --presend-live-qf2-filters SOLMIN:SOLMAX:CURVEMIN:CURVEMAX:AGEMAX (SOL, SOL, vSOL, vSOL, slots)
+/// --presend-live-qf2-filters SOLMIN:SOLMAX:CURVEMIN:CURVEMAX:AGEMAX[:AGEMIN] (SOL, SOL, vSOL, vSOL, slots, slots). dip43 A10: AGEMIN (default 0 =
+/// dip42; the control file's "qf2_min_age" sets it at run time)
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct QfFilt { pub sol: (f64, f64), pub curve: (f64, f64), pub age_max: u64 }
-impl Default for QfFilt { fn default() -> QfFilt { QfFilt { sol: (2.0, 8.0), curve: (36.0, 70.0), age_max: 300 } } }
+pub struct QfFilt { pub sol: (f64, f64), pub curve: (f64, f64), pub age_max: u64, pub age_min: u64 }
+impl Default for QfFilt { fn default() -> QfFilt { QfFilt { sol: (2.0, 8.0), curve: (36.0, 70.0), age_max: 300, age_min: 0 } } }
 impl QfFilt {
-    pub fn spec(&self) -> String { format!("{}:{}:{}:{}:{}", self.sol.0, self.sol.1, self.curve.0, self.curve.1, self.age_max) }
+    pub fn spec(&self) -> String {
+        let s = format!("{}:{}:{}:{}:{}", self.sol.0, self.sol.1, self.curve.0, self.curve.1, self.age_max);
+        if self.age_min > 0 { format!("{s}:{}", self.age_min) } else { s }
+    }
     /// (sol ok, curve ok, age ok) of a trigger: its SOL in, the curve after it (lamports), its age
     pub fn check(&self, sol: u64, vsol: u64, age: u64) -> (bool, bool, bool) {
         let (s, v) = (sol as f64 / 1e9, vsol as f64 / 1e9);
-        (s >= self.sol.0 && s <= self.sol.1, v >= self.curve.0 && v <= self.curve.1, age <= self.age_max)
+        (s >= self.sol.0 && s <= self.sol.1, v >= self.curve.0 && v <= self.curve.1, age <= self.age_max && age >= self.age_min)
     }
 }
 
@@ -143,13 +147,14 @@ pub fn qf_parse(s: &str) -> Result<QfCfg> {
 
 /// SOLMIN:SOLMAX:CURVEMIN:CURVEMAX:AGEMAX
 pub fn qf_filt_parse(s: &str) -> Result<QfFilt> {
-    let bad = || anyhow::anyhow!("--presend-live-qf2-filters SOLMIN:SOLMAX:CURVEMIN:CURVEMAX:AGEMAX (SOL, SOL, vSOL, vSOL, slots; min <= max), e.g. 2:8:36:70:300; got '{s}'");
+    let bad = || anyhow::anyhow!("--presend-live-qf2-filters SOLMIN:SOLMAX:CURVEMIN:CURVEMAX:AGEMAX[:AGEMIN] (SOL, SOL, vSOL, vSOL, slots, slots; min <= max), e.g. 2:8:36:70:300; got '{s}'");
     let v: Vec<&str> = s.split(':').map(|x| x.trim()).collect();
-    if v.len() != 5 { return Err(bad()); }
+    if v.len() != 5 && v.len() != 6 { return Err(bad()); }
+    let age_min: u64 = if v.len() == 6 { v[5].parse().map_err(|_| bad())? } else { 0 };
     let f: Vec<f64> = v[..4].iter().map(|x| x.parse::<f64>().ok().filter(|y| y.is_finite() && *y >= 0.0)).collect::<Option<Vec<f64>>>().ok_or_else(bad)?;
     let age: u64 = v[4].parse().map_err(|_| bad())?;
-    if f[0] > f[1] || f[2] > f[3] { return Err(bad()); }
-    Ok(QfFilt { sol: (f[0], f[1]), curve: (f[2], f[3]), age_max: age })
+    if f[0] > f[1] || f[2] > f[3] || age_min > age { return Err(bad()); }
+    Ok(QfFilt { sol: (f[0], f[1]), curve: (f[2], f[3]), age_max: age, age_min })
 }
 
 /// a mode flag's value: log|live -> live
@@ -333,6 +338,8 @@ pub struct Wd {
     pub filt: QfFilt,
     /// the windows' size (lamports)
     pub size: u64,
+    /// dip43 A9: QF2 windows' own size (the control file's "qf2_size"; None = `size`)
+    pub qf_size: Option<u64>,
     pub state: Option<String>,
     saved: u64,
     /// the start's state load: Some(wallets) / the error
@@ -349,7 +356,7 @@ pub struct Eval { pub kind: Kind, pub v: WdV, pub pass: bool, pub filt: Option<(
 impl Wd {
     pub fn open(wd: WdCfg, wd_live: bool, qf: Option<QfCfg>, filt: QfFilt, qf_live: bool, size: u64, state: Option<&str>) -> Wd {
         let rule = Rule { win: wd.win, frac_pm: (wd.frac * 1000.0).round() as u64, qwin: qf.map_or(10, |q| q.win) };
-        let mut w = Wd { led: Ledger::new(rule), wide: Var::new(Kind::Wide, wd.n, wd.score, wd_live), qf: qf.map(|q| Var::new(Kind::Qf2, q.n, q.score, qf_live)), filt, size,
+        let mut w = Wd { led: Ledger::new(rule), wide: Var::new(Kind::Wide, wd.n, wd.score, wd_live), qf: qf.map(|q| Var::new(Kind::Qf2, q.n, q.score, qf_live)), filt, size, qf_size: None,
             state: state.map(|s| s.to_string()), saved: 0, loaded: None, err: None, used_pruned: 0, wins: FxHashMap::default() };
         if let Some(p) = state {
             match std::fs::read(p) {
@@ -360,6 +367,8 @@ impl Wd {
         }
         w
     }
+    /// dip43: a variant's window size (QF2: its own when the control file set one)
+    pub fn size_of(&self, k: Kind) -> u64 { if k == Kind::Qf2 { self.qf_size.unwrap_or(self.size) } else { self.size } }
     pub fn var(&self, k: Kind) -> Option<&Var> { match k { Kind::Wide => Some(&self.wide), Kind::Qf2 => self.qf.as_ref() } }
     pub fn var_mut(&mut self, k: Kind) -> Option<&mut Var> { match k { Kind::Wide => Some(&mut self.wide), Kind::Qf2 => self.qf.as_mut() } }
     /// a trigger by one variant (`t2`: a T2 trigger: QF2 annotates only); would-arm marks its token used and counts
@@ -448,6 +457,8 @@ impl PsLive {
             "n": e.v.n, "score": e.v.json(e.kind)["score"], "pass": e.pass, "first": e.first, "would_arm": e.would, "mode": mode_str(live), "size": w.size});
         match e.kind { Kind::Wide => { r["d"] = e.v.d.into(); } Kind::Qf2 => { r["q"] = e.v.q.into(); } }
         if let Some((s, c, a)) = e.filt { r["filt"] = serde_json::json!({"sol": s, "curve": c, "age": a}); }
+        // dip43 A10 (verifier 11-10; --presend-live-shadows43 on): both QF2 age verdicts (age >= 10 and every age past AGEMIN)
+        if self.cfg.c43.shadows && e.kind == Kind::Qf2 { r["age43"] = serde_json::json!({"age": age, "ge10": age >= 10, "min": w.filt.age_min, "would_arm_ge10": e.would && age >= 10}); }
         if t2 { r["t2"] = true.into(); }
         if let Some(j) = self.bd_json(&t.mint, t.s) { r["botdepth"] = j; }
         r

@@ -374,6 +374,31 @@ pub fn own_fail_note(sig: &[u8], payer: Option<&[u8]>, slot: u64, index: u64, fe
 /// the recorded failure of `sig` (taken: a second call gets None)
 pub fn own_fail_take(sig: &[u8; 64]) -> Option<OwnFail> { OWN_FAIL.lock().unwrap_or_else(|e| e.into_inner()).0.remove(sig) }
 
+/// dip43 A3 TRUE-BALANCE BOOK (snipe_engine --presend-live-tbal on; src/ps43_book.rs): an executed pump tx's post_token_balances (proto tag
+/// 8), by signature: (mint, owner, token account, raw amount) of every non-WSOL entry. OFF until `tbal_on()` (then the executed feed's
+/// thread decodes them for txs with pump events only); bounded like OWN_FAIL (the oldest go past TBAL_MAX); the probe takes them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokBal { pub mint: Pk, pub owner: Pk, pub acct: Pk, pub amount: u64 }
+pub static TBAL_ON: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+type TbalMap = (rustc_hash::FxHashMap<[u8; 64], Vec<TokBal>>, std::collections::VecDeque<[u8; 64]>);
+static TBAL: std::sync::LazyLock<std::sync::Mutex<TbalMap>> = std::sync::LazyLock::new(Default::default);
+pub const TBAL_MAX: usize = 20_000;
+/// turn the decoding on (once per process)
+pub fn tbal_on() { let _ = TBAL_ON.set(()); }
+/// the feed's side: an executed pump tx's balances (nothing unless on)
+pub fn tbal_note(sig: &[u8], v: Vec<TokBal>) {
+    let Ok(s) = <[u8; 64]>::try_from(sig) else { return };
+    let mut g = TBAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (m, order) = &mut *g;
+    if m.insert(s, v).is_none() { order.push_back(s); }
+    while order.len() > TBAL_MAX { if let Some(k) = order.pop_front() { m.remove(&k); } }
+}
+/// the balances of `sig` (taken)
+pub fn tbal_take(sig: &[u8; 64]) -> Option<Vec<TokBal>> {
+    if TBAL_ON.get().is_none() { return None; }
+    TBAL.lock().unwrap_or_else(|e| e.into_inner()).0.remove(sig)
+}
+
 /// dip36 FP-NOBOT (log-only, --presend-fpnb-log on): EVERY failed executed tx whose logs name a Buy* / Sell* instruction ("Program log:
 /// Instruction: <NAME>", the first such NAME in log order wins), any payer and any program, goes to the FP-NOBOT thread with its payer
 /// (account_keys[0]), slot, block index and account keys (static, then the loaded ones): that thread keeps it on the first mint it

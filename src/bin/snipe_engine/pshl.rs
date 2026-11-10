@@ -105,9 +105,11 @@ pub struct HlSt {
     pub live: [bool; 2],
     ctl: Option<(String, Option<std::time::SystemTime>, Instant)>,
     pub ctl_changes: u64, pub ctl_errors: u64,
+    /// dip43 A9: the control file version whose "botdepth": "log" was refused (one record per version)
+    pub bd_refused_noted: Option<std::time::SystemTime>,
 }
 impl Default for HlSt {
-    fn default() -> HlSt { HlSt { keys: FxHashMap::default(), saved: 0, skips: [0; 2], would: [0; 2], live: [true; 2], ctl: None, ctl_changes: 0, ctl_errors: 0 } }
+    fn default() -> HlSt { HlSt { keys: FxHashMap::default(), saved: 0, skips: [0; 2], would: [0; 2], live: [true; 2], ctl: None, ctl_changes: 0, ctl_errors: 0, bd_refused_noted: None } }
 }
 
 impl PsLive {
@@ -179,7 +181,14 @@ impl PsLive {
                 let s1_new = match s1 { Some(live) if self.cfg.s1_log => if live { if self.cfg.s1_live != 0 { self.cfg.s1_live } else { 3 } } else { 0 }, _ => s1_old };
                 // dip39 "botdepth": the bot depth gate live / log (only with the gate on; else ignored)
                 let bd_old = self.sh.bd.live.load(Ordering::SeqCst);
-                let bd_new = match bd { Some(x) if self.cfg.bd.is_some() => x, _ => bd_old };
+                // dip43 A9: "botdepth": "log" is REFUSED (the gate stays live) unless the engine started with --presend-live-botdepth-allow-log
+                let bd_refused = bd == Some(false) && self.cfg.bd.is_some() && !self.cfg.c43.bd_allow_log;
+                let bd_new = match bd { Some(x) if self.cfg.bd.is_some() && !(bd_refused && !x) => x, _ => bd_old };
+                if bd_refused && self.hls.bd_refused_noted != mt {
+                    self.hls.bd_refused_noted = mt;
+                    self.rec(serde_json::json!({"ev": "presend_live_ledger_mode", "ok": true, "botdepth_refused": "log needs --presend-live-botdepth-allow-log: stays live", "path": path, "t": arbx::feeds::clock::now_ns()}));
+                    self.line(format!("  PRESEND LIVE LEDGER control file {path}: \"botdepth\": \"log\" REFUSED (dip43: bot depth is locked to live; start with --presend-live-botdepth-allow-log to allow it)"));
+                }
                 // dip41 "widedumper": the WIDE-DUMPER tier live / log (only with the dumper ledger on; else ignored)
                 let wd_old = self.wd.as_ref().map(|w| w.wide.live);
                 let wd_new = match (wdk, wd_old) { (Some(x), Some(_)) => Some(x), _ => wd_old };
