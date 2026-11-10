@@ -25,6 +25,20 @@ pub const FLAG_HOLDERS: &str = "--presend-live-guard-holders";
 pub const FLAG_AB: &str = "--presend-live-guard-ab";
 pub const FLAG_ALLOWLIST: &str = "--presend-live-guard-allowlist";
 pub const FLAG_MAX_AGE: &str = "--presend-live-guard-max-age-ms";
+/// dip43d (owner 11-11 "Build, hot switch"; bait79 + band42 studies): the CURVE band. D in (0, 1): a try aborts at execution when the curve's
+/// token account holds more than the balance at which the price is D under the try's signing price (price ∝ 1/vtok²). With the band live EVERY
+/// window carries snipe-guard (the A/B's Lighthouse arm: deadline + band, no floors). Hot switch: control key "curve_deep" live | log.
+pub const FLAG_CURVE: &str = "--presend-live-guard-curve-deep";
+/// a pump curve's token account holds its virtual token reserve minus 73,000,000 whole tokens (1e9 supply; 206.9M unsellable + the 279.9M
+/// virtual offset; verified on chain 11-11 on two live tokens: vtok − ata = 73,000,000,000,000 raw)
+pub const PUMP_ATA_OFFSET: u64 = 73_000_000_000_000;
+/// the band's upper bound on the curve token account for a try signed at `vtok`: the account above it = the price more than `d` under the signing price
+pub fn curve_hi(vtok: u64, d: f64) -> u64 { (((vtok as f64) / (1.0 - d).sqrt()).floor().max(0.0) as u64).saturating_sub(PUMP_ATA_OFFSET) }
+
+/// signatures of Lighthouse-arm tries that carried snipe-guard (band live): their guard failures are decoded too (bounded)
+static SG_L: std::sync::Mutex<Option<FxHashSet<[u8; 64]>>> = std::sync::Mutex::new(None);
+pub fn sg_l_note(sig: &[u8; 64]) { let mut g = SG_L.lock().unwrap(); let s = g.get_or_insert_with(FxHashSet::default); if s.len() > 200_000 { s.clear(); } s.insert(*sig); }
+pub fn sg_l_has(sig: &[u8; 64]) -> bool { SG_L.lock().unwrap().as_ref().is_some_and(|s| s.contains(sig)) }
 
 /// the most holder floors one try carries (a 1,232-byte try fits about 8 next to the buy; the builder drops from the tail)
 pub const MAXN: usize = 10;
@@ -49,6 +63,8 @@ pub struct G43 {
     pub allowlist: Option<Pk>,
     /// a true-balance snapshot older than this signs the deadline only
     pub max_age_ms: u64,
+    /// dip43d: the CURVE band's D (None = off)
+    pub curve_deep: Option<f64>,
 }
 
 fn pk_parse(f: &str, s: &str) -> Result<Pk> {
@@ -75,12 +91,12 @@ pub fn holders_parse(s: &str) -> Result<(usize, f64, u8, f64)> {
 impl G43 {
     /// the flags (None = off). `has` / `arg` as Cfg::from_argv's
     pub fn from_flags(has: &dyn Fn(&str) -> bool, arg: &dyn Fn(&str) -> Option<String>) -> Result<Option<G43>> {
-        for f in [FLAG_MODE, FLAG_PROGRAM, FLAG_HOLDERS, FLAG_AB, FLAG_ALLOWLIST, FLAG_MAX_AGE] {
+        for f in [FLAG_MODE, FLAG_PROGRAM, FLAG_HOLDERS, FLAG_AB, FLAG_ALLOWLIST, FLAG_MAX_AGE, FLAG_CURVE] {
             if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); }
         }
         let mode = match arg(FLAG_MODE).as_deref() {
             None | Some("off") => {
-                if let Some(f) = [FLAG_PROGRAM, FLAG_HOLDERS, FLAG_AB, FLAG_ALLOWLIST, FLAG_MAX_AGE].iter().find(|f| has(f)) { bail!("{f} needs {FLAG_MODE} deadline | holders"); }
+                if let Some(f) = [FLAG_PROGRAM, FLAG_HOLDERS, FLAG_AB, FLAG_ALLOWLIST, FLAG_MAX_AGE, FLAG_CURVE].iter().find(|f| has(f)) { bail!("{f} needs {FLAG_MODE} deadline | holders"); }
                 return Ok(None);
             }
             Some("deadline") => Mode::Deadline,
@@ -97,7 +113,11 @@ impl G43 {
         let max_age_ms = match arg(FLAG_MAX_AGE) { Some(s) => s.parse::<u64>().map_err(|_| anyhow::anyhow!("{FLAG_MAX_AGE} {s}: whole milliseconds"))?, None => 2_000 };
         if !(1..=600_000).contains(&max_age_ms) { bail!("{FLAG_MAX_AGE} must be 1..600000 ms"); }
         if has(FLAG_MAX_AGE) && mode != Mode::Holders { bail!("{FLAG_MAX_AGE} needs {FLAG_MODE} holders"); }
-        Ok(Some(G43 { mode, program, n, theta, max_leavers, min_pct, ab, allowlist, max_age_ms }))
+        let curve_deep = match arg(FLAG_CURVE) {
+            None => None,
+            Some(s) => Some(s.parse::<f64>().ok().filter(|d| d.is_finite() && *d >= 0.05 && *d <= 0.9).with_context(|| format!("{FLAG_CURVE} {s}: D in [0.05, 0.9] (0.42 = abort when the price is 42% or more under the try's signing price)"))?),
+        };
+        Ok(Some(G43 { mode, program, n, theta, max_leavers, min_pct, ab, allowlist, max_age_ms, curve_deep }))
     }
 
     /// refused at start: a wallet the program will not accept
@@ -115,8 +135,9 @@ impl G43 {
         let m = match self.mode { Mode::Deadline => "deadline".to_string(),
             Mode::Holders => format!("holders {}:{}:{}:{} (abort when more than {} of the top {} below {:.0}%), max snapshot age {} ms", self.n, self.theta, self.max_leavers, self.min_pct,
                 self.max_leavers, self.n, self.theta * 100.0, self.max_age_ms) };
-        format!("GUARD (dip43 snipe-guard) {m}; program {}; {}{}", b58(&self.program), if self.ab { "A/B by window parity (odd: snipe-guard, even: Lighthouse)" } else { "every window" },
-            self.allowlist.map(|l| format!("; allowlist {}", b58(&l))).unwrap_or_default())
+        format!("GUARD (dip43 snipe-guard) {m}; program {}; {}{}{}", b58(&self.program), if self.ab { "A/B by window parity (odd: snipe-guard, even: Lighthouse)" } else { "every window" },
+            self.allowlist.map(|l| format!("; allowlist {}", b58(&l))).unwrap_or_default(),
+            self.curve_deep.map(|d| format!("; CURVE BAND LIVE (control key curve_deep): a try aborts when the price is >= {:.0}% under its signing price, on EVERY window (the A/B's Lighthouse arm: snipe-guard deadline + band, no floors)", d * 100.0)).unwrap_or_default())
     }
 
     /// does window `id` use the guard? (None = Lighthouse, dip42's)
@@ -132,9 +153,9 @@ impl G43 {
     pub fn shrink(&self, nf: usize) -> usize { let x = nf.saturating_sub(1); if x <= self.max_leavers as usize { 0 } else { x } }
 
     /// the guard instruction (the first `nf` floors of the window's set)
-    pub fn ix(&self, user: Pk, deadline: u64, h: &HSet, nf: usize) -> build::Ix {
+    pub fn ix(&self, user: Pk, deadline: u64, h: &HSet, nf: usize, curve: Option<(Pk, u64)>) -> build::Ix {
         let g = sgc::Guard { deadline: Some(deadline), floors: h.f[..nf.min(h.n as usize)].iter().map(|(a, f, _)| (*a, *f)).collect(),
-            max_viol: if nf > 0 { self.max_leavers } else { 0 }, ..Default::default() };
+            max_viol: if nf > 0 { self.max_leavers } else { 0 }, curve: curve.map(|(a, hi)| (a, 0, hi)), ..Default::default() };
         guard_ix(self.program, &g, user, self.allowlist)
     }
 
@@ -203,7 +224,9 @@ impl PsLive {
 
 /// one try's instructions as the sender builds them
 pub struct GTry { pub ixs: Vec<build::Ix>, pub roles: pl::Roles, /// snipe-guard (false: Lighthouse, dip42's)
-    pub used: bool, pub nf: usize, pub dropped: usize }
+    pub used: bool, pub nf: usize, pub dropped: usize,
+    /// dip43d: a Lighthouse-arm window's try that carried snipe-guard for the band (deadline + band, no floors); the band's upper bound
+    pub l_arm: bool, pub curve_hi: Option<u64> }
 
 /// THE SENDER'S TRY BUILDER (pure; the tests run the same function). `lighthouse(deadline)` = dip42's guard instruction,
 /// `body(guard_ix)` = dip42's attempt around a guard instruction (attempt_ixs + the loaded-data limit). With the guard off (`g` None)
@@ -213,19 +236,27 @@ pub struct GTry { pub ixs: Vec<build::Ix>, pub roles: pl::Roles, /// snipe-guard
 #[allow(clippy::too_many_arguments)]
 pub fn try_ixs(g: Option<&G43>, w_id: u64, h: &HSet, now: u64, user: Pk, deadline: u64, bh: [u8; 32], lighthouse: impl Fn(u64) -> build::Ix,
                body: impl Fn(build::Ix) -> (Vec<build::Ix>, pl::Roles)) -> GTry {
-    let Some(g) = g.filter(|g| g.uses(w_id)) else {
+    try_ixs_c(g, w_id, h, now, user, deadline, bh, None, lighthouse, body)
+}
+/// dip43d: try_ixs with the CURVE band (`curve` = (the curve's token account, upper bound); None = no band, dip43c byte for byte). With the band
+/// the A/B's Lighthouse-arm windows carry snipe-guard too: deadline + band, no floors (`l_arm`).
+#[allow(clippy::too_many_arguments)]
+pub fn try_ixs_c(g: Option<&G43>, w_id: u64, h: &HSet, now: u64, user: Pk, deadline: u64, bh: [u8; 32], curve: Option<(Pk, u64)>, lighthouse: impl Fn(u64) -> build::Ix,
+               body: impl Fn(build::Ix) -> (Vec<build::Ix>, pl::Roles)) -> GTry {
+    let Some(g) = g.filter(|g| g.uses(w_id) || curve.is_some()) else {
         let (ixs, roles) = body(lighthouse(deadline));
-        return GTry { ixs, roles, used: false, nf: 0, dropped: 0 };
+        return GTry { ixs, roles, used: false, nf: 0, dropped: 0, l_arm: false, curve_hi: None };
     };
-    let mut nf = g.n_floors(h, now);
-    let (mut ixs, mut roles) = body(g.ix(user, deadline, h, nf));
+    let l_arm = !g.uses(w_id);
+    let mut nf = if l_arm { 0 } else { g.n_floors(h, now) };
+    let (mut ixs, mut roles) = body(g.ix(user, deadline, h, nf, curve));
     let mut dropped = 0usize;
     while nf > 0 && build::compile_v0(user, &ixs, bh, &[], &[]).is_ok_and(|m| m.bytes.len() + 65 > 1232) {
         nf = g.shrink(nf);
         dropped += 1;
-        (ixs, roles) = body(g.ix(user, deadline, h, nf));
+        (ixs, roles) = body(g.ix(user, deadline, h, nf, curve));
     }
-    GTry { ixs, roles, used: true, nf, dropped }
+    GTry { ixs, roles, used: true, nf, dropped, l_arm, curve_hi: curve.map(|c| c.1) }
 }
 
 /// the guard instruction for any Guard (engine tries, the start-up check, the tests): the wallet first (a signer; it pays the try,
@@ -284,9 +315,11 @@ fn ata_cached(w: &Pk, mint: &Pk) -> Pk {
 
 /// the guard instruction's place in a signed try is index 2 (Roles.guard); a failure there on a snipe-guard try, decoded.
 /// -> (the try's result, the guard_abort field). Nothing changes for a Lighthouse try (guard off, or the A/B's L arm).
-pub fn reclassify(g: Option<&G43>, w: u64, res: String, err: &str) -> (String, Option<serde_json::Value>) {
+pub fn reclassify(g: Option<&G43>, w: u64, res: String, err: &str) -> (String, Option<serde_json::Value>) { reclassify_sg(g, w, false, res, err) }
+/// dip43d: `sg_l` = this Lighthouse-arm try carried snipe-guard (the band): decoded like a guard-arm try
+pub fn reclassify_sg(g: Option<&G43>, w: u64, sg_l: bool, res: String, err: &str) -> (String, Option<serde_json::Value>) {
     let Some(g) = g else { return (res, None) };
-    if !g.uses(w) || res != "deadline" { return (res, None); }
+    if !(g.uses(w) || sg_l) || res != "deadline" { return (res, None); }
     let code = err.split(":custom:0x").nth(1).and_then(|h| u32::from_str_radix(h.trim(), 16).ok());
     match code {
         None => ("guard_other".into(), Some(serde_json::json!({"raw": err}))),

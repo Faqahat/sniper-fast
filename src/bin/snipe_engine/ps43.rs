@@ -141,6 +141,8 @@ pub struct Sh43 {
     pub pause_stall: AtomicBool,
     /// A9 "breaker": "log": a trip is recorded, nothing paused
     pub brk_log: AtomicBool,
+    /// dip43d control key "curve_deep": "log" (true): no CURVE band on the tries (the A/B's Lighthouse arm back on Lighthouse), the bound only recorded
+    pub curve_log: AtomicBool,
     /// A8 on (set at the start)
     pub acct: AtomicBool,
     pub ns: Mutex<FxHashMap<u64, NotSent>>,
@@ -232,7 +234,9 @@ impl G43 {
 /// the dip43 keys of the control file (None = absent: the mode stays)
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ctl43 { pub g: [Option<bool>; 10], pub mint_ledger: Option<bool>, pub stall: Option<bool>, pub deadman: Option<bool>, pub fpnb_t2: Option<bool>,
-    pub fpnb_rearm: Option<bool>, pub fpnb_strict: Option<bool>, pub qf2_size: Option<f64>, pub qf2_min_age: Option<u64>, pub fanout: Option<bool> }
+    pub fpnb_rearm: Option<bool>, pub fpnb_strict: Option<bool>, pub qf2_size: Option<f64>, pub qf2_min_age: Option<u64>, pub fanout: Option<bool>,
+    /// dip43d: the CURVE band live | log
+    pub curve_deep: Option<bool> }
 
 pub fn ctl43_parse(b: &[u8]) -> std::result::Result<Ctl43, String> {
     let v: serde_json::Value = serde_json::from_slice(b).map_err(|e| format!("bad JSON: {e}"))?;
@@ -243,7 +247,7 @@ pub fn ctl43_parse(b: &[u8]) -> std::result::Result<Ctl43, String> {
     let mut c = Ctl43::default();
     for (i, k) in G43::KEYS.iter().enumerate() { c.g[i] = key(k)?; }
     c.mint_ledger = key("mint_ledger")?; c.stall = key("stall")?; c.deadman = key("deadman")?; c.fpnb_t2 = key("fpnb_t2")?; c.fpnb_rearm = key("fpnb_rearm")?;
-    c.fpnb_strict = key("fpnb_strict")?; c.fanout = key("fanout")?;
+    c.fpnb_strict = key("fpnb_strict")?; c.fanout = key("fanout")?; c.curve_deep = key("curve_deep")?;
     c.qf2_size = match v.get("qf2_size") { None | Some(serde_json::Value::Null) => None,
         Some(x) => Some(x.as_f64().filter(|s| s.is_finite() && *s > 0.0 && *s <= 2.0).ok_or_else(|| format!("qf2_size: '{x}' (SOL in (0, 2])"))?) };
     c.qf2_min_age = match v.get("qf2_min_age") { None | Some(serde_json::Value::Null) => None,
@@ -369,6 +373,11 @@ impl PsLive {
         }
         self.sh.g43.brk_log.store(!self.d43.g.breaker, Ordering::SeqCst);
         if let Some(v) = k.stall { if v != self.d43.stall_live { ch.push(("stall".into(), s(self.d43.stall_live), s(v))); self.d43.stall_live = v; if !v { self.sh.g43.pause_stall.store(false, Ordering::SeqCst); } } }
+        // dip43d: the CURVE band (only with --presend-live-guard-curve-deep D)
+        if let Some(v) = k.curve_deep {
+            if self.cfg.g43.as_ref().and_then(|g| g.curve_deep).is_none() { ch.push(("curve_deep_ignored".into(), serde_json::Value::Null, "needs --presend-live-guard-curve-deep D".into())); }
+            else { let old = !self.sh.g43.curve_log.swap(!v, Ordering::SeqCst); if old != v { ch.push(("curve_deep".into(), s(old), s(v))); } }
+        }
         if let Some(v) = k.deadman { if v != self.d43.deadman_live { ch.push(("deadman".into(), s(self.d43.deadman_live), s(v))); self.d43.deadman_live = v; } }
         if let Some(v) = k.mint_ledger {
             if self.cfg.c43.ml.is_none() { ch.push(("mint_ledger_ignored".into(), serde_json::Value::Null, "needs --presend-live-mint-ledger SOL".into())); }

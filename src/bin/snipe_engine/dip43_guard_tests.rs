@@ -221,7 +221,7 @@ fn dip43_guard_holders_floors_size_and_semantics() {
         assert!(n <= 1232, "{n} bytes");
         assert!(gt.dropped > 0 && gt.nf < 10 && gt.nf > 1, "nf {} dropped {}", gt.nf, gt.dropped);
         // one more floor would not have fit
-        let more = { let (mut x, _) = att_ixs_fee(u, &swin(5, h10), 1_234_567, CU_DEFAULT as u32, 1_000, gg.ix(u, DEADLINE, &h10, gt.nf + 1), Some((helius()[1], 5_000_000))); speed16::add_ll(&mut x, Some(13_631_488)); x };
+        let more = { let (mut x, _) = att_ixs_fee(u, &swin(5, h10), 1_234_567, CU_DEFAULT as u32, 1_000, gg.ix(u, DEADLINE, &h10, gt.nf + 1, None), Some((helius()[1], 5_000_000))); speed16::add_ll(&mut x, Some(13_631_488)); x };
         assert!(signed(k, &more).len() > 1232);
         let r = gg.rec(true, &h10, gt.nf, gt.dropped, &gt.ixs[2], now);
         assert_eq!(r["dropped"].as_u64(), Some(gt.dropped as u64));
@@ -355,4 +355,110 @@ fn dip43c_tbal_src_flag() {
     assert!(cfg(&["--presend-live-tbal-src", "largest"]).is_err(), "needs the book");
     assert!(cfg(&["--presend-live-tbal", "on", "--presend-live-fam-log", "--presend-live-tbal-src", "largest"]).unwrap().unwrap().c43.tbal_largest);
     assert!(cfg(&["--presend-live-tbal", "on", "--presend-live-fam-log", "--presend-live-tbal-src", "maybe"]).is_err());
+}
+
+// ---- dip43d: the CURVE band ------------------------------------------------------------------------------------------------------
+/// the bound: a curve token account at exactly curve_hi(vtok, d) means a price (1 − d) × the signing price (constant product, price ∝ 1/vtok²)
+#[test]
+fn dip43d_curve_hi_math() {
+    for &(vsol, vtok) in &[(30_000_000_000u64, 1_073_000_000_000_000u64), (45_000_000_000, 715_333_333_333_333), (80_000_000_000, 402_375_000_000_000)] {
+        for &d in &[0.35, 0.42, 0.5] {
+            let hi = curve_hi(vtok, d);
+            let vtok_hi = hi + PUMP_ATA_OFFSET;
+            let k = vsol as f64 * vtok as f64;
+            let p_sign = vsol as f64 / vtok as f64;
+            let p_hi = (k / vtok_hi as f64) / vtok_hi as f64;
+            assert!(((p_hi / p_sign) - (1.0 - d)).abs() < 1e-6, "d {d}: ratio {}", p_hi / p_sign);
+            assert!(hi > vtok - PUMP_ATA_OFFSET, "the bound is above today's account: a try at the signing price passes");
+        }
+    }
+    assert_eq!(curve_hi(0, 0.42), 0);
+}
+
+/// flag: range, needs a guard mode; banner says so
+#[test]
+fn dip43d_curve_flag() {
+    assert!(g43(&["--presend-live-guard", "deadline"]).curve_deep.is_none());
+    let g = g43(&["--presend-live-guard", "deadline", "--presend-live-guard-curve-deep", "0.42"]);
+    assert_eq!(g.curve_deep, Some(0.42));
+    assert!(g.desc().contains("CURVE BAND LIVE") && g.desc().contains("42%"));
+    for bad in ["0.01", "0.95", "x"] { assert!(cfg(&["--presend-live-guard-program", PROG, "--presend-live-guard", "deadline", "--presend-live-guard-curve-deep", bad]).is_err(), "{bad}"); }
+    assert!(cfg(&["--presend-live-guard-curve-deep", "0.42"]).is_err(), "needs --presend-live-guard deadline | holders");
+}
+
+fn band_body(user: Pk, w: &SWin) -> impl Fn(build::Ix) -> (Vec<build::Ix>, pl::Roles) + '_ {
+    move |gix: build::Ix| att_ixs_fee(user, w, 1_234_567, CU_DEFAULT as u32, 1_000, gix, None)
+}
+/// with the band: the A/B's Lighthouse-arm window carries snipe-guard (deadline + band, no floors); the guard arm carries floors + band;
+/// the band's account is the curve's token account and the bound sits in the data; without the band: try_ixs byte for byte
+#[test]
+fn dip43d_band_on_both_arms() {
+    let g = g43(&["--presend-live-guard", "holders", "--presend-live-guard-ab", "on", "--presend-live-guard-curve-deep", "0.42"]);
+    let user = ams();
+    let now = 10_000_000_000u64;
+    let h = g.hset(&snap(6, Some(5)), &user, &launch().mint, now);
+    let w_g = swin(1, h);
+    let w_l = swin(2, h);
+    let acct = w_l.launch.assoc_bonding_curve;
+    let hi = curve_hi(w_l.vtok, 0.42);
+    // Lighthouse arm + band
+    let t = try_ixs_c(Some(&g), 2, &w_l.g43, now, user, DEADLINE, BH, Some((acct, hi)), |d| guard_ix_enc(LH, d), band_body(user, &w_l));
+    assert!(t.used && t.l_arm && t.nf == 0 && t.curve_hi == Some(hi));
+    assert_eq!(t.ixs[2].program, prog());
+    assert_eq!(t.ixs[2].accounts[1].key, acct, "the curve's token account right after the wallet");
+    assert!(t.ixs[2].data.windows(8).any(|x| x == hi.to_le_bytes()), "the bound in the data");
+    // guard arm + band: floors too
+    let t = try_ixs_c(Some(&g), 1, &w_g.g43, now, user, DEADLINE, BH, Some((acct, hi)), |d| guard_ix_enc(LH, d), band_body(user, &w_g));
+    assert!(t.used && !t.l_arm && t.nf >= 2 && t.curve_hi == Some(hi));
+    assert_eq!(t.ixs[2].accounts[1].key, acct);
+    // no band: try_ixs (dip43c) byte for byte, both arms
+    for (id, w) in [(1u64, &w_g), (2, &w_l)] {
+        let a = try_ixs_c(Some(&g), id, &w.g43, now, user, DEADLINE, BH, None, |d| guard_ix_enc(LH, d), band_body(user, w));
+        let b = try_ixs(Some(&g), id, &w.g43, now, user, DEADLINE, BH, |d| guard_ix_enc(LH, d), band_body(user, w));
+        assert_eq!(a.ixs.iter().map(|i| (i.program, i.data.clone())).collect::<Vec<_>>(), b.ixs.iter().map(|i| (i.program, i.data.clone())).collect::<Vec<_>>());
+        assert_eq!((a.used, a.l_arm, a.curve_hi), (b.used, false, None));
+    }
+    // the Lighthouse arm without the band stays Lighthouse
+    let t = try_ixs_c(Some(&g), 2, &w_l.g43, now, user, DEADLINE, BH, None, |d| guard_ix_enc(LH, d), band_body(user, &w_l));
+    assert!(!t.used && !t.l_arm);
+}
+
+/// a band + 6 floors + the largest tip + the loaded-data limit still fits one packet (floors dropped if not)
+#[test]
+fn dip43d_band_fits_a_packet() {
+    let g = g43(&["--presend-live-guard", "holders", "--presend-live-guard-holders", "10:0.9:1:1.0", "--presend-live-guard-curve-deep", "0.42"]);
+    let key = SigningKey::from_bytes(&[3u8; 32]);
+    let user = key.verifying_key().to_bytes();
+    let now = 10_000_000_000u64;
+    let h = g.hset(&snap(10, Some(5)), &user, &launch().mint, now);
+    let w = swin(1, h);
+    let band = Some((w.launch.assoc_bonding_curve, curve_hi(w.vtok, 0.42)));
+    let t = try_ixs_c(Some(&g), 1, &w.g43, now, user, DEADLINE, BH, band, |d| guard_ix_enc(LH, d), |gix| {
+        let (mut ixs, roles) = att_ixs_fee(user, &w, 1_234_567, CU_DEFAULT as u32, 1_000, gix, Some((helius()[3], 200_000)));
+        speed16::add_ll(&mut ixs, Some(16_777_216));
+        (ixs, roles)
+    });
+    assert!(signed(&key, &t.ixs).len() <= 1232, "{} bytes", signed(&key, &t.ixs).len());
+    assert!(t.curve_hi.is_some(), "the band is never dropped, only floors");
+}
+
+/// a Lighthouse-arm try that carried snipe-guard: its band abort is decoded; a plain Lighthouse try is not
+#[test]
+fn dip43d_reclassify_l_arm() {
+    let g = g43(&["--presend-live-guard", "holders", "--presend-live-guard-ab", "on", "--presend-live-guard-curve-deep", "0.42"]);
+    let code = format!("ix2:custom:0x{:x}", sgl::code(sgl::Fail { kind: sgl::K_CURVE_DEEP, idx: 0, cnt: 0, gap: 3 }));
+    let (r, j) = reclassify_sg(Some(&g), 2, true, "deadline".into(), &code);
+    assert_eq!((r.as_str(), j.unwrap()["kind"].as_str()), ("guard_abort", Some("curve_deep")));
+    assert_eq!(reclassify_sg(Some(&g), 2, false, "deadline".into(), "ix2:custom:0x1771"), ("deadline".to_string(), None));
+    let s = [9u8; 64];
+    assert!(!sg_l_has(&s)); sg_l_note(&s); assert!(sg_l_has(&s));
+}
+
+/// the hot switch: control key "curve_deep" live | log
+#[test]
+fn dip43d_ctl_key() {
+    assert_eq!(ps43::ctl43_parse(br#"{"curve_deep": "log"}"#).unwrap().curve_deep, Some(false));
+    assert_eq!(ps43::ctl43_parse(br#"{"curve_deep": "live"}"#).unwrap().curve_deep, Some(true));
+    assert_eq!(ps43::ctl43_parse(br#"{}"#).unwrap().curve_deep, None);
+    assert!(ps43::ctl43_parse(br#"{"curve_deep": "off"}"#).is_err());
 }

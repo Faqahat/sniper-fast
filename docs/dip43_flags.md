@@ -121,3 +121,13 @@ The engine accepts `--presend-live-max-per-sec 100` already (range 1..200). The 
 No hot control key: the guard changes the signed transaction and needs the start-up simulation; it is switched by restart only.
 Banner: one line `GUARD (dip43 snipe-guard) …` (mode + settings; `off …` without the flag) after the `DIP PRESEND LIVE` line;
 start check line `GUARD verified on chain (simulated): …`.
+
+## dip43d: the CURVE band (owner 11-11 "Build, hot switch"; studies bait79 + band42)
+
+| Flag / key | Values | Default | What it does |
+|---|---|---|---|
+| `--presend-live-guard-curve-deep` | D in [0.05, 0.9] | off | Needs `--presend-live-guard deadline\|holders`. Every try carries snipe-guard's CURVE check: the curve's token account must hold at most `curve_hi = vtok_sign / sqrt(1 − D) − 73,000,000 tokens` (price ∝ 1/vtok²; the curve's account = virtual token reserve − 73M tokens, verified on chain 11-11). A try landing when the price is ≥ D under its own signing price aborts (`res: "guard_abort"`, `guard_abort.kind: "curve_deep"`) and pays its fee like a failed try. With the A/B on, the Lighthouse-arm windows carry snipe-guard too (deadline + band, no floors: `guard.arm "L"`, `mode "deadline"`); the guard arm keeps its floors. `presend_attempt.guard.curve_hi` = the bound carried. |
+| control key `curve_deep` | `live` \| `log` | `live` (with the flag) | Hot switch in the ledger control file (re-read every ~10 s). `log`: no band on the tries (the Lighthouse arm back on Lighthouse, dip43c byte for byte); `guard.curve_would_hi` records the bound. Ignored (recorded) without the flag. |
+
+Evidence (band42, all runs): D 0.42 on every try: taped r65–r79 +1.03 (three deep rugs +1.06); untaped r40–r71 block-only −0.76; total +0.27,
+without the three attacks −0.79 (current regime ≈ −0.25). Insurance against deep rugs; misses shallow (r42) and BujUx-type attacks.

@@ -146,8 +146,8 @@ const DLFLAGS: [&str; 8] = ["--presend-live-dumper-ledger", "--presend-live-dump
 const F2FLAGS: [&str; 3] = ["--presend-live-fam2", "--presend-live-fam2-wallets", "--presend-live-fam2-slots"];
 
 /// dip43 C2 snipe-guard flags (ps43_guard.rs; named here so the start-up flag check knows them)
-const G43FLAGS: [&str; 6] = ["--presend-live-guard", "--presend-live-guard-program", "--presend-live-guard-holders", "--presend-live-guard-ab",
-    "--presend-live-guard-allowlist", "--presend-live-guard-max-age-ms"];
+const G43FLAGS: [&str; 7] = ["--presend-live-guard", "--presend-live-guard-program", "--presend-live-guard-holders", "--presend-live-guard-ab",
+    "--presend-live-guard-allowlist", "--presend-live-guard-max-age-ms", "--presend-live-guard-curve-deep"];
 
 /// dip42 Q1 (the quiet-token fresh-wallet big-buy shadow; LOG ONLY): its flags (each needs --presend-live: the probe's feed hook; the
 /// others need --q1-log on; psq1.rs)
@@ -1389,7 +1389,11 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             // dip43 C2 (ps43_guard::try_ixs): the guard at index 2 = dip42's Lighthouse deadline (guard off / the A/B's Lighthouse arm: exactly the
             // instructions below, nothing else) or snipe-guard (floors dropped from the tail if the try would exceed one packet)
             // dip16 C1 (--loaded-data-limit): the limit LAST (the roles' guard / ATA / buy / tip indices stay dip15's); nothing without it
-            let gt = ps43_guard::try_ixs(sc.cfg.g43.as_ref(), w.id, &w.g43, t0, sc.user, deadline, bh, |d| guard_ix_enc(sc.guard, d), |gix| {
+            // dip43d: the CURVE band (live: on every window's try; "log" by the control key: the bound only recorded; off without the flag)
+            let band = sc.cfg.g43.as_ref().and_then(|g| g.curve_deep).filter(|_| w.launch.assoc_bonding_curve != [0u8; 32] && w.vtok > 0)
+                .map(|d| (w.launch.assoc_bonding_curve, ps43_guard::curve_hi(w.vtok, d)));
+            let band_live = band.filter(|_| !sh.g43.curve_log.load(Ordering::Relaxed));
+            let gt = ps43_guard::try_ixs_c(sc.cfg.g43.as_ref(), w.id, &w.g43, t0, sc.user, deadline, bh, band_live, |d| guard_ix_enc(sc.guard, d), |gix| {
                 let (mut ixs, roles) = att_ixs_fee(sc.user, &w, min_out, cu_limit, cu_price, gix, tip);
                 speed16::add_ll(&mut ixs, speed16::loaded_limit());
                 (ixs, roles)
@@ -1399,6 +1403,8 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             if raw.len() > 1232 { sh.skip("too_big"); warn_once(&out, &mut warned, "size", &format!("{} bytes", raw.len())); continue; }
             if let Err(e) = r.path.check(&raw) { sh.skip("path_check"); warn_once(&out, &mut warned, &r.path.name, &format!("{e:#}")); continue; }
             let mut sig = [0u8; 64]; sig.copy_from_slice(&raw[1..65]);
+            // dip43d: a Lighthouse-arm try carrying snipe-guard (the band): noted before it is registered, so its guard failure is decoded
+            if gt.l_arm { ps43_guard::sg_l_note(&sig); }
             let seq = sh.seq.fetch_add(1, Ordering::Relaxed) + 1;
             let tag = pl::PS_TAG | seq;
             let t_send = arbx::feeds::clock::now_ns();
@@ -1436,7 +1442,13 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             if let Some(p0) = path0 { rec["path_orig"] = p0.into(); }
             if let Some(t) = tier { rec["tier"] = t.json(); }
             // dip43 C2: which guard, floors carried / why none (only with --presend-live-guard deadline | holders)
-            if let Some(g) = sc.cfg.g43.as_ref() { rec["guard"] = g.rec(gt.used, &w.g43, gt.nf, gt.dropped, &gt.ixs[roles.guard.unwrap_or(2) as usize], t0); }
+            if let Some(g) = sc.cfg.g43.as_ref() {
+                let mut j = if gt.l_arm { serde_json::json!({"mode": "deadline", "arm": "L", "n_floors": 0}) }
+                    else { g.rec(gt.used, &w.g43, gt.nf, gt.dropped, &gt.ixs[roles.guard.unwrap_or(2) as usize], t0) };
+                // dip43d: the band's bound on the curve's token account (curve_hi = carried; curve_would_hi = control key "log")
+                match (gt.curve_hi, band) { (Some(hi), _) => { j["curve_hi"] = hi.into(); } (None, Some((_, hi))) => { j["curve_would_hi"] = hi.into(); } _ => {} }
+                rec["guard"] = j;
+            }
             let _ = out.send(Out::Rec(rec));
         }
         // idle: 5 ms steps; armed: 0.5 ms (the pace's resolution)
@@ -2675,7 +2687,7 @@ impl PsLive {
         // dip43 A5 (cascade on): a later try failing ata_exists gets its own set's verdict at its position
         self.land_note43(&a.tx.sig, &att.mint, &res);
         // dip43 C2: a snipe-guard try's failure at the guard, decoded ("deadline" stays; any other kind "guard_abort"; nothing with it off)
-        let (res, _) = ps43_guard::reclassify(self.cfg.g43.as_ref(), att.w, res, &err);
+        let (res, _) = ps43_guard::reclassify_sg(self.cfg.g43.as_ref(), att.w, ps43_guard::sg_l_has(&att.sig), res, &err);
         self.st.fees += fee;
         // dip37: the fee A/B's share (nothing with it off)
         if let (Some(fs), Some(f)) = (self.fab.as_mut(), att.fa.as_ref()) { let c = fs.cell(f); c.fail += 1; c.fail_fee += fee; }
@@ -4203,7 +4215,7 @@ impl PsLive {
         if let Some(f) = &a.fa { f.put(&mut j, a.tip); }
         // dip43 C2: the guard's decoded abort {kind, idx, cnt, gap_bucket, ...} (a snipe-guard try that failed at the guard; nothing with it off)
         if matches!(l.res.as_str(), "deadline" | "guard_abort" | "guard_other") {
-            if let (_, Some(x)) = ps43_guard::reclassify(self.cfg.g43.as_ref(), a.w, "deadline".into(), &l.err) { j["guard_abort"] = x; }
+            if let (_, Some(x)) = ps43_guard::reclassify_sg(self.cfg.g43.as_ref(), a.w, ps43_guard::sg_l_has(&a.sig), "deadline".into(), &l.err) { j["guard_abort"] = x; }
         }
         if l.res == "unseen" { return j; }
         let idx = l.idx.unwrap_or(u32::MAX as u64) as u32;
