@@ -29,6 +29,9 @@ pub const FLAG_MAX_AGE: &str = "--presend-live-guard-max-age-ms";
 /// token account holds more than the balance at which the price is D under the try's signing price (price ∝ 1/vtok²). With the band live EVERY
 /// window carries snipe-guard (the A/B's Lighthouse arm: deadline + band, no floors). Hot switch: control key "curve_deep" live | log.
 pub const FLAG_CURVE: &str = "--presend-live-guard-curve-deep";
+/// dip43f (11-11 r81 replay: holder floors win on T2 windows, +2.81 at 1.0 over r65–r80, FIT and TEST both positive; they LOSE on re-arm
+/// windows, −1.25, FIT and TEST both negative): `t2` = floors on T2 windows only, re-arm windows carry snipe-guard deadline + band, no floors.
+pub const FLAG_FLOOR_KINDS: &str = "--presend-live-guard-floor-kinds";
 /// a pump curve's token account holds its virtual token reserve minus 73,000,000 whole tokens (1e9 supply; 206.9M unsellable + the 279.9M
 /// virtual offset; verified on chain 11-11 on two live tokens: vtok − ata = 73,000,000,000,000 raw)
 pub const PUMP_ATA_OFFSET: u64 = 73_000_000_000_000;
@@ -65,6 +68,8 @@ pub struct G43 {
     pub max_age_ms: u64,
     /// dip43d: the CURVE band's D (None = off)
     pub curve_deep: Option<f64>,
+    /// dip43f: floors on re-arm windows too (default true = dip43e); false with --presend-live-guard-floor-kinds t2
+    pub floor_rearm: bool,
 }
 
 fn pk_parse(f: &str, s: &str) -> Result<Pk> {
@@ -91,12 +96,12 @@ pub fn holders_parse(s: &str) -> Result<(usize, f64, u8, f64)> {
 impl G43 {
     /// the flags (None = off). `has` / `arg` as Cfg::from_argv's
     pub fn from_flags(has: &dyn Fn(&str) -> bool, arg: &dyn Fn(&str) -> Option<String>) -> Result<Option<G43>> {
-        for f in [FLAG_MODE, FLAG_PROGRAM, FLAG_HOLDERS, FLAG_AB, FLAG_ALLOWLIST, FLAG_MAX_AGE, FLAG_CURVE] {
+        for f in [FLAG_MODE, FLAG_PROGRAM, FLAG_HOLDERS, FLAG_AB, FLAG_ALLOWLIST, FLAG_MAX_AGE, FLAG_CURVE, FLAG_FLOOR_KINDS] {
             if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); }
         }
         let mode = match arg(FLAG_MODE).as_deref() {
             None | Some("off") => {
-                if let Some(f) = [FLAG_PROGRAM, FLAG_HOLDERS, FLAG_AB, FLAG_ALLOWLIST, FLAG_MAX_AGE, FLAG_CURVE].iter().find(|f| has(f)) { bail!("{f} needs {FLAG_MODE} deadline | holders"); }
+                if let Some(f) = [FLAG_PROGRAM, FLAG_HOLDERS, FLAG_AB, FLAG_ALLOWLIST, FLAG_MAX_AGE, FLAG_CURVE, FLAG_FLOOR_KINDS].iter().find(|f| has(f)) { bail!("{f} needs {FLAG_MODE} deadline | holders"); }
                 return Ok(None);
             }
             Some("deadline") => Mode::Deadline,
@@ -117,7 +122,9 @@ impl G43 {
             None => None,
             Some(s) => Some(s.parse::<f64>().ok().filter(|d| d.is_finite() && *d >= 0.05 && *d <= 0.9).with_context(|| format!("{FLAG_CURVE} {s}: D in [0.05, 0.9] (0.42 = abort when the price is 42% or more under the try's signing price)"))?),
         };
-        Ok(Some(G43 { mode, program, n, theta, max_leavers, min_pct, ab, allowlist, max_age_ms, curve_deep }))
+        let floor_rearm = match arg(FLAG_FLOOR_KINDS).as_deref() { None | Some("all") => true, Some("t2") => false, Some(x) => bail!("{FLAG_FLOOR_KINDS} {x}: all | t2") };
+        if has(FLAG_FLOOR_KINDS) && mode != Mode::Holders { bail!("{FLAG_FLOOR_KINDS} needs {FLAG_MODE} holders"); }
+        Ok(Some(G43 { mode, program, n, theta, max_leavers, min_pct, ab, allowlist, max_age_ms, curve_deep, floor_rearm }))
     }
 
     /// refused at start: a wallet the program will not accept
@@ -135,7 +142,8 @@ impl G43 {
         let m = match self.mode { Mode::Deadline => "deadline".to_string(),
             Mode::Holders => format!("holders {}:{}:{}:{} (abort when more than {} of the top {} below {:.0}%), max snapshot age {} ms", self.n, self.theta, self.max_leavers, self.min_pct,
                 self.max_leavers, self.n, self.theta * 100.0, self.max_age_ms) };
-        format!("GUARD (dip43 snipe-guard) {m}; program {}; {}{}{}", b58(&self.program), if self.ab { "A/B by window parity (odd: snipe-guard, even: Lighthouse)" } else { "every window" },
+        format!("GUARD (dip43 snipe-guard) {m}; program {}; {}{}{}{}", b58(&self.program), if self.ab { "A/B by window parity (odd: snipe-guard, even: Lighthouse)" } else { "every window" },
+            if self.floor_rearm { "" } else { "; FLOORS ON T2 WINDOWS ONLY (re-arm windows: snipe-guard deadline + band, no floors)" },
             self.allowlist.map(|l| format!("; allowlist {}", b58(&l))).unwrap_or_default(),
             self.curve_deep.map(|d| format!("; CURVE BAND LIVE (control key curve_deep): a try aborts when the price is >= {:.0}% under its signing price, on EVERY window (the A/B's Lighthouse arm: snipe-guard deadline + band, no floors)", d * 100.0)).unwrap_or_default())
     }
@@ -226,7 +234,9 @@ impl PsLive {
 pub struct GTry { pub ixs: Vec<build::Ix>, pub roles: pl::Roles, /// snipe-guard (false: Lighthouse, dip42's)
     pub used: bool, pub nf: usize, pub dropped: usize,
     /// dip43d: a Lighthouse-arm window's try that carried snipe-guard for the band (deadline + band, no floors); the band's upper bound
-    pub l_arm: bool, pub curve_hi: Option<u64> }
+    pub l_arm: bool, pub curve_hi: Option<u64>,
+    /// dip43f: a re-arm window's try with --presend-live-guard-floor-kinds t2 (snipe-guard deadline + band, no floors)
+    pub rearm_nf: bool }
 
 /// THE SENDER'S TRY BUILDER (pure; the tests run the same function). `lighthouse(deadline)` = dip42's guard instruction,
 /// `body(guard_ix)` = dip42's attempt around a guard instruction (attempt_ixs + the loaded-data limit). With the guard off (`g` None)
@@ -243,12 +253,19 @@ pub fn try_ixs(g: Option<&G43>, w_id: u64, h: &HSet, now: u64, user: Pk, deadlin
 #[allow(clippy::too_many_arguments)]
 pub fn try_ixs_c(g: Option<&G43>, w_id: u64, h: &HSet, now: u64, user: Pk, deadline: u64, bh: [u8; 32], curve: Option<(Pk, u64)>, lighthouse: impl Fn(u64) -> build::Ix,
                body: impl Fn(build::Ix) -> (Vec<build::Ix>, pl::Roles)) -> GTry {
+    try_ixs_k(g, w_id, false, h, now, user, deadline, bh, curve, lighthouse, body)
+}
+/// dip43f: try_ixs_c knowing the window's kind; `rearm` with floor_rearm false = no floors (deadline + band). floor_rearm true: try_ixs_c exactly
+#[allow(clippy::too_many_arguments)]
+pub fn try_ixs_k(g: Option<&G43>, w_id: u64, rearm: bool, h: &HSet, now: u64, user: Pk, deadline: u64, bh: [u8; 32], curve: Option<(Pk, u64)>, lighthouse: impl Fn(u64) -> build::Ix,
+               body: impl Fn(build::Ix) -> (Vec<build::Ix>, pl::Roles)) -> GTry {
     let Some(g) = g.filter(|g| g.uses(w_id) || curve.is_some()) else {
         let (ixs, roles) = body(lighthouse(deadline));
-        return GTry { ixs, roles, used: false, nf: 0, dropped: 0, l_arm: false, curve_hi: None };
+        return GTry { ixs, roles, used: false, nf: 0, dropped: 0, l_arm: false, curve_hi: None, rearm_nf: false };
     };
     let l_arm = !g.uses(w_id);
-    let mut nf = if l_arm { 0 } else { g.n_floors(h, now) };
+    let rearm_nf = !l_arm && rearm && !g.floor_rearm;
+    let mut nf = if l_arm || rearm_nf { 0 } else { g.n_floors(h, now) };
     let (mut ixs, mut roles) = body(g.ix(user, deadline, h, nf, curve));
     let mut dropped = 0usize;
     while nf > 0 && build::compile_v0(user, &ixs, bh, &[], &[]).is_ok_and(|m| m.bytes.len() + 65 > 1232) {
@@ -256,7 +273,7 @@ pub fn try_ixs_c(g: Option<&G43>, w_id: u64, h: &HSet, now: u64, user: Pk, deadl
         dropped += 1;
         (ixs, roles) = body(g.ix(user, deadline, h, nf, curve));
     }
-    GTry { ixs, roles, used: true, nf, dropped, l_arm, curve_hi: curve.map(|c| c.1) }
+    GTry { ixs, roles, used: true, nf, dropped, l_arm, curve_hi: curve.map(|c| c.1), rearm_nf }
 }
 
 /// the guard instruction for any Guard (engine tries, the start-up check, the tests): the wallet first (a signer; it pays the try,

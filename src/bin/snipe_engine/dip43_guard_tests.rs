@@ -462,3 +462,37 @@ fn dip43d_ctl_key() {
     assert_eq!(ps43::ctl43_parse(br#"{}"#).unwrap().curve_deep, None);
     assert!(ps43::ctl43_parse(br#"{"curve_deep": "off"}"#).is_err());
 }
+
+/// dip43f --presend-live-guard-floor-kinds t2: a re-arm window's try = snipe-guard deadline + band, no floors; a T2 window keeps its floors;
+/// `all` (the default) = dip43e (floors on both); the flag needs holders mode; the banner says so
+#[test]
+fn dip43f_floor_kinds_t2() {
+    let user = ams();
+    let now = 10_000_000_000u64;
+    let g = g43(&["--presend-live-guard", "holders", "--presend-live-guard-curve-deep", "0.42", "--presend-live-guard-floor-kinds", "t2"]);
+    assert!(!g.floor_rearm && g.desc().contains("FLOORS ON T2 WINDOWS ONLY"));
+    let h = g.hset(&snap(6, Some(5)), &user, &launch().mint, now);
+    let w = swin(1, h);
+    let acct = w.launch.assoc_bonding_curve;
+    let hi = curve_hi(w.vtok, 0.42);
+    let t2 = try_ixs_k(Some(&g), 1, false, &w.g43, now, user, DEADLINE, BH, Some((acct, hi)), |d| guard_ix_enc(LH, d), band_body(user, &w));
+    assert!(t2.used && !t2.rearm_nf && t2.nf >= 2 && t2.curve_hi == Some(hi));
+    let ra = try_ixs_k(Some(&g), 1, true, &w.g43, now, user, DEADLINE, BH, Some((acct, hi)), |d| guard_ix_enc(LH, d), band_body(user, &w));
+    assert!(ra.used && ra.rearm_nf && !ra.l_arm && ra.nf == 0 && ra.curve_hi == Some(hi));
+    assert_eq!(ra.ixs[2].program, prog());
+    assert_eq!(ra.ixs[2].accounts[1].key, acct, "the band still carried");
+    // no band: the re-arm try still goes through snipe-guard (deadline only)
+    let rn = try_ixs_k(Some(&g), 1, true, &w.g43, now, user, DEADLINE, BH, None, |d| guard_ix_enc(LH, d), band_body(user, &w));
+    assert!(rn.used && rn.rearm_nf && rn.nf == 0);
+    // default all: dip43e (re-arm keeps floors; try_ixs_k == try_ixs_c)
+    let g0 = g43(&["--presend-live-guard", "holders", "--presend-live-guard-curve-deep", "0.42"]);
+    assert!(g0.floor_rearm && !g0.desc().contains("T2 WINDOWS ONLY"));
+    let a = try_ixs_k(Some(&g0), 1, true, &w.g43, now, user, DEADLINE, BH, Some((acct, hi)), |d| guard_ix_enc(LH, d), band_body(user, &w));
+    let b = try_ixs_c(Some(&g0), 1, &w.g43, now, user, DEADLINE, BH, Some((acct, hi)), |d| guard_ix_enc(LH, d), band_body(user, &w));
+    assert!(!a.rearm_nf && a.nf == b.nf && a.nf >= 2);
+    assert_eq!(build::compile_v0(user, &a.ixs, BH, &[], &[]).unwrap().bytes, build::compile_v0(user, &b.ixs, BH, &[], &[]).unwrap().bytes);
+    // refusals
+    assert!(cfg(&["--presend-live-guard-program", PROG, "--presend-live-guard", "deadline", "--presend-live-guard-floor-kinds", "t2"]).is_err());
+    assert!(cfg(&["--presend-live-guard-program", PROG, "--presend-live-guard", "holders", "--presend-live-guard-floor-kinds", "rearm"]).is_err());
+    assert!(cfg(&["--presend-live-guard-floor-kinds", "t2"]).is_err());
+}

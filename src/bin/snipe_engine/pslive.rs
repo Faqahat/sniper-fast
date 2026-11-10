@@ -147,8 +147,8 @@ const DLFLAGS: [&str; 8] = ["--presend-live-dumper-ledger", "--presend-live-dump
 const F2FLAGS: [&str; 3] = ["--presend-live-fam2", "--presend-live-fam2-wallets", "--presend-live-fam2-slots"];
 
 /// dip43 C2 snipe-guard flags (ps43_guard.rs; named here so the start-up flag check knows them)
-const G43FLAGS: [&str; 7] = ["--presend-live-guard", "--presend-live-guard-program", "--presend-live-guard-holders", "--presend-live-guard-ab",
-    "--presend-live-guard-allowlist", "--presend-live-guard-max-age-ms", "--presend-live-guard-curve-deep"];
+const G43FLAGS: [&str; 8] = ["--presend-live-guard", "--presend-live-guard-program", "--presend-live-guard-holders", "--presend-live-guard-ab",
+    "--presend-live-guard-allowlist", "--presend-live-guard-max-age-ms", "--presend-live-guard-curve-deep", "--presend-live-guard-floor-kinds"];
 
 /// dip42 Q1 (the quiet-token fresh-wallet big-buy shadow; LOG ONLY): its flags (each needs --presend-live: the probe's feed hook; the
 /// others need --q1-log on; psq1.rs)
@@ -1417,7 +1417,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let band = sc.cfg.g43.as_ref().and_then(|g| g.curve_deep).filter(|_| w.launch.assoc_bonding_curve != [0u8; 32] && w.vtok > 0)
                 .map(|d| (w.launch.assoc_bonding_curve, ps43_guard::curve_hi(w.vtok, d)));
             let band_live = band.filter(|_| !sh.g43.curve_log.load(Ordering::Relaxed));
-            let gt = ps43_guard::try_ixs_c(sc.cfg.g43.as_ref(), w.id, &w.g43, t0, sc.user, deadline, bh, band_live, |d| guard_ix_enc(sc.guard, d), |gix| {
+            let gt = ps43_guard::try_ixs_k(sc.cfg.g43.as_ref(), w.id, w.rearm, &w.g43, t0, sc.user, deadline, bh, band_live, |d| guard_ix_enc(sc.guard, d), |gix| {
                 let (mut ixs, roles) = att_ixs_fee(sc.user, &w, min_out, cu_limit, cu_price, gix, tip);
                 speed16::add_ll(&mut ixs, speed16::loaded_limit());
                 (ixs, roles)
@@ -1468,6 +1468,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             // dip43 C2: which guard, floors carried / why none (only with --presend-live-guard deadline | holders)
             if let Some(g) = sc.cfg.g43.as_ref() {
                 let mut j = if gt.l_arm { serde_json::json!({"mode": "deadline", "arm": "L", "n_floors": 0}) }
+                    else if gt.rearm_nf { serde_json::json!({"mode": "deadline", "arm": "R", "n_floors": 0, "why": "rearm_no_floors"}) }
                     else { g.rec(gt.used, &w.g43, gt.nf, gt.dropped, &gt.ixs[roles.guard.unwrap_or(2) as usize], t0) };
                 // dip43d: the band's bound on the curve's token account (curve_hi = carried; curve_would_hi = control key "log")
                 match (gt.curve_hi, band) { (Some(hi), _) => { j["curve_hi"] = hi.into(); } (None, Some((_, hi))) => { j["curve_would_hi"] = hi.into(); } _ => {} }

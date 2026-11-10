@@ -141,3 +141,12 @@ without the three attacks −0.79 (current regime ≈ −0.25). Insurance agains
 | `--presend-live-wh-kinds` | `all` \| `t2` \| `rearm` | `all` | Needs `--presend-live-wh-loss`. Which window kinds the whale ledger may block: `t2` = the T2 trigger whale only, `rearm` = the re-arm dumper only. The 11-11 grid: re-arm blocking loses at every threshold; T2-only `2:0.3` (sum) blocks 9 fills over r40–r80, +0.52 (wins lost 0.116 vs losses saved 0.637). |
 
 Banner lines: `DIP43E DUMP EXIT: …` and `DIP43E WHALE LEDGER KINDS: …`.
+
+## dip43f: holder floors on T2 windows only (r81 replay, 11-11)
+
+| Flag | Values | Default | What it does |
+|---|---|---|---|
+| `--presend-live-guard-floor-kinds` | `all` \| `t2` | `all` | Needs `--presend-live-guard holders`. `t2`: re-arm windows' tries carry snipe-guard deadline + band (if live), no floors (`presend_attempt.guard`: `arm "R"`, `why "rearm_no_floors"`); T2 windows keep floors. `all` = dip43e. |
+
+Evidence (block-only on real fills r65–r80, 1.0-scaled): floors on T2 windows +2.81 (44 blocked; losses saved 3.77, wins lost 0.96; w/o top 5 +0.96; r65–r72 +2.35, r73+ +0.46).
+Floors on re-arm windows −1.25 (36 blocked; saved 1.39, lost 2.64; r65–r72 −0.41, r73+ −0.85): re-arm holders are the dumpers' co-holders and trim normally.
