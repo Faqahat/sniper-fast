@@ -19,6 +19,7 @@ All flags need `--presend-live` (refused without it, as every `--presend-live-*`
 | `--presend-live-lot2-cu-price-micro` | 1..50,000,000 µL | 500000 (when lots are on) | B3. Lot 2's CU price (a lot 2 fired by a stop uses the run's `--sell-cu-price-micro`). Lot 2 goes on the run's sell path(s) (the "helius-swqos only" variant of EXIT-1 is NOT built). Needs `--presend-live-exit-lots`. |
 | control key `exit_lots` | `off` / `ab` / `live` | the flag's mode (`ab` with `-ab on`, else `live`) | B3, in the `--presend-live-ledger-control` file (re-read every ~10 s, on change). Needs `--presend-live-exit-lots` (else ignored). Every change writes `presend_live_ledger_mode` with `exit_lots` / `was.exit_lots`; a bad value keeps the mode (`ok: false`). Note: the engine refuses `--presend-live-ledger-control` unless a ledger / gate it switches is on (bot depth / whale / holder / dumper ledger); the runs have bot depth on. |
 | `--presend-live-timer-sell-cu-price-micro` | 1..50,000,000 µL | off | B4 cheap timer sells (EXIT-2). `time-limit` / `time-ms` exit sells at this CU price; take-profit, stop-loss, `time-limit-wall`, orphan and follow-up sells unchanged. With lots on, lot 1 of a timer exit uses it (lot 2 uses the lot 2 price). Spec: 500000 (fee 65,000 instead of 605,000 lamports at 120k CU). |
+| `--presend-live-exit-ab` | `ms:N`, N 50..2000 | off | B6 exit-timer A/B (coordinator 11-10, the 10-28 haqq study). Position-id parity: ODD pid sells N ms after its fill (`time-ms`, checked first, as `--presend-live-exit-ms` does), EVEN pid keeps the run's exit (`--presend-live-exit-ms` if set, else the slot limit). TP / SL / slot limit / wall backstop unchanged on both arms; the exact-exit wake-up (`--presend-live-exact-exit`, on by default) follows each position's own timer. `presend_live_exit.exit_ab` = `{arm: "ms"/"base", ms}`. Refused together with `--presend-live-exit-lots-ab on` (both split on pid parity); with B4's A/B (second pid bit) it is orthogonal. |
 | `--presend-live-timer-sell-ab` | `on` / `off` | off | B4. on = A/B on the position id's SECOND bit: `(pid >> 1) & 1 == 0` = cheap, else the run's price (so it never lines up with the lots A/B's parity bit). off = every timer sell cheap. Needs the price flag. |
 
 ### Start banner (printed on every start, on or off)
@@ -29,7 +30,13 @@ DIP43-B B2 FEE TIER: off
 DIP43-B B3 TWO-LOT EXIT: off
 DIP43-B B4 CHEAP TIMER SELLS: off
 DIP43-B B5 WINDOW START: off: +50 ms after the trigger (--presend-live-ms)
+DIP43-B B6 EXIT-TIMER A/B: off
 ```
+
+Not built: **B7 cheap sell recipe** (`--presend-live-sell-recipe nonce-lite`, haqq's one-durable-nonce multi-copy sell). It needs a new
+sell builder (advance-nonce instruction, one copy per lane with its own tip, the nonce value cached and rotated after every sell so the
+first write never waits on RPC) inside `send_sell` / `sell_presend`, i.e. a rewrite of the shared sell send path, not a small flag-gated
+hook; left for a separate build.
 
 (The lines start with `DIP43-B`, not `DIP PRESEND LIVE`, so dipmon's parse of the main start line is untouched.)
 
@@ -42,7 +49,7 @@ The engine accepts `--presend-live-max-per-sec 100` already (range 1..200). The 
   Helius-only routes). The following check that the Helius attempt paths stay ≤ 50/s by themselves stays as it is: with the
   MISSES F7 table Helius carries 8 per slot = 37/s under its 40/s path cap.
 - The flag pass-through `case` must list the new flags, e.g. a line next to the dip37 fee A/B one:
-  `--presend-live-reroute|--presend-live-single-token|--presend-live-skip-clients|--presend-live-fee-tier|--presend-live-start-ms|--presend-live-exit-lots|--presend-live-exit-lots-ab|--presend-live-exit-lots-kinds|--presend-live-lot2-cu-price-micro|--presend-live-timer-sell-cu-price-micro|--presend-live-timer-sell-ab) [ $# -ge 2 ] || die "$1 needs a value"; PSV["$1"]=$2; shift 2;;`
+  `--presend-live-reroute|--presend-live-single-token|--presend-live-skip-clients|--presend-live-fee-tier|--presend-live-start-ms|--presend-live-exit-lots|--presend-live-exit-lots-ab|--presend-live-exit-lots-kinds|--presend-live-lot2-cu-price-micro|--presend-live-timer-sell-cu-price-micro|--presend-live-timer-sell-ab|--presend-live-exit-ab) [ $# -ge 2 ] || die "$1 needs a value"; PSV["$1"]=$2; shift 2;;`
   (and the PSV loop that passes `PSV` entries to the engine must include them, as it does for the dip37 flags).
 - The server's live script is newer than the repo copies; the orchestrator should apply the two changes there (or in the r76
   command wrapper) and check them with a dry run.

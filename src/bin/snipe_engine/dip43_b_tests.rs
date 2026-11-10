@@ -116,7 +116,7 @@ fn dip43b_defaults_off_and_flags_checked() {
     assert_eq!(b.lots, Some(ps43_b::LotsCfg { frac: 0.5, slots: 1, kinds: vec!["t2", "rearm"], mode: ps43_b::LotsMode::Ab, lot2_price: 400_000 }));
     assert_eq!(b.timer_sell, Some(ps43_b::TimerSellCfg { cu_price: 500_000, ab: true }));
     assert!(c.json()["b43"]["exit_lots"]["mode"] == "ab");
-    assert_eq!(b.desc_lines(60, 19, 50.0).len(), 5, "one banner line per item");
+    assert_eq!(b.desc_lines(60, 19, 50.0).len(), 6, "one banner line per item");
     // lots without -ab = every eligible exit; default kinds t2, lot 2 at 500,000
     let l = cfg(&["--presend-live-exit-lots", "0.5:1"]).unwrap().unwrap().b43.lots.unwrap();
     assert_eq!((l.mode, l.kinds.clone(), l.lot2_price), (ps43_b::LotsMode::Live, vec!["t2"], 500_000));
@@ -560,4 +560,45 @@ fn dip43b_exit_rules() {
     assert_eq!(ctl_parse_lots(br#"{"whale": "log"}"#), Ok(None));
     assert_eq!(ctl_parse_lots(br#"{"exit_lots": "ab"}"#), Ok(Some(LotsMode::Ab)));
     assert!(ctl_parse_lots(br#"{"exit_lots": 1}"#).is_err() && ctl_parse_lots(b"nope").is_err());
+}
+
+/// B6 the exit-timer A/B: off = cfg.exit_ms for every position (dip42); on = odd pid an N ms timer, even the run's exit; the arm on
+/// every exit record; refused with the lots A/B (both on pid parity)
+#[test]
+fn dip43b_exit_timer_ab() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    assert_eq!(cfg(&[]).unwrap().unwrap().b43.exit_ab, None);
+    assert_eq!(cfg(&["--presend-live-exit-ab", "ms:200"]).unwrap().unwrap().b43.exit_ab, Some(200));
+    for bad in ["200", "ms:20", "ms:3000", "ms:x"] { assert!(cfg(&["--presend-live-exit-ab", bad]).is_err(), "{bad}"); }
+    assert!(cfg(&["--presend-live-exit-ab", "ms:200", "--presend-live-exit-lots", "0.5:1", "--presend-live-exit-lots-ab", "on"]).is_err());
+    // off: every position's ms timer is the run's (0 here, and 125 with --presend-live-exit-ms 125)
+    let (p, _atx, _orx, mint, _l) = open(&[]);
+    assert_eq!((p.b43_exit_ms(1), p.b43_exit_ms(2), p.next_exit_in()), (0, 0, None));
+    let (p, _atx, _orx, _mint, _l) = open(&["--presend-live-exit-ms", "125"]);
+    assert_eq!((p.b43_exit_ms(1), p.b43_exit_ms(2)), (125, 125));
+    assert!(p.next_exit_in().is_some());
+    let _ = mint;
+    // on: pid 1 (odd) sells after 200 ms inside its fill slot; the record says arm ms
+    let (mut p, _atx, orx, mint, _l) = open(&["--presend-live-exit-ab", "ms:200"]);
+    let _ = p.take_cmds();
+    assert!(p.next_exit_in().is_some_and(|d| d <= Duration::from_millis(200)));
+    p.tick(N, None);
+    assert!(sells(&p.take_cmds()).is_empty(), "not yet");
+    p.pos.get_mut(&mint).unwrap().opened = Instant::now() - Duration::from_millis(210);
+    p.tick(N, None);
+    assert_eq!(sells(&p.take_cmds()), vec![(1, Some(TA), None)], "the ms arm: dip42's sell command");
+    let x = exits(&recs(&orx));
+    assert_eq!((x[0]["why"].as_str(), x[0]["exit_ab"]["arm"].as_str(), x[0]["exit_ab"]["ms"].as_u64()), (Some("time-ms"), Some("ms"), Some(200)));
+    // even pid: the run's slot exit
+    let (mut p, _atx, orx, mint, _l) = open(&["--presend-live-exit-ab", "ms:200"]);
+    let _ = p.take_cmds();
+    p.pos.get_mut(&mint).unwrap().pid = 2;
+    assert_eq!(p.next_exit_in(), None, "even pid: no ms timer");
+    p.pos.get_mut(&mint).unwrap().opened = Instant::now() - Duration::from_millis(500);
+    p.tick(N, None);
+    assert!(sells(&p.take_cmds()).is_empty());
+    p.tick(N + 2, None);
+    assert_eq!(sells(&p.take_cmds()), vec![(1, Some(TA), None)]);
+    let x = exits(&recs(&orx));
+    assert_eq!((x[0]["why"].as_str(), x[0]["exit_ab"]["arm"].as_str()), (Some("time-limit"), Some("base")));
 }

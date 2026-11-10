@@ -151,9 +151,9 @@ const Q1FLAGS: [&str; 11] = ["--q1-log", "--q1-bots", "--q1-fresh-state", "--q1-
     "--q1-gap-slots", "--q1-size-sol", "--q1-fresh-hours"];
 
 /// dip43 BUILDER B (send path + exits; ps43_b.rs): its flags (each needs --presend-live; every one OFF by default = dip42)
-const B43FLAGS: [&str; 11] = ["--presend-live-reroute", "--presend-live-single-token", "--presend-live-skip-clients", "--presend-live-fee-tier", "--presend-live-start-ms",
+const B43FLAGS: [&str; 12] = ["--presend-live-reroute", "--presend-live-single-token", "--presend-live-skip-clients", "--presend-live-fee-tier", "--presend-live-start-ms",
     "--presend-live-exit-lots", "--presend-live-exit-lots-ab", "--presend-live-exit-lots-kinds", "--presend-live-lot2-cu-price-micro", "--presend-live-timer-sell-cu-price-micro",
-    "--presend-live-timer-sell-ab"];
+    "--presend-live-timer-sell-ab", "--presend-live-exit-ab"];
 
 const RFLAGS: [&str; 5] = ["--presend-live-rearm", "--presend-live-rearm-size-sol", "--presend-live-rearm-gap-slots", "--presend-live-rearm-quiet-stop",
     "--presend-live-rearm-r5-skip"];
@@ -3726,9 +3726,9 @@ impl PsLive {
     /// dip34 exact exit: how long until the earliest open position's time-ms exit is due (zero = due now); None = no such exit pending
     /// (no position, the exit is off, or --presend-live-exact-exit off). The engine loop waits at most this long for the feed
     pub fn next_exit_in(&self) -> Option<Duration> {
-        if !self.cfg.exact_exit || self.cfg.exit_ms == 0 { return None; }
-        let ms = Duration::from_millis(self.cfg.exit_ms);
-        self.pos.values().filter(|p| p.exit.is_none()).map(|p| ms.saturating_sub(p.opened.elapsed())).min()
+        // dip43 B6: a position's own ms timer (off: cfg.exit_ms for every position, dip42)
+        if !self.cfg.exact_exit || (self.cfg.exit_ms == 0 && self.cfg.b43.exit_ab.is_none()) { return None; }
+        self.pos.values().filter(|p| p.exit.is_none()).filter_map(|p| { let ms = self.b43_exit_ms(p.pid); (ms > 0).then(|| Duration::from_millis(ms).saturating_sub(p.opened.elapsed())) }).min()
     }
 
     /// the clock: windows end, positions' time exits, attempts never seen, landing records whose tape is complete. `first`: the
@@ -3767,7 +3767,8 @@ impl PsLive {
         if let Some(v) = self.v2.as_mut() { v.sweep(); }
         // positions: time exit at entry slot + exit_slots; the wall-clock backstop (the feed stalled)
         let due: Vec<(Pk, &'static str)> = self.pos.values().filter(|p| p.exit.is_none()).filter_map(|p| {
-            time_exit_due(slot_now, p.land.0, self.cfg.exit_slots, p.opened.elapsed().as_millis() as u64, self.cfg.exit_ms).map(|w| (p.mint, w))
+            // dip43 B6: the position's ms timer (off: cfg.exit_ms, dip42)
+            time_exit_due(slot_now, p.land.0, self.cfg.exit_slots, p.opened.elapsed().as_millis() as u64, self.b43_exit_ms(p.pid)).map(|w| (p.mint, w))
         }).collect();
         for (m, why) in due { self.exit(&m, why, slot_now, f64::NAN, arbx::feeds::clock::now_ns()); }
         // dip43 B3: lot 2 of the lots exits whose slot came; the control file's "exit_lots" (nothing without --presend-live-exit-lots)

@@ -22,6 +22,7 @@ except where a section says otherwise.
 | `lot` | lot 1 of a lots exit | `1` |
 | `tokens` | lot 1 | lot 1's tokens (`floor(T × FRAC)`); dip42 = every token |
 | `tokens_all`, `lot2_tokens`, `lot2_due_slot` | lot 1 | T, T − lot 1, the decision slot + SLOTS |
+| `exit_ab` | `--presend-live-exit-ab ms:N` on (every exit) | `{arm: "ms" (odd pid: the N ms timer) / "base" (even pid: the run's exit), ms: N}` |
 | `timer_sell` | `--presend-live-timer-sell-cu-price-micro` on and a `time-limit` / `time-ms` exit | `{arm: "cheap"/"base", cu_price: N or null, ab}` |
 
 A SECOND `presend_live_exit` is written when lot 2 goes (the dip19 follow-up record does the same for its rounds):
@@ -53,7 +54,7 @@ include BOTH lots' sells (`rounds` = 2 for a lots exit).
 ### `presend_live_b43_start` (new; once at the start, only with a Builder B item on)
 
 The parsed settings: `{reroute, single_token, skip_clients, fee_tier {n, cu_price, clients}, start_ms, exit_lots {frac, slots, kinds,
-mode, lot2_cu_price}, timer_sell {cu_price, ab}, exit_lots_mode}` (the mode after the control file's first read).
+mode, lot2_cu_price}, timer_sell {cu_price, ab}, exit_ab_ms, exit_lots_mode}` (the mode after the control file's first read).
 
 ### `run_start` / `run_end` (existing)
 

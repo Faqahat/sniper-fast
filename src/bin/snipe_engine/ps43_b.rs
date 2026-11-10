@@ -28,6 +28,10 @@
 //                                                   with the lots A/B's parity; off: every timer sell cheap
 //   B5 --presend-live-start-ms N (off = --presend-live-ms, 50)  a T2 window's first try N ms after its trigger (0 = at once); the window's
 //                                                   end slot is NOT moved (dip42's end)
+//   B6 --presend-live-exit-ab ms:N (off)            exit-timer A/B: ODD position ids sell N ms after the fill (time-ms, the existing
+//                                                   --presend-live-exit-ms path), even ones keep the run's exit; presend_live_exit
+//                                                   "exit_ab" {arm ms|base, ms}. Refused with the lots A/B (both on pid parity)
+//   (B7 nonce-lite sell recipe: NOT built, see docs/dip43_flags.md)
 // Records: presend_attempt "path_orig" / "tier"; presend_live_exit "lot", "lots", "timer_sell", "tokens_all", "lot2_tokens",
 // "lot2_due_slot"; a second presend_live_exit (why lot2 / lot2-stop / lot2-wall, "lot": 2) when lot 2 goes; presend_live_lot_sold (lot 1's
 // sell loop answer); presend_live_sell_land "lot"; presend_live_ledger_mode "exit_lots"; run_end presend_live.b43. docs/dip43_records.md
@@ -66,6 +70,8 @@ pub struct B43Cfg {
     pub start_ms: Option<f64>,
     pub lots: Option<LotsCfg>,
     pub timer_sell: Option<TimerSellCfg>,
+    /// B6 --presend-live-exit-ab ms:N: odd position ids use an N ms timer exit (time-ms), even ones the run's own exit; None = off
+    pub exit_ab: Option<u64>,
 }
 
 /// a comma-separated client list (known gossip clientIds or Unknown(N)), no duplicates, not empty
@@ -146,6 +152,16 @@ impl B43Cfg {
                 }
             }
         }
+        // B6: the exit-timer A/B (odd pid: an N ms timer; even: the run's exit)
+        match arg("--presend-live-exit-ab") {
+            Some(x) => {
+                let n = x.strip_prefix("ms:").and_then(|v| v.parse::<u64>().ok()).filter(|n| (50..=2_000).contains(n))
+                    .with_context(|| format!("--presend-live-exit-ab ms:N (N 50..2000 ms: odd positions sell N ms after the fill), got '{x}'"))?;
+                if c.lots.as_ref().is_some_and(|l| l.mode == LotsMode::Ab) { bail!("--presend-live-exit-ab and --presend-live-exit-lots-ab on both split on the position id's parity: run one at a time"); }
+                c.exit_ab = Some(n);
+            }
+            None => if has("--presend-live-exit-ab") { bail!("--presend-live-exit-ab needs a value (e.g. ms:200)"); },
+        }
         match num("--presend-live-timer-sell-cu-price-micro", 1, 50_000_000)? {
             Some(p) => c.timer_sell = Some(TimerSellCfg { cu_price: p, ab: onoff("--presend-live-timer-sell-ab")? }),
             None => if has("--presend-live-timer-sell-ab") { bail!("--presend-live-timer-sell-ab needs --presend-live-timer-sell-cu-price-micro N"); },
@@ -165,7 +181,7 @@ impl B43Cfg {
         serde_json::json!({"reroute": self.reroute, "single_token": self.single_token, "skip_clients": self.skip_clients,
             "fee_tier": self.tier.as_ref().map(|t| serde_json::json!({"n": t.n, "cu_price": t.cu_price, "clients": t.clients})),
             "start_ms": self.start_ms, "exit_lots": self.lots.as_ref().map(|l| serde_json::json!({"frac": l.frac, "slots": l.slots, "kinds": l.kinds, "mode": l.mode.s(), "lot2_cu_price": l.lot2_price})),
-            "timer_sell": self.timer_sell.map(|t| serde_json::json!({"cu_price": t.cu_price, "ab": t.ab}))})
+            "timer_sell": self.timer_sell.map(|t| serde_json::json!({"cu_price": t.cu_price, "ab": t.ab})), "exit_ab_ms": self.exit_ab})
     }
 
     /// the start banner: one line per item (printed also when off, so a dry run shows every setting)
@@ -184,6 +200,8 @@ impl B43Cfg {
                 Some(t) => format!("ON: time-limit / time-ms sells at {} uL{} (TP / SL / wall / orphan sells unchanged)", t.cu_price, if t.ab { " on positions with (pid >> 1) even (A/B; others the run's price)" } else { " on every position" }) }),
             format!("DIP43-B B5 WINDOW START: {}", match self.start_ms { None => format!("off: +{live_ms} ms after the trigger (--presend-live-ms)"),
                 Some(s) => format!("ON: +{s} ms after the trigger (end slot unchanged)") }),
+            format!("DIP43-B B6 EXIT-TIMER A/B: {}", match self.exit_ab { None => "off".to_string(),
+                Some(n) => format!("ON: odd position ids sell {n} ms after the fill (time-ms, first), even ones the run's exit; TP / SL / slot limit unchanged") }),
         ]
     }
 }
@@ -362,6 +380,10 @@ impl PsLive {
     /// the lots exit's mode now
     pub(super) fn b43_mode(&self) -> LotsMode { self.b43.mode.unwrap_or_else(|| self.cfg.b43.lots.as_ref().map_or(LotsMode::Off, |l| l.mode)) }
 
+    /// B6: a position's ms timer (the run's --presend-live-exit-ms; an odd pid's N with --presend-live-exit-ab ms:N). Off: cfg.exit_ms
+    #[inline]
+    pub(super) fn b43_exit_ms(&self, pid: u64) -> u64 { match self.cfg.b43.exit_ab { Some(n) if pid % 2 == 1 => n, _ => self.cfg.exit_ms } }
+
     /// a position's kind for the lots exit
     fn b43_kind(&self, p: &PPos) -> &'static str {
         if p.rearm { "rearm" } else if let Some((k, _)) = self.wd_win(p.w) { k.key() } else { "t2" }
@@ -370,9 +392,11 @@ impl PsLive {
     /// B3 / B4 at an exit decision (exit(): the position's exit is set). false = not ours: the caller runs dip42's sell_round. true = this
     /// exit's sell is started here (lot 1 of a lots exit, or a whole sell at the cheap timer price); `r` = its presend_live_exit record
     pub(super) fn b43_exit(&mut self, mint: &Pk, why: &'static str, slot: u64, r: &mut serde_json::Value) -> bool {
-        if self.cfg.b43.lots.is_none() && self.cfg.b43.timer_sell.is_none() { return false; }
+        if self.cfg.b43.lots.is_none() && self.cfg.b43.timer_sell.is_none() && self.cfg.b43.exit_ab.is_none() { return false; }
         let Some(p) = self.pos.get(mint) else { return false };
         let (pid, round) = (p.pid, p.round);
+        // B6: the exit-timer A/B's arm on every exit record (the sell itself is dip42's unless B3 / B4 act)
+        if let Some(n) = self.cfg.b43.exit_ab { r["exit_ab"] = serde_json::json!({"arm": if pid % 2 == 1 { "ms" } else { "base" }, "ms": n}); }
         // B4: the cheap timer price (this position's arm)
         let cheap = match &self.cfg.b43.timer_sell {
             Some(ts) if timer_reason(why) => {
