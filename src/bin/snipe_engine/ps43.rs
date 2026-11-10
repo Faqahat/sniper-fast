@@ -652,6 +652,8 @@ impl PsLive {
             b.snapshot(req.mint, req.curve, hold, slot, arbx::fast::mono_ns());
             if self.cfg.c43.cascade { if let Some(&id) = self.armed.get(&req.mint) { self.wset43(id, &req.mint); } }
         }
+        // dip43 merge: the guard's holder floors from this snapshot at once (holders mode only)
+        self.g43_refresh(&req.mint);
         let n = self.cfg.c43.fanout? as usize;
         let flag = recv_n >= n;
         self.d43.fan_w.insert(req.w, (recv_n, flag));

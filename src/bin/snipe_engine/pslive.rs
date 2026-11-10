@@ -145,6 +145,10 @@ const DLFLAGS: [&str; 8] = ["--presend-live-dumper-ledger", "--presend-live-dump
 /// --presend-live-fam2 on; psfam2.rs)
 const F2FLAGS: [&str; 3] = ["--presend-live-fam2", "--presend-live-fam2-wallets", "--presend-live-fam2-slots"];
 
+/// dip43 C2 snipe-guard flags (ps43_guard.rs; named here so the start-up flag check knows them)
+const G43FLAGS: [&str; 6] = ["--presend-live-guard", "--presend-live-guard-program", "--presend-live-guard-holders", "--presend-live-guard-ab",
+    "--presend-live-guard-allowlist", "--presend-live-guard-max-age-ms"];
+
 /// dip42 Q1 (the quiet-token fresh-wallet big-buy shadow; LOG ONLY): its flags (each needs --presend-live: the probe's feed hook; the
 /// others need --q1-log on; psq1.rs)
 const Q1FLAGS: [&str; 11] = ["--q1-log", "--q1-bots", "--q1-fresh-state", "--q1-min-sol", "--q1-age-slots", "--q1-bot-slots", "--q1-dip-slots", "--q1-fresh-max",
@@ -225,6 +229,10 @@ pub mod psdl;
 // dip42 FAM2: the 2NUM family's presence on the pre-send windows' records (LOG ONLY; off unless --presend-live-fam2 on)
 #[path = "psfam2.rs"]
 pub mod psfam2;
+
+// dip43 C2 the on-chain guard program snipe-guard on the pre-send tries (DEFAULT OFF = dip42's Lighthouse deadline byte for byte)
+#[path = "ps43_guard.rs"]
+pub mod ps43_guard;
 
 // dip42 Q1: the quiet-token fresh-wallet big-buy reactive trigger as a shadow log (LOG ONLY, its own thread; off unless --q1-log on)
 #[path = "psq1.rs"]
@@ -530,6 +538,8 @@ pub struct Cfg {
     pub c43: ps43::Cfg43,
     /// dip43 BUILDER B's items (ps43_b.rs; Default = all off = dip42)
     pub b43: ps43_b::B43Cfg,
+    /// dip43 C2 snipe-guard (None = off, the default: the Lighthouse deadline as dip42)
+    pub g43: Option<ps43_guard::G43>,
 }
 
 impl Cfg {
@@ -563,7 +573,7 @@ impl Cfg {
         // dip43 B: its flags need --presend-live too
         ps43_b::needs_presend_live(argv)?;
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -697,6 +707,8 @@ impl Cfg {
             c43: ps43::Cfg43::parse(argv)?,
             // dip43 B (every item off unless its flag)
             b43: ps43_b::B43Cfg::from_argv(argv)?,
+            // dip43 C2 (set below)
+            g43: None,
         };
         // dip43: the true balances and the fan-out come from dip35's fam read at the arm (verifier 11-10: the feeds carry no plain transfers)
         if (c.c43.tbal || c.c43.fanout.is_some()) && !c.fam_log { bail!("--presend-live-tbal / --presend-live-cascade / --presend-live-fanout need --presend-live-fam-log (its RPC read at the arm is their source)"); }
@@ -791,6 +803,12 @@ impl Cfg {
         if c.skip2_live != 0 && !c.skip2_log { bail!("--presend-skip2-live needs --presend-skip2-log on (the verdict it acts on)"); }
         if c.fpnb_log && c.fpnb_bots.is_none() { bail!("--presend-fpnb-log on needs --presend-fpnb-bots FILE (the follower-bot list)"); }
         c.check(live, cap)?;
+        // dip43 C2 snipe-guard (off unless --presend-live-guard deadline | holders)
+        c.g43 = ps43_guard::G43::from_flags(&|f| has(f), &|f| arg(f))?;
+        // dip43 merge: the holder floors come only from the true-balance book (A3); without it every try would sign the deadline only
+        if c.g43.as_ref().is_some_and(|g| g.mode == ps43_guard::Mode::Holders) && !c.c43.tbal {
+            bail!("--presend-live-guard holders needs --presend-live-tbal on (and --presend-live-fam-log): the floors come from the true-balance book");
+        }
         Ok(Some(c))
     }
 
@@ -1068,7 +1086,9 @@ struct SWin { id: u64, mint: Pk, launch: Launch, st_ns: u64, stop_ns: u64, en_sl
               /// dip37c the window's largest listed holder >= the blocklist threshold now (wallet, %), kept by the main loop; None: none / off
               blk: Option<(Pk, f32)>,
               /// dip39 the window's copy of its mint's listed traders, kept by the main loop (None: the bot depth gate off / no good list)
-              bd: Option<psbd::Snap> }
+              bd: Option<psbd::Snap>,
+              /// dip43 C2 the window's holder floors (snipe-guard holders mode; empty otherwise), kept by the main loop
+              g43: ps43_guard::HSet }
 
 /// dip28: the deeper limit's holder threshold (% of supply)
 pub const DEEP_OB6: f32 = 6.0;
@@ -1364,12 +1384,18 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let (cu_limit, cu_price, tip, fa) = psfeeab::att_fee(&sc.cfg, w.fab, &client, r.path.tip(0));
             // dip43 B2: the fee tier (off: the values above unchanged)
             let (cu_price, fa, tier) = ps43_b::tier_apply(&sc.cfg.b43, &mut tctr, w.id, slot, &client, cu_price, fa);
-            let (mut ixs, roles) = att_ixs_fee(sc.user, &w, min_out, cu_limit, cu_price, guard_ix_enc(sc.guard, deadline), tip);
-            // dip16 C1 (--loaded-data-limit): the limit LAST (the roles' guard / ATA / buy / tip indices stay dip15's); nothing without it
-            speed16::add_ll(&mut ixs, speed16::loaded_limit());
             let Some((bh, bh_age)) = (*BLOCKHASH_CACHE.lock().unwrap()).map(|(h, t, _)| (h, t.elapsed())) else { sh.skip("no_blockhash"); continue };
             if bh_age > Duration::from_secs(20) { sh.skip("blockhash_old"); continue; }
-            let raw = match build::compile_v0(sc.user, &ixs, bh, &[], &[]) { Ok(m) => build::sign(&m, &sc.key), Err(e) => { sh.skip("build_error"); warn_once(&out, &mut warned, "build", &e); continue; } };
+            // dip43 C2 (ps43_guard::try_ixs): the guard at index 2 = dip42's Lighthouse deadline (guard off / the A/B's Lighthouse arm: exactly the
+            // instructions below, nothing else) or snipe-guard (floors dropped from the tail if the try would exceed one packet)
+            // dip16 C1 (--loaded-data-limit): the limit LAST (the roles' guard / ATA / buy / tip indices stay dip15's); nothing without it
+            let gt = ps43_guard::try_ixs(sc.cfg.g43.as_ref(), w.id, &w.g43, t0, sc.user, deadline, bh, |d| guard_ix_enc(sc.guard, d), |gix| {
+                let (mut ixs, roles) = att_ixs_fee(sc.user, &w, min_out, cu_limit, cu_price, gix, tip);
+                speed16::add_ll(&mut ixs, speed16::loaded_limit());
+                (ixs, roles)
+            });
+            let (ixs, roles) = (&gt.ixs, gt.roles);
+            let raw = match build::compile_v0(sc.user, ixs, bh, &[], &[]) { Ok(m) => build::sign(&m, &sc.key), Err(e) => { sh.skip("build_error"); warn_once(&out, &mut warned, "build", &e); continue; } };
             if raw.len() > 1232 { sh.skip("too_big"); warn_once(&out, &mut warned, "size", &format!("{} bytes", raw.len())); continue; }
             if let Err(e) = r.path.check(&raw) { sh.skip("path_check"); warn_once(&out, &mut warned, &r.path.name, &format!("{e:#}")); continue; }
             let mut sig = [0u8; 64]; sig.copy_from_slice(&raw[1..65]);
@@ -1409,6 +1435,8 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             // dip43 B1 / B2: only when re-routed / with the tier on
             if let Some(p0) = path0 { rec["path_orig"] = p0.into(); }
             if let Some(t) = tier { rec["tier"] = t.json(); }
+            // dip43 C2: which guard, floors carried / why none (only with --presend-live-guard deadline | holders)
+            if let Some(g) = sc.cfg.g43.as_ref() { rec["guard"] = g.rec(gt.used, &w.g43, gt.nf, gt.dropped, &gt.ixs[roles.guard.unwrap_or(2) as usize], t0); }
             let _ = out.send(Out::Rec(rec));
         }
         // idle: 5 ms steps; armed: 0.5 ms (the pace's resolution)
@@ -2454,6 +2482,8 @@ impl PsLive {
         eprintln!("{line}");
         // dip43: one line per Builder A feature (lines of their own, after the start-up line: the monitors parse that one)
         for l in cfg.c43.banner(cfg.fpnb_log) { eprintln!("{l}"); }
+        // dip43 C2: its own line (never starting "DIP PRESEND LIVE"): the guard's mode and settings, "off" by default
+        eprintln!("{}", cfg.g43.as_ref().map_or_else(|| "GUARD (dip43 snipe-guard) off: every try carries the Lighthouse slot deadline (dip42)".to_string(), |g| g.desc()));
         let thread = {
             let (sh, out) = (sh.clone(), out.clone());
             std::thread::Builder::new().name("ps-send".into()).spawn(move || sender(sh, sc, out, atx)).context("ps-send thread")?
@@ -2640,6 +2670,8 @@ impl PsLive {
         let res = if of.is_some() { pl::classify(&err, &att.roles) } else { "failed_unknown".to_string() };
         // dip43 A5 (cascade on): a later try failing ata_exists gets its own set's verdict at its position
         self.land_note43(&a.tx.sig, &att.mint, &res);
+        // dip43 C2: a snipe-guard try's failure at the guard, decoded ("deadline" stays; any other kind "guard_abort"; nothing with it off)
+        let (res, _) = ps43_guard::reclassify(self.cfg.g43.as_ref(), att.w, res, &err);
         self.st.fees += fee;
         // dip37: the fee A/B's share (nothing with it off)
         if let (Some(fs), Some(f)) = (self.fab.as_mut(), att.fa.as_ref()) { let c = fs.cell(f); c.fail += 1; c.fail_fee += fee; }
@@ -2899,7 +2931,9 @@ impl PsLive {
                     let mut g = self.sh.wins.lock().unwrap();
                     // dip30: the landing guard's set as of this trade (the next attempt signs with it)
                     let gs = grd_set(&self.det, self.cfg.ann, &e.mint, &self.user, t.s);
-                    if let Some(w) = g.iter_mut().find(|w| w.id == id) { w.ob6 = o6; w.grd = gs; }
+                    // dip43 C2: the holder floors as of this trade (empty unless the guard's holders mode)
+                    let hs = self.g43_set(&e.mint);
+                    if let Some(w) = g.iter_mut().find(|w| w.id == id) { w.ob6 = o6; w.grd = gs; w.g43 = hs; }
                 }
             }
             // dip26 RE-ARM: this trade for the re-arm (its windows' stops and QUIET count, a new candidate; nothing without it)
@@ -3142,7 +3176,7 @@ impl PsLive {
         let fab = self.fab_assign(id);
         let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
             spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
-            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint) };
+            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint), g43: self.g43_set(&t.mint) };
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
         self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0)).0.push_back(t.clone());
@@ -4151,6 +4185,10 @@ impl PsLive {
         if self.rearm_w(a.w) { j["kind"] = "rearm".into(); }
         // dip37: only with the fee A/B on
         if let Some(f) = &a.fa { f.put(&mut j, a.tip); }
+        // dip43 C2: the guard's decoded abort {kind, idx, cnt, gap_bucket, ...} (a snipe-guard try that failed at the guard; nothing with it off)
+        if matches!(l.res.as_str(), "deadline" | "guard_abort" | "guard_other") {
+            if let (_, Some(x)) = ps43_guard::reclassify(self.cfg.g43.as_ref(), a.w, "deadline".into(), &l.err) { j["guard_abort"] = x; }
+        }
         if l.res == "unseen" { return j; }
         let idx = l.idx.unwrap_or(u32::MAX as u64) as u32;
         let a_ours = arbx::dip_model::arrival(l.slot, idx.min(10_000));
@@ -4785,6 +4823,11 @@ mod dip43a_tests;
 #[cfg(test)]
 #[path = "dip43_b_tests.rs"]
 mod dip43_b_tests;
+
+// dip43 C2 (11-10 PKT): the snipe-guard program on the tries (ps43_guard.rs); off by default = dip42 byte for byte
+#[cfg(test)]
+#[path = "dip43_guard_tests.rs"]
+mod dip43_guard_tests;
 
 #[cfg(test)]
 mod tests {

@@ -1,0 +1,114 @@
+== cluster http://127.0.0.1:18899 payer 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA program Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa cold 4SdjBVP5meSr68iv1Edyww1jxHYrxSrrAKFz7De8ZtJG admin Dv5CR3JZdDrGERcKjab4TP6NtEHCmauKngyoMAFV82zP
+5 SOL
+== info
+so program/snipe-guard/release/snipe_guard.so: 15776 bytes, sha256 eb08c504a51b865f8590fa4aaf097ce8be01d496105f0f3b74134866913e4266
+http://127.0.0.1:18899: locks 0.112146 SOL (programdata 0.111005 + program 0.001141); a temporary buffer of the same size is refunded after the deploy
+== deploy (dry)
+DEPLOY PLAN (http://127.0.0.1:18899)
+  program id         Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa
+  .so                program/snipe-guard/release/snipe_guard.so: 15776 bytes, sha256 eb08c504a51b865f8590fa4aaf097ce8be01d496105f0f3b74134866913e4266
+  payer              7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA (balance 5.000000 SOL; temporary upgrade authority during the deploy)
+  final authority    4SdjBVP5meSr68iv1Edyww1jxHYrxSrrAKFz7De8ZtJG (cold; never needs to be online for this)
+  SOL locked         0.112146 (programdata 0.111005 + program 0.001141) + ~0.0002 fees; a buffer of ~0.1110 is refunded
+  SBPF v3 feature    ACTIVE (account exists) on this cluster
+dry: nothing sent. Re-run with --yes to deploy.
+== deploy
+DEPLOY PLAN (http://127.0.0.1:18899)
+  program id         Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa
+  .so                program/snipe-guard/release/snipe_guard.so: 15776 bytes, sha256 eb08c504a51b865f8590fa4aaf097ce8be01d496105f0f3b74134866913e4266
+  payer              7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA (balance 5.000000 SOL; temporary upgrade authority during the deploy)
+  final authority    4SdjBVP5meSr68iv1Edyww1jxHYrxSrrAKFz7De8ZtJG (cold; never needs to be online for this)
+  SOL locked         0.112146 (programdata 0.111005 + program 0.001141) + ~0.0002 fees; a buffer of ~0.1110 is refunded
+  SBPF v3 feature    ACTIVE (account exists) on this cluster
+=========================================================================
+Recover the intermediate account's ephemeral keypair file with
+`solana-keygen recover` and the following 12-word seed phrase:
+=========================================================================
+[throwaway localnet buffer phrase removed]
+=========================================================================
+To resume a deploy, pass the recovered keypair as the
+[BUFFER_SIGNER] to `solana program deploy` or `solana program write-buffer'.
+Or to recover the account's lamports, use:
+=========================================================================
+solana program close 6eRut4KrLPLGFjyMGxBNgesJR3GGjBD89vzMaazBZ8r2
+=========================================================================
+Program Id: Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa
+Signature: adc4Kj9UB7dtguHjMmubkTE7nhProjpwTYvUQFZc3Bb1jtznTt3ibjXDPPQ9XUW8oMvEby8uqed5SU1LWmausRd
+Account Type: Program
+Authority: 4SdjBVP5meSr68iv1Edyww1jxHYrxSrrAKFz7De8ZtJG
+VERIFY Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa on http://127.0.0.1:18899: programdata 2gJNCThz6WaxjHaHtE7agKJy2skqipyZjG98hTRTvymy (deployed slot 20, 15776 bytes, 0.111005 SOL)
+  build    sha256 eb08c504a51b865f8590fa4aaf097ce8be01d496105f0f3b74134866913e4266 (15776 bytes)
+  on chain sha256 eb08c504a51b865f8590fa4aaf097ce8be01d496105f0f3b74134866913e4266 (first 15776 bytes)
+  upgrade authority 4SdjBVP5meSr68iv1Edyww1jxHYrxSrrAKFz7De8ZtJG
+VERIFY PASS
+DEPLOYED Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa on http://127.0.0.1:18899: engine flag --presend-live-guard-program Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa
+== verify
+VERIFY Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa on http://127.0.0.1:18899: programdata 2gJNCThz6WaxjHaHtE7agKJy2skqipyZjG98hTRTvymy (deployed slot 20, 15776 bytes, 0.111005 SOL)
+  build    sha256 eb08c504a51b865f8590fa4aaf097ce8be01d496105f0f3b74134866913e4266 (15776 bytes)
+  on chain sha256 eb08c504a51b865f8590fa4aaf097ce8be01d496105f0f3b74134866913e4266 (first 15776 bytes)
+  upgrade authority 4SdjBVP5meSr68iv1Edyww1jxHYrxSrrAKFz7De8ZtJG
+VERIFY PASS
+== verify against a different build must FAIL
+VERIFY Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa on http://127.0.0.1:18899: programdata 2gJNCThz6WaxjHaHtE7agKJy2skqipyZjG98hTRTvymy (deployed slot 20, 15776 bytes, 0.111005 SOL)
+  build    sha256 217ffd35b49e9bf1d7e57aababda682e3316418bb22fe87131aaa20d4932d6d2 (15776 bytes)
+  on chain sha256 eb08c504a51b865f8590fa4aaf097ce8be01d496105f0f3b74134866913e4266 (first 15776 bytes)
+  upgrade authority 4SdjBVP5meSr68iv1Edyww1jxHYrxSrrAKFz7De8ZtJG
+sg_ops: VERIFY FAIL: the on-chain program is NOT this build
+(failed as expected)
+== smoke (wallet AMS, compiled; payer = 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA since AMS holds nothing here)
+SMOKE Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa on http://127.0.0.1:18899 (simulation only; wallet EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR, payer 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA, slot 21)
+  ok   PASS deadline +50, 2 floors of 0 on empty accounts, echo 849 CU passed echo [5, 2, 0]
+  ok   ABORT deadline -50                                      490 CU {"InstructionError":[1,{"Custom":3280969044}]} deadline, 17-64 slots (0xc38f9d54)
+  ok   ABORT 2 of 2 holders gone (G-A: more than 1 below)      865 CU {"InstructionError":[1,{"Custom":1557957261}]} floors holder #0, 2 below, 0% held (sold out / closed) (0x5cdc8a8d)
+  ok   ABORT another signer                                    291 CU {"InstructionError":[1,{"Custom":2079266443}]} auth not_ours_no_list (0x7bef168b)
+  ok   ABORT our wallet not signing                            278 CU {"InstructionError":[1,{"Custom":990914491}]} auth not_signer (0x3b1027bb)
+SMOKE PASS
+== smoke (wallet FRZ)
+SMOKE Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa on http://127.0.0.1:18899 (simulation only; wallet FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS, payer 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA, slot 21)
+  ok   PASS deadline +50, 2 floors of 0 on empty accounts, echo 853 CU passed echo [5, 2, 0]
+  ok   ABORT deadline -50                                      494 CU {"InstructionError":[1,{"Custom":3280969044}]} deadline, 17-64 slots (0xc38f9d54)
+  ok   ABORT 2 of 2 holders gone (G-A: more than 1 below)      869 CU {"InstructionError":[1,{"Custom":1557957261}]} floors holder #0, 2 below, 0% held (sold out / closed) (0x5cdc8a8d)
+  ok   ABORT another signer                                    291 CU {"InstructionError":[1,{"Custom":2079266443}]} auth not_ours_no_list (0x7bef168b)
+  ok   ABORT our wallet not signing                            278 CU {"InstructionError":[1,{"Custom":990914491}]} auth not_signer (0x3b1027bb)
+SMOKE PASS
+== allowlist
+allowlist PDA CQxPmdMJBGyHjT8C7vDuAe5mTQuXAjKCdkGp6VfNWSHF (bump 252)
+  not initialized (only the compiled wallets AMS/FRA/FRZ can use the program)
+  compiled in: AMS EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR FRA 2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE FRZ FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS
+ALLOW-INIT on http://127.0.0.1:18899: PDA CQxPmdMJBGyHjT8C7vDuAe5mTQuXAjKCdkGp6VfNWSHF admin Dv5CR3JZdDrGERcKjab4TP6NtEHCmauKngyoMAFV82zP (payer 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA, upgrade authority 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA)
+sg_ops: simulation failed: {"InstructionError":[1,{"Custom":2843018848}]} = admin not_authority (0xa9750660)
+(init by a non-authority refused as expected)
+ALLOW-INIT on http://127.0.0.1:18899: PDA CQxPmdMJBGyHjT8C7vDuAe5mTQuXAjKCdkGp6VfNWSHF admin Dv5CR3JZdDrGERcKjab4TP6NtEHCmauKngyoMAFV82zP (payer 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA, upgrade authority 4SdjBVP5meSr68iv1Edyww1jxHYrxSrrAKFz7De8ZtJG)
+allowlist initialized: PDA CQxPmdMJBGyHjT8C7vDuAe5mTQuXAjKCdkGp6VfNWSHF admin Dv5CR3JZdDrGERcKjab4TP6NtEHCmauKngyoMAFV82zP (3xibBgfZfE1KqZp5LB2s6HHGGaeTmsszJhcA79rULthFXurVBPc2LJXVSpucGAYmcYVisL9JgsQuzaVGS7J1n7xM)
+ALLOW-ADD 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA on http://127.0.0.1:18899 (list CQxPmdMJBGyHjT8C7vDuAe5mTQuXAjKCdkGp6VfNWSHF, admin Dv5CR3JZdDrGERcKjab4TP6NtEHCmauKngyoMAFV82zP)
+done: 2McWVsMY3T8rjZye6HYRm5u1QCk2LRRc2Cu3pSJMminNazDbJvKkNngh2guNAWS6H8fKHL5f1f9o85iizSJpnUSt
+allowlist PDA CQxPmdMJBGyHjT8C7vDuAe5mTQuXAjKCdkGp6VfNWSHF (bump 252)
+  admin Dv5CR3JZdDrGERcKjab4TP6NtEHCmauKngyoMAFV82zP  bump 252  rent 0.004691 SOL  wallets 1/16
+  - 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA
+  compiled in: AMS EgxfYgEbruk94yjiWrMa9ex8fS3jeQFLwkrkHg3BtdtR FRA 2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE FRZ FRZh63L6L8m3MEPwHVimRkWPzwSgizr22Z6wvpWTyTWS
+== smoke with the payer as a LISTED wallet (allowlist CQxPmdMJBGyHjT8C7vDuAe5mTQuXAjKCdkGp6VfNWSHF)
+SMOKE Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa on http://127.0.0.1:18899 (simulation only; wallet 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA, payer Dv5CR3JZdDrGERcKjab4TP6NtEHCmauKngyoMAFV82zP, slot 40)
+  ok   PASS deadline +50, 2 floors of 0 on empty accounts, echo 2496 CU passed echo [5, 2, 0]
+  ok   ABORT deadline -50                                      2137 CU {"InstructionError":[1,{"Custom":3280969044}]} deadline, 17-64 slots (0xc38f9d54)
+  ok   ABORT 2 of 2 holders gone (G-A: more than 1 below)      2512 CU {"InstructionError":[1,{"Custom":1557957261}]} floors holder #0, 2 below, 0% held (sold out / closed) (0x5cdc8a8d)
+  ok   ABORT another signer                                    291 CU {"InstructionError":[1,{"Custom":2079266443}]} auth not_ours_no_list (0x7bef168b)
+  ok   ABORT our wallet not signing                            336 CU {"InstructionError":[1,{"Custom":990914491}]} auth not_signer (0x3b1027bb)
+SMOKE PASS
+ALLOW-ADD 4SdjBVP5meSr68iv1Edyww1jxHYrxSrrAKFz7De8ZtJG on http://127.0.0.1:18899 (list CQxPmdMJBGyHjT8C7vDuAe5mTQuXAjKCdkGp6VfNWSHF, admin 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA)
+sg_ops: simulation failed: {"InstructionError":[0,{"Custom":1813107408}]} = admin not_admin (0x6c11d2d0)
+(add by a non-admin refused as expected)
+ALLOW-REMOVE 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA on http://127.0.0.1:18899 (list CQxPmdMJBGyHjT8C7vDuAe5mTQuXAjKCdkGp6VfNWSHF, admin Dv5CR3JZdDrGERcKjab4TP6NtEHCmauKngyoMAFV82zP)
+done: 3TFnWEGx63BMZErQSsXFBPLXHsqSafwe2UbK8f2vXyhEP9CEQ99snvALm8LSxQCjFExtypsBjwAV9gz78S2ofVXN
+== smoke after the removal must FAIL its pass case
+SMOKE Fr764WAZwUvZhE1dFtmVrmQ315gunNwV1Ni99w4czhJa on http://127.0.0.1:18899 (simulation only; wallet 7x66R95RxPUo1sCcAVtgYFwm1pXxK2f7hctcxkNb8KaA, payer Dv5CR3JZdDrGERcKjab4TP6NtEHCmauKngyoMAFV82zP, slot 43)
+  FAIL PASS deadline +50, 2 floors of 0 on empty accounts, echo 2031 CU {"InstructionError":[1,{"Custom":2020825931}]} auth not_listed (0x78735b4b)
+  FAIL ABORT deadline -50                                      1915 CU {"InstructionError":[1,{"Custom":2020825931}]} auth not_listed (0x78735b4b)
+  FAIL ABORT 2 of 2 holders gone (G-A: more than 1 below)      2031 CU {"InstructionError":[1,{"Custom":2020825931}]} auth not_listed (0x78735b4b)
+  ok   ABORT another signer                                    291 CU {"InstructionError":[1,{"Custom":2079266443}]} auth not_ours_no_list (0x7bef168b)
+  ok   ABORT our wallet not signing                            336 CU {"InstructionError":[1,{"Custom":990914491}]} auth not_signer (0x3b1027bb)
+sg_ops: SMOKE FAIL: 3 case(s)
+(refused as expected)
+== keystore paths refused
+sg_ops: /home/it/sniper-keys/fra.enc: refusing to read an engine keystore (sg_ops only takes solana-keygen JSON keypairs you name for it)
+(refused as expected)
+== REHEARSAL PASS

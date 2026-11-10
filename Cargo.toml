@@ -13,6 +13,8 @@ anyhow = "1"
 # the same code arbx-exec's on-chain sizing runs. no_std, no dependencies of its own
 # PLAN-ADDENDUM WP-21: with Raydium CLMM and Orca Whirlpool (kinds 7 and 8, feature "clmm"; DESIGN.md §9)
 arbx-sizing = { path = "program/arbx-sizing", features = ["clmm"] }
+# dip43 C2: the snipe-guard instruction encoder and its private error-code decoder (host side of program/snipe-guard; no dependencies)
+snipe-guard = { path = "program/snipe-guard" }
 base64 = "0.22"
 bs58 = "0.5"
 crossbeam-channel = "0.5"
