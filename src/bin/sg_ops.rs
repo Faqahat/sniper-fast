@@ -4,7 +4,7 @@
 //! refuses keystore paths. Simulations (verify / smoke) need no key at all.
 //!
 //!   sg_ops info     [--so FILE] [--cluster C]                                  sha256, size, SOL the deploy locks
-//!   sg_ops deploy   --cluster C --payer KP --program-keypair KP --upgrade-authority PUBKEY [--so FILE] [--init-allowlist-admin PUBKEY]
+//!   sg_ops deploy   --cluster C --payer KP (--program-keypair KP | --program-keystore FILE.enc --program-id-expect PUBKEY) --upgrade-authority PUBKEY [--so FILE] [--init-allowlist-admin PUBKEY]
 //!                   [--solana-bin PATH] [--yes]                                deploy (payer = temporary authority), optional
 //!                                                                              allowlist init, hand the authority to the cold key, verify
 //!   sg_ops verify   --cluster C --program-id ID [--so FILE] [--expect-authority PUBKEY]   on-chain bytes == the build
@@ -60,6 +60,48 @@ fn keypair(path: &str) -> Result<SigningKey> {
     Ok(sk)
 }
 fn pubkey(k: &SigningKey) -> Pk { k.verifying_key().to_bytes() }
+
+/// The PROGRAM keypair from an engine-format encrypted keystore (v3 `.enc`), for `deploy --program-keystore` only: the passphrase is
+/// asked on the terminal, the key must unlock to `--program-id-expect`, and it must NOT be one of our trading wallets. The keypair is
+/// written to a fresh owner-only directory in RAM (/dev/shm) just for the `solana program deploy` call; the file is overwritten
+/// with zeros and removed when this guard drops (also on any error).
+struct RamKey { dir: std::path::PathBuf, file: std::path::PathBuf }
+impl RamKey {
+    fn from_keystore(enc: &str, expect: &Pk) -> Result<(SigningKey, RamKey)> {
+        let pass = arbx::wallet::prompt_pass(&format!("passphrase for the PROGRAM keystore {enc} (hidden): "))?;
+        Self::from_keystore_pass(enc, pass.as_bytes(), expect)
+    }
+    fn from_keystore_pass(enc: &str, pass: &[u8], expect: &Pk) -> Result<(SigningKey, RamKey)> {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let blob = std::fs::read_to_string(enc).with_context(|| format!("read {enc}"))?;
+        let secret = arbx::wallet::decrypt(&blob, pass)?;
+        let sk = arbx::wallet::keypair(&secret)?;
+        drop(secret);
+        if pubkey(&sk) != *expect { bail!("{enc} unlocks to {}, not the expected program id {}", b58(&pubkey(&sk)), b58(expect)); }
+        if sgl::is_compiled(&pubkey(&sk)) { bail!("{enc} unlocks to one of our TRADING wallets: refusing to use it as a program id"); }
+        let dir = std::path::PathBuf::from(format!("/dev/shm/sg_ops_{}_{}", std::process::id(), arbx::fast::mono_ns()));
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).with_context(|| format!("create {}", dir.display()))?;
+        let file = dir.join("program.json");
+        let rk = RamKey { dir, file };
+        let mut kb = sk.to_keypair_bytes();
+        let json = format!("[{}]", kb.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(","));
+        kb.iter_mut().for_each(|b| *b = 0);
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&rk.file).with_context(|| format!("create {}", rk.file.display()))?;
+        f.write_all(json.as_bytes())?;
+        f.sync_all()?;
+        let mut json = json.into_bytes(); json.iter_mut().for_each(|b| *b = 0);
+        Ok((sk, rk))
+    }
+    fn path(&self) -> String { self.file.display().to_string() }
+}
+impl Drop for RamKey {
+    fn drop(&mut self) {
+        if let Ok(m) = std::fs::metadata(&self.file) { let _ = std::fs::write(&self.file, vec![0u8; m.len() as usize]); }
+        let _ = std::fs::remove_file(&self.file);
+        let _ = std::fs::remove_dir(&self.dir);
+    }
+}
 fn sha256_hex(b: &[u8]) -> String { sha2::Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect() }
 
 struct Cx { rpc: arbx::rpc::Rpc, cluster: String, rt: tokio::runtime::Runtime }
@@ -175,9 +217,14 @@ fn run() -> Result<()> {
             let cx = cx()?;
             let so = std::fs::read(&so_path).with_context(|| format!("read {so_path}"))?;
             let payer_path = need("--payer")?;
-            let prog_path = need("--program-keypair")?;
             let payer = keypair(&payer_path)?;
-            let prog = keypair(&prog_path)?;
+            // the program id: a solana-keygen JSON (--program-keypair) or, dip43 11-10, an engine-format keystore (--program-keystore FILE.enc
+            // --program-id-expect PUBKEY): its passphrase is asked only with --yes; the dry plan shows the expected id
+            let ks = arg("--program-keystore");
+            let (prog_id, mut ram, mut prog_path) = match &ks {
+                Some(_) => (pk(&need("--program-id-expect")?)?, None, String::new()),
+                None => { let p = need("--program-keypair")?; (pubkey(&keypair(&p)?), None::<RamKey>, p) }
+            };
             let cold = pk(&need("--upgrade-authority")?)?;
             let admin = arg("--init-allowlist-admin").map(|s| pk(&s)).transpose()?;
             let solana = arg("--solana-bin").unwrap_or_else(|| DEFAULT_SOLANA.into());
@@ -185,29 +232,34 @@ fn run() -> Result<()> {
             let bal = cx.call("getBalance", serde_json::json!([b58(&pubkey(&payer)), {"commitment": "confirmed"}]))?["value"].as_u64().unwrap_or(0);
             let feat = cx.account(&pk(SBPF_V3_FEATURE)?)?;
             println!("DEPLOY PLAN ({})", cx.cluster);
-            println!("  program id         {}", b58(&pubkey(&prog)));
+            println!("  program id         {}", b58(&prog_id));
             println!("  .so                {so_path}: {} bytes, sha256 {}", so.len(), sha256_hex(&so));
             println!("  payer              {} (balance {:.6} SOL; temporary upgrade authority during the deploy)", b58(&pubkey(&payer)), bal as f64 / 1e9);
             println!("  final authority    {} (cold; never needs to be online for this)", b58(&cold));
             println!("  SOL locked         {:.6} (programdata {:.6} + program {:.6}) + ~0.0002 fees; a buffer of ~{:.4} is refunded", (pd + pa) as f64 / 1e9, pd as f64 / 1e9, pa as f64 / 1e9, pd as f64 / 1e9);
             println!("  SBPF v3 feature    {} on this cluster", if feat.is_some() { "ACTIVE (account exists)" } else { "NOT FOUND" });
-            if let Some(a) = admin { println!("  allowlist PDA      {} init with admin {} (+{:.6} SOL rent)", b58(&list_pda(&pubkey(&prog)).0), b58(&a), cx.rent(sgl::AL_LEN)? as f64 / 1e9); }
+            if let Some(a) = admin { println!("  allowlist PDA      {} init with admin {} (+{:.6} SOL rent)", b58(&list_pda(&prog_id).0), b58(&a), cx.rent(sgl::AL_LEN)? as f64 / 1e9); }
             if feat.is_none() { bail!("the SBPF v3 feature account is missing on {}: the program cannot run there", cx.cluster); }
-            if cx.account(&pubkey(&prog))?.is_some() { bail!("{} already exists on {}: use `solana program deploy --program-id` with the cold authority to UPGRADE (DEPLOY.md §upgrade)", b58(&pubkey(&prog)), cx.cluster); }
+            if cx.account(&prog_id)?.is_some() { bail!("{} already exists on {}: use `solana program deploy --program-id` with the cold authority to UPGRADE (DEPLOY.md §upgrade)", b58(&prog_id), cx.cluster); }
             if bal < 2 * pd + pa + 10_000_000 { bail!("payer balance {:.6} SOL < {:.6} needed (buffer + programdata + fees)", bal as f64 / 1e9, (2 * pd + pa + 10_000_000) as f64 / 1e9); }
             if !yes { println!("dry: nothing sent. Re-run with --yes to deploy."); return Ok(()); }
+            if let Some(enc) = &ks {
+                let (_, rk) = RamKey::from_keystore(enc, &prog_id)?;
+                prog_path = rk.path(); ram = Some(rk);
+            }
             let url = url_of(&cx.cluster);
             let st = std::process::Command::new(&solana).args(["program", "deploy", "--url", &url, "--keypair", &payer_path, "--program-id", &prog_path,
                 "--upgrade-authority", &payer_path, "--commitment", "confirmed", &so_path]).status().with_context(|| format!("run {solana}"))?;
+            drop(ram.take());   // the program key is not needed after the deploy: wiped from RAM now
             if !st.success() { bail!("solana program deploy failed ({st})"); }
-            if let Some(a) = admin { allow_init(&cx, &pubkey(&prog), &payer, &payer, a)?; }
+            if let Some(a) = admin { allow_init(&cx, &prog_id, &payer, &payer, a)?; }
             if cold != pubkey(&payer) {
-                let st = std::process::Command::new(&solana).args(["program", "set-upgrade-authority", &b58(&pubkey(&prog)), "--url", &url, "--keypair", &payer_path,
+                let st = std::process::Command::new(&solana).args(["program", "set-upgrade-authority", &b58(&prog_id), "--url", &url, "--keypair", &payer_path,
                     "--upgrade-authority", &payer_path, "--new-upgrade-authority", &b58(&cold), "--skip-new-upgrade-authority-signer-check"]).status()?;
                 if !st.success() { bail!("set-upgrade-authority failed ({st}): the PAYER is still the upgrade authority; fix it by hand (DEPLOY.md)"); }
             }
-            verify(&cx, &pubkey(&prog), &so, Some(cold))?;
-            println!("DEPLOYED {} on {}: engine flag --presend-live-guard-program {}", b58(&pubkey(&prog)), cx.cluster, b58(&pubkey(&prog)));
+            verify(&cx, &prog_id, &so, Some(cold))?;
+            println!("DEPLOYED {} on {}: engine flag --presend-live-guard-program {}", b58(&prog_id), cx.cluster, b58(&prog_id));
         }
         "verify" => {
             let cx = cx()?;
@@ -350,5 +402,35 @@ fn print_codes() {
                 println!("| {} ({kind}) | {} | gap {gap}: {t} | {:#010x} |", sgc::kind_name(kind), if kind == sgl::K_FLOORS { "holder #" } else { "0" }, sgl::code(sgl::Fail { kind, idx: 0, cnt: if kind == sgl::K_FLOORS { 2 } else { 0 }, gap }));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod ramkey_tests {
+    use super::*;
+    /// a throwaway keystore unlocks to the expected id, the RAM file is a valid owner-only solana-keygen keypair, and it is gone after drop;
+    /// a wrong expected id and a wrong passphrase are refused
+    #[test]
+    fn ramkey_roundtrip() {
+        let sk = SigningKey::from_bytes(&[7u8; 32]);
+        let secret = bs58::encode(sk.to_keypair_bytes()).into_string();
+        let blob = arbx::wallet::encrypt(&secret, b"pw-test", 10).unwrap();
+        let dir = std::env::temp_dir().join(format!("sgk_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let enc = dir.join("p.enc"); std::fs::write(&enc, blob).unwrap();
+        let e = enc.to_str().unwrap();
+        let (k, rk) = RamKey::from_keystore_pass(e, b"pw-test", &pubkey(&sk)).unwrap();
+        assert_eq!(pubkey(&k), pubkey(&sk));
+        let path = rk.path();
+        assert!(path.starts_with("/dev/shm/"));
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        let v: Vec<u8> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v, sk.to_keypair_bytes().to_vec());
+        drop(rk);
+        assert!(!std::path::Path::new(&path).exists());
+        assert!(RamKey::from_keystore_pass(e, b"pw-test", &[1u8; 32]).is_err(), "wrong expected id");
+        assert!(RamKey::from_keystore_pass(e, b"wrong", &pubkey(&sk)).is_err(), "wrong passphrase");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

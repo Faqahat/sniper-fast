@@ -90,6 +90,23 @@ behind fails at the guard with the decoded deadline code (holders mode: two empt
 Use a paid RPC URL for `--cluster` if the public one is slow (`--cluster https://…`). A failed `solana program deploy` leaves a
 buffer account holding the SOL: `solana program show --buffers --keypair payer.json` and `solana program close <BUFFER>` refund it.
 
+### Program id from an engine-format keystore (11-10: the vanity id CYBERjpcr…TudiZ)
+
+The program keypair can stay in our encrypted keystore format (`.enc`). `sg_ops deploy` unlocks it only for the deploy call:
+`--program-keystore FILE.enc --program-id-expect <PUBKEY>` replaces `--program-keypair`.
+- The dry plan (no `--yes`) never opens the keystore; it shows the expected id.
+- With `--yes` it asks the passphrase on the terminal (hidden), checks the key unlocks to `--program-id-expect` and is not one of our
+  trading wallets, writes the keypair to a fresh owner-only folder in RAM (`/dev/shm`), runs `solana program deploy`, then overwrites
+  the file with zeros and removes it (also on any error). Test: `cargo test --release --bin sg_ops` (round trip with a throwaway key).
+
+```bash
+$G deploy --cluster mainnet --payer ~/guard-keys/payer.json \
+  --program-keystore /home/it/sniper-keys/cyber-program.enc --program-id-expect CYBERjpcrxMLkZyuvP3D3aEKpvuTKHiwwU8cvT5TudiZ \
+  --upgrade-authority <COLD_PUBKEY>          # dry plan; then the same + --yes (asks the passphrase)
+```
+Mainnet cost measured 11-10 by the dry plan: 0.0819 SOL stays locked (programdata 0.0810 + program 0.0008); the payer needs >= 0.173 SOL
+(a buffer of ~0.081 is refunded after the deploy).
+
 ## Verify: the on-chain bytes are the build
 
 `sg_ops verify` reads the program account → its programdata address → the programdata account, and checks:
