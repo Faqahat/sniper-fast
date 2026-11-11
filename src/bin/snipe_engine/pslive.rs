@@ -161,7 +161,8 @@ const A43FLAGS: [&str; 17] = ["--presend-live-dump-exit", "--presend-live-tbal-s
     "--presend-live-shadow-exit", "--presend-live-acct", "--presend-live-botdepth-allow-log", "--presend-live-shadows43", "--presend-live-fpnb-strict"];
 /// dip43 BUILDER B (send path + exits; ps43_b.rs): its flags (each needs --presend-live; every one OFF by default = dip42)
 /// dip45 FLEET SIGNAL shadow (LOG ONLY; ps45_fleet.rs): its flags (each needs --presend-live; the signature file needs --presend-live-fleet-log on)
-const F45FLAGS: [&str; 2] = ["--presend-live-fleet-log", "--presend-live-fleet-sig"];
+/// dip45 WHALE-SOLD tracker (LOG ONLY; ps45_wsold.rs): --presend-live-whale-sold-log on|off (needs --presend-live)
+const F45FLAGS: [&str; 3] = ["--presend-live-fleet-log", "--presend-live-fleet-sig", "--presend-live-whale-sold-log"];
 
 const B43FLAGS: [&str; 12] = ["--presend-live-reroute", "--presend-live-single-token", "--presend-live-skip-clients", "--presend-live-fee-tier", "--presend-live-start-ms",
     "--presend-live-exit-lots", "--presend-live-exit-lots-ab", "--presend-live-exit-lots-kinds", "--presend-live-lot2-cu-price-micro", "--presend-live-timer-sell-cu-price-micro",
@@ -245,6 +246,9 @@ pub mod psq1;
 // dip45 FLEET SIGNAL shadow: fleet-shape tries on the pre-exec feeds, flags on our arms / fills (LOG ONLY, its own thread; off unless --presend-live-fleet-log on)
 #[path = "ps45_fleet.rs"]
 pub mod ps45_fleet;
+// dip45 WHALE-SOLD tracker: the T2 trigger whale's sells vs our arms / fills (LOG ONLY, inline; off unless --presend-live-whale-sold-log on)
+#[path = "ps45_wsold.rs"]
+pub mod ps45_wsold;
 
 // dip43 Builder A: the feed-stall watchdog / dead-man (ps43_stall.rs) and the safety / control / shadow items (ps43.rs); off / log by default
 #[path = "ps43_stall.rs"]
@@ -551,6 +555,8 @@ pub struct Cfg {
     pub q1: Option<psq1::Q1Cfg>,
     /// dip45 FLEET SIGNAL shadow (LOG ONLY; None = off, the default): --presend-live-fleet-log on, --presend-live-fleet-sig FILE
     pub fleet: Option<ps45_fleet::FleetCfg>,
+    /// dip45 WHALE-SOLD tracker (LOG ONLY; false = off, the default): --presend-live-whale-sold-log on
+    pub wsold: bool,
     /// dip43 Builder A's options (ps43.rs; all off / log by default)
     pub c43: ps43::Cfg43,
     /// dip43 BUILDER B's items (ps43_b.rs; Default = all off = dip42)
@@ -737,6 +743,7 @@ impl Cfg {
             f2: None,
             q1: None,
             fleet: None,
+            wsold: false,
             // dip43 (ps43.rs)
             c43: ps43::Cfg43::parse(argv)?,
             // dip43 B (every item off unless its flag)
@@ -783,6 +790,7 @@ impl Cfg {
             if let Some(p) = &sig { ps45_fleet::Sig::parse(&std::fs::read(p).map_err(|e| anyhow::anyhow!("--presend-live-fleet-sig {p}: {e}"))?).map_err(|e| anyhow::anyhow!("--presend-live-fleet-sig {p}: {e}"))?; }
             c.fleet = Some(ps45_fleet::FleetCfg { sig });
         } else if has("--presend-live-fleet-sig") { bail!("--presend-live-fleet-sig needs --presend-live-fleet-log on"); }
+        c.wsold = onoff("--presend-live-whale-sold-log", false)?;
         // dip41: every value given; the state / the tier's flags need the ledger
         for f in DLFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         if !c.dl_on { if let Some(f) = DLFLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-dumper-ledger on"); } }
@@ -1056,6 +1064,7 @@ impl Cfg {
         if let Some(q) = &self.q1 { j["q1"] = q.json(); }
         // dip45: only when on (off: dip43g's record)
         if let Some(f) = &self.fleet { j["fleet"] = f.json(); }
+        if self.wsold { j["whale_sold"] = serde_json::json!({"mode": "log"}); }
         // dip43: only when an option is given (off: dip42's record)
         if self.c43.any() { j["dip43"] = self.c43.json(); }
         // dip43 B: only when an item is on (off: dip42's record)
@@ -2386,6 +2395,8 @@ pub struct PsLive {
     q1: Option<psq1::Q1Tap>,
     /// dip45 FLEET SIGNAL shadow (LOG ONLY): the handle of its thread (None = off, the default; ps45_fleet.rs)
     fleet: Option<ps45_fleet::FleetTap>,
+    /// dip45 WHALE-SOLD tracker (LOG ONLY, inline): None = off, the default (ps45_wsold.rs)
+    ws: Option<ps45_wsold::WSold>,
     /// dip43 Builder A's state (ps43.rs; idle by default)
     d43: ps43::D43,
     /// dip43 B: the lots exits under way, the lots mode, counters (empty with its flags off)
@@ -2470,6 +2481,7 @@ impl PsLive {
         let q1 = cfg.q1.clone().map(|c| psq1::Q1Tap::start(c, user, &out, false));
         // dip45 (LOG ONLY; None with it off): the fleet shadow's own thread
         let fleet = cfg.fleet.clone().map(|c| ps45_fleet::FleetTap::start(c, user, &out, false));
+        let ws = cfg.wsold.then(|| ps45_wsold::WSold::start(&out));
         arbx::feeds::own_fail_watch(user);
         // dip32: the creator histories' preload (the offline seed / the last run's state)
         if let Some(p) = &cfg.cr_state {
@@ -2631,7 +2643,7 @@ impl PsLive {
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet,
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet, ws,
             d43: Default::default(), b43: ps43_b::B43St::default() };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
@@ -2654,7 +2666,10 @@ impl PsLive {
         if let Some(f) = self.fp.as_ref() { f.on_rec(&v); }
         // dip45 (log-only): our arms and fills get the fleet flags (nothing with it off)
         if let Some(f) = self.fleet.as_mut() { f.on_rec(&v); }
+        // dip45 (log-only): T2 arms open whale-sold tracks, fills get the whale's sold fraction (its records after this one; nothing with it off)
+        let ws = if self.ws.is_some() && matches!(v["ev"].as_str(), Some("presend_live_arm" | "presend_live_fill")) { Some(v.clone()) } else { None };
         let _ = self.out.send(Out::Rec(v));
+        if let (Some(w), Some(v)) = (self.ws.as_mut(), ws) { w.on_rec(&v); }
     }
     fn line(&self, l: String) { let _ = self.out.send(Out::Line(l)); }
 
@@ -2726,6 +2741,8 @@ impl PsLive {
     pub fn on_arrival(&mut self, a: &arbx::feeds::Arrival, slot_now: u64) {
         // dip45 (log-only): the slot clock and the fleet-shape test, every feed (nothing with it off)
         if let Some(f) = self.fleet.as_mut() { f.arrival(a); }
+        // dip45 (log-only): a tracked whale's tx seen before execution (nothing with it off)
+        if let Some(w) = self.ws.as_mut() { w.arrival(a); }
         self.sh.slot.store(slot_now, Ordering::Relaxed);
         self.last_t = self.last_t.max(a.t_rx);
         if a.executed != Some(false) || a.tx.keys.first() != Some(&self.user) { return; }
@@ -2875,6 +2892,8 @@ impl PsLive {
         let t0 = Instant::now();
         // dip45 (log-only): the watched tokens' trades to the fleet shadow, before anything decides on this tx (nothing with it off)
         if let Some(f) = self.fleet.as_mut() { f.exec(a, x); }
+        // dip45 (log-only): the tracked whales' trades (before anything decides on this tx: a trigger of it opens its track after)
+        if let Some(w) = self.ws.as_mut() { w.exec(a, x, slot_now, self.d43.book.as_ref()); }
         self.sh.slot.store(slot_now, Ordering::Relaxed);
         // dip37 HYBRID-2: the dumps dipmode recorded (this tx's and earlier) into the counter, before any trigger of this tx (nothing without it)
         if let Some(h) = self.h2.as_mut() { h.drain(); h.prune(&self.det, slot_now); }
@@ -4349,6 +4368,8 @@ impl PsLive {
     pub fn on_shadow_rec(&mut self, rec: &serde_json::Value) {
         // dip45 (log-only): the shadow's paper arms / would-fills get the fleet flags (nothing with it off)
         if let Some(f) = self.fleet.as_mut() { f.on_shadow(rec); }
+        // dip45 (log-only): the shadow's paper arms open whale-sold tracks, its would-fills get the fraction (nothing with it off)
+        if let Some(w) = self.ws.as_mut() { w.on_shadow(rec); }
         // dip36 (log-only): the shadow's row c for FP-NOBOT's s_* inputs (nothing without the flag)
         if self.fp.is_some() { self.fpnb_shadow(rec); }
         // dip37 --presend-live-wh-learn paper: a wh_loss-skipped trigger's row c into the whale's ledger (nothing without it)
@@ -4395,7 +4416,10 @@ impl PsLive {
     }
 
     /// dip45: the feed names for the fleet shadow's records (nothing with it off)
-    pub fn fleet_feeds(&mut self, names: &[String]) { if let Some(f) = self.fleet.as_mut() { f.feeds(names.to_vec()); } }
+    pub fn fleet_feeds(&mut self, names: &[String]) {
+        if let Some(f) = self.fleet.as_mut() { f.feeds(names.to_vec()); }
+        if let Some(w) = self.ws.as_mut() { w.feeds = names.to_vec(); }
+    }
 
     /// the shadow's presend_arm records of this tx (parity with the live triggers)
     pub fn on_shadow_arm(&mut self, rec: &serde_json::Value) {
@@ -4425,7 +4449,7 @@ impl PsLive {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status()
-            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.status43() + &self.b43_status();
+            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.ws.as_ref().map(|w| w.status()).unwrap_or_default() + &self.status43() + &self.b43_status();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -4612,6 +4636,7 @@ impl PsLive {
         if let Some(j) = self.q1.as_mut().and_then(|q| q.finish()) { fin["q1"] = j; }
         // dip45 (log-only)
         if let Some(j) = self.fleet.as_mut().and_then(|f| f.finish()) { fin["fleet"] = j; }
+        if let Some(w) = self.ws.as_mut() { fin["whale_sold"] = w.finish(); }
         // dip43: only when an option is given / something happened (the exit shadows still open are written)
         if let Some(j) = self.finish43() { fin["dip43"] = j; }
         // dip43 B: only with an item on
@@ -4773,6 +4798,7 @@ impl PsLive {
         let f2 = cfg.f2.clone().map(psfam2::Fam2::new);
         let q1 = cfg.q1.clone().map(|c| psq1::Q1Tap::start(c, user, &out, true));
         let fleet = cfg.fleet.clone().map(|c| ps45_fleet::FleetTap::start(c, user, &out, true));
+        let ws = cfg.wsold.then(|| ps45_wsold::WSold::start(&out));
         // dip38: the anti-bait log with the tests' queue (no task, no RPC)
         let l38 = pslog38::L38::new(&cfg, None).unwrap();
         let (atx, arx) = crossbeam_channel::unbounded();
@@ -4797,7 +4823,7 @@ impl PsLive {
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet, d43: Default::default(),
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet, ws, d43: Default::default(),
             b43: ps43_b::B43St::default() }, atx, orx)
     }
 
@@ -4929,6 +4955,11 @@ mod dip43_guard_tests;
 #[cfg(test)]
 #[path = "dip45_tests.rs"]
 mod dip45_tests;
+
+// dip45 (11-11 PKT): the WHALE-SOLD tracker (ps45_wsold.rs; LOG ONLY, off by default)
+#[cfg(test)]
+#[path = "dip45_ws_tests.rs"]
+mod dip45_ws_tests;
 
 #[cfg(test)]
 mod tests {

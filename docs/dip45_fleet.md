@@ -75,3 +75,47 @@ key, its address as `wallet`, empty / unfunded), never the prod one. The shadow 
 Without `--live`, also leave out `--profit-lock` / `--profit-lock-min-sol` (dipmode refuses them: they watch the wallet's balance);
 `--max-sol` / `--max-loss-sol` are only required with `--live`. `--regular paper` keeps the reactive path paper. Not yet smoke-tested
 end to end on a server (the unit / golden tests run the pre-send probe in dry and live configs only).
+
+# WHALE-SOLD tracker (LOG ONLY; `--presend-live-whale-sold-log on`)
+
+Why: the PEMURULE replay (`~/sniper-studies/pemurule/`, `~/sniper-data/pemurule/report.txt`) found that filling only AFTER the T2
+trigger whale has sold >= 50% of its arm-time bag (V1_50) would have beaten our live T2 by ~+1.7 SOL on the live-filled windows of
+r65-r82 (small but consistent; peMU8nX3 does this on chain). This build measures it live before any on-chain check is built.
+Code `src/bin/snipe_engine/ps45_wsold.rs` (inline in the event loop, no thread), tests `dip45_ws_tests.rs`, checker
+`ops/fleet45/wsold_check.py`. **Nothing is sent, armed, skipped, sized or changed**; off (the default) = the dip45 fleet build byte for byte.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--presend-live-whale-sold-log on\|off` | off | the tracker (needs `--presend-live`; works with `--presend-live-dry`; independent of the fleet log) |
+
+Run scripts: add the flag to the `--presend-live-*` whitelist (as for the fleet flags).
+
+**Track** = one per trigger (mint, whale, trigger slot/idx/j). Opened by our live / dry T2 (and wide) arm (`presend_live_arm` with
+`trig`; re-arm windows have no trigger whale and are not tracked) and by the shadow's paper arm (`presend_arm` / `presend_wide_arm`);
+all arms of one trigger share the track. **Bag** = the trigger record's `bal` (the detector's whale balance after the trigger buy = the
+replay's bag). With `--presend-live-tbal on` the true-balance book is read once after the trigger tx and logged as `tbal` (not used in
+the fractions). The whale's trades after the trigger position are followed until the window end (live `en_slot`, shadow `en0`, at least
+trigger + 11) + 30 slots; a fill extends it to fill + 30. Whale trades executed before the arm record (the shadow's records can come
+late) are taken from a 64-slot ring of executed trades (`backfill: true`, pre-exec unknown). `cum_frac` = gross sold / bag;
+`net_frac` = (sold - bought back) / bag (the replay's rule V1 used net).
+
+Records `"ev": "presend_live_whale_sold"` by `stage`:
+| stage | when | fields |
+|---|---|---|
+| config | start | mode, tail_slots, min_win, ring_slots |
+| arm | an arm (live / dry / shadow) | src (live / shadow / wide_shadow), w, kind, dry, mint, whale, bag, trig [slot, idx], end_slot, track, slot, now {fractions now} |
+| sell | each whale SELL on the tracked mint | track, w (first arm), ws [{src, w, kind, dry}], mint, whale, slot, idx, j, dslot (vs trigger), sold_tok, cum_sold_tok, cum_frac, net_frac, bag, t (exec arrival ns), feed, feed_name, pre (seen on a pre-exec feed before execution; null = backfilled), pre_t, pre_ms (exec - pre-exec arrival), backfill |
+| fill | our live / dry fill (from presend_live_fill) | src, w, kind, track (null = untracked, e.g. re-arm), mint, whale, bag, slot, idx, cum_sold_tok, cum_frac, net_frac, sold25, sold50, net50, n_sells_before, last_sell_slot, dslot_trig, track_open — whale trades strictly BEFORE (slot, idx) |
+| shadow_fill | the shadow's would-fill | as fill, kind shadow:a/b/c; counted up to AND including its dump trade (the would-fill lands right after it) |
+| close | the track's end (or run end) | track, mint, whale, bag, tbal, trig, end_slot, n_sells, n_buys, cum_sold_tok, bought_tok, max_cum_frac, max_net_frac, first_sell [slot, idx], first_sell_dslot, s25 / s50 / s100 [slot, idx] (cum_frac crossings), net50, dslot25 / 50 / 100, arms, fills (recomputed: final) |
+
+Status line part: `| WHALE SOLD LOG: tracks N (open M) sells S (pre-exec P%) closed C: 1st sell x% >=25% y% >=50% z% 100% w% | fills F
+(whale >=50% sold before G) would-fills H (>=50% I)`. run_end `whale_sold {...}` (tracks, sells, pre-exec, backfill, crossings,
+fills / would-fills by sold25 / sold50, untracked).
+
+FRA dry shadow: add `--presend-live-whale-sold-log on` to the FRA dry run (next to `--presend-live-fleet-log on`). Offline:
+`python3 ops/fleet45/wsold_check.py --engine dip_fra_rNN.jsonl --fills dip_ams_rMM.jsonl` joins each AMS real T2 fill to FRA's track
+of the same trigger (mint + trigger slot/idx + whale), recomputes the whale's sold fraction before the fill's (slot, idx) from FRA's
+sell records, and prints real P&L by "whale >= 50% sold before our fill" yes / no (and >= 25%), overall and per day (PKT), plus the
+engine's own crossing shares and would-fills. Caveat: the YES-only total is an upper bound (a NO window might have filled later at a
+YES moment; the replay prices that, the join does not).
