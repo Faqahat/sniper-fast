@@ -162,7 +162,8 @@ const A43FLAGS: [&str; 17] = ["--presend-live-dump-exit", "--presend-live-tbal-s
 /// dip43 BUILDER B (send path + exits; ps43_b.rs): its flags (each needs --presend-live; every one OFF by default = dip42)
 /// dip45 FLEET SIGNAL shadow (LOG ONLY; ps45_fleet.rs): its flags (each needs --presend-live; the signature file needs --presend-live-fleet-log on)
 /// dip45 WHALE-SOLD tracker (LOG ONLY; ps45_wsold.rs): --presend-live-whale-sold-log on|off (needs --presend-live)
-const F45FLAGS: [&str; 3] = ["--presend-live-fleet-log", "--presend-live-fleet-sig", "--presend-live-whale-sold-log"];
+/// dip46 B1 LOG shadow (LOG ONLY; ps46_b1.rs): --presend-live-b1-log on|off (needs --presend-live-fleet-log on), --presend-live-b1-model FILE (the frozen B0 json)
+const F45FLAGS: [&str; 5] = ["--presend-live-fleet-log", "--presend-live-fleet-sig", "--presend-live-whale-sold-log", "--presend-live-b1-log", "--presend-live-b1-model"];
 
 const B43FLAGS: [&str; 12] = ["--presend-live-reroute", "--presend-live-single-token", "--presend-live-skip-clients", "--presend-live-fee-tier", "--presend-live-start-ms",
     "--presend-live-exit-lots", "--presend-live-exit-lots-ab", "--presend-live-exit-lots-kinds", "--presend-live-lot2-cu-price-micro", "--presend-live-timer-sell-cu-price-micro",
@@ -249,6 +250,9 @@ pub mod ps45_fleet;
 // dip45 WHALE-SOLD tracker: the T2 trigger whale's sells vs our arms / fills (LOG ONLY, inline; off unless --presend-live-whale-sold-log on)
 #[path = "ps45_wsold.rs"]
 pub mod ps45_wsold;
+// dip46 B1 LOG shadow: the frozen B0 score per token-slot + the fleet-signature gate, paper windows (LOG ONLY; inside the fleet thread)
+#[path = "ps46_b1.rs"]
+pub mod ps46_b1;
 
 // dip43 Builder A: the feed-stall watchdog / dead-man (ps43_stall.rs) and the safety / control / shadow items (ps43.rs); off / log by default
 #[path = "ps43_stall.rs"]
@@ -788,8 +792,16 @@ impl Cfg {
         if onoff("--presend-live-fleet-log", false)? {
             let sig = arg("--presend-live-fleet-sig");
             if let Some(p) = &sig { ps45_fleet::Sig::parse(&std::fs::read(p).map_err(|e| anyhow::anyhow!("--presend-live-fleet-sig {p}: {e}"))?).map_err(|e| anyhow::anyhow!("--presend-live-fleet-sig {p}: {e}"))?; }
-            c.fleet = Some(ps45_fleet::FleetCfg { sig });
+            c.fleet = Some(ps45_fleet::FleetCfg { sig, b1: None });
         } else if has("--presend-live-fleet-sig") { bail!("--presend-live-fleet-sig needs --presend-live-fleet-log on"); }
+        // dip46 B1 LOG (LOG ONLY; off unless --presend-live-b1-log on): its gate is the fleet signature detector (the fleet log); a model file
+        // must be the frozen one (sha256)
+        if onoff("--presend-live-b1-log", false)? {
+            let Some(f) = c.fleet.as_mut() else { bail!("--presend-live-b1-log on needs --presend-live-fleet-log on (its gate is the fleet signature detector)") };
+            let model = arg("--presend-live-b1-model");
+            if let Some(p) = &model { ps46_b1::Model::load(p)?; }
+            f.b1 = Some(ps45_fleet::B1Cfg { model });
+        } else if has("--presend-live-b1-model") { bail!("--presend-live-b1-model needs --presend-live-b1-log on"); }
         c.wsold = onoff("--presend-live-whale-sold-log", false)?;
         // dip41: every value given; the state / the tier's flags need the ledger
         for f in DLFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
@@ -4960,6 +4972,11 @@ mod dip45_tests;
 #[cfg(test)]
 #[path = "dip45_ws_tests.rs"]
 mod dip45_ws_tests;
+
+// dip46 (11-11 PKT): the B1 LOG shadow (ps46_b1.rs; LOG ONLY, off by default = dip45)
+#[cfg(test)]
+#[path = "dip46_b1_tests.rs"]
+mod dip46_b1_tests;
 
 #[cfg(test)]
 mod tests {

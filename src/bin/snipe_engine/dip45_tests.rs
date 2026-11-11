@@ -42,17 +42,17 @@ pub(super) fn fleet_arrival(mint: Pk, slot: u64, t: u64, n: u64) -> arbx::feeds:
 
 // ---- GOLDEN -------------------------------------------------------------------------------------------------------------
 
-fn strip45(l: &str) -> Option<String> {
+pub(super) fn strip45(l: &str) -> Option<String> {
     let (tag, body) = l.split_at(2);
     if tag != "R " && tag != "F " { return Some(l.to_string()); }
     let mut v: serde_json::Value = serde_json::from_str(body).unwrap();
-    if v["ev"] == "presend_live_fleet" { return None; }
+    if v["ev"] == "presend_live_fleet" || v["ev"] == "presend_live_b1" { return None; }
     if let Some(o) = v.as_object_mut() { o.remove("fleet"); }
     if let Some(o) = v.get_mut("cfg").and_then(|c| c.as_object_mut()) { o.remove("fleet"); }
     Some(format!("{tag}{v}"))
 }
 
-fn digest(extra: &[&str], inject: bool, strip: bool) -> Option<(String, usize, usize, Vec<serde_json::Value>)> {
+pub(super) fn digest(extra: &[&str], inject: bool, strip: bool) -> Option<(String, usize, usize, Vec<serde_json::Value>)> {
     use sha2::Digest;
     dip26_tests::GOLDEN_FLEET.with(|c| c.set(inject));
     let mut h = sha2::Sha256::new();
@@ -70,7 +70,7 @@ fn digest(extra: &[&str], inject: bool, strip: bool) -> Option<(String, usize, u
         let Some(lines) = lines else { dip26_tests::GOLDEN_FLEET.with(|c| c.set(false)); return None };
         h.update([tag]);
         for l in &lines {
-            if l.starts_with("R ") && l.contains("\"presend_live_fleet\"") { fl.push(serde_json::from_str(&l[2..]).unwrap()); }
+            if l.starts_with("R ") && (l.contains("\"presend_live_fleet\"") || l.contains("\"presend_live_b1\"")) { fl.push(serde_json::from_str(&l[2..]).unwrap()); }
             let l = if strip { match strip45(l) { Some(x) => x, None => { dropped += 1; continue } } } else { l.clone() };
             h.update(l.as_bytes()); h.update(b"\n"); n += 1;
         }
@@ -201,7 +201,7 @@ fn dip45_detector_on_real_fleet_tries_and_lookalikes() {
 // ---- the state ----------------------------------------------------------------------------------------------------------
 
 fn hit(mint: Pk, signer: Pk) -> Hit { Hit { class: Class::Fleet, mint, signer, cu_price: 32_000, cu_limit: 55_951 } }
-fn fleet() -> Fleet { Fleet::open(FleetCfg { sig: None }).0 }
+fn fleet() -> Fleet { Fleet::open(FleetCfg { sig: None, b1: None }).0 }
 const T0: u64 = 1_800_000_000_000_000_000;
 fn ts(slot: u64) -> u64 { T0 + slot * 400_000_000 }
 
@@ -252,7 +252,7 @@ fn dip45_ours_follow_and_silence() {
     let (m, a, d, x, y) = ([7u8; 32], [1u8; 32], [3u8; 32], [4u8; 32], [5u8; 32]);
     f.slot_start(200, ts(200), &mut out);
     f.sighting(&hit(m, a), 1, 198, ts(198), 0, 1, true, &mut out);
-    let ev = |stage: &'static str, slot: u64, idx: Option<u32>, dump: Option<(u64, u32)>| OurEv { stage, w: 3, kind: "t2".into(), mint: m, slot, idx, dump, sig: None, sol_in: None, dry: false };
+    let ev = |stage: &'static str, slot: u64, idx: Option<u32>, dump: Option<(u64, u32)>| OurEv { stage, w: 3, kind: "t2".into(), mint: m, slot, idx, dump, sig: None, sol_in: None, dry: false, en: None };
     f.our(ev("arm", 200, None, None), &mut out);
     let r = out.last().unwrap();
     assert_eq!((r["stage"].as_str(), r["fleet"]["n2"].as_u64(), r["fleet"]["on8"].as_bool()), (Some("arm"), Some(1), Some(true)));
@@ -291,7 +291,7 @@ fn dip45_ours_follow_and_silence() {
 #[test]
 fn dip45_tap_routing() {
     let (otx, orx) = crossbeam_channel::unbounded::<Out>();
-    let mut tap = FleetTap::start(FleetCfg { sig: None }, USER, &otx, true);
+    let mut tap = FleetTap::start(FleetCfg { sig: None, b1: None }, USER, &otx, true);
     let m = [7u8; 32];
     let mut a = fleet_arrival(m, 500, ts(500), 1);
     tap.arrival(&a);
@@ -316,7 +316,7 @@ fn dip45_tap_routing() {
 fn dip45_sig_file_hot_reload() {
     let p = std::env::temp_dir().join(format!("dip45_hot_{}.json", std::process::id()));
     std::fs::write(&p, DEFAULT_SIG).unwrap();
-    let (mut f, err) = Fleet::open(FleetCfg { sig: Some(p.display().to_string()) });
+    let (mut f, err) = Fleet::open(FleetCfg { sig: Some(p.display().to_string()), b1: None });
     assert!(err.is_none());
     let mut out = Vec::new();
     std::thread::sleep(Duration::from_millis(20));

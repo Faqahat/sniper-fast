@@ -46,9 +46,20 @@ fn alias(s: &str) -> Result<Pk> {
     })
 }
 
-#[derive(Clone, Debug)]
-pub struct FleetCfg { pub sig: Option<String> }
-impl FleetCfg { pub fn json(&self) -> serde_json::Value { serde_json::json!({"sig": self.sig}) } }
+#[derive(Clone, Debug, Default)]
+pub struct FleetCfg { pub sig: Option<String>, pub b1: Option<B1Cfg> }
+impl FleetCfg {
+    pub fn json(&self) -> serde_json::Value {
+        let mut j = serde_json::json!({"sig": self.sig});
+        // dip46: only when on (off: dip45's record)
+        if let Some(b) = &self.b1 { j["b1"] = serde_json::json!({"mode": "log", "model": b.model.clone().unwrap_or_else(|| "built-in".into())}); }
+        j
+    }
+}
+
+/// dip46 B1 LOG shadow (ps46_b1.rs; LOG ONLY): --presend-live-b1-log on [--presend-live-b1-model FILE]
+#[derive(Clone, Debug, Default)]
+pub struct B1Cfg { pub model: Option<String> }
 
 /// the fleet signature (built in, or the file)
 #[derive(Clone, Debug, PartialEq)]
@@ -144,7 +155,7 @@ impl FT { fn pos(&self) -> (u64, u32, u16) { (self.slot, self.idx, self.j) } }
 /// our arm / fill (live or dry), or the shadow's paper arm / would-fill
 #[derive(Clone, Debug)]
 pub struct OurEv { pub stage: &'static str, pub w: u64, pub kind: String, pub mint: Pk, pub slot: u64, pub idx: Option<u32>, pub dump: Option<(u64, u32)>, pub sig: Option<String>,
-    pub sol_in: Option<u64>, pub dry: bool }
+    pub sol_in: Option<u64>, pub dry: bool, pub en: Option<u64> }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Flags { pub n0: u32, pub n1: u32, pub n2: u32, pub n3: u32, pub n8: u32, pub pre8: u32, pub signers8: u32, pub first_slot: Option<u64>, pub last_slot: Option<u64> }
@@ -184,14 +195,21 @@ pub struct Fleet {
     follows: Vec<(OurEv, (u64, u32, u16))>,
     pub feeds: Vec<String>,
     pub st: Arc<FStats>,
+    /// dip46 B1 LOG shadow (None = off, the default)
+    pub b1: Option<super::ps46_b1::B1>,
 }
 
 impl Fleet {
     pub fn open(cfg: FleetCfg) -> (Fleet, Option<String>) {
         let mut f = Fleet { sig: Arc::new(RwLock::new(Arc::new(Sig::builtin()))), sig_src: "built-in".into(), sig_mtime: None, sig_at: Instant::now(), cfg, toks: FxHashMap::default(),
             open: FxHashSet::default(), starts: BTreeMap::new(), slot: 0, t_now: 0, t_start: 0, t_last_try: 0, silent: false, silent_n: 0, signers: FxHashMap::default(),
-            arm_ts: VecDeque::new(), shape_cups: BTreeMap::new(), fleet_cups: BTreeMap::new(), follows: Vec::new(), feeds: Vec::new(), st: Arc::new(FStats::default()) };
+            arm_ts: VecDeque::new(), shape_cups: BTreeMap::new(), fleet_cups: BTreeMap::new(), follows: Vec::new(), feeds: Vec::new(), st: Arc::new(FStats::default()), b1: None };
         let err = f.sig_load().err().map(|e| e.to_string());
+        // dip46: the frozen model (the file was checked at the config: its sha256 must be the frozen one)
+        if let Some(b) = f.cfg.b1.clone() {
+            let m = match &b.model { Some(p) => super::ps46_b1::Model::load(p).unwrap_or_else(|e| panic!("{e}")), None => super::ps46_b1::Model::frozen() };
+            f.b1 = Some(super::ps46_b1::B1::new(m));
+        }
         (f, err)
     }
 
@@ -378,6 +396,8 @@ impl Fleet {
         out.push(r);
         let watch = if e.stage.ends_with("arm") { e.slot + WATCH_ARM } else { e.slot + WATCH_FILL };
         let t = self.toks.entry(e.mint).or_default(); t.watch = t.watch.max(watch);
+        // dip46: our live / dry window armed / filled on the token (the B1 windows' overlap)
+        if let Some(b) = self.b1.as_mut() { if e.stage == "arm" || e.stage == "fill" { b.live(&e.mint, e.stage, e.slot, e.en); } }
         if e.stage.ends_with("fill") {
             // our landing: the fill's own position; a would-fill: just after its dump
             let land = match (e.idx, e.dump) { (Some(i), _) => (e.slot, i, 0), (None, Some((s, i))) => (s, i, u16::MAX), _ => (e.slot, u32::MAX, 0) };
@@ -428,6 +448,15 @@ impl Fleet {
             l(&s.tries), l(&s.pre), l(&s.exec), l(&s.exec_only), l(&s.slots), pct(l(&s.slots_pre_end), l(&s.slots)), l(&s.arms), self.arms_day(), self.signers_30m(),
             pct(l(&s.tries), l(&s.tries) + l(&s.shape)), l(&s.shape), l(&s.our_arms8), l(&s.our_arms), l(&s.our_fills8), l(&s.our_fills), l(&s.sh_fills8), l(&s.sh_fills),
             self.t_now.saturating_sub(self.t_last_try) / 1_000_000_000, if self.silent { " SILENT >30 min" } else { "" })
+            + &self.b1.as_ref().map(|b| b.status()).unwrap_or_default()
+    }
+
+    /// dip46: one executed tx's pump events to the B1 shadow (its gate = this thread's fleet flags)
+    pub fn b1_exec(&mut self, slot: u64, idx: u32, tr: &[arbx::dip::TradeEvent], cr: &[arbx::dip::CreateEvent], t: u64, out: &mut Vec<serde_json::Value>) {
+        let Some(mut b) = self.b1.take() else { return };
+        let clock = self.slot.max(slot);
+        b.exec(slot, idx, tr, cr, t, clock, &|m, s| self.flags(m, s), out);
+        self.b1 = Some(b);
     }
 
     pub fn finish(&mut self, out: &mut Vec<serde_json::Value>) -> serde_json::Value {
@@ -435,20 +464,26 @@ impl Fleet {
         for m in open { self.arm_close(&m, out); }
         let fl: Vec<(OurEv, (u64, u32, u16))> = std::mem::take(&mut self.follows);
         for (e, land) in fl { self.follow_rec(&e, land, out); }
+        let b1 = match self.b1.take() {
+            Some(mut b) => { let (t, c) = (self.t_now, self.slot); let j = b.finish(t, c, &|m, s| self.flags(m, s), out); self.b1 = Some(b); Some(j) }
+            None => None,
+        };
         let s = &self.st; let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
         let mut sg: Vec<_> = self.signers.iter().map(|(k, v)| (v.0, b58(k), v.1, v.2)).collect(); sg.sort();
-        serde_json::json!({"mode": "log", "sig_src": self.sig_src, "tries": l(&s.tries), "pre": l(&s.pre), "exec": l(&s.exec), "exec_only": l(&s.exec_only), "shape_only": l(&s.shape),
+        let mut j = serde_json::json!({"mode": "log", "sig_src": self.sig_src, "tries": l(&s.tries), "pre": l(&s.pre), "exec": l(&s.exec), "exec_only": l(&s.exec_only), "shape_only": l(&s.shape),
             "arms": l(&s.arms), "arms_day": self.arms_day(), "slots": l(&s.slots), "slots_pre_by_end": l(&s.slots_pre_end), "slots_exec_only": l(&s.slots_exec_only),
             "signers": sg.iter().map(|x| serde_json::json!({"signer": x.1, "first_t": x.0, "last_t": x.2, "tries": x.3})).collect::<Vec<_>>(),
             "fleet_cups": self.fleet_cups.iter().map(|(k, v)| [*k, *v as u64]).collect::<Vec<_>>(), "shape_cups": self.shape_cups.iter().map(|(k, v)| [*k, *v as u64]).collect::<Vec<_>>(),
             "ours": {"arms": l(&s.our_arms), "arms_fleet8": l(&s.our_arms8), "fills": l(&s.our_fills), "fills_fleet8": l(&s.our_fills8), "would_fills": l(&s.sh_fills),
-                "would_fills_fleet8": l(&s.sh_fills8)}, "follows": l(&s.follows), "silent_periods": self.silent_n, "silent_now": self.silent, "dropped": l(&s.dropped)})
+                "would_fills_fleet8": l(&s.sh_fills8)}, "follows": l(&s.follows), "silent_periods": self.silent_n, "silent_now": self.silent, "dropped": l(&s.dropped)});
+        if let Some(b) = b1 { j["b1"] = b; }
+        j
     }
 }
 
 // ---- the thread ---------------------------------------------------------------------------------------------------------
 
-pub enum FMsg { Hit(Hit, u64, u64, u64, u64, u16, bool), Slot(u64, u64), Trade(Pk, FT), Our(Box<OurEv>), Feeds(Vec<String>), Finish(crossbeam_channel::Sender<serde_json::Value>) }
+pub enum FMsg { Hit(Hit, u64, u64, u64, u64, u16, bool), Slot(u64, u64), Exec(u64, u32, Vec<arbx::dip::TradeEvent>, Vec<arbx::dip::CreateEvent>, u64), Trade(Pk, FT), Our(Box<OurEv>), Feeds(Vec<String>), Finish(crossbeam_channel::Sender<serde_json::Value>) }
 
 pub struct FleetTap {
     tx: Option<crossbeam_channel::Sender<FMsg>>,
@@ -461,6 +496,8 @@ pub struct FleetTap {
     pub max_slot: u64,
     pub watch: FxHashMap<Pk, u64>,
     pub user: Pk,
+    /// dip46 B1 LOG shadow on: every executed pump tx goes to the thread
+    pub b1: bool,
 }
 
 fn emit(out: &crossbeam_channel::Sender<Out>, recs: &mut Vec<serde_json::Value>) { for r in recs.drain(..) { let _ = out.send(Out::Rec(r)); } }
@@ -469,6 +506,7 @@ fn apply(f: &mut Fleet, m: FMsg, recs: &mut Vec<serde_json::Value>) {
     match m {
         FMsg::Hit(h, sig8, slot, t, mono, feed, pre) => f.sighting(&h, sig8, slot, t, mono, feed, pre, recs),
         FMsg::Slot(s, t) => f.slot_start(s, t, recs),
+        FMsg::Exec(s, i, tr, cr, t) => f.b1_exec(s, i, &tr, &cr, t, recs),
         FMsg::Trade(m, x) => f.trade(&m, x),
         FMsg::Our(e) => f.our(*e, recs),
         FMsg::Feeds(v) => f.feeds = v,
@@ -483,9 +521,15 @@ impl FleetTap {
             | per token tries in the last 1/2/3/8 slots on our arms / fills / would-fills | follower monitor {FOLLOW_SLOTS} slots | silent after {} min",
             f.sig_src, f.sig.read().unwrap().json(), err.as_ref().map(|e| format!(" | SIG FILE ERROR {e} (built-in kept)")).unwrap_or_default(), SILENT_NS / 60_000_000_000);
         let _ = out.send(Out::Rec(f.config_rec(&err)));
+        let b1 = f.b1.is_some();
+        if let Some(b) = &f.b1 {
+            eprintln!("DIP B1 LOG SHADOW (dip46, LOG ONLY: nothing sent, no decision changed): frozen B0 model {} sha256 {} | B0 = decoder >= {} and value >= {} SOL; B1 = value >= {} SOL and a fleet-signature try in S-2..S-1 | {}-slot windows, paper fills",
+                b.m.src, b.m.sha, b.m.dec_min, b.m.b0_thr, b.m.b1_thr, b.m.window);
+            let _ = out.send(Out::Rec(b.config_rec()));
+        }
         let sig = f.sig.clone();
         let status = Arc::new(Mutex::new(String::new()));
-        let base = FleetTap { tx: None, inline: None, out: out.clone(), thread: None, sig, status: status.clone(), max_slot: 0, watch: FxHashMap::default(), user };
+        let base = FleetTap { tx: None, inline: None, out: out.clone(), thread: None, sig, status: status.clone(), max_slot: 0, watch: FxHashMap::default(), user, b1 };
         if inline { return FleetTap { inline: Some(Box::new(f)), ..base }; }
         let (tx, rx) = crossbeam_channel::unbounded::<FMsg>();
         let o = out.clone();
@@ -525,6 +569,8 @@ impl FleetTap {
 
     /// an executed pump tx: the trades of the watched tokens
     pub fn exec(&mut self, a: &arbx::feeds::Arrival, x: &arbx::feeds::ExecInfo) {
+        // dip46: every executed pump tx (trades and creates) to the B1 shadow
+        if self.b1 && (!x.trades.is_empty() || !x.creates.is_empty()) { self.send(FMsg::Exec(a.slot, x.index as u32, x.trades.clone(), x.creates.clone(), a.t_rx)); }
         if self.watch.is_empty() { return; }
         for (j, e) in x.trades.iter().enumerate() {
             if self.watch.get(&e.mint).is_some_and(|&u| u >= a.slot) {
@@ -550,7 +596,7 @@ impl FleetTap {
         let slot = if stage == "fill" { v["slot"].as_u64().unwrap_or(self.max_slot) } else { self.max_slot };
         let kind = v["kind"].as_str().unwrap_or("t2").to_string();
         let e = OurEv { stage, w: v["w"].as_u64().unwrap_or(0), kind, mint, slot, idx: v["idx"].as_u64().map(|x| x as u32), dump,
-            sig: v["sig"].as_str().map(String::from), sol_in: v["sol_in"].as_u64(), dry: v["dry"].as_bool().unwrap_or(false) };
+            sig: v["sig"].as_str().map(String::from), sol_in: v["sol_in"].as_u64(), dry: v["dry"].as_bool().unwrap_or(false), en: v["en_slot"].as_u64() };
         self.watch_add(mint, slot + if stage == "arm" { WATCH_ARM } else { WATCH_FILL });
         self.send(FMsg::Our(Box::new(e)));
     }
@@ -564,7 +610,7 @@ impl FleetTap {
         let dump = v["x"]["slot"].as_u64().map(|s| (s, v["x"]["idx"].as_u64().unwrap_or(0) as u32));
         let slot = if stage == "shadow_fill" { v["s_in"].as_u64().or(dump.map(|d| d.0)).unwrap_or(self.max_slot) } else { v["slot"].as_u64().unwrap_or(self.max_slot) };
         let row = v["row"].as_str().map(|r| format!("{kind}:{r}")).unwrap_or_else(|| kind.to_string());
-        let e = OurEv { stage, w: v["w"].as_u64().unwrap_or(0), kind: row, mint, slot, idx: None, dump: if stage == "shadow_fill" { dump } else { None }, sig: None, sol_in: None, dry: true };
+        let e = OurEv { stage, w: v["w"].as_u64().unwrap_or(0), kind: row, mint, slot, idx: None, dump: if stage == "shadow_fill" { dump } else { None }, sig: None, sol_in: None, dry: true, en: None };
         self.watch_add(mint, slot + if stage == "shadow_arm" { WATCH_ARM } else { WATCH_FILL });
         self.send(FMsg::Our(Box::new(e)));
     }
