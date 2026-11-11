@@ -160,6 +160,9 @@ const A43FLAGS: [&str; 17] = ["--presend-live-dump-exit", "--presend-live-tbal-s
     "--presend-live-cascade", "--presend-live-fanout", "--presend-live-fanout-mode", "--presend-live-mint-ledger", "--presend-live-mint-ledger-mode",
     "--presend-live-shadow-exit", "--presend-live-acct", "--presend-live-botdepth-allow-log", "--presend-live-shadows43", "--presend-live-fpnb-strict"];
 /// dip43 BUILDER B (send path + exits; ps43_b.rs): its flags (each needs --presend-live; every one OFF by default = dip42)
+/// dip45 FLEET SIGNAL shadow (LOG ONLY; ps45_fleet.rs): its flags (each needs --presend-live; the signature file needs --presend-live-fleet-log on)
+const F45FLAGS: [&str; 2] = ["--presend-live-fleet-log", "--presend-live-fleet-sig"];
+
 const B43FLAGS: [&str; 12] = ["--presend-live-reroute", "--presend-live-single-token", "--presend-live-skip-clients", "--presend-live-fee-tier", "--presend-live-start-ms",
     "--presend-live-exit-lots", "--presend-live-exit-lots-ab", "--presend-live-exit-lots-kinds", "--presend-live-lot2-cu-price-micro", "--presend-live-timer-sell-cu-price-micro",
     "--presend-live-timer-sell-ab", "--presend-live-exit-ab"];
@@ -238,6 +241,10 @@ pub mod ps43_guard;
 // dip42 Q1: the quiet-token fresh-wallet big-buy reactive trigger as a shadow log (LOG ONLY, its own thread; off unless --q1-log on)
 #[path = "psq1.rs"]
 pub mod psq1;
+
+// dip45 FLEET SIGNAL shadow: fleet-shape tries on the pre-exec feeds, flags on our arms / fills (LOG ONLY, its own thread; off unless --presend-live-fleet-log on)
+#[path = "ps45_fleet.rs"]
+pub mod ps45_fleet;
 
 // dip43 Builder A: the feed-stall watchdog / dead-man (ps43_stall.rs) and the safety / control / shadow items (ps43.rs); off / log by default
 #[path = "ps43_stall.rs"]
@@ -542,6 +549,8 @@ pub struct Cfg {
     pub f2: Option<psfam2::F2Cfg>,
     /// dip42 Q1 (LOG ONLY; None = off): --q1-log on, --q1-bots FILE, --q1-fresh-state FILE and the rule's thresholds (psq1.rs)
     pub q1: Option<psq1::Q1Cfg>,
+    /// dip45 FLEET SIGNAL shadow (LOG ONLY; None = off, the default): --presend-live-fleet-log on, --presend-live-fleet-sig FILE
+    pub fleet: Option<ps45_fleet::FleetCfg>,
     /// dip43 Builder A's options (ps43.rs; all off / log by default)
     pub c43: ps43::Cfg43,
     /// dip43 BUILDER B's items (ps43_b.rs; Default = all off = dip42)
@@ -595,7 +604,7 @@ impl Cfg {
         // dip43 B: its flags need --presend-live too
         ps43_b::needs_presend_live(argv)?;
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(F45FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -727,6 +736,7 @@ impl Cfg {
             // dip42 (LOG ONLY; set below)
             f2: None,
             q1: None,
+            fleet: None,
             // dip43 (ps43.rs)
             c43: ps43::Cfg43::parse(argv)?,
             // dip43 B (every item off unless its flag)
@@ -766,6 +776,13 @@ impl Cfg {
             c.q1 = Some(psq1::Q1Cfg { min_sol: (min_sol * 1e9).round() as u64, age, bot_slots, dip_slots, fresh_max: fresh_max as u32, gap, size: (size * 1e9).round() as u64,
                 fresh_ns: (hours * 3.6e12).round() as u64, bots, state: arg("--q1-fresh-state"), fam: f2_wallets });
         }
+        // dip45 FLEET SIGNAL (LOG ONLY; off unless --presend-live-fleet-log on); the signature file needs the switch
+        for f in F45FLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
+        if onoff("--presend-live-fleet-log", false)? {
+            let sig = arg("--presend-live-fleet-sig");
+            if let Some(p) = &sig { ps45_fleet::Sig::parse(&std::fs::read(p).map_err(|e| anyhow::anyhow!("--presend-live-fleet-sig {p}: {e}"))?).map_err(|e| anyhow::anyhow!("--presend-live-fleet-sig {p}: {e}"))?; }
+            c.fleet = Some(ps45_fleet::FleetCfg { sig });
+        } else if has("--presend-live-fleet-sig") { bail!("--presend-live-fleet-sig needs --presend-live-fleet-log on"); }
         // dip41: every value given; the state / the tier's flags need the ledger
         for f in DLFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         if !c.dl_on { if let Some(f) = DLFLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-dumper-ledger on"); } }
@@ -1037,6 +1054,8 @@ impl Cfg {
         // dip42: only when on (off: dip41's record)
         if let Some(f) = &self.f2 { j["fam2"] = f.json(); }
         if let Some(q) = &self.q1 { j["q1"] = q.json(); }
+        // dip45: only when on (off: dip43g's record)
+        if let Some(f) = &self.fleet { j["fleet"] = f.json(); }
         // dip43: only when an option is given (off: dip42's record)
         if self.c43.any() { j["dip43"] = self.c43.json(); }
         // dip43 B: only when an item is on (off: dip42's record)
@@ -2365,6 +2384,8 @@ pub struct PsLive {
     f2: Option<psfam2::Fam2>,
     /// dip42 Q1 (LOG ONLY): the handle of its thread (None = off, the default; psq1.rs)
     q1: Option<psq1::Q1Tap>,
+    /// dip45 FLEET SIGNAL shadow (LOG ONLY): the handle of its thread (None = off, the default; ps45_fleet.rs)
+    fleet: Option<ps45_fleet::FleetTap>,
     /// dip43 Builder A's state (ps43.rs; idle by default)
     d43: ps43::D43,
     /// dip43 B: the lots exits under way, the lots mode, counters (empty with its flags off)
@@ -2447,6 +2468,8 @@ impl PsLive {
                 f.cfg.wallets.iter().map(|w| b58(w)[..8].to_string()).collect::<Vec<_>>().join(", "), f.cfg.slots);
         }
         let q1 = cfg.q1.clone().map(|c| psq1::Q1Tap::start(c, user, &out, false));
+        // dip45 (LOG ONLY; None with it off): the fleet shadow's own thread
+        let fleet = cfg.fleet.clone().map(|c| ps45_fleet::FleetTap::start(c, user, &out, false));
         arbx::feeds::own_fail_watch(user);
         // dip32: the creator histories' preload (the offline seed / the last run's state)
         if let Some(p) = &cfg.cr_state {
@@ -2608,7 +2631,7 @@ impl PsLive {
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1,
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet,
             d43: Default::default(), b43: ps43_b::B43St::default() };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
@@ -2626,9 +2649,11 @@ impl PsLive {
         Ok(p)
     }
 
-    fn rec(&self, v: serde_json::Value) {
+    fn rec(&mut self, v: serde_json::Value) {
         // dip36 skip2 (log-only): its history sees the skips and disarms (nothing without the flag)
         if let Some(f) = self.fp.as_ref() { f.on_rec(&v); }
+        // dip45 (log-only): our arms and fills get the fleet flags (nothing with it off)
+        if let Some(f) = self.fleet.as_mut() { f.on_rec(&v); }
         let _ = self.out.send(Out::Rec(v));
     }
     fn line(&self, l: String) { let _ = self.out.send(Out::Line(l)); }
@@ -2699,6 +2724,8 @@ impl PsLive {
 
     /// every executed or unexecuted arrival, before its pump events: our failed attempts (no pump event, so no ExecInfo)
     pub fn on_arrival(&mut self, a: &arbx::feeds::Arrival, slot_now: u64) {
+        // dip45 (log-only): the slot clock and the fleet-shape test, every feed (nothing with it off)
+        if let Some(f) = self.fleet.as_mut() { f.arrival(a); }
         self.sh.slot.store(slot_now, Ordering::Relaxed);
         self.last_t = self.last_t.max(a.t_rx);
         if a.executed != Some(false) || a.tx.keys.first() != Some(&self.user) { return; }
@@ -2846,6 +2873,8 @@ impl PsLive {
     pub fn on_exec(&mut self, a: &arbx::feeds::Arrival, x: &arbx::feeds::ExecInfo, slot_now: u64, launch_of: impl Fn(&Pk) -> Option<Launch>,
                    reactive_open: &dyn Fn(&Pk) -> bool, first: Option<&FxHashMap<u64, (u64, u16)>>) {
         let t0 = Instant::now();
+        // dip45 (log-only): the watched tokens' trades to the fleet shadow, before anything decides on this tx (nothing with it off)
+        if let Some(f) = self.fleet.as_mut() { f.exec(a, x); }
         self.sh.slot.store(slot_now, Ordering::Relaxed);
         // dip37 HYBRID-2: the dumps dipmode recorded (this tx's and earlier) into the counter, before any trigger of this tx (nothing without it)
         if let Some(h) = self.h2.as_mut() { h.drain(); h.prune(&self.det, slot_now); }
@@ -4318,6 +4347,8 @@ impl PsLive {
     /// to the creator's paper column (ps / pn) and writes presend_live_cr_paper; a window that ends without a row c fill is dropped.
     /// The creator gate's decision never reads the paper column
     pub fn on_shadow_rec(&mut self, rec: &serde_json::Value) {
+        // dip45 (log-only): the shadow's paper arms / would-fills get the fleet flags (nothing with it off)
+        if let Some(f) = self.fleet.as_mut() { f.on_shadow(rec); }
         // dip36 (log-only): the shadow's row c for FP-NOBOT's s_* inputs (nothing without the flag)
         if self.fp.is_some() { self.fpnb_shadow(rec); }
         // dip37 --presend-live-wh-learn paper: a wh_loss-skipped trigger's row c into the whale's ledger (nothing without it)
@@ -4363,6 +4394,9 @@ impl PsLive {
         }
     }
 
+    /// dip45: the feed names for the fleet shadow's records (nothing with it off)
+    pub fn fleet_feeds(&mut self, names: &[String]) { if let Some(f) = self.fleet.as_mut() { f.feeds(names.to_vec()); } }
+
     /// the shadow's presend_arm records of this tx (parity with the live triggers)
     pub fn on_shadow_arm(&mut self, rec: &serde_json::Value) {
         let k = (rec["mint"].as_str().unwrap_or("").to_string(), rec["sig"].as_str().unwrap_or("").to_string(), rec["j"].as_i64().unwrap_or(-1));
@@ -4391,7 +4425,7 @@ impl PsLive {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status()
-            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.status43() + &self.b43_status();
+            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.status43() + &self.b43_status();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -4576,6 +4610,8 @@ impl PsLive {
         // dip42: only with them on (Q1: its thread saves the wallet history and answers)
         if let Some(j) = self.f2_finish() { fin["fam2"] = j; }
         if let Some(j) = self.q1.as_mut().and_then(|q| q.finish()) { fin["q1"] = j; }
+        // dip45 (log-only)
+        if let Some(j) = self.fleet.as_mut().and_then(|f| f.finish()) { fin["fleet"] = j; }
         // dip43: only when an option is given / something happened (the exit shadows still open are written)
         if let Some(j) = self.finish43() { fin["dip43"] = j; }
         // dip43 B: only with an item on
@@ -4736,6 +4772,7 @@ impl PsLive {
         // dip42: FAM2's book; Q1 inline (every message handled at once; no thread)
         let f2 = cfg.f2.clone().map(psfam2::Fam2::new);
         let q1 = cfg.q1.clone().map(|c| psq1::Q1Tap::start(c, user, &out, true));
+        let fleet = cfg.fleet.clone().map(|c| ps45_fleet::FleetTap::start(c, user, &out, true));
         // dip38: the anti-bait log with the tests' queue (no task, no RPC)
         let l38 = pslog38::L38::new(&cfg, None).unwrap();
         let (atx, arx) = crossbeam_channel::unbounded();
@@ -4760,7 +4797,7 @@ impl PsLive {
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, d43: Default::default(),
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet, d43: Default::default(),
             b43: ps43_b::B43St::default() }, atx, orx)
     }
 
@@ -4887,6 +4924,11 @@ mod dip43_b_tests;
 #[cfg(test)]
 #[path = "dip43_guard_tests.rs"]
 mod dip43_guard_tests;
+
+// dip45 (11-11 PKT): the FLEET SIGNAL shadow (ps45_fleet.rs; LOG ONLY, off by default = dip43g)
+#[cfg(test)]
+#[path = "dip45_tests.rs"]
+mod dip45_tests;
 
 #[cfg(test)]
 mod tests {

@@ -562,7 +562,7 @@ pub async fn run_dip(probe: &Probe, key: &SigningKey, user: Pk, rpc: &Arc<rpc::R
     // dip43 C2: the snipe-guard program checked on chain by simulation before any try (fail closed; nothing with the guard off)
     if let Some(g) = ps_live_cfg.as_ref().and_then(|c| c.g43.as_ref()) { pslive::ps43_guard::verify(rpc, key, user, g).await.context("--presend-live-guard")?; }
     let mut pslive: Option<pslive::PsLive> = match ps_live_cfg {
-        Some(c) => Some(pslive::PsLive::start(c, key_arc.clone(), user, rpc, path, &log, mtx.clone(), allow_holder, &cohort)?),
+        Some(c) => { let mut p = pslive::PsLive::start(c, key_arc.clone(), user, rpc, path, &log, mtx.clone(), allow_holder, &cohort)?; p.fleet_feeds(&feed_names); Some(p) }
         None => None,
     };
     // dip43 A1 FEED-STALL WATCHDOG (ON by default as a line + record; its pre-send pause / dead-man only with their flags: pslive::ps43*)

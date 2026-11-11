@@ -16,6 +16,11 @@ use arbx::dip::{CreateEvent, TradeEvent};
 
 const USER: Pk = [0x5Au8; 32];
 
+thread_local! {
+    /// dip45 tests: inject a fleet-shape try before every tape tx of the golden passes
+    pub(super) static GOLDEN_FLEET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 // ---- GOLDEN -------------------------------------------------------------------------------------------------------------
 
 /// the digest of golden_digest() on the dip25 tree (10-29 ~20:30 PKT, before any dip26 change)
@@ -121,6 +126,8 @@ pub(super) fn golden_pass(tag: u8, extra: &[&str], ps: arbx::presend::Params, fi
         slot_now = slot_now.max(*s);
         let a = arbx::feeds::Arrival { feed: 0, slot: *s, t_rx: *s * 1_000_000 + *idx, t_decoded: *s * 1_000_000 + *idx, executed: Some(true),
             tx: arbx::tx::Tx { sig: *sig, keys: vec![[3u8; 32]], ..Default::default() }, poh: None, raw: arbx::feeds::RawTx::None, exec: Some(Arc::new(x.clone())) };
+        // dip45 tests: a fleet-shape try on the tx's token first (an unexecuted feed; off = no arrival added)
+        if GOLDEN_FLEET.with(|c| c.get()) { if let Some(e) = x.trades.first() { p.on_arrival(&dip45_tests::fleet_arrival(e.mint, *s, *s * 1_000_000 + *idx, *idx), slot_now); } }
         p.on_arrival(&a, slot_now);
         p.on_exec(&a, x, slot_now, launch_of, &|_| false, None);
         let marks: Vec<[u64; 5]> = (0..=x.trades.len()).map(|_| [0u64; 5]).collect();
