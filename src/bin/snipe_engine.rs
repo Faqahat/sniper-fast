@@ -1887,7 +1887,17 @@ async fn run(probe: &Probe, key: SigningKey, user: Pk, rpc: Arc<rpc::Rpc>, warm_
     // ALT cache: the known launchpad tables + --alt-cache-file + --alt-preload, before any feed starts
     altc::init(rpc.clone()).await;
     // M-3 (audit 3): --buy-max-slot-delta N: the on-chain slot deadline, verified by simulation now or no start (fail closed)
-    if has("--buy-max-slot-delta") {
+    // dip45: a DRY shadow run (no --live) with an unfunded key cannot simulate (AccountNotFound); --slot-guard-assume DISC:OP:ACCT
+    // takes the encoding the live runs verified (r76+: 15:5:0) without the simulation. Refused with --live (live keeps fail-closed).
+    if let Some(a) = arg("--slot-guard-assume") {
+        if live { anyhow::bail!("--slot-guard-assume is for dry shadow runs only (refused with --live: live verifies on chain)"); }
+        let v: Vec<u64> = a.split(':').map(|x| x.parse::<u64>()).collect::<std::result::Result<_, _>>().map_err(|_| anyhow::anyhow!("--slot-guard-assume DISC:OP:ACCT, got {a}"))?;
+        if v.len() != 3 || v[2] > 1 { anyhow::bail!("--slot-guard-assume DISC:OP:ACCT (ACCT 0|1), got {a}"); }
+        let g = GuardEnc { disc: v[0] as u8, op: v[1] as u8, acct: v[2] == 1 };
+        let n = arg_u64("--buy-max-slot-delta", 1);
+        eprintln!("SLOT-GUARD ASSUMED (dry shadow, no simulation): Lighthouse AssertSysvarClock disc {} op {} acct {}; deadline = create slot + {n}", g.disc, g.op, g.acct);
+        let _ = SLOT_GUARD.set((g, n));
+    } else if has("--buy-max-slot-delta") {
         let g = verify_slot_guard(&rpc, &key, user).await.context("--buy-max-slot-delta")?;
         let _ = SLOT_GUARD.set(g);
     }
