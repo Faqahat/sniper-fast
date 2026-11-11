@@ -107,7 +107,7 @@ fn dip36_fpnb_end_to_end() {
         let mut sg = [0u8; 64]; sg[0] = 0x36; sg[1] = 0xA7;
         atx.send(Att { w: 1, n: 1, mint: tk.mint, sig: sg, tag: pl::PS_TAG | 1, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 1006, deadline: 1007,
             lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (1006, 0, 0), t_send: 1006 * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-            tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default() }).unwrap();
+            tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
         p.drain_atts();
         let b2 = tk.buy(bot, S / 4);
         tx(&mut p, 1006, 4, None, bot, vec![b2], vec![], &l);
@@ -352,7 +352,7 @@ fn dip36_fpnb_gate_live_and_control_file() {
     let mut sg = [0u8; 64]; sg[0] = 0x37; sg[1] = 0xA7;
     atx.send(Att { w: 1, n: 9, mint: tk.mint, sig: sg, tag: pl::PS_TAG | 9, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 1008, deadline: 1009,
         lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (1008, 0, 0), t_send: 1008 * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-        tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default() }).unwrap();
+        tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
     p.drain_atts();
     let me = tk.buy(USER, 4 * S / 10);
     tx(&mut p, 1009, 9, Some(sg), USER, vec![me], vec![], &l);

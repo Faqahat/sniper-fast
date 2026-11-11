@@ -160,6 +160,9 @@ const A43FLAGS: [&str; 17] = ["--presend-live-dump-exit", "--presend-live-tbal-s
     "--presend-live-cascade", "--presend-live-fanout", "--presend-live-fanout-mode", "--presend-live-mint-ledger", "--presend-live-mint-ledger-mode",
     "--presend-live-shadow-exit", "--presend-live-acct", "--presend-live-botdepth-allow-log", "--presend-live-shadows43", "--presend-live-fpnb-strict"];
 /// dip43 BUILDER B (send path + exits; ps43_b.rs): its flags (each needs --presend-live; every one OFF by default = dip42)
+/// dip45 FLEET SIGNAL shadow (LOG ONLY; ps45_fleet.rs): its flags (each needs --presend-live; the signature file needs --presend-live-fleet-log on)
+const F45FLAGS: [&str; 2] = ["--presend-live-fleet-log", "--presend-live-fleet-sig"];
+
 const B43FLAGS: [&str; 12] = ["--presend-live-reroute", "--presend-live-single-token", "--presend-live-skip-clients", "--presend-live-fee-tier", "--presend-live-start-ms",
     "--presend-live-exit-lots", "--presend-live-exit-lots-ab", "--presend-live-exit-lots-kinds", "--presend-live-lot2-cu-price-micro", "--presend-live-timer-sell-cu-price-micro",
     "--presend-live-timer-sell-ab", "--presend-live-exit-ab"];
@@ -239,6 +242,10 @@ pub mod ps43_guard;
 #[path = "psq1.rs"]
 pub mod psq1;
 
+// dip45 FLEET SIGNAL shadow: fleet-shape tries on the pre-exec feeds, flags on our arms / fills (LOG ONLY, its own thread; off unless --presend-live-fleet-log on)
+#[path = "ps45_fleet.rs"]
+pub mod ps45_fleet;
+
 // dip43 Builder A: the feed-stall watchdog / dead-man (ps43_stall.rs) and the safety / control / shadow items (ps43.rs); off / log by default
 #[path = "ps43_stall.rs"]
 pub mod ps43_stall;
@@ -260,10 +267,16 @@ const D46FLAGS: [&str; 5] = ["--presend-live-probe", "--presend-live-probe-max-p
 // dip47: GRPSIGN, the group-holder-risk metric at SIGNING (LOG ONLY; off by default = dip46)
 #[path = "psgrp47.rs"]
 pub mod psgrp47;
-const D47FLAGS: [&str; 3] = ["--presend-live-grpsign-log", "--presend-rearm-max-per-mint", "--presend-live-pause-window"];
+const D47FLAGS: [&str; 8] = ["--presend-live-grpsign-log", "--presend-rearm-max-per-mint", "--presend-live-pause-window", "--presend-live-rearm-fleet",
+    "--presend-live-rearm-fleet-mode", "--presend-live-funder-log", "--presend-live-funder-rpc", "--presend-live-funder-rps"];
 // dip47: hot control keys (sizes, thresholds, exits, floors, grp_t2) + the versioned FILTER STATE stamped on decision records
 #[path = "psctl47.rs"]
 pub mod psctl47;
+// dip47: the RE-ARM FLEET rule (per-send gate on re-arm windows; log by default) and the FUNDER-CLUSTER log (log only)
+#[path = "psrfleet47.rs"]
+pub mod psrfleet47;
+#[path = "psfunder47.rs"]
+pub mod psfunder47;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -555,6 +568,8 @@ pub struct Cfg {
     pub f2: Option<psfam2::F2Cfg>,
     /// dip42 Q1 (LOG ONLY; None = off): --q1-log on, --q1-bots FILE, --q1-fresh-state FILE and the rule's thresholds (psq1.rs)
     pub q1: Option<psq1::Q1Cfg>,
+    /// dip45 FLEET SIGNAL shadow (LOG ONLY; None = off, the default): --presend-live-fleet-log on, --presend-live-fleet-sig FILE
+    pub fleet: Option<ps45_fleet::FleetCfg>,
     /// dip43 Builder A's options (ps43.rs; all off / log by default)
     pub c43: ps43::Cfg43,
     /// dip43 BUILDER B's items (ps43_b.rs; Default = all off = dip42)
@@ -571,6 +586,13 @@ pub struct Cfg {
     pub rearm_cap47: u32,
     /// dip47 --presend-live-pause-window "HH:MM-HH:MM[,...]" in PKT (UTC+5): no new arms inside (none by default)
     pub pause47: ([(u16, u16); 4], u8),
+    /// dip47 --presend-live-rearm-fleet N:SLOTS (None = off) and its mode (false = log)
+    pub rearm_fleet: Option<(u32, u64)>,
+    pub rearm_fleet_live: bool,
+    /// dip47 --presend-live-funder-log on (LOG ONLY), its RPC (None: the FAM log's) and calls per second
+    pub funder_log: bool,
+    pub funder_rpc: Option<String>,
+    pub funder_rps: u32,
 }
 
 /// dip43e --presend-live-dump-exit S:C:X -> (S lamports, C lamports, X fraction): S, C in [0, 50] SOL (0 = that trigger off, not both 0),
@@ -618,7 +640,7 @@ impl Cfg {
         // dip43 B: its flags need --presend-live too
         ps43_b::needs_presend_live(argv)?;
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -750,6 +772,7 @@ impl Cfg {
             // dip42 (LOG ONLY; set below)
             f2: None,
             q1: None,
+            fleet: None,
             // dip43 (ps43.rs)
             c43: ps43::Cfg43::parse(argv)?,
             // dip43 B (every item off unless its flag)
@@ -764,9 +787,18 @@ impl Cfg {
                 .with_context(|| format!("--presend-rearm-max-per-mint {v}: re-arm fills per mint 0..10 (0 = no cap)"))? },
             pause47: match arg("--presend-live-pause-window") { None => ([(0, 0); 4], 0),
                 Some(v) => psctl47::pause_parse(&v).map_err(|e| anyhow::anyhow!("--presend-live-pause-window {v}: {e} (\"HH:MM-HH:MM[,HH:MM-HH:MM]\" in PKT = UTC+5; 23:00-02:00 crosses midnight)"))? },
+            rearm_fleet: match arg(psrfleet47::FLAG) { None => None, Some(v) => Some(psrfleet47::spec_parse(&v).map_err(|e| anyhow::anyhow!("{} {e}", psrfleet47::FLAG))?) },
+            rearm_fleet_live: match arg(psrfleet47::FLAG_MODE).as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("{} {x}: log | live", psrfleet47::FLAG_MODE) },
+            funder_log: onoff("--presend-live-funder-log", false)?,
+            funder_rpc: arg("--presend-live-funder-rpc").filter(|u| !u.starts_with("--")),
+            funder_rps: match arg("--presend-live-funder-rps") { None => 15, Some(v) => v.parse::<u32>().ok().filter(|n| (1..=40).contains(n))
+                .with_context(|| format!("--presend-live-funder-rps {v}: RPC calls per second 1..40 (default 15)"))? },
             limits47: serde_json::json!({"max_sol": arg("--max-sol"), "kill_switch_sol": arg("--max-loss-sol"), "profit_lock": {"min_sol": arg("--profit-lock-min-sol"), "frac": arg("--profit-lock-frac")}}),
         };
         // dip47: the hold clocks it reads are kept only with the annotations on
+        if has(psrfleet47::FLAG_MODE) && c.rearm_fleet.is_none() { bail!("{} needs {} N:SLOTS", psrfleet47::FLAG_MODE, psrfleet47::FLAG); }
+        if !c.funder_log { if let Some(f) = ["--presend-live-funder-rpc", "--presend-live-funder-rps"].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-funder-log on"); } }
+        if has("--presend-live-funder-rpc") && c.funder_rpc.is_none() { bail!("--presend-live-funder-rpc needs a URL"); }
         if c.grpsign && !c.ann { bail!("{} on needs --presend-live-ann on (the hold clocks are kept only with it)", psgrp47::FLAG); }
         // dip43: the true balances and the fan-out come from dip35's fam read at the arm (verifier 11-10: the feeds carry no plain transfers)
         if (c.c43.tbal || c.c43.fanout.is_some()) && !c.fam_log { bail!("--presend-live-tbal / --presend-live-cascade / --presend-live-fanout need --presend-live-fam-log (its RPC read at the arm is their source)"); }
@@ -800,6 +832,16 @@ impl Cfg {
             c.q1 = Some(psq1::Q1Cfg { min_sol: (min_sol * 1e9).round() as u64, age, bot_slots, dip_slots, fresh_max: fresh_max as u32, gap, size: (size * 1e9).round() as u64,
                 fresh_ns: (hours * 3.6e12).round() as u64, bots, state: arg("--q1-fresh-state"), fam: f2_wallets });
         }
+        // dip45 FLEET SIGNAL (LOG ONLY; off unless --presend-live-fleet-log on); the signature file needs the switch
+        for f in F45FLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
+        if onoff("--presend-live-fleet-log", false)? {
+            let sig = arg("--presend-live-fleet-sig");
+            if let Some(p) = &sig { ps45_fleet::Sig::parse(&std::fs::read(p).map_err(|e| anyhow::anyhow!("--presend-live-fleet-sig {p}: {e}"))?).map_err(|e| anyhow::anyhow!("--presend-live-fleet-sig {p}: {e}"))?; }
+            c.fleet = Some(ps45_fleet::FleetCfg { sig });
+        } else if has("--presend-live-fleet-sig") { bail!("--presend-live-fleet-sig needs --presend-live-fleet-log on"); }
+        // dip47: the re-arm fleet rule reads the fleet detector
+        if c.rearm_fleet.is_some() && c.fleet.is_none() { bail!("{} needs --presend-live-fleet-log on (the fleet detector it reads); without it the rule would withhold every re-arm try", psrfleet47::FLAG); }
+        if c.rearm_fleet.is_some() && !c.rearm.on { bail!("{} needs --presend-live-rearm on (it gates re-arm windows only)", psrfleet47::FLAG); }
         // dip41: every value given; the state / the tier's flags need the ledger
         for f in DLFLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         if !c.dl_on { if let Some(f) = DLFLAGS[1..].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-dumper-ledger on"); } }
@@ -1073,6 +1115,8 @@ impl Cfg {
         // dip42: only when on (off: dip41's record)
         if let Some(f) = &self.f2 { j["fam2"] = f.json(); }
         if let Some(q) = &self.q1 { j["q1"] = q.json(); }
+        // dip45: only when on (off: dip43g's record)
+        if let Some(f) = &self.fleet { j["fleet"] = f.json(); }
         // dip43: only when an option is given (off: dip42's record)
         if self.c43.any() { j["dip43"] = self.c43.json(); }
         // dip43 B: only when an item is on (off: dip42's record)
@@ -1081,6 +1125,8 @@ impl Cfg {
         if self.p46.any() { j["dip46"] = self.p46.json(); }
         // dip47: only when on (off: dip46's record)
         if self.grpsign { j["dip47"] = serde_json::json!({"grpsign_log": true, "t2_pct": psgrp47::T2_PCT}); }
+        if let Some((n, k)) = self.rearm_fleet { j["rearm_fleet"] = serde_json::json!({"min": n, "slots": k, "mode": if self.rearm_fleet_live { "live" } else { "log" }}); }
+        if self.funder_log { j["funder_log"] = serde_json::json!({"rps": self.funder_rps, "rpc": if self.funder_rpc.is_some() { "--presend-live-funder-rpc" } else { "fam" }}); }
         j
     }
 }
@@ -1154,7 +1200,9 @@ struct SWin { id: u64, mint: Pk, launch: Launch, st_ns: u64, stop_ns: u64, en_sl
               /// dip43 C2 the window's holder floors (snipe-guard holders mode; empty otherwise), kept by the main loop
               g43: ps43_guard::HSet,
               /// dip46: Some(the blocking filter) = an arm-time PROBE window (every try a probe); None = a real window
-              p46: Option<&'static str> }
+              p46: Option<&'static str>,
+              /// dip47 re-arm fleet rule: the mint's fleet tries per slot, kept by the main loop (re-arm windows; zero otherwise)
+              rfl: psrfleet47::FlSnap }
 
 /// dip28: the deeper limit's holder threshold (% of supply)
 pub const DEEP_OB6: f32 = 6.0;
@@ -1296,6 +1344,8 @@ struct Shared {
     p46: psprobe46::Sh46,
     /// dip47: the hot keys the sender applies (psctl47.rs)
     f47: psctl47::Sh47,
+    /// dip47 re-arm fleet rule (psrfleet47.rs; off = spec 0)
+    rf: psrfleet47::ShRf,
 }
 
 impl Shared {
@@ -1318,6 +1368,8 @@ pub struct Att {
     pub bd: Option<psbd::BdV>,
     /// dip46: a probe (never a fill) / the A/B filters this try bypassed (Default: a real try, nothing bypassed)
     pub x46: psprobe46::X46,
+    /// dip47 re-arm fleet rule: this re-arm try's verdict (None: the rule off / not a re-arm window)
+    pub rf: Option<psrfleet47::RfV>,
 }
 
 /// what the sender needs
@@ -1364,9 +1416,12 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
     let mut s46 = psprobe46::Send46::new(&sc.cfg.p46);
     // dip47: the hot keys' version the sender applied (botdepth gate, CURVE band D, floors on re-arm windows)
     let mut f47v = 0u64;
+    // dip47 re-arm fleet rule: the per-window counts for its summary (empty with the rule off)
+    let mut srf = psrfleet47::SendRf::default();
     loop {
         if sh.stop.load(Ordering::Relaxed) && sh.wins.lock().unwrap().is_empty() { break; }
         psctl47::sender_sync(&sh.f47, &mut f47v, &mut sc.cfg);
+        srf.flush(&out, arbx::fast::mono_ns(), false);
         let now = arbx::fast::mono_ns();
         let slot = sh.cur_slot();
         let mut due: Vec<SWin> = Vec::new();
@@ -1386,6 +1441,8 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             // built as the real try, signed with min_out u64::MAX (never a fill); `ab46` = the A/B'd filters this real try bypasses
             let mut probe: Option<&'static str> = w.p46;
             let mut ab46: u32 = 0;
+            // dip47 re-arm fleet rule: this try's verdict (None: off / a T2 or wide window / a probe)
+            let mut rfv: Option<psrfleet47::RfV> = None;
             // dip43 A8 (--presend-live-acct on; nothing otherwise): this window's due try (its refusals are charged by Shared::skip)
             if probe.is_none() { ps43::cur_set(&sh.g43, w.id, slot); }
             // why not now (each counted); dip26: the same gate for every window (send_gate: unit-tested), at the window's own spend
@@ -1476,6 +1533,10 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
                     }
                 }
             }
+            // dip47 RE-ARM FLEET rule (re-arm windows only; never a probe): fewer than N fleet-shape tries on the mint in the last SLOTS slots ->
+            // withheld (live) / counted (log); fail open without detector data. Lock-free: the window's copy + 4 relaxed loads
+            rfv = psrfleet47::gate(&sh.rf, w.rearm, probe.is_some(), &w.rfl, slot, now);
+            if let Some(v) = rfv { srf.note(w.id, w.mint, &v, now); if v.withhold() { sh.skip("rearm_fleet_withheld"); continue 'due; } }
             let deadline = (slot + sc.cfg.deadline_slots).min(w.en_slot);
             if deadline < slot { skp(&sh, probe, "window_over"); continue; }
             let (leader, client) = lat::leader_of(slot).unwrap_or_default();
@@ -1529,7 +1590,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let t1 = arbx::fast::mono_ns();
             let x46 = psprobe46::X46 { probe, ab: ab46, spend: w.spend, fr: w.fr, sv: w.vsol, st: w.vtok, min: min_out };
             let mut a = Att { w: w.id, n: w.n, mint: w.mint, sig, tag, path: r.path.name.clone(), client: client.clone(), slot, deadline, lim, min_out: min_sig, p_sign: w.vsol as f64 / w.vtok.max(1) as f64,
-                sign_pos: w.pos, t_send, roles, tip: tip.map_or(0, |t| t.1), wst: "dry", ob6: w.ob6, grd: w.grd, fa, bd: bdv, x46 };
+                sign_pos: w.pos, t_send, roles, tip: tip.map_or(0, |t| t.1), wst: "dry", ob6: w.ob6, grd: w.grd, fa, bd: bdv, x46, rf: rfv };
             // registered BEFORE the write: the main loop knows the signature before its landing can arrive
             // dip43 B2: a tiered try's failed fee for the main loop's fallback (nothing with the tier off)
             if tier.is_some_and(|t| t.on) { ps43_b::tier_fee_note(&sig, psfeeab::fail_fee(cu_limit, cu_price)); }
@@ -1557,6 +1618,8 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             if let Some(f) = &a.fa { f.put(&mut rec, a.tip); }
             // dip39: the bot depth verdict (only with the gate on; "ok": false = no list, sent)
             if let (Some(v), Some(g)) = (bdv, sc.cfg.bd.as_ref()) { rec["botdepth"] = v.json(g); }
+            // dip47: the re-arm fleet rule's verdict (only with the rule on, re-arm windows)
+            if let Some(v) = rfv { rec["rearm_fleet"] = v.json(); }
             // dip43 B1 / B2: only when re-routed / with the tier on
             if let Some(p0) = path0 { rec["path_orig"] = p0.into(); }
             if let Some(t) = tier { rec["tier"] = t.json(); }
@@ -2473,6 +2536,8 @@ pub struct PsLive {
     f2: Option<psfam2::Fam2>,
     /// dip42 Q1 (LOG ONLY): the handle of its thread (None = off, the default; psq1.rs)
     q1: Option<psq1::Q1Tap>,
+    /// dip45 FLEET SIGNAL shadow (LOG ONLY): the handle of its thread (None = off, the default; ps45_fleet.rs)
+    fleet: Option<ps45_fleet::FleetTap>,
     /// dip43 Builder A's state (ps43.rs; idle by default)
     d43: ps43::D43,
     /// dip43 B: the lots exits under way, the lots mode, counters (empty with its flags off)
@@ -2483,6 +2548,10 @@ pub struct PsLive {
     g47: psgrp47::G47,
     /// dip47 hot keys + filter state (psctl47.rs)
     f47: psctl47::F47,
+    /// dip47 re-arm fleet rule: the mints' fleet tries (empty with the rule off)
+    rf47: psrfleet47::Rf47,
+    /// dip47 FUNDER-CLUSTER log (LOG ONLY; None = off)
+    fu47: Option<psfunder47::Funder>,
 }
 
 impl PsLive {
@@ -2524,7 +2593,7 @@ impl PsLive {
         let (atx, arx) = crossbeam_channel::unbounded::<Att>();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
-            slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() });
+            slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() });
         // dip39 BOT DEPTH: the start mode and the list (a bad / missing list: FAIL OPEN, a warning; None with it off)
         sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
         let bd = cfg.bd.map(|g| psbd::Bd::open(g, cfg.bd_list.as_deref(), cfg.bd_state.as_deref(), &user));
@@ -2561,6 +2630,8 @@ impl PsLive {
                 f.cfg.wallets.iter().map(|w| b58(w)[..8].to_string()).collect::<Vec<_>>().join(", "), f.cfg.slots);
         }
         let q1 = cfg.q1.clone().map(|c| psq1::Q1Tap::start(c, user, &out, false));
+        // dip45 (LOG ONLY; None with it off): the fleet shadow's own thread
+        let fleet = cfg.fleet.clone().map(|c| ps45_fleet::FleetTap::start(c, user, &out, false));
         arbx::feeds::own_fail_watch(user);
         // dip32: the creator histories' preload (the offline seed / the last run's state)
         if let Some(p) = &cfg.cr_state {
@@ -2724,8 +2795,8 @@ impl PsLive {
             st: Stats::default(), out, thread: Some(thread), user, key, rpc: rpc.clone(), path: Some(path.clone()), mtx, allow_holder, stopped: None, stopped_at: None,
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1,
-            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default() };
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet,
+            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
@@ -2743,14 +2814,18 @@ impl PsLive {
         p.p46_start();
         // dip47: the hot keys' start values, the control file's first read, the filter state fv 0
         p.f47_start();
+        // dip47 FUNDER-CLUSTER log (log only; None with the flag off)
+        p.fu47 = PsLive::fu47_open(&p.cfg);
         Ok(p)
     }
 
-    fn rec(&self, mut v: serde_json::Value) {
+    fn rec(&mut self, mut v: serde_json::Value) {
         // dip47: the filter state's version on the decision records (fill / realized: the window's ARM state in full)
         self.stamp47(&mut v);
         // dip36 skip2 (log-only): its history sees the skips and disarms (nothing without the flag)
         if let Some(f) = self.fp.as_ref() { f.on_rec(&v); }
+        // dip45 (log-only): our arms and fills get the fleet flags (nothing with it off)
+        if let Some(f) = self.fleet.as_mut() { f.on_rec(&v); }
         let _ = self.out.send(Out::Rec(v));
     }
     fn line(&self, l: String) { let _ = self.out.send(Out::Line(l)); }
@@ -2826,6 +2901,8 @@ impl PsLive {
 
     /// every executed or unexecuted arrival, before its pump events: our failed attempts (no pump event, so no ExecInfo)
     pub fn on_arrival(&mut self, a: &arbx::feeds::Arrival, slot_now: u64) {
+        // dip45 (log-only): the slot clock and the fleet-shape test, every feed (nothing with it off)
+        if let Some(h) = self.fleet.as_mut().and_then(|f| f.arrival(a)) { if self.cfg.rearm_fleet.is_some() { self.rf47_hit(h.0, h.1, h.2); } }
         self.sh.slot.store(slot_now, Ordering::Relaxed);
         self.last_t = self.last_t.max(a.t_rx);
         if a.executed != Some(false) || a.tx.keys.first() != Some(&self.user) { return; }
@@ -2975,6 +3052,8 @@ impl PsLive {
     pub fn on_exec(&mut self, a: &arbx::feeds::Arrival, x: &arbx::feeds::ExecInfo, slot_now: u64, launch_of: impl Fn(&Pk) -> Option<Launch>,
                    reactive_open: &dyn Fn(&Pk) -> bool, first: Option<&FxHashMap<u64, (u64, u16)>>) {
         let t0 = Instant::now();
+        // dip45 (log-only): the watched tokens' trades to the fleet shadow, before anything decides on this tx (nothing with it off)
+        if let Some(f) = self.fleet.as_mut() { f.exec(a, x); }
         self.sh.slot.store(slot_now, Ordering::Relaxed);
         // dip37 HYBRID-2: the dumps dipmode recorded (this tx's and earlier) into the counter, before any trigger of this tx (nothing without it)
         if let Some(h) = self.h2.as_mut() { h.drain(); h.prune(&self.det, slot_now); }
@@ -3063,6 +3142,8 @@ impl PsLive {
             }
             evs.clear();
             self.det.trade(&t, &mut evs);
+            // dip47 FUNDER-CLUSTER log (log only): first buys noted, a holder at >= 0.5% queued (nothing with it off)
+            if self.fu47.is_some() { self.fu47_trade(&t); }
             // dip37c: the per-send blocklist's cached listed holder (a listed wallet's trade only; nothing without the flag)
             if self.cfg.blocklist_send { self.bl_send_refresh(&e.mint, Some(&e.user)); }
             // dip38 (log-only): the launcher's trades, the shape's slot deltas, a new >= 3% buyer of an armed token queued (nothing with it off)
@@ -3409,10 +3490,12 @@ impl PsLive {
         let fab = self.fab_assign(id);
         let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
             spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
-            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint), g43: self.g43_set(&t.mint), p46: None };
+            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint), g43: self.g43_set(&t.mint), p46: None, rfl: Default::default() };
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
         self.f47_arm(id);
+        // dip47 FUNDER-CLUSTER log (log only; nothing with it off)
+        let _ = self.fu47_event(id, &t.mint, "arm", t.s);
         // dip47 (log only): the window's group at its arm (the first tries' state until the next trade; nothing with the flag off)
         if self.cfg.grpsign { self.g47_snap(id, &t.mint, t.pos(), t.s); }
         self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0)).0.push_back(t.clone());
@@ -3581,6 +3664,10 @@ impl PsLive {
         self.fill43(&mut rec, &att, t);
         // dip47 (log only): the filling try's group at its signing (nothing with the flag off)
         if let Some(j) = self.g47_fill(&att) { rec["grpsign"] = j; }
+        // dip47: the filling re-arm try's fleet verdict (only with the rule on)
+        if let Some(v) = att.rf { rec["rearm_fleet"] = v.json(); }
+        // dip47 FUNDER-CLUSTER log (log only; nothing with it off)
+        if let Some(j) = self.fu47_event(att.w, &t.mint, "fill", t.s) { rec["funder"] = j; }
         self.rec(rec);
         let sig = bs58::encode(&t.sig).into_string();
         let buy = Buy { sig: sig.clone(), w: att.w, slot: t.s, idx: t.i as u64, t_rx: t.t_rx, tokens: t.tok, sol_in: t.sol, fee, tip: att.tip, cost, round: 0, via: "feed" };
@@ -4523,6 +4610,8 @@ impl PsLive {
     /// to the creator's paper column (ps / pn) and writes presend_live_cr_paper; a window that ends without a row c fill is dropped.
     /// The creator gate's decision never reads the paper column
     pub fn on_shadow_rec(&mut self, rec: &serde_json::Value) {
+        // dip45 (log-only): the shadow's paper arms / would-fills get the fleet flags (nothing with it off)
+        if let Some(f) = self.fleet.as_mut() { f.on_shadow(rec); }
         // dip36 (log-only): the shadow's row c for FP-NOBOT's s_* inputs (nothing without the flag)
         if self.fp.is_some() { self.fpnb_shadow(rec); }
         // dip37 --presend-live-wh-learn paper: a wh_loss-skipped trigger's row c into the whale's ledger (nothing without it)
@@ -4568,6 +4657,9 @@ impl PsLive {
         }
     }
 
+    /// dip45: the feed names for the fleet shadow's records (nothing with it off)
+    pub fn fleet_feeds(&mut self, names: &[String]) { if let Some(f) = self.fleet.as_mut() { f.feeds(names.to_vec()); } }
+
     /// the shadow's presend_arm records of this tx (parity with the live triggers)
     pub fn on_shadow_arm(&mut self, rec: &serde_json::Value) {
         let k = (rec["mint"].as_str().unwrap_or("").to_string(), rec["sig"].as_str().unwrap_or("").to_string(), rec["j"].as_i64().unwrap_or(-1));
@@ -4596,7 +4688,7 @@ impl PsLive {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status()
-            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.status43() + &self.b43_status() + &self.status46();
+            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fu47.as_ref().map(|f| f.status()).unwrap_or_default() + &self.status43() + &self.b43_status() + &self.status46();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -4783,6 +4875,8 @@ impl PsLive {
         // dip42: only with them on (Q1: its thread saves the wallet history and answers)
         if let Some(j) = self.f2_finish() { fin["fam2"] = j; }
         if let Some(j) = self.q1.as_mut().and_then(|q| q.finish()) { fin["q1"] = j; }
+        // dip45 (log-only)
+        if let Some(j) = self.fleet.as_mut().and_then(|f| f.finish()) { fin["fleet"] = j; }
         // dip43: only when an option is given / something happened (the exit shadows still open are written)
         if let Some(j) = self.finish43() { fin["dip43"] = j; }
         // dip43 B: only with an item on
@@ -4945,6 +5039,7 @@ impl PsLive {
         // dip42: FAM2's book; Q1 inline (every message handled at once; no thread)
         let f2 = cfg.f2.clone().map(psfam2::Fam2::new);
         let q1 = cfg.q1.clone().map(|c| psq1::Q1Tap::start(c, user, &out, true));
+        let fleet = cfg.fleet.clone().map(|c| ps45_fleet::FleetTap::start(c, user, &out, true));
         // dip38: the anti-bait log with the tests' queue (no task, no RPC)
         let l38 = pslog38::L38::new(&cfg, None).unwrap();
         let (atx, arx) = crossbeam_channel::unbounded();
@@ -4952,7 +5047,7 @@ impl PsLive {
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true), skips: Mutex::new(FxHashMap::default()),
-            build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() });
+            build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() });
         sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
         let mut det = pl::Detector::new(cfg.whale_pct);
         // dip27: the hold clocks only with the annotations on (as a run)
@@ -4969,12 +5064,14 @@ impl PsLive {
             // clock; the tests set its lists
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
-            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, d43: Default::default(),
-            b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default() };
+            fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet, d43: Default::default(),
+            b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None };
         // dip46: its modes (nothing with its flags off)
         p.p46_start();
         // dip47: the hot keys' start values, the control file's first read, the filter state fv 0
         p.f47_start();
+        // dip47: the funder log without workers (the tests pump its queue)
+        if p.cfg.funder_log { p.fu47 = Some(psfunder47::Funder::idle()); }
         (p, atx, orx)
     }
 
@@ -5110,6 +5207,11 @@ mod dip46_tests;
 #[path = "dip47_tests.rs"]
 mod dip47_tests;
 
+// dip45 (11-11 PKT): the FLEET SIGNAL shadow (ps45_fleet.rs; LOG ONLY, off by default = dip43g)
+#[cfg(test)]
+#[path = "dip45_tests.rs"]
+mod dip45_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5133,7 +5235,7 @@ mod tests {
         let mut sg = [0u8; 64]; sg[0] = 0xD1; sg[1] = 0x5F;
         let roles = pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) };
         atx.send(Att { w: 999, n: 1, mint: [7u8; 32], sig: sg, tag: pl::PS_TAG | 1, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 100, deadline: 101,
-            lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (100, 0, 0), t_send: 0, roles, tip: 0, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default() }).unwrap();
+            lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (100, 0, 0), t_send: 0, roles, tip: 0, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
         p.drain_atts();
         assert!(!p.idle(), "an unresolved attempt keeps the probe busy");
         assert!(!p.can_end(Duration::ZERO), "never before the stop");
@@ -5200,7 +5302,7 @@ mod tests {
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() };
         let (ca, cb, cc) = ([1u8; 32], [2u8; 32], [3u8; 32]);
         {
             let mut g = sh.cr.lock().unwrap();
@@ -5260,7 +5362,7 @@ mod tests {
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() };
         let m = 60_000_000_000u64;
         let t0 = 1_000 * m;
         assert_eq!(breaker_note(&sh, &b, -300_000_000, t0), None, "one big loss: not yet");
@@ -5275,7 +5377,7 @@ mod tests {
         let sh2 = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() };
         assert!(breaker_paused(&sh2));
         sh2.brk_until.store(arbx::fast::mono_ns().saturating_sub(1), Ordering::SeqCst);
         assert!(!breaker_paused(&sh2));
@@ -5549,7 +5651,7 @@ mod tests {
                     seq += 1;
                     let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&seq.to_be_bytes()); sg[8] = 0xA7; sg[9] = fills_on as u8;
                     let att = Att { w, n: 1, mint: m, sig: sg, tag: pl::PS_TAG | seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot: *s, deadline: *s + 1, lim: 1.0,
-                        min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default() };
+                        min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None };
                     atx.send(att).unwrap();
                     assert!(p.blocks_reactive(&m).is_some(), "an armed token is not for the reactive bot");
                     if fills_on && seq % 7 == 0 {

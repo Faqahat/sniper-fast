@@ -63,7 +63,7 @@ fn setup(p: &mut PsLive, l: &Launch, slot: u64, tag: u8) {
 fn att(w: u64, mint: Pk, sig: [u8; 64], slot: u64, sign_pos: (u64, u32, i32)) -> Att {
     Att { w, n: 1, mint, sig, tag: pl::PS_TAG | (0xD47 << 8) | sig[0] as u64, path: "helius-ps".into(), client: "AgaveBam".into(), slot, deadline: slot + 1, lim: 1.0,
         min_out: 1, p_sign: 0.0000466, sign_pos, t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000,
-        wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default() }
+        wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }
 }
 /// our buy of the window's try lands at (slot, 50)
 fn our_fill(p: &mut PsLive, l: &Launch, sig: [u8; 64], slot: u64) {
@@ -577,4 +577,142 @@ fn dip47_pause_window_injected_clock() {
     p.tick(N + 120, None);
     assert!(p.f47.pause_on.is_none() && !p.f47.cur.unwrap().pause_now && p.f47.cur.unwrap().pause_n == 1, "absent: the start values (the flag's window)");
     let _ = std::fs::remove_file(&ctl);
+}
+
+// ---- funder-cluster log ---------------------------------------------------------------------------------------------------
+
+/// OFFLINE validation on r83 w96 H2d2DtyD (testdata/dip47_funder_h2d2.json: the fix8283 study's cached RPC answers; ops/funder47/make_fixture.py):
+/// the holders >= 0.5% at our send cutoff through the engine's queue, lookup and cluster code -> BufYjmzE, 17 wallets, 44.0%
+#[test]
+fn dip47_funder_h2d2_offline() {
+    use psfunder47::*;
+    let root = env!("CARGO_MANIFEST_DIR");
+    let fx: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{root}/testdata/dip47_funder_h2d2.json")).unwrap()).unwrap();
+    let pk = |s: &str| -> Pk { bs58::decode(s).into_vec().unwrap().try_into().unwrap() };
+    let mint = pk(fx["mint"].as_str().unwrap());
+    let calls = std::sync::atomic::AtomicU64::new(0);
+    let src = |m: &str, p: serde_json::Value| -> std::result::Result<serde_json::Value, String> {
+        calls.fetch_add(1, Ordering::Relaxed);
+        match m {
+            "getSignaturesForAddress" => fx["sigs"].get(format!("{}:{}", p[0].as_str().unwrap(), p[1]["before"].as_str().unwrap())).cloned().ok_or("not cached".to_string()),
+            "getTransaction" => fx["tx"].get(p[0].as_str().unwrap()).cloned().ok_or("not cached".to_string()),
+            _ => Err("no network in tests".into()),
+        }
+    };
+    let mut f = Funder::idle();
+    let mut holders: Vec<(Pk, i64)> = Vec::new();
+    for h in fx["holders"].as_array().unwrap() {
+        let (w, bal) = (pk(h["w"].as_str().unwrap()), (h["pct"].as_f64().unwrap() / 100.0 * pl::SUPPLY) as i64);
+        let sig: [u8; 64] = bs58::decode(h["sig"].as_str().unwrap()).into_vec().unwrap().try_into().unwrap();
+        f.buy(mint, w, sig, h["first"].as_u64().unwrap(), bal);
+        f.buy(mint, w, [9u8; 64], h["first"].as_u64().unwrap() + 5, bal);       // a later buy: no second lookup, the first buy stays the anchor
+        holders.push((w, bal));
+    }
+    assert_eq!((holders.len(), f.queued), (19, 19));
+    let s0 = summarize(&mint, &holders, |k| f.cache.get(k).copied());
+    assert_eq!((s0.resolved, s0.pending, s0.c1), (0, 19, None), "nothing resolved yet: reported as pending, never waited for");
+    f.pump(&src);
+    assert_eq!(calls.load(Ordering::Relaxed), 38, "2 RPC calls per holder");
+    // drained by the next event: here by hand through a second (no-op) pump + the public summary path
+    let mut p = { let (mut p, _a, _o) = PsLive::for_test(cfg(&[]).unwrap().unwrap(), USER); p.fu47 = Some(f); p };
+    let _ = p.fu47_event(1, &mint, "arm", 0);           // the mint is not followed by this probe's detector: only drains
+    let f = p.fu47.as_ref().unwrap();
+    let s = summarize(&mint, &holders, |k| f.cache.get(k).copied());
+    let (fu, n, pc) = s.c1.expect("a cluster");
+    eprintln!("DIP47 FUNDER offline H2d2DtyD: holders {} ({:.2}%), resolved {}/{}, cluster {} {} wallets {:.2}%, just funded {:.2}%, second {:?}", s.n, s.pct, s.resolved, s.n, b58(&fu), n, pc, s.just_pct, s.c2.map(|c| (c.1, c.2)));
+    assert_eq!(b58(&fu), "BufYjmzEzxpY2swPvvAFoqMSnmhEivXuaEYLpyEu7Bhd");
+    assert_eq!((n, s.resolved, s.pending), (17, 19, 0));
+    assert!((pc - 44.01).abs() < 0.05, "{pc}");
+    assert!(s.just_pct > 40.0, "funded 0-2 slots before the buy: {}", s.just_pct);
+    let j = s.json();
+    assert_eq!((j["c1"]["n_wallets"].as_u64(), j["resolved"].as_u64()), (Some(17), Some(19)));
+}
+
+/// on the probe: holders >= 0.5% are queued as they buy; the arm reports what is resolved by then (pending), the fill the cluster; the line;
+/// never a decision; the queue is bounded (oldest dropped, counted); a failed lookup is counted and asked again; flags
+#[test]
+fn dip47_funder_log_on_the_probe() {
+    use psfunder47::*;
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    let c = cfg(&["--presend-live-funder-log", "on", "--presend-live-funder-rpc", "https://secret.example/KEY123", "--presend-live-funder-rps", "20"]).unwrap().unwrap();
+    assert_eq!(c.json()["funder_log"], serde_json::json!({"rps": 20, "rpc": "--presend-live-funder-rpc"}));
+    assert!(!c.json().to_string().contains("secret.example"), "the URL is never in the run's config record");
+    let (mut p, atx, orx) = PsLive::for_test(c, USER);
+    let l = launch(30);
+    setup(&mut p, &l, N, 30);
+    let id = *p.armed.get(&l.mint).expect("armed as without the log");
+    assert_eq!(p.fu47.as_ref().unwrap().queued, 3, "H1, H2 and the whale reached 0.5%");
+    let (r, lines) = outs(&orx);
+    let arm = r.iter().find(|x| x["ev"] == "presend_live_funder").unwrap_or_else(|| panic!("{r:?}"));
+    assert_eq!((arm["at"].as_str(), arm["kind"].as_str(), arm["n"].as_u64(), arm["resolved"].as_u64(), arm["pending"].as_u64()), (Some("arm"), Some("t2"), Some(3), Some(0), Some(3)));
+    assert!(lines.iter().any(|x| x.starts_with(&format!("  PRESEND LIVE FUNDER (log) w{id} ")) && x.ends_with("resolved 0/3")), "{lines:?}");
+    assert!(!r.iter().chain(std::iter::empty()).any(|x| x.to_string().contains("secret.example")) && !lines.iter().any(|x| x.contains("secret.example")));
+    // the workers' answers: H1 and H2 funded by F one slot before their buys, the whale's lookup fails once
+    let fpk = [0xF0u8; 32];
+    let whale = b58(&[0xA0u8 + 30; 32]);
+    let fails = std::cell::Cell::new(0u32);
+    let src = |m: &str, pv: serde_json::Value| -> std::result::Result<serde_json::Value, String> {
+        if m == "getSignaturesForAddress" {
+            if pv[0] == whale.as_str() && fails.get() == 0 { fails.set(1); return Err("timeout".into()); }
+            return Ok(serde_json::json!([{"signature": format!("PREV{}", pv[0].as_str().unwrap()), "slot": N - 2}]));
+        }
+        let w = pv[0].as_str().unwrap().trim_start_matches("PREV").to_string();
+        Ok(serde_json::json!({"transaction": {"message": {"accountKeys": [{"pubkey": b58(&fpk), "signer": true}, {"pubkey": w, "signer": false}]}},
+            "meta": {"preBalances": [9_000_000_000u64, 0], "postBalances": [7_900_000_000u64, 1_000_000_000u64]}}))
+    };
+    p.fu47.as_mut().unwrap().pump(&src);
+    assert_eq!(p.fu47.as_ref().unwrap().sh.errs.load(Ordering::Relaxed), 1);
+    let sig = sg(0x4F, 30);
+    atx.send(att(id, l.mint, sig, N, (N, 34, 0))).unwrap();
+    p.drain_atts();
+    our_fill(&mut p, &l, sig, N);
+    let r = recs(&orx);
+    let fr = r.iter().find(|x| x["ev"] == "presend_live_funder" && x["at"] == "fill").unwrap();
+    assert_eq!((fr["resolved"].as_u64(), fr["pending"].as_u64(), fr["c1"]["n_wallets"].as_u64(), fr["c1"]["funder"].as_str()), (Some(2), Some(1), Some(2), Some(b58(&fpk).as_str())));
+    assert!((fr["c1"]["pct"].as_f64().unwrap() - 6.0).abs() < 0.01 && (fr["just_funded_pct"].as_f64().unwrap() - 6.0).abs() < 0.01, "{fr}");
+    let fill = r.iter().find(|x| x["ev"] == "presend_live_fill").unwrap();
+    assert_eq!(fill["funder"], serde_json::json!({"pct": 6.0, "n": 2, "resolved": 2}));
+    // the queue is bounded: the oldest job goes, counted
+    let f = p.fu47.as_mut().unwrap();
+    let q0 = f.sh.q.lock().unwrap().len();
+    for i in 0..(QUEUE_MAX + 5 - q0) as u32 { let mut w = [0x44u8; 32]; w[..4].copy_from_slice(&i.to_be_bytes()); f.buy([7u8; 32], w, [1u8; 64], N, (0.01 * pl::SUPPLY) as i64); }
+    assert_eq!((f.sh.q.lock().unwrap().len(), f.sh.drops.load(Ordering::Relaxed)), (QUEUE_MAX, 5));
+    // flags
+    for bad in [vec!["--presend-live-funder-rps", "10"], vec!["--presend-live-funder-log", "on", "--presend-live-funder-rps", "41"],
+                vec!["--presend-live-funder-log", "on", "--presend-live-funder-rps", "0"], vec!["--presend-live-funder-rpc", "http://x"], vec!["--presend-live-funder-log", "maybe"]] {
+        assert!(cfg(&bad).is_err(), "{bad:?}");
+    }
+    assert_eq!(cfg(&["--presend-live-funder-log", "on"]).unwrap().unwrap().funder_rps, 15);
+    // parse_tx on a plain (non-parsed) key list, a wallet not in the tx
+    assert_eq!(parse_tx(&serde_json::json!({"transaction": {"message": {"accountKeys": [b58(&fpk)]}}, "meta": {"preBalances": [1], "postBalances": [1]}}), "x").unwrap(), (Some(fpk), 0));
+}
+
+/// the funder log on: the same decisions, sends, fees and exits as off (golden passes; only its records / fields / lines are new)
+#[test]
+fn dip47_golden_funder_log_changes_no_decision() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let _g = rt.enter();
+    let strip = |lines: Vec<String>| -> (Vec<String>, usize) {
+        let mut n = 0;
+        let v = lines.into_iter().filter_map(|l| {
+            if l.starts_with("L   PRESEND LIVE FUNDER (log)") { n += 1; return None; }
+            if !l.starts_with("R ") && !l.starts_with("F ") { return Some(l.replace(" | FUNDER LOG", "\u{0}").split('\u{0}').next().unwrap().to_string()); }
+            let mut v: serde_json::Value = serde_json::from_str(&l[2..]).unwrap();
+            if v["ev"] == "presend_live_funder" { n += 1; return None; }
+            if let Some(o) = v.as_object_mut() { o.remove("funder"); }
+            if let Some(o) = v.get_mut("cfg").and_then(|c| c.as_object_mut()) { o.remove("funder_log"); }
+            Some(format!("{}{v}", &l[..2]))
+        }).collect();
+        (v, n)
+    };
+    let Some(a) = dip26_tests::golden_pass(1, &[], arbx::presend::Params::default(), 7) else { eprintln!("presend_parity.json missing: skipped"); return };
+    let b = dip26_tests::golden_pass(1, &["--presend-live-funder-log", "on"], arbx::presend::Params::default(), 7).unwrap();
+    let ((a, na), (b, nb)) = (strip(a), strip(b));
+    assert_eq!(na, 0);
+    assert!(nb > 20, "{nb}");
+    assert_eq!(a.len(), b.len());
+    for (x, y) in a.iter().zip(&b) { assert_eq!(x, y); }
 }

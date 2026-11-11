@@ -97,7 +97,7 @@ impl PsLive {
         g.snap_ns += arbx::fast::mono_ns().saturating_sub(t0);
     }
 
-    fn g47_kind(&self, w: u64) -> &'static str {
+    pub(super) fn g47_kind(&self, w: u64) -> &'static str {
         if self.rearm_w(w) { return "rearm"; }
         if let Some((k, _)) = self.wd_win(w) { return k.key(); }
         "t2"

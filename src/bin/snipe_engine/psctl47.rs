@@ -27,7 +27,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-pub const KEYS: [&str; 19] = ["rearm_max_per_mint", "pause_window", "pause_now", "floors", "wh_kinds", "size_t2", "size_rearm", "mint_ledger_sol", "wh_loss", "holder_loss", "botdepth", "curve_deep_pct",
+pub const KEYS: [&str; 21] = ["rearm_fleet", "rearm_fleet_spec", "rearm_max_per_mint", "pause_window", "pause_now", "floors", "wh_kinds", "size_t2", "size_rearm", "mint_ledger_sol", "wh_loss", "holder_loss", "botdepth", "curve_deep_pct",
     "min_age_slots", "exit_ms", "tp", "sl", "grp_t2", "grp_t2_pct", "grp_t2_whale"];
 
 /// the new keys' values (Copy; the start value of each = its flag)
@@ -60,6 +60,9 @@ pub struct Vals {
     pub pause_n: u8,
     /// the manual pause (control key only; off at start)
     pub pause_now: bool,
+    /// the re-arm fleet rule's spec (None: the flag not given: the keys are ignored) and mode
+    pub rf: Option<(u32, u64)>,
+    pub rf_live: bool,
 }
 
 /// "HH:MM-HH:MM[,HH:MM-HH:MM]" (PKT, at most 4; "" = none)
@@ -115,6 +118,8 @@ impl Vals {
             pause: c.pause47.0,
             pause_n: c.pause47.1,
             pause_now: false,
+            rf: c.rearm_fleet,
+            rf_live: c.rearm_fleet_live,
         }
     }
     /// each key's value as the records show it
@@ -140,6 +145,8 @@ impl Vals {
             "rearm_max_per_mint" => json!(self.rearm_cap),
             "pause_window" => pause_str(&self.pause[..self.pause_n as usize]).into(),
             "pause_now" => (if self.pause_now { "on" } else { "off" }).into(),
+            "rearm_fleet" => if self.rf.is_none() { "off".into() } else { (if self.rf_live { "live" } else { "log" }).into() },
+            "rearm_fleet_spec" => self.rf.map_or(serde_json::Value::Null, |(n, k)| format!("{n}:{k}").into()),
             _ => serde_json::Value::Null,
         }
     }
@@ -223,6 +230,14 @@ pub fn key_apply(k: &str, x: &serde_json::Value, start: &Vals, v: &mut Vals) -> 
             v.rearm_cap = f as u32;
         }
         "pause_window" => { (v.pause, v.pause_n) = pause_parse(text(x)?)?; }
+        "rearm_fleet" => {
+            if start.rf.is_none() { return Err("ignored: needs --presend-live-rearm-fleet N:SLOTS at start".into()); }
+            v.rf_live = match text(x)? { "log" => false, "live" => true, s => return Err(format!("'{s}' (log | live)")) };
+        }
+        "rearm_fleet_spec" => {
+            if start.rf.is_none() { return Err("ignored: needs --presend-live-rearm-fleet N:SLOTS at start".into()); }
+            v.rf = Some(psrfleet47::spec_parse(text(x)?)?);
+        }
         "pause_now" => v.pause_now = match text(x)? { "on" => true, "off" => false, s => return Err(format!("'{s}' (on | off)")) },
         "grp_t2_whale" => v.grp_whale_in = match text(x)? { "out" => false, "in" => true, s => return Err(format!("'{s}' (out | in)")) },
         _ => return Err("unknown key".into()),
@@ -258,7 +273,8 @@ fn copy_key(k: &str, from: &Vals, to: &mut Vals) {
         "holder_loss" => to.hl = from.hl, "botdepth" => to.bd = from.bd, "curve_deep_pct" => to.curve = from.curve, "min_age_slots" => to.min_age = from.min_age,
         "exit_ms" => to.exit_ms = from.exit_ms, "tp" => to.tp = from.tp, "sl" => to.sl = from.sl, "grp_t2" => to.grp_live = from.grp_live,
         "grp_t2_pct" => to.grp_pct = from.grp_pct, "grp_t2_whale" => to.grp_whale_in = from.grp_whale_in,
-        "rearm_max_per_mint" => to.rearm_cap = from.rearm_cap, "pause_window" => { to.pause = from.pause; to.pause_n = from.pause_n; } "pause_now" => to.pause_now = from.pause_now, _ => {}
+        "rearm_max_per_mint" => to.rearm_cap = from.rearm_cap, "pause_window" => { to.pause = from.pause; to.pause_n = from.pause_n; } "pause_now" => to.pause_now = from.pause_now,
+        "rearm_fleet" => to.rf_live = from.rf_live, "rearm_fleet_spec" => to.rf = from.rf, _ => {}
     }
 }
 
@@ -293,7 +309,9 @@ pub fn stamped(ev: &str) -> bool {
 /// the writer's stamp of a record built off the main loop (no fv yet)
 pub fn writer_stamp(v: &mut serde_json::Value) {
     let Some(ev) = v["ev"].as_str() else { return };
-    if !(ev.starts_with("presend_live_probe") || ev == "presend_live_filter_ab") || v.get("fv").is_some() { return; }
+    // the sender's tries: fv only (they are many)
+    if ev == "presend_attempt" { if v.get("fv").is_none() { v["fv"] = FV_NOW.load(Ordering::Relaxed).into(); } return; }
+    if !(ev.starts_with("presend_live_probe") || ev == "presend_live_filter_ab" || ev == "presend_live_rearm_fleet") || v.get("fv").is_some() { return; }
     v["fv"] = FV_NOW.load(Ordering::Relaxed).into();
     v["fh"] = FH_NOW.lock().unwrap().clone().into();
 }
@@ -353,7 +371,8 @@ impl PsLive {
         let now = self.pause_now47();
         if now == self.f47.pause_on { return; }
         let t = arbx::feeds::clock::now_ns();
-        match (&self.f47.pause_on, &now) {
+        let was = self.f47.pause_on.clone();
+        match (&was, &now) {
             (_, Some(w)) => {
                 self.f47.pause_cur = 0;
                 self.rec(serde_json::json!({"ev": "presend_live_ledger_mode", "ok": true, "pause_window": "on", "window": w, "tz": "PKT", "t": t}));
@@ -393,6 +412,7 @@ impl PsLive {
         let s = Vals::from_cfg(&self.cfg);
         self.f47.start = Some(s);
         self.f47.cur = Some(s);
+        self.sh.rf.set(s.rf, s.rf_live);
         if let Some(p) = self.cfg.ledger_ctl.clone() {
             self.line(format!("DIP47 CONTROL KEYS ({p}): {} (absent = the start flag; bad = the old value stays)", KEYS.iter().copied().collect::<Vec<_>>().join(", ")));
             self.f47.ctl = Some((p, None, Instant::now()));
@@ -455,6 +475,8 @@ impl PsLive {
             g.curve_deep = v.curve;
             if let Some(f) = v.floors { g.floor_rearm = f == 2; }
         }
+        // the re-arm fleet rule: the sender reads these atomics
+        self.sh.rf.set(v.rf, v.rf_live);
         let fr = self.cfg.g43.as_ref().is_some_and(|g| g.floor_rearm);
         let sender = (self.cfg.bd, self.cfg.g43.as_ref().and_then(|g| g.curve_deep), fr);
         let was = old.map(|o| (o.bd, o.curve, o.floors));
@@ -529,6 +551,8 @@ impl PsLive {
         let v = self.v47();
         for k in KEYS.iter() { put(k, v.get(k)); }
         put("grpsign_log", self.cfg.grpsign.into());
+        put("fleet_log", self.cfg.fleet.is_some().into());
+        put("funder_log", self.cfg.funder_log.into());
         // start-only settings that decide
         put("guard", self.cfg.g43.as_ref().map_or(off(), |g| serde_json::json!({"mode": if g.mode == ps43_guard::Mode::Holders { "holders" } else { "deadline" },
             "holders": format!("{}:{}:{}:{}", g.n, g.theta, g.max_leavers, g.min_pct), "ab": g.ab})));

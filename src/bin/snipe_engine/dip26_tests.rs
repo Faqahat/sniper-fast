@@ -16,6 +16,11 @@ use arbx::dip::{CreateEvent, TradeEvent};
 
 const USER: Pk = [0x5Au8; 32];
 
+thread_local! {
+    /// dip45 tests: inject a fleet-shape try before every tape tx of the golden passes
+    pub(super) static GOLDEN_FLEET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 // ---- GOLDEN -------------------------------------------------------------------------------------------------------------
 
 /// the digest of golden_digest() on the dip25 tree (10-29 ~20:30 PKT, before any dip26 change)
@@ -143,6 +148,8 @@ pub(super) fn golden_pass(tag: u8, extra: &[&str], ps: arbx::presend::Params, fi
         slot_now = slot_now.max(*s);
         let a = arbx::feeds::Arrival { feed: 0, slot: *s, t_rx: *s * 1_000_000 + *idx, t_decoded: *s * 1_000_000 + *idx, executed: Some(true),
             tx: arbx::tx::Tx { sig: *sig, keys: vec![[3u8; 32]], ..Default::default() }, poh: None, raw: arbx::feeds::RawTx::None, exec: Some(Arc::new(x.clone())) };
+        // dip45 tests: a fleet-shape try on the tx's token first (an unexecuted feed; off = no arrival added)
+        if GOLDEN_FLEET.with(|c| c.get()) { if let Some(e) = x.trades.first() { p.on_arrival(&dip45_tests::fleet_arrival(e.mint, *s, *s * 1_000_000 + *idx, *idx), slot_now); } }
         p.on_arrival(&a, slot_now);
         p.on_exec(&a, x, slot_now, launch_of, &|_| false, None);
         let marks: Vec<[u64; 5]> = (0..=x.trades.len()).map(|_| [0u64; 5]).collect();
@@ -159,7 +166,7 @@ pub(super) fn golden_pass(tag: u8, extra: &[&str], ps: arbx::presend::Params, fi
             atx.send(Att { w, n: 1, mint: m, sig: sg, tag: pl::PS_TAG | (0xD26 << 32) | seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot: *s, deadline: *s + 1,
                 lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written",
                 // dip27: the window's other holder, as the sender copies it (0 with the annotations off: the golden records unchanged)
-                ob6: o6, grd: gd, fa: None, bd: None, x46: Default::default() }).unwrap();
+                ob6: o6, grd: gd, fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
             if fill_every > 0 && seq % fill_every == 0 {
                 let (wv, wt) = p.sh.wins.lock().unwrap().iter().find(|x| x.id == w).map(|x| (x.vsol, x.vtok)).unwrap();
                 let tok = pl::buy_out(wv, wt, spend, 0.0125);
@@ -338,7 +345,7 @@ impl Ctx {
         let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&self.seq.to_be_bytes()); sg[8] = 0xD6; sg[9] = 0xA7;
         self.atx.send(Att { w, n: self.seq as u32, mint, sig: sg, tag: pl::PS_TAG | (0xD26A << 32) | self.seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot, deadline: slot + 1,
             lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (slot, 0, 0), t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-            tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default() }).unwrap();
+            tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
         self.p.drain_atts();
         sg
     }
@@ -1069,7 +1076,7 @@ fn t2_pass(extra: &[&str]) -> Option<(Vec<String>, serde_json::Value, u64)> {
             seq += 1;
             let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&seq.to_be_bytes()); sg[8] = 0xD6; sg[9] = 0x77;
             atx.send(Att { w, n: 1, mint: m, sig: sg, tag: pl::PS_TAG | (0xD26B << 32) | seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot: *s, deadline: *s + 1,
-                lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default() }).unwrap();
+                lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
             if seq % 7 == 0 {
                 let (wv, wt) = p.sh.wins.lock().unwrap().iter().find(|x| x.id == w).map(|x| (x.vsol, x.vtok)).unwrap();
                 let tok = pl::buy_out(wv, wt, spend, 0.0125);
@@ -1298,7 +1305,7 @@ impl Ctx {
         let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&self.seq.to_be_bytes()); sg[8] = 0xD7; sg[9] = 0xA7;
         self.atx.send(Att { w, n: self.seq as u32, mint, sig: sg, tag: pl::PS_TAG | (0xD27A << 32) | self.seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot, deadline: slot + 1,
             lim: p_sign * 0.88, min_out: 1, p_sign, sign_pos: (slot, 0, 0), t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-            tip: 200_000, wst: "written", ob6, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default() }).unwrap();
+            tip: 200_000, wst: "written", ob6, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
         self.p.drain_atts();
         sg
     }
@@ -1572,4 +1579,129 @@ fn dip47_rearm_cap_per_mint() {
         }
     }
     assert!(cfg(&["--presend-rearm-max-per-mint", "11"]).is_err() && cfg(&["--presend-rearm-max-per-mint", "x"]).is_err());
+}
+
+/// dip47 RE-ARM FLEET rule: re-arm windows only; log by default (nothing withheld), live by the hot key; fail open with no detector data /
+/// stale / blind; the window's copy follows the detector (de-duplicated by signature); the spec key; refusals; the sender's cost
+#[test]
+fn dip47_rearm_fleet_rule() {
+    use psrfleet47::{gate, FlSnap, SendRf, STALE_NS};
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    let ctl = std::env::temp_dir().join(format!("dip47_rf_{}.json", std::process::id()));
+    std::fs::write(&ctl, "{}").unwrap();
+    let mut c = Ctx::new(&["--presend-live-rearm", "on", "--presend-live-fleet-log", "on", "--presend-live-rearm-fleet", "1:8", "--presend-live-wh-loss", "2:0.05",
+        "--presend-live-ledger-control", ctl.to_str().unwrap()]);
+    let (a, b, x) = ([0xA1u8; 32], [0xB1u8; 32], [0x33u8; 32]);
+    let mut tk = c.token(1, 1000, &[(a, 7.0), (b, 8.0)]);
+    let mut z = c.token(90, 1000, &[]);
+    for s in 1001..=1004 { let e = tk.buy(x, S / 10); c.tx(s, 5, vec![e], vec![]); }
+    let d = tk.sell_tok(a, pct(7.0));
+    c.tx(1005, 5, vec![d], vec![]);
+    clock(&mut c, &mut z, 1006, 1008);
+    let w = *c.p.armed.get(&tk.mint).expect("armed");
+    let snap = |c: &Ctx| c.p.sh.wins.lock().unwrap().iter().find(|s| s.id == w).map(|s| s.rfl).unwrap();
+    let now = arbx::fast::mono_ns();
+    // no fleet try seen yet: would withhold, but OPEN (no_data), also in live mode
+    let v = gate(&c.p.sh.rf, true, false, &snap(&c), 1009, now).unwrap();
+    assert_eq!((v.n, v.min, v.slots, v.live, v.would, v.open, v.withhold()), (0, 1, 8, false, true, Some("no_data"), false));
+    // a fleet try on ANOTHER mint: the detector has data; this mint has none -> would (log: sent)
+    c.p.on_arrival(&dip45_tests::fleet_arrival(z.mint, 1009, 1009 * 1_000_000, 1), 1009);
+    let now = arbx::fast::mono_ns();
+    let v = gate(&c.p.sh.rf, true, false, &snap(&c), 1009, now).unwrap();
+    assert_eq!((v.n, v.would, v.open, v.withhold()), (0, true, None, false), "log mode: never withheld");
+    assert_eq!(v.json(), serde_json::json!({"n": 0, "min": 1, "slots": 8, "on": "log", "would_withhold": true}));
+    // T2 / wide windows and probes: never looked at, nothing counted
+    let n0: Vec<u64> = c.p.sh.rf.n.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+    assert!(gate(&c.p.sh.rf, false, false, &snap(&c), 1009, now).is_none() && gate(&c.p.sh.rf, true, true, &snap(&c), 1009, now).is_none());
+    assert_eq!(n0, c.p.sh.rf.n.iter().map(|x| x.load(Ordering::Relaxed)).collect::<Vec<_>>());
+    // a fleet try on the mint (pre-exec), seen twice (two feeds): the window's copy counts it once
+    let fa = dip45_tests::fleet_arrival(tk.mint, 1010, 1010 * 1_000_000, 2);
+    c.p.on_arrival(&fa, 1010);
+    c.p.on_arrival(&fa, 1010);
+    assert_eq!(snap(&c).count(1010, 8), 1);
+    let v = gate(&c.p.sh.rf, true, false, &snap(&c), 1011, now).unwrap();
+    assert_eq!((v.n, v.would), (1, false));
+    assert_eq!((snap(&c).count(1018, 8), snap(&c).count(1019, 8)), (1, 0), "slots [s - 8, s]");
+    // the hot keys: live -> withheld; the spec 2:32 -> one try is not enough
+    std::fs::write(&ctl, r#"{"rearm_fleet": "live"}"#).unwrap();
+    c.p.ctl47_check(true);
+    let v = gate(&c.p.sh.rf, true, false, &snap(&c), 1019, now).unwrap();
+    assert!(v.live && v.would && v.withhold());
+    assert!(!gate(&c.p.sh.rf, true, false, &snap(&c), 1012, now).unwrap().withhold(), "fleet seen: sent");
+    std::fs::write(&ctl, r#"{"rearm_fleet": "live", "rearm_fleet_spec": "2:32"}"#).unwrap();
+    c.p.ctl47_check(true);
+    let v = gate(&c.p.sh.rf, true, false, &snap(&c), 1012, now).unwrap();
+    assert_eq!((v.n, v.min, v.slots, v.withhold()), (1, 2, 32, true));
+    c.p.fs_tick();
+    assert_eq!((c.p.f47.fs.as_ref().unwrap().obj["rearm_fleet"].as_str(), c.p.f47.fs.as_ref().unwrap().obj["rearm_fleet_spec"].as_str()), (Some("live"), Some("2:32")));
+    std::fs::write(&ctl, r#"{"rearm_fleet": "on", "rearm_fleet_spec": "0:8"}"#).unwrap();
+    c.p.ctl47_check(true);
+    assert_eq!((c.p.f47.cur.unwrap().rf, c.p.f47.cur.unwrap().rf_live), (Some((2, 32)), true), "bad values: the old ones stay");
+    // fail open: stale detector (no fleet try for 10 min), the executed feed blind
+    let v = gate(&c.p.sh.rf, true, false, &snap(&c), 1012, now + STALE_NS + 1_000_000_000).unwrap();
+    assert_eq!((v.open, v.withhold()), (Some("stale"), false));
+    c.p.stall43(true, now);
+    assert_eq!(gate(&c.p.sh.rf, true, false, &snap(&c), 1012, now).unwrap().open, Some("blind"));
+    c.p.stall43(false, now);
+    assert!(gate(&c.p.sh.rf, true, false, &snap(&c), 1012, now).unwrap().withhold());
+    // the window's copy now (the fill below ends the window)
+    let s = snap(&c);
+    // the fill record of a re-arm try carries its verdict
+    c.drain();
+    let v = gate(&c.p.sh.rf, true, false, &s, 1011, now).unwrap();
+    let mut sg = [0u8; 64]; sg[0] = 0xF7;
+    c.atx.send(Att { w, n: 1, mint: tk.mint, sig: sg, tag: pl::PS_TAG | 0xF7, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 1011, deadline: 1012, lim: 1.0, min_out: 1, p_sign: 1.0,
+        sign_pos: (1011, 0, 0), t_send: 1011 * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written", ob6: 0.0,
+        grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: Some(v) }).unwrap();
+    c.p.drain_atts();
+    c.fill(&mut tk, sg, 1012, 8, 296_296_296);
+    let f = c.ev("presend_live_fill").pop().unwrap();
+    assert_eq!(f["rearm_fleet"]["on"], "live");
+    assert_eq!(f["rearm_fleet"]["n"], 1);
+    // the sender's per-window summary: one record + one line
+    let (otx, orx) = crossbeam_channel::unbounded::<Out>();
+    let mut srf = SendRf::default();
+    for i in 0..5u64 { let v = gate(&c.p.sh.rf, true, false, &s, 1012 + 20 * (i % 2), now).unwrap(); srf.note(w, tk.mint, &v, now); }
+    srf.flush(&otx, now + 1_500_000_000, false);
+    assert!(orx.try_recv().is_err(), "the window is still active");
+    srf.flush(&otx, now + 3_500_000_000, false);
+    let o: Vec<Out> = orx.try_iter().collect();
+    assert_eq!(o.len(), 2);
+    match (&o[0], &o[1]) {
+        (Out::Rec(r), Out::Line(l)) => {
+            assert_eq!((r["ev"].as_str(), r["tries"].as_u64(), r["withheld"].as_u64(), r["mode"].as_str()), (Some("presend_live_rearm_fleet"), Some(5), Some(5), Some("live")), "{r}");
+            assert!(l.starts_with(&format!("  PRESEND LIVE REARM FLEET (live) w{w} ")), "{l}");
+        }
+        _ => panic!("a record then a line"),
+    }
+    // the sender's cost per re-arm try (lock-free: the window's copy + 4 relaxed loads)
+    let k = 2_000_000u64;
+    let t0 = arbx::fast::mono_ns();
+    let mut acc = 0u32;
+    for i in 0..k { acc = acc.wrapping_add(gate(&c.p.sh.rf, true, false, std::hint::black_box(&s), 1012 + (i & 7), now).map_or(0, |v| v.n)); }
+    let ns = (arbx::fast::mono_ns() - t0) as f64 / k as f64;
+    eprintln!("DIP47 REARM FLEET sender cost: {ns:.1} ns per re-arm try (rule on); T2 tries: one branch (acc {acc})");
+    assert!(ns < 2_000.0);
+    // the counts ring
+    let mut fs = FlSnap::default();
+    for sl in [100u64, 100, 101, 140, 139] { fs.add(sl); }
+    assert_eq!((fs.count(140, 8), fs.count(140, 1), fs.count(101, 8)), (2, 2, 0), "a jump of 33+ slots clears the old slots");
+    // refusals
+    for bad in [vec!["--presend-live-rearm", "on", "--presend-live-rearm-fleet", "1:8"], vec!["--presend-live-fleet-log", "on", "--presend-live-rearm-fleet", "1:8"],
+                vec!["--presend-live-rearm", "on", "--presend-live-fleet-log", "on", "--presend-live-rearm-fleet", "0:8"],
+                vec!["--presend-live-rearm", "on", "--presend-live-fleet-log", "on", "--presend-live-rearm-fleet", "1:33"],
+                vec!["--presend-live-rearm", "on", "--presend-live-fleet-log", "on", "--presend-live-rearm-fleet-mode", "live"],
+                vec!["--presend-live-rearm", "on", "--presend-live-fleet-log", "on", "--presend-live-rearm-fleet", "1:8", "--presend-live-rearm-fleet-mode", "on"]] {
+        assert!(cfg(&bad).is_err(), "{bad:?}");
+    }
+    let e = format!("{:#}", cfg(&["--presend-live-rearm", "on", "--presend-live-rearm-fleet", "1:8"]).unwrap_err());
+    assert!(e.contains("needs --presend-live-fleet-log on"), "{e}");
+    let ok = cfg(&["--presend-live-rearm", "on", "--presend-live-fleet-log", "on", "--presend-live-rearm-fleet", "1:8", "--presend-live-rearm-fleet-mode", "live"]).unwrap().unwrap();
+    assert_eq!((ok.rearm_fleet, ok.rearm_fleet_live), (Some((1, 8)), true));
+    // the rule off: the key is ignored, the sender's gate reads one atomic and returns nothing
+    let mut c0 = Ctx::new(&["--presend-live-rearm", "on"]);
+    c0.p.ctl47_apply(&psctl47::ctl47_parse(br#"{"rearm_fleet": "live"}"#).unwrap(), "t");
+    assert!(gate(&c0.p.sh.rf, true, false, &FlSnap::default(), 1, 1).is_none());
+    let _ = std::fs::remove_file(&ctl);
 }

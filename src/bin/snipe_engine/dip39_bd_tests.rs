@@ -268,7 +268,7 @@ fn dip39_bd_fill_and_skip_records() {
     let mut sg = [0u8; 64]; sg[0] = 0xD3; sg[1] = 0x39;
     c.atx.send(Att { w: id, n: 1, mint: tk.mint, sig: sg, tag: pl::PS_TAG | 0xD39, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 1011, deadline: 1012,
         lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (1011, 0, 0), t_send: 1011 * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-        tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: Some(BdV { n: 1, q: 0, block: true, raw: true, live: false, ok: true }), x46: Default::default() }).unwrap();
+        tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: Some(BdV { n: 1, q: 0, block: true, raw: true, live: false, ok: true }), x46: Default::default(), rf: None }).unwrap();
     c.p.drain_atts();
     let e = tk.buy(USER, 396_000_000);
     c.tx_sig(1012, 4, sg, vec![e], vec![]);

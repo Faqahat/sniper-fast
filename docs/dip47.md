@@ -87,6 +87,8 @@ the replay's selected few. This is why the live rule (`grp_t2`) leaves the whale
 | `rearm_max_per_mint` | 0..10 (0 = no cap) | flag `--presend-rearm-max-per-mint N` | re-arm FILLS per mint this run; at N no new re-arm window arms on it: `presend_live_skip {kind:"rearm", why:"rearm_cap", rearm_fills, cap}` (a waiting window: dropped "rearm_cap"). T2 unaffected |
 | `pause_window` | "HH:MM-HH:MM[,...]" PKT (UTC+5), ≤4 windows, "" = none | flag `--presend-live-pause-window` | wall clock (UTC → PKT, not slots); inside: no new arm of any kind (T2, wide, re-arm, probe windows), skips counted under "pause_window" (no record per trigger); ON / OFF: one `presend_live_ledger_mode {pause_window:"on"\|"off", window, skipped}` + `PRESEND LIVE PAUSE WINDOW ON 23:00-02:00 PKT` / `... OFF`. Crosses midnight. Open positions exit as usual |
 | `pause_now` | on \| off (off) | control key only | manual pause, same effect (window "manual") |
+| `rearm_fleet` | log \| live (flag `--presend-live-rearm-fleet-mode`, default log) | `--presend-live-rearm-fleet N:SLOTS` | the re-arm fleet rule's mode (section 4) |
+| `rearm_fleet_spec` | "N:SLOTS", N 1..50, SLOTS 1..32 | `--presend-live-rearm-fleet N:SLOTS` | its threshold |
 
 **`grp_t2` live is an ARM-TIME skip.** The signing-time value of a window's first try only exists once that try has been signed, which is
 after the first send. So the rule runs at the T2 arm, on the detector state at the trigger. That state is exactly what the window's first
@@ -164,3 +166,52 @@ for l in open("dip_ams_rNN.jsonl"):
 for k, (n, pnl) in sorted(by.items(), key=str):
     print(k, n, round(pnl, 3))
 ```
+
+## 4. Re-arm fleet rule: `--presend-live-rearm-fleet N:SLOTS` (default off; suggested 1:8)
+
+* The fleet detector and fleet log are ported from dip45 (commit 15765a9a only: `ps45_fleet.rs`, `--presend-live-fleet-log on`,
+  `--presend-live-fleet-sig FILE`, docs/dip45_fleet.md). The whale-sold log, B1 and `--slot-guard-assume` are NOT ported. With the fleet
+  log off nothing of it runs.
+* The rule needs `--presend-live-fleet-log on` and `--presend-live-rearm on`; otherwise the engine refuses to start.
+* Mode: `--presend-live-rearm-fleet-mode log|live` (default log), hot key `rearm_fleet`. Threshold: hot key `rearm_fleet_spec`.
+* **Rule.** RE-ARM windows only, never T2 or wide windows, never probes. A re-arm try signed in slot `s` is sent only if the detector saw at
+  least N fleet-class tries on the mint in slots `[s - SLOTS, s]` (pre-exec and executed feeds, counted once per signature, ours never).
+  The study's g8 is "tries in the 8 slots before the LANDING slot"; a try signed in `s` lands in `s` or `s + 1`, so `[s - 8, s]` is the
+  signing-time equivalent.
+  * live: the try is withheld and counted as not-sent `rearm_fleet_withheld`;
+  * log: the try is sent and counted as would.
+* **Fail open** (never withheld; the reason is on the record as `open`):
+  * `no_data`: no fleet try seen on any mint since the start;
+  * `stale`: none for 10 minutes (the fleet is off or the pre-exec feeds are down);
+  * `blind`: the executed feed's blind episode (dip43 A1).
+* **Records.**
+  * `presend_attempt` and `presend_live_fill` of a re-arm try get `rearm_fleet: {n, min, slots, on (log|live), would_withhold, open?}`.
+  * Per window, about 2 s after its last try: `presend_live_rearm_fleet {w, mint, mode, tries, passed, withheld, would, open, n_min, open_why?}`
+    and the line `PRESEND LIVE REARM FLEET (log|live) wN MINT: tries T | fleet seen P | withheld W | would X | open O`.
+  * A withheld try has no `presend_attempt` record (like the other per-send gates); it is in the window summary and the not-sent counts.
+* **Cost on the sender.** The main loop keeps each mint's fleet tries per slot (33 slots) and copies them into the armed re-arm window (the
+  same way as the bot-depth copy). The sender reads that copy, which it already cloned, plus 4 relaxed atomic loads. No lock. Measured in
+  `dip47_rearm_fleet_rule`: see the test's `DIP47 REARM FLEET sender cost` line (about 10 ns per re-arm try). A T2 try costs one branch.
+
+## 5. Funder-cluster log (log only): `--presend-live-funder-log on`
+
+* It never blocks, withholds or changes a decision. Default off.
+* `--presend-live-funder-rpc URL` (`${VAR}` expanded; default: the FAM log's RPC, i.e. `--presend-live-fam-rpc` or `rpc_url`).
+  `--presend-live-funder-rps N` (default 15, 1..40). The URL is never printed or recorded; errors go through `rpc::scrub`.
+* **Definition** (the fix8283 study's, `lastfund2.py` / `features.py`):
+  * a holder's FUNDER is the fee payer (first signer) of the transaction right before its FIRST buy of the mint, when that payer is another
+    wallet and the holder's SOL balance rose by at least 0.05 SOL in it;
+  * "just funded" means that transaction is at most 3 slots before the buy;
+  * a CLUSTER is the holders with at least 0.5% of supply (ours out) that share one funder; its share is their holdings summed.
+* **How.** The main loop notes every wallet's first buy signature per followed token. When a holder reaches 0.5% it queues ONE lookup
+  (2 RPC calls: `getSignaturesForAddress` before that buy, then `getTransaction` of the newest entry). 4 background threads (`ps-funder-N`,
+  nice 19) do the calls, paced together to the rps. The queue holds 4,096 jobs (full: the oldest is dropped and counted); the cache holds
+  50,000 wallets (oldest out). The main loop never waits: an arm or fill reports what is resolved by then.
+* **Records.** At every arm (T2 and re-arm) and every fill:
+  `presend_live_funder {w, mint, kind, at (arm|fill), slot, n, pct, resolved, pending, c1 {funder, n_wallets, pct}, c2, just_funded_pct, lag_ms {mean, max}}`.
+  `presend_live_fill` gets `funder: {pct, n, resolved}`.
+* **Line.** Once per window at its arm: `PRESEND LIVE FUNDER (log) wN MINT: cluster X.X% (n wallets, funder ABCD…) resolved a/b`.
+* **Offline validation.** `dip47_funder_h2d2_offline` feeds r83 w96 H2d2DtyD's 19 holders through the engine's queue, lookup and cluster
+  code using the study's cached RPC answers (`testdata/dip47_funder_h2d2.json`, made by `ops/funder47/make_fixture.py`; no network):
+  BufYjmzE, 17 wallets, 44.0%, 19/19 resolved with 38 calls.
+* Both `fleet_log` and `funder_log` (on/off) are in the filter state, with `rearm_fleet` and `rearm_fleet_spec`.
