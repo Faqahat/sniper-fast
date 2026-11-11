@@ -344,6 +344,12 @@ type FiltAcc struct {
 	rs        *RuleState              // v4: the LOG rule registry's own records (logrules.go)
 	fillObj   map[FKey]map[string]any // v4: each position's first fill record, decoded (the registry's verdicts)
 	plKeys    map[string]bool         // v4: the latest run_start's presend_live keys (the build inference of runs before "ENGINE BUILD:")
+	// v5 (dip47): the pause's skipped arms (no record per trigger: ledger_mode "off" records, run_end), the re-arm fleet rule's live
+	// withheld windows (presend_live_rearm_fleet), a dip47 filter-state record seen
+	pauseSkips, pauseEnd int64
+	pauseAny, d47        bool
+	rfWin                []fGateWin
+
 	cache     *FiltReport
 	cacheVer  int64
 	cacheSeed string
@@ -403,6 +409,19 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		return
 	}
 	if !bytes.HasPrefix(ev, fEvPrefix) {
+		if string(ev) == "run_end" && bytes.Contains(line, []byte(`"pause_window"`)) { // v5 (dip47): the run's pause skips
+			var r struct {
+				PL *struct {
+					Skips map[string]int64 `json:"skips"`
+				} `json:"presend_live"`
+			}
+			if json.Unmarshal(line, &r) == nil && r.PL != nil {
+				if n, ok := r.PL.Skips["pause_window"]; ok {
+					F.pauseEnd, F.pauseAny = n, true
+					F.ver++
+				}
+			}
+		}
 		if string(ev) == "run_start" { // dip37: the run's ledger / A/B / HYBRID-2 flags (its rows from the start)
 			var keys struct {
 				PL map[string]json.RawMessage `json:"presend_live"`
@@ -452,6 +471,25 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		return
 	}
 	switch string(ev) {
+	case "presend_live_filter_state": // v5 (dip47)
+		if !F.d47 {
+			F.d47 = true
+			F.ver++
+		}
+		return
+	case "presend_live_rearm_fleet": // v5 (dip47): a re-arm window's fleet summary; live withheld windows
+		var r struct {
+			W        int64           `json:"w"`
+			Mint     string          `json:"mint"`
+			Mode     string          `json:"mode"`
+			Withheld int64           `json:"withheld"`
+			T        json.RawMessage `json:"t"`
+		}
+		if json.Unmarshal(line, &r) == nil && r.Withheld > 0 {
+			F.rfWin = append(F.rfWin, fGateWin{k: FKey{r.W, r.Mint}, kind: "RA", t: rawInt(r.T)})
+			F.ver++
+		}
+		return
 	case "presend_disarm": // the shadow window's end: its price move (11-03+) and row c's armed slots (the paper partition's try cost)
 		var r struct {
 			W    *int64 `json:"w"`
@@ -551,6 +589,19 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		}
 		return
 	case "presend_live_ledger_mode": // dip37: the control file's modes (a good read only); dip37b: the SKIP-2 gate's
+		if bytes.Contains(line, []byte(`"pause_window":"o`)) { // v5 (dip47): the pause window's off record counts the arms it skipped
+			var p struct {
+				PW      string `json:"pause_window"`
+				Skipped *int64 `json:"skipped"`
+			}
+			if json.Unmarshal(line, &p) == nil && (p.PW == "on" || p.PW == "off") {
+				F.pauseAny = true
+				if p.Skipped != nil {
+					F.pauseSkips += *p.Skipped
+				}
+				F.ver++
+			}
+		}
 		var r struct {
 			Ok bool    `json:"ok"`
 			Wh string  `json:"whale"`
@@ -640,6 +691,14 @@ func (F *FiltAcc) feed(ev, line []byte) {
 				// dip37: the re-arm's HYBRID-2 m2_unseen gate skips
 				if r.Why != nil && *r.Why == "rearm_m2_unseen" && r.Dump != nil {
 					F.skips = append(F.skips, fSkip{why: "m2_unseen", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
+				}
+				// v5 (dip47): the re-arm cap per mint (counted; a re-arm has no shadow window)
+				if r.Why != nil && *r.Why == "rearm_cap" {
+					var t int64
+					if r.Dump != nil {
+						t = rawInt(r.Dump.T)
+					}
+					F.skips = append(F.skips, fSkip{why: "rearm_cap", sig: "", mint: r.Mint, t: t, ra: true})
 				}
 			}
 			return
@@ -1160,6 +1219,9 @@ var optLiveFilters = []struct{ why, name string }{{"breaker", "circuit breaker"}
 var d37LiveFilters = []struct{ why, name string }{{"wh_loss", "whale loss (T2)"}, {"rearm_wh_loss", "whale loss (re-arm)"}, {"holder_loss", "holder loss (T2 / re-arm)"},
 	{"m2_unseen", "M2 unseen"}}
 
+// d47LiveFilters: dip47's LIVE skips (v5), shown once one fired: GRPSIGN's T2 skip at the arm (calibrated paper) and the re-arm cap
+var d47LiveFilters = []struct{ why, name string }{{"grp_t2", "group at signing (T2)"}, {"rearm_cap", "re-arm cap"}}
+
 // Report computes the table (cached while no record came and the seed is the same).
 func (F *FiltAcc) Report(seedPath string, cal *Calib) *FiltReport {
 	if F.cache != nil && F.cacheVer == F.ver && F.cacheSeed == seedPath && F.cacheCal == cal {
@@ -1348,6 +1410,13 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		}
 		return "mode LOG (skips nothing now); "
 	}
+	for _, f := range d47LiveFilters { // v5 (dip47)
+		note := "calibrated (paper -> cal); blocked = T2 triggers skipped at the arm, W/L = the ones whose shadow filled"
+		if f.why == "rearm_cap" {
+			note = "counted; a re-arm has no shadow window (no value)"
+		}
+		byWhy[f.why] = &FiltRow{Key: f.why, Name: f.name, Type: "LIVE", Note: note}
+	}
 	for _, f := range d37LiveFilters {
 		note := "paper; blocked = triggers skipped, W/L = the ones that would have filled"
 		switch f.why {
@@ -1433,6 +1502,33 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		if show {
 			R.Rows = append(R.Rows, *byWhy[f.why])
 		}
+	}
+	// v5 (dip47): GRPSIGN's T2 skip, the re-arm cap, the pause window, the re-arm fleet rule live (each once it acted, or on a dip47 run)
+	for _, f := range d47LiveFilters {
+		if byWhy[f.why].Blocked > 0 {
+			R.Rows = append(R.Rows, *byWhy[f.why])
+		}
+	}
+	if F.pauseAny {
+		n := max(F.pauseSkips, F.pauseEnd)
+		R.Rows = append(R.Rows, FiltRow{Key: "pause_window", Name: "pause window", Type: "LIVE", Blocked: int(n),
+			Note: fmt.Sprintf("counted; arms skipped inside the pause (no record per trigger: no value); %d in ended pauses", F.pauseSkips)})
+	}
+	if len(F.rfWin) > 0 {
+		row := FiltRow{Key: "rfleet_live", Name: "re-arm fleet (live)", Type: "LIVE"}
+		later, laterSol := 0, 0.0
+		for _, g := range F.rfWin {
+			if F.fills[g.k.W] {
+				later++
+				laterSol += F.real[g.k]
+				continue
+			}
+			row.Blocked++
+			R.Items = append(R.Items, FiltItem{T: g.t, Live: true, Filter: "rfleet_live", Name: row.Name, Rules: []string{"rfleet_live"}, Names: []string{row.Name},
+				Kind: "RA", Mint: g.k.Mint, W: g.k.W, Sig: fmt.Sprintf("w%d", g.k.W)})
+		}
+		row.Note = fmt.Sprintf("counted; re-arm windows with withheld tries: %d never filled (no shadow: no value), %d filled later (real P&L %s)", row.Blocked, later, fmtSigned(laterSol, 3))
+		R.Rows = append(R.Rows, row)
 	}
 	// dip36 LIVE no-bot gate: windows whose sends it withheld (blocked = never filled; the ones that filled later in the note)
 	if len(F.fpWin) > 0 || F.fpHeld > 0 || F.d37 {

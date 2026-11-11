@@ -26,7 +26,7 @@ import (
 	"dipmon/internal/ui"
 )
 
-const version = "4.0"
+const version = "5.0"
 
 const defaultDir = "/root/prod/runs"
 
@@ -233,6 +233,11 @@ func main() {
 	showVersion := fs.Bool("version", false, "print the version")
 	view := fs.Bool("view", strings.HasPrefix(filepath.Base(os.Args[0]), "dipview"), "dipview: the run explorer (every run in --dir; enter opens one in dipmon)")
 	listOnly := fs.Bool("list", false, "with --view: print the runs and their numbers as text, then exit")
+	v5All := fs.Bool("v5", false, "with --snapshot: add the run-wide v5 panels (P&L by hour, big trades, landing by client) to the text / JSON")
+	probeTape := fs.String("probe-tape", "", "the dip46 probes' chain tape (tests/probe_tape.py FILE): exit pricing as probe_check.py (default: the run's own trades, approx)")
+	hoursFiles := fs.String("runs-files", "", "P&L by hour and landing by client across these run files too (comma-separated paths / globs; tab 9 and --snapshot --v5)")
+	hoursOnly := fs.Bool("hours", false, "print the P&L by hour (PKT) of the run files given as arguments (or --runs-files), then exit")
+	landOnly := fs.Bool("landing", false, "print the landing by leader client / path of the run files given as arguments (or --runs-files), then exit")
 	_ = fs.Parse(os.Args[1:])
 	opts0 := func() ui.Options {
 		return ui.Options{Interval: *interval, LoadDuty: *loadDuty, NoColor: *noColor, ASCII: *ascii, Sound: *sound, Notify: *notify,
@@ -258,6 +263,29 @@ func main() {
 	}
 	core.SetASCII(*ascii)
 
+	var hoursList []string
+	for _, g := range strings.Split(*hoursFiles, ",") {
+		if g = strings.TrimSpace(g); g == "" {
+			continue
+		}
+		if m, _ := filepath.Glob(g); len(m) > 0 {
+			hoursList = append(hoursList, m...)
+		} else {
+			hoursList = append(hoursList, g)
+		}
+	}
+	if *hoursOnly || *landOnly { // v5: the hours / landing tables over run files, no UI
+		hoursList = append(hoursList, fs.Args()...)
+		if len(hoursList) == 0 {
+			die("--hours / --landing: give run files (dip_ams_rN.jsonl ...)")
+		}
+		mr, err := core.MultiOfFiles(hoursList)
+		if err != nil {
+			die("%v", err)
+		}
+		fmt.Print(core.MultiText(mr, *hoursOnly, *landOnly))
+		return
+	}
 	if *view {
 		os.Exit(runDipview(*dir, opts0(), usd, *noUSD, *listOnly, *screen, *screensColor, nowF))
 	}
@@ -277,6 +305,21 @@ func main() {
 			die("--calib %s: %v", *calibF, err)
 		}
 		ctx.Calib = c
+	}
+	ctx.V5All = *v5All
+	if *probeTape != "" {
+		t, err := core.LoadProbeTape(*probeTape)
+		if err != nil {
+			die("--probe-tape %s: %v", *probeTape, err)
+		}
+		ctx.ProbeTape = t
+	}
+	if len(hoursList) > 0 {
+		mr, err := core.MultiOfFiles(hoursList)
+		if err != nil {
+			die("--runs-files: %v", err)
+		}
+		ctx.Multi = mr
 	}
 	if !src.Exists() {
 		die("%s not found", src.JSONL)

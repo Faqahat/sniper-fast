@@ -235,6 +235,13 @@ func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.St
 			if f := m.d43Of(tr); f != nil {
 				s, st = f.Arm, t.Acc
 			}
+		case "fv": // v5 (dip47)
+			if f := m.v5Of(tr); f != nil {
+				s, st = f.FvCell(), t.Lbl
+				if strings.HasSuffix(s, "*") {
+					st = t.Warn
+				}
+			}
 		case "":
 			s, st = " ", t.Acc
 		case "flag":
@@ -275,6 +282,14 @@ func (m *Model) hlBg(tr *core.Trade) (color.Color, float64) {
 func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 	t := m.th
 	cols := tradeCols(w, m.usdFirst && m.view.Price != 0, m.viaOn(), m.armOn())
+	if m.fvOn() && w >= 110 { // v5 (dip47): the filter state's version at the window's arm ("*": it moved before the fill)
+		for i, c := range cols {
+			if c.title == "client" {
+				cols = append(cols[:i:i], append([]tcol{{"fv", 4, true}}, cols[i:]...)...)
+				break
+			}
+		}
+	}
 	if sel >= 0 {
 		cols = append([]tcol{{"", 1, false}}, cols...)
 	}

@@ -627,6 +627,8 @@ type Model struct {
 	// v4: the ADDED WINDOWS (dip41 / dip42 log-only windows; added.go) and the dip43 records (dip43.go)
 	Add *AddAcc
 	D43 *D43Acc
+	// v5: the dip46 / dip47 records, the hours / big trades / landing panels (v5.go)
+	V5 *V5Acc
 }
 
 type armRec struct {
@@ -642,7 +644,7 @@ func NewModel(failBuyFee int64, logKeep int) *Model {
 	M := &Model{jsess: -1, lsess: -1, LogKeep: logKeep, LogRing: NewRing(logKeep), LogImp: NewRing(max(200, logKeep/2)),
 		RPC: map[[2]string]*RPCStat{}, PollErr: map[int]int64{}, PathErr: map[string]map[int]int64{},
 		PathKind: map[string]string{}, PathTotal: map[string]int64{}, armInfo: map[[2]int64]armRec{},
-		EvCount: map[string]int{}, Filt: newFiltAcc(), Add: newAddAcc(), D43: newD43Acc()}
+		EvCount: map[string]int{}, Filt: newFiltAcc(), Add: newAddAcc(), D43: newD43Acc(), V5: newV5Acc()}
 	M.lpend = LogCfg{}
 	if failBuyFee > 0 {
 		M.FailBuyFee, M.FailBuyFeeSrc = failBuyFee, "cmdline"
@@ -736,6 +738,7 @@ func (M *Model) feedOne(line, ev []byte) {
 	M.Filt.feed(ev, line) // the Filters tab (its own presend_* records, before the model ignores the shadow's)
 	M.Add.feed(ev, line)  // v4: the added windows (dip41 / dip42)
 	M.D43.feed(ev, line)  // v4: the dip43 records (guard, CURVE band, true balances, fee tier, exits, shadows)
+	M.V5.feed(ev, line)   // v5: dip46 probes / A/B, dip47 filter state / pause / re-arm cap / fleet / GRPSIGN / funder; hours, landing
 	switch string(ev) {
 	case "presend_live_sell_land": // v3 only: a landed pre-send sell (ignored by the Python v1)
 		M.jPSSellLand(line)

@@ -211,6 +211,9 @@ func (M *Model) logLine(s string) {
 	if (c0 == 'G' || c0 == 'D') && (strings.HasPrefix(st, "GUARD (dip43") || strings.HasPrefix(st, "DIP43")) { // v4: the dip43 banners
 		M.D43.logLine(st)
 	}
+	if c0 == 'P' && strings.HasPrefix(st, "PRESEND LIVE: ") { // v5: the status line's pause_window skips
+		M.V5.logLine(st)
+	}
 	if c0 == 'E' && strings.HasPrefix(st, "ENGINE BUILD: ") { // dip39+: the engine binary's name (snipe_engine_dip43c) and sha256
 		if m := rxEngBuild.FindStringSubmatch(st); m != nil {
 			M.EngBuild, M.EngSHA = strings.TrimPrefix(m[1], "snipe_engine_"), m[2]

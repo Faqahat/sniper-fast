@@ -142,6 +142,51 @@ var LogRules = []LogRule{
 		}},
 }
 
+// v5 (dip47): GRPSIGN and the re-arm fleet rule on the fill records; "measured" = scored on the real fills
+var _ = func() bool {
+	LogRules = append(LogRules,
+		LogRule{Key: "grpsign", Code: "GS", Name: "group at signing (log)", Short: "grp at signing", Verdict: "LOG new", Why: "GRPSIGN T2 (dip47)",
+			Note:    "measured (real fills); GRPSIGN: the T2 window's group at the filling try's signing >= grp_t2_pct (trigger whale per grp_t2_whale; the fill's state)",
+			Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "grpsign") != nil },
+			Flag: func(_ *RuleState, f map[string]any) (bool, string) {
+				g := mObj(f, "grpsign")
+				if g == nil || mStr(f, "kind") == "rearm" || mBool(g, "miss") {
+					return false, ""
+				}
+				thr, whale := 3.0, "out"
+				if st := mObj(f, "filters"); st != nil {
+					if x, ok := mNum(st, "grp_t2_pct"); ok && x > 0 {
+						thr = x
+					}
+					if w := mStr(st, "grp_t2_whale"); w != "" {
+						whale = w
+					}
+				}
+				p, ok := mNum(g, "pct_x")
+				if whale == "in" {
+					p, ok = mNum(g, "pct")
+				}
+				if !ok || p < thr {
+					return false, ""
+				}
+				return true, fmt.Sprintf("group %.1f%% at signing (whale %s) >= %.1f%%", p, whale, thr)
+			}},
+		LogRule{Key: "rfleet", Code: "RF", Name: "re-arm fleet (log)", Short: "re-arm fleet", Verdict: "LOG new", Why: "REARM FLEET (dip47)",
+			Note:    "measured (real fills); RE-ARM FLEET: the filling re-arm try saw fewer fleet tries than the rule's N (it would have been withheld; fail-open tries not counted)",
+			Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "rearm_fleet") != nil },
+			Flag: func(_ *RuleState, f map[string]any) (bool, string) {
+				r := mObj(f, "rearm_fleet")
+				if r == nil || !mBool(r, "would_withhold") || mStr(r, "open") != "" {
+					return false, ""
+				}
+				n, _ := mNum(r, "n")
+				mn, _ := mNum(r, "min")
+				sl, _ := mNum(r, "slots")
+				return true, fmt.Sprintf("fleet %.0f < %.0f in %.0f slots", n, mn, sl)
+			}})
+	return true
+}()
+
 var ruleEvs = func() map[string][]int {
 	m := map[string][]int{}
 	for i, r := range LogRules {

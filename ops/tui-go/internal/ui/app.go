@@ -32,8 +32,8 @@ type Options struct {
 	Golden                                 bool   // tests: fixed probe values (system, pid, clock) for golden screens
 }
 
-var tabNames = []string{"Overview", "Engine", "Regular", "Trades", "Health", "Log", "Config", "Filters"}
-var tabShort = []string{"Ovw", "Eng", "Reg", "Trd", "Hlth", "Log", "Cfg", "Flt"}
+var tabNames = []string{"Overview", "Engine", "Regular", "Trades", "Health", "Log", "Config", "Filters", "Stats"}
+var tabShort = []string{"Ovw", "Eng", "Reg", "Trd", "Hlth", "Log", "Cfg", "Flt", "St"}
 var filters = []string{"all", "pre-send", "regular", "wins", "losses", "open"}
 
 const (
@@ -651,7 +651,7 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.query = ""
 			m.search.SetValue("")
 		}
-	case "1", "2", "3", "4", "5", "6", "7", "8":
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		m.tab = int(k[0] - '1')
 		m.detail = nil
 	case "tab":
@@ -1114,6 +1114,8 @@ func (m *Model) bodyRaw(w, bh int) string {
 			s, scrolls = m.scrLog(w, bh), false
 		case 7:
 			s, scrolls = m.scrFilters(w, bh), false
+		case 8: // v5
+			s = m.scrV5(w, bh)
 		default:
 			s = m.scrConfig(w, bh)
 		}
@@ -1217,6 +1219,9 @@ func (m *Model) tabBar(w int) string {
 	names := tabNames
 	if w < 100 {
 		names = tabShort
+	}
+	if !m.tab9Shown() { // v5: "9 Stats" only on dip46 / dip47 runs or while open (the key 9 opens it on every run)
+		names = names[:8]
 	}
 	var b strings.Builder
 	x := 0

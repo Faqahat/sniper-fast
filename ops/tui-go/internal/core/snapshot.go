@@ -274,6 +274,7 @@ func SnapshotJSON(v *View, ctx *Ctx, extra *JObj) string {
 	d26JSON(v, d)     // dip26 runs only
 	filtersJSON(v, d) // dip24+ runs only
 	d43JSON(v, d)     // v4: dip43 runs only
+	v5JSON(v, ctx, d) // v5: dip46 / dip47 runs (all runs with --v5)
 	if extra != nil {
 		for i, k := range extra.Keys {
 			d.Set(k, extra.Vals[i])
@@ -431,6 +432,7 @@ func SnapshotText(v *View, ctx *Ctx, width int) string {
 	out = append(out, d26Text(v, ctx)...)
 	out = append(out, filtersText(v, ctx)...)
 	out = append(out, d43Text(v)...)
+	out = append(out, v5Text(v, ctx)...)
 	if ps.Active {
 		capS := "?"
 		if c := v.PSCfg["max_fills"]; truthyAny(c) {

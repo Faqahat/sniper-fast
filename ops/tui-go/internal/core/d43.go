@@ -34,6 +34,10 @@ type D43Section struct {
 	Key, Title string
 	Lines      []string // plain text, already formatted ("label     value")
 	JSON       *JObj
+	// v5: the lines that are table rows (no wrapping: cut at the width) and a tone per line (pos / neg / warn / dim / acc)
+	Pre   []int
+	Tones map[int]string
+	Alt   []string // phones (< 70 columns): a compact table instead of Lines (every line a table row)
 }
 
 type d43Try struct {

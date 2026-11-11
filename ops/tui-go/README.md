@@ -1,4 +1,53 @@
-# REWIND: dipmon v4 + dipview, the live monitor and run explorer for the dip-bot runs (Go)
+# REWIND: dipmon v5 + dipview, the live monitor and run explorer for the dip-bot runs (Go)
+
+## v5 (11-11)
+
+The engine's **dip46** (probes, filter A/B) and **dip47** (a85abd28: filter state, hot keys, GRPSIGN, re-arm cap, pause window,
+re-arm fleet rule, funder clusters) records, plus three run-wide panels. Code: `internal/core/v5.go` (one `V5Acc`, sections like
+v4's dip43 ones), `internal/ui/v5.go`; tests `internal/core/v5_test.go`. Each section is absent when its records are (older runs:
+every v4 screen, `--snapshot` and `--json` byte-identical to v4 on r82; only the version string `5.0` differs).
+
+- **Tab 9 Stats** (key `9`; in the tab bar on dip46 / dip47 runs or while open), in order:
+  - **PROBES** (dip46): sent / landed / unseen, probe windows, fees, ends by why; per filter: probes, windows probed, would-fill
+    windows (each window's FIRST landing where the real try would have filled), win / lose / net / net at 1 SOL priced like
+    `sniper-dip46 ops/probe46/probe_check.py` (r82 exit: 2350 ms timer, TP / SL 20%, exact curve, sell cost, the probe's fee +
+    tip). The pricing needs the collector's chain tape, which the node does not have: `python3 tests/probe_tape.py RUN.jsonl
+    TAPE.jsonl` exports it (read-only, via harness/hlib), `dipmon --probe-tape TAPE.jsonl` prices with it (equal to
+    probe_check.py on r83, every row; `TestV5ProbeR83`). Without it: the engine's own `would_fill`, net "–".
+  - **FILTER A/B** (dip46): configured / now (`presend_live_dip46`, the `dip46.ab46` control key), per A/B'd filter the live,
+    bypass and bypass-would arms: windows, filled, real P&L (realized joined on w), `presend_live_filter_ab` counts.
+  - **FILTER STATE** (dip47): fv / fh, the full key table grouped (ledgers, arm gates, re-arm, send, exits, pause / shadows,
+    other), the change timeline (time PKT, fv, key old → new, src), control-file errors; each trade carries its fv (Trades column
+    `fv` from 110 columns, `*` = fv_fill ≠ fv; the details' `dip46/47` line).
+  - **PAUSE**: ACTIVE (red) / INACTIVE banner from the last `pause_window` on / off record, the window with its 12-hour times,
+    the next start → end (or the end of the current one), `pause_now`, each pause period with its skipped arms (the off record),
+    the total (the status line's / run_end's `pause_window` skips). While active and running: an alert.
+  - **RE-ARM CAP**: the cap, blocks (`presend_live_skip` why `rearm_cap`), tokens (time, blocks, fills / cap, GMGN link).
+  - **RE-ARM FLEET RULE**: mode / spec; re-arm windows all sent / withheld (live) / would-withhold (log) / fail-open, tries;
+    real P&L of re-arm fills with vs without fleet (`rearm_fleet.would_withhold`, fail-open excluded); would have saved = the
+    fills sent in log mode without fleet.
+  - **GROUP AT SIGNING** (GRPSIGN, `grp_t2`): mode, threshold, whale in / out; windows signed (first_try), T2 would-skips, live
+    skips; T2 fills it would have skipped and their real P&L.
+  - **FUNDER CLUSTERS**: per fill the largest cluster %, wallets and funder prefix (red at >= 25%), flagged trades and their P&L.
+  - **P&L BY HOUR** (PKT, 12-hour): fills, wins, win %, 20%+ wins (count, ◎), 20%+ losses, net = `~/sniper-data/fix8283/hours.py`
+    + its hours_winloss columns (20% of `spend`, else `sol_in`; reproduced exactly on all local runs). `--runs-files A,B,glob`
+    adds the table across those files; `dipmon --hours FILE...` prints it.
+  - **BIG TRADES** (|P&L| >= 14% of the size): time, kind, P&L ◎ and %, exit, the GMGN link, flags (mint_ledger, grp, cascade,
+    fam from the Filters LOG rules; grp_sign, funder >= 25%, rearm_fleet from the fill).
+  - **LANDING BY LEADER CLIENT**: `presend_attempt_land.ms_send_to_first_rx` p10 / p25 / p50 / p75 / p90 (0.1 ms buckets) and the
+    share <= 35 / 50 / 65 / 80 ms, ALL, per client, per path; `--runs-files` adds the multi-run table, `dipmon --landing FILE...`
+    prints it (r82 + r83: ALL p50 73.8, <= 50 ms 30%, FireBAM 50.3, JitoLabs 94.0).
+  Phones (< 70 columns): compact hours / landing tables.
+- **Filters**: LIVE rows `group at signing (T2)` (grp_t2 skips: paper -> **calibrated**), `re-arm cap`, `pause window`, `re-arm
+  fleet (live)` (counted, no value: re-arm windows have no shadow; the pause has no record per trigger); LOG rows (registry)
+  `group at signing (log)` and `re-arm fleet (log)` (**measured** on the real fills). Shown only once they acted / a fill carries
+  the field.
+- **Snapshot / JSON**: the dip46 / dip47 sections as `v5 ...` lines and a `"v5": {...}` object whenever the run has them;
+  `--v5` adds hours, big trades and landing (and every fill's v5 fields).
+- **Test data**: `~/sniper-data/dipmon5/dip47test/make_dip47_log.py` (r83 with every dip47 record type added in the a85abd28
+  shapes; synthetic values), `v5_check.py` (recomputes every dip47 panel in Python and compares with `--snapshot --json --v5`).
+- `make_screens_v5.sh BIN OUTDIR TAG RUN.jsonl` writes the new panels' text screens and `--snapshot --v5` dumps.
+
 
 ## v4 (11-11)
 

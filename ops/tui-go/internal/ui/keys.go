@@ -21,7 +21,7 @@ func newKeyMap() keyMap {
 	nb := key.NewBinding
 	k, h := key.WithKeys, key.WithHelp
 	return keyMap{
-		Tabs:    nb(k("1", "2", "3", "4", "5", "6", "7", "8"), h("1-8", "tabs")),
+		Tabs:    nb(k("1", "2", "3", "4", "5", "6", "7", "8", "9"), h("1-8", "tabs")),
 		Next:    nb(k("tab"), h("tab", "next tab")),
 		Prev:    nb(k("shift+tab"), h("shift+tab", "previous tab")),
 		Up:      nb(k("up", "k"), h("↑/k", "up")),

@@ -1203,6 +1203,19 @@ func (m *Model) scrDetail(w, bh int, tr *core.Trade) string {
 			out = append(out, m.kv(lab, lw, t.Val.Render(l)))
 		}
 	}
+	if f := m.v5Of(tr); f != nil && f.Brief() != "" { // v5: fv, GRPSIGN, re-arm fleet, funder cluster, A/B arm
+		for i, l := range core.WrapText(f.Brief(), max(10, w-lw-4), 0) {
+			lab := ""
+			if i == 0 {
+				lab = "dip46/47"
+			}
+			st := t.Val
+			if f.Fund != nil && f.Fund.Pct >= core.FunderRed {
+				st = t.Neg
+			}
+			out = append(out, m.kv(lab, lw, st.Render(l)))
+		}
+	}
 	if it, ok := m.flag(tr); ok { // the Filters tab's LOG rules that would have blocked it
 		for i, l := range core.WrapText(it.Info(), max(10, w-lw-4), 0) {
 			lab := ""

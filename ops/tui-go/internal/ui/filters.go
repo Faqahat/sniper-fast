@@ -333,6 +333,10 @@ var fltVerdicts = map[string]fltVerdict{
 	"hc":            {vgDism, "DISMISSED", "dup of group risk"},
 	"guard":         {vgDism, "DISMISSED", "flagged did better"},
 	"ctx85":         {vgDism, "DISMISSED", "attack-only gain"},
+	"grp_t2":        {vgLive, "LIVE new", "group at signing (dip47)"},
+	"rearm_cap":     {vgLive, "LIVE new", "re-arm fills per mint (dip47)"},
+	"pause_window":  {vgLive, "LIVE new", "PKT pause window (dip47)"},
+	"rfleet_live":   {vgLive, "LIVE new", "re-arm fleet rule (dip47)"},
 }
 
 // fltVerdictOf: the row's verdict; a filter the study did not judge (the deeper limit) keeps its type's group, "—".

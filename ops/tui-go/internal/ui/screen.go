@@ -109,7 +109,7 @@ func DumpScreens(ctx *core.Ctx, o Options, dir string, sizes [][2]int, tag strin
 	}
 	pages := []pg{{"01-overview", 0, ""}, {"02-presend", 1, ""}, {"03-regular", 2, ""}, {"04-trades", 3, ""}, {"05-health", 4, ""},
 		{"06-log", 5, ""}, {"07-config", 6, ""}, {"08-help", 0, "help"}, {"09-detail", 3, "detail"}, {"10-splash", 0, "splash"},
-		{"11-today", 0, "today"}, {"12-filters", 7, ""}}
+		{"11-today", 0, "today"}, {"12-filters", 7, ""}, {"13-stats", 8, ""}}
 	ext := ".txt"
 	if keepANSI {
 		ext = ".ans"

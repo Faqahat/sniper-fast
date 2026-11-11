@@ -454,6 +454,10 @@ type Ctx struct {
 	// v4 (11-11): the Filters tab's calibration (calib.go): nil = the embedded table, unless NoCalib (--calib none)
 	Calib   *Calib
 	NoCalib bool
+	// v5: --v5 (the snapshot adds the hours / big trades / landing panels), --probe-tape, --runs-files
+	V5All     bool
+	ProbeTape *ProbeTape
+	Multi     *MultiRuns
 }
 
 // CalibTable: the calibration the Filters tab applies (nil = off).
@@ -592,6 +596,7 @@ type View struct {
 	Paper PaperSplit
 	Added []string   // v4: the ADDED WINDOWS lines (dip41 / dip42 log-only windows; nil when none)
 	D43   *D43Report // v4: the dip43 sections (nil when the run has no dip43 record)
+	V5    *V5Report  // v5: the dip46 / dip47 sections and the run-wide stats (nil only with DIPMON_V3)
 }
 
 // NowNS is now_ns as a float.
@@ -975,7 +980,35 @@ func BuildView(ctx *Ctx, scope int) *View {
 	v.Filt = M.Filt.Report(ctx.GcrSeedPath(), ctx.CalibTable()) // the whole file (every session), cached per records version
 	v.Paper = M.Filt.Paper()
 	v.Added = M.Add.Lines()
+	M.V5.flagFn = func(w int64, mint string) []string { return filtFlags(v.Filt, w, mint) }
+	v.V5 = M.V5.Report(int64(ctx.Now()*1e9), ctx.ProbeTape, ctx.Multi)
+	if v.V5 != nil && v.V5.Pause != nil && v.V5.Pause.Active && v.Running {
+		v.Alerts = append(v.Alerts, Alert{"warn", "PAUSE window " + v.V5.Pause.Window + ": no new arms (dip47)"})
+	}
 	return v
+}
+
+// filtFlags: the Filters report's LOG flags of a fill, in the big-trades panel's names.
+func filtFlags(R *FiltReport, w int64, mint string) []string {
+	if R == nil {
+		return nil
+	}
+	it, ok := R.Flag(w, mint)
+	if !ok {
+		return nil
+	}
+	names := map[string]string{"mintled": "mint_ledger", "grp": "grp", "ga": "cascade", "gd": "cascade", "fam": "fam", "grpsign": "", "rfleet": ""}
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range it.Rules {
+		n, ok := names[r]
+		if !ok || n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	return out
 }
 
 // BestVal / WorstVal: the series' high / low as lamports.
