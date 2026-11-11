@@ -102,7 +102,7 @@ impl Ctx {
 fn sold(c: Option<u64>, sigs: &[&str], qty: u64) -> SellOut {
     SellOut { sold_at: c, sigs: sigs.iter().map(|s| (s.to_string(), true, 1_200_000)).collect(), last: None, attempts: sigs.len() as u32, last_qty: (qty, true), first_send_us: None }
 }
-fn strip(v: &[serde_json::Value]) -> Vec<String> { v.iter().map(|r| r.to_string()).collect() }
+fn strip(v: &[serde_json::Value]) -> Vec<String> { v.iter().cloned().filter_map(dip26_tests::strip47).map(|r| r.to_string()).collect() }
 
 /// the flags: parse, the start record, refusals, the start-up check
 #[test]

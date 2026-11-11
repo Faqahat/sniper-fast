@@ -257,6 +257,13 @@ pub mod psprobe46;
 /// dip46's flags (psprobe46.rs; named here so the start-up flag check knows them)
 const D46FLAGS: [&str; 5] = ["--presend-live-probe", "--presend-live-probe-max-per-sec", "--presend-live-probe-kinds", "--presend-live-probe-max-windows",
     "--presend-live-filter-ab"];
+// dip47: GRPSIGN, the group-holder-risk metric at SIGNING (LOG ONLY; off by default = dip46)
+#[path = "psgrp47.rs"]
+pub mod psgrp47;
+const D47FLAGS: [&str; 1] = ["--presend-live-grpsign-log"];
+// dip47: hot control keys (sizes, thresholds, exits, floors, grp_t2) + the versioned FILTER STATE stamped on decision records
+#[path = "psctl47.rs"]
+pub mod psctl47;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -556,6 +563,10 @@ pub struct Cfg {
     pub g43: Option<ps43_guard::G43>,
     /// dip46 probe tries + filter A/B (psprobe46.rs; Default = off = dip43g)
     pub p46: psprobe46::Cfg46,
+    /// dip47 GRPSIGN log (psgrp47.rs; false = off = dip46)
+    pub grpsign: bool,
+    /// dip47 filter state: the run's money limits as given (read-only; dipmode enforces them)
+    pub limits47: serde_json::Value,
 }
 
 /// dip43e --presend-live-dump-exit S:C:X -> (S lamports, C lamports, X fraction): S, C in [0, 50] SOL (0 = that trigger off, not both 0),
@@ -603,7 +614,7 @@ impl Cfg {
         // dip43 B: its flags need --presend-live too
         ps43_b::needs_presend_live(argv)?;
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -743,7 +754,12 @@ impl Cfg {
             g43: None,
             // dip46 (every item off unless its flag)
             p46: psprobe46::Cfg46::parse(argv)?,
+            // dip47 (log only)
+            grpsign: onoff(psgrp47::FLAG, false)?,
+            limits47: serde_json::json!({"max_sol": arg("--max-sol"), "kill_switch_sol": arg("--max-loss-sol"), "profit_lock": {"min_sol": arg("--profit-lock-min-sol"), "frac": arg("--profit-lock-frac")}}),
         };
+        // dip47: the hold clocks it reads are kept only with the annotations on
+        if c.grpsign && !c.ann { bail!("{} on needs --presend-live-ann on (the hold clocks are kept only with it)", psgrp47::FLAG); }
         // dip43: the true balances and the fan-out come from dip35's fam read at the arm (verifier 11-10: the feeds carry no plain transfers)
         if (c.c43.tbal || c.c43.fanout.is_some()) && !c.fam_log { bail!("--presend-live-tbal / --presend-live-cascade / --presend-live-fanout need --presend-live-fam-log (its RPC read at the arm is their source)"); }
         if c.c43.fp_strict.is_some() && !c.fpnb_log { bail!("--presend-live-fpnb-strict needs --presend-fpnb-log on (the score it thresholds)"); }
@@ -1055,6 +1071,8 @@ impl Cfg {
         if self.b43.any_on() { j["b43"] = self.b43.json(); }
         // dip46: only when on (off: dip43g's record)
         if self.p46.any() { j["dip46"] = self.p46.json(); }
+        // dip47: only when on (off: dip46's record)
+        if self.grpsign { j["dip47"] = serde_json::json!({"grpsign_log": true, "t2_pct": psgrp47::T2_PCT}); }
         j
     }
 }
@@ -1268,6 +1286,8 @@ struct Shared {
     g43: ps43::Sh43,
     /// dip46 probes / A/B (psprobe46.rs; idle by default)
     p46: psprobe46::Sh46,
+    /// dip47: the hot keys the sender applies (psctl47.rs)
+    f47: psctl47::Sh47,
 }
 
 impl Shared {
@@ -1315,6 +1335,8 @@ fn spawn_writer(log: Arc<DipLog>) -> crossbeam_channel::Sender<Out> {
             let mut n = 1;
             while let Ok(o) = rx.try_recv() { add(o); n += 1; if n > 256 { break; } }
             if !lines.is_empty() { eprint!("{lines}"); }
+            // dip47: the sender's probe / A/B records take the filter state's version here (off the send path)
+            for r in recs.iter_mut() { psctl47::writer_stamp(r); }
             log.w_all(recs);
         }
     }).expect("ps-log thread");
@@ -1332,8 +1354,11 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
     let mut bd_last: FxHashMap<u64, u64> = FxHashMap::default();
     // dip46 the probes' rate / per-window-slot limiter and the A/B's record limiter (idle with its flags off)
     let mut s46 = psprobe46::Send46::new(&sc.cfg.p46);
+    // dip47: the hot keys' version the sender applied (botdepth gate, CURVE band D, floors on re-arm windows)
+    let mut f47v = 0u64;
     loop {
         if sh.stop.load(Ordering::Relaxed) && sh.wins.lock().unwrap().is_empty() { break; }
+        psctl47::sender_sync(&sh.f47, &mut f47v, &mut sc.cfg);
         let now = arbx::fast::mono_ns();
         let slot = sh.cur_slot();
         let mut due: Vec<SWin> = Vec::new();
@@ -2446,6 +2471,10 @@ pub struct PsLive {
     b43: ps43_b::B43St,
     /// dip46 probes / A/B (psprobe46.rs; idle with its flags off)
     p46: psprobe46::P46,
+    /// dip47 GRPSIGN snapshots (psgrp47.rs; idle with its flag off)
+    g47: psgrp47::G47,
+    /// dip47 hot keys + filter state (psctl47.rs)
+    f47: psctl47::F47,
 }
 
 impl PsLive {
@@ -2487,7 +2516,7 @@ impl PsLive {
         let (atx, arx) = crossbeam_channel::unbounded::<Att>();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
-            slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default() });
+            slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() });
         // dip39 BOT DEPTH: the start mode and the list (a bad / missing list: FAIL OPEN, a warning; None with it off)
         sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
         let bd = cfg.bd.map(|g| psbd::Bd::open(g, cfg.bd_list.as_deref(), cfg.bd_state.as_deref(), &user));
@@ -2688,7 +2717,7 @@ impl PsLive {
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
             fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1,
-            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default() };
+            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default() };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
@@ -2704,10 +2733,14 @@ impl PsLive {
         p.b43_start();
         // dip46: the probe / A/B modes and the control file's "ab46" / "probe46" (a record only with its flags)
         p.p46_start();
+        // dip47: the hot keys' start values, the control file's first read, the filter state fv 0
+        p.f47_start();
         Ok(p)
     }
 
-    fn rec(&self, v: serde_json::Value) {
+    fn rec(&self, mut v: serde_json::Value) {
+        // dip47: the filter state's version on the decision records (fill / realized: the window's ARM state in full)
+        self.stamp47(&mut v);
         // dip36 skip2 (log-only): its history sees the skips and disarms (nothing without the flag)
         if let Some(f) = self.fp.as_ref() { f.on_rec(&v); }
         let _ = self.out.send(Out::Rec(v));
@@ -2721,6 +2754,8 @@ impl PsLive {
             if a.x46.probe.is_some() { self.p46_reg(a); continue; }
             if a.x46.ab != 0 { self.p46_ab_send(a.w, a.x46.ab); }
             if let Some(w) = self.wins.get_mut(&a.w) { w.sent += 1; w.last_deadline = w.last_deadline.max(a.deadline); }
+            // dip47 (log only): the window's first try's group at its signing (nothing with the flag off)
+            if self.cfg.grpsign { self.g47_att(&a); }
             let e = self.last_deadline.entry(a.mint).or_default(); *e = (*e).max(a.deadline);
             let q = self.quiet.entry(a.mint).or_default(); *q = (*q).max(a.deadline);
             cnt_add(&mut self.st.per_path, &a.path, 0);
@@ -3073,6 +3108,8 @@ impl PsLive {
                     if let Some(w) = g.iter_mut().find(|w| w.id == id) { w.ob6 = o6; w.grd = gs; w.g43 = hs; }
                 }
             }
+            // dip47 (log only): the armed window's group as of this trade (the next try signs with this state; nothing with the flag off)
+            if self.cfg.grpsign { if let Some(&id) = self.armed.get(&e.mint) { self.g47_snap(id, &e.mint, t.pos(), t.s); } }
             // dip26 RE-ARM: this trade for the re-arm (its windows' stops and QUIET count, a new candidate; nothing without it)
             if self.rm.is_some() { self.rearm_trade(&t); }
             // dip23 v2 (log-only): the ring takes the trade AFTER its trigger decision (the features of a trigger see only the trades
@@ -3083,7 +3120,9 @@ impl PsLive {
                 if let Some(p) = self.pos.get_mut(&e.mint) {
                     if p.exit.is_none() && p.tokens > 0 {
                         let v = pl::value(e.vsol, e.vtok, p.tokens, t.fr(), p.spend);
-                        let why = if self.cfg.tp > 0.0 && v >= 1.0 + self.cfg.tp { Some("take-profit") } else if self.cfg.sl > 0.0 && v <= 1.0 - self.cfg.sl { Some("stop-loss") } else { None };
+                        // dip47: the position's take-profit / stop-loss at its opening (the start's without a tp / sl key)
+                        let (_, tp, sl) = self.f47.px.get(&p.pid).copied().unwrap_or((self.cfg.exit_ms, self.cfg.tp, self.cfg.sl));
+                        let why = if tp > 0.0 && v >= 1.0 + tp { Some("take-profit") } else if sl > 0.0 && v <= 1.0 - sl { Some("stop-loss") } else { None };
                         // dip43e: a sell into the hold (nothing without --presend-live-dump-exit)
                         let why = why.or_else(|| self.dump_exit_check(&e.mint, &t, v, a.slot));
                         if let Some(why) = why { let m = e.mint; self.exit(&m, why, a.slot, v, a.t_rx); }
@@ -3147,7 +3186,7 @@ impl PsLive {
             "age_slots": age_slots, "sol": t.sol, "tok": t.tok, "vsol": t.vsol, "vtok": t.vtok});
         if wide.is_none() { self.par.insert((mint_s.clone(), sig_s.clone(), t.j as i64), (t.s, trig.clone())); }
         // dip41: the wide window's size (T2: the pre-send size)
-        let spend = match wide { Some((k, _)) => self.wd.as_ref().map_or(self.cfg.spend, |w| w.size_of(k)), None => self.cfg.spend };
+        let spend = match wide { Some((k, _)) => self.wd.as_ref().map_or(self.cfg.spend, |w| w.size_of(k)), None => self.size_t2_47() };
         let launch = launch_of(&t.mint);
         // dip43 A9: the create-slot / young-age gates' control keys ("log": the verdict is kept in would43, the trigger goes on; live: dip42)
         let (cs_hit, ya_hit) = (age_slots == 0 && !self.cfg.create_slot, age_slots < self.cfg.min_age_slots);
@@ -3243,6 +3282,11 @@ impl PsLive {
         // dip38 PSM12-S1 (log only; LIVE only with its gate on for T2): decided LAST, on a trigger that would arm (None with the log off)
         let s1v = if why.is_none() { self.s1_view(false, h2v.map(|v| v.0), age_slots, &whale) } else { None };
         if let Some(w) = s1v.as_ref().and_then(|v| self.s1_skip_why(v)) { why = Some(w); }
+        // dip47 grp_t2 "live" (control key; never re-arm / wide): the GRPSIGN group at the arm >= the threshold (the state the first try signs with)
+        let grp47 = if why.is_none() && wide.is_none() {
+            self.grp_t2_47().map(|(thr, whale_in)| { let sn = psgrp47::snap_of(&self.det, &t.mint, &self.user, t.s); (if whale_in { sn.pct } else { sn.without(&whale).0 }, thr) })
+        } else { None };
+        if grp47.is_some_and(|(p, thr)| p >= thr) { why = Some("grp_t2"); self.f47.grp_skips += 1; }
         // dip32 (log-only): QUIET3-A and the fresh holders
         let f3 = self.cfg.f3_log.then(|| {
             let (fresh, fresh_n) = f3_fresh(&self.det, &t.mint, &self.user, &whale, t.s);
@@ -3258,6 +3302,7 @@ impl PsLive {
         if let Some(why) = why {
             if wide.is_none() { *self.st.skips.entry(why).or_default() += 1; }
             let mut r = serde_json::json!({"ev": "presend_live_skip", "why": why, "trig": trig});
+            if let Some((p, thr)) = grp47.filter(|_| why == "grp_t2") { r["grp_t2"] = serde_json::json!({"pct": p, "thr": thr}); }
             // dip41: a wide window's skip says so; a T2 skip carries the whale's dumper ledger values (each only with the ledger on)
             if let Some((k, v)) = wide { r["kind"] = k.key().into(); r[k.field()] = v.json(k); } else { self.wd_t2_fields(&mut r, &whale, t, age_slots); }
             if let Some(j) = &qj { r["quiet"] = j.clone(); r["quiet_skip"] = (why == "quiet").into(); }
@@ -3357,6 +3402,9 @@ impl PsLive {
             grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint), g43: self.g43_set(&t.mint), p46: None };
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
+        self.f47_arm(id);
+        // dip47 (log only): the window's group at its arm (the first tries' state until the next trade; nothing with the flag off)
+        if self.cfg.grpsign { self.g47_snap(id, &t.mint, t.pos(), t.s); }
         self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0)).0.push_back(t.clone());
         self.wins.insert(id, Win { id, mint: t.mint, whale, trig_slot: t.s, en_slot, armed_at: Instant::now(), stop_at: None, sent: 0, resolved: 0, unseen: 0,
             last_deadline: 0, disarmed: None, filled: false, checked: false, quiet: 0, qj: qj.clone(), qkey, q_others: None, dl: None, excl: Vec::new() });
@@ -3521,6 +3569,8 @@ impl PsLive {
         }
         // dip43 (each only with its flag): A5 cascade, A6 mint ledger, A4 fan-out, A10 shadows, A7 the exit shadow's start
         self.fill43(&mut rec, &att, t);
+        // dip47 (log only): the filling try's group at its signing (nothing with the flag off)
+        if let Some(j) = self.g47_fill(&att) { rec["grpsign"] = j; }
         self.rec(rec);
         let sig = bs58::encode(&t.sig).into_string();
         let buy = Buy { sig: sig.clone(), w: att.w, slot: t.s, idx: t.i as u64, t_rx: t.t_rx, tokens: t.tok, sol_in: t.sol, fee, tip: att.tip, cost, round: 0, via: "feed" };
@@ -3561,6 +3611,7 @@ impl PsLive {
                 self.pos.insert(t.mint, PPos { pid: self.pid, w: att.w, mint: t.mint, launch, derived, buys: vec![buy], land: (t.s, t.i as u64, t.t_rx), tokens: t.tok, spend,
                     att: Some(att.clone()), exit: None, sell_lands: Vec::new(), sells: Vec::new(), round: 0, selling: false, opened: Instant::now(), acct, merged: 0, late: 0, via: "feed",
                     rearm });
+                self.f47_pos_open(self.pid);
                 self.sh.pause_pos.store(true, Ordering::Relaxed);
                 self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0));
             }
@@ -3878,6 +3929,7 @@ impl PsLive {
         let buy = Buy { sig: String::new(), w, slot: ctx, idx: 0, t_rx: now_ns, tokens, sol_in: spend, fee: 0, tip: 0, cost: spend, round: 0, via: "rpc_read" };
         self.pos.insert(mint, PPos { pid: self.pid, w, mint, launch, derived, buys: vec![buy], land: (ctx, 0, now_ns), tokens, spend, att: None, exit: None,
             sell_lands: Vec::new(), sells: Vec::new(), round: 0, selling: false, opened: Instant::now(), acct, merged: 0, late: 0, via: "rpc_read", rearm });
+        self.f47_pos_open(self.pid);
         self.ata_held(mint, ctx);
         self.sh.pause_pos.store(true, Ordering::Relaxed);
         self.tapes.entry(mint).or_insert_with(|| (VecDeque::new(), 0));
@@ -4178,6 +4230,9 @@ impl PsLive {
         self.wh_tick(slot_now);
         // dip37: the holder ledger's state and the ledgers' control file (nothing without them)
         self.hl_tick(slot_now);
+        // dip47: the control file's new keys; the filter state (a change by any control reader -> a new fv now; ~1 s auto check)
+        self.ctl47_check(false);
+        self.fs_tick();
         // dip38 (log-only): housekeeping and the ledgers' saves (nothing without its flags)
         self.l38_tick(slot_now);
         // dip32: the creator state, every ~10 min (written off the event loop)
@@ -4335,6 +4390,8 @@ impl PsLive {
     /// detector had no such trigger), a presend_disarm gets "quiet_stop" (the stop's verdict for that trigger: stop, slot, others;
     /// stop null = not decided yet: the window ended before trigger + N). Nothing without QUIET
     pub fn annotate_shadow(&mut self, evs: &mut [arbx::presend::Ev]) {
+        // dip47: the shadow's attempts carry the filter state's version (fv only: they are many)
+        if let Some(fv) = self.f47.fs.as_ref().map(|f| f.fv) { for e in evs.iter_mut().filter(|e| e.rec["ev"] == "presend_attempt") { e.rec["fv"] = fv.into(); } }
         let Some(q) = self.qt.as_mut() else { return };
         for e in evs.iter_mut() {
             match e.rec["ev"].as_str() {
@@ -4884,7 +4941,7 @@ impl PsLive {
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true), skips: Mutex::new(FxHashMap::default()),
-            build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default() });
+            build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() });
         sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
         let mut det = pl::Detector::new(cfg.whale_pct);
         // dip27: the hold clocks only with the annotations on (as a run)
@@ -4902,9 +4959,11 @@ impl PsLive {
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
             fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, d43: Default::default(),
-            b43: ps43_b::B43St::default(), p46: Default::default() };
+            b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default() };
         // dip46: its modes (nothing with its flags off)
         p.p46_start();
+        // dip47: the hot keys' start values, the control file's first read, the filter state fv 0
+        p.f47_start();
         (p, atx, orx)
     }
 
@@ -5035,6 +5094,10 @@ mod dip43_guard_tests;
 #[cfg(test)]
 #[path = "dip46_tests.rs"]
 mod dip46_tests;
+// dip47 (11-11): GRPSIGN log + hot keys + filter state (psgrp47.rs, psctl47.rs); off / no key = dip46's decisions
+#[cfg(test)]
+#[path = "dip47_tests.rs"]
+mod dip47_tests;
 
 #[cfg(test)]
 mod tests {
@@ -5126,7 +5189,7 @@ mod tests {
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default() };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() };
         let (ca, cb, cc) = ([1u8; 32], [2u8; 32], [3u8; 32]);
         {
             let mut g = sh.cr.lock().unwrap();
@@ -5186,7 +5249,7 @@ mod tests {
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default() };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() };
         let m = 60_000_000_000u64;
         let t0 = 1_000 * m;
         assert_eq!(breaker_note(&sh, &b, -300_000_000, t0), None, "one big loss: not yet");
@@ -5201,7 +5264,7 @@ mod tests {
         let sh2 = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default() };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() };
         assert!(breaker_paused(&sh2));
         sh2.brk_until.store(arbx::fast::mono_ns().saturating_sub(1), Ordering::SeqCst);
         assert!(!breaker_paused(&sh2));

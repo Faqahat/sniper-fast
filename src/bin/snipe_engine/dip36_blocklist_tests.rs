@@ -182,7 +182,7 @@ fn dip36_blocklist_t2_roles_and_boundary() {
     let pn = list("t2n", &[w(0x99)]);
     let c = run(&["--presend-live-blocklist", &pn], three);
     let strip = |v: &Vec<serde_json::Value>| -> Vec<String> { v.iter().map(|r| r.to_string()).collect() };
-    assert_eq!(strip(&c.recs), strip(&c0.recs), "not listed: no change");
+    assert_eq!(strip(&dip26_tests::s47(&c.recs)), strip(&dip26_tests::s47(&c0.recs)), "not listed: no change");
 }
 
 /// re-arm: the dumper listed -> "rearm_blocklist" (role dumper); the remaining 8% holder listed -> (role holder); nobody -> armed
@@ -204,7 +204,7 @@ fn dip36_blocklist_rearm_roles() {
     let pn = list("ran", &[w(0x99)]);
     let c = run(&["--presend-live-blocklist", &pn]);
     let strip = |v: &Vec<serde_json::Value>| -> Vec<String> { v.iter().map(|r| r.to_string()).collect() };
-    assert_eq!(strip(&c.recs), strip(&c0.recs), "not listed: no change");
+    assert_eq!(strip(&dip26_tests::s47(&c.recs)), strip(&dip26_tests::s47(&c0.recs)), "not listed: no change");
 }
 
 // ---- dip37c the PER-SEND blocklist (--presend-live-blocklist-send; control key "blocklist_send") ----------------------------------------

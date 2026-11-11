@@ -404,6 +404,9 @@ impl PsLive {
         self.sh.wins.lock().unwrap().push(SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::new(st_ns, k, slot_ns), n: 0, done: false,
             spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&mint), bd: self.bd_snap(&mint), g43: self.g43_set(&mint), p46: None });
         self.armed.insert(mint, id);
+        self.f47_arm(id);
+        // dip47 (log only): the re-arm window's group at its arm, on the guard set's slot (nothing with the flag off)
+        if self.cfg.grpsign { self.g47_snap(id, &mint, pos, dump.tr.s); }
         {
             let tp = &mut self.tapes.entry(mint).or_insert_with(|| (VecDeque::new(), 0)).0;
             tp.push_back(dump.tr.clone());

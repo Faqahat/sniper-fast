@@ -75,6 +75,28 @@ fn gstrip(mut v: serde_json::Value) -> serde_json::Value {
     v
 }
 
+/// dip47: the filter state's additions taken out of a record (its own records; fv / fh / fv_fill; fill / realized "filters"): every dip47 build
+/// with no control change must then write dip25's records (the decisions unchanged, only these fields added)
+pub(super) fn strip47(mut v: serde_json::Value) -> Option<serde_json::Value> {
+    let ev = v["ev"].as_str().unwrap_or("").to_string();
+    if ev == "presend_live_filter_state" { return None; }
+    if let Some(o) = v.as_object_mut() {
+        for k in ["fv", "fh", "fv_fill"] { o.remove(k); }
+        if ev == "presend_live_fill" || ev == "presend_live_realized" { o.remove("filters"); }
+    }
+    Some(v)
+}
+
+/// dip47: the filter state's additions taken out of every record (comparisons of two runs with different flags: their states differ by design)
+pub(super) fn s47(v: &[serde_json::Value]) -> Vec<serde_json::Value> { v.iter().cloned().filter_map(strip47).collect() }
+
+/// dip47: a written line's top-level "fv":N taken out as text (no re-serialization: the other bytes stay exactly)
+pub(super) fn strip47_text(l: &str) -> String {
+    let Some(i) = l.find("\"fv\":") else { return l.to_string() };
+    let j = i + 5 + l[i + 5..].find(|c: char| !c.is_ascii_digit()).unwrap_or(l.len() - i - 5);
+    if l[j..].starts_with(',') { format!("{}{}", &l[..i], &l[j + 1..]) } else if l[..i].ends_with(',') { format!("{}{}", &l[..i - 1], &l[j..]) } else { format!("{}{}", &l[..i], &l[j..]) }
+}
+
 /// the chain work queued so far: as text (`cmds`) and kept for its answers (`held`)
 fn gtake(p: &mut PsLive, cmds: &mut Vec<String>, held: &mut Vec<Cmd>) { let c = p.take_cmds(); cmds.extend(c.iter().map(gcmd)); held.extend(c); }
 
@@ -188,9 +210,17 @@ pub(super) fn golden_pass(tag: u8, extra: &[&str], ps: arbx::presend::Params, fi
     gtake(&mut p, &mut cmds, &mut held);
     drop(log);
     let mut out: Vec<String> = Vec::new();
-    for o in orx.try_iter() { match o { Out::Rec(v) => out.push(format!("R {}", gstrip(v))), Out::Line(l) => out.push(format!("L {l}")) } }
+    for o in orx.try_iter() {
+        match o {
+            Out::Rec(v) => { if let Some(v) = strip47(v) { out.push(format!("R {}", gstrip(v))) } }
+            Out::Line(l) => if !l.starts_with("  PRESEND LIVE FILTER STATE") { out.push(format!("L {l}")) },
+        }
+    }
     out.extend(cmds.into_iter().map(|c| format!("C {c}")));
-    for l in std::fs::read_to_string(&f).ok()?.lines() { out.push(format!("S {l}")); }
+    for l in std::fs::read_to_string(&f).ok()?.lines() {
+        // dip47: the shadow's attempts carry "fv" (taken out: the golden pins the decisions)
+        out.push(format!("S {}", strip47_text(l)));
+    }
     let _ = std::fs::remove_file(&f);
     out.push(format!("F {}", gstrip(fin)));
     Some(out)
@@ -1093,7 +1123,7 @@ fn t2_pass(extra: &[&str]) -> Option<(Vec<String>, serde_json::Value, u64)> {
             _ => {}
         }
     }
-    let mut recs: Vec<String> = orx.try_iter().filter_map(|o| o.rec()).filter(|r| r.get("kind").is_none()).map(|mut r| { strip(&mut r); r.to_string() }).collect();
+    let mut recs: Vec<String> = orx.try_iter().filter_map(|o| o.rec()).filter_map(strip47).filter(|r| r.get("kind").is_none()).map(|mut r| { strip(&mut r); r.to_string() }).collect();
     recs.sort();
     Some((recs, gstrip(fin), n_re))
 }

@@ -540,6 +540,7 @@ impl PsLive {
         let opened = Instant::now().checked_sub(ago).unwrap_or_else(Instant::now);
         self.pos.insert(req.mint, PPos { pid: self.pid, w: att.w, mint: req.mint, launch, derived, buys: vec![buy], land: (slot, 0, arbx::feeds::clock::now_ns()), tokens, spend,
             att: Some(att.clone()), exit: None, sell_lands: Vec::new(), sells: Vec::new(), round: 0, selling: false, opened, acct, merged: 0, late: 0, via: "status", rearm });
+        self.f47_pos_open(self.pid);
         self.sh.pause_pos.store(true, Ordering::Relaxed);
         self.tapes.entry(req.mint).or_insert_with(|| (VecDeque::new(), 0));
         self.rec(serde_json::json!({"ev": "presend_live_fill", "w": att.w, "n": att.n, "mint": b58(&req.mint), "sig": sig, "slot": slot, "tokens": tokens, "tokens_exact": exact,

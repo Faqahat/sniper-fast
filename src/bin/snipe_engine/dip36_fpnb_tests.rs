@@ -126,7 +126,7 @@ fn dip36_fpnb_end_to_end() {
     assert!(r0.iter().any(|r| r["ev"] == "presend_live_arm") && r0.iter().any(|r| r["ev"] == "presend_live_fill"), "armed and filled: {r0:?}");
     // NEVER a decision: every other record identical (the same arm, attempt bookkeeping, fill, exits)
     // (the wall-clock fields of the disarm record differ between any two runs)
-    let strip = |v: &Vec<serde_json::Value>| -> Vec<String> { v.iter().filter(|r| !r["ev"].as_str().unwrap_or("").starts_with("presend_live_fpnb")).map(|r| {
+    let strip = |v: &Vec<serde_json::Value>| -> Vec<String> { dip26_tests::s47(v).iter().filter(|r| !r["ev"].as_str().unwrap_or("").starts_with("presend_live_fpnb")).map(|r| {
         let mut r = r.clone();
         if r["ev"] == "presend_live_disarm" { if let Some(o) = r.as_object_mut() { o.remove("armed_ms"); o.remove("t"); } }
         r.to_string()

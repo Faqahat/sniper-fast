@@ -78,6 +78,10 @@ pub enum Det {
 /// slot of its first buy of the token (0: none), `fs` = its first sell after that buy was taken into its hold clock
 #[derive(Clone, Copy, Debug, Default)]
 struct Wal { bal: i64, n: u32, became: bool, ins: bool, trig: bool, sold: bool, fb: u64, fs: bool }
+/// dip47: an empty wallet (grp_now's buffer filler)
+static WAL0: Wal = Wal { bal: 0, n: 0, became: false, ins: false, trig: false, sold: false, fb: 0, fs: false };
+/// dip47: the empty key (grp_now's buffer filler)
+static PK0: Pk = [0u8; 32];
 
 /// dip27: the recent buys a token keeps (slot, buyer) cover this many slots (the lone-whale count's longest window)
 pub const RB_SLOTS: u64 = 64;
@@ -308,6 +312,41 @@ impl Detector {
             let (risk, hz3) = self.holds.get(k).map_or((0, 0.0), |h| h.hz(age, 3));
             HolderClock { w: *k, bal: w.bal, age, n, p25, p50, p75, h3, risk, hz3 }
         }).collect()
+    }
+
+    /// dip47 (log-only GRPSIGN): the dip30 GROUP RISK metric on the state now, without `holder_clocks`' allocations: the same holders
+    /// (>= `min` raw tokens, `not` out, largest first then by key, at most `top`), the same per-holder test (>= 5 holds at risk, 3-slot
+    /// hazard >= 0.3 at its hold age at `slot`), their holdings summed in the same order (% of supply; bit-identical to the landing
+    /// version's sum on the same state). Writes the members (wallet, raw balance) into `out` (at most out.len()) -> (pct, members)
+    pub fn grp_now(&self, mint: &Pk, min: i64, not: &Pk, slot: u64, top: usize, out: &mut [(Pk, i64)]) -> (f64, usize) {
+        let Some(tk) = self.toks.get(mint).filter(|t| !t.out) else { return (-0.0, 0) };
+        // the top `top` by (balance desc, key asc), kept in a small sorted buffer (no allocation for top <= 16)
+        let mut best: [(i64, &Pk, &Wal); 16] = [(i64::MIN, &PK0, &WAL0); 16];
+        let top = top.min(16);
+        let mut k = 0usize;
+        for (w, x) in tk.wal.iter() {
+            if x.bal < min || w == not { continue; }
+            // insertion into best[..k] ordered by (bal desc, key asc)
+            let before = |a: &(i64, &Pk, &Wal)| a.0 > x.bal || (a.0 == x.bal && a.1 < w);
+            let pos = best[..k].iter().position(|a| !before(a)).unwrap_or(k);
+            if pos >= top { continue; }
+            let end = k.min(top - 1);
+            for i in (pos..end).rev() { best[i + 1] = best[i]; }
+            best[pos] = (x.bal, w, x);
+            if k < top { k += 1; }
+        }
+        // -0.0: Iterator::sum's start for f64 (the landing version's sum; an empty group is -0.0 there too)
+        let (mut pct, mut n) = (-0.0f64, 0usize);
+        for &(bal, w, x) in &best[..k] {
+            let age = if x.fb > 0 { slot.saturating_sub(x.fb) } else { 0 };
+            let (risk, hz3) = self.holds.get(w).map_or((0, 0.0), |h| h.hz(age, 3));
+            if risk >= 5 && hz3 >= 0.3 {
+                pct += bal as f64 / SUPPLY * 100.0;
+                if n < out.len() { out[n] = (*w, bal); }
+                n += 1;
+            }
+        }
+        (pct, n.min(out.len()))
     }
 
     /// dip27: a wallet's hold clock (None: no hold seen, or the clock is off)
@@ -875,5 +914,55 @@ mod tests {
         // reversing whole slots is far worse than the feed's real reordering; still a small share
         assert!(n_rev_diff * 20 < n_trig, "{n_rev_diff} of {n_trig}");
         let _ = HashMap::<u8, u8>::new();
+    }
+
+    /// dip47: grp_now (the signing-time GRPSIGN metric) = the dip30 landing version (holder_clocks top 12 >= 2%, risk >= 5, hz3 >= 0.3,
+    /// summed in order) on the same state: bit-identical pct and the same members, over random states with ties, clocks and our wallet
+    #[test]
+    fn dip47_grp_now_equals_landing_version() {
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut rnd = move |m: u64| { x ^= x << 13; x ^= x >> 7; x ^= x << 17; x % m.max(1) };
+        let us = [0xEEu8; 32];
+        let (mut nonempty, mut cases) = (0, 0);
+        for case in 0..400u64 {
+            let mint = [case as u8 ^ 0x55; 32];
+            let mut d = Detector::new(6.0);
+            d.track = true;
+            d.create(mint, 1_000, [1u8; 32], [1u8; 32], false);
+            let nw = 1 + rnd(40) as u8;
+            let (mut v, mut t): (u64, u64) = (30_000_000_000, 1_073_000_000_000_000);
+            let mut n = 0u32;
+            for k in 0..nw {
+                let mut user = [k.wrapping_add(10); 32];
+                if rnd(9) == 0 { user = us; }
+                // ties: a few wallets buy the exact same token amount on a fresh curve state
+                let amount = if rnd(4) == 0 { 2_500_000_000 } else { 200_000_000 + rnd(6_000_000_000) };
+                let tok = (t as u128 * amount as u128 / (v + amount) as u128) as u64;
+                let (vv, tt) = if rnd(4) == 0 { (v, t) } else { v += amount; t -= tok; (v, t) };
+                n += 1;
+                let s = 1_000 + rnd(30);
+                let mut out = Vec::new();
+                d.trade(&Trade { mint, s, i: n, j: 0, sig: [0u8; 64], user, buy: true, sol: amount, tok, vsol: vv, vtok: tt, fbps: 95, cbps: 30, t_rx: 0 }, &mut out);
+                if rnd(3) > 0 {
+                    let holds: Vec<u32> = (0..rnd(17)).map(|_| 20 + rnd(50) as u32).collect();
+                    d.clock_preload(user, Holds::from_holds(&holds, 1_000));
+                }
+            }
+            for slot in [1_030u64, 1_040, 1_060] {
+                for top in [12usize, 3] {
+                    cases += 1;
+                    let hc = d.holder_clocks(&mint, (0.02 * SUPPLY) as i64, &us, slot, top);
+                    let grp: Vec<&HolderClock> = hc.iter().filter(|h| h.risk >= 5 && h.hz3 >= 0.3).collect();
+                    let land: f64 = grp.iter().map(|h| h.bal as f64 / SUPPLY * 100.0).sum();
+                    let mut m = [([0u8; 32], 0i64); 12];
+                    let (pct, k) = d.grp_now(&mint, (0.02 * SUPPLY) as i64, &us, slot, top, &mut m);
+                    assert_eq!(pct.to_bits(), land.to_bits(), "case {case} slot {slot}: {pct} vs {land}");
+                    assert_eq!(m[..k].to_vec(), grp.iter().map(|h| (h.w, h.bal)).collect::<Vec<_>>());
+                    if k > 0 { nonempty += 1; }
+                }
+            }
+        }
+        assert!(nonempty >= 100, "{nonempty} of {cases} with a group");
+        assert_eq!(Detector::new(6.0).grp_now(&[3u8; 32], 1, &us, 1, 12, &mut []).0.to_bits(), (-0.0f64).to_bits(), "not followed: -0.0 like an empty sum");
     }
 }

@@ -212,6 +212,8 @@ impl G43 {
 impl PsLive {
     /// a window's holder floors now (empty unless --presend-live-guard holders): the arm / re-arm and every trade of an armed mint
     pub(super) fn g43_set(&self, mint: &Pk) -> HSet {
+        // dip47 control key "floors": "off" -> no floors on any window (deadline + band); nothing without the key
+        if self.floors_off_47() { return HSet::default(); }
         match self.cfg.g43.as_ref() {
             Some(g) if g.mode == Mode::Holders => { let now = arbx::fast::mono_ns(); g.hset(&holders_for_floor(self.tbook(), mint, now), &self.user, mint, now) }
             _ => HSet::default(),

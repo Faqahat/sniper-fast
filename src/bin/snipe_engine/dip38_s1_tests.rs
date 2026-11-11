@@ -151,6 +151,7 @@ impl Ctx {
 
 /// the records with S1's and the nd counter's fields out (the counter runs with the S1 log), the wall-clock fields out
 fn recs_wo_s1(v: &[serde_json::Value]) -> Vec<String> {
+    let v = dip26_tests::s47(v);
     v.iter().map(|r| {
         let mut r = r.clone();
         if let Some(o) = r.as_object_mut() {

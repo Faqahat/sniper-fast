@@ -364,7 +364,7 @@ fn dip39_bd_log_changes_nothing_else() {
         (c.recs, sw)
     };
     let strip = |v: &Vec<serde_json::Value>| -> Vec<String> {
-        v.iter().map(|r| { let mut r = r.clone(); if let Some(o) = r.as_object_mut() { o.remove("botdepth"); o.remove("t"); } r.to_string() }).collect()
+        dip26_tests::s47(v).iter().map(|r| { let mut r = r.clone(); if let Some(o) = r.as_object_mut() { o.remove("botdepth"); o.remove("t"); } r.to_string() }).collect()
     };
     let l = list("same.json", &[w(1), w(2)], true);
     let (r0, s0) = run(&[]);

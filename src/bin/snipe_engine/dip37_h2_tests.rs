@@ -206,7 +206,7 @@ fn dip37_h2_off_flags_and_hook() {
     for r in rb.iter_mut() { if let Some(o) = r.as_object_mut() { for k in ["nd", "m2max", "h2_keep", "h2_size"] { o.remove(k); } } }
     // the wall-clock fields of a disarm (armed_ms, t) differ run to run
     let s = |v: &[serde_json::Value]| v.iter().map(|r| { let mut r = r.clone(); if r["ev"] == "presend_live_disarm" { if let Some(o) = r.as_object_mut() { o.remove("armed_ms"); o.remove("t"); } } r.to_string() }).collect::<Vec<_>>();
-    assert_eq!(s(&rb), s(&a.recs), "log only: the same records but its fields");
+    assert_eq!(s(&dip26_tests::s47(&rb)), s(&dip26_tests::s47(&a.recs)), "log only: the same records but its fields");
     assert!(b.recs.iter().filter(|r| r["ev"] == "presend_live_arm").all(|r| r.get("nd").is_some()));
     // the flags
     assert!(cfg(&["--presend-live-m2seen-log", "yes"]).unwrap_err().to_string().contains("on | off"));

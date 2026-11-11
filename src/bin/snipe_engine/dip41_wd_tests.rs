@@ -502,7 +502,7 @@ fn dip41_off_and_log_change_nothing_else() {
         (c.recs, c.p.status())
     };
     let strip = |v: &Vec<serde_json::Value>| -> Vec<String> {
-        v.iter().filter(|r| r["ev"] != "presend_live_widedumper").map(|r| { let mut r = r.clone(); if let Some(o) = r.as_object_mut() { o.remove("dumper"); o.remove("t"); } r.to_string() }).collect()
+        dip26_tests::s47(v).iter().filter(|r| r["ev"] != "presend_live_widedumper").map(|r| { let mut r = r.clone(); if let Some(o) = r.as_object_mut() { o.remove("dumper"); o.remove("t"); } r.to_string() }).collect()
     };
     let (r0, s0) = run(&[]);
     let (r1, s1) = run(&LED);

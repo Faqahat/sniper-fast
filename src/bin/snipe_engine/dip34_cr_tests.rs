@@ -26,7 +26,7 @@ fn shared() -> Shared {
     Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
         pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
         slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-        skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default() }
+        skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default() }
 }
 
 #[test]
@@ -109,6 +109,8 @@ fn dip34_cr_earn_shadow_credit() {
     let c = cfg(&["--presend-live-cr-loss", "2:0.05", "--presend-live-cr-earn-log", "0.5"]).unwrap().unwrap();
     let spend = c.spend as f64;
     let (mut p, _atx, orx) = PsLive::for_test(c, USER);
+    // dip47: the start's filter state record
+    let _ = recs(&orx);
     let (cr, mint) = ([4u8; 32], [7u8; 32]);
     {
         let mut g = p.sh.cr.lock().unwrap();
@@ -171,6 +173,7 @@ fn dip34_cr_earn_shadow_credit() {
     // the flag off: the hook does nothing
     let c0 = cfg(&["--presend-live-cr-loss", "2:0.05"]).unwrap().unwrap();
     let (mut q, _atx0, orx0) = PsLive::for_test(c0, USER);
+    let _ = recs(&orx0);
     q.ce.skipped.insert("SIG1".into(), (cr, mint, t0));
     q.on_shadow_rec(&arm(7, "SIG1"));
     q.on_shadow_rec(&fill(7, "c", 500_000_000.0));

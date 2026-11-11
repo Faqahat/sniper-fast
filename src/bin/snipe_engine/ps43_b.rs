@@ -382,7 +382,7 @@ impl PsLive {
 
     /// B6: a position's ms timer (the run's --presend-live-exit-ms; an odd pid's N with --presend-live-exit-ab ms:N). Off: cfg.exit_ms
     #[inline]
-    pub(super) fn b43_exit_ms(&self, pid: u64) -> u64 { match self.cfg.b43.exit_ab { Some(n) if pid % 2 == 1 => n, _ => self.cfg.exit_ms } }
+    pub(super) fn b43_exit_ms(&self, pid: u64) -> u64 { match self.cfg.b43.exit_ab { Some(n) if pid % 2 == 1 => n, _ => self.exit47(pid).0 } }
 
     /// a position's kind for the lots exit
     fn b43_kind(&self, p: &PPos) -> &'static str {

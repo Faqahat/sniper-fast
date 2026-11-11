@@ -139,6 +139,7 @@ fn cmds_wo38(v: &[Cmd]) -> Vec<String> {
 }
 /// the records but dip38's, the disarm's wall-clock fields out
 fn recs_wo38(v: &[serde_json::Value]) -> Vec<String> {
+    let v = dip26_tests::s47(v);
     v.iter().filter(|r| !["presend_live_insider", "presend_live_shape", "presend_live_fund"].contains(&r["ev"].as_str().unwrap_or(""))).map(|r| {
         let mut r = r.clone();
         // the wall-clock fields (the disarm's age and time, the exit's time, the close's hold) differ between any two runs
