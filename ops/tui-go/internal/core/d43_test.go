@@ -131,7 +131,7 @@ func TestD43Report(t *testing.T) {
 // TestD43Registry: the LOG rule registry's rows on the fills (G-A, fan-out, FP strict), each fill once with every rule.
 func TestD43Registry(t *testing.T) {
 	M := d43Model(t)
-	R := M.Filt.Report("")
+	R := M.Filt.Report("", nil)
 	want := map[string][3]int{"ga": {1, 0, 1}, "gd": {0, 0, 0}, "fanout": {1, 1, 0}, "fpstrict": {1, 0, 1}, "mintled": {0, 0, 0}}
 	for k, w := range want {
 		r, ok := R.Row(k)
@@ -147,7 +147,7 @@ func TestD43Registry(t *testing.T) {
 	NoV4 = true
 	defer func() { NoV4 = false }()
 	M2 := d43Model(t)
-	if _, ok := M2.Filt.Report("").Row("ga"); ok || M2.D43.Report() != nil {
+	if _, ok := M2.Filt.Report("", nil).Row("ga"); ok || M2.D43.Report() != nil {
 		t.Fatal("DIPMON_V3: registry rows / dip43 report still there")
 	}
 }

@@ -451,6 +451,20 @@ type Ctx struct {
 	FixedNow      float64
 	AssumeRunning bool
 	GcrSeed       string // the Filters tab's bad-creator ledger seed: "" = the defaults (GcrSeedDefaults), "none" = no seed
+	// v4 (11-11): the Filters tab's calibration (calib.go): nil = the embedded table, unless NoCalib (--calib none)
+	Calib   *Calib
+	NoCalib bool
+}
+
+// CalibTable: the calibration the Filters tab applies (nil = off).
+func (c *Ctx) CalibTable() *Calib {
+	if c.NoCalib {
+		return nil
+	}
+	if c.Calib != nil {
+		return c.Calib
+	}
+	return DefaultCalib
 }
 
 // GcrSeedPath is the seed file the Filters tab uses ("" = none).
@@ -958,7 +972,7 @@ func BuildView(ctx *Ctx, scope int) *View {
 	v.D43 = M.D43.Report() // before the config items (the snipe-guard's)
 	v.CfgItems = configItems(v, S, eng)
 	v.Alerts = makeAlerts(v, ctx, M)
-	v.Filt = M.Filt.Report(ctx.GcrSeedPath()) // the whole file (every session), cached per records version
+	v.Filt = M.Filt.Report(ctx.GcrSeedPath(), ctx.CalibTable()) // the whole file (every session), cached per records version
 	v.Paper = M.Filt.Paper()
 	v.Added = M.Add.Lines()
 	return v

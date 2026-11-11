@@ -347,6 +347,7 @@ type FiltAcc struct {
 	cache     *FiltReport
 	cacheVer  int64
 	cacheSeed string
+	cacheCal  *Calib
 }
 
 // inferPlus: the build of a run whose log has no "ENGINE BUILD:" line, from the newest feature its records show ("" = none of
@@ -921,6 +922,27 @@ type FiltRow struct {
 	NA                    bool   // the run does not log this rule (the landing guard before dip30): n/a, not 0
 	Blocked, WinN, LoseN  int
 	WinSol, LoseSol       float64
+	// v4 (11-11) CALIBRATED: a LIVE paper-scored row's windows through the gatecheck calibration (calib.go): expected live
+	// P&L per window; W / L by the calibrated sign (Cal = the row has calibrated values; LOG rows are real fills: never)
+	Cal                   bool
+	CalWinN, CalLoseN     int
+	CalWinSol, CalLoseSol float64
+}
+
+// CalNet: what the filter saved by the calibrated values (Net's sign convention).
+func (r FiltRow) CalNet() float64 {
+	if r.CalWinN+r.CalLoseN == 0 {
+		return 0
+	}
+	return -(r.CalWinSol + r.CalLoseSol)
+}
+
+// ShownNet: the net the table leads with: calibrated for a calibrated LIVE row, else the row's own (paper / real).
+func (r FiltRow) ShownNet() float64 {
+	if r.Cal {
+		return r.CalNet()
+	}
+	return r.Net()
 }
 
 // Net is what the filter saved (> 0) or cost (< 0): minus what its blocks would have made.
@@ -949,6 +971,8 @@ type FiltItem struct {
 	Sig      string   // LIVE: the trigger's key for the unique totals (its sig; "w<N>" for a window with no logged trigger)
 	Why      []string // LOG: each rule's reason numbers, parallel to Rules ("holder 5ThrZRSQ 7.5%, hz3 0.91")
 	Move     *FMove   // LIVE: the shadow window's price move (nil = no shadow window or the record has no "move")
+	Cal      bool     // v4: a scored LIVE item with a calibrated value
+	CalSol   float64  // its expected live P&L (calib.go)
 }
 
 // Info is the flagged-by line: every rule that would have blocked the fill with its reason numbers, e.g. "safe sell
@@ -999,14 +1023,19 @@ type FiltReport struct {
 	// the unique totals (owner 10-31): LiveU = each skipped / refused trigger once (by trigger sig), LogU = each real
 	// fill once (any LOG rule), All = both (disjoint: a skipped trigger never became a fill)
 	LiveU, LogU, All FiltTotal
-	LiveDup, LogDup  int // row entries the unique totals folded away (sum of the rows - unique)
-	LogMulti         int // real fills flagged by 2+ LOG rules
-	Items            []FiltItem
-	byFill           map[FKey]int
-	LiveSize         float64
-	HasLiveSize      bool
-	HasGuard         bool // the run logs the landing guard (dip30+)
-	Q3Live           bool // QUIET3-A ran live: its LOG row (q3a) is left out when it marked nothing
+	// v4 (11-11): the calibration used (nil = off: DIPMON_V3, --calib none) and the unique totals with the LIVE side calibrated
+	Calib                   *Calib
+	LiveUCal, AllCal        FiltTotal
+	DeepGainCal, DeepNetCal float64   // the deeper limit's gain / NET against the calibrated paper (real - cal(paper)); cal blocks
+	deepPapers              []float64 // the realized deep T2 fills' shadow paper (the ones with a shadow fill)
+	LiveDup, LogDup         int       // row entries the unique totals folded away (sum of the rows - unique)
+	LogMulti                int       // real fills flagged by 2+ LOG rules
+	Items                   []FiltItem
+	byFill                  map[FKey]int
+	LiveSize                float64
+	HasLiveSize             bool
+	HasGuard                bool // the run logs the landing guard (dip30+)
+	Q3Live                  bool // QUIET3-A ran live: its LOG row (q3a) is left out when it marked nothing
 }
 
 // LogRuleName: a LOG rule's name in the skip list (no "(new)" / "(approx)").
@@ -1132,13 +1161,88 @@ var d37LiveFilters = []struct{ why, name string }{{"wh_loss", "whale loss (T2)"}
 	{"m2_unseen", "M2 unseen"}}
 
 // Report computes the table (cached while no record came and the seed is the same).
-func (F *FiltAcc) Report(seedPath string) *FiltReport {
-	if F.cache != nil && F.cacheVer == F.ver && F.cacheSeed == seedPath {
+func (F *FiltAcc) Report(seedPath string, cal *Calib) *FiltReport {
+	if F.cache != nil && F.cacheVer == F.ver && F.cacheSeed == seedPath && F.cacheCal == cal {
 		return F.cache
 	}
 	R := F.compute(seedPath)
-	F.cache, F.cacheVer, F.cacheSeed = R, F.ver, seedPath
+	if cal != nil && !NoV4 {
+		R.calibrate(cal, F.liveSize)
+	}
+	F.cache, F.cacheVer, F.cacheSeed, F.cacheCal = R, F.ver, seedPath, cal
 	return R
+}
+
+// calibrate: every scored LIVE item's paper through the calibration (at the live size), the LIVE rows' cal W / L, the
+// calibrated unique totals (each trigger once, like LiveU; ALL = that + the LOG side's real fills).
+func (R *FiltReport) calibrate(cal *Calib, size float64) {
+	R.Calib = cal
+	idx := map[string]int{}
+	for i := range R.Rows {
+		idx[R.Rows[i].Key] = i
+	}
+	for i := range R.Items {
+		it := &R.Items[i]
+		if !it.Live || !it.Scored {
+			continue
+		}
+		v, ok := cal.Apply(it.Sol, it.Kind, size)
+		if !ok {
+			continue
+		}
+		it.Cal, it.CalSol = true, v
+		j, has := idx[it.Filter]
+		if !has {
+			continue
+		}
+		row := &R.Rows[j]
+		row.Cal = true
+		if v > 0 {
+			row.CalWinN++
+			row.CalWinSol += v
+		} else {
+			row.CalLoseN++
+			row.CalLoseSol += v
+		}
+	}
+	seen := map[string]bool{}
+	var t FiltTotal
+	for _, it := range R.Items { // the newest first; a trigger counted once (its first calibrated item)
+		if !it.Live || !it.Cal {
+			continue
+		}
+		key := it.Sig
+		if key == "" {
+			key = "item:" + it.Filter + ":" + it.Mint + ":" + strconv.FormatInt(it.T, 10)
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if it.CalSol > 0 {
+			t.WinN++
+			t.WinSol += it.CalSol
+		} else {
+			t.LoseN++
+			t.LoseSol += it.CalSol
+		}
+	}
+	t.Blocked = R.LiveU.Blocked
+	t.Net = -(t.WinSol + t.LoseSol)
+	R.LiveUCal = t
+	R.AllCal = FiltTotal{Blocked: t.Blocked + R.LogU.Blocked, WinN: t.WinN + R.LogU.WinN, LoseN: t.LoseN + R.LogU.LoseN,
+		WinSol: t.WinSol + R.LogU.WinSol, LoseSol: t.LoseSol + R.LogU.LoseSol}
+	R.AllCal.Net = -(R.AllCal.WinSol + R.AllCal.LoseSol)
+	if R.Deep { // the deep fills' gain vs the calibrated paper (a shadow that never filled is 0 either way)
+		cp := 0.0
+		for _, p := range R.deepPapers {
+			v, _ := cal.Apply(p, "T2", size)
+			cp += v
+		}
+		R.DeepGainCal = R.DeepReal - cp
+		r, _ := R.Row("deeper")
+		R.DeepNetCal = r.CalNet() + R.DeepGainCal
+	}
 }
 
 func (F *FiltAcc) paper(w int64, ok bool) (float64, bool) {
@@ -1461,6 +1565,7 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 			if pok {
 				R.DeepPaperN++
 				R.DeepPaper += p
+				R.deepPapers = append(R.deepPapers, p)
 			}
 			R.DeepGain += r - p
 		}
@@ -1952,9 +2057,25 @@ func filtersText(v *View, ctx *Ctx) []string {
 		return strconv.Itoa(t.Blocked) + " blocked, would win " + strconv.Itoa(t.WinN) + " " + fmtSigned(t.WinSol, 3) + ", would lose " + strconv.Itoa(t.LoseN) + " " +
 			fmtSigned(t.LoseSol, 3) + ", net saved " + fmtSigned(t.Net, 3)
 	}
+	if R.Calib != nil { // v4 (11-11): the LIVE paper-scored rows calibrated (calib.go)
+		out = append(out, "          CALIBRATED (gatecheck 11-11): paper is ~2x optimistic; decide on cal. LIVE rows' windows -> expected live P&L:")
+		for _, r := range R.Rows {
+			if !r.Cal {
+				continue
+			}
+			out = append(out, fmt.Sprintf("            %-26s cal W %4d %10s | L %4d %10s | net saved %9s (cal)   paper %s", r.Name, r.CalWinN, fmtSigned(r.CalWinSol, 3),
+				r.CalLoseN, fmtSigned(r.CalLoseSol, 3), fmtSigned(r.CalNet(), 3), fmtSigned(r.Net(), 3)))
+		}
+	}
 	out = append(out, "          LIVE total (unique triggers): "+tl(R.LiveU)+dupNote(R.LiveDup, "a trigger under 2+ LIVE rows"))
+	if R.Calib != nil {
+		out = append(out, "          LIVE total calibrated:        "+tl(R.LiveUCal)+" (cal)")
+	}
 	out = append(out, "          LOG total (unique fills):     "+tl(R.LogU)+dupNote(R.LogDup, "a fill flagged by 2+ rules; "+strconv.Itoa(R.LogMulti)+" fills"))
 	out = append(out, "          ALL total:                    "+tl(R.All)+" (LIVE is paper, LOG is real fills; the sets are disjoint; estimate)")
+	if R.Calib != nil {
+		out = append(out, "          ALL total calibrated:         "+tl(R.AllCal)+" (LIVE cal + LOG real)")
+	}
 	if R.RearmSkips > 0 {
 		out = append(out, "          re-arm skips: "+IC(R.RearmSkips)+" (no shadow window: not scored)")
 	}
@@ -2023,6 +2144,13 @@ func filtersJSON(v *View, d *JObj) {
 		}
 		x.Set("note", r.Note)
 		x.Set("na", r.NA)
+		if R.Calib != nil && r.Cal { // v4 (11-11): the calibrated LIVE row
+			x.Set("cal_win_n", int64(r.CalWinN))
+			x.Set("cal_win_sol", PyFloat(r.CalWinSol))
+			x.Set("cal_lose_n", int64(r.CalLoseN))
+			x.Set("cal_lose_sol", PyFloat(r.CalLoseSol))
+			x.Set("cal_net_saved_sol", PyFloat(r.CalNet()))
+		}
 		rows = append(rows, x)
 	}
 	o.Set("rows", rows)
@@ -2074,6 +2202,9 @@ func filtersJSON(v *View, d *JObj) {
 			x.Set("w", nil)
 		}
 		x.Set("sol", PyFloat(it.Sol))
+		if R.Calib != nil && it.Cal {
+			x.Set("cal_sol", PyFloat(it.CalSol))
+		}
 		items = append(items, x)
 	}
 	o.Set("items", items)
@@ -2086,5 +2217,14 @@ func filtersJSON(v *View, d *JObj) {
 	o.Set("live_dup", int64(R.LiveDup))
 	o.Set("log_dup", int64(R.LogDup))
 	o.Set("rearm_skips", R.RearmSkips)
+	if R.Calib != nil {
+		c := &JObj{}
+		c.Set("source", R.Calib.Source)
+		c.Set("made", R.Calib.Made)
+		c.Set("path", optStr(R.Calib.Path))
+		o.Set("calib", c)
+		o.Set("live_total_cal", tot(R.LiveUCal))
+		o.Set("all_total_cal", tot(R.AllCal))
+	}
 	d.Set("filters", o)
 }

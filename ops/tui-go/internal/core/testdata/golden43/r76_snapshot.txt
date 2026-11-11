@@ -60,9 +60,19 @@ filters   dip_ams_r76.jsonl: 11 positions realized +0.147 SOL; LIVE = changed wh
           fan-out (log)              LOG        0 |    0     +0.000 |    0     +0.000 |    +0.000   (real fills; FANOUT: the arm's fam read found >= N plain-transfer recipients (would have disarmed))
           FP strict (log)            LOG        6 |    5     +0.146 |    1     -0.036 |    -0.110   (real fills; FP-NOBOT strict: the window had a T2 slot the strict threshold blocked (the frozen one passed))
           landing guard (new)        LOG        0 |    0     +0.000 |    0     +0.000 |    +0.000   (real fills; the signing-time set still holding at landing)
+          CALIBRATED (gatecheck 11-11): paper is ~2x optimistic; decide on cal. LIVE rows' windows -> expected live P&L:
+            create-slot skip           cal W    2     +0.018 | L    8     -0.097 | net saved    +0.080 (cal)   paper +0.119
+            age-1 skip                 cal W    1     +0.005 | L    0     +0.000 | net saved    -0.005 (cal)   paper -0.019
+            10-sec skip                cal W    0     +0.000 | L    4     -0.037 | net saved    +0.037 (cal)   paper +0.075
+            blocklist                  cal W    1     +0.005 | L    1     -0.007 | net saved    +0.002 (cal)   paper -0.018
+            holder loss (T2 / re-arm) [live] cal W    0     +0.000 | L    3     -0.012 | net saved    +0.012 (cal)   paper +0.020
+            no-bot filter              cal W    2     +0.010 | L    8     -0.047 | net saved    +0.037 (cal)   paper -0.011
+            bot depth (live)           cal W    5     +0.033 | L   13     -0.089 | net saved    +0.056 (cal)   paper -0.012
           LIVE total (unique triggers): 258 blocked, would win 16 +0.339, would lose 25 -0.504, net saved +0.165 (rows sum 41 more: a trigger under 2+ LIVE rows)
+          LIVE total calibrated:        258 blocked, would win 9 +0.060, would lose 32 -0.257, net saved +0.197 (cal)
           LOG total (unique fills):     10 blocked, would win 8 +0.179, would lose 2 -0.044, net saved -0.136 (rows sum 16 more: a fill flagged by 2+ rules; 6 fills)
           ALL total:                    268 blocked, would win 24 +0.519, would lose 27 -0.548, net saved +0.029 (LIVE is paper, LOG is real fills; the sets are disjoint; estimate)
+          ALL total calibrated:         268 blocked, would win 17 +0.240, would lose 34 -0.301, net saved +0.061 (LIVE cal + LOG real)
           re-arm skips: 284 (no shadow window: not scored)
           ADDED WINDOWS (dip41; net = what they made): wide dumper log 3:0.8 | qf2 log 5:0.3
           wide dumper (log)          LOG       66 |    1     +0.003 |    4     -0.096 |    -0.092   (paper (the wide shadow's row c at 0.250 SOL); would-arm 66, scored 5, no wide shadow window 0)

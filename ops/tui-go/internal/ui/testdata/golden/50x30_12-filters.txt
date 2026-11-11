@@ -1,19 +1,19 @@
 ╱╱ REWIND ╱╱  ○ AMS r27               +0.5877 SOL
   1   2   3   4   5   6   7   8 Flt
 FILTERS ──────────────── LIVE live · LOG log only
-   filter        vrdt      net prec  blkd   W   L
-LV create-slot   KEEP   +0.664  79%   187   6  23
-LV QUIET         KEEP   +0.001  57%    36   3   4
+paper is ~2× optimistic; decide on cal · cal = ea…
+   filter        vrdt      net  prec  blkd   W   L
+LV create-slot   KEEP   +0.324c  86%   187   4  25
+LV QUIET         KEEP   +0.026c  86%    36   1   6
 4 with no blocks yet: age-1 skip, 10-sec skip, ba…
-▸ 4 dismissed (d)       +0.000    –     0   0   0
-LIVE unique             +0.665  75%   223   9  27
-LOG unique              -0.000    –     0   0   0
-ALL total               +0.665  75%   223   9  27
+▸ 4 dismissed (d)       +0.000     –     0   0   0
+LIVE unique             +0.350c  86%   223   5  31
+LOG unique              -0.000     –     0   0   0
+ALL total               +0.350c  86%   223   5  31
 net saved: green saved, red cost · prec = losers …
 SKIPPED / BLOCKED ───────────────────────────────
 all  (0)  +223 shadow (v)            0W 0L  +0.000
 nothing blocked here
-
 
 
 

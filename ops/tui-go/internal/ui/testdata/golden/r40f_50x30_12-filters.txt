@@ -1,19 +1,20 @@
 ╱╱ REWIND ╱╱  ● /tmp/TestGoldenFilte  +6.0009 SOL
   1   2   3   4   5   6   7   8 Flt
 FILTERS ──────────────── LIVE live · LOG log only
-   filter        vrdt      net prec  blkd   W   L
-LV create-slot   KEEP   +1.277  62% 1,036  68 113
-LV age-1 skip    KEEP   +0.833  68%   137  12  26
-LV QUIET         KEEP   +0.373  65%   254   9  17
-LV 10-sec skip   KEEP   +0.115  67%    92   1   2
-LG bad creator   LV32   -0.300  57%    21   9  12
-LV deeper limit  –      -0.914  43%   348  33  25
-   └ 77 deep fills gain +1.092  NET +0.177
-LG group risk    LOG    +0.721  64%    22   8  14
-▸ 3 dismissed (d)       +1.011  61%    44  17  27
-LIVE unique             +1.684  60% 1,867 123 183
-LOG unique              +0.640  60%    48  19  29
-ALL total               +2.324  60% 1,915 142 212
+paper is ~2× optimistic; decide on cal · cal = ea…
+   filter        vrdt      net  prec  blkd   W   L
+LV create-slot   KEEP   +2.196c  83% 1,036  31 150
+LV age-1 skip    KEEP   +0.586c  87%   137   5  33
+LV deeper limit  –      +0.401c  78%   348  13  45
+   └ 77 deep fills gain +0.995  NET +1.396 c
+LV QUIET         KEEP   +0.386c  88%   254   3  23
+LV 10-sec skip   KEEP   +0.035c  67%    92   1   2
+LG bad creator   LV32   -0.300   57%    21   9  12
+LG group risk    LOG    +0.721   64%    22   8  14
+▸ 3 dismissed (d)       +1.011   61%    44  17  27
+LIVE unique             +3.604c  83% 1,867  53 253
+LOG unique              +0.640   60%    48  19  29
+ALL total               +4.244c  80% 1,915  72 282
 net saved: green saved, red cost · prec = losers …
 SKIPPED / BLOCKED ───────────────────────────────
 all  (48)  +1,867 shadow (v)       19W 29L  -0.640
@@ -25,6 +26,5 @@ all  (48)  +1,867 shadow (v)       19W 29L  -0.640
   12:33:21 AM LG bad creat… 99hmVC LOSE  -0.019
   12:29:24 AM LG bad creat… FkaMPD WIN   +0.285
   12:24:43 AM LG BC+ST+GR+… B6Ygbi WIN   +0.040
-  12:24:23 AM LG ST+GR+HC   52VFaA LOSE  -0.002
  ▲ engine gone without DIP DONE
  ↑/k up · f filter …              1/48  ♪ all  1s

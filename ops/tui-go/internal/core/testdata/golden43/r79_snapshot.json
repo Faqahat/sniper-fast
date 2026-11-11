@@ -487,7 +487,12 @@
     "lose_sol": -0.15185630673555284,
     "net_saved_sol": 0.039872741796369474,
     "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 11/57 (no value: 0 re-arm = no shadow, 46 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 1,
+    "cal_win_sol": 0.01273475,
+    "cal_lose_n": 10,
+    "cal_lose_sol": -0.08729125000000001,
+    "cal_net_saved_sol": 0.07455650000000001
    },
    {
     "key": "create_slot",
@@ -500,7 +505,12 @@
     "lose_sol": -0.22456941369728511,
     "net_saved_sol": -0.0017089338430842094,
     "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 23/163 (no value: 0 re-arm = no shadow, 140 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 6,
+    "cal_win_sol": 0.0454745,
+    "cal_lose_n": 17,
+    "cal_lose_sol": -0.12151550000000001,
+    "cal_net_saved_sol": 0.07604100000000001
    },
    {
     "key": "young_age",
@@ -513,7 +523,12 @@
     "lose_sol": -0.03189543168557266,
     "net_saved_sol": -0.2039440208238488,
     "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 8/27 (no value: 0 re-arm = no shadow, 19 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 5,
+    "cal_win_sol": 0.04047325,
+    "cal_lose_n": 3,
+    "cal_lose_sol": -0.0189045,
+    "cal_net_saved_sol": -0.02156875
    },
    {
     "key": "lone_whale",
@@ -526,7 +541,12 @@
     "lose_sol": 0.0,
     "net_saved_sol": -0.016811089521125047,
     "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 2/19 (no value: 0 re-arm = no shadow, 17 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 0,
+    "cal_win_sol": 0.0,
+    "cal_lose_n": 2,
+    "cal_lose_sol": -0.00345725,
+    "cal_net_saved_sol": 0.00345725
    },
    {
     "key": "breaker",
@@ -591,7 +611,12 @@
     "lose_sol": -0.08403777626058455,
     "net_saved_sol": -0.017651106431981672,
     "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 5/31 (no value: 11 re-arm = no shadow, 15 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 2,
+    "cal_win_sol": 0.017736,
+    "cal_lose_n": 3,
+    "cal_lose_sol": -0.03614375,
+    "cal_net_saved_sol": 0.018407750000000004
    },
    {
     "key": "holder_loss",
@@ -604,7 +629,12 @@
     "lose_sol": -0.08596681741585752,
     "net_saved_sol": 0.06586111337688762,
     "note": "mode live; paper; blocked = triggers skipped, W/L = the ones that would have filled (re-arm skips counted, no paper); paper-scored 6/37 (no value: 20 re-arm = no shadow, 11 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 1,
+    "cal_win_sol": 0.00500125,
+    "cal_lose_n": 5,
+    "cal_lose_sol": -0.0366145,
+    "cal_net_saved_sol": 0.03161325
    },
    {
     "key": "m2_unseen",
@@ -630,7 +660,12 @@
     "lose_sol": -0.032180469012358895,
     "net_saved_sol": -0.09294115835036736,
     "note": "paper; 3927 sends withheld; 51 windows never filled, 5 filled later (real P&L +0.018); stale-hold withheld 716; paper-scored 6/51 (no value: 20 re-arm = no shadow, 25 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 1,
+    "cal_win_sol": 0.01273475,
+    "cal_lose_n": 5,
+    "cal_lose_sol": -0.033002000000000004,
+    "cal_net_saved_sol": 0.020267250000000004
    },
    {
     "key": "botdepth_live",
@@ -643,7 +678,12 @@
     "lose_sol": -0.03554879101992778,
     "net_saved_sol": -0.1268611572965838,
     "note": "paper; 324 sends withheld; 67 windows never filled, 3 filled later (real P&L +0.019); paper-scored 10/67 (no value: 25 re-arm = no shadow, 32 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 4,
+    "cal_win_sol": 0.035472,
+    "cal_lose_n": 6,
+    "cal_lose_sol": -0.0334585,
+    "cal_net_saved_sol": -0.0020134999999999945
    },
    {
     "key": "gcr",
@@ -931,7 +971,8 @@
     "kind": "T2",
     "mint": "4wWwnqr2VQcckeRwVK6aUrcndP5PB1mMKaBfAdVwpump",
     "w": 196,
-    "sol": -0.0065072465702396744
+    "sol": -0.0065072465702396744,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794344430.2037838,
@@ -943,7 +984,8 @@
     "kind": "T2",
     "mint": "DN3UP8LFDNzUwvYR39qwXbEY7U87BNYW1oMGaFqxpump",
     "w": null,
-    "sol": -0.04890829562180761
+    "sol": -0.04890829562180761,
+    "cal_sol": -0.02024
    },
    {
     "t": 1794344415.7709212,
@@ -955,7 +997,8 @@
     "kind": "T2",
     "mint": "DeRPz7cQLXwBVd9Y853X6w1AhjCGzPqs7JvJVicT9xm4",
     "w": null,
-    "sol": 0.017895782747451416
+    "sol": 0.017895782747451416,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794344400.4988265,
@@ -967,7 +1010,8 @@
     "kind": "T2",
     "mint": "DeRPz7cQLXwBVd9Y853X6w1AhjCGzPqs7JvJVicT9xm4",
     "w": null,
-    "sol": 0.0837930999451148
+    "sol": 0.0837930999451148,
+    "cal_sol": 0.01273475
    },
    {
     "t": 1794344396.7411408,
@@ -979,7 +1023,8 @@
     "kind": "T2",
     "mint": "DeRPz7cQLXwBVd9Y853X6w1AhjCGzPqs7JvJVicT9xm4",
     "w": null,
-    "sol": -0.008183204277742523
+    "sol": -0.008183204277742523,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794344281.256486,
@@ -991,7 +1036,8 @@
     "kind": "T2",
     "mint": "FEkJgMcbr9sKD2uRx6G1g3dLnNSQCaXUMh48ZScapz9b",
     "w": null,
-    "sol": -0.0010426143524006014
+    "sol": -0.0010426143524006014,
+    "cal_sol": -0.00300075
    },
    {
     "t": 1794344241.536687,
@@ -1003,7 +1049,8 @@
     "kind": "T2",
     "mint": "6H3GbyDPxMyfKaJL8xkPhU3CVnn97eLkuQqK1obZpoLL",
     "w": null,
-    "sol": -0.027972001888623036
+    "sol": -0.027972001888623036,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794344236.9211118,
@@ -1015,7 +1062,8 @@
     "kind": "T2",
     "mint": "6H3GbyDPxMyfKaJL8xkPhU3CVnn97eLkuQqK1obZpoLL",
     "w": null,
-    "sol": 0.028751479406725854
+    "sol": 0.028751479406725854,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794343824.3331654,
@@ -1027,7 +1075,8 @@
     "kind": "T2",
     "mint": "7L4x4kZfJ7s7V4mBAxQ1jGLoGf2tA3CvBMUyZVUopump",
     "w": null,
-    "sol": -0.012453255424432876
+    "sol": -0.012453255424432876,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794343815.1096857,
@@ -1039,7 +1088,8 @@
     "kind": "T2",
     "mint": "8PnESkpa65CMTuFRiCXudMDtVXG5VCp3ovWde1JJpump",
     "w": 188,
-    "sol": 0.01818385638301786
+    "sol": 0.01818385638301786,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794343764.5678341,
@@ -1051,7 +1101,8 @@
     "kind": "T2",
     "mint": "GsJJ5rS2LDda5WG5skfSYb96gayAnzLqoG6wFGaopump",
     "w": null,
-    "sol": -0.0064650764200191385
+    "sol": -0.0064650764200191385,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794343751.3491325,
@@ -1063,7 +1114,8 @@
     "kind": "T2",
     "mint": "ARkdLmsbpZTLDmBkDn98z7FmcjCHmxKUNHkDbwPepump",
     "w": null,
-    "sol": 0.019787836454735544
+    "sol": 0.019787836454735544,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794343722.1989985,
@@ -1088,7 +1140,8 @@
     "kind": "T2",
     "mint": "9FH3EfNw6SLsK1kPtUe9N2nhJkk7o4tBU4pRPDdLpump",
     "w": null,
-    "sol": -0.00441693382831734
+    "sol": -0.00441693382831734,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794343702.5826094,
@@ -1100,7 +1153,8 @@
     "kind": "T2",
     "mint": "9HqKLXkhawivPxC2vkapziGvV3AsPKcdhJNVLskWpump",
     "w": null,
-    "sol": -0.0067148848659451055
+    "sol": -0.0067148848659451055,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794343692.2433245,
@@ -1112,7 +1166,8 @@
     "kind": "T2",
     "mint": "8PnESkpa65CMTuFRiCXudMDtVXG5VCp3ovWde1JJpump",
     "w": null,
-    "sol": 0.006342635324346155
+    "sol": 0.006342635324346155,
+    "cal_sol": -0.0004565
    },
    {
     "t": 1794343618.5455909,
@@ -1124,7 +1179,8 @@
     "kind": "T2",
     "mint": "486aHdpNhcu9v1LdDKibJWu4L8wXicEHV1iBVjYBpump",
     "w": 183,
-    "sol": 0.05206009685091142
+    "sol": 0.05206009685091142,
+    "cal_sol": 0.01273475
    },
    {
     "t": 1794343603.0798929,
@@ -1231,7 +1287,8 @@
     "kind": "T2",
     "mint": "Femt3BReuwFtYmMnGq2xQGE3kqNs4axqGyAr9VB6pump",
     "w": null,
-    "sol": 0.11198356493918336
+    "sol": 0.11198356493918336,
+    "cal_sol": 0.01273475
    },
    {
     "t": 1794342896.598075,
@@ -1243,7 +1300,8 @@
     "kind": "T2",
     "mint": "CsE7BzYPmWHB1QZefwYgpKv56Nh6CppjYMFZGiJypump",
     "w": null,
-    "sol": -0.006714884865945003
+    "sol": -0.006714884865945003,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794342868.902087,
@@ -1267,7 +1325,8 @@
     "kind": "T2",
     "mint": "DX7QyNj79M6PnU8TeHCUjzkzAW4XKAccNc1wBf4npump",
     "w": null,
-    "sol": -0.010435895404787206
+    "sol": -0.010435895404787206,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794342591.7364635,
@@ -1279,7 +1338,8 @@
     "kind": "T2",
     "mint": "ALvgCeTQFPDrpeiDYMNw8Wc1czsWDaTVoywUxQa1pump",
     "w": null,
-    "sol": 0.022386170153367826
+    "sol": 0.022386170153367826,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794342464.6596432,
@@ -1291,7 +1351,8 @@
     "kind": "T2",
     "mint": "FXJ9ggPjhbGtGD8LRdrw4F64oh6figiS54WHLcr7pump",
     "w": null,
-    "sol": -0.006714884865945054
+    "sol": -0.006714884865945054,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794342320.1334512,
@@ -1303,7 +1364,8 @@
     "kind": "T2",
     "mint": "B6rWPrqtHFAGFoxCJ7RC6evkDiB3EB4mUarby9nqpump",
     "w": null,
-    "sol": -0.025180546819627607
+    "sol": -0.025180546819627607,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794342074.7522478,
@@ -1315,7 +1377,8 @@
     "kind": "T2",
     "mint": "7XBGrWQLNpMsbzBbnGWH95qwYKkvajcDVKUVhg1Bpump",
     "w": null,
-    "sol": -0.006714884865945003
+    "sol": -0.006714884865945003,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794341930.8173854,
@@ -1327,7 +1390,8 @@
     "kind": "T2",
     "mint": "BTwdsh9h58V6B8p1XKtDsoo93CMQCcgcpwCpzAKJpump",
     "w": null,
-    "sol": -0.020710830140358287
+    "sol": -0.020710830140358287,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794341914.750528,
@@ -1367,7 +1431,8 @@
     "kind": "T2",
     "mint": "3gtHxUtkQ1JF7ehuPqkBe3sgrmbArUyW42WXLXgApump",
     "w": null,
-    "sol": -0.006714884865945054
+    "sol": -0.006714884865945054,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794341520.072341,
@@ -1379,7 +1444,8 @@
     "kind": "T2",
     "mint": "2tE2nichyPVCTt8qoxkLzHV5FdWcFxdA9nEKmcA8pump",
     "w": null,
-    "sol": -0.04039371713591859
+    "sol": -0.04039371713591859,
+    "cal_sol": -0.02024
    },
    {
     "t": 1794341480.512096,
@@ -1391,7 +1457,8 @@
     "kind": "T2",
     "mint": "6ctj5rvhutmuaQmZAW4XJuzLrt8zChgDw3MQXQghpump",
     "w": null,
-    "sol": -0.025517139461899097
+    "sol": -0.025517139461899097,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794341324.609336,
@@ -1403,7 +1470,8 @@
     "kind": "T2",
     "mint": "BNvefAuFBu9wLep9meSZUcwRQdobpk6i5JRNeLCGpump",
     "w": null,
-    "sol": 0.019401872720721504
+    "sol": 0.019401872720721504,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794341206.7548614,
@@ -1441,7 +1509,8 @@
     "kind": "T2",
     "mint": "3URAxamp6SbVpAaLDAA2XBfSyNeqAKpBJgud7JBJpump",
     "w": null,
-    "sol": 0.017057242591727043
+    "sol": 0.017057242591727043,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794341074.6941664,
@@ -1453,7 +1522,8 @@
     "kind": "T2",
     "mint": "9Sg7jrjXT7jH4MXzemFumMjYiibnhioBLiAgh7F6pump",
     "w": null,
-    "sol": 0.05852753102651772
+    "sol": 0.05852753102651772,
+    "cal_sol": 0.01273475
    },
    {
     "t": 1794340920.181022,
@@ -1465,7 +1535,8 @@
     "kind": "T2",
     "mint": "27kGZiMEaTG6ju1NJRN8EaL9gKtwpZiGVZN44BUopump",
     "w": null,
-    "sol": -0.006714884865945054
+    "sol": -0.006714884865945054,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794340736.070332,
@@ -1501,7 +1572,8 @@
     "kind": "T2",
     "mint": "GQuVQqhdS9AhYVRoH7uh7dcHfu47HGoY5C3tYss9ccdq",
     "w": null,
-    "sol": -0.018715810251245107
+    "sol": -0.018715810251245107,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794340527.9285653,
@@ -1513,7 +1585,8 @@
     "kind": "T2",
     "mint": "8MDxU99Jjoq8RaP35BwKQBK5PQq14MM1u6dAeo3wpump",
     "w": null,
-    "sol": -0.030706555851223612
+    "sol": -0.030706555851223612,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794340470.8897455,
@@ -1525,7 +1598,8 @@
     "kind": "T2",
     "mint": "HFzRQA5xcABvVxdnRxxCPQVgmSrKFn7PhzSqEmGKpump",
     "w": null,
-    "sol": 0.013929598541388585
+    "sol": 0.013929598541388585,
+    "cal_sol": -0.0004565
    },
    {
     "t": 1794340347.820013,
@@ -1537,7 +1611,8 @@
     "kind": "T2",
     "mint": "rJdchLtidAQfNsDQrcSYCHVU6Nx5Vxpk3G8xTujpump",
     "w": null,
-    "sol": -0.029248780299151886
+    "sol": -0.029248780299151886,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794340320.2135181,
@@ -1549,7 +1624,8 @@
     "kind": "T2",
     "mint": "EFULdrSav5TZZM9NRmLUaLbbiyrgSGSsr6DGo6aupump",
     "w": 77,
-    "sol": 0.027821994303145643
+    "sol": 0.027821994303145643,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794340316.6566632,
@@ -1587,7 +1663,8 @@
     "kind": "T2",
     "mint": "E6zfgyWoT265iMWZqQiLyTCGo3zN8SMEDKbGE3r2fork",
     "w": null,
-    "sol": -0.006732856513217102
+    "sol": -0.006732856513217102,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794340201.485537,
@@ -1599,7 +1676,8 @@
     "kind": "T2",
     "mint": "F9T3t3qRHGSnbpkUwCwjViudqnh3jnKg1uXsYWzUfork",
     "w": null,
-    "sol": 0.02978923762566294
+    "sol": 0.02978923762566294,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794340000.6314178,
@@ -1611,7 +1689,8 @@
     "kind": "T2",
     "mint": "bagU34zzRappmSxA5HQhFadfvM54aGpUPyu48GRtJwV",
     "w": 69,
-    "sol": -0.004122735591230869
+    "sol": -0.004122735591230869,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794339971.7075312,
@@ -1623,7 +1702,8 @@
     "kind": "T2",
     "mint": "8njGd3x6JGuun4oKzvR6MPxPcbenkcEmDoEiq3Nepump",
     "w": 66,
-    "sol": -0.016107524546587267
+    "sol": -0.016107524546587267,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794339915.4240139,
@@ -1635,7 +1715,8 @@
     "kind": "T2",
     "mint": "27kFjFiQ2ZS5sZ1AWXoTtFH2YWNxv4DBywjozj8Bpump",
     "w": null,
-    "sol": 0.013557248835082584
+    "sol": 0.013557248835082584,
+    "cal_sol": -0.0004565
    },
    {
     "t": 1794339800.6125789,
@@ -1647,7 +1728,8 @@
     "kind": "T2",
     "mint": "AdtBMRjbM4ikZnGmhkrx3C3TVFoVnn3gpuc1VJmsB3tx",
     "w": null,
-    "sol": -0.05994531862003746
+    "sol": -0.05994531862003746,
+    "cal_sol": -0.02024
    },
    {
     "t": 1794339793.2343638,
@@ -1659,7 +1741,8 @@
     "kind": "T2",
     "mint": "GLKwLBrYzAnZb25F2tcer7uwDWUyUekovv3fpRDzpump",
     "w": null,
-    "sol": 0.03264433112111406
+    "sol": 0.03264433112111406,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794339765.963937,
@@ -1671,7 +1754,8 @@
     "kind": "T2",
     "mint": "8TF2jr42gAZwkHP8TDDecGW8FUDGZSYm94N9iKNgpump",
     "w": 60,
-    "sol": 0.0014842566554432864
+    "sol": 0.0014842566554432864,
+    "cal_sol": -0.00300075
    },
    {
     "t": 1794339631.837099,
@@ -1752,7 +1836,8 @@
     "kind": "T2",
     "mint": "3iscLtU1Nm1ihDNuC8u9yGwZ7zMZtqqwyHcB1zW6pump",
     "w": null,
-    "sol": 0.09676007162200684
+    "sol": 0.09676007162200684,
+    "cal_sol": 0.01273475
    },
    {
     "t": 1794339448.3395574,
@@ -1764,7 +1849,8 @@
     "kind": "T2",
     "mint": "6xFmiehuvYRc2494VTopELMDjDDVJ6jEe3t9EC1nmka2",
     "w": null,
-    "sol": -0.013192353159439665
+    "sol": -0.013192353159439665,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794339343.8685162,
@@ -1776,7 +1862,8 @@
     "kind": "T2",
     "mint": "F62okPEUSfK3iU3L5mAATfCRT4PmtXeH6APC4mJQpump",
     "w": null,
-    "sol": 0.02540708311204109
+    "sol": 0.02540708311204109,
+    "cal_sol": 0.00500125
    },
    {
     "t": 1794339269.195083,
@@ -1788,7 +1875,8 @@
     "kind": "T2",
     "mint": "8CN1rjK2LnUSfqahYeLbigK6uad5fhfiQv9kURSLpump",
     "w": null,
-    "sol": -0.018457593355053887
+    "sol": -0.018457593355053887,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794339174.6658764,
@@ -1800,7 +1888,8 @@
     "kind": "T2",
     "mint": "H9N3M7Hvh9FhrtuCddfNSWrkTG69A34J2o2VozvYpump",
     "w": null,
-    "sol": 0.003253840686042462
+    "sol": 0.003253840686042462,
+    "cal_sol": -0.00300075
    },
    {
     "t": 1794338999.3706682,
@@ -1812,7 +1901,8 @@
     "kind": "T2",
     "mint": "5prcoC12kepQnUeogcHTwwqA2F7rgsUaKRF2zo4Cpump",
     "w": null,
-    "sol": 0.0058025376204339256
+    "sol": 0.0058025376204339256,
+    "cal_sol": -0.0004565
    },
    {
     "t": 1794338665.4480896,
@@ -1837,7 +1927,8 @@
     "kind": "T2",
     "mint": "BnHX9MpWShvk7P1U2jBtsb1A2NBsXu3VKKE6rFh8pump",
     "w": null,
-    "sol": 0.004524142561986619
+    "sol": 0.004524142561986619,
+    "cal_sol": -0.00300075
    },
    {
     "t": 1794338560.644764,
@@ -1849,7 +1940,8 @@
     "kind": "T2",
     "mint": "7qEK5RdNAzE1SaZBQndtmiVGWnZvmTMppHsgfdv8pump",
     "w": null,
-    "sol": 0.05127078969216294
+    "sol": 0.05127078969216294,
+    "cal_sol": 0.01273475
    },
    {
     "t": 1794338448.7560017,
@@ -1861,7 +1953,8 @@
     "kind": "T2",
     "mint": "894n3DMaEbFThY4WZQyid6rSNsRJsweCnQztrVh8pump",
     "w": null,
-    "sol": -0.0067148848659451055
+    "sol": -0.0067148848659451055,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794338289.7060893,
@@ -1873,7 +1966,8 @@
     "kind": "T2",
     "mint": "9FS1cG3weHXbxPkjjZ7LsRFArVE9XHQSCJVY51gzpump",
     "w": null,
-    "sol": 0.04456918669280662
+    "sol": 0.04456918669280662,
+    "cal_sol": 0.01273475
    },
    {
     "t": 1794338084.6773472,
@@ -1885,7 +1979,8 @@
     "kind": "T2",
     "mint": "GBGnfQXqDKA1ue7Yvzc3R6BPCGqtqhMrbt7HmPbtpump",
     "w": null,
-    "sol": 0.004953890236781051
+    "sol": 0.004953890236781051,
+    "cal_sol": -0.00300075
    },
    {
     "t": 1794337837.238822,
@@ -1897,7 +1992,8 @@
     "kind": "T2",
     "mint": "BhwDbvqphf75cDLMgRMiVouRvAahu3Ap3tJ8dSVZb7bL",
     "w": null,
-    "sol": -0.024583395871298257
+    "sol": -0.024583395871298257,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794337634.1653912,
@@ -1923,7 +2019,8 @@
     "kind": "T2",
     "mint": "Eq3TvzDMpG29Fw3H279eWixboYNkGUcuFZwxyNJxpump",
     "w": null,
-    "sol": 0.00031786758423435615
+    "sol": 0.00031786758423435615,
+    "cal_sol": -0.00300075
    },
    {
     "t": 1794337599.6784413,
@@ -1947,7 +2044,8 @@
     "kind": "T2",
     "mint": "HKU7Rtqhrg9kWB9T95XSHNPG5JYaoVnjMo63xaispump",
     "w": null,
-    "sol": -0.02055540316279376
+    "sol": -0.02055540316279376,
+    "cal_sol": -0.008855
    },
    {
     "t": 1794337536.3855693,
@@ -1972,7 +2070,8 @@
     "kind": "T2",
     "mint": "3tQWaBfQsnJ8N3St4FnLnSpK5YSayzizoFW6sAoZpump",
     "w": null,
-    "sol": -0.0067148848659451055
+    "sol": -0.0067148848659451055,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794337462.2804027,
@@ -1984,7 +2083,8 @@
     "kind": "T2",
     "mint": "Daz6YVGZd2YxfJ5SWfgGR2hcdj2Eth5HgZiWsLSLpump",
     "w": 6,
-    "sol": 0.011188472943750413
+    "sol": 0.011188472943750413,
+    "cal_sol": -0.0004565
    },
    {
     "t": 1794337399.0798526,
@@ -1996,7 +2096,8 @@
     "kind": "T2",
     "mint": "a7GimrhCGXP8rAMWkKtZzPWP9JWqdSDP7NJY3jowBkV",
     "w": 3,
-    "sol": 0.05167127118024292
+    "sol": 0.05167127118024292,
+    "cal_sol": 0.01273475
    },
    {
     "t": 1794337396.8971083,
@@ -2008,7 +2109,8 @@
     "kind": "T2",
     "mint": "GJZNGpAZGeLvhjNBTPcb1YZPkixkaXdfSwsEve8qgate",
     "w": null,
-    "sol": -0.006714884865945054
+    "sol": -0.006714884865945054,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794337395.8334906,
@@ -2020,7 +2122,8 @@
     "kind": "T2",
     "mint": "a7GimrhCGXP8rAMWkKtZzPWP9JWqdSDP7NJY3jowBkV",
     "w": 1,
-    "sol": -0.008811284311869968
+    "sol": -0.008811284311869968,
+    "cal_sol": -0.00704875
    },
    {
     "t": 1794337386.853312,
@@ -2032,7 +2135,8 @@
     "kind": "T2",
     "mint": "3B6Jn7Ek5WeuvCvT9iuaBPHM12Yeg82XbcpBCm8VFmPr",
     "w": null,
-    "sol": -0.06266221882340237
+    "sol": -0.06266221882340237,
+    "cal_sol": -0.02024
    },
    {
     "t": 1794337263.5307863,
@@ -2044,7 +2148,8 @@
     "kind": "T2",
     "mint": "FWjBKLoZgsPV9AnUcBcaQcBJEXMNG8K11TzuX8v3ADzi",
     "w": null,
-    "sol": -0.001411985318550133
+    "sol": -0.001411985318550133,
+    "cal_sol": -0.00300075
    },
    {
     "t": 0.0,
@@ -2056,7 +2161,8 @@
     "kind": "T2",
     "mint": "8TF2jr42gAZwkHP8TDDecGW8FUDGZSYm94N9iKNgpump",
     "w": 60,
-    "sol": 0.0014842566554432864
+    "sol": 0.0014842566554432864,
+    "cal_sol": -0.00300075
    },
    {
     "t": 0.0,
@@ -2068,7 +2174,8 @@
     "kind": "T2",
     "mint": "Gj2vNtHSR1Pki5svc8tx89St4fEki9MmFNrsBCknUckV",
     "w": 63,
-    "sol": 0.12363737070728296
+    "sol": 0.12363737070728296,
+    "cal_sol": 0.01273475
    },
    {
     "t": 0.0,
@@ -2080,7 +2187,8 @@
     "kind": "T2",
     "mint": "8njGd3x6JGuun4oKzvR6MPxPcbenkcEmDoEiq3Nepump",
     "w": 66,
-    "sol": -0.016107524546587267
+    "sol": -0.016107524546587267,
+    "cal_sol": -0.008855
    },
    {
     "t": 0.0,
@@ -2092,7 +2200,8 @@
     "kind": "T2",
     "mint": "5AW6jCUhJFnc7kBRFFRgHqJqiS6qrRZRBMjHqnjFpump",
     "w": 79,
-    "sol": -0.0026431747338815153
+    "sol": -0.0026431747338815153,
+    "cal_sol": -0.00704875
    },
    {
     "t": 0.0,
@@ -2104,7 +2213,8 @@
     "kind": "T2",
     "mint": "27kGZiMEaTG6ju1NJRN8EaL9gKtwpZiGVZN44BUopump",
     "w": 98,
-    "sol": -0.006714884865945054
+    "sol": -0.006714884865945054,
+    "cal_sol": -0.00704875
    },
    {
     "t": 0.0,
@@ -2116,7 +2226,8 @@
     "kind": "T2",
     "mint": "Bd8W1Avjp1FSS7kNqcaDsBXGGKnGSdqJL7Lw9HqnhPPF",
     "w": 105,
-    "sol": -0.006714884865945054
+    "sol": -0.006714884865945054,
+    "cal_sol": -0.00704875
    }
   ],
   "guard_logged": true,
@@ -2162,7 +2273,28 @@
   },
   "live_dup": 24,
   "log_dup": 33,
-  "rearm_skips": 550
+  "rearm_skips": 550,
+  "calib": {
+   "source": "gatecheck calib.pkl (sniper-studies/gatecheck/calib.py; val.pkl r65-r82, FIT r65-75 / TEST r76-82)",
+   "made": "2026-11-11",
+   "path": null
+  },
+  "live_total_cal": {
+   "blocked": 428,
+   "win_n": 20,
+   "win_sol": 0.16962649999999996,
+   "lose_n": 49,
+   "lose_sol": -0.3585315,
+   "net_saved_sol": 0.18890500000000005
+  },
+  "all_total_cal": {
+   "blocked": 454,
+   "win_n": 33,
+   "win_sol": 0.510622772,
+   "lose_n": 62,
+   "lose_sol": -0.597361644,
+   "net_saved_sol": 0.08673887200000008
+  }
  },
  "dip43": {
   "guard": {

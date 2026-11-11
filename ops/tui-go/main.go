@@ -197,6 +197,7 @@ func main() {
 	fs.Var(&run, "run", "run number N: <dir>/dip_ams_rN or dip_rN")
 	region := fs.String("region", "", "with --run: ams | fra")
 	dir := fs.String("dir", defaultDir, "run files directory")
+	calibF := fs.String("calib", "", "the Filters tab's calibration table (JSON; default: the embedded gatecheck 11-11 table; none = raw paper only)")
 	gcrSeed := fs.String("gcr-seed", "", "the Filters tab's bad-creator ledger seed (default /root/dip/gcr_seed.json if it exists; none = this run's fills only)")
 	budget := fs.String("budget", "", "the dip budget file (default: <dir>/../dip_budget_ams.json or dip_budget.json)")
 	snapshot := fs.Bool("snapshot", false, "print a plain-text summary and exit (no UI)")
@@ -268,6 +269,15 @@ func main() {
 		ctx.FixedNow = nowF.v
 	}
 	ctx.GcrSeed = *gcrSeed
+	if *calibF == "none" {
+		ctx.NoCalib = true
+	} else if *calibF != "" {
+		c, err := core.LoadCalib(*calibF)
+		if err != nil {
+			die("--calib %s: %v", *calibF, err)
+		}
+		ctx.Calib = c
+	}
 	if !src.Exists() {
 		die("%s not found", src.JSONL)
 	}

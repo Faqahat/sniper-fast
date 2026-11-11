@@ -1,0 +1,39 @@
+{
+ "source": "gatecheck calib.pkl (sniper-studies/gatecheck/calib.py; val.pkl r65-r82, FIT r65-75 / TEST r76-82)",
+ "made": "2026-11-11",
+ "note": "per window: model P&L (SOL, spend ref_spend) in bucket (bins[i], bins[i+1]] -> mean live P&L (SOL, 0 when it never filled live)",
+ "bins": [
+  -9.0,
+  -0.15,
+  -0.05,
+  -0.01,
+  0.02,
+  0.06,
+  0.15,
+  9.0
+ ],
+ "ref_spend": {
+  "T2": 1.0,
+  "rearm": 0.8
+ },
+ "cal": {
+  "T2": [
+   -0.08096,
+   -0.03542,
+   -0.028195,
+   -0.012003,
+   -0.001826,
+   0.020005,
+   0.050939
+  ],
+  "rearm": [
+   -0.071678,
+   -0.023987,
+   -0.017471,
+   -0.011833,
+   -0.000873,
+   0.021479,
+   0.04375
+  ]
+ }
+}

@@ -1,19 +1,19 @@
 ╱╱ REWIND ╱╱  ○ AMS r27                         ENDED  ·  +0.5877 SOL  +$110.15
   1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
 FILTERS ────────────────────────────────────────────── LIVE live · LOG log only
-     filter                   verdict    net saved  prec │ blocked    W    L
-LIVE create-slot skip         KEEP          +0.664   79% │     187    6   23
-LIVE QUIET                    KEEP          +0.001   57% │      36    3    4
+paper is ~2× optimistic; decide on cal · cal = each blocked window's paper mapp…
+     filter         verdict    net saved src   prec │ blocked    W    L    paper
+LIVE create-slot    KEEP          +0.324 cal    86% │     187    4   25   +0.664
+LIVE QUIET          KEEP          +0.026 cal    86% │      36    1    6   +0.001
 4 with no blocks yet: age-1 skip, 10-sec skip, bad creator (run only), group ri…
-▸ 4 DISMISSED  d show                       +0.000     – │       0    0    0
-LIVE total (unique triggers)                +0.665   75% │     223    9   27
-LOG total (unique fills)                    -0.000     – │       0    0    0
-ALL total                                   +0.665   75% │     223    9   27
+▸ 4 DISMISSED  d show             +0.000 real     – │       0    0    0
+LIVE total (unique triggers)      +0.350 cal    86% │     223    5   31   +0.665
+LOG total (unique fills)          -0.000 real     – │       0    0    0
+ALL total                         +0.350 cal    86% │     223    5   31   +0.665
 net saved: green saved, red cost · prec = losers / marked · verdict 11-03
 SKIPPED / BLOCKED ─────────────────────────────────────────────────────────────
 all  (0)  +223 shadow (v)                                          0W 0L  +0.000
 nothing blocked here
-
 
 
 

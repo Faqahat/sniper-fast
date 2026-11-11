@@ -59,9 +59,15 @@ filters   dip_ams_r80.jsonl: 7 positions realized -0.500 SOL; LIVE = changed wha
           mint ledger (log)          LOG        0 |    0     +0.000 |    0     +0.000 |    +0.000   (real fills; MINT-LEDGER: an earlier landing on the mint at or below the ledger's loss (would have skipped the trigger))
           fan-out (log)              LOG        0 |    0     +0.000 |    0     +0.000 |    +0.000   (real fills; FANOUT: the arm's fam read found >= N plain-transfer recipients (would have disarmed))
           landing guard (new)        LOG        0 |    0     +0.000 |    0     +0.000 |    +0.000   (real fills; the signing-time set still holding at landing)
+          CALIBRATED (gatecheck 11-11): paper is ~2x optimistic; decide on cal. LIVE rows' windows -> expected live P&L:
+            QUIET                      cal W    0     +0.000 | L    2     -0.056 | net saved    +0.056 (cal)   paper +0.060
+            create-slot skip           cal W    0     +0.000 | L    2     -0.064 | net saved    +0.064 (cal)   paper +0.149
+            bot depth (live)           cal W    2     +0.071 | L    1     -0.012 | net saved    -0.059 (cal)   paper -0.215
           LIVE total (unique triggers): 56 blocked, would win 2 +0.223, would lose 5 -0.217, net saved -0.006 (rows do not overlap)
+          LIVE total calibrated:        56 blocked, would win 2 +0.071, would lose 5 -0.132, net saved +0.061 (cal)
           LOG total (unique fills):     6 blocked, would win 1 +0.165, would lose 5 -0.653, net saved +0.489 (rows sum 11 more: a fill flagged by 2+ rules; 6 fills)
           ALL total:                    62 blocked, would win 3 +0.388, would lose 10 -0.870, net saved +0.482 (LIVE is paper, LOG is real fills; the sets are disjoint; estimate)
+          ALL total calibrated:         62 blocked, would win 3 +0.236, would lose 10 -0.785, net saved +0.550 (LIVE cal + LOG real)
           re-arm skips: 81 (no shadow window: not scored)
           ADDED WINDOWS (dip41; net = what they made): wide dumper log 3:0.8 | qf2 log 5:0.3
           wide dumper (log)          LOG       15 |    0     +0.000 |    0     +0.000 |    +0.000   (paper (the wide shadow's row c at 1.000 SOL); would-arm 15, scored 0, no wide shadow window 0)

@@ -3,21 +3,21 @@
 ╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
 ╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
   1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
-FILTERS ────────────────────────────────────────────────────────────────────── LIVE changed what the engine did (paper) · LOG log only, would-have (real fills)
-     filter                   verdict    net saved  prec │ blocked │     would win │    would lose   why
-LIVE create-slot skip         KEEP          +0.664   79% │     187 │    6   +0.305 │   23   -0.969   strongest, + always
-LIVE QUIET                    KEEP          +0.001   57% │      36 │    3   +0.073 │    4   -0.074   small + everywhere
+FILTERS ──────────────────────────────────────────────────────────────────────── LIVE changed what the engine did (cal) · LOG log only, would-have (real fills)
+paper is ~2× optimistic; decide on cal · cal = each blocked window's paper mapped to expected live P&L (gatecheck 11-11); paper net = raw
+     filter                   verdict    net saved src   prec │ blocked │     would win │    would lose │ paper net   why
+LIVE create-slot skip         KEEP          +0.324 cal    86% │     187 │    4   +0.060 │   25   -0.384 │    +0.664   strongest, + always
+LIVE QUIET                    KEEP          +0.026 cal    86% │      36 │    1   +0.018 │    6   -0.044 │    +0.001   small + everywhere
 4 with no blocks yet: age-1 skip, 10-sec skip, bad creator (run only), group risk (new)
-▸ 4 DISMISSED  d show                       +0.000     – │       0 │    0   +0.000 │    0   +0.000   safe timer, ctx85, holder clock, landing guard
-LIVE total (unique triggers)                +0.665   75% │     223 │    9   +0.378 │   27   -1.043
-LOG total (unique fills)                    -0.000     – │       0 │    0   +0.000 │    0   +0.000   0 fills in 2+ rules
-ALL total                                   +0.665   75% │     223 │    9   +0.378 │   27   -1.043   LIVE paper+LOG real
+▸ 4 DISMISSED  d show                       +0.000 real     – │       0 │    0   +0.000 │    0   +0.000 │             safe timer, ctx85, holder clock, landing …
+LIVE total (unique triggers)                +0.350 cal    86% │     223 │    5   +0.078 │   31   -0.428 │    +0.665
+LOG total (unique fills)                    -0.000 real     – │       0 │    0   +0.000 │    0   +0.000 │             0 fills in 2+ rules
+ALL total                                   +0.350 cal    86% │     223 │    5   +0.078 │   31   -0.428 │    +0.665   LIVE cal+LOG real
 net saved = −(what the blocked would have made): green saved, red cost · prec = losers / marked · verdict: FILTERS-3 11-03
-LIVE rows: paper; blocked = triggers skipped, W/L = the ones that would have filled · LOG rows: real fills · bad creator: no ledger seed (this run's fills only)
+LIVE rows: cal (src cal); blocked = triggers skipped, W/L = filled-on-paper windows by calibrated sign · LOG rows: real fills · bad creator: no ledger seed (th…
 SKIPPED / BLOCKED ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 all  (0)  +223 shadow (v)                                                                  0W 0L  +0.000   f filter  n no-dip  v shadow  o sort  O order  c copy
 nothing blocked here
-
 
 
 

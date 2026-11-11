@@ -53,6 +53,16 @@ default (no `/home/moiz/...` data).
   - **DIP43 SHADOWS**: FEED-STALL episodes, dead-man / blind would-records, mint ledger entries and would-blocks (arm / skip /
     fill), fan-out flags and the fam read's acts, FP strict would-blocks, the fills' FP would-hold / big-holder short / T2
     arm-slot, exit shadow and stop shadow records, react-watch records, dip43e's dump exit (would-fires, those positions' P&L).
+- **Filters, CALIBRATED (11-11)**: the LIVE paper-scored rows lead with **calibrated** numbers (`src cal`; phones: a `c`
+  after the net): each blocked window's shadow paper P&L goes through the gatecheck calibration (model P&L bucket -> mean
+  LIVE P&L per window, by kind; `~/sniper-studies/gatecheck/calib.py`, report2 / gatecheck2 report3: the paper made +157
+  where live made +13 on the same windows) and net / prec / W / L are the calibrated ones; the raw paper net stays in a dim
+  `paper net` column. A one-line note on top: "paper is ~2x optimistic; decide on cal". LOG rows (real fills, `src real`)
+  are unchanged; re-arm rows without a shadow stay "no value". The table is embedded (`internal/core/calib.json`, exported
+  from `~/sniper-data/gatecheck/calib.pkl` by `~/sniper-data/dipmon-calib/export_calib.py`); `--calib FILE` reads another,
+  `--calib none` shows the raw paper only; `DIPMON_V3=1` leaves it out. `--snapshot` adds a CALIBRATED block and the
+  calibrated LIVE / ALL totals; `--json` adds `cal_*` per LIVE row, `cal_sol` per item, `calib`, `live_total_cal`,
+  `all_total_cal`. Tests: `TestCalibEmbedded` / `TestCalibApply` / `TestCalibRow` (a synthetic row).
 - **Filters**: a LOG rule registry (`internal/core/logrules.go`): **G-A holder floors (log)** (CASCADE G-A abort on the fill),
   **guards top-5 (log)**, **mint ledger (log)**, **fan-out (log)**, **FP strict (log)**: LOG rows scored on the real fills
   (verdict "LOG new"), in each flagged fill's item (the Trades dot, `x`, the details' "blocked by"). One entry adds a rule:
@@ -131,6 +141,7 @@ own priority at start (nice 19 and the idle I/O class, every thread), so `sudo i
 | `dipmon --file X.jsonl` | any run file (finished runs, local copies); the `.log` next to it is read too (`--log` to override) |
 | `dipmon --dir DIR` | another runs directory (e.g. `--dir ~/sniper-data/runs/ams/runs --run 27`) |
 | `dipmon --screen 200x35` | render the UI once as plain text (`--tab 1-8`, `--page help\|detail\|splash\|today`), then exit |
+| `dipmon --calib FILE` | the Filters tab's calibration table (default: the embedded gatecheck 11-11 table; `none` = raw paper only) |
 | `dipmon --gcr-seed FILE` | the Filters tab's bad-creator ledger seed (default `/root/dip/gcr_seed.json` if it exists; `none` = this run's fills only, the row says so) |
 | `dipmon --screens DIR` | text screenshots of every tab at `--sizes 200x35,160x50,...` into DIR |
 | `sudo dipview` | the run explorer: every run in `/root/prod/runs` (`dipmon-go --view`; `--dir DIR` for another) |

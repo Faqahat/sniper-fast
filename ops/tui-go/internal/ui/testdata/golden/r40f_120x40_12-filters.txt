@@ -3,22 +3,23 @@
 ╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
 ╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
   1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
-FILTERS ────────────────────────────── LIVE changed what the engine did (paper) · LOG log only, would-have (real fills)
-     filter                   verdict    net saved  prec │ blocked │     would win │    would lose   why
-LIVE create-slot skip         KEEP          +1.277   62% │   1,036 │   68   +3.931 │  113   -5.208   strongest, + always
-LIVE age-1 skip               KEEP          +0.833   68% │     137 │   12   +0.392 │   26   -1.225   no value either way
-LIVE QUIET                    KEEP          +0.373   65% │     254 │    9   +0.417 │   17   -0.790   small + everywhere
-LIVE 10-sec skip              KEEP          +0.115   67% │      92 │    1   +0.044 │    2   -0.159   tiny + everywhere
-LOG  bad creator              LIVE dip32    -0.300   57% │      21 │    9   +0.646 │   12   -0.346   now creator loss
-LIVE deeper limit             –             -0.914   43% │     348 │   33   +1.946 │   25   -1.032   no 11-03 verdict
-     └ 77 deep fills: real +0.133 vs 0.88x paper -0.958 = gain +1.092  NET +0.177  (+69 re-arm deep fills +1.805, no sh…
-LOG  group risk (new)         LOG           +0.721   64% │      22 │    8   +0.284 │   14   -1.004   weak, keep logging
-▸ 3 DISMISSED  d show                       +1.011   61% │      44 │   17   +0.639 │   27   -1.650   holder clock, safe…
-LIVE total (unique triggers)                +1.684   60% │   1,867 │  123   +6.730 │  183   -8.414   incl. deep +2.776
-LOG total (unique fills)                    +0.640   60% │      48 │   19   +0.969 │   29   -1.608   19 fills in 2+ rul…
-ALL total                                   +2.324   60% │   1,915 │  142   +7.699 │  212  -10.022   LIVE paper+LOG real
+FILTERS ──────────────────────────────── LIVE changed what the engine did (cal) · LOG log only, would-have (real fills)
+paper is ~2× optimistic; decide on cal · cal = each blocked window's paper mapped to expected live P&L (gatecheck 11-11…
+     filter                   verdict    net saved src   prec │ blocked │     would win │    would lose │ paper net
+LIVE create-slot skip         KEEP          +2.196 cal    83% │   1,036 │   31   +0.668 │  150   -2.864 │    +1.277
+LIVE age-1 skip               KEEP          +0.586 cal    87% │     137 │    5   +0.070 │   33   -0.656 │    +0.833
+LIVE deeper limit             –             +0.401 cal    78% │     348 │   13   +0.310 │   45   -0.711 │    -0.914
+     └ 77 deep fills: real +0.133 vs cal paper -0.862 = gain +0.995  NET +1.396 cal  (paper gain +1.092, NET +0.177)
+LIVE QUIET                    KEEP          +0.386 cal    88% │     254 │    3   +0.063 │   23   -0.449 │    +0.373
+LIVE 10-sec skip              KEEP          +0.035 cal    67% │      92 │    1   +0.014 │    2   -0.049 │    +0.115
+LOG  bad creator              LIVE dip32    -0.300 real   57% │      21 │    9   +0.646 │   12   -0.346 │
+LOG  group risk (new)         LOG           +0.721 real   64% │      22 │    8   +0.284 │   14   -1.004 │
+▸ 3 DISMISSED  d show                       +1.011 real   61% │      44 │   17   +0.639 │   27   -1.650 │
+LIVE total (unique triggers)                +3.604 cal    83% │   1,867 │   53   +1.125 │  253   -4.729 │    +1.684
+LOG total (unique fills)                    +0.640 real   60% │      48 │   19   +0.969 │   29   -1.608 │
+ALL total                                   +4.244 cal    80% │   1,915 │   72   +2.094 │  282   -6.338 │    +2.324
 net saved = −(what the blocked would have made): green saved, red cost · prec = losers / marked · verdict: FILTERS-3 11…
-LIVE rows: paper; blocked = triggers skipped, W/L = the ones that would have filled · LOG rows: real fills · bad creato…
+LIVE rows: cal (src cal); blocked = triggers skipped, W/L = filled-on-paper windows by calibrated sign · LOG rows: real…
 SKIPPED / BLOCKED ─────────────────────────────────────────────────────────────────────────────────────────────────────
 all  (48)  +1,867 shadow (v)                     19W 29L  -0.640   f filter  n no-dip  v shadow  o sort  O order  c copy
         ▼time type filter                                     kind mint     result      SOL
@@ -35,6 +36,5 @@ all  (48)  +1,867 shadow (v)                     19W 29L  -0.640   f filter  n n
   12:05:07 AM LOG  bad creator +3                             T2   E9YjGTCd WIN     +0.0269 real fill
   12:03:55 AM LOG  safe sell timer, group risk                T2   GeVmRyh3 WIN     +0.0342 real fill
   11:53:52 PM LOG  bad creator                                T2   6FuRbZby LOSE    -0.0438 real fill
-  11:49:27 PM LOG  holder clock                               T2   FNqe3oL5 LOSE    -0.0442 real fill
  ▲ engine gone without DIP DONE
  ↑/k up · f filter · d dismissed filters · n no-dip rows · v shadow rows · o sort column …              1/48  ♪ all  1s

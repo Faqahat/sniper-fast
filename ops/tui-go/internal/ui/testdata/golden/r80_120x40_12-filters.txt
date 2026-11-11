@@ -3,34 +3,34 @@
 ╱╱╱ █▀▀▀▄ █▀▀▀  █ ▄ █  █  █ ▀▄█ █   █ ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
 ╱╱╱ ▀   ▀ ▀▀▀▀▀  ▀ ▀  ▀▀▀ ▀   ▀ ▀▀▀▀  ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
   1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
-FILTERS ────────────────────────────── LIVE changed what the engine did (paper) · LOG log only, would-have (real fills)
-     filter                   verdict    net saved  prec │ blocked │     would win │    would lose   why
-LIVE create-slot skip         KEEP          +0.149  100% │      30 │    0   +0.000 │    2   -0.149   strongest, + always
-LIVE QUIET                    KEEP          +0.060  100% │      10 │    0   +0.000 │    2   -0.060   small + everywhere
-LIVE age-1 skip               KEEP          +0.000     – │       3 │    0   +0.000 │    0   +0.000   no value either way
-LIVE 10-sec skip              KEEP          +0.000     – │       1 │    0   +0.000 │    0   +0.000   tiny + everywhere
-LIVE holder loss              LIVE new      +0.000     – │       1 │    0   +0.000 │    0   +0.000   holder ledger (dip…
-LIVE bot depth (live)         –             -0.215   33% │      11 │    2   +0.223 │    1   -0.008   no 11-03 verdict
-LOG  HYBRID-2 gate (log)      LOG new       +0.473  100% │       4 │    0   +0.000 │    4   -0.473   HYBRID-2 arm rule …
-LOG  QUIET3-A (log)           LOG           +0.407  100% │       2 │    0   +0.000 │    2   -0.407   weak on holdout
-LOG  G-A holder floors (log)  LOG new       +0.220  100% │       2 │    0   +0.000 │    2   -0.220   CASCADE G-A (dip43)
-LOG  guards top-5 (log)       LOG new       +0.220  100% │       2 │    0   +0.000 │    2   -0.220   CASCADE guards (di…
-LOG  skip2 per-send (log)     LOG new       +0.180  100% │       1 │    0   +0.000 │    1   -0.180   per-send logit (di…
-LOG  whale other rule         LOG new       +0.180  100% │       1 │    0   +0.000 │    1   -0.180   whale ledger other…
-LOG  whale loss (log mode)    LOG           +0.180  100% │       1 │    0   +0.000 │    1   -0.180   whale ledger in lo…
-LOG  group risk (new)         LOG           +0.055  100% │       1 │    0   +0.000 │    1   -0.055   weak, keep logging
-LOG  bundle family fam (log)  LOG new       +0.045   50% │       2 │    1   +0.165 │    1   -0.210   bundle rug (dip35)
-LOG  equal-size group (log)   LOG           -0.165    0% │       1 │    1   +0.165 │    0   +0.000   mixed r51/r53
+FILTERS ──────────────────────────────── LIVE changed what the engine did (cal) · LOG log only, would-have (real fills)
+paper is ~2× optimistic; decide on cal · cal = each blocked window's paper mapped to expected live P&L (gatecheck 11-11…
+     filter                   verdict    net saved src   prec │ blocked │     would win │    would lose │ paper net
+LIVE create-slot skip         KEEP          +0.064 cal   100% │      30 │    0   +0.000 │    2   -0.064 │    +0.149
+LIVE QUIET                    KEEP          +0.056 cal   100% │      10 │    0   +0.000 │    2   -0.056 │    +0.060
+LIVE age-1 skip               KEEP          +0.000 pap      – │       3 │    0   +0.000 │    0   +0.000 │    +0.000
+LIVE 10-sec skip              KEEP          +0.000 pap      – │       1 │    0   +0.000 │    0   +0.000 │    +0.000
+LIVE holder loss              LIVE new      +0.000 pap      – │       1 │    0   +0.000 │    0   +0.000 │    +0.000
+LIVE bot depth (live)         –             -0.059 cal    33% │      11 │    2   +0.071 │    1   -0.012 │    -0.215
+LOG  HYBRID-2 gate (log)      LOG new       +0.473 real  100% │       4 │    0   +0.000 │    4   -0.473 │
+LOG  QUIET3-A (log)           LOG           +0.407 real  100% │       2 │    0   +0.000 │    2   -0.407 │
+LOG  G-A holder floors (log)  LOG new       +0.220 real  100% │       2 │    0   +0.000 │    2   -0.220 │
+LOG  guards top-5 (log)       LOG new       +0.220 real  100% │       2 │    0   +0.000 │    2   -0.220 │
+LOG  skip2 per-send (log)     LOG new       +0.180 real  100% │       1 │    0   +0.000 │    1   -0.180 │
+LOG  whale other rule         LOG new       +0.180 real  100% │       1 │    0   +0.000 │    1   -0.180 │
+LOG  whale loss (log mode)    LOG           +0.180 real  100% │       1 │    0   +0.000 │    1   -0.180 │
+LOG  group risk (new)         LOG           +0.055 real  100% │       1 │    0   +0.000 │    1   -0.055 │
+LOG  bundle family fam (log)  LOG new       +0.045 real   50% │       2 │    1   +0.165 │    1   -0.210 │
+LOG  equal-size group (log)   LOG           -0.165 real    0% │       1 │    1   +0.165 │    0   +0.000 │
 13 with no blocks yet: circuit breaker, creator loss (T2), QUIET3-A (live), blocklist, M2 unseen, no-bot filter, bad cr…
-▸ 4 DISMISSED  d show                       +0.000     – │       0 │    0   +0.000 │    0   +0.000   safe timer, ctx85,…
-LIVE total (unique triggers)                -0.006   71% │      56 │    2   +0.223 │    5   -0.217
-LOG total (unique fills)                    +0.489   83% │       6 │    1   +0.165 │    5   -0.653   6 fills in 2+ rules
-ALL total                                   +0.482   77% │      62 │    3   +0.388 │   10   -0.870   LIVE paper+LOG real
+▸ 4 DISMISSED  d show                       +0.000 real     – │       0 │    0   +0.000 │    0   +0.000 │
+LIVE total (unique triggers)                +0.061 cal    71% │      56 │    2   +0.071 │    5   -0.132 │    -0.006
+LOG total (unique fills)                    +0.489 real   83% │       6 │    1   +0.165 │    5   -0.653 │
+ALL total                                   +0.550 cal    77% │      62 │    3   +0.236 │   10   -0.785 │    +0.482
 ADDED WINDOWS (dip41; net = what they made): wide dumper log 3:0.8 | qf2 log 5:0.3
 wide dumper (log)          LOG       15 |    0     +0.000 |    0     +0.000 |    +0.000   (paper (the wide shadow's row…
 qf2 (log)                  LOG        8 |    0     +0.000 |    0     +0.000 |    +0.000   (paper (the wide shadow's row…
 qf2 on T2 (log)            LOG        4 |    0     +0.000 |    1     -0.055 |    -0.055   (real T2 positions; flagged a…
-Q1 (log)                   LOG        7 | +4:   7W/  0L    +0.579 | +9:   7W/  0L    +0.868   (paper 0.50 SOL, nothing …
 SKIPPED / BLOCKED ─────────────────────────────────────────────────────────────────────────────────────────────────────
 all  (6)  +56 shadow (v)                           1W 5L  -0.489   f filter  n no-dip  v shadow  o sort  O order  c copy
         ▼time type filter                                     kind mint     result      SOL

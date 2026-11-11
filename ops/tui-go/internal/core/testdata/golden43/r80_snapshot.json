@@ -478,7 +478,12 @@
     "lose_sol": -0.06018902770834389,
     "net_saved_sol": 0.06018902770834389,
     "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 2/10 (no value: 0 re-arm = no shadow, 8 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 0,
+    "cal_win_sol": 0.0,
+    "cal_lose_n": 2,
+    "cal_lose_sol": -0.05639,
+    "cal_net_saved_sol": 0.05639
    },
    {
     "key": "create_slot",
@@ -491,7 +496,12 @@
     "lose_sol": -0.14850231644013154,
     "net_saved_sol": 0.14850231644013154,
     "note": "paper; blocked = triggers skipped, W/L = the ones that would have filled; paper-scored 2/30 (no value: 0 re-arm = no shadow, 28 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 0,
+    "cal_win_sol": 0.0,
+    "cal_lose_n": 2,
+    "cal_lose_sol": -0.063615,
+    "cal_net_saved_sol": 0.063615
    },
    {
     "key": "young_age",
@@ -634,7 +644,12 @@
     "lose_sol": -0.00808492385365426,
     "net_saved_sol": -0.2149364381843786,
     "note": "paper; 84 sends withheld; 11 windows never filled, 2 filled later (real P&L -0.407); paper-scored 3/11 (no value: 1 re-arm = no shadow, 7 T2 shadow never filled)",
-    "na": false
+    "na": false,
+    "cal_win_n": 2,
+    "cal_win_sol": 0.070944,
+    "cal_lose_n": 1,
+    "cal_lose_sol": -0.012003,
+    "cal_net_saved_sol": -0.05894099999999999
    },
    {
     "key": "gcr",
@@ -936,7 +951,8 @@
     "kind": "T2",
     "mint": "Eb2qDY6m5T2dUk9h91p9nQ9XgnDCBaFFhpWeJuDgC3HG",
     "w": null,
-    "sol": -0.09875277908311489
+    "sol": -0.09875277908311489,
+    "cal_sol": -0.03542
    },
    {
     "t": 1794346084.1919508,
@@ -948,7 +964,8 @@
     "kind": "T2",
     "mint": "DMFPsnwkPY8WJvFAZqXTHL8Uk7c71sWabAKJNfKBpump",
     "w": null,
-    "sol": -0.04974953735701665
+    "sol": -0.04974953735701665,
+    "cal_sol": -0.028195
    },
    {
     "t": 1794346058.060057,
@@ -987,7 +1004,8 @@
     "kind": "T2",
     "mint": "3RS87emHPV5RwiWSowQiiRJsoEpx2w5UAZSKt8wNpump",
     "w": null,
-    "sol": -0.0345410177233293
+    "sol": -0.0345410177233293,
+    "cal_sol": -0.028195
    },
    {
     "t": 1794345703.7929118,
@@ -999,7 +1017,8 @@
     "kind": "T2",
     "mint": "J8EFo9DUrPwkbpQPbMaFhCAY5rHeKDYYCBdB8hkipump",
     "w": null,
-    "sol": -0.02564800998501459
+    "sol": -0.02564800998501459,
+    "cal_sol": -0.028195
    },
    {
     "t": 1794345387.2531369,
@@ -1027,7 +1046,8 @@
     "kind": "T2",
     "mint": "DJMjiYd6ZCNJjRtCf3qDr4hrQSRGYyJmG9RVQDwTpump",
     "w": 11,
-    "sol": -0.00808492385365426
+    "sol": -0.00808492385365426,
+    "cal_sol": -0.012003
    },
    {
     "t": 1794345082.2494807,
@@ -1052,7 +1072,8 @@
     "kind": "T2",
     "mint": "81YRpA2CLqCgxtXbV32QjLZvcCYPBph3i67QKQDcpump",
     "w": 2,
-    "sol": 0.06680045047544654
+    "sol": 0.06680045047544654,
+    "cal_sol": 0.020005
    },
    {
     "t": 1794344959.9713078,
@@ -1064,7 +1085,8 @@
     "kind": "T2",
     "mint": "BJN6STTMa1mYM5twFDD21CiCw4ZfMfC5C75XC5H5pump",
     "w": 1,
-    "sol": 0.15622091156258633
+    "sol": 0.15622091156258633,
+    "cal_sol": 0.050939
    }
   ],
   "guard_logged": true,
@@ -1110,7 +1132,28 @@
   },
   "live_dup": 0,
   "log_dup": 11,
-  "rearm_skips": 81
+  "rearm_skips": 81,
+  "calib": {
+   "source": "gatecheck calib.pkl (sniper-studies/gatecheck/calib.py; val.pkl r65-r82, FIT r65-75 / TEST r76-82)",
+   "made": "2026-11-11",
+   "path": null
+  },
+  "live_total_cal": {
+   "blocked": 56,
+   "win_n": 2,
+   "win_sol": 0.070944,
+   "lose_n": 5,
+   "lose_sol": -0.13200800000000001,
+   "net_saved_sol": 0.06106400000000002
+  },
+  "all_total_cal": {
+   "blocked": 62,
+   "win_n": 3,
+   "win_sol": 0.23557368699999998,
+   "lose_n": 10,
+   "lose_sol": -0.785296089,
+   "net_saved_sol": 0.549722402
+  }
  },
  "dip43": {
   "guard": {

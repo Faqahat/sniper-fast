@@ -93,7 +93,7 @@ func filtView(t testing.TB, path, seed string) *View {
 	src := NewSource(path, "", 0, 3000)
 	for {
 		n := src.Step(LoadChunk)
-		_ = src.Model.Filt.Report(ResolveGcrSeed(seed)) // the report between steps (cached, recomputed as records come)
+		_ = src.Model.Filt.Report(ResolveGcrSeed(seed), nil) // the report between steps (cached, recomputed as records come)
 		if n == 0 && !src.Pending() {
 			break
 		}
@@ -263,7 +263,7 @@ func TestFiltersLive(t *testing.T) {
 	src := NewSource(part, "", 0, 3000)
 	src.LoadAll(LoadChunk, 0, nil)
 	seed := ResolveGcrSeed(filepath.Join("testdata", "filters", "gcr_seed.json"))
-	r1 := src.Model.Filt.Report(seed)
+	r1 := src.Model.Filt.Report(seed, nil)
 	n1 := 0
 	for _, r := range r1.Rows {
 		n1 += r.Blocked
@@ -273,7 +273,7 @@ func TestFiltersLive(t *testing.T) {
 	f.Close()
 	for src.Step(LoadChunk) > 0 || src.Pending() {
 	}
-	r2 := src.Model.Filt.Report(seed)
+	r2 := src.Model.Filt.Report(seed, nil)
 	if r2 == r1 {
 		t.Fatal("stale report after the file grew")
 	}
@@ -288,7 +288,7 @@ func TestFiltersLive(t *testing.T) {
 	if n2 != nref || n1 >= n2 {
 		t.Errorf("blocked %d -> %d, want -> %d", n1, n2, nref)
 	}
-	if r3 := src.Model.Filt.Report(seed); r3 != r2 {
+	if r3 := src.Model.Filt.Report(seed, nil); r3 != r2 {
 		t.Error("no records came: the cached report should be reused")
 	}
 }
@@ -364,7 +364,7 @@ func TestFiltersF36(t *testing.T) {
 		}
 		return nil
 	}
-	if it := find(src.Model.Filt.Report(seed)); it != nil {
+	if it := find(src.Model.Filt.Report(seed, nil)); it != nil {
 		t.Fatalf("F36E6Xcs listed before it was realized: %+v", it)
 	}
 	f, _ := os.OpenFile(part, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -372,7 +372,7 @@ func TestFiltersF36(t *testing.T) {
 	f.Close()
 	for src.Step(LoadChunk) > 0 || src.Pending() {
 	}
-	R := src.Model.Filt.Report(seed)
+	R := src.Model.Filt.Report(seed, nil)
 	it := find(R)
 	if it == nil {
 		t.Fatal("F36E6Xcs not listed after its realized record")
@@ -404,7 +404,7 @@ func TestFiltersLandingGuard(t *testing.T) {
 		os.WriteFile(p, []byte(strings.Join(ls, "\n")+"\n"), 0o644)
 		src := NewSource(p, "", 0, 3000)
 		src.LoadAll(LoadChunk, 0, nil)
-		return src.Model.Filt.Report("")
+		return src.Model.Filt.Report("", nil)
 	}
 	R := run(recs)
 	g, ok := R.Row("guard")

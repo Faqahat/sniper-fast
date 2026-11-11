@@ -57,7 +57,7 @@ func TestGoldenFilters(t *testing.T) {
 				t.Errorf("%s line %d: %d cells", name, i+1, w)
 			}
 		}
-		if !strings.Contains(got, "FILTERS") || !strings.Contains(got, "SKIPPED / BLOCKED") || !strings.Contains(got, "+1.277") {
+		if !strings.Contains(got, "FILTERS") || !strings.Contains(got, "SKIPPED / BLOCKED") || !strings.Contains(got, "+2.196") || (sz[0] >= 80 && !strings.Contains(got, "+1.277")) { // the calibrated net; the raw paper net where it fits
 			t.Errorf("%s: the table is missing:\n%s", name, got)
 		}
 		fp := filepath.Join("testdata", "golden", name)

@@ -36,6 +36,8 @@ func fltShort(key, name string) string {
 		return "10-sec skip"
 	case "deeper":
 		return "deeper limit"
+	case "botdepth_live":
+		return "bot depth"
 	case "gcr":
 		if strings.Contains(name, "run only") {
 			return "bad creator*"
@@ -411,7 +413,7 @@ func fltSortedRows(rows []core.FiltRow) []core.FiltRow {
 		if a.NA != b.NA {
 			return !a.NA
 		}
-		return lamOf(a.Net()) > lamOf(b.Net())
+		return lamOf(a.ShownNet()) > lamOf(b.ShownNet())
 	})
 	return out
 }
@@ -431,24 +433,41 @@ func (m *Model) fltTableLines(w int) []string {
 	case w >= 76:
 		mode = 1
 	}
+	// v4 (11-11) CALIBRATED: with a calibration the LIVE paper-scored rows lead with the calibrated numbers (net, prec, W / L), a
+	// src marker after the net (cal / real / paper; phones: one cell, c = cal) and the raw paper net in a dim column of its own
+	calOn := R.Calib != nil
+	srcW, papW := 0, 0 // the marker's and the paper column's cells (0 = not shown)
+	if calOn {
+		switch mode {
+		case 0:
+			srcW, papW = 5, 12 // " " + 4; " | " + 9
+		case 1:
+			srcW, papW = 5, 9 // " " + 4; " " + 8
+		default:
+			srcW = 1
+		}
+	}
 	var nameW, tagW, vdW, netW, precW int
 	showBlk, showWL := true, true
 	switch mode {
 	case 0:
 		tagW, vdW, netW, precW = 5, 10, 9, 5
-		nameW = min(24, w-74)
+		nameW = max(8, min(24, w-74-srcW-papW))
 	case 1:
 		tagW, vdW, netW, precW = 5, 10, 9, 5
-		nameW = min(24, w-52)
+		nameW = max(8, min(24, w-52-srcW-papW))
 	default:
 		tagW, vdW, netW, precW = 3, 4, 8, 4
 		nameW = 13
-		fixed := tagW + nameW + 1 + vdW + 1 + netW + 1 + precW // 35
+		fixed := tagW + nameW + 1 + vdW + 1 + netW + srcW + 1 + precW // 35 (36 with the cal marker)
 		if fixed+6+8 > w {
 			showWL = false
 		}
 		if fixed+6 > w {
 			showBlk = false
+		}
+		if calOn && fixed+6+8+8 <= w { // phones: the paper column when it fits
+			papW = 8
 		}
 		if fixed > w {
 			nameW = max(4, nameW-(fixed-w))
@@ -456,14 +475,39 @@ func (m *Model) fltTableLines(w int) []string {
 	}
 	whyW := 0
 	if mode == 0 {
-		whyW = w - (74 + nameW) - 3
+		whyW = w - (74 + srcW + papW + nameW) - 3
 		if whyW < 12 {
 			whyW = 0
 		}
 	}
+	srcCell := func(src string) string { // "cal" / "real" / "pap" ("" = blank)
+		if srcW == 0 {
+			return ""
+		}
+		if srcW == 1 {
+			if src == "cal" {
+				return t.Acc.Render("c")
+			}
+			return " "
+		}
+		st := t.Dim
+		if src == "cal" {
+			st = t.Acc
+		}
+		return " " + st.Render(padRight(src, 4))
+	}
+	papCell := func(p string) string { // the raw paper net, dim ("" = blank)
+		if papW == 0 {
+			return ""
+		}
+		if mode == 0 {
+			return sep + t.Dim.Render(padLeft(p, 9))
+		}
+		return " " + t.Dim.Render(padLeft(p, papW-1))
+	}
 	// the numbers after the name + verdict (net, prec, blocked, W / L), shared by the rows, the totals and the folded line
-	nums := func(net string, winN, loseN, blocked int, winSol, loseSol float64, bold bool) string {
-		s := " " + padLeft(net, netW) + " " + m.precCell(winN, loseN, precW)
+	nums := func(net, src string, winN, loseN, blocked int, winSol, loseSol float64, paper string, bold bool) string {
+		s := " " + padLeft(net, netW) + srcCell(src) + " " + m.precCell(winN, loseN, precW)
 		blk := core.IC(int64(blocked))
 		st := t.Val
 		if bold {
@@ -483,26 +527,40 @@ func (m *Model) fltTableLines(w int) []string {
 				s += " " + t.Neg.Render(padLeft(fmt.Sprint(winN), 3)) + " " + t.Pos.Render(padLeft(fmt.Sprint(loseN), 3))
 			}
 		}
-		return s
+		return s + papCell(paper)
 	}
 	hdr := func() string {
-		s := padRight("", tagW) + padRight("filter", nameW) + " " + padRight("verdict", vdW) + " " + padLeft("net saved", netW) + " " + padLeft("prec", precW)
+		srcH, papH := "", ""
+		if srcW > 1 {
+			srcH = " " + padRight("src", 4)
+		} else if srcW == 1 {
+			srcH = " "
+		}
+		if papW > 0 {
+			if mode == 0 {
+				papH = bar + padLeft("paper net", 9)
+			} else {
+				papH = " " + padLeft("paper", papW-1)
+			}
+		}
+		s := padRight("", tagW) + padRight("filter", nameW) + " " + padRight("verdict", vdW) + " " + padLeft("net saved", netW) + srcH + " " + padLeft("prec", precW)
 		switch mode {
 		case 0:
-			s += bar + padLeft("blocked", 7) + bar + padLeft("would win", 13) + bar + padLeft("would lose", 13)
+			s += bar + padLeft("blocked", 7) + bar + padLeft("would win", 13) + bar + padLeft("would lose", 13) + papH
 			if whyW > 0 {
 				s += "   why"
 			}
 		case 1:
-			s += bar + padLeft("blocked", 7) + " " + padLeft("W", 4) + " " + padLeft("L", 4)
+			s += bar + padLeft("blocked", 7) + " " + padLeft("W", 4) + " " + padLeft("L", 4) + papH
 		default:
-			s = padRight("", tagW) + padRight("filter", nameW) + " " + padRight("vrdt", vdW) + " " + padLeft("net", netW) + " " + padLeft("prec", precW)
+			s = padRight("", tagW) + padRight("filter", nameW) + " " + padRight("vrdt", vdW) + " " + padLeft("net", netW) + srcH + " " + padLeft("prec", precW)
 			if showBlk {
 				s += " " + padLeft("blkd", 5)
 			}
 			if showWL {
 				s += " " + padLeft("W", 3) + " " + padLeft("L", 3)
 			}
+			s += papH
 		}
 		return t.Lbl.Render(s)
 	}
@@ -525,7 +583,14 @@ func (m *Model) fltTableLines(w int) []string {
 			}
 			return s + " " + t.Dim.Render(padLeft("n/a", netW)) + "  " + t.Dim.Render("(dip30+: not logged by this run)")
 		}
-		s += nums(m.solCell(r.Net(), r.WinN+r.LoseN, true), r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, false)
+		switch {
+		case r.Cal: // calibrated: the cal numbers lead, the raw paper net in its dim column
+			s += nums(m.solCell(r.CalNet(), r.CalWinN+r.CalLoseN, true), "cal", r.CalWinN, r.CalLoseN, r.Blocked, r.CalWinSol, r.CalLoseSol, core.FS(r.Net(), 3), false)
+		case r.Type == "LIVE":
+			s += nums(m.solCell(r.Net(), r.WinN+r.LoseN, true), "pap", r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, core.FS(r.Net(), 3), false)
+		default:
+			s += nums(m.solCell(r.Net(), r.WinN+r.LoseN, true), "real", r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, "", false)
+		}
 		if whyW > 0 {
 			why := vd.why
 			if r.Key == "gcr" && R.Seed == "" {
@@ -536,11 +601,21 @@ func (m *Model) fltTableLines(w int) []string {
 		return s
 	}
 	lead := tagW + nameW + 1 + vdW // the label span of a total / the folded line
-	total := func(label string, x core.FiltTotal) string {
-		return t.Lbl.Render(padRight(cut(label, lead), lead)) + nums(m.solCell(x.Net, 1, true), x.WinN, x.LoseN, x.Blocked, x.WinSol, x.LoseSol, true)
+	total := func(label, src string, x core.FiltTotal, paper string) string {
+		return t.Lbl.Render(padRight(cut(label, lead), lead)) + nums(m.solCell(x.Net, 1, true), src, x.WinN, x.LoseN, x.Blocked, x.WinSol, x.LoseSol, paper, true)
 	}
 	deepLine := func() string { // the deeper limit's deep fills (bought >= 15% down): their real P&L vs the shadow's, the NET
 		ind := strings.Repeat(" ", tagW)
+		if calOn { // v4 (11-11): against the calibrated paper (the row's cal blocks + real - cal(paper))
+			d := t.Dim.Render(ind+m.g("└ ", "` ")) + t.Lbl.Render(fmt.Sprintf("%d deep fills: real ", R.DeepRealN)) + m.solCell(R.DeepReal, 1, false) +
+				t.Lbl.Render(" vs cal paper ") + m.solCell(R.DeepReal-R.DeepGainCal, 1, false) + t.Lbl.Render(" = gain ") + m.solCell(R.DeepGainCal, 1, false) + t.Lbl.Render("  NET ") + m.solCell(R.DeepNetCal, 1, true) + t.Acc.Render(" cal") +
+				t.Dim.Render("  (paper gain "+core.FS(R.DeepGain, 3)+", NET "+core.FS(R.DeepNet, 3)+")")
+			if w < 84 {
+				d = t.Dim.Render(ind+m.g("└ ", "` ")) + t.Lbl.Render(fmt.Sprintf("%d deep fills gain ", R.DeepRealN)) + m.solCell(R.DeepGainCal, 1, false) +
+					t.Lbl.Render("  NET ") + m.solCell(R.DeepNetCal, 1, true) + t.Acc.Render(" c")
+			}
+			return cut(d, w)
+		}
 		d := t.Dim.Render(ind+m.g("└ ", "` ")) + t.Lbl.Render(fmt.Sprintf("%d deep fills: real ", R.DeepRealN)) + m.solCell(R.DeepReal, 1, false) +
 			t.Lbl.Render(" vs 0.88x paper ") + m.solCell(R.DeepPaper, 1, false) + t.Lbl.Render(" = gain ") + m.solCell(R.DeepGain, 1, false) +
 			t.Lbl.Render("  NET ") + m.solCell(R.DeepNet, 1, true)
@@ -574,17 +649,34 @@ func (m *Model) fltTableLines(w int) []string {
 		out = append(out, t.Dim.Render(cut(fmt.Sprintf("%d with no blocks yet: %s", len(idle), strings.Join(idle, ", ")), w)))
 	}
 	if len(dism) > 0 { // the DISMISSED filters: one line (count, the rows' net summed), d expands them under it
-		var net float64
+		var net, pnet float64
 		var names []string
 		var winN, loseN, blocked int
 		var winSol, loseSol float64
+		anyCal, anyLive := false, false
 		for _, r := range dism {
 			names = append(names, fltShort(r.Key, r.Name))
 			if !r.NA {
-				net += r.Net()
-				winN, loseN, blocked = winN+r.WinN, loseN+r.LoseN, blocked+r.Blocked
-				winSol, loseSol = winSol+r.WinSol, loseSol+r.LoseSol
+				net += r.ShownNet()
+				pnet += r.Net()
+				blocked += r.Blocked
+				if r.Cal {
+					anyCal = true
+					winN, loseN = winN+r.CalWinN, loseN+r.CalLoseN
+					winSol, loseSol = winSol+r.CalWinSol, loseSol+r.CalLoseSol
+				} else {
+					winN, loseN = winN+r.WinN, loseN+r.LoseN
+					winSol, loseSol = winSol+r.WinSol, loseSol+r.LoseSol
+				}
+				anyLive = anyLive || r.Type == "LIVE"
 			}
+		}
+		dsrc, dpap := "real", ""
+		if anyCal {
+			dsrc = "cal"
+		}
+		if anyLive {
+			dpap = core.FS(pnet, 3)
 		}
 		arrow, act := m.g("▸", ">"), "show"
 		if m.fltDism {
@@ -594,7 +686,7 @@ func (m *Model) fltTableLines(w int) []string {
 		if mode == 2 {
 			label = fmt.Sprintf("%s %d dismissed (d)", arrow, len(dism))
 		}
-		l := t.Dim.Render(padRight(cut(label, lead), lead)) + nums(m.solCell(net, winN+loseN, true), winN, loseN, blocked, winSol, loseSol, false)
+		l := t.Dim.Render(padRight(cut(label, lead), lead)) + nums(m.solCell(net, winN+loseN, true), dsrc, winN, loseN, blocked, winSol, loseSol, dpap, false)
 		if whyW > 0 {
 			l += "   " + t.Dim.Render(cut(strings.Join(names, ", "), whyW))
 		}
@@ -609,7 +701,10 @@ func (m *Model) fltTableLines(w int) []string {
 	if ansi.StringWidth(lvLabel) > lead {
 		lvLabel, lgLabel = "LIVE unique", "LOG unique"
 	}
-	lv := total(lvLabel, R.LiveU)
+	lv := total(lvLabel, "pap", R.LiveU, core.FS(R.LiveU.Net, 3))
+	if calOn {
+		lv = total(lvLabel, "cal", R.LiveUCal, core.FS(R.LiveU.Net, 3))
+	}
 	tail := func(s string) string { // a total's dim note in the reason column (wide only)
 		if whyW > 0 {
 			return "   " + t.Dim.Render(cut(s, whyW))
@@ -623,13 +718,21 @@ func (m *Model) fltTableLines(w int) []string {
 		return line
 	}
 	if R.Deep && whyW > 0 { // the deeper limit's deep fills earned apart from its blocks
-		lv = addIf(lv, t.Dim.Render("   incl. deep ")+m.solCell(R.LiveU.Net+R.DeepGain, 1, true))
+		inc := R.LiveU.Net + R.DeepGain
+		if calOn {
+			inc = R.LiveUCal.Net + R.DeepGainCal
+		}
+		lv = addIf(lv, t.Dim.Render("   incl. deep ")+m.solCell(inc, 1, true))
 	} else if R.LiveDup > 0 {
 		lv += tail(fmt.Sprintf("%d triggers in 2+ rows", R.LiveDup))
 	}
 	out = append(out, lv)
-	out = append(out, total(lgLabel, R.LogU)+tail(fmt.Sprintf("%d fills in 2+ rules", R.LogMulti)))
-	out = append(out, total(allLabel, R.All)+tail("LIVE paper+LOG real"))
+	out = append(out, total(lgLabel, "real", R.LogU, "")+tail(fmt.Sprintf("%d fills in 2+ rules", R.LogMulti)))
+	if calOn {
+		out = append(out, total(allLabel, "cal", R.AllCal, core.FS(R.All.Net, 3))+tail("LIVE cal+LOG real"))
+	} else {
+		out = append(out, total(allLabel, "pap", R.All, core.FS(R.All.Net, 3))+tail("LIVE paper+LOG real"))
+	}
 	for _, l := range m.view.Added { // dip41 / dip42: the log-only windows' rows (the snapshot's ADDED WINDOWS lines)
 		out = append(out, t.Val.Render(cut(l, w)))
 	}
@@ -647,11 +750,22 @@ func (m *Model) scrFilters(w, bh int) string {
 	}
 	sep := t.Dim.Render(" " + m.g("·", "|") + " ")
 	var out []string
-	right := m.fltTag(true, false) + t.Lbl.Render(" changed what the engine did (paper)") + sep + m.fltTag(false, false) + t.Lbl.Render(" log only, would-have (real fills)")
+	livePap := " changed what the engine did (paper)"
+	if R.Calib != nil {
+		livePap = " changed what the engine did (cal)"
+	}
+	right := m.fltTag(true, false) + t.Lbl.Render(livePap) + sep + m.fltTag(false, false) + t.Lbl.Render(" log only, would-have (real fills)")
 	if w < 100 {
 		right = m.fltTag(true, false) + t.Lbl.Render(" live") + sep + m.fltTag(false, false) + t.Lbl.Render(" log only")
 	}
 	out = append(out, m.rule("FILTERS", right, w))
+	if R.Calib != nil { // v4 (11-11): the one-line warning: decide on the calibrated numbers
+		note := t.Warn.Render("paper is ~2× optimistic; decide on cal") + t.Dim.Render(" · cal = each blocked window's paper mapped to expected live P&L (gatecheck 11-11); paper net = raw")
+		if m.ascii {
+			note = t.Warn.Render("paper is ~2x optimistic; decide on cal") + t.Dim.Render(" | cal = each blocked window's paper mapped to expected live P&L (gatecheck 11-11); paper net = raw")
+		}
+		out = append(out, cut(note, w))
+	}
 	out = append(out, m.fltTableLines(w)...)
 	// the legend: what net saved / prec / verdict mean (one line), then (wide) how LIVE and LOG rows are scored
 	foot := t.Dim.Render("net saved = "+m.g("−", "-")+"(what the blocked would have made): ") + t.Pos.Render("green saved") + t.Dim.Render(", ") + t.Neg.Render("red cost") + sep +
@@ -663,6 +777,9 @@ func (m *Model) scrFilters(w, bh int) string {
 	out = append(out, cut(foot, w))
 	if w >= 120 {
 		leg := "LIVE rows: paper; blocked = triggers skipped, W/L = the ones that would have filled · LOG rows: real fills"
+		if R.Calib != nil {
+			leg = "LIVE rows: cal (src cal); blocked = triggers skipped, W/L = filled-on-paper windows by calibrated sign · LOG rows: real fills"
+		}
 		seed := "bad creator: no ledger seed (this run's fills only)"
 		if R.Seed != "" {
 			seed = fmt.Sprintf("bad creator ledger: %d creators seeded", R.SeedN)
