@@ -236,7 +236,9 @@ pub struct GTry { pub ixs: Vec<build::Ix>, pub roles: pl::Roles, /// snipe-guard
     /// dip43d: a Lighthouse-arm window's try that carried snipe-guard for the band (deadline + band, no floors); the band's upper bound
     pub l_arm: bool, pub curve_hi: Option<u64>,
     /// dip43f: a re-arm window's try with --presend-live-guard-floor-kinds t2 (snipe-guard deadline + band, no floors)
-    pub rearm_nf: bool }
+    pub rearm_nf: bool,
+    /// dip46: a holder_floors A/B bypass (odd window: snipe-guard deadline + band, no floors)
+    pub ab_nf: bool }
 
 /// THE SENDER'S TRY BUILDER (pure; the tests run the same function). `lighthouse(deadline)` = dip42's guard instruction,
 /// `body(guard_ix)` = dip42's attempt around a guard instruction (attempt_ixs + the loaded-data limit). With the guard off (`g` None)
@@ -259,13 +261,21 @@ pub fn try_ixs_c(g: Option<&G43>, w_id: u64, h: &HSet, now: u64, user: Pk, deadl
 #[allow(clippy::too_many_arguments)]
 pub fn try_ixs_k(g: Option<&G43>, w_id: u64, rearm: bool, h: &HSet, now: u64, user: Pk, deadline: u64, bh: [u8; 32], curve: Option<(Pk, u64)>, lighthouse: impl Fn(u64) -> build::Ix,
                body: impl Fn(build::Ix) -> (Vec<build::Ix>, pl::Roles)) -> GTry {
+    try_ixs_k46(g, w_id, rearm, false, h, now, user, deadline, bh, curve, lighthouse, body)
+}
+/// dip46: try_ixs_k with the holder_floors A/B: `nofloors` (an odd window with the A/B on) = snipe-guard deadline + band, no floors; false:
+/// try_ixs_k exactly
+#[allow(clippy::too_many_arguments)]
+pub fn try_ixs_k46(g: Option<&G43>, w_id: u64, rearm: bool, nofloors: bool, h: &HSet, now: u64, user: Pk, deadline: u64, bh: [u8; 32], curve: Option<(Pk, u64)>,
+               lighthouse: impl Fn(u64) -> build::Ix, body: impl Fn(build::Ix) -> (Vec<build::Ix>, pl::Roles)) -> GTry {
     let Some(g) = g.filter(|g| g.uses(w_id) || curve.is_some()) else {
         let (ixs, roles) = body(lighthouse(deadline));
-        return GTry { ixs, roles, used: false, nf: 0, dropped: 0, l_arm: false, curve_hi: None, rearm_nf: false };
+        return GTry { ixs, roles, used: false, nf: 0, dropped: 0, l_arm: false, curve_hi: None, rearm_nf: false, ab_nf: false };
     };
     let l_arm = !g.uses(w_id);
     let rearm_nf = !l_arm && rearm && !g.floor_rearm;
-    let mut nf = if l_arm || rearm_nf { 0 } else { g.n_floors(h, now) };
+    let ab_nf = !l_arm && !rearm_nf && nofloors && g.mode == Mode::Holders;
+    let mut nf = if l_arm || rearm_nf || ab_nf { 0 } else { g.n_floors(h, now) };
     let (mut ixs, mut roles) = body(g.ix(user, deadline, h, nf, curve));
     let mut dropped = 0usize;
     while nf > 0 && build::compile_v0(user, &ixs, bh, &[], &[]).is_ok_and(|m| m.bytes.len() + 65 > 1232) {
@@ -273,7 +283,7 @@ pub fn try_ixs_k(g: Option<&G43>, w_id: u64, rearm: bool, h: &HSet, now: u64, us
         dropped += 1;
         (ixs, roles) = body(g.ix(user, deadline, h, nf, curve));
     }
-    GTry { ixs, roles, used: true, nf, dropped, l_arm, curve_hi: curve.map(|c| c.1), rearm_nf }
+    GTry { ixs, roles, used: true, nf, dropped, l_arm, curve_hi: curve.map(|c| c.1), rearm_nf, ab_nf }
 }
 
 /// the guard instruction for any Guard (engine tries, the start-up check, the tests): the wallet first (a signer; it pays the try,

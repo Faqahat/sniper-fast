@@ -33,7 +33,7 @@ fn launch() -> Launch { snipe_build::launch_from_target(pk("7oeUduY1zhUwQ3YdSP9C
 fn swin(id: u64, h: HSet) -> SWin {
     let l = launch();
     SWin { id, mint: l.mint, launch: l, st_ns: 0, stop_ns: u64::MAX, en_slot: 10, vsol: 40 * S, vtok: 800_000_000_000_000, fr: 0.0125, pos: (1, 0, 0),
-        pace: pl::Pace::new(0, 4, 400_000_000), n: 0, done: false, spend: 400_000_000, rearm: false, ob6: 0.0, grd: Grd::default(), fpg: None, fab: None, blk: None, bd: None, g43: h }
+        pace: pl::Pace::new(0, 4, 400_000_000), n: 0, done: false, spend: 400_000_000, rearm: false, ob6: 0.0, grd: Grd::default(), fpg: None, fab: None, blk: None, bd: None, g43: h, p46: None }
 }
 const LH: GuardEnc = GuardEnc { disc: 15, op: 4, acct: true };
 const BH: [u8; 32] = [9u8; 32];
@@ -495,4 +495,33 @@ fn dip43f_floor_kinds_t2() {
     assert!(cfg(&["--presend-live-guard-program", PROG, "--presend-live-guard", "deadline", "--presend-live-guard-floor-kinds", "t2"]).is_err());
     assert!(cfg(&["--presend-live-guard-program", PROG, "--presend-live-guard", "holders", "--presend-live-guard-floor-kinds", "rearm"]).is_err());
     assert!(cfg(&["--presend-live-guard-floor-kinds", "t2"]).is_err());
+}
+
+/// dip46 holder_floors A/B: `nofloors` false = try_ixs_k byte for byte; true (an odd window with the A/B on) = snipe-guard with the deadline
+/// and the band, NO floors (ab_nf); the Lighthouse arm / guard off never change
+#[test]
+fn dip46_floors_ab_bypass() {
+    let g = g43(&["--presend-live-guard", "holders", "--presend-live-guard-curve-deep", "0.42"]);
+    let key = SigningKey::from_bytes(&[7u8; 32]);
+    let user = key.verifying_key().to_bytes();
+    let now = 50_000_000_000u64;
+    let l = launch();
+    let h = g.hset(&snap(6, Some(100)), &user, &l.mint, now);
+    assert!(h.n >= 2, "floors to carry");
+    for id in [6u64, 7] {
+        let w = swin(id, h);
+        let band = Some((l.assoc_bonding_curve, curve_hi(w.vtok, 0.42)));
+        let body = |gix| att_ixs_fee(user, &w, 1_234_567, CU_DEFAULT as u32, 1_000, gix, None);
+        let a = try_ixs_k(Some(&g), id, false, &h, now, user, DEADLINE, BH, band, |d| guard_ix_enc(LH, d), body);
+        let b = try_ixs_k46(Some(&g), id, false, false, &h, now, user, DEADLINE, BH, band, |d| guard_ix_enc(LH, d), body);
+        assert_eq!(signed(&key, &a.ixs), signed(&key, &b.ixs), "off: try_ixs_k exactly");
+        assert!(a.nf > 0 && !a.ab_nf && !b.ab_nf);
+        let c = try_ixs_k46(Some(&g), id, false, true, &h, now, user, DEADLINE, BH, band, |d| guard_ix_enc(LH, d), body);
+        assert!(c.used && c.nf == 0 && c.ab_nf && c.curve_hi == a.curve_hi, "bypass: deadline + band, no floors");
+        let want = g.ix(user, DEADLINE, &h, 0, band);
+        assert_eq!(c.ixs[c.roles.guard.unwrap() as usize].data, want.data, "the guard carries the deadline and the band only");
+        // guard off: Lighthouse whatever the A/B says
+        let d = try_ixs_k46(None, id, false, true, &h, now, user, DEADLINE, BH, band, |d| guard_ix_enc(LH, d), body);
+        assert!(!d.used && !d.ab_nf);
+    }
 }

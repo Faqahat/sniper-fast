@@ -74,7 +74,7 @@ fn failed(p: &mut PsLive, slot: u64, idx: u64, sig: [u8; 64], err: &[u8]) {
 /// an attempt as the sender registers it (before its write)
 fn att(w: u64, n: u32, mint: Pk, sig: [u8; 64], slot: u64, client: &str) -> Att {
     Att { w, n, mint, sig, tag: pl::PS_TAG | (0xD19 << 8) | n as u64, path: "helius-ps".into(), client: client.into(), slot, deadline: slot + 1, lim: 0.000041, min_out: 9_524_401_719_354,
-        p_sign: 0.0000466, sign_pos: (slot, 34, 0), t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None }
+        p_sign: 0.0000466, sign_pos: (slot, 34, 0), t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default() }
 }
 
 fn sold(c: Option<u64>, sigs: &[&str], qty: u64) -> SellOut {
