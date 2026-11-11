@@ -932,7 +932,7 @@ impl Cfg {
         if !(1..=200).contains(&self.max_per_sec) || !(1..=200).contains(&self.path_max_per_sec) { bail!("--presend-live-max-per-sec / --presend-live-path-max-per-sec must be 1..200"); }
         // dip24: --presend-live-max-fills any N (0 = unlimited); the fee budget is per rolling 24 h, (0, 100] SOL
         if self.fee_budget == 0 || self.fee_budget > 100_000_000_000 { bail!("--presend-live-fee-budget-sol must be in (0, 100] SOL per rolling 24 h"); }
-        if self.exit_ms != 0 && !(50..=2_000).contains(&self.exit_ms) { bail!("--presend-live-exit-ms must be 0 (off) or 50..2000"); }
+        if self.exit_ms != 0 && !(50..=10_000).contains(&self.exit_ms) { bail!("--presend-live-exit-ms must be 0 (off) or 50..10000"); }
         // dip27: the lone-whale window within the recent buys a token keeps
         if self.lone_whale_slots > pl::RB_SLOTS { bail!("--presend-live-lone-whale-slots must be 0 (off) or 1..{}", pl::RB_SLOTS); }
         // dip28: the deeper limit is deeper than the normal one; the holds state needs the clocks (the annotations)

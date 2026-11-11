@@ -21,7 +21,9 @@ fn exit_ms_flag_off_by_default_and_checked() {
     assert_eq!(cfg(&["--presend-live-exit-ms", "200"]).unwrap().unwrap().exit_ms, 200);
     assert_eq!(cfg(&["--presend-live-exit-ms", "50"]).unwrap().unwrap().exit_ms, 50);
     assert_eq!(cfg(&["--presend-live-exit-ms", "2000"]).unwrap().unwrap().exit_ms, 2000);
-    for bad in ["20", "2001", "99999"] {
+    // dip43g (owner 11-11, hold ~2.35 s): the cap is 10,000 ms
+    assert_eq!(cfg(&["--presend-live-exit-ms", "2350"]).unwrap().unwrap().exit_ms, 2350);
+    for bad in ["20", "10001", "99999"] {
         assert!(cfg(&["--presend-live-exit-ms", bad]).is_err(), "{bad} must be refused");
     }
     // a stray flag without --presend-live is refused (like every --presend-live-* flag)
