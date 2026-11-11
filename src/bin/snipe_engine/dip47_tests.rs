@@ -502,3 +502,79 @@ fn dip47_filter_state_versions() {
     assert_eq!(v["fv"], 9, "a main-loop stamp stays");
     let _ = std::fs::remove_file(&ctl);
 }
+
+// ---- pause window ----------------------------------------------------------------------------------------------------------
+
+/// PKT = UTC + 5; a window crossing midnight; parse refusals
+#[test]
+fn dip47_pause_parse_and_clock() {
+    use psctl47::{pause_hit, pause_parse, pause_str, pkt_min};
+    let (v, n) = pause_parse("23:00-02:00, 10:15-10:45").unwrap();
+    assert_eq!((n, pause_str(&v[..n as usize])), (2, "23:00-02:00,10:15-10:45".to_string()));
+    let w = &v[..2];
+    for (m, hit) in [(22 * 60 + 59, false), (23 * 60, true), (0, true), (60 + 59, true), (120, false), (10 * 60 + 15, true), (10 * 60 + 45, false)] {
+        assert_eq!(pause_hit(w, m).is_some(), hit, "minute {m}");
+    }
+    // 2026-11-11 18:00:00 UTC = 23:00 PKT
+    let t = 1_794_420_000u64 * 1_000_000_000;
+    assert_eq!(pkt_min(t), 23 * 60);
+    assert_eq!(pkt_min(t + 3 * 3600 * 1_000_000_000), 2 * 60, "02:00 PKT next day");
+    for bad in ["23:00", "24:00-01:00", "10:00-10:00", "a-b", "1:00-2:00,3:00-4:00,5:00-6:00,7:00-8:00,9:00-10:00"] { assert!(pause_parse(bad).is_err(), "{bad}"); }
+    assert_eq!(pause_parse("").unwrap().1, 0);
+    assert!(cfg(&["--presend-live-pause-window", "23:00-25:00"]).is_err());
+}
+
+/// inside the window: no new T2 arm, one ON record + line, the skips counted (no record per trigger); after it: OFF with the count, arms
+/// again; an open position is not touched; "pause_now" on / off; the keys in the filter state (fv bumps)
+#[test]
+fn dip47_pause_window_injected_clock() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    let ctl = std::env::temp_dir().join(format!("dip47_pause_{}.json", std::process::id()));
+    std::fs::write(&ctl, "{}").unwrap();
+    let c = cfg(&["--presend-live-pause-window", "23:00-02:00", "--presend-live-wh-loss", "2:0.05", "--presend-live-ledger-control", ctl.to_str().unwrap()]).unwrap().unwrap();
+    let (mut p, _atx, orx) = PsLive::for_test(c, USER);
+    let t2300 = 1_794_420_000u64 * 1_000_000_000;
+    p.f47.clock_ns = Some(t2300 + 30 * 60 * 1_000_000_000);              // 23:30 PKT
+    let _ = outs(&orx);
+    let l = launch(20);
+    setup(&mut p, &l, N, 20);
+    assert!(p.armed.is_empty(), "paused: no arm");
+    let (r, lines) = outs(&orx);
+    assert!(r.iter().any(|x| x["ev"] == "presend_live_ledger_mode" && x["pause_window"] == "on" && x["window"] == "23:00-02:00"));
+    assert!(!r.iter().any(|x| x["ev"] == "presend_live_skip" || x["ev"] == "presend_live_arm"), "no record per trigger");
+    assert!(lines.iter().any(|x| x == "  PRESEND LIVE PAUSE WINDOW ON 23:00-02:00 PKT: no new arms (open positions exit as usual)"), "{lines:?}");
+    assert_eq!(p.st.skips.get("pause_window").copied(), Some(1));
+    // 01:59 still paused (crosses midnight), 02:00 off
+    p.f47.clock_ns = Some(t2300 + (2 * 3600 + 59 * 60) * 1_000_000_000);
+    p.tick(N + 5, None);
+    assert!(p.f47.pause_on.is_some());
+    p.f47.clock_ns = Some(t2300 + 3 * 3600 * 1_000_000_000);
+    p.tick(N + 6, None);
+    let (r, lines) = outs(&orx);
+    assert!(r.iter().any(|x| x["pause_window"] == "off" && x["skipped"] == 1));
+    assert!(lines.iter().any(|x| x.starts_with("  PRESEND LIVE PAUSE WINDOW OFF 23:00-02:00 PKT: 1 arms skipped")));
+    let l2 = launch(21);
+    setup(&mut p, &l2, N + 50, 21);
+    assert!(p.armed.contains_key(&l2.mint), "out of the window: armed");
+    // the manual pause and the window key (the filter state follows)
+    let fv0 = p.f47.fs.as_ref().unwrap().fv;
+    std::fs::write(&ctl, r#"{"pause_now": "on", "pause_window": ""}"#).unwrap();
+    p.ctl47_check(true);
+    p.fs_tick();
+    assert_eq!(p.f47.fs.as_ref().unwrap().obj["pause_now"], "on");
+    assert_eq!(p.f47.fs.as_ref().unwrap().obj["pause_window"], "");
+    assert!(p.f47.fs.as_ref().unwrap().fv > fv0);
+    let l3 = launch(22);
+    setup(&mut p, &l3, N + 100, 22);
+    assert!(!p.armed.contains_key(&l3.mint), "manual pause");
+    assert!(recs(&orx).iter().any(|x| x["pause_window"] == "on" && x["window"] == "manual"));
+    std::fs::write(&ctl, r#"{"pause_now": "maybe"}"#).unwrap();
+    p.ctl47_check(true);
+    assert!(p.f47.cur.unwrap().pause_now, "bad value: stays on");
+    std::fs::write(&ctl, "{}").unwrap();
+    p.ctl47_check(true);
+    p.tick(N + 120, None);
+    assert!(p.f47.pause_on.is_none() && !p.f47.cur.unwrap().pause_now && p.f47.cur.unwrap().pause_n == 1, "absent: the start values (the flag's window)");
+    let _ = std::fs::remove_file(&ctl);
+}

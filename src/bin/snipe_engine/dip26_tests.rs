@@ -1526,3 +1526,50 @@ fn dip28_holds_state_roundtrip() {
     let _ = std::fs::remove_file(&f);
     assert!(holds_load(&mut d2, &p).is_err());
 }
+
+/// dip47 --presend-rearm-max-per-mint 1: after one re-arm FILL on a mint, the next re-arm candidate on it is skipped "rearm_cap" (its count
+/// and the cap on the record); without the flag the same tape checks it normally; the hot key 0 lifts the cap
+#[test]
+fn dip47_rearm_cap_per_mint() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    for cap in [0u32, 1] {
+        let capv = cap.to_string();
+        let mut ex = vec!["--presend-live-rearm", "on", "--presend-live-rearm-size-sol", "0.3"];
+        if cap > 0 { ex.extend(["--presend-rearm-max-per-mint", capv.as_str()]); }
+        let mut c = Ctx::new(&ex);
+        let (a, b, d2, x) = ([0xA1u8; 32], [0xB1u8; 32], [0xD2u8; 32], [0x33u8; 32]);
+        let mut tk = c.token(1, 1000, &[(a, 7.0), (b, 8.0), (d2, 9.0)]);
+        let mut z = c.token(90, 1000, &[]);
+        for s in 1001..=1004 { let e = tk.buy(x, S / 10); c.tx(s, 5, vec![e], vec![]); }
+        let d = tk.sell_tok(a, pct(7.0));
+        c.tx(1005, 5, vec![d], vec![]);
+        clock(&mut c, &mut z, 1006, 1008);
+        let w = *c.p.armed.get(&tk.mint).expect("armed");
+        let sig = c.attempt(w, tk.mint, 1011);
+        let db = tk.sell_tok(b, pct(8.0));
+        c.tx(1012, 7, vec![db], vec![]);
+        c.fill(&mut tk, sig, 1012, 8, 296_296_296);
+        assert_eq!(c.p.f47.rfills.get(&tk.mint).copied(), Some(1));
+        // D2 dumps its 9% (a new candidate) after the window: checked at dump + 3
+        clock(&mut c, &mut z, 1013, 1030);
+        let dd = tk.sell_tok(d2, pct(9.0));
+        c.tx(1031, 5, vec![dd], vec![]);
+        clock(&mut c, &mut z, 1032, 1035);
+        let caps: Vec<serde_json::Value> = c.ev("presend_live_skip").into_iter().filter(|r| r["why"] == "rearm_cap").collect();
+        if cap == 0 { assert!(caps.is_empty()); }
+        else {
+            assert_eq!(caps.len(), 1, "{:?}", c.ev("presend_live_skip"));
+            assert_eq!((caps[0]["kind"].as_str(), caps[0]["rearm_fills"].as_u64(), caps[0]["cap"].as_u64()), (Some("rearm"), Some(1), Some(1)));
+            assert_eq!(c.p.f47.cur.unwrap().rearm_cap, 1);
+            // the hot key 0 lifts it
+            let raw = psctl47::ctl47_parse(br#"{"rearm_max_per_mint": 0}"#).unwrap();
+            c.p.ctl47_apply(&raw, "t");
+            assert!(c.p.rearm_cap47(&tk.mint).is_none());
+            let raw = psctl47::ctl47_parse(br#"{"rearm_max_per_mint": 11}"#).unwrap();
+            c.p.ctl47_apply(&raw, "t");
+            assert_eq!(c.p.f47.cur.unwrap().rearm_cap, 0, "out of bounds: the old value stays");
+        }
+    }
+    assert!(cfg(&["--presend-rearm-max-per-mint", "11"]).is_err() && cfg(&["--presend-rearm-max-per-mint", "x"]).is_err());
+}

@@ -27,7 +27,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-pub const KEYS: [&str; 16] = ["floors", "wh_kinds", "size_t2", "size_rearm", "mint_ledger_sol", "wh_loss", "holder_loss", "botdepth", "curve_deep_pct",
+pub const KEYS: [&str; 19] = ["rearm_max_per_mint", "pause_window", "pause_now", "floors", "wh_kinds", "size_t2", "size_rearm", "mint_ledger_sol", "wh_loss", "holder_loss", "botdepth", "curve_deep_pct",
     "min_age_slots", "exit_ms", "tp", "sl", "grp_t2", "grp_t2_pct", "grp_t2_whale"];
 
 /// the new keys' values (Copy; the start value of each = its flag)
@@ -53,7 +53,39 @@ pub struct Vals {
     pub grp_whale_in: bool,
     /// --presend-live-grpsign-log on (grp_t2 "live" needs it; not a key)
     pub grp_avail: bool,
+    /// re-arm FILLS per mint before no new re-arm window arms on it (0 = no cap)
+    pub rearm_cap: u32,
+    /// the pause windows (PKT minutes of the day, start..end; end < start crosses midnight), how many
+    pub pause: [(u16, u16); 4],
+    pub pause_n: u8,
+    /// the manual pause (control key only; off at start)
+    pub pause_now: bool,
 }
+
+/// "HH:MM-HH:MM[,HH:MM-HH:MM]" (PKT, at most 4; "" = none)
+pub fn pause_parse(s: &str) -> std::result::Result<([(u16, u16); 4], u8), String> {
+    let mut v = [(0u16, 0u16); 4];
+    let mut n = 0usize;
+    let hm = |x: &str| -> std::result::Result<u16, String> {
+        let (h, m) = x.trim().split_once(':').ok_or_else(|| format!("'{x}' is not HH:MM"))?;
+        let (h, m): (u16, u16) = (h.parse().map_err(|_| format!("'{x}' is not HH:MM"))?, m.parse().map_err(|_| format!("'{x}' is not HH:MM"))?);
+        if h > 23 || m > 59 { return Err(format!("'{x}' out of range (00:00..23:59)")); }
+        Ok(h * 60 + m)
+    };
+    for w in s.split(',').map(str::trim).filter(|w| !w.is_empty()) {
+        if n == 4 { return Err("at most 4 windows".into()); }
+        let (a, b) = w.split_once('-').ok_or_else(|| format!("'{w}' is not HH:MM-HH:MM"))?;
+        let (a, b) = (hm(a)?, hm(b)?);
+        if a == b { return Err(format!("'{w}': start = end")); }
+        v[n] = (a, b); n += 1;
+    }
+    Ok((v, n as u8))
+}
+pub fn pause_str(v: &[(u16, u16)]) -> String { v.iter().map(|(a, b)| format!("{:02}:{:02}-{:02}:{:02}", a / 60, a % 60, b / 60, b % 60)).collect::<Vec<_>>().join(",") }
+/// the window containing PKT minute `m` (crossing midnight when end < start)
+pub fn pause_hit(v: &[(u16, u16)], m: u16) -> Option<(u16, u16)> { v.iter().copied().find(|&(a, b)| if a < b { m >= a && m < b } else { m >= a || m < b }) }
+/// PKT (UTC+5) minute of the day of a UTC unix time in ns
+pub fn pkt_min(ns: u64) -> u16 { (((ns / 1_000_000_000 + 5 * 3600) / 60) % 1440) as u16 }
 
 pub fn floors_s(f: Option<u8>) -> &'static str { match f { None => "n/a", Some(0) => "off", Some(1) => "t2", _ => "all" } }
 pub fn kinds_s(k: u8) -> &'static str { match k { 1 => "t2", 2 => "rearm", _ => "all" } }
@@ -79,6 +111,10 @@ impl Vals {
             grp_pct: psgrp47::T2_PCT,
             grp_whale_in: false,
             grp_avail: c.grpsign,
+            rearm_cap: c.rearm_cap47,
+            pause: c.pause47.0,
+            pause_n: c.pause47.1,
+            pause_now: false,
         }
     }
     /// each key's value as the records show it
@@ -101,6 +137,9 @@ impl Vals {
             "grp_t2" => (if self.grp_live { "live" } else { "log" }).into(),
             "grp_t2_pct" => json!(self.grp_pct),
             "grp_t2_whale" => (if self.grp_whale_in { "in" } else { "out" }).into(),
+            "rearm_max_per_mint" => json!(self.rearm_cap),
+            "pause_window" => pause_str(&self.pause[..self.pause_n as usize]).into(),
+            "pause_now" => (if self.pause_now { "on" } else { "off" }).into(),
             _ => serde_json::Value::Null,
         }
     }
@@ -178,6 +217,13 @@ pub fn key_apply(k: &str, x: &serde_json::Value, start: &Vals, v: &mut Vals) -> 
             v.grp_live = live;
         }
         "grp_t2_pct" => v.grp_pct = num(x, 1.0, 20.0, "% of supply 1..20")?,
+        "rearm_max_per_mint" => {
+            let f = num(x, 0.0, 10.0, "re-arm fills per mint 0..10 (0 = no cap)")?;
+            if f.fract() != 0.0 { return Err(format!("{f}: a whole number 0..10")); }
+            v.rearm_cap = f as u32;
+        }
+        "pause_window" => { (v.pause, v.pause_n) = pause_parse(text(x)?)?; }
+        "pause_now" => v.pause_now = match text(x)? { "on" => true, "off" => false, s => return Err(format!("'{s}' (on | off)")) },
         "grp_t2_whale" => v.grp_whale_in = match text(x)? { "out" => false, "in" => true, s => return Err(format!("'{s}' (out | in)")) },
         _ => return Err("unknown key".into()),
     }
@@ -211,7 +257,8 @@ fn copy_key(k: &str, from: &Vals, to: &mut Vals) {
         "size_rearm" => to.size_rearm = from.size_rearm, "mint_ledger_sol" => to.ml = from.ml, "wh_loss" => to.wh_loss = from.wh_loss,
         "holder_loss" => to.hl = from.hl, "botdepth" => to.bd = from.bd, "curve_deep_pct" => to.curve = from.curve, "min_age_slots" => to.min_age = from.min_age,
         "exit_ms" => to.exit_ms = from.exit_ms, "tp" => to.tp = from.tp, "sl" => to.sl = from.sl, "grp_t2" => to.grp_live = from.grp_live,
-        "grp_t2_pct" => to.grp_pct = from.grp_pct, "grp_t2_whale" => to.grp_whale_in = from.grp_whale_in, _ => {}
+        "grp_t2_pct" => to.grp_pct = from.grp_pct, "grp_t2_whale" => to.grp_whale_in = from.grp_whale_in,
+        "rearm_max_per_mint" => to.rearm_cap = from.rearm_cap, "pause_window" => { to.pause = from.pause; to.pause_n = from.pause_n; } "pause_now" => to.pause_now = from.pause_now, _ => {}
     }
 }
 
@@ -268,6 +315,13 @@ pub struct F47 {
     pub wq: VecDeque<u64>,
     pub px: BTreeMap<u64, (u64, f64, f64)>,
     pub grp_skips: u64,
+    /// re-arm FILLS per mint this run (the re-arm cap's count)
+    pub rfills: FxHashMap<Pk, u32>,
+    /// the pause under way (its text: "23:00-02:00" / "manual"), arms skipped in pauses, the test clock (UTC ns)
+    pub pause_on: Option<String>,
+    pub pause_skips: u64,
+    pub pause_cur: u64,
+    pub clock_ns: Option<u64>,
     /// the time the stamping took (ns, main loop) and how many records
     pub stamp_ns: std::cell::Cell<u64>, pub stamp_n: std::cell::Cell<u64>,
 }
@@ -279,6 +333,51 @@ pub fn fh_of(obj: &serde_json::Value) -> String {
 }
 
 impl PsLive {
+    /// the re-arm cap hit on `mint`: (its re-arm fills, the cap); None: no cap / below it
+    pub(super) fn rearm_cap47(&self, mint: &Pk) -> Option<(u32, u32)> {
+        let cap = self.f47.cur.map_or(self.cfg.rearm_cap47, |v| v.rearm_cap);
+        if cap == 0 { return None; }
+        let n = self.f47.rfills.get(mint).copied().unwrap_or(0);
+        (n >= cap).then_some((n, cap))
+    }
+    /// the pause now (the window's text / "manual"); None: not paused
+    fn pause_now47(&self) -> Option<String> {
+        let v = self.f47.cur?;
+        if v.pause_now { return Some("manual".into()); }
+        if v.pause_n == 0 { return None; }
+        let m = pkt_min(self.f47.clock_ns.unwrap_or_else(arbx::feeds::clock::real_ns));
+        pause_hit(&v.pause[..v.pause_n as usize], m).map(|w| pause_str(&[w]))
+    }
+    /// the pause's entry / exit: one mode record + one line each (from tick and before every arm)
+    pub(super) fn pause47_tick(&mut self) {
+        let now = self.pause_now47();
+        if now == self.f47.pause_on { return; }
+        let t = arbx::feeds::clock::now_ns();
+        match (&self.f47.pause_on, &now) {
+            (_, Some(w)) => {
+                self.f47.pause_cur = 0;
+                self.rec(serde_json::json!({"ev": "presend_live_ledger_mode", "ok": true, "pause_window": "on", "window": w, "tz": "PKT", "t": t}));
+                self.line(format!("  PRESEND LIVE PAUSE WINDOW ON {w} PKT: no new arms (open positions exit as usual)"));
+            }
+            (Some(w), None) => {
+                self.rec(serde_json::json!({"ev": "presend_live_ledger_mode", "ok": true, "pause_window": "off", "window": w, "tz": "PKT", "skipped": self.f47.pause_cur, "t": t}));
+                self.line(format!("  PRESEND LIVE PAUSE WINDOW OFF {w} PKT: {} arms skipped", self.f47.pause_cur));
+            }
+            (None, None) => {}
+        }
+        self.f47.pause_on = now;
+    }
+    /// an arm (T2 / wide / re-arm) asked during a pause: counted ("pause_window", no record per trigger) -> true = do not arm
+    pub(super) fn paused47(&mut self) -> bool {
+        if self.f47.cur.is_none_or(|v| v.pause_n == 0 && !v.pause_now) { return false; }
+        self.pause47_tick();
+        if self.f47.pause_on.is_none() { return false; }
+        self.f47.pause_skips += 1;
+        self.f47.pause_cur += 1;
+        *self.st.skips.entry("pause_window").or_default() += 1;
+        true
+    }
+
     fn v47(&self) -> Vals { self.f47.cur.unwrap_or_else(|| Vals::from_cfg(&self.cfg)) }
     /// the T2 window size now (the start's without a size_t2 key)
     pub(super) fn size_t2_47(&self) -> u64 { self.f47.cur.map_or(self.cfg.spend, |v| v.size_t2) }

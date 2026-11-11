@@ -84,6 +84,9 @@ the replay's selected few. This is why the live rule (`grp_t2`) leaves the whale
 | `grp_t2` | log \| live (log) | `--presend-live-grpsign-log on` for live | the GRPSIGN T2 skip (never re-arm or wide) |
 | `grp_t2_pct` | 1..20 (3.0) | | its threshold, % of supply |
 | `grp_t2_whale` | out \| in (out) | | whether the trigger whale counts in the group |
+| `rearm_max_per_mint` | 0..10 (0 = no cap) | flag `--presend-rearm-max-per-mint N` | re-arm FILLS per mint this run; at N no new re-arm window arms on it: `presend_live_skip {kind:"rearm", why:"rearm_cap", rearm_fills, cap}` (a waiting window: dropped "rearm_cap"). T2 unaffected |
+| `pause_window` | "HH:MM-HH:MM[,...]" PKT (UTC+5), ≤4 windows, "" = none | flag `--presend-live-pause-window` | wall clock (UTC → PKT, not slots); inside: no new arm of any kind (T2, wide, re-arm, probe windows), skips counted under "pause_window" (no record per trigger); ON / OFF: one `presend_live_ledger_mode {pause_window:"on"\|"off", window, skipped}` + `PRESEND LIVE PAUSE WINDOW ON 23:00-02:00 PKT` / `... OFF`. Crosses midnight. Open positions exit as usual |
+| `pause_now` | on \| off (off) | control key only | manual pause, same effect (window "manual") |
 
 **`grp_t2` live is an ARM-TIME skip.** The signing-time value of a window's first try only exists once that try has been signed, which is
 after the first send. So the rule runs at the T2 arm, on the detector state at the trigger. That state is exactly what the window's first
@@ -112,7 +115,7 @@ one relaxed atomic load (`Sh47::ver`), measured at **1.6 ns**. Only when that va
 | exit_lots | off \| ab \| live | ps43_b | `--presend-live-exit-lots` |
 | probe46 | on \| off | psprobe46 | |
 | ab46 | {filter: ab \| live} | psprobe46 | `--presend-live-filter-ab` |
-| floors … grp_t2_whale (the table above) | | psctl47 (dip47) | |
+| floors … pause_now (the table above) | | psctl47 (dip47) | |
 
 (FP-NOBOT's own `--presend-fpnb-control` file is separate and is read on the FP thread.)
 

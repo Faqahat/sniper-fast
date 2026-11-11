@@ -260,7 +260,7 @@ const D46FLAGS: [&str; 5] = ["--presend-live-probe", "--presend-live-probe-max-p
 // dip47: GRPSIGN, the group-holder-risk metric at SIGNING (LOG ONLY; off by default = dip46)
 #[path = "psgrp47.rs"]
 pub mod psgrp47;
-const D47FLAGS: [&str; 1] = ["--presend-live-grpsign-log"];
+const D47FLAGS: [&str; 3] = ["--presend-live-grpsign-log", "--presend-rearm-max-per-mint", "--presend-live-pause-window"];
 // dip47: hot control keys (sizes, thresholds, exits, floors, grp_t2) + the versioned FILTER STATE stamped on decision records
 #[path = "psctl47.rs"]
 pub mod psctl47;
@@ -567,6 +567,10 @@ pub struct Cfg {
     pub grpsign: bool,
     /// dip47 filter state: the run's money limits as given (read-only; dipmode enforces them)
     pub limits47: serde_json::Value,
+    /// dip47 --presend-rearm-max-per-mint N: re-arm FILLS per mint before no new re-arm window arms on it (0 = no cap)
+    pub rearm_cap47: u32,
+    /// dip47 --presend-live-pause-window "HH:MM-HH:MM[,...]" in PKT (UTC+5): no new arms inside (none by default)
+    pub pause47: ([(u16, u16); 4], u8),
 }
 
 /// dip43e --presend-live-dump-exit S:C:X -> (S lamports, C lamports, X fraction): S, C in [0, 50] SOL (0 = that trigger off, not both 0),
@@ -756,6 +760,10 @@ impl Cfg {
             p46: psprobe46::Cfg46::parse(argv)?,
             // dip47 (log only)
             grpsign: onoff(psgrp47::FLAG, false)?,
+            rearm_cap47: match arg("--presend-rearm-max-per-mint") { None => 0, Some(v) => v.parse::<u32>().ok().filter(|n| *n <= 10)
+                .with_context(|| format!("--presend-rearm-max-per-mint {v}: re-arm fills per mint 0..10 (0 = no cap)"))? },
+            pause47: match arg("--presend-live-pause-window") { None => ([(0, 0); 4], 0),
+                Some(v) => psctl47::pause_parse(&v).map_err(|e| anyhow::anyhow!("--presend-live-pause-window {v}: {e} (\"HH:MM-HH:MM[,HH:MM-HH:MM]\" in PKT = UTC+5; 23:00-02:00 crosses midnight)"))? },
             limits47: serde_json::json!({"max_sol": arg("--max-sol"), "kill_switch_sol": arg("--max-loss-sol"), "profit_lock": {"min_sol": arg("--profit-lock-min-sol"), "frac": arg("--profit-lock-frac")}}),
         };
         // dip47: the hold clocks it reads are kept only with the annotations on
@@ -3151,6 +3159,8 @@ impl PsLive {
                                wide: Option<(psdl::Kind, psdl::WdV)>) {
         // dip46 FILTER A/B (arm-time filters A/B'd; off / a wide window: dip43g's path exactly): odd T2 triggers run with the A/B'd filters
         // in log mode (their verdicts recorded as would), even ones as today; the modes are restored right after
+        // dip47 pause window / manual pause: no new arm (counted "pause_window", no record per trigger; nothing without the flag / key)
+        if self.paused47() { return; }
         let ab = self.sh.p46.ab.load(Ordering::Relaxed) & psprobe46::AB_ARM;
         if ab == 0 || wide.is_some() { return self.trigger_kind0(t, whale, pct, bal, age_slots, launch_of, reactive_open, wide); }
         self.p46.ab_n += 1;
@@ -3494,7 +3504,7 @@ impl PsLive {
         if self.cfg.hl_on() { let wh = self.wins.get(&att.w).map_or(self.user, |w| w.whale); self.hl_fill(att.w, &t.mint, &wh); }
         // dip26: a re-arm window's fill (its size; its records and lines say so; the re-arm's own count)
         let (rearm, spend) = (self.rearm_w(att.w), self.w_spend(att.w));
-        if rearm { if let Some(rm) = self.rm.as_mut() { rm.st.fills += 1; } }
+        if rearm { if let Some(rm) = self.rm.as_mut() { rm.st.fills += 1; } *self.f47.rfills.entry(t.mint).or_default() += 1; }
         // a fill while its window was still armed, or a late one (an attempt in flight when the window ended)
         let window_open = self.wins.get(&att.w).is_some_and(|w| w.disarmed.is_none());
         if !window_open { self.st.late_fills += 1; }
@@ -4232,6 +4242,7 @@ impl PsLive {
         self.hl_tick(slot_now);
         // dip47: the control file's new keys; the filter state (a change by any control reader -> a new fv now; ~1 s auto check)
         self.ctl47_check(false);
+        self.pause47_tick();
         self.fs_tick();
         // dip38 (log-only): housekeeping and the ledgers' saves (nothing without its flags)
         self.l38_tick(slot_now);

@@ -259,6 +259,8 @@ impl PsLive {
     /// THE HOLDERS CHECK of a candidate (the clock reached its dump slot + 3): a skip, a waiting window, or a window armed now
     fn rearm_check(&mut self, c: RCand, slot: u64, t_rx: u64, launch_of: &dyn Fn(&Pk) -> Option<Launch>, reactive_open: &dyn Fn(&Pk) -> bool) {
         let mint = c.mint;
+        // dip47 pause window / manual pause: no new arm (counted "pause_window"; nothing without the flag / key)
+        if self.paused47() { return; }
         let holders = self.det.holders_at_least(&mint, RE_BIG, &self.user);
         let halted = self.rearm_halted();
         let armed = self.armed.get(&mint).copied();
@@ -281,6 +283,8 @@ impl PsLive {
         let s1v = self.s1_view(true, h2v.map(|v| v.0), c.dump.age, &c.dump.tr.user);
         // dip43 A9 "rearm_r5" / "rearm": "log" keeps the verdicts on the records (rearm: a check that would arm is skipped "rearm_log43")
         let (r5_live, re_live) = (self.d43.g.rearm_r5, self.d43.g.rearm);
+        // dip47 re-arm cap per mint (nothing without the flag / key)
+        let cap47 = self.rearm_cap47(&mint);
         let Some(rm) = self.rm.as_mut() else { return };
         rm.st.checks += 1;
         let en_slot = c.dump.tr.s + RE_WAIT + rm.cfg.gap;
@@ -301,6 +305,7 @@ impl PsLive {
             _ if hlg.is_some() && hl_live => Some("rearm_holder_loss"),
             _ if h2skip => Some("rearm_m2_unseen"),
             _ if blh.is_some() => Some("rearm_blocklist"),
+            _ if cap47.is_some() => Some("rearm_cap"),
             _ => None,
         };
         // R5 (the shadow's r5_skip): the QUIET arm signals of the LARGEST holder at the check; skipped only once the QUIET arm rule is on
@@ -329,6 +334,7 @@ impl PsLive {
         if let Some(w) = why {
             let mut x = serde_json::json!({"check_slot": slot, "en_slot": en_slot, "holders": hj});
             if w == "rearm_blocked_launch" { x["launch"] = lwhy.into(); }
+            if let Some((n, cap)) = cap47.filter(|_| w == "rearm_cap") { x["rearm_fills"] = n.into(); x["cap"] = cap.into(); }
             if let Some(j) = r5 { x["r5"] = j; }
             if let Some(j) = crj { x["cr"] = j; }
             // dip37: the ledger's view of the dumper (only with it on)
@@ -541,6 +547,9 @@ impl PsLive {
                 self.rearm_defer_drop(d, ended);
                 continue;
             }
+            // dip47: the re-arm cap reached / a pause meanwhile (nothing without the flag / key)
+            if self.rearm_cap47(&d.mint).is_some() { self.rearm_defer_drop(d, "rearm_cap"); continue; }
+            if self.paused47() { self.rearm_defer_drop(d, "pause_window"); continue; }
             let ms = d.at.elapsed().as_secs_f64() * 1e3;
             self.rearm_arm(d.mint, d.dump, d.holders, d.launch, d.chk_slot, d.chk_t, Some((ms, d.why)), d.r5, d.s1);
         }
